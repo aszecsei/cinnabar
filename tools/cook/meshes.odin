@@ -23,7 +23,7 @@ import "vendor:cgltf"
 import format "cinnabar:engine/asset/format"
 
 // Changing how the cooker cooks models changes this, which invalidates every cooked mesh.
-MODEL_COOK_VERSION :: "models 7"
+MODEL_COOK_VERSION :: "models 9"
 MODEL_EXTENSIONS :: []string{".gltf", ".glb"}
 // How much meshoptimizer weighs a meshlet's normal cone against its size, without cluster_lod: some, so culling by cone
 // works.
@@ -568,7 +568,14 @@ finish_mesh :: proc(m: Cook_Mesh, guid: format.Guid, key: u64) -> []byte {
 		// Kept, as a mesh whose group is more than a page stays as it was.
 		unpaged_nodes := slice.clone(meshlet_nodes[:], context.temp_allocator)
 		unpaged_submeshes := slice.clone(submeshes, context.temp_allocator)
-		if built, fits := build_pages(vertices, flags, meshlets[:], meshlet_indices[:], meshlet_triangles[:], meshlet_nodes[:], submeshes, page_inputs); fits {
+		built, fits := build_pages(vertices, flags, meshlets[:], meshlet_indices[:], meshlet_triangles[:], meshlet_nodes[:], submeshes, page_inputs)
+		// A mesh whose pages are all roots has nothing to stream: its pages would always be resident, so it keeps its
+		// streams, as a small mesh does.
+		streams := false
+		for p in built.pages {
+			streams ||= .Root not_in p.record.flags
+		}
+		if fits && streams {
 			contents.flags = flags + {.Paged}
 			if built.vertex_count > 65535 {
 				contents.flags += {.Index32}
@@ -578,7 +585,9 @@ finish_mesh :: proc(m: Cook_Mesh, guid: format.Guid, key: u64) -> []byte {
 			contents.vertex_count, contents.index_count = built.vertex_count, built.index_count
 			return format.mesh_write(contents, context.temp_allocator)
 		}
-		log.warnf("cook: mesh %s of %s has a group of meshlets that is more than a page, so it has no pages", m.name, m.source_path)
+		if !fits {
+			log.warnf("cook: mesh %s of %s has a group of meshlets that is more than a page, so it has no pages", m.name, m.source_path)
+		}
 		copy(meshlet_nodes[:], unpaged_nodes)
 		copy(submeshes, unpaged_submeshes)
 	}

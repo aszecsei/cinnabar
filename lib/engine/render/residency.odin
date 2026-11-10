@@ -1,7 +1,6 @@
 package render
 
 import "core:log"
-import "core:math/linalg"
 import "core:mem"
 
 import "cinnabar:core"
@@ -19,8 +18,19 @@ MAX_SUBMESHES :: 16
 RESIDENT_RETRY_FRAMES :: 60
 
 // Resident_Mesh is a mesh asset's GPU buffers, and what drawing it needs from its blob. Its pointer is valid for the
-// frame that it was given in.
+// frame that it was given in. A paged mesh has no meshlet buffers: its meshlets are in the pool of pages. It has no
+// positions, attributes or indices either until its level 0 is ready, which resident_level0 asks for.
 Resident_Mesh :: struct {
+	// Whether the mesh's meshlets and vertices are in pages, its id in the pool, and its level 0 (see mesh_pages.odin and
+	// mesh_level0.odin).
+	paged:             bool,
+	pool_mesh:         u32,
+	// Its range of the page table, for its mesh record.
+	pages_first:       u32,
+	page_count:        u32,
+	level0:            Level0,
+	// The frame of the last failure to assemble level 0, which was logged, or 0.
+	level0_failed_at:  u64,
 	positions:         gpu.Buffer,
 	attributes:        gpu.Buffer,
 	indices:           gpu.Buffer,
@@ -108,6 +118,8 @@ Residency :: struct {
 	accels:   bool,
 	// What this asks for is for a thumbnail, not the world, so it can go when the thumbnails are done.
 	baking:   bool,
+	// The pages of the paged meshes that are resident (see mesh_pages.odin).
+	pool:     Mesh_Pool,
 }
 
 @(private)
@@ -178,6 +190,8 @@ Resident_Stream :: struct {
 	// A mesh's seven streams, its impostor and its skin, a texture's one, or an instance set's two.
 	transfers:      [9]gpu.Transfer,
 	transfer_count: int,
+	// It streams in over a live mesh that was let go, which must not go on drawing if this does not come in.
+	released:       bool,
 }
 
 // Resident_Event is what changes an entry's source or stream, which change applies.
@@ -186,6 +200,8 @@ Resident_Event :: union #no_nil {
 	Event_Live_Blob,
 	Event_Let_Go,
 	Event_Landed,
+	Event_Stream_Failed,
+	Event_Stream_Superseded,
 	Event_Asset_Streaming,
 	Event_Asset_Failed,
 }
@@ -204,6 +220,17 @@ Event_Let_Go :: struct {}
 @(private = "file")
 Event_Landed :: struct {}
 
+// What streams cannot come in: a page of a paged mesh's roots was not what its table said.
+@(private = "file")
+Event_Stream_Failed :: struct {
+	reason: string,
+}
+
+// The asset's blob was swapped while what streams was still coming in from the blob before it, which cannot finish: a
+// paged mesh's root pages are in the head that went.
+@(private = "file")
+Event_Stream_Superseded :: struct {}
+
 // The asset's blob started to stream.
 @(private = "file")
 Event_Asset_Streaming :: struct {
@@ -221,6 +248,7 @@ residency_init :: proc(r: ^Residency, platform: ^core.Platform_API, assets: ^ass
 	mem.zero_item(r)
 	r.platform, r.assets = platform, assets
 	r.index = make(map[Resident_Key]int, platform.heap_allocator)
+	mesh_pool_init(&r.pool, platform)
 }
 
 // residency_reload keeps every resident asset after a code reload.
@@ -241,22 +269,65 @@ residency_destroy :: proc(r: ^Residency) {
 	}
 	r.count = 0
 	delete(r.index)
+	mesh_pool_destroy(&r.pool, r.platform)
+}
+
+// residency_set_mesh_pool sets the budget of the pool of mesh pages, in MiB. The pool is made again at its new size at
+// the next update, and every page streams in again, the roots first.
+residency_set_mesh_pool :: proc(r: ^Residency, megabytes: u32) {
+	r.pool.wanted_slots = mesh_pool_slots(megabytes)
+}
+
+// mesh_stream_stats is what the pool of mesh pages holds and what it waits for.
+mesh_stream_stats :: proc(r: ^Residency) -> Mesh_Stream_Stats {
+	return r.pool.stats
+}
+
+// resident_pin keeps every page of a paged mesh resident for this frame, and asks for the ones that are not. What draws
+// a mesh's meshlets without the selection, which tests every one, pins it: instanced meshes and the view model.
+resident_pin :: proc(r: ^Residency, m: ^Resident_Mesh) {
+	if m.paged {
+		mesh_pool_pin(&r.pool, m.pool_mesh)
+	}
 }
 
 // residency_update starts a frame: it swaps in the resources whose transfers are done, and streams a new version of
 // each asset whose blob asset.poll swapped. Call it once a frame, before drawing.
 residency_update :: proc(r: ^Residency) {
 	r.frame += 1
+	mesh_pool_update(&r.pool, r.platform, r.assets)
 	for &e in r.entries[:r.count] {
+		// A paged mesh's level 0 comes in over some frames, for what asked for it, and for the ray scene.
+		if e.kind == .Mesh && e.ready && e.current.mesh.paged {
+			if r.accels {
+				resident_level0(r, &e.current.mesh)
+			}
+			advance_level0(r, &e.current.mesh)
+		}
 		if s, streaming := &e.stream.(Resident_Stream); streaming {
 			done := true
 			for t in s.transfers[:s.transfer_count] {
 				done &&= r.platform.gpu_transfer_done(t)
 			}
+			// A paged mesh is in when its roots are in the pool.
+			superseded := false
+			if e.kind == .Mesh && s.pending.mesh.paged {
+				if mesh_pool_failed(&r.pool, s.pending.mesh.pool_mesh) {
+					change(r, &e, Event_Stream_Failed{"has a root page that is not what its table names"})
+					continue
+				}
+				done &&= mesh_pool_ready(&r.pool, s.pending.mesh.pool_mesh)
+				// Its roots come from the head of the version that it streams, which a newer blob has replaced.
+				superseded = !done && e.handle != {} && asset.version(r.assets, e.handle) != s.version
+			}
 			if done {
 				change(r, &e, Event_Landed{})
 			}
-			continue
+			if !superseded {
+				continue
+			}
+			// The newer version streams below, in this frame.
+			change(r, &e, Event_Stream_Superseded{})
 		}
 		// A live mesh draws from memory, whatever the asset's blob does.
 		switch _ in e.source {
@@ -278,7 +349,19 @@ residency_update :: proc(r: ^Residency) {
 // streams its data. Until it is ready, draw nothing.
 resident_mesh :: proc(r: ^Residency, guid: format.Guid) -> (mesh: ^Resident_Mesh, ready: bool) {
 	e := entry(r, guid, .Mesh) or_return
-	return &e.current.mesh, e.ready
+	// A paged mesh draws nothing while the pool of pages was made again and the GPU's table is still the old pool's.
+	return &e.current.mesh, e.ready && (!e.current.mesh.paged || mesh_pool_drawable(&r.pool))
+}
+
+// resident_whole_mesh gives a mesh asset's resources as resident_mesh does, for what draws its vertices by index: it is
+// ready when the mesh's positions, attributes and indices are resident too, which a paged mesh's are some frames after
+// the first call (see resident_level0).
+resident_whole_mesh :: proc(r: ^Residency, guid: format.Guid) -> (mesh: ^Resident_Mesh, ready: bool) {
+	mesh, ready = resident_mesh(r, guid)
+	if ready {
+		ready = resident_level0(r, mesh)
+	}
+	return
 }
 
 // resident_failed is whether a mesh asset could not be made resident, so what waits for it should not.
@@ -476,11 +559,32 @@ change :: proc(r: ^Residency, e: ^Resident_Entry, event: Resident_Event) -> (ok:
 				e.stream = stream
 			}
 		}
+	case Event_Stream_Failed:
+		s := e.stream.? or_return
+		destroy_resources(r, e.kind, &s.pending)
+		// Nothing may go on drawing what the editor gave up.
+		if s.released {
+			destroy_resources(r, e.kind, &e.current)
+			e.ready = false
+		}
+		// The version stays, so only a newer blob tries again.
+		e.stream, e.version = nil, s.version
+		fail(r, e, ev.reason)
+	case Event_Stream_Superseded:
+		s := e.stream.? or_return
+		destroy_resources(r, e.kind, &s.pending)
+		e.stream = nil
+		// What it was to replace is as it was, a live mesh that was let go too.
+		if s.released {
+			e.source = Released_Source{}
+		}
 	case Event_Asset_Streaming:
 		_, is_live := e.source.(Live_Source)
 		assert(!is_live && e.stream == nil, "an asset streams only into an entry that is not live and streams nothing")
 		// A live mesh that was let go draws until this is in.
-		e.source, e.stream, e.failed_at = Asset_Source{}, ev.stream, 0
+		stream := ev.stream
+		_, stream.released = e.source.(Released_Source)
+		e.source, e.stream, e.failed_at = Asset_Source{}, stream, 0
 	case Event_Asset_Failed:
 		_, is_live := e.source.(Live_Source)
 		assert(!is_live && e.stream == nil, "an asset fails only in an entry that is not live and streams nothing")
@@ -498,7 +602,7 @@ change :: proc(r: ^Residency, e: ^Resident_Entry, event: Resident_Event) -> (ok:
 // live_stream streams a live mesh's blob, at the version that draws, as it is not the asset's.
 @(private = "file")
 live_stream :: proc(r: ^Residency, e: ^Resident_Entry, blob: []byte) -> (s: Resident_Stream, ok: bool) {
-	s, ok = new_stream(r, .Mesh, blob, e.version)
+	s, ok = new_stream(r, .Mesh, blob, e.version, {})
 	if !ok {
 		buffer: [32]u8
 		log.errorf("render: the live mesh %s is not a blob that can be made resident", format.guid_format(e.guid, &buffer))
@@ -527,7 +631,7 @@ start_streaming :: proc(r: ^Residency, e: ^Resident_Entry) {
 	}
 	data, _ := asset.data(r.assets, e.handle)
 	version := asset.version(r.assets, e.handle)
-	stream, ok := new_stream(r, e.kind, data, version)
+	stream, ok := new_stream(r, e.kind, data, version, {e.guid, e.handle, asset.modified(r.assets, e.handle)})
 	if !ok {
 		// The version stays, so a broken blob is tried again when the cooker writes a new one.
 		e.version = version
@@ -537,12 +641,21 @@ start_streaming :: proc(r: ^Residency, e: ^Resident_Entry) {
 	change(r, e, Event_Asset_Streaming{stream})
 }
 
+// Stream_Origin is the asset that a blob is the head of, which a paged mesh reads its pages from: its GUID, its handle
+// and its file's time. A blob from memory, a live mesh's, has none.
+@(private = "file")
+Stream_Origin :: struct {
+	guid:     format.Guid,
+	handle:   asset.Handle,
+	modified: i64,
+}
+
 // new_stream creates new resources from a blob and streams its data into them.
 @(private = "file")
-new_stream :: proc(r: ^Residency, kind: format.Asset_Kind, data: []byte, version: u32) -> (s: Resident_Stream, ok: bool) {
+new_stream :: proc(r: ^Residency, kind: format.Asset_Kind, data: []byte, version: u32, origin: Stream_Origin) -> (s: Resident_Stream, ok: bool) {
 	#partial switch kind {
 	case .Mesh:
-		ok = stream_mesh(r, &s, data)
+		ok = stream_mesh(r, &s, data, version, origin)
 	case .Texture:
 		ok = stream_texture(r, &s, data)
 	case .Instance_Set:
@@ -566,13 +679,15 @@ fail :: proc(r: ^Residency, e: ^Resident_Entry, reason: string) {
 }
 
 @(private = "file")
-stream_mesh :: proc(r: ^Residency, s: ^Resident_Stream, data: []byte) -> bool {
+stream_mesh :: proc(r: ^Residency, s: ^Resident_Stream, data: []byte, version: u32, origin: Stream_Origin) -> bool {
 	blob, ok := format.mesh_view(data)
-	// A mesh with pages needs the pool of pages, which is not here yet (see docs/content/kinds/meshes.md#pages).
-	if !ok || .Paged in blob.flags {
+	paged := ok && .Paged in blob.flags
+	// A paged mesh reads its pages from its asset's file, so a blob from memory cannot be one.
+	if !ok || (paged && origin.handle == {}) {
 		return false
 	}
 	m := &s.pending.mesh
+	m.paged = paged
 	m.vertex_count = blob.vertex_count
 	m.attribute_stride = format.mesh_attribute_stride(blob.flags)
 	m.flags = blob.flags
@@ -584,14 +699,25 @@ stream_mesh :: proc(r: ^Residency, s: ^Resident_Stream, data: []byte) -> bool {
 	for s, i in submeshes[:m.submesh_count] {
 		m.submeshes[i] = {s.first_index, s.index_count, s.first_meshlet, s.meshlet_count, s.first_node, s.node_count, s.root_count}
 		m.submesh_bounds[i] = s.bounds
+		// A paged mesh's level buckets are in its head, as its meshlets are not.
+		m.level_first[i] = s.level_first
 	}
-	mesh_levels(m, format.mesh_meshlets(data, blob))
-	m.positions = stream_buffer(r, s, format.blob_bytes(data, blob.positions), {}, "mesh positions") or_return
-	m.attributes = stream_buffer(r, s, format.blob_bytes(data, blob.attributes), {}, "mesh attributes") or_return
-	m.indices = stream_buffer(r, s, format.blob_bytes(data, blob.indices), {.Index}, "mesh indices") or_return
-	m.meshlets = stream_buffer(r, s, format.blob_bytes(data, blob.meshlets), {}, "meshlets") or_return
-	m.meshlet_vertices = stream_buffer(r, s, format.blob_bytes(data, blob.meshlet_vertices), {}, "meshlet vertices") or_return
-	m.meshlet_triangles = stream_buffer(r, s, format.blob_bytes(data, blob.meshlet_triangles), {}, "meshlet triangles") or_return
+	if paged {
+		m.levels = blob.levels
+		m.pool_mesh = mesh_pool_add(&r.pool, r.platform, origin.guid, origin.handle, version, origin.modified, data, blob)
+		if m.pool_mesh == 0 {
+			return false
+		}
+		m.pages_first, m.page_count = mesh_pool_range(&r.pool, m.pool_mesh)
+	} else {
+		mesh_levels(m, format.mesh_meshlets(data, blob))
+		m.positions = stream_buffer(r, s, format.blob_bytes(data, blob.positions), {}, "mesh positions") or_return
+		m.attributes = stream_buffer(r, s, format.blob_bytes(data, blob.attributes), {}, "mesh attributes") or_return
+		m.indices = stream_buffer(r, s, format.blob_bytes(data, blob.indices), {.Index}, "mesh indices") or_return
+		m.meshlets = stream_buffer(r, s, format.blob_bytes(data, blob.meshlets), {}, "meshlets") or_return
+		m.meshlet_vertices = stream_buffer(r, s, format.blob_bytes(data, blob.meshlet_vertices), {}, "meshlet vertices") or_return
+		m.meshlet_triangles = stream_buffer(r, s, format.blob_bytes(data, blob.meshlet_triangles), {}, "meshlet triangles") or_return
+	}
 	m.meshlet_nodes = {}
 	if blob.meshlet_nodes.size > 0 {
 		m.meshlet_nodes = stream_buffer(r, s, format.blob_bytes(data, blob.meshlet_nodes), {}, "meshlet nodes") or_return
@@ -622,7 +748,7 @@ stream_instance_set :: proc(r: ^Residency, s: ^Resident_Stream, data: []byte) ->
 }
 
 // mesh_levels finds each submesh's level buckets and each level's errors among the mesh's meshlets, which the cooker
-// orders by level within each submesh.
+// orders by level within each submesh (see format.mesh_level_buckets). A paged mesh's are in its blob.
 @(private)
 mesh_levels :: proc(m: ^Resident_Mesh, meshlets: []format.Meshlet) {
 	deepest := -1
@@ -631,37 +757,16 @@ mesh_levels :: proc(m: ^Resident_Mesh, meshlets: []format.Meshlet) {
 		if u64(s.first_meshlet) + u64(s.meshlet_count) > u64(len(meshlets)) {
 			continue
 		}
-		own := meshlets[s.first_meshlet:][:s.meshlet_count]
-		last := 0
-		for c in own {
-			last = max(last, int(c.depth))
-		}
+		last: int
+		m.level_first[i], last = format.mesh_level_buckets(meshlets[s.first_meshlet:][:s.meshlet_count], m.bounds.center, &m.levels)
 		deepest = max(deepest, last)
-		for &first, bucket in m.level_first[i] {
-			first = s.meshlet_count
-			for c, k in own {
-				if int(c.depth) >= min(bucket, last) {
-					first = u32(k)
-					break
-				}
-			}
-		}
-		for c in own {
-			if int(c.depth) >= INSTANCE_LEVEL_BUCKETS {
-				continue
-			}
-			l := &m.levels[c.depth]
-			l[0] = max(l[0], c.parent_error)
-			if c.parent_error < max(f32) {
-				reach := linalg.length(c.parent_center - m.bounds.center) + c.parent_radius
-				l[1] = max(l[1], reach)
-			}
-		}
 	}
 	for &l in m.levels[clamp(deepest + 1, 0, INSTANCE_LEVEL_BUCKETS):] {
 		l[0] = max(f32)
 	}
 }
+
+#assert(INSTANCE_LEVEL_BUCKETS == format.MESH_LEVEL_BUCKETS)
 
 // residency_enable_accels gives meshes acceleration structures from now on, and gives one to every mesh that is
 // resident already.
@@ -679,9 +784,14 @@ residency_enable_accels :: proc(r: ^Residency) {
 
 // create_mesh_accel creates a ready mesh's bottom-level acceleration structure, which unbuilt_accels then gives to the
 // renderer to build.
-@(private = "file")
+@(private)
 create_mesh_accel :: proc(r: ^Residency, m: ^Resident_Mesh) {
-	if m.index_count == 0 || m.index_count % 3 != 0 {
+	if m.index_count == 0 || m.index_count % 3 != 0 || m.accel != {} {
+		return
+	}
+	// A paged mesh's is of its level 0, which the residency asks for while meshes have acceleration structures, and
+	// which makes this when it is in.
+	if _, ready := m.level0.(Level0_Ready); m.paged && !ready {
 		return
 	}
 	geometry := gpu.Accel_Geometry {
@@ -794,6 +904,8 @@ destroy_resources :: proc(r: ^Residency, kind: format.Asset_Kind, resources: ^Re
 	#partial switch kind {
 	case .Mesh:
 		m := &resources.mesh
+		drop_level0(r, m)
+		mesh_pool_remove(&r.pool, r.platform, m.pool_mesh)
 		r.platform.gpu_destroy_buffer(m.positions)
 		r.platform.gpu_destroy_buffer(m.attributes)
 		r.platform.gpu_destroy_buffer(m.indices)

@@ -205,6 +205,11 @@ Frame_Constants :: struct {
 	// The view's projection: the camera's in every view's copy, the view model's in its own, and a face's in a
 	// reflection probe's capture.
 	projection:                   View_Projection,
+	// The pool of mesh pages and its page table, as read indices, which the mesh shader path draws a paged mesh's
+	// meshlets from (see mesh_pages.odin).
+	mesh_pool:                    u32,
+	mesh_pages:                   u32,
+	mesh_pages_padding:           [2]u32,
 }
 
 // Material_Push matches Material_Push in material_common.hlsli: the forward pass's textures that exist only once the
@@ -269,6 +274,9 @@ MESH_RECORD_COLOR :: 4
 // A skinned entity's record: its positions, previous_positions and attributes are its own posed copies (see
 // docs/rendering/gpu-scene.md#skinned-meshes).
 MESH_RECORD_SKINNED :: 8
+// A paged mesh's record: its meshlets are in the pool of pages, its pages are page_count entries of the page table from
+// pages, and its positions, attributes and indices are its level 0, once that is resident.
+MESH_RECORD_PAGED :: 16
 
 // Mesh_Record matches Mesh_Record in material_common.hlsli and select_meshlets.hlsl: a resident mesh's buffers, as
 // bindless indices, its meshlet nodes for a mesh with them, and its impostor's atlas, the side of its frames and the
@@ -288,6 +296,11 @@ Mesh_Record :: struct {
 	meshlet_nodes:     u32,
 	previous_positions: u32,
 	impostor_sphere:   [4]f32,
+	pages:             u32,
+	page_count:        u32,
+	// Where the vertices start in positions and attributes, which only a shader sets, for a meshlet of a page.
+	positions_offset:  u32,
+	attributes_offset: u32,
 }
 
 // The clean slots that a run of the instance upload may cross, which costs less than a copy of its own.
@@ -546,8 +559,8 @@ Cell_Range :: struct {
 	first, count: u32,
 }
 
-#assert(size_of(Instance_Record) == 112 && size_of(Cull_Item) == 80 && size_of(Draw_Record) == 32 && size_of(Mesh_Record) == 64)
-#assert(size_of(Cull_View) == 128 && size_of(Frame_Constants) == 912 && size_of(Cull_Constants) == 144)
+#assert(size_of(Instance_Record) == 112 && size_of(Cull_Item) == 80 && size_of(Draw_Record) == 32 && size_of(Mesh_Record) == 80)
+#assert(size_of(Cull_View) == 128 && size_of(Frame_Constants) == 928 && size_of(Cull_Constants) == 144)
 #assert(size_of(Instance_Set_Record) == 112 && size_of(Instance_Cull_Constants) == 112)
 
 // Gpu_Scene is the GPU scene's state between frames, in the Renderer.
@@ -1332,6 +1345,8 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 		lod_scale                = camera_lod_scale,
 		lod_near                 = camera_lod_near,
 		selected_meshlets        = gpu.read_index(s.meshlet_select.selected),
+		mesh_pool                = gpu.read_index(r.residency.pool.pool),
+		mesh_pages               = gpu.read_index(r.residency.pool.table),
 	}
 	constants.gi = u32(f.gi != nil)
 	constants.reflections = u32(f.ssr != nil)
@@ -1596,6 +1611,10 @@ declare_scene_draws :: proc(f: ^Frame, p: Pass) {
 	if sf.meshlet_select.selected != 0 {
 		read(g, p, sf.meshlet_select.selected)
 	}
+	if f.mesh_pool.pool != 0 {
+		read(g, p, f.mesh_pool.pool)
+		read(g, p, f.mesh_pool.table)
+	}
 	declare_skinned_reads(f, p)
 }
 
@@ -1842,6 +1861,13 @@ add_instanced_items :: proc(
 			flags |= ITEM_BILLBOARD
 			set_flags |= SET_BILLBOARD
 		}
+		// The mesh shader path tests every meshlet of an instanced mesh, so every page of a paged one stays. Vertex
+		// pulling draws its level 0, once that is in.
+		if pipeline.mesh_path && material_group(pipeline) == .Opaque {
+			resident_pin(&r.residency, mesh)
+		} else if !resident_level0(&r.residency, mesh) {
+			continue
+		}
 		impostors &&= pipeline.impostor_path && material_group(pipeline) == .Opaque
 		occludable &&= material_group(pipeline) == .Opaque
 		bound = max(bound, pipeline.displacement_bound)
@@ -2002,6 +2028,13 @@ add_items :: proc(
 		if mesh_path {
 			flags |= ITEM_MESH_PATH
 			first, count = submesh.first_meshlet, submesh.meshlet_count
+			// The view model's amplification shaders test every meshlet, so every page of a paged mesh stays for it.
+			if view_model {
+				resident_pin(&r.residency, mesh)
+			}
+		} else if !resident_level0(&r.residency, mesh) {
+			// Vertex pulling draws a paged mesh's level 0, which is on its way.
+			continue
 		}
 		if skinned {
 			flags |= ITEM_SKINNED
@@ -2075,7 +2108,12 @@ mesh_record :: proc(mesh: ^Resident_Mesh) -> Mesh_Record {
 	if .Color in mesh.flags {
 		flags |= MESH_RECORD_COLOR
 	}
+	if mesh.paged {
+		flags |= MESH_RECORD_PAGED
+	}
 	return {
+		pages = mesh.pages_first,
+		page_count = mesh.page_count,
 		positions = gpu.read_index(mesh.positions),
 		attributes = gpu.read_index(mesh.attributes),
 		indices = gpu.read_index(mesh.indices),

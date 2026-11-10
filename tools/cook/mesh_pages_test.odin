@@ -403,6 +403,22 @@ a_mesh_without_a_hierarchy_or_with_a_skin_has_no_pages :: proc(t: ^testing.T) {
 		return
 	}
 	testing.expect(t, .Paged not_in blob.flags && blob.pages.size == 0 && blob.meshlets.size > 0)
+
+	// A mesh that fits in its root page has nothing to stream, and keeps its streams.
+	small, small_ok := cook_paged_grid_blob(t, 8)
+	testing.expect(t, small_ok && .Paged not_in small.flags && small.meshlets.size > 0 && small.meshlet_nodes.size > 0)
+}
+
+// cook_paged_grid_blob cooks a grid with pages = true, whatever it comes out as.
+@(private = "file")
+cook_paged_grid_blob :: proc(t: ^testing.T, size: int) -> (blob: ^format.Mesh_Blob, ok: bool) {
+	tree := make_tree(t, {{"content/grid.gltf", grid_gltf(size)}, {"content/grid.gltf.meta", fmt_meta("pages = true\n")}})
+	defer remove_tree(tree)
+	testing.expect(t, cook(tree_options(tree), {.Model}).ok)
+	guid, found := format.meta_subasset(read_meta(t, tree, "grid.gltf"), format.MESH_KIND, "Grid")
+	testing.expect(t, found)
+	_, blob = mesh_blob(t, tree, guid) or_return
+	return blob, true
 }
 
 @(test)

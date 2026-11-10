@@ -286,6 +286,8 @@ Frame :: struct {
 	// This frame is an extra view's (see Extra_View), not the frame's own view: the work that the world needs once a frame
 	// is the frame's own view's.
 	extra:                    bool,
+	// The pool of mesh pages' buffers in the frame's graph, 0 before any paged mesh is resident.
+	mesh_pool:                Mesh_Pool_Frame,
 	view:                     View,
 	// The scene's size, which the world's targets, the debug layer and every pass before temporal AA have: the frame's
 	// size at the quality's render scale (see docs/rendering/anti-aliasing.md#upscaling).
@@ -555,6 +557,7 @@ renderer_destroy :: proc(r: ^Renderer) {
 // docs/rendering/frame.md#views). It returns false if the frame's own graph could not execute.
 draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	profile.scope_text(&r.platform.profile, "Build frame", .Render)
+	residency_set_mesh_pool(&r.residency, r.quality.mesh_pool)
 	residency_update(&r.residency)
 	output := r.platform.gpu_output != nil ? r.platform.gpu_output() : gpu.Output{format = gpu.FRAME_TARGET_FORMAT}
 	// A target of its own is always SDR, whatever the frame's output is.
@@ -590,6 +593,9 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 
 	frame_target := desc.target != {} ? desc.target : r.platform.gpu_frame_target()
 	ok := draw_view(r, w, desc, world, own, output, limit_quality(desc.view, quality), frame_target, false)
+	if !ok {
+		mesh_pool_not_sent(&r.residency.pool)
+	}
 	// The stats are the frame's own view's, whichever state that is this frame.
 	r.stats_view = own != &r.view ? own : nil
 	// The extra views come after the frame's own, which committed what it did, so they read the world as it left it. A view
@@ -677,6 +683,14 @@ draw_view :: proc(
 	f.no_meshlet_hierarchy = .Meshlet_Hierarchy in desc.disable
 	if !extra {
 		r.last_sky_mode = settings.sky.mode
+	}
+	// The frame's own view brings the pool of mesh pages up to date before anything draws from it, whether or not anything
+	// draws yet: a mesh's roots come in this way. An extra view draws from the pool as that left it.
+	if !extra {
+		f.mesh_pool = add_stream_pages_pass(&g, &r.residency.pool, r.platform, r.residency.assets)
+	}
+	if f.mesh_pool.pool == 0 {
+		f.mesh_pool = mesh_pool_buffers(&g, &r.residency.pool)
 	}
 	build_scene(f, w, desc.hidden, desc.skins)
 	f.lights = extract_lights(f, w, desc.hidden)

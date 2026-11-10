@@ -14,7 +14,7 @@ The graphics and compute queues and how a frame orders them, the copy queue that
 
 ## Streaming
 
-Streaming copies data into resources on the copy queue, beside the frame's work. The renderer's residency table streams assets' GPU data this way (see [Rendering](../rendering/assets.md#gpu-residency)).
+Streaming copies data into resources on the copy queue, beside the frame's work. The renderer's residency table streams assets' GPU data this way (see [Rendering](../rendering/assets.md#gpu-residency)). A stream is for a resource that nothing reads until the transfer is done. A buffer that the frame's draws read while parts of it are written, as the pool of [mesh pages](../rendering/assets.md#mesh-pages) is, is written in a pass of the frame's graph from the upload ring instead, where the write is ordered with the passes that read it.
 
 - `gpu_stream_buffer(buffer, offset, data)` and `gpu_stream_texture(texture, data)` copy the data before they return and return a `Transfer`. Use the resource once `gpu_transfer_done(transfer)` is true.
 - A streamed texture has the `Streamed` usage with `Sampled` and no other usage, and is streamed once with its whole mip chain: each mip tightly packed, mip 0 first, and for an array or a cube, each layer's chain one after the other, layer 0 first (`mip_chain_size`). Copy queues cannot change texture layouts, so the texture is created in the common layout. When its copy is complete, the backend moves it to the sampled layout at the start of the next frame, and only then reports the transfer done.

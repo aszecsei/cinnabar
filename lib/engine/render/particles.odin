@@ -911,7 +911,7 @@ add_mesh_particle_items :: proc(
 				if em.render != .Mesh || slot.ranges[k].count == 0 {
 					continue
 				}
-				mesh, ready := resident_mesh(&r.residency, em.mesh)
+				mesh, ready := resident_whole_mesh(&r.residency, em.mesh)
 				if !ready {
 					continue
 				}

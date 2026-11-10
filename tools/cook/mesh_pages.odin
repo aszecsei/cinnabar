@@ -13,7 +13,7 @@ import format "cinnabar:engine/asset/format"
 LZ4_VERSION :: #config(LZ4_VERSION, "unknown")
 
 // What the import setting `pages` is for a mesh that does not set it.
-PAGES_DEFAULT :: "false"
+PAGES_DEFAULT :: "true"
 
 PAGES_SETTING :: Setting_Info {
 	key = "pages",
@@ -163,6 +163,14 @@ build_pages :: proc(vertices: []Vertex, flags: format.Mesh_Flags, meshlets: []fo
 	submesh := 0
 	submesh_indices := make([]u32, len(submeshes), context.temp_allocator)
 	submesh_first := make([]u32, len(submeshes), context.temp_allocator)
+	// What each page is built in, used again for the next: a large mesh has thousands of pages, and only their
+	// compressed blocks stay.
+	records := make([dynamic]format.Meshlet, context.temp_allocator)
+	refs := make([dynamic]u32, context.temp_allocator)
+	triangles := make([dynamic]u32, context.temp_allocator)
+	page_vertices := make([dynamic]u32, context.temp_allocator)
+	page_buffer := make([]byte, format.MESH_PAGE_SIZE, context.temp_allocator)
+	scratch := make([]byte, lz4.bound(format.MESH_PAGE_SIZE), context.temp_allocator)
 	for r, p in ranges {
 		first_meshlet := groups[r.first].first_meshlet
 		last := groups[r.end - 1]
@@ -172,16 +180,17 @@ build_pages :: proc(vertices: []Vertex, flags: format.Mesh_Flags, meshlets: []fo
 			submesh_first[submesh] = result.index_count
 		}
 
-		records := make([]format.Meshlet, count, context.temp_allocator)
-		refs := make([dynamic]u32, context.temp_allocator)
-		triangles := make([dynamic]u32, context.temp_allocator)
-		page_vertices := make([dynamic]u32, context.temp_allocator)
+		resize(&records, int(count))
+		clear(&refs)
+		clear(&triangles)
+		clear(&page_vertices)
 		level0: u32
 		level0_indices: u32
 		for &record, i in records {
 			source := meshlets[int(first_meshlet) + i]
 			record = source
-			own := make([]u32, source.vertex_count, context.temp_allocator)
+			own_vertices: [format.MESHLET_MAX_VERTICES]u32
+			own := own_vertices[:source.vertex_count]
 			for v, k in meshlet_indices[source.vertex_offset:][:source.vertex_count] {
 				if seen[v] != i32(p) {
 					seen[v] = i32(p)
@@ -215,16 +224,16 @@ build_pages :: proc(vertices: []Vertex, flags: format.Mesh_Flags, meshlets: []fo
 		header.attributes = header.positions + header.vertex_count * 12
 		size := int(header.attributes) + len(page_vertices) * attribute_stride
 		assert(size <= format.MESH_PAGE_SIZE && size % 4 == 0, "a page is not the size that it was counted to be")
-		page := make([]byte, size, context.temp_allocator)
+		page := page_buffer[:size]
 		mem.copy(raw_data(page), &header, size_of(header))
-		copy(page[size_of(format.Mesh_Page_Header):], mem.slice_to_bytes(records))
+		copy(page[size_of(format.Mesh_Page_Header):], mem.slice_to_bytes(records[:]))
 		copy(page[header.vertex_refs:], mem.slice_to_bytes(refs[:]))
 		copy(page[header.triangles:], mem.slice_to_bytes(triangles[:]))
 		for v, i in page_vertices {
 			write_vertex(vertices[v], flags, page[int(header.positions) + i * 12:], page[int(header.attributes) + i * attribute_stride:])
 		}
 
-		block := lz4.compress(page, make([]byte, lz4.bound(size), context.temp_allocator))
+		block := slice.clone(lz4.compress(page, scratch), context.temp_allocator)
 		if len(block) == 0 {
 			return
 		}

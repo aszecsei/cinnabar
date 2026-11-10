@@ -267,7 +267,7 @@ add_preview_passes :: proc(f: ^Frame, desc: ^Preview_Desc) {
 		uses  = make(map[format.Guid]Material_Use, platform.frame_allocator),
 		bytes = make([dynamic]byte, platform.frame_allocator),
 	}
-	mesh, mesh_ready := resident_mesh(&r.residency, desc.mesh)
+	mesh, mesh_ready := resident_whole_mesh(&r.residency, desc.mesh)
 	pipeline, block, material_ok := preview_use(r, &table, desc)
 	// A ribbon material draws ribbons, which a preview has none of, so its preview is the background.
 	material_ok &&= !pipeline.ribbon
@@ -418,7 +418,7 @@ add_effect_preview_passes :: proc(f: ^Frame, desc: ^Preview_Desc) {
 		bytes = make([dynamic]byte, platform.frame_allocator),
 	}
 	// The effect plays before its ground is ready, over the background.
-	mesh, mesh_ready := resident_mesh(&r.residency, ground.mesh)
+	mesh, mesh_ready := resident_whole_mesh(&r.residency, ground.mesh)
 	pipeline, block, material_ok := preview_use(r, &table, ground)
 	if mesh_ready && material_ok {
 		pf.pipeline = pipeline

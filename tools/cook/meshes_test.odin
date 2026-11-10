@@ -256,7 +256,8 @@ Grid_Mesh :: struct {
 
 @(private = "file")
 cook_grid :: proc(t: ^testing.T, meta: string) -> (grid: Grid_Mesh, ok: bool) {
-	tree := make_tree(t, {{"content/grid.gltf", grid_gltf(48)}, {"content/grid.gltf.meta", meta}})
+	// The hierarchy's tests read the mesh's own streams, which a mesh with pages does not have (see mesh_pages_test.odin).
+	tree := make_tree(t, {{"content/grid.gltf", grid_gltf(48)}, {"content/grid.gltf.meta", strings.concatenate({meta, "pages = false\n"}, context.temp_allocator)}})
 	defer remove_tree(tree)
 	testing.expect(t, cook(tree_options(tree), {.Model}).ok)
 	guid, found := format.meta_subasset(read_meta(t, tree, "grid.gltf"), format.MESH_KIND, "Grid")

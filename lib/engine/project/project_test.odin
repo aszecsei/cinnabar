@@ -84,16 +84,23 @@ quality_keys_replace_the_presets_features :: proc(t: ^testing.T) {
 	s: Settings
 	problems := make([dynamic]string, context.temp_allocator)
 	parse(
-		"quality.preset = Low\nquality.ao = Off\nquality.shadows.ray_traced = true\nquality.fog = Loud\nquality.render_scale = 0.75\nquality.render_scale = half\nquality.lod_error = 3\n",
+		"quality.preset = Low\nquality.ao = Off\nquality.shadows.ray_traced = true\nquality.fog = Loud\nquality.render_scale = 0.75\nquality.render_scale = half\nquality.lod_error = 3\nquality.mesh_pool = 512\nquality.mesh_pool = lots\n",
 		&s,
 		&problems,
 	)
-	testing.expect_value(t, len(problems), 2)
+	testing.expect_value(t, len(problems), 3)
+	testing.expect_value(t, problems[2], `9: quality.mesh_pool takes a whole number of MiB from 16 to 3584, not "lots"`)
 	testing.expect_value(t, problems[0], `4: quality.fog takes Low, Medium, High, Ultra, not "Loud"`)
 	testing.expect_value(t, problems[1], `6: quality.render_scale takes a number from 0.5 to 1, not "half"`)
 	q := quality(s, caps)
 	testing.expect_value(t, q.render_scale, 0.75)
 	testing.expect_value(t, q.lod_error, 3)
+	testing.expect_value(t, q.mesh_pool, 512)
+	// A preset's pool of mesh pages is its level's, and a device's at most a quarter of its video memory.
+	testing.expect_value(t, render.preset_quality(.Low, caps).mesh_pool, 256)
+	testing.expect_value(t, render.preset_quality(.Ultra, render.Caps{video_memory = 4 << 30}).mesh_pool, 1024)
+	testing.expect_value(t, render.clamp_quality({mesh_pool = 1}, caps).mesh_pool, 16)
+	testing.expect_value(t, render.clamp_quality({}, caps).mesh_pool, 1024)
 	testing.expect_value(t, q.shadows.level, render.Quality_Level.Low)
 	testing.expect(t, q.shadows.ray_traced)
 	testing.expect_value(t, q.ao.technique, render.Ao_Technique.Off)

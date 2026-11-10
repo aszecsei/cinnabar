@@ -889,7 +889,12 @@ mesh_write :: proc(contents: Mesh_Contents, allocator := context.allocator) -> [
 		}
 		mem.copy(&buffer[submeshes.offset + u32(i * size_of(Mesh_Submesh))], &record, size_of(record))
 	}
-	// The roots end the head, and the other pages follow it.
+	// The roots end the head, and the other pages follow it. The buffer grows once for them all.
+	compressed_size := 0
+	for p in contents.pages {
+		compressed_size += len(p.compressed) + BLOB_ALIGN
+	}
+	reserve(&buffer, len(buffer) + compressed_size)
 	records := make([]Mesh_Page, len(contents.pages), context.temp_allocator)
 	head_size := u32(len(buffer))
 	for root in ([2]bool{true, false}) {
