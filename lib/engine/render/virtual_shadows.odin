@@ -662,7 +662,7 @@ virtual_camera :: proc(f: ^Frame, p: Shadow_Params) -> Virtual_Camera {
 		up = up,
 		forward = forward,
 		scale = scale,
-		near = f.view.near,
+		near = view_near(f.view),
 		offset = ecs.position_sub(f.view.position, f.renderer.scene.origin),
 		selection = {
 			levels = p.virtual_levels,
@@ -855,7 +855,7 @@ run_virtual_mark :: proc(ctx: ^Pass_Context) {
 	push := Virtual_Mark_Push {
 		forward    = {c.forward.x, c.forward.y, c.forward.z, 0},
 		projection = {c.scale.x, c.scale.y, c.near, 0},
-		view_model = {view_model_scale.x, view_model_scale.y, view_model.near, 0},
+		view_model = {view_model_scale.x, view_model_scale.y, view_near(view_model), 0},
 		depth      = gpu.read_index(gpu_texture(g, f.depth)),
 		stencil    = gpu.stencil_index(gpu_texture(g, f.depth)),
 		requests   = gpu.write_index(gpu_buffer(g, vf.requests)),

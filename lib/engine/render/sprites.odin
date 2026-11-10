@@ -293,7 +293,7 @@ begin_sprites :: proc(f: ^Frame, sprites: []Sprite, buffers: ^Sprite_Buffers) {
 	}
 	sf := new(Sprite_Frame, platform.frame_allocator)
 	sf.buffers = buffers
-	sf.scale = projection_scale(f.view_projection)
+	sf.scale = f.projection.xy
 	f.sprites = sf
 	if len(sprites) == 0 {
 		return

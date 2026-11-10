@@ -3,8 +3,11 @@ package render
 import "base:runtime"
 import "core:fmt"
 import "core:log"
+import "core:math"
+import "core:math/linalg"
 import "core:mem/virtual"
 import "core:os"
+import "core:slice"
 import "core:strings"
 import "core:sync"
 import "core:testing"
@@ -255,7 +258,7 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 	debug.line(&r.debug, {}, ecs.position_offset({}, {0, 1, 0}), {0, 1, 0, 1}, mode = .Overlay)
 
 	desc := Frame_Desc {
-		view = {rotation = 1, vertical_fov = 1, near = 0.05},
+		view = {rotation = 1, projection = Perspective{1, 0.05}},
 		size = {64, 32},
 		keep_ids = true,
 		hooks = {
@@ -686,7 +689,7 @@ frames_upload_only_the_records_that_changed :: proc(t: ^testing.T) {
 		f := new(Frame, r.platform.frame_allocator)
 		f.renderer = r
 		f.state = &r.view
-		f.view = {position = at, rotation = 1, vertical_fov = 1, near = 0.05}
+		f.view = {position = at, rotation = 1, projection = Perspective{1, 0.05}}
 		f.size = {64, 32}
 		build_scene(f, w, nil, nil)
 		// The copy of a frame with no draws does not run here, so a test says whether it did.
@@ -1167,7 +1170,7 @@ an_extra_view_draws_into_its_own_target :: proc(t: ^testing.T) {
 	targets := [MAX_EXTRA_VIEWS + 1]gpu.Texture{first, second, third, third, first}
 	for &v, i in views {
 		v = {
-			view   = {position = ecs.position_offset({}, {f32(i), 0, 0}), rotation = 1, vertical_fov = 1, near = 0.05},
+			view   = {position = ecs.position_offset({}, {f32(i), 0, 0}), rotation = 1, projection = Perspective{1, 0.05}},
 			size   = {32, 16},
 			target = targets[i],
 			state  = &states[i],
@@ -1176,7 +1179,7 @@ an_extra_view_draws_into_its_own_target :: proc(t: ^testing.T) {
 		v.hooks.data = &records[i]
 	}
 	desc := Frame_Desc {
-		view        = {rotation = 1, vertical_fov = 1, near = 0.05},
+		view        = {rotation = 1, projection = Perspective{1, 0.05}},
 		size        = {64, 32},
 		extra_views = views[:],
 	}
@@ -1262,9 +1265,9 @@ two_views_keep_the_state_that_each_would_alone :: proc(t: ^testing.T) {
 	// Records: A in the renderer with both, B in it, A alone, B alone.
 	records: [4]View_Record
 	for k in 0 ..< 10 {
-		a := View{position = ecs.position_offset({}, {f32(k) * 2, 1, -4}), rotation = 1, vertical_fov = 1, near = 0.05}
+		a := View{position = ecs.position_offset({}, {f32(k) * 2, 1, -4}), rotation = 1, projection = Perspective{1, 0.05}}
 		// High above the others, where the sky's ambient light is not A's.
-		b := View{position = ecs.position_offset({}, {-300 + f32(k), 3000, 10}), rotation = 1, vertical_fov = 1, near = 0.05}
+		b := View{position = ecs.position_offset({}, {-300 + f32(k), 3000, 10}), rotation = 1, projection = Perspective{1, 0.05}}
 		desc_a := Frame_Desc {
 			view  = a,
 			size  = {64, 32},
@@ -1330,10 +1333,10 @@ views_keep_histories_of_their_own :: proc(t: ^testing.T) {
 	}
 
 	record_a, record_b: View_Record
-	extras := [1]Extra_View{{view = {position = ecs.position_offset({}, {20, 0, 0}), rotation = 1, vertical_fov = 1, near = 0.05}, size = {48, 24}, target = target, state = &state_b, hooks = RECORD_HOOKS}}
+	extras := [1]Extra_View{{view = {position = ecs.position_offset({}, {20, 0, 0}), rotation = 1, projection = Perspective{1, 0.05}}, size = {48, 24}, target = target, state = &state_b, hooks = RECORD_HOOKS}}
 	extras[0].hooks.data = &record_b
 	desc := Frame_Desc {
-		view  = {rotation = 1, vertical_fov = 1, near = 0.05},
+		view  = {rotation = 1, projection = Perspective{1, 0.05}},
 		size  = {64, 32},
 		hooks = RECORD_HOOKS,
 	}
@@ -1417,7 +1420,7 @@ an_extra_view_draws_the_passes_of_the_frames_own_view :: proc(t: ^testing.T) {
 	defer platform.gpu_destroy_texture(target)
 
 	record_a, record_b: View_Record
-	view := View{position = ecs.position_offset({}, {0, 1, -4}), rotation = 1, vertical_fov = 1, near = 0.05}
+	view := View{position = ecs.position_offset({}, {0, 1, -4}), rotation = 1, projection = Perspective{1, 0.05}}
 	extras := [1]Extra_View{{view = view, size = {64, 32}, target = target, state = &state_b, hooks = RECORD_HOOKS}}
 	extras[0].hooks.data = &record_b
 	desc := Frame_Desc {
@@ -1446,6 +1449,65 @@ an_extra_view_draws_the_passes_of_the_frames_own_view :: proc(t: ^testing.T) {
 	}
 	testing.expect(t, same)
 	testing.expectf(t, record_a.passes["gi trace"] > 0 && record_a.passes["exposure"] > 0 && record_a.passes["temporal aa"] > 0, "the frame lacks passes: %v", record_a.passes)
+	testing.expectf(t, len(rig.record.problems) == 0, "problems: %v", rig.record.problems)
+}
+
+// An orthographic view draws beside a perspective one, with the passes that do not take a perspective: no sky and no
+// clouds behind the world, and no screen-space reflections (see docs/rendering/frame.md#orthographic-views).
+@(test)
+an_orthographic_view_draws_the_passes_that_do_not_take_a_perspective :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	rig := new(Rig)
+	defer free(rig)
+	rig_start(t, rig)
+	defer rig_stop(rig)
+	context.logger = {record_problems, &rig.record, .Debug, {}}
+	r, platform := rig.r, &rig.platform
+	fill_world(rig.w)
+	enable_frame_pipelines(r)
+	defer platform.gpu_destroy_texture(r.blue_noise.texture)
+	state_b: View_State
+	view_state_init(&state_b, r)
+	defer view_state_destroy(&state_b, r)
+	target := extra_target(platform, {64, 32})
+	defer platform.gpu_destroy_texture(target)
+
+	record_a, record_b: View_Record
+	at := ecs.position_offset({}, {0, 1, -4})
+	extras := [1]Extra_View{{view = {position = at, rotation = 1, projection = Orthographic{10, 0.1, 100}}, size = {64, 32}, target = target, state = &state_b, hooks = RECORD_HOOKS}}
+	extras[0].hooks.data = &record_b
+	desc := Frame_Desc {
+		view        = {position = at, rotation = 1, projection = Perspective{1, 0.05}},
+		size        = {64, 32},
+		hooks       = RECORD_HOOKS,
+		extra_views = extras[:],
+	}
+	desc.hooks.data = &record_a
+	for _ in 0 ..< 24 {
+		testing.expect(t, draw_frame(r, rig.w, desc))
+	}
+	// What only the perspective view draws.
+	only := make(map[string]bool, context.temp_allocator)
+	for name in record_a.passes {
+		if name not_in record_b.passes {
+			only[name] = true
+		}
+	}
+	for name in record_b.passes {
+		testing.expectf(t, name in record_a.passes, "%q draws only in the orthographic view", name)
+	}
+	testing.expectf(t, only["sky"] && only["clouds march"] && only["reflections trace"], "the orthographic view draws the sky, the clouds or the screen-space reflections: only the perspective view has %v", only)
+	for name in ([]string{"world", "cluster lights", "fog inject", "fog integrate", "exposure", "temporal aa", "shadow mask", "gtao", "gi trace"}) {
+		testing.expectf(t, record_b.passes[name] > 0, "the orthographic view has no %q pass: %v", name, record_b.passes)
+	}
+	testing.expectf(t, len(rig.record.problems) == 0, "problems: %v", rig.record.problems)
+
+	// The orthographic view is the frame's own as well, with a perspective one beside it.
+	desc.view, extras[0].view = extras[0].view, desc.view
+	for _ in 0 ..< 4 {
+		testing.expect(t, draw_frame(r, rig.w, desc))
+	}
+	testing.expectf(t, "sky" not_in record_a.passes && record_b.passes["sky"] > 0, "the views did not swap their passes: %v, %v", record_a.passes, record_b.passes)
 	testing.expectf(t, len(rig.record.problems) == 0, "problems: %v", rig.record.problems)
 }
 
@@ -1491,8 +1553,8 @@ particles_step_once_a_frame_and_every_view_draws_them :: proc(t: ^testing.T) {
 	defer platform.gpu_destroy_texture(target)
 
 	record_a, record_b, record_reference: View_Record
-	view_a := View{rotation = 1, vertical_fov = 1, near = 0.05}
-	view_b := View{position = ecs.position_offset({}, {4, 1, 0}), rotation = 1, vertical_fov = 1, near = 0.05}
+	view_a := View{rotation = 1, projection = Perspective{1, 0.05}}
+	view_b := View{position = ecs.position_offset({}, {4, 1, 0}), rotation = 1, projection = Perspective{1, 0.05}}
 	extras := [1]Extra_View{{view = view_b, size = {48, 24}, target = target, state = &state_b, hooks = RECORD_HOOKS}}
 	extras[0].hooks.data = &record_b
 	desc := Frame_Desc {
@@ -1562,9 +1624,9 @@ no_view_evicts_the_probes_of_another :: proc(t: ^testing.T) {
 	defer platform.gpu_destroy_texture(target)
 	quality := r.quality
 	quality.reflections = {.Probes, .Low}
-	extras := [1]Extra_View{{view = {position = ecs.position_offset({}, {1000, 0, 0}), rotation = 1, vertical_fov = 1, near = 0.05}, size = {32, 16}, target = target, state = &state_b}}
+	extras := [1]Extra_View{{view = {position = ecs.position_offset({}, {1000, 0, 0}), rotation = 1, projection = Perspective{1, 0.05}}, size = {32, 16}, target = target, state = &state_b}}
 	desc := Frame_Desc {
-		view        = {rotation = 1, vertical_fov = 1, near = 0.05},
+		view        = {rotation = 1, projection = Perspective{1, 0.05}},
 		size        = {64, 32},
 		quality     = &quality,
 		extra_views = extras[:],
@@ -1620,9 +1682,9 @@ views_with_other_gi_techniques_keep_separate_storage :: proc(t: ^testing.T) {
 	quality_a, quality_b := r.quality, r.quality
 	quality_a.gi = {.Voxel_Cones, .Low}
 	quality_b.gi = {.Screen_Cascades, .Low}
-	extras := [1]Extra_View{{view = {position = ecs.position_offset({}, {20, 0, 0}), rotation = 1, vertical_fov = 1, near = 0.05}, size = {48, 24}, target = target, state = &state_b, quality = &quality_b}}
+	extras := [1]Extra_View{{view = {position = ecs.position_offset({}, {20, 0, 0}), rotation = 1, projection = Perspective{1, 0.05}}, size = {48, 24}, target = target, state = &state_b, quality = &quality_b}}
 	desc := Frame_Desc {
-		view        = {rotation = 1, vertical_fov = 1, near = 0.05},
+		view        = {rotation = 1, projection = Perspective{1, 0.05}},
 		size        = {64, 32},
 		quality     = &quality_a,
 		extra_views = extras[:],
@@ -1688,10 +1750,10 @@ an_extra_views_hooks_run_with_its_own_view_and_size :: proc(t: ^testing.T) {
 	extra_at := ecs.position_offset({}, {100, 0, 0})
 	quality := r.quality
 	quality.render_scale = 0.5
-	extras := [1]Extra_View{{view = {position = extra_at, rotation = 1, vertical_fov = 1, near = 0.05}, size = {32, 16}, target = target, state = &state_b, hooks = RECORD_HOOKS}}
+	extras := [1]Extra_View{{view = {position = extra_at, rotation = 1, projection = Perspective{1, 0.05}}, size = {32, 16}, target = target, state = &state_b, hooks = RECORD_HOOKS}}
 	extras[0].hooks.data = &extra_record
 	desc := Frame_Desc {
-		view        = {position = ecs.position_offset({}, {1, 2, 3}), rotation = 1, vertical_fov = 1, near = 0.05},
+		view        = {position = ecs.position_offset({}, {1, 2, 3}), rotation = 1, projection = Perspective{1, 0.05}},
 		size        = {64, 32},
 		quality     = &quality,
 		hooks       = RECORD_HOOKS,
@@ -1754,14 +1816,14 @@ the_debug_lines_of_a_frame_reach_its_extra_views :: proc(t: ^testing.T) {
 	records: [3]View_Record
 	extra_at := ecs.position_offset({}, {10, 0, 0})
 	extras := [2]Extra_View {
-		{view = {position = extra_at, rotation = 1, vertical_fov = 1, near = 0.05}, size = {32, 16}, target = first, state = &states[0], hooks = RECORD_HOOKS},
+		{view = {position = extra_at, rotation = 1, projection = Perspective{1, 0.05}}, size = {32, 16}, target = first, state = &states[0], hooks = RECORD_HOOKS},
 		// This one has no debug layer, and its hook still runs.
-		{view = {rotation = 1, vertical_fov = 1, near = 0.05}, size = {32, 16}, target = second, state = &states[1], no_debug = true, hooks = RECORD_HOOKS},
+		{view = {rotation = 1, projection = Perspective{1, 0.05}}, size = {32, 16}, target = second, state = &states[1], no_debug = true, hooks = RECORD_HOOKS},
 	}
 	extras[0].hooks.data = &records[1]
 	extras[1].hooks.data = &records[2]
 	desc := Frame_Desc {
-		view        = {position = ecs.position_offset({}, {1, 0, 0}), rotation = 1, vertical_fov = 1, near = 0.05},
+		view        = {position = ecs.position_offset({}, {1, 0, 0}), rotation = 1, projection = Perspective{1, 0.05}},
 		size        = {64, 32},
 		hooks       = RECORD_HOOKS,
 		extra_views = extras[:],
@@ -1819,7 +1881,7 @@ the_frames_own_view_draws_into_a_target_with_a_state_of_its_own :: proc(t: ^test
 
 	record: View_Record
 	desc := Frame_Desc {
-		view   = {rotation = 1, vertical_fov = 1, near = 0.05},
+		view   = {rotation = 1, projection = Perspective{1, 0.05}},
 		size   = {48, 24},
 		target = target,
 		state  = &state,
@@ -1889,7 +1951,7 @@ the_own_views_role_moves_between_states_without_losing_histories :: proc(t: ^tes
 	views: [2]Extra_View
 	for &v, i in views {
 		v = {
-			view   = {position = ecs.position_offset({}, {f32(i) * 30, 1, -4}), rotation = 1, vertical_fov = 1, near = 0.05},
+			view   = {position = ecs.position_offset({}, {f32(i) * 30, 1, -4}), rotation = 1, projection = Perspective{1, 0.05}},
 			size   = {48, 24},
 			target = targets[i],
 			state  = &states[i],
@@ -1951,7 +2013,7 @@ use_view_takes_every_field_of_an_extra_view :: proc(t: ^testing.T) {
 	settings: Frame_Settings
 	hook :: proc(_: ^Frame) {}
 	v := Extra_View {
-		view            = {rotation = 1, vertical_fov = 2, near = 0.5},
+		view            = {rotation = 1, projection = Perspective{2, 0.5}},
 		size            = {8, 4},
 		target          = {index = 3, generation = 1},
 		state           = &state,
@@ -2026,7 +2088,7 @@ the_particles_collide_again_a_frame_after_the_own_views_role_moves :: proc(t: ^t
 	views: [2]Extra_View
 	for &v, i in views {
 		v = {
-			view   = {position = ecs.position_offset({}, {f32(i) * 4, 1, 0}), rotation = 1, vertical_fov = 1, near = 0.05},
+			view   = {position = ecs.position_offset({}, {f32(i) * 4, 1, 0}), rotation = 1, projection = Perspective{1, 0.05}},
 			size   = {48, 24},
 			target = targets[i],
 			state  = &states[i],
@@ -2119,10 +2181,10 @@ the_overlay_runs_after_the_debug_hook_in_every_view_and_frame_user_is_of_one_vie
 	own, extra, other: Hook_Order
 	hidden := []u32{0b101}
 	// The same hooks and the same data for both views, as a game's are, and an overlay of its own data for each.
-	extras := [1]Extra_View{{view = {rotation = 1, vertical_fov = 1, near = 0.05}, size = {48, 24}, target = target, state = &state, hooks = ORDER_HOOKS, overlay = {&other, order_overlay}}}
+	extras := [1]Extra_View{{view = {rotation = 1, projection = Perspective{1, 0.05}}, size = {48, 24}, target = target, state = &state, hooks = ORDER_HOOKS, overlay = {&other, order_overlay}}}
 	extras[0].hooks.data = &extra
 	desc := Frame_Desc {
-		view        = {rotation = 1, vertical_fov = 1, near = 0.05},
+		view        = {rotation = 1, projection = Perspective{1, 0.05}},
 		size        = {64, 32},
 		hidden      = hidden,
 		hooks       = ORDER_HOOKS,
@@ -2175,4 +2237,170 @@ use_view_takes_the_overlay :: proc(t: ^testing.T) {
 	desc: Frame_Desc
 	use_view(&desc, v)
 	testing.expect(t, desc.overlay.data == &data && desc.overlay.draw == order_overlay)
+}
+
+// What the sprite test's hook saw of a view: its sprites' records in the order that they draw, and its passes.
+@(private = "file")
+Sprite_Capture :: struct {
+	records: [dynamic]Sheet_Sprite_Record,
+	passes:  map[string]int,
+}
+
+// The sprite renderers draw in one pass, sorted by layer, then by order, then from the farthest, each with its frame of
+// its sheet's texture, and write their IDs for the editor only when the frame keeps them.
+@(test)
+sprite_renderers_draw_sorted_by_layer_order_and_depth :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	rig := new(Rig)
+	defer free(rig)
+	rig_start(t, rig)
+	defer rig_stop(rig)
+	context.logger = {record_problems, &rig.record, .Debug, {}}
+	r, platform := rig.r, &rig.platform
+	platform.time_seconds = proc() -> f64 {return 0.1}
+	// The atlas streams in, which the other tests of the rig have no need of.
+	platform.gpu_stream_texture, platform.gpu_stream_buffer, platform.gpu_transfer_done = null.stream_texture, null.stream_buffer, null.transfer_done
+	enable_frame_pipelines(r)
+	defer platform.gpu_destroy_texture(r.blue_noise.texture)
+	code := []byte{1}
+	r.sheet_sprites.pipeline.pipeline = platform.gpu_create_graphics_pipeline({vertex = code, pixel = code, colors = {{format = SCENE_FORMAT, blend = .Premultiplied}}, depth_format = DEPTH_FORMAT, label = "test"})
+	r.sheet_sprites.ids.pipeline = platform.gpu_create_graphics_pipeline({vertex = code, pixel = code, colors = {{format = ID_FORMAT}}, depth_format = DEPTH_FORMAT, label = "test"})
+
+	// A sheet of two frames of 16 by 16 texels in a texture of 32 by 16, at 16 texels to a meter, with a walk of two
+	// frames a second.
+	atlas := format.Guid{0 = 0x51, 15 = 1}
+	sheet := format.Guid{0 = 0x51, 15 = 2}
+	write :: proc(t: ^testing.T, rig: ^Rig, guid: format.Guid, blob: []byte) {
+		buffer: [32]u8
+		testing.expect(t, os.write_entire_file(fmt.tprintf("%s/%s.blob", rig.dir, format.guid_format(guid, &buffer)), blob) == nil)
+	}
+	chain := format.texture_chain_size(.BC7_Unorm_Srgb, {32, 16}, 1)
+	write(t, rig, atlas, format.texture_write({guid = atlas, format = .BC7_Unorm_Srgb, usage = .Color, dimension = .D2, layer_count = 1, size = {32, 16}, mip_count = 1, mips = make([]byte, chain, context.temp_allocator)}, context.temp_allocator))
+	write(
+		t,
+		rig,
+		sheet,
+		format.sprite_sheet_write(
+			{
+				guid = sheet,
+				key = 1,
+				atlas = atlas,
+				atlas_size = {32, 16},
+				pixels_per_unit = 16,
+				filter = .Nearest,
+				frames = {{name = "a", rect = {0, 0, 16, 16}, pivot = {0.5, 0}}, {name = "b", rect = {16, 0, 16, 16}, pivot = {0.5, 0}}},
+				animations = {{name = "walk", frames = {0, 1}, rate = 2, loop = true}},
+				source_path = "game/hero.sprite_sheet",
+			},
+			context.temp_allocator,
+		),
+	)
+
+	spawn :: proc(w: ^ecs.World, sheet: format.Guid, z: f32, layer, order: i16) -> ecs.Entity {
+		e := ecs.spawn(w)
+		ecs.add(w, e, ecs.Transform{position = ecs.position_offset({}, {0, 0, z}), rotation = 1, scale = {2, 1, 1}})
+		sprite := DEFAULT_SPRITE_RENDERER
+		sprite.sheet, sprite.layer, sprite.order = sheet, layer, order
+		ecs.add(w, e, sprite)
+		return e
+	}
+	far := spawn(rig.w, sheet, 5, 0, 0)
+	near := spawn(rig.w, sheet, 2, 0, 0)
+	over := spawn(rig.w, sheet, 9, 0, 1)
+	top := spawn(rig.w, sheet, 9, 1, -5)
+	hidden_sprite := spawn(rig.w, sheet, 3, 0, 0)
+	clear_sprite := spawn(rig.w, sheet, 3, 0, 0)
+	ecs.get_write(rig.w, clear_sprite, Sprite_Renderer).opacity = 0
+	// One that walks, lit and snapped and flipped, half a second into its second frame.
+	walker := spawn(rig.w, sheet, 4, 2, 0)
+	walk := ecs.get_write(rig.w, walker, Sprite_Renderer)
+	walk.animation, walk.time, walk.lit, walk.pixel_snap, walk.flip_x, walk.opacity = 1, 0.6, true, true, true, 0.5
+	// A sprite of a sheet that is not cooked draws nothing, and says nothing.
+	spawn(rig.w, {0 = 0x99}, 3, 0, 0)
+
+	capture: Sprite_Capture
+	capture.records = make([dynamic]Sheet_Sprite_Record)
+	capture.passes = make(map[string]int)
+	defer delete(capture.records)
+	defer delete(capture.passes)
+	hidden := make([]u32, int(ecs.entity_index(hidden_sprite)) / 32 + 1, context.temp_allocator)
+	hidden[ecs.entity_index(hidden_sprite) / 32] |= 1 << (ecs.entity_index(hidden_sprite) % 32)
+	desc := Frame_Desc {
+		view = {rotation = 1, projection = Orthographic{10, 0.1, 100}},
+		size = {64, 32},
+		hidden = hidden,
+		keep_ids = true,
+		hooks = {
+			ui = proc(f: ^Frame) {
+				capture := (^Sprite_Capture)(f.data)
+				clear(&capture.records)
+				clear(&capture.passes)
+				if f.sheet_sprites != nil {
+					append(&capture.records, ..([^]Sheet_Sprite_Record)(raw_data(f.sheet_sprites.records.data))[:f.sheet_sprites.count])
+				}
+				for pass in f.graph.passes {
+					capture.passes[pass.name] += 1
+				}
+			},
+		},
+	}
+	desc.hooks.data = &capture
+	// The atlas streams in over the first frames.
+	for _ in 0 ..< 8 {
+		testing.expect(t, draw_frame(r, rig.w, desc))
+	}
+	ids := make([dynamic]u32, context.temp_allocator)
+	for record in capture.records {
+		append(&ids, record.id)
+	}
+	wanted := []u32{entity_id(far), entity_id(near), entity_id(over), entity_id(top), entity_id(walker)}
+	testing.expectf(t, slice.equal(ids[:], wanted), "the sprites draw as %v, want %v", ids, wanted)
+	testing.expect_value(t, capture.passes["sheet sprites"], 1)
+	testing.expect_value(t, capture.passes["sheet sprite ids"], 1)
+	if len(capture.records) == 5 {
+		// A frame of 16 texels at 16 to a meter is 1 m, twice as wide by the Transform's scale, about its pivot at the
+		// middle of its bottom, with the first frame's half of the texture.
+		first := capture.records[0]
+		testing.expect_value(t, first.center, [3]f32{0, 0, 5})
+		testing.expect_value(t, first.right, [3]f32{2, 0, 0})
+		testing.expect_value(t, first.up, [3]f32{0, 1, 0})
+		testing.expect_value(t, first.pivot, [2]f32{0.5, 0})
+		testing.expect_value(t, first.uv_rect, [4]f32{0, 0, 0.5, 1})
+		testing.expect_value(t, first.color, [4]f32{1, 1, 1, 1})
+		testing.expect_value(t, first.flags, 0)
+		testing.expect_value(t, first.sampler, gpu.sampler_index(r.sheet_sprites.samplers[.Nearest]))
+		// The walker shows its second frame, flipped, with its flags and its opacity.
+		last := capture.records[4]
+		testing.expect_value(t, last.uv_rect, [4]f32{1, 0, -0.5, 1})
+		testing.expect_value(t, last.flags, SHEET_SPRITE_LIT | SHEET_SPRITE_SNAP)
+		testing.expect_value(t, last.color.a, 0.5)
+	}
+	// While the world stands still, a sprite that the editor plays shows the frame of the host's time, and the others
+	// the frame of their own.
+	playing := [1]ecs.Entity{walker}
+	desc.playing = playing[:]
+	testing.expect(t, draw_frame(r, rig.w, desc))
+	if len(capture.records) == 5 {
+		testing.expect_value(t, capture.records[4].uv_rect, [4]f32{0.5, 0, -0.5, 1})
+	}
+	desc.playing = nil
+	// A frame that does not keep the IDs has no pass for them.
+	desc.keep_ids = false
+	testing.expect(t, draw_frame(r, rig.w, desc))
+	testing.expect_value(t, capture.passes["sheet sprites"], 1)
+	testing.expect_value(t, capture.passes["sheet sprite ids"], 0)
+	testing.expect_value(t, len(capture.records), 5)
+	// A sprite that is turned a quarter about its z draws turned about the view's axis, with its frame's shape.
+	turned := sheet_sprite_record(
+		DEFAULT_SPRITE_RENDERER,
+		{rotation = linalg.quaternion_angle_axis_f32(math.PI / 2, {0, 0, 1}), scale = 1},
+		{rect = {0, 0, 16, 32}, pivot = {0.5, 0.5}},
+		&format.Sprite_Sheet_Blob{atlas_size = {32, 32}, pixels_per_unit = 16},
+		{rotation = 1, projection = Perspective{1, 0.05}},
+		1,
+		2,
+		3,
+	)
+	testing.expect(t, linalg.length(turned.right - [3]f32{0, 1, 0}) < 1e-5 && linalg.length(turned.up - [3]f32{-2, 0, 0}) < 1e-5)
+	testing.expectf(t, len(rig.record.problems) == 0, "problems: %v", rig.record.problems)
 }

@@ -102,7 +102,9 @@ public sealed partial class EditorShell
                 view.Yaw,
                 view.Pitch,
                 view.VerticalFov,
-                view.Near);
+                view.Near,
+                view.Projection.ToString(),
+                view.OrthographicHeight);
         }
         return new CaptureContext(
             Mode.ToString(),

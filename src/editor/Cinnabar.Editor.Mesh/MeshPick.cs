@@ -53,7 +53,7 @@ public static class MeshPick
     const double DepthSlack = 0.02;
 
     /// <summary>The nearest face along a ray from the camera, or null. Back faces count only with <paramref name="through"/>.</summary>
-    public static FaceHit? Face(MeshData mesh, MeshPlacement placement, Vec3 ray, bool through = false)
+    public static FaceHit? Face(MeshData mesh, MeshPlacement placement, ViewRay ray, bool through = false)
     {
         FaceHit? best = null;
         for (var i = 0; i < mesh.Faces.Length; i++)
@@ -67,7 +67,7 @@ public static class MeshPick
     }
 
     /// <summary>Where a ray meets one face, or null when it misses it or comes from behind.</summary>
-    public static FaceHit? HitFace(MeshData mesh, MeshPlacement placement, int face, Vec3 ray, bool through)
+    public static FaceHit? HitFace(MeshData mesh, MeshPlacement placement, int face, ViewRay ray, bool through)
     {
         var corners = mesh.Faces[face].Corners;
         if (corners.Length < 3)
@@ -75,18 +75,18 @@ public static class MeshPick
             return null;
         }
         var normal = placement.NormalToView(MeshData.FaceNormal(mesh.Vertices, corners));
-        var facing = Vec3.Dot(normal, ray);
+        var facing = Vec3.Dot(normal, ray.Direction);
         if (normal == Vec3.Zero || (!through && facing >= 0) || Math.Abs(facing) < 1e-12)
         {
             return null;
         }
         var points = corners.Select(c => placement.ToView(mesh.Vertices[c])).ToArray();
-        var t = Vec3.Dot(normal, points[0]) / facing;
+        var t = Vec3.Dot(normal, points[0] - ray.Origin) / facing;
         if (t <= 0)
         {
             return null;
         }
-        var point = ray * t;
+        var point = ray.At(t);
         return Polygon2D.Inside(points, normal, point) ? new FaceHit(face, t, point) : null;
     }
 

@@ -202,6 +202,9 @@ Frame_Constants :: struct {
 	cloud_shadow_center:          [2]f32,
 	cloud_shadow_inv_extent:      f32,
 	cloud_shadow_top:             f32,
+	// The view's projection: the camera's in every view's copy, the view model's in its own, and a face's in a
+	// reflection probe's capture.
+	projection:                   View_Projection,
 }
 
 // Material_Push matches Material_Push in material_common.hlsli: the forward pass's textures that exist only once the
@@ -544,7 +547,7 @@ Cell_Range :: struct {
 }
 
 #assert(size_of(Instance_Record) == 112 && size_of(Cull_Item) == 80 && size_of(Draw_Record) == 32 && size_of(Mesh_Record) == 64)
-#assert(size_of(Cull_View) == 128 && size_of(Frame_Constants) == 896 && size_of(Cull_Constants) == 144)
+#assert(size_of(Cull_View) == 128 && size_of(Frame_Constants) == 912 && size_of(Cull_Constants) == 144)
 #assert(size_of(Instance_Set_Record) == 112 && size_of(Instance_Cull_Constants) == 112)
 
 // Gpu_Scene is the GPU scene's state between frames, in the Renderer.
@@ -915,7 +918,7 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32, skins: []Skin_Pose)
 	// docs/rendering/surfaces.md#surfaces).
 	surfaces := make([dynamic]Surface_Record, r.platform.frame_allocator)
 	camera_offset := ecs.position_sub(f.view.position, s.origin)
-	lod := lod_scale(f.view, f.size.y, f.lod_error)
+	lod, _ := lod_scale(f.view, f.size.y, f.lod_error)
 	surface_it := ecs.query_iter(w, r.surfaces.query)
 	for view in ecs.query_next(&surface_it) {
 		entities := ecs.entities(view)
@@ -959,13 +962,16 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32, skins: []Skin_Pose)
 	// Each pipeline's opaque or moment-based items are a bin, in one range of each view's draws. Each sorted item is a
 	// bin of its own, back to front from the camera by its bounds' middle, so the bins draw in that order.
 	camera := ecs.position_sub(f.view.position, s.origin)
+	_, _, forward := view_axes(f.view)
+	orthographic := is_orthographic(f.view)
 	sorting := make([]Sort_Item, len(items), r.platform.frame_allocator)
 	for item, i in items {
 		sorting[i] = {item = item, group = material_group(&r.materials.pipelines[item.bin])}
 		if sorting[i].group == .Sorted {
 			// The view model's instances are relative to the camera already.
 			eye := item.flags & ITEM_VIEW_MODEL != 0 ? [3]f32{} : camera
-			sorting[i].distance = squared_distance(s.records[item.instance].rows, item.sphere.xyz, eye)
+			// An orthographic view sorts by the depth along its axis, which is what covers what in it.
+			sorting[i].distance = orthographic ? depth_along(s.records[item.instance].rows, item.sphere.xyz, eye, forward) : squared_distance(s.records[item.instance].rows, item.sphere.xyz, eye)
 		}
 	}
 	sf.bin_pipelines, sf.groups = sort_bins(sorting, items[:], r.platform.frame_allocator)
@@ -1058,7 +1064,7 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32, skins: []Skin_Pose)
 Sort_Item :: struct {
 	item:     Cull_Item,
 	group:    Bin_Group,
-	// A sorted item's squared distance from the camera.
+	// A sorted item's squared distance from the camera, or its depth along an orthographic view's axis.
 	distance: f32,
 }
 
@@ -1180,6 +1186,16 @@ squared_distance :: proc(rows: [3][4]f32, p: [3]f32, from: [3]f32) -> f32 {
 	return d.x * d.x + d.y * d.y + d.z * d.z
 }
 
+// depth_along is how far a point of an instance is from a point, along a direction.
+@(private)
+depth_along :: proc(rows: [3][4]f32, p: [3]f32, from: [3]f32, direction: [3]f32) -> f32 {
+	depth: f32
+	for row, k in rows {
+		depth += (row.x * p.x + row.y * p.y + row.z * p.z + row.w - from[k]) * direction[k]
+	}
+	return depth
+}
+
 // upload_bytes copies data into the upload ring.
 @(private)
 upload_bytes :: proc(platform: ^core.Platform_API, data: []byte, align := 16) -> (u: gpu.Upload, ok: bool) {
@@ -1214,10 +1230,11 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 		time            = now,
 		valid           = true,
 	}
-	// The fog's injection and the voxel cones' read the camera's constants, so they are written without draws too.
+	// The fog's injection, the voxel cones' and the sprite renderers' draw read the camera's constants, so they are
+	// written without draws too.
 	has_items := len(sf.items) > 0
 	voxels := f.gi != nil ? f.gi.voxel : nil
-	if !has_items && f.fog == nil && voxels == nil {
+	if !has_items && f.fog == nil && voxels == nil && !f.wants_sheet_sprites {
 		return
 	}
 	// The voxel cones' views come after the shadow views (see Voxel_View), then a reflection probe capture's faces.
@@ -1261,7 +1278,9 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 		previous_view_model = previous.view_model
 		previous_rotation = previous.rotation
 	}
-	right, up, _ := view_axes(f.view)
+	right, up, forward := view_axes(f.view)
+	orthographic := is_orthographic(f.view)
+	camera_lod_scale, camera_lod_near := lod_scale(f.view, f.size.y, f.lod_error)
 	previous_right, previous_up, _ := view_axes({rotation = previous_rotation})
 	constants := Frame_Constants {
 		view_projection          = f.view_projection,
@@ -1297,7 +1316,8 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 		cluster_rows             = lf.rows,
 		slice_scale              = lf.slice_scale,
 		slice_bias               = lf.slice_bias,
-		near                     = f.view.near,
+		near                     = f.projection.z,
+		projection               = f.projection,
 		shadow_sampler           = gpu.sampler_index(r.shadows.sampler),
 		shadow_views             = gpu.read_index(shadows.views_upload.buffer),
 		shadow_views_offset      = shadows.views_upload.offset,
@@ -1309,8 +1329,8 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 		ltc_sampler              = gpu.sampler_index(r.lights.ltc_sampler),
 		debug_view               = u32(f.debug_view),
 		shadow_filter            = u32(shadows.params.filter),
-		lod_scale                = lod_scale(f.view, f.size.y, f.lod_error),
-		lod_near                 = f.view.near,
+		lod_scale                = camera_lod_scale,
+		lod_near                 = camera_lod_near,
 		selected_meshlets        = gpu.read_index(s.meshlet_select.selected),
 	}
 	constants.gi = u32(f.gi != nil)
@@ -1348,15 +1368,22 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 				// The view model's instances are relative to the camera already.
 				c.view_projection, c.previous_view_projection = view_model, previous_view_model
 				c.camera_offset, c.previous_camera_offset = {}, {}
-				c.near = view_model_view(f.view).near
-				c.lod_scale, c.lod_near = lod_scale(view_model_view(f.view), f.size.y, f.lod_error), c.near
+				c.projection = f.view_model_projection
+				c.near = c.projection.z
+				c.lod_scale, c.lod_near = lod_scale(view_model_view(f.view), f.size.y, f.lod_error)
 				views[v].offset, views[v].flags = {}, VIEW_MODEL
 			}
 			planes := frustum_planes(c.view_projection)
 			copy(views[v].planes[:], planes[:])
-			// The far plane is at infinity.
-			views[v].planes[5] = {0, 0, 0, 1}
-			c.cull_eye = {0, 0, 0, 1}
+			if orthographic {
+				// An orthographic view has a far plane, and looks along its axis from everywhere.
+				views[v].planes[5] = frustum_planes_6(c.view_projection)[5]
+				c.cull_eye = {forward.x, forward.y, forward.z, 0}
+			} else {
+				// The far plane is at infinity.
+				views[v].planes[5] = {0, 0, 0, 1}
+				c.cull_eye = {0, 0, 0, 1}
+			}
 			// The camera's views draw with its jitter, which the velocities leave out.
 			c.view_projection = jitter_projection(c.view_projection, f.jitter)
 			c.jitter = f.jitter
@@ -2064,12 +2091,25 @@ mesh_record :: proc(mesh: ^Resident_Mesh) -> Mesh_Record {
 	}
 }
 
+// A view without perspective has one level of detail at every distance: its distances are all this far, which no
+// point in the scene is, so an error over the distance is the error alone. The voxelization's views and an
+// orthographic camera's take it.
+LOD_FLAT_NEAR :: 1e9
+
 // lod_scale is what the mesh shader path's level of detail scales an error by, over its distance, for a view of a
 // height in pixels: the error's height on the screen, over the largest that may show (see Quality.lod_error). The mesh
-// shader path draws the coarsest level of each part of a mesh that shows at most that.
+// shader path draws the coarsest level of each part of a mesh that shows at most that. near is the least distance that
+// counts: the near plane in perspective, and LOD_FLAT_NEAR in orthographic, where a pixel is as large at every
+// distance.
 @(private)
-lod_scale :: proc(view: View, height: u32, error_pixels: f32) -> f32 {
-	return 0.5 * f32(height) / math.tan(view.vertical_fov * 0.5) / max(error_pixels, MIN_LOD_ERROR)
+lod_scale :: proc(view: View, height: u32, error_pixels: f32) -> (scale, near: f32) {
+	switch p in view.projection {
+	case Perspective:
+		return 0.5 * f32(height) / math.tan(p.vertical_fov * 0.5) / max(error_pixels, MIN_LOD_ERROR), p.near
+	case Orthographic:
+		return LOD_FLAT_NEAR * f32(height) / p.height / max(error_pixels, MIN_LOD_ERROR), LOD_FLAT_NEAR
+	}
+	return
 }
 
 // ensure_draw_buffers grows the frame's draw buffers to hold its draws in every view, and its bins' counts.

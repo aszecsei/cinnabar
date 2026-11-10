@@ -269,12 +269,11 @@ begin_gi :: proc(f: ^Frame, settings: Gi_Settings, ambient: Ambient) {
 	}
 	gf.voxel = begin_gi_voxels(f, settings)
 	right, up, forward := view_axes(f.view)
-	scale := projection_scale(f.view_projection)
 	gf.constants = {
 		right          = {right.x, right.y, right.z, 0},
 		up             = {up.x, up.y, up.z, 0},
 		forward        = {forward.x, forward.y, forward.z, 0},
-		projection     = {scale.x, scale.y, f.view.near, 0},
+		projection     = f.projection,
 		ambient        = ambient_constants(ambient),
 		lit_valid      = u32(gf.lit.valid),
 		valid          = u32(gf.diffuse.valid && gf.specular.valid),

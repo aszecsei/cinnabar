@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 using Avalonia;
 using Cinnabar.Editor.Tools;
 using Cinnabar.Editor.Viewport;
+using CameraProjection = Cinnabar.Editor.Link.Protocol.CameraProjection;
 using CaptureSource = Cinnabar.Editor.Link.Protocol.CaptureSource;
 using CloseViewport = Cinnabar.Editor.Link.Protocol.CloseViewport;
 using GameSize = Cinnabar.Editor.Link.Protocol.GameSize;
@@ -84,7 +85,9 @@ public sealed partial class EditorShell
     sealed record ViewportFile(
         List<ViewportSettings>? Viewports,
         SceneViewSet? Views = null,
-        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Layout = null);
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Layout = null,
+        // The scene views' projections, by their names, in the views' order.
+        List<string>? Projections = null);
 
     // The Game view's size when it last had one, which is the game's window size; it stays when the Game view hides.
     PixelSize? _gameSize;
@@ -95,13 +98,23 @@ public sealed partial class EditorShell
     // Makes the viewports with the user's settings, and connects each to the host.
     void CreateViewports()
     {
-        var (settings, views) = LoadViewportFile();
+        var (settings, views, projections) = LoadViewportFile();
         SceneViews = views;
         Viewports = [.. Enumerable.Range(0, EditorViewport.Max).Select(i => new EditorViewport(i, settings[i]))];
         ActiveViewport = SettingsViewport = Viewports[0];
         foreach (var viewport in Viewports)
         {
             var v = viewport;
+            // The projection that the user chose for the view. A view that has its place already takes it now, and the
+            // others when they are first shown (see EditorViewport.StartCamera).
+            if (v.HasCamera && v.Index < projections.Count && projections[v.Index] is { } projection)
+            {
+                v.Projection = projection;
+                if (v.Placed)
+                {
+                    v.Camera.SetProjection(projection);
+                }
+            }
             v.Session.Failed += message => Console.Add(LogLevel.Error, message);
             // The host renders on the adapter that composites the editor, which the first control to attach finds.
             v.Session.AdapterFound += adapter => OnAdapterFound(v, adapter);
@@ -227,6 +240,54 @@ public sealed partial class EditorShell
     /// <summary>Whether a scene view may be toggled: not when it is the only one in.</summary>
     public bool CanToggleSceneView(int index) => SceneViews != ViewBit(index);
 
+    /// <summary>The scene view that the View tab's Projection is of: the one whose settings it shows, or the active one when that is the Game view.</summary>
+    public EditorViewport ProjectionViewport => SettingsViewport.HasCamera ? SettingsViewport : ActiveViewport;
+
+    /// <summary>
+    /// Sets a scene view's projection, perspective or orthographic, the one place that chooses it: the camera changes
+    /// about its pivot, and viewport.json keeps the choice. The Game view has the game's camera, so it is refused.
+    /// </summary>
+    public bool SetProjection(EditorViewport viewport, CameraProjection projection)
+    {
+        if (!viewport.HasCamera)
+        {
+            return false;
+        }
+        var chosen = viewport.Projection != projection;
+        viewport.Projection = projection;
+        viewport.Camera.SetProjection(projection);
+        if (chosen)
+        {
+            SaveViewportFile();
+        }
+        Commands.InvalidateAll();
+        return true;
+    }
+
+    /// <summary>
+    /// Makes a scene view the 2D view: orthographic, looking along +z with +x to the right and +y up, as a 2D game's
+    /// camera looks at its scene, at the view's pivot and showing as much as it showed there. The Game view has the
+    /// game's camera, so it is refused.
+    /// </summary>
+    public bool Show2D(EditorViewport viewport)
+    {
+        if (!viewport.HasCamera)
+        {
+            return false;
+        }
+        var camera = viewport.Camera;
+        var distance = camera.IsOrthographic ? camera.OrthographicHeight / (2 * Math.Tan(camera.VerticalFov / 2)) : camera.PivotDistance;
+        var chosen = viewport.Projection != CameraProjection.Orthographic;
+        viewport.Projection = CameraProjection.Orthographic;
+        camera.LookAt(camera.Pivot, distance, 0, 0, CameraProjection.Orthographic);
+        if (chosen)
+        {
+            SaveViewportFile();
+        }
+        Commands.InvalidateAll();
+        return true;
+    }
+
     // Tells the game that a viewport is open, with what it draws it from: the camera and how it draws.
     void OpenInGame(EditorViewport viewport, PixelSize size)
     {
@@ -301,12 +362,12 @@ public sealed partial class EditorShell
     }
 
     /// <summary>The settings for the viewports and the scene views in the Scene document, from <c>viewport.json</c>.</summary>
-    (List<ViewportSettings> Settings, SceneViewSet Views) LoadViewportFile()
+    (List<ViewportSettings> Settings, SceneViewSet Views, List<CameraProjection?> Projections) LoadViewportFile()
     {
         var defaults = Enumerable.Range(0, EditorViewport.Max).Select(i => DefaultSettingsOf(i, DefaultViewportSettings)).ToList();
         if (Settings.Read(EditorSettings.ViewportFileName) is not { } json)
         {
-            return (defaults, SceneViewSet.Perspective);
+            return (defaults, SceneViewSet.Perspective, []);
         }
         try
         {
@@ -318,23 +379,28 @@ public sealed partial class EditorShell
                 // A file without the views has the earlier editor's layout: Quad is all four, anything else the first.
                 var views = file?.Views is { } kept && (kept & SceneViewSet.All) != SceneViewSet.None ? kept & SceneViewSet.All
                     : string.Equals(file?.Layout, "Quad", StringComparison.OrdinalIgnoreCase) ? SceneViewSet.All : SceneViewSet.Perspective;
-                return ([.. defaults.Select((d, i) => i < all.Count ? all[i] : d)], views);
+                return ([.. defaults.Select((d, i) => i < all.Count ? all[i] : d)], views, ProjectionsOf(file?.Projections));
             }
             // An editor with one viewport wrote that viewport's settings alone, which every viewport then starts from.
             var shared = JsonSerializer.Deserialize<ViewportSettings>(json) ?? DefaultViewportSettings;
-            return ([.. defaults.Select((_, i) => DefaultSettingsOf(i, shared))], SceneViewSet.Perspective);
+            return ([.. defaults.Select((_, i) => DefaultSettingsOf(i, shared))], SceneViewSet.Perspective, []);
         }
         catch (JsonException)
         {
             Console.Add(LogLevel.Warning, $"viewport: {Path.Combine(Settings.Directory, EditorSettings.ViewportFileName)} is not the viewports' settings, so the defaults are used");
-            return (defaults, SceneViewSet.Perspective);
+            return (defaults, SceneViewSet.Perspective, []);
         }
     }
+
+    // The projections that a file names, each null where it names none that there is, so the view keeps its own.
+    static List<CameraProjection?> ProjectionsOf(List<string>? names) =>
+        [.. (names ?? []).Select(name => Enum.TryParse<CameraProjection>(name, ignoreCase: true, out var projection) && Enum.IsDefined(projection) ? projection : (CameraProjection?)null)];
 
     // The Game view draws as a player sees it, so it starts without the editor's icons and shapes.
     static ViewportSettings DefaultSettingsOf(int index, ViewportSettings settings) =>
         index == EditorViewport.GameIndex ? settings with { ShowIcons = false, Helpers = HelperMode.None } : settings;
 
     void SaveViewportFile() =>
-        WriteSetting("viewport", EditorSettings.ViewportFileName, JsonSerializer.Serialize(new ViewportFile([.. Viewports.Select(v => v.Settings)], SceneViews)));
+        WriteSetting("viewport", EditorSettings.ViewportFileName, JsonSerializer.Serialize(new ViewportFile([.. Viewports.Select(v => v.Settings)], SceneViews,
+            Projections: [.. Viewports.Where(v => v.HasCamera).Select(v => v.Projection.ToString())])));
 }

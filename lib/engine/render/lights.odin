@@ -141,7 +141,8 @@ Cluster_Constants :: struct {
 	probes_offset: u32,
 	probe_count:   u32,
 	probe_clusters: u32,
-	padding:       u32,
+	// The view's far plane when it is orthographic, and 0 otherwise.
+	far:           f32,
 }
 
 #assert(size_of(Cluster_Constants) == 144)
@@ -237,16 +238,27 @@ cluster_grid :: proc(size: [2]u32) -> (columns, rows: u32) {
 }
 
 // cluster_slice is the depth slice of a view depth, as cluster_of in material_lighting.hlsli finds it: slices are
-// exponential from the near plane to CLUSTER_FAR.
-cluster_slice :: proc(depth, near: f32) -> int {
-	scale, bias := slice_constants(near)
-	return int(clamp(math.log2(depth) * scale + bias, 0, CLUSTER_SLICES - 1))
+// exponential from the near plane to CLUSTER_FAR in perspective, and even from the near plane to the far plane in
+// orthographic.
+cluster_slice :: proc(depth: f32, projection: Projection) -> int {
+	scale, bias := slice_constants(projection)
+	_, orthographic := projection.(Orthographic)
+	return int(clamp((orthographic ? depth : math.log2(depth)) * scale + bias, 0, CLUSTER_SLICES - 1))
 }
 
+// slice_constants are what a view depth's slice is found with: log2(depth) * scale + bias in perspective, and
+// depth * scale + bias in orthographic (see slice_of in view_projection.hlsli).
 @(private)
-slice_constants :: proc(near: f32) -> (scale, bias: f32) {
-	scale = CLUSTER_SLICES / math.log2(CLUSTER_FAR / near)
-	return scale, -math.log2(near) * scale
+slice_constants :: proc(projection: Projection) -> (scale, bias: f32) {
+	switch p in projection {
+	case Perspective:
+		scale = CLUSTER_SLICES / math.log2(CLUSTER_FAR / p.near)
+		return scale, -math.log2(p.near) * scale
+	case Orthographic:
+		scale = CLUSTER_SLICES / max(p.far - p.near, 1e-6)
+		return scale, -p.near * scale
+	}
+	return
 }
 
 // extract_lights writes the frame's lights relative to the camera, the directional ones first, and leaves out those
@@ -393,7 +405,7 @@ extract_lights :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32) -> ^Light_Frame 
 		log.warnf("render: more than %d lights; the rest are left out", MAX_LIGHTS)
 	}
 	lf.columns, lf.rows = cluster_grid(f.size)
-	lf.slice_scale, lf.slice_bias = slice_constants(f.view.near)
+	lf.slice_scale, lf.slice_bias = slice_constants(f.view.projection)
 	return lf
 }
 
@@ -459,12 +471,12 @@ upload_lights :: proc(f: ^Frame) {
 	}
 	(^u32)(raw_data(lf.zero.data))^ = 0
 	right, up, forward := view_axes(f.view)
-	scale := projection_scale(f.view_projection)
 	constants := Cluster_Constants {
 		right         = {right.x, right.y, right.z, 0},
 		up            = {up.x, up.y, up.z, 0},
 		forward       = {forward.x, forward.y, forward.z, 0},
-		projection    = {scale.x, scale.y, f.view.near, lf.slice_scale},
+		projection    = {f.projection.x, f.projection.y, f.projection.z, lf.slice_scale},
+		far           = f.projection.w,
 		size          = {f32(f.size.x), f32(f.size.y)},
 		columns       = lf.columns,
 		rows          = lf.rows,
@@ -521,8 +533,8 @@ add_cluster_passes :: proc(f: ^Frame) {
 	}
 }
 
-// projection_scale is a projection's x and y scales: a view-space x maps to x * scale.x / z in normalized device
-// coordinates.
+// projection_scale is a perspective projection's x and y scales: a view-space x maps to x * scale.x / z in normalized
+// device coordinates. What draws in an orthographic view too takes Frame.projection.
 @(private)
 projection_scale :: proc(view_projection: matrix[4, 4]f32) -> [2]f32 {
 	// The rotation keeps each row's length, so the rows' lengths are the scales.

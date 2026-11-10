@@ -342,6 +342,7 @@ public sealed class MainWindow : Window
             Link.Cook.AssetTemplate.Effect => ("New Effect", "effect"),
             Link.Cook.AssetTemplate.AnimationGraph => ("New Animation Graph", "animation graph"),
             Link.Cook.AssetTemplate.Ui => ("New UI Document", "UI document"),
+            Link.Cook.AssetTemplate.SpriteSheet => ("New Sprite Sheet", "sprite sheet"),
             _ => ("New Folder", "folder"),
         };
         var place = folder.Display;

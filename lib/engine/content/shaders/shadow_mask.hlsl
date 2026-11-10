@@ -2,6 +2,7 @@
 // four lights, against the GPU scene's acceleration structure. Each channel holds one light's result: 1 lit, 0 in
 // shadow. Pixels with no surface are lit.
 #include "cinnabar.hlsli"
+#include "view_projection.hlsli"
 #include "ray_scene.hlsli"
 
 // Matches Mask_Constants in lib/engine/render/shadows.odin. The view's axes and its projection rebuild each pixel's
@@ -13,7 +14,7 @@ struct Mask_Constants {
 	float4 right;
 	float4 up;
 	float4 forward;
-	// The x and y scales and the near plane of the camera's projection, and of the view model's.
+	// The camera's projection, and the view model's (see view_projection.hlsli).
 	float4 projection;
 	float4 view_model_projection;
 	float4 camera_offset;
@@ -74,13 +75,13 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	if (depth > 0) {
 		// The pixel's position relative to the camera, from its view depth.
 		bool view_model = (cn_stencil_texture(constants.stencil).Load(int3(id.xy, 0)).g & VIEW_MODEL_STENCIL) != 0;
-		float3 projection = view_model ? constants.view_model_projection.xyz : constants.projection.xyz;
-		float z = projection.z / depth;
+		float4 projection = view_model ? constants.view_model_projection : constants.projection;
+		float z = view_z(projection, depth);
 		// The depth is the surface's where the jittered projection put the pixel's center, so the position is rebuilt
 		// there. At the unjittered center, a sloped surface's point would be off its plane by the jitter times the
 		// slope, far more than the hair below.
 		float2 ndc = float2((id.x + 0.5) / constants.size.x * 2 - 1, 1 - (id.y + 0.5) / constants.size.y * 2) - constants.jitter;
-		float2 xy = ndc / projection.xy * z;
+		float2 xy = view_position(projection, ndc, z).xy;
 		float3 p = constants.right.xyz * xy.x + constants.up.xyz * xy.y + constants.forward.xyz * z;
 		float3 normal = octahedral(cn_texture(constants.normals).Load(int3(id.xy, 0)).xy);
 		// The ray starts off the surface along the normal by a hair: enough for the precision of the depth, of the

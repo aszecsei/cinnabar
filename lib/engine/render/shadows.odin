@@ -154,13 +154,14 @@ shadows_destroy :: proc(s: ^Shadow_Passes, platform: ^core.Platform_API) {
 
 // cascade_splits are the view depths at which count cascades end: between even and exponential splits of the range
 // from the near plane to distance, lambda of the way to exponential. The splits past count repeat the last, so no
-// depth reaches a cascade past it.
+// depth reaches a cascade past it. A lambda of 0 gives even splits, which an orthographic view takes: a near plane of
+// 0 has no exponential splits.
 cascade_splits :: proc(near: f32, distance: f32 = SHADOW_DISTANCE, lambda: f32 = SHADOW_SPLIT_LAMBDA, count := SHADOW_CASCADES) -> (splits: [SHADOW_CASCADES]f32) {
 	far := max(distance, near * 2)
 	n := clamp(count, 1, SHADOW_CASCADES)
 	for &split, i in splits {
 		t := f32(min(i + 1, n)) / f32(n)
-		exponential := near * math.pow(far / near, t)
+		exponential := lambda > 0 ? near * math.pow(far / near, t) : 0
 		even := near + (far - near) * t
 		split = lambda * exponential + (1 - lambda) * even
 	}
@@ -349,21 +350,25 @@ slot_viewport :: proc(p: Shadow_Params, slot: int, size: int) -> (pixels: [4]u32
 @(private = "file")
 add_cascades :: proc(f: ^Frame, sf: ^Shadow_Frame, direction: [3]f32) {
 	s := f.shadow_settings
-	splits := cascade_splits(f.view.near, s.distance > 0 ? s.distance : SHADOW_DISTANCE, s.split_lambda, sf.params.cascades)
+	start := view_near(f.view)
+	distance := s.distance > 0 ? s.distance : SHADOW_DISTANCE
+	lambda := s.split_lambda
+	// An orthographic view's cascades split evenly what it shows, up to the shadows' distance past its near plane.
+	if o, orthographic := f.view.projection.(Orthographic); orthographic {
+		distance, lambda = min(start + distance, o.far), 0
+	}
+	splits := cascade_splits(start, distance, lambda, sf.params.cascades)
 	sf.cascade_splits = splits
 	right, up, forward := view_axes(f.view)
-	scale := projection_scale(f.view_projection)
 	light_right, light_up := light_basis(direction)
 	camera_offset := ecs.position_sub(f.view.position, f.renderer.scene.origin)
-	start := f.view.near
 	for split, c in splits[:sf.params.cascades] {
 		// The slice's corners, relative to the camera, and the sphere around them.
 		corners: [8][3]f32
 		for &corner, k in corners {
 			z := k < 4 ? start : split
-			x := (k & 1 != 0 ? 1 : -1) * z / scale.x
-			y := (k & 2 != 0 ? 1 : -1) * z / scale.y
-			corner = right * x + up * y + forward * z
+			v := view_corner(f.projection, {k & 1 != 0 ? 1 : -1, k & 2 != 0 ? 1 : -1}, z)
+			corner = right * v.x + up * v.y + forward * v.z
 		}
 		center: [3]f32
 		for corner in corners {
@@ -525,16 +530,13 @@ trace_shadow_mask :: proc(ctx: ^Pass_Context) {
 		return
 	}
 	right, up, forward := view_axes(f.view)
-	scale := projection_scale(f.view_projection)
-	view_model := view_model_view(f.view)
-	view_model_scale := projection_scale(view_projection(view_model, f32(f.size.x) / f32(max(f.size.y, 1))))
 	offset := ecs.position_sub(f.view.position, f.renderer.scene.origin)
 	constants := Mask_Constants {
 		right         = {right.x, right.y, right.z, 0},
 		up            = {up.x, up.y, up.z, 0},
 		forward       = {forward.x, forward.y, forward.z, 0},
-		projection    = {scale.x, scale.y, f.view.near, 0},
-		view_model    = {view_model_scale.x, view_model_scale.y, view_model.near, 0},
+		projection    = f.projection,
+		view_model    = f.view_model_projection,
 		camera_offset = {offset.x, offset.y, offset.z, 0},
 		light_index   = {max(u32), max(u32), max(u32), max(u32)},
 		depth         = gpu.read_index(gpu_texture(g, f.depth)),

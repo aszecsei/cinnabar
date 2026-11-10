@@ -1,0 +1,4 @@
+# cinnabar asset metadata. Keep this file next to its asset (see docs/content/identity-and-cooking.md#identity).
+guid = 6f1c2a9e4b7d4c0e9a3f5d8b1e2c7a41
+usage = color
+standalone = false

@@ -103,6 +103,26 @@ public sealed partial class EditorShell
                 {
                     return new AutomationResponse(request.Id, false, Error: refusal);
                 }
+                // The 2D view is a place and a projection of the view's camera.
+                if (changes.Remove("view2d", out var view2d) && view2d.ValueKind == System.Text.Json.JsonValueKind.True)
+                {
+                    if (AutomationViewport(request, scene: true) is not { } flat || !Show2D(flat))
+                    {
+                        return new AutomationResponse(request.Id, false, Error: $"viewport {request.Viewport} has no editor camera to make the 2D view");
+                    }
+                }
+                // The projection is the view's camera's, not one of its settings.
+                if (changes.Remove("projection", out var projection))
+                {
+                    if (!Enum.TryParse<CameraProjection>(projection.ToString(), ignoreCase: true, out var chosenProjection) || !Enum.IsDefined(chosenProjection))
+                    {
+                        return new AutomationResponse(request.Id, false, Error: $"unknown projection {projection}; the projections are {string.Join(", ", Enum.GetNames<CameraProjection>())}");
+                    }
+                    if (AutomationViewport(request, scene: true) is not { } view || !SetProjection(view, chosenProjection))
+                    {
+                        return new AutomationResponse(request.Id, false, Error: $"viewport {request.Viewport} has no editor camera to set the projection of");
+                    }
+                }
                 if (AutomationViewport(request, scene: false) is not { } target)
                 {
                     return new AutomationResponse(request.Id, false, Error: $"viewport {request.Viewport} is not one of the viewports, 0 to {Viewports.Count - 1}");

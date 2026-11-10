@@ -233,15 +233,18 @@ public sealed partial class MeshToolRunner
     }
 
     // Where along a segment the camera's ray passes nearest, 0 at a and 1 at b.
-    static double AlongRay(Vec3 a, Vec3 b, Vec3 ray)
+    static double AlongRay(Vec3 a, Vec3 b, ViewRay ray)
     {
         var d = b - a;
-        var denominator = Vec3.Dot(d, d) - Vec3.Dot(d, ray) * Vec3.Dot(d, ray);
+        var along = ray.Direction;
+        // The segment's start, from where the ray starts.
+        var from = a - ray.Origin;
+        var denominator = Vec3.Dot(d, d) - Vec3.Dot(d, along) * Vec3.Dot(d, along);
         if (denominator < 1e-12)
         {
             return 0;
         }
-        return Math.Clamp((Vec3.Dot(a, ray) * Vec3.Dot(d, ray) - Vec3.Dot(a, d)) / denominator, 0, 1);
+        return Math.Clamp((Vec3.Dot(from, along) * Vec3.Dot(d, along) - Vec3.Dot(from, d)) / denominator, 0, 1);
     }
 
     bool AddPlanePoint(Vec2 pixel)

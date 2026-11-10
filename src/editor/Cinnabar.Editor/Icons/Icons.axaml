@@ -53,6 +53,7 @@
     <StreamGeometry x:Key="Icon.prefab">F0 M3 3H21V21H3ZM4.5 4.5V19.5H19.5V4.5ZM8 8H16V16H8Z</StreamGeometry>
     <!-- Not from Fluent: a sound, a speaker with a wave. -->
     <StreamGeometry x:Key="Icon.ui-document">M3 4H21V20H3ZM4.5 5.5V18.5H19.5V5.5ZM6 7H18V9H6ZM6 14H13V17H6Z</StreamGeometry>
+    <StreamGeometry x:Key="Icon.sprite-sheet">M3 3H21V21H3ZM4.5 4.5V11.25H11.25V4.5ZM12.75 4.5V11.25H19.5V4.5ZM4.5 12.75V19.5H11.25V12.75ZM12.75 12.75V19.5H19.5V12.75Z</StreamGeometry>
     <StreamGeometry x:Key="Icon.font">M11 3H13L20 21H17.8L16 16.5H8L6.2 21H4ZM8.8 14.5H15.2L12 6.2Z</StreamGeometry>
     <StreamGeometry x:Key="Icon.audio">M3 9H7L12 4V20L7 15H3ZM4.5 10.5V13.5H7.6L10.5 16.4V7.6L7.6 10.5ZM15 8.2C16.3 9 17 10.4 17 12C17 13.6 16.3 15 15 15.8L14.2 14.5C15.1 14 15.5 13.1 15.5 12C15.5 10.9 15.1 10 14.2 9.5ZM17 4.8C19.6 6.2 21.5 8.9 21.5 12C21.5 15.1 19.6 17.8 17 19.2L16.2 17.9C18.4 16.7 20 14.5 20 12C20 9.5 18.4 7.3 16.2 6.1Z</StreamGeometry>
     <!-- Not from Fluent: an instance set, the poses of a point instancer, a scatter of points. -->

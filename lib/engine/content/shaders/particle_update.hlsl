@@ -82,7 +82,8 @@ void collide(inout Particle p, Emitter_Record e, float4 values, float dt) {
 		return;
 	}
 	float4 clip = mul(constants.previous_view_projection, float4(p.position + e.previous_anchor, 1));
-	if (clip.w <= constants.near) {
+	float depth = clip_view_z(float4(0, 0, constants.near, constants.far), clip);
+	if (clip.w <= 0 || depth <= constants.near) {
 		return;
 	}
 	float2 uv = clip.xy / clip.w * float2(0.5, -0.5) + 0.5;
@@ -91,7 +92,7 @@ void collide(inout Particle p, Emitter_Record e, float4 values, float dt) {
 	}
 	float4 surface = cn_texture(constants.history).Load(int3(uv * constants.history_size, 0));
 	float thickness = max(0.3, length(p.velocity) * dt * 2);
-	float behind = clip.w - surface.w;
+	float behind = depth - surface.w;
 	if (behind < 0 || behind > thickness) {
 		return;
 	}

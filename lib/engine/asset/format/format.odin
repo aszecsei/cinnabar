@@ -220,6 +220,9 @@ Asset_Kind :: enum u32 {
 	Font,
 	// A tree of boxes, text and images with named styles, which a Ui_Document puts on the screen.
 	Ui,
+	// The frames of a texture and the animations that play them, which a Sprite_Renderer draws. The atlas of a sheet that
+	// the cooker packs is a Texture sub-asset.
+	Sprite_Sheet,
 }
 
 // Slice is a range of a blob, in bytes from the blob's start.

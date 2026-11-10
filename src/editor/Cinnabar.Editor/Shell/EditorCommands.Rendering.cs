@@ -1,5 +1,6 @@
 using Cinnabar.Editor.Commands;
 using Cinnabar.Editor.Docking;
+using CameraProjection = Cinnabar.Editor.Link.Protocol.CameraProjection;
 
 namespace Cinnabar.Editor.Shell;
 
@@ -66,6 +67,18 @@ static partial class EditorCommands
         {
             Description = "Choose which views the Scene shows: one, two side by side, or the four. The toggles next to it put one view in or out.",
             Icon = "viewport",
+        });
+        commands.Register(ChoiceCommand.ForEnum(ViewProjection, "Projection",
+            () => shell.ProjectionViewport.HasCamera ? shell.ProjectionViewport.Camera.Projection : CameraProjection.Perspective,
+            projection => shell.SetProjection(shell.ProjectionViewport, projection),
+            description: "Draw the view with perspective, or without it, as a plan or an elevation, or a 2D scene, is drawn. Orbiting an orthographic view makes it a perspective one.",
+            icon: "viewport",
+            canExecuteWhen: () => shell.ProjectionViewport.HasCamera));
+        commands.Register(new Command(View2D, "2D View", () => shell.Show2D(shell.ProjectionViewport))
+        {
+            Description = "Look at the scene as a 2D game's camera does: without perspective, along +z, with +x to the right and +y up.",
+            Icon = "viewport",
+            CanExecuteWhen = () => shell.ProjectionViewport.HasCamera,
         });
         for (var i = 0; i < EditorViewport.SceneViews; i++)
         {

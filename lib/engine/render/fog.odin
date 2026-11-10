@@ -72,7 +72,8 @@ Integrate_Push :: struct {
 	slices:      [2]f32,
 	screen_size: [2]f32,
 	slice_count: u32,
-	padding:     u32,
+	// Whether the view is orthographic, whose slices are even.
+	orthographic: u32,
 }
 
 // Background_Push matches Push in fog_background.hlsl.
@@ -157,7 +158,7 @@ begin_fog :: proc(f: ^Frame, fog: Fog_Settings) {
 	}
 	f.state.fog_frame += 1
 	right, up, forward := view_axes(f.view)
-	scale := projection_scale(f.view_projection)
+	scale := f.projection.xy
 	ff := new(Fog_Frame, platform.frame_allocator)
 	ff^ = {
 		traced = traced,
@@ -262,7 +263,7 @@ run_fog_integrate :: proc(ctx: ^Pass_Context) {
 	f := (^Frame)(ctx.data)
 	ff := f.fog
 	g := ctx.graph
-	scale, bias := slice_constants(f.view.near)
+	scale, bias := slice_constants(f.view.projection)
 	push := Integrate_Push {
 		input       = gpu.read_index(gpu_texture(g, ff.history.current)),
 		output      = gpu.write_index(gpu_texture(g, ff.volume)),
@@ -271,6 +272,7 @@ run_fog_integrate :: proc(ctx: ^Pass_Context) {
 		slices      = {scale, bias},
 		screen_size = {f32(f.size.x), f32(f.size.y)},
 		slice_count = ff.grid.z,
+		orthographic = u32(is_orthographic(f.view)),
 	}
 	gpu.cmd_set_pipeline(ctx.cb, f.renderer.fog.integrate.pipeline)
 	gpu.cmd_push_constants(ctx.cb, &push)

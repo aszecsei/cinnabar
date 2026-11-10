@@ -140,6 +140,8 @@ Debug_View_Push :: struct {
 	mask_channels: u32,
 	// The source's texels are this many pixels on a side, as the clouds' are: 1 for the others.
 	divisor:       u32,
+	// The far plane of an orthographic view, and 0 otherwise.
+	far:           f32,
 }
 
 // Debug_View_Frame is the pass of a view from the frame's textures, in frame memory.
@@ -214,7 +216,8 @@ run_debug_view :: proc(ctx: ^Pass_Context) {
 		output   = gpu.write_index(gpu_texture(g, dv.output)),
 		exposure = gpu.read_index(gpu_buffer(g, f.exposure)),
 		size     = f.size,
-		near     = f.view.near,
+		near     = f.projection.z,
+		far      = f.projection.w,
 		divisor  = 1,
 	}
 	if f.shadows != nil {

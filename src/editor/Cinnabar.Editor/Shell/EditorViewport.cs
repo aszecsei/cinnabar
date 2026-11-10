@@ -2,6 +2,7 @@ using Avalonia;
 using Cinnabar.Editor.Docking;
 using Cinnabar.Editor.Tools;
 using Cinnabar.Editor.Viewport;
+using CameraProjection = Cinnabar.Editor.Link.Protocol.CameraProjection;
 using ViewportKind = Cinnabar.Editor.Link.Protocol.ViewportKind;
 using ViewportSettings = Cinnabar.Editor.Link.Protocol.ViewportSettings;
 
@@ -55,6 +56,7 @@ public sealed class EditorViewport
         _camera = IsGame ? null : new EditorCamera();
         Settings = settings;
         Start = IsGame ? SceneViewStart.Perspective : (SceneViewStart)index;
+        Projection = Start == SceneViewStart.Perspective ? CameraProjection.Perspective : CameraProjection.Orthographic;
         // The first scene view starts at the origin. The others start from its pivot when they are first shown.
         Placed = index == 0 || IsGame;
         // A camera that has moved has a place, whoever moved it.
@@ -115,9 +117,15 @@ public sealed class EditorViewport
     }
 
     /// <summary>
+    /// The projection that the user chose for this view, which viewport.json keeps: orthographic for Top, Front and
+    /// Side until they choose, and perspective for the first. The camera has it from <see cref="StartCamera"/> on,
+    /// until it orbits or looks around, which makes it a perspective camera without changing the choice.
+    /// </summary>
+    public CameraProjection Projection { get; internal set; }
+
+    /// <summary>
     /// Puts the camera where this view starts, from the first scene view's camera: the same pivot at the same distance,
-    /// looking along the view's axis, so every view frames the same spot. All of them are perspective cameras that the user
-    /// can fly.
+    /// looking along the view's axis, with the view's projection, so every view frames the same spot.
     /// </summary>
     internal void StartCamera(EditorCamera first)
     {
@@ -128,6 +136,8 @@ public sealed class EditorViewport
             SceneViewStart.Side => (-Math.PI / 2, 0.0),
             _ => (first.Yaw, first.Pitch),
         };
-        Camera.LookAt(first.Pivot, first.PivotDistance, yaw, pitch);
+        // What the first view shows at its pivot, whatever its own projection is.
+        var distance = first.IsOrthographic ? first.OrthographicHeight / (2 * Math.Tan(first.VerticalFov / 2)) : first.PivotDistance;
+        Camera.LookAt(first.Pivot, distance, yaw, pitch, Projection);
     }
 }

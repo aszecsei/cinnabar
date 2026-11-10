@@ -34,7 +34,7 @@ A component refers to an asset by GUID, in a `format.Guid` field with an `asset`
 
 ## Components
 
-- **`Camera`** (stable ID 32): the vertical field of view in radians and the near plane in meters; 0 in either means 60° or 5 cm. Also the view model's field of view and near plane, 0 for the camera's own (see [View model](layers-and-output.md#view-model)). The camera's pose is its entity's presented `Transform`, and `render.camera_view` gives the view. `Game_State` holds the active camera's entity, as world-wide state (see [World](../world/README.md)). The game's view comes from it, unless an editor is linked (see [Editor](../editor/viewport.md#viewport)).
+- **`Camera`** (stable ID 32): the vertical field of view in radians and the near plane in meters; 0 in either means 60° or 5 cm. Also the view model's field of view and near plane, 0 for the camera's own (see [View model](layers-and-output.md#view-model)). `projection` makes it orthographic, with `orthographic_height` and `far` in meters (see [Orthographic views](frame.md#orthographic-views)). The camera's pose is its entity's presented `Transform`, and `render.camera_view` gives the view. `Game_State` holds the active camera's entity, as world-wide state (see [World](../world/README.md)). The game's view comes from it, unless an editor is linked (see [Editor](../editor/viewport.md#viewport)).
 - **`Mesh_Renderer`** (stable ID 33): a mesh, a material or instance for each of its mesh's first `MAX_MATERIAL_SLOTS` (8) submeshes (`materials.0` and on), and whether it casts shadows. `render.register_components` registers both. The renderer draws every `Mesh_Renderer` through the [GPU scene](gpu-scene.md#gpu-scene).
 - **`Directional_Light`** (stable ID 34): a color, an intensity and whether it casts shadows. It shines along its entity's +z.
 - **`Point_Light`** (35): a color, an intensity, a range in meters, and whether it casts shadows.
@@ -46,5 +46,6 @@ A component refers to an asset by GUID, in a `format.Guid` field with an `asset`
 - **`View_Model`** (37): a tag that makes a `Mesh_Renderer` part of the view model (see [View model](layers-and-output.md#view-model)).
 - **`Surface_Renderer`** (51): a patch surface's size, material, hole mask, finest cell, height range and whether it casts shadows (see [Surfaces](surfaces.md#surfaces)).
 - **`Particle_System`** (52): an effect, whether it is paused, and a scale of its rates (see [Particles](particles.md#systems)).
+- **`Sprite_Renderer`** (56): a sprite sheet, the frame or the animation of it that shows, a color, a layer and an order, and whether it is lit and snapped to pixels (see [2D](2d.md#sprite-renderers)).
 - **`Reflection_Probe`** (54): an influence box, its fade, a projection box, a priority, an intensity and when it captures again (see [Reflection probes](lighting-and-shadows.md#reflection-probes)).
 - **The settings components** (38, 43 to 50 and 55), which volumes carry (see [Settings](frame.md#settings)).

@@ -97,6 +97,9 @@ public sealed class ContentTests : IDisposable
         using var shell = NewShell();
         shell.Content.SelectContent(new ContentFolder("game", ""), []);
         Assert.Equal("new_animation_graph", shell.Content.NewName(AssetTemplate.AnimationGraph));
+        Assert.Equal("new_sprite_sheet", shell.Content.NewName(AssetTemplate.SpriteSheet));
+        // A sprite sheet is among the textures in the content browser.
+        Assert.Equal(ContentKind.Textures, ContentBrowserModel.KindOf(AssetKind.SpriteSheet));
 
         var graph = TestAssets.Make("44445555666677778888999900001111", AssetKind.AnimationGraph, "fox.animation_graph");
         Assert.True(EditorShell.CanOpen(graph));

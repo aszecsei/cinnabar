@@ -251,7 +251,7 @@ begin_screen_reflections :: proc(f: ^Frame, settings: Reflection_Settings) {
 		right         = {right.x, right.y, right.z, 0},
 		up            = {up.x, up.y, up.z, 0},
 		forward       = {forward.x, forward.y, forward.z, 0},
-		projection    = {scale.x, scale.y, f.view.near, 0},
+		projection    = {scale.x, scale.y, view_near(f.view), 0},
 		lit_valid     = u32(sf.lit.valid),
 		noise         = gpu.read_index(noise),
 		frame         = s.frame,

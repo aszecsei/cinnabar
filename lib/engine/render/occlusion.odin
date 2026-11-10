@@ -222,7 +222,8 @@ occlusion_constants :: proc(f: ^Frame) -> bool {
 		slot_seen       = gpu.read_index(o.slot_seen[1 - this]),
 		slot_seen_next  = gpu.write_index(o.slot_seen[this]),
 		cell_seen       = gpu.write_index(o.cell_seen),
-		near            = f.view.near * 0.5,
+		// An orthographic view's w is 1 everywhere, and its near plane clips what is behind it.
+		near            = is_orthographic(f.view) ? 0 : view_near(f.view) * 0.5,
 	}
 	for t, i in o.hzb[:o.hzb_levels] {
 		c.hzb[i] = gpu.read_index(t)

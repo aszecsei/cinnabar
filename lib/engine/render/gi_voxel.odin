@@ -31,9 +31,6 @@ VOXEL_BYTES :: 4 * 4 + 8
 // The tangents of the half angles of the cone along a reflection and of the shadows' cones.
 VOXEL_SPECULAR_APERTURE :: 0.12
 VOXEL_SHADOW_APERTURE :: 0.03
-// A voxelization view's level of detail is as fine as half its voxel, at every distance: its distances are all this far,
-// which no point in the scene is, so the mesh shader path's error over the distance is the error alone.
-VOXEL_LOD_NEAR :: 1e9
 
 // Gi_Voxel_Params are the voxel cones at a level. Level 0's voxels are 2^voxel meters, and there are levels of res^3
 // voxels. cones are the diffuse cones that each pixel traces (see voxel_cones). The pixels' histories hold at most
@@ -485,8 +482,8 @@ voxel_view_constants :: proc(c: ^Frame_Constants, view: Voxel_View, res: u32) {
 	c.view_projection = view.view_projection
 	c.previous_view_projection = view.view_projection
 	c.cluster_view_projection = view.view_projection
-	c.lod_near = VOXEL_LOD_NEAR
-	c.lod_scale = VOXEL_LOD_NEAR * 2 / view.size
+	c.lod_near = LOD_FLAT_NEAR
+	c.lod_scale = LOD_FLAT_NEAR * 2 / view.size
 	c.voxel_draw = 1
 	c.voxel_res = res
 	c.voxel_size = view.size

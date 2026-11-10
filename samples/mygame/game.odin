@@ -26,6 +26,7 @@ import "cinnabar:engine/physics"
 import "cinnabar:engine/project"
 import "cinnabar:engine/render"
 import "cinnabar:engine/scene"
+import "cinnabar:engine/sprite"
 import "cinnabar:engine/ui"
 import "cinnabar:engine/script"
 import "cinnabar:engine/volume"
@@ -62,6 +63,8 @@ ANIMATION_SCENE_META :: #load("content/scenes/animation.scene.meta", string)
 CUBE_SKY_SCENE_META :: #load("content/scenes/cube_sky.scene.meta", string)
 // The audio scene, a hum that moves behind a wall, over a long sound that streams (see docs/audio/design.md#the-sample).
 AUDIO_SCENE_META :: #load("content/scenes/audio.scene.meta", string)
+// The 2D scene, sprites under an orthographic camera (see docs/rendering/2d.md#sprite-renderers).
+SPRITES_SCENE_META :: #load("content/scenes/sprites.scene.meta", string)
 // The array that tints the large triangles, a layer for each (see docs/content/kinds/textures.md#cube-maps-and-arrays).
 TRIANGLE_TINTS_META :: #load("content/textures/cube/tints.texture_set.meta", string)
 
@@ -210,7 +213,7 @@ Game_State :: struct {
 	// F8 cycles the output mode for this run, until the settings' files change.
 	output_override:    Maybe(gpu.Output_Request),
 	// F7 cycles the main scene, the glass scene, the surfaces scene, the room scene, the billboards scene, the animation
-	// scene and the cube map scene.
+	// scene, the cube map scene, the audio scene and the 2D scene.
 	scene_index:        u8,
 	elapsed:            time.Duration,
 	// The time that the world stepped this frame, in seconds, which the particles step by.
@@ -237,6 +240,8 @@ Game_State :: struct {
 	audio:              audio.State,
 	// The Animators' queries, which the fixed ticks advance (see docs/content/kinds/skins-and-animations.md#playback).
 	animation:          anim.State,
+	// The Sprite_Renderers' animations (see docs/rendering/2d.md#animation).
+	sprites:            sprite.State,
 	// The HUD and the pause menu, documents on the main scene's entities (see docs/ui/design.md#the-frame).
 	ui:                 ui.State,
 	// The pause menu stops the world's time, while scripts and the UI run on.
@@ -457,6 +462,7 @@ register_world :: proc(s: ^Game_State) {
 	register_components(&w.registry)
 	physics.register(&s.physics, w)
 	anim.register(&s.animation, w, &s.assets)
+	sprite.register(&s.sprites, w, &s.assets)
 	ecs.register_system(w, {name = "spin", stage = .Fixed, procedure = spin, terms = {ecs.write(w, ecs.Transform), ecs.read(w, Spin)}})
 	s.triangles = render.extractor(w, {ecs.read(w, Triangle)})
 }
@@ -482,6 +488,7 @@ register_scripts :: proc(r: ^script.Runtime) {
 	physics.register_scripts(r, &container_of(r, Game_State, "scripts").physics)
 	audio.register_scripts(r, &container_of(r, Game_State, "scripts").audio)
 	anim.register_scripts(r, &container_of(r, Game_State, "scripts").animation)
+	sprite.register_scripts(r, &container_of(r, Game_State, "scripts").sprites)
 	ui.register_scripts(r, &container_of(r, Game_State, "scripts").ui)
 	script.define(r, "Game.set_paused", proc(L: ^luau.State) -> c.int {
 		luau.L_checktype(L, 1, .BOOLEAN)
@@ -636,7 +643,7 @@ camera_view :: proc(s: ^Game_State) -> render.View {
 	if view, ok := render.camera_view(&s.world, s.camera); ok {
 		return view
 	}
-	return {rotation = 1, vertical_fov = render.DEFAULT_VERTICAL_FOV, near = render.DEFAULT_NEAR}
+	return {rotation = 1, projection = render.Perspective{render.DEFAULT_VERTICAL_FOV, render.DEFAULT_NEAR}}
 }
 
 // end_frame lets the frame's animation graphs go, then swaps the blobs that the cooker rewrote, and reloads the scripts
@@ -713,6 +720,8 @@ before_world :: proc(f: ^render.Frame) {
 		frame.pass_constants = pass
 		aspect := f32(f.size.x) / f32(max(f.size.y, 1))
 		right, up, forward := render.view_axes(f.view)
+		// The sample's traced shadows are for a perspective camera.
+		perspective, _ := f.view.projection.(render.Perspective)
 		(^Pass_Constants)(raw_data(pass.data))^ = {
 			view_projection = render.jittered_view_projection(f),
 			right           = {right.x, right.y, right.z, 0},
@@ -720,8 +729,8 @@ before_world :: proc(f: ^render.Frame) {
 			forward         = {forward.x, forward.y, forward.z, 0},
 			time            = f32(time.duration_seconds(s.elapsed)),
 			aspect          = aspect,
-			tan_half_fov    = math.tan(f.view.vertical_fov * 0.5),
-			near            = f.view.near,
+			tan_half_fov    = math.tan(perspective.vertical_fov * 0.5),
+			near            = render.view_near(f.view),
 			exposure        = gpu.read_index(render.gpu_buffer(g, f.exposure)),
 		}
 		extract_triangles(frame, f.hidden)
@@ -925,6 +934,8 @@ shutdown :: proc(state: rawptr) {
 	script.destroy(&s.scripts)
 	ui.destroy(&s.ui)
 	render.renderer_destroy(&s.renderer)
+	// The sprites give their sheets back to the assets.
+	sprite.destroy(&s.sprites)
 	asset.destroy(&s.assets)
 	audio.destroy(&s.audio)
 	physics.destroy(&s.physics)
@@ -976,14 +987,14 @@ apply_audio_settings :: proc(s: ^Game_State) {
 }
 
 // switch_scene loads the next scene, the glass scene, the surfaces scene, the room scene, the billboards scene, the
-// animation scene, the cube map scene, the audio scene, then the main scene again, when F7 is pressed. A linked editor owns the scene, so
+// animation scene, the cube map scene, the audio scene, the 2D scene, then the main scene again, when F7 is pressed. A linked editor owns the scene, so
 // the key does nothing then.
 switch_scene :: proc(s: ^Game_State) {
 	if .F7 not_in s.platform.input().pressed || editor.active(&s.editor) {
 		return
 	}
-	metas := [?]string{MAIN_SCENE_META, GLASS_SCENE_META, SURFACES_SCENE_META, ROOM_SCENE_META, BILLBOARDS_SCENE_META, ANIMATION_SCENE_META, CUBE_SKY_SCENE_META, AUDIO_SCENE_META}
-	names := [?]string{"main", "glass", "surfaces", "room", "billboards", "animation", "cube map", "audio"}
+	metas := [?]string{MAIN_SCENE_META, GLASS_SCENE_META, SURFACES_SCENE_META, ROOM_SCENE_META, BILLBOARDS_SCENE_META, ANIMATION_SCENE_META, CUBE_SKY_SCENE_META, AUDIO_SCENE_META, SPRITES_SCENE_META}
+	names := [?]string{"main", "glass", "surfaces", "room", "billboards", "animation", "cube map", "audio", "2D"}
 	s.scene_index = (s.scene_index + 1) % len(metas)
 	if guid, ok := format.meta_guid(metas[s.scene_index]); ok {
 		scene.load_asset(&s.world, &s.scripts, &s.assets, guid)

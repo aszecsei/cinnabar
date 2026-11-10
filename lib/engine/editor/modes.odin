@@ -26,7 +26,7 @@ debug_shown :: proc(e: ^Editor) -> bool {
 	return !active(e) || e.session.mode == .Edit
 }
 
-// playing is the Particle_Systems that play while the world stands still, for render.Frame_Desc.playing: the editor's
+// playing is the Particle_Systems and the Sprite_Renderers that play while the world stands still, for render.Frame_Desc.playing: the editor's
 // selection, so a selected effect plays in Edit and while paused (see docs/rendering/particles.md#time). Without an
 // editor, none.
 playing :: proc(e: ^Editor) -> []ecs.Entity {

@@ -35,14 +35,14 @@ public static class MeshGrid
     public static Vec3 AxisVector(int axis) => axis switch { 0 => Vec3.UnitX, 1 => Vec3.UnitY, _ => Vec3.UnitZ };
 
     /// <summary>Where a ray from the camera meets the plane through a point with a normal, both relative to the camera, or null.</summary>
-    public static Vec3? HitPlane(Vec3 point, Vec3 normal, Vec3 ray)
+    public static Vec3? HitPlane(Vec3 point, Vec3 normal, ViewRay ray)
     {
-        var facing = Vec3.Dot(normal, ray);
+        var facing = Vec3.Dot(normal, ray.Direction);
         if (Math.Abs(facing) < 1e-9)
         {
             return null;
         }
-        var t = Vec3.Dot(normal, point) / facing;
-        return t > 0 ? ray * t : null;
+        var t = Vec3.Dot(normal, point - ray.Origin) / facing;
+        return t > 0 ? ray.At(t) : null;
     }
 }

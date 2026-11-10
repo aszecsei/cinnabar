@@ -179,7 +179,7 @@ camera_view :: proc(s: ^Game_State) -> render.View {
 	if view, ok := render.camera_view(&s.world, s.camera); ok {
 		return view
 	}
-	return {rotation = 1, vertical_fov = render.DEFAULT_VERTICAL_FOV, near = render.DEFAULT_NEAR}
+	return {rotation = 1, projection = render.Perspective{render.DEFAULT_VERTICAL_FOV, render.DEFAULT_NEAR}}
 }
 
 // render_frame describes the frame as the game draws it, with or without an editor, and gives it to the editor package to

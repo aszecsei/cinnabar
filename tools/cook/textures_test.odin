@@ -725,7 +725,7 @@ an_image_that_is_not_standalone_and_in_no_set_is_a_warning :: proc(t: ^testing.T
 	pass := cook(tree_options(tree), {.Texture}, log_problems = false)
 	testing.expect(t, pass.ok)
 	testing.expect_value(t, pass.cooked[.Texture], 0)
-	expect_warning(t, pass, "no .texture_set names it")
+	expect_warning(t, pass, "no .texture_set or .sprite_sheet names it")
 }
 
 @(test)

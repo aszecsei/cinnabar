@@ -17,7 +17,7 @@ Textures are `.png`, `.jpg`, `.tga`, `.hdr`, `.tif` and `.exr` files, and `.text
 | `alpha_coverage` | `true`, `false` | `false` | For a `color` texture, keep each mip's alpha coverage at `alpha_cutoff`, see below |
 | `alpha_cutoff` | `0.05` to `0.95`, in steps of `0.05` | `0.5` | The cutoff that `alpha_coverage` keeps the coverage at |
 | `layout` | `2d`, `cube_cross`, `cube_equirect`, `array_strip` | `2d` | How one image holds its layers, see [Cube maps and arrays](#cube-maps-and-arrays) |
-| `standalone` | `true`, `false` | `true` | Cook the image as a texture of its own. Turn it off for an image that only a `.texture_set` reads. |
+| `standalone` | `true`, `false` | `true` | Cook the image as a texture of its own. Turn it off for an image that only a `.texture_set` or a [sprite sheet](sprite-sheets.md#packed-images) reads. |
 
 | Usage | Format | Mips |
 |---|---|---|

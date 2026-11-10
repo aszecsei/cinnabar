@@ -591,8 +591,13 @@ the_editor_sets_the_view_and_the_selection :: proc(t: ^testing.T) {
 	testing.expect(t, ok)
 	v := camera_view(stored)
 	testing.expect_value(t, v.position.raw, [3]i64{1 << 24, 0, -(2 << 24)})
-	testing.expect_value(t, v.near, 0.05)
+	testing.expect_value(t, v.projection, render.Perspective{1, 0.05})
 	testing.expect_value(t, len(f.editor.session.view.selection), 1)
+	// An orthographic camera gives an orthographic view, with its height and its far plane.
+	camera.projection, camera.orthographic_height, camera.far = .Orthographic, 12, 500
+	step(f, 1, camera)
+	stored, _ = f.editor.session.view.viewports[0].camera.?
+	testing.expect_value(t, camera_view(stored).projection, render.Orthographic{12, 0.05, 500})
 
 	// Another editor has its own camera and selection.
 	step(f, 2)
@@ -618,7 +623,7 @@ picks_read_their_entities_from_the_results :: proc(t: ^testing.T) {
 		index := ecs.entity_index(e)
 		words[4 + index / 32] |= 1 << (index % 32)
 	}
-	result := pick_result(w, {id = 3, width = 1, height = 1}, words, 0.1, 0.01, context.temp_allocator)
+	result := pick_result(w, {id = 3, width = 1, height = 1}, words, render.Perspective{1, 0.1}, render.Perspective{1, 0.01}, context.temp_allocator)
 	testing.expect_value(t, result.id, 3)
 	// The dead entity's slot finds nothing, and the others come in slot order.
 	testing.expect_value(t, len(result.hits), 2)
@@ -630,16 +635,21 @@ picks_read_their_entities_from_the_results :: proc(t: ^testing.T) {
 
 	// On the view model's stencil bit, the depth is the view model's near plane's.
 	words[3] = render.VIEW_MODEL_STENCIL
-	model := pick_result(w, {id = 5, width = 1, height = 1}, words, 0.1, 0.01, context.temp_allocator)
+	model := pick_result(w, {id = 5, width = 1, height = 1}, words, render.Perspective{1, 0.1}, render.Perspective{1, 0.01}, context.temp_allocator)
 	testing.expect(t, abs(model.depth - 0.02) < 1e-6)
 
-	rect := pick_result(w, {id = 4, width = 8, height = 8}, words, 0.1, 0.01, context.temp_allocator)
+	rect := pick_result(w, {id = 4, width = 8, height = 8}, words, render.Perspective{1, 0.1}, render.Perspective{1, 0.01}, context.temp_allocator)
 	testing.expect_value(t, rect.depth, 0)
 	testing.expect_value(t, rect.submesh, -1)
 
+	// An orthographic view's depth is even from its near plane to its far plane: a depth of 0.5 is halfway.
+	words[3] = 0
+	flat := pick_result(w, {id = 7, width = 1, height = 1}, words, render.Orthographic{10, 1, 101}, render.Orthographic{10, 1, 101}, context.temp_allocator)
+	testing.expect(t, abs(flat.depth - 51) < 1e-4)
+
 	// Nothing at the corner has no submesh.
 	words[1] = 0
-	empty := pick_result(w, {id = 6, width = 1, height = 1}, words, 0.1, 0.01, context.temp_allocator)
+	empty := pick_result(w, {id = 6, width = 1, height = 1}, words, render.Perspective{1, 0.1}, render.Perspective{1, 0.01}, context.temp_allocator)
 	testing.expect_value(t, empty.submesh, -1)
 }
 
@@ -670,9 +680,8 @@ selected_parents_outline_their_children :: proc(t: ^testing.T) {
 @(test)
 gizmos_are_triangles_with_the_hot_part_highlighted :: proc(t: ^testing.T) {
 	v := render.View {
-		rotation     = 1,
-		vertical_fov = 1,
-		near         = 0.05,
+		rotation   = 1,
+		projection = render.Perspective{1, 0.05},
 	}
 	hot := pack_color({GIZMO_HOT.r, GIZMO_HOT.g, GIZMO_HOT.b, 1})
 	for kind in ([]link.Gizmo_Kind{.Translate, .Rotate, .Scale}) {
@@ -695,11 +704,31 @@ gizmos_are_triangles_with_the_hot_part_highlighted :: proc(t: ^testing.T) {
 // The box handles are a cube each, about their positions, in their box's color, and the hot one in the gizmo's highlight.
 // The game keeps the last Box_Handles, and an empty one clears them.
 @(test)
+a_ribbon_faces_an_orthographic_view_along_its_axis :: proc(t: ^testing.T) {
+	// A segment along x, off to the side and above: a perspective view sees it from the origin, so its ribbon tilts,
+	// and an orthographic view looks along z at every point, so its ribbon is flat in the xy plane.
+	from, to := [3]f32{4, 3, 10}, [3]f32{6, 3, 10}
+	width_along :: proc(view: render.View, from, to: [3]f32) -> (y, z: f32) {
+		out := make([dynamic]Gizmo_Vertex, context.temp_allocator)
+		b := gizmo_builder(&out, view)
+		ribbon(&b, from, to, 2, 0)
+		low, high := out[0].position, out[0].position
+		for v in out {
+			low, high = linalg.min(low, v.position), linalg.max(high, v.position)
+		}
+		return high.y - low.y, high.z - low.z
+	}
+	y, z := width_along({rotation = 1, projection = render.Orthographic{10, 0.1, 100}}, from, to)
+	testing.expect(t, abs(y - 2) < 1e-5 && abs(z) < 1e-5)
+	y, z = width_along({rotation = 1, projection = render.Perspective{1, 0.05}}, from, to)
+	testing.expect(t, z > 0.1 && y < 2)
+}
+
+@(test)
 box_handles_are_cubes_with_the_hot_one_highlighted :: proc(t: ^testing.T) {
 	v := render.View {
-		rotation     = 1,
-		vertical_fov = 1,
-		near         = 0.05,
+		rotation   = 1,
+		projection = render.Perspective{1, 0.05},
 	}
 	hot := pack_color({GIZMO_HOT.r, GIZMO_HOT.g, GIZMO_HOT.b, 1})
 	handles := []link.Box_Handle{{position = {0, 0, 5 << 24}, kind = .Influence}, {position = {1 << 24, 0, 5 << 24}, kind = .Projection, hot = true}}
@@ -1247,10 +1276,9 @@ the_mesh_overlay_draws_edges_vertices_fills_and_the_grid :: proc(t: ^testing.T) 
 	entity := ecs.spawn(&f.world)
 	ecs.add(&f.world, entity, ecs.TRANSFORM_IDENTITY)
 	view := render.View {
-		position     = {{0, 0, -5 * (1 << 24)}},
-		rotation     = 1,
-		vertical_fov = 1,
-		near         = 0.05,
+		position   = {{0, 0, -5 * (1 << 24)}},
+		rotation   = 1,
+		projection = render.Perspective{1, 0.05},
 	}
 	count :: proc(f: ^Fixture, view: render.View) -> int {
 		vertices := make([dynamic]Gizmo_Vertex, context.temp_allocator)
@@ -1638,7 +1666,7 @@ game_debug :: proc(_: ^render.Frame) {}
 @(private = "file")
 game_desc :: proc(g: ^Game_Frame, settings: ^render.Frame_Settings = nil) -> render.Frame_Desc {
 	return {
-		view = {rotation = 1, vertical_fov = 2, near = 0.5},
+		view = {rotation = 1, projection = render.Perspective{2, 0.5}},
 		size = {1280, 720},
 		settings = settings,
 		disable = {.Bloom},
@@ -1750,6 +1778,20 @@ the_game_view_draws_the_frame_as_described_and_a_scene_view_adds_the_editor :: p
 	step(f, 1, open_viewport(2, .Game, 32, 16), link.Set_Mode{mode = .Play})
 	out = plan_frame(&f.editor, &f.world, desc, frame_viewports(&f.editor), f.renderer.quality, f.renderer.caps)
 	testing.expect(t, len(out.extra_views) == 1 && out.extra_views[0].no_debug && out.extra_views[0].overlay.draw != nil && out.extra_views[0].keep_ids)
+
+	// An orthographic scene view stands back from what it shows, so it draws no fog, whatever its settings say. A
+	// perspective one draws it.
+	step(f, 1, link.Set_Viewport_Settings{viewport = 1, settings = {}})
+	out = plan_frame(&f.editor, &f.world, desc, frame_viewports(&f.editor), f.renderer.quality, f.renderer.caps)
+	testing.expect(t, len(out.extra_views) == 1 && .Fog not_in out.extra_views[0].disable)
+	flat := viewport_camera(1, 3 << 24)
+	flat.projection, flat.orthographic_height, flat.far = .Orthographic, 10, 1000
+	step(f, 1, flat)
+	out = plan_frame(&f.editor, &f.world, desc, frame_viewports(&f.editor), f.renderer.quality, f.renderer.caps)
+	if testing.expect_value(t, len(out.extra_views), 1) {
+		testing.expect(t, .Fog in out.extra_views[0].disable)
+		testing.expect(t, render.is_orthographic(out.extra_views[0].view))
+	}
 }
 
 @(test)

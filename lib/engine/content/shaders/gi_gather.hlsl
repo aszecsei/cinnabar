@@ -46,12 +46,12 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	float3 position;
 	float z;
 	if (!surface_at(pixel, position, z)) {
-		float3 reflected = reflect(normalize(position), normal);
+		float3 reflected = reflect(from_camera(position), normal);
 		out_diffuse[pixel] = float4(surrounding_light(0, normal), 0);
 		out_specular[pixel] = float4(beyond_specular(0, normal, reflected, gather_roughness(pixel)), 0);
 		return;
 	}
-	float3 reflected = reflect(normalize(position), normal);
+	float3 reflected = reflect(from_camera(position), normal);
 	Texture2D<float4> cascades = cn_texture(constants.cascades);
 
 	int2 probes[4];

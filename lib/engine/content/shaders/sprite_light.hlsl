@@ -48,7 +48,7 @@ void cs_main(uint3 group : SV_GroupID, uint3 thread : SV_GroupThreadID) {
 	float3 up = rotation.x * frame.camera_up.xyz - rotation.y * frame.camera_right.xyz;
 	float3 p = r.position + r.size * (q.x * right + q.y * up);
 	float4 clip = mul(frame.cluster_view_projection, float4(p, 1));
-	float depth = max(clip.w, frame.near);
+	float depth = max(clip_view_z(frame.projection, clip), frame.projection.z);
 
 	float3 light = 0;
 	for (uint i = 0; i < frame.directional_count; i++) {
@@ -69,7 +69,7 @@ void cs_main(uint3 group : SV_GroupID, uint3 thread : SV_GroupThreadID) {
 	}
 	light *= SPRITE_COSINE / PI;
 	if (frame.gi != 0) {
-		float2 pixel = (clip.xy / depth * float2(0.5, -0.5) + 0.5) * frame.screen_size;
+		float2 pixel = (clip.xy / max(clip.w, 1e-7) * float2(0.5, -0.5) + 0.5) * frame.screen_size;
 		light += load_screen(push.gi_diffuse, clamp(pixel, 0, frame.screen_size - 1)).rgb;
 	} else {
 		light += ambient_average(frame.ambient);

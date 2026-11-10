@@ -68,6 +68,7 @@ Scripts change the world structure **immediately**, except for despawns. The scr
 | `Physics` | Queries (`raycast`, `raycast_all`, `sphere_cast`, `box_cast`, `capsule_cast`, `overlap_sphere`, `overlap_box`, `overlap_capsule`), `layers(...)`, `gravity()` and `set_gravity`, the effects on a body, with its entity first (`add_force`, `add_impulse`, `velocity`, `set_velocity`, `sleep` and the rest), and a joint's `set_motor(entity, mode, target?, max?)` and `set_joint_enabled(entity, enabled)`, where the game defines it (see [Physics: Scripts](../physics/design.md#scripts)) |
 | `Ui` | A document's elements by its entity and their ids: `set`, `set_text`, `set_visible`, `focus`, `get_text`, `bind`, `add` and `remove`, and `wants_input()`, where the game defines it. The entity's behaviours get the document's events as `on_<event>(id)` (see [UI: Scripts](../ui/design.md#scripts)) |
 | `Animation` | An Animator's graph's parameters by name, with its entity first (`set_float`, `set_bool`, `trigger`, `reset_trigger`, `get_float`, `get_bool`), its current `state` and its `root_motion` in the world, where the game defines it (see [Animation: Scripts](../animation/design.md#scripts)) |
+| `Sprites` | A Sprite_Renderer's animations and frames by their names in its sheet, with its entity first: `play`, `stop`, `set_frame`, `animation` and `finished`, where the game defines it. See [Rendering: 2D](../rendering/2d.md#scripts). |
 
 - **Angles are in degrees**, as in Unity. Euler angles apply z, then x, then y, as in Unity.
 - `==` on quaternions is approximate, as in Unity's `==`. `==` on positions is exact.
@@ -146,6 +147,7 @@ Zones of a script's own code in the editor's profiler ([Profiling](../core/profi
 | `Physics.Raycast`, `SphereCast`, `OverlapSphere` | `Physics.raycast`, `Physics.sphere_cast`, `Physics.overlap_sphere` |
 | `OnCollisionEnter`, `OnCollisionExit`, `OnTriggerEnter`, `OnTriggerExit` | `on_collision_enter(other, point, normal, velocity, impulse)`, `on_collision_exit(other)`, `on_trigger_enter(other)`, `on_trigger_exit(other)`; no `stay` (see [Physics: Events](../physics/design.md#events)) |
 | `animator.SetFloat`, `SetBool`, `SetTrigger`, `ResetTrigger` | `Animation.set_float(entity, name, v)`, `set_bool`, `trigger`, `reset_trigger` (see [Animation: Scripts](../animation/design.md#scripts)) |
+| `SpriteRenderer.sprite`, `animator.Play(name)` on a 2D sprite | `Sprites.set_frame(entity, name)`, `Sprites.play(entity, name)` (see [Rendering: 2D](../rendering/2d.md#scripts)) |
 | `AnimationEvent` | `on_animation_event(name, ...)`, from markers authored in the graph |
 | `OnAnimatorMove`, `animator.deltaPosition` | `Animation.root_motion(entity)` or the `RootMotion` component, which nothing applies until gameplay does |
 | UI Toolkit's `UIDocument`, `rootVisualElement.Q<Label>(name).text` | `Ui_Document`, `Ui.set_text(entity, id, text)` (see [UI: Scripts](../ui/design.md#scripts)) |

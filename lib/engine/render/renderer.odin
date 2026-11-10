@@ -114,6 +114,8 @@ Renderer :: struct {
 	transparency_composite: Shader_Pipeline,
 	// The compute sprites' pipelines and buffers (see docs/rendering/transparency.md#sprites).
 	sprites:         Sprites,
+	// The sprite renderers (see sheet_sprites.odin).
+	sheet_sprites:   Sheet_Sprites,
 	// The frame's own view's state (see View_State) unless Frame_Desc.state names another, which a game with one camera has
 	// no other of.
 	view:            View_State,
@@ -301,6 +303,9 @@ Frame :: struct {
 	// How the frame target reaches the display (see docs/rendering/layers-and-output.md#hdr-output).
 	output:                   gpu.Output,
 	view_projection:          matrix[4, 4]f32,
+	// The view's projection as the shaders take it, and the view model's.
+	projection:               View_Projection,
+	view_model_projection:    View_Projection,
 	// The camera's subpixel jitter for temporal AA, in normalized device coordinates, which the renderer's draws add
 	// (see jittered_view_projection). Zero without temporal AA.
 	jitter:                   [2]f32,
@@ -330,6 +335,10 @@ Frame :: struct {
 	moments:                  Texture,
 	// nil without sprites.
 	sprites:                  ^Sprite_Frame,
+	// The view's sprite renderers, nil without any (see sheet_sprites.odin), and whether the world has any, which
+	// add_scene_passes writes the camera's constants for.
+	sheet_sprites:            ^Sheet_Sprite_Frame,
+	wants_sheet_sprites:      bool,
 	// nil without particles to step.
 	particles:                ^Particle_Frame,
 	// Zero without a UI hook, and without debug lines or a debug hook.
@@ -472,6 +481,7 @@ renderer_init :: proc(r: ^Renderer, platform: ^core.Platform_API, assets: ^asset
 	sky_init(&r.sky)
 	clouds_init(&r.clouds)
 	sprites_init(&r.sprites)
+	sheet_sprites_init(&r.sheet_sprites, platform, w)
 	particles_init(&r.particles, w)
 	reflection_probes_init(&r.reflection_probes, r, w)
 	post_init(&r.post, platform)
@@ -499,6 +509,7 @@ renderer_reload :: proc(r: ^Renderer, platform: ^core.Platform_API, w: ^ecs.Worl
 	volume.register(&r.volumes, w)
 	lights_register(&r.lights, w)
 	particles_register(&r.particles, w)
+	sheet_sprites_register(&r.sheet_sprites, w)
 	reflection_probes_register(&r.reflection_probes, w)
 	// The effects' procedures were in the old code, so the game registers them again.
 	r.effect_count = 0
@@ -525,6 +536,7 @@ renderer_destroy :: proc(r: ^Renderer) {
 	sky_destroy(&r.sky, r)
 	clouds_destroy(&r.clouds, r.platform)
 	sprites_destroy(&r.sprites, r.platform)
+	sheet_sprites_destroy(&r.sheet_sprites, r.platform, r.residency.assets)
 	view_state_destroy(&r.view, r)
 	particles_destroy(&r.particles, r.platform)
 	reflection_probes_destroy(&r.reflection_probes, r)
@@ -577,7 +589,7 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	world.cameras = cameras[1:1 + count]
 
 	frame_target := desc.target != {} ? desc.target : r.platform.gpu_frame_target()
-	ok := draw_view(r, w, desc, world, own, output, quality, frame_target, false)
+	ok := draw_view(r, w, desc, world, own, output, limit_quality(desc.view, quality), frame_target, false)
 	// The stats are the frame's own view's, whichever state that is this frame.
 	r.stats_view = own != &r.view ? own : nil
 	// The extra views come after the frame's own, which committed what it did, so they read the world as it left it. A view
@@ -590,7 +602,7 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 		view.extra_views, view.previews, view.playing, view.delta, view.shading_stats = nil, nil, nil, 0, false
 		view_quality := ev.quality != nil ? clamp_quality(ev.quality^, r.caps) : quality
 		// The target is always SDR, whatever the frame's output is.
-		draw_view(r, w, view, world, ev.state, {format = gpu.FRAME_TARGET_FORMAT}, view_quality, ev.target, true)
+		draw_view(r, w, view, world, ev.state, {format = gpu.FRAME_TARGET_FORMAT}, limit_quality(view.view, view_quality), ev.target, true)
 	}
 	// After the last view, so the lines of this frame reach them all.
 	debug.end_frame(&r.debug)
@@ -618,6 +630,7 @@ draw_view :: proc(
 	state.frames += 1
 	g := extra ? begin_extra(r.platform, &r.textures, &state.histories) : begin(r.platform, &r.textures, &state.histories)
 	size := render_size(desc.size, quality.render_scale)
+	aspect := f32(size.x) / f32(max(size.y, 1))
 	f := new(Frame, r.platform.frame_allocator)
 	f^ = {
 		renderer        = r,
@@ -628,7 +641,9 @@ draw_view :: proc(
 		output_size     = desc.size,
 		scene_size      = size,
 		output          = output,
-		view_projection = view_projection(desc.view, f32(size.x) / f32(max(size.y, 1))),
+		view_projection = view_projection(desc.view, aspect),
+		projection      = projection_constants(desc.view, aspect),
+		view_model_projection = projection_constants(view_model_view(desc.view), aspect),
 		hooks           = desc.hooks,
 		hidden          = desc.hidden,
 		scene_scale     = 1,
@@ -648,6 +663,7 @@ draw_view :: proc(
 	settings := desc.settings != nil ? desc.settings^ : resolve_settings(r, w, desc.view.position, desc.hidden)
 	apply_quality(&settings, quality)
 	apply_debug(&settings, desc.debug_view, desc.disable, desc.exposure_offset)
+	apply_view_limits(&settings, desc.view)
 	begin_post(f, settings.post)
 	f.post.effects = .Post_Effects not_in desc.disable && desc.debug_view == .Lit
 	f.post.effect_settings = settings.effects
@@ -681,10 +697,12 @@ draw_view :: proc(
 	begin_fog(f, settings.fog)
 	begin_gi(f, settings.gi, ambient)
 	begin_screen_reflections(f, settings.reflections)
+	f.wants_sheet_sprites = any_sprite_renderers(r, w)
 	add_scene_passes(f, ambient)
 	// Every request for the ray scene came before, so its build is before every pass that traces it.
 	add_ray_scene_passes(f)
 	begin_sprites(f, desc.sprites, &r.sprites.main)
+	begin_sheet_sprites(f, w, desc.hidden, desc.playing, desc.delta)
 	if extra {
 		begin_particles_draw(f)
 	} else {
@@ -741,7 +759,7 @@ draw_view :: proc(
 	color(&g, p, f.ids, .Clear, store = desc.keep_ids || desc.debug_view == .Entity_Ids ? .Store : .Discard)
 	// The debug layer tests against the depth, the editor reads it, and so do the sky, the fog over the background, the
 	// transparent surfaces, the sprites, temporal AA, the exposure and the depth's debug view.
-	keep_depth := desc.keep_ids || has_debug || f.fog != nil || draws_sky || has_transparency(f) || has_sprites(f) || reads_depth(f) || desc.debug_view == .Depth
+	keep_depth := desc.keep_ids || has_debug || f.fog != nil || draws_sky || has_transparency(f) || has_sprites(f) || has_sheet_sprites(f) || reads_depth(f) || desc.debug_view == .Depth
 	depth(&g, p, f.depth, .Load, store = keep_depth ? .Store : .Discard)
 	declare_scene_draws(f, p)
 	declare_lighting(f, p, opaque = true)
@@ -759,6 +777,7 @@ draw_view :: proc(
 	add_gi_lit(f)
 	add_screen_reflection_lit(f)
 	add_transparency_passes(f)
+	add_sheet_sprite_pass(f)
 	if desc.hooks.after_world != nil {
 		desc.hooks.after_world(f)
 	}
@@ -768,6 +787,7 @@ draw_view :: proc(
 	add_debug_view_pass(f)
 	add_post_passes(f)
 	add_transparent_id_pass(f, desc.keep_ids)
+	add_sheet_sprite_id_pass(f, desc.keep_ids)
 
 	if desc.hooks.ui != nil {
 		f.ui = create_texture(&g, {size = desc.size, format = UI_FORMAT, label = "ui"})
@@ -854,6 +874,7 @@ sync_frame_pipelines :: proc(r: ^Renderer, mode: gpu.Output_Mode, sdr: bool) {
 	sync_sky_pipelines(r, force)
 	sync_cloud_pipelines(r, force)
 	sync_sprite_pipelines(r, force)
+	sync_sheet_sprite_pipelines(r, force)
 	sync_particle_pipelines(r, force)
 	sync_reflection_probe_pipelines(r, force)
 	sync_compute_pipeline(&r.debug_view, r.platform, assets, {label = "debug view"}, force)

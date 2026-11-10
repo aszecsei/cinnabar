@@ -5,7 +5,8 @@
 #include "cinnabar.hlsli"
 
 // Matches Integrate_Push in lib/engine/render/fog.odin. scale holds the projection's x and y scales, and slices the
-// clusters' slice constants: slice = log2(depth) * slices.x + slices.y.
+// clusters' slice constants: slice = log2(depth) * slices.x + slices.y, or depth * slices.x + slices.y for an
+// orthographic view, whose rays all go along the view's axis.
 struct Push {
 	uint input;
 	uint output;
@@ -14,7 +15,7 @@ struct Push {
 	float2 slices;
 	float2 screen_size;
 	uint slice_count;
-	uint padding;
+	uint orthographic;
 };
 CN_PUSH_CONSTANTS(Push, push);
 
@@ -23,7 +24,8 @@ static const float FOG_TILE = 16;
 static const float CLUSTER_SLICES = 32;
 
 float slice_depth(float slice) {
-	return exp2((slice * CLUSTER_SLICES / push.slice_count - push.slices.y) / push.slices.x);
+	float t = (slice * CLUSTER_SLICES / push.slice_count - push.slices.y) / push.slices.x;
+	return push.orthographic != 0 ? t : exp2(t);
 }
 
 [numthreads(8, 8, 1)]
@@ -34,7 +36,7 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	// The froxels' depths are along the view's axis; the ray through the tile is longer by this much.
 	float2 pixel = (float2(id.xy) + 0.5) * FOG_TILE;
 	float2 ndc = float2(pixel.x / push.screen_size.x * 2 - 1, 1 - pixel.y / push.screen_size.y * 2);
-	float stretch = length(float3(ndc / push.scale, 1));
+	float stretch = push.orthographic != 0 ? 1 : length(float3(ndc / push.scale, 1));
 	Texture3D<float4> input = cn_texture3d(push.input);
 	RWTexture3D<float4> output = cn_rw_texture3d(push.output);
 	float3 scattered = 0;

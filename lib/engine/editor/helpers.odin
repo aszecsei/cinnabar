@@ -202,17 +202,26 @@ draw_entity_helpers :: proc(e: ^Editor, w: ^ecs.World, d: ^debug.Draw, entity: e
 		color := selected ? CAMERA_COLOR : UNSELECTED
 		fov := c.vertical_fov > 0 ? c.vertical_fov : render.DEFAULT_VERTICAL_FOV
 		half_y := math.tan(fov / 2) * FRUSTUM_LENGTH
+		// An orthographic camera shows a box: as wide at the camera as ahead of it.
+		orthographic := c.projection == .Orthographic
+		if orthographic {
+			half_y = (c.orthographic_height > 0 ? c.orthographic_height : render.DEFAULT_ORTHOGRAPHIC_HEIGHT) / 2
+		}
 		half_x := half_y * FRUSTUM_ASPECT
 		center := forward * FRUSTUM_LENGTH
 		corners := [4][3]f32 {
-			center - right * half_x - up * half_y,
-			center + right * half_x - up * half_y,
-			center + right * half_x + up * half_y,
-			center - right * half_x + up * half_y,
+			-right * half_x - up * half_y,
+			right * half_x - up * half_y,
+			right * half_x + up * half_y,
+			-right * half_x + up * half_y,
 		}
 		for k in 0 ..< 4 {
-			debug.line(d, at, ecs.position_offset(at, corners[k]), color)
-			debug.line(d, ecs.position_offset(at, corners[k]), ecs.position_offset(at, corners[(k + 1) % 4]), color)
+			from := orthographic ? ecs.position_offset(at, corners[k]) : at
+			debug.line(d, from, ecs.position_offset(at, center + corners[k]), color)
+			debug.line(d, ecs.position_offset(at, center + corners[k]), ecs.position_offset(at, center + corners[(k + 1) % 4]), color)
+			if orthographic {
+				debug.line(d, from, ecs.position_offset(at, corners[(k + 1) % 4]), color)
+			}
 		}
 	}
 }

@@ -107,11 +107,11 @@ Target_Told :: struct {
 Viewport_Tools :: struct {
 	// The ticket of the last pick that the GPU ran. A new session keeps it, so a pick of the old one comes back stale.
 	ticket:           u32,
-	// What the pick needs to read its results: the words of entity bits, and the near planes that the world and the
+	// What the pick needs to read its results: the words of entity bits, and the projections that the world and the
 	// view model were drawn with.
 	pick_words:       u32,
-	pick_near:        f32,
-	pick_view_model_near: f32,
+	pick_projection:  render.Projection,
+	pick_view_model_projection: render.Projection,
 	// The GPU objects, made at the first frame that draws the tools. If they cannot be made, the tools stay off.
 	gpu_ready:        bool,
 	gpu_failed:       bool,
@@ -151,8 +151,7 @@ camera_view :: proc(c: link.Editor_Camera) -> render.View {
 	return {
 		position = {c.position},
 		rotation = quaternion(x = c.rotation.x, y = c.rotation.y, z = c.rotation.z, w = c.rotation.w),
-		vertical_fov = c.vertical_fov,
-		near = c.near,
+		projection = c.projection == .Orthographic ? render.Orthographic{c.orthographic_height, c.near, c.far} : render.Perspective{c.vertical_fov, c.near},
 	}
 }
 
@@ -356,8 +355,8 @@ add_viewport_passes :: proc(e: ^Editor, g: ^render.Graph, w: ^ecs.World, frame: 
 			v.ticket += 1
 			tools.picking = true
 			v.pick_words = words
-			v.pick_near = frame.view.near
-			v.pick_view_model_near = render.view_model_view(frame.view).near
+			v.pick_projection = frame.view.projection
+			v.pick_view_model_projection = render.view_model_view(frame.view).projection
 			mem.zero_slice(zeros.data)
 			pick := new(Pick_Pass, platform.frame_allocator)
 			pick^ = {
@@ -868,12 +867,12 @@ finish_pick :: proc(e: ^Editor, w: ^ecs.World, out: ^[dynamic]byte, allocator: r
 	}
 	request := tools.picks[0]
 	ordered_remove(&tools.picks, 0)
-	link.write_message(out, pick_result(w, request, words[:PICK_HEADER / 4 + v.pick_words], v.pick_near, v.pick_view_model_near, allocator))
+	link.write_message(out, pick_result(w, request, words[:PICK_HEADER / 4 + v.pick_words], v.pick_projection, v.pick_view_model_projection, allocator))
 }
 
 // pick_result reads a pick's results: the header and the bits of entity slots.
 @(private)
-pick_result :: proc(w: ^ecs.World, request: link.Pick_Request, words: []u32, near, view_model_near: f32, allocator: runtime.Allocator) -> link.Pick_Result {
+pick_result :: proc(w: ^ecs.World, request: link.Pick_Request, words: []u32, projection, view_model_projection: render.Projection, allocator: runtime.Allocator) -> link.Pick_Result {
 	hits := make([dynamic]link.Pick_Hit, allocator)
 	for word, i in words[PICK_HEADER / 4:] {
 		for bit in 0 ..< u32(32) {
@@ -888,8 +887,8 @@ pick_result :: proc(w: ^ecs.World, request: link.Pick_Request, words: []u32, nea
 	depth: f32
 	submesh: i32 = -1
 	if request.width <= 1 && request.height <= 1 && render.id_entity(words[1]) != 0 {
-		// The view model's pixels have the view model's near plane (see docs/rendering/layers-and-output.md#view-model).
-		depth = render.view_depth(transmute(f32)words[2], words[3] & render.VIEW_MODEL_STENCIL != 0 ? view_model_near : near)
+		// The view model's pixels have the view model's projection (see docs/rendering/layers-and-output.md#view-model).
+		depth = render.view_depth(words[3] & render.VIEW_MODEL_STENCIL != 0 ? view_model_projection : projection, transmute(f32)words[2])
 		submesh = i32(render.id_submesh(words[1]))
 	}
 	return {id = request.id, hits = hits[:], depth = depth, submesh = submesh}
@@ -929,6 +928,16 @@ Gizmo_Builder :: struct {
 	out:   ^[dynamic]Gizmo_Vertex,
 	right: [3]f32,
 	up:    [3]f32,
+	// The way that an orthographic view looks, which is the same at every point, and 0 for a perspective view, which
+	// looks from the origin.
+	along: [3]f32,
+}
+
+// gizmo_builder is a builder of triangles that face a view.
+@(private)
+gizmo_builder :: proc(out: ^[dynamic]Gizmo_Vertex, view: render.View) -> Gizmo_Builder {
+	right, up, forward := render.view_axes(view)
+	return {out, right, up, render.is_orthographic(view) ? forward : {}}
 }
 
 @(private)
@@ -965,7 +974,7 @@ gizmo_vertices :: proc(gizmo: link.Gizmo_State, view: render.View, out: ^[dynami
 	}
 	s := gizmo.size
 	right, up, _ := render.view_axes(view)
-	b := Gizmo_Builder{out, right, up}
+	b := gizmo_builder(out, view)
 	color :: proc(gizmo: link.Gizmo_State, part: link.Gizmo_Part) -> u32 {
 		c := GIZMO_COLORS[part]
 		if gizmo.hot == part {
@@ -1013,7 +1022,7 @@ gizmo_vertices :: proc(gizmo: link.Gizmo_State, view: render.View, out: ^[dynami
 @(private)
 box_handle_vertices :: proc(handles: []link.Box_Handle, size: f32, view: render.View, out: ^[dynamic]Gizmo_Vertex) {
 	right, up, forward := render.view_axes(view)
-	b := Gizmo_Builder{out, right, up}
+	b := gizmo_builder(out, view)
 	for h in handles {
 		c := PROBE_COLORS[h.kind]
 		if h.hot {
@@ -1041,10 +1050,10 @@ quad :: proc(b: ^Gizmo_Builder, p0, p1, p2, p3: [3]f32, color: u32) {
 	triangle(b, p0, p2, p3, color)
 }
 
-// ribbon is a segment of a width, turned to face the view, which is at the origin.
+// ribbon is a segment of a width, turned to face the view: the origin, or the way that an orthographic view looks.
 @(private)
 ribbon :: proc(b: ^Gizmo_Builder, from, to: [3]f32, width: f32, color: u32) {
-	side := linalg.cross(to - from, (from + to) * 0.5)
+	side := linalg.cross(to - from, b.along != {} ? b.along : (from + to) * 0.5)
 	if linalg.length(side) < 1e-9 {
 		side = b.right
 	}

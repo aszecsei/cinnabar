@@ -23,7 +23,7 @@ struct Moment_Targets {
 
 // view_depth is a pixel's depth from the view, from its reversed depth with the far plane at infinity.
 float view_depth(Varyings i) {
-	return frame.near / max(i.position.z, 1e-7);
+	return view_z(frame.projection, i.position.z);
 }
 
 Moment_Targets ps_moments(Varyings i, bool front : SV_IsFrontFace) {
@@ -38,7 +38,7 @@ Moment_Targets ps_moments(Varyings i, bool front : SV_IsFrontFace) {
 	}
 	float depth = optical_depth(saturate(shade_opacity(s)));
 	o.b0 = depth;
-	o.moments = depth_moments(warp_depth(view_depth(i), frame.near), depth);
+	o.moments = depth_moments(warp_depth(view_depth(i), frame.projection), depth);
 	return o;
 }
 
@@ -56,7 +56,7 @@ float4 ps_transparent(Varyings i, bool front : SV_IsFrontFace) : SV_Target0 {
 		int3 pixel = int3(i.position.xy, 0);
 		float b0 = cn_texture(push.moments_zeroth).Load(pixel).r;
 		float4 moments = cn_texture(push.moments).Load(pixel);
-		transmittance = transmittance_at(b0, moments, warp_depth(view_depth(i), frame.near));
+		transmittance = transmittance_at(b0, moments, warp_depth(view_depth(i), frame.projection));
 	}
 	return float4(color, 1) * alpha * transmittance;
 #endif

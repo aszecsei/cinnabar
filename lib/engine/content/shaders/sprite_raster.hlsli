@@ -29,9 +29,9 @@ struct Raster_Push {
 #include "moments.hlsli"
 #include "sprites.hlsli"
 
-// opaque_depth is the view depth of a pixel's opaque surface, from its reversed depth with the far plane at infinity.
+// opaque_depth is the view depth of a pixel's opaque surface, from its reversed depth.
 float opaque_depth(uint2 pixel) {
-	return frame.near / max(cn_texture(push.depth).Load(int3(pixel, 0)).r, 1e-7);
+	return view_z(frame.projection, cn_texture(push.depth).Load(int3(pixel, 0)).r);
 }
 
 // used_words is how many of a tile's words have sprites: those of the frame's count, not of its capacity.

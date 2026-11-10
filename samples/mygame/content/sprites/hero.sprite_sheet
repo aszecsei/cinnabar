@@ -1,0 +1,16 @@
+# The 2D sample's sheet (see docs/content/kinds/sprite-sheets.md#packed-images): the cooker packs these images into one
+# atlas. Pixel art: 16 texels to a meter, read with the nearest filter, with each frame standing on its bottom edge.
+pixels_per_unit = 16
+filter = nearest
+pivot = 0.5 0
+frame idle_0 = $6f1c2a9e4b7d4c0e9a3f5d8b1e2c7a40
+frame idle_1 = $6f1c2a9e4b7d4c0e9a3f5d8b1e2c7a41
+frame walk_0 = $6f1c2a9e4b7d4c0e9a3f5d8b1e2c7a42
+frame walk_1 = $6f1c2a9e4b7d4c0e9a3f5d8b1e2c7a43
+frame walk_2 = $6f1c2a9e4b7d4c0e9a3f5d8b1e2c7a44
+frame walk_3 = $6f1c2a9e4b7d4c0e9a3f5d8b1e2c7a45
+frame tile = $6f1c2a9e4b7d4c0e9a3f5d8b1e2c7a46
+frame crate = $6f1c2a9e4b7d4c0e9a3f5d8b1e2c7a47
+frame card = $6f1c2a9e4b7d4c0e9a3f5d8b1e2c7a48
+animation idle = idle_0 idle_1 rate=2
+animation walk = walk_0 walk_1 walk_2 walk_3 rate=8

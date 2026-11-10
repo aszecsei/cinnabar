@@ -530,7 +530,8 @@ public sealed class ViewportView : Grid
         _start = _last = point.Position;
         if (point.Properties.IsRightButtonPressed)
         {
-            _gesture = alt ? Gesture.Dolly : Gesture.Fly;
+            // An orthographic view has no way to look around in: its right button moves it in its plane.
+            _gesture = alt ? Gesture.Dolly : _viewport.Camera.IsOrthographic ? Gesture.Pan : Gesture.Fly;
             if (_gesture == Gesture.Fly)
             {
                 _lastFly = Environment.TickCount64;

@@ -16,7 +16,8 @@ static const float SCREEN_SLACK = 0.05;
 bool screen_light(float3 p, uint depth, uint lit, uint sampler_index, out float3 light) {
 	light = 0;
 	float4 clip = mul(frame.view_projection, float4(p, 1));
-	if (clip.w <= frame.near) {
+	float view_depth = clip_view_z(frame.projection, clip);
+	if (clip.w <= 0 || view_depth <= frame.projection.z) {
 		return false;
 	}
 	float2 ndc = clip.xy / clip.w;
@@ -25,7 +26,7 @@ bool screen_light(float3 p, uint depth, uint lit, uint sampler_index, out float3
 	}
 	uint2 pixel = min(uint2((ndc * float2(0.5, -0.5) + 0.5) * frame.screen_size), uint2(frame.screen_size) - 1);
 	float z = cn_texture(depth).Load(int3(pixel, 0)).r;
-	if (z <= 0 || abs(clip.w - frame.near / z) > SCREEN_TOLERANCE * clip.w + SCREEN_SLACK) {
+	if (z <= 0 || abs(view_depth - view_z(frame.projection, z)) > SCREEN_TOLERANCE * view_depth + SCREEN_SLACK) {
 		return false;
 	}
 	float4 previous = mul(frame.previous_view_projection, float4(p + frame.camera_offset.xyz - frame.previous_camera_offset.xyz, 1));

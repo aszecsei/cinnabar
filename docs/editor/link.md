@@ -28,7 +28,7 @@ To add a message: add a struct to the `Message` union in `lib/engine/editor/link
 | Types | Component types with their fields, behaviour classes with their fields, `Game_Commands`; `Run_Game_Command`, `Game_Command_Result` |
 | World | Entity list snapshot and deltas (create, destroy, rename, reparent), watch and unwatch an entity, field value deltas for watched entities |
 | Edit | `Load_Scene`, `Apply_Operations`, `Edit_Problems` |
-| Viewport | `Editor_Camera`, `Set_Selection`, `Set_Hidden`, `Gizmo_State`, `Box_Handles`, `Pick_Request`, `Pick_Result`, `Set_Viewport_Settings`; `Editor_Camera`, `Gizmo_State`, `Box_Handles`, `Pick_Request` and `Set_Viewport_Settings` name a viewport |
+| Viewport | `Editor_Camera`, `Set_Selection`, `Set_Hidden`, `Gizmo_State`, `Box_Handles`, `Pick_Request`, `Pick_Result`, `Set_Viewport_Settings`; `Editor_Camera`, `Gizmo_State`, `Box_Handles`, `Pick_Request` and `Set_Viewport_Settings` name a viewport, and `Editor_Camera` has the camera's projection, with an orthographic one's height and far plane |
 | Views | `Open_Viewport` and `Close_Viewport`, which the editor sends as a viewport's control shows and hides, for up to five viewports (`MAX_VIEWPORTS`), `Viewport_Target`, which the game sends for each open viewport, and `Viewport_Acknowledged`, which the host handles (see [Viewport](viewport.md#views)) |
 | Game size | `Game_Size`, the Game view's size in physical pixels, which the host handles (see [Viewport](viewport.md#views)) |
 | Capture source | `Capture_Source`, the viewport that the host's screenshots and history ring read, which the host handles (see [Capture](capture.md#capture)) |

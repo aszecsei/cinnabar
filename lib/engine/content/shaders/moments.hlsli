@@ -22,9 +22,11 @@ static const float MOMENT_MIN_DEPTH = 0.00100050033;
 static const float MOMENT_MAX_ALPHA = 0.9999;
 
 // warp_depth maps a view depth to [-1, 1], on a log scale from the near plane to MOMENTS_FAR, so the moments spend
-// their precision evenly near and far.
-float warp_depth(float view_depth, float near) {
-	float t = log(max(view_depth, near) / near) / log(MOMENTS_FAR / near);
+// their precision evenly near and far. An orthographic projection (see view_projection.hlsli) has a far plane, and
+// its depths map evenly from the near plane to it.
+float warp_depth(float view_depth, float4 projection) {
+	float near = projection.z;
+	float t = projection.w != 0 ? (view_depth - near) / (projection.w - near) : log(max(view_depth, near) / near) / log(MOMENTS_FAR / near);
 	return saturate(t) * 2 - 1;
 }
 

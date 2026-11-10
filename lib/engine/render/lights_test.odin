@@ -12,16 +12,40 @@ import "cinnabar:core/jobs"
 import "cinnabar:engine/ecs"
 
 @(test)
+an_orthographic_views_clusters_slice_its_depth_evenly :: proc(t: ^testing.T) {
+	// A near plane at 0 has no exponential slices.
+	for near in ([]f32{0, 2}) {
+		projection := Orthographic{10, near, near + 64}
+		for k in 0 ..< CLUSTER_SLICES {
+			testing.expect_value(t, cluster_slice(near + f32(k) * 2 + 1, projection), k)
+		}
+		testing.expect_value(t, cluster_slice(near - 1, projection), 0)
+		testing.expect_value(t, cluster_slice(near + 1000, projection), CLUSTER_SLICES - 1)
+	}
+}
+
+@(test)
+an_orthographic_views_cascades_split_evenly :: proc(t: ^testing.T) {
+	splits := cascade_splits(0, 100, 0, 4)
+	testing.expect_value(t, splits, [SHADOW_CASCADES]f32{25, 50, 75, 100})
+	// Its corners are a box: as wide near as far.
+	c := projection_constants(orthographic_view(1, 10, 0, 100), 2)
+	testing.expect_value(t, view_corner(c, {1, 1}, 1), [3]f32{10, 5, 1})
+	testing.expect_value(t, view_corner(c, {-1, 1}, 90), [3]f32{-10, 5, 90})
+}
+
+@(test)
 clusters_slice_depth_exponentially :: proc(t: ^testing.T) {
 	near: f32 = 0.1
-	testing.expect_value(t, cluster_slice(near, near), 0)
+	projection := Perspective{1, near}
+	testing.expect_value(t, cluster_slice(near, projection), 0)
 	// Each slice's start, near * (far / near)^(k / slices), is in slice k.
 	for k in 0 ..< CLUSTER_SLICES {
 		depth := near * math.pow(f32(CLUSTER_FAR) / near, (f32(k) + 0.5) / CLUSTER_SLICES)
-		testing.expect_value(t, cluster_slice(depth, near), k)
+		testing.expect_value(t, cluster_slice(depth, projection), k)
 	}
 	// Beyond CLUSTER_FAR, the last slice reaches on.
-	testing.expect_value(t, cluster_slice(1e5, near), CLUSTER_SLICES - 1)
+	testing.expect_value(t, cluster_slice(1e5, projection), CLUSTER_SLICES - 1)
 	columns, rows := cluster_grid({1920, 1080})
 	testing.expect_value(t, columns, 30)
 	testing.expect_value(t, rows, 17)
@@ -110,7 +134,7 @@ light_setup :: proc(t: ^testing.T) -> ^Light_Fixture {
 	f.renderer = new(Renderer)
 	f.renderer.platform = &f.platform
 	lights_register(&f.renderer.lights, &f.world)
-	view := View{rotation = 1, vertical_fov = 1, near = 0.1}
+	view := View{rotation = 1, projection = Perspective{1, 0.1}}
 	f.frame = {renderer = f.renderer, view = view, size = {64, 32}, view_projection = view_projection(view, 2)}
 	return f
 }

@@ -21,7 +21,7 @@ public sealed class CaptureModelTests : IDisposable
         return Task.CompletedTask;
     });
 
-    static CaptureContext Context() => new("Edit", 0, ViewportKind.Scene, "E:/scenes/door.scene", new CameraInfo([0, 1 << 24, 0], [0, 1, 0], 0.5, -0.1, 1.05, 0.05),
+    static CaptureContext Context() => new("Edit", 0, ViewportKind.Scene, "E:/scenes/door.scene", new CameraInfo([0, 1 << 24, 0], [0, 1, 0], 0.5, -0.1, 1.05, 0.05, "Perspective", 10),
         EditorShell.DefaultViewportSettings, null, null,
         new ProfileSummary(10, 25, 16, 15, 9, 12, 20, 1, 2, 7.5f, 9, 22, 0, true, [new ProfileCost(ProfileCostKind.Pass, "world", ProfileCallback.None, 0, 1, 3.25f, 4)]),
         "mygame", 1234, ["mygame.dll"], Environment.ProcessId);

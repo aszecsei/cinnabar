@@ -356,7 +356,7 @@ add_sky_passes :: proc(f: ^Frame) {
 @(private)
 add_sky_background :: proc(f: ^Frame) {
 	sf := f.sky
-	if sf == nil {
+	if sf == nil || !sky_draws(f) {
 		return
 	}
 	g := f.graph
@@ -370,9 +370,13 @@ add_sky_background :: proc(f: ^Frame) {
 }
 
 // sky_draws is whether the atmosphere or a texture sky draws the frame's background, pre-exposed, so the world pass
-// clears to black under it and the exposure's histogram counts it.
+// clears to black under it and the exposure's histogram counts it. An orthographic view looks the same way at every
+// pixel, so it has no sky to show, and its background is the Environment's color.
 @(private)
 sky_draws :: proc(f: ^Frame) -> bool {
+	if is_orthographic(f.view) {
+		return false
+	}
 	return f.sky != nil || sky_texture_draws(f)
 }
 

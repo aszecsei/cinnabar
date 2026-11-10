@@ -425,6 +425,7 @@ public sealed class ContentBrowserView : DockPanel
         AssetKind.Audio => "audio",
         AssetKind.Font => "font",
         AssetKind.Ui => "UI document",
+        AssetKind.SpriteSheet => "sprite sheet",
         _ => "script",
     };
 
@@ -517,6 +518,7 @@ public sealed class ContentBrowserView : DockPanel
                     ("New Material", AssetTemplate.Material), ("New Material Function", AssetTemplate.MaterialFunction), ("New Mesh", AssetTemplate.Mesh),
                     ("New Prefab", AssetTemplate.Prefab), ("New Effect", AssetTemplate.Effect),
                     ("New Animation Graph", AssetTemplate.AnimationGraph), ("New UI Document", AssetTemplate.Ui),
+                    ("New Sprite Sheet", AssetTemplate.SpriteSheet),
                     ("New Folder", null),
                 })
             {

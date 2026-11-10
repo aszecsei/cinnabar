@@ -7,6 +7,7 @@
 #define AO_COMMON_HLSLI
 
 #include "cinnabar.hlsli"
+#include "view_projection.hlsli"
 #include "blue_noise.hlsli"
 
 // Matches Ao_Constants in lib/engine/render/ambient_occlusion.odin. The view's axes in the world turn the normals into
@@ -77,19 +78,22 @@ uint level_at(float pixels) {
 	return uint(clamp(round(log2(pixels) - LEVEL_OFFSET), 0, LEVELS - 1));
 }
 
+// ao_projection is the projection that drew a pixel: the camera's, or the view model's (see view_projection.hlsli).
+float4 ao_projection(bool view_model) {
+	return view_model ? constants.view_model : constants.projection;
+}
+
 // view_position is the position in view space (x right, y up, z forward) of a point on the screen, in pixels, from its
 // view depth and the projection that drew it.
 float3 view_position(float2 point_pixels, float z, bool view_model) {
-	float2 scale = view_model ? constants.view_model.xy : constants.projection.xy;
 	// The depth is the surface's at the point moved by the jitter, so a slope does not seem to bend.
 	float2 ndc = float2(point_pixels.x / constants.size.x * 2 - 1, 1 - point_pixels.y / constants.size.y * 2) - constants.jitter;
-	return float3(ndc / scale * z, z);
+	return view_position(ao_projection(view_model), ndc, z);
 }
 
 // screen_pixels is where a position in view space is on the screen, in pixels: view_position's inverse.
 float2 screen_pixels(float3 position, bool view_model) {
-	float2 scale = view_model ? constants.view_model.xy : constants.projection.xy;
-	float2 ndc = position.xy * scale / position.z + constants.jitter;
+	float2 ndc = view_ndc(ao_projection(view_model), position) + constants.jitter;
 	return float2((ndc.x + 1) * 0.5 * constants.size.x, (1 - ndc.y) * 0.5 * constants.size.y);
 }
 
@@ -149,20 +153,20 @@ bool ao_begin(uint3 id, out Ao_Pixel p) {
 	cn_rw_texture(constants.edges)[p.pixel] = pack_edges(edges(p.pixel, center));
 	p.view_model = center < 0;
 	float z = abs(center);
-	float near = p.view_model ? constants.view_model.z : constants.projection.z;
-	// The background is at the depth of a cleared pixel, near / 1e-7, and nothing occludes it.
-	if (z >= near * 1e7 * 0.5) {
+	float4 projection = ao_projection(p.view_model);
+	// The background is at the depth of a cleared pixel, near / 1e-7 or an orthographic view's far plane, and nothing
+	// occludes it.
+	if (is_orthographic(projection) ? z >= projection.w * 0.9999 : z >= projection.z * 1e7 * 0.5) {
 		cn_rw_texture(constants.output)[p.pixel] = 1;
 		return false;
 	}
 	p.position = view_position(float2(p.pixel) + 0.5, z, p.view_model);
 	float3 world_normal = octahedral(cn_texture(constants.normals).Load(int3(p.pixel, 0)).xy);
 	p.normal = normalize(float3(dot(world_normal, constants.right.xyz), dot(world_normal, constants.up.xyz), dot(world_normal, constants.forward.xyz)));
-	p.view = normalize(-p.position);
+	p.view = view_to_camera(projection, p.position);
 
-	// The radius in pixels at this depth: a pixel spans 2 z / (height * scale.y) meters.
-	float scale = p.view_model ? constants.view_model.y : constants.projection.y;
-	float full_pixels = constants.radius * constants.size.y * scale / (2 * z);
+	// The radius in pixels at this depth.
+	float full_pixels = constants.radius / view_pixel_meters(projection, z, constants.size.y);
 	p.pixels = min(full_pixels, MAX_PIXELS);
 	if (p.pixels < MIN_PIXELS) {
 		cn_rw_texture(constants.output)[p.pixel] = 1;

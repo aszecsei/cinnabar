@@ -113,7 +113,7 @@ public static class Gizmo
                 return best;
             case GizmoKind.Rotate:
                 // Only each ring's near half takes the mouse: the far half is behind the others.
-                var toCamera = (-center).Normalized();
+                var toCamera = -camera.ViewDirection(center);
                 for (var i = 0; i < 3; i++)
                 {
                     var (u, w) = (Axis(axes, (i + 1) % 3), Axis(axes, (i + 2) % 3));
@@ -260,7 +260,7 @@ public sealed class GizmoDrag
         }
     }
 
-    Vec3 Translation(Vec3 ray, Snapping? snap)
+    Vec3 Translation(ViewRay ray, Snapping? snap)
     {
         if (AxisIndex(Part) is { } i)
         {
@@ -286,7 +286,7 @@ public sealed class GizmoDrag
         return a * Snapping.Round(Vec3.Dot(moved, a), step.Meters) + b * Snapping.Round(Vec3.Dot(moved, b), step.Meters);
     }
 
-    Vec3 Ray(Vec2 mouse) => _camera.Ray(mouse, _width, _height);
+    ViewRay Ray(Vec2 mouse) => _camera.Ray(mouse, _width, _height);
 
     static int? AxisIndex(GizmoPart part) => part switch { GizmoPart.X => 0, GizmoPart.Y => 1, GizmoPart.Z => 2, _ => null };
 
@@ -308,30 +308,31 @@ public sealed class GizmoDrag
     Vec3 RotationAxis() => AxisIndex(Part) is { } i ? Gizmo.Axis(_axes, i) : _camera.Forward;
 
     // How far along an axis through the center the ray passes closest, in meters, or null when they are parallel.
-    double? Along(Vec3 axis, Vec3 ray)
+    double? Along(Vec3 axis, ViewRay ray)
     {
-        var b = Vec3.Dot(axis, ray);
+        var b = Vec3.Dot(axis, ray.Direction);
         var denominator = 1 - b * b;
         if (denominator < 1e-6)
         {
             return null;
         }
-        // The ray starts at the camera, which is the origin here.
-        var d = Vec3.Dot(axis, _center);
-        var e = Vec3.Dot(ray, _center);
+        // The center, from where the ray starts: the camera, or the pixel's point of an orthographic camera's plane.
+        var center = _center - ray.Origin;
+        var d = Vec3.Dot(axis, center);
+        var e = Vec3.Dot(ray.Direction, center);
         return (b * e - d) / denominator;
     }
 
     // Where the ray meets the plane through the center, or null when it runs along it or away from it.
-    Vec3? Plane(Vec3 normal, Vec3 ray)
+    Vec3? Plane(Vec3 normal, ViewRay ray)
     {
-        var facing = Vec3.Dot(normal, ray);
+        var facing = Vec3.Dot(normal, ray.Direction);
         if (Math.Abs(facing) < 1e-6)
         {
             return null;
         }
-        var t = Vec3.Dot(normal, _center) / facing;
-        return t > 0 ? ray * t : null;
+        var t = Vec3.Dot(normal, _center - ray.Origin) / facing;
+        return t > 0 ? ray.At(t) : null;
     }
 
     // The angle of the mouse about the rotation axis, in radians, counterclockwise as the axis points at the viewer. A
@@ -341,7 +342,7 @@ public sealed class GizmoDrag
     {
         var axis = RotationAxis();
         var (u, w) = Basis(axis);
-        if (Part != GizmoPart.View && Math.Abs(Vec3.Dot(axis, _center.Normalized())) > 0.15 && Plane(axis, Ray(mouse)) is { } hit)
+        if (Part != GizmoPart.View && Math.Abs(Vec3.Dot(axis, _camera.ViewDirection(_center))) > 0.15 && Plane(axis, Ray(mouse)) is { } hit)
         {
             var v = hit - _center;
             return Math.Atan2(Vec3.Dot(v, w), Vec3.Dot(v, u));

@@ -27,6 +27,7 @@ static partial class EditorCommands
     public const string NewEffect = "content.newEffect";
     public const string NewAnimationGraph = "content.newAnimationGraph";
     public const string NewUiDocument = "content.newUiDocument";
+    public const string NewSpriteSheet = "content.newSpriteSheet";
     public const string MakePrefab = "prefab.make";
     public const string UnpackPrefab = "prefab.unpack";
     public const string UnpackPrefabCompletely = "prefab.unpackCompletely";
@@ -124,6 +125,8 @@ static partial class EditorCommands
     public const string CollapseRibbon = "view.collapseRibbon";
     public const string ViewportScale = "viewport.scale";
     public const string SceneLayout = "viewport.layout";
+    public const string ViewProjection = "viewport.projection";
+    public const string View2D = "viewport.view2d";
 
     /// <summary>The ID of the command that puts a scene view, by its number, in the Scene or takes it out.</summary>
     public static string SceneViewToggle(int index) => $"viewport.view.{index}";

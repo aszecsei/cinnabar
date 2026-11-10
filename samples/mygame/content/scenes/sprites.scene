@@ -1,0 +1,473 @@
+# The 2D scene, which F7 in mygame cycles to (see docs/rendering/2d.md#sprite-renderers): an orthographic camera that
+# looks along +z at sprites in the xy plane. A hero walks over a row of tiles and plays its sheet's animations by name;
+# coins spin; three cards overlap by their layers and orders, not by their depths; and of two rows of crates, the lit
+# one takes the lamp's light and the unlit one shows its colors. A texel is 5 pixels at a height of 720, so the snapped
+# sprites stay sharp. Positions are raw World_Position values in units of 2^-24 m. The editor writes this file; see
+# docs/editor/document-and-scenes.md#scenes.
+scene 2
+
+entity 2d5e000000000001
+name = "Camera"
+component 1 Transform
+	position = [2516582400000000000, 0, -167772160]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 32 Camera
+	near = 0.1
+	projection = Orthographic
+	orthographic_height = 9
+	far = 50
+
+entity 2d5e000000000002
+name = "Global Volume"
+component 1 Transform
+	position = [2516582400000000000, 0, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 42 Volume
+	shape = Global
+component 43 Anti_Aliasing
+	off = true
+component 44 Exposure
+	mode = Manual
+	exposure = 1
+component 45 Tone_Mapping
+	tone_mapper = Pbr_Neutral
+component 49 Environment
+	background = [0.015, 0.025, 0.06]
+	sky = [0.5, 0.5, 0.55]
+	ground = [0.5, 0.5, 0.55]
+	ambient_intensity = 0.35
+
+entity 2d5e000000000003
+name = "Tile 1"
+component 1 Transform
+	position = [2516582399865782272, -67108864, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 56 Sprite_Renderer
+	sheet = $6f1c2a9e4b7d4c0e9a3f5d8b1e2c7a50
+	frame = 6
+	layer = -1
+	pixel_snap = true
+
+entity 2d5e000000000004
+name = "Tile 2"
+component 1 Transform
+	position = [2516582399882559488, -67108864, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 56 Sprite_Renderer
+	sheet = $6f1c2a9e4b7d4c0e9a3f5d8b1e2c7a50
+	frame = 6
+	layer = -1
+	pixel_snap = true
+
+entity 2d5e000000000005
+name = "Tile 3"
+component 1 Transform
+	position = [2516582399899336704, -67108864, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 56 Sprite_Renderer
+	sheet = $6f1c2a9e4b7d4c0e9a3f5d8b1e2c7a50
+	frame = 6
+	layer = -1
+	pixel_snap = true
+
+entity 2d5e000000000006
+name = "Tile 4"
+component 1 Transform
+	position = [2516582399916113920, -67108864, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 56 Sprite_Renderer
+	sheet = $6f1c2a9e4b7d4c0e9a3f5d8b1e2c7a50
+	frame = 6
+	layer = -1
+	pixel_snap = true
+
+entity 2d5e000000000007
+name = "Tile 5"
+component 1 Transform
+	position = [2516582399932891136, -67108864, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 56 Sprite_Renderer
+	sheet = $6f1c2a9e4b7d4c0e9a3f5d8b1e2c7a50
+	frame = 6
+	layer = -1
+	pixel_snap = true
+
+entity 2d5e000000000008
+name = "Tile 6"
+component 1 Transform
+	position = [2516582399949668352, -67108864, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 56 Sprite_Renderer
+	sheet = $6f1c2a9e4b7d4c0e9a3f5d8b1e2c7a50
+	frame = 6
+	layer = -1
+	pixel_snap = true
+
+entity 2d5e000000000009
+name = "Tile 7"
+component 1 Transform
+	position = [2516582399966445568, -67108864, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 56 Sprite_Renderer
+	sheet = $6f1c2a9e4b7d4c0e9a3f5d8b1e2c7a50
+	frame = 6
+	layer = -1
+	pixel_snap = true
+
+entity 2d5e00000000000a
+name = "Tile 8"
+component 1 Transform
+	position = [2516582399983222784, -67108864, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 56 Sprite_Renderer
+	sheet = $6f1c2a9e4b7d4c0e9a3f5d8b1e2c7a50
+	frame = 6
+	layer = -1
+	pixel_snap = true
+
+entity 2d5e00000000000b
+name = "Tile 9"
+component 1 Transform
+	position = [2516582400000000000, -67108864, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 56 Sprite_Renderer
+	sheet = $6f1c2a9e4b7d4c0e9a3f5d8b1e2c7a50
+	frame = 6
+	layer = -1
+	pixel_snap = true
+
+entity 2d5e00000000000c
+name = "Tile 10"
+component 1 Transform
+	position = [2516582400016777216, -67108864, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 56 Sprite_Renderer
+	sheet = $6f1c2a9e4b7d4c0e9a3f5d8b1e2c7a50
+	frame = 6
+	layer = -1
+	pixel_snap = true
+
+entity 2d5e00000000000d
+name = "Tile 11"
+component 1 Transform
+	position = [2516582400033554432, -67108864, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 56 Sprite_Renderer
+	sheet = $6f1c2a9e4b7d4c0e9a3f5d8b1e2c7a50
+	frame = 6
+	layer = -1
+	pixel_snap = true
+
+entity 2d5e00000000000e
+name = "Tile 12"
+component 1 Transform
+	position = [2516582400050331648, -67108864, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 56 Sprite_Renderer
+	sheet = $6f1c2a9e4b7d4c0e9a3f5d8b1e2c7a50
+	frame = 6
+	layer = -1
+	pixel_snap = true
+
+entity 2d5e00000000000f
+name = "Tile 13"
+component 1 Transform
+	position = [2516582400067108864, -67108864, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 56 Sprite_Renderer
+	sheet = $6f1c2a9e4b7d4c0e9a3f5d8b1e2c7a50
+	frame = 6
+	layer = -1
+	pixel_snap = true
+
+entity 2d5e000000000010
+name = "Tile 14"
+component 1 Transform
+	position = [2516582400083886080, -67108864, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 56 Sprite_Renderer
+	sheet = $6f1c2a9e4b7d4c0e9a3f5d8b1e2c7a50
+	frame = 6
+	layer = -1
+	pixel_snap = true
+
+entity 2d5e000000000011
+name = "Tile 15"
+component 1 Transform
+	position = [2516582400100663296, -67108864, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 56 Sprite_Renderer
+	sheet = $6f1c2a9e4b7d4c0e9a3f5d8b1e2c7a50
+	frame = 6
+	layer = -1
+	pixel_snap = true
+
+entity 2d5e000000000012
+name = "Tile 16"
+component 1 Transform
+	position = [2516582400117440512, -67108864, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 56 Sprite_Renderer
+	sheet = $6f1c2a9e4b7d4c0e9a3f5d8b1e2c7a50
+	frame = 6
+	layer = -1
+	pixel_snap = true
+
+entity 2d5e000000000013
+name = "Tile 17"
+component 1 Transform
+	position = [2516582400134217728, -67108864, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 56 Sprite_Renderer
+	sheet = $6f1c2a9e4b7d4c0e9a3f5d8b1e2c7a50
+	frame = 6
+	layer = -1
+	pixel_snap = true
+
+entity 2d5e000000000014
+name = "Hero"
+component 1 Transform
+	position = [2516582400000000000, -50331648, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 56 Sprite_Renderer
+	sheet = $6f1c2a9e4b7d4c0e9a3f5d8b1e2c7a50
+	animation = 2
+	layer = 2
+	pixel_snap = true
+behaviour 6f1c2a9e4b7d4c0e9a3f5d8b1e2c7a52
+
+entity 2d5e000000000015
+name = "Coin 1"
+component 1 Transform
+	position = [2516582399899336704, -25165824, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 56 Sprite_Renderer
+	sheet = $6f1c2a9e4b7d4c0e9a3f5d8b1e2c7a51
+	animation = 1
+	layer = 1
+	pixel_snap = true
+
+entity 2d5e000000000016
+name = "Coin 2"
+component 1 Transform
+	position = [2516582399924502528, -25165824, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 56 Sprite_Renderer
+	sheet = $6f1c2a9e4b7d4c0e9a3f5d8b1e2c7a51
+	animation = 1
+	layer = 1
+	pixel_snap = true
+
+entity 2d5e000000000017
+name = "Coin 3"
+component 1 Transform
+	position = [2516582399949668352, -25165824, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 56 Sprite_Renderer
+	sheet = $6f1c2a9e4b7d4c0e9a3f5d8b1e2c7a51
+	animation = 1
+	layer = 1
+	pixel_snap = true
+
+entity 2d5e000000000018
+name = "Card Red"
+component 1 Transform
+	position = [2516582400067108864, 25165824, -33554432]
+	rotation = [0, 0, 0, 1]
+	scale = [2, 2, 1]
+component 56 Sprite_Renderer
+	sheet = $6f1c2a9e4b7d4c0e9a3f5d8b1e2c7a50
+	frame = 8
+	color = [0.8, 0.03, 0.03]
+	layer = 3
+	pixel_snap = true
+
+entity 2d5e000000000019
+name = "Card Green"
+component 1 Transform
+	position = [2516582400079691776, 16777216, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [2, 2, 1]
+component 56 Sprite_Renderer
+	sheet = $6f1c2a9e4b7d4c0e9a3f5d8b1e2c7a50
+	frame = 8
+	color = [0.04, 0.55, 0.08]
+	layer = 4
+	pixel_snap = true
+
+entity 2d5e00000000001a
+name = "Card Blue"
+component 1 Transform
+	position = [2516582400092274688, 8388608, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [2, 2, 1]
+component 56 Sprite_Renderer
+	sheet = $6f1c2a9e4b7d4c0e9a3f5d8b1e2c7a50
+	frame = 8
+	color = [0.04, 0.12, 0.85]
+	layer = 4
+	order = 1
+	pixel_snap = true
+
+entity 2d5e00000000001b
+name = "Card Yellow"
+component 1 Transform
+	position = [2516582400104857600, 0, 50331648]
+	rotation = [0, 0, 0, 1]
+	scale = [2, 2, 1]
+component 56 Sprite_Renderer
+	sheet = $6f1c2a9e4b7d4c0e9a3f5d8b1e2c7a50
+	frame = 8
+	color = [0.9, 0.7, 0.03]
+	opacity = 0.6
+	layer = 5
+	pixel_snap = true
+
+entity 2d5e00000000001c
+name = "Lit Crate 1"
+component 1 Transform
+	position = [2516582399899336704, 41943040, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 56 Sprite_Renderer
+	sheet = $6f1c2a9e4b7d4c0e9a3f5d8b1e2c7a50
+	frame = 7
+	lit = true
+	pixel_snap = true
+
+entity 2d5e00000000001d
+name = "Unlit Crate 1"
+component 1 Transform
+	position = [2516582399899336704, 16777216, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 56 Sprite_Renderer
+	sheet = $6f1c2a9e4b7d4c0e9a3f5d8b1e2c7a50
+	frame = 7
+	pixel_snap = true
+
+entity 2d5e00000000001e
+name = "Lit Crate 2"
+component 1 Transform
+	position = [2516582399924502528, 41943040, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 56 Sprite_Renderer
+	sheet = $6f1c2a9e4b7d4c0e9a3f5d8b1e2c7a50
+	frame = 7
+	lit = true
+	pixel_snap = true
+
+entity 2d5e00000000001f
+name = "Unlit Crate 2"
+component 1 Transform
+	position = [2516582399924502528, 16777216, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 56 Sprite_Renderer
+	sheet = $6f1c2a9e4b7d4c0e9a3f5d8b1e2c7a50
+	frame = 7
+	pixel_snap = true
+
+entity 2d5e000000000020
+name = "Lit Crate 3"
+component 1 Transform
+	position = [2516582399949668352, 41943040, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 56 Sprite_Renderer
+	sheet = $6f1c2a9e4b7d4c0e9a3f5d8b1e2c7a50
+	frame = 7
+	lit = true
+	pixel_snap = true
+
+entity 2d5e000000000021
+name = "Unlit Crate 3"
+component 1 Transform
+	position = [2516582399949668352, 16777216, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 56 Sprite_Renderer
+	sheet = $6f1c2a9e4b7d4c0e9a3f5d8b1e2c7a50
+	frame = 7
+	pixel_snap = true
+
+entity 2d5e000000000022
+name = "Lit Crate 4"
+component 1 Transform
+	position = [2516582399974834176, 41943040, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 56 Sprite_Renderer
+	sheet = $6f1c2a9e4b7d4c0e9a3f5d8b1e2c7a50
+	frame = 7
+	lit = true
+	pixel_snap = true
+
+entity 2d5e000000000023
+name = "Unlit Crate 4"
+component 1 Transform
+	position = [2516582399974834176, 16777216, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 56 Sprite_Renderer
+	sheet = $6f1c2a9e4b7d4c0e9a3f5d8b1e2c7a50
+	frame = 7
+	pixel_snap = true
+
+entity 2d5e000000000024
+name = "Lit Crate 5"
+component 1 Transform
+	position = [2516582400000000000, 41943040, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 56 Sprite_Renderer
+	sheet = $6f1c2a9e4b7d4c0e9a3f5d8b1e2c7a50
+	frame = 7
+	lit = true
+	pixel_snap = true
+
+entity 2d5e000000000025
+name = "Unlit Crate 5"
+component 1 Transform
+	position = [2516582400000000000, 16777216, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 56 Sprite_Renderer
+	sheet = $6f1c2a9e4b7d4c0e9a3f5d8b1e2c7a50
+	frame = 7
+	pixel_snap = true
+
+entity 2d5e000000000026
+name = "Lamp"
+component 1 Transform
+	position = [2516582399949668352, 53687091, -12582912]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [1, 0.75, 0.45]
+	intensity = 30
+	range = 5

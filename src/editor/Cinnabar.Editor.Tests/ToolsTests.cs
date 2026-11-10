@@ -1,6 +1,7 @@
 using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Maths;
 using Cinnabar.Editor.Tools;
+using CameraProjection = Cinnabar.Editor.Link.Protocol.CameraProjection;
 using GizmoKind = Cinnabar.Editor.Link.Protocol.GizmoKind;
 using GizmoPart = Cinnabar.Editor.Link.Protocol.GizmoPart;
 
@@ -20,15 +21,120 @@ public sealed class ToolsTests
     {
         var camera = new EditorCamera();
         var center = camera.Ray(new Vec2(Width / 2, Height / 2), Width, Height);
-        Assert.Equal(Vec3.UnitZ, center);
+        Assert.Equal(new ViewRay(Vec3.Zero, Vec3.UnitZ), center);
 
         // A point ahead and up shows above the middle, and its ray comes back to it.
         var point = new Vec3(1, 2, 10);
         var pixel = camera.Project(point, Width, Height)!.Value;
         Assert.True(pixel.Y < Height / 2 && pixel.X > Width / 2);
         var ray = camera.Ray(pixel, Width, Height);
-        Near(0, (ray - point.Normalized()).Length);
+        Assert.Equal(Vec3.Zero, ray.Origin);
+        Near(0, (ray.Direction - point.Normalized()).Length);
         Assert.Null(camera.Project(new Vec3(0, 0, -1), Width, Height));
+    }
+
+    [Fact]
+    public void AnOrthographicCameraSeesAlongParallelRaysAndZoomsInPlace()
+    {
+        var camera = new EditorCamera();
+        camera.LookAt([0, 0, 0], 10, 0, 0, CameraProjection.Orthographic);
+        Assert.True(camera.IsOrthographic);
+        // It shows what a perspective camera shows 10 m away, from at least its standoff.
+        Near(2 * 10 * Math.Tan(camera.VerticalFov / 2), camera.OrthographicHeight);
+        Near(EditorCamera.OrthographicStandoff, camera.PivotDistance);
+
+        // Every ray looks the same way, each from its own point of the camera's plane.
+        var center = camera.Ray(new Vec2(Width / 2, Height / 2), Width, Height);
+        var corner = camera.Ray(new Vec2(Width, 0), Width, Height);
+        Assert.Equal(Vec3.UnitZ, center.Direction);
+        Assert.Equal(Vec3.UnitZ, corner.Direction);
+        Near(0, center.Origin.Length);
+        Near(camera.OrthographicHeight / 2, corner.Origin.Y);
+        Near(camera.OrthographicHeight / 2 * Width / Height, corner.Origin.X);
+
+        // A point shows at the same place however far it is, and its ray passes through it.
+        var point = new Vec3(1, 2, 30);
+        var pixel = camera.Project(point, Width, Height)!.Value;
+        Near(0, (camera.Project(point with { Z = 90 }, Width, Height)!.Value - pixel).Length);
+        var ray = camera.Ray(pixel, Width, Height);
+        Near(0, (ray.At(30) - point).Length);
+        Assert.Null(camera.Project(new Vec3(0, 0, -1), Width, Height));
+
+        // A pixel is as large at every distance, so a gizmo is too.
+        Near(camera.OrthographicHeight / Height, camera.PixelSize(1, Height));
+        Near(camera.PixelSize(1, Height), camera.PixelSize(500, Height));
+        Near(Gizmo.Size(camera, new Vec3(0, 0, 5), Height), Gizmo.Size(camera, new Vec3(0, 0, 80), Height));
+
+        // The wheel zooms: it shows less, from where it is.
+        var (position, height) = (camera.Position, camera.OrthographicHeight);
+        camera.Dolly(1);
+        Assert.True(camera.OrthographicHeight < height);
+        Assert.Equal(position, camera.Position);
+        // Panning moves it by the pixels' size, and framing shows a sphere whole.
+        camera.Pan(100, 0, Height);
+        Near(-100 * camera.OrthographicHeight / Height, Vec3.Between(position, camera.Position).X);
+        camera.Frame([0, 0, 0], 3);
+        Near(6.6, camera.OrthographicHeight);
+        Near(0, Vec3.Between(camera.Pivot, [0, 0, 0]).Length, 1e-4);
+
+        // Its message says so.
+        var message = camera.ToMessage(2);
+        Assert.Equal(CameraProjection.Orthographic, message.Projection);
+        Assert.Equal((float)camera.OrthographicHeight, message.OrthographicHeight);
+    }
+
+    [Fact]
+    public void ChangingTheProjectionKeepsThePivotAndWhatShowsAtIt()
+    {
+        var camera = new EditorCamera();
+        camera.Place([0, 2L << 24, 0], 0.4, 0.3);
+        var pivot = camera.Pivot;
+        var shows = 2 * camera.PivotDistance * Math.Tan(camera.VerticalFov / 2);
+        var changes = 0;
+        camera.Changed += () => changes++;
+
+        camera.SetProjection(CameraProjection.Orthographic);
+        Near(shows, camera.OrthographicHeight);
+        Near(0, Vec3.Between(pivot, camera.Pivot).Length, 1e-4);
+        Assert.Equal(1, changes);
+        camera.SetProjection(CameraProjection.Orthographic);
+        Assert.Equal(1, changes);
+
+        // Zoomed to half, then back to perspective: the pivot is half as far as it was.
+        camera.SetOrthographicHeight(shows / 2);
+        camera.SetProjection(CameraProjection.Perspective);
+        Near(2.5, camera.PivotDistance);
+        Near(0, Vec3.Between(pivot, camera.Pivot).Length, 1e-4);
+
+        // Orbiting and looking around are a perspective camera's.
+        camera.SetProjection(CameraProjection.Orthographic);
+        camera.Orbit(5, 0);
+        Assert.False(camera.IsOrthographic);
+        camera.SetProjection(CameraProjection.Orthographic);
+        camera.Look(5, 0);
+        Assert.False(camera.IsOrthographic);
+    }
+
+    [Fact]
+    public void AGizmoDragsAlongItsAxisInAnOrthographicView()
+    {
+        // A camera 50 m back from the origin, looking along +z, that shows 10 m from bottom to top.
+        var camera = new EditorCamera();
+        camera.LookAt([0, 0, 0], 10, 0, 0, CameraProjection.Orthographic);
+        camera.SetOrthographicHeight(10);
+        var center = camera.RelativeTo([0, 0, 0]);
+        var middle = new Vec2(Width / 2, Height / 2);
+        var drag = new GizmoDrag(GizmoKind.Translate, GizmoPart.X, camera, center, Quat.Identity, middle, Width, Height);
+        // A quarter of the frame's height to the right is 2.5 m along x, whatever the distance.
+        var change = drag.Update(middle + new Vec2(Height / 4, 0), null);
+        Near(2.5, change.Translation.X);
+        Near(0, change.Translation.Y);
+        Near(0, change.Translation.Z);
+        // The plane's drag follows the mouse too.
+        var plane = new GizmoDrag(GizmoKind.Translate, GizmoPart.XY, camera, center, Quat.Identity, middle, Width, Height);
+        var moved = plane.Update(middle + new Vec2(Height / 10, -Height / 5), null).Translation;
+        Near(1, moved.X);
+        Near(2, moved.Y);
     }
 
     [Fact]
