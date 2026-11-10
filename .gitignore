@@ -10,3 +10,6 @@ obj/
 *.user.settings
 samples/intel/downloads/
 samples/intel/content/.unpacked/
+# What odin test builds in the working directory, such as link.exe for lib/engine/editor/link.
+/*.exe
+/*.pdb
