@@ -5,79 +5,85 @@ using Cinnabar.Editor.Shell;
 namespace Cinnabar.Editor.Viewport;
 
 /// <summary>
-/// The Scene document's view: the scene views that the shell's layout shows (see docs/editor/viewport.md#views), each a
-/// <see cref="ViewportView"/>. Single is the first alone. Quad is two by two, with splitters between the views: Perspective
-/// at the top left, Top at the top right, Front at the bottom left and Side at the bottom right. A new layout keeps the
-/// first view as it is, so its target stays, and adds or drops the others.
+/// The Scene document's view: the scene views that are in it (<see cref="EditorShell.SceneViews"/>), each a
+/// <see cref="ViewportView"/>, placed by <see cref="SceneGrid"/> with splitters between them (see
+/// docs/editor/viewport.md#views). A change of the views keeps every view that stays in the tree, so its target stays,
+/// and moves it to its new cells; the views that leave are removed, and the ones that enter are added. The splitters'
+/// positions are not kept: a new arrangement starts with equal tracks.
 /// </summary>
-public sealed class SceneLayoutView : Grid
+public class SceneLayoutView : Grid
 {
     const double SplitterSize = 4;
 
     readonly EditorShell _shell;
-    // The first view stays in the tree across layouts, so that changing the layout does not close and open it.
-    readonly ViewportView _first;
+    readonly Dictionary<int, ViewportView> _views = [];
+    readonly List<Control> _splitters = [];
 
     public SceneLayoutView(EditorShell shell)
     {
         _shell = shell;
-        _first = new ViewportView(shell, shell.Viewports[0]);
         Background = Brushes.Black;
         AttachedToVisualTree += (_, _) =>
         {
-            _shell.SceneLayoutChanged += Arrange;
+            _shell.SceneViewsChanged += Arrange;
             Arrange();
         };
-        DetachedFromVisualTree += (_, _) => _shell.SceneLayoutChanged -= Arrange;
+        DetachedFromVisualTree += (_, _) => _shell.SceneViewsChanged -= Arrange;
         Arrange();
     }
 
-    void Arrange()
+    /// <summary>A splitter that resizes the columns, or the rows. Tests have no platform for the real one.</summary>
+    protected virtual Control CreateSplitter(bool vertical) =>
+        new GridSplitter { ResizeDirection = vertical ? GridResizeDirection.Columns : GridResizeDirection.Rows };
+
+    // Public to the tests, which have no visual tree to raise the shell's event on attach.
+    internal void Arrange()
     {
-        var quad = _shell.SceneLayout == SceneLayout.Quad;
-        // The other views and the splitters leave the tree, which hides the views' sessions and closes them in the game.
-        for (var i = Children.Count - 1; i >= 0; i--)
+        var grid = SceneGrid.Arrange(_shell.SceneViews);
+        var wanted = grid.Cells.Select(c => c.View).ToHashSet();
+        // The views that leave the Scene leave the tree, which hides their sessions and closes them in the game, and so do
+        // the old splitters. A view that stays is not touched but for its cell.
+        Children.RemoveAll(_splitters);
+        _splitters.Clear();
+        foreach (var gone in _views.Keys.Where(i => !wanted.Contains(i)).ToList())
         {
-            if (Children[i] != _first)
-            {
-                Children.RemoveAt(i);
-            }
+            Children.Remove(_views[gone]);
+            _views.Remove(gone);
         }
         ColumnDefinitions.Clear();
         RowDefinitions.Clear();
-        ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star));
-        RowDefinitions.Add(new RowDefinition(GridLength.Star));
-        if (quad)
+        for (var column = 0; column < grid.Columns; column++)
         {
-            ColumnDefinitions.Add(new ColumnDefinition(new GridLength(SplitterSize)));
-            ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star));
-            RowDefinitions.Add(new RowDefinition(new GridLength(SplitterSize)));
-            RowDefinitions.Add(new RowDefinition(GridLength.Star));
+            ColumnDefinitions.Add(new ColumnDefinition(column % 2 == 0 ? GridLength.Star : new GridLength(SplitterSize)));
         }
-        SetColumn(_first, 0);
-        SetRow(_first, 0);
-        if (!Children.Contains(_first))
+        for (var row = 0; row < grid.Rows; row++)
         {
-            Children.Add(_first);
+            RowDefinitions.Add(new RowDefinition(row % 2 == 0 ? GridLength.Star : new GridLength(SplitterSize)));
         }
-        if (!quad)
+        foreach (var cell in grid.Cells)
         {
-            return;
+            if (!_views.TryGetValue(cell.View, out var view))
+            {
+                _views[cell.View] = view = new ViewportView(_shell, _shell.Viewports[cell.View]);
+            }
+            SetRow(view, cell.Row);
+            SetColumn(view, cell.Column);
+            SetRowSpan(view, cell.RowSpan);
+            SetColumnSpan(view, cell.ColumnSpan);
+            if (!Children.Contains(view))
+            {
+                Children.Add(view);
+            }
         }
-        foreach (var viewport in _shell.SceneLayoutViews.Skip(1))
+        foreach (var splitter in grid.Splitters)
         {
-            var view = new ViewportView(_shell, viewport);
-            SetColumn(view, viewport.Index % 2 * 2);
-            SetRow(view, viewport.Index / 2 * 2);
-            Children.Add(view);
+            var control = CreateSplitter(splitter.Vertical);
+            _splitters.Add(control);
+            SetRow(control, splitter.Row);
+            SetColumn(control, splitter.Column);
+            SetRowSpan(control, splitter.RowSpan);
+            SetColumnSpan(control, splitter.ColumnSpan);
+            Children.Add(control);
         }
-        var across = new GridSplitter { ResizeDirection = GridResizeDirection.Columns };
-        SetColumn(across, 1);
-        SetRowSpan(across, RowDefinitions.Count);
-        Children.Add(across);
-        var down = new GridSplitter { ResizeDirection = GridResizeDirection.Rows };
-        SetRow(down, 1);
-        SetColumnSpan(down, ColumnDefinitions.Count);
-        Children.Add(down);
     }
 }

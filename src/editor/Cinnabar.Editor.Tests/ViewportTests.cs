@@ -307,63 +307,111 @@ public sealed class ViewportTests : IDisposable
         Assert.Equal(1L << 24, shell.Viewports[3].Camera.Position[1]);
     }
 
-    // --- The Scene's layout ---
+    // --- The Scene's views ---
+
+    const SceneViewSet P = SceneViewSet.Perspective;
+    const SceneViewSet T = SceneViewSet.Top;
+    const SceneViewSet F = SceneViewSet.Front;
+    const SceneViewSet S = SceneViewSet.Side;
 
     [Fact]
-    public void TheSingleLayoutShowsTheFirstViewAndTheQuadAllFour()
+    public void TheSceneStartsWithThePerspectiveViewAloneAndTheTogglesChangeItsViews()
     {
         using var shell = NewShell(show: false);
-        Assert.Equal(SceneLayout.Single, shell.SceneLayout);
-        Assert.Equal([0], shell.SceneLayoutViews.Select(v => v.Index));
+        Assert.Equal(P, shell.SceneViews);
+        Assert.Equal([0], shell.SceneDocumentViews.Select(v => v.Index));
         var changes = 0;
-        shell.SceneLayoutChanged += () => changes++;
+        shell.SceneViewsChanged += () => changes++;
 
-        shell.SetSceneLayout(SceneLayout.Quad);
-
-        Assert.Equal([0, 1, 2, 3], shell.SceneLayoutViews.Select(v => v.Index));
+        Assert.True(shell.ToggleSceneView(2));
+        Assert.Equal(P | F, shell.SceneViews);
+        Assert.Equal([0, 2], shell.SceneDocumentViews.Select(v => v.Index));
         Assert.Equal(1, changes);
-        shell.SetSceneLayout(SceneLayout.Quad);
+        // The same set again changes nothing.
+        Assert.True(shell.SetSceneViews(P | F));
         Assert.Equal(1, changes);
-        shell.SetSceneLayout(SceneLayout.Single);
-        Assert.Equal([0], shell.SceneLayoutViews.Select(v => v.Index));
+        Assert.True(shell.ToggleSceneView(0));
+        Assert.Equal(F, shell.SceneViews);
+        Assert.Equal(2, changes);
     }
 
     [Fact]
-    public void AQuadOpensEachViewOnceAndTheSingleLayoutClosesTheOthers()
+    public void TheLastViewCannotBeToggledOut()
     {
         using var shell = NewShell(show: false);
-        // The Scene document lays out one view, and the layout's controls show their sessions once they have a size.
+        var toggle = shell.Commands.Get(EditorCommands.SceneViewToggle(0));
+        Assert.False(toggle.CanExecute);
+        Assert.False(shell.CanToggleSceneView(0));
+
+        Assert.False(shell.ToggleSceneView(0));
+        Assert.False(shell.SetSceneViews(SceneViewSet.None));
+
+        Assert.Equal(P, shell.SceneViews);
+        shell.ToggleSceneView(3);
+        Assert.True(toggle.CanExecute);
+        Assert.True(toggle.IsChecked);
+        Assert.True(shell.Commands.Get(EditorCommands.SceneViewToggle(3)).IsChecked);
+        Assert.False(shell.Commands.Get(EditorCommands.SceneViewToggle(1)).IsChecked);
+        shell.Commands.Get(EditorCommands.SceneViewToggle(0)).Execute();
+        Assert.Equal(S, shell.SceneViews);
+        Assert.False(shell.Commands.Get(EditorCommands.SceneViewToggle(3)).CanExecute);
+    }
+
+    [Fact]
+    public void ThePresetsSetTheTogglesAndTheCurrentOneIsDerivedFromThem()
+    {
+        using var shell = NewShell(show: false);
+        var command = (ChoiceCommand)shell.Commands.Get(EditorCommands.SceneLayout);
+        Assert.Equal(["Single", "Two Side by Side", "Quad", "Custom"], command.Options);
+        Assert.Equal("Single", command.Selected);
+
+        command.Select("Quad");
+        Assert.Equal(SceneViewSet.All, shell.SceneViews);
+        Assert.Equal("Quad", command.Selected);
+        command.Select("Two Side by Side");
+        Assert.Equal(P | T, shell.SceneViews);
+        shell.ToggleSceneView(3);
+        Assert.Equal("Custom", command.Selected);
+        Assert.Equal("Custom", shell.ScenePresetName);
+        command.Select("Single");
+        Assert.Equal(P, shell.SceneViews);
+        // Custom is not a preset to choose.
+        shell.ToggleSceneView(1);
+        command.Select("Custom");
+        Assert.Equal(P | T, shell.SceneViews);
+    }
+
+    [Fact]
+    public void AViewThatEntersOpensOnceAndOneThatLeavesClosesOnceAndTheOthersAreNotTouched()
+    {
+        using var shell = NewShell(show: false);
+        // The Scene document's controls show their sessions once they have a size.
         Show(shell, 0, 800, 450);
-        Assert.Equal([0u], _sent.OfType<OpenViewport>().Select(o => o.Viewport));
-        shell.SetSceneLayout(SceneLayout.Quad);
         _sent.Clear();
-        foreach (var index in new[] { 1, 2, 3 })
-        {
-            Show(shell, index, 400, 225);
-        }
-        // The first view is resized by the quad, and the other three open once each.
+
+        // A change of the views sends nothing by itself: the game hears of the controls that appear and go.
+        shell.SetSceneViews(P | T | F);
+        Assert.DoesNotContain(_sent, m => m is OpenViewport or CloseViewport);
+        // The Perspective view stays, and only its size changes.
         Show(shell, 0, 400, 225);
+        Show(shell, 1, 400, 225);
+        Show(shell, 2, 400, 225);
+        Assert.Equal([(0u, 400), (1u, 400), (2u, 400)], _sent.OfType<OpenViewport>().Select(o => (o.Viewport, o.Width)));
+        Assert.Equal([1u, 2u], _sent.OfType<EditorCamera>().Select(c => c.Viewport));
 
-        Assert.Equal([(1u, 400), (2u, 400), (3u, 400), (0u, 400)], _sent.OfType<OpenViewport>().Select(o => (o.Viewport, o.Width)));
-        Assert.All(_sent.OfType<OpenViewport>(), o => Assert.Equal(ViewportKind.Scene, o.Kind));
-        Assert.Equal([1u, 2u, 3u], _sent.OfType<EditorCamera>().Select(c => c.Viewport));
-
-        shell.SetSceneLayout(SceneLayout.Single);
+        shell.SetSceneViews(P | F);
         _sent.Clear();
-        foreach (var index in new[] { 1, 2, 3 })
-        {
-            Hide(shell, index);
-        }
-
-        Assert.Equal([1u, 2u, 3u], _sent.OfType<CloseViewport>().Select(c => c.Viewport));
-        Assert.Equal([0], shell.ShownViewports.Select(v => v.Index));
+        Hide(shell, 1);
+        Assert.Equal([1u], _sent.OfType<CloseViewport>().Select(c => c.Viewport));
+        Assert.Empty(_sent.OfType<OpenViewport>());
+        Assert.Equal([0, 2], shell.ShownViewports.Select(v => v.Index));
     }
 
     [Fact]
     public void TheGameTabInFrontClosesEveryEditView()
     {
         using var shell = NewShell(show: false);
-        shell.SetSceneLayout(SceneLayout.Quad);
+        shell.SetSceneViews(SceneViewSet.All);
         foreach (var index in new[] { 0, 1, 2, 3 })
         {
             Show(shell, index, 400, 225);
@@ -384,10 +432,51 @@ public sealed class ViewportTests : IDisposable
     }
 
     [Fact]
+    public void AViewThatIsToggledInForTheFirstTimeStartsAlongItsAxis()
+    {
+        using var shell = NewShell();
+        shell.Camera.Place([0, 3L << 24, 0], 0.5, 0.25);
+
+        shell.SetSceneViews(P | S);
+        _sent.Clear();
+        Show(shell, 3, 400, 225);
+
+        var camera = Assert.Single(_sent.OfType<EditorCamera>());
+        Assert.Equal(3u, camera.Viewport);
+        Assert.True(Vec3.Dot(shell.Viewports[3].Camera.Forward, new Vec3(-1, 0, 0)) > 0.999);
+    }
+
+    [Fact]
+    public void TheActiveViewportFallsBackToTheLowestShownViewWhenItLeaves()
+    {
+        using var shell = NewShell(show: false);
+        shell.SetSceneViews(SceneViewSet.All);
+        foreach (var index in new[] { 0, 1, 2, 3 })
+        {
+            Show(shell, index, 400, 225);
+        }
+        shell.ActivateViewport(shell.Viewports[2]);
+        Assert.Same(shell.Viewports[2], shell.ActiveViewport);
+
+        // Toggling the active view out takes it out of the tree, and its control hides.
+        shell.ToggleSceneView(2);
+        Hide(shell, 2);
+
+        Assert.Same(shell.Viewports[0], shell.ActiveViewport);
+        Assert.Same(shell.Viewports[0], shell.SettingsViewport);
+        Assert.Same(shell.Viewports[0], shell.CaptureViewport);
+        // With the Perspective view out as well, the capture viewport is the lowest left.
+        shell.ToggleSceneView(0);
+        Hide(shell, 0);
+        Assert.Same(shell.Viewports[1], shell.CaptureViewport);
+        Assert.Same(shell.Viewports[1], shell.ActiveViewport);
+    }
+
+    [Fact]
     public void TheCaptureViewportOfAQuadIsThePerspectiveViewAndTheActiveViewportIsAmongTheFour()
     {
         using var shell = NewShell(show: false);
-        shell.SetSceneLayout(SceneLayout.Quad);
+        shell.SetSceneViews(SceneViewSet.All);
         foreach (var index in new[] { 3, 2, 1, 0 })
         {
             Show(shell, index, 400, 225);
@@ -404,39 +493,58 @@ public sealed class ViewportTests : IDisposable
     }
 
     [Fact]
-    public void TheLayoutStaysAcrossSessionsAndAFileWithoutOneReadsAsSingle()
+    public void TheViewsStayAcrossSessions()
     {
         using (var shell = NewShell(show: false))
         {
-            shell.SetSceneLayout(SceneLayout.Quad);
+            shell.SetSceneViews(P | F | S);
         }
-        using (var again = TestShell.Open(_temp, "box.scene", null))
+        using var again = TestShell.Open(_temp, "box.scene", null);
+        Assert.Equal(P | F | S, again.SceneViews);
+        Assert.Equal("Custom", again.ScenePresetName);
+        var text = File.ReadAllText(Path.Combine(_temp.Combine("settings"), EditorSettings.ViewportFileName));
+        Assert.Contains("Perspective", text);
+        Assert.DoesNotContain("\"Layout\"", text);
+    }
+
+    [Theory]
+    [InlineData("Quad", SceneViewSet.All)]
+    [InlineData("quad", SceneViewSet.All)]
+    [InlineData("Single", SceneViewSet.Perspective)]
+    [InlineData("Octo", SceneViewSet.Perspective)]
+    public void AFileWithTheEarlierLayoutOrNoneReadsAsTheMatchingViews(string layout, SceneViewSet expected)
+    {
+        var settings = EditorShell.DefaultViewportSettings with { NoFog = true };
+        Directory.CreateDirectory(_temp.Combine("settings"));
+        var file = Path.Combine(_temp.Combine("settings"), EditorSettings.ViewportFileName);
+
+        File.WriteAllText(file, JsonSerializer.Serialize(new { Viewports = new[] { settings, settings, settings, settings, settings }, Layout = layout }));
+        using (var shell = TestShell.Open(_temp, "box.scene", null))
         {
-            Assert.Equal(SceneLayout.Quad, again.SceneLayout);
-            Assert.Contains("Quad", File.ReadAllText(Path.Combine(_temp.Combine("settings"), EditorSettings.ViewportFileName)));
+            Assert.Equal(expected, shell.SceneViews);
+            Assert.True(shell.Viewports[3].Settings.NoFog);
         }
 
-        // The settings of the viewports alone, as an earlier editor wrote them.
-        var settings = EditorShell.DefaultViewportSettings with { NoFog = true };
-        File.WriteAllText(Path.Combine(_temp.Combine("settings"), EditorSettings.ViewportFileName), JsonSerializer.Serialize(new { Viewports = new[] { settings, settings, settings, settings, settings } }));
-        using var old = TestShell.Open(_temp, "box.scene", null);
-        Assert.Equal(SceneLayout.Single, old.SceneLayout);
-        Assert.True(old.Viewports[3].Settings.NoFog);
-        File.WriteAllText(Path.Combine(_temp.Combine("settings"), EditorSettings.ViewportFileName), JsonSerializer.Serialize(settings));
+        // No layout and no views, or the oldest file of one viewport's settings.
+        File.WriteAllText(file, JsonSerializer.Serialize(new { Viewports = new[] { settings } }));
+        using (var none = TestShell.Open(_temp, "box.scene", null))
+        {
+            Assert.Equal(P, none.SceneViews);
+        }
+        File.WriteAllText(file, JsonSerializer.Serialize(settings));
         using var bare = TestShell.Open(_temp, "box.scene", null);
-        Assert.Equal(SceneLayout.Single, bare.SceneLayout);
+        Assert.Equal(P, bare.SceneViews);
     }
 
     [Fact]
-    public void TheLayoutCommandChoosesTheLayout()
+    public void AFileWithNoViewsInItReadsAsThePerspectiveView()
     {
-        using var shell = NewShell(show: false);
-        var command = (ChoiceCommand)shell.Commands.Get(EditorCommands.SceneLayout);
+        Directory.CreateDirectory(_temp.Combine("settings"));
+        File.WriteAllText(Path.Combine(_temp.Combine("settings"), EditorSettings.ViewportFileName), """{"Viewports":[],"Views":"None"}""");
 
-        command.Select("Quad");
+        using var shell = TestShell.Open(_temp, "box.scene", null);
 
-        Assert.Equal(SceneLayout.Quad, shell.SceneLayout);
-        Assert.Equal("Quad", command.Selected);
+        Assert.Equal(P, shell.SceneViews);
     }
 
     [Fact]
@@ -724,39 +832,48 @@ public sealed class ViewportTests : IDisposable
     // --- Automation ---
 
     [Fact]
-    public async Task TheViewportCommandShowsAndHidesTheDocumentsAndSetsTheLayout()
+    public async Task TheViewportCommandTogglesTheViewsShowsTheDocumentsAndSetsThePreset()
     {
         using var shell = NewShell();
         var cancel = TestContext.Current.CancellationToken;
         Task<AutomationResponse> Ask(int id, int? viewport, params (string Name, object Value)[] settings) =>
             shell.HandleAutomation(new AutomationRequest(id, "viewport", Settings: Settings(settings), Viewport: viewport), cancel);
 
-        // Viewport 0 is the Scene document, and 4 the Game document.
-        Assert.True((await Ask(1, 0, ("shown", false))).Ok);
-        Assert.False(shell.Layout.IsViewportOpen(ViewportDocument.SceneId));
+        // Viewport 4 is the Game document.
         Assert.True((await Ask(2, 4, ("shown", false))).Ok);
         Assert.False(shell.Layout.IsViewportOpen(ViewportDocument.GameId));
         Assert.True((await Ask(3, 4, ("shown", true))).Ok);
         Assert.True(shell.Layout.IsViewportOpen(ViewportDocument.GameId));
         Assert.True((await Ask(4, 0, ("shown", true))).Ok);
         Assert.True(shell.Layout.IsViewportOpen(ViewportDocument.SceneId));
-        Assert.Equal(SceneLayout.Single, shell.SceneLayout);
+        Assert.Equal("scene", ActiveDocumentOf(shell, ViewportDocument.SceneId));
+        Assert.Equal(P, shell.SceneViews);
 
-        // A view of the quad needs the quad, which showing it sets, and it hides with the layout.
+        // A scene view, 0 to 3, goes in the Scene or out of it, and showing one brings the Scene's tab to the front.
         var quad = await Ask(5, 2, ("shown", true));
         Assert.True(quad.Ok, quad.Error);
-        Assert.Equal(SceneLayout.Quad, shell.SceneLayout);
-        var refused = await Ask(6, 2, ("shown", false));
-        Assert.False(refused.Ok);
-        Assert.Contains("quad layout", refused.Error);
+        Assert.Equal(P | F, shell.SceneViews);
+        Assert.Equal("scene", ActiveDocumentOf(shell, ViewportDocument.SceneId));
+        Assert.True((await Ask(6, 2, ("shown", false))).Ok);
+        Assert.Equal(P, shell.SceneViews);
+        Assert.True((await Ask(13, 1, ("shown", false))).Ok);
+        Assert.Equal(P, shell.SceneViews);
+        // The last one in stays, and the answer says why.
+        var last = await Ask(14, 0, ("shown", false));
+        Assert.False(last.Ok);
+        Assert.Contains("only view in the Scene", last.Error);
+        Assert.Equal(P, shell.SceneViews);
 
+        // A layout is a preset of the views.
         Assert.True((await Ask(7, null, ("layout", "Single"))).Ok);
-        Assert.Equal(SceneLayout.Single, shell.SceneLayout);
+        Assert.Equal(P, shell.SceneViews);
         Assert.True((await Ask(8, null, ("layout", "quad"))).Ok);
-        Assert.Equal(SceneLayout.Quad, shell.SceneLayout);
+        Assert.Equal(SceneViewSet.All, shell.SceneViews);
+        Assert.True((await Ask(15, null, ("layout", "TwoSideBySide"))).Ok);
+        Assert.Equal(P | T, shell.SceneViews);
         var unknown = await Ask(9, null, ("layout", "Octo"));
         Assert.False(unknown.Ok);
-        Assert.Contains("Single, Quad", unknown.Error);
+        Assert.Contains("Single, Two Side by Side, Quad", unknown.Error);
 
         var nameless = await Ask(10, null, ("shown", true));
         Assert.False(nameless.Ok);

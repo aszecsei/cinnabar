@@ -2050,3 +2050,129 @@ the_particles_collide_again_a_frame_after_the_own_views_role_moves :: proc(t: ^t
 	testing.expect_value(t, r.particles.frame, len(own))
 	testing.expectf(t, len(rig.record.problems) == 0, "problems: %v", rig.record.problems)
 }
+
+// What the hooks and the overlay of the tests below saw, in order: 'w' for before_world, 'd' for the debug hook and 'o'
+// for the overlay.
+@(private = "file")
+Hook_Order :: struct {
+	order:       [16]u8,
+	count:       int,
+	layer:       bool,
+	// Frame.user as each hook saw it, and the Frame.user that the first hook of the view set.
+	user_at_start: rawptr,
+	user_seen:   [3]rawptr,
+	hidden:      []u32,
+}
+
+@(private = "file")
+note :: proc(rec: ^Hook_Order, what: u8) {
+	rec.order[rec.count % len(rec.order)] = what
+	rec.count += 1
+}
+
+@(private = "file")
+ORDER_HOOKS :: Frame_Hooks {
+	before_world = proc(f: ^Frame) {
+		rec := (^Hook_Order)(f.data)
+		rec.user_at_start = f.user
+		rec.hidden = f.hidden
+		note(rec, 'w')
+		f.user = new_clone(i32(len(rec.order)), f.renderer.platform.frame_allocator)
+		rec.user_seen[0] = f.user
+	},
+	debug = proc(f: ^Frame) {
+		rec := (^Hook_Order)(f.data)
+		note(rec, 'd')
+		rec.layer = f.debug != 0
+		rec.user_seen[1] = f.user
+	},
+}
+
+@(private = "file")
+order_overlay :: proc(f: ^Frame, data: rawptr) {
+	rec := (^Hook_Order)(data)
+	note(rec, 'o')
+	rec.layer = f.debug != 0
+	rec.user_seen[2] = f.user
+}
+
+// The overlay is a second hook with a data pointer of its own: it runs after the debug hook in every view, with the
+// debug layer, and without a layer when the frame has no debug layer, as the debug hook does. A frame with only an overlay
+// has a layer. Frame.user is nil when each view begins, and holds what the view's hooks set; Frame.hidden is the frame's.
+@(test)
+the_overlay_runs_after_the_debug_hook_in_every_view_and_frame_user_is_of_one_view :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	rig := new(Rig)
+	defer free(rig)
+	rig_start(t, rig)
+	defer rig_stop(rig)
+	context.logger = {record_problems, &rig.record, .Debug, {}}
+	r, platform := rig.r, &rig.platform
+	enable_frame_pipelines(r)
+	defer platform.gpu_destroy_texture(r.blue_noise.texture)
+	state: View_State
+	view_state_init(&state, r)
+	defer view_state_destroy(&state, r)
+	target := extra_target(platform, {48, 24})
+	defer platform.gpu_destroy_texture(target)
+
+	own, extra, other: Hook_Order
+	hidden := []u32{0b101}
+	// The same hooks and the same data for both views, as a game's are, and an overlay of its own data for each.
+	extras := [1]Extra_View{{view = {rotation = 1, vertical_fov = 1, near = 0.05}, size = {48, 24}, target = target, state = &state, hooks = ORDER_HOOKS, overlay = {&other, order_overlay}}}
+	extras[0].hooks.data = &extra
+	desc := Frame_Desc {
+		view        = {rotation = 1, vertical_fov = 1, near = 0.05},
+		size        = {64, 32},
+		hidden      = hidden,
+		hooks       = ORDER_HOOKS,
+		overlay     = {&own, order_overlay},
+		extra_views = extras[:],
+	}
+	desc.hooks.data = &own
+	testing.expect(t, draw_frame(r, rig.w, desc))
+	testing.expect_value(t, string(own.order[:own.count]), "wdo")
+	testing.expect(t, own.layer, "the overlay had no debug layer")
+	// The extra view's hooks are its own, and so is its overlay.
+	testing.expect_value(t, string(extra.order[:extra.count]), "wd")
+	testing.expect_value(t, string(other.order[:other.count]), "o")
+	// Frame.user is nil at the start of each view, and each view's hooks see what its first hook set.
+	testing.expect(t, own.user_at_start == nil && extra.user_at_start == nil)
+	testing.expect(t, own.user_seen[0] != nil && own.user_seen[0] == own.user_seen[1] && own.user_seen[1] == own.user_seen[2])
+	testing.expect(t, extra.user_seen[0] != nil && extra.user_seen[0] == extra.user_seen[1] && extra.user_seen[0] != own.user_seen[0])
+	// The frame's hidden entities are in every view.
+	testing.expect(t, len(own.hidden) == 1 && len(extra.hidden) == 1 && own.hidden[0] == 0b101)
+
+	// With no debug layer, the overlay still runs, with Frame.debug 0.
+	desc.no_debug = true
+	own, extra, other = {}, {}, {}
+	extras[0].no_debug = true
+	testing.expect(t, draw_frame(r, rig.w, desc))
+	testing.expect_value(t, string(own.order[:own.count]), "wdo")
+	testing.expect(t, !own.layer)
+
+	// A frame with an overlay and no debug hook or lines has the layer.
+	desc.no_debug = false
+	desc.hooks = {}
+	desc.extra_views = nil
+	own = {}
+	testing.expect(t, draw_frame(r, rig.w, desc))
+	testing.expect_value(t, string(own.order[:own.count]), "o")
+	testing.expect(t, own.layer)
+	// And one without an overlay has none, as before.
+	desc.overlay = {}
+	testing.expect(t, draw_frame(r, rig.w, desc))
+	testing.expectf(t, len(rig.record.problems) == 0, "problems: %v", rig.record.problems)
+}
+
+// use_view takes the overlay too.
+@(test)
+use_view_takes_the_overlay :: proc(t: ^testing.T) {
+	data: i32
+	v := Extra_View {
+		overlay = {&data, order_overlay},
+	}
+	desc: Frame_Desc
+	use_view(&desc, v)
+	testing.expect(t, desc.overlay.data == &data && desc.overlay.draw == order_overlay)
+}

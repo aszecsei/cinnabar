@@ -169,6 +169,8 @@ Frame_Desc :: struct {
 	// docs/rendering/lighting-and-shadows.md#quad-overdraw).
 	shading_stats:     bool,
 	hooks:             Frame_Hooks,
+	// A second hook, for a caller that adds passes to the frame without owning hooks.data (see Frame_Overlay).
+	overlay:           Frame_Overlay,
 	// The editor's material previews that the frame also draws, each into its own target (see
 	// docs/rendering/materials.md#material-previews). draw_frame sets each one's complete.
 	previews:          []Preview_Desc,
@@ -214,15 +216,28 @@ Extra_View :: struct {
 	disable:         Features,
 	exposure_offset: f32,
 	hooks:           Frame_Hooks,
+	overlay:         Frame_Overlay,
 }
 
-// use_view makes an Extra_View the frame's own view: its camera, size, target, state, quality, settings, debug view, hooks
-// and the rest. A game that draws several cameras describes each as an Extra_View, gives the first to the frame with this,
-// and the rest to Frame_Desc.extra_views (see docs/rendering/frame.md#views).
+// use_view makes an Extra_View the frame's own view: its camera, size, target, state, quality, settings, debug view, hooks,
+// overlay and the rest. A caller that draws several cameras of one frame describes each as an Extra_View, gives the first
+// to the frame with this, and the rest to Frame_Desc.extra_views, as the editor package does (see
+// docs/rendering/frame.md#views).
 use_view :: proc(desc: ^Frame_Desc, v: Extra_View) {
 	desc.view, desc.size, desc.target, desc.state = v.view, v.size, v.target, v.state
 	desc.quality, desc.settings, desc.keep_ids, desc.no_debug = v.quality, v.settings, v.keep_ids, v.no_debug
 	desc.debug_view, desc.disable, desc.exposure_offset, desc.hooks = v.debug_view, v.disable, v.exposure_offset, v.hooks
+	desc.overlay = v.overlay
+}
+
+// Frame_Overlay is a second hook beside Frame_Hooks, with a data pointer of its own: it runs in every view after the
+// debug hook, with the frame's debug layer, and runs also when the frame has none (Frame_Desc.no_debug), as the debug
+// hook does, in which case Frame.debug is 0 and nothing may draw into it. It exists for a caller that adds passes to a
+// view without owning Frame_Hooks.data, which the game's: the editor's tools draw this way into the views of the game's
+// frame (see docs/rendering/frame.md#views). A frame with an overlay has a debug layer whenever it has no no_debug.
+Frame_Overlay :: struct {
+	data: rawptr,
+	draw: proc(f: ^Frame, data: rawptr),
 }
 
 // Frame_Hooks add a game's passes and draws to the frame. Each is optional. They are procedures in the game, so a
@@ -246,8 +261,8 @@ Frame_Hooks :: struct {
 	before_post:  proc(f: ^Frame),
 	// Adds the passes that draw the UI into Frame.ui, after a pass that clears it. They load it.
 	ui:           proc(f: ^Frame),
-	// Adds passes that draw into Frame.debug after the debug lines, such as the editor's tools. They load it. With
-	// Frame_Desc.no_debug the hook still runs, but Frame.debug is 0 and nothing may draw into it.
+	// Adds passes that draw into Frame.debug after the debug lines. They load it. With Frame_Desc.no_debug the hook still
+	// runs, but Frame.debug is 0 and nothing may draw into it.
 	debug:        proc(f: ^Frame),
 }
 
@@ -256,6 +271,13 @@ Frame :: struct {
 	renderer:                 ^Renderer,
 	graph:                    ^Graph,
 	data:                     rawptr,
+	// A pointer for the hooks to keep this view's data in: nil when the view begins, and not touched by the renderer. The
+	// hooks of one frame run once for each view with the same Frame_Hooks.data, so a game that keeps data for each view,
+	// such as the constants of its own passes, makes it in its first hook of the view and sets user to it (see
+	// docs/rendering/frame.md#views). Its memory is frame memory.
+	user:                     rawptr,
+	// The entity slots not to draw, as Frame_Desc.hidden has them (see is_hidden), for a game that draws its own geometry.
+	hidden:                   []u32,
 	// The view's state between frames, and what the frame's views share while it is drawn (see World_Frame).
 	state:                    ^View_State,
 	world:                    ^World_Frame,
@@ -564,6 +586,7 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 		view := desc
 		view.view, view.size, view.keep_ids, view.no_debug, view.debug_view = ev.view, ev.size, ev.keep_ids, ev.no_debug, ev.debug_view
 		view.disable, view.hooks, view.exposure_offset, view.settings = ev.disable, ev.hooks, ev.exposure_offset, ev.settings
+		view.overlay = ev.overlay
 		view.extra_views, view.previews, view.playing, view.delta, view.shading_stats = nil, nil, nil, 0, false
 		view_quality := ev.quality != nil ? clamp_quality(ev.quality^, r.caps) : quality
 		// The target is always SDR, whatever the frame's output is.
@@ -607,6 +630,7 @@ draw_view :: proc(
 		output          = output,
 		view_projection = view_projection(desc.view, f32(size.x) / f32(max(size.y, 1))),
 		hooks           = desc.hooks,
+		hidden          = desc.hidden,
 		scene_scale     = 1,
 		debug_view      = desc.debug_view,
 		lod_error       = quality.lod_error,
@@ -667,7 +691,7 @@ draw_view :: proc(
 		begin_particles(f, w, desc.delta, desc.hidden, desc.playing)
 	}
 	lines := debug.frame_lines(&r.debug)
-	has_debug := !desc.no_debug && (len(lines) > 0 || desc.hooks.debug != nil)
+	has_debug := !desc.no_debug && (len(lines) > 0 || desc.hooks.debug != nil || desc.overlay.draw != nil)
 
 	add_particle_passes(f)
 	add_ribbon_pass(f)
@@ -762,6 +786,9 @@ draw_view :: proc(
 	// Without the layer, the hook still adds the passes that need no target, such as the editor's picks.
 	if desc.hooks.debug != nil {
 		desc.hooks.debug(f)
+	}
+	if desc.overlay.draw != nil {
+		desc.overlay.draw(f, desc.overlay.data)
 	}
 
 	p = add_render_pass(&g, "output", draw_output, f)

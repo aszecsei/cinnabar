@@ -89,15 +89,15 @@ public sealed partial class EditorShell
                 {
                     return new AutomationResponse(request.Id, false, Error: "viewport takes settings to change");
                 }
-                // Shown and layout are the shell's, not a viewport's, so they are not settings to patch.
+                // Shown and layout are the shell's, not a viewport's, so they are not settings to patch. Layout is a preset of the Scene's views.
                 var changes = new Dictionary<string, System.Text.Json.JsonElement>(all, StringComparer.OrdinalIgnoreCase);
                 if (changes.Remove("layout", out var layout))
                 {
-                    if (!Enum.TryParse<SceneLayout>(layout.ToString(), true, out var chosen) || !Enum.IsDefined(chosen))
+                    if (ScenePreset.Find(layout.ToString()) is not { } chosen)
                     {
-                        return new AutomationResponse(request.Id, false, Error: $"unknown layout {layout}; the layouts are {string.Join(", ", Enum.GetNames<SceneLayout>())}");
+                        return new AutomationResponse(request.Id, false, Error: $"unknown layout {layout}; the layouts are {string.Join(", ", ScenePreset.All.Select(p => p.Name))}");
                     }
-                    SetSceneLayout(chosen);
+                    SetSceneViews(chosen.Views);
                 }
                 if (changes.Remove("shown", out var shown) && ShowViewportDocument(request, shown) is { } refusal)
                 {
@@ -139,9 +139,10 @@ public sealed partial class EditorShell
         }
     }
 
-    // Shows or hides the document of the viewport that a request names, and gives the reason when it cannot. The Scene
-    // document holds viewports 0 to 3: showing 1 to 3 needs the quad layout, which it sets, and hiding one of them is
-    // the layout's, so it is refused; viewport 0 shows and hides the whole document. Viewport 4 is the Game document.
+    // Shows or hides the viewport that a request names, and gives the reason when it cannot. A scene view, 0 to 3, goes in
+    // the Scene document or out of it, and showing one also brings the Scene's tab to the front; the last one in cannot go
+    // out. Viewport 4 is the Game document, which shown opens and brings to the front, or closes: the Game in front is how
+    // a tool leaves the Scene.
     string? ShowViewportDocument(AutomationRequest request, System.Text.Json.JsonElement shown)
     {
         if (request.Viewport is not { } number || number < 0 || number >= Viewports.Count)
@@ -153,20 +154,28 @@ public sealed partial class EditorShell
             return $"shown takes true or false, not {shown}";
         }
         var viewport = Viewports[number];
-        if (shown.ValueKind == System.Text.Json.JsonValueKind.False)
+        var show = shown.ValueKind == System.Text.Json.JsonValueKind.True;
+        if (viewport.IsGame)
         {
-            if (number is > 0 and < EditorViewport.SceneViews)
+            if (show)
             {
-                return $"viewport {number} is shown by the quad layout; set layout to Single, or hide viewport 0 to close the Scene";
+                Layout.ShowViewport(viewport.DocumentId);
             }
-            Layout.CloseViewport(viewport.DocumentId);
+            else
+            {
+                Layout.CloseViewport(viewport.DocumentId);
+            }
             return null;
         }
-        if (number is > 0 and < EditorViewport.SceneViews)
+        var views = show ? SceneViews | ViewBit(number) : SceneViews & ~ViewBit(number);
+        if (!SetSceneViews(views))
         {
-            SetSceneLayout(SceneLayout.Quad);
+            return $"viewport {number} is the only view in the Scene, which keeps one; show another view first, or show viewport {EditorViewport.GameIndex} to put the Game in front";
         }
-        Layout.ShowViewport(viewport.DocumentId);
+        if (show)
+        {
+            Layout.ShowViewport(viewport.DocumentId);
+        }
         return null;
     }
 

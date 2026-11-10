@@ -54,10 +54,31 @@ static partial class EditorCommands
             scale => scale == Viewport.ViewportScale.Fit ? "Fit" : "100%",
             description: "Fit the frame to the viewport, or show one frame pixel per screen pixel.",
             icon: "scale"));
-        commands.Register(ChoiceCommand.ForEnum<Shell.SceneLayout>(SceneLayout, "Layout", () => shell.SceneLayout, shell.SetSceneLayout,
-            layout => layout == Shell.SceneLayout.Quad ? "Quad" : "Single",
-            description: "Lay the Scene's views out as one, the Perspective view, or as four: Perspective and Top above, Front and Side below. Each has its own camera and settings.",
-            icon: "viewport"));
+        // A preset is a shortcut for the four toggles: the choice shows the preset that they make, or Custom.
+        commands.Register(new ChoiceCommand(SceneLayout, "Layout", [.. ScenePreset.All.Select(p => p.Name), ScenePreset.Custom],
+            () => shell.ScenePresetName, name =>
+            {
+                if (ScenePreset.Find(name) is { } preset)
+                {
+                    shell.SetSceneViews(preset.Views);
+                }
+            })
+        {
+            Description = "Choose which views the Scene shows: one, two side by side, or the four. The toggles next to it put one view in or out.",
+            Icon = "viewport",
+        });
+        for (var i = 0; i < EditorViewport.SceneViews; i++)
+        {
+            var index = i;
+            var view = shell.Viewports[index];
+            commands.Register(new Command(SceneViewToggle(index), view.Title, () => shell.ToggleSceneView(index))
+            {
+                Description = $"Show or hide the {view.Title} view in the Scene. One view always stays.",
+                Icon = "viewport",
+                CanExecuteWhen = () => shell.CanToggleSceneView(index),
+                IsCheckedWhen = () => shell.SceneViews.HasFlag((SceneViewSet)(1 << index)),
+            });
+        }
         ViewportDocumentToggle(shell, SceneView, "Scene View", ViewportDocument.SceneId, "Show or hide the Scene, which holds the editor's views of the world and its tools.", "viewport");
         ViewportDocumentToggle(shell, GameView, "Game View", ViewportDocument.GameId, "Show or hide the Game view, which shows the game as a player sees it and gives it the input while it plays.", "camera");
     }

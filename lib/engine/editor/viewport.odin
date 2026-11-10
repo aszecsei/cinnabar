@@ -18,8 +18,8 @@ import "cinnabar:engine/render"
 //
 // The editor shows viewports of two kinds (see docs/editor/viewport.md#views): scene views, which draw the world from
 // the editor's camera with the tools, and the Game view, which draws it from the game's own camera as a player sees it.
-// Every open viewport has a shared target of its own and a render.View_State of its own, and frame_viewports gives the
-// game the ones that it draws this frame.
+// Every open viewport has a shared target of its own and a render.View_State of its own. The game knows none of this: it
+// describes one frame and calls draw_frame (see frame.odin), which draws the viewports that are open from it.
 
 // The viewports that an editor can show.
 MAX_VIEWPORTS :: link.MAX_VIEWPORTS
@@ -122,9 +122,10 @@ Viewport_Tools :: struct {
 	readback:         gpu.Buffer,
 }
 
-// Viewport_Frame is what the game drew of a scene view that the tools draw on and pick from.
+// Viewport_Frame is what the frame drew of a scene view that the tools draw on and pick from.
+@(private)
 Viewport_Frame :: struct {
-	// The viewport, as Frame_Viewport.viewport has it.
+	// The viewport.
 	viewport:    int,
 	view:        render.View,
 	// The scene's size, which the debug layer, the IDs and the depth have, and the frame's, which the editor's picks
@@ -139,8 +140,8 @@ Viewport_Frame :: struct {
 	depth:  render.Texture,
 }
 
-// active is true while an editor is linked: the game then draws the editor's viewports, writes the ID buffer for the scene
-// views, keeps its depth and calls add_viewport_passes.
+// active is true while an editor is linked: draw_frame then draws the editor's viewports, writes the ID buffer for the
+// scene views, keeps its depth and adds the tools to them.
 active :: proc(e: ^Editor) -> bool {
 	return e.session.connection != 0
 }
@@ -157,6 +158,7 @@ camera_view :: proc(c: link.Editor_Camera) -> render.View {
 
 // Frame_Viewport is a viewport that this frame draws: its number and kind, the camera of a scene view, its size, its
 // target, and the renderer's state for its camera.
+@(private)
 Frame_Viewport :: struct {
 	viewport: int,
 	kind:     link.Viewport_Kind,
@@ -168,14 +170,14 @@ Frame_Viewport :: struct {
 }
 
 // frame_viewports gives the viewports that this frame draws, in frame memory, with the one that is the frame's own view
-// first: each open viewport whose target the editor is not still reading, and a scene view only once it has a camera. The
-// game draws the first with Frame_Desc and render.use_view, and the rest as Frame_Desc.extra_views, each made by
-// render_view. The frame's own view is the Game view with the lowest number if one draws, because the view model, the
+// first: each open viewport whose target the editor is not still reading, and a scene view only once it has a camera.
+// draw_frame draws the first as the frame's own view (render.use_view), and the rest as Frame_Desc.extra_views. The frame's own view is the Game view with the lowest number if one draws, because the view model, the
 // particles' collisions and the render origin are the frame's own view's (see docs/rendering/frame.md#views), and
 // otherwise the viewport with the lowest number. The others are in viewport order. It gives none when no editor is
-// linked, no viewport is open, or none can draw this frame, and the game then draws its own camera into the frame target,
-// as it does without an editor. Call it once per frame: it takes the targets for the frame, and makes the state of a
-// viewport that draws for the first time.
+// linked, no viewport is open, or none can draw this frame, and draw_frame then draws the game's frame into the frame
+// target, as it does without an editor. Call it once per frame: it takes the targets for the frame, and makes the state of
+// a viewport that draws for the first time.
+@(private)
 frame_viewports :: proc(e: ^Editor) -> []Frame_Viewport {
 	if !active(e) || e.renderer == nil || e.platform.gpu_viewport_target == nil {
 		return nil
@@ -229,34 +231,8 @@ frame_viewports :: proc(e: ^Editor) -> []Frame_Viewport {
 	return views[:]
 }
 
-// render_view describes a frame viewport as a render.Extra_View, for render.use_view or Frame_Desc.extra_views, with the
-// game's hooks for it. A scene view takes its editor camera, keeps its IDs for the picks, and has the debug layer while
-// the frame has (see debug_shown); the Game view takes game_camera, the game's own, keeps no IDs, and has no debug layer,
-// as the player sees it. Both take the viewport's debug view, the features that it turns off, its exposure and its quality
-// (see render_overrides and viewport_quality). The hooks are the game's: it gives a scene view the tools' debug hook (see
-// add_viewport_passes) and a Game view its UI.
-render_view :: proc(e: ^Editor, v: Frame_Viewport, game_camera: render.View, hooks: render.Frame_Hooks) -> render.Extra_View {
-	overrides := render_overrides(e, v.viewport)
-	scene := v.kind == .Scene
-	view := render.Extra_View {
-		view            = v.view.? or_else game_camera,
-		size            = v.size,
-		target          = v.target,
-		state           = v.state,
-		keep_ids        = scene,
-		no_debug        = !scene || !debug_shown(e),
-		debug_view      = overrides.debug_view,
-		disable         = overrides.disable,
-		exposure_offset = overrides.exposure_offset,
-		hooks           = hooks,
-	}
-	if quality, replaced := viewport_quality(e, e.renderer, v.viewport); replaced {
-		view.quality = new_clone(quality, e.platform.frame_allocator)
-	}
-	return view
-}
-
 // Render_Overrides are what the editor's viewport changes in the frame, for render.Frame_Desc.
+@(private)
 Render_Overrides :: struct {
 	debug_view:      render.Debug_View,
 	disable:         render.Features,
@@ -267,6 +243,7 @@ Render_Overrides :: struct {
 
 // render_overrides gives a viewport's debug view, the features that it turns off and its exposure offset while an
 // editor is linked, and none otherwise.
+@(private)
 render_overrides :: proc(e: ^Editor, viewport: int) -> (o: Render_Overrides) {
 	if !active(e) || viewport < 0 || viewport >= MAX_VIEWPORTS {
 		return
@@ -296,20 +273,22 @@ render_overrides :: proc(e: ^Editor, viewport: int) -> (o: Render_Overrides) {
 	return
 }
 
-// viewport_quality is the quality that a viewport draws at while an editor is linked: the renderer's, with the
+// viewport_quality is the quality that a viewport draws at while an editor is linked: the game's, base, with the
 // viewport's preset, anti-aliasing, global illumination and render scale in place of its own where the viewport chooses
 // them. A preset sets the global illumination's technique with every feature, and a choice of technique replaces it,
-// at the preset's level or the game's. ok is false when the viewport keeps the renderer's, or no editor is linked.
-viewport_quality :: proc(e: ^Editor, r: ^render.Renderer, viewport: int) -> (q: render.Quality, ok: bool) {
+// at the preset's level or the game's. ok is false when the viewport keeps the game's, or no editor is linked. caps is
+// the device's, which limits the result.
+@(private)
+viewport_quality :: proc(e: ^Editor, base: render.Quality, caps: render.Caps, viewport: int) -> (q: render.Quality, ok: bool) {
 	if !active(e) || viewport < 0 || viewport >= MAX_VIEWPORTS {
 		return
 	}
 	s := e.session.view.viewports[viewport].settings
-	q = r.quality
+	q = base
 	if s.quality_preset != .Game {
-		q = render.preset_quality(render.Quality_Preset(int(s.quality_preset) - 1), r.caps)
+		q = render.preset_quality(render.Quality_Preset(int(s.quality_preset) - 1), caps)
 		// The preset sets the features; the anti-aliasing and the render scale stay the game's.
-		q.aa, q.render_scale = r.quality.aa, r.quality.render_scale
+		q.aa, q.render_scale = base.aa, base.render_scale
 		ok = true
 	}
 	if s.anti_aliasing != .Game {
@@ -332,7 +311,7 @@ viewport_quality :: proc(e: ^Editor, r: ^render.Renderer, viewport: int) -> (q: 
 		q.render_scale = s.render_scale
 		ok = true
 	}
-	return render.clamp_quality(q, r.caps), ok
+	return render.clamp_quality(q, caps), ok
 }
 
 #assert(int(max(link.Viewport_Preset)) == int(render.Quality_Preset.Ultra) + 1)
@@ -347,10 +326,11 @@ entity_id :: proc "contextless" (entity: ecs.Entity) -> u32 {
 	return render.entity_id(entity)
 }
 
-// add_viewport_passes adds the pick, the icons and the overlay of a scene view to its graph, in the debug hook. Add them
-// after the passes that write the target, the ID buffer and the depth. The pick runs in every mode, so a click in Play
-// still selects; the icons and the overlay draw only while editing, so the viewport in Play shows what the game shows.
-// The Game view has no tools: it adds nothing, and its picks are answered with no hits.
+// add_viewport_passes adds the pick, the icons and the overlay of a scene view to its graph, in the frame overlay (see
+// tools_overlay), after the passes that write the target, the ID buffer and the depth. The pick runs in every mode, so a
+// click in Play still selects; the icons and the overlay draw only while editing, so the viewport in Play shows what the
+// game shows. The Game view has no tools: it adds nothing, and its picks are answered with no hits.
+@(private)
 add_viewport_passes :: proc(e: ^Editor, g: ^render.Graph, w: ^ecs.World, frame: Viewport_Frame) {
 	v := &e.tools
 	tools := &e.session.view
@@ -590,12 +570,14 @@ draw_overlay :: proc(ctx: ^render.Pass_Context) {
 
 // Visibility is the entities that the editor hides, with their descendants, as a bit for each entity slot. It is in
 // frame memory, for one frame.
+@(private)
 Visibility :: struct {
 	hidden: []u32,
 }
 
-// visibility is what the editor hides this frame. A game that draws entities skips those that is_visible rejects, so
-// they are neither drawn nor picked. Without an editor, or with nothing hidden, it hides nothing.
+// visibility is what the editor hides this frame, which draw_frame merges into Frame_Desc.hidden. Without an editor, or
+// with nothing hidden, it hides nothing.
+@(private)
 visibility :: proc(e: ^Editor, w: ^ecs.World) -> Visibility {
 	if !active(e) || len(e.session.view.hidden) == 0 {
 		return {}
@@ -605,6 +587,7 @@ visibility :: proc(e: ^Editor, w: ^ecs.World) -> Visibility {
 	return {bits}
 }
 
+@(private)
 is_visible :: proc "contextless" (v: Visibility, entity: ecs.Entity) -> bool {
 	index := ecs.entity_index(entity)
 	return int(index / 32) >= len(v.hidden) || v.hidden[index / 32] & (1 << (index % 32)) == 0

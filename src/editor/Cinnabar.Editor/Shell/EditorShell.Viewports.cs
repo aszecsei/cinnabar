@@ -16,19 +16,9 @@ using ViewportTarget = Cinnabar.Editor.Link.Protocol.ViewportTarget;
 
 namespace Cinnabar.Editor.Shell;
 
-/// <summary>How the Scene document lays out the scene views (see docs/editor/viewport.md#views).</summary>
-[JsonConverter(typeof(JsonStringEnumConverter))]
-public enum SceneLayout
-{
-    /// <summary>The first scene view alone.</summary>
-    Single,
-    /// <summary>The four scene views, two by two: Perspective and Top above, Front and Side below.</summary>
-    Quad,
-}
-
 /// <summary>
-/// The editor's views of the game (see docs/editor/viewport.md#views): four scene views, in the Scene document as one
-/// or as a quad, and the Game view in the Game document, each open in the game exactly while its control is on screen
+/// The editor's views of the game (see docs/editor/viewport.md#views): four scene views, in the Scene document by the
+/// toggles of <see cref="SceneViews"/>, and the Game view in the Game document, each open in the game exactly while its control is on screen
 /// with a size. The tools
 /// act in the active scene view, the one that the mouse last used: <see cref="Camera"/>, <see cref="FrameSize"/> and
 /// <see cref="ViewportSettings"/> are its own, so a tool that reads them works in whichever scene view the user is in.
@@ -72,17 +62,29 @@ public sealed partial class EditorShell
     /// </summary>
     public EditorViewport? CaptureViewport => ShownSceneViews.FirstOrDefault() ?? (GameViewport.IsShown ? GameViewport : null);
 
-    /// <summary>How the Scene document lays out the scene views. The user's choice, kept in <c>viewport.json</c>.</summary>
-    public SceneLayout SceneLayout { get; private set; }
+    /// <summary>
+    /// Which scene views are in the Scene document: the one state of its layout, the user's choice, kept in <c>viewport.json</c>.
+    /// At least one is always in. <see cref="SetSceneViews"/> changes it.
+    /// </summary>
+    public SceneViewSet SceneViews { get; private set; }
 
-    /// <summary>The scene views that the Scene document shows: the first one for <see cref="SceneLayout.Single"/>, all four for <see cref="SceneLayout.Quad"/>.</summary>
-    public IReadOnlyList<EditorViewport> SceneLayoutViews => [.. Viewports.Take(SceneLayout == SceneLayout.Quad ? EditorViewport.SceneViews : 1)];
+    /// <summary>The scene views that are in the Scene document, by their numbers.</summary>
+    public IReadOnlyList<EditorViewport> SceneDocumentViews => [.. Viewports.Take(EditorViewport.SceneViews).Where(v => SceneViews.HasFlag(ViewBit(v.Index)))];
 
-    /// <summary><see cref="SceneLayout"/> changed.</summary>
-    public event Action? SceneLayoutChanged;
+    /// <summary>The name of the preset that <see cref="SceneViews"/> is, or Custom. It is derived, not kept.</summary>
+    public string ScenePresetName => ScenePreset.NameOf(SceneViews);
 
-    // What viewport.json holds: how each viewport draws, and the Scene document's layout.
-    sealed record ViewportFile(List<ViewportSettings>? Viewports, SceneLayout Layout = SceneLayout.Single);
+    /// <summary><see cref="SceneViews"/> changed.</summary>
+    public event Action? SceneViewsChanged;
+
+    static SceneViewSet ViewBit(int index) => (SceneViewSet)(1 << index);
+
+    // What viewport.json holds: how each viewport draws, and the scene views in the Scene document. Layout is what an
+    // earlier editor wrote in place of the views, Single or Quad.
+    sealed record ViewportFile(
+        List<ViewportSettings>? Viewports,
+        SceneViewSet? Views = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Layout = null);
 
     // The Game view's size when it last had one, which is the game's window size; it stays when the Game view hides.
     PixelSize? _gameSize;
@@ -93,8 +95,8 @@ public sealed partial class EditorShell
     // Makes the viewports with the user's settings, and connects each to the host.
     void CreateViewports()
     {
-        var (settings, layout) = LoadViewportFile();
-        SceneLayout = layout;
+        var (settings, views) = LoadViewportFile();
+        SceneViews = views;
         Viewports = [.. Enumerable.Range(0, EditorViewport.Max).Select(i => new EditorViewport(i, settings[i]))];
         ActiveViewport = SettingsViewport = Viewports[0];
         foreach (var viewport in Viewports)
@@ -197,20 +199,33 @@ public sealed partial class EditorShell
     }
 
     /// <summary>
-    /// Lays the scene views out in the Scene document as one or as four. The views that the layout drops hide, and the game
-    /// closes them; the ones it adds are shown once the document lays them out.
+    /// Sets which scene views are in the Scene document, the one place that changes them. The views that leave hide, and
+    /// the game closes them; the ones that enter are shown once the document lays them out. Refuses none at all, and says
+    /// whether it set them.
     /// </summary>
-    public void SetSceneLayout(SceneLayout layout)
+    public bool SetSceneViews(SceneViewSet views)
     {
-        if (layout == SceneLayout)
+        views &= SceneViewSet.All;
+        if (views == SceneViewSet.None)
         {
-            return;
+            return false;
         }
-        SceneLayout = layout;
-        SaveViewportFile();
-        Commands.InvalidateAll();
-        SceneLayoutChanged?.Invoke();
+        if (views != SceneViews)
+        {
+            SceneViews = views;
+            SaveViewportFile();
+            Commands.InvalidateAll();
+            SceneViewsChanged?.Invoke();
+        }
+        return true;
     }
+
+    /// <summary>Puts a scene view in the Scene document or takes it out. The last one cannot be taken out.</summary>
+    public bool ToggleSceneView(int index) =>
+        SetSceneViews(SceneViews ^ ViewBit(index));
+
+    /// <summary>Whether a scene view may be toggled: not when it is the only one in.</summary>
+    public bool CanToggleSceneView(int index) => SceneViews != ViewBit(index);
 
     // Tells the game that a viewport is open, with what it draws it from: the camera and how it draws.
     void OpenInGame(EditorViewport viewport, PixelSize size)
@@ -285,13 +300,13 @@ public sealed partial class EditorShell
         }
     }
 
-    /// <summary>The settings for the viewports and the Scene document's layout, from <c>viewport.json</c>.</summary>
-    (List<ViewportSettings> Settings, SceneLayout Layout) LoadViewportFile()
+    /// <summary>The settings for the viewports and the scene views in the Scene document, from <c>viewport.json</c>.</summary>
+    (List<ViewportSettings> Settings, SceneViewSet Views) LoadViewportFile()
     {
         var defaults = Enumerable.Range(0, EditorViewport.Max).Select(i => DefaultSettingsOf(i, DefaultViewportSettings)).ToList();
         if (Settings.Read(EditorSettings.ViewportFileName) is not { } json)
         {
-            return (defaults, SceneLayout.Single);
+            return (defaults, SceneViewSet.Perspective);
         }
         try
         {
@@ -300,16 +315,19 @@ public sealed partial class EditorShell
             {
                 var file = JsonSerializer.Deserialize<ViewportFile>(json);
                 var all = file?.Viewports ?? [];
-                return ([.. defaults.Select((d, i) => i < all.Count ? all[i] : d)], file != null && Enum.IsDefined(file.Layout) ? file.Layout : SceneLayout.Single);
+                // A file without the views has the earlier editor's layout: Quad is all four, anything else the first.
+                var views = file?.Views is { } kept && (kept & SceneViewSet.All) != SceneViewSet.None ? kept & SceneViewSet.All
+                    : string.Equals(file?.Layout, "Quad", StringComparison.OrdinalIgnoreCase) ? SceneViewSet.All : SceneViewSet.Perspective;
+                return ([.. defaults.Select((d, i) => i < all.Count ? all[i] : d)], views);
             }
             // An editor with one viewport wrote that viewport's settings alone, which every viewport then starts from.
             var shared = JsonSerializer.Deserialize<ViewportSettings>(json) ?? DefaultViewportSettings;
-            return ([.. defaults.Select((_, i) => DefaultSettingsOf(i, shared))], SceneLayout.Single);
+            return ([.. defaults.Select((_, i) => DefaultSettingsOf(i, shared))], SceneViewSet.Perspective);
         }
         catch (JsonException)
         {
             Console.Add(LogLevel.Warning, $"viewport: {Path.Combine(Settings.Directory, EditorSettings.ViewportFileName)} is not the viewports' settings, so the defaults are used");
-            return (defaults, SceneLayout.Single);
+            return (defaults, SceneViewSet.Perspective);
         }
     }
 
@@ -318,5 +336,5 @@ public sealed partial class EditorShell
         index == EditorViewport.GameIndex ? settings with { ShowIcons = false, Helpers = HelperMode.None } : settings;
 
     void SaveViewportFile() =>
-        WriteSetting("viewport", EditorSettings.ViewportFileName, JsonSerializer.Serialize(new ViewportFile([.. Viewports.Select(v => v.Settings)], SceneLayout)));
+        WriteSetting("viewport", EditorSettings.ViewportFileName, JsonSerializer.Serialize(new ViewportFile([.. Viewports.Select(v => v.Settings)], SceneViews)));
 }

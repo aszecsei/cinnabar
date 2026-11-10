@@ -124,6 +124,10 @@ static partial class EditorCommands
     public const string CollapseRibbon = "view.collapseRibbon";
     public const string ViewportScale = "viewport.scale";
     public const string SceneLayout = "viewport.layout";
+
+    /// <summary>The ID of the command that puts a scene view, by its number, in the Scene or takes it out.</summary>
+    public static string SceneViewToggle(int index) => $"viewport.view.{index}";
+
     public const string SceneView = "viewport.scene";
     public const string GameView = "viewport.game";
     public const string SelectAll = "edit.selectAll";

@@ -130,7 +130,7 @@ public sealed class ViewportView : Grid
             ItemsSource = EditorShell.DebugViewNames,
             Focusable = false,
         };
-        // A scene view in a quad is named, so the four can be told apart.
+        // A scene view is named while it has company in the Scene, so the four can be told apart.
         _title = new TextBlock
         {
             Text = viewport.Title,
@@ -227,7 +227,7 @@ public sealed class ViewportView : Grid
             _shell.ModeChanged += ShowMode;
             _shell.ActiveViewportChanged += ShowActive;
             _shell.ViewportsChanged += ShowActive;
-            _shell.SceneLayoutChanged += ShowTitle;
+            _shell.SceneViewsChanged += ShowTitle;
             _shell.ViewportSettingsChanged += ShowView;
             _timer.Start();
             if (_viewport.IsGame)
@@ -253,7 +253,7 @@ public sealed class ViewportView : Grid
             _shell.ModeChanged -= ShowMode;
             _shell.ActiveViewportChanged -= ShowActive;
             _shell.ViewportsChanged -= ShowActive;
-            _shell.SceneLayoutChanged -= ShowTitle;
+            _shell.SceneViewsChanged -= ShowTitle;
             _shell.ViewportSettingsChanged -= ShowView;
             _timer.Stop();
             _flyTimer.Stop();
@@ -265,7 +265,7 @@ public sealed class ViewportView : Grid
     // The viewport that the View tab acts on has a frame around it while more than one viewport is shown.
     void ShowActive() => _activeFrame.Classes.Set("active", _shell.SettingsViewport == _viewport && _shell.ShownViewports.Skip(1).Any());
 
-    void ShowTitle() => _title.IsVisible = !_viewport.IsGame && _shell.SceneLayout == SceneLayout.Quad;
+    void ShowTitle() => _title.IsVisible = !_viewport.IsGame && _shell.SceneDocumentViews.Count > 1;
 
     void ShowView()
     {

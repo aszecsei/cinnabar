@@ -22,7 +22,7 @@ Read them in this order the first time.
 
 ## Overview
 
-The editor has two halves. The C# application owns the user's state: the scene document, the selection, the camera, the panels and the settings. The game side, `lib/engine/editor`, owns nothing persistent: it answers the editor's messages with what the game knows, applies the editor's operations to the world, and draws the viewport's tools. Three flows connect them:
+The editor has two halves. The C# application owns the user's state: the scene document, the selection, the camera, the panels and the settings. The game side, `lib/engine/editor`, owns nothing persistent: it answers the editor's messages with what the game knows, applies the editor's operations to the world, and draws the viewports' tools, in `draw_frame`. Three flows connect them:
 
 ```mermaid
 flowchart LR
@@ -51,7 +51,7 @@ The game side is small and lives in `lib/engine/editor`:
 | `types.odin` | `component_types`: every registered component with the fields that scenes can set |
 | `edit.odin` | `apply_operations`: the editor's edits applied to the world, with problems for what cannot be |
 | `modes.odin` | Edit, Play and Paused: `simulation` tells the game's frame what to run |
-| `viewport.odin` | The viewports with their cameras, the selection, hidden entities, the ID buffer's pick pass, the outline and the gizmo |
+| `viewport.odin` | `draw_frame`, which draws the game's frame in each open viewport, the viewports with their cameras, the selection, hidden entities, the ID buffer's pick pass, the outline and the gizmo |
 | `helpers.odin`, `icons.odin` | The shapes of lights, volumes and cameras as debug lines, and their clickable icons |
 | `commands.odin` | Game commands: registered by the game, shown in the ribbon, run through `poll` |
 | `preview.odin` | Material previews for the material editor, and effect previews (see [Rendering](../rendering/materials.md#material-previews) and [Particles](../rendering/particles.md#previews)) |

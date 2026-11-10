@@ -1057,66 +1057,66 @@ the_viewports_quality_replaces_the_games_where_it_chooses :: proc(t: ^testing.T)
 	renderer.quality.aa, renderer.quality.render_scale = .Smaa, 0.75
 
 	step(f)
-	_, ok := viewport_quality(&f.editor, renderer, 0)
+	_, ok := viewport_quality(&f.editor, renderer.quality, renderer.caps, 0)
 	testing.expect(t, !ok, "the viewport keeps the game's quality")
 	// A preset sets the features, and the anti-aliasing and the render scale stay the game's.
 	step(f, 1, link.Set_Viewport_Settings{settings = {quality_preset = .Low}})
 	q: render.Quality
-	q, ok = viewport_quality(&f.editor, renderer, 0)
+	q, ok = viewport_quality(&f.editor, renderer.quality, renderer.caps, 0)
 	testing.expect(t, ok)
 	testing.expect_value(t, q.shadows.level, render.Quality_Level.Low)
 	testing.expect_value(t, q.aa, render.Aa_Technique.Smaa)
 	testing.expect_value(t, q.render_scale, 0.75)
 	step(f, 1, link.Set_Viewport_Settings{settings = {anti_aliasing = .Fsr, render_scale = 0.5}})
-	q, ok = viewport_quality(&f.editor, renderer, 0)
+	q, ok = viewport_quality(&f.editor, renderer.quality, renderer.caps, 0)
 	testing.expect(t, ok)
 	testing.expect_value(t, q.shadows.level, render.Quality_Level.High)
 	testing.expect_value(t, q.aa, render.Aa_Technique.Fsr)
 	testing.expect_value(t, q.render_scale, 0.5)
 	// The device limits it: without FSR, temporal AA.
 	renderer.caps = {}
-	q, _ = viewport_quality(&f.editor, renderer, 0)
+	q, _ = viewport_quality(&f.editor, renderer.quality, renderer.caps, 0)
 	testing.expect_value(t, q.aa, render.Aa_Technique.Taa)
 	// The global illumination's technique replaces the game's, at its level, and the device limits it too: without
 	// Ray_Query, the split cascades are the screen cascades.
 	renderer.caps = {ray_query = true}
 	step(f, 1, link.Set_Viewport_Settings{settings = {global_illumination = .Voxel_Cones}})
-	q, ok = viewport_quality(&f.editor, renderer, 0)
+	q, ok = viewport_quality(&f.editor, renderer.quality, renderer.caps, 0)
 	testing.expect(t, ok)
 	testing.expect_value(t, q.gi.technique, render.Gi_Technique.Voxel_Cones)
 	testing.expect_value(t, q.gi.level, render.Quality_Level.High)
 	testing.expect_value(t, q.aa, render.Aa_Technique.Smaa)
 	step(f, 1, link.Set_Viewport_Settings{settings = {quality_preset = .Low, global_illumination = .Split_Cascades}})
-	q, _ = viewport_quality(&f.editor, renderer, 0)
+	q, _ = viewport_quality(&f.editor, renderer.quality, renderer.caps, 0)
 	testing.expect_value(t, q.gi, render.Gi_Quality{technique = .Split_Cascades, level = .Low})
 	renderer.caps = {}
-	q, _ = viewport_quality(&f.editor, renderer, 0)
+	q, _ = viewport_quality(&f.editor, renderer.quality, renderer.caps, 0)
 	testing.expect_value(t, q.gi.technique, render.Gi_Technique.Screen_Cascades)
 	step(f, 1, link.Set_Viewport_Settings{settings = {global_illumination = .Off}})
-	q, _ = viewport_quality(&f.editor, renderer, 0)
+	q, _ = viewport_quality(&f.editor, renderer.quality, renderer.caps, 0)
 	testing.expect_value(t, q.gi.technique, render.Gi_Technique.Off)
 	// The reflections' technique and level each replace the game's, or the preset's, on their own; without Ray_Query,
 	// the traced reflections are the screen-space ones.
 	game := renderer.quality.reflections
 	step(f, 1, link.Set_Viewport_Settings{settings = {reflections = .Probes}})
-	q, ok = viewport_quality(&f.editor, renderer, 0)
+	q, ok = viewport_quality(&f.editor, renderer.quality, renderer.caps, 0)
 	testing.expect(t, ok)
 	testing.expect_value(t, q.reflections, render.Reflection_Quality{technique = .Probes, level = game.level})
 	step(f, 1, link.Set_Viewport_Settings{settings = {reflections_level = .Ultra}})
-	q, ok = viewport_quality(&f.editor, renderer, 0)
+	q, ok = viewport_quality(&f.editor, renderer.quality, renderer.caps, 0)
 	testing.expect(t, ok)
 	testing.expect_value(t, q.reflections, render.Reflection_Quality{technique = game.technique, level = .Ultra})
 	step(f, 1, link.Set_Viewport_Settings{settings = {quality_preset = .Ultra, reflections = .Ray_Traced, reflections_level = .Low}})
-	q, _ = viewport_quality(&f.editor, renderer, 0)
+	q, _ = viewport_quality(&f.editor, renderer.quality, renderer.caps, 0)
 	testing.expect_value(t, q.reflections, render.Reflection_Quality{technique = .Screen, level = .Low})
 	renderer.caps = {ray_query = true}
-	q, _ = viewport_quality(&f.editor, renderer, 0)
+	q, _ = viewport_quality(&f.editor, renderer.quality, renderer.caps, 0)
 	testing.expect_value(t, q.reflections.technique, render.Reflection_Technique.Ray_Traced)
 	step(f, 1, link.Set_Viewport_Settings{settings = {reflections = .Off}})
-	q, _ = viewport_quality(&f.editor, renderer, 0)
+	q, _ = viewport_quality(&f.editor, renderer.quality, renderer.caps, 0)
 	testing.expect_value(t, q.reflections.technique, render.Reflection_Technique.Off)
 	step(f, 0)
-	_, ok = viewport_quality(&f.editor, renderer, 0)
+	_, ok = viewport_quality(&f.editor, renderer.quality, renderer.caps, 0)
 	testing.expect(t, !ok, "without an editor, the game's quality")
 }
 // A fake GPU for the live meshes' residency, whose transfers are done at once.
@@ -1616,66 +1616,241 @@ each_viewport_has_its_own_gizmo_handles_and_settings :: proc(t: ^testing.T) {
 	testing.expect_value(t, render_overrides(&f.editor, -1), Render_Overrides{})
 }
 
+// The game's frame, as the game describes it. Its hooks have data of their own, and every view of the frame runs them.
+@(private = "file")
+Game_Frame :: struct {
+	data:    i32,
+	hidden:  [1]u32,
+	skins:   [1]render.Skin_Pose,
+	extra:   [1]render.Extra_View,
+	quality: render.Quality,
+}
+
+@(private = "file")
+game_hook :: proc(_: ^render.Frame) {}
+
+@(private = "file")
+game_ui :: proc(_: ^render.Frame) {}
+
+@(private = "file")
+game_debug :: proc(_: ^render.Frame) {}
+
+@(private = "file")
+game_desc :: proc(g: ^Game_Frame, settings: ^render.Frame_Settings = nil) -> render.Frame_Desc {
+	return {
+		view = {rotation = 1, vertical_fov = 2, near = 0.5},
+		size = {1280, 720},
+		settings = settings,
+		disable = {.Bloom},
+		exposure_offset = 0.5,
+		hooks = {data = &g.data, before_world = game_hook, ui = game_ui, debug = game_debug},
+		delta = 0.25,
+		skins = g.skins[:],
+	}
+}
+
 @(test)
-a_frame_viewport_takes_its_own_settings_quality_and_exposure :: proc(t: ^testing.T) {
+without_an_editor_the_frame_is_the_games_as_it_is :: proc(t: ^testing.T) {
 	f := setup(t)
 	defer teardown(f)
 	with_targets(f)
 	with_renderer(f)
+	g: Game_Frame
+	g.hidden = {0b11}
+	desc := game_desc(&g)
+	desc.hidden = g.hidden[:]
+	// No editor is linked, whatever the viewports a past one opened.
+	step(f, 0)
+	out := plan_frame(&f.editor, &f.world, desc, nil, f.renderer.quality, f.renderer.caps)
+	testing.expect_value(t, out.view, desc.view)
+	testing.expect_value(t, out.size, desc.size)
+	testing.expect_value(t, out.target, gpu.Texture{})
+	testing.expect(t, out.state == nil && out.quality == nil && out.overlay.draw == nil)
+	testing.expect(t, out.hooks.data == desc.hooks.data && out.hooks.ui == game_ui && out.hooks.debug == game_debug)
+	testing.expect(t, raw_data(out.hidden) == raw_data(desc.hidden) && len(out.hidden) == 1)
+	testing.expect(t, len(out.previews) == 0 && len(out.playing) == 0 && len(out.extra_views) == 0)
+	testing.expect(t, !out.no_debug && !out.keep_ids)
+	testing.expect_value(t, out.disable, render.Features{.Bloom})
+	testing.expect_value(t, out.exposure_offset, 0.5)
+	testing.expect(t, raw_data(out.skins) == raw_data(desc.skins))
+}
+
+@(test)
+the_game_view_draws_the_frame_as_described_and_a_scene_view_adds_the_editor :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	with_targets(f)
+	with_renderer(f)
+	g: Game_Frame
+	settings: render.Frame_Settings
+	desc := game_desc(&g, &settings)
 	step(
 		f,
 		1,
 		viewport_camera(1, 3 << 24),
 		open_viewport(1, .Scene, 16, 8),
 		open_viewport(2, .Game, 32, 16),
-		link.Set_Viewport_Settings{viewport = 1, settings = {debug_view = .Normals, no_fog = true, exposure_offset = -1, quality_preset = .Low}},
+		link.Set_Viewport_Settings{viewport = 1, settings = {debug_view = .Normals, no_fog = true, exposure_offset = -1, quality_preset = .Low, shading_stats = true}},
 		link.Set_Viewport_Settings{viewport = 2, settings = {no_bloom = true, exposure_offset = 2, anti_aliasing = .Fxaa}},
 	)
-	hook :: proc(_: ^render.Frame) {}
-	camera := render.View {
-		rotation     = 1,
-		vertical_fov = 2,
-		near         = 0.5,
+	out := plan_frame(&f.editor, &f.world, desc, frame_viewports(&f.editor), f.renderer.quality, f.renderer.caps)
+
+	// The Game view is the frame's own: the game's camera, hooks, UI and settings, at the viewport's size, in its target.
+	testing.expect_value(t, out.view, desc.view)
+	testing.expect_value(t, out.size, [2]u32{32, 16})
+	testing.expect_value(t, out.target, gpu.Texture{index = 22, generation = 1})
+	testing.expect(t, out.state != nil)
+	testing.expect(t, out.hooks.data == desc.hooks.data && out.hooks.ui == game_ui && out.hooks.debug == game_debug && out.hooks.before_world == game_hook)
+	testing.expect(t, out.settings == &settings)
+	testing.expect_value(t, out.delta, 0.25)
+	testing.expect(t, raw_data(out.skins) == raw_data(desc.skins))
+	// No tools, no IDs for picks and no debug layer, as a player sees it.
+	testing.expect(t, out.overlay.draw == nil && !out.keep_ids && out.no_debug)
+	// Its own settings join the game's: the features and the exposure.
+	testing.expect_value(t, out.disable, render.Features{.Bloom})
+	testing.expect_value(t, out.exposure_offset, 2.5)
+	testing.expect_value(t, out.debug_view, render.Debug_View.Lit)
+	if testing.expect(t, out.quality != nil) {
+		testing.expect_value(t, out.quality.aa, render.Aa_Technique.Fxaa)
 	}
-	views := frame_viewports(&f.editor)
-	if !testing.expect_value(t, len(views), 2) {
+	testing.expect(t, !out.shading_stats)
+
+	// The scene view is an extra view of the same frame, from the editor's camera, in its own target and state.
+	if !testing.expect_value(t, len(out.extra_views), 1) {
 		return
 	}
-	game, scene := render_view(&f.editor, views[0], camera, {debug = hook}), render_view(&f.editor, views[1], camera, {debug = hook})
-
-	// The scene view: the editor's camera, its IDs for the picks, its debug layer in Edit, and its own settings.
+	scene := out.extra_views[0]
 	testing.expect_value(t, scene.view.position.raw.x, 3 << 24)
 	testing.expect_value(t, scene.size, [2]u32{16, 8})
 	testing.expect_value(t, scene.target, gpu.Texture{index = 21, generation = 1})
-	testing.expect(t, scene.state == views[1].state)
+	testing.expect(t, scene.state != nil && scene.state != out.state)
+	testing.expect(t, scene.settings == &settings)
+	// The game's hooks, the same data and passes, minus the UI.
+	testing.expect(t, scene.hooks.data == desc.hooks.data && scene.hooks.before_world == game_hook && scene.hooks.debug == game_debug)
+	testing.expect(t, scene.hooks.ui == nil)
+	// The editor's tools as its overlay, the IDs for the picks, and the debug layer in Edit.
+	testing.expect(t, scene.overlay.draw != nil && scene.overlay.data != nil)
 	testing.expect(t, scene.keep_ids && !scene.no_debug)
 	testing.expect_value(t, scene.debug_view, render.Debug_View.Normals)
-	testing.expect_value(t, scene.disable, render.Features{.Fog})
-	testing.expect_value(t, scene.exposure_offset, -1)
-	testing.expect(t, scene.hooks.debug == hook)
-	if testing.expect(t, scene.quality != nil, "the scene view's preset replaces the quality") {
+	testing.expect_value(t, scene.disable, render.Features{.Bloom, .Fog})
+	testing.expect_value(t, scene.exposure_offset, -0.5)
+	if testing.expect(t, scene.quality != nil, "a view always has its quality") {
 		testing.expect_value(t, scene.quality.aa, f.renderer.quality.aa)
 	}
+	// The own view's shading stats are the viewport's that is the own view.
+	step(f, 1, link.Close_Viewport{viewport = 2})
+	out = plan_frame(&f.editor, &f.world, desc, frame_viewports(&f.editor), f.renderer.quality, f.renderer.caps)
+	testing.expect(t, out.shading_stats)
+	testing.expect_value(t, out.view.position.raw.x, 3 << 24)
+	testing.expect_value(t, len(out.extra_views), 0)
+	// A scene view as the frame's own view has no UI either.
+	testing.expect(t, out.hooks.ui == nil && out.overlay.draw != nil)
 
-	// The Game view: the game's camera, no IDs and no debug layer, as a player sees it, and its own settings.
-	testing.expect_value(t, game.view, camera)
-	testing.expect_value(t, game.size, [2]u32{32, 16})
-	testing.expect(t, game.state == views[0].state && game.state != scene.state)
-	testing.expect(t, !game.keep_ids && game.no_debug)
-	testing.expect_value(t, game.debug_view, render.Debug_View.Lit)
-	testing.expect_value(t, game.disable, render.Features{.Bloom})
-	testing.expect_value(t, game.exposure_offset, 2)
-	if testing.expect(t, game.quality != nil, "the Game view's anti-aliasing replaces the quality") {
-		testing.expect_value(t, game.quality.aa, render.Aa_Technique.Fxaa)
+	// Outside Edit, a scene view has no debug layer, but keeps its tools for the picks.
+	step(f, 1, open_viewport(2, .Game, 32, 16), link.Set_Mode{mode = .Play})
+	out = plan_frame(&f.editor, &f.world, desc, frame_viewports(&f.editor), f.renderer.quality, f.renderer.caps)
+	testing.expect(t, len(out.extra_views) == 1 && out.extra_views[0].no_debug && out.extra_views[0].overlay.draw != nil && out.extra_views[0].keep_ids)
+}
+
+@(test)
+the_frame_with_no_viewport_to_draw_is_the_games_with_the_editors_additions :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	with_targets(f)
+	with_renderer(f)
+	g: Game_Frame
+	desc := game_desc(&g)
+	desc.extra_views = g.extra[:]
+	g.extra[0] = {
+		size = {4, 4},
 	}
+	a := spawn(f, {})
+	// Linked, in Edit, with nothing open: the game's frame into the frame target, with the debug layer.
+	step(f, 1, link.Set_Selection{entities = {u64(a)}})
+	out := plan_frame(&f.editor, &f.world, desc, frame_viewports(&f.editor), f.renderer.quality, f.renderer.caps)
+	testing.expect_value(t, out.view, desc.view)
+	testing.expect_value(t, out.size, desc.size)
+	testing.expect_value(t, out.target, gpu.Texture{})
+	testing.expect(t, out.state == nil && out.hooks.ui == game_ui && out.overlay.draw == nil)
+	testing.expect(t, !out.no_debug)
+	testing.expect_value(t, len(out.extra_views), 1)
+	// The systems that the editor plays, the selection, are the game's.
+	testing.expect_value(t, len(out.playing), 1)
+	// In Play there is no debug layer, as in any viewport.
+	step(f, 1, link.Set_Mode{mode = .Play})
+	out = plan_frame(&f.editor, &f.world, desc, frame_viewports(&f.editor), f.renderer.quality, f.renderer.caps)
+	testing.expect(t, out.no_debug)
 
-	// The scene view has no debug layer outside Edit; the Game view never does. A viewport that keeps the game's quality
-	// leaves it to the frame's.
-	step(f, 1, link.Set_Mode{mode = .Play}, link.Set_Viewport_Settings{viewport = 1})
-	views = frame_viewports(&f.editor)
-	scene = render_view(&f.editor, views[1], camera, {})
-	testing.expect(t, scene.keep_ids && scene.no_debug)
-	testing.expect(t, scene.quality == nil)
+	// Viewports that are open but cannot draw, as their targets are still read, leave the same frame.
+	step(f, 1, open_viewport(2, .Game, 32, 16))
+	targets.busy[2] = true
+	out = plan_frame(&f.editor, &f.world, desc, frame_viewports(&f.editor), f.renderer.quality, f.renderer.caps)
+	testing.expect_value(t, out.size, desc.size)
+	testing.expect_value(t, out.target, gpu.Texture{})
+}
+
+@(test)
+the_games_hidden_entities_and_the_editors_are_together_in_every_view :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	with_targets(f)
+	with_renderer(f)
+	g: Game_Frame
+	desc := game_desc(&g)
+	a := spawn(f, {})
+	b := spawn(f, {})
+	step(f, 1, open_viewport(2, .Game), open_viewport(0, .Scene), viewport_camera(0, 0))
+	plan :: proc(f: ^Fixture, desc: render.Frame_Desc) -> render.Frame_Desc {
+		return plan_frame(&f.editor, &f.world, desc, frame_viewports(&f.editor), f.renderer.quality, f.renderer.caps)
+	}
+	// Nothing hidden by either.
+	testing.expect_value(t, len(plan(f, desc).hidden), 0)
+
+	// The editor's alone, with the entity's descendants.
+	step(f, 1, link.Set_Hidden{entities = {u64(a)}})
+	out := plan(f, desc)
+	testing.expect(t, !render.is_hidden(out.hidden, b) && render.is_hidden(out.hidden, a))
+
+	// The game's alone is the game's own list, and with both, one list that hides what either does.
+	step(f, 1, link.Set_Hidden{})
+	g.hidden = {1 << (ecs.entity_index(b) % 32)}
+	desc.hidden = g.hidden[:]
+	out = plan(f, desc)
+	testing.expect(t, raw_data(out.hidden) == raw_data(desc.hidden))
+	step(f, 1, link.Set_Hidden{entities = {u64(a)}})
+	out = plan(f, desc)
+	testing.expect(t, render.is_hidden(out.hidden, a) && render.is_hidden(out.hidden, b), "the list hides what either hides")
+	// The game's list is not changed.
+	testing.expect(t, !render.is_hidden(desc.hidden, a))
+}
+
+@(test)
+a_view_starts_from_the_games_quality_when_it_has_one :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	with_targets(f)
+	with_renderer(f)
+	g: Game_Frame
+	g.quality = render.preset_quality(.High, f.renderer.caps)
+	g.quality.aa = .Taa
+	desc := game_desc(&g)
+	desc.quality = &g.quality
+	step(
+		f,
+		1,
+		open_viewport(2, .Game),
+		open_viewport(0, .Scene),
+		viewport_camera(0, 0),
+		link.Set_Viewport_Settings{viewport = 0, settings = {render_scale = 0.5}},
+	)
+	out := plan_frame(&f.editor, &f.world, desc, frame_viewports(&f.editor), f.renderer.quality, f.renderer.caps)
+	// The Game view keeps the game's, and the scene view changes only what it chooses.
+	if testing.expect(t, out.quality != nil && len(out.extra_views) == 1 && out.extra_views[0].quality != nil) {
+		testing.expect_value(t, out.quality.aa, render.Aa_Technique.Taa)
+		testing.expect_value(t, out.extra_views[0].quality.aa, render.Aa_Technique.Taa)
+		testing.expect_value(t, out.extra_views[0].quality.render_scale, 0.5)
+		testing.expect(t, out.quality != desc.quality, "a view's quality is its own copy")
+	}
 }
 
 @(test)

@@ -174,8 +174,7 @@ update :: proc(state: rawptr, dt: time.Duration) -> (keep_running: bool) {
 	return true
 }
 
-// camera_view is the scene's camera, which the editor's Game view and the game without an editor draw from. The editor's
-// scene views draw from the editor's cameras.
+// camera_view is the scene's camera, which the game draws from.
 camera_view :: proc(s: ^Game_State) -> render.View {
 	if view, ok := render.camera_view(&s.world, s.camera); ok {
 		return view
@@ -183,58 +182,10 @@ camera_view :: proc(s: ^Game_State) -> render.View {
 	return {rotation = 1, vertical_fov = render.DEFAULT_VERTICAL_FOV, near = render.DEFAULT_NEAR}
 }
 
-// View_Data is what the hooks of a view of the frame get: the game's state, and the editor's viewport that the view is.
-View_Data :: struct {
-	state:    ^Game_State,
-	viewport: int,
-}
-
-// render_frame draws the frame. A linked editor shows viewports (see docs/editor/viewport.md#views): the first one that
-// editor.frame_viewports gives is the frame's own view, and the others are extra views. A scene view draws from the
-// editor's camera with the editor's tools, and the Game view from the scene's camera without them. With none, as without
-// an editor, the frame draws the scene's camera into the frame target.
+// render_frame describes the frame as the game draws it, with or without an editor, and gives it to the editor package to
+// draw (see editor.draw_frame), which draws it in the views it shows.
 render_frame :: proc(s: ^Game_State, window: [2]u32) {
-	camera := camera_view(s)
-	hooks :: proc(s: ^Game_State, viewport: int, tools: bool) -> render.Frame_Hooks {
-		data := new(View_Data, s.platform.frame_allocator)
-		data^ = {s, viewport}
-		return {data = data, debug = tools ? draw_editor_tools : nil}
-	}
-	editor.draw_helpers(&s.editor, &s.world, &s.renderer.debug)
-	desc := render.Frame_Desc {
-		size     = window,
-		view     = camera,
-		no_debug = !editor.debug_shown(&s.editor),
-		hidden   = editor.visibility(&s.editor, &s.world).hidden,
-		previews = editor.previews(&s.editor),
-		delta    = s.frame_step,
-		playing  = editor.playing(&s.editor),
-		hooks    = hooks(s, 0, false),
-	}
-	extra_views := make([dynamic]render.Extra_View, s.platform.frame_allocator)
-	for viewport, i in editor.frame_viewports(&s.editor) {
-		view := editor.render_view(&s.editor, viewport, camera, hooks(s, viewport.viewport, viewport.kind == .Scene))
-		if i == 0 {
-			render.use_view(&desc, view)
-			desc.shading_stats = editor.render_overrides(&s.editor, viewport.viewport).shading_stats
-		} else {
-			append(&extra_views, view)
-		}
-	}
-	desc.extra_views = extra_views[:]
-	render.draw_frame(&s.renderer, &s.world, desc)
-}
-
-// draw_editor_tools adds the editor's pick, and in Edit its icons, outline and gizmo.
-draw_editor_tools :: proc(f: ^render.Frame) {
-	data := (^View_Data)(f.data)
-	s := data.state
-	editor.add_viewport_passes(
-		&s.editor,
-		f.graph,
-		&s.world,
-		{viewport = data.viewport, view = f.view, size = f.size, output_size = f.output_size, target = f.debug, ids = f.ids, depth = f.depth},
-	)
+	editor.draw_frame(&s.editor, &s.renderer, &s.world, {view = camera_view(s), size = window, delta = s.frame_step})
 }
 
 // update_project reads the project's settings again when their files change, so the editor's change shows at once.
