@@ -144,6 +144,33 @@ the_particle_passes_append_sprites :: proc(t: ^testing.T) {
 @(test)
 an_effect_preview_plays_on_a_frame_of_its_own :: proc(t: ^testing.T) {
 	sync.guard(&backend_lock)
+	draw_effect_previews(t, 1, {32, 32})
+}
+
+@(test)
+a_frame_with_four_previews_shares_their_targets :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	one := draw_effect_previews(t, 1, {32, 32})
+	four := draw_effect_previews(t, gpu.MAX_PREVIEW_TARGETS, {32, 32})
+	// The previews draw one after another, so each takes the textures of the one before it: four take what one does.
+	testing.expect_value(t, four.textures, 1 + gpu.MAX_PREVIEW_TARGETS * (one.textures - 1))
+	testing.expect_value(t, four.taken, one.taken)
+	testing.expect_value(t, four.taken_bytes, one.taken_bytes)
+	// At a size that the editor's panels draw them at.
+	four = draw_effect_previews(t, gpu.MAX_PREVIEW_TARGETS, {512, 512})
+	log.infof(
+		"four previews at 512x512: %d transient textures, %.1f MiB; they take %d, %.1f MiB",
+		four.textures,
+		f64(four.bytes) / (1 << 20),
+		four.taken,
+		f64(four.taken_bytes) / (1 << 20),
+	)
+}
+
+// draw_effect_previews draws two frames with count previews of an unsaved effect at one size, each into a target of its
+// own, as the editor's previews draw, and returns what the last frame's transient textures took.
+@(private = "file")
+draw_effect_previews :: proc(t: ^testing.T, count: int, size: [2]u32) -> (stats: Transient_Stats) {
 	arena: virtual.Arena
 	testing.expect(t, virtual.arena_init_growing(&arena) == nil)
 	defer virtual.arena_destroy(&arena)
@@ -197,8 +224,13 @@ an_effect_preview_plays_on_a_frame_of_its_own :: proc(t: ^testing.T) {
 	p.update.pipeline = platform.gpu_create_compute_pipeline({compute = {1}, label = "test particle update"})
 	p.history.pipeline = platform.gpu_create_compute_pipeline({compute = {1}, label = "test particle history"})
 	defer particles_destroy(p, &platform)
-	target := platform.gpu_create_texture({size = {32, 32}, format = gpu.FRAME_TARGET_FORMAT, usage = {.Render_Target}, label = "preview target"}, nil)
-	defer platform.gpu_destroy_texture(target)
+	targets: [gpu.MAX_PREVIEW_TARGETS]gpu.Texture
+	for &target in targets[:count] {
+		target = platform.gpu_create_texture({size = size, format = gpu.FRAME_TARGET_FORMAT, usage = {.Render_Target}, label = "preview target"}, nil)
+	}
+	defer for target in targets[:count] {
+		platform.gpu_destroy_texture(target)
+	}
 
 	// The editor's unsaved effect: one emitter of 64 particles.
 	effect := format.guid_parse("00112233445566778899aabbccddeeff") or_else {}
@@ -215,28 +247,32 @@ an_effect_preview_plays_on_a_frame_of_its_own :: proc(t: ^testing.T) {
 		f.lut = create_texture(&g, {size = {16, 16}, format = .RGBA16_Float, label = "lut"})
 		pass := add_render_pass(&g, "lut", proc(_: ^Pass_Context) {}, f)
 		color(&g, pass, f.lut, .Clear)
-		desc := Preview_Desc {
-			target   = target,
-			size     = {32, 32},
-			id       = 1,
-			material = effect,
-			effect   = true,
-			data     = blob,
-			version  = 1,
-			rotation = 1,
-			distance = 4,
+		for target, id in targets[:count] {
+			desc := Preview_Desc {
+				target   = target,
+				size     = size,
+				id       = id,
+				material = effect,
+				effect   = true,
+				data     = blob,
+				version  = 1,
+				rotation = 1,
+				distance = 4,
+			}
+			{
+				// The ground's mesh and material are not cooked, which residency logs.
+				context.logger = log.nil_logger()
+				add_preview_passes(f, &desc)
+			}
+			// The effect's emitter took its range of the pool, and the preview's frame reserved its sprites.
+			testing.expect(t, p.previews[id].started && p.previews[id].ranges[0].count == 64)
+			testing.expect_value(t, p.preview_cameras[id].valid, true)
 		}
-		{
-			// The ground's mesh and material are not cooked, which residency logs.
-			context.logger = log.nil_logger()
-			add_preview_passes(f, &desc)
-		}
-		// The effect's emitter took its range of the pool, and the preview's frame reserved its sprites.
-		testing.expect(t, p.previews[1].started && p.previews[1].ranges[0].count == 64)
-		testing.expect_value(t, p.preview_cameras[1].valid, true)
 		testing.expectf(t, execute(&g), "preview frame %d did not execute", frame)
+		stats = g.transients
 		null.begin_frame({64, 32})
 	}
+	return
 }
 
 @(test)

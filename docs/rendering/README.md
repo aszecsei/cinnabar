@@ -88,7 +88,7 @@ The shaders are engine content in `lib/engine/content/shaders`: one `.hlsl` asse
 | `Gpu_Scene` | `Renderer` | The persistent instance buffer, its slots, the render origin, the draw items and bins |
 | `Material_Table` | `Renderer` | The loaded materials and instances, their pipelines, and the frame's parameter blocks |
 | `Residency` | `Renderer` | The resident textures and meshes by GUID, and their streaming state |
-| `Texture_Cache` | `Renderer` | The transient textures that every view shares, keyed by description and label, and the frame count |
+| `Texture_Cache` | `Renderer` | The transient textures that every view shares, keyed by description, and the frame count |
 
 ## Goals
 

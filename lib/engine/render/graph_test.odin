@@ -290,6 +290,181 @@ sampling_an_unwritten_texture_fails :: proc(t: ^testing.T) {
 	context.logger = testlog.expected_errors()
 	_, ok := record(&g)
 	testing.expect(t, !ok)
+
+	// A texture that would take the texture of one written before it is still unwritten.
+	g = begin(&f.platform, &f.cache)
+	target = import_texture(&g, null.frame_target(), .Color)
+	written := create_texture(&g, {size = SIZE, format = .RGBA8_Unorm, label = "written"})
+	empty = create_texture(&g, {size = SIZE, format = .RGBA8_Unorm, label = "empty"})
+	p = add_render_pass(&g, "write", nothing)
+	color(&g, p, written, .Clear)
+	p = add_render_pass(&g, "read", nothing)
+	read(&g, p, written)
+	color(&g, p, target, .Clear)
+	p = add_render_pass(&g, "draw", nothing)
+	read(&g, p, empty)
+	color(&g, p, target, .Load)
+	_, ok = record(&g)
+	testing.expect(t, !ok, "a texture took the contents of the one before it")
+}
+
+@(test)
+textures_of_one_description_share_when_their_lifetimes_do_not_overlap :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	f: Fixture
+	setup(t, &f)
+	defer teardown(&f)
+
+	// A blur's shape: the first texture is dead once the blur reads it, so the second one takes its texture.
+	g := begin(&f.platform, &f.cache)
+	target := import_texture(&g, null.frame_target(), .Color)
+	first := create_texture(&g, {size = SIZE, format = .RGBA16_Float, label = "first"})
+	blurred := create_texture(&g, {size = SIZE, format = .R16_Float, label = "blurred"})
+	second := create_texture(&g, {size = SIZE, format = .RGBA16_Float, label = "second"})
+	p := add_render_pass(&g, "draw first", nothing)
+	color(&g, p, first, .Clear)
+	p = add_compute_pass(&g, "blur", nothing)
+	read(&g, p, first)
+	write(&g, p, blurred)
+	p = add_render_pass(&g, "draw second", nothing)
+	read(&g, p, blurred)
+	color(&g, p, second, .Clear)
+	p = add_render_pass(&g, "composite", nothing)
+	read(&g, p, second)
+	color(&g, p, target, .Clear)
+
+	subs, ok := record(&g)
+	testing.expect(t, ok)
+	cb := all_buffers(subs)
+	shared, b := gpu_texture(&g, first), gpu_texture(&g, blurred)
+	testing.expect_value(t, gpu_texture(&g, second), shared)
+	testing.expect_value(t, g.transients.textures, 3)
+	testing.expect_value(t, g.transients.taken, 2)
+	testing.expect_value(t, g.transients.taken_bytes, g.transients.bytes - 64 * 64 * 8)
+	r := inspect(cb, f.platform.frame_allocator)
+	// The second texture starts in the layout that the blur left, and its first barrier waits for the blur's read.
+	expect_transitions(
+		t,
+		r.textures[:],
+		{
+			{shared, .Undefined, .Render_Target},
+			{shared, .Render_Target, .Shader_Resource},
+			{b, .Undefined, .Unordered_Access},
+			{b, .Unordered_Access, .Shader_Resource},
+			{shared, .Shader_Resource, .Render_Target},
+			{shared, .Render_Target, .Shader_Resource},
+		},
+	)
+	if len(r.textures) == 6 {
+		testing.expect_value(t, r.textures[4].sync_before, gpu.Syncs{.Compute_Shading})
+		testing.expect_value(t, r.textures[4].access_before, gpu.Accesses{.Shader_Resource})
+	}
+	testing.expect(t, null.submit(cb))
+	null.end_frame()
+}
+
+@(test)
+textures_whose_lifetimes_overlap_do_not_share :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	f: Fixture
+	setup(t, &f)
+	defer teardown(&f)
+
+	g := begin(&f.platform, &f.cache)
+	target := import_texture(&g, null.frame_target(), .Color)
+	desc := gpu.Texture_Desc {
+		size   = SIZE,
+		format = .RGBA16_Float,
+	}
+	first := create_texture(&g, desc)
+	second := create_texture(&g, desc)
+	p := add_render_pass(&g, "draw first", nothing)
+	color(&g, p, first, .Clear)
+	p = add_render_pass(&g, "draw second", nothing)
+	color(&g, p, second, .Clear)
+	p = add_render_pass(&g, "composite", nothing)
+	read(&g, p, first)
+	read(&g, p, second)
+	color(&g, p, target, .Clear)
+
+	subs, ok := record(&g)
+	testing.expect(t, ok)
+	testing.expect(t, gpu_texture(&g, first) != gpu_texture(&g, second), "two live textures share one")
+	testing.expect_value(t, g.transients.taken, 2)
+	testing.expect(t, null.submit(all_buffers(subs)))
+	null.end_frame()
+}
+
+@(test)
+a_texture_on_the_compute_queue_lives_until_the_queues_sync :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	f: Fixture
+	setup(t, &f)
+	defer teardown(&f)
+
+	// The occlusion's texture is last read on the compute queue. A graphics pass before the graphics queue waits for
+	// the compute queue again would add a wait to take it, so only a pass at or after that wait takes it.
+	g := begin(&f.platform, &f.cache)
+	target := import_texture(&g, null.frame_target(), .Color)
+	desc := gpu.Texture_Desc {
+		size   = SIZE,
+		format = .RGBA16_Float,
+	}
+	occlusion := create_texture(&g, desc)
+	blurred := create_texture(&g, {size = SIZE, format = .R16_Float})
+	early := create_texture(&g, desc)
+	simulated := create_texture(&g, {size = SIZE, format = .R32_Float})
+	late := create_texture(&g, desc)
+
+	p := add_compute_pass(&g, "occlusion", nothing, queue = .Compute)
+	write(&g, p, occlusion)
+	p = add_compute_pass(&g, "occlusion blur", nothing, queue = .Compute)
+	read(&g, p, occlusion)
+	write(&g, p, blurred)
+	p = add_compute_pass(&g, "draw", nothing)
+	write(&g, p, early)
+	p = add_compute_pass(&g, "simulate", nothing, queue = .Compute)
+	write(&g, p, simulated)
+	p = add_compute_pass(&g, "light", nothing)
+	read(&g, p, blurred)
+	read(&g, p, simulated)
+	read(&g, p, early)
+	write(&g, p, late)
+	p = add_render_pass(&g, "composite", nothing)
+	read(&g, p, late)
+	color(&g, p, target, .Clear)
+
+	subs, ok := record(&g)
+	testing.expect(t, ok)
+	shared := gpu_texture(&g, occlusion)
+	testing.expect(t, gpu_texture(&g, early) != shared, "a texture took one that the compute queue may still use")
+	testing.expect_value(t, gpu_texture(&g, late), shared)
+	// The waits are the ones that the graph has without sharing: only the light pass waits for the compute queue.
+	testing.expect_value(t, len(subs), 4)
+	if len(subs) != 4 {
+		return
+	}
+	queues := [4]gpu.Queue{.Compute, .Graphics, .Compute, .Graphics}
+	waits := [4]gpu.Queues{{}, {}, {}, {.Compute}}
+	for s, i in subs {
+		testing.expect_value(t, s.queue, queues[i])
+		testing.expect_value(t, s.wait_for, waits[i])
+	}
+	// The wait orders the queues, so the late texture starts Undefined, and its first barrier discards the contents.
+	light := inspect(subs[3].buffers[:1], f.platform.frame_allocator)
+	found := false
+	for b in light.textures {
+		if b.texture == shared && b.layout_after == .Unordered_Access {
+			found = true
+			testing.expect_value(t, b.layout_before, gpu.Texture_Layout.Undefined)
+			testing.expect_value(t, b.sync_before, gpu.Syncs{})
+		}
+	}
+	testing.expect(t, found, "the late texture has no first barrier")
+	for s in subs {
+		testing.expect(t, null.submit(s.buffers[:], s.queue, s.wait_for))
+	}
+	null.end_frame()
 }
 
 @(test)
@@ -310,11 +485,15 @@ cache_reuses_and_evicts :: proc(t: ^testing.T) {
 	b := cache_acquire(&f.cache, &f.platform, desc)
 	testing.expect(t, a != {} && b != {} && a != b, "one frame got the same texture twice")
 
+	// The label picks among the textures of one description, and takes another one when its own is in use.
 	cache_begin_frame(&f.cache, &f.platform)
-	testing.expect_value(t, cache_acquire(&f.cache, &f.platform, desc), a)
 	relabeled := desc
 	relabeled.label = "other"
-	testing.expect(t, cache_acquire(&f.cache, &f.platform, relabeled) != b, "a different label reused a texture")
+	testing.expect_value(t, cache_acquire(&f.cache, &f.platform, relabeled), a)
+	testing.expect_value(t, cache_acquire(&f.cache, &f.platform, desc), b)
+	cache_begin_frame(&f.cache, &f.platform)
+	testing.expect_value(t, cache_acquire(&f.cache, &f.platform, desc), a)
+	testing.expect_value(t, cache_acquire(&f.cache, &f.platform, desc), b)
 
 	for _ in 0 ..< CACHE_LIFETIME + 1 {
 		cache_begin_frame(&f.cache, &f.platform)

@@ -567,8 +567,9 @@ probes_bin_into_the_boxes_that_they_reach :: proc(t: ^testing.T) {
 @(private = "file")
 Probe_Run :: struct {
 	passes:    map[string]int,
-	// The transient textures that the faces drew into.
+	// The transient textures that the faces drew into, and the textures that they took.
 	transient: int,
+	taken:     int,
 	stats:     Reflection_Probe_Stats,
 	frame:     Reflection_Probe_Frame,
 	// With the global illumination or the ambient occlusion: the faces' constants' gi, the voxel cones' radiance
@@ -735,12 +736,16 @@ run_probe_frame :: proc(
 				radiance[u32(gf.voxel.textures[l][.Radiance] - 1)] = true
 			}
 		}
-		lit := make(map[u32]bool, platform.frame_allocator)
-		switch light in pf.face_light {
-		case Reflection_Probe_Voxel_Light:
-			lit[u32(light.diffuse - 1)], lit[u32(light.specular - 1)] = true, true
-		case Reflection_Probe_Occlusion:
-			lit[u32(light.texture - 1)] = true
+		// Each face's own light, which its forward pass reads.
+		lit: [6]map[u32]bool
+		for k in 0 ..< int(pf.face_count) {
+			lit[k] = make(map[u32]bool, platform.frame_allocator)
+			switch light in pf.face_light[pf.first_face + u32(k)] {
+			case Reflection_Probe_Voxel_Light:
+				lit[k][u32(light.diffuse - 1)], lit[k][u32(light.specular - 1)] = true, true
+			case Reflection_Probe_Occlusion:
+				lit[k][u32(light.texture - 1)] = true
+			}
 		}
 		for node in g.passes {
 			switch node.name {
@@ -753,7 +758,7 @@ run_probe_frame :: proc(
 			case "reflection probe face":
 				reads := false
 				for use in node.uses {
-					reads ||= !use.buffer && use.reads && lit[use.index]
+					reads ||= !use.buffer && use.reads && lit[len(run.lit_reads)][use.index]
 				}
 				append(&run.lit_reads, reads)
 			case "reflection probe ao depth":
@@ -772,12 +777,15 @@ run_probe_frame :: proc(
 		run.frame = f.reflection_probes^
 	}
 	run.stats = reflection_probe_stats(r)
+	testing.expect(t, execute(&g), "the frame did not execute")
+	taken := make(map[gpu.Texture]bool, platform.frame_allocator)
 	for node in g.textures {
 		if !node.imported && strings.has_prefix(node.desc.label, "reflection probe") {
 			run.transient += 1
+			taken[node.texture] = true
 		}
 	}
-	testing.expect(t, execute(&g), "the frame did not execute")
+	run.taken = len(taken)
 	run.passes = make(map[string]int, platform.frame_allocator)
 	for node in g.passes {
 		if node.live {
@@ -916,8 +924,10 @@ a_capture_draws_its_faces_in_the_graph :: proc(t: ^testing.T) {
 	run = run_probe_frame(t, r, &cache, w, {technique = .Probes, level = .Ultra})
 	testing.expect(t, run.frame.capturing && run.frame.finish)
 	testing.expect_value(t, run.passes["reflection probe copy"], 6)
-	// The six faces share one set of targets, so they fit the graph's cache.
-	testing.expect_value(t, run.transient, 6)
+	// Each face has its own six targets, and the graph gives each face the textures of the one before it, so the six
+	// take no more of the graph's cache than one does.
+	testing.expect_value(t, run.transient, 36)
+	testing.expect_value(t, run.taken, 6)
 	run = run_probe_frame(t, r, &cache, w, {technique = .Off, off = true})
 	testing.expect(t, !rp.made && rp.cubes.texture == {})
 	testing.expect_value(t, run.stats, Reflection_Probe_Stats{})
@@ -1022,8 +1032,10 @@ a_capture_takes_the_voxel_cones_or_its_own_ambient_occlusion :: proc(t: ^testing
 		testing.expect_value(t, gi, 1)
 	}
 	testing.expect_value(t, run.face_ao, 0)
-	_, voxel_light := run.frame.face_light.(Reflection_Probe_Voxel_Light)
-	testing.expect(t, voxel_light)
+	for face in run.frame.face_light {
+		_, voxel_light := face.(Reflection_Probe_Voxel_Light)
+		testing.expect(t, voxel_light)
+	}
 
 	// From 10 km away, the probe is outside every level: its faces read no voxels, and take the ambient light.
 	far := ecs.position_offset({}, {10000, 0, 0})
@@ -1035,17 +1047,18 @@ a_capture_takes_the_voxel_cones_or_its_own_ambient_occlusion :: proc(t: ^testing
 	for gi in run.face_gi {
 		testing.expect_value(t, gi, 0)
 	}
-	testing.expect(t, run.frame.face_light == nil)
+	testing.expect(t, run.frame.face_light == {})
 
-	// With the screen cascades, each face takes the ambient occlusion of its own depth, which its forward pass reads, and
-	// the faces share its textures.
+	// With the screen cascades, each face takes the ambient occlusion of its own depth, which its forward pass reads.
 	testing.expect(t, capture_reflection_probe(r, probe))
 	run = run_probe_frame(t, r, &cache, w, ultra, gi = Gi_Settings{technique = .Screen_Cascades, level = .Low}, ao = true)
 	testing.expect(t, run.frame.capturing && run.frame.face_count == 6)
 	testing.expect_value(t, run.passes["reflection probe gi"], 0)
 	testing.expect_value(t, run.face_ao, 6)
-	_, occlusion := run.frame.face_light.(Reflection_Probe_Occlusion)
-	testing.expect(t, occlusion)
+	for face in run.frame.face_light {
+		_, occlusion := face.(Reflection_Probe_Occlusion)
+		testing.expect(t, occlusion)
+	}
 	for reads in run.lit_reads {
 		testing.expect(t, reads, "a face's forward pass does not read its ambient occlusion")
 	}
@@ -1057,7 +1070,7 @@ a_capture_takes_the_voxel_cones_or_its_own_ambient_occlusion :: proc(t: ^testing
 	testing.expect(t, capture_reflection_probe(r, probe))
 	run = run_probe_frame(t, r, &cache, w, ultra, gi = Gi_Settings{technique = .Screen_Cascades, level = .Low})
 	testing.expect_value(t, run.face_ao, 0)
-	testing.expect(t, run.frame.face_light == nil)
+	testing.expect(t, run.frame.face_light == {})
 }
 
 // An On_Load probe that captures while a mesh streams keeps a provisional capture. It does not capture again while

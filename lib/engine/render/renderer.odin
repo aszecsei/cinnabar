@@ -69,6 +69,8 @@ Renderer :: struct {
 	platform:        ^core.Platform_API,
 	residency:       Residency,
 	textures:        Texture_Cache,
+	// What the last frame's transient textures took, over its views (see Transient_Stats).
+	transients:      Transient_Stats,
 	// The lines that debug draws, which the debug layer draws each frame.
 	debug:           debug.Draw,
 	// Registrations, created again in renderer_reload.
@@ -565,6 +567,7 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 		output = {format = gpu.FRAME_TARGET_FORMAT}
 	}
 	own := desc.state != nil ? desc.state : &r.view
+	r.transients = {}
 	sync_frame_pipelines(r, output.mode, len(desc.previews) > 0 || len(desc.extra_views) > 0)
 	quality := desc.quality != nil ? clamp_quality(desc.quality^, r.caps) : r.quality
 
@@ -847,6 +850,10 @@ draw_view :: proc(
 		add_preview_passes(f, &preview)
 	}
 	ok := execute(&g)
+	r.transients.textures += g.transients.textures
+	r.transients.bytes += g.transients.bytes
+	r.transients.taken += g.transients.taken
+	r.transients.taken_bytes += g.transients.taken_bytes
 	if ok {
 		for &preview in desc.previews {
 			if preview.capture != 0 && preview.complete != nil && preview.complete^ && preview.captured != nil && r.platform.gpu_capture_texture != nil {

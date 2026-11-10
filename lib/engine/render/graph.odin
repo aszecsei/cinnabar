@@ -96,9 +96,20 @@ Graph :: struct {
 	passes:    [dynamic]Pass_Node,
 	commits:   [dynamic]Commit,
 	// The histories of the view that the graph draws (see history_texture).
-	histories: ^History_Set,
+	histories:  ^History_Set,
 	// A graph after the first of its frame (see begin_extra).
-	extra:     bool,
+	extra:      bool,
+	// What the transient textures took, once record has created them.
+	transients: Transient_Stats,
+}
+
+// Transient_Stats is what a graph's transient textures took: the graph textures that a live pass uses and their size if
+// each took a texture of its own, and the textures that they share, which the cache holds (see create_transients).
+Transient_Stats :: struct {
+	textures:    int,
+	bytes:       int,
+	taken:       int,
+	taken_bytes: int,
 }
 
 // State is what a resource's last uses did. Buffers have no layout, so theirs stays Undefined.
@@ -126,6 +137,9 @@ Texture_Node :: struct {
 	// Culling: a later live pass reads the contents.
 	needed:   bool,
 	used:     bool,
+	// The transient texture whose texture this one takes after it on the same queue, whose state it starts from, or 0
+	// (see create_transients).
+	follows:  Texture,
 }
 
 // Acceleration structures share the buffer nodes: accel selects the barrier type, and buffer holds the handle.
@@ -482,6 +496,7 @@ record :: proc(g: ^Graph) -> (submissions: []Submission, ok: bool) {
 	p := &g.platform.profile
 	profile.begin(p, profile.name(p, "Compile graph", .Render))
 	cull(g)
+	order_queues(g)
 	ok = create_transients(g) && compute_barriers(g)
 	profile.end(p)
 	if !ok {
@@ -586,6 +601,18 @@ compute_barriers :: proc(g: ^Graph) -> bool {
 				continue
 			}
 			node := &g.textures[use.index]
+			if !node.touched && !node.imported {
+				if use.state.layout == .Shader_Resource {
+					log.errorf("render: pass %q samples texture %q before a pass writes it", pass.name, node.desc.label)
+					return false
+				}
+				// A texture that takes another's texture on the same queue starts where that one's last use left it,
+				// so its first use, a write, waits for that one's accesses.
+				if node.follows != 0 {
+					before := &g.textures[node.follows - 1]
+					node.state, node.queue, node.touched, node.last = before.state, before.queue, before.touched, before.last
+				}
+			}
 			if node.touched && node.queue != pass.queue && pass.queue == .Compute && node.state.layout != use.state.layout && !compute_layout(node.state.layout) {
 				// The compute queue cannot leave this layout, as after a render pass, so the texture's last pass changes
 				// it after its work, and the wait for that queue orders the change.
@@ -599,10 +626,6 @@ compute_barriers :: proc(g: ^Graph) -> bool {
 			}
 			node.last = pass_index
 			cross_queue(&pass, &node.state, &node.queue, &node.touched)
-			if node.state.layout == .Undefined && use.state.layout == .Shader_Resource {
-				log.errorf("render: pass %q samples texture %q before a pass writes it", pass.name, node.desc.label)
-				return false
-			}
 			if before, needed := transition(&node.state, use.state); needed {
 				append(
 					&pass.barriers.textures,
@@ -624,12 +647,12 @@ compute_layout :: proc(layout: gpu.Texture_Layout) -> bool {
 }
 
 // cross_queue handles a use on another queue than the resource's last use this frame. The pass waits for that
-// queue's earlier work, and the fence makes the earlier accesses complete and visible, so only a layout change is
-// left for a barrier.
+// queue's earlier work (see order_queues), and the fence makes the earlier accesses complete and visible, so only a
+// layout change is left for a barrier.
 @(private = "file")
 cross_queue :: proc(pass: ^Pass_Node, state: ^State, queue: ^gpu.Queue, touched: ^bool) {
 	if touched^ && queue^ != pass.queue {
-		pass.wait_for += {queue^}
+		assert(queue^ in pass.wait_for, "render: a pass uses a resource from the other queue without a wait")
 		state^ = {layout = state.layout}
 	}
 	queue^ = pass.queue
@@ -867,10 +890,56 @@ cull :: proc(g: ^Graph) {
 	}
 }
 
-// create_transients takes a texture from the cache for each transient texture that a live pass uses.
+// order_queues gives each live pass the queues that it waits for: a pass that uses a resource whose last use this
+// frame was on the other queue waits for that queue. It runs before create_transients, so the textures that the
+// transients share add no wait, and an async compute pass keeps running beside the graphics work that it ran beside.
+@(private = "file")
+order_queues :: proc(g: ^Graph) {
+	Last_Use :: struct {
+		queue:   gpu.Queue,
+		touched: bool,
+	}
+	textures := make([]Last_Use, len(g.textures), g.allocator)
+	buffers := make([]Last_Use, len(g.buffers), g.allocator)
+	for &pass in g.passes {
+		if !pass.live {
+			continue
+		}
+		for use in pass.uses {
+			last := use.buffer ? &buffers[use.index] : &textures[use.index]
+			if last.touched && last.queue != pass.queue {
+				pass.wait_for += {last.queue}
+			}
+			last^ = {pass.queue, true}
+		}
+	}
+}
+
+// Lifetime is the live passes that use a transient texture: the first, the last and the last one's queue.
+@(private = "file")
+Lifetime :: struct {
+	node:  int,
+	first: int,
+	last:  int,
+	queue: gpu.Queue,
+}
+
+// Shared_Texture is a texture that the cache gave to the frame, and the transient texture that took it last.
+@(private = "file")
+Shared_Texture :: struct {
+	desc:     gpu.Texture_Desc,
+	texture:  gpu.Texture,
+	occupant: Lifetime,
+}
+
+// create_transients gives each transient texture that a live pass uses a texture from the cache. Transient textures of
+// one description share a texture when one's last use comes before the other's first use (see free_after). Each texture
+// is taken from the cache once, with the description and the label of the first transient texture that takes it.
 @(private = "file")
 create_transients :: proc(g: ^Graph) -> bool {
-	for pass in g.passes {
+	lifetimes := make([]Lifetime, len(g.textures), g.allocator)
+	order := make([dynamic]int, g.allocator)
+	for pass, pass_index in g.passes {
 		if !pass.live {
 			continue
 		}
@@ -879,20 +948,79 @@ create_transients :: proc(g: ^Graph) -> bool {
 				continue
 			}
 			node := &g.textures[use.index]
-			node.used = true
-			if usage, ok := gpu.layout_usage(use.state.layout); ok && !node.imported {
+			if node.imported {
+				node.used = true
+				continue
+			}
+			if !node.used {
+				node.used = true
+				lifetimes[use.index].first = pass_index
+				append(&order, int(use.index))
+			}
+			lifetimes[use.index] = {int(use.index), lifetimes[use.index].first, pass_index, pass.queue}
+			if usage, ok := gpu.layout_usage(use.state.layout); ok {
 				node.desc.usage += {usage}
 			}
 		}
 	}
-	for &node in g.textures {
-		if node.imported || !node.used {
-			continue
+
+	shared := make([dynamic]Shared_Texture, g.allocator)
+	stats: Transient_Stats
+	next: for index in order {
+		node := &g.textures[index]
+		life := lifetimes[index]
+		queue := g.passes[life.first].queue
+		key := node.desc
+		key.label = ""
+		bytes := texture_bytes(key)
+		stats.textures += 1
+		stats.bytes += bytes
+		for &s in shared {
+			if s.desc == key && free_after(g, s.occupant, life.first, queue) {
+				if s.occupant.queue == queue {
+					node.follows = Texture(s.occupant.node + 1)
+				}
+				s.occupant = life
+				node.texture = s.texture
+				continue next
+			}
 		}
 		node.texture = cache_acquire(g.cache, g.platform, node.desc)
 		if node.texture == {} {
 			return false
 		}
+		append(&shared, Shared_Texture{key, node.texture, life})
+		stats.taken += 1
+		stats.taken_bytes += bytes
 	}
+	g.transients = stats
 	return true
+}
+
+// free_after is whether a transient texture's texture is free for another whose first use is the live pass first, on
+// queue. Every use of a texture on the other queue than the one before waits for that one (see order_queues), so its
+// uses are ordered and only its last one matters. After a last use on the same queue, the other one starts from that
+// use's state, and its first barrier waits for it. After a last use on the other queue, it waits until a pass on its
+// queue, at its first use or before it, already waits for that one; it then starts Undefined, and its first barrier
+// discards the contents, as at the start of a frame.
+@(private = "file")
+free_after :: proc(g: ^Graph, before: Lifetime, first: int, queue: gpu.Queue) -> bool {
+	if before.last >= first {
+		return false
+	}
+	if before.queue == queue {
+		return true
+	}
+	for pass in g.passes[before.last + 1:first + 1] {
+		if pass.live && pass.queue == queue && before.queue in pass.wait_for {
+			return true
+		}
+	}
+	return false
+}
+
+// texture_bytes is the memory of a texture of a description, without the backend's alignment.
+@(private = "file")
+texture_bytes :: proc(desc: gpu.Texture_Desc) -> int {
+	return gpu.mip_chain_size(desc) * int(max(desc.depth, 1))
 }

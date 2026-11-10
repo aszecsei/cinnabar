@@ -764,7 +764,17 @@ begin_preview_particles :: proc(f: ^Frame, desc: ^Preview_Desc, camera: [3]f32) 
 	step := new_particle_step(r.platform)
 	previous_position := has_previous ? previous.position : camera
 	step_slot(r, step, slot, data, identity, -camera, -previous_position, p.wall_delta, 1, false)
-	finish_particles(f, step, previous.view_projection, has_previous, "particle history (preview)")
+	labels := PREVIEW_PARTICLE_HISTORIES
+	finish_particles(f, step, previous.view_projection, has_previous, labels[desc.id])
+}
+
+// Each preview's particles keep a history of their own, so the previews of one frame each use theirs once.
+@(private = "file")
+PREVIEW_PARTICLE_HISTORIES :: [gpu.MAX_PREVIEW_TARGETS]string {
+	"particle history (preview 0)",
+	"particle history (preview 1)",
+	"particle history (preview 2)",
+	"particle history (preview 3)",
 }
 
 // particle_key is the GPU scene's key for a system's anchor's instance: its entity with the generation's top bit set,
