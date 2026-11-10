@@ -41,9 +41,10 @@ henyey_greenstein :: proc(g, cos_theta: f64) -> f64 {
 @(test)
 the_fogs_sky_light_is_the_sky_through_the_phase :: proc(t: ^testing.T) {
 	a := Ambient{constant = {0.5, 0.6, 0.8}, x = {0.05, 0.02, -0.03}, y = {0.2, 0.25, 0.35}, z = {-0.04, 0.06, 0.01}}
-	N :: 16384
+	// At g = 0.9 the phase's lobe is about 0.1 radians wide, so the directions are 0.007 radians apart.
+	N :: 1 << 18
 	golden := math.PI * (3 - math.sqrt(f64(5)))
-	for g in ([]f32{-0.4, 0.3, 0.6}) {
+	for g in ([]f32{-0.5, 0, 0.5, 0.9}) {
 		for toward in ([][3]f32{{0, -1, 0}, {0, 1, 0}, linalg.normalize([3]f32{1, -2, 3})}) {
 			sum: [3]f64
 			for i in 0 ..< N {
@@ -90,6 +91,20 @@ a_noon_sky_is_blue_and_a_night_sky_dark :: proc(t: ^testing.T) {
 	testing.expectf(t, up.b > up.g && up.g > up.r && up.r > 0, "the sky from above is %v", up)
 	night := sky_ambient(a, 0.001, {{sky_direction(0, -30), 3}})
 	testing.expectf(t, linalg.length(ambient_at(night, {0, 1, 0})) < linalg.length(up) * 0.01, "night %v", night)
+}
+
+// The sky's light toward a low sun, where Mie's lobe is, is brighter than the sky's light away from it, so fog that
+// scatters forward glows toward a sunset.
+@(test)
+a_sunsets_ambient_is_brighter_toward_the_sun :: proc(t: ^testing.T) {
+	a := sky_settings(DEFAULT_ENVIRONMENT).atmosphere
+	for el in ([]f32{4, 15, 45}) {
+		toward := sky_direction(0, el)
+		ambient := sky_ambient(a, 0.003, {{toward, 3}})
+		along := [3]f32{toward.x, 0, toward.z}
+		gradient := ambient.x * along.x + ambient.z * along.z
+		testing.expectf(t, gradient.r > 0.015 * ambient.constant.r && gradient.b > 0, "elevation %v: the gradient toward the sun is %v, the constant %v", el, gradient, ambient.constant)
+	}
 }
 
 @(test)
