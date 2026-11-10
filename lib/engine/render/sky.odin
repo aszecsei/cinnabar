@@ -43,9 +43,11 @@ OZONE_CENTER :: 25
 OZONE_HALF_WIDTH :: 15
 
 // The CPU's ambient light takes the sky in this many directions, with this many steps along each and toward each
-// light.
+// light. 64 directions miss Mie's lobe around a low sun, so the sky toward the sun comes out darker than the sky away
+// from it; 256 give two thirds of the gradient toward a 4-degree sun that 16384 give, and more toward a higher one, in
+// 1.8 ms in the debug host.
 @(private = "file")
-AMBIENT_DIRECTIONS :: 64
+AMBIENT_DIRECTIONS :: 256
 @(private = "file")
 AMBIENT_STEPS :: 12
 @(private = "file")
