@@ -3,6 +3,7 @@ using Cinnabar.Editor.Content;
 using Cinnabar.Editor.Link.Protocol;
 using Cinnabar.Editor.Model;
 using LogLevel = Cinnabar.Editor.Model.LogLevel;
+using ViewAxis = Cinnabar.Editor.Tools.ViewAxis;
 
 namespace Cinnabar.Editor.Shell;
 
@@ -121,6 +122,18 @@ public sealed partial class EditorShell
                     if (AutomationViewport(request, scene: true) is not { } view || !SetProjection(view, chosenProjection))
                     {
                         return new AutomationResponse(request.Id, false, Error: $"viewport {request.Viewport} has no editor camera to set the projection of");
+                    }
+                }
+                // A view along an axis, at once, with the view's projection, which a projection above has just chosen.
+                if (changes.Remove("look", out var look))
+                {
+                    if (!Enum.TryParse<ViewAxis>(look.ToString(), ignoreCase: true, out var axis) || !Enum.IsDefined(axis))
+                    {
+                        return new AutomationResponse(request.Id, false, Error: $"unknown view {look}; the views are {string.Join(", ", Enum.GetNames<ViewAxis>())}");
+                    }
+                    if (AutomationViewport(request, scene: true) is not { } along || !LookAlong(along, axis, animate: false))
+                    {
+                        return new AutomationResponse(request.Id, false, Error: $"viewport {request.Viewport} has no editor camera to turn");
                     }
                 }
                 if (AutomationViewport(request, scene: false) is not { } target)

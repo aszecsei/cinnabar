@@ -180,6 +180,8 @@ public sealed partial class EditorShell
                 }
                 break;
             default:
+                // A hidden view has no control to step its turn, so the turn ends where it would have.
+                StepTurn(viewport, CameraTurn.Duration);
                 if (viewport.Opened != null)
                 {
                     viewport.Opened = null;
@@ -275,18 +277,68 @@ public sealed partial class EditorShell
         {
             return false;
         }
-        var camera = viewport.Camera;
-        var distance = camera.IsOrthographic ? camera.OrthographicHeight / (2 * Math.Tan(camera.VerticalFov / 2)) : camera.PivotDistance;
-        var chosen = viewport.Projection != CameraProjection.Orthographic;
-        viewport.Projection = CameraProjection.Orthographic;
-        camera.LookAt(camera.Pivot, distance, 0, 0, CameraProjection.Orthographic);
-        if (chosen)
+        if (viewport.Projection != CameraProjection.Orthographic)
         {
+            viewport.Projection = CameraProjection.Orthographic;
             SaveViewportFile();
+        }
+        return LookAlong(viewport, ViewAxis.Back, animate: false);
+    }
+
+    /// <summary>
+    /// Turns a scene view's camera about its pivot to look along an axis, with the projection that the user chose for
+    /// the view, the one place that does (see docs/editor/viewport.md#view-gizmo): what is at the pivot stays as large.
+    /// An animated turn runs over <see cref="CameraTurn.Duration"/> as the view's control steps it
+    /// (<see cref="StepTurn"/>); otherwise the camera is there at once. The Game view has the game's camera, so it is
+    /// refused.
+    /// </summary>
+    public bool LookAlong(EditorViewport viewport, ViewAxis axis, bool animate = true)
+    {
+        if (!viewport.HasCamera)
+        {
+            return false;
+        }
+        // A view that has not been shown turns about the pivot that it would start at, the first view's.
+        PlaceCamera(viewport);
+        var (yaw, pitch) = ViewGizmo.Angles(axis);
+        var turn = CameraTurn.Of(viewport.Camera, yaw, pitch, viewport.Projection);
+        if (animate)
+        {
+            viewport.Turn = turn;
+            viewport.RaiseTurnStarted();
+        }
+        else
+        {
+            viewport.Turn = null;
+            turn.Step(viewport.Camera, CameraTurn.Duration);
         }
         Commands.InvalidateAll();
         return true;
     }
+
+    /// <summary>
+    /// Moves a scene view's turn on by some milliseconds, and says whether it still runs. A turn ends at its end, or as
+    /// soon as anything else has moved the camera, which then stays where that put it.
+    /// </summary>
+    public bool StepTurn(EditorViewport viewport, double milliseconds)
+    {
+        if (viewport.Turn is not { } turn)
+        {
+            return false;
+        }
+        if (turn.Moved(viewport.Camera))
+        {
+            viewport.Turn = null;
+            return false;
+        }
+        var next = turn.Step(viewport.Camera, milliseconds);
+        viewport.Turn = next.Done ? null : next;
+        return viewport.Turn != null;
+    }
+
+    /// <summary>Switches a scene view between orthographic and perspective, as its projection's choice (see <see cref="SetProjection"/>).</summary>
+    public bool ToggleProjection(EditorViewport viewport) =>
+        viewport.HasCamera && SetProjection(viewport, viewport.Camera.IsOrthographic ? CameraProjection.Perspective : CameraProjection.Orthographic);
 
     // Tells the game that a viewport is open, with what it draws it from: the camera and how it draws.
     void OpenInGame(EditorViewport viewport, PixelSize size)

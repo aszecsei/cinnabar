@@ -75,6 +75,15 @@ public sealed class EditorCamera
     /// <summary>The point that orbiting turns around, as a raw World_Position.</summary>
     public long[] Pivot => (Forward * PivotDistance).Offset(Position);
 
+    /// <summary>
+    /// How far a perspective camera would stand from the pivot to show what this one shows there: its pivot's distance,
+    /// or for an orthographic camera, the distance that shows its height.
+    /// </summary>
+    public double ViewDistance => IsOrthographic ? OrthographicHeight / (2 * Math.Tan(VerticalFov / 2)) : PivotDistance;
+
+    /// <summary>Where the camera is and how it looks, to tell whether anything moved it.</summary>
+    public CameraPose Pose => new(Position[0], Position[1], Position[2], Yaw, Pitch, Projection, OrthographicHeight, PivotDistance);
+
     public EditorCamera Clone() => (EditorCamera)MemberwiseClone();
 
     /// <summary>

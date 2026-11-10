@@ -131,13 +131,23 @@ public sealed class EditorViewport
     {
         var (yaw, pitch) = Start switch
         {
-            SceneViewStart.Top => (0.0, EditorCamera.MaxPitch),
-            SceneViewStart.Front => (Math.PI, 0.0),
-            SceneViewStart.Side => (-Math.PI / 2, 0.0),
+            SceneViewStart.Top => ViewGizmo.Angles(ViewAxis.Top),
+            SceneViewStart.Front => ViewGizmo.Angles(ViewAxis.Front),
+            SceneViewStart.Side => ViewGizmo.Angles(ViewAxis.Right),
             _ => (first.Yaw, first.Pitch),
         };
         // What the first view shows at its pivot, whatever its own projection is.
-        var distance = first.IsOrthographic ? first.OrthographicHeight / (2 * Math.Tan(first.VerticalFov / 2)) : first.PivotDistance;
-        Camera.LookAt(first.Pivot, distance, yaw, pitch, Projection);
+        Camera.LookAt(first.Pivot, first.ViewDistance, yaw, pitch, Projection);
     }
+
+    /// <summary>
+    /// The camera's turn to look along an axis while the view gizmo animates it, or null when none runs. Only the shell
+    /// changes it (<see cref="EditorShell.LookAlong"/>, <see cref="EditorShell.StepTurn"/>).
+    /// </summary>
+    public CameraTurn? Turn { get; internal set; }
+
+    /// <summary>A turn started, which the view's control steps until it ends.</summary>
+    public event Action? TurnStarted;
+
+    internal void RaiseTurnStarted() => TurnStarted?.Invoke();
 }

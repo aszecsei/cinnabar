@@ -21,6 +21,11 @@ static class Palette
     /// <summary>The frame graph's wait time, a deeper amber than <see cref="Warning"/>.</summary>
     public static readonly Color Wait = Color.Parse("#D9A441");
 
+    /// <summary>The world's x, y and z axes, as the game's gizmo draws them (GIZMO_COLORS in lib/engine/editor/viewport.odin).</summary>
+    public static readonly Color AxisX = Color.FromRgb(204, 18, 13);
+    public static readonly Color AxisY = Color.FromRgb(51, 166, 10);
+    public static readonly Color AxisZ = Color.FromRgb(15, 56, 230);
+
     /// <summary>The outline of a color swatch.</summary>
     public static readonly Color SwatchBorder = Color.Parse("#55555C");
 
