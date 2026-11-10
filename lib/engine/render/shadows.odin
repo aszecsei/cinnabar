@@ -12,6 +12,8 @@ import "cinnabar:engine/ecs"
 // structure of the GPU scene. The other lights that cast shadows get shadow maps in one atlas: the cascades for the
 // first directional light, one view for a spot light, and six for a point light. The maps draw each material's depth
 // pass. With a virtual shadow map in the quality, its levels take the place of the cascades (see virtual_shadows.odin).
+// A frame that does not trace gives the directional light with the shadow map contact shadows: a compute pass marches a
+// short way toward it on the screen, through the ambient occlusion's depth levels.
 
 SHADOW_FORMAT :: gpu.Format.D32_Float
 // The most cascades that a level has. Frame_Constants.cascade_splits holds this many.
@@ -59,6 +61,8 @@ SHADOW_NEAR :: 0.05
 MAX_MASK_LIGHTS :: 4
 SHADOW_MASK_FORMAT :: gpu.Format.RGBA8_Unorm
 MASK_GROUP_SIZE :: 8
+// The contact shadows hold one light's visibility: a frame that has them traces no mask.
+CONTACT_SHADOWS_FORMAT :: gpu.Format.R8_Unorm
 
 // slots_per_cell is how many slots a cell holds.
 slots_per_cell :: proc(p: Shadow_Params) -> int {
@@ -73,6 +77,8 @@ max_shadow_views :: proc(p: Shadow_Params) -> int {
 
 // SHADOW_MASK_SHADER is the engine's shadow mask shader (lib/engine/content/shaders/shadow_mask.hlsl).
 SHADOW_MASK_SHADER :: #load("../content/shaders/shadow_mask.hlsl.meta", string)
+// CONTACT_SHADOWS_SHADER is the engine's contact shadows shader (lib/engine/content/shaders/contact_shadows.hlsl).
+CONTACT_SHADOWS_SHADER :: #load("../content/shaders/contact_shadows.hlsl.meta", string)
 
 // Shadow_View matches Shadow_View in material_common.hlsli: a shadow map's projection of positions relative to the
 // camera, as its matrix's rows, its rectangle of the atlas in UV, and the size of a texel. A virtual shadow map's level
@@ -111,14 +117,31 @@ Mask_Constants :: struct {
 	padding:       u32,
 }
 
+// Contact_Constants matches Contact_Constants in contact_shadows.hlsl.
+Contact_Constants :: struct {
+	projection:  [4]f32,
+	// The direction toward the light, in view space.
+	to_light:    [4]f32,
+	levels:      [4]u32,
+	level4:      u32,
+	output:      u32,
+	noise:       u32,
+	noise_slice: u32,
+	size:        [2]u32,
+	// The camera's jitter, which the prepass drew with (see Frame.jitter).
+	jitter:      [2]f32,
+}
+
 // Shadow_Passes is the shadows' state between frames, in the Renderer.
 Shadow_Passes :: struct {
-	mask_pipeline: Shader_Pipeline,
+	mask_pipeline:    Shader_Pipeline,
+	contact_pipeline: Shader_Pipeline,
 	sampler:       gpu.Sampler,
 	virtual:       Virtual_Shadows,
 }
 
-// Shadow_Frame is one frame's shadows, in frame memory: the shadow maps' views, and the lights of the mask's channels.
+// Shadow_Frame is one frame's shadows, in frame memory: the shadow maps' views, the lights of the mask's channels, and
+// the light that takes the contact shadows, or -1.
 @(private)
 Shadow_Frame :: struct {
 	views:          [dynamic]Shadow_View,
@@ -133,8 +156,10 @@ Shadow_Frame :: struct {
 	params:         Shadow_Params,
 	mask_lights:    [MAX_MASK_LIGHTS]u32,
 	mask_count:     int,
+	contact_light:  i32,
 	atlas:          Texture,
 	mask:           Texture,
+	contact:        Texture,
 	virtual:        Virtual_Frame,
 	views_upload:   gpu.Upload,
 	mask_constants: gpu.Upload,
@@ -142,6 +167,7 @@ Shadow_Frame :: struct {
 
 shadows_init :: proc(s: ^Shadow_Passes, platform: ^core.Platform_API) {
 	s.mask_pipeline = shader_pipeline(SHADOW_MASK_SHADER)
+	s.contact_pipeline = shader_pipeline(CONTACT_SHADOWS_SHADER)
 	s.sampler = platform.gpu_create_sampler({filter = .Linear, address = .Clamp, compare = .Greater_Equal, label = "shadow comparison"})
 	virtual_shadows_init(&s.virtual)
 }
@@ -150,6 +176,7 @@ shadows_destroy :: proc(s: ^Shadow_Passes, platform: ^core.Platform_API) {
 	virtual_shadows_destroy(&s.virtual, platform)
 	platform.gpu_destroy_sampler(s.sampler)
 	destroy_shader_pipeline(&s.mask_pipeline, platform)
+	destroy_shader_pipeline(&s.contact_pipeline, platform)
 }
 
 // cascade_splits are the view depths at which count cascades end: between even and exponential splits of the range
@@ -171,7 +198,7 @@ cascade_splits :: proc(near: f32, distance: f32 = SHADOW_DISTANCE, lambda: f32 =
 // assign_shadows gives the lights that cast shadows their shadows, in order: the directional lights, then the
 // punctual lights by how much light they bring to the view. With traced shadows, the first MAX_MASK_LIGHTS take
 // channels of the mask. The others take shadow maps while the atlas has room: the cascades only for one directional
-// light.
+// light, which takes the contact shadows in a frame that does not trace.
 @(private)
 assign_shadows :: proc(f: ^Frame) {
 	r := f.renderer
@@ -179,20 +206,24 @@ assign_shadows :: proc(f: ^Frame) {
 		// Synced whether or not this frame traces, so turning tracing on does not wait for it to compile.
 		sync_compute_pipeline(&r.shadows.mask_pipeline, r.platform, r.residency.assets, {label = "shadow mask"}, r.reloaded)
 	}
+	sync_compute_pipeline(&r.shadows.contact_pipeline, r.platform, r.residency.assets, {label = "contact shadows"}, r.reloaded)
 	trace := f.shadow_settings.ray_traced && r.shadows.mask_pipeline.pipeline != {} && request_ray_scene(f)
 	params := SHADOW_PARAMS[f.shadow_settings.level]
 	virtual := f.shadow_settings.virtual && params.virtual_levels > 0 && ensure_virtual_shadows(r, &f.state.virtual_shadows, params)
-	assign_shadow_views(f, trace, virtual)
+	contact := !trace && pipeline_ready(r.platform, &r.shadows.contact_pipeline)
+	assign_shadow_views(f, trace, virtual, contact)
 }
 
 // assign_shadow_views gives the lights their shadows, with the mask's channels first if trace, and with a virtual shadow
-// map in place of the cascades if virtual.
+// map in place of the cascades if virtual. If contact, the directional light with the cascades or the virtual shadow
+// map also takes the contact shadows.
 @(private)
-assign_shadow_views :: proc(f: ^Frame, trace: bool, virtual := false) {
+assign_shadow_views :: proc(f: ^Frame, trace: bool, virtual := false, contact := false) {
 	r := f.renderer
 	lf := f.lights
 	sf := new(Shadow_Frame, r.platform.frame_allocator)
 	f.shadows = sf
+	sf.contact_light = -1
 	sf.views = make([dynamic]Shadow_View, r.platform.frame_allocator)
 	sf.matrices = make([dynamic]matrix[4, 4]f32, r.platform.frame_allocator)
 	sf.planes = make([dynamic][6][4]f32, r.platform.frame_allocator)
@@ -245,6 +276,10 @@ assign_shadow_views :: proc(f: ^Frame, trace: bool, virtual := false) {
 			}
 			cascades_taken = true
 			record.shadow = i32(len(sf.views))
+			if contact {
+				record.flags += {.Contact_Shadow}
+				sf.contact_light = i32(i)
+			}
 			if virtual {
 				record.flags += {.Virtual_Shadow}
 				add_virtual_levels(f, sf, record.direction)
@@ -286,8 +321,9 @@ assign_shadow_views :: proc(f: ^Frame, trace: bool, virtual := false) {
 			// Without their views, the lights have no shadow maps.
 			for &record in lf.records {
 				record.shadow = -1
-				record.flags -= {.Virtual_Shadow}
+				record.flags -= {.Virtual_Shadow, .Contact_Shadow}
 			}
+			sf.contact_light = -1
 			clear(&sf.views)
 			sf.virtual.count = 0
 		}
@@ -483,7 +519,9 @@ frustum_planes_6 :: proc(m: matrix[4, 4]f32) -> (planes: [6][4]f32) {
 }
 
 // add_shadow_passes adds the shadow maps' pass, and with traced lights, the mask's pass, which traces the ray scene
-// (see docs/rendering/ray-scene.md#ray-scene). The maps draw the bins of each shadow view, which the culling filled.
+// (see docs/rendering/ray-scene.md#ray-scene), or without them, the contact shadows' pass, which reads the ambient
+// occlusion's depth levels, so it runs after add_ao_passes. The maps draw the bins of each shadow view, which the
+// culling filled.
 @(private)
 add_shadow_passes :: proc(f: ^Frame) {
 	sf := f.shadows
@@ -499,6 +537,7 @@ add_shadow_passes :: proc(f: ^Frame) {
 		declare_scene_draws(f, p)
 	}
 	if sf.mask_count == 0 {
+		add_contact_shadows_pass(f)
 		return
 	}
 	sf.mask = create_texture(g, {size = f.size, format = SHADOW_MASK_FORMAT, label = "shadow mask"})
@@ -507,6 +546,63 @@ add_shadow_passes :: proc(f: ^Frame) {
 	read(g, p, f.normals)
 	read_accel(g, p, ray_scene_accel(f))
 	write(g, p, sf.mask)
+}
+
+// add_contact_shadows_pass adds the contact shadows' pass, on the compute queue beside the ambient occlusion, whose
+// depth levels and blue noise it reads. Without the ambient occlusion, or a light that takes them, it adds nothing.
+// The march finds each pixel's plane from the depths, not the prepass's normals, which a normal map tilts.
+@(private = "file")
+add_contact_shadows_pass :: proc(f: ^Frame) {
+	sf := f.shadows
+	g := f.graph
+	if sf.contact_light < 0 || f.ao == nil {
+		return
+	}
+	sf.contact = create_texture(g, {size = f.size, format = CONTACT_SHADOWS_FORMAT, label = "contact shadows"})
+	p := add_compute_pass(g, "contact shadows", run_contact_shadows, f, queue = .Compute)
+	for level in f.ao.levels {
+		read(g, p, level)
+	}
+	write(g, p, sf.contact)
+}
+
+@(private = "file")
+run_contact_shadows :: proc(ctx: ^Pass_Context) {
+	f := (^Frame)(ctx.data)
+	sf := f.shadows
+	g := ctx.graph
+	pipeline := f.renderer.shadows.contact_pipeline.pipeline
+	if pipeline == {} {
+		return
+	}
+	right, up, forward := view_axes(f.view)
+	to_light := -f.lights.records[sf.contact_light].direction
+	constants := Contact_Constants {
+		projection  = f.projection,
+		to_light    = {linalg.dot(to_light, right), linalg.dot(to_light, up), linalg.dot(to_light, forward), 0},
+		output      = gpu.write_index(gpu_texture(g, sf.contact)),
+		noise       = f.ao.constants.noise,
+		size        = f.size,
+		jitter      = f.jitter,
+		noise_slice = f.ao.constants.noise_slice,
+	}
+	for level, i in f.ao.levels {
+		index := gpu.read_index(gpu_texture(g, level))
+		if i < 4 {
+			constants.levels[i] = index
+		} else {
+			constants.level4 = index
+		}
+	}
+	upload, ok := f.renderer.platform.gpu_upload(size_of(Contact_Constants), gpu.PASS_CONSTANTS_ALIGN)
+	if !ok {
+		return
+	}
+	(^Contact_Constants)(raw_data(upload.data))^ = constants
+	groups := (f.size + MASK_GROUP_SIZE - 1) / MASK_GROUP_SIZE
+	gpu.cmd_set_pipeline(ctx.cb, pipeline)
+	gpu.cmd_set_pass_constants(ctx.cb, upload)
+	gpu.cmd_dispatch(ctx.cb, {groups.x, groups.y, 1})
 }
 
 @(private = "file")

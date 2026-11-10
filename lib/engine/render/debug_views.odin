@@ -181,7 +181,10 @@ add_debug_view_pass :: proc(f: ^Frame) {
 	case .Gi_Probes:
 		source = f.gi != nil ? f.gi.probe_view : 0
 	case .Shadow_Mask:
-		source = f.shadows != nil ? f.shadows.mask : 0
+		// A frame that does not trace shows the sun's contact shadows in the mask's place, as its first channel.
+		if f.shadows != nil {
+			source = f.shadows.mask != 0 ? f.shadows.mask : f.shadows.contact
+		}
 	case .Entity_Ids:
 		source = f.ids
 	case .Luminance:
@@ -221,7 +224,7 @@ run_debug_view :: proc(ctx: ^Pass_Context) {
 		divisor  = 1,
 	}
 	if f.shadows != nil {
-		push.mask_channels = u32(f.shadows.mask_count)
+		push.mask_channels = f.shadows.mask != 0 ? u32(f.shadows.mask_count) : 1
 	}
 	if f.debug_view == .Clouds && f.clouds != nil {
 		push.divisor = f.clouds.params.divisor

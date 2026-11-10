@@ -14,6 +14,7 @@ The ambient occlusion is ground-truth ambient occlusion (GTAO, after Jimenez et 
 - **The forward pass** scales the indirect light, diffuse and specular, by the occlusion. Direct light is not occluded.
 - **Reflection probes.** A capture's face whose indirect light is the ambient light, with the screen cascades or without GI, takes the occlusion of its own depth (`ao_face`): the camera's technique, radius and power, along the face's axes, with no jitter and the noise at slice 0, and both denoiser passes. Its passes run on the graphics queue, between the face's prepass and its forward pass, as `reflection probe ao depth`, `reflection probe ao` and `reflection probe ao denoise` (see [Reflection probes](lighting-and-shadows.md#reflection-probes)).
 - With [global illumination](global-illumination.md#global-illumination), which finds the larger occluders, the ambient occlusion still scales its light, for the contact shadows that the probes are too coarse for.
+- **The sun's contact shadows** read the depth levels and the blue noise too, in a frame that does not trace the sun (see [Shadows](lighting-and-shadows.md#shadows)). Without the ambient occlusion they have no depth levels, so they do not run.
 
 ## Techniques
 

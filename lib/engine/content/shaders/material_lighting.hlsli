@@ -159,6 +159,8 @@ float map_shadow(Light_Record light, float3 p, float3 normal, float3 to_light, f
 
 // light_shadow is how lit a point is by one light: its channel of the shadow mask, or its shadow maps, or 1. The mask is
 // the opaque surfaces', from the prepass's depth, so a transparent surface is lit by the lights that have a channel.
+// The sun's contact shadows (see contact_shadows.hlsl) are the opaque surfaces' too, so only the forward pass's opaque
+// surfaces take them, on top of the shadow map; the fog, the sprites and the transparent surfaces have the map alone.
 // to_light is the direction toward the light, which the shadow maps' lookup offsets along.
 float light_shadow(Light_Record light, float3 p, float3 normal, float3 to_light, float4 position) {
 	if (light.mask >= 0) {
@@ -168,7 +170,13 @@ float light_shadow(Light_Record light, float3 p, float3 normal, float3 to_light,
 		return load_screen(push.shadow_mask, position.xy)[light.mask];
 #endif
 	}
-	return map_shadow(light, p, normal, to_light, view_z(frame.projection, position.z));
+	float shadow = map_shadow(light, p, normal, to_light, view_z(frame.projection, position.z));
+#if MATERIAL_SCREEN_SHADOWS && !MATERIAL_TRANSPARENT
+	if ((light.flags & LIGHT_CONTACT_SHADOW) != 0) {
+		shadow *= load_screen(push.shadow_mask, position.xy).r;
+	}
+#endif
+	return shadow;
 }
 
 // range_window is 1 near a light and 0 at its range: saturate(1 - (d / range)^4)^2.

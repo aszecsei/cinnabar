@@ -257,6 +257,31 @@ lights_take_their_shadows_in_order :: proc(t: ^testing.T) {
 	testing.expect_value(t, lf.records[0].mask, 0)
 	testing.expect(t, .Virtual_Shadow not_in lf.records[0].flags)
 	testing.expect_value(t, frame.shadows.virtual.count, 0)
+
+	// Without tracing, the light with the virtual shadow map or the cascades also takes the contact shadows, and no other.
+	for virtual in ([]bool{true, false}) {
+		for &record in lf.records {
+			record.shadow, record.mask = -1, -1
+			record.flags -= {.Virtual_Shadow, .Contact_Shadow}
+		}
+		assign_shadow_views(frame, trace = false, virtual = virtual, contact = true)
+		testing.expect_value(t, frame.shadows.contact_light, 0)
+		testing.expect_value(t, lf.records[0].shadow, 0)
+		testing.expect(t, .Contact_Shadow in lf.records[0].flags)
+		for record, i in lf.records[1:] {
+			testing.expectf(t, .Contact_Shadow not_in record.flags, "light %d takes the contact shadows", i + 1)
+		}
+	}
+	// The mask's channel is the sun's shadow in a frame that traces, so it takes none.
+	for &record in lf.records {
+		record.shadow, record.mask = -1, -1
+		record.flags -= {.Virtual_Shadow, .Contact_Shadow}
+	}
+	assign_shadow_views(frame, trace = true, contact = true)
+	testing.expect_value(t, frame.shadows.contact_light, -1)
+	for record, i in lf.records {
+		testing.expectf(t, .Contact_Shadow not_in record.flags, "light %d takes the contact shadows", i)
+	}
 }
 
 @(test)

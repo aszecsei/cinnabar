@@ -37,7 +37,7 @@ The editor shows what makes the frame in its viewport (see [Editor](../editor/vi
 | `Shadow_Virtual` | The forward pass | The [virtual shadow map](lighting-and-shadows.md#virtual-shadow-maps)'s level at each pixel in a color of its own, half red where it fell back to a coarser level, magenta where it found no page, and grey without a virtual shadow map | No |
 | `Reflection_Probes` | The forward pass | The [reflection probe](lighting-and-shadows.md#reflection-probes) that counts the most at each pixel, by its cube, in a color of its own, red where none counts | No |
 | `Normals`, `Depth`, `Velocity`, `Roughness` | `debug_view.hlsl` | The prepass's: the world normal, the depth on a log scale to 1 km, the motion with grey where nothing moved, and the roughness from black, smooth, to white, rough, white where nothing drew (see [Prepass](lighting-and-shadows.md#prepass)) | No |
-| `Ambient_Occlusion`, `Shadow_Mask` | `debug_view.hlsl` | The occlusion, and each traced light's mask channel in its own color | No |
+| `Ambient_Occlusion`, `Shadow_Mask` | `debug_view.hlsl` | The occlusion, and each traced light's mask channel in its own color, or in a frame that does not trace, the sun's [contact shadows](lighting-and-shadows.md#shadows) in red | No |
 | `Gi_Diffuse`, `Gi_Specular` | `debug_view.hlsl` | The global illumination's light | Yes |
 | `Reflections` | `debug_view.hlsl` | The [screen-space reflections](lighting-and-shadows.md#screen-space-reflections)' light times their weight: black where the probes take over, and black without them | Yes |
 | `Clouds` | `debug_view.hlsl` | The [clouds](clouds.md#passes)' history over black: their light, a texel for each block of pixels of the cloud buffer, and black without them | Yes |

@@ -260,12 +260,14 @@ float3 hash_color(uint id) {
 }
 
 // Matches Material_Push in lib/engine/render/scene.odin: the frame's textures, which exist only once the frame's
-// passes record, so the forward pass pushes them. The shadow maps' atlas, the ray-traced shadow mask, the ambient
-// occlusion in r, the integrated fog volume (see docs/rendering/fog.md#volumetric-fog), and the global illumination's diffuse
+// passes record, so the forward pass pushes them. The shadow maps' atlas, the ray-traced shadow mask or, in a frame
+// that does not trace, the sun's contact shadows in r (a frame never has both), the ambient occlusion in r, the
+// integrated fog volume (see docs/rendering/fog.md#volumetric-fog), and the global illumination's diffuse
 // and specular light (see docs/rendering/global-illumination.md#global-illumination). The transparent pass of moment-based transparency
 // also has the moments, and transmittance set, so each surface is dimmed by those in front of it (see
 // material_transparent.hlsli). A compute pass that includes the light loop defines MATERIAL_PUSH as its own push
-// constants, which start with shadow_atlas and shadow_mask.
+// constants, which start with shadow_atlas and shadow_mask. Only the forward template's own push constants have the
+// contact shadows, so only it defines MATERIAL_SCREEN_SHADOWS.
 //
 // A material's hit pass and hit shading's fallback compile with MATERIAL_HIT 1 (see material_hit.hlsli): their push
 // constants are hit shading's, and a material's textures sample the level that the ray's cone picks.
@@ -297,6 +299,10 @@ struct Material_Push {
 	uint aerial;
 };
 #define MATERIAL_PUSH Material_Push
+#define MATERIAL_SCREEN_SHADOWS 1
+#endif
+#ifndef MATERIAL_SCREEN_SHADOWS
+#define MATERIAL_SCREEN_SHADOWS 0
 #endif
 CN_PUSH_CONSTANTS(MATERIAL_PUSH, push);
 
@@ -428,6 +434,8 @@ static const uint LIGHT_TWO_SIDED = 1;
 static const uint LIGHT_VIRTUAL_SHADOW = 2;
 // The clouds shadow the light (see cloud_shadow.hlsli).
 static const uint LIGHT_CLOUD_SHADOW = 4;
+// The forward pass darkens the light by the contact shadows too (see light_shadow in material_lighting.hlsli).
+static const uint LIGHT_CONTACT_SHADOW = 8;
 struct Light_Record {
 	float3 position;
 	float range;
