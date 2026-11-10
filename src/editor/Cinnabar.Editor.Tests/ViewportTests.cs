@@ -270,11 +270,20 @@ public sealed class ViewportTests : IDisposable
 
             Assert.True(Vec3.Dot(camera.Forward, looks) > 0.999, $"view {index} looks along {camera.Forward}");
             Assert.True(Vec3.Between(pivot, camera.Pivot).Length < 0.001, $"view {index}'s pivot is {Vec3.Between(pivot, camera.Pivot)} off");
-            Assert.Equal(shell.Camera.PivotDistance, camera.PivotDistance, 6);
+            // They are orthographic: they show what the first view shows at its pivot, from far enough back to clip
+            // little that is in front of it.
+            Assert.True(camera.IsOrthographic);
+            Assert.Equal(2 * shell.Camera.PivotDistance * Math.Tan(shell.Camera.VerticalFov / 2), camera.OrthographicHeight, 6);
+            Assert.Equal(Tools.EditorCamera.OrthographicStandoff, camera.PivotDistance, 6);
             Assert.Equal(yaw, camera.Yaw, 6);
-            // The game hears of the camera that the view starts with.
-            Assert.Equal(camera.Position, Assert.Single(_sent.OfType<EditorCamera>(), c => c.Viewport == (uint)index).Position);
+            // The game hears of the camera that the view starts with, once.
+            var sent = Assert.Single(_sent.OfType<EditorCamera>(), c => c.Viewport == (uint)index);
+            Assert.Equal(camera.Position, sent.Position);
+            Assert.Equal(CameraProjection.Orthographic, sent.Projection);
+            Assert.Equal((float)camera.OrthographicHeight, sent.OrthographicHeight);
+            Assert.Equal((float)Tools.EditorCamera.OrthographicFar, sent.Far);
         }
+        Assert.False(shell.Camera.IsOrthographic);
         Assert.Equal(["Perspective", "Top", "Front", "Side", "Game"], shell.Viewports.Select(v => v.Title));
     }
 
@@ -654,7 +663,8 @@ public sealed class ViewportTests : IDisposable
         using var shell = NewShell();
         Show(shell, 1, 800, 900);
         Show(shell, 4, 800, 900);
-        // Twice as far from the box as the first viewport's camera.
+        // A perspective view, twice as far from the box as the first viewport's camera.
+        shell.SetProjection(shell.Viewports[1], CameraProjection.Perspective);
         shell.Viewports[1].Camera.Place([0, 0, -5L << 24], 0, 0);
         _sent.Clear();
 
@@ -919,6 +929,61 @@ public sealed class ViewportTests : IDisposable
         Assert.Contains("Game view", game.Error);
         var gone = await shell.HandleAutomation(new AutomationRequest(3, "camera", Position: [0, 2, 0], Viewport: 7), cancel);
         Assert.False(gone.Ok);
+    }
+
+    [Fact]
+    public async Task AViewsProjectionIsChosenSavedAndSetByAutomation()
+    {
+        var cancel = TestContext.Current.CancellationToken;
+        using (var shell = NewShell())
+        {
+            Show(shell, 2, 640, 360);
+            Assert.True(shell.Viewports[2].Camera.IsOrthographic);
+            var pivot = shell.Camera.Pivot;
+            var shows = 2 * shell.Camera.PivotDistance * Math.Tan(shell.Camera.VerticalFov / 2);
+
+            // The first view goes orthographic about its pivot, and shows as much of it.
+            _sent.Clear();
+            Assert.True(shell.SetProjection(shell.Viewports[0], CameraProjection.Orthographic));
+            Assert.True(shell.Camera.IsOrthographic);
+            Assert.Equal(shows, shell.Camera.OrthographicHeight, 6);
+            Assert.True(Vec3.Between(pivot, shell.Camera.Pivot).Length < 0.001);
+            Assert.Equal(CameraProjection.Orthographic, _sent.OfType<EditorCamera>().Last(c => c.Viewport == 0).Projection);
+
+            // Automation sets a view's, by its name, and refuses a name that is none and the Game view.
+            var front = await shell.HandleAutomation(new AutomationRequest(1, "viewport", Viewport: 2, Settings: Settings(("projection", "perspective"))), cancel);
+            Assert.True(front.Ok, front.Error);
+            Assert.False(shell.Viewports[2].Camera.IsOrthographic);
+            var unknown = await shell.HandleAutomation(new AutomationRequest(2, "viewport", Viewport: 2, Settings: Settings(("projection", "Isometric"))), cancel);
+            Assert.False(unknown.Ok);
+            Assert.Contains("Perspective, Orthographic", unknown.Error);
+            var game = await shell.HandleAutomation(new AutomationRequest(3, "viewport", Viewport: 4, Settings: Settings(("projection", "Orthographic"))), cancel);
+            Assert.False(game.Ok);
+
+            // The 2D view looks along +z without perspective, at the pivot, and shows as much of it.
+            Show(shell, 3, 640, 360);
+            var side = shell.Viewports[3];
+            var (sidePivot, sideShows) = (side.Camera.Pivot, side.Camera.OrthographicHeight);
+            var flat = await shell.HandleAutomation(new AutomationRequest(4, "viewport", Viewport: 3, Settings: Settings(("view2d", true))), cancel);
+            Assert.True(flat.Ok, flat.Error);
+            Assert.True(side.Camera.IsOrthographic);
+            Assert.True(Vec3.Dot(side.Camera.Forward, Vec3.UnitZ) > 0.999999 && Vec3.Dot(side.Camera.Right, Vec3.UnitX) > 0.999999);
+            Assert.True(Vec3.Between(sidePivot, side.Camera.Pivot).Length < 0.001);
+            Assert.Equal(sideShows, side.Camera.OrthographicHeight, 6);
+            Assert.False(shell.Show2D(shell.Viewports[4]));
+
+            // Orbiting makes a view a perspective one, and leaves what the user chose for it.
+            shell.Camera.Orbit(10, 0);
+            Assert.False(shell.Camera.IsOrthographic);
+            Assert.Equal(CameraProjection.Orthographic, shell.Viewports[0].Projection);
+        }
+        // The next editor's views have the projections that were chosen.
+        using var again = NewShell();
+        Assert.True(again.Camera.IsOrthographic);
+        Show(again, 2, 640, 360);
+        Assert.False(again.Viewports[2].Camera.IsOrthographic);
+        Show(again, 1, 640, 360);
+        Assert.True(again.Viewports[1].Camera.IsOrthographic);
     }
 
     [Fact]

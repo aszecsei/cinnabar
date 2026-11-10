@@ -151,7 +151,7 @@ camera_view :: proc(c: link.Editor_Camera) -> render.View {
 	return {
 		position = {c.position},
 		rotation = quaternion(x = c.rotation.x, y = c.rotation.y, z = c.rotation.z, w = c.rotation.w),
-		projection = render.Perspective{c.vertical_fov, c.near},
+		projection = c.projection == .Orthographic ? render.Orthographic{c.orthographic_height, c.near, c.far} : render.Perspective{c.vertical_fov, c.near},
 	}
 }
 
@@ -928,6 +928,16 @@ Gizmo_Builder :: struct {
 	out:   ^[dynamic]Gizmo_Vertex,
 	right: [3]f32,
 	up:    [3]f32,
+	// The way that an orthographic view looks, which is the same at every point, and 0 for a perspective view, which
+	// looks from the origin.
+	along: [3]f32,
+}
+
+// gizmo_builder is a builder of triangles that face a view.
+@(private)
+gizmo_builder :: proc(out: ^[dynamic]Gizmo_Vertex, view: render.View) -> Gizmo_Builder {
+	right, up, forward := render.view_axes(view)
+	return {out, right, up, render.is_orthographic(view) ? forward : {}}
 }
 
 @(private)
@@ -964,7 +974,7 @@ gizmo_vertices :: proc(gizmo: link.Gizmo_State, view: render.View, out: ^[dynami
 	}
 	s := gizmo.size
 	right, up, _ := render.view_axes(view)
-	b := Gizmo_Builder{out, right, up}
+	b := gizmo_builder(out, view)
 	color :: proc(gizmo: link.Gizmo_State, part: link.Gizmo_Part) -> u32 {
 		c := GIZMO_COLORS[part]
 		if gizmo.hot == part {
@@ -1012,7 +1022,7 @@ gizmo_vertices :: proc(gizmo: link.Gizmo_State, view: render.View, out: ^[dynami
 @(private)
 box_handle_vertices :: proc(handles: []link.Box_Handle, size: f32, view: render.View, out: ^[dynamic]Gizmo_Vertex) {
 	right, up, forward := render.view_axes(view)
-	b := Gizmo_Builder{out, right, up}
+	b := gizmo_builder(out, view)
 	for h in handles {
 		c := PROBE_COLORS[h.kind]
 		if h.hot {
@@ -1040,10 +1050,10 @@ quad :: proc(b: ^Gizmo_Builder, p0, p1, p2, p3: [3]f32, color: u32) {
 	triangle(b, p0, p2, p3, color)
 }
 
-// ribbon is a segment of a width, turned to face the view, which is at the origin.
+// ribbon is a segment of a width, turned to face the view: the origin, or the way that an orthographic view looks.
 @(private)
 ribbon :: proc(b: ^Gizmo_Builder, from, to: [3]f32, width: f32, color: u32) {
-	side := linalg.cross(to - from, (from + to) * 0.5)
+	side := linalg.cross(to - from, b.along != {} ? b.along : (from + to) * 0.5)
 	if linalg.length(side) < 1e-9 {
 		side = b.right
 	}

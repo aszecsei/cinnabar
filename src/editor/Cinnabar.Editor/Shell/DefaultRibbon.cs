@@ -74,6 +74,7 @@ static class DefaultRibbon
                     new RibbonGroup("Scene Views",
                     [
                         new ComboBox(EditorCommands.SceneLayout),
+                        new SmallStack([EditorCommands.ViewProjection, EditorCommands.View2D]),
                         new SmallStack([EditorCommands.SceneViewToggle(0), EditorCommands.SceneViewToggle(1)]),
                         new SmallStack([EditorCommands.SceneViewToggle(2), EditorCommands.SceneViewToggle(3)]),
                     ]),

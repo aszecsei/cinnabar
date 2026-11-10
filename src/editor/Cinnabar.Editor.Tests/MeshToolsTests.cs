@@ -104,7 +104,9 @@ public class MeshToolsTests
         Assert.Equal("16 m", MeshGrid.Format(16));
         Assert.Equal(1, MeshGrid.NearestAxis(new Vec3(0.2, -0.9, 0.3)));
         // A ray down onto the floor plane 2 m below.
-        Assert.Equal(new Vec3(0, -2, 2), MeshGrid.HitPlane(new Vec3(0, -2, 0), Vec3.UnitY, new Vec3(0, -1, 1).Normalized())!.Value);
-        Assert.Null(MeshGrid.HitPlane(new Vec3(0, -2, 0), Vec3.UnitY, Vec3.UnitZ));
+        Assert.Equal(new Vec3(0, -2, 2), MeshGrid.HitPlane(new Vec3(0, -2, 0), Vec3.UnitY, new ViewRay(Vec3.Zero, new Vec3(0, -1, 1).Normalized()))!.Value);
+        Assert.Null(MeshGrid.HitPlane(new Vec3(0, -2, 0), Vec3.UnitY, new ViewRay(Vec3.Zero, Vec3.UnitZ)));
+        // An orthographic ray starts beside the camera, and meets the plane straight below where it starts.
+        Assert.Equal(new Vec3(3, -2, 1), MeshGrid.HitPlane(new Vec3(0, -2, 0), Vec3.UnitY, new ViewRay(new Vec3(3, 0, 1), -Vec3.UnitY))!.Value);
     }
 }

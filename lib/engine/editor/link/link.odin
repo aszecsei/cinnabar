@@ -473,8 +473,19 @@ Editor_Camera :: struct {
 	rotation:     [4]f32,
 	// Vertical, in radians.
 	vertical_fov: f32,
-	// The near plane's distance in meters. The far plane is at infinity.
+	// The near plane's distance in meters. A perspective camera's far plane is at infinity.
 	near:         f32,
+	// An orthographic camera shows orthographic_height meters from bottom to top, between near and far (see
+	// docs/editor/viewport.md#projection). A perspective camera does not read them.
+	projection:          Camera_Projection,
+	orthographic_height: f32,
+	far:                 f32,
+}
+
+// Camera_Projection is how an editor's camera projects: with perspective, or without.
+Camera_Projection :: enum u8 {
+	Perspective,
+	Orthographic,
 }
 
 // Editor to game: the selected entities, which the game outlines with their descendants. The editor sends it when the

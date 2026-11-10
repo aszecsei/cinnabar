@@ -363,16 +363,17 @@ public sealed partial class EditorShell
         var (width, height) = FrameSize;
         var ray = Camera.Ray(pixel, width, height);
         double distance;
-        if (result is { Depth: > 0 } && Vec3.Dot(ray, Camera.Forward) is var cos and > 1e-6)
+        if (result is { Depth: > 0 } && Vec3.Dot(ray.Direction, Camera.Forward) is var cos and > 1e-6)
         {
+            // The depth is along the view's axis, from the camera's plane.
             distance = result.Depth / cos;
         }
         else
         {
-            var plane = Camera.RelativeTo(Camera.Pivot).Y;
-            distance = Math.Abs(ray.Y) > 1e-6 && plane / ray.Y is var t and > 0 ? t : Camera.PivotDistance;
+            var plane = Camera.RelativeTo(Camera.Pivot).Y - ray.Origin.Y;
+            distance = Math.Abs(ray.Direction.Y) > 1e-6 && plane / ray.Direction.Y is var t and > 0 ? t : Camera.PivotDistance;
         }
-        var point = (ray * distance).Offset(Camera.Position);
+        var point = ray.At(distance).Offset(Camera.Position);
         if (Snap)
         {
             var step = Mesh.GridSize * Pose.Unit;

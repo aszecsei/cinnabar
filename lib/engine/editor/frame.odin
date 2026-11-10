@@ -102,6 +102,11 @@ plan_view :: proc(e: ^Editor, w: ^ecs.World, desc: render.Frame_Desc, v: Frame_V
 	if scene {
 		view.hooks.ui = nil
 		view.overlay = {new_clone(Tools{e, w, v.viewport}, allocator), tools_overlay}
+		// An orthographic scene view's camera stands back from what it shows, by a distance that means nothing, so the
+		// fog between them would hide the scene.
+		if render.is_orthographic(view.view) {
+			view.disable += {.Fog}
+		}
 	}
 	return view
 }

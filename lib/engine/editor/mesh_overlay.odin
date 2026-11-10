@@ -85,7 +85,7 @@ mesh_overlay_vertices :: proc(e: ^Editor, w: ^ecs.World, view: render.View, heig
 		return
 	}
 	right, up, forward := render.view_axes(view)
-	b := Gizmo_Builder{out, right, up}
+	b := gizmo_builder(out, view)
 	// The meters that a pixel covers at a point's depth: at a depth of 1 in perspective, where it grows with the depth,
 	// and at every depth in orthographic.
 	pixel := render.pixel_meters(view, 1, height)

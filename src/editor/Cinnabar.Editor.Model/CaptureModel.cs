@@ -12,7 +12,7 @@ public sealed record CaptureImage(string File, string? View, ulong Frame, uint W
 public sealed record CaptureOutcome(bool Ok, string? Error, IReadOnlyList<string> Files, string? Sidecar);
 
 /// <summary>A scene view's camera at a capture: a raw World_Position and the same in meters, the angles in radians.</summary>
-public sealed record CameraInfo(long[] Position, double[] PositionMeters, double Yaw, double Pitch, double VerticalFov, double Near);
+public sealed record CameraInfo(long[] Position, double[] PositionMeters, double Yaw, double Pitch, double VerticalFov, double Near, string Projection, double OrthographicHeight);
 
 /// <summary>
 /// Everything the sidecar records of the editor's state at a capture (see docs/editor/capture.md#sidecar). Viewport is
