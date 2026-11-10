@@ -49,6 +49,8 @@ Light_Flag :: enum u32 {
 	Virtual_Shadow,
 	// The clouds shadow the light through the cloud shadow map (see clouds.odin).
 	Cloud_Shadow,
+	// The forward pass darkens the light by the contact shadows, as well as by its shadow map (see shadows.odin).
+	Contact_Shadow,
 }
 
 // Light_Record matches Light_Record in material_common.hlsli: a light relative to the camera. direction is where the

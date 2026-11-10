@@ -154,6 +154,8 @@ enable_pipelines :: proc(r: ^Renderer) {
 		&r.scene.cull_patches_pipeline,
 		// The traced shadows, so the lights trace their mask, and the frame builds the ray scene before it.
 		&r.shadows.mask_pipeline,
+		// The contact shadows, which the sun takes where the frame does not trace.
+		&r.shadows.contact_pipeline,
 		&r.ray_scene.bin_pipeline,
 		&r.ray_scene.fallback,
 		// The world probes, which the quality's Split_Cascades runs on the traced scene.
@@ -1569,6 +1571,89 @@ the_aerial_volume_is_an_atmospheres_alone :: proc(t: ^testing.T) {
 		testing.expectf(t, record.passes == (atmosphere ? 1 : 0), "%v: %d aerial passes", mode, record.passes)
 		testing.expectf(t, record.aerial == atmosphere && record.reads == atmosphere, "%v: the volume %v, read by the world %v", mode, record.aerial, record.reads)
 	}
+	testing.expectf(t, len(rig.record.problems) == 0, "problems: %v", rig.record.problems)
+}
+
+// The sun's contact shadows are the untraced frames': a frame whose shadow mask has the sun marches no contact shadows,
+// one that does not trace does, and the world pass reads them; without the ambient occlusion's depth levels, they wait.
+@(test)
+the_sun_takes_contact_shadows_where_it_does_not_trace :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	rig := new(Rig)
+	defer free(rig)
+	rig_start(t, rig)
+	defer rig_stop(rig)
+	context.logger = {record_problems, &rig.record, .Debug, {}}
+	r, platform := rig.r, &rig.platform
+	fill_world(rig.w)
+	enable_frame_pipelines(r)
+	defer platform.gpu_destroy_texture(r.blue_noise.texture)
+
+	Contact_Record :: struct {
+		contact: int,
+		mask:    int,
+		reads:   bool,
+		flagged: bool,
+	}
+	record: Contact_Record
+	desc := Frame_Desc {
+		view  = {position = ecs.position_offset({}, {0, 1, -4}), rotation = 1, projection = Perspective{1, 0.05}},
+		size  = {64, 32},
+		hooks = {
+			data = &record,
+			debug = proc(f: ^Frame) {
+				rec := (^Contact_Record)(f.data)
+				contact := f.shadows.contact
+				rec^ = {}
+				for pass in f.graph.passes {
+					switch pass.name {
+					case "contact shadows":
+						rec.contact += 1
+					case "shadow mask":
+						rec.mask += 1
+					case "world":
+						for use in pass.uses {
+							rec.reads ||= contact != 0 && !use.buffer && use.reads && Texture(use.index + 1) == contact
+						}
+					}
+				}
+				for light in f.lights.records {
+					rec.flagged ||= .Contact_Shadow in light.flags
+				}
+			},
+		},
+	}
+	draw :: proc(t: ^testing.T, r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) {
+		for _ in 0 ..< 2 {
+			testing.expect(t, draw_frame(r, w, desc))
+		}
+	}
+
+	// The default quality traces the sun's shadow.
+	draw(t, r, rig.w, desc)
+	testing.expectf(t, record.mask == 1 && record.contact == 0 && !record.flagged, "traced: %v", record)
+
+	// Without tracing in the quality, at every level, the sun takes the contact shadows, which the world reads.
+	for level in Quality_Level {
+		q := preset_quality(Quality_Preset(level), r.caps)
+		q.shadows.ray_traced = false
+		desc.quality = &q
+		draw(t, r, rig.w, desc)
+		testing.expectf(t, record.mask == 0 && record.contact == 1 && record.reads && record.flagged, "%v, untraced: %v", level, record)
+	}
+
+	// So does a device without Ray_Query, at the default quality.
+	desc.quality = nil
+	r.caps.ray_query = false
+	draw(t, r, rig.w, desc)
+	testing.expectf(t, record.mask == 0 && record.contact == 1 && record.reads, "without Ray_Query: %v", record)
+
+	// Without the ambient occlusion there are no depth levels to march, so there is no pass, and the world reads white.
+	q := r.quality
+	q.ao.technique = .Off
+	desc.quality = &q
+	draw(t, r, rig.w, desc)
+	testing.expectf(t, record.mask == 0 && record.contact == 0 && !record.reads, "without the ambient occlusion: %v", record)
 	testing.expectf(t, len(rig.record.problems) == 0, "problems: %v", rig.record.problems)
 }
 

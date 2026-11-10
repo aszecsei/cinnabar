@@ -2528,8 +2528,11 @@ material_push :: proc(f: ^Frame, pass: format.Material_Pass, group: Bin_Group) -
 	if f.ambient_occlusion != 0 {
 		push.ambient_occlusion = gpu.read_index(gpu_texture(g, f.ambient_occlusion))
 	}
+	// A frame has the mask or the contact shadows, never both (see add_shadow_passes).
 	if f.shadows.mask != 0 {
 		push.shadow_mask = gpu.read_index(gpu_texture(g, f.shadows.mask))
+	} else if f.shadows.contact != 0 {
+		push.shadow_mask = gpu.read_index(gpu_texture(g, f.shadows.contact))
 	}
 	if f.reflections != 0 {
 		push.reflections = gpu.read_index(gpu_texture(g, f.reflections))

@@ -1158,7 +1158,7 @@ upload_reflection_probe_lights :: proc(f: ^Frame) {
 		if record.type == .Directional {
 			record.shadow =
 				i == pf.shadow_light && pf.shadow_view < len(f.shadows.views) ? i32(pf.shadow_view) : -1
-			record.flags -= {.Virtual_Shadow, .Cloud_Shadow}
+			record.flags -= {.Virtual_Shadow, .Cloud_Shadow, .Contact_Shadow}
 		}
 	}
 	ok: bool
