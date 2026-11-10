@@ -22,6 +22,7 @@ SURFACE_RENDERER_ID :: ecs.Component_Id(51)
 INSTANCED_MESH_RENDERER_ID :: ecs.Component_Id(53)
 REFLECTION_PROBE_ID :: ecs.Component_Id(54)
 // 55 is the Clouds settings component (see settings.odin).
+// 56 is the Sprite_Renderer (see sheet_sprites.odin).
 
 // The view of a Camera that leaves a field at 0, as a component added in the editor does.
 DEFAULT_VERTICAL_FOV :: math.PI / 3
@@ -198,6 +199,7 @@ Reflection_Probe :: struct {
 // on_reload.
 register_components :: proc(r: ^ecs.Registry) {
 	ecs.register_component(r, Camera, CAMERA_ID)
+	ecs.register_component(r, Sprite_Renderer, SPRITE_RENDERER_ID, DEFAULT_SPRITE_RENDERER)
 	ecs.register_component(r, Mesh_Renderer, MESH_RENDERER_ID)
 	ecs.register_component(r, Directional_Light, DIRECTIONAL_LIGHT_ID)
 	ecs.register_component(r, Point_Light, POINT_LIGHT_ID)

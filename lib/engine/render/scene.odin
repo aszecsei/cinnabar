@@ -1230,10 +1230,11 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 		time            = now,
 		valid           = true,
 	}
-	// The fog's injection and the voxel cones' read the camera's constants, so they are written without draws too.
+	// The fog's injection, the voxel cones' and the sprite renderers' draw read the camera's constants, so they are
+	// written without draws too.
 	has_items := len(sf.items) > 0
 	voxels := f.gi != nil ? f.gi.voxel : nil
-	if !has_items && f.fog == nil && voxels == nil {
+	if !has_items && f.fog == nil && voxels == nil && !f.wants_sheet_sprites {
 		return
 	}
 	// The voxel cones' views come after the shadow views (see Voxel_View), then a reflection probe capture's faces.

@@ -26,6 +26,7 @@ import "cinnabar:engine/physics"
 import "cinnabar:engine/project"
 import "cinnabar:engine/render"
 import "cinnabar:engine/scene"
+import "cinnabar:engine/sprite"
 import "cinnabar:engine/ui"
 import "cinnabar:engine/script"
 import "cinnabar:engine/volume"
@@ -237,6 +238,8 @@ Game_State :: struct {
 	audio:              audio.State,
 	// The Animators' queries, which the fixed ticks advance (see docs/content/kinds/skins-and-animations.md#playback).
 	animation:          anim.State,
+	// The Sprite_Renderers' animations (see docs/rendering/2d.md#animation).
+	sprites:            sprite.State,
 	// The HUD and the pause menu, documents on the main scene's entities (see docs/ui/design.md#the-frame).
 	ui:                 ui.State,
 	// The pause menu stops the world's time, while scripts and the UI run on.
@@ -457,6 +460,7 @@ register_world :: proc(s: ^Game_State) {
 	register_components(&w.registry)
 	physics.register(&s.physics, w)
 	anim.register(&s.animation, w, &s.assets)
+	sprite.register(&s.sprites, w, &s.assets)
 	ecs.register_system(w, {name = "spin", stage = .Fixed, procedure = spin, terms = {ecs.write(w, ecs.Transform), ecs.read(w, Spin)}})
 	s.triangles = render.extractor(w, {ecs.read(w, Triangle)})
 }
@@ -482,6 +486,7 @@ register_scripts :: proc(r: ^script.Runtime) {
 	physics.register_scripts(r, &container_of(r, Game_State, "scripts").physics)
 	audio.register_scripts(r, &container_of(r, Game_State, "scripts").audio)
 	anim.register_scripts(r, &container_of(r, Game_State, "scripts").animation)
+	sprite.register_scripts(r, &container_of(r, Game_State, "scripts").sprites)
 	ui.register_scripts(r, &container_of(r, Game_State, "scripts").ui)
 	script.define(r, "Game.set_paused", proc(L: ^luau.State) -> c.int {
 		luau.L_checktype(L, 1, .BOOLEAN)
@@ -927,6 +932,8 @@ shutdown :: proc(state: rawptr) {
 	script.destroy(&s.scripts)
 	ui.destroy(&s.ui)
 	render.renderer_destroy(&s.renderer)
+	// The sprites give their sheets back to the assets.
+	sprite.destroy(&s.sprites)
 	asset.destroy(&s.assets)
 	audio.destroy(&s.audio)
 	physics.destroy(&s.physics)

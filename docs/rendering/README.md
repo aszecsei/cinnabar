@@ -16,6 +16,7 @@ Read them in this order the first time.
 | [Lighting and shadows](lighting-and-shadows.md) | Clustered forward, the prepass, lights, area lights and shadows. |
 | [Transparency](transparency.md) | Moment-based and sorted transparency, and compute sprites. |
 | [Particles](particles.md) | Particle systems, their simulation and collision, ribbons and mesh particles. |
+| [2D](2d.md) | Sprite renderers: their sorting by layer and order, their draw, lit and unlit, pixel snapping, and their animations by name. |
 | [Materials](materials.md) | Shading models, materials, permutations, instances, the runtime and previews. |
 | [Surfaces](surfaces.md) | Patch surfaces: a quadtree of grid patches picked on the GPU, with holes, for water and terrain. |
 | [Ambient occlusion](ambient-occlusion.md) | GTAO as XeGTAO builds it, and HBAO and SSAO in its place. |
@@ -52,6 +53,7 @@ Read them in this order the first time.
 | `ray_scene.odin` | The scene's acceleration structure, its requests and build, the hit table, and hit shading's binning and dispatches ([Ray scene](ray-scene.md#ray-scene)) |
 | `transparency.odin` | Moment-based and sorted transparency ([Transparency](transparency.md#transparency)) |
 | `particles.odin` | `Particle_System`, the pool, the systems' slots and the simulation's passes, the ribbons' build and the mesh particles' draws ([Particles](particles.md#particles)) |
+| `sheet_sprites.odin` | `Sprite_Renderer`: the sprites' extraction and sort, their records, their draw and their IDs' ([2D](2d.md#sprite-renderers)); `lib/engine/sprite` plays their animations |
 | `sprites.odin` | Compute sprites: `Sprite`, the records that the CPU and GPU passes write, their tiles, bins and light, and their passes into the moments ([Sprites](transparency.md#sprites)) |
 | `ambient_occlusion.odin` | GTAO, HBAO or SSAO on the compute queue ([Ambient occlusion](ambient-occlusion.md#ambient-occlusion)) |
 | `gi.odin` | Screen-space radiance cascades ([Global illumination](global-illumination.md#global-illumination)) |

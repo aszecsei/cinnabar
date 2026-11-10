@@ -114,6 +114,8 @@ Renderer :: struct {
 	transparency_composite: Shader_Pipeline,
 	// The compute sprites' pipelines and buffers (see docs/rendering/transparency.md#sprites).
 	sprites:         Sprites,
+	// The sprite renderers (see sheet_sprites.odin).
+	sheet_sprites:   Sheet_Sprites,
 	// The frame's own view's state (see View_State) unless Frame_Desc.state names another, which a game with one camera has
 	// no other of.
 	view:            View_State,
@@ -333,6 +335,10 @@ Frame :: struct {
 	moments:                  Texture,
 	// nil without sprites.
 	sprites:                  ^Sprite_Frame,
+	// The view's sprite renderers, nil without any (see sheet_sprites.odin), and whether the world has any, which
+	// add_scene_passes writes the camera's constants for.
+	sheet_sprites:            ^Sheet_Sprite_Frame,
+	wants_sheet_sprites:      bool,
 	// nil without particles to step.
 	particles:                ^Particle_Frame,
 	// Zero without a UI hook, and without debug lines or a debug hook.
@@ -475,6 +481,7 @@ renderer_init :: proc(r: ^Renderer, platform: ^core.Platform_API, assets: ^asset
 	sky_init(&r.sky)
 	clouds_init(&r.clouds)
 	sprites_init(&r.sprites)
+	sheet_sprites_init(&r.sheet_sprites, platform, w)
 	particles_init(&r.particles, w)
 	reflection_probes_init(&r.reflection_probes, r, w)
 	post_init(&r.post, platform)
@@ -502,6 +509,7 @@ renderer_reload :: proc(r: ^Renderer, platform: ^core.Platform_API, w: ^ecs.Worl
 	volume.register(&r.volumes, w)
 	lights_register(&r.lights, w)
 	particles_register(&r.particles, w)
+	sheet_sprites_register(&r.sheet_sprites, w)
 	reflection_probes_register(&r.reflection_probes, w)
 	// The effects' procedures were in the old code, so the game registers them again.
 	r.effect_count = 0
@@ -528,6 +536,7 @@ renderer_destroy :: proc(r: ^Renderer) {
 	sky_destroy(&r.sky, r)
 	clouds_destroy(&r.clouds, r.platform)
 	sprites_destroy(&r.sprites, r.platform)
+	sheet_sprites_destroy(&r.sheet_sprites, r.platform, r.residency.assets)
 	view_state_destroy(&r.view, r)
 	particles_destroy(&r.particles, r.platform)
 	reflection_probes_destroy(&r.reflection_probes, r)
@@ -688,10 +697,12 @@ draw_view :: proc(
 	begin_fog(f, settings.fog)
 	begin_gi(f, settings.gi, ambient)
 	begin_screen_reflections(f, settings.reflections)
+	f.wants_sheet_sprites = any_sprite_renderers(r, w)
 	add_scene_passes(f, ambient)
 	// Every request for the ray scene came before, so its build is before every pass that traces it.
 	add_ray_scene_passes(f)
 	begin_sprites(f, desc.sprites, &r.sprites.main)
+	begin_sheet_sprites(f, w, desc.hidden, desc.playing, desc.delta)
 	if extra {
 		begin_particles_draw(f)
 	} else {
@@ -748,7 +759,7 @@ draw_view :: proc(
 	color(&g, p, f.ids, .Clear, store = desc.keep_ids || desc.debug_view == .Entity_Ids ? .Store : .Discard)
 	// The debug layer tests against the depth, the editor reads it, and so do the sky, the fog over the background, the
 	// transparent surfaces, the sprites, temporal AA, the exposure and the depth's debug view.
-	keep_depth := desc.keep_ids || has_debug || f.fog != nil || draws_sky || has_transparency(f) || has_sprites(f) || reads_depth(f) || desc.debug_view == .Depth
+	keep_depth := desc.keep_ids || has_debug || f.fog != nil || draws_sky || has_transparency(f) || has_sprites(f) || has_sheet_sprites(f) || reads_depth(f) || desc.debug_view == .Depth
 	depth(&g, p, f.depth, .Load, store = keep_depth ? .Store : .Discard)
 	declare_scene_draws(f, p)
 	declare_lighting(f, p, opaque = true)
@@ -766,6 +777,7 @@ draw_view :: proc(
 	add_gi_lit(f)
 	add_screen_reflection_lit(f)
 	add_transparency_passes(f)
+	add_sheet_sprite_pass(f)
 	if desc.hooks.after_world != nil {
 		desc.hooks.after_world(f)
 	}
@@ -775,6 +787,7 @@ draw_view :: proc(
 	add_debug_view_pass(f)
 	add_post_passes(f)
 	add_transparent_id_pass(f, desc.keep_ids)
+	add_sheet_sprite_id_pass(f, desc.keep_ids)
 
 	if desc.hooks.ui != nil {
 		f.ui = create_texture(&g, {size = desc.size, format = UI_FORMAT, label = "ui"})
@@ -861,6 +874,7 @@ sync_frame_pipelines :: proc(r: ^Renderer, mode: gpu.Output_Mode, sdr: bool) {
 	sync_sky_pipelines(r, force)
 	sync_cloud_pipelines(r, force)
 	sync_sprite_pipelines(r, force)
+	sync_sheet_sprite_pipelines(r, force)
 	sync_particle_pipelines(r, force)
 	sync_reflection_probe_pipelines(r, force)
 	sync_compute_pipeline(&r.debug_view, r.platform, assets, {label = "debug view"}, force)

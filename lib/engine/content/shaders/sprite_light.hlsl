@@ -69,7 +69,7 @@ void cs_main(uint3 group : SV_GroupID, uint3 thread : SV_GroupThreadID) {
 	}
 	light *= SPRITE_COSINE / PI;
 	if (frame.gi != 0) {
-		float2 pixel = (clip.xy / depth * float2(0.5, -0.5) + 0.5) * frame.screen_size;
+		float2 pixel = (clip.xy / max(clip.w, 1e-7) * float2(0.5, -0.5) + 0.5) * frame.screen_size;
 		light += load_screen(push.gi_diffuse, clamp(pixel, 0, frame.screen_size - 1)).rgb;
 	} else {
 		light += ambient_average(frame.ambient);

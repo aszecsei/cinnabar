@@ -3,8 +3,11 @@ package render
 import "base:runtime"
 import "core:fmt"
 import "core:log"
+import "core:math"
+import "core:math/linalg"
 import "core:mem/virtual"
 import "core:os"
+import "core:slice"
 import "core:strings"
 import "core:sync"
 import "core:testing"
@@ -2234,4 +2237,170 @@ use_view_takes_the_overlay :: proc(t: ^testing.T) {
 	desc: Frame_Desc
 	use_view(&desc, v)
 	testing.expect(t, desc.overlay.data == &data && desc.overlay.draw == order_overlay)
+}
+
+// What the sprite test's hook saw of a view: its sprites' records in the order that they draw, and its passes.
+@(private = "file")
+Sprite_Capture :: struct {
+	records: [dynamic]Sheet_Sprite_Record,
+	passes:  map[string]int,
+}
+
+// The sprite renderers draw in one pass, sorted by layer, then by order, then from the farthest, each with its frame of
+// its sheet's texture, and write their IDs for the editor only when the frame keeps them.
+@(test)
+sprite_renderers_draw_sorted_by_layer_order_and_depth :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	rig := new(Rig)
+	defer free(rig)
+	rig_start(t, rig)
+	defer rig_stop(rig)
+	context.logger = {record_problems, &rig.record, .Debug, {}}
+	r, platform := rig.r, &rig.platform
+	platform.time_seconds = proc() -> f64 {return 0.1}
+	// The atlas streams in, which the other tests of the rig have no need of.
+	platform.gpu_stream_texture, platform.gpu_stream_buffer, platform.gpu_transfer_done = null.stream_texture, null.stream_buffer, null.transfer_done
+	enable_frame_pipelines(r)
+	defer platform.gpu_destroy_texture(r.blue_noise.texture)
+	code := []byte{1}
+	r.sheet_sprites.pipeline.pipeline = platform.gpu_create_graphics_pipeline({vertex = code, pixel = code, colors = {{format = SCENE_FORMAT, blend = .Premultiplied}}, depth_format = DEPTH_FORMAT, label = "test"})
+	r.sheet_sprites.ids.pipeline = platform.gpu_create_graphics_pipeline({vertex = code, pixel = code, colors = {{format = ID_FORMAT}}, depth_format = DEPTH_FORMAT, label = "test"})
+
+	// A sheet of two frames of 16 by 16 texels in a texture of 32 by 16, at 16 texels to a meter, with a walk of two
+	// frames a second.
+	atlas := format.Guid{0 = 0x51, 15 = 1}
+	sheet := format.Guid{0 = 0x51, 15 = 2}
+	write :: proc(t: ^testing.T, rig: ^Rig, guid: format.Guid, blob: []byte) {
+		buffer: [32]u8
+		testing.expect(t, os.write_entire_file(fmt.tprintf("%s/%s.blob", rig.dir, format.guid_format(guid, &buffer)), blob) == nil)
+	}
+	chain := format.texture_chain_size(.BC7_Unorm_Srgb, {32, 16}, 1)
+	write(t, rig, atlas, format.texture_write({guid = atlas, format = .BC7_Unorm_Srgb, usage = .Color, dimension = .D2, layer_count = 1, size = {32, 16}, mip_count = 1, mips = make([]byte, chain, context.temp_allocator)}, context.temp_allocator))
+	write(
+		t,
+		rig,
+		sheet,
+		format.sprite_sheet_write(
+			{
+				guid = sheet,
+				key = 1,
+				atlas = atlas,
+				atlas_size = {32, 16},
+				pixels_per_unit = 16,
+				filter = .Nearest,
+				frames = {{name = "a", rect = {0, 0, 16, 16}, pivot = {0.5, 0}}, {name = "b", rect = {16, 0, 16, 16}, pivot = {0.5, 0}}},
+				animations = {{name = "walk", frames = {0, 1}, rate = 2, loop = true}},
+				source_path = "game/hero.sprite_sheet",
+			},
+			context.temp_allocator,
+		),
+	)
+
+	spawn :: proc(w: ^ecs.World, sheet: format.Guid, z: f32, layer, order: i16) -> ecs.Entity {
+		e := ecs.spawn(w)
+		ecs.add(w, e, ecs.Transform{position = ecs.position_offset({}, {0, 0, z}), rotation = 1, scale = {2, 1, 1}})
+		sprite := DEFAULT_SPRITE_RENDERER
+		sprite.sheet, sprite.layer, sprite.order = sheet, layer, order
+		ecs.add(w, e, sprite)
+		return e
+	}
+	far := spawn(rig.w, sheet, 5, 0, 0)
+	near := spawn(rig.w, sheet, 2, 0, 0)
+	over := spawn(rig.w, sheet, 9, 0, 1)
+	top := spawn(rig.w, sheet, 9, 1, -5)
+	hidden_sprite := spawn(rig.w, sheet, 3, 0, 0)
+	clear_sprite := spawn(rig.w, sheet, 3, 0, 0)
+	ecs.get_write(rig.w, clear_sprite, Sprite_Renderer).opacity = 0
+	// One that walks, lit and snapped and flipped, half a second into its second frame.
+	walker := spawn(rig.w, sheet, 4, 2, 0)
+	walk := ecs.get_write(rig.w, walker, Sprite_Renderer)
+	walk.animation, walk.time, walk.lit, walk.pixel_snap, walk.flip_x, walk.opacity = 1, 0.6, true, true, true, 0.5
+	// A sprite of a sheet that is not cooked draws nothing, and says nothing.
+	spawn(rig.w, {0 = 0x99}, 3, 0, 0)
+
+	capture: Sprite_Capture
+	capture.records = make([dynamic]Sheet_Sprite_Record)
+	capture.passes = make(map[string]int)
+	defer delete(capture.records)
+	defer delete(capture.passes)
+	hidden := make([]u32, int(ecs.entity_index(hidden_sprite)) / 32 + 1, context.temp_allocator)
+	hidden[ecs.entity_index(hidden_sprite) / 32] |= 1 << (ecs.entity_index(hidden_sprite) % 32)
+	desc := Frame_Desc {
+		view = {rotation = 1, projection = Orthographic{10, 0.1, 100}},
+		size = {64, 32},
+		hidden = hidden,
+		keep_ids = true,
+		hooks = {
+			ui = proc(f: ^Frame) {
+				capture := (^Sprite_Capture)(f.data)
+				clear(&capture.records)
+				clear(&capture.passes)
+				if f.sheet_sprites != nil {
+					append(&capture.records, ..([^]Sheet_Sprite_Record)(raw_data(f.sheet_sprites.records.data))[:f.sheet_sprites.count])
+				}
+				for pass in f.graph.passes {
+					capture.passes[pass.name] += 1
+				}
+			},
+		},
+	}
+	desc.hooks.data = &capture
+	// The atlas streams in over the first frames.
+	for _ in 0 ..< 8 {
+		testing.expect(t, draw_frame(r, rig.w, desc))
+	}
+	ids := make([dynamic]u32, context.temp_allocator)
+	for record in capture.records {
+		append(&ids, record.id)
+	}
+	wanted := []u32{entity_id(far), entity_id(near), entity_id(over), entity_id(top), entity_id(walker)}
+	testing.expectf(t, slice.equal(ids[:], wanted), "the sprites draw as %v, want %v", ids, wanted)
+	testing.expect_value(t, capture.passes["sheet sprites"], 1)
+	testing.expect_value(t, capture.passes["sheet sprite ids"], 1)
+	if len(capture.records) == 5 {
+		// A frame of 16 texels at 16 to a meter is 1 m, twice as wide by the Transform's scale, about its pivot at the
+		// middle of its bottom, with the first frame's half of the texture.
+		first := capture.records[0]
+		testing.expect_value(t, first.center, [3]f32{0, 0, 5})
+		testing.expect_value(t, first.right, [3]f32{2, 0, 0})
+		testing.expect_value(t, first.up, [3]f32{0, 1, 0})
+		testing.expect_value(t, first.pivot, [2]f32{0.5, 0})
+		testing.expect_value(t, first.uv_rect, [4]f32{0, 0, 0.5, 1})
+		testing.expect_value(t, first.color, [4]f32{1, 1, 1, 1})
+		testing.expect_value(t, first.flags, 0)
+		testing.expect_value(t, first.sampler, gpu.sampler_index(r.sheet_sprites.samplers[.Nearest]))
+		// The walker shows its second frame, flipped, with its flags and its opacity.
+		last := capture.records[4]
+		testing.expect_value(t, last.uv_rect, [4]f32{1, 0, -0.5, 1})
+		testing.expect_value(t, last.flags, SHEET_SPRITE_LIT | SHEET_SPRITE_SNAP)
+		testing.expect_value(t, last.color.a, 0.5)
+	}
+	// While the world stands still, a sprite that the editor plays shows the frame of the host's time, and the others
+	// the frame of their own.
+	playing := [1]ecs.Entity{walker}
+	desc.playing = playing[:]
+	testing.expect(t, draw_frame(r, rig.w, desc))
+	if len(capture.records) == 5 {
+		testing.expect_value(t, capture.records[4].uv_rect, [4]f32{0.5, 0, -0.5, 1})
+	}
+	desc.playing = nil
+	// A frame that does not keep the IDs has no pass for them.
+	desc.keep_ids = false
+	testing.expect(t, draw_frame(r, rig.w, desc))
+	testing.expect_value(t, capture.passes["sheet sprites"], 1)
+	testing.expect_value(t, capture.passes["sheet sprite ids"], 0)
+	testing.expect_value(t, len(capture.records), 5)
+	// A sprite that is turned a quarter about its z draws turned about the view's axis, with its frame's shape.
+	turned := sheet_sprite_record(
+		DEFAULT_SPRITE_RENDERER,
+		{rotation = linalg.quaternion_angle_axis_f32(math.PI / 2, {0, 0, 1}), scale = 1},
+		{rect = {0, 0, 16, 32}, pivot = {0.5, 0.5}},
+		&format.Sprite_Sheet_Blob{atlas_size = {32, 32}, pixels_per_unit = 16},
+		{rotation = 1, projection = Perspective{1, 0.05}},
+		1,
+		2,
+		3,
+	)
+	testing.expect(t, linalg.length(turned.right - [3]f32{0, 1, 0}) < 1e-5 && linalg.length(turned.up - [3]f32{-2, 0, 0}) < 1e-5)
+	testing.expectf(t, len(rig.record.problems) == 0, "problems: %v", rig.record.problems)
 }

@@ -553,7 +553,7 @@ new_particle_step :: proc(platform: ^core.Platform_API) -> ^Particle_Step {
 	return step
 }
 
-@(private = "file")
+@(private)
 slice_has :: proc(entities: []ecs.Entity, e: ecs.Entity) -> bool {
 	for x in entities {
 		if x == e {

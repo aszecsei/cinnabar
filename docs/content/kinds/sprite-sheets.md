@@ -1,6 +1,6 @@
 # Sprite sheets
 
-A sprite sheet is a `.sprite_sheet` text file in the content roots: the frames of a texture, and the animations that play them. A `Sprite_Renderer` draws a frame of one (see [Rendering](../../rendering/README.md)). `just sprite_sheets` runs `cook sprite_sheets --cache build/<target>/content --config dev|release --root game=<content root> --root engine=lib/engine/content`, and the daemon cooks them like any other kind (`tools/cook/sprite_sheets.odin`).
+A sprite sheet is a `.sprite_sheet` text file in the content roots: the frames of a texture, and the animations that play them. A `Sprite_Renderer` draws a frame of one (see [Rendering: 2D](../../rendering/2d.md#sprite-renderers)). `just sprite_sheets` runs `cook sprite_sheets --cache build/<target>/content --config dev|release --root game=<content root> --root engine=lib/engine/content`, and the daemon cooks them like any other kind (`tools/cook/sprite_sheets.odin`).
 
 **In this document:** [The text](#the-text) · [Packed images](#packed-images) · [A texture's frames](#a-textures-frames) · [Imported descriptions](#imported-descriptions) · [Animations](#animations) · [The cook](#the-cook) · [The blob](#the-blob)
 
@@ -66,7 +66,7 @@ A sheet with an import can add `animation` lines of its own, and cannot have a g
 - **A frame** is a frame's name, an index from 0 in the sheet's order, or a range of indices `a..b`, which runs either way.
 - **`rate`** is `DEFAULT_SPRITE_RATE` (10) by default. A frame with a duration of its own, from an import, shows for that long whatever the rate.
 - **`loop`** is true by default. An animation that does not loop stays on its last frame.
-- A `Sprite_Renderer` plays an animation by its index, and a script plays it by name.
+- A `Sprite_Renderer` plays an animation by its index, and a script plays it by name (see [Rendering: 2D](../../rendering/2d.md#animation)).
 
 ## The cook
 
