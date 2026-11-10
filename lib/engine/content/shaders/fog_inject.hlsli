@@ -1,7 +1,7 @@
 // The fog volume's injection (see docs/rendering/fog.md#volumetric-fog): a thread for each froxel, a screen tile of
 // FOG_TILE pixels in one of grid.z depth slices, which divide the clusters' slices. Each froxel takes the fog's
 // density at a point in it, which moves within its slice from frame to frame, and the light that reaches that point:
-// every directional light, the punctual lights of its cluster with their shadow maps, and the ambient light. Then it
+// every directional light, the punctual lights of its cluster with their shadow maps, and the sky's light. Then it
 // blends with last frame's value where the point was then. fog_inject.hlsl and fog_inject_traced.hlsl include this;
 // the traced one defines FOG_TRACE, and traces the lights that have a channel of the shadow mask with RayQuery.
 #ifndef FOG_INJECT_HLSLI
@@ -99,8 +99,9 @@ float3 fog_light(float3 p, float depth) {
 			}
 		}
 	}
-	// The ambient light comes from every direction, so it scatters toward the camera whatever the phase.
-	return result + ambient_average(frame.ambient);
+	// The sky's light is the ambient light, through the phase: with anisotropy above 0, more of it comes from the side of
+	// the sky behind the point as the camera sees it.
+	return result + ambient_scattered(frame.ambient, push.anisotropy, toward_camera);
 }
 
 // fog_inject fills one froxel. Each shader that includes this file calls it from its cs_main, with 4x4x4 threads,

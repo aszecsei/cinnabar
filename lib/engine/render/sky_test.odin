@@ -21,6 +21,56 @@ the_flat_ambient_is_the_sky_above_and_the_ground_below :: proc(t: ^testing.T) {
 }
 
 @(test)
+the_fogs_sky_light_without_anisotropy_is_the_average :: proc(t: ^testing.T) {
+	a := Ambient{constant = {0.4, 0.5, 0.6}, x = {0.1, 0, 0}, y = {0.2, 0.25, 0.3}, z = {0, -0.05, 0.1}}
+	for d in ([][3]f32{{0, 1, 0}, {0, -1, 0}, {1, 0, 0}, linalg.normalize([3]f32{1, -2, 3})}) {
+		testing.expect(t, near(ambient_scattered(a, 0, d), a.constant))
+	}
+}
+
+// The share of light that scatters by an angle, per steradian, as henyey_greenstein in fog_inject.hlsli has it.
+@(private = "file")
+henyey_greenstein :: proc(g, cos_theta: f64) -> f64 {
+	g2 := g * g
+	return (1 - g2) / (4 * math.PI * math.pow(1 + g2 - 2 * g * cos_theta, 1.5))
+}
+
+// The fog's sky light is the integral, over every direction, of the sky's light from it through the phase toward the
+// camera. The sky's light from a direction is the ambient's constant and its gradient times 1.5, which undoes the
+// cosine's convolution.
+@(test)
+the_fogs_sky_light_is_the_sky_through_the_phase :: proc(t: ^testing.T) {
+	a := Ambient{constant = {0.5, 0.6, 0.8}, x = {0.05, 0.02, -0.03}, y = {0.2, 0.25, 0.35}, z = {-0.04, 0.06, 0.01}}
+	N :: 16384
+	golden := math.PI * (3 - math.sqrt(f64(5)))
+	for g in ([]f32{-0.4, 0.3, 0.6}) {
+		for toward in ([][3]f32{{0, -1, 0}, {0, 1, 0}, linalg.normalize([3]f32{1, -2, 3})}) {
+			sum: [3]f64
+			for i in 0 ..< N {
+				y := 1 - (f64(i) + 0.5) * 2 / N
+				r := math.sqrt(1 - y * y)
+				w := [3]f64{math.cos(golden * f64(i)) * r, y, math.sin(golden * f64(i)) * r}
+				from := [3]f64{f64(a.constant.r), f64(a.constant.g), f64(a.constant.b)}
+				for c in 0 ..< 3 {
+					from[c] += 1.5 * (f64(a.x[c]) * w.x + f64(a.y[c]) * w.y + f64(a.z[c]) * w.z)
+				}
+				// Light from w travels along -w, and leaves along toward.
+				cos_theta := -(w.x * f64(toward.x) + w.y * f64(toward.y) + w.z * f64(toward.z))
+				sum += from * henyey_greenstein(f64(g), cos_theta)
+			}
+			integral := sum * (4 * math.PI / N)
+			expected := [3]f32{f32(integral.x), f32(integral.y), f32(integral.z)}
+			got := ambient_scattered(a, g, toward)
+			testing.expectf(t, near(got, expected, 1e-3), "g %v toward %v: %v, the integral %v", g, toward, got, expected)
+		}
+	}
+	// Fog that scatters forward, above a camera under a Flat sky, takes more of the sky's light than fog below it.
+	flat := flat_ambient({0.4, 0.5, 0.9}, {0.2, 0.1, 0.05})
+	above, below := ambient_scattered(flat, 0.5, {0, -1, 0}), ambient_scattered(flat, 0.5, {0, 1, 0})
+	testing.expectf(t, above.b > flat.constant.b && below.b < flat.constant.b, "above %v, below %v", above, below)
+}
+
+@(test)
 the_air_dims_and_reddens_the_sun_toward_the_horizon :: proc(t: ^testing.T) {
 	a := sky_settings(DEFAULT_ENVIRONMENT).atmosphere
 	zenith := sky_transmittance(a, 0.001, {0, 1, 0})

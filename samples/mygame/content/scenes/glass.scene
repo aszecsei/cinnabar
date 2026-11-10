@@ -100,6 +100,7 @@ component 49 Environment
 component 38 Fog
 	density = 0.01
 	height_falloff = 0.3
+	anisotropy = 0.5
 component 55 Clouds
 	density = 1.0
 	weather = Map

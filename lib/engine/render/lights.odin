@@ -105,6 +105,12 @@ ambient_at :: proc(a: Ambient, d: [3]f32) -> [3]f32 {
 	return linalg.max(a.constant + a.x * d.x + a.y * d.y + a.z * d.z, 0)
 }
 
+// ambient_scattered is the ambient light that a medium with Henyey-Greenstein's g scatters along toward, per unit of
+// scattering, as ambient_scattered in ambient.hlsli has it: the fog's sky light.
+ambient_scattered :: proc(a: Ambient, g: f32, toward: [3]f32) -> [3]f32 {
+	return linalg.max(a.constant - 1.5 * g * (a.x * toward.x + a.y * toward.y + a.z * toward.z), 0)
+}
+
 // ambient_constants is an Ambient as the shaders take it: constant, x, y and z in four float4s.
 @(private)
 ambient_constants :: proc(a: Ambient) -> [4][4]f32 {
