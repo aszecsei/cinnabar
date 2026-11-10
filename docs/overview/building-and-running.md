@@ -31,7 +31,7 @@ build/
 ├── release/    mygame.exe, D3D12/ and the FSR libraries, content/, project.settings
 ├── tools/      cook.exe, viewer.exe, ltc_fit.exe, stbn.exe, editorctl.exe
 ├── captures/   the editor's screenshots, GIFs and their sidecars
-└── obj/        luau/, compressonator/, meshoptimizer/, clusterlod/, opus/, vorbis/   the CMake builds the executables link
+└── obj/        luau/, compressonator/, meshoptimizer/, clusterlod/, opus/, vorbis/, lz4/   the CMake builds the executables link
                 pdb/, link/, script-types/, dotnet/, editor/autosave/, editor/automation.json
 ```
 

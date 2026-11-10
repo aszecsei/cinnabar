@@ -57,6 +57,8 @@ Platform :: struct {
 	// The game's virtual memory reservations, released at a soft restart.
 	reservations: [dynamic][]byte,
 	reservations_mutex: sync.Mutex,
+	// The game's reads of file ranges, ended at a soft restart.
+	file_reads:  File_Reads,
 	// The most that a frame's arena used since memory_stats last read it.
 	frame_peak:  uint,
 	// Input from the editor, for the next frame.
@@ -160,6 +162,9 @@ init :: proc(
 		file_read_range              = file_read_range,
 		file_modified                = file_modified,
 		file_write                   = file_write,
+		file_read_begin              = file_read_begin,
+		file_read_result             = file_read_result,
+		file_read_end                = file_read_end,
 		window_size                  = window_size,
 		set_window_title             = _window_set_title,
 		jobs_run                     = jobs.run,
@@ -273,6 +278,9 @@ shutdown :: proc() {
 	platform.api.physics.shutdown()
 	backend.shutdown()
 	_window_close()
+	// Its jobs must be done before the job system stops: a read's job frees what an ended read left.
+	file_reads_end_all(&platform.file_reads)
+	file_reads_wait(&platform.file_reads)
 	jobs.shutdown()
 	profile.shutdown()
 	release_reservations()
@@ -338,8 +346,8 @@ alloc_game_state :: proc(size: int) -> rawptr {
 }
 
 // soft_restart runs between the old game's shutdown and the new game's init. It destroys the GPU resources in the
-// Game scope, the virtual memory reservations, the script VMs, the physics worlds and the audio backend's voices, sounds
-// and buses, which the old game may have left, and frees all permanent allocations.
+// Game scope, the virtual memory reservations, the file reads, the script VMs, the physics worlds and the audio
+// backend's voices, sounds and buses, which the old game may have left, and frees all permanent allocations.
 soft_restart :: proc() {
 	if count := platform.api.audio.reset(); count > 0 {
 		log.debugf("core: stopped %d audio voices that the game left playing", count)
@@ -355,6 +363,9 @@ soft_restart :: proc() {
 	}
 	if count := release_reservations(); count > 0 {
 		log.debugf("core: released %d memory reservations that the game left", count)
+	}
+	if count := file_reads_end_all(&platform.file_reads); count > 0 {
+		log.debugf("core: ended %d file reads that the game left", count)
 	}
 	virtual.arena_free_all(&platform.permanent)
 }
@@ -461,6 +472,21 @@ window_size :: proc() -> [2]i32 {
 
 time_seconds :: proc() -> f64 {
 	return time.duration_seconds(time.tick_since(platform.start))
+}
+
+@(private = "file")
+file_read_begin :: proc(path: string, offset: i64, size: int) -> File_Read {
+	return file_reads_begin(&platform.file_reads, path, offset, size)
+}
+
+@(private = "file")
+file_read_result :: proc(read: File_Read) -> ([]byte, File_Read_State) {
+	return file_reads_result(&platform.file_reads, read)
+}
+
+@(private = "file")
+file_read_end :: proc(read: File_Read) {
+	file_reads_end(&platform.file_reads, read)
 }
 
 @(private = "file")
