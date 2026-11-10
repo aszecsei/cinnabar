@@ -124,6 +124,7 @@ Asset_Kind :: enum u8 {
 	Audio,
 	Font,
 	Ui,
+	Sprite_Sheet,
 }
 
 Asset_Status :: enum u8 {
@@ -264,6 +265,8 @@ Asset_Template :: enum u8 {
 	Animation_Graph,
 	// A UI document of a panel with a title and a button.
 	Ui,
+	// A sprite sheet whose comments show how to name its frames and animations.
+	Sprite_Sheet,
 }
 
 // Makes an asset from a template in a folder, with a new .meta file. The result has its GUID.

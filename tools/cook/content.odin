@@ -207,6 +207,9 @@ cook :: proc(
 	if .Ui in kinds {
 		pass.ok = cook_ui_documents(options, pass.assets, &pass) && pass.ok
 	}
+	if .Sprite_Sheet in kinds {
+		pass.ok = cook_sprite_sheets(options, pass.assets, &pass) && pass.ok
+	}
 	written := 0
 	for n in pass.cooked {
 		written += n

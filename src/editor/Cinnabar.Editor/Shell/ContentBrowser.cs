@@ -178,6 +178,7 @@ public sealed class ContentBrowser
             AssetTemplate.Effect => "new_effect",
             AssetTemplate.AnimationGraph => "new_animation_graph",
             AssetTemplate.Ui => "new_ui",
+            AssetTemplate.SpriteSheet => "new_sprite_sheet",
             _ => "new_folder",
         };
         if (Folder?.Directory(assets) is not { } dir)
@@ -194,6 +195,7 @@ public sealed class ContentBrowser
             AssetTemplate.Effect => assets.ExtensionOf(AssetKind.Effect),
             AssetTemplate.AnimationGraph => assets.ExtensionOf(AssetKind.AnimationGraph),
             AssetTemplate.Ui => assets.ExtensionOf(AssetKind.Ui),
+            AssetTemplate.SpriteSheet => assets.ExtensionOf(AssetKind.SpriteSheet),
             null => "",
             _ => assets.ExtensionOf(AssetKind.Script),
         };

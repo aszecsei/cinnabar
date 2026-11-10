@@ -159,6 +159,22 @@ cook_textures :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass
 			}
 		}
 	}
+	// A sprite sheet packs the images that it names into its own atlas, so it names them as a set does.
+	for a, i in assets {
+		if a.kind != .Sprite_Sheet {
+			continue
+		}
+		packed := a.dependencies[:]
+		if a.carried == nil {
+			asset_source(pass, i)
+			packed = sprite_sheet_images(string(source_of(assets[i])))
+		}
+		for child in packed {
+			if j, found := by_guid[child]; found {
+				named[j] = true
+			}
+		}
+	}
 	sets := make(map[int]Texture_Set, context.temp_allocator)
 	for i in textures {
 		a := &assets[i]
@@ -189,7 +205,7 @@ cook_textures :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass
 		}
 		if !is_texture_set(a^) && texture_setting(a^, "standalone") == "false" {
 			if !named[i] {
-				report_warning(problems, fmt.tprintf("%s%s", a.path, format.META_EXTENSION), 0, 0, "has standalone = false, but no .texture_set names it, so nothing cooks it")
+				report_warning(problems, fmt.tprintf("%s%s", a.path, format.META_EXTENSION), 0, 0, "has standalone = false, but no .texture_set or .sprite_sheet names it, so nothing cooks it")
 			}
 			remove_texture_blob(out_dir, a^, problems)
 			// It has nothing to cook.

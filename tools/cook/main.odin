@@ -84,6 +84,10 @@ main :: proc() {
 		if options, parsed = parse_cook_args(os.args[2:]); parsed {
 			ok = cook_batch(options, .Ui)
 		}
+	case "sprite_sheets":
+		if options, parsed = parse_cook_args(os.args[2:]); parsed {
+			ok = cook_batch(options, .Sprite_Sheet)
+		}
 	case "stages":
 		if options, parsed = parse_cook_args(os.args[2:]); parsed {
 			ok = cook_batch(options, .Stage)
@@ -167,6 +171,9 @@ cook_batch :: proc(options: Cook_Options, kind: format.Asset_Kind) -> bool {
 	if kind == .Font {
 		log.infof("cook: %d atlases of fonts cooked", pass.cooked[.Texture])
 	}
+	if kind == .Sprite_Sheet {
+		log.infof("cook: %d atlases of sprite sheets cooked", pass.cooked[.Texture])
+	}
 	return pass.ok
 }
 
@@ -215,6 +222,8 @@ kind_plural :: proc(kind: format.Asset_Kind) -> string {
 		return "fonts"
 	case .Ui:
 		return "UI documents"
+	case .Sprite_Sheet:
+		return "sprite sheets"
 	}
 	return "assets"
 }

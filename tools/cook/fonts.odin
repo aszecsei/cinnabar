@@ -7,7 +7,6 @@ import "core:slice"
 import "core:strconv"
 import "core:strings"
 import "core:unicode/utf16"
-import stbrp "vendor:stb/rect_pack"
 import stbtt "vendor:stb/truetype"
 
 import format "cinnabar:engine/asset/format"
@@ -322,41 +321,15 @@ font_cells :: proc(info: ^stbtt.fontinfo, wanted: []bool, scale, em_size: f64, r
 // MAX_FONT_ATLAS, and gives its size. Its height is then cut to the last cell's row.
 @(private = "file")
 pack_font_cells :: proc(cells: []Font_Cell) -> (size: [2]u32, ok: bool) {
-	rects := make([]stbrp.Rect, len(cells), context.temp_allocator)
-	area := 0
+	sizes := make([][2]int, len(cells), context.temp_allocator)
 	for c, i in cells {
-		rects[i] = {id = i32(i), w = stbrp.Coord(c.size.x), h = stbrp.Coord(c.size.y)}
-		area += c.size.x * c.size.y
+		sizes[i] = c.size
 	}
-	width, height := 64, 64
-	for width * height < area {
-		if width <= height {
-			width *= 2
-		} else {
-			height *= 2
-		}
+	corners, atlas := pack_rects(sizes, MAX_FONT_ATLAS) or_return
+	for corner, i in corners {
+		cells[i].glyph.rect = {u16(corner.x), u16(corner.y), u16(sizes[i].x), u16(sizes[i].y)}
 	}
-	for width <= MAX_FONT_ATLAS && height <= MAX_FONT_ATLAS {
-		nodes := make([]stbrp.Node, width, context.temp_allocator)
-		ctx: stbrp.Context
-		stbrp.init_target(&ctx, i32(width), i32(height), raw_data(nodes), i32(width))
-		if stbrp.pack_rects(&ctx, raw_data(rects), i32(len(rects))) == 1 {
-			used := 1
-			for r in rects {
-				used = max(used, int(r.y + r.h))
-			}
-			for r, i in rects {
-				cells[i].glyph.rect = {u16(r.x), u16(r.y), u16(r.w), u16(r.h)}
-			}
-			return {u32(width), u32(used)}, true
-		}
-		if width <= height {
-			width *= 2
-		} else {
-			height *= 2
-		}
-	}
-	return
+	return {u32(atlas.x), u32(atlas.y)}, true
 }
 
 // Font_Draw is the cells that draw_font_cells's threads draw into the atlas, each its own part of it.

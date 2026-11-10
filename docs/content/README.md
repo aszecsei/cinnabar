@@ -22,6 +22,7 @@ Read them in this order the first time.
 | [Audio](kinds/audio.md) | Sounds: what the cooker decodes, the blob and its import settings, and the sample's sounds. |
 | [Fonts](kinds/fonts.md) | Fonts: the glyphs that the atlas holds, msdfgen's distance fields, the blob and its import settings. |
 | [UI documents](kinds/ui-documents.md) | The `.ui` format: its elements, attributes, values, styles and templates, and the blob. |
+| [Sprite sheets](kinds/sprite-sheets.md) | The `.sprite_sheet` format: packed images, a texture's grid and rectangles, Aseprite's and TexturePacker's JSON, animations, and the blob. |
 | [Cook daemon](daemon-and-operations.md) | The daemon, asset operations and the cook link. |
 | [Blobs and loading](blobs-and-loading.md) | The blob format, the asset runtime and hot reload. |
 
@@ -67,6 +68,7 @@ The code is in three places:
 | | `audio.odin`, `audio_encode.odin` | Sounds: decoding through `vendor:miniaudio` to PCM at the engine's rate, whether they stream, and their format |
 | | `fonts.odin`, `opentype.odin`, `msdf.odin`, `msdfgen/cn_msdf.cpp` | Fonts: the glyphs that GSUB reaches from the charset, the atlas's cells, and their distance fields through msdfgen's core |
 | | `ui_documents.odin` | UI documents: the parse from `format`, the kinds of the assets that they name, and the template |
+| | `sprite_sheets.odin`, `pack.odin` | Sprite sheets: the text's parse, the atlas that packs a sheet's images, a texture's grid and rectangles, and the JSON import; `pack_rects`, which the fonts pack with too |
 | | `daemon.odin`, `watch_windows.odin`, `index.odin`, `serve.odin` | The daemon: the watcher, the passes, the index of the content, and the cook link's server |
 | | `operations.odin`, `files_windows.odin`, `lock_windows.odin` | The asset operations, the file moves they need, and the cache lock |
 | | `problems.odin` | `Problem`: an error or warning with its file, line and column |

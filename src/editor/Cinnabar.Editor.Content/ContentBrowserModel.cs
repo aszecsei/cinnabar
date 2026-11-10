@@ -391,7 +391,7 @@ public sealed class ContentBrowserModel
         AssetKind.Model or AssetKind.Stage => ContentKind.Models,
         AssetKind.Mesh or AssetKind.InstanceSet => ContentKind.Meshes,
         AssetKind.Material or AssetKind.MaterialInstance or AssetKind.MaterialFunction => ContentKind.Materials,
-        AssetKind.Texture => ContentKind.Textures,
+        AssetKind.Texture or AssetKind.SpriteSheet => ContentKind.Textures,
         AssetKind.Audio => ContentKind.Audio,
         AssetKind.Effect => ContentKind.Effects,
         AssetKind.Font or AssetKind.Ui => ContentKind.Interface,
