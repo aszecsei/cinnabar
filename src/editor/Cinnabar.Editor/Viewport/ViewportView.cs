@@ -6,6 +6,7 @@ using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using Cinnabar.Editor.Maths;
 using Cinnabar.Editor.Panels;
 using Cinnabar.Editor.Ribbon;
@@ -48,6 +49,8 @@ public sealed class ViewportView : Grid
     readonly Border _activeFrame;
     readonly ComboBox _view;
     readonly TextBlock _title;
+    // The title, the view menu and the view box at the top: their presses are theirs, not the frame's.
+    readonly StackPanel _header;
     bool _showingView;
     readonly ViewportControl _control;
     readonly Border _overlay;
@@ -156,7 +159,7 @@ public sealed class ViewportView : Grid
             Foreground = Brushes.White,
             Opacity = 0.8,
         };
-        var header = new StackPanel
+        var header = _header = new StackPanel
         {
             Orientation = Orientation.Horizontal,
             HorizontalAlignment = HorizontalAlignment.Center,
@@ -230,7 +233,7 @@ public sealed class ViewportView : Grid
         };
         DoubleTapped += (_, e) =>
         {
-            if (!_viewport.IsGame && _control.FramePoint(e.GetPosition(this)) is { } pixel)
+            if (!_viewport.IsGame && !OnHeader(e) && _control.FramePoint(e.GetPosition(this)) is { } pixel)
             {
                 _shell.ActivateViewport(_viewport);
                 _shell.Mesh.EnterMeshModeAt(pixel);
@@ -360,6 +363,8 @@ public sealed class ViewportView : Grid
             _turnTimer.Stop();
         }
     }
+
+    bool OnHeader(RoutedEventArgs e) => e.Source is Visual source && _header.IsVisualAncestorOf(source);
 
     void ShowTitle() => _title.IsVisible = !_viewport.IsGame && _shell.SceneDocumentViews.Count > 1;
 
@@ -600,7 +605,8 @@ public sealed class ViewportView : Grid
     protected override void OnPointerPressed(PointerPressedEventArgs e)
     {
         base.OnPointerPressed(e);
-        if (_gesture != Gesture.None)
+        // A ComboBox leaves its press unhandled and opens on the release, which a gesture's capture would take from it.
+        if (_gesture != Gesture.None || OnHeader(e))
         {
             return;
         }
