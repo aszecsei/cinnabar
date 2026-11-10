@@ -987,6 +987,102 @@ public sealed class ViewportTests : IDisposable
     }
 
     [Fact]
+    public void LookingAlongAnAxisTurnsAboutThePivotToTheViewsChosenProjection()
+    {
+        using var shell = NewShell();
+        Show(shell, 1, 640, 360);
+        var top = shell.Viewports[1];
+        // The Top view orbits, which makes it a perspective one and leaves its choice orthographic.
+        top.Camera.Orbit(200, -150);
+        Assert.False(top.Camera.IsOrthographic);
+        var (pivot, shows) = (top.Camera.Pivot, top.Camera.ViewDistance);
+
+        _sent.Clear();
+        Assert.True(shell.LookAlong(top, Tools.ViewAxis.Top));
+        Assert.NotNull(top.Turn);
+        // Half way it still turns, in perspective, about the same pivot.
+        Assert.True(shell.StepTurn(top, Tools.CameraTurn.Duration / 2));
+        Assert.False(top.Camera.IsOrthographic);
+        Assert.True(Vec3.Between(pivot, top.Camera.Pivot).Length < 0.001);
+        // At its end it looks down, orthographic, showing as much at the pivot, and the turn is over.
+        Assert.False(shell.StepTurn(top, Tools.CameraTurn.Duration));
+        Assert.Null(top.Turn);
+        Assert.Equal(Tools.ViewAxis.Top, Tools.ViewGizmo.Aligned(top.Camera));
+        Assert.True(top.Camera.IsOrthographic);
+        Assert.Equal(shows, top.Camera.ViewDistance, 6);
+        Assert.True(Vec3.Between(pivot, top.Camera.Pivot).Length < 0.001);
+        Assert.Equal(CameraProjection.Orthographic, _sent.OfType<EditorCamera>().Last(c => c.Viewport == 1).Projection);
+
+        // A perspective view turns in perspective, and the Game view has no camera to turn.
+        Assert.True(shell.LookAlong(shell.Viewports[0], Tools.ViewAxis.Left, animate: false));
+        Assert.Equal(Tools.ViewAxis.Left, Tools.ViewGizmo.Aligned(shell.Viewports[0].Camera));
+        Assert.False(shell.Viewports[0].Camera.IsOrthographic);
+        Assert.False(shell.LookAlong(shell.Viewports[4], Tools.ViewAxis.Top));
+
+        // A view that was never shown turns about the first view's pivot, where it would have started.
+        var front = shell.Viewports[2];
+        Assert.True(shell.LookAlong(front, Tools.ViewAxis.Top, animate: false));
+        Assert.True(Vec3.Between(shell.Viewports[0].Camera.Pivot, front.Camera.Pivot).Length < 0.001);
+        Assert.Equal(Tools.ViewAxis.Top, Tools.ViewGizmo.Aligned(front.Camera));
+    }
+
+    [Fact]
+    public void AnotherMoveOfTheCameraEndsATurnWhereThatMovePutIt()
+    {
+        using var shell = NewShell();
+        var view = shell.Viewports[0];
+        shell.LookAlong(view, Tools.ViewAxis.Front);
+        shell.StepTurn(view, 50);
+
+        view.Camera.Pan(30, 0, 900);
+        var panned = view.Camera.Pose;
+
+        Assert.False(shell.StepTurn(view, 50));
+        Assert.Null(view.Turn);
+        Assert.Equal(panned, view.Camera.Pose);
+    }
+
+    [Fact]
+    public void AViewThatHidesWhileItTurnsEndsTheTurnAtOnce()
+    {
+        using var shell = NewShell();
+        var view = shell.Viewports[0];
+        shell.LookAlong(view, Tools.ViewAxis.Right);
+
+        Hide(shell, 0);
+
+        Assert.Null(view.Turn);
+        Assert.Equal(Tools.ViewAxis.Right, Tools.ViewGizmo.Aligned(view.Camera));
+    }
+
+    [Fact]
+    public async Task TheProjectionSwitchIsTheViewsChoiceAndAutomationLooksAlongAnAxis()
+    {
+        var cancel = TestContext.Current.CancellationToken;
+        using (var shell = NewShell())
+        {
+            Assert.True(shell.ToggleProjection(shell.Viewports[0]));
+            Assert.True(shell.Camera.IsOrthographic);
+            Assert.Equal(CameraProjection.Orthographic, shell.Viewports[0].Projection);
+            Assert.False(shell.ToggleProjection(shell.Viewports[4]));
+
+            var look = await shell.HandleAutomation(new AutomationRequest(1, "viewport", Viewport: 0, Settings: Settings(("look", "bottom"))), cancel);
+            Assert.True(look.Ok, look.Error);
+            Assert.Null(shell.Viewports[0].Turn);
+            Assert.Equal(Tools.ViewAxis.Bottom, Tools.ViewGizmo.Aligned(shell.Camera));
+            Assert.True(shell.Camera.IsOrthographic);
+            var unknown = await shell.HandleAutomation(new AutomationRequest(2, "viewport", Viewport: 0, Settings: Settings(("look", "Above"))), cancel);
+            Assert.False(unknown.Ok);
+            Assert.Contains("Top, Bottom, Front, Back, Right, Left", unknown.Error);
+            var game = await shell.HandleAutomation(new AutomationRequest(3, "viewport", Viewport: 4, Settings: Settings(("look", "Top"))), cancel);
+            Assert.False(game.Ok);
+        }
+        // The switch is kept as the view's choice.
+        using var again = NewShell();
+        Assert.True(again.Camera.IsOrthographic);
+    }
+
+    [Fact]
     public async Task TheStatusListsTheShownViewports()
     {
         using var shell = NewShell();

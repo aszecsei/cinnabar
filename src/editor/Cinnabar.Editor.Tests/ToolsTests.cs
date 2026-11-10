@@ -354,4 +354,99 @@ public sealed class ToolsTests
         Assert.Equal(0L, (long)Field(scene, 1, SceneEdits.TransformId, "position")!.Numbers[0].Integer!.Value);
         Assert.Equal(1L << 24, (long)Field(scene, 2, SceneEdits.TransformId, "position")!.Numbers[0].Integer!.Value);
     }
+
+    [Fact]
+    public void EachViewAxisLooksAlongItsAxisAndIsKnownAgain()
+    {
+        var camera = new EditorCamera();
+        foreach (var axis in Enum.GetValues<ViewAxis>())
+        {
+            var (yaw, pitch) = ViewGizmo.Angles(axis);
+            camera.LookAt([0, 0, 0], 10, yaw, pitch);
+            // Top and Bottom are a degree short of straight, and still along their axes.
+            Assert.True(Vec3.Dot(camera.Forward, ViewGizmo.Direction(axis)) > 0.999, $"{axis} looks along {camera.Forward}");
+            Assert.Equal(axis, ViewGizmo.Aligned(camera));
+        }
+        camera.LookAt([0, 0, 0], 10, 0.5, 0.4);
+        Assert.Null(ViewGizmo.Aligned(camera));
+        Assert.Equal("Free · Persp", ViewGizmo.Label(camera));
+
+        // A handle looks from its end of the axis.
+        Assert.Equal(ViewAxis.Top, ViewGizmo.AxisOf(ViewGizmoPart.PositiveY));
+        Assert.Equal(ViewAxis.Front, ViewGizmo.AxisOf(ViewGizmoPart.PositiveZ));
+        Assert.Equal(ViewAxis.Right, ViewGizmo.AxisOf(ViewGizmoPart.PositiveX));
+        Assert.Equal(ViewAxis.Back, ViewGizmo.AxisOf(ViewGizmoPart.NegativeZ));
+        Assert.Null(ViewGizmo.AxisOf(ViewGizmoPart.Center));
+    }
+
+    [Fact]
+    public void TheViewGizmoShowsEachAxisWhereTheCameraSeesIt()
+    {
+        const double radius = 30;
+        var camera = new EditorCamera();
+        ViewGizmoHandle Of(IReadOnlyList<ViewGizmoHandle> handles, ViewGizmoPart part) => handles.Single(h => h.Part == part);
+
+        // From the top, +z is up the screen and +x to the right, and +y points at the viewer, so it is drawn last.
+        var (yaw, pitch) = ViewGizmo.Angles(ViewAxis.Top);
+        camera.LookAt([0, 0, 0], 10, yaw, pitch);
+        var top = ViewGizmo.Layout(camera.Rotation, radius);
+        Assert.True(Of(top, ViewGizmoPart.PositiveZ).Offset.Y < -radius * 0.99);
+        Assert.True(Of(top, ViewGizmoPart.PositiveX).Offset.X > radius * 0.99);
+        Assert.Equal(ViewGizmoPart.PositiveY, top[^1].Part);
+        Assert.Equal(ViewGizmoPart.NegativeY, top[0].Part);
+
+        // From the front, +x is to the left and +y up.
+        (yaw, pitch) = ViewGizmo.Angles(ViewAxis.Front);
+        camera.LookAt([0, 0, 0], 10, yaw, pitch);
+        var front = ViewGizmo.Layout(camera.Rotation, radius);
+        Near(-radius, Of(front, ViewGizmoPart.PositiveX).Offset.X);
+        Near(-radius, Of(front, ViewGizmoPart.PositiveY).Offset.Y);
+    }
+
+    [Fact]
+    public void TheViewGizmoHitsTheMiddleThenTheNearestHandle()
+    {
+        const double radius = 30;
+        var camera = new EditorCamera();
+        // Looking a little to the right of +z: the -x end comes forward, its handle in front of the +z end's far side.
+        camera.LookAt([0, 0, 0], 10, 0.3, 0.2);
+        var handles = ViewGizmo.Layout(camera.Rotation, radius);
+
+        Assert.Equal(ViewGizmoPart.Center, ViewGizmo.Hit(handles, new Vec2(1, -1), radius));
+        foreach (var handle in handles)
+        {
+            var hit = ViewGizmo.Hit(handles, handle.Offset, radius);
+            // A handle under another nearer one gives the nearer one.
+            var nearer = handles.SkipWhile(h => h.Part != handle.Part).Skip(1)
+                .Any(h => (h.Offset - handle.Offset).Length <= (h.Positive ? ViewGizmo.PositiveHandle : ViewGizmo.NegativeHandle) * radius);
+            Assert.True(hit == handle.Part || nearer, $"{handle.Part} gave {hit}");
+        }
+        Assert.Equal(ViewGizmoPart.None, ViewGizmo.Hit(handles, new Vec2(radius * 2, radius * 2), radius));
+    }
+
+    [Fact]
+    public void ACameraTurnTakesTheShortWayRoundAndEndsExactly()
+    {
+        var camera = new EditorCamera();
+        var from = 170 * Math.PI / 180;
+        camera.LookAt([0, 0, 0], 10, from, 0);
+        var turn = CameraTurn.Of(camera, -170 * Math.PI / 180, 0.3, CameraProjection.Orthographic);
+
+        // Half way is through 180°, not through 0°.
+        var (yaw, pitch) = turn.At(0.5);
+        Near(Math.PI, Math.Abs(yaw), 1e-9);
+        Near(0.15, pitch, 1e-9);
+
+        turn = turn.Step(camera, CameraTurn.Duration / 2);
+        Assert.False(turn.Done);
+        Assert.False(camera.IsOrthographic);
+        Assert.False(turn.Moved(camera));
+        turn = turn.Step(camera, CameraTurn.Duration);
+        Assert.True(turn.Done);
+        Near(-170 * Math.PI / 180, camera.Yaw, 1e-12);
+        Near(0.3, camera.Pitch, 1e-12);
+        Assert.True(camera.IsOrthographic);
+        // What a perspective camera showed at the pivot, an orthographic one shows.
+        Near(2 * 10 * Math.Tan(camera.VerticalFov / 2), camera.OrthographicHeight);
+    }
 }

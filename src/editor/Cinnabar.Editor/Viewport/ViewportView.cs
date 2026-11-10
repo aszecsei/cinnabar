@@ -60,6 +60,11 @@ public sealed class ViewportView : Grid
     readonly DispatcherTimer _timer;
     readonly DispatcherTimer _flyTimer;
     readonly DispatcherTimer _gamepadTimer;
+    // Steps the camera's turn to an axis while one runs (see EditorShell.StepTurn).
+    readonly DispatcherTimer _turnTimer;
+    long _lastTurn;
+    // A scene view's menu of the views along the axes and the projections, and the button that names the view.
+    readonly TextBlock _lookText = new();
     readonly GamepadPoller _gamepads = new(GamepadPoller.ReadXInput);
     bool _pollingGamepads;
     readonly GameInput.Characters _characters = new();
@@ -113,7 +118,18 @@ public sealed class ViewportView : Grid
         _stats = new TextBlock { FontFamily = new FontFamily("Consolas"), FontSize = 12 };
         _overlay = Overlay(_stats, HorizontalAlignment.Right, VerticalAlignment.Top);
         _overlay.IsHitTestVisible = false;
-        Children.Add(_overlay);
+        if (_viewport.IsGame)
+        {
+            Children.Add(_overlay);
+        }
+        else
+        {
+            // The view gizmo is in the corner, under the stats while they show.
+            var corner = new StackPanel { HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top };
+            corner.Children.Add(_overlay);
+            corner.Children.Add(new ViewGizmoControl(shell, viewport) { Margin = new Thickness(8), HorizontalAlignment = HorizontalAlignment.Right });
+            Children.Add(corner);
+        }
 
         _speed = new TextBlock { FontSize = 11 };
         var speed = Overlay(_speed, HorizontalAlignment.Left, VerticalAlignment.Bottom);
@@ -149,6 +165,10 @@ public sealed class ViewportView : Grid
             IsHitTestVisible = true,
         };
         header.Children.Add(_title);
+        if (!_viewport.IsGame)
+        {
+            header.Children.Add(LookButton());
+        }
         header.Children.Add(_view);
         ToolTip.SetTip(_view, "What this viewport shows: the lit scene, or a debug view of what makes it.");
         _view.SelectionChanged += (_, _) =>
@@ -171,6 +191,7 @@ public sealed class ViewportView : Grid
         _timer = new DispatcherTimer(TimeSpan.FromMilliseconds(500), DispatcherPriority.Background, (_, _) => UpdateStats());
         _flyTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(16), DispatcherPriority.Input, (_, _) => FlyStep());
         _gamepadTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(16), DispatcherPriority.Input, (_, _) => PollGamepads());
+        _turnTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(16), DispatcherPriority.Input, (_, _) => TurnStep());
 
         _composition = new TextBlock { FontSize = 14 };
         _compositionOverlay = Overlay(_composition, HorizontalAlignment.Left, VerticalAlignment.Bottom);
@@ -223,6 +244,9 @@ public sealed class ViewportView : Grid
             if (!_viewport.IsGame)
             {
                 _viewport.Camera.Changed += ShowSpeed;
+                _viewport.Camera.Changed += ShowLook;
+                _viewport.TurnStarted += StartTurn;
+                ShowLook();
             }
             _shell.ModeChanged += ShowMode;
             _shell.ActiveViewportChanged += ShowActive;
@@ -249,6 +273,8 @@ public sealed class ViewportView : Grid
             if (!_viewport.IsGame)
             {
                 _viewport.Camera.Changed -= ShowSpeed;
+                _viewport.Camera.Changed -= ShowLook;
+                _viewport.TurnStarted -= StartTurn;
             }
             _shell.ModeChanged -= ShowMode;
             _shell.ActiveViewportChanged -= ShowActive;
@@ -258,12 +284,82 @@ public sealed class ViewportView : Grid
             _timer.Stop();
             _flyTimer.Stop();
             _gamepadTimer.Stop();
+            _turnTimer.Stop();
         };
         UpdateStats();
     }
 
     // The viewport that the View tab acts on has a frame around it while more than one viewport is shown.
     void ShowActive() => _activeFrame.Classes.Set("active", _shell.SettingsViewport == _viewport && _shell.ShownViewports.Skip(1).Any());
+
+    // The button that names the view along an axis and its projection, with a menu of the axes' views and the projections.
+    Control LookButton()
+    {
+        var menu = new MenuFlyout();
+        var axes = new List<(MenuItem Item, ViewAxis Axis)>();
+        foreach (var axis in Enum.GetValues<ViewAxis>())
+        {
+            var item = new MenuItem { Header = axis.ToString(), ToggleType = MenuItemToggleType.Radio, GroupName = "axis" };
+            item.Click += (_, _) =>
+            {
+                _shell.ActivateViewport(_viewport);
+                _shell.LookAlong(_viewport, axis);
+            };
+            menu.Items.Add(item);
+            axes.Add((item, axis));
+        }
+        menu.Items.Add(new Separator());
+        var projections = new List<(MenuItem Item, Link.Protocol.CameraProjection Projection)>();
+        foreach (var projection in Enum.GetValues<Link.Protocol.CameraProjection>())
+        {
+            var item = new MenuItem { Header = projection.ToString(), ToggleType = MenuItemToggleType.Radio, GroupName = "projection" };
+            item.Click += (_, _) =>
+            {
+                _shell.ActivateViewport(_viewport);
+                _shell.SetProjection(_viewport, projection);
+            };
+            menu.Items.Add(item);
+            projections.Add((item, projection));
+        }
+        // The checks show the camera as it is when the menu opens.
+        menu.Opening += (_, _) =>
+        {
+            var aligned = ViewGizmo.Aligned(_viewport.Camera);
+            foreach (var (item, axis) in axes)
+            {
+                item.IsChecked = axis == aligned;
+            }
+            foreach (var (item, projection) in projections)
+            {
+                item.IsChecked = projection == _viewport.Camera.Projection;
+            }
+        };
+        _lookText.VerticalAlignment = VerticalAlignment.Center;
+        var button = new Button { Content = _lookText, Classes = { "viewport-look" }, Focusable = false, Flyout = menu, Margin = new Thickness(0, 0, 4, 0) };
+        ToolTip.SetTip(button, "Which way this view looks, and its projection: look along an axis, or switch between perspective and orthographic.");
+        return button;
+    }
+
+    void ShowLook() =>
+        _lookText.Text = $"{ViewGizmo.Label(_viewport.Camera)} ▾";
+
+    void StartTurn()
+    {
+        _lastTurn = Environment.TickCount64;
+        _turnTimer.Start();
+    }
+
+    // Each tick moves the turn on by the time since the last, until it ends or something else moves the camera.
+    void TurnStep()
+    {
+        var now = Environment.TickCount64;
+        var elapsed = now - _lastTurn;
+        _lastTurn = now;
+        if (!_shell.StepTurn(_viewport, elapsed))
+        {
+            _turnTimer.Stop();
+        }
+    }
 
     void ShowTitle() => _title.IsVisible = !_viewport.IsGame && _shell.SceneDocumentViews.Count > 1;
 
