@@ -8,6 +8,7 @@ import "base:runtime"
 import "core:c"
 import "core:fmt"
 import "core:hash"
+import "core:log"
 import "core:math"
 import "core:math/linalg"
 import "core:mem"
@@ -22,7 +23,7 @@ import "vendor:cgltf"
 import format "cinnabar:engine/asset/format"
 
 // Changing how the cooker cooks models changes this, which invalidates every cooked mesh.
-MODEL_COOK_VERSION :: "models 6"
+MODEL_COOK_VERSION :: "models 7"
 MODEL_EXTENSIONS :: []string{".gltf", ".glb"}
 // How much meshoptimizer weighs a meshlet's normal cone against its size, without cluster_lod: some, so culling by cone
 // works.
@@ -57,6 +58,7 @@ MODEL_SETTINGS := []Setting_Info {
 		default = "true",
 		description = "Simplify the meshlets into a hierarchy of levels of detail, which the mesh shader path draws by distance. Without it, the meshlets are the mesh's own triangles only.",
 	},
+	PAGES_SETTING,
 	{
 		key = "collision",
 		values = {"true", "false"},
@@ -336,13 +338,13 @@ model_meshes :: proc(data: ^cgltf.data, combine: bool, stem: string) -> []Model_
 	return result[:]
 }
 
-// model_key covers what the meshes depend on: the cooker, meshoptimizer, the path, the source, the GUID and the
+// model_key covers what the meshes depend on: the cooker, meshoptimizer, LZ4, the path, the source, the GUID and the
 // settings, and the buffer files that a .gltf file names. The sub-asset lines of the .meta file are not in it, because
 // the cooker writes them: a mesh's GUID is its blob's name instead. The buffers are the model's inputs, which a change
 // to puts it in a daemon's pass.
 @(private = "file")
 model_key :: proc(options: Cook_Options, a: ^Asset_Source, data: ^cgltf.data, problems: ^Problems) -> (key: u64, ok: bool) {
-	key = hash.fnv64a(transmute([]byte)fmt.tprintf("%s\x00%s\x00%s\x00%x\x00", MODEL_COOK_VERSION, MESHOPTIMIZER_VERSION, a.name, format.mesh_layout() ~ format.skin_layout() * 31 ~ format.animation_layout() * 961))
+	key = hash.fnv64a(transmute([]byte)fmt.tprintf("%s\x00%s\x00%s\x00%s\x00%x\x00", MODEL_COOK_VERSION, MESHOPTIMIZER_VERSION, LZ4_VERSION, a.name, format.mesh_layout() ~ format.skin_layout() * 31 ~ format.animation_layout() * 961))
 	key = hash.fnv64a(source_of(a^), key)
 	guid := a.meta.guid
 	key = hash.fnv64a(guid[:], key)
@@ -375,6 +377,7 @@ build_mesh :: proc(a: Asset_Source, m: Model_Mesh, skin: ^Model_Skin, guid: form
 	scale := f32(strconv.parse_f64(model_setting(a, "scale")) or_else 1)
 	generate := model_setting(a, "tangents") == "generate"
 	lod := model_setting(a, "cluster_lod") == "true"
+	paged := model_setting(a, "pages") == "true"
 	collision := model_setting(a, "collision") == "true"
 	impostor := model_setting(a, "impostor") == "true" ? (strconv.parse_int(model_setting(a, "impostor_size")) or_else 64) : 0
 	flags: format.Mesh_Flags
@@ -424,6 +427,7 @@ build_mesh :: proc(a: Asset_Source, m: Model_Mesh, skin: ^Model_Skin, guid: form
 		flags             = flags,
 		generate_tangents = generate,
 		lod               = lod,
+		paged             = paged,
 		collision         = collision,
 		impostor_size     = impostor,
 		name              = m.name,
@@ -443,6 +447,8 @@ Cook_Mesh :: struct {
 	generate_tangents: bool,
 	// Build the meshlets' hierarchy of levels of detail, or only level 0.
 	lod:               bool,
+	// Split the hierarchy into pages (see build_pages). Only with lod, and only for a mesh without a skin.
+	paged:             bool,
 	// Write the collision data (see collision_of).
 	collision:         bool,
 	// Bake an impostor with frames of this many texels a side, or none for 0 (see bake_impostor).
@@ -453,7 +459,8 @@ Cook_Mesh :: struct {
 
 // finish_mesh is the half of a mesh's cook that every importer shares: it welds identical corners into vertices,
 // orders each submesh's triangles for the vertex cache and the vertices for fetching, builds the meshlets, orders a
-// large mesh's vertices by them, bakes the impostor, and writes the blob.
+// large mesh's vertices by them, bakes the impostor, and writes the blob. A paged mesh's blob has pages in place of the
+// streams of vertices, indices and meshlets (see build_pages).
 finish_mesh :: proc(m: Cook_Mesh, guid: format.Guid, key: u64) -> []byte {
 	corners := m.corners
 	ranges := m.ranges
@@ -499,10 +506,16 @@ finish_mesh :: proc(m: Cook_Mesh, guid: format.Guid, key: u64) -> []byte {
 	meshlet_triangles := make([dynamic]u32, context.temp_allocator)
 	meshlet_nodes := make([dynamic]format.Meshlet_Node, context.temp_allocator)
 	submeshes := make([]format.Submesh_Entry, len(ranges), context.temp_allocator)
+	page_inputs := Page_Inputs {
+		groups      = make([dynamic]Page_Group, context.temp_allocator),
+		owner       = make([dynamic]i32, context.temp_allocator),
+		refined     = make([dynamic]i32, context.temp_allocator),
+		node_groups = make([dynamic]i32, context.temp_allocator),
+	}
 	for r, s in ranges {
 		first_meshlet := len(meshlets)
 		first_node := len(meshlet_nodes)
-		roots := build_meshlets(indices[r.x:r.y], vertices, lod, &meshlets, &meshlet_indices, &meshlet_triangles, &meshlet_nodes)
+		roots := build_meshlets(indices[r.x:r.y], vertices, lod, &meshlets, &meshlet_indices, &meshlet_triangles, &meshlet_nodes, &page_inputs)
 		submeshes[s] = {
 			name          = m.names[s],
 			first_index   = u32(r.x),
@@ -518,6 +531,57 @@ finish_mesh :: proc(m: Cook_Mesh, guid: format.Guid, key: u64) -> []byte {
 
 	// The bounds come first, because a sphere's depends on the order of its points.
 	bounds := bounds_of(vertices, nil)
+	if m.paged && lod && .Skinned not_in flags && len(meshlet_nodes) > 0 {
+		// The collision data and the impostor are of the mesh's own vertices and indices, whose ranges build_pages
+		// replaces in the submeshes.
+		contents := format.Mesh_Contents {
+			guid          = guid,
+			key           = key,
+			bounds        = bounds,
+			meshlet_nodes = meshlet_nodes[:],
+			name          = m.name,
+			source_path   = m.source_path,
+			meshlet_count = u32(len(meshlets)),
+			face_area     = face_area_of(vertices, indices),
+		}
+		if m.collision {
+			contents.collision_positions, contents.collision_triangles, contents.collision_submeshes = collision_of(vertices, indices, submeshes)
+		}
+		if m.impostor_size > 0 {
+			contents.impostor = bake_impostor(vertices, indices, submeshes, bounds, m.impostor_size, context.temp_allocator)
+			contents.impostor_size = u32(m.impostor_size)
+			contents.impostor_error = impostor_error(meshlets[:], bounds, m.impostor_size)
+		}
+		deepest := -1
+		for &s in submeshes {
+			if s.meshlet_count == 0 {
+				continue
+			}
+			last: int
+			s.level_first, last = format.mesh_level_buckets(meshlets[s.first_meshlet:][:s.meshlet_count], bounds.center, &contents.levels)
+			deepest = max(deepest, last)
+		}
+		// A level that no submesh has is never the one that a distance picks.
+		for &l in contents.levels[clamp(deepest + 1, 0, format.MESH_LEVEL_BUCKETS):] {
+			l[0] = max(f32)
+		}
+		// Kept, as a mesh whose group is more than a page stays as it was.
+		unpaged_nodes := slice.clone(meshlet_nodes[:], context.temp_allocator)
+		unpaged_submeshes := slice.clone(submeshes, context.temp_allocator)
+		if built, fits := build_pages(vertices, flags, meshlets[:], meshlet_indices[:], meshlet_triangles[:], meshlet_nodes[:], submeshes, page_inputs); fits {
+			contents.flags = flags + {.Paged}
+			if built.vertex_count > 65535 {
+				contents.flags += {.Index32}
+			}
+			contents.submeshes = submeshes
+			contents.pages = built.pages
+			contents.vertex_count, contents.index_count = built.vertex_count, built.index_count
+			return format.mesh_write(contents, context.temp_allocator)
+		}
+		log.warnf("cook: mesh %s of %s has a group of meshlets that is more than a page, so it has no pages", m.name, m.source_path)
+		copy(meshlet_nodes[:], unpaged_nodes)
+		copy(submeshes, unpaged_submeshes)
+	}
 	if vertex_count > 65535 {
 		flags += {.Index32}
 		renumber_by_meshlets(vertices, indices, meshlet_indices[:])
@@ -530,23 +594,7 @@ finish_mesh :: proc(m: Cook_Mesh, guid: format.Guid, key: u64) -> []byte {
 	positions := make([]byte, vertex_count * 12, context.temp_allocator)
 	attributes := make([]byte, vertex_count * attribute_stride, context.temp_allocator)
 	for v, i in vertices {
-		(^[3]f32)(&positions[i * 12])^ = v.position
-		record := attributes[i * attribute_stride:]
-		(^format.Mesh_Attributes)(&record[0])^ = {
-			normal  = encode_normal(v.normal),
-			tangent = encode_tangent(v.tangent),
-			uv0     = v.uv0,
-		}
-		offset := size_of(format.Mesh_Attributes)
-		if .UV1 in flags {
-			(^[2]f32)(&record[offset])^ = v.uv1
-			offset += 8
-		}
-		if .Color in flags {
-			for ch in 0 ..< 4 {
-				record[offset + ch] = u8(clamp(v.color[ch], 0, 1) * 255 + 0.5)
-			}
-		}
+		write_vertex(v, flags, positions[i * 12:], attributes[i * attribute_stride:])
 	}
 	index_bytes: []byte
 	if .Index32 in flags {
@@ -768,10 +816,10 @@ renumber_by_meshlets :: proc(vertices: []Vertex, indices: []c.uint, meshlet_indi
 // build_meshlets splits a submesh's triangles into meshlets, appended with their offsets into the mesh's arrays. With
 // lod, they are clusterlod's hierarchy, level by level: the submesh's own triangles, then each simplification of groups
 // of the level below (see docs/content/kinds/meshes.md#meshlets), with a tree over each level's groups appended to the
-// nodes, whose roots it returns the count of. Without it, they are the submesh's own triangles, clustered with a weight
-// on their cones, without nodes.
+// nodes, whose roots it returns the count of, and the groups appended to pages for build_pages. Without it, they are the
+// submesh's own triangles, clustered with a weight on their cones, without nodes.
 @(private = "file")
-build_meshlets :: proc(indices: []c.uint, vertices: []Vertex, lod: bool, meshlets: ^[dynamic]format.Meshlet, meshlet_vertices: ^[dynamic]u32, meshlet_triangles: ^[dynamic]u32, nodes: ^[dynamic]format.Meshlet_Node) -> (roots: int) {
+build_meshlets :: proc(indices: []c.uint, vertices: []Vertex, lod: bool, meshlets: ^[dynamic]format.Meshlet, meshlet_vertices: ^[dynamic]u32, meshlet_triangles: ^[dynamic]u32, nodes: ^[dynamic]format.Meshlet_Node, pages: ^Page_Inputs) -> (roots: int) {
 	if len(indices) == 0 {
 		return
 	}
@@ -833,12 +881,15 @@ build_meshlets :: proc(indices: []c.uint, vertices: []Vertex, lod: bool, meshlet
 	// clodBuild gives the groups level by level, so the meshlets are in order of depth, and each group's clusters
 	// together, so a group's meshlets are a range.
 	group_meshlets := make([][2]u32, len(output.groups), context.temp_allocator)
+	first_group := i32(len(pages.groups))
 	for cluster in output.clusters {
 		range := &group_meshlets[cluster.group]
 		if range.y == 0 {
 			range.x = u32(len(meshlets) - first_meshlet)
 		}
 		range.y += 1
+		append(&pages.owner, first_group + i32(cluster.group))
+		append(&pages.refined, cluster.refined >= 0 ? first_group + i32(cluster.refined) : -1)
 		local_vertices := make([]c.uint, len(cluster.indices), context.temp_allocator)
 		local_triangles := make([]u8, len(cluster.indices), context.temp_allocator)
 		vertex_count := int(clod_local_indices(&local_vertices[0], &local_triangles[0], &cluster.indices[0], c.size_t(len(cluster.indices))))
@@ -846,14 +897,17 @@ build_meshlets :: proc(indices: []c.uint, vertices: []Vertex, lod: bool, meshlet
 		group := output.groups[cluster.group]
 		append_meshlet(local_vertices[:vertex_count], local_triangles, vertices, int(group.depth), made, group.simplified, meshlets, meshlet_vertices, meshlet_triangles)
 	}
-	return build_meshlet_nodes(output.groups[:], group_meshlets, nodes)
+	for range in group_meshlets {
+		append(&pages.groups, Page_Group{first_meshlet = u32(first_meshlet) + range.x, meshlet_count = range.y})
+	}
+	return build_meshlet_nodes(output.groups[:], group_meshlets, nodes, pages, first_group)
 }
 
 // build_meshlet_nodes appends clusterlod's tree over each level's groups, whose leaves are the groups' ranges of
 // meshlets, and returns how many roots it has: one for each level. Each node's sphere is grown to hold its children's,
 // and its error raised to theirs, so that a node whose error does not show has no group below it whose error does.
 @(private = "file")
-build_meshlet_nodes :: proc(groups: []Clod_Group, group_meshlets: [][2]u32, nodes: ^[dynamic]format.Meshlet_Node) -> int {
+build_meshlet_nodes :: proc(groups: []Clod_Group, group_meshlets: [][2]u32, nodes: ^[dynamic]format.Meshlet_Node, pages: ^Page_Inputs, first_group: i32) -> int {
 	levels := 0
 	for g in groups {
 		levels = max(levels, int(g.depth) + 1)
@@ -898,6 +952,7 @@ build_meshlet_nodes :: proc(groups: []Clod_Group, group_meshlets: [][2]u32, node
 			record.count = range.y | format.MESHLET_NODE_LEAF
 		}
 		append(nodes, record)
+		append(&pages.node_groups, n.group >= 0 ? first_group + i32(n.group) : -1)
 	}
 	return levels
 }
@@ -957,6 +1012,7 @@ append_meshlet :: proc(local_vertices: []c.uint, local_triangles: []u8, vertices
 			parent_radius = parent.radius,
 			error = made.error,
 			parent_error = parent.error,
+			refined_page = format.MESH_PAGE_NONE,
 		},
 	)
 	for v in local_vertices {

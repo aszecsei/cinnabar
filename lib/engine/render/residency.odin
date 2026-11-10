@@ -568,7 +568,8 @@ fail :: proc(r: ^Residency, e: ^Resident_Entry, reason: string) {
 @(private = "file")
 stream_mesh :: proc(r: ^Residency, s: ^Resident_Stream, data: []byte) -> bool {
 	blob, ok := format.mesh_view(data)
-	if !ok {
+	// A mesh with pages needs the pool of pages, which is not here yet (see docs/content/kinds/meshes.md#pages).
+	if !ok || .Paged in blob.flags {
 		return false
 	}
 	m := &s.pending.mesh

@@ -44,9 +44,11 @@ struct Meshlet {
 	float4 parent_sphere;
 	float error;
 	float parent_error;
+	// The page of the group that it was simplified from, or MESH_PAGE_NONE.
+	uint refined_page;
 };
 
-_Static_assert(sizeof(Meshlet) == 68, "Meshlet must match lib/engine/asset/format/mesh.odin");
+_Static_assert(sizeof(Meshlet) == 72, "Meshlet must match lib/engine/asset/format/mesh.odin");
 
 // The meshlets that an amplification group launches, and its instance's poses, this frame's and last frame's, which
 // the group places once, an instanced draw's from its entity's and its own, so neither its threads nor its mesh

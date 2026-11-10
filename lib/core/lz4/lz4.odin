@@ -1,5 +1,5 @@
 // Package lz4 binds LZ4's block codec, which `just lz4` builds from vendor/lz4. The cooker compresses a mesh's pages
-// with it, and the runtime decompresses them. See docs/content/blobs-and-loading.md#blob-format.
+// with it, and the runtime decompresses them. See docs/content/kinds/meshes.md#pages.
 package lz4
 
 import "core:c"

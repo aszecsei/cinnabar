@@ -1,5 +1,5 @@
 # Builds LZ4's block codec from vendor/lz4 for the cooker, which compresses a mesh's pages with it, and the runtime,
-# which decompresses them (see docs/content/blobs-and-loading.md#blob-format). `just lz4` configures it, and puts cn_lz4.lib in
+# which decompresses them (see docs/content/kinds/meshes.md#pages). `just lz4` configures it, and puts cn_lz4.lib in
 # <build dir>/out, where lib/core/lz4/lz4.odin looks for it.
 cmake_minimum_required(VERSION 3.24)
 project(cinnabar_lz4 LANGUAGES C)

@@ -22,6 +22,7 @@ build_simple_meshlets :: proc(positions: [][3]f32, indices: []u32, meshlets: ^[d
 			triangle_offset = u32(len(meshlet_triangles)),
 			triangle_count  = u8(len(triangles)),
 			parent_error    = math.F32_MAX,
+			refined_page    = format.MESH_PAGE_NONE,
 		}
 		// The sphere: the box's center, and the farthest vertex.
 		low, high := [3]f32{math.F32_MAX, math.F32_MAX, math.F32_MAX}, [3]f32{-math.F32_MAX, -math.F32_MAX, -math.F32_MAX}

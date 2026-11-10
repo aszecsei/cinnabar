@@ -114,6 +114,7 @@ A stage cooks each mesh and texture as a job of its own, the meshes first, many 
 |---|---|---|---|
 | `scale` | `0.001`, `0.01`, `0.0254`, `0.1`, `1`, `10`, `100` | `1` | Scales the stage after its `metersPerUnit`. |
 | `cluster_lod` | `true`, `false` | `true` | Builds the meshes' meshlet hierarchies (see [Meshlets](meshes.md#meshlets)). |
+| `pages` | `true`, `false` | `false` | Splits the meshes' hierarchies into pages that stream (see [Pages](meshes.md#pages)). |
 | `collision` | `true`, `false` | `false` | Writes the meshes' collision data. |
 | `impostor` | `true`, `false` | `false` | Bakes each mesh's impostor (see [Impostors](meshes.md#impostors)). |
 | `texture_max_size` | `256` to `16384` | `4096` | Halves each texture until it fits. |

@@ -12,7 +12,7 @@ import "core:strconv"
 import format "cinnabar:engine/asset/format"
 
 // Changing how the cooker cooks mesh files changes this, which invalidates every cooked mesh file.
-MESH_FILE_COOK_VERSION :: "mesh files 5"
+MESH_FILE_COOK_VERSION :: "mesh files 6"
 
 MESH_SETTINGS := []Setting_Info {
 	{
@@ -27,6 +27,7 @@ MESH_SETTINGS := []Setting_Info {
 		default = "true",
 		description = "Simplify the meshlets into a hierarchy of levels of detail, which the mesh shader path draws by distance. Without it, the meshlets are the mesh's own triangles only.",
 	},
+	PAGES_SETTING,
 	{
 		key = "collision",
 		values = {"true", "false"},
@@ -135,6 +136,7 @@ baked_mesh :: proc(a: Asset_Source, bake: format.Mesh_Bake) -> Cook_Mesh {
 		names = names,
 		generate_tangents = mesh_file_setting(a, "tangents") == "mikk",
 		lod = mesh_file_setting(a, "cluster_lod") == "true",
+		paged = mesh_file_setting(a, "pages") == "true",
 		collision = mesh_file_setting(a, "collision") == "true",
 		impostor_size = mesh_file_setting(a, "impostor") == "true" ? (strconv.parse_int(mesh_file_setting(a, "impostor_size")) or_else 64) : 0,
 		name = filepath.stem(a.path),
@@ -158,9 +160,10 @@ mesh_file_setting :: proc(a: Asset_Source, key: string) -> string {
 mesh_file_key :: proc(a: Asset_Source) -> u64 {
 	key := hash.fnv64a(
 		transmute([]byte)fmt.tprintf(
-			"%s\x00%s\x00%s\x00%x\x00",
+			"%s\x00%s\x00%s\x00%s\x00%x\x00",
 			MESH_FILE_COOK_VERSION,
 			MESHOPTIMIZER_VERSION,
+			LZ4_VERSION,
 			a.name,
 			format.mesh_layout(),
 		),

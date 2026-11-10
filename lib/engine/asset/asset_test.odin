@@ -30,6 +30,7 @@ setup :: proc(t: ^testing.T) -> ^Fixture {
 		frame_allocator = virtual.arena_allocator(&f.frame),
 		asset_allocator = runtime.heap_allocator(),
 		file_read       = core.file_read,
+		file_read_range = core.file_read_range,
 		file_modified   = core.file_modified,
 	}
 	temp, err := os.make_directory_temp("", "asset_test_*", context.allocator)
@@ -118,6 +119,63 @@ loading_twice_gives_the_same_handle :: proc(t: ^testing.T) {
 	testing.expect_value(t, a, b)
 	testing.expect_value(t, blob_key(f, a), 7)
 	testing.expect_value(t, guid(&f.assets, a), test_guid(1))
+}
+
+// A paged mesh's blob is its head and then the pages that stream, and only the head is loaded.
+@(test)
+a_paged_mesh_loads_only_its_head :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	stream := make([]byte, 4096, context.temp_allocator)
+	root := make([]byte, 48, context.temp_allocator)
+	blob := format.mesh_write(
+		{
+			guid = test_guid(4),
+			key = 11,
+			flags = {.Paged},
+			vertex_count = 3,
+			index_count = 3,
+			meshlet_count = 2,
+			submeshes = {{name = "s", meshlet_count = 2}},
+			pages = {
+				{record = {size = 64, meshlet_count = 1, level0_meshlets = 1, vertex_count = 3}, compressed = stream, dependencies = {1}},
+				{record = {size = 64, first_meshlet = 1, meshlet_count = 1, flags = {.Root}}, compressed = root},
+			},
+		},
+		context.temp_allocator,
+	)
+	whole, whole_ok := format.mesh_view(blob)
+	testing.expect(t, whole_ok, "the test's blob is a paged mesh")
+	if !whole_ok {
+		return
+	}
+	testing.expect(t, int(whole.head_size) + len(stream) <= len(blob))
+	buffer: [32]u8
+	path := fmt.tprintf("%s/%s.blob", f.dir, format.guid_format(test_guid(4), &buffer))
+	testing.expect(t, os.write_entire_file(path, blob) == nil)
+
+	h, ok := load(&f.assets, test_guid(4))
+	testing.expect(t, ok)
+	head, _ := data(&f.assets, h)
+	testing.expect_value(t, len(head), int(whole.head_size))
+	view, view_ok := format.mesh_view(head)
+	testing.expect(t, view_ok, "the head alone is a mesh blob")
+	if view_ok {
+		pages := format.mesh_pages(head, view)
+		testing.expect_value(t, len(pages), 2)
+		// The root is in the head, and the other page is past what was loaded.
+		testing.expect(t, int(pages[1].offset + pages[1].compressed_size) <= len(head))
+		testing.expect(t, int(pages[0].offset) >= len(head))
+	}
+	testing.expect_value(t, modified(&f.assets, h), f.platform.file_modified(path))
+	testing.expect_value(t, modified(&f.assets, {}), 0)
+
+	// A blob that is not a paged mesh loads whole.
+	write_blob(t, f, test_guid(1), 7, time.now())
+	script, _ := load(&f.assets, test_guid(1))
+	script_data, _ := data(&f.assets, script)
+	_, script_ok := format.script_view(script_data)
+	testing.expect(t, script_ok)
 }
 
 @(test)
