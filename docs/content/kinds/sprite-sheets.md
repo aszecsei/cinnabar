@@ -29,7 +29,7 @@ animation idle = idle_0 idle_1 rate=4
 | `import` | The path of a JSON description, from the sheet's directory | |
 | `animation <name>` | Frames, then `rate=` and `loop=` (see [Animations](#animations)) | |
 
-A new sheet from the editor's New Sprite Sheet command is comments that show the three ways (`SPRITE_SHEET_TEMPLATE`).
+A new sheet from the editor's New Sprite Sheet command is comments that show the three ways (`SPRITE_SHEET_TEMPLATE`). The sample has one that packs images, `content/sprites/hero.sprite_sheet`, and one with a grid, `coin.sprite_sheet` (see [Rendering: 2D](../../rendering/2d.md#the-sample)).
 
 ## Packed images
 

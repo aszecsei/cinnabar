@@ -1,0 +1,6 @@
+# The coin's sheet (see docs/content/kinds/sprite-sheets.md#a-textures-frames): a strip of four frames in a texture.
+pixels_per_unit = 16
+filter = nearest
+texture = $6f1c2a9e4b7d4c0e9a3f5d8b1e2c7a49
+grid = 4 1
+animation spin = 0..3 rate=8

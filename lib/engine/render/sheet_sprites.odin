@@ -1,6 +1,7 @@
 package render
 
 import "core:log"
+import "core:math"
 import "core:math/linalg"
 import "core:slice"
 
@@ -270,10 +271,10 @@ sheet_sprite_before :: proc(a, b: Sorted_Sheet_Sprite) -> bool {
 @(private)
 sheet_sprite_record :: proc(sprite: Sprite_Renderer, pose: ecs.Transform, frame: format.Sprite_Frame, blob: ^format.Sprite_Sheet_Blob, view: View, texture, sampler, id: u32) -> Sheet_Sprite_Record {
 	right, up, _ := view_axes(view)
-	// The pose's own x, as the camera sees it, gives the turn.
-	x := linalg.quaternion128_mul_vector3(pose.rotation, [3]f32{1, 0, 0})
-	turn := [2]f32{linalg.dot(x, right), linalg.dot(x, up)}
-	turn = linalg.length(turn) > 1e-6 ? linalg.normalize(turn) : {1, 0}
+	// The pose's turn about its own z, whatever else it turns by: the twist of its rotation about that axis. So a
+	// sprite stands upright in every view until its entity is turned in its plane.
+	angle := 2 * math.atan2(pose.rotation.z, pose.rotation.w)
+	turn := [2]f32{math.cos(angle), math.sin(angle)}
 	size := [2]f32{f32(frame.rect.z), f32(frame.rect.w)} / blob.pixels_per_unit * [2]f32{abs(pose.scale.x), abs(pose.scale.y)}
 	atlas := [2]f32{f32(blob.atlas_size.x), f32(blob.atlas_size.y)}
 	uv := [4]f32{f32(frame.rect.x) / atlas.x, f32(frame.rect.y) / atlas.y, f32(frame.rect.z) / atlas.x, f32(frame.rect.w) / atlas.y}
