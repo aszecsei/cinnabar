@@ -138,6 +138,7 @@ enable_pipelines :: proc(r: ^Renderer) {
 		&r.sky.multiscatter,
 		&r.sky.view,
 		&r.sky.background,
+		&r.sky.aerial,
 		// The sky's cubemap, which the atmosphere captures from its tables.
 		&r.sky.cube.capture,
 		&r.sky.cube.atmosphere,
@@ -850,9 +851,9 @@ enable_frame_pipelines :: proc(r: ^Renderer) {
 }
 
 // fill_world makes the world of the extra views' tests: a sun and a lamp that cast shadows, meshes that hold slots, a
-// reflection probe, and a global volume with fog, clouds and an atmosphere whose sun is the directional light.
+// reflection probe, and a global volume, mist, with fog, clouds and an atmosphere whose sun is the directional light.
 @(private = "file")
-fill_world :: proc(w: ^ecs.World) -> (probe: ecs.Entity) {
+fill_world :: proc(w: ^ecs.World) -> (probe, mist: ecs.Entity) {
 	sun := ecs.spawn(w)
 	ecs.add(w, sun, ecs.TRANSFORM_IDENTITY)
 	ecs.add(w, sun, Directional_Light{intensity = 1, cast_shadows = true})
@@ -867,7 +868,7 @@ fill_world :: proc(w: ^ecs.World) -> (probe: ecs.Entity) {
 	probe = ecs.spawn(w)
 	ecs.add(w, probe, ecs.Transform{position = ecs.position_offset({}, {0, 1, 3}), rotation = 1, scale = 1})
 	ecs.add(w, probe, Reflection_Probe{extent = {2, 1, 2}, box_projection = true})
-	mist := ecs.spawn(w)
+	mist = ecs.spawn(w)
 	ecs.add(w, mist, ecs.TRANSFORM_IDENTITY)
 	ecs.add(w, mist, volume.Volume{shape = .Global})
 	ecs.add(w, mist, Fog{density = {true, 0.05}, height_falloff = {true, 0.5}})
@@ -1497,7 +1498,7 @@ an_orthographic_view_draws_the_passes_that_do_not_take_a_perspective :: proc(t: 
 	for name in record_b.passes {
 		testing.expectf(t, name in record_a.passes, "%q draws only in the orthographic view", name)
 	}
-	testing.expectf(t, only["sky"] && only["clouds march"] && only["reflections trace"], "the orthographic view draws the sky, the clouds or the screen-space reflections: only the perspective view has %v", only)
+	testing.expectf(t, only["sky"] && only["sky aerial"] && only["clouds march"] && only["reflections trace"], "the orthographic view draws the sky, its air, the clouds or the screen-space reflections: only the perspective view has %v", only)
 	for name in ([]string{"world", "cluster lights", "fog inject", "fog integrate", "exposure", "temporal aa", "shadow mask", "gtao", "gi trace"}) {
 		testing.expectf(t, record_b.passes[name] > 0, "the orthographic view has no %q pass: %v", name, record_b.passes)
 	}
@@ -1509,6 +1510,65 @@ an_orthographic_view_draws_the_passes_that_do_not_take_a_perspective :: proc(t: 
 		testing.expect(t, draw_frame(r, rig.w, desc))
 	}
 	testing.expectf(t, "sky" not_in record_a.passes && record_b.passes["sky"] > 0, "the views did not swap their passes: %v, %v", record_a.passes, record_b.passes)
+	testing.expectf(t, "sky aerial" not_in record_a.passes && record_b.passes["sky aerial"] == 1, "the views did not swap their air: %v, %v", record_a.passes, record_b.passes)
+	testing.expectf(t, len(rig.record.problems) == 0, "problems: %v", rig.record.problems)
+}
+
+// The aerial perspective volume is an atmosphere's alone: a perspective view in Atmosphere makes it once, and the world
+// pass reads it, so it stays live; Flat and Texture skies have none (see docs/rendering/sky.md#aerial-perspective).
+@(test)
+the_aerial_volume_is_an_atmospheres_alone :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	rig := new(Rig)
+	defer free(rig)
+	rig_start(t, rig)
+	defer rig_stop(rig)
+	context.logger = {record_problems, &rig.record, .Debug, {}}
+	r, platform := rig.r, &rig.platform
+	_, mist := fill_world(rig.w)
+	enable_frame_pipelines(r)
+	defer platform.gpu_destroy_texture(r.blue_noise.texture)
+
+	Air_Record :: struct {
+		passes: int,
+		aerial: bool,
+		reads:  bool,
+	}
+	record: Air_Record
+	desc := Frame_Desc {
+		view  = {position = ecs.position_offset({}, {0, 1, -4}), rotation = 1, projection = Perspective{1, 0.05}},
+		size  = {64, 32},
+		hooks = {
+			data = &record,
+			debug = proc(f: ^Frame) {
+				rec := (^Air_Record)(f.data)
+				rec^ = {aerial = f.aerial != 0}
+				for pass in f.graph.passes {
+					if pass.name == "sky aerial" {
+						rec.passes += 1
+					}
+				}
+				// The world pass declares the read, so the graph keeps the pass that writes it.
+				for pass in f.graph.passes {
+					if pass.name != "world" {
+						continue
+					}
+					for use in pass.uses {
+						rec.reads ||= f.aerial != 0 && !use.buffer && use.reads && Texture(use.index + 1) == f.aerial
+					}
+				}
+			},
+		},
+	}
+	for mode in Sky_Mode {
+		ecs.get(rig.w, mist, Environment).mode = {true, mode}
+		for _ in 0 ..< 2 {
+			testing.expect(t, draw_frame(r, rig.w, desc))
+		}
+		atmosphere := mode == .Atmosphere
+		testing.expectf(t, record.passes == (atmosphere ? 1 : 0), "%v: %d aerial passes", mode, record.passes)
+		testing.expectf(t, record.aerial == atmosphere && record.reads == atmosphere, "%v: the volume %v, read by the world %v", mode, record.aerial, record.reads)
+	}
 	testing.expectf(t, len(rig.record.problems) == 0, "problems: %v", rig.record.problems)
 }
 
@@ -2490,7 +2550,7 @@ transient_textures_share_at_each_preset :: proc(t: ^testing.T) {
 	runner := context.logger
 	context.logger = {record_problems, &rig.record, .Debug, {}}
 	r := rig.r
-	probe := fill_world(rig.w)
+	probe, _ := fill_world(rig.w)
 	enable_frame_pipelines(r)
 	defer rig.platform.gpu_destroy_texture(r.blue_noise.texture)
 

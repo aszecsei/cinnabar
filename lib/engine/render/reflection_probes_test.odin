@@ -1205,6 +1205,7 @@ a_capture_face_has_its_own_constants :: proc(t: ^testing.T) {
 	c := Frame_Constants {
 		gi                     = 1,
 		fog                    = 1,
+		aerial                 = 1,
 		debug_view             = 3,
 		reflection_probe_count = 4,
 		cascade_splits         = {1, 2, 3, 4},
@@ -1217,7 +1218,7 @@ a_capture_face_has_its_own_constants :: proc(t: ^testing.T) {
 	testing.expect_value(t, c.cluster_view_projection, m)
 	testing.expect(
 		t,
-		c.gi == 0 && c.fog == 0 && c.debug_view == 0 && c.reflection_probe_count == 0,
+		c.gi == 0 && c.fog == 0 && c.aerial == 0 && c.debug_view == 0 && c.reflection_probe_count == 0,
 	)
 	testing.expect_value(t, c.capture, 1)
 	testing.expect_value(t, c.screen_size, [2]f32{128, 128})

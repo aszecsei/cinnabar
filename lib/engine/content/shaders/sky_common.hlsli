@@ -176,6 +176,35 @@ float mie_phase(float cos_theta, float g) {
 	return 3 / (8 * SKY_PI) * (1 - g2) * (1 + cos_theta * cos_theta) / ((2 + g2) * pow(max(1 + g2 - 2 * g * cos_theta, 1e-4), 1.5));
 }
 
+// The light that the air at a point along a ray from the camera scatters toward the camera from one light: once from
+// the transmittance table, and more from the multiple scattering table.
+float3 scattered(Medium m, float h, float t, float h_at, float3 d, float4 toward, float3 illuminance) {
+	if (all(illuminance <= 0)) {
+		return 0;
+	}
+	float cos_ray = dot(d, toward.xyz);
+	float mu = mu_along(h, t, toward.y, cos_ray, h_at);
+	float3 phase = m.rayleigh * rayleigh_phase(cos_ray) + m.mie * mie_phase(cos_ray, sky.mie.z);
+	float3 multi = multiscatter_at(h_at, mu) * (m.rayleigh + m.mie);
+	return illuminance * (light_at(h_at, mu) * phase + multi);
+}
+
+// sky_step is one step of a march along a ray from the camera at height h, with mu its d.y: the light that the sun and
+// the moon scatter toward the camera from the air between t - dt / 2 and t + dt / 2, dimmed by the transmittance in
+// front of it, which the step then dims. The sky view table and the aerial perspective volume march with it, so they
+// give the same light.
+void sky_step(float h, float mu, float3 d, float t, float dt, inout float3 light, inout float3 transmittance) {
+	// A ray of the aerial perspective can pass below the ground, where nothing in the world is seen; the air there is the
+	// ground's.
+	float h_at = max(height_along(h, mu, t), 0);
+	Medium m = medium_at(h_at);
+	float3 source = scattered(m, h, t, h_at, d, sky.sun_direction, sky.sun_illuminance.rgb) +
+		scattered(m, h, t, h_at, d, sky.moon_direction, sky.moon_light.rgb);
+	float3 step = exp(-m.extinction * dt);
+	light += transmittance * source * (1 - step) / max(m.extinction, 1e-6);
+	transmittance *= step;
+}
+
 // The sky view table holds the light from every direction at the camera: the azimuth from +z toward +x across, and
 // the elevation down, from the zenith to the horizon in the top half and from the horizon to the nadir in the
 // bottom. Each half is squeezed toward the horizon, where the light changes fastest.

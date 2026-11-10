@@ -8,7 +8,7 @@ GPU particles: a `Particle_System` places an effect asset, whose emitters the GP
 
 `lib/engine/render/particles.odin`. Each emitter of a system owns a range of one pool of particles. Every frame, a thread for each particle of a range ages it, moves it with the emitter's modules and collides it, or, while it is dead, takes one of the frame's new particles. Each living particle then appends a sprite, with its color, size and emission from the emitter's curves at its age, which the sprite passes bin, light and rasterize into the moments with the rest.
 
-- **Lighting** is the sprites': the clusters, the shadow maps, the global illumination and the fog, on an 8x8 grid of points on each sprite (see [Sprites](transparency.md#sprites)). The sample's smoke is lit by the glass scene's point light.
+- **Lighting** is the sprites': the clusters, the shadow maps, the global illumination, the [air](sky.md#aerial-perspective) and the fog, on an 8x8 grid of points on each sprite (see [Sprites](transparency.md#sprites)). The sample's smoke is lit by the glass scene's point light.
 - **Order:** the sprites take their place in the moments, so particles need no sort, and draw among glass.
 - **Limits:**
   - Particles draw as sprites, squares that face the camera, as ribbons (see [Ribbons](#ribbons)), or as meshes (see [Mesh particles](#mesh-particles)).

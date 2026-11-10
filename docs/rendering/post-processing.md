@@ -30,7 +30,7 @@ The editor shows what makes the frame in its viewport (see [Editor](../editor/vi
 | `Lit` | The forward pass | The scene | Yes |
 | `Lighting_Only` | The forward pass | The lighting on a grey base color, without emission | Yes |
 | `Direct_Light`, `Indirect_Light` | The forward pass | Only the lights' light, or only the indirect light | Yes |
-| `Fog` | The forward pass | Only the light that the fog scatters toward the camera | Yes |
+| `Fog` | The forward pass | Only the light that the fog and the [air](sky.md#aerial-perspective) scatter toward the camera | Yes |
 | `Albedo` | The forward pass | The base color, or an unlit surface's color | No |
 | `Light_Complexity` | The forward pass | The lights that shade each pixel, as heat colors up to 16 | No |
 | `Shadow_Cascades` | The forward pass | Each directional cascade in its color: red, green, blue, yellow, then grey beyond | No |

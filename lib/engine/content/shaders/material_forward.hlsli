@@ -69,10 +69,10 @@ Indirect capture_indirect(float3 p, float3 normal, float3 reflected, float rough
 // The colors of the directional lights' cascades, and beyond the last.
 static const float3 CASCADE_COLORS[5] = {float3(1, 0.3, 0.3), float3(0.3, 1, 0.3), float3(0.3, 0.5, 1), float3(1, 1, 0.3), float3(0.4, 0.4, 0.4)};
 
-// forward_color is a surface's shaded color: its emission, its lights' light and its indirect light, fogged and
-// pre-exposed, or a debug view's color as it is, without the exposure or the fog. The fog dims the color, and adds the
-// light that it scatters toward the camera times scatter: an additive surface adds none, since the fog's light is
-// already in front of what it adds to.
+// forward_color is a surface's shaded color: its emission, its lights' light and its indirect light, behind the air and
+// the fog and pre-exposed, or a debug view's color as it is, without the exposure, the air or the fog. The air and the
+// fog dim the color, and add the light that they scatter toward the camera times scatter: an additive surface adds
+// none, since their light is already in front of what it adds to.
 float3 forward_color(Varyings i, Material_Inputs inputs, Surface s, float scatter) {
 	// The debug views (see docs/rendering/post-processing.md#debug-views). A dynamic branch on the frame's constant, so they need no
 	// permutations.
@@ -176,8 +176,8 @@ float3 forward_color(Varyings i, Material_Inputs inputs, Surface s, float scatte
 		color += shade_indirect(s, p, indirect);
 	}
 #endif
-	if (frame.fog != 0) {
-		float4 fog = fog_at(i.world);
+	if (frame.fog != 0 || frame.aerial != 0) {
+		float4 fog = air_and_fog_at(i.world);
 		color = color * fog.a + fog.rgb * scatter;
 	}
 	return color * frame_exposure();

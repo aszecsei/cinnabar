@@ -95,7 +95,7 @@ Sheet_Sprite_Push :: struct {
 	fog:            u32,
 	records:        u32,
 	records_offset: u32,
-	padding:        u32,
+	aerial:         u32,
 }
 
 #assert(size_of(Sheet_Sprite_Record) == 96 && size_of(Sheet_Sprite_Push) <= 128)
@@ -433,6 +433,7 @@ draw_sheet_sprites :: proc(ctx: ^Pass_Context, f: ^Frame, pipeline: gpu.Pipeline
 		shadow_atlas   = white,
 		shadow_mask    = white,
 		fog            = white,
+		aerial         = white,
 		records        = gpu.read_index(sf.records.buffer),
 		records_offset = sf.records.offset,
 	}
@@ -441,6 +442,9 @@ draw_sheet_sprites :: proc(ctx: ^Pass_Context, f: ^Frame, pipeline: gpu.Pipeline
 	}
 	if f.fog_volume != 0 {
 		push.fog = gpu.read_index(gpu_texture(g, f.fog_volume))
+	}
+	if f.aerial != 0 {
+		push.aerial = gpu.read_index(gpu_texture(g, f.aerial))
 	}
 	gpu.cmd_set_pipeline(ctx.cb, pipeline)
 	gpu.cmd_set_pass_constants(ctx.cb, f.scene_frame.view_constants[VIEW_CAMERA])

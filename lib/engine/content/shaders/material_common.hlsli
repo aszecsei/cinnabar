@@ -190,7 +190,9 @@ struct Frame_Constants {
 	// mesh_pages.hlsli).
 	uint mesh_pool;
 	uint mesh_pages;
-	uint2 mesh_pages_padding;
+	// Whether the push constants have the aerial perspective volume, and its clamping sampler (see fog_at.hlsli).
+	uint aerial;
+	uint aerial_sampler;
 };
 CN_PASS_CONSTANTS(Frame_Constants, frame);
 
@@ -291,6 +293,8 @@ struct Material_Push {
 	uint shading_stats;
 	// The screen-space or traced reflections, read when Frame_Constants.reflections says so (see material_forward.hlsli).
 	uint reflections;
+	// The aerial perspective volume, read when Frame_Constants.aerial says so (see fog_at.hlsli).
+	uint aerial;
 };
 #define MATERIAL_PUSH Material_Push
 #endif
