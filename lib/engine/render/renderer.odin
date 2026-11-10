@@ -189,7 +189,7 @@ Frame_Desc :: struct {
 }
 
 // The most extra views that a frame draws. The texture cache holds the transient textures of this many and the frame's own.
-MAX_EXTRA_VIEWS :: 3
+MAX_EXTRA_VIEWS :: 4
 
 // Extra_View is another camera on the frame's world, drawn after the frame's own view into its own target (see
 // docs/rendering/frame.md#views). It draws exactly what the frame's own view would from its camera, with the state in its

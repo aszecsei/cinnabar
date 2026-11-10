@@ -1418,7 +1418,7 @@ viewports_of_both_kinds_open_resize_and_close :: proc(t: ^testing.T) {
 			testing.expect_value(t, target.prefix, "test.viewport")
 		}
 	}
-	testing.expect_value(t, told, [MAX_VIEWPORTS]int{0, 1, 1, 0})
+	testing.expect_value(t, told, [MAX_VIEWPORTS]int{0, 1, 1, 0, 0})
 	frame_viewports(&f.editor)
 	for m in step(f, 1) {
 		_, is_target := m.(link.Viewport_Target)
@@ -1454,16 +1454,16 @@ viewports_of_both_kinds_open_resize_and_close :: proc(t: ^testing.T) {
 	freed := objects.freed
 	step(f, 1, link.Close_Viewport{viewport = 1})
 	expect_viewports(t, frame_viewports(&f.editor)[:], 2, 3)
-	testing.expect_value(t, targets.released, [gpu.MAX_VIEWPORT_TARGETS]int{0, 1, 0, 0})
+	testing.expect_value(t, targets.released, [gpu.MAX_VIEWPORT_TARGETS]int{0, 1, 0, 0, 0})
 	testing.expect_value(t, objects.freed, freed + 1)
 	// A viewport that is not open, and one that is not there, close nothing.
 	step(f, 1, link.Close_Viewport{viewport = 1}, link.Close_Viewport{viewport = 0}, link.Close_Viewport{viewport = 9})
-	testing.expect_value(t, targets.released, [gpu.MAX_VIEWPORT_TARGETS]int{0, 1, 0, 0})
+	testing.expect_value(t, targets.released, [gpu.MAX_VIEWPORT_TARGETS]int{0, 1, 0, 0, 0})
 	testing.expect_value(t, objects.freed, freed + 1)
 
 	// A new editor's session has none of the old one's viewports: their targets go, and so do their states.
 	step(f, 2)
-	testing.expect_value(t, targets.released, [gpu.MAX_VIEWPORT_TARGETS]int{0, 1, 1, 1})
+	testing.expect_value(t, targets.released, [gpu.MAX_VIEWPORT_TARGETS]int{0, 1, 1, 1, 0})
 	testing.expect_value(t, objects.freed, objects.made)
 	testing.expect_value(t, len(frame_viewports(&f.editor)), 0)
 }

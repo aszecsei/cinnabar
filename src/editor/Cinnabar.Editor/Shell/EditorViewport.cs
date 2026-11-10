@@ -1,4 +1,5 @@
 using Avalonia;
+using Cinnabar.Editor.Docking;
 using Cinnabar.Editor.Tools;
 using Cinnabar.Editor.Viewport;
 using ViewportKind = Cinnabar.Editor.Link.Protocol.ViewportKind;
@@ -12,22 +13,38 @@ namespace Cinnabar.Editor.Shell;
 /// <param name="Handles">The last <c>Box_Handles</c>, as a key.</param>
 public sealed record OpenedViewport(PixelSize Size, string Gizmo = "", string Handles = "");
 
+/// <summary>Where a scene view's camera starts when the view is first shown (see <see cref="EditorViewport.StartCamera"/>).</summary>
+public enum SceneViewStart
+{
+    /// <summary>Where the first scene view is: it starts at the origin, looking along +z.</summary>
+    Perspective,
+    /// <summary>Looking straight down, with +z up the view.</summary>
+    Top,
+    /// <summary>Looking along -z from +z, with +x to the left.</summary>
+    Front,
+    /// <summary>Looking along -x from +x, with +z to the right.</summary>
+    Side,
+}
+
 /// <summary>
 /// One of the editor's views of the game (see docs/editor/viewport.md#views): a scene view, which draws the world from
 /// the editor's camera with the editor's tools, or the Game view, which draws it from the game's camera. The shell makes
-/// all of them once, so a view that closes and opens again keeps its camera and its settings. Each has a document in the
-/// dock layout, a number in the link's messages, and a shared target of its own while it is shown.
+/// all of them once, so a view that closes and opens again keeps its camera and its settings. A scene view is in the Scene
+/// document and the Game view in the Game document, and each has a number in the link's messages and a shared target of
+/// its own while it is shown.
 /// </summary>
 public sealed class EditorViewport
 {
     /// <summary>The viewports that the game can draw, which <c>link.MAX_VIEWPORTS</c> names.</summary>
-    public const int Max = 4;
+    public const int Max = 5;
 
     /// <summary>How many of the viewports are scene views: the numbers below this.</summary>
-    public const int SceneViews = 3;
+    public const int SceneViews = 4;
 
     /// <summary>The Game view's number, which is the last.</summary>
     public const int GameIndex = SceneViews;
+
+    static readonly string[] Titles = ["Perspective", "Top", "Front", "Side"];
 
     readonly EditorCamera? _camera;
 
@@ -37,7 +54,8 @@ public sealed class EditorViewport
         Kind = index == GameIndex ? ViewportKind.Game : ViewportKind.Scene;
         _camera = IsGame ? null : new EditorCamera();
         Settings = settings;
-        // The first scene view starts at the origin. A scene view that is shown for the first time starts from another one's.
+        Start = IsGame ? SceneViewStart.Perspective : (SceneViewStart)index;
+        // The first scene view starts at the origin. The others start from its pivot when they are first shown.
         Placed = index == 0 || IsGame;
         // A camera that has moved has a place, whoever moved it.
         if (_camera != null)
@@ -46,6 +64,9 @@ public sealed class EditorViewport
         }
     }
 
+    /// <summary>How the camera starts when the view is first shown.</summary>
+    public SceneViewStart Start { get; }
+
     /// <summary>The viewport's number in the link's messages.</summary>
     public int Index { get; }
 
@@ -53,8 +74,11 @@ public sealed class EditorViewport
 
     public bool IsGame => Kind == ViewportKind.Game;
 
-    /// <summary>The document's title: Scene, Scene 2, Scene 3 or Game.</summary>
-    public string Title => IsGame ? "Game" : Index == 0 ? "Scene" : $"Scene {Index + 1}";
+    /// <summary>The view's title: Perspective, Top, Front, Side or Game.</summary>
+    public string Title => IsGame ? "Game" : Titles[Index];
+
+    /// <summary>The ID of the dock document that holds the view: <c>scene</c> for a scene view, <c>game</c> for the Game view.</summary>
+    public string DocumentId => IsGame ? ViewportDocument.GameId : ViewportDocument.SceneId;
 
     public ViewportSession Session { get; } = new();
 
@@ -67,7 +91,7 @@ public sealed class EditorViewport
     /// <summary>How the viewport draws. The shell changes it (<see cref="EditorShell.ApplyViewportSettings"/>).</summary>
     public ViewportSettings Settings { get; internal set; }
 
-    /// <summary>Whether the camera has a place. A scene view that is shown for the first time gets another one's.</summary>
+    /// <summary>Whether the camera has a place. A scene view that is shown for the first time gets its start from the first one's.</summary>
     internal bool Placed { get; set; }
 
     /// <summary>
@@ -88,5 +112,22 @@ public sealed class EditorViewport
                 : Session.Presence is ViewportPresence.Shown { Size: var shown } ? shown : default;
             return (Math.Max(size.Width, 1), Math.Max(size.Height, 1));
         }
+    }
+
+    /// <summary>
+    /// Puts the camera where this view starts, from the first scene view's camera: the same pivot at the same distance,
+    /// looking along the view's axis, so every view frames the same spot. All of them are perspective cameras that the user
+    /// can fly.
+    /// </summary>
+    internal void StartCamera(EditorCamera first)
+    {
+        var (yaw, pitch) = Start switch
+        {
+            SceneViewStart.Top => (0.0, EditorCamera.MaxPitch),
+            SceneViewStart.Front => (Math.PI, 0.0),
+            SceneViewStart.Side => (-Math.PI / 2, 0.0),
+            _ => (first.Yaw, first.Pitch),
+        };
+        Camera.LookAt(first.Pivot, first.PivotDistance, yaw, pitch);
     }
 }

@@ -1,4 +1,5 @@
 using Cinnabar.Editor.Commands;
+using Cinnabar.Editor.Docking;
 
 namespace Cinnabar.Editor.Shell;
 
@@ -53,31 +54,33 @@ static partial class EditorCommands
             scale => scale == Viewport.ViewportScale.Fit ? "Fit" : "100%",
             description: "Fit the frame to the viewport, or show one frame pixel per screen pixel.",
             icon: "scale"));
-        commands.Register(new Command(NewSceneView, "New Scene View", () => shell.OpenSceneView())
+        commands.Register(ChoiceCommand.ForEnum<Shell.SceneLayout>(SceneLayout, "Layout", () => shell.SceneLayout, shell.SetSceneLayout,
+            layout => layout == Shell.SceneLayout.Quad ? "Quad" : "Single",
+            description: "Lay the Scene's views out as one, the Perspective view, or as four: Perspective and Top above, Front and Side below. Each has its own camera and settings.",
+            icon: "viewport"));
+        ViewportDocumentToggle(shell, SceneView, "Scene View", ViewportDocument.SceneId, "Show or hide the Scene, which holds the editor's views of the world and its tools.", "viewport");
+        ViewportDocumentToggle(shell, GameView, "Game View", ViewportDocument.GameId, "Show or hide the Game view, which shows the game as a player sees it and gives it the input while it plays.", "camera");
+    }
+
+    static void ViewportDocumentToggle(EditorShell shell, string id, string label, string document, string description, string icon) =>
+        shell.Commands.Register(new Command(id, label, () =>
         {
-            Description = "Open another scene view, with a camera of its own, up to three. Drag its tab to dock it beside the others.",
-            Icon = "viewport",
-            CanExecuteWhen = () => shell.CanOpenSceneView,
-        });
-        commands.Register(new Command(GameView, "Game View", () =>
-        {
-            if (shell.Layout.IsViewportOpen(EditorViewport.GameIndex))
+            if (shell.Layout.IsViewportOpen(document))
             {
-                shell.Layout.CloseViewport(EditorViewport.GameIndex);
+                shell.Layout.CloseViewport(document);
             }
             else
             {
-                shell.Layout.ShowViewport(EditorViewport.GameIndex);
+                shell.Layout.ShowViewport(document);
             }
         })
         {
-            Description = "Show or hide the Game view, which shows the game as a player sees it and gives it the input while it plays.",
-            Icon = "camera",
-            IsCheckedWhen = () => shell.Layout.IsViewportOpen(EditorViewport.GameIndex),
+            Description = description,
+            Icon = icon,
+            IsCheckedWhen = () => shell.Layout.IsViewportOpen(document),
         });
-    }
 
-    // The active viewport's rendering (see docs/editor/viewport.md#viewport): what it shows in place of the lit scene, the
+    // The settings viewport's rendering (see docs/editor/viewport.md#viewport): what it shows in place of the lit scene, the
     // features that it turns off, the exposure offset, and the helpers. Each toggle is checked while its feature is on.
     static void RegisterRendering(EditorShell shell)
     {

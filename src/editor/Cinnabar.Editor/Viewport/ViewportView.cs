@@ -16,7 +16,7 @@ namespace Cinnabar.Editor.Viewport;
 
 /// <summary>
 /// One view of the game, as a document (see docs/editor/viewport.md#views): its frames, its view, and the stats over them.
-/// A scene view also has the tool palette and the camera's speed, and the input that drives the editor's tools. The right
+/// A scene view also has the tool palette and the camera's speed, and its title in a quad, and the input that drives the editor's tools. The right
 /// button flies with WASD, Q and E; Alt with the left button orbits, the middle button pans, and the wheel dollies. The
 /// left button selects, drags a box, or drags the gizmo. Q, W, E and R pick a tool, X switches the gizmo's space, F frames
 /// the selection, and H hides it. A material dragged from the content browser shows on the submesh under the mouse, and
@@ -47,6 +47,7 @@ public sealed class ViewportView : Grid
     readonly ViewportSession _session;
     readonly Border _activeFrame;
     readonly ComboBox _view;
+    readonly TextBlock _title;
     bool _showingView;
     readonly ViewportControl _control;
     readonly Border _overlay;
@@ -127,11 +128,28 @@ public sealed class ViewportView : Grid
         {
             Classes = { "viewport-view" },
             ItemsSource = EditorShell.DebugViewNames,
+            Focusable = false,
+        };
+        // A scene view in a quad is named, so the four can be told apart.
+        _title = new TextBlock
+        {
+            Text = viewport.Title,
+            FontSize = 11,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 0, 6, 0),
+            Foreground = Brushes.White,
+            Opacity = 0.8,
+        };
+        var header = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Top,
             Margin = new Thickness(8),
-            Focusable = false,
+            IsHitTestVisible = true,
         };
+        header.Children.Add(_title);
+        header.Children.Add(_view);
         ToolTip.SetTip(_view, "What this viewport shows: the lit scene, or a debug view of what makes it.");
         _view.SelectionChanged += (_, _) =>
         {
@@ -140,7 +158,7 @@ public sealed class ViewportView : Grid
                 _shell.ApplyViewportSettings(_viewport, _viewport.Settings with { DebugView = (Link.Protocol.DebugView)_view.SelectedIndex });
             }
         };
-        Children.Add(_view);
+        Children.Add(header);
 
         if (!_viewport.IsGame)
         {
@@ -209,6 +227,7 @@ public sealed class ViewportView : Grid
             _shell.ModeChanged += ShowMode;
             _shell.ActiveViewportChanged += ShowActive;
             _shell.ViewportsChanged += ShowActive;
+            _shell.SceneLayoutChanged += ShowTitle;
             _shell.ViewportSettingsChanged += ShowView;
             _timer.Start();
             if (_viewport.IsGame)
@@ -219,6 +238,7 @@ public sealed class ViewportView : Grid
             ShowTools();
             ShowSpeed();
             ShowActive();
+            ShowTitle();
             ShowView();
         };
         DetachedFromVisualTree += (_, _) =>
@@ -233,6 +253,7 @@ public sealed class ViewportView : Grid
             _shell.ModeChanged -= ShowMode;
             _shell.ActiveViewportChanged -= ShowActive;
             _shell.ViewportsChanged -= ShowActive;
+            _shell.SceneLayoutChanged -= ShowTitle;
             _shell.ViewportSettingsChanged -= ShowView;
             _timer.Stop();
             _flyTimer.Stop();
@@ -243,6 +264,8 @@ public sealed class ViewportView : Grid
 
     // The viewport that the View tab acts on has a frame around it while more than one viewport is shown.
     void ShowActive() => _activeFrame.Classes.Set("active", _shell.SettingsViewport == _viewport && _shell.ShownViewports.Skip(1).Any());
+
+    void ShowTitle() => _title.IsVisible = !_viewport.IsGame && _shell.SceneLayout == SceneLayout.Quad;
 
     void ShowView()
     {

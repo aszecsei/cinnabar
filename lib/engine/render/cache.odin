@@ -8,9 +8,9 @@ import "cinnabar:core/gpu"
 
 // A frame's transient textures each take one, since no two share a texture in a frame: about 35 for a frame at High,
 // about 65 with every feature on, and each of the editor's previews adds its own targets. Each extra view (see
-// docs/rendering/frame.md#views) draws the full pipeline and takes as many of its own, so the frame's own view and three
+// docs/rendering/frame.md#views) draws the full pipeline and takes as many of its own, so the frame's own view and four
 // extra ones fit.
-MAX_CACHED_TEXTURES :: 320
+MAX_CACHED_TEXTURES :: 400
 MAX_HISTORY_TEXTURES :: 16
 // A cached texture or history is destroyed after this many frames without use.
 CACHE_LIFETIME :: 8

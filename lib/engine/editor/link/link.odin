@@ -453,7 +453,7 @@ Edit_Problems :: struct {
 // A viewport is a number below MAX_VIEWPORTS (see docs/editor/viewport.md#views). Each is open from its Open_Viewport
 // to its Close_Viewport, which the editor sends as the viewport shows and hides, and while it is open the game draws it
 // into a shared target of its own. Its kind says what it shows.
-MAX_VIEWPORTS :: 4
+MAX_VIEWPORTS :: 5
 
 Viewport_Kind :: enum u8 {
 	// A scene view: the world from the viewport's Editor_Camera, with the editor's tools, in every mode.

@@ -69,7 +69,8 @@ static class DefaultRibbon
                         new LargeButton(EditorCommands.Stats),
                         new SmallStack([EditorCommands.FrameSelected, EditorCommands.FrameScene, EditorCommands.OrbitSelection]),
                         new ComboBox(EditorCommands.ViewportScale),
-                        new SmallStack([EditorCommands.NewSceneView, EditorCommands.GameView]),
+                        new ComboBox(EditorCommands.SceneLayout),
+                        new SmallStack([EditorCommands.SceneView, EditorCommands.GameView]),
                     ]),
                     new RibbonGroup("Rendering",
                     [

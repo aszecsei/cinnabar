@@ -245,7 +245,7 @@ MAX_PREVIEW_SIZE :: 1024
 
 // The editor's viewports render into shared targets of their own too, at most this many, each at most this large on a
 // side, as the frame target is (see docs/editor/viewport.md#views).
-MAX_VIEWPORT_TARGETS :: 4
+MAX_VIEWPORT_TARGETS :: 5
 MAX_VIEWPORT_SIZE :: 8192
 
 // Preview_Target is a frame of a preview target: its texture, in the render target layout until the frame ends, in

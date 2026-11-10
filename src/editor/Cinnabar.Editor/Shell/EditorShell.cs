@@ -73,7 +73,8 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
         Mesh.Subscribe();
         Autosave = new Autosave(options.AutosaveDirectory);
         CreateViewports();
-        Layout = new EditorLayout(CreatePanels(), [.. Viewports.Select(v => new ViewportDocument(v, () => new ViewportView(this, v)))]);
+        Layout = new EditorLayout(CreatePanels(), new ViewportDocument(ViewportDocument.SceneId, "Scene", () => new SceneLayoutView(this)),
+            new ViewportDocument(ViewportDocument.GameId, "Game", () => new ViewportView(this, GameViewport)));
         RestoreLayout();
 
         Host.Output += Console.Add;

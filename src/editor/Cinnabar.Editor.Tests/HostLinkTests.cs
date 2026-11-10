@@ -385,7 +385,7 @@ public sealed class HostLinkTests : IAsyncDisposable
         editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
         await editor.Next<EntitySnapshot>();
         var scene = await Show(editor, 0, ViewportKind.Scene, 320, 240);
-        var game = await Show(editor, 3, ViewportKind.Game, 320, 240);
+        var game = await Show(editor, 4, ViewportKind.Game, 320, 240);
         using var device = new ViewportDevice(_adapter);
         using var sceneFrames = await Open(device, scene.Prefix);
         using var gameFrames = await Open(device, game.Prefix);
@@ -402,7 +402,7 @@ public sealed class HostLinkTests : IAsyncDisposable
         var albedo = EditorShell.DefaultViewportSettings with { DebugView = DebugView.Albedo, ShowIcons = false };
         editor.Link.Send(new EditorCamera(0, [Origin, 0, -Meter], [0, 0, 0, 1], (float)(60 * Math.PI / 180), 0.05f));
         editor.Link.Send(new SetViewportSettings(0, albedo));
-        editor.Link.Send(new SetViewportSettings(3, albedo));
+        editor.Link.Send(new SetViewportSettings(4, albedo));
 
         // Both pictures come, and they differ: the scene view looks at the box, the Game view at the background.
         ulong sceneFrame = 0;
@@ -413,7 +413,7 @@ public sealed class HostLinkTests : IAsyncDisposable
         {
             await Task.Delay(25, TestContext.Current.CancellationToken);
             editor.Link.Send(new ViewportAcknowledged(0, scene.Generation, sceneFrames.Completed));
-            editor.Link.Send(new ViewportAcknowledged(3, game.Generation, gameFrames.Completed));
+            editor.Link.Send(new ViewportAcknowledged(4, game.Generation, gameFrames.Completed));
             (sceneFrame, gameFrame) = (sceneFrames.Completed, gameFrames.Completed);
             if (i >= 20 && sceneFrame > 0 && !Background(Pixel(device, sceneFrames.Texture(sceneFrame), scene.Width / 2, scene.Height / 2)))
             {
@@ -434,7 +434,7 @@ public sealed class HostLinkTests : IAsyncDisposable
             found = [.. (await editor.Next<PickResult>(r => r.Id == 100 + attempt)).Hits.Select(h => h.SceneId)];
         }
         Assert.Equal([box.Id], found);
-        editor.Link.Send(new PickRequest(7, 3, game.Width / 2, game.Height / 2, 1, 1));
+        editor.Link.Send(new PickRequest(7, 4, game.Width / 2, game.Height / 2, 1, 1));
         Assert.Empty((await editor.Next<PickResult>(r => r.Id == 7)).Hits);
     }
 
@@ -476,6 +476,68 @@ public sealed class HostLinkTests : IAsyncDisposable
             editor.Link.Send(new ViewportAcknowledged(2, again.Generation, secondFrames.Completed));
         }
         Assert.True(secondFrames.Completed > 0, "the viewport drew nothing after it opened again");
+    }
+
+    // The engine draws at most five viewports: the four scene views of a quad and the Game view.
+    [Fact]
+    public async Task FourSceneViewsAndTheGameViewDrawTogetherAndEachAnswersItsPicks()
+    {
+        await using var editor = await Connect();
+        editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
+        await editor.Next<EntitySnapshot>();
+        List<ViewportTarget> targets = [];
+        for (uint viewport = 0; viewport < 4; viewport++)
+        {
+            targets.Add(await Show(editor, viewport, ViewportKind.Scene, 320, 240));
+        }
+        targets.Add(await Show(editor, 4, ViewportKind.Game, 320, 240));
+        Assert.Equal(5, targets.Select(t => t.Prefix).Distinct().Count());
+        using var device = new ViewportDevice(_adapter);
+        List<SharedFrames> frames = [];
+        foreach (var target in targets)
+        {
+            frames.Add(await Open(device, target.Prefix));
+        }
+
+        var box = Box(1, "Box", z: 1, scale: 1);
+        var volume = Entity(2, "Volume");
+        volume.Components.Add(new Document.SceneComponent(VolumeId, "Volume", [Field("shape", Document.SceneValue.Name("Global"))]));
+        volume.Components.Add(new Document.SceneComponent(EnvironmentId, "Environment", [Field("background", Document.SceneValue.Of(Number(1.0), Number(0.0), Number(0.0)))]));
+        // The views of a frame share the render origin of the Game view, so the game's camera is in the scene.
+        var camera = Entity(3, "Camera", z: 5);
+        camera.Components.Add(new Document.SceneComponent(CameraId, "Camera", [Field("vertical_fov", Document.SceneValue.Of(Number(1.0))), Field("near", Document.SceneValue.Of(Number(0.05)))]));
+        await Load(editor, Scene(box, volume, camera), "Box");
+        for (uint viewport = 0; viewport < 4; viewport++)
+        {
+            editor.Link.Send(new EditorCamera(viewport, [Origin, 0, -Meter], [0, 0, 0, 1], (float)(60 * Math.PI / 180), 0.05f));
+        }
+
+        // Every viewport draws, and the frames go on coming while all five are open.
+        ulong[] first = new ulong[5];
+        for (var i = 0; i < 400 && frames.Any(f => f.Completed == 0); i++)
+        {
+            await Task.Delay(25, TestContext.Current.CancellationToken);
+        }
+        for (var i = 0; i < 5; i++)
+        {
+            first[i] = frames[i].Completed;
+            Assert.True(first[i] > 0, $"viewport {i} drew no frame");
+        }
+        await Task.Delay(500, TestContext.Current.CancellationToken);
+        for (var i = 0; i < 5; i++)
+        {
+            Assert.True(frames[i].Completed > first[i], $"viewport {i} stopped drawing");
+        }
+
+        // The fourth scene view finds the box in the middle of its frame, once the mesh has streamed in.
+        ulong[] found = [];
+        for (var attempt = 0u; attempt < 200 && found.Length == 0; attempt++)
+        {
+            editor.Link.Send(new PickRequest(100 + attempt, 3, targets[3].Width / 2, targets[3].Height / 2, 1, 1));
+            found = [.. (await editor.Next<PickResult>(r => r.Id == 100 + attempt)).Hits.Select(h => h.SceneId)];
+            await Task.Delay(50, TestContext.Current.CancellationToken);
+        }
+        Assert.Equal([box.Id], found);
     }
 
     [Fact]

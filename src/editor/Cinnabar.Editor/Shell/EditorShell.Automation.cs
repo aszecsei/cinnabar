@@ -89,26 +89,19 @@ public sealed partial class EditorShell
                 {
                     return new AutomationResponse(request.Id, false, Error: "viewport takes settings to change");
                 }
-                // Shown is the viewport's document, not one of its settings to patch.
+                // Shown and layout are the shell's, not a viewport's, so they are not settings to patch.
                 var changes = new Dictionary<string, System.Text.Json.JsonElement>(all, StringComparer.OrdinalIgnoreCase);
-                if (changes.Remove("shown", out var shown))
+                if (changes.Remove("layout", out var layout))
                 {
-                    if (request.Viewport is not { } number || number < 0 || number >= Viewports.Count)
+                    if (!Enum.TryParse<SceneLayout>(layout.ToString(), true, out var chosen) || !Enum.IsDefined(chosen))
                     {
-                        return new AutomationResponse(request.Id, false, Error: $"shown takes a viewport, 0 to {Viewports.Count - 1}");
+                        return new AutomationResponse(request.Id, false, Error: $"unknown layout {layout}; the layouts are {string.Join(", ", Enum.GetNames<SceneLayout>())}");
                     }
-                    if (shown.ValueKind is not (System.Text.Json.JsonValueKind.True or System.Text.Json.JsonValueKind.False))
-                    {
-                        return new AutomationResponse(request.Id, false, Error: $"shown takes true or false, not {shown}");
-                    }
-                    if (shown.ValueKind == System.Text.Json.JsonValueKind.True)
-                    {
-                        Layout.ShowViewport(number);
-                    }
-                    else
-                    {
-                        Layout.CloseViewport(number);
-                    }
+                    SetSceneLayout(chosen);
+                }
+                if (changes.Remove("shown", out var shown) && ShowViewportDocument(request, shown) is { } refusal)
+                {
+                    return new AutomationResponse(request.Id, false, Error: refusal);
                 }
                 if (AutomationViewport(request, scene: false) is not { } target)
                 {
@@ -144,6 +137,37 @@ public sealed partial class EditorShell
             default:
                 return new AutomationResponse(request.Id, false, Error: $"unknown command {request.Command}; the commands are status, screenshot, gif, viewport, camera, ui and content");
         }
+    }
+
+    // Shows or hides the document of the viewport that a request names, and gives the reason when it cannot. The Scene
+    // document holds viewports 0 to 3: showing 1 to 3 needs the quad layout, which it sets, and hiding one of them is
+    // the layout's, so it is refused; viewport 0 shows and hides the whole document. Viewport 4 is the Game document.
+    string? ShowViewportDocument(AutomationRequest request, System.Text.Json.JsonElement shown)
+    {
+        if (request.Viewport is not { } number || number < 0 || number >= Viewports.Count)
+        {
+            return $"shown takes a viewport, 0 to {Viewports.Count - 1}";
+        }
+        if (shown.ValueKind is not (System.Text.Json.JsonValueKind.True or System.Text.Json.JsonValueKind.False))
+        {
+            return $"shown takes true or false, not {shown}";
+        }
+        var viewport = Viewports[number];
+        if (shown.ValueKind == System.Text.Json.JsonValueKind.False)
+        {
+            if (number is > 0 and < EditorViewport.SceneViews)
+            {
+                return $"viewport {number} is shown by the quad layout; set layout to Single, or hide viewport 0 to close the Scene";
+            }
+            Layout.CloseViewport(viewport.DocumentId);
+            return null;
+        }
+        if (number is > 0 and < EditorViewport.SceneViews)
+        {
+            SetSceneLayout(SceneLayout.Quad);
+        }
+        Layout.ShowViewport(viewport.DocumentId);
+        return null;
     }
 
     // The viewport that a request names, or null when it is not one. Without a name, the capture viewport, which is the

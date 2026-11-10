@@ -1145,7 +1145,7 @@ an_extra_view_draws_into_its_own_target :: proc(t: ^testing.T) {
 			platform.gpu_destroy_texture(target)
 		}
 	}
-	states: [4]View_State
+	states: [MAX_EXTRA_VIEWS + 1]View_State
 	for &state in states {
 		view_state_init(&state, r)
 	}
@@ -1161,9 +1161,10 @@ an_extra_view_draws_into_its_own_target :: proc(t: ^testing.T) {
 		draw_log = {}
 	}
 
-	records: [4]View_Record
-	views: [4]Extra_View
-	targets := [4]gpu.Texture{first, second, third, first}
+	// One view more than draw. The fourth draws into the third's target again, after it.
+	records: [MAX_EXTRA_VIEWS + 1]View_Record
+	views: [MAX_EXTRA_VIEWS + 1]Extra_View
+	targets := [MAX_EXTRA_VIEWS + 1]gpu.Texture{first, second, third, third, first}
 	for &v, i in views {
 		v = {
 			view   = {position = ecs.position_offset({}, {f32(i), 0, 0}), rotation = 1, vertical_fov = 1, near = 0.05},
@@ -1187,13 +1188,13 @@ an_extra_view_draws_into_its_own_target :: proc(t: ^testing.T) {
 	testing.expect_value(t, main_draws, 1)
 	testing.expect_value(t, first_draws, 1)
 	testing.expect_value(t, second_draws, 1)
-	testing.expect_value(t, third_draws, 1)
+	testing.expect_value(t, third_draws, 2)
 	testing.expect(t, main_first < first_first && first_first < second_first && second_first < third_first, "the views did not draw in order")
-	for i in 0 ..< 3 {
+	for i in 0 ..< MAX_EXTRA_VIEWS {
 		testing.expect_value(t, records[i].before_world, 1)
 	}
-	// The fourth view is past the limit, and the frame says so.
-	testing.expect_value(t, records[3].before_world, 0)
+	// The last view is past the limit, and the frame says so.
+	testing.expect_value(t, records[MAX_EXTRA_VIEWS].before_world, 0)
 	testing.expect_value(t, len(rig.record.problems), 1)
 	testing.expect(t, len(rig.record.problems) == 1 && strings.contains(rig.record.problems[0], "extra views"))
 	forget_problems(rig)

@@ -22,7 +22,8 @@ public sealed class EditorLayout
     static readonly Dictionary<string, string> Renamed = new() { ["assetBrowser"] = "contentBrowser" };
 
     readonly IReadOnlyDictionary<string, PanelTool> _panels;
-    readonly IReadOnlyList<ViewportDocument> _viewports;
+    readonly ViewportDocument _scene;
+    readonly ViewportDocument _game;
     readonly IReadOnlyDictionary<string, ViewportDocument> _viewportsById;
 
     public Factory Factory { get; } = new();
@@ -47,12 +48,14 @@ public sealed class EditorLayout
     public IEnumerable<PanelTool> Panels => _panels.Values;
 
     /// <param name="panels">Every panel, each of which exists once.</param>
-    /// <param name="viewports">Every viewport's document, in the order of their numbers: the scene views, then the Game view.</param>
-    public EditorLayout(IEnumerable<PanelTool> panels, IReadOnlyList<ViewportDocument> viewports)
+    /// <param name="scene">The Scene document, which holds the scene views.</param>
+    /// <param name="game">The Game document, which holds the Game view.</param>
+    public EditorLayout(IEnumerable<PanelTool> panels, ViewportDocument scene, ViewportDocument game)
     {
         _panels = panels.ToDictionary(p => p.Id);
-        _viewports = viewports;
-        _viewportsById = viewports.ToDictionary(v => v.Id);
+        _scene = scene;
+        _game = game;
+        _viewportsById = new[] { scene, game }.ToDictionary(v => v.Id);
         Root = CreateDefault();
         Factory.DockableAdded += (_, _) => Changed?.Invoke();
         Factory.DockableRemoved += (_, _) => Changed?.Invoke();
@@ -102,7 +105,7 @@ public sealed class EditorLayout
     IDocumentDock? DocumentHost()
     {
         var docks = Walk(Root).OfType<IDocumentDock>().ToList();
-        return _viewports.Where(v => IsOpen(v.Id)).Select(v => v.Owner).OfType<IDocumentDock>().FirstOrDefault(docks.Contains) ?? docks.FirstOrDefault();
+        return _viewportsById.Values.Where(v => IsOpen(v.Id)).OrderBy(v => v == _scene ? 0 : 1).Select(v => v.Owner).OfType<IDocumentDock>().FirstOrDefault(docks.Contains) ?? docks.FirstOrDefault();
     }
 
     /// <summary>Adds a material editor's or an effect preview's document beside the viewports, and shows it.</summary>
@@ -140,16 +143,16 @@ public sealed class EditorLayout
     EditorDocument? FindDocument(object editor) =>
         Walk(Root).OfType<EditorDocument>().FirstOrDefault(d => d.Shows == editor);
 
-    /// <summary>Whether a viewport's document is in the layout, as a tab that may be behind another.</summary>
-    public bool IsViewportOpen(int index) => IsOpen(_viewports[index].Id);
+    /// <summary>Whether the Scene or the Game document (by <see cref="ViewportDocument.SceneId"/> or <see cref="ViewportDocument.GameId"/>) is in the layout, as a tab that may be behind another.</summary>
+    public bool IsViewportOpen(string id) => IsOpen(id);
 
     /// <summary>
-    /// Shows a viewport's document: it opens in the document dock that holds the first open viewport, unless it is open
+    /// Shows the Scene or the Game document: it opens in the document dock that holds the other one, unless it is open
     /// already, and becomes its dock's active tab.
     /// </summary>
-    public void ShowViewport(int index)
+    public void ShowViewport(string id)
     {
-        var document = _viewports[index];
+        var document = _viewportsById[id];
         if (!IsOpen(document.Id))
         {
             if (DocumentHost() is not { } dock)
@@ -167,17 +170,17 @@ public sealed class EditorLayout
         Changed?.Invoke();
     }
 
-    /// <summary>Closes a viewport's document. Its viewport keeps its camera and settings for the next time.</summary>
-    public void CloseViewport(int index)
+    /// <summary>Closes the Scene or the Game document. Its viewports keep their cameras and settings for the next time.</summary>
+    public void CloseViewport(string id)
     {
-        if (IsViewportOpen(index))
+        if (IsViewportOpen(id))
         {
-            Factory.CloseDockable(_viewports[index]);
+            Factory.CloseDockable(_viewportsById[id]);
             Changed?.Invoke();
         }
     }
 
-    /// <summary>The outliner on the left, the scene view and the Game view in the middle, the properties on the right, and the console below.</summary>
+    /// <summary>The outliner on the left, the Scene and the Game in the middle, the properties on the right, and the console below.</summary>
     IRootDock CreateDefault()
     {
         IDockable Tools(string id, Alignment alignment, double proportion, params string[] panels) =>
@@ -189,7 +192,7 @@ public sealed class EditorLayout
             Orientation = Orientation.Vertical,
             Proportion = 0.64,
             VisibleDockables = Factory.CreateList<IDockable>(
-                NewDocumentDock(DocumentDockId, DocumentDockProportion, [_viewports[0], _viewports[^1]], _viewports[0].Id),
+                NewDocumentDock(DocumentDockId, DocumentDockProportion, [_scene, _game], _scene.Id),
                 new ProportionalDockSplitter(),
                 Tools(BottomDock, Alignment.Bottom, 0.28, "console", "contentBrowser", "resourceMonitor", "profiler")),
         };
@@ -365,7 +368,7 @@ public sealed class EditorLayout
             case DocumentsNode documents:
                 documentDocks++;
                 // A file from an editor with one viewport lists no documents, and had the scene view and the Game view's place.
-                var wanted = documents.Documents ?? [_viewports[0].Id, _viewports[^1].Id];
+                var wanted = documents.Documents ?? [_scene.Id, _game.Id];
                 var placed = wanted.Where(id => _viewportsById.ContainsKey(id) && used.Add(id)).Select(id => _viewportsById[id]).ToList();
                 dockable = NewDocumentDock(UniqueId(documents.Id, DocumentDockId, dockIds), double.NaN, placed, documents.Active);
                 break;
