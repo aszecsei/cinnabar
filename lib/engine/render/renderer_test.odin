@@ -303,8 +303,8 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 				rec.reflections, rec.traced = f.reflections != 0, f.ssr != nil && f.ssr.traced != nil
 				pf := f.reflection_probes
 				if pf != nil {
-					_, rec.capture_gi = pf.face_light.(Reflection_Probe_Voxel_Light)
-					_, rec.capture_occlusion = pf.face_light.(Reflection_Probe_Occlusion)
+					_, rec.capture_gi = pf.face_light[pf.first_face].(Reflection_Probe_Voxel_Light)
+					_, rec.capture_occlusion = pf.face_light[pf.first_face].(Reflection_Probe_Occlusion)
 				} else {
 					rec.capture_gi, rec.capture_occlusion = false, false
 				}
@@ -764,13 +764,13 @@ Rig :: struct {
 	r:        ^Renderer,
 }
 
-// rig_start starts the rig. The caller then sets context.logger to record_problems with the rig's record, so a frame's
-// warnings and errors come to rig.record.problems.
+// rig_start starts the rig, with a frame target of size. The caller then sets context.logger to record_problems with the
+// rig's record, so a frame's warnings and errors come to rig.record.problems.
 @(private = "file")
-rig_start :: proc(t: ^testing.T, rig: ^Rig) {
+rig_start :: proc(t: ^testing.T, rig: ^Rig, size := [2]i32{64, 32}) {
 	testing.expect(t, virtual.arena_init_growing(&rig.arena) == nil)
 	testing.expect(t, jobs.init(2))
-	testing.expect(t, null.init(nil, {64, 32}))
+	testing.expect(t, null.init(nil, size))
 	rig.platform = test_platform(&rig.arena)
 	rig.record.problems = make([dynamic]string)
 	rig.record.runner = context.logger
@@ -852,7 +852,7 @@ enable_frame_pipelines :: proc(r: ^Renderer) {
 // fill_world makes the world of the extra views' tests: a sun and a lamp that cast shadows, meshes that hold slots, a
 // reflection probe, and a global volume with fog, clouds and an atmosphere whose sun is the directional light.
 @(private = "file")
-fill_world :: proc(w: ^ecs.World) {
+fill_world :: proc(w: ^ecs.World) -> (probe: ecs.Entity) {
 	sun := ecs.spawn(w)
 	ecs.add(w, sun, ecs.TRANSFORM_IDENTITY)
 	ecs.add(w, sun, Directional_Light{intensity = 1, cast_shadows = true})
@@ -864,7 +864,7 @@ fill_world :: proc(w: ^ecs.World) {
 		ecs.add(w, mesh, ecs.Transform{position = ecs.position_offset({}, {f32(k), 0, 5}), rotation = 1, scale = 1})
 		ecs.add(w, mesh, Mesh_Renderer{})
 	}
-	probe := ecs.spawn(w)
+	probe = ecs.spawn(w)
 	ecs.add(w, probe, ecs.Transform{position = ecs.position_offset({}, {0, 1, 3}), rotation = 1, scale = 1})
 	ecs.add(w, probe, Reflection_Probe{extent = {2, 1, 2}, box_projection = true})
 	mist := ecs.spawn(w)
@@ -876,6 +876,7 @@ fill_world :: proc(w: ^ecs.World) {
 	environment.mode = {true, .Atmosphere}
 	environment.sun = {true, sun}
 	ecs.add(w, mist, environment)
+	return
 }
 
 // extra_target makes a target for an extra view, as the editor's shared ones are: in the render target layout.
@@ -2472,5 +2473,61 @@ a_frame_streams_a_paged_meshs_pages :: proc(t: ^testing.T) {
 		testing.expect(t, fake.reads_begun > 0)
 	}
 	testing.expect_value(t, fake.reads_open, 0)
+	testing.expectf(t, len(rig.record.problems) == 0, "the frames logged %v", rig.record.problems)
+}
+
+// What a frame's transient textures take at 1080p at each preset, once the reflection probe's capture is done, and in a
+// frame at Ultra that captures all six of its faces: every frame executes, the null backend checks its barriers and
+// waits, and the textures that they share are fewer than they are. The numbers are logged at the Info level.
+@(test)
+transient_textures_share_at_each_preset :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	SIZE :: [2]u32{1920, 1080}
+	rig := new(Rig)
+	defer free(rig)
+	rig_start(t, rig, {i32(SIZE.x), i32(SIZE.y)})
+	defer rig_stop(rig)
+	runner := context.logger
+	context.logger = {record_problems, &rig.record, .Debug, {}}
+	r := rig.r
+	probe := fill_world(rig.w)
+	enable_frame_pipelines(r)
+	defer rig.platform.gpu_destroy_texture(r.blue_noise.texture)
+
+	measure :: proc(t: ^testing.T, r: ^Renderer, w: ^ecs.World, name: string, quality: ^Quality, faces: u32, runner: log.Logger) {
+		// The frames go on until the probe's capture draws the faces asked for: none once it is done, or all six.
+		for k in 0 ..< 16 {
+			desc := Frame_Desc {
+				view    = View{position = ecs.position_offset({}, {f32(k), 1, -4}), rotation = 1, projection = Perspective{1, 0.05}},
+				size    = SIZE,
+				quality = quality,
+			}
+			testing.expectf(t, draw_frame(r, w, desc), "%s: frame %d did not execute", name, k)
+			if reflection_probe_stats(r).faces == faces {
+				break
+			}
+		}
+		testing.expectf(t, reflection_probe_stats(r).faces == faces, "%s: the probe's capture drew %v", name, reflection_probe_stats(r))
+		s := r.transients
+		testing.expectf(t, s.taken > 0 && s.taken < s.textures, "%s: %d transient textures took %d", name, s.textures, s.taken)
+		testing.expect(t, s.taken_bytes < s.bytes)
+		testing.expect(t, s.taken <= MAX_CACHED_TEXTURES)
+		context.logger = runner
+		log.infof(
+			"%s: %d transient textures, %.1f MiB; they take %d, %.1f MiB",
+			name,
+			s.textures,
+			f64(s.bytes) / (1 << 20),
+			s.taken,
+			f64(s.taken_bytes) / (1 << 20),
+		)
+	}
+	for preset in Quality_Preset.Low ..= Quality_Preset.Ultra {
+		q := preset_quality(preset, r.caps)
+		measure(t, r, rig.w, fmt.tprint(preset), &q, 0, runner)
+	}
+	q := preset_quality(.Ultra, r.caps)
+	testing.expect(t, capture_reflection_probe(r, probe))
+	measure(t, r, rig.w, "Ultra, capturing six faces", &q, 6, runner)
 	testing.expectf(t, len(rig.record.problems) == 0, "the frames logged %v", rig.record.problems)
 }

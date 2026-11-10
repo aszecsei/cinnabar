@@ -6,10 +6,9 @@ import "core:log"
 import "cinnabar:core"
 import "cinnabar:core/gpu"
 
-// A frame's transient textures each take one, since no two share a texture in a frame: about 35 for a frame at High,
-// about 65 with every feature on, and each of the editor's previews adds its own targets. Each extra view (see
-// docs/rendering/frame.md#views) draws the full pipeline and takes as many of its own, so the frame's own view and four
-// extra ones fit.
+// The textures that a frame's transient textures take, which share a texture where their lifetimes do not overlap (see
+// create_transients): about 40 for a frame at 1080p at Ultra, and about 56 while it captures a reflection probe's six
+// faces. Each extra view (see docs/rendering/frame.md#views) draws the full pipeline and takes as many of its own.
 MAX_CACHED_TEXTURES :: 400
 MAX_HISTORY_TEXTURES :: 16
 // A cached texture or history is destroyed after this many frames without use.
@@ -90,9 +89,11 @@ history_set_trim :: proc(cache: ^Texture_Cache, set: ^History_Set, platform: ^co
 	}
 }
 
-// cache_acquire returns a texture that matches the description and is not used yet in this frame. A full cache
-// destroys its least recently used texture that this frame does not use, as a window that is resized every frame
-// needs. It returns the nil handle when this frame uses every texture or the backend cannot create one.
+// cache_acquire returns a texture that matches the description, apart from the label, and is not used yet in this
+// frame. Of those, it takes one that was made with the same label, so a texture keeps its name in a debugger while the
+// frames take their textures in the same order. A full cache destroys its least recently used texture that this frame
+// does not use, as a window that is resized every frame needs. It returns the nil handle when this frame uses every
+// texture or the backend cannot create one.
 @(private)
 cache_acquire :: proc(cache: ^Texture_Cache, platform: ^core.Platform_API, desc: gpu.Texture_Desc) -> gpu.Texture {
 	key := desc
@@ -100,6 +101,7 @@ cache_acquire :: proc(cache: ^Texture_Cache, platform: ^core.Platform_API, desc:
 	label_hash := hash.fnv64a(transmute([]byte)desc.label)
 	free_slot := -1
 	oldest := -1
+	match := -1
 	for &entry, i in cache.entries {
 		if entry.texture == {} {
 			if free_slot < 0 {
@@ -107,13 +109,22 @@ cache_acquire :: proc(cache: ^Texture_Cache, platform: ^core.Platform_API, desc:
 			}
 			continue
 		}
-		if entry.desc == key && entry.label_hash == label_hash && entry.last_used != cache.frame {
-			entry.last_used = cache.frame
-			return entry.texture
+		if entry.last_used == cache.frame {
+			continue
 		}
-		if entry.last_used != cache.frame && (oldest < 0 || entry.last_used < cache.entries[oldest].last_used) {
+		if entry.desc == key && (match < 0 || entry.label_hash == label_hash) {
+			match = i
+			if entry.label_hash == label_hash {
+				break
+			}
+		}
+		if oldest < 0 || entry.last_used < cache.entries[oldest].last_used {
 			oldest = i
 		}
+	}
+	if match >= 0 {
+		cache.entries[match].last_used = cache.frame
+		return cache.entries[match].texture
 	}
 	if free_slot < 0 && oldest >= 0 {
 		platform.gpu_destroy_texture(cache.entries[oldest].texture)

@@ -285,10 +285,10 @@ add_ao_passes :: proc(f: ^Frame, settings: Ao_Settings) {
 // docs/rendering/lighting-and-shadows.md#reflection-probes): the same search, radius and power, from the face's own
 // depth and normals, a 90° view of size pixels along axes (right, up and forward) from REFLECTION_PROBE_NEAR, with no
 // jitter and a noise that stays, since nothing averages a capture over time, so the denoiser takes all of its passes.
-// It runs on the graphics queue, between the face's prepass and its forward pass, in passes named for the probes. first is the frame's first face's,
-// whose textures the frame's faces share, or nil for the first face. It is nil without the camera's ambient occlusion.
+// It runs on the graphics queue, between the face's prepass and its forward pass, in passes named for the probes. It is
+// nil without the camera's ambient occlusion.
 @(private)
-ao_face :: proc(f: ^Frame, axes: [3][3]f32, size: u32, depth, normals: Texture, first: ^Ao_Frame) -> ^Ao_Frame {
+ao_face :: proc(f: ^Frame, axes: [3][3]f32, size: u32, depth, normals: Texture) -> ^Ao_Frame {
 	if f.ao == nil {
 		return nil
 	}
@@ -310,14 +310,7 @@ ao_face :: proc(f: ^Frame, axes: [3][3]f32, size: u32, depth, normals: Texture, 
 	af.constants.size = af.size
 	af.constants.jitter = {}
 	af.constants.noise_slice = 0
-	if first != nil {
-		af.levels, af.raw, af.edges = first.levels, first.raw, first.edges
-		for i in 0 ..< af.denoise_count {
-			af.denoise[i].output = first.denoise[i].output
-		}
-	} else {
-		create_ao_textures(f.graph, af)
-	}
+	create_ao_textures(f.graph, af)
 	add_ao_view_passes(f.graph, af)
 	return af
 }

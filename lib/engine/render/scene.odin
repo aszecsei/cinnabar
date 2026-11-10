@@ -2435,8 +2435,8 @@ draw_scene_view :: proc(f: ^Frame, cb: ^gpu.Command_Buffer, view: int, pass: for
 	pushes := pass == .Forward || pass == .Transparent
 	push: Material_Push
 	if pushes {
-		_, is_probe := reflection_probe_view(f, view)
-		push = is_probe ? reflection_probe_push(f) : material_push(f, pass, group)
+		face, is_probe := reflection_probe_view(f, view)
+		push = is_probe ? reflection_probe_push(f, face) : material_push(f, pass, group)
 	}
 	if pass != .Depth && pass != .Virtual_Depth && pass != .Voxelize {
 		gpu.cmd_set_stencil_reference(cb, view == VIEW_VIEW_MODEL ? VIEW_MODEL_STENCIL : 0)
