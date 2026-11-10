@@ -73,6 +73,8 @@ Session :: struct {
 	last_scan:    f64,
 	last_values:  f64,
 	last_stats:   f64,
+	// The bytes of mesh pages that the renderer had streamed when the stats were last sent.
+	pages_streamed: u64,
 	// The material editor's previews, by ID, and the one to draw next (see preview.odin).
 	previews:     [MAX_PREVIEWS]Preview,
 	next_preview: int,
@@ -295,6 +297,7 @@ poll :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, connection: u6
 		send_ui_layouts(e, out, frame)
 	}
 	if now - s.last_stats >= STATS_INTERVAL {
+		stats_interval := now - s.last_stats
 		s.last_stats = now
 		stats := game_stats(w, scripts, frame)
 		if e.renderer != nil {
@@ -307,6 +310,14 @@ poll :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, connection: u6
 			vs := render.virtual_shadow_stats(e.renderer)
 			stats.virtual_pages_requested, stats.virtual_pages_allocated = vs.requested, vs.allocated
 			stats.virtual_pages_missed, stats.virtual_pages_capacity = vs.missed, vs.capacity
+			pages := render.mesh_stream_stats(&e.renderer.residency)
+			stats.mesh_pages_resident, stats.mesh_pages_capacity = pages.resident_pages, pages.capacity_pages
+			stats.mesh_pages_pending = pages.pending_requests
+			// A rate over the interval, as a frame's bytes are 0 in most frames.
+			if pages.streamed_total >= s.pages_streamed && stats_interval > 0 {
+				stats.mesh_pages_streamed_bytes = u32(min(f64(pages.streamed_total - s.pages_streamed) / stats_interval, f64(max(u32))))
+			}
+			s.pages_streamed = pages.streamed_total
 			gi := render.gi_split_stats(e.renderer)
 			cascades := make([]link.Gi_Cascade_Stats, gi.count, frame)
 			for &cascade, k in cascades {

@@ -1191,6 +1191,13 @@ Game_Stats :: struct {
 	virtual_pages_allocated: u32,
 	virtual_pages_missed:    u32,
 	virtual_pages_capacity:  u32,
+	// The pool of mesh pages: the pages that are resident, the slots that it has, 0 without a paged mesh, the pages that
+	// views want and that are not resident yet, and the bytes a second that the frames since the last stats copied into
+	// it (see docs/rendering/assets.md#mesh-pages).
+	mesh_pages_resident: u32,
+	mesh_pages_capacity: u32,
+	mesh_pages_pending:  u32,
+	mesh_pages_streamed_bytes: u32,
 	// The split cascades' tables a frame or two ago, a cascade each, none without them (see
 	// docs/rendering/global-illumination.md#split-cascades).
 	gi_cascades:      []Gi_Cascade_Stats,
