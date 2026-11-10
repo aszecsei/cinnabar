@@ -118,6 +118,8 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
             Visibility.Resend();
         };
         World.EntitiesChanged += OnEntitiesChanged;
+        World.EntitiesChanged += UpdateWorldCamera;
+        World.TypesChanged += UpdateWorldCamera;
         // An entity that comes back, as an undone delete does, gets a new handle, which the game must hide again.
         World.EntitiesChanged += Visibility.Send;
         Layout.Changed += Commands.InvalidateAll;

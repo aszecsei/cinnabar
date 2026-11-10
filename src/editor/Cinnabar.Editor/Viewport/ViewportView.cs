@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
+using Avalonia.Input.TextInput;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
@@ -54,6 +55,8 @@ public sealed class ViewportView : Grid
     bool _showingView;
     readonly ViewportControl _control;
     readonly Border _overlay;
+    // The Game view's notice that the world has no camera; null in a scene view.
+    readonly Border? _noCamera;
     readonly TextBlock _stats;
     readonly Border _box;
     readonly TextBlock _speed;
@@ -124,6 +127,11 @@ public sealed class ViewportView : Grid
         if (_viewport.IsGame)
         {
             Children.Add(_overlay);
+            _noCamera = Overlay(new TextBlock { Text = "No camera in the scene: showing a default view", FontSize = 12 }, HorizontalAlignment.Center, VerticalAlignment.Top);
+            _noCamera.Margin = new Thickness(8, 44, 8, 8);
+            _noCamera.IsHitTestVisible = false;
+            _noCamera.IsVisible = false;
+            Children.Add(_noCamera);
         }
         else
         {
@@ -260,6 +268,10 @@ public sealed class ViewportView : Grid
             if (_viewport.IsGame)
             {
                 _gamepadTimer.Start();
+                _shell.WorldCameraChanged += ShowCamera;
+                _viewport.FocusRequested += TakeFocus;
+                ShowCamera();
+                TakeFocus();
             }
             ShowMode();
             ShowTools();
@@ -284,6 +296,11 @@ public sealed class ViewportView : Grid
             _shell.ViewportsChanged -= ShowActive;
             _shell.SceneViewsChanged -= ShowTitle;
             _shell.ViewportSettingsChanged -= ShowView;
+            if (_viewport.IsGame)
+            {
+                _shell.WorldCameraChanged -= ShowCamera;
+                _viewport.FocusRequested -= TakeFocus;
+            }
             _timer.Stop();
             _flyTimer.Stop();
             _gamepadTimer.Stop();
@@ -449,8 +466,38 @@ public sealed class ViewportView : Grid
         {
             EndGesture();
         }
-        RaiseEvent(new RoutedEventArgs(InputMethod.TextInputMethodClientRequeryRequestedEvent));
+        RequeryTextInput();
         ShowSpeed();
+    }
+
+    // The IME asks again whether the view has a text client, which it has only while the game has the input. The event's
+    // own args type, as a handler typed for it on the route casts to it. Internal to the tests.
+    internal void RequeryTextInput() =>
+        RaiseEvent(new TextInputMethodClientRequeryRequestedEventArgs { RoutedEvent = InputMethod.TextInputMethodClientRequeryRequestedEvent });
+
+    // The Game view takes the keyboard focus when the shell asks, as Play does, so the game has the keys at once. Docking
+    // attaches the view after the tab changes, so the focus moves once it has.
+    void TakeFocus()
+    {
+        if (_viewport.TakeFocusRequest())
+        {
+            Dispatcher.UIThread.Post(() =>
+            {
+                if (VisualRoot != null)
+                {
+                    Focus();
+                }
+            });
+        }
+    }
+
+    // The Game view says so when the world has no camera, over the default view that the game draws then.
+    void ShowCamera()
+    {
+        if (_noCamera != null)
+        {
+            _noCamera.IsVisible = _shell.World.HasWorld && !_shell.WorldHasCamera;
+        }
     }
 
     void ShowSpeed()

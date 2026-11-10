@@ -1316,6 +1316,84 @@ public sealed class ViewportTests : IDisposable
     static string? ActiveDocumentOf(EditorShell shell, string document) =>
         (FindDock(shell.Layout.Root, document) as IDock)?.ActiveDockable?.Id;
 
+    // --- Play and the Game view ---
+
+    [Fact]
+    public void PlayBringsTheGameViewForwardAndAsksForItsFocus()
+    {
+        using var shell = NewShell();
+        shell.Layout.ShowViewport(ViewportDocument.SceneId);
+        var asked = 0;
+        shell.GameViewport.FocusRequested += () => asked++;
+
+        shell.Play();
+
+        Assert.Equal(ViewportDocument.GameId, ActiveDocumentOf(shell, ViewportDocument.GameId));
+        Assert.Equal(1, asked);
+        // The request is taken once, by the control that takes the focus.
+        Assert.True(shell.GameViewport.TakeFocusRequest());
+        Assert.False(shell.GameViewport.TakeFocusRequest());
+
+        // Pause and Stop leave the documents where the user put them.
+        shell.Layout.ShowViewport(ViewportDocument.SceneId);
+        shell.TogglePause();
+        shell.Stop();
+        Assert.Equal(ViewportDocument.SceneId, ActiveDocumentOf(shell, ViewportDocument.SceneId));
+        Assert.False(shell.GameViewport.WantsFocus);
+        Assert.Equal(1, asked);
+    }
+
+    [Fact]
+    public void PlayOpensAClosedGameViewBesideTheScene()
+    {
+        using var shell = NewShell();
+        shell.Layout.CloseViewport(ViewportDocument.GameId);
+        Assert.False(shell.Layout.IsViewportOpen(ViewportDocument.GameId));
+
+        shell.Play();
+
+        Assert.True(shell.Layout.IsViewportOpen(ViewportDocument.GameId));
+        Assert.Same(FindDock(shell.Layout.Root, ViewportDocument.SceneId), FindDock(shell.Layout.Root, ViewportDocument.GameId));
+        Assert.Equal(ViewportDocument.GameId, ActiveDocumentOf(shell, ViewportDocument.GameId));
+    }
+
+    [Fact]
+    public void TheShellKnowsWhetherTheWorldHasACamera()
+    {
+        const ulong camera = 2UL << 32;
+        using var shell = NewShell();
+        var changes = 0;
+        shell.WorldCameraChanged += () => changes++;
+        shell.OnGameMessage(new ComponentTypes([new ComponentType(1, "Transform", 48, []), new ComponentType(32, "Camera", 32, [])]));
+        Assert.False(shell.WorldHasCamera);
+
+        shell.OnGameMessage(new EntitySnapshot([new EntityInfo(Box, "Box", 1, 0, true, [1]), new EntityInfo(camera, "Camera", 2, 0, true, [1, 32])]));
+        Assert.True(shell.WorldHasCamera);
+        Assert.Equal(1, changes);
+
+        // The camera's entity goes, as a delete in Edit or a despawn in Play does.
+        shell.OnGameMessage(new EntitySnapshot([new EntityInfo(Box, "Box", 1, 0, true, [1])]));
+        Assert.False(shell.WorldHasCamera);
+        Assert.Equal(2, changes);
+    }
+
+    [Fact]
+    public void TheTextInputRequeryCarriesItsOwnArgs()
+    {
+        // A handler typed for the event's args, as Avalonia's own are, casts what the view raises; a plain RoutedEventArgs
+        // threw here, from the view's attach inside docking, which then showed no document's content again.
+        using var shell = NewShell();
+        var view = new Viewport.ViewportView(shell, shell.GameViewport);
+        var parent = new Avalonia.Controls.Panel { Children = { view } };
+        var heard = 0;
+        parent.AddHandler(Avalonia.Input.InputMethod.TextInputMethodClientRequeryRequestedEvent,
+            (object? _, Avalonia.Input.TextInput.TextInputMethodClientRequeryRequestedEventArgs _) => heard++);
+
+        view.RequeryTextInput();
+
+        Assert.Equal(1, heard);
+    }
+
     // --- Input ---
 
     [Fact]

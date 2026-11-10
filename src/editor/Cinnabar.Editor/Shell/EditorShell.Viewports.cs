@@ -89,6 +89,29 @@ public sealed partial class EditorShell
         // The scene views' projections, by their names, in the views' order.
         List<string>? Projections = null);
 
+    /// <summary>
+    /// Whether the game's world has an entity with a <c>Camera</c>, which the Game view draws from: false with no world.
+    /// The world is the game's in every mode, so it follows the document in Edit and what the game spawns in Play.
+    /// </summary>
+    public bool WorldHasCamera { get; private set; }
+
+    /// <summary><see cref="WorldHasCamera"/> changed.</summary>
+    public event Action? WorldCameraChanged;
+
+    // The Camera component's type name, as the game registers it (render.Camera).
+    const string CameraComponentName = "Camera";
+
+    void UpdateWorldCamera()
+    {
+        var camera = World.Types.Values.FirstOrDefault(t => t.Name == CameraComponentName)?.Id;
+        var has = World.HasWorld && camera is { } id && World.Entities.Any(e => e.Components.Contains(id));
+        if (has != WorldHasCamera)
+        {
+            WorldHasCamera = has;
+            WorldCameraChanged?.Invoke();
+        }
+    }
+
     // The Game view's size when it last had one, which is the game's window size; it stays when the Game view hides.
     PixelSize? _gameSize;
 

@@ -45,6 +45,10 @@ public sealed partial class EditorShell
             Console.Add(LogLevel.Info, "editor: playing. Edits wait until Stop.");
         }
         SetModeTo(EditorMode.Play);
+        // The game plays in the Game view: it comes to the front, opened beside the Scene if it was closed, and takes
+        // the keys, so the game has them at once.
+        Layout.ShowViewport(Docking.ViewportDocument.GameId);
+        GameViewport.RequestFocus();
     }
 
     /// <summary>Pauses play, or goes on after a pause.</summary>
