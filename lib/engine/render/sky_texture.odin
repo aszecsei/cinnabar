@@ -304,7 +304,7 @@ add_sky_texture_passes :: proc(f: ^Frame) {
 @(private)
 add_sky_texture_background :: proc(f: ^Frame) {
 	sf := f.sky_texture
-	if sf == nil || sf.constants.data == nil {
+	if sf == nil || sf.constants.data == nil || !sky_draws(f) {
 		return
 	}
 	g := f.graph

@@ -1,6 +1,5 @@
 package editor
 
-import "core:math"
 import "core:math/linalg"
 import "core:slice"
 
@@ -87,10 +86,15 @@ mesh_overlay_vertices :: proc(e: ^Editor, w: ^ecs.World, view: render.View, heig
 	}
 	right, up, forward := render.view_axes(view)
 	b := Gizmo_Builder{out, right, up}
-	// The meters that a pixel covers at a point's depth.
-	pixel := f32(2 * math.tan(view.vertical_fov / 2) / f32(max(height, 1)))
+	// The meters that a pixel covers at a point's depth: at a depth of 1 in perspective, where it grows with the depth,
+	// and at every depth in orthographic.
+	pixel := render.pixel_meters(view, 1, height)
+	if render.is_orthographic(view) {
+		// A direction of 0 makes every depth 1.
+		forward = {}
+	}
 	size :: proc(p: [3]f32, forward: [3]f32, pixel: f32, pixels: f32) -> f32 {
-		return max(linalg.dot(p, forward), 0.01) * pixel * pixels
+		return (forward == {} ? 1 : max(linalg.dot(p, forward), 0.01)) * pixel * pixels
 	}
 	for mesh in o.meshes {
 		live, found := e.session.live_meshes[format.Guid(mesh.guid)]

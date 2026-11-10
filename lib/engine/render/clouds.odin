@@ -635,7 +635,7 @@ begin_clouds :: proc(f: ^Frame, s: Cloud_Settings, sky: Sky_Settings, ambient: A
 		density            = s.density,
 		history_blend      = 1 / max(params.history_frames, 1),
 		shadow_extent      = CLOUD_SHADOW_EXTENT,
-		near               = f.view.near,
+		near               = view_near(f.view),
 		shadow_center      = center,
 		shadow_size        = params.shadow_size,
 		shadow_steps       = params.shadow_steps,

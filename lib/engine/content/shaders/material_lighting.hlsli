@@ -33,15 +33,15 @@ uint cluster_at(float3 p, float depth) {
 	float4 clip = mul(frame.cluster_view_projection, float4(p, 1));
 	float2 pixel = (clip.xy / max(clip.w, 1e-7) * float2(0.5, -0.5) + 0.5) * frame.screen_size;
 	uint2 tile = min(uint2(max(pixel, 0)) / CLUSTER_TILE, uint2(frame.cluster_columns, frame.cluster_rows) - 1);
-	uint slice = uint(clamp(log2(depth) * frame.slice_scale + frame.slice_bias, 0, CLUSTER_SLICES - 1));
+	uint slice = uint(clamp(slice_of(frame.projection, depth, frame.slice_scale, frame.slice_bias), 0, CLUSTER_SLICES - 1));
 	return (slice * frame.cluster_rows + tile.y) * frame.cluster_columns + tile.x;
 }
 
 // cluster_of is the cluster of a point: its tile of the screen as the camera's projection places it, and the depth
-// slice of its view depth, which slices exponentially from the near plane. The view model's pixels are elsewhere on the
+// slice of its view depth (see slice_of). The view model's pixels are elsewhere on the
 // screen than the camera's projection would place their points, so the tile comes from the point, not the pixel.
 uint cluster_of(float3 p, float4 position) {
-	return cluster_at(p, frame.near / max(position.z, 1e-7));
+	return cluster_at(p, view_z(frame.projection, position.z));
 }
 
 // light_count is how many lights shade a point: every directional light, and its cluster's.
@@ -168,7 +168,7 @@ float light_shadow(Light_Record light, float3 p, float3 normal, float3 to_light,
 		return load_screen(push.shadow_mask, position.xy)[light.mask];
 #endif
 	}
-	return map_shadow(light, p, normal, to_light, frame.near / max(position.z, 1e-7));
+	return map_shadow(light, p, normal, to_light, view_z(frame.projection, position.z));
 }
 
 // range_window is 1 near a light and 0 at its range: saturate(1 - (d / range)^4)^2.

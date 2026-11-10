@@ -636,7 +636,7 @@ camera_view :: proc(s: ^Game_State) -> render.View {
 	if view, ok := render.camera_view(&s.world, s.camera); ok {
 		return view
 	}
-	return {rotation = 1, vertical_fov = render.DEFAULT_VERTICAL_FOV, near = render.DEFAULT_NEAR}
+	return {rotation = 1, projection = render.Perspective{render.DEFAULT_VERTICAL_FOV, render.DEFAULT_NEAR}}
 }
 
 // end_frame lets the frame's animation graphs go, then swaps the blobs that the cooker rewrote, and reloads the scripts
@@ -713,6 +713,8 @@ before_world :: proc(f: ^render.Frame) {
 		frame.pass_constants = pass
 		aspect := f32(f.size.x) / f32(max(f.size.y, 1))
 		right, up, forward := render.view_axes(f.view)
+		// The sample's traced shadows are for a perspective camera.
+		perspective, _ := f.view.projection.(render.Perspective)
 		(^Pass_Constants)(raw_data(pass.data))^ = {
 			view_projection = render.jittered_view_projection(f),
 			right           = {right.x, right.y, right.z, 0},
@@ -720,8 +722,8 @@ before_world :: proc(f: ^render.Frame) {
 			forward         = {forward.x, forward.y, forward.z, 0},
 			time            = f32(time.duration_seconds(s.elapsed)),
 			aspect          = aspect,
-			tan_half_fov    = math.tan(f.view.vertical_fov * 0.5),
-			near            = f.view.near,
+			tan_half_fov    = math.tan(perspective.vertical_fov * 0.5),
+			near            = render.view_near(f.view),
 			exposure        = gpu.read_index(render.gpu_buffer(g, f.exposure)),
 		}
 		extract_triangles(frame, f.hidden)

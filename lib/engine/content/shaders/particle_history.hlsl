@@ -21,6 +21,6 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	}
 	float depth = cn_texture(push.depth).Load(int3(id.xy, 0)).r;
 	float3 normal = octahedral(cn_texture(push.normals).Load(int3(id.xy, 0)).xy);
-	float view_depth = depth > 0 ? min(frame.near / depth, HISTORY_FAR) : HISTORY_FAR;
+	float view_depth = depth > 0 ? min(view_z(frame.projection, depth), HISTORY_FAR) : HISTORY_FAR;
 	cn_rw_texture(push.output)[id.xy] = float4(normal, view_depth);
 }

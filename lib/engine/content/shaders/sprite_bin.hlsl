@@ -29,12 +29,12 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	}
 	Sprite_Record r = load_sprite(push.records, index);
 	float4 clip = mul(frame.view_projection, float4(r.position, 1));
-	float depth = clip.w;
-	if (depth <= frame.near) {
+	float depth = clip_view_z(frame.projection, clip);
+	if (clip.w <= 0 || depth <= frame.projection.z) {
 		return;
 	}
-	float2 center = (clip.xy / depth * float2(0.5, -0.5) + 0.5) * frame.screen_size;
-	float radius = r.size * push.scale.y * 0.5 * frame.screen_size.y / depth;
+	float2 center = (clip.xy / clip.w * float2(0.5, -0.5) + 0.5) * frame.screen_size;
+	float radius = r.size / view_pixel_meters(frame.projection, depth, frame.screen_size.y);
 	if (radius < 0.01) {
 		return;
 	}
@@ -54,7 +54,7 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	s.axis = rotation / radius;
 	s.uv_rect = r.uv_rect;
 	s.depth = depth;
-	s.z = warp_depth(depth, frame.near);
+	s.z = warp_depth(depth, frame.projection);
 	s.opacity = r.color.a;
 	s.softness = r.softness;
 	s.texture = r.texture;
@@ -75,7 +75,7 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	for (int y = low.y; y <= high.y; y++) {
 		for (int x = low.x; x <= high.x; x++) {
 			uint tile = uint(y) * push.tiles.x + uint(x);
-			float farthest = frame.near / max(tile_depths.Load<float>(tile * 4), 1e-7);
+			float farthest = view_z(frame.projection, tile_depths.Load<float>(tile * 4));
 			if (nearest < farthest) {
 				bins.InterlockedOr((tile * push.words + index / 32) * 4, bit);
 			}

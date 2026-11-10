@@ -26,17 +26,31 @@ REFLECTION_PROBE_ID :: ecs.Component_Id(54)
 // The view of a Camera that leaves a field at 0, as a component added in the editor does.
 DEFAULT_VERTICAL_FOV :: math.PI / 3
 DEFAULT_NEAR :: 0.05
+// An orthographic camera's defaults: what it shows from bottom to top, and its far plane, in meters.
+DEFAULT_ORTHOGRAPHIC_HEIGHT :: 10
+DEFAULT_ORTHOGRAPHIC_FAR :: 1000
+
+// Camera_Projection is which projection a Camera has (see Projection).
+Camera_Projection :: enum u8 {
+	Perspective,
+	Orthographic,
+}
 
 // Camera makes its entity a camera: the frame can be drawn from its presented Transform. Game_State holds the active
 // camera's entity (see docs/rendering/assets.md#components). 0 in a field means its default.
 Camera :: struct {
 	// In radians.
 	vertical_fov: f32 `editor:"range=0.1,3"`,
-	// In meters. The far plane is at infinity.
+	// In meters. A perspective camera's far plane is at infinity.
 	near:            f32 `editor:"range=0.001,10"`,
 	// The view model's projection, in radians and meters (see View_Model). 0 means the camera's own.
 	view_model_fov:  f32 `editor:"range=0,3"`,
 	view_model_near: f32 `editor:"range=0,10"`,
+	// An orthographic camera has no perspective (see docs/rendering/frame.md#orthographic-views): it shows
+	// orthographic_height meters from bottom to top at every distance, between near and far.
+	projection:          Camera_Projection,
+	orthographic_height: f32 `editor:"range=0,10000"`,
+	far:                 f32 `editor:"range=0,100000"`,
 }
 
 // View_Model marks an entity of the first-person view model: it draws with the camera's view model projection, over
@@ -199,19 +213,30 @@ register_components :: proc(r: ^ecs.Registry) {
 	register_settings_components(r)
 }
 
-// camera_view is the view from a Camera entity: its presented pose, and its field of view and near plane. It fails if
-// the entity is not a live camera.
+// camera_view is the view from a Camera entity: its presented pose and its projection. It fails if the entity is not a
+// live camera.
 camera_view :: proc(w: ^ecs.World, entity: ecs.Entity) -> (view: View, ok: bool) {
 	camera := ecs.get(w, entity, Camera)
 	if camera == nil {
 		return
 	}
 	pose := ecs.presented(w, entity) or_return
+	near := camera.near > 0 ? camera.near : DEFAULT_NEAR
+	projection: Projection = Perspective {
+		vertical_fov = camera.vertical_fov > 0 ? camera.vertical_fov : DEFAULT_VERTICAL_FOV,
+		near         = near,
+	}
+	if camera.projection == .Orthographic {
+		projection = Orthographic {
+			height = camera.orthographic_height > 0 ? camera.orthographic_height : DEFAULT_ORTHOGRAPHIC_HEIGHT,
+			near   = near,
+			far    = max(camera.far > 0 ? camera.far : DEFAULT_ORTHOGRAPHIC_FAR, near * 2),
+		}
+	}
 	return {
 			position = pose.position,
 			rotation = pose.rotation,
-			vertical_fov = camera.vertical_fov > 0 ? camera.vertical_fov : DEFAULT_VERTICAL_FOV,
-			near = camera.near > 0 ? camera.near : DEFAULT_NEAR,
+			projection = projection,
 			view_model_fov = camera.view_model_fov,
 			view_model_near = camera.view_model_near,
 		},

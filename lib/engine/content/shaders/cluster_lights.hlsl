@@ -4,6 +4,7 @@
 // influence boxes reach its box, and writes the first MAX_CLUSTER_PROBES of them, in their records' order, which is
 // their priority's, into its own fixed list (see docs/rendering/lighting-and-shadows.md#reflection-probes).
 #include "cinnabar.hlsli"
+#include "view_projection.hlsli"
 
 // Matches Cluster_Constants in lib/engine/render/lights.odin. The view's axes in the world turn positions relative to
 // its eye, which is relative to the camera, into view space. projection holds the projection's x and y scales, the
@@ -31,7 +32,8 @@ struct Cluster_Constants {
 	uint probes_offset;
 	uint probe_count;
 	uint probe_clusters;
-	uint padding;
+	// The view's far plane when it is orthographic, and 0 otherwise.
+	float far;
 };
 CN_PASS_CONSTANTS(Cluster_Constants, constants);
 
@@ -99,19 +101,21 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	uint x = id.x % constants.columns;
 	uint y = (id.x / constants.columns) % constants.rows;
 
-	// The slice's depths, from slice = log2(z / near) * scale.
+	// The slice's depths, from slice = log2(z / near) * scale, or (z - near) * scale for an orthographic view, whose
+	// last slice ends at its far plane.
 	float near = constants.projection.z;
 	float scale = constants.projection.w;
-	float z0 = near * exp2(slice / scale);
-	float z1 = slice + 1 == CLUSTER_SLICES ? LAST_SLICE_FAR : near * exp2((slice + 1) / scale);
+	float4 projection = float4(constants.projection.xyz, constants.far);
+	bool orthographic = is_orthographic(projection);
+	float z0 = orthographic ? near + slice / scale : near * exp2(slice / scale);
+	float z1 = orthographic ? near + (slice + 1) / scale : (slice + 1 == CLUSTER_SLICES ? LAST_SLICE_FAR : near * exp2((slice + 1) / scale));
 	// The tile in normalized device coordinates, then its box in view space between the two depths.
 	float2 low_px = float2(x, y) * CLUSTER_TILE;
 	float2 high_px = min(low_px + CLUSTER_TILE, constants.size);
 	float2 ndc_a = float2(low_px.x / constants.size.x * 2 - 1, 1 - high_px.y / constants.size.y * 2);
 	float2 ndc_b = float2(high_px.x / constants.size.x * 2 - 1, 1 - low_px.y / constants.size.y * 2);
-	float2 inverse_scale = 1 / constants.projection.xy;
-	float2 a0 = ndc_a * inverse_scale * z0, a1 = ndc_a * inverse_scale * z1;
-	float2 b0 = ndc_b * inverse_scale * z0, b1 = ndc_b * inverse_scale * z1;
+	float2 a0 = view_position(projection, ndc_a, z0).xy, a1 = view_position(projection, ndc_a, z1).xy;
+	float2 b0 = view_position(projection, ndc_b, z0).xy, b1 = view_position(projection, ndc_b, z1).xy;
 	float3 box_min = float3(min(min(a0, a1), min(b0, b1)), z0);
 	float3 box_max = float3(max(max(a0, a1), max(b0, b1)), z1);
 

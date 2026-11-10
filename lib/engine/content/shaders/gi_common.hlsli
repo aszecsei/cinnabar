@@ -10,12 +10,13 @@
 
 #include "ambient.hlsli"
 #include "cinnabar.hlsli"
+#include "view_projection.hlsli"
 #include "gi_probes.hlsli"
 #include "sky_cube.hlsli"
 
 // Matches Gi_Constants in lib/engine/render/gi.odin. previous maps a position relative to the camera to last frame's
 // clip space, the camera's motion included. right, up and forward are the view's axes in the world; projection holds
-// the camera's x and y scales and its near plane. region is the size of one cascade's rows, and cascade the cascade
+// the camera's projection (see view_projection.hlsli). region is the size of one cascade's rows, and cascade the cascade
 // that a merge pass writes.
 struct Gi_Constants {
 	float4x4 previous;
@@ -196,9 +197,9 @@ float interleaved_noise(float2 pixel) {
 bool surface_at(int2 pixel, out float3 position, out float z) {
 	float depth = cn_texture(constants.depth).Load(int3(pixel, 0)).r;
 	bool view_model = (cn_stencil_texture(constants.stencil).Load(int3(pixel, 0)).g & VIEW_MODEL_STENCIL) != 0;
-	z = constants.projection.z / max(depth, 1e-7);
+	z = view_z(constants.projection, depth);
 	float2 ndc = float2((pixel.x + 0.5) / constants.size.x * 2 - 1, 1 - (pixel.y + 0.5) / constants.size.y * 2);
-	float2 xy = ndc / constants.projection.xy * z;
+	float2 xy = view_position(constants.projection, ndc, z).xy;
 	position = constants.right.xyz * xy.x + constants.up.xyz * xy.y + constants.forward.xyz * z;
 	return depth > 0 && !view_model;
 }
@@ -226,7 +227,13 @@ float probe_weight(float3 position, float3 normal, float z, int2 probe_pixel) {
 
 // pixel_meters is the size of a pixel at a view depth.
 float pixel_meters(float z) {
-	return 2 * z / (constants.size.y * constants.projection.y);
+	return view_pixel_meters(constants.projection, z, constants.size.y);
+}
+
+// from_camera is the direction in which the camera sees a point relative to it: from its position in perspective,
+// and the way it looks in orthographic.
+float3 from_camera(float3 position) {
+	return is_orthographic(constants.projection) ? constants.forward.xyz : normalize(position);
 }
 
 // The distance at which cascade k's interval starts: they grow four times longer each, from a length that scales

@@ -224,7 +224,7 @@ run_cloud_frame :: proc(
 		renderer = r, state = &r.view,
 		graph    = &g,
 		size     = {64, 32},
-		view     = {rotation = 1, vertical_fov = 1, near = 0.05},
+		view     = {rotation = 1, projection = Perspective{1, 0.05}},
 	}
 	f.view_projection = view_projection(f.view, 2)
 	f.depth = create_texture(&g, {size = f.size, format = DEPTH_FORMAT, label = "depth"})

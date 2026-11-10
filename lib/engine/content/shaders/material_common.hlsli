@@ -6,6 +6,7 @@
 #include "ambient.hlsli"
 #include "cinnabar.hlsli"
 #include "mesh_encoding.hlsli"
+#include "view_projection.hlsli"
 
 // Matches Frame_Constants in lib/engine/render/scene.odin. Positions in the GPU scene are relative to the render
 // origin, and the view's are relative to the camera, which is camera_offset from the origin. A shadow view's copy has
@@ -182,8 +183,17 @@ struct Frame_Constants {
 	float2 cloud_shadow_center;
 	float cloud_shadow_inv_extent;
 	float cloud_shadow_top;
+	// The view's projection (see view_projection.hlsli): the camera's in every view's copy, the view model's in its own,
+	// and a face's in a reflection probe's capture.
+	float4 projection;
 };
 CN_PASS_CONSTANTS(Frame_Constants, frame);
+
+// to_camera is the direction from a point relative to the camera to where the camera sees it from: the camera's
+// position in perspective, and against the way it looks in orthographic.
+float3 to_camera(float3 p) {
+	return is_orthographic(frame.projection) ? cross(frame.camera_up.xyz, frame.camera_right.xyz) : normalize(-p);
+}
 
 // Match render.Debug_View. The shaded views are exposed and tone mapped as the scene is; the others are colors as they
 // are.
@@ -487,7 +497,7 @@ Material_Inputs vertex_material_inputs(Vertex_Inputs v) {
 	inputs.uv0 = v.uv0;
 	inputs.uv1 = v.uv1;
 	inputs.color = v.color;
-	inputs.view = normalize(-v.position);
+	inputs.view = to_camera(v.position);
 	inputs.front_facing = true;
 	inputs.time = v.time;
 	return inputs;

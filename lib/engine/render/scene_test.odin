@@ -19,9 +19,8 @@ inside :: proc(planes: [5][4]f32, p: [3]f32, radius: f32) -> bool {
 @(test)
 frustum_planes_keep_what_the_view_sees :: proc(t: ^testing.T) {
 	view := View {
-		rotation     = 1,
-		vertical_fov = math.PI / 2,
-		near         = 0.1,
+		rotation   = 1,
+		projection = Perspective{math.PI / 2, 0.1},
 	}
 	planes := frustum_planes(view_projection(view, 1))
 	// Ahead, however far, is inside: the far plane is at infinity.

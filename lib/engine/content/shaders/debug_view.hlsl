@@ -15,6 +15,8 @@ struct Push {
 	uint mask_channels;
 	// The source's texels are this many pixels on a side, as the clouds' are: 1 for the others.
 	uint divisor;
+	// The far plane of an orthographic view, and 0 otherwise.
+	float far;
 };
 CN_PUSH_CONSTANTS(Push, push);
 
@@ -86,9 +88,9 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	}
 	case DEBUG_DEPTH: {
 		// Reversed depth with the far plane at infinity: the view depth is near / depth, so log2(view depth / near) is
-		// -log2(depth).
+		// -log2(depth). An orthographic view's depth is even from its near plane to its far plane.
 		float depth = cn_texture(push.source).Load(pixel).r;
-		color = depth > 0 ? 1 - saturate(-log2(depth) / log2(DEPTH_FAR / push.near)) : 0;
+		color = push.far != 0 ? depth : (depth > 0 ? 1 - saturate(-log2(depth) / log2(DEPTH_FAR / push.near)) : 0);
 		break;
 	}
 	case DEBUG_VELOCITY: {

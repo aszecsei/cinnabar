@@ -1016,6 +1016,8 @@ reflection_probe_view_constants :: proc(
 	size := pf.params.face
 	c.view_projection, c.previous_view_projection, c.cluster_view_projection = m, m, m
 	c.near = REFLECTION_PROBE_NEAR
+	// A face is a quarter turn wide and high.
+	c.projection = {1, 1, REFLECTION_PROBE_NEAR, 0}
 	c.camera_right, c.camera_up = {right.x, right.y, right.z, 0}, {up.x, up.y, up.z, 0}
 	c.previous_camera_right, c.previous_camera_up = c.camera_right, c.camera_up
 	c.screen_size = {f32(size), f32(size)}
@@ -1166,7 +1168,7 @@ upload_reflection_probe_lights :: proc(f: ^Frame) {
 	}
 	size := pf.params.face
 	pf.columns, pf.rows = cluster_grid({size, size})
-	pf.slice_scale, pf.slice_bias = slice_constants(REFLECTION_PROBE_NEAR)
+	pf.slice_scale, pf.slice_bias = slice_constants(Perspective{near = REFLECTION_PROBE_NEAR})
 	if len(lf.records) == lf.directional_count || r.lights.pipeline.pipeline == {} {
 		return
 	}

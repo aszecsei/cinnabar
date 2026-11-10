@@ -639,10 +639,9 @@ run_probe_frame :: proc(
 	g := begin(platform, cache)
 	f := new(Frame, platform.frame_allocator)
 	view := View {
-		position     = camera,
-		rotation     = 1,
-		vertical_fov = 1,
-		near         = 0.1,
+		position   = camera,
+		rotation   = 1,
+		projection = Perspective{1, 0.1},
 	}
 	f^ = {
 		renderer        = r, state = &r.view,

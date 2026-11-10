@@ -190,6 +190,8 @@ run_upscale :: proc(ctx: ^Pass_Context) {
 	if pf.upscale_mask != 0 {
 		mask = gpu_texture(g, pf.upscale_mask)
 	}
+	// Only a perspective view upscales (see limit_quality).
+	perspective, _ := f.view.projection.(Perspective)
 	gpu.cmd_upscale(
 		ctx.cb,
 		{
@@ -204,9 +206,9 @@ run_upscale :: proc(ctx: ^Pass_Context) {
 			jitter = f.jitter * [2]f32{0.5, -0.5} * size,
 			motion_scale = -size,
 			delta_time = pf.delta > 0 ? pf.delta : 1.0 / 60,
-			near = f.view.near,
+			near = view_near(f.view),
 			far = math.F32_MAX,
-			fov_y = f.view.vertical_fov,
+			fov_y = perspective.vertical_fov,
 			reset = b32(pf.upscale_reset),
 		},
 	)

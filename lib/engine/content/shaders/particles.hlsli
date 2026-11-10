@@ -4,6 +4,7 @@
 #define PARTICLES_HLSLI
 
 #include "cinnabar.hlsli"
+#include "view_projection.hlsli"
 
 // Matches format.Effect_Shape, format.Effect_Module_Kind and format.Effect_Curve.
 static const uint SHAPE_POINT = 0;
@@ -106,7 +107,9 @@ struct Particle_Constants {
 	float near;
 	// The mesh particles' instances, which the update writes (see docs/rendering/particles.md#mesh-particles).
 	uint mesh_instances;
-	uint2 padding;
+	// The far plane of an orthographic camera, and 0 otherwise.
+	float far;
+	uint padding;
 };
 CN_PASS_CONSTANTS(Particle_Constants, constants);
 

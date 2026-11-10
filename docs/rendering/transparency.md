@@ -13,6 +13,7 @@ Transparent and additive surfaces draw after the world pass, the background's fo
 **Moment-based transparency** (Münstermann, Krumpen, Klein and Peters, *Moment-Based Order-Independent Transparency*, 2018) uses four power moments:
 
 1. **The moments pass** draws the moment-based items, with additive blending. At each pixel, it adds up the optical depth of every surface, b0 = Σ −ln(1 − α), into an `R32_Float` target (`MOMENTS_ZEROTH_FORMAT`). It also adds up b0 · (z, z², z³, z⁴) into an `RGBA32_Float` target (`MOMENTS_FORMAT`). z is the view depth on a log scale from the near plane to `MOMENTS_FAR` (500 m), mapped to [−1, 1] (`moments.hlsli`).
+   In an [orthographic view](frame.md#orthographic-views), the warped depth is even from the near plane to the far plane, and the sorted items sort by their depth along the view.
 2. **The transparent pass** draws the same items again. Each surface shades with the forward template, then reconstructs the transmittance T in front of it from the moments (`transmittance_at`). The moments are biased toward an even spread by `MOMENT_BIAS` (5·10⁻⁷), and a surface takes `MOMENT_OVERESTIMATION` (0.25) of its own optical depth. The pass adds `(color · α · T, α · T)` into an `RGBA16_Float` target (`ACCUMULATED_FORMAT`).
 3. **The composite** (`transparency_composite.hlsl`) is a compute pass. It writes `scene · e^−b0 + (1 − e^−b0) · accumulated.rgb / accumulated.a` into the scene, where b0 is not about 0.
 

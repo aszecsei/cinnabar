@@ -258,9 +258,8 @@ add_preview_passes :: proc(f: ^Frame, desc: ^Preview_Desc) {
 	size := desc.size
 	aspect := f32(size.x) / f32(max(size.y, 1))
 	view := View {
-		rotation     = desc.rotation,
-		vertical_fov = PREVIEW_FOV,
-		near         = PREVIEW_NEAR,
+		rotation   = desc.rotation,
+		projection = Perspective{PREVIEW_FOV, PREVIEW_NEAR},
 	}
 	view_projection := view_projection(view, aspect)
 
@@ -410,9 +409,8 @@ add_effect_preview_passes :: proc(f: ^Frame, desc: ^Preview_Desc) {
 	pf.renderer, pf.desc, pf.frame = r, ground, f
 	size := desc.size
 	view := View {
-		rotation     = desc.rotation,
-		vertical_fov = PREVIEW_FOV,
-		near         = PREVIEW_NEAR,
+		rotation   = desc.rotation,
+		projection = Perspective{PREVIEW_FOV, PREVIEW_NEAR},
 	}
 	view_projection := view_projection(view, f32(size.x) / f32(max(size.y, 1)))
 	table := Material_Table {

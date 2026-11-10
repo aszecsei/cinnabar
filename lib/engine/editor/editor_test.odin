@@ -591,7 +591,7 @@ the_editor_sets_the_view_and_the_selection :: proc(t: ^testing.T) {
 	testing.expect(t, ok)
 	v := camera_view(stored)
 	testing.expect_value(t, v.position.raw, [3]i64{1 << 24, 0, -(2 << 24)})
-	testing.expect_value(t, v.near, 0.05)
+	testing.expect_value(t, v.projection, render.Perspective{1, 0.05})
 	testing.expect_value(t, len(f.editor.session.view.selection), 1)
 
 	// Another editor has its own camera and selection.
@@ -618,7 +618,7 @@ picks_read_their_entities_from_the_results :: proc(t: ^testing.T) {
 		index := ecs.entity_index(e)
 		words[4 + index / 32] |= 1 << (index % 32)
 	}
-	result := pick_result(w, {id = 3, width = 1, height = 1}, words, 0.1, 0.01, context.temp_allocator)
+	result := pick_result(w, {id = 3, width = 1, height = 1}, words, render.Perspective{1, 0.1}, render.Perspective{1, 0.01}, context.temp_allocator)
 	testing.expect_value(t, result.id, 3)
 	// The dead entity's slot finds nothing, and the others come in slot order.
 	testing.expect_value(t, len(result.hits), 2)
@@ -630,16 +630,16 @@ picks_read_their_entities_from_the_results :: proc(t: ^testing.T) {
 
 	// On the view model's stencil bit, the depth is the view model's near plane's.
 	words[3] = render.VIEW_MODEL_STENCIL
-	model := pick_result(w, {id = 5, width = 1, height = 1}, words, 0.1, 0.01, context.temp_allocator)
+	model := pick_result(w, {id = 5, width = 1, height = 1}, words, render.Perspective{1, 0.1}, render.Perspective{1, 0.01}, context.temp_allocator)
 	testing.expect(t, abs(model.depth - 0.02) < 1e-6)
 
-	rect := pick_result(w, {id = 4, width = 8, height = 8}, words, 0.1, 0.01, context.temp_allocator)
+	rect := pick_result(w, {id = 4, width = 8, height = 8}, words, render.Perspective{1, 0.1}, render.Perspective{1, 0.01}, context.temp_allocator)
 	testing.expect_value(t, rect.depth, 0)
 	testing.expect_value(t, rect.submesh, -1)
 
 	// Nothing at the corner has no submesh.
 	words[1] = 0
-	empty := pick_result(w, {id = 6, width = 1, height = 1}, words, 0.1, 0.01, context.temp_allocator)
+	empty := pick_result(w, {id = 6, width = 1, height = 1}, words, render.Perspective{1, 0.1}, render.Perspective{1, 0.01}, context.temp_allocator)
 	testing.expect_value(t, empty.submesh, -1)
 }
 
@@ -670,9 +670,8 @@ selected_parents_outline_their_children :: proc(t: ^testing.T) {
 @(test)
 gizmos_are_triangles_with_the_hot_part_highlighted :: proc(t: ^testing.T) {
 	v := render.View {
-		rotation     = 1,
-		vertical_fov = 1,
-		near         = 0.05,
+		rotation   = 1,
+		projection = render.Perspective{1, 0.05},
 	}
 	hot := pack_color({GIZMO_HOT.r, GIZMO_HOT.g, GIZMO_HOT.b, 1})
 	for kind in ([]link.Gizmo_Kind{.Translate, .Rotate, .Scale}) {
@@ -697,9 +696,8 @@ gizmos_are_triangles_with_the_hot_part_highlighted :: proc(t: ^testing.T) {
 @(test)
 box_handles_are_cubes_with_the_hot_one_highlighted :: proc(t: ^testing.T) {
 	v := render.View {
-		rotation     = 1,
-		vertical_fov = 1,
-		near         = 0.05,
+		rotation   = 1,
+		projection = render.Perspective{1, 0.05},
 	}
 	hot := pack_color({GIZMO_HOT.r, GIZMO_HOT.g, GIZMO_HOT.b, 1})
 	handles := []link.Box_Handle{{position = {0, 0, 5 << 24}, kind = .Influence}, {position = {1 << 24, 0, 5 << 24}, kind = .Projection, hot = true}}
@@ -1247,10 +1245,9 @@ the_mesh_overlay_draws_edges_vertices_fills_and_the_grid :: proc(t: ^testing.T) 
 	entity := ecs.spawn(&f.world)
 	ecs.add(&f.world, entity, ecs.TRANSFORM_IDENTITY)
 	view := render.View {
-		position     = {{0, 0, -5 * (1 << 24)}},
-		rotation     = 1,
-		vertical_fov = 1,
-		near         = 0.05,
+		position   = {{0, 0, -5 * (1 << 24)}},
+		rotation   = 1,
+		projection = render.Perspective{1, 0.05},
 	}
 	count :: proc(f: ^Fixture, view: render.View) -> int {
 		vertices := make([dynamic]Gizmo_Vertex, context.temp_allocator)
@@ -1638,7 +1635,7 @@ game_debug :: proc(_: ^render.Frame) {}
 @(private = "file")
 game_desc :: proc(g: ^Game_Frame, settings: ^render.Frame_Settings = nil) -> render.Frame_Desc {
 	return {
-		view = {rotation = 1, vertical_fov = 2, near = 0.5},
+		view = {rotation = 1, projection = render.Perspective{2, 0.5}},
 		size = {1280, 720},
 		settings = settings,
 		disable = {.Bloom},

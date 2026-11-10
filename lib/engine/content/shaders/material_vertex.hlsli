@@ -56,7 +56,8 @@ void billboard_rows(inout float4 rows[3], float3 eye, float3 right, float3 up) {
 	float3 forward = cross(right, up);
 #if MATERIAL_BILLBOARD == 2
 	float3 axis = normalize(float3(rows[0].y, rows[1].y, rows[2].y));
-	float3 toward = origin - eye;
+	// An orthographic camera looks the same way at every point.
+	float3 toward = is_orthographic(frame.projection) ? forward : origin - eye;
 	toward -= axis * dot(toward, axis);
 	// Seen straight along its axis, it faces the camera's up, which is across the axis then.
 	if (dot(toward, toward) < 1e-12) {
@@ -224,7 +225,7 @@ Material_Inputs material_inputs(Varyings i, bool front) {
 	inputs.uv0 = i.uv0;
 	inputs.uv1 = i.uv1;
 	inputs.color = i.color;
-	inputs.view = normalize(-i.world);
+	inputs.view = to_camera(i.world);
 	inputs.front_facing = front;
 	inputs.time = frame.time;
 #if MATERIAL_TWO_SIDED

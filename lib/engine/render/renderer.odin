@@ -301,6 +301,9 @@ Frame :: struct {
 	// How the frame target reaches the display (see docs/rendering/layers-and-output.md#hdr-output).
 	output:                   gpu.Output,
 	view_projection:          matrix[4, 4]f32,
+	// The view's projection as the shaders take it, and the view model's.
+	projection:               View_Projection,
+	view_model_projection:    View_Projection,
 	// The camera's subpixel jitter for temporal AA, in normalized device coordinates, which the renderer's draws add
 	// (see jittered_view_projection). Zero without temporal AA.
 	jitter:                   [2]f32,
@@ -577,7 +580,7 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	world.cameras = cameras[1:1 + count]
 
 	frame_target := desc.target != {} ? desc.target : r.platform.gpu_frame_target()
-	ok := draw_view(r, w, desc, world, own, output, quality, frame_target, false)
+	ok := draw_view(r, w, desc, world, own, output, limit_quality(desc.view, quality), frame_target, false)
 	// The stats are the frame's own view's, whichever state that is this frame.
 	r.stats_view = own != &r.view ? own : nil
 	// The extra views come after the frame's own, which committed what it did, so they read the world as it left it. A view
@@ -590,7 +593,7 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 		view.extra_views, view.previews, view.playing, view.delta, view.shading_stats = nil, nil, nil, 0, false
 		view_quality := ev.quality != nil ? clamp_quality(ev.quality^, r.caps) : quality
 		// The target is always SDR, whatever the frame's output is.
-		draw_view(r, w, view, world, ev.state, {format = gpu.FRAME_TARGET_FORMAT}, view_quality, ev.target, true)
+		draw_view(r, w, view, world, ev.state, {format = gpu.FRAME_TARGET_FORMAT}, limit_quality(view.view, view_quality), ev.target, true)
 	}
 	// After the last view, so the lines of this frame reach them all.
 	debug.end_frame(&r.debug)
@@ -618,6 +621,7 @@ draw_view :: proc(
 	state.frames += 1
 	g := extra ? begin_extra(r.platform, &r.textures, &state.histories) : begin(r.platform, &r.textures, &state.histories)
 	size := render_size(desc.size, quality.render_scale)
+	aspect := f32(size.x) / f32(max(size.y, 1))
 	f := new(Frame, r.platform.frame_allocator)
 	f^ = {
 		renderer        = r,
@@ -628,7 +632,9 @@ draw_view :: proc(
 		output_size     = desc.size,
 		scene_size      = size,
 		output          = output,
-		view_projection = view_projection(desc.view, f32(size.x) / f32(max(size.y, 1))),
+		view_projection = view_projection(desc.view, aspect),
+		projection      = projection_constants(desc.view, aspect),
+		view_model_projection = projection_constants(view_model_view(desc.view), aspect),
 		hooks           = desc.hooks,
 		hidden          = desc.hidden,
 		scene_scale     = 1,
@@ -648,6 +654,7 @@ draw_view :: proc(
 	settings := desc.settings != nil ? desc.settings^ : resolve_settings(r, w, desc.view.position, desc.hidden)
 	apply_quality(&settings, quality)
 	apply_debug(&settings, desc.debug_view, desc.disable, desc.exposure_offset)
+	apply_view_limits(&settings, desc.view)
 	begin_post(f, settings.post)
 	f.post.effects = .Post_Effects not_in desc.disable && desc.debug_view == .Lit
 	f.post.effect_settings = settings.effects

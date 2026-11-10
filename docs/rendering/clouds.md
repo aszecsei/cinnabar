@@ -8,6 +8,7 @@ A ray-marched layer of clouds above the world, between two heights above the fog
 
 Every field is a `volume.Value`, and the defaults are `DEFAULT_CLOUDS`. Heights are meters above the atmosphere's ground, where `Atmosphere.altitude` (in kilometers) puts the world's y of 0 (see [The atmosphere](sky.md#the-atmosphere)).
 
+- **A perspective view only:** the march starts at the camera, so an [orthographic view](frame.md#orthographic-views) draws no clouds and takes no cloud shadows (`apply_view_limits`).
 - **`density`** multiplies the clouds' extinction (0 by default, so a scene without the component has none, as `Fog` has no density). A meter of cloud at a density of 1 takes `CLOUD_EXTINCTION` (0.05) of the light away where the noise is whole.
 - **`weather`** is where the weather comes from: `Scalars`, the four fields below everywhere, or `Map`, the [weather map](#weather). A `Map` whose texture is not set or not resident yet takes the scalars for that frame, without a log, as a texture sky that is not resident draws nothing.
 - **`coverage`** (0.5), **`precipitation`** (0) and **`cloud_type`** (0.5) are the low layer's weather with `Scalars`; **`cirrus`** (0.2) is how much of the sky the cirrus layer covers in either source.

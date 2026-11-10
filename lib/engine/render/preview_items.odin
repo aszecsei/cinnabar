@@ -315,9 +315,8 @@ add_preview_item_passes :: proc(f: ^Frame, desc: ^Preview_Desc) {
 	center, radius := preview_fit(centers, radii)
 	distance := desc.distance > 0 ? desc.distance : preview_distance(radius)
 	view := View {
-		rotation     = desc.rotation,
-		vertical_fov = PREVIEW_FOV,
-		near         = max(radius * 0.001, PREVIEW_NEAR),
+		rotation   = desc.rotation,
+		projection = Perspective{PREVIEW_FOV, max(radius * 0.001, PREVIEW_NEAR)},
 	}
 	view_projection := view_projection(view, f32(desc.size.x) / f32(max(desc.size.y, 1)))
 	camera := linalg.quaternion128_mul_vector3(desc.rotation, [3]f32{0, 0, -distance})
@@ -380,7 +379,7 @@ add_preview_item_passes :: proc(f: ^Frame, desc: ^Preview_Desc) {
 	if desc.complete != nil {
 		desc.complete^ = settled && ready && !table.waiting && lut_ready(f)
 	}
-	write_preview_item_records(f, pf, instances, records, arguments, meshes, &table, view_projection, camera, view.near)
+	write_preview_item_records(f, pf, instances, records, arguments, meshes, &table, view_projection, camera, view_near(view))
 
 	pf.target = import_texture(g, desc.target, .Color)
 	pf.scene = create_texture(g, {size = desc.size, format = SCENE_FORMAT, label = "preview scene"})

@@ -93,7 +93,7 @@ float3 forward_color(Varyings i, Material_Inputs inputs, Surface s, float scatte
 		return heat(light_count(i.world, i.position) / 16.0) * lambert;
 	}
 	if (debug_view == DEBUG_SHADOW_CASCADES) {
-		return CASCADE_COLORS[cascade_at(frame.near / max(i.position.z, 1e-7))] * lambert;
+		return CASCADE_COLORS[cascade_at(view_z(frame.projection, i.position.z))] * lambert;
 	}
 	if (debug_view == DEBUG_SHADOW_VIRTUAL) {
 		return virtual_debug_color(i.world) * lambert;

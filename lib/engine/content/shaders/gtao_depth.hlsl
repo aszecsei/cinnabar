@@ -3,6 +3,7 @@
 // level, where one texel stands for the area around it. After XeGTAO's XeGTAO_PrefilterDepths16x16 (Copyright (C)
 // 2016-2021, Intel Corporation; SPDX-License-Identifier: MIT).
 #include "cinnabar.hlsli"
+#include "view_projection.hlsli"
 
 // Matches Ao_Depth_Constants in lib/engine/render/ambient_occlusion.odin. levels and level4 are the five levels'
 // storage views. A view model's pixel stores its depth negated, from the view model's near plane.
@@ -13,8 +14,12 @@ struct Depth_Constants {
 	uint stencil;
 	float radius;
 	uint2 size;
+	// The near and the far plane of the camera's projection, and of the view model's: a far plane of 0 is a perspective
+	// projection's.
 	float near;
 	float view_model_near;
+	float far;
+	float view_model_far;
 };
 CN_PASS_CONSTANTS(Depth_Constants, constants);
 
@@ -30,7 +35,8 @@ float view_depth(int2 pixel) {
 	pixel = clamp(pixel, 0, int2(constants.size) - 1);
 	float depth = cn_texture(constants.depth).Load(int3(pixel, 0)).r;
 	bool view_model = (cn_stencil_texture(constants.stencil).Load(int3(pixel, 0)).g & VIEW_MODEL_STENCIL) != 0;
-	float z = (view_model ? constants.view_model_near : constants.near) / max(depth, 1e-7);
+	float4 projection = view_model ? float4(0, 0, constants.view_model_near, constants.view_model_far) : float4(0, 0, constants.near, constants.far);
+	float z = view_z(projection, depth);
 	return view_model ? -z : z;
 }
 

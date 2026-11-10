@@ -37,7 +37,7 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	for (uint s = 0; s < steps; s++) {
 		float3 p = origin + direction * (start + (s + noise.x) * step);
 		float3 view = float3(dot(p, constants.right.xyz), dot(p, constants.up.xyz), dot(p, constants.forward.xyz));
-		float2 ndc = view.xy * constants.projection.xy / max(view.z, 1e-6);
+		float2 ndc = view_ndc(constants.projection, float3(view.xy, max(view.z, 1e-6)));
 		// A ray that leaves the screen sees what lies beyond its interval: the screen cannot say what blocks it. The
 		// world probes can.
 		if (view.z <= constants.projection.z || any(abs(ndc) >= 1)) {
@@ -52,7 +52,7 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 		if (surface_depth <= 0 || view_model) {
 			continue;
 		}
-		float surface_z = constants.projection.z / surface_depth;
+		float surface_z = view_z(constants.projection, surface_depth);
 		float thickness = max(step * 2, 0.05 * view.z);
 		if (view.z > surface_z && view.z - surface_z < thickness) {
 			result = float4(0, 0, 0, 0);

@@ -48,7 +48,7 @@ void cs_main(uint3 group : SV_GroupID, uint3 thread : SV_GroupThreadID) {
 	float3 up = rotation.x * frame.camera_up.xyz - rotation.y * frame.camera_right.xyz;
 	float3 p = r.position + r.size * (q.x * right + q.y * up);
 	float4 clip = mul(frame.cluster_view_projection, float4(p, 1));
-	float depth = max(clip.w, frame.near);
+	float depth = max(clip_view_z(frame.projection, clip), frame.projection.z);
 
 	float3 light = 0;
 	for (uint i = 0; i < frame.directional_count; i++) {

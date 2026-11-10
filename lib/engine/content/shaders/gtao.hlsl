@@ -20,7 +20,7 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	// would weigh some directions more and make an open plane look occluded or brighter than open.
 	float3 across = normalize(cross(float3(0, 1, 0), p.view));
 	float3 along = cross(p.view, across);
-	float2 projection_scale = p.view_model ? constants.view_model.xy : constants.projection.xy;
+	float4 projection = ao_projection(p.view_model);
 	uint slices = constants.samples;
 	uint steps = constants.steps;
 	[loop] for (uint slice = 0; slice < slices; slice++) {
@@ -28,7 +28,7 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 		float3 ortho = cos(phi) * across + sin(phi) * along;
 		// The slice's direction on the screen: how its direction moves the point's projection. The screen's y goes
 		// down, view space's up.
-		float2 moved = projection_scale * (ortho.xy * p.position.z - p.position.xy * ortho.z);
+		float2 moved = projection.xy * (is_orthographic(projection) ? ortho.xy : ortho.xy * p.position.z - p.position.xy * ortho.z);
 		float2 omega = normalize(float2(moved.x * constants.size.x, -moved.y * constants.size.y)) * p.pixels;
 		float3 axis = normalize(cross(ortho, p.view));
 		float3 projected = p.normal - axis * dot(p.normal, axis);

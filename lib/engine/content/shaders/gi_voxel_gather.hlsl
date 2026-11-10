@@ -86,7 +86,7 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	float z;
 	bool surface = surface_at(pixel, position, z);
 	if (push.view_output != 0) {
-		cn_rw_texture(push.view_output)[pixel] = float4(voxel_view(g, normalize(position)), 1);
+		cn_rw_texture(push.view_output)[pixel] = float4(voxel_view(g, from_camera(position)), 1);
 	}
 	if (depth <= 0) {
 		out_diffuse[pixel] = 0;
@@ -94,7 +94,7 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 		return;
 	}
 	float3 normal = octahedral_normal(pixel);
-	float3 reflected = reflect(normalize(position), normal);
+	float3 reflected = reflect(from_camera(position), normal);
 	float turn = 6.28318531 * interleaved_noise(float2(pixel));
 	float roughness = gather_roughness(pixel);
 	float3 diffuse, specular;

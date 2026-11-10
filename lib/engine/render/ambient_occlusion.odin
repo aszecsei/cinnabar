@@ -101,8 +101,11 @@ Ao_Depth_Constants :: struct {
 	stencil:         u32,
 	radius:          f32,
 	size:            [2]u32,
+	// The near and the far plane of the camera's projection and of the view model's (see View_Projection).
 	near:            f32,
 	view_model_near: f32,
+	far:             f32,
+	view_model_far:  f32,
 }
 
 // Ao_Constants matches Constants in ao_common.hlsli.
@@ -236,10 +239,6 @@ add_ao_passes :: proc(f: ^Frame, settings: Ao_Settings) {
 	temporal := f.post.temporal || f.post.upscaler != {}
 
 	right, up, forward := view_axes(f.view)
-	aspect := f32(f.size.x) / f32(max(f.size.y, 1))
-	scale := projection_scale(f.view_projection)
-	view_model := view_model_view(f.view)
-	view_model_scale := projection_scale(view_projection(view_model, aspect))
 	radius := settings.radius > 0 ? settings.radius : DEFAULT_AO_RADIUS
 	af := new(Ao_Frame, platform.frame_allocator)
 	af^ = {
@@ -255,15 +254,17 @@ add_ao_passes :: proc(f: ^Frame, settings: Ao_Settings) {
 	af.depth_constants = {
 		radius          = radius,
 		size            = f.size,
-		near            = f.view.near,
-		view_model_near = view_model.near,
+		near            = f.projection.z,
+		view_model_near = f.view_model_projection.z,
+		far             = f.projection.w,
+		view_model_far  = f.view_model_projection.w,
 	}
 	af.constants = {
 		right       = {right.x, right.y, right.z, 0},
 		up          = {up.x, up.y, up.z, 0},
 		forward     = {forward.x, forward.y, forward.z, 0},
-		projection  = {scale.x, scale.y, f.view.near, 0},
-		view_model  = {view_model_scale.x, view_model_scale.y, view_model.near, 0},
+		projection  = f.projection,
+		view_model  = f.view_model_projection,
 		size        = f.size,
 		jitter      = f.jitter,
 		radius      = radius,
@@ -300,6 +301,7 @@ ao_face :: proc(f: ^Frame, axes: [3][3]f32, size: u32, depth, normals: Texture, 
 	af.denoise_count = AO_DENOISE_PASSES
 	af.depth_constants.size = af.size
 	af.depth_constants.near, af.depth_constants.view_model_near = REFLECTION_PROBE_NEAR, REFLECTION_PROBE_NEAR
+	af.depth_constants.far, af.depth_constants.view_model_far = 0, 0
 	af.constants.right = {right.x, right.y, right.z, 0}
 	af.constants.up = {up.x, up.y, up.z, 0}
 	af.constants.forward = {forward.x, forward.y, forward.z, 0}

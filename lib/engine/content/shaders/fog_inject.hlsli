@@ -8,8 +8,7 @@
 #define FOG_INJECT_HLSLI
 
 // Matches Fog_Push in lib/engine/render/fog.odin. It starts with Material_Push's shadow textures, which the light loop
-// reads. right, up and forward are the view's axes in the world, with the projection's x and y scales in right.w and
-// up.w. base_height is the fog's height relative to the camera. jitter is where the point is in its slice, in [0, 1).
+// reads. right, up and forward are the view's axes in the world. base_height is the fog's height relative to the camera. jitter is where the point is in its slice, in [0, 1).
 struct Fog_Push {
 	uint shadow_atlas;
 	uint shadow_mask;
@@ -40,10 +39,15 @@ static const float FOG_TILE = 16;
 // Directional rays stop this far away, in meters.
 static const float FOG_RAY_DISTANCE = 10000;
 
-// fog_depth is the view depth at a slice coordinate of the fog volume, from slice = log2(depth) * scale + bias in the
-// clusters' slices.
+// fog_depth is the view depth at a slice coordinate of the fog volume, in the clusters' slices (see slice_z).
 float fog_depth(float slice) {
-	return exp2((slice * CLUSTER_SLICES / float(push.grid.z) - frame.slice_bias) / frame.slice_scale);
+	return slice_z(frame.projection, slice * CLUSTER_SLICES / float(push.grid.z), frame.slice_scale, frame.slice_bias);
+}
+
+// fog_point is the point relative to the camera at a normalized device x and y and a view depth.
+float3 fog_point(float2 ndc, float depth) {
+	float3 v = view_position(frame.projection, ndc, depth);
+	return push.right.xyz * v.x + push.up.xyz * v.y + push.forward.xyz * v.z;
 }
 
 // henyey_greenstein is the share of light that scatters by an angle, per steradian.
@@ -75,7 +79,7 @@ float fog_shadow(Light_Record light, Light reaching, float3 p, float depth) {
 
 // fog_light is the light that a point in the fog scatters toward the camera, per unit of scattering.
 float3 fog_light(float3 p, float depth) {
-	float3 toward_camera = -normalize(p);
+	float3 toward_camera = to_camera(p);
 	float3 result = 0;
 	for (uint i = 0; i < frame.directional_count; i++) {
 		Light_Record l = load_light(i);
@@ -109,8 +113,7 @@ void fog_inject(uint3 id) {
 	float2 pixel = (float2(id.xy) + 0.5) * FOG_TILE;
 	float2 ndc = float2(pixel.x / frame.screen_size.x * 2 - 1, 1 - pixel.y / frame.screen_size.y * 2);
 	float depth = fog_depth(id.z + push.jitter);
-	float2 xy = ndc / float2(push.right.w, push.up.w) * depth;
-	float3 p = push.right.xyz * xy.x + push.up.xyz * xy.y + push.forward.xyz * depth;
+	float3 p = fog_point(ndc, depth);
 
 	float density = push.density * exp(-push.height_falloff * max(p.y - push.base_height, 0));
 	float4 current = float4(push.albedo * density * fog_light(p, depth), density);
@@ -121,13 +124,13 @@ void fog_inject(uint3 id) {
 		// still camera reads its own texel; from the jittered point it would read between slices, by a different amount
 		// each frame, and smear them.
 		float middle = fog_depth(id.z + 0.5);
-		float2 middle_xy = ndc / float2(push.right.w, push.up.w) * middle;
-		float3 previous = push.right.xyz * middle_xy.x + push.up.xyz * middle_xy.y + push.forward.xyz * middle + frame.camera_offset.xyz - frame.previous_camera_offset.xyz;
+		float3 previous = fog_point(ndc, middle) + frame.camera_offset.xyz - frame.previous_camera_offset.xyz;
 		float4 clip = mul(frame.previous_view_projection, float4(previous, 1));
-		if (clip.w > 0) {
+		float previous_depth = clip_view_z(frame.projection, clip);
+		if (clip.w > 0 && (previous_depth > 0 || is_orthographic(frame.projection))) {
 			float2 uv = (clip.xy / clip.w * float2(0.5, -0.5) + 0.5) * frame.fog_scale;
 			float slices = float(push.grid.z);
-			float slice = (log2(clip.w) * frame.slice_scale + frame.slice_bias) * (slices / CLUSTER_SLICES);
+			float slice = slice_of(frame.projection, previous_depth, frame.slice_scale, frame.slice_bias) * (slices / CLUSTER_SLICES);
 			float3 coordinates = float3(uv, slice / slices);
 			if (all(coordinates == saturate(coordinates))) {
 				float4 history = cn_texture3d(push.history).SampleLevel(cn_sampler(frame.fog_sampler), coordinates, 0);

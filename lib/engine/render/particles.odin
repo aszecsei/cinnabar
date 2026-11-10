@@ -194,7 +194,9 @@ Particle_Constants :: struct {
 	history_size:             [2]u32,
 	near:                     f32,
 	mesh_instances:           u32,
-	padding:                  [2]u32,
+	// The far plane of an orthographic camera, and 0 otherwise.
+	far:                      f32,
+	padding:                  u32,
 }
 
 // History_Push matches History_Push in particle_history.hlsl.
@@ -514,7 +516,8 @@ begin_particles_draw :: proc(f: ^Frame) {
 		return
 	}
 	(^Particle_Constants)(raw_data(pf.constants.data))^ = {
-		near = f.view.near,
+		near = f.projection.z,
+		far  = f.projection.w,
 	}
 	f.particles = pf
 }
@@ -718,7 +721,8 @@ finish_particles :: proc(f: ^Frame, step: ^Particle_Step, previous_view_projecti
 	}
 	(^Particle_Constants)(raw_data(pf.constants.data))^ = {
 		previous_view_projection = previous_view_projection,
-		near                     = f.view.near,
+		near                     = f.projection.z,
+		far                      = f.projection.w,
 	}
 	f.particles = pf
 	// The update resets the new systems' ranges. Until a frame does that and executes, each frame asks again.

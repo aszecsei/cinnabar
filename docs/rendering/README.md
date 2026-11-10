@@ -36,7 +36,7 @@ Read them in this order the first time.
 | `graph.odin` | `Graph`: passes, uses, transient and imported resources, barriers, culling and execution ([GPU](../gpu/render-graph.md#render-graph)) |
 | `cache.odin` | `Texture_Cache`: transient textures and history pairs kept between frames |
 | `extract.odin` | Extractors and `extract`, the ECS-to-GPU step ([World](../world/render-extraction.md#render-extraction)) |
-| `view.odin` | `View`: a camera's pose, projection and viewport; `view_projection`, `view_depth`, `camera_view` ([Views](frame.md#views)) |
+| `view.odin` | `View`: a camera's pose and its `Projection`, perspective or orthographic; `view_projection`, `view_depth`, `projection_constants`, `limit_quality` ([Views](frame.md#views), [Orthographic views](frame.md#orthographic-views)) |
 | `renderer.odin` | `Renderer`, `Frame_Desc`, `Frame`, the hooks, the frame's targets and `draw_frame` ([Frame](frame.md#frame)) |
 | `settings.odin` | The settings components on volumes and `resolve_settings` ([Settings](frame.md#settings)) |
 | `quality.odin` | `Quality`, its presets, `Caps`, `default_quality`, `clamp_quality` and `apply_quality` ([Quality](quality.md#quality)) |
@@ -101,7 +101,7 @@ The shaders are engine content in `lib/engine/content/shaders`: one `.hlsl` asse
 |---|---|---|
 | Shading path | Clustered forward, with a depth and normal prepass | See [Clustered forward](lighting-and-shadows.md#clustered-forward). |
 | Visibility buffer | Not the shading path | A prototype on the mesh shader path was measured in Sponza and Jungle Ruins. It removed the forward pass's quad overdraw, 40 to 70 % helper lanes on dense meshes, but there that shading costs a tenth of a millisecond or less. Its visibility pass cost 1.5 to 2 times the prepass that it replaced, so Sponza was 2 to 12 % slower, and Jungle Ruins, which its geometry bounds, was no faster than the forward pass's best runs. See [Visibility buffer](lighting-and-shadows.md#visibility-buffer). |
-| Depth | Reversed infinite Z: depth is `near / z`, test `Greater`, clear 0 | `D32_Float` has its precision near 0. Reversing puts that precision in the distance instead of at the near plane, where nothing needs it. See Reed in [References](#references). |
+| Depth | Reversed Z: test `Greater`, clear 0. A perspective view's far plane is at infinity and its depth is `near / z`. An orthographic view's depth is `(far - z) / (far - near)` | `D32_Float` has its precision near 0. Reversing puts that precision in the distance instead of at the near plane, where nothing needs it. See Reed in [References](#references). |
 | Scene color | `RGBA16_Float`, linear, pre-exposed | Bloom, exposure and tone mapping need HDR. Pre-exposure keeps bright values inside the half-float range. |
 | View model | A second view drawn into the scene's targets, not a separate target | See [View model](layers-and-output.md#view-model). |
 | UI and debug | Separate targets, combined after tone mapping | Tone mapping and exposure do not change them, and the scene can render at a lower resolution than the UI does. The debug layer has the scene's size, for the depth that it tests against. |
