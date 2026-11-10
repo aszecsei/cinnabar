@@ -467,14 +467,19 @@ end_frame :: proc() {
 	frame := &dev.frames[dev.frame_index % FRAMES_IN_FLIGHT]
 	target := gpu.pool_get(&dev.textures, dev.frame_target)
 	list := acquire_list(frame, .Graphics)
-	if slot := pending_capture(); slot != nil {
-		record_capture(slot, list, target)
-	} else {
+	if slot := pending_capture(); slot == nil {
 		texture_barrier(list, target.resource, {.RENDER_TARGET}, {.NO_ACCESS}, {.RENDER_TARGET}, {}, .RENDER_TARGET, .PRESENT)
+	} else if viewport, is_viewport := slot.viewport.?; is_viewport {
+		// The copy reads the viewport's target, which end_shared_sides then moves to the common layout. The frame target
+		// ends as it does without a capture.
+		record_viewport_capture(slot, list, viewport)
+		texture_barrier(list, target.resource, {.RENDER_TARGET}, {.NO_ACCESS}, {.RENDER_TARGET}, {}, .RENDER_TARGET, .PRESENT)
+	} else {
+		record_capture(slot, list, target)
 	}
 	record_texture_capture(list)
 	if dev.shared_mode {
-		end_shared_previews(list)
+		end_shared_sides(list)
 	}
 	resolve_timestamps(frame, list)
 	check(list->Close(), "ICommandList.Close")

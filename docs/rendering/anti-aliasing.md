@@ -36,7 +36,7 @@ The [quality](quality.md#quality) chooses the anti-aliasing's technique (`Qualit
 - **Jitter:** the Halton sequence has `JITTER_SAMPLES` (8) points times the output's pixels for each of the scene's, rounded (32 at half size), so every output pixel gets samples near its center. The jitter is in the scene's pixels.
 - **Without temporal AA,** `Frame.scene` stays at the scene's size, and so do the tone map pass and FXAA or SMAA after it. The output pass reads the scene, or `Frame.display`, bilinearly at each frame pixel's center, which at the same size is the pixel itself, and so stretches a smaller one.
 - **The debug layer** is at the scene's size, with the depth that its tested lines and the editor's tools test against. The output pass stretches it as well, so at a scale below 1, debug lines and the editor's outline and gizmos are wider and softer.
-- **Editor picks** are in the frame's pixels: `editor.add_viewport_passes` takes the scene's size and the frame's in its `Viewport_Frame`, and a pick covers the scene's pixels under its rectangle, at least one (see [Editor](../editor/viewport.md#viewport)).
+- **Editor picks** are in the frame's pixels: the editor's tools take the scene's size and the frame's from the `Frame` that their overlay is given, and a pick covers the scene's pixels under its rectangle, at least one (see [Editor](../editor/viewport.md#viewport)).
 - **FSR upscales** as temporal AA does, at every scale; its own history is at the frame's size (see [FSR](#fsr)).
 - **Changing the scale** reallocates the scene's transient textures, and the histories start again, as on a resize.
 

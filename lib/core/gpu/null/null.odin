@@ -2,6 +2,7 @@
 // It runs headless tests and catches code that only one real backend accepts.
 package gpu_null
 
+import "core:fmt"
 import "core:log"
 import "core:mem"
 import "core:sync"
@@ -29,6 +30,8 @@ Null_Capture :: struct {
 	status:  gpu.Capture_Status,
 	source:  gpu.Capture_Source,
 	ticket:  u32,
+	// The capture source when the request was made.
+	viewport: Maybe(int),
 	size:    [2]u32,
 	format:  gpu.Format,
 	mode:    gpu.Output_Mode,
@@ -44,6 +47,16 @@ Null_Capture_State :: enum u8 {
 	Done,
 	// The caller holds it until release_frame_capture.
 	Taken,
+}
+
+// Null_Viewport is a viewport's target, which a game takes with viewport_target: a texture of the target's size. It has no
+// shared objects, so nothing paces it.
+@(private = "file")
+Null_Viewport :: struct {
+	texture:    gpu.Texture,
+	generation: u32,
+	// Whether this frame took the target.
+	used:       bool,
 }
 
 // Null_Frame is a frame's fake GPU spans, until begin_frame gives them to the profiler.
@@ -108,6 +121,9 @@ state: struct {
 	// Whether the next frame copy fails, as D3D12's does when it cannot make its readback buffer, for tests.
 	fail_frame_copy:   bool,
 	captures:          [CAPTURE_SLOTS]Null_Capture,
+	viewports:         [gpu.MAX_VIEWPORT_TARGETS]Null_Viewport,
+	// The viewport whose target the frame's copies read, or nil for the frame target.
+	capture_viewport:  Maybe(int),
 }
 
 // The null backend has no shared mode and no adapter: it renders nothing to share.
@@ -204,14 +220,12 @@ request_output :: proc(request: gpu.Output_Request) {
 	state.request = request
 }
 
-// The null backend has no shared target, so these do nothing.
+// The null backend has no shared target, so these do nothing. Its viewports have textures to draw into, which nothing reads.
 shared_target :: proc() -> (prefix: string, generation: u32, size: [2]i32) {
 	return
 }
 
 pace_shared_frames :: proc(paced: bool) {}
-
-acknowledge_shared_frame :: proc(generation: u32, frame: u64) {}
 
 preview_target :: proc(id: int, size: [2]u32) -> (target: gpu.Preview_Target, ok: bool) {
 	return
@@ -220,6 +234,37 @@ preview_target :: proc(id: int, size: [2]u32) -> (target: gpu.Preview_Target, ok
 release_preview_target :: proc(id: int) {}
 
 acknowledge_preview_frame :: proc(id: int, generation: u32, frame: u64) {}
+
+// viewport_target gives viewport id's texture for this frame, at a size within gpu.MAX_VIEWPORT_SIZE, in the render target
+// layout. It makes the texture the first time, and a new generation when the size changes. It is false while the frame
+// records nothing, as D3D12's is outside shared mode.
+viewport_target :: proc(id: int, size: [2]u32) -> (target: gpu.Preview_Target, ok: bool) {
+	if id < 0 || id >= gpu.MAX_VIEWPORT_TARGETS || size.x == 0 || size.y == 0 || !state.recording {
+		return
+	}
+	v := &state.viewports[id]
+	want := [2]u32{min(size.x, gpu.MAX_VIEWPORT_SIZE), min(size.y, gpu.MAX_VIEWPORT_SIZE)}
+	desc := gpu.Texture_Desc{size = want, format = gpu.FRAME_TARGET_FORMAT, usage = {.Render_Target}, scope = .Permanent}
+	if v.texture == {} {
+		v.texture = gpu.pool_add(&state.textures, desc)
+	} else if entry := gpu.pool_get(&state.textures, v.texture); entry.size != want {
+		entry^ = desc
+		v.generation += 1
+	}
+	gpu.track_layout(&state.layouts, v.texture, .Render_Target)
+	v.used = true
+	return {texture = v.texture, prefix = fmt.tprintf("null.viewport%d.g%d", id, v.generation), generation = v.generation, size = want}, true
+}
+
+release_viewport_target :: proc(id: int) {
+	if id < 0 || id >= gpu.MAX_VIEWPORT_TARGETS || state.viewports[id].texture == {} {
+		return
+	}
+	destroy_texture(state.viewports[id].texture)
+	state.viewports[id] = {generation = state.viewports[id].generation + 1}
+}
+
+acknowledge_viewport_frame :: proc(id: int, generation: u32, frame: u64) {}
 
 // Nothing compiles, so a pipeline is Ready once it exists, and a handle that is not a pipeline's is Failed.
 pipeline_status :: proc(pipeline: gpu.Pipeline) -> gpu.Pipeline_Status {
@@ -317,8 +362,25 @@ end_frame :: proc() {
 	if state.frame_pending >= 0 {
 		copied := state.recording && !state.fail_frame_copy
 		state.fail_frame_copy = false
-		finish_capture(state.frame_pending, state.frame_target, state.output.mode, copied)
+		texture, mode := state.frame_target, state.output.mode
+		// A copy of a viewport's target needs a frame that drew it.
+		if viewport, is_viewport := state.captures[state.frame_pending].viewport.?; is_viewport {
+			drawn := viewport >= 0 && viewport < gpu.MAX_VIEWPORT_TARGETS && state.viewports[viewport].used
+			copied &&= drawn
+			if drawn {
+				texture, mode = state.viewports[viewport].texture, .Sdr
+			}
+		}
+		finish_capture(state.frame_pending, texture, mode, copied)
 		state.frame_pending = -1
+	}
+	for &v in state.viewports {
+		if v.used && v.texture != {} {
+			if layout, _ := gpu.tracked_layout(&state.layouts, v.texture); layout != .Render_Target {
+				log.errorf("gpu: a viewport's target ends the frame in the %v layout", layout)
+			}
+		}
+		v.used = false
 	}
 }
 
@@ -349,6 +411,9 @@ take_capture_slot :: proc(source: gpu.Capture_Source, ticket: u32) -> int {
 	for &c, i in state.captures {
 		if c.state == .Free {
 			c = {state = .Requested, source = source, ticket = ticket}
+			if source == .Frame {
+				c.viewport = state.capture_viewport
+			}
 			return i
 		}
 	}
@@ -371,8 +436,18 @@ capture_row_pitch :: proc(width: u32) -> u32 {
 	return (width * 4 + 255) &~ 255
 }
 
-// request_frame_capture takes a slot for this frame's frame target, or is false when the last frame recorded nothing,
-// every slot is held or a copy is already asked for this frame. Like D3D12's, it sees the last frame, so a frame that
+// set_capture_source chooses what request_frame_capture copies from the next request on: a viewport's target, or with nil
+// the frame target, which is the start. A frame that does not take the viewport's target cancels the copy.
+set_capture_source :: proc(viewport: Maybe(int)) {
+	state.capture_viewport = viewport
+}
+
+capture_source :: proc() -> Maybe(int) {
+	return state.capture_viewport
+}
+
+// request_frame_capture takes a slot for this frame's capture source, the frame target unless set_capture_source chose a
+// viewport's, or is false when the last frame recorded nothing, every slot is held or a copy is already asked for this frame. Like D3D12's, it sees the last frame, so a frame that
 // then records nothing cancels the copy.
 request_frame_capture :: proc(ticket: u32) -> bool {
 	if !state.recording || state.frame_pending >= 0 {
@@ -390,7 +465,7 @@ poll_frame_capture :: proc() -> (capture: gpu.Frame_Capture, ok: bool) {
 			continue
 		}
 		c.state = .Taken
-		capture = {slot = u32(i), status = c.status, source = c.source, ticket = c.ticket}
+		capture = {slot = u32(i), status = c.status, source = c.source, ticket = c.ticket, viewport = c.viewport}
 		if c.status == .Ready {
 			capture.size, capture.format, capture.mode = c.size, c.format, c.mode
 			capture.row_pitch, capture.pixels = capture_row_pitch(c.size.x), c.pixels

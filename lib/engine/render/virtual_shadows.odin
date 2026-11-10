@@ -515,7 +515,7 @@ virtual_lookup_level :: proc(s: Virtual_Selection, distance: f32) -> int {
 // virtual_shadow_stats is the frame's own view's virtual shadow map's pages, a frame or two ago, all 0 after a frame
 // without it.
 virtual_shadow_stats :: proc(r: ^Renderer) -> Virtual_Shadow_Stats {
-	return r.view.virtual_shadows.last_stats
+	return stats_state(r).virtual_shadows.last_stats
 }
 
 @(private)

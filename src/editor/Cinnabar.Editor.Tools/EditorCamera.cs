@@ -16,7 +16,7 @@ public sealed class EditorCamera
     // Radians per pixel of mouse movement, for looking and orbiting.
     const double TurnRate = 0.005;
     // Pitch stops short of straight up and down, where the heading is undefined.
-    const double MaxPitch = 89 * Math.PI / 180;
+    public const double MaxPitch = 89 * Math.PI / 180;
     // Each wheel notch of a dolly takes the camera this much of the way to the pivot.
     const double DollyStep = 0.15;
     const double MinPivotDistance = 0.01;
@@ -139,6 +139,16 @@ public sealed class EditorCamera
         Changed?.Invoke();
     }
 
+    /// <summary>Looks along a heading and a pitch at a pivot, from a distance in front of it: the camera moves back from the pivot, which stays where it is.</summary>
+    public void LookAt(long[] pivot, double distance, double yaw, double pitch)
+    {
+        Yaw = yaw;
+        Pitch = Math.Clamp(pitch, -MaxPitch, MaxPitch);
+        PivotDistance = Math.Max(distance, MinPivotDistance);
+        Position = (-Forward * PivotDistance).Offset(pivot);
+        Changed?.Invoke();
+    }
+
     void Turn(double yaw, double pitch)
     {
         Yaw = Math.IEEERemainder(Yaw + yaw, 2 * Math.PI);
@@ -174,9 +184,10 @@ public sealed class EditorCamera
         return new Vec2((x + 1) * width / 2, (1 - y) * height / 2);
     }
 
-    public Wire.EditorCamera ToMessage()
+    /// <summary>The camera as the game takes it, for one of the editor's viewports.</summary>
+    public Wire.EditorCamera ToMessage(uint viewport = 0)
     {
         var q = Rotation;
-        return new Wire.EditorCamera([.. Position], [(float)q.X, (float)q.Y, (float)q.Z, (float)q.W], (float)VerticalFov, (float)Near);
+        return new Wire.EditorCamera(viewport, [.. Position], [(float)q.X, (float)q.Y, (float)q.Z, (float)q.W], (float)VerticalFov, (float)Near);
     }
 }

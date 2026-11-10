@@ -493,7 +493,7 @@ public sealed class MainWindow : Window
     {
         _modeStatus.Text = _shell.Mode switch
         {
-            Link.Protocol.EditorMode.Play => _shell.FreeCamera ? "Play, free camera" : "Play",
+            Link.Protocol.EditorMode.Play => "Play",
             Link.Protocol.EditorMode.Paused => "Paused",
             _ => _shell.Mesh.InMeshMode ? $"Mesh  ·  {_shell.Mesh.MeshStatus}" : "Edit",
         };

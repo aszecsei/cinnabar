@@ -10,6 +10,18 @@ public enum ViewportScale
     Actual,
 }
 
+/// <summary>Whether a viewport's control is on screen with a size, which is what the game draws a viewport for.</summary>
+public abstract record ViewportPresence
+{
+    /// <summary>No control of the session is attached, visible and sized.</summary>
+    public static readonly ViewportPresence Hidden = new HiddenPresence();
+
+    /// <summary>A control shows the session at a size in physical pixels.</summary>
+    public sealed record Shown(PixelSize Size) : ViewportPresence;
+
+    sealed record HiddenPresence : ViewportPresence;
+}
+
 /// <summary>
 /// What the viewport shows, apart from any one control: the editor's D3D11 device and the host's shared frames (see
 /// docs/editor/viewport.md#viewport). Docking can move or rebuild the <see cref="ViewportControl"/>, and the session stays.
@@ -72,10 +84,14 @@ public sealed class ViewportSession : IDisposable
     /// </summary>
     public bool HasPicture { get; private set; }
 
-    /// <summary>The size of the viewport in physical pixels, which the host should render at.</summary>
-    public PixelSize RequestedSize { get; private set; }
+    /// <summary>
+    /// Whether the viewport's control is on screen, and its size in physical pixels, which the host should render at. The
+    /// one state that <see cref="Show"/> and <see cref="Hide"/> change.
+    /// </summary>
+    public ViewportPresence Presence { get; private set; } = ViewportPresence.Hidden;
 
-    public event Action<PixelSize>? SizeRequested;
+    /// <summary><see cref="Presence"/> changed.</summary>
+    public event Action? PresenceChanged;
 
     /// <summary>The GPU finished copying a frame of a generation, so the host may draw into its texture again.</summary>
     public event Action<uint, ulong>? FrameCopied;
@@ -106,12 +122,38 @@ public sealed class ViewportSession : IDisposable
         _acknowledged = 0;
     }
 
-    internal void RequestSize(PixelSize size)
+    // The control that last showed the session. Docking can attach a control for the session before it detaches the old
+    // one, and the old one's hide must not hide the new one's.
+    object? _shownBy;
+
+    /// <summary>A control shows the session at a size. A size with no area hides it.</summary>
+    internal void Show(PixelSize size, object? by = null)
     {
-        if (size != RequestedSize && size.Width > 0 && size.Height > 0)
+        if (size.Width <= 0 || size.Height <= 0)
         {
-            RequestedSize = size;
-            SizeRequested?.Invoke(size);
+            Hide(by);
+            return;
+        }
+        _shownBy = by;
+        SetPresence(new ViewportPresence.Shown(size));
+    }
+
+    /// <summary>No control shows the session: it detached, hid, or has no area. A control that did not show it last cannot hide it.</summary>
+    internal void Hide(object? by = null)
+    {
+        if (by == null || _shownBy == null || _shownBy == by)
+        {
+            _shownBy = null;
+            SetPresence(ViewportPresence.Hidden);
+        }
+    }
+
+    void SetPresence(ViewportPresence presence)
+    {
+        if (presence != Presence)
+        {
+            Presence = presence;
+            PresenceChanged?.Invoke();
         }
     }
 

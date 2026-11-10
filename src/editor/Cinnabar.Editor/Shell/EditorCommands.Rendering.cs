@@ -1,10 +1,11 @@
 using Cinnabar.Editor.Commands;
+using Cinnabar.Editor.Docking;
 
 namespace Cinnabar.Editor.Shell;
 
 static partial class EditorCommands
 {
-    // The panels, the layout, the ribbon and the viewport's scale.
+    // The panels, the layout, the ribbon, the viewports' documents and their scale.
     static void RegisterWindow(EditorShell shell)
     {
         var commands = shell.Commands;
@@ -22,11 +23,18 @@ static partial class EditorCommands
             Description = "Put every panel back where it starts.",
             Icon = "reset",
         });
-        commands.Register(new Command(Stats, "Viewport Stats", () => shell.Viewport.ShowStats = !shell.Viewport.ShowStats)
+        commands.Register(new Command(Stats, "Viewport Stats", () =>
         {
-            Description = "Show the frame rates and the adapter over the viewport.",
+            var show = !shell.Viewports.Any(v => v.Session.ShowStats);
+            foreach (var viewport in shell.Viewports)
+            {
+                viewport.Session.ShowStats = show;
+            }
+        })
+        {
+            Description = "Show the frame rates and the adapter over the viewports.",
             Icon = "stats",
-            IsCheckedWhen = () => shell.Viewport.ShowStats,
+            IsCheckedWhen = () => shell.Viewports.Any(v => v.Session.ShowStats),
         });
         commands.Register(new Command(CollapseRibbon, "Collapse Ribbon", () => shell.RibbonCollapsed = !shell.RibbonCollapsed)
         {
@@ -35,14 +43,66 @@ static partial class EditorCommands
             Shortcut = "Ctrl+F1",
             IsCheckedWhen = () => shell.RibbonCollapsed,
         });
-        commands.Register(ChoiceCommand.ForEnum<Viewport.ViewportScale>(ViewportScale, "Scale", () => shell.Viewport.Scale, scale => shell.Viewport.Scale = scale,
+        commands.Register(ChoiceCommand.ForEnum<Viewport.ViewportScale>(ViewportScale, "Scale", () => shell.ActiveViewport.Session.Scale,
+            scale =>
+            {
+                foreach (var viewport in shell.Viewports)
+                {
+                    viewport.Session.Scale = scale;
+                }
+            },
             scale => scale == Viewport.ViewportScale.Fit ? "Fit" : "100%",
             description: "Fit the frame to the viewport, or show one frame pixel per screen pixel.",
             icon: "scale"));
+        // A preset is a shortcut for the four toggles: the choice shows the preset that they make, or Custom.
+        commands.Register(new ChoiceCommand(SceneLayout, "Layout", [.. ScenePreset.All.Select(p => p.Name), ScenePreset.Custom],
+            () => shell.ScenePresetName, name =>
+            {
+                if (ScenePreset.Find(name) is { } preset)
+                {
+                    shell.SetSceneViews(preset.Views);
+                }
+            })
+        {
+            Description = "Choose which views the Scene shows: one, two side by side, or the four. The toggles next to it put one view in or out.",
+            Icon = "viewport",
+        });
+        for (var i = 0; i < EditorViewport.SceneViews; i++)
+        {
+            var index = i;
+            var view = shell.Viewports[index];
+            commands.Register(new Command(SceneViewToggle(index), view.Title, () => shell.ToggleSceneView(index))
+            {
+                Description = $"Show or hide the {view.Title} view in the Scene. One view always stays.",
+                Icon = "viewport",
+                CanExecuteWhen = () => shell.CanToggleSceneView(index),
+                IsCheckedWhen = () => shell.SceneViews.HasFlag((SceneViewSet)(1 << index)),
+            });
+        }
+        ViewportDocumentToggle(shell, SceneView, "Scene View", ViewportDocument.SceneId, "Show or hide the Scene, which holds the editor's views of the world and its tools.", "viewport");
+        ViewportDocumentToggle(shell, GameView, "Game View", ViewportDocument.GameId, "Show or hide the Game view, which shows the game as a player sees it and gives it the input while it plays.", "camera");
     }
 
-    // The viewport's rendering (see docs/editor/viewport.md#viewport): what it shows in place of the lit scene, the features
-    // that it turns off, the exposure offset, and the helpers. Each toggle is checked while its feature is on.
+    static void ViewportDocumentToggle(EditorShell shell, string id, string label, string document, string description, string icon) =>
+        shell.Commands.Register(new Command(id, label, () =>
+        {
+            if (shell.Layout.IsViewportOpen(document))
+            {
+                shell.Layout.CloseViewport(document);
+            }
+            else
+            {
+                shell.Layout.ShowViewport(document);
+            }
+        })
+        {
+            Description = description,
+            Icon = icon,
+            IsCheckedWhen = () => shell.Layout.IsViewportOpen(document),
+        });
+
+    // The settings viewport's rendering (see docs/editor/viewport.md#viewport): what it shows in place of the lit scene, the
+    // features that it turns off, the exposure offset, and the helpers. Each toggle is checked while its feature is on.
     static void RegisterRendering(EditorShell shell)
     {
         var commands = shell.Commands;

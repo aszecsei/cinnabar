@@ -26,9 +26,11 @@ every_message_round_trips :: proc(t: ^testing.T) {
 		Refused{reason = "versions differ", protocol = 2},
 		Log{level = .Warning, time = -5, location = "host.odin:12:main()", text = "ünïcode"},
 		Game_Reloaded{kind = .Soft_Restart},
-		Viewport_Size{width = 1920, height = -1},
-		Frame_Target{prefix = "cinnabar.g3", generation = 3, width = 640, height = 360},
-		Frame_Acknowledged{generation = 3, frame = 1 << 40},
+		Game_Size{width = 1920, height = -1},
+		Open_Viewport{viewport = 2, kind = .Game, width = 640, height = 360},
+		Viewport_Target{viewport = 2, prefix = "cinnabar.viewport2.g3", generation = 3, width = 640, height = 360},
+		Viewport_Acknowledged{viewport = 2, generation = 3, frame = 1 << 40},
+		Capture_Source{viewport = -1},
 		Component_Types{
 			types = {
 				{
@@ -135,7 +137,7 @@ a_header_with_a_huge_payload_is_refused :: proc(t: ^testing.T) {
 @(test)
 the_schema_lists_every_message_and_type :: proc(t: ^testing.T) {
 	text := schema(context.temp_allocator)
-	for name in ([]string{"Hello", "Welcome", "Refused", "Log", "Game_Reloaded", "Viewport_Size", "Frame_Target", "Frame_Acknowledged", "Log_Level", "Reload_Kind", "Entity_Values", "Behaviour_Field", "Field_Kind"}) {
+	for name in ([]string{"Hello", "Welcome", "Refused", "Log", "Game_Reloaded", "Game_Size", "Open_Viewport", "Viewport_Acknowledged", "Capture_Source", "Log_Level", "Reload_Kind", "Entity_Values", "Behaviour_Field", "Field_Kind"}) {
 		testing.expectf(t, strings.contains(text, name), "the schema has no %s", name)
 	}
 	testing.expect(t, strings.contains(text, `"kind": 1, "name": "Hello"`))
@@ -183,8 +185,8 @@ decoding_allocates_only_from_the_given_allocator :: proc(t: ^testing.T) {
 the_bytes_match_the_editor_encoding :: proc(t: ^testing.T) {
 	buf: [dynamic]byte
 	defer delete(buf)
-	write_message(&buf, Frame_Acknowledged{generation = 3, frame = 0x0102030405060708})
-	expected := []byte{12, 0, 0, 0, 8, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 8, 7, 6, 5, 4, 3, 2, 1}
+	write_message(&buf, Game_Size{width = 3, height = 0x01020304})
+	expected := []byte{8, 0, 0, 0, 6, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 4, 3, 2, 1}
 	testing.expectf(t, string(buf[:]) == string(expected), "wrote %v", buf[:])
 }
 
@@ -219,6 +221,6 @@ an_animators_view_round_trips :: proc(t: ^testing.T) {
 @(test)
 kind_of_is_the_index_in_the_union :: proc(t: ^testing.T) {
 	testing.expect_value(t, kind_of(Hello), u16(1))
-	testing.expect_value(t, kind_of(Frame_Acknowledged), u16(8))
-	testing.expect_value(t, kind_of(Entity_Values), u16(14))
+	testing.expect_value(t, kind_of(Game_Size), u16(6))
+	testing.expect_value(t, kind_of(Entity_Values), u16(12))
 }

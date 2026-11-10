@@ -264,10 +264,12 @@ Pipelines :: struct {
 	lens:      render.Shader_Pipeline,
 }
 
-// Frame is what the pass procedures need. It lives in frame memory.
+// Frame is what the pass procedures need for one view of the frame. The renderer runs the hooks once for each view, with
+// the same data, so the sample makes a Frame in the first hook of a view and keeps it in render.Frame.user. It lives in
+// frame memory.
 Frame :: struct {
 	state:          ^Game_State,
-	// The scene's size, at the quality's render scale, which before_world takes from the renderer's frame.
+	// The scene's size, at the quality's render scale.
 	size:           [2]u32,
 	view:           render.View,
 	pass_constants: gpu.Upload,
@@ -285,8 +287,11 @@ Frame :: struct {
 	scene:          render.Texture,
 	shadows:        render.Texture,
 	post:           render.Texture,
-	// The ray tracing pass built the triangle's acceleration structure.
-	building_blas:  bool,
+}
+
+// frame_of is the sample's data for the view that a hook is drawing.
+frame_of :: proc(f: ^render.Frame) -> ^Frame {
+	return (^Frame)(f.user)
 }
 
 init :: proc(state: rawptr, platform: ^core.Platform_API) {
@@ -402,7 +407,7 @@ register_post_effects :: proc(s: ^Game_State) {
 
 // Lens_Pass is the lens's pass, in frame memory.
 Lens_Pass :: struct {
-	frame:  ^Frame,
+	state:  ^Game_State,
 	lens:   Lens,
 	// The scene's size there, which temporal AA may have upscaled.
 	size:   [2]u32,
@@ -411,14 +416,14 @@ Lens_Pass :: struct {
 }
 
 add_lens :: proc(f: ^render.Frame, settings: rawptr) {
-	frame := (^Frame)(f.data)
-	if !render.pipeline_ready(f.renderer.platform, &frame.state.pipelines.lens) {
+	s := (^Game_State)(f.data)
+	if !render.pipeline_ready(f.renderer.platform, &s.pipelines.lens) {
 		return
 	}
 	g := f.graph
-	pass := new(Lens_Pass, frame.state.platform.frame_allocator)
+	pass := new(Lens_Pass, s.platform.frame_allocator)
 	pass^ = {
-		frame  = frame,
+		state  = s,
 		lens   = (^Lens)(settings)^,
 		size   = f.scene_size,
 		input  = f.scene,
@@ -441,7 +446,7 @@ run_lens :: proc(ctx: ^render.Pass_Context) {
 		vignette   = pass.lens.vignette.value,
 	}
 	groups := (pass.size + POST_GROUP_SIZE - 1) / POST_GROUP_SIZE
-	gpu.cmd_set_pipeline(cb, pass.frame.state.pipelines.lens.pipeline)
+	gpu.cmd_set_pipeline(cb, pass.state.pipelines.lens.pipeline)
 	gpu.cmd_push_constants(cb, &constants)
 	gpu.cmd_dispatch(cb, {groups.x, groups.y, 1})
 }
@@ -593,24 +598,7 @@ update :: proc(state: rawptr, dt: time.Duration) -> (keep_running: bool) {
 	if size.x <= 0 || size.y <= 0 {
 		return true
 	}
-	pass, ok := s.platform.gpu_upload(size_of(Pass_Constants), gpu.PASS_CONSTANTS_ALIGN)
-	if !ok {
-		return true
-	}
-	view := camera_view(s)
-	aspect := f32(size.x) / f32(size.y)
-	right, up, forward := render.view_axes(view)
-	(^Pass_Constants)(raw_data(pass.data))^ = {
-		view_projection = render.view_projection(view, aspect),
-		right           = {right.x, right.y, right.z, 0},
-		up              = {up.x, up.y, up.z, 0},
-		forward         = {forward.x, forward.y, forward.z, 0},
-		time            = f32(time.duration_seconds(s.elapsed)),
-		aspect          = aspect,
-		tan_half_fov    = math.tan(view.vertical_fov * 0.5),
-		near            = view.near,
-	}
-	render_frame(s, {u32(size.x), u32(size.y)}, view, pass)
+	render_frame(s, {u32(size.x), u32(size.y)})
 	return true
 }
 
@@ -642,11 +630,9 @@ draw_spin_axes :: proc(s: ^Game_State) {
 	}
 }
 
-// camera_view is the editor's camera while an editor is linked, and the scene's camera otherwise.
+// camera_view is the scene's camera, which the game draws from: the editor's Game view draws from it, and so does the
+// game without an editor. The editor's scene views draw from the editor's cameras.
 camera_view :: proc(s: ^Game_State) -> render.View {
-	if view, ok := editor.view(&s.editor); ok {
-		return view
-	}
 	if view, ok := render.camera_view(&s.world, s.camera); ok {
 		return view
 	}
@@ -684,73 +670,63 @@ stream_rings :: proc(s: ^Game_State) {
 	s.rings_transfer = s.platform.gpu_stream_texture(s.rings, data)
 }
 
-// render_frame draws the frame with the built-in renderer, which draws the Mesh_Renderers, and adds the sample's own
-// work through its hooks: the triangles in the world pass,
-// the ray-traced shadows and the post pass after it, the UI's documents in the UI layer, and the editor's tools in the
-// debug layer. The render graph places the barriers between the passes and the waits between the queues.
-render_frame :: proc(s: ^Game_State, size: [2]u32, view: render.View, pass_constants: gpu.Upload) {
-	frame := new(Frame, s.platform.frame_allocator)
-	frame^ = {
-		state          = s,
-		size           = size,
-		view           = view,
-		pass_constants = pass_constants,
-	}
-	extract_triangles(frame)
-	// A linked editor, in any mode: the frame writes the IDs for its picks and takes its viewport settings.
-	editing := editor.active(&s.editor)
-	// The editor's viewport settings and the shapes of lights, volumes and cameras (see docs/editor/viewport.md#viewport), or
-	// none without an editor. The shapes draw only in Edit.
-	overrides := editor.render_overrides(&s.editor)
-	quality, viewport_quality := editor.viewport_quality(&s.editor, &s.renderer)
-	editor.draw_helpers(&s.editor, &s.world, &s.renderer.debug)
-	hidden := editor.visibility(&s.editor, &s.world).hidden
+// render_frame describes the frame as the game draws it, with or without an editor, and gives it to the editor package to
+// draw (see editor.draw_frame): the scene's camera, the window's size, the built-in renderer's frame with the sample's own
+// work through its hooks, the triangles in the world pass, the ray-traced shadows and the post pass after it, and the UI's
+// documents in the UI layer. The render graph places the barriers between the passes and the waits between the queues.
+// The editor draws this frame in the views it shows, and the hooks run once for each, with their own data.
+render_frame :: proc(s: ^Game_State, window: [2]u32) {
 	desc := render.Frame_Desc {
-		view            = view,
-		size            = size,
-		keep_ids        = editing,
-		// The debug layer, with the editor's overlays and the debug lines, only while editing or without an editor.
-		no_debug        = !editor.debug_shown(&s.editor),
-		hidden          = hidden,
-		debug_view      = overrides.debug_view,
-		disable         = overrides.disable,
-		exposure_offset = overrides.exposure_offset,
-		shading_stats   = overrides.shading_stats,
-		quality         = viewport_quality ? &quality : nil,
-		// The material editor's previews (see docs/rendering/materials.md#material-previews).
-		previews        = editor.previews(&s.editor),
+		view   = camera_view(s),
+		size   = window,
 		// The particles step by the time that the world stepped, so they stand still in the editor's Edit and Paused.
-		delta           = s.frame_step,
-		// The editor's selected systems play while the world stands still.
-		playing         = editor.playing(&s.editor),
+		delta  = s.frame_step,
 		// The skinned entities' poses, between the last two ticks.
-		skins           = anim.present(&s.animation, &s.world, s.platform.frame_allocator),
-		hooks           = {
-			data         = frame,
+		skins  = anim.present(&s.animation, &s.world, s.platform.frame_allocator),
+		hooks  = {
+			data         = s,
 			before_world = before_world,
 			world_uses   = world_uses,
 			world_draw   = draw_scene,
 			after_world  = after_world,
 			ui           = draw_ui_layer,
-			debug        = editing ? draw_editor_tools : nil,
 		},
 	}
-	if render.draw_frame(&s.renderer, &s.world, desc) && frame.building_blas {
-		s.blas_built = true
-	}
+	editor.draw_frame(&s.editor, &s.renderer, &s.world, desc)
 }
 
-// before_world imports the sample's resources.
+// before_world makes the sample's data for this view of the frame, in Frame.user: the constants of its own passes, its
+// triangles relative to the view and its imported resources.
 before_world :: proc(f: ^render.Frame) {
-	frame := (^Frame)(f.data)
-	frame.size = f.size
-	s := frame.state
+	s := (^Game_State)(f.data)
+	frame := new(Frame, s.platform.frame_allocator)
+	frame^ = {
+		state = s,
+		size  = f.size,
+		view  = f.view,
+	}
+	f.user = frame
 	g := f.graph
+	// The sample's own draws cover the same pixels as the renderer's, with its jitter, and pre-expose their colors. Without
+	// room for the constants the view draws no triangles.
+	if pass, ok := s.platform.gpu_upload(size_of(Pass_Constants), gpu.PASS_CONSTANTS_ALIGN); ok {
+		frame.pass_constants = pass
+		aspect := f32(f.size.x) / f32(max(f.size.y, 1))
+		right, up, forward := render.view_axes(f.view)
+		(^Pass_Constants)(raw_data(pass.data))^ = {
+			view_projection = render.jittered_view_projection(f),
+			right           = {right.x, right.y, right.z, 0},
+			up              = {up.x, up.y, up.z, 0},
+			forward         = {forward.x, forward.y, forward.z, 0},
+			time            = f32(time.duration_seconds(s.elapsed)),
+			aspect          = aspect,
+			tan_half_fov    = math.tan(f.view.vertical_fov * 0.5),
+			near            = f.view.near,
+			exposure        = gpu.read_index(render.gpu_buffer(g, f.exposure)),
+		}
+		extract_triangles(frame, f.hidden)
+	}
 	// The large triangles show the rings once they are streamed in.
-	// The sample's own draws cover the same pixels as the renderer's, with its jitter, and pre-expose their colors.
-	constants := (^Pass_Constants)(raw_data(frame.pass_constants.data))
-	constants.view_projection = render.jittered_view_projection(f)
-	constants.exposure = gpu.read_index(render.gpu_buffer(g, f.exposure))
 	frame.checker = render.import_texture(g, s.rings_ready ? s.rings : s.checker, .Sampled)
 	frame.vertices = render.import_buffer(g, s.vertices)
 	frame.indices = render.import_buffer(g, s.indices)
@@ -758,7 +734,7 @@ before_world :: proc(f: ^render.Frame) {
 
 // world_uses declares what draw_scene reads in the world pass.
 world_uses :: proc(f: ^render.Frame, p: render.Pass) {
-	frame := (^Frame)(f.data)
+	frame := frame_of(f)
 	g := f.graph
 	render.read(g, p, frame.checker)
 	render.read(g, p, frame.vertices)
@@ -767,12 +743,15 @@ world_uses :: proc(f: ^render.Frame, p: render.Pass) {
 
 // after_world traces the triangles' shadows, and multiplies them into a new scene color, before temporal AA.
 after_world :: proc(f: ^render.Frame) {
-	frame := (^Frame)(f.data)
+	frame := frame_of(f)
 	s := frame.state
 	g := f.graph
 	frame.scene = f.scene
-	if s.shadow_mode != .None {
-		frame.building_blas = add_shadow_passes(g, frame)
+	// The view that builds the triangle's structure says so when its frame has executed, so the next one does not.
+	if s.shadow_mode != .None && add_shadow_passes(g, frame) {
+		render.on_executed(g, proc(data: rawptr) {
+				(^Game_State)(data).blas_built = true
+			}, s)
 	}
 	frame.post = render.create_texture(g, {size = frame.size, format = render.SCENE_FORMAT, label = "post"})
 	p := render.add_compute_pass(g, "post", run_post, frame)
@@ -786,24 +765,13 @@ after_world :: proc(f: ^render.Frame) {
 
 // draw_ui_layer draws the UI's documents, the HUD and the pause menu, into the UI layer.
 draw_ui_layer :: proc(f: ^render.Frame) {
-	ui.add_passes(&(^Frame)(f.data).state.ui, f)
-}
-
-// draw_editor_tools adds the editor's pick, and in Edit its icons, outline and gizmo, which draw into the debug layer.
-// In Play and Paused the frame has no debug layer, so only the pick runs.
-draw_editor_tools :: proc(f: ^render.Frame) {
-	s := (^Frame)(f.data).state
-	editor.add_viewport_passes(
-		&s.editor,
-		f.graph,
-		&s.world,
-		{view = f.view, size = f.size, output_size = f.output_size, target = f.debug, ids = f.ids, depth = f.depth},
-	)
+	ui.add_passes(&(^Game_State)(f.data).ui, f)
 }
 
 // extract_triangles writes the large triangles' instances for the scene pass and the acceleration structure:
-// their poses relative to the camera, interpolated between the last two ticks, their brightness and their IDs.
-extract_triangles :: proc(frame: ^Frame) {
+// their poses relative to the camera, interpolated between the last two ticks, their brightness and their IDs. The
+// triangles in hidden, the frame's hidden entities, are left out.
+extract_triangles :: proc(frame: ^Frame, hidden: []u32) {
 	s := frame.state
 	w := &s.world
 	count := render.extract_count(w, s.triangles)
@@ -813,18 +781,17 @@ extract_triangles :: proc(frame: ^Frame) {
 	}
 	chunks := render.extract(w, s.triangles, frame.view.position, triangles.data, size_of(Triangle_Instance))
 	instances := ([^]Triangle_Instance)(raw_data(triangles.data))[:count]
-	// The triangles that the editor hides are left out, and the others close up behind them.
-	visibility := editor.visibility(&s.editor, w)
+	// The others close up behind the hidden ones.
 	kept := 0
 	for c in chunks {
 		entities := ecs.entities(c.view)
 		for t, i in ecs.column(c.view, render.EXTRACT_TERMS, Triangle) {
-			if !editor.is_visible(visibility, entities[i]) {
+			if render.is_hidden(hidden, entities[i]) {
 				continue
 			}
 			instance := instances[c.first + i]
 			instance.brightness = t.brightness
-			instance.id = editor.entity_id(entities[i])
+			instance.id = render.entity_id(entities[i])
 			instances[kept] = instance
 			kept += 1
 		}
@@ -910,7 +877,7 @@ trace_shadows :: proc(ctx: ^render.Pass_Context) {
 
 // draw_scene draws the large triangles.
 draw_scene :: proc(f: ^render.Frame, ctx: ^render.Pass_Context) {
-	frame := (^Frame)(f.data)
+	frame := frame_of(f)
 	if frame.triangle_count == 0 {
 		return
 	}

@@ -166,8 +166,11 @@ public sealed class HostSession : IDisposable
     /// <summary>The running host's process id, for the capture sidecar and the automation status.</summary>
     public int? ProcessId => State.Run?.Process.Id;
 
-    /// <summary>The host can start once the viewport has found the adapter.</summary>
+    /// <summary>The host can start once a viewport has found the adapter.</summary>
     public bool CanStart => _adapter != 0;
+
+    /// <summary>The LUID of the adapter that the host renders on, or 0 before a viewport found it.</summary>
+    public ulong Adapter => _adapter;
 
     /// <summary><see cref="State"/> changed, from the state that it gives. It is raised once for each change.</summary>
     public event Action<HostState>? StateChanged;
@@ -177,8 +180,6 @@ public sealed class HostSession : IDisposable
 
     /// <summary>A line of the host's or the game's log, over the link.</summary>
     public event Action<Log>? LogReceived;
-
-    public event Action<FrameTarget>? FrameTargetChanged;
 
     public event Action<ReloadKind>? GameReloaded;
 
@@ -335,13 +336,10 @@ public sealed class HostSession : IDisposable
             case Log log:
                 LogReceived?.Invoke(log);
                 break;
-            case FrameTarget target:
-                FrameTargetChanged?.Invoke(target);
-                break;
             case GameReloaded reloaded:
                 GameReloaded?.Invoke(reloaded.Kind);
                 break;
-            case Hello or ViewportSize or FrameAcknowledged or WatchEntity or UnwatchEntity:
+            case Hello or GameSize or OpenViewport or CloseViewport or ViewportAcknowledged or WatchEntity or UnwatchEntity:
                 Output?.Invoke($"editor: the host sent a message that only the editor sends: {message.GetType().Name}");
                 break;
             default:

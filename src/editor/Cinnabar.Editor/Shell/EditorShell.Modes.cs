@@ -25,10 +25,7 @@ public sealed partial class EditorShell
     [MemberNotNullWhen(true, nameof(Scene))]
     public bool CanEditScene => IsEditing && Scene != null;
 
-    /// <summary>While playing, the viewport flies the editor's camera and the game draws from it, instead of the game's input and camera.</summary>
-    public bool FreeCamera { get; private set; }
-
-    /// <summary>The mode or the free camera changed.</summary>
+    /// <summary>The mode changed.</summary>
     public event Action? ModeChanged;
 
     /// <summary>Starts playing the world that the game has, or goes on after a pause.</summary>
@@ -75,17 +72,9 @@ public sealed partial class EditorShell
         {
             return;
         }
-        FreeCamera = false;
         SetModeTo(EditorMode.Edit);
         SendScene();
         Console.Add(LogLevel.Info, "editor: stopped, so the game has the scene again.");
-    }
-
-    public void ToggleFreeCamera()
-    {
-        FreeCamera = !FreeCamera;
-        SendMode();
-        OnModeChanged();
     }
 
     void SetModeTo(EditorMode mode)
@@ -95,7 +84,7 @@ public sealed partial class EditorShell
         OnModeChanged();
     }
 
-    void SendMode() => Host.Send(new SetMode(Mode, FreeCamera));
+    void SendMode() => Host.Send(new SetMode(Mode));
 
     void OnModeChanged()
     {
@@ -108,29 +97,28 @@ public sealed partial class EditorShell
     // A new link, a restart or a soft restart has a game in Edit.
     void ResetMode()
     {
-        if (Mode != EditorMode.Edit || FreeCamera)
+        if (Mode != EditorMode.Edit)
         {
             Mode = EditorMode.Edit;
-            FreeCamera = false;
             OnModeChanged();
         }
     }
 
-    /// <summary>Sends the viewport's input to the game, while it plays without the free camera.</summary>
+    /// <summary>Sends the Game view's input to the game, while it plays.</summary>
     public void SendInput(params InputEvent[] events)
     {
-        if (Mode == EditorMode.Play && !FreeCamera && events.Length > 0)
+        if (Mode == EditorMode.Play && events.Length > 0)
         {
             Host.Send(new EditorInput(events));
         }
     }
 
-    /// <summary>Whether the viewport's input goes to the game.</summary>
-    public bool InputGoesToGame => Mode == EditorMode.Play && !FreeCamera;
+    /// <summary>Whether the Game view's input goes to the game: in Play, and not in Edit or Paused.</summary>
+    public bool InputGoesToGame => Mode == EditorMode.Play;
 
-    /// <summary>Whether the viewport has the keyboard focus.</summary>
-    public bool ViewportHasFocus { get; set; }
+    /// <summary>Whether the Game view has the keyboard focus.</summary>
+    public bool GameViewHasFocus { get; set; }
 
     /// <summary>Whether the keys are the game's, so that the editor's shortcuts leave them alone.</summary>
-    public bool GameHasKeys => InputGoesToGame && ViewportHasFocus;
+    public bool GameHasKeys => InputGoesToGame && GameViewHasFocus;
 }

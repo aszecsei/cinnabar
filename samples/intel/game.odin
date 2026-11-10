@@ -170,54 +170,22 @@ update :: proc(state: rawptr, dt: time.Duration) -> (keep_running: bool) {
 	if size.x <= 0 || size.y <= 0 {
 		return true
 	}
-	render_frame(s, {u32(size.x), u32(size.y)}, camera_view(s))
+	render_frame(s, {u32(size.x), u32(size.y)})
 	return true
 }
 
-// camera_view is the editor's camera while an editor is linked, and the scene's camera otherwise.
+// camera_view is the scene's camera, which the game draws from.
 camera_view :: proc(s: ^Game_State) -> render.View {
-	if view, ok := editor.view(&s.editor); ok {
-		return view
-	}
 	if view, ok := render.camera_view(&s.world, s.camera); ok {
 		return view
 	}
 	return {rotation = 1, vertical_fov = render.DEFAULT_VERTICAL_FOV, near = render.DEFAULT_NEAR}
 }
 
-render_frame :: proc(s: ^Game_State, size: [2]u32, view: render.View) {
-	editing := editor.active(&s.editor)
-	overrides := editor.render_overrides(&s.editor)
-	quality, viewport_quality := editor.viewport_quality(&s.editor, &s.renderer)
-	editor.draw_helpers(&s.editor, &s.world, &s.renderer.debug)
-	desc := render.Frame_Desc {
-		view            = view,
-		size            = size,
-		keep_ids        = editing,
-		no_debug        = !editor.debug_shown(&s.editor),
-		hidden          = editor.visibility(&s.editor, &s.world).hidden,
-		debug_view      = overrides.debug_view,
-		disable         = overrides.disable,
-		exposure_offset = overrides.exposure_offset,
-		shading_stats   = overrides.shading_stats,
-		quality         = viewport_quality ? &quality : nil,
-		previews        = editor.previews(&s.editor),
-		delta           = s.frame_step,
-		playing         = editor.playing(&s.editor),
-		hooks           = {data = s, debug = editing ? draw_editor_tools : nil},
-	}
-	render.draw_frame(&s.renderer, &s.world, desc)
-}
-
-// draw_editor_tools adds the editor's pick, and in Edit its icons, outline and gizmo.
-draw_editor_tools :: proc(f: ^render.Frame) {
-	s := (^Game_State)(f.data)
-	editor.add_viewport_passes(
-		&s.editor,
-		f.graph,
-		&s.world,
-		{view = f.view, size = f.size, output_size = f.output_size, target = f.debug, ids = f.ids, depth = f.depth},
-	)
+// render_frame describes the frame as the game draws it, with or without an editor, and gives it to the editor package to
+// draw (see editor.draw_frame), which draws it in the views it shows.
+render_frame :: proc(s: ^Game_State, window: [2]u32) {
+	editor.draw_frame(&s.editor, &s.renderer, &s.world, {view = camera_view(s), size = window, delta = s.frame_step})
 }
 
 // update_project reads the project's settings again when their files change, so the editor's change shows at once.

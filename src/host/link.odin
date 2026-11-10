@@ -19,7 +19,6 @@ STATS_INTERVAL :: 250 * time.Millisecond
 Link :: struct {
 	server:          serve.Server,
 	// The main thread's own state.
-	sent_generation: i64,
 	decode_arena:    virtual.Arena,
 	// What the game's editor_poll wrote, before it goes into the outbox. The game appends to it with the host's heap.
 	game_out:        [dynamic]byte,
@@ -48,7 +47,6 @@ link_start :: proc(l: ^Link, port: int, game: string) -> bool {
 	serve.start(&l.server, "host: editor link", port, write_log) or_return
 	l.game_out = make([dynamic]byte, runtime.heap_allocator())
 	l.captures = make([dynamic]Pending_Capture, runtime.heap_allocator())
-	l.sent_generation = -1
 	l.game = game
 	return true
 }
@@ -177,6 +175,8 @@ link_poll :: proc(l: ^Link, game: core.Game_API, state: rawptr) {
 handle_taken :: proc(l: ^Link, taken: serve.Taken, game: core.Game_API, state: rawptr) {
 	if taken.unlinked {
 		core.pace_shared_frames(false)
+		// Without an editor, the captures read the frame target again.
+		core.set_capture_source(nil)
 		// Keys that the editor held stay down otherwise.
 		core.queue_input({{kind = .Release_All}})
 		// And no one reads the pads any more.
@@ -215,13 +215,6 @@ handle_taken :: proc(l: ^Link, taken: serve.Taken, game: core.Game_API, state: r
 	}
 	virtual.arena_free_all(&l.decode_arena)
 
-	if link_linked(l) {
-		prefix, generation, size := core.shared_target()
-		if i64(generation) != l.sent_generation {
-			l.sent_generation = i64(generation)
-			link_send(l, link.Frame_Target{prefix = prefix, generation = generation, width = size.x, height = size.y})
-		}
-	}
 	if taken.dropped_logs > 0 {
 		log.warnf("host: editor link: dropped %d log lines while the editor was slow to read", taken.dropped_logs)
 	}
@@ -236,9 +229,9 @@ handle_taken :: proc(l: ^Link, taken: serve.Taken, game: core.Game_API, state: r
 @(private = "file")
 is_host_message :: proc(kind: u16) -> bool {
 	switch kind {
-	case link.kind_of(link.Hello), link.kind_of(link.Viewport_Size), link.kind_of(link.Frame_Acknowledged), link.kind_of(link.Preview_Acknowledged), link.kind_of(link.Editor_Input), link.kind_of(link.Profile_Capture_Request), link.kind_of(link.Profile_Recording), link.kind_of(link.Capture_Request):
+	case link.kind_of(link.Hello), link.kind_of(link.Game_Size), link.kind_of(link.Capture_Source), link.kind_of(link.Preview_Acknowledged), link.kind_of(link.Viewport_Acknowledged), link.kind_of(link.Editor_Input), link.kind_of(link.Profile_Capture_Request), link.kind_of(link.Profile_Recording), link.kind_of(link.Capture_Request):
 		return true
-	case link.kind_of(link.Welcome), link.kind_of(link.Refused), link.kind_of(link.Log), link.kind_of(link.Game_Reloaded), link.kind_of(link.Frame_Target), link.kind_of(link.Host_Stats), link.kind_of(link.Profile_Summary), link.kind_of(link.Profile_Capture), link.kind_of(link.Capture_Result):
+	case link.kind_of(link.Welcome), link.kind_of(link.Refused), link.kind_of(link.Log), link.kind_of(link.Game_Reloaded), link.kind_of(link.Host_Stats), link.kind_of(link.Profile_Summary), link.kind_of(link.Profile_Capture), link.kind_of(link.Capture_Result):
 		// Only the host sends these, so handle_message reports them.
 		return true
 	}
@@ -264,20 +257,23 @@ handle_message :: proc(l: ^Link, message: link.Message, connection: u64) {
 			log.infof("host: editor link: %s disconnected before it was linked", m.editor)
 			return
 		}
-		l.sent_generation = -1
 		core.pace_shared_frames(true)
 		log.infof("host: linked to %s", m.editor)
-	case link.Viewport_Size:
+	case link.Game_Size:
 		if linked {
 			core.resize_shared_target({m.width, m.height})
 		}
-	case link.Frame_Acknowledged:
+	case link.Capture_Source:
 		if linked {
-			core.acknowledge_shared_frame(m.generation, m.frame)
+			core.set_capture_source(capture_source(m.viewport))
 		}
 	case link.Preview_Acknowledged:
 		if linked {
 			core.acknowledge_preview_frame(int(m.id), m.generation, m.frame)
+		}
+	case link.Viewport_Acknowledged:
+		if linked {
+			core.acknowledge_viewport_frame(int(m.viewport), m.generation, m.frame)
 		}
 	case link.Editor_Input:
 		if linked {
@@ -313,9 +309,9 @@ handle_message :: proc(l: ^Link, message: link.Message, connection: u64) {
 		if linked && l.capture != nil {
 			capture_request(l.capture, m)
 		}
-	case link.Welcome, link.Refused, link.Log, link.Game_Reloaded, link.Frame_Target, link.Host_Stats, link.Profile_Summary, link.Profile_Capture, link.Capture_Result:
+	case link.Welcome, link.Refused, link.Log, link.Game_Reloaded, link.Host_Stats, link.Profile_Summary, link.Profile_Capture, link.Capture_Result:
 		log.warnf("host: editor link: the editor sent a message that only the host sends: %v", message)
-	case link.Component_Types, link.Entity_Snapshot, link.Entity_Delta, link.Watch_Entity, link.Unwatch_Entity, link.Entity_Values, link.Load_Scene, link.Apply_Operations, link.Edit_Problems, link.Editor_Camera, link.Set_Selection, link.Gizmo_State, link.Pick_Request, link.Pick_Result, link.Set_Hidden, link.Set_Mode, link.Step_Frame, link.Game_Stats, link.Game_Commands, link.Run_Game_Command, link.Game_Command_Result, link.Open_Preview, link.Preview_Settings, link.Close_Preview, link.Preview_Target, link.Viewport_Settings, link.Live_Mesh, link.Live_Mesh_Vertices, link.Release_Live_Mesh, link.Mesh_Overlay, link.Sky_Sun_Request, link.Sky_Sun, link.Animator_View, link.Set_Preview_Parameter, link.Restart_Preview, link.Ui_Preview_Settings, link.Ui_Preview_Layout, link.Capture_Reflection_Probes, link.Reflection_Probe_View, link.Box_Handles, link.Bake_Thumbnail, link.Thumbnail_Failed:
+	case link.Component_Types, link.Entity_Snapshot, link.Entity_Delta, link.Watch_Entity, link.Unwatch_Entity, link.Entity_Values, link.Load_Scene, link.Apply_Operations, link.Edit_Problems, link.Editor_Camera, link.Set_Selection, link.Gizmo_State, link.Pick_Request, link.Pick_Result, link.Set_Hidden, link.Set_Mode, link.Step_Frame, link.Game_Stats, link.Game_Commands, link.Run_Game_Command, link.Game_Command_Result, link.Open_Preview, link.Preview_Settings, link.Close_Preview, link.Preview_Target, link.Set_Viewport_Settings, link.Open_Viewport, link.Close_Viewport, link.Viewport_Target, link.Live_Mesh, link.Live_Mesh_Vertices, link.Release_Live_Mesh, link.Mesh_Overlay, link.Sky_Sun_Request, link.Sky_Sun, link.Animator_View, link.Set_Preview_Parameter, link.Restart_Preview, link.Ui_Preview_Settings, link.Ui_Preview_Layout, link.Capture_Reflection_Probes, link.Reflection_Probe_View, link.Box_Handles, link.Bake_Thumbnail, link.Thumbnail_Failed:
 		// is_host_message sends these to the game.
 	}
 }

@@ -55,7 +55,7 @@ public sealed class HostLinkTests : IAsyncDisposable
     }
 
     [Fact]
-    public async Task TheHostWelcomesResizesAndSendsItsLog()
+    public async Task TheHostWelcomesAnOpenViewportResizesItAndSendsItsLog()
     {
         await using var editor = await Connect();
         editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
@@ -63,8 +63,7 @@ public sealed class HostLinkTests : IAsyncDisposable
         var welcome = await editor.Next<Welcome>();
         Assert.Equal("mygame", welcome.Game);
         Assert.Equal(LinkMessages.ProtocolVersion, welcome.Protocol);
-        // The host says that it linked, and that line comes over the link, not its console. It handles the Hello
-        // before it sends the frame target of the frame.
+        // The host says that it linked, and that line comes over the link, not its console.
         try
         {
             await editor.Next<Log>(l => l.Text.Contains("linked to test"));
@@ -73,13 +72,14 @@ public sealed class HostLinkTests : IAsyncDisposable
         {
             Assert.Fail($"{e.Message}\nThe host's console:\n{string.Join("\n", _output)}");
         }
-        var first = await editor.Next<FrameTarget>();
-        Assert.Equal(0u, first.Generation);
+        // A viewport has a target only once the editor opens it, at the size it asks for.
+        var first = await Show(editor, 0, ViewportKind.Scene, 1280, 720);
+        Assert.Equal((0u, 0u, 1280, 720), (first.Viewport, first.Generation, first.Width, first.Height));
         Assert.EndsWith(".g0", first.Prefix);
 
-        editor.Link.Send(new ViewportSize(640, 360));
-        var resized = await editor.Next<FrameTarget>();
-        Assert.Equal(new FrameTarget(first.Prefix[..^1] + "1", 1, 640, 360), resized);
+        editor.Link.Send(new OpenViewport(0, ViewportKind.Scene, 640, 360));
+        var resized = await editor.Next<ViewportTarget>(t => t.Viewport == 0 && t.Generation == 1);
+        Assert.Equal(new ViewportTarget(0, first.Prefix[..^1] + "1", 1, 640, 360), resized);
     }
 
     [Fact]
@@ -87,18 +87,18 @@ public sealed class HostLinkTests : IAsyncDisposable
     {
         await using var editor = await Connect();
         editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
-        var target = await editor.Next<FrameTarget>();
+        var target = await Show(editor, keepUp: false);
         using var device = new ViewportDevice(_adapter);
         using var frames = await Open(device, target.Prefix);
 
-        // Paced from the Hello, the host shares two more frames and then renders into its scratch target.
+        // Paced from the viewport's opening, the host shares two frames and then renders into its scratch target.
         await Task.Delay(500, TestContext.Current.CancellationToken);
         var stalled = frames.Completed;
         await Task.Delay(300, TestContext.Current.CancellationToken);
         Assert.Equal(stalled, frames.Completed);
 
         // An acknowledgement lets exactly two more frames through.
-        editor.Link.Send(new FrameAcknowledged(target.Generation, stalled));
+        editor.Link.Send(new ViewportAcknowledged(target.Viewport, target.Generation, stalled));
         await Task.Delay(500, TestContext.Current.CancellationToken);
         Assert.Equal(stalled + 2, frames.Completed);
     }
@@ -114,6 +114,27 @@ public sealed class HostLinkTests : IAsyncDisposable
             await Task.Delay(50, TestContext.Current.CancellationToken);
         }
         throw new InvalidOperationException($"cannot open {prefix}");
+    }
+
+    // Opens a viewport of the game, as the editor does when its control has a size, and waits for the target that the game
+    // makes for it.
+    // Show opens a viewport and gives its target. With keepUp, it acknowledges every frame of that target ahead of time, as
+    // an editor that always keeps up would, so the game draws the viewport in every frame and its picks and captures run
+    // without the test copying frames. A test of the back-pressure itself passes false.
+    static async Task<ViewportTarget> Show(Editor editor, uint viewport = 0, ViewportKind kind = ViewportKind.Scene, int width = 1280, int height = 720, bool keepUp = true)
+    {
+        editor.Link.Send(new OpenViewport(viewport, kind, width, height));
+        // A scene view draws, and so has a target, once it has a camera, as the editor sends with each one that it opens.
+        if (kind == ViewportKind.Scene)
+        {
+            editor.Link.Send(new EditorCamera(viewport, [0, 0, 0], [0, 0, 0, 1], (float)(60 * Math.PI / 180), 0.05f));
+        }
+        var target = await editor.Next<ViewportTarget>(t => t.Viewport == viewport);
+        if (keepUp)
+        {
+            editor.Link.Send(new ViewportAcknowledged(viewport, target.Generation, ulong.MaxValue / 2));
+        }
+        return target;
     }
 
     static ulong HighPerformanceAdapter()
@@ -195,35 +216,34 @@ public sealed class HostLinkTests : IAsyncDisposable
     {
         await using var editor = await Connect();
         editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
-        // The game's world comes before the frame target, in the same poll.
         await editor.Next<EntitySnapshot>();
-        var target = await editor.Next<FrameTarget>();
+        var target = await Show(editor);
 
         // Two boxes ahead of the camera: a small one whose face is 1.2 m away, in front of a larger one whose face is
         // 1.5 m away.
         var near = Box(1, "Near", z: 0.4, scale: 0.4);
         var far = Box(2, "Far", z: 1, scale: 1);
         var loaded = await Load(editor, Scene(near, far), "Far");
-        editor.Link.Send(new EditorCamera([Origin, 0, -Meter], [0, 0, 0, 1], (float)(60 * Math.PI / 180), 0.05f));
+        editor.Link.Send(new EditorCamera(0, [Origin, 0, -Meter], [0, 0, 0, 1], (float)(60 * Math.PI / 180), 0.05f));
 
         // A pick over the whole frame finds both, once their mesh has streamed in, so it is picked again until it has.
         ulong[] both = [near.Id, far.Id];
         ulong[] found = [];
         for (var attempt = 0u; attempt < 60 && !found.SequenceEqual(both); attempt++)
         {
-            editor.Link.Send(new PickRequest(100 + attempt, 0, 0, target.Width, target.Height));
+            editor.Link.Send(new PickRequest(100 + attempt, 0, 0, 0, target.Width, target.Height));
             var all = await editor.Next<PickResult>(r => r.Id == 100 + attempt);
             found = [.. all.Hits.Select(h => h.SceneId).Order()];
         }
         Assert.Equal(both, found);
 
         // The middle finds the near box at its depth, and the corner finds nothing.
-        editor.Link.Send(new PickRequest(7, target.Width / 2, target.Height / 2, 1, 1));
+        editor.Link.Send(new PickRequest(7, 0, target.Width / 2, target.Height / 2, 1, 1));
         var center = await editor.Next<PickResult>(r => r.Id == 7);
         Assert.Equal(near.Id, Assert.Single(center.Hits).SceneId);
         Assert.InRange(center.Depth, 1.15f, 1.25f);
         Assert.Equal(0, center.Submesh);
-        editor.Link.Send(new PickRequest(9, 0, 0, 1, 1));
+        editor.Link.Send(new PickRequest(9, 0, 0, 0, 1, 1));
         var corner = await editor.Next<PickResult>(r => r.Id == 9);
         Assert.Empty(corner.Hits);
         Assert.Equal(0, corner.Depth);
@@ -231,10 +251,293 @@ public sealed class HostLinkTests : IAsyncDisposable
 
         // A hidden entity is not drawn, so the pick sees through it to the far box.
         editor.Link.Send(new SetHidden([loaded.Entities.Single(e => e.SceneId == near.Id).Entity]));
-        editor.Link.Send(new PickRequest(10, target.Width / 2, target.Height / 2, 1, 1));
+        editor.Link.Send(new PickRequest(10, 0, target.Width / 2, target.Height / 2, 1, 1));
         var behind = await editor.Next<PickResult>(r => r.Id == 10);
         Assert.Equal(far.Id, Assert.Single(behind.Hits).SceneId);
         Assert.InRange(behind.Depth, 1.45f, 1.55f);
+    }
+
+    [Fact]
+    public async Task TwoSceneViewsShowTheSceneFromTheirOwnCamerasAndAnswerTheirOwnPicks()
+    {
+        await using var editor = await Connect();
+        editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
+        await editor.Next<EntitySnapshot>();
+        var target = await Show(editor, 0, ViewportKind.Scene, 640, 360);
+        using var device = new ViewportDevice(_adapter);
+        using var frames = await Open(device, target.Prefix);
+
+        // Two boxes on the z axis, a small one at 0.4 m and a larger one at 1 m, under a red background. The first
+        // viewport looks along +z from 1 m before the origin, so the small box is in front. The second looks back along
+        // -z from 3 m, so the larger box, whose face is 1.5 m from it, hides the small one.
+        var near = Box(1, "Near", z: 0.4, scale: 0.4);
+        var far = Box(2, "Far", z: 1, scale: 1);
+        var volume = Entity(3, "Volume");
+        volume.Components.Add(new Document.SceneComponent(VolumeId, "Volume", [Field("shape", Document.SceneValue.Name("Global"))]));
+        volume.Components.Add(new Document.SceneComponent(EnvironmentId, "Environment", [Field("background", Document.SceneValue.Of(Number(1.0), Number(0.0), Number(0.0)))]));
+        await Load(editor, Scene(near, far, volume), "Far");
+        var fov = (float)(60 * Math.PI / 180);
+        editor.Link.Send(new EditorCamera(0, [Origin, 0, -Meter], [0, 0, 0, 1], fov, 0.05f));
+        // Each viewport has its own view: the normals, which are black where nothing drew, and the albedo, which shows
+        // the background as it is. Neither shows the volume's icon, which would be in the middle of the first one.
+        editor.Link.Send(new SetViewportSettings(0, EditorShell.DefaultViewportSettings with { DebugView = DebugView.Normals, ShowIcons = false }));
+        editor.Link.Send(new SetViewportSettings(1, EditorShell.DefaultViewportSettings with { DebugView = DebugView.Albedo, ShowIcons = false }));
+
+        // The game makes the second viewport's target at its size, and draws into it beside the first one's.
+        var second = await Show(editor, 1, ViewportKind.Scene, 320, 240);
+        editor.Link.Send(new EditorCamera(1, [Origin, 0, 3 * Meter], [0, 1, 0, 0], fov, 0.05f));
+        Assert.Equal((320, 240), (second.Width, second.Height));
+        using var secondFrames = await Open(device, second.Prefix);
+        Assert.Equal((320, 240), (secondFrames.Size.Width, secondFrames.Size.Height));
+        async Task<(ulong First, ulong Second)> Both()
+        {
+            for (var i = 0; i < 20; i++)
+            {
+                await Task.Delay(25, TestContext.Current.CancellationToken);
+                editor.Link.Send(new ViewportAcknowledged(target.Viewport, target.Generation, frames.Completed));
+                editor.Link.Send(new ViewportAcknowledged(1, second.Generation, secondFrames.Completed));
+            }
+            return (frames.Completed, secondFrames.Completed);
+        }
+        var shown = await Both();
+        Assert.True(shown.Second > 0, "the second viewport drew no frame");
+        var albedo = Pixel(device, secondFrames.Texture(shown.Second), 2, 2);
+        Assert.True(albedo.R > 240 && albedo.G < 20 && albedo.B < 20, $"the second viewport's background is {albedo}, not the albedo view's red");
+        var normals = Pixel(device, frames.Texture(shown.First), 2, 2);
+        Assert.True(normals.R < 20 && normals.G < 20 && normals.B < 20, $"the first viewport's background is {normals}, not the normals view's black");
+
+        // A pick over the second viewport's whole frame finds only the larger box, which hides the small one from
+        // there, once the mesh has streamed in. The same pick in the first viewport finds both.
+        async Task<ulong[]> PickAll(uint viewport, int width, int height, uint id, ulong[] expected)
+        {
+            ulong[] found = [];
+            for (var attempt = 0u; attempt < 60 && !found.SequenceEqual(expected); attempt++)
+            {
+                editor.Link.Send(new PickRequest(id + attempt, viewport, 0, 0, width, height));
+                editor.Link.Send(new ViewportAcknowledged(1, second.Generation, secondFrames.Completed));
+                var all = await editor.Next<PickResult>(r => r.Id == id + attempt);
+                found = [.. all.Hits.Select(h => h.SceneId).Order()];
+            }
+            return found;
+        }
+        Assert.Equal([far.Id], await PickAll(1, second.Width, second.Height, 100, [far.Id]));
+        Assert.Equal([near.Id, far.Id], await PickAll(0, target.Width, target.Height, 200, [near.Id, far.Id]));
+
+        // The middle of each viewport is what its own camera sees there, at its own depth.
+        editor.Link.Send(new ViewportAcknowledged(1, second.Generation, secondFrames.Completed));
+        editor.Link.Send(new PickRequest(7, 1, second.Width / 2, second.Height / 2, 1, 1));
+        var behind = await editor.Next<PickResult>(r => r.Id == 7);
+        Assert.Equal(far.Id, Assert.Single(behind.Hits).SceneId);
+        Assert.InRange(behind.Depth, 1.45f, 1.55f);
+        editor.Link.Send(new PickRequest(8, 0, target.Width / 2, target.Height / 2, 1, 1));
+        var front = await editor.Next<PickResult>(r => r.Id == 8);
+        Assert.Equal(near.Id, Assert.Single(front.Hits).SceneId);
+        Assert.InRange(front.Depth, 1.15f, 1.25f);
+
+        // The second viewport draws the whole frame, as the first does, at each quality and with each global
+        // illumination, anti-aliasing and reflections, each with a state of its own for its camera. Its frames keep
+        // coming through every change, and its background is still the albedo view's.
+        async Task SecondDraws(ViewportSettings quality, string what)
+        {
+            editor.Link.Send(new SetViewportSettings(0, quality with { ShowIcons = false }));
+            var before = (await Both()).Second;
+            var after = (await Both()).Second;
+            Assert.True(after > before, $"the second viewport stopped drawing with {what}");
+            var pixel = Pixel(device, secondFrames.Texture(after), 2, 2);
+            Assert.True(pixel.R > 240 && pixel.G < 20 && pixel.B < 20, $"the second viewport's background is {pixel} with {what}");
+        }
+        foreach (var preset in Enum.GetValues<ViewportPreset>())
+        {
+            await SecondDraws(EditorShell.DefaultViewportSettings with { QualityPreset = preset }, $"the {preset} preset");
+        }
+        foreach (var gi in Enum.GetValues<ViewportGi>())
+        {
+            await SecondDraws(EditorShell.DefaultViewportSettings with { GlobalIllumination = gi }, $"{gi} global illumination");
+        }
+        foreach (var aa in Enum.GetValues<ViewportAa>())
+        {
+            await SecondDraws(EditorShell.DefaultViewportSettings with { AntiAliasing = aa, RenderScale = 0.5f }, $"{aa} anti-aliasing");
+        }
+        foreach (var reflections in Enum.GetValues<ViewportReflections>())
+        {
+            await SecondDraws(EditorShell.DefaultViewportSettings with { Reflections = reflections }, $"{reflections} reflections");
+        }
+        editor.Link.Send(new SetViewportSettings(0, EditorShell.DefaultViewportSettings with { ShowIcons = false }));
+
+        // A closed viewport draws no more, and a pick of it answers with no hits.
+        editor.Link.Send(new CloseViewport(1));
+        editor.Link.Send(new PickRequest(9, 1, second.Width / 2, second.Height / 2, 1, 1));
+        var closed = await editor.Next<PickResult>(r => r.Id == 9);
+        Assert.Empty(closed.Hits);
+        var last = (await Both()).Second;
+        Assert.Equal(last, (await Both()).Second);
+        // The first one goes on.
+        Assert.True((await Both()).First > shown.First);
+    }
+
+    // The Game view draws from the scene's Camera entity, which here is past the box and looks away from it, and a scene
+    // view from the editor's camera, which looks at the box. The game's camera is near the scene, as it is in a real one:
+    // the views of a frame share a render origin (see docs/rendering/frame.md#views).
+    [Fact]
+    public async Task TheGameViewShowsTheGamesCameraAndNotTheEditorsAndItsPicksFindNothing()
+    {
+        await using var editor = await Connect();
+        editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
+        await editor.Next<EntitySnapshot>();
+        var scene = await Show(editor, 0, ViewportKind.Scene, 320, 240);
+        var game = await Show(editor, 4, ViewportKind.Game, 320, 240);
+        using var device = new ViewportDevice(_adapter);
+        using var sceneFrames = await Open(device, scene.Prefix);
+        using var gameFrames = await Open(device, game.Prefix);
+
+        // A box filling the editor's view, under a red background. Both views show the albedo, which has the background
+        // whole, and no icons.
+        var box = Box(1, "Box", z: 1, scale: 2);
+        var volume = Entity(2, "Volume");
+        volume.Components.Add(new Document.SceneComponent(VolumeId, "Volume", [Field("shape", Document.SceneValue.Name("Global"))]));
+        volume.Components.Add(new Document.SceneComponent(EnvironmentId, "Environment", [Field("background", Document.SceneValue.Of(Number(1.0), Number(0.0), Number(0.0)))]));
+        var camera = Entity(3, "Camera", z: 5);
+        camera.Components.Add(new Document.SceneComponent(CameraId, "Camera", [Field("vertical_fov", Document.SceneValue.Of(Number(1.0))), Field("near", Document.SceneValue.Of(Number(0.05)))]));
+        await Load(editor, Scene(box, volume, camera), "Box");
+        var albedo = EditorShell.DefaultViewportSettings with { DebugView = DebugView.Albedo, ShowIcons = false };
+        editor.Link.Send(new EditorCamera(0, [Origin, 0, -Meter], [0, 0, 0, 1], (float)(60 * Math.PI / 180), 0.05f));
+        editor.Link.Send(new SetViewportSettings(0, albedo));
+        editor.Link.Send(new SetViewportSettings(4, albedo));
+
+        // Both pictures come, and they differ: the scene view looks at the box, the Game view at the background.
+        ulong sceneFrame = 0;
+        ulong gameFrame = 0;
+        // The box's mesh streams in over the first frames, so the scene view is looked at until it shows it.
+        static bool Background((byte R, byte G, byte B) p) => p.R > 240 && p.G < 20 && p.B < 20;
+        for (var i = 0; i < 400; i++)
+        {
+            await Task.Delay(25, TestContext.Current.CancellationToken);
+            editor.Link.Send(new ViewportAcknowledged(0, scene.Generation, sceneFrames.Completed));
+            editor.Link.Send(new ViewportAcknowledged(4, game.Generation, gameFrames.Completed));
+            (sceneFrame, gameFrame) = (sceneFrames.Completed, gameFrames.Completed);
+            if (i >= 20 && sceneFrame > 0 && !Background(Pixel(device, sceneFrames.Texture(sceneFrame), scene.Width / 2, scene.Height / 2)))
+            {
+                break;
+            }
+        }
+        Assert.True(sceneFrame > 0 && gameFrame > 0, "a viewport drew no frame");
+        var inScene = Pixel(device, sceneFrames.Texture(sceneFrame), scene.Width / 2, scene.Height / 2);
+        var inGame = Pixel(device, gameFrames.Texture(gameFrame), game.Width / 2, game.Height / 2);
+        Assert.False(inScene.G < 20 && inScene.B < 20 && inScene.R > 240, $"the scene view shows {inScene}, the background, not the box");
+        Assert.True(inGame.R > 240 && inGame.G < 20 && inGame.B < 20, $"the Game view shows {inGame}, not the background of the game's own camera");
+
+        // A pick in the Game view finds nothing, where the same pick in the scene view finds the box.
+        ulong[] found = [];
+        for (var attempt = 0u; attempt < 60 && found.Length == 0; attempt++)
+        {
+            editor.Link.Send(new PickRequest(100 + attempt, 0, scene.Width / 2, scene.Height / 2, 1, 1));
+            found = [.. (await editor.Next<PickResult>(r => r.Id == 100 + attempt)).Hits.Select(h => h.SceneId)];
+        }
+        Assert.Equal([box.Id], found);
+        editor.Link.Send(new PickRequest(7, 4, game.Width / 2, game.Height / 2, 1, 1));
+        Assert.Empty((await editor.Next<PickResult>(r => r.Id == 7)).Hits);
+    }
+
+    [Fact]
+    public async Task ACloseViewportStopsItsFramesAndAnOpenOneStartsThemAgain()
+    {
+        await using var editor = await Connect();
+        editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
+        await editor.Next<EntitySnapshot>();
+        var target = await Show(editor, 2, ViewportKind.Scene, 320, 240);
+        editor.Link.Send(new EditorCamera(2, [Origin, 0, -Meter], [0, 0, 0, 1], (float)(60 * Math.PI / 180), 0.05f));
+        using var device = new ViewportDevice(_adapter);
+        using var frames = await Open(device, target.Prefix);
+        async Task<ulong> Drawn()
+        {
+            for (var i = 0; i < 20; i++)
+            {
+                await Task.Delay(25, TestContext.Current.CancellationToken);
+                editor.Link.Send(new ViewportAcknowledged(2, target.Generation, frames.Completed));
+            }
+            return frames.Completed;
+        }
+        var before = await Drawn();
+        Assert.True(before > 0, "the viewport drew no frame");
+        Assert.True(await Drawn() > before);
+
+        editor.Link.Send(new CloseViewport(2));
+        var closed = await Drawn();
+        Assert.Equal(closed, await Drawn());
+
+        // It opens again with a target of its own, and draws from the camera that the editor sends.
+        editor.Link.Send(new OpenViewport(2, ViewportKind.Scene, 320, 240));
+        var again = await editor.Next<ViewportTarget>(t => t.Viewport == 2);
+        editor.Link.Send(new EditorCamera(2, [Origin, 0, -Meter], [0, 0, 0, 1], (float)(60 * Math.PI / 180), 0.05f));
+        using var secondFrames = await Open(device, again.Prefix);
+        for (var i = 0; i < 20; i++)
+        {
+            await Task.Delay(25, TestContext.Current.CancellationToken);
+            editor.Link.Send(new ViewportAcknowledged(2, again.Generation, secondFrames.Completed));
+        }
+        Assert.True(secondFrames.Completed > 0, "the viewport drew nothing after it opened again");
+    }
+
+    // The engine draws at most five viewports: the four scene views of a quad and the Game view.
+    [Fact]
+    public async Task FourSceneViewsAndTheGameViewDrawTogetherAndEachAnswersItsPicks()
+    {
+        await using var editor = await Connect();
+        editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
+        await editor.Next<EntitySnapshot>();
+        List<ViewportTarget> targets = [];
+        for (uint viewport = 0; viewport < 4; viewport++)
+        {
+            targets.Add(await Show(editor, viewport, ViewportKind.Scene, 320, 240));
+        }
+        targets.Add(await Show(editor, 4, ViewportKind.Game, 320, 240));
+        Assert.Equal(5, targets.Select(t => t.Prefix).Distinct().Count());
+        using var device = new ViewportDevice(_adapter);
+        List<SharedFrames> frames = [];
+        foreach (var target in targets)
+        {
+            frames.Add(await Open(device, target.Prefix));
+        }
+
+        var box = Box(1, "Box", z: 1, scale: 1);
+        var volume = Entity(2, "Volume");
+        volume.Components.Add(new Document.SceneComponent(VolumeId, "Volume", [Field("shape", Document.SceneValue.Name("Global"))]));
+        volume.Components.Add(new Document.SceneComponent(EnvironmentId, "Environment", [Field("background", Document.SceneValue.Of(Number(1.0), Number(0.0), Number(0.0)))]));
+        // The views of a frame share the render origin of the Game view, so the game's camera is in the scene.
+        var camera = Entity(3, "Camera", z: 5);
+        camera.Components.Add(new Document.SceneComponent(CameraId, "Camera", [Field("vertical_fov", Document.SceneValue.Of(Number(1.0))), Field("near", Document.SceneValue.Of(Number(0.05)))]));
+        await Load(editor, Scene(box, volume, camera), "Box");
+        for (uint viewport = 0; viewport < 4; viewport++)
+        {
+            editor.Link.Send(new EditorCamera(viewport, [Origin, 0, -Meter], [0, 0, 0, 1], (float)(60 * Math.PI / 180), 0.05f));
+        }
+
+        // Every viewport draws, and the frames go on coming while all five are open.
+        ulong[] first = new ulong[5];
+        for (var i = 0; i < 400 && frames.Any(f => f.Completed == 0); i++)
+        {
+            await Task.Delay(25, TestContext.Current.CancellationToken);
+        }
+        for (var i = 0; i < 5; i++)
+        {
+            first[i] = frames[i].Completed;
+            Assert.True(first[i] > 0, $"viewport {i} drew no frame");
+        }
+        await Task.Delay(500, TestContext.Current.CancellationToken);
+        for (var i = 0; i < 5; i++)
+        {
+            Assert.True(frames[i].Completed > first[i], $"viewport {i} stopped drawing");
+        }
+
+        // The fourth scene view finds the box in the middle of its frame, once the mesh has streamed in.
+        ulong[] found = [];
+        for (var attempt = 0u; attempt < 200 && found.Length == 0; attempt++)
+        {
+            editor.Link.Send(new PickRequest(100 + attempt, 3, targets[3].Width / 2, targets[3].Height / 2, 1, 1));
+            found = [.. (await editor.Next<PickResult>(r => r.Id == 100 + attempt)).Hits.Select(h => h.SceneId)];
+            await Task.Delay(50, TestContext.Current.CancellationToken);
+        }
+        Assert.Equal([box.Id], found);
     }
 
     [Fact]
@@ -262,12 +565,12 @@ public sealed class HostLinkTests : IAsyncDisposable
         await Task.Delay(300, TestContext.Current.CancellationToken);
         Assert.Equal(still, await Values());
 
-        editor.Link.Send(new SetMode(EditorMode.Play, false));
+        editor.Link.Send(new SetMode(EditorMode.Play));
         await Task.Delay(300, TestContext.Current.CancellationToken);
         var played = await Values();
         Assert.NotEqual(still, played);
 
-        editor.Link.Send(new SetMode(EditorMode.Paused, false));
+        editor.Link.Send(new SetMode(EditorMode.Paused));
         await Task.Delay(200, TestContext.Current.CancellationToken);
         var paused = await Values();
         await Task.Delay(300, TestContext.Current.CancellationToken);
@@ -285,7 +588,7 @@ public sealed class HostLinkTests : IAsyncDisposable
         await using var editor = await Connect();
         editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
         await editor.Next<EntitySnapshot>();
-        editor.Link.Send(new SetMode(EditorMode.Play, false));
+        editor.Link.Send(new SetMode(EditorMode.Play));
 
         void Send(params InputEvent[] events) => editor.Link.Send(new EditorInput(events));
         Task<Log> Logged(string text) => editor.Next<Log>(l => l.Text.Contains(text));
@@ -335,7 +638,7 @@ public sealed class HostLinkTests : IAsyncDisposable
             return await Pose();
         }
 
-        editor.Link.Send(new SetMode(EditorMode.Play, false));
+        editor.Link.Send(new SetMode(EditorMode.Play));
         // A pad that nothing touches leaves it where it is.
         var start = await Hold(default);
         await Task.Delay(200, TestContext.Current.CancellationToken);
@@ -434,7 +737,7 @@ public sealed class HostLinkTests : IAsyncDisposable
         var fox = world.Entities.Single(e => e.Name == "Walking Fox").Entity;
 
         editor.Link.Send(new WatchEntity(fox));
-        editor.Link.Send(new SetMode(EditorMode.Play, false));
+        editor.Link.Send(new SetMode(EditorMode.Play));
         var idle = await editor.Next<AnimatorView>(v => v.Entity == fox && v.State == 1);
         Assert.Equal(FoxGraph, Convert.ToHexStringLower(idle.Graph));
         Assert.Equal(["speed", "look"], idle.Parameters.Select(p => p.Name));
@@ -658,9 +961,9 @@ public sealed class HostLinkTests : IAsyncDisposable
         await using var editor = await Connect();
         editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
         await editor.Next<Welcome>();
-        await editor.Next<FrameTarget>();
-        editor.Link.Send(new ViewportSize(320, 180));
-        await editor.Next<FrameTarget>(t => t.Width == 320);
+        await Show(editor, 0, ViewportKind.Scene, 320, 180);
+        // The host's screenshots and history ring read the viewport that the editor names.
+        editor.Link.Send(new CaptureSource(0));
         var directory = Path.Combine(Path.GetTempPath(), $"cinnabar-capture-{Guid.NewGuid():N}");
         try
         {
@@ -706,7 +1009,7 @@ public sealed class HostLinkTests : IAsyncDisposable
     {
         await using var editor = await Connect();
         editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
-        await editor.Next<FrameTarget>();
+        await editor.Next<Welcome>();
         // The sample's gold: an instance of the engine's default material.
         editor.Link.Send(new OpenPreview(0, Convert.FromHexString("f6d3de3190e2dfb97d6834ed5101c4c0"), false));
         editor.Link.Send(new PreviewSettings(0, PreviewMesh.Sphere, new byte[16], 0.6f, 0.3f, 2.5f, 128, 96));
@@ -765,7 +1068,7 @@ public sealed class HostLinkTests : IAsyncDisposable
         await using var editor = await Connect();
         editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
         await editor.Next<EntitySnapshot>();
-        var target = await editor.Next<FrameTarget>();
+        var target = await Show(editor);
         using var device = new ViewportDevice(_adapter);
         using var frames = await Open(device, target.Prefix);
 
@@ -774,23 +1077,23 @@ public sealed class HostLinkTests : IAsyncDisposable
         volume.Components.Add(new Document.SceneComponent(VolumeId, "Volume", [Field("shape", Document.SceneValue.Name("Global"))]));
         volume.Components.Add(new Document.SceneComponent(EnvironmentId, "Environment", [Field("background", Document.SceneValue.Of(Number(1.0), Number(0.0), Number(0.0)))]));
         await Load(editor, Scene(volume));
-        editor.Link.Send(new EditorCamera([Origin, 0, -Meter], [0, 0, 0, 1], (float)(60 * Math.PI / 180), 0.05f));
+        editor.Link.Send(new EditorCamera(0, [Origin, 0, -Meter], [0, 0, 0, 1], (float)(60 * Math.PI / 180), 0.05f));
 
         var lit = Pixel(device, frames.Texture(await Latest(editor, frames, target)), 2, 2);
         Assert.True(lit.R > lit.G + 60 && lit.R > lit.B + 60, $"the background is {lit}, not the volume's red");
 
         // The albedo view shows the background as it is, without the tone mapper, so the red is whole.
-        editor.Link.Send(EditorShell.DefaultViewportSettings with { DebugView = DebugView.Albedo });
+        editor.Link.Send(new SetViewportSettings(0, EditorShell.DefaultViewportSettings with { DebugView = DebugView.Albedo }));
         var albedo = Pixel(device, frames.Texture(await Latest(editor, frames, target)), 2, 2);
         Assert.True(albedo.R > 240 && albedo.G < 20 && albedo.B < 20, $"the albedo view's background is {albedo}");
 
         // Where nothing drew, the prepass's normals are zero, which the normals view shows black. Every other view draws.
-        editor.Link.Send(EditorShell.DefaultViewportSettings with { DebugView = DebugView.Normals });
+        editor.Link.Send(new SetViewportSettings(0, EditorShell.DefaultViewportSettings with { DebugView = DebugView.Normals }));
         var normals = Pixel(device, frames.Texture(await Latest(editor, frames, target)), 2, 2);
         Assert.True(normals.R < 20 && normals.G < 20 && normals.B < 20, $"the normals view's background is {normals}");
         foreach (var view in Enum.GetValues<DebugView>())
         {
-            editor.Link.Send(EditorShell.DefaultViewportSettings with { DebugView = view, NoBloom = true, NoShadows = true, ExposureOffset = 1 });
+            editor.Link.Send(new SetViewportSettings(0, EditorShell.DefaultViewportSettings with { DebugView = view, NoBloom = true, NoShadows = true, ExposureOffset = 1 }));
             await Latest(editor, frames, target);
         }
         // The viewport's quality in place of the game's: each preset, each anti-aliasing at half the size, FSR
@@ -799,24 +1102,24 @@ public sealed class HostLinkTests : IAsyncDisposable
         // technique at each level, the traced ones included, which are the screen-space ones without ray queries.
         foreach (var preset in Enum.GetValues<ViewportPreset>())
         {
-            editor.Link.Send(EditorShell.DefaultViewportSettings with { QualityPreset = preset });
+            editor.Link.Send(new SetViewportSettings(0, EditorShell.DefaultViewportSettings with { QualityPreset = preset }));
             await Latest(editor, frames, target);
         }
         foreach (var aa in Enum.GetValues<ViewportAa>())
         {
-            editor.Link.Send(EditorShell.DefaultViewportSettings with { AntiAliasing = aa, RenderScale = 0.5f });
+            editor.Link.Send(new SetViewportSettings(0, EditorShell.DefaultViewportSettings with { AntiAliasing = aa, RenderScale = 0.5f }));
             await Latest(editor, frames, target);
         }
         foreach (var gi in Enum.GetValues<ViewportGi>())
         {
-            editor.Link.Send(EditorShell.DefaultViewportSettings with { GlobalIllumination = gi, RenderScale = 0.5f });
+            editor.Link.Send(new SetViewportSettings(0, EditorShell.DefaultViewportSettings with { GlobalIllumination = gi, RenderScale = 0.5f }));
             await Latest(editor, frames, target);
         }
         foreach (var reflections in Enum.GetValues<ViewportReflections>())
         {
             foreach (var level in Enum.GetValues<ViewportLevel>())
             {
-                editor.Link.Send(EditorShell.DefaultViewportSettings with { Reflections = reflections, ReflectionsLevel = level, RenderScale = 0.5f });
+                editor.Link.Send(new SetViewportSettings(0, EditorShell.DefaultViewportSettings with { Reflections = reflections, ReflectionsLevel = level, RenderScale = 0.5f }));
                 await Latest(editor, frames, target);
             }
         }
@@ -831,7 +1134,7 @@ public sealed class HostLinkTests : IAsyncDisposable
         await using var editor = await Connect();
         editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
         await editor.Next<EntitySnapshot>();
-        var target = await editor.Next<FrameTarget>();
+        var target = await Show(editor);
         using var device = new ViewportDevice(_adapter);
         using var frames = await Open(device, target.Prefix);
 
@@ -846,8 +1149,8 @@ public sealed class HostLinkTests : IAsyncDisposable
             return volume;
         }
         await Load(editor, Scene(Sky(60)));
-        editor.Link.Send(new EditorCamera([Origin, 0, -Meter], [0, 0, 0, 1], (float)(60 * Math.PI / 180), 0.05f));
-        editor.Link.Send(EditorShell.DefaultViewportSettings);
+        editor.Link.Send(new EditorCamera(0, [Origin, 0, -Meter], [0, 0, 0, 1], (float)(60 * Math.PI / 180), 0.05f));
+        editor.Link.Send(new SetViewportSettings(0, EditorShell.DefaultViewportSettings));
 
         var day = Pixel(device, frames.Texture(await Latest(editor, frames, target)), 32, 2);
         Assert.True(day.B > day.R + 20 && day.B > 40, $"the day's sky is {day}, not blue");
@@ -880,11 +1183,11 @@ public sealed class HostLinkTests : IAsyncDisposable
         await using var editor = await Connect();
         editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
         await editor.Next<EntitySnapshot>();
-        var target = await editor.Next<FrameTarget>();
+        var target = await Show(editor);
         using var device = new ViewportDevice(_adapter);
         using var frames = await Open(device, target.Prefix);
         await Load(editor, Scene(TextureSky(CubeFaces)));
-        editor.Link.Send(EditorShell.DefaultViewportSettings);
+        editor.Link.Send(new SetViewportSettings(0, EditorShell.DefaultViewportSettings));
 
         // Each direction, with the rotation that turns the camera's +z toward it and the channels that its face's color has
         // high.
@@ -899,7 +1202,7 @@ public sealed class HostLinkTests : IAsyncDisposable
         ];
         foreach (var look in looks)
         {
-            editor.Link.Send(new EditorCamera([Origin, 0, 0], look.Rotation, (float)(60 * Math.PI / 180), 0.05f));
+            editor.Link.Send(new EditorCamera(0, [Origin, 0, 0], look.Rotation, (float)(60 * Math.PI / 180), 0.05f));
             (byte R, byte G, byte B) color = default;
             var matches = false;
             for (var attempt = 0; attempt < 40 && !matches; attempt++)
@@ -922,10 +1225,10 @@ public sealed class HostLinkTests : IAsyncDisposable
         await using var editor = await Connect();
         editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
         await editor.Next<EntitySnapshot>();
-        var target = await editor.Next<FrameTarget>();
+        var target = await Show(editor);
         using var device = new ViewportDevice(_adapter);
         using var frames = await Open(device, target.Prefix);
-        editor.Link.Send(EditorShell.DefaultViewportSettings);
+        editor.Link.Send(new SetViewportSettings(0, EditorShell.DefaultViewportSettings));
 
         // The same image as an equirectangular texture and as a cube, under each a white box that it lights, at the bottom
         // of the frame, with the sky above it.
@@ -933,7 +1236,7 @@ public sealed class HostLinkTests : IAsyncDisposable
         {
             var box = Box(2, "Box", 1, 1);
             await Load(editor, Scene(TextureSky(texture), box));
-            editor.Link.Send(new EditorCamera([Origin, 0, -2 * Meter], [0, 0, 0, 1], (float)(60 * Math.PI / 180), 0.05f));
+            editor.Link.Send(new EditorCamera(0, [Origin, 0, -2 * Meter], [0, 0, 0, 1], (float)(60 * Math.PI / 180), 0.05f));
             SkySun sun = new(SkySunState.NotReady, [0, 0, 0]);
             for (var attempt = 0; attempt < 200 && sun.State != SkySunState.Found; attempt++)
             {
@@ -978,7 +1281,7 @@ public sealed class HostLinkTests : IAsyncDisposable
         await using var editor = await Connect();
         editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
         await editor.Next<EntitySnapshot>();
-        var target = await editor.Next<FrameTarget>();
+        var target = await Show(editor);
         using var device = new ViewportDevice(_adapter);
         using var frames = await Open(device, target.Prefix);
 
@@ -995,8 +1298,8 @@ public sealed class HostLinkTests : IAsyncDisposable
             triangle.Components.Add(new Document.SceneComponent(TriangleId, "Triangle", [Field("brightness", Document.SceneValue.Of(Number(1.0)))]));
             entities.Add(triangle);
             await Load(editor, Scene([.. entities]));
-            editor.Link.Send(new EditorCamera([Origin, 0, -3 * Meter], [0, 0, 0, 1], (float)(60 * Math.PI / 180), 0.05f));
-            editor.Link.Send(EditorShell.DefaultViewportSettings);
+            editor.Link.Send(new EditorCamera(0, [Origin, 0, -3 * Meter], [0, 0, 0, 1], (float)(60 * Math.PI / 180), 0.05f));
+            editor.Link.Send(new SetViewportSettings(0, EditorShell.DefaultViewportSettings));
             for (var i = 0; i < 4; i++)
             {
                 await Latest(editor, frames, target);
@@ -1028,7 +1331,6 @@ public sealed class HostLinkTests : IAsyncDisposable
         await using var editor = await Connect();
         editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
         await editor.Next<EntitySnapshot>();
-        await editor.Next<FrameTarget>();
         // The array is neither of the sky's two dimensions, so the sky is Flat's and says why.
         const string Tints = "c0be0000000000000000000000000030";
         await Load(editor, Scene(TextureSky(Tints)));
@@ -1041,47 +1343,47 @@ public sealed class HostLinkTests : IAsyncDisposable
         await using var editor = await Connect();
         editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
         await editor.Next<EntitySnapshot>();
-        var target = await editor.Next<FrameTarget>();
+        var target = await Show(editor);
 
         // A point light 2 m ahead of the camera, with nothing else to draw.
         var lamp = Entity(1, "Lamp", z: 1);
         lamp.Components.Add(new Document.SceneComponent(PointLightId, "Point_Light", [Field("intensity", Document.SceneValue.Of(Number(1.0)))]));
         await Load(editor, Scene(lamp));
-        editor.Link.Send(new EditorCamera([Origin, 0, -Meter], [0, 0, 0, 1], (float)(60 * Math.PI / 180), 0.05f));
-        editor.Link.Send(EditorShell.DefaultViewportSettings);
+        editor.Link.Send(new EditorCamera(0, [Origin, 0, -Meter], [0, 0, 0, 1], (float)(60 * Math.PI / 180), 0.05f));
+        editor.Link.Send(new SetViewportSettings(0, EditorShell.DefaultViewportSettings));
 
         PickResult center = new(0, [], 0, -1);
         for (var attempt = 0u; attempt < 60 && center.Hits.Length == 0; attempt++)
         {
-            editor.Link.Send(new PickRequest(100 + attempt, target.Width / 2, target.Height / 2, 1, 1));
+            editor.Link.Send(new PickRequest(100 + attempt, 0, target.Width / 2, target.Height / 2, 1, 1));
             center = await editor.Next<PickResult>(r => r.Id == 100 + attempt);
         }
         Assert.Equal(lamp.Id, Assert.Single(center.Hits).SceneId);
         Assert.InRange(center.Depth, 1.9f, 2.1f);
 
         // At half the render size, a pick in the viewport's pixels still finds it.
-        editor.Link.Send(EditorShell.DefaultViewportSettings with { RenderScale = 0.5f });
+        editor.Link.Send(new SetViewportSettings(0, EditorShell.DefaultViewportSettings with { RenderScale = 0.5f }));
         center = new(0, [], 0, -1);
         for (var attempt = 0u; attempt < 60 && center.Hits.Length == 0; attempt++)
         {
-            editor.Link.Send(new PickRequest(200 + attempt, target.Width / 2, target.Height / 2, 1, 1));
+            editor.Link.Send(new PickRequest(200 + attempt, 0, target.Width / 2, target.Height / 2, 1, 1));
             center = await editor.Next<PickResult>(r => r.Id == 200 + attempt);
         }
         Assert.Equal(lamp.Id, Assert.Single(center.Hits).SceneId);
 
         // Without the icons, the light is not drawn, so nothing is there.
-        editor.Link.Send(EditorShell.DefaultViewportSettings with { ShowIcons = false });
-        editor.Link.Send(new PickRequest(7, target.Width / 2, target.Height / 2, 1, 1));
+        editor.Link.Send(new SetViewportSettings(0, EditorShell.DefaultViewportSettings with { ShowIcons = false }));
+        editor.Link.Send(new PickRequest(7, 0, target.Width / 2, target.Height / 2, 1, 1));
         Assert.Empty((await editor.Next<PickResult>(r => r.Id == 7)).Hits);
     }
 
     // Latest acknowledges the viewport's frames for a while, so the game draws with what it was sent, and gives the last.
-    static async Task<ulong> Latest(Editor editor, SharedFrames frames, FrameTarget target)
+    static async Task<ulong> Latest(Editor editor, SharedFrames frames, ViewportTarget target)
     {
         for (var i = 0; i < 20; i++)
         {
             await Task.Delay(25, TestContext.Current.CancellationToken);
-            editor.Link.Send(new FrameAcknowledged(target.Generation, frames.Completed));
+            editor.Link.Send(new ViewportAcknowledged(target.Viewport, target.Generation, frames.Completed));
         }
         return frames.Completed;
     }
@@ -1225,6 +1527,7 @@ public sealed class HostLinkTests : IAsyncDisposable
     const string BoxMesh = "89fc38c8aa19f0cf0cc161d2ab5e015b";
     const string PulseScript = "7142e05b3941bc44849ed0379727e60b";
     // The engine's Mesh_Renderer, and the game's Spin and Triangle (samples/mygame/game.odin).
+    const ulong CameraId = 32;
     const ulong MeshRendererId = 33;
     const ulong PointLightId = 35;
     const ulong VolumeId = 42;
