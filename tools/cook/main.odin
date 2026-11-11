@@ -3,7 +3,8 @@
 // `cook scripts` cooks scripts (see scripts.odin), `cook scenes` cooks scenes (see scenes.odin), `cook shaders` cooks
 // shaders (see shaders.odin), `cook models` cooks glTF models (see meshes.odin), `cook meshes` cooks mesh files (see
 // mesh_files.odin), `cook stages` cooks USD stages (see stages.odin), and `cook daemon` cooks every kind whenever the
-// content changes (see daemon.odin). `cook stage-report` measures stages against the renderer's limits.
+// content changes (see daemon.odin). `cook stage-report` measures stages against the renderer's limits. `cook package`
+// packs a release cache into bundles (see package.odin).
 package cook
 
 import "core:fmt"
@@ -28,6 +29,7 @@ USAGE :: `usage: cook scripts --cache <dir> --config dev|release [--definitions 
        cook ui --cache <dir> --config dev|release --root <name>=<dir> [--root <name>=<dir>]...
        cook stages --cache <dir> --config dev|release --root <name>=<dir> [--root <name>=<dir>]...
        cook stage-report <stage>...
+       cook package --cache <dir> --out <dir> [--project <file>]
        cook daemon --cache <dir> [--definitions <file>] [--dxc <dxc.exe>] [--include <dir>]... [--link <port>] --root <name>=<dir> [--root <name>=<dir>]...
        cook --emit-link-schema <file>`
 
@@ -91,6 +93,11 @@ main :: proc() {
 	case "stages":
 		if options, parsed = parse_cook_args(os.args[2:]); parsed {
 			ok = cook_batch(options, .Stage)
+		}
+	case "package":
+		if package_options, package_parsed := parse_package_args(os.args[2:]); package_parsed {
+			parsed = true
+			ok = package_content(package_options)
 		}
 	case "stage-report":
 		if parsed = len(os.args) > 2; parsed {

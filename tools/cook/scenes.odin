@@ -190,14 +190,7 @@ scene_key :: proc(config: Script_Config, s: Asset_Source, scene: format.Scene, p
 	for g in used {
 		append(&guids, g)
 	}
-	slice.sort_by(guids[:], proc(a, b: format.Guid) -> bool {
-		for i in 0 ..< len(a) {
-			if a[i] != b[i] {
-				return a[i] < b[i]
-			}
-		}
-		return false
-	})
+	slice.sort_by(guids[:], format.guid_less)
 	for &g in guids {
 		key = hash.fnv64a(g[:], key)
 		if i, found := prefabs.index[g]; found {

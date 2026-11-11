@@ -28,14 +28,15 @@ Everything the justfile makes goes under `build/`, one folder per thing you run,
 build/
 ├── dev/        host.exe, mygame.dll (and the mygame_N.dll copies the host loads), luau.dll,
 │               D3D12/ and the FSR libraries, content/        the development loose cache
-├── release/    mygame.exe, D3D12/ and the FSR libraries, content/, project.settings
+├── release/    mygame.exe, D3D12/ and the FSR libraries, content/        the bundles, project.settings
 ├── tools/      cook.exe, viewer.exe, ltc_fit.exe, stbn.exe, editorctl.exe
 ├── captures/   the editor's screenshots, GIFs and their sidecars
 └── obj/        luau/, compressonator/, meshoptimizer/, clusterlod/, opus/, vorbis/, lz4/   the CMake builds the executables link
-                pdb/, link/, script-types/, dotnet/, editor/autosave/, editor/automation.json
+                pdb/, link/, script-types/, dotnet/, editor/autosave/, editor/automation.json,
+                release-cache/   the release loose cache, which the package step packs into bundles
 ```
 
-A game finds its files beside its executable, never through the working directory: `core.init` fills `Platform_API.content_dir` and `project_path` with `content` and `project.settings` in the executable's directory, as absolute paths, so `build/release` runs from Explorer or from any shell, and the folder can be copied or zipped as it is. The development host is the exception that takes `--content <dir>` and `--project <file>`, because the project's settings are in the source tree, where the editor edits them: `just dev` passes the sample's, and the editor passes its own (see [Editor](../editor/processes-and-projects.md#processes)). The cooker's `--cache` names a loose cache itself, so `just build` cooks into `build/dev/content` and `just release` into `build/release/content`, and the Agility SDK and FSR libraries are copied beside each executable that renders. `build/obj/luau` is where `lib/core/luau` links Luau from, so that path is fixed.
+A game finds its files beside its executable, never through the working directory: `core.init` fills `Platform_API.content_dir` and `project_path` with `content` and `project.settings` in the executable's directory, as absolute paths, so `build/release` runs from Explorer or from any shell, and the folder can be copied or zipped as it is. The development host is the exception that takes `--content <dir>` and `--project <file>`, because the project's settings are in the source tree, where the editor edits them: `just dev` passes the sample's, and the editor passes its own (see [Editor](../editor/processes-and-projects.md#processes)). The cooker's `--cache` names a loose cache itself. `just build` cooks into `build/dev/content`, and `just release` cooks into `build/obj/release-cache`. `just release` then packs that cache into bundles in `build/release/content` (see [Content: Bundles](../content/blobs-and-loading.md#bundles)), so the release folder holds no loose blobs. The Agility SDK and FSR libraries are copied beside each executable that renders. `build/obj/luau` is where `lib/core/luau` links Luau from, so that path is fixed.
 
 ## A frame in the sample
 

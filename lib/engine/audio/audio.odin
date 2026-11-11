@@ -581,33 +581,39 @@ can_stream :: proc(features: boundary.Features, sound_format: boundary.Sound_For
 @(private)
 load_sound :: proc(s: ^State, sound: ^Sound_Slot) {
 	api := &s.platform.audio
-	path := asset.blob_path(s.assets, sound.guid)
-	sound.modified = s.platform.file_modified(path)
 	buffer: [32]u8
 	name := format.guid_format(sound.guid, &buffer)
-	if sound.modified == 0 {
+	location, found := asset.blob_location(s.assets, sound.guid)
+	path := location.path
+	if found {
+		sound.modified = s.platform.file_modified(path)
+	}
+	if !found || sound.modified == 0 {
 		log.errorf("audio: no blob for sound %s at %s. Cook the content.", name, path)
 		return
 	}
-	blob: format.Audio_Blob
-	if s.platform.file_read_range(path, 0, mem.ptr_to_bytes(&blob)) != size_of(blob) || blob.header.layout != format.audio_layout() || !format.audio_check(&blob, sound.guid) {
-		log.errorf("audio: %s is not a cooked sound of its GUID. Cook the content.", path)
-		return
+	// A blob that a bundle compresses does not stream: the asset runtime decompresses all of it.
+	if location.raw {
+		blob: format.Audio_Blob
+		if s.platform.file_read_range(path, location.offset, mem.ptr_to_bytes(&blob)) != size_of(blob) || blob.header.layout != format.audio_layout() || !format.audio_check(&blob, sound.guid) {
+			log.errorf("audio: %s is not a cooked sound of its GUID. Cook the content.", path)
+			return
+		}
+		if bool(blob.stream) && can_stream(s.features, blob.format) {
+			desc := boundary.Sound_Desc {
+				frames   = blob.frames,
+				channels = blob.channels,
+				path     = strings.clone_to_cstring(path, s.platform.frame_allocator),
+				offset   = u64(location.offset) + u64(blob.data.offset),
+				size     = u64(blob.data.size),
+				format   = blob.format,
+				skip     = blob.skip,
+			}
+			sound.handle = api.sound_create(&desc)
+			return
+		}
 	}
-	desc := boundary.Sound_Desc {
-		frames   = blob.frames,
-		channels = blob.channels,
-	}
-	if bool(blob.stream) && can_stream(s.features, blob.format) {
-		desc.path = strings.clone_to_cstring(path, s.platform.frame_allocator)
-		desc.offset = u64(blob.data.offset)
-		desc.size = u64(blob.data.size)
-		desc.format = blob.format
-		desc.skip = blob.skip
-		sound.handle = api.sound_create(&desc)
-		return
-	}
-	data, ok := s.platform.file_read(path, format.BLOB_ALIGN, s.platform.asset_allocator)
+	data, _, ok := asset.read(s.assets, sound.guid)
 	if !ok {
 		log.errorf("audio: cannot read %s", path)
 		return
@@ -617,6 +623,10 @@ load_sound :: proc(s: ^State, sound: ^Sound_Slot) {
 	if !valid {
 		log.errorf("audio: %s is not a cooked sound of its GUID. Cook the content.", path)
 		return
+	}
+	desc := boundary.Sound_Desc {
+		frames   = view.frames,
+		channels = view.channels,
 	}
 	if view.format == .PCM {
 		desc.samples = raw_data(format.audio_samples(data, view))
@@ -642,7 +652,8 @@ check_blobs :: proc(s: ^State) {
 	}
 	s.sound_cursor = (s.sound_cursor + 1) % s.sound_count
 	sound := &s.sounds[s.sound_cursor]
-	modified := s.platform.file_modified(asset.blob_path(s.assets, sound.guid))
+	location, found := asset.blob_location(s.assets, sound.guid)
+	modified := s.platform.file_modified(location.path) if found else 0
 	if modified == 0 || modified == sound.modified {
 		return
 	}

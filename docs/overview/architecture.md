@@ -118,24 +118,27 @@ A project's settings are a text file beside the game, such as `samples/mygame/pr
 | `audio.buses` | Bus names, separated by commas | None, only `Master` | The buses that sounds mix into (see [Audio](../audio/design.md#buses-and-effects)). |
 | `audio.backend` | `mixer`, `none`, or another backend's name | `mixer` | The audio backend, which the host loads before the game starts; `--audio` on its command line replaces it (see [Audio](../audio/backends.md#choosing)). |
 | `physics.backend` | `jolt`, `none`, or another backend's name | `jolt` | The physics backend, which the host loads before the game starts; `--physics` on its command line replaces it (see [Physics: Backends](../physics/backends.md#choosing)). |
+| `bundles.global_scenes` | Scenes' GUIDs, separated by commas | None | The scenes that are not levels, such as a menu. `cook package` puts them and their assets in the global bundle, and gives no scene in the list a bundle of its own (see [Content: Bundles](../content/blobs-and-loading.md#bundles)). The game's parser only knows the key, so that it is not a warning. |
 
 ## Content pipeline
 
 ```mermaid
 flowchart TB
     SOURCE[("source/<br/>png, gltf, hlsl, scripts, scenes, materials<br/>+ .meta sidecars")]
-    CACHE[("build/&lt;target&gt;/content/<br/>one blob per asset,<br/>a cache per configuration")]
+    CACHE[("loose cache<br/>one blob per asset,<br/>a cache per configuration")]
+    BUNDLES[("build/release/content/<br/>*.cbb bundles")]
     DEVRT["Development runtime"]
     RELRT["Release runtime"]
 
     SOURCE -->|"tools/cook"| CACHE
     CACHE --> DEVRT
-    CACHE --> RELRT
+    CACHE -->|"cook package"| BUNDLES
+    BUNDLES --> RELRT
 ```
 
 - Every source asset has a GUID. Content refers to other content only by GUID.
 - `tools/cook` compiles source assets into a cache of blobs. `tools/cook` and the runtime share the asset type definitions from `lib/engine`.
-- The runtime reads blobs from the loose cache of its configuration: `build/dev/content` in development, and the `content` folder beside the executable in release. The blob format is the same in both.
+- In development, the runtime reads blobs from the loose cache, `build/dev/content`. A release build reads them from bundles in the `content` folder beside the executable. `cook package` writes the bundles from the release loose cache: one bundle for each level and one global bundle, with each blob compressed on its own. The blob format is the same in both.
 - In development, the cook daemon watches the source files and cooks what changes. After each pass, it writes a counter to the cache, and the running game swaps every new blob in place in one frame.
 - The cook daemon is the only program that writes `.meta` files. The editor's content browser asks it to create, move, rename and delete assets.
 

@@ -195,6 +195,13 @@ parse :: proc(text: string, settings: ^Settings, problems: ^[dynamic]string = ni
 			append(&ignores, Ignore{line, value})
 			continue
 		}
+		// The package step reads it (see docs/content/blobs-and-loading.md#bundles); the game only knows the key.
+		if key == format.BUNDLE_GLOBAL_SCENES_KEY {
+			if _, ok := format.bundle_parse_scenes(value, context.temp_allocator); !ok {
+				problem(problems, line, "%s takes scenes' GUIDs of 32 hex digits between commas, not %q", key, value)
+			}
+			continue
+		}
 		if key == PHYSICS_BACKEND_KEY {
 			if value == "" {
 				problem(problems, line, "%s takes a backend's name, such as jolt or none", key)

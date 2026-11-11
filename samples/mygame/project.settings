@@ -12,3 +12,8 @@ mesh.default_material = 5a1c3e7f9b2d4f608a1c3e5f7a9b0c2d
 
 # The texel density of the editor's texture tools, in texels per meter: what new faces and Reset Scale map a texture at.
 mesh.texel_density = 256
+
+# The scenes that are not levels, as GUIDs between commas: the release's package step puts them and their assets in the
+# global bundle, and gives the other scenes a bundle each (see docs/content/blobs-and-loading.md#bundles). Every scene of the
+# sample is a level.
+# bundles.global_scenes = <guid>, <guid>

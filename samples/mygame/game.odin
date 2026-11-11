@@ -38,7 +38,8 @@ POST_SHADER :: #load("content/shaders/post.hlsl.meta", string)
 LENS_SHADER :: #load("content/shaders/lens.hlsl.meta", string)
 SHADOWS_SHADER :: #load("content/shaders/shadows.hlsl.meta", string)
 SHADOWS_RT_SHADER :: #load("content/shaders/shadows_rt.hlsl.meta", string)
-// The game reads its cooked content from platform.content_dir, the loose cache, until bundles exist, and its
+// The game reads its cooked content from platform.content_dir: the loose cache in development, and bundles in a release
+// build (see docs/content/blobs-and-loading.md#loading). It reads its
 // settings from platform.project_path, which the editor edits, with the user's file beside them (see
 // docs/overview/architecture.md#project-settings). The game looks for a change to the settings' files this often, in seconds.
 PROJECT_CHECK_INTERVAL :: 0.5
@@ -368,7 +369,7 @@ init :: proc(state: rawptr, platform: ^core.Platform_API) {
 	}
 	audio.init(&s.audio, platform, &s.assets)
 	register_world(s)
-	asset.init(&s.assets, platform, asset.loose_cache(platform.content_dir))
+	asset.init(&s.assets, platform, asset.content_source(platform.content_dir))
 	render.renderer_init(&s.renderer, platform, &s.assets, &s.world)
 	ui.init(&s.ui, platform, &s.assets, &s.renderer.residency)
 	s.script_quality = project.script_quality(&s.renderer, platform.project_path)

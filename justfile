@@ -80,8 +80,11 @@ roots := "--root game=" + content_root + " --root engine=lib/engine/content"
 # What the cooker compiles shaders and materials with: DXC, the directory of the fixed header, cinnabar.hlsli, and the
 # engine's material templates and SMAA's reference shader (vendor/smaa).
 shader_tools := "--dxc " + dxc + " --include lib/core/gpu/shaders --include lib/engine/content/shaders --include vendor/smaa"
-# The loose caches, which the host and the release executable read from beside themselves.
+# The development loose cache, which the host reads from beside itself; the release loose cache, which the release cooks
+# into; and the release's content beside its executable: the bundles that the package step writes from the release
+# cache (see docs/content/blobs-and-loading.md#bundles).
 cache_dir := dev_dir + "/content"
+release_cache := obj_dir + "/release-cache"
 release_content := release_dir + "/content"
 # The scripts' Luau definition file, which the cooker type checks against and luau-lsp reads.
 script_types := obj_dir + "/script-types/cinnabar.d.luau"
@@ -371,11 +374,11 @@ cook: luau compressonator meshoptimizer lightusd opus vorbis msdfgen lz4
 
 # Cook the game's scripts into the loose cache of the configuration. A script without a .meta file gets one: commit it.
 scripts config="dev": cook
-    "./{{tools_dir}}/cook.exe" scripts --cache "{{ if config == "release" { release_content } else { cache_dir } }}" --config {{config}} --definitions "{{script_types}}" {{roots}}
+    "./{{tools_dir}}/cook.exe" scripts --cache "{{ if config == "release" { release_cache } else { cache_dir } }}" --config {{config}} --definitions "{{script_types}}" {{roots}}
 
 # Cook the game's scenes into the loose cache of the configuration. A scene without a .meta file gets one: commit it.
 scenes config="dev": cook
-    "./{{tools_dir}}/cook.exe" scenes --cache "{{ if config == "release" { release_content } else { cache_dir } }}" --config {{config}} {{roots}}
+    "./{{tools_dir}}/cook.exe" scenes --cache "{{ if config == "release" { release_cache } else { cache_dir } }}" --config {{config}} {{roots}}
 
 # Run the cook daemon, which cooks the game's and the engine's content into build/dev/content whenever they change, until
 # it is stopped. A running game swaps the new blobs (see docs/content/daemon-and-operations.md#cook-daemon).
@@ -389,63 +392,63 @@ script-types: host game-dll
 # Cook the game's textures and the engine's into the loose cache of the configuration. A texture without a .meta file
 # gets one, with its usage guessed from its name: commit it.
 textures config="dev": cook
-    "./{{tools_dir}}/cook.exe" textures --cache "{{ if config == "release" { release_content } else { cache_dir } }}" --config {{config}} {{roots}}
+    "./{{tools_dir}}/cook.exe" textures --cache "{{ if config == "release" { release_cache } else { cache_dir } }}" --config {{config}} {{roots}}
 
 # Cook the shading models, materials and material instances of the game and the engine into the loose cache of the
 # configuration: each material compiles a variant for each set of static switches that it or an instance uses.
 materials config="dev": install-dxc cook
-    "./{{tools_dir}}/cook.exe" materials --cache "{{ if config == "release" { release_content } else { cache_dir } }}" --config {{config}} {{shader_tools}} {{roots}}
+    "./{{tools_dir}}/cook.exe" materials --cache "{{ if config == "release" { release_cache } else { cache_dir } }}" --config {{config}} {{shader_tools}} {{roots}}
 
 # Cook the game's models and the engine's into the loose cache of the configuration: each glTF mesh becomes a mesh with
 # its own GUID in its model's .meta file. A model without a .meta file gets one: commit it, with the GUIDs it gains.
 models config="dev": cook
-    "./{{tools_dir}}/cook.exe" models --cache "{{ if config == "release" { release_content } else { cache_dir } }}" --config {{config}} {{roots}}
+    "./{{tools_dir}}/cook.exe" models --cache "{{ if config == "release" { release_cache } else { cache_dir } }}" --config {{config}} {{roots}}
 
 # Cook the game's mesh files and the engine's into the loose cache of the configuration: each .mesh file is a mesh with
 # its own GUID (see docs/content/kinds/meshes.md#mesh-files). A mesh without a .meta file gets one: commit it.
 meshes config="dev": cook
-    "./{{tools_dir}}/cook.exe" meshes --cache "{{ if config == "release" { release_content } else { cache_dir } }}" --config {{config}} {{roots}}
+    "./{{tools_dir}}/cook.exe" meshes --cache "{{ if config == "release" { release_cache } else { cache_dir } }}" --config {{config}} {{roots}}
 
 # Cook the game's USD stages into the loose cache of the configuration: each stage's meshes and textures, and the text of
 # its material instances and its prefab, which `just materials` and `just scenes` cook (see
 # docs/content/kinds/stages.md#stages). A stage without a .meta file gets one: commit it, with the GUIDs it gains.
 stages config="dev": cook
-    "./{{tools_dir}}/cook.exe" stages --cache "{{ if config == "release" { release_content } else { cache_dir } }}" --config {{config}} {{roots}}
+    "./{{tools_dir}}/cook.exe" stages --cache "{{ if config == "release" { release_cache } else { cache_dir } }}" --config {{config}} {{roots}}
 
 # Cook the game's effects and the engine's into the loose cache of the configuration (see
 # docs/content/kinds/effects.md#effects). An effect without a .meta file gets one: commit it.
 effects config="dev": cook
-    "./{{tools_dir}}/cook.exe" effects --cache "{{ if config == "release" { release_content } else { cache_dir } }}" --config {{config}} {{roots}}
+    "./{{tools_dir}}/cook.exe" effects --cache "{{ if config == "release" { release_cache } else { cache_dir } }}" --config {{config}} {{roots}}
 
 # Cook the game's sounds into the loose cache of the configuration (see docs/content/kinds/audio.md#audio). A sound without
 # a .meta file gets one: commit it.
 audio config="dev": cook
-    "./{{tools_dir}}/cook.exe" audio --cache "{{ if config == "release" { release_content } else { cache_dir } }}" --config {{config}} {{roots}}
+    "./{{tools_dir}}/cook.exe" audio --cache "{{ if config == "release" { release_cache } else { cache_dir } }}" --config {{config}} {{roots}}
 
 # Cook the game's animation graphs into the loose cache of the configuration (see
 # docs/content/kinds/animation-graphs.md#animation-graphs). A graph without a .meta file gets one: commit it.
 animation_graphs config="dev": cook
-    "./{{tools_dir}}/cook.exe" animation_graphs --cache "{{ if config == "release" { release_content } else { cache_dir } }}" --config {{config}} {{roots}}
+    "./{{tools_dir}}/cook.exe" animation_graphs --cache "{{ if config == "release" { release_cache } else { cache_dir } }}" --config {{config}} {{roots}}
 
 # Cook the game's fonts and their atlases into the loose cache of the configuration (see docs/content/kinds/fonts.md#fonts).
 # A font without a .meta file gets one: commit it.
 fonts config="dev": cook
-    "./{{tools_dir}}/cook.exe" fonts --cache "{{ if config == "release" { release_content } else { cache_dir } }}" --config {{config}} {{roots}}
+    "./{{tools_dir}}/cook.exe" fonts --cache "{{ if config == "release" { release_cache } else { cache_dir } }}" --config {{config}} {{roots}}
 
 # Cook the game's sprite sheets and the atlases of those that pack images into the loose cache of the configuration (see
 # docs/content/kinds/sprite-sheets.md#sprite-sheets). A sheet without a .meta file gets one: commit it.
 sprite_sheets config="dev": cook
-    "./{{tools_dir}}/cook.exe" sprite_sheets --cache "{{ if config == "release" { release_content } else { cache_dir } }}" --config {{config}} {{roots}}
+    "./{{tools_dir}}/cook.exe" sprite_sheets --cache "{{ if config == "release" { release_cache } else { cache_dir } }}" --config {{config}} {{roots}}
 
 # Cook the game's UI documents into the loose cache of the configuration (see docs/content/kinds/ui-documents.md#ui-documents).
 # A document without a .meta file gets one: commit it.
 ui config="dev": cook
-    "./{{tools_dir}}/cook.exe" ui --cache "{{ if config == "release" { release_content } else { cache_dir } }}" --config {{config}} {{roots}}
+    "./{{tools_dir}}/cook.exe" ui --cache "{{ if config == "release" { release_cache } else { cache_dir } }}" --config {{config}} {{roots}}
 
 # Cook the game's shaders and the engine's into the loose cache of the configuration: each <name>.hlsl becomes one blob
 # with an entry for each stage. A shader without a .meta file gets one: commit it.
 shaders config="dev": install-dxc cook
-    "./{{tools_dir}}/cook.exe" shaders --cache "{{ if config == "release" { release_content } else { cache_dir } }}" --config {{config}} {{shader_tools}} {{roots}}
+    "./{{tools_dir}}/cook.exe" shaders --cache "{{ if config == "release" { release_cache } else { cache_dir } }}" --config {{config}} {{shader_tools}} {{roots}}
 
 # Build the game DLL. A running host picks it up and hot-reloads it.
 game-dll: luau jolt opus lz4
@@ -537,12 +540,14 @@ edit: build editor
         --cook "{{tools_dir}}/cook.exe" --cache "{{cache_dir}}" --definitions "{{script_types}}" {{shader_tools}} {{roots}} \
         --project "samples/{{game}}/project.settings"
 
-# Build the statically linked release executable into build/release, with its content and project settings beside it,
-# so the folder runs from anywhere as it is
+# Build the statically linked release executable into build/release, with its content's bundles and project settings
+# beside it, so the folder runs from anywhere as it is
 release: (agility-runtime release_dir) (fidelityfx-runtime release_dir) luau jolt opus lz4 script-types (scripts "release") (scenes "release") (shaders "release") (textures "release") (models "release") (meshes "release") (materials "release") (effects "release") (animation_graphs "release") (audio "release") (fonts "release") (ui "release") (sprite_sheets "release")
     mkdir -p "{{release_dir}}"
     cp "samples/{{game}}/project.settings" "{{release_dir}}/project.settings"
-    odin build "samples/{{game}}/main_release" {{collections}} {{luau_features}} -define:DEBUG_DRAW=false -define:PROFILE=false -define:CAPTURE=false -out:"{{release_dir}}/{{game}}.exe" -o:speed
+    rm -rf "{{release_content}}"
+    "./{{tools_dir}}/cook.exe" package --cache "{{release_cache}}" --out "{{release_content}}" --project "samples/{{game}}/project.settings"
+    odin build "samples/{{game}}/main_release" {{collections}} {{luau_features}} -define:DEBUG_DRAW=false -define:PROFILE=false -define:CAPTURE=false -define:BUNDLES=true -out:"{{release_dir}}/{{game}}.exe" -o:speed
 
 # Build and run the release executable
 run-release: release

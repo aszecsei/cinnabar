@@ -66,7 +66,7 @@ init :: proc(state: rawptr, platform: ^core.Platform_API) {
 		log.panic("intel: cannot create the physics world")
 	}
 	register_world(s)
-	asset.init(&s.assets, platform, asset.loose_cache(platform.content_dir))
+	asset.init(&s.assets, platform, asset.content_source(platform.content_dir))
 	render.renderer_init(&s.renderer, platform, &s.assets, &s.world)
 	s.script_quality = project.script_quality(&s.renderer, platform.project_path)
 	if !script.init(&s.scripts, platform, &s.world, &s.assets, register_scripts) {
