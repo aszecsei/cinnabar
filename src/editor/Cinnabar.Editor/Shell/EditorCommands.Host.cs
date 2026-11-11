@@ -107,6 +107,30 @@ static partial class EditorCommands
         });
     }
 
+    // The project as a whole (see docs/editor/processes-and-projects.md#projects): another one, its build, and its release.
+    static void RegisterProject(EditorShell shell)
+    {
+        var commands = shell.Commands;
+        commands.Register(new Command(OpenProject, "Open Project", shell.RequestOpenProject)
+        {
+            Description = "Open another project's folder in a new editor, and close this one.",
+            Icon = "folder",
+        });
+        commands.Register(new Command(BuildProject, "Build Project", shell.BuildProject)
+        {
+            Description = "Build the project's Odin, if it has a game folder, and its scripts' types, as cinnabar build does. The game reloads the new code at once.",
+            Icon = "restart",
+            Shortcut = "Ctrl+B",
+            CanExecuteWhen = () => !shell.Builder.IsRunning,
+        });
+        commands.Register(new Command(ExportProject, "Export", shell.ExportProject)
+        {
+            Description = "Write a release into the project's build/release: the game's executable, its content's bundles and its settings, which run anywhere as they are. It cooks the saved files.",
+            Icon = "save-as",
+            CanExecuteWhen = () => !shell.Builder.IsRunning,
+        });
+    }
+
     // The profiler (see docs/editor/shell-and-panels.md#profiler): captures of a frame, and whether the host records zones.
     static void RegisterProfiler(EditorShell shell)
     {

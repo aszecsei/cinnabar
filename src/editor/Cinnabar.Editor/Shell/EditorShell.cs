@@ -67,6 +67,8 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
         Watches = new EntityWatches(Selection, Host);
         Visibility = new SceneVisibility(World, Selection, Host, settings, Console, () => Scene?.Path, WriteSetting, Commands.InvalidateAll);
         Cook = new CookSession(options.Cook, Assets);
+        Builder = new ProjectTool(ProjectLayout.Tool(options.EngineRoot), options.EngineRoot, ChildProcess.Start);
+        WireTool();
         PreviewCooker = Cook;
         Content = new ContentBrowser(Assets, Cook, Console, MovingScene, Commands.InvalidateAll, ProjectTags.PathFor(options.ProjectPath));
         WireCook();
@@ -261,6 +263,7 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
     {
         StopAutomation();
         StopGame();
+        Builder.Dispose();
         Host.Dispose();
         Cook.Dispose();
         foreach (var viewport in Viewports)

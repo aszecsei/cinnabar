@@ -177,6 +177,9 @@ static partial class EditorCommands
     public const string ViewportReflectionsLevel = "view.reflectionsLevel";
     public const string CaptureProbe = "reflections.captureProbe";
     public const string CaptureAllProbes = "reflections.captureAllProbes";
+    public const string OpenProject = "project.open";
+    public const string BuildProject = "project.build";
+    public const string ExportProject = "project.export";
     public const string RunGame = "game.run";
     public const string StopGame = "game.stop";
     public const string ProjectOutput = "project.output";
@@ -223,6 +226,7 @@ static partial class EditorCommands
         RegisterProfiler(shell);
         RegisterCapture(shell);
         RegisterGameWindow(shell);
+        RegisterProject(shell);
     }
 
     static string Nearest(IReadOnlyList<string> options, double value) => options.MinBy(o => Math.Abs(double.Parse(o, System.Globalization.CultureInfo.InvariantCulture) - value))!;

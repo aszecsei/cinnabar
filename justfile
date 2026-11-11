@@ -562,7 +562,7 @@ link-schema: host cook
     "./{{dev_dir}}/host.exe" --emit-link-schema "{{obj_dir}}/link/link-schema.json"
     "./{{tools_dir}}/cook.exe" --emit-link-schema "{{obj_dir}}/link/cook-schema.json"
 
-# Build the editor (see docs/editor/processes-and-projects.md#projects)
+# Build the editor (see docs/editor/processes-and-projects.md#c-projects)
 editor: link-schema
     dotnet build src/editor -nologo -v:quiet
 
