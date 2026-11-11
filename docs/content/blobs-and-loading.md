@@ -120,7 +120,7 @@ Use `bundles.global_scenes` for scenes that are not levels, such as a menu or a 
 
 **What a release does not do.** Bundles do not change, so `asset.poll` returns nothing, and `asset.current` is always true. Hot reload of assets and of scripts is therefore for development only. Scripts load from bundles like every other asset (see [Scripting](../scripting/tooling-and-hot-reload.md#script-hot-reload)). There are no material previews.
 
-**The package step.** `just release` cooks every kind into the release loose cache, `build/obj/release-cache`. Then it runs `cook package --cache build/obj/release-cache --out build/release/content --project samples/<game>/project.settings`. The step does these things:
+**The package step.** `just release` cooks every kind into the game's release loose cache, `build/obj/release-cache/<game>`, with `cook all --prune`, so the cache holds only the game's content (see [Cooking](identity-and-cooking.md#cooking)). Then it runs `cook package --cache build/obj/release-cache/<game> --out build/release/content --project samples/<game>/project.settings`. `cinnabar export` does the same with the project's `build/release-cache` (see [Getting started](../overview/getting-started.md#releases)). The step does these things:
 
 1. Takes the cache's lock.
 2. Reads every blob.

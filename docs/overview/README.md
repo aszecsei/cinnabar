@@ -10,6 +10,7 @@ Read them in this order the first time.
 |---|---|
 | [Architecture](architecture.md) | The frame's phases and each part's role, with pointers into the layers. |
 | [Hot reload](hot-reload.md) | The rules game-side code follows, what survives a reload, and the reload sequence. |
+| [Getting started](getting-started.md) | Making a game with the engine: building the engine once, a new project, the loop, Odin in a project, and releases. |
 | [Building and running](building-and-running.md) | The `just` recipes, and a walkthrough of the sample game's frame. |
 | [Conventions](conventions.md) | The rules that cut across every layer. |
 

@@ -1,0 +1,54 @@
+// {{name}}'s Odin: hooks that add to the standard game (see docs/world/game-package.md#hooks). Content and scripts need
+// no Odin; add it here for components, systems and script bindings of the game's own. `cinnabar build` builds it into
+// build/dev/game.dll, which a running game reloads.
+package {{package}}
+
+import "core:math/linalg"
+
+import "cinnabar:core"
+import "cinnabar:engine/ecs"
+import "cinnabar:engine/game"
+import "cinnabar:engine/script"
+
+// The game's components have IDs of their own, which stay the same, because scenes name components by ID (see
+// docs/world/ecs.md#component-registry). The engine's are below 1000.
+SPIN_ID :: ecs.Component_Id(1001)
+
+// Spin turns an entity about the world's up axis, in radians per second, in fixed ticks.
+Spin :: struct {
+	speed: f32,
+}
+
+hooks :: proc() -> game.Hooks {
+	return {register_components = register_components, register_world = register_world, register_scripts = register_scripts}
+}
+
+@(export)
+cinnabar_game_api :: proc() -> core.Game_API {
+	return game.api(hooks)
+}
+
+register_components :: proc(r: ^ecs.Registry) {
+	ecs.register_component(r, Spin, SPIN_ID)
+}
+
+register_world :: proc(g: ^game.Game) {
+	w := &g.world
+	ecs.register_system(w, {name = "spin", stage = .Fixed, procedure = spin, terms = {ecs.write(w, ecs.Transform), ecs.read(w, Spin)}})
+}
+
+// register_scripts lets scripts read and write Spin, as entity:get(Spin).
+register_scripts :: proc(r: ^script.Runtime) {
+	script.expose(r, Spin)
+}
+
+spin :: proc(ctx: ^ecs.System_Context) {
+	it := ecs.query_iter(ctx.world, ctx.query, ctx.first_chunk, ctx.chunk_count)
+	for view in ecs.query_next(&it) {
+		spins := ecs.column(view, 1, Spin)
+		for &pose, i in ecs.column(view, 0, ecs.Transform) {
+			turn := linalg.quaternion_angle_axis_f32(spins[i].speed * ctx.dt, {0, 1, 0})
+			pose.rotation = linalg.normalize(turn * pose.rotation)
+		}
+	}
+}

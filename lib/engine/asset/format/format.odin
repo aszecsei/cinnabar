@@ -2,6 +2,8 @@
 // layouts. It imports nothing from core, so the cooker can use it. See docs/content/README.md.
 package asset_format
 
+import "core:crypto"
+import "core:fmt"
 import "core:mem"
 import "core:strings"
 
@@ -50,6 +52,44 @@ hex_digit :: proc "contextless" (c: u8) -> (u8, bool) {
 }
 
 META_EXTENSION :: ".meta"
+// The comment that a new .meta file starts with.
+META_HEADER :: "# cinnabar asset metadata. Keep this file next to its asset (see docs/content/identity-and-cooking.md#identity)."
+
+// guid_new is a new random GUID, as an asset without a .meta file gets.
+guid_new :: proc() -> (guid: Guid) {
+	crypto.rand_bytes(guid[:])
+	return
+}
+
+// meta_text is the text of a .meta file with a GUID, import settings and sub-assets. It keeps the comments of an old
+// .meta file, or starts with META_HEADER. With no sub-assets given, it keeps the old file's. The cooker and the tools
+// that make projects write .meta files with it.
+meta_text :: proc(guid: Guid, old_text: string, settings: []Meta_Setting, subassets: Maybe([]Meta_Subasset) = nil, allocator := context.allocator) -> string {
+	b := strings.builder_make(allocator)
+	rest := old_text
+	for line in strings.split_lines_iterator(&rest) {
+		if trimmed := strings.trim_space(line); strings.has_prefix(trimmed, "#") {
+			fmt.sbprintln(&b, trimmed)
+		}
+	}
+	if strings.builder_len(b) == 0 {
+		fmt.sbprintln(&b, META_HEADER)
+	}
+	buffer: [32]u8
+	fmt.sbprintfln(&b, "guid = %s", guid_format(guid, &buffer))
+	for s in settings {
+		fmt.sbprintfln(&b, "%s = %s", s.key, s.value)
+	}
+	lines, given := subassets.?
+	if !given {
+		old, _ := meta_parse(old_text, context.temp_allocator)
+		lines = old.subassets
+	}
+	for s in lines {
+		fmt.sbprintfln(&b, "%s.%s = %s", s.kind, s.name, guid_format(s.guid, &buffer))
+	}
+	return strings.to_string(b)
+}
 
 // After a cook writes blobs into a configuration's cache directory, it writes a counter to this file in it. The
 // runtime checks the blobs it has loaded only when the file changes (see docs/content/blobs-and-loading.md#loading).
