@@ -16,10 +16,17 @@ FOG_INJECT_TRACED_SHADER :: #load("../content/shaders/fog_inject_traced.hlsl.met
 FOG_INTEGRATE_SHADER :: #load("../content/shaders/fog_integrate.hlsl.meta", string)
 FOG_BACKGROUND_SHADER :: #load("../content/shaders/fog_background.hlsl.meta", string)
 
-// A froxel is a screen tile of FOG_TILE pixels in one of the level's depth slices, which divide the clusters' slices.
-// FOG_TILE matches fog_inject.hlsli and fog_integrate.hlsl; the slices reach the shaders in Fog_Push.grid and
-// Frame_Constants.fog_slices.
-FOG_TILE :: 16
+// A froxel is a screen tile of the level's FOG_LEVEL_TILE pixels in one of its depth slices, which divide the clusters'
+// slices. The tile reaches the shaders in Fog_Push.tile and Integrate_Push.tile, and the slices in Fog_Push.grid and
+// Frame_Constants.fog_slices. Every level takes 16 pixels: 8 at Ultra tripled the injection's time and quadrupled the
+// volume's memory for no difference that a capture showed (see docs/rendering/fog.md#tile-size).
+@(rodata)
+FOG_LEVEL_TILE := [Quality_Level]u32 {
+	.Low    = 16,
+	.Medium = 16,
+	.High   = 16,
+	.Ultra  = 16,
+}
 @(rodata)
 FOG_LEVEL_SLICES := [Quality_Level]u32 {
 	.Low    = CLUSTER_SLICES,
@@ -60,6 +67,8 @@ Fog_Push :: struct {
 	valid:          u32,
 	accel:          u32,
 	blend:          f32,
+	// The froxels' tile in pixels.
+	tile:           f32,
 }
 
 // Integrate_Push matches Push in fog_integrate.hlsl.
@@ -74,6 +83,8 @@ Integrate_Push :: struct {
 	slice_count: u32,
 	// Whether the view is orthographic, whose slices are even.
 	orthographic: u32,
+	// The froxels' tile in pixels.
+	tile:        f32,
 }
 
 // Background_Push matches Push in fog_background.hlsl.
@@ -135,6 +146,14 @@ sync_fog_pipelines :: proc(r: ^Renderer, force: bool) {
 	sync_compute_pipeline(&v.background, r.platform, assets, {label = "fog background"}, force)
 }
 
+// fog_grid is the fog volume's froxels across, down and deep for a frame's size at a level: the tiles that cover the
+// screen, the last ones past its edges, and the level's slices.
+@(private)
+fog_grid :: proc(size: [2]u32, level: Quality_Level) -> [3]u32 {
+	tile := FOG_LEVEL_TILE[level]
+	return {(size.x + tile - 1) / tile, (size.y + tile - 1) / tile, FOG_LEVEL_SLICES[level]}
+}
+
 // begin_fog readies the frame's fog volume, from the Fog settings at the camera, before the scene's constants are
 // written, which say whether there is fog. It runs after assign_shadows: the injection traces the lights that have a
 // channel of the mask. Without fog or its pipelines, Frame.fog stays nil.
@@ -151,7 +170,8 @@ begin_fog :: proc(f: ^Frame, fog: Fog_Settings) {
 	if fog.density <= 0 {
 		return
 	}
-	grid := [3]u32{(f.size.x + FOG_TILE - 1) / FOG_TILE, (f.size.y + FOG_TILE - 1) / FOG_TILE, FOG_LEVEL_SLICES[fog.level]}
+	tile := FOG_LEVEL_TILE[fog.level]
+	grid := fog_grid(f.size, fog.level)
 	history := history_texture(f.graph, {size = grid.xy, depth = grid.z, format = FOG_FORMAT, label = "fog history"})
 	if history.current == 0 {
 		return
@@ -163,7 +183,7 @@ begin_fog :: proc(f: ^Frame, fog: Fog_Settings) {
 	ff^ = {
 		traced = traced,
 		grid = grid,
-		scale = {f32(f.size.x) / f32(grid.x * FOG_TILE), f32(f.size.y) / f32(grid.y * FOG_TILE)},
+		scale = {f32(f.size.x) / f32(grid.x * tile), f32(f.size.y) / f32(grid.y * tile)},
 		history = history,
 		push = {
 			right = {right.x, right.y, right.z, scale.x},
@@ -179,6 +199,7 @@ begin_fog :: proc(f: ^Frame, fog: Fog_Settings) {
 			grid = grid,
 			valid = u32(history.valid),
 			blend = FOG_BLEND,
+			tile = f32(tile),
 		},
 	}
 	f.fog = ff
@@ -273,6 +294,7 @@ run_fog_integrate :: proc(ctx: ^Pass_Context) {
 		screen_size = {f32(f.size.x), f32(f.size.y)},
 		slice_count = ff.grid.z,
 		orthographic = u32(is_orthographic(f.view)),
+		tile        = ff.push.tile,
 	}
 	gpu.cmd_set_pipeline(ctx.cb, f.renderer.fog.integrate.pipeline)
 	gpu.cmd_push_constants(ctx.cb, &push)

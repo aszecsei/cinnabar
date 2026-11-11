@@ -1,5 +1,5 @@
 // The fog volume's injection (see docs/rendering/fog.md#volumetric-fog): a thread for each froxel, a screen tile of
-// FOG_TILE pixels in one of grid.z depth slices, which divide the clusters' slices. Each froxel takes the fog's
+// tile pixels in one of grid.z depth slices, which divide the clusters' slices. Each froxel takes the fog's
 // density at a point in it, which moves within its slice from frame to frame, and the light that reaches that point:
 // every directional light, the punctual lights of its cluster with their shadow maps, and the sky's light. Then it
 // blends with last frame's value where the point was then. fog_inject.hlsl and fog_inject_traced.hlsl include this;
@@ -8,7 +8,7 @@
 #define FOG_INJECT_HLSLI
 
 // Matches Fog_Push in lib/engine/render/fog.odin. It starts with Material_Push's shadow textures, which the light loop
-// reads. right, up and forward are the view's axes in the world. base_height is the fog's height relative to the camera. jitter is where the point is in its slice, in [0, 1).
+// reads. right, up and forward are the view's axes in the world. base_height is the fog's height relative to the camera. jitter is where the point is in its slice, in [0, 1). tile is the froxels' tile in pixels, the level's FOG_LEVEL_TILE.
 struct Fog_Push {
 	uint shadow_atlas;
 	uint shadow_mask;
@@ -27,6 +27,7 @@ struct Fog_Push {
 	uint valid;
 	uint accel;
 	float blend;
+	float tile;
 };
 #define MATERIAL_PUSH Fog_Push
 // No shading model: the fog needs only the light loop's lookups.
@@ -34,8 +35,6 @@ struct Fog_Push {
 #include "material_lighting.hlsli"
 #include "ray_scene.hlsli"
 
-// Matches FOG_TILE in lib/engine/render/fog.odin.
-static const float FOG_TILE = 16;
 // Directional rays stop this far away, in meters.
 static const float FOG_RAY_DISTANCE = 10000;
 
@@ -111,7 +110,7 @@ void fog_inject(uint3 id) {
 		return;
 	}
 	// The point: the froxel's tile center, at its jittered place in its slice.
-	float2 pixel = (float2(id.xy) + 0.5) * FOG_TILE;
+	float2 pixel = (float2(id.xy) + 0.5) * push.tile;
 	float2 ndc = float2(pixel.x / frame.screen_size.x * 2 - 1, 1 - pixel.y / frame.screen_size.y * 2);
 	float depth = fog_depth(id.z + push.jitter);
 	float3 p = fog_point(ndc, depth);

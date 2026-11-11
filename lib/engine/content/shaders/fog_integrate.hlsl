@@ -4,7 +4,7 @@
 // it, so the result does not depend on the slices' thickness.
 #include "cinnabar.hlsli"
 
-// Matches Integrate_Push in lib/engine/render/fog.odin. scale holds the projection's x and y scales, and slices the
+// Matches Integrate_Push in lib/engine/render/fog.odin. tile is the froxels' tile in pixels. scale holds the projection's x and y scales, and slices the
 // clusters' slice constants: slice = log2(depth) * slices.x + slices.y, or depth * slices.x + slices.y for an
 // orthographic view, whose rays all go along the view's axis.
 struct Push {
@@ -16,11 +16,11 @@ struct Push {
 	float2 screen_size;
 	uint slice_count;
 	uint orthographic;
+	float tile;
 };
 CN_PUSH_CONSTANTS(Push, push);
 
-// Matches FOG_TILE and CLUSTER_SLICES in lib/engine/render.
-static const float FOG_TILE = 16;
+// Matches CLUSTER_SLICES in lib/engine/render.
 static const float CLUSTER_SLICES = 32;
 
 float slice_depth(float slice) {
@@ -34,7 +34,7 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 		return;
 	}
 	// The froxels' depths are along the view's axis; the ray through the tile is longer by this much.
-	float2 pixel = (float2(id.xy) + 0.5) * FOG_TILE;
+	float2 pixel = (float2(id.xy) + 0.5) * push.tile;
 	float2 ndc = float2(pixel.x / push.screen_size.x * 2 - 1, 1 - pixel.y / push.screen_size.y * 2);
 	float stretch = push.orthographic != 0 ? 1 : length(float3(ndc / push.scale, 1));
 	Texture3D<float4> input = cn_texture3d(push.input);

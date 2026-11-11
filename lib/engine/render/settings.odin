@@ -305,7 +305,7 @@ Fog_Settings :: struct {
 	base_height:    f32,
 	height_falloff: f32,
 	anisotropy:     f32,
-	// The volume's FOG_LEVEL_SLICES.
+	// The volume's FOG_LEVEL_TILE and FOG_LEVEL_SLICES.
 	level:          Quality_Level,
 }
 

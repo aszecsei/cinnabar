@@ -242,3 +242,21 @@ the_render_size_is_the_frames_at_the_render_scale :: proc(t: ^testing.T) {
 	testing.expect_value(t, render_size({1280, 720}, 0.67), [2]u32{858, 482})
 	testing.expect_value(t, render_size({1, 1}, 0.5), [2]u32{1, 1})
 }
+
+// The fog's froxels are 16 pixels across at every level (see docs/rendering/fog.md#tile-size), in the level's slices,
+// and the tiles cover the screen, the last ones past its edges, which the volume's scale leaves out.
+@(test)
+the_fogs_tiles_follow_the_level :: proc(t: ^testing.T) {
+	testing.expect_value(t, fog_grid({1920, 1080}, .Low), [3]u32{120, 68, 32})
+	testing.expect_value(t, fog_grid({1920, 1080}, .High), [3]u32{120, 68, 64})
+	testing.expect_value(t, fog_grid({1920, 1080}, .Ultra), [3]u32{120, 68, 96})
+	testing.expect_value(t, fog_grid({2560, 1440}, .Ultra), [3]u32{160, 90, 96})
+	for level in Quality_Level {
+		for size in ([][2]u32{{1, 1}, {1196, 568}, {1920, 1080}, {2560, 1440}}) {
+			grid := fog_grid(size, level)
+			tile := FOG_LEVEL_TILE[level]
+			testing.expectf(t, grid.x * tile >= size.x && (grid.x - 1) * tile < size.x, "%v at %v: %v", size, level, grid)
+			testing.expectf(t, grid.y * tile >= size.y && (grid.y - 1) * tile < size.y, "%v at %v: %v", size, level, grid)
+		}
+	}
+}
