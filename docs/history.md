@@ -72,6 +72,7 @@ The order in which scripting was built.
 5. **Tooling:** `--emit-script-types`, type checking in the cooker, `luau-lsp` configuration.
 6. **Script hot reload:** module patching, behaviour classes and `on_reload`, main script restarts.
 7. **Native code generation and direct field access.**
+8. **Bundles:** a release build's scripts load from bundles, like every other asset (see [Content pipeline](#content-pipeline), phase 5).
 
 ## Content pipeline
 The order in which the daemon was built.
@@ -80,6 +81,7 @@ The order in which the daemon was built.
 2. **Cook link:** problems by file and line, the index and its changes, `lib/engine/wire`, `cook_link` and its schema, and the editor's side (see [Editor](#editor)).
 3. **Asset operations:** the operations, the importers' settings tables, orphans, and the editor's commands, menus, dragging and settings editors.
 4. **GPU assets:** shaders, textures and meshes as assets, cooked in parallel, sub-assets, and the GPU residency table (see [Rendering](#rendering), phase 0).
+5. **Bundles:** `cook package`, a bundle for each level and a global one, blobs compressed one by one with LZ4, and the asset runtime's `Bundle` source, which release builds read from (see [Content: Bundles](content/blobs-and-loading.md#bundles)).
 
 ## Editor
 The order in which the editor was built.

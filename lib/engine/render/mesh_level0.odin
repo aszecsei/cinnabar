@@ -215,8 +215,12 @@ assemble_level0 :: proc(r: ^Residency, m: ^Resident_Mesh, s: ^Level0_Assembling)
 					fail_level0(r, m, mesh.guid, "cannot be read on this platform")
 					return
 				}
-				path := asset.blob_path(r.assets, mesh.guid)
-				if platform.file_modified(path) != mesh.modified {
+				location, found := asset.blob_location(r.assets, mesh.guid)
+				if !found || !location.raw {
+					fail_level0(r, m, mesh.guid, "is not stored as it is, so its pages cannot be read")
+					return
+				}
+				if platform.file_modified(location.path) != mesh.modified {
 					return
 				}
 				// The pages from this one that follow each other in the file, up to a read's size.
@@ -230,7 +234,7 @@ assemble_level0 :: proc(r: ^Residency, m: ^Resident_Mesh, s: ^Level0_Assembling)
 					size = next
 					end += 1
 				}
-				s.read = platform.file_read_begin(path, i64(record.offset), int(size))
+				s.read = platform.file_read_begin(location.path, location.offset + i64(record.offset), int(size))
 				s.read_end, s.read_offset = end, record.offset
 				if s.read == 0 {
 					// The host's reads are all in use. The next frame asks again.

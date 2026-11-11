@@ -43,18 +43,19 @@ flowchart LR
     COOK --> GEN --> LOAD
 ```
 
-Content reaches a game in two ways:
+Content reaches a game in three ways:
 
 | Way | When | How the game learns of new blobs |
 |---|---|---|
 | **Batch cook** (`just scripts`, `just textures`, `just build` and so on) | A build, or a release cook | The cache's generation counter changes; `asset.poll` swaps the new blobs |
 | **Cook daemon** (`just watch`, or started by the editor) | Development, while sources change | The same counter, after each pass |
+| **Bundles** (`just release`, which runs `cook package` after the release cook) | A release build, which reads `*.cbb` files in place of a loose cache (see [Bundles](blobs-and-loading.md#bundles)) | It does not: bundles do not change while the game runs |
 
 The code is in three places:
 
 | Package | Files | What they hold |
 |---|---|---|
-| `tools/cook` | `main.odin` | The commands: `scripts`, `scenes`, `shaders`, `textures`, `models`, `meshes`, `stages`, `materials`, `effects`, `animation_graphs`, `audio`, `fonts`, `ui`, `daemon`, `stage-report`, `--emit-link-schema` |
+| `tools/cook` | `main.odin` | The commands: `scripts`, `scenes`, `shaders`, `textures`, `models`, `meshes`, `stages`, `materials`, `effects`, `animation_graphs`, `audio`, `fonts`, `ui`, `daemon`, `stage-report`, `package`, `--emit-link-schema` |
 | | `content.odin`, `assets.odin` | The one pass that every command shares: the scan of the roots, `.meta` files for new assets, and each kind's cook. `IMPORTERS`: each kind's extensions and import settings. |
 | | `scripts.odin`, `typecheck.odin`, `schema.odin`, `luau_tools.odin` | Scripts: requires, type checking against the definition file, behaviour fields read with the prelude, and the bindings to the Luau compiler and analyzer |
 | | `scenes.odin` | Scenes: the syntax check and the blob |
@@ -72,8 +73,9 @@ The code is in three places:
 | | `daemon.odin`, `watch_windows.odin`, `index.odin`, `serve.odin` | The daemon: the watcher, the passes, the index of the content, and the cook link's server |
 | | `operations.odin`, `files_windows.odin`, `lock_windows.odin` | The asset operations, the file moves they need, and the cache lock |
 | | `problems.odin` | `Problem`: an error or warning with its file, line and column |
-| `lib/engine/asset` | `asset.odin` | The runtime: `load`, `poll`, handles, the `Source` union, whose one arm is `Loose_Cache` |
-| `lib/engine/asset/format` | `format.odin`, `scene.odin`, `scene_text.odin`, `shader.odin`, `texture.odin`, `mesh.odin`, `mesh_text.odin`, `mesh_bake.odin`, `skin.odin`, `animation.odin`, `material.odin`, `font.odin`, `ui.odin`, `ui_text.odin` | What the cooker writes and the runtime reads: GUIDs, `.meta` files, the blob header, and each kind's layout. Shared by `tools/cook` and the runtime; imports nothing from `lib/core`. |
+| | `package.odin` | `cook package`: the release cache's blobs packed into a bundle for each load unit |
+| `lib/engine/asset` | `asset.odin` | The runtime: `load`, `poll`, handles, and the `Source` union, whose arms are `Loose_Cache` and `Bundle` |
+| `lib/engine/asset/format` | `format.odin`, `bundle.odin`, `references.odin`, `scene.odin`, `scene_text.odin`, `shader.odin`, `texture.odin`, `mesh.odin`, `mesh_text.odin`, `mesh_bake.odin`, `skin.odin`, `animation.odin`, `material.odin`, `font.odin`, `ui.odin`, `ui_text.odin` | What the cooker writes and the runtime reads: GUIDs, `.meta` files, the blob header, each kind's layout, the assets that each blob names, and the bundle format. Shared by `tools/cook` and the runtime; imports nothing from `lib/core`. |
 | `lib/engine/asset/cook_link` | `cook_link.odin` | The cook link's messages, over the transport in `lib/engine/wire` |
 
 The sections below follow the same order: how an asset is identified, how each kind is cooked, how the daemon keeps the cache current and serves the editor, what a blob looks like, and how the runtime loads it.

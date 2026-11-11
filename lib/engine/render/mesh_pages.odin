@@ -695,12 +695,12 @@ mesh_pool_update :: proc(pool: ^Mesh_Pool, platform: ^core.Platform_API, assets:
 		if page.state != nil || .Root in record.flags {
 			continue
 		}
-		path := asset.blob_path(assets, mesh.guid)
+		location, found := asset.blob_location(assets, mesh.guid)
 		// The cooker wrote the blob again: its pages are another blob's, and the new version streams soon.
-		if platform.file_modified(path) != mesh.modified {
+		if !found || !location.raw || platform.file_modified(location.path) != mesh.modified {
 			continue
 		}
-		if read := platform.file_read_begin(path, i64(record.offset), int(record.compressed_size)); read != 0 {
+		if read := platform.file_read_begin(location.path, location.offset + i64(record.offset), int(record.compressed_size)); read != 0 {
 			change_page(pool, platform, w.entry, Page_Read_Began{read})
 		}
 	}

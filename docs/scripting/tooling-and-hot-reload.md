@@ -43,7 +43,7 @@ Modules and `require`, the type definitions that the cooker checks against and `
 
 ## Script hot reload
 
-In development, a changed script reloads at the end of the frame in which the asset runtime swaps its blob. The game calls `script.reload_changed(r, asset.poll(assets))` there, when no script runs.
+In development, a changed script reloads at the end of the frame in which the asset runtime swaps its blob. The game calls `script.reload_changed(r, asset.poll(assets))` there, when no script runs. A release build loads its scripts from bundles, as it loads every other asset. Bundles do not change, so `asset.poll` returns nothing, and scripts never reload in a release build (see [Content: Bundles](../content/blobs-and-loading.md#bundles)).
 
 1. The asset runtime swaps the blob behind the script's handle (see [Content pipeline](../content/blobs-and-loading.md#loading)). A script with a type error keeps its old blob, so the game never sees it.
 2. The script runtime runs the new version's top level in a fresh environment. If it fails, the old version stays and the error is logged.
