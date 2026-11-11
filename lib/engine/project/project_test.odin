@@ -7,6 +7,7 @@ import "core:testing"
 
 import "cinnabar:core"
 import "cinnabar:core/gpu"
+import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/audio"
 import "cinnabar:engine/physics"
 import "cinnabar:engine/render"
@@ -347,4 +348,22 @@ the_ui_scale_is_a_number_from_a_quarter_to_four :: proc(t: ^testing.T) {
 	parse("ui.scale = 9\nui.scale = big\n", &s, &problems)
 	testing.expect_value(t, s.ui_scale, 1.5)
 	testing.expect_value(t, len(problems), 2)
+}
+
+@(test)
+the_games_keys_name_its_main_scene :: proc(t: ^testing.T) {
+	s: Settings
+	problems := make([dynamic]string, context.temp_allocator)
+	text := "game.name = Demo\ngame.icon = icon.ico\ngame.main_scene = 047ea7c35e4dbfb73d2dac450b79b9a8\nengine.path = E:/cinnabar\n"
+	parse(text, &s, &problems)
+	testing.expect_value(t, len(problems), 0)
+	guid, _ := format.guid_parse("047ea7c35e4dbfb73d2dac450b79b9a8")
+	testing.expect_value(t, s.main_scene, guid)
+	testing.expect_value(t, format.settings_value(text, NAME_KEY), "Demo")
+	testing.expect_value(t, format.settings_value("game.name = A\n# game.name = B\ngame.name = C\n", NAME_KEY), "C")
+	testing.expect_value(t, format.settings_value(text, "game.version"), "")
+
+	parse("game.main_scene = main.scene\ngame.name =\n", &s, &problems)
+	testing.expect_value(t, len(problems), 2)
+	testing.expect_value(t, s.main_scene, guid)
 }

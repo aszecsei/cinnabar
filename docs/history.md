@@ -132,3 +132,8 @@ The order in which the UI was built (see [UI](ui/README.md)).
 1. **Fonts:** msdfgen's core in `vendor/msdfgen` behind a C API of the cooker's, the `Font` kind with the glyphs that GSUB reaches from its charset, and its atlas of multi-channel and true distance fields as a texture sub-asset ([Content: Fonts](content/kinds/fonts.md)).
 2. **UI documents:** the `.ui` kind, its pseudo-XML with named styles and their variants and templates, the parser and checks in `format` that the runtime shares, the blob, and the editor's template ([Content: UI documents](content/kinds/ui-documents.md)).
 3. **The runtime:** `lib/engine/ui`, with `Ui_Document`, documents built from their blobs with what scripts set kept across rebuilds, the cascade, layout with fills and the UI scale, text shaped with kb_text_shape, one batch drawn by `ui.hlsl`, hover, focus, navigation with keys and gamepads, modal documents, fields with IME composition, and the `Ui` library ([Design](ui/design.md)).
+
+## Projects
+The order in which a game became a project that the engine runs, instead of a fork of the engine (see [The game package](world/game-package.md)).
+
+1. **The standard game:** `lib/engine/game`, the frame that every game wrote, with `Hooks` for a project's Odin, `game.main_scene` in place of a scene that the game's code named, `standard.dll` and `runtime.exe` for a project without Odin, one release entry point with no console, and a copy of the DLL for each host. `samples/intel` lost its Odin, and `samples/mygame` keeps only its hooks.

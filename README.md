@@ -52,7 +52,9 @@ The documentation starts at [docs/README.md](docs/README.md), which gives a read
 | `src/editor` | The C# editor |
 | `tools/cook` | The asset cooker and cook daemon |
 | `tools/viewer`, `tools/ltc_fit` | A viewer for a host's shared frames, and the area lights' table fitter |
-| `samples/mygame` | The sample game, which exercises most features |
+| `lib/engine/game` | The standard game, which a project without Odin runs, and the hooks that a project's Odin adds to it |
+| `samples/mygame` | The sample game, which exercises most features, with its own Odin in `game/` |
+| `samples/intel` | Intel's USD scenes, with no Odin: the standard game runs it (see its README) |
 | `vendor/` | Luau, Jolt Physics, Compressonator, meshoptimizer, Opus, libvorbis, libogg, the Agility SDK and DXC |
 
 ## License

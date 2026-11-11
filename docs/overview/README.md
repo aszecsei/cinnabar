@@ -104,7 +104,8 @@ cinnabar/
 │   ├── editorctl/           Drives a running editor from a terminal: screenshots and GIFs
 │   ├── ltc_fit/             Fits the area lights' lookup tables
 │   └── stbn/                Makes the ambient occlusion's and the reflections' blue noise
-├── samples/mygame/          The sample game: game.odin, main_release/, content/, project.settings
+├── samples/mygame/          The sample that exercises most of the engine: game/ (its hooks), content/, project.settings
+├── samples/intel/           Intel's USD scenes, with no Odin: content/, project.settings
 └── vendor/                  luau, compressonator, meshoptimizer, jolt, opus, vorbis, ogg, msdfgen, lz4 (submodules); agility, dxc (downloaded)
 ```
 
@@ -140,7 +141,8 @@ Packages are small and single-purpose. A package's tests are beside it as `*_tes
 | `lib/engine/editor/link` | Shared | The editor link's messages, and the schema that the editor's C# is generated from. The host and the game both import it. |
 | `lib/engine/asset/format` | Shared | GUIDs, `.meta` files and blob layouts. `tools/cook` and the runtime both import it. |
 | `lib/engine/asset/cook_link` | Shared | The cook link's messages, between the editor and the cook daemon, and the schema that the editor's C# is generated from. `tools/cook` imports it. |
-| `samples/<game>` | Game | A game. Each game has a game package and a small `main_release` package that links everything statically. |
+| `lib/engine/game` | Game | The standard game: every engine package started, stepped, reloaded and drawn in order, with `Hooks` for a project's own Odin. `standard/game` is the standard game as a project's game package, and `runtime` is the one release entry point (see [The game package](../world/game-package.md)). |
+| `samples/<game>` | Game | A project: `project.settings`, `content/`, and a `game/` package of hooks when it has Odin. |
 | `src/host` | Host | The generic development host. It loads the game DLL, runs the frame loop, drives hot reload and serves the editor link. One host serves every game. |
 | `src/editor` | — | The C# editor application. It runs `host.exe` and the cook daemon as child processes. |
 | `tools/cook` | — | The asset compiler and the cook daemon, which watches the content roots and does the editor's asset operations. |
@@ -158,7 +160,7 @@ The two sides communicate only through two structs of procedures, both in `lib/c
 - **`Platform_API`** (host → game): what `core` provides to the engine. Its fields are the complete list of what a game may ask of the platform: allocators and virtual memory, time, input, files, the window, jobs, every `gpu_*` procedure, and the script VM's `script_*` procedures.
 - **`Game_API`** (game → host): `init`, `update`, `shutdown`, `on_reload`, `state_size`, `layout_hash`, `abi_hash` (the GPU command format and `Platform_API`), `script_types` (see [Scripting](../scripting/tooling-and-hot-reload.md#types-and-tooling)), and `editor_poll`, the game's side of the editor link (see [Editor](../editor/link.md#world)).
 
-In development, the host gets `Game_API` from the DLL's exported `cinnabar_game_api` procedure. In release, `main_release` fills both structs with direct procedure references, so the code paths are the same in both configurations. Code must not branch on `HOT_RELOAD` outside `src/host` and the per-game `main_release` stubs.
+In development, the host gets `Game_API` from the DLL's exported `cinnabar_game_api` procedure. In release, `lib/engine/game/runtime` calls the same procedure of the game package that it links, and fills `Platform_API` with direct procedure references, so the code paths are the same in both configurations. Code must not branch on `HOT_RELOAD` outside `src/host` and `lib/engine/game/runtime`.
 
 ## References
 

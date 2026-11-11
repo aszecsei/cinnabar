@@ -36,6 +36,15 @@ AUDIO_BACKEND_KEY :: "audio.backend"
 AUDIO_BUSES_KEY :: "audio.buses"
 // What multiplies the UI's scale, which the output's height gives (see docs/ui/design.md#scale).
 UI_SCALE_KEY :: "ui.scale"
+// The game's name, which a release's executable and window take, and its icon, a .ico file relative to the settings
+// file, which the export writes into the executable. The game only knows the keys.
+NAME_KEY :: "game.name"
+ICON_KEY :: "game.icon"
+// The scene that the standard game loads when it starts, by GUID (see docs/world/game-package.md#settings).
+MAIN_SCENE_KEY :: "game.main_scene"
+// The engine checkout that builds the project, which only the user file gives, because it is a path on one machine
+// (see docs/world/game-package.md#settings). The game only knows the key.
+ENGINE_PATH_KEY :: "engine.path"
 
 // Settings are a project's settings. A key that no file gives keeps its default.
 Settings :: struct {
@@ -59,6 +68,8 @@ Settings :: struct {
 	audio_buses:           audio.Bus_Names,
 	// What multiplies the UI's scale, or 0 for 1.
 	ui_scale:              f32,
+	// The scene that the game starts with, or zero for none.
+	main_scene:            format.Guid,
 }
 
 // physics_layers gives the layers that settings name, or the default ones.
@@ -173,6 +184,20 @@ parse :: proc(text: string, settings: ^Settings, problems: ^[dynamic]string = ni
 				settings.mesh_default_material = guid
 			} else {
 				problem(problems, line, "%s takes a material's GUID of 32 hex digits, not %q", key, value)
+			}
+			continue
+		}
+		if key == MAIN_SCENE_KEY {
+			if guid, ok := format.guid_parse(value); ok {
+				settings.main_scene = guid
+			} else {
+				problem(problems, line, "%s takes a scene's GUID of 32 hex digits, not %q", key, value)
+			}
+			continue
+		}
+		if key == NAME_KEY || key == ICON_KEY || key == ENGINE_PATH_KEY {
+			if value == "" {
+				problem(problems, line, "%s takes a value", key)
 			}
 			continue
 		}

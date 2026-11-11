@@ -118,6 +118,9 @@ A project's settings are a text file beside the game, such as `samples/mygame/pr
 | `audio.buses` | Bus names, separated by commas | None, only `Master` | The buses that sounds mix into (see [Audio](../audio/design.md#buses-and-effects)). |
 | `audio.backend` | `mixer`, `none`, or another backend's name | `mixer` | The audio backend, which the host loads before the game starts; `--audio` on its command line replaces it (see [Audio](../audio/backends.md#choosing)). |
 | `physics.backend` | `jolt`, `none`, or another backend's name | `jolt` | The physics backend, which the host loads before the game starts; `--physics` on its command line replaces it (see [Physics: Backends](../physics/backends.md#choosing)). |
+| `game.main_scene` | A scene's GUID | None | The scene that the standard game loads when it starts (see [The game package](../world/game-package.md#settings)). |
+| `game.name`, `game.icon` | A name; a `.ico` file relative to the settings file | None | The release's executable, window title and icon. The game only knows the keys. |
+| `engine.path` | A folder | None | The engine checkout that builds the project, in the user's file only. The game only knows the key. |
 | `bundles.global_scenes` | Scenes' GUIDs, separated by commas | None | The scenes that are not levels, such as a menu. `cook package` puts them and their assets in the global bundle, and gives no scene in the list a bundle of its own (see [Content: Bundles](../content/blobs-and-loading.md#bundles)). The game's parser only knows the key, so that it is not a warning. |
 
 ## Content pipeline

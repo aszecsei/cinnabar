@@ -12,7 +12,7 @@ Scenes built from USD stages of Intel's [Graphics Research Samples Library](http
 3. Run `just intel-unpack`. It unpacks the USD files and the textures into `samples/intel/content/.unpacked/`, which Git and the cooker's scan both skip, and leaves out the 3ds Max, FBX, Blender and glTF versions.
 4. Run `just game=intel dev`, or `just game=intel edit` to open the sample in the editor. The first cook takes several minutes, because each texture is block-compressed. Later cooks reuse the blobs.
 
-Without the downloads, the stages warn that they are not cooked, the build still passes, and the game logs which stage is missing.
+Without the downloads, the cooker warns which stages are not cooked, the build still passes, and the scene shows only what it places itself: a camera, a sun and a volume. The sample has no Odin of its own: the standard game runs it (see [The game package](../../docs/world/game-package.md)).
 
 ## Content
 

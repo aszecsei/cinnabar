@@ -14,8 +14,9 @@ import "cinnabar:core"
 import "cinnabar:core/profile"
 import "cinnabar:engine/editor/link"
 
-// The game DLL, beside the host, when no argument names one.
-DEFAULT_GAME_NAME :: "mygame.dll"
+// The game DLL, beside the host, when no argument names one: the standard game, which a project without Odin runs (see
+// docs/world/game-package.md).
+DEFAULT_GAME_NAME :: "standard.dll"
 
 Game_Module :: struct {
 	source_path: string,
@@ -28,7 +29,7 @@ main :: proc() {
 	context.logger = log.create_console_logger()
 
 	// host [game.dll] [--content <dir>] [--project <file>] [--physics <name>] [--shared <name>] [--adapter <luid>]
-	// [--link <port>] [--emit-script-types <file>] [--emit-link-schema <file>]. The DLL is mygame.dll beside the host by
+	// [--link <port>] [--emit-script-types <file>] [--emit-link-schema <file>]. The DLL is standard.dll beside the host by
 	// default. --physics names the physics backend, physics_<name>.dll beside the host or none, in place of the
 	// project's physics.backend (see docs/physics/backends.md#choosing).
 	// --content is the game's loose cache and --project its settings file, which are content and project.settings
@@ -205,8 +206,9 @@ Load_Result :: enum {
 	Refused,
 }
 
-// game_load copies the DLL to a versioned name and loads the copy, so the
-// build can overwrite the original. Old copies are never unloaded.
+// game_load copies the DLL to a versioned name and loads the copy, so the build can overwrite the original. Old copies
+// are never unloaded. The copy's name has the process's ID, so two hosts can run one DLL, as the editor's and its Run
+// Game do: neither can replace a copy that the other has loaded.
 game_load :: proc(source_path: string, version: int) -> (game: Game_Module, result: Load_Result) {
 	result = .Not_Ready
 	modified, stat_err := os.modification_time_by_path(source_path)
@@ -214,8 +216,11 @@ game_load :: proc(source_path: string, version: int) -> (game: Game_Module, resu
 		log.errorf("host: %s: %v", source_path, stat_err)
 		return
 	}
+	if version == 0 {
+		remove_old_copies(source_path)
+	}
 
-	loaded_path := fmt.tprintf("%s_%d.dll", strings.trim_suffix(source_path, ".dll"), version)
+	loaded_path := copy_path(source_path, os.get_pid(), version)
 	if err := os.copy_file(loaded_path, source_path); err != nil {
 		// The linker may still be writing the DLL; the next frame retries.
 		log.debugf("host: copy %s: %v", source_path, err)
@@ -244,6 +249,44 @@ game_load :: proc(source_path: string, version: int) -> (game: Game_Module, resu
 	}
 	log.infof("host: loaded %s", loaded_path)
 	return game, .Loaded
+}
+
+// copy_path is the name of a DLL's copy that a host loads: <name>_<process>_<version>.dll beside it.
+copy_path :: proc(source_path: string, pid, version: int, allocator := context.temp_allocator) -> string {
+	return fmt.aprintf("%s_%d_%d.dll", strings.trim_suffix(source_path, ".dll"), pid, version, allocator = allocator)
+}
+
+// is_copy_of is whether a file's name is a copy of a DLL's, as copy_path names it, or as hosts before it named them,
+// <name>_<version>.dll.
+is_copy_of :: proc(name, source_name: string) -> bool {
+	prefix := strings.concatenate({strings.trim_suffix(source_name, ".dll"), "_"}, context.temp_allocator)
+	if !strings.has_prefix(name, prefix) || !strings.has_suffix(name, ".dll") || len(name) <= len(prefix) + len(".dll") {
+		return false
+	}
+	for part in strings.split(name[len(prefix):len(name) - len(".dll")], "_", context.temp_allocator) {
+		if _, ok := strconv.parse_uint(part, 10); !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// remove_old_copies removes the copies of a DLL that earlier hosts loaded. Those that a running host has loaded stay,
+// because Windows refuses to remove them.
+remove_old_copies :: proc(source_path: string) {
+	dir, name := filepath.split(source_path)
+	if dir == "" {
+		dir = "."
+	}
+	entries, err := os.read_all_directory_by_path(dir, context.temp_allocator)
+	if err != nil {
+		return
+	}
+	for entry in entries {
+		if is_copy_of(entry.name, name) {
+			_ = os.remove(entry.fullpath)
+		}
+	}
 }
 
 game_changed :: proc(game: Game_Module) -> bool {

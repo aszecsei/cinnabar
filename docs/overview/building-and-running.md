@@ -1,18 +1,19 @@
 # Building and running
 
-Everything goes through the [justfile](../../justfile). This document lists the recipes that matter and walks through the sample game's frame, which is the most concrete picture of how the parts fit.
+Everything goes through the [justfile](../../justfile). This document lists the recipes that matter and the layout of what they build. The recipes build one game at a time, `samples/mygame` unless `game=` names another, as in `just game=intel dev`. The standard game's frame, which is the most concrete picture of how the parts fit, is in [The game package](../world/game-package.md#the-frame).
 
-Everything goes through the [justfile](../../justfile). The recipes that matter most:
+The recipes that matter most:
 
 | Recipe | What it does |
 |---|---|
 | `just setup` | Fetches the submodules, the D3D12 Agility SDK and DXC at the versions the justfile pins. |
-| `just build` | Builds the host and the game DLL, writes the scripts' type definitions from the DLL, and cooks every kind of content into `build/dev/content`. |
+| `just build` | Builds the host and the game's DLL, writes the scripts' type definitions from the DLL, and cooks every kind of content into `build/dev/content`. |
 | `just dev` | `build`, then runs the game in the host's own window, with the sample's `project.settings`. |
-| `just game-dll` | Builds only the DLL. A running host picks it up and hot-reloads it. |
+| `just game-dll` | Builds only the game's DLL: `<game>.dll` from the project's `game/` folder, or the standard game's `standard.dll` for a project without one (see [The game package](../world/game-package.md#development)). A running host picks it up and hot-reloads it. |
 | `just watch` | Runs the cook daemon, which cooks content as it changes. A running game swaps the new blobs in place. |
 | `just edit` | Builds everything, including the editor, and opens the sample in it. The editor starts the host and the daemon itself. |
-| `just release` | Cooks the `release` configuration and builds the statically linked `mygame.exe` into `build/release`, with its content and settings beside it. |
+| `just release` | Cooks the `release` configuration and builds the statically linked `<game>.exe` into `build/release`, with its content and settings beside it. The executable has no console and logs to a file (see [The game package](../world/game-package.md#releases)). |
+| `just engine-runtime` | Builds the standard game alone: `build/dev/standard.dll` and the release executable `build/runtime/runtime.exe`, which a project without Odin runs. |
 | `just test` | Runs every Odin package's tests, the script tests with direct field access on and off, and the editor's .NET tests. |
 | `just check`, `vet`, `lint`, `fmt` | Type checks and lints every package, and formats the source. |
 | `just script-types`, `link-schema`, `ltc-fit`, `stbn` | Regenerate derived files: the Luau definition file, the links' JSON schemas, the area lights' tables, and the blue noise of the ambient occlusion and the screen-space reflections. |
@@ -26,10 +27,11 @@ Everything the justfile makes goes under `build/`, one folder per thing you run,
 
 ```
 build/
-├── dev/        host.exe, mygame.dll (and the mygame_N.dll copies the host loads), luau.dll,
-│               D3D12/ and the FSR libraries, content/        the development loose cache
-├── release/    mygame.exe, D3D12/ and the FSR libraries, content/        the bundles, project.settings
-├── tools/      cook.exe, viewer.exe, ltc_fit.exe, stbn.exe, editorctl.exe
+├── dev/        host.exe, <game>.dll or standard.dll (and the <name>_<process>_<version>.dll copies the hosts load),
+│               luau.dll, D3D12/ and the FSR libraries, content/        the development loose cache
+├── release/    <game>.exe, D3D12/ and the FSR libraries, content/        the bundles, project.settings
+├── runtime/    runtime.exe        the standard game's release executable
+├── tools/      cook.exe, viewer.exe, ltc_fit.exe, stbn.exe, editorctl.exe, flickerstat.exe
 ├── captures/   the editor's screenshots, GIFs and their sidecars
 └── obj/        luau/, compressonator/, meshoptimizer/, clusterlod/, opus/, vorbis/, lz4/   the CMake builds the executables link
                 pdb/, link/, script-types/, dotnet/, editor/autosave/, editor/automation.json,
@@ -40,13 +42,4 @@ A game finds its files beside its executable, never through the working director
 
 ## A frame in the sample
 
-`samples/mygame/game.odin` is the best concrete walkthrough of how the parts fit. Its `update` does, in order:
-
-1. Reads the project settings and asks `core` for the output mode they name, and switches scenes if a key asked for it.
-2. Asks the editor package whether the world runs this frame (`editor.simulation`): yes without an editor, and in play mode; no in edit mode, where only transforms propagate so that edits show. While the pause menu shows, the world takes no time, but the script phase still runs.
-3. Matches the UI's documents to the world's `Ui_Document`s (`ui.sync`), and if the world runs: the fixed ticks that are due, the `Update` systems, the UI's input and its events (see [UI: Input and focus](../ui/design.md#input-and-focus)), the script phase, and the `Late` systems, exactly the phases of [Frame](architecture.md#frame).
-4. Picks the camera: the scene's `Camera` entity, whether or not an editor is linked.
-5. Fills one `Frame_Desc` with that camera, the window's size, the time that the particles step and the skinned poses, and the hooks that add its own passes: culling on the compute queue, its own draws in the world pass, the shadows and the post pass, and the UI's documents in the UI layer (`ui.add_passes`). It calls `editor.draw_frame`, which is `render.draw_frame` without an editor. With one, the editor package draws that frame in the views that the editor has open (see [Rendering: Views](../rendering/frame.md#views)): the Game view as the description says, and each scene view from the editor's camera with the game's hooks and the editor's tools. The hooks run once for each view and keep their data for it in `Frame.user`, so the game never knows how many views there are.
-6. At the end of the frame, polls the asset runtime for blobs that the cooker rewrote and reloads the scripts among them.
-
-`init` builds the world, the asset runtime, the script runtime, the renderer and the editor package in that order, and `on_reload` runs the same registration procedure as `init` so that every registration points at the new code.
+The standard game's frame is in [The game package](../world/game-package.md#the-frame). `samples/mygame/game/game.odin` adds the sample's own work through its hooks: before the world steps, F7 switches the scene and F8 the output mode; after it steps, the window's title reports the frame, a texture streams in and the axes of the spinning entities are drawn; and in the frame, the render hooks add its own draws in the world pass, its ray-traced shadows and its post pass. `samples/intel` has no Odin, and the standard game runs it as it is.

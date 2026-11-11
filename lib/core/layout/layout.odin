@@ -17,6 +17,13 @@ hash :: proc($T: typeid) -> u64 {
 	return h
 }
 
+// hash_typeid is hash of a type known only when the program runs, such as a project's state that a procedure gives.
+hash_typeid :: proc(id: typeid) -> u64 {
+	h := fnv.fnv64a(nil)
+	hash_type(&h, type_info_of(id), 0)
+	return h
+}
+
 @(private = "file")
 hash_type :: proc(h: ^u64, ti: ^runtime.Type_Info, depth: int) {
 	if ti == nil || depth > MAX_DEPTH {

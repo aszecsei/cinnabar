@@ -13,6 +13,7 @@ Read them in this order the first time.
 | [Time](time.md) | Fixed ticks, interpolation and teleports. |
 | [Render extraction](render-extraction.md) | How rendering reads the world. |
 | [Volumes](volumes.md) | Settings that depend on where a point is. |
+| [The game package](game-package.md) | The standard game, which runs every package on the world in order, and the hooks that a project's Odin adds to it. |
 
 Animation runs on the world as physics does, in `Fixed` systems with presentation between ticks: see [Animation](../animation/design.md#the-ecs).
 
