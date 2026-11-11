@@ -105,13 +105,22 @@ public sealed class EditorViewport
     /// <summary>Whether the viewport's control is on screen with a size.</summary>
     public bool IsShown => Session.Presence is ViewportPresence.Shown;
 
-    /// <summary>The frame's size in pixels: the host's, or before its first frame, the size that the control has.</summary>
+    /// <summary>
+    /// The size that the game draws the viewport at in place of its control's, or null for the control's. Automation
+    /// sets it, so a measurement has the same size whatever the pane's (see docs/editor/capture.md#automation); the
+    /// control fits the frame into itself. The shell changes it (<see cref="EditorShell.SetFixedSize"/>).
+    /// </summary>
+    public PixelSize? FixedSize { get; internal set; }
+
+    /// <summary>The size that the game draws the viewport at while it is shown: the fixed size, or its control's; null while it is hidden.</summary>
+    public PixelSize? DrawSize => Session.Presence is ViewportPresence.Shown { Size: var size } ? FixedSize ?? size : null;
+
+    /// <summary>The frame's size in pixels: the host's, or before its first frame, the size that the game draws it at.</summary>
     public (double Width, double Height) FrameSize
     {
         get
         {
-            var size = Session.FrameSize is { Width: > 0, Height: > 0 } frame ? frame
-                : Session.Presence is ViewportPresence.Shown { Size: var shown } ? shown : default;
+            var size = Session.FrameSize is { Width: > 0, Height: > 0 } frame ? frame : DrawSize ?? default;
             return (Math.Max(size.Width, 1), Math.Max(size.Height, 1));
         }
     }

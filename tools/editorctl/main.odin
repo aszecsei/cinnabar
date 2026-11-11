@@ -7,6 +7,7 @@
 //   editorctl [--automation <file>] [--json] gif [--viewport <number>] [--out <path>]
 //   editorctl [--automation <file>] [--json] viewport [--viewport <number>] --set <name>=<value>...
 //   editorctl [--automation <file>] [--json] camera [--viewport <number>] --position <x>,<y>,<z> [--yaw <radians>] [--pitch <radians>]
+//   editorctl [--automation <file>] [--json] timing [--samples <n>] [--skip <n>] [--pass <name>]...
 //   editorctl [--automation <file>] [--json] ui [--window <panel>] [--out <path>]
 //   editorctl [--automation <file>] [--json] content [--set <name>=<value>]...
 package editorctl
@@ -50,6 +51,11 @@ Options :: struct {
 	// The viewport that viewport and camera change, and that screenshot and gif capture, or nil for the first scene view (see
 	// docs/editor/viewport.md#views).
 	viewport:   Maybe(int),
+	// The profile summaries that timing takes and those it skips first, or nil for the editor's defaults, and the passes
+	// it answers for, or none for every pass.
+	samples:    Maybe(int),
+	skip:       Maybe(int),
+	passes:     [dynamic]string,
 }
 
 // Request matches AutomationRequest in Cinnabar.Editor.Model.
@@ -64,6 +70,17 @@ Request :: struct {
 	pitch:    Maybe(f64) `json:"pitch"`,
 	window:   string `json:"window"`,
 	viewport: Maybe(int) `json:"viewport"`,
+	samples:  Maybe(int) `json:"samples"`,
+	skip:     Maybe(int) `json:"skip"`,
+	passes:   []string `json:"passes"`,
+}
+
+// Viewport_Size matches AutomationViewportSize.
+Viewport_Size :: struct {
+	viewport: int `json:"viewport"`,
+	width:    int `json:"width"`,
+	height:   int `json:"height"`,
+	fixed:    bool `json:"fixed"`,
 }
 
 // Status matches AutomationStatus.
@@ -74,6 +91,27 @@ Status :: struct {
 	scene:      string `json:"scene"`,
 	game:       string `json:"game"`,
 	host_pid:   int `json:"hostPid"`,
+	sizes:      []Viewport_Size `json:"sizes"`,
+}
+
+// Pass_Timing matches PassTiming.
+Pass_Timing :: struct {
+	name:      string `json:"name"`,
+	queue:     string `json:"queue"`,
+	calls:     f64 `json:"calls"`,
+	median_ms: f64 `json:"medianMs"`,
+	min_ms:    f64 `json:"minMs"`,
+	max_ms:    f64 `json:"maxMs"`,
+	seen:      int `json:"seen"`,
+}
+
+// Timing matches AutomationTiming.
+Timing :: struct {
+	samples:       int `json:"samples"`,
+	gpu_median_ms: f64 `json:"gpuMedianMs"`,
+	passes:        []Pass_Timing `json:"passes"`,
+	viewports:     []Viewport_Size `json:"viewports"`,
+	missing:       []string `json:"missing"`,
 }
 
 // Content matches AutomationContent.
@@ -94,6 +132,7 @@ Response :: struct {
 	error:   string `json:"error"`,
 	status:  Maybe(Status) `json:"status"`,
 	content: Maybe(Content) `json:"content"`,
+	timing:  Maybe(Timing) `json:"timing"`,
 }
 
 // Info matches AutomationInfo.
@@ -108,7 +147,7 @@ main :: proc() {
 	if problem != "" {
 		fmt.eprintfln("editorctl: %s", problem)
 		fmt.eprintln(
-			"usage: editorctl [--automation <file>] [--json] status | screenshot [--view <name>]... [--viewport <number>] [--out <path>] | gif [--viewport <number>] [--out <path>] | viewport [--viewport <number>] --set <name>=<value>... | camera [--viewport <number>] --position <x>,<y>,<z> [--yaw <radians>] [--pitch <radians>] | ui [--window <panel>] [--out <path>] | content [--set <name>=<value>]...",
+			"usage: editorctl [--automation <file>] [--json] status | screenshot [--view <name>]... [--viewport <number>] [--out <path>] | gif [--viewport <number>] [--out <path>] | viewport [--viewport <number>] --set <name>=<value>... | camera [--viewport <number>] --position <x>,<y>,<z> [--yaw <radians>] [--pitch <radians>] | timing [--samples <n>] [--skip <n>] [--pass <name>]... | ui [--window <panel>] [--out <path>] | content [--set <name>=<value>]...",
 		)
 		os.exit(2)
 	}
@@ -191,6 +230,20 @@ parse_args :: proc(args: []string) -> (o: Options, problem: string) {
 			}
 			o.viewport = v
 			i += 1
+		case (arg == "--samples" || arg == "--skip") && i + 1 < len(args):
+			v, ok := strconv.parse_int(args[i + 1])
+			if !ok || v < 0 {
+				return o, fmt.tprintf("%s takes a number of profile summaries, not %s", arg, args[i + 1])
+			}
+			if arg == "--samples" {
+				o.samples = v
+			} else {
+				o.skip = v
+			}
+			i += 1
+		case arg == "--pass" && i + 1 < len(args):
+			append(&o.passes, args[i + 1])
+			i += 1
 		case arg == "--set" && i + 1 < len(args):
 			name, _, value := strings.partition(args[i + 1], "=")
 			if name == "" || value == "" {
@@ -229,11 +282,11 @@ parse_args :: proc(args: []string) -> (o: Options, problem: string) {
 		}
 	}
 	switch o.command {
-	case "status", "screenshot", "gif", "viewport", "camera", "ui", "content":
+	case "status", "screenshot", "gif", "viewport", "camera", "timing", "ui", "content":
 	case "":
-		return o, "no command: status, screenshot, gif, viewport, camera, ui or content"
+		return o, "no command: status, screenshot, gif, viewport, camera, timing, ui or content"
 	case:
-		return o, fmt.tprintf("unknown command %s: status, screenshot, gif, viewport, camera, ui or content", o.command)
+		return o, fmt.tprintf("unknown command %s: status, screenshot, gif, viewport, camera, timing, ui or content", o.command)
 	}
 	if o.command != "content" && (len(o.settings) > 0) != (o.command == "viewport") {
 		return o, o.command == "viewport" ? "viewport takes --set <name>=<value>" : "--set goes with viewport or content"
@@ -247,6 +300,9 @@ parse_args :: proc(args: []string) -> (o: Options, problem: string) {
 	}
 	if len(o.views) > 0 && o.command != "screenshot" {
 		return o, "--view goes with screenshot"
+	}
+	if (o.samples != nil || o.skip != nil || len(o.passes) > 0) && o.command != "timing" {
+		return o, "--samples, --skip and --pass go with timing"
 	}
 	if o.window != "" && o.command != "ui" {
 		return o, "--window goes with ui"
@@ -343,6 +399,9 @@ request_line :: proc(o: Options, id: i64, allocator: runtime.Allocator) -> []byt
 		pitch    = o.pitch,
 		window   = o.window,
 		viewport = o.viewport,
+		samples  = o.samples,
+		skip     = o.skip,
+		passes   = o.passes[:],
 	}
 	data, _ := json.marshal(request, allocator = context.temp_allocator)
 	line := make([]byte, len(data) + 1, allocator)
@@ -409,6 +468,9 @@ print_response :: proc(r: Response) {
 		fmt.printfln("scene: %s", status.scene)
 		fmt.printfln("game: %s", status.game)
 		fmt.printfln("host pid: %d", status.host_pid)
+		for size in status.sizes {
+			print_size(size)
+		}
 	}
 	if content, has := r.content.?; has {
 		fmt.printfln("folder: %s", content.folder)
@@ -420,7 +482,33 @@ print_response :: proc(r: Response) {
 			fmt.printfln("thumbnail failed: %s", failure)
 		}
 	}
+	if timing, has := r.timing.?; has {
+		fmt.printfln("samples: %d", timing.samples)
+		fmt.printfln("gpu frame: %.3f ms", timing.gpu_median_ms)
+		for size in timing.viewports {
+			print_size(size)
+		}
+		fmt.printfln("%-32s %-8s %6s %10s %10s %10s", "pass", "queue", "calls", "median ms", "min ms", "max ms")
+		for p in timing.passes {
+			fmt.printfln(
+				"%-32s %-8s %6s %10s %10s %10s",
+				p.name,
+				p.queue,
+				fmt.tprintf("%.2f", p.calls),
+				fmt.tprintf("%.4f", p.median_ms),
+				fmt.tprintf("%.4f", p.min_ms),
+				fmt.tprintf("%.4f", p.max_ms),
+			)
+		}
+		for name in timing.missing {
+			fmt.printfln("missing: %s", name)
+		}
+	}
 	for file in r.files {
 		fmt.println(file)
 	}
+}
+
+print_size :: proc(size: Viewport_Size) {
+	fmt.printfln("viewport %d: %dx%d%s", size.viewport, size.width, size.height, size.fixed ? " (fixed)" : "")
 }

@@ -184,22 +184,22 @@ public sealed partial class EditorShell
     }
 
     // The one place that a viewport's open state in the game changes: the game is told what its control's presence is.
-    // Shown opens it, a new size opens it again with the size, hidden closes it. A game that is not linked hears of it
+    // Shown opens it at its draw size, a new draw size opens it again with the size, hidden closes it. A game that is not linked hears of it
     // when it links (see SendViewportTools).
     void SyncViewport(EditorViewport viewport)
     {
-        switch (viewport.Session.Presence)
+        switch (viewport.DrawSize)
         {
-            case ViewportPresence.Shown shown:
+            case { } size:
                 PlaceCamera(viewport);
                 if (Host.Linked && viewport.Opened is null)
                 {
-                    OpenInGame(viewport, shown.Size);
+                    OpenInGame(viewport, size);
                 }
-                else if (viewport.Opened is { } opened && opened.Size != shown.Size)
+                else if (viewport.Opened is { } opened && opened.Size != size)
                 {
-                    viewport.Opened = opened with { Size = shown.Size };
-                    Host.Send(new OpenViewport((uint)viewport.Index, viewport.Kind, shown.Size.Width, shown.Size.Height));
+                    viewport.Opened = opened with { Size = size };
+                    Host.Send(new OpenViewport((uint)viewport.Index, viewport.Kind, size.Width, size.Height));
                 }
                 break;
             default:
@@ -224,6 +224,27 @@ public sealed partial class EditorShell
         Commands.InvalidateAll();
         ViewportsChanged?.Invoke();
     }
+
+    /// <summary>
+    /// Makes the game draw a viewport at a size of its own in place of its control's, or at its control's again for null,
+    /// and opens it again at that size if it is shown. A side is at most <see cref="MaxViewportSize"/>.
+    /// </summary>
+    public void SetFixedSize(EditorViewport viewport, PixelSize? size)
+    {
+        if (size is { } s && (s.Width < 1 || s.Height < 1 || s.Width > MaxViewportSize || s.Height > MaxViewportSize))
+        {
+            throw new ArgumentOutOfRangeException(nameof(size), size, $"a side is 1 to {MaxViewportSize} pixels");
+        }
+        if (viewport.FixedSize == size)
+        {
+            return;
+        }
+        viewport.FixedSize = size;
+        SyncViewport(viewport);
+    }
+
+    /// <summary>The largest side of a viewport's target, which <c>gpu.MAX_VIEWPORT_SIZE</c> names.</summary>
+    public const int MaxViewportSize = 8192;
 
     // A scene view that is shown for the first time starts from the first one's pivot, looking along its own axis.
     void PlaceCamera(EditorViewport viewport)
@@ -394,7 +415,7 @@ public sealed partial class EditorShell
     // A new game state sends the size again.
     void SendGameSize(bool resend)
     {
-        if (GameViewport.Session.Presence is ViewportPresence.Shown { Size: var size } && size != _gameSize)
+        if (GameViewport.DrawSize is { } size && size != _gameSize)
         {
             _gameSize = size;
             resend = true;

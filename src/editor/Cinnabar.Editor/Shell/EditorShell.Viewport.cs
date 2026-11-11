@@ -361,7 +361,7 @@ public sealed partial class EditorShell
         foreach (var viewport in Viewports)
         {
             viewport.Opened = null;
-            if (viewport.Session.Presence is ViewportPresence.Shown { Size: var size })
+            if (viewport.DrawSize is { } size)
             {
                 OpenInGame(viewport, size);
             }

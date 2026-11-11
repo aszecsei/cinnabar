@@ -200,3 +200,48 @@ the_automation_file_is_found_below_the_repository_root :: proc(t: ^testing.T) {
 	testing.expect(t, !process_alive(0xfffffff0))
 	testing.expect(t, process_alive(u32(win.GetCurrentProcessId())))
 }
+
+@(test)
+timing_takes_its_samples_and_passes :: proc(t: ^testing.T) {
+	o, problem := parse_args({"timing", "--samples", "7", "--skip", "2", "--pass", "fog inject", "--pass", "fog integrate"})
+	defer delete(o.passes)
+	testing.expect_value(t, problem, "")
+	testing.expect_value(t, o.samples.? or_else 0, 7)
+	testing.expect_value(t, o.skip.? or_else 0, 2)
+	testing.expect_value(t, len(o.passes), 2)
+	line := request_line(o, 3, context.allocator)
+	defer delete(line)
+	text := string(line)
+	testing.expect(t, strings.contains(text, `"command":"timing"`))
+	testing.expect(t, strings.contains(text, `"samples":7`))
+	testing.expect(t, strings.contains(text, `"skip":2`))
+	testing.expect(t, strings.contains(text, `"passes":["fog inject","fog integrate"]`))
+
+	defaults, defaults_problem := parse_args({"timing"})
+	testing.expect_value(t, defaults_problem, "")
+	testing.expect(t, defaults.samples == nil && defaults.skip == nil)
+	_, negative := parse_args({"timing", "--samples", "-1"})
+	testing.expect(t, strings.contains(negative, "--samples"))
+	stray, stray_problem := parse_args({"status", "--pass", "world"})
+	defer delete(stray.passes)
+	testing.expect(t, strings.contains(stray_problem, "timing"))
+}
+
+@(test)
+a_timing_response_decodes_with_its_passes_and_sizes :: proc(t: ^testing.T) {
+	r, ok := decode_response(
+		transmute([]byte)string(
+			`{"id":1,"ok":true,"timing":{"samples":5,"gpuMedianMs":4.5,"passes":[{"name":"fog inject","queue":"compute","calls":1,"medianMs":0.2,"minMs":0.1,"maxMs":0.3,"seen":5}],"viewports":[{"viewport":0,"width":1920,"height":1080,"fixed":true}],"missing":["nothing"]}}`,
+		),
+		context.temp_allocator,
+	)
+	testing.expect(t, ok)
+	timing, has := r.timing.?
+	testing.expect(t, has)
+	testing.expect_value(t, timing.samples, 5)
+	testing.expect_value(t, len(timing.passes), 1)
+	testing.expect_value(t, timing.passes[0].name, "fog inject")
+	testing.expect_value(t, timing.passes[0].median_ms, 0.2)
+	testing.expect_value(t, timing.viewports[0], Viewport_Size{0, 1920, 1080, true})
+	testing.expect_value(t, timing.missing[0], "nothing")
+}

@@ -1094,6 +1094,110 @@ public sealed class ViewportTests : IDisposable
     }
 
     [Fact]
+    public async Task AFixedSizeOpensTheViewportAtItWhateverItsPanesAndPaneTakesThePaneAgain()
+    {
+        using var shell = NewShell();
+        var cancel = TestContext.Current.CancellationToken;
+        _sent.Clear();
+
+        var fixedSize = await shell.HandleAutomation(new AutomationRequest(1, "viewport", Settings: Settings(("size", "1920x1080"))), cancel);
+
+        Assert.True(fixedSize.Ok, fixedSize.Error);
+        Assert.Equal(new OpenViewport(0, ViewportKind.Scene, 1920, 1080), Assert.Single(_sent.OfType<OpenViewport>()));
+        Assert.Equal((1920.0, 1080.0), shell.Viewports[0].FrameSize);
+        // The pane's size changes, and the game's does not.
+        _sent.Clear();
+        Show(shell, 0, 1200, 600);
+        Assert.Empty(_sent.OfType<OpenViewport>());
+        var status = await shell.HandleAutomation(new AutomationRequest(2, "status"), cancel);
+        Assert.Equal([new AutomationViewportSize(0, 1920, 1080, true)], status.Status!.Sizes!);
+
+        var pane = await shell.HandleAutomation(new AutomationRequest(3, "viewport", Settings: Settings(("size", "pane"))), cancel);
+
+        Assert.True(pane.Ok, pane.Error);
+        Assert.Equal(new OpenViewport(0, ViewportKind.Scene, 1200, 600), Assert.Single(_sent.OfType<OpenViewport>()));
+        Assert.Null(shell.Viewports[0].FixedSize);
+
+        foreach (var bad in new[] { "1920", "0x1080", "9000x10", "wide" })
+        {
+            var refused = await shell.HandleAutomation(new AutomationRequest(4, "viewport", Settings: Settings(("size", bad))), cancel);
+            Assert.False(refused.Ok);
+            Assert.Contains("size takes <width>x<height>", refused.Error);
+        }
+    }
+
+    [Fact]
+    public async Task AHiddenViewportOpensAtItsFixedSizeAndTheGameViewsGameSizeFollowsIt()
+    {
+        using var shell = NewShell();
+        var cancel = TestContext.Current.CancellationToken;
+
+        var set = await shell.HandleAutomation(new AutomationRequest(1, "viewport", Settings: Settings(("size", "2560x1440")), Viewport: 4), cancel);
+        Assert.True(set.Ok, set.Error);
+        Assert.DoesNotContain(_sent.OfType<OpenViewport>(), o => o.Viewport == 4);
+
+        Show(shell, 4, 640, 360);
+
+        Assert.Equal(new OpenViewport(4, ViewportKind.Game, 2560, 1440), Assert.Single(_sent.OfType<OpenViewport>(), o => o.Viewport == 4));
+        Assert.Equal(new GameSize(2560, 1440), Assert.Single(_sent.OfType<GameSize>()));
+    }
+
+    // A pass's cost in a summary, in milliseconds per frame.
+    static ProfileSummary Summary(uint gpuFrames, float gpuMs, params (string Name, byte Queue, float Ms)[] passes) =>
+        new(0, 0, 16, gpuFrames, 1, 1, 0, 0, 0, gpuMs, gpuMs, 0, 0, true,
+            [.. passes.Select(p => new ProfileCost(ProfileCostKind.Pass, p.Name, ProfileCallback.None, p.Queue, 1, p.Ms, p.Ms))]);
+
+    [Fact]
+    public async Task TimingSkipsTheFirstSummaryAndTakesTheMediansOfTheNext()
+    {
+        using var shell = NewShell();
+        var cancel = TestContext.Current.CancellationToken;
+        var timing = shell.HandleAutomation(new AutomationRequest(1, "timing", Samples: 3, Passes: ["fog inject", "fog integrate", "nothing"]), cancel);
+
+        // The first is from before the request, and the one without GPU frames has no passes.
+        shell.OnGameMessage(Summary(16, 9, ("fog inject", 1, 9)));
+        shell.OnGameMessage(Summary(16, 2, ("fog inject", 1, 0.3f), ("fog integrate", 1, 0.05f), ("world", 0, 1)));
+        shell.OnGameMessage(Summary(0, 0));
+        shell.OnGameMessage(Summary(16, 3, ("fog inject", 1, 0.1f), ("fog integrate", 1, 0.04f)));
+        shell.OnGameMessage(Summary(16, 4, ("fog inject", 1, 0.2f), ("world", 0, 1)));
+        var answer = await timing;
+
+        Assert.True(answer.Ok, answer.Error);
+        var t = answer.Timing!;
+        Assert.Equal(3, t.Samples);
+        Assert.Equal(3, t.GpuMedianMs);
+        Assert.Equal(["fog inject", "fog integrate"], t.Passes.Select(p => p.Name));
+        Assert.Equal(0.2, t.Passes[0].MedianMs, 1e-6);
+        Assert.Equal(0.1, t.Passes[0].MinMs, 1e-6);
+        Assert.Equal(0.3, t.Passes[0].MaxMs, 1e-6);
+        Assert.Equal("compute", t.Passes[0].Queue);
+        Assert.Equal(3, t.Passes[0].Seen);
+        Assert.Equal(0.045, t.Passes[1].MedianMs, 1e-6);
+        Assert.Equal(2, t.Passes[1].Seen);
+        Assert.Equal(["nothing"], t.Missing!);
+        Assert.Equal([new AutomationViewportSize(0, 1600, 900, false)], t.Viewports);
+    }
+
+    [Fact]
+    public async Task TimingWithoutPassesTakesEveryPassTheSlowestFirstAndRefusesWhatItCannotTime()
+    {
+        using var shell = NewShell();
+        var cancel = TestContext.Current.CancellationToken;
+        var timing = shell.HandleAutomation(new AutomationRequest(1, "timing", Samples: 1, Skip: 0), cancel);
+        shell.OnGameMessage(Summary(16, 2, ("fog inject", 1, 0.3f), ("world", 0, 1)));
+        var answer = await timing;
+        Assert.True(answer.Ok, answer.Error);
+        Assert.Equal(["world", "fog inject"], answer.Timing!.Passes.Select(p => p.Name));
+        Assert.Null(answer.Timing.Missing);
+
+        Assert.False((await shell.HandleAutomation(new AutomationRequest(2, "timing", Samples: 0), cancel)).Ok);
+        Hide(shell, 0);
+        var hidden = await shell.HandleAutomation(new AutomationRequest(3, "timing"), cancel);
+        Assert.False(hidden.Ok);
+        Assert.Contains("no viewport is shown", hidden.Error);
+    }
+
+    [Fact]
     public async Task AScreenshotOfAViewportThatIsNotShownIsRefused()
     {
         using var shell = NewShell();
