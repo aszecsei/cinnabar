@@ -1,0 +1,3 @@
+# What cinnabar builds, and the settings of one machine.
+build/
+*.user.settings

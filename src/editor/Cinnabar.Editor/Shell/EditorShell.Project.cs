@@ -151,6 +151,49 @@ public sealed partial class EditorShell
         Commands.InvalidateAll();
     }
 
+    /// <summary>
+    /// <c>cinnabar.exe</c>, which builds and exports the project (see docs/editor/processes-and-projects.md#projects). Its
+    /// output goes to the console.
+    /// </summary>
+    public ProjectTool Builder { get; }
+
+    /// <summary>The project's folder, which Build Project and Export Project build.</summary>
+    public string ProjectDirectory => _options.ProjectDirectory;
+
+    void WireTool()
+    {
+        Builder.Output += line => Console.Add(LogLevel.Info, $"cinnabar: {line}");
+        Builder.Finished += (command, code) =>
+        {
+            Console.Add(code == 0 ? LogLevel.Info : LogLevel.Error, code == 0
+                ? command == "export" ? $"project: exported to {Path.Combine(ProjectDirectory, "build", "release")}" : $"project: {command} done"
+                : $"project: {command} failed with code {code}");
+            Commands.InvalidateAll();
+        };
+    }
+
+    /// <summary>
+    /// Builds the project's game DLL, when it has Odin, and its scripts' types, as <c>cinnabar build</c> does. The host
+    /// reloads a new DLL by itself, and the cook daemon keeps the content cooked meanwhile.
+    /// </summary>
+    public void BuildProject()
+    {
+        Builder.Run("build", ProjectDirectory);
+        Commands.InvalidateAll();
+    }
+
+    /// <summary>Writes a release into the project's <c>build/release</c>, as <c>cinnabar export</c> does. Save the scene first: the export cooks the files.</summary>
+    public void ExportProject()
+    {
+        Builder.Run("export", ProjectDirectory);
+        Commands.InvalidateAll();
+    }
+
+    /// <summary>The window asks for another project's folder and opens it in a new editor.</summary>
+    public event Action? OpenProjectRequested;
+
+    public void RequestOpenProject() => OpenProjectRequested?.Invoke();
+
     public void StopGame()
     {
         var process = _gameWindow;

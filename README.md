@@ -14,12 +14,22 @@ cinnabar is a game engine written in [Odin](https://odin-lang.org), with:
 
 ## Getting started
 
-cinnabar runs on Windows with D3D12. You need Odin, the .NET 10 SDK, CMake with Visual Studio 2022's build tools, Git, and [just](https://github.com/casey/just).
+cinnabar runs on Windows with D3D12. You need Odin, the .NET 10 SDK, CMake with Visual Studio 2022's build tools, Git with its Bash, and [just](https://github.com/casey/just) (see [Getting started](docs/overview/getting-started.md#prerequisites)).
+
+To make a game with the engine, build the engine once, then make a project anywhere:
 
 ```sh
-just setup      # fetch the submodules, the D3D12 Agility SDK and DXC
+just install                  # fetch the submodules, the D3D12 Agility SDK, DXC, FSR and Compressonator
+just engine                   # build the host, the cooker, the standard game, the editor and build/tools/cinnabar.exe
+cinnabar new ../my_game       # a project of your own, from a template
+cinnabar edit ../my_game      # build it and open it in the editor; `cinnabar export` writes a release
+```
+
+[Getting started](docs/overview/getting-started.md) walks through it. To work on the engine itself, with the samples:
+
+```sh
 just dev        # build everything, cook the sample's content, and run it in the development host
-just edit       # build everything and open the sample in the editor
+just edit       # build everything and open the sample in the editor (just game=intel edit for the other)
 just test       # run the engine's, the cooker's and the editor's tests
 ```
 
@@ -51,8 +61,12 @@ The documentation starts at [docs/README.md](docs/README.md), which gives a read
 | `src/host` | The development host, which loads and reloads the game DLL |
 | `src/editor` | The C# editor |
 | `tools/cook` | The asset cooker and cook daemon |
+| `tools/cinnabar` | `cinnabar.exe`, which makes, builds, runs, edits and exports a project outside the repository |
+| `lib/engine/templates` | The templates that new projects start from |
 | `tools/viewer`, `tools/ltc_fit` | A viewer for a host's shared frames, and the area lights' table fitter |
-| `samples/mygame` | The sample game, which exercises most features |
+| `lib/engine/game` | The standard game, which a project without Odin runs, and the hooks that a project's Odin adds to it |
+| `samples/mygame` | The sample game, which exercises most features, with its own Odin in `game/` |
+| `samples/intel` | Intel's USD scenes, with no Odin: the standard game runs it (see its README) |
 | `vendor/` | Luau, Jolt Physics, Compressonator, meshoptimizer, Opus, libvorbis, libogg, the Agility SDK and DXC |
 
 ## License

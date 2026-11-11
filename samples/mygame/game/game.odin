@@ -1,73 +1,64 @@
+// mygame, the sample that exercises most of the engine. The standard game runs it (see docs/world/game-package.md), and
+// these hooks add the sample's own: its components and their system, its bindings, its editor commands, its triangles
+// and their ray-traced shadows, its post pass and lens, and the F7 and F8 keys.
 package mygame
 
 import "core:c"
 import "core:fmt"
-import "core:hash"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
-import "core:mem"
 import "core:slice"
 import "core:time"
 
 import "cinnabar:core"
 import "cinnabar:core/gpu"
-import "cinnabar:core/layout"
 import "cinnabar:core/luau"
 import "cinnabar:engine/audio"
-import "cinnabar:engine/asset"
-import "cinnabar:engine/anim"
 import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/debug"
 import "cinnabar:engine/ecs"
 import "cinnabar:engine/editor"
 import "cinnabar:engine/editor/link"
-import "cinnabar:engine/physics"
-import "cinnabar:engine/project"
+import "cinnabar:engine/game"
 import "cinnabar:engine/render"
 import "cinnabar:engine/scene"
-import "cinnabar:engine/sprite"
-import "cinnabar:engine/ui"
 import "cinnabar:engine/script"
 import "cinnabar:engine/volume"
 
 // The shaders are assets, which the cooker compiles (see docs/content/kinds/shaders.md#shaders). The game finds them by the
 // GUIDs in their .meta files.
-TRIANGLE_SHADER :: #load("content/shaders/triangle.hlsl.meta", string)
-POST_SHADER :: #load("content/shaders/post.hlsl.meta", string)
-LENS_SHADER :: #load("content/shaders/lens.hlsl.meta", string)
-SHADOWS_SHADER :: #load("content/shaders/shadows.hlsl.meta", string)
-SHADOWS_RT_SHADER :: #load("content/shaders/shadows_rt.hlsl.meta", string)
-// The game reads its cooked content from platform.content_dir: the loose cache in development, and bundles in a release
-// build (see docs/content/blobs-and-loading.md#loading). It reads its
-// settings from platform.project_path, which the editor edits, with the user's file beside them (see
-// docs/overview/architecture.md#project-settings). The game looks for a change to the settings' files this often, in seconds.
-PROJECT_CHECK_INTERVAL :: 0.5
-// Content refers to content by GUID. The game reads the GUIDs of its main script and its scene from their .meta files.
-HELLO_META :: #load("content/scripts/hello.luau.meta", string)
-MAIN_SCENE_META :: #load("content/scenes/main.scene.meta", string)
+TRIANGLE_SHADER :: #load("../content/shaders/triangle.hlsl.meta", string)
+POST_SHADER :: #load("../content/shaders/post.hlsl.meta", string)
+LENS_SHADER :: #load("../content/shaders/lens.hlsl.meta", string)
+SHADOWS_SHADER :: #load("../content/shaders/shadows.hlsl.meta", string)
+SHADOWS_RT_SHADER :: #load("../content/shaders/shadows_rt.hlsl.meta", string)
+// Content refers to content by GUID. The game reads the GUIDs of its main script and its scenes from their .meta files.
+// The settings' game.main_scene names the main scene, which the standard game loads, and F7 cycles from it.
+HELLO_META :: #load("../content/scripts/hello.luau.meta", string)
+MAIN_SCENE_META :: #load("../content/scenes/main.scene.meta", string)
 // The sample's scenes are 1.5e11 m from the origin, to test large worlds, so the physics world is anchored there: its
 // broad phase is f32, which would have a resolution of 16 km so far out (see docs/physics/design.md#positions-and-precision).
 PHYSICS_ANCHOR :: ecs.World_Position{raw = {2516582400000000000, 0, 0}}
 // The transparency scene, which F7 switches to and back (see docs/rendering/transparency.md#transparency).
-GLASS_SCENE_META :: #load("content/scenes/glass.scene.meta", string)
+GLASS_SCENE_META :: #load("../content/scenes/glass.scene.meta", string)
 // The patch surfaces scene, a lake with an island (see docs/rendering/surfaces.md#surfaces).
-SURFACES_SCENE_META :: #load("content/scenes/surfaces.scene.meta", string)
+SURFACES_SCENE_META :: #load("../content/scenes/surfaces.scene.meta", string)
 // The room scene, a room built as a .mesh file (see docs/content/kinds/meshes.md#mesh-files).
-ROOM_SCENE_META :: #load("content/scenes/room.scene.meta", string)
+ROOM_SCENE_META :: #load("../content/scenes/room.scene.meta", string)
 // The billboards scene, sprites, foliage cards and towers that draw as impostors far away (see
 // docs/rendering/gpu-scene.md#billboards).
-BILLBOARDS_SCENE_META :: #load("content/scenes/billboards.scene.meta", string)
+BILLBOARDS_SCENE_META :: #load("../content/scenes/billboards.scene.meta", string)
 // The animation scene, two skinned foxes that play their clips (see docs/content/kinds/skins-and-animations.md#playback).
-ANIMATION_SCENE_META :: #load("content/scenes/animation.scene.meta", string)
+ANIMATION_SCENE_META :: #load("../content/scenes/animation.scene.meta", string)
 // The cube map scene, a sphere under a Texture sky whose texture is a cube map (see docs/rendering/sky.md#texture).
-CUBE_SKY_SCENE_META :: #load("content/scenes/cube_sky.scene.meta", string)
+CUBE_SKY_SCENE_META :: #load("../content/scenes/cube_sky.scene.meta", string)
 // The audio scene, a hum that moves behind a wall, over a long sound that streams (see docs/audio/design.md#the-sample).
-AUDIO_SCENE_META :: #load("content/scenes/audio.scene.meta", string)
+AUDIO_SCENE_META :: #load("../content/scenes/audio.scene.meta", string)
 // The 2D scene, sprites under an orthographic camera (see docs/rendering/2d.md#sprite-renderers).
-SPRITES_SCENE_META :: #load("content/scenes/sprites.scene.meta", string)
+SPRITES_SCENE_META :: #load("../content/scenes/sprites.scene.meta", string)
 // The array that tints the large triangles, a layer for each (see docs/content/kinds/textures.md#cube-maps-and-arrays).
-TRIANGLE_TINTS_META :: #load("content/textures/cube/tints.texture_set.meta", string)
+TRIANGLE_TINTS_META :: #load("../content/textures/cube/tints.texture_set.meta", string)
 
 // Matches numthreads in content/shaders/post.hlsl.
 POST_GROUP_SIZE :: 8
@@ -200,25 +191,13 @@ Pass_Constants :: struct {
 	padding:         [3]u32,
 }
 
-// Game_State is the root of all persistent game-side state. The host owns its memory.
-Game_State :: struct {
-	platform:           ^core.Platform_API,
-	frame_count:        u64,
-	// The audio device's test tone, which CINNABAR_TEST_TONE turns on.
-	tone:               audio.Tone,
-	// What the scripts' Render bindings reach: the renderer and the settings file (see quality_keys.luau).
-	script_quality:     project.Script_Quality,
-	// The project's settings, read again when their files change.
-	project:            project.Watch,
-	next_project_check: f64,
+// State is the sample's own state, which follows the standard game's (see game.user). The host owns its memory.
+State :: struct {
 	// F8 cycles the output mode for this run, until the settings' files change.
 	output_override:    Maybe(gpu.Output_Request),
 	// F7 cycles the main scene, the glass scene, the surfaces scene, the room scene, the billboards scene, the animation
 	// scene, the cube map scene, the audio scene and the 2D scene.
 	scene_index:        u8,
-	elapsed:            time.Duration,
-	// The time that the world stepped this frame, in seconds, which the particles step by.
-	frame_step:         f32,
 	next_report:        time.Duration,
 	pipelines:          Pipelines,
 	vertices:           gpu.Buffer,
@@ -234,31 +213,10 @@ Game_State :: struct {
 	rings_transfer:     gpu.Transfer,
 	rings_ready:        bool,
 	nearest:            gpu.Sampler,
-	world:              ecs.World,
-	// The physics world, which the fixed ticks step (see docs/physics/design.md#the-physics-tick).
-	physics:            physics.State,
-	// The sounds that the world and the scripts play (see docs/audio/design.md#the-game-side).
-	audio:              audio.State,
-	// The Animators' queries, which the fixed ticks advance (see docs/content/kinds/skins-and-animations.md#playback).
-	animation:          anim.State,
-	// The Sprite_Renderers' animations (see docs/rendering/2d.md#animation).
-	sprites:            sprite.State,
-	// The HUD and the pause menu, documents on the main scene's entities (see docs/ui/design.md#the-frame).
-	ui:                 ui.State,
-	// The pause menu stops the world's time, while scripts and the UI run on.
-	paused:             bool,
-	// The scene's render.Camera entity. A new scene replaces it, so find_camera looks for it again.
-	camera:             ecs.Entity,
-	// The built-in renderer, which draws the frame (see docs/rendering/frame.md#frame).
-	renderer:           render.Renderer,
 	// A registration, created again in on_reload.
 	triangles:          render.Extractor,
-	assets:             asset.Assets,
-	scripts:            script.Runtime,
 	// content/scripts/hello.luau, which the scheduler runs.
 	hello:              script.Main_Script,
-	// What the editor knows of the world (see docs/editor/link.md#world).
-	editor:             editor.Editor,
 }
 
 Pipelines :: struct {
@@ -274,7 +232,8 @@ Pipelines :: struct {
 // the same data, so the sample makes a Frame in the first hook of a view and keeps it in render.Frame.user. It lives in
 // frame memory.
 Frame :: struct {
-	state:          ^Game_State,
+	game:           ^game.Game,
+	state:          ^State,
 	// The scene's size, at the quality's render scale.
 	size:           [2]u32,
 	view:           render.View,
@@ -295,19 +254,45 @@ Frame :: struct {
 	post:           render.Texture,
 }
 
+// hooks are the sample's additions to the standard game.
+hooks :: proc() -> game.Hooks {
+	return {
+		State = State,
+		physics_anchor = PHYSICS_ANCHOR,
+		register_components = register_components,
+		register_world = register_world,
+		register_scripts = register_scripts,
+		register = register,
+		init = init,
+		shutdown = shutdown,
+		on_reload = on_reload,
+		settings_changed = settings_changed,
+		begin_frame = begin_frame,
+		update = update,
+		frame = frame,
+		tone_pan = tone_pan,
+	}
+}
+
+@(export)
+cinnabar_game_api :: proc() -> core.Game_API {
+	return game.api(hooks)
+}
+
+// state_of is the sample's state.
+state_of :: proc(g: ^game.Game) -> ^State {
+	return game.user(g, State)
+}
+
 // frame_of is the sample's data for the view that a hook is drawing.
 frame_of :: proc(f: ^render.Frame) -> ^Frame {
 	return (^Frame)(f.user)
 }
 
-init :: proc(state: rawptr, platform: ^core.Platform_API) {
-	s := (^Game_State)(state)
-	// Game_State is too large for a temporary on the stack, so it is zeroed in place.
-	mem.zero_item(s)
-	s.platform = platform
-	editor.init(&s.editor, platform, &s.assets, &s.renderer.residency, &s.renderer)
-	register_editor_commands(s)
-
+// init makes the sample's GPU resources and pipelines and runs its main script, after the standard game started and
+// before it loads the main scene.
+init :: proc(g: ^game.Game) {
+	s, platform := state_of(g), g.platform
 	vertices := [3]Vertex {
 		{{0, 0.6}, {0.5, 0}, {1, 0.3, 0.3, 1}},
 		{{0.52, -0.3}, {1, 1}, {0.3, 1, 0.3, 1}},
@@ -355,65 +340,35 @@ init :: proc(state: rawptr, platform: ^core.Platform_API) {
 		s.tlas = platform.gpu_create_accel({kind = .Top, max_instances = MAX_TRIANGLES, label = "scene"})
 	}
 	s.pipelines = {
-		scene     = render.shader_pipeline(TRIANGLE_SHADER),
-		shadows   = render.shader_pipeline(s.shadow_mode == .Pipeline ? SHADOWS_RT_SHADER : SHADOWS_SHADER),
-		post      = render.shader_pipeline(POST_SHADER),
-		lens      = render.shader_pipeline(LENS_SHADER),
+		scene   = render.shader_pipeline(TRIANGLE_SHADER),
+		shadows = render.shader_pipeline(s.shadow_mode == .Pipeline ? SHADOWS_RT_SHADER : SHADOWS_SHADER),
+		post    = render.shader_pipeline(POST_SHADER),
+		lens    = render.shader_pipeline(LENS_SHADER),
 	}
-
-	if !ecs.init(&s.world, platform) {
-		log.panic("mygame: cannot create the world")
-	}
-	if !physics.init(&s.physics, platform, anchor = PHYSICS_ANCHOR, assets = &s.assets) {
-		log.panic("mygame: cannot create the physics world")
-	}
-	audio.init(&s.audio, platform, &s.assets)
-	register_world(s)
-	asset.init(&s.assets, platform, asset.content_source(platform.content_dir))
-	render.renderer_init(&s.renderer, platform, &s.assets, &s.world)
-	ui.init(&s.ui, platform, &s.assets, &s.renderer.residency)
-	s.script_quality = project.script_quality(&s.renderer, platform.project_path)
-	register_post_effects(s)
-	sync_pipelines(s)
-	if !script.init(&s.scripts, platform, &s.world, &s.assets, register_scripts) {
-		log.panic("mygame: cannot open the script VM")
-	}
+	sync_pipelines(g)
 	if hello, ok := format.meta_guid(HELLO_META); ok {
-		s.hello, _ = script.spawn_script(&s.scripts, hello)
-	}
-	// An editor replaces this scene with its own document when it links (see docs/editor/document-and-scenes.md#document-model).
-	if main_scene, ok := format.meta_guid(MAIN_SCENE_META); ok {
-		scene.load_asset(&s.world, &s.scripts, &s.assets, main_scene)
+		s.hello, _ = script.spawn_script(&g.scripts, hello)
 	}
 	log.infof("mygame: init, shadows %v", s.shadow_mode)
 }
 
-// register_components registers every component type. init and on_reload call it on the world's registry, and
-// layout_hash on its own, so a component change restarts the game.
+// register_components registers the sample's component types, after the engine's.
 register_components :: proc(r: ^ecs.Registry) {
-	ecs.register_engine_components(r)
-	render.register_components(r)
-	script.register_components(r)
-	scene.register_components(r)
-	volume.register_components(r)
-	physics.register_components(r)
-	audio.register_components(r)
-	anim.register_components(r)
-	ui.register_components(r)
 	ecs.register_component(r, Spin, SPIN_ID)
 	ecs.register_component(r, Triangle, TRIANGLE_ID)
 	ecs.register_component(r, Lens, LENS_ID, DEFAULT_LENS)
 }
 
-// register_post_effects adds the sample's lens to the post-processing, before tone mapping, where a volume with a Lens
-// reaches the camera. init and on_reload call it after the renderer's.
-register_post_effects :: proc(s: ^Game_State) {
-	render.register_post_effect(&s.renderer, &s.world, "lens", .Before_Tone_Mapping, Lens, add_lens)
+// register adds the sample's lens to the post-processing, before tone mapping, where a volume with a Lens reaches the
+// camera, and describes its editor commands. init and on_reload call it after the renderer's and the editor's.
+register :: proc(g: ^game.Game) {
+	render.register_post_effect(&g.renderer, &g.world, "lens", .Before_Tone_Mapping, Lens, add_lens)
+	register_editor_commands(g)
 }
 
 // Lens_Pass is the lens's pass, in frame memory.
 Lens_Pass :: struct {
-	state:  ^Game_State,
+	state:  ^State,
 	lens:   Lens,
 	// The scene's size there, which temporal AA may have upscaled.
 	size:   [2]u32,
@@ -422,12 +377,12 @@ Lens_Pass :: struct {
 }
 
 add_lens :: proc(f: ^render.Frame, settings: rawptr) {
-	s := (^Game_State)(f.data)
+	s := state_of((^game.Game)(f.data))
 	if !render.pipeline_ready(f.renderer.platform, &s.pipelines.lens) {
 		return
 	}
 	g := f.graph
-	pass := new(Lens_Pass, s.platform.frame_allocator)
+	pass := new(Lens_Pass, f.renderer.platform.frame_allocator)
 	pass^ = {
 		state  = s,
 		lens   = (^Lens)(settings)^,
@@ -457,58 +412,25 @@ run_lens :: proc(ctx: ^render.Pass_Context) {
 	gpu.cmd_dispatch(cb, {groups.x, groups.y, 1})
 }
 
-// register_world makes the world's registrations: components, systems and queries.
-register_world :: proc(s: ^Game_State) {
-	w := &s.world
-	register_components(&w.registry)
-	physics.register(&s.physics, w)
-	anim.register(&s.animation, w, &s.assets)
-	sprite.register(&s.sprites, w, &s.assets)
+// register_world makes the sample's registrations in the world: its system and its query.
+register_world :: proc(g: ^game.Game) {
+	w, s := &g.world, state_of(g)
 	ecs.register_system(w, {name = "spin", stage = .Fixed, procedure = spin, terms = {ecs.write(w, ecs.Transform), ecs.read(w, Spin)}})
 	s.triangles = render.extractor(w, {ecs.read(w, Triangle)})
 }
 
-// find_camera finds the scene's camera, after a scene load replaced the one that the game knew.
-find_camera :: proc(s: ^Game_State) {
-	if ecs.is_alive(&s.world, s.camera) {
-		return
-	}
-	cameras := make([dynamic]ecs.Entity, s.platform.frame_allocator)
-	ecs.collect(&s.world, {render.CAMERA_ID}, &cameras)
-	s.camera = cameras[0] if len(cameras) > 0 else 0
-}
-
-// register_scripts defines the game's script bindings and exposes its components. init and on_reload call it.
+// register_scripts exposes the sample's components and defines its bindings, after the engine's.
 register_scripts :: proc(r: ^script.Runtime) {
-	scene.register_scripts(r)
 	script.expose(r, Spin)
 	script.expose(r, Triangle)
-	// The Render bindings read the Game_State's script_quality only when a script calls them, which the runtime of
-	// script_types, outside any Game_State, never does.
-	project.define_quality_bindings(r, &container_of(r, Game_State, "scripts").script_quality)
-	physics.register_scripts(r, &container_of(r, Game_State, "scripts").physics)
-	audio.register_scripts(r, &container_of(r, Game_State, "scripts").audio)
-	anim.register_scripts(r, &container_of(r, Game_State, "scripts").animation)
-	sprite.register_scripts(r, &container_of(r, Game_State, "scripts").sprites)
-	ui.register_scripts(r, &container_of(r, Game_State, "scripts").ui)
-	script.define(r, "Game.set_paused", proc(L: ^luau.State) -> c.int {
-		luau.L_checktype(L, 1, .BOOLEAN)
-		game_of(L).paused = bool(luau.toboolean(L, 1))
-		return 0
-	}, "(paused: boolean) -> ()")
 	script.define(r, "Game.frame", proc(L: ^luau.State) -> c.int {
-		luau.pushnumber(L, f64(game_of(L).frame_count))
+		luau.pushnumber(L, f64(game.game_of(L).frame_count))
 		return 1
 	}, "() -> number")
 	script.define(r, "Game.greeting", proc(L: ^luau.State) -> c.int {
 		luau.pushstring(L, "hello from Luau")
 		return 1
 	}, "() -> string")
-}
-
-// game_of is the Game_State of a script binding.
-game_of :: proc "contextless" (L: ^luau.State) -> ^Game_State {
-	return container_of(script.runtime_of(L), Game_State, "scripts")
 }
 
 spin :: proc(ctx: ^ecs.System_Context) {
@@ -522,147 +444,73 @@ spin :: proc(ctx: ^ecs.System_Context) {
 	}
 }
 
-update :: proc(state: rawptr, dt: time.Duration) -> (keep_running: bool) {
-	s := (^Game_State)(state)
-	defer end_frame(s)
-	s.frame_count += 1
+// begin_frame takes the F7 and F8 keys, before the world steps.
+begin_frame :: proc(g: ^game.Game) {
+	update_output(g)
+	switch_scene(g)
+}
 
-	// In the editor's edit mode, and while it pauses, the world stands still and only its transforms propagate, so
-	// edits show. No script code runs then, not even on_disable and on_destroy for the behaviours that a new scene
-	// despawns (see docs/editor/document-and-scenes.md#modes).
-	update_output(s)
-	switch_scene(s)
-	run, step := editor.simulation(&s.editor, &s.world, dt)
-	// A paused world takes no time: no ticks, and no particles, while the script phase runs for the pause menu.
-	if s.paused {
-		step = 0
-	}
-	script.set_quiet(&s.scripts, !run)
-	// The documents follow the world in every mode, so the editor's viewport shows them as they are.
-	ui.sync(&s.ui, &s.world)
-	// The Animators' graphs and clips load before the ticks, so the animate system's jobs only read them.
-	anim.prepare(&s.animation, &s.world)
-	s.frame_step = 0
-	if run {
-		s.elapsed += step
-		s.frame_step = f32(time.duration_seconds(step))
-		input := s.platform.input()
-		// Each fixed tick runs the Fixed systems, the scripts' fixed step, the physics tick and the tick's events (see
-		// docs/physics/design.md#scripts-in-fixed-ticks).
-		ticks := ecs.begin_ticks(&s.world, step)
-		physics.begin_frame(&s.physics)
-		anim.begin_frame(&s.animation)
-		for ecs.next_tick(&ticks) {
-			ecs.run_tick_systems(&ticks, s)
-			script.fixed_update(&s.scripts, &ticks, input)
-			ecs.update_transforms(&s.world)
-			physics.tick(&s.physics, &s.world)
-			physics.send_events(&s.physics, &s.world, &s.scripts)
-			anim.send_events(&s.animation, &s.world, &s.scripts)
-			script.fixed_events(&s.scripts)
-			ecs.update_transforms(&s.world)
-		}
-		ecs.run_stage(&s.world, .Update, step, s)
-		// The UI reads the input against what the player saw, and its events reach the behaviours in the script phase.
-		ui.handle_input(&s.ui, input, s.platform.time_seconds())
-		ui.flush_events(&s.ui, &s.scripts)
-		// The script phase, with its structural changes (phases 5 and 6).
-		script.run_phase(&s.scripts, step, input)
-		ecs.run_stage(&s.world, .Late, step, s)
-	} else {
-		ecs.update_transforms(&s.world)
-		// The physics world follows the edits without stepping, so queries see the scene as it is.
-		physics.sync(&s.physics, &s.world)
-		script.settle(&s.scripts)
-	}
-
-	if s.elapsed >= s.next_report {
+// update reports the frame in the window's title, streams the rings in, updates the pipelines whose shaders changed and
+// draws the spinning entities' axes, after the world stepped.
+update :: proc(g: ^game.Game, run: bool) {
+	s := state_of(g)
+	if g.elapsed >= s.next_report {
 		s.next_report += time.Second
-		title := fmt.aprintf("mygame | frame %d | %.1fs", s.frame_count, time.duration_seconds(s.elapsed), allocator = s.platform.frame_allocator)
-		s.platform.set_window_title(title)
+		title := fmt.aprintf("mygame | frame %d | %.1fs", g.frame_count, time.duration_seconds(g.elapsed), allocator = g.platform.frame_allocator)
+		g.platform.set_window_title(title)
 	}
 
-	if s.frame_count == STREAM_FRAME {
-		stream_rings(s)
+	if g.frame_count == STREAM_FRAME {
+		stream_rings(g)
 	}
-	if s.rings_transfer != 0 && !s.rings_ready && s.platform.gpu_transfer_done(s.rings_transfer) {
+	if s.rings_transfer != 0 && !s.rings_ready && g.platform.gpu_transfer_done(s.rings_transfer) {
 		s.rings_ready = true
-		log.infof("mygame: rings streamed in at frame %d", s.frame_count)
+		log.infof("mygame: rings streamed in at frame %d", g.frame_count)
 	}
-
-	find_camera(s)
-	// The device takes one writer, and the test tone is that writer when it asks to be.
-	if s.platform.audio_test_tone {
-		audio.tone_update(&s.tone, s.platform, tone_pan(s))
-	} else {
-		audio.update(&s.audio, &s.world, &s.physics, run, dt)
-	}
-	sync_pipelines(s)
+	sync_pipelines(g)
 	when DEBUG_AXES {
-		draw_spin_axes(s)
+		draw_spin_axes(g)
 	}
-	// A minimized window has no size, and nothing is rendered.
-	size := s.platform.window_size()
-	if size.x <= 0 || size.y <= 0 {
-		return true
-	}
-	render_frame(s, {u32(size.x), u32(size.y)})
-	return true
 }
 
 // tone_pan is the test tone's pan: how far the first spinning entity's presented X axis points along the view's right.
 // It is 0 in a scene with nothing spinning.
-tone_pan :: proc(s: ^Game_State) -> f32 {
-	spinning := make([dynamic]ecs.Entity, s.platform.frame_allocator)
-	ecs.collect(&s.world, {SPIN_ID}, &spinning)
+tone_pan :: proc(g: ^game.Game) -> f32 {
+	spinning := make([dynamic]ecs.Entity, g.platform.frame_allocator)
+	ecs.collect(&g.world, {SPIN_ID}, &spinning)
 	if len(spinning) == 0 {
 		return 0
 	}
-	pose, ok := ecs.presented(&s.world, spinning[0])
+	pose, ok := ecs.presented(&g.world, spinning[0])
 	if !ok {
 		return 0
 	}
 	axis := linalg.quaternion128_mul_vector3(pose.rotation, [3]f32{1, 0, 0})
-	right := linalg.quaternion128_mul_vector3(camera_view(s).rotation, [3]f32{1, 0, 0})
+	right := linalg.quaternion128_mul_vector3(game.camera_view(g).rotation, [3]f32{1, 0, 0})
 	return linalg.dot(axis, right)
 }
 
 // draw_spin_axes draws the axes of each spinning entity into the debug layer.
-draw_spin_axes :: proc(s: ^Game_State) {
-	spinning := make([dynamic]ecs.Entity, s.platform.frame_allocator)
-	ecs.collect(&s.world, {SPIN_ID}, &spinning)
+draw_spin_axes :: proc(g: ^game.Game) {
+	spinning := make([dynamic]ecs.Entity, g.platform.frame_allocator)
+	ecs.collect(&g.world, {SPIN_ID}, &spinning)
 	for e in spinning {
-		if pose, ok := ecs.presented(&s.world, e); ok {
-			debug.axes(&s.renderer.debug, pose, DEBUG_AXES_SIZE)
+		if pose, ok := ecs.presented(&g.world, e); ok {
+			debug.axes(&g.renderer.debug, pose, DEBUG_AXES_SIZE)
 		}
 	}
 }
 
-// camera_view is the scene's camera, which the game draws from: the editor's Game view draws from it, and so does the
-// game without an editor. The editor's scene views draw from the editor's cameras.
-camera_view :: proc(s: ^Game_State) -> render.View {
-	if view, ok := render.camera_view(&s.world, s.camera); ok {
-		return view
-	}
-	return {rotation = 1, projection = render.Perspective{render.DEFAULT_VERTICAL_FOV, render.DEFAULT_NEAR}}
-}
-
-// end_frame lets the frame's animation graphs go, then swaps the blobs that the cooker rewrote, and reloads the scripts
-// among them.
-end_frame :: proc(s: ^Game_State) {
-	anim.end_frame(&s.animation)
-	script.reload_changed(&s.scripts, asset.poll(&s.assets))
-}
-
 // stream_rings generates the rings' mip chain and streams it. The backend copies the data before the call returns.
-stream_rings :: proc(s: ^Game_State) {
+stream_rings :: proc(g: ^game.Game) {
+	s := state_of(g)
 	desc := gpu.Texture_Desc {
 		size      = RINGS_SIZE,
 		format    = .RGBA8_Unorm_Srgb,
 		mip_count = RINGS_MIPS,
 	}
 	colors := [3][4]u8{{255, 170, 60, 255}, {60, 190, 255, 255}, {40, 40, 70, 255}}
-	data := make([]byte, gpu.mip_chain_size(desc), s.platform.frame_allocator)
+	data := make([]byte, gpu.mip_chain_size(desc), g.platform.frame_allocator)
 	texels := ([^][4]u8)(raw_data(data))
 	i := 0
 	for mip in 0 ..< u32(RINGS_MIPS) {
@@ -675,49 +523,37 @@ stream_rings :: proc(s: ^Game_State) {
 			}
 		}
 	}
-	s.rings_transfer = s.platform.gpu_stream_texture(s.rings, data)
+	s.rings_transfer = g.platform.gpu_stream_texture(s.rings, data)
 }
 
-// render_frame describes the frame as the game draws it, with or without an editor, and gives it to the editor package to
-// draw (see editor.draw_frame): the scene's camera, the window's size, the built-in renderer's frame with the sample's own
-// work through its hooks, the triangles in the world pass, the ray-traced shadows and the post pass after it, and the UI's
-// documents in the UI layer. The render graph places the barriers between the passes and the waits between the queues.
-// The editor draws this frame in the views it shows, and the hooks run once for each, with their own data.
-render_frame :: proc(s: ^Game_State, window: [2]u32) {
-	desc := render.Frame_Desc {
-		view   = camera_view(s),
-		size   = window,
-		// The particles step by the time that the world stepped, so they stand still in the editor's Edit and Paused.
-		delta  = s.frame_step,
-		// The skinned entities' poses, between the last two ticks.
-		skins  = anim.present(&s.animation, &s.world, s.platform.frame_allocator),
-		hooks  = {
-			data         = s,
-			before_world = before_world,
-			world_uses   = world_uses,
-			world_draw   = draw_scene,
-			after_world  = after_world,
-			ui           = draw_ui_layer,
-		},
-	}
-	editor.draw_frame(&s.editor, &s.renderer, &s.world, desc)
+// frame adds the sample's work to the standard game's frame through the renderer's hooks: the triangles in the world
+// pass, and the ray-traced shadows and the post pass after it. The render graph places the barriers between the passes
+// and the waits between the queues. The editor draws this frame in the views it shows, and the hooks run once for each,
+// with their own data.
+frame :: proc(g: ^game.Game, desc: ^render.Frame_Desc) {
+	desc.hooks.before_world = before_world
+	desc.hooks.world_uses = world_uses
+	desc.hooks.world_draw = draw_scene
+	desc.hooks.after_world = after_world
 }
 
 // before_world makes the sample's data for this view of the frame, in Frame.user: the constants of its own passes, its
 // triangles relative to the view and its imported resources.
 before_world :: proc(f: ^render.Frame) {
-	s := (^Game_State)(f.data)
-	frame := new(Frame, s.platform.frame_allocator)
+	g := (^game.Game)(f.data)
+	s := state_of(g)
+	frame := new(Frame, g.platform.frame_allocator)
 	frame^ = {
+		game  = g,
 		state = s,
 		size  = f.size,
 		view  = f.view,
 	}
 	f.user = frame
-	g := f.graph
+	graph := f.graph
 	// The sample's own draws cover the same pixels as the renderer's, with its jitter, and pre-expose their colors. Without
 	// room for the constants the view draws no triangles.
-	if pass, ok := s.platform.gpu_upload(size_of(Pass_Constants), gpu.PASS_CONSTANTS_ALIGN); ok {
+	if pass, ok := g.platform.gpu_upload(size_of(Pass_Constants), gpu.PASS_CONSTANTS_ALIGN); ok {
 		frame.pass_constants = pass
 		aspect := f32(f.size.x) / f32(max(f.size.y, 1))
 		right, up, forward := render.view_axes(f.view)
@@ -728,18 +564,18 @@ before_world :: proc(f: ^render.Frame) {
 			right           = {right.x, right.y, right.z, 0},
 			up              = {up.x, up.y, up.z, 0},
 			forward         = {forward.x, forward.y, forward.z, 0},
-			time            = f32(time.duration_seconds(s.elapsed)),
+			time            = f32(time.duration_seconds(g.elapsed)),
 			aspect          = aspect,
 			tan_half_fov    = math.tan(perspective.vertical_fov * 0.5),
 			near            = render.view_near(f.view),
-			exposure        = gpu.read_index(render.gpu_buffer(g, f.exposure)),
+			exposure        = gpu.read_index(render.gpu_buffer(graph, f.exposure)),
 		}
 		extract_triangles(frame, f.hidden)
 	}
 	// The large triangles show the rings once they are streamed in.
-	frame.checker = render.import_texture(g, s.rings_ready ? s.rings : s.checker, .Sampled)
-	frame.vertices = render.import_buffer(g, s.vertices)
-	frame.indices = render.import_buffer(g, s.indices)
+	frame.checker = render.import_texture(graph, s.rings_ready ? s.rings : s.checker, .Sampled)
+	frame.vertices = render.import_buffer(graph, s.vertices)
+	frame.indices = render.import_buffer(graph, s.indices)
 }
 
 // world_uses declares what draw_scene reads in the world pass.
@@ -760,7 +596,7 @@ after_world :: proc(f: ^render.Frame) {
 	// The view that builds the triangle's structure says so when its frame has executed, so the next one does not.
 	if s.shadow_mode != .None && add_shadow_passes(g, frame) {
 		render.on_executed(g, proc(data: rawptr) {
-				(^Game_State)(data).blas_built = true
+				(^State)(data).blas_built = true
 			}, s)
 	}
 	frame.post = render.create_texture(g, {size = frame.size, format = render.SCENE_FORMAT, label = "post"})
@@ -773,19 +609,14 @@ after_world :: proc(f: ^render.Frame) {
 	f.scene = frame.post
 }
 
-// draw_ui_layer draws the UI's documents, the HUD and the pause menu, into the UI layer.
-draw_ui_layer :: proc(f: ^render.Frame) {
-	ui.add_passes(&(^Game_State)(f.data).ui, f)
-}
-
 // extract_triangles writes the large triangles' instances for the scene pass and the acceleration structure:
 // their poses relative to the camera, interpolated between the last two ticks, their brightness and their IDs. The
 // triangles in hidden, the frame's hidden entities, are left out.
 extract_triangles :: proc(frame: ^Frame, hidden: []u32) {
 	s := frame.state
-	w := &s.world
+	w := &frame.game.world
 	count := render.extract_count(w, s.triangles)
-	triangles, ok := s.platform.gpu_upload(max(count, 1) * size_of(Triangle_Instance), 16)
+	triangles, ok := frame.game.platform.gpu_upload(max(count, 1) * size_of(Triangle_Instance), 16)
 	if !ok || count == 0 {
 		return
 	}
@@ -827,13 +658,13 @@ add_shadow_passes :: proc(g: ^render.Graph, frame: ^Frame) -> (building_blas: bo
 	}
 
 	count := min(frame.triangle_count, MAX_TRIANGLES)
-	instances, ok := s.platform.gpu_upload(MAX_TRIANGLES * size_of(gpu.Accel_Instance), 16)
+	instances, ok := frame.game.platform.gpu_upload(MAX_TRIANGLES * size_of(gpu.Accel_Instance), 16)
 	if !ok || count == 0 {
 		return
 	}
 	records := ([^]gpu.Accel_Instance)(raw_data(instances.data))[:count]
 	triangles := ([^]Triangle_Instance)(raw_data(frame.triangles.data))[:count]
-	blas := s.platform.gpu_accel_reference(s.blas)
+	blas := frame.game.platform.gpu_accel_reference(s.blas)
 	for t, i in triangles {
 		records[i] = gpu.accel_instance(t.rows, blas, id = u32(i), flags = {.Cull_Disable, .Force_Opaque})
 	}
@@ -929,108 +760,72 @@ run_post :: proc(ctx: ^render.Pass_Context) {
 	gpu.cmd_dispatch(cb, {groups.x, groups.y, 1})
 }
 
-shutdown :: proc(state: rawptr) {
-	s := (^Game_State)(state)
-	editor.destroy(&s.editor)
-	script.destroy(&s.scripts)
-	ui.destroy(&s.ui)
-	render.renderer_destroy(&s.renderer)
-	// The sprites give their sheets back to the assets.
-	sprite.destroy(&s.sprites)
-	asset.destroy(&s.assets)
-	audio.destroy(&s.audio)
-	physics.destroy(&s.physics)
-	anim.destroy(&s.animation)
-	ecs.destroy(&s.world)
-	destroy_pipelines(s.platform, &s.pipelines)
-	s.platform.gpu_destroy_sampler(s.nearest)
-	s.platform.gpu_destroy_accel(s.tlas)
-	s.platform.gpu_destroy_accel(s.blas)
-	s.platform.gpu_destroy_texture(s.rings)
-	s.platform.gpu_destroy_texture(s.checker)
-	s.platform.gpu_destroy_buffer(s.indices)
-	s.platform.gpu_destroy_buffer(s.vertices)
+// shutdown destroys the sample's GPU resources, before the standard game shuts down.
+shutdown :: proc(g: ^game.Game) {
+	s, platform := state_of(g), g.platform
+	destroy_pipelines(platform, &s.pipelines)
+	platform.gpu_destroy_sampler(s.nearest)
+	platform.gpu_destroy_accel(s.tlas)
+	platform.gpu_destroy_accel(s.blas)
+	platform.gpu_destroy_texture(s.rings)
+	platform.gpu_destroy_texture(s.checker)
+	platform.gpu_destroy_buffer(s.indices)
+	platform.gpu_destroy_buffer(s.vertices)
 	log.info("mygame: shutdown")
 }
 
-// update_output asks for the output mode and the render quality of the project's settings, and reads them again when
-// their files change, so the editor's change shows at once. F8 cycles the mode for this run.
-update_output :: proc(s: ^Game_State) {
-	now := s.platform.time_seconds()
-	changed := false
-	if now >= s.next_project_check {
-		s.next_project_check = now + PROJECT_CHECK_INTERVAL
-		if project.refresh(&s.project, s.platform, s.platform.project_path) {
-			changed = true
-			s.output_override = nil
-			render.set_quality(&s.renderer, project.quality(s.project.settings, s.renderer.caps))
-			physics.set_layers(&s.physics, project.physics_layers(s.project.settings))
-			apply_audio_settings(s)
-			ui.set_scale_factor(&s.ui, s.project.settings.ui_scale)
-		}
-	}
-	if .F8 in s.platform.input().pressed {
-		current := s.output_override.? or_else s.project.settings.output
-		next := gpu.Output_Request((int(current) + 1) % len(gpu.Output_Request))
-		s.output_override = next
-		changed = true
-		log.infof("mygame: output %v until the project's settings change (F8 cycles it)", next)
-	}
-	if changed {
-		s.platform.gpu_request_output(s.output_override.? or_else s.project.settings.output)
-	}
+// settings_changed gives Sfx its room, and ends F8's output mode, when the project's settings' files change: the
+// standard game then asks for the settings' output mode.
+settings_changed :: proc(g: ^game.Game) {
+	state_of(g).output_override = nil
+	audio.set_bus_effect(&g.audio, "Sfx", 0, {kind = .Reverb, parameters = {1.2, 0.4, 0.15}})
 }
 
-// apply_audio_settings makes the project's buses, and gives Sfx its room.
-apply_audio_settings :: proc(s: ^Game_State) {
-	audio.set_buses(&s.audio, s.project.settings.audio_buses)
-	audio.set_bus_effect(&s.audio, "Sfx", 0, {kind = .Reverb, parameters = {1.2, 0.4, 0.15}})
+// update_output cycles the output mode for this run when F8 is pressed, until the settings' files change.
+update_output :: proc(g: ^game.Game) {
+	if .F8 not_in g.platform.input().pressed {
+		return
+	}
+	s := state_of(g)
+	current := s.output_override.? or_else g.project.settings.output
+	next := gpu.Output_Request((int(current) + 1) % len(gpu.Output_Request))
+	s.output_override = next
+	g.platform.gpu_request_output(next)
+	log.infof("mygame: output %v until the project's settings change (F8 cycles it)", next)
 }
 
 // switch_scene loads the next scene, the glass scene, the surfaces scene, the room scene, the billboards scene, the
 // animation scene, the cube map scene, the audio scene, the 2D scene, then the main scene again, when F7 is pressed. A linked editor owns the scene, so
 // the key does nothing then.
-switch_scene :: proc(s: ^Game_State) {
-	if .F7 not_in s.platform.input().pressed || editor.active(&s.editor) {
+switch_scene :: proc(g: ^game.Game) {
+	if .F7 not_in g.platform.input().pressed || editor.active(&g.editor) {
 		return
 	}
+	s := state_of(g)
 	metas := [?]string{MAIN_SCENE_META, GLASS_SCENE_META, SURFACES_SCENE_META, ROOM_SCENE_META, BILLBOARDS_SCENE_META, ANIMATION_SCENE_META, CUBE_SKY_SCENE_META, AUDIO_SCENE_META, SPRITES_SCENE_META}
 	names := [?]string{"main", "glass", "surfaces", "room", "billboards", "animation", "cube map", "audio", "2D"}
 	s.scene_index = (s.scene_index + 1) % len(metas)
 	if guid, ok := format.meta_guid(metas[s.scene_index]); ok {
-		scene.load_asset(&s.world, &s.scripts, &s.assets, guid)
+		scene.load_asset(&g.world, &g.scripts, &g.assets, guid)
 		log.infof("mygame: the %s scene (F7 cycles them)", names[s.scene_index])
 	}
 }
 
 // on_reload updates the pipelines, because the new DLL may describe them differently. The old versions keep drawing
 // until the new ones compile.
-on_reload :: proc(state: rawptr, platform: ^core.Platform_API) {
-	s := (^Game_State)(state)
-	s.platform = platform
-	ecs.reload(&s.world, platform)
-	physics.reload(&s.physics, platform)
-	audio.reload(&s.audio, platform)
-	register_world(s)
-	render.renderer_reload(&s.renderer, platform, &s.world)
-	register_post_effects(s)
-	asset.reload(&s.assets, platform)
-	script.reload(&s.scripts, platform, register_scripts)
-	editor.reload(&s.editor, platform)
-	ui.on_reload(&s.ui, platform)
-	register_editor_commands(s)
-	sync_pipelines(s, force = true)
-	log.infof("mygame: reloaded at frame %d", s.frame_count)
+on_reload :: proc(g: ^game.Game) {
+	sync_pipelines(g, force = true)
+	log.infof("mygame: reloaded at frame %d", g.frame_count)
 }
 
 // sync_pipelines creates the pipelines from their shader assets, and updates each one whose shader the cooker
 // compiled again, so a shader change shows in the next frame without a code reload. force updates them all.
-sync_pipelines :: proc(s: ^Game_State, force := false) {
-	p, platform, assets := &s.pipelines, s.platform, &s.assets
+sync_pipelines :: proc(g: ^game.Game, force := false) {
+	s := state_of(g)
+	p, platform, assets := &s.pipelines, g.platform, &g.assets
 	render.sync_graphics_pipeline(&p.scene, platform, assets, {.Vertex, .Pixel}, SCENE_PIPELINE, force)
 	render.sync_compute_pipeline(&p.post, platform, assets, POST_PIPELINE, force)
 	render.sync_compute_pipeline(&p.lens, platform, assets, LENS_PIPELINE, force)
-	ui.sync_pipelines(&s.ui, force)
 	switch s.shadow_mode {
 	case .None:
 	case .Inline:
@@ -1081,55 +876,10 @@ gpu_bytes :: proc(data: ^$T) -> []byte {
 	return ([^]byte)(data)[:size_of(T)]
 }
 
-state_size :: proc() -> int {
-	return size_of(Game_State)
-}
-
-// layout_hash covers the component layouts too: the world stores components as bytes, so Game_State's own layout
-// does not show them.
-layout_hash :: proc() -> u64 {
-	components: ecs.Registry
-	register_components(&components)
-	hashes := [2]u64{layout.hash(Game_State), ecs.registry_layout_hash(&components)}
-	return hash.fnv64a(slice.to_bytes(hashes[:]))
-}
-
-// script_types writes the scripts' definition file from a world and a script runtime of its own, so it makes no
-// game state and no GPU resources.
-script_types :: proc(platform: ^core.Platform_API) -> string {
-	world := new(ecs.World, platform.permanent_allocator)
-	if !ecs.init(world, platform) {
-		log.panic("mygame: cannot create a world for the script types")
-	}
-	defer ecs.destroy(world)
-	register_components(&world.registry)
-	r := new(script.Runtime, platform.permanent_allocator)
-	if !script.init(r, platform, world, nil, register_scripts) {
-		log.panic("mygame: cannot open a script VM for the script types")
-	}
-	defer script.destroy(r)
-	return script.definitions(r, platform.permanent_allocator)
-}
-
-@(export)
-cinnabar_game_api :: proc() -> core.Game_API {
-	return {
-		init = init,
-		update = update,
-		shutdown = shutdown,
-		on_reload = on_reload,
-		state_size = state_size,
-		layout_hash = layout_hash,
-		abi_hash = core.abi_hash,
-		script_types = script_types,
-		editor_poll = editor_poll,
-	}
-}
-
 // register_editor_commands describes the game's commands, which the editor shows on its Game tab (see
 // docs/editor/shell-and-panels.md#commands). init and on_reload call it.
-register_editor_commands :: proc(s: ^Game_State) {
-	editor.register_command(&s.editor, {
+register_editor_commands :: proc(g: ^game.Game) {
+	editor.register_command(&g.editor, {
 		id = "mygame.add_triangle",
 		label = "Add Triangle",
 		description = "Add a spinning triangle 2 m in front of the editor's camera.",
@@ -1139,7 +889,7 @@ register_editor_commands :: proc(s: ^Game_State) {
 		edits = true,
 		procedure = add_triangle,
 	})
-	editor.register_command(&s.editor, {
+	editor.register_command(&g.editor, {
 		id = "mygame.reverse_spin",
 		label = "Reverse Spin",
 		description = "Turn the selected triangles the other way.",
@@ -1149,7 +899,7 @@ register_editor_commands :: proc(s: ^Game_State) {
 		edits = true,
 		procedure = reverse_spin,
 	})
-	editor.register_command(&s.editor, {
+	editor.register_command(&g.editor, {
 		id = "mygame.world_report",
 		label = "World Report",
 		description = "Write the number of entities and triangles to the console.",
@@ -1205,11 +955,6 @@ reverse_spin :: proc(ctx: ^editor.Command_Context) {
 
 // world_report counts, and changes nothing.
 world_report :: proc(ctx: ^editor.Command_Context) {
-	s := (^Game_State)(ctx.user)
-	ctx.message = fmt.aprintf("mygame: %d entities, %d triangles, frame %d", ecs.entity_count(ctx.world), render.extract_count(ctx.world, s.triangles), s.frame_count, allocator = ctx.allocator)
-}
-
-editor_poll :: proc(state: rawptr, connection: u64, incoming: []core.Editor_Message, out: ^[dynamic]byte) {
-	s := (^Game_State)(state)
-	editor.poll(&s.editor, &s.world, &s.scripts, connection, incoming, out, s)
+	g := (^game.Game)(ctx.user)
+	ctx.message = fmt.aprintf("mygame: %d entities, %d triangles, frame %d", ecs.entity_count(ctx.world), render.extract_count(ctx.world, state_of(g).triangles), g.frame_count, allocator = ctx.allocator)
 }

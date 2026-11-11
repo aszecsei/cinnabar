@@ -50,6 +50,11 @@ static class DefaultRibbon
                         new ComboBox(EditorCommands.ProjectQuality),
                         new ComboBox(EditorCommands.UserQuality),
                     ]),
+                    new RibbonGroup("Project",
+                    [
+                        new LargeButton(EditorCommands.ExportProject),
+                        new SmallStack([EditorCommands.BuildProject, EditorCommands.OpenProject]),
+                    ]),
                     new RibbonGroup("Host",
                     [
                         new SplitButton(EditorCommands.RestartHost, [EditorCommands.RestartHost, EditorCommands.StopHost]),

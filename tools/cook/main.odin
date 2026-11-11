@@ -3,7 +3,8 @@
 // `cook scripts` cooks scripts (see scripts.odin), `cook scenes` cooks scenes (see scenes.odin), `cook shaders` cooks
 // shaders (see shaders.odin), `cook models` cooks glTF models (see meshes.odin), `cook meshes` cooks mesh files (see
 // mesh_files.odin), `cook stages` cooks USD stages (see stages.odin), and `cook daemon` cooks every kind whenever the
-// content changes (see daemon.odin). `cook stage-report` measures stages against the renderer's limits. `cook package`
+// content changes (see daemon.odin). `cook all` cooks every kind in one pass, and with --prune deletes the blobs of
+// assets that left the content (see all.odin). `cook stage-report` measures stages against the renderer's limits. `cook package`
 // packs a release cache into bundles (see package.odin).
 package cook
 
@@ -28,6 +29,7 @@ USAGE :: `usage: cook scripts --cache <dir> --config dev|release [--definitions 
        cook fonts --cache <dir> --config dev|release --root <name>=<dir> [--root <name>=<dir>]...
        cook ui --cache <dir> --config dev|release --root <name>=<dir> [--root <name>=<dir>]...
        cook stages --cache <dir> --config dev|release --root <name>=<dir> [--root <name>=<dir>]...
+       cook all --cache <dir> --config dev|release --dxc <dxc.exe> [--include <dir>]... [--definitions <file>] [--prune] --root <name>=<dir> [--root <name>=<dir>]...
        cook stage-report <stage>...
        cook package --cache <dir> --out <dir> [--project <file>]
        cook daemon --cache <dir> [--definitions <file>] [--dxc <dxc.exe>] [--include <dir>]... [--link <port>] --root <name>=<dir> [--root <name>=<dir>]...
@@ -93,6 +95,22 @@ main :: proc() {
 	case "stages":
 		if options, parsed = parse_cook_args(os.args[2:]); parsed {
 			ok = cook_batch(options, .Stage)
+		}
+	case "all":
+		args := make([dynamic]string, context.temp_allocator)
+		prune := false
+		for arg in os.args[2:] {
+			if arg == "--prune" {
+				prune = true
+			} else {
+				append(&args, arg)
+			}
+		}
+		if options, parsed = parse_cook_args(args[:]); parsed {
+			ok = options.dxc != "" && cook_all(options, prune)
+			if options.dxc == "" {
+				log.error("cook: all needs --dxc, for the shaders and the materials")
+			}
 		}
 	case "package":
 		if package_options, package_parsed := parse_package_args(os.args[2:]); package_parsed {

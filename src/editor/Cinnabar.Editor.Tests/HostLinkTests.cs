@@ -39,7 +39,8 @@ public sealed class HostLinkTests : IAsyncDisposable
         _port = FreePort();
         _adapter = HighPerformanceAdapter();
         var info = new ProcessStartInfo(hostPath,
-            [gamePath, "--shared", $"cinnabar-test-{Guid.NewGuid():N}", "--link", _port.ToString(), "--adapter", _adapter.ToString("x16")])
+            // The project's settings name the scene that the game starts with (see docs/world/game-package.md#settings).
+            [gamePath, "--project", Path.Combine(root, "samples", "mygame", "project.settings"), "--shared", $"cinnabar-test-{Guid.NewGuid():N}", "--link", _port.ToString(), "--adapter", _adapter.ToString("x16")])
         {
             WorkingDirectory = root,
             UseShellExecute = false,

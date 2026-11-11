@@ -1,9 +1,12 @@
 using Cinnabar.Editor.Content;
+using Cinnabar.Editor.Document;
 
 namespace Cinnabar.Editor;
 
 /// <summary>
-/// The command line: <c>editor [--host &lt;host.exe&gt;] [--game &lt;game.dll&gt;] [--scene &lt;file.scene&gt;]
+/// The command line: <c>editor &lt;project&gt;</c> opens a project's folder with the engine that the editor is in (see
+/// <see cref="ForProject"/>), and with no arguments the editor shows its welcome window (see
+/// docs/editor/processes-and-projects.md#projects). The full form, which <c>just edit</c> uses, is <c>editor [--host &lt;host.exe&gt;] [--game &lt;game.dll&gt;] [--scene &lt;file.scene&gt;]
 /// [--cook &lt;cook.exe&gt;] [--cache &lt;dir&gt;] [--definitions &lt;file&gt;] [--dxc &lt;dxc.exe&gt;] [--include &lt;dir&gt;]...
 /// [--root &lt;name&gt;=&lt;dir&gt;]... [--material &lt;file&gt;]... [--effect &lt;file&gt;]... [--animation-graph &lt;file&gt;]... [--project &lt;project.settings&gt;]</c>. The daemon
 /// cooks shaders only with <c>--dxc</c>. Each <c>--material</c> opens in the material editor, and each <c>--effect</c> in an
@@ -27,6 +30,12 @@ public sealed record EditorOptions(string HostPath, string GamePath, string? Sce
 
     /// <summary>UI documents to open in the UI editor, by their files' full paths.</summary>
     public IReadOnlyList<string> UiDocumentPaths { get; init; } = [];
+
+    /// <summary>The project's folder, which Build Project and Export Project build: the settings file's.</summary>
+    public string ProjectDirectory => Path.GetDirectoryName(ProjectPath) ?? Environment.CurrentDirectory;
+
+    /// <summary>The engine's checkout, whose <c>cinnabar.exe</c> builds and exports the project.</summary>
+    public string EngineRoot { get; init; } = RepositoryRoot();
 
     /// <summary>The project's settings file, which the game reads (see docs/overview/architecture.md#project-settings).</summary>
     public string ProjectPath { get; init; } = InRepository("samples", "mygame", "project.settings");
@@ -58,25 +67,52 @@ public sealed record EditorOptions(string HostPath, string GamePath, string? Sce
     /// <summary>The host runs in its executable's directory.</summary>
     public string HostDirectory => Path.GetDirectoryName(HostPath) is { Length: > 0 } dir ? dir : RepositoryRoot();
 
+    /// <summary>The engine's checkout (see <see cref="ProjectLayout.EngineRoot"/>), else the working directory.</summary>
+    public static string RepositoryRoot() => ProjectLayout.EngineRoot() ?? Environment.CurrentDirectory;
+
     /// <summary>
-    /// The repository root: the directory with the justfile above the editor's executable, else the working directory.
+    /// The options of a project's folder with an engine's checkout: the paths that <c>cinnabar.exe</c> builds (see
+    /// docs/overview/getting-started.md#a-project). The game is the project's <c>build/dev/game.dll</c> when it has Odin,
+    /// and the engine's <c>standard.dll</c> otherwise. The scene is the one that its settings' <c>game.main_scene</c>
+    /// names. The editor's own files, its autosaves and captures, go in the project's <c>build/editor</c>.
     /// </summary>
-    public static string RepositoryRoot()
+    public static EditorOptions ForProject(string projectDir, string engineRoot)
     {
-        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir != null; dir = dir.Parent)
+        projectDir = Path.GetFullPath(projectDir);
+        engineRoot = Path.GetFullPath(engineRoot);
+        string Engine(params string[] parts) => Path.Combine([engineRoot, .. parts]);
+        string Project(params string[] parts) => Path.Combine([projectDir, .. parts]);
+        var settings = Project(ProjectLayout.SettingsFileName);
+        var game = ProjectLayout.HasOdin(projectDir) ? Project("build", "dev", "game.dll") : Engine("build", "dev", "standard.dll");
+        var content = Project("content");
+        var scene = ProjectSettings.Get(settings, ProjectLayout.MainSceneKey) is { Length: > 0 } guid ? ProjectLayout.FindAsset(content, guid) : null;
+        return new EditorOptions(Engine("build", "dev", "host.exe"), game, scene)
         {
-            if (File.Exists(Path.Combine(dir.FullName, "justfile")))
-            {
-                return dir.FullName;
-            }
-        }
-        return Environment.CurrentDirectory;
+            EngineRoot = engineRoot,
+            ProjectPath = settings,
+            AutosaveDirectory = Project("build", "editor", "autosave"),
+            CaptureDirectory = Project("build", "editor", "captures"),
+            AutomationFile = Project("build", "editor", "automation.json"),
+            Cook = new CookOptions(
+                Engine("build", "tools", "cook.exe"),
+                Project("build", "cache"),
+                Project("build", "types", "cinnabar.d.luau"),
+                [("game", content), ("engine", Engine("lib", "engine", "content"))],
+                engineRoot,
+                ProjectLayout.Dxc(engineRoot),
+                [Engine("lib", "core", "gpu", "shaders"), Engine("lib", "engine", "content", "shaders"), Engine("vendor", "smaa")]),
+        };
     }
 
     static string InRepository(params string[] parts) => Path.GetFullPath(Path.Combine([RepositoryRoot(), .. parts]));
 
     public static EditorOptions Parse(IReadOnlyList<string> args)
     {
+        if (args.Count == 1 && !args[0].StartsWith("--", StringComparison.Ordinal))
+        {
+            var dir = ProjectLayout.ProjectDirectory(args[0]) ?? throw new ArgumentException($"{args[0]} is not a project: it has no {ProjectLayout.SettingsFileName}");
+            return ForProject(dir, RepositoryRoot());
+        }
         var host = InRepository("build", "dev", "host.exe");
         var game = InRepository("build", "dev", "mygame.dll");
         string? scene = null;

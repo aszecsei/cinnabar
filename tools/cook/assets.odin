@@ -1,6 +1,5 @@
 package cook
 
-import "core:crypto"
 import "core:fmt"
 import "core:log"
 import "core:os"
@@ -530,37 +529,13 @@ assign_guid :: proc(root_dir: string, a: ^Asset_Source, meta_path: string, probl
 
 // new_meta is the text of a .meta file with a new GUID and import settings.
 new_meta :: proc(settings: []format.Meta_Setting) -> (text: string, guid: format.Guid) {
-	crypto.rand_bytes(guid[:])
-	return meta_with(guid, "", settings), guid
+	guid = format.guid_new()
+	return format.meta_text(guid, "", settings, allocator = context.temp_allocator), guid
 }
 
-// meta_with is the text of a .meta file with a GUID, import settings and sub-assets. It keeps the comments of an old
-// .meta file, or starts with one that says what the file is. With no sub-assets given, it keeps the old file's.
+// meta_with is the text of a .meta file with a GUID, import settings and sub-assets (see format.meta_text).
 meta_with :: proc(guid: format.Guid, old_text: string, settings: []format.Meta_Setting, subassets: Maybe([]format.Meta_Subasset) = nil) -> string {
-	b := strings.builder_make(context.temp_allocator)
-	rest := old_text
-	for line in strings.split_lines_iterator(&rest) {
-		if trimmed := strings.trim_space(line); strings.has_prefix(trimmed, "#") {
-			fmt.sbprintln(&b, trimmed)
-		}
-	}
-	if strings.builder_len(b) == 0 {
-		fmt.sbprintln(&b, "# cinnabar asset metadata. Keep this file next to its asset (see docs/content/identity-and-cooking.md#identity).")
-	}
-	buffer: [32]u8
-	fmt.sbprintfln(&b, "guid = %s", format.guid_format(guid, &buffer))
-	for s in settings {
-		fmt.sbprintfln(&b, "%s = %s", s.key, s.value)
-	}
-	lines, given := subassets.?
-	if !given {
-		old, _ := format.meta_parse(old_text, context.temp_allocator)
-		lines = old.subassets
-	}
-	for s in lines {
-		fmt.sbprintfln(&b, "%s.%s = %s", s.kind, s.name, format.guid_format(s.guid, &buffer))
-	}
-	return strings.to_string(b)
+	return format.meta_text(guid, old_text, settings, subassets, context.temp_allocator)
 }
 
 // subasset_kind_name is the name that a kind of sub-asset has in .meta files, such as "mesh".

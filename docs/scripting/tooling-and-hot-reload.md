@@ -37,6 +37,8 @@ Modules and `require`, the type definitions that the cooker checks against and `
   	"luau-lsp.sourcemap.enabled": false
   }
   ```
+
+  In a project outside the repository, the definition file is the project's `build/types/cinnabar.d.luau`, which `cinnabar build` writes (see [Getting started](../overview/getting-started.md#a-project)).
 - **`tools/cook` type checks** each script that it cooks against the same file (see [Content pipeline](../content/kinds/scripts.md#scripts)). A type error is a cook error, so the script keeps its old blob, and the running game keeps the previous version. Each file's `--!strict`, `--!nonstrict` or `--!nocheck` applies, and the nearest `.luaurc`'s `languageMode` sets the default, which is nonstrict without one. Without the definition file, as on the first build, the cooker warns and does not type check. The file's hash is in each script's cache key, so the scripts are checked once it exists.
 - **The old type solver.** Under the new solver, `self` in `function Door:update()` gets a type inferred from the method's body, with read-only fields, so `self.phase += 1` is an error, and every behaviour would need annotations. The old solver gives `self` the class's type. The cooker uses the old solver, and the editor setting matches it.
 - **The build order:** `just build` builds the host and the game DLL, writes the definitions from the DLL, and then cooks the scripts. The DLL embeds only committed `.meta` files, so it does not wait for the cook.

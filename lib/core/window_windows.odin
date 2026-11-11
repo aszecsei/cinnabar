@@ -25,6 +25,9 @@ _window_open :: proc(title: string, width, height: i32, visible := true) -> bool
 		style         = win.CS_HREDRAW | win.CS_VREDRAW,
 		lpfnWndProc   = window_proc,
 		hInstance     = instance,
+		// A release's icon, which the export writes as icon group 1 (see docs/world/game-package.md#releases). The host
+		// has none, and the window takes Windows' default.
+		hIcon         = win.LoadIconW(instance, transmute(win.LPCWSTR)uintptr(1)),
 		hCursor       = win.LoadCursorW(nil, transmute(win.LPCWSTR)win.IDC_ARROW),
 		lpszClassName = win.L(WINDOW_CLASS),
 	}

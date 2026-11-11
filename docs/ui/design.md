@@ -150,7 +150,7 @@ end
 
 ## The frame
 
-A game calls the UI at these points of its frame (the sample's are in `samples/mygame/game.odin`):
+A game calls the UI at these points of its frame (the standard game's are in `lib/engine/game/lifecycle.odin`):
 
 | When | Call |
 |---|---|

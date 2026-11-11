@@ -32,7 +32,7 @@ The porting surface is therefore exactly: the `*_windows.odin` files of `core`, 
 | Audio backend | `audio` | The `Audio_API` table that the project chose. See [Audio: Backends](../audio/backends.md#the-contract). |
 | Scripting | `script_open`, `script_close`, `script_push_binding`, `script_atom`, `script_direct_access` | The host trampolines. See [Scripting](../scripting/embedding.md#host-trampolines). |
 
-In release, `main_release` fills the same struct with direct references, so a game never knows which configuration it is in.
+In release, `lib/engine/game/runtime` fills the same struct with direct references, so a game never knows which configuration it is in.
 
 ## File reads
 

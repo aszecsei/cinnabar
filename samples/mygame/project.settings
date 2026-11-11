@@ -1,6 +1,12 @@
 # The project's settings (see docs/overview/architecture.md#project-settings). The editor edits them, and a running game takes
 # a change at once. project.user.settings beside this file replaces them on one machine, and is not committed.
 
+# The game's name, which the release's executable and window take.
+game.name = mygame
+
+# The scene that the game starts with, by GUID: content/scenes/main.scene.
+game.main_scene = 047ea7c35e4dbfb73d2dac450b79b9a8
+
 # The window's output mode: Auto (HDR10 on a display in HDR, SDR otherwise), Sdr, Hdr10 or Scrgb.
 output = Sdr
 

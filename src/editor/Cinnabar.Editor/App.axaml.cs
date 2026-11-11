@@ -8,6 +8,7 @@ using Cinnabar.Editor.Model;
 using Cinnabar.Editor.Panels;
 using Cinnabar.Editor.Shell;
 using Cinnabar.Editor.Viewport;
+using Cinnabar.Editor.Projects;
 
 namespace Cinnabar.Editor;
 
@@ -28,15 +29,43 @@ public partial class App : Application
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            var shell = new EditorShell(EditorOptions.Parse(desktop.Args ?? []), EditorSettings.ForUser());
-            // A bug in one panel must not close the editor and lose the user's work. It goes to the console instead.
-            Dispatcher.UIThread.UnhandledException += (_, e) =>
+            var settings = EditorSettings.ForUser();
+            var args = desktop.Args ?? [];
+            // Without a project, or with only a project's folder, the welcome window comes first: it builds the project
+            // with cinnabar.exe, and then the editor opens it (see docs/editor/processes-and-projects.md#projects).
+            if (args.Length == 0 || (args.Length == 1 && !args[0].StartsWith("--", StringComparison.Ordinal)))
             {
-                shell.Console.Add(LogLevel.Error, $"editor: {e.Exception}");
-                e.Handled = true;
-            };
-            desktop.MainWindow = new MainWindow(shell);
+                var welcome = new WelcomeWindow(settings, ProjectLayout.EngineRoot(), args.Length == 1 ? args[0] : null);
+                welcome.ProjectReady += options =>
+                {
+                    var main = OpenEditor(options, settings);
+                    desktop.MainWindow = main;
+                    main.Show();
+                    welcome.Close();
+                };
+                desktop.MainWindow = welcome;
+            }
+            else
+            {
+                desktop.MainWindow = OpenEditor(EditorOptions.Parse(args), settings);
+            }
         }
         base.OnFrameworkInitializationCompleted();
+    }
+
+    static MainWindow OpenEditor(EditorOptions options, EditorSettings settings)
+    {
+        if (ProjectLayout.ProjectDirectory(options.ProjectDirectory) is { } project)
+        {
+            new RecentProjects(settings).Add(project);
+        }
+        var shell = new EditorShell(options, settings);
+        // A bug in one panel must not close the editor and lose the user's work. It goes to the console instead.
+        Dispatcher.UIThread.UnhandledException += (_, e) =>
+        {
+            shell.Console.Add(LogLevel.Error, $"editor: {e.Exception}");
+            e.Handled = true;
+        };
+        return new MainWindow(shell);
     }
 }

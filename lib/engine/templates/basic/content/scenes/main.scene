@@ -1,0 +1,56 @@
+# {{name}}'s first scene: a camera, a sun, a sky, a floor and a cube that a behaviour turns. Positions are raw
+# World_Position values in units of 2^-24 m. The editor writes this file; see docs/editor/document-and-scenes.md#scenes.
+scene 2
+
+entity 0000000000000001
+name = "Camera"
+component 1 Transform
+	position = [0, 33554432, -100663296]
+	rotation = [0.0871557, 0, 0, 0.9961947]
+	scale = [1, 1, 1]
+component 32 Camera
+component 97 Audio_Listener
+
+entity 0000000000000002
+name = "Sun"
+component 1 Transform
+	position = [0, 67108864, 0]
+	rotation = [0.403058, 0.272532, -0.127084, 0.864361]
+	scale = [1, 1, 1]
+component 34 Directional_Light
+	color = [1, 0.95, 0.85]
+	intensity = 3
+	cast_shadows = true
+
+entity 0000000000000003
+name = "Global Volume"
+component 1 Transform
+	position = [0, 0, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 42 Volume
+	shape = Global
+component 49 Environment
+	mode = Atmosphere
+	sun = @0000000000000002
+
+entity 0000000000000004
+name = "Floor"
+component 1 Transform
+	position = [0, 0, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [10, 1, 10]
+component 33 Mesh_Renderer
+	mesh = $13877e2ae98b45509db3145676f75e28
+	materials.0 = $7b3d1f5a9c2e4b6d8f0a2c4e6b8d0f13
+
+entity 0000000000000005
+name = "Cube"
+component 1 Transform
+	position = [0, 16777216, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 33 Mesh_Renderer
+	mesh = $507bb4a374444f91b8e822e2d2e8fac7
+	materials.0 = $7c3e5a91ad4f6b829c3e5a7b9d1e3f40
+behaviour {{guid:content/scripts/spinner.luau}}

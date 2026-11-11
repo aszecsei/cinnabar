@@ -8,6 +8,15 @@ set script-interpreter := ["C:/Program Files/Git/bin/bash.exe"]
 # Configuration
 # =================================
 game := "mygame"
+# The game's project: its settings, its content and, when it has Odin, its game package (see
+# docs/world/game-package.md). A project without a game/ folder runs the standard game, standard.dll.
+project_dir := "samples/" + game
+has_game_code := path_exists(project_dir + "/game")
+# The DLL that the development host runs: the project's own, or the standard game's.
+game_dll_name := if has_game_code == "true" { game } else { "standard" }
+# The game package that the release links: the project's own game/, or the standard game's, which the project
+# collection names (see lib/engine/game/runtime/main.odin).
+release_project := if has_game_code == "true" { project_dir } else { "lib/engine/game/standard" }
 # The build's layout (see docs/overview/building-and-running.md#build-layout): each thing you run is a folder of its
 # own, with the content and the runtime libraries it needs beside its executable, and obj holds the intermediates.
 build_dir := "build"
@@ -74,7 +83,7 @@ opus_version := `git -C vendor/opus describe --tags --always 2>/dev/null || echo
 vorbis_version := `git -C vendor/vorbis describe --tags --always 2>/dev/null || echo unknown`
 # The cooker puts this in every font's cache key, so an msdfgen update cooks every font again.
 msdfgen_version := `git -C vendor/msdfgen describe --tags --always 2>/dev/null || echo unknown`
-content_root := "samples/" + game + "/content"
+content_root := project_dir + "/content"
 # Every cook takes the game's content root and the engine's, so one scan gives every asset its .meta file.
 roots := "--root game=" + content_root + " --root engine=lib/engine/content"
 # What the cooker compiles shaders and materials with: DXC, the directory of the fixed header, cinnabar.hlsli, and the
@@ -84,11 +93,13 @@ shader_tools := "--dxc " + dxc + " --include lib/core/gpu/shaders --include lib/
 # into; and the release's content beside its executable: the bundles that the package step writes from the release
 # cache (see docs/content/blobs-and-loading.md#bundles).
 cache_dir := dev_dir + "/content"
-release_cache := obj_dir + "/release-cache"
+release_cache := obj_dir + "/release-cache/" + game
 release_content := release_dir + "/content"
 # The scripts' Luau definition file, which the cooker type checks against and luau-lsp reads.
 script_types := obj_dir + "/script-types/cinnabar.d.luau"
-packages := "lib/core lib/core/layout lib/core/profile lib/core/jobs lib/core/capture lib/core/gpu lib/core/gpu/null lib/core/gpu/" + gpu_backend + " lib/core/luau lib/core/physics lib/core/physics/host lib/core/physics/null lib/core/physics/jolt lib/core/physics/plugin lib/core/physics/conformance lib/core/audio lib/core/audio/host lib/core/audio/null lib/core/audio/adpcm lib/core/audio/opus lib/core/lz4 lib/core/audio/codec lib/core/audio/mixer lib/core/audio/plugin lib/core/audio/dll lib/core/audio/conformance lib/core/script lib/engine lib/engine/asset lib/engine/asset/format lib/engine/asset/cook_link lib/engine/wire lib/engine/wire/serve lib/engine/wire/servetest lib/engine/render lib/engine/debug lib/engine/ecs lib/engine/script lib/engine/scene lib/engine/volume lib/engine/physics lib/engine/audio lib/engine/anim lib/engine/anim/graph lib/engine/sprite lib/engine/ui lib/engine/project lib/engine/editor lib/engine/editor/link src/host tools/viewer tools/cook tools/ltc_fit tools/stbn tools/editorctl samples/mygame samples/mygame/main_release samples/intel samples/intel/main_release"
+# check, vet and lint take the standard game's package as the release entry point's project collection.
+check_collections := collections + " -collection:project=lib/engine/game/standard"
+packages := "lib/core lib/core/layout lib/core/profile lib/core/jobs lib/core/capture lib/core/gpu lib/core/gpu/null lib/core/gpu/" + gpu_backend + " lib/core/luau lib/core/physics lib/core/physics/host lib/core/physics/null lib/core/physics/jolt lib/core/physics/plugin lib/core/physics/conformance lib/core/audio lib/core/audio/host lib/core/audio/null lib/core/audio/adpcm lib/core/audio/opus lib/core/lz4 lib/core/audio/codec lib/core/audio/mixer lib/core/audio/plugin lib/core/audio/dll lib/core/audio/conformance lib/core/script lib/engine lib/engine/asset lib/engine/asset/format lib/engine/asset/cook_link lib/engine/wire lib/engine/wire/serve lib/engine/wire/servetest lib/engine/render lib/engine/debug lib/engine/ecs lib/engine/script lib/engine/scene lib/engine/volume lib/engine/physics lib/engine/audio lib/engine/anim lib/engine/anim/graph lib/engine/sprite lib/engine/ui lib/engine/project lib/engine/editor lib/engine/editor/link lib/engine/game lib/engine/game/standard/game lib/engine/game/runtime src/host tools/viewer tools/cook tools/cinnabar tools/ltc_fit tools/stbn tools/editorctl samples/mygame/game"
 
 # =================================
 # Help
@@ -387,7 +398,7 @@ watch: cook install-dxc
 
 # Write the scripts' type definitions from the game's bindings
 script-types: host game-dll
-    "./{{dev_dir}}/host.exe" "{{dev_dir}}/{{game}}.dll" --emit-script-types "{{script_types}}"
+    "./{{dev_dir}}/host.exe" "{{dev_dir}}/{{game_dll_name}}.dll" --emit-script-types "{{script_types}}"
 
 # Cook the game's textures and the engine's into the loose cache of the configuration. A texture without a .meta file
 # gets one, with its usage guessed from its name: commit it.
@@ -450,19 +461,40 @@ ui config="dev": cook
 shaders config="dev": install-dxc cook
     "./{{tools_dir}}/cook.exe" shaders --cache "{{ if config == "release" { release_cache } else { cache_dir } }}" --config {{config}} {{shader_tools}} {{roots}}
 
-# Build the game DLL. A running host picks it up and hot-reloads it.
+# Build the game DLL: the project's game package, or the standard game's when the project has no Odin (see
+# docs/world/game-package.md). A running host picks it up and hot-reloads it.
 game-dll: luau jolt opus lz4
     mkdir -p "{{dev_dir}}" "{{obj_dir}}/pdb"
-    odin build "samples/{{game}}" {{dev_collections}} {{dev_defines}} -build-mode:dll \
-        -out:"{{dev_dir}}/{{game}}.dll" \
-        -pdb-name:"{{obj_dir}}/pdb/{{game}}_$(date +%s%N).pdb" \
+    odin build "{{ if has_game_code == "true" { project_dir + "/game" } else { "lib/engine/game/standard/game" } }}" {{dev_collections}} {{dev_defines}} -build-mode:dll \
+        -out:"{{dev_dir}}/{{game_dll_name}}.dll" \
+        -pdb-name:"{{obj_dir}}/pdb/{{game_dll_name}}_$(date +%s%N).pdb" \
         -debug
 
-# Copy the Agility SDK runtime next to an executable, where D3D12SDKPath points
+# Build everything that a project outside the repository builds and runs with (see
+# docs/overview/getting-started.md#the-engine): the host, the cooker, the standard game, the editor and cinnabar.exe.
+engine: host cook engine-runtime editor cinnabar install-dxc
+
+# Build cinnabar.exe, which builds, runs, edits and exports a project with this checkout (see
+# docs/overview/getting-started.md)
+cinnabar:
+    mkdir -p "{{tools_dir}}"
+    odin build tools/cinnabar -collection:cinnabar=lib -define:DXC_VERSION="{{dxc_version}}" -out:"{{tools_dir}}/cinnabar.exe" -o:speed
+
+# Build what a project without Odin runs: the standard game's DLL for development, build/dev/standard.dll, and its
+# release executable, build/runtime/runtime.exe, which an export copies beside the project's bundles under the game's
+# name (see docs/world/game-package.md#releases).
+engine-runtime: luau jolt opus lz4
+    mkdir -p "{{dev_dir}}" "{{build_dir}}/runtime" "{{obj_dir}}/pdb"
+    odin build lib/engine/game/standard/game {{dev_collections}} {{dev_defines}} -build-mode:dll         -out:"{{dev_dir}}/standard.dll" -pdb-name:"{{obj_dir}}/pdb/standard_$(date +%s%N).pdb" -debug
+    odin build lib/engine/game/runtime {{collections}} -collection:project=lib/engine/game/standard {{luau_features}} -define:DEBUG_DRAW=false -define:PROFILE=false -define:BUNDLES=true -subsystem:windows -out:"{{build_dir}}/runtime/runtime.exe" -o:speed
+
+# Copy the Agility SDK runtime next to an executable, where D3D12SDKPath points. The debug layer's library is for
+# development only: a release turns the layer off.
 [private]
-agility-runtime dir: install-agility
+agility-runtime dir layers="true": install-agility
     mkdir -p "{{dir}}/D3D12"
-    cp "{{agility_dir}}/D3D12Core.dll" "{{agility_dir}}/d3d12SDKLayers.dll" "{{dir}}/D3D12/"
+    cp "{{agility_dir}}/D3D12Core.dll" "{{dir}}/D3D12/"
+    if [ "{{layers}}" = true ]; then cp "{{agility_dir}}/d3d12SDKLayers.dll" "{{dir}}/D3D12/"; else rm -f "{{dir}}/D3D12/d3d12SDKLayers.dll"; fi
 
 # Copy FSR's libraries next to an executable, where the D3D12 backend loads them, with their license. A running host
 # keeps them loaded, so only changed ones are copied.
@@ -474,7 +506,7 @@ fidelityfx-runtime dir: install-fidelityfx
 
 # Build and run the game in the development host, with the sample's project settings
 dev: build
-    "./{{dev_dir}}/host.exe" "{{dev_dir}}/{{game}}.dll" --project "samples/{{game}}/project.settings"
+    "./{{dev_dir}}/host.exe" "{{dev_dir}}/{{game_dll_name}}.dll" --project "{{project_dir}}/project.settings"
 
 # Build the viewer, which shows a host's shared frames in place of the editor's viewport
 viewer: opus lz4
@@ -517,7 +549,7 @@ stbn:
 [script]
 dev-shared name="cinnabar": build viewer
     set -euo pipefail
-    "./{{dev_dir}}/host.exe" "{{dev_dir}}/{{game}}.dll" --project "samples/{{game}}/project.settings" --shared "{{name}}" &
+    "./{{dev_dir}}/host.exe" "{{dev_dir}}/{{game_dll_name}}.dll" --project "{{project_dir}}/project.settings" --shared "{{name}}" &
     host=$!
     trap 'kill $host 2>/dev/null || true' EXIT
     # The viewer opens the shared objects, so the host must create them first.
@@ -530,24 +562,29 @@ link-schema: host cook
     "./{{dev_dir}}/host.exe" --emit-link-schema "{{obj_dir}}/link/link-schema.json"
     "./{{tools_dir}}/cook.exe" --emit-link-schema "{{obj_dir}}/link/cook-schema.json"
 
-# Build the editor (see docs/editor/processes-and-projects.md#projects)
+# Build the editor (see docs/editor/processes-and-projects.md#c-projects)
 editor: link-schema
     dotnet build src/editor -nologo -v:quiet
 
 # Build everything and run the game in the editor
 edit: build editor
-    "./{{obj_dir}}/dotnet/bin/Cinnabar.Editor/debug/editor.exe" --host "{{dev_dir}}/host.exe" --game "{{dev_dir}}/{{game}}.dll" --scene "{{content_root}}/scenes/main.scene" \
+    "./{{obj_dir}}/dotnet/bin/Cinnabar.Editor/debug/editor.exe" --host "{{dev_dir}}/host.exe" --game "{{dev_dir}}/{{game_dll_name}}.dll" --scene "{{content_root}}/scenes/main.scene" \
         --cook "{{tools_dir}}/cook.exe" --cache "{{cache_dir}}" --definitions "{{script_types}}" {{shader_tools}} {{roots}} \
-        --project "samples/{{game}}/project.settings"
+        --project "{{project_dir}}/project.settings"
 
 # Build the statically linked release executable into build/release, with its content's bundles and project settings
-# beside it, so the folder runs from anywhere as it is
-release: (agility-runtime release_dir) (fidelityfx-runtime release_dir) luau jolt opus lz4 script-types (scripts "release") (scenes "release") (shaders "release") (textures "release") (models "release") (meshes "release") (materials "release") (effects "release") (animation_graphs "release") (audio "release") (fonts "release") (ui "release") (sprite_sheets "release")
+# beside it, so the folder runs from anywhere as it is. The executable is a Windows application, without a console: it
+# logs to %LOCALAPPDATA%\<game.name>\log.txt (see docs/world/game-package.md#releases).
+# The release cache is the game's own, and the cook in one pass deletes the blobs of assets that left its content, so the
+# bundles hold only its content's (see docs/content/blobs-and-loading.md#bundles).
+release: (agility-runtime release_dir "false") (fidelityfx-runtime release_dir) luau jolt opus lz4 script-types cook install-dxc
+    "./{{tools_dir}}/cook.exe" all --cache "{{release_cache}}" --config release --definitions "{{script_types}}" {{shader_tools}} --prune {{roots}}
     mkdir -p "{{release_dir}}"
-    cp "samples/{{game}}/project.settings" "{{release_dir}}/project.settings"
+    rm -f "{{release_dir}}"/*.exe
+    cp "{{project_dir}}/project.settings" "{{release_dir}}/project.settings"
     rm -rf "{{release_content}}"
-    "./{{tools_dir}}/cook.exe" package --cache "{{release_cache}}" --out "{{release_content}}" --project "samples/{{game}}/project.settings"
-    odin build "samples/{{game}}/main_release" {{collections}} {{luau_features}} -define:DEBUG_DRAW=false -define:PROFILE=false -define:CAPTURE=false -define:BUNDLES=true -out:"{{release_dir}}/{{game}}.exe" -o:speed
+    "./{{tools_dir}}/cook.exe" package --cache "{{release_cache}}" --out "{{release_content}}" --project "{{project_dir}}/project.settings"
+    odin build lib/engine/game/runtime {{collections}} -collection:project="{{release_project}}" {{luau_features}} -define:DEBUG_DRAW=false -define:PROFILE=false -define:CAPTURE=false -define:BUNDLES=true -subsystem:windows -out:"{{release_dir}}/{{game}}.exe" -o:speed
 
 # Build and run the release executable
 run-release: release
@@ -558,13 +595,13 @@ run-release: release
 # =================================
 
 check:
-    for p in {{packages}}; do odin check "$p" {{collections}} -no-entry-point || exit 1; done
+    for p in {{packages}}; do odin check "$p" {{check_collections}} -no-entry-point || exit 1; done
 
 vet:
-    for p in {{packages}}; do odin check "$p" {{collections}} -no-entry-point -vet -vet-tabs -vet-style -vet-semicolon || exit 1; done
+    for p in {{packages}}; do odin check "$p" {{check_collections}} -no-entry-point -vet -vet-tabs -vet-style -vet-semicolon || exit 1; done
 
 lint:
-    for p in {{packages}}; do odin check "$p" {{collections}} -no-entry-point -vet -vet-tabs -vet-style -strict-style -warnings-as-errors || exit 1; done
+    for p in {{packages}}; do odin check "$p" {{check_collections}} -no-entry-point -vet -vet-tabs -vet-style -strict-style -warnings-as-errors || exit 1; done
 
 # Check that every docs/<path>.md#<section> link in the source, the justfile and the docs resolves to a heading
 docs-check:
@@ -620,7 +657,7 @@ intel-report: cook
 
 # The cooker's tests compile shaders, so they need DXC.
 test: luau jolt opus lz4 vorbis audio-plugin compressonator meshoptimizer lightusd msdfgen link-schema install-dxc
-    for p in lib/core lib/core/testlog lib/core/layout lib/core/profile lib/core/jobs lib/core/capture lib/core/gpu lib/core/gpu/null lib/core/physics lib/core/physics/host lib/core/physics/null lib/core/physics/jolt lib/core/physics/plugin lib/core/audio/host lib/core/audio/null lib/core/audio/adpcm lib/core/audio/codec lib/core/audio/mixer lib/core/audio/plugin lib/core/lz4 lib/core/script lib/engine/asset lib/engine/asset/format lib/engine/asset/cook_link lib/engine/wire lib/engine/wire/serve lib/engine/render lib/engine/debug lib/engine/ecs lib/engine/script lib/engine/scene lib/engine/volume lib/engine/physics lib/engine/audio lib/engine/anim lib/engine/anim/graph lib/engine/sprite lib/engine/ui lib/engine/project lib/engine/editor lib/engine/editor/link src/host tools/cook tools/ltc_fit tools/stbn tools/flickerstat; do odin test "$p" {{collections}} -define:LUAU_VERSION="{{luau_version}}" -define:COMPRESSONATOR_VERSION="{{compressonator_version}}" -define:MESHOPTIMIZER_VERSION="{{meshoptimizer_version}}" -define:LIGHTUSD_VERSION="{{lightusd_version}}" -define:OPUS_VERSION="{{opus_version}}" -define:LZ4_VERSION="{{lz4_version}}" -define:VORBIS_VERSION="{{vorbis_version}}" -define:MSDFGEN_VERSION="{{msdfgen_version}}" || exit 1; done
+    for p in lib/core lib/core/testlog lib/core/layout lib/core/profile lib/core/jobs lib/core/capture lib/core/gpu lib/core/gpu/null lib/core/physics lib/core/physics/host lib/core/physics/null lib/core/physics/jolt lib/core/physics/plugin lib/core/audio/host lib/core/audio/null lib/core/audio/adpcm lib/core/audio/codec lib/core/audio/mixer lib/core/audio/plugin lib/core/lz4 lib/core/script lib/engine/asset lib/engine/asset/format lib/engine/asset/cook_link lib/engine/wire lib/engine/wire/serve lib/engine/render lib/engine/debug lib/engine/ecs lib/engine/script lib/engine/scene lib/engine/volume lib/engine/physics lib/engine/audio lib/engine/anim lib/engine/anim/graph lib/engine/sprite lib/engine/ui lib/engine/project lib/engine/editor lib/engine/editor/link lib/engine/game src/host tools/cook tools/cinnabar tools/ltc_fit tools/stbn tools/flickerstat; do odin test "$p" {{collections}} -define:LUAU_VERSION="{{luau_version}}" -define:COMPRESSONATOR_VERSION="{{compressonator_version}}" -define:MESHOPTIMIZER_VERSION="{{meshoptimizer_version}}" -define:LIGHTUSD_VERSION="{{lightusd_version}}" -define:OPUS_VERSION="{{opus_version}}" -define:LZ4_VERSION="{{lz4_version}}" -define:VORBIS_VERSION="{{vorbis_version}}" -define:MSDFGEN_VERSION="{{msdfgen_version}}" -define:DXC_VERSION="{{dxc_version}}" || exit 1; done
     # The optional direct field access path must behave the same (see docs/scripting/embedding.md#direct-field-access).
     odin test lib/engine/script {{collections}} -define:LUAU_DIRECT_ACCESS=true
     # Release builds have no profiler, and everything must still run (see docs/core/profiling.md#builds).

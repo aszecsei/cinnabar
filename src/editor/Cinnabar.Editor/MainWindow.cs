@@ -67,6 +67,7 @@ public sealed class MainWindow : Window
         var palette = new CommandPalette(views);
         shell.PaletteRequested += palette.Open;
         shell.OpenSceneRequested += () => _ = PickScene();
+        shell.OpenProjectRequested += () => _ = PickProject();
         shell.OpenSceneFileRequested += path => _ = OpenSceneFile(path);
         shell.SaveAsRequested += () => _ = PickSaveAs();
         shell.RestoreOffered += () => _ = OfferRestore();
@@ -456,6 +457,27 @@ public sealed class MainWindow : Window
         if (files.Count == 1 && files[0].TryGetLocalPath() is { } path)
         {
             _shell.OpenScene(path);
+        }
+    }
+
+    // Another project opens in a new editor, which builds it first (see docs/editor/processes-and-projects.md#projects).
+    // This one closes as the user closes it, asking about unsaved changes.
+    async Task PickProject()
+    {
+        var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = "Open Project", AllowMultiple = false });
+        if (folders.Count != 1 || folders[0].TryGetLocalPath() is not { } path)
+        {
+            return;
+        }
+        if (ProjectLayout.ProjectDirectory(path) is not { } project)
+        {
+            await Dialogs.Ask(this, "Open Project", $"{path} is not a project: it has no {ProjectLayout.SettingsFileName}. Make one with New Project in the welcome window, or cinnabar new.", "OK");
+            return;
+        }
+        if (Environment.ProcessPath is { } editor)
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(editor, [project]) { UseShellExecute = false });
+            Close();
         }
     }
 
