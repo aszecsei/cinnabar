@@ -11,7 +11,8 @@ namespace Cinnabar.Editor.Model;
 /// views and path, the viewport settings that <c>viewport</c> changes by their names in the sidecar, and the position in
 /// meters and the angles in radians that <c>camera</c> places the editor's camera at, the panel whose window <c>ui</c>
 /// draws, the viewport (0 to 3) that <c>screenshot</c>, <c>gif</c>, <c>viewport</c> and <c>camera</c> act on, and in the
-/// settings, what <c>content</c> changes in the content browser.
+/// settings, what <c>content</c> changes in the content browser, and the summaries that <c>timing</c> skips and takes, and
+/// the passes it answers for.
 /// </summary>
 public sealed record AutomationRequest(
     long Id,
@@ -23,16 +24,22 @@ public sealed record AutomationRequest(
     double? Yaw = null,
     double? Pitch = null,
     string? Window = null,
-    int? Viewport = null);
+    int? Viewport = null,
+    int? Samples = null,
+    int? Skip = null,
+    string[]? Passes = null);
 
-/// <summary>What <c>status</c> answers: the host and the scene, and the numbers of the viewports that are shown.</summary>
-public sealed record AutomationStatus(bool Linked, string HostState, string Mode, string? Scene, string? Game, int? HostPid, int[]? Viewports = null);
+/// <summary>A shown viewport's number and the size that the game draws it at, and whether that size is fixed rather than its pane's.</summary>
+public sealed record AutomationViewportSize(int Viewport, int Width, int Height, bool Fixed);
+
+/// <summary>What <c>status</c> answers: the host and the scene, the numbers of the viewports that are shown, and the sizes that the game draws them at.</summary>
+public sealed record AutomationStatus(bool Linked, string HostState, string Mode, string? Scene, string? Game, int? HostPid, int[]? Viewports = null, AutomationViewportSize[]? Sizes = null);
 
 /// <summary>What <c>content</c> answers: the content browser's folder, search and selection, the names of the assets that it shows, and the pictures that it waits for and those that could not be made.</summary>
 public sealed record AutomationContent(string? Folder, string Search, string[] Selection, string[] Items, int ThumbnailsWaiting = 0, string[]? ThumbnailsFailed = null);
 
 /// <summary>The answer to a request. Files are the ones a capture wrote, the sidecar last.</summary>
-public sealed record AutomationResponse(long Id, bool Ok, string[]? Files = null, string? Error = null, AutomationStatus? Status = null, AutomationContent? Content = null);
+public sealed record AutomationResponse(long Id, bool Ok, string[]? Files = null, string? Error = null, AutomationStatus? Status = null, AutomationContent? Content = null, AutomationTiming? Timing = null);
 
 /// <summary>What the editor writes beside its build for tools to find it: the port, and the editor's process, so a stale file is known.</summary>
 public sealed record AutomationInfo(int Port, int Pid, DateTime Started);

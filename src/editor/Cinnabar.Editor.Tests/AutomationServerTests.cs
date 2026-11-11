@@ -36,6 +36,8 @@ public sealed class AutomationServerTests
             {
                 "status" => new AutomationResponse(request.Id, true, Status: new AutomationStatus(true, "Running", "Edit", "E:/door.scene", "mygame", 42)),
                 "screenshot" => new AutomationResponse(request.Id, true, ["E:/captures/a.png", "E:/captures/a.json"]),
+                "timing" => new AutomationResponse(request.Id, true, Timing: new AutomationTiming(5, 4.5,
+                    [new PassTiming("fog inject", "compute", 1, 0.2, 0.1, 0.3, 5)], [new AutomationViewportSize(0, 1920, 1080, true)])),
                 _ => new AutomationResponse(request.Id, false, Error: $"unknown command {request.Command}"),
             });
         });
@@ -55,6 +57,14 @@ public sealed class AutomationServerTests
             Assert.Equal(["depth", "normals"], seen[1].Views!);
             Assert.Equal("E:/captures/a", seen[1].Path);
 
+            var timing = await Ask(reader, writer, """{"id":5,"command":"timing","samples":5,"skip":2,"passes":["fog inject"]}""");
+            var pass = timing.GetProperty("timing").GetProperty("passes")[0];
+            Assert.Equal("fog inject", pass.GetProperty("name").GetString());
+            Assert.Equal(0.2, pass.GetProperty("medianMs").GetDouble());
+            Assert.True(timing.GetProperty("timing").GetProperty("viewports")[0].GetProperty("fixed").GetBoolean());
+            Assert.Equal((5, 2), (seen[2].Samples, seen[2].Skip));
+            Assert.Equal(["fog inject"], seen[2].Passes!);
+
             var unknown = await Ask(reader, writer, """{"id":3,"command":"dance"}""");
             Assert.False(unknown.GetProperty("ok").GetBoolean());
             Assert.Contains("dance", unknown.GetProperty("error").GetString());
@@ -67,7 +77,7 @@ public sealed class AutomationServerTests
             Assert.Equal(4, empty.GetProperty("id").GetInt64());
             Assert.Contains("command", empty.GetProperty("error").GetString());
         }
-        Assert.Equal(3, seen.Count);
+        Assert.Equal(4, seen.Count);
     }
 
     [Fact]

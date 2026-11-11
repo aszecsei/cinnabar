@@ -1,3 +1,4 @@
+using Avalonia;
 using Avalonia.Threading;
 using Cinnabar.Editor.Content;
 using Cinnabar.Editor.Link.Protocol;
@@ -71,7 +72,7 @@ public sealed partial class EditorShell
         {
             case "status":
                 return new AutomationResponse(request.Id, true,
-                    Status: new AutomationStatus(Host.Linked, Host.State.Name, Mode.ToString(), Scene?.Path, Host.Game, Host.ProcessId, [.. ShownViewports.Select(v => v.Index)]));
+                    Status: new AutomationStatus(Host.Linked, Host.State.Name, Mode.ToString(), Scene?.Path, Host.Game, Host.ProcessId, [.. ShownViewports.Select(v => v.Index)], DrawSizes()));
             case "screenshot":
                 List<DebugView> views = [];
                 foreach (var name in request.Views ?? [])
@@ -140,6 +141,15 @@ public sealed partial class EditorShell
                 {
                     return new AutomationResponse(request.Id, false, Error: $"viewport {request.Viewport} is not one of the viewports, 0 to {Viewports.Count - 1}");
                 }
+                // The size is the shell's too: what it opens the viewport in the game at.
+                if (changes.Remove("size", out var size))
+                {
+                    if (!TryParseFixedSize(size.ToString(), out var fixedSize, out var refused))
+                    {
+                        return new AutomationResponse(request.Id, false, Error: refused);
+                    }
+                    SetFixedSize(target, fixedSize);
+                }
                 if (changes.Count == 0)
                 {
                     return new AutomationResponse(request.Id, true);
@@ -163,12 +173,104 @@ public sealed partial class EditorShell
                 }
                 placed.Camera.Place([.. meters.Select(m => (long)Math.Round(m * (1 << 24)))], request.Yaw ?? placed.Camera.Yaw, request.Pitch ?? placed.Camera.Pitch);
                 return new AutomationResponse(request.Id, true);
+            case "timing":
+                return await TimingResponse(request, cancel);
             case "ui":
                 return CaptureUiResponse(request);
             case "content":
                 return ContentResponse(request);
             default:
-                return new AutomationResponse(request.Id, false, Error: $"unknown command {request.Command}; the commands are status, screenshot, gif, viewport, camera, ui and content");
+                return new AutomationResponse(request.Id, false, Error: $"unknown command {request.Command}; the commands are status, screenshot, gif, viewport, camera, timing, ui and content");
+        }
+    }
+
+    /// <summary>The summaries that <c>timing</c> takes when a request does not say, and the most it takes or skips.</summary>
+    public const int DefaultTimingSamples = 5, MaxTimingSamples = 100;
+
+    /// <summary>How long <c>timing</c> waits for a summary: the host sends one every 250 ms.</summary>
+    public static readonly TimeSpan SummaryWait = TimeSpan.FromSeconds(2);
+
+    /// <summary>
+    /// Reads a viewport's <c>size</c>: <c>&lt;width&gt;x&lt;height&gt;</c> in pixels for a size of its own, or <c>pane</c>
+    /// for its control's, which is null. The reason is why it is neither.
+    /// </summary>
+    public static bool TryParseFixedSize(string text, out PixelSize? size, out string reason)
+    {
+        size = null;
+        reason = "";
+        if (text.Equals("pane", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+        var parts = text.Split('x', 'X');
+        if (parts.Length == 2 && int.TryParse(parts[0], out var width) && int.TryParse(parts[1], out var height)
+            && width >= 1 && height >= 1 && width <= MaxViewportSize && height <= MaxViewportSize)
+        {
+            size = new PixelSize(width, height);
+            return true;
+        }
+        reason = $"size takes <width>x<height>, each 1 to {MaxViewportSize} pixels, or pane, not {text}";
+        return false;
+    }
+
+    // The viewports that are shown, with the sizes that the game draws them at.
+    AutomationViewportSize[] DrawSizes() =>
+        [.. Viewports.Where(v => v.DrawSize != null).Select(v => new AutomationViewportSize(v.Index, v.DrawSize!.Value.Width, v.DrawSize.Value.Height, v.FixedSize != null))];
+
+    // Waits for the host's profile summaries: skips the first ones, whose interval may be from before a change that the
+    // request follows, then takes the passes' times from the next ones. A summary without GPU frames has no passes and
+    // does not count; a host that sends none for SummaryWait is an error.
+    async Task<AutomationResponse> TimingResponse(AutomationRequest request, CancellationToken cancel)
+    {
+        var samples = request.Samples ?? DefaultTimingSamples;
+        var skip = request.Skip ?? 1;
+        if (samples < 1 || samples > MaxTimingSamples || skip < 0 || skip > MaxTimingSamples)
+        {
+            return new AutomationResponse(request.Id, false, Error: $"timing takes 1 to {MaxTimingSamples} samples and skips 0 to {MaxTimingSamples}");
+        }
+        if (!Host.Linked)
+        {
+            return new AutomationResponse(request.Id, false, Error: "no host is linked to time");
+        }
+        if (!ShownViewports.Any())
+        {
+            return new AutomationResponse(request.Id, false, Error: "no viewport is shown, so no pass draws");
+        }
+        var arrived = new List<Link.Protocol.ProfileSummary>();
+        using var signal = new SemaphoreSlim(0);
+        void OnArrived(Link.Protocol.ProfileSummary summary)
+        {
+            arrived.Add(summary);
+            signal.Release();
+        }
+        Profiler.SummaryArrived += OnArrived;
+        try
+        {
+            var taken = new List<Link.Protocol.ProfileSummary>(samples);
+            var seen = 0;
+            // A host whose frames never reach the GPU would keep this waiting, so it gives up after this many summaries.
+            var most = 4 * (samples + skip) + 8;
+            while (taken.Count < samples)
+            {
+                if (!await signal.WaitAsync(SummaryWait, cancel))
+                {
+                    return new AutomationResponse(request.Id, false, Error: $"the host sent no profile summary for {SummaryWait.TotalSeconds:0} s");
+                }
+                var summary = arrived[seen++];
+                if (summary.GpuFrames > 0 && seen > skip)
+                {
+                    taken.Add(summary);
+                }
+                else if (seen >= most)
+                {
+                    return new AutomationResponse(request.Id, false, Error: $"the host's last {seen} profile summaries had no GPU frames");
+                }
+            }
+            return new AutomationResponse(request.Id, true, Timing: ProfileTiming.Measure(taken, request.Passes, DrawSizes()));
+        }
+        finally
+        {
+            Profiler.SummaryArrived -= OnArrived;
         }
     }
 

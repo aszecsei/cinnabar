@@ -63,10 +63,14 @@ public sealed class ProfilerModel
     /// <summary>The capture, its status or the highlight changed.</summary>
     public event Action? CaptureChanged;
 
+    /// <summary>The host sent a summary: one for each stats interval, unlike <see cref="SummaryChanged"/>, which a new order raises too.</summary>
+    public event Action<ProfileSummary>? SummaryArrived;
+
     public void Apply(ProfileSummary summary)
     {
         Summary = summary;
         SummaryChanged?.Invoke();
+        SummaryArrived?.Invoke(summary);
     }
 
     /// <summary>Makes a capture request, and waits for its answer. An answer to an earlier request is ignored.</summary>
