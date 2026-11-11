@@ -54,10 +54,14 @@ Tone_Mapping :: struct {
 	peak:        volume.Value(f32) `editor:"range=0,10000"`,
 }
 
+// Bloom is the glow around bright light (see docs/rendering/post-processing.md#bloom).
 Bloom :: struct {
 	off:       volume.Value(bool),
 	// Bloom's share of the final color.
 	intensity: volume.Value(f32) `editor:"range=0,0.5"`,
+	// How wide the glow spreads: 0 keeps it to the largest level of the chain, a few pixels around the light, and 1
+	// takes only the smallest, across much of the screen.
+	radius:    volume.Value(f32) `editor:"range=0,1"`,
 }
 
 // Ambient_Occlusion is the ambient occlusion (see docs/rendering/ambient-occlusion.md#ambient-occlusion).
@@ -230,6 +234,7 @@ DEFAULT_TONE_MAPPING :: Tone_Mapping {
 }
 DEFAULT_BLOOM :: Bloom {
 	intensity = {value = DEFAULT_BLOOM_INTENSITY},
+	radius = {value = DEFAULT_BLOOM_RADIUS},
 }
 DEFAULT_AMBIENT_OCCLUSION :: Ambient_Occlusion {
 	radius = {value = DEFAULT_AO_RADIUS},
@@ -359,6 +364,7 @@ resolve_settings :: proc(r: ^Renderer, w: ^ecs.World, position: ecs.World_Positi
 			no_aa = aa.off.value,
 			no_bloom = bloom.off.value,
 			bloom_intensity = bloom.intensity.value,
+			bloom_radius = bloom.radius.value,
 			exposure_mode = exposure.mode.value,
 			exposure = exposure.exposure.value,
 			exposure_compensation = exposure.compensation.value,

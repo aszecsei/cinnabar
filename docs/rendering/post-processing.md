@@ -1,6 +1,6 @@
 # Post-processing
 
-**In this document:** [Debug views](#debug-views) · [Post effects](#post-effects)
+**In this document:** [Bloom](#bloom) · [Debug views](#debug-views) · [Post effects](#post-effects)
 
 The post passes run after the `before_post` hook, in linear HDR at the scene's resolution (`lib/engine/render/post.odin`). The `Anti_Aliasing`, `Exposure`, `Tone_Mapping` and `Bloom` settings set them (see [Settings](frame.md#settings)), and the [quality](quality.md#quality) chooses the anti-aliasing: temporal AA or FSR here, or FXAA or SMAA after the lookup table (see [Anti-aliasing](anti-aliasing.md#anti-aliasing)). A pass whose pipeline is not compiled is left out, and the frame goes on without it: no jitter without temporal AA or FSR, and a plain roll-off to white until the lookup table is baked.
 
@@ -9,7 +9,7 @@ The post passes run after the `before_post` hook, in linear HDR at the scene's r
 | Temporal AA | Reprojection by velocity, a Catmull-Rom history, clipping to the neighborhood's colors; upscales a smaller scene to the frame's size (see [Upscaling](anti-aliasing.md#upscaling)) | Scene color, velocity, depth, history | Its history texture, which becomes `Frame.scene` |
 | FSR, in temporal AA's place | The motion pass, then AMD's FSR (see [Anti-aliasing](anti-aliasing.md#fsr)) | Scene color, velocity, depth | The upscaled scene, which becomes `Frame.scene` |
 | Exposure | A luminance histogram, then the exposure that maps its average to middle grey | Scene color, depth | The exposure buffer, which pre-exposes the next frame |
-| Bloom | A chain of downsamples with a 13-tap filter, and upsamples with a 3x3 tent | Scene color | `Frame.bloom` |
+| Bloom | A chain of downsamples with a 13-tap filter, and upsamples that blend each level with the one below by a radius (see [Bloom](#bloom)) | Scene color | `Frame.bloom` |
 | Tone mapping | A lookup table that a compute pass bakes when the settings change: the color grading and the curve (AgX by default; Khronos PBR Neutral, ACES); the output pass reads it, or with FXAA or SMAA, the tone map pass before them | Scene color, bloom | sRGB-encoded colors, or PQ-encoded nits in [HDR output](layers-and-output.md#hdr-output) |
 | FXAA or SMAA | See [Anti-aliasing](anti-aliasing.md#anti-aliasing) | The tone-mapped scene | `Frame.display`, which the output pass reads |
 
@@ -18,8 +18,42 @@ The post passes run after the `before_post` hook, in linear HDR at the scene's r
 - **History textures:** `history_texture` in the render graph gives a pair of textures that the `Texture_Cache` keeps and swaps every frame, for temporal AA, the global illumination and the fog (see [GPU](../gpu/render-graph.md#render-graph)). Last frame's is not valid in the first frame, after a frame that did not use it, or when the view's size changes.
 - **Pre-exposure.** The forward pass multiplies its colors by the exposure, so the scene holds `radiance × exposure`, inside the half-float range at any brightness. The exposure is in a buffer of two floats (`Post.exposure`): this frame's, then last frame's. The exposure pass writes the next frame's after the scene is drawn, so the exposure lags a frame, and temporal AA rescales the history by the ratio. A game's own draws in the world pass read it too. The clear color is not pre-exposed. Each [view](frame.md#views) has an exposure buffer of its own, in its `View_State` (`Post_State.exposure`), with its own adaptation, jitter and upscaler.
 - **Exposure.** With `Auto`, the histogram (`exposure_histogram.hlsl`) counts each pixel's luminance, without pre-exposure, into 256 bins of log2 luminance from -12 to 8. Pixels where nothing drew count when the `Atmosphere` or `Texture` sky drew them, pre-exposed (see [Sky](sky.md#modes)). Otherwise they hold the clear color, which is not pre-exposed, so they do not count; the exposure would chase its own scale. The exposure pass (`exposure_adapt.hlsl`) takes the mean log2 luminance between the 10th and the 90th percentiles, clamps it to `exposure_range` (`DEFAULT_EXPOSURE_RANGE`, -8 to 4), and aims at `0.18 / average × 2^exposure_compensation`. It goes `1 - e^(-speed × seconds)` of the way there in a frame (`adaptation_speed`, `DEFAULT_ADAPTATION_SPEED`), and all the way in the first frame. With `Manual`, the exposure is `exposure × 2^exposure_compensation`, at once. Both passes run on the graphics queue: on the compute queue, the next frame's forward pass would need the graph to order the exposure buffer across frames.
-- **Bloom** halves the scene at most `BLOOM_LEVELS` (6) times, while each side stays at least `BLOOM_MIN_SIZE` (8) pixels. The first downsample weighs each of the filter's five boxes by `1 / (1 + luminance)`, so a single bright pixel does not flicker as it moves. Then, from the smallest level up, each level adds the level below it, blurred with a 3x3 tent. The output pass adds the largest level: `scene × (1 - intensity) + bloom × intensity / levels`, with `bloom_intensity` 0.04 by default (`DEFAULT_BLOOM_INTENSITY`).
+- **Bloom** halves the scene up to 8 times and blends the levels back up by `bloom_radius`; the output pass adds the result with `bloom_intensity` (see [Bloom](#bloom)).
 - **The lookup table** (`tone_lut.hlsl`, `tone_lut.hlsli`) has 32 entries on each axis, its blue slices side by side in one 1024x32 `RGBA16_Float` texture, since textures are 2D. The entries cover -12.5 to +8 stops around middle grey on a log2 scale, so a scene color in any range has a place. Each holds the display color of its scene color, sRGB-encoded: the tint, the saturation and the contrast (`tint`, `saturation`, `contrast`), then the tone mapper. A compute pass bakes it in the first frame, and again when the grading or its shader changes. The output pass reads it with two bilinear samples. AgX rolls bright colors off to white with less saturation than Khronos PBR Neutral, and keeps dark colors a little brighter, so `tone_mapper = .Pbr_Neutral` gives the look that the fixed tone mapper had before.
+
+## Bloom
+
+Bloom is the glow around bright light (`bloom.hlsl`, compute passes on the graphics queue). The `Bloom` settings give its `intensity`, 0.04 by default (`DEFAULT_BLOOM_INTENSITY`), and its `radius`, 0 to 1, 0.75 by default (`DEFAULT_BLOOM_RADIUS`).
+
+- **Down:** the chain halves the scene while the shorter side is at least `BLOOM_MIN_SIZE` (4) pixels, up to `BLOOM_LEVELS` (8) times (`bloom_chain`): at 1080p from 960x540 to 7x4, at 1440p to 10x5. Each level is a 13-tap filter of the one before, five overlapping boxes of bilinear taps (Jimenez). The first weighs each box by `1 / (1 + luminance)`, so a single bright pixel does not flicker as it moves.
+- **Up:** from the smallest level up, each level becomes `lerp(level, upsample(below), radius)`. Level k's share of the result is `(1 - radius) × radius^k`, and the smallest level's `radius^7`, so the shares sum to 1 and the result is as bright as the scene. At 0 the result is the largest level alone, which adds almost no glow; at 1 it is the smallest level alone, a haze across much of the screen.
+- **The upsample** reads a level whose shorter side is under `BLOOM_BICUBIC_SIZE` (16) pixels with Catmull-Rom in five bilinear taps (`sample_catmull_rom` in `filter.hlsli`, which temporal AA's history shares), and the others with a 3x3 tent. At 1080p that is the 15x8 and 7x4 levels. A large radius spreads those few texels over the screen; Catmull-Rom keeps their glow around the light where the tent smears it outward. At radius 1, the glow 64 to 128 pixels from mygame's hologram at night is 10.3 codes over the scene with Catmull-Rom against 6.4 with the tent. Neither showed blocks at 1080p.
+- **The output pass** adds the largest level: `scene × (1 - intensity) + bloom × intensity`, or the composite does, before a game's [post effects](#post-effects).
+
+**The default radius.** The chain had 6 levels to a side of 8 pixels, and the output divided their sum by the level count, so every level weighed a sixth. No single radius gives equal weights, so 0.75 is the radius whose glow of a single bright pixel at 1080p comes nearest the old one: a simulation of both chains (13-tap down, tent or Catmull-Rom up) put the root mean square difference of their encircled energy, at radii 1 to 256 pixels, at 0.071, against 0.097 at 0.7 and 0.098 at 0.8. Measured in mygame's glass scene at 1920x1080, as the mean luma (0 to 255) that bloom adds in rings around the light against a capture without bloom:
+
+| Rings (pixels) | 4-8 | 8-16 | 16-32 | 32-64 | 64-128 | 128-256 | 256-512 |
+|---|---|---|---|---|---|---|---|
+| The sun's disc, 6 levels before | 93.2 | 107.5 | 79.9 | 41.3 | 12.9 | 1.5 | 0.0 |
+| The sun's disc, radius 0.75 | 93.1 | 104.6 | 67.9 | 27.8 | 8.8 | 3.1 | 0.9 |
+| The sun's disc, radius 0 | 61.4 | 1.8 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
+| The sun's disc, radius 1 | 11.4 | 12.1 | 12.2 | 12.2 | 12.4 | 11.9 | 5.7 |
+| The hologram at night, 6 levels before | 0.0 | 0.0 | 0.0 | 2.2 | 9.4 | 6.4 | 0.9 |
+| The hologram at night, radius 0.75 | 0.0 | 0.0 | 0.0 | 1.7 | 7.5 | 6.5 | 3.2 |
+| The hologram at night, radius 0 | 0.0 | 0.0 | 0.0 | 0.4 | 0.3 | 0.2 | 0.0 |
+| The hologram at night, radius 1 | 0.0 | 0.0 | 0.0 | 1.1 | 10.3 | 14.4 | 15.4 |
+
+The core is the same, the middle a little fainter and the edge a little wider; side by side, the two look alike.
+
+**Eight levels against six.** With the blend and 6 levels, the glow at radius 0.75 ends near 256 pixels (1.0 at 256-512 around the hologram, against 3.2 with 8), and at radius 1 it stays around the light (18.8 at 64-128 and 3.1 at 256-512, against 10.3 and 15.4 with 8). Cost on an RTX 5090 with D3D12 at 1920x1080, the median of five 250 ms summaries:
+
+| Chain | Down | Up | Bloom |
+|---|---|---|---|
+| 6 levels, the sum over the level count (before) | 27.7 us | 23.1 us | 50.8 us |
+| 6 levels, the blend | 27.8 us | 23.9 us | 51.7 us |
+| 8 levels, the blend | 33.4 us | 30.0 us | 63.4 us |
+
+The two smallest levels are a few hundred pixels each, so their cost is two passes of overhead each way. The radius does not change it.
 
 ## Debug views
 
