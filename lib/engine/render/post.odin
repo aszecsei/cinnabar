@@ -29,11 +29,18 @@ TEMPORAL_BLEND :: 0.1
 // The prepass clears the velocity to this where it draws nothing, the sky and a game's own draws, which temporal AA
 // then moves with the camera. Matches VELOCITY_NONE in temporal_aa.hlsl.
 VELOCITY_NONE :: 10000
-// Bloom's chain halves the scene at most this many times, and stops before a side is shorter than BLOOM_MIN_SIZE.
-BLOOM_LEVELS :: 6
-BLOOM_MIN_SIZE :: 8
+// Bloom's chain halves the scene at most this many times, and stops before the shorter side is under BLOOM_MIN_SIZE.
+// At 1080p it ends at 7x4.
+BLOOM_LEVELS :: 8
+BLOOM_MIN_SIZE :: 4
+// An upsample from a level whose shorter side is under this many pixels reads it with Catmull-Rom rather than the 3x3
+// tent, so the smallest levels do not show as blocks when a large radius spreads them over the screen.
+BLOOM_BICUBIC_SIZE :: 16
 BLOOM_FORMAT :: gpu.Format.RGBA16_Float
 DEFAULT_BLOOM_INTENSITY :: 0.04
+// How much of each level the level below replaces on the way up. At 0.75 a bright pixel's glow is nearest the old
+// chain's, which weighed its six levels the same (see docs/rendering/post-processing.md#bloom).
+DEFAULT_BLOOM_RADIUS :: 0.75
 // The luminance histogram's bins, and the range of log2 luminance that bins 1 and up cover. Bin 0 holds black pixels.
 HISTOGRAM_BINS :: 256
 HISTOGRAM_MIN_LOG :: -12
@@ -74,8 +81,9 @@ Post_Settings :: struct {
 	aa:                    Aa_Technique,
 	no_aa:                 bool,
 	no_bloom:              bool,
-	// Bloom's share of the final color.
+	// Bloom's share of the final color, and how wide it spreads, from 0, the largest level alone, to 1, the smallest.
 	bloom_intensity:       f32,
+	bloom_radius:          f32,
 	exposure_mode:         Exposure_Mode,
 	// With Manual, the scale of the scene's colors. 0 means 1.
 	exposure:              f32,
@@ -238,7 +246,8 @@ Temporal_Constants :: struct {
 }
 
 // The modes of bloom.hlsl: the first downsample, which weighs down bright pixels so they do not flicker, the others,
-// the upsamples, and the composite into the scene before a game's effects (see add_post_effects).
+// the upsamples with the tent and with Catmull-Rom, and the composite into the scene before a game's effects (see
+// add_post_effects).
 @(private)
 BLOOM_FIRST :: 0
 @(private)
@@ -247,6 +256,8 @@ BLOOM_DOWN :: 1
 BLOOM_UP :: 2
 @(private)
 BLOOM_COMPOSITE :: 3
+@(private)
+BLOOM_UP_BICUBIC :: 4
 
 // Bloom_Push matches Push in bloom.hlsl.
 @(private)
@@ -260,7 +271,7 @@ Bloom_Push :: struct {
 	mode:          u32,
 	scene_scale:   f32,
 	bloom_scale:   f32,
-	padding:       u32,
+	radius:        f32,
 }
 
 // Histogram_Push matches Push in exposure_histogram.hlsl.
@@ -532,15 +543,9 @@ add_post_passes :: proc(f: ^Frame) {
 	}
 
 	if !s.no_bloom && pipeline_ready(platform, &p.bloom) {
-		size := f.scene_size
-		for level in 0 ..< BLOOM_LEVELS {
-			size = {max(size.x / 2, 1), max(size.y / 2, 1)}
-			if level > 0 && min(size.x, size.y) < BLOOM_MIN_SIZE {
-				break
-			}
-			pf.bloom_sizes[level] = size
-			pf.bloom_down[level] = create_texture(g, {size = size, format = BLOOM_FORMAT, label = "bloom down"})
-			pf.bloom_levels += 1
+		pf.bloom_levels, pf.bloom_sizes = bloom_chain(f.scene_size)
+		for level in 0 ..< pf.bloom_levels {
+			pf.bloom_down[level] = create_texture(g, {size = pf.bloom_sizes[level], format = BLOOM_FORMAT, label = "bloom down"})
 		}
 		pf.bloom_in = f.scene
 		source := f.scene
@@ -550,7 +555,7 @@ add_post_passes :: proc(f: ^Frame) {
 			write(g, pass, pf.bloom_down[level])
 			source = pf.bloom_down[level]
 		}
-		// From the smallest level up, each level adds the blurred level below it.
+		// From the smallest level up, each level blends with the level below it by the radius.
 		for level := pf.bloom_levels - 2; level >= 0; level -= 1 {
 			pf.bloom_up[level] = create_texture(g, {size = pf.bloom_sizes[level], format = BLOOM_FORMAT, label = "bloom up"})
 			pass := add_compute_pass(g, "bloom up", run_bloom, new_clone(Bloom_Step{f, level, true}, platform.frame_allocator))
@@ -559,10 +564,11 @@ add_post_passes :: proc(f: ^Frame) {
 			write(g, pass, pf.bloom_up[level])
 			source = pf.bloom_up[level]
 		}
-		// Each level adds its share, so the chain's sum is about levels times the scene.
+		// Level k's share of the result is (1 - radius) × radius^k, and the smallest level's radius^(levels - 1), so the
+		// shares sum to 1 and the result is as bright as the scene.
 		intensity := s.bloom_intensity
 		f.bloom = source
-		f.bloom_scale = intensity / f32(pf.bloom_levels)
+		f.bloom_scale = intensity
 		f.scene_scale = 1 - intensity
 	}
 	add_post_effects(f, .Before_Tone_Mapping)
@@ -589,6 +595,29 @@ add_post_passes :: proc(f: ^Frame) {
 		pf.lut, pf.baked = bake, true
 	}
 	add_spatial_aa(f)
+}
+
+// bloom_chain gives the sizes of bloom's levels for a scene's size: each half the one before, while the shorter side is
+// at least BLOOM_MIN_SIZE, up to BLOOM_LEVELS. The first level is there at any size.
+@(private)
+bloom_chain :: proc(scene_size: [2]u32) -> (levels: int, sizes: [BLOOM_LEVELS][2]u32) {
+	size := scene_size
+	for level in 0 ..< BLOOM_LEVELS {
+		size = {max(size.x / 2, 1), max(size.y / 2, 1)}
+		if level > 0 && min(size.x, size.y) < BLOOM_MIN_SIZE {
+			break
+		}
+		sizes[level] = size
+		levels += 1
+	}
+	return
+}
+
+// bloom_up_mode is how an upsample reads the level below it, of a size: with Catmull-Rom from the smallest levels, and
+// with the tent from the others.
+@(private)
+bloom_up_mode :: proc(below: [2]u32) -> u32 {
+	return min(below.x, below.y) < BLOOM_BICUBIC_SIZE ? BLOOM_UP_BICUBIC : BLOOM_UP
 }
 
 // groups is the thread groups of a dispatch over a size.
@@ -696,7 +725,8 @@ run_bloom :: proc(ctx: ^Pass_Context) {
 		source_size = pf.bloom_sizes[below]
 		push.base = gpu.read_index(gpu_texture(g, pf.bloom_down[level]))
 		push.output = gpu.write_index(gpu_texture(g, pf.bloom_up[level]))
-		push.mode = BLOOM_UP
+		push.mode = bloom_up_mode(source_size)
+		push.radius = clamp(pf.settings.bloom_radius, 0, 1)
 	} else {
 		source = level == 0 ? pf.bloom_in : pf.bloom_down[level - 1]
 		source_size = level == 0 ? f.scene_size : pf.bloom_sizes[level - 1]

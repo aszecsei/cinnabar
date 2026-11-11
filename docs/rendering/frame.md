@@ -85,7 +85,7 @@ The settings that make the scene's look are settings components on [volumes](../
 | `Anti_Aliasing` | 43 | `off`: no anti-aliasing, of any technique |
 | `Exposure` | 44 | `mode` (Auto or Manual), the manual `exposure`, the `compensation` in stops, and the auto exposure's `range` and `adaptation_speed` |
 | `Tone_Mapping` | 45 | The `tone_mapper`, the grading's `contrast`, `saturation` and `tint`, and HDR output's `paper_white` and `peak` |
-| `Bloom` | 46 | `off`, `intensity` |
+| `Bloom` | 46 | `off`, `intensity`, `radius` |
 | `Ambient_Occlusion` | 47 | `off`, `radius`, `power` |
 | `Global_Illumination` | 48 | `off` |
 | `Environment` | 49 | The `mode`: Flat's `background`, which the world pass clears the scene to and which is not pre-exposed, and its ambient light's `sky` and `ground`; the atmosphere's sky, with its sun, moon and stars; or a texture's. The `ambient_intensity` in each. See [Sky](sky.md#sky) |

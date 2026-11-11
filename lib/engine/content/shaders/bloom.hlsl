@@ -1,11 +1,13 @@
-// Bloom's chain (see docs/rendering/post-processing.md#post-processing): each level halves the one before with a 13-tap filter, then
-// from the smallest level up, each level adds the level below it, blurred with a 3x3 tent. The output pass adds the
-// largest level to the scene, or the composite adds it, before a game's effects that read the scene with its bloom.
+// Bloom's chain (see docs/rendering/post-processing.md#bloom): each level halves the one before with a 13-tap filter, then
+// from the smallest level up, each level blends with the level below it by the radius, upsampled with a 3x3 tent, or
+// with Catmull-Rom from the smallest levels. The output pass adds the largest level to the scene, or the composite adds
+// it, before a game's effects that read the scene with its bloom.
 #include "cinnabar.hlsli"
+#include "filter.hlsli"
 
 // Matches Bloom_Push in lib/engine/render/post.odin. The source is read with a bilinear, clamped sampler; source_texel
-// is a texel of it in UV. base is the downsampled level that an upsample adds to. The composite reads the scene as
-// source and the bloom as base, with their scales.
+// is a texel of it in UV. base is the downsampled level that an upsample blends with, taking radius of the source. The
+// composite reads the scene as source and the bloom as base, with their scales.
 struct Push {
 	uint source;
 	uint base;
@@ -16,7 +18,7 @@ struct Push {
 	uint mode;
 	float scene_scale;
 	float bloom_scale;
-	uint padding;
+	float radius;
 };
 CN_PUSH_CONSTANTS(Push, push);
 
@@ -24,6 +26,7 @@ static const uint BLOOM_FIRST = 0;
 static const uint BLOOM_DOWN = 1;
 static const uint BLOOM_UP = 2;
 static const uint BLOOM_COMPOSITE = 3;
+static const uint BLOOM_UP_BICUBIC = 4;
 
 float luma(float3 c) {
 	return dot(c, float3(0.2126, 0.7152, 0.0722));
@@ -33,6 +36,20 @@ float luma(float3 c) {
 // blob as it moves between pixels.
 float karis(float3 c) {
 	return 1 / (1 + luma(c));
+}
+
+// tent blurs a level as it upsamples it, with nine bilinear taps a texel apart weighed 1, 2, 1 on each axis.
+float3 tent(Texture2D<float4> source, SamplerState s, float2 uv, float2 t) {
+	float3 color = source.SampleLevel(s, uv + t * float2(-1, -1), 0).rgb;
+	color += source.SampleLevel(s, uv + t * float2(0, -1), 0).rgb * 2;
+	color += source.SampleLevel(s, uv + t * float2(1, -1), 0).rgb;
+	color += source.SampleLevel(s, uv + t * float2(-1, 0), 0).rgb * 2;
+	color += source.SampleLevel(s, uv, 0).rgb * 4;
+	color += source.SampleLevel(s, uv + t * float2(1, 0), 0).rgb * 2;
+	color += source.SampleLevel(s, uv + t * float2(-1, 1), 0).rgb;
+	color += source.SampleLevel(s, uv + t * float2(0, 1), 0).rgb * 2;
+	color += source.SampleLevel(s, uv + t * float2(1, 1), 0).rgb;
+	return color / 16;
 }
 
 [numthreads(8, 8, 1)]
@@ -49,17 +66,14 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 		// As the output pass adds it.
 		color = max(source.Load(int3(id.xy, 0)).rgb, 0) * push.scene_scale;
 		color += cn_texture(push.base).SampleLevel(s, uv, 0).rgb * push.bloom_scale;
-	} else if (push.mode == BLOOM_UP) {
-		color = source.SampleLevel(s, uv + t * float2(-1, -1), 0).rgb;
-		color += source.SampleLevel(s, uv + t * float2(0, -1), 0).rgb * 2;
-		color += source.SampleLevel(s, uv + t * float2(1, -1), 0).rgb;
-		color += source.SampleLevel(s, uv + t * float2(-1, 0), 0).rgb * 2;
-		color += source.SampleLevel(s, uv, 0).rgb * 4;
-		color += source.SampleLevel(s, uv + t * float2(1, 0), 0).rgb * 2;
-		color += source.SampleLevel(s, uv + t * float2(-1, 1), 0).rgb;
-		color += source.SampleLevel(s, uv + t * float2(0, 1), 0).rgb * 2;
-		color += source.SampleLevel(s, uv + t * float2(1, 1), 0).rgb;
-		color = color / 16 + cn_texture(push.base).Load(int3(id.xy, 0)).rgb;
+	} else if (push.mode == BLOOM_UP || push.mode == BLOOM_UP_BICUBIC) {
+		float3 below = 0;
+		if (push.mode == BLOOM_UP_BICUBIC) {
+			below = sample_catmull_rom(source, s, uv, 1 / t, t);
+		} else {
+			below = tent(source, s, uv, t);
+		}
+		color = lerp(cn_texture(push.base).Load(int3(id.xy, 0)).rgb, below, push.radius);
 	} else {
 		// Jimenez's 13 taps: an inner box of four and an outer grid of nine, each a bilinear average of four texels.
 		float3 a = source.SampleLevel(s, uv + t * float2(-2, -2), 0).rgb;

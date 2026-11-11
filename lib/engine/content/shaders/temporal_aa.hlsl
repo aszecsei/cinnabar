@@ -6,6 +6,7 @@
 // at the output's size, and each output pixel takes this frame's color from the scene's samples around it, weighted by
 // how near their jittered positions are, and blends in as much of it as its nearest sample is near.
 #include "cinnabar.hlsli"
+#include "filter.hlsli"
 
 // Matches Temporal_Constants in lib/engine/render/post.odin. reproject maps a pixel's clip position in this frame,
 // without the jitter, to its clip position in the last frame for a point that did not move. exposure holds this
@@ -55,32 +56,6 @@ float3 compress(float3 c) {
 
 float3 expand(float3 c) {
 	return c / max(1 - max(c.r, max(c.g, c.b)), 1e-4);
-}
-
-// sample_history filters the history with a Catmull-Rom spline in five bilinear taps, which keeps it sharp where a
-// bilinear filter would blur it a little more every frame.
-float3 sample_history(Texture2D<float4> history, SamplerState s, float2 uv) {
-	float2 size = float2(constants.size);
-	float2 position = uv * size;
-	float2 center = floor(position - 0.5) + 0.5;
-	float2 f = position - center;
-	float2 f2 = f * f;
-	float2 f3 = f2 * f;
-	float2 w0 = -0.5 * f3 + f2 - 0.5 * f;
-	float2 w1 = 1.5 * f3 - 2.5 * f2 + 1;
-	float2 w2 = -1.5 * f3 + 2 * f2 + 0.5 * f;
-	float2 w3 = 0.5 * f3 - 0.5 * f2;
-	float2 w12 = w1 + w2;
-	float2 middle = (center + w2 / w12) * constants.inverse_size;
-	float2 before = (center - 1) * constants.inverse_size;
-	float2 after = (center + 2) * constants.inverse_size;
-	float4 sum = 0;
-	sum += float4(history.SampleLevel(s, float2(middle.x, before.y), 0).rgb, 1) * (w12.x * w0.y);
-	sum += float4(history.SampleLevel(s, float2(before.x, middle.y), 0).rgb, 1) * (w0.x * w12.y);
-	sum += float4(history.SampleLevel(s, middle, 0).rgb, 1) * (w12.x * w12.y);
-	sum += float4(history.SampleLevel(s, float2(after.x, middle.y), 0).rgb, 1) * (w3.x * w12.y);
-	sum += float4(history.SampleLevel(s, float2(middle.x, after.y), 0).rgb, 1) * (w12.x * w3.y);
-	return max(sum.rgb / sum.a, 0);
 }
 
 // clip_to_box moves a color toward the box's center until it is inside the box.
@@ -162,7 +137,10 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	float3 result = current;
 	if (constants.valid != 0 && moved && all(previous_uv == saturate(previous_uv))) {
 		float2 exposure = cn_buffer(constants.exposure).Load<float2>(0);
-		float3 history = sample_history(cn_texture(constants.history), cn_sampler(constants.sampler_index), previous_uv);
+		// Catmull-Rom keeps the history sharp where a bilinear sample would blur it a little more every frame.
+		Texture2D<float4> history_texture = cn_texture(constants.history);
+		SamplerState history_sampler = cn_sampler(constants.sampler_index);
+		float3 history = sample_catmull_rom(history_texture, history_sampler, previous_uv, float2(constants.size), constants.inverse_size);
 		history = to_ycocg(compress(history * (exposure.x / max(exposure.y, 1e-10))));
 		float3 mean = sum / 9;
 		float3 sigma = sqrt(max(squares / 9 - mean * mean, 0));

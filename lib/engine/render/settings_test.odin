@@ -1,10 +1,12 @@
 package render
 
 import "core:mem/virtual"
+import "core:slice"
 import "core:testing"
 
 import "cinnabar:core"
 import "cinnabar:engine/ecs"
+import "cinnabar:engine/scene"
 import "cinnabar:engine/volume"
 
 @(test)
@@ -39,6 +41,7 @@ the_frame_takes_its_settings_from_the_volumes_at_the_camera :: proc(t: ^testing.
 	// Without volumes, every setting has its default, as a zero Frame_Desc had.
 	s := resolve_settings(r, w, {})
 	testing.expect_value(t, s.post.bloom_intensity, DEFAULT_BLOOM_INTENSITY)
+	testing.expect_value(t, s.post.bloom_radius, DEFAULT_BLOOM_RADIUS)
 	testing.expect_value(t, s.post.contrast, 1)
 	testing.expect_value(t, s.sky.mode, Sky_Mode.Flat)
 	testing.expect_value(t, s.sky.sky, DEFAULT_SKY_COLOR)
@@ -58,6 +61,7 @@ the_frame_takes_its_settings_from_the_volumes_at_the_camera :: proc(t: ^testing.
 	ecs.add(w, base, Environment{background = {true, {0.02, 0.02, 0.035}}})
 	ecs.add(w, base, Fog{density = {true, 0.1}, base_height = {true, 2}})
 	ecs.add(w, base, Shadows{distance = {true, 30}})
+	ecs.add(w, base, Bloom{radius = {true, 0.3}})
 	ecs.add(w, base, Clouds{density = {true, 1}, coverage = {true, 0.8}, weather = {true, .Map}})
 	// A box over part of the world turns bloom off, fogs less and clears the sky, and leaves the rest to the global
 	// volume.
@@ -73,6 +77,8 @@ the_frame_takes_its_settings_from_the_volumes_at_the_camera :: proc(t: ^testing.
 	testing.expect_value(t, s.fog.density, 0.1)
 	testing.expect_value(t, s.shadows, Shadow_Settings{distance = 30, split_lambda = SHADOW_SPLIT_LAMBDA})
 	testing.expect(t, !s.post.no_bloom)
+	testing.expect_value(t, s.post.bloom_radius, 0.3)
+	testing.expect_value(t, s.post.bloom_intensity, DEFAULT_BLOOM_INTENSITY)
 	testing.expect_value(t, s.clouds.density, 1)
 	testing.expect_value(t, s.clouds.coverage, 0.8)
 	testing.expect_value(t, s.clouds.weather, Weather_Source.Map)
@@ -91,4 +97,19 @@ the_frame_takes_its_settings_from_the_volumes_at_the_camera :: proc(t: ^testing.
 	hidden := [1]u32{1 << ecs.entity_index(local)}
 	s = resolve_settings(r, w, ecs.position_offset({}, {10, 0, 0}), hidden[:])
 	testing.expect(t, !s.post.no_bloom)
+}
+
+// The editor lists a volume's Bloom settings from its fields: the radius is one, from 0 to 1, that a volume overrides.
+@(test)
+blooms_radius_is_a_setting_from_0_to_1 :: proc(t: ^testing.T) {
+	fields := scene.component_fields(Bloom, context.temp_allocator)
+	names := make([dynamic]string, context.temp_allocator)
+	for field in fields {
+		append(&names, field.name)
+	}
+	testing.expectf(t, slice.equal(names[:], []string{"off", "intensity", "radius"}), "fields %v", names[:])
+	radius := fields[2]
+	testing.expect(t, radius.has_override && radius.has_range)
+	testing.expect_value(t, radius.range_min, 0)
+	testing.expect_value(t, radius.range_max, 1)
 }
