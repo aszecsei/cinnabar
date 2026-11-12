@@ -107,10 +107,10 @@ public sealed class ContentTests : IDisposable
     }
 
     [Fact]
-    public void BlackboardsAndDecisionsAreScriptsThatOpenAsText()
+    public void BlackboardsDecisionsAndPerceptionsAreScriptsThatOpenAsText()
     {
         using var shell = NewShell();
-        foreach (var (kind, file) in new[] { (AssetKind.Blackboard, "guard.blackboard"), (AssetKind.Decision, "guard.decision") })
+        foreach (var (kind, file) in new[] { (AssetKind.Blackboard, "guard.blackboard"), (AssetKind.Decision, "guard.decision"), (AssetKind.Perception, "guard.perception") })
         {
             // They are among the scripts in the content browser, and open in the script editor.
             Assert.Equal(ContentKind.Scripts, ContentBrowserModel.KindOf(kind));

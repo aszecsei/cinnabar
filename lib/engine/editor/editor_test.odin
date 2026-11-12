@@ -1774,10 +1774,11 @@ the_game_view_draws_the_frame_as_described_and_a_scene_view_adds_the_editor :: p
 	// A scene view as the frame's own view has no UI either.
 	testing.expect(t, out.hooks.ui == nil && out.overlay.draw != nil)
 
-	// Outside Edit, a scene view has no debug layer, but keeps its tools for the picks.
+	// Outside Edit, a scene view keeps its debug layer, where a selected perceiver shows what it perceives, and its tools for
+	// the picks.
 	step(f, 1, open_viewport(2, .Game, 32, 16), link.Set_Mode{mode = .Play})
 	out = plan_frame(&f.editor, &f.world, desc, frame_viewports(&f.editor), f.renderer.quality, f.renderer.caps)
-	testing.expect(t, len(out.extra_views) == 1 && out.extra_views[0].no_debug && out.extra_views[0].overlay.draw != nil && out.extra_views[0].keep_ids)
+	testing.expect(t, len(out.extra_views) == 1 && !out.extra_views[0].no_debug && out.extra_views[0].overlay.draw != nil && out.extra_views[0].keep_ids)
 
 	// An orthographic scene view stands back from what it shows, so it draws no fog, whatever its settings say. A
 	// perspective one draws it.

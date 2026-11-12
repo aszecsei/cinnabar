@@ -19,6 +19,8 @@ The core of the AI, in `lib/engine/ai`: agents, their blackboards, the decision 
 | `Agent` | 130 | Authoring | `blackboard` and `decision`, by GUID; `interval`, the seconds between thinks (0.25 by default, 0 for every tick); `priority`, higher first for the budget |
 | `Agent_State` | 131 | Runtime | `agent`, its slot in the pool, hidden in the editor and scripts |
 
+An agent with a `Perceiver` also sees and hears, and keeps what it perceives in its slot ([Perception](perception.md#components)).
+
 - **Slots:** the `ai think` system gives each `Agent` without an `Agent_State` a slot, and adds its `Agent_State` by command after the tick. A copy of an entity, whose `Agent_State` names another entity's slot, gets a slot of its own. A slot is freed when its entity goes, loses its `Agent`, or names another slot, and its action is stopped. An `Agent` whose blackboard or decision changes starts again.
 - **Phases:** a slot is `Agent_Waiting` until its blobs are loaded and fit, then `Agent_Ready`. `set_phase` is its only writer.
 - **Loading:** `ai.prepare`, in every mode before the ticks, loads each blackboard and decision that a slot names, unloads those that none names, and reads the loaded blobs into the frame's views. `ai.end_frame` lets them go before `asset.poll`. A blob that does not load is tried again after the next cook.
@@ -104,12 +106,13 @@ return Bark
 
 ## The order in a tick
 
-1. `ai think`: the native actions that ended stop, and the decisions run.
-2. `ai actions`: the native actions start and tick.
-3. The other `Fixed` systems, such as `nav paths`, which the engine registers after the AI's.
-4. The flush: the commands of the tick's jobs apply, in system order and then job order.
-5. The scripts' fixed step: the behaviours' `fixed_update`, then the script actions.
-6. Physics.
+1. `ai perceive`: the perceivers see and hear, and their memories change ([Perception](perception.md#the-order-in-a-tick)).
+2. `ai think`: the native actions that ended stop, and the decisions run.
+3. `ai actions`: the native actions start and tick.
+4. The other `Fixed` systems, such as `nav paths`, which the engine registers after the AI's.
+5. The flush: the commands of the tick's jobs apply, in system order and then job order.
+6. The scripts' fixed step: the behaviours' `fixed_update`, then the script actions.
+7. Physics, then the tick's events: perception's `on_perceive` and `on_forget` among them.
 
 ## Determinism
 

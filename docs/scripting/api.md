@@ -72,6 +72,7 @@ Scripts change the world structure **immediately**, except for despawns. The scr
 | `Blackboard` | An agent's blackboard by its keys' names: `get(entity, key)` and `set(entity, key, value)`, where the game defines it (see [AI: Agents: Scripts](../ai/agents.md#scripts)) |
 | `Agent` | `current_action(entity)`: the name of the action that an agent runs, or nil, where the game defines it (see [AI: Agents: Scripts](../ai/agents.md#scripts)) |
 | `Action`, `Param` | `Action.define(name, params)` makes an action class, which agents' decisions start by name, with its parameters from `Param` (see [AI: Agents: Script actions](../ai/agents.md#script-actions)) |
+| `Perception` | `noise(position, loudness, tag, source?)`: a noise that agents hear in the next tick, where the game defines it. An agent's behaviours get `on_perceive(entity, sense)` and `on_forget(entity)` (see [AI: Perception: Scripts](../ai/perception.md#scripts)) |
 | `Navigation` | Queries on the navmeshes by an agent type's name: `nearest(point, agent, extents?)`, `find_path(start, goal, agent, max_nodes?)`, `raycast(start, finish, agent)` and `random_point(around, radius, agent)`, and an entity's path: `request_path(entity, goal)` and `path(entity)`, where the game defines it (see [AI: Navigation: Scripts](../ai/navigation.md#scripts)) |
 | `Sprites` | A Sprite_Renderer's animations and frames by their names in its sheet, with its entity first: `play`, `stop`, `set_frame`, `animation` and `finished`, where the game defines it. See [Rendering: 2D](../rendering/2d.md#scripts). |
 
@@ -180,5 +181,6 @@ The world's random numbers (`lib/engine/script/random.odin`). Use them in place 
 | UI Toolkit's `UIDocument`, `rootVisualElement.Q<Label>(name).text` | `Ui_Document`, `Ui.set_text(entity, id, text)` (see [UI: Scripts](../ui/design.md#scripts)) |
 | `Button.clicked` | `click="name"` in the document, and `on_name(id)` on the entity's behaviour |
 | `HingeJoint`, `OnJointBreak` | `Hinge_Joint` and the other joints, `on_joint_break(force, torque)` |
+| AI Perception's `OnTargetPerceptionUpdated`, `ReportNoiseEvent` | `on_perceive(entity, sense)` and `on_forget(entity)` on an agent's behaviour, `Perception.noise(position, loudness, tag, source?)` |
 | `GameObject.Find` | Not provided. Use entity fields. |
 | `Resources.Load` | Not provided. Content refers to content by GUID, so use an asset field. |

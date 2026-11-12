@@ -29,7 +29,7 @@ game_init :: proc(state: rawptr, platform: ^core.Platform_API, h: Hooks, registe
 	mem.zero(state, state_bytes(h))
 	g := (^Game)(state)
 	g.platform = platform
-	editor.init(&g.editor, platform, &g.assets, &g.renderer.residency, &g.renderer, &g.nav)
+	editor.init(&g.editor, platform, &g.assets, &g.renderer.residency, &g.renderer, &g.nav, &g.ai)
 	if !ecs.init(&g.world, platform) {
 		log.panic("game: cannot create the world")
 	}
@@ -38,7 +38,7 @@ game_init :: proc(state: rawptr, platform: ^core.Platform_API, h: Hooks, registe
 	}
 	audio.init(&g.audio, platform, &g.assets)
 	nav.init(&g.nav, platform, &g.assets)
-	ai.init(&g.ai, platform, &g.assets, &g.scripts)
+	ai.init(&g.ai, platform, &g.assets, &g.scripts, &g.physics)
 	register_world(g, h)
 	asset.init(&g.assets, platform, asset.content_source(platform.content_dir))
 	render.renderer_init(&g.renderer, platform, &g.assets, &g.world)
@@ -131,6 +131,7 @@ game_update :: proc(g: ^Game, dt: time.Duration, h: Hooks) -> (keep_running: boo
 			physics.tick(&g.physics, &g.world)
 			physics.send_events(&g.physics, &g.world, &g.scripts)
 			anim.send_events(&g.animation, &g.world, &g.scripts)
+			ai.send_events(&g.ai, &g.world, &g.scripts)
 			script.fixed_events(&g.scripts)
 			ecs.update_transforms(&g.world)
 		}
@@ -223,8 +224,8 @@ draw_ui_layer :: proc(f: ^render.Frame) {
 	ui.add_passes(&(^Game)(f.data).ui, f)
 }
 
-// update_project reads the project's settings when their files change, and gives them to the renderer, physics, audio
-// and the UI and asks for the output mode, so the editor's change shows at once.
+// update_project reads the project's settings when their files change, and gives them to the renderer, physics, audio,
+// the AI and the UI and asks for the output mode, so the editor's change shows at once.
 @(private)
 update_project :: proc(g: ^Game, h: Hooks) {
 	now := g.platform.time_seconds()
@@ -239,6 +240,7 @@ update_project :: proc(g: ^Game, h: Hooks) {
 	render.set_quality(&g.renderer, project.quality(settings, g.renderer.caps))
 	physics.set_layers(&g.physics, project.physics_layers(settings))
 	audio.set_buses(&g.audio, settings.audio_buses)
+	ai.set_tags(&g.ai, settings.perception_tags)
 	ui.set_scale_factor(&g.ui, settings.ui_scale)
 	g.platform.gpu_request_output(settings.output)
 	if h.settings_changed != nil {

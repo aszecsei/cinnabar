@@ -36,8 +36,8 @@ Tools :: struct {
 //
 // Every view keeps the game's hooks, with the same data, its settings, sprites, skins and time. What changes:
 //   - A viewport's size and target replace desc.size, and each viewport has the View_State of its own.
-//   - A scene view draws from its editor camera, keeps the IDs for the picks, has the debug layer while the editor is in
-//     Edit, has no UI hook, and has the tools as its overlay. The Game view draws from desc.view, keeps the game's
+//   - A scene view draws from its editor camera, keeps the IDs for the picks, has the debug layer in every mode, so a
+//     selected perceiver shows what it perceives while the game plays, has no UI hook, and has the tools as its overlay. The Game view draws from desc.view, keeps the game's
 //     keep_ids, has no debug layer and no overlay.
 //   - Each takes its debug view, the features it turns off, its exposure offset and its quality choices from the
 //     editor's settings for the viewport, over the game's: the debug view replaces a Lit one, the features join, the
@@ -88,7 +88,7 @@ plan_view :: proc(e: ^Editor, w: ^ecs.World, desc: render.Frame_Desc, v: Frame_V
 		state           = v.state,
 		settings        = desc.settings,
 		keep_ids        = scene || desc.keep_ids,
-		no_debug        = !scene || desc.no_debug || !debug_shown(e),
+		no_debug        = !scene || desc.no_debug,
 		debug_view      = overrides.debug_view != .Lit ? overrides.debug_view : desc.debug_view,
 		disable         = desc.disable + overrides.disable,
 		exposure_offset = desc.exposure_offset + overrides.exposure_offset,

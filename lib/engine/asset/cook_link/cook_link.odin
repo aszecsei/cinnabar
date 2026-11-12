@@ -128,6 +128,7 @@ Asset_Kind :: enum u8 {
 	Nav_Mesh,
 	Blackboard,
 	Decision,
+	Perception,
 }
 
 Asset_Status :: enum u8 {
