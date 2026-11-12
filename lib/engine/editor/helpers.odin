@@ -156,6 +156,9 @@ draw_entity_helpers :: proc(e: ^Editor, w: ^ecs.World, d: ^debug.Draw, entity: e
 	if c := ecs.get(w, entity, physics.Collider); c != nil {
 		draw_collider(e, d, c^, pose, selected)
 	}
+	if c := ecs.get(w, entity, physics.Character); c != nil {
+		draw_character(d, c^, pose, selected)
+	}
 	if j, _, ok := physics.joint_of(w, entity); ok {
 		draw_joint(w, d, j^, pose, selected)
 	}
@@ -323,9 +326,6 @@ draw_collider :: proc(e: ^Editor, d: ^debug.Draw, c: physics.Collider, pose: ecs
 	}
 	rotation := pose.rotation * c.rotation
 	at := ecs.position_offset(pose.position, linalg.quaternion128_mul_vector3(pose.rotation, c.offset * pose.scale))
-	right := linalg.quaternion128_mul_vector3(rotation, [3]f32{1, 0, 0})
-	up := linalg.quaternion128_mul_vector3(rotation, [3]f32{0, 1, 0})
-	forward := linalg.quaternion128_mul_vector3(rotation, [3]f32{0, 0, 1})
 	kind, size := physics.collider_size(c, pose.scale)
 	switch kind {
 	case .Box:
@@ -333,17 +333,7 @@ draw_collider :: proc(e: ^Editor, d: ^debug.Draw, c: physics.Collider, pose: ecs
 	case .Sphere:
 		debug.sphere(d, at, size.x, color)
 	case .Capsule, .Cylinder:
-		radius, half := size.x, size.y
-		top, bottom := ecs.position_offset(at, up * half), ecs.position_offset(at, -up * half)
-		debug.circle(d, top, right, forward, radius, color)
-		debug.circle(d, bottom, right, forward, radius, color)
-		for side in ([4][3]f32{right, -right, forward, -forward}) {
-			debug.line(d, ecs.position_offset(top, side * radius), ecs.position_offset(bottom, side * radius), color)
-		}
-		if kind == .Capsule {
-			debug.sphere(d, top, radius, color)
-			debug.sphere(d, bottom, radius, color)
-		}
+		draw_upright(d, at, rotation, size.x, size.y, kind == .Capsule, color)
 	case .Mesh, .Convex_Hull:
 		// The mesh's bounds, if it is loaded: its triangles would be too many lines.
 		if e.assets == nil {
@@ -359,6 +349,35 @@ draw_collider :: proc(e: ^Editor, d: ^debug.Draw, c: physics.Collider, pose: ecs
 			debug.box(d, center, (blob.bounds.max - blob.bounds.min) * 0.5 * size, rotation, color)
 		}
 	}
+}
+
+// draw_upright draws a capsule or a cylinder along its rotation's y: its radius, and the half height of the cylinder
+// between its caps.
+@(private = "file")
+draw_upright :: proc(d: ^debug.Draw, at: ecs.World_Position, rotation: quaternion128, radius, half: f32, capsule: bool, color: [4]f32) {
+	right := linalg.quaternion128_mul_vector3(rotation, [3]f32{1, 0, 0})
+	up := linalg.quaternion128_mul_vector3(rotation, [3]f32{0, 1, 0})
+	forward := linalg.quaternion128_mul_vector3(rotation, [3]f32{0, 0, 1})
+	top, bottom := ecs.position_offset(at, up * half), ecs.position_offset(at, -up * half)
+	debug.circle(d, top, right, forward, radius, color)
+	debug.circle(d, bottom, right, forward, radius, color)
+	for side in ([4][3]f32{right, -right, forward, -forward}) {
+		debug.line(d, ecs.position_offset(top, side * radius), ecs.position_offset(bottom, side * radius), color)
+	}
+	if capsule {
+		debug.sphere(d, top, radius, color)
+		debug.sphere(d, bottom, radius, color)
+	}
+}
+
+// draw_character draws a character's capsule, which stands on its entity's position, upright and unscaled (see
+// docs/physics/design.md#the-editor).
+@(private = "file")
+draw_character :: proc(d: ^debug.Draw, c: physics.Character, pose: ecs.Transform, selected: bool) {
+	radius, height := physics.character_size(c)
+	up := linalg.quaternion128_mul_vector3(pose.rotation, [3]f32{0, 1, 0})
+	at := ecs.position_offset(pose.position, up * height * 0.5)
+	draw_upright(d, at, pose.rotation, radius, height * 0.5 - radius, true, COLLIDER_COLOR if selected else UNSELECTED)
 }
 
 // The axes of a joint's frame, in meters.

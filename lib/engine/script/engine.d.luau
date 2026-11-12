@@ -160,6 +160,15 @@ type RaycastHit = {
 	distance: number,
 }
 
+-- What a character stands on after the last tick: the ground's normal, its velocity under the character, and its
+-- entity, which is nil in the air or on a body without one.
+type CharacterGround = {
+	state: "ground" | "steep" | "air",
+	normal: vector,
+	velocity: vector,
+	entity: Entity?,
+}
+
 declare function wait(seconds: number?): ()
 declare function wait_realtime(seconds: number): ()
 declare function wait_frames(frames: number?): ()

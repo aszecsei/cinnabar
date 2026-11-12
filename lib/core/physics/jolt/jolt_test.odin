@@ -116,3 +116,43 @@ motor :: proc(t: ^testing.T) {
 meshes :: proc(t: ^testing.T) {
 	with_backend(t, conformance.meshes, quiet = true)
 }
+
+@(test)
+character_moves :: proc(t: ^testing.T) {
+	with_backend(t, conformance.character_moves, quiet = true)
+}
+
+@(test)
+character_replays :: proc(t: ^testing.T) {
+	with_backend(t, conformance.character_replays)
+}
+
+@(test)
+character_walks_into_wall :: proc(t: ^testing.T) {
+	with_backend(t, conformance.character_walks_into_wall)
+}
+
+@(test)
+character_climbs_step :: proc(t: ^testing.T) {
+	with_backend(t, conformance.character_climbs_step)
+}
+
+@(test)
+character_steep_slope :: proc(t: ^testing.T) {
+	with_backend(t, conformance.character_steep_slope)
+}
+
+@(test)
+character_moving_platform :: proc(t: ^testing.T) {
+	with_backend(t, conformance.character_moving_platform)
+}
+
+@(test)
+character_pushes_box :: proc(t: ^testing.T) {
+	with_backend(t, conformance.character_pushes_box)
+}
+
+@(test)
+character_is_a_body :: proc(t: ^testing.T) {
+	with_backend(t, conformance.character_is_a_body)
+}

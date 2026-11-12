@@ -170,6 +170,9 @@ to_filter :: proc(w: ^ecs.World, f: Filter) -> (out: core_physics.Query_Filter) 
 		if pb := ecs.is_alive(w, e) ? ecs.get(w, e, Physics_Body) : nil; pb != nil && pb.body.generation != 0 {
 			out.ignore[out.ignore_count] = pb.body
 			out.ignore_count += 1
+		} else if body, ok := character_of(w, e); ok {
+			out.ignore[out.ignore_count] = body
+			out.ignore_count += 1
 		}
 	}
 	return

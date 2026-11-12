@@ -38,8 +38,9 @@ The host reads the key itself, from the user's file first, before the game start
 - Destroying a body ends its contacts and removes its joints; the joint's handle stays valid until `Destroy_Joint`.
 - `Set_Enabled` takes a body out of the simulation without destroying it, and ends its contacts.
 - `Create_Compound` names its children after its payload.
+- A character's handle is a `Body` ([Design: Characters](design.md#characters)). `Set_Enabled` and `body_state` take it as a body's, and the queries and contacts name it; the other body commands refuse it, and `Destroy_Character` refuses a body. `Set_Character_Velocity` holds until the next one: with `Gravity`, the backend adds gravity and the ground's velocity, and adds the velocity's y once, as a jump.
 
-**Results.** `results` points into the backend's memory, valid until the next `submit` or `step`, and a `submit` or `step` after a step starts them again. `moved` is every body that moved in the step, and those that fell asleep in it, once each, sorted by handle index. `contacts` are body pairs, not sub-shape pairs, that began or ended since the last step, sorted by `a`, `b` and kind, with `a`'s index below `b`'s; a pair whose bodies only fell asleep has not ended. `broken` are the joints that broke. The sorting makes results the same on every run.
+**Results.** `results` points into the backend's memory, valid until the next `submit` or `step`, and a `submit` or `step` after a step starts them again. `moved` is every body that moved in the step, and those that fell asleep in it, once each, sorted by handle index. `contacts` are body pairs, not sub-shape pairs, that began or ended since the last step, sorted by `a`, `b` and kind, with `a`'s index below `b`'s; a pair whose bodies only fell asleep has not ended. `broken` are the joints that broke. `characters` is every enabled character after the step, which the backend moves after the bodies, one at a time in handle order, sorted by handle, with its ground; a character's contacts with bodies are in `contacts` as a body's are. The sorting makes results the same on every run.
 
 **Queries** return hits in a defined order: by distance, then by body handle, or by body handle for an overlap. A filter is data: layers, sensors, and up to 8 bodies to ignore. A ray ignores the back faces of triangles.
 
@@ -55,10 +56,11 @@ The host reads the key itself, from the user's file first, before the game start
 | `Sensors` | A sensor collider makes no body. |
 | `Joints` | Joint components are ignored. |
 | `Queries` | Every query misses. |
-| `Characters`, `Vehicles`, `Soft_Bodies`, `Cloth`, `Hair`, `Buoyancy`, `Save_State` | Reserved: no component needs them, and the Jolt backend reports none of them. |
+| `Characters` | A `Character` makes no character. |
+| `Vehicles`, `Soft_Bodies`, `Cloth`, `Hair`, `Buoyancy`, `Save_State` | Reserved: no component needs them, and the Jolt backend reports none of them. |
 | `Deterministic`, `Double_Precision` | Informative: the build's options. |
 
-The null backend reports `Rigid_Bodies`, `Joints`, `Queries` and `Sensors`: it takes every command and simulates none.
+The null backend reports `Rigid_Bodies`, `Joints`, `Queries`, `Sensors` and `Characters`: it takes every command and simulates none, except that a character moves by its velocity, without gravity, and hits nothing.
 
 ## Writing a backend
 
@@ -70,4 +72,4 @@ The null backend reports `Rigid_Bodies`, `Joints`, `Queries` and `Sensors`: it t
 
 ## Conformance
 
-`lib/core/physics/conformance` is the suite that every simulating backend passes, driven through `Physics_API` with no engine world: a falling box that rests and sleeps; rays with filters; stale handles; determinism to the bit; an offset shape and a disabled body; contacts that begin, last through sleep and end; a sensor; every query; joints, a break and a motor; and mesh and hull shapes. A backend's tests call each procedure with its table on the host's job system, as `lib/core/physics/jolt/jolt_test.odin` does, and `lib/core/physics/plugin/plugin_test.odin` runs a test through the DLL as the host loads it.
+`lib/core/physics/conformance` is the suite that every simulating backend passes, driven through `Physics_API` with no engine world: a falling box that rests and sleeps; rays with filters; stale handles; determinism to the bit; an offset shape and a disabled body; contacts that begin, last through sleep and end; a sensor; every query; joints, a break and a motor; mesh and hull shapes; and characters: one that moves by its velocity, replays to the bit, walks into a wall and slides along it, climbs a step and not a tall one, does not climb a steep slope, stands on a moving platform, pushes a box, and is a body that rays, sensors and contacts see. The null backend passes the first two of the characters' cases, which need no simulation. A backend's tests call each procedure with its table on the host's job system, as `lib/core/physics/jolt/jolt_test.odin` does, and `lib/core/physics/plugin/plugin_test.odin` runs a test through the DLL as the host loads it.

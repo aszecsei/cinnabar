@@ -514,3 +514,352 @@ meshes :: proc(t: ^testing.T, api: ^physics.Physics_API) {
 	physics.cmd_create_body(&list, physics.body_desc({2, 1}, GROUND_SHAPE, .Dynamic, {0, 5, 0}))
 	testing.expect(t, !physics.submit(api, w, list), "a dynamic body on a triangle mesh is refused")
 }
+
+// =================================
+// Characters
+// =================================
+
+@(private)
+CHARACTER :: physics.Body{2, 1}
+
+// step_character steps the world, checks that each step's characters are in handle order, and gives the character's
+// state from the last step's results, with each step's contacts added to events.
+@(private)
+step_character :: proc(
+	t: ^testing.T,
+	api: ^physics.Physics_API,
+	w: physics.World,
+	body: physics.Body,
+	steps: int,
+	events: ^[dynamic]physics.Contact_Event = nil,
+) -> (
+	out: physics.Character_State,
+	found: bool,
+) {
+	for _ in 0 ..< steps {
+		testing.expect(t, bool(api.step(w, STEP, 1)))
+		results: physics.Step_Results
+		api.results(w, &results)
+		characters := results.characters[:results.character_count]
+		found = false
+		for c, i in characters {
+			if i > 0 {
+				testing.expect(t, characters[i - 1].body.index < c.body.index, "characters are in handle order")
+			}
+			if c.body == body {
+				out, found = c, true
+			}
+		}
+		if events != nil {
+			append(events, ..results.contacts[:results.contact_count])
+		}
+	}
+	return
+}
+
+// character_moves: a character without the backend's gravity moves by its velocity, high above the ground, and the
+// results report it with its user value; a pose teleports it, a disabled one stays, body commands refuse its handle,
+// and a destroyed one is stale. The null backend passes it too. The backend logs what it refuses, so run it with a
+// quiet host.
+character_moves :: proc(t: ^testing.T, api: ^physics.Physics_API) {
+	w := world(t, api)
+	defer api.world_destroy(w)
+	OTHER :: physics.Body{3, 1}
+	list := physics.command_list(context.temp_allocator)
+	physics.cmd_create_character(&list, physics.character_desc(CHARACTER, {0, 20, 0}, user = 42))
+	physics.cmd_create_character(&list, physics.character_desc(OTHER, {10, 20, 0}, user = 43))
+	physics.cmd_set_character_velocity(&list, CHARACTER, {1, 0, 0})
+	physics.cmd_set_character_velocity(&list, OTHER, {})
+	testing.expect(t, physics.submit(api, w, list))
+
+	s, found := step_character(t, api, w, CHARACTER, 60)
+	testing.expect(t, found, "the character is in the step's results")
+	testing.expect_value(t, s.user, 42)
+	testing.expect_value(t, s.ground, physics.Ground_State.Air)
+	testing.expectf(t, abs(s.position.x - 1) < 0.01 && abs(s.position.y - 20) < 0.01, "it moved a meter: %v", s.position)
+	testing.expectf(t, abs(s.velocity.x - 1) < 1e-3, "at its velocity: %v", s.velocity)
+	testing.expect_value(t, state(api, w, CHARACTER).user, 42)
+
+	list = physics.command_list(context.temp_allocator)
+	physics.cmd_set_character_pose(&list, CHARACTER, {5, 20, 0}, {0, 0, 0, 1})
+	physics.cmd_set_enabled(&list, CHARACTER, false)
+	testing.expect(t, physics.submit(api, w, list))
+	testing.expectf(t, abs(state(api, w, CHARACTER).position.x - 5) < 1e-6, "a pose teleports it: %v", state(api, w, CHARACTER).position)
+	_, found = step_character(t, api, w, CHARACTER, 30)
+	testing.expect(t, !found, "a disabled character is not in the results")
+	testing.expectf(t, abs(state(api, w, CHARACTER).position.x - 5) < 1e-6, "a disabled character stays")
+
+	bad := physics.command_list(context.temp_allocator)
+	physics.cmd_set_velocity(&bad, CHARACTER, {1, 0, 0}, {})
+	physics.cmd_destroy_body(&bad, CHARACTER)
+	physics.cmd_destroy_character(&bad, GROUND)
+	testing.expect(t, !physics.submit(api, w, bad), "body commands refuse a character, and character commands a body")
+
+	list = physics.command_list(context.temp_allocator)
+	physics.cmd_set_enabled(&list, CHARACTER, true)
+	physics.cmd_destroy_character(&list, CHARACTER)
+	testing.expect(t, physics.submit(api, w, list))
+	testing.expect_value(t, state(api, w, CHARACTER).body, physics.Body{})
+	_, found = step_character(t, api, w, OTHER, 1)
+	testing.expect(t, found, "the other character is still there")
+}
+
+// character_replays: two worlds given the same commands, characters that walk among boxes, report the same characters
+// after two seconds, to the bit.
+character_replays :: proc(t: ^testing.T, api: ^physics.Physics_API) {
+	COUNT :: 4
+	run :: proc(t: ^testing.T, api: ^physics.Physics_API) -> (states: [COUNT]physics.Character_State) {
+		w := world(t, api)
+		defer api.world_destroy(w)
+		list := physics.command_list(context.temp_allocator)
+		for i in 0 ..< 8 {
+			box := physics.body_desc({u32(10 + i), 1}, BOX_SHAPE, .Dynamic, {1.5 + f64(i % 3) * 1.1, 0.5 + f64(i / 3) * 1.05, f64(i % 2) * 0.4})
+			box.mass = 5
+			physics.cmd_create_body(&list, box)
+		}
+		for i in 0 ..< COUNT {
+			body := physics.Body{u32(2 + i), 1}
+			physics.cmd_create_character(&list, physics.character_desc(body, {0, 0.1, f64(i) * 0.7 - 1}, user = u64(i)))
+			physics.cmd_set_character_velocity(&list, body, {2, 0, 0.3 * f32(i - 1)}, {.Gravity})
+		}
+		testing.expect(t, physics.submit(api, w, list))
+		for _ in 0 ..< 120 {
+			api.step(w, STEP, 1)
+		}
+		results: physics.Step_Results
+		api.results(w, &results)
+		testing.expect_value(t, results.character_count, COUNT)
+		for c, i in results.characters[:min(results.character_count, COUNT)] {
+			states[i] = c
+		}
+		return
+	}
+	a := run(t, api)
+	b := run(t, api)
+	testing.expect(t, mem.compare_ptrs(&a, &b, size_of(a)) == 0, "two runs of the same commands give the same characters")
+}
+
+// character_walks_into_wall: a character walks to a wall and stops there on the ground, and a velocity at an angle to
+// the wall slides it along.
+character_walks_into_wall :: proc(t: ^testing.T, api: ^physics.Physics_API) {
+	w := world(t, api)
+	defer api.world_destroy(w)
+	WALL_SHAPE :: physics.Shape{2, 1}
+	list := physics.command_list(context.temp_allocator)
+	// Its face is at x = 2.5.
+	physics.cmd_create_shape(&list, WALL_SHAPE, .Box, {0.5, 2, 5})
+	physics.cmd_create_body(&list, physics.body_desc({3, 1}, WALL_SHAPE, .Static, {3, 2, 0}))
+	physics.cmd_create_character(&list, physics.character_desc(CHARACTER, {0, 0.1, 0}))
+	physics.cmd_set_character_velocity(&list, CHARACTER, {2, 0, 0}, {.Gravity})
+	testing.expect(t, physics.submit(api, w, list))
+	s, _ := step_character(t, api, w, CHARACTER, 120)
+	testing.expectf(t, s.position.x > 2.1 && s.position.x < 2.21, "it stops at the wall: %v", s.position)
+	testing.expectf(t, abs(s.position.y) < 0.05, "on the ground: %v", s.position)
+	testing.expect_value(t, s.ground, physics.Ground_State.Ground)
+	testing.expect_value(t, s.ground_body, GROUND)
+	testing.expect_value(t, s.ground_user, 1)
+	testing.expectf(t, s.ground_normal.y > 0.99, "the ground faces up: %v", s.ground_normal)
+
+	list = physics.command_list(context.temp_allocator)
+	physics.cmd_set_character_velocity(&list, CHARACTER, {2, 0, 1}, {.Gravity})
+	testing.expect(t, physics.submit(api, w, list))
+	s, _ = step_character(t, api, w, CHARACTER, 60)
+	testing.expectf(t, s.position.z > 0.8 && s.position.x < 2.21, "it slides along the wall: %v", s.position)
+}
+
+// character_climbs_step: a character walks up a 0.3 m step, which is under its step_height, and not up a 0.6 m one.
+character_climbs_step :: proc(t: ^testing.T, api: ^physics.Physics_API) {
+	w := world(t, api)
+	defer api.world_destroy(w)
+	LOW_SHAPE :: physics.Shape{2, 1}
+	HIGH_SHAPE :: physics.Shape{3, 1}
+	OTHER :: physics.Body{3, 1}
+	list := physics.command_list(context.temp_allocator)
+	// Each from x = 1.5 to 5.5.
+	physics.cmd_create_shape(&list, LOW_SHAPE, .Box, {2, 0.15, 2})
+	physics.cmd_create_shape(&list, HIGH_SHAPE, .Box, {2, 0.3, 2})
+	physics.cmd_create_body(&list, physics.body_desc({4, 1}, LOW_SHAPE, .Static, {3.5, 0.15, 0}))
+	physics.cmd_create_body(&list, physics.body_desc({5, 1}, HIGH_SHAPE, .Static, {3.5, 0.3, 10}))
+	physics.cmd_create_character(&list, physics.character_desc(CHARACTER, {0, 0.1, 0}))
+	physics.cmd_create_character(&list, physics.character_desc(OTHER, {0, 0.1, 10}))
+	physics.cmd_set_character_velocity(&list, CHARACTER, {2, 0, 0}, {.Gravity})
+	physics.cmd_set_character_velocity(&list, OTHER, {2, 0, 0}, {.Gravity})
+	testing.expect(t, physics.submit(api, w, list))
+	for _ in 0 ..< 90 {
+		api.step(w, STEP, 1)
+	}
+	low, high := state(api, w, CHARACTER), state(api, w, OTHER)
+	testing.expectf(t, low.position.x > 2.5 && abs(low.position.y - 0.3) < 0.05, "it climbs the low step: %v", low.position)
+	testing.expectf(t, high.position.x < 1.5 && high.position.y < 0.05, "it stops at the high step: %v", high.position)
+}
+
+// ramp places a box 6 m long whose top is a ramp at angle radians, rising along x from about the ground at x = 1.
+@(private)
+ramp :: proc(list: ^physics.Command_List, body: physics.Body, shape: physics.Shape, angle: f32, z: f64) {
+	physics.cmd_create_shape(list, shape, .Box, {3, 0.1, 2})
+	desc := physics.body_desc(body, shape, .Static, {1 + 3 * f64(math.cos(angle)), 3 * f64(math.sin(angle)), z})
+	desc.rotation = {0, 0, math.sin(angle / 2), math.cos(angle / 2)}
+	physics.cmd_create_body(list, desc)
+}
+
+// character_steep_slope: a character with a max_slope of 45 degrees walks up a 20 degree ramp and not a 60 degree one,
+// and one put on the steep ramp stands on steep ground and slides down it.
+character_steep_slope :: proc(t: ^testing.T, api: ^physics.Physics_API) {
+	w := world(t, api)
+	defer api.world_destroy(w)
+	STEEP :: f32(math.PI / 3)
+	GENTLE :: f32(math.PI / 9)
+	CLIMBER :: physics.Body{3, 1}
+	SLIDER :: physics.Body{4, 1}
+	list := physics.command_list(context.temp_allocator)
+	ramp(&list, {5, 1}, {2, 1}, STEEP, 0)
+	ramp(&list, {6, 1}, {3, 1}, GENTLE, 10)
+	physics.cmd_create_character(&list, physics.character_desc(CHARACTER, {0, 0.1, -1}))
+	physics.cmd_create_character(&list, physics.character_desc(CLIMBER, {0, 0.1, 10}))
+	// Above the steep ramp's top at its middle, its lower sphere clear of it along the normal.
+	center := [2]f64{1 + 3 * f64(math.cos(STEEP)), 3 * f64(math.sin(STEEP))}
+	normal := [2]f64{-f64(math.sin(STEEP)), f64(math.cos(STEEP))}
+	sphere := center + normal * (0.1 + 0.3 + 0.05)
+	physics.cmd_create_character(&list, physics.character_desc(SLIDER, {sphere.x, sphere.y - 0.3, 1.5}))
+	physics.cmd_set_character_velocity(&list, CHARACTER, {2, 0, 0}, {.Gravity})
+	physics.cmd_set_character_velocity(&list, CLIMBER, {2, 0, 0}, {.Gravity})
+	testing.expect(t, physics.submit(api, w, list))
+
+	steep := false
+	for _ in 0 ..< 120 {
+		s, _ := step_character(t, api, w, SLIDER, 1)
+		steep ||= s.ground == .Steep
+	}
+	testing.expect(t, steep, "the slider stood on steep ground")
+	testing.expectf(t, state(api, w, SLIDER).position.y < sphere.y - 1, "it slid down: %v", state(api, w, SLIDER).position)
+	walker := state(api, w, CHARACTER)
+	testing.expectf(t, walker.position.y < 0.5 && walker.position.x < 1.8, "it does not climb the steep ramp: %v", walker.position)
+	climber := state(api, w, CLIMBER)
+	testing.expectf(t, climber.position.y > 0.5, "it climbs the gentle ramp: %v", climber.position)
+}
+
+// character_moving_platform: a character stands on a kinematic platform that moves at 1 m/s, which carries it, and
+// its ground is the platform with the platform's velocity.
+character_moving_platform :: proc(t: ^testing.T, api: ^physics.Physics_API) {
+	w := world(t, api)
+	defer api.world_destroy(w)
+	PLATFORM :: physics.Body{3, 1}
+	PLATFORM_SHAPE :: physics.Shape{2, 1}
+	list := physics.command_list(context.temp_allocator)
+	// Its top is at y = 0.6.
+	physics.cmd_create_shape(&list, PLATFORM_SHAPE, .Box, {1.5, 0.1, 1.5})
+	physics.cmd_create_body(&list, physics.body_desc(PLATFORM, PLATFORM_SHAPE, .Kinematic, {0, 0.5, 0}))
+	physics.cmd_create_character(&list, physics.character_desc(CHARACTER, {0, 0.65, 0}))
+	testing.expect(t, physics.submit(api, w, list))
+	// It lands first.
+	step_character(t, api, w, CHARACTER, 20)
+	s: physics.Character_State
+	for i in 1 ..= 60 {
+		list = physics.command_list(context.temp_allocator)
+		physics.cmd_move_kinematic(&list, PLATFORM, {f64(i) * f64(STEP), 0.5, 0}, {0, 0, 0, 1}, STEP)
+		testing.expect(t, physics.submit(api, w, list))
+		s, _ = step_character(t, api, w, CHARACTER, 1)
+	}
+	testing.expectf(t, abs(s.position.x - 1) < 0.1 && abs(s.position.y - 0.6) < 0.05, "the platform carried it: %v", s.position)
+	testing.expect_value(t, s.ground, physics.Ground_State.Ground)
+	testing.expect_value(t, s.ground_body, PLATFORM)
+	testing.expectf(t, abs(s.ground_velocity.x - 1) < 0.05, "the ground moves at the platform's velocity: %v", s.ground_velocity)
+}
+
+// character_pushes_box: a character that walks into a light box pushes it, and one with no push force does not.
+character_pushes_box :: proc(t: ^testing.T, api: ^physics.Physics_API) {
+	w := world(t, api)
+	defer api.world_destroy(w)
+	WEAK :: physics.Body{3, 1}
+	FAR_BOX :: physics.Body{5, 1}
+	list := physics.command_list(context.temp_allocator)
+	boxes := [2]physics.Body{BOX, FAR_BOX}
+	for b, i in boxes {
+		box := physics.body_desc(b, BOX_SHAPE, .Dynamic, {2, 0.5, f64(i) * 10})
+		box.mass = 10
+		physics.cmd_create_body(&list, box)
+	}
+	weak := physics.character_desc(WEAK, {0, 0.1, 10})
+	weak.max_push_force = 0
+	physics.cmd_create_character(&list, physics.character_desc(CHARACTER, {0, 0.1, 0}))
+	physics.cmd_create_character(&list, weak)
+	physics.cmd_set_character_velocity(&list, CHARACTER, {1.5, 0, 0}, {.Gravity})
+	physics.cmd_set_character_velocity(&list, WEAK, {1.5, 0, 0}, {.Gravity})
+	testing.expect(t, physics.submit(api, w, list))
+	for _ in 0 ..< 120 {
+		api.step(w, STEP, 1)
+	}
+	testing.expectf(t, state(api, w, BOX).position.x > 2.3, "it pushes the box: %v", state(api, w, BOX).position)
+	testing.expectf(t, abs(state(api, w, FAR_BOX).position.x - 2) < 0.02, "with no push force it does not: %v", state(api, w, FAR_BOX).position)
+	testing.expectf(t, state(api, w, WEAK).position.x < 1.3, "and the box stops it: %v", state(api, w, WEAK).position)
+}
+
+// character_is_a_body: a ray hits a character, and skips it when the filter ignores it; a character that reports
+// contacts begins one with the ground when it lands; a sensor reports it; and destroying it ends its contacts.
+character_is_a_body :: proc(t: ^testing.T, api: ^physics.Physics_API) {
+	w := world(t, api)
+	defer api.world_destroy(w)
+	SENSOR :: physics.Body{3, 1}
+	SENSOR_SHAPE :: physics.Shape{2, 1}
+	list := physics.command_list(context.temp_allocator)
+	physics.cmd_create_shape(&list, SENSOR_SHAPE, .Box, {0.5, 1, 0.5})
+	trigger := physics.body_desc(SENSOR, SENSOR_SHAPE, .Static, {4, 1, 0}, user = 7)
+	trigger.flags = {.Sensor}
+	physics.cmd_create_body(&list, trigger)
+	desc := physics.character_desc(CHARACTER, {0, 0.5, 0}, user = 42)
+	desc.flags = {.Report_Contacts}
+	physics.cmd_create_character(&list, desc)
+	testing.expect(t, physics.submit(api, w, list))
+
+	down := physics.Ray{origin = {0, 10, 0}, direction = {0, -1, 0}, max_distance = 20}
+	hit: physics.Ray_Hit
+	testing.expect(t, bool(api.raycast(w, &down, nil, &hit)))
+	testing.expect_value(t, hit.body, CHARACTER)
+	testing.expect_value(t, hit.user, 42)
+	// A backend may keep the capsule a little above its feet: Jolt keeps it its padding, 2 cm, above them.
+	testing.expectf(t, abs(hit.position.y - 2.3) < 0.03, "at the top of its capsule: %v", hit.position)
+	ignore := physics.FILTER_ALL
+	ignore.ignore[0], ignore.ignore_count = CHARACTER, 1
+	testing.expect(t, bool(api.raycast(w, &down, &ignore, &hit)))
+	testing.expect_value(t, hit.body, GROUND)
+
+	events := make([dynamic]physics.Contact_Event, context.temp_allocator)
+	step_character(t, api, w, CHARACTER, 60, &events)
+	testing.expect_value(t, len(events), 1)
+	if len(events) == 1 {
+		e := events[0]
+		testing.expect_value(t, e.kind, physics.Contact_Kind.Begin)
+		testing.expect(t, !e.sensor)
+		testing.expect_value(t, e.a, GROUND)
+		testing.expect_value(t, e.b, CHARACTER)
+		testing.expect_value(t, e.b_user, 42)
+		testing.expectf(t, e.normal.y > 0.99, "the normal points from the ground to the character: %v", e.normal)
+	}
+
+	clear(&events)
+	list = physics.command_list(context.temp_allocator)
+	physics.cmd_set_character_velocity(&list, CHARACTER, {2, 0, 0}, {.Gravity})
+	testing.expect(t, physics.submit(api, w, list))
+	step_character(t, api, w, CHARACTER, 180, &events)
+	sensed := 0
+	for e in events {
+		if e.sensor {
+			testing.expect_value(t, e.a, CHARACTER)
+			testing.expect_value(t, e.b, SENSOR)
+			testing.expect_value(t, e.kind, physics.Contact_Kind.Begin if sensed == 0 else physics.Contact_Kind.End)
+			sensed += 1
+		}
+	}
+	testing.expect_value(t, sensed, 2)
+
+	clear(&events)
+	list = physics.command_list(context.temp_allocator)
+	physics.cmd_destroy_character(&list, CHARACTER)
+	testing.expect(t, physics.submit(api, w, list))
+	step_character(t, api, w, CHARACTER, 1, &events)
+	testing.expect_value(t, len(events), 1)
+	if len(events) == 1 {
+		testing.expect_value(t, events[0].kind, physics.Contact_Kind.End)
+		testing.expect_value(t, events[0].b, CHARACTER)
+	}
+}

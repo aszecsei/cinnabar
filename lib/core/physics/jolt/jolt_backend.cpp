@@ -12,6 +12,7 @@
 #include <Jolt/Core/TempAllocator.h>
 #include <Jolt/Physics/Body/BodyActivationListener.h>
 #include <Jolt/Physics/Body/BodyCreationSettings.h>
+#include <Jolt/Physics/Character/CharacterVirtual.h>
 #include <Jolt/Core/UnorderedMap.h>
 #include <Jolt/Core/UnorderedSet.h>
 #include <Jolt/Physics/Collision/CastResult.h>
@@ -222,6 +223,9 @@ public:
     }
 };
 
+// A character's inner body carries this in its flags, beside the engine's Body_Flags, which use the low bits.
+constexpr uint16 CHARACTER_BODY = 1u << 15;
+
 class Layer_Mask_Filter final : public ObjectLayerFilter {
 public:
     uint32 layers;
@@ -275,9 +279,40 @@ public:
     void end_event(uint32 i1, uint32 i2);
 };
 
+// The characters' contacts with bodies, which Jolt reports from each character's update, on the thread that steps: the
+// pairs and their events go into the same tables as the bodies' (see docs/physics/design.md#characters). It also says
+// which bodies push a character and which it pushes, by their motion: a table, not a game procedure.
+class Character_Listener final : public CharacterContactListener {
+public:
+    World_Impl* world = nullptr;
+
+    void OnContactAdded(const CharacterVirtual* character, const CharacterContact& contact, CharacterContactSettings& settings) override;
+    // A contact that persists is one that began, unless its pair ended while the character was out of the simulation.
+    void OnContactPersisted(const CharacterVirtual* character, const CharacterContact& contact, CharacterContactSettings& settings) override
+    {
+        OnContactAdded(character, contact, settings);
+    }
+    void OnContactRemoved(const CharacterVirtual* character, const BodyID& body, const SubShapeID& sub_shape) override;
+};
+
+// A character: Jolt's CharacterVirtual, which owns its inner body, and the velocity that it moves by.
+struct Character_Slot {
+    JPH_OVERRIDE_NEW_DELETE
+
+    Ref<CharacterVirtual> character;
+    // The velocity of Set_Character_Velocity, and its Character_Move_Flags.
+    Vec3 velocity = Vec3::sZero();
+    uint32 move_flags = CN_CHARACTER_MOVE_GRAVITY;
+    float step_height = 0, stick_to_floor = 0, mass = 0;
+    ObjectLayer layer = 0;
+    bool enabled = true;
+};
+
+// A body handle's slot. id is the body, or a character's inner body; character is set, and owned, for a character.
 struct Body_Slot {
     uint32 generation = 0;
     BodyID id;
+    Character_Slot* character = nullptr;
 };
 
 struct Joint_Slot {
@@ -306,7 +341,11 @@ struct World_Impl {
     Layer_Pairs pairs;
     Activation_Listener activation;
     Contact_Listener contacts;
+    Character_Listener character_contacts;
     Array<Body_Slot> bodies;
+    // The handle indices of the characters, in order, which is the order they step in.
+    Array<uint32> character_indices;
+    Array<cn_character_state> character_states;
     Array<Shape_Slot> shapes;
     Array<Joint_Slot> joints;
     Array<cn_joint_break> broken;
@@ -332,6 +371,7 @@ struct World_Impl {
             pairs);
         system.SetBodyActivationListener(&activation);
         contacts.world = this;
+        character_contacts.world = this;
         system.SetContactListener(&contacts);
     }
 };
@@ -344,6 +384,12 @@ bool reports(const World_Impl& w, const Body& body)
 void Contact_Listener::OnContactAdded(const Body& body1, const Body& body2, const ContactManifold& manifold, ContactSettings& settings)
 {
     if (!reports(*world, body1) && !reports(*world, body2)) {
+        return;
+    }
+    // A character's contacts with bodies come from the character, which touches what its inner body would; a sensor's
+    // come from here, since a character passes through sensors.
+    bool character = ((world->flags[body1.GetID().GetIndex()] | world->flags[body2.GetID().GetIndex()]) & CHARACTER_BODY) != 0;
+    if (character && !body1.IsSensor() && !body2.IsSensor()) {
         return;
     }
     SubShapeIDPair sub_shapes = body1.GetID() < body2.GetID()
@@ -486,11 +532,21 @@ bool find_body(World_Impl& w, cn_body handle, BodyID& id)
         return false;
     }
     const Body_Slot& slot = w.bodies[handle.index];
-    if (slot.generation != handle.generation || slot.id.IsInvalid()) {
+    // A character's handle names its inner body, which only the character moves.
+    if (slot.generation != handle.generation || slot.id.IsInvalid() || slot.character != nullptr) {
         return false;
     }
     id = slot.id;
     return true;
+}
+
+Character_Slot* find_character(World_Impl& w, cn_body handle)
+{
+    if (handle.generation == 0 || handle.index >= w.bodies.size()) {
+        return nullptr;
+    }
+    Body_Slot& slot = w.bodies[handle.index];
+    return slot.generation == handle.generation ? slot.character : nullptr;
 }
 
 const Shape* find_shape(World_Impl& w, cn_shape handle)
@@ -531,6 +587,73 @@ void from_quat(QuatArg q, float out[4])
 ObjectLayer object_layer(uint8_t layer, uint8_t motion)
 {
     return ObjectLayer(layer & LAYER_MASK) | (motion == CN_MOTION_STATIC ? 0 : MOVING);
+}
+
+void Character_Listener::OnContactAdded(const CharacterVirtual* character, const CharacterContact& contact, CharacterContactSettings& settings)
+{
+    settings.mCanPushCharacter = contact.mMotionTypeB != EMotionType::Static;
+    settings.mCanReceiveImpulses = contact.mMotionTypeB == EMotionType::Dynamic;
+    if (contact.mIsSensorB || contact.mBodyB.IsInvalid()) {
+        return;
+    }
+    BodyID self = character->GetInnerBodyID();
+    uint32 i1 = self.GetIndex(), i2 = contact.mBodyB.GetIndex();
+    World_Impl& w = *world;
+    if (!((w.flags[i1] | w.flags[i2]) & (CN_BODY_REPORT_CONTACTS | CN_BODY_SENSOR))) {
+        return;
+    }
+    SubShapeIDPair sub_shapes = self < contact.mBodyB ? SubShapeIDPair(self, SubShapeID(), contact.mBodyB, contact.mSubShapeIDB)
+                                                      : SubShapeIDPair(contact.mBodyB, contact.mSubShapeIDB, self, SubShapeID());
+    Contact_Listener& c = w.contacts;
+    UniqueLock lock(c.mutex);
+    if (!c.touching.insert(sub_shapes).second || c.pairs[Contact_Listener::key(self, contact.mBodyB)]++ > 0) {
+        return;
+    }
+    // The pair's first contact. The contact's normal points from the body to the character, and a is the lower handle.
+    Vec3 normal = contact.mContactNormal;
+    bool character_first = w.handles[i1].index < w.handles[i2].index;
+    if (character_first) {
+        normal = -normal;
+    }
+    cn_contact_event e = {};
+    e.kind = CN_CONTACT_BEGIN;
+    e.a = w.handles[character_first ? i1 : i2];
+    e.b = w.handles[character_first ? i2 : i1];
+    e.a_user = w.users[character_first ? i1 : i2];
+    e.b_user = w.users[character_first ? i2 : i1];
+    from_rvec3(contact.mPosition, e.point);
+    // b's velocity relative to a's at the point.
+    Vec3 relative = contact.mLinearVelocity - character->GetLinearVelocity();
+    if (!character_first) {
+        relative = -relative;
+    }
+    for (int i = 0; i < 3; i++) {
+        e.normal[i] = normal[i];
+        e.relative_velocity[i] = relative[i];
+    }
+    // An estimate, as a body's is: what stops the character's speed along the normal.
+    const Character_Slot* slot = w.bodies[w.handles[i1].index].character;
+    e.impulse = slot != nullptr ? slot->mass * std::abs(relative.Dot(normal)) : 0.0f;
+    c.events.push_back(e);
+}
+
+void Character_Listener::OnContactRemoved(const CharacterVirtual* character, const BodyID& body, const SubShapeID& sub_shape)
+{
+    BodyID self = character->GetInnerBodyID();
+    SubShapeIDPair pair = self < body ? SubShapeIDPair(self, SubShapeID(), body, sub_shape) : SubShapeIDPair(body, sub_shape, self, SubShapeID());
+    Contact_Listener& c = world->contacts;
+    UniqueLock lock(c.mutex);
+    auto found = c.touching.find(pair);
+    if (found == c.touching.end()) {
+        return;
+    }
+    c.touching.erase(found);
+    auto count = c.pairs.find(Contact_Listener::key(self, body));
+    if (count == c.pairs.end() || --count->second > 0) {
+        return;
+    }
+    c.pairs.erase(count);
+    c.end_event(self.GetIndex(), body.GetIndex());
 }
 
 Shape::ShapeResult create_shape(const cn_create_shape& c)
@@ -701,6 +824,95 @@ bool run_destroy_body(World_Impl& w, cn_body body)
     bodies.DestroyBody(id);
     w.handles[id.GetIndex()] = {};
     w.bodies[body.index] = {};
+    return true;
+}
+
+bool run_create_character(World_Impl& w, const cn_create_character& c)
+{
+    if (c.body.generation == 0 || c.body.index >= w.bodies.size()) {
+        report(CN_LOG_ERROR, "physics: Create_Character: body index %u is outside the world's %u", c.body.index,
+            uint32(w.bodies.size()));
+        return false;
+    }
+    Body_Slot& slot = w.bodies[c.body.index];
+    if (!slot.id.IsInvalid()) {
+        report(CN_LOG_ERROR, "physics: Create_Character: body index %u is in use", c.body.index);
+        return false;
+    }
+    if (!(c.radius > 0) || !(c.height > 2 * c.radius)) {
+        report(CN_LOG_ERROR, "physics: Create_Character: radius %g and height %g are not a capsule", c.radius, c.height);
+        return false;
+    }
+    // A capsule standing on the character's position, its feet.
+    Shape::ShapeResult capsule = CapsuleShapeSettings(0.5f * c.height - c.radius, c.radius).Create();
+    Shape::ShapeResult shape = capsule.HasError()
+        ? capsule
+        : RotatedTranslatedShapeSettings(Vec3(0, 0.5f * c.height, 0), Quat::sIdentity(), capsule.Get()).Create();
+    if (shape.HasError()) {
+        report(CN_LOG_ERROR, "physics: Create_Character: %s", shape.GetError().c_str());
+        return false;
+    }
+    CharacterVirtualSettings settings;
+    settings.mShape = shape.Get();
+    settings.mInnerBodyShape = shape.Get();
+    settings.mInnerBodyLayer = object_layer(c.layer, CN_MOTION_KINEMATIC);
+    // Contacts with the lower sphere of the capsule hold it up.
+    settings.mSupportingVolume = Plane(Vec3::sAxisY(), -c.radius);
+    settings.mMaxSlopeAngle = c.max_slope;
+    settings.mMass = c.mass;
+    settings.mMaxStrength = c.max_push_force;
+
+    auto* character = new Character_Slot();
+    character->character = new CharacterVirtual(&settings, to_rvec3(c.position), to_quat(c.rotation), c.user, &w.system);
+    character->character->SetListener(&w.character_contacts);
+    character->step_height = c.step_height;
+    character->stick_to_floor = c.stick_to_floor;
+    character->mass = c.mass;
+    character->layer = settings.mInnerBodyLayer;
+    BodyID inner = character->character->GetInnerBodyID();
+    if (inner.IsInvalid()) {
+        delete character;
+        report(CN_LOG_ERROR, "physics: Create_Character: the world is full");
+        return false;
+    }
+    {
+        // A sensor detects only an active kinematic body, and the inner body has no velocity of its own to keep it awake.
+        BodyLockWrite lock(w.system.GetBodyLockInterface(), inner);
+        if (lock.Succeeded()) {
+            lock.GetBody().SetAllowSleeping(false);
+        }
+    }
+    slot.generation = c.body.generation;
+    slot.id = inner;
+    slot.character = character;
+    w.handles[inner.GetIndex()] = c.body;
+    w.users[inner.GetIndex()] = c.user;
+    w.flags[inner.GetIndex()] = uint16(c.flags | CHARACTER_BODY);
+    w.character_indices.insert(std::lower_bound(w.character_indices.begin(), w.character_indices.end(), c.body.index), c.body.index);
+    w.added_since_optimize++;
+    return true;
+}
+
+// release_character ends a character's contacts and destroys it, with its inner body.
+void release_character(World_Impl& w, Body_Slot& slot)
+{
+    w.contacts.end_pairs(slot.id);
+    w.handles[slot.id.GetIndex()] = {};
+    w.flags[slot.id.GetIndex()] = 0;
+    delete slot.character;
+    slot = {};
+}
+
+bool run_destroy_character(World_Impl& w, cn_body body)
+{
+    if (find_character(w, body) == nullptr) {
+        return false;
+    }
+    auto found = std::lower_bound(w.character_indices.begin(), w.character_indices.end(), body.index);
+    if (found != w.character_indices.end() && *found == body.index) {
+        w.character_indices.erase(found);
+    }
+    release_character(w, w.bodies[body.index]);
     return true;
 }
 
@@ -968,7 +1180,7 @@ const char* command_name(uint16_t kind)
     static const char* names[] = { "Set_World", "Create_Shape", "Release_Shape", "Create_Body", "Destroy_Body",
         "Set_Pose", "Move_Kinematic", "Set_Velocity", "Add_Force", "Add_Force_At", "Add_Torque", "Add_Impulse",
         "Add_Angular_Impulse", "Activate", "Deactivate", "Set_Enabled", "Create_Compound", "Create_Joint", "Destroy_Joint",
-        "Set_Joint" };
+        "Set_Joint", "Create_Character", "Destroy_Character", "Set_Character_Velocity", "Set_Character_Pose" };
     return kind < sizeof(names) / sizeof(names[0]) ? names[kind] : "unknown";
 }
 
@@ -1095,8 +1307,43 @@ bool run_command(World_Impl& w, uint16_t kind, const uint8_t* data, uint32_t siz
         }
         return true;
     }
+    case CN_CMD_CREATE_CHARACTER:
+        return run_create_character(w, read<cn_create_character>(data));
+    case CN_CMD_DESTROY_CHARACTER:
+        return run_destroy_character(w, read<cn_body_command>(data).body);
+    case CN_CMD_SET_CHARACTER_VELOCITY: {
+        const auto& c = read<cn_set_character_velocity>(data);
+        Character_Slot* slot = find_character(w, c.body);
+        if (slot == nullptr) {
+            return false;
+        }
+        slot->velocity = to_vec3(c.velocity);
+        slot->move_flags = c.flags;
+        return true;
+    }
+    case CN_CMD_SET_CHARACTER_POSE: {
+        const auto& c = read<cn_set_pose>(data);
+        Character_Slot* slot = find_character(w, c.body);
+        if (slot == nullptr) {
+            return false;
+        }
+        slot->character->SetPosition(to_rvec3(c.position));
+        slot->character->SetRotation(to_quat(c.rotation));
+        return true;
+    }
     case CN_CMD_SET_ENABLED: {
         const auto& c = read<cn_set_enabled>(data);
+        if (Character_Slot* slot = find_character(w, c.body)) {
+            BodyID inner = slot->character->GetInnerBodyID();
+            if (c.enabled && !slot->enabled) {
+                bodies.AddBody(inner, EActivation::Activate);
+            } else if (!c.enabled && slot->enabled) {
+                w.contacts.end_pairs(inner);
+                bodies.RemoveBody(inner);
+            }
+            slot->enabled = c.enabled != 0;
+            return true;
+        }
         if (!find_body(w, c.body, id)) {
             return false;
         }
@@ -1161,9 +1408,68 @@ void collect_moved(World_Impl& w)
     w.moved.erase(end, w.moved.end());
 }
 
+void read_character(World_Impl& w, cn_body handle, const CharacterVirtual& character, cn_character_state& out)
+{
+    out = {};
+    out.body = handle;
+    out.user = character.GetUserData();
+    from_rvec3(character.GetPosition(), out.position);
+    from_quat(character.GetRotation(), out.rotation);
+    from_vec3(character.GetLinearVelocity(), out.velocity);
+    switch (character.GetGroundState()) {
+    case CharacterBase::EGroundState::OnGround: out.ground = CN_GROUND_GROUND; break;
+    case CharacterBase::EGroundState::OnSteepGround: out.ground = CN_GROUND_STEEP; break;
+    default: out.ground = CN_GROUND_AIR; break;
+    }
+    if (out.ground == CN_GROUND_AIR) {
+        return;
+    }
+    from_vec3(character.GetGroundNormal(), out.ground_normal);
+    from_vec3(character.GetGroundVelocity(), out.ground_velocity);
+    BodyID ground = character.GetGroundBodyID();
+    if (!ground.IsInvalid()) {
+        out.ground_body = w.handles[ground.GetIndex()];
+        out.ground_user = out.ground_body.generation != 0 ? w.users[ground.GetIndex()] : 0;
+    }
+}
+
+// step_characters moves each enabled character after the bodies, one at a time in handle order, so that the step is
+// the same on every run: it takes the ground's velocity, walks up steps, sticks to the floor and slides along walls.
+void step_characters(World_Impl& w, float dt)
+{
+    Vec3 gravity = w.system.GetGravity();
+    for (uint32 index : w.character_indices) {
+        Body_Slot& body = w.bodies[index];
+        Character_Slot& slot = *body.character;
+        if (!slot.enabled) {
+            continue;
+        }
+        CharacterVirtual& character = *slot.character;
+        character.UpdateGroundVelocity();
+        Vec3 velocity = slot.velocity;
+        if (slot.move_flags & CN_CHARACTER_MOVE_GRAVITY) {
+            // As Jolt's own example does: on the ground and not leaving it, the ground's velocity, else the vertical
+            // velocity that it has; then gravity, the walk, and a jump once.
+            Vec3 ground = character.GetGroundVelocity();
+            float vertical = character.GetLinearVelocity().GetY();
+            bool towards_ground = vertical - ground.GetY() < 0.1f;
+            velocity = character.GetGroundState() == CharacterBase::EGroundState::OnGround && towards_ground ? ground : Vec3(0, vertical, 0);
+            velocity += gravity * dt + slot.velocity;
+            slot.velocity.SetY(0);
+        }
+        character.SetLinearVelocity(velocity);
+        CharacterVirtual::ExtendedUpdateSettings settings;
+        settings.mWalkStairsStepUp = Vec3(0, slot.step_height, 0);
+        settings.mStickToFloorStepDown = Vec3(0, -slot.stick_to_floor, 0);
+        character.ExtendedUpdate(dt, gravity, settings, DefaultBroadPhaseLayerFilter(w.object_vs_broad, slot.layer),
+            DefaultObjectLayerFilter(w.pairs, slot.layer), {}, {}, w.temp);
+        read_character(w, { index, body.generation }, character, w.character_states.emplace_back());
+    }
+}
+
 cn_backend_info info()
 {
-    uint32_t features = CN_FEATURE_RIGID_BODIES | CN_FEATURE_QUERIES | CN_FEATURE_SENSORS | CN_FEATURE_JOINTS;
+    uint32_t features = CN_FEATURE_RIGID_BODIES | CN_FEATURE_QUERIES | CN_FEATURE_SENSORS | CN_FEATURE_JOINTS | CN_FEATURE_CHARACTERS;
 #ifdef JPH_DOUBLE_PRECISION
     features |= CN_FEATURE_DOUBLE_PRECISION;
 #endif
@@ -1210,7 +1516,11 @@ void destroy(World_Entry& entry)
     }
     BodyInterface& bodies = w->system.GetBodyInterface();
     for (Body_Slot& slot : w->bodies) {
-        if (!slot.id.IsInvalid()) {
+        // A character destroys its own inner body.
+        if (slot.character != nullptr) {
+            delete slot.character;
+            slot = {};
+        } else if (!slot.id.IsInvalid()) {
             if (bodies.IsAdded(slot.id)) {
                 bodies.RemoveBody(slot.id);
             }
@@ -1254,6 +1564,7 @@ uint32_t submit(cn_world handle, const void* data, uint32_t size)
         w->moved.clear();
         w->contacts.events.clear();
         w->broken.clear();
+        w->character_states.clear();
     }
     bool ok = true;
     const uint8_t* bytes = static_cast<const uint8_t*>(data);
@@ -1285,6 +1596,7 @@ uint32_t step(cn_world handle, float dt, int32_t substeps)
         w->moved.clear();
         w->contacts.events.clear();
         w->broken.clear();
+        w->character_states.clear();
     }
     if (w->added_since_optimize >= OPTIMIZE_AFTER) {
         w->system.OptimizeBroadPhase();
@@ -1295,6 +1607,7 @@ uint32_t step(cn_world handle, float dt, int32_t substeps)
     w->contacts.apply_removed();
     check_breaks(*w, dt);
     collect_moved(*w);
+    step_characters(*w, dt);
     Array<cn_contact_event>& events = w->contacts.events;
     QuickSort(events.begin(), events.end(), [](const cn_contact_event& x, const cn_contact_event& y) {
         if (x.a.index != y.a.index) {
@@ -1323,6 +1636,8 @@ void results(cn_world handle, cn_step_results* out)
         out->contact_count = uint32_t(w->contacts.events.size());
         out->broken = w->broken.data();
         out->broken_count = uint32_t(w->broken.size());
+        out->characters = w->character_states.data();
+        out->character_count = uint32_t(w->character_states.size());
     }
 }
 
@@ -1331,8 +1646,16 @@ void body_state(cn_world handle, const cn_body* bodies, uint32_t count, cn_body_
     World_Impl* w = find_world(handle);
     for (uint32_t i = 0; i < count; i++) {
         BodyID id;
+        const Character_Slot* character = w != nullptr ? find_character(*w, bodies[i]) : nullptr;
         if (w != nullptr && find_body(*w, bodies[i], id)) {
             read_state(*w, id, bodies[i], out[i]);
+        } else if (character != nullptr) {
+            out[i] = {};
+            out[i].body = bodies[i];
+            out[i].user = character->character->GetUserData();
+            from_rvec3(character->character->GetPosition(), out[i].position);
+            from_quat(character->character->GetRotation(), out[i].rotation);
+            from_vec3(character->character->GetLinearVelocity(), out[i].linear_velocity);
         } else {
             out[i] = {};
         }

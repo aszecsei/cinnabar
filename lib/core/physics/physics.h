@@ -9,7 +9,7 @@
 extern "C" {
 #endif
 
-#define CN_PHYSICS_API_VERSION 7
+#define CN_PHYSICS_API_VERSION 8
 #define CN_PHYSICS_MAX_COMPOUND_CHILDREN 1024
 #define CN_PHYSICS_MAX_LAYERS 32
 #define CN_PHYSICS_MAX_QUERY_IGNORE 8
@@ -81,6 +81,10 @@ enum cn_command_kind {
     CN_CMD_CREATE_JOINT,
     CN_CMD_DESTROY_JOINT,
     CN_CMD_SET_JOINT,
+    CN_CMD_CREATE_CHARACTER,
+    CN_CMD_DESTROY_CHARACTER,
+    CN_CMD_SET_CHARACTER_VELOCITY,
+    CN_CMD_SET_CHARACTER_POSE,
 };
 
 enum cn_joint_kind { CN_JOINT_FIXED, CN_JOINT_POINT, CN_JOINT_HINGE, CN_JOINT_SLIDER, CN_JOINT_DISTANCE, CN_JOINT_CONE, CN_JOINT_SIX_DOF };
@@ -172,6 +176,36 @@ typedef struct cn_set_joint {
 typedef struct cn_joint_break { cn_joint joint; float force, torque; } cn_joint_break;
 typedef struct cn_set_enabled { cn_body body; uint32_t enabled, _pad; } cn_set_enabled;
 
+// A character controller (see docs/physics/design.md#characters). Its handle is a body's; position is its feet.
+typedef struct cn_create_character {
+    cn_body body;
+    double position[3];
+    float rotation[4];
+    uint64_t user;
+    float radius, height, max_slope, step_height, stick_to_floor, mass, max_push_force;
+    uint8_t layer, _pad;
+    uint16_t flags;
+} cn_create_character;
+
+enum cn_character_move_flag { CN_CHARACTER_MOVE_GRAVITY = 1u << 0 };
+
+typedef struct cn_set_character_velocity { cn_body body; float velocity[3]; uint32_t flags; } cn_set_character_velocity;
+
+enum cn_ground_state { CN_GROUND_AIR, CN_GROUND_GROUND, CN_GROUND_STEEP };
+
+typedef struct cn_character_state {
+    cn_body body;
+    uint64_t user;
+    double position[3];
+    float rotation[4];
+    float velocity[3];
+    uint8_t ground, _pad[3];
+    float ground_normal[3];
+    float ground_velocity[3];
+    cn_body ground_body;
+    uint64_t ground_user;
+} cn_character_state;
+
 enum cn_body_state_flag { CN_BODY_STATE_ASLEEP = 1u << 0 };
 
 typedef struct cn_body_state {
@@ -202,7 +236,8 @@ typedef struct cn_step_results {
     uint32_t moved_count, contact_count;
     const cn_contact_event* contacts;
     const cn_joint_break* broken;
-    uint32_t broken_count, _pad;
+    uint32_t broken_count, character_count;
+    const cn_character_state* characters;
 } cn_step_results;
 
 typedef struct cn_ray { double origin[3]; float direction[3]; float max_distance; } cn_ray;
@@ -313,6 +348,9 @@ static inline uint32_t cn_physics_layout(void)
         (uint32_t)sizeof(cn_overlap_hit),
         (uint32_t)sizeof(cn_physics_api),
         (uint32_t)sizeof(cn_physics_host),
+        (uint32_t)sizeof(cn_create_character),
+        (uint32_t)sizeof(cn_set_character_velocity),
+        (uint32_t)sizeof(cn_character_state),
     };
     uint32_t h = 0x811c9dc5u;
     for (size_t i = 0; i < sizeof(sizes) / sizeof(sizes[0]); i++) {
@@ -340,7 +378,10 @@ static_assert(sizeof(cn_add_force_at) == 48);
 static_assert(sizeof(cn_world_desc) == 24);
 static_assert(sizeof(cn_backend_info) == 32);
 static_assert(sizeof(cn_body_state) == 88);
-static_assert(sizeof(cn_step_results) == 40);
+static_assert(sizeof(cn_step_results) == 48);
+static_assert(sizeof(cn_create_character) == 88);
+static_assert(sizeof(cn_set_character_velocity) == 24);
+static_assert(sizeof(cn_character_state) == 112);
 static_assert(sizeof(cn_create_joint) == 192);
 static_assert(sizeof(cn_set_joint) == 24);
 static_assert(sizeof(cn_joint_break) == 16);
