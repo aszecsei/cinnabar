@@ -10,7 +10,7 @@ import "core:slice"
 import format "cinnabar:engine/asset/format"
 
 // Changing how the cooker cooks scenes changes this, which invalidates every cooked scene.
-SCENE_COOK_VERSION :: "scenes 2"
+SCENE_COOK_VERSION :: "scenes 3"
 
 // cook_scenes cooks the prefabs and the scenes among the assets whose keys changed. The cooker cannot lay out native
 // components, because their types exist only in the game DLL, so it checks only what the file itself says: its
@@ -120,14 +120,25 @@ cook_scenes :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass) 
 					}
 				}
 			}
-			key := scene_key(options.config, s^, scene, &prefabs)
+			// A scene's navmeshes are its sub-assets, which its blob lists (see nav_meshes.odin). A stage's generated
+			// prefab has no .meta file to keep their GUIDs in, and a prefab bakes none.
+			navs: []format.Scene_Nav_Mesh
+			if kind == .Scene && s.owner == {} {
+				navs_ok: bool
+				if navs, navs_ok = scene_nav_meshes(options, pass, i, flat); !navs_ok {
+					settle(pass, i, .Failed)
+					ok = false
+					continue
+				}
+			}
+			key := scene_key(options.config, s^, scene, &prefabs, navs)
 			buffer: [32]u8
 			output := fmt.tprintf("%s/%s.blob", out_dir, format.guid_format(s.meta.guid, &buffer))
 			if cooked_key(output, kind, format.scene_layout()) == key && !pass.force[s.meta.guid] {
 				settle(pass, i, .Current)
 				continue
 			}
-			if !write_blob(output, format.scene_write(flat, s.meta.guid, key, kind, context.temp_allocator)) {
+			if !write_blob(output, format.scene_write(flat, s.meta.guid, key, kind, navs, context.temp_allocator)) {
 				settle(pass, i, .Failed)
 				ok = false
 				continue
@@ -165,13 +176,23 @@ scene_prefab :: proc(p: ^Scene_Prefabs, guid: format.Guid) -> (format.Scene, boo
 	return scene, ok
 }
 
-// scene_key covers what the blob depends on: the cooker, the configuration, the path, the source, the settings, and
-// the source of every prefab that the scene instantiates, through the prefabs inside them, or that it is missing.
+// scene_key covers what the blob depends on: the cooker, the configuration, the path, the source, the GUID, the
+// settings, the navmeshes that it lists, and the source of every prefab that the scene instantiates, through the
+// prefabs inside them, or that it is missing. The sub-asset lines of the .meta file are not in it, because the cooker
+// writes them: the navmeshes' GUIDs are, through the list.
 @(private = "file")
-scene_key :: proc(config: Script_Config, s: Asset_Source, scene: format.Scene, prefabs: ^Scene_Prefabs) -> u64 {
+scene_key :: proc(config: Script_Config, s: Asset_Source, scene: format.Scene, prefabs: ^Scene_Prefabs, navs: []format.Scene_Nav_Mesh) -> u64 {
 	key := hash.fnv64a(transmute([]byte)fmt.tprintf("%s\x00%v\x00%s\x00%x\x00", SCENE_COOK_VERSION, config, s.name, format.scene_layout()))
 	key = hash.fnv64a(source_of(s), key)
-	key = hash.fnv64a(transmute([]byte)s.meta_text, key)
+	guid := s.meta.guid
+	key = hash.fnv64a(guid[:], key)
+	for setting in s.meta.settings {
+		key = hash.fnv64a(transmute([]byte)fmt.tprintf("%s=%s\x00", setting.key, setting.value), key)
+	}
+	for &n in navs {
+		key = hash.fnv64a(transmute([]byte)fmt.tprintf("%x\x00%s\x00", n.entity, n.agent), key)
+		key = hash.fnv64a(n.guid[:], key)
+	}
 	used := make(map[format.Guid]bool, context.temp_allocator)
 	pending := make([dynamic]format.Scene, context.temp_allocator)
 	append(&pending, scene)
@@ -200,6 +221,31 @@ scene_key :: proc(config: Script_Config, s: Asset_Source, scene: format.Scene, p
 		}
 	}
 	return key
+}
+
+// scene_flat parses and expands a scene, as its cook does, without reporting its problems again: the scene's cook
+// reports them.
+scene_flat :: proc(pass: ^Pass, index: int) -> (flat: format.Scene, ok: bool) {
+	prefabs := Scene_Prefabs {
+		pass   = pass,
+		parsed = make(map[format.Guid]Maybe(format.Scene), context.temp_allocator),
+		index  = make(map[format.Guid]int, context.temp_allocator),
+	}
+	for i in assets_of(pass.assets, .Prefab) {
+		prefabs.index[pass.assets[i].meta.guid] = i
+	}
+	resolver := format.Prefab_Resolver {
+		data = &prefabs,
+		find = proc(data: rawptr, prefab: format.Guid) -> (format.Scene, bool) {
+			return scene_prefab((^Scene_Prefabs)(data), prefab)
+		},
+	}
+	scene, _, parsed := format.scene_parse(string(asset_source(pass, index)), context.temp_allocator)
+	if !parsed {
+		return
+	}
+	flat, _, ok = format.scene_expand(scene, resolver, {}, context.temp_allocator)
+	return
 }
 
 // parse_scene parses a scene or a prefab and reports the problems of its text.

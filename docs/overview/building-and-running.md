@@ -34,7 +34,7 @@ build/
 ├── runtime/    runtime.exe        the standard game's release executable
 ├── tools/      cook.exe, cinnabar.exe, viewer.exe, ltc_fit.exe, stbn.exe, editorctl.exe, flickerstat.exe
 ├── captures/   the editor's screenshots, GIFs and their sidecars
-└── obj/        luau/, compressonator/, meshoptimizer/, clusterlod/, opus/, vorbis/, lz4/   the CMake builds the executables link
+└── obj/        luau/, compressonator/, meshoptimizer/, clusterlod/, opus/, vorbis/, lz4/, recast/   the CMake builds the executables link
                 pdb/, link/, script-types/, dotnet/, editor/autosave/, editor/automation.json,
                 release-cache/<game>/   the game's release loose cache, which the package step packs into bundles
 ```

@@ -30,10 +30,11 @@ settle_counts_and_fail_pending_fails_the_rest :: proc(t: ^testing.T) {
 }
 
 // When a kind's pass stops before its loop, as when it cannot make the cache's directory, none of the kind's assets is
-// current (#325). The kinds without such a stop, the shading models and the material functions, are left out.
+// current (#325). The kinds without such a stop, the shading models and the material functions, are left out, and so
+// are navmeshes, which are scenes' sub-assets with no file of their own.
 @(test)
 a_pass_that_stops_early_fails_its_kind :: proc(t: ^testing.T) {
-	kinds := ALL_KINDS - {.Shading_Model, .Material_Function}
+	kinds := ALL_KINDS - {.Shading_Model, .Material_Function, .Nav_Mesh}
 	files := make([dynamic]struct {
 			path, text: string,
 		}, context.temp_allocator)

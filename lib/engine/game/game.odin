@@ -15,6 +15,7 @@ import "cinnabar:engine/asset"
 import "cinnabar:engine/audio"
 import "cinnabar:engine/ecs"
 import "cinnabar:engine/editor"
+import "cinnabar:engine/nav"
 import "cinnabar:engine/physics"
 import "cinnabar:engine/project"
 import "cinnabar:engine/render"
@@ -194,6 +195,7 @@ register_components :: proc(r: ^ecs.Registry, h: Hooks) {
 	audio.register_components(r)
 	anim.register_components(r)
 	ui.register_components(r)
+	nav.register_components(r)
 	if h.register_components != nil {
 		h.register_components(r)
 	}

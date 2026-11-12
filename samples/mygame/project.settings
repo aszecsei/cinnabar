@@ -23,3 +23,16 @@ mesh.texel_density = 256
 # global bundle, and gives the other scenes a bundle each (see docs/content/blobs-and-loading.md#bundles). Every scene of the
 # sample is a level.
 # bundles.global_scenes = <guid>, <guid>
+
+# The agent types that the cooker bakes navmeshes for, each with its radius, height and step height in meters and the
+# steepest slope that it walks up, in degrees (see docs/content/kinds/nav-meshes.md#agent-types). The main scene's
+# Navigation volume bakes one navmesh for each.
+nav.agents = Human, Small
+nav.agent.Human.radius = 0.3
+nav.agent.Human.height = 1.8
+nav.agent.Human.step_height = 0.35
+nav.agent.Human.max_slope = 45
+nav.agent.Small.radius = 0.15
+nav.agent.Small.height = 0.6
+nav.agent.Small.step_height = 0.25
+nav.agent.Small.max_slope = 45

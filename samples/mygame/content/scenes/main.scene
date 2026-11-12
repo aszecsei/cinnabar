@@ -55,6 +55,20 @@ component 65 Collider
 behaviour ecc996e9308f4bf1b7d7b4d623429249
 	sound = $1899c44a1ec54500d12ede038a7e3f4f
 
+entity 3b9d7e21c4a8f650
+name = "Navigation"
+component 1 Transform
+	position = [2516582400000000000, 15518925, -13841203]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 42 Volume
+	shape = Box
+	extents = [1.05, 1.025, 1.9]
+component 128 Nav_Mesh_Volume
+	cell_size = 0.05
+	cell_height = 0.05
+	tile_size = 64
+
 entity 52f2b689117aa80c
 name = "Tall Box"
 component 1 Transform

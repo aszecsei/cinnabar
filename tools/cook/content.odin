@@ -63,6 +63,10 @@ Pass :: struct {
 	files:      []File_Record,
 	// The sources that the pass read, by path: the scan's, and those that asset_source read for another asset.
 	read:       [dynamic]string,
+	// The project's agent types, which nav_project reads once in a pass, and the navmeshes' tiles that the pass baked or
+	// found up to date (see nav_meshes.odin).
+	nav:        Maybe(Nav_Project),
+	nav_tiles:  [Asset_Result]int,
 }
 
 // parse_cook_args reads `--cache <dir> --config dev|release [--definitions <file>] [--dxc <dxc.exe>] [--include <dir>]...
@@ -209,6 +213,11 @@ cook :: proc(
 	}
 	if .Sprite_Sheet in kinds {
 		pass.ok = cook_sprite_sheets(options, pass.assets, &pass) && pass.ok
+	}
+	// A navmesh reads the cooked meshes of its scene's colliders, so it bakes after the meshes, and its GUID is the one
+	// that the scene's cook gave it.
+	if .Nav_Mesh in kinds {
+		pass.ok = cook_nav_meshes(options, &pass) && pass.ok
 	}
 	written := 0
 	for n in pass.cooked {

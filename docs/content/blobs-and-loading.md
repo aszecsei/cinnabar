@@ -91,7 +91,7 @@ The runtime reads an uncompressed blob from the bundle at its offset, as it read
 
 - **A level** is a scene that `bundles.global_scenes` in the project's settings does not name. Its bundle is `<scene guid>.cbb`. It holds the scene and what only that level uses.
 - **What a blob uses** is the assets that it names (`format.blob_references`):
-  - A scene's or prefab's behaviour scripts and asset fields.
+  - A scene's or prefab's behaviour scripts and asset fields, and a scene's navmeshes.
   - A script's requires.
   - A material's textures, and an instance's material and textures.
   - An effect's materials, meshes and textures.

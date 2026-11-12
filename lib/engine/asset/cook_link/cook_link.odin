@@ -125,6 +125,7 @@ Asset_Kind :: enum u8 {
 	Font,
 	Ui,
 	Sprite_Sheet,
+	Nav_Mesh,
 }
 
 Asset_Status :: enum u8 {
