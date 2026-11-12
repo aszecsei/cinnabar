@@ -78,6 +78,16 @@ wake :: proc(to: Effects, w: ^ecs.World, e: ecs.Entity) -> bool {
 	return true
 }
 
+// character_move sets the velocity that a character moves by from the next tick, until another (see
+// docs/physics/design.md#characters). With gravity, the backend adds gravity: velocity's x and z are the walk, and its
+// y is a jump, added once. Without it, velocity is the character's, as given. Its Physics_Character shows the
+// character's velocity after the tick.
+character_move :: proc(to: Effects, w: ^ecs.World, e: ecs.Entity, velocity: [3]f32, gravity := false) -> bool {
+	body := character_of(w, e) or_return
+	core_physics.cmd_set_character_velocity(to.list, body, velocity, {.Gravity} if gravity else {})
+	return true
+}
+
 @(private)
 make_job_effects :: proc(user: rawptr, allocator: runtime.Allocator) -> rawptr {
 	list := new(core_physics.Command_List, allocator)

@@ -114,6 +114,7 @@ register_components :: proc(r: ^ecs.Registry) {
 	ecs.register_component(r, Collider, COLLIDER_ID, DEFAULT_COLLIDER)
 	ecs.register_component(r, Physics_Body, PHYSICS_BODY_ID)
 	register_joint_components(r)
+	register_character_components(r)
 }
 
 // Pool hands out the engine's handles: an index and a generation, which goes up each time the index is freed, so a
@@ -151,10 +152,17 @@ pool_destroy :: proc(p: ^Pool) {
 	p^ = {}
 }
 
-// Body_Record is what the engine knows of a live body: its entity, and whether the body is out of the simulation
+// Body_Kind is what a body handle names: a body of a Physics_Body, or a character of a Physics_Character.
+Body_Kind :: enum u8 {
+	Body,
+	Character,
+}
+
+// Body_Record is what the engine knows of a live body: its entity, what it is, and whether it is out of the simulation
 // because its entity is inactive.
 Body_Record :: struct {
 	entity:   ecs.Entity,
+	kind:     Body_Kind,
 	disabled: bool,
 }
 
@@ -193,11 +201,13 @@ State :: struct {
 	pending:        core_physics.Command_List,
 	job_effects:    ecs.Job_Buffer,
 	queries:  struct {
-		new_colliders: ecs.Query,
-		new_bodies:    ecs.Query,
-		bodies:        ecs.Query,
-		parts:         ecs.Query,
-		joints:        [Joint_Kind]ecs.Query,
+		new_colliders:  ecs.Query,
+		new_bodies:     ecs.Query,
+		bodies:         ecs.Query,
+		parts:          ecs.Query,
+		joints:         [Joint_Kind]ecs.Query,
+		new_characters: ecs.Query,
+		characters:     ecs.Query,
 	},
 }
 
@@ -233,12 +243,26 @@ init :: proc(s: ^State, platform: ^core.Platform_API, desc: core_physics.World_D
 
 // register makes the sync's queries. Call it after init and in on_reload, with the world's components registered.
 register :: proc(s: ^State, w: ^ecs.World) {
-	s.queries.new_colliders = ecs.query(w, {ecs.read(w, ecs.Transform), ecs.read(w, Collider), ecs.without(w, Physics_Body)})
+	// A Character is its entity's body, and its Rigid_Body and Collider make none.
+	s.queries.new_colliders = ecs.query(
+		w,
+		{ecs.read(w, ecs.Transform), ecs.read(w, Collider), ecs.without(w, Physics_Body), ecs.without(w, Character)},
+	)
 	s.queries.new_bodies = ecs.query(
 		w,
-		{ecs.read(w, ecs.Transform), ecs.read(w, Rigid_Body), ecs.without(w, Collider), ecs.without(w, Physics_Body)},
+		{
+			ecs.read(w, ecs.Transform),
+			ecs.read(w, Rigid_Body),
+			ecs.without(w, Collider),
+			ecs.without(w, Physics_Body),
+			ecs.without(w, Character),
+		},
 	)
-	s.queries.bodies = ecs.query(w, {ecs.read(w, ecs.Transform), ecs.write(w, Physics_Body)})
+	s.queries.new_characters = ecs.query(w, {ecs.read(w, ecs.Transform), ecs.read(w, Character), ecs.without(w, Physics_Character)})
+	s.queries.characters = ecs.query(w, {ecs.read(w, ecs.Transform), ecs.write(w, Physics_Character), ecs.read(w, Character)})
+	// The sync removes a character's Physics_Body, and a Physics_Character without its Character, by commands: until
+	// then, they are left alone.
+	s.queries.bodies = ecs.query(w, {ecs.read(w, ecs.Transform), ecs.write(w, Physics_Body), ecs.without(w, Character)})
 	s.queries.parts = ecs.query(w, {ecs.read(w, Collider), ecs.read(w, ecs.Parent), ecs.without(w, Rigid_Body)})
 	for id, kind in JOINT_IDS {
 		s.queries.joints[kind] = ecs.query(w, {{id = id, access = .Read}, ecs.optional(ecs.write(w, Physics_Joint))})

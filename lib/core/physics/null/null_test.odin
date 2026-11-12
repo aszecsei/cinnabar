@@ -5,6 +5,7 @@ import "core:sync"
 import "core:testing"
 
 import physics "cinnabar:core/physics"
+import "cinnabar:core/physics/conformance"
 import physics_host "cinnabar:core/physics/host"
 
 // The backend's state is one per process, and the test runner runs tests on several threads.
@@ -84,4 +85,17 @@ destroy_all :: proc(t: ^testing.T) {
 	testing.expect_value(t, api.world_destroy_all(), 2)
 	testing.expect(t, !api.step(a, 1.0 / 60, 1))
 	testing.expect_value(t, api.world_destroy_all(), 0)
+}
+
+// The conformance suite's character cases that need no simulation: a character moves by its velocity and replays.
+@(test)
+character_moves :: proc(t: ^testing.T) {
+	sync.guard(&lock)
+	conformance.character_moves(t, setup(quiet = true))
+}
+
+@(test)
+character_replays :: proc(t: ^testing.T) {
+	sync.guard(&lock)
+	conformance.character_replays(t, setup())
 }

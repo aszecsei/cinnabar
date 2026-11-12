@@ -1,0 +1,258 @@
+# The playground: a character to walk around, with a follow camera behind it (see docs/physics/design.md#characters).
+# W, A, S and D or a gamepad's left stick walk it, Space or the gamepad's A jumps, and the right mouse button or the
+# right stick turns the camera. It walks up the stairs, slides along the blue wall, stops below the steep red ramp and
+# walks up the gentle gray one, rides the yellow platform, and pushes the green boxes. Positions are raw
+# World_Position values in units of 2^-24 m, so 2516582400000000000 is 1.5e11 m. The editor writes this file; see
+# docs/editor/document-and-scenes.md#scenes.
+scene 2
+
+entity 93a963fcc659e42b
+name = "Camera"
+component 1 Transform
+	position = [2516582400000000000, 50331648, -100663296]
+	rotation = [0.1305262, 0, 0, 0.9914449]
+	scale = [1, 1, 1]
+component 32 Camera
+component 97 Audio_Listener
+behaviour 0d2b9ccc8bdbaaf687f50afcc7b47500
+	target = @10e704ffe82e4445
+
+entity 7f9294579f9f2f5a
+name = "Sun"
+component 1 Transform
+	position = [2516582400000000000, 167772160, 0]
+	rotation = [0.403058, 0.272532, -0.127084, 0.864361]
+	scale = [1, 1, 1]
+component 34 Directional_Light
+	color = [1, 0.95, 0.85]
+	intensity = 3
+	cast_shadows = true
+
+entity 151746ebbeb1fe23
+name = "Global Volume"
+component 1 Transform
+	position = [2516582400000000000, 0, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 42 Volume
+	shape = Global
+component 49 Environment
+	mode = Atmosphere
+	sun = @7f9294579f9f2f5a
+
+entity 0b03ad1aeaeb1b3e
+name = "Floor"
+component 1 Transform
+	position = [2516582400000000000, -8388608, 67108864]
+	rotation = [0, 0, 0, 1]
+	scale = [40, 1, 40]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $7b3d1f5a9c2e4b6d8f0a2c4e6b8d0f13
+	cast_shadows = true
+component 65 Collider
+
+entity 10e704ffe82e4445
+name = "Player"
+component 1 Transform
+	position = [2516582400000000000, 0, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 75 Character
+behaviour 51ea1de1cfb466a772d7bf450af51d74
+	camera = @93a963fcc659e42b
+
+entity d86f52b6039dc572
+name = "Player Body"
+parent = @10e704ffe82e4445
+component 1 Transform
+	position = [2516582400000000000, 15099494, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [0.6, 1.8, 0.6]
+component 2 Local_Transform
+	offset = [0, 0.9, 0]
+	scale = [0.6, 1.8, 0.6]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $7c3e5a91ad4f6b829c3e5a7b9d1e3f40
+	cast_shadows = true
+
+entity 99f0ac966f393502
+name = "Player Visor"
+parent = @10e704ffe82e4445
+component 1 Transform
+	position = [2516582400000000000, 25165824, 5033165]
+	rotation = [0, 0, 0, 1]
+	scale = [0.4, 0.15, 0.1]
+component 2 Local_Transform
+	offset = [0, 1.5, 0.3]
+	scale = [0.4, 0.15, 0.1]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $5a1c3e7f9b2d4f608a1c3e5f7a9b0c2d
+	cast_shadows = true
+
+entity 98730d6be09baa10
+name = "Step 1"
+component 1 Transform
+	position = [2516582400067108864, 2097152, 53687091]
+	rotation = [0, 0, 0, 1]
+	scale = [2, 0.25, 0.4]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $5a1c3e7f9b2d4f608a1c3e5f7a9b0c2d
+	cast_shadows = true
+component 65 Collider
+
+entity b32bd2bc335d1042
+name = "Step 2"
+component 1 Transform
+	position = [2516582400067108864, 4194304, 60397978]
+	rotation = [0, 0, 0, 1]
+	scale = [2, 0.5, 0.4]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $5a1c3e7f9b2d4f608a1c3e5f7a9b0c2d
+	cast_shadows = true
+component 65 Collider
+
+entity 1a8cde89cec5bb47
+name = "Step 3"
+component 1 Transform
+	position = [2516582400067108864, 6291456, 67108864]
+	rotation = [0, 0, 0, 1]
+	scale = [2, 0.75, 0.4]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $5a1c3e7f9b2d4f608a1c3e5f7a9b0c2d
+	cast_shadows = true
+component 65 Collider
+
+entity f5164e65e64293d3
+name = "Step 4"
+component 1 Transform
+	position = [2516582400067108864, 8388608, 73819750]
+	rotation = [0, 0, 0, 1]
+	scale = [2, 1, 0.4]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $5a1c3e7f9b2d4f608a1c3e5f7a9b0c2d
+	cast_shadows = true
+component 65 Collider
+
+entity 05609c221497f075
+name = "Step 5"
+component 1 Transform
+	position = [2516582400067108864, 10485760, 80530637]
+	rotation = [0, 0, 0, 1]
+	scale = [2, 1.25, 0.4]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $5a1c3e7f9b2d4f608a1c3e5f7a9b0c2d
+	cast_shadows = true
+component 65 Collider
+
+entity 12a222946e3e5381
+name = "Step 6"
+component 1 Transform
+	position = [2516582400067108864, 12582912, 87241523]
+	rotation = [0, 0, 0, 1]
+	scale = [2, 1.5, 0.4]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $5a1c3e7f9b2d4f608a1c3e5f7a9b0c2d
+	cast_shadows = true
+component 65 Collider
+
+entity 8ca202bd8c589aa0
+name = "Landing"
+component 1 Transform
+	position = [2516582400067108864, 12582912, 115762790]
+	rotation = [0, 0, 0, 1]
+	scale = [2, 1.5, 3]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $5a1c3e7f9b2d4f608a1c3e5f7a9b0c2d
+	cast_shadows = true
+component 65 Collider
+
+entity bf7d13fe4dd25dd0
+name = "Wall"
+component 1 Transform
+	position = [2516582399932891136, 20971520, 67108864]
+	rotation = [0, 0, 0, 1]
+	scale = [0.5, 2.5, 8]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $6b2d4f809c3e5a718b2d4f6a8c0d2e3f
+	cast_shadows = true
+component 65 Collider
+
+entity 7f49bbe3b0f417d2
+name = "Gentle Ramp"
+component 1 Transform
+	position = [2516582400150994944, 17214437, 80850710]
+	rotation = [-0.1736482, 0, 0, 0.9848078]
+	scale = [3, 0.2, 6]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $5a1c3e7f9b2d4f608a1c3e5f7a9b0c2d
+	cast_shadows = true
+component 65 Collider
+
+entity 342ebd423782953a
+name = "Steep Ramp"
+component 1 Transform
+	position = [2516582399849005056, 41229272, 62423479]
+	rotation = [-0.4617486, 0, 0, 0.8870108]
+	scale = [3, 0.2, 6]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $9e507cb3cf618da4be507c9dbf305162
+	cast_shadows = true
+component 65 Collider
+
+entity 5bf33a99f363e8d1
+name = "Moving Platform"
+component 1 Transform
+	position = [2516582400000000000, 3355443, 201326592]
+	rotation = [0, 0, 0, 1]
+	scale = [2.5, 0.2, 2.5]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $af618dc4d0729eb5cf618daec0416273
+	cast_shadows = true
+component 65 Collider
+component 64 Rigid_Body
+	motion = Kinematic
+behaviour 6870f098abf40ca88d9de5f597dda41d
+	width = 4
+	period = 8
+
+entity 88db230c96f893c1
+name = "Big Box"
+component 1 Transform
+	position = [2516582399974834176, 8388608, 67108864]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $8d4f6ba2be507c93ad4f6b8cae2f4051
+	cast_shadows = true
+component 65 Collider
+component 64 Rigid_Body
+	mass = 10
+
+entity 2079229569f8e11a
+name = "Light Box"
+component 1 Transform
+	position = [2516582400025165824, 5033165, 83886080]
+	rotation = [0, 0, 0, 1]
+	scale = [0.6, 0.6, 0.6]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $8d4f6ba2be507c93ad4f6b8cae2f4051
+	cast_shadows = true
+component 65 Collider
+component 64 Rigid_Body
+	mass = 5

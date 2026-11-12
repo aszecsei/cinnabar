@@ -15,7 +15,7 @@ import "cinnabar:core/jobs"
 import "cinnabar:core/layout"
 
 // The version of Physics_API and the command format. The host refuses a backend whose info reports another one.
-API_VERSION :: 7
+API_VERSION :: 8
 
 // A handle with generation 0 is the nil handle. The engine allocates Body and Shape handles itself, before the
 // backend knows them, so a command can name a body that an earlier command in the same list creates.
@@ -146,6 +146,10 @@ Command_Kind :: enum u16 {
 	Create_Joint,
 	Destroy_Joint,
 	Set_Joint,
+	Create_Character,
+	Destroy_Character,
+	Set_Character_Velocity,
+	Set_Character_Pose,
 }
 
 // size includes the header and the padding after the payload. Payloads start 8-byte aligned.
@@ -365,6 +369,70 @@ Set_Enabled :: struct {
 	_:       u32,
 }
 
+// =================================
+// Characters
+// =================================
+
+// Create_Character makes a character controller: a capsule that walks, climbs steps, sticks to slopes and stops at
+// walls, moved by the velocity that Set_Character_Velocity gives it (see docs/physics/design.md#characters). Its
+// handle is a Body, from the same pool as the bodies', so that queries and contacts name it as a body; body commands
+// other than Set_Enabled refuse it. position is the bottom of the capsule, its feet, and the capsule of radius and
+// height, its whole height, stands upright above it. max_slope is in radians: steeper ground is a wall. step_height is
+// the tallest step it walks up, and stick_to_floor how far down it follows the ground. It pushes dynamic bodies with
+// at most max_push_force newtons, and mass, in kg, is its weight on what it stands on. Of the flags, only
+// Report_Contacts applies. A new character is at rest, with the backend's gravity (Character_Move_Flag.Gravity).
+Create_Character :: struct {
+	body:           Body,
+	position:       Position,
+	rotation:       Rotation,
+	user:           u64,
+	radius:         f32,
+	height:         f32,
+	max_slope:      f32,
+	step_height:    f32,
+	stick_to_floor: f32,
+	mass:           f32,
+	max_push_force: f32,
+	layer:          u8,
+	_:              u8,
+	flags:          Body_Flags,
+}
+
+// character_desc gives a Create_Character with the usual defaults: 0.3 m by 1.8 m, slopes up to 45 degrees, steps
+// up to 0.4 m, 70 kg and a push of 100 N.
+character_desc :: proc(body: Body, position: Position, user: u64 = 0, layer: u8 = 0) -> Create_Character {
+	return {
+		body = body,
+		position = position,
+		rotation = {0, 0, 0, 1},
+		user = user,
+		radius = 0.3,
+		height = 1.8,
+		max_slope = 0.78539816,
+		step_height = 0.4,
+		stick_to_floor = 0.5,
+		mass = 70,
+		max_push_force = 100,
+		layer = layer,
+	}
+}
+
+Character_Move_Flag :: enum u32 {
+	// The backend's gravity: velocity's x and z are the walk, held until the next Set_Character_Velocity, and its y is
+	// added once to the character's vertical velocity, as a jump. The backend keeps the vertical velocity and adds
+	// gravity to it, and on the ground takes the ground's velocity. Without it, velocity is the character's, as given.
+	Gravity,
+}
+
+Character_Move_Flags :: bit_set[Character_Move_Flag;u32]
+
+// Set_Character_Velocity is the velocity that a character moves by in each step from the next, until another.
+Set_Character_Velocity :: struct {
+	body:     Body,
+	velocity: [3]f32,
+	flags:    Character_Move_Flags,
+}
+
 // Command_List is a stream of commands in chunks from its allocator, normally frame memory. It has no destroy
 // procedure: its memory is freed with the allocator's memory. A backend reads each chunk as bytes (see submit).
 Command_List :: struct {
@@ -505,6 +573,23 @@ cmd_set_enabled :: proc(list: ^Command_List, body: Body, enabled: bool) {
 	push(list, .Set_Enabled, Set_Enabled{body = body, enabled = b32(enabled)})
 }
 
+cmd_create_character :: proc(list: ^Command_List, desc: Create_Character) {
+	push(list, .Create_Character, desc)
+}
+
+cmd_destroy_character :: proc(list: ^Command_List, body: Body) {
+	push(list, .Destroy_Character, Body_Command{body})
+}
+
+cmd_set_character_velocity :: proc(list: ^Command_List, body: Body, velocity: [3]f32, flags: Character_Move_Flags = {}) {
+	push(list, .Set_Character_Velocity, Set_Character_Velocity{body = body, velocity = velocity, flags = flags})
+}
+
+// A character's teleport, which takes the Set_Pose payload; activate does nothing.
+cmd_set_character_pose :: proc(list: ^Command_List, body: Body, position: Position, rotation: Rotation) {
+	push(list, .Set_Character_Pose, Set_Pose{body = body, position = position, rotation = rotation})
+}
+
 cmd_create_joint :: proc(list: ^Command_List, desc: Create_Joint) {
 	push(list, .Create_Joint, desc)
 }
@@ -563,39 +648,42 @@ submit :: proc(api: ^Physics_API, world: World, list: Command_List) -> bool {
 // Format lists every type that crosses the boundary, so format_hash changes when any layout changes.
 @(private = "file")
 Format :: struct {
-	header:         Command_Header,
-	set_world:      Set_World,
-	create_shape:   Create_Shape,
-	release_shape:  Release_Shape,
-	compound:       Create_Compound,
-	create_joint:   Create_Joint,
-	destroy_joint:  Destroy_Joint,
-	set_joint:      Set_Joint,
-	joint_break:    Joint_Break,
-	create_body:    Create_Body,
-	destroy_body:   Destroy_Body,
-	set_pose:       Set_Pose,
-	move_kinematic: Move_Kinematic,
-	set_velocity:   Set_Velocity,
-	add_vector:     Add_Vector,
-	add_force_at:   Add_Force_At,
-	body_command:   Body_Command,
-	set_enabled:    Set_Enabled,
-	world_desc:     World_Desc,
-	info:           Backend_Info,
-	results:        Step_Results,
-	state:          Body_State,
-	ray:            Ray,
-	filter:         Query_Filter,
-	hit:            Ray_Hit,
-	contact:        Contact_Event,
-	shape_desc:     Shape_Desc,
-	shape_cast:     Shape_Cast,
-	overlap:        Overlap_Query,
-	overlap_hit:    Overlap_Hit,
-	api:            Physics_API,
-	host:           Host,
-	kind:           Command_Kind,
+	header:          Command_Header,
+	set_world:       Set_World,
+	create_shape:    Create_Shape,
+	release_shape:   Release_Shape,
+	compound:        Create_Compound,
+	create_joint:    Create_Joint,
+	destroy_joint:   Destroy_Joint,
+	set_joint:       Set_Joint,
+	joint_break:     Joint_Break,
+	create_body:     Create_Body,
+	destroy_body:    Destroy_Body,
+	set_pose:        Set_Pose,
+	move_kinematic:  Move_Kinematic,
+	set_velocity:    Set_Velocity,
+	add_vector:      Add_Vector,
+	add_force_at:    Add_Force_At,
+	body_command:    Body_Command,
+	set_enabled:     Set_Enabled,
+	character:       Create_Character,
+	move_character:  Set_Character_Velocity,
+	character_state: Character_State,
+	world_desc:      World_Desc,
+	info:            Backend_Info,
+	results:         Step_Results,
+	state:           Body_State,
+	ray:             Ray,
+	filter:          Query_Filter,
+	hit:             Ray_Hit,
+	contact:         Contact_Event,
+	shape_desc:      Shape_Desc,
+	shape_cast:      Shape_Cast,
+	overlap:         Overlap_Query,
+	overlap_hit:     Overlap_Hit,
+	api:             Physics_API,
+	host:            Host,
+	kind:            Command_Kind,
 }
 
 // layout_signature is an FNV-1a hash of the sizes of every type that crosses the boundary, in this order, which
@@ -636,6 +724,9 @@ layout_signature :: proc "contextless" () -> u32 {
 		u32(size_of(Overlap_Hit)),
 		u32(size_of(Physics_API)),
 		u32(size_of(Host)),
+		u32(size_of(Create_Character)),
+		u32(size_of(Set_Character_Velocity)),
+		u32(size_of(Character_State)),
 	}
 	h: u32 = 0x811c9dc5
 	for s in sizes {
@@ -673,18 +764,47 @@ Body_State :: struct {
 	_:                u32,
 }
 
-// Step_Results points into the backend's memory, valid until the next submit or step. moved is sorted by body
-// handle, so its order is the same on every run.
+// Step_Results points into the backend's memory, valid until the next submit or step. moved and characters are
+// sorted by body handle, so their order is the same on every run.
 Step_Results :: struct {
-	moved:         [^]Body_State,
-	moved_count:   u32,
-	contact_count: u32,
+	moved:           [^]Body_State,
+	moved_count:     u32,
+	contact_count:   u32,
 	// The contacts that began and ended since the last step, sorted by a, then b, then kind.
-	contacts:      [^]Contact_Event,
+	contacts:        [^]Contact_Event,
 	// The joints that broke in the step, by handle. A broken joint stays disabled.
-	broken:        [^]Joint_Break,
-	broken_count:  u32,
-	_:             u32,
+	broken:          [^]Joint_Break,
+	broken_count:    u32,
+	character_count: u32,
+	// Every enabled character, after the step.
+	characters:      [^]Character_State,
+}
+
+// What a character stands on after a step. Air is the zero value: a character is not on the ground until a step
+// finds it there.
+Ground_State :: enum u8 {
+	// Nothing below it, or only the side of something.
+	Air,
+	// Ground that it walks on.
+	Ground,
+	// Ground steeper than its max_slope, which it slides down.
+	Steep,
+}
+
+// Character_State is a character after a step: its pose, its velocity, and what it stands on, with that ground's
+// normal, its velocity under the character, its body and its user value. The ground fields are zero in the air.
+Character_State :: struct {
+	body:            Body,
+	user:            u64,
+	position:        Position,
+	rotation:        Rotation,
+	velocity:        [3]f32,
+	ground:          Ground_State,
+	_:               [3]u8,
+	ground_normal:   [3]f32,
+	ground_velocity: [3]f32,
+	ground_body:     Body,
+	ground_user:     u64,
 }
 
 // Joint_Break is a joint that carried more than its break_force or break_torque, with what it carried.
@@ -857,7 +977,10 @@ Host :: struct {
 #assert(size_of(World_Desc) == 24)
 #assert(size_of(Backend_Info) == 32)
 #assert(size_of(Body_State) == 88)
-#assert(size_of(Step_Results) == 40)
+#assert(size_of(Step_Results) == 48)
+#assert(size_of(Create_Character) == 88)
+#assert(size_of(Set_Character_Velocity) == 24)
+#assert(size_of(Character_State) == 112)
 #assert(size_of(Create_Joint) == 192)
 #assert(size_of(Set_Joint) == 24)
 #assert(size_of(Joint_Break) == 16)

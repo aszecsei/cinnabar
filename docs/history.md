@@ -114,6 +114,7 @@ The order in which physics was built.
 5. **Constraints:** the boundary's joints and the Jolt constraints for seven kinds, with limits, springs, motors and breaking; the joint components and their sync; `on_joint_break`, `Physics.set_motor` and `set_joint_enabled`; joint drawing; and the sample's chain.
 6. **Mesh colliders:** welded collision data in the mesh blob with the `collision` import setting, `create_mesh_shape` for triangle meshes and convex hulls, `Mesh` and `Convex_Mesh` colliders with a dynamic body's hull, hot reload by the mesh's version, mesh bounds in the editor, and the room scene's level mesh as its collider.
 7. **Plugins:** the layout signature and boundary version 7, the plugin loader for the development host and game DLL, `physics.backend` and `--physics`, the null backend for `none` and for a backend that does not load, features gating components, and the backend author's document.
+8. **Characters:** boundary version 8 with the character commands and results, Jolt's `CharacterVirtual` with an inner body and a contact listener of the backend's own, the null backend's characters, the conformance cases, `Character` and `Physics_Character` and their sync, `character_move`, `Physics.move_character`, `character_ground` and `is_grounded`, the capsule among the editor's helpers, and the sample's playground with a player and a follow camera.
 
 ## Animation
 The order in which animation was built (see [Animation](animation/README.md)).

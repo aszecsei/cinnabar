@@ -844,7 +844,7 @@ mesh_colliders :: proc(t: ^testing.T) {
 	testing.expect(t, ok && hit.entity == g, "a ray from above hits the scaled mesh")
 }
 
-// A backend without Joints: a joint component is ignored, with a warning, and the box falls.
+// A backend without Joints and Characters: a joint and a character are ignored, with a warning each, and the box falls.
 @(test)
 features_gate_components :: proc(t: ^testing.T) {
 	f := setup(t, null = true)
@@ -857,8 +857,143 @@ features_gate_components :: proc(t: ^testing.T) {
 	register(&f.physics, &f.world)
 	b := box(f, {0, 5, 0})
 	point_joint(f, b, {0, 1, 0})
+	walker := spawn_at(f, {3, 0, 0})
+	ecs.add(&f.world, walker, DEFAULT_CHARACTER)
 	ticks(f, 2)
 	testing.expect(t, ecs.has(&f.world, b, Physics_Body))
 	testing.expect(t, !ecs.has(&f.world, b, Physics_Joint), "the joint is ignored")
 	testing.expect(t, .Joints in f.physics.warned, "and warned about")
+	testing.expect_value(t, ecs.get(&f.world, walker, Physics_Character).body, core_physics.Body{})
+	testing.expect(t, .Characters in f.physics.warned, "and so is the character")
+}
+
+@(private = "file")
+character :: proc(f: ^Fixture, meters: [3]f64) -> ecs.Entity {
+	e := spawn_at(f, meters)
+	ecs.add(&f.world, e, DEFAULT_CHARACTER)
+	return e
+}
+
+@(private = "file")
+position :: proc(f: ^Fixture, e: ecs.Entity) -> [3]f64 {
+	return ecs.position_to_meters(ecs.get(&f.world, e, ecs.Transform).position)
+}
+
+// A Character walks on the ground: the sync makes its character, a Physics_Character and a Previous_Transform, and no
+// Physics_Body; a move with the backend's gravity walks it, and the write-back gives its Transform and its ground. A ray
+// hits it, and one that ignores it hits the ground.
+@(test)
+characters_walk :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(t, f)
+	g := ground(f)
+	e := character(f, {0, 0.1, 0})
+	ticks(f, 1)
+	testing.expect(t, ecs.has(&f.world, e, Physics_Character))
+	testing.expect(t, ecs.has(&f.world, e, ecs.Previous_Transform))
+	testing.expect(t, !ecs.has(&f.world, e, Physics_Body))
+	testing.expect(t, character_move(effects(&f.physics), &f.world, e, {2, 0, 0}, gravity = true))
+	ticks(f, 60)
+	p := position(f, e)
+	testing.expectf(t, abs(p.x - 2) < 0.15 && abs(p.y) < 0.05, "it walked 2 m on the ground: %v", p)
+	pc := ecs.get(&f.world, e, Physics_Character)
+	testing.expect_value(t, pc.ground, Ground_State.Ground)
+	testing.expect_value(t, pc.ground_entity, g)
+	testing.expectf(t, abs(pc.velocity.x - 2) < 0.05, "at its velocity: %v", pc.velocity)
+
+	above := ecs.position_from_meters({p.x, 10, p.z})
+	hit, ok := raycast(&f.physics, &f.world, above, {0, -1, 0}, 20)
+	testing.expect(t, ok && hit.entity == e, "a ray hits the character")
+	ignore := []ecs.Entity{e}
+	hit, ok = raycast(&f.physics, &f.world, above, {0, -1, 0}, 20, {layers = max(u32), ignore = ignore})
+	testing.expect(t, ok && hit.entity == g, "and one that ignores it hits the ground")
+	testing.expect(t, !character_move(effects(&f.physics), &f.world, g, {1, 0, 0}), "a body is not a character")
+}
+
+// On the null backend, a character moves by its velocity. A Transform write teleports it, an inactive one stays, and a
+// change of its Character makes it again with a new handle.
+@(test)
+characters_change :: proc(t: ^testing.T) {
+	f := setup(t, null = true)
+	defer teardown(t, f)
+	e := character(f, {0, 5, 0})
+	ticks(f, 1)
+	character_move(effects(&f.physics), &f.world, e, {1, 0, 0})
+	ticks(f, 60)
+	testing.expectf(t, abs(position(f, e).x - 1) < 1e-3, "it moved by its velocity: %v", position(f, e))
+
+	ecs.get(&f.world, e, ecs.Transform).position = ecs.position_from_meters({10, 5, 0})
+	ticks(f, 1)
+	testing.expectf(t, abs(position(f, e).x - (10 + 1.0 / 60)) < 1e-3, "a Transform write teleports it: %v", position(f, e))
+
+	ecs.set_active(&f.world, e, false)
+	ticks(f, 30)
+	testing.expectf(t, abs(position(f, e).x - (10 + 1.0 / 60)) < 1e-3, "an inactive character stays: %v", position(f, e))
+	testing.expect(t, f.physics.records[ecs.get(&f.world, e, Physics_Character).body.index].disabled)
+	ecs.set_active(&f.world, e, true)
+
+	old := ecs.get(&f.world, e, Physics_Character).body
+	c := ecs.get(&f.world, e, Character)
+	c.radius = 0.5
+	ticks(f, 1)
+	testing.expect(t, ecs.get(&f.world, e, Physics_Character).body != old, "a changed Character is made again")
+	testing.expect(t, !pool_valid(&f.physics.bodies, core_physics.Handle(old)))
+}
+
+// A Character is its entity's body: its Rigid_Body and Collider make none, with a warning. Without the Character, the
+// character is destroyed, and they make a body.
+@(test)
+a_character_is_its_entitys_body :: proc(t: ^testing.T) {
+	f := setup(t, null = true, quiet = true)
+	defer teardown(t, f)
+	e := box(f, {0, 5, 0})
+	ecs.add(&f.world, e, DEFAULT_CHARACTER)
+	ticks(f, 1)
+	testing.expect(t, !ecs.has(&f.world, e, Physics_Body), "the Character wins")
+	handle := ecs.get(&f.world, e, Physics_Character).body
+	testing.expect(t, pool_valid(&f.physics.bodies, core_physics.Handle(handle)))
+
+	ecs.remove(&f.world, e, Character)
+	ticks(f, 2)
+	testing.expect(t, !ecs.has(&f.world, e, Physics_Character))
+	testing.expect(t, !pool_valid(&f.physics.bodies, core_physics.Handle(handle)), "its handle went back to the pool")
+	testing.expect(t, ecs.has(&f.world, e, Physics_Body), "the Rigid_Body and Collider make a body")
+
+	ecs.add(&f.world, e, DEFAULT_CHARACTER)
+	ticks(f, 2)
+	testing.expect(t, !ecs.has(&f.world, e, Physics_Body), "an entity that becomes a character gives up its body")
+	testing.expect(t, ecs.has(&f.world, e, Physics_Character))
+}
+
+// Scripts move a character with the controller's gravity, read its ground, and its behaviour hears it land. The
+// behaviour's first fixed_update comes before the sync makes the character, which is no error.
+@(test)
+scripts_move_characters :: proc(t: ^testing.T) {
+	f := setup(t, scripts = true)
+	defer teardown(t, f)
+	ground(f)
+	f.box = character(f, {0, 0.2, 0})
+	context.user_ptr = f
+	_, ok := script.spawn_source(&f.runtime, "=walker", `
+local Walker = Behaviour.define("Walker")
+function Walker:fixed_update(dt)
+	Physics.move_character(self.entity, vector.create(0, 0, 2), true)
+end
+function Walker:on_collision_enter(other) Test.report(7) end
+Test.box():add(Walker)
+`)
+	testing.expect(t, ok)
+	ticks(f, 60)
+	_, ok = script.spawn_source(&f.runtime, "=ground", `
+local ground = Physics.character_ground(Test.box())
+Test.report(Physics.is_grounded(Test.box()) and 1 or 0)
+Test.report(ground.state == "ground" and ground.entity ~= nil and ground.normal.y > 0.99 and 1 or 0)
+Test.report(Physics.velocity(Test.box()).z)
+`)
+	testing.expect(t, ok)
+	testing.expectf(t, len(f.reports) == 4 && f.reports[0] == 7 && f.reports[1] == 1 && f.reports[2] == 1 && abs(f.reports[3] - 2) < 0.05, "reports %v", f.reports[:])
+
+	context.logger = testlog.expected_errors()
+	_, ok = script.spawn_source(&f.runtime, "=bodiless", `Physics.move_character(World.spawn(), vector.create(0, 0, 1))`)
+	testing.expect(t, !ok, "an entity that is not a character is an error")
 }

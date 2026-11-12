@@ -112,7 +112,7 @@ a_new_project_has_new_guids_that_its_files_name :: proc(t: ^testing.T) {
 	testing.expect(t, strings.contains(scene, "Spinning Cube"), "the odin template's scene replaces the basic one")
 	code := read(dir, "game/game.odin")
 	testing.expect(t, strings.has_prefix(code, "// Demo Game's Odin"))
-	testing.expect(t, strings.contains(code, "package demo_game\n"))
+	testing.expect(t, has_line(code, "package demo_game"), "the package is the name as a package's")
 	for text in ([]string{settings, scene, code}) {
 		testing.expect(t, !strings.contains(text, "{{"), "a placeholder is left")
 	}
@@ -154,4 +154,17 @@ an_icon_files_images_become_resources :: proc(t: ^testing.T) {
 
 	_, ok = icon_resources(ico[:10], context.temp_allocator)
 	testing.expect(t, !ok, "a cut file is refused")
+}
+
+// has_line says whether text has a line that is exactly line, with either line ending: a checkout with core.autocrlf
+// gives the templates CRLF.
+@(private = "file")
+has_line :: proc(text, line: string) -> bool {
+	text := text
+	for l in strings.split_lines_iterator(&text) {
+		if strings.trim_right(l, "\r") == line {
+			return true
+		}
+	}
+	return false
 }

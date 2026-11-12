@@ -29,6 +29,7 @@ tick :: proc(s: ^State, w: ^ecs.World) {
 	results: core_physics.Step_Results
 	api(s).results(s.world, &results)
 	write_back(s, w, results.moved[:results.moved_count])
+	write_back_characters(s, w, results.characters[:results.character_count])
 	note_breaks(s, w, results.broken[:results.broken_count])
 	clear(&s.tick_contacts)
 	for e in results.contacts[:results.contact_count] {
@@ -70,6 +71,8 @@ sync :: proc(s: ^State, w: ^ecs.World, dt: f32 = 1.0 / 60) -> bool {
 	check_bodies(s, w, &list, &commands)
 	add_bodies(s, w, &list, &commands, &parts)
 	update_bodies(s, w, &list, &commands, &parts, dt)
+	add_characters(s, w, &list, &commands)
+	update_characters(s, w, &list)
 	// The joints need the Physics_Body of a body that this sync made.
 	ecs.apply(w, {commands})
 	commands = ecs.commands(allocator_of(s))
@@ -156,9 +159,10 @@ walk_up :: proc(w: ^ecs.World, e: ecs.Entity, stop: proc(w: ^ecs.World, e: ecs.E
 	return 0, pose
 }
 
-// check_bodies goes through the live bodies: a body whose entity is gone, or whose Physics_Body or authoring
-// components were removed, is destroyed, and one whose entity became inactive leaves the simulation until it is
-// active again. The world's log has one reader, the script runtime, so the bodies are checked instead.
+// check_bodies goes through the live bodies and characters: one whose entity is gone, or whose runtime or authoring
+// components were removed, is destroyed, as is a body whose entity became a character, and one whose entity became
+// inactive leaves the simulation until it is active again. The world's log has one reader, the script runtime, so the
+// bodies are checked instead.
 @(private)
 check_bodies :: proc(s: ^State, w: ^ecs.World, list: ^core_physics.Command_List, commands: ^ecs.Commands) {
 	for &record, index in s.records {
@@ -167,15 +171,30 @@ check_bodies :: proc(s: ^State, w: ^ecs.World, list: ^core_physics.Command_List,
 			continue
 		}
 		e := record.entity
-		pb := ecs.is_alive(w, e) ? ecs.get(w, e, Physics_Body) : nil
-		if pb == nil || pb.body != handle {
-			destroy_body(s, list, handle)
-			continue
-		}
-		if !ecs.has(w, e, Rigid_Body) && !ecs.has(w, e, Collider) {
-			destroy_body(s, list, handle)
-			ecs.command_remove(commands, w, e, Physics_Body)
-			continue
+		alive := ecs.is_alive(w, e)
+		switch record.kind {
+		case .Body:
+			pb := ecs.get(w, e, Physics_Body) if alive else nil
+			if pb == nil || pb.body != handle {
+				destroy_body(s, list, handle)
+				continue
+			}
+			if (!ecs.has(w, e, Rigid_Body) && !ecs.has(w, e, Collider)) || ecs.has(w, e, Character) {
+				destroy_body(s, list, handle)
+				ecs.command_remove(commands, w, e, Physics_Body)
+				continue
+			}
+		case .Character:
+			pc := ecs.get(w, e, Physics_Character) if alive else nil
+			if pc == nil || pc.body != handle {
+				destroy_character(s, list, handle)
+				continue
+			}
+			if !ecs.has(w, e, Character) {
+				destroy_character(s, list, handle)
+				ecs.command_remove(commands, w, e, Physics_Character)
+				continue
+			}
 		}
 		inactive := ecs.has(w, e, ecs.Inactive)
 		if inactive != record.disabled {
@@ -245,7 +264,7 @@ update_bodies :: proc(s: ^State, w: ^ecs.World, list: ^core_physics.Command_List
 				create_body(s, w, list, e, pose, pb, body_parts)
 				continue
 			}
-			if pb.body.generation == 0 || !moved(pb, pose) {
+			if pb.body.generation == 0 || !moved(pb.position, pb.rotation, pose) {
 				if pb.motion == .Kinematic && (pb.linear_velocity != 0 || pb.angular_velocity != 0) {
 					core_physics.cmd_set_velocity(list, pb.body, 0, 0)
 					pb.linear_velocity, pb.angular_velocity = 0, 0
@@ -282,18 +301,26 @@ write_back :: proc(s: ^State, w: ^ecs.World, moved: []core_physics.Body_State) {
 		if pb.motion != .Dynamic {
 			continue
 		}
-		pose := ecs.get_write(w, e, ecs.Transform)
-		pose.position = ecs.position_offset_f64(s.anchor, state.position)
-		pose.rotation = from_rotation(state.rotation)
+		pose := write_pose(s, w, e, state.position, state.rotation)
 		pb.position, pb.rotation = pose.position, pose.rotation
-		if parent := ecs.get(w, e, ecs.Parent); parent != nil {
-			if local := ecs.get_write(w, e, ecs.Local_Transform); local != nil {
-				if parent_pose := ecs.get(w, parent.entity, ecs.Transform); parent_pose != nil {
-					local^ = local_from_world(parent_pose^, pose^, local.scale)
-				}
+	}
+}
+
+// write_pose writes a pose from the backend to an entity: its Transform, and a child's Local_Transform, which
+// propagation turns into its Transform. It gives the Transform.
+@(private)
+write_pose :: proc(s: ^State, w: ^ecs.World, e: ecs.Entity, position: core_physics.Position, rotation: core_physics.Rotation) -> ecs.Transform {
+	pose := ecs.get_write(w, e, ecs.Transform)
+	pose.position = ecs.position_offset_f64(s.anchor, position)
+	pose.rotation = from_rotation(rotation)
+	if parent := ecs.get(w, e, ecs.Parent); parent != nil {
+		if local := ecs.get_write(w, e, ecs.Local_Transform); local != nil {
+			if parent_pose := ecs.get(w, parent.entity, ecs.Transform); parent_pose != nil {
+				local^ = local_from_world(parent_pose^, pose^, local.scale)
 			}
 		}
 	}
+	return pose^
 }
 
 // create_body sends the commands that make e's body from its Collider and its parts, and fills pb with it. One
@@ -542,13 +569,14 @@ source_hash :: proc(s: ^State, w: ^ecs.World, e: ecs.Entity, parts: []Part) -> u
 	return h
 }
 
+// moved says whether a pose differs from the one last sent or written.
 @(private)
-moved :: proc(pb: ^Physics_Body, pose: ecs.Transform) -> bool {
-	d := ecs.position_sub(pose.position, pb.position)
+moved :: proc(position: ecs.World_Position, rotation: quaternion128, pose: ecs.Transform) -> bool {
+	d := ecs.position_sub(pose.position, position)
 	if linalg.dot(d, d) > MOVED_DISTANCE * MOVED_DISTANCE {
 		return true
 	}
-	return math.abs(linalg.dot(pose.rotation, pb.rotation)) < MOVED_ANGLE_COS
+	return math.abs(linalg.dot(pose.rotation, rotation)) < MOVED_ANGLE_COS
 }
 
 // local_from_world is the Local_Transform that puts a child at a world pose under its parent, keeping its scale.

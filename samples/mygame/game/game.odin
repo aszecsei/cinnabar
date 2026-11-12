@@ -57,6 +57,8 @@ CUBE_SKY_SCENE_META :: #load("../content/scenes/cube_sky.scene.meta", string)
 AUDIO_SCENE_META :: #load("../content/scenes/audio.scene.meta", string)
 // The 2D scene, sprites under an orthographic camera (see docs/rendering/2d.md#sprite-renderers).
 SPRITES_SCENE_META :: #load("../content/scenes/sprites.scene.meta", string)
+// The playground, a character to walk around with a follow camera (see docs/physics/design.md#characters).
+PLAYGROUND_SCENE_META :: #load("../content/scenes/playground.scene.meta", string)
 // The array that tints the large triangles, a layer for each (see docs/content/kinds/textures.md#cube-maps-and-arrays).
 TRIANGLE_TINTS_META :: #load("../content/textures/cube/tints.texture_set.meta", string)
 
@@ -795,15 +797,15 @@ update_output :: proc(g: ^game.Game) {
 }
 
 // switch_scene loads the next scene, the glass scene, the surfaces scene, the room scene, the billboards scene, the
-// animation scene, the cube map scene, the audio scene, the 2D scene, then the main scene again, when F7 is pressed. A linked editor owns the scene, so
-// the key does nothing then.
+// animation scene, the cube map scene, the audio scene, the 2D scene, the playground, then the main scene again, when
+// F7 is pressed. A linked editor owns the scene, so the key does nothing then.
 switch_scene :: proc(g: ^game.Game) {
 	if .F7 not_in g.platform.input().pressed || editor.active(&g.editor) {
 		return
 	}
 	s := state_of(g)
-	metas := [?]string{MAIN_SCENE_META, GLASS_SCENE_META, SURFACES_SCENE_META, ROOM_SCENE_META, BILLBOARDS_SCENE_META, ANIMATION_SCENE_META, CUBE_SKY_SCENE_META, AUDIO_SCENE_META, SPRITES_SCENE_META}
-	names := [?]string{"main", "glass", "surfaces", "room", "billboards", "animation", "cube map", "audio", "2D"}
+	metas := [?]string{MAIN_SCENE_META, GLASS_SCENE_META, SURFACES_SCENE_META, ROOM_SCENE_META, BILLBOARDS_SCENE_META, ANIMATION_SCENE_META, CUBE_SKY_SCENE_META, AUDIO_SCENE_META, SPRITES_SCENE_META, PLAYGROUND_SCENE_META}
+	names := [?]string{"main", "glass", "surfaces", "room", "billboards", "animation", "cube map", "audio", "2D", "playground"}
 	s.scene_index = (s.scene_index + 1) % len(metas)
 	if guid, ok := format.meta_guid(metas[s.scene_index]); ok {
 		scene.load_asset(&g.world, &g.scripts, &g.assets, guid)

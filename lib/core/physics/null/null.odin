@@ -1,6 +1,6 @@
-// Package physics_null is a physics backend that keeps bodies where they are put, steps nothing and hits nothing. It
-// checks every command as a real backend does, so it runs the engine's tests of the boundary, and it is the backend of
-// a game with physics turned off. See docs/physics/design.md#where-jolt-lives.
+// Package physics_null is a physics backend that keeps bodies where they are put, moves characters by their velocity,
+// and hits nothing. It checks every command as a real backend does, so it runs the engine's tests of the boundary, and
+// it is the backend of a game with physics turned off. See docs/physics/design.md#where-jolt-lives.
 package physics_null
 
 import "base:runtime"
@@ -19,6 +19,9 @@ Null_Body :: struct {
 	rotation:   physics.Rotation,
 	linear:     [3]f32,
 	angular:    [3]f32,
+	// A character moves by linear in each step, gravity or not, while it is enabled.
+	character:  bool,
+	disabled:   bool,
 }
 
 @(private)
@@ -28,6 +31,8 @@ Null_World :: struct {
 	bodies:     []Null_Body,
 	shapes:     []u32,
 	joints:     []u32,
+	// The characters after the last step, in handle order.
+	characters: [dynamic]physics.Character_State,
 }
 
 // The host is one per process, so the backend's state is too.
@@ -74,7 +79,7 @@ info :: proc "c" () -> physics.Backend_Info {
 	// It takes every command, and simulates none of them.
 	return {
 		api_version = physics.API_VERSION,
-		features = {.Rigid_Bodies, .Joints, .Queries, .Sensors},
+		features = {.Rigid_Bodies, .Joints, .Queries, .Sensors, .Characters},
 		layout = physics.layout_signature(),
 		name = "null",
 		version = "1",
@@ -96,7 +101,16 @@ find_body :: proc(w: ^Null_World, handle: physics.Body) -> ^Null_Body {
 		return nil
 	}
 	b := &w.bodies[handle.index]
-	return b if b.generation == handle.generation else nil
+	return b if b.generation == handle.generation && !b.character else nil
+}
+
+@(private)
+find_character :: proc(w: ^Null_World, handle: physics.Body) -> ^Null_Body {
+	if handle.generation == 0 || int(handle.index) >= len(w.bodies) {
+		return nil
+	}
+	b := &w.bodies[handle.index]
+	return b if b.generation == handle.generation && b.character else nil
 }
 
 @(private)
@@ -117,6 +131,7 @@ world_create :: proc "c" (desc: ^physics.World_Desc) -> physics.World {
 			bodies     = make([]Null_Body, max_bodies, runtime.heap_allocator()),
 			shapes     = make([]u32, max_shapes, runtime.heap_allocator()),
 			joints     = make([]u32, max_joints, runtime.heap_allocator()),
+			characters = make([dynamic]physics.Character_State, runtime.heap_allocator()),
 		}
 		return {u32(i), generation}
 	}
@@ -128,6 +143,7 @@ destroy :: proc(w: ^Null_World) {
 	delete(w.bodies, runtime.heap_allocator())
 	delete(w.shapes, runtime.heap_allocator())
 	delete(w.joints, runtime.heap_allocator())
+	delete(w.characters)
 	w^ = {generation = w.generation}
 }
 
@@ -255,7 +271,51 @@ run :: proc(w: ^Null_World, command: physics.Command) -> bool {
 	case .Activate, .Deactivate:
 		return find_body(w, physics.payload(command, physics.Body_Command).body) != nil
 	case .Set_Enabled:
-		return find_body(w, physics.payload(command, physics.Set_Enabled).body) != nil
+		c := physics.payload(command, physics.Set_Enabled)
+		if b := find_character(w, c.body); b != nil {
+			b.disabled = !c.enabled
+			return true
+		}
+		return find_body(w, c.body) != nil
+	case .Create_Character:
+		c := physics.payload(command, physics.Create_Character)
+		if c.body.generation == 0 || int(c.body.index) >= len(w.bodies) || w.bodies[c.body.index].generation != 0 {
+			return false
+		}
+		if !(c.radius > 0) || !(c.height > 2 * c.radius) {
+			return false
+		}
+		w.bodies[c.body.index] = {
+			generation = c.body.generation,
+			user       = c.user,
+			position   = c.position,
+			rotation   = c.rotation,
+			character  = true,
+		}
+		return true
+	case .Destroy_Character:
+		b := find_character(w, physics.payload(command, physics.Body_Command).body)
+		if b == nil {
+			return false
+		}
+		b^ = {}
+		return true
+	case .Set_Character_Velocity:
+		c := physics.payload(command, physics.Set_Character_Velocity)
+		b := find_character(w, c.body)
+		if b == nil {
+			return false
+		}
+		b.linear = c.velocity
+		return true
+	case .Set_Character_Pose:
+		c := physics.payload(command, physics.Set_Pose)
+		b := find_character(w, c.body)
+		if b == nil {
+			return false
+		}
+		b.position, b.rotation = c.position, c.rotation
+		return true
 	case .Create_Joint:
 		c := physics.payload(command, physics.Create_Joint)
 		if c.joint.generation == 0 || int(c.joint.index) >= len(w.joints) || find_body(w, c.a) == nil {
@@ -291,15 +351,39 @@ run :: proc(w: ^Null_World, command: physics.Command) -> bool {
 	return false
 }
 
+// step moves each enabled character by its velocity, in handle order, and nothing else.
 @(private)
 step :: proc "c" (handle: physics.World, dt: f32, substeps: i32) -> b32 {
 	context = runtime.default_context()
-	return find_world(handle) != nil
+	w := find_world(handle)
+	if w == nil {
+		return false
+	}
+	clear(&w.characters)
+	for &b, i in w.bodies {
+		if b.generation == 0 || !b.character || b.disabled {
+			continue
+		}
+		b.position += physics.Position{f64(b.linear.x), f64(b.linear.y), f64(b.linear.z)} * f64(dt)
+		append(&w.characters, physics.Character_State {
+			body     = {u32(i), b.generation},
+			user     = b.user,
+			position = b.position,
+			rotation = b.rotation,
+			velocity = b.linear,
+		})
+	}
+	return true
 }
 
 @(private)
 results :: proc "c" (handle: physics.World, out: ^physics.Step_Results) {
+	context = runtime.default_context()
 	out^ = {}
+	if w := find_world(handle); w != nil {
+		out.characters = raw_data(w.characters)
+		out.character_count = u32(len(w.characters))
+	}
 }
 
 @(private)
@@ -311,7 +395,11 @@ body_state :: proc "c" (handle: physics.World, bodies: [^]physics.Body, count: u
 		if w == nil {
 			continue
 		}
-		if b := find_body(w, bodies[i]); b != nil {
+		b := find_body(w, bodies[i])
+		if b == nil {
+			b = find_character(w, bodies[i])
+		}
+		if b != nil {
 			out[i] = {
 				body             = bodies[i],
 				user             = b.user,
