@@ -54,8 +54,16 @@ public sealed partial class EditorShell
 
     public void SetTool(Tool tool)
     {
+        if (tool == Tool.NavPath && Mesh.InMeshMode)
+        {
+            return;
+        }
         CancelGizmo();
         Tool = tool;
+        if (tool != Tool.NavPath)
+        {
+            ClearNavProbe();
+        }
         OnToolsChanged();
     }
 
@@ -372,6 +380,7 @@ public sealed partial class EditorShell
         SendSelection();
         Visibility.Resend();
         Mesh.ResendMeshOverlay();
+        ResendNavProbe();
     }
 
     void OnPickResult(PickResult result)

@@ -49,7 +49,9 @@ Nav_Mesh_Blob :: struct {
 	tile_size:        f32,
 	tiles_x:          u32,
 	tiles_z:          u32,
-	padding:          u32,
+	// The agent type's index in the project's nav.agents, which is its bit in Nav_Mesh_Volume.agents: the runtime's
+	// nav.Agent_Type.
+	agent_index:      u32,
 	// The agent type's name.
 	agent:            Slice,
 	// Nav_Tile records.
@@ -134,7 +136,7 @@ nav_mesh_layout :: proc() -> u64 {
 }
 
 // nav_mesh_view checks a navmesh blob: its header, its layout, that every stream is inside it and aligned, that its
-// tiles are its grid, and that every index points into its run.
+// tiles are its grid, that the tiles' runs of polygons follow each other, and that every index points into its run.
 nav_mesh_view :: proc(data: []byte) -> (blob: ^Nav_Mesh_Blob, ok: bool) {
 	header := blob_header(data) or_return
 	if header.kind != .Nav_Mesh || header.layout != nav_mesh_layout() || len(data) < size_of(Nav_Mesh_Blob) {
@@ -168,7 +170,13 @@ nav_mesh_view :: proc(data: []byte) -> (blob: ^Nav_Mesh_Blob, ok: bool) {
 		return u64(first) + u64(count) <= total
 	}
 	triangles := nav_mesh_detail_triangles(data, blob)
+	// The runtime finds a polygon's tile by its index, so each tile's polygons start where the last tile's end.
+	next_polygon: u32
 	for tile, i in tiles {
+		if tile.first_polygon != next_polygon {
+			return nil, false
+		}
+		next_polygon += tile.polygon_count
 		if tile.x != u32(i) % max(blob.tiles_x, 1) || tile.z != u32(i) / max(blob.tiles_x, 1) ||
 		   !inside(tile.first_vertex, tile.vertex_count, vertex_total) ||
 		   !inside(tile.first_polygon, tile.polygon_count, u64(len(polygons))) ||
@@ -254,6 +262,7 @@ Nav_Mesh_Contents :: struct {
 	anchor:           [3]i64,
 	volume:           u64,
 	agent:            Nav_Agent,
+	agent_index:      u32,
 	cell_size:        f32,
 	cell_height:      f32,
 	tile_size:        f32,
@@ -301,6 +310,7 @@ nav_mesh_write :: proc(contents: Nav_Mesh_Contents, allocator := context.allocat
 		tile_size = contents.tile_size,
 		tiles_x = contents.tiles_x,
 		tiles_z = contents.tiles_z,
+		agent_index = contents.agent_index,
 		agent = agent,
 		tiles = tiles,
 		vertices = vertices,

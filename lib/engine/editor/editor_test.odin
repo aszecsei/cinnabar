@@ -1929,3 +1929,32 @@ a_pick_of_the_game_view_or_a_viewport_that_cannot_draw_answers_with_no_hits :: p
 	testing.expect_value(t, f.editor.session.view.picks[0].id, 7)
 	testing.expect(t, pickable(&f.editor, 0) && !pickable(&f.editor, 2) && !pickable(&f.editor, 3) && !pickable(&f.editor, 1))
 }
+
+// The editor's scene document names its GUID, which the world keeps, so the game finds what its cooked blob lists.
+@(test)
+a_loaded_scene_gives_the_world_its_guid :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	step(f)
+	step(f, 1, link.Load_Scene{guid = {0 = 0xab, 15 = 1}, entities = {{id = DOOR, name = "Door", active = true}}})
+	testing.expect_value(t, f.world.scene, format.Guid{0 = 0xab, 15 = 1})
+	step(f, 1, link.Load_Scene{})
+	testing.expect_value(t, f.world.scene, format.Guid{})
+}
+
+// The game keeps the Navigation Path tool's last points, at most two, and a new editor's session starts with none.
+@(test)
+the_nav_probe_is_the_sessions :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	step(f, 1, link.Nav_Probe{points = {{position = {1, 2, 3}}, {position = {4, 5, 6}}, {position = {7, 8, 9}}}})
+	probe := f.editor.session.view.nav_probe[:]
+	testing.expect_value(t, len(probe), 2)
+	if len(probe) == 2 {
+		testing.expect_value(t, probe[1], ecs.World_Position{raw = {4, 5, 6}})
+	}
+	step(f, 1, link.Nav_Probe{points = {{position = {1, 2, 3}}}})
+	testing.expect_value(t, len(f.editor.session.view.nav_probe), 1)
+	step(f, 2)
+	testing.expect_value(t, len(f.editor.session.view.nav_probe), 0)
+}

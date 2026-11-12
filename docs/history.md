@@ -135,6 +135,12 @@ The order in which the UI was built (see [UI](ui/README.md)).
 2. **UI documents:** the `.ui` kind, its pseudo-XML with named styles and their variants and templates, the parser and checks in `format` that the runtime shares, the blob, and the editor's template ([Content: UI documents](content/kinds/ui-documents.md)).
 3. **The runtime:** `lib/engine/ui`, with `Ui_Document`, documents built from their blobs with what scripts set kept across rebuilds, the cascade, layout with fills and the UI scale, text shaped with kb_text_shape, one batch drawn by `ui.hlsl`, hover, focus, navigation with keys and gamepads, modal documents, fields with IME composition, and the `Ui` library ([Design](ui/design.md)).
 
+## AI
+The order in which the AI was built (see [AI](ai/README.md)).
+
+1. **Navmeshes in the cooker:** the bake with Recast, as [Content pipeline](#content-pipeline) phase 6 lists it ([Content: Navmeshes](content/kinds/nav-meshes.md)).
+2. **Navigation at runtime:** `lib/engine/nav` loads a scene's navmeshes with it, by the GUID that the world now keeps and that `Load_Scene` carries, and answers `nearest`, `find_path`, `raycast` and `random_point` in its own Odin, after Detour's algorithms; the blob's `agent_index` as `Agent_Type`; `Nav_Path` and `request_path`, solved by the `nav paths` system on jobs within a budget of searched nodes in each tick, the same on one job or many; `lib/engine/random`, the generator that scripts' `Random` shares; the `Navigation` library; and the navmesh of a selected volume and the Navigation Path tool's paths among the editor's helpers ([AI: Navigation](ai/navigation.md)).
+
 ## Projects
 The order in which a game became a project that the engine runs, instead of a fork of the engine (see [The game package](world/game-package.md)).
 

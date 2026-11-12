@@ -27,8 +27,8 @@ To add a message: add a struct to the `Message` union in `lib/engine/editor/link
 | Session | `Hello`, `Welcome`, `Refused`, `Log`, `Game_Reloaded` |
 | Types | Component types with their fields, behaviour classes with their fields, `Game_Commands`; `Run_Game_Command`, `Game_Command_Result` |
 | World | Entity list snapshot and deltas (create, destroy, rename, reparent), watch and unwatch an entity, field value deltas for watched entities |
-| Edit | `Load_Scene`, `Apply_Operations`, `Edit_Problems` |
-| Viewport | `Editor_Camera`, `Set_Selection`, `Set_Hidden`, `Gizmo_State`, `Box_Handles`, `Pick_Request`, `Pick_Result`, `Set_Viewport_Settings`; `Editor_Camera`, `Gizmo_State`, `Box_Handles`, `Pick_Request` and `Set_Viewport_Settings` name a viewport, and `Editor_Camera` has the camera's projection, with an orthographic one's height and far plane |
+| Edit | `Load_Scene`, with the scene's GUID, so the game finds its cooked blob's navmeshes, `Apply_Operations`, `Edit_Problems` |
+| Viewport | `Editor_Camera`, `Set_Selection`, `Set_Hidden`, `Gizmo_State`, `Box_Handles`, `Pick_Request`, `Pick_Result`, `Set_Viewport_Settings`, `Nav_Probe` (the Navigation Path tool's points, see [Viewport](viewport.md#navigation-path)); `Editor_Camera`, `Gizmo_State`, `Box_Handles`, `Pick_Request` and `Set_Viewport_Settings` name a viewport, and `Editor_Camera` has the camera's projection, with an orthographic one's height and far plane |
 | Views | `Open_Viewport` and `Close_Viewport`, which the editor sends as a viewport's control shows and hides, for up to five viewports (`MAX_VIEWPORTS`), `Viewport_Target`, which the game sends for each open viewport, and `Viewport_Acknowledged`, which the host handles (see [Viewport](viewport.md#views)) |
 | Game size | `Game_Size`, the Game view's size in physical pixels, which the host handles (see [Viewport](viewport.md#views)) |
 | Capture source | `Capture_Source`, the viewport that the host's screenshots and history ring read, which the host handles (see [Capture](capture.md#capture)) |
@@ -67,7 +67,7 @@ The game's side of the link is `lib/engine/editor`. The game keeps an `editor.Ed
 
 A new link, from a start, a restart or a crash, and a soft restart both give the editor a game state that knows nothing that the editor sent. A code reload keeps the game state, so it is not one.
 
-- **The game's side.** What one connection has sent the game, and what the game has sent it, is the `Session` in `editor.Editor`: the entities that the editor knows and watches, the selection, the hidden entities, the picks, and each viewport's kind, camera, gizmo, settings and target (`View`), the mode, the previews and the thumbnail, the live meshes and the mesh overlay, and when the game last sent each kind of update. `begin_session` starts one and `end_session` frees it, closes its previews and its viewports, and zeroes it, at `init`, at `destroy` and for each new connection. State that a new editor must not inherit goes in `Session`, so `end_session` frees it. The viewport tools' GPU objects, the commands, the UI state and `by_scene_id` stay outside it. A pick that the GPU still runs comes back with an old ticket, which the next session ignores.
+- **The game's side.** What one connection has sent the game, and what the game has sent it, is the `Session` in `editor.Editor`: the entities that the editor knows and watches, the selection, the hidden entities, the picks, the Navigation Path tool's points, and each viewport's kind, camera, gizmo, settings and target (`View`), the mode, the previews and the thumbnail, the live meshes and the mesh overlay, and when the game last sent each kind of update. `begin_session` starts one and `end_session` frees it, closes its previews and its viewports, and zeroes it, at `init`, at `destroy` and for each new connection. State that a new editor must not inherit goes in `Session`, so `end_session` frees it. The viewport tools' GPU objects, the commands, the UI state and `by_scene_id` stay outside it. A pick that the GPU still runs comes back with an old ticket, which the next session ignores.
 - **The editor's side.** `EditorShell.OnNewGameState` is the one handler. A new link and a `Game_Reloaded` of kind `Soft_Restart` both call it. It clears every cache of what the game was sent, drops every request that waits for the game, and sends again:
 
   | What | Message |
@@ -81,6 +81,7 @@ A new link, from a start, a restart or a crash, and a soft restart both give the
   | The Game view's size, if it has had one | `Game_Size` |
   | The viewport that captures read | `Capture_Source` |
   | The mesh overlay | `Mesh_Overlay` |
+  | The Navigation Path tool's points | `Nav_Probe` |
   | The live meshes | `Live_Mesh` |
   | Each open preview, with what it shows | `Open_Preview`, `Preview_Settings` |
 

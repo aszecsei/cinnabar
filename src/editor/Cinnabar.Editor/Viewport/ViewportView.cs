@@ -429,6 +429,7 @@ public sealed class ViewportView : Grid
         Add(EditorCommands.MoveTool);
         Add(EditorCommands.RotateTool);
         Add(EditorCommands.ScaleTool);
+        Add(EditorCommands.NavPathTool);
         panel.Children.Add(new Border { Height = 6 });
         Add(EditorCommands.LocalSpace);
         Add(EditorCommands.Snap);
@@ -808,7 +809,7 @@ public sealed class ViewportView : Grid
                 _shell.Mesh.EndBlock(forceEntity: e.KeyModifiers.HasFlag(KeyModifiers.Control));
                 break;
             case Gesture.Click:
-                if (_control.FramePoint(position) is { } pixel && !_shell.Mesh.Tools.AddToolPoint(pixel))
+                if (_control.FramePoint(position) is { } pixel && !_shell.Mesh.Tools.AddToolPoint(pixel) && !_shell.AddNavPoint(pixel))
                 {
                     _shell.PickAt(pixel, mode);
                 }
@@ -960,6 +961,7 @@ public sealed class ViewportView : Grid
             Key.W => EditorCommands.MoveTool,
             Key.E => EditorCommands.RotateTool,
             Key.R => EditorCommands.ScaleTool,
+            Key.N => EditorCommands.NavPathTool,
             Key.X => EditorCommands.LocalSpace,
             Key.F => EditorCommands.FrameSelected,
             Key.H => EditorCommands.HideSelected,

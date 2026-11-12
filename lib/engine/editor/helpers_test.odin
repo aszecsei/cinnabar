@@ -1,14 +1,18 @@
 package editor
 
 import "base:runtime"
+import "core:mem"
 import "core:mem/virtual"
 import "core:testing"
 
 import "cinnabar:core"
+import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/debug"
 import "cinnabar:engine/ecs"
 import "cinnabar:engine/editor/link"
+import "cinnabar:engine/nav"
 import "cinnabar:engine/render"
+import "cinnabar:engine/scene"
 import "cinnabar:engine/volume"
 
 @(private = "file")
@@ -18,6 +22,7 @@ Helper_Fixture :: struct {
 	world:    ecs.World,
 	editor:   Editor,
 	lines:    debug.Draw,
+	nav:      nav.State,
 }
 
 @(private = "file")
@@ -43,7 +48,9 @@ helper_setup :: proc(t: ^testing.T) -> ^Helper_Fixture {
 	ecs.register_engine_components(&f.world.registry)
 	volume.register_components(&f.world.registry)
 	render.register_components(&f.world.registry)
-	init(&f.editor, &f.platform, nil)
+	scene.register_components(&f.world.registry)
+	nav.register_components(&f.world.registry)
+	init(&f.editor, &f.platform, nil, navigation = &f.nav)
 	debug.init(&f.lines, runtime.heap_allocator())
 	// Linked, as an editor's first poll makes it, with a scene view open, whose settings choose the helpers.
 	f.editor.session.connection = 1
@@ -235,4 +242,94 @@ a_pick_covers_the_scenes_pixels_under_it :: proc(t: ^testing.T) {
 	// At the frame's size, the pick is as it was.
 	same := Viewport_Frame{size = {1280, 720}, output_size = {1280, 720}}
 	testing.expect_value(t, scale_pick({x = 7, y = 9, width = 1, height = 1}, same), link.Pick_Request{x = 7, y = 9, width = 1, height = 1})
+}
+
+// A navmesh of the volume 0x100 for the agent type 0: a floor of two 1 m squares from x = 0 to 2, z = 0 to 1, which
+// meet at x = 1, in one tile.
+@(private = "file")
+nav_floor :: proc(f: ^Helper_Fixture) {
+	square :: proc(x: f32) -> [4][3]f32 {
+		return {{x, 0, 0}, {x, 0, 1}, {x + 1, 0, 1}, {x + 1, 0, 0}}
+	}
+	vertices := make([dynamic][3]f32, context.temp_allocator)
+	left, right := square(0), square(1)
+	append(&vertices, ..left[:])
+	append(&vertices, ..right[:])
+	none := u16(format.NAV_NONE)
+	data := format.nav_mesh_write(
+		{
+			agent = {name = "Human", radius = 0.25, height = 1.8, step_height = 0.3, max_slope = 45},
+			cell_size = 0.25,
+			cell_height = 0.1,
+			tile_size = 2,
+			tiles_x = 1,
+			tiles_z = 1,
+			bounds_min = {0, -1, 0},
+			bounds_max = {2, 1, 1},
+			tiles = {{bounds_min = {0, -1, 0}, bounds_max = {2, 1, 1}, vertex_count = 8, polygon_count = 2, detail_vertex_count = 8, detail_triangle_count = 4}},
+			vertices = vertices[:],
+			polygons = {
+				{vertices = {0, 1, 2, 3, 0, 0}, neighbors = {none, none, 1, none, 0, 0}, vertex_count = 4},
+				{vertices = {4, 5, 6, 7, 0, 0}, neighbors = {0, none, none, none, 0, 0}, vertex_count = 4},
+			},
+			details = {{0, 4, 0, 2}, {4, 4, 2, 2}},
+			detail_vertices = vertices[:],
+			detail_triangles = {{0, 1, 2, 0}, {0, 2, 3, 0}, {0, 1, 2, 0}, {0, 2, 3, 0}},
+		},
+		context.temp_allocator,
+	)
+	aligned, _ := mem.alloc_bytes_non_zeroed(len(data), format.BLOB_ALIGN, context.temp_allocator)
+	copy(aligned, data)
+	view, ok := nav.view_of(aligned, {}, 0x100)
+	assert(ok)
+	views := make([]nav.Mesh_View, 1, context.temp_allocator)
+	views[0] = view
+	f.nav.frame = views
+}
+
+// A selected navigation volume draws its navmesh: the floor's 6 walls, the edge between its squares, and its tile.
+@(test)
+a_selected_volume_draws_its_navmesh :: proc(t: ^testing.T) {
+	when !debug.DEBUG_DRAW {
+		return
+	}
+	f := helper_setup(t)
+	defer helper_teardown(f)
+	nav_floor(f)
+	e := spawn_with(f, volume.Volume{shape = .Box})
+	ecs.add(&f.world, e, nav.Nav_Mesh_Volume{})
+	ecs.add(&f.world, e, scene.Scene_Entity{0x100})
+	f.editor.session.view.viewports[0].settings.helpers = .Selected
+	append(&f.editor.session.view.selection, e)
+	testing.expect_value(t, line_count(f), 12 + 6 + 1 + 4)
+	// Another volume's navmeshes are not its own.
+	ecs.get_write(&f.world, e, scene.Scene_Entity).id = 0x200
+	testing.expect_value(t, line_count(f), 12)
+}
+
+// The Navigation Path tool's points draw as spheres, and with a goal, the path between them for each agent type; a
+// selected agent draws its path to the goal.
+@(test)
+the_nav_probe_draws_paths :: proc(t: ^testing.T) {
+	when !debug.DEBUG_DRAW {
+		return
+	}
+	f := helper_setup(t)
+	defer helper_teardown(f)
+	nav_floor(f)
+	f.editor.session.view.viewports[0].settings.helpers = .Selected
+	probe := &f.editor.session.view.nav_probe
+	testing.expect_value(t, line_count(f), 0)
+	append(probe, ecs.World_Position{}, ecs.position_from_meters({1.5, 0, 0.5}))
+	spheres := 2 * 3 * debug.CIRCLE_SEGMENTS
+	// A straight path of two corners: its leg and a cross at each.
+	testing.expect_value(t, line_count(f), spheres + 5)
+	// Off the floor: the spheres only.
+	probe[0] = ecs.position_from_meters({-9, 0, -9})
+	testing.expect_value(t, line_count(f), spheres)
+	// A selected agent's path, from where it stands to the goal.
+	agent := spawn_with(f, nav.Nav_Path{})
+	ecs.get_write(&f.world, agent, ecs.Transform).position = ecs.position_from_meters({0.5, 0, 0.5})
+	append(&f.editor.session.view.selection, agent)
+	testing.expect_value(t, line_count(f), spheres + 5)
 }

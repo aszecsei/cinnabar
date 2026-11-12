@@ -103,6 +103,7 @@ Message :: union {
 	Viewport_Target,
 	Viewport_Acknowledged,
 	Capture_Source,
+	Nav_Probe,
 }
 
 // Editor to host, first: the editor's protocol version and its name.
@@ -328,6 +329,9 @@ Behaviour_Field :: struct {
 // restart. Values are tagged as the scene file writes them, and the game converts them to its fields' kinds.
 Load_Scene :: struct {
 	entities: []Scene_Entity,
+	// The scene's GUID, so the game finds what its cooked blob lists, such as its navmeshes, or zero for a scene that
+	// has none yet.
+	guid:     [16]u8,
 }
 
 Scene_Entity :: struct {
@@ -1362,6 +1366,19 @@ Output_Mode :: enum u8 {
 // capture, as a minimized frame has none.
 Capture_Source :: struct {
 	viewport: i32,
+}
+
+// Editor to game: the points that the Navigation Path tool picked: none, a start, or a start and a goal (see
+// docs/editor/viewport.md#navigation-path). With both, the helpers draw the path between them for each agent type,
+// from the cooked navmeshes. The editor sends it when a click picks a point, when the tool closes, with none, and when
+// the link connects.
+Nav_Probe :: struct {
+	points: []Nav_Probe_Point,
+}
+
+// A point of a Nav_Probe: a World_Position's raw value.
+Nav_Probe_Point :: struct {
+	position: [3]i64,
 }
 
 // Editor to host: write the next frame of the capture's source as a PNG, or the history ring as a GIF, to path, an

@@ -79,7 +79,7 @@ The cooker cannot lay out native components, so it reads the physics components 
 
 | Part | What it holds |
 |---|---|
-| `Nav_Mesh_Blob` | The anchor (the volume's center, a raw `World_Position`), the volume's scene ID, the bounds relative to the anchor, the agent type's name and settings, the cell sizes, the tiles' size in meters, and the grid's `tiles_x` by `tiles_z` |
+| `Nav_Mesh_Blob` | The anchor (the volume's center, a raw `World_Position`), the volume's scene ID, the bounds relative to the anchor, the agent type's name, its settings and its index in the project's types (`agent_index`, the runtime's `Agent_Type`), the cell sizes, the tiles' size in meters, and the grid's `tiles_x` by `tiles_z` |
 | `Nav_Tile` | Each tile, row by row from -z: its place, its bounds, its key, and its runs of the streams below |
 | vertices | `[3]f32`, relative to the anchor, each tile's run |
 | `Nav_Polygon` | Up to 6 of its tile's vertices, and across each edge a polygon of the tile, `NAV_NONE`, or `NAV_EXTERNAL` with the side of the tile; its run of links |
@@ -87,7 +87,7 @@ The cooker cannot lay out native components, so it reads the physics components 
 | `Nav_Detail` | Each polygon's run of detail vertices and triangles, which give the height of its surface |
 | detail triangles | `[4]u8`: three of the polygon's detail vertices and Recast's edge flags |
 
-`format.nav_mesh_view` checks the blob: every stream inside it and aligned, the tiles in their grid, and every index inside its run. A navmesh names no other asset.
+`format.nav_mesh_view` checks the blob: every stream inside it and aligned, the tiles in their grid, each tile's polygons right after the last tile's, and every index inside its run. A navmesh names no other asset.
 
 ## Recast
 
@@ -96,7 +96,7 @@ Recast is the submodule `vendor/recastnavigation` (github.com/recastnavigation/r
 ## Limits
 
 - **Not baked:** areas and their costs, such as water or a road; off-mesh links, such as jumps and ladders; and joining volumes that overlap.
-- **At runtime:** obstacles, and baking again while the game runs.
-- **Drawing:** the editor and the game do not draw navmeshes yet.
+- **At runtime:** obstacles, and baking again while the game runs. The runtime loads navmeshes with their scene and finds paths on them ([AI: Navigation](../../ai/navigation.md)).
+- **Drawing:** the editor draws a selected volume's navmeshes ([AI: Navigation: Drawing](../../ai/navigation.md#drawing)).
 - **Geometry above the volume** is cut off, so a ceiling above the box does not limit the headroom under it. A surface inside the box with nothing above it, such as a room's roof, is walkable, so keep the box's top under a ceiling: the sample's main scene ends its volume at 1.95 m, under the room's ceiling at 2 m.
 - **A polygon** has at most 255 links.

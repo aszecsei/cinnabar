@@ -8,12 +8,16 @@ import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/debug"
 import "cinnabar:engine/ecs"
 import "cinnabar:engine/editor/link"
+import "cinnabar:engine/nav"
 import "cinnabar:engine/physics"
 import "cinnabar:engine/render"
+import "cinnabar:engine/scene"
 import "cinnabar:engine/volume"
 
 // The viewport's helpers (see docs/editor/viewport.md#viewport): the shapes of lights, volumes, reflection probes and cameras,
-// as debug lines, for the selection or for every entity, as Viewport_Settings.helpers says.
+// as debug lines, for the selection or for every entity, as Viewport_Settings.helpers says. A selected navigation
+// volume draws its navmeshes, and the Navigation Path tool's points draw the paths between them (see
+// docs/ai/navigation.md#drawing).
 
 // A helper of an entity that is not selected is grey and faint. A selected light's is its color, made bright.
 @(private = "file")
@@ -45,6 +49,11 @@ FRUSTUM_LENGTH :: 1
 // The frustum's shape: a 16:9 frame.
 @(private = "file")
 FRUSTUM_ASPECT :: 16.0 / 9.0
+// The Navigation Path tool's points, as small spheres.
+@(private = "file")
+PROBE_COLOR :: [4]f32{1, 1, 1, 1}
+@(private = "file")
+PROBE_RADIUS :: 0.08
 
 // draw_helpers draws the helpers of this frame into d, while a linked editor is in Edit. Call it before the frame draws
 // d's lines. Hidden entities have none, and Play and Paused have none. The lines are the frame's, which every scene view
@@ -54,6 +63,7 @@ draw_helpers :: proc(e: ^Editor, w: ^ecs.World, d: ^debug.Draw) {
 	if !editing(e) || !has_scene_view {
 		return
 	}
+	draw_nav_probe(e, d)
 	mode := e.session.view.viewports[index].settings.helpers
 	if mode == .None {
 		return
@@ -69,6 +79,40 @@ draw_helpers :: proc(e: ^Editor, w: ^ecs.World, d: ^debug.Draw) {
 			draw_entity_helpers(e, w, d, entity, pose, selected)
 		}
 	}
+}
+
+// draw_nav_probe draws the Navigation Path tool's points, and with a start and a goal, the path between them for each
+// agent type whose navmeshes are loaded, each in its color, faint when partial.
+@(private = "file")
+draw_nav_probe :: proc(e: ^Editor, d: ^debug.Draw) {
+	probe := e.session.view.nav_probe[:]
+	for p in probe {
+		debug.sphere(d, p, PROBE_RADIUS, PROBE_COLOR)
+	}
+	if e.nav == nil || len(probe) != 2 {
+		return
+	}
+	drawn: bit_set[0 ..< 64]
+	for &m in e.nav.frame {
+		agent := m.id.agent
+		if agent < 64 && int(agent) in drawn {
+			continue
+		}
+		if agent < 64 {
+			drawn += {int(agent)}
+		}
+		draw_probe_path(e, d, probe[0], probe[1], agent)
+	}
+}
+
+@(private = "file")
+draw_probe_path :: proc(e: ^Editor, d: ^debug.Draw, start, goal: ecs.World_Position, agent: nav.Agent_Type) {
+	path := nav.find_path(e.nav, start, goal, agent, allocator = e.platform.frame_allocator)
+	color := nav.agent_color(agent)
+	if path.status == .Partial {
+		color.a *= 0.4
+	}
+	nav.draw_corners(d, path.corners, color)
 }
 
 @(private = "file")
@@ -158,6 +202,17 @@ draw_entity_helpers :: proc(e: ^Editor, w: ^ecs.World, d: ^debug.Draw, entity: e
 	}
 	if c := ecs.get(w, entity, physics.Character); c != nil {
 		draw_character(d, c^, pose, selected)
+	}
+	if e.nav != nil && selected {
+		id := ecs.get(w, entity, scene.Scene_Entity)
+		if id != nil && ecs.has(w, entity, nav.Nav_Mesh_Volume) {
+			nav.draw_volume(e.nav, d, id.id)
+		}
+		// A selected agent's path from where it stands to the tool's goal.
+		probe := e.session.view.nav_probe[:]
+		if np := ecs.get(w, entity, nav.Nav_Path); np != nil && len(probe) == 2 {
+			draw_probe_path(e, d, pose.position, probe[1], np.agent)
+		}
 	}
 	if j, _, ok := physics.joint_of(w, entity); ok {
 		draw_joint(w, d, j^, pose, selected)

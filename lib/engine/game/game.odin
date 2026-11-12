@@ -54,6 +54,8 @@ Game :: struct {
 	audio:              audio.State,
 	// The Animators' queries, which the fixed ticks advance (see docs/content/kinds/skins-and-animations.md#playback).
 	animation:          anim.State,
+	// The scene's navmeshes and the path requests (see docs/ai/navigation.md).
+	nav:                nav.State,
 	// The Sprite_Renderers' animations (see docs/rendering/2d.md#animation).
 	sprites:            sprite.State,
 	// The UI's documents (see docs/ui/design.md#the-frame).
@@ -211,6 +213,7 @@ register_scripts :: proc(r: ^script.Runtime) {
 	physics.register_scripts(r, &g.physics)
 	audio.register_scripts(r, &g.audio)
 	anim.register_scripts(r, &g.animation)
+	nav.register_scripts(r, &g.nav)
 	sprite.register_scripts(r, &g.sprites)
 	ui.register_scripts(r, &g.ui)
 	script.define(r, "Game.set_paused", proc(L: ^luau.State) -> c.int {

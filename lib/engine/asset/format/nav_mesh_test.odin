@@ -26,6 +26,7 @@ two_tiles :: proc() -> Nav_Mesh_Contents {
 		anchor = {1 << 24, 0, -(1 << 24)},
 		volume = 0x1234,
 		agent = {"Human", 0.4, 1.8, 0.35, 45},
+		agent_index = 3,
 		cell_size = 0.1,
 		cell_height = 0.05,
 		tile_size = 1,
@@ -59,6 +60,7 @@ nav_meshes_write_and_read_back :: proc(t: ^testing.T) {
 	testing.expect_value(t, blob.anchor, contents.anchor)
 	testing.expect_value(t, blob.volume, 0x1234)
 	testing.expect_value(t, nav_mesh_agent(data, blob), contents.agent)
+	testing.expect_value(t, blob.agent_index, 3)
 	testing.expect(t, slice.equal(nav_mesh_tiles(data, blob), contents.tiles))
 	testing.expect(t, slice.equal(nav_mesh_vertices(data, blob), contents.vertices))
 	testing.expect(t, slice.equal(nav_mesh_polygons(data, blob), contents.polygons))
@@ -89,6 +91,12 @@ nav_meshes_that_point_outside_their_runs_are_refused :: proc(t: ^testing.T) {
 	bad_grid := two_tiles()
 	bad_grid.tiles_z = 2
 	_, ok = nav_mesh_view(aligned(nav_mesh_write(bad_grid, context.temp_allocator)))
+	testing.expect(t, !ok)
+
+	// The second tile's polygons must start where the first's end.
+	bad_runs := two_tiles()
+	bad_runs.tiles[1].first_polygon = 0
+	_, ok = nav_mesh_view(aligned(nav_mesh_write(bad_runs, context.temp_allocator)))
 	testing.expect(t, !ok)
 
 	bad_triangle := two_tiles()

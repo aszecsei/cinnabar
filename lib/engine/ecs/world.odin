@@ -4,6 +4,7 @@ import "core:log"
 import "core:mem"
 
 import "cinnabar:core"
+import format "cinnabar:engine/asset/format"
 
 // Commits grow in steps of this size, so growth makes few calls into core.
 @(private)
@@ -51,6 +52,9 @@ World :: struct {
 	watched:         [MAX_WATCHED]Component_Id,
 	watched_count:   int,
 	log_activity:    bool,
+	// The GUID of the scene that the world was loaded from, or zero. scene.load writes it; nav loads the scene's
+	// navmeshes by it (see docs/ai/navigation.md#loading).
+	scene:           format.Guid,
 }
 
 // init reserves the world's storage and creates the empty archetype. Register the components after it.

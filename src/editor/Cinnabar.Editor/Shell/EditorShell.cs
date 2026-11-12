@@ -73,6 +73,13 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
         Content = new ContentBrowser(Assets, Cook, Console, MovingScene, Commands.InvalidateAll, ProjectTags.PathFor(options.ProjectPath));
         WireCook();
         Mesh.Subscribe();
+        Mesh.MeshModeChanged += () =>
+        {
+            if (Mesh.InMeshMode)
+            {
+                ClearNavProbe();
+            }
+        };
         Autosave = new Autosave(options.AutosaveDirectory);
         CreateViewports();
         Layout = new EditorLayout(CreatePanels(), new ViewportDocument(ViewportDocument.SceneId, "Scene", () => new SceneLayoutView(this)),

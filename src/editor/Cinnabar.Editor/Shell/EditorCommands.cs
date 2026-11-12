@@ -146,6 +146,7 @@ static partial class EditorCommands
     public const string MoveTool = "tool.move";
     public const string RotateTool = "tool.rotate";
     public const string ScaleTool = "tool.scale";
+    public const string NavPathTool = "tool.nav-path";
     public const string LocalSpace = "tool.localSpace";
     public const string Snap = "tool.snap";
     public const string FrameSelected = "viewport.frameSelected";

@@ -431,6 +431,7 @@ public sealed partial class EditorShell
             Mesh.CloseMeshes();
         }
         Scene = document;
+        ClearNavProbe();
         document.Applied += SendOperations;
         document.Changed += OnDocumentChanged;
         _problems.Clear();
@@ -475,7 +476,7 @@ public sealed partial class EditorShell
     {
         if (Scene != null && Host.Linked)
         {
-            Host.Send(SceneSnapshot.ToMessage(Scene.Expanded.Flat));
+            Host.Send(SceneSnapshot.ToMessage(Scene.Expanded.Flat, AssetGuidOf(Scene.Path) ?? ""));
         }
     }
 
