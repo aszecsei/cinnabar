@@ -17,82 +17,18 @@ RIGID_BODY_ID :: ecs.Component_Id(64)
 COLLIDER_ID :: ecs.Component_Id(65)
 PHYSICS_BODY_ID :: ecs.Component_Id(66)
 
-Motion :: core_physics.Motion
+// Motion, Rigid_Body, Shape and Collider are defined in format, with their defaults, so the cooker reads a scene's
+// colliders as the registry does (see docs/physics/design.md#components).
+Motion :: format.Motion
+Rigid_Body :: format.Rigid_Body
+DEFAULT_RIGID_BODY :: format.DEFAULT_RIGID_BODY
+Shape :: format.Collider_Shape
+Collider :: format.Collider
+DEFAULT_COLLIDER :: format.DEFAULT_COLLIDER
 
-// Rigid_Body makes its entity a body that the simulation moves, or that moves by its Transform: a dynamic body falls
-// and is pushed, a kinematic one follows its Transform and pushes, and a static one never moves. Its shape is the
-// entity's Collider. An entity with a Collider and no Rigid_Body is a static body.
-Rigid_Body :: struct {
-	motion:          Motion,
-	// In kg. 0 takes the mass from the collider's density.
-	mass:            f32 `editor:"range=0,10000"`,
-	linear_damping:  f32 `editor:"range=0,1"`,
-	angular_damping: f32 `editor:"range=0,1"`,
-	gravity_factor:  f32 `editor:"range=-10,10"`,
-	// Continuous collision detection, for a fast body that would pass through thin ones.
-	ccd:             bool,
-	start_asleep:    bool,
-	// Its contacts reach Physics_Events and its entity's behaviours (see docs/physics/design.md#events).
-	report_contacts: bool,
-}
-
-DEFAULT_RIGID_BODY :: Rigid_Body {
-	motion          = .Dynamic,
-	linear_damping  = 0.05,
-	angular_damping = 0.05,
-	gravity_factor  = 1,
-	report_contacts = true,
-}
-
-Shape :: enum u8 {
-	Box,
-	Sphere,
-	// Along the entity's y.
-	Capsule,
-	// Along the entity's y.
-	Cylinder,
-	// The triangles of the mesh asset's collision data. A dynamic body takes their convex hull instead, since a mesh
-	// has no mass.
-	Mesh,
-	// The convex hull of the mesh asset's collision data.
-	Convex_Mesh,
-}
-
-// Collider is its entity's shape, scaled by its Transform: a box of size meters, a sphere of radius, a capsule or
-// cylinder of radius and height, its whole height along y, or a mesh asset's collision triangles or their hull, which
-// the cooker writes unless the mesh's collision import setting is false (see docs/physics/design.md#shapes). offset and
-// rotation place it in the entity. A Collider
-// on a descendant of a Rigid_Body, with no Rigid_Body between them, is a part of that body's shape, and the body
-// takes its friction, restitution, layer and sensor from its own Collider, or its first part's.
-Collider :: struct {
-	shape:       Shape,
-	size:        [3]f32 `editor:"range=0,1000"`,
-	radius:      f32 `editor:"range=0,1000"`,
-	height:      f32 `editor:"range=0,1000"`,
-	mesh:        format.Guid `asset:"mesh"`,
-	offset:      [3]f32,
-	rotation:    quaternion128,
-	friction:    f32 `editor:"range=0,2"`,
-	restitution: f32 `editor:"range=0,1"`,
-	// In kg/m³, which gives a dynamic body's mass when its Rigid_Body's is 0.
-	density:     f32 `editor:"range=1,20000"`,
-	// A sensor detects bodies and does not touch them (see docs/physics/design.md#events).
-	sensor:      bool,
-	// A sensor that does not move detects only bodies that move, unless this is set.
-	detect_static: bool,
-	// The object layer, an index into the project's physics.layers (see docs/physics/design.md#layers).
-	layer:       u8 `editor:"range=0,31"`,
-}
-
-DEFAULT_COLLIDER :: Collider {
-	shape    = .Box,
-	size     = 1,
-	radius   = 0.5,
-	height   = 2,
-	rotation = 1,
-	friction = 0.5,
-	density  = 1000,
-}
+#assert(int(Motion.Static) == int(core_physics.Motion.Static) && int(Motion.Kinematic) == int(core_physics.Motion.Kinematic))
+#assert(int(Motion.Dynamic) == int(core_physics.Motion.Dynamic) && len(Motion) == len(core_physics.Motion))
+#assert(RIGID_BODY_ID == format.SCENE_RIGID_BODY_ID && COLLIDER_ID == format.SCENE_COLLIDER_ID)
 
 // Physics_Body is the backend's body of its entity, which the sync adds and keeps. Its first 8 bytes are the handle.
 // A nil body means that the entity has a Rigid_Body and no Collider.

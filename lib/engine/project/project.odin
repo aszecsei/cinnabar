@@ -220,6 +220,13 @@ parse :: proc(text: string, settings: ^Settings, problems: ^[dynamic]string = ni
 			append(&ignores, Ignore{line, value})
 			continue
 		}
+		// The cooker reads them (see docs/content/kinds/nav-meshes.md#agent-types); the game only checks each line.
+		if format.nav_is_setting(key) {
+			if p := format.nav_check_setting(key, value); p != "" {
+				problem(problems, line, "%s", p)
+			}
+			continue
+		}
 		// The package step reads it (see docs/content/blobs-and-loading.md#bundles); the game only knows the key.
 		if key == format.BUNDLE_GLOBAL_SCENES_KEY {
 			if _, ok := format.bundle_parse_scenes(value, context.temp_allocator); !ok {

@@ -139,11 +139,28 @@ scene_field_hash :: proc "contextless" (name: string) -> u64 {
 	return hash.fnv64a(transmute([]byte)name)
 }
 
+// Scene_Nav_Mesh names a navmesh that the cooker bakes for a scene: its Nav_Mesh_Volume's entity, the agent type and
+// the navmesh's GUID (see docs/content/kinds/nav-meshes.md#sub-assets). The scene's blob lists them, so a level's bundle
+// holds them.
+Scene_Nav_Mesh :: struct {
+	entity: u64,
+	agent:  string,
+	guid:   Guid,
+}
+
 // Scene_Blob is the start of a cooked scene. The records use offsets, like every blob.
 Scene_Blob :: struct {
-	header:   Blob_Header,
+	header:     Blob_Header,
 	// Scene_Entity_Record records.
-	entities: Slice,
+	entities:   Slice,
+	// Scene_Nav_Mesh_Record records, by entity and then by the agent types' order.
+	nav_meshes: Slice,
+}
+
+Scene_Nav_Mesh_Record :: struct {
+	entity: u64,
+	agent:  Slice,
+	guid:   Guid,
 }
 
 Scene_Entity_Record :: struct {
@@ -192,8 +209,9 @@ scene_layout :: proc() -> u64 {
 	)
 }
 
-// scene_write builds a scene blob of a flat scene, under the kind Scene or Prefab.
-scene_write :: proc(scene: Scene, guid: Guid, key: u64, kind := Asset_Kind.Scene, allocator := context.allocator) -> []byte {
+// scene_write builds a scene blob of a flat scene, under the kind Scene or Prefab, with the navmeshes that the cooker
+// bakes for it.
+scene_write :: proc(scene: Scene, guid: Guid, key: u64, kind := Asset_Kind.Scene, nav_meshes: []Scene_Nav_Mesh = nil, allocator := context.allocator) -> []byte {
 	buffer := make([dynamic]byte, size_of(Scene_Blob), allocator)
 	entities := reserve_bytes(&buffer, len(scene.entities) * size_of(Scene_Entity_Record), align_of(Scene_Entity_Record))
 	for e, i in scene.entities {
@@ -224,9 +242,19 @@ scene_write :: proc(scene: Scene, guid: Guid, key: u64, kind := Asset_Kind.Scene
 		}
 		put_record(&buffer, entities, i, &record)
 	}
+	navs := reserve_bytes(&buffer, len(nav_meshes) * size_of(Scene_Nav_Mesh_Record), align_of(Scene_Nav_Mesh_Record))
+	for n, i in nav_meshes {
+		record := Scene_Nav_Mesh_Record {
+			entity = n.entity,
+			agent  = append_bytes(&buffer, transmute([]byte)n.agent),
+			guid   = n.guid,
+		}
+		put_record(&buffer, navs, i, &record)
+	}
 	blob := Scene_Blob {
 		header = {magic = BLOB_MAGIC, kind = kind, layout = scene_layout(), key = key, guid = guid},
 		entities = entities,
+		nav_meshes = navs,
 	}
 	mem.copy(raw_data(buffer), &blob, size_of(blob))
 	return buffer[:]
@@ -295,6 +323,26 @@ scene_read :: proc(data: []byte, allocator := context.allocator) -> (scene: Scen
 		}
 	}
 	return {entities = entities}, true
+}
+
+// scene_nav_meshes checks a scene or prefab blob and gives the navmeshes that it lists. The agents' names point into
+// the blob.
+scene_nav_meshes :: proc(data: []byte, allocator := context.allocator) -> (nav_meshes: []Scene_Nav_Mesh, ok: bool) {
+	header := blob_header(data) or_return
+	if (header.kind != .Scene && header.kind != .Prefab) || header.layout != scene_layout() || len(data) < size_of(Scene_Blob) {
+		return
+	}
+	blob := (^Scene_Blob)(raw_data(data))
+	nav_records := records(data, blob.nav_meshes, Scene_Nav_Mesh_Record) or_return
+	nav_meshes = make([]Scene_Nav_Mesh, len(nav_records), allocator)
+	for r, i in nav_records {
+		nav_meshes[i] = {
+			entity = r.entity,
+			agent  = text(data, r.agent) or_return,
+			guid   = r.guid,
+		}
+	}
+	return nav_meshes, true
 }
 
 @(private = "file")

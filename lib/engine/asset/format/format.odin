@@ -137,6 +137,8 @@ subasset_kind_of :: proc(kind: string) -> Asset_Kind {
 		return .Skin
 	case ANIMATION_KIND:
 		return .Animation
+	case NAV_MESH_KIND:
+		return .Nav_Mesh
 	}
 	return .None
 }
@@ -263,6 +265,9 @@ Asset_Kind :: enum u32 {
 	// The frames of a texture and the animations that play them, which a Sprite_Renderer draws. The atlas of a sheet that
 	// the cooker packs is a Texture sub-asset.
 	Sprite_Sheet,
+	// The polygons that agents of one type walk on inside a Nav_Mesh_Volume, which the cooker bakes from a scene's
+	// static colliders. It is a sub-asset of the scene.
+	Nav_Mesh,
 }
 
 // Slice is a range of a blob, in bytes from the blob's start.

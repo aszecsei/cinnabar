@@ -9,39 +9,23 @@ import "core:math/linalg"
 import "core:mem"
 import "core:slice"
 
+import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/ecs"
 
 VOLUME_ID :: ecs.Component_Id(42)
 
+// Shape and Volume are defined in format, so the cooker reads a scene's volumes as the registry does: the cooker bakes
+// navmeshes inside box volumes (see docs/content/kinds/nav-meshes.md#the-volume).
+Shape :: format.Volume_Shape
+Volume :: format.Volume
+
 // In meters, for an extent of 0, as a component added in the editor leaves it.
-DEFAULT_EXTENT :: 5
+DEFAULT_EXTENT :: format.VOLUME_DEFAULT_EXTENT
 
 // At most this many volumes reach a point. The rest are left out, from the last that the query finds.
 MAX_INFLUENCES :: 64
 
-Shape :: enum u8 {
-	// Everywhere, as a base that local volumes go over.
-	Global,
-	// A box along the entity's axes, extents times its scale.
-	Box,
-	// A sphere, a radius of extents.x times the largest of its scale.
-	Sphere,
-}
-
-// Volume gives its entity's settings components a shape. Inside it, its settings have its weight, and outside it they
-// fall off to 0 over the blend distance. Where volumes overlap, a higher priority goes on top, then a smaller volume.
-// To turn a volume off, deactivate its entity.
-Volume :: struct {
-	shape:          Shape,
-	// Half the box's size along each of the entity's axes, or the sphere's radius in x, in meters. 0 gives
-	// DEFAULT_EXTENT.
-	extents:        [3]f32 `editor:"range=0,100"`,
-	// In meters outside the shape. 0 is a hard edge.
-	blend_distance: f32 `editor:"range=0,100"`,
-	priority:       f32 `editor:"range=-100,100"`,
-	// The settings' share where the volume is whole, up to 1. 0 means 1.
-	weight:         f32 `editor:"range=0,1"`,
-}
+#assert(VOLUME_ID == format.SCENE_VOLUME_ID)
 
 // Value is a setting that a volume can override. With override, the volume gives value, as it is. Without, the volume
 // keeps value but leaves the setting to the volumes below it, or the default, so turning override off and on compares

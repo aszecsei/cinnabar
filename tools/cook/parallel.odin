@@ -27,8 +27,8 @@ Parallel_Work :: struct {
 // at most one for each PARALLEL_THREAD_MEMORY of the machine's memory, and returns once every call has returned. The
 // calls take indices in order, so the costliest should come first. Each thread has its own temp allocator, which it
 // frees after each call: what a call keeps belongs in memory that it allocates itself, as a Scratch. The calls must
-// share nothing that they change.
-parallel_for :: proc(count: int, data: rawptr, work: proc(data: rawptr, index: int)) {
+// share nothing that they change. threads, when it is above 0, is the most threads that it runs.
+parallel_for :: proc(count: int, data: rawptr, work: proc(data: rawptr, index: int), threads := 0) {
 	if count <= 0 {
 		return
 	}
@@ -48,14 +48,17 @@ parallel_for :: proc(count: int, data: rawptr, work: proc(data: rawptr, index: i
 		}
 	}
 	thread_count := min(os.get_processor_core_count(), count)
+	if threads > 0 {
+		thread_count = min(thread_count, threads)
+	}
 	if ram, _, _, _, ok := si.ram_stats(); ok {
 		thread_count = min(thread_count, int(ram / PARALLEL_THREAD_MEMORY))
 	}
-	threads := make([]^thread.Thread, max(thread_count, 1), context.temp_allocator)
-	for &t in threads {
+	running := make([]^thread.Thread, max(thread_count, 1), context.temp_allocator)
+	for &t in running {
 		t = thread.create_and_start_with_poly_data(&state, worker, context)
 	}
-	for t in threads {
+	for t in running {
 		thread.join(t)
 		thread.destroy(t)
 	}

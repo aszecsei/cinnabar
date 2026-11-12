@@ -180,7 +180,7 @@ write_scene :: proc(t: ^testing.T, f: ^Bake_Fixture, guid: [16]u8, text: string)
 	testing.expectf(t, ok, "%v", problems)
 	buffer: [32]u8
 	path := fmt.tprintf("%s/%s.blob", f.dir, format.guid_format(format.Guid(guid), &buffer))
-	testing.expect(t, os.write_entire_file(path, format.scene_write(scene, format.Guid(guid), 1, .Prefab, context.temp_allocator)) == nil)
+	testing.expect(t, os.write_entire_file(path, format.scene_write(scene, format.Guid(guid), 1, .Prefab, allocator = context.temp_allocator)) == nil)
 }
 
 @(test)

@@ -29,3 +29,6 @@
 [submodule "vendor/lz4"]
 	path = vendor/lz4
 	url = https://github.com/lz4/lz4.git
+[submodule "vendor/recastnavigation"]
+	path = vendor/recastnavigation
+	url = https://github.com/recastnavigation/recastnavigation

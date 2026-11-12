@@ -5,6 +5,7 @@ import "core:math/linalg"
 import "core:slice"
 
 import "cinnabar:core/profile"
+import format "cinnabar:engine/asset/format"
 
 // Engine components have small explicit IDs. A hash of a name is practically never this small.
 TRANSFORM_ID :: Component_Id(1)
@@ -41,21 +42,25 @@ Parent :: struct {
 // Fixed systems, and to its children, so presentation can interpolate them. See interpolate.
 Previous_Transform :: distinct Transform
 
+// The identity poses, which are also the defaults of the fields that a scene leaves out. Their values are format's, so
+// the cooker reads a scene's poses as the loader does.
 TRANSFORM_IDENTITY :: Transform {
-	rotation = 1,
-	scale    = 1,
+	rotation = format.DEFAULT_ROTATION,
+	scale    = format.DEFAULT_SCALE,
 }
 
 LOCAL_TRANSFORM_IDENTITY :: Local_Transform {
-	rotation = 1,
-	scale    = 1,
+	rotation = format.DEFAULT_ROTATION,
+	scale    = format.DEFAULT_SCALE,
 }
+
+#assert(TRANSFORM_ID == format.SCENE_TRANSFORM_ID && LOCAL_TRANSFORM_ID == format.SCENE_LOCAL_TRANSFORM_ID)
 
 // register_engine_components registers the components that the world itself uses. Call it from the game's
 // component registration procedure.
 register_engine_components :: proc(r: ^Registry) {
-	register_component(r, Transform, TRANSFORM_ID)
-	register_component(r, Local_Transform, LOCAL_TRANSFORM_ID)
+	register_component(r, Transform, TRANSFORM_ID, TRANSFORM_IDENTITY)
+	register_component(r, Local_Transform, LOCAL_TRANSFORM_ID, LOCAL_TRANSFORM_IDENTITY)
 	register_component(r, Parent, PARENT_ID)
 	register_component(r, Previous_Transform, PREVIOUS_TRANSFORM_ID)
 	register_component(r, Disabled, DISABLED_ID)

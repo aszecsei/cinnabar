@@ -82,6 +82,7 @@ The order in which the daemon was built.
 3. **Asset operations:** the operations, the importers' settings tables, orphans, and the editor's commands, menus, dragging and settings editors.
 4. **GPU assets:** shaders, textures and meshes as assets, cooked in parallel, sub-assets, and the GPU residency table (see [Rendering](#rendering), phase 0).
 5. **Bundles:** `cook package`, a bundle for each level and a global one, blobs compressed one by one with LZ4, and the asset runtime's `Bundle` source, which release builds read from (see [Content: Bundles](content/blobs-and-loading.md#bundles)).
+6. **Navmeshes:** Recast in `vendor/recastnavigation` behind a C API of the cooker's, `Nav_Mesh_Volume` on a box `Volume`, the project's agent types, the physics components' defaults in `format` so the cooker reads a scene's static colliders by their fields' names, navmeshes as scenes' sub-assets in their blobs and bundles, and a tiled bake whose tiles have keys of their own and bake on every core ([Content: Navmeshes](content/kinds/nav-meshes.md)).
 
 ## Editor
 The order in which the editor was built.

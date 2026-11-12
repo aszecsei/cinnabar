@@ -22,6 +22,7 @@ Read them in this order the first time.
 | [Audio](kinds/audio.md) | Sounds: what the cooker decodes, the blob and its import settings, and the sample's sounds. |
 | [Fonts](kinds/fonts.md) | Fonts: the glyphs that the atlas holds, msdfgen's distance fields, the blob and its import settings. |
 | [UI documents](kinds/ui-documents.md) | The `.ui` format: its elements, attributes, values, styles and templates, and the blob. |
+| [Navmeshes](kinds/nav-meshes.md) | Navmeshes: navigation volumes, agent types, the static colliders that they bake from, Recast's tiled bake, and the blob. |
 | [Sprite sheets](kinds/sprite-sheets.md) | The `.sprite_sheet` format: packed images, a texture's grid and rectangles, Aseprite's and TexturePacker's JSON, animations, and the blob. |
 | [Cook daemon](daemon-and-operations.md) | The daemon, asset operations and the cook link. |
 | [Blobs and loading](blobs-and-loading.md) | The blob format, the asset runtime and hot reload. |
@@ -55,10 +56,11 @@ The code is in three places:
 
 | Package | Files | What they hold |
 |---|---|---|
-| `tools/cook` | `main.odin` | The commands: `scripts`, `scenes`, `shaders`, `textures`, `models`, `meshes`, `stages`, `materials`, `effects`, `animation_graphs`, `audio`, `fonts`, `ui`, `daemon`, `stage-report`, `package`, `--emit-link-schema` |
+| `tools/cook` | `main.odin` | The commands: `scripts`, `scenes`, `shaders`, `textures`, `models`, `meshes`, `stages`, `materials`, `effects`, `animation_graphs`, `audio`, `fonts`, `ui`, `navmeshes`, `daemon`, `stage-report`, `package`, `--emit-link-schema` |
 | | `content.odin`, `assets.odin` | The one pass that every command shares: the scan of the roots, `.meta` files for new assets, and each kind's cook. `IMPORTERS`: each kind's extensions and import settings. |
 | | `scripts.odin`, `typecheck.odin`, `schema.odin`, `luau_tools.odin` | Scripts: requires, type checking against the definition file, behaviour fields read with the prelude, and the bindings to the Luau compiler and analyzer |
 | | `scenes.odin` | Scenes: the syntax check and the blob |
+| | `nav_meshes.odin`, `recast.odin`, `recast/cn_recast.cpp` | Navmeshes: the agent types, the volumes, the static colliders read by their fields' names, the tiles, their keys and threads, and Recast's bake of a tile |
 | | `shaders.odin` | Shaders: DXC as a child process, includes, problems from its messages |
 | | `textures.odin`, `compressonator.odin` | Textures: decoding, resizing, mips, block compression through `CMP_Core` |
 | | `meshes.odin`, `meshoptimizer.odin` | Models and meshes: glTF through cgltf, the vertex streams, meshoptimizer |
@@ -75,7 +77,7 @@ The code is in three places:
 | | `problems.odin` | `Problem`: an error or warning with its file, line and column |
 | | `package.odin` | `cook package`: the release cache's blobs packed into a bundle for each load unit |
 | `lib/engine/asset` | `asset.odin` | The runtime: `load`, `poll`, handles, and the `Source` union, whose arms are `Loose_Cache` and `Bundle` |
-| `lib/engine/asset/format` | `format.odin`, `bundle.odin`, `references.odin`, `scene.odin`, `scene_text.odin`, `shader.odin`, `texture.odin`, `mesh.odin`, `mesh_text.odin`, `mesh_bake.odin`, `skin.odin`, `animation.odin`, `material.odin`, `font.odin`, `ui.odin`, `ui_text.odin` | What the cooker writes and the runtime reads: GUIDs, `.meta` files, the blob header, each kind's layout, the assets that each blob names, and the bundle format. Shared by `tools/cook` and the runtime; imports nothing from `lib/core`. |
+| `lib/engine/asset/format` | `format.odin`, `bundle.odin`, `references.odin`, `scene.odin`, `scene_text.odin`, `shader.odin`, `texture.odin`, `mesh.odin`, `mesh_text.odin`, `mesh_bake.odin`, `skin.odin`, `animation.odin`, `material.odin`, `font.odin`, `ui.odin`, `ui_text.odin`, `nav_mesh.odin`, `nav_settings.odin`, `components.odin` | What the cooker writes and the runtime reads: GUIDs, `.meta` files, the blob header, each kind's layout, the assets that each blob names, and the bundle format. Shared by `tools/cook` and the runtime; imports nothing from `lib/core`. |
 | `lib/engine/asset/cook_link` | `cook_link.odin` | The cook link's messages, over the transport in `lib/engine/wire` |
 
 The sections below follow the same order: how an asset is identified, how each kind is cooked, how the daemon keeps the cache current and serves the editor, what a blob looks like, and how the runtime loads it.
@@ -87,6 +89,7 @@ The sections below follow the same order: how an asset is identified, how each k
 - Xiph.Org, [libvorbis and libogg](https://github.com/xiph/vorbis) and [Opus](https://github.com/xiph/opus): the encoders and the Opus decoder behind [Audio](kinds/audio.md#audio).
 - Sean Barrett, [stb_vorbis](https://github.com/nothings/stb): the Vorbis decoder in [Audio](kinds/audio.md#audio).
 - Viktor Chlumsky, [msdfgen](https://github.com/Chlumsky/msdfgen) and *Shape Decomposition for Multi-channel Distance Fields* (2015): the multi-channel and true distance fields in [Fonts](kinds/fonts.md#fonts), and msdf-atlas-gen's test of a shape's winding.
+- Mikko Mononen and the Recast Navigation contributors, [Recast and Detour](https://github.com/recastnavigation/recastnavigation): the voxel bake of a tile, its filters, regions, contours, polygons and detail mesh, the tiles' borders and their edges' sides, and Detour's links between tiles, in [Navmeshes](kinds/nav-meshes.md#the-bake).
 - AMD, [Compressonator](https://github.com/GPUOpen-Tools/compressonator): the `CMP_Core` block encoders for BC1 to BC7 in [Textures](kinds/textures.md#textures).
 - Microsoft, [DirectX Shader Compiler](https://github.com/microsoft/DirectXShaderCompiler): the compiler that [Shaders](kinds/shaders.md#shaders) and [Materials](kinds/materials.md#materials) drive, and its `-Zi -Qembed_debug` flags.
 - Light Transport Entertainment, [TinyUSDZ](https://github.com/lighttransport/tinyusdz), now LightUSD: the USD reader, composition and Tydra converter behind [Stages](kinds/stages.md#stages).

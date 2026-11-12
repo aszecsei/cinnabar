@@ -89,7 +89,7 @@ teardown :: proc(f: ^Prefab_Fixture) {
 write_blob :: proc(t: ^testing.T, f: ^Prefab_Fixture, guid: format.Guid, text: string, kind: format.Asset_Kind) {
 	s, problems, ok := format.scene_parse(text, context.temp_allocator)
 	testing.expectf(t, ok, "problems: %v", problems)
-	blob := format.scene_write(s, guid, 1, kind, context.temp_allocator)
+	blob := format.scene_write(s, guid, 1, kind, allocator = context.temp_allocator)
 	buffer: [32]u8
 	testing.expect(t, os.write_entire_file(fmt.tprintf("%s/%s.blob", f.dir, format.guid_format(guid, &buffer)), blob) == nil)
 }

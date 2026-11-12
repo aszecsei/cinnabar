@@ -367,3 +367,21 @@ the_games_keys_name_its_main_scene :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(problems), 2)
 	testing.expect_value(t, s.main_scene, guid)
 }
+
+@(test)
+the_navigation_keys_are_checked_line_by_line :: proc(t: ^testing.T) {
+	s: Settings
+	problems := make([dynamic]string, context.temp_allocator)
+	parse("nav.agents = Human, Large\nnav.agent.Human.radius = 0.3\nnav.agent.Large.max_slope = 30\n", &s, &problems)
+	testing.expect_value(t, len(problems), 0)
+
+	clear(&problems)
+	parse("nav.agents = Human, Hu man\nnav.agent.Human.width = 1\nnav.agent.Human.radius = -1\nnav.agent.Human.max_slope = 90\n", &s, &problems)
+	testing.expect_value(t, len(problems), 4)
+	if len(problems) == 4 {
+		testing.expect(t, strings.has_prefix(problems[0], "1: nav.agents takes names"))
+		testing.expect_value(t, problems[1], `2: there is no setting "nav.agent.Human.width": an agent type has radius, height, step_height and max_slope`)
+		testing.expect(t, strings.has_prefix(problems[2], "3: nav.agent.Human.radius takes a number"))
+		testing.expect(t, strings.has_prefix(problems[3], "4: nav.agent.Human.max_slope takes a number above 0 and below 90"))
+	}
+}

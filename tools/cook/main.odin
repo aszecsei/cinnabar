@@ -2,7 +2,8 @@
 //
 // `cook scripts` cooks scripts (see scripts.odin), `cook scenes` cooks scenes (see scenes.odin), `cook shaders` cooks
 // shaders (see shaders.odin), `cook models` cooks glTF models (see meshes.odin), `cook meshes` cooks mesh files (see
-// mesh_files.odin), `cook stages` cooks USD stages (see stages.odin), and `cook daemon` cooks every kind whenever the
+// mesh_files.odin), `cook stages` cooks USD stages (see stages.odin), `cook navmeshes` bakes the scenes' navmeshes (see
+// nav_meshes.odin), and `cook daemon` cooks every kind whenever the
 // content changes (see daemon.odin). `cook all` cooks every kind in one pass, and with --prune deletes the blobs of
 // assets that left the content (see all.odin). `cook stage-report` measures stages against the renderer's limits. `cook package`
 // packs a release cache into bundles (see package.odin).
@@ -29,6 +30,7 @@ USAGE :: `usage: cook scripts --cache <dir> --config dev|release [--definitions 
        cook fonts --cache <dir> --config dev|release --root <name>=<dir> [--root <name>=<dir>]...
        cook ui --cache <dir> --config dev|release --root <name>=<dir> [--root <name>=<dir>]...
        cook stages --cache <dir> --config dev|release --root <name>=<dir> [--root <name>=<dir>]...
+       cook navmeshes --cache <dir> --config dev|release --root <name>=<dir> [--root <name>=<dir>]...
        cook all --cache <dir> --config dev|release --dxc <dxc.exe> [--include <dir>]... [--definitions <file>] [--prune] --root <name>=<dir> [--root <name>=<dir>]...
        cook stage-report <stage>...
        cook package --cache <dir> --out <dir> [--project <file>]
@@ -95,6 +97,10 @@ main :: proc() {
 	case "stages":
 		if options, parsed = parse_cook_args(os.args[2:]); parsed {
 			ok = cook_batch(options, .Stage)
+		}
+	case "navmeshes":
+		if options, parsed = parse_cook_args(os.args[2:]); parsed {
+			ok = cook_batch(options, .Nav_Mesh)
 		}
 	case "all":
 		args := make([dynamic]string, context.temp_allocator)
@@ -199,6 +205,9 @@ cook_batch :: proc(options: Cook_Options, kind: format.Asset_Kind) -> bool {
 	if kind == .Sprite_Sheet {
 		log.infof("cook: %d atlases of sprite sheets cooked", pass.cooked[.Texture])
 	}
+	if kind == .Nav_Mesh {
+		log.infof("cook: %d tiles of navmeshes baked, %d up to date", pass.nav_tiles[.Cooked], pass.nav_tiles[.Current])
+	}
 	return pass.ok
 }
 
@@ -249,6 +258,8 @@ kind_plural :: proc(kind: format.Asset_Kind) -> string {
 		return "UI documents"
 	case .Sprite_Sheet:
 		return "sprite sheets"
+	case .Nav_Mesh:
+		return "navmeshes"
 	}
 	return "assets"
 }

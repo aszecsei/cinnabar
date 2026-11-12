@@ -107,7 +107,7 @@ cinnabar/
 │   └── stbn/                Makes the ambient occlusion's and the reflections' blue noise
 ├── samples/mygame/          The sample that exercises most of the engine: game/ (its hooks), content/, project.settings
 ├── samples/intel/           Intel's USD scenes, with no Odin: content/, project.settings
-└── vendor/                  luau, compressonator, meshoptimizer, jolt, opus, vorbis, ogg, msdfgen, lz4 (submodules); agility, dxc (downloaded)
+└── vendor/                  luau, compressonator, meshoptimizer, jolt, opus, vorbis, ogg, msdfgen, lz4, recastnavigation (submodules); agility, dxc (downloaded)
 ```
 
 Packages are small and single-purpose. A package's tests are beside it as `*_test.odin`, and the justfile's `test` recipe lists every package with tests.

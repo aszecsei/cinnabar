@@ -386,7 +386,7 @@ create_body :: proc(
 	}
 
 	handle := core_physics.Body(pool_alloc(&s.bodies))
-	desc := core_physics.body_desc(handle, shape, body.motion, ecs.position_sub_f64(pose.position, s.anchor), u64(e), material.layer)
+	desc := core_physics.body_desc(handle, shape, core_physics.Motion(body.motion), ecs.position_sub_f64(pose.position, s.anchor), u64(e), material.layer)
 	desc.rotation = to_rotation(pose.rotation)
 	desc.mass = body.mass
 	desc.friction = material.friction

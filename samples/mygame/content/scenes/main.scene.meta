@@ -1,2 +1,4 @@
 # cinnabar asset metadata. Keep this file next to its asset (see docs/content-pipeline.md#identity).
 guid = 047ea7c35e4dbfb73d2dac450b79b9a8
+navmesh.3b9d7e21c4a8f650.Human = a630b315f1889819e16a27a5216d9e70
+navmesh.3b9d7e21c4a8f650.Small = 986d092215830828724c6f341e3f8abf

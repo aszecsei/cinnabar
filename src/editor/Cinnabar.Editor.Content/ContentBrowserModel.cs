@@ -386,7 +386,7 @@ public sealed class ContentBrowserModel
     /// <summary>The kind that the filter offers an asset under.</summary>
     public static ContentKind KindOf(AssetKind kind) => kind switch
     {
-        AssetKind.Scene => ContentKind.Scenes,
+        AssetKind.Scene or AssetKind.NavMesh => ContentKind.Scenes,
         AssetKind.Prefab => ContentKind.Prefabs,
         AssetKind.Model or AssetKind.Stage => ContentKind.Models,
         AssetKind.Mesh or AssetKind.InstanceSet => ContentKind.Meshes,

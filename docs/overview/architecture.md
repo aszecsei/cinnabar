@@ -121,6 +121,7 @@ A project's settings are a text file beside the game, such as `samples/mygame/pr
 | `game.main_scene` | A scene's GUID | None | The scene that the standard game loads when it starts (see [The game package](../world/game-package.md#settings)). |
 | `game.name`, `game.icon` | A name; a `.ico` file relative to the settings file | None | The release's executable, window title and icon. The game only knows the keys. |
 | `engine.path` | A folder | None | The engine checkout that builds the project, in the user's file only. The game only knows the key. |
+| `nav.agents`, `nav.agent.<Name>.<field>` | Agent types' names, separated by commas; a type's `radius`, `height`, `step_height` or `max_slope` | One type, `Default`: 0.4 m, 1.8 m, 0.35 m and 45 degrees | The agent types that the cooker bakes navmeshes for (see [Content: Navmeshes](../content/kinds/nav-meshes.md#agent-types)). The game's parser checks each line. |
 | `bundles.global_scenes` | Scenes' GUIDs, separated by commas | None | The scenes that are not levels, such as a menu. `cook package` puts them and their assets in the global bundle, and gives no scene in the list a bundle of its own (see [Content: Bundles](../content/blobs-and-loading.md#bundles)). The game's parser only knows the key, so that it is not a warning. |
 
 ## Content pipeline
