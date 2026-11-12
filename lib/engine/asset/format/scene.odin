@@ -21,6 +21,9 @@ SCENE_MESH_RENDERER_ID :: 33
 // a blob and the editor's Load_Scene are flat.
 Scene :: struct {
 	entities: []Scene_Entity,
+	// The scene's GUID, from a blob's header or the editor's Load_Scene, or zero. A parsed file has none: its .meta
+	// file holds it.
+	guid:     Guid,
 }
 
 Scene_Entity :: struct {
@@ -322,7 +325,7 @@ scene_read :: proc(data: []byte, allocator := context.allocator) -> (scene: Scen
 			behaviours = behaviours,
 		}
 	}
-	return {entities = entities}, true
+	return {entities = entities, guid = header.guid}, true
 }
 
 // scene_nav_meshes checks a scene or prefab blob and gives the navmeshes that it lists. The agents' names point into

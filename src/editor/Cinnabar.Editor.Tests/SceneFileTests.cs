@@ -171,7 +171,7 @@ public class SceneFileTests
     [Fact]
     public void TheSnapshotTagsValuesAsTheGameReadsThem()
     {
-        var message = SceneSnapshot.ToMessage(Parse(Door));
+        var message = SceneSnapshot.ToMessage(Parse(Door), "");
 
         var door = message.Entities.Single(e => e.Id == 0x5f3a9c01e2b47d10);
         Assert.Equal(0x1b04c7e95a2f3d88UL, door.Parent);

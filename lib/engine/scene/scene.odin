@@ -52,9 +52,10 @@ load_asset :: proc(w: ^ecs.World, scripts: ^script.Runtime, assets: ^asset.Asset
 	return true
 }
 
-// load replaces every entity in the world with the scene's. Call it between frames, outside the script phase. What
-// the world cannot use, such as a component that the game no longer registers or a field that it no longer has, is
-// skipped with a warning: the scene keeps it, so a broken build never deletes scene data.
+// load replaces every entity in the world with the scene's, and makes its GUID the world's scene. Call it between
+// frames, outside the script phase. What the world cannot use, such as a component that the game no longer registers
+// or a field that it no longer has, is skipped with a warning: the scene keeps it, so a broken build never deletes
+// scene data.
 //
 // Fields that a scene does not set have the component's registered defaults, or are zero. Previous_Transform starts
 // equal to Transform, so nothing interpolates from where the old world was. The behaviours wake in the next script
@@ -62,6 +63,7 @@ load_asset :: proc(w: ^ecs.World, scripts: ^script.Runtime, assets: ^asset.Asset
 // each scene ID. problems, if given, gets each warning, in frame memory.
 load :: proc(w: ^ecs.World, scripts: ^script.Runtime, s: format.Scene, handles: ^map[u64]ecs.Entity = nil, problems: ^[dynamic]Problem = nil) {
 	ecs.despawn_all(w)
+	w.scene = s.guid
 	local: map[u64]ecs.Entity
 	target := handles
 	if target == nil {

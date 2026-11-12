@@ -31,34 +31,10 @@ public sealed partial class EditorShell
     // Prefabs whose files changed while their documents were dirty, which the console has said once.
     readonly HashSet<string> _keptPrefabs = [];
 
-    // The GUID of a prefab file, from the index or from its .meta file, or "" for a scene.
-    string PrefabGuidOf(string path)
-    {
-        if (!path.EndsWith(SceneFile.PrefabExtension, StringComparison.OrdinalIgnoreCase))
-        {
-            return "";
-        }
-        if (Assets.FindByPath(path) is { } asset)
-        {
-            return asset.Guid;
-        }
-        try
-        {
-            foreach (var line in File.ReadAllLines(path + ".meta"))
-            {
-                var parts = line.Split('=', 2);
-                if (parts.Length == 2 && parts[0].Trim() == "guid")
-                {
-                    return parts[1].Trim().ToLowerInvariant();
-                }
-            }
-        }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
-        {
-        }
-        // A prefab that the cooker has not seen yet still has one root; it only cannot know itself in its instances.
-        return "0";
-    }
+    // The GUID of a prefab file, or "" for a scene. A prefab that the cooker has not seen yet still has one root; it only
+    // cannot know itself in its instances.
+    string PrefabGuidOf(string path) =>
+        path.EndsWith(SceneFile.PrefabExtension, StringComparison.OrdinalIgnoreCase) ? AssetGuidOf(path) ?? "0" : "";
 
     // A new entity in a prefab document goes under the root, keeping where it is in the world, since a prefab has one root.
     CreateEntity UnderPrefabRoot(CreateEntity create)
@@ -356,9 +332,9 @@ public sealed partial class EditorShell
 
     /// <summary>
     /// Where a prefab dropped at a frame pixel lands: on what the pixel shows, or on the grid plane through the camera's
-    /// pivot when it shows nothing, snapped to the grid when Snap is on.
+    /// pivot when it shows nothing, snapped to the grid when Snap is on and snap is true.
     /// </summary>
-    public long[] DropPoint(Vec2 pixel, PickResult? result)
+    public long[] DropPoint(Vec2 pixel, PickResult? result, bool snap = true)
     {
         var (width, height) = FrameSize;
         var ray = Camera.Ray(pixel, width, height);
@@ -374,7 +350,7 @@ public sealed partial class EditorShell
             distance = Math.Abs(ray.Direction.Y) > 1e-6 && plane / ray.Direction.Y is var t and > 0 ? t : Camera.PivotDistance;
         }
         var point = ray.At(distance).Offset(Camera.Position);
-        if (Snap)
+        if (snap && Snap)
         {
             var step = Mesh.GridSize * Pose.Unit;
             point = [.. point.Select(p => (long)(Math.Round(p / step) * step))];

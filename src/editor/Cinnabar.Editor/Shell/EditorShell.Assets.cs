@@ -20,10 +20,34 @@ public sealed partial class EditorShell
         return false;
     }
 
+    /// <summary>The GUID of an asset file, from the index or from its .meta file, or null when it has none yet.</summary>
+    string? AssetGuidOf(string path)
+    {
+        if (Assets.FindByPath(path) is { } asset)
+        {
+            return asset.Guid;
+        }
+        try
+        {
+            foreach (var line in File.ReadAllLines(path + ".meta"))
+            {
+                var parts = line.Split('=', 2);
+                if (parts.Length == 2 && parts[0].Trim() == "guid")
+                {
+                    return parts[1].Trim().ToLowerInvariant();
+                }
+            }
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+        }
+        return null;
+    }
+
     // An operation that may move the open scene's file, which the document then follows, with its autosave.
     async Task<bool> MovingScene(Func<Task<OperationResult?>> operation)
     {
-        var open = Scene is { } scene ? Assets.FindByPath(scene.Path)?.Guid : null;
+        var open = Scene is { } scene ? AssetGuidOf(scene.Path) : null;
         if (await operation() == null)
         {
             return false;

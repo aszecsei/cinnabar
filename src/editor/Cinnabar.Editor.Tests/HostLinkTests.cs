@@ -1688,7 +1688,7 @@ public sealed class HostLinkTests : IAsyncDisposable
     static async Task<EntitySnapshot> Load(Editor editor, Document.Scene scene, string? name = null)
     {
         name ??= scene.Entities[0].Name;
-        editor.Link.Send(Document.SceneSnapshot.ToMessage(scene));
+        editor.Link.Send(Document.SceneSnapshot.ToMessage(scene, ""));
         return await editor.Next<EntitySnapshot>(s => s.Entities.Any(e => e.Name == name) && s.Entities.Length == scene.Entities.Count);
     }
 

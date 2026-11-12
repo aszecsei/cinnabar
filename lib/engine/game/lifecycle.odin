@@ -13,6 +13,7 @@ import "cinnabar:engine/asset"
 import "cinnabar:engine/audio"
 import "cinnabar:engine/ecs"
 import "cinnabar:engine/editor"
+import "cinnabar:engine/nav"
 import "cinnabar:engine/physics"
 import "cinnabar:engine/project"
 import "cinnabar:engine/render"
@@ -27,7 +28,7 @@ game_init :: proc(state: rawptr, platform: ^core.Platform_API, h: Hooks, registe
 	mem.zero(state, state_bytes(h))
 	g := (^Game)(state)
 	g.platform = platform
-	editor.init(&g.editor, platform, &g.assets, &g.renderer.residency, &g.renderer)
+	editor.init(&g.editor, platform, &g.assets, &g.renderer.residency, &g.renderer, &g.nav)
 	if !ecs.init(&g.world, platform) {
 		log.panic("game: cannot create the world")
 	}
@@ -35,6 +36,7 @@ game_init :: proc(state: rawptr, platform: ^core.Platform_API, h: Hooks, registe
 		log.panic("game: cannot create the physics world")
 	}
 	audio.init(&g.audio, platform, &g.assets)
+	nav.init(&g.nav, platform, &g.assets)
 	register_world(g, h)
 	asset.init(&g.assets, platform, asset.content_source(platform.content_dir))
 	render.renderer_init(&g.renderer, platform, &g.assets, &g.world)
@@ -77,6 +79,7 @@ register_world :: proc(g: ^Game, h: Hooks) {
 	physics.register(&g.physics, w)
 	anim.register(&g.animation, w, &g.assets)
 	sprite.register(&g.sprites, w, &g.assets)
+	nav.register(&g.nav, w)
 	if h.register_world != nil {
 		h.register_world(g)
 	}
@@ -103,6 +106,8 @@ game_update :: proc(g: ^Game, dt: time.Duration, h: Hooks) -> (keep_running: boo
 	ui.sync(&g.ui, &g.world)
 	// The Animators' graphs and clips load before the ticks, so the animate system's jobs only read them.
 	anim.prepare(&g.animation, &g.world)
+	// The scene's navmeshes load with it, and the frame's queries and path requests read them, in every mode.
+	nav.prepare(&g.nav, &g.world)
 	g.frame_step = 0
 	if run {
 		g.elapsed += step
@@ -157,11 +162,12 @@ game_update :: proc(g: ^Game, dt: time.Duration, h: Hooks) -> (keep_running: boo
 	return true
 }
 
-// end_frame lets the frame's animation graphs go, then swaps the blobs that the cooker rewrote, and reloads the scripts
-// among them.
+// end_frame lets the frame's animation graphs and navmeshes go, then swaps the blobs that the cooker rewrote, and
+// reloads the scripts among them.
 @(private)
 end_frame :: proc(g: ^Game) {
 	anim.end_frame(&g.animation)
+	nav.end_frame(&g.nav)
 	script.reload_changed(&g.scripts, asset.poll(&g.assets))
 }
 
@@ -244,6 +250,7 @@ game_shutdown :: proc(g: ^Game, h: Hooks) {
 	render.renderer_destroy(&g.renderer)
 	// The sprites give their sheets back to the assets.
 	sprite.destroy(&g.sprites)
+	nav.destroy(&g.nav)
 	asset.destroy(&g.assets)
 	audio.destroy(&g.audio)
 	physics.destroy(&g.physics)
@@ -259,6 +266,7 @@ game_reload :: proc(g: ^Game, platform: ^core.Platform_API, h: Hooks, register_s
 	ecs.reload(&g.world, platform)
 	physics.reload(&g.physics, platform)
 	audio.reload(&g.audio, platform)
+	nav.reload(&g.nav, platform)
 	register_world(g, h)
 	render.renderer_reload(&g.renderer, platform, &g.world)
 	asset.reload(&g.assets, platform)

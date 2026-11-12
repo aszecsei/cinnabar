@@ -54,6 +54,8 @@ View :: struct {
 	picks:     [dynamic]link.Pick_Request,
 	// picks[0] was rendered with Viewport_Tools.ticket, and its results come back through the readback buffer.
 	picking:   bool,
+	// The Navigation Path tool's points, from Nav_Probe: none, a start, or a start and a goal.
+	nav_probe: [dynamic]ecs.World_Position,
 }
 
 // Viewport is one of the editor's viewports: its camera, its gizmo and how it draws, which the editor sends whether the
@@ -743,6 +745,11 @@ handle_viewport_message :: proc(e: ^Editor, message: link.Message) -> bool {
 	case link.Gizmo_State:
 		if p := viewport(v, m.viewport); p != nil {
 			p.gizmo = m
+		}
+	case link.Nav_Probe:
+		clear(&v.nav_probe)
+		for point in m.points[:min(len(m.points), 2)] {
+			append(&v.nav_probe, ecs.World_Position{raw = point.position})
 		}
 	case link.Box_Handles:
 		if p := viewport(v, m.viewport); p != nil {

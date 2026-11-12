@@ -58,6 +58,29 @@ public sealed class GameStateTests : IDisposable
     }
 
     [Fact]
+    public void TheSceneIsSentWithItsFilesGuid()
+    {
+        const string guid = "0123456789abcdef0123456789abcdef";
+        Directory.CreateDirectory(_temp.Path);
+        File.WriteAllText(_temp.Combine("box.scene.meta"), $"guid = {guid}\n");
+        using var shell = TestShell.Open(_temp, "box.scene", SceneText);
+
+        shell.Host.LinkForTests(_sent.Add);
+
+        Assert.Equal(Convert.FromHexString(guid), Assert.Single(_sent.OfType<LoadScene>()).Guid);
+    }
+
+    [Fact]
+    public void ASceneWithoutAFileGuidIsSentWithZeros()
+    {
+        using var shell = TestShell.Open(_temp, "box.scene", SceneText);
+
+        shell.Host.LinkForTests(_sent.Add);
+
+        Assert.Equal(new byte[16], Assert.Single(_sent.OfType<LoadScene>()).Guid);
+    }
+
+    [Fact]
     public void ANewLinkSendsWhatASoftRestartSends()
     {
         using var restarted = NewShell();

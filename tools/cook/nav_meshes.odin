@@ -210,7 +210,7 @@ cook_nav_meshes :: proc(options: Cook_Options, pass: ^Pass) -> bool {
 					report_warning(&pass.problems, a.path, 0, 0, "the navmesh %s has no GUID yet: cook the scene, and then its navmeshes", name)
 					continue
 				}
-				plan := nav_plan({guid = guid, volume = v.entity, anchor = v.anchor, agent = agent, settings = v.settings, bounds_min = v.bounds_min, bounds_max = v.bounds_max, triangles = triangles})
+				plan := nav_plan({guid = guid, volume = v.entity, anchor = v.anchor, agent = agent, agent_index = u32(k), settings = v.settings, bounds_min = v.bounds_min, bounds_max = v.bounds_max, triangles = triangles})
 				buffer: [32]u8
 				output := fmt.tprintf("%s/%s.blob", out_dir, format.guid_format(guid, &buffer))
 				if cooked_key(output, .Nav_Mesh, format.nav_mesh_layout()) == plan.key && !pass.force[a.meta.guid] {
@@ -719,12 +719,13 @@ nav_lathe :: proc(out: ^[dynamic][3][3]f32, rings: [][2]f32) {
 }
 
 // Nav_Bake_Input is what a navmesh bakes from: its GUID, its volume's scene ID, center, settings and bounds, its agent
-// type, and the triangles that reach the volume, relative to its center.
+// type and its index in the project's types, and the triangles that reach the volume, relative to its center.
 Nav_Bake_Input :: struct {
-	guid:       format.Guid,
-	volume:     u64,
-	anchor:     [3]i64,
-	agent:      format.Nav_Agent,
+	guid:        format.Guid,
+	volume:      u64,
+	anchor:      [3]i64,
+	agent:       format.Nav_Agent,
+	agent_index: u32,
 	settings:   format.Nav_Mesh_Volume,
 	bounds_min: [3]f32,
 	bounds_max: [3]f32,
@@ -854,7 +855,8 @@ nav_plan :: proc(input: Nav_Bake_Input) -> Nav_Plan {
 		tile_meters: f32,
 		tiles_x:     u32,
 		tiles_z:     u32,
-	}{input.guid, input.anchor, input.volume, input.bounds_min, input.bounds_max, agent.radius, agent.height, agent.step_height, agent.max_slope, cell_size, cell_height, plan.tile_meters, plan.tiles_x, plan.tiles_z}
+		agent_index: u32,
+	}{input.guid, input.anchor, input.volume, input.bounds_min, input.bounds_max, agent.radius, agent.height, agent.step_height, agent.max_slope, cell_size, cell_height, plan.tile_meters, plan.tiles_x, plan.tiles_z, input.agent_index}
 	key := hash.fnv64a(transmute([]byte)fmt.tprintf("%s\x00%x\x00%s\x00", NAV_COOK_VERSION, format.nav_mesh_layout(), agent.name))
 	key = hash.fnv64a(mem.ptr_to_bytes(&header), key)
 	for &tile in tiles {
@@ -1138,6 +1140,7 @@ nav_assemble :: proc(plan: ^Nav_Plan, tiles: []Nav_Tile_Data) -> format.Nav_Mesh
 		anchor = input.anchor,
 		volume = input.volume,
 		agent = input.agent,
+		agent_index = input.agent_index,
 		cell_size = plan.cell_size,
 		cell_height = plan.cell_height,
 		tile_size = plan.tile_meters,

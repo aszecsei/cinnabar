@@ -34,6 +34,31 @@ public class LinkWireTests
     }
 
     [Fact]
+    public void ANavProbeRoundTrips()
+    {
+        var message = new NavProbe([new NavProbePoint([1, -2, 1L << 40]), new NavProbePoint([0, 0, 3])]);
+        var frame = LinkFrame.Encode(message);
+        var header = LinkFrame.ReadHeader(frame);
+
+        var back = Assert.IsType<NavProbe>(LinkFrame.Decode(header.Kind, frame.AsSpan(LinkFrame.HeaderSize), LinkMessages.Read));
+
+        Assert.Equal(message.Points.Select(p => p.Position), back.Points.Select(p => p.Position));
+    }
+
+    [Fact]
+    public void ALoadSceneRoundTripsItsGuid()
+    {
+        byte[] guid = [.. Enumerable.Range(1, 16).Select(i => (byte)i)];
+        var frame = LinkFrame.Encode(new LoadScene([], guid));
+        var header = LinkFrame.ReadHeader(frame);
+
+        var back = Assert.IsType<LoadScene>(LinkFrame.Decode(header.Kind, frame.AsSpan(LinkFrame.HeaderSize), LinkMessages.Read));
+
+        Assert.Equal(guid, back.Guid);
+        Assert.Empty(back.Entities);
+    }
+
+    [Fact]
     public void TheBytesMatchTheOdinEncoding()
     {
         // Game_Size{width = 3, height = 0x01020304} as lib/engine/editor/link writes it.

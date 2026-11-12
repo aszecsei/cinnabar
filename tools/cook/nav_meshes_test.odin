@@ -178,13 +178,14 @@ nav_meshes_bake_what_each_agent_type_walks_on :: proc(t: ^testing.T) {
 	far_side := [3]f32{5, 0, 7}
 	wall_top := [3]f32{-4, 2, 4}
 	inside_wall := [3]f32{-4, 1, 4}
-	for agent in ([]string{"Small", "Large"}) {
+	for agent, k in ([]string{"Small", "Large"}) {
 		data, blob, _, ok := nav_blob_of(t, tree, "level.scene", 0x100, agent)
 		if !ok {
 			return
 		}
 		testing.expect_value(t, format.nav_mesh_agent(data, blob).name, agent)
 		testing.expect_value(t, blob.volume, 0x100)
+		testing.expect_value(t, blob.agent_index, u32(k))
 		testing.expect_value(t, blob.tiles_x, 4)
 		testing.expect_value(t, len(format.nav_mesh_links(data, blob)) > 0, true)
 		from := nav_polygon_at(data, blob, start)

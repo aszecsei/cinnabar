@@ -14,6 +14,7 @@ import "cinnabar:engine/asset"
 import "cinnabar:engine/ecs"
 import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/editor/link"
+import "cinnabar:engine/nav"
 import "cinnabar:engine/render"
 import "cinnabar:engine/scene"
 import "cinnabar:engine/script"
@@ -48,6 +49,8 @@ Editor :: struct {
 	residency:   ^render.Residency,
 	// The renderer, which answers where the texture sky's sun is.
 	renderer:    ^render.Renderer,
+	// The game's navigation, in Game_State, whose navmeshes the helpers draw, or nil without one.
+	nav:         ^nav.State,
 }
 
 // Session is the state of one editor connection: what the editor has sent the game, and what the game has sent the
@@ -112,12 +115,13 @@ Watched :: struct {
 // editor; without them (nil), the tools stay off. The live meshes draw through residency, the renderer's, which must
 // outlive the editor too; without it (nil), they are kept and baked but not drawn. The renderer answers for the sky
 // (see Sky_Sun_Request); without it (nil), the sky has no sun.
-init :: proc(e: ^Editor, platform: ^core.Platform_API, assets: ^asset.Assets, residency: ^render.Residency = nil, renderer: ^render.Renderer = nil) {
+init :: proc(e: ^Editor, platform: ^core.Platform_API, assets: ^asset.Assets, residency: ^render.Residency = nil, renderer: ^render.Renderer = nil, navigation: ^nav.State = nil) {
 	e^ = {
 		platform    = platform,
 		assets      = assets,
 		residency   = residency,
 		renderer    = renderer,
+		nav         = navigation,
 		by_scene_id = make(map[u64]ecs.Entity, platform.heap_allocator),
 		commands    = make([dynamic]Command, platform.heap_allocator),
 	}
@@ -140,6 +144,7 @@ begin_session :: proc(e: ^Editor, connection: u64) {
 			selection = make([dynamic]ecs.Entity, heap),
 			hidden    = make([dynamic]ecs.Entity, heap),
 			picks     = make([dynamic]link.Pick_Request, heap),
+			nav_probe = make([dynamic]ecs.World_Position, heap),
 		},
 	}
 	for &v in e.session.view.viewports {
@@ -165,6 +170,7 @@ end_session :: proc(e: ^Editor) {
 	delete(s.view.selection)
 	delete(s.view.hidden)
 	delete(s.view.picks)
+	delete(s.view.nav_probe)
 	s^ = {}
 }
 

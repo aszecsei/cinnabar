@@ -69,6 +69,7 @@ Scripts change the world structure **immediately**, except for despawns. The scr
 | `Physics` | Queries (`raycast`, `raycast_all`, `sphere_cast`, `box_cast`, `capsule_cast`, `overlap_sphere`, `overlap_box`, `overlap_capsule`), `layers(...)`, `gravity()` and `set_gravity`, the effects on a body, with its entity first (`add_force`, `add_impulse`, `velocity`, `set_velocity`, `sleep` and the rest), and a joint's `set_motor(entity, mode, target?, max?)` and `set_joint_enabled(entity, enabled)`, and a character's `move_character(entity, velocity, gravity?)`, `character_ground(entity)` and `is_grounded(entity)`, where the game defines it (see [Physics: Scripts](../physics/design.md#scripts)) |
 | `Ui` | A document's elements by its entity and their ids: `set`, `set_text`, `set_visible`, `focus`, `get_text`, `bind`, `add` and `remove`, and `wants_input()`, where the game defines it. The entity's behaviours get the document's events as `on_<event>(id)` (see [UI: Scripts](../ui/design.md#scripts)) |
 | `Animation` | An Animator's graph's parameters by name, with its entity first (`set_float`, `set_bool`, `trigger`, `reset_trigger`, `get_float`, `get_bool`), its current `state` and its `root_motion` in the world, where the game defines it (see [Animation: Scripts](../animation/design.md#scripts)) |
+| `Navigation` | Queries on the navmeshes by an agent type's name: `nearest(point, agent, extents?)`, `find_path(start, goal, agent, max_nodes?)`, `raycast(start, finish, agent)` and `random_point(around, radius, agent)`, and an entity's path: `request_path(entity, goal)` and `path(entity)`, where the game defines it (see [AI: Navigation: Scripts](../ai/navigation.md#scripts)) |
 | `Sprites` | A Sprite_Renderer's animations and frames by their names in its sheet, with its entity first: `play`, `stop`, `set_frame`, `animation` and `finished`, where the game defines it. See [Rendering: 2D](../rendering/2d.md#scripts). |
 
 - **Angles are in degrees**, as in Unity. Euler angles apply z, then x, then y, as in Unity.
@@ -119,7 +120,7 @@ Zones of a script's own code in the editor's profiler ([Profiling](../core/profi
 
 ## Random
 
-The world's random numbers (`lib/engine/script/random.odin`). Use them in place of `math.random` when a replay or a test must repeat. The generator is xoshiro256\*\*, so one seed gives one sequence on every platform.
+The world's random numbers (`lib/engine/script/random.odin`). Use them in place of `math.random` when a replay or a test must repeat. The generator is the engine's, xoshiro256\*\* in `lib/engine/random`, so one seed gives one sequence on every platform. `Navigation.random_point` draws from it too.
 
 | Binding | What it gives |
 |---|---|

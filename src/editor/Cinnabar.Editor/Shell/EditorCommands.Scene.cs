@@ -192,6 +192,13 @@ static partial class EditorCommands
         ToolCommand(shell, MoveTool, Tool.Move, "Move", "move", "Move the selection along an axis or a plane. W in the viewport.");
         ToolCommand(shell, RotateTool, Tool.Rotate, "Rotate", "rotate", "Turn the selection about an axis. E in the viewport.");
         ToolCommand(shell, ScaleTool, Tool.Scale, "Scale", "scale-tool", "Scale the selection along its own axes. R in the viewport.");
+        commands.Register(new Command(NavPathTool, "Navigation Path", () => shell.SetTool(Tool.NavPath))
+        {
+            Description = "Click two points in the viewport to draw the path between them on each agent type's navmesh. N in the viewport.",
+            Icon = "nav-path",
+            IsCheckedWhen = () => shell.Tool == Tool.NavPath,
+            CanExecuteWhen = () => !shell.Mesh.InMeshMode,
+        });
         commands.Register(new Command(LocalSpace, "Local Axes", shell.ToggleSpace)
         {
             Description = "Move and turn along the entity's axes, not the world's. X in the viewport.",

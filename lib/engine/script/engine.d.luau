@@ -169,6 +169,21 @@ type CharacterGround = {
 	entity: Entity?,
 }
 
+-- A path on the navmeshes (see docs/ai/navigation.md#scripts): found to the goal, partial to the reachable point
+-- nearest it, or failed off every navmesh, and its corners from the start to its end.
+type NavPath = {
+	status: "found" | "partial" | "failed",
+	corners: { WorldPosition },
+}
+
+-- How far a straight walk along a navmesh goes: the fraction t of the way, the point that it reaches, and the normal of
+-- the wall that stopped it, which is nil when it reached its end.
+type NavRaycastHit = {
+	t: number,
+	position: WorldPosition,
+	normal: vector?,
+}
+
 declare function wait(seconds: number?): ()
 declare function wait_realtime(seconds: number): ()
 declare function wait_frames(frames: number?): ()

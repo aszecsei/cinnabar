@@ -152,7 +152,7 @@ scene_of :: proc(m: link.Load_Scene, allocator: runtime.Allocator) -> format.Sce
 	for e, i in m.entities {
 		entities[i] = scene_entity_of(e, allocator)
 	}
-	return {entities = entities}
+	return {entities = entities, guid = format.Guid(m.guid)}
 }
 
 @(private)

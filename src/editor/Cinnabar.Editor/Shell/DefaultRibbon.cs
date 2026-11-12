@@ -34,7 +34,7 @@ static class DefaultRibbon
                     new RibbonGroup("Tools",
                     [
                         new SmallStack([EditorCommands.SelectTool, EditorCommands.MoveTool]),
-                        new SmallStack([EditorCommands.RotateTool, EditorCommands.ScaleTool]),
+                        new SmallStack([EditorCommands.RotateTool, EditorCommands.ScaleTool, EditorCommands.NavPathTool]),
                         new SmallStack([EditorCommands.LocalSpace, EditorCommands.Snap]),
                     ]),
                     new RibbonGroup("Play",
