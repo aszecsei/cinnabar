@@ -30,6 +30,8 @@ Cook_Options :: struct {
 	dxc_version: string,
 	// The directories that shader includes resolve in after the including file's own: absolute, with forward slashes.
 	includes:    [dynamic]string,
+	// Readers that stand in for the cooker's own for a technique of decisions, as tests give; nil for the cooker's.
+	technique_readers: Technique_Readers,
 }
 
 // Pass is what one cook did, and what it found, in the temporary allocator.
@@ -201,6 +203,13 @@ cook :: proc(
 	}
 	if .Animation_Graph in kinds {
 		pass.ok = cook_animation_graphs(options, pass.assets, &pass) && pass.ok
+	}
+	if .Blackboard in kinds {
+		pass.ok = cook_blackboards(options, pass.assets, &pass) && pass.ok
+	}
+	// A decision reads its blackboard's source, not its blob, so the order of the two passes does not matter.
+	if .Decision in kinds {
+		pass.ok = cook_decisions(options, pass.assets, &pass) && pass.ok
 	}
 	if .Audio in kinds {
 		pass.ok = cook_audio(options, pass.assets, &pass) && pass.ok

@@ -10,6 +10,7 @@ import "core:time"
 
 import "cinnabar:core"
 import "cinnabar:core/luau"
+import "cinnabar:engine/ai"
 import "cinnabar:engine/anim"
 import "cinnabar:engine/asset"
 import "cinnabar:engine/audio"
@@ -56,6 +57,8 @@ Game :: struct {
 	animation:          anim.State,
 	// The scene's navmeshes and the path requests (see docs/ai/navigation.md).
 	nav:                nav.State,
+	// The agents, their blackboards and their actions (see docs/ai/agents.md).
+	ai:                 ai.State,
 	// The Sprite_Renderers' animations (see docs/rendering/2d.md#animation).
 	sprites:            sprite.State,
 	// The UI's documents (see docs/ui/design.md#the-frame).
@@ -198,6 +201,7 @@ register_components :: proc(r: ^ecs.Registry, h: Hooks) {
 	anim.register_components(r)
 	ui.register_components(r)
 	nav.register_components(r)
+	ai.register_components(r)
 	if h.register_components != nil {
 		h.register_components(r)
 	}
@@ -214,6 +218,7 @@ register_scripts :: proc(r: ^script.Runtime) {
 	audio.register_scripts(r, &g.audio)
 	anim.register_scripts(r, &g.animation)
 	nav.register_scripts(r, &g.nav)
+	ai.register_scripts(r, &g.ai)
 	sprite.register_scripts(r, &g.sprites)
 	ui.register_scripts(r, &g.ui)
 	script.define(r, "Game.set_paused", proc(L: ^luau.State) -> c.int {

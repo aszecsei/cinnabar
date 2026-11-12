@@ -200,6 +200,8 @@ reload_module :: proc(r: ^Runtime, m: ^Module) {
 @(private = "file")
 patch_module :: proc(r: ^Runtime, L: ^luau.State, old, new: c.int) {
 	is_class := is_class(L, old) && is_class(L, new)
+	// An action class keeps its own __index and __newindex too, and has no instances to give new fields.
+	keeps := is_class || (is_action_class(L, old) && is_action_class(L, new))
 	keep :: proc(L: ^luau.State, is_class: bool) -> bool {
 		key, _ := key_atom(L, -1)
 		return is_class && luau.type(L, -1) == .STRING && (key == "__index" || key == "__newindex")
@@ -219,7 +221,7 @@ patch_module :: proc(r: ^Runtime, L: ^luau.State, old, new: c.int) {
 	luau.pushnil(L)
 	for luau.next(L, old) {
 		luau.pop(L, 1)
-		kept := keep(L, is_class)
+		kept := keep(L, keeps)
 		luau.pushvalue(L, -1)
 		missing := luau.rawget(L, new) == .NIL
 		luau.pop(L, 1)
@@ -232,7 +234,7 @@ patch_module :: proc(r: ^Runtime, L: ^luau.State, old, new: c.int) {
 	luau.pushnil(L)
 	for luau.next(L, new) {
 		luau.pushvalue(L, -2)
-		if keep(L, is_class) {
+		if keep(L, keeps) {
 			luau.pop(L, 2)
 			continue
 		}

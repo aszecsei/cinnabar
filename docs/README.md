@@ -19,7 +19,7 @@ Read the layers in this order the first time. Each one assumes the ones before i
 | 9 | [Audio](audio/README.md) | `lib/core/audio`, `lib/engine/audio` | Sound in the world: the mixer on its own thread, the boundary a backend implements, spatial sound, occlusion, streaming and the script binding. |
 | 10 | [UI](ui/README.md) | `lib/engine/ui` | Menus and HUDs: documents on entities, the cascade of styles, layout and the UI scale, MSDF text, the one batch, focus and gamepad navigation, and the `Ui` library. |
 | 11 | [Content pipeline](content/README.md) | `tools/cook`, `lib/engine/asset` | Identity and cooking, each asset kind, the cook daemon and its operations, blobs and loading. |
-| 12 | [AI](ai/README.md) | `lib/engine/nav`, `lib/engine/random` | Navigation: a scene's navmeshes loaded with it, queries for points and paths on them, and path requests solved on jobs within a budget. |
+| 12 | [AI](ai/README.md) | `lib/engine/ai`, `lib/engine/nav`, `lib/engine/random` | Agents: blackboards, decisions run on jobs within a budget, and native and script actions. Navigation: a scene's navmeshes loaded with it, queries for points and paths on them, and path requests solved on jobs within a budget. |
 | 13 | [Editor](editor/README.md) | `src/editor`, `lib/engine/editor` | Processes and projects, the document model and scenes, the editor link, the viewport, the shell and panels, and the material editor. |
 
 [History](history.md) keeps the implementation phases of each layer, in the order they were built.
@@ -32,6 +32,7 @@ Not everyone needs every layer.
 |---|---|
 | Writing gameplay in Luau | [Scripting: API](scripting/api.md), [Behaviours](scripting/behaviours.md), [Tooling](scripting/tooling-and-hot-reload.md); then [World: ECS](world/ecs.md) for what is underneath |
 | Making agents find their way | [Content: Navmeshes](content/kinds/nav-meshes.md), [AI: Navigation](ai/navigation.md) |
+| Making agents decide and act | [Content: Blackboards](content/kinds/blackboards.md), [Content: Decisions](content/kinds/decisions.md), [AI: Agents](ai/agents.md) |
 | Making menus and HUDs | [Content: UI documents](content/kinds/ui-documents.md), [Content: Fonts](content/kinds/fonts.md), [UI: Design](ui/design.md) |
 | Making content: materials, textures, meshes, scenes | [Content: kinds](content/README.md#documents), [Rendering: Materials](rendering/materials.md), [Editor: Material editor](editor/material-editor.md), [Editor: Shell and panels](editor/shell-and-panels.md) |
 | Writing native game code | Everything in order; [Overview: Conventions](overview/conventions.md) and [Hot reload](overview/hot-reload.md) first |

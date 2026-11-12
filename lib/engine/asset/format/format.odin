@@ -268,6 +268,10 @@ Asset_Kind :: enum u32 {
 	// The polygons that agents of one type walk on inside a Nav_Mesh_Volume, which the cooker bakes from a scene's
 	// static colliders. It is a sub-asset of the scene.
 	Nav_Mesh,
+	// The typed keys that an agent's decision reads and its actions write, each at a slot in the agent's values.
+	Blackboard,
+	// The conditions, actions and blackboard writes of an agent's decision, and the part that its technique reads.
+	Decision,
 }
 
 // Slice is a range of a blob, in bytes from the blob's start.
@@ -290,6 +294,8 @@ Script_Flag :: enum u32 {
 	Native,
 	// The module returns a behaviour class, and fields holds its schema.
 	Behaviour,
+	// The module returns an action class: class_name is the action's name, and fields holds its parameters.
+	Action,
 }
 
 Script_Flags :: bit_set[Script_Flag; u32]
@@ -303,7 +309,8 @@ Script_Blob :: struct {
 	requires:    Slice,
 	// The path relative to the content root, prefixed with the root's name, such as "game/scripts/hello.luau".
 	source_path: Slice,
-	// For a behaviour: the class name, and its Script_Field records, sorted by name.
+	// For a behaviour: the class name, and its Script_Field records, sorted by name. For an action: its name, and its
+	// parameters as Script_Field records, sorted by name.
 	class_name:  Slice,
 	fields:      Slice,
 }
@@ -317,6 +324,8 @@ Script_Field_Kind :: enum u32 {
 	// An asset reference. text holds the kind of asset that it takes, as the cook link names kinds in lowercase, such
 	// as "prefab", or "" for any.
 	Asset,
+	// A World_Position, only an action's parameter, which has no default.
+	Position,
 }
 
 // Script_Field is a field of a behaviour, from Behaviour.define. number holds the default of a Number, and 1 or 0

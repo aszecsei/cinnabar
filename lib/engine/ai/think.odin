@@ -1,0 +1,359 @@
+package ai
+
+import "base:runtime"
+import "core:math"
+import "core:slice"
+
+import "cinnabar:core/jobs"
+import "cinnabar:core/profile"
+import format "cinnabar:engine/asset/format"
+import "cinnabar:engine/ecs"
+
+// Thinking (see docs/ai/agents.md#thinking). In each tick, the ai think system takes the agents whose think is due,
+// the first budget of them by priority and then by the time since each last thought, and runs their decision modules
+// on jobs, THINK_BATCH agents to a job. A module reads the agent's blackboard and its own state and writes only its
+// state; what it decides, actions to start or stop and blackboard writes, goes into the job's commands, which apply
+// after the tick's Fixed systems in system order and then job order. A think therefore gives the same result on one job
+// or many.
+
+// Module is a technique's decision module. think runs on a job, and may read the world, but writes only the agent's
+// module state and the context's outputs. It never calls a script.
+Module :: struct {
+	think: proc(t: ^Think_Context),
+}
+
+// Action_View is the agent's action as its decision sees it: the action reference that it started, DECISION_NONE for
+// none, and whether it runs or ended.
+Action_View :: struct {
+	ref:    u32,
+	status: Action_Status,
+}
+
+// Think_Context is what a module gets for one agent's think.
+Think_Context :: struct {
+	world:      ^ecs.World,
+	entity:     ecs.Entity,
+	decision:   Decision,
+	board:      Board,
+	// The agent's values, which the module reads and writes only through writes.
+	values:     []byte,
+	// The agent's module state, decision.blob.state_size bytes, zero when the agent starts.
+	state:      []byte,
+	action:     Action_View,
+	// Seconds since the agent last thought, 0 at its first think.
+	dt:         f32,
+	// How many times the agent thought before.
+	thinks:     u32,
+	agent:      Agent_Handle,
+	// The job's commands.
+	out:        ^[dynamic]Command,
+}
+
+// technique_data is the technique's part of the agent's decision.
+technique_data :: proc(t: ^Think_Context) -> []byte {
+	return format.decision_technique_data(t.decision.data, t.decision.blob)
+}
+
+// start_action asks to start a decision's action reference, by its index, which stops the action that runs. Asking for
+// the action that runs or starts does nothing.
+start_action :: proc(t: ^Think_Context, ref: u32) {
+	append(t.out, Command{entity = t.entity, agent = t.agent, kind = .Start, ref = ref})
+}
+
+// stop_action asks to stop the action that runs.
+stop_action :: proc(t: ^Think_Context) {
+	append(t.out, Command{entity = t.entity, agent = t.agent, kind = .Stop})
+}
+
+// write asks for a decision's blackboard write, by its index, with its value as the blackboard is now.
+write :: proc(t: ^Think_Context, index: u32) {
+	writes := format.decision_writes(t.decision.data, t.decision.blob)
+	w := writes[index]
+	keys := format.blackboard_keys(t.board.data, t.board.blob)
+	key := keys[w.key]
+	c := Command {
+		entity = t.entity,
+		agent  = t.agent,
+		kind   = .Write,
+		key    = w.key,
+		type   = key.type,
+	}
+	switch w.source {
+	case .Constant:
+		constant := format.decision_constants(t.decision.data, t.decision.blob)[w.index]
+		c.value = constant.value
+	case .Key:
+		copy(c.value[:], value_bytes(t.values, keys[w.index]))
+	case .Self:
+		(^ecs.Entity)(&c.value)^ = t.entity
+	}
+	append(t.out, c)
+}
+
+// node_writes asks for each of a node's `set` writes, in their order.
+node_writes :: proc(t: ^Think_Context, node: format.Decision_Node) {
+	for i in node.first_write ..< node.first_write + node.write_count {
+		write(t, i)
+	}
+}
+
+// Stack_Value is a value on a condition's stack: a number, bits for a bool, an enum or an entity, or a place.
+@(private)
+Stack_Value :: struct {
+	number:   f64,
+	bits:     u64,
+	position: ecs.World_Position,
+	// A position, or an entity whose position is in position. A place that is none or has no Transform is not one.
+	place:    bool,
+}
+
+// condition_holds evaluates a decision's condition, by its index, against the agent's values and the world's
+// Transforms. DECISION_NONE holds.
+condition_holds :: proc(t: ^Think_Context, index: u32) -> bool {
+	if index == format.DECISION_NONE {
+		return true
+	}
+	condition := format.decision_conditions(t.decision.data, t.decision.blob)[index]
+	ops := format.decision_ops(t.decision.data, t.decision.blob)[condition.first_op:][:condition.op_count]
+	constants := format.decision_constants(t.decision.data, t.decision.blob)
+	keys := format.blackboard_keys(t.board.data, t.board.blob)
+	stack: [format.MAX_DECISION_STACK]Stack_Value
+	top := 0
+	push_bytes :: proc(t: ^Think_Context, type: format.Blackboard_Type, bytes: []byte) -> (v: Stack_Value) {
+		switch type {
+		case .Float:
+			v.number = f64((^f32)(raw_data(bytes))^)
+		case .Int:
+			v.number = f64((^i32)(raw_data(bytes))^)
+		case .Bool:
+			v.bits = u64(bytes[0])
+		case .Enum:
+			v.bits = u64((^u32)(raw_data(bytes))^)
+		case .Entity:
+			e := (^ecs.Entity)(raw_data(bytes))^
+			v.bits = u64(e)
+			if e != 0 && ecs.is_alive(t.world, e) {
+				if transform := ecs.get(t.world, e, ecs.Transform); transform != nil {
+					v.position, v.place = transform.position, true
+				}
+			}
+		case .Position:
+			v.position, v.place = (^ecs.World_Position)(raw_data(bytes))^, true
+		case .Vector, .String:
+		}
+		return
+	}
+	for o in ops {
+		switch o.code {
+		case .Key:
+			key := keys[o.operand]
+			stack[top] = push_bytes(t, key.type, value_bytes(t.values, key))
+			top += 1
+		case .Constant:
+			c := constants[o.operand]
+			value := c.value
+			stack[top] = push_bytes(t, c.type, value[:])
+			top += 1
+		case .Self:
+			self := t.entity
+			stack[top] = push_bytes(t, .Entity, mem_bytes(&self))
+			top += 1
+		case .Distance:
+			a, b := stack[top - 2], stack[top - 1]
+			top -= 1
+			distance := math.INF_F64
+			if a.place && b.place {
+				d := ecs.position_sub_f64(a.position, b.position)
+				distance = math.sqrt(d.x * d.x + d.y * d.y + d.z * d.z)
+			}
+			stack[top - 1] = {number = distance}
+		case .Less, .Less_Equal, .Greater, .Greater_Equal, .Equal, .Not_Equal:
+			a, b := stack[top - 2], stack[top - 1]
+			top -= 1
+			result: bool
+			if format.Blackboard_Type(o.type) == .Float {
+				switch o.code {
+				case .Less:
+					result = a.number < b.number
+				case .Less_Equal:
+					result = a.number <= b.number
+				case .Greater:
+					result = a.number > b.number
+				case .Greater_Equal:
+					result = a.number >= b.number
+				case .Equal:
+					result = a.number == b.number
+				case .Not_Equal:
+					result = a.number != b.number
+				case .Key, .Constant, .Self, .Distance, .And, .Or, .Not:
+				}
+			} else {
+				result = (a.bits == b.bits) == (o.code == .Equal)
+			}
+			stack[top - 1] = {bits = u64(result)}
+		case .And:
+			top -= 1
+			stack[top - 1] = {bits = u64(stack[top - 1].bits != 0 && stack[top].bits != 0)}
+		case .Or:
+			top -= 1
+			stack[top - 1] = {bits = u64(stack[top - 1].bits != 0 || stack[top].bits != 0)}
+		case .Not:
+			stack[top - 1] = {bits = u64(stack[top - 1].bits == 0)}
+		}
+	}
+	return top == 1 && stack[0].bits != 0
+}
+
+@(private)
+mem_bytes :: proc(e: ^ecs.Entity) -> []byte {
+	return ([^]byte)(e)[:size_of(ecs.Entity)]
+}
+
+// Think_Job is a batch of agents that one job thinks for.
+@(private)
+Think_Job :: struct {
+	s:       ^State,
+	world:   ^ecs.World,
+	agents:  []u32,
+	out:     [dynamic]Command,
+	ctx:     runtime.Context,
+}
+
+@(private)
+think_job :: proc(data: rawptr) {
+	j := (^Think_Job)(data)
+	context = j.ctx
+	s := j.s
+	w := j.world
+	now := w.clock.tick
+	for index in j.agents {
+		slot := &s.agents.slots[index]
+		ready := &slot.phase.(Agent_Ready)
+		board, _ := board_of(s, slot.blackboard)
+		decision, _ := decision_of(s, slot.decision)
+		t := Think_Context {
+			world    = w,
+			entity   = slot.entity,
+			decision = decision,
+			board    = board,
+			values   = ready.values,
+			state    = ready.state,
+			action   = action_view(ready.action),
+			dt       = 0 if ready.thinks == 0 else f32(now - ready.last_think) / f32(w.clock.tick_rate),
+			thinks   = ready.thinks,
+			agent    = {index, s.agents.generations[index]},
+			out      = &j.out,
+		}
+		s.modules[decision.blob.technique].think(&t)
+	}
+}
+
+// action_view is an action as a decision sees it.
+@(private)
+action_view :: proc(a: Action_Phase) -> Action_View {
+	switch p in a {
+	case Native_Starting:
+		return {p.ref, .Running}
+	case Script_Starting:
+		return {p.ref, .Running}
+	case Native_Running:
+		return {p.ref, .Running}
+	case Script_Running:
+		return {p.ref, .Running}
+	case Action_Done:
+		return {p.ref, p.status}
+	}
+	return {format.DECISION_NONE, .Succeeded}
+}
+
+// think_system is the ai think system: it stops the native actions that ended, keeps the pool in step with the
+// world's agents, makes ready those whose blobs loaded, and runs the decisions of the agents that think in this tick.
+@(private)
+think_system :: proc(ctx: ^ecs.System_Context) {
+	s := (^State)(ctx.data)
+	w := ctx.world
+	stop_native_endings(s, ctx)
+	check_agents(s, w, ctx.commands)
+	ready_agents(s, w)
+	think(s, w, ctx)
+}
+
+// Due is an agent whose think is due, with what orders it for the budget.
+@(private)
+Due :: struct {
+	index:      u32,
+	priority:   i32,
+	last_think: u64,
+}
+
+// due_agents is the agents that think in this tick: those whose think is due and whose entities are active, the first
+// budget of them by priority, highest first, then by the tick each last thought in, oldest first, then by slot. The
+// order never depends on an entity's handle.
+@(private)
+due_agents :: proc(s: ^State, w: ^ecs.World) -> []u32 {
+	now := w.clock.tick
+	due := make([dynamic]Due, w.platform.frame_allocator)
+	for &slot, index in s.agents.slots {
+		ready, ok := &slot.phase.(Agent_Ready)
+		if !ok || ready.next_think > now || ecs.has(w, slot.entity, ecs.Inactive) {
+			continue
+		}
+		agent := ecs.get(w, slot.entity, Agent)
+		append(&due, Due{u32(index), agent.priority, ready.last_think})
+	}
+	slice.sort_by(due[:], proc(a, b: Due) -> bool {
+		if a.priority != b.priority {
+			return a.priority > b.priority
+		}
+		if a.last_think != b.last_think {
+			return a.last_think < b.last_think
+		}
+		return a.index < b.index
+	})
+	count := min(len(due), s.budget)
+	result := make([]u32, count, w.platform.frame_allocator)
+	for d, i in due[:count] {
+		result[i] = d.index
+	}
+	return result
+}
+
+@(private)
+think :: proc(s: ^State, w: ^ecs.World, ctx: ^ecs.System_Context) {
+	agents := due_agents(s, w)
+	if len(agents) == 0 {
+		return
+	}
+	p := &w.platform.profile
+	profile.begin(p, profile.name(p, "AI think", .Frame))
+	defer profile.end(p)
+	batches := (len(agents) + THINK_BATCH - 1) / THINK_BATCH
+	work := make([]Think_Job, batches, w.platform.frame_allocator)
+	list := make([]jobs.Job, batches, w.platform.frame_allocator)
+	for b in 0 ..< batches {
+		work[b] = {
+			s       = s,
+			world   = w,
+			agents  = agents[b * THINK_BATCH:min((b + 1) * THINK_BATCH, len(agents))],
+			out     = make([dynamic]Command, w.platform.frame_allocator),
+			ctx     = context,
+		}
+		list[b] = {think_job, &work[b]}
+	}
+	counter: jobs.Counter
+	w.platform.jobs_run(list, &counter)
+	w.platform.jobs_wait(&counter)
+	// The batches' commands, in batch order, which is the agents' order.
+	out := job_commands(s, ctx)
+	for &j in work {
+		append(out, ..j.out[:])
+	}
+	now := w.clock.tick
+	for index in agents {
+		slot := &s.agents.slots[index]
+		ready := &slot.phase.(Agent_Ready)
+		ready.last_think = now
+		ready.thinks += 1
+		ready.next_think = now + interval_ticks(w, slot.entity)
+	}
+}

@@ -126,6 +126,8 @@ Asset_Kind :: enum u8 {
 	Ui,
 	Sprite_Sheet,
 	Nav_Mesh,
+	Blackboard,
+	Decision,
 }
 
 Asset_Status :: enum u8 {

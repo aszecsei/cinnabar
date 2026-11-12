@@ -106,7 +106,7 @@ light_index :: proc(L: ^luau.State) -> c.int {
 			return 1
 		}
 		raise(L, fmt.aprintf("Asset has no field %s", key, allocator = frame(r)))
-	case .None, .Instance_Key:
+	case .None, .Instance_Key, .Action_Key:
 	}
 	raise(L, "this value has no fields")
 }
@@ -139,7 +139,7 @@ light_tostring :: proc(L: ^luau.State) -> c.int {
 	case .Asset:
 		buffer: [32]u8
 		luau.pushodinstring(L, fmt.aprintf("Asset(%s)", format.guid_format(to_asset(r, L, 1), &buffer), allocator = frame(r)))
-	case .None, .Instance_Key:
+	case .None, .Instance_Key, .Action_Key:
 		luau.pushstring(L, "lightuserdata")
 	}
 	return 1

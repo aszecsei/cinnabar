@@ -5,7 +5,7 @@ import "core:mem/virtual"
 // blob_references is the assets that a blob names, which the runtime loads when it uses the blob: a script's requires,
 // a scene's or prefab's behaviours, asset fields and navmeshes, a material's textures, an instance's material and textures, an
 // effect's materials, meshes and textures, an animation's skin, an animation graph's clips, a font's or sprite sheet's
-// atlas, and a UI document's fonts and images. A GUID appears once, and the zero GUID never. ok is false for a blob
+// atlas, a UI document's fonts and images, and a decision's blackboard. A GUID appears once, and the zero GUID never. ok is false for a blob
 // that does not check.
 blob_references :: proc(data: []byte, allocator := context.allocator) -> (references: []Guid, ok: bool) {
 	header := blob_header(data) or_return
@@ -90,6 +90,9 @@ blob_references :: proc(data: []byte, allocator := context.allocator) -> (refere
 	case .Sprite_Sheet:
 		blob := sprite_sheet_view(data) or_return
 		add(&list, blob.atlas)
+	case .Decision:
+		blob := decision_view(data) or_return
+		add(&list, blob.blackboard)
 	case .Ui:
 		blob := ui_view(data) or_return
 		for p in ui_props(data, blob) {

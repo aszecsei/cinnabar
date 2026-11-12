@@ -79,7 +79,8 @@ effective :: proc(i: ^Instance) -> bool {
 	return i.flags >= {.Live, .Awake, .Enabled, .Active}
 }
 
-// run_prelude runs the prelude once, and sets Behaviour and Field. Its native procedures are dispatcher closures, so
+// run_prelude runs the prelude once, and sets Behaviour, Field, Action and Param, and keeps the registry of action
+// classes. Its native procedures are dispatcher closures, so
 // they reach the new DLL's bindings after a code reload.
 @(private)
 run_prelude :: proc(r: ^Runtime) {
@@ -94,15 +95,16 @@ run_prelude :: proc(r: ^Runtime) {
 		r.platform.script_push_binding(L, fmt.aprintf("Behaviour.%s", name, allocator = frame(r)))
 		luau.rawsetfield(L, -2, cstring_of(r, name))
 	}
-	if luau.pcall(L, 1, 2, 0) != .OK {
+	if luau.pcall(L, 1, 5, 0) != .OK {
 		log.panicf("script: the prelude fails: %s", luau.toodinstring(L, -1))
 	}
-	field := luau.gettop(L)
-	luau.pushvalue(L, field - 1)
-	set_path(r, "Behaviour")
-	luau.pushvalue(L, field)
-	set_path(r, "Field")
-	luau.pop(L, 2)
+	registry := luau.gettop(L)
+	r.action_registry = luau.ref(L, registry)
+	for name, i in ([?]string{"Behaviour", "Field", "Action", "Param"}) {
+		luau.pushvalue(L, registry - 4 + c.int(i))
+		set_path(r, name)
+	}
+	luau.pop(L, 5)
 }
 
 @(private)
@@ -123,7 +125,7 @@ register_behaviours :: proc(r: ^Runtime) {
 	bind(r, "Behaviour.stop_coroutine", stop_coroutine_binding)
 	bind(r, "Behaviour.stop_all_coroutines", proc(L: ^luau.State) -> c.int {
 		r := runtime_of(L)
-		stop_owned(r, handle_of(r, check_instance(r, L, 1)))
+		stop_owned(r, check_owner(r, L, 1))
 		return 0
 	})
 }
@@ -135,6 +137,17 @@ is_class :: proc(L: ^luau.State, idx: c.int) -> bool {
 		return false
 	}
 	is := luau.rawgetfield(L, idx, "__behaviour") == .STRING
+	luau.pop(L, 1)
+	return is
+}
+
+// is_action_class is true for a table that Action.define made.
+@(private)
+is_action_class :: proc(L: ^luau.State, idx: c.int) -> bool {
+	if !luau.istable(L, idx) {
+		return false
+	}
+	is := luau.rawgetfield(L, idx, "__action") == .STRING
 	luau.pop(L, 1)
 	return is
 }

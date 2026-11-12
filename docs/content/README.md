@@ -23,6 +23,8 @@ Read them in this order the first time.
 | [Fonts](kinds/fonts.md) | Fonts: the glyphs that the atlas holds, msdfgen's distance fields, the blob and its import settings. |
 | [UI documents](kinds/ui-documents.md) | The `.ui` format: its elements, attributes, values, styles and templates, and the blob. |
 | [Navmeshes](kinds/nav-meshes.md) | Navmeshes: navigation volumes, agent types, the static colliders that they bake from, Recast's tiled bake, and the blob. |
+| [Blackboards](kinds/blackboards.md) | The `.blackboard` format: an agent's typed keys, their slots, offsets and defaults, and the blob. |
+| [Decisions](kinds/decisions.md) | The `.decision` format: the technique, the shared conditions, action references and blackboard writes, the techniques' readers, and the blob. |
 | [Sprite sheets](kinds/sprite-sheets.md) | The `.sprite_sheet` format: packed images, a texture's grid and rectangles, Aseprite's and TexturePacker's JSON, animations, and the blob. |
 | [Cook daemon](daemon-and-operations.md) | The daemon, asset operations and the cook link. |
 | [Blobs and loading](blobs-and-loading.md) | The blob format, the asset runtime and hot reload. |
@@ -56,9 +58,9 @@ The code is in three places:
 
 | Package | Files | What they hold |
 |---|---|---|
-| `tools/cook` | `main.odin` | The commands: `scripts`, `scenes`, `shaders`, `textures`, `models`, `meshes`, `stages`, `materials`, `effects`, `animation_graphs`, `audio`, `fonts`, `ui`, `navmeshes`, `daemon`, `stage-report`, `package`, `--emit-link-schema` |
+| `tools/cook` | `main.odin` | The commands: `scripts`, `scenes`, `shaders`, `textures`, `models`, `meshes`, `stages`, `materials`, `effects`, `animation_graphs`, `audio`, `fonts`, `ui`, `sprite_sheets`, `navmeshes`, `blackboards`, `decisions`, `daemon`, `stage-report`, `package`, `--emit-link-schema` |
 | | `content.odin`, `assets.odin` | The one pass that every command shares: the scan of the roots, `.meta` files for new assets, and each kind's cook. `IMPORTERS`: each kind's extensions and import settings. |
-| | `scripts.odin`, `typecheck.odin`, `schema.odin`, `luau_tools.odin` | Scripts: requires, type checking against the definition file, behaviour fields read with the prelude, and the bindings to the Luau compiler and analyzer |
+| | `scripts.odin`, `typecheck.odin`, `schema.odin`, `luau_tools.odin` | Scripts: requires, type checking against the definition file, behaviour fields and action parameters read with the prelude, and the bindings to the Luau compiler and analyzer |
 | | `scenes.odin` | Scenes: the syntax check and the blob |
 | | `nav_meshes.odin`, `recast.odin`, `recast/cn_recast.cpp` | Navmeshes: the agent types, the volumes, the static colliders read by their fields' names, the tiles, their keys and threads, and Recast's bake of a tile |
 | | `shaders.odin` | Shaders: DXC as a child process, includes, problems from its messages |
@@ -71,13 +73,14 @@ The code is in three places:
 | | `audio.odin`, `audio_encode.odin` | Sounds: decoding through `vendor:miniaudio` to PCM at the engine's rate, whether they stream, and their format |
 | | `fonts.odin`, `opentype.odin`, `msdf.odin`, `msdfgen/cn_msdf.cpp` | Fonts: the glyphs that GSUB reaches from the charset, the atlas's cells, and their distance fields through msdfgen's core |
 | | `ui_documents.odin` | UI documents: the parse from `format`, the kinds of the assets that they name, and the template |
+| | `blackboards.odin`, `decisions.odin`, `conditions.odin` | Blackboards and decisions: the keys' slots and defaults, the decisions' shared parts parsed against their blackboard's source, and the techniques' readers |
 | | `sprite_sheets.odin`, `pack.odin` | Sprite sheets: the text's parse, the atlas that packs a sheet's images, a texture's grid and rectangles, and the JSON import; `pack_rects`, which the fonts pack with too |
 | | `daemon.odin`, `watch_windows.odin`, `index.odin`, `serve.odin` | The daemon: the watcher, the passes, the index of the content, and the cook link's server |
 | | `operations.odin`, `files_windows.odin`, `lock_windows.odin` | The asset operations, the file moves they need, and the cache lock |
 | | `problems.odin` | `Problem`: an error or warning with its file, line and column |
 | | `package.odin` | `cook package`: the release cache's blobs packed into a bundle for each load unit |
 | `lib/engine/asset` | `asset.odin` | The runtime: `load`, `poll`, handles, and the `Source` union, whose arms are `Loose_Cache` and `Bundle` |
-| `lib/engine/asset/format` | `format.odin`, `bundle.odin`, `references.odin`, `scene.odin`, `scene_text.odin`, `shader.odin`, `texture.odin`, `mesh.odin`, `mesh_text.odin`, `mesh_bake.odin`, `skin.odin`, `animation.odin`, `material.odin`, `font.odin`, `ui.odin`, `ui_text.odin`, `nav_mesh.odin`, `nav_settings.odin`, `components.odin` | What the cooker writes and the runtime reads: GUIDs, `.meta` files, the blob header, each kind's layout, the assets that each blob names, and the bundle format. Shared by `tools/cook` and the runtime; imports nothing from `lib/core`. |
+| `lib/engine/asset/format` | `format.odin`, `bundle.odin`, `references.odin`, `scene.odin`, `scene_text.odin`, `shader.odin`, `texture.odin`, `mesh.odin`, `mesh_text.odin`, `mesh_bake.odin`, `skin.odin`, `animation.odin`, `material.odin`, `font.odin`, `ui.odin`, `ui_text.odin`, `nav_mesh.odin`, `nav_settings.odin`, `blackboard.odin`, `decision.odin`, `components.odin` | What the cooker writes and the runtime reads: GUIDs, `.meta` files, the blob header, each kind's layout, the assets that each blob names, and the bundle format. Shared by `tools/cook` and the runtime; imports nothing from `lib/core`. |
 | `lib/engine/asset/cook_link` | `cook_link.odin` | The cook link's messages, over the transport in `lib/engine/wire` |
 
 The sections below follow the same order: how an asset is identified, how each kind is cooked, how the daemon keeps the cache current and serves the editor, what a blob looks like, and how the runtime loads it.

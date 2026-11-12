@@ -8,6 +8,7 @@ import "core:time"
 
 import "cinnabar:core"
 import "cinnabar:core/layout"
+import "cinnabar:engine/ai"
 import "cinnabar:engine/anim"
 import "cinnabar:engine/asset"
 import "cinnabar:engine/audio"
@@ -37,6 +38,7 @@ game_init :: proc(state: rawptr, platform: ^core.Platform_API, h: Hooks, registe
 	}
 	audio.init(&g.audio, platform, &g.assets)
 	nav.init(&g.nav, platform, &g.assets)
+	ai.init(&g.ai, platform, &g.assets, &g.scripts)
 	register_world(g, h)
 	asset.init(&g.assets, platform, asset.content_source(platform.content_dir))
 	render.renderer_init(&g.renderer, platform, &g.assets, &g.world)
@@ -79,6 +81,8 @@ register_world :: proc(g: ^Game, h: Hooks) {
 	physics.register(&g.physics, w)
 	anim.register(&g.animation, w, &g.assets)
 	sprite.register(&g.sprites, w, &g.assets)
+	// The agents think and act before the paths are found, so a path that an action asks for is solved in the tick.
+	ai.register(&g.ai, w)
 	nav.register(&g.nav, w)
 	if h.register_world != nil {
 		h.register_world(g)
@@ -108,6 +112,8 @@ game_update :: proc(g: ^Game, dt: time.Duration, h: Hooks) -> (keep_running: boo
 	anim.prepare(&g.animation, &g.world)
 	// The scene's navmeshes load with it, and the frame's queries and path requests read them, in every mode.
 	nav.prepare(&g.nav, &g.world)
+	// The agents' blackboards and decisions load before the ticks, so the think jobs only read them.
+	ai.prepare(&g.ai, &g.world)
 	g.frame_step = 0
 	if run {
 		g.elapsed += step
@@ -162,12 +168,13 @@ game_update :: proc(g: ^Game, dt: time.Duration, h: Hooks) -> (keep_running: boo
 	return true
 }
 
-// end_frame lets the frame's animation graphs and navmeshes go, then swaps the blobs that the cooker rewrote, and
+// end_frame lets the frame's animation graphs, navmeshes, blackboards and decisions go, then swaps the blobs that the cooker rewrote, and
 // reloads the scripts among them.
 @(private)
 end_frame :: proc(g: ^Game) {
 	anim.end_frame(&g.animation)
 	nav.end_frame(&g.nav)
+	ai.end_frame(&g.ai)
 	script.reload_changed(&g.scripts, asset.poll(&g.assets))
 }
 
@@ -251,6 +258,7 @@ game_shutdown :: proc(g: ^Game, h: Hooks) {
 	// The sprites give their sheets back to the assets.
 	sprite.destroy(&g.sprites)
 	nav.destroy(&g.nav)
+	ai.destroy(&g.ai)
 	asset.destroy(&g.assets)
 	audio.destroy(&g.audio)
 	physics.destroy(&g.physics)
@@ -267,6 +275,7 @@ game_reload :: proc(g: ^Game, platform: ^core.Platform_API, h: Hooks, register_s
 	physics.reload(&g.physics, platform)
 	audio.reload(&g.audio, platform)
 	nav.reload(&g.nav, platform)
+	ai.reload(&g.ai, platform)
 	register_world(g, h)
 	render.renderer_reload(&g.renderer, platform, &g.world)
 	asset.reload(&g.assets, platform)
