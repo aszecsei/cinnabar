@@ -24,6 +24,8 @@ Light_Tag :: enum c.int {
 	// An asset reference. The payload is one more than the index of its GUID in the runtime's asset_refs, so two
 	// references to one asset are the same value and compare equal.
 	Asset,
+	// The key under which a script action's instance table holds its native handle (see actions.odin).
+	Action_Key,
 }
 
 // The most assets that scripts can refer to at once. A GUID keeps its place for the runtime's life.

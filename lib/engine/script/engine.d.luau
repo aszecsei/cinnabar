@@ -50,6 +50,10 @@ end
 declare extern type FieldSpec with
 end
 
+-- An action's parameter, from Param (see docs/ai/agents.md#script-actions).
+declare extern type ParamSpec with
+end
+
 -- A reference to an asset by its GUID, from a behaviour's Field.asset. Two references to one asset are equal.
 declare extern type Asset with
 	guid: string
@@ -149,6 +153,21 @@ declare Field: {
 -- A class is a table, so its methods can be defined on it. Its instances are untyped for now.
 declare Behaviour: {
 	define: (name: string, fields: { [string]: FieldSpec }?) -> { [any]: any },
+}
+
+declare Param: {
+	number: (default: number?) -> ParamSpec,
+	boolean: (default: boolean?) -> ParamSpec,
+	string: (default: string?) -> ParamSpec,
+	vector: (default: vector?) -> ParamSpec,
+	entity: () -> ParamSpec,
+	position: () -> ParamSpec,
+}
+
+-- An action class, which an agent's decision starts by its name. Its start, tick and stop are methods, and tick returns
+-- "running", "succeeded" or "failed", or nothing for running.
+declare Action: {
+	define: (name: string, params: { [string]: ParamSpec }?) -> { [any]: any },
 }
 
 -- A physics query's hit (see docs/physics/design.md#scripts): the entity whose body it hit, the point, the surface's

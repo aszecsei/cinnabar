@@ -427,6 +427,8 @@ public sealed class ContentBrowserView : DockPanel
         AssetKind.Ui => "UI document",
         AssetKind.SpriteSheet => "sprite sheet",
         AssetKind.NavMesh => "navmesh",
+        AssetKind.Blackboard => "blackboard",
+        AssetKind.Decision => "decision",
         _ => "script",
     };
 

@@ -103,7 +103,7 @@ release_content := release_dir + "/content"
 script_types := obj_dir + "/script-types/cinnabar.d.luau"
 # check, vet and lint take the standard game's package as the release entry point's project collection.
 check_collections := collections + " -collection:project=lib/engine/game/standard"
-packages := "lib/core lib/core/layout lib/core/profile lib/core/jobs lib/core/capture lib/core/gpu lib/core/gpu/null lib/core/gpu/" + gpu_backend + " lib/core/luau lib/core/physics lib/core/physics/host lib/core/physics/null lib/core/physics/jolt lib/core/physics/plugin lib/core/physics/conformance lib/core/audio lib/core/audio/host lib/core/audio/null lib/core/audio/adpcm lib/core/audio/opus lib/core/lz4 lib/core/audio/codec lib/core/audio/mixer lib/core/audio/plugin lib/core/audio/dll lib/core/audio/conformance lib/core/script lib/engine lib/engine/asset lib/engine/asset/format lib/engine/asset/cook_link lib/engine/wire lib/engine/wire/serve lib/engine/wire/servetest lib/engine/render lib/engine/debug lib/engine/ecs lib/engine/script lib/engine/scene lib/engine/volume lib/engine/random lib/engine/nav lib/engine/physics lib/engine/audio lib/engine/anim lib/engine/anim/graph lib/engine/sprite lib/engine/ui lib/engine/project lib/engine/editor lib/engine/editor/link lib/engine/game lib/engine/game/standard/game lib/engine/game/runtime src/host tools/viewer tools/cook tools/cinnabar tools/ltc_fit tools/stbn tools/editorctl samples/mygame/game"
+packages := "lib/core lib/core/layout lib/core/profile lib/core/jobs lib/core/capture lib/core/gpu lib/core/gpu/null lib/core/gpu/" + gpu_backend + " lib/core/luau lib/core/physics lib/core/physics/host lib/core/physics/null lib/core/physics/jolt lib/core/physics/plugin lib/core/physics/conformance lib/core/audio lib/core/audio/host lib/core/audio/null lib/core/audio/adpcm lib/core/audio/opus lib/core/lz4 lib/core/audio/codec lib/core/audio/mixer lib/core/audio/plugin lib/core/audio/dll lib/core/audio/conformance lib/core/script lib/engine lib/engine/asset lib/engine/asset/format lib/engine/asset/cook_link lib/engine/wire lib/engine/wire/serve lib/engine/wire/servetest lib/engine/render lib/engine/debug lib/engine/ecs lib/engine/script lib/engine/scene lib/engine/volume lib/engine/random lib/engine/nav lib/engine/ai lib/engine/physics lib/engine/audio lib/engine/anim lib/engine/anim/graph lib/engine/sprite lib/engine/ui lib/engine/project lib/engine/editor lib/engine/editor/link lib/engine/game lib/engine/game/standard/game lib/engine/game/runtime src/host tools/viewer tools/cook tools/cinnabar tools/ltc_fit tools/stbn tools/editorctl samples/mygame/game"
 
 # =================================
 # Help
@@ -310,7 +310,7 @@ update-compressonator tag="": install-compressonator
 alias b := build
 
 # Build the host and the game DLL, and cook the game's scripts and scenes
-build: host game-dll script-types scripts scenes shaders textures models meshes stages materials effects animation_graphs audio fonts ui sprite_sheets navmeshes
+build: host game-dll script-types scripts scenes shaders textures models meshes stages materials effects animation_graphs audio fonts ui sprite_sheets navmeshes blackboards decisions
 
 # Build the development host
 host: (agility-runtime dev_dir) (fidelityfx-runtime dev_dir) luau jolt opus lz4
@@ -465,6 +465,16 @@ audio config="dev": cook
 # docs/content/kinds/animation-graphs.md#animation-graphs). A graph without a .meta file gets one: commit it.
 animation_graphs config="dev": cook
     "./{{tools_dir}}/cook.exe" animation_graphs --cache "{{ if config == "release" { release_cache } else { cache_dir } }}" --config {{config}} {{roots}}
+
+# Cook the game's blackboards into the loose cache of the configuration (see docs/content/kinds/blackboards.md#blackboards).
+# A blackboard without a .meta file gets one: commit it.
+blackboards config="dev": cook
+    "./{{tools_dir}}/cook.exe" blackboards --cache "{{ if config == "release" { release_cache } else { cache_dir } }}" --config {{config}} {{roots}}
+
+# Cook the game's decisions into the loose cache of the configuration, against their blackboards (see
+# docs/content/kinds/decisions.md#decisions). A decision without a .meta file gets one: commit it.
+decisions config="dev": cook
+    "./{{tools_dir}}/cook.exe" decisions --cache "{{ if config == "release" { release_cache } else { cache_dir } }}" --config {{config}} {{roots}}
 
 # Cook the game's fonts and their atlases into the loose cache of the configuration (see docs/content/kinds/fonts.md#fonts).
 # A font without a .meta file gets one: commit it.
@@ -682,7 +692,7 @@ intel-report: cook
 
 # The cooker's tests compile shaders, so they need DXC.
 test: luau jolt opus lz4 vorbis audio-plugin compressonator meshoptimizer lightusd msdfgen recast link-schema install-dxc
-    for p in lib/core lib/core/testlog lib/core/layout lib/core/profile lib/core/jobs lib/core/capture lib/core/gpu lib/core/gpu/null lib/core/physics lib/core/physics/host lib/core/physics/null lib/core/physics/jolt lib/core/physics/plugin lib/core/audio/host lib/core/audio/null lib/core/audio/adpcm lib/core/audio/codec lib/core/audio/mixer lib/core/audio/plugin lib/core/lz4 lib/core/script lib/engine/asset lib/engine/asset/format lib/engine/asset/cook_link lib/engine/wire lib/engine/wire/serve lib/engine/render lib/engine/debug lib/engine/ecs lib/engine/script lib/engine/scene lib/engine/volume lib/engine/random lib/engine/nav lib/engine/physics lib/engine/audio lib/engine/anim lib/engine/anim/graph lib/engine/sprite lib/engine/ui lib/engine/project lib/engine/editor lib/engine/editor/link lib/engine/game src/host tools/cook tools/cinnabar tools/ltc_fit tools/stbn tools/flickerstat; do odin test "$p" {{collections}} -define:LUAU_VERSION="{{luau_version}}" -define:COMPRESSONATOR_VERSION="{{compressonator_version}}" -define:MESHOPTIMIZER_VERSION="{{meshoptimizer_version}}" -define:LIGHTUSD_VERSION="{{lightusd_version}}" -define:OPUS_VERSION="{{opus_version}}" -define:LZ4_VERSION="{{lz4_version}}" -define:VORBIS_VERSION="{{vorbis_version}}" -define:MSDFGEN_VERSION="{{msdfgen_version}}" -define:RECAST_VERSION="{{recast_version}}" -define:DXC_VERSION="{{dxc_version}}" || exit 1; done
+    for p in lib/core lib/core/testlog lib/core/layout lib/core/profile lib/core/jobs lib/core/capture lib/core/gpu lib/core/gpu/null lib/core/physics lib/core/physics/host lib/core/physics/null lib/core/physics/jolt lib/core/physics/plugin lib/core/audio/host lib/core/audio/null lib/core/audio/adpcm lib/core/audio/codec lib/core/audio/mixer lib/core/audio/plugin lib/core/lz4 lib/core/script lib/engine/asset lib/engine/asset/format lib/engine/asset/cook_link lib/engine/wire lib/engine/wire/serve lib/engine/render lib/engine/debug lib/engine/ecs lib/engine/script lib/engine/scene lib/engine/volume lib/engine/random lib/engine/nav lib/engine/ai lib/engine/physics lib/engine/audio lib/engine/anim lib/engine/anim/graph lib/engine/sprite lib/engine/ui lib/engine/project lib/engine/editor lib/engine/editor/link lib/engine/game src/host tools/cook tools/cinnabar tools/ltc_fit tools/stbn tools/flickerstat; do odin test "$p" {{collections}} -define:LUAU_VERSION="{{luau_version}}" -define:COMPRESSONATOR_VERSION="{{compressonator_version}}" -define:MESHOPTIMIZER_VERSION="{{meshoptimizer_version}}" -define:LIGHTUSD_VERSION="{{lightusd_version}}" -define:OPUS_VERSION="{{opus_version}}" -define:LZ4_VERSION="{{lz4_version}}" -define:VORBIS_VERSION="{{vorbis_version}}" -define:MSDFGEN_VERSION="{{msdfgen_version}}" -define:RECAST_VERSION="{{recast_version}}" -define:DXC_VERSION="{{dxc_version}}" || exit 1; done
     # The optional direct field access path must behave the same (see docs/scripting/embedding.md#direct-field-access).
     odin test lib/engine/script {{collections}} -define:LUAU_DIRECT_ACCESS=true
     # Release builds have no profiler, and everything must still run (see docs/core/profiling.md#builds).

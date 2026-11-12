@@ -68,6 +68,11 @@ waiter_class :: proc(r: ^Runtime, w: ^Waiter) -> profile.Name {
 			return i.profile_class
 		}
 	}
+	if owner, ok := w.owner.(Action_Handle); ok {
+		if a := action_at(r, owner); a != nil {
+			return a.profile_class
+		}
+	}
 	return r.coroutine_name
 }
 

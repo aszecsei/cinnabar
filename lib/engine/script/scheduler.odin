@@ -77,11 +77,12 @@ Waiter_Id :: struct {
 	seq:   u64,
 }
 
-// Waiter_Owner is what started a waiter: a behaviour's start_coroutine, or spawn_script.
+// Waiter_Owner is what started a waiter: a behaviour's or a script action's start_coroutine, or spawn_script.
 @(private)
 Waiter_Owner :: union {
 	Instance_Handle,
 	Main_Script,
+	Action_Handle,
 }
 
 // Waiter is a thread that the scheduler runs: a script from spawn_script, or a behaviour's coroutine.
@@ -271,14 +272,41 @@ stop_waiter :: proc(r: ^Runtime, index: int) {
 	}
 }
 
-// stop_owned stops every coroutine that an instance started.
+// same_owner is whether two owners are the same behaviour, script action or main script.
 @(private)
-stop_owned :: proc(r: ^Runtime, owner: Instance_Handle) {
+same_owner :: proc(a, b: Waiter_Owner) -> bool {
+	switch x in a {
+	case Instance_Handle:
+		y, ok := b.(Instance_Handle)
+		return ok && x == y
+	case Main_Script:
+		y, ok := b.(Main_Script)
+		return ok && x == y
+	case Action_Handle:
+		y, ok := b.(Action_Handle)
+		return ok && x == y
+	}
+	return false
+}
+
+// stop_owned stops every coroutine that a behaviour or a script action started.
+@(private)
+stop_owned :: proc(r: ^Runtime, owner: Waiter_Owner) {
 	for &w, i in r.waiters[:r.waiter_used] {
-		if handle, ok := w.owner.(Instance_Handle); ok && w.status != .Free && handle == owner {
+		if w.status != .Free && same_owner(w.owner, owner) {
 			stop_waiter(r, i)
 		}
 	}
+}
+
+// check_owner is the behaviour or the script action whose instance table is at idx, which raises an error for one that
+// is destroyed or ended.
+@(private)
+check_owner :: proc(r: ^Runtime, L: ^luau.State, idx: c.int) -> Waiter_Owner {
+	if h, ok := action_of(r, L, idx); ok {
+		return h
+	}
+	return handle_of(r, check_instance(r, L, idx))
 }
 
 // stop_waiter_id stops the waiter that id names, if it still lives.
@@ -298,8 +326,8 @@ stop_waiter_id :: proc(r: ^Runtime, id: Waiter_Id) {
 @(private)
 start_coroutine_binding :: proc(L: ^luau.State) -> c.int {
 	r := runtime_of(L)
-	i := check_instance(r, L, 1)
-	if .Active not_in i.flags {
+	owner := check_owner(r, L, 1)
+	if h, is_instance := owner.(Instance_Handle); is_instance && .Active not_in instance_at(r, h).flags {
 		raise(L, "a coroutine cannot start on an inactive entity")
 	}
 	luau.L_checktype(L, 2, .FUNCTION)
@@ -308,7 +336,7 @@ start_coroutine_binding :: proc(L: ^luau.State) -> c.int {
 	for k in 2 ..= top {
 		luau.xpush(L, co, k)
 	}
-	index := add_waiter(r, L, handle_of(r, i))
+	index := add_waiter(r, L, owner)
 	run_waiter(r, index, top - 2)
 	return 1
 }
@@ -316,13 +344,13 @@ start_coroutine_binding :: proc(L: ^luau.State) -> c.int {
 @(private)
 stop_coroutine_binding :: proc(L: ^luau.State) -> c.int {
 	r := runtime_of(L)
-	owner := handle_of(r, check_instance(r, L, 1))
+	owner := check_owner(r, L, 1)
 	co := luau.tothread(L, 2)
 	if co == nil {
 		luau.L_typeerrorL(L, 2, "thread")
 	}
 	for &w, i in r.waiters[:r.waiter_used] {
-		if handle, ok := w.owner.(Instance_Handle); ok && w.status != .Free && w.state == co && handle == owner {
+		if w.status != .Free && w.state == co && same_owner(w.owner, owner) {
 			stop_waiter(r, i)
 		}
 	}

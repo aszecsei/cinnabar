@@ -17,16 +17,17 @@ struct RequireVisitor : Luau::AstVisitor
     void* ud;
     cn_luau_require_fn onRequire;
     cn_luau_error_fn onError;
-    bool definesBehaviour = false;
+    bool definesClass = false;
 
     bool visit(Luau::AstExprCall* call) override
     {
-        // Behaviour.define(...)
+        // Behaviour.define(...) or Action.define(...)
         if (Luau::AstExprIndexName* index = call->func->as<Luau::AstExprIndexName>())
         {
             Luau::AstExprGlobal* object = index->expr->as<Luau::AstExprGlobal>();
-            if (object && strcmp(object->name.value, "Behaviour") == 0 && strcmp(index->index.value, "define") == 0)
-                definesBehaviour = true;
+            if (object && (strcmp(object->name.value, "Behaviour") == 0 || strcmp(object->name.value, "Action") == 0) &&
+                strcmp(index->index.value, "define") == 0)
+                definesClass = true;
         }
 
         Luau::AstExprGlobal* global = call->func->as<Luau::AstExprGlobal>();
@@ -51,13 +52,13 @@ struct RequireVisitor : Luau::AstVisitor
 } // namespace
 
 // cn_luau_find_requires parses source and reports every call to the global require. It returns false if the source
-// does not parse; the errors are reported through onError. definesBehaviour is set if the source calls
-// Behaviour.define, and native if it starts with a --!native comment.
+// does not parse; the errors are reported through onError. definesClass is set if the source calls
+// Behaviour.define or Action.define, and native if it starts with a --!native comment.
 CN_LUAU_API bool cn_luau_find_requires(
-    const char* source, size_t size, void* ud, cn_luau_require_fn onRequire, cn_luau_error_fn onError, bool* definesBehaviour, bool* native
+    const char* source, size_t size, void* ud, cn_luau_require_fn onRequire, cn_luau_error_fn onError, bool* definesClass, bool* native
 )
 {
-    *definesBehaviour = false;
+    *definesClass = false;
     *native = false;
     Luau::Allocator allocator;
     Luau::AstNameTable names(allocator);
@@ -75,7 +76,7 @@ CN_LUAU_API bool cn_luau_find_requires(
     visitor.onRequire = onRequire;
     visitor.onError = onError;
     result.root->visit(&visitor);
-    *definesBehaviour = visitor.definesBehaviour;
+    *definesClass = visitor.definesClass;
     for (const Luau::HotComment& comment : result.hotcomments)
     {
         if (comment.header && comment.content == "native")

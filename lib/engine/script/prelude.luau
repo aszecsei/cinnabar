@@ -1,7 +1,8 @@
 --!strict
--- The engine prelude: Behaviour.define and Field. The runtime runs it once at init, and tools/cook runs it to read the
--- fields of each behaviour, so both see the same classes. native holds the engine's procedures. The cooker's raise an
--- error, because a module's top level must not call into the engine. See docs/scripting/behaviours.md#behaviours.
+-- The engine prelude: Behaviour.define and Field, and Action.define and Param. The runtime runs it once at init, and
+-- tools/cook runs it to read the fields of each behaviour and the parameters of each action, so both see the same
+-- classes. native holds the engine's procedures. The cooker's raise an error, because a module's top level must not
+-- call into the engine. See docs/scripting/behaviours.md#behaviours.
 local native = ...
 
 local Field = {}
@@ -91,4 +92,83 @@ function Behaviour.define(name: string, fields: { [string]: any }?)
 	return class
 end
 
-return table.freeze(Behaviour), table.freeze(Field)
+local Param = {}
+
+local function param(kind: string, default: any)
+	return table.freeze({ __param = kind, default = default })
+end
+
+function Param.number(default: number?)
+	return param("number", default or 0)
+end
+
+function Param.boolean(default: boolean?)
+	return param("boolean", default or false)
+end
+
+function Param.string(default: string?)
+	return param("string", default or "")
+end
+
+function Param.vector(default: vector?)
+	return param("vector", default or vector.zero)
+end
+
+function Param.entity()
+	return param("entity", nil)
+end
+
+function Param.position()
+	return param("position", nil)
+end
+
+-- The names that every action instance has, so an action cannot take them as parameters.
+local ACTION_RESERVED = { entity = true }
+
+-- The action classes that modules have defined, by name: the runtime finds a decision's script actions here (see
+-- docs/ai/agents.md#script-actions). It is not a global, so scripts cannot change it.
+local actions = {}
+
+local Action = {}
+
+-- Action.define makes an action class, which an agent's decision starts by its name: start, tick and stop are its
+-- methods. The first class of a name is the one that is kept, so a module that is loaded again after an edit, whose
+-- class the runtime patches in place, keeps its instances' class.
+function Action.define(name: string, params: { [string]: any }?)
+	if type(name) ~= "string" then
+		error("Action.define takes the action's name first", 2)
+	end
+	local schema = {}
+	for key, spec in params or {} do
+		if type(key) ~= "string" or type(spec) ~= "table" or spec.__param == nil then
+			error(`parameter {key} of {name} needs a Param value, such as Param.number(0)`, 2)
+		end
+		if ACTION_RESERVED[key] then
+			error(`{name} cannot have a parameter named {key}`, 2)
+		end
+		schema[key] = spec
+	end
+
+	local class = {}
+	class.__action = name
+	class.__params = table.freeze(schema)
+	class.__index = function(self, key)
+		local value = rawget(class, key)
+		if value ~= nil then
+			return value
+		end
+		return base[key]
+	end
+	class.__newindex = function(self, key, value)
+		if key == "entity" then
+			error("entity is read-only", 2)
+		end
+		rawset(self, key, value)
+	end
+	if actions[name] == nil then
+		actions[name] = class
+	end
+	return class
+end
+
+return table.freeze(Behaviour), table.freeze(Field), table.freeze(Action), table.freeze(Param), actions

@@ -84,6 +84,8 @@ Unity has two switches, and so does cinnabar:
 - **`on_enable` and `on_disable` always alternate.** Each instance records which of the two its script got last, and a callback runs only when the instance's state differs from that record.
 - **Across a quiet period**, as in the editor's Edit and Paused modes ([Editor](../editor/document-and-scenes.md#modes)), neither callback runs, and the record keeps what the script last got. When quiet ends, `script.set_quiet` sends each instance, in slot order, the callback that it missed: `on_disable` to one that stopped being enabled and active, and `on_enable` to an awake one that became enabled and active. An instance that changed and changed back gets neither. One that has not woken gets `awake` and `on_enable` in the next script phase, as after a native spawn.
 
+Script actions are classes too, which `Action.define` makes, but they are not behaviours: agents' decisions start them by name, and an entity cannot add one ([AI: Agents: Script actions](../ai/agents.md#script-actions)).
+
 ### Coroutines
 
 - `self:start_coroutine(fn, ...)` starts a Luau thread that the instance owns, as in Unity's `StartCoroutine`. It runs until its first wait before `start_coroutine` returns the thread, which `self:stop_coroutine(co)` stops. A destroyed or deactivated entity stops its coroutines. A coroutine that was stopped does not start again when the entity comes back, as in Unity.
@@ -140,7 +142,8 @@ for ecs.next_tick(&ticks) {
 2. Set `Input` for the tick. The first tick of a frame gets the frame's edges and typed text, with those of earlier frames that ran no tick; the others get none, so `Input.was_pressed`, `Input.gamepad_was_pressed` and `Input.text` in `fixed_update` see each press and each character exactly once ([Time](../world/time.md#fixed-and-variable-rate)).
 3. Drain the world's log, then `awake`, `on_enable` and `start` as in the script phase, so an instance's `start` comes before its first `fixed_update`.
 4. `fixed_update` for the classes that define it, in instance slot order.
-5. Deliver the events that it sent, and apply its structural changes.
+5. The fixed hook, which `lib/engine/ai` sets: the script actions start, tick and stop ([AI: Agents: Script actions](../ai/agents.md#script-actions)).
+6. Deliver the events that it sent, and apply its structural changes.
 
 `script.fixed_events`, at the end of the tick: deliver the tick's events, resume the coroutines that wait in `wait_fixed`, in the order they started, deliver what they sent, and apply their structural changes. The tick's physics contacts are delivered here, after `physics.send_events` queues them ([Physics: Events](../physics/design.md#events)).
 

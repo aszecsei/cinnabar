@@ -17,7 +17,7 @@ A script blob holds:
 | Header | The blob header, and flags (`Native`, `Behaviour`) |
 | Bytecode | The output of `luau_compile` |
 | Requires | Sorted pairs of require string and target GUID |
-| Fields | For a behaviour (flag `Behaviour`): the class name, and each field's name, kind and default, sorted by name |
+| Fields | For a behaviour (flag `Behaviour`): the class name, and each field's name, kind and default, sorted by name. For an action (flag `Action`): the action's name, and its parameters in the same records. |
 | Source path | The root's name and the path in the root. Error messages and tracebacks use it as the chunk name. |
 
 A scene blob holds a table of entities: the scene ID, the parent's scene ID, the name, the active flag, and slices of component and behaviour records. A component record has the stable ID and the name. A behaviour record has the script's GUID. Each has a slice of field records: the hash of the field's name, the name for messages, and the tagged value. The loader in `lib/engine/scene` matches the hashes to the fields of the registered types.
@@ -41,6 +41,8 @@ A font blob holds its atlas's GUID and size, its units per em, the atlas's texel
 A sprite sheet blob holds its atlas's GUID, the size that its frames' rectangles are in, its texels to a meter, its filter, its frames (each its rectangle, pivot, duration and name), its animations (each its name, frames, rate and whether it loops), and the source path (see [Sprite sheets](kinds/sprite-sheets.md#the-blob)).
 
 A UI document blob holds its nodes in the order of a walk that visits each before its children (each its element, its parent, the end of its subtree, its line, its id, its attributes and its styles), its styles (each its name, its attributes and its variant for each state), its attributes (each an attribute and its value as text, which the runtime parses as it does a script's), the styles that each node takes, and the source path (see [UI documents](kinds/ui-documents.md#the-blob)).
+
+A blackboard blob holds its keys in slot order (each its name, its name's hash, its type, its offset and its enum's names), the size of an agent's values and their defaults (see [Blackboards](kinds/blackboards.md#the-blob)). A decision blob holds its technique, its blackboard's GUID and key, its nodes, conditions as ops in postfix order, constants, action references with their arguments, blackboard writes, and the technique's own data (see [Decisions](kinds/decisions.md#the-blob)).
 
 The format package has its own enum of texture formats, because it imports nothing from `lib/core/gpu`. The runtime maps it to `gpu.Format`.
 
@@ -98,6 +100,7 @@ The runtime reads an uncompressed blob from the bundle at its offset, as it read
   - An animation's skin, and an animation graph's clips.
   - A font's or a sprite sheet's atlas.
   - A UI document's fonts and images.
+  - A decision's blackboard.
 
   A walk from a level follows these references, but it does not go into another level's scene, which belongs to that level.
 - **The global bundle**, `global.cbb`, holds everything else. Every level's bundle depends on it. It holds:

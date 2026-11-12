@@ -11,7 +11,7 @@ import "core:time"
 import "cinnabar:core/luau"
 import format "cinnabar:engine/asset/format"
 
-// The engine's prelude, which defines Behaviour and Field. The runtime runs the same source.
+// The engine's prelude, which defines Behaviour, Field, Action and Param. The runtime runs the same source.
 PRELUDE :: #load("../../lib/engine/script/prelude.luau", string)
 
 // A behaviour script's top level that runs longer than this at cook time is stopped.
@@ -70,9 +70,13 @@ schema_vm_open :: proc(vm: ^Schema_VM, config: Script_Config, scripts: []Script_
 		}
 	}
 	luau.L_openlibs(L)
-	if !run_chunk(vm, "=cook/natives", COOK_NATIVES, 0, 1) || !run_chunk(vm, "=engine/prelude.luau", PRELUDE, 1, 2) {
+	if !run_chunk(vm, "=cook/natives", COOK_NATIVES, 0, 1) || !run_chunk(vm, "=engine/prelude.luau", PRELUDE, 1, 5) {
 		return false
 	}
+	// The registry of actions, which only the runtime reads.
+	luau.pop(L, 1)
+	luau.setglobal(L, "Param")
+	luau.setglobal(L, "Action")
 	luau.setglobal(L, "Field")
 	luau.setglobal(L, "Behaviour")
 	luau.pushcfunction(L, schema_require, "require")
@@ -108,9 +112,10 @@ run_chunk :: proc(vm: ^Schema_VM, chunkname: cstring, source: string, nargs, nre
 	return true
 }
 
-// read_schema runs a behaviour script's top level and reads the class that it returns. A script that returns no class
-// has no schema, and is not an error.
-read_schema :: proc(vm: ^Schema_VM, index: int) -> (class_name: string, fields: []format.Field_Entry, ok: bool) {
+// read_schema runs a behaviour or action script's top level and reads the class that it returns: a behaviour's name
+// and fields, with the Behaviour flag, or an action's name and parameters, with the Action flag. A script that returns
+// no class has no schema, and is not an error.
+read_schema :: proc(vm: ^Schema_VM, index: int) -> (class_name: string, fields: []format.Field_Entry, flag: Maybe(format.Script_Flag), ok: bool) {
 	L := vm.L
 	s := &vm.scripts[index]
 	top := luau.gettop(L)
@@ -133,24 +138,35 @@ read_schema :: proc(vm: ^Schema_VM, index: int) -> (class_name: string, fields: 
 			s.path,
 			0,
 			0,
-			"a behaviour script's top level runs when it is cooked, so it may only require modules and define classes: %s",
+			"a behaviour or action script's top level runs when it is cooked, so it may only require modules and define classes: %s",
 			message,
 		)
 		return
 	}
-	if luau.gettop(co) == 0 || !luau.istable(co, -1) || luau.rawgetfield(co, -1, "__behaviour") != .STRING {
-		return "", nil, true
+	if luau.gettop(co) == 0 || !luau.istable(co, -1) {
+		return "", nil, nil, true
+	}
+	// A behaviour's fields are __fields of Field specs, and an action's parameters __params of Param specs.
+	kind_key, schema_key: cstring
+	if luau.rawgetfield(co, -1, "__behaviour") == .STRING {
+		flag, schema_key, kind_key = .Behaviour, "__fields", "__field"
+	} else {
+		luau.pop(co, 1)
+		if luau.rawgetfield(co, -1, "__action") != .STRING {
+			return "", nil, nil, true
+		}
+		flag, schema_key, kind_key = .Action, "__params", "__param"
 	}
 	class_name = strings.clone(luau.toodinstring(co, -1), context.temp_allocator)
 	luau.pop(co, 1)
-	luau.rawgetfield(co, -1, "__fields")
+	luau.rawgetfield(co, -1, schema_key)
 	entries := make([dynamic]format.Field_Entry, context.temp_allocator)
 	luau.pushnil(co)
 	for luau.next(co, -2) {
 		entry := format.Field_Entry {
 			name = strings.clone(luau.toodinstring(co, -2), context.temp_allocator),
 		}
-		luau.rawgetfield(co, -1, "__field")
+		luau.rawgetfield(co, -1, kind_key)
 		kind := luau.toodinstring(co, -1)
 		luau.rawgetfield(co, -2, "default")
 		switch kind {
@@ -168,6 +184,8 @@ read_schema :: proc(vm: ^Schema_VM, index: int) -> (class_name: string, fields: 
 			entry.vector = luau.tovector(co, -1)^
 		case "entity":
 			entry.kind = .Entity
+		case "position":
+			entry.kind = .Position
 		case "asset":
 			entry.kind = .Asset
 			luau.rawgetfield(co, -3, "kind")
@@ -178,7 +196,7 @@ read_schema :: proc(vm: ^Schema_VM, index: int) -> (class_name: string, fields: 
 		luau.pop(co, 3)
 	}
 	slice.sort_by(entries[:], proc(a, b: format.Field_Entry) -> bool {return a.name < b.name})
-	return class_name, entries[:], true
+	return class_name, entries[:], flag, true
 }
 
 // schema_require loads a module for a behaviour script's top level, as the runtime's require does: by the requires

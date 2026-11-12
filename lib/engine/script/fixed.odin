@@ -9,8 +9,8 @@ import "cinnabar:core/profile"
 import "cinnabar:engine/ecs"
 
 // fixed_update is the scripts' step in a fixed tick, after the Fixed systems: Time and Input for the tick, the world's
-// changes, awake and start, fixed_update for the classes that define it, the events that it sent, and its structural
-// changes. Call it in each tick that ecs.next_tick starts, with the frame's input; only the first tick of a frame gets
+// changes, awake and start, fixed_update for the classes that define it, the fixed hook, which runs the script actions,
+// the events that it sent, and its structural changes. Call it in each tick that ecs.next_tick starts, with the frame's input; only the first tick of a frame gets
 // the input edges, with those of the frames before it that ran no tick. See
 // docs/physics/design.md#scripts-in-fixed-ticks.
 fixed_update :: proc(r: ^Runtime, ticks: ^ecs.Ticks, input: core.Input) {
@@ -54,6 +54,7 @@ fixed_update :: proc(r: ^Runtime, ticks: ^ecs.Ticks, input: core.Input) {
 		}
 	}
 	profile.end(p)
+	run_fixed_hook(r)
 	deliver_events(r)
 	end_fixed(r)
 }

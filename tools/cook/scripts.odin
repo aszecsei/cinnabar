@@ -42,8 +42,9 @@ Script_Source :: struct {
 	meta:      format.Meta,
 	source:    []byte,
 	requires:  [dynamic]Found_Require,
-	// The source calls Behaviour.define, so the cooker runs its top level to read the fields.
-	defines_behaviour: bool,
+	// The source calls Behaviour.define or Action.define, so the cooker runs its top level to read the fields or the
+	// parameters.
+	defines_class:     bool,
 	// The source starts with --!native.
 	native_comment:    bool,
 	// The resolved requires, sorted by path.
@@ -145,7 +146,8 @@ cook_scripts :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass)
 		}
 		class_name: string
 		fields: []format.Field_Entry
-		if s.defines_behaviour {
+		class_flag: Maybe(format.Script_Flag)
+		if s.defines_class {
 			if vm_state == .Closed {
 				vm_state = .Open if schema_vm_open(&vm, options.config, scripts, problems) else .Broken
 			}
@@ -156,19 +158,21 @@ cook_scripts :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass)
 				continue
 			}
 			schema_ok: bool
-			class_name, fields, schema_ok = read_schema(&vm, index)
+			class_name, fields, class_flag, schema_ok = read_schema(&vm, index)
 			if !schema_ok {
 				settle(pass, s.asset, .Failed)
 				ok = false
 				continue
 			}
 		}
-		if !compile_script(options.config, s, key, output, class_name, fields, problems) {
+		if !compile_script(options.config, s, key, output, class_name, fields, class_flag, problems) {
 			settle(pass, s.asset, .Failed)
 			ok = false
 			continue
 		}
-		s.behaviour = class_name
+		if class_flag == .Behaviour {
+			s.behaviour = class_name
+		}
 		settle(pass, s.asset, .Cooked)
 	}
 	return ok
@@ -258,7 +262,7 @@ find_requires :: proc(s: ^Script_Source, problems: ^Problems) -> bool {
 		f.failed = true
 	}
 	f := Find_Context{ctx = context, script = s, problems = problems}
-	cn_luau_find_requires(raw_data(s.source), c.size_t(len(s.source)), &f, on_require, on_error, &s.defines_behaviour, &s.native_comment)
+	cn_luau_find_requires(raw_data(s.source), c.size_t(len(s.source)), &f, on_require, on_error, &s.defines_class, &s.native_comment)
 	return !f.failed
 }
 
@@ -451,7 +455,16 @@ cooked_script :: proc(output: string) -> (key: u64, behaviour: string) {
 }
 
 // compile_script compiles a script and writes its blob.
-compile_script :: proc(config: Script_Config, s: Script_Source, key: u64, output: string, class_name: string, fields: []format.Field_Entry, problems: ^Problems) -> bool {
+compile_script :: proc(
+	config: Script_Config,
+	s: Script_Source,
+	key: u64,
+	output: string,
+	class_name: string,
+	fields: []format.Field_Entry,
+	class_flag: Maybe(format.Script_Flag),
+	problems: ^Problems,
+) -> bool {
 	bytecode := compile_source(config, string(s.source))
 	defer luau.free_bytecode(raw_data(bytecode))
 	// Failed compilation gives a zero byte and the message.
@@ -480,8 +493,8 @@ compile_script :: proc(config: Script_Config, s: Script_Source, key: u64, output
 	if native, _ := format.meta_value(s.meta, "native"); native == "true" || s.native_comment {
 		flags += {.Native}
 	}
-	if class_name != "" {
-		flags += {.Behaviour}
+	if flag, has := class_flag.?; has {
+		flags += {flag}
 	}
 	blob := format.script_write(
 		{

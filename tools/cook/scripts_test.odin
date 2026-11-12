@@ -351,6 +351,49 @@ return Door`},
 }
 
 @(test)
+actions_get_their_parameters_in_the_blob :: proc(t: ^testing.T) {
+	tree := make_tree(
+		t,
+		{
+			{"content/bark.luau", `
+local Bark = Action.define("bark", {
+	line = Param.string("hey"),
+	loud = Param.boolean(),
+	at = Param.entity(),
+	toward = Param.position(),
+})
+function Bark:tick(dt) return "succeeded" end
+return Bark`},
+		},
+	)
+	defer remove_tree(tree)
+	options := tree_options(tree)
+	pass := cook(options, {.Script})
+	testing.expect(t, pass.ok)
+	data := tree_blob(t, tree, tree_guid(t, tree, "bark.luau"))
+	blob, ok := format.script_view(data)
+	testing.expect(t, ok)
+	if !ok {
+		return
+	}
+	// An action is not a behaviour, so the editor does not offer it as one.
+	testing.expect_value(t, blob.flags, format.Script_Flags{.Action})
+	testing.expect_value(t, format.blob_string(data, blob.class_name), "bark")
+	for a in pass.assets {
+		testing.expect_value(t, a.behaviour, "")
+	}
+	params := format.script_fields(data, blob)
+	testing.expect_value(t, len(params), 4)
+	if len(params) == 4 {
+		// Sorted by name: at, line, loud, toward.
+		testing.expect_value(t, params[0].kind, format.Script_Field_Kind.Entity)
+		testing.expect_value(t, format.blob_string(data, params[1].text), "hey")
+		testing.expect_value(t, params[2].kind, format.Script_Field_Kind.Boolean)
+		testing.expect_value(t, params[3].kind, format.Script_Field_Kind.Position)
+	}
+}
+
+@(test)
 a_behaviour_top_level_that_calls_the_engine_is_an_error :: proc(t: ^testing.T) {
 	tree := make_tree(
 		t,
@@ -364,7 +407,7 @@ a_behaviour_top_level_that_calls_the_engine_is_an_error :: proc(t: ^testing.T) {
 	context.logger = capture_errors(&errors)
 	defer release_errors(&errors)
 	testing.expect(t, !cook(tree_options(tree), {.Script}).ok)
-	expect_error(t, &errors, "eager.luau: a behaviour script's top level runs when it is cooked")
+	expect_error(t, &errors, "eager.luau: a behaviour or action script's top level runs when it is cooked")
 	expect_error(t, &errors, "game/eager.luau:1: World is not available when the cooker reads a behaviour's fields")
 	expect_error(t, &errors, "the top level ran for more than 2 seconds")
 }

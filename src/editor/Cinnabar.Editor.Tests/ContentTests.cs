@@ -107,6 +107,20 @@ public sealed class ContentTests : IDisposable
     }
 
     [Fact]
+    public void BlackboardsAndDecisionsAreScriptsThatOpenAsText()
+    {
+        using var shell = NewShell();
+        foreach (var (kind, file) in new[] { (AssetKind.Blackboard, "guard.blackboard"), (AssetKind.Decision, "guard.decision") })
+        {
+            // They are among the scripts in the content browser, and open in the script editor.
+            Assert.Equal(ContentKind.Scripts, ContentBrowserModel.KindOf(kind));
+            var asset = TestAssets.Make("44445555666677778888999900002222", kind, file);
+            Assert.True(EditorShell.CanOpen(asset));
+            Assert.Equal("Open in Script Editor", shell.OpenLabel(asset));
+        }
+    }
+
+    [Fact]
     public void AnImportSettingAtItsDefaultLeavesTheMetaFile()
     {
         Setting[] settings = [new("old", "1"), new("native", "true"), new("last", "2")];
