@@ -211,6 +211,9 @@ cook :: proc(
 	if .Decision in kinds {
 		pass.ok = cook_decisions(options, pass.assets, &pass) && pass.ok
 	}
+	if .Perception in kinds {
+		pass.ok = cook_perceptions(options, pass.assets, &pass) && pass.ok
+	}
 	if .Audio in kinds {
 		pass.ok = cook_audio(options, pass.assets, &pass) && pass.ok
 	}

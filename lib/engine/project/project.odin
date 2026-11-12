@@ -11,6 +11,7 @@ import "core:strings"
 
 import "cinnabar:core"
 import "cinnabar:core/gpu"
+import "cinnabar:engine/ai"
 import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/audio"
 import "cinnabar:engine/physics"
@@ -34,6 +35,8 @@ PHYSICS_BACKEND_KEY :: "physics.backend"
 AUDIO_BACKEND_KEY :: "audio.backend"
 // The buses that sounds mix into, besides Master (see docs/audio/design.md#buses-and-effects).
 AUDIO_BUSES_KEY :: "audio.buses"
+// The tags that perceivers notice, in order (see docs/ai/perception.md#tags).
+PERCEPTION_TAGS_KEY :: "perception.tags"
 // What multiplies the UI's scale, which the output's height gives (see docs/ui/design.md#scale).
 UI_SCALE_KEY :: "ui.scale"
 // The game's name, which a release's executable and window take, and its icon, a .ico file relative to the settings
@@ -66,6 +69,8 @@ Settings :: struct {
 	physics_layers:        physics.Layers,
 	// The audio buses besides Master.
 	audio_buses:           audio.Bus_Names,
+	// The perception tags, which Perceivables' tags index.
+	perception_tags:       ai.Tag_Names,
 	// What multiplies the UI's scale, or 0 for 1.
 	ui_scale:              f32,
 	// The scene that the game starts with, or zero for none.
@@ -258,6 +263,21 @@ parse :: proc(text: string, settings: ^Settings, problems: ^[dynamic]string = ni
 			}
 			if ok {
 				settings.audio_buses = buses
+			}
+			continue
+		}
+		if key == PERCEPTION_TAGS_KEY {
+			tags: ai.Tag_Names
+			ok := true
+			for part in strings.split(value, ",", context.temp_allocator) {
+				name := strings.trim_space(part)
+				if !ai.add_tag_name(&tags, name) {
+					problem(problems, line, "%s: %q is empty, longer than %d, given twice, or past %d tags", key, name, ai.MAX_TAG_NAME, ai.MAX_TAGS)
+					ok = false
+				}
+			}
+			if ok {
+				settings.perception_tags = tags
 			}
 			continue
 		}

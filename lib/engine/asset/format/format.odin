@@ -272,6 +272,8 @@ Asset_Kind :: enum u32 {
 	Blackboard,
 	// The conditions, actions and blackboard writes of an agent's decision, and the part that its technique reads.
 	Decision,
+	// The tags that an agent's Perceiver notices, and the rows that fill its blackboard's keys from what it perceives.
+	Perception,
 }
 
 // Slice is a range of a blob, in bytes from the blob's start.

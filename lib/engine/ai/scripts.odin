@@ -8,8 +8,8 @@ import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/ecs"
 import "cinnabar:engine/script"
 
-// The Blackboard and Agent libraries (see docs/ai/agents.md#scripts). Scripts act and write the blackboard; they do
-// not decide. Their writes apply at once, since the script steps are serial, and a write to an agent that is not ready
+// The Blackboard, Agent and Perception libraries (see docs/ai/agents.md#scripts and docs/ai/perception.md#scripts).
+// Scripts act, write the blackboard and make noises; they do not decide. Their writes apply at once, since the script steps are serial, and a write to an agent that is not ready
 // yet, as an awake's is, applies when it is.
 
 @(private = "file")
@@ -132,6 +132,21 @@ register_scripts :: proc(r: ^script.Runtime, s: ^State) {
 		}
 		return 1
 	}, "(entity: Entity) -> string?")
+	script.define(r, "Perception.noise", proc(L: ^luau.State) -> c.int {
+		s := state_of(L)
+		position := script.check_position(L, 1)
+		loudness := f32(luau.L_checknumber(L, 2))
+		tag := string(luau.L_checkstring(L, 3))
+		source: ecs.Entity
+		if !luau.isnoneornil(L, 4) {
+			source = script.check_entity(L, 4)
+		}
+		if _, found := tag_index(s.tags, tag); !found {
+			script.raise(L, fmt.tprintf("there is no tag %q: perception.tags names the project's", tag))
+		}
+		noise(s, position, loudness, tag, source)
+		return 0
+	}, "(position: WorldPosition, loudness: number, tag: string, source: Entity?) -> ()")
 }
 
 // current_action is the name of the action that an agent runs or starts, or "".

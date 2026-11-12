@@ -3,6 +3,7 @@ package editor
 import "core:math"
 import "core:math/linalg"
 
+import "cinnabar:engine/ai"
 import "cinnabar:engine/asset"
 import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/debug"
@@ -17,7 +18,8 @@ import "cinnabar:engine/volume"
 // The viewport's helpers (see docs/editor/viewport.md#viewport): the shapes of lights, volumes, reflection probes and cameras,
 // as debug lines, for the selection or for every entity, as Viewport_Settings.helpers says. A selected navigation
 // volume draws its navmeshes, and the Navigation Path tool's points draw the paths between them (see
-// docs/ai/navigation.md#drawing).
+// docs/ai/navigation.md#drawing). A selected perceiver draws its cone, and while the game plays, its last rays and what
+// it remembers (see docs/ai/perception.md#drawing).
 
 // A helper of an entity that is not selected is grey and faint. A selected light's is its color, made bright.
 @(private = "file")
@@ -54,13 +56,46 @@ FRUSTUM_ASPECT :: 16.0 / 9.0
 PROBE_COLOR :: [4]f32{1, 1, 1, 1}
 @(private = "file")
 PROBE_RADIUS :: 0.08
+// A perceiver's cone, the rays of its last sight check, clear and blocked, and the last positions of what it remembers:
+// seen now, heard now, and neither, as small spheres.
+@(private = "file")
+CONE_COLOR :: [4]f32{1, 0.55, 0.2, 1}
+@(private = "file")
+RAY_CLEAR :: [4]f32{0.3, 1, 0.3, 1}
+@(private = "file")
+RAY_BLOCKED :: [4]f32{1, 0.25, 0.25, 1}
+@(private = "file")
+SEEN_COLOR :: [4]f32{0.3, 1, 0.3, 1}
+@(private = "file")
+HEARD_COLOR :: [4]f32{1, 0.9, 0.3, 1}
+@(private = "file")
+REMEMBERED_COLOR :: [4]f32{0.6, 0.6, 0.6, 1}
+@(private = "file")
+MEMORY_RADIUS :: 0.15
 
 // draw_helpers draws the helpers of this frame into d, while a linked editor is in Edit. Call it before the frame draws
-// d's lines. Hidden entities have none, and Play and Paused have none. The lines are the frame's, which every scene view
-// draws, so the open scene view with the lowest number chooses them for all, and with none open there are none.
+// d's lines. Hidden entities have none. In Play and Paused, only the selected perceivers draw, with what they perceive.
+// The lines are the frame's, which every scene view draws, so the open scene view with the lowest number chooses them
+// for all, and with none open there are none.
 draw_helpers :: proc(e: ^Editor, w: ^ecs.World, d: ^debug.Draw) {
 	index, has_scene_view := scene_viewport(e)
-	if !editing(e) || !has_scene_view {
+	if !active(e) || !has_scene_view {
+		return
+	}
+	if !editing(e) {
+		if e.session.view.viewports[index].settings.helpers == .None {
+			return
+		}
+		for entity in e.session.view.selection {
+			if !ecs.is_alive(w, entity) {
+				continue
+			}
+			if p := ecs.get(w, entity, ai.Perceiver); p != nil {
+				if pose, ok := ecs.presented(w, entity); ok {
+					draw_perceiver(e, d, entity, p^, pose)
+				}
+			}
+		}
 		return
 	}
 	draw_nav_probe(e, d)
@@ -113,6 +148,41 @@ draw_probe_path :: proc(e: ^Editor, d: ^debug.Draw, start, goal: ecs.World_Posit
 		color.a *= 0.4
 	}
 	nav.draw_corners(d, path.corners, color)
+}
+
+// draw_perceiver draws a perceiver's cone from its eye: the circle at its range and four edges, or a sphere for a cone
+// wider than a half sphere. While the game plays, it draws the rays of its last sight check and the last positions of
+// what it remembers too.
+@(private = "file")
+draw_perceiver :: proc(e: ^Editor, d: ^debug.Draw, entity: ecs.Entity, p: ai.Perceiver, pose: ecs.Transform) {
+	eye, forward := ai.eye_of(p, pose)
+	right := linalg.normalize0(linalg.quaternion128_mul_vector3(pose.rotation, [3]f32{1, 0, 0}))
+	up := linalg.normalize0(linalg.quaternion128_mul_vector3(pose.rotation, [3]f32{0, 1, 0}))
+	reach := max(p.sight_range, 0)
+	half := math.to_radians(clamp(p.half_angle, 0, 180))
+	if half >= math.PI / 2 {
+		debug.sphere(d, eye, reach, CONE_COLOR)
+	} else {
+		end := ecs.position_offset(eye, forward * reach * math.cos(half))
+		radius := reach * math.sin(half)
+		debug.circle(d, end, right, up, radius, CONE_COLOR)
+		for k in 0 ..< 4 {
+			angle := f32(k) * math.PI / 2
+			edge := (right * math.cos(angle) + up * math.sin(angle)) * radius
+			debug.line(d, eye, ecs.position_offset(end, edge), CONE_COLOR)
+		}
+	}
+	m := ai.perception_debug(e.ai, entity) if e.ai != nil else nil
+	if m == nil {
+		return
+	}
+	for r in m.rays[:m.ray_count] {
+		debug.line(d, m.eye, r.to, RAY_BLOCKED if r.blocked else RAY_CLEAR)
+	}
+	for entry in m.entries[:m.count] {
+		color := SEEN_COLOR if entry.seen else HEARD_COLOR if entry.heard else REMEMBERED_COLOR
+		debug.sphere(d, entry.position, MEMORY_RADIUS, color)
+	}
 }
 
 @(private = "file")
@@ -213,6 +283,9 @@ draw_entity_helpers :: proc(e: ^Editor, w: ^ecs.World, d: ^debug.Draw, entity: e
 		if np := ecs.get(w, entity, nav.Nav_Path); np != nil && len(probe) == 2 {
 			draw_probe_path(e, d, pose.position, probe[1], np.agent)
 		}
+	}
+	if p := ecs.get(w, entity, ai.Perceiver); p != nil && selected {
+		draw_perceiver(e, d, entity, p^, pose)
 	}
 	if j, _, ok := physics.joint_of(w, entity); ok {
 		draw_joint(w, d, j^, pose, selected)

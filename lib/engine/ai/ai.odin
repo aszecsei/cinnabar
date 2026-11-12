@@ -11,10 +11,11 @@ import "cinnabar:core"
 import "cinnabar:engine/asset"
 import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/ecs"
+import "cinnabar:engine/physics"
 import "cinnabar:engine/script"
 
 // The AI components' stable IDs, in the AI's range, 128 to 143 (see docs/world/ecs.md#component-registry). nav has
-// 128 and 129.
+// 128 and 129, and perception 132 and 133.
 AGENT_ID :: ecs.Component_Id(130)
 AGENT_STATE_ID :: ecs.Component_Id(131)
 
@@ -104,52 +105,69 @@ Loaded :: struct {
 // View is a loaded blob that checks, in the frame.
 @(private)
 View :: struct {
-	guid:     format.Guid,
-	board:    Board,
-	decision: Decision,
+	guid:       format.Guid,
+	board:      Board,
+	decision:   Decision,
+	perception: Perception,
 }
 
 // State is the AI's state in Game_State: the agents' pool, the blobs that they use and the frame's views of them, the
-// actions that are to stop, and the registrations of native actions and decision modules, which register clears. It
-// holds handles and plain data only, besides the registrations, so a code reload keeps it.
+// actions that are to stop, the noises and perception events of the tick, and the registrations of native actions and
+// decision modules, which register clears. It holds handles and plain data only, besides the registrations, so a code
+// reload keeps it.
 State :: struct {
-	platform:      ^core.Platform_API,
-	assets:        ^asset.Assets,
-	// The world and the script runtime live in Game_State too, so the pointers stay valid across reloads.
-	world:         ^ecs.World,
-	scripts:       ^script.Runtime,
-	agents:        Agent_Pool,
-	loaded:        [dynamic]Loaded,
+	platform:       ^core.Platform_API,
+	assets:         ^asset.Assets,
+	// The world, the script runtime and physics live in Game_State too, so the pointers stay valid across reloads.
+	world:          ^ecs.World,
+	scripts:        ^script.Runtime,
+	// The physics that sight and hearing cast their rays in, nil for none, where every ray misses.
+	physics:        ^physics.State,
+	agents:         Agent_Pool,
+	loaded:         [dynamic]Loaded,
 	// The loaded blobs that check, in frame memory, from prepare to end_frame, and nil between frames.
-	frame:         []View,
+	frame:          []View,
 	// Actions that were replaced or whose agents went, which their system stops: the natives in the next tick's ai think,
 	// the scripts in this tick's script step.
-	ending_native: [dynamic]Ending,
-	ending_script: [dynamic]Ending,
+	ending_native:  [dynamic]Ending,
+	ending_script:  [dynamic]Ending,
 	// Writes to agents that were not ready, by name, which apply when each is (see Blackboard.set).
-	early:         [dynamic]Command,
+	early:          [dynamic]Command,
 	// The agents that think in a tick.
-	budget:        int,
+	budget:         int,
+	// The project's perception.tags, the sight rays of a tick, and the slot of the perceiver that was visited last.
+	tags:           Tag_Names,
+	sight_budget:   int,
+	sight_cursor:   i64,
+	// The noises made since the last perception, which it hears, and those that it hears in this tick.
+	noises_pending: [dynamic]Noise,
+	noises:         [dynamic]Noise,
+	// What the tick's perception found, which send_events gives the behaviours.
+	events:         [dynamic]Perception_Event,
 	// Registrations, which register clears: native actions, and each technique's module.
-	natives:       [MAX_NATIVE_ACTIONS]Native_Action,
-	native_params: [MAX_NATIVE_ACTIONS][MAX_ACTION_PARAMS]Param,
-	native_count:  int,
-	modules:       [format.Decision_Technique]Module,
-	job_commands:  ecs.Job_Buffer,
-	new_agents:    ecs.Query,
-	states:        ecs.Query,
+	natives:        [MAX_NATIVE_ACTIONS]Native_Action,
+	native_params:  [MAX_NATIVE_ACTIONS][MAX_ACTION_PARAMS]Param,
+	native_count:   int,
+	modules:        [format.Decision_Technique]Module,
+	job_commands:   ecs.Job_Buffer,
+	new_agents:     ecs.Query,
+	states:         ecs.Query,
+	perceivables:   ecs.Query,
 }
 
-// register_components registers Agent and Agent_State. Call it with the engine's components, in init and on_reload.
+// register_components registers Agent, Agent_State, Perceiver and Perceivable. Call it with the engine's components,
+// in init and on_reload.
 register_components :: proc(r: ^ecs.Registry) {
 	ecs.register_component(r, Agent, AGENT_ID, DEFAULT_AGENT)
 	ecs.register_component(r, Agent_State, AGENT_STATE_ID)
+	ecs.register_component(r, Perceiver, PERCEIVER_ID, DEFAULT_PERCEIVER)
+	ecs.register_component(r, Perceivable, PERCEIVABLE_ID, DEFAULT_PERCEIVABLE)
 }
 
-// init makes the state's lists. scripts is the runtime that runs the script actions, nil for none. Call it once, before
-// register.
-init :: proc(s: ^State, platform: ^core.Platform_API, assets: ^asset.Assets, scripts: ^script.Runtime = nil) {
-	s.platform, s.assets, s.scripts = platform, assets, scripts
+// init makes the state's lists. scripts is the runtime that runs the script actions, and physics the one that sight and
+// hearing cast rays in, nil for none. Call it once, before register.
+init :: proc(s: ^State, platform: ^core.Platform_API, assets: ^asset.Assets, scripts: ^script.Runtime = nil, physics: ^physics.State = nil) {
+	s.platform, s.assets, s.scripts, s.physics = platform, assets, scripts, physics
 	heap := platform.heap_allocator
 	s.agents = {
 		slots       = make([dynamic]Agent_Slot, heap),
@@ -161,6 +179,11 @@ init :: proc(s: ^State, platform: ^core.Platform_API, assets: ^asset.Assets, scr
 	s.ending_script = make([dynamic]Ending, heap)
 	s.early = make([dynamic]Command, heap)
 	s.budget = DEFAULT_THINK_BUDGET
+	s.sight_budget = DEFAULT_SIGHT_BUDGET
+	s.sight_cursor = -1
+	s.noises_pending = make([dynamic]Noise, heap)
+	s.noises = make([dynamic]Noise, heap)
+	s.events = make([dynamic]Perception_Event, heap)
 }
 
 // register makes the queries, the commands' job buffer and the systems, and clears the native actions and the modules,
@@ -173,8 +196,22 @@ register :: proc(s: ^State, w: ^ecs.World) {
 	s.modules = {}
 	s.new_agents = ecs.query(w, {ecs.read(w, Agent), ecs.without(w, Agent_State)})
 	s.states = ecs.query(w, {ecs.read(w, Agent_State)})
+	s.perceivables = ecs.query(w, {ecs.read(w, Perceivable), ecs.read(w, ecs.Transform)})
 	s.job_commands = ecs.register_job_buffer(w, {name = "ai commands", user = s, make = make_job_commands, flush = flush_job_commands})
-	ecs.register_system(w, {name = "ai think", stage = .Fixed, procedure = think_system, reads = {AGENT_ID, ecs.TRANSFORM_ID}, writes = {AGENT_STATE_ID}, data = s})
+	ecs.register_system(
+		w,
+		{
+			name = "ai perceive",
+			stage = .Fixed,
+			procedure = perceive_system,
+			reads = {AGENT_ID, AGENT_STATE_ID, PERCEIVER_ID, PERCEIVABLE_ID, ecs.TRANSFORM_ID, physics.PHYSICS_BODY_ID, physics.PHYSICS_CHARACTER_ID},
+			data = s,
+		},
+	)
+	ecs.register_system(
+		w,
+		{name = "ai think", stage = .Fixed, procedure = think_system, reads = {AGENT_ID, ecs.TRANSFORM_ID}, writes = {AGENT_STATE_ID}, after = {"ai perceive"}, data = s},
+	)
 	ecs.register_system(
 		w,
 		{
@@ -216,6 +253,9 @@ destroy :: proc(s: ^State) {
 	delete(s.ending_native)
 	delete(s.ending_script)
 	delete(s.early)
+	delete(s.noises_pending)
+	delete(s.noises)
+	delete(s.events)
 	s.frame = nil
 }
 
@@ -254,9 +294,15 @@ prepare :: proc(s: ^State, w: ^ecs.World) {
 		append(&s.loaded, Loaded{guid = guid, used = true})
 	}
 	for &slot in s.agents.slots {
-		if slot.phase != nil {
-			use(s, slot.blackboard)
-			use(s, slot.decision)
+		if slot.phase == nil {
+			continue
+		}
+		use(s, slot.blackboard)
+		use(s, slot.decision)
+		if ecs.is_alive(w, slot.entity) {
+			if perceiver := ecs.get(w, slot.entity, Perceiver); perceiver != nil {
+				use(s, perceiver.perception)
+			}
 		}
 	}
 	generation := s.assets.cache_generation
@@ -300,17 +346,23 @@ prepare :: proc(s: ^State, w: ^ecs.World) {
 		} else if header != nil && header.kind == .Decision {
 			view.decision.blob, valid = format.decision_view(data)
 			view.decision.data = data
+		} else if header != nil && header.kind == .Perception {
+			view.perception.blob, valid = format.perception_view(data)
+			view.perception.data = data
 		}
 		first := l.checked != version
 		l.checked = version
 		if !valid {
 			if first {
-				log.warnf("ai: %s is not a blackboard or a decision blob of this build. Cook the content.", guid_text(l.guid))
+				log.warnf("ai: %s is not a blackboard, decision or perception blob of this build. Cook the content.", guid_text(l.guid))
 			}
 			continue
 		}
 		if view.decision.blob != nil && first {
 			check_actions(s, view.decision)
+		}
+		if view.perception.blob != nil {
+			resolve_tags(s, &view.perception, first, w.platform.frame_allocator)
 		}
 		append(&views, view)
 	}

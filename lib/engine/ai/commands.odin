@@ -19,6 +19,9 @@ Command_Kind :: enum u8 {
 	Write_Named,
 	Start,
 	Stop,
+	// A noise for perception: its source in entity, its position in value, its tag's hash in key, and its loudness in
+	// amount.
+	Noise,
 }
 
 // Command is a command to an agent. agent is its slot when a decision or an action gave it, so a command for a slot
@@ -32,6 +35,8 @@ Command :: struct {
 	key:    u32,
 	// A Start's action reference.
 	ref:    u32,
+	// A Noise's loudness.
+	amount: f32,
 	value:  [format.BLACKBOARD_VALUE_SIZE]byte,
 }
 
@@ -180,6 +185,10 @@ flush_job_commands :: proc(user: rawptr, buffers: []rawptr) {
 @(private)
 apply :: proc(s: ^State, c: Command) {
 	w := s.world
+	if c.kind == .Noise {
+		apply_noise(s, c)
+		return
+	}
 	slot: ^Agent_Slot
 	if c.agent != {} {
 		slot = slot_of(s, c.agent)
@@ -212,6 +221,7 @@ apply :: proc(s: ^State, c: Command) {
 		start_ref(s, slot, ready, c.ref)
 	case .Stop:
 		set_action(s, slot.entity, ready, nil)
+	case .Noise:
 	}
 }
 

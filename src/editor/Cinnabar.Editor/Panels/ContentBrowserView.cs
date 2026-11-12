@@ -429,6 +429,7 @@ public sealed class ContentBrowserView : DockPanel
         AssetKind.NavMesh => "navmesh",
         AssetKind.Blackboard => "blackboard",
         AssetKind.Decision => "decision",
+        AssetKind.Perception => "perception",
         _ => "script",
     };
 

@@ -6,6 +6,7 @@ import "core:mem/virtual"
 import "core:testing"
 
 import "cinnabar:core"
+import "cinnabar:engine/ai"
 import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/debug"
 import "cinnabar:engine/ecs"
@@ -50,6 +51,7 @@ helper_setup :: proc(t: ^testing.T) -> ^Helper_Fixture {
 	render.register_components(&f.world.registry)
 	scene.register_components(&f.world.registry)
 	nav.register_components(&f.world.registry)
+	ai.register_components(&f.world.registry)
 	init(&f.editor, &f.platform, nil, navigation = &f.nav)
 	debug.init(&f.lines, runtime.heap_allocator())
 	// Linked, as an editor's first poll makes it, with a scene view open, whose settings choose the helpers.
@@ -332,4 +334,62 @@ the_nav_probe_draws_paths :: proc(t: ^testing.T) {
 	ecs.get_write(&f.world, agent, ecs.Transform).position = ecs.position_from_meters({0.5, 0, 0.5})
 	append(&f.editor.session.view.selection, agent)
 	testing.expect_value(t, line_count(f), spheres + 5)
+}
+
+// A selected perceiver draws its cone in Edit: the circle at its range and its four edges, or a sphere for a cone wider
+// than a half sphere. One that is not selected draws none.
+@(test)
+a_selected_perceiver_draws_its_cone :: proc(t: ^testing.T) {
+	when !debug.DEBUG_DRAW {
+		return
+	}
+	f := helper_setup(t)
+	defer helper_teardown(f)
+	f.editor.session.view.viewports[0].settings.helpers = .All
+	e := spawn_with(f, ai.DEFAULT_PERCEIVER)
+	testing.expect_value(t, line_count(f), 0)
+	append(&f.editor.session.view.selection, e)
+	testing.expect_value(t, line_count(f), debug.CIRCLE_SEGMENTS + 4)
+	ecs.get_write(&f.world, e, ai.Perceiver).half_angle = 120
+	testing.expect_value(t, line_count(f), 3 * debug.CIRCLE_SEGMENTS)
+}
+
+// While the game plays, a selected perceiver draws its cone, the rays of its last sight check and what it remembers,
+// and no other helper draws. One that is not selected draws nothing.
+@(test)
+a_playing_perceiver_draws_its_rays_and_memory :: proc(t: ^testing.T) {
+	when !debug.DEBUG_DRAW {
+		return
+	}
+	f := helper_setup(t)
+	defer helper_teardown(f)
+	f.editor.session.view.viewports[0].settings.helpers = .All
+	e := spawn_with(f, ai.DEFAULT_PERCEIVER)
+	spawn_with(f, render.Point_Light{})
+	// The AI's pool, with the perceiver in its first slot, as the ai perceive system leaves it.
+	agents: ai.State
+	agents.world = &f.world
+	memory := ai.Perception_Memory {
+		count     = 2,
+		ray_count = 2,
+	}
+	memory.entries[0] = {entity = 7, seen = true}
+	memory.entries[1] = {entity = 8, position = ecs.position_from_meters({0, 0, 3})}
+	memory.rays[0] = {to = ecs.position_from_meters({0, 1, 5})}
+	memory.rays[1] = {to = ecs.position_from_meters({1, 1, 5}), blocked = true}
+	agents.agents.slots = make([dynamic]ai.Agent_Slot, context.temp_allocator)
+	agents.agents.generations = make([dynamic]u32, context.temp_allocator)
+	append(&agents.agents.slots, ai.Agent_Slot{entity = e, phase = ai.Agent_Ready{perception = &memory}})
+	append(&agents.agents.generations, 1)
+	ecs.add(&f.world, e, ai.Agent_State{agent = {0, 1}})
+	f.editor.ai = &agents
+	f.editor.session.mode = .Play
+	testing.expect_value(t, line_count(f), 0)
+	append(&f.editor.session.view.selection, e)
+	spheres := 2 * 3 * debug.CIRCLE_SEGMENTS
+	testing.expect_value(t, line_count(f), debug.CIRCLE_SEGMENTS + 4 + 2 + spheres)
+	f.editor.session.mode = .Paused
+	testing.expect_value(t, line_count(f), debug.CIRCLE_SEGMENTS + 4 + 2 + spheres)
+	f.editor.session.view.viewports[0].settings.helpers = .None
+	testing.expect_value(t, line_count(f), 0)
 }

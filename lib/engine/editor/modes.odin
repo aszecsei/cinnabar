@@ -20,8 +20,9 @@ editing :: proc(e: ^Editor) -> bool {
 	return active(e) && e.session.mode == .Edit
 }
 
-// debug_shown is whether a frame draws its debug layer: always without an editor, and only while editing with one, so a
-// scene view in Play and Paused shows what the game shows. The Game view never has one (see render_view).
+// debug_shown is whether the game's frame draws its debug layer when no viewport draws it: always without an editor,
+// and only while editing with one, so it shows what the game shows in Play and Paused. A scene view always has the debug
+// layer, and the Game view never has one (see plan_view).
 debug_shown :: proc(e: ^Editor) -> bool {
 	return !active(e) || e.session.mode == .Edit
 }

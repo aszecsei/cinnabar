@@ -91,8 +91,9 @@ the_standard_games_scripts_have_every_engine_binding :: proc(t: ^testing.T) {
 	expect :: proc(t: ^testing.T, text, fragment: string, loc := #caller_location) {
 		testing.expectf(t, strings.contains(text, fragment), "the definitions have no %q", fragment, loc = loc)
 	}
-	// The engine's bindings that a game used to choose are all there: physics, audio, animation, sprites and the UI.
-	for name in ([]string{"declare Physics:", "declare Audio:", "declare Animator:", "declare Sprites:", "declare Ui:", "declare Render:"}) {
+	// The engine's bindings that a game used to choose are all there: physics, audio, animation, sprites, the UI and
+	// perception.
+	for name in ([]string{"declare Physics:", "declare Audio:", "declare Animator:", "declare Sprites:", "declare Ui:", "declare Render:", "declare Perception:"}) {
 		expect(t, text, name)
 	}
 	expect(t, text, "\tset_paused: (paused: boolean) -> (),")

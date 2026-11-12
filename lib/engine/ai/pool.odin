@@ -38,6 +38,9 @@ Agent_Ready :: struct {
 	next_think:   u64,
 	last_think:   u64,
 	thinks:       u32,
+	// What it perceives, which the ai perceive system makes when it first perceives, and nil before (see
+	// docs/ai/perception.md#memory).
+	perception:   ^Perception_Memory,
 }
 
 // Agent_Phase is where an agent is. nil is a free slot. set_phase is its only writer.
@@ -159,6 +162,7 @@ release_slot :: proc(s: ^State, slot: ^Agent_Slot) {
 	if ready, ok := slot.phase.(Agent_Ready); ok {
 		delete(ready.values, s.platform.heap_allocator)
 		delete(ready.state, s.platform.heap_allocator)
+		free(ready.perception, s.platform.heap_allocator)
 	}
 }
 

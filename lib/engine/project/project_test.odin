@@ -7,6 +7,7 @@ import "core:testing"
 
 import "cinnabar:core"
 import "cinnabar:core/gpu"
+import "cinnabar:engine/ai"
 import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/audio"
 import "cinnabar:engine/physics"
@@ -312,6 +313,22 @@ audio_buses_and_backend :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(problems), 2)
 	testing.expect_value(t, s.audio_buses.count, 2)
 	testing.expect_value(t, audio.bus_name(&s.audio_buses, 0), "Music")
+}
+
+// perception.tags names the tags that Perceivables' tags index, in order.
+@(test)
+perception_tags :: proc(t: ^testing.T) {
+	s: Settings
+	problems := make([dynamic]string, context.temp_allocator)
+	parse("perception.tags = Player, Enemy, Noise_Maker\n", &s, &problems)
+	testing.expect_value(t, len(problems), 0)
+	testing.expect_value(t, s.perception_tags.count, 3)
+	testing.expect_value(t, ai.tag_name(&s.perception_tags, 2), "Noise_Maker")
+
+	// A list with a name twice keeps what the settings had, and says so.
+	parse("perception.tags = Player, Player\n", &s, &problems)
+	testing.expect_value(t, len(problems), 1)
+	testing.expect_value(t, s.perception_tags.count, 3)
 }
 
 // physics.layers names the layers in order, and physics.ignore the pairs that do not collide, wherever it is in the

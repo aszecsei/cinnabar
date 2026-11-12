@@ -397,8 +397,8 @@ public sealed class ContentBrowserModel
         AssetKind.Font or AssetKind.Ui => ContentKind.Interface,
         AssetKind.Animation or AssetKind.AnimationGraph or AssetKind.Skin => ContentKind.Animation,
         AssetKind.Shader or AssetKind.ShadingModel => ContentKind.Shaders,
-        // An agent's blackboard and decision are text that a gameplay programmer writes with its scripts.
-        AssetKind.Blackboard or AssetKind.Decision => ContentKind.Scripts,
+        // An agent's blackboard, decision and perception are text that a gameplay programmer writes with its scripts.
+        AssetKind.Blackboard or AssetKind.Decision or AssetKind.Perception => ContentKind.Scripts,
         _ => ContentKind.Scripts,
     };
 
