@@ -227,6 +227,8 @@ an_agents_view_round_trips :: proc(t: ^testing.T) {
 		decision = {0 = 1, 15 = 2},
 		nodes    = {{id = 3, running = true, last = .Aborted}, {id = 4, last = .Failed}},
 		values   = {{name = "health", kind = .Float, text = "0.25"}, {name = "target", kind = .Entity, text = "#4:1"}},
+		options  = {{id = 5, score = 0.5, chosen = true, considerations = {{id = 6, input = 0.25, score = 0.75}}}},
+		plan     = {{goal = 1, goals = {{1, 2}}, steps = {10, 11}, step = 1, methods = {{2, 3}}, searching = true}},
 	}
 	write_message(&buf, sent)
 	header, _ := read_header(buf[:])
@@ -240,6 +242,14 @@ an_agents_view_round_trips :: proc(t: ^testing.T) {
 	testing.expect_value(t, got.nodes[0], Agent_Node{id = 3, running = true, last = .Aborted})
 	testing.expect_value(t, got.values[1].kind, Agent_Kind.Entity)
 	testing.expect_value(t, got.values[1].text, "#4:1")
+	testing.expect_value(t, len(got.options), 1)
+	testing.expect_value(t, got.options[0].chosen, true)
+	testing.expect_value(t, got.options[0].considerations[0], Agent_Consideration{id = 6, input = 0.25, score = 0.75})
+	testing.expect_value(t, len(got.plan), 1)
+	testing.expect_value(t, got.plan[0].steps[1], 11)
+	testing.expect_value(t, got.plan[0].methods[0], Agent_Method{2, 3})
+	testing.expect_value(t, got.plan[0].goals[0], Agent_Goal{1, 2})
+	testing.expect(t, got.plan[0].searching)
 }
 
 @(test)

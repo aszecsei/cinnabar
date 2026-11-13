@@ -485,18 +485,56 @@ Shading_Models :: struct {
 
 // Editor to daemon: the text of a material, an animation graph or a UI document that the editor has not saved, as a
 // request. The daemon cooks it as the asset with this GUID, into the preview area of the cache,
-// <cache>/dev/preview/<guid>.blob, which the host's previews load. The asset's own blob does not change. A
-// Preview_Result with the request's ID answers it.
+// <cache>/dev/preview/<guid>.blob, which the host's previews load. The asset's own blob does not change. A decision or a
+// blackboard is checked, and a GOAP decision also plans the plan query, of which there is at most one, as the runtime
+// would. A Preview_Result with the request's ID answers it.
 Cook_Preview :: struct {
 	guid: string,
 	text: string,
+	plan: []Plan_Query,
 }
 
 // Daemon to editor: the answer to a Cook_Preview. error is "" when the text cooked or checked out, and problems are its
-// errors and warnings, with the lines of the text that it was given.
+// errors and warnings, with the lines of the text that it was given. plan has the answer to the request's plan query,
+// when the decision checked out and its goal and keys are known, and is otherwise empty.
 Preview_Result :: struct {
 	error:    string,
 	problems: []Problem,
+	plan:     []Plan_Answer,
+}
+
+// A plan to preview: the node ID of a GOAP decision's goal, and the world state to plan from, by planning key. A planning
+// key that the state leaves out has its blackboard's default. A bool is 0 or 1, an int is itself, and an enum is its
+// index.
+Plan_Query :: struct {
+	goal:  u32,
+	state: []Plan_Value,
+}
+
+Plan_Value :: struct {
+	key:   string,
+	value: i32,
+}
+
+// Plan_Outcome mirrors the GOAP search's outcome: a plan that reaches the goal, or the plan of the search's closest node.
+Plan_Outcome :: enum u8 {
+	Found,
+	Closest,
+}
+
+// The plan of a Plan_Query: its actions, in their order, the nodes that the search made, and, for the closest plan, the
+// planning keys that its first state needs and the world state does not have.
+Plan_Answer :: struct {
+	outcome: Plan_Outcome,
+	steps:   []Plan_Answer_Step,
+	nodes:   u32,
+	unmet:   []string,
+}
+
+// A step of a plan: the action node's ID, and its action's name.
+Plan_Answer_Step :: struct {
+	id:     u32,
+	action: string,
 }
 
 // Daemon to editor, during a pass: how far it has got with the step that it cooks now, the assets of a kind, or a

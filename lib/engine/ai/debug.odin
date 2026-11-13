@@ -4,8 +4,9 @@ import "cinnabar:engine/asset"
 import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/ecs"
 
-// What the editor shows of a running agent (see docs/ai/agents.md#the-editor): its blackboard's values and, for a
-// technique whose module has nodes, what each node does.
+// What the editor shows of a running agent (see docs/ai/agents.md#the-editor): its blackboard's values, and what its
+// module shows: what each node does, for a technique whose module has nodes, the options' scores, for one that scores,
+// and the goal and the plan, for one that plans.
 
 // Node_Result is how a decision node last ended, for the editor. None is a node that has not ended since the agent
 // started. Aborted is a node that its parent or its guard stopped while it ran.
@@ -32,12 +33,15 @@ Key_View :: struct {
 	enum_name: string,
 }
 
-// Agent_Debug is what an agent does, for the editor: its decision, its blackboard's values in slot order, and the
-// nodes of its module that run or ended. The strings are the blobs', valid until the next asset poll.
+// Agent_Debug is what an agent does, for the editor: its decision, its blackboard's values in slot order, the nodes of
+// its module that run or ended, its options' scores in its last think (see scores), and its goal and plan (see plan),
+// for the modules that keep them. The strings are the blobs', valid until the next asset poll.
 Agent_Debug :: struct {
 	decision: format.Guid,
 	keys:     []Key_View,
 	nodes:    []Node_View,
+	scores:   []Option_Score,
+	plan:     Maybe(Plan_View),
 }
 
 // agent_debug is an entity's agent, from the blobs that the assets have loaded and the agent started with, so the
@@ -73,8 +77,16 @@ agent_debug :: proc(s: ^State, e: ecs.Entity, allocator := context.temp_allocato
 		debug.keys[i] = view
 	}
 	module := s.modules[decision.technique]
+	d := Decision{data = decision_data, blob = decision}
+	b := Board{data = board_data, blob = board}
 	if module.nodes != nil {
-		debug.nodes = module.nodes(Decision{data = decision_data, blob = decision}, ready.state, allocator)
+		debug.nodes = module.nodes(d, ready.state, allocator)
+	}
+	if module.scores != nil {
+		debug.scores = module.scores(d, b, ready.state, allocator)
+	}
+	if module.plan != nil {
+		debug.plan = module.plan(d, b, ready.state, allocator)
 	}
 	return debug, true
 }

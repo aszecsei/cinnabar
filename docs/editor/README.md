@@ -15,7 +15,7 @@ Read them in this order the first time.
 | [Shell and panels](shell-and-panels.md) | Docking, the ribbon, commands and every panel. |
 | [Material editor](material-editor.md) | The node editor and its previews. |
 | [Animation graph editor](animation-graph-editor.md) | The canvas for `.animation_graph` files, its reader and writer that keep every line, and the live view of an Animator in play mode. |
-| [Decision editor](decision-editor.md) | The canvas for `.decision` files, with behavior trees, its reader and writer that keep every line, the blackboard editor's table, and the live view of an Agent in play mode. |
+| [Decision editor](decision-editor.md) | The views of `.decision` files: behavior trees and HTN domains on a canvas, utility options with their curves, and GOAP goals and actions with a plan preview; its reader and writer that keep every line, the blackboard editor's table, and the live view of an Agent in play mode. |
 | [UI editor](ui-editor.md) | The WYSIWYG editor for `.ui` documents: its reader and writer that keep every line, the canvas that the game draws at a screen's size and scale, picking, the tree, properties, styles and bindings. |
 | [Mesh editing](mesh-editing.md) | Level geometry as `.mesh` assets: mesh mode, the mesh and texture tools, and the live path that draws an unsaved mesh. |
 | [Prefabs](prefabs.md) | `.prefab` assets: instances and overrides in the scene format, their expansion into plain entities, editing instances and prefabs, and spawning them at run time. |

@@ -638,7 +638,7 @@ public sealed class AnimationGraphEditorTests : IDisposable
     }
 
     static PreviewResult Answer(string file, params (uint Line, string Text)[] problems) =>
-        new(problems.Length == 0 ? "" : problems[0].Text, [.. problems.Select(p => new Problem(file, p.Line, 0, true, p.Text))]);
+        new(problems.Length == 0 ? "" : problems[0].Text, [.. problems.Select(p => new Problem(file, p.Line, 0, true, p.Text))], []);
 
     [Fact]
     public void TheCheckersProblemsGoOnTheirNodes()

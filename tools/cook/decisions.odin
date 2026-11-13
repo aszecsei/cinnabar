@@ -183,9 +183,17 @@ technique_readers :: proc(options: Cook_Options) -> Technique_Readers {
 	return readers
 }
 
+// Checked_Decision is a decision's text that checked out: its contents, and its blackboard's keys, in the temporary
+// allocator.
+Checked_Decision :: struct {
+	contents: format.Decision_Contents,
+	keys:     []format.Blackboard_Key_Contents,
+}
+
 // decision_check gives the problems of a decision's text that the editor has not saved, as a cook of the file at this
-// path would, with the blackboard that it names read from the index and the content roots. It writes nothing.
-decision_check :: proc(options: Cook_Options, index: ^Index, path, text: string) -> (problems: Problems) {
+// path would, with the blackboard that it names read from the index and the content roots, and the decision when it has
+// none. It writes nothing.
+decision_check :: proc(options: Cook_Options, index: ^Index, path, text: string) -> (problems: Problems, checked: Maybe(Checked_Decision)) {
 	header := decision_header(text)
 	named: Named_Blackboard
 	if a, found := index.assets[guid_text(header.blackboard)]; found && header.blackboard_line != 0 {
@@ -208,9 +216,12 @@ decision_check :: proc(options: Cook_Options, index: ^Index, path, text: string)
 		report_error(&problems, path, header.blackboard_line, 0, "%s", message)
 		return
 	}
-	_, found := decision_parse(text, keys, technique_readers(options), context.temp_allocator)
+	contents, found := decision_parse(text, keys, technique_readers(options), context.temp_allocator)
 	for p in found {
 		report_error(&problems, path, p.line, 0, "%s", p.message)
+	}
+	if len(found) == 0 {
+		checked = Checked_Decision{contents, keys}
 	}
 	return
 }

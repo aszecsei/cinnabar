@@ -19,8 +19,8 @@ public sealed class PreviewCookTests : IDisposable
     const string GraphGuid = "0123456789abcdef0123456789abcdef";
     const string UiGuid = "5b845a4341f6a3b772ec017211470fac";
 
-    static readonly PreviewResult Cooked = new("", []);
-    static readonly PreviewResult Failed = new("the text has an error", []);
+    static readonly PreviewResult Cooked = new("", [], []);
+    static readonly PreviewResult Failed = new("the text has an error", [], []);
 
     readonly TempDirectory _temp = new("preview-cook");
     readonly FakePreviewCooker _cooker = new();
@@ -160,7 +160,7 @@ public sealed class PreviewCookTests : IDisposable
     }
 
     /// <summary>A cook link that holds each cook until the test answers it.</summary>
-    sealed class FakePreviewCooker : IPreviewCooker
+    internal sealed class FakePreviewCooker : IPreviewCooker
     {
         readonly List<Cook> _requests = [];
 
@@ -177,10 +177,10 @@ public sealed class PreviewCookTests : IDisposable
             }
         }
 
-        public Task<PreviewResult> CookPreview(string guid, string text)
+        public Task<PreviewResult> CookPreview(string guid, string text, PlanQuery? plan = null)
         {
             // Without RunContinuationsAsynchronously, an answer runs the editor's continuation before Answer returns.
-            var cook = new Cook(guid, text, new TaskCompletionSource<PreviewResult>());
+            var cook = new Cook(guid, text, plan, new TaskCompletionSource<PreviewResult>());
             lock (_requests)
             {
                 _requests.Add(cook);
@@ -189,7 +189,7 @@ public sealed class PreviewCookTests : IDisposable
         }
     }
 
-    sealed record Cook(string Guid, string Text, TaskCompletionSource<PreviewResult> Result)
+    internal sealed record Cook(string Guid, string Text, PlanQuery? Plan, TaskCompletionSource<PreviewResult> Result)
     {
         public void Answer(PreviewResult result) => Result.SetResult(result);
     }

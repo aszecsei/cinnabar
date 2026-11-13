@@ -231,7 +231,7 @@ public sealed class DecisionEditorTests : IDisposable
         Assert.Equal(Blackboard, editor.Document.Text);
 
         // A problem goes on its key's row.
-        editor.ShowProblems(editor.Document.Text, new PreviewResult("bad", [new Problem(editor.Document.Path, 5, 0, true, "the enum mood has the value calm twice")]));
+        editor.ShowProblems(editor.Document.Text, new PreviewResult("bad", [new Problem(editor.Document.Path, 5, 0, true, "the enum mood has the value calm twice")], []));
         Assert.Single(editor.ProblemsOf(editor.Find("mood")!));
         Assert.Empty(editor.ProblemsOf(editor.Find("health")!));
     }
@@ -247,12 +247,12 @@ public sealed class DecisionEditorTests : IDisposable
         [
             new Problem(path, 9, 0, true, "the blackboard has no key named target"),
             new Problem(path, 3, 0, true, "no asset has the GUID"),
-        ]));
+        ], []));
         Assert.Equal(new int?[] { 2, null }, editor.Problems.Select(p => p.Node));
         Assert.Equal("bad", editor.CookError);
         // An answer about a text that has changed since is dropped.
         editor.SetField(2, "cooldown", "1");
-        editor.ShowProblems(Tree(), new PreviewResult("", []));
+        editor.ShowProblems(Tree(), new PreviewResult("", [], []));
         Assert.Equal(2, editor.Problems.Count);
     }
 
@@ -292,7 +292,7 @@ public sealed class DecisionEditorTests : IDisposable
     static AgentView View(ulong entity, string decision = Guard, bool running = true) =>
         new(entity, Convert.FromHexString(decision),
             [new AgentNode(1, running, AgentResult.None), new AgentNode(2, running, AgentResult.Failed)],
-            [new AgentValue("health", AgentKind.Float, "100"), new AgentValue("target", AgentKind.Entity, "#3:1")]);
+            [new AgentValue("health", AgentKind.Float, "100"), new AgentValue("target", AgentKind.Entity, "#3:1")], [], []);
 
     [Fact]
     public void WhileTheGamePlaysTheSelectedEntitysAgentIsLive()
@@ -321,7 +321,7 @@ public sealed class DecisionEditorTests : IDisposable
         Assert.Null(editor.Live);
         Assert.Contains("Guard runs sniper", editor.LiveWaiting);
         // An empty view says that the agent has gone.
-        shell.OnGameMessage(new AgentView(1, new byte[16], [], []));
+        shell.OnGameMessage(new AgentView(1, new byte[16], [], [], [], []));
         Assert.Null(shell.World.Agent(1));
         shell.Stop();
         Assert.Null(editor.LiveWaiting);

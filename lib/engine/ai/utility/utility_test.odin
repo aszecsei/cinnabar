@@ -913,7 +913,8 @@ a_behavior_tree_and_a_utility_decision_share_a_blackboard_and_actions :: proc(t:
 	testing.expect(t, walks >= 2, "both decisions walk")
 }
 
-// What the last think scored is read by option and consideration, with each option's action and target.
+// What the last think scored is read by option and consideration, with each option's action and target, and whether it
+// runs.
 @(test)
 scores_are_read_by_option_and_consideration :: proc(t: ^testing.T) {
 	f := setup(t, {options = {{action = "run", n = 1, considerations = {HEALTH, OTHER}}, {action = "ok", weight = 0.25}}})
@@ -939,6 +940,9 @@ scores_are_read_by_option_and_consideration :: proc(t: ^testing.T) {
 	testing.expect(t, near(f64(scores[0].score), compensate(0.5, 2), 1e-6))
 	testing.expect_value(t, scores[1].action, "ok")
 	testing.expect_value(t, scores[1].score, 0.25)
+	// The better option runs.
+	testing.expect(t, scores[0].chosen)
+	testing.expect(t, !scores[1].chosen)
 	_, ok = ai.scores(&f.ai, spawn_thing(f, 0))
 	testing.expect(t, !ok)
 }

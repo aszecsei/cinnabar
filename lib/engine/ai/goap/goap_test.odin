@@ -2,6 +2,7 @@ package goap
 
 import "base:runtime"
 import "core:fmt"
+import "core:mem"
 import "core:mem/virtual"
 import "core:os"
 import "core:slice"
@@ -13,6 +14,7 @@ import "cinnabar:core"
 import "cinnabar:core/jobs"
 import "cinnabar:core/testlog"
 import "cinnabar:engine/ai"
+import "cinnabar:engine/ai/goap/search"
 import "cinnabar:engine/asset"
 import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/ecs"
@@ -955,4 +957,117 @@ goap_is_the_same_on_one_job_and_many :: proc(t: ^testing.T) {
 	many := run(t, false)
 	defer delete(many)
 	testing.expect(t, slice.equal(one[:], many[:]), "the outcomes differ")
+}
+
+// whole_of runs search.whole on a decision as a tool does, from the agent's planning keys now, every action usable,
+// and each action's cost from its constant or the agent's key, and gives its plan as node IDs.
+@(private = "file")
+whole_of :: proc(f: ^Fixture, e: ecs.Entity, d: D, goal: int) -> (search.Whole, []u32) {
+	// A blob is aligned as a loaded one is.
+	built := build(d)
+	data, _ := mem.alloc_bytes_non_zeroed(len(built), 16, context.temp_allocator)
+	copy(data, built)
+	blob, viewed := format.decision_view(data)
+	assert(viewed)
+	g := format.goap_data(format.decision_technique_data(data, blob))
+	shared := format.decision_nodes(data, blob)
+	world := make([]i32, len(PLANNING), context.temp_allocator)
+	for name, k in PLANNING {
+		#partial switch v in key_value(f, e, name) {
+		case bool:
+			world[k] = 1 if v else 0
+		case i32:
+			world[k] = v
+		case ai.Enum_Index:
+			world[k] = i32(v)
+		case:
+			panic("not a planning key")
+		}
+	}
+	usable := make([]u32, (len(g.actions) + 31) / 32, context.temp_allocator)
+	costs := make([]f32, len(g.actions), context.temp_allocator)
+	for a, i in g.actions {
+		usable[i / 32] |= 1 << u32(i % 32)
+		costs[i] = a.cost.value
+		if a.cost.source == .Key {
+			keys := KEYS
+			costs[i] = key_value(f, e, keys[a.cost.key].name).(f32)
+		}
+		costs[i] = max(costs[i], search.MIN_COST)
+	}
+	state := make([]byte, format.goap_state_of(g).size, context.temp_allocator)
+	steps := make([]u16, g.header.max_plan, context.temp_allocator)
+	w := search.whole(g, state, world, usable, costs, g.goals[goal], steps)
+	ids := make([]u32, w.length, context.temp_allocator)
+	for step, i in steps[:w.length] {
+		ids[i] = shared[g.actions[step].node].id
+	}
+	return w, ids
+}
+
+// plan_ids is the agent's running plan as node IDs.
+@(private = "file")
+plan_ids :: proc(f: ^Fixture, e: ecs.Entity) -> []u32 {
+	view, _ := ai.plan(&f.ai, e)
+	ids := make([]u32, len(view.steps), context.temp_allocator)
+	for s, i in view.steps {
+		ids[i] = s.id
+	}
+	return ids
+}
+
+// A whole search, as the cook daemon's plan preview runs it, finds the plan that an agent finds from the same world
+// state, with the same costs, a cost key's among them.
+@(test)
+a_whole_search_finds_the_agents_plan :: proc(t: ^testing.T) {
+	f := setup(t, down_plan())
+	defer teardown(t, f)
+	e := spawn_agent(f)
+	start(f, e)
+	testing.expect(t, run_until(f, e, .Running) >= 0)
+	w, ids := whole_of(f, e, down_plan(), 0)
+	testing.expect_value(t, w.outcome, search.Outcome.Found)
+	testing.expect_value(t, w.nodes, 5)
+	testing.expect_value(t, w.unmet, bit_set[0 ..< format.MAX_PLAN_KEYS;u32]{})
+	testing.expectf(t, slice.equal(ids, plan_ids(f, e)), "whole %v, agent %v", ids, plan_ids(f, e))
+	testing.expect(t, slice.equal(ids, []u32{12, 11, 10}))
+
+	d := D {
+		goals   = {{tests = {is(DOWN)}}},
+		actions = {
+			{action = "step", n = 1, effects = {set(DOWN)}, cost = 5},
+			{action = "step", n = 2, effects = {set(ARMED)}},
+			{action = "step", n = 3, tests = {is(ARMED)}, effects = {set(DOWN)}, cost_key = "cost"},
+		},
+	}
+	write_blob(t, f, OTHER, build(d, OTHER))
+	for cost in ([]f32{1, 10}) {
+		agent := spawn_agent(f, OTHER)
+		ai.set_key(&f.ai, agent, "cost", cost)
+		start(f, agent)
+		testing.expect(t, run_until(f, agent, .Running) >= 0)
+		_, cheapest := whole_of(f, agent, d, 0)
+		testing.expectf(t, slice.equal(cheapest, plan_ids(f, agent)), "cost %v: whole %v, agent %v", cost, cheapest, plan_ids(f, agent))
+	}
+}
+
+// A whole search that fails, as the agent's does, gives the plan of its closest node: the fewest keys that the world
+// state lacks, and of those the cheapest that is not the goal itself, with the keys that it lacks.
+@(test)
+a_failed_whole_search_gives_its_closest_plan :: proc(t: ^testing.T) {
+	d := down_plan()
+	// Without the action that arms it, the agent can come near and not attack.
+	d.actions = d.actions[:1]
+	d.actions = slice.concatenate([][]A{d.actions, {{action = "step", n = 2, effects = {set(NEAR)}}}}, context.temp_allocator)
+	f := setup(t, d)
+	defer teardown(t, f)
+	e := spawn_agent(f)
+	start(f, e)
+	frame(f, 10)
+	testing.expect_value(t, agent_of(f, e).failed, 1)
+	w, ids := whole_of(f, e, d, 0)
+	testing.expect_value(t, w.outcome, search.Outcome.Closest)
+	testing.expect_value(t, w.nodes, agent_of(f, e).nodes)
+	testing.expect(t, slice.equal(ids, []u32{11, 10}), "approach, then attack")
+	testing.expect_value(t, w.unmet, bit_set[0 ..< format.MAX_PLAN_KEYS;u32]{ARMED})
 }

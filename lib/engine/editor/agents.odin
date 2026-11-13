@@ -3,6 +3,7 @@ package editor
 import "base:runtime"
 import "core:fmt"
 import "core:hash"
+import "core:math"
 import "core:strings"
 
 import "cinnabar:engine/ai"
@@ -34,7 +35,42 @@ agent_view :: proc(e: ^Editor, entity: ecs.Entity, allocator: runtime.Allocator)
 	for k, i in debug.keys {
 		view.values[i] = {name = k.name, kind = link.Agent_Kind(k.type), text = value_text(k, allocator)}
 	}
+	view.options = make([]link.Agent_Option, len(debug.scores), allocator)
+	for o, i in debug.scores {
+		considerations := make([]link.Agent_Consideration, len(o.considerations), allocator)
+		for c, j in o.considerations {
+			considerations[j] = {id = c.id, input = rounded(c.input), score = rounded(c.score)}
+		}
+		view.options[i] = {id = o.id, score = rounded(o.score), chosen = o.chosen, considerations = considerations}
+	}
+	if p, plans := debug.plan.?; plans {
+		plan := link.Agent_Plan {
+			goal      = p.goal,
+			goals     = make([]link.Agent_Goal, len(p.goals), allocator),
+			steps     = make([]u32, len(p.steps), allocator),
+			step      = u32(p.step),
+			methods   = make([]link.Agent_Method, len(p.methods), allocator),
+			searching = p.searching,
+		}
+		for g, i in p.goals {
+			plan.goals[i] = {id = g.id, priority = rounded(g.priority)}
+		}
+		for s, i in p.steps {
+			plan.steps[i] = s.id
+		}
+		for m, i in p.methods {
+			plan.methods[i] = {task = m.task, method = m.method}
+		}
+		view.plan = make([]link.Agent_Plan, 1, allocator)
+		view.plan[0] = plan
+	}
 	return
+}
+
+// rounded is a score to three decimals, so a view that only drifts in its noise is not sent again (see send_agents).
+@(private = "file")
+rounded :: proc(v: f32) -> f32 {
+	return f32(math.round(f64(v) * 1000) / 1000)
 }
 
 // value_text is a key's value as the editor shows it.

@@ -537,7 +537,7 @@ The header holds the layout hash, the counts, the root and `max_plan`. `format.h
   - the technique's own.
 
   A decision with a problem keeps its old blob, so the running game keeps the last good version.
-- **Unsaved text:** `Cook_Preview` with a decision's GUID checks the text that the editor sends as the cook does, with the blackboard that it names read from disk, and answers with its problems at the text's lines. A blackboard with problems is the one problem, at the `blackboard` line, as in the cook. It writes no blob (`decision_check` in `tools/cook/decisions.odin`).
+- **Unsaved text:** `Cook_Preview` with a decision's GUID checks the text that the editor sends as the cook does, with the blackboard that it names read from disk, and answers with its problems at the text's lines. A blackboard with problems is the one problem, at the `blackboard` line, as in the cook. It writes no blob (`decision_check` in `tools/cook/decisions.odin`). A GOAP decision's request may also carry a plan query, which a text without problems plans (`plan_preview` in `tools/cook/plan_preview.odin`): from the query's start state, with the blackboard's defaults for the planning keys that it leaves out, every action usable, since the cook cannot evaluate a guard, and each cost key at its default.
 - **The cache key** covers the cooker version, the layout, the technique reader's version, the source path, the source, the GUID and the blackboard's own key, which covers its source.
 
 ## The blob

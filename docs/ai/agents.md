@@ -155,7 +155,8 @@ While the game plays, the editor's [decision editor](../editor/decision-editor.m
 
 - **The native actions** go to the editor as `Agent_Actions` when it links and after a code reload, with each action's name and its parameters' names and types, from `ai.native_actions`.
 - **A watched agent** goes out as `Agent_View`, once after the watch and then when it changes: the decision's GUID, the nodes that run or have a result, and the blackboard's values as text ([Editor link](../editor/link.md#messages)). `ai.agent_debug(s, entity)` reads them. The editor polls between frames, when the frame's views are gone, so it finds the blackboard and the decision in the assets, and checks their keys against the ones that the agent started with. An agent that waits, or whose blobs were recooked and have not restarted it, is not found, and its view is empty.
-- **The nodes** come from the module's `nodes` hook, which reads its state. Only the behavior tree has one ([Behavior trees: Last results](behavior-trees.md#last-results)). The views of the other techniques are to come.
+- **The nodes** come from the module's `nodes` hook, which reads its state. Only the behavior tree has one ([Behavior trees: Last results](behavior-trees.md#last-results)).
+- **The scores and the plan** come from the module's `scores` and `plan` hooks, as `Agent.scores` and `Agent.plan` do, but from the blobs in the assets, since the frame's views are gone: a utility agent's options, each with its score, whether it runs, and its considerations, and a GOAP or an HTN agent's goal, goals, plan, step and methods.
 
 ## Scripts
 

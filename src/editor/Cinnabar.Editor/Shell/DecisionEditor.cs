@@ -18,9 +18,9 @@ public sealed record DecisionAction(string Name, IReadOnlyList<(string Name, str
 
 /// <summary>
 /// An open decision in its editor (see docs/editor/decision-editor.md#decision-editor): its document, the selected
-/// nodes, the problems of the last check of its text, and the selected agent's live view. Every change of the decision
-/// sends the unsaved text to the cook daemon, a moment after the last change. The view turns input into calls here, so
-/// tests can drive the editor without a window.
+/// nodes, the problems of the last check of its text, a GOAP decision's plan preview, and the selected agent's live view.
+/// Every change of the decision sends the unsaved text to the cook daemon, a moment after the last change. The view
+/// turns input into calls here, so tests can drive the editor without a window.
 /// </summary>
 public sealed class DecisionEditor : IGraphEditor, IGraphCanvasEditor
 {
@@ -62,12 +62,21 @@ public sealed class DecisionEditor : IGraphEditor, IGraphCanvasEditor
     readonly PreviewCook _cook;
     // The blackboard that the keys were last read from: its GUID and text, and the keys.
     (string? Guid, string? Text, IReadOnlyList<BlackboardKey> Keys) _board = (null, null, []);
+    // The plan preview's goal and the start state's values that the user set, by planning key; the version of the two,
+    // which each change counts; and the last answer, with the version and the text that it answers.
+    int? _planGoal;
+    readonly Dictionary<string, int> _planState = [];
+    int _planVersion;
+    PlanAnswered? _planAnswered;
+
+    /// <summary>The daemon's answer to a plan query, for the plan setup's version and the text that it was asked about.</summary>
+    sealed record PlanAnswered(int Version, string Text, PlanAnswer? Answer);
 
     internal DecisionEditor(EditorShell shell, DecisionDocument document)
     {
         _shell = shell;
         Document = document;
-        _cook = new PreviewCook(() => _shell.PreviewCooker.Linked, () => Document.Text, text => _shell.PreviewCooker.CookPreview(Guid, text), ShowProblems);
+        _cook = new PreviewCook(() => _shell.PreviewCooker.Linked, () => Document.Text, Cook, ShowProblems);
         Document.Changed += OnDocumentChanged;
         _shell.Assets.Changed += OnAssetsChanged;
         _shell.World.AgentChanged += OnAgentChanged;
@@ -104,6 +113,9 @@ public sealed class DecisionEditor : IGraphEditor, IGraphCanvasEditor
 
     /// <summary>The blackboard's keys or the actions that the game and the scripts have changed.</summary>
     public event Action? CatalogChanged;
+
+    /// <summary>The plan preview's goal or start state changed, or its answer came.</summary>
+    public event Action? PlanChanged;
 
     DecisionFile File => Document.Graph;
 
@@ -176,8 +188,8 @@ public sealed class DecisionEditor : IGraphEditor, IGraphCanvasEditor
     // Adding and deleting nodes.
 
     /// <summary>
-    /// Adds a node of a kind at a point of the canvas, selected, as the last child of a composite when one is given.
-    /// An action starts the action that is given.
+    /// Adds a node of a kind at a point of the canvas, selected, as the last child of a node with children when one is
+    /// given, or as the last consideration of an option or a goal. An action starts the action that is given.
     /// </summary>
     public int AddNode(string kind, double x, double y, string? action = null, int? parent = null)
     {
@@ -195,63 +207,129 @@ public sealed class DecisionEditor : IGraphEditor, IGraphCanvasEditor
                 case "wait":
                     node.Set("seconds", "1");
                     break;
+                case "consideration":
+                    node.Set("curve", "linear");
+                    break;
             }
             if (action != null)
             {
                 node.Set("action", action);
             }
-            if (parent is { } p && f.Find(p) is { } composite && BehaviorTreeGeometry.IsComposite(composite.Kind))
+            if (parent is { } p && f.Find(p) is { } owner && ListFor(owner, kind) is { } key)
             {
-                composite.SetIds("children", [.. composite.Ids("children"), id]);
+                owner.SetIds(key, [.. owner.Ids(key), id]);
             }
         });
         Select([id]);
         return id;
     }
 
-    /// <summary>The composite that lists a node among its children, or null for a root.</summary>
-    public DecisionNode? ParentOf(int id) => File.Nodes.FirstOrDefault(n => BehaviorTreeGeometry.IsComposite(n.Kind) && n.Ids("children").Contains(id));
+    /// <summary>The field that lists a node's children in this technique, or null for a node without children (see BehaviorTreeGeometry.ChildrenKey).</summary>
+    public string? ChildrenKey(DecisionNode node) => BehaviorTreeGeometry.ChildrenKey(Technique, node.Kind);
+
+    // The list of a node that a new node of a kind joins: its children, when the kind can be one, or an option's or a
+    // goal's considerations.
+    string? ListFor(DecisionNode owner, string kind) => kind == "consideration" && owner.Kind is "option" or "goal"
+        ? "considerations"
+        : ChildrenKey(owner) is { } key && CanBeChild(key, kind) ? key : null;
+
+    // Whether a node of a kind can be listed in a list of children: a task lists methods, and a method tasks and actions.
+    static bool CanBeChild(string key, string kind) => key switch
+    {
+        "methods" => kind == "method",
+        "subtasks" => kind is "task" or "action",
+        _ => true,
+    };
+
+    /// <summary>The nodes that list a node among their children: a composite or a task, or the methods that list a subtask.</summary>
+    public IEnumerable<DecisionNode> ParentsOf(int id) => File.Nodes.Where(n => ChildrenKey(n) is { } key && n.Ids(key).Contains(id));
+
+    /// <summary>The first node that lists a node among its children, or null for a root.</summary>
+    public DecisionNode? ParentOf(int id) => ParentsOf(id).FirstOrDefault();
 
     /// <summary>
-    /// Makes a node a composite's child, which is what a drag from the composite's foot to it does. It leaves its old
-    /// parent, and goes among its new siblings by their places from left to right. It returns false, and changes
-    /// nothing, when the parent is not a composite or the child is the parent or above it.
+    /// Makes a node a child, which is what a drag from a node's foot to it does: a composite's child, a task's method, or
+    /// a method's subtask. It goes among its new siblings by their places from left to right. A behavior tree's child and
+    /// a method leave their old parent, since each has one; a subtask may be several methods' and a task may recur, so
+    /// they stay. It returns false, and changes nothing, when the node has no children, when the child cannot be one of
+    /// them, or when a behavior tree's child is its parent or above it.
     /// </summary>
     public bool AddChild(int parent, int child)
     {
-        if (File.Find(parent) is not { } composite || !BehaviorTreeGeometry.IsComposite(composite.Kind) || File.Find(child) == null)
+        if (File.Find(parent) is not { } owner || ChildrenKey(owner) is not { } key || File.Find(child) is not { } node || !CanBeChild(key, node.Kind))
         {
             return false;
         }
-        for (int? above = parent; above is { } a; above = ParentOf(a)?.Id)
+        if (key == "children")
         {
-            if (a == child)
+            for (int? above = parent; above is { } a; above = ParentOf(a)?.Id)
             {
-                return false;
+                if (a == child)
+                {
+                    return false;
+                }
             }
         }
-        if (composite.Ids("children").Contains(child))
+        if (owner.Ids(key).Contains(child))
         {
             return true;
         }
         var geometry = Geometry();
+        var shared = key == "subtasks";
         Document.Edit($"Add {Label(child)} to {Label(parent)}", f =>
         {
-            foreach (var old in f.Nodes.Where(n => n.Id != parent && n.Ids("children").Contains(child)).ToList())
+            if (!shared)
             {
-                old.SetIds("children", old.Ids("children").Where(c => c != child));
+                foreach (var old in f.Nodes.Where(n => n.Id != parent && n.Ids(key).Contains(child)).ToList())
+                {
+                    old.SetIds(key, old.Ids(key).Where(c => c != child));
+                }
             }
             var p = f.Find(parent)!;
-            p.SetIds("children", SortedByX([.. p.Ids("children"), child], geometry));
+            p.SetIds(key, SortedByX([.. p.Ids(key), child], geometry));
         });
         return true;
+    }
+
+    /// <summary>Takes a child out of a node's children, or a consideration out of an option's or a goal's, and leaves the node, in one entry.</summary>
+    public void RemoveFromList(int owner, string key, int id) =>
+        Document.Edit($"Remove {Label(id)} from {Label(owner)}", f =>
+        {
+            if (f.Find(owner) is { } node)
+            {
+                node.SetIds(key, node.Ids(key).Where(c => c != id));
+            }
+        });
+
+    /// <summary>Moves an ID of a list to another place in it, as the arrows of a list do, in one entry.</summary>
+    public void MoveInList(int owner, string key, int from, int to)
+    {
+        if (File.Find(owner) is not { } node || node.Ids(key) is not { } ids || from < 0 || from >= ids.Count || to < 0 || to >= ids.Count || from == to)
+        {
+            return;
+        }
+        var moved = ids.ToList();
+        var id = moved[from];
+        moved.RemoveAt(from);
+        moved.Insert(to, id);
+        Document.Edit($"Move {Label(id)}", f => f.Find(owner)?.SetIds(key, moved));
+    }
+
+    /// <summary>Adds a linear consideration to an option or a goal, as its last, selected, in one entry.</summary>
+    public int AddConsideration(int owner) => AddNode("consideration", 0, 0, parent: owner);
+
+    /// <summary>Deletes a node, and takes it out of every list that names it, in one entry.</summary>
+    public void Delete(int id)
+    {
+        Select([id]);
+        DeleteSelected();
     }
 
     // Children in their order from left to right on the canvas, where two at the same place keep their order.
     static List<int> SortedByX(List<int> children, BehaviorTreeGeometry geometry) =>
         [.. children.Select((id, i) => (id, i)).OrderBy(c => geometry.Find(c.id)?.Bounds.X ?? double.MaxValue).ThenBy(c => c.i).Select(c => c.id)];
 
-    /// <summary>Deletes the selected nodes, and takes them out of the children of the composites that list them, in one entry.</summary>
+    /// <summary>Deletes the selected nodes, and takes them out of the lists of children and considerations that name them, in one entry.</summary>
     public void DeleteSelected()
     {
         var ids = _selection.Where(id => File.Find(id) != null).ToHashSet();
@@ -265,9 +343,12 @@ public sealed class DecisionEditor : IGraphEditor, IGraphCanvasEditor
             {
                 f.Remove(f.Find(id)!);
             }
-            foreach (var node in f.Nodes.Where(n => n.Ids("children").Any(ids.Contains)).ToList())
+            foreach (var key in BehaviorTreeGeometry.ListKeys)
             {
-                node.SetIds("children", node.Ids("children").Where(c => !ids.Contains(c)));
+                foreach (var node in f.Nodes.Where(n => n.Ids(key).Any(ids.Contains)).ToList())
+                {
+                    node.SetIds(key, node.Ids(key).Where(c => !ids.Contains(c)));
+                }
             }
         });
     }
@@ -301,8 +382,8 @@ public sealed class DecisionEditor : IGraphEditor, IGraphCanvasEditor
         });
 
     /// <summary>
-    /// Ends a drag. The composites of the moved nodes order their children from left to right, as the tree runs them,
-    /// in the drag's entry.
+    /// Ends a drag. The parents of the moved nodes order their children from left to right, as the tree runs them or a
+    /// task tries its methods, in the drag's entry.
     /// </summary>
     public void EndMove(bool cancel = false)
     {
@@ -316,18 +397,18 @@ public sealed class DecisionEditor : IGraphEditor, IGraphCanvasEditor
             return;
         }
         var geometry = Geometry();
-        var parents = _selection.Select(ParentOf).OfType<DecisionNode>().Select(p => p.Id).Distinct().ToList();
+        var parents = _selection.SelectMany(ParentsOf).Select(p => (p.Id, Key: ChildrenKey(p)!)).Distinct().ToList();
         Document.Step(f =>
         {
-            foreach (var id in parents)
+            foreach (var (id, key) in parents)
             {
                 if (f.Find(id) is { } parent)
                 {
-                    var children = parent.Ids("children").ToList();
+                    var children = parent.Ids(key).ToList();
                     var sorted = SortedByX(children, geometry);
                     if (!children.SequenceEqual(sorted))
                     {
-                        parent.SetIds("children", sorted);
+                        parent.SetIds(key, sorted);
                     }
                 }
             }
@@ -345,9 +426,78 @@ public sealed class DecisionEditor : IGraphEditor, IGraphCanvasEditor
         Document.Edit(label, f => f.Find(node)?.Set(key, string.IsNullOrWhiteSpace(value) ? null : value.Trim()));
     }
 
+    /// <summary>Sets several fields of a node in one entry, as <see cref="SetField"/> does each.</summary>
+    public void SetFields(int node, string label, IReadOnlyDictionary<string, string?> fields) =>
+        Document.Edit(label, f => SetEach(f, node, fields));
+
+    static void SetEach(DecisionFile f, int node, IReadOnlyDictionary<string, string?> fields)
+    {
+        if (f.Find(node) is { } n)
+        {
+            foreach (var (key, value) in fields)
+            {
+                n.Set(key, string.IsNullOrWhiteSpace(value) ? null : value.Trim());
+            }
+        }
+    }
+
+    /// <summary>
+    /// Sets a consideration's curve, in one entry, with the fields that it takes: linear and step take no exponent, and
+    /// only a table has points, which a new table starts with as a line from [0, 0] to [1, 1].
+    /// </summary>
+    public void SetCurveKind(int node, string kind)
+    {
+        var fields = new Dictionary<string, string?> { ["curve"] = kind };
+        if (kind is "linear" or "step")
+        {
+            fields["exponent"] = null;
+        }
+        if (kind != "table")
+        {
+            fields["points"] = null;
+        }
+        else if (File.Find(node)?.Get("points") == null)
+        {
+            fields["points"] = "[0, 0], [1, 1]";
+        }
+        SetFields(node, $"Set curve {kind}", fields);
+    }
+
+    /// <summary>Begins a drag that changes a node's fields, such as a curve's handle's, which is one undo entry however it moves.</summary>
+    public void BeginFieldDrag(string label) => Document.Begin(label);
+
+    /// <summary>A step of a drag of fields: the fields as they are at the drag's place now.</summary>
+    public void DragFields(int node, IReadOnlyDictionary<string, string?> fields)
+    {
+        if (Document.InTransaction)
+        {
+            Document.Step(f => SetEach(f, node, fields));
+        }
+    }
+
+    /// <summary>Ends a drag of fields, or with cancel puts them back.</summary>
+    public void EndFieldDrag(bool cancel = false)
+    {
+        if (cancel)
+        {
+            Document.Cancel();
+        }
+        else if (Document.InTransaction)
+        {
+            Document.Commit();
+        }
+    }
+
     /// <summary>Replaces a node's writes.</summary>
     public void SetWrites(int node, IReadOnlyList<(string Key, string Value)> writes) =>
         Document.Edit("Set writes", f => f.Find(node)?.SetWrites(writes));
+
+    /// <summary>Sets a setting of the decision, such as a utility decision's <c>pick</c>, or with null or "", removes it so it has its default.</summary>
+    public void SetSetting(string key, string? value)
+    {
+        var words = key.Replace('_', ' ');
+        Document.Edit(string.IsNullOrWhiteSpace(value) ? $"Reset {words}" : $"Set {words}", f => f.SetSetting(key, string.IsNullOrWhiteSpace(value) ? null : value.Trim()));
+    }
 
     /// <summary>Names the blackboard whose keys the decision reads.</summary>
     public void SetBlackboard(string guid) => Document.Edit("Set Blackboard", f => f.SetBlackboard(guid));
@@ -470,6 +620,92 @@ public sealed class DecisionEditor : IGraphEditor, IGraphCanvasEditor
         return colon < 0 ? AddNode(pick, at.X, at.Y, parent: parent) : AddNode(pick[..colon], at.X, at.Y, pick[(colon + 1)..], parent);
     }
 
+    // The plan preview: a GOAP decision's plan from a start state to a goal, as the cook daemon plans it.
+
+    /// <summary>The planning keys that the decision names, in its order, with their blackboard keys, or null for a key that the blackboard does not have.</summary>
+    public IReadOnlyList<(string Name, BlackboardKey? Key)> PlanningKeys =>
+        [.. (File.Setting("keys") ?? "").Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+            .Distinct()
+            .Select(name => (name, Keys.FirstOrDefault(k => k.Name == name)))];
+
+    /// <summary>The goal that the plan preview plans for, when the decision has it.</summary>
+    public int? PlanGoal => _planGoal is { } goal && File.Find(goal) is { Kind: "goal" } ? goal : null;
+
+    /// <summary>A planning key's value in the plan preview's start state: the one that the user set, or the blackboard's default.</summary>
+    public int PlanValue(string key)
+    {
+        if (_planState.TryGetValue(key, out var value))
+        {
+            return value;
+        }
+        return Keys.FirstOrDefault(k => k.Name == key) is { } k ? DefaultPlanValue(k) : 0;
+    }
+
+    /// <summary>A key's default as a planning key's value: a bool is 0 or 1, an int is itself, and an enum is its index.</summary>
+    public static int DefaultPlanValue(BlackboardKey key) => key.Type switch
+    {
+        "bool" => key.Default == "true" ? 1 : 0,
+        "int" => int.TryParse(key.Default, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : 0,
+        "enum" => Math.Max(0, key.Values.ToList().IndexOf(key.Default ?? "")),
+        _ => 0,
+    };
+
+    /// <summary>Picks the goal of the plan preview, or none, and plans it.</summary>
+    public void SetPlanGoal(int? goal)
+    {
+        _planGoal = goal;
+        PlanSetupChanged();
+    }
+
+    /// <summary>Sets a planning key's value in the plan preview's start state, or with null its default, and plans it.</summary>
+    public void SetPlanValue(string key, int? value)
+    {
+        if (value is { } v)
+        {
+            _planState[key] = v;
+        }
+        else
+        {
+            _planState.Remove(key);
+        }
+        PlanSetupChanged();
+    }
+
+    void PlanSetupChanged()
+    {
+        _planVersion++;
+        PlanChanged?.Invoke();
+        _cook.Schedule();
+    }
+
+    /// <summary>The query that the next check sends, or null without a goal: the values that the user set of the decision's planning keys.</summary>
+    public PlanQuery? PlanQuery()
+    {
+        if (Technique != "goap" || PlanGoal is not { } goal)
+        {
+            return null;
+        }
+        var planning = PlanningKeys.Select(k => k.Name).ToHashSet();
+        return new PlanQuery((uint)goal, [.. _planState.Where(v => planning.Contains(v.Key)).OrderBy(v => v.Key, StringComparer.Ordinal).Select(v => new PlanValue(v.Key, v.Value))]);
+    }
+
+    /// <summary>
+    /// The plan preview's answer, for the goal and the start state as they are and the text as it is, or null while it is
+    /// asked for, or when the decision has problems, which the daemon does not plan.
+    /// </summary>
+    public PlanAnswer? Plan => _planAnswered is { } a && a.Version == _planVersion && a.Text == Document.Text ? a.Answer : null;
+
+    // A check of a text, with the plan query as it is when the check is sent; the answer keeps the setup's version and
+    // the text, so a later setup or text does not show it.
+    async Task<PreviewResult> Cook(string text)
+    {
+        var version = _planVersion;
+        var query = PlanQuery();
+        var result = await _shell.PreviewCooker.CookPreview(Guid, text, query);
+        _planAnswered = new PlanAnswered(version, text, query == null ? null : result.Plan.FirstOrDefault());
+        return result;
+    }
+
     // Problems.
 
     /// <summary>Sends the unsaved text to the cook daemon now, and shows the answer's problems.</summary>
@@ -495,6 +731,7 @@ public sealed class DecisionEditor : IGraphEditor, IGraphCanvasEditor
         }
         CookError = result.Error == "" ? null : result.Error;
         ProblemsChanged?.Invoke();
+        PlanChanged?.Invoke();
     }
 
     public void Dispose()
@@ -526,6 +763,29 @@ public sealed class DecisionEditor : IGraphEditor, IGraphCanvasEditor
     /// <summary>The selected entity's Agent, while the game runs, when it runs this decision.</summary>
     public AgentView? Live =>
         !_shell.IsEditing && _shell.World.Agent(_shell.Selection.Entity) is { } view && Convert.ToHexStringLower(view.Decision) == Guid ? view : null;
+
+    /// <summary>The live agent's plan, a GOAP or an HTN decision's, or null.</summary>
+    public AgentPlan? LivePlan => Live?.Plan.FirstOrDefault();
+
+    /// <summary>
+    /// The nodes of the live agent's run on the canvas: a behavior tree's nodes that run, or an HTN plan's path, each
+    /// task that it broke down with the method that it chose and the plan's actions; and the node that runs now, a plan's
+    /// action at its step.
+    /// </summary>
+    public (IReadOnlySet<int> Path, int? Running) LivePath()
+    {
+        if (Live is not { } view)
+        {
+            return (new HashSet<int>(), null);
+        }
+        if (view.Plan.FirstOrDefault() is not { } plan)
+        {
+            return (view.Nodes.Where(n => n.Running).Select(n => (int)n.Id).ToHashSet(), null);
+        }
+        var path = plan.Methods.SelectMany(m => new[] { (int)m.Task, (int)m.Method }).Concat(plan.Steps.Select(s => (int)s)).ToHashSet();
+        int? running = plan.Step < plan.Steps.Length ? (int)plan.Steps[plan.Step] : null;
+        return (path, running);
+    }
 
     /// <summary>Why there is no live view while the game runs, or null in Edit or with one.</summary>
     public string? LiveWaiting
