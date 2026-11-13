@@ -1,0 +1,39 @@
+# One of the guard scene's guards, which its Crowd spawns (see scripts/ai/crowd.luau): the scene's guard without the key
+# that swaps its decision. A fox with a character, a crowd agent, eyes, and the behavior tree of ai/guard.decision.
+scene 2
+
+entity 1000000000000001
+name = "Guard"
+component 1 Transform
+	position = [0, 0, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 75 Character
+	radius = 0.3
+	height = 1
+	mass = 30
+component 134 Nav_Agent
+	max_speed = 3
+	radius = 0.4
+	stopping_distance = 0.6
+component 132 Perceiver
+	perception = $940e651efc2db6dd8fb33b34ae132c5f
+	sight_range = 12
+	half_angle = 60
+	eye_offset = [0, 0.7, 0.45]
+	memory = 4
+component 130 Agent
+	blackboard = $320a03f70e28cc471291c76dd5a2048a
+	decision = $2effcc9c7bb19592d725d1adf3ff2aba
+	interval = 0.2
+component 33 Mesh_Renderer
+	mesh = $e049cf90c64cbdc7eec588c7120cbabb
+	materials.0 = $edcc00e87401ff420e0a68dc5f84449c
+	cast_shadows = true
+component 80 Animator
+	graph = $3a4b0a276d476e7014cbdf3b475dc715
+	speed = 1
+	loop = true
+	playing = true
+behaviour dd867d28b53548017e66520e886e8a34
+	bark_sound = $7ce894b4b95e68b918869459e5cd9c93

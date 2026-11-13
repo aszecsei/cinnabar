@@ -132,6 +132,22 @@ register_scripts :: proc(r: ^script.Runtime, s: ^State) {
 		}
 		return 1
 	}, "(entity: Entity) -> string?")
+	script.define(r, "Agent.decision", proc(L: ^luau.State) -> c.int {
+		s := state_of(L)
+		script.push_asset(script.runtime_of(L), L, ecs.get(s.world, agent_entity(L, s), Agent).decision)
+		return 1
+	}, "(entity: Entity) -> Asset?")
+	script.define(r, "Agent.set_decision", proc(L: ^luau.State) -> c.int {
+		s := state_of(L)
+		e := agent_entity(L, s)
+		decision := script.to_asset(script.runtime_of(L), L, 2)
+		if decision == {} {
+			script.raise(L, "Agent.set_decision takes a decision: an asset from Field.asset(\"decision\")")
+		}
+		// The next think's pool sync sees the change, and the agent starts again with the decision.
+		ecs.get_write(s.world, e, Agent).decision = decision
+		return 0
+	}, "(entity: Entity, decision: Asset) -> ()")
 	script.define(r, "Agent.scores", proc(L: ^luau.State) -> c.int {
 		s := state_of(L)
 		e := script.check_entity(L, 1)
@@ -270,11 +286,17 @@ state_of :: proc(L: ^luau.State) -> ^State {
 // agent_args reads an entity with an Agent and a key's name.
 @(private = "file")
 agent_args :: proc(L: ^luau.State, s: ^State) -> (ecs.Entity, string) {
+	return agent_entity(L, s), string(luau.L_checkstring(L, 2))
+}
+
+// agent_entity reads an entity with an Agent.
+@(private = "file")
+agent_entity :: proc(L: ^luau.State, s: ^State) -> ecs.Entity {
 	e := script.check_entity(L, 1)
 	if !ecs.is_alive(s.world, e) || !ecs.has(s.world, e, Agent) {
 		script.raise(L, "the entity has no Agent")
 	}
-	return e, string(luau.L_checkstring(L, 2))
+	return e
 }
 
 // key_of is the key of a name, which raises an error for a name that the blackboard does not have.

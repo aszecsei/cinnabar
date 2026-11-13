@@ -33,6 +33,71 @@ The data flow in a frame: `ai.prepare` loads the agents' blackboards, decisions 
 
 For navigation, `nav.prepare` loads the navmeshes of the world's scene when the scene changes, and reads the loaded blobs into the frame's views. The queries read the views, from frame code, systems' jobs and scripts. In each fixed tick, the `nav paths` system admits the requests, runs the searches on jobs for their share of the node budget, and writes the paths that finished to their `Nav_Path`s. Then `nav crowd` applies the agents' moves, takes their paths, and on jobs fixes each agent's corridor from where its character is, steers it and avoids its neighbors, and gives its character a velocity, which the tick's physics step moves. `nav.end_frame` lets the views go before the assets poll for recooked blobs.
 
+## Design
+
+1. **Shared parts, and a module for each technique.** An agent has a blackboard of typed keys, a perception that fills some of them, and actions that act. A decision module reads the blackboard and chooses the next action. Behavior trees, utility, GOAP and HTN are four modules over the same parts. Agents with different techniques can therefore share a blackboard and actions, and a script can give an agent another decision ([Agents](agents.md#design)).
+2. **Decisions are data, and scripts act.** A decision is a `.decision` asset whose header names its technique. The editor edits it, and the cooker cooks it against its blackboard. A module runs it natively on jobs, in fixed ticks, within a budget of agents. Scripts write the blackboard and implement actions, but they do not decide.
+3. **Perception writes the blackboard.** Sight and hearing fill keys through the rows of the agent's perception. A noise is an event that gameplay makes. It is not a sound in the mix ([Perception](perception.md#design)).
+4. **Navigation is the engine's own at runtime.** The cooker bakes navmeshes with Recast from the static colliders of a scene's navigation volumes, one for each agent type. The queries, the path requests and the crowd are Odin in `lib/engine/nav`, after Detour's algorithms, with no static state ([Navigation](navigation.md#design)).
+5. **Agents move as characters.** The crowd steers each agent and gives its `Character` a velocity, which the physics step moves. Physics owns the position.
+6. **The state is on the host's heap.** The agents' pool and the crowd's pool keep each agent's values, module state, running action, memory and corridor, so a code reload keeps every agent where it was. A planner keeps its search there between ticks, since jobs end with the frame.
+
+## The order in a tick
+
+| Step | What happens |
+|---|---|
+| 1. `ai perceive` | The perceivers see within the ray budget and hear the noises of the last tick. Their memories change, and their perceptions' rows ask to write the blackboard ([Perception](perception.md#the-order-in-a-tick)). |
+| 2. `ai think` | The native actions that ended stop. The agents whose turn it is think on jobs, within the think budget, and ask for actions and writes ([Agents: Thinking](agents.md#thinking)). |
+| 3. `ai actions` | The native actions start and tick on jobs. `move_to` asks the crowd for a move. |
+| 4. `nav paths` | The path requests are solved on jobs, within the node budget ([Navigation: Path requests](navigation.md#path-requests)). |
+| 5. `nav crowd` | The crowd applies its moves, takes its paths, steers and avoids, and gives the characters their velocities ([Navigation: Crowds](navigation.md#crowds)). |
+| 6. The flush | The commands of the tick's jobs apply, in system order and then job order: blackboard writes, and actions to start or stop. |
+| 7. The scripts' fixed step | The behaviours' `fixed_update`, and then the script actions: those that ended stop, and those that a decision chose start and tick. |
+| 8. Physics, then events | The physics step moves the characters. Then the tick's events arrive: contacts, animation events, and `on_perceive` and `on_forget`. |
+
+A decision therefore reads in a tick what perception wrote in the tick before, and an action that it starts acts in the same tick, for a script action, or in the next, for a native one.
+
+## Reload and restart
+
+| What happens | The agents | Navigation |
+|---|---|---|
+| A code reload | Keep their values, module states, running actions and memories. `register_world` registers the modules and the native actions again ([Agents: Reload and restart](agents.md#reload-and-restart)). | Keeps its navmeshes, its paths and its crowd. |
+| A soft restart | Start again from their blackboards' defaults, since the pool goes with the `Game`. | Starts again with the `Game`. |
+| A recooked blackboard or decision | The agent stops its action and starts again from its defaults. | — |
+| A recooked navmesh | — | The paths on it are found again, and the crowd's agents ask for new paths ([Navigation: Loading](navigation.md#loading)). |
+| A script hot reload | A script action's class is patched in place, so its instances keep running. | — |
+
+## The sample
+
+`samples/mygame`'s guard scene, `content/scenes/guard.scene`, which F7 cycles to, puts the parts together. It has two rooms that a doorway 2 m wide joins, a ramp up to a platform in the east room, low cover 1.2 m high, tall cover, and a navigation volume over all of it.
+
+| Entity | What it has | What it does |
+|---|---|---|
+| The player | `Character`, a `Perceivable` with the `Player` tag, and `player.luau`, `ai/footsteps.luau` and `ai/thrower.luau` | Walks with W, A, S and D, and makes a quiet `Player` noise, 4 m, at each stride. E throws a stone, `prefabs/stone.prefab`. Each fast knock of the stone makes a loud `Noise`, 15 m, and the thud's sound. A stone hurts an agent with `Health` the first time that it hits it. |
+| The guard | A fox: `Character`, `Nav_Agent`, `Perceiver`, `Agent`, and an `Animator` with `models/fox/guard.animation_graph`; `ai/agent_body.luau` and `ai/decision_switch.luau` | Runs `ai/guard.decision`, a behavior tree. H swaps it with `ai/guard_htn.decision`, an HTN, through `Agent.set_decision`. |
+| The wary one | A capsule with the guard's components without the `Animator`; `ai/agent_body.luau` and `ai/health.luau` | Runs `ai/wary.decision`, a utility decision. |
+| Crowd | `ai/crowd.luau` | G adds 18 guards from `prefabs/guard.prefab` at random points on the navmesh, which makes twenty agents. The next G takes them away. |
+| HUD | `ui/guard_hud.ui` and `ai/guard_hud.luau` | Shows the guard's decision and action, the wary one's action and health, and the number of agents. |
+
+**The shared parts.** Every agent names one blackboard, `ai/guard.blackboard`, and one perception, `ai/guard.perception`.
+- **The perception** fills `target` with the nearest `Player` that the agent sees or hears, `can_see_target` with whether it sees them, and `last_seen` with where it last perceived them. A footstep is a noise whose source is the player, so it keeps the player in the agent's memory, at the step's place, without sight. The perception also fills `noise` and `noise_at` with the nearest `Noise` that the agent remembers, and where it was.
+- **The actions** are the engine's `move_to` and `stop`, and the script actions in `content/scripts/ai`, which the main script requires through `ai/actions.luau`: `bark(at)`, `look_around(seconds)`, `next_patrol_point(radius)`, `patrol(radius)`, `keep_distance(from, range)` and `flee(from, range)`. `patrol` and `flee` wait for their own moves by the tickets that `Navigation.move_to` gives.
+- **The body.** `agent_body.luau` keeps what each agent's actions share: where the agent started, which the patrols walk around, and where an action asks it to look. The actions reach it with `self.entity:get(AgentBody)`. It turns the agent to face the way that the crowd walks it. While the agent stands, it turns the agent to where its action asks it to look. It sets the graph's `speed` from `Navigation.velocity`, so the fox walks and runs as fast as it moves. `bark` sets the graph's `bark` trigger, and the graph's `bark` event plays `audio/bark.wav`. An agent without an `Animator` barks at once.
+
+**The guard's tree** has four branches, in order of priority:
+1. **Chase** while it sees the player, with `abort = both`. It notes that it searches, and moves to the player. Within 2 m, the bark cuts in: it stops and barks, and the bark cools down for 3 s.
+2. **Go to a noise** that it remembers, with `abort = lower`, and look about there.
+3. **Search** while it searches, or while it remembers the player without seeing them, with `abort = both`. It moves to `last_seen`, looks about for 3 s, and stops searching. A wall hides the player, and so does the low cover, which is higher than the fox's eye. A footstep shows where they are.
+4. **Patrol:** it takes a random point within 8 m of where it started, moves there, and looks about.
+
+**The guard's HTN** has the same ways, as five methods of its root task in the same order, over the same actions. Its planning key is `can_see_target`, which the chase and the bark need. When the guard loses sight of the player, the key changes, and the guard plans again and searches. When it sees the player, the chase is a better method, which cuts into a search or a patrol ([HTN: The method traversal record](htn.md#the-method-traversal-record)).
+
+**The wary one's options** weigh its health and its distance to the player. Healthy, it chases, and it barks when it is close. Hurt, it keeps 6 m away. Badly hurt and close, it flees to the furthest of a few points within 12 m. A noise draws it, and otherwise it patrols. Two stones take its health from 100 to 30, and it gets 3 points back each second ([Utility](utility.md)).
+
+**Watching it.** Play the scene in the editor, select an agent and open its decision. The decision editor shows the guard's running branch or its HTN plan, and the wary one's scores ([Editor: Decision editor: Live view](../editor/decision-editor.md#live-view)). A decision saved while the game plays is cooked again, and the agent starts again with it.
+
+**The cost.** `TwentyAgentsCostWhatTheProfilerReports`, a host link test, plays the scene with 18 more guards: first while they patrol, and then while they chase the player. It reports the profiler's costs of the five systems for each tick, and of the scripts. The intervals of 0.2 s and 0.25 s spread the agents' thinks over the ticks, and the think budget bounds a tick in which many are due ([Agents: Thinking](agents.md#thinking)).
+
 ## References
 
 - Epic Games, [Unreal Engine: Behavior Trees](https://dev.epicgames.com/documentation/en-us/unreal-engine/behavior-tree-overview-in-unreal-engine): blackboards of typed keys, which the AI's blackboards follow, and decorators with observer aborts (`Self`, `Lower Priority` and `Both`), which the behavior tree's guards follow.

@@ -45,10 +45,11 @@ A behaviour's field is `Field.asset("audio")`. Both show a picker of sounds in t
 
 ## The sample's sounds
 
-`samples/mygame/content/audio` holds three sounds that a formula makes, so the repository holds no recorded audio. `just sample-audio` writes them again, with `tools/audio_samples.py`, and always the same bytes.
+`samples/mygame/content/audio` holds four sounds that a formula makes, so the repository holds no recorded audio. `just sample-audio` writes them again, with `tools/audio_samples.py`, and always the same bytes.
 
 | Sound | What it is |
 |---|---|
 | `hum.wav` | A machine's drone, 2 seconds that loop without a seam, with high harmonics that make it easy to hear a wall take them away. |
 | `thud.wav` | A short knock for a box that lands. `format = adpcm`. |
+| `bark.wav` | Two short barks for the guard scene's agents, each a pitch that falls fast with its harmonics loudest near 1 kHz (see [AI: The sample](../../ai/README.md#the-sample)). `format = adpcm`. |
 | `ambience.wav` | A slow pad, 20 seconds that loop. It streams, as it is over 10 seconds, and it is at 24 kHz, so its cook converts its rate too. `format = vorbis`, which makes it 29 times smaller. |

@@ -1,0 +1,68 @@
+decision 1
+technique = htn
+blackboard = $320a03f70e28cc471291c76dd5a2048a
+keys = can_see_target
+root = 1
+max_plan = 4
+
+# The guard as a hierarchy of tasks, which H swaps with its behavior tree (see docs/ai/README.md#the-sample). It does
+# what the tree does, with the same blackboard and actions. The methods are in order of preference, so a better one
+# cuts in: seeing the intruder ends a search or a patrol. Losing sight of it changes the planning key that its chase
+# depends on, so the guard plans again, and searches.
+node 1 task
+	position = [0, 0]
+	methods = 2, 3, 4, 5, 6
+node 2 method
+	position = [-840, 150]
+	when = distance(self, target) < 2
+	preconditions = can_see_target
+	subtasks = 10, 11
+node 3 method
+	position = [-420, 150]
+	preconditions = can_see_target
+	subtasks = 12
+node 4 method
+	position = [0, 150]
+	when = noise != none
+	subtasks = 13, 14
+node 5 method
+	position = [420, 150]
+	when = searching or target != none
+	subtasks = 15, 16, 17
+node 6 method
+	position = [840, 150]
+	subtasks = 18, 19, 14
+node 10 action
+	position = [-945, 300]
+	action = stop
+node 11 action
+	position = [-735, 300]
+	action = bark(at = target)
+	preconditions = can_see_target
+node 12 action
+	position = [-420, 300]
+	action = move_to(key = "target")
+	preconditions = can_see_target
+	set searching = true
+node 13 action
+	position = [-105, 300]
+	action = move_to(key = "noise_at")
+node 14 action
+	position = [105, 450]
+	action = look_around(seconds = 2)
+node 15 action
+	position = [315, 300]
+	action = move_to(key = "last_seen")
+node 16 action
+	position = [525, 450]
+	action = look_around(seconds = 3)
+node 17 action
+	position = [525, 300]
+	action = stop
+	set searching = false
+node 18 action
+	position = [735, 300]
+	action = next_patrol_point(radius = 8)
+node 19 action
+	position = [945, 300]
+	action = move_to(key = "waypoint")

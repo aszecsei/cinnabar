@@ -35,6 +35,9 @@ DEFAULT_SIGHT_BUDGET :: 64
 PERCEIVE_BATCH :: 16
 // The edge of the grid's cells that the Perceivables are found in, in meters.
 SIGHT_CELL :: 16.0
+// How far short of a noise its hearing ray stops, in meters. A noise is often made on a surface, as a step on the floor
+// or a knock where a body hits, and the ray would otherwise find that surface and take it for a wall.
+NOISE_SURFACE :: 0.1
 // The tags that the project's perception.tags names, and the length of each name.
 MAX_TAGS :: 32
 MAX_TAG_NAME :: 31
@@ -831,8 +834,8 @@ part_of :: proc(w: ^ecs.World, e, of: ecs.Entity) -> bool {
 }
 
 // hear hears the last tick's noises that the perceiver notices: within half of its range, loudness times its hearing,
-// at once, and up to its range when a ray from its eye reaches the noise. A noise with a source updates its entry. It
-// gives the noises heard, in the order that they were made.
+// at once, and up to its range when a ray from its eye reaches NOISE_SURFACE short of the noise. A noise with a source
+// updates its entry. It gives the noises heard, in the order that they were made.
 @(private)
 hear :: proc(j: ^Perceive_Job, pw: ^Perceiver_Work, m: ^Perception_Memory, was: ^[MAX_MEMORY]bool) -> []u32 {
 	s, w := j.s, j.world
@@ -849,7 +852,7 @@ hear :: proc(j: ^Perceive_Job, pw: ^Perceiver_Work, m: ^Perception_Memory, was: 
 		if distance > range / 2 && s.physics != nil {
 			ignore := [2]ecs.Entity{pw.entity, n.source}
 			d := ecs.position_sub(n.position, pw.eye)
-			if hit, blocked := physics.raycast(s.physics, w, pw.eye, d, distance, {layers = pw.perceiver.sight_layers, ignore = ignore[:]});
+			if hit, blocked := physics.raycast(s.physics, w, pw.eye, d, max(distance - NOISE_SURFACE, 0), {layers = pw.perceiver.sight_layers, ignore = ignore[:]});
 			   blocked && !part_of(w, hit.entity, n.source) {
 				continue
 			}

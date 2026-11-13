@@ -125,9 +125,14 @@ register_scripts :: proc(r: ^script.Runtime, s: ^State) {
 		} else {
 			luau.L_typeerrorL(L, 2, "WorldPosition or Entity")
 		}
-		move_to(crowd_requests(s, w), e, target)
-		return 0
-	}, "(entity: Entity, target: WorldPosition | Entity) -> ()")
+		luau.pushnumber(L, f64(move_to(crowd_requests(s, w), e, target)))
+		return 1
+	}, "(entity: Entity, target: WorldPosition | Entity) -> number")
+	script.define(r, "Navigation.move_status", proc(L: ^luau.State) -> c.int {
+		s, w, e := agent_args(L)
+		luau.pushstring(L, move_status(s, w, e, u64(luau.L_checknumber(L, 2))))
+		return 1
+	}, "(entity: Entity, ticket: number) -> \"pending\" | \"moving\" | \"arrived\" | \"failed\" | \"stopped\" | \"replaced\"")
 	script.define(r, "Navigation.stop", proc(L: ^luau.State) -> c.int {
 		s, w, e := agent_args(L)
 		stop(crowd_requests(s, w), e)
@@ -192,4 +197,28 @@ push_positions :: proc(L: ^luau.State, positions: []ecs.World_Position) {
 		script.push_position(L, p)
 		luau.rawseti(L, -2, c.int(i + 1))
 	}
+}
+
+// move_status is where the move of a ticket from Navigation.move_to is, as the move_to action reads its own: pending
+// until the crowd applies it, replaced once a later move or stop has, and otherwise its status.
+@(private = "file")
+move_status :: proc(s: ^State, w: ^ecs.World, e: ecs.Entity, ticket: u64) -> cstring {
+	move, ok := crowd_move(s, w, e)
+	switch {
+	case !ok || move.ticket < ticket:
+		return "pending"
+	case move.ticket > ticket:
+		return "replaced"
+	}
+	switch move.status {
+	case .Moving:
+		return "moving"
+	case .Arrived:
+		return "arrived"
+	case .Failed:
+		return "failed"
+	case .Idle:
+		return "stopped"
+	}
+	return "stopped"
 }

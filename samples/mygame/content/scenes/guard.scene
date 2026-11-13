@@ -1,20 +1,26 @@
-# The guard: a room with cover walls, and one agent that patrols a round of four waypoints. A behavior tree decides what
-# it does (ai/guard.decision), and its perception fills the tree's keys from what it sees (ai/guard.perception). The
-# intruder is a Perceivable with the Player tag that walks to and fro through the west cover wall. When the guard sees
-# it, the guard chases it. When the wall hides it, the guard goes to where it saw it last, and then goes on with its
-# round. Select the guard in the editor while the game plays to see which nodes run (see
-# docs/editor/decision-editor.md#live-view). Positions are raw World_Position values in units of 2^-24 m, so
-# 2516582400000000000 is 1.5e11 m. The editor writes this file; see docs/editor/document-and-scenes.md#scenes.
+# The guard scene, which F7 in mygame cycles to (see docs/ai/README.md#the-sample): two rooms joined by a doorway, a
+# ramp up to a platform in the east room, low cover and tall cover, and a navigation volume over it all. The player, the
+# intruder, walks with W, A, S and D, and makes footstep noises; E throws a stone, whose knock is a loud noise. The
+# guard, a fox, runs a behavior tree (ai/guard.decision): it patrols between random points, chases the player when it
+# sees them, searches where it last saw or heard them, goes to a noise, and barks when it is close. H swaps it to an
+# HTN (ai/guard_htn.decision) with the same blackboard and actions. The wary one on the platform runs a utility
+# decision (ai/wary.decision) over them too, which weighs chasing, keeping its distance and fleeing by its health,
+# which a stone lowers, and its distance to the player. G adds 18 guards, which makes twenty agents. Select an agent in
+# the editor while the game plays to see its decision run (see docs/editor/decision-editor.md#live-view). Positions are
+# raw World_Position values in units of 2^-24 m, so 2516582400000000000 is 1.5e11 m. The editor writes this file; see
+# docs/editor/document-and-scenes.md#scenes.
 scene 2
 
 entity 3d15a236faa571ab
 name = "Camera"
 component 1 Transform
-	position = [2516582400000000000, 251658240, -218103808]
-	rotation = [0.422618, 0, 0, 0.906308]
+	position = [2516582400251658240, 50331648, 100663296]
+	rotation = [0.092296, -0.7010574, 0.092296, 0.7010574]
 	scale = [1, 1, 1]
 component 32 Camera
 component 97 Audio_Listener
+behaviour 0d2b9ccc8bdbaaf687f50afcc7b47500
+	target = @10e704ffe82e4446
 
 entity a6b580a516ab9822
 name = "Sun"
@@ -44,7 +50,7 @@ name = "Floor"
 component 1 Transform
 	position = [2516582400000000000, -8388608, 0]
 	rotation = [0, 0, 0, 1]
-	scale = [22, 1, 14]
+	scale = [32, 1, 22]
 component 33 Mesh_Renderer
 	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
 	materials.0 = $7b3d1f5a9c2e4b6d8f0a2c4e6b8d0f13
@@ -54,9 +60,9 @@ component 65 Collider
 entity d37d608225283310
 name = "North Wall"
 component 1 Transform
-	position = [2516582400000000000, 16777216, 104018739]
+	position = [2516582400000000000, 20971520, 181193933]
 	rotation = [0, 0, 0, 1]
-	scale = [20.8, 2, 0.4]
+	scale = [32, 2.5, 0.4]
 component 33 Mesh_Renderer
 	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
 	materials.0 = $5a1c3e7f9b2d4f608a1c3e5f7a9b0c2d
@@ -66,9 +72,9 @@ component 65 Collider
 entity 18647993cc851ace
 name = "South Wall"
 component 1 Transform
-	position = [2516582400000000000, 16777216, -104018739]
+	position = [2516582400000000000, 20971520, -181193933]
 	rotation = [0, 0, 0, 1]
-	scale = [20.8, 2, 0.4]
+	scale = [32, 2.5, 0.4]
 component 33 Mesh_Renderer
 	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
 	materials.0 = $5a1c3e7f9b2d4f608a1c3e5f7a9b0c2d
@@ -78,9 +84,9 @@ component 65 Collider
 entity a3a4feb61ec1d536
 name = "East Wall"
 component 1 Transform
-	position = [2516582400171127603, 16777216, 0]
+	position = [2516582400265080013, 20971520, 0]
 	rotation = [0, 0, 0, 1]
-	scale = [0.4, 2, 12]
+	scale = [0.4, 2.5, 21.2]
 component 33 Mesh_Renderer
 	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
 	materials.0 = $5a1c3e7f9b2d4f608a1c3e5f7a9b0c2d
@@ -90,9 +96,69 @@ component 65 Collider
 entity 610be4c21067a72c
 name = "West Wall"
 component 1 Transform
-	position = [2516582399828872397, 16777216, 0]
+	position = [2516582399734919987, 20971520, 0]
 	rotation = [0, 0, 0, 1]
-	scale = [0.4, 2, 12]
+	scale = [0.4, 2.5, 21.2]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $5a1c3e7f9b2d4f608a1c3e5f7a9b0c2d
+	cast_shadows = true
+component 65 Collider
+
+entity 2c61f0e5a8b3d417
+name = "Middle Wall South"
+component 1 Transform
+	position = [2516582400050331648, 20971520, -97307853]
+	rotation = [0, 0, 0, 1]
+	scale = [0.4, 2.5, 9.6]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $5a1c3e7f9b2d4f608a1c3e5f7a9b0c2d
+	cast_shadows = true
+component 65 Collider
+
+entity 8e05b7d2c4a19f63
+name = "Middle Wall North"
+component 1 Transform
+	position = [2516582400050331648, 20971520, 97307853]
+	rotation = [0, 0, 0, 1]
+	scale = [0.4, 2.5, 9.6]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $5a1c3e7f9b2d4f608a1c3e5f7a9b0c2d
+	cast_shadows = true
+component 65 Collider
+
+entity 51d8a3e6f0c2b749
+name = "Lintel"
+component 1 Transform
+	position = [2516582400050331648, 37748736, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [0.4, 0.5, 2]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $5a1c3e7f9b2d4f608a1c3e5f7a9b0c2d
+	cast_shadows = true
+component 65 Collider
+
+entity c4e2a91f7b3d5068
+name = "Platform"
+component 1 Transform
+	position = [2516582400206359757, 10066330, -114085069]
+	rotation = [0, 0, 0, 1]
+	scale = [6.6, 1.2, 7.6]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $5a1c3e7f9b2d4f608a1c3e5f7a9b0c2d
+	cast_shadows = true
+component 65 Collider
+
+entity 9a7c3e5b1d2f4086
+name = "Ramp"
+component 1 Transform
+	position = [2516582400112830841, 8442937, -109051904]
+	rotation = [0, 0, 0.1272453, 0.9918713]
+	scale = [4.9539457, 0.2, 4]
 component 33 Mesh_Renderer
 	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
 	materials.0 = $5a1c3e7f9b2d4f608a1c3e5f7a9b0c2d
@@ -100,11 +166,11 @@ component 33 Mesh_Renderer
 component 65 Collider
 
 entity feb3b864643aa62f
-name = "Cover West"
+name = "Low Wall West"
 component 1 Transform
-	position = [2516582399983222784, 16777216, 0]
+	position = [2516582399849005056, 10066330, 67108864]
 	rotation = [0, 0, 0, 1]
-	scale = [0.4, 2, 6]
+	scale = [4, 1.2, 0.5]
 component 33 Mesh_Renderer
 	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
 	materials.0 = $7d2e4a9c1f6b4c3d8e5a2b7f9c0d1e64
@@ -112,11 +178,11 @@ component 33 Mesh_Renderer
 component 65 Collider
 
 entity 3699e84c804814ea
-name = "Cover East"
+name = "Low Wall Middle"
 component 1 Transform
-	position = [2516582400083886080, 16777216, -50331648]
+	position = [2516582399932891136, 10066330, -50331648]
 	rotation = [0, 0, 0, 1]
-	scale = [0.4, 2, 5]
+	scale = [0.5, 1.2, 4]
 component 33 Mesh_Renderer
 	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
 	materials.0 = $7d2e4a9c1f6b4c3d8e5a2b7f9c0d1e64
@@ -126,9 +192,45 @@ component 65 Collider
 entity 16f6828e6824a698
 name = "Crate"
 component 1 Transform
-	position = [2516582400033554432, 8388608, 58720256]
+	position = [2516582400134217728, 10066330, 83886080]
 	rotation = [0, 0, 0, 1]
-	scale = [3, 1, 0.8]
+	scale = [1.5, 1.2, 1.5]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $7d2e4a9c1f6b4c3d8e5a2b7f9c0d1e64
+	cast_shadows = true
+component 65 Collider
+
+entity 6d93b0a7e1f45c28
+name = "Pillar West"
+component 1 Transform
+	position = [2516582399815450624, 20971520, -83886080]
+	rotation = [0, 0, 0, 1]
+	scale = [1.2, 2.5, 1.2]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $7d2e4a9c1f6b4c3d8e5a2b7f9c0d1e64
+	cast_shadows = true
+component 65 Collider
+
+entity b7e14c09a2d36f85
+name = "Screen Wall"
+component 1 Transform
+	position = [2516582399983222784, 20971520, 100663296]
+	rotation = [0, 0, 0, 1]
+	scale = [4, 2.5, 0.4]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $7d2e4a9c1f6b4c3d8e5a2b7f9c0d1e64
+	cast_shadows = true
+component 65 Collider
+
+entity 4f2a8d6c0e1b3975
+name = "Pillar East"
+component 1 Transform
+	position = [2516582400117440512, 20971520, 25165824]
+	rotation = [0, 0, 0, 1]
+	scale = [1.2, 2.5, 1.2]
 component 33 Mesh_Renderer
 	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
 	materials.0 = $7d2e4a9c1f6b4c3d8e5a2b7f9c0d1e64
@@ -138,121 +240,39 @@ component 65 Collider
 entity f4af0026a3d6dca2
 name = "Navigation"
 component 1 Transform
-	position = [2516582400000000000, 16777216, 0]
+	position = [2516582400000000000, 25165824, 0]
 	rotation = [0, 0, 0, 1]
 	scale = [1, 1, 1]
 component 42 Volume
 	shape = Box
-	extents = [10.5, 1.5, 6.5]
+	extents = [15.6, 2.5, 10.6]
 component 128 Nav_Mesh_Volume
 	cell_size = 0.1
 	cell_height = 0.05
 	tile_size = 64
 
-entity a6c85513d38bed01
-name = "Waypoint 1"
+entity 10e704ffe82e4446
+name = "Player"
 component 1 Transform
-	position = [2516582399865782272, 419430, -67108864]
-	rotation = [0, 0, 0, 1]
-	scale = [0.5, 0.05, 0.5]
-component 33 Mesh_Renderer
-	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
-	materials.0 = $f6d3de3190e2dfb97d6834ed5101c4c0
-	cast_shadows = true
-behaviour 70d8c17640de3d1ec91798b2f689fbdf
-	order = 1
-
-entity 4a47cbdf651b321d
-name = "Waypoint 2"
-component 1 Transform
-	position = [2516582399865782272, 419430, 67108864]
-	rotation = [0, 0, 0, 1]
-	scale = [0.5, 0.05, 0.5]
-component 33 Mesh_Renderer
-	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
-	materials.0 = $f6d3de3190e2dfb97d6834ed5101c4c0
-	cast_shadows = true
-behaviour 70d8c17640de3d1ec91798b2f689fbdf
-	order = 2
-
-entity 56cc912e2da19f64
-name = "Waypoint 3"
-component 1 Transform
-	position = [2516582399932891136, 419430, 67108864]
-	rotation = [0, 0, 0, 1]
-	scale = [0.5, 0.05, 0.5]
-component 33 Mesh_Renderer
-	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
-	materials.0 = $f6d3de3190e2dfb97d6834ed5101c4c0
-	cast_shadows = true
-behaviour 70d8c17640de3d1ec91798b2f689fbdf
-	order = 3
-
-entity f1c70e33d7e5d871
-name = "Waypoint 4"
-component 1 Transform
-	position = [2516582399932891136, 419430, -67108864]
-	rotation = [0, 0, 0, 1]
-	scale = [0.5, 0.05, 0.5]
-component 33 Mesh_Renderer
-	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
-	materials.0 = $f6d3de3190e2dfb97d6834ed5101c4c0
-	cast_shadows = true
-behaviour 70d8c17640de3d1ec91798b2f689fbdf
-	order = 4
-
-entity 3879b4addc462ac9
-name = "Intruder"
-component 1 Transform
-	position = [2516582400016777216, 0, 0]
-	rotation = [0, 0, 0, 1]
-	scale = [1, 1, 1]
-component 133 Perceivable
-	tag = 0
-behaviour 6870f098abf40ca88d9de5f597dda41d
-	width = 3.5
-	period = 20
-
-entity ecb61a6f75cdb8f8
-name = "Intruder Body"
-parent = @3879b4addc462ac9
-component 1 Transform
-	position = [2516582400016777216, 15099494, 0]
-	rotation = [0, 0, 0, 1]
-	scale = [0.6, 1.8, 0.6]
-component 2 Local_Transform
-	offset = [0, 0.9, 0]
-	scale = [0.6, 1.8, 0.6]
-component 33 Mesh_Renderer
-	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
-	materials.0 = $0633d94a72554cf9947b0f8c9911055c
-	cast_shadows = true
-
-entity 3d524ee2b7799143
-name = "Guard"
-component 1 Transform
-	position = [2516582399865782272, 0, 0]
-	rotation = [0, 0, 0, 1]
+	position = [2516582400150994944, 0, 100663296]
+	rotation = [0, -0.7071068, 0, 0.7071068]
 	scale = [1, 1, 1]
 component 75 Character
-component 134 Nav_Agent
-	max_speed = 2.5
-	radius = 0.35
-	stopping_distance = 0.5
-component 132 Perceiver
-	perception = $940e651efc2db6dd8fb33b34ae132c5f
-	sight_range = 10
-	half_angle = 180
-component 130 Agent
-	blackboard = $320a03f70e28cc471291c76dd5a2048a
-	decision = $2effcc9c7bb19592d725d1adf3ff2aba
+component 133 Perceivable
+	tag = 0
+behaviour 51ea1de1cfb466a772d7bf450af51d74
+	camera = @3d15a236faa571ab
+behaviour 8f1c9ffe2b66268c17d9732940188d9c
+behaviour 4c8d6b624402abe2aa8f39d83e78325f
+	stone = $9a2728bfc2e9b1d21ce27d2eb945c856
+	camera = @3d15a236faa571ab
 
-entity 7fdb6c7383c70fa4
-name = "Guard Body"
-parent = @3d524ee2b7799143
+entity d86f52b6039dc573
+name = "Player Body"
+parent = @10e704ffe82e4446
 component 1 Transform
-	position = [2516582399865782272, 15099494, 0]
-	rotation = [0, 0, 0, 1]
+	position = [2516582400150994944, 15099494, 100663296]
+	rotation = [0, -0.7071068, 0, 0.7071068]
 	scale = [0.6, 1.8, 0.6]
 component 2 Local_Transform
 	offset = [0, 0.9, 0]
@@ -261,3 +281,131 @@ component 33 Mesh_Renderer
 	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
 	materials.0 = $7c3e5a91ad4f6b829c3e5a7b9d1e3f40
 	cast_shadows = true
+
+entity 99f0ac966f393503
+name = "Player Visor"
+parent = @10e704ffe82e4446
+component 1 Transform
+	position = [2516582400145961779, 25165824, 100663296]
+	rotation = [0, -0.7071068, 0, 0.7071068]
+	scale = [0.4, 0.15, 0.1]
+component 2 Local_Transform
+	offset = [0, 1.5, 0.3]
+	scale = [0.4, 0.15, 0.1]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $5a1c3e7f9b2d4f608a1c3e5f7a9b0c2d
+	cast_shadows = true
+
+entity 3d524ee2b7799143
+name = "Guard"
+component 1 Transform
+	position = [2516582399832227840, 0, 0]
+	rotation = [0, 0.7071068, 0, 0.7071068]
+	scale = [1, 1, 1]
+component 75 Character
+	radius = 0.3
+	height = 1
+	mass = 30
+component 134 Nav_Agent
+	max_speed = 3
+	radius = 0.4
+	stopping_distance = 0.6
+component 132 Perceiver
+	perception = $940e651efc2db6dd8fb33b34ae132c5f
+	sight_range = 12
+	half_angle = 60
+	eye_offset = [0, 0.7, 0.45]
+	memory = 4
+component 130 Agent
+	blackboard = $320a03f70e28cc471291c76dd5a2048a
+	decision = $2effcc9c7bb19592d725d1adf3ff2aba
+	interval = 0.2
+component 33 Mesh_Renderer
+	mesh = $e049cf90c64cbdc7eec588c7120cbabb
+	materials.0 = $edcc00e87401ff420e0a68dc5f84449c
+	cast_shadows = true
+component 80 Animator
+	graph = $3a4b0a276d476e7014cbdf3b475dc715
+	speed = 1
+	loop = true
+	playing = true
+behaviour dd867d28b53548017e66520e886e8a34
+	bark_sound = $7ce894b4b95e68b918869459e5cd9c93
+behaviour f84bd91d0d4928c112fdda2baac1208a
+	first = $2effcc9c7bb19592d725d1adf3ff2aba
+	second = $40500e12fd7a29e8d19c99a91a4d2ac4
+
+entity 7fdb6c7383c70fa4
+name = "Wary"
+component 1 Transform
+	position = [2516582400201326592, 20132659, -134217728]
+	rotation = [0, -0.7071068, 0, 0.7071068]
+	scale = [1, 1, 1]
+component 75 Character
+component 134 Nav_Agent
+	max_speed = 3.5
+	radius = 0.35
+	stopping_distance = 0.5
+component 132 Perceiver
+	perception = $940e651efc2db6dd8fb33b34ae132c5f
+	sight_range = 12
+	half_angle = 75
+	memory = 4
+component 130 Agent
+	blackboard = $320a03f70e28cc471291c76dd5a2048a
+	decision = $2041e98e7c6b1abfd14355b305a8acf7
+	interval = 0.25
+behaviour dd867d28b53548017e66520e886e8a34
+	bark_sound = $7ce894b4b95e68b918869459e5cd9c93
+behaviour 08277f9d785d3c0073a2aa9c2665b6c6
+
+entity a85c3f17d9e2064b
+name = "Wary Body"
+parent = @7fdb6c7383c70fa4
+component 1 Transform
+	position = [2516582400201326592, 35232154, -134217728]
+	rotation = [0, -0.7071068, 0, 0.7071068]
+	scale = [0.6, 1.8, 0.6]
+component 2 Local_Transform
+	offset = [0, 0.9, 0]
+	scale = [0.6, 1.8, 0.6]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $cbeb3ff7d07840a7a816ea35868ee5b0
+	cast_shadows = true
+
+entity e3b96d0f4a1c7285
+name = "Wary Visor"
+parent = @7fdb6c7383c70fa4
+component 1 Transform
+	position = [2516582400196293427, 45298483, -134217728]
+	rotation = [0, -0.7071068, 0, 0.7071068]
+	scale = [0.4, 0.15, 0.1]
+component 2 Local_Transform
+	offset = [0, 1.5, 0.3]
+	scale = [0.4, 0.15, 0.1]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $5a1c3e7f9b2d4f608a1c3e5f7a9b0c2d
+	cast_shadows = true
+
+entity 5c0e8b3f7a2d6914
+name = "Crowd"
+component 1 Transform
+	position = [2516582399932891136, 0, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+behaviour baf543284188611c12b72c869092de65
+	guard = $0d9b84a2116a5529c2cd33741edd33a4
+
+entity 0b7d2e9f4c6a1835
+name = "HUD"
+component 112 Ui_Document
+	document = $a6047cf8447127625d5d1b6e794f3f2d
+	order = 0
+	visible = true
+behaviour 6bea8b8d2b69e14ef00ea97b476e8ba5
+	guard = @3d524ee2b7799143
+	wary = @7fdb6c7383c70fa4
+	crowd = @5c0e8b3f7a2d6914

@@ -2,45 +2,81 @@ decision 1
 technique = behavior_tree
 blackboard = $320a03f70e28cc471291c76dd5a2048a
 
-# Chase an intruder that the guard sees, and stay on it. When it loses sight of it, go to where it saw it last. Otherwise walk the round
-# of the waypoints, and rest at each.
+# The guard (see docs/ai/README.md#the-sample). It barks at an intruder that it sees close by, and chases one that it
+# sees further off. A noise draws it to where the noise was. When it loses sight of the intruder, or hears its steps,
+# it searches where it last perceived it. Otherwise it patrols between random points, and looks about at each.
 node 1 selector
-	position = [-50, 0]
-	children = 2, 5, 8
+	position = [0, 0]
+	children = 2, 10, 14, 18
 node 2 sequence
-	position = [-525, 150]
+	position = [-735, 150]
 	when = can_see_target
 	abort = both
 	children = 3, 4
 node 3 set
-	position = [-630, 300]
+	position = [-945, 300]
 	set searching = true
-node 4 action
-	position = [-420, 300]
-	action = move_to(key = "target")
-	repeat = forever
+node 4 selector
+	position = [-630, 300]
+	children = 5, 9
 node 5 sequence
-	position = [-105, 150]
-	when = searching
-	abort = self
-	children = 6, 7
+	position = [-840, 450]
+	when = distance(self, target) < 2
+	abort = lower
+	cooldown = 3
+	children = 6, 7, 8
 node 6 action
+	position = [-1050, 600]
+	action = stop
+node 7 action
+	position = [-840, 600]
+	action = bark(at = target)
+node 8 wait
+	position = [-630, 600]
+	seconds = 0.5
+node 9 action
+	position = [-420, 450]
+	action = move_to(key = "target")
+node 10 sequence
+	position = [-105, 150]
+	when = noise != none
+	abort = lower
+	children = 11, 12
+node 11 action
 	position = [-210, 300]
+	action = move_to(key = "noise_at")
+	time_limit = 10
+	force = succeed
+node 12 action
+	position = [0, 300]
+	action = look_around(seconds = 2)
+node 14 sequence
+	position = [420, 150]
+	when = searching or target != none
+	abort = both
+	children = 15, 16, 17
+node 15 action
+	position = [210, 300]
 	action = move_to(key = "last_seen")
 	time_limit = 10
 	force = succeed
-node 7 set
-	position = [0, 300]
-	set searching = false
-node 8 sequence
-	position = [420, 150]
-	children = 9, 10, 11
-node 9 action
-	position = [210, 300]
-	action = next_waypoint
-node 10 action
+node 16 action
 	position = [420, 300]
-	action = move_to(key = "waypoint")
-node 11 wait
+	action = look_around(seconds = 3)
+node 17 set
 	position = [630, 300]
-	seconds = 2
+	set searching = false
+node 18 sequence
+	position = [945, 150]
+	children = 19, 20, 21
+node 19 action
+	position = [840, 300]
+	action = next_patrol_point(radius = 8)
+node 20 action
+	position = [1050, 300]
+	action = move_to(key = "waypoint")
+	time_limit = 15
+	force = succeed
+node 21 action
+	position = [1260, 300]
+	action = look_around(seconds = 2)

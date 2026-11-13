@@ -2,7 +2,7 @@
 
 The decision module of the `utility` technique, in `lib/engine/ai/utility`. When an agent thinks, the module scores each option of the agent's decision, and runs the best one. Read [Agents](agents.md) and [Content: Decisions: Utility](../content/kinds/decisions.md#utility) first. The second document gives the text, the options, the considerations and the curves.
 
-**In this document:** [Design](#design) · [Registering](#registering) · [A think](#a-think) · [Scoring](#scoring) · [Choosing](#choosing) · [Targets](#targets) · [Actions](#actions) · [Time](#time) · [Scores for debugging](#scores-for-debugging) · [Determinism](#determinism) · [Reload and restart](#reload-and-restart) · [Limits](#limits)
+**In this document:** [Design](#design) · [Registering](#registering) · [A think](#a-think) · [Scoring](#scoring) · [Choosing](#choosing) · [Targets](#targets) · [Actions](#actions) · [Time](#time) · [Scores for debugging](#scores-for-debugging) · [Determinism](#determinism) · [Reload and restart](#reload-and-restart) · [The sample](#the-sample) · [Limits](#limits)
 
 ## Design
 
@@ -73,6 +73,10 @@ The module writes only the agent's module state and the outputs of its `Think_Co
 - **A code reload** keeps the running option, the cooldowns, the last scores, the generator and the running action. The action is neither started again nor stopped.
 - **A recooked decision or blackboard** starts the agent again from its blackboard's defaults, with no option running.
 - **A soft restart** starts every agent again.
+
+## The sample
+
+The sample's wary one runs `content/ai/wary.decision` over the guard's blackboard and actions. It weighs chasing, keeping its distance and fleeing by its health and its distance to the player, with a table curve for being hurt and a logistic that falls for being badly hurt ([AI: The sample](README.md#the-sample)).
 
 ## Limits
 

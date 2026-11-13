@@ -854,34 +854,295 @@ public sealed class HostLinkTests : IAsyncDisposable
     }
 
     const string GuardDecision = "2effcc9c7bb19592d725d1adf3ff2aba";
+    const string GuardHtn = "40500e12fd7a29e8d19c99a91a4d2ac4";
+    const string WaryDecision = "2041e98e7c6b1abfd14355b305a8acf7";
     const string GuardScene = "b5c0dc0f830dfc93c35afa5461183af7";
+    const ulong AgentId = 130;
 
     [Fact]
     public async Task AWatchedGuardShowsTheNodesOfItsTreeThatRun()
     {
-        if (!File.Exists(Path.Combine(EditorOptions.RepositoryRoot(), "build", "dev", "content", GuardDecision + ".blob")))
-        {
-            Assert.Skip("the sample's content is not cooked");
-        }
-        await using var editor = await Connect();
-        editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
-        await editor.Next<Welcome>();
-        var text = File.ReadAllText(Path.Combine(EditorOptions.RepositoryRoot(), "samples", "mygame", "content", "scenes", "guard.scene")).ReplaceLineEndings("\n");
-        var (scene, problems) = Document.SceneFile.Parse(text);
-        Assert.Empty(problems);
-        var world = await Load(editor, scene!, guid: GuardScene);
+        await using var editor = await ConnectToGuardScene();
+        var world = await Load(editor, GuardSceneFile(), guid: GuardScene);
         var guard = world.Entities.Single(e => e.Name == "Guard").Entity;
 
         editor.Link.Send(new WatchEntity(guard));
         editor.Link.Send(new SetMode(EditorMode.Play));
-        // With no intruder in sight, the guard walks its round: the root selector runs, and then the patrol sequence
-        // (node 8) with its move to the waypoint (node 10), which the guard writes into its blackboard first.
-        const uint Root = 1, Patrol = 8, MoveToWaypoint = 10;
+        // With no intruder in sight, the guard patrols: the root selector runs, and then the patrol sequence (node 18)
+        // with its move to the waypoint (node 20), which the guard's next_patrol_point writes into its blackboard first.
+        const uint Root = 1, Patrol = 18, MoveToWaypoint = 20;
         var view = await editor.Next<AgentView>(v => v.Entity == guard && v.Nodes.Any(n => n.Running && n.Id == MoveToWaypoint));
         Assert.Equal(GuardDecision, Convert.ToHexStringLower(view.Decision));
         Assert.Contains(view.Nodes, n => n.Id == Root && n.Running);
         Assert.Contains(view.Nodes, n => n.Id == Patrol && n.Running);
         Assert.Contains(view.Values, v => v.Name == "waypoint" && v.Kind == AgentKind.Position);
+    }
+
+    [Fact]
+    public async Task TheGuardChasesThePlayerThatItSeesAndBarksAtThem()
+    {
+        await using var editor = await ConnectToGuardScene();
+        var scene = GuardSceneFile();
+        // The player stands in the west room, 5 m ahead of the guard, which faces them.
+        Place(scene, "Player", -5, 0, 1);
+        var world = await Load(editor, scene, guid: GuardScene);
+        var guard = world.Entities.Single(e => e.Name == "Guard").Entity;
+
+        editor.Link.Send(new WatchEntity(guard));
+        editor.Link.Send(new SetMode(EditorMode.Play));
+        // It chases them with move_to (node 9), and once it is close, the bark (node 7) cuts in.
+        const uint Chase = 2, MoveToTarget = 9, Bark = 7;
+        var chase = await editor.Next<AgentView>(v => v.Entity == guard && v.Nodes.Any(n => n.Running && n.Id == MoveToTarget));
+        Assert.Contains(chase.Values, v => v.Name == "can_see_target" && v.Text == "true");
+        var bark = await editor.Next<AgentView>(v => v.Entity == guard && v.Nodes.Any(n => n.Running && n.Id == Bark));
+        Assert.Contains(bark.Nodes, n => n.Id == Chase && n.Running);
+        Assert.Contains(bark.Values, v => v.Name == "searching" && v.Text == "true");
+        // The bark is a script action, which logs, maybe before the view that shows it.
+        await Logged(editor, "bark");
+    }
+
+    [Fact]
+    public async Task TheGuardBarksAsWellWithItsHtn()
+    {
+        await using var editor = await ConnectToGuardScene();
+        var scene = GuardSceneFile();
+        Place(scene, "Player", -5, 0, 1);
+        // The decision that H swaps to, with the same blackboard and actions.
+        SetField(scene, "Guard", AgentId, "decision", Document.SceneValue.AssetRef(GuardHtn));
+        var world = await Load(editor, scene, guid: GuardScene);
+        var guard = world.Entities.Single(e => e.Name == "Guard").Entity;
+
+        editor.Link.Send(new WatchEntity(guard));
+        editor.Link.Send(new SetMode(EditorMode.Play));
+        // The root task (node 1) takes the chase method (node 3), whose plan moves to the player (node 12), and then
+        // the bark's (node 2), whose plan stops and barks (nodes 10 and 11).
+        var chase = await editor.Next<AgentView>(v => v.Entity == guard && v.Plan.Any(p => p.Methods.Contains(new AgentMethod(1, 3))));
+        Assert.Equal(GuardHtn, Convert.ToHexStringLower(chase.Decision));
+        Assert.Equal([12u], chase.Plan[0].Steps);
+        var bark = await editor.Next<AgentView>(v => v.Entity == guard && v.Plan.Any(p => p.Methods.Contains(new AgentMethod(1, 2))));
+        Assert.Equal([10u, 11u], bark.Plan[0].Steps);
+        await Logged(editor, "bark");
+    }
+
+    [Fact]
+    public async Task TheWaryOneWeighsItsOptionsOverTheGuardsBlackboard()
+    {
+        await using var editor = await ConnectToGuardScene();
+        var scene = GuardSceneFile();
+        // The player stands on the platform, 2.5 m ahead of the wary one, which faces them.
+        Place(scene, "Player", 9.5, 1.2, -7.5);
+        var world = await Load(editor, scene, guid: GuardScene);
+        var wary = world.Entities.Single(e => e.Name == "Wary").Entity;
+
+        editor.Link.Send(new WatchEntity(wary));
+        editor.Link.Send(new SetMode(EditorMode.Play));
+        // At full health, chasing (option 1) or barking (option 2) beats keeping its distance (3) and fleeing (4), whose
+        // health considerations (12 and 14) score little.
+        const uint Chase = 1, Bark = 2, KeepDistance = 3, Flee = 4, Hurt = 12, BadlyHurt = 14;
+        var view = await editor.Next<AgentView>(v => v.Entity == wary && v.Options.Any(o => o.Chosen && (o.Id == Chase || o.Id == Bark)));
+        Assert.Equal(WaryDecision, Convert.ToHexStringLower(view.Decision));
+        var chosen = view.Options.Single(o => o.Chosen);
+        Assert.True(chosen.Score > view.Options.Single(o => o.Id == KeepDistance).Score);
+        Assert.True(chosen.Score > view.Options.Single(o => o.Id == Flee).Score);
+        Assert.Contains(view.Options.Single(o => o.Id == KeepDistance).Considerations, c => c.Id == Hurt && c.Input == 1 && c.Score < 0.1f);
+        Assert.Contains(view.Options.Single(o => o.Id == Flee).Considerations, c => c.Id == BadlyHurt && c.Input == 1 && c.Score < 0.1f);
+        Assert.Contains(view.Values, v => v.Name == "health" && v.Text == "100");
+    }
+
+    [Fact]
+    public async Task HSwapsTheGuardToItsHtnAndBack()
+    {
+        await using var editor = await ConnectToGuardScene();
+        var world = await Load(editor, GuardSceneFile(), guid: GuardScene);
+        var guard = world.Entities.Single(e => e.Name == "Guard").Entity;
+
+        editor.Link.Send(new WatchEntity(guard));
+        editor.Link.Send(new SetMode(EditorMode.Play));
+        await editor.Next<AgentView>(v => v.Entity == guard && Convert.ToHexStringLower(v.Decision) == GuardDecision);
+        Press(editor, InputKey.H);
+        await editor.Next<Log>(l => l.Text.Contains("runs its HTN"));
+        // The agent starts again with the HTN, and patrols by its fifth method (node 6).
+        var htn = await editor.Next<AgentView>(v => v.Entity == guard && v.Plan.Any(p => p.Methods.Contains(new AgentMethod(1, 6))));
+        Assert.Equal(GuardHtn, Convert.ToHexStringLower(htn.Decision));
+        Press(editor, InputKey.H);
+        await editor.Next<Log>(l => l.Text.Contains("runs its behavior tree"));
+        await editor.Next<AgentView>(v => v.Entity == guard && Convert.ToHexStringLower(v.Decision) == GuardDecision && v.Nodes.Any(n => n.Running));
+    }
+
+    [Fact]
+    public async Task AThrownStoneDrawsTheGuardToItsKnock()
+    {
+        await using var editor = await ConnectToGuardScene();
+        var scene = GuardSceneFile();
+        // The player stands behind the guard, and the camera looks east, which the throw follows. The guard patrols, and
+        // could turn to the player, so the player is not perceivable here: the stone is all that the guard perceives.
+        Place(scene, "Player", -14, 0, -8);
+        scene.Entities.Single(e => e.Name == "Player").Components.RemoveAll(c => c.Name == "Perceivable");
+        SetField(scene, "Camera", 1, "rotation", Document.SceneValue.Of(Number(0), Number(Math.Sqrt(0.5)), Number(0), Number(Math.Sqrt(0.5))));
+        var world = await Load(editor, scene, guid: GuardScene);
+        var guard = world.Entities.Single(e => e.Name == "Guard").Entity;
+
+        editor.Link.Send(new WatchEntity(guard));
+        editor.Link.Send(new SetMode(EditorMode.Play));
+        await editor.Next<AgentView>(v => v.Entity == guard && v.Nodes.Any(n => n.Running));
+        Press(editor, InputKey.E);
+        // The stone lands some 9 m ahead of the player, which the guard hears, and goes to (node 10).
+        const uint GoToNoise = 10;
+        var view = await editor.Next<AgentView>(v => v.Entity == guard && v.Nodes.Any(n => n.Running && n.Id == GoToNoise));
+        Assert.Contains(view.Values, v => v.Name == "noise" && v.Text != "none");
+        Assert.Contains(view.Values, v => v.Name == "target" && v.Text == "none");
+    }
+
+    [Fact]
+    public async Task TheGuardHearsThePlayersStepsBehindItAndSearches()
+    {
+        await using var editor = await ConnectToGuardScene();
+        var scene = GuardSceneFile();
+        // The guard stands still, so it stays within earshot. The player starts 3 m behind it, to its right, and the
+        // camera looks north, so W walks them past its back, out of its sight.
+        SetField(scene, "Guard", 134, "max_speed", Document.SceneValue.Of(Number(0.0)));
+        Place(scene, "Player", -12.5, 0, -3);
+        SetField(scene, "Camera", 1, "rotation", Document.SceneValue.Of(Number(0), Number(0), Number(0), Number(1)));
+        var world = await Load(editor, scene, guid: GuardScene);
+        var guard = world.Entities.Single(e => e.Name == "Guard").Entity;
+
+        editor.Link.Send(new WatchEntity(guard));
+        editor.Link.Send(new SetMode(EditorMode.Play));
+        await editor.Next<AgentView>(v => v.Entity == guard && v.Nodes.Any(n => n.Running));
+        editor.Link.Send(new EditorInput([GameInput.Down(InputKey.W)]));
+        // A step within 4 m puts the player in the guard's memory without sight, and the search (node 14) cuts in.
+        const uint Search = 14;
+        var view = await editor.Next<AgentView>(v => v.Entity == guard && v.Nodes.Any(n => n.Running && n.Id == Search));
+        editor.Link.Send(new EditorInput([GameInput.Up(InputKey.W)]));
+        Assert.Contains(view.Values, v => v.Name == "target" && v.Text != "none");
+        Assert.Contains(view.Values, v => v.Name == "can_see_target" && v.Text == "false");
+        Assert.DoesNotContain(editor.Skipped.OfType<AgentView>(), v => v.Entity == guard && v.Values.Any(x => x.Name == "can_see_target" && x.Text == "true"));
+    }
+
+    // Twenty agents, the guard scene's two and the 18 guards that G adds, cost what the profiler reports for the AI's
+    // and the crowd's systems: first while they patrol with no one to perceive, and then while they chase the player.
+    // Their thinks are spread over the ticks by their intervals and the think budget. The test reports the costs, which
+    // the pull request that built the sample quotes. It does not hold them to a bound, since they depend on the machine
+    // and the build.
+    [Fact]
+    public async Task TwentyAgentsCostWhatTheProfilerReports()
+    {
+        await using var editor = await ConnectToGuardScene();
+        var output = TestContext.Current.TestOutputHelper;
+        foreach (var chasing in new[] { false, true })
+        {
+            var scene = GuardSceneFile();
+            var what = chasing ? "chasing" : "patrolling";
+            if (chasing)
+            {
+                // In the west room, 3.5 m ahead of the guard.
+                Place(scene, "Player", -6, 0, -1);
+            }
+            else
+            {
+                scene.Entities.Single(e => e.Name == "Player").Components.RemoveAll(c => c.Name == "Perceivable");
+            }
+            editor.Link.Send(new SetMode(EditorMode.Edit));
+            var world = await Load(editor, scene, guid: GuardScene);
+            var guard = world.Entities.Single(e => e.Name == "Guard").Entity;
+            editor.Link.Send(new WatchEntity(guard));
+            editor.Link.Send(new SetMode(EditorMode.Play));
+            await editor.Next<AgentView>(v => v.Entity == guard && v.Nodes.Any(n => n.Running));
+            Press(editor, InputKey.G);
+            await editor.Next<Log>(l => l.Text.Contains("crowd 18 guards added"));
+            if (chasing)
+            {
+                const uint Chase = 2;
+                await editor.Next<AgentView>(v => v.Entity == guard && v.Nodes.Any(n => n.Running && n.Id == Chase));
+            }
+            // The crowd settles for two seconds: its blobs load and its first paths are found.
+            var settled = DateTime.UtcNow + TimeSpan.FromSeconds(2);
+            await editor.Next<ProfileSummary>(_ => DateTime.UtcNow > settled);
+            var summaries = new List<ProfileSummary>();
+            for (var i = 0; i < 8; i++)
+            {
+                summaries.Add(await editor.Next<ProfileSummary>(s => s.Frames > 0));
+            }
+            // The fixed ticks run at 60 Hz, and a summary covers 250 ms, so a frame runs 60 / fps ticks.
+            var fps = summaries.Average(s => s.Frames) * 4;
+            double PerTick(string name, ProfileCostKind kind) =>
+                Median(summaries.Select(s => (double)(s.Costs.FirstOrDefault(c => c.Kind == kind && c.Name == name)?.MsAverage ?? 0))) * fps / 60;
+            var total = 0.0;
+            foreach (var name in new[] { "ai perceive", "ai think", "ai actions", "nav paths", "nav crowd" })
+            {
+                var ms = PerTick(name, ProfileCostKind.System);
+                Assert.True(ms > 0, $"{name} ran no zones while the agents were {what}");
+                total += ms;
+                output?.WriteLine($"{what}: {name} {ms:F3} ms a tick");
+            }
+            var scripts = summaries.SelectMany(s => s.Costs).Where(c => c.Kind == ProfileCostKind.Script).Select(c => c.Name).Distinct()
+                .Sum(n => PerTick(n, ProfileCostKind.Script));
+            output?.WriteLine($"{what}: the systems {total:F3} ms a tick, every script {scripts:F3} ms, at {fps:F0} frames a second");
+        }
+    }
+
+    // Logged waits for a log line with the text, unless one came while the test waited for something else.
+    static async Task Logged(Editor editor, string text)
+    {
+        if (!editor.Skipped.OfType<Log>().Any(l => l.Text.Contains(text)))
+        {
+            await editor.Next<Log>(l => l.Text.Contains(text));
+        }
+    }
+
+    // Press presses a key and lets it go in the next frame, as a player does.
+    static void Press(Editor editor, InputKey key)
+    {
+        editor.Link.Send(new EditorInput([GameInput.Down(key)]));
+        Thread.Sleep(100);
+        editor.Link.Send(new EditorInput([GameInput.Up(key)]));
+    }
+
+    static double Median(IEnumerable<double> values)
+    {
+        var sorted = values.Order().ToArray();
+        return sorted.Length == 0 ? 0 : sorted[sorted.Length / 2];
+    }
+
+    async Task<Editor> ConnectToGuardScene()
+    {
+        foreach (var blob in new[] { GuardDecision, GuardHtn, WaryDecision })
+        {
+            if (!File.Exists(Path.Combine(EditorOptions.RepositoryRoot(), "build", "dev", "content", blob + ".blob")))
+            {
+                Assert.Skip("the sample's content is not cooked");
+            }
+        }
+        var editor = await Connect();
+        editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
+        await editor.Next<Welcome>();
+        return editor;
+    }
+
+    static Document.Scene GuardSceneFile()
+    {
+        var text = File.ReadAllText(Path.Combine(EditorOptions.RepositoryRoot(), "samples", "mygame", "content", "scenes", "guard.scene")).ReplaceLineEndings("\n");
+        var (scene, problems) = Document.SceneFile.Parse(text);
+        Assert.Empty(problems);
+        return scene!;
+    }
+
+    // Place moves the guard scene's entity of the name to x, y and z meters from the scene's origin.
+    static void Place(Document.Scene scene, string name, double x, double y, double z) =>
+        SetField(scene, name, 1, "position", Document.SceneValue.Of(Number(Origin + (long)(x * Meter)), Number((long)(y * Meter)), Number((long)(z * Meter))));
+
+    static void SetField(Document.Scene scene, string name, ulong component, string field, Document.SceneValue value)
+    {
+        var fields = scene.Entities.Single(e => e.Name == name).Components.Single(c => c.Id == component).Fields;
+        var i = fields.FindIndex(f => f.Name == field);
+        if (i < 0)
+        {
+            fields.Add(Field(field, value));
+        }
+        else
+        {
+            fields[i] = Field(field, value);
+        }
     }
 
     [Fact]

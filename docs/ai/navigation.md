@@ -144,12 +144,13 @@ The `Navigation` library takes the agent type by its name. A name that no loaded
 | `Navigation.random_point(around, radius, agent)` | A reachable point, drawn from the world's `Random` state, so `Random.seed` repeats it |
 | `Navigation.request_path(entity, goal)` | Asks for the entity's path, as `request_path` does. The entity needs a `NavPath`. |
 | `Navigation.path(entity)` | The entity's path's corners, found or partial, or nil |
-| `Navigation.move_to(entity, target)` | Sends the agent to a `WorldPosition` or an `Entity`, as `move_to` does. The entity needs a `NavAgent`. |
+| `Navigation.move_to(entity, target)` | Sends the agent to a `WorldPosition` or an `Entity`, as `move_to` does, and gives the move's ticket. The entity needs a `NavAgent`. |
+| `Navigation.move_status(entity, ticket)` | Where the move of a ticket is, as the `move_to` action reads its own: `"pending"` until the crowd applies it, `"replaced"` once a later move or stop applied, and otherwise `"moving"`, `"arrived"`, `"failed"` or `"stopped"` |
 | `Navigation.stop(entity)` | Stops the agent |
 | `Navigation.arrived(entity)` | Whether the agent arrived at its target |
 | `Navigation.velocity(entity)` | The velocity that the agent chose in its last tick, a `vector` in m/s |
 
-`NavPath`, `NavAgent` and `NavAgentState` are exposed to scripts. `NavPath`'s `status` and `corners` and `NavAgentState`'s fields are read-only. A move from a script applies in the next tick.
+`NavPath`, `NavAgent` and `NavAgentState` are exposed to scripts. `NavPath`'s `status` and `corners` and `NavAgentState`'s fields are read-only. A move from a script applies in the next tick, so until then `arrived` and `NavAgentState`'s `status` are the last move's. An action that waits for its own move reads its ticket's `move_status` instead.
 
 ## Drawing
 

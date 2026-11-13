@@ -580,6 +580,25 @@ a_noise_is_heard_in_the_next_tick_and_an_occluded_one_is_not :: proc(t: ^testing
 	testing.expect_value(t, len(f.ai.noises_pending), 0)
 }
 
+// A noise on the floor, as a step is, is heard past half of its range: the floor that it is on is not a wall. One under
+// the floor is.
+@(test)
+a_noise_on_a_surface_is_heard_and_one_under_it_is_not :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(t, f)
+	p := spawn_perceiver(f, {})
+	wall(f, at(0, -0.5, 0), {40, 1, 40})
+	physics.sync(&f.physics, &f.world)
+	frame(f, 3)
+
+	noise(&f.ai, at(0, 0, 8), 10, "Noise_Maker")
+	frame(f)
+	testing.expect_value(t, key(f, p, "heard").(bool), true)
+	noise(&f.ai, at(0, -0.3, 8), 10, "Noise_Maker")
+	frame(f)
+	testing.expect_value(t, key(f, p, "heard").(bool), false)
+}
+
 // An entity that is not perceived is forgotten after the perceiver's memory, and one that goes is forgotten at once.
 @(test)
 a_perceived_entity_is_forgotten_after_its_memory :: proc(t: ^testing.T) {

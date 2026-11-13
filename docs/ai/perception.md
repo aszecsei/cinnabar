@@ -2,7 +2,7 @@
 
 How agents see and hear, in `lib/engine/ai`. A `Perceiver` sees the `Perceivable`s in its cone that a ray from its eye reaches. It also hears the noises that gameplay makes. What it perceives goes into a short memory in the agent's pool slot. Its `.perception` asset's rows then fill the agent's blackboard from that memory. Read [Agents](agents.md), [Physics: Queries](../physics/design.md#queries) and [Content: Perceptions](../content/kinds/perceptions.md) first.
 
-**In this document:** [Design](#design) · [Components](#components) · [Tags](#tags) · [Sight](#sight) · [Hearing](#hearing) · [Memory](#memory) · [Filling the blackboard](#filling-the-blackboard) · [The order in a tick](#the-order-in-a-tick) · [Determinism](#determinism) · [Scripts](#scripts) · [Drawing](#drawing) · [Limits](#limits)
+**In this document:** [Design](#design) · [Components](#components) · [Tags](#tags) · [Sight](#sight) · [Hearing](#hearing) · [Memory](#memory) · [Filling the blackboard](#filling-the-blackboard) · [The order in a tick](#the-order-in-a-tick) · [Determinism](#determinism) · [Scripts](#scripts) · [Drawing](#drawing) · [The sample](#the-sample) · [Limits](#limits)
 
 ## Design
 
@@ -46,7 +46,7 @@ Without physics, or with a backend without queries, every ray is clear.
 
 - **Making a noise:** `ai.noise(s, position, loudness, tag, source)` from frame code, `ai.write_noise(ai.job_writer(s, ctx), position, loudness, tag, source)` from a system's job, and `Perception.noise` from scripts. `source` is the entity that made it, or none.
 - **When it is heard:** a noise lives for one tick. It is heard in the next tick's `ai perceive`. A noise from frame code before the ticks is heard in the first tick. A noise from a system's job or a script is heard in the tick after it.
-- **Who hears it:** a perceiver that notices the noise's tag, and that is not its source, hears it within `loudness * hearing` meters of its eye. A wall halves that range. Within half the range, the noise is heard at once. Between half and the full range, one `physics.raycast` from the eye to the noise decides. The ray ignores the perceiver and the source, and its filter is `sight_layers`. These rays are outside the sight budget, since noises are few.
+- **Who hears it:** a perceiver that notices the noise's tag, and that is not its source, hears it within `loudness * hearing` meters of its eye. A wall halves that range. Within half the range, the noise is heard at once. Between half and the full range, one `physics.raycast` from the eye towards the noise decides. The ray stops `NOISE_SURFACE` (0.1 m) short of the noise, so the surface that a noise is made on, such as the floor under a step or the wall that a stone hits, does not block it. The ray ignores the perceiver and the source, and its filter is `sight_layers`. These rays are outside the sight budget, since noises are few.
 - **What it gives:** a noise with a source updates that entity's memory entry, by hearing, at the noise's position. Every noise that is heard counts for the rows `heard noise` and `loudest noise`.
 
 ## Memory
@@ -109,6 +109,10 @@ The viewport's helpers draw a selected perceiver ([Editor: Viewport](../editor/v
 - **In Play and Paused:** the cone, the rays of its last sight check from its eye (green clear, red blocked), and a small sphere at each remembered entity's last position (green seen, yellow heard, grey remembered). Scene views keep the debug layer in these modes, and only selected perceivers draw there. The Game view has none.
 
 `ai.perception_debug(s, entity)` gives an agent's memory for drawing.
+
+## The sample
+
+The sample's guard scene makes both kinds of noise from scripts: the player's steps, quiet `Player` noises whose source is the player, which keep the player in an agent's memory without sight, and a thrown stone's knocks, loud `Noise`s. Its fox guard sees from an eye 0.7 m up, so the low cover, 1.2 m high, hides the player's point at 1 m from it. The wary one's eye is at 1.7 m, so the low cover hides the player from it unless it is close ([AI: The sample](README.md#the-sample)).
 
 ## Limits
 

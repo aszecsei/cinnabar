@@ -94,6 +94,9 @@ cinnabar/
 │       ├── project/         The project settings file
 │       ├── debug/           The immediate-mode debug drawing API
 │       ├── ui/              The UI: documents, layout, MSDF text, the batch, focus and navigation, the Ui library
+│       ├── ai/              Agents, blackboards, actions, perception, and a decision module for each technique
+│       ├── nav/             Navmeshes at runtime: queries, path requests, the crowd and its actions
+│       ├── random/          The engine's generator, which scripts' Random shares
 │       ├── wire/            Framing, wire format and schema writer, shared by both links
 │       └── content/         Engine content: shaders, shading models, the default and placeholder materials, the preview meshes
 ├── src/
