@@ -9,7 +9,7 @@ The decision module of the `goap` technique, in `lib/engine/ai/goap`, and the pl
 1. **The agent finds its own way.** A designer gives actions preconditions and effects, and gives goals. The agent then finds the actions that reach a goal, in their order, such as getting a weapon before it attacks. No one writes the order.
 2. **Planning has a fixed cost in each tick.** The search expands a budget of nodes in each tick, shared among the agents that search. Many agents that plan again at once therefore spread their searches over ticks, and do not make a spike.
 3. **The state is in the agent.** The phase, the plan, the expected world state and the search, with its open and closed nodes, are at offsets in the agent's module state, which the cooker sizes. A job cannot wait across frames ([Core: Job system](../core/jobs-and-memory.md#job-system)), so a search that does not end in its think goes on from that state in the next tick. The module holds no state of its own, so a code reload keeps every agent where it was.
-4. **A plan is a list of actions, however it was made.** The plan runner reads only the actions, their preconditions and their effects, so the HTN technique can run its plans with the same runner.
+4. **A plan is a list of actions, however it was made.** The plan runner reads only the actions, their preconditions and their effects, so the HTN technique runs its plans with the same runner ([HTN](htn.md)).
 
 ## Registering
 

@@ -60,6 +60,7 @@ TECHNIQUE_READERS :: #partial Technique_Readers {
 	.Behavior_Tree = BEHAVIOR_TREE_READER,
 	.Utility       = UTILITY_READER,
 	.Goap          = GOAP_READER,
+	.Htn           = HTN_READER,
 }
 
 // Decision_Header is what decision_header finds of a decision before its blackboard is read.

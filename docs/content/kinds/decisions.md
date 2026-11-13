@@ -31,7 +31,7 @@ node 5 wait
 	seconds = 1
 ```
 
-**In this document:** [The text](#the-text) · [Shared parts](#shared-parts) · [Techniques](#techniques) · [Behavior trees](#behavior-trees) · [Utility](#utility) · [GOAP](#goap) · [The cook](#the-cook) · [The blob](#the-blob)
+**In this document:** [The text](#the-text) · [Shared parts](#shared-parts) · [Techniques](#techniques) · [Behavior trees](#behavior-trees) · [Utility](#utility) · [GOAP](#goap) · [HTN](#htn) · [The cook](#the-cook) · [The blob](#the-blob)
 
 ## The text
 
@@ -80,14 +80,14 @@ The cook reads the header, the nodes and their shared parts, and gives the rest 
 - may parse conditions, action references and writes of its own fields, such as a planner's preconditions, with the shared parsers (`decision_condition`, `decision_action` and `decision_write`);
 - writes the technique's data for the blob, and sizes the module state that each agent keeps, at most `MAX_DECISION_STATE` (4096) bytes.
 
-Each technique adds its reader to `TECHNIQUE_READERS` in `tools/cook/decisions.odin`, and its module at runtime. A decision of a technique that has no reader yet is a problem.
+Each technique adds its reader to `TECHNIQUE_READERS` in `tools/cook/decisions.odin`, and its module at runtime. A decision of a technique that has no reader is a problem. The planning techniques, GOAP and HTN, share the reading of planning keys, tests and effects (`tools/cook/plans.odin`).
 
 | Technique | Reader | Module |
 |---|---|---|
 | `behavior_tree` | `BEHAVIOR_TREE_READER` (`tools/cook/behavior_trees.odin`) | `lib/engine/ai/behavior_tree` ([AI: Behavior trees](../../ai/behavior-trees.md)) |
 | `utility` | `UTILITY_READER` (`tools/cook/utility.odin`) | `lib/engine/ai/utility` ([AI: Utility](../../ai/utility.md)) |
 | `goap` | `GOAP_READER` (`tools/cook/goap.odin`) | `lib/engine/ai/goap` ([AI: GOAP](../../ai/goap.md)) |
-| `htn` | None yet | None yet |
+| `htn` | `HTN_READER` (`tools/cook/htn.odin`) | `lib/engine/ai/htn` ([AI: HTN](../../ai/htn.md)) |
 
 ## Behavior trees
 
@@ -427,6 +427,103 @@ The technique's data (`lib/engine/asset/format/goap.odin`) is a `Goap_Header`, t
 4. The search: `Goap_Search` (its node count and the heuristic's unit), its world state, a bit for each action that it may use, each action's cost, and `max_nodes` nodes, each a `Goap_Node` (16 bytes) and an interval (8 bytes) for each planning key.
 
 The header holds the layout hash, the counts, `max_nodes` and `max_plan`. `format.goap_check` refuses data of another layout, counts out of their limits, a state smaller than the layout, an action without an action or effects or with a cost of 0 or less, a goal without tests or with a negative priority, indices and tests out of range, keys of types that the data does not read, and effects that do not fit their keys. The module does this check before an agent starts with the decision.
+
+## HTN
+
+An `htn` decision is a hierarchy of tasks over planning keys. When the agent thinks, the module breaks the root task down into actions, by the methods of each compound task in their order, and runs the plan. While the plan runs, the module looks for a better method on each think ([AI: HTN](../../ai/htn.md)).
+
+```
+decision 1
+technique = htn
+blackboard = $0123456789abcdef0123456789abcdef
+keys = armed, near, sees, ammo
+root = 1
+max_plan = 6
+
+# Attack a target that it sees, closing in unless it is near; arm itself when it is not armed; and otherwise patrol.
+node 1 task
+	methods = 2, 3, 4
+node 2 method
+	when = target != none
+	preconditions = sees and ammo > 0
+	subtasks = 5, 10
+node 3 method
+	preconditions = not armed
+	subtasks = 11
+node 4 method
+	subtasks = 12
+node 5 task
+	methods = 6, 7
+node 6 method
+	preconditions = near
+	subtasks = 13
+node 7 method
+	subtasks = 14, 13
+node 10 action
+	action = attack(at = target)
+	preconditions = near and ammo > 0
+	effects = ammo -= 1
+	set mood = alert
+node 11 action
+	action = pick_up(item = "rifle")
+	effects = armed = true, ammo += 6
+node 12 action
+	action = patrol
+node 13 action
+	action = aim
+node 14 action
+	action = move_to(key = "target")
+	preconditions = not near
+	effects = near = true
+```
+
+### Settings
+
+| Setting | Values | What it does |
+|---|---|---|
+| `root` | A node ID | The root task, which a decomposition breaks down. It is a `task` node. Required. |
+| `keys` | `<key>, <key>, ...` | The planning keys, as GOAP's ([GOAP: Settings](#settings-1)): bool, int and enum keys of the blackboard, at most `MAX_PLAN_KEYS` (32). A decision without `keys` plans without them: its methods and actions have no preconditions or effects, only guards. |
+| `max_plan` | A count from 1 to `MAX_PLAN_LENGTH` (32), 8 by default | The most actions in a plan. |
+
+### Tasks, methods and actions
+
+| Kind | Fields | What it is |
+|---|---|---|
+| `task` | `methods` | A compound task. `methods = <id>, <id>, ...` lists its methods in order of preference: a decomposition tries the first one first. Required. |
+| `method` | `subtasks`, `preconditions`, `when` | A way to do its task. `subtasks = <id>, <id>, ...` lists the tasks and actions that it does, in their order. Required. `preconditions` are tests on the planning keys, which must hold in the decomposition's world state when the method is tried. `when` is a guard over any keys, read when a decomposition begins. |
+| `action` | `action`, `preconditions`, `effects`, `when`, `set` lines | A primitive task: an action that a plan holds, as GOAP's action, without a cost. `action` is required. `effects` are optional. `when` is checked when a decomposition begins, and again by the runner before the action starts. A `set` does not write a planning key. |
+
+Tests and effects are GOAP's ([Tests and effects](#tests-and-effects)). A method has one task, which lists it once. A task or an action can be a subtask of several methods. A method can list its own task, or a task above it, so a task can recur: the decomposition's depth bounds it ([AI: HTN: Limits](../../ai/htn.md#limits)).
+
+### Problems
+
+The reader reports these problems at their lines, in addition to the shared problems ([The cook](#the-cook)):
+- a setting other than `keys`, `root` and `max_plan`, a `max_plan` out of range, a decision without `root`, a `root` that is not a node ID, that no node has, or that is not a task;
+- the problems of `keys`, as GOAP's reader reports them;
+- a decision without tasks or without actions, more than `MAX_HTN_TASKS` (256) tasks, `MAX_HTN_METHODS` (1024) methods or `MAX_HTN_ACTIONS` (256) actions;
+- an unknown kind or field, or a field that the node's kind does not take, such as `when` on a task or `cost` on an action;
+- a task without `methods`, a method without `subtasks`, and an action without `action`;
+- `set` lines on a task or a method, and a `set` of a planning key on an action;
+- an ID that no node has, a `methods` entry that is not a method, a `subtasks` entry that is not a task or an action, a method that its task lists twice or that two tasks list, and a method that no task lists;
+- a node that the root does not reach;
+- the problems of tests and effects, as GOAP's reader reports them;
+- a state of more than `MAX_DECISION_STATE` bytes, with its size, at the `keys` line, or at line 1 without one.
+
+### The HTN data
+
+The technique's data (`lib/engine/asset/format/htn.odin`) is an `Htn_Header`, then the planning keys' slots, the actions as `Plan_Action`s, the `Htn_Task`s, the `Htn_Method`s, the `Htn_Subtask`s, the `Plan_Test`s and the `Plan_Effect`s. The actions and the tasks are in the text's order. The methods are in the order of their tasks, each task's together in the order that it lists them.
+- **An action** has its decision node, which holds its guard, its action and its writes, and its ranges of tests and effects. Its cost is 1, and the module does not read it.
+- **A task** has its decision node and its range of methods.
+- **A method** has its decision node, which holds its guard, its range of tests, and its range of subtasks.
+- **A subtask** is `Action` or `Task`, and the index of one.
+
+`format.htn_state` lays out the module state from the counts, and the cook sizes it with the same procedure:
+1. `Htn_Agent` (16 bytes): the phase, `Idle`, `Planning`, `Running` or `Checking`; the steps of the last decomposition; and the length of the running plan's record.
+2. `Plan_Run` (16 bytes): the plan runner's state, as GOAP's.
+3. The running plan's actions (2 bytes each), the world state that it expects, and its record, `MAX_HTN_RECORD` (64) `Htn_Choice`s (4 bytes each): a task and the index of its method.
+4. The decomposition: `Htn_Search` (32 bytes: its counts, its steps, and what it replays after a backtrack), its world state and the one it began in, a bit for each method and each action that it may use, its plan, its record, and `MAX_HTN_DEPTH` (32) `Htn_Frame`s (4 bytes each): a method and its next subtask.
+
+The header holds the layout hash, the counts, the root and `max_plan`. `format.htn_check` refuses data of another layout, counts out of their limits, a root that is not a task, a state smaller than the layout, an action without an action, a task without methods, a method without subtasks, indices, ranges and tests out of range, keys of types that the data does not read, and effects that do not fit their keys. The module does this check before an agent starts with the decision.
 
 ## The cook
 

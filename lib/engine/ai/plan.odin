@@ -11,13 +11,15 @@ import format "cinnabar:engine/asset/format"
 // preconditions do not hold, or when a planning key that the rest of the plan depends on is not the value that the plan
 // expects. The planner's world state is the planning keys' values (see format.Plan_Test).
 
-// Plan_View is an agent's goal and plan, for debuggers and scripts (see plan).
+// Plan_View is an agent's goal or methods and its plan, for debuggers and scripts (see plan).
 Plan_View :: struct {
 	// The goal's decision node ID, or 0 for none.
 	goal:      u32,
 	// Each goal's priority in the last think.
 	goals:     []Goal_Priority,
 	steps:     []Plan_Step,
+	// The methods that the plan's decomposition chose, in its order, for an HTN plan.
+	methods:   []Plan_Method,
 	// The step that runs, from 0. It is len(steps) when the plan is done or there is none.
 	step:      int,
 	// The nodes of the last search that ended.
@@ -36,6 +38,13 @@ Goal_Priority :: struct {
 Plan_Step :: struct {
 	id:     u32,
 	action: string,
+}
+
+// Plan_Method is a choice of a decomposition: the compound task's decision node ID, and the ID of the method that it
+// chose.
+Plan_Method :: struct {
+	task:   u32,
+	method: u32,
 }
 
 // Plan_World is a world state: each planning key's value, by its index among the planning keys.

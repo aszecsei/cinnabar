@@ -152,7 +152,8 @@ test_scores :: proc(decision: Decision, board: Board, state: []byte, allocator: 
 	return result
 }
 
-// test_plan is a plan of two steps, the second of which runs, for a goal whose priority is the thinks so far.
+// test_plan is a plan of two steps, the second of which runs, for a goal whose priority is the thinks so far, by one
+// method of a task.
 @(private = "file")
 test_plan :: proc(decision: Decision, board: Board, state: []byte, allocator: runtime.Allocator) -> Plan_View {
 	goals := make([]Goal_Priority, 1, allocator)
@@ -160,7 +161,9 @@ test_plan :: proc(decision: Decision, board: Board, state: []byte, allocator: ru
 	steps := make([]Plan_Step, 2, allocator)
 	steps[0] = {id = 4, action = "walk"}
 	steps[1] = {id = 5, action = "flee"}
-	return {goal = 3, goals = goals, steps = steps, step = 1, nodes = 9}
+	methods := make([]Plan_Method, 1, allocator)
+	methods[0] = {task = 6, method = 7}
+	return {goal = 3, goals = goals, steps = steps, methods = methods, step = 1, nodes = 9}
 }
 
 @(private = "file")
@@ -935,8 +938,8 @@ agent_scores_reads_the_modules_scores :: proc(t: ^testing.T) {
 	testing.expectf(t, slice.equal(f.reports[:], expected), "%v, expected %v", f.reports, expected)
 }
 
-// Agent.plan gives the agent's goal, the goals' priorities, the plan and its step from 1, the last search's nodes and
-// whether it searches, and nil before the agent is ready.
+// Agent.plan gives the agent's goal, the goals' priorities, the plan, its methods and its step from 1, the last search's
+// nodes and whether it searches, and nil before the agent is ready.
 @(test)
 agent_plan_reads_the_modules_plan :: proc(t: ^testing.T) {
 	f := setup(t, serial = true, scripts = true)
@@ -955,12 +958,15 @@ agent_plan_reads_the_modules_plan :: proc(t: ^testing.T) {
 		Test.report(#plan.steps)
 		Test.report(plan.steps[1].node)
 		Test.report(if plan.steps[2].action == "flee" then 1 else 0)
+		Test.report(#plan.methods)
+		Test.report(plan.methods[1].task)
+		Test.report(plan.methods[1].method)
 		Test.report(plan.step)
 		Test.report(plan.nodes)
 		Test.report(if plan.searching then 1 else 0)
 	`)
 	testing.expect(t, ok)
 	thinks := f64(thinks_of(f, f.agent))
-	expected := []f64{1, 3, 1, 3, thinks, 2, 4, 1, 2, 9, 0}
+	expected := []f64{1, 3, 1, 3, thinks, 2, 4, 1, 1, 6, 7, 2, 9, 0}
 	testing.expectf(t, slice.equal(f.reports[:], expected), "%v, expected %v", f.reports, expected)
 }
