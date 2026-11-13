@@ -162,6 +162,7 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
         _pendingMaterials.AddRange(options.EffectPaths);
         _pendingMaterials.AddRange(options.AnimationGraphPaths);
         _pendingMaterials.AddRange(options.UiDocumentPaths);
+        _pendingMaterials.AddRange(options.DecisionPaths);
         Assets.Changed += OpenPendingMaterials;
         Assets.Changed += OpenPendingUi;
         Content.AssetCreated += OnAssetCreated;

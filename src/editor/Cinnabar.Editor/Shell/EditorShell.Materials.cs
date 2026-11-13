@@ -22,7 +22,8 @@ public sealed partial class EditorShell
     readonly Dictionary<string, (DateTime Modified, MaterialGraph? Graph)> _functions = [];
     // Editors that closed with their changes discarded, so their documents close without asking again.
     readonly HashSet<IGraphEditor> _discarding = [];
-    // The command line's materials, effects, animation graphs and UI documents, which open once the index has them.
+    // The command line's materials, effects, animation graphs, UI documents, decisions and blackboards, which open once the
+    // index has them.
     readonly List<string> _pendingMaterials = [];
 
     void OpenPendingMaterials()
@@ -44,6 +45,14 @@ public sealed partial class EditorShell
                 {
                     OpenUiDocument(asset);
                 }
+                else if (asset.Kind == AssetKind.Decision)
+                {
+                    OpenDecision(asset);
+                }
+                else if (asset.Kind == AssetKind.Blackboard)
+                {
+                    OpenBlackboard(asset);
+                }
                 else
                 {
                     OpenMaterial(asset);
@@ -55,7 +64,7 @@ public sealed partial class EditorShell
     public IReadOnlyList<MaterialEditor> Materials => _materials;
 
     /// <summary>The open graphs of every kind.</summary>
-    public IEnumerable<IGraphEditor> GraphEditors => _materials.Concat<IGraphEditor>(_animationGraphs).Concat(_uiDocuments);
+    public IEnumerable<IGraphEditor> GraphEditors => _materials.Concat<IGraphEditor>(_animationGraphs).Concat(_uiDocuments).Concat(_decisions).Concat(_blackboards);
 
     /// <summary>The graph editor whose document is active, or null when the viewport is.</summary>
     public IGraphEditor? ActiveGraphEditor { get; private set; }
@@ -194,6 +203,14 @@ public sealed partial class EditorShell
             _uiDocuments.Remove(ui);
             ui.ClosePreview();
         }
+        if (editor is DecisionEditor decision)
+        {
+            _decisions.Remove(decision);
+        }
+        if (editor is BlackboardEditor blackboard)
+        {
+            _blackboards.Remove(blackboard);
+        }
         _discarding.Remove(editor);
         editor.Dispose();
         if (ActiveGraphEditor == editor)
@@ -216,8 +233,8 @@ public sealed partial class EditorShell
     }
 
     /// <summary>
-    /// Writes a graph editor's graph to its file. A failure goes to the console. An animation graph or a UI document whose
-    /// file another program changed since it was read is not written, and the window asks, unless
+    /// Writes a graph editor's graph to its file. A failure goes to the console. A text file that the editor keeps whole,
+    /// such as an animation graph, a UI document, a decision or a blackboard, whose file another program changed since it was read is not written, and the window asks, unless
     /// <paramref name="overwrite"/> says so. Refused during a drag, whose steps the file must not get as saved.
     /// </summary>
     public bool SaveGraph(IGraphEditor editor, bool overwrite = false)
@@ -227,7 +244,7 @@ public sealed partial class EditorShell
             Console.Add(LogLevel.Warning, $"{editor.Noun}: cannot save {editor.Document.Path} while a drag is open. Finish or cancel it first.");
             return false;
         }
-        if (!overwrite && editor.Document is AnimationGraphDocument { ChangedOnDisk: true } or UiDocument { ChangedOnDisk: true })
+        if (!overwrite && editor.Document is ITextGraphDocument { ChangedOnDisk: true })
         {
             GraphOverwriteRequested?.Invoke(editor);
             return false;

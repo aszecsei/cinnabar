@@ -1,0 +1,18 @@
+# keys: health ammo has_target searching can_see_target armed near down sees mood target last_seen heading rest_time travel_cost
+blackboard 1
+# A guard's knowledge, as the docs write it.
+float health = 100
+int ammo = 30
+bool has_target
+bool searching
+bool can_see_target
+bool armed
+bool near
+bool down
+bool sees
+enum mood (calm, alert, angry) = calm
+entity target
+position last_seen = [0, 0, 0]
+vector heading = [0, 0, 1]
+float rest_time = 2
+float travel_cost = 1

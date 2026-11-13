@@ -5,9 +5,11 @@ import "core:log"
 import "core:mem"
 import "core:mem/virtual"
 import "core:os"
+import "core:slice"
 import "core:strings"
 import "core:testing"
 
+import cook_link "cinnabar:engine/asset/cook_link"
 import format "cinnabar:engine/asset/format"
 
 // Errors captures error logs. The test runner fails a test that logs an error, so tests that expect errors capture
@@ -379,8 +381,25 @@ return Bark`},
 	// An action is not a behaviour, so the editor does not offer it as one.
 	testing.expect_value(t, blob.flags, format.Script_Flags{.Action})
 	testing.expect_value(t, format.blob_string(data, blob.class_name), "bark")
+	// The index has the action's name and its parameters sorted by name, from the cook and from an up to date script.
+	expected := []cook_link.Action_Param{{"at", .Entity}, {"line", .String}, {"loud", .Boolean}, {"toward", .Position}}
 	for a in pass.assets {
 		testing.expect_value(t, a.behaviour, "")
+		testing.expect_value(t, a.action, "bark")
+		testing.expect(t, slice.equal(a.params, expected))
+	}
+	pass = cook(options, {.Script})
+	testing.expect_value(t, pass.current[.Script], 1)
+	for a in pass.assets {
+		testing.expect_value(t, a.action, "bark")
+		testing.expect(t, slice.equal(a.params, expected))
+	}
+	index: Index
+	index_build(&index, pass, options.roots[:])
+	defer index_destroy(&index)
+	for _, a in index.assets {
+		testing.expect_value(t, a.action, "bark")
+		testing.expect(t, slice.equal(a.params, expected))
 	}
 	params := format.script_fields(data, blob)
 	testing.expect_value(t, len(params), 4)

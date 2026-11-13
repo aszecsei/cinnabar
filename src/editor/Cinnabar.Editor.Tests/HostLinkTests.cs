@@ -853,6 +853,37 @@ public sealed class HostLinkTests : IAsyncDisposable
         Assert.Equal(0.25f, look.FadeDuration);
     }
 
+    const string GuardDecision = "2effcc9c7bb19592d725d1adf3ff2aba";
+    const string GuardScene = "b5c0dc0f830dfc93c35afa5461183af7";
+
+    [Fact]
+    public async Task AWatchedGuardShowsTheNodesOfItsTreeThatRun()
+    {
+        if (!File.Exists(Path.Combine(EditorOptions.RepositoryRoot(), "build", "dev", "content", GuardDecision + ".blob")))
+        {
+            Assert.Skip("the sample's content is not cooked");
+        }
+        await using var editor = await Connect();
+        editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
+        await editor.Next<Welcome>();
+        var text = File.ReadAllText(Path.Combine(EditorOptions.RepositoryRoot(), "samples", "mygame", "content", "scenes", "guard.scene")).ReplaceLineEndings("\n");
+        var (scene, problems) = Document.SceneFile.Parse(text);
+        Assert.Empty(problems);
+        var world = await Load(editor, scene!, guid: GuardScene);
+        var guard = world.Entities.Single(e => e.Name == "Guard").Entity;
+
+        editor.Link.Send(new WatchEntity(guard));
+        editor.Link.Send(new SetMode(EditorMode.Play));
+        // With no intruder in sight, the guard walks its round: the root selector runs, and then the patrol sequence
+        // (node 8) with its move to the waypoint (node 10), which the guard writes into its blackboard first.
+        const uint Root = 1, Patrol = 8, MoveToWaypoint = 10;
+        var view = await editor.Next<AgentView>(v => v.Entity == guard && v.Nodes.Any(n => n.Running && n.Id == MoveToWaypoint));
+        Assert.Equal(GuardDecision, Convert.ToHexStringLower(view.Decision));
+        Assert.Contains(view.Nodes, n => n.Id == Root && n.Running);
+        Assert.Contains(view.Nodes, n => n.Id == Patrol && n.Running);
+        Assert.Contains(view.Values, v => v.Name == "waypoint" && v.Kind == AgentKind.Position);
+    }
+
     [Fact]
     public async Task APreviewPlaysAGraphOnItsMeshApartFromTheWorld()
     {
@@ -1649,10 +1680,10 @@ public sealed class HostLinkTests : IAsyncDisposable
     static Document.SceneNumber Number(double value) => Document.SceneNumber.Of(value);
 
     /// <summary>Replaces the game's world with a scene, as the editor does, and gives the world once it has loaded.</summary>
-    static async Task<EntitySnapshot> Load(Editor editor, Document.Scene scene, string? name = null)
+    static async Task<EntitySnapshot> Load(Editor editor, Document.Scene scene, string? name = null, string guid = "")
     {
         name ??= scene.Entities[0].Name;
-        editor.Link.Send(Document.SceneSnapshot.ToMessage(scene, ""));
+        editor.Link.Send(Document.SceneSnapshot.ToMessage(scene, guid));
         return await editor.Next<EntitySnapshot>(s => s.Entities.Any(e => e.Name == name) && s.Entities.Length == scene.Entities.Count);
     }
 

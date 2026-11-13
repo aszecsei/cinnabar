@@ -149,6 +149,9 @@ Asset_Source :: struct {
 	visual:       [dynamic]format.Guid,
 	// For a script that defines a behaviour, the class's name.
 	behaviour:    string,
+	// For a script that defines an action, its name and its parameters, sorted by name.
+	action:       string,
+	params:       []cook_link.Action_Param,
 	// The sub-assets that the cook made of it, such as a model's meshes (see docs/content/identity-and-cooking.md#identity).
 	subassets:    [dynamic]Subasset,
 	// For a material, the combinations of static switches that it and its instances use.
@@ -212,6 +215,8 @@ uncarry :: proc(a: ^Asset_Source) {
 	clear(&a.subassets)
 	clear(&a.inputs)
 	a.behaviour = ""
+	a.action = ""
+	a.params = nil
 	a.permutations = 0
 	a.size = {}
 	a.tool_texture = {}

@@ -15,6 +15,11 @@ import format "cinnabar:engine/asset/format"
 // its slots are the blob's.
 BLACKBOARD_COOK_VERSION :: "blackboards 1"
 
+// BLACKBOARD_TEMPLATE is the source of a new blackboard.
+BLACKBOARD_TEMPLATE :: `blackboard 1
+# A key is <type> <name> [= <default>], of the types float, int, bool, enum, entity, position and vector.
+`
+
 // Blackboard_Problem is an error in a blackboard's or a decision's text, at a line from 1.
 Blackboard_Problem :: struct {
 	line:    int,
@@ -90,6 +95,16 @@ cook_blackboard :: proc(a: ^Asset_Source, out_dir: string, pass: ^Pass) -> Asset
 		return .Failed
 	}
 	return .Cooked
+}
+
+// blackboard_check gives the problems of a blackboard's text that the editor has not saved, as a cook of the file at
+// this path would. It writes nothing.
+blackboard_check :: proc(path, text: string) -> (problems: Problems) {
+	_, found := blackboard_parse(text, context.temp_allocator)
+	for p in found {
+		report_error(&problems, path, p.line, 0, "%s", p.message)
+	}
+	return
 }
 
 // strip_line_comment is a line without a # and what follows it, outside of quotes.

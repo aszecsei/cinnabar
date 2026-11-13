@@ -537,6 +537,7 @@ The header holds the layout hash, the counts, the root and `max_plan`. `format.h
   - the technique's own.
 
   A decision with a problem keeps its old blob, so the running game keeps the last good version.
+- **Unsaved text:** `Cook_Preview` with a decision's GUID checks the text that the editor sends as the cook does, with the blackboard that it names read from disk, and answers with its problems at the text's lines. A blackboard with problems is the one problem, at the `blackboard` line, as in the cook. It writes no blob (`decision_check` in `tools/cook/decisions.odin`).
 - **The cache key** covers the cooker version, the layout, the technique reader's version, the source path, the source, the GUID and the blackboard's own key, which covers its source.
 
 ## The blob
@@ -552,4 +553,4 @@ A `Decision_Blob` (`lib/engine/asset/format/decision.odin`) holds:
 
 The view checks every index between the records. A decision blob names its blackboard among its references, so a level's bundle holds both ([Blobs and loading: Bundles](../blobs-and-loading.md#bundles)).
 
-- **The editor** opens a decision in the script editor. It is among the scripts in the content browser.
+- **The editor** opens a decision in the decision editor, which draws a behavior tree on a canvas, puts the cooker's problems on its nodes, and shows the selected agent running it ([Editor: Decision editor](../../editor/decision-editor.md#decision-editor)). It is among the scripts in the content browser.

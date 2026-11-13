@@ -1,0 +1,4 @@
+# A comment can come before the header, but an indent can't be on it.
+
+	decision 1 # problem
+technique = behavior_tree

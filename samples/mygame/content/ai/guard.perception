@@ -1,0 +1,6 @@
+perception 1
+# A guard's eyes: the nearest intruder that it sees now, whether it sees it, and where it last was.
+notices Player
+target = nearest seen Player
+can_see_target = visible target
+last_seen = position target

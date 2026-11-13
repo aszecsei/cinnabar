@@ -107,17 +107,26 @@ public sealed class ContentTests : IDisposable
     }
 
     [Fact]
-    public void BlackboardsDecisionsAndPerceptionsAreScriptsThatOpenAsText()
+    public void BlackboardsAndDecisionsOpenInTheirEditorsAndPerceptionsAsText()
     {
         using var shell = NewShell();
-        foreach (var (kind, file) in new[] { (AssetKind.Blackboard, "guard.blackboard"), (AssetKind.Decision, "guard.decision"), (AssetKind.Perception, "guard.perception") })
+        foreach (var (kind, file, label) in new[]
+            {
+                (AssetKind.Blackboard, "guard.blackboard", "Open in Blackboard Editor"), (AssetKind.Decision, "guard.decision", "Open in Decision Editor"),
+                (AssetKind.Perception, "guard.perception", "Open in Script Editor"),
+            })
         {
-            // They are among the scripts in the content browser, and open in the script editor.
+            // They are among the scripts in the content browser.
             Assert.Equal(ContentKind.Scripts, ContentBrowserModel.KindOf(kind));
             var asset = TestAssets.Make("44445555666677778888999900002222", kind, file);
             Assert.True(EditorShell.CanOpen(asset));
-            Assert.Equal("Open in Script Editor", shell.OpenLabel(asset));
+            Assert.Equal(label, shell.OpenLabel(asset));
         }
+        shell.Content.SelectContent(new ContentFolder("game", ""), []);
+        Assert.Equal("new_blackboard", shell.Content.NewName(AssetTemplate.Blackboard));
+        Assert.Equal("new_decision", shell.Content.NewName(AssetTemplate.DecisionUtility));
+        Assert.Equal([Path.GetFullPath("guard.decision"), Path.GetFullPath("guard.blackboard")],
+            EditorOptions.Parse(["--decision", "guard.decision", "--blackboard", "guard.blackboard"]).DecisionPaths);
     }
 
     [Fact]

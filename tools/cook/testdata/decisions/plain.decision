@@ -1,0 +1,49 @@
+decision 1
+# nodes: 1 2 3 4 5 6 7 8 9 10 11 12
+technique = behavior_tree
+blackboard = $0123456789abcdef0123456789abcdef
+
+# Attack a close target, chase a seen one, search where it was last seen, keep watch, and patrol.
+node 1 selector
+	position = [0, 0]
+	children = 2, 5, 6, 9, 10
+node 2 sequence
+	position = [200, -80]
+	when = target != none and distance(self, target) < 2
+	abort = both
+	children = 3, 4
+node 3 action
+	action = attack(at = target)
+	cooldown = 1.5
+node 4 wait
+	seconds = 0.5
+node 5 action
+	when = can_see_target
+	abort = lower
+	action = move_to(key = "target")
+	time_limit = 10
+node 6 sequence
+	when = searching
+	abort = self
+	children = 7, 8
+node 7 action
+	action = move_to(key = "last_seen")
+	force = succeed
+node 8 set
+	set searching = false
+	set mood = calm
+	set rest_time = 3
+node 9 condition
+	condition = health < 30 and not has_target
+	invert = true
+node 10 parallel
+	policy = one
+	children = 11, 12
+node 11 wait
+	seconds = rest_time
+	repeat = 2
+	cooldown = rest_time
+	invert = false
+node 12 action
+	action = patrol
+	repeat = forever

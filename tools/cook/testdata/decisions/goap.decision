@@ -1,0 +1,35 @@
+decision 1
+# nodes: 1 2 10 11 12 20
+technique = goap
+blackboard = $0123456789abcdef0123456789abcdef
+keys = armed, ammo, near, down
+max_nodes = 48
+max_plan = 6
+
+# Down the target when there is one, more so when healthy, and otherwise keep ammo.
+node 1 goal
+	when = target != none
+	desired = down
+	priority = 10
+	considerations = 20
+node 2 goal
+	desired = ammo >= 5
+node 10 action
+	action = pick_up(item = "rifle")
+	effects = armed = true, ammo += 6
+	cost = 2
+node 11 action
+	action = attack(at = target)
+	when = can_see_target
+	preconditions = armed and ammo > 0 and near
+	effects = down = true, ammo -= 1
+	set mood = alert
+node 12 action
+	action = move_to(key = "target")
+	preconditions = not near
+	effects = near = true
+	cost = travel_cost
+node 20 consideration
+	input = health
+	range = [0, 100]
+	curve = linear

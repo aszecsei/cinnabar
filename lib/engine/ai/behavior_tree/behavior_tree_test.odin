@@ -959,3 +959,58 @@ trees_are_the_same_on_one_job_and_many :: proc(t: ^testing.T) {
 	defer delete(many)
 	testing.expect(t, slice.equal(one[:], many[:]), "the outcomes differ")
 }
+
+@(private = "file")
+last :: proc(f: ^Fixture, e: ecs.Entity, node: int) -> ai.Node_Result {
+	ready := ready_of(f, e)
+	if ready == nil {
+		return .None
+	}
+	return (^Node_State)(&ready.state[node * format.TREE_STATE_SIZE]).last
+}
+
+// A node keeps how it last ended, and the module gives the nodes that run or ended, by their IDs in the text.
+@(test)
+last_results_show_for_a_finished_sequence :: proc(t: ^testing.T) {
+	f := setup(t, {kind = .Selector, children = {{kind = .Sequence, children = {{kind = .Action, action = "ok"}, {kind = .Action, action = "no"}}}, HOLD}})
+	defer teardown(t, f)
+	e := spawn_agent(f)
+	frame(f, 20)
+	testing.expect_value(t, last(f, e, 2), ai.Node_Result.Succeeded)
+	testing.expect_value(t, last(f, e, 3), ai.Node_Result.Failed)
+	testing.expect_value(t, last(f, e, 1), ai.Node_Result.Failed)
+	testing.expect_value(t, last(f, e, 4), ai.Node_Result.None)
+
+	debug, ok := ai.agent_debug(&f.ai, e)
+	testing.expect(t, ok)
+	testing.expect_value(t, debug.decision, DECISION)
+	testing.expect_value(t, len(debug.keys), len(KEYS))
+	testing.expect_value(t, debug.keys[2].name, "delay")
+	testing.expect_value(t, debug.keys[2].value, ai.Value(f32(0.25)))
+	// The IDs are the nodes' indices plus one. The wait runs, and the selector, which has not ended.
+	expected := []ai.Node_View{{id = 1, running = true}, {id = 2, last = .Failed}, {id = 3, last = .Succeeded}, {id = 4, last = .Failed}, {id = 5, running = true}}
+	testing.expect(t, slice.equal(debug.nodes, expected), "the nodes differ")
+}
+
+// An abort leaves Aborted in the nodes that ran, which stays.
+@(test)
+last_results_are_kept_after_an_abort :: proc(t: ^testing.T) {
+	f := setup(
+		t,
+		{kind = .Selector, children = {{kind = .Sequence, guard = "a", abort = .Self, children = {{kind = .Action, action = "walk", steps = 1000}}}, HOLD}},
+	)
+	defer teardown(t, f)
+	e := spawn_agent(f)
+	ai.set_key(&f.ai, e, "a", true)
+	frame(f, 10)
+	testing.expect_value(t, last(f, e, 2), ai.Node_Result.None)
+	ai.set_key(&f.ai, e, "a", false)
+	frame(f, 3)
+	testing.expect_value(t, status(f, e, 2), Status.Idle)
+	testing.expect_value(t, last(f, e, 2), ai.Node_Result.Aborted)
+	testing.expect_value(t, last(f, e, 1), ai.Node_Result.Failed)
+
+	// It stays until the node ends again.
+	frame(f, 10)
+	testing.expect_value(t, last(f, e, 2), ai.Node_Result.Aborted)
+}

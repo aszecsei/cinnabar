@@ -122,3 +122,11 @@ public sealed class ViewportDocument : Dock.Model.Mvvm.Controls.Document
     /// <summary>Docking can template a document more than once, so each call makes a new view over the same viewports.</summary>
     public Control CreateView() => _createView();
 }
+
+/// <summary>A decision in the decision editor (see docs/editor/decision-editor.md#decision-editor).</summary>
+public sealed class DecisionEditorDocument(Shell.DecisionEditor editor, Func<Control> createView)
+    : GraphEditorDocument(editor, $"decision.{editor.Guid}", createView);
+
+/// <summary>A blackboard in the blackboard editor (see docs/editor/decision-editor.md#blackboards).</summary>
+public sealed class BlackboardEditorDocument(Shell.BlackboardEditor editor, Func<Control> createView)
+    : GraphEditorDocument(editor, $"blackboard.{editor.Guid}", createView);

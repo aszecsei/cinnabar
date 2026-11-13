@@ -1,0 +1,15 @@
+# keys: health ammo mood
+blackboard 1
+float health = 1
+int ammo = 30
+enum mood (calm, alert) = calm
+float health = 2 # problem
+string name # problem
+int count = 1.5 # problem
+enum phase calm, alert # problem
+enum phase (one, one) # problem
+entity target = self # problem
+bool ready = yes # problem
+position home = [1, 2] # problem
+	vector heading = 1 # problem
+float 3d # problem

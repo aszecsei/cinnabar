@@ -6,6 +6,8 @@
 // holds no state of its own.
 package behavior_tree
 
+import "base:runtime"
+
 import "cinnabar:engine/ai"
 import format "cinnabar:engine/asset/format"
 
@@ -21,10 +23,12 @@ Status :: enum u8 {
 
 // Node_State is a node's state in the agent's module state. child is a sequence's or a selector's running child, by
 // its index in the tree; repeats is how many times a repeating node succeeded; entered is the think that the node last
-// started in, as Think_Context.thinks counts them.
+// started in, as Think_Context.thinks counts them. last is how the node last ended, which the editor shows: the result
+// that it gave its parent, or Aborted. Starting a node again keeps it, and only the next end changes it.
 Node_State :: struct {
 	status:  Status,
-	padding: [3]u8,
+	last:    ai.Node_Result,
+	padding: [2]u8,
 	child:   u32,
 	repeats: u32,
 	entered: u32,
@@ -41,7 +45,22 @@ Result :: enum u8 {
 // register registers the module with the agents' AI. Call it in register_world, after ai.register, which clears the
 // modules, so a code reload registers it again.
 register :: proc(s: ^ai.State) {
-	ai.register_module(s, .Behavior_Tree, {think = think, check = check})
+	ai.register_module(s, .Behavior_Tree, {think = think, check = check, nodes = nodes})
+}
+
+// nodes is each node of the agent's tree that runs or has ended, by its decision node's ID, for the editor.
+nodes :: proc(decision: ai.Decision, state: []byte, allocator: runtime.Allocator) -> []ai.Node_View {
+	tree := format.tree_nodes(format.decision_technique_data(decision.data, decision.blob))
+	shared := format.decision_nodes(decision.data, decision.blob)
+	views := make([dynamic]ai.Node_View, 0, len(tree), allocator)
+	for n in tree {
+		st := (^Node_State)(&state[n.state])
+		running := st.status == .Running || st.status == .Again
+		if running || st.last != .None {
+			append(&views, ai.Node_View{id = shared[n.node].id, running = running, last = st.last})
+		}
+	}
+	return views[:]
 }
 
 // check checks a decision's tree against the decision and its blackboard, once, before an agent starts with it.
@@ -126,6 +145,7 @@ enter :: proc(b: ^Tree, i: u32) -> Result {
 		result := decorate(n, .Failed)
 		state(b, i)^ = {
 			status = status_of(result),
+			last   = last_of(result),
 		}
 		return result
 	}
@@ -327,6 +347,7 @@ finish :: proc(b: ^Tree, i: u32, result: Result) -> Result {
 	n := b.nodes[i]
 	final := decorate(n, result)
 	state(b, i).status = status_of(final)
+	state(b, i).last = last_of(final)
 	if .Cooldown in n.flags {
 		timer(b, i, .Ready_At)^ = b.now + ticks(b, n.cooldown)
 	}
@@ -362,6 +383,20 @@ status_of :: proc(r: Result) -> Status {
 	return .Failed
 }
 
+// last_of is the result that a node ended with, as the editor shows it.
+@(private)
+last_of :: proc(r: Result) -> ai.Node_Result {
+	switch r {
+	case .Running:
+		return .None
+	case .Succeeded:
+		return .Succeeded
+	case .Failed:
+		return .Failed
+	}
+	return .None
+}
+
 // abort stops a node's subtree: each node in it that runs stops, and is idle, with its cooldown started, and an action
 // that runs is stopped.
 @(private)
@@ -376,6 +411,7 @@ abort :: proc(b: ^Tree, i: u32) {
 			ai.stop_action(b.t)
 		}
 		st.status = .Idle
+		st.last = .Aborted
 		if .Cooldown in n.flags {
 			timer(b, j, .Ready_At)^ = b.now + ticks(b, n.cooldown)
 		}

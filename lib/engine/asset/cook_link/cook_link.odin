@@ -151,6 +151,9 @@ Asset :: struct {
 	warnings:     u32,
 	// For a script that defines a behaviour, the class's name.
 	behaviour:    string,
+	// For a script that defines an action, the action's name, and its parameters sorted by name.
+	action:       string,
+	params:       []Action_Param,
 	// The import settings in its .meta file, in the file's order.
 	settings:     []Setting,
 	// The GUIDs of the assets that it depends on: a script's requires, and the scripts that a scene names.
@@ -182,6 +185,22 @@ Asset :: struct {
 // face onto.
 Hotspot :: struct {
 	x0, y0, x1, y1: u32,
+}
+
+// Action_Param_Kind is the type of an action's parameter.
+Action_Param_Kind :: enum u8 {
+	Number,
+	Boolean,
+	String,
+	Vector,
+	Entity,
+	Position,
+}
+
+// Action_Param is a parameter of a script's action, from Param.
+Action_Param :: struct {
+	name: string,
+	kind: Action_Param_Kind,
 }
 
 Setting :: struct {
@@ -271,6 +290,16 @@ Asset_Template :: enum u8 {
 	Ui,
 	// A sprite sheet whose comments show how to name its frames and animations.
 	Sprite_Sheet,
+	// A blackboard with no keys.
+	Blackboard,
+	// A behavior tree decision of a selector over a wait, which names no blackboard yet.
+	Decision_Behavior_Tree,
+	// A utility decision of one option, which names no blackboard yet.
+	Decision_Utility,
+	// A GOAP decision of one goal and one action, which names no blackboard yet.
+	Decision_Goap,
+	// An HTN decision of one task, one method and one action, which names no blackboard yet.
+	Decision_Htn,
 }
 
 // Makes an asset from a template in a folder, with a new .meta file. The result has its GUID.

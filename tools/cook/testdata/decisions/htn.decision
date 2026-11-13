@@ -1,0 +1,43 @@
+decision 1
+# nodes: 1 2 3 4 5 6 7 10 11 12 13 14
+technique = htn
+blackboard = $0123456789abcdef0123456789abcdef
+keys = armed, near, sees, ammo
+root = 1
+max_plan = 6
+
+# Attack a target that it sees, closing in unless it is near; arm itself when it is not armed; and otherwise patrol.
+node 1 task
+	methods = 2, 3, 4
+node 2 method
+	when = target != none
+	preconditions = sees and ammo > 0
+	subtasks = 5, 10
+node 3 method
+	preconditions = not armed
+	subtasks = 11
+node 4 method
+	subtasks = 12
+node 5 task
+	methods = 6, 7
+node 6 method
+	preconditions = near
+	subtasks = 13
+node 7 method
+	subtasks = 14, 13
+node 10 action
+	action = attack(at = target)
+	preconditions = near and ammo > 0
+	effects = ammo -= 1
+	set mood = alert
+node 11 action
+	action = pick_up(item = "rifle")
+	effects = armed = true, ammo += 6
+node 12 action
+	action = patrol
+node 13 action
+	action = aim
+node 14 action
+	action = move_to(key = "target")
+	preconditions = not near
+	effects = near = true

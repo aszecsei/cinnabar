@@ -237,6 +237,37 @@ public sealed class CookLinkTests : IDisposable
     }
 
     [Fact]
+    public async Task TheDaemonChecksAnUnsavedDecisionAgainstItsBlackboardAndAnUnsavedBlackboard()
+    {
+        if (!File.Exists(_cook))
+        {
+            Assert.Skip("build/tools/cook.exe is missing");
+        }
+        const string Board = "blackboard 1\nentity target\nbool searching\n";
+        Write("guard.blackboard", Board);
+        var index = new AssetIndex();
+        using var session = Start(index);
+        await Until(() => session.Linked && index.Assets.Values.Any(a => a.Kind == AssetKind.Blackboard && a.Status == AssetStatus.Current), session, []);
+        var board = index.Assets.Values.Single(a => a.Kind == AssetKind.Blackboard);
+        var tree = $"decision 1\ntechnique = behavior_tree\nblackboard = ${board.Guid}\n\nnode 1 selector\n\tchildren = 2\nnode 2 action\n\twhen = target != none\n\taction = move_to(key = \"target\")\n";
+        Write("guard.decision", tree);
+        await Until(() => index.Assets.Values.Any(a => a.Kind == AssetKind.Decision && a.Status == AssetStatus.Current), session, []);
+        var decision = index.Assets.Values.Single(a => a.Kind == AssetKind.Decision);
+
+        Assert.Equal("", (await session.CookPreview(decision.Guid, tree)).Error);
+        // A key that the blackboard does not have is a problem at the line of its node, which the editor finds.
+        var file = DecisionFile.Parse(tree).File!;
+        file.Find(2)!.Set("when", "enemy != none");
+        var broken = await session.CookPreview(decision.Guid, file.Text);
+        Assert.NotEqual("", broken.Error);
+        Assert.Equal(2, file.NodeAt((int)Assert.Single(broken.Problems).Line));
+
+        // A blackboard's unsaved text is checked too, at its lines.
+        var twice = await session.CookPreview(board.Guid, Board + "bool searching\n");
+        Assert.Equal(4u, Assert.Single(twice.Problems).Line);
+    }
+
+    [Fact]
     public async Task TheDaemonCooksAnUnsavedUiDocumentAndPutsItsProblemsOnItsElements()
     {
         if (!File.Exists(_cook))

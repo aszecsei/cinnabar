@@ -344,6 +344,11 @@ public sealed class MainWindow : Window
             Link.Cook.AssetTemplate.AnimationGraph => ("New Animation Graph", "animation graph"),
             Link.Cook.AssetTemplate.Ui => ("New UI Document", "UI document"),
             Link.Cook.AssetTemplate.SpriteSheet => ("New Sprite Sheet", "sprite sheet"),
+            Link.Cook.AssetTemplate.Blackboard => ("New Blackboard", "blackboard"),
+            Link.Cook.AssetTemplate.DecisionBehaviorTree => ("New Decision", "behavior tree decision"),
+            Link.Cook.AssetTemplate.DecisionUtility => ("New Decision", "utility decision"),
+            Link.Cook.AssetTemplate.DecisionGoap => ("New Decision", "GOAP decision"),
+            Link.Cook.AssetTemplate.DecisionHtn => ("New Decision", "HTN decision"),
             _ => ("New Folder", "folder"),
         };
         var place = folder.Display;

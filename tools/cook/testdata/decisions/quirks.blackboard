@@ -1,0 +1,17 @@
+# keys: health ammo has_target searching mood phase target last_seen heading tricky
+# A comment can come before the header.
+
+blackboard 1 # and after it
+
+# A blank line and a comment, between the keys.
+float health=1.5 # no spaces around the equals sign
+int ammo   =   -30
+bool has_target = true
+bool   searching
+enum mood (calm,alert , angry) = alert # the spaces in the list do not matter
+enum phase (one) # one value, and its first is the default
+entity target = none
+	position last_seen = [1, 2, -3]
+vector heading = [0, 0, 1]
+	# An indented comment is a comment too.
+float tricky = 1e3 # a # inside a comment

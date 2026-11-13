@@ -1,4 +1,5 @@
 using Cinnabar.Editor.Document;
+using Cinnabar.Editor.Graphs;
 using Cinnabar.Editor.Link.Cook;
 using Cinnabar.Editor.Link.Protocol;
 using Cinnabar.Editor.Maths;
@@ -14,7 +15,7 @@ namespace Cinnabar.Editor.Shell;
 /// world. Every change of the graph sends the unsaved text to the cook daemon, a moment after the last change. The view
 /// turns input into calls here, so tests can drive the editor without a window.
 /// </summary>
-public sealed class AnimationGraphEditor : PreviewOwner, IGraphEditor
+public sealed class AnimationGraphEditor : PreviewOwner, IGraphEditor, IGraphCanvasEditor
 {
     // The preview's camera starts here, for a model of a meter or two.
     const float StartYaw = 2.4f;

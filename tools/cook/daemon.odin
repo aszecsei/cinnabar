@@ -321,9 +321,10 @@ handle_taken :: proc(d: ^Daemon, taken: serve.Taken) {
 }
 
 // preview cooks a material, an animation graph or a UI document that the editor has not saved into the cache's preview
-// area (see cook_preview, animation_graph_check and ui_check). Its problems go to the editor in the answer, and not to
+// area (see cook_preview, animation_graph_check and ui_check), and checks a decision or a blackboard, which have no
+// preview, and writes nothing (see decision_check and blackboard_check). Its problems go to the editor in the answer, and not to
 // the log: the asset's editor shows them on its nodes or elements.
-@(private = "file")
+@(private)
 preview :: proc(d: ^Daemon, msg: cook_link.Cook_Preview) -> cook_link.Preview_Result {
 	guid, guid_ok := format.guid_parse(msg.guid)
 	if !guid_ok {
@@ -347,6 +348,14 @@ preview :: proc(d: ^Daemon, msg: cook_link.Cook_Preview) -> cook_link.Preview_Re
 	case known && a.kind == .Ui:
 		problems, ok = ui_check(d.options, guid, msg.text, path, name, index_kinds(&d.index))
 		failed = "the document did not cook"
+	case known && a.kind == .Decision:
+		problems = decision_check(d.options, &d.index, path, msg.text)
+		ok = len(problems.list) == 0
+		failed = "the decision did not cook"
+	case known && a.kind == .Blackboard:
+		problems = blackboard_check(path, msg.text)
+		ok = len(problems.list) == 0
+		failed = "the blackboard did not cook"
 	case:
 		problems, ok = cook_preview(d.options, guid, msg.text)
 	}

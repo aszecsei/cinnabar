@@ -28,6 +28,11 @@ static partial class EditorCommands
     public const string NewAnimationGraph = "content.newAnimationGraph";
     public const string NewUiDocument = "content.newUiDocument";
     public const string NewSpriteSheet = "content.newSpriteSheet";
+    public const string NewBlackboard = "content.newBlackboard";
+    public const string NewDecision = "content.newDecision";
+    public const string NewUtilityDecision = "content.newUtilityDecision";
+    public const string NewGoapDecision = "content.newGoapDecision";
+    public const string NewHtnDecision = "content.newHtnDecision";
     public const string MakePrefab = "prefab.make";
     public const string UnpackPrefab = "prefab.unpack";
     public const string UnpackPrefabCompletely = "prefab.unpackCompletely";

@@ -1,0 +1,7 @@
+blackboard 1
+# What a guard knows: the intruder that it sees, where it saw it last, and the next place on its round.
+entity target
+bool can_see_target
+position last_seen
+bool searching
+position waypoint

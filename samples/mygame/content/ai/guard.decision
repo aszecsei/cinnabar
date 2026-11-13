@@ -1,0 +1,46 @@
+decision 1
+technique = behavior_tree
+blackboard = $320a03f70e28cc471291c76dd5a2048a
+
+# Chase an intruder that the guard sees, and stay on it. When it loses sight of it, go to where it saw it last. Otherwise walk the round
+# of the waypoints, and rest at each.
+node 1 selector
+	position = [-50, 0]
+	children = 2, 5, 8
+node 2 sequence
+	position = [-525, 150]
+	when = can_see_target
+	abort = both
+	children = 3, 4
+node 3 set
+	position = [-630, 300]
+	set searching = true
+node 4 action
+	position = [-420, 300]
+	action = move_to(key = "target")
+	repeat = forever
+node 5 sequence
+	position = [-105, 150]
+	when = searching
+	abort = self
+	children = 6, 7
+node 6 action
+	position = [-210, 300]
+	action = move_to(key = "last_seen")
+	time_limit = 10
+	force = succeed
+node 7 set
+	position = [0, 300]
+	set searching = false
+node 8 sequence
+	position = [420, 150]
+	children = 9, 10, 11
+node 9 action
+	position = [210, 300]
+	action = next_waypoint
+node 10 action
+	position = [420, 300]
+	action = move_to(key = "waypoint")
+node 11 wait
+	position = [630, 300]
+	seconds = 2

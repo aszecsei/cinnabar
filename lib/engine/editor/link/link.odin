@@ -91,6 +91,8 @@ Message :: union {
 	Sky_Sun_Request,
 	Sky_Sun,
 	Animator_View,
+	Agent_View,
+	Agent_Actions,
 	Set_Preview_Parameter,
 	Restart_Preview,
 	Ui_Preview_Settings,
@@ -1222,6 +1224,73 @@ Gi_Cascade_Stats :: struct {
 	active:  u32,
 	slots:   u32,
 	dropped: u32,
+}
+
+// Agent_Result is how a decision node last ended: None before it has ended, or Aborted when its parent or its guard
+// stopped it while it ran.
+Agent_Result :: enum u8 {
+	None,
+	Succeeded,
+	Failed,
+	Aborted,
+}
+
+// Agent_Node is a decision node that runs or has ended, by its ID in the decision's text.
+Agent_Node :: struct {
+	id:      u32,
+	running: bool,
+	last:    Agent_Result,
+}
+
+// Agent_Kind is the type of a blackboard key or an action's parameter. It matches format.Blackboard_Type, and String is
+// only an action's parameter.
+Agent_Kind :: enum u8 {
+	Float,
+	Int,
+	Bool,
+	Enum,
+	Entity,
+	Position,
+	Vector,
+	String,
+}
+
+// Agent_Value is a blackboard key and its value as the editor shows it: a float with up to three decimals, an enum as
+// its name, an entity as `none` or `#index:generation`, a position in meters as `[x, y, z]`, a vector as `[x, y, z]`.
+Agent_Value :: struct {
+	name: string,
+	kind: Agent_Kind,
+	text: string,
+}
+
+// Game to editor: what a watched entity's Agent does, which its component's bytes do not say (see
+// docs/editor/decision-editor.md#live-view). A watched entity's goes out once after the watch, empty without an Agent,
+// then when it changes. nodes are those of the decision that run or have ended, and values the blackboard's keys in
+// their order. Without an agent that is ready, decision is zero and the rest is too, which tells the editor that it has
+// gone.
+Agent_View :: struct {
+	entity:   u64,
+	decision: [16]u8,
+	nodes:    []Agent_Node,
+	values:   []Agent_Value,
+}
+
+// Agent_Action_Param is a parameter of a native action.
+Agent_Action_Param :: struct {
+	name: string,
+	kind: Agent_Kind,
+}
+
+// Agent_Action_Info is a native action that the game registered, with its parameters.
+Agent_Action_Info :: struct {
+	name:   string,
+	params: []Agent_Action_Param,
+}
+
+// Game to editor: the game's native actions, which a decision's `action` lines may name: when a new editor links and
+// after a code reload, as for Game_Commands.
+Agent_Actions :: struct {
+	actions: []Agent_Action_Info,
 }
 
 // Game commands (see docs/editor/shell-and-panels.md#commands).
