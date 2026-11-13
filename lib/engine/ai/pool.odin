@@ -23,6 +23,7 @@ Wait_Reason :: enum u8 {
 	Other_Blackboard,
 	Unfitting,
 	No_Module,
+	Refused,
 }
 
 // Agent_Ready is an agent that thinks: its values, its module's state, its running action, and when it thinks.
@@ -309,6 +310,8 @@ fits :: proc(s: ^State, slot: ^Agent_Slot) -> (reason: Wait_Reason, board: Board
 		reason = .Unfitting
 	case s.modules[decision.blob.technique].think == nil:
 		reason = .No_Module
+	case s.modules[decision.blob.technique].check != nil && !s.modules[decision.blob.technique].check(decision, board):
+		reason = .Refused
 	}
 	return
 }
@@ -323,6 +326,8 @@ warn_waiting :: proc(slot: ^Agent_Slot, reason: Wait_Reason) {
 		log.warnf("ai: entity %v's decision %s was cooked against another version of its blackboard. Cook the content.", slot.entity, guid_text(slot.decision))
 	case .No_Module:
 		log.warnf("ai: entity %v's decision %s is of a technique that no module runs", slot.entity, guid_text(slot.decision))
+	case .Refused:
+		log.warnf("ai: entity %v's decision %s has technique data that its module refuses. Cook the content.", slot.entity, guid_text(slot.decision))
 	}
 }
 

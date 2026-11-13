@@ -9,6 +9,7 @@ import "core:time"
 import "cinnabar:core"
 import "cinnabar:core/layout"
 import "cinnabar:engine/ai"
+import "cinnabar:engine/ai/behavior_tree"
 import "cinnabar:engine/anim"
 import "cinnabar:engine/asset"
 import "cinnabar:engine/audio"
@@ -84,6 +85,7 @@ register_world :: proc(g: ^Game, h: Hooks) {
 	// The agents think and act before the paths are found and the crowd moves, so a move that an action asks for applies
 	// in the next tick, and the crowd takes the paths that the paths system solved in its own tick.
 	ai.register(&g.ai, w)
+	behavior_tree.register(&g.ai)
 	nav.register(&g.nav, w, &g.ai)
 	if h.register_world != nil {
 		h.register_world(g)

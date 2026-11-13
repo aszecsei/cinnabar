@@ -1,6 +1,6 @@
 # Agents
 
-The core of the AI, in `lib/engine/ai`: agents, their blackboards, the decision modules that choose their actions, the native and script actions that act, and the `ai think` system that runs the decisions on jobs within a budget. It has no decision module of its own. Each technique of the [decision kind](../content/kinds/decisions.md#techniques) registers one. Read [Hot reload](../overview/hot-reload.md#rules), [World: ECS](../world/ecs.md#systems), [World: Time](../world/time.md) and [Scripting: Behaviours](../scripting/behaviours.md) first.
+The core of the AI, in `lib/engine/ai`: agents, their blackboards, the decision modules that choose their actions, the native and script actions that act, and the `ai think` system that runs the decisions on jobs within a budget. It has no decision module of its own. Each technique of the [decision kind](../content/kinds/decisions.md#techniques) registers one: the behavior tree's is in `lib/engine/ai/behavior_tree` ([Behavior trees](behavior-trees.md)). Read [Hot reload](../overview/hot-reload.md#rules), [World: ECS](../world/ecs.md#systems), [World: Time](../world/time.md) and [Scripting: Behaviours](../scripting/behaviours.md) first.
 
 **In this document:** [Design](#design) · [Agents](#agents) · [Blackboards](#blackboards) · [Thinking](#thinking) · [Actions](#actions) · [The order in a tick](#the-order-in-a-tick) · [Determinism](#determinism) · [Reload and restart](#reload-and-restart) · [Scripts](#scripts) · [Limits](#limits)
 
@@ -24,7 +24,7 @@ An agent with a `Perceiver` also sees and hears, and keeps what it perceives in 
 - **Slots:** the `ai think` system gives each `Agent` without an `Agent_State` a slot, and adds its `Agent_State` by command after the tick. A copy of an entity, whose `Agent_State` names another entity's slot, gets a slot of its own. A slot is freed when its entity goes, loses its `Agent`, or names another slot, and its action is stopped. An `Agent` whose blackboard or decision changes starts again.
 - **Phases:** a slot is `Agent_Waiting` until its blobs are loaded and fit, then `Agent_Ready`. `set_phase` is its only writer.
 - **Loading:** `ai.prepare`, in every mode before the ticks, loads each blackboard and decision that a slot names, unloads those that none names, and reads the loaded blobs into the frame's views. `ai.end_frame` lets them go before `asset.poll`. A blob that does not load is tried again after the next cook.
-- **Fitting:** an agent waits, with a warning, while its decision names another blackboard than its `Agent`, was cooked against another version of its blackboard (`format.decision_check`), or is of a technique that no module runs.
+- **Fitting:** an agent waits, with a warning, while its decision names another blackboard than its `Agent`, was cooked against another version of its blackboard (`format.decision_check`), is of a technique that no module runs, or has technique data that its module's `check` refuses.
 - **Starting:** a ready agent's values start as its blackboard's defaults, its module state as zero, and it has no action. The writes that scripts made before it was ready then apply ([Scripts](#scripts)).
 
 ## Blackboards
@@ -54,7 +54,7 @@ An agent's blackboard is its values: `values_size` bytes in its slot, with each 
 
 An agent's first think is staggered by its slot: the slot's place on the golden ratio's sequence, scaled to the interval. Agents that start together think in ticks spread over their interval rather than in one tick. An agent that the budget delays thinks as soon as its turn comes, and its next think is placed from then.
 
-- **Modules:** `ai.register_module(s, technique, {think})` in `register_world`. `think` gets a `Think_Context`: the agent, its decision and blackboard, its values, its module state (`state_size` bytes from the decision's blob), its action (`Action_View`: the reference that it started, and whether it runs or ended), the seconds since it last thought, and how often it thought. It may read the world, writes only its module state, and asks for its outputs:
+- **Modules:** `ai.register_module(s, technique, {think, check})` in `register_world`. `check`, which is optional, checks the technique's data against the decision and its blackboard before an agent starts with them, so `think` reads only data that was checked. `think` gets a `Think_Context`: the agent, its decision and blackboard, its values, its module state (`state_size` bytes from the decision's blob), its action (`Action_View`: the reference that it started, and whether it runs or ended), the seconds since it last thought, and how often it thought. It may read the world, writes only its module state, and asks for its outputs:
   - `ai.condition_holds(t, index)` evaluates a decision's condition;
   - `ai.start_action(t, ref)` asks to start an action reference, which stops the one that runs. Asking for the action that runs does nothing.
   - `ai.stop_action(t)` asks to stop it;
