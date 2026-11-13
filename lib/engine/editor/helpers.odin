@@ -19,7 +19,8 @@ import "cinnabar:engine/volume"
 // as debug lines, for the selection or for every entity, as Viewport_Settings.helpers says. A selected navigation
 // volume draws its navmeshes, and the Navigation Path tool's points draw the paths between them (see
 // docs/ai/navigation.md#drawing). A selected perceiver draws its cone, and while the game plays, its last rays and what
-// it remembers (see docs/ai/perception.md#drawing).
+// it remembers (see docs/ai/perception.md#drawing). A selected agent of the crowd draws its radius, and while the game
+// plays, its corridor, its corners, its neighbors and its velocities.
 
 // A helper of an entity that is not selected is grey and faint. A selected light's is its color, made bright.
 @(private = "file")
@@ -72,9 +73,13 @@ HEARD_COLOR :: [4]f32{1, 0.9, 0.3, 1}
 REMEMBERED_COLOR :: [4]f32{0.6, 0.6, 0.6, 1}
 @(private = "file")
 MEMORY_RADIUS :: 0.15
+// A crowd agent's avoidance radius, at its feet.
+@(private = "file")
+AGENT_RADIUS_COLOR :: [4]f32{0.3, 0.6, 1, 1}
 
 // draw_helpers draws the helpers of this frame into d, while a linked editor is in Edit. Call it before the frame draws
-// d's lines. Hidden entities have none. In Play and Paused, only the selected perceivers draw, with what they perceive.
+// d's lines. Hidden entities have none. In Play and Paused, only the selected perceivers and crowd agents draw, with
+// what they perceive and how they move.
 // The lines are the frame's, which every scene view draws, so the open scene view with the lowest number chooses them
 // for all, and with none open there are none.
 draw_helpers :: proc(e: ^Editor, w: ^ecs.World, d: ^debug.Draw) {
@@ -90,10 +95,15 @@ draw_helpers :: proc(e: ^Editor, w: ^ecs.World, d: ^debug.Draw) {
 			if !ecs.is_alive(w, entity) {
 				continue
 			}
+			pose, ok := ecs.presented(w, entity)
+			if !ok {
+				continue
+			}
 			if p := ecs.get(w, entity, ai.Perceiver); p != nil {
-				if pose, ok := ecs.presented(w, entity); ok {
-					draw_perceiver(e, d, entity, p^, pose)
-				}
+				draw_perceiver(e, d, entity, p^, pose)
+			}
+			if e.nav != nil && ecs.has(w, entity, nav.Nav_Agent) {
+				nav.draw_agent(e.nav, w, d, entity, pose.position)
 			}
 		}
 		return
@@ -286,6 +296,9 @@ draw_entity_helpers :: proc(e: ^Editor, w: ^ecs.World, d: ^debug.Draw, entity: e
 	}
 	if p := ecs.get(w, entity, ai.Perceiver); p != nil && selected {
 		draw_perceiver(e, d, entity, p^, pose)
+	}
+	if a := ecs.get(w, entity, nav.Nav_Agent); a != nil && selected {
+		debug.circle(d, pose.position, {1, 0, 0}, {0, 0, 1}, a.radius, AGENT_RADIUS_COLOR)
 	}
 	if j, _, ok := physics.joint_of(w, entity); ok {
 		draw_joint(w, d, j^, pose, selected)

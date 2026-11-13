@@ -37,7 +37,7 @@ game_init :: proc(state: rawptr, platform: ^core.Platform_API, h: Hooks, registe
 		log.panic("game: cannot create the physics world")
 	}
 	audio.init(&g.audio, platform, &g.assets)
-	nav.init(&g.nav, platform, &g.assets)
+	nav.init(&g.nav, platform, &g.assets, &g.physics)
 	ai.init(&g.ai, platform, &g.assets, &g.scripts, &g.physics)
 	register_world(g, h)
 	asset.init(&g.assets, platform, asset.content_source(platform.content_dir))
@@ -81,9 +81,10 @@ register_world :: proc(g: ^Game, h: Hooks) {
 	physics.register(&g.physics, w)
 	anim.register(&g.animation, w, &g.assets)
 	sprite.register(&g.sprites, w, &g.assets)
-	// The agents think and act before the paths are found, so a path that an action asks for is solved in the tick.
+	// The agents think and act before the paths are found and the crowd moves, so a move that an action asks for applies
+	// in the next tick, and the crowd takes the paths that the paths system solved in its own tick.
 	ai.register(&g.ai, w)
-	nav.register(&g.nav, w)
+	nav.register(&g.nav, w, &g.ai)
 	if h.register_world != nil {
 		h.register_world(g)
 	}

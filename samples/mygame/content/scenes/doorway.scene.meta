@@ -1,0 +1,4 @@
+# cinnabar asset metadata. Keep this file next to its asset (see docs/content/identity-and-cooking.md#identity).
+guid = 0e7ac3bab25c4e118cc9e9989521190c
+navmesh.cce6425fd87ae639.Human = 72a5934553e002894f80a3576678c13c
+navmesh.cce6425fd87ae639.Small = 82571574f021a2bb86e080b5f84e9f17
