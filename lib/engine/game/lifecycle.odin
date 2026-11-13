@@ -11,6 +11,7 @@ import "cinnabar:core/layout"
 import "cinnabar:engine/ai"
 import "cinnabar:engine/ai/behavior_tree"
 import "cinnabar:engine/ai/goap"
+import "cinnabar:engine/ai/htn"
 import "cinnabar:engine/ai/utility"
 import "cinnabar:engine/anim"
 import "cinnabar:engine/asset"
@@ -90,6 +91,7 @@ register_world :: proc(g: ^Game, h: Hooks) {
 	behavior_tree.register(&g.ai)
 	utility.register(&g.ai)
 	goap.register(&g.ai)
+	htn.register(&g.ai)
 	nav.register(&g.nav, w, &g.ai)
 	if h.register_world != nil {
 		h.register_world(g)

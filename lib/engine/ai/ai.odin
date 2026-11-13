@@ -23,8 +23,8 @@ AGENT_STATE_ID :: ecs.Component_Id(131)
 DEFAULT_THINK_BUDGET :: 64
 // The agents that one think job runs.
 THINK_BATCH :: 32
-// The search nodes that the agents of a planning technique expand in a tick by default (see
-// docs/ai/agents.md#planning).
+// The search nodes that the agents of a planning technique expand in a tick by default, or the decomposition steps
+// that they take (see docs/ai/agents.md#planning).
 DEFAULT_PLAN_BUDGET :: 256
 // The bytes of state that a native action may keep in each agent.
 MAX_ACTION_STATE :: 64
@@ -273,8 +273,8 @@ set_budget :: proc(s: ^State, agents: int) {
 	s.budget = max(agents, 1)
 }
 
-// set_plan_budget sets the search nodes that a technique's agents expand in a tick, which its searching agents share
-// (see docs/ai/agents.md#planning).
+// set_plan_budget sets the search nodes that a technique's agents expand in a tick, or the decomposition steps that
+// they take, which its searching agents share (see docs/ai/agents.md#planning).
 set_plan_budget :: proc(s: ^State, technique: format.Decision_Technique, nodes: int) {
 	s.plan_budgets[technique] = max(nodes, 1)
 }

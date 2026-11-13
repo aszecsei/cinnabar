@@ -25,7 +25,7 @@ Read them in this order the first time.
 | [Navmeshes](kinds/nav-meshes.md) | Navmeshes: navigation volumes, agent types, the static colliders that they bake from, Recast's tiled bake, and the blob. |
 | [Blackboards](kinds/blackboards.md) | The `.blackboard` format: an agent's typed keys, their slots, offsets and defaults, and the blob. |
 | [Perceptions](kinds/perceptions.md) | The `.perception` format: the tags that a perceiver notices, the rows that fill its blackboard, and the blob. |
-| [Decisions](kinds/decisions.md) | The `.decision` format: the technique, the shared conditions, action references and blackboard writes, the techniques' readers, behavior trees, utility, GOAP, and the blob. |
+| [Decisions](kinds/decisions.md) | The `.decision` format: the technique, the shared conditions, action references and blackboard writes, the techniques' readers, behavior trees, utility, GOAP, HTN, and the blob. |
 | [Sprite sheets](kinds/sprite-sheets.md) | The `.sprite_sheet` format: packed images, a texture's grid and rectangles, Aseprite's and TexturePacker's JSON, animations, and the blob. |
 | [Cook daemon](daemon-and-operations.md) | The daemon, asset operations and the cook link. |
 | [Blobs and loading](blobs-and-loading.md) | The blob format, the asset runtime and hot reload. |
@@ -74,7 +74,7 @@ The code is in three places:
 | | `audio.odin`, `audio_encode.odin` | Sounds: decoding through `vendor:miniaudio` to PCM at the engine's rate, whether they stream, and their format |
 | | `fonts.odin`, `opentype.odin`, `msdf.odin`, `msdfgen/cn_msdf.cpp` | Fonts: the glyphs that GSUB reaches from the charset, the atlas's cells, and their distance fields through msdfgen's core |
 | | `ui_documents.odin` | UI documents: the parse from `format`, the kinds of the assets that they name, and the template |
-| | `blackboards.odin`, `decisions.odin`, `conditions.odin`, `behavior_trees.odin`, `utility.odin`, `goap.odin` | Blackboards and decisions: the keys' slots and defaults, the decisions' shared parts parsed against their blackboard's source, and the techniques' readers, the behavior tree's, utility's and GOAP's |
+| | `blackboards.odin`, `decisions.odin`, `conditions.odin`, `behavior_trees.odin`, `utility.odin`, `goap.odin`, `htn.odin`, `plans.odin` | Blackboards and decisions: the keys' slots and defaults, the decisions' shared parts parsed against their blackboard's source, and the techniques' readers, the behavior tree's, utility's, GOAP's and HTN's, with the planning keys, tests and effects that the planners share |
 | | `perceptions.odin` | Perceptions: the tags that they notice and their rows |
 | | `sprite_sheets.odin`, `pack.odin` | Sprite sheets: the text's parse, the atlas that packs a sheet's images, a texture's grid and rectangles, and the JSON import; `pack_rects`, which the fonts pack with too |
 | | `daemon.odin`, `watch_windows.odin`, `index.odin`, `serve.odin` | The daemon: the watcher, the passes, the index of the content, and the cook link's server |

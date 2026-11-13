@@ -183,7 +183,7 @@ register_scripts :: proc(r: ^script.Runtime, s: ^State) {
 			luau.pushnil(L)
 			return 1
 		}
-		luau.createtable(L, 0, 6)
+		luau.createtable(L, 0, 7)
 		if view.goal != 0 {
 			luau.pushnumber(L, f64(view.goal))
 			luau.setfield(L, -2, "goal")
@@ -208,6 +208,16 @@ register_scripts :: proc(r: ^script.Runtime, s: ^State) {
 			luau.rawseti(L, -2, c.int(i + 1))
 		}
 		luau.setfield(L, -2, "steps")
+		luau.createtable(L, c.int(len(view.methods)), 0)
+		for m, i in view.methods {
+			luau.createtable(L, 0, 2)
+			luau.pushnumber(L, f64(m.task))
+			luau.setfield(L, -2, "task")
+			luau.pushnumber(L, f64(m.method))
+			luau.setfield(L, -2, "method")
+			luau.rawseti(L, -2, c.int(i + 1))
+		}
+		luau.setfield(L, -2, "methods")
 		// From 1, as Luau counts.
 		luau.pushnumber(L, f64(view.step + 1))
 		luau.setfield(L, -2, "step")
@@ -216,7 +226,7 @@ register_scripts :: proc(r: ^script.Runtime, s: ^State) {
 		luau.pushboolean(L, b32(view.searching))
 		luau.setfield(L, -2, "searching")
 		return 1
-	}, "(entity: Entity) -> { goal: number?, goals: { { goal: number, priority: number } }, steps: { { node: number, action: string } }, step: number, nodes: number, searching: boolean }?")
+	}, "(entity: Entity) -> { goal: number?, goals: { { goal: number, priority: number } }, steps: { { node: number, action: string } }, methods: { { task: number, method: number } }, step: number, nodes: number, searching: boolean }?")
 	script.define(r, "Perception.noise", proc(L: ^luau.State) -> c.int {
 		s := state_of(L)
 		position := script.check_position(L, 1)
