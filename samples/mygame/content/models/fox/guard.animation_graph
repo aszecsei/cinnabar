@@ -1,0 +1,59 @@
+animation_graph 1
+# The guard scene's fox (see docs/ai/README.md#the-sample). It looks about while it stands, and walks and runs by its
+# speed in meters a second, which its body sets from the velocity that the crowd gives it (see
+# scripts/ai/agent_body.luau). The bark trigger plays the survey clip quickly once, and its bark event, as the fox
+# lifts its head, plays the bark's sound. The Fox's clips are in place, so the graph names no root motion joint.
+entry = idle
+
+param speed float 0
+param bark trigger
+
+clip survey = $3918fb8bad25fb7d58abb5d2a6f2cadd
+clip bark = $3918fb8bad25fb7d58abb5d2a6f2cadd
+	event 0.35 bark
+clip walk = $dea303d3f0374a9e56b0bb58f4a85315
+clip run = $cf6a8cd8cc1591bd3e6e09437d5754a1
+
+node 1 state
+	position = [0, 0]
+	name = idle
+	motion = survey
+node 2 state
+	position = [408, 0]
+	name = move
+	motion = @10.pose
+node 3 state
+	position = [204, 200]
+	name = bark
+	motion = bark
+	speed = 1.5
+	loop = false
+
+node 10 blend_1d
+	position = [408, -175]
+	parameter = speed
+	input.0 = walk
+	at.0 = 1
+	input.1 = run
+	at.1 = 3
+
+node 20 transition
+	from = idle
+	to = move
+	when = speed > 0.1
+	duration = 0.3
+node 21 transition
+	from = move
+	to = idle
+	when = speed < 0.05
+	duration = 0.4
+node 22 transition
+	from = any
+	to = bark
+	when = bark
+	duration = 0.15
+node 23 transition
+	from = bark
+	to = idle
+	exit_time = 0.6
+	duration = 0.3

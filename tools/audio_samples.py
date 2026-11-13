@@ -48,6 +48,35 @@ def thud(rate=48000, seconds=0.4):
     return rate, samples
 
 
+# bark is a dog's two short barks for the guard scene's agents: each a pitch that falls fast, rich in harmonics and loud
+# around 1 kHz, as a bark's mouth shapes it, over a breath of noise, in 0.45 seconds.
+def bark(rate=48000, seconds=0.45):
+    frames = int(rate * seconds)
+    noise = random.Random(41)
+    samples = []
+    onsets = (0.0, 0.22)
+    phases = [0.0, 0.0]
+    for i in range(frames):
+        t = i / rate
+        value = 0.0
+        for n, onset in enumerate(onsets):
+            u = t - onset
+            if u < 0:
+                continue
+            pitch = 330 + 320 * math.exp(-u * 18)
+            phases[n] += math.tau * pitch / rate
+            envelope = min(u / 0.006, 1.0) * math.exp(-u * 22)
+            voice = 0.0
+            for k in range(1, 10):
+                # The harmonics near 1 kHz are loudest.
+                shape = 1 / (1 + ((k * pitch - 1000) / 700) ** 2)
+                voice += shape / k * math.sin(phases[n] * k)
+            breath = (noise.random() * 2 - 1) * 0.25 * math.exp(-u * 40)
+            value += envelope * (voice + breath)
+        samples.append(value)
+    return rate, samples
+
+
 # ambience is a slow pad, long enough to stream: 20 seconds that loop, at half the engine's rate, so a cook also converts
 # its rate. Its chords' parts have whole numbers of cycles in the 20 seconds too.
 def ambience(rate=24000, seconds=20):
@@ -78,7 +107,7 @@ def ambience(rate=24000, seconds=20):
 def main():
     root = sys.argv[1] if len(sys.argv) > 1 else "."
     folder = os.path.join(root, "samples", "mygame", "content", "audio")
-    for name, make in (("hum", hum), ("thud", thud), ("ambience", ambience)):
+    for name, make in (("hum", hum), ("thud", thud), ("bark", bark), ("ambience", ambience)):
         rate, samples = make()
         write_wav(os.path.join(folder, name + ".wav"), rate, samples)
 

@@ -2,7 +2,7 @@
 
 The decision module of the `behavior_tree` technique, in `lib/engine/ai/behavior_tree`. When an agent thinks, the module checks the guards that abort, and then resumes the agent's tree from its running nodes. Read [Agents](agents.md) and [Content: Decisions: Behavior trees](../content/kinds/decisions.md#behavior-trees) first. The second document gives the text, the nodes and the decorators.
 
-**In this document:** [Design](#design) · [Registering](#registering) · [A think](#a-think) · [Aborts](#aborts) · [Actions](#actions) · [Time](#time) · [Repeats](#repeats) · [Determinism](#determinism) · [Reload and restart](#reload-and-restart) · [Limits](#limits)
+**In this document:** [Design](#design) · [Registering](#registering) · [A think](#a-think) · [Aborts](#aborts) · [Actions](#actions) · [Time](#time) · [Repeats](#repeats) · [Determinism](#determinism) · [Reload and restart](#reload-and-restart) · [Last results](#last-results) · [The sample](#the-sample) · [Limits](#limits)
 
 ## Design
 
@@ -94,7 +94,7 @@ Each node's state keeps how the node last ended, for the [decision editor](../ed
 
 ## The sample
 
-`samples/mygame`'s guard scene, which F7 cycles to, has a guard whose tree (`content/ai/guard.decision`) chases an intruder that it sees, with `move_to` and an abort of both, goes to where it last saw it when a wall hides it, and otherwise walks a round of four waypoints with the `next_waypoint` script action, resting 2 s at each. Its perception fills `target`, `can_see_target` and `last_seen`. Select the guard in the decision editor while the game plays to see its running branch ([Editor: Decision editor](../editor/decision-editor.md#live-view)).
+`samples/mygame`'s guard scene, which F7 cycles to, has a guard whose tree (`content/ai/guard.decision`) chases the player that it sees, with `move_to` and an abort of both, and barks when it is close, with a guard that cuts into the chase. A noise that it remembers draws it, with an abort of lower. When it loses sight of the player, or hears their steps, it searches where it last perceived them. Otherwise it patrols between random points that the `next_patrol_point` script action picks, and looks about at each. H swaps the tree with an HTN over the same blackboard and actions ([AI: The sample](README.md#the-sample)). Select the guard in the decision editor while the game plays to see its running branch ([Editor: Decision editor](../editor/decision-editor.md#live-view)).
 
 ## Limits
 

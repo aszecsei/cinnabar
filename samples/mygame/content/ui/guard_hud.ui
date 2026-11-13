@@ -1,0 +1,35 @@
+ui 1
+<!-- The guard scene's HUD: a panel in the top right with what the agents do, and the scene's keys. guard_hud.luau binds
+     it. Its colors are as a designer picks them, sRGB-encoded. -->
+<ui font=$5b845a4341f6a3b772ec017211470fab size="15" color="#ffffffe0">
+	<style name="label" size="13" color="#ffffff90"/>
+	<style name="key" size="13" color="#ffd27a"/>
+
+	<column id="guard_hud" anchor="top_right" offset="-16 16" width="300" padding="12 14" gap="6" fill="#14171fb8" radius="8">
+		<row gap="8">
+			<text style="label">Guard</text>
+			<text id="decision">{decision}</text>
+			<box width="fill"/>
+			<text id="guard_action">{guard_action}</text>
+		</row>
+		<row gap="8">
+			<text style="label">Wary</text>
+			<text id="health">{health}</text>
+			<text style="label">health</text>
+			<box width="fill"/>
+			<text id="wary_action">{wary_action}</text>
+		</row>
+		<row gap="8">
+			<text style="label">Agents</text>
+			<text id="agents">{agents}</text>
+		</row>
+		<row gap="10">
+			<text style="key">E</text>
+			<text style="label">throw</text>
+			<text style="key">H</text>
+			<text style="label">swap</text>
+			<text style="key">G</text>
+			<text style="label">crowd</text>
+		</row>
+	</column>
+</ui>

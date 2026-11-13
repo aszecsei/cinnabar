@@ -720,30 +720,53 @@ scripts_move_agents :: proc(t: ^testing.T) {
 		"=move",
 		`
 local origin = WorldPosition.from_meters(1000, 2, -500)
-Navigation.move_to(Test.agent(), origin + vector.create(6, 0, 2))
+local ticket = Navigation.move_to(Test.agent(), origin + vector.create(6, 0, 2))
+Test.report(ticket)
 Test.report(Navigation.arrived(Test.agent()) and 1 or 0)
+Test.report(Navigation.move_status(Test.agent(), ticket) == "pending" and 1 or 0)
 `,
 	)
 	testing.expect(t, ok)
+	// The ticket goes into the chunks that follow, since each has its own globals.
+	ticket := u64(f.reports[0])
 	frame(f, 30)
-	_, ok = script.spawn_source(&f.runtime, "=moving", `
+	_, ok = script.spawn_source(&f.runtime, "=moving", fmt.tprintf(`
 Test.report(vector.magnitude(Navigation.velocity(Test.agent())))
 Test.report(Test.agent():get(NavAgentState).status == "Moving" and 1 or 0)
-`)
+Test.report(Navigation.move_status(Test.agent(), %d) == "moving" and 1 or 0)
+`, ticket))
 	testing.expect(t, ok)
 	testing.expect(t, run(f, 600, f.agent) < 600, "the agent arrives")
-	_, ok = script.spawn_source(&f.runtime, "=arrived", `
+	_, ok = script.spawn_source(&f.runtime, "=arrived", fmt.tprintf(`
 Test.report(Navigation.arrived(Test.agent()) and 1 or 0)
+Test.report(Navigation.move_status(Test.agent(), %d) == "arrived" and 1 or 0)
 Navigation.stop(Test.agent())
-`)
+`, ticket))
 	testing.expect(t, ok)
 	frame(f)
 	testing.expect_value(t, status(f, f.agent), Move_Status.Idle)
-	if testing.expectf(t, len(f.reports) == 4, "reports %v", f.reports[:]) {
-		testing.expect_value(t, f.reports[0], 0)
-		testing.expectf(t, f.reports[1] > 0.5, "the agent walks at %v", f.reports[1])
-		testing.expect_value(t, f.reports[2], 1)
-		testing.expect_value(t, f.reports[3], 1)
+	// A stop leaves the move stopped. A later move replaces it once the crowd applies it.
+	_, ok = script.spawn_source(&f.runtime, "=again", fmt.tprintf(`
+Test.report(Navigation.move_status(Test.agent(), %d) == "stopped" and 1 or 0)
+Test.report(Navigation.move_to(Test.agent(), WorldPosition.from_meters(1000, 2, -500)))
+`, ticket))
+	testing.expect(t, ok)
+	second := u64(f.reports[len(f.reports) - 1])
+	frame(f)
+	_, ok = script.spawn_source(&f.runtime, "=replaced", fmt.tprintf(`
+Test.report(Navigation.move_status(Test.agent(), %d) == "replaced" and 1 or 0)
+Test.report(Navigation.move_status(Test.agent(), %d) == "moving" and 1 or 0)
+`, ticket, second))
+	testing.expect(t, ok)
+	if testing.expectf(t, len(f.reports) == 12, "reports %v", f.reports[:]) {
+		testing.expect(t, second > ticket)
+		testing.expect_value(t, f.reports[1], 0)
+		testing.expectf(t, f.reports[3] > 0.5, "the agent walks at %v", f.reports[3])
+		for r, i in f.reports {
+			if i != 0 && i != 1 && i != 3 && i != 9 {
+				testing.expectf(t, r == 1, "report %d is %v", i, r)
+			}
+		}
 	}
 	context.logger = testlog.expected_errors()
 	_, ok = script.spawn_source(&f.runtime, "=not_an_agent", `Navigation.move_to(World.spawn(), WorldPosition.origin)`)

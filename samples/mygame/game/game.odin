@@ -61,8 +61,9 @@ SPRITES_SCENE_META :: #load("../content/scenes/sprites.scene.meta", string)
 PLAYGROUND_SCENE_META :: #load("../content/scenes/playground.scene.meta", string)
 // The doorway, twenty agents that cross a room through a doorway and back (see docs/ai/navigation.md#crowds).
 DOORWAY_SCENE_META :: #load("../content/scenes/doorway.scene.meta", string)
-// The guard, an agent that patrols, chases an intruder that it sees, and searches where it lost it (see
-// docs/ai/behavior-trees.md).
+// The guard scene: a fox guard that patrols, chases and barks at the player that it sees, and searches where it lost
+// them, with a behavior tree that H swaps to an HTN, and a wary agent with a utility decision (see
+// docs/ai/README.md#the-sample).
 GUARD_SCENE_META :: #load("../content/scenes/guard.scene.meta", string)
 // The array that tints the large triangles, a layer for each (see docs/content/kinds/textures.md#cube-maps-and-arrays).
 TRIANGLE_TINTS_META :: #load("../content/textures/cube/tints.texture_set.meta", string)

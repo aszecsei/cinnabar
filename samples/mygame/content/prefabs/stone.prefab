@@ -1,0 +1,23 @@
+# A stone that the guard scene's player throws (see scripts/ai/thrower.luau). Its knocks make loud noises that draw the
+# agents, and it hurts an agent that it hits (see scripts/ai/stone.luau).
+scene 2
+
+entity 1000000000000001
+name = "Stone"
+component 1 Transform
+	position = [0, 0, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [0.12, 0.12, 0.12]
+component 33 Mesh_Renderer
+	mesh = $9486d4ef423a1cec3dcc39a1250a78f8
+	materials.0 = $f6d3de3190e2dfb97d6834ed5101c4c0
+	cast_shadows = true
+component 65 Collider
+	shape = Sphere
+	radius = 1
+	restitution = 0.3
+component 64 Rigid_Body
+	mass = 0.5
+	ccd = true
+behaviour b5ac6cb18675bbb058774421ff1ecdbb
+	sound = $1899c44a1ec54500d12ede038a7e3f4f

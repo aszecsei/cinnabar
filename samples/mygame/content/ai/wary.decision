@@ -1,0 +1,69 @@
+decision 1
+technique = utility
+blackboard = $320a03f70e28cc471291c76dd5a2048a
+momentum = 0.3
+
+# The wary one (see docs/ai/README.md#the-sample), with the guard's blackboard and actions. It weighs chasing, keeping
+# its distance and fleeing by its health and its distance to the intruder: healthy, it chases and barks; hurt, it keeps
+# its distance; badly hurt and close, it flees. A noise draws it, and otherwise it patrols.
+node 1 option
+	when = can_see_target
+	action = move_to(key = "target")
+	considerations = 10, 11
+node 2 option
+	when = can_see_target and distance(self, target) < 2
+	action = bark(at = target)
+	weight = 2
+	considerations = 10
+	cooldown = 4
+node 3 option
+	when = target != none
+	action = keep_distance(from = target, range = 6)
+	considerations = 12, 13
+node 4 option
+	when = target != none
+	action = flee(from = target, range = 12)
+	weight = 1.3
+	considerations = 14, 15
+node 5 option
+	when = noise != none
+	action = move_to(key = "noise_at")
+	weight = 0.4
+node 6 option
+	action = patrol(radius = 8)
+	weight = 0.15
+
+# Healthy: an S from 0 at no health to 1 at full health.
+node 10 consideration
+	input = health
+	range = [0, 100]
+	curve = logistic
+# Near enough to chase: 1 at the intruder, 0 at 15 m.
+node 11 consideration
+	input = distance(self, target)
+	range = [15, 0]
+	curve = linear
+# Hurt: most at about half health, little when healthy.
+node 12 consideration
+	input = health
+	range = [0, 100]
+	curve = table
+	points = [0, 0.2], [0.3, 0.9], [0.6, 0.9], [0.8, 0.1], [1, 0]
+# Too close: 1 at the intruder, 0 at 10 m.
+node 13 consideration
+	input = distance(self, target)
+	range = [10, 0]
+	curve = linear
+# Badly hurt: an S down from 1 at no health, through a half at 30.
+node 14 consideration
+	input = health
+	range = [0, 100]
+	curve = logistic
+	slope = -1
+	y_shift = 1
+	x_shift = -0.2
+# Close: 1 at the intruder, 0 at 12 m.
+node 15 consideration
+	input = distance(self, target)
+	range = [12, 0]
+	curve = linear

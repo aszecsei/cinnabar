@@ -6,8 +6,8 @@
 local greeting = require("./greeting")
 local Pulse = require("./pulse")
 local quality_keys = require("./quality_keys")
--- The guard's action exists once this has run (see next_waypoint.luau).
-require("./next_waypoint")
+-- The guard scene's script actions exist once this has run (see ai/actions.luau).
+require("./ai/actions")
 
 local connected = { false, false, false, false }
 local composition = ""

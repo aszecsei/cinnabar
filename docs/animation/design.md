@@ -175,3 +175,5 @@ The sample's animation scene, which F7 cycles to, has two foxes:
 - **The Khronos Fox's clips are in place**, so the graph names no root motion joint: the behaviour, not the clips, moves the fox.
 - **The running fox** plays its clip without a graph.
 
+The guard scene's fox plays `models/fox/guard.animation_graph`, the walking fox's states with a `bark` state that the `bark` trigger enters from any state. It plays the survey clip quickly once, under a second name with a `bark` marker, whose event plays the bark's sound. The agent's body sets `speed` from the velocity that the crowd chose ([AI: The sample](../ai/README.md#the-sample)).
+

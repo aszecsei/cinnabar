@@ -2,8 +2,8 @@
 
 The Fox from the Khronos glTF Sample Assets, unchanged: `Fox.gltf`, `Fox.bin` and `Texture.png`, from
 <https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/Fox>. The sample's animation scene plays its clips
-(see docs/content/kinds/skins-and-animations.md). `fox.animation_graph`, the walking fox's graph, is the sample's own
-(see docs/content/kinds/animation-graphs.md).
+(see docs/content/kinds/skins-and-animations.md). `fox.animation_graph`, the walking fox's graph, and
+`guard.animation_graph`, the guard scene's fox's, are the sample's own (see docs/content/kinds/animation-graphs.md).
 
 ## Credits and license
 

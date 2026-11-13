@@ -1,7 +1,12 @@
 blackboard 1
-# What a guard knows: the intruder that it sees, where it saw it last, and the next place on its round.
+# What the guard scene's agents know (see docs/ai/README.md#the-sample). Their perception fills the intruder that they
+# perceive, whether they see it and where it was, and the last noise that they heard and where. Their decisions write
+# whether they search, and their actions where they patrol to. Health is the wary one's, which a stone lowers.
 entity target
 bool can_see_target
 position last_seen
+entity noise
+position noise_at
 bool searching
 position waypoint
+float health = 100

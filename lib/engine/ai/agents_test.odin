@@ -49,6 +49,9 @@ Fixture :: struct {
 BOARD :: format.Guid{0 = 0xb0}
 @(private = "file")
 DECISION :: format.Guid{0 = 0xd0}
+// A second decision, which a script swaps an agent to.
+@(private = "file")
+OTHER_DECISION :: format.Guid{0 = 0xd1}
 
 @(private = "file")
 value :: proc(v: $T) -> (bytes: [format.BLACKBOARD_VALUE_SIZE]byte) {
@@ -305,6 +308,11 @@ register_test_scripts :: proc(r: ^script.Runtime) {
 	})
 	script.define(r, "Test.agent", proc(L: ^luau.State) -> c.int {
 		script.push_entity(L, (^Fixture)(context.user_ptr).agent)
+		return 1
+	})
+	// The test decision, or with true the other one, as an asset.
+	script.define(r, "Test.decision", proc(L: ^luau.State) -> c.int {
+		script.push_asset(script.runtime_of(L), L, OTHER_DECISION if luau.toboolean(L, 1) else DECISION)
 		return 1
 	})
 }
@@ -856,6 +864,46 @@ scripts_act_and_write_the_blackboard :: proc(t: ^testing.T) {
 	_, ok = script.spawn_source(&f.runtime, "=bad", `Blackboard.set(Test.agent(), "nothing", 1)`)
 	testing.expect(t, !ok)
 	_, ok = script.spawn_source(&f.runtime, "=bad", `Blackboard.set(Test.agent(), "mood", "furious")`)
+	testing.expect(t, !ok)
+}
+
+// A script reads an agent's decision and gives it another. The agent starts again with it, from its blackboard's
+// defaults.
+@(test)
+scripts_swap_an_agents_decision :: proc(t: ^testing.T) {
+	f := setup(t, serial = true, scripts = true)
+	defer teardown(t, f)
+	context.user_ptr = f
+	other := decision_contents()
+	other.guid = OTHER_DECISION
+	write_blob(t, f, OTHER_DECISION, format.decision_write(other, context.temp_allocator))
+	f.agent = spawn_agent(f)
+	frame(f, 3)
+	set_key(&f.ai, f.agent, "ammo", i32(9))
+	walk_start := fmt.tprintf("walk start %v 3", f.agent)
+	testing.expect_value(t, slice.count(f.events[:], walk_start), 1)
+
+	_, ok := script.spawn_source(&f.runtime, "=swap", `
+		Test.report(if Agent.decision(Test.agent()) == Test.decision(false) then 1 else 0)
+		Agent.set_decision(Test.agent(), Test.decision(true))
+		Test.report(if Agent.decision(Test.agent()) == Test.decision(true) then 1 else 0)
+	`)
+	testing.expect(t, ok)
+	testing.expectf(t, slice.equal(f.reports[:], []f64{1, 1}), "%v", f.reports)
+	testing.expect_value(t, ecs.get(&f.world, f.agent, Agent).decision, OTHER_DECISION)
+
+	frame(f, 3)
+	slot, ready := ready_of(&f.ai, &f.world, f.agent)
+	testing.expect(t, ready != nil)
+	testing.expect_value(t, slot.decision, OTHER_DECISION)
+	ammo, _ := get_key(&f.ai, f.agent, "ammo")
+	testing.expect_value(t, ammo.(i32), 3)
+	testing.expect_value(t, slice.count(f.events[:], walk_start), 2)
+
+	context.logger = testlog.expected_errors()
+	_, ok = script.spawn_source(&f.runtime, "=bad", `Agent.set_decision(Test.agent(), nil)`)
+	testing.expect(t, !ok)
+	_, ok = script.spawn_source(&f.runtime, "=bad", `Agent.decision(World.spawn())`)
 	testing.expect(t, !ok)
 }
 

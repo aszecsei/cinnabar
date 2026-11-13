@@ -7,7 +7,7 @@ The decision module of the `htn` technique, in `lib/engine/ai/htn`. When an agen
 ## Design
 
 1. **The designer gives the structure.** A task names the ways to do it, in order of preference, such as an attack in melee when the target is close and a ranged attack otherwise. The plan follows that structure. The planner does not search for the order of the actions, as GOAP does.
-2. **A better way cuts in.** Each plan keeps the methods that it chose. While it runs, the module looks for a plan of earlier methods, and replaces the running plan when it finds one. A guard who searches drops the search when it sees the player.
+2. **A better way cuts in.** Each plan keeps the methods that it chose. While it runs, the module looks for a plan of earlier methods, and replaces the running plan when it finds one. A guard who searches drops the search when it sees the player, as the sample's `ai/guard_htn.decision` does ([AI: The sample](README.md#the-sample)).
 3. **Planning has a fixed cost in each tick.** A decomposition takes a budget of steps in each tick, shared among the agents that decompose, as GOAP's search does ([GOAP: The budget](goap.md#the-budget)).
 4. **The state is in the agent.** The phase, the plan, its record and the decomposition are in the agent's module state, which the cooker sizes. The module holds no state of its own, so a code reload keeps every agent where it was.
 5. **One runner.** The plan is a list of actions, which GOAP's plan runner runs ([GOAP: The plan runner](goap.md#the-plan-runner)).
