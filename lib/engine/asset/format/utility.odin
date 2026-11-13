@@ -238,26 +238,55 @@ utility_view :: proc(data: []byte, decision_data: []byte, decision: ^Decision_Bl
 		}
 	}
 	for c in u.considerations {
-		if int(c.node) >= len(nodes) || c.input > max(Utility_Input) || c.curve > max(Utility_Curve) {
+		if !utility_consideration_ok(c, u.points, len(nodes)) {
 			return {}, false
-		}
-		if !(c.max != c.min) || !is_finite(c.min) || !is_finite(c.max) || !is_finite(c.slope) || !is_finite(c.exponent) ||
-		   !is_finite(c.x_shift) || !is_finite(c.y_shift) {
-			return {}, false
-		}
-		if c.curve == .Table {
-			if c.point_count < 2 || c.point_count > MAX_UTILITY_POINTS || u64(c.first_point) + u64(c.point_count) > u64(len(u.points)) {
-				return {}, false
-			}
-			points := u.points[c.first_point:][:c.point_count]
-			for i in 1 ..< len(points) {
-				if !(points[i].x >= points[i - 1].x) {
-					return {}, false
-				}
-			}
 		}
 	}
 	return u, true
+}
+
+// utility_consideration_ok checks a consideration without its keys: its node, its input and curve, that its range and
+// parameters are finite and its range not empty, and that a table's points are in range and go up in x. GOAP's goals
+// use utility's considerations, so its check does this too.
+utility_consideration_ok :: proc "contextless" (c: Utility_Consideration, points: []Utility_Point, node_count: int) -> bool {
+	if int(c.node) >= node_count || c.input > max(Utility_Input) || c.curve > max(Utility_Curve) {
+		return false
+	}
+	if !(c.max != c.min) || !is_finite(c.min) || !is_finite(c.max) || !is_finite(c.slope) || !is_finite(c.exponent) ||
+	   !is_finite(c.x_shift) || !is_finite(c.y_shift) {
+		return false
+	}
+	if c.curve == .Table {
+		if c.point_count < 2 || c.point_count > MAX_UTILITY_POINTS || u64(c.first_point) + u64(c.point_count) > u64(len(points)) {
+			return false
+		}
+		table := points[c.first_point:][:c.point_count]
+		for i in 1 ..< len(table) {
+			if !(table[i].x >= table[i - 1].x) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// utility_consideration_keys_ok is whether a consideration's keys are of the types that its input reads.
+utility_consideration_keys_ok :: proc "contextless" (keys: []Blackboard_Key, c: Utility_Consideration) -> bool {
+	is :: proc "contextless" (keys: []Blackboard_Key, slot: u32, types: bit_set[Blackboard_Type]) -> bool {
+		return int(slot) < len(keys) && keys[slot].type in types
+	}
+	place :: proc "contextless" (keys: []Blackboard_Key, slot: u32) -> bool {
+		return slot == UTILITY_SELF || is(keys, slot, {.Entity, .Position})
+	}
+	switch c.input {
+	case .Number:
+		return is(keys, c.a, {.Float, .Int, .Bool})
+	case .Distance:
+		return place(keys, c.a) && place(keys, c.b)
+	case .Since:
+		return int(c.a) < len(keys)
+	}
+	return false
 }
 
 @(private = "file")
@@ -276,9 +305,6 @@ utility_check :: proc(data: []byte, decision_data: []byte, decision: ^Decision_B
 	is :: proc(keys: []Blackboard_Key, slot: u32, types: bit_set[Blackboard_Type]) -> bool {
 		return int(slot) < len(keys) && keys[slot].type in types
 	}
-	place :: proc(keys: []Blackboard_Key, slot: u32) -> bool {
-		return slot == UTILITY_SELF || is(keys, slot, {.Entity, .Position})
-	}
 	for o in u.options {
 		if o.target != DECISION_NONE && !is(keys, o.target, {.Entity}) {
 			return false
@@ -288,19 +314,8 @@ utility_check :: proc(data: []byte, decision_data: []byte, decision: ^Decision_B
 		}
 	}
 	for c in u.considerations {
-		switch c.input {
-		case .Number:
-			if !is(keys, c.a, {.Float, .Int, .Bool}) {
-				return false
-			}
-		case .Distance:
-			if !place(keys, c.a) || !place(keys, c.b) {
-				return false
-			}
-		case .Since:
-			if int(c.a) >= len(keys) {
-				return false
-			}
+		if !utility_consideration_keys_ok(keys, c) {
+			return false
 		}
 	}
 	return true

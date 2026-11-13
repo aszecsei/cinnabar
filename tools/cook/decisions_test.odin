@@ -301,7 +301,7 @@ decision_mistakes_are_problems_at_their_lines :: proc(t: ^testing.T) {
 
 @(test)
 a_technique_without_a_reader_is_a_problem :: proc(t: ^testing.T) {
-	text := fmt.tprintf("decision 1\ntechnique = goap\nblackboard = $%s\n", BOARD_GUID)
+	text := fmt.tprintf("decision 1\ntechnique = htn\nblackboard = $%s\n", BOARD_GUID)
 	_, problems := decision_parse(text, board_keys(t), TECHNIQUE_READERS, context.temp_allocator)
 	testing.expectf(t, len(problems) == 1 && problems[0].line == 2, "%v", problems)
 }

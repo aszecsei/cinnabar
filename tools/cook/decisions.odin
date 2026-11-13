@@ -23,14 +23,17 @@ Decision_Field :: struct {
 }
 
 // Decision_Text_Node is a node, `node <id> <kind>`, with the fields that its technique reads. Its shared parts are its
-// record in the parser's nodes, at index; set_line is the line of its first `set`, or 0 without one.
+// record in the parser's nodes, at index; set_line is the line of its first `set`, or 0 without one, and its writes are
+// a range of the parser's writes.
 Decision_Text_Node :: struct {
-	id:       int,
-	kind:     string,
-	line:     int,
-	index:    int,
-	set_line: int,
-	fields:   [dynamic]Decision_Field,
+	id:          int,
+	kind:        string,
+	line:        int,
+	index:       int,
+	set_line:    int,
+	first_write: u32,
+	write_count: u32,
+	fields:      [dynamic]Decision_Field,
 }
 
 // Decision_Text is what a technique's reader gets: the header's lines other than the technique and the blackboard,
@@ -56,6 +59,7 @@ Technique_Readers :: [format.Decision_Technique]Technique_Reader
 TECHNIQUE_READERS :: #partial Technique_Readers {
 	.Behavior_Tree = BEHAVIOR_TREE_READER,
 	.Utility       = UTILITY_READER,
+	.Goap          = GOAP_READER,
 }
 
 // Decision_Header is what decision_header finds of a decision before its blackboard is read.
@@ -243,6 +247,7 @@ node_field :: proc(p: ^Decision_Parser, node: ^Decision_Text_Node, record: ^form
 		}
 		assert(record.first_write + record.write_count == write)
 		record.write_count += 1
+		node.first_write, node.write_count = record.first_write, record.write_count
 		return
 	}
 	key, has_value, value := strings.partition(text, "=")

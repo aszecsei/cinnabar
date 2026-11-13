@@ -152,6 +152,17 @@ test_scores :: proc(decision: Decision, board: Board, state: []byte, allocator: 
 	return result
 }
 
+// test_plan is a plan of two steps, the second of which runs, for a goal whose priority is the thinks so far.
+@(private = "file")
+test_plan :: proc(decision: Decision, board: Board, state: []byte, allocator: runtime.Allocator) -> Plan_View {
+	goals := make([]Goal_Priority, 1, allocator)
+	goals[0] = {id = 3, priority = f32((^u32)(&state[0])^)}
+	steps := make([]Plan_Step, 2, allocator)
+	steps[0] = {id = 4, action = "walk"}
+	steps[1] = {id = 5, action = "flee"}
+	return {goal = 3, goals = goals, steps = steps, step = 1, nodes = 9}
+}
+
 @(private = "file")
 log_event :: proc(a: ^Action_Context, f: string, args: ..any) {
 	fixture := (^Fixture)(a.system.user)
@@ -164,7 +175,7 @@ log_event :: proc(a: ^Action_Context, f: string, args: ..any) {
 // stopped. Without scripts, bark is a native action that succeeds at once.
 @(private = "file")
 register_test_actions :: proc(s: ^State, scripts := false) {
-	register_module(s, .Behavior_Tree, {think = test_think, scores = test_scores})
+	register_module(s, .Behavior_Tree, {think = test_think, scores = test_scores, plan = test_plan})
 	if !scripts {
 		register_action(s, {name = "bark", params = {{"line", .String}, {"at", .Entity}}})
 	}
@@ -921,5 +932,35 @@ agent_scores_reads_the_modules_scores :: proc(t: ^testing.T) {
 	testing.expect(t, ok)
 	thinks := f64(thinks_of(f, f.agent))
 	expected := []f64{1, 1, 1, 1, f64(f32(thinks) / 10), 1, 1, 7, 0.25, 0.75}
+	testing.expectf(t, slice.equal(f.reports[:], expected), "%v, expected %v", f.reports, expected)
+}
+
+// Agent.plan gives the agent's goal, the goals' priorities, the plan and its step from 1, the last search's nodes and
+// whether it searches, and nil before the agent is ready.
+@(test)
+agent_plan_reads_the_modules_plan :: proc(t: ^testing.T) {
+	f := setup(t, serial = true, scripts = true)
+	defer teardown(t, f)
+	context.user_ptr = f
+	f.agent = spawn_agent(f, interval = 0)
+	_, ok := script.spawn_source(&f.runtime, "=early", `Test.report(if Agent.plan(Test.agent()) == nil then 1 else 0)`)
+	testing.expect(t, ok)
+	frame(f, 4)
+	_, ok = script.spawn_source(&f.runtime, "=plan", `
+		local plan = Agent.plan(Test.agent())
+		Test.report(plan.goal)
+		Test.report(#plan.goals)
+		Test.report(plan.goals[1].goal)
+		Test.report(plan.goals[1].priority)
+		Test.report(#plan.steps)
+		Test.report(plan.steps[1].node)
+		Test.report(if plan.steps[2].action == "flee" then 1 else 0)
+		Test.report(plan.step)
+		Test.report(plan.nodes)
+		Test.report(if plan.searching then 1 else 0)
+	`)
+	testing.expect(t, ok)
+	thinks := f64(thinks_of(f, f.agent))
+	expected := []f64{1, 3, 1, 3, thinks, 2, 4, 1, 2, 9, 0}
 	testing.expectf(t, slice.equal(f.reports[:], expected), "%v, expected %v", f.reports, expected)
 }

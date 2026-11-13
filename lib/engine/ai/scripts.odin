@@ -172,6 +172,51 @@ register_scripts :: proc(r: ^script.Runtime, s: ^State) {
 		}
 		return 1
 	}, "(entity: Entity) -> { { option: number, action: string, score: number, target: Entity?, considerations: { { consideration: number, input: number, score: number } } } }?")
+	script.define(r, "Agent.plan", proc(L: ^luau.State) -> c.int {
+		s := state_of(L)
+		e := script.check_entity(L, 1)
+		if !ecs.is_alive(s.world, e) || !ecs.has(s.world, e, Agent) {
+			script.raise(L, "the entity has no Agent")
+		}
+		view, ok := plan(s, e, context.temp_allocator)
+		if !ok {
+			luau.pushnil(L)
+			return 1
+		}
+		luau.createtable(L, 0, 6)
+		if view.goal != 0 {
+			luau.pushnumber(L, f64(view.goal))
+			luau.setfield(L, -2, "goal")
+		}
+		luau.createtable(L, c.int(len(view.goals)), 0)
+		for g, i in view.goals {
+			luau.createtable(L, 0, 2)
+			luau.pushnumber(L, f64(g.id))
+			luau.setfield(L, -2, "goal")
+			luau.pushnumber(L, f64(g.priority))
+			luau.setfield(L, -2, "priority")
+			luau.rawseti(L, -2, c.int(i + 1))
+		}
+		luau.setfield(L, -2, "goals")
+		luau.createtable(L, c.int(len(view.steps)), 0)
+		for step, i in view.steps {
+			luau.createtable(L, 0, 2)
+			luau.pushnumber(L, f64(step.id))
+			luau.setfield(L, -2, "node")
+			luau.pushodinstring(L, step.action)
+			luau.setfield(L, -2, "action")
+			luau.rawseti(L, -2, c.int(i + 1))
+		}
+		luau.setfield(L, -2, "steps")
+		// From 1, as Luau counts.
+		luau.pushnumber(L, f64(view.step + 1))
+		luau.setfield(L, -2, "step")
+		luau.pushnumber(L, f64(view.nodes))
+		luau.setfield(L, -2, "nodes")
+		luau.pushboolean(L, b32(view.searching))
+		luau.setfield(L, -2, "searching")
+		return 1
+	}, "(entity: Entity) -> { goal: number?, goals: { { goal: number, priority: number } }, steps: { { node: number, action: string } }, step: number, nodes: number, searching: boolean }?")
 	script.define(r, "Perception.noise", proc(L: ^luau.State) -> c.int {
 		s := state_of(L)
 		position := script.check_position(L, 1)

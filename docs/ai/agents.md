@@ -1,8 +1,8 @@
 # Agents
 
-The core of the AI, in `lib/engine/ai`: agents, their blackboards, the decision modules that choose their actions, the native and script actions that act, and the `ai think` system that runs the decisions on jobs within a budget. It has no decision module of its own. Each technique of the [decision kind](../content/kinds/decisions.md#techniques) registers one: the behavior tree's is in `lib/engine/ai/behavior_tree` ([Behavior trees](behavior-trees.md)), and utility's is in `lib/engine/ai/utility` ([Utility](utility.md)). Read [Hot reload](../overview/hot-reload.md#rules), [World: ECS](../world/ecs.md#systems), [World: Time](../world/time.md) and [Scripting: Behaviours](../scripting/behaviours.md) first.
+The core of the AI, in `lib/engine/ai`: agents, their blackboards, the decision modules that choose their actions, the native and script actions that act, and the `ai think` system that runs the decisions on jobs within a budget. It has no decision module of its own. Each technique of the [decision kind](../content/kinds/decisions.md#techniques) registers one: the behavior tree's is in `lib/engine/ai/behavior_tree` ([Behavior trees](behavior-trees.md)), utility's is in `lib/engine/ai/utility` ([Utility](utility.md)), and GOAP's is in `lib/engine/ai/goap` ([GOAP](goap.md)). Read [Hot reload](../overview/hot-reload.md#rules), [World: ECS](../world/ecs.md#systems), [World: Time](../world/time.md) and [Scripting: Behaviours](../scripting/behaviours.md) first.
 
-**In this document:** [Design](#design) · [Agents](#agents) · [Blackboards](#blackboards) · [Thinking](#thinking) · [Actions](#actions) · [The order in a tick](#the-order-in-a-tick) · [Determinism](#determinism) · [Reload and restart](#reload-and-restart) · [Scripts](#scripts) · [Limits](#limits)
+**In this document:** [Design](#design) · [Agents](#agents) · [Blackboards](#blackboards) · [Thinking](#thinking) · [Planning](#planning) · [Actions](#actions) · [The order in a tick](#the-order-in-a-tick) · [Determinism](#determinism) · [Reload and restart](#reload-and-restart) · [Scripts](#scripts) · [Limits](#limits)
 
 ## Design
 
@@ -51,18 +51,29 @@ An agent's blackboard is its values: `values_size` bytes in its slot, with each 
 2. Keeps the pool in step with the world's agents ([Agents](#agents)), and makes ready the agents whose blobs loaded. An agent whose blackboard or decision was recooked, by its blob's key, stops its action and starts again from its defaults.
 3. Takes the agents whose next think is due and whose entities are active, and sorts them by `priority`, highest first, then by the tick each last thought in, oldest first, then by slot. The first `budget` of them think: `DEFAULT_THINK_BUDGET` (64), which `ai.set_budget` changes.
 4. Runs their decision modules on jobs, `THINK_BATCH` (32) agents to a job. The jobs' commands go into the system's buffer in the agents' order.
-5. Places each agent's next think at its interval from now.
+5. Places each agent's next think at its interval from now, or in the next tick for an agent that searches for a plan ([Planning](#planning)).
 
 An agent's first think is staggered by its slot: the slot's place on the golden ratio's sequence, scaled to the interval. Agents that start together think in ticks spread over their interval rather than in one tick. An agent that the budget delays thinks as soon as its turn comes, and its next think is placed from then.
 
-- **Modules:** `ai.register_module(s, technique, {think, check})` in `register_world`. `check`, which is optional, checks the technique's data against the decision and its blackboard before an agent starts with them, so `think` reads only data that was checked. `scores`, which is optional, gives what the agent's last think scored, for debuggers and scripts (`ai.scores(s, entity)`). `think` gets a `Think_Context`: the agent, its decision and blackboard, its values and the tick at which each key last changed, its module state (`state_size` bytes from the decision's blob), its action (`Action_View`: the reference that it started, and whether it runs or ended), the seconds since it last thought, how often it thought, its generator, and its perception memory, if it has one, with the project's tags. It may read the world, writes only its module state and its generator, and asks for its outputs:
+- **Modules:** `ai.register_module(s, technique, {think, check})` in `register_world`. `check`, which is optional, checks the technique's data against the decision and its blackboard before an agent starts with them, so `think` reads only data that was checked. `scores`, which is optional, gives what the agent's last think scored, for debuggers and scripts (`ai.scores(s, entity)`). A planning module also has `searching` and `plan` ([Planning](#planning)). `think` gets a `Think_Context`: the agent, its decision and blackboard, its values and the tick at which each key last changed, its module state (`state_size` bytes from the decision's blob), its action (`Action_View`: the reference that it started, and whether it runs or ended), the seconds since it last thought, how often it thought, its generator, its perception memory, if it has one, with the project's tags, and its share of the plan budget. It may read the world, writes only its module state and its generator, and asks for its outputs:
   - `ai.condition_holds(t, index)` evaluates a decision's condition;
   - `ai.start_action(t, ref)` asks to start an action reference, which stops the one that runs. Asking for the action that runs does nothing.
   - `ai.stop_action(t)` asks to stop it;
   - `ai.write(t, index)` and `ai.node_writes(t, node)` ask for a decision's writes, with their values as the blackboard is at the think;
   - `ai.write_entity(t, slot, entity)` asks to write an entity key;
-  - `ai.key_number`, `ai.place_of`, `ai.distance`, `ai.seconds_since_changed` and `ai.tag_matches` read the inputs that a module scores.
+  - `ai.key_number`, `ai.place_of`, `ai.distance`, `ai.seconds_since_changed` and `ai.tag_matches` read the inputs that a module scores;
+  - `ai.plan_world`, `ai.plan_start` and `ai.plan_think` read the world state of planning keys and run a plan ([GOAP: The plan runner](goap.md#the-plan-runner)).
 - **When outputs apply:** after the tick's `Fixed` systems. A native action starts in the next tick's `ai actions`; a script action in this tick's script step.
+
+## Planning
+
+A planning technique, such as GOAP, searches for a plan over several thinks, with its search in the agent's module state ([GOAP: The search](goap.md#the-search)). Its module has two more procedures:
+- **`searching(state)`** is whether the agent's module state holds a search that its next think goes on with.
+- **`plan(decision, board, state, allocator)`** gives the agent's goal and plan, which `ai.plan(s, entity)` and `Agent.plan` read ([GOAP: The plan for debugging](goap.md#the-plan-for-debugging)).
+
+Each technique has a **plan budget**: the search nodes that its agents expand in a tick, `DEFAULT_PLAN_BUDGET` (256) by default, which `ai.set_plan_budget(s, technique, nodes)` changes. Before the think jobs run, the think system shares each technique's budget among the agents that think in the tick and whose module says that they search. Each gets the budget divided by their count, and the first of them in the agents' order get one node more while the remainder lasts. When the agents that search are more than the budget's nodes, the last of them in the agents' order get none until the searches before them end. An agent that does not search gets 0, so a search begins in one think and expands from the next. Its module reads its share in `Think_Context.plan_budget`.
+
+An agent that still searches after its think thinks again in the next tick, whatever its interval, within the think budget. The shares depend only on the order of the agents that think and their states, so a plan is the same on one job or many.
 
 ## Actions
 
@@ -145,6 +156,7 @@ The tests compare the thinks, chosen nodes, actions and values of 100 agents on 
 | `Blackboard.get(entity, key)` | The key's value: a number for a float or an int, a boolean, an enum's name, an `Entity` or nil, a `WorldPosition`, or a vector. Nil for an agent that is not ready. |
 | `Blackboard.set(entity, key, value)` | Writes the key at once. A write to an agent that is not ready yet, as in `awake`, applies when it is. |
 | `Agent.current_action(entity)` | The name of the action that the agent runs or starts, or nil |
+| `Agent.plan(entity)` | The agent's goal and plan: `{ goal, goals, steps, step, nodes, searching }`, with the current goal's node ID or nil, each goal `{ goal, priority }`, each step `{ node, action }`, the step that runs from 1, the node count of the last search, and whether the agent searches now. Nil for an agent that is not ready, or whose module does not plan ([GOAP: The plan for debugging](goap.md#the-plan-for-debugging)). |
 | `Agent.scores(entity)` | What the agent's module scored in its last think: a list of `{ option, action, score, target, considerations }`, with each consideration `{ consideration, input, score }` and the node IDs of the decision. Nil for an agent that is not ready, or whose module keeps no scores ([Utility: Scores for debugging](utility.md#scores-for-debugging)). |
 
 An entity without an `Agent`, a key that the blackboard does not have, or a value of another type raises an error.
