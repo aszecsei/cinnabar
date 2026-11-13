@@ -88,6 +88,14 @@ The module writes only the agent's module state and the outputs of its `Think_Co
 - **A recooked decision or blackboard** starts the agent again from its blackboard's defaults, with every node `Idle`.
 - **A soft restart** starts every agent again.
 
+## Last results
+
+Each node's state keeps how the node last ended, for the [decision editor](../editor/decision-editor.md#live-view): `Succeeded` or `Failed`, which is the result that it gave its parent, after its invert and force, or `Aborted` when an abort stopped it while it ran. A guard or a cooldown that fails a node sets `Failed`. Starting a node again keeps the old result until the node ends. The module's `nodes` hook gives each node that runs or has a result, by its decision node's ID ([Agents: The editor](agents.md#the-editor)). The result is a byte of the node's padding, so the state keeps its size.
+
+## The sample
+
+`samples/mygame`'s guard scene, which F7 cycles to, has a guard whose tree (`content/ai/guard.decision`) chases an intruder that it sees, with `move_to` and an abort of both, goes to where it last saw it when a wall hides it, and otherwise walks a round of four waypoints with the `next_waypoint` script action, resting 2 s at each. Its perception fills `target`, `can_see_target` and `last_seen`. Select the guard in the decision editor while the game plays to see its running branch ([Editor: Decision editor](../editor/decision-editor.md#live-view)).
+
 ## Limits
 
 - **Writes apply after the tick.** A node after a `set` in the same think reads the old values. It reads the new values from the next think.

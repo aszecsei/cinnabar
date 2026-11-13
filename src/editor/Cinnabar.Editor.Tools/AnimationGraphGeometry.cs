@@ -53,7 +53,7 @@ public readonly record struct AnimationGraphHit(AnimationGraphHitKind Kind, int 
 /// and what is at a point, so the hit tests run without a window. A node without a position gets a place below the
 /// others, which is not written, so a file does not change by being opened.
 /// </summary>
-public sealed class AnimationGraphGeometry
+public sealed class AnimationGraphGeometry : IGraphLayout
 {
     public const double NodeWidth = 180;
     public const double HeaderHeight = 24;

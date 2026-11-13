@@ -16,6 +16,7 @@ import "core:strconv"
 import "core:strings"
 
 import "cinnabar:core/luau"
+import cook_link "cinnabar:engine/asset/cook_link"
 import format "cinnabar:engine/asset/format"
 
 // Changing how the cooker compiles scripts changes this, which invalidates every cooked script.
@@ -51,6 +52,9 @@ Script_Source :: struct {
 	resolved:  [dynamic]Resolved_Require,
 	// The class that it defines, if it is a behaviour.
 	behaviour: string,
+	// The action that it defines, if it is one, and its parameters, sorted by name.
+	action:    string,
+	params:    []cook_link.Action_Param,
 }
 
 Resolved_Require :: struct {
@@ -83,6 +87,8 @@ cook_scripts :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass)
 			append(&a.dependencies, r.entry.target)
 		}
 		a.behaviour = s.behaviour
+		a.action = s.action
+		a.params = s.params
 	}
 	by_path := make(map[string]int, len(scripts), context.temp_allocator)
 	for s, i in scripts {
@@ -125,8 +131,8 @@ cook_scripts :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass)
 		key := script_key(options.config, s, dependency_hash(scripts, index) ~ definitions)
 		buffer: [32]u8
 		output := fmt.tprintf("%s/%s.blob", out_dir, format.guid_format(s.meta.guid, &buffer))
-		if cooked, behaviour := cooked_script(output); cooked == key && !pass.force[s.meta.guid] {
-			s.behaviour = behaviour
+		if cooked, behaviour, action, params := cooked_script(output); cooked == key && !pass.force[s.meta.guid] {
+			s.behaviour, s.action, s.params = behaviour, action, params
 			settle(pass, s.asset, .Current)
 			continue
 		}
@@ -172,6 +178,14 @@ cook_scripts :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass)
 		}
 		if class_flag == .Behaviour {
 			s.behaviour = class_name
+		}
+		if class_flag == .Action {
+			s.action = class_name
+			// The fields are sorted by name, as the blob keeps them, since a Luau table has no order of its own.
+			s.params = make([]cook_link.Action_Param, len(fields), context.temp_allocator)
+			for f, i in fields {
+				s.params[i] = {f.name, param_kind(f.kind)}
+			}
 		}
 		settle(pass, s.asset, .Cooked)
 	}
@@ -435,21 +449,52 @@ cooked_script_key :: proc(output: string) -> u64 {
 	return cooked_key(output, .Script, format.script_layout())
 }
 
-// cooked_script reads the key of a cooked script, as cooked_script_key does, and its behaviour class, if any.
-cooked_script :: proc(output: string) -> (key: u64, behaviour: string) {
+// param_kind is the cook link's kind of an action's parameter. An action has no asset parameters.
+@(private = "file")
+param_kind :: proc(kind: format.Script_Field_Kind) -> cook_link.Action_Param_Kind {
+	switch kind {
+	case .Number, .Asset:
+		return .Number
+	case .Boolean:
+		return .Boolean
+	case .String:
+		return .String
+	case .Vector:
+		return .Vector
+	case .Entity:
+		return .Entity
+	case .Position:
+		return .Position
+	}
+	return .Number
+}
+
+// cooked_script reads the key of a cooked script, as cooked_script_key does, and its behaviour class or its action's
+// name and parameters, if any.
+cooked_script :: proc(output: string) -> (key: u64, behaviour, action: string, params: []cook_link.Action_Param) {
 	key = cooked_script_key(output)
 	if key == 0 {
 		return
 	}
 	data, err := os.read_entire_file(output, context.temp_allocator)
 	if err != nil {
-		return 0, ""
+		return 0, "", "", nil
 	}
 	// The blob's offsets assume the runtime's alignment.
 	aligned, _ := mem.alloc_bytes(len(data), format.BLOB_ALIGN, context.temp_allocator)
 	copy(aligned, data)
-	if blob, ok := format.script_view(aligned); ok && .Behaviour in blob.flags {
-		behaviour = format.blob_string(aligned, blob.class_name)
+	if blob, ok := format.script_view(aligned); ok {
+		if .Behaviour in blob.flags {
+			behaviour = format.blob_string(aligned, blob.class_name)
+		}
+		if .Action in blob.flags {
+			action = format.blob_string(aligned, blob.class_name)
+			fields := format.script_fields(aligned, blob)
+			params = make([]cook_link.Action_Param, len(fields), context.temp_allocator)
+			for f, i in fields {
+				params[i] = {format.blob_string(aligned, f.name), param_kind(f.kind)}
+			}
+		}
 	}
 	return
 }

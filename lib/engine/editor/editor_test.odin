@@ -138,7 +138,7 @@ step :: proc(f: ^Fixture, connection: u64 = 1, incoming: ..link.Message) -> []li
 	messages := make([dynamic]link.Message, context.temp_allocator)
 	for m in step_all(f, connection, ..incoming) {
 		#partial switch _ in m {
-		case link.Game_Stats, link.Game_Commands:
+		case link.Game_Stats, link.Game_Commands, link.Agent_Actions:
 		case:
 			append(&messages, m)
 		}

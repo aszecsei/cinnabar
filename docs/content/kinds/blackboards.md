@@ -53,5 +53,6 @@ The view checks that each key lies inside the values at its alignment, and that 
   - too many keys, or values too large.
 
   A blackboard with a problem keeps its old blob, so the running game keeps the last good version.
+- **Unsaved text:** `Cook_Preview` with a blackboard's GUID answers with the problems of the text that the editor sends, at its lines, and writes no blob (`blackboard_check` in `tools/cook/blackboards.odin`).
 - **The cache key** covers the cooker version, the layout, the source path, the source and the GUID. A decision keeps its blackboard's key ([Decisions: The cook](decisions.md#the-cook)).
-- **The editor** opens a blackboard in the script editor. It is among the scripts in the content browser.
+- **The editor** opens a blackboard in the blackboard editor, a table of its keys, where renaming a key renames it in the decisions that read it ([Editor: Decision editor](../../editor/decision-editor.md#blackboards)). It is among the scripts in the content browser.

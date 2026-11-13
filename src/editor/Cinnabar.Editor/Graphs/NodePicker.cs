@@ -1,32 +1,33 @@
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Layout;
-using Cinnabar.Editor.Link.Cook;
 using Cinnabar.Editor.Maths;
-using Cinnabar.Editor.Shell;
-using Cinnabar.Editor.Tools;
 
-namespace Cinnabar.Editor.Materials;
+namespace Cinnabar.Editor.Graphs;
+
+/// <summary>A choice in a node picker: what it adds, and the words that find it.</summary>
+public sealed record PickerEntry(string Kind, string Label, string Category, string Description);
 
 /// <summary>
-/// The menu that adds a node: a search over the kinds of node that the graph can have, by label, category and
-/// description, every word of the query matching. Enter adds the first match.
+/// The menu that adds a node to a graph: a search over what the graph can add, by label, category, kind and description,
+/// every word of the query matching. Enter adds the first match. TFrom is what the canvas opened it from, such as the
+/// pin that a link was dragged from, which it gives back with the pick.
 /// </summary>
-sealed class NodePicker
+sealed class NodePicker<TFrom>
 {
-    readonly MaterialEditor _editor;
+    readonly Func<IEnumerable<PickerEntry>> _entries;
     readonly Flyout _flyout;
     readonly TextBox _query = new() { PlaceholderText = "Search nodes", Classes = { "palette-query" } };
     readonly ListBox _results = new() { Classes = { "palette-results" }, MaxHeight = 360, Width = 280 };
     Vec2 _at;
-    (int Node, string Pin, bool FromOutput)? _from;
+    TFrom _from = default!;
 
-    /// <summary>A kind was picked: its name, where to put it, and the pin that a link was dragged from, if any.</summary>
-    public event Action<string, Vec2, (int Node, string Pin, bool FromOutput)?>? Picked;
+    /// <summary>A kind was picked: its name, where to put it, and what the picker was opened from.</summary>
+    public event Action<string, Vec2, TFrom>? Picked;
 
-    public NodePicker(MaterialEditor editor)
+    public NodePicker(Func<IEnumerable<PickerEntry>> entries)
     {
-        _editor = editor;
+        _entries = entries;
         var panel = new StackPanel { Children = { _query, _results } };
         _flyout = new Flyout { Content = new Border { Classes = { "palette" }, Child = panel }, Placement = PlacementMode.Pointer };
         _query.TextChanged += (_, _) => Fill();
@@ -64,7 +65,7 @@ sealed class NodePicker
         _flyout.Opened += (_, _) => _query.Focus();
     }
 
-    public void Open(Control target, Vec2 at, (int Node, string Pin, bool FromOutput)? from)
+    public void Open(Control target, Vec2 at, TFrom from)
     {
         _at = at;
         _from = from;
@@ -77,7 +78,7 @@ sealed class NodePicker
     {
         var words = (_query.Text ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries);
         _results.Items.Clear();
-        foreach (var kind in _editor.Catalog.KindsFor(_editor.Document.Kind).Where(k => k.Kind != "output" && words.All(w => Matches(k, w))))
+        foreach (var kind in _entries().Where(k => words.All(w => Matches(k, w))))
         {
             var item = new ListBoxItem
             {
@@ -99,7 +100,7 @@ sealed class NodePicker
         _results.SelectedIndex = _results.ItemCount > 0 ? 0 : -1;
     }
 
-    static bool Matches(NodeInfo kind, string word) =>
+    static bool Matches(PickerEntry kind, string word) =>
         kind.Label.Contains(word, StringComparison.OrdinalIgnoreCase) || kind.Category.Contains(word, StringComparison.OrdinalIgnoreCase)
         || kind.Kind.Contains(word, StringComparison.OrdinalIgnoreCase) || kind.Description.Contains(word, StringComparison.OrdinalIgnoreCase);
 

@@ -49,6 +49,7 @@ public sealed class WorldModel
     readonly List<EntityNode> _roots = [];
     readonly Dictionary<ulong, EntityValues> _values = [];
     readonly Dictionary<ulong, AnimatorView> _animators = [];
+    readonly Dictionary<ulong, AgentView> _agents = [];
     readonly Dictionary<ulong, (ReflectionProbeView View, DateTime Received)> _probes = [];
 
     public IReadOnlyDictionary<ulong, ComponentType> Types => _types;
@@ -74,6 +75,15 @@ public sealed class WorldModel
     /// <summary>What a watched entity's Animator plays changed, or it has gone.</summary>
     public event Action<ulong>? AnimatorChanged;
 
+    /// <summary>What a watched entity's Agent runs changed, or it has gone.</summary>
+    public event Action<ulong>? AgentChanged;
+
+    /// <summary>The game's native actions changed: a new link, or a code reload.</summary>
+    public event Action? ActionsChanged;
+
+    /// <summary>The native actions that the game registered, which decisions start by name (see docs/ai/agents.md#native-actions).</summary>
+    public IReadOnlyList<AgentActionInfo> NativeActions { get; private set; } = [];
+
     /// <summary>A watched entity's reflection probe's state changed, or it has gone.</summary>
     public event Action<ulong>? ProbeChanged;
 
@@ -89,6 +99,9 @@ public sealed class WorldModel
 
     /// <summary>What a watched entity's Animator plays, or null without one whose graph is ready.</summary>
     public AnimatorView? Animator(ulong handle) => _animators.GetValueOrDefault(handle);
+
+    /// <summary>What a watched entity's Agent runs, or null without one that is ready.</summary>
+    public AgentView? Agent(ulong handle) => _agents.GetValueOrDefault(handle);
 
     /// <summary>
     /// A watched entity's reflection probe's last state from the game, with when it came, which its age is from, or null
@@ -116,6 +129,7 @@ public sealed class WorldModel
                 _entities.Clear();
                 _values.Clear();
                 _animators.Clear();
+                _agents.Clear();
                 _probes.Clear();
                 foreach (var info in snapshot.Entities)
                 {
@@ -134,6 +148,10 @@ public sealed class WorldModel
                     if (_animators.Remove(handle))
                     {
                         AnimatorChanged?.Invoke(handle);
+                    }
+                    if (_agents.Remove(handle))
+                    {
+                        AgentChanged?.Invoke(handle);
                     }
                     if (_probes.Remove(handle))
                     {
@@ -169,6 +187,25 @@ public sealed class WorldModel
                     AnimatorChanged?.Invoke(view.Entity);
                 }
                 return true;
+            case AgentView view:
+                if (_entities.ContainsKey(view.Entity))
+                {
+                    // A view without a decision says that the entity no longer has an agent to show.
+                    if (view.Decision.AsSpan().IndexOfAnyExcept((byte)0) < 0)
+                    {
+                        _agents.Remove(view.Entity);
+                    }
+                    else
+                    {
+                        _agents[view.Entity] = view;
+                    }
+                    AgentChanged?.Invoke(view.Entity);
+                }
+                return true;
+            case AgentActions actions:
+                NativeActions = actions.Actions;
+                ActionsChanged?.Invoke();
+                return true;
             case ReflectionProbeView probe:
                 if (_entities.ContainsKey(probe.Entity))
                 {
@@ -198,7 +235,9 @@ public sealed class WorldModel
         _bySceneId.Clear();
         _values.Clear();
         _animators.Clear();
+        _agents.Clear();
         _probes.Clear();
+        NativeActions = [];
         HasWorld = false;
         TypesChanged?.Invoke();
         Reset?.Invoke();

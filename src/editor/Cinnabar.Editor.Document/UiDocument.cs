@@ -4,7 +4,7 @@ namespace Cinnabar.Editor.Document;
 /// An open UI document and its edits. Its first state is the file's text as it is, so opening a file changes nothing,
 /// and the first save changes only the text of its edits.
 /// </summary>
-public sealed class UiDocument : GraphDocument<UiFile>
+public sealed class UiDocument : GraphDocument<UiFile>, ITextGraphDocument
 {
     // The file's text when the document last read or wrote it.
     string _onDisk;

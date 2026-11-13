@@ -24,13 +24,15 @@ import "cinnabar:engine/random"
 // module state, for debuggers and scripts (see scores). A planning module has searching, which is whether the agent's
 // module state holds a search that its next think goes on with: the think system shares the technique's plan budget
 // among those agents, and they think again in the next tick (see docs/ai/agents.md#planning). It has plan too, which
-// gives the agent's goal and plan from its module state (see plan).
+// gives the agent's goal and plan from its module state (see plan). nodes gives each decision node that runs or has
+// ended, from its module state, for the editor (see agent_debug).
 Module :: struct {
 	think:     proc(t: ^Think_Context),
 	check:     proc(decision: Decision, board: Board) -> bool,
 	scores:    proc(decision: Decision, board: Board, state: []byte, allocator: runtime.Allocator) -> []Option_Score,
 	searching: proc(state: []byte) -> bool,
 	plan:      proc(decision: Decision, board: Board, state: []byte, allocator: runtime.Allocator) -> Plan_View,
+	nodes:     proc(decision: Decision, state: []byte, allocator: runtime.Allocator) -> []Node_View,
 }
 
 // Option_Score is an option that a module scored in the agent's last think: its decision node's ID, its action's name,

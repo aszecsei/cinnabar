@@ -1,0 +1,30 @@
+decision 1
+# nodes: 1 2 3 4 5 6 7
+technique = behavior_tree
+blackboard = $0123456789abcdef0123456789abcdef
+speed = 3 # problem
+	position = [0, 0] # problem
+node 0 x # problem
+	position = [1, 1] # problem
+node 1 # problem
+	position = [2, 2] # problem
+node 1 selector
+	children = 2, 3, 5, 6, 7
+node 2 wait
+	seconds = 1
+	seconds = 2 # problem node 2
+	speed = 3 # problem node 2
+	policy = one # problem node 2
+node 3 sequence
+	children = 4, 99 # problem node 3
+node 4 action
+	action = patrol
+	when = missing # problem node 4
+node 2 wait # problem
+	seconds = 1 # problem
+node 5 wait # problem node 5
+	set mood = alert # problem node 5
+node 6 sequence
+	abort = lower # problem node 6
+	children = 4 # problem node 6
+node 7 widget # problem node 7

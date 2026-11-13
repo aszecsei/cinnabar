@@ -95,3 +95,38 @@ a_hello_after_its_editor_left_links_nothing :: proc(t: ^testing.T) {
 	}
 	testing.expect(t, found, "the linked editor got no log line")
 }
+
+// A decision's preview is its problems at the lines of the text that the editor sends, whatever the file holds.
+@(test)
+a_preview_of_a_decision_or_a_blackboard_gives_the_problems_of_its_text :: proc(t: ^testing.T) {
+	GUARD :: "0123456789abcdef0123456789abcdef"
+	DECISION :: "00112233445566778899aabbccddeeff"
+	head :: "decision 1\ntechnique = behavior_tree\nblackboard = $" + GUARD + "\nnode 1 wait\n"
+	tree := make_tree(
+		t,
+		{
+			{"content/ai/guard.blackboard", "blackboard 1\nfloat health\n"},
+			{"content/ai/guard.blackboard.meta", "guid = " + GUARD + "\n"},
+			{"content/ai/guard.decision", head + "\tseconds = 1\n"},
+			{"content/ai/guard.decision.meta", "guid = " + DECISION + "\n"},
+		},
+	)
+	defer remove_tree(tree)
+	d: Daemon
+	d.options = tree_options(tree)
+	pass := cook(d.options, {.Blackboard, .Decision}, log_problems = false)
+	index_build(&d.index, pass, d.options.roots[:])
+	defer index_destroy(&d.index)
+
+	result := preview(&d, {guid = DECISION, text = head + "\tseconds = rest\n"})
+	testing.expectf(t, len(result.problems) == 1 && result.problems[0].line == 5 && result.problems[0].error, "%v", result.problems)
+	testing.expect(t, result.error != "")
+	result = preview(&d, {guid = DECISION, text = head + "\tseconds = health\n"})
+	testing.expectf(t, len(result.problems) == 0 && result.error == "", "%v", result)
+
+	result = preview(&d, {guid = GUARD, text = "blackboard 1\nfloat health\nfloat health\n"})
+	testing.expectf(t, len(result.problems) == 1 && result.problems[0].line == 3, "%v", result.problems)
+	testing.expect(t, result.error != "")
+	result = preview(&d, {guid = GUARD, text = "blackboard 1\nfloat health\n"})
+	testing.expectf(t, len(result.problems) == 0 && result.error == "", "%v", result)
+}

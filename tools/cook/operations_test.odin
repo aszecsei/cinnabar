@@ -276,3 +276,44 @@ names_follow_windows_and_luau :: proc(t: ^testing.T) {
 	testing.expect_value(t, class_name("2d-camera"), "B2d_Camera")
 	testing.expect_value(t, class_name("..."), "Behaviour")
 }
+
+@(test)
+the_blackboard_and_decision_templates_make_assets_that_cook_once_a_blackboard_is_named :: proc(t: ^testing.T) {
+	o := ops_open(t, {{"content/keep.luau", "return 1"}})
+	defer ops_close(&o)
+
+	board := operate(&o, cook_link.Create_Asset{template = .Blackboard, root = "game", name = "guard"})
+	testing.expectf(t, board.error == "" && len(board.guids) == 1, "%v", board)
+	testing.expect(t, o.pass.ok)
+	testing.expect_value(t, o.index.assets[board.guids[0]].kind, cook_link.Asset_Kind.Blackboard)
+	testing.expect_value(t, o.index.assets[board.guids[0]].status, cook_link.Asset_Status.Current)
+
+	templates := [?]cook_link.Asset_Template{.Decision_Behavior_Tree, .Decision_Utility, .Decision_Goap, .Decision_Htn}
+	techniques := [?]string{"behavior_tree", "utility", "goap", "htn"}
+	for template, i in templates {
+		result := operate(&o, cook_link.Create_Asset{template = template, root = "game", name = techniques[i]})
+		testing.expectf(t, result.error == "" && len(result.guids) == 1, "%v", result)
+		if len(result.guids) != 1 {
+			continue
+		}
+		decision := o.index.assets[result.guids[0]]
+		testing.expect_value(t, decision.kind, cook_link.Asset_Kind.Decision)
+		testing.expect_value(t, decision.path, fmt.tprintf("%s.decision", techniques[i]))
+		// It is a problem until the author names a blackboard. The planners' planning keys are unknown without one too.
+		testing.expect_value(t, decision.status, cook_link.Asset_Status.Failed)
+		problems := o.index.problems[decision.guid]
+		testing.expectf(t, len(problems) > 0 && problems[0].line == 1 && strings.contains(problems[0].text, "names its blackboard"), "%v", problems)
+	}
+}
+
+@(test)
+the_decision_templates_are_good_once_they_name_a_blackboard :: proc(t: ^testing.T) {
+	board, board_problems := blackboard_parse("blackboard 1\nbool done\n", context.temp_allocator)
+	testing.expect_value(t, len(board_problems), 0)
+	texts := [?]string{BEHAVIOR_TREE_TEMPLATE, UTILITY_TEMPLATE, GOAP_TEMPLATE, HTN_TEMPLATE}
+	for text in texts {
+		named := fmt.tprintf("%sblackboard = $0123456789abcdef0123456789abcdef\n", text)
+		_, problems := decision_parse(named, board.keys, TECHNIQUE_READERS, context.temp_allocator)
+		testing.expectf(t, len(problems) == 0, "%s: %v", text, problems)
+	}
+}

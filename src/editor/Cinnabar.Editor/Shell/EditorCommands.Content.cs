@@ -20,6 +20,11 @@ static partial class EditorCommands
         NewAssetCommand(shell, NewAnimationGraph, Link.Cook.AssetTemplate.AnimationGraph, "New Animation Graph", "animation-graph", "Add an animation graph, the states and blends of clips that an Animator plays, to the content browser's folder.");
         NewAssetCommand(shell, NewUiDocument, Link.Cook.AssetTemplate.Ui, "New UI Document", "ui-document", "Add a UI document, a panel of boxes, text and images that a Ui_Document puts on the screen, to the content browser's folder.");
         NewAssetCommand(shell, NewSpriteSheet, Link.Cook.AssetTemplate.SpriteSheet, "New Sprite Sheet", "sprite-sheet", "Add a sprite sheet, the frames of a texture and the animations that a Sprite_Renderer plays, to the content browser's folder.");
+        NewAssetCommand(shell, NewBlackboard, Link.Cook.AssetTemplate.Blackboard, "New Blackboard", "blackboard", "Add a blackboard, the typed keys that an agent's decision reads and its actions and scripts write, to the content browser's folder.");
+        NewAssetCommand(shell, NewDecision, Link.Cook.AssetTemplate.DecisionBehaviorTree, "New Decision", "decision", "Add a decision, a behavior tree that picks an agent's actions, to the content browser's folder.");
+        NewAssetCommand(shell, NewUtilityDecision, Link.Cook.AssetTemplate.DecisionUtility, "New Utility Decision", "decision", "Add a decision that scores its options and runs the best, to the content browser's folder.");
+        NewAssetCommand(shell, NewGoapDecision, Link.Cook.AssetTemplate.DecisionGoap, "New GOAP Decision", "decision", "Add a decision that plans actions toward its goals, to the content browser's folder.");
+        NewAssetCommand(shell, NewHtnDecision, Link.Cook.AssetTemplate.DecisionHtn, "New HTN Decision", "decision", "Add a decision that breaks its tasks down into actions, to the content browser's folder.");
         NewAssetCommand(shell, NewFolder, null, "New Folder", "folder", "Add a folder to the content browser's folder.");
         commands.Register(new Command(RenameAsset, "Rename Asset", shell.Content.RequestRenameSelected)
         {

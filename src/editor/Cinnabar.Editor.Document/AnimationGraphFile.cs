@@ -9,53 +9,10 @@ public enum AnimationGraphNodeKind
     Transition,
 }
 
-/// <summary>A line of the file and the line ending after it, which is "" for a new line or a last line without one.</summary>
-sealed class AnimationGraphLine(string text, string ending)
-{
-    public string Text { get; set; } = text;
-
-    public string Ending { get; set; } = ending;
-
-    /// <summary>The line without its comment and the white space around it.</summary>
-    public string Code => AnimationGraphFile.StripComment(Text).Trim();
-
-    public bool IsBlank => Code.Length == 0;
-
-    /// <summary>Replaces the line's code, keeping its indent and its comment.</summary>
-    public void SetCode(string code)
-    {
-        var stripped = AnimationGraphFile.StripComment(Text);
-        var indent = stripped[..(stripped.Length - stripped.TrimStart().Length)];
-        var kept = stripped.TrimEnd().Length;
-        Text = indent + code + Text[kept..];
-    }
-
-    /// <summary>The text after the line's first <c>=</c>, or "" without one.</summary>
-    public string Value => Code.IndexOf('=') is >= 0 and var at ? Code[(at + 1)..].Trim() : "";
-
-    /// <summary>The text before the line's first <c>=</c>.</summary>
-    public string Key => Code.IndexOf('=') is >= 0 and var at ? Code[..at].Trim() : Code;
-
-    /// <summary>Replaces what follows the line's first <c>=</c>, keeping the spaces after it.</summary>
-    public void SetValue(string value)
-    {
-        var code = Code;
-        var at = code.IndexOf('=');
-        if (at < 0)
-        {
-            SetCode($"{code} = {value}");
-            return;
-        }
-        var after = code[(at + 1)..];
-        var spaces = after.Length == 0 ? " " : after[..(after.Length - after.TrimStart().Length)];
-        SetCode(code[..(at + 1)] + spaces + value);
-    }
-}
-
 /// <summary>Whole lines of the file that belong together. Together, a file's blocks hold every line that it has.</summary>
 public abstract class AnimationGraphBlock
 {
-    internal List<AnimationGraphLine> Lines { get; } = [];
+    internal List<TextLine> Lines { get; } = [];
 
     /// <summary>The text of the block's lines, without their endings.</summary>
     public IEnumerable<string> LineTexts => Lines.Select(l => l.Text);
@@ -107,7 +64,7 @@ public sealed class AnimationGraphNode(int id, AnimationGraphNodeKind kind) : An
     /// <summary>The fields in the file's order. A field that the cooker reports as set twice is here twice.</summary>
     public IEnumerable<(string Key, string Value)> Fields => FieldLines.Select(l => (l.Key, l.Value));
 
-    IEnumerable<AnimationGraphLine> FieldLines => Lines.Skip(1).Where(l => !l.IsBlank);
+    IEnumerable<TextLine> FieldLines => Lines.Skip(1).Where(l => !l.IsBlank);
 
     /// <summary>A field's value as the file writes it, or null without it. The first line counts, as in the cooker.</summary>
     public string? Get(string key) => FieldLines.FirstOrDefault(l => l.Key == key)?.Value;
@@ -132,7 +89,7 @@ public sealed class AnimationGraphNode(int id, AnimationGraphNodeKind kind) : An
         var indent = last == null ? "\t" : last.Text[..(last.Text.Length - last.Text.TrimStart().Length)];
         // A position comes first, and the rest in the order that they were set.
         var at = key == "position" || last == null ? 1 : Lines.IndexOf(last) + 1;
-        Lines.Insert(at, new AnimationGraphLine($"{indent}{key} = {value}", ""));
+        Lines.Insert(at, new TextLine($"{indent}{key} = {value}", ""));
     }
 
     /// <summary>Gives a field's line another key, as a blend's inputs do when one before them goes.</summary>
@@ -210,26 +167,7 @@ public sealed class AnimationGraphFile
     }
 
     /// <summary>A line without a <c>#</c> and what follows it, outside of quotes.</summary>
-    public static string StripComment(string line)
-    {
-        var quoted = false;
-        for (var i = 0; i < line.Length; i++)
-        {
-            switch (line[i])
-            {
-                case '\\' when quoted:
-                    // The escaped character does not end the string.
-                    i++;
-                    break;
-                case '"':
-                    quoted = !quoted;
-                    break;
-                case '#' when !quoted:
-                    return line[..i];
-            }
-        }
-        return line;
-    }
+    public static string StripComment(string line) => TextLine.StripComment(line);
 
     /// <summary>Reads a node's ID as the cooker does: with a sign, a prefix for its base, and <c>_</c> between its digits.</summary>
     public static bool TryParseId(string text, out int id)
@@ -279,9 +217,9 @@ public sealed class AnimationGraphFile
         var header = false;
         AnimationGraphBlock? open = null;
         // Blank lines and comments: they stay in the open block when an indented line follows them.
-        var pending = new List<AnimationGraphLine>();
+        var pending = new List<TextLine>();
         var ids = new HashSet<int>();
-        void Other(params IEnumerable<AnimationGraphLine> lines)
+        void Other(params IEnumerable<TextLine> lines)
         {
             var block = new AnimationGraphOther();
             block.Lines.AddRange(lines);
@@ -296,7 +234,7 @@ public sealed class AnimationGraphFile
             pending.Clear();
         }
         var number = 0;
-        foreach (var line in SplitLines(text))
+        foreach (var line in TextLine.Split(text))
         {
             number++;
             file._finalEnding = line.Ending;
@@ -353,26 +291,9 @@ public sealed class AnimationGraphFile
         return (file, null);
     }
 
-    static IEnumerable<AnimationGraphLine> SplitLines(string text)
-    {
-        var start = 0;
-        while (start < text.Length)
-        {
-            var end = text.IndexOf('\n', start);
-            if (end < 0)
-            {
-                yield return new AnimationGraphLine(text[start..], "");
-                yield break;
-            }
-            var crlf = end > start && text[end - 1] == '\r';
-            yield return new AnimationGraphLine(text[start..(crlf ? end - 1 : end)], crlf ? "\r\n" : "\n");
-            start = end + 1;
-        }
-    }
-
     // The block that an unindented line starts, or null for a line that the cooker has no place for, whose indented
     // lines then have no place either.
-    static AnimationGraphBlock? ReadBlock(AnimationGraphLine line, string[] fields, HashSet<int> ids)
+    static AnimationGraphBlock? ReadBlock(TextLine line, string[] fields, HashSet<int> ids)
     {
         switch (fields[0])
         {
@@ -470,7 +391,7 @@ public sealed class AnimationGraphFile
             return;
         }
         var block = new AnimationGraphSetting(key);
-        block.Lines.Add(new AnimationGraphLine($"{key} = {value}", ""));
+        block.Lines.Add(new TextLine($"{key} = {value}", ""));
         // Under the header and the comments that follow it.
         var at = _blocks.FindIndex(b => b is AnimationGraphOther && b.Lines.Any(l => !l.IsBlank)) + 1;
         while (at < _blocks.Count && _blocks[at] is AnimationGraphOther && _blocks[at].Lines.All(l => l.Text.TrimStart().StartsWith('#')))
@@ -484,7 +405,7 @@ public sealed class AnimationGraphFile
     public AnimationGraphParam AddParam(string name, string type, string? value)
     {
         var block = new AnimationGraphParam();
-        block.Lines.Add(new AnimationGraphLine(ParamCode(name, type, value), ""));
+        block.Lines.Add(new TextLine(ParamCode(name, type, value), ""));
         InsertInGroup(block, Params.LastOrDefault(), _blocks.FirstOrDefault(b => b is AnimationGraphClip or AnimationGraphNode));
         return block;
     }
@@ -498,7 +419,7 @@ public sealed class AnimationGraphFile
     public AnimationGraphClip AddClip(string name, string guid)
     {
         var block = new AnimationGraphClip();
-        block.Lines.Add(new AnimationGraphLine($"clip {name} = ${guid}", ""));
+        block.Lines.Add(new TextLine($"clip {name} = ${guid}", ""));
         InsertInGroup(block, Clips.LastOrDefault(), _blocks.FirstOrDefault(b => b is AnimationGraphNode));
         return block;
     }
@@ -510,7 +431,7 @@ public sealed class AnimationGraphFile
     {
         var block = new AnimationGraphNode(NextId(), kind);
         var word = kind switch { AnimationGraphNodeKind.State => "state", AnimationGraphNodeKind.Blend1D => "blend_1d", _ => "transition" };
-        block.Lines.Add(new AnimationGraphLine($"node {block.Id} {word}", ""));
+        block.Lines.Add(new TextLine($"node {block.Id} {word}", ""));
         InsertInGroup(block, Nodes.LastOrDefault(n => n.Kind == kind), null);
         return block;
     }
@@ -525,7 +446,7 @@ public sealed class AnimationGraphFile
             return;
         }
         var blank = new AnimationGraphOther();
-        blank.Lines.Add(new AnimationGraphLine("", ""));
+        blank.Lines.Add(new TextLine("", ""));
         if (next != null)
         {
             var at = _blocks.IndexOf(next);

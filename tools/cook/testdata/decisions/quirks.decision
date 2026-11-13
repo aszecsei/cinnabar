@@ -1,0 +1,30 @@
+# nodes: 16 1 3 4 5 6
+# A comment, and a blank line, can come before the header.
+
+decision 1 # and after it
+technique=behavior_tree
+node 0x10 selector
+	children = 1, 3, 5
+# This comment does not end the node above: a line indented after it is the node's.
+	position = [0, 0]
+node   1   sequence # an ID can be hex, as 0x10 is, and the fields can have any spaces
+  when = has_target # two spaces indent as well as a tab
+  children=4,6
+
+   # An indented comment, and a line of spaces, stay in the block.
+  
+	  	position = [1, 2]
+node 3 action
+	action = bark(line = "Halt! # not a comment", at = target) # but this is
+node 4 wait
+	seconds=1
+
+# A comment and a blank line between the blocks.
+
+node 5 set
+	set mood = alert
+	set	searching = true
+	set   ammo = 0
+node 6 condition
+	condition = health < 0.3
+blackboard = $0123456789abcdef0123456789abcdef # the header's lines can come after the nodes

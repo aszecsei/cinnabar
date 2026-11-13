@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
 using Cinnabar.Editor.Document;
+using Cinnabar.Editor.Graphs;
 using Cinnabar.Editor.Link.Protocol;
 using Cinnabar.Editor.Maths;
 using Cinnabar.Editor.Panels;
@@ -15,15 +16,12 @@ namespace Cinnabar.Editor.AnimationGraphs;
 /// <summary>
 /// The animation graph editor's canvas (see docs/editor/animation-graph-editor.md#animation-graph-editor): the graph's states and
 /// blends, a link from each blend to the states that play it, and an arrow for each transition, drawn in the canvas's
-/// own units under a pan and a zoom. The left button selects, drags, drags a box, drags a transition from a state's rim
-/// to another state, and drags a tether from a blend's foot to a state; a tether dragged off a state's chip comes away. The right or middle
-/// button pans, and a right click without a drag, Space or Tab adds a node. The wheel zooms about the mouse. Delete
-/// deletes the selected nodes, and F frames the graph.
+/// own units under a pan and a zoom, with the gestures of every graph canvas (NodeGraphCanvas). Its own drags take a
+/// transition from a state's rim to another state, and a tether from a blend's foot to a state; a tether dragged off a
+/// state's chip comes away.
 /// </summary>
-public sealed class AnimationGraphCanvas : Control
+public sealed class AnimationGraphCanvas : NodeGraphCanvas
 {
-    const double MinZoom = 0.2;
-    const double MaxZoom = 2;
     const double ArrowHead = 8;
     const double StateCorner = 10;
     const double BlendCorner = 2;
@@ -38,8 +36,6 @@ public sealed class AnimationGraphCanvas : Control
     static readonly IPen ErrorBorder = new Pen(new SolidColorBrush(Palette.Error), 2, new DashStyle([3, 2], 0));
     static readonly IBrush Text = new SolidColorBrush(Color.Parse("#E4E4E8"));
     static readonly IBrush DimText = new SolidColorBrush(Color.Parse("#8A8A92"));
-    static readonly IBrush BoxFill = new SolidColorBrush(Color.Parse("#22E34234"));
-    static readonly IPen BoxPen = new Pen(new SolidColorBrush(Palette.Accent), 1);
     static readonly IBrush BlendHeader = new SolidColorBrush(Color.Parse("#39303F"));
     static readonly IBrush ArrowBrush = new SolidColorBrush(Color.Parse("#A8A8B0"));
     static readonly IPen ArrowPen = new Pen(ArrowBrush, 1.5);
@@ -59,42 +55,31 @@ public sealed class AnimationGraphCanvas : Control
     static readonly IBrush LastTakenBrush = new SolidColorBrush(LiveColor, 0.45);
     static readonly IPen LastTakenPen = new Pen(LastTakenBrush, 2);
 
-    enum Gesture
+    // The canvas's own drags: a transition from a state's rim, and a blend's tether.
+    enum Drag
     {
         None,
-        Click,
-        Move,
-        Box,
         Transition,
         Link,
-        Pan,
-        PanClick,
     }
 
     readonly EditorShell _shell;
     readonly AnimationGraphEditor _editor;
     AnimationGraphGeometry _geometry;
-    Canvas2DView _view = new(new Vec2(-200, -150), 1);
-    Gesture _gesture;
-    Point _start;
-    Point _last;
-    int _pressed;
-    Dictionary<int, Vec2> _moveStarts = [];
+    Drag _drag;
     // The state whose rim the mouse is on.
     int _rimUnderMouse;
     // A drag from a state's rim or a blend's feed, and the state that a tether came off, if any.
     int _dragFrom;
     int? _detachedFrom;
     Vec2 _dragEnd;
-    bool _framed;
 
     public AnimationGraphCanvas(EditorShell shell, AnimationGraphEditor editor)
+        : base(editor)
     {
         _shell = shell;
         _editor = editor;
         _geometry = editor.Geometry();
-        Focusable = true;
-        ClipToBounds = true;
         new ViewSubscriptions(this, attached: OnChanged)
             .Add(() => _editor.Changed += OnChanged, () => _editor.Changed -= OnChanged)
             .Add(() => _editor.SelectionChanged += InvalidateVisual, () => _editor.SelectionChanged -= InvalidateVisual)
@@ -108,77 +93,40 @@ public sealed class AnimationGraphCanvas : Control
         InvalidateVisual();
     }
 
-    protected override Size ArrangeOverride(Size finalSize)
+    protected override IGraphLayout Layout => _geometry;
+
+    protected override void DrawGraph(DrawingContext context)
     {
-        var size = base.ArrangeOverride(finalSize);
-        // The graph starts framed, once the canvas has a size.
-        if (!_framed && finalSize.Width > 0 && finalSize.Height > 0)
+        var problems = _editor.Problems.Where(p => p.Error && p.Node != null).Select(p => p.Node!.Value).ToHashSet();
+        foreach (var t in _geometry.Transitions)
         {
-            _framed = true;
-            Frame(finalSize);
+            DrawArrow(context, t, ArrowPen, ArrowBrush);
         }
-        return size;
-    }
-
-    Vec2 ToCanvas(Point p) => _view.ToCanvas(p.X, p.Y);
-
-    /// <summary>Pans and zooms so the whole graph is in view.</summary>
-    public void Frame() => Frame(Bounds.Size);
-
-    void Frame(Size size)
-    {
-        if (_geometry.Extent() is not { } extent || size.Width <= 0)
+        // What plays, in the preview or the game. The last transition's arrow goes under its glyph, like the others, so
+        // its words stay whole.
+        var live = _editor.ShownView;
+        if (live != null && _geometry.FindTransition((int)live.Transition) is { } taken)
         {
-            return;
+            var fading = AnimationGraphEditor.FadeOf(live) < 1;
+            DrawArrow(context, taken, fading ? LivePen : LastTakenPen, fading ? LiveBrush : LastTakenBrush);
         }
-        const double Margin = 40;
-        _view = Canvas2DView.Fit(extent, size.Width, size.Height, Margin, MinZoom, 1);
-        InvalidateVisual();
-    }
-
-    /// <summary>The middle of the view, in canvas units, where a node that the view adds goes.</summary>
-    public Vec2 Middle => ToCanvas(new Point(Bounds.Width / 2, Bounds.Height / 2));
-
-    public override void Render(DrawingContext context)
-    {
-        DrawBackground(context, Bounds.Size, _view);
-        using (context.PushTransform(Matrix.CreateTranslation(-_view.Offset.X, -_view.Offset.Y) * Matrix.CreateScale(_view.Zoom, _view.Zoom)))
+        foreach (var link in _geometry.Links)
         {
-            var problems = _editor.Problems.Where(p => p.Error && p.Node != null).Select(p => p.Node!.Value).ToHashSet();
-            foreach (var t in _geometry.Transitions)
-            {
-                DrawArrow(context, t, ArrowPen, ArrowBrush);
-            }
-            // What plays, in the preview or the game. The last transition's arrow goes under its glyph, like the others, so
-            // its words stay whole.
-            var live = _editor.ShownView;
-            if (live != null && _geometry.FindTransition((int)live.Transition) is { } taken)
-            {
-                var fading = AnimationGraphEditor.FadeOf(live) < 1;
-                DrawArrow(context, taken, fading ? LivePen : LastTakenPen, fading ? LiveBrush : LastTakenBrush);
-            }
-            foreach (var link in _geometry.Links)
-            {
-                DrawLine(context, TetherPen, link.Start, link.End);
-            }
-            foreach (var node in _geometry.Nodes)
-            {
-                DrawNode(context, node, _editor.Selection.Contains(node.Node.Id), problems.Contains(node.Node.Id));
-            }
-            foreach (var t in _geometry.Transitions)
-            {
-                DrawGlyph(context, t, _editor.Selection.Contains(t.Node.Id), problems.Contains(t.Node.Id));
-            }
-            if (live != null)
-            {
-                DrawLive(context, live);
-            }
-            DrawDrag(context);
+            DrawLine(context, TetherPen, link.Start, link.End);
         }
-        if (_gesture == Gesture.Box)
+        foreach (var node in _geometry.Nodes)
         {
-            context.DrawRectangle(BoxFill, BoxPen, new Rect(_start, _last).Normalize());
+            DrawNode(context, node, _editor.Selection.Contains(node.Node.Id), problems.Contains(node.Node.Id));
         }
+        foreach (var t in _geometry.Transitions)
+        {
+            DrawGlyph(context, t, _editor.Selection.Contains(t.Node.Id), problems.Contains(t.Node.Id));
+        }
+        if (live != null)
+        {
+            DrawLive(context, live);
+        }
+        DrawDrag(context);
     }
 
     // The state that plays, with its progress through this play; the state that it fades from, by what is left of the
@@ -214,7 +162,7 @@ public sealed class AnimationGraphCanvas : Control
 
     void DrawDrag(DrawingContext context)
     {
-        if (_gesture == Gesture.Transition && _geometry.Find(_dragFrom) is { } state)
+        if (_drag == Drag.Transition && _geometry.Find(_dragFrom) is { } state)
         {
             // Over another state, it shows where the arrow will land: on the rim, and not on what the state says.
             var target = StateAt(_dragEnd) is { } over && over != _dragFrom ? _geometry.Find(over) : null;
@@ -224,7 +172,7 @@ public sealed class AnimationGraphCanvas : Control
             DrawLine(context, ArrowPen, start, end);
             DrawHead(context, start, end, ArrowBrush);
         }
-        if (_gesture == Gesture.Link && _geometry.Find(_dragFrom) is { } blend)
+        if (_drag == Drag.Link && _geometry.Find(_dragFrom) is { } blend)
         {
             DrawLine(context, TetherPen, blend.EdgeToward(_dragEnd), _dragEnd);
         }
@@ -232,7 +180,7 @@ public sealed class AnimationGraphCanvas : Control
 
     // Whether a state's rim lights: the mouse is on it, or a transition being dragged would land on it.
     bool RimIsHot(int state) =>
-        _gesture == Gesture.None ? _rimUnderMouse == state : _gesture == Gesture.Transition && (state == _dragFrom || StateAt(_dragEnd) == state);
+        Idle ? _rimUnderMouse == state : _drag == Drag.Transition && (state == _dragFrom || StateAt(_dragEnd) == state);
 
     static void DrawLine(DrawingContext context, IPen pen, Vec2 a, Vec2 b) => context.DrawLine(pen, new Point(a.X, a.Y), new Point(b.X, b.Y));
 
@@ -301,7 +249,7 @@ public sealed class AnimationGraphCanvas : Control
         var chipRect = new Rect(chip.X, chip.Y, chip.Width, chip.Height);
         var link = _geometry.Links.FirstOrDefault(l => l.State == layout.Node.Id);
         var linked = link.Blend != 0;
-        var landing = _gesture == Gesture.Link && StateAt(_dragEnd) == layout.Node.Id;
+        var landing = _drag == Drag.Link && StateAt(_dragEnd) == layout.Node.Id;
         context.DrawRectangle(ChipBody, linked || landing ? TetherEdge : NodeBorder, chipRect, 3, 3);
         var motion = layout.Node.Get("motion");
         var chipText = linked ? _editor.Label(link.Blend) : motion ?? "No motion";
@@ -361,150 +309,57 @@ public sealed class AnimationGraphCanvas : Control
         }
     }
 
-    static SelectMode ModeOf(KeyModifiers modifiers) =>
-        modifiers.HasFlag(KeyModifiers.Shift) ? SelectMode.Add : modifiers.HasFlag(KeyModifiers.Control) ? SelectMode.Toggle : SelectMode.Replace;
-
-    protected override void OnPointerPressed(PointerPressedEventArgs e)
+    protected override CanvasPress PressAt(Vec2 at, KeyModifiers modifiers)
     {
-        base.OnPointerPressed(e);
-        if (_gesture != Gesture.None)
+        var hit = _geometry.HitTest(at, View.Zoom);
+        _dragEnd = at;
+        _detachedFrom = null;
+        switch (hit.Kind)
         {
-            return;
+            case AnimationGraphHitKind.StateRim:
+                (_drag, _dragFrom) = (Drag.Transition, hit.Node);
+                return new CanvasPress(CanvasPressKind.Connect);
+            case AnimationGraphHitKind.BlendFeed:
+                (_drag, _dragFrom) = (Drag.Link, hit.Node);
+                return new CanvasPress(CanvasPressKind.Connect);
+            case AnimationGraphHitKind.MotionChip when _geometry.Links.FirstOrDefault(l => l.State == hit.Node) is { Blend: not 0 } link:
+                // A state's chip gives up its tether, which the drag then carries from its blend.
+                (_drag, _dragFrom, _detachedFrom) = (Drag.Link, link.Blend, hit.Node);
+                return new CanvasPress(CanvasPressKind.Connect);
+            case AnimationGraphHitKind.Node or AnimationGraphHitKind.Transition or AnimationGraphHitKind.MotionChip:
+                return new CanvasPress(CanvasPressKind.Select, hit.Node);
+            default:
+                return new CanvasPress(CanvasPressKind.Empty);
         }
-        Focus();
-        var point = e.GetCurrentPoint(this);
-        _start = _last = point.Position;
-        if (point.Properties.IsRightButtonPressed || point.Properties.IsMiddleButtonPressed)
+    }
+
+    protected override void ConnectMoved(Vec2 at) => _dragEnd = at;
+
+    protected override void EndConnect(Vec2 at)
+    {
+        var drag = _drag;
+        _drag = Drag.None;
+        if (drag == Drag.Transition)
         {
-            _gesture = point.Properties.IsRightButtonPressed ? Gesture.PanClick : Gesture.Pan;
-        }
-        else if (point.Properties.IsLeftButtonPressed)
-        {
-            var hit = _geometry.HitTest(ToCanvas(point.Position), _view.Zoom);
-            _dragEnd = ToCanvas(point.Position);
-            _detachedFrom = null;
-            switch (hit.Kind)
+            if (StateAt(at) is { } to && _editor.AddTransition(_dragFrom, to) == null && to != _dragFrom)
             {
-                case AnimationGraphHitKind.StateRim:
-                    (_gesture, _dragFrom) = (Gesture.Transition, hit.Node);
-                    break;
-                case AnimationGraphHitKind.BlendFeed:
-                    (_gesture, _dragFrom) = (Gesture.Link, hit.Node);
-                    break;
-                case AnimationGraphHitKind.MotionChip when _geometry.Links.FirstOrDefault(l => l.State == hit.Node) is { Blend: not 0 } link:
-                    // A state's chip gives up its tether, which the drag then carries from its blend.
-                    (_gesture, _dragFrom, _detachedFrom) = (Gesture.Link, link.Blend, hit.Node);
-                    break;
-                case AnimationGraphHitKind.Node or AnimationGraphHitKind.Transition or AnimationGraphHitKind.MotionChip:
-                    if (!_editor.Selection.Contains(hit.Node) || e.KeyModifiers != KeyModifiers.None)
-                    {
-                        _editor.Select([hit.Node], ModeOf(e.KeyModifiers));
-                    }
-                    _pressed = hit.Node;
-                    _gesture = Gesture.Click;
-                    break;
-                default:
-                    _pressed = 0;
-                    _gesture = Gesture.Click;
-                    break;
+                _shell.Console.Add(Model.LogLevel.Warning, "animation graph: a transition goes between two states with names");
             }
         }
-        if (_gesture != Gesture.None)
+        else if (drag == Drag.Link)
         {
-            e.Pointer.Capture(this);
-            e.Handled = true;
+            _editor.MoveBlendLink(_dragFrom, _detachedFrom, StateAt(at));
         }
     }
 
-    protected override void OnPointerMoved(PointerEventArgs e)
-    {
-        base.OnPointerMoved(e);
-        var position = e.GetPosition(this);
-        var delta = position - _last;
-        _last = position;
-        var moved = position - _start;
-        var far = Gestures.MovedPast(moved);
-        switch (_gesture)
-        {
-            case Gesture.None:
-                ShowWhatAPressWouldTake(position);
-                break;
-            case Gesture.PanClick when far:
-                _gesture = Gesture.Pan;
-                break;
-            case Gesture.Pan:
-                _view = _view.Pan(delta.X, delta.Y);
-                InvalidateVisual();
-                break;
-            case Gesture.Click when far:
-                if (_pressed != 0)
-                {
-                    _moveStarts = _editor.MoveStarts();
-                    _editor.BeginMove();
-                    _gesture = Gesture.Move;
-                }
-                else
-                {
-                    _gesture = Gesture.Box;
-                }
-                break;
-            case Gesture.Move:
-                _editor.MoveSelected(_moveStarts, _view.ToCanvasDelta(moved.X, moved.Y));
-                break;
-            case Gesture.Box:
-                InvalidateVisual();
-                break;
-            case Gesture.Transition or Gesture.Link:
-                _dragEnd = ToCanvas(position);
-                InvalidateVisual();
-                break;
-        }
-    }
+    protected override void CancelConnect() => _drag = Drag.None;
 
-    protected override void OnPointerReleased(PointerReleasedEventArgs e)
-    {
-        base.OnPointerReleased(e);
-        var position = e.GetPosition(this);
-        switch (_gesture)
-        {
-            case Gesture.PanClick:
-                OpenAddMenu(ToCanvas(position));
-                break;
-            case Gesture.Click:
-                if (_pressed == 0)
-                {
-                    _editor.Select([], ModeOf(e.KeyModifiers) == SelectMode.Replace ? SelectMode.Replace : SelectMode.Add);
-                }
-                else if (e.KeyModifiers == KeyModifiers.None)
-                {
-                    _editor.Select([_pressed]);
-                }
-                break;
-            case Gesture.Move:
-                _editor.EndMove();
-                break;
-            case Gesture.Box:
-                _editor.Select(_geometry.InBox(ToCanvas(_start), ToCanvas(position)), ModeOf(e.KeyModifiers));
-                break;
-            case Gesture.Transition:
-                if (StateAt(ToCanvas(position)) is { } to && _editor.AddTransition(_dragFrom, to) == null && to != _dragFrom)
-                {
-                    _shell.Console.Add(Model.LogLevel.Warning, "animation graph: a transition goes between two states with names");
-                }
-                break;
-            case Gesture.Link:
-                _editor.MoveBlendLink(_dragFrom, _detachedFrom, StateAt(ToCanvas(position)));
-                break;
-        }
-        _gesture = Gesture.None;
-        e.Pointer.Capture(null);
-        InvalidateVisual();
-    }
+    protected override void Hover(Vec2 at) => ShowWhatAPressWouldTake(at);
 
     // A rim lights and the cursor changes where a press would start a connection, since nothing else there says so.
-    void ShowWhatAPressWouldTake(Point position)
+    void ShowWhatAPressWouldTake(Vec2 at)
     {
-        var hit = _geometry.HitTest(ToCanvas(position), _view.Zoom);
+        var hit = _geometry.HitTest(at, View.Zoom);
         var rim = hit.Kind == AnimationGraphHitKind.StateRim ? hit.Node : 0;
         Cursor = hit.Kind switch
         {
@@ -520,9 +375,8 @@ public sealed class AnimationGraphCanvas : Control
         }
     }
 
-    protected override void OnPointerExited(PointerEventArgs e)
+    protected override void HoverEnded()
     {
-        base.OnPointerExited(e);
         if (_rimUnderMouse != 0)
         {
             _rimUnderMouse = 0;
@@ -533,12 +387,12 @@ public sealed class AnimationGraphCanvas : Control
     // The state at a point, on its body, its chip or its rim.
     int? StateAt(Vec2 at)
     {
-        var hit = _geometry.HitTest(at, _view.Zoom);
+        var hit = _geometry.HitTest(at, View.Zoom);
         return hit.Kind is AnimationGraphHitKind.Node or AnimationGraphHitKind.StateRim or AnimationGraphHitKind.MotionChip
             && _geometry.Find(hit.Node) is { Node.Kind: AnimationGraphNodeKind.State } ? hit.Node : null;
     }
 
-    void OpenAddMenu(Vec2 at)
+    protected override void OpenAddMenu(Vec2 at)
     {
         var state = new MenuItem { Header = "Add State" };
         state.Click += (_, _) => _editor.AddState(at.X, at.Y);
@@ -548,49 +402,5 @@ public sealed class AnimationGraphCanvas : Control
         menu.Items.Add(state);
         menu.Items.Add(blend);
         menu.ShowAt(this, showAtPointer: true);
-    }
-
-    protected override void OnPointerCaptureLost(PointerCaptureLostEventArgs e)
-    {
-        base.OnPointerCaptureLost(e);
-        if (_gesture == Gesture.Move)
-        {
-            _editor.EndMove();
-        }
-        _gesture = Gesture.None;
-        InvalidateVisual();
-    }
-
-    protected override void OnPointerWheelChanged(PointerWheelEventArgs e)
-    {
-        base.OnPointerWheelChanged(e);
-        var at = e.GetPosition(this);
-        _view = _view.ZoomAbout(at.X, at.Y, Math.Pow(Canvas2DView.WheelStep, e.Delta.Y), MinZoom, MaxZoom);
-        InvalidateVisual();
-        e.Handled = true;
-    }
-
-    protected override void OnKeyDown(KeyEventArgs e)
-    {
-        base.OnKeyDown(e);
-        switch (e.Key)
-        {
-            case Key.Delete or Key.Back:
-                _editor.DeleteSelected();
-                break;
-            case Key.F when e.KeyModifiers == KeyModifiers.None:
-                Frame();
-                break;
-            case Key.Space or Key.Tab when e.KeyModifiers == KeyModifiers.None:
-                OpenAddMenu(ToCanvas(_last));
-                break;
-            case Key.Escape when _gesture == Gesture.Move:
-                _editor.EndMove(cancel: true);
-                _gesture = Gesture.None;
-                break;
-            default:
-                return;
-        }
-        e.Handled = true;
     }
 }

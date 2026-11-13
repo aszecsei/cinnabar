@@ -522,7 +522,7 @@ public sealed class ContentBrowserView : DockPanel
                     ("New Material", AssetTemplate.Material), ("New Material Function", AssetTemplate.MaterialFunction), ("New Mesh", AssetTemplate.Mesh),
                     ("New Prefab", AssetTemplate.Prefab), ("New Effect", AssetTemplate.Effect),
                     ("New Animation Graph", AssetTemplate.AnimationGraph), ("New UI Document", AssetTemplate.Ui),
-                    ("New Sprite Sheet", AssetTemplate.SpriteSheet),
+                    ("New Sprite Sheet", AssetTemplate.SpriteSheet), ("New Blackboard", AssetTemplate.Blackboard),
                     ("New Folder", null),
                 })
             {
@@ -537,6 +537,25 @@ public sealed class ContentBrowserView : DockPanel
                     }),
                 });
             }
+            // A decision is of one technique, which its submenu picks.
+            var decision = new MenuItem { Header = "New Decision", IsEnabled = linked };
+            foreach (var (label, template) in new (string, AssetTemplate)[]
+                {
+                    ("Behavior Tree", AssetTemplate.DecisionBehaviorTree), ("Utility", AssetTemplate.DecisionUtility),
+                    ("GOAP", AssetTemplate.DecisionGoap), ("HTN", AssetTemplate.DecisionHtn),
+                })
+            {
+                decision.Items.Add(new MenuItem
+                {
+                    Header = label,
+                    Command = new RelayCommand(() =>
+                    {
+                        Open();
+                        _shell.Content.RequestNewAsset(template);
+                    }),
+                });
+            }
+            menu.Items.Insert(menu.Items.Count - 1, decision);
             if (row == null)
             {
                 return;

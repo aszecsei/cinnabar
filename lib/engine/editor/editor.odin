@@ -110,6 +110,8 @@ Watched :: struct {
 	// The hash of its Animator's view that the editor last got, 0 for an empty one, or nil before the first, which then
 	// goes out whatever it is, so a watch tells the editor even of no Animator (see animators.odin).
 	animator_sent: Maybe(u64),
+	// The same for its Agent's view (see agents.odin).
+	agent_sent:    Maybe(u64),
 	// The same for its reflection probe's view, 0 for None (see reflection_probes.odin).
 	probe_sent:    Maybe(u64),
 }
@@ -302,6 +304,7 @@ poll :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, connection: u6
 	if !s.types_sent {
 		link.write_message(out, component_types(w, frame))
 		link.write_message(out, command_infos(e, frame))
+		link.write_message(out, agent_actions(e, frame))
 		s.types_sent = true
 	}
 	now := e.platform.time_seconds()
@@ -315,6 +318,7 @@ poll :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, connection: u6
 		s.last_values = now
 		send_values(e, w, scripts, out, frame)
 		send_animators(e, w, out, frame)
+		send_agents(e, out, frame)
 		send_reflection_probes(e, w, out)
 		send_preview_views(e, out, frame)
 		send_ui_layouts(e, out, frame)

@@ -179,6 +179,8 @@ public sealed class ContentBrowser
             AssetTemplate.AnimationGraph => "new_animation_graph",
             AssetTemplate.Ui => "new_ui",
             AssetTemplate.SpriteSheet => "new_sprite_sheet",
+            AssetTemplate.Blackboard => "new_blackboard",
+            AssetTemplate.DecisionBehaviorTree or AssetTemplate.DecisionUtility or AssetTemplate.DecisionGoap or AssetTemplate.DecisionHtn => "new_decision",
             _ => "new_folder",
         };
         if (Folder?.Directory(assets) is not { } dir)
@@ -196,6 +198,8 @@ public sealed class ContentBrowser
             AssetTemplate.AnimationGraph => assets.ExtensionOf(AssetKind.AnimationGraph),
             AssetTemplate.Ui => assets.ExtensionOf(AssetKind.Ui),
             AssetTemplate.SpriteSheet => assets.ExtensionOf(AssetKind.SpriteSheet),
+            AssetTemplate.Blackboard => assets.ExtensionOf(AssetKind.Blackboard),
+            AssetTemplate.DecisionBehaviorTree or AssetTemplate.DecisionUtility or AssetTemplate.DecisionGoap or AssetTemplate.DecisionHtn => assets.ExtensionOf(AssetKind.Decision),
             null => "",
             _ => assets.ExtensionOf(AssetKind.Script),
         };

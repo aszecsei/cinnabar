@@ -2,6 +2,8 @@ package cook
 
 import "core:fmt"
 import "core:os"
+import "core:slice"
+import "core:strconv"
 import "core:strings"
 import "core:testing"
 
@@ -413,4 +415,159 @@ a_decision_names_a_blackboard :: proc(t: ^testing.T) {
 		}
 		testing.expectf(t, found, "an error says %q: %v", fragment, pass.problems.list)
 	}
+}
+
+// The files that the editor's reader and writer are tested with too (see DecisionFileTests.cs), so the two agree on a
+// decision's structure and a blackboard's: a `# problem` comment is on each line that the cooker reports, `# nodes:`
+// names the decision's nodes in the file's order, and `# keys:` names the blackboard's keys.
+@(private = "file")
+CORPUS := #load_directory("testdata/decisions")
+
+@(private = "file")
+Corpus_Marks :: struct {
+	problems: [dynamic]int,
+	listed:   [dynamic]int,
+	has_list: bool,
+	words:    [dynamic]string,
+}
+
+@(private = "file")
+corpus_marks :: proc(text, list: string) -> (marks: Corpus_Marks) {
+	marks.problems = make([dynamic]int, context.temp_allocator)
+	marks.listed = make([dynamic]int, context.temp_allocator)
+	marks.words = make([dynamic]string, context.temp_allocator)
+	for line, i in strings.split_lines(text, context.temp_allocator) {
+		if strings.contains(line, "# problem") {
+			append(&marks.problems, i + 1)
+		}
+		if strings.has_prefix(line, list) {
+			marks.has_list = true
+			for field in strings.fields(line[len(list):], context.temp_allocator) {
+				append(&marks.words, field)
+				if id, ok := strconv.parse_int(field); ok {
+					append(&marks.listed, id)
+				}
+			}
+		}
+	}
+	return
+}
+
+@(private = "file")
+corpus_lines :: proc(problems: []Blackboard_Problem) -> []int {
+	found := make([dynamic]int, context.temp_allocator)
+	for p in problems {
+		if len(found) == 0 || found[len(found) - 1] != p.line {
+			append(&found, p.line)
+		}
+	}
+	return found[:]
+}
+
+@(test)
+the_shared_decisions_have_their_problems_at_their_lines_and_their_nodes :: proc(t: ^testing.T) {
+	keys: []format.Blackboard_Key_Contents
+	for file in CORPUS {
+		if file.name == "guard.blackboard" {
+			board, problems := blackboard_parse(string(file.data), context.temp_allocator)
+			testing.expectf(t, len(problems) == 0, "problems: %v", problems)
+			keys = board.keys
+		}
+	}
+	testing.expect(t, len(keys) > 0)
+	count := 0
+	for file in CORPUS {
+		if !strings.has_suffix(file.name, ".decision") {
+			continue
+		}
+		count += 1
+		text := string(file.data)
+		marks := corpus_marks(text, "# nodes:")
+		contents, problems := decision_parse(text, keys, TECHNIQUE_READERS, context.temp_allocator)
+		found := corpus_lines(problems)
+		testing.expectf(t, slice.equal(found, marks.problems[:]), "%s: problems at %v, expected at %v: %v", file.name, found, marks.problems, problems)
+		if marks.has_list {
+			ids := make([dynamic]int, context.temp_allocator)
+			for n in contents.nodes {
+				append(&ids, int(n.id))
+			}
+			testing.expectf(t, slice.equal(ids[:], marks.listed[:]), "%s: nodes %v, expected %v", file.name, ids, marks.listed)
+		}
+		testing.expectf(t, marks.has_list || strings.has_prefix(file.name, "refused"), "%s has no # nodes:", file.name)
+	}
+	testing.expect(t, count >= 8)
+}
+
+@(test)
+the_shared_blackboards_have_their_problems_at_their_lines_and_their_keys :: proc(t: ^testing.T) {
+	count := 0
+	for file in CORPUS {
+		if !strings.has_suffix(file.name, ".blackboard") {
+			continue
+		}
+		count += 1
+		text := string(file.data)
+		marks := corpus_marks(text, "# keys:")
+		contents, problems := blackboard_parse(text, context.temp_allocator)
+		found := corpus_lines(problems)
+		testing.expectf(t, slice.equal(found, marks.problems[:]), "%s: problems at %v, expected at %v: %v", file.name, found, marks.problems, problems)
+		names := make([dynamic]string, context.temp_allocator)
+		for k in contents.keys {
+			append(&names, k.name)
+		}
+		testing.expectf(t, slice.equal(names[:], marks.words[:]), "%s: keys %v, expected %v", file.name, names, marks.words)
+	}
+	testing.expect(t, count >= 3)
+}
+
+@(private = "file")
+CHECKED_TEXT :: `decision 1
+technique = behavior_tree
+blackboard = $0123456789abcdef0123456789abcdef
+node 1 wait
+	seconds = rest
+`
+
+@(test)
+a_decision_is_checked_against_its_blackboard_without_writing :: proc(t: ^testing.T) {
+	tree := make_tree(
+		t,
+		{
+			{"content/ai/guard.blackboard", BOARD},
+			{"content/ai/guard.blackboard.meta", "guid = " + BOARD_GUID + "\n"},
+			{"content/ai/guard.decision", CHECKED_TEXT},
+		},
+	)
+	defer remove_tree(tree)
+	options := tree_options(tree)
+	pass := cook(options, {.Blackboard, .Decision}, log_problems = false)
+	index: Index
+	index_build(&index, pass, options.roots[:])
+	defer index_destroy(&index)
+	path := fmt.tprintf("%s/content/ai/guard.decision", tree.dir)
+
+	// The text's own problems are at the text's lines: this blackboard has no key named rest.
+	problems := decision_check(options, &index, path, CHECKED_TEXT)
+	testing.expectf(t, len(problems.list) == 1 && problems.list[0].line == 5 && problems.list[0].file == path, "%v", problems.list)
+	fixed, _ := strings.replace(CHECKED_TEXT, "rest", "health", 1, context.temp_allocator)
+	problems = decision_check(options, &index, path, fixed)
+	testing.expectf(t, len(problems.list) == 0, "%v", problems.list)
+	// A blackboard that does not exist is the problem at the line that names it, and the keys are not reported.
+	missing, _ := strings.replace(CHECKED_TEXT, "0123456789abcdef0123456789abcdef", "ffffffffffffffffffffffffffffffff", 1, context.temp_allocator)
+	problems = decision_check(options, &index, path, missing)
+	testing.expectf(t, len(problems.list) == 1 && problems.list[0].line == 3, "%v", problems.list)
+	// So is a blackboard with problems, as the cook reports it.
+	testing.expect(t, os.write_entire_file(fmt.tprintf("%s/content/ai/guard.blackboard", tree.dir), string(BOARD + "bool armed = maybe\n")) == nil)
+	problems = decision_check(options, &index, path, fixed)
+	testing.expectf(t, len(problems.list) == 1 && problems.list[0].line == 3, "%v", problems.list)
+	// Nothing was written: the cache has no preview area.
+	testing.expect(t, !os.exists(fmt.tprintf("%s/cache/dev/preview", tree.dir)))
+}
+
+@(test)
+a_blackboard_is_checked_at_its_lines :: proc(t: ^testing.T) {
+	problems := blackboard_check("a.blackboard", "blackboard 1\nfloat health\nfloat health\n")
+	testing.expectf(t, len(problems.list) == 1 && problems.list[0].line == 3 && problems.list[0].file == "a.blackboard", "%v", problems.list)
+	problems = blackboard_check("a.blackboard", BOARD)
+	testing.expectf(t, len(problems.list) == 0, "%v", problems.list)
 }

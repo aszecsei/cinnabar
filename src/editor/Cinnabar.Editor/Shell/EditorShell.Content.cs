@@ -40,8 +40,8 @@ public sealed partial class EditorShell
 
     /// <summary>
     /// Opens an asset as a double click does: a scene in the editor, a material graph or a material function in the
-    /// material editor, an animation graph in its editor, and the text assets (scripts, shaders, shading models, HLSL
-    /// materials and material instances) in the script editor. Textures, models and meshes have no editor yet. What the
+    /// material editor, an animation graph, a UI document, a decision or a blackboard in its editor, and the text assets
+    /// (scripts, shaders, shading models, HLSL materials, material instances and perceptions) in the script editor. Textures, models and meshes have no editor yet. What the
     /// cooker generates, such as a USD stage's prefab and material instances, opens from its generated text, which its
     /// next cook replaces.
     /// </summary>
@@ -75,8 +75,14 @@ public sealed partial class EditorShell
             case AssetKind.Ui:
                 OpenUiDocument(asset);
                 break;
+            case AssetKind.Decision:
+                OpenDecision(asset);
+                break;
+            case AssetKind.Blackboard:
+                OpenBlackboard(asset);
+                break;
             case AssetKind.Script or AssetKind.Shader or AssetKind.ShadingModel or AssetKind.Material or AssetKind.MaterialInstance
-                or AssetKind.Blackboard or AssetKind.Decision or AssetKind.Perception:
+                or AssetKind.Perception:
                 OpenScript(path);
                 break;
         }
@@ -110,6 +116,8 @@ public sealed partial class EditorShell
         AssetKind.Material when Assets.FullPath(asset) is { } path && !IsHlslMaterial(path) => "Open in Material Editor",
         AssetKind.AnimationGraph => "Open in Animation Graph Editor",
         AssetKind.Ui => "Open in UI Editor",
+        AssetKind.Decision => "Open in Decision Editor",
+        AssetKind.Blackboard => "Open in Blackboard Editor",
         _ => "Open in Script Editor",
     };
 

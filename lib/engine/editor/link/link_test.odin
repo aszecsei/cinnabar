@@ -219,6 +219,49 @@ an_animators_view_round_trips :: proc(t: ^testing.T) {
 }
 
 @(test)
+an_agents_view_round_trips :: proc(t: ^testing.T) {
+	buf: [dynamic]byte
+	defer delete(buf)
+	sent := Agent_View {
+		entity   = 7,
+		decision = {0 = 1, 15 = 2},
+		nodes    = {{id = 3, running = true, last = .Aborted}, {id = 4, last = .Failed}},
+		values   = {{name = "health", kind = .Float, text = "0.25"}, {name = "target", kind = .Entity, text = "#4:1"}},
+	}
+	write_message(&buf, sent)
+	header, _ := read_header(buf[:])
+	testing.expect_value(t, header.kind, kind_of(Agent_View))
+	message, ok := decode_message(header.kind, buf[HEADER_SIZE:], context.temp_allocator)
+	testing.expect(t, ok)
+	got := message.(Agent_View)
+	testing.expect_value(t, got.entity, 7)
+	testing.expect_value(t, got.decision, sent.decision)
+	testing.expect_value(t, len(got.nodes), 2)
+	testing.expect_value(t, got.nodes[0], Agent_Node{id = 3, running = true, last = .Aborted})
+	testing.expect_value(t, got.values[1].kind, Agent_Kind.Entity)
+	testing.expect_value(t, got.values[1].text, "#4:1")
+}
+
+@(test)
+the_agents_actions_round_trip :: proc(t: ^testing.T) {
+	buf: [dynamic]byte
+	defer delete(buf)
+	sent := Agent_Actions {
+		actions = {{name = "walk", params = {{name = "steps", kind = .Int}, {name = "line", kind = .String}}}, {name = "idle"}},
+	}
+	write_message(&buf, sent)
+	header, _ := read_header(buf[:])
+	testing.expect_value(t, header.kind, kind_of(Agent_Actions))
+	message, ok := decode_message(header.kind, buf[HEADER_SIZE:], context.temp_allocator)
+	testing.expect(t, ok)
+	got := message.(Agent_Actions)
+	testing.expect_value(t, len(got.actions), 2)
+	testing.expect_value(t, got.actions[0].name, "walk")
+	testing.expect_value(t, got.actions[0].params[1], Agent_Action_Param{name = "line", kind = .String})
+	testing.expect_value(t, len(got.actions[1].params), 0)
+}
+
+@(test)
 kind_of_is_the_index_in_the_union :: proc(t: ^testing.T) {
 	testing.expect_value(t, kind_of(Hello), u16(1))
 	testing.expect_value(t, kind_of(Game_Size), u16(6))

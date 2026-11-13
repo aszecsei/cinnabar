@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
 using Cinnabar.Editor.Document;
+using Cinnabar.Editor.Graphs;
 using Cinnabar.Editor.Link.Cook;
 using Cinnabar.Editor.Maths;
 using Cinnabar.Editor.Panels;
@@ -46,7 +47,7 @@ public sealed class GraphCanvas : Control
 
     readonly EditorShell _shell;
     readonly MaterialEditor _editor;
-    readonly NodePicker _picker;
+    readonly NodePicker<(int Node, string Pin, bool FromOutput)?> _picker;
     GraphGeometry _geometry;
     Canvas2DView _view = new(new Vec2(-200, -150), 1);
     Gesture _gesture;
@@ -67,7 +68,8 @@ public sealed class GraphCanvas : Control
         _geometry = editor.Geometry();
         Focusable = true;
         ClipToBounds = true;
-        _picker = new NodePicker(editor);
+        _picker = new(() => editor.Catalog.KindsFor(editor.Document.Kind).Where(k => k.Kind != "output")
+            .Select(k => new PickerEntry(k.Kind, k.Label, k.Category, k.Description)));
         _picker.Picked += OnPicked;
         AttachedToVisualTree += (_, _) =>
         {

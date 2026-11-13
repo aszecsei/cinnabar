@@ -13,6 +13,10 @@ output = Sdr
 # The audio buses besides Master. An Audio_Source's bus is 0 for Master, 1 for Music and 2 for Sfx.
 audio.buses = Music, Sfx
 
+# The tags that perceivers notice and perceivables carry, in order: a Perceivable's tag is an index into them (see
+# docs/ai/perception.md#tags). The guard scene's intruder is a Player.
+perception.tags = Player, Enemy
+
 # The material of new faces in the editor's mesh mode: a material or an instance by GUID. The engine's dev_gray.
 mesh.default_material = 5a1c3e7f9b2d4f608a1c3e5f7a9b0c2d
 

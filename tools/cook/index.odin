@@ -83,6 +83,8 @@ index_build :: proc(index: ^Index, pass: Pass, roots: []Root) {
 			path      = clone(a.name[len(root.name) + 1:], allocator),
 			status    = link_status(a.result),
 			behaviour = clone(a.behaviour, allocator),
+			action    = clone(a.action, allocator),
+			params    = clone_params(a.params, allocator),
 			permutations = u32(a.permutations),
 			size      = a.size,
 		}
@@ -279,12 +281,24 @@ folders_missing :: proc(from, other: []cook_link.Folder) -> []cook_link.Folder {
 	return missing[:]
 }
 
+// clone_params copies an action's parameters, with their names.
+clone_params :: proc(params: []cook_link.Action_Param, allocator := context.allocator) -> []cook_link.Action_Param {
+	if len(params) == 0 {
+		return nil
+	}
+	copied := make([]cook_link.Action_Param, len(params), allocator)
+	for p, i in params {
+		copied[i] = {strings.clone(p.name, allocator), p.kind}
+	}
+	return copied
+}
+
 @(private = "file")
 asset_equal :: proc(a, b: cook_link.Asset) -> bool {
-	if a.thumbnail != b.thumbnail || a.thumbnail_ready != b.thumbnail_ready || a.generated != b.generated || a.guid != b.guid || a.kind != b.kind || a.root != b.root || a.path != b.path || a.status != b.status || a.errors != b.errors || a.warnings != b.warnings || a.behaviour != b.behaviour || a.parent != b.parent || a.subasset != b.subasset || a.permutations != b.permutations || a.size != b.size || a.tool_texture != b.tool_texture {
+	if a.thumbnail != b.thumbnail || a.thumbnail_ready != b.thumbnail_ready || a.generated != b.generated || a.guid != b.guid || a.kind != b.kind || a.root != b.root || a.path != b.path || a.status != b.status || a.errors != b.errors || a.warnings != b.warnings || a.behaviour != b.behaviour || a.action != b.action || a.parent != b.parent || a.subasset != b.subasset || a.permutations != b.permutations || a.size != b.size || a.tool_texture != b.tool_texture {
 		return false
 	}
-	return slice.equal(a.settings, b.settings) && slice.equal(a.dependencies, b.dependencies) && slice.equal(a.hotspots, b.hotspots)
+	return slice.equal(a.settings, b.settings) && slice.equal(a.dependencies, b.dependencies) && slice.equal(a.hotspots, b.hotspots) && slice.equal(a.params, b.params)
 }
 
 @(private = "file")

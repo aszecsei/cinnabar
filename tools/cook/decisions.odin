@@ -2,6 +2,7 @@ package cook
 
 import "core:fmt"
 import "core:hash"
+import "core:os"
 import "core:slice"
 import "core:strconv"
 import "core:strings"
@@ -14,6 +15,61 @@ import format "cinnabar:engine/asset/format"
 // node, and the header's other lines, go to the technique's reader, which writes the technique's own part of the blob
 // and sizes the agents' module state.
 DECISION_COOK_VERSION :: "decisions 1"
+
+// The sources of new decisions, one for each technique. Each names no blackboard, so it is a problem until the author
+// names one.
+BEHAVIOR_TREE_TEMPLATE :: `decision 1
+technique = behavior_tree
+# Name the blackboard: blackboard = $<guid>, from its .meta file.
+
+node 1 selector
+	position = [0, 0]
+	children = 2
+node 2 wait
+	position = [0, 100]
+	seconds = 1
+`
+
+UTILITY_TEMPLATE :: `decision 1
+technique = utility
+# Name the blackboard: blackboard = $<guid>, from its .meta file.
+
+node 1 option
+	position = [0, 0]
+	action = idle
+`
+
+GOAP_TEMPLATE :: `decision 1
+technique = goap
+# Name the blackboard: blackboard = $<guid>, from its .meta file. Then name its bool, int and enum keys that the planner uses.
+keys = done
+
+node 1 goal
+	position = [0, 0]
+	desired = done
+node 2 action
+	position = [0, 100]
+	action = work
+	effects = done = true
+`
+
+HTN_TEMPLATE :: `decision 1
+technique = htn
+# Name the blackboard: blackboard = $<guid>, from its .meta file. Then name its bool, int and enum keys that the planner uses.
+keys = done
+root = 1
+
+node 1 task
+	position = [0, 0]
+	methods = 2
+node 2 method
+	position = [0, 100]
+	subtasks = 3
+node 3 action
+	position = [0, 200]
+	action = work
+	effects = done = true
+`
 
 // Decision_Field is a `<field> = <value>` line that the shared parts do not read, which the technique's reader does.
 Decision_Field :: struct {
@@ -83,6 +139,78 @@ decision_header :: proc(text: string) -> (header: Decision_Header) {
 				header = {v.guid, index + 1}
 			}
 		}
+	}
+	return
+}
+
+// Named_Blackboard is what a decision's blackboard GUID names, for decision_keys: whether the content has an asset
+// with the GUID, whether it is a blackboard, its name, and its source if it is one.
+Named_Blackboard :: struct {
+	found:    bool,
+	is_board: bool,
+	name:     string,
+	source:   string,
+}
+
+// decision_keys reads the keys of the blackboard that a decision names, as the cook does. The message is the problem at
+// the decision's blackboard line, or "" if the blackboard is good. Without a good blackboard the keys are unreliable, so
+// only its problem is reported, and not the decision's.
+decision_keys :: proc(header: Decision_Header, named: Named_Blackboard) -> (keys: []format.Blackboard_Key_Contents, message: string) {
+	if header.blackboard_line == 0 {
+		return
+	}
+	switch {
+	case !named.found:
+		return nil, fmt.tprintf("no asset has the GUID $%s", guid_text(header.blackboard))
+	case !named.is_board:
+		return nil, fmt.tprintf("%s is not a blackboard", named.name)
+	}
+	contents, problems := blackboard_parse(named.source, context.temp_allocator)
+	if len(problems) > 0 {
+		message = fmt.tprintf("the blackboard %s has problems", named.name)
+	}
+	return contents.keys, message
+}
+
+// technique_readers are the readers that a cook with these options uses: the cooker's, and the options' in their place.
+technique_readers :: proc(options: Cook_Options) -> Technique_Readers {
+	readers := TECHNIQUE_READERS
+	for r, t in options.technique_readers {
+		if r.read != nil {
+			readers[t] = r
+		}
+	}
+	return readers
+}
+
+// decision_check gives the problems of a decision's text that the editor has not saved, as a cook of the file at this
+// path would, with the blackboard that it names read from the index and the content roots. It writes nothing.
+decision_check :: proc(options: Cook_Options, index: ^Index, path, text: string) -> (problems: Problems) {
+	header := decision_header(text)
+	named: Named_Blackboard
+	if a, found := index.assets[guid_text(header.blackboard)]; found && header.blackboard_line != 0 {
+		named = {
+			found    = true,
+			is_board = a.kind == .Blackboard,
+			name     = fmt.tprintf("%s/%s", a.root, a.path),
+		}
+		if named.is_board {
+			for r in options.roots {
+				if r.name == a.root {
+					source, _ := os.read_entire_file(fmt.tprintf("%s/%s", r.dir, a.path), context.temp_allocator)
+					named.source = string(source)
+				}
+			}
+		}
+	}
+	keys, message := decision_keys(header, named)
+	if message != "" {
+		report_error(&problems, path, header.blackboard_line, 0, "%s", message)
+		return
+	}
+	_, found := decision_parse(text, keys, technique_readers(options), context.temp_allocator)
+	for p in found {
+		report_error(&problems, path, p.line, 0, "%s", p.message)
 	}
 	return
 }
@@ -283,12 +411,7 @@ cook_decisions :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pas
 	for a, i in assets {
 		by_guid[a.meta.guid] = i
 	}
-	readers := TECHNIQUE_READERS
-	for r, t in options.technique_readers {
-		if r.read != nil {
-			readers[t] = r
-		}
-	}
+	readers := technique_readers(options)
 	ok := true
 	step_begin(pass, .Decision, "", len(decisions))
 	for i in decisions {
@@ -321,27 +444,26 @@ cook_decision :: proc(
 		append(&a.dependencies, header.blackboard)
 	}
 	board := -1
-	keys: []format.Blackboard_Key_Contents
-	board_ok := true
+	named: Named_Blackboard
 	if header.blackboard_line != 0 {
 		child, found := by_guid[header.blackboard]
-		switch {
-		case !found:
-			report_error(problems, a.path, header.blackboard_line, 0, "no asset has the GUID $%s", guid_text(header.blackboard))
-			board_ok = false
-		case assets[child].kind != .Blackboard:
-			report_error(problems, a.path, header.blackboard_line, 0, "%s is not a blackboard", assets[child].name)
-			board_ok = false
-		case:
-			asset_source(pass, child)
-			board = child
-			contents, board_problems := blackboard_parse(string(source_of(assets[child])), context.temp_allocator)
-			if len(board_problems) > 0 {
-				report_error(problems, a.path, header.blackboard_line, 0, "the blackboard %s has problems", assets[child].name)
-				board_ok = false
+		if found {
+			named = {
+				found = true,
+				is_board = assets[child].kind == .Blackboard,
+				name = assets[child].name,
 			}
-			keys = contents.keys
+			if named.is_board {
+				asset_source(pass, child)
+				board = child
+				named.source = string(source_of(assets[child]))
+			}
 		}
+	}
+	keys, board_message := decision_keys(header, named)
+	board_ok := board_message == ""
+	if !board_ok {
+		report_error(problems, a.path, header.blackboard_line, 0, "%s", board_message)
 	}
 	contents, parse_problems := decision_parse(text, keys, readers, context.temp_allocator)
 	// Without the blackboard's keys every key is unknown, so only the blackboard's problem is reported.
