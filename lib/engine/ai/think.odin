@@ -17,9 +17,12 @@ import "cinnabar:engine/ecs"
 // or many.
 
 // Module is a technique's decision module. think runs on a job, and may read the world, but writes only the agent's
-// module state and the context's outputs. It never calls a script.
+// module state and the context's outputs. It never calls a script. check, if it is there, checks the technique's data
+// against the decision and its blackboard before an agent starts with them: an agent whose decision it refuses waits,
+// so think gets only data that checked.
 Module :: struct {
 	think: proc(t: ^Think_Context),
+	check: proc(decision: Decision, board: Board) -> bool,
 }
 
 // Action_View is the agent's action as its decision sees it: the action reference that it started, DECISION_NONE for

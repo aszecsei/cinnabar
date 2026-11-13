@@ -23,13 +23,14 @@ Decision_Field :: struct {
 }
 
 // Decision_Text_Node is a node, `node <id> <kind>`, with the fields that its technique reads. Its shared parts are its
-// record in the parser's nodes, at index.
+// record in the parser's nodes, at index; set_line is the line of its first `set`, or 0 without one.
 Decision_Text_Node :: struct {
-	id:     int,
-	kind:   string,
-	line:   int,
-	index:  int,
-	fields: [dynamic]Decision_Field,
+	id:       int,
+	kind:     string,
+	line:     int,
+	index:    int,
+	set_line: int,
+	fields:   [dynamic]Decision_Field,
 }
 
 // Decision_Text is what a technique's reader gets: the header's lines other than the technique and the blackboard,
@@ -48,11 +49,13 @@ Technique_Reader :: struct {
 }
 
 // Technique_Readers are the readers of each technique. A technique without one is a problem in each decision that
-// names it. The cooker has none yet: each technique adds its own (see docs/content/kinds/decisions.md#techniques).
+// names it. Each technique adds its own (see docs/content/kinds/decisions.md#techniques).
 Technique_Readers :: [format.Decision_Technique]Technique_Reader
 
 // TECHNIQUE_READERS are the cooker's readers.
-TECHNIQUE_READERS :: Technique_Readers{}
+TECHNIQUE_READERS :: #partial Technique_Readers {
+	.Behavior_Tree = BEHAVIOR_TREE_READER,
+}
 
 // Decision_Header is what decision_header finds of a decision before its blackboard is read.
 Decision_Header :: struct {
@@ -226,7 +229,10 @@ decision_parse :: proc(
 @(private = "file")
 node_field :: proc(p: ^Decision_Parser, node: ^Decision_Text_Node, record: ^format.Decision_Node_Contents, text: string, line: int) {
 	if strings.has_prefix(text, "set ") || strings.has_prefix(text, "set\t") {
-		write := decision_write(p, strings.trim_space(text[len("set"):]), line)
+		if node.set_line == 0 {
+			node.set_line = line
+		}
+		write :=decision_write(p, strings.trim_space(text[len("set"):]), line)
 		if write == format.DECISION_NONE {
 			return
 		}
