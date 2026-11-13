@@ -23,6 +23,9 @@ AGENT_STATE_ID :: ecs.Component_Id(131)
 DEFAULT_THINK_BUDGET :: 64
 // The agents that one think job runs.
 THINK_BATCH :: 32
+// The search nodes that the agents of a planning technique expand in a tick by default (see
+// docs/ai/agents.md#planning).
+DEFAULT_PLAN_BUDGET :: 256
 // The bytes of state that a native action may keep in each agent.
 MAX_ACTION_STATE :: 64
 // The native actions and the parameters of each that register_action takes.
@@ -133,8 +136,9 @@ State :: struct {
 	ending_script:  [dynamic]Ending,
 	// Writes to agents that were not ready, by name, which apply when each is (see Blackboard.set).
 	early:          [dynamic]Command,
-	// The agents that think in a tick.
+	// The agents that think in a tick, and the search nodes that each technique's agents expand in a tick.
 	budget:         int,
+	plan_budgets:   [format.Decision_Technique]int,
 	// The seed of the agents' generators, which set_seed sets.
 	seed:           u64,
 	// The project's perception.tags, the sight rays of a tick, and the slot of the perceiver that was visited last.
@@ -181,6 +185,9 @@ init :: proc(s: ^State, platform: ^core.Platform_API, assets: ^asset.Assets, scr
 	s.ending_script = make([dynamic]Ending, heap)
 	s.early = make([dynamic]Command, heap)
 	s.budget = DEFAULT_THINK_BUDGET
+	for &b in s.plan_budgets {
+		b = DEFAULT_PLAN_BUDGET
+	}
 	s.sight_budget = DEFAULT_SIGHT_BUDGET
 	s.sight_cursor = -1
 	s.noises_pending = make([dynamic]Noise, heap)
@@ -266,6 +273,12 @@ set_budget :: proc(s: ^State, agents: int) {
 	s.budget = max(agents, 1)
 }
 
+// set_plan_budget sets the search nodes that a technique's agents expand in a tick, which its searching agents share
+// (see docs/ai/agents.md#planning).
+set_plan_budget :: proc(s: ^State, technique: format.Decision_Technique, nodes: int) {
+	s.plan_budgets[technique] = max(nodes, 1)
+}
+
 // set_seed sets the seed that each agent's generator starts from, with its slot, when it starts (see
 // docs/ai/agents.md#determinism). It is 0 by default. The agents that run already keep their sequences.
 set_seed :: proc(s: ^State, seed: u64) {
@@ -289,6 +302,25 @@ scores :: proc(s: ^State, e: ecs.Entity, allocator := context.temp_allocator) ->
 		return nil, false
 	}
 	return module.scores(decision, board, ready.state, allocator), true
+}
+
+// plan is an agent's goal and plan, from its module's state, for debuggers and scripts, in the allocator. It is false
+// for an agent that is not ready, or whose module does not plan.
+plan :: proc(s: ^State, e: ecs.Entity, allocator := context.temp_allocator) -> (Plan_View, bool) {
+	slot, ready := ready_of(s, s.world, e)
+	if ready == nil {
+		return {}, false
+	}
+	board, board_ok := board_of(s, slot.blackboard)
+	decision, decision_ok := decision_of(s, slot.decision)
+	if !board_ok || !decision_ok {
+		return {}, false
+	}
+	module := s.modules[decision.blob.technique]
+	if module.plan == nil {
+		return {}, false
+	}
+	return module.plan(decision, board, ready.state, allocator), true
 }
 
 // register_module registers a technique's decision module. Call it in register_world, after register.

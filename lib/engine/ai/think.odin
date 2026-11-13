@@ -21,11 +21,16 @@ import "cinnabar:engine/random"
 // module state and the context's outputs. It never calls a script. check, if it is there, checks the technique's data
 // against the decision and its blackboard before an agent starts with them: an agent whose decision it refuses waits,
 // so think gets only data that checked. scores, if it is there, gives what the agent's last think scored, from its
-// module state, for debuggers and scripts (see scores).
+// module state, for debuggers and scripts (see scores). A planning module has searching, which is whether the agent's
+// module state holds a search that its next think goes on with: the think system shares the technique's plan budget
+// among those agents, and they think again in the next tick (see docs/ai/agents.md#planning). It has plan too, which
+// gives the agent's goal and plan from its module state (see plan).
 Module :: struct {
-	think:  proc(t: ^Think_Context),
-	check:  proc(decision: Decision, board: Board) -> bool,
-	scores: proc(decision: Decision, board: Board, state: []byte, allocator: runtime.Allocator) -> []Option_Score,
+	think:     proc(t: ^Think_Context),
+	check:     proc(decision: Decision, board: Board) -> bool,
+	scores:    proc(decision: Decision, board: Board, state: []byte, allocator: runtime.Allocator) -> []Option_Score,
+	searching: proc(state: []byte) -> bool,
+	plan:      proc(decision: Decision, board: Board, state: []byte, allocator: runtime.Allocator) -> Plan_View,
 }
 
 // Option_Score is an option that a module scored in the agent's last think: its decision node's ID, its action's name,
@@ -78,6 +83,9 @@ Think_Context :: struct {
 	// What the agent perceives, or nil for an agent that has perceived nothing, and the project's tags.
 	perception: ^Perception_Memory,
 	tags:       ^Tag_Names,
+	// The search nodes that the agent may expand in this think: its share of its technique's plan budget, if its module
+	// state held a search when the think began, and 0 otherwise.
+	plan_budget: int,
 }
 
 // technique_data is the technique's part of the agent's decision.
@@ -336,6 +344,8 @@ Think_Job :: struct {
 	s:       ^State,
 	world:   ^ecs.World,
 	agents:  []u32,
+	// Each agent's share of its technique's plan budget.
+	shares:  []int,
 	out:     [dynamic]Command,
 	ctx:     runtime.Context,
 }
@@ -347,7 +357,7 @@ think_job :: proc(data: rawptr) {
 	s := j.s
 	w := j.world
 	now := w.clock.tick
-	for index in j.agents {
+	for index, k in j.agents {
 		slot := &s.agents.slots[index]
 		ready := &slot.phase.(Agent_Ready)
 		board, _ := board_of(s, slot.blackboard)
@@ -368,6 +378,7 @@ think_job :: proc(data: rawptr) {
 			changed    = ready.changed,
 			perception = ready.perception,
 			tags       = &s.tags,
+			plan_budget = j.shares[k],
 		}
 		s.modules[decision.blob.technique].think(&t)
 	}
@@ -452,14 +463,17 @@ think :: proc(s: ^State, w: ^ecs.World, ctx: ^ecs.System_Context) {
 	p := &w.platform.profile
 	profile.begin(p, profile.name(p, "AI think", .Frame))
 	defer profile.end(p)
+	shares := plan_shares(s, agents, w.platform.frame_allocator)
 	batches := (len(agents) + THINK_BATCH - 1) / THINK_BATCH
 	work := make([]Think_Job, batches, w.platform.frame_allocator)
 	list := make([]jobs.Job, batches, w.platform.frame_allocator)
 	for b in 0 ..< batches {
+		first, end := b * THINK_BATCH, min((b + 1) * THINK_BATCH, len(agents))
 		work[b] = {
 			s       = s,
 			world   = w,
-			agents  = agents[b * THINK_BATCH:min((b + 1) * THINK_BATCH, len(agents))],
+			agents  = agents[first:end],
+			shares  = shares[first:end],
 			out     = make([dynamic]Command, w.platform.frame_allocator),
 			ctx     = context,
 		}
@@ -479,6 +493,50 @@ think :: proc(s: ^State, w: ^ecs.World, ctx: ^ecs.System_Context) {
 		ready := &slot.phase.(Agent_Ready)
 		ready.last_think = now
 		ready.thinks += 1
-		ready.next_think = now + interval_ticks(w, slot.entity)
+		ready.next_think = now + (1 if searching(s, slot, ready) else interval_ticks(w, slot.entity))
 	}
+}
+
+// searching is whether an agent's module state holds a search that its next think goes on with.
+@(private)
+searching :: proc(s: ^State, slot: ^Agent_Slot, ready: ^Agent_Ready) -> bool {
+	decision, ok := decision_of(s, slot.decision)
+	if !ok {
+		return false
+	}
+	module := s.modules[decision.blob.technique]
+	return module.searching != nil && module.searching(ready.state)
+}
+
+// plan_shares is each agent's share of its technique's plan budget, by the agents' order. Each technique's budget is
+// shared evenly among its agents that are searching, and the first of them by the agents' order get one node more
+// while the budget's remainder lasts. Other agents get 0. The shares depend only on the order and the agents' states,
+// so a think gives the same result on one job or many.
+@(private)
+plan_shares :: proc(s: ^State, agents: []u32, allocator: runtime.Allocator) -> []int {
+	shares := make([]int, len(agents), allocator)
+	techniques := make([]format.Decision_Technique, len(agents), allocator)
+	searchers := make([]bool, len(agents), allocator)
+	counts: [format.Decision_Technique]int
+	for index, i in agents {
+		slot := &s.agents.slots[index]
+		if !searching(s, slot, &slot.phase.(Agent_Ready)) {
+			continue
+		}
+		decision, _ := decision_of(s, slot.decision)
+		techniques[i] = decision.blob.technique
+		searchers[i] = true
+		counts[techniques[i]] += 1
+	}
+	given: [format.Decision_Technique]int
+	for searcher, i in searchers {
+		if !searcher {
+			continue
+		}
+		t := techniques[i]
+		budget := s.plan_budgets[t]
+		shares[i] = budget / counts[t] + (1 if given[t] < budget % counts[t] else 0)
+		given[t] += 1
+	}
+	return shares
 }

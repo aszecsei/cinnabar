@@ -31,7 +31,7 @@ node 5 wait
 	seconds = 1
 ```
 
-**In this document:** [The text](#the-text) · [Shared parts](#shared-parts) · [Techniques](#techniques) · [Behavior trees](#behavior-trees) · [Utility](#utility) · [The cook](#the-cook) · [The blob](#the-blob)
+**In this document:** [The text](#the-text) · [Shared parts](#shared-parts) · [Techniques](#techniques) · [Behavior trees](#behavior-trees) · [Utility](#utility) · [GOAP](#goap) · [The cook](#the-cook) · [The blob](#the-blob)
 
 ## The text
 
@@ -86,7 +86,8 @@ Each technique adds its reader to `TECHNIQUE_READERS` in `tools/cook/decisions.o
 |---|---|---|
 | `behavior_tree` | `BEHAVIOR_TREE_READER` (`tools/cook/behavior_trees.odin`) | `lib/engine/ai/behavior_tree` ([AI: Behavior trees](../../ai/behavior-trees.md)) |
 | `utility` | `UTILITY_READER` (`tools/cook/utility.odin`) | `lib/engine/ai/utility` ([AI: Utility](../../ai/utility.md)) |
-| `goap`, `htn` | None yet | None yet |
+| `goap` | `GOAP_READER` (`tools/cook/goap.odin`) | `lib/engine/ai/goap` ([AI: GOAP](../../ai/goap.md)) |
+| `htn` | None yet | None yet |
 
 ## Behavior trees
 
@@ -313,6 +314,119 @@ The reader lays out the module state:
 3. A `Utility_Link_State` (8 bytes) for each link of each option: the last normalized input and score of each consideration.
 
 The header holds the layout hash, the pick, `within` and `momentum`. `format.utility_check` refuses data of another layout, links, points and nodes out of range, an option without an action, states outside the module state, and keys of types that the data does not read. The module does this check before an agent starts with the decision.
+
+## GOAP
+
+A `goap` decision is a set of goals and actions over planning keys. When the agent thinks, the module picks the goal of the highest priority that is not yet true, searches for the cheapest plan of actions whose effects reach it, and runs the plan ([AI: GOAP](../../ai/goap.md)).
+
+```
+decision 1
+technique = goap
+blackboard = $0123456789abcdef0123456789abcdef
+keys = armed, ammo, near, down
+max_nodes = 48
+max_plan = 6
+
+# Down the target when there is one, more so when healthy, and otherwise keep ammo.
+node 1 goal
+	when = target != none
+	desired = down
+	priority = 10
+	considerations = 20
+node 2 goal
+	desired = ammo >= 5
+node 10 action
+	action = pick_up(item = "rifle")
+	effects = armed = true, ammo += 6
+	cost = 2
+node 11 action
+	action = attack(at = target)
+	when = can_see_target
+	preconditions = armed and ammo > 0 and near
+	effects = down = true, ammo -= 1
+	set mood = alert
+node 12 action
+	action = move_to(key = "target")
+	preconditions = not near
+	effects = near = true
+	cost = travel_cost
+node 20 consideration
+	input = health
+	range = [0, 100]
+	curve = linear
+```
+
+### Settings
+
+| Setting | Values | What it does |
+|---|---|---|
+| `keys` | `<key>, <key>, ...` | The planning keys: bool, int and enum keys of the blackboard, at most `MAX_PLAN_KEYS` (32). The planner's world state is their values. Required. |
+| `max_nodes` | A count from 1 to `MAX_GOAP_NODES` (1024), 64 by default | The most nodes that a search holds. The cook sizes the agents' state from it. |
+| `max_plan` | A count from 1 to `MAX_PLAN_LENGTH` (32), 8 by default | The most actions in a plan. |
+
+### Goals
+
+A `goal` node is a state that the agent wants:
+
+| Field | Values | What it does |
+|---|---|---|
+| `desired` | Tests ([Tests and effects](#tests-and-effects)) | The state that the goal wants. A goal whose desired state is true is not current. Required. |
+| `priority` | A number of 0 or more (1 by default) | The goal's weight. The current goal is the one with the highest priority. |
+| `considerations` | `<id>, <id>, ...` | Consideration nodes, as utility's ([Considerations](#considerations)), whose scores multiply the priority, each made up for their count by the compensation factor, as an option's score is. One consideration can serve several goals. |
+| `when` | A condition | A guard: when it does not hold, the goal's priority is 0. |
+
+### Actions
+
+An `action` node is an action that a plan can hold:
+
+| Field | Values | What it does |
+|---|---|---|
+| `action` | An action reference | The action that runs ([Action references](#action-references)). Required. |
+| `preconditions` | Tests | What must hold before the action runs. |
+| `effects` | Effects ([Tests and effects](#tests-and-effects)) | What the action changes. When the action succeeds, the plan runner writes them to the blackboard. Required. |
+| `cost` | A number above 0, or a float or an int key (1 by default) | The cost that a plan adds up. A key is read when a search begins. |
+| `when` | A condition | A guard over any keys: an action whose guard does not hold when a search begins is not in the search, and the runner checks it again before the action starts. |
+| `set <key> = <value>` | Writes | Applied when the action starts. A `set` does not write a planning key: effects change those. |
+
+A `consideration` node takes the fields of a utility consideration ([Considerations](#considerations)).
+
+### Tests and effects
+
+The world state holds one value for each planning key: a bool is 0 or 1, an int is itself, and an enum is the index of its name.
+
+- **Tests** are joined by `and`. Each is `<key>` or `not <key>` for a bool, or `<key> <op> <value>`. The operators are `==`, `<`, `<=`, `>` and `>=` for an int, `==` for an enum, and `==` and `!=` for a bool. A value is an integer, `true` or `false`, or one of an enum's names. Each key's tests make one interval of values, so `ammo > 2 and ammo <= 9` is the interval 3 to 9.
+- **Effects** are separated by commas. `<key> = <value>` sets a key, and `<key> += <n>` and `<key> -= <n>` add to an int key. An action changes each key once.
+
+Tests and effects name only planning keys.
+
+### Problems
+
+The reader reports these problems at their lines, in addition to the shared problems ([The cook](#the-cook)):
+- a setting other than `keys`, `max_nodes` and `max_plan`, a count out of range, and a decision without `keys`;
+- a planning key that the blackboard does not have, that is not a bool, an int or an enum, that `keys` names twice, or more than 32 of them;
+- a decision without goals or without actions, more than `MAX_GOAP_GOALS` (32) goals, or more than `MAX_GOAP_ACTIONS` (256) actions;
+- an unknown kind or field, or a field that the node's kind does not take, such as `effects` on a goal;
+- a goal without `desired`, and an action without `action` or `effects`;
+- `set` lines on a goal or a consideration, and a `set` of a planning key on an action;
+- a test or an effect of a key that is not a planning key, an operator that the key's type does not take, a value that is not of the key's type, tests of one key that can never hold together, an add to a key that is not an int, and an effect that changes a key twice;
+- a `cost` of 0 or less, or a cost key that is not a float or an int, and a negative `priority`;
+- a consideration ID that no node has, a node that is not a consideration, a consideration that a goal lists twice, and a consideration that no goal lists, and the problems of a consideration, as utility's reader reports them;
+- a state of more than `MAX_DECISION_STATE` bytes, with its size and the search's size, at the `max_nodes` line, or at the `keys` line without one.
+
+### The GOAP data
+
+The technique's data (`lib/engine/asset/format/goap.odin`) is a `Goap_Header`, then the planning keys' slots, the `Plan_Action`s, the `Goap_Goal`s, the `Plan_Test`s, the `Plan_Effect`s, and the goals' considerations, links and points, which are utility's records. The goals and the actions are in the text's order. The records that the planning techniques share are in `lib/engine/asset/format/plan.odin`.
+- **An action** has its decision node, which holds its guard, its action and its writes. It also has its cost, a constant or a key's slot, and its ranges of tests and effects.
+- **A goal** has its decision node, its priority, its range of links, and its range of tests.
+- **A test** is a planning key's index and an interval, `lo` to `hi`. **An effect** is a planning key's index, `Set` or `Add`, and a value.
+
+`format.goap_state` lays out the module state from the counts, and the cook sizes it with the same procedure:
+1. `Goap_Agent` (16 bytes): the phase, `Idle`, `Searching` or `Running`; the goal, plus 1; the node count of the last search; and the failed goals.
+2. `Plan_Run` (16 bytes): the plan runner's step, the plan's length, and the planning keys that the rest of the plan depends on.
+3. Each goal's last priority, the world state that the failed goals failed in, the plan's actions (2 bytes each), and the world state that the plan expects.
+4. The search: `Goap_Search` (its node count and the heuristic's unit), its world state, a bit for each action that it may use, each action's cost, and `max_nodes` nodes, each a `Goap_Node` (16 bytes) and an interval (8 bytes) for each planning key.
+
+The header holds the layout hash, the counts, `max_nodes` and `max_plan`. `format.goap_check` refuses data of another layout, counts out of their limits, a state smaller than the layout, an action without an action or effects or with a cost of 0 or less, a goal without tests or with a negative priority, indices and tests out of range, keys of types that the data does not read, and effects that do not fit their keys. The module does this check before an agent starts with the decision.
 
 ## The cook
 

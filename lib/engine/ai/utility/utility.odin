@@ -301,12 +301,19 @@ score_values :: proc(b: ^Think, o: format.Utility_Option, records: []format.Util
 	count := int(o.link_count)
 	for k in 0 ..< count {
 		c := b.u.considerations[b.u.links[o.first_link + u32(k)]]
-		x := normalize(c, input(b.t, c))
-		y := curve(c, b.u.points[c.first_point:][:c.point_count] if c.curve == .Table else nil, x)
+		x, y := consider(b.t, c, b.u.points)
 		records[k] = {f32(x), f32(y)}
 		score *= compensate(y, count)
 	}
 	return score
+}
+
+// consider is a consideration's input on the context's values, normalized over its range, and its score through its
+// curve, a table's points being a range of points. GOAP scores its goals' considerations with it too.
+consider :: proc(t: ^ai.Think_Context, c: format.Utility_Consideration, points: []format.Utility_Point) -> (x, y: f64) {
+	x = normalize(c, input(t, c))
+	y = curve(c, points[c.first_point:][:c.point_count] if c.curve == .Table else nil, x)
+	return
 }
 
 // input is a consideration's input before its range: a key's number, a distance in meters, or the seconds since a key

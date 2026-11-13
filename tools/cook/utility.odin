@@ -22,7 +22,7 @@ UTILITY_DEFAULT_MOMENTUM :: 0.25
 
 @(private = "file")
 OPTION_FIELDS :: []string{"action", "when", "weight", "considerations", "target", "target_tag", "cooldown", "position"}
-@(private = "file")
+// The fields of a consideration, which GOAP's considerations take too.
 CONSIDERATION_FIELDS :: []string{"input", "range", "curve", "slope", "exponent", "x_shift", "y_shift", "points", "position"}
 
 @(private = "file")
@@ -209,17 +209,10 @@ read_utility_node :: proc(p: ^Decision_Parser, text: ^Decision_Text_Node, n: ^Ut
 			weight     = 1,
 			target     = format.DECISION_NONE,
 		}
-	} else {
-		n.consideration = {
-			node     = u32(text.index),
-			max      = 1,
-			slope    = 1,
-			exponent = 1,
-		}
-		if text.set_line != 0 {
-			decision_problem(p, text.set_line, "only an option writes keys, and this is a consideration")
-		}
+	} else if text.set_line != 0 {
+		decision_problem(p, text.set_line, "only an option writes keys, and this is a consideration")
 	}
+	own_fields := make([dynamic]Decision_Field, context.temp_allocator)
 	for f in text.fields {
 		own := false
 		for k in takes {
@@ -241,7 +234,7 @@ read_utility_node :: proc(p: ^Decision_Parser, text: ^Decision_Text_Node, n: ^Ut
 		if n.kind == .Option {
 			read_option_field(p, n, f)
 		} else {
-			read_consideration_field(p, n, f)
+			append(&own_fields, f)
 		}
 	}
 	if n.kind == .Option {
@@ -253,18 +246,48 @@ read_utility_node :: proc(p: ^Decision_Parser, text: ^Decision_Text_Node, n: ^Ut
 		}
 		return
 	}
+	n.consideration, n.points = read_consideration(p, text, own_fields[:])
+}
+
+// read_consideration reads a consideration's fields, which are among CONSIDERATION_FIELDS, into its record and a
+// table's points, and checks them together. A utility option and a GOAP goal score their considerations alike. The
+// caller reports the fields that a consideration does not take, and its `set` lines.
+read_consideration :: proc(
+	p: ^Decision_Parser,
+	text: ^Decision_Text_Node,
+	fields: []Decision_Field,
+) -> (
+	consideration: format.Utility_Consideration,
+	points: [dynamic]format.Utility_Point,
+) {
+	n := Utility_Text_Node {
+		kind          = .Consideration,
+		points        = make([dynamic]format.Utility_Point, context.temp_allocator),
+		consideration = {node = u32(text.index), max = 1, slope = 1, exponent = 1},
+	}
+	has := proc(fields: []Decision_Field, key: string) -> bool {
+		for f in fields {
+			if f.key == key {
+				return true
+			}
+		}
+		return false
+	}
+	for f in fields {
+		read_consideration_field(p, &n, f)
+	}
 	c := &n.consideration
-	if !has(text, "input") {
+	if !has(fields, "input") {
 		decision_problem(p, text.line, "a consideration has an input")
 	}
-	if !has(text, "curve") {
+	if !has(fields, "curve") {
 		decision_problem(p, text.line, "a consideration has a curve")
 	}
 	if n.is_bool && n.range_line != 0 {
 		decision_problem(p, n.range_line, "a bool's input is 0 or 1, so it takes no range")
 	}
 	curve_names := format.UTILITY_CURVE_NAMES
-	for f in text.fields {
+	for f in fields {
 		switch f.key {
 		case "exponent":
 			if c.curve == .Linear || c.curve == .Step {
@@ -276,9 +299,10 @@ read_utility_node :: proc(p: ^Decision_Parser, text: ^Decision_Text_Node, n: ^Ut
 			}
 		}
 	}
-	if c.curve == .Table && !has(text, "points") && has(text, "curve") {
+	if c.curve == .Table && !has(fields, "points") && has(fields, "curve") {
 		decision_problem(p, text.line, "a table curve has points: `points = [x, y], [x, y], ...`")
 	}
+	return n.consideration, n.points
 }
 
 @(private = "file")
