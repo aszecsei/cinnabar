@@ -54,7 +54,7 @@ The plan preview shows the plan that an agent would make, without the game.
 - **The setup:** a goal, and the start state. Each planning key has a check box for a bool, a number for an int, or a choice of names for an enum. A key starts at its blackboard default, and ↺ puts it back. The setup is the editor's, and is not in the file or the undo history.
 - **The answer:** the next check of the decision sends the setup as the `Cook_Preview`'s plan query ([Daemon](../content/daemon-and-operations.md#cook-daemon)). The daemon plans with the runtime's search, `search.whole` in `lib/engine/ai/goap/search`, and answers with the plan as a chain of actions. A click on an action selects it. When no plan reaches the goal, the answer is the plan of the closest search, and the planning keys that it needs and the start state does not have ([AI: GOAP: The search](../ai/goap.md#the-search)).
 - **What it cannot know:** a guard reads the agent's values and the world, so every action is usable in the preview. A cost key has its blackboard default.
-- **An answer is for its setup and its text.** A change of either hides the answer until the next one comes. A decision with problems does not plan.
+- **An answer is for its query and its text.** The query holds the goal and every planning key's value, a default included, so a change of the setup, of the text, or of a default in the blackboard hides the answer and plans again. A decision with problems, or a query that the daemon does not plan, says so instead of a plan.
 
 ## HTN
 

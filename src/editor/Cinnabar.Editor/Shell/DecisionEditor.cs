@@ -7,6 +7,15 @@ using Cinnabar.Editor.Tools;
 
 namespace Cinnabar.Editor.Shell;
 
+/// <summary>Where a GOAP decision's plan preview is (see DecisionEditor.PlanStatus).</summary>
+public enum PlanPreviewStatus
+{
+    NoGoal,
+    Pending,
+    Refused,
+    Answered,
+}
+
 /// <summary>A kind of node that a technique has, and what it does, for the add menu.</summary>
 public sealed record DecisionKind(string Kind, string Label, string Description);
 
@@ -62,15 +71,14 @@ public sealed class DecisionEditor : IGraphEditor, IGraphCanvasEditor
     readonly PreviewCook _cook;
     // The blackboard that the keys were last read from: its GUID and text, and the keys.
     (string? Guid, string? Text, IReadOnlyList<BlackboardKey> Keys) _board = (null, null, []);
-    // The plan preview's goal and the start state's values that the user set, by planning key; the version of the two,
-    // which each change counts; and the last answer, with the version and the text that it answers.
+    // The plan preview's goal and the start state's values that the user set, by planning key, and the last answer, with
+    // the query and the text that it answers.
     int? _planGoal;
-    readonly Dictionary<string, int> _planState = [];
-    int _planVersion;
+    readonly Dictionary<string, int> _planValues = [];
     PlanAnswered? _planAnswered;
 
-    /// <summary>The daemon's answer to a plan query, for the plan setup's version and the text that it was asked about.</summary>
-    sealed record PlanAnswered(int Version, string Text, PlanAnswer? Answer);
+    /// <summary>The daemon's answer to a plan query, by the query's key (see QueryKey) and the text that it was asked about.</summary>
+    sealed record PlanAnswered(string Query, string Text, PlanAnswer? Answer);
 
     internal DecisionEditor(EditorShell shell, DecisionDocument document)
     {
@@ -149,6 +157,12 @@ public sealed class DecisionEditor : IGraphEditor, IGraphCanvasEditor
         if (guid == File.Blackboard)
         {
             CatalogChanged?.Invoke();
+            // The start state takes the blackboard's defaults, so a change of one plans again.
+            if (PlanQuery() is { } query && QueryKey(query) != _planAnswered?.Query)
+            {
+                PlanChanged?.Invoke();
+                _cook.Schedule();
+            }
         }
     }
 
@@ -463,8 +477,19 @@ public sealed class DecisionEditor : IGraphEditor, IGraphCanvasEditor
         SetFields(node, $"Set curve {kind}", fields);
     }
 
-    /// <summary>Begins a drag that changes a node's fields, such as a curve's handle's, which is one undo entry however it moves.</summary>
-    public void BeginFieldDrag(string label) => Document.Begin(label);
+    /// <summary>
+    /// Begins a drag that changes a node's fields, such as a curve's handle's, which is one undo entry however it moves.
+    /// It is false, and begins nothing, while another edit's entry is open, which the drag must not step into or end.
+    /// </summary>
+    public bool BeginFieldDrag(string label)
+    {
+        if (Document.InTransaction)
+        {
+            return false;
+        }
+        Document.Begin(label);
+        return true;
+    }
 
     /// <summary>A step of a drag of fields: the fields as they are at the drag's place now.</summary>
     public void DragFields(int node, IReadOnlyDictionary<string, string?> fields)
@@ -634,7 +659,7 @@ public sealed class DecisionEditor : IGraphEditor, IGraphCanvasEditor
     /// <summary>A planning key's value in the plan preview's start state: the one that the user set, or the blackboard's default.</summary>
     public int PlanValue(string key)
     {
-        if (_planState.TryGetValue(key, out var value))
+        if (_planValues.TryGetValue(key, out var value))
         {
             return value;
         }
@@ -662,47 +687,65 @@ public sealed class DecisionEditor : IGraphEditor, IGraphCanvasEditor
     {
         if (value is { } v)
         {
-            _planState[key] = v;
+            _planValues[key] = v;
         }
         else
         {
-            _planState.Remove(key);
+            _planValues.Remove(key);
         }
         PlanSetupChanged();
     }
 
     void PlanSetupChanged()
     {
-        _planVersion++;
         PlanChanged?.Invoke();
         _cook.Schedule();
     }
 
-    /// <summary>The query that the next check sends, or null without a goal: the values that the user set of the decision's planning keys.</summary>
+    /// <summary>
+    /// The query that the next check sends, or null without a goal: the goal, and the value of each planning key of a
+    /// type that plans, as <see cref="PlanValue"/> gives it, so the query holds everything that its answer depends on
+    /// besides the text.
+    /// </summary>
     public PlanQuery? PlanQuery()
     {
         if (Technique != "goap" || PlanGoal is not { } goal)
         {
             return null;
         }
-        var planning = PlanningKeys.Select(k => k.Name).ToHashSet();
-        return new PlanQuery((uint)goal, [.. _planState.Where(v => planning.Contains(v.Key)).OrderBy(v => v.Key, StringComparer.Ordinal).Select(v => new PlanValue(v.Key, v.Value))]);
+        return new PlanQuery((uint)goal, [.. PlanningKeys.Where(k => k.Key?.Type is "bool" or "int" or "enum").Select(k => new PlanValue(k.Name, PlanValue(k.Name)))]);
     }
 
-    /// <summary>
-    /// The plan preview's answer, for the goal and the start state as they are and the text as it is, or null while it is
-    /// asked for, or when the decision has problems, which the daemon does not plan.
-    /// </summary>
-    public PlanAnswer? Plan => _planAnswered is { } a && a.Version == _planVersion && a.Text == Document.Text ? a.Answer : null;
+    // A query as a key that an answer is matched by.
+    static string QueryKey(PlanQuery? query) =>
+        query == null ? "" : $"{query.Goal}:{string.Join(",", query.State.Select(v => $"{v.Key}={v.Value}"))}";
 
-    // A check of a text, with the plan query as it is when the check is sent; the answer keeps the setup's version and
-    // the text, so a later setup or text does not show it.
+    // The last answer, when it answers the query and the text as they are now.
+    PlanAnswered? CurrentAnswer => _planAnswered is { } a && a.Query == QueryKey(PlanQuery()) && a.Text == Document.Text ? a : null;
+
+    /// <summary>The plan preview's answer, for the goal, the start state and the text as they are, or null (see <see cref="PlanStatus"/>).</summary>
+    public PlanAnswer? Plan => CurrentAnswer?.Answer;
+
+    /// <summary>
+    /// Where the plan preview is: without a goal, waiting for the answer to the query and the text as they are, refused
+    /// when the daemon answered them without a plan, as for a decision with problems, or answered.
+    /// </summary>
+    public PlanPreviewStatus PlanStatus => PlanQuery() == null
+        ? PlanPreviewStatus.NoGoal
+        : CurrentAnswer switch
+        {
+            null => PlanPreviewStatus.Pending,
+            { Answer: null } => PlanPreviewStatus.Refused,
+            _ => PlanPreviewStatus.Answered,
+        };
+
+    // A check of a text, with the plan query as it is when the check is sent; the answer keeps the query and the text, so
+    // a later setup or text does not show it.
     async Task<PreviewResult> Cook(string text)
     {
-        var version = _planVersion;
         var query = PlanQuery();
         var result = await _shell.PreviewCooker.CookPreview(Guid, text, query);
-        _planAnswered = new PlanAnswered(version, text, query == null ? null : result.Plan.FirstOrDefault());
+        _planAnswered = new PlanAnswered(QueryKey(query), text, query == null ? null : result.Plan.FirstOrDefault());
         return result;
     }
 

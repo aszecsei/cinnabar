@@ -178,7 +178,7 @@ sealed class GoapView : ScrollViewer
         var goals = file.Nodes.Where(n => n.Kind == "goal").ToList();
         var planning = _editor.PlanningKeys;
         var shown = $"{_editor.PlanGoal}|{string.Join(",", goals.Select(GoalName))}|{string.Join(",", planning.Select(k => $"{k.Name}={_editor.PlanValue(k.Name)}{k.Key?.Type}"))}"
-            + $"|{_shell.Cook.Linked}|{_editor.CookError}|{Describe(_editor.Plan)}";
+            + $"|{_shell.Cook.Linked}|{_editor.PlanStatus}|{Describe(_editor.Plan)}";
         if (shown == _previewShown)
         {
             return;
@@ -234,7 +234,7 @@ sealed class GoapView : ScrollViewer
 
     Control Answer()
     {
-        if (_editor.PlanGoal == null)
+        if (_editor.PlanStatus == PlanPreviewStatus.NoGoal)
         {
             return Dim("Pick a goal to plan for.");
         }
@@ -242,9 +242,13 @@ sealed class GoapView : ScrollViewer
         {
             return Dim("Waiting for the cook daemon.");
         }
+        if (_editor.PlanStatus == PlanPreviewStatus.Refused)
+        {
+            return Dim("The decision or the start state has problems, which the daemon does not plan.");
+        }
         if (_editor.Plan is not { } answer)
         {
-            return Dim(_editor.CookError != null ? "The decision has problems, which the daemon does not plan." : "Planning…");
+            return Dim("Planning…");
         }
         var panel = new StackPanel { Spacing = 4 };
         var nodes = answer.Nodes == 1 ? "1 node" : $"{answer.Nodes} nodes";

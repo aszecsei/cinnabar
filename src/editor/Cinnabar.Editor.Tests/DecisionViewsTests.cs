@@ -279,8 +279,9 @@ public sealed class DecisionViewsTests : IDisposable
         editor.SetPlanValue("health", 5);
         var query = editor.PlanQuery()!;
         Assert.Equal(1u, query.Goal);
-        // Only planning keys are asked about.
-        Assert.Equal([("armed", 1)], query.State.Select(v => (v.Key, v.Value)));
+        // The query has every planning key's value, set or the default, and only the planning keys.
+        Assert.Equal([("armed", 1), ("ammo", 30), ("near", 0), ("down", 0)], query.State.Select(v => (v.Key, v.Value)));
+        Assert.Equal(PlanPreviewStatus.Pending, editor.PlanStatus);
 
         var cook = await Next(cooker, c => c.Plan != null);
         Assert.Equal(1u, cook.Plan!.Goal);
@@ -288,13 +289,14 @@ public sealed class DecisionViewsTests : IDisposable
         cook.Answer(new PreviewResult("", [], [answer]));
         await Until(() => editor.Plan != null);
         Assert.Equal([12u, 11u], editor.Plan!.Steps.Select(s => s.Id));
+        Assert.Equal(PlanPreviewStatus.Answered, editor.PlanStatus);
 
         // A change of the setup hides the answer, and an answer to the old setup does not show.
         var count = cooker.Requests.Count;
         editor.SetPlanValue("near", 1);
         Assert.Null(editor.Plan);
         var next = await Next(cooker, c => c.Plan != null, count);
-        Assert.Equal([("armed", 1), ("near", 1)], next.Plan!.State.Select(v => (v.Key, v.Value)));
+        Assert.Equal([("armed", 1), ("ammo", 30), ("near", 1), ("down", 0)], next.Plan!.State.Select(v => (v.Key, v.Value)));
         count = cooker.Requests.Count;
         editor.SetPlanValue("near", null);
         next.Answer(new PreviewResult("", [], [answer]));
@@ -304,6 +306,19 @@ public sealed class DecisionViewsTests : IDisposable
         last.Answer(new PreviewResult("", [], [closest]));
         await Until(() => editor.Plan != null);
         Assert.Equal(PlanOutcome.Closest, editor.Plan!.Outcome);
+
+        // A blackboard's default is in the start state, so a change of one asks again, and hides the answer until then.
+        count = cooker.Requests.Count;
+        shell.OpenAsset(shell.Assets.Find(Board)!);
+        var board = Assert.Single(shell.Blackboards);
+        board.SetKey("ammo", "int", [], "12");
+        Assert.Equal(12, editor.PlanValue("ammo"));
+        Assert.Null(editor.Plan);
+        var again = await Next(cooker, c => c.Plan != null, count);
+        Assert.Contains(again.Plan!.State, v => v.Key == "ammo" && v.Value == 12);
+        // An answer without a plan, as for a decision with problems, is refused.
+        again.Answer(new PreviewResult("the decision did not cook", [], []));
+        await Until(() => editor.PlanStatus == PlanPreviewStatus.Refused);
 
         // A goal that is deleted asks for no plan.
         editor.Delete(1);

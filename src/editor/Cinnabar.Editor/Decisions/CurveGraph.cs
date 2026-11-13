@@ -168,10 +168,10 @@ sealed class CurveGraph : Control
             e.Handled = true;
             return;
         }
-        if (handle is { } h)
+        // A drag is this graph's only when it opens its own entry.
+        if (handle is { } h && _editor.BeginFieldDrag(h.Kind == CurveHandleKind.Point ? "Move Point" : $"Drag {h.Kind}"))
         {
             _drag = (h, curve);
-            _editor.BeginFieldDrag(h.Kind == CurveHandleKind.Point ? "Move Point" : $"Drag {h.Kind}");
             e.Pointer.Capture(this);
             e.Handled = true;
             InvalidateVisual();
