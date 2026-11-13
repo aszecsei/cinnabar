@@ -14,20 +14,25 @@ namespace Cinnabar.Editor.Decisions;
 
 /// <summary>
 /// The decision editor (see docs/editor/decision-editor.md#decision-editor): the decision's technique and blackboard,
-/// its problems and the selected agent's blackboard on the left, its canvas, and the selected node's details on the
-/// right. Docking can rebuild the view at any time, so its state is in its <see cref="DecisionEditor"/>.
+/// its problems and the selected agent's blackboard on the left, the technique's view, and the selected node's details
+/// on the right. The view is a behavior tree's or an HTN domain's canvas, a utility decision's options, or a GOAP
+/// decision's goals, actions and plan preview, and it changes when the technique does. Docking can rebuild the view at
+/// any time, so its state is in its <see cref="DecisionEditor"/>.
 /// </summary>
 public sealed class DecisionEditorView : DockPanel
 {
     readonly EditorShell _shell;
     readonly DecisionEditor _editor;
     readonly TextBlock _status = new() { FontSize = 12, VerticalAlignment = VerticalAlignment.Center };
+    readonly Grid _grid = new() { ColumnDefinitions = new ColumnDefinitions("240,4,*,4,300") };
+    readonly Button _frame;
+    Control? _center;
+    string? _technique;
 
     public DecisionEditorView(EditorShell shell, DecisionEditor editor)
     {
         _shell = shell;
         _editor = editor;
-        var canvas = new BehaviorTreeCanvas(shell, editor);
 
         var toolbar = new DockPanel { Margin = new Thickness(8, 4) };
         var save = new Button { Content = CommandViews.Icon("save", 16), Classes = { "viewport-tool" }, Focusable = false, Margin = new Thickness(0, 0, 8, 0) };
@@ -38,9 +43,9 @@ public sealed class DecisionEditorView : DockPanel
         var text = SmallButton("Open in Script Editor", "Edit the decision's text. Save first: this editor does not read the file again.", () => shell.OpenScript(editor.Document.Path));
         DockPanel.SetDock(text, DockSide.Left);
         toolbar.Children.Add(text);
-        var frame = SmallButton("Frame", "Pan and zoom so the whole tree is in view (F)", canvas.Frame);
-        DockPanel.SetDock(frame, DockSide.Left);
-        toolbar.Children.Add(frame);
+        _frame = SmallButton("Frame", "Pan and zoom so the whole tree is in view (F)", () => (_center as BehaviorTreeCanvas)?.Frame());
+        DockPanel.SetDock(_frame, DockSide.Left);
+        toolbar.Children.Add(_frame);
         DockPanel.SetDock(_status, DockSide.Right);
         toolbar.Children.Add(_status);
         toolbar.Children.Add(new Panel());
@@ -48,25 +53,50 @@ public sealed class DecisionEditorView : DockPanel
         SetDock(top, DockSide.Top);
         Children.Add(top);
 
-        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("240,4,*,4,300") };
-        grid.Children.Add(new DecisionPanel(shell, editor));
+        _grid.Children.Add(new DecisionPanel(shell, editor));
         var leftSplit = new GridSplitter { ResizeDirection = GridResizeDirection.Columns };
         Grid.SetColumn(leftSplit, 1);
-        grid.Children.Add(leftSplit);
-        Grid.SetColumn(canvas, 2);
-        grid.Children.Add(canvas);
+        _grid.Children.Add(leftSplit);
         var rightSplit = new GridSplitter { ResizeDirection = GridResizeDirection.Columns };
         Grid.SetColumn(rightSplit, 3);
-        grid.Children.Add(rightSplit);
+        _grid.Children.Add(rightSplit);
         var details = new DecisionNodeDetails(shell, editor);
         Grid.SetColumn(details, 4);
-        grid.Children.Add(details);
-        Children.Add(grid);
+        _grid.Children.Add(details);
+        Children.Add(_grid);
+        ShowCenter();
 
         new ViewSubscriptions(this, attached: Show)
+            .Add(() => _editor.Changed += ShowCenter, () => _editor.Changed -= ShowCenter)
             .Add(() => _editor.Changed += Show, () => _editor.Changed -= Show)
             .Add(() => _editor.ProblemsChanged += Show, () => _editor.ProblemsChanged -= Show)
             .Add(() => _shell.Cook.StateChanged += Show, () => _shell.Cook.StateChanged -= Show);
+    }
+
+    /// <summary>The view of a technique: a canvas for a tree or an HTN domain, a list of options, or goals and actions.</summary>
+    internal static Control CenterOf(EditorShell shell, DecisionEditor editor) => editor.Technique switch
+    {
+        "utility" => new UtilityView(editor),
+        "goap" => new GoapView(shell, editor),
+        _ => new BehaviorTreeCanvas(shell, editor),
+    };
+
+    // The technique's view, made again when the technique changes.
+    void ShowCenter()
+    {
+        if (_center != null && _technique == _editor.Technique)
+        {
+            return;
+        }
+        _technique = _editor.Technique;
+        if (_center != null)
+        {
+            _grid.Children.Remove(_center);
+        }
+        _center = CenterOf(_shell, _editor);
+        Grid.SetColumn(_center, 2);
+        _grid.Children.Add(_center);
+        _frame.IsVisible = _center is BehaviorTreeCanvas;
     }
 
     void Show()
@@ -141,9 +171,9 @@ sealed class DecisionPanel : ScrollViewer
         _content.Children.Clear();
         _content.Children.Add(Heading("Decision"));
         _content.Children.Add(Row("Technique", new TextBlock { Text = (_editor.Technique ?? "none").Replace('_', ' '), VerticalAlignment = VerticalAlignment.Center }));
-        if (_editor.Technique is not "behavior_tree")
+        if (_editor.Technique is not ("behavior_tree" or "utility" or "goap" or "htn"))
         {
-            _content.Children.Add(Dim("The canvas draws this technique's nodes without their links, which the details show as the file writes them."));
+            _content.Children.Add(Dim("The editor does not know this technique, so the canvas draws its nodes without their links, which the details show as the file writes them."));
         }
         var names = blackboards.Select(AssetIndex.DisplayName).ToList();
         var current = blackboards.FirstOrDefault(b => b.Guid == guid);

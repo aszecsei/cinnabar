@@ -1263,16 +1263,59 @@ Agent_Value :: struct {
 	text: string,
 }
 
+// Agent_Option is a utility option as the agent's last think scored it, by its ID in the decision's text: its score,
+// whether it is the option that the agent runs, and its considerations. Scores are rounded to three decimals.
+Agent_Option :: struct {
+	id:             u32,
+	score:          f32,
+	chosen:         bool,
+	considerations: []Agent_Consideration,
+}
+
+// Agent_Consideration is a consideration of an option, by its ID: its input normalized to 0 to 1, and its curve's
+// value there, each rounded to three decimals.
+Agent_Consideration :: struct {
+	id:    u32,
+	input: f32,
+	score: f32,
+}
+
+// Agent_Goal is a GOAP goal's priority in the agent's last think, by its ID, rounded to three decimals.
+Agent_Goal :: struct {
+	id:       u32,
+	priority: f32,
+}
+
+// Agent_Method is the method, by its ID, that a running HTN plan chose for a compound task, by its ID.
+Agent_Method :: struct {
+	task:   u32,
+	method: u32,
+}
+
+// Agent_Plan is a planning agent's plan: its goal's ID, 0 for none or for an HTN plan, which has no goal, the goals'
+// priorities, the action nodes of the plan that runs, in their order, and the step that runs, an HTN plan's methods,
+// and whether the agent searches for a plan.
+Agent_Plan :: struct {
+	goal:      u32,
+	goals:     []Agent_Goal,
+	steps:     []u32,
+	step:      u32,
+	methods:   []Agent_Method,
+	searching: bool,
+}
+
 // Game to editor: what a watched entity's Agent does, which its component's bytes do not say (see
 // docs/editor/decision-editor.md#live-view). A watched entity's goes out once after the watch, empty without an Agent,
 // then when it changes. nodes are those of the decision that run or have ended, and values the blackboard's keys in
-// their order. Without an agent that is ready, decision is zero and the rest is too, which tells the editor that it has
-// gone.
+// their order. options are a utility decision's, and plan has at most one, a GOAP or an HTN decision's. Without an agent
+// that is ready, decision is zero and the rest is too, which tells the editor that it has gone.
 Agent_View :: struct {
 	entity:   u64,
 	decision: [16]u8,
 	nodes:    []Agent_Node,
 	values:   []Agent_Value,
+	options:  []Agent_Option,
+	plan:     []Agent_Plan,
 }
 
 // Agent_Action_Param is a parameter of a native action.

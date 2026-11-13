@@ -356,6 +356,7 @@ scores :: proc(decision: ai.Decision, board: ai.Board, state: []byte, allocator:
 	shared := format.decision_nodes(decision.data, decision.blob)
 	actions := format.decision_actions(decision.data, decision.blob)
 	result := make([]ai.Option_Score, len(u.options), allocator)
+	running := (^format.Utility_Running)(raw_data(state))
 	for o, i in u.options {
 		st := option_state(state, o)
 		records := link_states(state, o)
@@ -373,6 +374,7 @@ scores :: proc(decision: ai.Decision, board: ai.Board, state: []byte, allocator:
 			action         = format.blob_string(decision.data, actions[shared[o.node].action].name),
 			score          = st.score,
 			target         = ecs.Entity(st.target),
+			chosen         = running.option == u32(i) + 1,
 			considerations = considerations,
 		}
 	}

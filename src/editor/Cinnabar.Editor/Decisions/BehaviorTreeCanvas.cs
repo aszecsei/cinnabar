@@ -12,11 +12,11 @@ using static Cinnabar.Editor.Materials.CanvasDrawing;
 namespace Cinnabar.Editor.Decisions;
 
 /// <summary>
-/// The decision editor's canvas (see docs/editor/decision-editor.md#the-canvas): a behavior tree from the top down, its
-/// children left to right in their order, with the gestures of every graph canvas (NodeGraphCanvas). Each kind of node
-/// has a shape of its own, and its decorators are bands across its top. A drag from a composite's foot to a node makes it
-/// a child, and to an empty place opens the add menu for a new child. The live view lights the nodes that run and marks
-/// the last result of each that ran.
+/// The decision editor's canvas (see docs/editor/decision-editor.md#the-canvas): a behavior tree, or an HTN domain, from
+/// the top down, its children left to right in their order, with the gestures of every graph canvas (NodeGraphCanvas).
+/// Each kind of node has a shape of its own, and its decorators are bands across its top. A drag from a node's foot to a
+/// node makes it a child, and to an empty place opens the add menu for a new child. The live view lights the nodes that
+/// run and marks the last result of each that ran, or lights an HTN plan's path and its action that runs.
 /// </summary>
 public sealed class BehaviorTreeCanvas : NodeGraphCanvas
 {
@@ -41,11 +41,15 @@ public sealed class BehaviorTreeCanvas : NodeGraphCanvas
     static readonly IBrush WaitHeader = new SolidColorBrush(Color.Parse("#3E3A2C"));
     static readonly IBrush SetHeader = new SolidColorBrush(Color.Parse("#3F2F44"));
     static readonly IBrush ConditionHeader = new SolidColorBrush(Color.Parse("#4A3A2A"));
+    static readonly IBrush TaskHeader = new SolidColorBrush(Color.Parse("#2F3B4F"));
+    static readonly IBrush MethodHeader = new SolidColorBrush(Color.Parse("#2E4148"));
     static readonly IBrush UnknownHeader = new SolidColorBrush(Color.Parse("#3A3A3E"));
     // The live view: what runs, and how each node that ran last ended.
     static readonly IBrush LiveBrush = new SolidColorBrush(Color.Parse("#5BC47F"));
     static readonly IPen LivePen = new Pen(LiveBrush, 3);
     static readonly IPen LiveEdge = new Pen(LiveBrush, 2.5);
+    // An HTN plan's path, which its action that runs is on.
+    static readonly IPen PathPen = new Pen(LiveBrush, 1.5, new DashStyle([4, 2], 0));
     static readonly IBrush SucceededBrush = new SolidColorBrush(Color.Parse("#5BC47F"));
     static readonly IBrush FailedBrush = new SolidColorBrush(Color.Parse("#D9534F"));
     static readonly IBrush AbortedBrush = new SolidColorBrush(Color.Parse("#C9A23F"));
@@ -86,15 +90,18 @@ public sealed class BehaviorTreeCanvas : NodeGraphCanvas
     {
         var problems = _editor.Problems.Where(p => p.Error && p.Node != null).Select(p => p.Node!.Value).ToHashSet();
         var live = _editor.Live;
-        var running = live?.Nodes.Where(n => n.Running).Select(n => (int)n.Id).ToHashSet() ?? [];
+        var (path, running) = _editor.LivePath();
+        var planned = _editor.LivePlan != null;
         foreach (var edge in _geometry.Edges)
         {
-            DrawEdge(context, edge, running.Contains(edge.Parent) && running.Contains(edge.Child) ? LiveEdge : EdgePen);
+            DrawEdge(context, edge, path.Contains(edge.Parent) && path.Contains(edge.Child) ? LiveEdge : EdgePen);
         }
         foreach (var node in _geometry.Nodes)
         {
-            var result = live?.Nodes.FirstOrDefault(n => n.Id == node.Node.Id);
-            DrawNode(context, node, _editor.Selection.Contains(node.Node.Id), problems.Contains(node.Node.Id), result);
+            var id = node.Node.Id;
+            var result = live?.Nodes.FirstOrDefault(n => n.Id == id);
+            var lit = running == id || (!planned && path.Contains(id)) ? LivePen : planned && path.Contains(id) ? PathPen : null;
+            DrawNode(context, node, _editor.Selection.Contains(id), problems.Contains(id), lit, result);
         }
         if (Connecting && _geometry.Find(_dragFrom) is { } from)
         {
@@ -127,7 +134,7 @@ public sealed class BehaviorTreeCanvas : NodeGraphCanvas
         context.DrawGeometry(null, pen, geometry);
     }
 
-    void DrawNode(DrawingContext context, TreeNodeLayout layout, bool selected, bool error, AgentNode? live)
+    void DrawNode(DrawingContext context, TreeNodeLayout layout, bool selected, bool error, IPen? lit, AgentNode? live)
     {
         var b = layout.Bounds;
         var rect = new Rect(b.X, b.Y, b.Width, b.Height);
@@ -152,22 +159,19 @@ public sealed class BehaviorTreeCanvas : NodeGraphCanvas
                 y += BehaviorTreeGeometry.RowHeight;
             }
         }
-        if (layout.Shape == TreeShape.Composite)
+        if (layout.HasFoot)
         {
             var foot = layout.Foot;
             var hot = Idle ? _footUnderMouse == layout.Node.Id : Connecting && _dragFrom == layout.Node.Id;
             context.DrawRectangle(hot ? FootHot : FootBody, null, new Rect(foot.X, foot.Y, foot.Width, foot.Height), 0, 0);
         }
-        if (live is { } result)
+        if (lit != null)
         {
-            if (result.Running)
-            {
-                context.DrawGeometry(null, LivePen, Shape(layout.Shape, rect.Inflate(3)));
-            }
-            if (ResultBrush(result.Last) is { } brush)
-            {
-                context.DrawEllipse(brush, null, new Point(b.X + b.Width - 10, layout.Header.Y + 13), 4, 4);
-            }
+            context.DrawGeometry(null, lit, Shape(layout.Shape, rect.Inflate(3)));
+        }
+        if (live is { } result && ResultBrush(result.Last) is { } brush)
+        {
+            context.DrawEllipse(brush, null, new Point(b.X + b.Width - 10, layout.Header.Y + 13), 4, 4);
         }
         if (selected || error)
         {
@@ -175,12 +179,14 @@ public sealed class BehaviorTreeCanvas : NodeGraphCanvas
         }
     }
 
-    // What a node's header says: an action's name, or the node's kind, with a composite's mark of how it runs.
+    // What a node's header says: an action's name, or the node's kind, with a composite's mark of how it runs, and a
+    // task's or a method's ID, since a domain has several.
     string Title(TreeNodeLayout layout) => layout.Node.Kind switch
     {
         "sequence" => "→  Sequence",
         "selector" => "?  Selector",
         "parallel" => "⇉  Parallel",
+        _ when layout.Shape is TreeShape.Task or TreeShape.Method => $"{_editor.Label(layout.Node.Id)} {layout.Node.Id}",
         _ => _editor.Label(layout.Node.Id),
     };
 
@@ -199,11 +205,13 @@ public sealed class BehaviorTreeCanvas : NodeGraphCanvas
         TreeShape.Wait => WaitHeader,
         TreeShape.Set => SetHeader,
         TreeShape.Condition => ConditionHeader,
+        TreeShape.Task => TaskHeader,
+        TreeShape.Method => MethodHeader,
         _ => UnknownHeader,
     };
 
-    // Each kind's outline: a composite square, an action rounded, a wait a pill, a condition with cut corners, a set
-    // with a notch.
+    // Each kind's outline: a composite or a task square, an action rounded, a method a little rounded, a wait a pill, a
+    // condition with cut corners, a set with a notch.
     static Geometry Shape(TreeShape shape, Rect r)
     {
         switch (shape)
@@ -212,6 +220,8 @@ public sealed class BehaviorTreeCanvas : NodeGraphCanvas
                 return new RectangleGeometry(r, Corner * 2, Corner * 2);
             case TreeShape.Wait:
                 return new RectangleGeometry(r, 13, 13);
+            case TreeShape.Method:
+                return new RectangleGeometry(r, Corner, Corner);
             case TreeShape.Condition or TreeShape.Set:
                 var cut = shape == TreeShape.Condition ? 12.0 : 6.0;
                 var geometry = new StreamGeometry();
@@ -264,7 +274,8 @@ public sealed class BehaviorTreeCanvas : NodeGraphCanvas
         }
         if (child != from && !_editor.AddChild(from, child))
         {
-            _shell.Console.Add(Model.LogLevel.Warning, $"decision: {_editor.Label(child)} cannot be a child of {_editor.Label(from)}, which is below it");
+            var why = _editor.Technique == "htn" ? "a task lists methods, and a method tasks and actions" : "which is below it";
+            _shell.Console.Add(Model.LogLevel.Warning, $"decision: {_editor.Label(child)} cannot be a child of {_editor.Label(from)}, {why}");
         }
     }
 

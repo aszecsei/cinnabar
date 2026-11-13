@@ -36,12 +36,14 @@ Module :: struct {
 }
 
 // Option_Score is an option that a module scored in the agent's last think: its decision node's ID, its action's name,
-// its score, the target that it scored best for, or none, and the score of each of its considerations.
+// its score, the target that it scored best for, or none, whether it is the option that the agent runs, and the score of
+// each of its considerations.
 Option_Score :: struct {
 	id:             u32,
 	action:         string,
 	score:          f32,
 	target:         ecs.Entity,
+	chosen:         bool,
 	considerations: []Consideration_Score,
 }
 

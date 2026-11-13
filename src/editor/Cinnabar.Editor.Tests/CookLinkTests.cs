@@ -1,6 +1,7 @@
 using Cinnabar.Editor.Content;
 using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Link.Cook;
+using Cinnabar.Editor.Model;
 
 namespace Cinnabar.Editor.Tests;
 
@@ -265,6 +266,40 @@ public sealed class CookLinkTests : IDisposable
         // A blackboard's unsaved text is checked too, at its lines.
         var twice = await session.CookPreview(board.Guid, Board + "bool searching\n");
         Assert.Equal(4u, Assert.Single(twice.Problems).Line);
+    }
+
+    [Fact]
+    public async Task TheDaemonPlansAGoapDecisionsPlanPreviewAsTheRuntimeDoes()
+    {
+        if (!File.Exists(_cook))
+        {
+            Assert.Skip("build/tools/cook.exe is missing");
+        }
+        static string Corpus(string file) =>
+            File.ReadAllText(Path.Combine(EditorOptions.RepositoryRoot(), "tools", "cook", "testdata", "decisions", file)).ReplaceLineEndings("\n");
+        // The cooker's test decision, and the blackboard of the GUID that it names.
+        Write("guard.blackboard", Corpus("guard.blackboard"));
+        Write("guard.blackboard.meta", Corpus("guard.blackboard.meta"));
+        var text = Corpus("goap.decision");
+        Write("hunter.decision", text);
+        var index = new AssetIndex();
+        using var session = Start(index);
+        await Until(() => session.Linked && index.Assets.Values.Any(a => a.Kind == AssetKind.Decision && a.Status == AssetStatus.Current), session, []);
+        var decision = index.Assets.Values.Single(a => a.Kind == AssetKind.Decision);
+
+        // From the blackboard's defaults, it arms, comes near and attacks: the plan of lib/engine/ai/goap's search, which
+        // the runtime's tests compare with an agent's.
+        var result = await session.CookPreview(decision.Guid, text, new PlanQuery(1, []));
+        Assert.Equal("", result.Error);
+        var plan = Assert.Single(result.Plan);
+        Assert.Equal(PlanOutcome.Found, plan.Outcome);
+        Assert.Equal([10u, 12u, 11u], plan.Steps.Select(s => s.Id));
+        Assert.Equal(["pick_up", "move_to", "attack"], plan.Steps.Select(s => s.Action));
+
+        // Armed and near already, it only attacks; and a check without a query has no plan.
+        result = await session.CookPreview(decision.Guid, text, new PlanQuery(1, [new PlanValue("armed", 1), new PlanValue("near", 1)]));
+        Assert.Equal([11u], Assert.Single(result.Plan).Steps.Select(s => s.Id));
+        Assert.Empty((await session.CookPreview(decision.Guid, text)).Plan);
     }
 
     [Fact]

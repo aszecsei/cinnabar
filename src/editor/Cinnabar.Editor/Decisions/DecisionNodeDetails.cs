@@ -16,7 +16,8 @@ namespace Cinnabar.Editor.Decisions;
 /// <summary>
 /// The decision editor's details (see docs/editor/decision-editor.md#the-canvas): the selected node's fields, its
 /// decorators and its problems. An action's arguments are each a constant or a key of the blackboard, picked from a
-/// list, and a condition is a text box that completes the blackboard's keys.
+/// list, and a condition is a text box that completes the blackboard's keys. A utility, GOAP or HTN node shows each
+/// field of its kind, whether the file writes it or not.
 /// </summary>
 sealed class DecisionNodeDetails : ScrollViewer
 {
@@ -68,7 +69,7 @@ sealed class DecisionNodeDetails : ScrollViewer
         _content.Children.Clear();
         if (node == null)
         {
-            _content.Children.Add(Dim("Select a node to see its fields. Drag from a composite's foot to a node to make it a child, and Space, Tab or a right click adds a node."));
+            _content.Children.Add(Dim("Select a node to see its fields. On a canvas, a drag from a node's foot to a node makes it a child, and Space, Tab or a right click adds a node."));
             return;
         }
         _content.Children.Add(new TextBlock { Text = _editor.Label(node.Id), FontSize = 15, FontWeight = FontWeight.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis });
@@ -76,6 +77,10 @@ sealed class DecisionNodeDetails : ScrollViewer
         if (_editor.Technique == "behavior_tree")
         {
             ShowTreeNode(node);
+        }
+        else if (FieldsOf(_editor.Technique, node.Kind) is { } fields)
+        {
+            ShowTechniqueNode(node, fields);
         }
         else
         {
@@ -154,7 +159,7 @@ sealed class DecisionNodeDetails : ScrollViewer
         KeyBox(node.Get(key) ?? "", "a condition, such as health < 0.3", _editor.Keys.Select(k => k.Name), text => _editor.SetField(node.Id, key, text));
 
     /// <summary>A box that edits text and completes the word under its end from a list of keys, as a condition's.</summary>
-    static Control KeyBox(string text, string watermark, IEnumerable<string> keys, Action<string> commit)
+    internal static Control KeyBox(string text, string watermark, IEnumerable<string> keys, Action<string> commit)
     {
         var box = new AutoCompleteBox
         {
@@ -323,7 +328,91 @@ sealed class DecisionNodeDetails : ScrollViewer
         _ => "0",
     };
 
-    // Another technique's node, until it has a view of its own: each field as the file writes it.
+    /// <summary>
+    /// The fields of a kind of node of a technique, in the order that the details show them, as
+    /// docs/content/kinds/decisions.md lists them; <c>set</c> is its writes. Null for a kind that the editor does not know.
+    /// </summary>
+    internal static IReadOnlyList<string>? FieldsOf(string? technique, string kind) => (technique, kind) switch
+    {
+        ("utility", "option") => ["action", "weight", "when", "considerations", "target", "target_tag", "cooldown", "set"],
+        ("utility" or "goap", "consideration") => ["input", "range", "curve", "slope", "exponent", "x_shift", "y_shift", "points"],
+        ("goap", "goal") => ["desired", "priority", "when", "considerations"],
+        ("goap", "action") => ["action", "preconditions", "effects", "cost", "when", "set"],
+        ("htn", "task") => ["methods"],
+        ("htn", "method") => ["when", "preconditions", "subtasks"],
+        ("htn", "action") => ["action", "preconditions", "effects", "when", "set"],
+        _ => null,
+    };
+
+    // What a field's empty box says it takes.
+    static string Hint(string key) => key switch
+    {
+        "weight" or "priority" or "slope" or "exponent" => "1",
+        "x_shift" or "y_shift" => "0",
+        "range" => "[0, 1]",
+        "points" => "[x, y], [x, y], ...",
+        "when" => "always",
+        "preconditions" => "none, or tests such as armed and ammo > 0",
+        "effects" => "key = value, key += n",
+        "desired" => "tests, such as down",
+        "cost" => "1, or a float or an int key",
+        "cooldown" => "seconds, or a key",
+        "input" => "a key, distance(self, target) or since(key)",
+        "target" => "an entity key",
+        "target_tag" => "a tag",
+        _ => key,
+    };
+
+    // A utility, GOAP or HTN node: its action, picked as a tree's is, its technique's fields, and any other that the file
+    // writes, which the cooker reports.
+    void ShowTechniqueNode(DecisionNode node, IReadOnlyList<string> fields)
+    {
+        var id = node.Id;
+        foreach (var key in fields)
+        {
+            switch (key)
+            {
+                case "action":
+                    ShowAction(node);
+                    break;
+                case "considerations" or "methods" or "subtasks":
+                    var ids = node.Ids(key);
+                    var none = key switch
+                    {
+                        "considerations" => "None",
+                        "methods" => "None: drag from its foot to a method",
+                        _ => "None: drag from its foot to a task or an action",
+                    };
+                    _content.Children.Add(Row(key, new TextBlock
+                    {
+                        Text = ids.Count == 0 ? none : string.Join(", ", ids.Select(c => $"{_editor.Label(c)} {c}")),
+                        TextWrapping = TextWrapping.Wrap,
+                        VerticalAlignment = VerticalAlignment.Center,
+                    }));
+                    break;
+                case "curve":
+                    var curve = node.Get("curve") ?? "linear";
+                    var kinds = ResponseCurve.Kinds.Contains(curve) ? ResponseCurve.Kinds : [.. ResponseCurve.Kinds, curve];
+                    _content.Children.Add(Row("curve", Choice(kinds, curve, picked => _editor.SetCurveKind(id, picked))));
+                    break;
+                case "exponent" when node.Get("curve") is "linear" or "step" or null:
+                case "points" when node.Get("curve") != "table":
+                    break;
+                case "set":
+                    ShowWrites(node);
+                    break;
+                default:
+                    _content.Children.Add(Row(key.Replace('_', ' '), DecisionKeysField(node, key)));
+                    break;
+            }
+        }
+        foreach (var (key, _) in node.Fields.Where(f => f.Key != "position" && !fields.Contains(f.Key)).DistinctBy(f => f.Key).ToList())
+        {
+            _content.Children.Add(Row(key.Replace('_', ' '), DecisionKeysField(node, key)));
+        }
+    }
+
+    // Another technique's node: each field as the file writes it.
     void ShowFields(DecisionNode node)
     {
         foreach (var (key, _) in node.Fields.Where(f => f.Key != "position").DistinctBy(f => f.Key).ToList())
@@ -336,6 +425,9 @@ sealed class DecisionNodeDetails : ScrollViewer
         }
     }
 
+    // A field that may name keys completes them; a number, a range or points is a plain box.
     Control DecisionKeysField(DecisionNode node, string key) =>
-        key is "when" or "condition" or "input" or "desired" or "preconditions" or "effects" ? ConditionField(node, key) : TextField(node, key, key);
+        key is "when" or "condition" or "input" or "desired" or "preconditions" or "effects" or "cost" or "cooldown" or "target"
+            ? KeyBox(node.Get(key) ?? "", Hint(key), _editor.Keys.Select(k => k.Name), text => _editor.SetField(node.Id, key, text))
+            : TextField(node, key, Hint(key));
 }

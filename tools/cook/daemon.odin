@@ -322,7 +322,8 @@ handle_taken :: proc(d: ^Daemon, taken: serve.Taken) {
 
 // preview cooks a material, an animation graph or a UI document that the editor has not saved into the cache's preview
 // area (see cook_preview, animation_graph_check and ui_check), and checks a decision or a blackboard, which have no
-// preview, and writes nothing (see decision_check and blackboard_check). Its problems go to the editor in the answer, and not to
+// preview, and writes nothing (see decision_check and blackboard_check). A GOAP decision that checks out also plans the
+// request's plan query (see plan_preview). Its problems go to the editor in the answer, and not to
 // the log: the asset's editor shows them on its nodes or elements.
 @(private)
 preview :: proc(d: ^Daemon, msg: cook_link.Cook_Preview) -> cook_link.Preview_Result {
@@ -332,6 +333,7 @@ preview :: proc(d: ^Daemon, msg: cook_link.Cook_Preview) -> cook_link.Preview_Re
 	}
 	problems: Problems
 	ok: bool
+	plan: []cook_link.Plan_Answer
 	failed := "the graph did not cook"
 	a, known := d.index.assets[msg.guid]
 	path := a.path
@@ -349,7 +351,13 @@ preview :: proc(d: ^Daemon, msg: cook_link.Cook_Preview) -> cook_link.Preview_Re
 		problems, ok = ui_check(d.options, guid, msg.text, path, name, index_kinds(&d.index))
 		failed = "the document did not cook"
 	case known && a.kind == .Decision:
-		problems = decision_check(d.options, &d.index, path, msg.text)
+		checked: Maybe(Checked_Decision)
+		problems, checked = decision_check(d.options, &d.index, path, msg.text)
+		if c, has := checked.?; has && len(msg.plan) > 0 {
+			if answer, planned := plan_preview(c, msg.plan[0], path, &problems); planned {
+				plan = slice.clone([]cook_link.Plan_Answer{answer}, context.temp_allocator)
+			}
+		}
 		ok = len(problems.list) == 0
 		failed = "the decision did not cook"
 	case known && a.kind == .Blackboard:
@@ -361,6 +369,7 @@ preview :: proc(d: ^Daemon, msg: cook_link.Cook_Preview) -> cook_link.Preview_Re
 	}
 	result := cook_link.Preview_Result {
 		problems = make([]cook_link.Problem, len(problems.list), context.temp_allocator),
+		plan     = plan,
 	}
 	for p, i in problems.list {
 		result.problems[i] = {p.file, u32(p.line), u32(p.column), p.error, p.text}

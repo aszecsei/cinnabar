@@ -10,11 +10,12 @@ import "base:runtime"
 import "core:slice"
 
 import "cinnabar:engine/ai"
+import "cinnabar:engine/ai/goap/search"
 import "cinnabar:engine/ai/utility"
 import format "cinnabar:engine/asset/format"
 
-// The least cost of an action: a cost key below it counts as it, so every action costs something and a search ends.
-MIN_COST :: 0.001
+// The least cost of an action (see search.MIN_COST).
+MIN_COST :: search.MIN_COST
 
 // register registers the module with the agents' AI. Call it in register_world, after ai.register, which clears the
 // modules, so a code reload registers it again.
@@ -103,7 +104,7 @@ think :: proc(t: ^ai.Think_Context) {
 		if goal + 1 != int(v.agent.goal) {
 			v.agent.phase = .Idle
 		} else {
-			search(t, &v)
+			go_on(t, &v)
 			if v.agent.phase == .Idle {
 				goal = current_goal(t, &v, world[:k])
 			}
@@ -148,7 +149,7 @@ current_goal :: proc(t: ^ai.Think_Context, v: ^View, world: []i32) -> int {
 // expands no node until the next think, which has a share of the plan budget.
 @(private)
 begin :: proc(t: ^ai.Think_Context, v: ^View, goal: u32, world: []i32) {
-	s := search_of(v.g, v.layout, t.state)
+	s := search.of(v.g, v.layout, t.state)
 	copy(s.world, world)
 	for &bits in s.usable {
 		bits = 0
@@ -159,24 +160,24 @@ begin :: proc(t: ^ai.Think_Context, v: ^View, goal: u32, world: []i32) {
 		}
 		s.costs[i] = f32(max(ai.plan_number(t, a.cost), MIN_COST))
 	}
-	search_begin(&s, v.g, v.g.goals[goal])
+	search.begin(&s, v.g, v.g.goals[goal])
 	v.agent.phase = .Searching
 	v.agent.goal = goal + 1
 }
 
-// search goes on with the search for the agent's goal, within its share of the plan budget. A plan that it finds
+// go_on goes on with the search for the agent's goal, within its share of the plan budget. A plan that it finds
 // starts if it still holds in the world state now, or else the search begins again from that state. A search that
 // fails marks its goal failed, until a planning key changes from the world state that it failed in.
 @(private)
-search :: proc(t: ^ai.Think_Context, v: ^View) {
-	s := search_of(v.g, v.layout, t.state)
+go_on :: proc(t: ^ai.Think_Context, v: ^View) {
+	s := search.of(v.g, v.layout, t.state)
 	goal := v.agent.goal - 1
-	result, found := search_step(&s, v.g, t.plan_budget)
+	result, found := search.step(&s, v.g, t.plan_budget)
 	switch result {
 	case .Searching:
 	case .Found:
 		v.agent.nodes = s.header.node_count
-		length := search_plan(&s, found, v.plan.steps)
+		length := search.plan(&s, found, v.plan.steps)
 		if ai.plan_start(t, v.domain, v.plan, length, goal_tests(v, goal)) {
 			v.agent.phase = .Running
 		} else {

@@ -38,7 +38,7 @@ A goal **fails** when a search for it does not find a plan. The module keeps the
 
 ## The search
 
-The search is a regressive A* (Orkin), in `lib/engine/ai/goap/search.odin`. It reads only the technique's data, so a tool can plan as the runtime does.
+The search is a regressive A* (Orkin), in its own package, `lib/engine/ai/goap/search`, which imports only `format`. It reads only the technique's data, so a tool can plan as the runtime does: the cook daemon's plan preview runs `search.whole`, the whole search in one call, from a world state, the usable actions and their costs ([Decision editor: Plan preview](../editor/decision-editor.md#plan-preview)). The module's tests check that it finds the plan that an agent finds.
 
 - **A node** is a state that the search regressed to: an interval of values for each planning key. A key that the state does not constrain is free. The **root** is the goal's desired state.
 - **The search begins** with the world state, the actions whose `when` holds, and each action's cost, all as they are when it begins. A cost from a key below `MIN_COST` (0.001) counts as `MIN_COST`.
@@ -48,6 +48,7 @@ The search is a regressive A* (Orkin), in `lib/engine/ai/goap/search.odin`. It r
 - **The heuristic** is the count of keys that the world state does not satisfy, times the least cost of an effect among the usable actions, which is an action's cost over its count of effects. No plan can satisfy a key for less, so the heuristic never overestimates, and the plan that the search finds is the cheapest.
 - **A node of a state that the search has** is not made again. If the new way to it costs less, the node takes the new way and is open again.
 - **The search fails** when no node is open, or when a new node does not fit in the `max_nodes` nodes of the state. A node at a depth of `max_plan` makes no children, so a plan is at most `max_plan` actions.
+- **The closest node** of a search that failed is the one with the fewest keys that the world state does not satisfy, then one other than the root, which is the goal itself and has no plan, then the cheapest, and the first made of equal ones (`search.closest`). A deeper node is not closer for its depth: an action whose effect only adds to a key regresses again and again. The plan preview shows its plan and the keys that it lacks.
 
 ## The budget
 

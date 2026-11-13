@@ -1,4 +1,4 @@
-package goap
+package search
 
 import format "cinnabar:engine/asset/format"
 
@@ -8,7 +8,10 @@ import format "cinnabar:engine/asset/format"
 // touch a key that the node constrains, and the state before it takes the action's preconditions. A node that the
 // world state satisfies ends the search, and the actions on the way back to the goal are the plan, in their order. The
 // search is in the agent's module state, so it goes on over thinks, and it reads only the technique's data, so a tool
-// can plan as the runtime does.
+// can plan as the runtime does: whole runs a search to its end in one call, as the cook daemon's plan preview does.
+
+// The least cost of an action: a cost key below it counts as it, so every action costs something and a search ends.
+MIN_COST :: 0.001
 
 // The parent and the action of the root, which has neither.
 @(private)
@@ -31,14 +34,14 @@ Search :: struct {
 	max_plan:  int,
 }
 
-Search_Result :: enum u8 {
+Result :: enum u8 {
 	Searching,
 	Found,
 	Failed,
 }
 
-// search_of is the search in an agent's module state.
-search_of :: proc(g: format.Goap_Data, layout: format.Goap_State, state: []byte) -> Search {
+// of is the search in an agent's module state.
+of :: proc(g: format.Goap_Data, layout: format.Goap_State, state: []byte) -> Search {
 	k, a := int(g.header.key_count), int(g.header.action_count)
 	return {
 		header = (^format.Goap_Search)(&state[layout.search]),
@@ -66,10 +69,10 @@ is_usable :: proc(s: ^Search, action: int) -> bool {
 	return s.usable[action / 32] & (1 << u32(action % 32)) != 0
 }
 
-// search_begin begins a search for a goal, from the world state, the usable actions and their costs that the search
+// begin begins a search for a goal, from the world state, the usable actions and their costs that the search
 // holds already. The heuristic's unit is the least cost of an effect among the usable actions: no plan can satisfy a key
 // for less, so the heuristic never overestimates, and the plan found is the cheapest.
-search_begin :: proc(s: ^Search, g: format.Goap_Data, goal: format.Goap_Goal) {
+begin :: proc(s: ^Search, g: format.Goap_Data, goal: format.Goap_Goal) {
 	s.header^ = {}
 	unit := max(f32)
 	for a, i in g.actions {
@@ -95,11 +98,11 @@ search_begin :: proc(s: ^Search, g: format.Goap_Data, goal: format.Goap_Goal) {
 	s.header.node_count = 1
 }
 
-// search_step expands at most budget nodes of a search. A search is found when a node that it takes from the open
+// step expands at most budget nodes of a search. A search is found when a node that it takes from the open
 // nodes is satisfied by its world state, and it fails when no node is open, or when a node does not fit in its state.
 // It takes the open node of the lowest f, and the first made of equal ones. Its children are made in the actions'
 // order, so the actions' order breaks ties, and a search gives the same plan on every run.
-search_step :: proc(s: ^Search, g: format.Goap_Data, budget: int) -> (result: Search_Result, found: int) {
+step :: proc(s: ^Search, g: format.Goap_Data, budget: int) -> (result: Result, found: int) {
 	children: [format.MAX_PLAN_KEYS]format.Plan_Interval
 	for _ in 0 ..< budget {
 		best := -1
@@ -165,9 +168,9 @@ search_step :: proc(s: ^Search, g: format.Goap_Data, budget: int) -> (result: Se
 	return .Searching, -1
 }
 
-// search_plan writes the plan of a found node into steps: the actions on the way from it back to the goal, which is
+// plan writes the plan of a found node into steps: the actions on the way from it back to the goal, which is
 // the order that they run in. It gives the plan's length.
-search_plan :: proc(s: ^Search, found: int, steps: []u16) -> u32 {
+plan :: proc(s: ^Search, found: int, steps: []u16) -> u32 {
 	length: u32
 	node, _ := node_at(s, found)
 	for node.parent != NO_NODE {
@@ -263,4 +266,75 @@ find :: proc(s: ^Search, intervals: []format.Plan_Interval) -> int {
 		return i
 	}
 	return -1
+}
+
+// Outcome is how a whole search ended: with a plan that reaches the goal from the world state, or, when it failed, with
+// the plan of its closest node.
+Outcome :: enum u8 {
+	Found,
+	Closest,
+}
+
+// Whole is a whole search's result. Its plan is in the steps that whole was given.
+Whole :: struct {
+	outcome: Outcome,
+	// The plan's length in steps.
+	length:  u32,
+	// The nodes that the search made.
+	nodes:   u32,
+	// The planning keys, by index, that the plan's first state needs and the world state does not have. A found plan
+	// has none.
+	unmet:   bit_set[0 ..< format.MAX_PLAN_KEYS;u32],
+}
+
+// whole runs a search for a goal to its end, from a world state, the usable actions, a bit each by index, and their
+// costs, in a state of goap_state_of(g).size bytes, and writes its plan into steps, which hold max_plan. The search is
+// the runtime's, so it finds the plan that an agent finds from the same world state, usable actions and costs. When it
+// fails, its plan is that of its closest node (see closest).
+whole :: proc(g: format.Goap_Data, state: []byte, world: []i32, usable: []u32, costs: []f32, goal: format.Goap_Goal, steps: []u16) -> (w: Whole) {
+	s := of(g, format.goap_state_of(g), state)
+	copy(s.world, world)
+	copy(s.usable, usable)
+	copy(s.costs, costs)
+	begin(&s, g, goal)
+	result, found := step(&s, g, max(int))
+	w.nodes = s.header.node_count
+	if result != .Found {
+		w.outcome = .Closest
+		found = closest(&s)
+		_, intervals := node_at(&s, found)
+		for iv, k in intervals {
+			if s.world[k] < iv.lo || s.world[k] > iv.hi {
+				w.unmet += {k}
+			}
+		}
+	}
+	w.length = plan(&s, found, steps)
+	return
+}
+
+// closest is the node of a search that the world state is closest to: the fewest keys that the world state does not
+// satisfy, then a node other than the root, which is the goal itself and has no plan, then the lowest cost from the
+// goal, and the first made of equal ones. A deeper node is not closer for its depth: an action whose effect only adds to
+// a key regresses again and again, each time costing more. The root is a node, so there is one.
+closest :: proc(s: ^Search) -> int {
+	best, best_unsatisfied := 0, max(int)
+	best_g: f32
+	for i in 0 ..< int(s.header.node_count) {
+		node, intervals := node_at(s, i)
+		unsatisfied := 0
+		for iv, k in intervals {
+			if s.world[k] < iv.lo || s.world[k] > iv.hi {
+				unsatisfied += 1
+			}
+		}
+		better := unsatisfied < best_unsatisfied
+		if unsatisfied == best_unsatisfied {
+			better = best == 0 || (i != 0 && node.g < best_g)
+		}
+		if better {
+			best, best_unsatisfied, best_g = i, unsatisfied, node.g
+		}
+	}
+	return best
 }

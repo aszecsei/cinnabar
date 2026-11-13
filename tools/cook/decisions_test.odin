@@ -547,18 +547,18 @@ a_decision_is_checked_against_its_blackboard_without_writing :: proc(t: ^testing
 	path := fmt.tprintf("%s/content/ai/guard.decision", tree.dir)
 
 	// The text's own problems are at the text's lines: this blackboard has no key named rest.
-	problems := decision_check(options, &index, path, CHECKED_TEXT)
+	problems, _ := decision_check(options, &index, path, CHECKED_TEXT)
 	testing.expectf(t, len(problems.list) == 1 && problems.list[0].line == 5 && problems.list[0].file == path, "%v", problems.list)
 	fixed, _ := strings.replace(CHECKED_TEXT, "rest", "health", 1, context.temp_allocator)
-	problems = decision_check(options, &index, path, fixed)
+	problems, _ = decision_check(options, &index, path, fixed)
 	testing.expectf(t, len(problems.list) == 0, "%v", problems.list)
 	// A blackboard that does not exist is the problem at the line that names it, and the keys are not reported.
 	missing, _ := strings.replace(CHECKED_TEXT, "0123456789abcdef0123456789abcdef", "ffffffffffffffffffffffffffffffff", 1, context.temp_allocator)
-	problems = decision_check(options, &index, path, missing)
+	problems, _ = decision_check(options, &index, path, missing)
 	testing.expectf(t, len(problems.list) == 1 && problems.list[0].line == 3, "%v", problems.list)
 	// So is a blackboard with problems, as the cook reports it.
 	testing.expect(t, os.write_entire_file(fmt.tprintf("%s/content/ai/guard.blackboard", tree.dir), string(BOARD + "bool armed = maybe\n")) == nil)
-	problems = decision_check(options, &index, path, fixed)
+	problems, _ = decision_check(options, &index, path, fixed)
 	testing.expectf(t, len(problems.list) == 1 && problems.list[0].line == 3, "%v", problems.list)
 	// Nothing was written: the cache has no preview area.
 	testing.expect(t, !os.exists(fmt.tprintf("%s/cache/dev/preview", tree.dir)))

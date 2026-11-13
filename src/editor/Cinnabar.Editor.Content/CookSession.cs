@@ -12,8 +12,11 @@ public interface IPreviewCooker
     /// <summary>Whether a cook can be sent now.</summary>
     bool Linked { get; }
 
-    /// <summary>Cooks an asset's unsaved text into the cache's preview area, and completes with the answer.</summary>
-    Task<PreviewResult> CookPreview(string guid, string text);
+    /// <summary>
+    /// Cooks an asset's unsaved text into the cache's preview area, or checks a decision's and plans its plan query, and
+    /// completes with the answer.
+    /// </summary>
+    Task<PreviewResult> CookPreview(string guid, string text, PlanQuery? plan = null);
 }
 
 /// <summary>
@@ -264,15 +267,15 @@ public sealed class CookSession : IPreviewCooker, IDisposable
     /// Asks the daemon to cook a material's unsaved text into the cache's preview area (see
     /// docs/rendering/materials.md#material-previews), and completes with its answer. Without the cook link, it fails at once.
     /// </summary>
-    public Task<PreviewResult> CookPreview(string guid, string text)
+    public Task<PreviewResult> CookPreview(string guid, string text, PlanQuery? plan = null)
     {
         if (State is not CookState.Linked linked)
         {
-            return Task.FromResult(new PreviewResult("The cook daemon is not running.", []));
+            return Task.FromResult(new PreviewResult("The cook daemon is not running.", [], []));
         }
         var answer = new TaskCompletionSource<PreviewResult>(TaskCreationOptions.RunContinuationsAsynchronously);
         var request = _previews.Add(answer);
-        linked.Link.Send(new CookPreview(guid, text), request);
+        linked.Link.Send(new CookPreview(guid, text, plan == null ? [] : [plan]), request);
         return answer.Task;
     }
 
@@ -491,7 +494,7 @@ public sealed class CookSession : IPreviewCooker, IDisposable
     void FailRequests()
     {
         _requests.FailAll(answer => answer.TrySetResult(new OperationResult("The cook link closed before the cook daemon answered.", [])));
-        _previews.FailAll(answer => answer.TrySetResult(new PreviewResult("The cook link closed before the cook daemon answered.", [])));
+        _previews.FailAll(answer => answer.TrySetResult(new PreviewResult("The cook link closed before the cook daemon answered.", [], [])));
     }
 
     void Post(Action action)

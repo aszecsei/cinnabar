@@ -39,7 +39,7 @@ public sealed class UiEditorTests : IDisposable
     }
 
     static PreviewResult Answer(string file, params (uint Line, uint Column, string Text)[] problems) =>
-        new(problems.Length == 0 ? "" : problems[0].Text, [.. problems.Select(p => new Problem(file, p.Line, p.Column, true, p.Text))]);
+        new(problems.Length == 0 ? "" : problems[0].Text, [.. problems.Select(p => new Problem(file, p.Line, p.Column, true, p.Text))], []);
 
     static UiPreviewLayout Layout(UiEditor editor, params (int Node, float X0, float Y0, float X1, float Y1)[] nodes) =>
         new(0, Fnv.Hash64(Encoding.UTF8.GetBytes(editor.Document.Text)), 1, 1920, 1080,
