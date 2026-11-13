@@ -393,3 +393,57 @@ a_playing_perceiver_draws_its_rays_and_memory :: proc(t: ^testing.T) {
 	f.editor.session.view.viewports[0].settings.helpers = .None
 	testing.expect_value(t, line_count(f), 0)
 }
+
+// A selected agent of the crowd draws its avoidance radius in Edit. One that is not selected draws none.
+@(test)
+a_selected_nav_agent_draws_its_radius :: proc(t: ^testing.T) {
+	when !debug.DEBUG_DRAW {
+		return
+	}
+	f := helper_setup(t)
+	defer helper_teardown(f)
+	f.editor.session.view.viewports[0].settings.helpers = .All
+	e := spawn_with(f, nav.DEFAULT_NAV_AGENT)
+	testing.expect_value(t, line_count(f), 0)
+	append(&f.editor.session.view.selection, e)
+	testing.expect_value(t, line_count(f), debug.CIRCLE_SEGMENTS)
+}
+
+// While the game plays, a selected agent of the crowd draws its last tick: its corners, a line to each neighbor, and
+// its desired and chosen velocities as arrows. One that is not selected draws nothing.
+@(test)
+a_playing_nav_agent_draws_its_corners_neighbors_and_velocities :: proc(t: ^testing.T) {
+	when !debug.DEBUG_DRAW {
+		return
+	}
+	f := helper_setup(t)
+	defer helper_teardown(f)
+	f.editor.session.view.viewports[0].settings.helpers = .All
+	e := spawn_with(f, nav.DEFAULT_NAV_AGENT)
+	other := spawn_with(f, nav.DEFAULT_NAV_AGENT)
+	ecs.get_write(&f.world, other, ecs.Transform).position = ecs.position_from_meters({1, 0, 0})
+	// The crowd's pool, with the agent in its first slot, as the crowd system leaves it.
+	info := nav.Crowd_Debug {
+		corners        = {0 = ecs.position_from_meters({0, 0, 0}), 1 = ecs.position_from_meters({0, 0, 4})},
+		corner_count   = 2,
+		neighbor_count = 1,
+		desired        = {0, 0, 2},
+		velocity       = {0.5, 0, 1.5},
+	}
+	info.neighbors[0] = other
+	f.nav.crowd.slots = make([dynamic]nav.Crowd_Slot, context.temp_allocator)
+	f.nav.crowd.generations = make([dynamic]u32, context.temp_allocator)
+	append(&f.nav.crowd.slots, nav.Crowd_Slot{entity = e, phase = nav.Crowd_Arrived{}, debug = info})
+	append(&f.nav.crowd.generations, 1)
+	ecs.add(&f.world, e, nav.Nav_Agent_State{crowd = {0, 1}})
+	f.editor.session.mode = .Play
+	testing.expect_value(t, line_count(f), 0)
+	append(&f.editor.session.view.selection, e)
+	// The path between the corners and a cross at each, the neighbor's line, and two arrows of a line and a head of four.
+	want := 1 + 2 * 2 + 1 + 2 * 5
+	testing.expect_value(t, line_count(f), want)
+	f.editor.session.mode = .Paused
+	testing.expect_value(t, line_count(f), want)
+	f.editor.session.view.viewports[0].settings.helpers = .None
+	testing.expect_value(t, line_count(f), 0)
+}

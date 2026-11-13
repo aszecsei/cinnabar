@@ -1,0 +1,705 @@
+# The doorway: a room split by a wall with a doorway 2 m wide, and twenty agents on one side that walk through it to
+# the places across the door from where they started, wait for each other there, and walk back (see
+# docs/ai/navigation.md#crowds). The crowd finds their paths on the navmesh that the Navigation volume bakes, keeps
+# them apart, and moves their characters; crosser.luau only sends them. Select one in the editor while the game plays
+# to see its corridor, its corners, its neighbors and its velocities. Positions are raw World_Position values in units
+# of 2^-24 m, so 2516582400000000000 is 1.5e11 m. The editor writes this file; see
+# docs/editor/document-and-scenes.md#scenes.
+scene 2
+
+entity 3d15a236faa571ab
+name = "Camera"
+component 1 Transform
+	position = [2516582400000000000, 251658240, -218103808]
+	rotation = [0.422618, 0, 0, 0.906308]
+	scale = [1, 1, 1]
+component 32 Camera
+component 97 Audio_Listener
+
+entity 599a6e413f0e50df
+name = "Sun"
+component 1 Transform
+	position = [2516582400000000000, 167772160, 0]
+	rotation = [0.403058, 0.272532, -0.127084, 0.864361]
+	scale = [1, 1, 1]
+component 34 Directional_Light
+	color = [1, 0.95, 0.85]
+	intensity = 3
+	cast_shadows = true
+
+entity 37da2cf2b3e6df1f
+name = "Global Volume"
+component 1 Transform
+	position = [2516582400000000000, 0, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 42 Volume
+	shape = Global
+component 49 Environment
+	mode = Atmosphere
+	sun = @599a6e413f0e50df
+
+entity 13957dc97f1c0fdc
+name = "Floor"
+component 1 Transform
+	position = [2516582400000000000, -8388608, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [22, 1, 14]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $7b3d1f5a9c2e4b6d8f0a2c4e6b8d0f13
+	cast_shadows = true
+component 65 Collider
+
+entity 5cd2f29d5433dc0d
+name = "North Wall"
+component 1 Transform
+	position = [2516582400000000000, 16777216, 104018739]
+	rotation = [0, 0, 0, 1]
+	scale = [20.8, 2, 0.4]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $5a1c3e7f9b2d4f608a1c3e5f7a9b0c2d
+	cast_shadows = true
+component 65 Collider
+
+entity 2e297f1530f41aef
+name = "South Wall"
+component 1 Transform
+	position = [2516582400000000000, 16777216, -104018739]
+	rotation = [0, 0, 0, 1]
+	scale = [20.8, 2, 0.4]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $5a1c3e7f9b2d4f608a1c3e5f7a9b0c2d
+	cast_shadows = true
+component 65 Collider
+
+entity b5f95491a3b2b85f
+name = "East Wall"
+component 1 Transform
+	position = [2516582400171127603, 16777216, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [0.4, 2, 12]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $5a1c3e7f9b2d4f608a1c3e5f7a9b0c2d
+	cast_shadows = true
+component 65 Collider
+
+entity 92fe2b526663d9dc
+name = "West Wall"
+component 1 Transform
+	position = [2516582399828872397, 16777216, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [0.4, 2, 12]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $5a1c3e7f9b2d4f608a1c3e5f7a9b0c2d
+	cast_shadows = true
+component 65 Collider
+
+entity bd8d200434fe714e
+name = "Wall South of the Door"
+component 1 Transform
+	position = [2516582400000000000, 16777216, -58720256]
+	rotation = [0, 0, 0, 1]
+	scale = [0.4, 2, 5]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $7d2e4a9c1f6b4c3d8e5a2b7f9c0d1e64
+	cast_shadows = true
+component 65 Collider
+
+entity 74a9e2d8dccfbb87
+name = "Wall North of the Door"
+component 1 Transform
+	position = [2516582400000000000, 16777216, 58720256]
+	rotation = [0, 0, 0, 1]
+	scale = [0.4, 2, 5]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $7d2e4a9c1f6b4c3d8e5a2b7f9c0d1e64
+	cast_shadows = true
+component 65 Collider
+
+entity 9a6f35ef6b80a34c
+name = "Doorway"
+component 1 Transform
+	position = [2516582400000000000, 0, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+
+entity cce6425fd87ae639
+name = "Navigation"
+component 1 Transform
+	position = [2516582400000000000, 16777216, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 42 Volume
+	shape = Box
+	extents = [10.5, 1.5, 6.5]
+component 128 Nav_Mesh_Volume
+	cell_size = 0.1
+	cell_height = 0.05
+	tile_size = 64
+
+entity 1580ae84dbabd04f
+name = "Agent 1"
+component 1 Transform
+	position = [2516582399849005056, 0, -67108864]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 75 Character
+component 134 Nav_Agent
+	max_speed = 2.5
+	radius = 0.35
+behaviour 3c496238755d4dd88d099636520824f3
+	door = @9a6f35ef6b80a34c
+
+entity 794ec4fdc7503dbb
+name = "Agent 1 Body"
+parent = @1580ae84dbabd04f
+component 1 Transform
+	position = [2516582399849005056, 15099494, -67108864]
+	rotation = [0, 0, 0, 1]
+	scale = [0.6, 1.8, 0.6]
+component 2 Local_Transform
+	offset = [0, 0.9, 0]
+	scale = [0.6, 1.8, 0.6]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $7c3e5a91ad4f6b829c3e5a7b9d1e3f40
+	cast_shadows = true
+
+entity 8cfa670bba04eb37
+name = "Agent 2"
+component 1 Transform
+	position = [2516582399849005056, 0, -33554432]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 75 Character
+component 134 Nav_Agent
+	max_speed = 2.5
+	radius = 0.35
+behaviour 3c496238755d4dd88d099636520824f3
+	door = @9a6f35ef6b80a34c
+
+entity 33894af25fc7107b
+name = "Agent 2 Body"
+parent = @8cfa670bba04eb37
+component 1 Transform
+	position = [2516582399849005056, 15099494, -33554432]
+	rotation = [0, 0, 0, 1]
+	scale = [0.6, 1.8, 0.6]
+component 2 Local_Transform
+	offset = [0, 0.9, 0]
+	scale = [0.6, 1.8, 0.6]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $7c3e5a91ad4f6b829c3e5a7b9d1e3f40
+	cast_shadows = true
+
+entity 3a3dd42818d91b48
+name = "Agent 3"
+component 1 Transform
+	position = [2516582399849005056, 0, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 75 Character
+component 134 Nav_Agent
+	max_speed = 2.5
+	radius = 0.35
+behaviour 3c496238755d4dd88d099636520824f3
+	door = @9a6f35ef6b80a34c
+
+entity f27e07cef4501e9e
+name = "Agent 3 Body"
+parent = @3a3dd42818d91b48
+component 1 Transform
+	position = [2516582399849005056, 15099494, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [0.6, 1.8, 0.6]
+component 2 Local_Transform
+	offset = [0, 0.9, 0]
+	scale = [0.6, 1.8, 0.6]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $7c3e5a91ad4f6b829c3e5a7b9d1e3f40
+	cast_shadows = true
+
+entity 0dd0392b9d5848aa
+name = "Agent 4"
+component 1 Transform
+	position = [2516582399849005056, 0, 33554432]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 75 Character
+component 134 Nav_Agent
+	max_speed = 2.5
+	radius = 0.35
+behaviour 3c496238755d4dd88d099636520824f3
+	door = @9a6f35ef6b80a34c
+
+entity 3a6d075a9f63a7c1
+name = "Agent 4 Body"
+parent = @0dd0392b9d5848aa
+component 1 Transform
+	position = [2516582399849005056, 15099494, 33554432]
+	rotation = [0, 0, 0, 1]
+	scale = [0.6, 1.8, 0.6]
+component 2 Local_Transform
+	offset = [0, 0.9, 0]
+	scale = [0.6, 1.8, 0.6]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $7c3e5a91ad4f6b829c3e5a7b9d1e3f40
+	cast_shadows = true
+
+entity fdae594ee04e1ac1
+name = "Agent 5"
+component 1 Transform
+	position = [2516582399849005056, 0, 67108864]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 75 Character
+component 134 Nav_Agent
+	max_speed = 2.5
+	radius = 0.35
+behaviour 3c496238755d4dd88d099636520824f3
+	door = @9a6f35ef6b80a34c
+
+entity f104498d692ff7b5
+name = "Agent 5 Body"
+parent = @fdae594ee04e1ac1
+component 1 Transform
+	position = [2516582399849005056, 15099494, 67108864]
+	rotation = [0, 0, 0, 1]
+	scale = [0.6, 1.8, 0.6]
+component 2 Local_Transform
+	offset = [0, 0.9, 0]
+	scale = [0.6, 1.8, 0.6]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $7c3e5a91ad4f6b829c3e5a7b9d1e3f40
+	cast_shadows = true
+
+entity 985178a34fa1f950
+name = "Agent 6"
+component 1 Transform
+	position = [2516582399874170880, 0, -67108864]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 75 Character
+component 134 Nav_Agent
+	max_speed = 2.5
+	radius = 0.35
+behaviour 3c496238755d4dd88d099636520824f3
+	door = @9a6f35ef6b80a34c
+
+entity 03e8eec194de45fa
+name = "Agent 6 Body"
+parent = @985178a34fa1f950
+component 1 Transform
+	position = [2516582399874170880, 15099494, -67108864]
+	rotation = [0, 0, 0, 1]
+	scale = [0.6, 1.8, 0.6]
+component 2 Local_Transform
+	offset = [0, 0.9, 0]
+	scale = [0.6, 1.8, 0.6]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $7c3e5a91ad4f6b829c3e5a7b9d1e3f40
+	cast_shadows = true
+
+entity c0399b4011ef8bbd
+name = "Agent 7"
+component 1 Transform
+	position = [2516582399874170880, 0, -33554432]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 75 Character
+component 134 Nav_Agent
+	max_speed = 2.5
+	radius = 0.35
+behaviour 3c496238755d4dd88d099636520824f3
+	door = @9a6f35ef6b80a34c
+
+entity a5e4ae3a413f8e48
+name = "Agent 7 Body"
+parent = @c0399b4011ef8bbd
+component 1 Transform
+	position = [2516582399874170880, 15099494, -33554432]
+	rotation = [0, 0, 0, 1]
+	scale = [0.6, 1.8, 0.6]
+component 2 Local_Transform
+	offset = [0, 0.9, 0]
+	scale = [0.6, 1.8, 0.6]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $7c3e5a91ad4f6b829c3e5a7b9d1e3f40
+	cast_shadows = true
+
+entity 547b1d4f69c797a5
+name = "Agent 8"
+component 1 Transform
+	position = [2516582399874170880, 0, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 75 Character
+component 134 Nav_Agent
+	max_speed = 2.5
+	radius = 0.35
+behaviour 3c496238755d4dd88d099636520824f3
+	door = @9a6f35ef6b80a34c
+
+entity 646c90200093c7f3
+name = "Agent 8 Body"
+parent = @547b1d4f69c797a5
+component 1 Transform
+	position = [2516582399874170880, 15099494, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [0.6, 1.8, 0.6]
+component 2 Local_Transform
+	offset = [0, 0.9, 0]
+	scale = [0.6, 1.8, 0.6]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $7c3e5a91ad4f6b829c3e5a7b9d1e3f40
+	cast_shadows = true
+
+entity a2b3a9b96355065b
+name = "Agent 9"
+component 1 Transform
+	position = [2516582399874170880, 0, 33554432]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 75 Character
+component 134 Nav_Agent
+	max_speed = 2.5
+	radius = 0.35
+behaviour 3c496238755d4dd88d099636520824f3
+	door = @9a6f35ef6b80a34c
+
+entity 14e6a362f47144ea
+name = "Agent 9 Body"
+parent = @a2b3a9b96355065b
+component 1 Transform
+	position = [2516582399874170880, 15099494, 33554432]
+	rotation = [0, 0, 0, 1]
+	scale = [0.6, 1.8, 0.6]
+component 2 Local_Transform
+	offset = [0, 0.9, 0]
+	scale = [0.6, 1.8, 0.6]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $7c3e5a91ad4f6b829c3e5a7b9d1e3f40
+	cast_shadows = true
+
+entity 6209a1f358c14be6
+name = "Agent 10"
+component 1 Transform
+	position = [2516582399874170880, 0, 67108864]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 75 Character
+component 134 Nav_Agent
+	max_speed = 2.5
+	radius = 0.35
+behaviour 3c496238755d4dd88d099636520824f3
+	door = @9a6f35ef6b80a34c
+
+entity 74026427cfbf8957
+name = "Agent 10 Body"
+parent = @6209a1f358c14be6
+component 1 Transform
+	position = [2516582399874170880, 15099494, 67108864]
+	rotation = [0, 0, 0, 1]
+	scale = [0.6, 1.8, 0.6]
+component 2 Local_Transform
+	offset = [0, 0.9, 0]
+	scale = [0.6, 1.8, 0.6]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $7c3e5a91ad4f6b829c3e5a7b9d1e3f40
+	cast_shadows = true
+
+entity 3afd9a61459befe1
+name = "Agent 11"
+component 1 Transform
+	position = [2516582399899336704, 0, -67108864]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 75 Character
+component 134 Nav_Agent
+	max_speed = 2.5
+	radius = 0.35
+behaviour 3c496238755d4dd88d099636520824f3
+	door = @9a6f35ef6b80a34c
+
+entity 67591185499de285
+name = "Agent 11 Body"
+parent = @3afd9a61459befe1
+component 1 Transform
+	position = [2516582399899336704, 15099494, -67108864]
+	rotation = [0, 0, 0, 1]
+	scale = [0.6, 1.8, 0.6]
+component 2 Local_Transform
+	offset = [0, 0.9, 0]
+	scale = [0.6, 1.8, 0.6]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $7c3e5a91ad4f6b829c3e5a7b9d1e3f40
+	cast_shadows = true
+
+entity f81355474566d76c
+name = "Agent 12"
+component 1 Transform
+	position = [2516582399899336704, 0, -33554432]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 75 Character
+component 134 Nav_Agent
+	max_speed = 2.5
+	radius = 0.35
+behaviour 3c496238755d4dd88d099636520824f3
+	door = @9a6f35ef6b80a34c
+
+entity a2335157b63775ce
+name = "Agent 12 Body"
+parent = @f81355474566d76c
+component 1 Transform
+	position = [2516582399899336704, 15099494, -33554432]
+	rotation = [0, 0, 0, 1]
+	scale = [0.6, 1.8, 0.6]
+component 2 Local_Transform
+	offset = [0, 0.9, 0]
+	scale = [0.6, 1.8, 0.6]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $7c3e5a91ad4f6b829c3e5a7b9d1e3f40
+	cast_shadows = true
+
+entity b610861e17875961
+name = "Agent 13"
+component 1 Transform
+	position = [2516582399899336704, 0, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 75 Character
+component 134 Nav_Agent
+	max_speed = 2.5
+	radius = 0.35
+behaviour 3c496238755d4dd88d099636520824f3
+	door = @9a6f35ef6b80a34c
+
+entity 5bbff914ed4b3ba2
+name = "Agent 13 Body"
+parent = @b610861e17875961
+component 1 Transform
+	position = [2516582399899336704, 15099494, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [0.6, 1.8, 0.6]
+component 2 Local_Transform
+	offset = [0, 0.9, 0]
+	scale = [0.6, 1.8, 0.6]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $7c3e5a91ad4f6b829c3e5a7b9d1e3f40
+	cast_shadows = true
+
+entity 56d86ebd0e02d6d9
+name = "Agent 14"
+component 1 Transform
+	position = [2516582399899336704, 0, 33554432]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 75 Character
+component 134 Nav_Agent
+	max_speed = 2.5
+	radius = 0.35
+behaviour 3c496238755d4dd88d099636520824f3
+	door = @9a6f35ef6b80a34c
+
+entity 7a3a4b394a136c13
+name = "Agent 14 Body"
+parent = @56d86ebd0e02d6d9
+component 1 Transform
+	position = [2516582399899336704, 15099494, 33554432]
+	rotation = [0, 0, 0, 1]
+	scale = [0.6, 1.8, 0.6]
+component 2 Local_Transform
+	offset = [0, 0.9, 0]
+	scale = [0.6, 1.8, 0.6]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $7c3e5a91ad4f6b829c3e5a7b9d1e3f40
+	cast_shadows = true
+
+entity 1931cd8585f3af2c
+name = "Agent 15"
+component 1 Transform
+	position = [2516582399899336704, 0, 67108864]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 75 Character
+component 134 Nav_Agent
+	max_speed = 2.5
+	radius = 0.35
+behaviour 3c496238755d4dd88d099636520824f3
+	door = @9a6f35ef6b80a34c
+
+entity cf9cd4a4e86b5649
+name = "Agent 15 Body"
+parent = @1931cd8585f3af2c
+component 1 Transform
+	position = [2516582399899336704, 15099494, 67108864]
+	rotation = [0, 0, 0, 1]
+	scale = [0.6, 1.8, 0.6]
+component 2 Local_Transform
+	offset = [0, 0.9, 0]
+	scale = [0.6, 1.8, 0.6]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $7c3e5a91ad4f6b829c3e5a7b9d1e3f40
+	cast_shadows = true
+
+entity 8a07e4dc95bd1bf3
+name = "Agent 16"
+component 1 Transform
+	position = [2516582399924502528, 0, -67108864]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 75 Character
+component 134 Nav_Agent
+	max_speed = 2.5
+	radius = 0.35
+behaviour 3c496238755d4dd88d099636520824f3
+	door = @9a6f35ef6b80a34c
+
+entity 624682290816078d
+name = "Agent 16 Body"
+parent = @8a07e4dc95bd1bf3
+component 1 Transform
+	position = [2516582399924502528, 15099494, -67108864]
+	rotation = [0, 0, 0, 1]
+	scale = [0.6, 1.8, 0.6]
+component 2 Local_Transform
+	offset = [0, 0.9, 0]
+	scale = [0.6, 1.8, 0.6]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $7c3e5a91ad4f6b829c3e5a7b9d1e3f40
+	cast_shadows = true
+
+entity 5632a7fb9ede81cb
+name = "Agent 17"
+component 1 Transform
+	position = [2516582399924502528, 0, -33554432]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 75 Character
+component 134 Nav_Agent
+	max_speed = 2.5
+	radius = 0.35
+behaviour 3c496238755d4dd88d099636520824f3
+	door = @9a6f35ef6b80a34c
+
+entity f8c5951a4c49ab1d
+name = "Agent 17 Body"
+parent = @5632a7fb9ede81cb
+component 1 Transform
+	position = [2516582399924502528, 15099494, -33554432]
+	rotation = [0, 0, 0, 1]
+	scale = [0.6, 1.8, 0.6]
+component 2 Local_Transform
+	offset = [0, 0.9, 0]
+	scale = [0.6, 1.8, 0.6]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $7c3e5a91ad4f6b829c3e5a7b9d1e3f40
+	cast_shadows = true
+
+entity 3363a3c03795edf2
+name = "Agent 18"
+component 1 Transform
+	position = [2516582399924502528, 0, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 75 Character
+component 134 Nav_Agent
+	max_speed = 2.5
+	radius = 0.35
+behaviour 3c496238755d4dd88d099636520824f3
+	door = @9a6f35ef6b80a34c
+
+entity b621e71462c5154f
+name = "Agent 18 Body"
+parent = @3363a3c03795edf2
+component 1 Transform
+	position = [2516582399924502528, 15099494, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [0.6, 1.8, 0.6]
+component 2 Local_Transform
+	offset = [0, 0.9, 0]
+	scale = [0.6, 1.8, 0.6]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $7c3e5a91ad4f6b829c3e5a7b9d1e3f40
+	cast_shadows = true
+
+entity 5f859d5f6d60e3d9
+name = "Agent 19"
+component 1 Transform
+	position = [2516582399924502528, 0, 33554432]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 75 Character
+component 134 Nav_Agent
+	max_speed = 2.5
+	radius = 0.35
+behaviour 3c496238755d4dd88d099636520824f3
+	door = @9a6f35ef6b80a34c
+
+entity 1011471b100943ec
+name = "Agent 19 Body"
+parent = @5f859d5f6d60e3d9
+component 1 Transform
+	position = [2516582399924502528, 15099494, 33554432]
+	rotation = [0, 0, 0, 1]
+	scale = [0.6, 1.8, 0.6]
+component 2 Local_Transform
+	offset = [0, 0.9, 0]
+	scale = [0.6, 1.8, 0.6]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $7c3e5a91ad4f6b829c3e5a7b9d1e3f40
+	cast_shadows = true
+
+entity d459e4185d34871a
+name = "Agent 20"
+component 1 Transform
+	position = [2516582399924502528, 0, 67108864]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 75 Character
+component 134 Nav_Agent
+	max_speed = 2.5
+	radius = 0.35
+behaviour 3c496238755d4dd88d099636520824f3
+	door = @9a6f35ef6b80a34c
+
+entity 614b2bf087f866ec
+name = "Agent 20 Body"
+parent = @d459e4185d34871a
+component 1 Transform
+	position = [2516582399924502528, 15099494, 67108864]
+	rotation = [0, 0, 0, 1]
+	scale = [0.6, 1.8, 0.6]
+component 2 Local_Transform
+	offset = [0, 0.9, 0]
+	scale = [0.6, 1.8, 0.6]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $7c3e5a91ad4f6b829c3e5a7b9d1e3f40
+	cast_shadows = true

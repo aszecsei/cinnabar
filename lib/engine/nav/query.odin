@@ -146,43 +146,10 @@ to_world :: proc(m: ^Mesh_View, points: [][3]f32, allocator: runtime.Allocator) 
 raycast :: proc(s: ^State, start, end: ecs.World_Position, agent: Agent_Type) -> (hit: Raycast_Hit, ok: bool) {
 	m, polygon, p0 := snap(s, start, agent) or_return
 	p1 := local(m, end)
-	t: f32
-	current := polygon
-	hit = {mesh = m.id}
-	// Each polygon is crossed once at most on a straight line.
-	for _ in 0 ..= len(m.polygons) {
-		pts := points_of(m, current)
-		_, tmax, _, leaving, crossed := cross_polygon_2d(p0, p1, &pts)
-		hit.polygon = current
-		if !crossed {
-			// The segment misses the polygon, which only rounding does: the walk stops where it is.
-			hit.wall = [3]f32{}
-			break
-		}
-		t = max(t, tmax)
-		if leaving < 0 {
-			t = 1
-			break
-		}
-		a, b := pts.points[leaving], pts.points[(leaving + 1) % pts.count]
-		c := math.lerp(p0, p1, tmax)
-		along := projection_2d(c, a, b)
-		next, found := across(m, current, leaving, along)
-		if !found {
-			normal := [3]f32{b.z - a.z, 0, -(b.x - a.x)}
-			if length := linalg.length(normal); length > 0 {
-				normal /= length
-			}
-			hit.wall = normal
-			break
-		}
-		current = next
-	}
-	p := math.lerp(p0, p1, t)
-	p.y = height_at(m, hit.polygon, p)
-	hit.t = t
-	hit.position = world(m, p)
-	return hit, true
+	walk := raycast_local(m, polygon, p0, p1)
+	p := math.lerp(p0, p1, walk.t)
+	p.y = height_at(m, walk.polygon, p)
+	return {t = walk.t, position = world(m, p), wall = walk.wall, mesh = m.id, polygon = walk.polygon}, true
 }
 
 // cross_polygon_2d is where segment p0 p1 enters and leaves a convex polygon on the xz plane, as Detour's

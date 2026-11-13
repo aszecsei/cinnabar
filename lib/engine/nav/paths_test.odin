@@ -20,9 +20,10 @@ import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/ecs"
 import "cinnabar:engine/script"
 
-// The scheduler is a singleton, and the test runner runs tests on several threads.
-@(private = "file")
-lock: sync.Mutex
+// The scheduler and the physics backend are singletons, and the test runner runs tests on several threads, so every
+// test of the package that uses them takes this lock.
+@(private)
+test_lock: sync.Mutex
 
 @(private = "file")
 Fixture :: struct {
@@ -52,7 +53,7 @@ SMALL :: format.Guid{0 = 0x42}
 // calling thread, as one job would; otherwise the scheduler has workers threads.
 @(private = "file")
 setup :: proc(t: ^testing.T, serial := false, workers := 0, scripts := false) -> ^Fixture {
-	sync.lock(&lock)
+	sync.lock(&test_lock)
 	f := new(Fixture)
 	f.serial = serial
 	testing.expect(t, virtual.arena_init_growing(&f.frame) == nil)
@@ -142,7 +143,7 @@ teardown :: proc(t: ^testing.T, f: ^Fixture) {
 		jobs.shutdown()
 	}
 	free(f)
-	sync.unlock(&lock)
+	sync.unlock(&test_lock)
 }
 
 @(private = "file")

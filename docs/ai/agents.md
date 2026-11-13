@@ -75,6 +75,8 @@ When a start applies, the action's name is looked for first among the native act
 - **Arguments:** `start` gets them, each converted to its parameter's type: a float and an int convert, and a vector constant becomes a position. `ai.arg(a, name)` and `ai.arg_text(a, name)` read them. An action keeps what it needs between ticks in its state, `state_size` bytes up to `MAX_ACTION_STATE` (64), zero when it starts.
 - **Writes:** an action writes the blackboard through `a.out`, and the world through its system's buffers, as any job does ([World: Command buffers](../world/ecs.md#command-buffers)).
 - **Stopping one that ended early:** a native action that a decision replaced, or whose agent went, is stopped at the start of the next tick's `ai think`, with its state. Its agent may be gone.
+- **Data:** `Native_Action.data` is what its procedures get as `a.data`, such as the state of the package that registers it. `ai.get_hashed(a, hash)` reads a key by its name's hash, for an action that keeps a key's name past its start.
+- **The engine's:** `nav.register` registers the crowd's actions ([Navigation: Crowds](navigation.md#crowds)). `move_to(key)` takes the name of a key that holds a position or an entity. Each tick it reads the key, sends the agent to its value whenever the value changes, and runs until the agent arrives, when it succeeds. It fails when no path reaches the target, when the key holds neither, or when another move replaces it. Stopped before the move ends, it stops the agent. `stop` stops the agent, and succeeds.
 
 ### Script actions
 
@@ -109,7 +111,7 @@ return Bark
 1. `ai perceive`: the perceivers see and hear, and their memories change ([Perception](perception.md#the-order-in-a-tick)).
 2. `ai think`: the native actions that ended stop, and the decisions run.
 3. `ai actions`: the native actions start and tick.
-4. The other `Fixed` systems, such as `nav paths`, which the engine registers after the AI's.
+4. The other `Fixed` systems, such as `nav paths` and then `nav crowd`, which the engine registers after the AI's. A move that an action asks for applies in the next tick's `nav crowd`.
 5. The flush: the commands of the tick's jobs apply, in system order and then job order.
 6. The scripts' fixed step: the behaviours' `fixed_update`, then the script actions.
 7. Physics, then the tick's events: perception's `on_perceive` and `on_forget` among them.

@@ -21,7 +21,8 @@ Param :: struct {
 // Native_Action is an action in Odin. start and stop are optional; an action without a tick succeeds when it starts.
 // Each runs on a job for its agent: it reads the world, writes the blackboard and other components through a Writer
 // or the system's buffers, and keeps what it needs between ticks in its state, state_size bytes up to
-// MAX_ACTION_STATE, zero when it starts.
+// MAX_ACTION_STATE, zero when it starts. data is what its procedures get as Action_Context.data, such as the state of
+// the package that registers it, which they cannot otherwise find.
 Native_Action :: struct {
 	name:       string,
 	params:     []Param,
@@ -29,6 +30,7 @@ Native_Action :: struct {
 	start:      proc(a: ^Action_Context),
 	tick:       proc(a: ^Action_Context) -> Action_Status,
 	stop:       proc(a: ^Action_Context),
+	data:       rawptr,
 	hash:       u32,
 }
 
@@ -55,6 +57,8 @@ Action_Context :: struct {
 	// The tick's length in seconds.
 	dt:     f32,
 	out:    Writer,
+	// The native action's data.
+	data:   rawptr,
 }
 
 // register_action registers a native action by its name, which decisions name it by. Call it in register_world, after
@@ -116,10 +120,16 @@ arg_text :: proc(a: ^Action_Context, name: string) -> (string, bool) {
 
 // get is a key of the agent's blackboard by its name, as it is in this tick.
 get :: proc(a: ^Action_Context, name: string) -> (Value, bool) {
+	return get_hashed(a, format.animation_graph_hash(name))
+}
+
+// get_hashed is a key of the agent's blackboard by its name's hash, as format.animation_graph_hash gives it, for an
+// action that keeps a key's name past its start, where String arguments end.
+get_hashed :: proc(a: ^Action_Context, hash: u32) -> (Value, bool) {
 	if a.values == nil {
 		return nil, false
 	}
-	slot, found := format.blackboard_find(a.board.data, a.board.blob, format.animation_graph_hash(name))
+	slot, found := format.blackboard_find(a.board.data, a.board.blob, hash)
 	if !found {
 		return nil, false
 	}
@@ -269,6 +279,7 @@ run_native :: proc(s: ^State, ctx: ^ecs.System_Context, slot: ^Agent_Slot, ready
 		ready.action = Native_Running{ref = p.ref, hash = ref.hash}
 		running := &ready.action.(Native_Running)
 		a.state = running.memory[:native.state_size]
+		a.data = native.data
 		a.args = native_args(native, decision, board, ready.values, slot.entity, ref, ctx.world.platform.frame_allocator)
 		if native.start != nil {
 			native.start(&a)
@@ -286,6 +297,7 @@ run_native :: proc(s: ^State, ctx: ^ecs.System_Context, slot: ^Agent_Slot, ready
 	}
 	running := &ready.action.(Native_Running)
 	a.state = running.memory[:native.state_size]
+	a.data = native.data
 	status := native.tick(&a) if native.tick != nil else .Succeeded
 	if status == .Running {
 		return
@@ -312,6 +324,7 @@ stop_native_endings :: proc(s: ^State, ctx: ^ecs.System_Context) {
 			state  = run.memory[:native.state_size],
 			dt     = ctx.dt,
 			out    = job_writer(s, ctx),
+			data   = native.data,
 		}
 		native.stop(&a)
 	}

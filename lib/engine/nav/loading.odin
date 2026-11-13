@@ -3,9 +3,11 @@ package nav
 import "core:log"
 
 import "cinnabar:core"
+import "cinnabar:engine/ai"
 import "cinnabar:engine/asset"
 import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/ecs"
+import "cinnabar:engine/physics"
 
 // Loading (see docs/ai/navigation.md#loading): the navmeshes of the world's scene load with it, by the list in the
 // scene's cooked blob, and unload when the world holds another scene. The state holds asset handles, never blob
@@ -48,30 +50,39 @@ Scene_State :: union {
 	Scene_Missing,
 }
 
-// State is navigation's state in Game_State: the scene's navmeshes, the frame's views of them, and the path requests
-// and their pool. It holds handles and plain data only, so a code reload keeps it.
+// State is navigation's state in Game_State: the scene's navmeshes, the frame's views of them, the path requests and
+// their pool, and the crowd. It holds handles and plain data only, so a code reload keeps it.
 State :: struct {
-	platform:     ^core.Platform_API,
-	assets:       ^asset.Assets,
+	platform:      ^core.Platform_API,
+	assets:        ^asset.Assets,
+	// Physics lives in Game_State too, so the pointer stays valid across reloads. The crowd moves its agents' characters
+	// in it; with none, they stand still.
+	physics:       ^physics.State,
 	// sync_scene is its only writer.
-	scene:        Scene_State,
+	scene:         Scene_State,
 	// The loaded navmeshes, in the scene's order, in frame memory, from prepare to end_frame, and nil between frames.
-	frame:        []Mesh_View,
-	paths:        Path_Pool,
+	frame:         []Mesh_View,
+	paths:         Path_Pool,
 	// The Queued and Searching paths, in the order of their requests.
-	queue:        [dynamic]Path_Handle,
+	queue:         [dynamic]Path_Handle,
 	// The requests since the last tick: frame code's, and then the systems' jobs', which flush after their stage.
-	pending:      [dynamic]Path_Request,
-	searches:     [MAX_ACTIVE_SEARCHES]Active_Search,
+	pending:       [dynamic]Path_Request,
+	searches:      [MAX_ACTIVE_SEARCHES]Active_Search,
 	// The nodes that the paths system searches in a tick, shared by the searches.
-	budget:       int,
-	job_requests: ecs.Job_Buffer,
-	agents:       ecs.Query,
+	budget:        int,
+	job_requests:  ecs.Job_Buffer,
+	agents:        ecs.Query,
+	crowd:         Crowd_Pool,
+	// The moves and stops since the last crowd tick: frame code's and the scripts', and then the systems' jobs'.
+	crowd_pending: [dynamic]Crowd_Request,
+	job_crowd:     ecs.Job_Buffer,
+	crowd_agents:  ecs.Query,
 }
 
-// init makes the state's lists and reserves the searches' memory. Call it once, before register.
-init :: proc(s: ^State, platform: ^core.Platform_API, assets: ^asset.Assets) {
-	s.platform, s.assets = platform, assets
+// init makes the state's lists and reserves the searches' memory. Call it once, before register. The crowd moves its
+// agents in physics.
+init :: proc(s: ^State, platform: ^core.Platform_API, assets: ^asset.Assets, physics: ^physics.State = nil) {
+	s.platform, s.assets, s.physics = platform, assets, physics
 	heap := platform.heap_allocator
 	s.paths = {
 		slots       = make([dynamic]Path_Slot, heap),
@@ -80,21 +91,38 @@ init :: proc(s: ^State, platform: ^core.Platform_API, assets: ^asset.Assets) {
 	}
 	s.queue = make([dynamic]Path_Handle, heap)
 	s.pending = make([dynamic]Path_Request, heap)
+	s.crowd = {
+		slots       = make([dynamic]Crowd_Slot, heap),
+		generations = make([dynamic]u32, heap),
+		free        = make([dynamic]u32, heap),
+	}
+	s.crowd_pending = make([dynamic]Crowd_Request, heap)
 	for &a in s.searches {
 		graph_reserve(&a.search.graph, MAX_PATH_NODES, heap)
 	}
 	s.budget = DEFAULT_TICK_NODES
 }
 
-// register makes the query, the requests' job buffer and the paths system. Call it after the world's components are
-// registered, in init and in on_reload.
-register :: proc(s: ^State, w: ^ecs.World) {
+// register makes the queries, the requests' job buffers, the paths system and the crowd system. With the agents' AI,
+// which must be registered before, the crowd runs after their actions, and registers the move_to and stop actions.
+// Call it after the world's components are registered, in init and in on_reload.
+register :: proc(s: ^State, w: ^ecs.World, agents: ^ai.State = nil) {
 	s.frame = nil
 	s.agents = ecs.query(w, {ecs.read(w, Nav_Path)})
+	s.crowd_agents = ecs.query(w, {ecs.read(w, Nav_Agent)})
 	s.job_requests = ecs.register_job_buffer(w, {name = "path requests", user = s, make = make_job_requests, flush = flush_job_requests})
+	s.job_crowd = ecs.register_job_buffer(w, {name = "crowd requests", user = s, make = make_job_crowd, flush = flush_job_crowd})
 	reads := []ecs.Component_Id{ecs.TRANSFORM_ID}
 	writes := []ecs.Component_Id{NAV_PATH_ID}
 	ecs.register_system(w, {name = "nav paths", stage = .Fixed, procedure = tick_paths, reads = reads, writes = writes, data = s})
+	// The crowd reads the paths that the paths system solved in the tick, and the moves that the actions asked for.
+	after := []string{"nav paths", "ai actions"} if agents != nil else []string{"nav paths"}
+	crowd_reads := []ecs.Component_Id{NAV_AGENT_ID, NAV_PATH_ID, ecs.TRANSFORM_ID, physics.CHARACTER_ID, physics.PHYSICS_CHARACTER_ID}
+	crowd_writes := []ecs.Component_Id{NAV_AGENT_STATE_ID}
+	ecs.register_system(w, {name = "nav crowd", stage = .Fixed, procedure = crowd_system, reads = crowd_reads, writes = crowd_writes, after = after, data = s})
+	if agents != nil {
+		register_crowd_actions(s, agents)
+	}
 }
 
 // reload keeps the state after a code reload.
@@ -115,6 +143,13 @@ destroy :: proc(s: ^State) {
 	delete(s.paths.free)
 	delete(s.queue)
 	delete(s.pending)
+	for i in 0 ..< len(s.crowd.slots) {
+		release_crowd_phase(&s.crowd.slots[i])
+	}
+	delete(s.crowd.slots)
+	delete(s.crowd.generations)
+	delete(s.crowd.free)
+	delete(s.crowd_pending)
 	for &a in s.searches {
 		graph_delete(&a.search.graph)
 	}

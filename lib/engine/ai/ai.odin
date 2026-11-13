@@ -15,7 +15,7 @@ import "cinnabar:engine/physics"
 import "cinnabar:engine/script"
 
 // The AI components' stable IDs, in the AI's range, 128 to 143 (see docs/world/ecs.md#component-registry). nav has
-// 128 and 129, and perception 132 and 133.
+// 128, 129, 134 and 135, and perception 132 and 133.
 AGENT_ID :: ecs.Component_Id(130)
 AGENT_STATE_ID :: ecs.Component_Id(131)
 

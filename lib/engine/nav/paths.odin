@@ -19,10 +19,11 @@ DEFAULT_TICK_NODES :: 1024
 MAX_PATH_NODES :: DEFAULT_MAX_NODES
 
 // Path_Request is an entity's request for a path to a goal. The path starts where the entity is when its search
-// starts.
+// starts. ticket is the crowd's, which its answer keeps, so the crowd takes only the path that it last asked for.
 Path_Request :: struct {
 	entity: ecs.Entity,
 	goal:   ecs.World_Position,
+	ticket: u64,
 }
 
 // Requests is where requests are recorded: frame code's list, or a system's job's.
@@ -44,7 +45,7 @@ job_requests :: proc(s: ^State, ctx: ^ecs.System_Context) -> Requests {
 // request_path asks for an entity's path to goal, on the navmeshes of its Nav_Path's agent type. A new request
 // replaces the entity's last one. The entity's Nav_Path is Pending from the next tick until its path is solved.
 request_path :: proc(to: Requests, e: ecs.Entity, goal: ecs.World_Position) {
-	append(to.list, Path_Request{e, goal})
+	append(to.list, Path_Request{entity = e, goal = goal})
 }
 
 // path_corners is an entity's path, Found or Partial, from its start to its end, or nil. It stays valid until the
@@ -105,6 +106,8 @@ Path_Slot :: struct {
 	entity: ecs.Entity,
 	agent:  Agent_Type,
 	goal:   ecs.World_Position,
+	// The request's ticket.
+	ticket: u64,
 	// set_phase is its only writer.
 	phase:  Path_Phase,
 }
@@ -287,7 +290,7 @@ admit_requests :: proc(s: ^State, w: ^ecs.World) {
 			unqueue(s, h.index)
 		}
 		slot := &s.paths.slots[h.index]
-		slot.entity, slot.agent, slot.goal = r.entity, np.agent, r.goal
+		slot.entity, slot.agent, slot.goal, slot.ticket = r.entity, np.agent, r.goal, r.ticket
 		set_phase(s, w, h, Path_Queued{})
 		append(&s.queue, h)
 	}

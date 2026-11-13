@@ -8,7 +8,7 @@ import "cinnabar:engine/ecs"
 import "cinnabar:engine/script"
 
 // The Navigation library that scripts see (see docs/ai/navigation.md#scripts): the queries, synchronous, for a few
-// calls, and an entity's path requests. Scripts name an agent type by its name, as the project's nav.agents gives it;
+// calls, an entity's path requests, and the crowd's moves. Scripts name an agent type by its name, as the project's nav.agents gives it;
 // a name that no loaded navmesh has finds nothing.
 
 @(private = "file")
@@ -23,12 +23,14 @@ STATUS_NAMES := [Path_Status]cstring {
 	.Failed  = "failed",
 }
 
-// register_scripts defines the Navigation library, which reaches s, and exposes Nav_Path. A game's Register_Proc calls
-// it, so init and every reload define them again.
+// register_scripts defines the Navigation library, which reaches s, and exposes Nav_Path, Nav_Agent and
+// Nav_Agent_State. A game's Register_Proc calls it, so init and every reload define them again.
 register_scripts :: proc(r: ^script.Runtime, s: ^State) {
 	luau.pushlightuserdata(r.L, s)
 	luau.setfield(r.L, luau.REGISTRYINDEX, REGISTRY_KEY)
 	script.expose(r, Nav_Path)
+	script.expose(r, Nav_Agent)
+	script.expose(r, Nav_Agent_State)
 
 	script.define(r, "Navigation.nearest", proc(L: ^luau.State) -> c.int {
 		s := state_of(L)
@@ -113,6 +115,36 @@ register_scripts :: proc(r: ^script.Runtime, s: ^State) {
 		push_positions(L, corners)
 		return 1
 	}, "(entity: Entity) -> { WorldPosition }?")
+	script.define(r, "Navigation.move_to", proc(L: ^luau.State) -> c.int {
+		s, w, e := agent_args(L)
+		target: Crowd_Target
+		if p, ok := script.to_position(L, 2); ok {
+			target = p
+		} else if other := script.to_entity(L, 2); other != 0 {
+			target = other
+		} else {
+			luau.L_typeerrorL(L, 2, "WorldPosition or Entity")
+		}
+		move_to(crowd_requests(s, w), e, target)
+		return 0
+	}, "(entity: Entity, target: WorldPosition | Entity) -> ()")
+	script.define(r, "Navigation.stop", proc(L: ^luau.State) -> c.int {
+		s, w, e := agent_args(L)
+		stop(crowd_requests(s, w), e)
+		return 0
+	}, "(entity: Entity) -> ()")
+	script.define(r, "Navigation.arrived", proc(L: ^luau.State) -> c.int {
+		_, w, e := agent_args(L)
+		state := ecs.get(w, e, Nav_Agent_State)
+		luau.pushboolean(L, state != nil && state.status == .Arrived)
+		return 1
+	}, "(entity: Entity) -> boolean")
+	script.define(r, "Navigation.velocity", proc(L: ^luau.State) -> c.int {
+		_, w, e := agent_args(L)
+		state := ecs.get(w, e, Nav_Agent_State)
+		script.push_vector(L, state.velocity if state != nil else {})
+		return 1
+	}, "(entity: Entity) -> vector")
 }
 
 @(private = "file")
@@ -139,6 +171,16 @@ path_args :: proc(L: ^luau.State) -> (^State, ^ecs.World, ecs.Entity) {
 	s, w, e := state_of(L), script.runtime_of(L).world, script.check_entity(L, 1)
 	if !ecs.is_alive(w, e) || !ecs.has(w, e, Nav_Path) {
 		script.raise(L, fmt.tprintf("entity %v has no path: give it a NavPath", e))
+	}
+	return s, w, e
+}
+
+// agent_args reads the entity in the first argument, and raises an error unless it has a Nav_Agent.
+@(private = "file")
+agent_args :: proc(L: ^luau.State) -> (^State, ^ecs.World, ecs.Entity) {
+	s, w, e := state_of(L), script.runtime_of(L).world, script.check_entity(L, 1)
+	if !ecs.is_alive(w, e) || !ecs.has(w, e, Nav_Agent) {
+		script.raise(L, fmt.tprintf("entity %v is not an agent: give it a NavAgent", e))
 	}
 	return s, w, e
 }

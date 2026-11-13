@@ -6,9 +6,9 @@ import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/debug"
 import "cinnabar:engine/ecs"
 
-// Drawing (see docs/ai/navigation.md#drawing): a volume's navmeshes, each agent type in its own color, and paths, as
-// debug lines for this frame. The editor's helpers draw them in edit mode from the cooked blobs, and a game can draw
-// them in its own debug layer.
+// Drawing (see docs/ai/navigation.md#drawing): a volume's navmeshes, each agent type in its own color, paths, and an
+// agent's last crowd tick, as debug lines for this frame. The editor's helpers draw the navmeshes in edit mode from the
+// cooked blobs and the agents while the game plays, and a game can draw them in its own debug layer.
 
 // The agent types' colors, by their index, around again past the last.
 @(private = "file", rodata)
@@ -25,6 +25,20 @@ TILE_COLOR :: [4]f32{0.5, 0.5, 0.5, 0.5}
 // A link across tiles is white over the edge that it covers.
 @(private = "file")
 LINK_COLOR :: [4]f32{1, 1, 1, 1}
+// An agent's corridor, its next corners, the lines to its neighbors, and its desired and chosen velocities.
+@(private = "file")
+CORRIDOR_COLOR :: [4]f32{0.3, 0.6, 1, 0.5}
+@(private = "file")
+CORNER_COLOR :: [4]f32{1, 1, 1, 1}
+@(private = "file")
+NEIGHBOR_COLOR :: [4]f32{1, 0.6, 0.2, 0.7}
+@(private = "file")
+DESIRED_COLOR :: [4]f32{0.3, 0.6, 1, 1}
+@(private = "file")
+VELOCITY_COLOR :: [4]f32{0.3, 1, 0.3, 1}
+// The velocities' arrows start this high over the agent's feet.
+@(private = "file")
+ARROW_HEIGHT :: 0.5
 
 // agent_color is an agent type's color: walls at full alpha, and the edges between polygons faint.
 agent_color :: proc "contextless" (agent: Agent_Type) -> [4]f32 {
@@ -106,4 +120,33 @@ draw_corners :: proc(d: ^debug.Draw, corners: []ecs.World_Position, color: [4]f3
 // draw_path draws an entity's path, Found or Partial, as the paths system last solved it.
 draw_path :: proc(s: ^State, w: ^ecs.World, d: ^debug.Draw, e: ecs.Entity, color: [4]f32) {
 	draw_corners(d, path_corners(s, w, e), color)
+}
+
+// draw_agent draws an agent's last crowd tick: its corridor's polygons, the corners that it steers by, a line to each
+// neighbor that it avoids, and its desired and chosen velocities as arrows a second long, from at, where it is shown.
+// It returns false for an entity that is not an agent of the crowd.
+draw_agent :: proc(s: ^State, w: ^ecs.World, d: ^debug.Draw, e: ecs.Entity, at: ecs.World_Position) -> bool {
+	info, m, corridor := crowd_debug(s, w, e)
+	if info == nil {
+		return false
+	}
+	if m != nil {
+		lift := [3]f32{0, m.cell_height, 0}
+		for polygon in corridor {
+			pts := points_of(m, polygon)
+			for k in 0 ..< pts.count {
+				debug.line(d, world(m, pts.points[k] + lift), world(m, pts.points[(k + 1) % pts.count] + lift), CORRIDOR_COLOR)
+			}
+		}
+	}
+	draw_corners(d, info.corners[:info.corner_count], CORNER_COLOR)
+	for n in info.neighbors[:info.neighbor_count] {
+		if t := ecs.get(w, n, ecs.Transform); t != nil {
+			debug.line(d, at, t.position, NEIGHBOR_COLOR)
+		}
+	}
+	from := ecs.position_offset(at, {0, ARROW_HEIGHT, 0})
+	debug.arrow(d, from, ecs.position_offset(from, info.desired), DESIRED_COLOR)
+	debug.arrow(d, from, ecs.position_offset(from, info.velocity), VELOCITY_COLOR)
+	return true
 }
