@@ -4,6 +4,7 @@ import "core:log"
 
 import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/ecs"
+import "cinnabar:engine/random"
 import "cinnabar:engine/script"
 
 // The agents' pool (see docs/ai/agents.md#agents). Each Agent gets a slot, which its Agent_State names: the
@@ -26,13 +27,17 @@ Wait_Reason :: enum u8 {
 	Refused,
 }
 
-// Agent_Ready is an agent that thinks: its values, its module's state, its running action, and when it thinks.
-// board_key and decision_key are the blobs' keys that it started with, so a recook starts it again.
+// Agent_Ready is an agent that thinks: its values and the tick that each key last changed in, its module's state and
+// generator, its running action, and when it thinks. board_key and decision_key are the blobs' keys that it started
+// with, so a recook starts it again.
 Agent_Ready :: struct {
 	board_key:    u64,
 	decision_key: u64,
 	values:       []byte,
+	changed:      []u64,
 	state:        []byte,
+	// Seeded from the state's seed and the slot when the agent starts (see set_seed).
+	random:       random.State,
 	// set_action is its only writer, besides the action systems, which stop the actions that they end.
 	action:       Action_Phase,
 	// The tick that it thinks in next, the tick that it last thought in, and how many times it thought.
@@ -162,6 +167,7 @@ alloc_slot :: proc(s: ^State) -> Agent_Handle {
 release_slot :: proc(s: ^State, slot: ^Agent_Slot) {
 	if ready, ok := slot.phase.(Agent_Ready); ok {
 		delete(ready.values, s.platform.heap_allocator)
+		delete(ready.changed, s.platform.heap_allocator)
 		delete(ready.state, s.platform.heap_allocator)
 		free(ready.perception, s.platform.heap_allocator)
 	}
@@ -331,9 +337,9 @@ warn_waiting :: proc(slot: ^Agent_Slot, reason: Wait_Reason) {
 	}
 }
 
-// start_agent starts an agent from its blackboard's defaults, with its module's state zero, and the writes that scripts
-// made to it before it was ready. Its first think is placed by its slot, so agents that start together do not all think
-// in the same tick.
+// start_agent starts an agent from its blackboard's defaults, with its module's state zero, its generator seeded by its
+// slot, and the writes that scripts made to it before it was ready. Every key counts as changed now. Its first think is
+// placed by its slot, so agents that start together do not all think in the same tick.
 @(private)
 start_agent :: proc(s: ^State, w: ^ecs.World, slot: ^Agent_Slot, index: int, board: Board, decision: Decision) {
 	heap := s.platform.heap_allocator
@@ -341,10 +347,15 @@ start_agent :: proc(s: ^State, w: ^ecs.World, slot: ^Agent_Slot, index: int, boa
 		board_key    = board.blob.header.key,
 		decision_key = decision.blob.header.key,
 		values       = make([]byte, board.blob.values_size, heap),
+		changed      = make([]u64, len(format.blackboard_keys(board.data, board.blob)), heap),
 		state        = make([]byte, decision.blob.state_size, heap),
 	}
 	copy(ready.values, format.blob_bytes(board.data, board.blob.defaults))
 	now := w.clock.tick
+	for &c in ready.changed {
+		c = now
+	}
+	random.seed(&ready.random, agent_seed(s.seed, index))
 	ready.next_think = now + stagger(index, interval_ticks(w, slot.entity))
 	ready.last_think = now
 	set_phase(s, slot, ready)
@@ -358,6 +369,14 @@ start_agent :: proc(s: ^State, w: ^ecs.World, slot: ^Agent_Slot, index: int, boa
 			i += 1
 		}
 	}
+}
+
+// agent_seed is the seed of the generator of the agent at a slot: the state's seed and the slot, mixed, so agents in
+// slots in a row draw unlike sequences.
+@(private)
+agent_seed :: proc(seed: u64, index: int) -> u64 {
+	x := seed ~ (u64(index) * 0x9E3779B97F4A7C15)
+	return random.splitmix64(&x)
 }
 
 // interval_ticks is an agent's think interval in ticks, at least 1.

@@ -8,6 +8,7 @@ How agents decide, perceive and find their way: agents, their blackboards and th
 |---|---|
 | [Agents](agents.md) | Agents and their pool, blackboards and how they are written, thinking and its budget, decision modules, native and script actions, the order in a tick, determinism, reload, and the `Blackboard` and `Agent` script libraries. |
 | [Behavior trees](behavior-trees.md) | The `behavior_tree` technique's module: a think, starting and resuming nodes, the abort modes, actions over several thinks, time in ticks, repeats, determinism, reload, and the limits. |
+| [Utility](utility.md) | The `utility` technique's module: a think, scoring with curves and the compensation factor, the best or a weighted pick by the agent's generator, momentum, cooldowns, scoring for each perceived target, the scores for debuggers and scripts, determinism, reload, and the limits. |
 | [Perception](perception.md) | `Perceiver` and `Perceivable`, the project's tags, sight in a cone checked by rays within a budget shared in turn, hearing gameplay's noises through walls, each agent's memory, the rows that fill its blackboard, `on_perceive` and `on_forget`, determinism, the `Perception` script library, and drawing. |
 | [Navigation](navigation.md) | Loading a scene's navmeshes, the queries (`nearest`, `find_path`, `raycast`, `random_point`), path requests and their budget, the crowd (`Nav_Agent`, corridors, steering and avoidance) and its movement through characters, the `move_to` and `stop` actions, determinism, the `Navigation` script library, drawing in the editor, and the limits. |
 
@@ -17,6 +18,7 @@ How agents decide, perceive and find their way: agents, their blackboards and th
 |---|---|---|
 | `tools/cook` (blackboards, decisions) | Tool | Cooks blackboards into slots and decisions' shared parts against their blackboards, and gives the rest of a decision to its technique's reader (see [Content: Decisions](../content/kinds/decisions.md)). |
 | `lib/engine/ai/behavior_tree` | Game | The behavior tree module: it checks a tree when an agent starts with it, and runs it when the agent thinks, with each node's state in the agent's module state (see [Behavior trees](behavior-trees.md)). |
+| `lib/engine/ai/utility` | Game | The utility module: it checks a decision's options when an agent starts with it, and scores and runs them when the agent thinks, with the running option, cooldowns and last scores in the agent's module state (see [Utility](utility.md)). |
 | `lib/engine/ai` | Game | `Agent` and `Agent_State`, the agents' pool, loading, the `ai perceive`, `ai think` and `ai actions` systems, the commands' job buffer, native and script actions, `Perceiver` and `Perceivable` and the agents' memories, and the script libraries. |
 | `tools/cook` (perceptions) | Tool | Cooks perceptions into the tags that they notice and their rows (see [Content: Perceptions](../content/kinds/perceptions.md)). |
 | `tools/cook` (navmeshes) | Tool | Bakes a navmesh for each navigation volume and agent type with Recast (see [Content: Navmeshes](../content/kinds/nav-meshes.md)). |
@@ -30,6 +32,7 @@ For navigation, `nav.prepare` loads the navmeshes of the world's scene when the 
 ## References
 
 - Epic Games, [Unreal Engine: Behavior Trees](https://dev.epicgames.com/documentation/en-us/unreal-engine/behavior-tree-overview-in-unreal-engine): blackboards of typed keys, which the AI's blackboards follow, and decorators with observer aborts (`Self`, `Lower Priority` and `Both`), which the behavior tree's guards follow.
+- Dave Mark, *Behavioral Mathematics for Game AI* (Course Technology, 2009), and Dave Mark and Mike Lewis, "Building a Better Centaur: AI at Massive Scale" (GDC 2015): response curves over normalized inputs, and the compensation factor for the count of considerations, which utility decisions follow.
 - Epic Games, [Unreal Engine: AI Perception](https://dev.epicgames.com/documentation/en-us/unreal-engine/ai-perception-in-unreal-engine): sight in a cone with a line-of-sight check, hearing of noise events that gameplay reports, and stimuli that age out, which perception follows.
 
 - Mikko Mononen, [Recast and Detour](https://github.com/recastnavigation/recastnavigation): the bake, and Detour's `dtNavMeshQuery` (`findPath`, `findStraightPath`, `raycast`, `findRandomPointAroundCircle`) and its sliced path finding, which the queries and the path requests follow. The engine's code is its own.

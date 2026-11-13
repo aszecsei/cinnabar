@@ -31,7 +31,7 @@ node 5 wait
 	seconds = 1
 ```
 
-**In this document:** [The text](#the-text) · [Shared parts](#shared-parts) · [Techniques](#techniques) · [Behavior trees](#behavior-trees) · [The cook](#the-cook) · [The blob](#the-blob)
+**In this document:** [The text](#the-text) · [Shared parts](#shared-parts) · [Techniques](#techniques) · [Behavior trees](#behavior-trees) · [Utility](#utility) · [The cook](#the-cook) · [The blob](#the-blob)
 
 ## The text
 
@@ -85,7 +85,8 @@ Each technique adds its reader to `TECHNIQUE_READERS` in `tools/cook/decisions.o
 | Technique | Reader | Module |
 |---|---|---|
 | `behavior_tree` | `BEHAVIOR_TREE_READER` (`tools/cook/behavior_trees.odin`) | `lib/engine/ai/behavior_tree` ([AI: Behavior trees](../../ai/behavior-trees.md)) |
-| `utility`, `goap`, `htn` | None yet | None yet |
+| `utility` | `UTILITY_READER` (`tools/cook/utility.odin`) | `lib/engine/ai/utility` ([AI: Utility](../../ai/utility.md)) |
+| `goap`, `htn` | None yet | None yet |
 
 ## Behavior trees
 
@@ -188,6 +189,130 @@ The technique's data (`lib/engine/asset/format/behavior_tree.odin`) is a `Tree_H
 - the offsets of its state and its timers in the agent's module state.
 
 The reader lays out the module state: `TREE_STATE_SIZE` (16) bytes for each node, and then 8 bytes for each timer. The timers are the end of a `wait`, the start of a node with a `time_limit`, and the tick at which a node with a `cooldown` can start again. The header holds the layout hash of the data. `format.tree_check` refuses data of another layout, subtrees that do not nest, and offsets outside the state. It also refuses a time key that is not a float or an int. The module does this check before an agent starts with the decision.
+
+## Utility
+
+A `utility` decision is a set of options. When the agent thinks, the module scores each option from its considerations, and runs the best one ([AI: Utility](../../ai/utility.md)).
+
+```
+decision 1
+technique = utility
+blackboard = $0123456789abcdef0123456789abcdef
+pick = weighted
+within = 0.2
+momentum = 0.25
+
+# Attack the best enemy that it perceives, flee when hurt, and otherwise patrol.
+node 1 option
+	action = attack(at = target)
+	weight = 2
+	considerations = 4, 5
+	target = target
+	target_tag = enemy
+	cooldown = 1.5
+node 2 option
+	when = health < 30
+	action = flee
+	considerations = 6
+	set mood = alert
+node 3 option
+	action = patrol
+	weight = 0.2
+node 4 consideration
+	input = health
+	range = [0, 100]
+	curve = logistic
+node 5 consideration
+	input = distance(self, target)
+	range = [0, 30]
+	curve = table
+	points = [0, 1], [0.3, 0.9], [1, 0]
+node 6 consideration
+	input = health
+	range = [0, 100]
+	curve = polynomial
+	slope = -1
+	exponent = 2
+	y_shift = 1
+```
+
+### Settings
+
+| Setting | Values | What it does |
+|---|---|---|
+| `pick` | `best` (the default) or `weighted` | `best` runs the option with the highest score, the first of equal ones. `weighted` picks at random among the options whose score is at least the best times `1 - within`, each in proportion to its score. |
+| `within` | A fraction from 0 to 1 (0.1 by default) | The band of a weighted pick. Only with `pick = weighted`. |
+| `momentum` | A fraction of 0 or more (0.25 by default) | The running option's score is multiplied by `1 + momentum`. Another option cuts in only when its score is above that. |
+
+### Options
+
+An `option` node names an action and how to score it:
+
+| Field | Values | What it does |
+|---|---|---|
+| `action` | An action reference | The action that the option runs ([Action references](#action-references)). Required. |
+| `weight` | A number of 0 or more (1 by default) | Multiplies the option's score. |
+| `considerations` | `<id>, <id>, ...` | The consideration nodes that score the option. One consideration can serve several options. An option without considerations scores its weight. |
+| `when` | A condition | A guard: when it does not hold, the option scores 0. |
+| `set <key> = <value>` | Writes | Applied when the option starts. |
+| `cooldown` | A time: seconds, or a float or an int key | After the option ends, it scores 0 until this time passes. |
+| `target` | An entity key | The option is scored once for each entity that the agent perceives now ([AI: Perception](../../ai/perception.md#memory)). While each entity is scored, the key holds it, for the guard and the considerations. The best entity is written into the key when the option wins. |
+| `target_tag` | A tag's name, from `perception.tags` | With `target`, only the perceived entities of this tag. |
+
+An option's **score** is its weight times the product of its considerations' scores. Each consideration's score is first made up for the count of the option's considerations, so that an option with more considerations does not score lower only for that. With `n` considerations, a score `s` becomes `s + (1 - s) × (1 - 1/n) × s`. This is Dave Mark's compensation factor. For example, 0.5 with two considerations becomes 0.625.
+
+### Considerations
+
+A `consideration` node reads an input, normalizes it over its range to 0 to 1, and maps it through a curve:
+
+| Field | Values | What it does |
+|---|---|---|
+| `input` | A float, int or bool key; `distance(<place>, <place>)`; or `since(<key>)` | The value to read. A bool is 0 or 1. `distance` is the meters between two places, each `self`, an entity key or a position key. An entity that is none, dead or without a `Transform` is infinitely far. `since` is the seconds since the key's value last changed, or since the agent started. Required. |
+| `range` | `[min, max]`, with min and max not equal | Normalizes the input: min becomes 0 and max becomes 1, and the values beyond them are clamped. A range can go down, as `[30, 0]` does. `[0, 1]` by default. A bool takes no range. |
+| `curve` | `linear`, `polynomial`, `logistic`, `logit`, `step` or `table` | The response curve. Required. |
+| `slope`, `exponent`, `x_shift`, `y_shift` | Numbers (1, 1, 0 and 0 by default) | The curve's parameters. `exponent` is above 0. |
+| `points` | `[x, y], [x, y], ...` | A table's points, at least 2 and at most `MAX_UTILITY_POINTS` (32), in the order of their x. |
+
+For an input `x` from 0 to 1, with `u = x - x_shift`, a curve gives `slope × f(u) + y_shift`, clamped to 0 to 1. A result that is not a number is 0.
+
+| Curve | `f(u)` |
+|---|---|
+| `linear` | `u` |
+| `polynomial` | `u ^ exponent` |
+| `logistic` | `1 / (1 + e^(-10 × exponent × (u - 0.5)))`, an S through (0.5, 0.5) |
+| `logit` | `0.5 + ln(u / (1 - u)) / (10 × exponent)`, the inverse of `logistic` |
+| `step` | 1 when `u` is 0.5 or more, else 0 |
+| `table` | The line through the points, raised to the exponent. Beyond the points, it is the first or the last point's y. Where two points have one x, it is the later point's y. |
+
+`linear` and `step` have no `exponent`.
+
+### Problems
+
+The reader reports these problems at their lines, in addition to the shared problems ([The cook](#the-cook)):
+- a setting other than `pick`, `within` and `momentum`, a value that a setting does not take, and `within` without `pick = weighted`;
+- a decision without options;
+- an unknown kind or field, or a field that the node's kind does not take, such as `curve` on an option, or `when`, `action` or `set` lines on a consideration;
+- an option without `action`, and a consideration without `input` or `curve`;
+- a consideration ID that no node has, a node that is not a consideration, a consideration that an option lists twice, and a consideration that no option lists;
+- a key that the blackboard does not have, or a key of a type that the field does not take: an input that is not a float, an int or a bool, a place that is not an entity or a position, a `target` that is not an entity, and a `cooldown` key that is not a float or an int;
+- `target_tag` without `target`;
+- a `range` on a bool's input, or a range whose min and max are equal;
+- `exponent` on `linear` or `step`, an `exponent` of 0 or less, `points` on a curve that is not `table`, and a `table` without points;
+- fewer than 2 points, more than 32 points, or points that are not in the order of their x;
+- a negative `weight` or `cooldown`.
+
+### The utility's data
+
+The technique's data (`lib/engine/asset/format/utility.odin`) is a `Utility_Header`, then the `Utility_Option`s, the `Utility_Consideration`s, the links from each option to its considerations, and the `Utility_Point`s of the tables. The options and the considerations are in the text's order.
+- **An option** has its decision node, which holds its guard, its action and its writes. It also has its weight, its range of links, its target's slot or `DECISION_NONE`, its tag's hash, its cooldown, and the offsets of its state.
+- **A consideration** has its decision node, for its ID. It also has its input and its slots (`UTILITY_SELF` is the agent), its range, its curve and parameters, and its range of points.
+
+The reader lays out the module state:
+1. `Utility_Running` (8 bytes): the running option, plus 1, so a zero state runs none.
+2. A `Utility_Option_State` (24 bytes) for each option: the tick that its cooldown ends, its best target, and its last score.
+3. A `Utility_Link_State` (8 bytes) for each link of each option: the last normalized input and score of each consideration.
+
+The header holds the layout hash, the pick, `within` and `momentum`. `format.utility_check` refuses data of another layout, links, points and nodes out of range, an option without an action, states outside the module state, and keys of types that the data does not read. The module does this check before an agent starts with the decision.
 
 ## The cook
 
