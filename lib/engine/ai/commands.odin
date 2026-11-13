@@ -2,6 +2,7 @@ package ai
 
 import "base:runtime"
 import "core:log"
+import "core:slice"
 
 import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/ecs"
@@ -225,7 +226,8 @@ apply :: proc(s: ^State, c: Command) {
 	}
 }
 
-// apply_write writes a key of an agent's values, checking its type. A write by name finds its key by its hash.
+// apply_write writes a key of an agent's values, checking its type, and notes the tick when the value changes. A write
+// by name finds its key by its hash.
 @(private)
 apply_write :: proc(s: ^State, slot: ^Agent_Slot, ready: ^Agent_Ready, board: Board, c: Command) {
 	keys := format.blackboard_keys(board.data, board.blob)
@@ -264,7 +266,11 @@ apply_write :: proc(s: ^State, slot: ^Agent_Slot, ready: ^Agent_Ready, board: Bo
 		log.warnf("ai: entity %v's key %s is a %v, and the value written is a %v", slot.entity, format.blob_string(board.data, key.name), key.type, c.type)
 		return
 	}
-	copy(value_bytes(ready.values, key), value[:])
+	bytes := value_bytes(ready.values, key)
+	if !slice.equal(bytes, value[:len(bytes)]) {
+		copy(bytes, value[:])
+		ready.changed[index] = s.world.clock.tick
+	}
 }
 
 // start_ref starts a decision's action reference: a native action if one has its name, else a script action if a

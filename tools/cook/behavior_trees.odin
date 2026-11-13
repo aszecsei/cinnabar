@@ -266,7 +266,7 @@ read_field :: proc(r: ^Tree_Read, n: ^Tree_Text_Node, f: Decision_Field) {
 }
 
 // name_of finds a value among an enum's names.
-@(private = "file")
+@(private)
 name_of :: proc(names: [$E]string, value: string) -> (E, bool) {
 	for name, e in names {
 		if name == value {
@@ -277,7 +277,7 @@ name_of :: proc(names: [$E]string, value: string) -> (E, bool) {
 }
 
 // tree_time reads a time: a number of seconds, 0 or more, or a float or int key.
-@(private = "file")
+@(private)
 tree_time :: proc(p: ^Decision_Parser, f: Decision_Field) -> format.Tree_Time {
 	if seconds, ok := strconv.parse_f32(f.value); ok {
 		if seconds < 0 {

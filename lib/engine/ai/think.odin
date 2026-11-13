@@ -8,6 +8,7 @@ import "cinnabar:core/jobs"
 import "cinnabar:core/profile"
 import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/ecs"
+import "cinnabar:engine/random"
 
 // Thinking (see docs/ai/agents.md#thinking). In each tick, the ai think system takes the agents whose think is due,
 // the first budget of them by priority and then by the time since each last thought, and runs their decision modules
@@ -19,10 +20,30 @@ import "cinnabar:engine/ecs"
 // Module is a technique's decision module. think runs on a job, and may read the world, but writes only the agent's
 // module state and the context's outputs. It never calls a script. check, if it is there, checks the technique's data
 // against the decision and its blackboard before an agent starts with them: an agent whose decision it refuses waits,
-// so think gets only data that checked.
+// so think gets only data that checked. scores, if it is there, gives what the agent's last think scored, from its
+// module state, for debuggers and scripts (see scores).
 Module :: struct {
-	think: proc(t: ^Think_Context),
-	check: proc(decision: Decision, board: Board) -> bool,
+	think:  proc(t: ^Think_Context),
+	check:  proc(decision: Decision, board: Board) -> bool,
+	scores: proc(decision: Decision, board: Board, state: []byte, allocator: runtime.Allocator) -> []Option_Score,
+}
+
+// Option_Score is an option that a module scored in the agent's last think: its decision node's ID, its action's name,
+// its score, the target that it scored best for, or none, and the score of each of its considerations.
+Option_Score :: struct {
+	id:             u32,
+	action:         string,
+	score:          f32,
+	target:         ecs.Entity,
+	considerations: []Consideration_Score,
+}
+
+// Consideration_Score is a consideration of an option: its decision node's ID, its input normalized to 0 to 1, and its
+// score.
+Consideration_Score :: struct {
+	id:    u32,
+	input: f32,
+	score: f32,
 }
 
 // Action_View is the agent's action as its decision sees it: the action reference that it started, DECISION_NONE for
@@ -50,6 +71,13 @@ Think_Context :: struct {
 	agent:      Agent_Handle,
 	// The job's commands.
 	out:        ^[dynamic]Command,
+	// The agent's own generator, which only its thinks draw from, so a run replays the same (see set_seed).
+	random:     ^random.State,
+	// The tick that each key last changed in, by slot.
+	changed:    []u64,
+	// What the agent perceives, or nil for an agent that has perceived nothing, and the project's tags.
+	perception: ^Perception_Memory,
+	tags:       ^Tag_Names,
 }
 
 // technique_data is the technique's part of the agent's decision.
@@ -100,6 +128,101 @@ node_writes :: proc(t: ^Think_Context, node: format.Decision_Node) {
 	}
 }
 
+// key_number is a float, int or bool key's value as a number, a bool being 0 or 1, and 0 for a key of another type.
+key_number :: proc(t: ^Think_Context, slot: u32) -> f64 {
+	keys := format.blackboard_keys(t.board.data, t.board.blob)
+	key := keys[slot]
+	bytes := value_bytes(t.values, key)
+	#partial switch key.type {
+	case .Float:
+		return f64((^f32)(raw_data(bytes))^)
+	case .Int:
+		return f64((^i32)(raw_data(bytes))^)
+	case .Bool:
+		return 1 if bytes[0] != 0 else 0
+	}
+	return 0
+}
+
+// entity_place is where an entity is: its Transform's position, if it is alive and has one.
+entity_place :: proc(w: ^ecs.World, e: ecs.Entity) -> (ecs.World_Position, bool) {
+	if e == 0 || !ecs.is_alive(w, e) {
+		return {}, false
+	}
+	transform := ecs.get(w, e, ecs.Transform)
+	if transform == nil {
+		return {}, false
+	}
+	return transform.position, true
+}
+
+// place_of is where a place is: the agent for format.UTILITY_SELF, an entity key's entity, or a position key's
+// position. An entity that is none, dead or without a Transform is no place.
+place_of :: proc(t: ^Think_Context, slot: u32) -> (ecs.World_Position, bool) {
+	if slot == format.UTILITY_SELF {
+		return entity_place(t.world, t.entity)
+	}
+	keys := format.blackboard_keys(t.board.data, t.board.blob)
+	key := keys[slot]
+	bytes := value_bytes(t.values, key)
+	#partial switch key.type {
+	case .Entity:
+		return entity_place(t.world, (^ecs.Entity)(raw_data(bytes))^)
+	case .Position:
+		return (^ecs.World_Position)(raw_data(bytes))^, true
+	}
+	return {}, false
+}
+
+// distance is the meters between two places, as place_of finds them, or infinity when either is no place.
+distance :: proc(t: ^Think_Context, a, b: u32) -> f64 {
+	pa, a_ok := place_of(t, a)
+	pb, b_ok := place_of(t, b)
+	if !a_ok || !b_ok {
+		return math.INF_F64
+	}
+	return place_distance(pa, pb)
+}
+
+@(private)
+place_distance :: proc(a, b: ecs.World_Position) -> f64 {
+	d := ecs.position_sub_f64(a, b)
+	return math.sqrt(d.x * d.x + d.y * d.y + d.z * d.z)
+}
+
+// seconds_since_changed is the seconds since the key at a slot last changed, or since the agent started if it never
+// did.
+seconds_since_changed :: proc(t: ^Think_Context, slot: u32) -> f64 {
+	now := t.world.clock.tick
+	at := t.changed[slot]
+	if now <= at {
+		return 0
+	}
+	return f64(now - at) / f64(t.world.clock.tick_rate)
+}
+
+// write_entity asks to write an entity into the entity key at a slot.
+write_entity :: proc(t: ^Think_Context, slot: u32, e: ecs.Entity) {
+	c := Command {
+		entity = t.entity,
+		agent  = t.agent,
+		kind   = .Write,
+		key    = slot,
+		type   = .Entity,
+	}
+	(^ecs.Entity)(&c.value)^ = e
+	append(t.out, c)
+}
+
+// tag_matches is whether a perceived entity's tag is the project's tag whose name has a hash.
+tag_matches :: proc(t: ^Think_Context, entry: Memory_Entry, hash: u32) -> bool {
+	if t.tags == nil {
+		return false
+	}
+	tag, found := tag_of_hash(t.tags, hash)
+	return found && int(entry.tag) == tag
+}
+
 // Stack_Value is a value on a condition's stack: a number, bits for a bool, an enum or an entity, or a place.
 @(private)
 Stack_Value :: struct {
@@ -135,11 +258,7 @@ condition_holds :: proc(t: ^Think_Context, index: u32) -> bool {
 		case .Entity:
 			e := (^ecs.Entity)(raw_data(bytes))^
 			v.bits = u64(e)
-			if e != 0 && ecs.is_alive(t.world, e) {
-				if transform := ecs.get(t.world, e, ecs.Transform); transform != nil {
-					v.position, v.place = transform.position, true
-				}
-			}
+			v.position, v.place = entity_place(t.world, e)
 		case .Position:
 			v.position, v.place = (^ecs.World_Position)(raw_data(bytes))^, true
 		case .Vector, .String:
@@ -164,12 +283,11 @@ condition_holds :: proc(t: ^Think_Context, index: u32) -> bool {
 		case .Distance:
 			a, b := stack[top - 2], stack[top - 1]
 			top -= 1
-			distance := math.INF_F64
+			meters := math.INF_F64
 			if a.place && b.place {
-				d := ecs.position_sub_f64(a.position, b.position)
-				distance = math.sqrt(d.x * d.x + d.y * d.y + d.z * d.z)
+				meters = place_distance(a.position, b.position)
 			}
-			stack[top - 1] = {number = distance}
+			stack[top - 1] = {number = meters}
 		case .Less, .Less_Equal, .Greater, .Greater_Equal, .Equal, .Not_Equal:
 			a, b := stack[top - 2], stack[top - 1]
 			top -= 1
@@ -235,17 +353,21 @@ think_job :: proc(data: rawptr) {
 		board, _ := board_of(s, slot.blackboard)
 		decision, _ := decision_of(s, slot.decision)
 		t := Think_Context {
-			world    = w,
-			entity   = slot.entity,
-			decision = decision,
-			board    = board,
-			values   = ready.values,
-			state    = ready.state,
-			action   = action_view(ready.action),
-			dt       = 0 if ready.thinks == 0 else f32(now - ready.last_think) / f32(w.clock.tick_rate),
-			thinks   = ready.thinks,
-			agent    = {index, s.agents.generations[index]},
-			out      = &j.out,
+			world      = w,
+			entity     = slot.entity,
+			decision   = decision,
+			board      = board,
+			values     = ready.values,
+			state      = ready.state,
+			action     = action_view(ready.action),
+			dt         = 0 if ready.thinks == 0 else f32(now - ready.last_think) / f32(w.clock.tick_rate),
+			thinks     = ready.thinks,
+			agent      = {index, s.agents.generations[index]},
+			out        = &j.out,
+			random     = &ready.random,
+			changed    = ready.changed,
+			perception = ready.perception,
+			tags       = &s.tags,
 		}
 		s.modules[decision.blob.technique].think(&t)
 	}

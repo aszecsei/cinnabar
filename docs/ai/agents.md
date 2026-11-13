@@ -1,6 +1,6 @@
 # Agents
 
-The core of the AI, in `lib/engine/ai`: agents, their blackboards, the decision modules that choose their actions, the native and script actions that act, and the `ai think` system that runs the decisions on jobs within a budget. It has no decision module of its own. Each technique of the [decision kind](../content/kinds/decisions.md#techniques) registers one: the behavior tree's is in `lib/engine/ai/behavior_tree` ([Behavior trees](behavior-trees.md)). Read [Hot reload](../overview/hot-reload.md#rules), [World: ECS](../world/ecs.md#systems), [World: Time](../world/time.md) and [Scripting: Behaviours](../scripting/behaviours.md) first.
+The core of the AI, in `lib/engine/ai`: agents, their blackboards, the decision modules that choose their actions, the native and script actions that act, and the `ai think` system that runs the decisions on jobs within a budget. It has no decision module of its own. Each technique of the [decision kind](../content/kinds/decisions.md#techniques) registers one: the behavior tree's is in `lib/engine/ai/behavior_tree` ([Behavior trees](behavior-trees.md)), and utility's is in `lib/engine/ai/utility` ([Utility](utility.md)). Read [Hot reload](../overview/hot-reload.md#rules), [World: ECS](../world/ecs.md#systems), [World: Time](../world/time.md) and [Scripting: Behaviours](../scripting/behaviours.md) first.
 
 **In this document:** [Design](#design) · [Agents](#agents) · [Blackboards](#blackboards) · [Thinking](#thinking) · [Actions](#actions) · [The order in a tick](#the-order-in-a-tick) · [Determinism](#determinism) · [Reload and restart](#reload-and-restart) · [Scripts](#scripts) · [Limits](#limits)
 
@@ -25,7 +25,7 @@ An agent with a `Perceiver` also sees and hears, and keeps what it perceives in 
 - **Phases:** a slot is `Agent_Waiting` until its blobs are loaded and fit, then `Agent_Ready`. `set_phase` is its only writer.
 - **Loading:** `ai.prepare`, in every mode before the ticks, loads each blackboard and decision that a slot names, unloads those that none names, and reads the loaded blobs into the frame's views. `ai.end_frame` lets them go before `asset.poll`. A blob that does not load is tried again after the next cook.
 - **Fitting:** an agent waits, with a warning, while its decision names another blackboard than its `Agent`, was cooked against another version of its blackboard (`format.decision_check`), is of a technique that no module runs, or has technique data that its module's `check` refuses.
-- **Starting:** a ready agent's values start as its blackboard's defaults, its module state as zero, and it has no action. The writes that scripts made before it was ready then apply ([Scripts](#scripts)).
+- **Starting:** a ready agent's values start as its blackboard's defaults, its module state as zero, and it has no action. Its generator is seeded ([Determinism](#determinism)), and every key counts as changed at that tick. The writes that scripts made before it was ready then apply ([Scripts](#scripts)).
 
 ## Blackboards
 
@@ -41,6 +41,7 @@ An agent's blackboard is its values: `values_size` bytes in its slot, with each 
 - **Values** are an `ai.Value`: `f32`, `i32`, `bool`, `Enum_Index`, `Entity`, `World_Position` or `[3]f32`. A write by name finds its key by `animation_graph_hash` of the name. A float and an int convert into each other. A write of another type, or to a key that the blackboard does not have, is warned about and dropped.
 - **Reading:** `ai.get_key(s, entity, key)` from frame code, `ai.get(a, key)` in a native action, and `Blackboard.get` from scripts. A module reads its context's `values`.
 - **Commands:** the job buffer `ai commands` holds `ai.Command`s: writes, and actions to start or stop. Its flush applies them in its order, which is the order of the systems and then of their jobs.
+- **Changes:** each agent keeps the tick at which each key last changed, which a decision reads as the time since the change. A write that gives a key the bytes that it has already is not a change.
 
 ## Thinking
 
@@ -54,11 +55,13 @@ An agent's blackboard is its values: `values_size` bytes in its slot, with each 
 
 An agent's first think is staggered by its slot: the slot's place on the golden ratio's sequence, scaled to the interval. Agents that start together think in ticks spread over their interval rather than in one tick. An agent that the budget delays thinks as soon as its turn comes, and its next think is placed from then.
 
-- **Modules:** `ai.register_module(s, technique, {think, check})` in `register_world`. `check`, which is optional, checks the technique's data against the decision and its blackboard before an agent starts with them, so `think` reads only data that was checked. `think` gets a `Think_Context`: the agent, its decision and blackboard, its values, its module state (`state_size` bytes from the decision's blob), its action (`Action_View`: the reference that it started, and whether it runs or ended), the seconds since it last thought, and how often it thought. It may read the world, writes only its module state, and asks for its outputs:
+- **Modules:** `ai.register_module(s, technique, {think, check})` in `register_world`. `check`, which is optional, checks the technique's data against the decision and its blackboard before an agent starts with them, so `think` reads only data that was checked. `scores`, which is optional, gives what the agent's last think scored, for debuggers and scripts (`ai.scores(s, entity)`). `think` gets a `Think_Context`: the agent, its decision and blackboard, its values and the tick at which each key last changed, its module state (`state_size` bytes from the decision's blob), its action (`Action_View`: the reference that it started, and whether it runs or ended), the seconds since it last thought, how often it thought, its generator, and its perception memory, if it has one, with the project's tags. It may read the world, writes only its module state and its generator, and asks for its outputs:
   - `ai.condition_holds(t, index)` evaluates a decision's condition;
   - `ai.start_action(t, ref)` asks to start an action reference, which stops the one that runs. Asking for the action that runs does nothing.
   - `ai.stop_action(t)` asks to stop it;
-  - `ai.write(t, index)` and `ai.node_writes(t, node)` ask for a decision's writes, with their values as the blackboard is at the think.
+  - `ai.write(t, index)` and `ai.node_writes(t, node)` ask for a decision's writes, with their values as the blackboard is at the think;
+  - `ai.write_entity(t, slot, entity)` asks to write an entity key;
+  - `ai.key_number`, `ai.place_of`, `ai.distance`, `ai.seconds_since_changed` and `ai.tag_matches` read the inputs that a module scores.
 - **When outputs apply:** after the tick's `Fixed` systems. A native action starts in the next tick's `ai actions`; a script action in this tick's script step.
 
 ## Actions
@@ -124,6 +127,7 @@ An agent's thinks, actions and blackboard are the same on every run, on one job 
 - Each think job writes only its own agents' module state. Its outputs go into the system's buffer in the agents' order, after every job is done.
 - Native action jobs write only their own agents' actions. Their commands land in job order.
 - Script actions run serially, in slot order.
+- Each agent has its own generator, `random.State` in its slot, which only its thinks draw from. It is seeded when the agent starts, from `ai.set_seed`'s seed (0 by default) mixed with the agent's slot. A run with the same seed therefore replays the same draws.
 
 The tests compare the thinks, chosen nodes, actions and values of 100 agents on one job and on eight workers, with budgets of 7 and 1000.
 
@@ -141,6 +145,7 @@ The tests compare the thinks, chosen nodes, actions and values of 100 agents on 
 | `Blackboard.get(entity, key)` | The key's value: a number for a float or an int, a boolean, an enum's name, an `Entity` or nil, a `WorldPosition`, or a vector. Nil for an agent that is not ready. |
 | `Blackboard.set(entity, key, value)` | Writes the key at once. A write to an agent that is not ready yet, as in `awake`, applies when it is. |
 | `Agent.current_action(entity)` | The name of the action that the agent runs or starts, or nil |
+| `Agent.scores(entity)` | What the agent's module scored in its last think: a list of `{ option, action, score, target, considerations }`, with each consideration `{ consideration, input, score }` and the node IDs of the decision. Nil for an agent that is not ready, or whose module keeps no scores ([Utility: Scores for debugging](utility.md#scores-for-debugging)). |
 
 An entity without an `Agent`, a key that the blackboard does not have, or a value of another type raises an error.
 

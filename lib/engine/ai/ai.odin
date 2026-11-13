@@ -135,6 +135,8 @@ State :: struct {
 	early:          [dynamic]Command,
 	// The agents that think in a tick.
 	budget:         int,
+	// The seed of the agents' generators, which set_seed sets.
+	seed:           u64,
 	// The project's perception.tags, the sight rays of a tick, and the slot of the perceiver that was visited last.
 	tags:           Tag_Names,
 	sight_budget:   int,
@@ -262,6 +264,31 @@ destroy :: proc(s: ^State) {
 // set_budget sets the agents that think in a tick (see docs/ai/agents.md#thinking).
 set_budget :: proc(s: ^State, agents: int) {
 	s.budget = max(agents, 1)
+}
+
+// set_seed sets the seed that each agent's generator starts from, with its slot, when it starts (see
+// docs/ai/agents.md#determinism). It is 0 by default. The agents that run already keep their sequences.
+set_seed :: proc(s: ^State, seed: u64) {
+	s.seed = seed
+}
+
+// scores is what an agent's module scored in its last think, by option, for debuggers and scripts, in the allocator.
+// It is false for an agent that is not ready, or whose module keeps no scores.
+scores :: proc(s: ^State, e: ecs.Entity, allocator := context.temp_allocator) -> ([]Option_Score, bool) {
+	slot, ready := ready_of(s, s.world, e)
+	if ready == nil {
+		return nil, false
+	}
+	board, board_ok := board_of(s, slot.blackboard)
+	decision, decision_ok := decision_of(s, slot.decision)
+	if !board_ok || !decision_ok {
+		return nil, false
+	}
+	module := s.modules[decision.blob.technique]
+	if module.scores == nil {
+		return nil, false
+	}
+	return module.scores(decision, board, ready.state, allocator), true
 }
 
 // register_module registers a technique's decision module. Call it in register_world, after register.

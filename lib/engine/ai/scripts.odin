@@ -132,6 +132,46 @@ register_scripts :: proc(r: ^script.Runtime, s: ^State) {
 		}
 		return 1
 	}, "(entity: Entity) -> string?")
+	script.define(r, "Agent.scores", proc(L: ^luau.State) -> c.int {
+		s := state_of(L)
+		e := script.check_entity(L, 1)
+		if !ecs.is_alive(s.world, e) || !ecs.has(s.world, e, Agent) {
+			script.raise(L, "the entity has no Agent")
+		}
+		options, ok := scores(s, e, context.temp_allocator)
+		if !ok {
+			luau.pushnil(L)
+			return 1
+		}
+		luau.createtable(L, c.int(len(options)), 0)
+		for o, i in options {
+			luau.createtable(L, 0, 5)
+			luau.pushnumber(L, f64(o.id))
+			luau.setfield(L, -2, "option")
+			luau.pushodinstring(L, o.action)
+			luau.setfield(L, -2, "action")
+			luau.pushnumber(L, f64(o.score))
+			luau.setfield(L, -2, "score")
+			if o.target != 0 {
+				script.push_entity(L, o.target)
+				luau.setfield(L, -2, "target")
+			}
+			luau.createtable(L, c.int(len(o.considerations)), 0)
+			for cs, k in o.considerations {
+				luau.createtable(L, 0, 3)
+				luau.pushnumber(L, f64(cs.id))
+				luau.setfield(L, -2, "consideration")
+				luau.pushnumber(L, f64(cs.input))
+				luau.setfield(L, -2, "input")
+				luau.pushnumber(L, f64(cs.score))
+				luau.setfield(L, -2, "score")
+				luau.rawseti(L, -2, c.int(k + 1))
+			}
+			luau.setfield(L, -2, "considerations")
+			luau.rawseti(L, -2, c.int(i + 1))
+		}
+		return 1
+	}, "(entity: Entity) -> { { option: number, action: string, score: number, target: Entity?, considerations: { { consideration: number, input: number, score: number } } } }?")
 	script.define(r, "Perception.noise", proc(L: ^luau.State) -> c.int {
 		s := state_of(L)
 		position := script.check_position(L, 1)

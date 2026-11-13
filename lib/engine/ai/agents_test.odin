@@ -18,6 +18,7 @@ import "cinnabar:core/testlog"
 import "cinnabar:engine/asset"
 import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/ecs"
+import "cinnabar:engine/random"
 import "cinnabar:engine/script"
 
 // The scheduler and the physics backend are singletons, and the test runner runs tests on several threads, so every
@@ -141,6 +142,16 @@ test_think :: proc(t: ^Think_Context) {
 	stop_action(t)
 }
 
+// test_scores gives one option, with the module's think count as its score's tenths, and one consideration.
+@(private = "file")
+test_scores :: proc(decision: Decision, board: Board, state: []byte, allocator: runtime.Allocator) -> []Option_Score {
+	considerations := make([]Consideration_Score, 1, allocator)
+	considerations[0] = {id = 7, input = 0.25, score = 0.75}
+	result := make([]Option_Score, 1, allocator)
+	result[0] = {id = 1, action = "flee", score = f32((^u32)(&state[0])^) / 10, considerations = considerations}
+	return result
+}
+
 @(private = "file")
 log_event :: proc(a: ^Action_Context, f: string, args: ..any) {
 	fixture := (^Fixture)(a.system.user)
@@ -153,7 +164,7 @@ log_event :: proc(a: ^Action_Context, f: string, args: ..any) {
 // stopped. Without scripts, bark is a native action that succeeds at once.
 @(private = "file")
 register_test_actions :: proc(s: ^State, scripts := false) {
-	register_module(s, .Behavior_Tree, {think = test_think})
+	register_module(s, .Behavior_Tree, {think = test_think, scores = test_scores})
 	if !scripts {
 		register_action(s, {name = "bark", params = {{"line", .String}, {"at", .Entity}}})
 	}
@@ -832,4 +843,83 @@ scripts_act_and_write_the_blackboard :: proc(t: ^testing.T) {
 	testing.expect(t, !ok)
 	_, ok = script.spawn_source(&f.runtime, "=bad", `Blackboard.set(Test.agent(), "mood", "furious")`)
 	testing.expect(t, !ok)
+}
+
+// A write notes the tick that its key changed in, and a write of the same value does not.
+@(test)
+a_key_notes_the_tick_that_it_changed_in :: proc(t: ^testing.T) {
+	f := setup(t, serial = true)
+	defer teardown(t, f)
+	e := spawn_agent(f, interval = 100)
+	frame(f, 2)
+	ready := ready_agent(f, e)
+	testing.expect(t, ready != nil)
+	if ready == nil {
+		return
+	}
+	started := ready.changed[1]
+	frame(f, 3)
+	set_key(&f.ai, e, "ammo", i32(3))
+	testing.expect_value(t, ready.changed[1], started)
+	set_key(&f.ai, e, "ammo", i32(4))
+	testing.expect_value(t, ready.changed[1], f.world.clock.tick)
+	testing.expect_value(t, ready.changed[0], started)
+}
+
+// Each agent's generator is seeded by the state's seed and its slot, so agents draw unlike sequences, and one seed
+// gives the same sequences again.
+@(test)
+each_agent_draws_from_its_own_seeded_generator :: proc(t: ^testing.T) {
+	states :: proc(t: ^testing.T, seed: u64) -> (a, b: random.State) {
+		f := setup(t, serial = true)
+		defer teardown(t, f)
+		set_seed(&f.ai, seed)
+		first := spawn_agent(f, interval = 100)
+		second := spawn_agent(f, interval = 100)
+		frame(f, 2)
+		if ready := ready_agent(f, first); ready != nil {
+			a = ready.random
+		}
+		if ready := ready_agent(f, second); ready != nil {
+			b = ready.random
+		}
+		return
+	}
+	a1, b1 := states(t, 5)
+	a2, b2 := states(t, 5)
+	a3, _ := states(t, 6)
+	testing.expect(t, a1 != {} && b1 != {})
+	testing.expect(t, a1 != b1)
+	testing.expect_value(t, a1, a2)
+	testing.expect_value(t, b1, b2)
+	testing.expect(t, a1 != a3)
+}
+
+// Agent.scores gives what the agent's module scored, by option and consideration, and nil before the agent is ready.
+@(test)
+agent_scores_reads_the_modules_scores :: proc(t: ^testing.T) {
+	f := setup(t, serial = true, scripts = true)
+	defer teardown(t, f)
+	context.user_ptr = f
+	f.agent = spawn_agent(f, interval = 0)
+	_, ok := script.spawn_source(&f.runtime, "=early", `Test.report(if Agent.scores(Test.agent()) == nil then 1 else 0)`)
+	testing.expect(t, ok)
+	frame(f, 4)
+	_, ok = script.spawn_source(&f.runtime, "=scores", `
+		local scores = Agent.scores(Test.agent())
+		Test.report(#scores)
+		local s = scores[1]
+		Test.report(s.option)
+		Test.report(if s.action == "flee" then 1 else 0)
+		Test.report(s.score)
+		Test.report(if s.target == nil then 1 else 0)
+		Test.report(#s.considerations)
+		Test.report(s.considerations[1].consideration)
+		Test.report(s.considerations[1].input)
+		Test.report(s.considerations[1].score)
+	`)
+	testing.expect(t, ok)
+	thinks := f64(thinks_of(f, f.agent))
+	expected := []f64{1, 1, 1, 1, f64(f32(thinks) / 10), 1, 1, 7, 0.25, 0.75}
+	testing.expectf(t, slice.equal(f.reports[:], expected), "%v, expected %v", f.reports, expected)
 }
