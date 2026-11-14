@@ -131,6 +131,12 @@ ambient_scattered :: proc(a: Ambient, g: f32, toward: [3]f32) -> [3]f32 {
 	return linalg.max(a.constant - 1.5 * g * (a.x * toward.x + a.y * toward.y + a.z * toward.z), 0)
 }
 
+// ambient_hemisphere is the ambient light averaged over the hemisphere around axis, as ambient_hemisphere in
+// ambient.hlsli has it: the clouds' sky light from above and the ground's from below.
+ambient_hemisphere :: proc(a: Ambient, axis: [3]f32) -> [3]f32 {
+	return linalg.max(a.constant + 0.75 * (a.x * axis.x + a.y * axis.y + a.z * axis.z), 0)
+}
+
 // ambient_constants is an Ambient as the shaders take it: constant, x, y and z in four float4s.
 @(private)
 ambient_constants :: proc(a: Ambient) -> [4][4]f32 {

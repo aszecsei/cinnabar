@@ -8,9 +8,17 @@ float3 ambient_light(float4 ambient[4], float3 d) {
 	return max(ambient[0].rgb + ambient[1].rgb * d.x + ambient[2].rgb * d.y + ambient[3].rgb * d.z, 0);
 }
 
-// The ambient light averaged over every direction, which the sprites and the clouds take whatever their phase.
+// The ambient light averaged over every direction, which the sprites take whatever their facing.
 float3 ambient_average(float4 ambient[4]) {
 	return ambient[0].rgb;
+}
+
+// Matches ambient_hemisphere in lib/engine/render/lights.odin: the light averaged over the hemisphere around axis. The
+// light from a direction d is constant + 1.5 * gradient . d (see ambient_scattered), and d . axis averages 0.5 over the
+// hemisphere, so the mean is constant + 0.75 * gradient . axis.
+float3 ambient_hemisphere(float4 ambient[4], float3 axis) {
+	float3 gradient = ambient[1].rgb * axis.x + ambient[2].rgb * axis.y + ambient[3].rgb * axis.z;
+	return max(ambient[0].rgb + 0.75 * gradient, 0);
 }
 
 // Matches ambient_scattered in lib/engine/render/lights.odin: the ambient light that a medium with Henyey-Greenstein's
