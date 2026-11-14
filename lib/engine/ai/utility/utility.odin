@@ -129,7 +129,11 @@ option_state :: proc(state: []byte, o: format.Utility_Option) -> ^format.Utility
 @(private)
 link_states :: proc(state: []byte, o: format.Utility_Option) -> []format.Utility_Link_State {
 	// An option without considerations may have its links' states at the end of the state.
-	return ([^]format.Utility_Link_State)(rawptr(uintptr(raw_data(state)) + uintptr(o.links_state)))[:o.link_count]
+	return(
+		([^]format.Utility_Link_State)(
+			rawptr(uintptr(raw_data(state)) + uintptr(o.links_state)),
+		)[:o.link_count] \
+	)
 }
 
 // think scores the options and runs the best: the running option, while it runs and no other beats its score with its
@@ -274,7 +278,8 @@ score_option :: proc(b: ^Think, o: format.Utility_Option) -> f64 {
 	scratch: [MAX_LINKS]format.Utility_Link_State
 	m := t.perception
 	for entry in m.entries[:m.count] {
-		if !ai.perceived_now(entry) || (.Tag in o.flags && !ai.tag_matches(t, entry, o.target_tag)) {
+		if !ai.perceived_now(entry) ||
+		   (.Tag in o.flags && !ai.tag_matches(t, entry, o.target_tag)) {
 			continue
 		}
 		slot^ = entry.entity
@@ -293,7 +298,11 @@ score_option :: proc(b: ^Think, o: format.Utility_Option) -> f64 {
 // score_values scores an option on the context's values: its weight times each of its considerations, made up for
 // their count, and 0 when its guard does not hold. It keeps each consideration's input and score in records.
 @(private)
-score_values :: proc(b: ^Think, o: format.Utility_Option, records: []format.Utility_Link_State) -> f64 {
+score_values :: proc(
+	b: ^Think,
+	o: format.Utility_Option,
+	records: []format.Utility_Link_State,
+) -> f64 {
 	if !ai.condition_holds(b.t, b.shared[o.node].condition) {
 		return 0
 	}
@@ -310,7 +319,13 @@ score_values :: proc(b: ^Think, o: format.Utility_Option, records: []format.Util
 
 // consider is a consideration's input on the context's values, normalized over its range, and its score through its
 // curve, a table's points being a range of points. GOAP scores its goals' considerations with it too.
-consider :: proc(t: ^ai.Think_Context, c: format.Utility_Consideration, points: []format.Utility_Point) -> (x, y: f64) {
+consider :: proc(
+	t: ^ai.Think_Context,
+	c: format.Utility_Consideration,
+	points: []format.Utility_Point,
+) -> (
+	x, y: f64,
+) {
 	x = normalize(c, input(t, c))
 	y = curve(c, points[c.first_point:][:c.point_count] if c.curve == .Table else nil, x)
 	return
@@ -351,7 +366,12 @@ ticks :: proc(b: ^Think, time: format.Tree_Time) -> u64 {
 }
 
 // scores gives what the agent's last think scored, for debuggers and scripts (see ai.scores).
-scores :: proc(decision: ai.Decision, board: ai.Board, state: []byte, allocator: runtime.Allocator) -> []ai.Option_Score {
+scores :: proc(
+	decision: ai.Decision,
+	board: ai.Board,
+	state: []byte,
+	allocator: runtime.Allocator,
+) -> []ai.Option_Score {
 	u := format.utility_data(format.decision_technique_data(decision.data, decision.blob))
 	shared := format.decision_nodes(decision.data, decision.blob)
 	actions := format.decision_actions(decision.data, decision.blob)
@@ -371,7 +391,10 @@ scores :: proc(decision: ai.Decision, board: ai.Board, state: []byte, allocator:
 		}
 		result[i] = {
 			id             = shared[o.node].id,
-			action         = format.blob_string(decision.data, actions[shared[o.node].action].name),
+			action         = format.blob_string(
+				decision.data,
+				actions[shared[o.node].action].name,
+			),
 			score          = st.score,
 			target         = ecs.Entity(st.target),
 			chosen         = running.option == u32(i) + 1,

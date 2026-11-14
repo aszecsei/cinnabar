@@ -75,9 +75,28 @@ templates_make_assets_that_cook :: proc(t: ^testing.T) {
 	o := ops_open(t, {{"content/scripts/keep.luau", "return 1"}}, typed = true)
 	defer ops_close(&o)
 
-	module := operate(&o, cook_link.Create_Asset{template = .Script, root = "game", folder = "scripts", name = "util"})
-	behaviour := operate(&o, cook_link.Create_Asset{template = .Behaviour, root = "game", folder = "scripts", name = "door bell"})
-	scene := operate(&o, cook_link.Create_Asset{template = .Scene, root = "game", folder = "", name = "hall.scene"})
+	module := operate(
+		&o,
+		cook_link.Create_Asset {
+			template = .Script,
+			root = "game",
+			folder = "scripts",
+			name = "util",
+		},
+	)
+	behaviour := operate(
+		&o,
+		cook_link.Create_Asset {
+			template = .Behaviour,
+			root = "game",
+			folder = "scripts",
+			name = "door bell",
+		},
+	)
+	scene := operate(
+		&o,
+		cook_link.Create_Asset{template = .Scene, root = "game", folder = "", name = "hall.scene"},
+	)
 	for r in ([]cook_link.Operation_Result{module, behaviour, scene}) {
 		testing.expectf(t, r.error == "" && len(r.guids) == 1, "%v", r)
 	}
@@ -90,28 +109,18 @@ templates_make_assets_that_cook :: proc(t: ^testing.T) {
 
 @(test)
 a_failed_operation_changes_nothing :: proc(t: ^testing.T) {
-	o := ops_open(t, {{"content/a.luau", "return 1"}, {"content/b.luau", "return 2"}, {"content/sub/b.luau", "return 3"}})
+	o := ops_open(
+		t,
+		{
+			{"content/a.luau", "return 1"},
+			{"content/b.luau", "return 2"},
+			{"content/sub/b.luau", "return 3"},
+		},
+	)
 	defer ops_close(&o)
 	a, b := guid_at(&o, "a.luau"), guid_at(&o, "b.luau")
 
-	for message in ([]cook_link.Message {
-			cook_link.Create_Asset{template = .Script, root = "game", name = "a"},
-			cook_link.Create_Asset{template = .Script, root = "game", name = "con"},
-			cook_link.Create_Asset{template = .Script, root = "game", name = "x/y"},
-			cook_link.Create_Asset{template = .Script, root = "game", folder = "../outside", name = "x"},
-			cook_link.Create_Asset{template = .Script, root = "nowhere", name = "x"},
-			cook_link.Create_Folder{root = "game", path = "sub"},
-			cook_link.Create_Folder{root = "game", path = ".hidden"},
-			cook_link.Rename_Asset{guid = a, name = "b"},
-			cook_link.Rename_Folder{root = "game", path = "", name = "x"},
-			cook_link.Move_Assets{guids = {a, b}, root = "game", folder = "sub"},
-			cook_link.Move_Assets{guids = {a}, root = "game", folder = "missing"},
-			cook_link.Delete_Assets{folders = {{"game", ""}}},
-			cook_link.Delete_Assets{guids = {"00000000000000000000000000000000"}},
-			cook_link.Set_Import_Settings{assets = {{guid = a, settings = {{"native", "maybe"}}}}},
-			cook_link.Set_Import_Settings{assets = {{guid = a, settings = {{"colour", "red"}}}}},
-			cook_link.Reimport{guids = {"nope"}},
-		}) {
+	for message in ([]cook_link.Message{cook_link.Create_Asset{template = .Script, root = "game", name = "a"}, cook_link.Create_Asset{template = .Script, root = "game", name = "con"}, cook_link.Create_Asset{template = .Script, root = "game", name = "x/y"}, cook_link.Create_Asset{template = .Script, root = "game", folder = "../outside", name = "x"}, cook_link.Create_Asset{template = .Script, root = "nowhere", name = "x"}, cook_link.Create_Folder{root = "game", path = "sub"}, cook_link.Create_Folder{root = "game", path = ".hidden"}, cook_link.Rename_Asset{guid = a, name = "b"}, cook_link.Rename_Folder{root = "game", path = "", name = "x"}, cook_link.Move_Assets{guids = {a, b}, root = "game", folder = "sub"}, cook_link.Move_Assets{guids = {a}, root = "game", folder = "missing"}, cook_link.Delete_Assets{folders = {{"game", ""}}}, cook_link.Delete_Assets{guids = {"00000000000000000000000000000000"}}, cook_link.Set_Import_Settings{assets = {{guid = a, settings = {{"native", "maybe"}}}}}, cook_link.Set_Import_Settings{assets = {{guid = a, settings = {{"colour", "red"}}}}}, cook_link.Reimport{guids = {"nope"}}}) {
 		result := operate(&o, message)
 		testing.expectf(t, result.error != "", "%v succeeded", message)
 	}
@@ -127,7 +136,11 @@ moves_and_renames_keep_the_guid :: proc(t: ^testing.T) {
 	defer ops_close(&o)
 	a := guid_at(&o, "a.luau")
 
-	testing.expect_value(t, operate(&o, cook_link.Move_Assets{guids = {a}, root = "game", folder = "sub"}).error, "")
+	testing.expect_value(
+		t,
+		operate(&o, cook_link.Move_Assets{guids = {a}, root = "game", folder = "sub"}).error,
+		"",
+	)
 	testing.expect_value(t, guid_at(&o, "sub/a.luau"), a)
 	testing.expect(t, !exists(&o, "a.luau.meta") && exists(&o, "sub/a.luau.meta"))
 
@@ -137,8 +150,16 @@ moves_and_renames_keep_the_guid :: proc(t: ^testing.T) {
 	testing.expect_value(t, operate(&o, cook_link.Rename_Asset{guid = a, name = "B"}).error, "")
 	testing.expect_value(t, guid_at(&o, "sub/B.luau"), a)
 
-	testing.expect_value(t, operate(&o, cook_link.Create_Folder{root = "game", path = "sub/deep"}).error, "")
-	testing.expect_value(t, operate(&o, cook_link.Rename_Folder{root = "game", path = "sub", name = "moved"}).error, "")
+	testing.expect_value(
+		t,
+		operate(&o, cook_link.Create_Folder{root = "game", path = "sub/deep"}).error,
+		"",
+	)
+	testing.expect_value(
+		t,
+		operate(&o, cook_link.Rename_Folder{root = "game", path = "sub", name = "moved"}).error,
+		"",
+	)
 	testing.expect_value(t, guid_at(&o, "moved/B.luau"), a)
 	testing.expect(t, slice_has_folder(o.index.folders, {"game", "moved/deep"}))
 	testing.expect_value(t, len(o.pass.problems.list), 0)
@@ -156,7 +177,13 @@ slice_has_folder :: proc(folders: []cook_link.Folder, f: cook_link.Folder) -> bo
 
 @(test)
 a_duplicate_has_a_new_guid_and_the_settings :: proc(t: ^testing.T) {
-	o := ops_open(t, {{"content/a.luau", "return 1"}, {"content/a.luau.meta", "guid = 00112233445566778899aabbccddee01\nnative = true\n"}})
+	o := ops_open(
+		t,
+		{
+			{"content/a.luau", "return 1"},
+			{"content/a.luau.meta", "guid = 00112233445566778899aabbccddee01\nnative = true\n"},
+		},
+	)
 	defer ops_close(&o)
 	a := guid_at(&o, "a.luau")
 
@@ -167,7 +194,10 @@ a_duplicate_has_a_new_guid_and_the_settings :: proc(t: ^testing.T) {
 	testing.expect_value(t, guid_at(&o, "a_copy_2.luau"), second.guids[0])
 	testing.expect(t, first.guids[0] != a)
 	copy := o.index.assets[first.guids[0]]
-	testing.expect(t, len(copy.settings) == 1 && copy.settings[0] == cook_link.Setting{"native", "true"})
+	testing.expect(
+		t,
+		len(copy.settings) == 1 && copy.settings[0] == cook_link.Setting{"native", "true"},
+	)
 	testing.expect(t, o.pass.ok)
 }
 
@@ -179,13 +209,29 @@ import_settings_are_checked_and_cook_again :: proc(t: ^testing.T) {
 	a := guid_at(&o, "a.luau")
 
 	// A setting that the importer does not know stays as the file has it.
-	result := operate(&o, cook_link.Set_Import_Settings{assets = {{guid = a, settings = {{"old", "1"}, {"native", "true"}}}}})
+	result := operate(
+		&o,
+		cook_link.Set_Import_Settings {
+			assets = {{guid = a, settings = {{"old", "1"}, {"native", "true"}}}},
+		},
+	)
 	testing.expect_value(t, result.error, "")
 	testing.expect_value(t, o.pass.cooked[.Script], 1)
-	text, _ := os.read_entire_file(fmt.tprintf("%s/content/a.luau.meta", o.tree.dir), context.temp_allocator)
-	testing.expect_value(t, string(text), "# a comment that stays\nguid = 00112233445566778899aabbccddee01\nold = 1\nnative = true\n")
+	text, _ := os.read_entire_file(
+		fmt.tprintf("%s/content/a.luau.meta", o.tree.dir),
+		context.temp_allocator,
+	)
+	testing.expect_value(
+		t,
+		string(text),
+		"# a comment that stays\nguid = 00112233445566778899aabbccddee01\nold = 1\nnative = true\n",
+	)
 
-	testing.expect_value(t, operate(&o, cook_link.Set_Import_Settings{assets = {{guid = a}}}).error, "")
+	testing.expect_value(
+		t,
+		operate(&o, cook_link.Set_Import_Settings{assets = {{guid = a}}}).error,
+		"",
+	)
 	testing.expect_value(t, len(o.index.assets[a].settings), 0)
 }
 
@@ -198,14 +244,30 @@ set_import_settings_is_all_or_nothing :: proc(t: ^testing.T) {
 	before, _ := os.read_entire_file(meta_a, context.temp_allocator)
 
 	// A bad setting on the second asset leaves the first's .meta file as it was.
-	result := operate(&o, cook_link.Set_Import_Settings{assets = {{guid = a, settings = {{"native", "true"}}}, {guid = b, settings = {{"native", "maybe"}}}}})
+	result := operate(
+		&o,
+		cook_link.Set_Import_Settings {
+			assets = {
+				{guid = a, settings = {{"native", "true"}}},
+				{guid = b, settings = {{"native", "maybe"}}},
+			},
+		},
+	)
 	testing.expect(t, result.error != "")
 	after, _ := os.read_entire_file(meta_a, context.temp_allocator)
 	testing.expect_value(t, string(after), string(before))
 	testing.expect_value(t, o.pass.cooked[.Script], 0)
 
 	// With both good, both change, and one pass cooks them.
-	result = operate(&o, cook_link.Set_Import_Settings{assets = {{guid = a, settings = {{"native", "true"}}}, {guid = b, settings = {{"native", "true"}}}}})
+	result = operate(
+		&o,
+		cook_link.Set_Import_Settings {
+			assets = {
+				{guid = a, settings = {{"native", "true"}}},
+				{guid = b, settings = {{"native", "true"}}},
+			},
+		},
+	)
 	testing.expect_value(t, result.error, "")
 	testing.expect_value(t, o.pass.cooked[.Script], 2)
 	testing.expect_value(t, len(o.index.assets[a].settings), 1)
@@ -232,7 +294,15 @@ a_failed_write_restores_the_meta_files :: proc(t: ^testing.T) {
 	result: cook_link.Operation_Result
 	{
 		context.logger = log.nil_logger()
-		result = operate(&o, cook_link.Set_Import_Settings{assets = {{guid = a, settings = {{"native", "true"}}}, {guid = b, settings = {{"native", "true"}}}}})
+		result = operate(
+			&o,
+			cook_link.Set_Import_Settings {
+				assets = {
+					{guid = a, settings = {{"native", "true"}}},
+					{guid = b, settings = {{"native", "true"}}},
+				},
+			},
+		)
 	}
 	testing.expect(t, strings.contains(result.error, "b.luau.meta"))
 	after_a, _ := os.read_entire_file(meta_a, context.temp_allocator)
@@ -248,7 +318,10 @@ a_reimport_cooks_an_up_to_date_asset :: proc(t: ^testing.T) {
 	ops_pass(&o)
 	testing.expect_value(t, o.pass.cooked[.Script] + o.pass.cooked[.Scene], 0)
 
-	result := operate(&o, cook_link.Reimport{guids = {guid_at(&o, "a.luau"), guid_at(&o, "b.scene")}})
+	result := operate(
+		&o,
+		cook_link.Reimport{guids = {guid_at(&o, "a.luau"), guid_at(&o, "b.scene")}},
+	)
 	testing.expect_value(t, result.error, "")
 	testing.expect_value(t, o.pass.cooked[.Script], 1)
 	testing.expect_value(t, o.pass.cooked[.Scene], 1)
@@ -260,7 +333,12 @@ a_meta_file_without_its_asset_is_a_warning :: proc(t: ^testing.T) {
 	defer ops_close(&o)
 	testing.expect(t, o.pass.ok)
 	problems := o.index.problems[""]
-	testing.expect(t, len(problems) == 1 && !problems[0].error && strings.has_suffix(problems[0].file, "moved.luau.meta"))
+	testing.expect(
+		t,
+		len(problems) == 1 &&
+		!problems[0].error &&
+		strings.has_suffix(problems[0].file, "moved.luau.meta"),
+	)
 }
 
 @(test)
@@ -278,20 +356,33 @@ names_follow_windows_and_luau :: proc(t: ^testing.T) {
 }
 
 @(test)
-the_blackboard_and_decision_templates_make_assets_that_cook_once_a_blackboard_is_named :: proc(t: ^testing.T) {
+the_blackboard_and_decision_templates_make_assets_that_cook_once_a_blackboard_is_named :: proc(
+	t: ^testing.T,
+) {
 	o := ops_open(t, {{"content/keep.luau", "return 1"}})
 	defer ops_close(&o)
 
-	board := operate(&o, cook_link.Create_Asset{template = .Blackboard, root = "game", name = "guard"})
+	board := operate(
+		&o,
+		cook_link.Create_Asset{template = .Blackboard, root = "game", name = "guard"},
+	)
 	testing.expectf(t, board.error == "" && len(board.guids) == 1, "%v", board)
 	testing.expect(t, o.pass.ok)
 	testing.expect_value(t, o.index.assets[board.guids[0]].kind, cook_link.Asset_Kind.Blackboard)
 	testing.expect_value(t, o.index.assets[board.guids[0]].status, cook_link.Asset_Status.Current)
 
-	templates := [?]cook_link.Asset_Template{.Decision_Behavior_Tree, .Decision_Utility, .Decision_Goap, .Decision_Htn}
+	templates := [?]cook_link.Asset_Template {
+		.Decision_Behavior_Tree,
+		.Decision_Utility,
+		.Decision_Goap,
+		.Decision_Htn,
+	}
 	techniques := [?]string{"behavior_tree", "utility", "goap", "htn"}
 	for template, i in templates {
-		result := operate(&o, cook_link.Create_Asset{template = template, root = "game", name = techniques[i]})
+		result := operate(
+			&o,
+			cook_link.Create_Asset{template = template, root = "game", name = techniques[i]},
+		)
 		testing.expectf(t, result.error == "" && len(result.guids) == 1, "%v", result)
 		if len(result.guids) != 1 {
 			continue
@@ -302,7 +393,14 @@ the_blackboard_and_decision_templates_make_assets_that_cook_once_a_blackboard_is
 		// It is a problem until the author names a blackboard. The planners' planning keys are unknown without one too.
 		testing.expect_value(t, decision.status, cook_link.Asset_Status.Failed)
 		problems := o.index.problems[decision.guid]
-		testing.expectf(t, len(problems) > 0 && problems[0].line == 1 && strings.contains(problems[0].text, "names its blackboard"), "%v", problems)
+		testing.expectf(
+			t,
+			len(problems) > 0 &&
+			problems[0].line == 1 &&
+			strings.contains(problems[0].text, "names its blackboard"),
+			"%v",
+			problems,
+		)
 	}
 }
 

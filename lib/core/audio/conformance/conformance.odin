@@ -11,7 +11,9 @@ SAMPLES := [8]i16{0, 100, 200, 300, 400, 500, 600, 700}
 
 @(private)
 sound :: proc(api: ^audio.Audio_API) -> audio.Sound {
-	return api.sound_create(&audio.Sound_Desc{frames = len(SAMPLES), samples = &SAMPLES[0], channels = 1})
+	return api.sound_create(
+		&audio.Sound_Desc{frames = len(SAMPLES), samples = &SAMPLES[0], channels = 1},
+	)
 }
 
 @(private)
@@ -58,7 +60,11 @@ stale_handles_do_nothing :: proc(t: ^testing.T, api: ^audio.Audio_API) {
 
 	api.sound_destroy(s)
 	api.sound_destroy(s)
-	testing.expect_value(t, api.voice_play(&audio.Voice_Desc{sound = s, params = params()}), audio.Voice{})
+	testing.expect_value(
+		t,
+		api.voice_play(&audio.Voice_Desc{sound = s, params = params()}),
+		audio.Voice{},
+	)
 	testing.expect_value(t, api.voice_play(&audio.Voice_Desc{params = params()}), audio.Voice{})
 	api.bus_set_gain({30, 99}, 1)
 	api.update()
@@ -86,7 +92,9 @@ buses_nest :: proc(t: ^testing.T, api: ^audio.Audio_API) {
 	api.bus_set_effect(child, 0, &audio.Effect{kind = .Low_Pass, parameters = {1000, 0.7, 0}})
 	api.bus_set_effect(child, 0, &audio.Effect{kind = .None})
 	s := sound(api)
-	voice := api.voice_play(&audio.Voice_Desc{sound = s, bus = child, params = params(), loop = true})
+	voice := api.voice_play(
+		&audio.Voice_Desc{sound = s, bus = child, params = params(), loop = true},
+	)
 	testing.expect(t, bool(api.voice_playing(voice)))
 	testing.expect_value(t, api.bus_create("orphan", {31, 99}), audio.Bus{})
 	api.reset()
@@ -96,10 +104,16 @@ buses_nest :: proc(t: ^testing.T, api: ^audio.Audio_API) {
 reset_leaves_nothing :: proc(t: ^testing.T, api: ^audio.Audio_API) {
 	s := sound(api)
 	bus := api.bus_create("gone", {})
-	voice := api.voice_play(&audio.Voice_Desc{sound = s, bus = bus, params = params(), loop = true})
+	voice := api.voice_play(
+		&audio.Voice_Desc{sound = s, bus = bus, params = params(), loop = true},
+	)
 	testing.expect_value(t, api.reset(), 1)
 	testing.expect(t, !bool(api.voice_playing(voice)))
-	testing.expect_value(t, api.voice_play(&audio.Voice_Desc{sound = s, params = params()}), audio.Voice{})
+	testing.expect_value(
+		t,
+		api.voice_play(&audio.Voice_Desc{sound = s, params = params()}),
+		audio.Voice{},
+	)
 
 	stats: audio.Stats
 	api.stats(&stats)
@@ -107,8 +121,19 @@ reset_leaves_nothing :: proc(t: ^testing.T, api: ^audio.Audio_API) {
 	testing.expect_value(t, stats.sounds, 0)
 
 	again := sound(api)
-	testing.expect_value(t, api.voice_play(&audio.Voice_Desc{sound = again, bus = bus, params = params()}), audio.Voice{})
-	testing.expect(t, bool(api.voice_playing(api.voice_play(&audio.Voice_Desc{sound = again, params = params(), loop = true}))))
+	testing.expect_value(
+		t,
+		api.voice_play(&audio.Voice_Desc{sound = again, bus = bus, params = params()}),
+		audio.Voice{},
+	)
+	testing.expect(
+		t,
+		bool(
+			api.voice_playing(
+				api.voice_play(&audio.Voice_Desc{sound = again, params = params(), loop = true}),
+			),
+		),
+	)
 	testing.expect_value(t, api.reset(), 1)
 }
 

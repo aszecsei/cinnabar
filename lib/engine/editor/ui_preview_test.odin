@@ -75,8 +75,14 @@ setup :: proc(t: ^testing.T) -> ^Fixture {
 	document, problems, ok := format.ui_parse(TEXT)
 	testing.expectf(t, ok, "%v", problems)
 	guid, _ := format.guid_parse(DOCUMENT)
-	written := format.ui_write({guid = guid, key = 77, document = document}, context.temp_allocator)
-	testing.expect(t, os.write_entire_file(fmt.tprintf("%s/%s.blob", f.cache, DOCUMENT), written) == nil)
+	written := format.ui_write(
+		{guid = guid, key = 77, document = document},
+		context.temp_allocator,
+	)
+	testing.expect(
+		t,
+		os.write_entire_file(fmt.tprintf("%s/%s.blob", f.cache, DOCUMENT), written) == nil,
+	)
 	init(&f.editor, &f.platform, &f.assets)
 	return f
 }
@@ -101,7 +107,10 @@ exchange :: proc(f: ^Fixture, incoming: ..link.Message) -> []link.Ui_Preview_Lay
 		bytes := make([dynamic]byte, context.temp_allocator)
 		link.write_message(&bytes, m)
 		header, _ := link.read_header(bytes[:])
-		append(&encoded, core.Editor_Message{kind = header.kind, payload = bytes[link.HEADER_SIZE:]})
+		append(
+			&encoded,
+			core.Editor_Message{kind = header.kind, payload = bytes[link.HEADER_SIZE:]},
+		)
 	}
 	clear(&f.out)
 	f.editor.session.last_values = -1
@@ -110,7 +119,11 @@ exchange :: proc(f: ^Fixture, incoming: ..link.Message) -> []link.Ui_Preview_Lay
 	rest := f.out[:]
 	for len(rest) > 0 {
 		header, _ := link.read_header(rest)
-		message, ok := link.decode_message(header.kind, rest[link.HEADER_SIZE:][:header.length], context.temp_allocator)
+		message, ok := link.decode_message(
+			header.kind,
+			rest[link.HEADER_SIZE:][:header.length],
+			context.temp_allocator,
+		)
 		if layout, is_layout := message.(link.Ui_Preview_Layout); ok && is_layout {
 			append(&found, layout)
 		}
@@ -140,7 +153,9 @@ draw :: proc(f: ^Fixture) -> int {
 }
 
 @(test)
-a_ui_preview_lays_its_document_out_on_its_screen_and_says_where_its_elements_went :: proc(t: ^testing.T) {
+a_ui_preview_lays_its_document_out_on_its_screen_and_says_where_its_elements_went :: proc(
+	t: ^testing.T,
+) {
 	f := setup(t)
 	defer teardown(f)
 	guid, _ := format.guid_parse(DOCUMENT)
@@ -154,7 +169,11 @@ a_ui_preview_lays_its_document_out_on_its_screen_and_says_where_its_elements_wen
 		height        = 540,
 		forced_node   = max(u32),
 	}
-	testing.expect_value(t, len(exchange(f, link.Open_Preview{id = 2, material = ([16]u8)(guid)}, settings)), 0)
+	testing.expect_value(
+		t,
+		len(exchange(f, link.Open_Preview{id = 2, material = ([16]u8)(guid)}, settings)),
+		0,
+	)
 	testing.expect_value(t, draw(f), 1)
 	p := &f.editor.session.previews[2]
 	testing.expect_value(t, p.kind, Preview_Kind.Ui)
@@ -195,13 +214,25 @@ a_ui_preview_lays_its_document_out_on_its_screen_and_says_where_its_elements_wen
 // An Open_Preview that moves a preview from a UI document to a material with no blob frees the document, and the
 // preview draws the material, once, and not the document.
 @(test)
-a_preview_that_moves_from_a_ui_document_to_a_material_does_not_draw_the_document :: proc(t: ^testing.T) {
+a_preview_that_moves_from_a_ui_document_to_a_material_does_not_draw_the_document :: proc(
+	t: ^testing.T,
+) {
 	f := setup(t)
 	defer teardown(f)
-	missing := Counted_Log{text = "no blob for", next = context.logger}
+	missing := Counted_Log {
+		text = "no blob for",
+		next = context.logger,
+	}
 	context.logger = {count_log, &missing, .Debug, {}}
 	guid, _ := format.guid_parse(DOCUMENT)
-	settings := link.Ui_Preview_Settings{id = 2, screen_width = 1920, screen_height = 1080, width = 960, height = 540, forced_node = max(u32)}
+	settings := link.Ui_Preview_Settings {
+		id            = 2,
+		screen_width  = 1920,
+		screen_height = 1080,
+		width         = 960,
+		height        = 540,
+		forced_node   = max(u32),
+	}
 	exchange(f, link.Open_Preview{id = 2, material = ([16]u8)(guid)}, settings)
 	testing.expect_value(t, draw(f), 1)
 	p := &f.editor.session.previews[2]
@@ -209,7 +240,24 @@ a_preview_that_moves_from_a_ui_document_to_a_material_does_not_draw_the_document
 	testing.expect(t, ok)
 	testing.expect(t, f.editor.ui.documents[slot].used)
 
-	material := [16]u8{0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x01}
+	material := [16]u8 {
+		0x11,
+		0x22,
+		0x33,
+		0x44,
+		0x55,
+		0x66,
+		0x77,
+		0x88,
+		0x99,
+		0xaa,
+		0xbb,
+		0xcc,
+		0xdd,
+		0xee,
+		0xff,
+		0x01,
+	}
 	testing.expect_value(t, len(exchange(f, link.Open_Preview{id = 2, material = material})), 0)
 	testing.expect(t, !f.editor.ui.documents[slot].used)
 	testing.expect(t, p.ui_preview.document == nil)
@@ -231,19 +279,34 @@ a_preview_that_moves_from_a_ui_document_to_a_material_does_not_draw_the_document
 // A UI preview whose new blob does not build frees its document's slot, draws nothing, once, and does not build that
 // blob again. A blob of another key builds.
 @(test)
-a_ui_preview_whose_document_does_not_build_frees_its_slot_and_waits_for_another_blob :: proc(t: ^testing.T) {
+a_ui_preview_whose_document_does_not_build_frees_its_slot_and_waits_for_another_blob :: proc(
+	t: ^testing.T,
+) {
 	f := setup(t)
 	defer teardown(f)
-	warnings := Counted_Log{text = "cooked with another build", next = context.logger}
+	warnings := Counted_Log {
+		text = "cooked with another build",
+		next = context.logger,
+	}
 	context.logger = {count_log, &warnings, .Debug, {}}
 	guid, _ := format.guid_parse(DOCUMENT)
-	cooked, err := os.read_entire_file(fmt.tprintf("%s/%s.blob", f.cache, DOCUMENT), context.temp_allocator)
+	cooked, err := os.read_entire_file(
+		fmt.tprintf("%s/%s.blob", f.cache, DOCUMENT),
+		context.temp_allocator,
+	)
 	testing.expect(t, err == nil)
 	testing.expect(t, os.make_directory(fmt.tprintf("%s/preview", f.cache)) == nil)
 	path := fmt.tprintf("%s/preview/%s.blob", f.cache, DOCUMENT)
 	start := time.now()
 	write_preview_blob(t, path, cooked, start)
-	settings := link.Ui_Preview_Settings{id = 1, screen_width = 1920, screen_height = 1080, width = 960, height = 540, forced_node = max(u32)}
+	settings := link.Ui_Preview_Settings {
+		id            = 1,
+		screen_width  = 1920,
+		screen_height = 1080,
+		width         = 960,
+		height        = 540,
+		forced_node   = max(u32),
+	}
 	exchange(f, link.Open_Preview{id = 1, material = ([16]u8)(guid), unsaved = true}, settings)
 	testing.expect_value(t, draw(f), 1)
 	p := &f.editor.session.previews[1]

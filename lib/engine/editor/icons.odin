@@ -85,7 +85,8 @@ add_icons_pass :: proc(e: ^Editor, g: ^render.Graph, w: ^ecs.World, frame: Viewp
 	if e.renderer != nil {
 		if texture, sampler_index, made := render.reflection_probe_cubes(e.renderer); made {
 			// The probes' passes import it with the same resting use, so this is their node.
-			cubes, cubes_index, sampler = render.import_texture(g, texture, .Storage), gpu.read_index(texture), sampler_index
+			cubes, cubes_index, sampler =
+				render.import_texture(g, texture, .Storage), gpu.read_index(texture), sampler_index
 		}
 	}
 	pass := new(Icons_Pass, e.platform.frame_allocator)
@@ -94,7 +95,10 @@ add_icons_pass :: proc(e: ^Editor, g: ^render.Graph, w: ^ecs.World, frame: Viewp
 		instances = upload,
 		count = u32(len(icons)),
 		constants = {
-			view_projection = render.view_projection(frame.view, f32(frame.size.x) / f32(max(frame.size.y, 1))),
+			view_projection = render.view_projection(
+				frame.view,
+				f32(frame.size.x) / f32(max(frame.size.y, 1)),
+			),
 			instances = gpu.read_index(upload.buffer),
 			instances_offset = upload.offset,
 			viewport = {f32(frame.size.x), f32(frame.size.y)},
@@ -121,4 +125,3 @@ draw_icons :: proc(ctx: ^render.Pass_Context) {
 }
 
 #assert(size_of(Icon_Instance) == 48 && size_of(Icons_Constants) <= 128)
-

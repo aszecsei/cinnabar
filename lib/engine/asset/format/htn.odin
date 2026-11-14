@@ -164,7 +164,11 @@ HTN_RUN :: size_of(Htn_Agent)
 
 // htn_state lays out the module state of a decision of these counts. The cook sizes the state with it, and the module
 // finds its parts with it.
-htn_state :: proc "contextless" (key_count, action_count, method_count, max_plan: u32) -> (s: Htn_State) {
+htn_state :: proc "contextless" (
+	key_count, action_count, method_count, max_plan: u32,
+) -> (
+	s: Htn_State,
+) {
 	k := u64(key_count)
 	steps := (u64(max_plan) * 2 + 3) &~ 3
 	at := u64(HTN_RUN + size_of(Plan_Run))
@@ -209,9 +213,16 @@ Htn_Data :: struct {
 
 @(private = "file")
 htn_size :: proc "contextless" (h: ^Htn_Header) -> u64 {
-	return size_of(Htn_Header) + u64(h.key_count) * 4 + u64(h.action_count) * size_of(Plan_Action) + u64(h.task_count) * size_of(Htn_Task) +
-		u64(h.method_count) * size_of(Htn_Method) + u64(h.subtask_count) * size_of(Htn_Subtask) + u64(h.test_count) * size_of(Plan_Test) +
-		u64(h.effect_count) * size_of(Plan_Effect)
+	return(
+		size_of(Htn_Header) +
+		u64(h.key_count) * 4 +
+		u64(h.action_count) * size_of(Plan_Action) +
+		u64(h.task_count) * size_of(Htn_Task) +
+		u64(h.method_count) * size_of(Htn_Method) +
+		u64(h.subtask_count) * size_of(Htn_Subtask) +
+		u64(h.test_count) * size_of(Plan_Test) +
+		u64(h.effect_count) * size_of(Plan_Effect) \
+	)
 }
 
 // htn_data is a view of the data, which it does not check, besides its size.
@@ -242,14 +253,26 @@ htn_data :: proc "contextless" (data: []byte) -> (h: Htn_Data) {
 
 // htn_state_of is the layout of the data's module state.
 htn_state_of :: proc "contextless" (h: Htn_Data) -> Htn_State {
-	return htn_state(h.header.key_count, h.header.action_count, h.header.method_count, h.header.max_plan)
+	return htn_state(
+		h.header.key_count,
+		h.header.action_count,
+		h.header.method_count,
+		h.header.max_plan,
+	)
 }
 
 // htn_view checks the data against its decision: its layout and size, its counts and limits, that the module state
 // holds its layout, that the root is a compound task, that each action's node has an action, that each task has methods
 // and each method subtasks, at most a u16's count, and that every range and index is in range. It does not check keys: htn_check does, with
 // the blackboard.
-htn_view :: proc(data: []byte, decision_data: []byte, decision: ^Decision_Blob) -> (h: Htn_Data, ok: bool) {
+htn_view :: proc(
+	data: []byte,
+	decision_data: []byte,
+	decision: ^Decision_Blob,
+) -> (
+	h: Htn_Data,
+	ok: bool,
+) {
 	if len(data) < size_of(Htn_Header) || uintptr(raw_data(data)) % align_of(Htn_Header) != 0 {
 		return
 	}
@@ -257,9 +280,16 @@ htn_view :: proc(data: []byte, decision_data: []byte, decision: ^Decision_Blob) 
 	if header.layout != htn_layout() || u64(len(data)) != htn_size(header) {
 		return
 	}
-	if header.key_count > MAX_PLAN_KEYS || header.action_count == 0 || header.action_count > MAX_HTN_ACTIONS || header.task_count == 0 ||
-	   header.task_count > MAX_HTN_TASKS || header.method_count == 0 || header.method_count > MAX_HTN_METHODS || header.root >= header.task_count ||
-	   header.max_plan == 0 || header.max_plan > MAX_PLAN_LENGTH {
+	if header.key_count > MAX_PLAN_KEYS ||
+	   header.action_count == 0 ||
+	   header.action_count > MAX_HTN_ACTIONS ||
+	   header.task_count == 0 ||
+	   header.task_count > MAX_HTN_TASKS ||
+	   header.method_count == 0 ||
+	   header.method_count > MAX_HTN_METHODS ||
+	   header.root >= header.task_count ||
+	   header.max_plan == 0 ||
+	   header.max_plan > MAX_PLAN_LENGTH {
 		return
 	}
 	h = htn_data(data)
@@ -277,18 +307,24 @@ htn_view :: proc(data: []byte, decision_data: []byte, decision: ^Decision_Blob) 
 		if int(a.node) >= len(nodes) || nodes[a.node].action == DECISION_NONE {
 			return {}, false
 		}
-		if !range(a.first_test, a.test_count, len(h.tests)) || !range(a.first_effect, a.effect_count, len(h.effects)) {
+		if !range(a.first_test, a.test_count, len(h.tests)) ||
+		   !range(a.first_effect, a.effect_count, len(h.effects)) {
 			return {}, false
 		}
 	}
 	for task in h.tasks {
-		if int(task.node) >= len(nodes) || task.method_count == 0 || !range(task.first_method, task.method_count, len(h.methods)) {
+		if int(task.node) >= len(nodes) ||
+		   task.method_count == 0 ||
+		   !range(task.first_method, task.method_count, len(h.methods)) {
 			return {}, false
 		}
 	}
 	for m in h.methods {
 		// A frame counts a method's subtasks in a u16.
-		if int(m.node) >= len(nodes) || m.subtask_count == 0 || m.subtask_count > u32(max(u16)) || !range(m.first_test, m.test_count, len(h.tests)) ||
+		if int(m.node) >= len(nodes) ||
+		   m.subtask_count == 0 ||
+		   m.subtask_count > u32(max(u16)) ||
+		   !range(m.first_test, m.test_count, len(h.tests)) ||
 		   !range(m.first_subtask, m.subtask_count, len(h.subtasks)) {
 			return {}, false
 		}
@@ -312,7 +348,13 @@ htn_view :: proc(data: []byte, decision_data: []byte, decision: ^Decision_Blob) 
 
 // htn_check checks the data against its decision and the decision's blackboard: htn_view's checks, and that the
 // planning keys are distinct bool, int and enum keys and each effect fits its key.
-htn_check :: proc(data: []byte, decision_data: []byte, decision: ^Decision_Blob, board_data: []byte, board: ^Blackboard_Blob) -> bool {
+htn_check :: proc(
+	data: []byte,
+	decision_data: []byte,
+	decision: ^Decision_Blob,
+	board_data: []byte,
+	board: ^Blackboard_Blob,
+) -> bool {
 	h, ok := htn_view(data, decision_data, decision)
 	if !ok {
 		return false

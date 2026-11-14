@@ -15,12 +15,28 @@ write_color :: proc(t: ^testing.T, tree: Tree, path: string, width, height: int,
 	for &p in pixels {
 		p = color
 	}
-	full := strings.clone_to_cstring(fmt.tprintf("%s/content/%s", tree.dir, path), context.temp_allocator)
-	testing.expectf(t, stbi.write_png(full, i32(width), i32(height), 4, raw_data(pixels), i32(width * 4)) != 0, "cannot write %s", path)
+	full := strings.clone_to_cstring(
+		fmt.tprintf("%s/content/%s", tree.dir, path),
+		context.temp_allocator,
+	)
+	testing.expectf(
+		t,
+		stbi.write_png(full, i32(width), i32(height), 4, raw_data(pixels), i32(width * 4)) != 0,
+		"cannot write %s",
+		path,
+	)
 }
 
 @(private = "file")
-sheet_blob :: proc(t: ^testing.T, tree: Tree, path: string) -> (data: []byte, blob: ^format.Sprite_Sheet_Blob, ok: bool) {
+sheet_blob :: proc(
+	t: ^testing.T,
+	tree: Tree,
+	path: string,
+) -> (
+	data: []byte,
+	blob: ^format.Sprite_Sheet_Blob,
+	ok: bool,
+) {
 	data = tree_blob(t, tree, tree_guid(t, tree, path))
 	blob, ok = format.sprite_sheet_view(data)
 	testing.expectf(t, ok, "%s did not cook into a sprite sheet blob", path)
@@ -28,21 +44,35 @@ sheet_blob :: proc(t: ^testing.T, tree: Tree, path: string) -> (data: []byte, bl
 }
 
 @(private = "file")
-frame_named :: proc(t: ^testing.T, data: []byte, blob: ^format.Sprite_Sheet_Blob, name: string) -> format.Sprite_Frame {
+frame_named :: proc(
+	t: ^testing.T,
+	data: []byte,
+	blob: ^format.Sprite_Sheet_Blob,
+	name: string,
+) -> format.Sprite_Frame {
 	index, found := format.sprite_sheet_find_frame(data, blob, name)
 	testing.expectf(t, found, "the sheet has no frame %q", name)
 	return found ? format.sprite_sheet_frames(data, blob)[index] : {}
 }
 
 @(private = "file")
-animation_frames :: proc(t: ^testing.T, data: []byte, blob: ^format.Sprite_Sheet_Blob, name: string) -> (frames: []u16, animation: format.Sprite_Animation) {
+animation_frames :: proc(
+	t: ^testing.T,
+	data: []byte,
+	blob: ^format.Sprite_Sheet_Blob,
+	name: string,
+) -> (
+	frames: []u16,
+	animation: format.Sprite_Animation,
+) {
 	index, found := format.sprite_sheet_find_animation(data, blob, name)
 	testing.expectf(t, found, "the sheet has no animation %q", name)
 	if !found {
 		return
 	}
 	animation = format.sprite_sheet_animations(data, blob)[index]
-	return format.sprite_sheet_frame_indices(data, blob)[animation.first:][:animation.count], animation
+	return format.sprite_sheet_frame_indices(data, blob)[animation.first:][:animation.count],
+		animation
 }
 
 @(private = "file")
@@ -57,7 +87,11 @@ STRIP :: "00112233445566778899aabbccdd0004"
 @(test)
 a_sheet_parses_its_frames_and_animations :: proc(t: ^testing.T) {
 	sheet, problems := sprite_sheet_parse(
-		"# A hero.\npixels_per_unit = 16\nfilter = nearest\npivot = 0.5 0\nframe a = $" + RED + "\nframe b = $" + GREEN + "\nanimation walk = a b 0..1 rate=8 loop=false\n",
+		"# A hero.\npixels_per_unit = 16\nfilter = nearest\npivot = 0.5 0\nframe a = $" +
+		RED +
+		"\nframe b = $" +
+		GREEN +
+		"\nanimation walk = a b 0..1 rate=8 loop=false\n",
 		context.temp_allocator,
 	)
 	testing.expectf(t, len(problems) == 0, "problems: %v", problems)
@@ -70,7 +104,11 @@ a_sheet_parses_its_frames_and_animations :: proc(t: ^testing.T) {
 	testing.expect_value(t, sheet.animations[0].rate, 8)
 	testing.expect(t, !sheet.animations[0].loop)
 	testing.expect_value(t, len(sheet.animations[0].frames), 3)
-	testing.expect_value(t, len(sprite_sheet_images("frame a = $" + RED + "\ntexture = $" + BLUE + "\n")), 1)
+	testing.expect_value(
+		t,
+		len(sprite_sheet_images("frame a = $" + RED + "\ntexture = $" + BLUE + "\n")),
+		1,
+	)
 
 	// Each mistake is a problem at its line.
 	mistakes := []struct {
@@ -98,7 +136,15 @@ a_sheet_parses_its_frames_and_animations :: proc(t: ^testing.T) {
 		for p in found {
 			matched ||= strings.contains(p.message, m.fragment) && p.line == m.line
 		}
-		testing.expectf(t, matched, "%q: no problem with %q at line %d: %v", m.text, m.fragment, m.line, found)
+		testing.expectf(
+			t,
+			matched,
+			"%q: no problem with %q at line %d: %v",
+			m.text,
+			m.fragment,
+			m.line,
+			found,
+		)
 	}
 }
 
@@ -112,7 +158,13 @@ a_sheet_packs_the_images_that_it_names_into_its_atlas :: proc(t: ^testing.T) {
 			{"content/blue.png.meta", "guid = " + BLUE + "\nusage = color\n"},
 			{
 				"content/hero.sprite_sheet",
-				"pixels_per_unit = 16\nfilter = nearest\npivot = 0.5 0\nframe red = $" + RED + "\nframe green = $" + GREEN + "\nframe blue = $" + BLUE + "\nanimation all = red green blue rate=4\nanimation back = 2..0 loop=false\n",
+				"pixels_per_unit = 16\nfilter = nearest\npivot = 0.5 0\nframe red = $" +
+				RED +
+				"\nframe green = $" +
+				GREEN +
+				"\nframe blue = $" +
+				BLUE +
+				"\nanimation all = red green blue rate=4\nanimation back = 2..0 loop=false\n",
 			},
 		},
 	)
@@ -141,10 +193,17 @@ a_sheet_packs_the_images_that_it_names_into_its_atlas :: proc(t: ^testing.T) {
 	testing.expect_value(t, blob.pixels_per_unit, 16)
 	testing.expect_value(t, blob.filter, format.Sprite_Filter.Nearest)
 	// The atlas is the sheet's sub-asset, in its .meta file, and a texture of whole blocks without mips.
-	meta_text, err := os.read_entire_file(fmt.tprintf("%s/content/hero.sprite_sheet.meta", tree.dir), context.temp_allocator)
+	meta_text, err := os.read_entire_file(
+		fmt.tprintf("%s/content/hero.sprite_sheet.meta", tree.dir),
+		context.temp_allocator,
+	)
 	testing.expect(t, err == nil)
 	meta, meta_ok := format.meta_parse(string(meta_text), context.temp_allocator)
-	atlas_guid, has_atlas := format.meta_subasset(meta, format.TEXTURE_KIND, format.SPRITE_SHEET_ATLAS_NAME)
+	atlas_guid, has_atlas := format.meta_subasset(
+		meta,
+		format.TEXTURE_KIND,
+		format.SPRITE_SHEET_ATLAS_NAME,
+	)
 	testing.expect(t, meta_ok && has_atlas)
 	testing.expect_value(t, blob.atlas, atlas_guid)
 	atlas_data := tree_blob(t, tree, atlas_guid)
@@ -159,12 +218,26 @@ a_sheet_packs_the_images_that_it_names_into_its_atlas :: proc(t: ^testing.T) {
 	testing.expect(t, atlas.size.x % 4 == 0 && atlas.size.y % 4 == 0)
 	// Each frame keeps its image's size, apart from the others by its border, and has its color in the atlas.
 	decoded := make([][4]u8, int(atlas.size.x * atlas.size.y), context.temp_allocator)
-	testing.expect_value(t, cn_decompress(.BC7, raw_data(format.blob_bytes(atlas_data, atlas.mips)), atlas.size.x, atlas.size.y, raw_data(decoded)), 0)
+	testing.expect_value(
+		t,
+		cn_decompress(
+			.BC7,
+			raw_data(format.blob_bytes(atlas_data, atlas.mips)),
+			atlas.size.x,
+			atlas.size.y,
+			raw_data(decoded),
+		),
+		0,
+	)
 	wanted := []struct {
 		name:  string,
 		size:  [2]u16,
 		color: [4]u8,
-	}{{"red", {16, 16}, {255, 0, 0, 255}}, {"green", {24, 16}, {0, 255, 0, 255}}, {"blue", {8, 30}, {0, 0, 255, 255}}}
+	} {
+		{"red", {16, 16}, {255, 0, 0, 255}},
+		{"green", {24, 16}, {0, 255, 0, 255}},
+		{"blue", {8, 30}, {0, 0, 255, 255}},
+	}
 	rects: [3][4]u16
 	for w, i in wanted {
 		f := frame_named(t, data, blob, w.name)
@@ -172,15 +245,28 @@ a_sheet_packs_the_images_that_it_names_into_its_atlas :: proc(t: ^testing.T) {
 		testing.expect_value(t, f.rect.zw, w.size)
 		testing.expect_value(t, f.pivot, [2]f32{0.5, 0})
 		for corner in ([][2]int{{0, 0}, {int(f.rect.z) - 1, int(f.rect.w) - 1}, {-1, -1}, {int(f.rect.z), int(f.rect.w)}}) {
-			texel := decoded[(int(f.rect.y) + corner.y) * int(atlas.size.x) + int(f.rect.x) + corner.x]
+			texel :=
+				decoded[(int(f.rect.y) + corner.y) * int(atlas.size.x) + int(f.rect.x) + corner.x]
 			for channel in 0 ..< 4 {
-				testing.expectf(t, abs(int(texel[channel]) - int(w.color[channel])) <= 3, "%s at %v is %v, want %v", w.name, corner, texel, w.color)
+				testing.expectf(
+					t,
+					abs(int(texel[channel]) - int(w.color[channel])) <= 3,
+					"%s at %v is %v, want %v",
+					w.name,
+					corner,
+					texel,
+					w.color,
+				)
 			}
 		}
 	}
 	for a, i in rects {
 		for b in rects[i + 1:] {
-			apart := a.x + a.z + 2 <= b.x || b.x + b.z + 2 <= a.x || a.y + a.w + 2 <= b.y || b.y + b.w + 2 <= a.y
+			apart :=
+				a.x + a.z + 2 <= b.x ||
+				b.x + b.z + 2 <= a.x ||
+				a.y + a.w + 2 <= b.y ||
+				b.y + b.w + 2 <= a.y
 			testing.expectf(t, apart, "the frames %v and %v are not apart by their borders", a, b)
 		}
 	}
@@ -213,7 +299,12 @@ a_sheet_takes_a_textures_grid_and_rects :: proc(t: ^testing.T) {
 		t,
 		{
 			{"content/strip.png.meta", "guid = " + STRIP + "\nusage = color\n"},
-			{"content/grid.sprite_sheet", "texture = $" + STRIP + "\ngrid = 4 2\nrect whole = 0 0 64 32\nanimation top = 0..3 rate=12\nanimation one = 5 whole\n"},
+			{
+				"content/grid.sprite_sheet",
+				"texture = $" +
+				STRIP +
+				"\ngrid = 4 2\nrect whole = 0 0 64 32\nanimation top = 0..3 rate=12\nanimation one = 5 whole\n",
+			},
 			{"content/spaced.sprite_sheet", "texture = $" + STRIP + "\ngrid = 3 1 2 6\n"},
 		},
 	)
@@ -288,11 +379,21 @@ a_sheet_imports_the_json_of_aseprite_and_texturepacker :: proc(t: ^testing.T) {
 		{
 			{"content/strip.png.meta", "guid = " + STRIP + "\nusage = color\n"},
 			{"content/hash.json", ASEPRITE_HASH},
-			{"content/hash.sprite_sheet", "texture = $" + STRIP + "\nimport = hash.json\npivot = 0.5 0\nanimation first = 0 rate=2\n"},
+			{
+				"content/hash.sprite_sheet",
+				"texture = $" +
+				STRIP +
+				"\nimport = hash.json\npivot = 0.5 0\nanimation first = 0 rate=2\n",
+			},
 			{"content/sub/array.json", ASEPRITE_ARRAY},
 			{"content/array.sprite_sheet", "texture = $" + STRIP + "\nimport = sub/array.json\n"},
 			{"content/packer.json", TEXTURE_PACKER},
-			{"content/packer.sprite_sheet", "texture = $" + STRIP + "\nimport = packer.json\nanimation spin = coin.png gem.png\n"},
+			{
+				"content/packer.sprite_sheet",
+				"texture = $" +
+				STRIP +
+				"\nimport = packer.json\nanimation spin = coin.png gem.png\n",
+			},
 		},
 	)
 	defer remove_tree(tree)
@@ -302,7 +403,10 @@ a_sheet_imports_the_json_of_aseprite_and_texturepacker :: proc(t: ^testing.T) {
 	testing.expect(t, pass.ok)
 	testing.expect_value(t, pass.cooked[.Sprite_Sheet], 3)
 	// A JSON file is not an asset.
-	_, json_meta := os.read_entire_file(fmt.tprintf("%s/content/hash.json.meta", tree.dir), context.temp_allocator)
+	_, json_meta := os.read_entire_file(
+		fmt.tprintf("%s/content/hash.json.meta", tree.dir),
+		context.temp_allocator,
+	)
 	testing.expect(t, json_meta != nil)
 
 	data, blob, ok := sheet_blob(t, tree, "hash.sprite_sheet")
@@ -315,7 +419,10 @@ a_sheet_imports_the_json_of_aseprite_and_texturepacker :: proc(t: ^testing.T) {
 	testing.expect_value(t, format.blob_string(data, frames[0].name), "hero 10.aseprite")
 	testing.expect_value(t, format.blob_string(data, frames[1].name), "hero 2.aseprite")
 	testing.expect_value(t, frames[1].rect, [4]u16{16, 0, 16, 16})
-	testing.expect(t, abs(frames[1].duration - 0.25) < 1e-6 && abs(frames[0].duration - 0.1) < 1e-6)
+	testing.expect(
+		t,
+		abs(frames[1].duration - 0.25) < 1e-6 && abs(frames[0].duration - 0.1) < 1e-6,
+	)
 	testing.expect_value(t, frames[2].pivot, [2]f32{0.5, 0})
 	walk, _ := animation_frames(t, data, blob, "walk")
 	testing.expect(t, len(walk) == 3 && walk[0] == 0 && walk[2] == 2)
@@ -346,9 +453,25 @@ a_sheet_imports_the_json_of_aseprite_and_texturepacker :: proc(t: ^testing.T) {
 	}
 
 	// A change to the JSON file cooks its sheet again, and only that one.
-	changed := strings.concatenate({ASEPRITE_ARRAY[:len(ASEPRITE_ARRAY) - 2], " }"}, context.temp_allocator)
-	changed, _ = strings.replace(changed, `"w": 32, "h": 16 }, "duration": 50 },`, `"w": 16, "h": 16 }, "duration": 50 },`, 1, context.temp_allocator)
-	testing.expect(t, os.write_entire_file(fmt.tprintf("%s/content/sub/array.json", tree.dir), transmute([]byte)changed) == nil)
+	changed := strings.concatenate(
+		{ASEPRITE_ARRAY[:len(ASEPRITE_ARRAY) - 2], " }"},
+		context.temp_allocator,
+	)
+	changed, _ = strings.replace(
+		changed,
+		`"w": 32, "h": 16 }, "duration": 50 },`,
+		`"w": 16, "h": 16 }, "duration": 50 },`,
+		1,
+		context.temp_allocator,
+	)
+	testing.expect(
+		t,
+		os.write_entire_file(
+			fmt.tprintf("%s/content/sub/array.json", tree.dir),
+			transmute([]byte)changed,
+		) ==
+		nil,
+	)
 	again := cook(options, {.Sprite_Sheet})
 	testing.expect(t, again.ok)
 	testing.expect_value(t, again.cooked[.Sprite_Sheet], 1)
@@ -365,11 +488,20 @@ a_sheet_that_is_wrong_fails_with_its_reason :: proc(t: ^testing.T) {
 			{"content/missing.sprite_sheet", "frame a = $" + NONE + "\n"},
 			{"content/uneven.sprite_sheet", "texture = $" + STRIP + "\ngrid = 5 1\n"},
 			{"content/outside.sprite_sheet", "texture = $" + STRIP + "\nrect a = 60 0 16 16\n"},
-			{"content/unnamed.sprite_sheet", "texture = $" + STRIP + "\ngrid = 2 1\nanimation walk = 0 run 7\n"},
+			{
+				"content/unnamed.sprite_sheet",
+				"texture = $" + STRIP + "\ngrid = 2 1\nanimation walk = 0 run 7\n",
+			},
 			{"content/nojson.sprite_sheet", "texture = $" + STRIP + "\nimport = gone.json\n"},
-			{"content/rotated.json", `{"frames": [{"filename": "a", "frame": {"x":0,"y":0,"w":8,"h":8}, "rotated": true}]}`},
+			{
+				"content/rotated.json",
+				`{"frames": [{"filename": "a", "frame": {"x":0,"y":0,"w":8,"h":8}, "rotated": true}]}`,
+			},
 			{"content/rotated.sprite_sheet", "texture = $" + STRIP + "\nimport = rotated.json\n"},
-			{"content/tags.json", `{"frames": [{"filename": "a", "frame": {"x":0,"y":0,"w":8,"h":8}}], "meta": {"frameTags": [{"name": "t", "from": 0, "to": 4}]}}`},
+			{
+				"content/tags.json",
+				`{"frames": [{"filename": "a", "frame": {"x":0,"y":0,"w":8,"h":8}}], "meta": {"frameTags": [{"name": "t", "from": 0, "to": 4}]}}`,
+			},
 			{"content/tags.sprite_sheet", "texture = $" + STRIP + "\nimport = tags.json\n"},
 			{"content/self.sprite_sheet", "texture = $" + STRIP + "\ngrid = 1 1\n"},
 			{"content/nested.sprite_sheet", "frame a = $00112233445566778899aabbccdd00aa\n"},

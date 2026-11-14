@@ -36,7 +36,12 @@ point :: proc(entity: ecs.Entity, at: [3]f32, range: f32 = 10) -> Atlas_Light {
 
 @(private = "file")
 moved :: proc(slot: u32, from, to: [3]f32, report := false) -> Caster_Change {
-	return {slot = slot, old = Caster_Sphere{ecs.position_offset({}, from), 0.5}, new = Caster_Sphere{ecs.position_offset({}, to), 0.5}, report = report}
+	return {
+		slot = slot,
+		old = Caster_Sphere{ecs.position_offset({}, from), 0.5},
+		new = Caster_Sphere{ecs.position_offset({}, to), 0.5},
+		report = report,
+	}
 }
 
 // plan runs atlas_cache_plan for a frame with the cache on and tracked, and complete inputs.
@@ -55,7 +60,19 @@ plan :: proc(
 	free_slot: int,
 	stats: Atlas_Cache_Stats,
 ) {
-	return atlas_cache_plan(cache, true, true, params, first_slot, frame, lights, changes, nil, complete, context.temp_allocator)
+	return atlas_cache_plan(
+		cache,
+		true,
+		true,
+		params,
+		first_slot,
+		frame,
+		lights,
+		changes,
+		nil,
+		complete,
+		context.temp_allocator,
+	)
 }
 
 // A still light over still casters draws its cache in the first frame, and copies it in every frame after.
@@ -82,9 +99,17 @@ a_change_in_a_lights_reach_draws_it_again :: proc(t: ^testing.T) {
 	lights := []Atlas_Light{spot(1, {0, 5, 0}), spot(2, {100, 5, 0})}
 	cache, plans, _, _ := plan(nil, 1, lights)
 	cache, plans, _, _ = plan(cache, 2, lights, {moved(0, {0, 0, 0}, {50, 0, 0})})
-	testing.expect(t, plans[0].redraw && !plans[1].redraw, "a caster that left the first light's reach drew the wrong lights")
+	testing.expect(
+		t,
+		plans[0].redraw && !plans[1].redraw,
+		"a caster that left the first light's reach drew the wrong lights",
+	)
 	cache, plans, _, _ = plan(cache, 3, lights, {moved(0, {50, 0, 0}, {98, 0, 0})})
-	testing.expect(t, !plans[0].redraw && plans[1].redraw, "a caster that came into the second light's reach drew the wrong lights")
+	testing.expect(
+		t,
+		!plans[0].redraw && plans[1].redraw,
+		"a caster that came into the second light's reach drew the wrong lights",
+	)
 	cache, plans, _, _ = plan(cache, 4, lights, {moved(0, {200, 0, 0}, {300, 0, 0})})
 	testing.expect(t, !plans[0].redraw && !plans[1].redraw, "a caster out of reach drew a light")
 }
@@ -125,13 +150,25 @@ reports_draw_on_the_budget_the_oldest_first :: proc(t: ^testing.T) {
 	// The third light draws again at frame 2, so it is the newest.
 	cache, plans, _, _ = plan(cache, 2, lights, {moved(0, {200, 0, 0}, {201, 0, 0})})
 	testing.expect(t, plans[2].redraw)
-	reports := []Caster_Change{moved(1, {0, 0, 0}, {1, 0, 0}, true), moved(2, {100, 0, 0}, {101, 0, 0}, true), moved(3, {200, 0, 0}, {202, 0, 0}, true)}
+	reports := []Caster_Change {
+		moved(1, {0, 0, 0}, {1, 0, 0}, true),
+		moved(2, {100, 0, 0}, {101, 0, 0}, true),
+		moved(3, {200, 0, 0}, {202, 0, 0}, true),
+	}
 	stats: Atlas_Cache_Stats
 	cache, plans, _, stats = plan(cache, 3, lights, reports)
-	testing.expect(t, plans[0].redraw && !plans[1].redraw && !plans[2].redraw, "the budget did not take the oldest light first")
+	testing.expect(
+		t,
+		plans[0].redraw && !plans[1].redraw && !plans[2].redraw,
+		"the budget did not take the oldest light first",
+	)
 	testing.expect_value(t, stats.refreshed, 1)
 	cache, plans, _, stats = plan(cache, 4, lights)
-	testing.expect(t, !plans[0].redraw && plans[1].redraw && !plans[2].redraw, "the pending reports did not wait their turn")
+	testing.expect(
+		t,
+		!plans[0].redraw && plans[1].redraw && !plans[2].redraw,
+		"the pending reports did not wait their turn",
+	)
 	cache, plans, _, _ = plan(cache, 5, lights)
 	testing.expect(t, plans[2].redraw)
 	cache, plans, _, stats = plan(cache, 6, lights)
@@ -177,9 +214,33 @@ the_cache_starts_again_when_it_is_not_known_to_be_right :: proc(t: ^testing.T) {
 	testing.expect(t, plans[0].redraw, "other parameters kept the cache")
 	_, plans, _, _ = plan(first, 2, lights, first_slot = 0)
 	testing.expect(t, plans[0].redraw, "another first slot kept the cache")
-	_, plans, _, _ = atlas_cache_plan(first, true, false, TEST_PARAMS, 16, 2, lights, nil, nil, true, context.temp_allocator)
+	_, plans, _, _ = atlas_cache_plan(
+		first,
+		true,
+		false,
+		TEST_PARAMS,
+		16,
+		2,
+		lights,
+		nil,
+		nil,
+		true,
+		context.temp_allocator,
+	)
 	testing.expect(t, plans[0].redraw, "an untracked frame kept the cache")
-	_, plans, _, _ = atlas_cache_plan(first, false, true, TEST_PARAMS, 16, 2, lights, nil, nil, true, context.temp_allocator)
+	_, plans, _, _ = atlas_cache_plan(
+		first,
+		false,
+		true,
+		TEST_PARAMS,
+		16,
+		2,
+		lights,
+		nil,
+		nil,
+		true,
+		context.temp_allocator,
+	)
 	testing.expect(t, plans[0].redraw, "the cache off kept the cache")
 }
 
@@ -189,9 +250,17 @@ a_provisional_light_draws_again_once_the_inputs_are_complete :: proc(t: ^testing
 	lights := []Atlas_Light{spot(1, {0, 5, 0})}
 	cache, plans, _, _ := plan(nil, 1, lights, complete = false)
 	cache, plans, _, _ = plan(cache, 2, lights, complete = false)
-	testing.expect(t, !plans[0].redraw, "a provisional light drew again while the inputs stayed incomplete")
+	testing.expect(
+		t,
+		!plans[0].redraw,
+		"a provisional light drew again while the inputs stayed incomplete",
+	)
 	cache, plans, _, _ = plan(cache, 3, lights)
-	testing.expect(t, plans[0].redraw, "a provisional light did not draw once the inputs were complete")
+	testing.expect(
+		t,
+		plans[0].redraw,
+		"a provisional light did not draw once the inputs were complete",
+	)
 	cache, plans, _, _ = plan(cache, 4, lights)
 	testing.expect(t, !plans[0].redraw)
 }

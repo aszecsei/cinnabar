@@ -9,10 +9,95 @@ BLOCK_FRAMES :: 1 + (CHANNEL_BYTES - 4) * 2
 
 @(private)
 STEPS := [89]i32 {
-	7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 21, 23, 25, 28, 31, 34, 37, 41, 45, 50, 55, 60, 66, 73, 80, 88, 97, 107, 118, 130, 143,
-	157, 173, 190, 209, 230, 253, 279, 307, 337, 371, 408, 449, 494, 544, 598, 658, 724, 796, 876, 963, 1060, 1166, 1282, 1411, 1552,
-	1707, 1878, 2066, 2272, 2499, 2749, 3024, 3327, 3660, 4026, 4428, 4871, 5358, 5894, 6484, 7132, 7845, 8630, 9493, 10442, 11487,
-	12635, 13899, 15289, 16818, 18500, 20350, 22385, 24623, 27086, 29794, 32767,
+	7,
+	8,
+	9,
+	10,
+	11,
+	12,
+	13,
+	14,
+	16,
+	17,
+	19,
+	21,
+	23,
+	25,
+	28,
+	31,
+	34,
+	37,
+	41,
+	45,
+	50,
+	55,
+	60,
+	66,
+	73,
+	80,
+	88,
+	97,
+	107,
+	118,
+	130,
+	143,
+	157,
+	173,
+	190,
+	209,
+	230,
+	253,
+	279,
+	307,
+	337,
+	371,
+	408,
+	449,
+	494,
+	544,
+	598,
+	658,
+	724,
+	796,
+	876,
+	963,
+	1060,
+	1166,
+	1282,
+	1411,
+	1552,
+	1707,
+	1878,
+	2066,
+	2272,
+	2499,
+	2749,
+	3024,
+	3327,
+	3660,
+	4026,
+	4428,
+	4871,
+	5358,
+	5894,
+	6484,
+	7132,
+	7845,
+	8630,
+	9493,
+	10442,
+	11487,
+	12635,
+	13899,
+	15289,
+	16818,
+	18500,
+	20350,
+	22385,
+	24623,
+	27086,
+	29794,
+	32767,
 }
 
 @(private)
@@ -46,7 +131,11 @@ step_decode :: #force_inline proc "contextless" (c: ^Channel, code: u8) {
 	if code & 1 != 0 {
 		delta += step >> 2
 	}
-	c.predictor = clamp(c.predictor - delta if code & 8 != 0 else c.predictor + delta, -32768, 32767)
+	c.predictor = clamp(
+		c.predictor - delta if code & 8 != 0 else c.predictor + delta,
+		-32768,
+		32767,
+	)
 	c.index = clamp(c.index + INDEX_CHANGE[code], 0, len(STEPS) - 1)
 }
 
@@ -81,7 +170,9 @@ encode :: proc(samples: []i16, channels: int, allocator := context.allocator) ->
 	out := make([]byte, data_bytes(frames, channels), allocator)
 	state: [2]Channel
 	block_size := block_bytes(channels)
-	for block_start, block_index := 0, 0; block_start < int(frames); block_start, block_index = block_start + BLOCK_FRAMES, block_index + 1 {
+	for block_start, block_index := 0, 0;
+	    block_start < int(frames);
+	    block_start, block_index = block_start + BLOCK_FRAMES, block_index + 1 {
 		block := out[block_index * block_size:][:block_size]
 		for c in 0 ..< channels {
 			first := samples[block_start * channels + c]

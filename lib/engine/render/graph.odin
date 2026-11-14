@@ -95,13 +95,13 @@ Commit :: struct {
 
 // Graph holds one frame's passes and resources in frame memory. Declare the passes in execution order, then call execute.
 Graph :: struct {
-	platform:  ^core.Platform_API,
-	cache:     ^Texture_Cache,
-	allocator: runtime.Allocator,
-	textures:  [dynamic]Texture_Node,
-	buffers:   [dynamic]Buffer_Node,
-	passes:    [dynamic]Pass_Node,
-	commits:   [dynamic]Commit,
+	platform:   ^core.Platform_API,
+	cache:      ^Texture_Cache,
+	allocator:  runtime.Allocator,
+	textures:   [dynamic]Texture_Node,
+	buffers:    [dynamic]Buffer_Node,
+	passes:     [dynamic]Pass_Node,
+	commits:    [dynamic]Commit,
 	// The histories of the view that the graph draws (see history_texture).
 	histories:  ^History_Set,
 	// A graph after the first of its frame (see begin_extra).
@@ -215,7 +215,11 @@ Barriers :: struct {
 
 // begin starts the frame's graph, and with it the cache's frame. Build one graph per frame for each cache. histories is
 // the set of history textures that the graph's view keeps (see View_State); nil takes the cache's own.
-begin :: proc(platform: ^core.Platform_API, cache: ^Texture_Cache, histories: ^History_Set = nil) -> Graph {
+begin :: proc(
+	platform: ^core.Platform_API,
+	cache: ^Texture_Cache,
+	histories: ^History_Set = nil,
+) -> Graph {
 	cache_begin_frame(cache, platform)
 	return new_graph(platform, cache, histories)
 }
@@ -224,14 +228,22 @@ begin :: proc(platform: ^core.Platform_API, cache: ^Texture_Cache, histories: ^H
 // docs/rendering/frame.md#views): it does not start a cache frame, so the histories of every view of the frame are valid
 // by the same count. Its textures are its own, since the cache gives no texture twice in a frame, and its first
 // submission on each queue waits for the earlier work of the other, which the views before it did.
-begin_extra :: proc(platform: ^core.Platform_API, cache: ^Texture_Cache, histories: ^History_Set = nil) -> Graph {
+begin_extra :: proc(
+	platform: ^core.Platform_API,
+	cache: ^Texture_Cache,
+	histories: ^History_Set = nil,
+) -> Graph {
 	g := new_graph(platform, cache, histories)
 	g.extra = true
 	return g
 }
 
 @(private = "file")
-new_graph :: proc(platform: ^core.Platform_API, cache: ^Texture_Cache, histories: ^History_Set) -> Graph {
+new_graph :: proc(
+	platform: ^core.Platform_API,
+	cache: ^Texture_Cache,
+	histories: ^History_Set,
+) -> Graph {
 	allocator := platform.frame_allocator
 	set := histories != nil ? histories : &cache.histories
 	history_set_trim(cache, set, platform)
@@ -261,11 +273,23 @@ import_texture :: proc(g: ^Graph, texture: gpu.Texture, resting: Texture_Use) ->
 	layout := texture_state(resting, .Render).layout
 	for node, i in g.textures {
 		if node.imported && node.texture == texture {
-			assert(node.resting == layout, "render: a texture is imported twice with different resting uses")
+			assert(
+				node.resting == layout,
+				"render: a texture is imported twice with different resting uses",
+			)
 			return Texture(i + 1)
 		}
 	}
-	append(&g.textures, Texture_Node{texture = texture, imported = true, resting = layout, state = {layout = layout}, needed = true})
+	append(
+		&g.textures,
+		Texture_Node {
+			texture = texture,
+			imported = true,
+			resting = layout,
+			state = {layout = layout},
+			needed = true,
+		},
+	)
 	return Texture(len(g.textures))
 }
 
@@ -311,7 +335,11 @@ history_texture :: proc(g: ^Graph, desc: gpu.Texture_Desc) -> History {
 	if !ok {
 		return {}
 	}
-	return {current = import_texture(g, current, .Storage), previous = import_texture(g, previous, .Storage), valid = valid}
+	return {
+		current = import_texture(g, current, .Storage),
+		previous = import_texture(g, previous, .Storage),
+		valid = valid,
+	}
 }
 
 // create_texture adds a transient texture. Its contents are undefined until a pass writes them.
@@ -323,7 +351,13 @@ create_texture :: proc(g: ^Graph, desc: gpu.Texture_Desc) -> Texture {
 
 // pieces splits a large pass across jobs. The pieces of a render pass are one render pass on the GPU: the first
 // piece loads or clears the attachments, and the last one stores them (see docs/gpu/command-buffers.md#split-passes).
-add_render_pass :: proc(g: ^Graph, name: string, execute: Pass_Proc, data: rawptr = nil, pieces := 1) -> Pass {
+add_render_pass :: proc(
+	g: ^Graph,
+	name: string,
+	execute: Pass_Proc,
+	data: rawptr = nil,
+	pieces := 1,
+) -> Pass {
 	return add_pass(g, name, .Render, execute, data, pieces, .Graphics)
 }
 
@@ -341,7 +375,13 @@ add_compute_pass :: proc(
 }
 
 // add_ray_tracing_pass adds a pass that dispatches rays. Its shader accesses synchronize with the ray tracing stage.
-add_ray_tracing_pass :: proc(g: ^Graph, name: string, execute: Pass_Proc, data: rawptr = nil, queue := gpu.Queue.Graphics) -> Pass {
+add_ray_tracing_pass :: proc(
+	g: ^Graph,
+	name: string,
+	execute: Pass_Proc,
+	data: rawptr = nil,
+	queue := gpu.Queue.Graphics,
+) -> Pass {
 	return add_pass(g, name, .Ray_Tracing, execute, data, 1, queue)
 }
 
@@ -350,23 +390,45 @@ keep_pass :: proc(g: ^Graph, pass: Pass) {
 	g.passes[pass - 1].keep = true
 }
 
-color :: proc(g: ^Graph, pass: Pass, texture: Texture, load: gpu.Load_Op, clear: [4]f32 = {}, store := gpu.Store_Op.Store) {
+color :: proc(
+	g: ^Graph,
+	pass: Pass,
+	texture: Texture,
+	load: gpu.Load_Op,
+	clear: [4]f32 = {},
+	store := gpu.Store_Op.Store,
+) {
 	p := &g.passes[pass - 1]
 	assert(p.kind == .Render, "render: color attachments need a render pass")
 	assert(p.color_count < gpu.MAX_COLOR_ATTACHMENTS, "render: too many color attachments")
 	use_texture(g, pass, texture, .Color, reads = load == .Load)
-	p.colors[p.color_count] = {load = load, store = store, clear = clear}
+	p.colors[p.color_count] = {
+		load  = load,
+		store = store,
+		clear = clear,
+	}
 	p.color_textures[p.color_count] = texture
 	p.color_count += 1
 }
 
 // depth declares the pass's depth attachment. The clear is 0, the far end of reversed depth (see view_projection).
-depth :: proc(g: ^Graph, pass: Pass, texture: Texture, load: gpu.Load_Op, clear: f32 = 0, store := gpu.Store_Op.Store) {
+depth :: proc(
+	g: ^Graph,
+	pass: Pass,
+	texture: Texture,
+	load: gpu.Load_Op,
+	clear: f32 = 0,
+	store := gpu.Store_Op.Store,
+) {
 	p := &g.passes[pass - 1]
 	assert(p.kind == .Render, "render: a depth attachment needs a render pass")
 	assert(p.depth_texture == 0, "render: a pass has one depth attachment")
 	use_texture(g, pass, texture, .Depth, reads = load == .Load)
-	p.depth = {load = load, store = store, clear = clear}
+	p.depth = {
+		load  = load,
+		store = store,
+		clear = clear,
+	}
 	p.depth_texture = texture
 }
 
@@ -560,7 +622,9 @@ record :: proc(g: ^Graph) -> (submissions: []Submission, ok: bool) {
 		if node.imported && node.state.layout != node.resting {
 			if node.touched && node.queue != .Graphics {
 				final_wait += {node.queue}
-				node.state = {layout = node.state.layout}
+				node.state = {
+					layout = node.state.layout,
+				}
 			}
 			append(
 				&textures,
@@ -590,10 +654,19 @@ record :: proc(g: ^Graph) -> (submissions: []Submission, ok: bool) {
 // add_to_submission appends command buffers to the last submission if it is on the same queue, and starts a new
 // one otherwise. The waits of a submission apply at its start, which comes before every pass in it.
 @(private = "file")
-add_to_submission :: proc(g: ^Graph, submissions: ^[dynamic]Submission, buffers: []gpu.Command_Buffer, queue: gpu.Queue, wait_for: gpu.Queues) {
+add_to_submission :: proc(
+	g: ^Graph,
+	submissions: ^[dynamic]Submission,
+	buffers: []gpu.Command_Buffer,
+	queue: gpu.Queue,
+	wait_for: gpu.Queues,
+) {
 	n := len(submissions)
 	if n == 0 || submissions[n - 1].queue != queue {
-		append(submissions, Submission{buffers = make([dynamic]gpu.Command_Buffer, g.allocator), queue = queue})
+		append(
+			submissions,
+			Submission{buffers = make([dynamic]gpu.Command_Buffer, g.allocator), queue = queue},
+		)
 		n += 1
 	}
 	last := &submissions[n - 1]
@@ -619,10 +692,25 @@ compute_barriers :: proc(g: ^Graph) -> bool {
 				cross_queue(&pass, &node.state, &node.queue, &node.touched)
 				if before, needed := transition(&node.state, use.state); needed {
 					if node.accel {
-						barrier := gpu.Accel_Barrier{gpu.Accel_Struct(node.buffer), before.sync, use.state.sync, before.access, use.state.access}
+						barrier := gpu.Accel_Barrier {
+							gpu.Accel_Struct(node.buffer),
+							before.sync,
+							use.state.sync,
+							before.access,
+							use.state.access,
+						}
 						append(&pass.barriers.accels, barrier)
 					} else {
-						append(&pass.barriers.buffers, gpu.Buffer_Barrier{node.buffer, before.sync, use.state.sync, before.access, use.state.access})
+						append(
+							&pass.barriers.buffers,
+							gpu.Buffer_Barrier {
+								node.buffer,
+								before.sync,
+								use.state.sync,
+								before.access,
+								use.state.access,
+							},
+						)
 					}
 				}
 				continue
@@ -630,17 +718,26 @@ compute_barriers :: proc(g: ^Graph) -> bool {
 			node := &g.textures[use.index]
 			if !node.touched && !node.imported {
 				if use.state.layout == .Shader_Resource {
-					log.errorf("render: pass %q samples texture %q before a pass writes it", pass.name, node.desc.label)
+					log.errorf(
+						"render: pass %q samples texture %q before a pass writes it",
+						pass.name,
+						node.desc.label,
+					)
 					return false
 				}
 				// A texture that takes another's texture on the same queue starts where that one's last use left it,
 				// so its first use, a write, waits for that one's accesses.
 				if node.follows != 0 {
 					before := &g.textures[node.follows - 1]
-					node.state, node.queue, node.touched, node.last = before.state, before.queue, before.touched, before.last
+					node.state, node.queue, node.touched, node.last =
+						before.state, before.queue, before.touched, before.last
 				}
 			}
-			if node.touched && node.queue != pass.queue && pass.queue == .Compute && node.state.layout != use.state.layout && !compute_layout(node.state.layout) {
+			if node.touched &&
+			   node.queue != pass.queue &&
+			   pass.queue == .Compute &&
+			   node.state.layout != use.state.layout &&
+			   !compute_layout(node.state.layout) {
 				// The compute queue cannot leave this layout, as after a render pass, so the texture's last pass changes
 				// it after its work, and the wait for that queue orders the change.
 				last := &g.passes[node.last]
@@ -648,7 +745,18 @@ compute_barriers :: proc(g: ^Graph) -> bool {
 					last.after = make([dynamic]gpu.Texture_Barrier, g.allocator)
 				}
 				s := node.state
-				append(&last.after, gpu.Texture_Barrier{node.texture, s.sync, use.state.sync, s.access, use.state.access, s.layout, use.state.layout})
+				append(
+					&last.after,
+					gpu.Texture_Barrier {
+						node.texture,
+						s.sync,
+						use.state.sync,
+						s.access,
+						use.state.access,
+						s.layout,
+						use.state.layout,
+					},
+				)
 				node.state = use.state
 			}
 			node.last = pass_index
@@ -656,7 +764,15 @@ compute_barriers :: proc(g: ^Graph) -> bool {
 			if before, needed := transition(&node.state, use.state); needed {
 				append(
 					&pass.barriers.textures,
-					gpu.Texture_Barrier{node.texture, before.sync, use.state.sync, before.access, use.state.access, before.layout, use.state.layout},
+					gpu.Texture_Barrier {
+						node.texture,
+						before.sync,
+						use.state.sync,
+						before.access,
+						use.state.access,
+						before.layout,
+						use.state.layout,
+					},
 				)
 			}
 		}
@@ -679,8 +795,13 @@ compute_layout :: proc(layout: gpu.Texture_Layout) -> bool {
 @(private = "file")
 cross_queue :: proc(pass: ^Pass_Node, state: ^State, queue: ^gpu.Queue, touched: ^bool) {
 	if touched^ && queue^ != pass.queue {
-		assert(queue^ in pass.wait_for, "render: a pass uses a resource from the other queue without a wait")
-		state^ = {layout = state.layout}
+		assert(
+			queue^ in pass.wait_for,
+			"render: a pass uses a resource from the other queue without a wait",
+		)
+		state^ = {
+			layout = state.layout,
+		}
 	}
 	queue^ = pass.queue
 	touched^ = true
@@ -691,13 +812,22 @@ record_piece :: proc(data: rawptr) {
 	piece := (^Piece)(data)
 	pass, i := piece.pass, piece.index
 	g := pass.graph
-	profile.scope(&g.platform.profile, profile.name(&g.platform.profile, pass.name, .Render), u16(i))
+	profile.scope(
+		&g.platform.profile,
+		profile.name(&g.platform.profile, pass.name, .Render),
+		u16(i),
+	)
 	last := pass.piece_count - 1
 	split_render := pass.kind == .Render && pass.piece_count > 1
 	pass.cbs[i] = gpu.command_buffer(g.allocator)
 	cb := &pass.cbs[i]
 	if i == 0 {
-		gpu.cmd_barriers(cb, pass.barriers.buffers[:], pass.barriers.textures[:], pass.barriers.accels[:])
+		gpu.cmd_barriers(
+			cb,
+			pass.barriers.buffers[:],
+			pass.barriers.textures[:],
+			pass.barriers.accels[:],
+		)
 	}
 	if !split_render {
 		gpu.cmd_begin_marker(cb, pass.name, timed = true)
@@ -751,8 +881,19 @@ record_piece :: proc(data: rawptr) {
 }
 
 @(private = "file")
-add_pass :: proc(g: ^Graph, name: string, kind: Pass_Kind, execute: Pass_Proc, data: rawptr, pieces: int, queue: gpu.Queue) -> Pass {
-	assert(pieces >= 1 && pieces <= MAX_PASS_PIECES, "render: a pass has 1 to MAX_PASS_PIECES pieces")
+add_pass :: proc(
+	g: ^Graph,
+	name: string,
+	kind: Pass_Kind,
+	execute: Pass_Proc,
+	data: rawptr,
+	pieces: int,
+	queue: gpu.Queue,
+) -> Pass {
+	assert(
+		pieces >= 1 && pieces <= MAX_PASS_PIECES,
+		"render: a pass has 1 to MAX_PASS_PIECES pieces",
+	)
 	append(
 		&g.passes,
 		Pass_Node {
@@ -777,16 +918,38 @@ use_texture :: proc(g: ^Graph, pass: Pass, texture: Texture, use: Texture_Use, r
 @(private = "file")
 use_accel :: proc(g: ^Graph, pass: Pass, accel: Accel, use: Accel_Use) {
 	p := &g.passes[pass - 1]
-	assert(p.kind != .Render, "render: acceleration structures are built and traced outside render passes")
-	add_use(p, {index = u32(accel - 1), buffer = true, state = accel_state(use, p.kind), reads = use != .Build && use != .Compact_Dest})
+	assert(
+		p.kind != .Render,
+		"render: acceleration structures are built and traced outside render passes",
+	)
+	add_use(
+		p,
+		{
+			index = u32(accel - 1),
+			buffer = true,
+			state = accel_state(use, p.kind),
+			reads = use != .Build && use != .Compact_Dest,
+		},
+	)
 }
 
 @(private = "file")
 use_buffer :: proc(g: ^Graph, pass: Pass, buffer: Buffer, use: Buffer_Use) {
 	p := &g.passes[pass - 1]
-	assert(p.kind != .Render || (use != .Copy_Source && use != .Copy_Dest), "render: copies occur outside render passes")
+	assert(
+		p.kind != .Render || (use != .Copy_Source && use != .Copy_Dest),
+		"render: copies occur outside render passes",
+	)
 	// A copy destination is written without being read, so earlier writers are not needed for it.
-	add_use(p, {index = u32(buffer - 1), buffer = true, state = buffer_state(use, p.kind), reads = use != .Copy_Dest})
+	add_use(
+		p,
+		{
+			index = u32(buffer - 1),
+			buffer = true,
+			state = buffer_state(use, p.kind),
+			reads = use != .Copy_Dest,
+		},
+	)
 }
 
 // add_use merges two reads of a resource in one pass. Any other second use of the resource is an error.
@@ -883,7 +1046,9 @@ buffer_state :: proc(use: Buffer_Use, kind: Pass_Kind) -> State {
 // so a later write waits for all of them.
 @(private)
 transition :: proc(state: ^State, next: State) -> (before: State, needed: bool) {
-	hazard := state.access & gpu.WRITE_ACCESSES != {} || (next.access & gpu.WRITE_ACCESSES != {} && state.access != {})
+	hazard :=
+		state.access & gpu.WRITE_ACCESSES != {} ||
+		(next.access & gpu.WRITE_ACCESSES != {} && state.access != {})
 	if state.layout == next.layout && !hazard {
 		state.sync += next.sync
 		state.access += next.access
@@ -992,7 +1157,12 @@ create_transients :: proc(g: ^Graph) -> bool {
 				lifetimes[use.index].first = pass_index
 				append(&order, int(use.index))
 			}
-			lifetimes[use.index] = {int(use.index), lifetimes[use.index].first, pass_index, pass.queue}
+			lifetimes[use.index] = {
+				int(use.index),
+				lifetimes[use.index].first,
+				pass_index,
+				pass.queue,
+			}
 			if usage, ok := gpu.layout_usage(use.state.layout); ok {
 				node.desc.usage += {usage}
 			}

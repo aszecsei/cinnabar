@@ -188,12 +188,20 @@ tree_nodes :: proc "contextless" (data: []byte) -> []Tree_Node {
 // MAX_TREE_DEPTH deep, that a composite has children and another node none, that each node's decision node, action and
 // condition are there, and that each state and timer is inside the module state. It does not check keys: tree_check
 // does, with the blackboard.
-tree_view :: proc(data: []byte, decision_data: []byte, decision: ^Decision_Blob) -> (nodes: []Tree_Node, ok: bool) {
+tree_view :: proc(
+	data: []byte,
+	decision_data: []byte,
+	decision: ^Decision_Blob,
+) -> (
+	nodes: []Tree_Node,
+	ok: bool,
+) {
 	if len(data) < size_of(Tree_Header) || uintptr(raw_data(data)) % align_of(Tree_Node) != 0 {
 		return
 	}
 	header := (^Tree_Header)(raw_data(data))
-	if header.layout != tree_layout() || header.node_count == 0 ||
+	if header.layout != tree_layout() ||
+	   header.node_count == 0 ||
 	   u64(len(data)) != size_of(Tree_Header) + u64(header.node_count) * size_of(Tree_Node) {
 		return
 	}
@@ -202,9 +210,14 @@ tree_view :: proc(data: []byte, decision_data: []byte, decision: ^Decision_Blob)
 	conditions := decision_conditions(decision_data, decision)
 	state_size := decision.state_size
 	for n in nodes {
-		if n.kind > max(Tree_Kind) || n.abort > max(Tree_Abort) || n.force > max(Tree_Force) || n.policy > max(Tree_Policy) ||
-		   n.seconds.source > max(Tree_Time_Source) || n.cooldown.source > max(Tree_Time_Source) ||
-		   n.time_limit.source > max(Tree_Time_Source) || int(n.node) >= len(decision_nodes) {
+		if n.kind > max(Tree_Kind) ||
+		   n.abort > max(Tree_Abort) ||
+		   n.force > max(Tree_Force) ||
+		   n.policy > max(Tree_Policy) ||
+		   n.seconds.source > max(Tree_Time_Source) ||
+		   n.cooldown.source > max(Tree_Time_Source) ||
+		   n.time_limit.source > max(Tree_Time_Source) ||
+		   int(n.node) >= len(decision_nodes) {
 			return nil, false
 		}
 		if n.kind == .Action && decision_nodes[n.node].action == DECISION_NONE {
@@ -247,17 +260,28 @@ tree_view :: proc(data: []byte, decision_data: []byte, decision: ^Decision_Blob)
 
 // tree_check checks a tree against its decision and its decision's blackboard: tree_view's checks, and that each time
 // that a key holds is a float or an int key's.
-tree_check :: proc(data: []byte, decision_data: []byte, decision: ^Decision_Blob, board_data: []byte, board: ^Blackboard_Blob) -> bool {
+tree_check :: proc(
+	data: []byte,
+	decision_data: []byte,
+	decision: ^Decision_Blob,
+	board_data: []byte,
+	board: ^Blackboard_Blob,
+) -> bool {
 	nodes, ok := tree_view(data, decision_data, decision)
 	if !ok {
 		return false
 	}
 	keys := blackboard_keys(board_data, board)
 	time_ok :: proc(t: Tree_Time, keys: []Blackboard_Key) -> bool {
-		return t.source == .Constant || (int(t.key) < len(keys) && (keys[t.key].type == .Float || keys[t.key].type == .Int))
+		return(
+			t.source == .Constant ||
+			(int(t.key) < len(keys) && (keys[t.key].type == .Float || keys[t.key].type == .Int)) \
+		)
 	}
 	for n in nodes {
-		if !time_ok(n.seconds, keys) || !time_ok(n.cooldown, keys) || !time_ok(n.time_limit, keys) {
+		if !time_ok(n.seconds, keys) ||
+		   !time_ok(n.cooldown, keys) ||
+		   !time_ok(n.time_limit, keys) {
 			return false
 		}
 	}

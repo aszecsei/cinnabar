@@ -82,7 +82,9 @@ bar_style :: proc(s: ^State, d: ^Document, n: u32, part: Bar_Part) -> Style {
 		st.padding = DEFAULT_TRACK_INSET
 		style = d.track_style
 	} else {
-		st.fill = {colors = {DEFAULT_THUMB_COLOR, DEFAULT_THUMB_COLOR}}
+		st.fill = {
+			colors = {DEFAULT_THUMB_COLOR, DEFAULT_THUMB_COLOR},
+		}
 	}
 	if style != format.UI_NONE && int(style) < len(d.styles) {
 		apply_styles(&st, d, {style}, bar_states(s, d, n, part))
@@ -178,7 +180,10 @@ scroll_chain :: proc(d: ^Document, n: u32, p: [2]f32, out: ^[dynamic]u32) {
 	if !node.shown {
 		return
 	}
-	if scroll_axis(&node.style) >= 0 && node.scroll_max > 0 && !node.disabled && inside(intersect(node.rect, node.clip), p) {
+	if scroll_axis(&node.style) >= 0 &&
+	   node.scroll_max > 0 &&
+	   !node.disabled &&
+	   inside(intersect(node.rect, node.clip), p) {
 		append(out, n)
 	}
 	for c := node.first_child; c != NONE; c = d.nodes[c].next_sibling {
@@ -211,7 +216,11 @@ scroll_by :: proc(s: ^State, d: ^Document, chain: []u32, delta: [2]f32, pages: f
 		if axis < 0 {
 			continue
 		}
-		to := clamp(node.scroll + delta[axis] + pages * view_length(s, node, axis), 0, node.scroll_max)
+		to := clamp(
+			node.scroll + delta[axis] + pages * view_length(s, node, axis),
+			0,
+			node.scroll_max,
+		)
 		if to != node.scroll {
 			node.scroll = to
 			return true
@@ -251,7 +260,8 @@ drag_thumb :: proc(s: ^State, input: core.Input) {
 	if bar, shown := bar_of(s, d, n); shown && .Mouse_Left in input.down {
 		node := &d.nodes[n]
 		axis := scroll_axis(&node.style)
-		at := bar.travel > 0 ? (input.mouse_position[axis] - s.input.drag_grab - bar.start) / bar.travel : 0
+		at :=
+			bar.travel > 0 ? (input.mouse_position[axis] - s.input.drag_grab - bar.start) / bar.travel : 0
 		node.scroll = clamp(at, 0, 1) * node.scroll_max
 	}
 	if .Mouse_Left in input.released || .Mouse_Left not_in input.down {

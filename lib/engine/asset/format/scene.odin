@@ -59,7 +59,7 @@ Scene_Key :: enum u8 {
 	Active,
 }
 
-Scene_Keys :: bit_set[Scene_Key; u8]
+Scene_Keys :: bit_set[Scene_Key;u8]
 
 // scene_path_id is the scene ID of the entity id inside the instance with ID instance: FNV-1a over the two IDs'
 // 16 bytes, little-endian, or 1 if that is 0. The editor computes the same in ScenePath.Id.
@@ -214,11 +214,26 @@ scene_layout :: proc() -> u64 {
 
 // scene_write builds a scene blob of a flat scene, under the kind Scene or Prefab, with the navmeshes that the cooker
 // bakes for it.
-scene_write :: proc(scene: Scene, guid: Guid, key: u64, kind := Asset_Kind.Scene, nav_meshes: []Scene_Nav_Mesh = nil, allocator := context.allocator) -> []byte {
+scene_write :: proc(
+	scene: Scene,
+	guid: Guid,
+	key: u64,
+	kind := Asset_Kind.Scene,
+	nav_meshes: []Scene_Nav_Mesh = nil,
+	allocator := context.allocator,
+) -> []byte {
 	buffer := make([dynamic]byte, size_of(Scene_Blob), allocator)
-	entities := reserve_bytes(&buffer, len(scene.entities) * size_of(Scene_Entity_Record), align_of(Scene_Entity_Record))
+	entities := reserve_bytes(
+		&buffer,
+		len(scene.entities) * size_of(Scene_Entity_Record),
+		align_of(Scene_Entity_Record),
+	)
 	for e, i in scene.entities {
-		components := reserve_bytes(&buffer, len(e.components) * size_of(Scene_Component_Record), align_of(Scene_Component_Record))
+		components := reserve_bytes(
+			&buffer,
+			len(e.components) * size_of(Scene_Component_Record),
+			align_of(Scene_Component_Record),
+		)
 		for c, j in e.components {
 			record := Scene_Component_Record {
 				id     = c.id,
@@ -227,7 +242,11 @@ scene_write :: proc(scene: Scene, guid: Guid, key: u64, kind := Asset_Kind.Scene
 			}
 			put_record(&buffer, components, j, &record)
 		}
-		behaviours := reserve_bytes(&buffer, len(e.behaviours) * size_of(Scene_Behaviour_Record), align_of(Scene_Behaviour_Record))
+		behaviours := reserve_bytes(
+			&buffer,
+			len(e.behaviours) * size_of(Scene_Behaviour_Record),
+			align_of(Scene_Behaviour_Record),
+		)
 		for b, j in e.behaviours {
 			record := Scene_Behaviour_Record {
 				script = b.script,
@@ -245,7 +264,11 @@ scene_write :: proc(scene: Scene, guid: Guid, key: u64, kind := Asset_Kind.Scene
 		}
 		put_record(&buffer, entities, i, &record)
 	}
-	navs := reserve_bytes(&buffer, len(nav_meshes) * size_of(Scene_Nav_Mesh_Record), align_of(Scene_Nav_Mesh_Record))
+	navs := reserve_bytes(
+		&buffer,
+		len(nav_meshes) * size_of(Scene_Nav_Mesh_Record),
+		align_of(Scene_Nav_Mesh_Record),
+	)
 	for n, i in nav_meshes {
 		record := Scene_Nav_Mesh_Record {
 			entity = n.entity,
@@ -255,7 +278,13 @@ scene_write :: proc(scene: Scene, guid: Guid, key: u64, kind := Asset_Kind.Scene
 		put_record(&buffer, navs, i, &record)
 	}
 	blob := Scene_Blob {
-		header = {magic = BLOB_MAGIC, kind = kind, layout = scene_layout(), key = key, guid = guid},
+		header = {
+			magic = BLOB_MAGIC,
+			kind = kind,
+			layout = scene_layout(),
+			key = key,
+			guid = guid,
+		},
 		entities = entities,
 		nav_meshes = navs,
 	}
@@ -265,7 +294,11 @@ scene_write :: proc(scene: Scene, guid: Guid, key: u64, kind := Asset_Kind.Scene
 
 @(private = "file")
 write_fields :: proc(buffer: ^[dynamic]byte, fields: []Scene_Field) -> Slice {
-	records := reserve_bytes(buffer, len(fields) * size_of(Scene_Field_Record), align_of(Scene_Field_Record))
+	records := reserve_bytes(
+		buffer,
+		len(fields) * size_of(Scene_Field_Record),
+		align_of(Scene_Field_Record),
+	)
 	for f, i in fields {
 		record := Scene_Field_Record {
 			hash    = f.hash,
@@ -292,7 +325,9 @@ put_record :: proc(buffer: ^[dynamic]byte, records: Slice, i: int, record: ^$T) 
 // scene_read checks a scene or prefab blob and gives its scene. Strings point into the blob, and the slices are in allocator.
 scene_read :: proc(data: []byte, allocator := context.allocator) -> (scene: Scene, ok: bool) {
 	header := blob_header(data) or_return
-	if (header.kind != .Scene && header.kind != .Prefab) || header.layout != scene_layout() || len(data) < size_of(Scene_Blob) {
+	if (header.kind != .Scene && header.kind != .Prefab) ||
+	   header.layout != scene_layout() ||
+	   len(data) < size_of(Scene_Blob) {
 		return
 	}
 	blob := (^Scene_Blob)(raw_data(data))
@@ -330,9 +365,17 @@ scene_read :: proc(data: []byte, allocator := context.allocator) -> (scene: Scen
 
 // scene_nav_meshes checks a scene or prefab blob and gives the navmeshes that it lists. The agents' names point into
 // the blob.
-scene_nav_meshes :: proc(data: []byte, allocator := context.allocator) -> (nav_meshes: []Scene_Nav_Mesh, ok: bool) {
+scene_nav_meshes :: proc(
+	data: []byte,
+	allocator := context.allocator,
+) -> (
+	nav_meshes: []Scene_Nav_Mesh,
+	ok: bool,
+) {
 	header := blob_header(data) or_return
-	if (header.kind != .Scene && header.kind != .Prefab) || header.layout != scene_layout() || len(data) < size_of(Scene_Blob) {
+	if (header.kind != .Scene && header.kind != .Prefab) ||
+	   header.layout != scene_layout() ||
+	   len(data) < size_of(Scene_Blob) {
 		return
 	}
 	blob := (^Scene_Blob)(raw_data(data))
@@ -349,7 +392,14 @@ scene_nav_meshes :: proc(data: []byte, allocator := context.allocator) -> (nav_m
 }
 
 @(private = "file")
-read_fields :: proc(data: []byte, s: Slice, allocator: mem.Allocator) -> (fields: []Scene_Field, ok: bool) {
+read_fields :: proc(
+	data: []byte,
+	s: Slice,
+	allocator: mem.Allocator,
+) -> (
+	fields: []Scene_Field,
+	ok: bool,
+) {
 	field_records := records(data, s, Scene_Field_Record) or_return
 	fields = make([]Scene_Field, len(field_records), allocator)
 	for r, i in field_records {
@@ -377,7 +427,9 @@ read_fields :: proc(data: []byte, s: Slice, allocator: mem.Allocator) -> (fields
 // records is a slice of a blob as records of T, if it is inside the blob and aligned for T.
 @(private = "file")
 records :: proc(data: []byte, s: Slice, $T: typeid) -> ([]T, bool) {
-	if u64(s.offset) + u64(s.size) > u64(len(data)) || s.size % size_of(T) != 0 || s.offset % align_of(T) != 0 {
+	if u64(s.offset) + u64(s.size) > u64(len(data)) ||
+	   s.size % size_of(T) != 0 ||
+	   s.offset % align_of(T) != 0 {
 		return nil, false
 	}
 	bytes := blob_bytes(data, s)

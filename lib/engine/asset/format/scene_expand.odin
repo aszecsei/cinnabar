@@ -24,7 +24,16 @@ Prefab_Resolver :: struct {
 // are errors, and ok is false. self is the prefab being expanded, if the scene is one, so that one containing itself
 // is a cycle. An instance with a node is only that entity of its prefab's expansion and its descendants, with the node
 // as its root. The scene and the messages are in allocator.
-scene_expand :: proc(scene: Scene, resolver: Prefab_Resolver, self: Guid = {}, allocator := context.allocator) -> (flat: Scene, problems: []Scene_Problem, ok: bool) {
+scene_expand :: proc(
+	scene: Scene,
+	resolver: Prefab_Resolver,
+	self: Guid = {},
+	allocator := context.allocator,
+) -> (
+	flat: Scene,
+	problems: []Scene_Problem,
+	ok: bool,
+) {
 	chain: []Guid
 	if self != {} {
 		chain = []Guid{self}
@@ -39,7 +48,12 @@ scene_expand :: proc(scene: Scene, resolver: Prefab_Resolver, self: Guid = {}, a
 	seen := make(map[u64]bool, len(entities), context.temp_allocator)
 	for e in entities {
 		if seen[e.id] {
-			expand_problem(&x, true, "two entities have the scene ID %016x after expanding the prefabs", e.id)
+			expand_problem(
+				&x,
+				true,
+				"two entities have the scene ID %016x after expanding the prefabs",
+				e.id,
+			)
 		}
 		seen[e.id] = true
 	}
@@ -77,7 +91,13 @@ Expander :: struct {
 
 @(private = "file")
 expand_problem :: proc(x: ^Expander, error: bool, format: string, args: ..any) {
-	append(&x.problems, Scene_Problem{message = fmt.aprintf(format, ..args, allocator = x.allocator), error = error})
+	append(
+		&x.problems,
+		Scene_Problem {
+			message = fmt.aprintf(format, ..args, allocator = x.allocator),
+			error = error,
+		},
+	)
 }
 
 // expand_entities expands a scene inside the prefabs of chain, outermost first. Only the outermost scene's warnings
@@ -121,7 +141,12 @@ expand_entities :: proc(x: ^Expander, scene: Scene, chain: []Guid) -> []Scene_En
 		}
 		if target < 0 {
 			if outermost {
-				expand_problem(x, false, "the override %s names an entity that the instance does not have, so it is kept and does nothing", path_text(e.path))
+				expand_problem(
+					x,
+					false,
+					"the override %s names an entity that the instance does not have, so it is kept and does nothing",
+					path_text(e.path),
+				)
 			}
 			continue
 		}
@@ -137,7 +162,13 @@ expand_entities :: proc(x: ^Expander, scene: Scene, chain: []Guid) -> []Scene_En
 // place_instance appends an instance's entities: its prefab's flat entities with their IDs on the instance's paths,
 // and the instance block over the root.
 @(private = "file")
-place_instance :: proc(x: ^Expander, out: ^[dynamic]Scene_Entity, block: Scene_Entity, chain: []Guid, outermost: bool) {
+place_instance :: proc(
+	x: ^Expander,
+	out: ^[dynamic]Scene_Entity,
+	block: Scene_Entity,
+	chain: []Guid,
+	outermost: bool,
+) {
 	prefab, root, found := flat_prefab(x, block, chain, outermost)
 	if found && block.node != 0 {
 		prefab, root, found = prefab_part(x, block, prefab, outermost)
@@ -194,7 +225,16 @@ place_instance :: proc(x: ^Expander, out: ^[dynamic]Scene_Entity, block: Scene_E
 // prefab_part is the part of a prefab's flat entities that an instance names: its node and the node's descendants, in
 // their order, with the node as the root. A node that the prefab does not have warns, as a missing prefab does.
 @(private = "file")
-prefab_part :: proc(x: ^Expander, block: Scene_Entity, prefab: []Scene_Entity, outermost: bool) -> (part: []Scene_Entity, root: u64, ok: bool) {
+prefab_part :: proc(
+	x: ^Expander,
+	block: Scene_Entity,
+	prefab: []Scene_Entity,
+	outermost: bool,
+) -> (
+	part: []Scene_Entity,
+	root: u64,
+	ok: bool,
+) {
 	parents := make(map[u64]u64, len(prefab), context.temp_allocator)
 	for e in prefab {
 		parents[e.id] = e.parent
@@ -202,7 +242,14 @@ prefab_part :: proc(x: ^Expander, block: Scene_Entity, prefab: []Scene_Entity, o
 	if block.node not_in parents {
 		if outermost {
 			buffer: [32]u8
-			expand_problem(x, false, "instance %016x: the prefab %s has no entity %016x, so the instance is its root alone", block.id, guid_format(block.prefab, &buffer), block.node)
+			expand_problem(
+				x,
+				false,
+				"instance %016x: the prefab %s has no entity %016x, so the instance is its root alone",
+				block.id,
+				guid_format(block.prefab, &buffer),
+				block.node,
+			)
 		}
 		return
 	}
@@ -223,7 +270,16 @@ prefab_part :: proc(x: ^Expander, block: Scene_Entity, prefab: []Scene_Entity, o
 // flat_prefab is the prefab's flat entities and its root's ID, inside chain. A cycle and a nesting beyond the depth
 // are errors at every level, since every scene that reaches one cannot cook.
 @(private = "file")
-flat_prefab :: proc(x: ^Expander, block: Scene_Entity, chain: []Guid, outermost: bool) -> (entities: []Scene_Entity, root: u64, ok: bool) {
+flat_prefab :: proc(
+	x: ^Expander,
+	block: Scene_Entity,
+	chain: []Guid,
+	outermost: bool,
+) -> (
+	entities: []Scene_Entity,
+	root: u64,
+	ok: bool,
+) {
 	buffer: [32]u8
 	name := strings.clone(guid_format(block.prefab, &buffer), context.temp_allocator)
 	for g in chain {
@@ -232,25 +288,53 @@ flat_prefab :: proc(x: ^Expander, block: Scene_Entity, chain: []Guid, outermost:
 			for c in chain {
 				fmt.sbprintf(&b, "%s contains ", guid_format(c, &buffer))
 			}
-			expand_problem(x, true, "instance %016x: the prefab %s contains itself: %s%s", x.instance, name, strings.to_string(b), name)
+			expand_problem(
+				x,
+				true,
+				"instance %016x: the prefab %s contains itself: %s%s",
+				x.instance,
+				name,
+				strings.to_string(b),
+				name,
+			)
 			return
 		}
 	}
 	if len(chain) >= SCENE_EXPAND_DEPTH {
-		expand_problem(x, true, "instance %016x: the prefab %s is more than %d prefabs deep", x.instance, name, SCENE_EXPAND_DEPTH)
+		expand_problem(
+			x,
+			true,
+			"instance %016x: the prefab %s is more than %d prefabs deep",
+			x.instance,
+			name,
+			SCENE_EXPAND_DEPTH,
+		)
 		return
 	}
 	scene, found := x.resolver.find(x.resolver.data, block.prefab)
 	if !found {
 		if outermost {
-			expand_problem(x, false, "instance %016x: the prefab %s is missing or does not parse, so the instance is its root alone", block.id, name)
+			expand_problem(
+				x,
+				false,
+				"instance %016x: the prefab %s is missing or does not parse, so the instance is its root alone",
+				block.id,
+				name,
+			)
 		}
 		return
 	}
 	r, roots := prefab_root(scene)
 	if roots != 1 {
 		if outermost {
-			expand_problem(x, false, "instance %016x: the prefab %s has %d roots, not one, so the instance is its root alone", block.id, name, roots)
+			expand_problem(
+				x,
+				false,
+				"instance %016x: the prefab %s has %d roots, not one, so the instance is its root alone",
+				block.id,
+				name,
+				roots,
+			)
 		}
 		return
 	}
@@ -263,19 +347,33 @@ flat_prefab :: proc(x: ^Expander, block: Scene_Entity, chain: []Guid, outermost:
 // remap_fields gives the references of a prefab's entity the IDs of the instance's entities. A reference to an entity
 // that the prefab does not have becomes none.
 @(private = "file")
-remap_fields :: proc(x: ^Expander, fields: []Scene_Field, ids: map[u64]bool, root, instance: u64, outermost: bool) {
+remap_fields :: proc(
+	x: ^Expander,
+	fields: []Scene_Field,
+	ids: map[u64]bool,
+	root, instance: u64,
+	outermost: bool,
+) {
 	for &f in fields {
 		if f.value.kind != .Entity || f.value.entity == 0 {
 			continue
 		}
 		if !ids[f.value.entity] {
 			if outermost {
-				expand_problem(x, false, "instance %016x: the field %s refers to %016x, which its prefab does not have, so it is none", instance, f.name, f.value.entity)
+				expand_problem(
+					x,
+					false,
+					"instance %016x: the field %s refers to %016x, which its prefab does not have, so it is none",
+					instance,
+					f.name,
+					f.value.entity,
+				)
 			}
 			f.value.entity = 0
 			continue
 		}
-		f.value.entity = f.value.entity == root ? instance : scene_path_id(instance, f.value.entity)
+		f.value.entity =
+			f.value.entity == root ? instance : scene_path_id(instance, f.value.entity)
 	}
 }
 
@@ -290,7 +388,12 @@ apply_override :: proc(x: ^Expander, e: ^Scene_Entity, block: Scene_Entity) {
 	if .Active in block.keys {
 		e.active = block.active
 	}
-	components := make([dynamic]Scene_Component, 0, len(e.components) + len(block.components), x.allocator)
+	components := make(
+		[dynamic]Scene_Component,
+		0,
+		len(e.components) + len(block.components),
+		x.allocator,
+	)
 	for c in e.components {
 		if !slice.contains(block.removed_components, c.id) {
 			append(&components, c)
@@ -307,11 +410,20 @@ apply_override :: proc(x: ^Expander, e: ^Scene_Entity, block: Scene_Entity) {
 		if at < len(components) && components[at].id == c.id {
 			components[at].fields = merge_fields(x, components[at].fields, c.fields)
 		} else {
-			inject_at(&components, at, Scene_Component{id = c.id, name = c.name, fields = merge_fields(x, nil, c.fields)})
+			inject_at(
+				&components,
+				at,
+				Scene_Component{id = c.id, name = c.name, fields = merge_fields(x, nil, c.fields)},
+			)
 		}
 	}
 	e.components = components[:]
-	behaviours := make([dynamic]Scene_Behaviour, 0, len(e.behaviours) + len(block.behaviours), x.allocator)
+	behaviours := make(
+		[dynamic]Scene_Behaviour,
+		0,
+		len(e.behaviours) + len(block.behaviours),
+		x.allocator,
+	)
 	for b in e.behaviours {
 		if !slice.contains(block.removed_behaviours, b.script) {
 			append(&behaviours, b)
@@ -324,7 +436,10 @@ apply_override :: proc(x: ^Expander, e: ^Scene_Entity, block: Scene_Entity) {
 				continue outer
 			}
 		}
-		append(&behaviours, Scene_Behaviour{script = b.script, fields = merge_fields(x, nil, b.fields)})
+		append(
+			&behaviours,
+			Scene_Behaviour{script = b.script, fields = merge_fields(x, nil, b.fields)},
+		)
 	}
 	e.behaviours = behaviours[:]
 }
@@ -384,11 +499,18 @@ copy_entity :: proc(x: ^Expander, e: Scene_Entity) -> Scene_Entity {
 	result := e
 	result.components = make([]Scene_Component, len(e.components), x.allocator)
 	for c, i in e.components {
-		result.components[i] = {id = c.id, name = c.name, fields = slice.clone(c.fields, x.allocator)}
+		result.components[i] = {
+			id     = c.id,
+			name   = c.name,
+			fields = slice.clone(c.fields, x.allocator),
+		}
 	}
 	result.behaviours = make([]Scene_Behaviour, len(e.behaviours), x.allocator)
 	for b, i in e.behaviours {
-		result.behaviours[i] = {script = b.script, fields = slice.clone(b.fields, x.allocator)}
+		result.behaviours[i] = {
+			script = b.script,
+			fields = slice.clone(b.fields, x.allocator),
+		}
 	}
 	result.keys = {}
 	result.path = nil

@@ -16,7 +16,12 @@ Gamepad_Poller :: struct {
 // gamepad_poll reads the pads into input: each connected slot on every call, and one empty slot in turn every
 // GAMEPAD_EMPTY_SLOT_INTERVAL. That is the whole of hot plugging: a slot that reads as gone becomes empty, and an empty
 // slot that reads as connected has a pad.
-gamepad_poll :: proc(poller: ^Gamepad_Poller, input: ^Input, now: time.Tick, read: proc(slot: int) -> Gamepad_Reading) {
+gamepad_poll :: proc(
+	poller: ^Gamepad_Poller,
+	input: ^Input,
+	now: time.Tick,
+	read: proc(slot: int) -> Gamepad_Reading,
+) {
 	for pad, slot in input.gamepads {
 		if pad.connected {
 			input_gamepad_set(input, slot, read(slot))

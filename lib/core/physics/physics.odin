@@ -216,7 +216,14 @@ Create_Body :: struct {
 }
 
 // body_desc gives a Create_Body with the usual defaults: no rotation, friction 0.2, light damping and full gravity.
-body_desc :: proc(body: Body, shape: Shape, motion: Motion, position: Position, user: u64 = 0, layer: u8 = 0) -> Create_Body {
+body_desc :: proc(
+	body: Body,
+	shape: Shape,
+	motion: Motion,
+	position: Position,
+	user: u64 = 0,
+	layer: u8 = 0,
+) -> Create_Body {
 	return {
 		body = body,
 		shape = shape,
@@ -400,7 +407,12 @@ Create_Character :: struct {
 
 // character_desc gives a Create_Character with the usual defaults: 0.3 m by 1.8 m, slopes up to 45 degrees, steps
 // up to 0.4 m, 70 kg and a push of 100 N.
-character_desc :: proc(body: Body, position: Position, user: u64 = 0, layer: u8 = 0) -> Create_Character {
+character_desc :: proc(
+	body: Body,
+	position: Position,
+	user: u64 = 0,
+	layer: u8 = 0,
+) -> Create_Character {
 	return {
 		body = body,
 		position = position,
@@ -461,7 +473,10 @@ chunk_data :: proc(chunk: ^Chunk) -> []byte {
 push :: proc(list: ^Command_List, kind: Command_Kind, payload: $T, extra: []byte = nil) {
 	#assert(align_of(T) <= COMMAND_ALIGN)
 	size := mem.align_forward_int(size_of(Command_Header) + size_of(T) + len(extra), COMMAND_ALIGN)
-	assert(size <= COMMAND_CHUNK_SIZE - size_of(Chunk) && size <= int(max(u16)), "physics: command too large")
+	assert(
+		size <= COMMAND_CHUNK_SIZE - size_of(Chunk) && size <= int(max(u16)),
+		"physics: command too large",
+	)
 	if list.last == nil || len(chunk_data(list.last)) - list.last.used < size {
 		ptr, err := mem.alloc(COMMAND_CHUNK_SIZE, COMMAND_ALIGN, list.allocator)
 		if err != nil {
@@ -477,7 +492,10 @@ push :: proc(list: ^Command_List, kind: Command_Kind, payload: $T, extra: []byte
 		list.last = chunk
 	}
 	dst := raw_data(chunk_data(list.last)[list.last.used:])
-	header := Command_Header{kind = kind, size = u16(size)}
+	header := Command_Header {
+		kind = kind,
+		size = u16(size),
+	}
 	payload := payload
 	mem.zero(dst, size)
 	mem.copy(dst, &header, size_of(Command_Header))
@@ -501,12 +519,28 @@ cmd_create_shape :: proc(
 	offset: [3]f32 = 0,
 	rotation: Rotation = {0, 0, 0, 1},
 ) {
-	push(list, .Create_Shape, Create_Shape{shape = shape, kind = kind, size = size, density = density, offset = offset, rotation = rotation})
+	push(
+		list,
+		.Create_Shape,
+		Create_Shape {
+			shape = shape,
+			kind = kind,
+			size = size,
+			density = density,
+			offset = offset,
+			rotation = rotation,
+		},
+	)
 }
 
 cmd_create_compound :: proc(list: ^Command_List, shape: Shape, children: []Shape) {
 	assert(len(children) <= MAX_COMPOUND_CHILDREN, "physics: too many children in a compound")
-	push(list, .Create_Compound, Create_Compound{shape = shape, count = u32(len(children))}, ([^]byte)(raw_data(children))[:len(children) * size_of(Shape)])
+	push(
+		list,
+		.Create_Compound,
+		Create_Compound{shape = shape, count = u32(len(children))},
+		([^]byte)(raw_data(children))[:len(children) * size_of(Shape)],
+	)
 }
 
 // compound_children gives the child handles that follow a Create_Compound's payload.
@@ -529,12 +563,32 @@ cmd_destroy_body :: proc(list: ^Command_List, body: Body) {
 	push(list, .Destroy_Body, Destroy_Body{body})
 }
 
-cmd_set_pose :: proc(list: ^Command_List, body: Body, position: Position, rotation: Rotation, activate := true) {
-	push(list, .Set_Pose, Set_Pose{body = body, position = position, rotation = rotation, activate = b32(activate)})
+cmd_set_pose :: proc(
+	list: ^Command_List,
+	body: Body,
+	position: Position,
+	rotation: Rotation,
+	activate := true,
+) {
+	push(
+		list,
+		.Set_Pose,
+		Set_Pose{body = body, position = position, rotation = rotation, activate = b32(activate)},
+	)
 }
 
-cmd_move_kinematic :: proc(list: ^Command_List, body: Body, position: Position, rotation: Rotation, dt: f32) {
-	push(list, .Move_Kinematic, Move_Kinematic{body = body, position = position, rotation = rotation, dt = dt})
+cmd_move_kinematic :: proc(
+	list: ^Command_List,
+	body: Body,
+	position: Position,
+	rotation: Rotation,
+	dt: f32,
+) {
+	push(
+		list,
+		.Move_Kinematic,
+		Move_Kinematic{body = body, position = position, rotation = rotation, dt = dt},
+	)
 }
 
 cmd_set_velocity :: proc(list: ^Command_List, body: Body, linear, angular: [3]f32) {
@@ -581,13 +635,31 @@ cmd_destroy_character :: proc(list: ^Command_List, body: Body) {
 	push(list, .Destroy_Character, Body_Command{body})
 }
 
-cmd_set_character_velocity :: proc(list: ^Command_List, body: Body, velocity: [3]f32, flags: Character_Move_Flags = {}) {
-	push(list, .Set_Character_Velocity, Set_Character_Velocity{body = body, velocity = velocity, flags = flags})
+cmd_set_character_velocity :: proc(
+	list: ^Command_List,
+	body: Body,
+	velocity: [3]f32,
+	flags: Character_Move_Flags = {},
+) {
+	push(
+		list,
+		.Set_Character_Velocity,
+		Set_Character_Velocity{body = body, velocity = velocity, flags = flags},
+	)
 }
 
 // A character's teleport, which takes the Set_Pose payload; activate does nothing.
-cmd_set_character_pose :: proc(list: ^Command_List, body: Body, position: Position, rotation: Rotation) {
-	push(list, .Set_Character_Pose, Set_Pose{body = body, position = position, rotation = rotation})
+cmd_set_character_pose :: proc(
+	list: ^Command_List,
+	body: Body,
+	position: Position,
+	rotation: Rotation,
+) {
+	push(
+		list,
+		.Set_Character_Pose,
+		Set_Pose{body = body, position = position, rotation = rotation},
+	)
 }
 
 cmd_create_joint :: proc(list: ^Command_List, desc: Create_Joint) {
@@ -598,8 +670,24 @@ cmd_destroy_joint :: proc(list: ^Command_List, joint: Joint) {
 	push(list, .Destroy_Joint, Destroy_Joint{joint})
 }
 
-cmd_set_joint :: proc(list: ^Command_List, joint: Joint, enabled: bool, motor: Motor_Mode, target, max: f32) {
-	push(list, .Set_Joint, Set_Joint{joint = joint, enabled = b32(enabled), motor = motor, motor_target = target, motor_max = max})
+cmd_set_joint :: proc(
+	list: ^Command_List,
+	joint: Joint,
+	enabled: bool,
+	motor: Motor_Mode,
+	target, max: f32,
+) {
+	push(
+		list,
+		.Set_Joint,
+		Set_Joint {
+			joint = joint,
+			enabled = b32(enabled),
+			motor = motor,
+			motor_target = target,
+			motor_max = max,
+		},
+	)
 }
 
 // Command is a command read from a chunk. data is the payload and its padding.
@@ -625,7 +713,7 @@ next_command :: proc(data: []byte, offset: ^int) -> (command: Command, ok: bool)
 
 // push_command copies a command that next_command read, as when one list's commands move into another.
 push_command :: proc(list: ^Command_List, command: Command) {
-	push(list, command.kind, struct {}{}, command.data)
+	push(list, command.kind, struct{}{}, command.data)
 }
 
 payload :: proc(command: Command, $T: typeid) -> ^T {
@@ -862,7 +950,9 @@ Query_Filter :: struct {
 }
 
 // A filter that hits every layer, and no sensors.
-FILTER_ALL :: Query_Filter{layers = max(u32)}
+FILTER_ALL :: Query_Filter {
+	layers = max(u32),
+}
 
 // Shape_Desc is a query's shape, with the sizes of Create_Shape.
 Shape_Desc :: struct {
@@ -925,17 +1015,54 @@ Physics_API :: struct {
 	// an engine handle that later commands use as a Create_Shape's: mesh data does not fit in a command. Front faces
 	// are those whose (b - a) x (c - a) points out. It runs between steps, as submit does, and returns false for a
 	// shape that the backend cannot make, which it logs.
-	create_mesh_shape: proc "c" (world: World, shape: Shape, kind: Shape_Kind, vertices: [^][3]f32, vertex_count: u32, triangles: [^][3]u32, triangle_count: u32, density: f32) -> b32,
+	create_mesh_shape: proc "c" (
+		world: World,
+		shape: Shape,
+		kind: Shape_Kind,
+		vertices: [^][3]f32,
+		vertex_count: u32,
+		triangles: [^][3]u32,
+		triangle_count: u32,
+		density: f32,
+	) -> b32,
 	// The closest hit along the ray. filter may be nil, which is FILTER_ALL.
-	raycast:           proc "c" (world: World, ray: ^Ray, filter: ^Query_Filter, hit: ^Ray_Hit) -> b32,
+	raycast:           proc "c" (
+		world: World,
+		ray: ^Ray,
+		filter: ^Query_Filter,
+		hit: ^Ray_Hit,
+	) -> b32,
 	// Every hit along the ray, by distance: the first capacity of them go to out, and the count is all of them.
-	raycast_all:       proc "c" (world: World, ray: ^Ray, filter: ^Query_Filter, out: [^]Ray_Hit, capacity: u32) -> u32,
+	raycast_all:       proc "c" (
+		world: World,
+		ray: ^Ray,
+		filter: ^Query_Filter,
+		out: [^]Ray_Hit,
+		capacity: u32,
+	) -> u32,
 	// The closest hit of each ray, in order; a miss is a zeroed hit.
-	raycast_batch:     proc "c" (world: World, rays: [^]Ray, count: u32, filter: ^Query_Filter, out: [^]Ray_Hit),
+	raycast_batch:     proc "c" (
+		world: World,
+		rays: [^]Ray,
+		count: u32,
+		filter: ^Query_Filter,
+		out: [^]Ray_Hit,
+	),
 	// The first hit of a swept shape: the contact point, the normal of the surface it hit, and the distance swept.
-	shape_cast:        proc "c" (world: World, sweep: ^Shape_Cast, filter: ^Query_Filter, hit: ^Ray_Hit) -> b32,
+	shape_cast:        proc "c" (
+		world: World,
+		sweep: ^Shape_Cast,
+		filter: ^Query_Filter,
+		hit: ^Ray_Hit,
+	) -> b32,
 	// The bodies that overlap a shape, by handle: the first capacity of them go to out, and the count is all of them.
-	overlap:           proc "c" (world: World, query: ^Overlap_Query, filter: ^Query_Filter, out: [^]Overlap_Hit, capacity: u32) -> u32,
+	overlap:           proc "c" (
+		world: World,
+		query: ^Overlap_Query,
+		filter: ^Query_Filter,
+		out: [^]Overlap_Hit,
+		capacity: u32,
+	) -> u32,
 	// The backend runs its jobs through Host.jobs_run, which calls this with each job's data.
 	run_job:           proc "c" (data: rawptr),
 	// Destroys every world, for a soft restart, and returns how many there were.

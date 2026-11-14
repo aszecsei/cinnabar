@@ -135,7 +135,7 @@ Hit_Scratch :: struct {
 // Ray_Scene_Frame is one frame's ray scene, in frame memory, made by the frame's first request.
 Ray_Scene_Frame :: struct {
 	// 0 until add_ray_scene_passes adds the build.
-	accel:   Accel,
+	accel:          Accel,
 	// The meshes whose acceleration structures this frame builds; whose compacted sizes it writes, into the sizes and
 	// then the readback slot size_slot; and whose structures it compacts.
 	builds:         []^Resident_Mesh,
@@ -214,8 +214,20 @@ sync_ray_scene_pipelines :: proc(r: ^Renderer, force: bool) {
 	if !r.caps.ray_query {
 		return
 	}
-	sync_compute_pipeline(&r.ray_scene.bin_pipeline, r.platform, r.residency.assets, {label = "hit bins"}, force)
-	sync_compute_pipeline(&r.ray_scene.fallback, r.platform, r.residency.assets, {label = "hit fallback"}, force)
+	sync_compute_pipeline(
+		&r.ray_scene.bin_pipeline,
+		r.platform,
+		r.residency.assets,
+		{label = "hit bins"},
+		force,
+	)
+	sync_compute_pipeline(
+		&r.ray_scene.fallback,
+		r.platform,
+		r.residency.assets,
+		{label = "hit fallback"},
+		force,
+	)
 }
 
 // request_ray_scene asks for the scene's acceleration structure this frame, which it makes on the first request. It is
@@ -227,7 +239,9 @@ request_ray_scene :: proc(f: ^Frame) -> bool {
 		return false
 	}
 	if r.ray_scene.accel == {} {
-		r.ray_scene.accel = r.platform.gpu_create_accel({kind = .Top, max_instances = MAX_INSTANCES, label = "gpu scene"})
+		r.ray_scene.accel = r.platform.gpu_create_accel(
+			{kind = .Top, max_instances = MAX_INSTANCES, label = "gpu scene"},
+		)
 		residency_enable_accels(&r.residency)
 	}
 	if f.ray_scene == nil {
@@ -258,10 +272,10 @@ add_ray_scene_passes :: proc(f: ^Frame) {
 	blases := make([]Accel, len(rf.builds), r.platform.frame_allocator)
 	if len(rf.builds) > 0 {
 		p := add_compute_pass(g, "build mesh accels", proc(ctx: ^Pass_Context) {
-			for m in (^Frame)(ctx.data).ray_scene.builds {
-				gpu.cmd_build_accel(ctx.cb, m.accel)
-			}
-		}, f)
+				for m in (^Frame)(ctx.data).ray_scene.builds {
+					gpu.cmd_build_accel(ctx.cb, m.accel)
+				}
+			}, f)
 		for m, i in rf.builds {
 			build_input(g, p, import_buffer(g, m.positions))
 			build_input(g, p, import_buffer(g, m.indices))
@@ -275,12 +289,12 @@ add_ray_scene_passes :: proc(f: ^Frame) {
 	skinned := make([]Accel, len(sf.skin.refits), r.platform.frame_allocator)
 	if len(sf.items) > 0 && len(sf.skin.refits) > 0 {
 		p := add_compute_pass(g, "refit skinned accels", proc(ctx: ^Pass_Context) {
-			f := (^Frame)(ctx.data)
-			for refit in f.scene_frame.skin.refits {
-				instance := f.renderer.scene.skins.instances[refit.slot]
-				gpu.cmd_build_accel(ctx.cb, instance.accel, update = refit.update)
-			}
-		}, f)
+				f := (^Frame)(ctx.data)
+				for refit in f.scene_frame.skin.refits {
+					instance := f.renderer.scene.skins.instances[refit.slot]
+					gpu.cmd_build_accel(ctx.cb, instance.accel, update = refit.update)
+				}
+			}, f)
 		for &refit, i in sf.skin.refits {
 			instance := &r.scene.skins.instances[refit.slot]
 			build_input(g, p, import_buffer(g, instance.positions))
@@ -295,10 +309,16 @@ add_ray_scene_passes :: proc(f: ^Frame) {
 	add_compaction_pass(f)
 	on_executed(g, commit_ray_scene, f)
 	p := add_compute_pass(g, "build scene accel", proc(ctx: ^Pass_Context) {
-		f := (^Frame)(ctx.data)
-		instances := f.scene_frame.accel_instances
-		gpu.cmd_build_top_accel(ctx.cb, gpu_accel(ctx.graph, f.ray_scene.accel), instances.buffer, instances.offset, u32(f.scene_frame.accel_count))
-	}, f)
+			f := (^Frame)(ctx.data)
+			instances := f.scene_frame.accel_instances
+			gpu.cmd_build_top_accel(
+				ctx.cb,
+				gpu_accel(ctx.graph, f.ray_scene.accel),
+				instances.buffer,
+				instances.offset,
+				u32(f.scene_frame.accel_count),
+			)
+		}, f)
 	for blas in blases {
 		build_input(g, p, blas)
 	}
@@ -335,7 +355,9 @@ add_hit_entries :: proc(
 	pipelines: []Material_Pipeline,
 	ready: proc(platform: ^core.Platform_API, pipeline: gpu.Pipeline) -> bool,
 	platform: ^core.Platform_API,
-) -> (surfaces: bool) {
+) -> (
+	surfaces: bool,
+) {
 	first := u32(len(table.submeshes))
 	mesh_index: u32
 	for item in items {
@@ -356,9 +378,21 @@ add_hit_entries :: proc(
 			surfaces = true
 		}
 		table.used[bin & HIT_BIN_MASK] = true
-		append(&table.submeshes, Hit_Submesh{first_primitive = submesh.first_index / 3, primitive_count = submesh.index_count / 3, block = item.material, bin = bin})
+		append(
+			&table.submeshes,
+			Hit_Submesh {
+				first_primitive = submesh.first_index / 3,
+				primitive_count = submesh.index_count / 3,
+				block = item.material,
+				bin = bin,
+			},
+		)
 	}
-	table.instances[slot] = {mesh = mesh_index, first = first, count = u32(len(table.submeshes)) - first}
+	table.instances[slot] = {
+		mesh  = mesh_index,
+		first = first,
+		count = u32(len(table.submeshes)) - first,
+	}
 	return
 }
 
@@ -375,10 +409,18 @@ hit_shading_ready :: proc(f: ^Frame) -> bool {
 	r := f.renderer
 	rf := f.ray_scene
 	sf := f.scene_frame
-	if rf == nil || rf.accel == 0 || sf.hit_instance_count == 0 || sf.instances == 0 || len(sf.view_constants) == 0 || rf.batches == MAX_HIT_BATCHES {
+	if rf == nil ||
+	   rf.accel == 0 ||
+	   sf.hit_instance_count == 0 ||
+	   sf.instances == 0 ||
+	   len(sf.view_constants) == 0 ||
+	   rf.batches == MAX_HIT_BATCHES {
 		return false
 	}
-	return pipeline_ready(r.platform, &r.ray_scene.bin_pipeline) && pipeline_ready(r.platform, &r.ray_scene.fallback)
+	return(
+		pipeline_ready(r.platform, &r.ray_scene.bin_pipeline) &&
+		pipeline_ready(r.platform, &r.ray_scene.fallback) \
+	)
 }
 
 // reserve_hit_shading takes a batch's turn at hit shading for up to count rays: its scratch, sized for count, and the
@@ -411,7 +453,13 @@ reserve_hit_shading :: proc(f: ^Frame, count: u32) -> Maybe(Hit_Reservation) {
 // name, when it gives one, starts its passes' names, so the profiler tells its batch apart. It spends a reservation
 // from reserve_hit_shading, so it cannot fail: the batch is shaded, and add_hit_light_passes takes what it gives. A
 // batch of no rays adds no pass.
-add_hit_shading :: proc(f: ^Frame, reservation: Hit_Reservation, batch: Hit_Batch, queue := gpu.Queue.Graphics, name := "") -> Hit_Shaded {
+add_hit_shading :: proc(
+	f: ^Frame,
+	reservation: Hit_Reservation,
+	batch: Hit_Batch,
+	queue := gpu.Queue.Graphics,
+	name := "",
+) -> Hit_Shaded {
 	r := f.renderer
 	sf := f.scene_frame
 	platform := r.platform
@@ -457,7 +505,13 @@ add_hit_shading :: proc(f: ^Frame, reservation: Hit_Reservation, batch: Hit_Batc
 	for phase_name, phase in HIT_PHASES {
 		step := new_clone(data^, platform.frame_allocator)
 		step.phase = phase
-		p := add_compute_pass(g, pass_name(name, phase_name, platform.frame_allocator), run_hit_phase, step, queue = queue)
+		p := add_compute_pass(
+			g,
+			pass_name(name, phase_name, platform.frame_allocator),
+			run_hit_phase,
+			step,
+			queue = queue,
+		)
 		write(g, p, data.bins)
 		switch phase {
 		case 1:
@@ -470,7 +524,13 @@ add_hit_shading :: proc(f: ^Frame, reservation: Hit_Reservation, batch: Hit_Batc
 			write(g, p, data.order)
 		}
 	}
-	p := add_compute_pass(g, pass_name(name, "hit shading", platform.frame_allocator), run_hit_shading, data, queue = queue)
+	p := add_compute_pass(
+		g,
+		pass_name(name, "hit shading", platform.frame_allocator),
+		run_hit_shading,
+		data,
+		queue = queue,
+	)
 	read(g, p, batch.hits)
 	read(g, p, data.order)
 	read(g, p, data.bins)
@@ -487,13 +547,26 @@ ensure_hit_scratch :: proc(r: ^Renderer, batch, count: int) -> ^Hit_Scratch {
 	s := &r.ray_scene.scratch[batch]
 	platform := r.platform
 	if s.bins == {} {
-		s.bins = platform.gpu_create_buffer({size = 3 * MAX_HIT_BINS * 4, usage = {.Storage}, label = "hit bins"}, nil)
-		s.arguments = platform.gpu_create_buffer({size = MAX_HIT_BINS * size_of(gpu.Dispatch_Indirect_Args), usage = {.Storage, .Indirect}, label = "hit arguments"}, nil)
+		s.bins = platform.gpu_create_buffer(
+			{size = 3 * MAX_HIT_BINS * 4, usage = {.Storage}, label = "hit bins"},
+			nil,
+		)
+		s.arguments = platform.gpu_create_buffer(
+			{
+				size = MAX_HIT_BINS * size_of(gpu.Dispatch_Indirect_Args),
+				usage = {.Storage, .Indirect},
+				label = "hit arguments",
+			},
+			nil,
+		)
 	}
 	if count > s.capacity || s.order == {} {
 		platform.gpu_destroy_buffer(s.order)
 		s.capacity = max(count, s.capacity * 2, 4096)
-		s.order = platform.gpu_create_buffer({size = u32(s.capacity * 4), usage = {.Storage}, label = "hit order"}, nil)
+		s.order = platform.gpu_create_buffer(
+			{size = u32(s.capacity * 4), usage = {.Storage}, label = "hit order"},
+			nil,
+		)
 	}
 	return s
 }

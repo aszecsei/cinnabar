@@ -45,10 +45,10 @@ Gi_Voxel_Params :: struct {
 
 @(rodata)
 GI_VOXEL_PARAMS := [Quality_Level]Gi_Voxel_Params {
-	.Low    = {res = 64, levels = 5, voxel = -2, cones = 4, history_frames = 12},
+	.Low = {res = 64, levels = 5, voxel = -2, cones = 4, history_frames = 12},
 	.Medium = {res = 96, levels = 5, voxel = -3, cones = 6, history_frames = 10},
-	.High   = {res = 128, levels = 5, voxel = -3, cones = 6, history_frames = 8},
-	.Ultra  = {res = 128, levels = 6, voxel = -3, cones = 9, history_frames = 8},
+	.High = {res = 128, levels = 5, voxel = -3, cones = 6, history_frames = 8},
+	.Ultra = {res = 128, levels = 6, voxel = -3, cones = 9, history_frames = 8},
 }
 
 // The engine's voxel cone shaders, by their .meta files.
@@ -223,13 +223,22 @@ voxel_bytes :: proc(params: Gi_Voxel_Params) -> int {
 
 // voxel_snap is a cell rounded down to a multiple of VOXEL_SNAP.
 voxel_snap :: proc(cell: [3]i64) -> [3]i64 {
-	return {cell.x & ~i64(VOXEL_SNAP - 1), cell.y & ~i64(VOXEL_SNAP - 1), cell.z & ~i64(VOXEL_SNAP - 1)}
+	return {
+		cell.x & ~i64(VOXEL_SNAP - 1),
+		cell.y & ~i64(VOXEL_SNAP - 1),
+		cell.z & ~i64(VOXEL_SNAP - 1),
+	}
 }
 
 // place_voxel_box moves a level's box to have the camera near its middle, when the camera is more than VOXEL_SNAP
 // voxels from it, and gives whether it moved. Its first cell is a multiple of VOXEL_SNAP. A box that moves holds no
 // surfaces until it voxelizes again.
-place_voxel_box :: proc(box: ^Voxel_Box, camera: ecs.World_Position, exponent: i32, res: u32) -> bool {
+place_voxel_box :: proc(
+	box: ^Voxel_Box,
+	camera: ecs.World_Position,
+	exponent: i32,
+	res: u32,
+) -> bool {
 	cell := split_cell(camera, exponent)
 	half := i64(res / 2)
 	if box.placed {
@@ -296,7 +305,12 @@ voxel_cones :: proc(count: u32) -> (cones: [VOXEL_MAX_CONES][4]f32, aperture: f3
 		for i in 0 ..< ring.count {
 			// Each ring turns by half a step from the one before, so the rings' cones do not line up.
 			phi := (f32(i) + 0.5 * f32(r)) / f32(ring.count) * math.TAU
-			cones[n] = {math.sin(theta) * math.cos(phi), math.sin(theta) * math.sin(phi), math.cos(theta), math.cos(theta)}
+			cones[n] = {
+				math.sin(theta) * math.cos(phi),
+				math.sin(theta) * math.sin(phi),
+				math.cos(theta),
+				math.cos(theta),
+			}
 			total += math.cos(theta)
 			n += 1
 		}
@@ -339,7 +353,9 @@ voxel_box_planes :: proc(min: [3]f32, extent: f32) -> (planes: [6][4]f32) {
 ensure_voxel_storage :: proc(r: ^Renderer, v: ^Gi_Voxel_State, params: Gi_Voxel_Params) {
 	platform := r.platform
 	if r.gi.voxel.sampler == {} {
-		r.gi.voxel.sampler = platform.gpu_create_sampler({filter = .Linear, address = .Repeat, label = "gi voxel sampler"})
+		r.gi.voxel.sampler = platform.gpu_create_sampler(
+			{filter = .Linear, address = .Repeat, label = "gi voxel sampler"},
+		)
 	}
 	if v.params == params && v.textures[0][.Radiance] != {} {
 		return
@@ -415,7 +431,12 @@ begin_gi_voxels :: proc(f: ^Frame, settings: Gi_Settings) -> ^Gi_Voxel_Frame {
 		scale := 1 / extent
 		grid.levels[l] = {
 			min    = {min.x, min.y, min.z, size},
-			uvw    = {(f32(phase.x) - min.x / size) / f32(params.res), (f32(phase.y) - min.y / size) / f32(params.res), (f32(phase.z) - min.z / size) / f32(params.res), scale},
+			uvw    = {
+				(f32(phase.x) - min.x / size) / f32(params.res),
+				(f32(phase.y) - min.y / size) / f32(params.res),
+				(f32(phase.z) - min.z / size) / f32(params.res),
+				scale,
+			},
 			phase  = {phase.x, phase.y, phase.z, 0},
 			reads  = reads,
 			writes = writes,
@@ -489,7 +510,8 @@ voxel_view_constants :: proc(c: ^Frame_Constants, view: Voxel_View, res: u32) {
 	c.voxel_size = view.size
 	c.voxel_min = view.min
 	c.voxel_phase = view.phase
-	c.voxel_albedo, c.voxel_normal, c.voxel_emission, c.voxel_mask = view.writes[0], view.writes[1], view.writes[2], view.writes[3]
+	c.voxel_albedo, c.voxel_normal, c.voxel_emission, c.voxel_mask =
+		view.writes[0], view.writes[1], view.writes[2], view.writes[3]
 }
 
 // add_gi_voxel_passes adds the voxel cones' passes after the prepass and sets Frame.gi_diffuse and Frame.gi_specular,
@@ -548,7 +570,13 @@ add_gi_voxel_passes :: proc(f: ^Frame) -> bool {
 		declare_scene_draws(f, p)
 	}
 	for l in 0 ..< int(params.levels) {
-		p := add_compute_pass(g, "gi voxel inject", run_voxel_pass, step(vf, .Inject, u32(l)), queue = .Compute)
+		p := add_compute_pass(
+			g,
+			"gi voxel inject",
+			run_voxel_pass,
+			step(vf, .Inject, u32(l)),
+			queue = .Compute,
+		)
 		declare_cloud_shadow(f, p)
 		for k in 0 ..< int(params.levels) {
 			read(g, p, vf.textures[k][.Mask])
@@ -566,14 +594,29 @@ add_gi_voxel_passes :: proc(f: ^Frame) -> bool {
 		if vf.grid.levels[l].phase.w == 0 {
 			continue
 		}
-		p := add_compute_pass(g, "gi voxel filter", run_voxel_pass, step(vf, .Filter, u32(l)), queue = .Compute)
+		p := add_compute_pass(
+			g,
+			"gi voxel filter",
+			run_voxel_pass,
+			step(vf, .Filter, u32(l)),
+			queue = .Compute,
+		)
 		read(g, p, vf.textures[l][.Radiance])
 		write(g, p, vf.textures[l + 1][.Radiance])
 	}
 	if f.debug_view == .Gi_Probes {
-		gf.probe_view = create_texture(g, {size = f.size, format = GI_FORMAT, label = "gi probe view"})
+		gf.probe_view = create_texture(
+			g,
+			{size = f.size, format = GI_FORMAT, label = "gi probe view"},
+		)
 	}
-	p := add_compute_pass(g, "gi voxel gather", run_voxel_pass, step(vf, .Gather), queue = .Compute)
+	p := add_compute_pass(
+		g,
+		"gi voxel gather",
+		run_voxel_pass,
+		step(vf, .Gather),
+		queue = .Compute,
+	)
 	read(g, p, f.depth)
 	read(g, p, f.normals)
 	read(g, p, f.velocity)
@@ -605,7 +648,12 @@ voxel_holds :: proc(vf: ^Gi_Voxel_Frame, p: [3]f32) -> bool {
 			continue
 		}
 		local := (p - level.min.xyz) / level.min.w
-		if local.x >= 1 && local.y >= 1 && local.z >= 1 && local.x <= res - 1 && local.y <= res - 1 && local.z <= res - 1 {
+		if local.x >= 1 &&
+		   local.y >= 1 &&
+		   local.z >= 1 &&
+		   local.x <= res - 1 &&
+		   local.y <= res - 1 &&
+		   local.z <= res - 1 {
 			return true
 		}
 	}
@@ -657,7 +705,8 @@ run_voxel_capture_gather :: proc(ctx: ^Pass_Context) {
 	g := ctx.graph
 	k := gf.constants
 	right, up, forward := c.axes[0], c.axes[1], c.axes[2]
-	k.right, k.up, k.forward = {right.x, right.y, right.z, 0}, {up.x, up.y, up.z, 0}, {forward.x, forward.y, forward.z, 0}
+	k.right, k.up, k.forward =
+		{right.x, right.y, right.z, 0}, {up.x, up.y, up.z, 0}, {forward.x, forward.y, forward.z, 0}
 	// A 90° view's x and y scales are 1.
 	k.projection = {1, 1, REFLECTION_PROBE_NEAR, 0}
 	k.size = {c.size, c.size}
@@ -747,7 +796,11 @@ run_voxel_pass :: proc(ctx: ^Pass_Context) {
 		level       = step.level,
 	}
 	res := vf.params.res
-	voxel_groups := [3]u32{(res + VOXEL_GROUP - 1) / VOXEL_GROUP, (res + VOXEL_GROUP - 1) / VOXEL_GROUP, (res + VOXEL_GROUP - 1) / VOXEL_GROUP}
+	voxel_groups := [3]u32 {
+		(res + VOXEL_GROUP - 1) / VOXEL_GROUP,
+		(res + VOXEL_GROUP - 1) / VOXEL_GROUP,
+		(res + VOXEL_GROUP - 1) / VOXEL_GROUP,
+	}
 	switch step.pass {
 	case .Clear, .Inject, .Filter:
 		pipeline := v.clear.pipeline
@@ -758,7 +811,11 @@ run_voxel_pass :: proc(ctx: ^Pass_Context) {
 		case .Filter:
 			pipeline = v.filter.pipeline
 			half := res / 2
-			groups = {(half + VOXEL_GROUP - 1) / VOXEL_GROUP, (half + VOXEL_GROUP - 1) / VOXEL_GROUP, (half + VOXEL_GROUP - 1) / VOXEL_GROUP}
+			groups = {
+				(half + VOXEL_GROUP - 1) / VOXEL_GROUP,
+				(half + VOXEL_GROUP - 1) / VOXEL_GROUP,
+				(half + VOXEL_GROUP - 1) / VOXEL_GROUP,
+			}
 		}
 		gpu.cmd_set_pipeline(ctx.cb, pipeline)
 		gpu.cmd_set_pass_constants(ctx.cb, f.scene_frame.view_constants[VIEW_CAMERA])

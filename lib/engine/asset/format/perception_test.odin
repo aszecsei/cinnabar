@@ -15,7 +15,12 @@ test_perception :: proc() -> []byte {
 			{key = "target_visible", source = .Visible, of = 0},
 			{key = "target_since", source = .Since, of = 0},
 			{key = "heard", source = .Heard_Noise, of = PERCEPTION_NONE},
-			{key = "heard_position", source = .Loudest_Noise, tag = "Noise_Maker", of = PERCEPTION_NONE},
+			{
+				key = "heard_position",
+				source = .Loudest_Noise,
+				tag = "Noise_Maker",
+				of = PERCEPTION_NONE,
+			},
 		},
 		source_path = "game/ai/guard.perception",
 	}

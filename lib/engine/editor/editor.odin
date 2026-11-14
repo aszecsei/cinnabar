@@ -12,8 +12,8 @@ import "cinnabar:core"
 import "cinnabar:core/profile"
 import "cinnabar:engine/ai"
 import "cinnabar:engine/asset"
-import "cinnabar:engine/ecs"
 import format "cinnabar:engine/asset/format"
+import "cinnabar:engine/ecs"
 import "cinnabar:engine/editor/link"
 import "cinnabar:engine/nav"
 import "cinnabar:engine/render"
@@ -62,33 +62,33 @@ Editor :: struct {
 // docs/overview/conventions.md#state-with-a-lifecycle).
 Session :: struct {
 	// The connection that this session is for. Another one means a new editor, which gets everything.
-	connection:   u64,
-	types_sent:   bool,
+	connection:     u64,
+	types_sent:     bool,
 	// What the editor knows of each entity slot, by entity index.
-	known:        [dynamic]Known,
+	known:          [dynamic]Known,
 	// The version that the last scan took, and how many entities the world had despawned at it.
-	scan_version: u64,
-	despawned:    u64,
-	watched:      [dynamic]Watched,
+	scan_version:   u64,
+	despawned:      u64,
+	watched:        [dynamic]Watched,
 	// The editor's viewports, each with its camera and gizmo, its selection and its picks (see viewport.odin).
-	view:         View,
+	view:           View,
 	// The mode that the editor set (see modes.odin).
-	mode:         link.Editor_Mode,
+	mode:           link.Editor_Mode,
 	// Step_Frame messages that wait for a paused frame.
-	steps:        int,
-	last_scan:    f64,
-	last_values:  f64,
-	last_stats:   f64,
+	steps:          int,
+	last_scan:      f64,
+	last_values:    f64,
+	last_stats:     f64,
 	// The bytes of mesh pages that the renderer had streamed when the stats were last sent.
 	pages_streamed: u64,
 	// The material editor's previews, by ID, and the one to draw next (see preview.odin).
-	previews:     [MAX_PREVIEWS]Preview,
-	next_preview: int,
-	thumbnail:    Thumbnail,
+	previews:       [MAX_PREVIEWS]Preview,
+	next_preview:   int,
+	thumbnail:      Thumbnail,
 	// The meshes that the editor edits, drawn from memory in place of their assets (see live.odin).
-	live_meshes:  map[format.Guid]Live_Mesh,
+	live_meshes:    map[format.Guid]Live_Mesh,
 	// What mesh mode draws over the live meshes (see mesh_overlay.odin), in the host's heap.
-	mesh_overlay: link.Mesh_Overlay,
+	mesh_overlay:   link.Mesh_Overlay,
 }
 
 @(private)
@@ -150,14 +150,14 @@ init :: proc(
 begin_session :: proc(e: ^Editor, connection: u64) {
 	heap := e.platform.heap_allocator
 	e.session = {
-		connection  = connection,
-		known       = make([dynamic]Known, heap),
-		watched     = make([dynamic]Watched, heap),
+		connection = connection,
+		known = make([dynamic]Known, heap),
+		watched = make([dynamic]Watched, heap),
 		live_meshes = make(map[format.Guid]Live_Mesh, heap),
 		view = {
 			selection = make([dynamic]ecs.Entity, heap),
-			hidden    = make([dynamic]ecs.Entity, heap),
-			picks     = make([dynamic]link.Pick_Request, heap),
+			hidden = make([dynamic]ecs.Entity, heap),
+			picks = make([dynamic]link.Pick_Request, heap),
 			nav_probe = make([dynamic]ecs.World_Position, heap),
 		},
 	}
@@ -218,7 +218,15 @@ destroy :: proc(e: ^Editor) {
 
 // poll handles the editor's messages and appends the game's messages to out. Call it between frames, outside the
 // script phase. user is the game's own data, which its commands get.
-poll :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, connection: u64, incoming: []core.Editor_Message, out: ^[dynamic]byte, user: rawptr = nil) {
+poll :: proc(
+	e: ^Editor,
+	w: ^ecs.World,
+	scripts: ^script.Runtime,
+	connection: u64,
+	incoming: []core.Editor_Message,
+	out: ^[dynamic]byte,
+	user: rawptr = nil,
+) {
 	profile.scope_text(&e.platform.profile, "Editor poll", .Editor)
 	snapshot := false
 	if connection != e.session.connection {
@@ -280,10 +288,15 @@ poll :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, connection: u6
 		case link.Capture_Reflection_Probes:
 			capture_probes(e, v.entities)
 		case link.Sky_Sun_Request:
-			answer := link.Sky_Sun{state = .No_Texture_Sky}
+			answer := link.Sky_Sun {
+				state = .No_Texture_Sky,
+			}
 			if e.renderer != nil {
 				direction, state := render.sky_texture_sun(e.renderer)
-				answer = {state = link.Sky_Sun_State(state), direction = direction}
+				answer = {
+					state     = link.Sky_Sun_State(state),
+					direction = direction,
+				}
 			}
 			link.write_message(out, answer)
 		case link.Step_Frame:
@@ -291,7 +304,10 @@ poll :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, connection: u6
 				e.session.steps += 1
 			}
 		case:
-			if !handle_thumbnail_message(e, message) && !handle_preview_message(e, message) && !handle_viewport_message(e, message) && !handle_live_message(e, message) {
+			if !handle_thumbnail_message(e, message) &&
+			   !handle_preview_message(e, message) &&
+			   !handle_viewport_message(e, message) &&
+			   !handle_live_message(e, message) {
 				log.warnf("editor: the game does not handle %v", message)
 			}
 		}
@@ -329,13 +345,17 @@ poll :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, connection: u6
 		stats := game_stats(w, scripts, frame)
 		if e.renderer != nil {
 			c := render.cull_stats(e.renderer)
-			stats.early_items, stats.late_items, stats.hidden_items = c.early_items, c.late_items, c.hidden_items
-			stats.early_instances, stats.late_instances, stats.hidden_instances = c.early_instances, c.late_instances, c.hidden_instances
-			stats.hierarchy_meshlets, stats.selected_meshlets = c.hierarchy_meshlets, c.selected_meshlets
+			stats.early_items, stats.late_items, stats.hidden_items =
+				c.early_items, c.late_items, c.hidden_items
+			stats.early_instances, stats.late_instances, stats.hidden_instances =
+				c.early_instances, c.late_instances, c.hidden_instances
+			stats.hierarchy_meshlets, stats.selected_meshlets =
+				c.hierarchy_meshlets, c.selected_meshlets
 			sh := render.shading_stats(e.renderer)
 			stats.forward_quads, stats.forward_pixels = sh.forward_quads, sh.forward_pixels
 			vs := render.virtual_shadow_stats(e.renderer)
-			stats.virtual_pages_requested, stats.virtual_pages_allocated = vs.requested, vs.allocated
+			stats.virtual_pages_requested, stats.virtual_pages_allocated =
+				vs.requested, vs.allocated
 			stats.virtual_pages_missed, stats.virtual_pages_capacity = vs.missed, vs.capacity
 			stats.virtual_pages_cached, stats.virtual_pages_drawn = vs.cached, vs.drawn
 			stats.virtual_pages_evicted, stats.virtual_pages_resident = vs.evicted, vs.resident
@@ -343,17 +363,27 @@ poll :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, connection: u6
 			stats.atlas_cache_lights, stats.atlas_cache_copied = ac.lights, ac.copied
 			stats.atlas_cache_drawn, stats.atlas_cache_refreshed = ac.drawn, ac.refreshed
 			pages := render.mesh_stream_stats(&e.renderer.residency)
-			stats.mesh_pages_resident, stats.mesh_pages_capacity = pages.resident_pages, pages.capacity_pages
+			stats.mesh_pages_resident, stats.mesh_pages_capacity =
+				pages.resident_pages, pages.capacity_pages
 			stats.mesh_pages_pending = pages.pending_requests
 			// A rate over the interval, as a frame's bytes are 0 in most frames.
 			if pages.streamed_total >= s.pages_streamed && stats_interval > 0 {
-				stats.mesh_pages_streamed_bytes = u32(min(f64(pages.streamed_total - s.pages_streamed) / stats_interval, f64(max(u32))))
+				stats.mesh_pages_streamed_bytes = u32(
+					min(
+						f64(pages.streamed_total - s.pages_streamed) / stats_interval,
+						f64(max(u32)),
+					),
+				)
 			}
 			s.pages_streamed = pages.streamed_total
 			gi := render.gi_split_stats(e.renderer)
 			cascades := make([]link.Gi_Cascade_Stats, gi.count, frame)
 			for &cascade, k in cascades {
-				cascade = {active = gi.cascades[k].active, slots = gi.cascades[k].slots, dropped = gi.cascades[k].dropped}
+				cascade = {
+					active  = gi.cascades[k].active,
+					slots   = gi.cascades[k].slots,
+					dropped = gi.cascades[k].dropped,
+				}
 			}
 			stats.gi_cascades = cascades
 			rp := render.reflection_probe_stats(e.renderer)
@@ -366,7 +396,11 @@ poll :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, connection: u6
 }
 
 @(private)
-game_stats :: proc(w: ^ecs.World, scripts: ^script.Runtime, allocator: runtime.Allocator) -> link.Game_Stats {
+game_stats :: proc(
+	w: ^ecs.World,
+	scripts: ^script.Runtime,
+	allocator: runtime.Allocator,
+) -> link.Game_Stats {
 	stats := link.Game_Stats {
 		entities   = ecs.entity_count(w),
 		archetypes = w.archetype_count,
@@ -377,7 +411,10 @@ game_stats :: proc(w: ^ecs.World, scripts: ^script.Runtime, allocator: runtime.A
 		stats.script_bytes = u64(total)
 		list := make([]link.Script_Module_Memory, len(modules), allocator)
 		for m, i in modules {
-			list[i] = {name = m.name, bytes = u64(m.bytes)}
+			list[i] = {
+				name  = m.name,
+				bytes = u64(m.bytes),
+			}
 		}
 		stats.modules = list
 	}
@@ -392,7 +429,11 @@ watch :: proc(e: ^Editor, entity: ecs.Entity) {
 		}
 	}
 	if len(e.session.watched) == MAX_WATCHED {
-		log.warnf("editor: the editor watches more than %d entities, so %v is not watched", MAX_WATCHED, entity)
+		log.warnf(
+			"editor: the editor watches more than %d entities, so %v is not watched",
+			MAX_WATCHED,
+			entity,
+		)
 		return
 	}
 	append(&e.session.watched, Watched{entity = entity})
@@ -414,7 +455,15 @@ unwatch :: proc(e: ^Editor, entity: ecs.Entity) {
 // What the editor knows of an entity changes only with its row, which moves with its archetype and its activity, or
 // with its Parent or its Name, so a delta visits only the chunks where those changed since the last scan.
 @(private)
-scan :: proc(e: ^Editor, w: ^ecs.World, full: bool, allocator: runtime.Allocator) -> (message: link.Message, changed: bool) {
+scan :: proc(
+	e: ^Editor,
+	w: ^ecs.World,
+	full: bool,
+	allocator: runtime.Allocator,
+) -> (
+	message: link.Message,
+	changed: bool,
+) {
 	since := full ? 0 : e.session.scan_version
 	e.session.scan_version = ecs.take_version(w)
 	infos := make([dynamic]link.Entity_Info, allocator)
@@ -444,13 +493,19 @@ scan :: proc(e: ^Editor, w: ^ecs.World, full: bool, allocator: runtime.Allocator
 		name := ecs.name_of(w, entity)
 		now := Known{entity, archetype, parent, !inactive, hash.fnv64a(transmute([]byte)name)}
 		k := &e.session.known[index]
-		if full || k.entity != now.entity || k.archetype != now.archetype || k.parent != now.parent || k.active != now.active || k.name != now.name {
+		if full ||
+		   k.entity != now.entity ||
+		   k.archetype != now.archetype ||
+		   k.parent != now.parent ||
+		   k.active != now.active ||
+		   k.name != now.name {
 			ids := make([]u64, len(components), allocator)
 			for id, i in components {
 				ids[i] = u64(id)
 			}
 			scene_id: u64
-			if s := (^scene.Scene_Entity)(ecs.get_raw(w, entity, scene.SCENE_ENTITY_ID)); s != nil {
+			if s := (^scene.Scene_Entity)(ecs.get_raw(w, entity, scene.SCENE_ENTITY_ID));
+			   s != nil {
 				scene_id = s.id
 			}
 			append(
@@ -470,13 +525,20 @@ scan :: proc(e: ^Editor, w: ^ecs.World, full: bool, allocator: runtime.Allocator
 	if full {
 		return link.Entity_Snapshot{entities = infos[:]}, true
 	}
-	return link.Entity_Delta{changed = infos[:], destroyed = destroyed[:]}, len(infos) > 0 || len(destroyed) > 0
+	return link.Entity_Delta{changed = infos[:], destroyed = destroyed[:]},
+		len(infos) > 0 || len(destroyed) > 0
 }
 
 // send_values sends the values of each watched entity whose values changed since the editor last got them. A watched
 // entity that died is no longer watched; the delta tells the editor that it is gone.
 @(private)
-send_values :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, out: ^[dynamic]byte, allocator: runtime.Allocator) {
+send_values :: proc(
+	e: ^Editor,
+	w: ^ecs.World,
+	scripts: ^script.Runtime,
+	out: ^[dynamic]byte,
+	allocator: runtime.Allocator,
+) {
 	for i := 0; i < len(e.session.watched); {
 		watched := &e.session.watched[i]
 		if !ecs.is_alive(w, watched.entity) {
@@ -511,7 +573,11 @@ send_values :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, out: ^[
 }
 
 @(private)
-behaviour_values :: proc(scripts: ^script.Runtime, entity: ecs.Entity, allocator: runtime.Allocator) -> []link.Behaviour_Value {
+behaviour_values :: proc(
+	scripts: ^script.Runtime,
+	entity: ecs.Entity,
+	allocator: runtime.Allocator,
+) -> []link.Behaviour_Value {
 	if scripts == nil || scripts.L == nil {
 		return nil
 	}
@@ -532,7 +598,12 @@ behaviour_values :: proc(scripts: ^script.Runtime, entity: ecs.Entity, allocator
 				asset_kind = f.asset_kind,
 			}
 		}
-		values[i] = {class = s.class, script = ([16]u8)(s.script), enabled = s.enabled, fields = fields}
+		values[i] = {
+			class   = s.class,
+			script  = ([16]u8)(s.script),
+			enabled = s.enabled,
+			fields  = fields,
+		}
 	}
 	return values
 }
@@ -549,6 +620,9 @@ find :: proc(ids: []ecs.Component_Id, id: ecs.Component_Id) -> (int, bool) {
 
 #assert(int(script.Behaviour_Field_Kind.Entity) == int(link.Behaviour_Field_Kind.Entity))
 #assert(int(script.Behaviour_Field_Kind.Asset) == int(link.Behaviour_Field_Kind.Asset))
-#assert(len(render.Sky_Sun_State) == len(link.Sky_Sun_State) && int(render.Sky_Sun_State.No_Sun) == int(link.Sky_Sun_State.No_Sun))
+#assert(
+	len(render.Sky_Sun_State) == len(link.Sky_Sun_State) &&
+	int(render.Sky_Sun_State.No_Sun) == int(link.Sky_Sun_State.No_Sun),
+)
 #assert(int(format.Scene_Value_Kind.Entity) == int(link.Scene_Value_Kind.Entity))
 #assert(int(format.Scene_Value_Kind.Asset) == int(link.Scene_Value_Kind.Asset))

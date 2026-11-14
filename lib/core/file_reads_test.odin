@@ -13,7 +13,10 @@ jobs_lock: sync.Mutex
 
 @(private = "file")
 numbered_file :: proc(t: ^testing.T, name: string, size: int) -> string {
-	path, _ := filepath.join({os.get_env("TEMP", context.temp_allocator), name}, context.temp_allocator)
+	path, _ := filepath.join(
+		{os.get_env("TEMP", context.temp_allocator), name},
+		context.temp_allocator,
+	)
 	data := make([]byte, size, context.temp_allocator)
 	for &b, i in data {
 		b = byte(i)
@@ -111,7 +114,11 @@ a_read_that_is_ended_early_is_cancelled_and_its_slot_comes_back :: proc(t: ^test
 	testing.expect_value(t, state, File_Read_State.Failed)
 	file_reads_wait(reads)
 	for slot in reads.slots {
-		testing.expect(t, slot.work == nil && slot.buffer == nil, "every slot is free and holds no buffer")
+		testing.expect(
+			t,
+			slot.work == nil && slot.buffer == nil,
+			"every slot is free and holds no buffer",
+		)
 	}
 	again := file_reads_begin(reads, path, 0, 64)
 	testing.expect(t, again != 0, "a freed slot takes a read again")

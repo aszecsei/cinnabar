@@ -162,7 +162,15 @@ push_action_value :: proc(r: ^Runtime, L: ^luau.State, kind: string, value: Acti
 // start_action makes an instance of the action named name for an entity, with its parameters' defaults and then the
 // arguments, and calls its start. It fails for a name that no module defined, an argument that the action has no
 // parameter for or of another kind, a start that raises an error, or when MAX_ACTIONS run. Call it in a fixed step.
-start_action :: proc(r: ^Runtime, name: string, e: ecs.Entity, args: []Action_Arg) -> (h: Action_Handle, status: Action_Status) {
+start_action :: proc(
+	r: ^Runtime,
+	name: string,
+	e: ecs.Entity,
+	args: []Action_Arg,
+) -> (
+	h: Action_Handle,
+	status: Action_Status,
+) {
 	assert(r.phase == .Fixed, "script: actions start in a fixed step")
 	L := r.L
 	top := luau.gettop(L)
@@ -211,7 +219,12 @@ start_action :: proc(r: ^Runtime, name: string, e: ecs.Entity, args: []Action_Ar
 		kind := luau.toodinstring(L, -1)
 		luau.pushlstring(L, raw_data(arg.name), c.size_t(len(arg.name)))
 		if !push_action_value(r, L, kind, arg.value) {
-			log.warnf("script: the action %s's parameter %s is a %s, and its argument is not", name, arg.name, kind)
+			log.warnf(
+				"script: the action %s's parameter %s is a %s, and its argument is not",
+				name,
+				arg.name,
+				kind,
+			)
 			return {}, .Failed
 		}
 		luau.rawset(L, t)
@@ -222,7 +235,11 @@ start_action :: proc(r: ^Runtime, name: string, e: ecs.Entity, args: []Action_Ar
 		entity        = e,
 		generation    = a.generation + 1,
 		live          = true,
-		profile_class = profile.name(&r.platform.profile, fmt.aprintf("%s", name, allocator = frame(r)), .Script),
+		profile_class = profile.name(
+			&r.platform.profile,
+			fmt.aprintf("%s", name, allocator = frame(r)),
+			.Script,
+		),
 	}
 	if a.generation == 0 {
 		a.generation = 1
@@ -247,7 +264,15 @@ start_action :: proc(r: ^Runtime, name: string, e: ecs.Entity, args: []Action_Ar
 // call_action calls a method of a running action, if its class has one, with dt as its argument if it is set, and
 // gives its result. ok is false when it raises an error.
 @(private = "file")
-call_action :: proc(r: ^Runtime, h: Action_Handle, name: cstring, dt: Maybe(f64) = nil) -> (ok: bool, status: Action_Status) {
+call_action :: proc(
+	r: ^Runtime,
+	h: Action_Handle,
+	name: cstring,
+	dt: Maybe(f64) = nil,
+) -> (
+	ok: bool,
+	status: Action_Status,
+) {
 	L := r.L
 	a := action_at(r, h)
 	if a == nil {
@@ -285,7 +310,10 @@ call_action :: proc(r: ^Runtime, h: Action_Handle, name: cstring, dt: Maybe(f64)
 			return true, .Failed
 		}
 	}
-	log.errorf("script: an action's %s gives \"running\", \"succeeded\", \"failed\" or nothing", name)
+	log.errorf(
+		"script: an action's %s gives \"running\", \"succeeded\", \"failed\" or nothing",
+		name,
+	)
 	return false, .Failed
 }
 

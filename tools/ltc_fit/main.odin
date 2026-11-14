@@ -70,7 +70,10 @@ ltc_eval :: proc(l: ^Ltc, d: Vec3) -> f64 {
 ltc_sample :: proc(l: ^Ltc, u1, u2: f64) -> Vec3 {
 	theta := math.acos(math.sqrt(u1))
 	phi := 2 * math.PI * u2
-	return linalg.normalize(l.m * Vec3{math.sin(theta) * math.cos(phi), math.sin(theta) * math.sin(phi), math.cos(theta)})
+	return linalg.normalize(
+		l.m *
+		Vec3{math.sin(theta) * math.cos(phi), math.sin(theta) * math.sin(phi), math.cos(theta)},
+	)
 }
 
 // brdf_eval is Lit's specular without Fresnel, times the cosine, as shade_direct computes it, and the probability of
@@ -299,7 +302,14 @@ fit_texel :: proc(l: ^Ltc, x, y: int) -> Fit {
 	} else {
 		untilted_error := nelder_mead(l, v, alpha, .Untilted, FIT_DELTA)
 		untilted := l^
-		if nelder_mead(l, v, alpha, .Tilted, {FIT_DELTA, FIT_DELTA, FIT_DELTA, 0.25 * min(l.m00, l.m11)}) > untilted_error {
+		if nelder_mead(
+			   l,
+			   v,
+			   alpha,
+			   .Tilted,
+			   {FIT_DELTA, FIT_DELTA, FIT_DELTA, 0.25 * min(l.m00, l.m11)},
+		   ) >
+		   untilted_error {
 			l^ = untilted
 		}
 	}
@@ -342,7 +352,11 @@ fit_all :: proc(fits: []Fit) {
 			}
 		}
 	}
-	threads := make([]^thread.Thread, max(os.get_processor_core_count(), 1), context.temp_allocator)
+	threads := make(
+		[]^thread.Thread,
+		max(os.get_processor_core_count(), 1),
+		context.temp_allocator,
+	)
 	for &t in threads {
 		t = thread.create_and_start_with_data(&work, worker)
 	}
@@ -377,7 +391,10 @@ clipped_cap :: proc(w, s: f64) -> f64 {
 	g := math.asin(clamp(math.cos(s) / math.sin(w), -1, 1))
 	cos_g := math.cos(g)
 	big_g := -2 * math.sin(w) * math.cos(s) * cos_g + math.PI / 2 - g + math.sin(g) * cos_g
-	big_h := math.cos(w) * (cos_g * math.sqrt(max(sin2s - cos_g * cos_g, 0)) + sin2s * math.asin(clamp(cos_g / math.sin(s), -1, 1)))
+	big_h :=
+		math.cos(w) *
+		(cos_g * math.sqrt(max(sin2s - cos_g * cos_g, 0)) +
+				sin2s * math.asin(clamp(cos_g / math.sin(s), -1, 1)))
 	if w < math.PI / 2 {
 		return math.PI * math.cos(w) * sin2s + big_g - big_h
 	}
@@ -399,7 +416,9 @@ pack :: proc(fits: []Fit) -> []f32 {
 		x, y := i % SIZE, i / SIZE
 		second[i * 4 + 0] = f32(fit.magnitude)
 		second[i * 4 + 1] = f32(fit.fresnel)
-		second[i * 4 + 3] = f32(sphere_form_factor(f64(x) / (SIZE - 1) * 2 - 1, f64(y) / (SIZE - 1)))
+		second[i * 4 + 3] = f32(
+			sphere_form_factor(f64(x) / (SIZE - 1) * 2 - 1, f64(y) / (SIZE - 1)),
+		)
 	}
 	return data
 }
@@ -416,7 +435,13 @@ main :: proc() {
 		worst = max(worst, fit.error)
 		total += fit.error
 	}
-	fmt.printfln("fitted %dx%d: the share of light in the wrong place is %.3f at most, %.3f on average", SIZE, SIZE, worst, total / (SIZE * SIZE))
+	fmt.printfln(
+		"fitted %dx%d: the share of light in the wrong place is %.3f at most, %.3f on average",
+		SIZE,
+		SIZE,
+		worst,
+		total / (SIZE * SIZE),
+	)
 	// A sample of the grid, by roughness across and by view angle down.
 	for y := 0; y < SIZE; y += 9 {
 		fmt.printf("  y %2d:", y)
@@ -426,7 +451,10 @@ main :: proc() {
 		fmt.println()
 	}
 	data := pack(fits)
-	if err := os.write_entire_file(os.args[1], ([^]byte)(raw_data(data))[:len(data) * size_of(f32)]); err != nil {
+	if err := os.write_entire_file(
+		os.args[1],
+		([^]byte)(raw_data(data))[:len(data) * size_of(f32)],
+	); err != nil {
 		fmt.eprintfln("ltc_fit: cannot write %s: %v", os.args[1], err)
 		os.exit(1)
 	}

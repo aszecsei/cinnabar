@@ -12,12 +12,22 @@ import "cinnabar:engine/ecs"
 import "cinnabar:engine/editor/link"
 
 #assert(len(format.Animation_Graph_Parameter_Kind) == len(link.Animator_Parameter_Kind))
-#assert(int(format.Animation_Graph_Parameter_Kind.Trigger) == int(link.Animator_Parameter_Kind.Trigger))
+#assert(
+	int(format.Animation_Graph_Parameter_Kind.Trigger) ==
+	int(link.Animator_Parameter_Kind.Trigger),
+)
 
 // animator_graph is the blob of an Animator's graph, when its instance was made from it. The frame's table in
 // anim.State is gone by the time that the editor polls, so this reads what animate's prepare has already loaded.
 @(private = "file")
-animator_graph :: proc(e: ^Editor, a: ^anim.Animator) -> (data: []byte, blob: ^format.Animation_Graph_Blob, ok: bool) {
+animator_graph :: proc(
+	e: ^Editor,
+	a: ^anim.Animator,
+) -> (
+	data: []byte,
+	blob: ^format.Animation_Graph_Blob,
+	ok: bool,
+) {
 	if e.assets == nil || a.graph == {} {
 		return
 	}
@@ -29,7 +39,14 @@ animator_graph :: proc(e: ^Editor, a: ^anim.Animator) -> (data: []byte, blob: ^f
 
 // animator_view is what an entity's Animator plays: empty but for the entity without one, or before its graph is ready.
 @(private = "file")
-animator_view :: proc(e: ^Editor, w: ^ecs.World, entity: ecs.Entity, allocator: runtime.Allocator) -> (view: link.Animator_View) {
+animator_view :: proc(
+	e: ^Editor,
+	w: ^ecs.World,
+	entity: ecs.Entity,
+	allocator: runtime.Allocator,
+) -> (
+	view: link.Animator_View,
+) {
 	view.entity = u64(entity)
 	a := ecs.get(w, entity, anim.Animator)
 	if a == nil {
@@ -45,7 +62,14 @@ animator_view :: proc(e: ^Editor, w: ^ecs.World, entity: ecs.Entity, allocator: 
 
 // instance_view is what an instance of a graph plays, by the nodes of the graph's text and its parameters' names.
 @(private)
-instance_view :: proc(data: []byte, blob: ^format.Animation_Graph_Blob, inst: ^anim_graph.Instance, graph: format.Guid, view: ^link.Animator_View, allocator: runtime.Allocator) {
+instance_view :: proc(
+	data: []byte,
+	blob: ^format.Animation_Graph_Blob,
+	inst: ^anim_graph.Instance,
+	graph: format.Guid,
+	view: ^link.Animator_View,
+	allocator: runtime.Allocator,
+) {
 	states := format.animation_graph_states(data, blob)
 	if int(inst.state) >= len(states) {
 		return
@@ -64,7 +88,11 @@ instance_view :: proc(data: []byte, blob: ^format.Animation_Graph_Blob, inst: ^a
 		if p.kind == .Trigger {
 			value = 1 if inst.triggers & (1 << u32(i)) != 0 else 0
 		}
-		view.parameters[i] = {name = format.blob_string(data, p.name), kind = link.Animator_Parameter_Kind(p.kind), value = value}
+		view.parameters[i] = {
+			name  = format.blob_string(data, p.name),
+			kind  = link.Animator_Parameter_Kind(p.kind),
+			value = value,
+		}
 	}
 }
 
@@ -72,7 +100,12 @@ instance_view :: proc(data: []byte, blob: ^format.Animation_Graph_Blob, inst: ^a
 // after a watch, whatever it is, so the editor drops a view that it kept from an earlier watch, then one empty view for
 // an Animator that has gone, so the editor keeps no old state.
 @(private)
-send_animators :: proc(e: ^Editor, w: ^ecs.World, out: ^[dynamic]byte, allocator: runtime.Allocator) {
+send_animators :: proc(
+	e: ^Editor,
+	w: ^ecs.World,
+	out: ^[dynamic]byte,
+	allocator: runtime.Allocator,
+) {
 	for &watched in e.session.watched {
 		view := animator_view(e, w, watched.entity, allocator)
 		encoded := make([dynamic]byte, allocator)
@@ -89,7 +122,13 @@ send_animators :: proc(e: ^Editor, w: ^ecs.World, out: ^[dynamic]byte, allocator
 // set_instance_parameter sets a parameter of an instance by its name: a number, 1 or 0 for a bool, and
 // for a trigger, anything but 0 pulls it and 0 resets it.
 @(private)
-set_instance_parameter :: proc(data: []byte, blob: ^format.Animation_Graph_Blob, inst: ^anim_graph.Instance, name: string, value: f32) {
+set_instance_parameter :: proc(
+	data: []byte,
+	blob: ^format.Animation_Graph_Blob,
+	inst: ^anim_graph.Instance,
+	name: string,
+	value: f32,
+) {
 	name_hash := format.animation_graph_hash(name)
 	for p, i in format.animation_graph_parameters(data, blob) {
 		if p.hash != name_hash {

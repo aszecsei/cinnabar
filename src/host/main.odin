@@ -150,7 +150,8 @@ main :: proc() {
 			audio_before := platform.audio_status()
 			switch next, reload := game_load(source_path, game.version + 1); reload {
 			case .Loaded:
-				kind := link.Reload_Kind.Code if next.api.layout_hash() == game.api.layout_hash() else .Soft_Restart
+				kind :=
+					link.Reload_Kind.Code if next.api.layout_hash() == game.api.layout_hash() else .Soft_Restart
 				state = game_swap(&game, next, state)
 				audio_after := platform.audio_status()
 				log.debugf(
@@ -244,7 +245,10 @@ game_load :: proc(source_path: string, version: int) -> (game: Game_Module, resu
 		api         = (proc() -> core.Game_API)(get_api)(),
 	}
 	if game.api.abi_hash() != core.abi_hash() {
-		log.errorf("host: %s was built with a different GPU command format or Platform_API. Restart the host to load it.", loaded_path)
+		log.errorf(
+			"host: %s was built with a different GPU command format or Platform_API. Restart the host to load it.",
+			loaded_path,
+		)
 		return game, .Refused
 	}
 	log.infof("host: loaded %s", loaded_path)
@@ -252,15 +256,30 @@ game_load :: proc(source_path: string, version: int) -> (game: Game_Module, resu
 }
 
 // copy_path is the name of a DLL's copy that a host loads: <name>_<process>_<version>.dll beside it.
-copy_path :: proc(source_path: string, pid, version: int, allocator := context.temp_allocator) -> string {
-	return fmt.aprintf("%s_%d_%d.dll", strings.trim_suffix(source_path, ".dll"), pid, version, allocator = allocator)
+copy_path :: proc(
+	source_path: string,
+	pid, version: int,
+	allocator := context.temp_allocator,
+) -> string {
+	return fmt.aprintf(
+		"%s_%d_%d.dll",
+		strings.trim_suffix(source_path, ".dll"),
+		pid,
+		version,
+		allocator = allocator,
+	)
 }
 
 // is_copy_of is whether a file's name is a copy of a DLL's, as copy_path names it, or as hosts before it named them,
 // <name>_<version>.dll.
 is_copy_of :: proc(name, source_name: string) -> bool {
-	prefix := strings.concatenate({strings.trim_suffix(source_name, ".dll"), "_"}, context.temp_allocator)
-	if !strings.has_prefix(name, prefix) || !strings.has_suffix(name, ".dll") || len(name) <= len(prefix) + len(".dll") {
+	prefix := strings.concatenate(
+		{strings.trim_suffix(source_name, ".dll"), "_"},
+		context.temp_allocator,
+	)
+	if !strings.has_prefix(name, prefix) ||
+	   !strings.has_suffix(name, ".dll") ||
+	   len(name) <= len(prefix) + len(".dll") {
 		return false
 	}
 	for part in strings.split(name[len(prefix):len(name) - len(".dll")], "_", context.temp_allocator) {

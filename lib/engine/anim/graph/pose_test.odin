@@ -21,18 +21,57 @@ aligned :: proc(data: []byte) -> []byte {
 }
 
 @(private = "file")
-test_clip :: proc(interpolation: format.Animation_Interpolation) -> ([]byte, ^format.Animation_Blob) {
+test_clip :: proc(
+	interpolation: format.Animation_Interpolation,
+) -> (
+	[]byte,
+	^format.Animation_Blob,
+) {
 	turn := linalg.quaternion_angle_axis_f32(math.PI / 2, {0, 0, 1})
-	data := aligned(format.animation_write({
-		joint_count = 2,
-		duration = 1,
-		channels = {
-			{joint = 0, path = .Rotation, interpolation = interpolation, first_key = 0, key_count = 2, first_value = 0},
-			{joint = 1, path = .Scale, interpolation = interpolation, first_key = 2, key_count = 2, first_value = 8},
-		},
-		times = {0, 1, 0, 1},
-		values = {0, 0, 0, 1, imag(turn), jmag(turn), kmag(turn), real(turn), 1, 1, 1, 3, 3, 3},
-	}, context.temp_allocator))
+	data := aligned(
+		format.animation_write(
+			{
+				joint_count = 2,
+				duration = 1,
+				channels = {
+					{
+						joint = 0,
+						path = .Rotation,
+						interpolation = interpolation,
+						first_key = 0,
+						key_count = 2,
+						first_value = 0,
+					},
+					{
+						joint = 1,
+						path = .Scale,
+						interpolation = interpolation,
+						first_key = 2,
+						key_count = 2,
+						first_value = 8,
+					},
+				},
+				times = {0, 1, 0, 1},
+				values = {
+					0,
+					0,
+					0,
+					1,
+					imag(turn),
+					jmag(turn),
+					kmag(turn),
+					real(turn),
+					1,
+					1,
+					1,
+					3,
+					3,
+					3,
+				},
+			},
+			context.temp_allocator,
+		),
+	)
 	blob, ok := format.animation_view(data)
 	assert(ok)
 	return data, blob
@@ -42,12 +81,32 @@ test_clip :: proc(interpolation: format.Animation_Interpolation) -> ([]byte, ^fo
 test_joints :: proc() -> []format.Skin_Joint {
 	identity := [3][4]f32{{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}}
 	down := [3][4]f32{{1, 0, 0, 0}, {0, 1, 0, -1}, {0, 0, 1, 0}}
-	data := aligned(format.skin_write({
-		joints = {
-			{name = "Root", parent = -1, inverse_bind = identity, rotation = {0, 0, 0, 1}, scale = 1, sphere = {0, 0, 0, -1}},
-			{name = "Tip", parent = 0, inverse_bind = down, translation = {0, 1, 0}, rotation = {0, 0, 0, 1}, scale = 1, sphere = {0, 0.5, 0, 0.5}},
-		},
-	}, context.temp_allocator))
+	data := aligned(
+		format.skin_write(
+			{
+				joints = {
+					{
+						name = "Root",
+						parent = -1,
+						inverse_bind = identity,
+						rotation = {0, 0, 0, 1},
+						scale = 1,
+						sphere = {0, 0, 0, -1},
+					},
+					{
+						name = "Tip",
+						parent = 0,
+						inverse_bind = down,
+						translation = {0, 1, 0},
+						rotation = {0, 0, 0, 1},
+						scale = 1,
+						sphere = {0, 0.5, 0, 0.5},
+					},
+				},
+			},
+			context.temp_allocator,
+		),
+	)
 	blob, ok := format.skin_view(data)
 	assert(ok)
 	return format.skin_joints(data, blob)
@@ -55,7 +114,13 @@ test_joints :: proc() -> []format.Skin_Joint {
 
 // pose_at is a clip's palette and sphere at a time, from its skin's rest pose.
 @(private = "file")
-pose_at :: proc(joints: []format.Skin_Joint, data: []byte, clip: ^format.Animation_Blob, time: f32, palette: [][3][4]f32) -> [4]f32 {
+pose_at :: proc(
+	joints: []format.Skin_Joint,
+	data: []byte,
+	clip: ^format.Animation_Blob,
+	time: f32,
+	palette: [][3][4]f32,
+) -> [4]f32 {
 	locals := make([]Joint_Pose, len(joints), context.temp_allocator)
 	models := make([]matrix[4, 4]f32, len(joints), context.temp_allocator)
 	rest_pose(joints, locals)
@@ -107,7 +172,11 @@ the_palette_poses_the_bind_pose :: proc(t: ^testing.T) {
 	m := palette[1]
 	vertex := [4]f32{0, 2, 0, 1}
 	posed := [3]f32{linalg.dot(m[0], vertex), linalg.dot(m[1], vertex), linalg.dot(m[2], vertex)}
-	testing.expect(t, near(posed.x, -4) && near(posed.y, 0) && near(posed.z, 0), "Tip turns with Root and grows")
+	testing.expect(
+		t,
+		near(posed.x, -4) && near(posed.y, 0) && near(posed.z, 0),
+		"Tip turns with Root and grows",
+	)
 
 	// The posed sphere holds Tip's posed vertices, from its joint out to the vertex.
 	for y in ([]f32{1, 1.5, 2}) {
@@ -136,10 +205,22 @@ poses_blend_by_their_weights :: proc(t: ^testing.T) {
 	accumulate(sum, a, 0.5)
 	accumulate(sum, b, 0.5)
 	resolve(sum, 1, rest)
-	testing.expect(t, near(sum[0].translation.x, 1) && near(sum[0].translation.y, 2), "translations average")
+	testing.expect(
+		t,
+		near(sum[0].translation.x, 1) && near(sum[0].translation.y, 2),
+		"translations average",
+	)
 	testing.expect(t, near(sum[0].scale.x, 2), "scales average")
-	testing.expect(t, near(linalg.dot(sum[0].rotation, sum[0].rotation), 1), "the rotation is normalized")
-	testing.expect(t, near(angle_between(sum[0].rotation, 1), math.PI / 4), "the rotation is halfway")
+	testing.expect(
+		t,
+		near(linalg.dot(sum[0].rotation, sum[0].rotation), 1),
+		"the rotation is normalized",
+	)
+	testing.expect(
+		t,
+		near(angle_between(sum[0].rotation, 1), math.PI / 4),
+		"the rotation is halfway",
+	)
 
 	// Weights that do not add up to 1 blend as their shares of the total.
 	uneven := make([]Joint_Pose, 1, context.temp_allocator)

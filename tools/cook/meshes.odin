@@ -64,7 +64,8 @@ MODEL_SETTINGS := []Setting_Info {
 		values = {"true", "false"},
 		default = "true",
 		description = "Write the welded triangles that a mesh collider is built from. Turn it off for a mesh that nothing collides with, to save its size.",
-	},	{
+	},
+	{
 		key = "impostor",
 		values = {"true", "false"},
 		default = "false",
@@ -127,7 +128,12 @@ cook_models :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass) 
 }
 
 @(private = "file")
-cook_model :: proc(options: Cook_Options, a: ^Asset_Source, out_dir: string, pass: ^Pass) -> Asset_Result {
+cook_model :: proc(
+	options: Cook_Options,
+	a: ^Asset_Source,
+	out_dir: string,
+	pass: ^Pass,
+) -> Asset_Result {
 	problems := &pass.problems
 	if !check_settings(a^, problems) {
 		return .Failed
@@ -153,14 +159,25 @@ cook_model :: proc(options: Cook_Options, a: ^Asset_Source, out_dir: string, pas
 	animations: []Model_Animation
 	if combine {
 		if len(data.skins) > 0 || len(data.animations) > 0 {
-			report_warning(problems, a.path, 0, 0, "with combine = true, its skins and animations are left out")
+			report_warning(
+				problems,
+				a.path,
+				0,
+				0,
+				"with combine = true, its skins and animations are left out",
+			)
 		}
 	} else {
 		skins, mesh_skins = model_skins(data, meshes, problems, a.path)
 		animations = model_animations(data, skins, problems, a.path)
 	}
 	force := pass.force[a.meta.guid]
-	wanted := make([dynamic]Subasset, 0, len(meshes) + len(skins) + len(animations), context.temp_allocator)
+	wanted := make(
+		[dynamic]Subasset,
+		0,
+		len(meshes) + len(skins) + len(animations),
+		context.temp_allocator,
+	)
 	for m in meshes {
 		append(&wanted, Subasset{kind = .Mesh, name = m.name})
 	}
@@ -218,32 +235,47 @@ cook_model :: proc(options: Cook_Options, a: ^Asset_Source, out_dir: string, pas
 		blobs[i] = blob
 	}
 	for s, i in skins {
-		blobs[len(meshes) + i] = format.skin_write({
-			guid        = skin_guids[i].guid,
-			key         = key,
-			joints      = skin_contents(s, scale),
-			name        = s.name,
-			source_path = a.name,
-		}, context.temp_allocator)
+		blobs[len(meshes) + i] = format.skin_write(
+			{
+				guid = skin_guids[i].guid,
+				key = key,
+				joints = skin_contents(s, scale),
+				name = s.name,
+				source_path = a.name,
+			},
+			context.temp_allocator,
+		)
 	}
 	for anim, i in animations {
-		channels, times, values, duration := animation_contents(anim, skins[anim.skin], scale, problems, a.path)
-		blobs[len(meshes) + len(skins) + i] = format.animation_write({
-			guid        = animation_guids[i].guid,
-			key         = key,
-			skin        = skin_guids[anim.skin].guid,
-			joint_count = u32(len(skins[anim.skin].nodes)),
-			duration    = duration,
-			channels    = channels,
-			times       = times,
-			values      = values,
-			name        = anim.name,
-			source_path = a.name,
-		}, context.temp_allocator)
+		channels, times, values, duration := animation_contents(
+			anim,
+			skins[anim.skin],
+			scale,
+			problems,
+			a.path,
+		)
+		blobs[len(meshes) + len(skins) + i] = format.animation_write(
+			{
+				guid = animation_guids[i].guid,
+				key = key,
+				skin = skin_guids[anim.skin].guid,
+				joint_count = u32(len(skins[anim.skin].nodes)),
+				duration = duration,
+				channels = channels,
+				times = times,
+				values = values,
+				name = anim.name,
+				source_path = a.name,
+			},
+			context.temp_allocator,
+		)
 	}
 	for blob, i in blobs {
 		buffer: [32]u8
-		if !write_blob(fmt.tprintf("%s/%s.blob", out_dir, format.guid_format(a.subassets[i].guid, &buffer)), blob) {
+		if !write_blob(
+			fmt.tprintf("%s/%s.blob", out_dir, format.guid_format(a.subassets[i].guid, &buffer)),
+			blob,
+		) {
 			return .Failed
 		}
 	}
@@ -269,7 +301,10 @@ model_setting :: proc(a: Asset_Source, key: string) -> string {
 model_meshes :: proc(data: ^cgltf.data, combine: bool, stem: string) -> []Model_Mesh {
 	result := make([dynamic]Model_Mesh, context.temp_allocator)
 	if combine {
-		m := Model_Mesh{name = stem, parts = make([dynamic]Model_Part, context.temp_allocator)}
+		m := Model_Mesh {
+			name  = stem,
+			parts = make([dynamic]Model_Part, context.temp_allocator),
+		}
 		roots: []^cgltf.node
 		switch {
 		case data.scene != nil:
@@ -329,7 +364,10 @@ model_meshes :: proc(data: ^cgltf.data, combine: bool, stem: string) -> []Model_
 		} else {
 			used[name] = 1
 		}
-		m := Model_Mesh{name = name, parts = make([dynamic]Model_Part, context.temp_allocator)}
+		m := Model_Mesh {
+			name  = name,
+			parts = make([dynamic]Model_Part, context.temp_allocator),
+		}
 		for &p in mesh.primitives {
 			append(&m.parts, Model_Part{&p, linalg.MATRIX4F32_IDENTITY})
 		}
@@ -343,8 +381,25 @@ model_meshes :: proc(data: ^cgltf.data, combine: bool, stem: string) -> []Model_
 // the cooker writes them: a mesh's GUID is its blob's name instead. The buffers are the model's inputs, which a change
 // to puts it in a daemon's pass.
 @(private = "file")
-model_key :: proc(options: Cook_Options, a: ^Asset_Source, data: ^cgltf.data, problems: ^Problems) -> (key: u64, ok: bool) {
-	key = hash.fnv64a(transmute([]byte)fmt.tprintf("%s\x00%s\x00%s\x00%s\x00%x\x00", MODEL_COOK_VERSION, MESHOPTIMIZER_VERSION, LZ4_VERSION, a.name, format.mesh_layout() ~ format.skin_layout() * 31 ~ format.animation_layout() * 961))
+model_key :: proc(
+	options: Cook_Options,
+	a: ^Asset_Source,
+	data: ^cgltf.data,
+	problems: ^Problems,
+) -> (
+	key: u64,
+	ok: bool,
+) {
+	key = hash.fnv64a(
+		transmute([]byte)fmt.tprintf(
+			"%s\x00%s\x00%s\x00%s\x00%x\x00",
+			MODEL_COOK_VERSION,
+			MESHOPTIMIZER_VERSION,
+			LZ4_VERSION,
+			a.name,
+			format.mesh_layout() ~ format.skin_layout() * 31 ~ format.animation_layout() * 961,
+		),
+	)
 	key = hash.fnv64a(source_of(a^), key)
 	guid := a.meta.guid
 	key = hash.fnv64a(guid[:], key)
@@ -373,20 +428,38 @@ model_key :: proc(options: Cook_Options, a: ^Asset_Source, data: ^cgltf.data, pr
 // build_mesh cooks one mesh into its blob. A mesh with a skin has a skin stream, and adds its vertices to the points of
 // the skin's joints.
 @(private = "file")
-build_mesh :: proc(a: Asset_Source, m: Model_Mesh, skin: ^Model_Skin, guid: format.Guid, key: u64, problems: ^Problems) -> (blob: []byte, ok: bool) {
+build_mesh :: proc(
+	a: Asset_Source,
+	m: Model_Mesh,
+	skin: ^Model_Skin,
+	guid: format.Guid,
+	key: u64,
+	problems: ^Problems,
+) -> (
+	blob: []byte,
+	ok: bool,
+) {
 	scale := f32(strconv.parse_f64(model_setting(a, "scale")) or_else 1)
 	generate := model_setting(a, "tangents") == "generate"
 	lod := model_setting(a, "cluster_lod") == "true"
 	paged := model_setting(a, "pages") == "true"
 	collision := model_setting(a, "collision") == "true"
-	impostor := model_setting(a, "impostor") == "true" ? (strconv.parse_int(model_setting(a, "impostor_size")) or_else 64) : 0
+	impostor :=
+		model_setting(a, "impostor") == "true" ? (strconv.parse_int(model_setting(a, "impostor_size")) or_else 64) : 0
 	flags: format.Mesh_Flags
 	// The skin stream is all of the mesh's or none of it: a primitive without joints is bound to the skin's first.
 	if skin != nil {
 		flags += {.Skinned}
 		// An impostor would show the rest pose.
 		if impostor > 0 {
-			report_warning(problems, a.path, 0, 0, "mesh %s has a skin, so it bakes no impostor", m.name)
+			report_warning(
+				problems,
+				a.path,
+				0,
+				0,
+				"mesh %s has a skin, so it bakes no impostor",
+				m.name,
+			)
 			impostor = 0
 		}
 	}
@@ -471,10 +544,16 @@ finish_mesh :: proc(m: Cook_Mesh, guid: format.Guid, key: u64) -> []byte {
 	if generate {
 		tangents := make([][4]f32, len(corners), context.temp_allocator)
 		meshopt_generateTangents(
-			&tangents[0][0], nil, c.size_t(len(corners)),
-			&corners[0].position[0], c.size_t(len(corners)), stride,
-			&corners[0].normal[0], stride,
-			&corners[0].uv0[0], stride,
+			&tangents[0][0],
+			nil,
+			c.size_t(len(corners)),
+			&corners[0].position[0],
+			c.size_t(len(corners)),
+			stride,
+			&corners[0].normal[0],
+			stride,
+			&corners[0].uv0[0],
+			stride,
 			MESHOPT_TANGENT_COMPATIBLE,
 		)
 		for &v, i in corners {
@@ -485,19 +564,42 @@ finish_mesh :: proc(m: Cook_Mesh, guid: format.Guid, key: u64) -> []byte {
 	// Weld identical corners into vertices, order each submesh's triangles for the vertex cache, then the vertices
 	// for fetching.
 	remap := make([]c.uint, len(corners), context.temp_allocator)
-	vertex_count := int(meshopt_generateVertexRemap(&remap[0], nil, c.size_t(len(corners)), &corners[0], c.size_t(len(corners)), stride))
+	vertex_count := int(
+		meshopt_generateVertexRemap(
+			&remap[0],
+			nil,
+			c.size_t(len(corners)),
+			&corners[0],
+			c.size_t(len(corners)),
+			stride,
+		),
+	)
 	welded := make([]Vertex, vertex_count, context.temp_allocator)
 	meshopt_remapVertexBuffer(&welded[0], &corners[0], c.size_t(len(corners)), stride, &remap[0])
 	indices := remap
 	for r in ranges {
 		if r.y > r.x {
 			ordered := make([]c.uint, r.y - r.x, context.temp_allocator)
-			meshopt_optimizeVertexCache(&ordered[0], &indices[r.x], c.size_t(r.y - r.x), c.size_t(vertex_count))
+			meshopt_optimizeVertexCache(
+				&ordered[0],
+				&indices[r.x],
+				c.size_t(r.y - r.x),
+				c.size_t(vertex_count),
+			)
 			copy(indices[r.x:r.y], ordered)
 		}
 	}
 	vertices := make([]Vertex, vertex_count, context.temp_allocator)
-	vertex_count = int(meshopt_optimizeVertexFetch(&vertices[0], &indices[0], c.size_t(len(indices)), &welded[0], c.size_t(vertex_count), stride))
+	vertex_count = int(
+		meshopt_optimizeVertexFetch(
+			&vertices[0],
+			&indices[0],
+			c.size_t(len(indices)),
+			&welded[0],
+			c.size_t(vertex_count),
+			stride,
+		),
+	)
 	vertices = vertices[:vertex_count]
 
 	meshlets := make([dynamic]format.Meshlet, context.temp_allocator)
@@ -515,7 +617,16 @@ finish_mesh :: proc(m: Cook_Mesh, guid: format.Guid, key: u64) -> []byte {
 	for r, s in ranges {
 		first_meshlet := len(meshlets)
 		first_node := len(meshlet_nodes)
-		roots := build_meshlets(indices[r.x:r.y], vertices, lod, &meshlets, &meshlet_indices, &meshlet_triangles, &meshlet_nodes, &page_inputs)
+		roots := build_meshlets(
+			indices[r.x:r.y],
+			vertices,
+			lod,
+			&meshlets,
+			&meshlet_indices,
+			&meshlet_triangles,
+			&meshlet_nodes,
+			&page_inputs,
+		)
 		submeshes[s] = {
 			name          = m.names[s],
 			first_index   = u32(r.x),
@@ -545,10 +656,18 @@ finish_mesh :: proc(m: Cook_Mesh, guid: format.Guid, key: u64) -> []byte {
 			face_area     = face_area_of(vertices, indices),
 		}
 		if m.collision {
-			contents.collision_positions, contents.collision_triangles, contents.collision_submeshes = collision_of(vertices, indices, submeshes)
+			contents.collision_positions, contents.collision_triangles, contents.collision_submeshes =
+				collision_of(vertices, indices, submeshes)
 		}
 		if m.impostor_size > 0 {
-			contents.impostor = bake_impostor(vertices, indices, submeshes, bounds, m.impostor_size, context.temp_allocator)
+			contents.impostor = bake_impostor(
+				vertices,
+				indices,
+				submeshes,
+				bounds,
+				m.impostor_size,
+				context.temp_allocator,
+			)
 			contents.impostor_size = u32(m.impostor_size)
 			contents.impostor_error = impostor_error(meshlets[:], bounds, m.impostor_size)
 		}
@@ -558,7 +677,11 @@ finish_mesh :: proc(m: Cook_Mesh, guid: format.Guid, key: u64) -> []byte {
 				continue
 			}
 			last: int
-			s.level_first, last = format.mesh_level_buckets(meshlets[s.first_meshlet:][:s.meshlet_count], bounds.center, &contents.levels)
+			s.level_first, last = format.mesh_level_buckets(
+				meshlets[s.first_meshlet:][:s.meshlet_count],
+				bounds.center,
+				&contents.levels,
+			)
 			deepest = max(deepest, last)
 		}
 		// A level that no submesh has is never the one that a distance picks.
@@ -568,7 +691,16 @@ finish_mesh :: proc(m: Cook_Mesh, guid: format.Guid, key: u64) -> []byte {
 		// Kept, as a mesh whose group is more than a page stays as it was.
 		unpaged_nodes := slice.clone(meshlet_nodes[:], context.temp_allocator)
 		unpaged_submeshes := slice.clone(submeshes, context.temp_allocator)
-		built, fits := build_pages(vertices, flags, meshlets[:], meshlet_indices[:], meshlet_triangles[:], meshlet_nodes[:], submeshes, page_inputs)
+		built, fits := build_pages(
+			vertices,
+			flags,
+			meshlets[:],
+			meshlet_indices[:],
+			meshlet_triangles[:],
+			meshlet_nodes[:],
+			submeshes,
+			page_inputs,
+		)
 		// A mesh whose pages are all roots has nothing to stream: its pages would always be resident, so it keeps its
 		// streams, as a small mesh does.
 		streams := false
@@ -586,7 +718,11 @@ finish_mesh :: proc(m: Cook_Mesh, guid: format.Guid, key: u64) -> []byte {
 			return format.mesh_write(contents, context.temp_allocator)
 		}
 		if !fits {
-			log.warnf("cook: mesh %s of %s has a group of meshlets that is more than a page, so it has no pages", m.name, m.source_path)
+			log.warnf(
+				"cook: mesh %s of %s has a group of meshlets that is more than a page, so it has no pages",
+				m.name,
+				m.source_path,
+			)
 		}
 		copy(meshlet_nodes[:], unpaged_nodes)
 		copy(submeshes, unpaged_submeshes)
@@ -597,7 +733,11 @@ finish_mesh :: proc(m: Cook_Mesh, guid: format.Guid, key: u64) -> []byte {
 	}
 	meshlet_vertices := make([dynamic]u32, context.temp_allocator)
 	for &meshlet in meshlets {
-		format.meshlet_write_vertices(&meshlet, meshlet_indices[meshlet.vertex_offset:][:meshlet.vertex_count], &meshlet_vertices)
+		format.meshlet_write_vertices(
+			&meshlet,
+			meshlet_indices[meshlet.vertex_offset:][:meshlet.vertex_count],
+			&meshlet_vertices,
+		)
 	}
 	attribute_stride := int(format.mesh_attribute_stride(flags))
 	positions := make([]byte, vertex_count * 12, context.temp_allocator)
@@ -619,7 +759,10 @@ finish_mesh :: proc(m: Cook_Mesh, guid: format.Guid, key: u64) -> []byte {
 	if .Skinned in flags {
 		skin = make([]format.Mesh_Skin_Vertex, vertex_count, context.temp_allocator)
 		for v, i in vertices {
-			skin[i] = {joints = v.joints, weights = v.weights}
+			skin[i] = {
+				joints  = v.joints,
+				weights = v.weights,
+			}
 		}
 	}
 	contents := format.Mesh_Contents {
@@ -642,10 +785,18 @@ finish_mesh :: proc(m: Cook_Mesh, guid: format.Guid, key: u64) -> []byte {
 		source_path       = m.source_path,
 	}
 	if m.collision {
-		contents.collision_positions, contents.collision_triangles, contents.collision_submeshes = collision_of(vertices, indices, submeshes)
+		contents.collision_positions, contents.collision_triangles, contents.collision_submeshes =
+			collision_of(vertices, indices, submeshes)
 	}
 	if m.impostor_size > 0 {
-		contents.impostor = bake_impostor(vertices, indices, submeshes, bounds, m.impostor_size, context.temp_allocator)
+		contents.impostor = bake_impostor(
+			vertices,
+			indices,
+			submeshes,
+			bounds,
+			m.impostor_size,
+			context.temp_allocator,
+		)
 		contents.impostor_size = u32(m.impostor_size)
 		contents.impostor_error = impostor_error(meshlets[:], bounds, m.impostor_size)
 	}
@@ -656,7 +807,15 @@ finish_mesh :: proc(m: Cook_Mesh, guid: format.Guid, key: u64) -> []byte {
 // render mesh splits at its seams for normals and UVs, so a collider has no internal edges there; its triangles over
 // them, without the ones that welding made degenerate; and each triangle's submesh.
 @(private)
-collision_of :: proc(vertices: []Vertex, indices: []c.uint, submeshes: []format.Submesh_Entry) -> (positions: [][3]f32, triangles: [][3]u32, owners: []u16) {
+collision_of :: proc(
+	vertices: []Vertex,
+	indices: []c.uint,
+	submeshes: []format.Submesh_Entry,
+) -> (
+	positions: [][3]f32,
+	triangles: [][3]u32,
+	owners: []u16,
+) {
 	if len(vertices) == 0 || len(indices) == 0 {
 		return
 	}
@@ -665,14 +824,27 @@ collision_of :: proc(vertices: []Vertex, indices: []c.uint, submeshes: []format.
 		all[i] = v.position
 	}
 	remap := make([]c.uint, len(all), context.temp_allocator)
-	count := int(meshopt_generateVertexRemap(&remap[0], nil, c.size_t(len(all)), &all[0], c.size_t(len(all)), 12))
+	count := int(
+		meshopt_generateVertexRemap(
+			&remap[0],
+			nil,
+			c.size_t(len(all)),
+			&all[0],
+			c.size_t(len(all)),
+			12,
+		),
+	)
 	positions = make([][3]f32, count, context.temp_allocator)
 	meshopt_remapVertexBuffer(&positions[0], &all[0], c.size_t(len(all)), 12, &remap[0])
 	kept := make([dynamic][3]u32, 0, len(indices) / 3, context.temp_allocator)
 	kept_owners := make([dynamic]u16, 0, len(indices) / 3, context.temp_allocator)
 	for s, owner in submeshes {
 		for i := s.first_index; i + 2 < s.first_index + s.index_count; i += 3 {
-			t := [3]u32{u32(remap[indices[i]]), u32(remap[indices[i + 1]]), u32(remap[indices[i + 2]])}
+			t := [3]u32 {
+				u32(remap[indices[i]]),
+				u32(remap[indices[i + 1]]),
+				u32(remap[indices[i + 2]]),
+			}
 			if t.x != t.y && t.y != t.z && t.x != t.z {
 				append(&kept, t)
 				append(&kept_owners, u16(owner))
@@ -687,10 +859,26 @@ collision_of :: proc(vertices: []Vertex, indices: []c.uint, submeshes: []format.
 // faces clockwise on screen, as lib/core/gpu takes them. A primitive without normals gets its faces' normals, as glTF
 // says. A primitive without tangents makes generate true.
 @(private = "file")
-read_primitive :: proc(a: Asset_Source, part: Model_Part, scale: f32, skin: ^Model_Skin, corners: ^[dynamic]Vertex, flags: ^format.Mesh_Flags, generate: ^bool, problems: ^Problems) -> bool {
+read_primitive :: proc(
+	a: Asset_Source,
+	part: Model_Part,
+	scale: f32,
+	skin: ^Model_Skin,
+	corners: ^[dynamic]Vertex,
+	flags: ^format.Mesh_Flags,
+	generate: ^bool,
+	problems: ^Problems,
+) -> bool {
 	p := part.primitive
 	if p.type != .triangles {
-		report_warning(problems, a.path, 0, 0, "a primitive of %v is not triangles, and is left out", p.type)
+		report_warning(
+			problems,
+			a.path,
+			0,
+			0,
+			"a primitive of %v is not triangles, and is left out",
+			p.type,
+		)
 		return true
 	}
 	position, normal, tangent, uv0, uv1, color: ^cgltf.accessor
@@ -739,14 +927,16 @@ read_primitive :: proc(a: Asset_Source, part: Model_Part, scale: f32, skin: ^Mod
 				color   = {1, 1, 1, 1},
 			}
 			_ = cgltf.accessor_read_float(position, index, &v.position[0], 3)
-			v.position = (m * [4]f32{v.position.x, v.position.y, v.position.z, 1}).xyz * scale * mirror
+			v.position =
+				(m * [4]f32{v.position.x, v.position.y, v.position.z, 1}).xyz * scale * mirror
 			if normal != nil {
 				_ = cgltf.accessor_read_float(normal, index, &v.normal[0], 3)
 				v.normal = linalg.normalize0(normal_matrix * v.normal) * mirror
 			}
 			if tangent != nil {
 				_ = cgltf.accessor_read_float(tangent, index, &v.tangent[0], 4)
-				v.tangent.xyz = linalg.normalize0(linalg.matrix3_from_matrix4(m) * v.tangent.xyz) * mirror
+				v.tangent.xyz =
+					linalg.normalize0(linalg.matrix3_from_matrix4(m) * v.tangent.xyz) * mirror
 				// The mirror flips the frame's handedness, so the bitangent's sign flips too.
 				v.tangent.w = -v.tangent.w
 			}
@@ -768,17 +958,36 @@ read_primitive :: proc(a: Asset_Source, part: Model_Part, scale: f32, skin: ^Mod
 					if joints[set] == nil || weights[set] == nil {
 						continue
 					}
-					_ = cgltf.accessor_read_uint(joints[set], index, &influence_joints[influences], 4)
-					_ = cgltf.accessor_read_float(weights[set], index, &influence_weights[influences], 4)
+					_ = cgltf.accessor_read_uint(
+						joints[set],
+						index,
+						&influence_joints[influences],
+						4,
+					)
+					_ = cgltf.accessor_read_float(
+						weights[set],
+						index,
+						&influence_weights[influences],
+						4,
+					)
 					influences += 4
 				}
-				v.joints, v.weights = skin_weights(skin, influence_joints[:influences], influence_weights[:influences])
+				v.joints, v.weights = skin_weights(
+					skin,
+					influence_joints[:influences],
+					influence_weights[:influences],
+				)
 				skin_point(skin, v.position, v.joints, v.weights)
 			}
 			triangle[k] = v
 		}
 		if normal == nil {
-			face := linalg.normalize0(linalg.cross(triangle[1].position - triangle[0].position, triangle[2].position - triangle[0].position))
+			face := linalg.normalize0(
+				linalg.cross(
+					triangle[1].position - triangle[0].position,
+					triangle[2].position - triangle[0].position,
+				),
+			)
 			for &v in triangle {
 				v.normal = face
 			}
@@ -828,29 +1037,70 @@ renumber_by_meshlets :: proc(vertices: []Vertex, indices: []c.uint, meshlet_indi
 // nodes, whose roots it returns the count of, and the groups appended to pages for build_pages. Without it, they are the
 // submesh's own triangles, clustered with a weight on their cones, without nodes.
 @(private = "file")
-build_meshlets :: proc(indices: []c.uint, vertices: []Vertex, lod: bool, meshlets: ^[dynamic]format.Meshlet, meshlet_vertices: ^[dynamic]u32, meshlet_triangles: ^[dynamic]u8, nodes: ^[dynamic]format.Meshlet_Node, pages: ^Page_Inputs) -> (roots: int) {
+build_meshlets :: proc(
+	indices: []c.uint,
+	vertices: []Vertex,
+	lod: bool,
+	meshlets: ^[dynamic]format.Meshlet,
+	meshlet_vertices: ^[dynamic]u32,
+	meshlet_triangles: ^[dynamic]u8,
+	nodes: ^[dynamic]format.Meshlet_Node,
+	pages: ^Page_Inputs,
+) -> (
+	roots: int,
+) {
 	if len(indices) == 0 {
 		return
 	}
 	first_meshlet := len(meshlets)
 	stride := c.size_t(size_of(Vertex))
 	if !lod {
-		bound := int(meshopt_buildMeshletsBound(c.size_t(len(indices)), format.MESHLET_MAX_VERTICES, format.MESHLET_MAX_TRIANGLES))
+		bound := int(
+			meshopt_buildMeshletsBound(
+				c.size_t(len(indices)),
+				format.MESHLET_MAX_VERTICES,
+				format.MESHLET_MAX_TRIANGLES,
+			),
+		)
 		built := make([]Meshopt_Meshlet, bound, context.temp_allocator)
 		local_vertices := make([]c.uint, len(indices), context.temp_allocator)
 		local_triangles := make([]u8, len(indices), context.temp_allocator)
 		count := int(
 			meshopt_buildMeshlets(
-				&built[0], &local_vertices[0], &local_triangles[0],
-				&indices[0], c.size_t(len(indices)),
-				&vertices[0].position[0], c.size_t(len(vertices)), stride,
-				format.MESHLET_MAX_VERTICES, format.MESHLET_MAX_TRIANGLES, MESHLET_CONE_WEIGHT,
+				&built[0],
+				&local_vertices[0],
+				&local_triangles[0],
+				&indices[0],
+				c.size_t(len(indices)),
+				&vertices[0].position[0],
+				c.size_t(len(vertices)),
+				stride,
+				format.MESHLET_MAX_VERTICES,
+				format.MESHLET_MAX_TRIANGLES,
+				MESHLET_CONE_WEIGHT,
 			),
 		)
 		for m in built[:count] {
-			meshopt_optimizeMeshlet(&local_vertices[m.vertex_offset], &local_triangles[m.triangle_offset], c.size_t(m.triangle_count), c.size_t(m.vertex_count))
-			top := Clod_Bounds{error = math.F32_MAX}
-			append_meshlet(local_vertices[m.vertex_offset:][:m.vertex_count], local_triangles[m.triangle_offset:][:m.triangle_count * 3], vertices, 0, {}, top, meshlets, meshlet_vertices, meshlet_triangles)
+			meshopt_optimizeMeshlet(
+				&local_vertices[m.vertex_offset],
+				&local_triangles[m.triangle_offset],
+				c.size_t(m.triangle_count),
+				c.size_t(m.vertex_count),
+			)
+			top := Clod_Bounds {
+				error = math.F32_MAX,
+			}
+			append_meshlet(
+				local_vertices[m.vertex_offset:][:m.vertex_count],
+				local_triangles[m.triangle_offset:][:m.triangle_count * 3],
+				vertices,
+				0,
+				{},
+				top,
+				meshlets,
+				meshlet_vertices,
+				meshlet_triangles,
+			)
 		}
 		return
 	}
@@ -901,13 +1151,33 @@ build_meshlets :: proc(indices: []c.uint, vertices: []Vertex, lod: bool, meshlet
 		append(&pages.refined, cluster.refined >= 0 ? first_group + i32(cluster.refined) : -1)
 		local_vertices := make([]c.uint, len(cluster.indices), context.temp_allocator)
 		local_triangles := make([]u8, len(cluster.indices), context.temp_allocator)
-		vertex_count := int(clod_local_indices(&local_vertices[0], &local_triangles[0], &cluster.indices[0], c.size_t(len(cluster.indices))))
+		vertex_count := int(
+			clod_local_indices(
+				&local_vertices[0],
+				&local_triangles[0],
+				&cluster.indices[0],
+				c.size_t(len(cluster.indices)),
+			),
+		)
 		made := cluster.refined >= 0 ? output.groups[cluster.refined].simplified : Clod_Bounds{}
 		group := output.groups[cluster.group]
-		append_meshlet(local_vertices[:vertex_count], local_triangles, vertices, int(group.depth), made, group.simplified, meshlets, meshlet_vertices, meshlet_triangles)
+		append_meshlet(
+			local_vertices[:vertex_count],
+			local_triangles,
+			vertices,
+			int(group.depth),
+			made,
+			group.simplified,
+			meshlets,
+			meshlet_vertices,
+			meshlet_triangles,
+		)
 	}
 	for range in group_meshlets {
-		append(&pages.groups, Page_Group{first_meshlet = u32(first_meshlet) + range.x, meshlet_count = range.y})
+		append(
+			&pages.groups,
+			Page_Group{first_meshlet = u32(first_meshlet) + range.x, meshlet_count = range.y},
+		)
 	}
 	return build_meshlet_nodes(output.groups[:], group_meshlets, nodes, pages, first_group)
 }
@@ -916,7 +1186,13 @@ build_meshlets :: proc(indices: []c.uint, vertices: []Vertex, lod: bool, meshlet
 // meshlets, and returns how many roots it has: one for each level. Each node's sphere is grown to hold its children's,
 // and its error raised to theirs, so that a node whose error does not show has no group below it whose error does.
 @(private = "file")
-build_meshlet_nodes :: proc(groups: []Clod_Group, group_meshlets: [][2]u32, nodes: ^[dynamic]format.Meshlet_Node, pages: ^Page_Inputs, first_group: i32) -> int {
+build_meshlet_nodes :: proc(
+	groups: []Clod_Group,
+	group_meshlets: [][2]u32,
+	nodes: ^[dynamic]format.Meshlet_Node,
+	pages: ^Page_Inputs,
+	first_group: i32,
+) -> int {
 	levels := 0
 	for g in groups {
 		levels = max(levels, int(g.depth) + 1)
@@ -929,8 +1205,20 @@ build_meshlet_nodes :: proc(groups: []Clod_Group, group_meshlets: [][2]u32, node
 	for p in present {
 		assert(p, "a level of the meshlet hierarchy has no group")
 	}
-	built := make([]Clod_Node, clod_build_hierarchy_bound(c.size_t(len(groups)), MESHLET_NODE_WIDTH, c.size_t(levels)), context.temp_allocator)
-	count := int(clod_build_hierarchy(&built[0], &groups[0], c.size_t(len(groups)), MESHLET_NODE_WIDTH, c.size_t(levels)))
+	built := make(
+		[]Clod_Node,
+		clod_build_hierarchy_bound(c.size_t(len(groups)), MESHLET_NODE_WIDTH, c.size_t(levels)),
+		context.temp_allocator,
+	)
+	count := int(
+		clod_build_hierarchy(
+			&built[0],
+			&groups[0],
+			c.size_t(len(groups)),
+			MESHLET_NODE_WIDTH,
+			c.size_t(levels),
+		),
+	)
 	built = built[:count]
 	conservative :: proc(built: []Clod_Node, i: int) {
 		n := &built[i]
@@ -941,7 +1229,10 @@ build_meshlet_nodes :: proc(groups: []Clod_Group, group_meshlets: [][2]u32, node
 			conservative(built, int(k))
 			child := built[k].bounds
 			n.bounds.error = max(n.bounds.error, child.error)
-			n.bounds.radius = max(n.bounds.radius, linalg.distance(n.bounds.center, child.center) + child.radius)
+			n.bounds.radius = max(
+				n.bounds.radius,
+				linalg.distance(n.bounds.center, child.center) + child.radius,
+			)
 		}
 	}
 	for i in 0 ..< levels {
@@ -982,7 +1273,12 @@ Lod_Cluster :: struct {
 }
 
 @(private = "file")
-lod_output :: proc "c" (output_context: rawptr, group: Clod_Group, clusters: [^]Clod_Cluster, cluster_count: c.size_t) -> c.int {
+lod_output :: proc "c" (
+	output_context: rawptr,
+	group: Clod_Group,
+	clusters: [^]Clod_Cluster,
+	cluster_count: c.size_t,
+) -> c.int {
 	output := (^Lod_Output)(output_context)
 	context = output.ctx
 	id := len(output.groups)
@@ -990,7 +1286,10 @@ lod_output :: proc "c" (output_context: rawptr, group: Clod_Group, clusters: [^]
 	// The clusters' indices last only until this returns.
 	for cluster in clusters[:cluster_count] {
 		indices := slice.clone(cluster.indices[:cluster.index_count], context.temp_allocator)
-		append(&output.clusters, Lod_Cluster{group = id, refined = int(cluster.refined), indices = indices})
+		append(
+			&output.clusters,
+			Lod_Cluster{group = id, refined = int(cluster.refined), indices = indices},
+		)
 	}
 	return c.int(id)
 }
@@ -998,9 +1297,25 @@ lod_output :: proc "c" (output_context: rawptr, group: Clod_Group, clusters: [^]
 // append_meshlet appends a meshlet of local vertices and triangles, with its culling bounds, the simplification that
 // made it and its group's, a level up.
 @(private = "file")
-append_meshlet :: proc(local_vertices: []c.uint, local_triangles: []u8, vertices: []Vertex, depth: int, made, parent: Clod_Bounds, meshlets: ^[dynamic]format.Meshlet, meshlet_vertices: ^[dynamic]u32, meshlet_triangles: ^[dynamic]u8) {
+append_meshlet :: proc(
+	local_vertices: []c.uint,
+	local_triangles: []u8,
+	vertices: []Vertex,
+	depth: int,
+	made, parent: Clod_Bounds,
+	meshlets: ^[dynamic]format.Meshlet,
+	meshlet_vertices: ^[dynamic]u32,
+	meshlet_triangles: ^[dynamic]u8,
+) {
 	triangle_count := len(local_triangles) / 3
-	b := meshopt_computeMeshletBounds(&local_vertices[0], &local_triangles[0], c.size_t(triangle_count), &vertices[0].position[0], c.size_t(len(vertices)), size_of(Vertex))
+	b := meshopt_computeMeshletBounds(
+		&local_vertices[0],
+		&local_triangles[0],
+		c.size_t(triangle_count),
+		&vertices[0].position[0],
+		c.size_t(len(vertices)),
+		size_of(Vertex),
+	)
 	assert(depth <= int(max(u8)), "a meshlet's level does not fit in its record")
 	center, radius := format.meshlet_encode_sphere(b.center, b.radius)
 	m := format.Meshlet {
@@ -1019,7 +1334,11 @@ append_meshlet :: proc(local_vertices: []c.uint, local_triangles: []u8, vertices
 		parent_error  = parent.error,
 		refined_page  = format.MESH_PAGE_NONE,
 	}
-	format.meshlet_write_triangles(&m, slice.reinterpret([][3]u8, local_triangles[:triangle_count * 3]), meshlet_triangles)
+	format.meshlet_write_triangles(
+		&m,
+		slice.reinterpret([][3]u8, local_triangles[:triangle_count * 3]),
+		meshlet_triangles,
+	)
 	append(meshlets, m)
 	for v in local_vertices {
 		append(meshlet_vertices, u32(v))
@@ -1047,7 +1366,13 @@ bounds_of :: proc(vertices: []Vertex, indices: []c.uint) -> (b: format.Mesh_Boun
 		b.min = linalg.min(b.min, p)
 		b.max = linalg.max(b.max, p)
 	}
-	sphere := meshopt_computeSphereBounds(&used[0][0], c.size_t(len(used)), size_of([3]f32), nil, 0)
+	sphere := meshopt_computeSphereBounds(
+		&used[0][0],
+		c.size_t(len(used)),
+		size_of([3]f32),
+		nil,
+		0,
+	)
 	b.center, b.radius = sphere.center, sphere.radius
 	return
 }

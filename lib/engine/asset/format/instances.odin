@@ -58,14 +58,20 @@ Instance_Set_Blob :: struct {
 #assert(size_of(Instance) == 32 && size_of(Instance_Cell) == 32)
 
 instance_set_layout :: proc() -> u64 {
-	return layout.hash(Instance_Set_Blob) ~ layout.hash(Instance) * 31 ~ layout.hash(Instance_Cell) * 961
+	return(
+		layout.hash(Instance_Set_Blob) ~
+		layout.hash(Instance) * 31 ~
+		layout.hash(Instance_Cell) * 961 \
+	)
 }
 
 // instance_set_view checks an instance set blob: its header, its layout, its slices, and that its streams have the sizes
 // that its counts give and its cells cover its instances.
 instance_set_view :: proc(data: []byte) -> (blob: ^Instance_Set_Blob, ok: bool) {
 	header := blob_header(data) or_return
-	if header.kind != .Instance_Set || header.layout != instance_set_layout() || len(data) < size_of(Instance_Set_Blob) {
+	if header.kind != .Instance_Set ||
+	   header.layout != instance_set_layout() ||
+	   len(data) < size_of(Instance_Set_Blob) {
 		return
 	}
 	blob = (^Instance_Set_Blob)(raw_data(data))
@@ -74,8 +80,10 @@ instance_set_view :: proc(data: []byte) -> (blob: ^Instance_Set_Blob, ok: bool) 
 			return nil, false
 		}
 	}
-	if blob.instances.size != blob.count * size_of(Instance) || blob.instances.offset % BLOB_ALIGN != 0 ||
-	   blob.cells.size != blob.cell_count * size_of(Instance_Cell) || blob.cells.offset % BLOB_ALIGN != 0 {
+	if blob.instances.size != blob.count * size_of(Instance) ||
+	   blob.instances.offset % BLOB_ALIGN != 0 ||
+	   blob.cells.size != blob.cell_count * size_of(Instance_Cell) ||
+	   blob.cells.offset % BLOB_ALIGN != 0 {
 		return nil, false
 	}
 	next: u32
@@ -113,7 +121,10 @@ Instance_Set_Contents :: struct {
 }
 
 // instance_set_write builds an instance set blob.
-instance_set_write :: proc(contents: Instance_Set_Contents, allocator := context.allocator) -> []byte {
+instance_set_write :: proc(
+	contents: Instance_Set_Contents,
+	allocator := context.allocator,
+) -> []byte {
 	buffer := make([dynamic]byte, size_of(Instance_Set_Blob), allocator)
 	instances := reserve_bytes(&buffer, len(contents.instances) * size_of(Instance), BLOB_ALIGN)
 	copy(buffer[instances.offset:], mem.slice_to_bytes(contents.instances))
@@ -122,7 +133,13 @@ instance_set_write :: proc(contents: Instance_Set_Contents, allocator := context
 	name := append_bytes(&buffer, transmute([]byte)contents.name)
 	source_path := append_bytes(&buffer, transmute([]byte)contents.source_path)
 	blob := Instance_Set_Blob {
-		header = {magic = BLOB_MAGIC, kind = .Instance_Set, layout = instance_set_layout(), key = contents.key, guid = contents.guid},
+		header = {
+			magic = BLOB_MAGIC,
+			kind = .Instance_Set,
+			layout = instance_set_layout(),
+			key = contents.key,
+			guid = contents.guid,
+		},
 		count = u32(len(contents.instances)),
 		cell_count = u32(len(contents.cells)),
 		center = contents.center,

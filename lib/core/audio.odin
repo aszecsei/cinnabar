@@ -67,7 +67,10 @@ Audio_Device :: struct {
 
 @(private)
 audio_ring_queued :: proc(ring: ^Audio_Ring) -> int {
-	return int(sync.atomic_load_explicit(&ring.write.value, .Acquire) - sync.atomic_load_explicit(&ring.read.value, .Acquire))
+	return int(
+		sync.atomic_load_explicit(&ring.write.value, .Acquire) -
+		sync.atomic_load_explicit(&ring.read.value, .Acquire),
+	)
 }
 
 // audio_ring_write copies as many frames as fit and returns how many. It is the writer's side.
@@ -154,7 +157,11 @@ audio_claim_writer :: proc(device: ^Audio_Device, who: Audio_Writer) -> (ok: boo
 		return true, false
 	}
 	if !sync.atomic_exchange(&device.refused, true) {
-		log.errorf("core: the audio device takes frames from one writer, the %v, so the %v's are dropped", writer, who)
+		log.errorf(
+			"core: the audio device takes frames from one writer, the %v, so the %v's are dropped",
+			writer,
+			who,
+		)
 	}
 	return false, false
 }
@@ -173,7 +180,13 @@ audio_write_as :: proc(device: ^Audio_Device, who: Audio_Writer, frames: []Audio
 	count := audio_ring_write(&device.ring, frames)
 	if first {
 		context = device.thread_context
-		device.thread = thread.create_and_start_with_data(device, _audio_thread, device.thread_context, .High, name = "audio")
+		device.thread = thread.create_and_start_with_data(
+			device,
+			_audio_thread,
+			device.thread_context,
+			.High,
+			name = "audio",
+		)
 	}
 	return count
 }

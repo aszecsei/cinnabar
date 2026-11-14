@@ -4,50 +4,116 @@ import "core:mem/virtual"
 import "core:testing"
 
 @(private = "file")
-TARGET :: Texture{index = 0, generation = 1}
+TARGET :: Texture {
+	index      = 0,
+	generation = 1,
+}
 @(private = "file")
-SMALL_TARGET :: Texture{index = 1, generation = 1}
+SMALL_TARGET :: Texture {
+	index      = 1,
+	generation = 1,
+}
 @(private = "file")
-DEPTH :: Texture{index = 2, generation = 1}
+DEPTH :: Texture {
+	index      = 2,
+	generation = 1,
+}
 @(private = "file")
-SAMPLED :: Texture{index = 3, generation = 1}
+SAMPLED :: Texture {
+	index      = 3,
+	generation = 1,
+}
 @(private = "file")
-MULTI :: Texture{index = 4, generation = 1}
+MULTI :: Texture {
+	index      = 4,
+	generation = 1,
+}
 @(private = "file")
-STORAGE :: Texture{index = 5, generation = 1}
+STORAGE :: Texture {
+	index      = 5,
+	generation = 1,
+}
 @(private = "file")
-INDICES :: Buffer{index = 0, generation = 1}
+INDICES :: Buffer {
+	index      = 0,
+	generation = 1,
+}
 @(private = "file")
-PLAIN :: Buffer{index = 1, generation = 1}
+PLAIN :: Buffer {
+	index      = 1,
+	generation = 1,
+}
 @(private = "file")
-INDIRECT :: Buffer{index = 2, generation = 1}
+INDIRECT :: Buffer {
+	index      = 2,
+	generation = 1,
+}
 @(private = "file")
-READBACK :: Buffer{index = 3, generation = 1}
+READBACK :: Buffer {
+	index      = 3,
+	generation = 1,
+}
 @(private = "file")
-COLOR_PIPELINE :: Pipeline{index = 0, generation = 1}
+COLOR_PIPELINE :: Pipeline {
+	index      = 0,
+	generation = 1,
+}
 @(private = "file")
-DEPTH_PIPELINE :: Pipeline{index = 1, generation = 1}
+DEPTH_PIPELINE :: Pipeline {
+	index      = 1,
+	generation = 1,
+}
 @(private = "file")
-COMPUTE_PIPELINE :: Pipeline{index = 2, generation = 1}
+COMPUTE_PIPELINE :: Pipeline {
+	index      = 2,
+	generation = 1,
+}
 @(private = "file")
-MESH_PIPELINE :: Pipeline{index = 3, generation = 1}
+MESH_PIPELINE :: Pipeline {
+	index      = 3,
+	generation = 1,
+}
 @(private = "file")
-RT_PIPELINE :: Pipeline{index = 4, generation = 1}
+RT_PIPELINE :: Pipeline {
+	index      = 4,
+	generation = 1,
+}
 @(private = "file")
-BLAS :: Accel_Struct{index = 0, generation = 1}
+BLAS :: Accel_Struct {
+	index      = 0,
+	generation = 1,
+}
 @(private = "file")
-UPDATABLE_BLAS :: Accel_Struct{index = 1, generation = 1}
+UPDATABLE_BLAS :: Accel_Struct {
+	index      = 1,
+	generation = 1,
+}
 @(private = "file")
-TLAS :: Accel_Struct{index = 2, generation = 1}
+TLAS :: Accel_Struct {
+	index      = 2,
+	generation = 1,
+}
 @(private = "file")
-STALE_BLAS :: Accel_Struct{index = 3, generation = 1}
+STALE_BLAS :: Accel_Struct {
+	index      = 3,
+	generation = 1,
+}
 @(private = "file")
-COMPACTABLE_BLAS :: Accel_Struct{index = 4, generation = 1}
+COMPACTABLE_BLAS :: Accel_Struct {
+	index      = 4,
+	generation = 1,
+}
 // COMPACTABLE_BLAS's compaction's destination.
 @(private = "file")
-COMPACTED_BLAS :: Accel_Struct{index = 5, generation = 1}
+COMPACTED_BLAS :: Accel_Struct {
+	index      = 5,
+	generation = 1,
+}
 @(private = "file")
-UPSCALER :: Upscaler{index = 0, generation = 1}
+UPSCALER :: Upscaler {
+	index      = 0,
+	generation = 1,
+}
 
 @(private = "file")
 RESOURCES :: Resources {
@@ -62,7 +128,12 @@ RESOURCES :: Resources {
 		case SAMPLED:
 			return {size = {64, 64}, format = .RGBA8_Unorm, usage = {.Sampled}}, true
 		case MULTI:
-			return {size = {64, 64}, format = FRAME_TARGET_FORMAT, usage = {.Sampled, .Render_Target}}, true
+			return {
+					size = {64, 64},
+					format = FRAME_TARGET_FORMAT,
+					usage = {.Sampled, .Render_Target},
+				},
+				true
 		case STORAGE:
 			return {size = {64, 64}, format = .RGBA16_Float, usage = {.Sampled, .Storage}}, true
 		}
@@ -86,7 +157,10 @@ RESOURCES :: Resources {
 		case COLOR_PIPELINE:
 			return pipeline_info({colors = {{format = FRAME_TARGET_FORMAT}}}), true
 		case DEPTH_PIPELINE:
-			return pipeline_info({colors = {{format = FRAME_TARGET_FORMAT}}, depth_format = .D32_Float}), true
+			return pipeline_info(
+					{colors = {{format = FRAME_TARGET_FORMAT}}, depth_format = .D32_Float},
+				),
+				true
 		case COMPUTE_PIPELINE:
 			return {kind = .Compute}, true
 		case MESH_PIPELINE:
@@ -171,7 +245,11 @@ packets_span_chunks :: proc(t: ^testing.T) {
 	count := 0
 	it := packet_iterator(cb)
 	for p in next_packet(&it) {
-		testing.expect_value(t, p.kind, count % 2 == 0 ? Packet_Kind.Begin_Pass : Packet_Kind.End_Pass)
+		testing.expect_value(
+			t,
+			p.kind,
+			count % 2 == 0 ? Packet_Kind.Begin_Pass : Packet_Kind.End_Pass,
+		)
 		count += 1
 	}
 	testing.expect_value(t, count, 2 * COUNT)
@@ -254,50 +332,14 @@ validate_rules :: proc(t: ^testing.T) {
 		err:    Validation_Error,
 		packet: int,
 	}
-	cases := []Case {
-		{
-			proc(cb: ^Command_Buffer) {
+	cases := []Case{{proc(cb: ^Command_Buffer) {
 				cmd_begin_marker(cb, "outer")
 				cmd_begin_pass(cb, {{texture = TARGET}})
 				cmd_begin_marker(cb, "inner")
 				cmd_end_marker(cb)
 				cmd_end_pass(cb)
 				cmd_end_marker(cb)
-			},
-			.None,
-			6,
-		},
-		{proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_begin_pass(cb, {{texture = TARGET}})}, .Nested_Pass, 1},
-		{proc(cb: ^Command_Buffer) {cmd_end_pass(cb)}, .End_Pass_Outside_Pass, 0},
-		{proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}})}, .Unclosed_Pass, 1},
-		{proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {})}, .Bad_Attachment_Count, 0},
-		{proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {}, size = {64, 64}); cmd_end_pass(cb)}, .None, 2},
-		{proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}, size = {64, 64})}, .Bad_Attachment_Count, 0},
-		{proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = {}}})}, .Invalid_Texture, 0},
-		{proc(cb: ^Command_Buffer) {cmd_end_marker(cb)}, .End_Marker_Without_Begin, 0},
-		{
-			proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_begin_marker(cb, "a", timed = true); cmd_end_marker(cb); cmd_end_pass(cb)},
-			.None,
-			4,
-		},
-		{
-			proc(cb: ^Command_Buffer) {push(cb, .Begin_Marker, Begin_Marker{flags = transmute(Marker_Flags)u16(2)}); cmd_end_marker(cb)},
-			.Unknown_Marker_Flags,
-			0,
-		},
-		{proc(cb: ^Command_Buffer) {cmd_begin_marker(cb, "a")}, .Unclosed_Marker, 1},
-		{
-			proc(cb: ^Command_Buffer) {cmd_begin_marker(cb, "a"); cmd_begin_pass(cb, {{texture = TARGET}}); cmd_end_marker(cb)},
-			.Marker_Crosses_Pass,
-			2,
-		},
-		{
-			proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_begin_marker(cb, "a"); cmd_end_pass(cb)},
-			.Marker_Crosses_Pass,
-			2,
-		},
-		{
-			proc(cb: ^Command_Buffer) {
+			}, .None, 6}, {proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_begin_pass(cb, {{texture = TARGET}})}, .Nested_Pass, 1}, {proc(cb: ^Command_Buffer) {cmd_end_pass(cb)}, .End_Pass_Outside_Pass, 0}, {proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}})}, .Unclosed_Pass, 1}, {proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {})}, .Bad_Attachment_Count, 0}, {proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {}, size = {64, 64}); cmd_end_pass(cb)}, .None, 2}, {proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}, size = {64, 64})}, .Bad_Attachment_Count, 0}, {proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = {}}})}, .Invalid_Texture, 0}, {proc(cb: ^Command_Buffer) {cmd_end_marker(cb)}, .End_Marker_Without_Begin, 0}, {proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_begin_marker(cb, "a", timed = true); cmd_end_marker(cb); cmd_end_pass(cb)}, .None, 4}, {proc(cb: ^Command_Buffer) {push(cb, .Begin_Marker, Begin_Marker{flags = transmute(Marker_Flags)u16(2)}); cmd_end_marker(cb)}, .Unknown_Marker_Flags, 0}, {proc(cb: ^Command_Buffer) {cmd_begin_marker(cb, "a")}, .Unclosed_Marker, 1}, {proc(cb: ^Command_Buffer) {cmd_begin_marker(cb, "a"); cmd_begin_pass(cb, {{texture = TARGET}}); cmd_end_marker(cb)}, .Marker_Crosses_Pass, 2}, {proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_begin_marker(cb, "a"); cmd_end_pass(cb)}, .Marker_Crosses_Pass, 2}, {proc(cb: ^Command_Buffer) {
 				constants := [4]u32{1, 2, 3, 4}
 				cmd_begin_pass(cb, {{texture = TARGET}}, {texture = DEPTH})
 				cmd_set_pipeline(cb, DEPTH_PIPELINE)
@@ -310,49 +352,27 @@ validate_rules :: proc(t: ^testing.T) {
 				cmd_end_pass(cb)
 				cmd_set_pipeline(cb, COMPUTE_PIPELINE)
 				cmd_dispatch(cb, {1, 1, 1})
-			},
-			.None,
-			11,
-		},
-		{proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = SAMPLED}})}, .Bad_Attachment_Usage, 0},
-		{proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}, {texture = TARGET})}, .Bad_Attachment_Usage, 0},
-		{proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}, {texture = SMALL_TARGET}})}, .Attachment_Size_Mismatch, 0},
-		{proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {}, {texture = DEPTH}); cmd_end_pass(cb)}, .None, 2},
-		{proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_set_pipeline(cb, {})}, .Invalid_Pipeline, 1},
-		{proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_set_pipeline(cb, COMPUTE_PIPELINE)}, .Wrong_Pipeline_Kind, 1},
-		{proc(cb: ^Command_Buffer) {cmd_set_pipeline(cb, COLOR_PIPELINE)}, .Wrong_Pipeline_Kind, 0},
-		{proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_set_pipeline(cb, DEPTH_PIPELINE)}, .Pipeline_Pass_Mismatch, 1},
-		{proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_draw(cb, 3)}, .No_Pipeline, 1},
-		{
-			proc(cb: ^Command_Buffer) {
+			}, .None, 11}, {proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = SAMPLED}})}, .Bad_Attachment_Usage, 0}, {proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}, {texture = TARGET})}, .Bad_Attachment_Usage, 0}, {proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}, {texture = SMALL_TARGET}})}, .Attachment_Size_Mismatch, 0}, {proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {}, {texture = DEPTH}); cmd_end_pass(cb)}, .None, 2}, {proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_set_pipeline(cb, {})}, .Invalid_Pipeline, 1}, {proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_set_pipeline(cb, COMPUTE_PIPELINE)}, .Wrong_Pipeline_Kind, 1}, {proc(cb: ^Command_Buffer) {cmd_set_pipeline(cb, COLOR_PIPELINE)}, .Wrong_Pipeline_Kind, 0}, {proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_set_pipeline(cb, DEPTH_PIPELINE)}, .Pipeline_Pass_Mismatch, 1}, {proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_draw(cb, 3)}, .No_Pipeline, 1}, {proc(cb: ^Command_Buffer) {
 				cmd_begin_pass(cb, {{texture = TARGET}})
 				cmd_set_pipeline(cb, COLOR_PIPELINE)
 				cmd_end_pass(cb)
 				cmd_begin_pass(cb, {{texture = TARGET}})
 				cmd_draw(cb, 3)
-			},
-			.No_Pipeline,
-			4,
-		},
-		{proc(cb: ^Command_Buffer) {cmd_set_pipeline(cb, COMPUTE_PIPELINE); cmd_draw(cb, 3)}, .Draw_Outside_Pass, 1},
-		{proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_dispatch(cb, {1, 1, 1})}, .Dispatch_Inside_Pass, 1},
-		{proc(cb: ^Command_Buffer) {cmd_dispatch(cb, {1, 1, 1})}, .No_Pipeline, 0},
-		{
-			proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_set_pipeline(cb, COLOR_PIPELINE); cmd_draw_indexed(cb, 3)},
-			.No_Index_Buffer,
-			2,
-		},
-		{proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_set_index_buffer(cb, PLAIN, .U16)}, .Bad_Buffer_Usage, 1},
-		{proc(cb: ^Command_Buffer) {cmd_set_index_buffer(cb, INDICES, .U16)}, .State_Outside_Pass, 0},
-		{proc(cb: ^Command_Buffer) {cmd_set_scissor(cb, {}, {1, 1})}, .State_Outside_Pass, 0},
-		{proc(cb: ^Command_Buffer) {cmd_set_stencil_reference(cb, 1)}, .State_Outside_Pass, 0},
-		{proc(cb: ^Command_Buffer) {cmd_set_pass_constants(cb, {buffer = {index = 9, generation = 1}})}, .Invalid_Buffer, 0},
-	}
+			}, .No_Pipeline, 4}, {proc(cb: ^Command_Buffer) {cmd_set_pipeline(cb, COMPUTE_PIPELINE); cmd_draw(cb, 3)}, .Draw_Outside_Pass, 1}, {proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_dispatch(cb, {1, 1, 1})}, .Dispatch_Inside_Pass, 1}, {proc(cb: ^Command_Buffer) {cmd_dispatch(cb, {1, 1, 1})}, .No_Pipeline, 0}, {proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_set_pipeline(cb, COLOR_PIPELINE); cmd_draw_indexed(cb, 3)}, .No_Index_Buffer, 2}, {proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_set_index_buffer(cb, PLAIN, .U16)}, .Bad_Buffer_Usage, 1}, {proc(cb: ^Command_Buffer) {cmd_set_index_buffer(cb, INDICES, .U16)}, .State_Outside_Pass, 0}, {proc(cb: ^Command_Buffer) {cmd_set_scissor(cb, {}, {1, 1})}, .State_Outside_Pass, 0}, {proc(cb: ^Command_Buffer) {cmd_set_stencil_reference(cb, 1)}, .State_Outside_Pass, 0}, {proc(cb: ^Command_Buffer) {cmd_set_pass_constants(cb, {buffer = {index = 9, generation = 1}})}, .Invalid_Buffer, 0}}
 	for c, i in cases {
 		cb := command_buffer(allocator)
 		c.record(&cb)
 		err, packet := validate(cb, RESOURCES)
-		testing.expectf(t, err == c.err && packet == c.packet, "case %d: got %v at %d, want %v at %d", i, err, packet, c.err, c.packet)
+		testing.expectf(
+			t,
+			err == c.err && packet == c.packet,
+			"case %d: got %v at %d, want %v at %d",
+			i,
+			err,
+			packet,
+			c.err,
+			c.packet,
+		)
 	}
 }
 
@@ -366,8 +386,14 @@ barriers_split_into_packets :: proc(t: ^testing.T) {
 	buffers: [COUNT]Buffer_Barrier
 	textures: [COUNT]Texture_Barrier
 	for i in 0 ..< COUNT {
-		buffers[i] = {buffer = {index = u32(i), generation = 1}, access_after = {.Shader_Resource}}
-		textures[i] = {texture = {index = u32(i), generation = 1}, layout_after = .Shader_Resource}
+		buffers[i] = {
+			buffer = {index = u32(i), generation = 1},
+			access_after = {.Shader_Resource},
+		}
+		textures[i] = {
+			texture = {index = u32(i), generation = 1},
+			layout_after = .Shader_Resource,
+		}
 	}
 	cb := command_buffer(virtual.arena_allocator(&arena))
 	cmd_barriers(&cb, buffers[:], textures[:])
@@ -410,22 +436,55 @@ validate_barriers :: proc(t: ^testing.T) {
 		err:      Validation_Error,
 	}
 	TO_SAMPLED :: Texture_Barrier {
-		texture       = SAMPLED,
-		sync_after    = {.Pixel_Shading},
-		access_after  = {.Shader_Resource},
-		layout_after  = .Shader_Resource,
+		texture      = SAMPLED,
+		sync_after   = {.Pixel_Shading},
+		access_after = {.Shader_Resource},
+		layout_after = .Shader_Resource,
 	}
 	cases := []Case {
 		{textures = {TO_SAMPLED}, err = .None},
-		{buffers = {{buffer = INDICES, sync_after = {.Index_Input}, access_after = {.Index_Buffer}}}, err = .None},
-		{buffers = {{buffer = PLAIN, sync_after = {.Index_Input}, access_after = {.Index_Buffer}}}, err = .Bad_Barrier},
+		{
+			buffers = {
+				{buffer = INDICES, sync_after = {.Index_Input}, access_after = {.Index_Buffer}},
+			},
+			err = .None,
+		},
+		{
+			buffers = {
+				{buffer = PLAIN, sync_after = {.Index_Input}, access_after = {.Index_Buffer}},
+			},
+			err = .Bad_Barrier,
+		},
 		{buffers = {{buffer = PLAIN, access_after = {.Shader_Resource}}}, err = .Bad_Barrier},
 		{buffers = {{buffer = {index = 9, generation = 1}}}, err = .Invalid_Buffer},
-		{textures = {{texture = {index = 9, generation = 1}, layout_after = .Shader_Resource}}, err = .Invalid_Texture},
+		{
+			textures = {{texture = {index = 9, generation = 1}, layout_after = .Shader_Resource}},
+			err = .Invalid_Texture,
+		},
 		{textures = {{texture = SAMPLED, layout_after = .Render_Target}}, err = .Bad_Barrier},
 		{textures = {{texture = SAMPLED, layout_before = .Shader_Resource}}, err = .Bad_Barrier},
-		{textures = {{texture = TARGET, sync_after = {.Render_Target}, access_after = {.Shader_Resource}, layout_after = .Render_Target}}, err = .Bad_Barrier},
-		{textures = {{texture = DEPTH, sync_after = {.Depth_Stencil}, access_after = {.Depth_Stencil_Write}, layout_after = .Depth_Stencil_Write}}, err = .None},
+		{
+			textures = {
+				{
+					texture = TARGET,
+					sync_after = {.Render_Target},
+					access_after = {.Shader_Resource},
+					layout_after = .Render_Target,
+				},
+			},
+			err = .Bad_Barrier,
+		},
+		{
+			textures = {
+				{
+					texture = DEPTH,
+					sync_after = {.Depth_Stencil},
+					access_after = {.Depth_Stencil_Write},
+					layout_after = .Depth_Stencil_Write,
+				},
+			},
+			err = .None,
+		},
 	}
 	for c, i in cases {
 		cb := command_buffer(allocator)
@@ -495,7 +554,18 @@ validate_tracks_layouts :: proc(t: ^testing.T) {
 
 	// Undefined as the layout before is valid in any layout.
 	discard := command_buffer(allocator)
-	cmd_barriers(&discard, nil, {{texture = MULTI, sync_after = {.Pixel_Shading}, access_after = {.Shader_Resource}, layout_after = .Shader_Resource}})
+	cmd_barriers(
+		&discard,
+		nil,
+		{
+			{
+				texture = MULTI,
+				sync_after = {.Pixel_Shading},
+				access_after = {.Shader_Resource},
+				layout_after = .Shader_Resource,
+			},
+		},
+	)
 	err, _ = validate(discard, RESOURCES, &layouts)
 	testing.expect_value(t, err, Validation_Error.None)
 	layout, _ := tracked_layout(&layouts, MULTI)
@@ -509,22 +579,55 @@ validate_split_passes :: proc(t: ^testing.T) {
 	defer virtual.arena_destroy(&arena)
 	allocator := virtual.arena_allocator(&arena)
 
-	LOADED :: Color_Attachment{texture = TARGET, load = .Load}
+	LOADED :: Color_Attachment {
+		texture = TARGET,
+		load    = .Load,
+	}
 	Case :: struct {
 		record: proc(cb: ^Command_Buffer),
 		err:    Validation_Error,
 	}
 	cases := []Case {
-		{proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}, flags = {.Suspending}); cmd_end_pass(cb)}, .None},
-		{proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {LOADED}, flags = {.Resuming}); cmd_end_pass(cb)}, .None},
-		{proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET, load = .Clear}}, flags = {.Resuming}); cmd_end_pass(cb)}, .Bad_Resume},
-		{proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET, store = .Discard}}, flags = {.Suspending}); cmd_end_pass(cb)}, .Bad_Suspend},
+		{proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}, flags = {.Suspending})
+				cmd_end_pass(cb)}, .None},
+		{proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {LOADED}, flags = {.Resuming})
+				cmd_end_pass(cb)}, .None},
 		{
-			proc(cb: ^Command_Buffer) {cmd_begin_marker(cb, "a"); cmd_begin_pass(cb, {LOADED}, flags = {.Resuming}); cmd_end_pass(cb); cmd_end_marker(cb)},
+			proc(cb: ^Command_Buffer) {cmd_begin_pass(
+					cb,
+					{{texture = TARGET, load = .Clear}},
+					flags = {.Resuming},
+				)
+				cmd_end_pass(cb)},
 			.Bad_Resume,
 		},
 		{
-			proc(cb: ^Command_Buffer) {cmd_begin_marker(cb, "a"); cmd_begin_pass(cb, {{texture = TARGET}}, flags = {.Suspending}); cmd_end_pass(cb); cmd_end_marker(cb)},
+			proc(cb: ^Command_Buffer) {cmd_begin_pass(
+					cb,
+					{{texture = TARGET, store = .Discard}},
+					flags = {.Suspending},
+				)
+				cmd_end_pass(cb)},
+			.Bad_Suspend,
+		},
+		{
+			proc(cb: ^Command_Buffer) {cmd_begin_marker(cb, "a"); cmd_begin_pass(
+					cb,
+					{LOADED},
+					flags = {.Resuming},
+				)
+				cmd_end_pass(cb)
+				cmd_end_marker(cb)},
+			.Bad_Resume,
+		},
+		{
+			proc(cb: ^Command_Buffer) {cmd_begin_marker(cb, "a"); cmd_begin_pass(
+					cb,
+					{{texture = TARGET}},
+					flags = {.Suspending},
+				)
+				cmd_end_pass(cb)
+				cmd_end_marker(cb)},
 			.Bad_Suspend,
 		},
 	}
@@ -536,7 +639,12 @@ validate_split_passes :: proc(t: ^testing.T) {
 	}
 
 	first := command_buffer(allocator)
-	cmd_begin_pass(&first, {{texture = TARGET, load = .Clear}}, {texture = DEPTH, load = .Clear}, {.Suspending})
+	cmd_begin_pass(
+		&first,
+		{{texture = TARGET, load = .Clear}},
+		{texture = DEPTH, load = .Clear},
+		{.Suspending},
+	)
 	cmd_end_pass(&first)
 	middle := command_buffer(allocator)
 	cmd_begin_pass(&middle, {LOADED}, {texture = DEPTH, load = .Load}, {.Resuming, .Suspending})
@@ -566,7 +674,16 @@ validate_split_passes :: proc(t: ^testing.T) {
 	}
 	for c, i in chains {
 		err, buffer, _ := validate_submission(c.buffers, RESOURCES)
-		testing.expectf(t, err == c.err && buffer == c.buffer, "chain %d: got %v in %d, want %v in %d", i, err, buffer, c.err, c.buffer)
+		testing.expectf(
+			t,
+			err == c.err && buffer == c.buffer,
+			"chain %d: got %v in %d, want %v in %d",
+			i,
+			err,
+			buffer,
+			c.err,
+			c.buffer,
+		)
 	}
 }
 
@@ -584,8 +701,7 @@ validate_indirect_and_queues :: proc(t: ^testing.T) {
 	}
 	cases := []Case {
 		// INDIRECT holds 96 bytes: four indexed records, or a count at offset 92.
-		{
-			proc(cb: ^Command_Buffer) {
+		{proc(cb: ^Command_Buffer) {
 				cmd_begin_pass(cb, {{texture = TARGET}})
 				cmd_set_pipeline(cb, COLOR_PIPELINE)
 				cmd_set_index_buffer(cb, INDICES, .U16)
@@ -594,46 +710,69 @@ validate_indirect_and_queues :: proc(t: ^testing.T) {
 				cmd_end_pass(cb)
 				cmd_set_pipeline(cb, COMPUTE_PIPELINE)
 				cmd_dispatch_indirect(cb, INDIRECT, 84)
-			},
-			.Graphics,
-			.None,
-		},
+			}, .Graphics, .None},
 		{
-			proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_set_pipeline(cb, COLOR_PIPELINE); cmd_draw_indirect(cb, INDIRECT, 0, 5)},
-			.Graphics,
-			.Bad_Indirect,
-		},
-		{
-			proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_set_pipeline(cb, COLOR_PIPELINE); cmd_draw_indirect(cb, INDIRECT, 2, 1)},
+			proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_set_pipeline(
+					cb,
+					COLOR_PIPELINE,
+				)
+				cmd_draw_indirect(cb, INDIRECT, 0, 5)},
 			.Graphics,
 			.Bad_Indirect,
 		},
 		{
-			proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_set_pipeline(cb, COLOR_PIPELINE); cmd_draw_indirect(cb, PLAIN, 0, 1)},
+			proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_set_pipeline(
+					cb,
+					COLOR_PIPELINE,
+				)
+				cmd_draw_indirect(cb, INDIRECT, 2, 1)},
+			.Graphics,
+			.Bad_Indirect,
+		},
+		{
+			proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_set_pipeline(
+					cb,
+					COLOR_PIPELINE,
+				)
+				cmd_draw_indirect(cb, PLAIN, 0, 1)},
 			.Graphics,
 			.Bad_Buffer_Usage,
 		},
-		{
-			proc(cb: ^Command_Buffer) {
+		{proc(cb: ^Command_Buffer) {
 				cmd_begin_pass(cb, {{texture = TARGET}})
 				cmd_set_pipeline(cb, COLOR_PIPELINE)
 				cmd_draw_indirect(cb, INDIRECT, 0, 1, INDIRECT, 96)
-			},
-			.Graphics,
-			.Bad_Indirect,
-		},
+			}, .Graphics, .Bad_Indirect},
 		{
-			proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_set_pipeline(cb, COLOR_PIPELINE); cmd_draw_indexed_indirect(cb, INDIRECT, 0, 1)},
+			proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_set_pipeline(
+					cb,
+					COLOR_PIPELINE,
+				)
+				cmd_draw_indexed_indirect(cb, INDIRECT, 0, 1)},
 			.Graphics,
 			.No_Index_Buffer,
 		},
-		{proc(cb: ^Command_Buffer) {cmd_set_pipeline(cb, COMPUTE_PIPELINE); cmd_draw_indirect(cb, INDIRECT, 0, 1)}, .Graphics, .Draw_Outside_Pass},
-		{proc(cb: ^Command_Buffer) {cmd_dispatch_indirect(cb, INDIRECT)}, .Graphics, .No_Pipeline},
-		{proc(cb: ^Command_Buffer) {cmd_set_pipeline(cb, COMPUTE_PIPELINE); cmd_dispatch_indirect(cb, INDIRECT, 88)}, .Graphics, .Bad_Indirect},
-		{proc(cb: ^Command_Buffer) {cmd_set_pipeline(cb, COMPUTE_PIPELINE); cmd_dispatch_indirect(cb, INDIRECT)}, .Compute, .None},
-		{proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_end_pass(cb)}, .Compute, .Wrong_Queue},
 		{
-			proc(cb: ^Command_Buffer) {
+			proc(cb: ^Command_Buffer) {cmd_set_pipeline(cb, COMPUTE_PIPELINE); cmd_draw_indirect(
+					cb,
+					INDIRECT,
+					0,
+					1,
+				)},
+			.Graphics,
+			.Draw_Outside_Pass,
+		},
+		{proc(cb: ^Command_Buffer) {cmd_dispatch_indirect(cb, INDIRECT)}, .Graphics, .No_Pipeline},
+		{proc(cb: ^Command_Buffer) {cmd_set_pipeline(cb, COMPUTE_PIPELINE)
+				cmd_dispatch_indirect(cb, INDIRECT, 88)}, .Graphics, .Bad_Indirect},
+		{proc(cb: ^Command_Buffer) {cmd_set_pipeline(cb, COMPUTE_PIPELINE)
+				cmd_dispatch_indirect(cb, INDIRECT)}, .Compute, .None},
+		{
+			proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_end_pass(cb)},
+			.Compute,
+			.Wrong_Queue,
+		},
+		{proc(cb: ^Command_Buffer) {
 				barrier := Buffer_Barrier {
 					buffer        = INDIRECT,
 					sync_before   = {.Compute_Shading},
@@ -642,24 +781,48 @@ validate_indirect_and_queues :: proc(t: ^testing.T) {
 					access_after  = {.Indirect_Argument},
 				}
 				cmd_barriers(cb, {barrier}, nil)
-			},
-			.Compute,
-			.None,
-		},
+			}, .Compute, .None},
 		{
-			proc(cb: ^Command_Buffer) {cmd_barriers(cb, {{buffer = INDIRECT, sync_before = {.Pixel_Shading}, access_before = {.Shader_Resource}}}, nil)},
+			proc(cb: ^Command_Buffer) {cmd_barriers(
+					cb,
+					{
+						{
+							buffer = INDIRECT,
+							sync_before = {.Pixel_Shading},
+							access_before = {.Shader_Resource},
+						},
+					},
+					nil,
+				)},
 			.Compute,
 			.Bad_Barrier,
 		},
+		{proc(cb: ^Command_Buffer) {
+				cmd_barriers(
+					cb,
+					nil,
+					{
+						{
+							texture = TARGET,
+							sync_after = {.Render_Target},
+							access_after = {.Render_Target},
+							layout_after = .Render_Target,
+						},
+					},
+				)
+			}, .Compute, .Bad_Barrier},
 		{
-			proc(cb: ^Command_Buffer) {
-				cmd_barriers(cb, nil, {{texture = TARGET, sync_after = {.Render_Target}, access_after = {.Render_Target}, layout_after = .Render_Target}})
-			},
-			.Compute,
-			.Bad_Barrier,
-		},
-		{
-			proc(cb: ^Command_Buffer) {cmd_barriers(cb, {{buffer = PLAIN, sync_after = {.Execute_Indirect}, access_after = {.Indirect_Argument}}}, nil)},
+			proc(cb: ^Command_Buffer) {cmd_barriers(
+					cb,
+					{
+						{
+							buffer = PLAIN,
+							sync_after = {.Execute_Indirect},
+							access_after = {.Indirect_Argument},
+						},
+					},
+					nil,
+				)},
 			.Graphics,
 			.Bad_Barrier,
 		},
@@ -685,8 +848,7 @@ validate_mesh_draws :: proc(t: ^testing.T) {
 	}
 	cases := []Case {
 		// INDIRECT holds 96 bytes: six mesh records.
-		{
-			proc(cb: ^Command_Buffer) {
+		{proc(cb: ^Command_Buffer) {
 				cmd_begin_pass(cb, {{texture = TARGET}})
 				cmd_set_pipeline(cb, MESH_PIPELINE)
 				cmd_draw_mesh(cb, {4, 1, 1})
@@ -694,19 +856,48 @@ validate_mesh_draws :: proc(t: ^testing.T) {
 				cmd_set_pipeline(cb, COLOR_PIPELINE)
 				cmd_draw(cb, 3)
 				cmd_end_pass(cb)
-			},
-			.None,
-		},
-		{proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_set_pipeline(cb, MESH_PIPELINE); cmd_draw(cb, 3)}, .Wrong_Pipeline_Kind},
-		{proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_set_pipeline(cb, COLOR_PIPELINE); cmd_draw_mesh(cb, {1, 1, 1})}, .Wrong_Pipeline_Kind},
-		{proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_draw_mesh(cb, {1, 1, 1})}, .No_Pipeline},
-		{proc(cb: ^Command_Buffer) {cmd_set_pipeline(cb, MESH_PIPELINE)}, .Wrong_Pipeline_Kind},
-		{proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}, {texture = DEPTH}); cmd_set_pipeline(cb, MESH_PIPELINE)}, .Pipeline_Pass_Mismatch},
+			}, .None},
 		{
-			proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_set_pipeline(cb, MESH_PIPELINE); cmd_draw_mesh_indirect(cb, INDIRECT, 0, 7)},
+			proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_set_pipeline(
+					cb,
+					MESH_PIPELINE,
+				)
+				cmd_draw(cb, 3)},
+			.Wrong_Pipeline_Kind,
+		},
+		{
+			proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_set_pipeline(
+					cb,
+					COLOR_PIPELINE,
+				)
+				cmd_draw_mesh(cb, {1, 1, 1})},
+			.Wrong_Pipeline_Kind,
+		},
+		{
+			proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_draw_mesh(
+					cb,
+					{1, 1, 1},
+				)},
+			.No_Pipeline,
+		},
+		{proc(cb: ^Command_Buffer) {cmd_set_pipeline(cb, MESH_PIPELINE)}, .Wrong_Pipeline_Kind},
+		{proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}, {texture = DEPTH})
+				cmd_set_pipeline(cb, MESH_PIPELINE)}, .Pipeline_Pass_Mismatch},
+		{
+			proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_set_pipeline(
+					cb,
+					MESH_PIPELINE,
+				)
+				cmd_draw_mesh_indirect(cb, INDIRECT, 0, 7)},
 			.Bad_Indirect,
 		},
-		{proc(cb: ^Command_Buffer) {cmd_set_pipeline(cb, COMPUTE_PIPELINE); cmd_draw_mesh(cb, {1, 1, 1})}, .Draw_Outside_Pass},
+		{
+			proc(cb: ^Command_Buffer) {cmd_set_pipeline(cb, COMPUTE_PIPELINE); cmd_draw_mesh(
+					cb,
+					{1, 1, 1},
+				)},
+			.Draw_Outside_Pass,
+		},
 	}
 	for c, i in cases {
 		cb := command_buffer(allocator)
@@ -717,17 +908,64 @@ validate_mesh_draws :: proc(t: ^testing.T) {
 
 	shader := []byte{0}
 	colors := []Color_Target{{format = FRAME_TARGET_FORMAT}}
-	testing.expect_value(t, validate_graphics_pipeline_desc({mesh = shader, pixel = shader, colors = colors}), Desc_Error.None)
-	testing.expect_value(t, validate_graphics_pipeline_desc({amplification = shader, mesh = shader, pixel = shader, colors = colors}), Desc_Error.None)
-	testing.expect_value(t, validate_graphics_pipeline_desc({vertex = shader, mesh = shader, pixel = shader, colors = colors}), Desc_Error.Bad_Stages)
-	testing.expect_value(t, validate_graphics_pipeline_desc({vertex = shader, amplification = shader, pixel = shader, colors = colors}), Desc_Error.Bad_Stages)
-	testing.expect_value(t, validate_graphics_pipeline_desc({amplification = shader, pixel = shader, colors = colors}), Desc_Error.Missing_Shader)
+	testing.expect_value(
+		t,
+		validate_graphics_pipeline_desc({mesh = shader, pixel = shader, colors = colors}),
+		Desc_Error.None,
+	)
+	testing.expect_value(
+		t,
+		validate_graphics_pipeline_desc(
+			{amplification = shader, mesh = shader, pixel = shader, colors = colors},
+		),
+		Desc_Error.None,
+	)
+	testing.expect_value(
+		t,
+		validate_graphics_pipeline_desc(
+			{vertex = shader, mesh = shader, pixel = shader, colors = colors},
+		),
+		Desc_Error.Bad_Stages,
+	)
+	testing.expect_value(
+		t,
+		validate_graphics_pipeline_desc(
+			{vertex = shader, amplification = shader, pixel = shader, colors = colors},
+		),
+		Desc_Error.Bad_Stages,
+	)
+	testing.expect_value(
+		t,
+		validate_graphics_pipeline_desc({amplification = shader, pixel = shader, colors = colors}),
+		Desc_Error.Missing_Shader,
+	)
 	testing.expect_value(t, pipeline_info({mesh = shader}).kind, Pipeline_Kind.Mesh)
 	// A stencil test or stencil writes need a depth format with a stencil.
-	stencil := Stencil_State{compare = .Equal, read_mask = 1}
-	testing.expect_value(t, validate_graphics_pipeline_desc({vertex = shader, depth_format = .D32_Float, stencil = stencil}), Desc_Error.Bad_Format)
-	testing.expect_value(t, validate_graphics_pipeline_desc({vertex = shader, depth_format = .D32_Float_S8_Uint, stencil = stencil}), Desc_Error.None)
-	testing.expect_value(t, validate_graphics_pipeline_desc({vertex = shader, depth_format = .D32_Float, stencil = {read_mask = 1}}), Desc_Error.None)
+	stencil := Stencil_State {
+		compare   = .Equal,
+		read_mask = 1,
+	}
+	testing.expect_value(
+		t,
+		validate_graphics_pipeline_desc(
+			{vertex = shader, depth_format = .D32_Float, stencil = stencil},
+		),
+		Desc_Error.Bad_Format,
+	)
+	testing.expect_value(
+		t,
+		validate_graphics_pipeline_desc(
+			{vertex = shader, depth_format = .D32_Float_S8_Uint, stencil = stencil},
+		),
+		Desc_Error.None,
+	)
+	testing.expect_value(
+		t,
+		validate_graphics_pipeline_desc(
+			{vertex = shader, depth_format = .D32_Float, stencil = {read_mask = 1}},
+		),
+		Desc_Error.None,
+	)
 }
 
 @(test)
@@ -744,8 +982,7 @@ validate_accel_builds :: proc(t: ^testing.T) {
 	}
 	cases := []Case {
 		// INDIRECT holds 96 bytes: one instance at offset 16.
-		{
-			proc(cb: ^Command_Buffer) {
+		{proc(cb: ^Command_Buffer) {
 				cmd_build_accel(cb, BLAS)
 				cmd_build_accel(cb, UPDATABLE_BLAS, update = true)
 				barrier := Accel_Barrier {
@@ -757,21 +994,73 @@ validate_accel_builds :: proc(t: ^testing.T) {
 				}
 				cmd_barriers(cb, nil, nil, {barrier})
 				cmd_build_top_accel(cb, TLAS, INDIRECT, 16, 1)
-			},
-			.Compute,
-			.None,
+			}, .Compute, .None},
+		{
+			proc(cb: ^Command_Buffer) {cmd_build_accel(cb, {index = 9, generation = 1})},
+			.Graphics,
+			.Invalid_Accel,
 		},
-		{proc(cb: ^Command_Buffer) {cmd_build_accel(cb, {index = 9, generation = 1})}, .Graphics, .Invalid_Accel},
-		{proc(cb: ^Command_Buffer) {cmd_build_accel(cb, BLAS, update = true)}, .Graphics, .Bad_Accel_Build},
+		{
+			proc(cb: ^Command_Buffer) {cmd_build_accel(cb, BLAS, update = true)},
+			.Graphics,
+			.Bad_Accel_Build,
+		},
 		{proc(cb: ^Command_Buffer) {cmd_build_accel(cb, STALE_BLAS)}, .Graphics, .Invalid_Buffer},
 		{proc(cb: ^Command_Buffer) {cmd_build_accel(cb, TLAS)}, .Graphics, .Invalid_Buffer},
-		{proc(cb: ^Command_Buffer) {cmd_build_top_accel(cb, BLAS, INDIRECT, 0, 1)}, .Graphics, .Bad_Accel_Build},
-		{proc(cb: ^Command_Buffer) {cmd_build_top_accel(cb, TLAS, INDIRECT, 8, 1)}, .Graphics, .Bad_Accel_Build},
-		{proc(cb: ^Command_Buffer) {cmd_build_top_accel(cb, TLAS, INDIRECT, 0, 3)}, .Graphics, .Bad_Accel_Build},
-		{proc(cb: ^Command_Buffer) {cmd_build_top_accel(cb, TLAS, INDIRECT, 48, 1)}, .Graphics, .Bad_Accel_Build},
-		{proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_build_accel(cb, BLAS)}, .Graphics, .Build_Inside_Pass},
-		{proc(cb: ^Command_Buffer) {cmd_barriers(cb, nil, nil, {{accel = BLAS, sync_after = {.Compute_Shading}, access_after = {.Shader_Resource}}})}, .Graphics, .Bad_Barrier},
-		{proc(cb: ^Command_Buffer) {cmd_barriers(cb, nil, nil, {{accel = BLAS, sync_after = {.Pixel_Shading}, access_after = {.Accel_Read}}})}, .Compute, .Bad_Barrier},
+		{
+			proc(cb: ^Command_Buffer) {cmd_build_top_accel(cb, BLAS, INDIRECT, 0, 1)},
+			.Graphics,
+			.Bad_Accel_Build,
+		},
+		{
+			proc(cb: ^Command_Buffer) {cmd_build_top_accel(cb, TLAS, INDIRECT, 8, 1)},
+			.Graphics,
+			.Bad_Accel_Build,
+		},
+		{
+			proc(cb: ^Command_Buffer) {cmd_build_top_accel(cb, TLAS, INDIRECT, 0, 3)},
+			.Graphics,
+			.Bad_Accel_Build,
+		},
+		{
+			proc(cb: ^Command_Buffer) {cmd_build_top_accel(cb, TLAS, INDIRECT, 48, 1)},
+			.Graphics,
+			.Bad_Accel_Build,
+		},
+		{
+			proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_build_accel(
+					cb,
+					BLAS,
+				)},
+			.Graphics,
+			.Build_Inside_Pass,
+		},
+		{
+			proc(cb: ^Command_Buffer) {cmd_barriers(
+					cb,
+					nil,
+					nil,
+					{
+						{
+							accel = BLAS,
+							sync_after = {.Compute_Shading},
+							access_after = {.Shader_Resource},
+						},
+					},
+				)},
+			.Graphics,
+			.Bad_Barrier,
+		},
+		{
+			proc(cb: ^Command_Buffer) {cmd_barriers(
+					cb,
+					nil,
+					nil,
+					{{accel = BLAS, sync_after = {.Pixel_Shading}, access_after = {.Accel_Read}}},
+				)},
+			.Compute,
+			.Bad_Barrier,
+		},
 	}
 	for c, i in cases {
 		cb := command_buffer(allocator)
@@ -780,7 +1069,14 @@ validate_accel_builds :: proc(t: ^testing.T) {
 		testing.expectf(t, err == c.err, "case %d: got %v, want %v", i, err, c.err)
 	}
 
-	instance := accel_instance({{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}}, 0xabc, id = 0x1234567, mask = 0x0f, hit_group_offset = 2, flags = {.Force_Opaque})
+	instance := accel_instance(
+		{{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}},
+		0xabc,
+		id = 0x1234567,
+		mask = 0x0f,
+		hit_group_offset = 2,
+		flags = {.Force_Opaque},
+	)
 	testing.expect_value(t, instance.id_and_mask, 0x0f234567)
 	testing.expect_value(t, instance.hit_group_offset_flags, 0x04000002)
 	testing.expect_value(t, instance.accel, 0xabc)
@@ -790,19 +1086,35 @@ validate_accel_builds :: proc(t: ^testing.T) {
 		vertex_stride = 8,
 		vertex_count  = 3,
 	}
-	testing.expect_value(t, validate_accel_desc({kind = .Bottom, geometries = {shared}}), Desc_Error.None)
+	testing.expect_value(
+		t,
+		validate_accel_desc({kind = .Bottom, geometries = {shared}}),
+		Desc_Error.None,
+	)
 	testing.expect_value(t, validate_accel_desc({kind = .Top, max_instances = 4}), Desc_Error.None)
 	testing.expect_value(t, validate_accel_desc({kind = .Top}), Desc_Error.Bad_Geometry)
 	testing.expect_value(t, validate_accel_desc({kind = .Bottom}), Desc_Error.Bad_Geometry)
 	bad := shared
 	bad.vertex_count = 4
-	testing.expect_value(t, validate_accel_desc({kind = .Bottom, geometries = {bad}}), Desc_Error.Bad_Geometry)
+	testing.expect_value(
+		t,
+		validate_accel_desc({kind = .Bottom, geometries = {bad}}),
+		Desc_Error.Bad_Geometry,
+	)
 	bad = shared
 	bad.vertex_format = .RGB32_Float
-	testing.expect_value(t, validate_accel_desc({kind = .Bottom, geometries = {bad}}), Desc_Error.Bad_Geometry)
+	testing.expect_value(
+		t,
+		validate_accel_desc({kind = .Bottom, geometries = {bad}}),
+		Desc_Error.Bad_Geometry,
+	)
 	bad = shared
 	bad.indices, bad.index_count = INDICES, 4
-	testing.expect_value(t, validate_accel_desc({kind = .Bottom, geometries = {bad}}), Desc_Error.Bad_Geometry)
+	testing.expect_value(
+		t,
+		validate_accel_desc({kind = .Bottom, geometries = {bad}}),
+		Desc_Error.Bad_Geometry,
+	)
 }
 
 @(test)
@@ -819,8 +1131,7 @@ validate_accel_compactions :: proc(t: ^testing.T) {
 	}
 	cases := []Case {
 		// INDIRECT is a Storage buffer of 96 bytes.
-		{
-			proc(cb: ^Command_Buffer) {
+		{proc(cb: ^Command_Buffer) {
 				cmd_write_accel_size(cb, COMPACTABLE_BLAS, INDIRECT, 88)
 				barrier := Accel_Barrier {
 					accel         = COMPACTED_BLAS,
@@ -831,23 +1142,88 @@ validate_accel_compactions :: proc(t: ^testing.T) {
 				}
 				cmd_compact_accel(cb, COMPACTED_BLAS, COMPACTABLE_BLAS)
 				cmd_barriers(cb, nil, nil, {barrier})
-			},
-			.Compute,
-			.None,
+			}, .Compute, .None},
+		{
+			proc(cb: ^Command_Buffer) {cmd_write_accel_size(
+					cb,
+					{index = 9, generation = 1},
+					INDIRECT,
+					0,
+				)},
+			.Graphics,
+			.Invalid_Accel,
 		},
-		{proc(cb: ^Command_Buffer) {cmd_write_accel_size(cb, {index = 9, generation = 1}, INDIRECT, 0)}, .Graphics, .Invalid_Accel},
-		{proc(cb: ^Command_Buffer) {cmd_write_accel_size(cb, COMPACTABLE_BLAS, {index = 9, generation = 1}, 0)}, .Graphics, .Invalid_Buffer},
-		{proc(cb: ^Command_Buffer) {cmd_write_accel_size(cb, BLAS, INDIRECT, 0)}, .Graphics, .Bad_Accel_Size},
-		{proc(cb: ^Command_Buffer) {cmd_write_accel_size(cb, COMPACTABLE_BLAS, PLAIN, 0)}, .Graphics, .Bad_Accel_Size},
-		{proc(cb: ^Command_Buffer) {cmd_write_accel_size(cb, COMPACTABLE_BLAS, INDIRECT, 4)}, .Graphics, .Bad_Accel_Size},
-		{proc(cb: ^Command_Buffer) {cmd_write_accel_size(cb, COMPACTABLE_BLAS, INDIRECT, 96)}, .Graphics, .Bad_Accel_Size},
-		{proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_write_accel_size(cb, COMPACTABLE_BLAS, INDIRECT, 0)}, .Graphics, .Build_Inside_Pass},
-		{proc(cb: ^Command_Buffer) {cmd_compact_accel(cb, COMPACTED_BLAS, {index = 9, generation = 1})}, .Graphics, .Invalid_Accel},
-		{proc(cb: ^Command_Buffer) {cmd_compact_accel(cb, COMPACTED_BLAS, BLAS)}, .Graphics, .Bad_Compaction},
-		{proc(cb: ^Command_Buffer) {cmd_compact_accel(cb, BLAS, COMPACTABLE_BLAS)}, .Graphics, .Bad_Compaction},
-		{proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_compact_accel(cb, COMPACTED_BLAS, COMPACTABLE_BLAS)}, .Graphics, .Build_Inside_Pass},
+		{
+			proc(cb: ^Command_Buffer) {cmd_write_accel_size(
+					cb,
+					COMPACTABLE_BLAS,
+					{index = 9, generation = 1},
+					0,
+				)},
+			.Graphics,
+			.Invalid_Buffer,
+		},
+		{
+			proc(cb: ^Command_Buffer) {cmd_write_accel_size(cb, BLAS, INDIRECT, 0)},
+			.Graphics,
+			.Bad_Accel_Size,
+		},
+		{
+			proc(cb: ^Command_Buffer) {cmd_write_accel_size(cb, COMPACTABLE_BLAS, PLAIN, 0)},
+			.Graphics,
+			.Bad_Accel_Size,
+		},
+		{
+			proc(cb: ^Command_Buffer) {cmd_write_accel_size(cb, COMPACTABLE_BLAS, INDIRECT, 4)},
+			.Graphics,
+			.Bad_Accel_Size,
+		},
+		{
+			proc(cb: ^Command_Buffer) {cmd_write_accel_size(cb, COMPACTABLE_BLAS, INDIRECT, 96)},
+			.Graphics,
+			.Bad_Accel_Size,
+		},
+		{proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}})
+				cmd_write_accel_size(
+					cb,
+					COMPACTABLE_BLAS,
+					INDIRECT,
+					0,
+				)}, .Graphics, .Build_Inside_Pass},
+		{
+			proc(cb: ^Command_Buffer) {cmd_compact_accel(
+					cb,
+					COMPACTED_BLAS,
+					{index = 9, generation = 1},
+				)},
+			.Graphics,
+			.Invalid_Accel,
+		},
+		{
+			proc(cb: ^Command_Buffer) {cmd_compact_accel(cb, COMPACTED_BLAS, BLAS)},
+			.Graphics,
+			.Bad_Compaction,
+		},
+		{
+			proc(cb: ^Command_Buffer) {cmd_compact_accel(cb, BLAS, COMPACTABLE_BLAS)},
+			.Graphics,
+			.Bad_Compaction,
+		},
+		{
+			proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_compact_accel(
+					cb,
+					COMPACTED_BLAS,
+					COMPACTABLE_BLAS,
+				)},
+			.Graphics,
+			.Build_Inside_Pass,
+		},
 		// A compaction's destination is never built.
-		{proc(cb: ^Command_Buffer) {cmd_build_accel(cb, COMPACTED_BLAS)}, .Graphics, .Bad_Accel_Build},
+		{
+			proc(cb: ^Command_Buffer) {cmd_build_accel(cb, COMPACTED_BLAS)},
+			.Graphics,
+			.Bad_Accel_Build,
+		},
 	}
 	for c, i in cases {
 		cb := command_buffer(allocator)
@@ -861,20 +1237,60 @@ validate_accel_compactions :: proc(t: ^testing.T) {
 		vertex_stride = 12,
 		vertex_count  = 3,
 	}
-	testing.expect_value(t, validate_accel_desc({kind = .Bottom, flags = {.Allow_Compaction}, geometries = {triangle}}), Desc_Error.None)
-	testing.expect_value(t, validate_accel_desc({kind = .Top, flags = {.Allow_Compaction}, max_instances = 4}), Desc_Error.Bad_Compaction)
-	testing.expect_value(t, validate_accel_desc({kind = .Bottom, compact = COMPACTABLE_BLAS, compacted_size = 256}), Desc_Error.None)
-	testing.expect_value(t, validate_accel_desc({kind = .Bottom, compact = COMPACTABLE_BLAS}), Desc_Error.Bad_Compaction)
-	testing.expect_value(t, validate_accel_desc({kind = .Bottom, compacted_size = 256}), Desc_Error.Bad_Compaction)
-	testing.expect_value(t, validate_accel_desc({kind = .Top, compact = COMPACTABLE_BLAS, compacted_size = 256}), Desc_Error.Bad_Compaction)
 	testing.expect_value(
 		t,
-		validate_accel_desc({kind = .Bottom, flags = {.Allow_Compaction}, compact = COMPACTABLE_BLAS, compacted_size = 256}),
+		validate_accel_desc(
+			{kind = .Bottom, flags = {.Allow_Compaction}, geometries = {triangle}},
+		),
+		Desc_Error.None,
+	)
+	testing.expect_value(
+		t,
+		validate_accel_desc({kind = .Top, flags = {.Allow_Compaction}, max_instances = 4}),
 		Desc_Error.Bad_Compaction,
 	)
 	testing.expect_value(
 		t,
-		validate_accel_desc({kind = .Bottom, geometries = {triangle}, compact = COMPACTABLE_BLAS, compacted_size = 256}),
+		validate_accel_desc({kind = .Bottom, compact = COMPACTABLE_BLAS, compacted_size = 256}),
+		Desc_Error.None,
+	)
+	testing.expect_value(
+		t,
+		validate_accel_desc({kind = .Bottom, compact = COMPACTABLE_BLAS}),
+		Desc_Error.Bad_Compaction,
+	)
+	testing.expect_value(
+		t,
+		validate_accel_desc({kind = .Bottom, compacted_size = 256}),
+		Desc_Error.Bad_Compaction,
+	)
+	testing.expect_value(
+		t,
+		validate_accel_desc({kind = .Top, compact = COMPACTABLE_BLAS, compacted_size = 256}),
+		Desc_Error.Bad_Compaction,
+	)
+	testing.expect_value(
+		t,
+		validate_accel_desc(
+			{
+				kind = .Bottom,
+				flags = {.Allow_Compaction},
+				compact = COMPACTABLE_BLAS,
+				compacted_size = 256,
+			},
+		),
+		Desc_Error.Bad_Compaction,
+	)
+	testing.expect_value(
+		t,
+		validate_accel_desc(
+			{
+				kind = .Bottom,
+				geometries = {triangle},
+				compact = COMPACTABLE_BLAS,
+				compacted_size = 256,
+			},
+		),
 		Desc_Error.Bad_Compaction,
 	)
 }
@@ -891,12 +1307,42 @@ validate_ray_dispatches :: proc(t: ^testing.T) {
 		err:    Validation_Error,
 	}
 	cases := []Case {
-		{proc(cb: ^Command_Buffer) {cmd_set_pipeline(cb, RT_PIPELINE); cmd_dispatch_rays(cb, {64, 64, 1})}, .None},
+		{
+			proc(cb: ^Command_Buffer) {cmd_set_pipeline(cb, RT_PIPELINE); cmd_dispatch_rays(
+					cb,
+					{64, 64, 1},
+				)},
+			.None,
+		},
 		{proc(cb: ^Command_Buffer) {cmd_dispatch_rays(cb, {1, 1, 1})}, .No_Pipeline},
-		{proc(cb: ^Command_Buffer) {cmd_set_pipeline(cb, COMPUTE_PIPELINE); cmd_dispatch_rays(cb, {1, 1, 1})}, .Wrong_Pipeline_Kind},
-		{proc(cb: ^Command_Buffer) {cmd_set_pipeline(cb, RT_PIPELINE); cmd_dispatch(cb, {1, 1, 1})}, .Wrong_Pipeline_Kind},
-		{proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_set_pipeline(cb, RT_PIPELINE)}, .Wrong_Pipeline_Kind},
-		{proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_dispatch_rays(cb, {1, 1, 1})}, .Dispatch_Inside_Pass},
+		{
+			proc(cb: ^Command_Buffer) {cmd_set_pipeline(cb, COMPUTE_PIPELINE); cmd_dispatch_rays(
+					cb,
+					{1, 1, 1},
+				)},
+			.Wrong_Pipeline_Kind,
+		},
+		{
+			proc(cb: ^Command_Buffer) {cmd_set_pipeline(cb, RT_PIPELINE); cmd_dispatch(
+					cb,
+					{1, 1, 1},
+				)},
+			.Wrong_Pipeline_Kind,
+		},
+		{
+			proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_set_pipeline(
+					cb,
+					RT_PIPELINE,
+				)},
+			.Wrong_Pipeline_Kind,
+		},
+		{
+			proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_dispatch_rays(
+					cb,
+					{1, 1, 1},
+				)},
+			.Dispatch_Inside_Pass,
+		},
 	}
 	for c, i in cases {
 		cb := command_buffer(allocator)
@@ -953,19 +1399,143 @@ validate_upscales :: proc(t: ^testing.T) {
 		{UPSCALE, false, .Graphics, .None},
 		{UPSCALE, true, .Graphics, .Dispatch_Inside_Pass},
 		{UPSCALE, false, .Compute, .Wrong_Queue},
-		{{upscaler = {index = 9, generation = 1}, color = SAMPLED, depth = SAMPLED, motion = SAMPLED, output = STORAGE, render_size = {32, 32}}, false, .Graphics, .Invalid_Upscaler},
+		{
+			{
+				upscaler = {index = 9, generation = 1},
+				color = SAMPLED,
+				depth = SAMPLED,
+				motion = SAMPLED,
+				output = STORAGE,
+				render_size = {32, 32},
+			},
+			false,
+			.Graphics,
+			.Invalid_Upscaler,
+		},
 		// Larger than the upscaler's renders, or empty.
-		{{upscaler = UPSCALER, color = SAMPLED, depth = SAMPLED, motion = SAMPLED, output = STORAGE, render_size = {48, 32}}, false, .Graphics, .Bad_Upscale},
-		{{upscaler = UPSCALER, color = SAMPLED, depth = SAMPLED, motion = SAMPLED, output = STORAGE}, false, .Graphics, .Bad_Upscale},
+		{
+			{
+				upscaler = UPSCALER,
+				color = SAMPLED,
+				depth = SAMPLED,
+				motion = SAMPLED,
+				output = STORAGE,
+				render_size = {48, 32},
+			},
+			false,
+			.Graphics,
+			.Bad_Upscale,
+		},
+		{
+			{
+				upscaler = UPSCALER,
+				color = SAMPLED,
+				depth = SAMPLED,
+				motion = SAMPLED,
+				output = STORAGE,
+			},
+			false,
+			.Graphics,
+			.Bad_Upscale,
+		},
 		// An input that is not sampled, and an output that is not storage or not the output's size.
-		{{upscaler = UPSCALER, color = TARGET, depth = SAMPLED, motion = SAMPLED, output = STORAGE, render_size = {32, 32}}, false, .Graphics, .Bad_Upscale},
-		{{upscaler = UPSCALER, color = SAMPLED, depth = SAMPLED, motion = SAMPLED, output = SAMPLED, render_size = {32, 32}}, false, .Graphics, .Bad_Upscale},
-		{{upscaler = UPSCALER, color = SAMPLED, depth = SAMPLED, motion = SMALL_TARGET, output = STORAGE, render_size = {32, 32}}, false, .Graphics, .Bad_Upscale},
+		{
+			{
+				upscaler = UPSCALER,
+				color = TARGET,
+				depth = SAMPLED,
+				motion = SAMPLED,
+				output = STORAGE,
+				render_size = {32, 32},
+			},
+			false,
+			.Graphics,
+			.Bad_Upscale,
+		},
+		{
+			{
+				upscaler = UPSCALER,
+				color = SAMPLED,
+				depth = SAMPLED,
+				motion = SAMPLED,
+				output = SAMPLED,
+				render_size = {32, 32},
+			},
+			false,
+			.Graphics,
+			.Bad_Upscale,
+		},
+		{
+			{
+				upscaler = UPSCALER,
+				color = SAMPLED,
+				depth = SAMPLED,
+				motion = SMALL_TARGET,
+				output = STORAGE,
+				render_size = {32, 32},
+			},
+			false,
+			.Graphics,
+			.Bad_Upscale,
+		},
 		// The masks are optional, and sampled where they are given.
-		{{upscaler = UPSCALER, color = SAMPLED, depth = SAMPLED, motion = SAMPLED, reactive = SAMPLED, transparency = STORAGE, output = STORAGE, render_size = {32, 32}}, false, .Graphics, .None},
-		{{upscaler = UPSCALER, color = SAMPLED, depth = SAMPLED, motion = SAMPLED, reactive = SMALL_TARGET, output = STORAGE, render_size = {32, 32}}, false, .Graphics, .Bad_Upscale},
-		{{upscaler = UPSCALER, color = SAMPLED, depth = SAMPLED, motion = SAMPLED, transparency = TARGET, output = STORAGE, render_size = {32, 32}}, false, .Graphics, .Bad_Upscale},
-		{{upscaler = UPSCALER, color = SAMPLED, depth = SAMPLED, motion = SAMPLED, reactive = {index = 9, generation = 1}, output = STORAGE, render_size = {32, 32}}, false, .Graphics, .Invalid_Texture},
+		{
+			{
+				upscaler = UPSCALER,
+				color = SAMPLED,
+				depth = SAMPLED,
+				motion = SAMPLED,
+				reactive = SAMPLED,
+				transparency = STORAGE,
+				output = STORAGE,
+				render_size = {32, 32},
+			},
+			false,
+			.Graphics,
+			.None,
+		},
+		{
+			{
+				upscaler = UPSCALER,
+				color = SAMPLED,
+				depth = SAMPLED,
+				motion = SAMPLED,
+				reactive = SMALL_TARGET,
+				output = STORAGE,
+				render_size = {32, 32},
+			},
+			false,
+			.Graphics,
+			.Bad_Upscale,
+		},
+		{
+			{
+				upscaler = UPSCALER,
+				color = SAMPLED,
+				depth = SAMPLED,
+				motion = SAMPLED,
+				transparency = TARGET,
+				output = STORAGE,
+				render_size = {32, 32},
+			},
+			false,
+			.Graphics,
+			.Bad_Upscale,
+		},
+		{
+			{
+				upscaler = UPSCALER,
+				color = SAMPLED,
+				depth = SAMPLED,
+				motion = SAMPLED,
+				reactive = {index = 9, generation = 1},
+				output = STORAGE,
+				render_size = {32, 32},
+			},
+			false,
+			.Graphics,
+			.Invalid_Texture,
+		},
 	}
 	for c, i in cases {
 		cb := command_buffer(allocator)
@@ -1014,8 +1584,16 @@ validate_upscales :: proc(t: ^testing.T) {
 	err, _ = validate(cb, RESOURCES, &layouts)
 	testing.expect_value(t, err, Validation_Error.None)
 
-	testing.expect_value(t, validate_upscaler_desc({max_render_size = {32, 32}, output_size = {64, 64}}), Desc_Error.None)
-	testing.expect_value(t, validate_upscaler_desc({max_render_size = {64, 65}, output_size = {64, 64}}), Desc_Error.Bad_Size)
+	testing.expect_value(
+		t,
+		validate_upscaler_desc({max_render_size = {32, 32}, output_size = {64, 64}}),
+		Desc_Error.None,
+	)
+	testing.expect_value(
+		t,
+		validate_upscaler_desc({max_render_size = {64, 65}, output_size = {64, 64}}),
+		Desc_Error.Bad_Size,
+	)
 	testing.expect_value(t, validate_upscaler_desc({output_size = {64, 64}}), Desc_Error.Bad_Size)
 }
 
@@ -1033,17 +1611,75 @@ validate_copies_and_streams :: proc(t: ^testing.T) {
 	}
 	cases := []Case {
 		// PLAIN holds 64 bytes and INDIRECT 96.
-		{proc(cb: ^Command_Buffer) {cmd_copy_buffer(cb, INDIRECT, 32, PLAIN, 0, 64)}, .Compute, .None},
-		{proc(cb: ^Command_Buffer) {cmd_copy_buffer(cb, PLAIN, 0, PLAIN, 32, 16)}, .Graphics, .Bad_Copy},
-		{proc(cb: ^Command_Buffer) {cmd_copy_buffer(cb, INDIRECT, 0, PLAIN, 0, 68)}, .Graphics, .Bad_Copy},
-		{proc(cb: ^Command_Buffer) {cmd_copy_buffer(cb, INDIRECT, 2, PLAIN, 0, 4)}, .Graphics, .Bad_Copy},
-		// A readback buffer is only a copy's destination.
-		{proc(cb: ^Command_Buffer) {cmd_copy_buffer(cb, INDIRECT, 0, READBACK, 0, 64)}, .Compute, .None},
-		{proc(cb: ^Command_Buffer) {cmd_copy_buffer(cb, READBACK, 0, PLAIN, 0, 4)}, .Graphics, .Bad_Copy},
-		{proc(cb: ^Command_Buffer) {cmd_copy_buffer(cb, {index = 9, generation = 1}, 0, PLAIN, 0, 4)}, .Graphics, .Invalid_Buffer},
-		{proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_copy_buffer(cb, INDIRECT, 0, PLAIN, 0, 4)}, .Graphics, .Copy_Inside_Pass},
 		{
-			proc(cb: ^Command_Buffer) {cmd_barriers(cb, {{buffer = PLAIN, sync_before = {.Copy}, access_before = {.Copy_Dest}, sync_after = {.Copy}, access_after = {.Copy_Source}}}, nil)},
+			proc(cb: ^Command_Buffer) {cmd_copy_buffer(cb, INDIRECT, 32, PLAIN, 0, 64)},
+			.Compute,
+			.None,
+		},
+		{
+			proc(cb: ^Command_Buffer) {cmd_copy_buffer(cb, PLAIN, 0, PLAIN, 32, 16)},
+			.Graphics,
+			.Bad_Copy,
+		},
+		{
+			proc(cb: ^Command_Buffer) {cmd_copy_buffer(cb, INDIRECT, 0, PLAIN, 0, 68)},
+			.Graphics,
+			.Bad_Copy,
+		},
+		{
+			proc(cb: ^Command_Buffer) {cmd_copy_buffer(cb, INDIRECT, 2, PLAIN, 0, 4)},
+			.Graphics,
+			.Bad_Copy,
+		},
+		// A readback buffer is only a copy's destination.
+		{
+			proc(cb: ^Command_Buffer) {cmd_copy_buffer(cb, INDIRECT, 0, READBACK, 0, 64)},
+			.Compute,
+			.None,
+		},
+		{
+			proc(cb: ^Command_Buffer) {cmd_copy_buffer(cb, READBACK, 0, PLAIN, 0, 4)},
+			.Graphics,
+			.Bad_Copy,
+		},
+		{
+			proc(cb: ^Command_Buffer) {cmd_copy_buffer(
+					cb,
+					{index = 9, generation = 1},
+					0,
+					PLAIN,
+					0,
+					4,
+				)},
+			.Graphics,
+			.Invalid_Buffer,
+		},
+		{
+			proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_copy_buffer(
+					cb,
+					INDIRECT,
+					0,
+					PLAIN,
+					0,
+					4,
+				)},
+			.Graphics,
+			.Copy_Inside_Pass,
+		},
+		{
+			proc(cb: ^Command_Buffer) {cmd_barriers(
+					cb,
+					{
+						{
+							buffer = PLAIN,
+							sync_before = {.Copy},
+							access_before = {.Copy_Dest},
+							sync_after = {.Copy},
+							access_after = {.Copy_Source},
+						},
+					},
+					nil,
+				)},
 			.Compute,
 			.None,
 		},
@@ -1071,7 +1707,12 @@ validate_copies_and_streams :: proc(t: ^testing.T) {
 	testing.expect_value(t, validate_texture_desc(bad, nil), Desc_Error.Bad_Usage)
 
 	// A 3D texture is only sampled and written in shaders, with one mip.
-	volume := Texture_Desc{size = {16, 8}, depth = 4, format = .RGBA16_Float, usage = {.Sampled, .Storage}}
+	volume := Texture_Desc {
+		size   = {16, 8},
+		depth  = 4,
+		format = .RGBA16_Float,
+		usage  = {.Sampled, .Storage},
+	}
 	testing.expect_value(t, validate_texture_desc(volume, nil), Desc_Error.None)
 	bad = volume
 	bad.usage += {.Render_Target}
@@ -1095,12 +1736,46 @@ validate_copies_and_streams :: proc(t: ^testing.T) {
 	bad = volume
 	bad.layers = 2
 	testing.expect_value(t, validate_texture_desc(bad, nil), Desc_Error.Bad_Layers)
-	testing.expect_value(t, validate_texture_desc({size = {16, 8}, layers = 2, format = .RGBA8_Unorm, usage = {.Sampled}}, nil), Desc_Error.Bad_Usage)
-	testing.expect_value(t, validate_texture_desc({size = {16, 8}, layers = 2, format = .RGBA8_Unorm, usage = {.Sampled, .Render_Target}}, nil), Desc_Error.Bad_Usage)
-	cube := Texture_Desc{size = {16, 16}, layers = 6, cube = true, format = .RGBA8_Unorm, mip_count = 5, usage = {.Sampled, .Streamed}}
+	testing.expect_value(
+		t,
+		validate_texture_desc(
+			{size = {16, 8}, layers = 2, format = .RGBA8_Unorm, usage = {.Sampled}},
+			nil,
+		),
+		Desc_Error.Bad_Usage,
+	)
+	testing.expect_value(
+		t,
+		validate_texture_desc(
+			{
+				size = {16, 8},
+				layers = 2,
+				format = .RGBA8_Unorm,
+				usage = {.Sampled, .Render_Target},
+			},
+			nil,
+		),
+		Desc_Error.Bad_Usage,
+	)
+	cube := Texture_Desc {
+		size      = {16, 16},
+		layers    = 6,
+		cube      = true,
+		format    = .RGBA8_Unorm,
+		mip_count = 5,
+		usage     = {.Sampled, .Streamed},
+	}
 	testing.expect_value(t, validate_texture_desc(cube, nil), Desc_Error.None)
-	testing.expect_value(t, validate_stream_texture(cube, false, make([]byte, mip_chain_size(cube), allocator)), Desc_Error.None)
-	testing.expect_value(t, validate_stream_texture(cube, false, make([]byte, mip_chain_size(cube) / 6, allocator)), Desc_Error.Bad_Data_Size)
+	testing.expect_value(
+		t,
+		validate_stream_texture(cube, false, make([]byte, mip_chain_size(cube), allocator)),
+		Desc_Error.None,
+	)
+	testing.expect_value(
+		t,
+		validate_stream_texture(cube, false, make([]byte, mip_chain_size(cube) / 6, allocator)),
+		Desc_Error.Bad_Data_Size,
+	)
 	bad = cube
 	bad.layers = 5
 	testing.expect_value(t, validate_texture_desc(bad, nil), Desc_Error.Bad_Layers)
@@ -1116,12 +1791,20 @@ validate_copies_and_streams :: proc(t: ^testing.T) {
 	storage_array := storage_cube
 	storage_array.cube, storage_array.layers = false, 3
 	testing.expect_value(t, validate_texture_desc(storage_array, nil), Desc_Error.None)
-	testing.expect_value(t, validate_texture_desc(storage_cube, make([]byte, 16 * 16 * 8, allocator)), Desc_Error.Bad_Usage)
+	testing.expect_value(
+		t,
+		validate_texture_desc(storage_cube, make([]byte, 16 * 16 * 8, allocator)),
+		Desc_Error.Bad_Usage,
+	)
 	bad = storage_cube
 	bad.usage = {.Sampled, .Storage, .Render_Target}
 	testing.expect_value(t, validate_texture_desc(bad, nil), Desc_Error.Bad_Usage)
 	testing.expect_value(t, validate_texture_view({mip = 4}, storage_cube, false), Desc_Error.None)
-	testing.expect_value(t, validate_texture_view({mip = 5}, storage_cube, false), Desc_Error.Bad_Mip_Count)
+	testing.expect_value(
+		t,
+		validate_texture_view({mip = 5}, storage_cube, false),
+		Desc_Error.Bad_Mip_Count,
+	)
 	testing.expect_value(t, validate_texture_view({}, storage_cube, true), Desc_Error.Bad_Usage)
 	// A cube array is a whole number of cubes, whose views write each mip of every cube.
 	cube_array := storage_cube
@@ -1139,18 +1822,40 @@ validate_copies_and_streams :: proc(t: ^testing.T) {
 	data := make([]byte, mip_chain_size(streamed), allocator)
 	testing.expect_value(t, validate_stream_texture(streamed, false, data), Desc_Error.None)
 	testing.expect_value(t, validate_stream_texture(streamed, true, data), Desc_Error.Bad_Usage)
-	testing.expect_value(t, validate_stream_texture(streamed, false, data[1:]), Desc_Error.Bad_Data_Size)
+	testing.expect_value(
+		t,
+		validate_stream_texture(streamed, false, data[1:]),
+		Desc_Error.Bad_Data_Size,
+	)
 	plain := streamed
 	plain.usage = {.Sampled}
 	testing.expect_value(t, validate_stream_texture(plain, false, data), Desc_Error.Bad_Usage)
 
-	testing.expect_value(t, validate_buffer_desc({size = 64, usage = {.Readback}}, nil), Desc_Error.None)
-	testing.expect_value(t, validate_buffer_desc({size = 64, usage = {.Readback, .Storage}}, nil), Desc_Error.Bad_Usage)
-	testing.expect_value(t, validate_buffer_desc({size = 64, usage = {.Readback}}, data[:4]), Desc_Error.Bad_Usage)
+	testing.expect_value(
+		t,
+		validate_buffer_desc({size = 64, usage = {.Readback}}, nil),
+		Desc_Error.None,
+	)
+	testing.expect_value(
+		t,
+		validate_buffer_desc({size = 64, usage = {.Readback, .Storage}}, nil),
+		Desc_Error.Bad_Usage,
+	)
+	testing.expect_value(
+		t,
+		validate_buffer_desc({size = 64, usage = {.Readback}}, data[:4]),
+		Desc_Error.Bad_Usage,
+	)
 
-	buffer := Buffer_Desc{size = 64}
+	buffer := Buffer_Desc {
+		size = 64,
+	}
 	testing.expect_value(t, validate_stream_buffer(buffer, 32, data[:32]), Desc_Error.None)
-	testing.expect_value(t, validate_stream_buffer(buffer, 48, data[:32]), Desc_Error.Bad_Data_Size)
+	testing.expect_value(
+		t,
+		validate_stream_buffer(buffer, 48, data[:32]),
+		Desc_Error.Bad_Data_Size,
+	)
 	testing.expect_value(t, validate_stream_buffer(buffer, 2, data[:8]), Desc_Error.Bad_Data_Size)
 }
 
@@ -1162,7 +1867,12 @@ block_formats_count_whole_blocks :: proc(t: ^testing.T) {
 	testing.expect_value(t, surface_size(.BC7_Unorm, 8, 8), 4 * 16)
 	// A mip smaller than a block takes a whole block.
 	testing.expect_value(t, surface_size(.BC5_Unorm, 2, 1), 16)
-	bc7 := Texture_Desc{size = {16, 8}, format = .BC7_Unorm, mip_count = 5, usage = {.Sampled, .Streamed}}
+	bc7 := Texture_Desc {
+		size      = {16, 8},
+		format    = .BC7_Unorm,
+		mip_count = 5,
+		usage     = {.Sampled, .Streamed},
+	}
 	// 16x8, 8x4, 4x2, 2x1 and 1x1: 8, 2, 1, 1 and 1 blocks.
 	testing.expect_value(t, mip_chain_size(bc7), (8 + 2 + 1 + 1 + 1) * 16)
 	testing.expect_value(t, validate_texture_desc(bc7, nil), Desc_Error.None)
@@ -1170,9 +1880,17 @@ block_formats_count_whole_blocks :: proc(t: ^testing.T) {
 	render_target := bc7
 	render_target.usage = {.Sampled, .Render_Target}
 	testing.expect_value(t, validate_texture_desc(render_target, nil), Desc_Error.Bad_Usage)
-	partial := Texture_Desc{size = {10, 8}, format = .BC4_Unorm, usage = {.Sampled}}
+	partial := Texture_Desc {
+		size   = {10, 8},
+		format = .BC4_Unorm,
+		usage  = {.Sampled},
+	}
 	testing.expect_value(t, validate_texture_desc(partial, nil), Desc_Error.Bad_Size)
-	with_data := Texture_Desc{size = {8, 8}, format = .BC4_Unorm, usage = {.Sampled}}
+	with_data := Texture_Desc {
+		size   = {8, 8},
+		format = .BC4_Unorm,
+		usage  = {.Sampled},
+	}
 	data: [4 * 8]byte
 	testing.expect_value(t, validate_texture_desc(with_data, data[:]), Desc_Error.None)
 	testing.expect_value(t, validate_texture_desc(with_data, data[:16]), Desc_Error.Bad_Data_Size)
@@ -1180,7 +1898,10 @@ block_formats_count_whole_blocks :: proc(t: ^testing.T) {
 
 @(test)
 output_modes_follow_the_request_and_the_display :: proc(t: ^testing.T) {
-	sdr, hdr := Display{}, Display{hdr = true, max_luminance = 1000}
+	sdr, hdr := Display{}, Display {
+			hdr           = true,
+			max_luminance = 1000,
+		}
 	testing.expect_value(t, output_mode(.Auto, sdr), Output_Mode.Sdr)
 	testing.expect_value(t, output_mode(.Auto, hdr), Output_Mode.Hdr10)
 	testing.expect_value(t, output_mode(.Sdr, hdr), Output_Mode.Sdr)

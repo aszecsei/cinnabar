@@ -12,11 +12,22 @@ import format "cinnabar:engine/asset/format"
 
 // set_override sets an attribute of the element of an id, over what its document and styles say. It replaces what was
 // set on the same attribute before. A string in the value is copied.
-set_override :: proc(s: ^State, d: ^Document, id: string, id_hash: u64, attr: format.Ui_Attr, value: format.Ui_Value) {
+set_override :: proc(
+	s: ^State,
+	d: ^Document,
+	id: string,
+	id_hash: u64,
+	attr: format.Ui_Attr,
+	value: format.Ui_Value,
+) {
 	// Temporary memory here is the frame's, which the platform frees each frame.
 	context.temp_allocator = s.platform.frame_allocator
 	if _, found := find_node(d, id); !found && !d.warned_ids[id_hash] {
-		log.warnf("ui: %v has no element %s now; what is set on it applies if one comes", d.guid, id)
+		log.warnf(
+			"ui: %v has no element %s now; what is set on it applies if one comes",
+			d.guid,
+			id,
+		)
 		d.warned_ids[id_hash] = true
 	}
 	owned := own_value(s, value)
@@ -58,13 +69,23 @@ set_binding :: proc(s: ^State, d: ^Document, name, value: string) {
 			return
 		}
 	}
-	append(&d.bindings, Binding{strings.clone(name, s.allocator), strings.clone(value, s.allocator)})
+	append(
+		&d.bindings,
+		Binding{strings.clone(name, s.allocator), strings.clone(value, s.allocator)},
+	)
 }
 
 // add_clone copies a template under an element, as its last child, and gives the copy's id, <template>#<n>, whose
 // inner elements' ids are <template>#<n>.<id>. A document that is not built yet copies it when it is. It gives a
 // message of what is wrong, or "".
-add_clone :: proc(s: ^State, d: ^Document, parent, template: string) -> (id: string, message: string) {
+add_clone :: proc(
+	s: ^State,
+	d: ^Document,
+	parent, template: string,
+) -> (
+	id: string,
+	message: string,
+) {
 	// Temporary memory here is the frame's, which the platform frees each frame.
 	context.temp_allocator = s.platform.frame_allocator
 	if !format.ui_valid_id(template) {
@@ -103,7 +124,8 @@ remove_element :: proc(s: ^State, d: ^Document, id: string) -> string {
 			// What was set on the copy and in it goes with it.
 			for j := len(d.overrides) - 1; j >= 0; j -= 1 {
 				o := d.overrides[j]
-				if n, found := d.ids[o.id_hash]; found && (id_of(d, n) == id || strings.has_prefix(id_of(d, n), prefix)) {
+				if n, found := d.ids[o.id_hash];
+				   found && (id_of(d, n) == id || strings.has_prefix(id_of(d, n), prefix)) {
 					free_value(s, o.value)
 					unordered_remove(&d.overrides, j)
 				}
@@ -139,8 +161,11 @@ text_of :: proc(s: ^State, d: ^Document, id: string) -> (text: string, ok: bool)
 	if node.element == .Text {
 		return expand(d, st.text, s.platform.frame_allocator), true
 	}
-	if node.element == .Button && node.first_child != NONE && d.nodes[node.first_child].element == .Text {
-		return expand(d, cascade(d, node.first_child, nil, {}).text, s.platform.frame_allocator), true
+	if node.element == .Button &&
+	   node.first_child != NONE &&
+	   d.nodes[node.first_child].element == .Text {
+		return expand(d, cascade(d, node.first_child, nil, {}).text, s.platform.frame_allocator),
+			true
 	}
 	return "", false
 }

@@ -19,7 +19,11 @@ host: physics.Host
 // with_backend runs a conformance test on the host's job system, as the game's frame code would. A quiet host drops
 // the backend's log, for tests of what it rejects; the test's own failures still report.
 @(private = "file")
-with_backend :: proc(t: ^testing.T, test: proc(t: ^testing.T, api: ^physics.Physics_API), quiet := false) {
+with_backend :: proc(
+	t: ^testing.T,
+	test: proc(t: ^testing.T, api: ^physics.Physics_API),
+	quiet := false,
+) {
 	sync.guard(&lock)
 	testing.expect(t, jobs.init())
 	defer jobs.shutdown()
@@ -62,19 +66,19 @@ deterministic :: proc(t: ^testing.T) {
 @(test)
 destroy_all :: proc(t: ^testing.T) {
 	with_backend(t, proc(t: ^testing.T, api: ^physics.Physics_API) {
-		a := api.world_create(nil)
-		b := api.world_create(nil)
-		testing.expect(t, a != b && a.generation != 0 && b.generation != 0)
-		list := physics.command_list(context.temp_allocator)
-		physics.cmd_create_shape(&list, {0, 1}, .Sphere, {1, 0, 0})
-		physics.cmd_create_body(&list, physics.body_desc({0, 1}, {0, 1}, .Dynamic, {0, 0, 0}))
-		testing.expect(t, physics.submit(api, a, list))
-		testing.expect_value(t, api.world_destroy_all(), 2)
-		testing.expect(t, !api.step(a, 1.0 / 60, 1), "a destroyed world is stale")
-		c := api.world_create(nil)
-		testing.expect(t, c != a, "a new world in the same slot has a new generation")
-		api.world_destroy(c)
-	}, quiet = true)
+			a := api.world_create(nil)
+			b := api.world_create(nil)
+			testing.expect(t, a != b && a.generation != 0 && b.generation != 0)
+			list := physics.command_list(context.temp_allocator)
+			physics.cmd_create_shape(&list, {0, 1}, .Sphere, {1, 0, 0})
+			physics.cmd_create_body(&list, physics.body_desc({0, 1}, {0, 1}, .Dynamic, {0, 0, 0}))
+			testing.expect(t, physics.submit(api, a, list))
+			testing.expect_value(t, api.world_destroy_all(), 2)
+			testing.expect(t, !api.step(a, 1.0 / 60, 1), "a destroyed world is stale")
+			c := api.world_create(nil)
+			testing.expect(t, c != a, "a new world in the same slot has a new generation")
+			api.world_destroy(c)
+		}, quiet = true)
 }
 
 @(test)

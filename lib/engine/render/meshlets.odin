@@ -11,19 +11,34 @@ import format "cinnabar:engine/asset/format"
 // docs/rendering/assets.md#gpu-residency). The game builds the editor's live meshes with it. Each meshlet gets the sphere
 // around its vertices and the normal cone of its triangles, conservative as meshoptimizer's. It appends to the three
 // arrays, with offsets into them, and returns how many meshlets it made.
-build_simple_meshlets :: proc(positions: [][3]f32, indices: []u32, meshlets: ^[dynamic]format.Meshlet, meshlet_vertices: ^[dynamic]u32, meshlet_triangles: ^[dynamic]u8) -> int {
+build_simple_meshlets :: proc(
+	positions: [][3]f32,
+	indices: []u32,
+	meshlets: ^[dynamic]format.Meshlet,
+	meshlet_vertices: ^[dynamic]u32,
+	meshlet_triangles: ^[dynamic]u8,
+) -> int {
 	local: [format.MESHLET_MAX_VERTICES]u32
 	local_count := 0
 	triangles: [format.MESHLET_MAX_TRIANGLES][3]u8
 	triangle_count := 0
 	made := 0
-	flush :: proc(positions: [][3]f32, local: []u32, triangles: [][3]u8, meshlets: ^[dynamic]format.Meshlet, meshlet_vertices: ^[dynamic]u32, meshlet_triangles: ^[dynamic]u8) {
+	flush :: proc(
+		positions: [][3]f32,
+		local: []u32,
+		triangles: [][3]u8,
+		meshlets: ^[dynamic]format.Meshlet,
+		meshlet_vertices: ^[dynamic]u32,
+		meshlet_triangles: ^[dynamic]u8,
+	) {
 		m := format.Meshlet {
 			parent_error = math.F32_MAX,
 			refined_page = format.MESH_PAGE_NONE,
 		}
 		// The sphere: the box's center, and the farthest vertex.
-		low, high := [3]f32{math.F32_MAX, math.F32_MAX, math.F32_MAX}, [3]f32{-math.F32_MAX, -math.F32_MAX, -math.F32_MAX}
+		low, high :=
+			[3]f32{math.F32_MAX, math.F32_MAX, math.F32_MAX},
+			[3]f32{-math.F32_MAX, -math.F32_MAX, -math.F32_MAX}
 		for v in local {
 			low, high = linalg.min(low, positions[v]), linalg.max(high, positions[v])
 		}
@@ -76,8 +91,16 @@ build_simple_meshlets :: proc(positions: [][3]f32, indices: []u32, meshlets: ^[d
 				new += 1
 			}
 		}
-		if triangle_count == format.MESHLET_MAX_TRIANGLES || local_count + new > format.MESHLET_MAX_VERTICES {
-			flush(positions, local[:local_count], triangles[:triangle_count], meshlets, meshlet_vertices, meshlet_triangles)
+		if triangle_count == format.MESHLET_MAX_TRIANGLES ||
+		   local_count + new > format.MESHLET_MAX_VERTICES {
+			flush(
+				positions,
+				local[:local_count],
+				triangles[:triangle_count],
+				meshlets,
+				meshlet_vertices,
+				meshlet_triangles,
+			)
 			made += 1
 			local_count, triangle_count = 0, 0
 		}
@@ -99,7 +122,14 @@ build_simple_meshlets :: proc(positions: [][3]f32, indices: []u32, meshlets: ^[d
 		triangle_count += 1
 	}
 	if triangle_count > 0 {
-		flush(positions, local[:local_count], triangles[:triangle_count], meshlets, meshlet_vertices, meshlet_triangles)
+		flush(
+			positions,
+			local[:local_count],
+			triangles[:triangle_count],
+			meshlets,
+			meshlet_vertices,
+			meshlet_triangles,
+		)
 		made += 1
 	}
 	return made

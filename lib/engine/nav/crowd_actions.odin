@@ -69,7 +69,10 @@ move_to_tick :: proc(a: ^ai.Action_Context) -> ai.Action_Status {
 	case f32, i32, bool, ai.Enum_Index, [3]f32:
 	}
 	if !found || target == nil {
-		log.warnf("nav: move_to's key of the agent %v holds no position or entity, so it fails", a.entity)
+		log.warnf(
+			"nav: move_to's key of the agent %v holds no position or entity, so it fails",
+			a.entity,
+		)
 		return .Failed
 	}
 	if m.ticket == 0 || !same_target(target, m.target) {
@@ -80,7 +83,9 @@ move_to_tick :: proc(a: ^ai.Action_Context) -> ai.Action_Status {
 	move, ok := crowd_move(s, a.world, a.entity)
 	if !ok {
 		// An agent that the crowd has not given a slot yet waits for its next tick.
-		return .Running if ecs.is_alive(a.world, a.entity) && ecs.has(a.world, a.entity, Nav_Agent) else .Failed
+		return(
+			.Running if ecs.is_alive(a.world, a.entity) && ecs.has(a.world, a.entity, Nav_Agent) else .Failed \
+		)
 	}
 	switch {
 	case move.ticket < m.ticket:
@@ -107,7 +112,8 @@ move_to_stop :: proc(a: ^ai.Action_Context) {
 	if m.ticket == 0 {
 		return
 	}
-	if move, ok := crowd_move(s, a.world, a.entity); ok && move.ticket == m.ticket && (move.status == .Arrived || move.status == .Failed) {
+	if move, ok := crowd_move(s, a.world, a.entity);
+	   ok && move.ticket == m.ticket && (move.status == .Arrived || move.status == .Failed) {
 		return
 	}
 	stop(job_crowd(s, a.system), a.entity, m.ticket)

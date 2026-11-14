@@ -59,7 +59,13 @@ set_ui_preview_settings :: proc(e: ^Editor, p: ^Preview, m: link.Ui_Preview_Sett
 		u.bindings = make([dynamic]link.Ui_Preview_Binding, e.platform.heap_allocator)
 	}
 	for b in m.bindings {
-		append(&u.bindings, link.Ui_Preview_Binding{strings.clone(b.name, e.platform.heap_allocator), strings.clone(b.value, e.platform.heap_allocator)})
+		append(
+			&u.bindings,
+			link.Ui_Preview_Binding {
+				strings.clone(b.name, e.platform.heap_allocator),
+				strings.clone(b.value, e.platform.heap_allocator),
+			},
+		)
 	}
 	u.settings = m
 	u.settings.bindings = nil
@@ -133,7 +139,11 @@ sync_ui_preview :: proc(e: ^Editor, p: ^Preview) -> ^Ui_Document {
 	if u.apply {
 		u.apply = false
 		d := &e.ui.documents[doc.slot]
-		ui.set_forced_states(d, u.settings.forced_node, transmute(bit_set[format.Ui_State])u.settings.forced_states)
+		ui.set_forced_states(
+			d,
+			u.settings.forced_node,
+			transmute(bit_set[format.Ui_State])u.settings.forced_states,
+		)
 		ui.clear_bindings(&e.ui, d)
 		for b in u.bindings {
 			ui.set_binding(&e.ui, d, b.name, b.value)
@@ -169,7 +179,10 @@ build_ui_document :: proc(e: ^Editor, p: ^Preview, data: []byte, key: u64) {
 		fail_ui_build(p, data, key)
 		return
 	}
-	u.document = Ui_Document{slot = slot, key = key}
+	u.document = Ui_Document {
+		slot = slot,
+		key  = key,
+	}
 	u.apply = true
 }
 
@@ -181,7 +194,10 @@ fail_ui_build :: proc(p: ^Preview, data: []byte, key: u64) {
 	buffer: [32]u8
 	guid := format.guid_format(p.material, &buffer)
 	if header, _ := format.blob_header(data); header.layout != format.ui_layout() {
-		log.warnf("editor: the UI preview of %s cannot read its blob, which was cooked with another build. Cook the content with this build.", guid)
+		log.warnf(
+			"editor: the UI preview of %s cannot read its blob, which was cooked with another build. Cook the content with this build.",
+			guid,
+		)
 	} else {
 		log.warnf("editor: the UI preview of %s cannot build its blob of key %x.", guid, key)
 	}
@@ -196,7 +212,12 @@ Ui_Draw :: struct {
 
 // ui_preview_desc is what the renderer draws of a UI preview: its background, and its document through the hook.
 @(private)
-ui_preview_desc :: proc(e: ^Editor, p: ^Preview, id: int, target: gpu.Preview_Target) -> render.Preview_Desc {
+ui_preview_desc :: proc(
+	e: ^Editor,
+	p: ^Preview,
+	id: int,
+	target: gpu.Preview_Target,
+) -> render.Preview_Desc {
 	draw := new(Ui_Draw, e.platform.frame_allocator)
 	draw^ = {e, p}
 	background: [4]f32
@@ -232,7 +253,10 @@ draw_ui_preview :: proc(f: ^render.Frame) -> bool {
 	scale := s.scale > 0 ? s.scale : max(screen.y / ui.REFERENCE_HEIGHT, ui.MIN_SCALE)
 	ui.layout_one(&e.ui, doc.slot, screen, scale)
 	doc.laid_out, doc.scale = true, scale
-	view := ui.View{scale = s.view_scale > 0 ? s.view_scale : 1, offset = {s.view_x, s.view_y}}
+	view := ui.View {
+		scale  = s.view_scale > 0 ? s.view_scale : 1,
+		offset = {s.view_x, s.view_y},
+	}
 	return ui.add_document_passes(&e.ui, f, doc.slot, view)
 }
 
@@ -260,7 +284,12 @@ send_ui_layouts :: proc(e: ^Editor, out: ^[dynamic]byte, allocator: runtime.Allo
 				source  = n.source,
 				shown   = n.shown,
 				rect    = n.rect,
-				content = {n.rect[0] + pad[3], n.rect[1] + pad[0], n.rect[2] - pad[1], n.rect[3] - pad[2]},
+				content = {
+					n.rect[0] + pad[3],
+					n.rect[1] + pad[0],
+					n.rect[2] - pad[1],
+					n.rect[3] - pad[2],
+				},
 				clip    = n.clip,
 			}
 		}

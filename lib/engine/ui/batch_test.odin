@@ -14,16 +14,28 @@ the_batch_draws_documents_by_order_and_each_tree_parents_first :: proc(t: ^testi
 	f := setup(t)
 	defer teardown(t, f)
 	// The front document is shown first but has the higher order, so it draws last.
-	show(t, f, FRONT, `ui 1
-<ui><box id="front" width="10" height="10" fill="#ff000080" opacity="0.5"/></ui>`, order = 2)
-	show(t, f, BACK, `ui 1
+	show(
+		t,
+		f,
+		FRONT,
+		`ui 1
+<ui><box id="front" width="10" height="10" fill="#ff000080" opacity="0.5"/></ui>`,
+		order = 2,
+	)
+	show(
+		t,
+		f,
+		BACK,
+		`ui 1
 <ui>
 	<box id="panel" width="100" height="50" fill="linear(90, #000, #fff)" radius="4 4 0 0" border="2 #00ff00">
 		<box id="inner" width="10" height="10" fill="#0000ff"/>
 		<box id="clear" width="10" height="10"/>
 		<box id="hidden" width="10" height="10" fill="#fff" visible="false"/>
 	</box>
-</ui>`, order = 1)
+</ui>`,
+		order = 1,
+	)
 	step(f)
 	b := build_batch(&f.ui, 0, context.temp_allocator)
 	testing.expect_value(t, len(b.instances), 3)
@@ -75,8 +87,13 @@ a_nine_slice_keeps_its_corners_and_stretches_the_rest :: proc(t: ^testing.T) {
 instances_outside_their_clip_are_left_out :: proc(t: ^testing.T) {
 	f := setup(t)
 	defer teardown(t, f)
-	show(t, f, BACK, `ui 1
-<ui><row width="20" height="10" clip="true" cross="stretch"><box width="20" fill="#fff"/><box id="out" width="20" fill="#fff"/></row></ui>`)
+	show(
+		t,
+		f,
+		BACK,
+		`ui 1
+<ui><row width="20" height="10" clip="true" cross="stretch"><box width="20" fill="#fff"/><box id="out" width="20" fill="#fff"/></row></ui>`,
+	)
 	step(f)
 	b := build_batch(&f.ui, 0, context.temp_allocator)
 	testing.expect_value(t, len(b.instances), 1)

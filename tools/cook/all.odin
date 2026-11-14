@@ -16,10 +16,16 @@ cook_all :: proc(options: Cook_Options, prune: bool) -> bool {
 	case .Locked:
 	case .Held:
 		if options.config == .Dev && !prune {
-			log.infof("cook: the cook daemon is running, and keeps %s up to date", config_dir(options))
+			log.infof(
+				"cook: the cook daemon is running, and keeps %s up to date",
+				config_dir(options),
+			)
 			return true
 		}
-		log.errorf("cook: another cook is using %s. Stop the cook daemon (`just watch` or the editor) and cook again.", options.cache)
+		log.errorf(
+			"cook: another cook is using %s. Stop the cook daemon (`just watch` or the editor) and cook again.",
+			options.cache,
+		)
 		return false
 	case .Failed:
 		return false

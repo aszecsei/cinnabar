@@ -31,7 +31,12 @@ Readback_Take :: enum {
 // ensure_readback_ring creates the ring's copies of size bytes the first time. A ring has all of its copies or none: when
 // one cannot be made, the others go, and a later call tries again.
 @(private)
-ensure_readback_ring :: proc(ring: ^Readback_Ring, platform: ^core.Platform_API, size: u32, label: string) -> bool {
+ensure_readback_ring :: proc(
+	ring: ^Readback_Ring,
+	platform: ^core.Platform_API,
+	size: u32,
+	label: string,
+) -> bool {
 	if ring.copies[0] != {} {
 		return true
 	}
@@ -65,12 +70,29 @@ Readback_Copy :: struct {
 // add_readback_copy copies size bytes of source into the ring's next copy, in a pass of its own on queue. Once the frame
 // executes, the copy is written and the ring moves on to the one after it. A frame copies into a ring at most once.
 @(private)
-add_readback_copy :: proc(g: ^Graph, platform: ^core.Platform_API, ring: ^Readback_Ring, source: Buffer, size: u32, name: string, queue := gpu.Queue.Graphics) {
-	data := new_clone(Readback_Copy{ring = ring, slot = ring.next, source = source, dest = ring.copies[ring.next], size = size}, platform.frame_allocator)
+add_readback_copy :: proc(
+	g: ^Graph,
+	platform: ^core.Platform_API,
+	ring: ^Readback_Ring,
+	source: Buffer,
+	size: u32,
+	name: string,
+	queue := gpu.Queue.Graphics,
+) {
+	data := new_clone(
+		Readback_Copy {
+			ring = ring,
+			slot = ring.next,
+			source = source,
+			dest = ring.copies[ring.next],
+			size = size,
+		},
+		platform.frame_allocator,
+	)
 	p := add_compute_pass(g, name, proc(ctx: ^Pass_Context) {
-		c := (^Readback_Copy)(ctx.data)
-		gpu.cmd_copy_buffer(ctx.cb, gpu_buffer(ctx.graph, c.source), 0, c.dest, 0, c.size)
-	}, data, queue = queue)
+			c := (^Readback_Copy)(ctx.data)
+			gpu.cmd_copy_buffer(ctx.cb, gpu_buffer(ctx.graph, c.source), 0, c.dest, 0, c.size)
+		}, data, queue = queue)
 	copy_source(g, p, source)
 	copy_dest(g, p, import_buffer(g, data.dest))
 	on_executed(g, commit_readback_copy, data)
@@ -96,7 +118,14 @@ mark_readback_copied :: proc(ring: ^Readback_Ring, slot: int) {
 // it has. When no frame that executed copied into the ring since the last take, it drops the copies in flight and is
 // Idle, so a frame without the value, or a frame that failed, shows none.
 @(private)
-take_readback :: proc(ring: ^Readback_Ring, platform: ^core.Platform_API, size: int) -> (data: []byte, take: Readback_Take) {
+take_readback :: proc(
+	ring: ^Readback_Ring,
+	platform: ^core.Platform_API,
+	size: int,
+) -> (
+	data: []byte,
+	take: Readback_Take,
+) {
 	defer ring.copied = false
 	if !ring.copied {
 		ring.written = {}

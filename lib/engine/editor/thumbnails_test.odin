@@ -16,9 +16,43 @@ import "cinnabar:engine/editor/link"
 import "cinnabar:engine/render"
 
 @(private = "file")
-BAKE_MESH := [16]u8{0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11}
+BAKE_MESH := [16]u8 {
+	0x11,
+	0x11,
+	0x11,
+	0x11,
+	0x11,
+	0x11,
+	0x11,
+	0x11,
+	0x11,
+	0x11,
+	0x11,
+	0x11,
+	0x11,
+	0x11,
+	0x11,
+	0x11,
+}
 @(private = "file")
-BAKE_PREFAB := [16]u8{0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22}
+BAKE_PREFAB := [16]u8 {
+	0x22,
+	0x22,
+	0x22,
+	0x22,
+	0x22,
+	0x22,
+	0x22,
+	0x22,
+	0x22,
+	0x22,
+	0x22,
+	0x22,
+	0x22,
+	0x22,
+	0x22,
+	0x22,
+}
 
 @(private = "file")
 BAKE_PREFAB_TEXT :: `scene 2
@@ -84,11 +118,21 @@ bake_setup :: proc(t: ^testing.T) -> ^Bake_Fixture {
 		file_read = core.file_read,
 		file_modified = core.file_modified,
 		time_seconds = proc() -> f64 {return bake_now},
-		gpu_create_texture = proc(desc: gpu.Texture_Desc, data: []byte) -> gpu.Texture {return gpu.Texture{index = 1, generation = 1}},
+		gpu_create_texture = proc(
+			desc: gpu.Texture_Desc,
+			data: []byte,
+		) -> gpu.Texture {return gpu.Texture{index = 1, generation = 1}},
 		gpu_destroy_texture = proc(texture: gpu.Texture) {},
-		gpu_create_buffer = proc(desc: gpu.Buffer_Desc, data: []byte) -> gpu.Buffer {return gpu.Buffer{index = 1, generation = 1}},
+		gpu_create_buffer = proc(
+			desc: gpu.Buffer_Desc,
+			data: []byte,
+		) -> gpu.Buffer {return gpu.Buffer{index = 1, generation = 1}},
 		gpu_destroy_buffer = proc(buffer: gpu.Buffer) {},
-		gpu_stream_buffer = proc(buffer: gpu.Buffer, offset: u32, data: []byte) -> gpu.Transfer {return gpu.Transfer(1)},
+		gpu_stream_buffer = proc(
+			buffer: gpu.Buffer,
+			offset: u32,
+			data: []byte,
+		) -> gpu.Transfer {return gpu.Transfer(1)},
 		gpu_transfer_done = proc(transfer: gpu.Transfer) -> bool {return true},
 		memory_reserve = proc(size: int) -> rawptr {
 			data, err := virtual.reserve(uint(size))
@@ -145,13 +189,22 @@ write_mesh :: proc(t: ^testing.T, f: ^Bake_Fixture) {
 	}
 	buffer: [32]u8
 	path := fmt.tprintf("%s/%s.blob", f.dir, format.guid_format(format.Guid(BAKE_MESH), &buffer))
-	testing.expect(t, os.write_entire_file(path, format.mesh_write(contents, context.temp_allocator)) == nil)
+	testing.expect(
+		t,
+		os.write_entire_file(path, format.mesh_write(contents, context.temp_allocator)) == nil,
+	)
 }
 
 // What is not in the cache fails, which residency logs. Only that goes quiet: a test's expects report through the logger
 // too, and could not fail under a logger that hears nothing.
 @(private = "file")
-preview_quietly :: proc(f: ^Bake_Fixture, others_waiting: bool) -> (desc: render.Preview_Desc, draw: bool) {
+preview_quietly :: proc(
+	f: ^Bake_Fixture,
+	others_waiting: bool,
+) -> (
+	desc: render.Preview_Desc,
+	draw: bool,
+) {
 	context.logger = log.nil_logger()
 	return thumbnail_preview(&f.editor, others_waiting)
 }
@@ -171,7 +224,10 @@ first_drawing :: proc(f: ^Bake_Fixture) -> (desc: render.Preview_Desc, draw: boo
 
 @(private = "file")
 bake :: proc(f: ^Bake_Fixture, id: u32, kind: link.Thumbnail_Kind, guid: [16]u8) {
-	handle_thumbnail_message(&f.editor, link.Bake_Thumbnail{id = id, kind = kind, asset = guid, width = 64, height = 64})
+	handle_thumbnail_message(
+		&f.editor,
+		link.Bake_Thumbnail{id = id, kind = kind, asset = guid, width = 64, height = 64},
+	)
 }
 
 @(private = "file")
@@ -180,7 +236,20 @@ write_scene :: proc(t: ^testing.T, f: ^Bake_Fixture, guid: [16]u8, text: string)
 	testing.expectf(t, ok, "%v", problems)
 	buffer: [32]u8
 	path := fmt.tprintf("%s/%s.blob", f.dir, format.guid_format(format.Guid(guid), &buffer))
-	testing.expect(t, os.write_entire_file(path, format.scene_write(scene, format.Guid(guid), 1, .Prefab, allocator = context.temp_allocator)) == nil)
+	testing.expect(
+		t,
+		os.write_entire_file(
+			path,
+			format.scene_write(
+				scene,
+				format.Guid(guid),
+				1,
+				.Prefab,
+				allocator = context.temp_allocator,
+			),
+		) ==
+		nil,
+	)
 }
 
 @(test)
@@ -294,7 +363,9 @@ a_bake_of_what_cannot_be_drawn_says_why :: proc(t: ^testing.T) {
 	testing.expect_value(t, f.editor.session.thumbnail.failed, "it draws nothing")
 
 	// With nothing that it draws in the cache, there is no picture to keep.
-	missing := [16]u8{0 ..< 16 = 0x33}
+	missing := [16]u8 {
+		0 ..< 16 = 0x33,
+	}
 	bake(f, 3, .Mesh, missing)
 	_, draw = first_drawing(f)
 	testing.expect(t, !draw)
@@ -349,7 +420,11 @@ a_bake_leaves_the_world_room_in_the_tables :: proc(t: ^testing.T) {
 	_, draw := preview_quietly(f, false)
 	testing.expect(t, !draw)
 	testing.expect_value(t, f.editor.session.thumbnail.failed_id, 3)
-	testing.expect_value(t, f.editor.session.thumbnail.failed, "the renderer's tables are nearly full")
+	testing.expect_value(
+		t,
+		f.editor.session.thumbnail.failed,
+		"the renderer's tables are nearly full",
+	)
 	testing.expect_value(t, f.renderer.residency.count, 0)
 
 	f.renderer.materials.pipeline_count = render.MAX_MATERIAL_PIPELINES - render.PREVIEW_ROOM
@@ -375,7 +450,11 @@ a_bake_refuses_a_mesh_that_is_being_edited :: proc(t: ^testing.T) {
 	_, draw := preview_quietly(f, false)
 	render.clear_live(&f.renderer.residency, format.Guid(BAKE_MESH))
 	testing.expect(t, !draw)
-	testing.expect_value(t, f.editor.session.thumbnail.failed, "a mesh that it draws is being edited")
+	testing.expect_value(
+		t,
+		f.editor.session.thumbnail.failed,
+		"a mesh that it draws is being edited",
+	)
 }
 
 @(test)
@@ -392,7 +471,11 @@ a_bake_gives_back_what_many_bakes_loaded :: proc(t: ^testing.T) {
 		}
 	}
 	f.renderer.residency.baking = false
-	testing.expect_value(t, render.residency_baked_count(&f.renderer.residency), THUMBNAIL_BAKED_MOST + 1)
+	testing.expect_value(
+		t,
+		render.residency_baked_count(&f.renderer.residency),
+		THUMBNAIL_BAKED_MOST + 1,
+	)
 
 	// A screen of bakes never leaves the time that releases what they loaded, so a new one does.
 	bake(f, 1, .Mesh, BAKE_MESH)
@@ -407,18 +490,48 @@ a_bake_of_a_node_draws_only_what_is_under_it :: proc(t: ^testing.T) {
 	defer bake_teardown(f)
 	write_scene(t, f, BAKE_PREFAB, BAKE_PREFAB_TEXT + BAKE_MISSING_TEXT)
 
-	handle_thumbnail_message(&f.editor, link.Bake_Thumbnail{id = 1, kind = .Prefab, asset = BAKE_PREFAB, node = 2, width = 64, height = 64})
+	handle_thumbnail_message(
+		&f.editor,
+		link.Bake_Thumbnail {
+			id = 1,
+			kind = .Prefab,
+			asset = BAKE_PREFAB,
+			node = 2,
+			width = 64,
+			height = 64,
+		},
+	)
 	preview_quietly(f, false)
 	// Its one mesh is the one that is not in the cache, so what it draws is not its prefab's other.
 	testing.expect_value(t, f.editor.session.thumbnail.failed, "what it draws could not be loaded")
 
-	handle_thumbnail_message(&f.editor, link.Bake_Thumbnail{id = 2, kind = .Prefab, asset = BAKE_PREFAB, node = 1, width = 64, height = 64})
+	handle_thumbnail_message(
+		&f.editor,
+		link.Bake_Thumbnail {
+			id = 2,
+			kind = .Prefab,
+			asset = BAKE_PREFAB,
+			node = 1,
+			width = 64,
+			height = 64,
+		},
+	)
 	desc, draw := first_drawing(f)
 	testing.expect(t, draw)
 	testing.expect_value(t, len(desc.items), 2)
 	free_all(f.platform.frame_allocator)
 
-	handle_thumbnail_message(&f.editor, link.Bake_Thumbnail{id = 3, kind = .Prefab, asset = BAKE_PREFAB, node = 99, width = 64, height = 64})
+	handle_thumbnail_message(
+		&f.editor,
+		link.Bake_Thumbnail {
+			id = 3,
+			kind = .Prefab,
+			asset = BAKE_PREFAB,
+			node = 99,
+			width = 64,
+			height = 64,
+		},
+	)
 	preview_quietly(f, false)
 	testing.expect_value(t, f.editor.session.thumbnail.failed_id, 3)
 	testing.expect_value(t, f.editor.session.thumbnail.failed, "it draws nothing")
@@ -443,4 +556,3 @@ a_bake_gives_back_what_it_loaded :: proc(t: ^testing.T) {
 	testing.expect(t, !f.editor.session.thumbnail.baked)
 	testing.expect_value(t, f.renderer.residency.count, 0)
 }
-

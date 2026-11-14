@@ -75,9 +75,9 @@ Cost_Key :: struct {
 }
 
 Cost :: struct {
-	total:    u64,
-	max:      u64,
-	calls:    u64,
+	total: u64,
+	max:   u64,
+	calls: u64,
 }
 
 Summary_Cost :: struct {
@@ -135,16 +135,16 @@ Pinned :: struct {
 
 @(private)
 Interval :: struct {
-	frames:                     u32,
-	first_frame, last_frame:    u64,
-	cpu_total, cpu_max:         u64,
-	cpu_worst:                  u64,
-	wait_total, wait_max:       u64,
-	gpu_frames:                 u32,
-	gpu_total, gpu_max:         u64,
-	gpu_worst:                  u64,
-	costs:                      map[Cost_Key]Cost,
-	dropped:                    u32,
+	frames:                  u32,
+	first_frame, last_frame: u64,
+	cpu_total, cpu_max:      u64,
+	cpu_worst:               u64,
+	wait_total, wait_max:    u64,
+	gpu_frames:              u32,
+	gpu_total, gpu_max:      u64,
+	gpu_worst:               u64,
+	costs:                   map[Cost_Key]Cost,
+	dropped:                 u32,
 }
 
 @(private)
@@ -201,7 +201,10 @@ init :: proc() -> bool {
 		generation += 1
 		state.names = make([]Name_Entry, MAX_NAMES)
 		state.slots = make([]u16, 2 * MAX_NAMES)
-		state.names[OVERFLOW_NAME] = {text = "(too many names)", category = .Frame}
+		state.names[OVERFLOW_NAME] = {
+			text     = "(too many names)",
+			category = .Frame,
+		}
 		state.name_count = 2
 		state.pool = make([]Zone, ZONE_POOL)
 		state.gpu_pool = make([]Gpu_Span, GPU_POOL)
@@ -285,7 +288,11 @@ intern :: proc(text: string, category: Category) -> Name {
 		if count == MAX_NAMES {
 			return OVERFLOW_NAME
 		}
-		state.names[count] = {strings.clone(text, virtual.arena_allocator(&state.text)), h, category}
+		state.names[count] = {
+			strings.clone(text, virtual.arena_allocator(&state.text)),
+			h,
+			category,
+		}
 		sync.atomic_store_explicit(&state.name_count, count + 1, .Release)
 		sync.atomic_store_explicit(&state.slots[i], u16(count), .Release)
 		return Name(count)
@@ -431,7 +438,17 @@ close_open :: proc(zones: ^Fiber_Zones, depth: int, end: u64, flags: Zone_Flags)
 		if o.start == 0 || !sync.atomic_load(&state.recording) {
 			return
 		}
-		write({start = o.start, end = end, name = o.name, detail = o.detail, depth = u8(depth), flags = o.flags + flags, fiber = zones.fiber})
+		write(
+			{
+				start = o.start,
+				end = end,
+				name = o.name,
+				detail = o.detail,
+				depth = u8(depth),
+				flags = o.flags + flags,
+				fiber = zones.fiber,
+			},
+		)
 	}
 }
 
@@ -500,7 +517,9 @@ zone_text :: proc(text: string, category: Category) {
 // init_fiber gives a fiber's zones the fiber's index, which links a zone's segments.
 init_fiber :: proc(zones: ^Fiber_Zones, index: int) {
 	when ENABLED {
-		zones^ = {fiber = u8(index + 1)}
+		zones^ = {
+			fiber = u8(index + 1),
+		}
 	}
 }
 
@@ -589,7 +608,12 @@ frame_boundary :: proc() {
 @(private = "file")
 close_frame :: proc(t: u64) {
 	r := &state.frames[state.frame % FRAME_RING]
-	r^ = {number = state.frame, start = state.frame_start, end = t, first = state.pool_written}
+	r^ = {
+		number = state.frame,
+		start  = state.frame_start,
+		end    = t,
+		first  = state.pool_written,
+	}
 	for lane in state.lanes[:sync.atomic_load(&state.lane_count)] {
 		head := sync.atomic_load_explicit(&lane.head, .Acquire)
 		for i in lane.tail ..< head {
@@ -634,7 +658,12 @@ measure :: proc(r: ^Frame_Record) {
 		case .System:
 			add_cost(&state.frame_costs, {kind = .System, name = z.name}, duration, calls)
 		case .Script:
-			add_cost(&state.frame_costs, {kind = .Script, detail = z.detail, name = z.name}, duration - min(children, duration), calls)
+			add_cost(
+				&state.frame_costs,
+				{kind = .Script, detail = z.detail, name = z.name},
+				duration - min(children, duration),
+				calls,
+			)
 		}
 		nested[d] += duration if category == .Script else children
 	}
@@ -702,7 +731,12 @@ add_gpu :: proc(frame: u64, spans: []Gpu_Span, begin, end: u64) {
 		}
 		clear(&state.frame_costs)
 		for s in spans {
-			add_cost(&state.frame_costs, {kind = .Pass, queue = s.queue, name = s.name}, s.end - min(s.start, s.end), 1 if s.detail == 0 else 0)
+			add_cost(
+				&state.frame_costs,
+				{kind = .Pass, queue = s.queue, name = s.name},
+				s.end - min(s.start, s.end),
+				1 if s.detail == 0 else 0,
+			)
 		}
 		fold_costs()
 	}
@@ -781,7 +815,15 @@ take_summary :: proc(allocator: runtime.Allocator) -> (s: Summary) {
 	costs := make([dynamic]Summary_Cost, 0, len(iv.costs), allocator)
 	for key, c in iv.costs {
 		per := gpu_frames if key.kind == .Pass else frames
-		append(&costs, Summary_Cost{key = key, average = f64(c.total) / per, max = c.max, calls = f64(c.calls) / per})
+		append(
+			&costs,
+			Summary_Cost {
+				key = key,
+				average = f64(c.total) / per,
+				max = c.max,
+				calls = f64(c.calls) / per,
+			},
+		)
 	}
 	slice.sort_by(costs[:], proc(a, b: Summary_Cost) -> bool {
 		return a.average > b.average
@@ -794,7 +836,9 @@ take_summary :: proc(allocator: runtime.Allocator) -> (s: Summary) {
 	}
 	costs_map := iv.costs
 	clear(&costs_map)
-	iv^ = {costs = costs_map}
+	iv^ = {
+		costs = costs_map,
+	}
 	return
 }
 

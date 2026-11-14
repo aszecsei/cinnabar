@@ -132,7 +132,10 @@ decision_header :: proc(text: string) -> (header: Decision_Header) {
 		if len(raw) == 0 || raw[0] == '\t' || raw[0] == ' ' {
 			continue
 		}
-		key, has_value, value := strings.partition(strings.trim_space(strip_line_comment(raw)), "=")
+		key, has_value, value := strings.partition(
+			strings.trim_space(strip_line_comment(raw)),
+			"=",
+		)
 		if has_value != "" && strings.trim_space(key) == "blackboard" {
 			v, _ := parse_graph_value(strings.trim_space(value))
 			if v.kind == .Asset && header.blackboard_line == 0 {
@@ -155,7 +158,13 @@ Named_Blackboard :: struct {
 // decision_keys reads the keys of the blackboard that a decision names, as the cook does. The message is the problem at
 // the decision's blackboard line, or "" if the blackboard is good. Without a good blackboard the keys are unreliable, so
 // only its problem is reported, and not the decision's.
-decision_keys :: proc(header: Decision_Header, named: Named_Blackboard) -> (keys: []format.Blackboard_Key_Contents, message: string) {
+decision_keys :: proc(
+	header: Decision_Header,
+	named: Named_Blackboard,
+) -> (
+	keys: []format.Blackboard_Key_Contents,
+	message: string,
+) {
 	if header.blackboard_line == 0 {
 		return
 	}
@@ -193,10 +202,18 @@ Checked_Decision :: struct {
 // decision_check gives the problems of a decision's text that the editor has not saved, as a cook of the file at this
 // path would, with the blackboard that it names read from the index and the content roots, and the decision when it has
 // none. It writes nothing.
-decision_check :: proc(options: Cook_Options, index: ^Index, path, text: string) -> (problems: Problems, checked: Maybe(Checked_Decision)) {
+decision_check :: proc(
+	options: Cook_Options,
+	index: ^Index,
+	path, text: string,
+) -> (
+	problems: Problems,
+	checked: Maybe(Checked_Decision),
+) {
 	header := decision_header(text)
 	named: Named_Blackboard
-	if a, found := index.assets[guid_text(header.blackboard)]; found && header.blackboard_line != 0 {
+	if a, found := index.assets[guid_text(header.blackboard)];
+	   found && header.blackboard_line != 0 {
 		named = {
 			found    = true,
 			is_board = a.kind == .Blackboard,
@@ -205,7 +222,10 @@ decision_check :: proc(options: Cook_Options, index: ^Index, path, text: string)
 		if named.is_board {
 			for r in options.roots {
 				if r.name == a.root {
-					source, _ := os.read_entire_file(fmt.tprintf("%s/%s", r.dir, a.path), context.temp_allocator)
+					source, _ := os.read_entire_file(
+						fmt.tprintf("%s/%s", r.dir, a.path),
+						context.temp_allocator,
+					)
 					named.source = string(source)
 				}
 			}
@@ -216,7 +236,12 @@ decision_check :: proc(options: Cook_Options, index: ^Index, path, text: string)
 		report_error(&problems, path, header.blackboard_line, 0, "%s", message)
 		return
 	}
-	contents, found := decision_parse(text, keys, technique_readers(options), context.temp_allocator)
+	contents, found := decision_parse(
+		text,
+		keys,
+		technique_readers(options),
+		context.temp_allocator,
+	)
 	for p in found {
 		report_error(&problems, path, p.line, 0, "%s", p.message)
 	}
@@ -258,7 +283,12 @@ decision_parse :: proc(
 			continue
 		}
 		if !header {
-			if fields := strings.fields(trimmed); len(fields) == 2 && fields[0] == "decision" && fields[1] == "1" && raw[0] != '\t' && raw[0] != ' ' {
+			if fields := strings.fields(trimmed);
+			   len(fields) == 2 &&
+			   fields[0] == "decision" &&
+			   fields[1] == "1" &&
+			   raw[0] != '\t' &&
+			   raw[0] != ' ' {
 				header = true
 				continue
 			}
@@ -286,14 +316,29 @@ decision_parse :: proc(
 			}
 			ids[id] = len(nodes)
 			current = len(nodes)
-			append(&d.nodes, Decision_Text_Node{id = id, kind = fields[2], line = line, index = len(nodes)})
-			append(&nodes, format.Decision_Node_Contents{id = u32(id), kind = fields[2], condition = format.DECISION_NONE, action = format.DECISION_NONE})
+			append(
+				&d.nodes,
+				Decision_Text_Node{id = id, kind = fields[2], line = line, index = len(nodes)},
+			)
+			append(
+				&nodes,
+				format.Decision_Node_Contents {
+					id = u32(id),
+					kind = fields[2],
+					condition = format.DECISION_NONE,
+					action = format.DECISION_NONE,
+				},
+			)
 			continue
 		}
 		key, has_value, value := strings.partition(trimmed, "=")
 		key, value = strings.trim_space(key), strings.trim_space(value)
 		if has_value == "" || !is_identifier(key) || value == "" {
-			decision_problem(&p, line, "expected `technique = <technique>`, `blackboard = $<guid>`, `<setting> = <value>` or `node <id> <kind>`")
+			decision_problem(
+				&p,
+				line,
+				"expected `technique = <technique>`, `blackboard = $<guid>`, `<setting> = <value>` or `node <id> <kind>`",
+			)
 			continue
 		}
 		switch key {
@@ -313,7 +358,13 @@ decision_parse :: proc(
 				for name in format.DECISION_TECHNIQUE_NAMES {
 					append(&names, name)
 				}
-				decision_problem(&p, line, "%s is not a technique: a decision is %s", value, strings.join(names[:], ", ", context.temp_allocator))
+				decision_problem(
+					&p,
+					line,
+					"%s is not a technique: a decision is %s",
+					value,
+					strings.join(names[:], ", ", context.temp_allocator),
+				)
 			}
 		case "blackboard":
 			v, _ := parse_graph_value(value)
@@ -348,11 +399,22 @@ decision_parse :: proc(
 		technique_names := format.DECISION_TECHNIQUE_NAMES
 		contents.technique = t
 		if readers[t].read == nil {
-			decision_problem(&p, technique_line, "the technique %s has no reader in this cooker yet", technique_names[t])
+			decision_problem(
+				&p,
+				technique_line,
+				"the technique %s has no reader in this cooker yet",
+				technique_names[t],
+			)
 		} else {
 			state_size, data = readers[t].read(&p, &d)
 			if state_size > format.MAX_DECISION_STATE {
-				decision_problem(&p, technique_line, "the decision's state is %d bytes, more than %d", state_size, format.MAX_DECISION_STATE)
+				decision_problem(
+					&p,
+					technique_line,
+					"the decision's state is %d bytes, more than %d",
+					state_size,
+					format.MAX_DECISION_STATE,
+				)
 			}
 		}
 	}
@@ -372,12 +434,18 @@ decision_parse :: proc(
 // node_field reads a line indented under a node: `when = <condition>`, `action = <action>`, `set <key> = <value>`,
 // `position = [x, y]`, which the cook keeps for the editor and does not read, or a field of the technique's.
 @(private = "file")
-node_field :: proc(p: ^Decision_Parser, node: ^Decision_Text_Node, record: ^format.Decision_Node_Contents, text: string, line: int) {
+node_field :: proc(
+	p: ^Decision_Parser,
+	node: ^Decision_Text_Node,
+	record: ^format.Decision_Node_Contents,
+	text: string,
+	line: int,
+) {
 	if strings.has_prefix(text, "set ") || strings.has_prefix(text, "set\t") {
 		if node.set_line == 0 {
 			node.set_line = line
 		}
-		write :=decision_write(p, strings.trim_space(text[len("set"):]), line)
+		write := decision_write(p, strings.trim_space(text[len("set"):]), line)
 		if write == format.DECISION_NONE {
 			return
 		}
@@ -460,9 +528,9 @@ cook_decision :: proc(
 		child, found := by_guid[header.blackboard]
 		if found {
 			named = {
-				found = true,
+				found    = true,
 				is_board = assets[child].kind == .Blackboard,
-				name = assets[child].name,
+				name     = assets[child].name,
 			}
 			if named.is_board {
 				asset_source(pass, child)
@@ -488,7 +556,15 @@ cook_decision :: proc(
 		return .Failed
 	}
 	layout := format.decision_layout()
-	key := hash.fnv64a(transmute([]byte)fmt.tprintf("%s\x00%s\x00%x\x00%s\x00", DECISION_COOK_VERSION, a.name, layout, readers[contents.technique].version))
+	key := hash.fnv64a(
+		transmute([]byte)fmt.tprintf(
+			"%s\x00%s\x00%x\x00%s\x00",
+			DECISION_COOK_VERSION,
+			a.name,
+			layout,
+			readers[contents.technique].version,
+		),
+	)
 	key = hash.fnv64a(source_of(a^), key)
 	guid := a.meta.guid
 	key = hash.fnv64a(guid[:], key)

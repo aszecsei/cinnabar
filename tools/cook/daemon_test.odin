@@ -40,7 +40,10 @@ a_hello_after_its_editor_left_links_nothing :: proc(t: ^testing.T) {
 	waker: servetest.Waker
 	{
 		context.logger = servetest.console_logger(&console)
-		if !testing.expect(t, serve.start(&d.server, "cook: cook link", 0, write_log, servetest.wake, &waker)) {
+		if !testing.expect(
+			t,
+			serve.start(&d.server, "cook: cook link", 0, write_log, servetest.wake, &waker),
+		) {
 			return
 		}
 	}
@@ -60,11 +63,19 @@ a_hello_after_its_editor_left_links_nothing :: proc(t: ^testing.T) {
 	defer serve.release(taken)
 	testing.expect_value(t, len(taken.incoming), 1)
 	net.close(first)
-	testing.expect(t, servetest.wait(&waker), "the daemon did not notice that the first editor left")
+	testing.expect(
+		t,
+		servetest.wait(&waker),
+		"the daemon did not notice that the first editor left",
+	)
 	handle_logged(&d, taken)
 	testing.expect_value(t, serve.linked(&d.server), 0)
 	log_logged(&d, "after the first editor left")
-	testing.expect(t, servetest.heard(&console, "after the first editor left"), "a log line after the editor left did not reach the console")
+	testing.expect(
+		t,
+		servetest.heard(&console, "after the first editor left"),
+		"a log line after the editor left did not reach the console",
+	)
 	testing.expect(t, !servetest.heard(&console, "linked to first editor"))
 
 	second, second_ok := servetest.dial(port)
@@ -121,13 +132,23 @@ a_preview_of_a_decision_or_a_blackboard_gives_the_problems_of_its_text :: proc(t
 	defer index_destroy(&d.index)
 
 	result := preview(&d, {guid = DECISION, text = head + "\tseconds = rest\n"})
-	testing.expectf(t, len(result.problems) == 1 && result.problems[0].line == 5 && result.problems[0].error, "%v", result.problems)
+	testing.expectf(
+		t,
+		len(result.problems) == 1 && result.problems[0].line == 5 && result.problems[0].error,
+		"%v",
+		result.problems,
+	)
 	testing.expect(t, result.error != "")
 	result = preview(&d, {guid = DECISION, text = head + "\tseconds = health\n"})
 	testing.expectf(t, len(result.problems) == 0 && result.error == "", "%v", result)
 
 	result = preview(&d, {guid = GUARD, text = "blackboard 1\nfloat health\nfloat health\n"})
-	testing.expectf(t, len(result.problems) == 1 && result.problems[0].line == 3, "%v", result.problems)
+	testing.expectf(
+		t,
+		len(result.problems) == 1 && result.problems[0].line == 3,
+		"%v",
+		result.problems,
+	)
 	testing.expect(t, result.error != "")
 	result = preview(&d, {guid = GUARD, text = "blackboard 1\nfloat health\n"})
 	testing.expectf(t, len(result.problems) == 0 && result.error == "", "%v", result)
@@ -141,8 +162,18 @@ a_preview_of_a_decision_or_a_blackboard_gives_the_problems_of_its_text :: proc(t
 a_preview_of_a_goap_decision_plans_its_query :: proc(t: ^testing.T) {
 	GUARD :: "0123456789abcdef0123456789abcdef"
 	DECISION :: "00112233445566778899aabbccddeeff"
-	board, _ := strings.replace_all(#load("testdata/decisions/guard.blackboard", string), "\r\n", "\n", context.temp_allocator)
-	text, _ := strings.replace_all(#load("testdata/decisions/goap.decision", string), "\r\n", "\n", context.temp_allocator)
+	board, _ := strings.replace_all(
+		#load("testdata/decisions/guard.blackboard", string),
+		"\r\n",
+		"\n",
+		context.temp_allocator,
+	)
+	text, _ := strings.replace_all(
+		#load("testdata/decisions/goap.decision", string),
+		"\r\n",
+		"\n",
+		context.temp_allocator,
+	)
 	tree := make_tree(
 		t,
 		{
@@ -175,7 +206,10 @@ a_preview_of_a_goap_decision_plans_its_query :: proc(t: ^testing.T) {
 		testing.expect_value(t, len(answer.unmet), 0)
 	}
 	// Already armed and near, it only attacks.
-	result = preview(&d, {guid = DECISION, text = text, plan = {{goal = 1, state = {{"armed", 1}, {"near", 1}}}}})
+	result = preview(
+		&d,
+		{guid = DECISION, text = text, plan = {{goal = 1, state = {{"armed", 1}, {"near", 1}}}}},
+	)
 	if testing.expectf(t, len(result.plan) == 1, "%v", result) {
 		testing.expectf(t, slice.equal(ids(result.plan[0]), []u32{11}), "%v", result.plan[0].steps)
 	}
@@ -191,10 +225,25 @@ a_preview_of_a_goap_decision_plans_its_query :: proc(t: ^testing.T) {
 		testing.expectf(t, slice.equal(answer.unmet, []string{"armed"}), "%v", answer.unmet)
 	}
 	result = preview(&d, {guid = DECISION, text = text, plan = {{goal = 99}}})
-	testing.expectf(t, len(result.plan) == 0 && len(result.problems) == 1 && result.error != "", "%v", result)
-	result = preview(&d, {guid = DECISION, text = text, plan = {{goal = 1, state = {{"health", 1}}}}})
+	testing.expectf(
+		t,
+		len(result.plan) == 0 && len(result.problems) == 1 && result.error != "",
+		"%v",
+		result,
+	)
+	result = preview(
+		&d,
+		{guid = DECISION, text = text, plan = {{goal = 1, state = {{"health", 1}}}}},
+	)
 	testing.expectf(t, len(result.plan) == 0 && len(result.problems) == 1, "%v", result)
 	// A decision with problems has no plan.
-	result = preview(&d, {guid = DECISION, text = strings.concatenate({text, "node 30 bogus\n"}, context.temp_allocator), plan = {{goal = 1}}})
+	result = preview(
+		&d,
+		{
+			guid = DECISION,
+			text = strings.concatenate({text, "node 30 bogus\n"}, context.temp_allocator),
+			plan = {{goal = 1}},
+		},
+	)
 	testing.expectf(t, len(result.plan) == 0 && result.error != "", "%v", result)
 }

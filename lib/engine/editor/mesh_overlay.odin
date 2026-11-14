@@ -79,7 +79,13 @@ clear_mesh_overlay :: proc(e: ^Editor) {
 // mesh_overlay_vertices builds the overlay's triangles, relative to the view, into out: nothing without an active
 // overlay. Widths are in pixels of a frame height pixels tall.
 @(private)
-mesh_overlay_vertices :: proc(e: ^Editor, w: ^ecs.World, view: render.View, height: u32, out: ^[dynamic]Gizmo_Vertex) {
+mesh_overlay_vertices :: proc(
+	e: ^Editor,
+	w: ^ecs.World,
+	view: render.View,
+	height: u32,
+	out: ^[dynamic]Gizmo_Vertex,
+) {
 	o := e.session.mesh_overlay
 	if !o.active {
 		return
@@ -154,7 +160,10 @@ mesh_overlay_vertices :: proc(e: ^Editor, w: ^ecs.World, view: render.View, heig
 				if selected_face || (o.element == .Edges && has_edge(mesh.selected_edges, key)) {
 					color, pixels = ACCENT, SELECTED_EDGE_PIXELS
 				}
-				if hot_face || (o.element == .Edges && mesh.has_hovered_edge && same_edge(mesh.hovered_edge, key)) {
+				if hot_face ||
+				   (o.element == .Edges &&
+						   mesh.has_hovered_edge &&
+						   same_edge(mesh.hovered_edge, key)) {
 					color, pixels = HOT, SELECTED_EDGE_PIXELS
 				}
 				a, d := positions[c], positions[next]
@@ -163,9 +172,20 @@ mesh_overlay_vertices :: proc(e: ^Editor, w: ^ecs.World, view: render.View, heig
 		}
 		// A Cut's or a Draw's points, as larger squares in the highlight.
 		for k in 0 ..< len(mesh.marks) / 3 {
-			p := to_view(origin, pose, {mesh.marks[k * 3], mesh.marks[k * 3 + 1], mesh.marks[k * 3 + 2]})
+			p := to_view(
+				origin,
+				pose,
+				{mesh.marks[k * 3], mesh.marks[k * 3 + 1], mesh.marks[k * 3 + 2]},
+			)
 			h := size(p, forward, pixel, MARK_PIXELS) * 0.5
-			quad(&b, p - right * h - up * h, p + right * h - up * h, p + right * h + up * h, p - right * h + up * h, pack_color(HOT))
+			quad(
+				&b,
+				p - right * h - up * h,
+				p + right * h - up * h,
+				p + right * h + up * h,
+				p - right * h + up * h,
+				pack_color(HOT),
+			)
 		}
 		if o.element == .Vertices {
 			for p, i in positions {
@@ -177,7 +197,14 @@ mesh_overlay_vertices :: proc(e: ^Editor, w: ^ecs.World, view: render.View, heig
 					color = HOT
 				}
 				h := size(p, forward, pixel, VERTEX_PIXELS) * 0.5
-				quad(&b, p - right * h - up * h, p + right * h - up * h, p + right * h + up * h, p - right * h + up * h, pack_color(color))
+				quad(
+					&b,
+					p - right * h - up * h,
+					p + right * h - up * h,
+					p + right * h + up * h,
+					p - right * h + up * h,
+					pack_color(color),
+				)
 			}
 		}
 	}
@@ -189,7 +216,13 @@ mesh_overlay_vertices :: proc(e: ^Editor, w: ^ecs.World, view: render.View, heig
 // grid_vertices draws the grid on its plane: GRID_LINES lines each way from the origin along the plane's two axes,
 // every tenth brighter, faint, as ribbons a pixel wide.
 @(private = "file")
-grid_vertices :: proc(b: ^Gizmo_Builder, o: link.Mesh_Overlay, view: render.View, forward: [3]f32, pixel: f32) {
+grid_vertices :: proc(
+	b: ^Gizmo_Builder,
+	o: link.Mesh_Overlay,
+	view: render.View,
+	forward: [3]f32,
+	pixel: f32,
+) {
 	origin := ecs.position_sub({o.grid_origin}, view.position)
 	axis := int(o.grid_axis) % 3
 	u := [3]f32{}

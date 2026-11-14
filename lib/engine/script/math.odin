@@ -17,12 +17,15 @@ QUATERNION_EQUAL_DOT :: 1 - 1e-6
 @(private)
 register_math :: proc(r: ^Runtime) {
 	define(r, "Quaternion.new", proc(L: ^luau.State) -> c.int {
-		push_quaternion(L, quaternion(
-			x = f32(luau.L_checknumber(L, 1)),
-			y = f32(luau.L_checknumber(L, 2)),
-			z = f32(luau.L_checknumber(L, 3)),
-			w = f32(luau.L_checknumber(L, 4)),
-		))
+		push_quaternion(
+			L,
+			quaternion(
+				x = f32(luau.L_checknumber(L, 1)),
+				y = f32(luau.L_checknumber(L, 2)),
+				z = f32(luau.L_checknumber(L, 3)),
+				w = f32(luau.L_checknumber(L, 4)),
+			),
+		)
 		return 1
 	})
 	define(r, "Quaternion.euler", proc(L: ^luau.State) -> c.int {
@@ -30,7 +33,13 @@ register_math :: proc(r: ^Runtime) {
 		return 1
 	})
 	define(r, "Quaternion.angle_axis", proc(L: ^luau.State) -> c.int {
-		push_quaternion(L, linalg.quaternion_angle_axis_f32(f32(luau.L_checknumber(L, 1)) * math.RAD_PER_DEG, linalg.normalize0(check_vector(L, 2))))
+		push_quaternion(
+			L,
+			linalg.quaternion_angle_axis_f32(
+				f32(luau.L_checknumber(L, 1)) * math.RAD_PER_DEG,
+				linalg.normalize0(check_vector(L, 2)),
+			),
+		)
 		return 1
 	})
 	define(r, "Quaternion.look_rotation", proc(L: ^luau.State) -> c.int {
@@ -39,7 +48,14 @@ register_math :: proc(r: ^Runtime) {
 		return 1
 	})
 	define(r, "Quaternion.slerp", proc(L: ^luau.State) -> c.int {
-		push_quaternion(L, linalg.quaternion_slerp_f32(check_quaternion(L, 1), check_quaternion(L, 2), clamp(f32(luau.L_checknumber(L, 3)), 0, 1)))
+		push_quaternion(
+			L,
+			linalg.quaternion_slerp_f32(
+				check_quaternion(L, 1),
+				check_quaternion(L, 2),
+				clamp(f32(luau.L_checknumber(L, 3)), 0, 1),
+			),
+		)
 		return 1
 	})
 	define(r, "Quaternion.angle", proc(L: ^luau.State) -> c.int {
@@ -70,12 +86,23 @@ register_math :: proc(r: ^Runtime) {
 	})
 	userdata_method(r, .Quaternion, "rotate_towards", quaternion_rotate_towards)
 	userdata_method(r, .Quaternion, "slerp", proc(L: ^luau.State) -> c.int {
-		push_quaternion(L, linalg.quaternion_slerp_f32(check_quaternion(L, 1), check_quaternion(L, 2), clamp(f32(luau.L_checknumber(L, 3)), 0, 1)))
+		push_quaternion(
+			L,
+			linalg.quaternion_slerp_f32(
+				check_quaternion(L, 1),
+				check_quaternion(L, 2),
+				clamp(f32(luau.L_checknumber(L, 3)), 0, 1),
+			),
+		)
 		return 1
 	})
 
 	define(r, "WorldPosition.from_meters", proc(L: ^luau.State) -> c.int {
-		meters := [3]f64{luau.L_checknumber(L, 1), luau.L_checknumber(L, 2), luau.L_checknumber(L, 3)}
+		meters := [3]f64 {
+			luau.L_checknumber(L, 1),
+			luau.L_checknumber(L, 2),
+			luau.L_checknumber(L, 3),
+		}
 		for m in meters {
 			if !(abs(m) < WORLD_LIMIT_METERS) {
 				raise(L, "the position is outside the world")
@@ -147,7 +174,17 @@ quaternion_index :: proc(L: ^luau.State) -> c.int {
 @(private)
 quaternion_tostring :: proc(L: ^luau.State) -> c.int {
 	q := check_quaternion(L, 1)
-	luau.pushodinstring(L, fmt.aprintf("Quaternion(%g, %g, %g, %g)", imag(q), jmag(q), kmag(q), real(q), allocator = frame(runtime_of(L))))
+	luau.pushodinstring(
+		L,
+		fmt.aprintf(
+			"Quaternion(%g, %g, %g, %g)",
+			imag(q),
+			jmag(q),
+			kmag(q),
+			real(q),
+			allocator = frame(runtime_of(L)),
+		),
+	)
 	return 1
 }
 
@@ -185,20 +222,40 @@ position_eq :: proc(L: ^luau.State) -> c.int {
 @(private)
 position_tostring :: proc(L: ^luau.State) -> c.int {
 	m := ecs.position_to_meters(check_position(L, 1))
-	luau.pushodinstring(L, fmt.aprintf("WorldPosition(%.3f, %.3f, %.3f)", m.x, m.y, m.z, allocator = frame(runtime_of(L))))
+	luau.pushodinstring(
+		L,
+		fmt.aprintf(
+			"WorldPosition(%.3f, %.3f, %.3f)",
+			m.x,
+			m.y,
+			m.z,
+			allocator = frame(runtime_of(L)),
+		),
+	)
 	return 1
 }
 
 @(private = "file")
 position_lerp :: proc(L: ^luau.State) -> c.int {
-	push_position(L, ecs.position_lerp(check_position(L, 1), check_position(L, 2), clamp(f32(luau.L_checknumber(L, 3)), 0, 1)))
+	push_position(
+		L,
+		ecs.position_lerp(
+			check_position(L, 1),
+			check_position(L, 2),
+			clamp(f32(luau.L_checknumber(L, 3)), 0, 1),
+		),
+	)
 	return 1
 }
 
 // offset_checked is ecs.position_offset with a script error instead of an assertion for a delta that is not finite
 // or leaves the world.
 @(private = "file")
-offset_checked :: proc(L: ^luau.State, p: ecs.World_Position, delta: [3]f32) -> ecs.World_Position {
+offset_checked :: proc(
+	L: ^luau.State,
+	p: ecs.World_Position,
+	delta: [3]f32,
+) -> ecs.World_Position {
 	for i in 0 ..< 3 {
 		target := f64(p.raw[i]) + f64(delta[i]) * (1 << ecs.POSITION_FRACTION_BITS)
 		if !(abs(target) < f64(ecs.POSITION_LIMIT)) {
@@ -271,8 +328,8 @@ look_rotation :: proc "contextless" (forward, up: [3]f32) -> quaternion128 {
 	x = linalg.normalize(x)
 	y := linalg.cross(z, x)
 	return linalg.normalize(linalg.quaternion_from_matrix3_f32(matrix[3, 3]f32{
-		x.x, y.x, z.x,
-		x.y, y.y, z.y,
-		x.z, y.z, z.z,
-	}))
+			x.x, y.x, z.x,
+			x.y, y.y, z.y,
+			x.z, y.z, z.z,
+		}))
 }

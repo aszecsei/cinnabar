@@ -8,8 +8,18 @@ import format "cinnabar:engine/asset/format"
 // level's largest parent error and its parents' reach, F32_MAX past the mesh's last level.
 @(test)
 mesh_levels_bucket_each_submeshs_meshlets :: proc(t: ^testing.T) {
-	meshlet :: proc(depth: u8, parent_error: f32, parent_center: [3]f32 = {}, parent_radius: f32 = 0) -> format.Meshlet {
-		return {depth = depth, parent_error = parent_error, parent_center = parent_center, parent_radius = parent_radius}
+	meshlet :: proc(
+		depth: u8,
+		parent_error: f32,
+		parent_center: [3]f32 = {},
+		parent_radius: f32 = 0,
+	) -> format.Meshlet {
+		return {
+			depth = depth,
+			parent_error = parent_error,
+			parent_center = parent_center,
+			parent_radius = parent_radius,
+		}
 	}
 	meshlets := []format.Meshlet {
 		// Submesh 0: two levels.
@@ -23,8 +33,14 @@ mesh_levels_bucket_each_submeshs_meshlets :: proc(t: ^testing.T) {
 	}
 	m: Resident_Mesh
 	m.submesh_count = 2
-	m.submeshes[0] = {first_meshlet = 0, meshlet_count = 3}
-	m.submeshes[1] = {first_meshlet = 3, meshlet_count = 3}
+	m.submeshes[0] = {
+		first_meshlet = 0,
+		meshlet_count = 3,
+	}
+	m.submeshes[1] = {
+		first_meshlet = 3,
+		meshlet_count = 3,
+	}
 	mesh_levels(&m, meshlets)
 	testing.expect_value(t, m.level_first[0][0], 0)
 	testing.expect_value(t, m.level_first[0][1], 2)
@@ -44,9 +60,16 @@ mesh_levels_bucket_each_submeshs_meshlets :: proc(t: ^testing.T) {
 	}
 	d: Resident_Mesh
 	d.submesh_count = 1
-	d.submeshes[0] = {first_meshlet = 0, meshlet_count = 12}
+	d.submeshes[0] = {
+		first_meshlet = 0,
+		meshlet_count = 12,
+	}
 	mesh_levels(&d, deep)
-	testing.expect_value(t, d.level_first[0][INSTANCE_LEVEL_BUCKETS - 1], INSTANCE_LEVEL_BUCKETS - 1)
+	testing.expect_value(
+		t,
+		d.level_first[0][INSTANCE_LEVEL_BUCKETS - 1],
+		INSTANCE_LEVEL_BUCKETS - 1,
+	)
 	testing.expect_value(t, d.levels[INSTANCE_LEVEL_BUCKETS - 1][0], INSTANCE_LEVEL_BUCKETS)
 }
 

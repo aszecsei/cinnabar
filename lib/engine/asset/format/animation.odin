@@ -71,7 +71,9 @@ animation_layout :: proc() -> u64 {
 // of the skin's and its keys are in the blob.
 animation_view :: proc(data: []byte) -> (blob: ^Animation_Blob, ok: bool) {
 	header := blob_header(data) or_return
-	if header.kind != .Animation || header.layout != animation_layout() || len(data) < size_of(Animation_Blob) {
+	if header.kind != .Animation ||
+	   header.layout != animation_layout() ||
+	   len(data) < size_of(Animation_Blob) {
 		return
 	}
 	blob = (^Animation_Blob)(raw_data(data))
@@ -80,15 +82,22 @@ animation_view :: proc(data: []byte) -> (blob: ^Animation_Blob, ok: bool) {
 			return nil, false
 		}
 	}
-	if blob.channels.size % size_of(Animation_Channel) != 0 || blob.channels.offset % align_of(Animation_Channel) != 0 ||
-	   blob.times.size % 4 != 0 || blob.times.offset % 4 != 0 || blob.values.size % 4 != 0 || blob.values.offset % 4 != 0 {
+	if blob.channels.size % size_of(Animation_Channel) != 0 ||
+	   blob.channels.offset % align_of(Animation_Channel) != 0 ||
+	   blob.times.size % 4 != 0 ||
+	   blob.times.offset % 4 != 0 ||
+	   blob.values.size % 4 != 0 ||
+	   blob.values.offset % 4 != 0 {
 		return nil, false
 	}
 	times := u64(blob.times.size / 4)
 	values := u64(blob.values.size / 4)
 	for c in animation_channels(data, blob) {
-		if u32(c.joint) >= blob.joint_count || c.path > max(Animation_Path) || c.interpolation > max(Animation_Interpolation) ||
-		   c.key_count == 0 || u64(c.first_key) + u64(c.key_count) > times ||
+		if u32(c.joint) >= blob.joint_count ||
+		   c.path > max(Animation_Path) ||
+		   c.interpolation > max(Animation_Interpolation) ||
+		   c.key_count == 0 ||
+		   u64(c.first_key) + u64(c.key_count) > times ||
 		   u64(c.first_value) + u64(c.key_count) * u64(animation_path_width(c.path)) > values {
 			return nil, false
 		}
@@ -96,7 +105,10 @@ animation_view :: proc(data: []byte) -> (blob: ^Animation_Blob, ok: bool) {
 	return blob, true
 }
 
-animation_channels :: proc "contextless" (data: []byte, blob: ^Animation_Blob) -> []Animation_Channel {
+animation_channels :: proc "contextless" (
+	data: []byte,
+	blob: ^Animation_Blob,
+) -> []Animation_Channel {
 	bytes := blob_bytes(data, blob.channels)
 	return ([^]Animation_Channel)(raw_data(bytes))[:len(bytes) / size_of(Animation_Channel)]
 }
@@ -139,7 +151,13 @@ animation_write :: proc(contents: Animation_Contents, allocator := context.alloc
 	name := append_bytes(&buffer, transmute([]byte)contents.name)
 	source_path := append_bytes(&buffer, transmute([]byte)contents.source_path)
 	blob := Animation_Blob {
-		header = {magic = BLOB_MAGIC, kind = .Animation, layout = animation_layout(), key = contents.key, guid = contents.guid},
+		header = {
+			magic = BLOB_MAGIC,
+			kind = .Animation,
+			layout = animation_layout(),
+			key = contents.key,
+			guid = contents.guid,
+		},
 		skin = contents.skin,
 		joint_count = contents.joint_count,
 		duration = contents.duration,

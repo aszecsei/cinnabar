@@ -77,16 +77,16 @@ Occlusion :: struct {
 // Occlusion_State is one view's occlusion culling between frames, in View_State: the pyramid's levels, made again when the
 // view's size changes, each slot's bit of its last frame and of this one, which alternate, and each cell's bits.
 Occlusion_State :: struct {
-	hzb:        [MAX_HZB_LEVELS]gpu.Texture,
-	hzb_levels: int,
-	hzb_size:   [2]u32,
-	slot_seen:  [2]gpu.Buffer,
-	cell_seen:  gpu.Buffer,
+	hzb:                [MAX_HZB_LEVELS]gpu.Texture,
+	hzb_levels:         int,
+	hzb_size:           [2]u32,
+	slot_seen:          [2]gpu.Buffer,
+	cell_seen:          gpu.Buffer,
 	cell_seen_capacity: u32,
 	// The camera's tally of this frame, its copies, and the last that came back.
-	stats:          gpu.Buffer,
-	stats_ring:     Readback_Ring,
-	last_stats:     Cull_Stats,
+	stats:              gpu.Buffer,
+	stats_ring:         Readback_Ring,
+	last_stats:         Cull_Stats,
 }
 
 // cull_stats is what the frame's own view's camera drew, a frame or two ago (see Cull_Stats).
@@ -117,7 +117,14 @@ add_cull_stats_copy :: proc(f: ^Frame) {
 	if sf == nil || sf.stats == 0 {
 		return
 	}
-	add_readback_copy(f.graph, f.renderer.platform, &f.state.occlusion.stats_ring, sf.stats, CULL_STATS_WORDS * 4, "cull stats")
+	add_readback_copy(
+		f.graph,
+		f.renderer.platform,
+		&f.state.occlusion.stats_ring,
+		sf.stats,
+		CULL_STATS_WORDS * 4,
+		"cull stats",
+	)
 }
 
 // ensure_cull_stats creates the tally and its copies the first time.
@@ -125,20 +132,31 @@ add_cull_stats_copy :: proc(f: ^Frame) {
 ensure_cull_stats :: proc(r: ^Renderer, v: ^View_State) -> bool {
 	o := &v.occlusion
 	if o.stats == {} {
-		o.stats = r.platform.gpu_create_buffer({size = CULL_STATS_WORDS * 4, usage = {.Storage}, label = "cull stats"}, nil)
+		o.stats = r.platform.gpu_create_buffer(
+			{size = CULL_STATS_WORDS * 4, usage = {.Storage}, label = "cull stats"},
+			nil,
+		)
 	}
-	return o.stats != {} && ensure_readback_ring(&o.stats_ring, r.platform, CULL_STATS_WORDS * 4, "cull stats readback")
+	return(
+		o.stats != {} &&
+		ensure_readback_ring(
+			&o.stats_ring,
+			r.platform,
+			CULL_STATS_WORDS * 4,
+			"cull stats readback",
+		) \
+	)
 }
 
 // Occlusion_Frame is one frame's occlusion culling, in Scene_Frame.
 @(private)
 Occlusion_Frame :: struct {
-	constants:     gpu.Upload,
-	late_cull:     gpu.Upload,
-	hzb:           [MAX_HZB_LEVELS]Texture,
-	slot_seen:     Buffer,
+	constants:      gpu.Upload,
+	late_cull:      gpu.Upload,
+	hzb:            [MAX_HZB_LEVELS]Texture,
+	slot_seen:      Buffer,
 	slot_seen_next: Buffer,
-	cell_seen:     Buffer,
+	cell_seen:      Buffer,
 }
 
 @(private)
@@ -170,7 +188,10 @@ occlusion_state_destroy :: proc(o: ^Occlusion_State, platform: ^core.Platform_AP
 occlusion_ready :: proc(f: ^Frame, disabled: bool) -> bool {
 	r := f.renderer
 	o := &f.state.occlusion
-	if disabled || !pipeline_ready(r.platform, &r.scene.occlusion.pipeline) || f.size.x < 2 || f.size.y < 2 {
+	if disabled ||
+	   !pipeline_ready(r.platform, &r.scene.occlusion.pipeline) ||
+	   f.size.x < 2 ||
+	   f.size.y < 2 {
 		return false
 	}
 	platform := r.platform
@@ -182,7 +203,15 @@ occlusion_ready :: proc(f: ^Frame, disabled: bool) -> bool {
 		o.hzb_size, o.hzb_levels = size, 0
 		level_size := size
 		for o.hzb_levels < MAX_HZB_LEVELS {
-			o.hzb[o.hzb_levels] = platform.gpu_create_texture({size = level_size, format = HZB_FORMAT, usage = {.Sampled, .Storage}, label = "depth pyramid"}, nil)
+			o.hzb[o.hzb_levels] = platform.gpu_create_texture(
+				{
+					size = level_size,
+					format = HZB_FORMAT,
+					usage = {.Sampled, .Storage},
+					label = "depth pyramid",
+				},
+				nil,
+			)
 			o.hzb_levels += 1
 			if level_size == {1, 1} {
 				break
@@ -192,14 +221,20 @@ occlusion_ready :: proc(f: ^Frame, disabled: bool) -> bool {
 	}
 	if o.slot_seen[0] == {} {
 		for &b in o.slot_seen {
-			b = platform.gpu_create_buffer({size = MAX_INSTANCES / 8, usage = {.Storage}, label = "seen slots"}, nil)
+			b = platform.gpu_create_buffer(
+				{size = MAX_INSTANCES / 8, usage = {.Storage}, label = "seen slots"},
+				nil,
+			)
 		}
 	}
 	cells := max(r.scene.cell_high, 1)
 	if cells > o.cell_seen_capacity || o.cell_seen == {} {
 		platform.gpu_destroy_buffer(o.cell_seen)
 		o.cell_seen_capacity = min(max(cells, o.cell_seen_capacity * 2, 1024), MAX_INSTANCE_CELLS)
-		o.cell_seen = platform.gpu_create_buffer({size = o.cell_seen_capacity * 32, usage = {.Storage}, label = "seen cells"}, nil)
+		o.cell_seen = platform.gpu_create_buffer(
+			{size = o.cell_seen_capacity * 32, usage = {.Storage}, label = "seen cells"},
+			nil,
+		)
 	}
 	return true
 }
@@ -253,7 +288,12 @@ add_occlusion_passes :: proc(f: ^Frame) {
 	of := &sf.occlusion
 	o := &f.state.occlusion
 	for level in 0 ..< o.hzb_levels {
-		p := add_compute_pass(g, "depth pyramid", run_hzb_level, new_clone(Hzb_Step{f, level}, f.renderer.platform.frame_allocator))
+		p := add_compute_pass(
+			g,
+			"depth pyramid",
+			run_hzb_level,
+			new_clone(Hzb_Step{f, level}, f.renderer.platform.frame_allocator),
+		)
 		read(g, p, level == 0 ? f.depth : of.hzb[level - 1])
 		write(g, p, of.hzb[level])
 	}
@@ -279,9 +319,9 @@ add_occlusion_passes :: proc(f: ^Frame) {
 		write(g, p, sf.stats)
 	}
 	p = add_render_pass(g, "late prepass", proc(ctx: ^Pass_Context) {
-		f := (^Frame)(ctx.data)
-		draw_scene_view(f, ctx.cb, f.scene_frame.late_view, .Prepass, filter = .No_Particles)
-	}, f)
+			f := (^Frame)(ctx.data)
+			draw_scene_view(f, ctx.cb, f.scene_frame.late_view, .Prepass, filter = .No_Particles)
+		}, f)
 	color(g, p, f.normals, .Load)
 	color(g, p, f.velocity, .Load)
 	color(g, p, f.roughness, .Load)
@@ -309,7 +349,8 @@ run_hzb_level :: proc(ctx: ^Pass_Context) {
 	if level == 0 {
 		push.source, push.source_size = gpu.read_index(gpu_texture(g, f.depth)), f.size
 	} else {
-		push.source, push.source_size = gpu.read_index(o.hzb[level - 1]), level_size(o.hzb_size, level - 1)
+		push.source, push.source_size =
+			gpu.read_index(o.hzb[level - 1]), level_size(o.hzb_size, level - 1)
 	}
 	gpu.cmd_set_pipeline(ctx.cb, f.renderer.scene.occlusion.pipeline.pipeline)
 	gpu.cmd_push_constants(ctx.cb, &push)

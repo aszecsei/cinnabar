@@ -54,7 +54,10 @@ LOCAL_TRANSFORM_IDENTITY :: Local_Transform {
 	scale    = format.DEFAULT_SCALE,
 }
 
-#assert(TRANSFORM_ID == format.SCENE_TRANSFORM_ID && LOCAL_TRANSFORM_ID == format.SCENE_LOCAL_TRANSFORM_ID)
+#assert(
+	TRANSFORM_ID == format.SCENE_TRANSFORM_ID &&
+	LOCAL_TRANSFORM_ID == format.SCENE_LOCAL_TRANSFORM_ID,
+)
 
 // register_engine_components registers the components that the world itself uses. Call it from the game's
 // component registration procedure.
@@ -72,7 +75,10 @@ register_engine_components :: proc(r: ^Registry) {
 // it does not shear.
 compose :: proc(parent: Transform, local: Local_Transform) -> Transform {
 	return {
-		position = position_offset(parent.position, linalg.quaternion_mul_vector3(parent.rotation, local.offset * parent.scale)),
+		position = position_offset(
+			parent.position,
+			linalg.quaternion_mul_vector3(parent.rotation, local.offset * parent.scale),
+		),
 		rotation = parent.rotation * local.rotation,
 		scale = parent.scale * local.scale,
 	}
@@ -141,19 +147,20 @@ snapshot_previous :: proc(w: ^World) {
 		}
 	}
 	parallel_for(w, len(copies), 8, proc(w: ^World, data: rawptr, first, count: int) {
-		copies := (^[dynamic]Copy)(data)
-		for c in copies[first:][:count] {
-			a := archetype(w, c.archetype)
-			rows := min(a.capacity, a.count - c.chunk * a.capacity)
-			chunk := chunk_directory(w, c.archetype)[c.chunk]
-			data := chunk_data(w, chunk)
-			current, previous := ([^]Transform)(&data[c.from])[:rows], ([^]Transform)(&data[c.to])[:rows]
-			if !slice.equal(slice.to_bytes(current), slice.to_bytes(previous)) {
-				copy(previous, current)
-				stamp(w, chunk, c.column)
+			copies := (^[dynamic]Copy)(data)
+			for c in copies[first:][:count] {
+				a := archetype(w, c.archetype)
+				rows := min(a.capacity, a.count - c.chunk * a.capacity)
+				chunk := chunk_directory(w, c.archetype)[c.chunk]
+				data := chunk_data(w, chunk)
+				current, previous :=
+					([^]Transform)(&data[c.from])[:rows], ([^]Transform)(&data[c.to])[:rows]
+				if !slice.equal(slice.to_bytes(current), slice.to_bytes(previous)) {
+					copy(previous, current)
+					stamp(w, chunk, c.column)
+				}
 			}
-		}
-	}, &copies)
+		}, &copies)
 }
 
 // propagate writes the Transform of every child whose pose changed, one hierarchy level at a time.
@@ -170,11 +177,17 @@ propagate :: proc(w: ^World) {
 	for depth in 0 ..< MAX_HIERARCHY_DEPTH {
 		first, last := w.levels[depth], w.levels[depth + 1]
 		level := children[first:last]
-		parallel_for(w, len(level), PROPAGATE_BATCH, proc(w: ^World, data: rawptr, first, count: int) {
-			for e in (^[]Entity)(data)[first:][:count] {
-				propagate_one(w, e)
-			}
-		}, &level)
+		parallel_for(
+			w,
+			len(level),
+			PROPAGATE_BATCH,
+			proc(w: ^World, data: rawptr, first, count: int) {
+				for e in (^[]Entity)(data)[first:][:count] {
+					propagate_one(w, e)
+				}
+			},
+			&level,
+		)
 	}
 }
 
@@ -224,7 +237,11 @@ rebuild_hierarchy :: proc(w: ^World) {
 			e := entity_at(w, index, row)^
 			depth := hierarchy_depth(w, e)
 			if depth < 0 {
-				log.errorf("ecs: the hierarchy above entity %x is a cycle or deeper than %d", u64(e), MAX_HIERARCHY_DEPTH)
+				log.errorf(
+					"ecs: the hierarchy above entity %x is a cycle or deeper than %d",
+					u64(e),
+					MAX_HIERARCHY_DEPTH,
+				)
 			}
 			// A child whose parent is not alive has depth 0. It is despawned at the next apply, and until then
 			// propagation leaves it alone.

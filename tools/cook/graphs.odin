@@ -94,28 +94,128 @@ NODE_KINDS := []Node_Kind {
 		properties = {{name = "name", kind = .Parameter}},
 		scope = .Material,
 	},
-	{name = "scalar", label = "Scalar", category = "Inputs", description = "A number.", outputs = {{name = "value", type = .Float, code = "{.value}"}}, properties = {{name = "value", kind = .Number, default = "0"}}},
-	{name = "vector2", label = "Vector 2", category = "Inputs", description = "Two numbers.", outputs = {{name = "value", type = .Float2, code = "{.value}"}}, properties = {{name = "value", kind = .Vector2, default = "[0, 0]"}}},
-	{name = "vector3", label = "Vector 3", category = "Inputs", description = "Three numbers.", outputs = {{name = "value", type = .Float3, code = "{.value}"}}, properties = {{name = "value", kind = .Vector3, default = "[0, 0, 0]"}}},
-	{name = "vector4", label = "Vector 4", category = "Inputs", description = "Four numbers.", outputs = {{name = "value", type = .Float4, code = "{.value}"}}, properties = {{name = "value", kind = .Vector4, default = "[0, 0, 0, 0]"}}},
-	{name = "color", label = "Color", category = "Inputs", description = "A linear color with alpha.", outputs = {{name = "value", type = .Float4, code = "{.value}"}}, properties = {{name = "value", kind = .Color, default = "[1, 1, 1, 1]"}}},
-	{name = "uv", label = "UV", category = "Inputs", description = "A UV set of the mesh.", outputs = {{name = "uv", type = .Float2, code = "inputs.uv{.set}"}}, properties = {{name = "set", kind = .Choice, choices = {"0", "1"}, default = "0"}}},
-	{name = "vertex_color", label = "Vertex Color", category = "Inputs", description = "The mesh's vertex color, or white.", outputs = {{name = "color", type = .Float4, code = "inputs.color"}}},
-	{name = "position", label = "World Position", category = "Inputs", description = "The point's position in meters relative to the render origin, which snaps to a grid of 1024 m, so it stays put while the camera moves. A pattern whose period divides 1024 m has no seam when the origin moves.", outputs = {{name = "position", type = .Float3, code = "world_position(inputs)"}}},
-	{name = "object_position", label = "Object Position", category = "Inputs", description = "The point's position in the mesh's own space, in meters, before its entity's pose, so a pattern moves, turns and scales with the object.", outputs = {{name = "position", type = .Float3, code = "inputs.object_position"}}},
-	{name = "normal", label = "World Normal", category = "Inputs", description = "The mesh's normal in the world, before a normal map.", outputs = {{name = "normal", type = .Float3, code = "inputs.normal"}}},
-	{name = "tangent", label = "World Tangent", category = "Inputs", description = "The mesh's tangent in the world, with the bitangent's sign in w.", outputs = {{name = "tangent", type = .Float4, code = "inputs.tangent"}}},
-	{name = "view", label = "View Direction", category = "Inputs", description = "The direction from the point toward the camera.", outputs = {{name = "view", type = .Float3, code = "inputs.view"}}, stages = {.Pixel}},
-	{name = "time", label = "Time", category = "Inputs", description = "The frame's time in seconds, which wraps every hour. In the vertex offset's previous pose, last frame's.", outputs = {{name = "time", type = .Float, code = "inputs.time"}}},
-	{name = "front_facing", label = "Front Facing", category = "Inputs", description = "1 on the front of a face, and 0 on the back of a two-sided one.", outputs = {{name = "front", type = .Float, code = "(inputs.front_facing ? 1.0 : 0.0)"}}, stages = {.Pixel}},
+	{
+		name = "scalar",
+		label = "Scalar",
+		category = "Inputs",
+		description = "A number.",
+		outputs = {{name = "value", type = .Float, code = "{.value}"}},
+		properties = {{name = "value", kind = .Number, default = "0"}},
+	},
+	{
+		name = "vector2",
+		label = "Vector 2",
+		category = "Inputs",
+		description = "Two numbers.",
+		outputs = {{name = "value", type = .Float2, code = "{.value}"}},
+		properties = {{name = "value", kind = .Vector2, default = "[0, 0]"}},
+	},
+	{
+		name = "vector3",
+		label = "Vector 3",
+		category = "Inputs",
+		description = "Three numbers.",
+		outputs = {{name = "value", type = .Float3, code = "{.value}"}},
+		properties = {{name = "value", kind = .Vector3, default = "[0, 0, 0]"}},
+	},
+	{
+		name = "vector4",
+		label = "Vector 4",
+		category = "Inputs",
+		description = "Four numbers.",
+		outputs = {{name = "value", type = .Float4, code = "{.value}"}},
+		properties = {{name = "value", kind = .Vector4, default = "[0, 0, 0, 0]"}},
+	},
+	{
+		name = "color",
+		label = "Color",
+		category = "Inputs",
+		description = "A linear color with alpha.",
+		outputs = {{name = "value", type = .Float4, code = "{.value}"}},
+		properties = {{name = "value", kind = .Color, default = "[1, 1, 1, 1]"}},
+	},
+	{
+		name = "uv",
+		label = "UV",
+		category = "Inputs",
+		description = "A UV set of the mesh.",
+		outputs = {{name = "uv", type = .Float2, code = "inputs.uv{.set}"}},
+		properties = {{name = "set", kind = .Choice, choices = {"0", "1"}, default = "0"}},
+	},
+	{
+		name = "vertex_color",
+		label = "Vertex Color",
+		category = "Inputs",
+		description = "The mesh's vertex color, or white.",
+		outputs = {{name = "color", type = .Float4, code = "inputs.color"}},
+	},
+	{
+		name = "position",
+		label = "World Position",
+		category = "Inputs",
+		description = "The point's position in meters relative to the render origin, which snaps to a grid of 1024 m, so it stays put while the camera moves. A pattern whose period divides 1024 m has no seam when the origin moves.",
+		outputs = {{name = "position", type = .Float3, code = "world_position(inputs)"}},
+	},
+	{
+		name = "object_position",
+		label = "Object Position",
+		category = "Inputs",
+		description = "The point's position in the mesh's own space, in meters, before its entity's pose, so a pattern moves, turns and scales with the object.",
+		outputs = {{name = "position", type = .Float3, code = "inputs.object_position"}},
+	},
+	{
+		name = "normal",
+		label = "World Normal",
+		category = "Inputs",
+		description = "The mesh's normal in the world, before a normal map.",
+		outputs = {{name = "normal", type = .Float3, code = "inputs.normal"}},
+	},
+	{
+		name = "tangent",
+		label = "World Tangent",
+		category = "Inputs",
+		description = "The mesh's tangent in the world, with the bitangent's sign in w.",
+		outputs = {{name = "tangent", type = .Float4, code = "inputs.tangent"}},
+	},
+	{
+		name = "view",
+		label = "View Direction",
+		category = "Inputs",
+		description = "The direction from the point toward the camera.",
+		outputs = {{name = "view", type = .Float3, code = "inputs.view"}},
+		stages = {.Pixel},
+	},
+	{
+		name = "time",
+		label = "Time",
+		category = "Inputs",
+		description = "The frame's time in seconds, which wraps every hour. In the vertex offset's previous pose, last frame's.",
+		outputs = {{name = "time", type = .Float, code = "inputs.time"}},
+	},
+	{
+		name = "front_facing",
+		label = "Front Facing",
+		category = "Inputs",
+		description = "1 on the front of a face, and 0 on the back of a two-sided one.",
+		outputs = {{name = "front", type = .Float, code = "(inputs.front_facing ? 1.0 : 0.0)"}},
+		stages = {.Pixel},
+	},
 	{
 		name = "texture_sample",
 		label = "Texture Sample",
 		category = "Textures",
 		description = "Samples a texture parameter.",
-		inputs = {{name = "texture", type = .Texture}, {name = "uv", type = .Float2, code = "inputs.uv0", default_label = "UV0"}},
+		inputs = {
+			{name = "texture", type = .Texture},
+			{name = "uv", type = .Float2, code = "inputs.uv0", default_label = "UV0"},
+		},
 		outputs = {
-			{name = "rgba", type = .Float4, code = "cn_sample({texture}, {uv})", vertex_code = "cn_sample_level({texture}, {uv}, 0)"},
+			{
+				name = "rgba",
+				type = .Float4,
+				code = "cn_sample({texture}, {uv})",
+				vertex_code = "cn_sample_level({texture}, {uv}, 0)",
+			},
 			{name = "rgb", type = .Float3, code = "{=rgba}.rgb"},
 			{name = "r", type = .Float, code = "{=rgba}.r"},
 			{name = "g", type = .Float, code = "{=rgba}.g"},
@@ -128,8 +228,18 @@ NODE_KINDS := []Node_Kind {
 		label = "Normal Map",
 		category = "Textures",
 		description = "Samples a two-channel normal map, and gives the tangent-space normal.",
-		inputs = {{name = "texture", type = .Texture}, {name = "uv", type = .Float2, code = "inputs.uv0", default_label = "UV0"}},
-		outputs = {{name = "normal", type = .Float3, code = "cn_normal_map({texture}, {uv})", vertex_code = "cn_normal_map_level({texture}, {uv}, 0)"}},
+		inputs = {
+			{name = "texture", type = .Texture},
+			{name = "uv", type = .Float2, code = "inputs.uv0", default_label = "UV0"},
+		},
+		outputs = {
+			{
+				name = "normal",
+				type = .Float3,
+				code = "cn_normal_map({texture}, {uv})",
+				vertex_code = "cn_normal_map_level({texture}, {uv}, 0)",
+			},
+		},
 	},
 	{
 		name = "parallax_occlusion",
@@ -143,7 +253,11 @@ NODE_KINDS := []Node_Kind {
 			{name = "steps", type = .Float, default = {16, 0, 0, 0}},
 		},
 		outputs = {
-			{name = "result", type = .Float3, code = "cn_parallax({height}, {uv}, {scale}, {steps}, inputs)"},
+			{
+				name = "result",
+				type = .Float3,
+				code = "cn_parallax({height}, {uv}, {scale}, {steps}, inputs)",
+			},
 			{name = "uv", type = .Float2, code = "{=result}.xy"},
 			{name = "height", type = .Float, code = "{=result}.z"},
 		},
@@ -170,7 +284,10 @@ NODE_KINDS := []Node_Kind {
 		label = "Multiply",
 		category = "Math",
 		description = "a × b.",
-		inputs = {{name = "a", type = .Any, default = {1, 1, 1, 1}}, {name = "b", type = .Any, default = {1, 1, 1, 1}}},
+		inputs = {
+			{name = "a", type = .Any, default = {1, 1, 1, 1}},
+			{name = "b", type = .Any, default = {1, 1, 1, 1}},
+		},
 		outputs = {{name = "out", type = .Any, code = "{a} * {b}"}},
 	},
 	{
@@ -178,7 +295,10 @@ NODE_KINDS := []Node_Kind {
 		label = "Divide",
 		category = "Math",
 		description = "a ÷ b.",
-		inputs = {{name = "a", type = .Any, default = {1, 1, 1, 1}}, {name = "b", type = .Any, default = {1, 1, 1, 1}}},
+		inputs = {
+			{name = "a", type = .Any, default = {1, 1, 1, 1}},
+			{name = "b", type = .Any, default = {1, 1, 1, 1}},
+		},
 		outputs = {{name = "out", type = .Any, code = "{a} / {b}"}},
 	},
 	{
@@ -202,7 +322,10 @@ NODE_KINDS := []Node_Kind {
 		label = "Power",
 		category = "Math",
 		description = "a to the power b.",
-		inputs = {{name = "a", type = .Any, default = {1, 1, 1, 1}}, {name = "b", type = .Any, default = {2, 2, 2, 2}}},
+		inputs = {
+			{name = "a", type = .Any, default = {1, 1, 1, 1}},
+			{name = "b", type = .Any, default = {2, 2, 2, 2}},
+		},
 		outputs = {{name = "out", type = .Any, code = "pow({a}, {b})"}},
 	},
 	{
@@ -210,7 +333,10 @@ NODE_KINDS := []Node_Kind {
 		label = "Step",
 		category = "Math",
 		description = "1 where b ≥ a, and 0 elsewhere.",
-		inputs = {{name = "a", type = .Any, default = {0.5, 0.5, 0.5, 0.5}}, {name = "b", type = .Any}},
+		inputs = {
+			{name = "a", type = .Any, default = {0.5, 0.5, 0.5, 0.5}},
+			{name = "b", type = .Any},
+		},
 		outputs = {{name = "out", type = .Any, code = "step({a}, {b})"}},
 	},
 	{
@@ -218,7 +344,11 @@ NODE_KINDS := []Node_Kind {
 		label = "Lerp",
 		category = "Math",
 		description = "From a at t = 0 to b at t = 1.",
-		inputs = {{name = "a", type = .Any}, {name = "b", type = .Any, default = {1, 1, 1, 1}}, {name = "t", type = .Any, default = {0.5, 0.5, 0.5, 0.5}}},
+		inputs = {
+			{name = "a", type = .Any},
+			{name = "b", type = .Any, default = {1, 1, 1, 1}},
+			{name = "t", type = .Any, default = {0.5, 0.5, 0.5, 0.5}},
+		},
 		outputs = {{name = "out", type = .Any, code = "lerp({a}, {b}, {t})"}},
 	},
 	{
@@ -226,7 +356,11 @@ NODE_KINDS := []Node_Kind {
 		label = "Clamp",
 		category = "Math",
 		description = "x, kept between min and max.",
-		inputs = {{name = "x", type = .Any}, {name = "min", type = .Any}, {name = "max", type = .Any, default = {1, 1, 1, 1}}},
+		inputs = {
+			{name = "x", type = .Any},
+			{name = "min", type = .Any},
+			{name = "max", type = .Any, default = {1, 1, 1, 1}},
+		},
 		outputs = {{name = "out", type = .Any, code = "clamp({x}, {min}, {max})"}},
 	},
 	{
@@ -234,20 +368,101 @@ NODE_KINDS := []Node_Kind {
 		label = "Smoothstep",
 		category = "Math",
 		description = "0 below min, 1 above max, and a smooth curve between.",
-		inputs = {{name = "min", type = .Any}, {name = "max", type = .Any, default = {1, 1, 1, 1}}, {name = "x", type = .Any}},
+		inputs = {
+			{name = "min", type = .Any},
+			{name = "max", type = .Any, default = {1, 1, 1, 1}},
+			{name = "x", type = .Any},
+		},
 		outputs = {{name = "out", type = .Any, code = "smoothstep({min}, {max}, {x})"}},
 	},
-	{name = "saturate", label = "Saturate", category = "Math", description = "x, kept between 0 and 1.", inputs = {{name = "x", type = .Any}}, outputs = {{name = "out", type = .Any, code = "saturate({x})"}}},
-	{name = "one_minus", label = "One Minus", category = "Math", description = "1 - x.", inputs = {{name = "x", type = .Any}}, outputs = {{name = "out", type = .Any, code = "1 - {x}"}}},
-	{name = "negate", label = "Negate", category = "Math", description = "-x.", inputs = {{name = "x", type = .Any}}, outputs = {{name = "out", type = .Any, code = "-{x}"}}},
-	{name = "abs", label = "Abs", category = "Math", description = "The absolute value of x.", inputs = {{name = "x", type = .Any}}, outputs = {{name = "out", type = .Any, code = "abs({x})"}}},
-	{name = "sqrt", label = "Square Root", category = "Math", description = "The square root of x.", inputs = {{name = "x", type = .Any}}, outputs = {{name = "out", type = .Any, code = "sqrt({x})"}}},
-	{name = "floor", label = "Floor", category = "Math", description = "x, rounded down.", inputs = {{name = "x", type = .Any}}, outputs = {{name = "out", type = .Any, code = "floor({x})"}}},
-	{name = "ceil", label = "Ceil", category = "Math", description = "x, rounded up.", inputs = {{name = "x", type = .Any}}, outputs = {{name = "out", type = .Any, code = "ceil({x})"}}},
-	{name = "frac", label = "Frac", category = "Math", description = "The part of x after the point.", inputs = {{name = "x", type = .Any}}, outputs = {{name = "out", type = .Any, code = "frac({x})"}}},
-	{name = "sin", label = "Sin", category = "Math", description = "The sine of x, in radians.", inputs = {{name = "x", type = .Any}}, outputs = {{name = "out", type = .Any, code = "sin({x})"}}},
-	{name = "cos", label = "Cos", category = "Math", description = "The cosine of x, in radians.", inputs = {{name = "x", type = .Any}}, outputs = {{name = "out", type = .Any, code = "cos({x})"}}},
-	{name = "normalize", label = "Normalize", category = "Math", description = "x, scaled to a length of 1.", inputs = {{name = "x", type = .Any}}, outputs = {{name = "out", type = .Any, code = "normalize({x})"}}},
+	{
+		name = "saturate",
+		label = "Saturate",
+		category = "Math",
+		description = "x, kept between 0 and 1.",
+		inputs = {{name = "x", type = .Any}},
+		outputs = {{name = "out", type = .Any, code = "saturate({x})"}},
+	},
+	{
+		name = "one_minus",
+		label = "One Minus",
+		category = "Math",
+		description = "1 - x.",
+		inputs = {{name = "x", type = .Any}},
+		outputs = {{name = "out", type = .Any, code = "1 - {x}"}},
+	},
+	{
+		name = "negate",
+		label = "Negate",
+		category = "Math",
+		description = "-x.",
+		inputs = {{name = "x", type = .Any}},
+		outputs = {{name = "out", type = .Any, code = "-{x}"}},
+	},
+	{
+		name = "abs",
+		label = "Abs",
+		category = "Math",
+		description = "The absolute value of x.",
+		inputs = {{name = "x", type = .Any}},
+		outputs = {{name = "out", type = .Any, code = "abs({x})"}},
+	},
+	{
+		name = "sqrt",
+		label = "Square Root",
+		category = "Math",
+		description = "The square root of x.",
+		inputs = {{name = "x", type = .Any}},
+		outputs = {{name = "out", type = .Any, code = "sqrt({x})"}},
+	},
+	{
+		name = "floor",
+		label = "Floor",
+		category = "Math",
+		description = "x, rounded down.",
+		inputs = {{name = "x", type = .Any}},
+		outputs = {{name = "out", type = .Any, code = "floor({x})"}},
+	},
+	{
+		name = "ceil",
+		label = "Ceil",
+		category = "Math",
+		description = "x, rounded up.",
+		inputs = {{name = "x", type = .Any}},
+		outputs = {{name = "out", type = .Any, code = "ceil({x})"}},
+	},
+	{
+		name = "frac",
+		label = "Frac",
+		category = "Math",
+		description = "The part of x after the point.",
+		inputs = {{name = "x", type = .Any}},
+		outputs = {{name = "out", type = .Any, code = "frac({x})"}},
+	},
+	{
+		name = "sin",
+		label = "Sin",
+		category = "Math",
+		description = "The sine of x, in radians.",
+		inputs = {{name = "x", type = .Any}},
+		outputs = {{name = "out", type = .Any, code = "sin({x})"}},
+	},
+	{
+		name = "cos",
+		label = "Cos",
+		category = "Math",
+		description = "The cosine of x, in radians.",
+		inputs = {{name = "x", type = .Any}},
+		outputs = {{name = "out", type = .Any, code = "cos({x})"}},
+	},
+	{
+		name = "normalize",
+		label = "Normalize",
+		category = "Math",
+		description = "x, scaled to a length of 1.",
+		inputs = {{name = "x", type = .Any}},
+		outputs = {{name = "out", type = .Any, code = "normalize({x})"}},
+	},
 	{
 		name = "dot",
 		label = "Dot",
@@ -264,7 +479,14 @@ NODE_KINDS := []Node_Kind {
 		inputs = {{name = "a", type = .Float3}, {name = "b", type = .Float3}},
 		outputs = {{name = "out", type = .Float3, code = "cross({a}, {b})"}},
 	},
-	{name = "length", label = "Length", category = "Vector", description = "The length of x.", inputs = {{name = "x", type = .Any}}, outputs = {{name = "out", type = .Float, code = "length({x})"}}},
+	{
+		name = "length",
+		label = "Length",
+		category = "Vector",
+		description = "The length of x.",
+		inputs = {{name = "x", type = .Any}},
+		outputs = {{name = "out", type = .Float, code = "length({x})"}},
+	},
 	{
 		name = "distance",
 		label = "Distance",
@@ -279,14 +501,24 @@ NODE_KINDS := []Node_Kind {
 		category = "Vector",
 		description = "The components of x. Those that x does not have are 0.",
 		inputs = {{name = "x", type = .Float4}},
-		outputs = {{name = "x", type = .Float, code = "{x}.x"}, {name = "y", type = .Float, code = "{x}.y"}, {name = "z", type = .Float, code = "{x}.z"}, {name = "w", type = .Float, code = "{x}.w"}},
+		outputs = {
+			{name = "x", type = .Float, code = "{x}.x"},
+			{name = "y", type = .Float, code = "{x}.y"},
+			{name = "z", type = .Float, code = "{x}.z"},
+			{name = "w", type = .Float, code = "{x}.w"},
+		},
 	},
 	{
 		name = "combine",
 		label = "Combine",
 		category = "Vector",
 		description = "A vector of the components.",
-		inputs = {{name = "x", type = .Float}, {name = "y", type = .Float}, {name = "z", type = .Float}, {name = "w", type = .Float}},
+		inputs = {
+			{name = "x", type = .Float},
+			{name = "y", type = .Float},
+			{name = "z", type = .Float},
+			{name = "w", type = .Float},
+		},
 		outputs = {
 			{name = "xy", type = .Float2, code = "float2({x}, {y})"},
 			{name = "xyz", type = .Float3, code = "float3({x}, {y}, {z})"},
@@ -298,8 +530,22 @@ NODE_KINDS := []Node_Kind {
 		label = "Fresnel",
 		category = "Vector",
 		description = "1 where the surface is seen edge on, and 0 where it faces the camera, with a falloff.",
-		inputs = {{name = "exponent", type = .Float, default = {5, 0, 0, 0}}, {name = "normal", type = .Float3, code = "inputs.normal", default_label = "World normal"}},
-		outputs = {{name = "out", type = .Float, code = "pow(1 - saturate(dot(normalize({normal}), inputs.view)), {exponent})"}},
+		inputs = {
+			{name = "exponent", type = .Float, default = {5, 0, 0, 0}},
+			{
+				name = "normal",
+				type = .Float3,
+				code = "inputs.normal",
+				default_label = "World normal",
+			},
+		},
+		outputs = {
+			{
+				name = "out",
+				type = .Float,
+				code = "pow(1 - saturate(dot(normalize({normal}), inputs.view)), {exponent})",
+			},
+		},
 		stages = {.Pixel},
 	},
 	{
@@ -307,7 +553,10 @@ NODE_KINDS := []Node_Kind {
 		label = "Emission",
 		category = "Vector",
 		description = "A color at a brightness in stops: color × 2^ev, which is the radiance that a shading model's emission takes, in the scene's linear units, so a surface at 0 EV is as bright as a white surface in light of 1.",
-		inputs = {{name = "color", type = .Float3, default = {1, 1, 1, 1}}, {name = "ev", type = .Float, default = {0, 0, 0, 0}}},
+		inputs = {
+			{name = "color", type = .Float3, default = {1, 1, 1, 1}},
+			{name = "ev", type = .Float, default = {0, 0, 0, 0}},
+		},
 		outputs = {{name = "out", type = .Float3, code = "{color} * exp2({ev})"}},
 	},
 	{
@@ -325,9 +574,17 @@ NODE_KINDS := []Node_Kind {
 		label = "Custom HLSL",
 		category = "Advanced",
 		description = "HLSL of a, b, c and d, which are float4, and inputs, the Material_Inputs: an expression, or a function's body that returns the value.",
-		inputs = {{name = "a", type = .Float4}, {name = "b", type = .Float4}, {name = "c", type = .Float4}, {name = "d", type = .Float4}},
+		inputs = {
+			{name = "a", type = .Float4},
+			{name = "b", type = .Float4},
+			{name = "c", type = .Float4},
+			{name = "d", type = .Float4},
+		},
 		outputs = {{name = "out", type = .Any}},
-		properties = {{name = "type", kind = .Choice, choices = FLOATS, default = "float3"}, {name = "code", kind = .Code, default = "\"a.rgb\""}},
+		properties = {
+			{name = "type", kind = .Choice, choices = FLOATS, default = "float3"},
+			{name = "code", kind = .Code, default = "\"a.rgb\""},
+		},
 	},
 	{
 		name = "function",
@@ -345,7 +602,12 @@ NODE_KINDS := []Node_Kind {
 		outputs = {{name = "value", type = .Any}},
 		properties = {
 			{name = "name", kind = .Text, default = "\"input\""},
-			{name = "type", kind = .Choice, choices = {"float", "float2", "float3", "float4", "texture"}, default = "float3"},
+			{
+				name = "type",
+				kind = .Choice,
+				choices = {"float", "float2", "float3", "float4", "texture"},
+				default = "float3",
+			},
 			{name = "default", kind = .Vector4, default = "[0, 0, 0, 0]"},
 		},
 		scope = .Function,
@@ -356,7 +618,10 @@ NODE_KINDS := []Node_Kind {
 		category = "Function",
 		description = "An output of the material function.",
 		inputs = {{name = "value", type = .Any}},
-		properties = {{name = "name", kind = .Text, default = "\"output\""}, {name = "type", kind = .Choice, choices = FLOATS, default = "float3"}},
+		properties = {
+			{name = "name", kind = .Text, default = "\"output\""},
+			{name = "type", kind = .Choice, choices = FLOATS, default = "float3"},
+		},
 		scope = .Function,
 	},
 }
@@ -375,7 +640,12 @@ node_infos :: proc() -> []cook_link.Node_Info {
 	pins :: proc(list: []Node_Pin) -> []cook_link.Node_Pin {
 		result := make([]cook_link.Node_Pin, len(list), context.temp_allocator)
 		for p, i in list {
-			result[i] = {p.name, p.type, {f32(p.default.x), f32(p.default.y), f32(p.default.z), f32(p.default.w)}, p.default_label}
+			result[i] = {
+				p.name,
+				p.type,
+				{f32(p.default.x), f32(p.default.y), f32(p.default.z), f32(p.default.w)},
+				p.default_label,
+			}
 		}
 		return result
 	}
@@ -385,7 +655,17 @@ node_infos :: proc() -> []cook_link.Node_Info {
 		for p, j in k.properties {
 			properties[j] = {p.name, p.kind, p.choices, p.default}
 		}
-		infos[i] = {k.name, k.label, k.category, k.description, pins(k.inputs), pins(k.outputs), properties, k.pins_from, k.scope}
+		infos[i] = {
+			k.name,
+			k.label,
+			k.category,
+			k.description,
+			pins(k.inputs),
+			pins(k.outputs),
+			properties,
+			k.pins_from,
+			k.scope,
+		}
 	}
 	return infos
 }
@@ -524,7 +804,10 @@ is_identifier :: proc(name: string) -> bool {
 		return false
 	}
 	for c in transmute([]byte)name {
-		if !(c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) {
+		if !(c == '_' ||
+			   (c >= 'a' && c <= 'z') ||
+			   (c >= 'A' && c <= 'Z') ||
+			   (c >= '0' && c <= '9')) {
 			return false
 		}
 	}
@@ -532,7 +815,16 @@ is_identifier :: proc(name: string) -> bool {
 }
 
 // graph_node_start reads a node's first line, `node <id> <kind>`, and adds the node.
-graph_node_start :: proc(g: ^Graph, rest: string, line: int, path: string, problems: ^Problems) -> (node: ^Graph_Node, ok: bool) {
+graph_node_start :: proc(
+	g: ^Graph,
+	rest: string,
+	line: int,
+	path: string,
+	problems: ^Problems,
+) -> (
+	node: ^Graph_Node,
+	ok: bool,
+) {
 	if g.nodes == nil {
 		g.nodes = make([dynamic]Graph_Node, context.temp_allocator)
 		g.ids = make(map[int]int, context.temp_allocator)
@@ -553,13 +845,27 @@ graph_node_start :: proc(g: ^Graph, rest: string, line: int, path: string, probl
 		return
 	}
 	g.ids[id] = len(g.nodes)
-	append(&g.nodes, Graph_Node{id = id, kind = kind, line = line, fields = make([dynamic]Graph_Field, context.temp_allocator)})
+	append(
+		&g.nodes,
+		Graph_Node {
+			id = id,
+			kind = kind,
+			line = line,
+			fields = make([dynamic]Graph_Field, context.temp_allocator),
+		},
+	)
 	return &g.nodes[len(g.nodes) - 1], true
 }
 
 // graph_node_field reads a line of a node's block, `<name> = <value>`. A field is an input, a property or the node's
 // position in the editor, which the cooker does not read; graph_check checks the names.
-graph_node_field :: proc(node: ^Graph_Node, text: string, line: int, path: string, problems: ^Problems) -> bool {
+graph_node_field :: proc(
+	node: ^Graph_Node,
+	text: string,
+	line: int,
+	path: string,
+	problems: ^Problems,
+) -> bool {
 	key, _, value := strings.partition(text, "=")
 	key, value = strings.trim_space(key), strings.trim_space(value)
 	if !is_identifier(key) {
@@ -703,7 +1009,13 @@ parse_function :: proc(a: Asset_Source, index: int, problems: ^Problems) -> (dec
 	}
 	lines, _, _, _ := decl_lines(string(source_of(a)))
 	if len(lines) == 0 || lines[0].text != "material_function 1" {
-		report_error(problems, a.path, 1, 0, "a material function starts with `material_function 1`")
+		report_error(
+			problems,
+			a.path,
+			1,
+			0,
+			"a material function starts with `material_function 1`",
+		)
 		decl.ok = false
 		return
 	}
@@ -721,7 +1033,14 @@ parse_function :: proc(a: Asset_Source, index: int, problems: ^Problems) -> (dec
 			node = added if added_ok else nil
 			decl.ok &&= added_ok
 		case:
-			report_error(problems, a.path, l.number, 0, "a material function has only nodes, not %q", word)
+			report_error(
+				problems,
+				a.path,
+				l.number,
+				0,
+				"a material function has only nodes, not %q",
+				word,
+			)
 			decl.ok = false
 		}
 	}
@@ -734,13 +1053,28 @@ parse_function :: proc(a: Asset_Source, index: int, problems: ^Problems) -> (dec
 		width := type_width(property(&n, "type").text)
 		list := &decl.inputs if n.kind.name == "function_input" else &decl.outputs
 		if !is_identifier(name) {
-			report_error(problems, a.path, n.line, 0, "%q is not a name for a function's input or output", name)
+			report_error(
+				problems,
+				a.path,
+				n.line,
+				0,
+				"%q is not a name for a function's input or output",
+				name,
+			)
 			decl.ok = false
 			continue
 		}
 		for p in list {
 			if p.name == name {
-				report_error(problems, a.path, n.line, 0, "the function has two %ss named %s", n.kind.name == "function_input" ? "input" : "output", name)
+				report_error(
+					problems,
+					a.path,
+					n.line,
+					0,
+					"the function has two %ss named %s",
+					n.kind.name == "function_input" ? "input" : "output",
+					name,
+				)
 				decl.ok = false
 			}
 		}
@@ -769,7 +1103,15 @@ graph_check :: proc(
 	for &n in g.nodes {
 		k := n.kind
 		if k.scope != .Both && k.scope != scope {
-			report_error(problems, path, n.line, 0, "a %s node is only in a %s", k.name, k.scope == .Material ? "material" : "material function")
+			report_error(
+				problems,
+				path,
+				n.line,
+				0,
+				"a %s node is only in a %s",
+				k.name,
+				k.scope == .Material ? "material" : "material function",
+			)
 			ok = false
 			continue
 		}
@@ -785,7 +1127,15 @@ graph_check :: proc(
 			}
 			if f.value.kind == .Link {
 				if _, linked := g.ids[f.value.node]; !linked {
-					report_error(problems, path, f.line, 0, "%s links to node %d, which the graph does not have", f.name, f.value.node)
+					report_error(
+						problems,
+						path,
+						f.line,
+						0,
+						"%s links to node %d, which the graph does not have",
+						f.name,
+						f.value.node,
+					)
 					ok = false
 				}
 			}
@@ -798,28 +1148,62 @@ graph_check :: proc(
 			}
 			if _, is_input := find_pin(k.inputs, f.name); is_input || k.pins_from != .Kind {
 				if f.value.kind != .Link && f.value.kind != .Numbers {
-					report_error(problems, path, f.line, 0, "the input %s takes a link or numbers", f.name)
+					report_error(
+						problems,
+						path,
+						f.line,
+						0,
+						"the input %s takes a link or numbers",
+						f.name,
+					)
 					ok = false
 				}
 				continue
 			}
-			report_error(problems, path, f.line, 0, "a %s node has no input or property named %s", k.name, f.name)
+			report_error(
+				problems,
+				path,
+				f.line,
+				0,
+				"a %s node has no input or property named %s",
+				k.name,
+				f.name,
+			)
 			ok = false
 		}
 	}
 	if scope == .Material && outputs != 1 {
-		report_error(problems, path, 0, 0, "a material's graph has one output node, not %d", outputs)
+		report_error(
+			problems,
+			path,
+			0,
+			0,
+			"a material's graph has one output node, not %d",
+			outputs,
+		)
 		ok = false
 	}
 	if vertex_outputs > 1 {
-		report_error(problems, path, 0, 0, "a material's graph has at most one vertex_output node, not %d", vertex_outputs)
+		report_error(
+			problems,
+			path,
+			0,
+			0,
+			"a material's graph has at most one vertex_output node, not %d",
+			vertex_outputs,
+		)
 		ok = false
 	}
 	return ok
 }
 
 @(private = "file")
-check_property :: proc(p: Node_Property, v: Graph_Value, params: []Param_Decl, switches: []Switch_Decl) -> string {
+check_property :: proc(
+	p: Node_Property,
+	v: Graph_Value,
+	params: []Param_Decl,
+	switches: []Switch_Decl,
+) -> string {
 	want_numbers := 0
 	switch p.kind {
 	case .Number:
@@ -836,7 +1220,11 @@ check_property :: proc(p: Node_Property, v: Graph_Value, params: []Param_Decl, s
 		}
 	case .Choice:
 		if (v.kind != .Word && v.kind != .Numbers) || !slice.contains(p.choices, v.text) {
-			return fmt.tprintf("%s is %s", p.name, strings.join(p.choices, " or ", context.temp_allocator))
+			return fmt.tprintf(
+				"%s is %s",
+				p.name,
+				strings.join(p.choices, " or ", context.temp_allocator),
+			)
 		}
 	case .Parameter:
 		if v.kind != .Text {
@@ -907,14 +1295,24 @@ Graph_Body :: struct {
 // generate_evaluate writes the evaluate of a material's graph for one combination of switches, and the functions that
 // it needs before it, into globals and body; and displace from its vertex_output node, if it has one, after the
 // functions that it needs, written again for the vertex stage (see docs/rendering/materials.md#vertex-displacement).
-generate_evaluate :: proc(gen: ^Generator, g: ^Graph, path: string) -> (body: string, displace: string) {
+generate_evaluate :: proc(
+	gen: ^Generator,
+	g: ^Graph,
+	path: string,
+) -> (
+	body: string,
+	displace: string,
+) {
 	gen.ok = true
 	gen.stage = .Pixel
 	gen.globals = strings.builder_make(context.temp_allocator)
 	gen.written = make(map[format.Guid]string, context.temp_allocator)
 	gen.writing = make([dynamic]format.Guid, context.temp_allocator)
 	gb := new_body(gen, g, path, "", nil)
-	strings.write_string(&gb.b, "Surface evaluate(Material_Inputs inputs) {\n\tSurface s = default_surface();\n")
+	strings.write_string(
+		&gb.b,
+		"Surface evaluate(Material_Inputs inputs) {\n\tSurface s = default_surface();\n",
+	)
 	for &n, i in g.nodes {
 		if n.kind.name == "output" {
 			visit(gb, i)
@@ -934,14 +1332,22 @@ generate_evaluate :: proc(gen: ^Generator, g: ^Graph, path: string) -> (body: st
 	gen.stage = .Vertex
 	gen.written = make(map[format.Guid]string, context.temp_allocator)
 	vb := new_body(gen, g, path, "v", nil)
-	strings.write_string(&vb.b, "float3 displace(Vertex_Inputs v) {\n\tMaterial_Inputs inputs = vertex_material_inputs(v);\n")
+	strings.write_string(
+		&vb.b,
+		"float3 displace(Vertex_Inputs v) {\n\tMaterial_Inputs inputs = vertex_material_inputs(v);\n",
+	)
 	visit(vb, vertex_output)
 	strings.write_string(&vb.b, "}\n")
 	return body, strings.to_string(vb.b)
 }
 
 @(private = "file")
-new_body :: proc(gen: ^Generator, g: ^Graph, path, prefix: string, function: ^Function_Decl) -> ^Graph_Body {
+new_body :: proc(
+	gen: ^Generator,
+	g: ^Graph,
+	path, prefix: string,
+	function: ^Function_Decl,
+) -> ^Graph_Body {
 	gb := new(Graph_Body, context.temp_allocator)
 	gb^ = {
 		gen      = gen,
@@ -986,7 +1392,11 @@ literal :: proc(numbers: [4]f64, count, width: int) -> string {
 	for &p, i in parts {
 		p = i < count ? float_text(numbers[i]) : "0.0"
 	}
-	return fmt.tprintf("%s(%s)", width_type(width), strings.join(parts, ", ", context.temp_allocator))
+	return fmt.tprintf(
+		"%s(%s)",
+		width_type(width),
+		strings.join(parts, ", ", context.temp_allocator),
+	)
 }
 
 // convert gives an expression of one width as another: a scalar fills every component, a wider value keeps its first
@@ -1006,14 +1416,19 @@ convert :: proc(expr: string, from, to: int) -> string {
 	for &z in zeros {
 		z = "0.0"
 	}
-	return fmt.tprintf("%s(%s, %s)", width_type(to), expr, strings.join(zeros, ", ", context.temp_allocator))
+	return fmt.tprintf(
+		"%s(%s, %s)",
+		width_type(to),
+		expr,
+		strings.join(zeros, ", ", context.temp_allocator),
+	)
 }
 
 // Source is where an input's value comes from, and its width.
 @(private = "file")
 Source :: struct {
-	expr:  string,
-	width: int,
+	expr:    string,
+	width:   int,
 	// Not linked and without a value: the input's default, which fits any width.
 	default: bool,
 }
@@ -1024,10 +1439,17 @@ source :: proc(gb: ^Graph_Body, n: ^Graph_Node, pin: Node_Pin) -> (s: Source, ok
 	f := find_field(n, pin.name)
 	if f == nil || f.value.kind != .Link {
 		if f != nil {
-			return {literal(f.value.numbers, f.value.count, f.value.count), f.value.count, false}, true
+			return {literal(f.value.numbers, f.value.count, f.value.count), f.value.count, false},
+				true
 		}
 		if pin.type == .Texture {
-			fail(gb, n.line, "the %s node's %s input links to a texture parameter or a texture function input", n.kind.name, pin.name)
+			fail(
+				gb,
+				n.line,
+				"the %s node's %s input links to a texture parameter or a texture function input",
+				n.kind.name,
+				pin.name,
+			)
 			return
 		}
 		if pin.code != "" {
@@ -1071,10 +1493,26 @@ output_names :: proc(gb: ^Graph_Body, n: ^Graph_Node) -> []string {
 
 // input_expr is an input's value at a width. A texture fits only a texture input.
 @(private = "file")
-input_expr :: proc(gb: ^Graph_Body, n: ^Graph_Node, pin: Node_Pin, width: int) -> (expr: string, ok: bool) {
+input_expr :: proc(
+	gb: ^Graph_Body,
+	n: ^Graph_Node,
+	pin: Node_Pin,
+	width: int,
+) -> (
+	expr: string,
+	ok: bool,
+) {
 	s := source(gb, n, pin) or_return
 	if (s.width == TEXTURE_WIDTH) != (width == TEXTURE_WIDTH) {
-		fail(gb, n.line, "the %s node's %s input takes %s, not %s", n.kind.name, pin.name, width == TEXTURE_WIDTH ? "a texture" : "numbers", s.width == TEXTURE_WIDTH ? "a texture" : "numbers")
+		fail(
+			gb,
+			n.line,
+			"the %s node's %s input takes %s, not %s",
+			n.kind.name,
+			pin.name,
+			width == TEXTURE_WIDTH ? "a texture" : "numbers",
+			s.width == TEXTURE_WIDTH ? "a texture" : "numbers",
+		)
 		return
 	}
 	if s.default {
@@ -1095,7 +1533,12 @@ line_directive :: proc(gb: ^Graph_Body, line: int) {
 visit :: proc(gb: ^Graph_Body, index: int) -> bool {
 	switch gb.state[index] {
 	case 1:
-		fail(gb, gb.g.nodes[index].line, "node %d links back to itself through its inputs", gb.g.nodes[index].id)
+		fail(
+			gb,
+			gb.g.nodes[index].line,
+			"node %d links back to itself through its inputs",
+			gb.g.nodes[index].id,
+		)
 		return false
 	case 2:
 		return gb.widths[index] != nil
@@ -1104,7 +1547,12 @@ visit :: proc(gb: ^Graph_Body, index: int) -> bool {
 	defer gb.state[index] = 2
 	n := &gb.g.nodes[index]
 	if n.kind.stages != {} && gb.gen.stage not_in n.kind.stages {
-		fail(gb, n.line, "the %s node reads what only a pixel has, so the vertex offset cannot use it", n.kind.name)
+		fail(
+			gb,
+			n.line,
+			"the %s node reads what only a pixel has, so the vertex offset cannot use it",
+			n.kind.name,
+		)
 		return false
 	}
 	switch n.kind.name {
@@ -1139,7 +1587,13 @@ write_template :: proc(gb: ^Graph_Body, index: int) -> bool {
 		if pin.type == .Any {
 			s := source(gb, n, pin) or_return
 			if s.width == TEXTURE_WIDTH {
-				fail(gb, n.line, "the %s node's %s input takes numbers, not a texture", k.name, pin.name)
+				fail(
+					gb,
+					n.line,
+					"the %s node's %s input takes numbers, not a texture",
+					k.name,
+					pin.name,
+				)
 				return false
 			}
 			generic = max(generic, s.width)
@@ -1309,11 +1763,23 @@ write_custom :: proc(gb: ^Graph_Body, index: int) -> bool {
 	}
 	name := fmt.tprintf("%scustom%d", gb.prefix, n.id)
 	body := code if contains_word(code, "return") else fmt.tprintf("return %s;", code)
-	fmt.sbprintfln(&gb.gen.globals, "%s %s(float4 a, float4 b, float4 c, float4 d, Material_Inputs inputs) {{", width_type(width), name)
+	fmt.sbprintfln(
+		&gb.gen.globals,
+		"%s %s(float4 a, float4 b, float4 c, float4 d, Material_Inputs inputs) {{",
+		width_type(width),
+		name,
+	)
 	fmt.sbprintfln(&gb.gen.globals, "#line %d \"%s\"", code_line, gb.path)
 	fmt.sbprintfln(&gb.gen.globals, "%s\n}}", body)
 	line_directive(gb, n.line)
-	fmt.sbprintfln(&gb.b, "\t%s n%d_out = %s(%s, inputs);", width_type(width), n.id, name, strings.join(args[:], ", ", context.temp_allocator))
+	fmt.sbprintfln(
+		&gb.b,
+		"\t%s n%d_out = %s(%s, inputs);",
+		width_type(width),
+		n.id,
+		name,
+		strings.join(args[:], ", ", context.temp_allocator),
+	)
 	gb.widths[index] = slice.clone([]int{width}, context.temp_allocator)
 	return true
 }
@@ -1339,7 +1805,13 @@ write_call :: proc(gb: ^Graph_Body, index: int) -> bool {
 			known ||= p.name == field.name
 		}
 		if !known {
-			fail(gb, field.line, "the material function %s has no input named %s", f.path, field.name)
+			fail(
+				gb,
+				field.line,
+				"the material function %s has no input named %s",
+				f.path,
+				field.name,
+			)
 		}
 	}
 	name := write_function(gb, f) or_return
@@ -1351,7 +1823,12 @@ write_call :: proc(gb: ^Graph_Body, index: int) -> bool {
 			default = p.default,
 		}
 		if p.width == TEXTURE_WIDTH && find_field(n, p.name) == nil {
-			fail(gb, n.line, "the material function's input %s is a texture, which a call must link", p.name)
+			fail(
+				gb,
+				n.line,
+				"the material function's input %s is a texture, which a call must link",
+				p.name,
+			)
 			return false
 		}
 		s := source(gb, n, pin) or_return
@@ -1408,7 +1885,12 @@ write_function :: proc(gb: ^Graph_Body, f: ^Function_Decl) -> (name: string, ok:
 		append(&parameters, fmt.tprintf("out %s out_%s", width_type(p.width), p.name))
 	}
 	// A function that a later call reaches first is written first, because its body names only what is above it.
-	fmt.sbprintfln(&gen.globals, "void %s(%s) {{", name, strings.join(parameters[:], ", ", context.temp_allocator))
+	fmt.sbprintfln(
+		&gen.globals,
+		"void %s(%s) {{",
+		name,
+		strings.join(parameters[:], ", ", context.temp_allocator),
+	)
 	strings.write_string(&gen.globals, strings.to_string(fb.b))
 	strings.write_string(&gen.globals, "}\n")
 	gen.written[f.guid] = name
@@ -1420,7 +1902,13 @@ write_function_input :: proc(gb: ^Graph_Body, index: int) -> bool {
 	n := &gb.g.nodes[index]
 	width := type_width(property(n, "type").text)
 	line_directive(gb, n.line)
-	fmt.sbprintfln(&gb.b, "\t%s n%d_value = in_%s;", width_type(width), n.id, property(n, "name").text)
+	fmt.sbprintfln(
+		&gb.b,
+		"\t%s n%d_value = in_%s;",
+		width_type(width),
+		n.id,
+		property(n, "name").text,
+	)
 	gb.widths[index] = slice.clone([]int{width}, context.temp_allocator)
 	return true
 }

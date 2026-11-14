@@ -93,7 +93,10 @@ setup :: proc(t: ^testing.T, scripts := false) -> ^Fixture {
 		f.reports = make([dynamic]string)
 		script.register_components(&f.world.registry)
 		context.user_ptr = f
-		testing.expect(t, script.init(&f.runtime, &f.platform, &f.world, nil, register_test_scripts))
+		testing.expect(
+			t,
+			script.init(&f.runtime, &f.platform, &f.world, nil, register_test_scripts),
+		)
 	}
 	blob := format.sprite_sheet_write(
 		{
@@ -102,8 +105,15 @@ setup :: proc(t: ^testing.T, scripts := false) -> ^Fixture {
 			atlas = {0 = 1},
 			atlas_size = {48, 16},
 			pixels_per_unit = 16,
-			frames = {{name = "a", rect = {0, 0, 16, 16}}, {name = "b", rect = {16, 0, 16, 16}}, {name = "c", rect = {32, 0, 16, 16}}},
-			animations = {{name = "walk", frames = {0, 1}, rate = 2, loop = true}, {name = "jump", frames = {0, 1, 2}, rate = 2}},
+			frames = {
+				{name = "a", rect = {0, 0, 16, 16}},
+				{name = "b", rect = {16, 0, 16, 16}},
+				{name = "c", rect = {32, 0, 16, 16}},
+			},
+			animations = {
+				{name = "walk", frames = {0, 1}, rate = 2, loop = true},
+				{name = "jump", frames = {0, 1, 2}, rate = 2},
+			},
 			source_path = "game/hero.sprite_sheet",
 		},
 		context.temp_allocator,
@@ -125,7 +135,12 @@ register_test_scripts :: proc(r: ^script.Runtime) {
 		f := (^Fixture)(context.user_ptr)
 		report := ""
 		for i in 1 ..= luau.gettop(L) {
-			report = fmt.tprintf("%s%s%s", report, i > 1 ? " " : "", string(cstring(luau.L_tolstring(L, i, nil))))
+			report = fmt.tprintf(
+				"%s%s%s",
+				report,
+				i > 1 ? " " : "",
+				string(cstring(luau.L_tolstring(L, i, nil))),
+			)
 			luau.pop(L, 1)
 		}
 		append(&f.reports, fmt.aprint(report))
@@ -226,7 +241,11 @@ a_sprite_plays_an_animation_by_name :: proc(t: ^testing.T) {
 	testing.expect_value(t, set_frame(&f.sprites, sprite, "z"), Found.No_Name)
 	testing.expect_value(t, shown(t, f, e), "b")
 	lost := spawn(f, {})
-	testing.expect_value(t, play(&f.sprites, ecs.get_write(&f.world, lost, render.Sprite_Renderer), "walk"), Found.No_Sheet)
+	testing.expect_value(
+		t,
+		play(&f.sprites, ecs.get_write(&f.world, lost, render.Sprite_Renderer), "walk"),
+		Found.No_Sheet,
+	)
 }
 
 @(test)
@@ -235,7 +254,10 @@ a_script_plays_a_sprites_animations_by_name :: proc(t: ^testing.T) {
 	defer teardown(t, f)
 	f.entity = spawn(f, guid(SHEET))
 	context.user_ptr = f
-	_, ok := script.spawn_source(&f.runtime, "=sprites", `
+	_, ok := script.spawn_source(
+		&f.runtime,
+		"=sprites",
+		`
 local e = Test.entity()
 Test.report("before", Sprites.animation(e), Sprites.finished(e))
 Sprites.play(e, "jump")
@@ -246,9 +268,16 @@ Sprites.set_frame(e, "c")
 Test.report("frame", Sprites.animation(e))
 Test.report("no frame", (pcall(Sprites.set_frame, e, "z")))
 Sprites.play(e, "walk", true)
-`)
+`,
+	)
 	testing.expect(t, ok)
-	wanted := []string{"before nil true", "playing jump false", "unknown false", "frame nil", "no frame false"}
+	wanted := []string {
+		"before nil true",
+		"playing jump false",
+		"unknown false",
+		"frame nil",
+		"no frame false",
+	}
 	testing.expect_value(t, len(f.reports), len(wanted))
 	for report, i in f.reports {
 		if i < len(wanted) {

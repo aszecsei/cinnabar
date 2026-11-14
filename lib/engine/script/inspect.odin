@@ -80,7 +80,8 @@ inspect :: proc(r: ^Runtime, e: ecs.Entity, allocator: runtime.Allocator) -> []B
 				// An asset field says so while it is nil, so the editor offers its picker.
 				luau.pushvalue(L, -1)
 				luau.rawget(L, schema)
-				if luau.rawgetfield(L, -1, "__field") == .STRING && luau.toodinstring(L, -1) == "asset" {
+				if luau.rawgetfield(L, -1, "__field") == .STRING &&
+				   luau.toodinstring(L, -1) == "asset" {
 					field.kind = .Asset
 					luau.rawgetfield(L, -2, "kind")
 					field.asset_kind = strings.clone(luau.toodinstring(L, -1), allocator)
@@ -93,7 +94,15 @@ inspect :: proc(r: ^Runtime, e: ecs.Entity, allocator: runtime.Allocator) -> []B
 			}
 		}
 		slice.sort_by(fields[:], proc(a, b: Behaviour_Field) -> bool {return a.name < b.name})
-		append(&snapshots, Behaviour_Snapshot{class = name, script = script_of(r, L, class), enabled = .Enabled in i.flags, fields = fields[:]})
+		append(
+			&snapshots,
+			Behaviour_Snapshot {
+				class = name,
+				script = script_of(r, L, class),
+				enabled = .Enabled in i.flags,
+				fields = fields[:],
+			},
+		)
 	}
 	return snapshots[:]
 }
@@ -117,7 +126,13 @@ script_of :: proc(r: ^Runtime, L: ^luau.State, idx: c.int) -> format.Guid {
 
 // read_field pops a key and reads the instance's value for it, without metamethods.
 @(private = "file")
-read_field :: proc(r: ^Runtime, L: ^luau.State, instance: i32, field: ^Behaviour_Field, allocator: runtime.Allocator) {
+read_field :: proc(
+	r: ^Runtime,
+	L: ^luau.State,
+	instance: i32,
+	field: ^Behaviour_Field,
+	allocator: runtime.Allocator,
+) {
 	luau.rawget(L, instance)
 	defer luau.pop(L, 1)
 	#partial switch luau.type(L, -1) {

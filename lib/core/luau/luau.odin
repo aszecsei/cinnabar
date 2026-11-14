@@ -14,15 +14,7 @@ LUAU_SHARED :: #config(LUAU_SHARED, false)
 when LUAU_SHARED {
 	foreign import lib "../../../build/obj/luau/shared/out/luau.lib"
 } else {
-	foreign import lib {
-		"../../../build/obj/luau/static/out/Luau.VM.lib",
-		"../../../build/obj/luau/static/out/Luau.CodeGen.lib",
-		"../../../build/obj/luau/static/out/Luau.Compiler.lib",
-		"../../../build/obj/luau/static/out/Luau.Ast.lib",
-		"../../../build/obj/luau/static/out/Luau.Bytecode.lib",
-		"../../../build/obj/luau/static/out/Luau.Common.lib",
-		"../../../build/obj/luau/static/out/luau_shim.lib",
-	}
+	foreign import lib {"../../../build/obj/luau/static/out/Luau.VM.lib", "../../../build/obj/luau/static/out/Luau.CodeGen.lib", "../../../build/obj/luau/static/out/Luau.Compiler.lib", "../../../build/obj/luau/static/out/Luau.Ast.lib", "../../../build/obj/luau/static/out/Luau.Bytecode.lib", "../../../build/obj/luau/static/out/Luau.Common.lib", "../../../build/obj/luau/static/out/luau_shim.lib"}
 }
 
 // These match vendor/luau/VM/include/luaconf.h as lib/core/luau/CMakeLists.txt builds it.
@@ -132,7 +124,14 @@ Callbacks :: struct {
 	debugstep:           proc "c" (L: ^State, ar: ^Debug),
 	debuginterrupt:      proc "c" (L: ^State, ar: ^Debug),
 	debugprotectederror: proc "c" (L: ^State),
-	onallocate:          proc "c" (L: ^State, block: rawptr, osize, nsize: c.size_t, memcat: u8, tt: c.int, tag: c.int),
+	onallocate:          proc "c" (
+		L: ^State,
+		block: rawptr,
+		osize, nsize: c.size_t,
+		memcat: u8,
+		tt: c.int,
+		tag: c.int,
+	),
 	preresume:           proc "c" (L: ^State),
 	postresume:          proc "c" (L: ^State),
 	onfree:              proc "c" (L: ^State, block: rawptr),
@@ -141,8 +140,20 @@ Callbacks :: struct {
 // The direct access callbacks of a userdata tag (see registeruserdatadirectaccess). The VM calls them in a C call frame
 // with the same arguments as __index, __newindex or __namecall, and passes the key's atom and a slot that it caches per
 // instruction. cachedslot is shared by every tag, so a callback checks its value before it trusts it.
-UserdataDirectAccess :: #type proc "c" (L: ^State, data: rawptr, atom: c.int, cachedslot: ^u16, utag: c.int)
-UserdataDirectNamecall :: #type proc "c" (L: ^State, data: rawptr, atom: c.int, cachedslot: ^u16, utag: c.int) -> c.int
+UserdataDirectAccess :: #type proc "c" (
+	L: ^State,
+	data: rawptr,
+	atom: c.int,
+	cachedslot: ^u16,
+	utag: c.int,
+)
+UserdataDirectNamecall :: #type proc "c" (
+	L: ^State,
+	data: rawptr,
+	atom: c.int,
+	cachedslot: ^u16,
+	utag: c.int,
+) -> c.int
 
 L_Reg :: struct {
 	name: cstring,
@@ -362,7 +373,11 @@ foreign lib {
 
 Compile_Constant :: rawptr
 Library_Member_Type_Callback :: #type proc "c" (library: cstring, member: cstring) -> c.int
-Library_Member_Constant_Callback :: #type proc "c" (library: cstring, member: cstring, constant: ^Compile_Constant)
+Library_Member_Constant_Callback :: #type proc "c" (
+	library: cstring,
+	member: cstring,
+	constant: ^Compile_Constant,
+)
 
 // Compile_Options matches lua_CompileOptions. String arrays end with a nil entry.
 Compile_Options :: struct {
@@ -438,7 +453,10 @@ newuserdata :: #force_inline proc "c" (L: ^State, sz: c.size_t) -> rawptr {
 
 isfunction :: #force_inline proc "c" (L: ^State, n: c.int) -> bool {return type(L, n) == .FUNCTION}
 istable :: #force_inline proc "c" (L: ^State, n: c.int) -> bool {return type(L, n) == .TABLE}
-islightuserdata :: #force_inline proc "c" (L: ^State, n: c.int) -> bool {return type(L, n) == .LIGHTUSERDATA}
+islightuserdata :: #force_inline proc "c" (L: ^State, n: c.int) -> bool {return(
+		type(L, n) ==
+		.LIGHTUSERDATA \
+	)}
 isnil :: #force_inline proc "c" (L: ^State, n: c.int) -> bool {return type(L, n) == .NIL}
 isboolean :: #force_inline proc "c" (L: ^State, n: c.int) -> bool {return type(L, n) == .BOOLEAN}
 isinteger64 :: #force_inline proc "c" (L: ^State, n: c.int) -> bool {return type(L, n) == .INTEGER}

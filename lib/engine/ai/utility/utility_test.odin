@@ -38,11 +38,17 @@ Fixture :: struct {
 }
 
 @(private = "file")
-BOARD :: format.Guid{0 = 0xb8}
+BOARD :: format.Guid {
+	0 = 0xb8,
+}
 @(private = "file")
-DECISION :: format.Guid{0 = 0xd8}
+DECISION :: format.Guid {
+	0 = 0xd8,
+}
 @(private = "file")
-TREE :: format.Guid{0 = 0xd9}
+TREE :: format.Guid {
+	0 = 0xd9,
+}
 
 // The test blackboard's keys, at their slots.
 @(private = "file")
@@ -71,7 +77,10 @@ board_contents :: proc() -> format.Blackboard_Contents {
 	names := KEYS
 	keys := make([]format.Blackboard_Key_Contents, len(names), context.temp_allocator)
 	for k, i in names {
-		keys[i] = {name = k.name, type = k.type}
+		keys[i] = {
+			name = k.name,
+			type = k.type,
+		}
 	}
 	keys[0].default = value(f32(0.5))
 	keys[1].default = value(i32(3))
@@ -157,12 +166,21 @@ build :: proc(u: U, key: u64 = 1, refused := false) -> []byte {
 		if o.guard != "" {
 			negated := o.guard[0] == '!'
 			first := u32(len(ops))
-			append(&ops, format.Decision_Op{code = .Key, operand = slot_of(o.guard[1:] if negated else o.guard)})
+			append(
+				&ops,
+				format.Decision_Op {
+					code = .Key,
+					operand = slot_of(o.guard[1:] if negated else o.guard),
+				},
+			)
 			if negated {
 				append(&ops, format.Decision_Op{code = .Not})
 			}
 			shared.condition = u32(len(conditions))
-			append(&conditions, format.Decision_Condition{first_op = first, op_count = u32(len(ops)) - first})
+			append(
+				&conditions,
+				format.Decision_Condition{first_op = first, op_count = u32(len(ops)) - first},
+			)
 		}
 		action := format.Decision_Action_Contents {
 			name      = o.action,
@@ -170,15 +188,33 @@ build :: proc(u: U, key: u64 = 1, refused := false) -> []byte {
 		}
 		if o.n != 0 {
 			append(&constants, format.Decision_Constant_Contents{type = .Int, value = value(o.n)})
-			append(&args, format.Decision_Arg_Contents{name = "n", source = .Constant, index = u32(len(constants) - 1), type = .Int})
+			append(
+				&args,
+				format.Decision_Arg_Contents {
+					name = "n",
+					source = .Constant,
+					index = u32(len(constants) - 1),
+					type = .Int,
+				},
+			)
 			action.arg_count = 1
 		}
 		append(&actions, action)
 		if o.set_key != "" {
-			append(&constants, format.Decision_Constant_Contents{type = .Int, value = value(o.set_value)})
+			append(
+				&constants,
+				format.Decision_Constant_Contents{type = .Int, value = value(o.set_value)},
+			)
 			shared.first_write = u32(len(writes))
 			shared.write_count = 1
-			append(&writes, format.Decision_Write{key = slot_of(o.set_key), source = .Constant, index = u32(len(constants) - 1)})
+			append(
+				&writes,
+				format.Decision_Write {
+					key = slot_of(o.set_key),
+					source = .Constant,
+					index = u32(len(constants) - 1),
+				},
+			)
 		}
 		append(&nodes, shared)
 		record := format.Utility_Option {
@@ -197,7 +233,9 @@ build :: proc(u: U, key: u64 = 1, refused := false) -> []byte {
 		}
 		if o.cooldown != 0 {
 			record.flags += {.Cooldown}
-			record.cooldown = {seconds = o.cooldown}
+			record.cooldown = {
+				seconds = o.cooldown,
+			}
 		}
 		for c in o.considerations {
 			append(&links, u32(len(considerations)))
@@ -226,7 +264,15 @@ build :: proc(u: U, key: u64 = 1, refused := false) -> []byte {
 		append(&options, record)
 	}
 	for c in considerations {
-		append(&nodes, format.Decision_Node_Contents{id = 100 + c.node, kind = "consideration", condition = format.DECISION_NONE, action = format.DECISION_NONE})
+		append(
+			&nodes,
+			format.Decision_Node_Contents {
+				id = 100 + c.node,
+				kind = "consideration",
+				condition = format.DECISION_NONE,
+				action = format.DECISION_NONE,
+			},
+		)
 	}
 	at := u32(size_of(format.Utility_Running))
 	for &o in options {
@@ -280,7 +326,15 @@ build_tree :: proc() -> []byte {
 		{node = 0, end = 4, kind = .Sequence, test = format.DECISION_NONE, state = 0},
 		{node = 1, end = 2, kind = .Action, test = format.DECISION_NONE, state = 16},
 		{node = 2, end = 3, kind = .Set, test = format.DECISION_NONE, state = 32},
-		{node = 3, end = 4, kind = .Wait, test = format.DECISION_NONE, seconds = {seconds = 1000}, state = 48, timers = 64},
+		{
+			node = 3,
+			end = 4,
+			kind = .Wait,
+			test = format.DECISION_NONE,
+			seconds = {seconds = 1000},
+			state = 48,
+			timers = 64,
+		},
 	}
 	contents := format.Decision_Contents {
 		guid           = TREE,
@@ -290,12 +344,32 @@ build_tree :: proc() -> []byte {
 		blackboard     = BOARD,
 		blackboard_key = 77,
 		nodes          = {
-			{id = 1, kind = "sequence", condition = format.DECISION_NONE, action = format.DECISION_NONE},
+			{
+				id = 1,
+				kind = "sequence",
+				condition = format.DECISION_NONE,
+				action = format.DECISION_NONE,
+			},
 			{id = 2, kind = "action", condition = format.DECISION_NONE, action = 0},
-			{id = 3, kind = "set", condition = format.DECISION_NONE, action = format.DECISION_NONE, first_write = 0, write_count = 1},
-			{id = 4, kind = "wait", condition = format.DECISION_NONE, action = format.DECISION_NONE},
+			{
+				id = 3,
+				kind = "set",
+				condition = format.DECISION_NONE,
+				action = format.DECISION_NONE,
+				first_write = 0,
+				write_count = 1,
+			},
+			{
+				id = 4,
+				kind = "wait",
+				condition = format.DECISION_NONE,
+				action = format.DECISION_NONE,
+			},
 		},
-		constants      = {{type = .Int, value = value(i32(2))}, {type = .Int, value = value(i32(7))}},
+		constants      = {
+			{type = .Int, value = value(i32(2))},
+			{type = .Int, value = value(i32(7))},
+		},
 		actions        = {{name = "walk", first_arg = 0, arg_count = 1}},
 		args           = {{name = "n", source = .Constant, index = 0, type = .Int}},
 		writes         = {{key = slot_of("trace"), source = .Constant, index = 1}},
@@ -319,41 +393,38 @@ log_event :: proc(a: ^ai.Action_Context, f: string, args: ..any) {
 register_test :: proc(s: ^ai.State) {
 	register(s)
 	behavior_tree.register(s)
-	ai.register_action(s, {name = "ok", start = proc(a: ^ai.Action_Context) {log_event(a, "start ok")}})
-	ai.register_action(
-		s,
-		{
-			name = "walk",
-			params = {{"n", .Int}},
-			state_size = 4,
-			start = proc(a: ^ai.Action_Context) {
-				n, _ := ai.arg(a, "n")
-				(^i32)(&a.state[0])^ = n.(i32)
-				log_event(a, "start walk")
-			},
-			tick = proc(a: ^ai.Action_Context) -> ai.Action_Status {
-				left := (^i32)(&a.state[0])
-				left^ -= 1
-				return .Succeeded if left^ <= 0 else .Running
-			},
-			stop = proc(a: ^ai.Action_Context) {log_event(a, "stop walk")},
+	ai.register_action(s, {
+		name = "ok",
+		start = proc(a: ^ai.Action_Context) {log_event(a, "start ok")},
+	})
+	ai.register_action(s, {
+		name = "walk",
+		params = {{"n", .Int}},
+		state_size = 4,
+		start = proc(a: ^ai.Action_Context) {
+			n, _ := ai.arg(a, "n")
+			(^i32)(&a.state[0])^ = n.(i32)
+			log_event(a, "start walk")
 		},
-	)
-	ai.register_action(
-		s,
-		{
-			name = "run",
-			params = {{"n", .Int}},
-			state_size = 4,
-			start = proc(a: ^ai.Action_Context) {
-				n, _ := ai.arg(a, "n")
-				(^i32)(&a.state[0])^ = n.(i32)
-				log_event(a, "start run %d", n.(i32))
-			},
-			tick = proc(a: ^ai.Action_Context) -> ai.Action_Status {return .Running},
-			stop = proc(a: ^ai.Action_Context) {log_event(a, "stop run %d", (^i32)(&a.state[0])^)},
+		tick = proc(a: ^ai.Action_Context) -> ai.Action_Status {
+			left := (^i32)(&a.state[0])
+			left^ -= 1
+			return .Succeeded if left^ <= 0 else .Running
 		},
-	)
+		stop = proc(a: ^ai.Action_Context) {log_event(a, "stop walk")},
+	})
+	ai.register_action(s, {
+		name = "run",
+		params = {{"n", .Int}},
+		state_size = 4,
+		start = proc(a: ^ai.Action_Context) {
+			n, _ := ai.arg(a, "n")
+			(^i32)(&a.state[0])^ = n.(i32)
+			log_event(a, "start run %d", n.(i32))
+		},
+		tick = proc(a: ^ai.Action_Context) -> ai.Action_Status {return .Running},
+		stop = proc(a: ^ai.Action_Context) {log_event(a, "stop run %d", (^i32)(&a.state[0])^)},
+	})
 }
 
 @(private = "file")
@@ -519,7 +590,14 @@ running :: proc(f: ^Fixture, e: ecs.Entity) -> int {
 
 @(private = "file")
 expect_events :: proc(t: ^testing.T, f: ^Fixture, expected: []string, loc := #caller_location) {
-	testing.expectf(t, slice.equal(f.events[:], expected), "events %v, expected %v", f.events[:], expected, loc = loc)
+	testing.expectf(
+		t,
+		slice.equal(f.events[:], expected),
+		"events %v, expected %v",
+		f.events[:],
+		expected,
+		loc = loc,
+	)
 }
 
 @(private = "file")
@@ -561,8 +639,21 @@ each_curve_gives_its_known_values :: proc(t: ^testing.T) {
 		want: f64,
 	}
 	TABLE :: []format.Utility_Point{{0, 0}, {0.5, 1}, {1, 0.5}}
-	c :: proc(curve: format.Utility_Curve, slope: f32 = 1, exponent: f32 = 1, x_shift: f32 = 0, y_shift: f32 = 0) -> format.Utility_Consideration {
-		return {curve = curve, slope = slope, exponent = exponent, x_shift = x_shift, y_shift = y_shift, max = 1}
+	c :: proc(
+		curve: format.Utility_Curve,
+		slope: f32 = 1,
+		exponent: f32 = 1,
+		x_shift: f32 = 0,
+		y_shift: f32 = 0,
+	) -> format.Utility_Consideration {
+		return {
+			curve = curve,
+			slope = slope,
+			exponent = exponent,
+			x_shift = x_shift,
+			y_shift = y_shift,
+			max = 1,
+		}
 	}
 	cases := []Case {
 		{c(.Linear), 0.3, 0.3},
@@ -600,7 +691,16 @@ each_curve_gives_its_known_values :: proc(t: ^testing.T) {
 	for k, i in cases {
 		points := TABLE if k.c.curve == .Table else nil
 		got := curve(k.c, points, k.x)
-		testing.expectf(t, near(got, k.want), "case %d: %v at %v gives %v, not %v", i, k.c.curve, k.x, got, k.want)
+		testing.expectf(
+			t,
+			near(got, k.want),
+			"case %d: %v at %v gives %v, not %v",
+			i,
+			k.c.curve,
+			k.x,
+			got,
+			k.want,
+		)
 	}
 	// A table's two points at one x is a step.
 	step := []format.Utility_Point{{0, 0}, {0.5, 0}, {0.5, 1}, {1, 1}}
@@ -629,7 +729,15 @@ the_compensation_factor_makes_up_for_more_considerations :: proc(t: ^testing.T) 
 	testing.expect(t, near(compensate(1, 4), 1))
 	testing.expect(t, near(compensate(0, 4), 0))
 
-	f := setup(t, {options = {{action = "run", n = 1, considerations = {HEALTH}}, {action = "run", n = 2, weight = 2, considerations = {HEALTH, HEALTH, HEALTH}}}})
+	f := setup(
+		t,
+		{
+			options = {
+				{action = "run", n = 1, considerations = {HEALTH}},
+				{action = "run", n = 2, weight = 2, considerations = {HEALTH, HEALTH, HEALTH}},
+			},
+		},
+	)
 	defer teardown(t, f)
 	e := spawn_agent(f)
 	start(f, e)
@@ -641,8 +749,18 @@ the_compensation_factor_makes_up_for_more_considerations :: proc(t: ^testing.T) 
 		return
 	}
 	one := compensate(0.8, 3)
-	testing.expectf(t, near(f64(scores[0].score), 0.8, 1e-5), "one consideration scores %v", scores[0].score)
-	testing.expectf(t, near(f64(scores[1].score), 2 * one * one * one, 1e-5), "three considerations score %v", scores[1].score)
+	testing.expectf(
+		t,
+		near(f64(scores[0].score), 0.8, 1e-5),
+		"one consideration scores %v",
+		scores[0].score,
+	)
+	testing.expectf(
+		t,
+		near(f64(scores[1].score), 2 * one * one * one, 1e-5),
+		"three considerations score %v",
+		scores[1].score,
+	)
 	testing.expect(t, f64(scores[1].score) > 2 * 0.8 * 0.8 * 0.8)
 }
 
@@ -661,7 +779,13 @@ inputs_read_numbers_bools_distances_and_time_since_a_change :: proc(t: ^testing.
 						{input = .Number, key = "ammo", max = 10, curve = .Linear},
 						{input = .Number, key = "armed", curve = .Linear},
 						{input = .Distance, key = "self", to = "home", max = 10, curve = .Linear},
-						{input = .Distance, key = "self", to = "target", max = 10, curve = .Linear},
+						{
+							input = .Distance,
+							key = "self",
+							to = "target",
+							max = 10,
+							curve = .Linear,
+						},
 						{input = .Since, key = "trace", max = 1, curve = .Linear},
 					},
 				},
@@ -693,7 +817,13 @@ inputs_read_numbers_bools_distances_and_time_since_a_change :: proc(t: ^testing.
 	rate := f64(f.world.clock.tick_rate)
 	latest := f64(f.world.clock.tick - written) / rate
 	since := f64(inputs[4].input)
-	testing.expectf(t, since > 0 && since <= latest + 1e-6 && since >= latest - 2 / rate - 1e-6, "since %v, at most %v", since, latest)
+	testing.expectf(
+		t,
+		since > 0 && since <= latest + 1e-6 && since >= latest - 2 / rate - 1e-6,
+		"since %v, at most %v",
+		since,
+		latest,
+	)
 	// A target that is none is infinitely far.
 	ai.set_key(&f.ai, e, "target", ecs.Entity(0))
 	frame(f, 2)
@@ -714,7 +844,20 @@ per_target_scoring_picks_the_best_perceived_entity_and_writes_it :: proc(t: ^tes
 		slope   = -1,
 		y_shift = 1,
 	}
-	f := setup(t, {options = {{action = "run", n = 1, target = "target", tag = "enemy", considerations = {near_by}}}})
+	f := setup(
+		t,
+		{
+			options = {
+				{
+					action = "run",
+					n = 1,
+					target = "target",
+					tag = "enemy",
+					considerations = {near_by},
+				},
+			},
+		},
+	)
 	defer teardown(t, f)
 	tags: ai.Tag_Names
 	ai.add_tag_name(&tags, "friend")
@@ -738,10 +881,25 @@ per_target_scoring_picks_the_best_perceived_entity_and_writes_it :: proc(t: ^tes
 
 	ready.perception = new(ai.Perception_Memory, f.platform.heap_allocator)
 	m := ready.perception
-	m.entries[0] = {entity = far_enemy, tag = 1, seen = true}
-	m.entries[1] = {entity = friend, tag = 0, seen = true}
-	m.entries[2] = {entity = gone_enemy, tag = 1}
-	m.entries[3] = {entity = close_enemy, tag = 1, heard = true}
+	m.entries[0] = {
+		entity = far_enemy,
+		tag    = 1,
+		seen   = true,
+	}
+	m.entries[1] = {
+		entity = friend,
+		tag    = 0,
+		seen   = true,
+	}
+	m.entries[2] = {
+		entity = gone_enemy,
+		tag    = 1,
+	}
+	m.entries[3] = {
+		entity = close_enemy,
+		tag    = 1,
+		heard  = true,
+	}
 	m.count = 4
 	frame(f, 2)
 	scores, _ = ai.scores(&f.ai, e)
@@ -766,7 +924,16 @@ per_target_scoring_picks_the_best_perceived_entity_and_writes_it :: proc(t: ^tes
 // with the bonus.
 @(test)
 momentum_keeps_the_running_option_until_a_higher_score_beats_it :: proc(t: ^testing.T) {
-	f := setup(t, {momentum = 0.25, options = {{action = "run", n = 1, considerations = {HEALTH}}, {action = "run", n = 2, considerations = {OTHER}}}})
+	f := setup(
+		t,
+		{
+			momentum = 0.25,
+			options = {
+				{action = "run", n = 1, considerations = {HEALTH}},
+				{action = "run", n = 2, considerations = {OTHER}},
+			},
+		},
+	)
 	defer teardown(t, f)
 	e := spawn_agent(f)
 	start(f, e)
@@ -793,7 +960,10 @@ momentum_keeps_the_running_option_until_a_higher_score_beats_it :: proc(t: ^test
 // An option with a cooldown scores 0 from when it ends until the cooldown passes.
 @(test)
 a_cooldown_keeps_an_option_from_being_picked_after_it_ends :: proc(t: ^testing.T) {
-	f := setup(t, {options = {{action = "ok", weight = 2, cooldown = 0.5}, {action = "run", n = 1}}})
+	f := setup(
+		t,
+		{options = {{action = "ok", weight = 2, cooldown = 0.5}, {action = "run", n = 1}}},
+	)
 	defer teardown(t, f)
 	e := spawn_agent(f)
 	start(f, e)
@@ -821,7 +991,13 @@ when_the_action_ends_the_next_think_picks_again :: proc(t: ^testing.T) {
 	frame(f, 8)
 	testing.expect(t, len(f.events) >= 4)
 	if len(f.events) >= 4 {
-		testing.expect(t, slice.equal(f.events[:4], []string{"start walk", "stop walk", "start walk", "stop walk"}))
+		testing.expect(
+			t,
+			slice.equal(
+				f.events[:4],
+				[]string{"start walk", "stop walk", "start walk", "stop walk"},
+			),
+		)
 	}
 	trace, _ := ai.get_key(&f.ai, e, "trace")
 	testing.expect_value(t, trace.(i32), 4)
@@ -830,7 +1006,15 @@ when_the_action_ends_the_next_think_picks_again :: proc(t: ^testing.T) {
 // A guard that does not hold scores the option 0, and nothing that scores above 0 runs nothing.
 @(test)
 a_guard_or_no_score_runs_nothing :: proc(t: ^testing.T) {
-	f := setup(t, {options = {{action = "run", n = 1, guard = "armed"}, {action = "run", n = 2, considerations = {OTHER}}}})
+	f := setup(
+		t,
+		{
+			options = {
+				{action = "run", n = 1, guard = "armed"},
+				{action = "run", n = 2, considerations = {OTHER}},
+			},
+		},
+	)
 	defer teardown(t, f)
 	e := spawn_agent(f)
 	start(f, e)
@@ -848,7 +1032,19 @@ a_guard_or_no_score_runs_nothing :: proc(t: ^testing.T) {
 @(test)
 a_weighted_pick_replays_the_same_with_the_same_seed :: proc(t: ^testing.T) {
 	run :: proc(t: ^testing.T, seed: u64) -> [dynamic]string {
-		f := setup(t, {pick = .Weighted, within = 1, options = {{action = "ok"}, {action = "walk", n = 1}, {action = "ok", weight = 0.5}}}, seed = seed)
+		f := setup(
+			t,
+			{
+				pick = .Weighted,
+				within = 1,
+				options = {
+					{action = "ok"},
+					{action = "walk", n = 1},
+					{action = "ok", weight = 0.5},
+				},
+			},
+			seed = seed,
+		)
 		defer teardown(t, f)
 		e := spawn_agent(f)
 		start(f, e)
@@ -890,7 +1086,15 @@ a_weighted_pick_replays_the_same_with_the_same_seed :: proc(t: ^testing.T) {
 // One blackboard and one set of actions serve a behavior tree and a utility decision.
 @(test)
 a_behavior_tree_and_a_utility_decision_share_a_blackboard_and_actions :: proc(t: ^testing.T) {
-	f := setup(t, {options = {{action = "walk", n = 3, guard = "!armed", set_key = "trace", set_value = 3}, {action = "run", n = 1, guard = "armed"}}})
+	f := setup(
+		t,
+		{
+			options = {
+				{action = "walk", n = 3, guard = "!armed", set_key = "trace", set_value = 3},
+				{action = "run", n = 1, guard = "armed"},
+			},
+		},
+	)
 	defer teardown(t, f)
 	tree := spawn_agent(f, TREE)
 	choice := spawn_agent(f)
@@ -917,7 +1121,15 @@ a_behavior_tree_and_a_utility_decision_share_a_blackboard_and_actions :: proc(t:
 // runs.
 @(test)
 scores_are_read_by_option_and_consideration :: proc(t: ^testing.T) {
-	f := setup(t, {options = {{action = "run", n = 1, considerations = {HEALTH, OTHER}}, {action = "ok", weight = 0.25}}})
+	f := setup(
+		t,
+		{
+			options = {
+				{action = "run", n = 1, considerations = {HEALTH, OTHER}},
+				{action = "ok", weight = 0.25},
+			},
+		},
+	)
 	defer teardown(t, f)
 	e := spawn_agent(f)
 	start(f, e)
@@ -950,7 +1162,15 @@ scores_are_read_by_option_and_consideration :: proc(t: ^testing.T) {
 // The running option and its cooldowns are in the agent's module state, so a code reload keeps them and the action.
 @(test)
 the_running_option_is_kept_across_a_code_reload :: proc(t: ^testing.T) {
-	f := setup(t, {options = {{action = "run", n = 1, considerations = {HEALTH}}, {action = "run", n = 2, considerations = {OTHER}}}})
+	f := setup(
+		t,
+		{
+			options = {
+				{action = "run", n = 1, considerations = {HEALTH}},
+				{action = "run", n = 2, considerations = {OTHER}},
+			},
+		},
+	)
 	defer teardown(t, f)
 	e := spawn_agent(f)
 	start(f, e)
@@ -971,7 +1191,12 @@ the_running_option_is_kept_across_a_code_reload :: proc(t: ^testing.T) {
 a_refused_utility_waits :: proc(t: ^testing.T) {
 	f := setup(t, {options = {{action = "run", n = 1, considerations = {HEALTH}}}})
 	defer teardown(t, f)
-	write_blob(t, f, DECISION, build({options = {{action = "run", n = 1, considerations = {HEALTH}}}}, refused = true))
+	write_blob(
+		t,
+		f,
+		DECISION,
+		build({options = {{action = "run", n = 1, considerations = {HEALTH}}}}, refused = true),
+	)
 	context.logger = testlog.expected_errors()
 	e := spawn_agent(f)
 	frame(f, 3)
@@ -995,14 +1220,35 @@ utility_is_the_same_on_one_job_and_many :: proc(t: ^testing.T) {
 	}
 	run :: proc(t: ^testing.T, serial: bool) -> [dynamic]Outcome {
 		u := U {
-			pick = .Weighted,
-			within = 0.3,
+			pick     = .Weighted,
+			within   = 0.3,
 			momentum = 0.1,
-			options = {
-				{action = "walk", n = 2, considerations = {HEALTH}, set_key = "trace", set_value = 1},
+			options  = {
+				{
+					action = "walk",
+					n = 2,
+					considerations = {HEALTH},
+					set_key = "trace",
+					set_value = 1,
+				},
 				{action = "run", n = 1, considerations = {OTHER}, cooldown = 0.05},
 				{action = "ok", weight = 0.6, set_key = "trace", set_value = 2},
-				{action = "run", n = 2, target = "target", considerations = {{input = .Distance, key = "self", to = "target", max = 20, curve = .Logistic, slope = -1, y_shift = 1}}},
+				{
+					action = "run",
+					n = 2,
+					target = "target",
+					considerations = {
+						{
+							input = .Distance,
+							key = "self",
+							to = "target",
+							max = 20,
+							curve = .Logistic,
+							slope = -1,
+							y_shift = 1,
+						},
+					},
+				},
 			},
 		}
 		f := setup(t, u, serial = serial, workers = 0 if serial else 8, seed = 3)
@@ -1022,7 +1268,10 @@ utility_is_the_same_on_one_job_and_many :: proc(t: ^testing.T) {
 			if ready := ready_of(f, e); ready != nil && i % 2 == 0 {
 				ready.perception = new(ai.Perception_Memory, f.platform.heap_allocator)
 				for thing, k in things {
-					ready.perception.entries[k] = {entity = thing, seen = (i + k) % 2 == 0}
+					ready.perception.entries[k] = {
+						entity = thing,
+						seen   = (i + k) % 2 == 0,
+					}
 				}
 				ready.perception.count = len(things)
 			}

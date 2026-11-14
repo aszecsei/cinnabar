@@ -97,7 +97,8 @@ handle_preview_message :: proc(e: ^Editor, message: link.Message) -> bool {
 		if m.id < MAX_PREVIEWS {
 			p := &e.session.previews[m.id]
 			if data := preview_graph_data(e, p); data != nil {
-				if blob, ok := format.animation_graph_view(data); ok && blob.header.key == p.play.instance.key {
+				if blob, ok := format.animation_graph_view(data);
+				   ok && blob.header.key == p.play.instance.key {
 					set_instance_parameter(data, blob, &p.play.instance, m.name, m.value)
 				}
 			}
@@ -204,7 +205,13 @@ previews :: proc(e: ^Editor) -> []render.Preview_Desc {
 		}
 		if !p.told || target.generation != p.told_generation {
 			copied := copy(p.prefix[:], target.prefix)
-			p.announce = {id = u32(id), prefix = string(p.prefix[:copied]), generation = target.generation, width = i32(target.size.x), height = i32(target.size.y)}
+			p.announce = {
+				id         = u32(id),
+				prefix     = string(p.prefix[:copied]),
+				generation = target.generation,
+				width      = i32(target.size.x),
+				height     = i32(target.size.y),
+			}
 			p.told, p.told_generation = true, target.generation
 		}
 		e.session.next_preview = (id + 1) % MAX_PREVIEWS
@@ -229,7 +236,8 @@ refresh_preview :: proc(e: ^Editor, p: ^Preview) {
 		return
 	}
 	if p.unsaved {
-		if data, modified, changed := asset.preview_blob(e.assets, p.material, p.modified); changed {
+		if data, modified, changed := asset.preview_blob(e.assets, p.material, p.modified);
+		   changed {
 			free_preview_data(e, p)
 			p.data, p.modified = data, modified
 			p.version += 1
@@ -281,7 +289,13 @@ play_animation_graph :: proc(e: ^Editor, p: ^Preview) -> [][3][4]f32 {
 	}
 	step := g.last_tick == 0 ? 0 : min(f32(now - g.last_tick), MAX_STEP)
 	g.last_tick = now
-	palette, _, ok := anim.preview_pose(e.assets, data, &g.instance, step, e.platform.frame_allocator)
+	palette, _, ok := anim.preview_pose(
+		e.assets,
+		data,
+		&g.instance,
+		step,
+		e.platform.frame_allocator,
+	)
 	if !ok {
 		g.retry_at = now + 1
 		return nil

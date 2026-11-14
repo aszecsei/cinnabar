@@ -20,14 +20,23 @@ Icon_Resources :: struct {
 }
 
 // icon_resources reads an icon file into the resources that an executable holds, or fails on a file that is not one.
-icon_resources :: proc(ico: []byte, allocator := context.allocator) -> (r: Icon_Resources, ok: bool) {
+icon_resources :: proc(
+	ico: []byte,
+	allocator := context.allocator,
+) -> (
+	r: Icon_Resources,
+	ok: bool,
+) {
 	if len(ico) < ICON_HEADER {
 		return
 	}
 	reserved, _ := endian.get_u16(ico[0:], .Little)
 	kind, _ := endian.get_u16(ico[2:], .Little)
 	count, _ := endian.get_u16(ico[4:], .Little)
-	if reserved != 0 || kind != 1 || count == 0 || len(ico) < ICON_HEADER + int(count) * ICON_ENTRY {
+	if reserved != 0 ||
+	   kind != 1 ||
+	   count == 0 ||
+	   len(ico) < ICON_HEADER + int(count) * ICON_ENTRY {
 		return
 	}
 	r.group = make([]byte, ICON_HEADER + int(count) * GROUP_ENTRY, allocator)

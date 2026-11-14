@@ -95,7 +95,11 @@ history_set_trim :: proc(cache: ^Texture_Cache, set: ^History_Set, platform: ^co
 // does not use, as a window that is resized every frame needs. It returns the nil handle when this frame uses every
 // texture or the backend cannot create one.
 @(private)
-cache_acquire :: proc(cache: ^Texture_Cache, platform: ^core.Platform_API, desc: gpu.Texture_Desc) -> gpu.Texture {
+cache_acquire :: proc(
+	cache: ^Texture_Cache,
+	platform: ^core.Platform_API,
+	desc: gpu.Texture_Desc,
+) -> gpu.Texture {
 	key := desc
 	key.label = ""
 	label_hash := hash.fnv64a(transmute([]byte)desc.label)
@@ -132,7 +136,11 @@ cache_acquire :: proc(cache: ^Texture_Cache, platform: ^core.Platform_API, desc:
 		free_slot = oldest
 	}
 	if free_slot < 0 {
-		log.errorf("render: texture %q: more than %d cached textures in one frame", desc.label, MAX_CACHED_TEXTURES)
+		log.errorf(
+			"render: texture %q: more than %d cached textures in one frame",
+			desc.label,
+			MAX_CACHED_TEXTURES,
+		)
 		return {}
 	}
 	texture := platform.gpu_create_texture(desc, nil)
@@ -153,7 +161,15 @@ cache_acquire :: proc(cache: ^Texture_Cache, platform: ^core.Platform_API, desc:
 // A new description, as a new view size gives, makes the pair again. It returns ok false when every history is in use
 // or the backend cannot create the textures.
 @(private)
-cache_history :: proc(cache: ^Texture_Cache, set: ^History_Set, platform: ^core.Platform_API, desc: gpu.Texture_Desc) -> (current, previous: gpu.Texture, valid, ok: bool) {
+cache_history :: proc(
+	cache: ^Texture_Cache,
+	set: ^History_Set,
+	platform: ^core.Platform_API,
+	desc: gpu.Texture_Desc,
+) -> (
+	current, previous: gpu.Texture,
+	valid, ok: bool,
+) {
 	key := desc
 	key.label = ""
 	key.usage += {.Sampled, .Storage}
@@ -170,7 +186,10 @@ cache_history :: proc(cache: ^Texture_Cache, set: ^History_Set, platform: ^core.
 		}
 	}
 	if entry != nil {
-		assert(entry.last_used != cache.frame, "render: a history texture is used twice in a frame")
+		assert(
+			entry.last_used != cache.frame,
+			"render: a history texture is used twice in a frame",
+		)
 		if entry.desc == key {
 			valid = entry.written == cache.frame - 1
 			entry.current = 1 - entry.current
@@ -181,12 +200,19 @@ cache_history :: proc(cache: ^Texture_Cache, set: ^History_Set, platform: ^core.
 	} else if free_slot >= 0 {
 		entry = &set.entries[free_slot]
 	} else {
-		log.errorf("render: history %q: more than %d history textures", desc.label, MAX_HISTORY_TEXTURES)
+		log.errorf(
+			"render: history %q: more than %d history textures",
+			desc.label,
+			MAX_HISTORY_TEXTURES,
+		)
 		return
 	}
 	create := key
 	create.label = desc.label
-	textures := [2]gpu.Texture{platform.gpu_create_texture(create, nil), platform.gpu_create_texture(create, nil)}
+	textures := [2]gpu.Texture {
+		platform.gpu_create_texture(create, nil),
+		platform.gpu_create_texture(create, nil),
+	}
 	entry^ = {
 		textures   = textures,
 		desc       = key,

@@ -56,7 +56,13 @@ _audio_thread :: proc(data: rawptr) {
 	defer win.CloseHandle(wake)
 
 	enumerator: ^wasapi.IMMDeviceEnumerator
-	if hr := win.CoCreateInstance(wasapi.CLSID_MMDeviceEnumerator, nil, win.CLSCTX_ALL, wasapi.IID_IMMDeviceEnumerator, cast(^win.LPVOID)&enumerator); win.FAILED(hr) {
+	if hr := win.CoCreateInstance(
+		wasapi.CLSID_MMDeviceEnumerator,
+		nil,
+		win.CLSCTX_ALL,
+		wasapi.IID_IMMDeviceEnumerator,
+		cast(^win.LPVOID)&enumerator,
+	); win.FAILED(hr) {
 		log.errorf("core: audio: no device enumerator: %x", u32(hr))
 	}
 	defer if enumerator != nil {
@@ -72,11 +78,15 @@ _audio_thread :: proc(data: rawptr) {
 
 	for !sync.atomic_load_explicit(&device.closing, .Acquire) {
 		if stream.client == nil {
-			if enumerator != nil && (last_look == {} || time.tick_since(last_look) >= AUDIO_RETRY_INTERVAL) {
+			if enumerator != nil &&
+			   (last_look == {} || time.tick_since(last_look) >= AUDIO_RETRY_INTERVAL) {
 				last_look = time.tick_now()
 				hr := audio_stream_open(device, enumerator, wake, &stream)
 				if win.FAILED(hr) && !warned {
-					log.warnf("core: audio: no output device: %x. The queue drains until one opens.", u32(hr))
+					log.warnf(
+						"core: audio: no output device: %x. The queue drains until one opens.",
+						u32(hr),
+					)
 					warned = true
 				}
 				if win.SUCCEEDED(hr) {
@@ -112,7 +122,14 @@ _audio_thread :: proc(data: rawptr) {
 }
 
 // audio_stream_open opens the default endpoint in the device's format, fills its buffer and starts it.
-audio_stream_open :: proc(device: ^Audio_Device, enumerator: ^wasapi.IMMDeviceEnumerator, wake: win.HANDLE, stream: ^Audio_Stream) -> (hr: win.HRESULT) {
+audio_stream_open :: proc(
+	device: ^Audio_Device,
+	enumerator: ^wasapi.IMMDeviceEnumerator,
+	wake: win.HANDLE,
+	stream: ^Audio_Stream,
+) -> (
+	hr: win.HRESULT,
+) {
 	defer if win.FAILED(hr) {
 		audio_stream_close(device, stream)
 	}
@@ -126,7 +143,12 @@ audio_stream_open :: proc(device: ^Audio_Device, enumerator: ^wasapi.IMMDeviceEn
 	if win.FAILED(hr) {
 		return
 	}
-	hr = endpoint->Activate(wasapi.IID_IAudioClient, win.CLSCTX_ALL, nil, cast([^]rawptr)&stream.client)
+	hr = endpoint->Activate(
+		wasapi.IID_IAudioClient,
+		win.CLSCTX_ALL,
+		nil,
+		cast([^]rawptr)&stream.client,
+	)
 	if win.FAILED(hr) {
 		return
 	}
@@ -138,7 +160,10 @@ audio_stream_open :: proc(device: ^Audio_Device, enumerator: ^wasapi.IMMDeviceEn
 		nBlockAlign     = size_of(Audio_Frame),
 		wBitsPerSample  = size_of(f32) * 8,
 	}
-	flags := u32(wasapi.AUDCLNT_FLAG.STREAM_EVENTCALLBACK) | u32(wasapi.AUDCLNT_FLAG.STREAM_AUTOCONVERTPCM) | u32(wasapi.AUDCLNT_FLAG.STREAM_SRC_DEFAULT_QUALITY)
+	flags :=
+		u32(wasapi.AUDCLNT_FLAG.STREAM_EVENTCALLBACK) |
+		u32(wasapi.AUDCLNT_FLAG.STREAM_AUTOCONVERTPCM) |
+		u32(wasapi.AUDCLNT_FLAG.STREAM_SRC_DEFAULT_QUALITY)
 	hr = stream.client->Initialize(.SHARED, flags, AUDIO_ENDPOINT_BUFFER, 0, &format, nil)
 	if win.FAILED(hr) {
 		return
@@ -164,7 +189,10 @@ audio_stream_open :: proc(device: ^Audio_Device, enumerator: ^wasapi.IMMDeviceEn
 		return
 	}
 	sync.atomic_store_explicit(&device.open, true, .Relaxed)
-	log.infof("core: audio: opened the default output device, with %d frames of buffer", stream.size)
+	log.infof(
+		"core: audio: opened the default output device, with %d frames of buffer",
+		stream.size,
+	)
 	return
 }
 

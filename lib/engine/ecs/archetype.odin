@@ -88,16 +88,30 @@ world_iter :: proc "contextless" (w: ^World) -> World_Iterator {
 // world_iter_changed walks the entities of the chunks that changed since a version from take_version: where a row was
 // added or moved in, or a column in ids was written. The whole chunk is visited, so it can give entities that did not
 // change. ids must outlive the iterator.
-world_iter_changed :: proc "contextless" (w: ^World, since: u64, ids: []Component_Id) -> World_Iterator {
+world_iter_changed :: proc "contextless" (
+	w: ^World,
+	since: u64,
+	ids: []Component_Id,
+) -> World_Iterator {
 	return {world = w, since = since, ids = ids}
 }
 
 // world_next gives the next entity, the index of its archetype, which is the same for every entity with the same
 // components, and its sorted component IDs.
-world_next :: proc "contextless" (it: ^World_Iterator) -> (e: Entity, archetype_index: u32, components: []Component_Id, ok: bool) {
+world_next :: proc "contextless" (
+	it: ^World_Iterator,
+) -> (
+	e: Entity,
+	archetype_index: u32,
+	components: []Component_Id,
+	ok: bool,
+) {
 	for it.archetype < it.world.archetype_count {
 		a := archetype(it.world, it.archetype)
-		for it.since != 0 && it.row < a.count && it.row % a.capacity == 0 && !world_chunk_changed(it, a) {
+		for it.since != 0 &&
+		    it.row < a.count &&
+		    it.row % a.capacity == 0 &&
+		    !world_chunk_changed(it, a) {
 			it.row += a.capacity
 		}
 		if it.row < a.count {
@@ -114,7 +128,10 @@ world_next :: proc "contextless" (it: ^World_Iterator) -> (e: Entity, archetype_
 @(private = "file")
 world_chunk_changed :: proc "contextless" (it: ^World_Iterator, a: ^Archetype) -> bool {
 	chunk := chunk_directory(it.world, it.archetype)[it.row / a.capacity]
-	return chunk_version(it.world, chunk, ENTITY_COLUMN) > it.since || columns_changed(it.world, a, chunk, it.ids, it.since)
+	return(
+		chunk_version(it.world, chunk, ENTITY_COLUMN) > it.since ||
+		columns_changed(it.world, a, chunk, it.ids, it.since) \
+	)
 }
 
 // add_raw adds a component, or overwrites it if the entity has it. A nil data zeroes the component. Otherwise data
@@ -136,7 +153,10 @@ add_raw :: proc(w: ^World, e: Entity, id: Component_Id, data: []byte) -> bool {
 	if !found {
 		n := int(a.component_count)
 		if n == MAX_ARCHETYPE_COMPONENTS {
-			log.errorf("ecs: an entity cannot have more than %d components", MAX_ARCHETYPE_COMPONENTS)
+			log.errorf(
+				"ecs: an entity cannot have more than %d components",
+				MAX_ARCHETYPE_COMPONENTS,
+			)
 			return false
 		}
 		ids: [MAX_ARCHETYPE_COMPONENTS]Component_Id
@@ -391,7 +411,11 @@ remove_row :: proc(w: ^World, index: u32, row: u32) {
 		moved := entity_at(w, index, last)^
 		entity_at(w, index, row)^ = moved
 		for column in 0 ..< a.component_count {
-			mem.copy(component_at(w, index, column, row), component_at(w, index, column, last), int(a.sizes[column]))
+			mem.copy(
+				component_at(w, index, column, row),
+				component_at(w, index, column, last),
+				int(a.sizes[column]),
+			)
 		}
 		records(w)[entity_index(moved)].row = row
 		stamp_chunk(w, a, chunk_directory(w, index)[row / a.capacity])
@@ -415,7 +439,11 @@ move_entity :: proc(w: ^World, record: ^Entity_Record, target: u32) {
 			i += 1
 		}
 		if i < from.component_count && from.ids[i] == to.ids[column] {
-			mem.copy(component_at(w, target, column, row), component_at(w, source, i, record.row), int(to.sizes[column]))
+			mem.copy(
+				component_at(w, target, column, row),
+				component_at(w, source, i, record.row),
+				int(to.sizes[column]),
+			)
 		}
 	}
 	remove_row(w, source, record.row)
@@ -434,7 +462,11 @@ chunk_alloc :: proc(w: ^World) -> u32 {
 	}
 	if pool.used == MAX_CHUNKS ||
 	   !region_commit(&pool.memory, w.platform, int(pool.used + 1) * CHUNK_SIZE) ||
-	   !region_commit(&pool.versions, w.platform, int(pool.used + 1) * size_of([CHUNK_VERSIONS]u64)) {
+	   !region_commit(
+			   &pool.versions,
+			   w.platform,
+			   int(pool.used + 1) * size_of([CHUNK_VERSIONS]u64),
+		   ) {
 		panic("ecs: out of chunk memory")
 	}
 	pool.used += 1

@@ -123,8 +123,13 @@ arrows_and_the_dpad_move_the_focus_to_the_nearest_element_that_way :: proc(t: ^t
 a_held_direction_repeats_after_a_delay :: proc(t: ^testing.T) {
 	f := setup(t)
 	defer teardown(t, f)
-	show(t, f, MENU, `ui 1
-<ui><column><button id="1" height="20"/><button id="2" height="20"/><button id="3" height="20"/><button id="4" height="20"/></column></ui>`)
+	show(
+		t,
+		f,
+		MENU,
+		`ui 1
+<ui><column><button id="1" height="20"/><button id="2" height="20"/><button id="3" height="20"/><button id="4" height="20"/></column></ui>`,
+	)
 	step(f)
 	test_now = 10
 	step(f, key(.Down))
@@ -147,8 +152,13 @@ a_held_direction_repeats_after_a_delay :: proc(t: ^testing.T) {
 the_stick_engages_past_half_and_lets_go_under_a_third :: proc(t: ^testing.T) {
 	f := setup(t)
 	defer teardown(t, f)
-	show(t, f, MENU, `ui 1
-<ui><column><button id="1" height="20"/><button id="2" height="20"/><button id="3" height="20"/></column></ui>`)
+	show(
+		t,
+		f,
+		MENU,
+		`ui 1
+<ui><column><button id="1" height="20"/><button id="2" height="20"/><button id="3" height="20"/></column></ui>`,
+	)
 	step(f)
 	pad :: proc(y: f32) -> core.Input {
 		input: core.Input
@@ -197,10 +207,16 @@ a_modal_document_takes_the_focus_and_gives_it_back :: proc(t: ^testing.T) {
 	f := setup(t)
 	defer teardown(t, f)
 	show(t, f, MENU, GRID)
-	modal := show(t, f, MODAL, `ui 1
+	modal := show(
+		t,
+		f,
+		MODAL,
+		`ui 1
 <ui modal="true" cancel="resume" focus="no">
 	<column anchor="center"><button id="yes" click="yes">Yes</button><button id="no" click="no">No</button></column>
-</ui>`, order = 5)
+</ui>`,
+		order = 5,
+	)
 	ecs.get(&f.world, modal, Ui_Document).visible = false
 	step(f)
 	step(f, key(.Down))
@@ -228,8 +244,16 @@ a_modal_document_takes_the_focus_and_gives_it_back :: proc(t: ^testing.T) {
 a_field_takes_typed_text_and_its_keys :: proc(t: ^testing.T) {
 	f := setup(t)
 	defer teardown(t, f)
-	e := show(t, f, MENU, fmt.tprintf(`ui 1
-<ui font=$%s><field id="name" width="300" max_length="5" changed="edited" submit="named" placeholder="Name"/></ui>`, TEST_FONT))
+	e := show(
+		t,
+		f,
+		MENU,
+		fmt.tprintf(
+			`ui 1
+<ui font=$%s><field id="name" width="300" max_length="5" changed="edited" submit="named" placeholder="Name"/></ui>`,
+			TEST_FONT,
+		),
+	)
 	step(f)
 	step(f, {mouse_position = {10, 10}, down = {.Mouse_Left}, pressed = {.Mouse_Left}})
 	testing.expect(t, f.ui.input.edit != nil)
@@ -277,15 +301,25 @@ a_field_takes_typed_text_and_its_keys :: proc(t: ^testing.T) {
 escape_or_b_in_a_field_ends_the_edit_and_the_next_cancels :: proc(t: ^testing.T) {
 	f := setup(t)
 	defer teardown(t, f)
-	show(t, f, MENU, fmt.tprintf(`ui 1
-<ui font=$%s cancel="back"><field id="name" width="300" changed="edited"/></ui>`, TEST_FONT))
+	show(
+		t,
+		f,
+		MENU,
+		fmt.tprintf(
+			`ui 1
+<ui font=$%s cancel="back"><field id="name" width="300" changed="edited"/></ui>`,
+			TEST_FONT,
+		),
+	)
 	step(f)
 	click_at :: proc(f: ^Fixture, p: [2]f32) {
 		step(f, {mouse_position = p, down = {.Mouse_Left}, pressed = {.Mouse_Left}})
 		step(f, {mouse_position = p, released = {.Mouse_Left}})
 	}
 	click_at(f, {10, 10})
-	typed := core.Input{mouse_position = {10, 10}}
+	typed := core.Input {
+		mouse_position = {10, 10},
+	}
 	core.input_text_append(&typed.text, "Alic")
 	step(f, typed)
 	testing.expect_value(t, events(f), `edited(name, "Alic") `)
@@ -300,7 +334,10 @@ escape_or_b_in_a_field_ends_the_edit_and_the_next_cancels :: proc(t: ^testing.T)
 	// So does B.
 	click_at(f, {10, 10})
 	testing.expect(t, f.ui.input.edit != nil)
-	b := core.Input{mouse_position = {10, 10}, gamepads = {0 = {connected = true, down = {.B}, pressed = {.B}}}}
+	b := core.Input {
+		mouse_position = {10, 10},
+		gamepads = {0 = {connected = true, down = {.B}, pressed = {.B}}},
+	}
 	step(f, b)
 	testing.expect(t, f.ui.input.edit == nil)
 	testing.expect_value(t, events(f), "")
@@ -313,8 +350,16 @@ escape_or_b_in_a_field_ends_the_edit_and_the_next_cancels :: proc(t: ^testing.T)
 a_click_in_a_field_places_the_caret_by_that_fields_own_scroll :: proc(t: ^testing.T) {
 	f := setup(t)
 	defer teardown(t, f)
-	e := show(t, f, MENU, fmt.tprintf(`ui 1
-<ui font=$%s><column gap="10"><field id="a" width="60"/><field id="b" width="300" text="Alic Alic"/></column></ui>`, TEST_FONT))
+	e := show(
+		t,
+		f,
+		MENU,
+		fmt.tprintf(
+			`ui 1
+<ui font=$%s><column gap="10"><field id="a" width="60"/><field id="b" width="300" text="Alic Alic"/></column></ui>`,
+			TEST_FONT,
+		),
+	)
 	step(f)
 	a := node_rect(t, f, e, "a")
 	b := node_rect(t, f, e, "b")
@@ -330,7 +375,10 @@ a_click_in_a_field_places_the_caret_by_that_fields_own_scroll :: proc(t: ^testin
 	d := document_of(&f.ui, e)
 	n, _ := find_node(d, "b")
 	x := b[0] + d.nodes[n].style.padding[3] * f.ui.scale + caret_x(d, d.nodes[n].text, 3) + 1
-	step(f, {mouse_position = {x, (b[1] + b[3]) * 0.5}, down = {.Mouse_Left}, pressed = {.Mouse_Left}})
+	step(
+		f,
+		{mouse_position = {x, (b[1] + b[3]) * 0.5}, down = {.Mouse_Left}, pressed = {.Mouse_Left}},
+	)
 	edit, editing_b := f.ui.input.edit.?
 	testing.expect(t, editing_b && edit.field.node == n)
 	testing.expect_value(t, edit.caret, 3)
@@ -341,8 +389,13 @@ a_click_in_a_field_places_the_caret_by_that_fields_own_scroll :: proc(t: ^testin
 a_document_that_goes_away_ends_the_edit_of_its_field :: proc(t: ^testing.T) {
 	f := setup(t)
 	defer teardown(t, f)
-	e := show(t, f, MENU, fmt.tprintf(`ui 1
-<ui font=$%s><field id="name" width="300"/></ui>`, TEST_FONT))
+	e := show(
+		t,
+		f,
+		MENU,
+		fmt.tprintf(`ui 1
+<ui font=$%s><field id="name" width="300"/></ui>`, TEST_FONT),
+	)
 	step(f)
 	step(f, {mouse_position = {10, 10}, down = {.Mouse_Left}, pressed = {.Mouse_Left}})
 	testing.expect(t, f.ui.input.edit != nil)

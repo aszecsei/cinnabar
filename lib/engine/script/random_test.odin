@@ -57,9 +57,17 @@ the_generator_survives_a_code_reload :: proc(t: ^testing.T) {
 	f := setup(t, register_first_build)
 	defer teardown(f)
 	context.user_ptr = f
-	_, ok := spawn_source(&f.runtime, "=whole", "Random.seed(9) for _ = 1, 4 do Test.report(Random.value()) end")
+	_, ok := spawn_source(
+		&f.runtime,
+		"=whole",
+		"Random.seed(9) for _ = 1, 4 do Test.report(Random.value()) end",
+	)
 	testing.expect(t, ok)
-	_, ok = spawn_source(&f.runtime, "=before", "Random.seed(9) for _ = 1, 2 do Test.report(Random.value()) end")
+	_, ok = spawn_source(
+		&f.runtime,
+		"=before",
+		"Random.seed(9) for _ = 1, 2 do Test.report(Random.value()) end",
+	)
 	testing.expect(t, ok)
 	reload(&f.runtime, &f.platform, register_second_build)
 	_, ok = spawn_source(&f.runtime, "=after", "for _ = 1, 2 do Test.report(Random.value()) end")

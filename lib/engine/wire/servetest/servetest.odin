@@ -40,7 +40,13 @@ console_logger :: proc(c: ^Console) -> log.Logger {
 }
 
 @(private = "file")
-console_proc :: proc(data: rawptr, level: log.Level, text: string, options: log.Options, location := #caller_location) {
+console_proc :: proc(
+	data: rawptr,
+	level: log.Level,
+	text: string,
+	options: log.Options,
+	location := #caller_location,
+) {
 	c := (^Console)(data)
 	sync.guard(&c.mutex)
 	append(&c.lines, strings.clone(text, runtime.heap_allocator()))
@@ -76,7 +82,11 @@ dial :: proc(port: int) -> (socket: net.TCP_Socket, ok: bool) {
 }
 
 // send sends one message of a link's union.
-send :: proc(socket: net.TCP_Socket, message: $M, request: u32 = 0) -> bool where intrinsics.type_is_union(M) {
+send :: proc(
+	socket: net.TCP_Socket,
+	message: $M,
+	request: u32 = 0,
+) -> bool where intrinsics.type_is_union(M) {
 	buf: [dynamic]byte
 	defer delete(buf)
 	wire.write_message(&buf, message, request)
@@ -91,7 +101,13 @@ send :: proc(socket: net.TCP_Socket, message: $M, request: u32 = 0) -> bool wher
 }
 
 // receive receives one message of a link's union, in the temporary allocator.
-receive :: proc(socket: net.TCP_Socket, $M: typeid) -> (message: M, ok: bool) where intrinsics.type_is_union(M) {
+receive :: proc(
+	socket: net.TCP_Socket,
+	$M: typeid,
+) -> (
+	message: M,
+	ok: bool,
+) where intrinsics.type_is_union(M) {
 	header, payload := receive_raw(socket) or_return
 	return wire.decode_message(M, header.kind, payload, context.temp_allocator)
 }

@@ -37,7 +37,15 @@ foreign cn_vorbis {
 
 // audio_encode codes a sound's interleaved samples in a compressed format. skip is what a pass throws away before the
 // sound. The data is from the temp allocator.
-audio_encode :: proc(format: audio.Sound_Format, samples: []i16, channels: int) -> (data: []byte, skip: u32, ok: bool) {
+audio_encode :: proc(
+	format: audio.Sound_Format,
+	samples: []i16,
+	channels: int,
+) -> (
+	data: []byte,
+	skip: u32,
+	ok: bool,
+) {
 	#partial switch format {
 	case .ADPCM:
 		return adpcm.encode(samples, channels, context.temp_allocator), 0, true
@@ -80,7 +88,15 @@ encode_vorbis :: proc(samples: []i16, channels: int) -> (data: []byte, skip: u32
 		context = target.context_
 		append(target.bytes, ..data[:size])
 	}
-	if cn_vorbis_encode(raw_data(input), u64(len(input) / channels), c.int(channels), AUDIO_VORBIS_QUALITY, write, &target) != 0 {
+	if cn_vorbis_encode(
+		   raw_data(input),
+		   u64(len(input) / channels),
+		   c.int(channels),
+		   AUDIO_VORBIS_QUALITY,
+		   write,
+		   &target,
+	   ) !=
+	   0 {
 		return nil, 0, false
 	}
 	return out[:], AUDIO_ROLL_FRAMES, true
@@ -91,7 +107,8 @@ encode_opus :: proc(samples: []i16, channels: int) -> (data: []byte, skip: u32, 
 	input := rolled(samples, channels)
 	state := make([]byte, opus.encoder_get_size(c.int(channels)), context.temp_allocator)
 	encoder := (^opus.Encoder)(raw_data(state))
-	if opus.encoder_init(encoder, audio.SAMPLE_RATE, c.int(channels), opus.APPLICATION_AUDIO) != opus.OK {
+	if opus.encoder_init(encoder, audio.SAMPLE_RATE, c.int(channels), opus.APPLICATION_AUDIO) !=
+	   opus.OK {
 		return nil, 0, false
 	}
 	opus.encoder_ctl(encoder, opus.SET_BITRATE_REQUEST, i32(AUDIO_OPUS_BITRATE * channels))
@@ -109,7 +126,13 @@ encode_opus :: proc(samples: []i16, channels: int) -> (data: []byte, skip: u32, 
 		for i in count ..< len(frame) {
 			frame[i] = 0
 		}
-		size := opus.encode(encoder, raw_data(frame), AUDIO_OPUS_PACKET_FRAMES, &packet[0], len(packet))
+		size := opus.encode(
+			encoder,
+			raw_data(frame),
+			AUDIO_OPUS_PACKET_FRAMES,
+			&packet[0],
+			len(packet),
+		)
 		if size <= 0 {
 			return nil, 0, false
 		}

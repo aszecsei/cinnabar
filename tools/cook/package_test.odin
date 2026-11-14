@@ -55,13 +55,39 @@ package_tree :: proc(t: ^testing.T) -> Tree {
 			{"content/meshes/box.mesh.meta", "guid = " + BOX + "\n"},
 			{"content/audio/wind.wav", wav_of(samples)},
 			{"content/audio/wind.wav.meta", "guid = " + WIND + "\nstream = true\n"},
-			{"content/levels/hall.scene", "scene 2\nentity 0000000000000001\ncomponent 7 Renderer\n\ta = $" + STONE + "\n\tb = $" + MOSS + "\n\tc = $" + ROCK + "\nbehaviour " + DOOR + "\n"},
+			{
+				"content/levels/hall.scene",
+				"scene 2\nentity 0000000000000001\ncomponent 7 Renderer\n\ta = $" +
+				STONE +
+				"\n\tb = $" +
+				MOSS +
+				"\n\tc = $" +
+				ROCK +
+				"\nbehaviour " +
+				DOOR +
+				"\n",
+			},
 			{"content/levels/hall.scene.meta", "guid = " + HALL + "\n"},
-			{"content/levels/yard.scene", "scene 2\nentity 0000000000000001\ncomponent 7 Renderer\n\ta = $" + STONE + "\n\tb = $" + BOX + "\n\tc = $" + WIND + "\n"},
+			{
+				"content/levels/yard.scene",
+				"scene 2\nentity 0000000000000001\ncomponent 7 Renderer\n\ta = $" +
+				STONE +
+				"\n\tb = $" +
+				BOX +
+				"\n\tc = $" +
+				WIND +
+				"\n",
+			},
 			{"content/levels/yard.scene.meta", "guid = " + YARD + "\n"},
-			{"content/levels/menu.scene", "scene 2\nentity 0000000000000001\ncomponent 7 Renderer\n\ta = $" + ROCK + "\n"},
+			{
+				"content/levels/menu.scene",
+				"scene 2\nentity 0000000000000001\ncomponent 7 Renderer\n\ta = $" + ROCK + "\n",
+			},
 			{"content/levels/menu.scene.meta", "guid = " + MENU + "\n"},
-			{"project.settings", "output = Sdr\n" + format.BUNDLE_GLOBAL_SCENES_KEY + " = " + MENU + "\n"},
+			{
+				"project.settings",
+				"output = Sdr\n" + format.BUNDLE_GLOBAL_SCENES_KEY + " = " + MENU + "\n",
+			},
 		},
 	)
 }
@@ -102,7 +128,10 @@ Read_Bundle :: struct {
 // read_bundle reads a bundle, if there is one of the name.
 @(private = "file")
 read_bundle :: proc(t: ^testing.T, out, name: string) -> (bundle: Read_Bundle, found: bool) {
-	data, err := os.read_entire_file(fmt.tprintf("%s/%s%s", out, name, format.BUNDLE_EXTENSION), context.temp_allocator)
+	data, err := os.read_entire_file(
+		fmt.tprintf("%s/%s%s", out, name, format.BUNDLE_EXTENSION),
+		context.temp_allocator,
+	)
 	if err != nil {
 		return
 	}
@@ -115,7 +144,11 @@ read_bundle :: proc(t: ^testing.T, out, name: string) -> (bundle: Read_Bundle, f
 		return
 	}
 	bundle.entries = entries
-	bundle.dependencies = make([]string, format.bundle_dependency_count(header), context.temp_allocator)
+	bundle.dependencies = make(
+		[]string,
+		format.bundle_dependency_count(header),
+		context.temp_allocator,
+	)
 	for &d, i in bundle.dependencies {
 		d = format.bundle_dependency(head, header, i)
 	}
@@ -148,7 +181,16 @@ a_release_cache_packs_into_a_bundle_for_each_level_and_one_for_the_rest :: proc(
 	pass := cook(options, ALL_KINDS, log_problems = false)
 	testing.expectf(t, pass.ok, "%v", pass.problems.list)
 	out := fmt.tprintf("%s/bundles", tree.dir)
-	testing.expect(t, package_content({cache = options.cache, out = out, project = fmt.tprintf("%s/project.settings", tree.dir)}))
+	testing.expect(
+		t,
+		package_content(
+			{
+				cache = options.cache,
+				out = out,
+				project = fmt.tprintf("%s/project.settings", tree.dir),
+			},
+		),
+	)
 
 	global, global_found := read_bundle(t, out, format.GLOBAL_BUNDLE)
 	hall, hall_found := read_bundle(t, out, HALL)
@@ -159,7 +201,10 @@ a_release_cache_packs_into_a_bundle_for_each_level_and_one_for_the_rest :: proc(
 	testing.expect_value(t, len(global.dependencies), 0)
 	testing.expect(t, slice.equal(hall.dependencies, []string{format.GLOBAL_BUNDLE}))
 	testing.expect(t, slice.equal(yard.dependencies, []string{format.GLOBAL_BUNDLE}))
-	testing.expect(t, has(global, STONE) && has(global, ROCK) && has(global, MENU) && has(global, HELLO))
+	testing.expect(
+		t,
+		has(global, STONE) && has(global, ROCK) && has(global, MENU) && has(global, HELLO),
+	)
 	testing.expect(t, has(hall, HALL) && has(hall, MOSS) && has(hall, DOOR))
 	testing.expect(t, has(yard, YARD) && has(yard, BOX) && has(yard, WIND))
 	testing.expect_value(t, len(global.entries) + len(hall.entries) + len(yard.entries), 10)
@@ -171,7 +216,12 @@ a_release_cache_packs_into_a_bundle_for_each_level_and_one_for_the_rest :: proc(
 		for e in bundle.entries {
 			buffer: [32]u8
 			name := format.guid_format(e.guid, &buffer)
-			testing.expectf(t, slice.equal(unpack(bundle, e), tree_blob(t, tree, e.guid)), "%s is not its loose blob", name)
+			testing.expectf(
+				t,
+				slice.equal(unpack(bundle, e), tree_blob(t, tree, e.guid)),
+				"%s is not its loose blob",
+				name,
+			)
 			if e.kind == .Script || e.kind == .Scene || e.kind == .Mesh {
 				testing.expectf(t, e.codec == .Lz4, "%s is not compressed", name)
 			}
@@ -181,7 +231,8 @@ a_release_cache_packs_into_a_bundle_for_each_level_and_one_for_the_rest :: proc(
 
 @(test)
 units_are_levels_and_what_only_they_reach :: proc(t: ^testing.T) {
-	scene, other, shared, own, code := guid_of(HALL), guid_of(YARD), guid_of(STONE), guid_of(MOSS), guid_of(HELLO)
+	scene, other, shared, own, code :=
+		guid_of(HALL), guid_of(YARD), guid_of(STONE), guid_of(MOSS), guid_of(HELLO)
 	blobs := []Package_Blob {
 		{guid = scene, kind = .Scene, references = {shared, own, other}},
 		{guid = other, kind = .Scene, references = {shared}},

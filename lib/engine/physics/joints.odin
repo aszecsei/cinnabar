@@ -132,11 +132,46 @@ Physics_Joint :: struct {
 register_joint_components :: proc(r: ^ecs.Registry) {
 	ecs.register_component(r, Fixed_Joint, FIXED_JOINT_ID, Fixed_Joint{DEFAULT_JOINT})
 	ecs.register_component(r, Point_Joint, POINT_JOINT_ID, Point_Joint{DEFAULT_JOINT})
-	ecs.register_component(r, Hinge_Joint, HINGE_JOINT_ID, Hinge_Joint{joint = DEFAULT_JOINT, min_angle = -math.PI / 2, max_angle = math.PI / 2, spring_damping = 1})
-	ecs.register_component(r, Slider_Joint, SLIDER_JOINT_ID, Slider_Joint{joint = DEFAULT_JOINT, min = -1, max = 1, spring_damping = 1})
-	ecs.register_component(r, Distance_Joint, DISTANCE_JOINT_ID, Distance_Joint{joint = DEFAULT_JOINT, min_distance = -1, max_distance = -1, spring_damping = 1})
-	ecs.register_component(r, Cone_Joint, CONE_JOINT_ID, Cone_Joint{joint = DEFAULT_JOINT, half_angle = math.PI / 4})
-	ecs.register_component(r, Six_DOF_Joint, SIX_DOF_JOINT_ID, Six_DOF_Joint{joint = DEFAULT_JOINT, free_angular = true})
+	ecs.register_component(
+		r,
+		Hinge_Joint,
+		HINGE_JOINT_ID,
+		Hinge_Joint {
+			joint = DEFAULT_JOINT,
+			min_angle = -math.PI / 2,
+			max_angle = math.PI / 2,
+			spring_damping = 1,
+		},
+	)
+	ecs.register_component(
+		r,
+		Slider_Joint,
+		SLIDER_JOINT_ID,
+		Slider_Joint{joint = DEFAULT_JOINT, min = -1, max = 1, spring_damping = 1},
+	)
+	ecs.register_component(
+		r,
+		Distance_Joint,
+		DISTANCE_JOINT_ID,
+		Distance_Joint {
+			joint = DEFAULT_JOINT,
+			min_distance = -1,
+			max_distance = -1,
+			spring_damping = 1,
+		},
+	)
+	ecs.register_component(
+		r,
+		Cone_Joint,
+		CONE_JOINT_ID,
+		Cone_Joint{joint = DEFAULT_JOINT, half_angle = math.PI / 4},
+	)
+	ecs.register_component(
+		r,
+		Six_DOF_Joint,
+		SIX_DOF_JOINT_ID,
+		Six_DOF_Joint{joint = DEFAULT_JOINT, free_angular = true},
+	)
 	ecs.register_component(r, Physics_Joint, PHYSICS_JOINT_ID)
 }
 
@@ -181,7 +216,12 @@ Joint_Break :: struct {
 // sync: a joint waits for its bodies, is made again when what it was made from changes, and changes in place when
 // only its motor or whether it is enabled does.
 @(private)
-sync_joints :: proc(s: ^State, w: ^ecs.World, list: ^core_physics.Command_List, commands: ^ecs.Commands) {
+sync_joints :: proc(
+	s: ^State,
+	w: ^ecs.World,
+	list: ^core_physics.Command_List,
+	commands: ^ecs.Commands,
+) {
 	if !has_feature(s, .Joints, "joints are ignored") {
 		return
 	}
@@ -197,7 +237,12 @@ sync_joints :: proc(s: ^State, w: ^ecs.World, list: ^core_physics.Command_List, 
 
 // check_joints destroys the live joints whose entity, Physics_Joint or joint component is gone.
 @(private)
-check_joints :: proc(s: ^State, w: ^ecs.World, list: ^core_physics.Command_List, commands: ^ecs.Commands) {
+check_joints :: proc(
+	s: ^State,
+	w: ^ecs.World,
+	list: ^core_physics.Command_List,
+	commands: ^ecs.Commands,
+) {
 	for record, index in s.joint_records {
 		if record.entity == 0 {
 			continue
@@ -217,7 +262,14 @@ check_joints :: proc(s: ^State, w: ^ecs.World, list: ^core_physics.Command_List,
 }
 
 @(private)
-sync_kind :: proc(s: ^State, w: ^ecs.World, list: ^core_physics.Command_List, commands: ^ecs.Commands, $T: typeid, kind: Joint_Kind) {
+sync_kind :: proc(
+	s: ^State,
+	w: ^ecs.World,
+	list: ^core_physics.Command_List,
+	commands: ^ecs.Commands,
+	$T: typeid,
+	kind: Joint_Kind,
+) {
 	q := s.queries.joints[kind]
 	it := ecs.query_iter(w, q)
 	for view in ecs.query_next(&it) {
@@ -231,13 +283,21 @@ sync_kind :: proc(s: ^State, w: ^ecs.World, list: ^core_physics.Command_List, co
 				// A body is missing or not made yet: the joint waits for it.
 				if pj != nil && pool_valid(&s.joints, core_physics.Handle(pj.joint)) {
 					destroy_joint(s, list, pj.joint)
-					pj^ = {kind = kind}
+					pj^ = {
+						kind = kind,
+					}
 				}
 				continue
 			}
-			enabled := c.joint.enabled && !ecs.has(w, e, ecs.Inactive) && !body_disabled(s, desc.a) && !body_disabled(s, desc.b)
+			enabled :=
+				c.joint.enabled &&
+				!ecs.has(w, e, ecs.Inactive) &&
+				!body_disabled(s, desc.a) &&
+				!body_disabled(s, desc.b)
 			motor := motor_of(c)
-			if pj == nil || source != pj.source || !pool_valid(&s.joints, core_physics.Handle(pj.joint)) {
+			if pj == nil ||
+			   source != pj.source ||
+			   !pool_valid(&s.joints, core_physics.Handle(pj.joint)) {
 				if pj != nil && pool_valid(&s.joints, core_physics.Handle(pj.joint)) {
 					destroy_joint(s, list, pj.joint)
 				}
@@ -251,8 +311,17 @@ sync_kind :: proc(s: ^State, w: ^ecs.World, list: ^core_physics.Command_List, co
 				for int(handle.index) >= len(s.joint_records) {
 					append(&s.joint_records, Joint_Record{})
 				}
-				s.joint_records[handle.index] = {entity = e, kind = kind}
-				made := Physics_Joint{joint = handle, kind = kind, source = source, enabled = enabled, motor = motor}
+				s.joint_records[handle.index] = {
+					entity = e,
+					kind   = kind,
+				}
+				made := Physics_Joint {
+					joint   = handle,
+					kind    = kind,
+					source  = source,
+					enabled = enabled,
+					motor   = motor,
+				}
 				if pj == nil {
 					ecs.command_add(commands, w, e, made)
 				} else {
@@ -261,7 +330,14 @@ sync_kind :: proc(s: ^State, w: ^ecs.World, list: ^core_physics.Command_List, co
 				continue
 			}
 			if !pj.broken && (enabled != pj.enabled || motor != pj.motor) {
-				core_physics.cmd_set_joint(list, pj.joint, enabled, motor.mode, motor.target, motor.max)
+				core_physics.cmd_set_joint(
+					list,
+					pj.joint,
+					enabled,
+					motor.mode,
+					motor.target,
+					motor.max,
+				)
 				pj.enabled, pj.motor = enabled, motor
 			}
 		}
@@ -271,7 +347,17 @@ sync_kind :: proc(s: ^State, w: ^ecs.World, list: ^core_physics.Command_List, co
 // describe gives the Create_Joint of an entity's joint, without its handle, and a hash of what it is made from; it
 // gives false while a body is missing.
 @(private)
-describe :: proc(s: ^State, w: ^ecs.World, e: ecs.Entity, c: ^$T, kind: Joint_Kind) -> (desc: core_physics.Create_Joint, source: u64, ok: bool) {
+describe :: proc(
+	s: ^State,
+	w: ^ecs.World,
+	e: ecs.Entity,
+	c: ^$T,
+	kind: Joint_Kind,
+) -> (
+	desc: core_physics.Create_Joint,
+	source: u64,
+	ok: bool,
+) {
 	j := c.joint
 	has_body :: proc(w: ^ecs.World, e: ecs.Entity) -> bool {
 		pb := ecs.get(w, e, Physics_Body)
@@ -299,13 +385,22 @@ describe :: proc(s: ^State, w: ^ecs.World, e: ecs.Entity, c: ^$T, kind: Joint_Ki
 	desc.break_force, desc.break_torque = j.break_force, j.break_torque
 
 	pose := ecs.get(w, e, ecs.Transform)^
-	at := ecs.position_offset(pose.position, linalg.quaternion_mul_vector3(pose.rotation, j.offset * pose.scale))
-	desc.position_a, desc.rotation_a = ecs.position_sub_f64(at, s.anchor), to_rotation(pose.rotation * j.rotation)
+	at := ecs.position_offset(
+		pose.position,
+		linalg.quaternion_mul_vector3(pose.rotation, j.offset * pose.scale),
+	)
+	desc.position_a, desc.rotation_a =
+		ecs.position_sub_f64(at, s.anchor), to_rotation(pose.rotation * j.rotation)
 	desc.position_b, desc.rotation_b = desc.position_a, desc.rotation_a
 	if j.use_connected_frame && j.body_b != 0 {
 		other := ecs.get(w, j.body_b, ecs.Transform)^
-		on_b := ecs.position_offset(other.position, linalg.quaternion_mul_vector3(other.rotation, j.connected_offset * other.scale))
-		desc.position_b, desc.rotation_b = ecs.position_sub_f64(on_b, s.anchor), to_rotation(other.rotation * j.connected_rotation)
+		on_b := ecs.position_offset(
+			other.position,
+			linalg.quaternion_mul_vector3(other.rotation, j.connected_offset * other.scale),
+		)
+		desc.position_b, desc.rotation_b =
+			ecs.position_sub_f64(on_b, s.anchor),
+			to_rotation(other.rotation * j.connected_rotation)
 	}
 
 	when T == Hinge_Joint {
@@ -327,8 +422,12 @@ describe :: proc(s: ^State, w: ^ecs.World, e: ecs.Entity, c: ^$T, kind: Joint_Ki
 		desc.limit_max = c.half_angle
 	} else when T == Six_DOF_Joint {
 		for i in 0 ..< 3 {
-			desc.six_min[i], desc.six_max[i] = c.free_linear[i] ? -max(f32) : c.linear_min[i], c.free_linear[i] ? max(f32) : c.linear_max[i]
-			desc.six_min[i + 3], desc.six_max[i + 3] = c.free_angular[i] ? -max(f32) : c.angular_min[i], c.free_angular[i] ? max(f32) : c.angular_max[i]
+			desc.six_min[i], desc.six_max[i] =
+				c.free_linear[i] ? -max(f32) : c.linear_min[i],
+				c.free_linear[i] ? max(f32) : c.linear_max[i]
+			desc.six_min[i + 3], desc.six_max[i + 3] =
+				c.free_angular[i] ? -max(f32) : c.angular_min[i],
+				c.free_angular[i] ? max(f32) : c.angular_max[i]
 		}
 	}
 
@@ -356,7 +455,11 @@ motor_of :: proc(c: ^$T) -> Motor {
 
 @(private)
 body_disabled :: proc(s: ^State, body: core_physics.Body) -> bool {
-	return body.generation != 0 && int(body.index) < len(s.records) && s.records[body.index].disabled
+	return(
+		body.generation != 0 &&
+		int(body.index) < len(s.records) &&
+		s.records[body.index].disabled \
+	)
 }
 
 @(private)
@@ -375,7 +478,8 @@ note_breaks :: proc(s: ^State, w: ^ecs.World, broken: []core_physics.Joint_Break
 			continue
 		}
 		e := s.joint_records[b.joint.index].entity
-		if pj := ecs.is_alive(w, e) ? ecs.get_write(w, e, Physics_Joint) : nil; pj != nil && pj.joint == b.joint {
+		if pj := ecs.is_alive(w, e) ? ecs.get_write(w, e, Physics_Joint) : nil;
+		   pj != nil && pj.joint == b.joint {
 			pj.broken = true
 			append(&s.breaks, Joint_Break{e, b.force, b.torque})
 			log.debugf("physics: the joint of %v broke at %v N and %v N m", e, b.force, b.torque)

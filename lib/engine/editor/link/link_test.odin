@@ -28,10 +28,16 @@ every_message_round_trips :: proc(t: ^testing.T) {
 		Game_Reloaded{kind = .Soft_Restart},
 		Game_Size{width = 1920, height = -1},
 		Open_Viewport{viewport = 2, kind = .Game, width = 640, height = 360},
-		Viewport_Target{viewport = 2, prefix = "cinnabar.viewport2.g3", generation = 3, width = 640, height = 360},
+		Viewport_Target {
+			viewport = 2,
+			prefix = "cinnabar.viewport2.g3",
+			generation = 3,
+			width = 640,
+			height = 360,
+		},
 		Viewport_Acknowledged{viewport = 2, generation = 3, frame = 1 << 40},
 		Capture_Source{viewport = -1},
-		Component_Types{
+		Component_Types {
 			types = {
 				{
 					id = 1,
@@ -39,32 +45,69 @@ every_message_round_trips :: proc(t: ^testing.T) {
 					size = 48,
 					fields = {
 						{name = "position", kind = .Position},
-						{name = "mode", offset = 40, kind = .Enum, enum_base = .U8, enum_values = {{"Off", 0}, {"On", 1}}},
-						{name = "speed", offset = 44, kind = .F32, read_only = true, has_range = true, range_min = -1, range_max = 1},
+						{
+							name = "mode",
+							offset = 40,
+							kind = .Enum,
+							enum_base = .U8,
+							enum_values = {{"Off", 0}, {"On", 1}},
+						},
+						{
+							name = "speed",
+							offset = 44,
+							kind = .F32,
+							read_only = true,
+							has_range = true,
+							range_min = -1,
+							range_max = 1,
+						},
 					},
 				},
 			},
 		},
-		Entity_Snapshot{entities = {{entity = 1 << 32 | 3, parent = 0, active = true, components = {1, 3, 16}}}},
+		Entity_Snapshot {
+			entities = {
+				{entity = 1 << 32 | 3, parent = 0, active = true, components = {1, 3, 16}},
+			},
+		},
 		Entity_Delta{changed = {{entity = 5, parent = 1, components = {}}}, destroyed = {7, 8}},
 		Watch_Entity{entity = 9},
 		Unwatch_Entity{entity = 9},
-		Entity_Values{
+		Entity_Values {
 			entity = 9,
 			components = {{id = 1, data = {1, 2, 3}}},
-			behaviours = {{class = "Door", enabled = true, fields = {{name = "angle", kind = .Number, number = 90}, {name = "at", kind = .Vector, vector = {1, 2, 3}}}}},
+			behaviours = {
+				{
+					class = "Door",
+					enabled = true,
+					fields = {
+						{name = "angle", kind = .Number, number = 90},
+						{name = "at", kind = .Vector, vector = {1, 2, 3}},
+					},
+				},
+			},
 		},
-		Profile_Summary{
+		Profile_Summary {
 			first_frame = 10,
 			last_frame = 24,
 			frames = 15,
 			cpu_ms_average = 4.5,
 			gpu_worst_frame = 21,
 			recording = true,
-			costs = {{kind = .Script, name = "Door", callback = .Update, calls = 3, ms_average = 0.25, ms_max = 1}, {kind = .Pass, name = "prepass", queue = 1}},
+			costs = {
+				{
+					kind = .Script,
+					name = "Door",
+					callback = .Update,
+					calls = 3,
+					ms_average = 0.25,
+					ms_max = 1,
+				},
+				{kind = .Pass, name = "prepass", queue = 1},
+			},
 		},
 		Profile_Capture_Request{id = 4, mode = .Worst_Recent, count = 60},
-		Profile_Capture{
+		Profile_Capture {
 			id = 4,
 			frame = 21,
 			available = true,
@@ -72,11 +115,33 @@ every_message_round_trips :: proc(t: ^testing.T) {
 			gpu_begin = -200,
 			names = {{"Game update", .Frame}, {"prepass", .Render}},
 			lanes = {{"Main", .Thread}, {"GPU graphics", .Gpu_Graphics}},
-			zones = {{start = -5, duration = 100, name = 1, detail = 2, lane = 1, depth = 3, flags = 5, fiber = 9}},
+			zones = {
+				{
+					start = -5,
+					duration = 100,
+					name = 1,
+					detail = 2,
+					lane = 1,
+					depth = 3,
+					flags = 5,
+					fiber = 9,
+				},
+			},
 		},
 		Profile_Recording{recording = true},
 		Capture_Request{id = 5, kind = .Gif, path = "E:/captures/clip.gif"},
-		Capture_Result{id = 5, kind = .Gif, ok = true, path = "E:/captures/clip.gif", frame = 900, width = 640, height = 360, frames = 50, duration_ms = 4900, output = .Sdr},
+		Capture_Result {
+			id = 5,
+			kind = .Gif,
+			ok = true,
+			path = "E:/captures/clip.gif",
+			frame = 900,
+			width = 640,
+			height = 360,
+			frames = 50,
+			duration_ms = 4900,
+			output = .Sdr,
+		},
 	}
 	for message in messages {
 		decoded := round_trip(t, message)
@@ -150,7 +215,10 @@ the_version_is_stable_and_in_the_schema :: proc(t: ^testing.T) {
 	testing.expect(t, version != 0)
 	testing.expect_value(t, protocol_version(), version)
 	text := schema(context.temp_allocator)
-	testing.expect(t, strings.contains(text, strings.to_lower(tprint_hex(version), context.temp_allocator)))
+	testing.expect(
+		t,
+		strings.contains(text, strings.to_lower(tprint_hex(version), context.temp_allocator)),
+	)
 }
 
 @(private = "file")
@@ -195,15 +263,18 @@ an_animators_view_round_trips :: proc(t: ^testing.T) {
 	buf: [dynamic]byte
 	defer delete(buf)
 	sent := Animator_View {
-		entity        = 7,
-		graph         = {0 = 1, 15 = 2},
-		state         = 3,
-		source        = 1,
-		transition    = 20,
-		fade          = 0.25,
+		entity = 7,
+		graph = {0 = 1, 15 = 2},
+		state = 3,
+		source = 1,
+		transition = 20,
+		fade = 0.25,
 		fade_duration = 0.5,
-		progress      = 1.5,
-		parameters    = {{name = "speed", kind = .Float, value = 2}, {name = "look", kind = .Trigger, value = 1}},
+		progress = 1.5,
+		parameters = {
+			{name = "speed", kind = .Float, value = 2},
+			{name = "look", kind = .Trigger, value = 1},
+		},
 	}
 	write_message(&buf, sent)
 	header, _ := read_header(buf[:])
@@ -223,12 +294,31 @@ an_agents_view_round_trips :: proc(t: ^testing.T) {
 	buf: [dynamic]byte
 	defer delete(buf)
 	sent := Agent_View {
-		entity   = 7,
+		entity = 7,
 		decision = {0 = 1, 15 = 2},
-		nodes    = {{id = 3, running = true, last = .Aborted}, {id = 4, last = .Failed}},
-		values   = {{name = "health", kind = .Float, text = "0.25"}, {name = "target", kind = .Entity, text = "#4:1"}},
-		options  = {{id = 5, score = 0.5, chosen = true, considerations = {{id = 6, input = 0.25, score = 0.75}}}},
-		plan     = {{goal = 1, goals = {{1, 2}}, steps = {10, 11}, step = 1, methods = {{2, 3}}, searching = true}},
+		nodes = {{id = 3, running = true, last = .Aborted}, {id = 4, last = .Failed}},
+		values = {
+			{name = "health", kind = .Float, text = "0.25"},
+			{name = "target", kind = .Entity, text = "#4:1"},
+		},
+		options = {
+			{
+				id = 5,
+				score = 0.5,
+				chosen = true,
+				considerations = {{id = 6, input = 0.25, score = 0.75}},
+			},
+		},
+		plan = {
+			{
+				goal = 1,
+				goals = {{1, 2}},
+				steps = {10, 11},
+				step = 1,
+				methods = {{2, 3}},
+				searching = true,
+			},
+		},
 	}
 	write_message(&buf, sent)
 	header, _ := read_header(buf[:])
@@ -244,7 +334,11 @@ an_agents_view_round_trips :: proc(t: ^testing.T) {
 	testing.expect_value(t, got.values[1].text, "#4:1")
 	testing.expect_value(t, len(got.options), 1)
 	testing.expect_value(t, got.options[0].chosen, true)
-	testing.expect_value(t, got.options[0].considerations[0], Agent_Consideration{id = 6, input = 0.25, score = 0.75})
+	testing.expect_value(
+		t,
+		got.options[0].considerations[0],
+		Agent_Consideration{id = 6, input = 0.25, score = 0.75},
+	)
 	testing.expect_value(t, len(got.plan), 1)
 	testing.expect_value(t, got.plan[0].steps[1], 11)
 	testing.expect_value(t, got.plan[0].methods[0], Agent_Method{2, 3})
@@ -257,7 +351,13 @@ the_agents_actions_round_trip :: proc(t: ^testing.T) {
 	buf: [dynamic]byte
 	defer delete(buf)
 	sent := Agent_Actions {
-		actions = {{name = "walk", params = {{name = "steps", kind = .Int}, {name = "line", kind = .String}}}, {name = "idle"}},
+		actions = {
+			{
+				name = "walk",
+				params = {{name = "steps", kind = .Int}, {name = "line", kind = .String}},
+			},
+			{name = "idle"},
+		},
 	}
 	write_message(&buf, sent)
 	header, _ := read_header(buf[:])
@@ -267,7 +367,11 @@ the_agents_actions_round_trip :: proc(t: ^testing.T) {
 	got := message.(Agent_Actions)
 	testing.expect_value(t, len(got.actions), 2)
 	testing.expect_value(t, got.actions[0].name, "walk")
-	testing.expect_value(t, got.actions[0].params[1], Agent_Action_Param{name = "line", kind = .String})
+	testing.expect_value(
+		t,
+		got.actions[0].params[1],
+		Agent_Action_Param{name = "line", kind = .String},
+	)
 	testing.expect_value(t, len(got.actions[1].params), 0)
 }
 

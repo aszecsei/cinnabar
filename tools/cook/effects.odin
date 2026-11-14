@@ -104,7 +104,14 @@ cook_effect :: proc(a: ^Asset_Source, out_dir: string, pass: ^Pass) -> Asset_Res
 			}
 		}
 	}
-	key := hash.fnv64a(transmute([]byte)fmt.tprintf("%s\x00%s\x00%x\x00", EFFECT_COOK_VERSION, a.name, format.effect_layout()))
+	key := hash.fnv64a(
+		transmute([]byte)fmt.tprintf(
+			"%s\x00%s\x00%x\x00",
+			EFFECT_COOK_VERSION,
+			a.name,
+			format.effect_layout(),
+		),
+	)
 	key = hash.fnv64a(source_of(a^), key)
 	guid := a.meta.guid
 	key = hash.fnv64a(guid[:], key)
@@ -113,7 +120,10 @@ cook_effect :: proc(a: ^Asset_Source, out_dir: string, pass: ^Pass) -> Asset_Res
 	if cooked_key(output, .Effect, format.effect_layout()) == key && !pass.force[guid] {
 		return .Current
 	}
-	blob := format.effect_write({guid = guid, key = key, emitters = emitters, source_path = a.name}, context.temp_allocator)
+	blob := format.effect_write(
+		{guid = guid, key = key, emitters = emitters, source_path = a.name},
+		context.temp_allocator,
+	)
 	if !write_blob(output, blob) {
 		return .Failed
 	}
@@ -122,7 +132,13 @@ cook_effect :: proc(a: ^Asset_Source, out_dir: string, pass: ^Pass) -> Asset_Res
 
 // effect_parse parses an effect's text into its emitters, with their curves baked. It gives every problem that it
 // finds, and the effect is good only without any.
-effect_parse :: proc(text: string, allocator := context.allocator) -> (emitters: []format.Effect_Emitter_Contents, problems: []Effect_Problem) {
+effect_parse :: proc(
+	text: string,
+	allocator := context.allocator,
+) -> (
+	emitters: []format.Effect_Emitter_Contents,
+	problems: []Effect_Problem,
+) {
 	context.allocator = allocator
 	result := make([dynamic]format.Effect_Emitter_Contents)
 	found := make([dynamic]Effect_Problem)
@@ -137,13 +153,26 @@ effect_parse :: proc(text: string, allocator := context.allocator) -> (emitters:
 	emitter_line := 0
 	check_emitter :: proc(found: ^[dynamic]Effect_Problem, e: format.Effect_Emitter, line: int) {
 		if e.render == .Ribbon && e.capacity > format.MAX_RIBBON_CAPACITY {
-			append(found, Effect_Problem{line, fmt.aprintf("a ribbon emitter holds at most %d particles", format.MAX_RIBBON_CAPACITY)})
+			append(
+				found,
+				Effect_Problem {
+					line,
+					fmt.aprintf(
+						"a ribbon emitter holds at most %d particles",
+						format.MAX_RIBBON_CAPACITY,
+					),
+				},
+			)
 		}
 		if e.render == .Mesh && e.mesh == {} {
 			append(found, Effect_Problem{line, fmt.aprintf("a mesh emitter needs a mesh")})
 		}
 	}
-	finish :: proc(e: ^format.Effect_Emitter_Contents, modules: ^[dynamic]format.Effect_Module, keys: ^[format.Effect_Curve][dynamic]Curve_Key) {
+	finish :: proc(
+		e: ^format.Effect_Emitter_Contents,
+		modules: ^[dynamic]format.Effect_Module,
+		keys: ^[format.Effect_Curve][dynamic]Curve_Key,
+	) {
 		e.modules = modules[:]
 		for curve in format.Effect_Curve {
 			e.curves[curve] = bake_curve(keys[curve][:], DEFAULT_CURVES[curve])
@@ -180,9 +209,17 @@ effect_parse :: proc(text: string, allocator := context.allocator) -> (emitters:
 				check_emitter(&found, result[current].emitter, emitter_line)
 			}
 			if len(result) == format.MAX_EFFECT_EMITTERS {
-				problem(&found, line, "an effect has at most %d emitters", format.MAX_EFFECT_EMITTERS)
+				problem(
+					&found,
+					line,
+					"an effect has at most %d emitters",
+					format.MAX_EFFECT_EMITTERS,
+				)
 			}
-			append(&result, format.Effect_Emitter_Contents{emitter = DEFAULT_EMITTER, name = fields[1]})
+			append(
+				&result,
+				format.Effect_Emitter_Contents{emitter = DEFAULT_EMITTER, name = fields[1]},
+			)
 			current = len(result) - 1
 			emitter_line = line
 			modules = make([dynamic]format.Effect_Module)
@@ -198,7 +235,12 @@ effect_parse :: proc(text: string, allocator := context.allocator) -> (emitters:
 			if m, message := parse_module(fields[1:]); message != "" {
 				problem(&found, line, "%s", message)
 			} else if len(modules) == format.MAX_EFFECT_MODULES {
-				problem(&found, line, "an emitter has at most %d modules", format.MAX_EFFECT_MODULES)
+				problem(
+					&found,
+					line,
+					"an emitter has at most %d modules",
+					format.MAX_EFFECT_MODULES,
+				)
 			} else {
 				append(&modules, m)
 			}
@@ -216,7 +258,11 @@ effect_parse :: proc(text: string, allocator := context.allocator) -> (emitters:
 				problem(&found, line, "unknown curve %q: color, size or emission", name)
 				continue
 			}
-			if message := parse_curve(strings.fields(trimmed[equals + 1:]), CURVE_COMPONENTS[curve], &keys[curve]); message != "" {
+			if message := parse_curve(
+				strings.fields(trimmed[equals + 1:]),
+				CURVE_COMPONENTS[curve],
+				&keys[curve],
+			); message != "" {
 				problem(&found, line, "%s", message)
 			}
 			continue
@@ -296,7 +342,10 @@ parse_setting :: proc(e: ^format.Effect_Emitter, key: string, values: []string) 
 	case "capacity":
 		count, ok := strconv.parse_int(len(values) == 1 ? values[0] : "")
 		if !ok || count < 1 || count > format.MAX_EMITTER_CAPACITY {
-			return fmt.tprintf("capacity is a whole number from 1 to %d", format.MAX_EMITTER_CAPACITY)
+			return fmt.tprintf(
+				"capacity is a whole number from 1 to %d",
+				format.MAX_EMITTER_CAPACITY,
+			)
 		}
 		e.capacity = u32(count)
 	case "rate":
@@ -315,7 +364,10 @@ parse_setting :: proc(e: ^format.Effect_Emitter, key: string, values: []string) 
 		e.burst = u32(count)
 		if len(values) == 2 {
 			if bad, number := numbers(values[1:], n[:1]); !number || n[0] < 0 {
-				return fmt.tprintf("burst: %q is not an interval of 0 or more", bad if !number else values[1])
+				return fmt.tprintf(
+					"burst: %q is not an interval of 0 or more",
+					bad if !number else values[1],
+				)
 			}
 			e.burst_interval = n[0]
 		}
@@ -409,7 +461,10 @@ parse_setting :: proc(e: ^format.Effect_Emitter, key: string, values: []string) 
 			return "softness is meters"
 		}
 		if bad, ok := numbers(values, n[:1]); !ok || n[0] < 0 {
-			return fmt.tprintf("softness: %q is not meters of 0 or more", bad if !ok else values[0])
+			return fmt.tprintf(
+				"softness: %q is not meters of 0 or more",
+				bad if !ok else values[0],
+			)
 		}
 		e.softness = n[0]
 	case:
@@ -428,7 +483,7 @@ parse_module :: proc(fields: []string) -> (m: format.Effect_Module, message: str
 		kind:   format.Effect_Module_Kind,
 		values: int,
 		usage:  string,
-	}{
+	} {
 		{"gravity", .Gravity, 3, "module gravity <x> <y> <z>"},
 		{"drag", .Drag, 1, "module drag <per second>"},
 		{"noise", .Noise, 2, "module noise <strength> <frequency>"},
@@ -465,7 +520,10 @@ parse_curve :: proc(fields: []string, components: int, keys: ^[dynamic]Curve_Key
 		key: Curve_Key
 		t: [1]f32
 		if bad, ok := numbers({field[:colon]}, t[:]); !ok || t[0] < 0 || t[0] > 1 {
-			return fmt.tprintf("%q is not a point of life from 0 to 1", bad if !ok else field[:colon])
+			return fmt.tprintf(
+				"%q is not a point of life from 0 to 1",
+				bad if !ok else field[:colon],
+			)
 		}
 		key.t = t[0]
 		values := strings.split(field[colon + 1:], ",", context.temp_allocator)

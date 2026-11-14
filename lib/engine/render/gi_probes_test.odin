@@ -55,7 +55,11 @@ a_level_follows_the_camera_and_resets_the_probes_it_moved_over :: proc(t: ^testi
 	testing.expect_value(t, delta, [3]i64{3, 0, 0})
 	testing.expect_value(t, level.min_cell, before + {3, 0, 0})
 	mark_moved_probes(&schedule, 0, probe_phase(level.min_cell), delta)
-	testing.expect_value(t, pending_count(&schedule, 0), 3 * int(GI_PROBE_GRID.y * GI_PROBE_GRID.z))
+	testing.expect_value(
+		t,
+		pending_count(&schedule, 0),
+		3 * int(GI_PROBE_GRID.y * GI_PROBE_GRID.z),
+	)
 	// They are the box's last three columns along x.
 	phase := probe_phase(level.min_cell)
 	for storage in u32(0) ..< GI_PROBE_COUNT {
@@ -78,7 +82,11 @@ a_render_origin_rebase_moves_no_probe :: proc(t: ^testing.T) {
 	level: Gi_Probe_Level
 	before_camera, after_camera := meters(1023.75, 3.25, -7.5), meters(1024.25, 3.25, -7.5)
 	place_probe_level(&level, before_camera, 1)
-	testing.expect(t, snap_origin(before_camera) != snap_origin(after_camera), "the camera's step crosses a rebase")
+	testing.expect(
+		t,
+		snap_origin(before_camera) != snap_origin(after_camera),
+		"the camera's step crosses a rebase",
+	)
 	cells := level.min_cell
 	before := probe_level_min(level.min_cell, before_camera, 1)
 	testing.expect_value(t, place_probe_level(&level, after_camera, 1), [3]i64{})
@@ -123,7 +131,15 @@ the_rays_rotation_is_a_rotation :: proc(t: ^testing.T) {
 		for i in 0 ..< 3 {
 			for j in 0 ..< 3 {
 				d := rows[i].x * rows[j].x + rows[i].y * rows[j].y + rows[i].z * rows[j].z
-				testing.expectf(t, abs(d - (i == j ? 1 : 0)) < 1e-5, "frame %d: rows %d and %d: %f", frame, i, j, d)
+				testing.expectf(
+					t,
+					abs(d - (i == j ? 1 : 0)) < 1e-5,
+					"frame %d: rows %d and %d: %f",
+					frame,
+					i,
+					j,
+					d,
+				)
 			}
 		}
 	}
@@ -165,12 +181,20 @@ the_probes_update_on_the_compute_queue_and_pass_validation :: proc(t: ^testing.T
 	for p in ([]^Shader_Pipeline{&r.ray_scene.bin_pipeline, &r.ray_scene.fallback, &probes.reset, &probes.trace, &probes.light, &probes.screen, &probes.update}) {
 		p.pipeline = platform.gpu_create_compute_pipeline({compute = code, label = "test"})
 	}
-	r.ray_scene.accel = platform.gpu_create_accel({kind = .Top, max_instances = 4, label = "test scene"})
+	r.ray_scene.accel = platform.gpu_create_accel(
+		{kind = .Top, max_instances = 4, label = "test scene"},
+	)
 	defer ray_scene_destroy(&r.ray_scene, &platform)
 	defer gi_probes_destroy(probes, &platform)
-	instances := platform.gpu_create_buffer({size = 1024, usage = {.Storage}, label = "instances"}, nil)
+	instances := platform.gpu_create_buffer(
+		{size = 1024, usage = {.Storage}, label = "instances"},
+		nil,
+	)
 	defer platform.gpu_destroy_buffer(instances)
-	lit_texture := platform.gpu_create_texture({size = {32, 16}, format = GI_FORMAT, usage = {.Sampled, .Storage}, label = "lit"}, nil)
+	lit_texture := platform.gpu_create_texture(
+		{size = {32, 16}, format = GI_FORMAT, usage = {.Sampled, .Storage}, label = "lit"},
+		nil,
+	)
 	defer platform.gpu_destroy_texture(lit_texture)
 
 	settings := Gi_Settings {
@@ -182,18 +206,30 @@ the_probes_update_on_the_compute_queue_and_pass_validation :: proc(t: ^testing.T
 		cache: Texture_Cache
 		g := begin(&platform, &cache)
 		f := new(Frame, platform.frame_allocator)
-		f^ = {renderer = r, state = &r.view, graph = &g, size = {64, 32}, view = {position = camera}}
+		f^ = {
+			renderer = r,
+			state = &r.view,
+			graph = &g,
+			size = {64, 32},
+			view = {position = camera},
+		}
 		f.lights = new(Light_Frame, platform.frame_allocator)
 		// The prepass's depth, which the hits' light reads.
 		f.depth = create_texture(&g, {size = f.size, format = DEPTH_FORMAT, label = "depth"})
 		prepass := add_render_pass(&g, "prepass", proc(_: ^Pass_Context) {}, nil)
 		depth(&g, prepass, f.depth, .Clear)
 		// Last frame's lit scene, as the history cache keeps it.
-		lit := History{previous = import_texture(&g, lit_texture, .Storage), valid = frame > 0}
+		lit := History {
+			previous = import_texture(&g, lit_texture, .Storage),
+			valid    = frame > 0,
+		}
 		sf := new(Scene_Frame, platform.frame_allocator)
 		f.scene_frame = sf
 		sf.view_constants = make([]gpu.Upload, 1, platform.frame_allocator)
-		sf.view_constants[0], _ = platform.gpu_upload(size_of(Frame_Constants), gpu.PASS_CONSTANTS_ALIGN)
+		sf.view_constants[0], _ = platform.gpu_upload(
+			size_of(Frame_Constants),
+			gpu.PASS_CONSTANTS_ALIGN,
+		)
 		sf.instances = import_buffer(&g, instances)
 		sf.hit_instances, _ = platform.gpu_upload(size_of(Hit_Instance), 16)
 		sf.hit_submeshes, _ = platform.gpu_upload(size_of(Hit_Submesh), 16)
@@ -232,7 +268,13 @@ the_probes_update_on_the_compute_queue_and_pass_validation :: proc(t: ^testing.T
 	defer cache_destroy(&cache, &platform)
 	g := begin(&platform, &cache)
 	f := new(Frame, platform.frame_allocator)
-	f^ = {renderer = r, state = &r.view, graph = &g, size = {64, 32}, view = {position = meters(500, 0, 0)}}
+	f^ = {
+		renderer = r,
+		state = &r.view,
+		graph = &g,
+		size = {64, 32},
+		view = {position = meters(500, 0, 0)},
+	}
 	testing.expect(t, add_gi_probe_passes(f, settings, {}) == nil)
 	testing.expect_value(t, r.view.gi.probes.levels, before)
 }

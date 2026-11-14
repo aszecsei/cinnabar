@@ -116,7 +116,8 @@ thumbnails_update :: proc(index: ^Index, pass: ^Pass, options: Cook_Options) {
 		}
 		carried[guid] = true
 		for s in a.subassets {
-			carried[strings.clone(format.guid_format(s.guid, &buffer), context.temp_allocator)] = true
+			carried[strings.clone(format.guid_format(s.guid, &buffer), context.temp_allocator)] =
+				true
 		}
 	}
 	settled := options
@@ -124,7 +125,9 @@ thumbnails_update :: proc(index: ^Index, pass: ^Pass, options: Cook_Options) {
 		sources = sources,
 		data = &settled,
 		blob_key = proc(data: rawptr, guid: string) -> u64 {
-			return blob_header_key(fmt.tprintf("%s/%s.blob", config_dir((^Cook_Options)(data)^), guid))
+			return blob_header_key(
+				fmt.tprintf("%s/%s.blob", config_dir((^Cook_Options)(data)^), guid),
+			)
 		},
 		memo = make(map[string]u64, len(index.assets), context.temp_allocator),
 		blobs = make(map[string]u64, len(index.assets), context.temp_allocator),
@@ -168,7 +171,16 @@ thumbnails_update :: proc(index: ^Index, pass: ^Pass, options: Cook_Options) {
 				asset_source(pass, i)
 				source = &pass.assets[i]
 			}
-			append(&pending, Thumbnail_Job{guid = guid, kind = entry.kind, output = entry.thumbnail, source = source, blob = fmt.tprintf("%s/%s.blob", config_dir(options), guid)})
+			append(
+				&pending,
+				Thumbnail_Job {
+					guid = guid,
+					kind = entry.kind,
+					output = entry.thumbnail,
+					source = source,
+					blob = fmt.tprintf("%s/%s.blob", config_dir(options), guid),
+				},
+			)
 		}
 	}
 	// A file goes when nothing wants its GUID and key, whatever comes after them, as a part of a prefab's picture.
@@ -215,10 +227,17 @@ thumbnail_make :: proc(job: Thumbnail_Job) -> bool {
 		}
 		pixels, size, ok = texture_thumbnail(data, context.temp_allocator)
 	} else if job.source != nil {
-		samples, channels, decoded := decode_sound(source_of(job.source^), audio_setting(job.source^, "channels"))
+		samples, channels, decoded := decode_sound(
+			source_of(job.source^),
+			audio_setting(job.source^, "channels"),
+		)
 		defer delete(samples)
 		if decoded {
-			pixels, size, ok = waveform_thumbnail(samples[:], int(channels), context.temp_allocator)
+			pixels, size, ok = waveform_thumbnail(
+				samples[:],
+				int(channels),
+				context.temp_allocator,
+			)
 		}
 	}
 	if !ok {
@@ -248,13 +267,25 @@ blob_header_key :: proc(path: string) -> u64 {
 // its smallest mip that is at least that large. Color keeps its sRGB bytes, a mask is gray, a normal map shows its
 // normals, and HDR is tone mapped.
 @(private)
-texture_thumbnail :: proc(data: []byte, allocator: runtime.Allocator) -> (pixels: []u8, size: [2]int, ok: bool) {
+texture_thumbnail :: proc(
+	data: []byte,
+	allocator: runtime.Allocator,
+) -> (
+	pixels: []u8,
+	size: [2]int,
+	ok: bool,
+) {
 	blob := format.texture_view(data) or_return
 	mips := format.blob_bytes(data, blob.mips)
 	offset := 0
 	mip := u32(0)
-	for mip + 1 < blob.mip_count && max(max(blob.size.x >> (mip + 1), 1), max(blob.size.y >> (mip + 1), 1)) >= THUMBNAIL_SIZE {
-		offset += format.texture_mip_size(blob.format, max(blob.size.x >> mip, 1), max(blob.size.y >> mip, 1))
+	for mip + 1 < blob.mip_count &&
+	    max(max(blob.size.x >> (mip + 1), 1), max(blob.size.y >> (mip + 1), 1)) >= THUMBNAIL_SIZE {
+		offset += format.texture_mip_size(
+			blob.format,
+			max(blob.size.x >> mip, 1),
+			max(blob.size.y >> mip, 1),
+		)
 		mip += 1
 	}
 	width, height := max(blob.size.x >> mip, 1), max(blob.size.y >> mip, 1)
@@ -278,7 +309,14 @@ texture_thumbnail :: proc(data: []byte, allocator: runtime.Allocator) -> (pixels
 	if compressed == .BC6H {
 		// Half floats, RGBA.
 		halves := make([]u8, int(width) * int(height) * 8, context.temp_allocator)
-		if cn_decompress(.BC6H, raw_data(texels), c.uint(width), c.uint(height), raw_data(halves)) != 0 {
+		if cn_decompress(
+			   .BC6H,
+			   raw_data(texels),
+			   c.uint(width),
+			   c.uint(height),
+			   raw_data(halves),
+		   ) !=
+		   0 {
 			return
 		}
 		for i in 0 ..< int(width) * int(height) {
@@ -290,14 +328,22 @@ texture_thumbnail :: proc(data: []byte, allocator: runtime.Allocator) -> (pixels
 			decoded[i * 4 + 3] = 255
 		}
 	} else if compressed != {} {
-		if cn_decompress(compressed, raw_data(texels), c.uint(width), c.uint(height), raw_data(decoded)) != 0 {
+		if cn_decompress(
+			   compressed,
+			   raw_data(texels),
+			   c.uint(width),
+			   c.uint(height),
+			   raw_data(decoded),
+		   ) !=
+		   0 {
 			return
 		}
 	}
 	#partial switch blob.format {
 	case .BC4_Unorm:
 		for i in 0 ..< int(width) * int(height) {
-			decoded[i * 4 + 1], decoded[i * 4 + 2], decoded[i * 4 + 3] = decoded[i * 4], decoded[i * 4], 255
+			decoded[i * 4 + 1], decoded[i * 4 + 2], decoded[i * 4 + 3] =
+				decoded[i * 4], decoded[i * 4], 255
 		}
 	case .BC5_Unorm:
 		for i in 0 ..< int(width) * int(height) {
@@ -313,17 +359,35 @@ texture_thumbnail :: proc(data: []byte, allocator: runtime.Allocator) -> (pixels
 // fit_thumbnail is RGBA8 pixels with their longer side at most THUMBNAIL_SIZE: each new pixel is the average of the old
 // ones that it covers.
 @(private)
-fit_thumbnail :: proc(pixels: []u8, size: [2]int, allocator: runtime.Allocator) -> (fitted: []u8, fitted_size: [2]int) {
+fit_thumbnail :: proc(
+	pixels: []u8,
+	size: [2]int,
+	allocator: runtime.Allocator,
+) -> (
+	fitted: []u8,
+	fitted_size: [2]int,
+) {
 	longest := max(size.x, size.y)
 	if longest <= THUMBNAIL_SIZE {
 		return slice.clone(pixels, allocator), size
 	}
-	fitted_size = {max(size.x * THUMBNAIL_SIZE / longest, 1), max(size.y * THUMBNAIL_SIZE / longest, 1)}
+	fitted_size = {
+		max(size.x * THUMBNAIL_SIZE / longest, 1),
+		max(size.y * THUMBNAIL_SIZE / longest, 1),
+	}
 	fitted = make([]u8, fitted_size.x * fitted_size.y * 4, allocator)
 	for y in 0 ..< fitted_size.y {
-		y0, y1 := y * size.y / fitted_size.y, max((y + 1) * size.y / fitted_size.y, y * size.y / fitted_size.y + 1)
+		y0, y1 :=
+			y *
+			size.y /
+			fitted_size.y,
+			max((y + 1) * size.y / fitted_size.y, y * size.y / fitted_size.y + 1)
 		for x in 0 ..< fitted_size.x {
-			x0, x1 := x * size.x / fitted_size.x, max((x + 1) * size.x / fitted_size.x, x * size.x / fitted_size.x + 1)
+			x0, x1 :=
+				x *
+				size.x /
+				fitted_size.x,
+				max((x + 1) * size.x / fitted_size.x, x * size.x / fitted_size.x + 1)
 			sum: [4]int
 			for sy in y0 ..< y1 {
 				for sx in x0 ..< x1 {
@@ -346,7 +410,15 @@ fit_thumbnail :: proc(pixels: []u8, size: [2]int, allocator: runtime.Allocator) 
 // waveform_thumbnail is a picture of a sound, RGBA8 on nothing: for each column, the lowest and highest sample of any
 // channel in that part of the sound.
 @(private)
-waveform_thumbnail :: proc(samples: []i16, channels: int, allocator: runtime.Allocator) -> (pixels: []u8, size: [2]int, ok: bool) {
+waveform_thumbnail :: proc(
+	samples: []i16,
+	channels: int,
+	allocator: runtime.Allocator,
+) -> (
+	pixels: []u8,
+	size: [2]int,
+	ok: bool,
+) {
 	if channels <= 0 {
 		return
 	}
@@ -370,7 +442,8 @@ waveform_thumbnail :: proc(samples: []i16, channels: int, allocator: runtime.All
 		bottom := int(math.ceil(middle - f32(low) / 32768 * middle))
 		for y in clamp(top, 0, size.y - 1) ..= clamp(bottom, 0, size.y - 1) {
 			at := (y * size.x + x) * 4
-			pixels[at], pixels[at + 1], pixels[at + 2], pixels[at + 3] = WAVEFORM_COLOR.r, WAVEFORM_COLOR.g, WAVEFORM_COLOR.b, WAVEFORM_COLOR.a
+			pixels[at], pixels[at + 1], pixels[at + 2], pixels[at + 3] =
+				WAVEFORM_COLOR.r, WAVEFORM_COLOR.g, WAVEFORM_COLOR.b, WAVEFORM_COLOR.a
 		}
 	}
 	return pixels, size, true
@@ -378,7 +451,8 @@ waveform_thumbnail :: proc(samples: []i16, channels: int, allocator: runtime.All
 
 @(private = "file")
 srgb_byte :: proc(linear: f32) -> u8 {
-	encoded := linear <= 0.0031308 ? linear * 12.92 : 1.055 * math.pow(linear, 1 / f32(2.4)) - 0.055
+	encoded :=
+		linear <= 0.0031308 ? linear * 12.92 : 1.055 * math.pow(linear, 1 / f32(2.4)) - 0.055
 	return u8(clamp(encoded, 0, 1) * 255 + 0.5)
 }
 
@@ -386,14 +460,14 @@ srgb_byte :: proc(linear: f32) -> u8 {
 @(private)
 png_encode :: proc(pixels: []u8, size: [2]int, allocator: runtime.Allocator) -> []byte {
 	Sink :: struct {
-		out:     [dynamic]byte,
+		out:      [dynamic]byte,
 		context_: runtime.Context,
 	}
 	sink := Sink{make([dynamic]byte, allocator), context}
 	stbi.write_png_to_func(proc "c" (data: rawptr, bytes: rawptr, count: c.int) {
-		sink := (^Sink)(data)
-		context = sink.context_
-		append(&sink.out, ..([^]byte)(bytes)[:count])
-	}, &sink, c.int(size.x), c.int(size.y), 4, raw_data(pixels), c.int(size.x * 4))
+			sink := (^Sink)(data)
+			context = sink.context_
+			append(&sink.out, ..([^]byte)(bytes)[:count])
+		}, &sink, c.int(size.x), c.int(size.y), 4, raw_data(pixels), c.int(size.x * 4))
 	return sink.out[:]
 }

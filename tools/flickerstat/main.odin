@@ -70,7 +70,11 @@ add :: proc(s: ^Stats, values: []f32, size: [2]int, frame: i64) -> bool {
 	}
 	s.count += 1
 	if s.count > 1 {
-		step := Step{from = s.frame, to = frame, low = size}
+		step := Step {
+			from = s.frame,
+			to   = frame,
+			low  = size,
+		}
 		total: f64
 		pops := 0
 		for v, i in values {
@@ -117,14 +121,23 @@ quantiles :: proc(values: []f32) -> (q: Quantiles) {
 	at :: proc(sorted: []f32, share: f32) -> f32 {
 		return sorted[min(int(share * f32(len(sorted))), len(sorted) - 1)]
 	}
-	return {at(sorted, 0.5), at(sorted, 0.95), at(sorted, 0.99), at(sorted, 0.999), sorted[len(sorted) - 1]}
+	return {
+		at(sorted, 0.5),
+		at(sorted, 0.95),
+		at(sorted, 0.99),
+		at(sorted, 0.999),
+		sorted[len(sorted) - 1],
+	}
 }
 
 // luma is an RGB8 image's Rec. 709 luma in 8-bit codes, on the encoded values.
 luma :: proc(pixels: []byte, allocator := context.allocator) -> []f32 {
 	out := make([]f32, len(pixels) / 3, allocator)
 	for &v, i in out {
-		v = 0.2126 * f32(pixels[i * 3]) + 0.7152 * f32(pixels[i * 3 + 1]) + 0.0722 * f32(pixels[i * 3 + 2])
+		v =
+			0.2126 * f32(pixels[i * 3]) +
+			0.7152 * f32(pixels[i * 3 + 1]) +
+			0.0722 * f32(pixels[i * 3 + 2])
 	}
 	return out
 }
@@ -136,14 +149,22 @@ heat :: proc(v: f32) -> [3]u8 {
 }
 
 // screenshots lists a directory's PNGs in order. Their names start with their times, or number them.
-screenshots :: proc(directory: string, allocator := context.allocator) -> (paths: []string, ok: bool) {
+screenshots :: proc(
+	directory: string,
+	allocator := context.allocator,
+) -> (
+	paths: []string,
+	ok: bool,
+) {
 	infos, err := os.read_all_directory_by_path(directory, context.temp_allocator)
 	if err != nil {
 		return
 	}
 	found := make([dynamic]string, allocator)
 	for info in infos {
-		if strings.has_suffix(info.name, ".png") && !strings.has_suffix(info.name, ".spread.png") && !strings.has_suffix(info.name, ".step.png") {
+		if strings.has_suffix(info.name, ".png") &&
+		   !strings.has_suffix(info.name, ".spread.png") &&
+		   !strings.has_suffix(info.name, ".step.png") {
 			append(&found, strings.clone(info.fullpath, allocator))
 		}
 	}
@@ -162,7 +183,9 @@ frame_of :: proc(png_path: string, place: int) -> i64 {
 	stem := png_path[:len(png_path) - len(filepath.ext(png_path))]
 	data, err := os.read_entire_file(fmt.tprintf("%s.json", stem), context.temp_allocator)
 	sidecar: Sidecar
-	if err != nil || json.unmarshal(data, &sidecar, allocator = context.temp_allocator) != nil || len(sidecar.images) == 0 {
+	if err != nil ||
+	   json.unmarshal(data, &sidecar, allocator = context.temp_allocator) != nil ||
+	   len(sidecar.images) == 0 {
 		return i64(place)
 	}
 	return sidecar.images[0].frame
@@ -174,7 +197,10 @@ write_heat :: proc(path: string, values: []f32, size: [2]int, full: f32) -> bool
 		color := heat(v / full)
 		copy(pixels[i * 3:], color[:])
 	}
-	encoded, ok := capture.encode_png({size = {u32(size.x), u32(size.y)}, pixels = pixels}, context.temp_allocator)
+	encoded, ok := capture.encode_png(
+		{size = {u32(size.x), u32(size.y)}, pixels = pixels},
+		context.temp_allocator,
+	)
 	return ok && os.write_entire_file(path, encoded) == nil
 }
 
@@ -189,7 +215,15 @@ print_report :: proc(s: ^Stats, spreads: []f32) {
 		}
 		fmt.println()
 	}
-	fmt.printfln("%-6s %7s %7s %7s %7s %7s  (8-bit codes)", "", "p50", "p95", "p99", "p99.9", "max")
+	fmt.printfln(
+		"%-6s %7s %7s %7s %7s %7s  (8-bit codes)",
+		"",
+		"p50",
+		"p95",
+		"p99",
+		"p99.9",
+		"max",
+	)
 	row("spread", a)
 	row("step", b)
 	means := make([]f32, len(s.steps), context.temp_allocator)
@@ -253,7 +287,14 @@ main :: proc() {
 		}
 		size := [2]int{img.width, img.height}
 		if !add(&stats, luma(img.pixels.buf[:], context.temp_allocator), size, frame_of(path, i)) {
-			fmt.eprintfln("flickerstat: %s is %dx%d, not %dx%d like the others", path, size.x, size.y, stats.size.x, stats.size.y)
+			fmt.eprintfln(
+				"flickerstat: %s is %dx%d, not %dx%d like the others",
+				path,
+				size.x,
+				size.y,
+				stats.size.x,
+				stats.size.y,
+			)
 			os.exit(1)
 		}
 		free_all(context.temp_allocator)
@@ -263,7 +304,8 @@ main :: proc() {
 	if out != "" {
 		a := fmt.tprintf("%s.spread.png", out)
 		b := fmt.tprintf("%s.step.png", out)
-		if !write_heat(a, spreads, stats.size, SPREAD_FULL) || !write_heat(b, stats.largest, stats.size, STEP_FULL) {
+		if !write_heat(a, spreads, stats.size, SPREAD_FULL) ||
+		   !write_heat(b, stats.largest, stats.size, STEP_FULL) {
 			fmt.eprintfln("flickerstat: cannot write %s or %s", a, b)
 			os.exit(1)
 		}

@@ -34,17 +34,17 @@ TEST_FONT :: "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0"
 
 @(private)
 Fixture :: struct {
-	frame:    virtual.Arena,
-	platform: core.Platform_API,
-	world:    ecs.World,
-	cache:    string,
-	assets:   asset.Assets,
-	ui:       State,
-	scripts:  bool,
-	runtime:  script.Runtime,
-	reports:  [dynamic]string,
+	frame:      virtual.Arena,
+	platform:   core.Platform_API,
+	world:      ecs.World,
+	cache:      string,
+	assets:     asset.Assets,
+	ui:         State,
+	scripts:    bool,
+	runtime:    script.Runtime,
+	reports:    [dynamic]string,
 	// The entity that Test.entity gives.
-	entity:   ecs.Entity,
+	entity:     ecs.Entity,
 	// The blobs' versions, which a rewrite moves on.
 	generation: int,
 }
@@ -63,24 +63,27 @@ setup :: proc(t: ^testing.T, scripts := false) -> ^Fixture {
 	f := new(Fixture)
 	testing.expect(t, virtual.arena_init_growing(&f.frame) == nil)
 	f.platform = {
-		frame_allocator      = virtual.arena_allocator(&f.frame),
-		heap_allocator       = runtime.heap_allocator(),
-		asset_allocator      = runtime.heap_allocator(),
-		jobs_run             = jobs.run,
-		jobs_wait            = jobs.wait,
-		memory_reserve       = proc(size: int) -> rawptr {
+		frame_allocator = virtual.arena_allocator(&f.frame),
+		heap_allocator = runtime.heap_allocator(),
+		asset_allocator = runtime.heap_allocator(),
+		jobs_run = jobs.run,
+		jobs_wait = jobs.wait,
+		memory_reserve = proc(size: int) -> rawptr {
 			data, err := virtual.reserve(uint(size))
 			return err == nil ? raw_data(data) : nil
 		},
-		memory_commit        = proc(ptr: rawptr, size: int) -> bool {return virtual.commit(ptr, uint(size)) == nil},
-		memory_release       = proc(ptr: rawptr, size: int) {virtual.release(ptr, uint(size))},
-		file_read            = core.file_read,
-		file_modified        = core.file_modified,
-		time_seconds         = proc() -> f64 {return test_now},
-		script_open          = script_host.open,
-		script_close         = script_host.close,
-		script_push_binding  = script_host.push_binding,
-		script_atom          = script_host.atom,
+		memory_commit = proc(
+			ptr: rawptr,
+			size: int,
+		) -> bool {return virtual.commit(ptr, uint(size)) == nil},
+		memory_release = proc(ptr: rawptr, size: int) {virtual.release(ptr, uint(size))},
+		file_read = core.file_read,
+		file_modified = core.file_modified,
+		time_seconds = proc() -> f64 {return test_now},
+		script_open = script_host.open,
+		script_close = script_host.close,
+		script_push_binding = script_host.push_binding,
+		script_atom = script_host.atom,
 		script_direct_access = script_host.direct_access,
 	}
 	testing.expect(t, ecs.init(&f.world, &f.platform))
@@ -97,7 +100,10 @@ setup :: proc(t: ^testing.T, scripts := false) -> ^Fixture {
 		f.reports = make([dynamic]string)
 		script.register_components(&f.world.registry)
 		context.user_ptr = f
-		testing.expect(t, script.init(&f.runtime, &f.platform, &f.world, nil, register_test_scripts))
+		testing.expect(
+			t,
+			script.init(&f.runtime, &f.platform, &f.world, nil, register_test_scripts),
+		)
 	}
 	return f
 }
@@ -115,7 +121,13 @@ register_test_scripts :: proc(r: ^script.Runtime) {
 		f := (^Fixture)(context.user_ptr)
 		parts := make([dynamic]string, context.temp_allocator)
 		for i in 1 ..= luau.gettop(L) {
-			append(&parts, strings.clone(string(cstring(luau.L_tolstring(L, i, nil))), context.temp_allocator))
+			append(
+				&parts,
+				strings.clone(
+					string(cstring(luau.L_tolstring(L, i, nil))),
+					context.temp_allocator,
+				),
+			)
 			luau.pop(L, 1)
 		}
 		append(&f.reports, strings.join(parts[:], " ", context.temp_allocator))
@@ -153,34 +165,62 @@ write_font :: proc(t: ^testing.T, f: ^Fixture) {
 	for &g, i in glyphs {
 		g.id = u32(i)
 	}
-	write_blob(t, f, TEST_FONT, format.font_write({
-		guid = guid_of(TEST_FONT),
-		key = 1,
-		atlas_size = {1, 1},
-		units_per_em = 1000,
-		em_size = 48,
-		range = 8,
-		ascender = 0.935,
-		descender = -0.265,
-		line_gap = 0,
-		glyphs = glyphs,
-		font_data = TEST_FONT_FILE,
-		family = "Fira Sans",
-	}, context.temp_allocator))
+	write_blob(
+		t,
+		f,
+		TEST_FONT,
+		format.font_write(
+			{
+				guid = guid_of(TEST_FONT),
+				key = 1,
+				atlas_size = {1, 1},
+				units_per_em = 1000,
+				em_size = 48,
+				range = 8,
+				ascender = 0.935,
+				descender = -0.265,
+				line_gap = 0,
+				glyphs = glyphs,
+				font_data = TEST_FONT_FILE,
+				family = "Fira Sans",
+			},
+			context.temp_allocator,
+		),
+	)
 }
 
 // write_document parses a document's text, which must have no errors, and writes its blob.
 @(private)
-write_document :: proc(t: ^testing.T, f: ^Fixture, guid: string, text: string, loc := #caller_location) {
+write_document :: proc(
+	t: ^testing.T,
+	f: ^Fixture,
+	guid: string,
+	text: string,
+	loc := #caller_location,
+) {
 	document, problems, ok := format.ui_parse(text)
 	testing.expectf(t, ok, "%v", problems, loc = loc)
 	f.generation += 1
-	write_blob(t, f, guid, format.ui_write({guid = guid_of(guid), key = u64(f.generation), document = document}, context.temp_allocator))
+	write_blob(
+		t,
+		f,
+		guid,
+		format.ui_write(
+			{guid = guid_of(guid), key = u64(f.generation), document = document},
+			context.temp_allocator,
+		),
+	)
 }
 
 // show puts a document on a new entity.
 @(private)
-show :: proc(t: ^testing.T, f: ^Fixture, guid: string, text: string, order: i32 = 0) -> ecs.Entity {
+show :: proc(
+	t: ^testing.T,
+	f: ^Fixture,
+	guid: string,
+	text: string,
+	order: i32 = 0,
+) -> ecs.Entity {
 	write_document(t, f, guid, text)
 	e := ecs.spawn(&f.world)
 	ecs.add(&f.world, e, Ui_Document{document = guid_of(guid), order = order, visible = true})
@@ -199,7 +239,13 @@ step :: proc(f: ^Fixture, input: core.Input = {}, size := [2]f32{1920, 1080}) {
 
 // node_rect is the rectangle of a document's element by its id.
 @(private)
-node_rect :: proc(t: ^testing.T, f: ^Fixture, e: ecs.Entity, id: string, loc := #caller_location) -> [4]f32 {
+node_rect :: proc(
+	t: ^testing.T,
+	f: ^Fixture,
+	e: ecs.Entity,
+	id: string,
+	loc := #caller_location,
+) -> [4]f32 {
 	d := document_of(&f.ui, e)
 	testing.expect(t, d != nil, loc = loc)
 	if d == nil {

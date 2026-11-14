@@ -45,7 +45,9 @@ shader_layout :: proc() -> u64 {
 // shader_view checks a shader blob: its header, its layout and that every slice is inside it.
 shader_view :: proc(data: []byte) -> (blob: ^Shader_Blob, ok: bool) {
 	header := blob_header(data) or_return
-	if header.kind != .Shader || header.layout != shader_layout() || len(data) < size_of(Shader_Blob) {
+	if header.kind != .Shader ||
+	   header.layout != shader_layout() ||
+	   len(data) < size_of(Shader_Blob) {
 		return
 	}
 	blob = (^Shader_Blob)(raw_data(data))
@@ -54,7 +56,8 @@ shader_view :: proc(data: []byte) -> (blob: ^Shader_Blob, ok: bool) {
 			return nil, false
 		}
 	}
-	if blob.entries.size % size_of(Shader_Entry) != 0 || blob.entries.offset % align_of(Shader_Entry) != 0 {
+	if blob.entries.size % size_of(Shader_Entry) != 0 ||
+	   blob.entries.offset % align_of(Shader_Entry) != 0 {
 		return nil, false
 	}
 	for e in shader_entries(data, blob) {
@@ -71,7 +74,12 @@ shader_entries :: proc "contextless" (data: []byte, blob: ^Shader_Blob) -> []Sha
 }
 
 // shader_code is the bytecode of a stage for a target, or nil if the blob has no such entry.
-shader_code :: proc "contextless" (data: []byte, blob: ^Shader_Blob, stage: Shader_Stage, target := Shader_Target.DXIL) -> []byte {
+shader_code :: proc "contextless" (
+	data: []byte,
+	blob: ^Shader_Blob,
+	stage: Shader_Stage,
+	target := Shader_Target.DXIL,
+) -> []byte {
 	for e in shader_entries(data, blob) {
 		if e.stage == stage && e.target == target {
 			return blob_bytes(data, e.code)
@@ -81,7 +89,13 @@ shader_code :: proc "contextless" (data: []byte, blob: ^Shader_Blob, stage: Shad
 }
 
 // shader_stages is the stages that the blob has for a target.
-shader_stages :: proc "contextless" (data: []byte, blob: ^Shader_Blob, target := Shader_Target.DXIL) -> (stages: Shader_Stages) {
+shader_stages :: proc "contextless" (
+	data: []byte,
+	blob: ^Shader_Blob,
+	target := Shader_Target.DXIL,
+) -> (
+	stages: Shader_Stages,
+) {
 	for e in shader_entries(data, blob) {
 		if e.target == target {
 			stages += {e.stage}
@@ -107,16 +121,30 @@ Shader_Contents :: struct {
 // shader_write builds a shader blob. Each entry's bytecode starts at BLOB_ALIGN.
 shader_write :: proc(contents: Shader_Contents, allocator := context.allocator) -> []byte {
 	buffer := make([dynamic]byte, size_of(Shader_Blob), allocator)
-	entries := reserve_bytes(&buffer, len(contents.entries) * size_of(Shader_Entry), align_of(Shader_Entry))
+	entries := reserve_bytes(
+		&buffer,
+		len(contents.entries) * size_of(Shader_Entry),
+		align_of(Shader_Entry),
+	)
 	for e, i in contents.entries {
 		code := reserve_bytes(&buffer, len(e.code), BLOB_ALIGN)
 		copy(buffer[code.offset:], e.code)
 		record := Shader_Entry{e.stage, e.target, code}
-		mem.copy(&buffer[entries.offset + u32(i * size_of(Shader_Entry))], &record, size_of(record))
+		mem.copy(
+			&buffer[entries.offset + u32(i * size_of(Shader_Entry))],
+			&record,
+			size_of(record),
+		)
 	}
 	source_path := append_bytes(&buffer, transmute([]byte)contents.source_path)
 	blob := Shader_Blob {
-		header = {magic = BLOB_MAGIC, kind = .Shader, layout = shader_layout(), key = contents.key, guid = contents.guid},
+		header = {
+			magic = BLOB_MAGIC,
+			kind = .Shader,
+			layout = shader_layout(),
+			key = contents.key,
+			guid = contents.guid,
+		},
 		entries = entries,
 		source_path = source_path,
 	}

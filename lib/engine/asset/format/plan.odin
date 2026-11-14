@@ -103,7 +103,8 @@ plan_effects_ok :: proc "contextless" (effects: []Plan_Effect, key_count: u32) -
 // fits its key: an add only on an int, a bool set to 0 or 1, and an enum set to one of its names.
 plan_keys_ok :: proc(planning: []u32, effects: []Plan_Effect, keys: []Blackboard_Key) -> bool {
 	for slot, i in planning {
-		if int(slot) >= len(keys) || keys[slot].type not_in (bit_set[Blackboard_Type]{.Bool, .Int, .Enum}) {
+		if int(slot) >= len(keys) ||
+		   keys[slot].type not_in (bit_set[Blackboard_Type]{.Bool, .Int, .Enum}) {
 			return false
 		}
 		for other in planning[:i] {

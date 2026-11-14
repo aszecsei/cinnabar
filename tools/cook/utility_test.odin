@@ -26,7 +26,9 @@ UTILITY_HEAD :: "decision 1\ntechnique = utility\nblackboard = $" + UTILITY_BOAR
 // A soldier: attack the best enemy that it perceives, flee when it is hurt, and rest. The considerations follow the
 // options, and one is shared.
 @(private = "file")
-SOLDIER :: UTILITY_HEAD + `pick = weighted
+SOLDIER ::
+	UTILITY_HEAD +
+	`pick = weighted
 within = 0.2
 momentum = 0.5
 
@@ -81,7 +83,12 @@ utility_keys :: proc(t: ^testing.T) -> []format.Blackboard_Key_Contents {
 // order, and the module state is the running option, the options' states and then their links' states.
 @(test)
 a_utility_decision_cooks :: proc(t: ^testing.T) {
-	contents, problems := decision_parse(SOLDIER, utility_keys(t), TECHNIQUE_READERS, context.temp_allocator)
+	contents, problems := decision_parse(
+		SOLDIER,
+		utility_keys(t),
+		TECHNIQUE_READERS,
+		context.temp_allocator,
+	)
 	testing.expectf(t, len(problems) == 0, "problems: %v", problems)
 	if len(problems) > 0 {
 		return
@@ -89,7 +96,13 @@ a_utility_decision_cooks :: proc(t: ^testing.T) {
 	u := format.utility_data(contents.technique_data)
 	testing.expect(t, u.header != nil)
 	if u.header == nil || len(u.options) != 3 || len(u.considerations) != 4 {
-		testing.expectf(t, false, "%d options and %d considerations", len(u.options), len(u.considerations))
+		testing.expectf(
+			t,
+			false,
+			"%d options and %d considerations",
+			len(u.options),
+			len(u.considerations),
+		)
 		return
 	}
 	testing.expect_value(t, u.header.pick, format.Utility_Pick.Weighted)
@@ -114,7 +127,8 @@ a_utility_decision_cooks :: proc(t: ^testing.T) {
 	testing.expect(t, slice.equal(u.links[flee.first_link:][:flee.link_count], []u32{0, 2}))
 	testing.expect(t, slice.equal(u.links[rest.first_link:][:rest.link_count], []u32{3}))
 
-	health, distance, since, has_target := u.considerations[0], u.considerations[1], u.considerations[2], u.considerations[3]
+	health, distance, since, has_target :=
+		u.considerations[0], u.considerations[1], u.considerations[2], u.considerations[3]
 	testing.expect_value(t, health.input, format.Utility_Input.Number)
 	testing.expect_value(t, health.a, 0)
 	testing.expect_value(t, health.max, 100)
@@ -147,7 +161,12 @@ a_utility_decision_cooks :: proc(t: ^testing.T) {
 @(test)
 utility_settings_have_defaults :: proc(t: ^testing.T) {
 	text := UTILITY_HEAD + "node 1 option\n\taction = rest\n"
-	contents, problems := decision_parse(text, utility_keys(t), TECHNIQUE_READERS, context.temp_allocator)
+	contents, problems := decision_parse(
+		text,
+		utility_keys(t),
+		TECHNIQUE_READERS,
+		context.temp_allocator,
+	)
 	testing.expectf(t, len(problems) == 0, "problems: %v", problems)
 	u := format.utility_data(contents.technique_data)
 	if u.header == nil {
@@ -165,7 +184,12 @@ utility_settings_have_defaults :: proc(t: ^testing.T) {
 		"node 1 option\n\taction = a\n\tconsiderations = 2\n\tcooldown = ammo\nnode 2 consideration\n\tinput = since(facing)\n\tcurve = step\n\tx_shift = 0.2\n",
 	}
 	for g in good {
-		_, good_problems := decision_parse(strings.concatenate({UTILITY_HEAD, g}, context.temp_allocator), utility_keys(t), TECHNIQUE_READERS, context.temp_allocator)
+		_, good_problems := decision_parse(
+			strings.concatenate({UTILITY_HEAD, g}, context.temp_allocator),
+			utility_keys(t),
+			TECHNIQUE_READERS,
+			context.temp_allocator,
+		)
 		testing.expectf(t, len(good_problems) == 0, "%q: %v", g, good_problems)
 	}
 }
@@ -211,24 +235,59 @@ utility_problems_have_their_lines :: proc(t: ^testing.T) {
 		{OPTION + "node 2 consideration\n\tinput = distance(self)\n\tcurve = linear\n", 8},
 		{OPTION + "node 2 consideration\n\tinput = distance(self, health)\n\tcurve = linear\n", 8},
 		{OPTION + "node 2 consideration\n\tinput = since(missing)\n\tcurve = linear\n", 8},
-		{OPTION + "node 2 consideration\n\tinput = has_target\n\trange = [0, 2]\n\tcurve = linear\n", 9},
+		{
+			OPTION +
+			"node 2 consideration\n\tinput = has_target\n\trange = [0, 2]\n\tcurve = linear\n",
+			9,
+		},
 		{OPTION + CONSIDERATION + "\trange = [1, 1]\n", 10},
 		{OPTION + CONSIDERATION + "\trange = 5\n", 10},
 		{OPTION + "node 2 consideration\n\tinput = health\n\tcurve = wavy\n", 9},
 		{OPTION + CONSIDERATION + "\texponent = 2\n", 10},
-		{OPTION + "node 2 consideration\n\tinput = health\n\tcurve = polynomial\n\texponent = 0\n", 10},
+		{
+			OPTION +
+			"node 2 consideration\n\tinput = health\n\tcurve = polynomial\n\texponent = 0\n",
+			10,
+		},
 		{OPTION + CONSIDERATION + "\tslope = steep\n", 10},
 		{OPTION + CONSIDERATION + "\tpoints = [0, 0], [1, 1]\n", 10},
 		{OPTION + "node 2 consideration\n\tinput = health\n\tcurve = table\n", 7},
-		{OPTION + "node 2 consideration\n\tinput = health\n\tcurve = table\n\tpoints = [0, 0]\n", 10},
-		{OPTION + "node 2 consideration\n\tinput = health\n\tcurve = table\n\tpoints = [1, 0], [0, 1]\n", 10},
-		{OPTION + "node 2 consideration\n\tinput = health\n\tcurve = table\n\tpoints = [0, 0] [1, 1]\n", 10},
-		{OPTION + "node 2 consideration\n\tinput = health\n\tcurve = table\n\tpoints = [0, 0, 1], [1, 1]\n", 10},
+		{
+			OPTION +
+			"node 2 consideration\n\tinput = health\n\tcurve = table\n\tpoints = [0, 0]\n",
+			10,
+		},
+		{
+			OPTION +
+			"node 2 consideration\n\tinput = health\n\tcurve = table\n\tpoints = [1, 0], [0, 1]\n",
+			10,
+		},
+		{
+			OPTION +
+			"node 2 consideration\n\tinput = health\n\tcurve = table\n\tpoints = [0, 0] [1, 1]\n",
+			10,
+		},
+		{
+			OPTION +
+			"node 2 consideration\n\tinput = health\n\tcurve = table\n\tpoints = [0, 0, 1], [1, 1]\n",
+			10,
+		},
 	}
 	keys := utility_keys(t)
 	for c in cases {
-		_, problems := decision_parse(strings.concatenate({UTILITY_HEAD, c.text}, context.temp_allocator), keys, TECHNIQUE_READERS, context.temp_allocator)
-		testing.expectf(t, len(problems) > 0 && problems[0].line == c.line, "%q: %v", c.text, problems)
+		_, problems := decision_parse(
+			strings.concatenate({UTILITY_HEAD, c.text}, context.temp_allocator),
+			keys,
+			TECHNIQUE_READERS,
+			context.temp_allocator,
+		)
+		testing.expectf(
+			t,
+			len(problems) > 0 && problems[0].line == c.line,
+			"%q: %v",
+			c.text,
+			problems,
+		)
 	}
 }
 
@@ -259,5 +318,14 @@ utility_decisions_cook_to_blobs_that_fit_their_blackboards :: proc(t: ^testing.T
 	testing.expect_value(t, blob.technique, format.Decision_Technique.Utility)
 	testing.expect_value(t, blob.state_size, 120)
 	testing.expect(t, format.decision_check(data, blob, board_data, board))
-	testing.expect(t, format.utility_check(format.decision_technique_data(data, blob), data, blob, board_data, board))
+	testing.expect(
+		t,
+		format.utility_check(
+			format.decision_technique_data(data, blob),
+			data,
+			blob,
+			board_data,
+			board,
+		),
+	)
 }

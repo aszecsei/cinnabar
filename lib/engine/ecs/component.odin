@@ -50,7 +50,12 @@ component_id :: proc "contextless" (name: string) -> Component_Id {
 // A type without a name needs an explicit id. A duplicate type or ID is a programming error and panics. defaults, if
 // given, are what a scene starts the component from and what a reset field goes back to (see registry_defaults);
 // otherwise those are zeros.
-register_component :: proc(r: ^Registry, $T: typeid, id := Component_Id(0), defaults: Maybe(T) = nil) -> Component_Id {
+register_component :: proc(
+	r: ^Registry,
+	$T: typeid,
+	id := Component_Id(0),
+	defaults: Maybe(T) = nil,
+) -> Component_Id {
 	ti := type_info_of(T)
 	name := "(unnamed)"
 	component := id

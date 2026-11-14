@@ -58,8 +58,14 @@ init_timestamps :: proc() -> bool {
 	when !profile.ENABLED {
 		return true
 	} else {
-		check(dev.queue->GetTimestampFrequency(&dev.timestamp_frequency[.Graphics]), "GetTimestampFrequency") or_return
-		check(dev.compute_queue->GetTimestampFrequency(&dev.timestamp_frequency[.Compute]), "GetTimestampFrequency(compute)") or_return
+		check(
+			dev.queue->GetTimestampFrequency(&dev.timestamp_frequency[.Graphics]),
+			"GetTimestampFrequency",
+		) or_return
+		check(
+			dev.compute_queue->GetTimestampFrequency(&dev.timestamp_frequency[.Compute]),
+			"GetTimestampFrequency(compute)",
+		) or_return
 		win.QueryPerformanceFrequency(&dev.qpc_frequency)
 		for &frame in dev.frames {
 			ts := &frame.timestamps
@@ -67,13 +73,22 @@ init_timestamps :: proc() -> bool {
 				Type  = .TIMESTAMP,
 				Count = MAX_TIMESTAMPS,
 			}
-			check(dev.device->CreateQueryHeap(&heap_desc, d3d.IQueryHeap_UUID, (^rawptr)(&ts.heap)), "CreateQueryHeap(timestamps)") or_return
-			resource, ok := create_buffer_resource({size = MAX_TIMESTAMPS * size_of(u64), usage = {.Readback}, label = "timestamps"}, .READBACK)
+			check(
+				dev.device->CreateQueryHeap(&heap_desc, d3d.IQueryHeap_UUID, (^rawptr)(&ts.heap)),
+				"CreateQueryHeap(timestamps)",
+			) or_return
+			resource, ok := create_buffer_resource(
+				{size = MAX_TIMESTAMPS * size_of(u64), usage = {.Readback}, label = "timestamps"},
+				.READBACK,
+			)
 			if !ok {
 				return false
 			}
 			ts.readback = resource
-			check(resource->Map(0, nil, (^rawptr)(&ts.mapped)), "IResource.Map(timestamps)") or_return
+			check(
+				resource->Map(0, nil, (^rawptr)(&ts.mapped)),
+				"IResource.Map(timestamps)",
+			) or_return
 			ts.spans = make([dynamic]Timestamp_Span, dev.allocator)
 		}
 		return true
@@ -139,10 +154,21 @@ read_timestamps :: proc(ts: ^Timestamps) {
 	spans := make([dynamic]profile.Gpu_Span, 0, len(ts.spans), context.temp_allocator)
 	for s in ts.spans {
 		begin, end := ts.mapped[s.begin], ts.mapped[s.end]
-		if end < begin || end - begin > MAX_SPAN * dev.timestamp_frequency[s.queue] / 1_000_000_000 {
+		if end < begin ||
+		   end - begin > MAX_SPAN * dev.timestamp_frequency[s.queue] / 1_000_000_000 {
 			continue
 		}
-		append(&spans, profile.Gpu_Span{to_cpu(ts, s.queue, begin), to_cpu(ts, s.queue, end), s.name, s.detail, u8(s.queue), s.depth})
+		append(
+			&spans,
+			profile.Gpu_Span {
+				to_cpu(ts, s.queue, begin),
+				to_cpu(ts, s.queue, end),
+				s.name,
+				s.detail,
+				u8(s.queue),
+				s.depth,
+			},
+		)
 	}
 	begin := to_cpu(ts, .Graphics, ts.mapped[FRAME_BEGIN_TIMESTAMP])
 	end := to_cpu(ts, .Graphics, ts.mapped[FRAME_END_TIMESTAMP])
@@ -189,11 +215,20 @@ Marker_Timer :: struct {
 @(private)
 marker_timer :: proc(frame: ^Frame, queue: gpu.Queue) -> Marker_Timer {
 	ts := &frame.timestamps
-	return {ts = ts if ts.heap != nil else nil, queue = queue, spans = make([dynamic]Timestamp_Span, context.temp_allocator)}
+	return {
+		ts = ts if ts.heap != nil else nil,
+		queue = queue,
+		spans = make([dynamic]Timestamp_Span, context.temp_allocator),
+	}
 }
 
 @(private)
-timer_begin :: proc(t: ^Marker_Timer, list: ^d3d.IGraphicsCommandList7, label: string, timed: bool) {
+timer_begin :: proc(
+	t: ^Marker_Timer,
+	list: ^d3d.IGraphicsCommandList7,
+	label: string,
+	timed: bool,
+) {
 	index := i32(-1)
 	if timed && t.ts != nil {
 		if i := sync.atomic_add(&t.ts.count, 1); i < MAX_TIMESTAMPS {
@@ -228,7 +263,10 @@ timer_end :: proc(t: ^Marker_Timer, list: ^d3d.IGraphicsCommandList7) {
 	for d in 0 ..< t.depth {
 		depth += 1 if t.open[d] >= 0 else 0
 	}
-	append(&t.spans, Timestamp_Span{u32(t.open[t.depth]), u32(end), t.names[t.depth], 0, t.queue, u8(depth)})
+	append(
+		&t.spans,
+		Timestamp_Span{u32(t.open[t.depth]), u32(end), t.names[t.depth], 0, t.queue, u8(depth)},
+	)
 }
 
 // timer_finish adds the list's spans to the frame's.

@@ -63,17 +63,41 @@ plain :: proc() -> audio.Voice_Params {
 
 @(private = "file")
 spatial_at :: proc(position: [3]f32, occlusion: f32 = 0) -> audio.Voice_Params {
-	return {position = position, gain = 1, pitch = 1, occlusion = occlusion, min_distance = 1, max_distance = 100, spatial = true}
+	return {
+		position = position,
+		gain = 1,
+		pitch = 1,
+		occlusion = occlusion,
+		min_distance = 1,
+		max_distance = 100,
+		spatial = true,
+	}
 }
 
 @(private = "file")
 memory_sound :: proc(m: ^Mixer, samples: []i16, channels: u32 = 1) -> audio.Sound {
-	return sound_create(m, &audio.Sound_Desc{frames = u64(len(samples)) / u64(channels), samples = raw_data(samples), channels = channels})
+	return sound_create(
+		m,
+		&audio.Sound_Desc {
+			frames = u64(len(samples)) / u64(channels),
+			samples = raw_data(samples),
+			channels = channels,
+		},
+	)
 }
 
 @(private = "file")
-play :: proc(m: ^Mixer, sound: audio.Sound, params: audio.Voice_Params, loop := false, bus := audio.Bus{}) -> audio.Voice {
-	return voice_play(m, &audio.Voice_Desc{sound = sound, bus = bus, params = params, loop = b32(loop)})
+play :: proc(
+	m: ^Mixer,
+	sound: audio.Sound,
+	params: audio.Voice_Params,
+	loop := false,
+	bus := audio.Bus{},
+) -> audio.Voice {
+	return voice_play(
+		m,
+		&audio.Voice_Desc{sound = sound, bus = bus, params = params, loop = b32(loop)},
+	)
 }
 
 // A sine of a whole number of cycles, at full scale times gain.
@@ -367,9 +391,18 @@ filters_filter :: proc(t: ^testing.T) {
 	setup(&f)
 	defer teardown(&f)
 	testing.expect(t, effect_level(&f, {kind = .Low_Pass, parameters = {1000, 0.7, 0}}, 10) > 0.3)
-	testing.expect(t, effect_level(&f, {kind = .Low_Pass, parameters = {1000, 0.7, 0}}, 800) < 0.03)
-	testing.expect(t, effect_level(&f, {kind = .High_Pass, parameters = {1000, 0.7, 0}}, 10) < 0.03)
-	testing.expect(t, effect_level(&f, {kind = .High_Pass, parameters = {1000, 0.7, 0}}, 800) > 0.3)
+	testing.expect(
+		t,
+		effect_level(&f, {kind = .Low_Pass, parameters = {1000, 0.7, 0}}, 800) < 0.03,
+	)
+	testing.expect(
+		t,
+		effect_level(&f, {kind = .High_Pass, parameters = {1000, 0.7, 0}}, 10) < 0.03,
+	)
+	testing.expect(
+		t,
+		effect_level(&f, {kind = .High_Pass, parameters = {1000, 0.7, 0}}, 800) > 0.3,
+	)
 }
 
 // An impulse comes back after the delay's time, at the wet level, and again at the feedback.
@@ -500,11 +533,23 @@ a_reverb_tail_is_in_proportion :: proc(t: ^testing.T) {
 	loud := level(out)
 	render(f.m, out[:4800])
 	tail := level(out[:4800])
-	testing.expectf(t, tail > 0.01 && tail < loud, "the tail is %v after a sound of %v", tail, loud)
+	testing.expectf(
+		t,
+		tail > 0.01 && tail < loud,
+		"the tail is %v after a sound of %v",
+		tail,
+		loud,
+	)
 	for _ in 0 ..< 4 {
 		render(f.m, out)
 	}
-	testing.expectf(t, level(out) < tail * 0.01, "after 2 s, the tail is %v from %v", level(out), tail)
+	testing.expectf(
+		t,
+		level(out) < tail * 0.01,
+		"after 2 s, the tail is %v from %v",
+		level(out),
+		tail,
+	)
 }
 
 // A mix that is far out of range, or not a number, goes silent, and not to full scale. It clears the effects, so that it
@@ -602,7 +647,15 @@ write_stream_file :: proc(t: ^testing.T, samples: []i16) -> Stream_File {
 
 @(private = "file")
 stream_sound :: proc(m: ^Mixer, file: Stream_File, frames: int, channels: u32 = 1) -> audio.Sound {
-	return sound_create(m, &audio.Sound_Desc{frames = u64(frames), path = strings.clone_to_cstring(file.path, context.temp_allocator), offset = 16, channels = channels})
+	return sound_create(
+		m,
+		&audio.Sound_Desc {
+			frames = u64(frames),
+			path = strings.clone_to_cstring(file.path, context.temp_allocator),
+			offset = 16,
+			channels = channels,
+		},
+	)
 }
 
 // A stream plays the same samples as a memory sound of them, over more than a ring's length, and ends.
@@ -625,7 +678,14 @@ a_stream_matches_a_memory_sound :: proc(t: ^testing.T) {
 	reference := make([]audio.Device_Frame, FRAMES + 2, context.temp_allocator)
 	render(f.m, reference)
 	testing.expect(t, !bool(voice_playing(f.m, a)))
-	testing.expect_value(t, reference[FRAMES - 1], audio.Device_Frame{f32(samples[FRAMES * 2 - 2]) / 32768, f32(samples[FRAMES * 2 - 1]) / 32768})
+	testing.expect_value(
+		t,
+		reference[FRAMES - 1],
+		audio.Device_Frame {
+			f32(samples[FRAMES * 2 - 2]) / 32768,
+			f32(samples[FRAMES * 2 - 1]) / 32768,
+		},
+	)
 
 	b := play(f.m, streamed, plain())
 	out := make([]audio.Device_Frame, FRAMES + 2, context.temp_allocator)
@@ -808,7 +868,14 @@ the_threads_play_a_stream :: proc(t: ^testing.T) {
 
 	api := load(&table_host)
 	defer api.shutdown()
-	sound := api.sound_create(&audio.Sound_Desc{frames = 48000, path = strings.clone_to_cstring(file.path, context.temp_allocator), offset = 16, channels = 1})
+	sound := api.sound_create(
+		&audio.Sound_Desc {
+			frames = 48000,
+			path = strings.clone_to_cstring(file.path, context.temp_allocator),
+			offset = 16,
+			channels = 1,
+		},
+	)
 	voice := api.voice_play(&audio.Voice_Desc{sound = sound, params = plain(), loop = true})
 	testing.expect(t, bool(api.voice_playing(voice)))
 	for _ in 0 ..< 2000 {
@@ -859,7 +926,9 @@ coded_adpcm :: proc(frames: int, channels: u32) -> Coded {
 	samples := make([]i16, frames * int(channels), context.temp_allocator)
 	for i in 0 ..< frames {
 		for c in 0 ..< int(channels) {
-			samples[i * int(channels) + c] = i16(math.sin(f64(i) * f64(480 + c * 240) * math.TAU / 48000) * 12000)
+			samples[i * int(channels) + c] = i16(
+				math.sin(f64(i) * f64(480 + c * 240) * math.TAU / 48000) * 12000,
+			)
 		}
 	}
 	data := adpcm.encode(samples, int(channels), context.temp_allocator)
@@ -884,7 +953,11 @@ long_coded :: proc() -> [6]Coded {
 // Every compressed format, far shorter than a chunk.
 @(private = "file")
 short_coded :: proc() -> [3]Coded {
-	return {coded_of(.Vorbis, #load("../codec/testdata/short_mono.vorbis")), coded_of(.Opus, #load("../codec/testdata/short_mono.opus")), coded_adpcm(1000, 1)}
+	return {
+		coded_of(.Vorbis, #load("../codec/testdata/short_mono.vorbis")),
+		coded_of(.Opus, #load("../codec/testdata/short_mono.opus")),
+		coded_adpcm(1000, 1),
+	}
 }
 
 @(private = "file")
@@ -912,7 +985,10 @@ coded_desc :: proc(coded: Coded, file: Stream_File) -> audio.Sound_Desc {
 device_frames :: proc(samples: []i16, channels: int) -> []audio.Device_Frame {
 	frames := make([]audio.Device_Frame, len(samples) / channels, context.temp_allocator)
 	for &frame, i in frames {
-		frame = {f32(samples[i * channels]) / 32768, f32(samples[i * channels + channels - 1]) / 32768}
+		frame = {
+			f32(samples[i * channels]) / 32768,
+			f32(samples[i * channels + channels - 1]) / 32768,
+		}
 	}
 	return frames
 }
@@ -921,9 +997,25 @@ device_frames :: proc(samples: []i16, channels: int) -> []audio.Device_Frame {
 @(private = "file")
 decoded_passes :: proc(t: ^testing.T, coded: Coded) -> (first, later: []audio.Device_Frame) {
 	channels := int(coded.channels)
-	memory, _ := mem.make_aligned([]byte, codec.memory_bytes(coded.format, channels), codec.MEMORY_ALIGN, context.temp_allocator)
+	memory, _ := mem.make_aligned(
+		[]byte,
+		codec.memory_bytes(coded.format, channels),
+		codec.MEMORY_ALIGN,
+		context.temp_allocator,
+	)
 	decoder: codec.Decoder
-	testing.expect(t, codec.decoder_init(&decoder, coded.format, channels, coded.frames, u64(coded.skip), u64(len(coded.file) - 16), memory))
+	testing.expect(
+		t,
+		codec.decoder_init(
+			&decoder,
+			coded.format,
+			channels,
+			coded.frames,
+			u64(coded.skip),
+			u64(len(coded.file) - 16),
+			memory,
+		),
+	)
 	reader := codec.Memory_Reader{coded.file[16:]}
 	samples := make([dynamic]i16, context.temp_allocator)
 	for {
@@ -936,7 +1028,17 @@ decoded_passes :: proc(t: ^testing.T, coded: Coded) -> (first, later: []audio.De
 	}
 	first = device_frames(samples[:], channels)
 	whole := make([]i16, int(coded.frames) * channels, context.temp_allocator)
-	testing.expect(t, codec.decode_all(coded.format, coded.file[16:], channels, coded.frames, u64(coded.skip), whole))
+	testing.expect(
+		t,
+		codec.decode_all(
+			coded.format,
+			coded.file[16:],
+			channels,
+			coded.frames,
+			u64(coded.skip),
+			whole,
+		),
+	)
 	return first, device_frames(whole, channels)
 }
 
@@ -1113,9 +1215,42 @@ a_bad_format_is_refused :: proc(t: ^testing.T) {
 	// The host's log goes to one logger for the process, so an error here would land on whichever test is running.
 	f.host.log = proc "c" (level: audio.Log_Level, message: cstring) {}
 	samples := [?]i16{1, 2}
-	testing.expect_value(t, sound_create(f.m, &audio.Sound_Desc{frames = 2, samples = &samples[0], channels = 1, format = .Vorbis, size = 4}), audio.Sound{})
-	testing.expect_value(t, sound_create(f.m, &audio.Sound_Desc{frames = 2, path = "a.blob", channels = 1, format = .Opus}), audio.Sound{})
-	testing.expect_value(t, sound_create(f.m, &audio.Sound_Desc{frames = 2, path = "a.blob", channels = 1, format = audio.Sound_Format(99), size = 4}), audio.Sound{})
+	testing.expect_value(
+		t,
+		sound_create(
+			f.m,
+			&audio.Sound_Desc {
+				frames = 2,
+				samples = &samples[0],
+				channels = 1,
+				format = .Vorbis,
+				size = 4,
+			},
+		),
+		audio.Sound{},
+	)
+	testing.expect_value(
+		t,
+		sound_create(
+			f.m,
+			&audio.Sound_Desc{frames = 2, path = "a.blob", channels = 1, format = .Opus},
+		),
+		audio.Sound{},
+	)
+	testing.expect_value(
+		t,
+		sound_create(
+			f.m,
+			&audio.Sound_Desc {
+				frames = 2,
+				path = "a.blob",
+				channels = 1,
+				format = audio.Sound_Format(99),
+				size = 4,
+			},
+		),
+		audio.Sound{},
+	)
 }
 
 @(private = "file")
@@ -1140,7 +1275,12 @@ a_compressed_stream_decodes_off_the_mix_thread :: proc(t: ^testing.T) {
 		table_host = audio_host.table(thread_recording_write, fake_status)
 	}
 	real_read_at = table_host.file_read_at
-	table_host.file_read_at = proc "c" (file: rawptr, offset: u64, buffer: rawptr, size: u64) -> i64 {
+	table_host.file_read_at = proc "c" (
+		file: rawptr,
+		offset: u64,
+		buffer: rawptr,
+		size: u64,
+	) -> i64 {
 		sync.atomic_store(&reader_thread, sync.current_thread_id())
 		sync.atomic_add(&reader_calls, 1)
 		return real_read_at(file, offset, buffer, size)

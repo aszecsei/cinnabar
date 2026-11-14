@@ -56,7 +56,12 @@ cook_ui_documents :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^
 }
 
 @(private = "file")
-cook_ui_document :: proc(a: ^Asset_Source, out_dir: string, kinds: map[format.Guid]format.Asset_Kind, pass: ^Pass) -> Asset_Result {
+cook_ui_document :: proc(
+	a: ^Asset_Source,
+	out_dir: string,
+	kinds: map[format.Guid]format.Asset_Kind,
+	pass: ^Pass,
+) -> Asset_Result {
 	problems := &pass.problems
 	settings_ok := check_settings(a^, problems)
 	document, parse_problems, parsed := format.ui_parse(string(source_of(a^)))
@@ -78,7 +83,14 @@ cook_ui_document :: proc(a: ^Asset_Source, out_dir: string, kinds: map[format.Gu
 	if !parsed || !settings_ok {
 		return .Failed
 	}
-	key := hash.fnv64a(transmute([]byte)fmt.tprintf("%s\x00%s\x00%x\x00", UI_COOK_VERSION, a.name, format.ui_layout()))
+	key := hash.fnv64a(
+		transmute([]byte)fmt.tprintf(
+			"%s\x00%s\x00%x\x00",
+			UI_COOK_VERSION,
+			a.name,
+			format.ui_layout(),
+		),
+	)
 	key = hash.fnv64a(source_of(a^), key)
 	guid := a.meta.guid
 	key = hash.fnv64a(guid[:], key)
@@ -86,7 +98,10 @@ cook_ui_document :: proc(a: ^Asset_Source, out_dir: string, kinds: map[format.Gu
 	if cooked_key(output, .Ui, format.ui_layout()) == key && !pass.force[guid] {
 		return .Current
 	}
-	blob := format.ui_write({guid = guid, key = key, document = document, source_path = a.name}, context.temp_allocator)
+	blob := format.ui_write(
+		{guid = guid, key = key, document = document, source_path = a.name},
+		context.temp_allocator,
+	)
 	if !write_blob(output, blob) {
 		return .Failed
 	}
@@ -98,7 +113,15 @@ cook_ui_document :: proc(a: ^Asset_Source, out_dir: string, kinds: map[format.Gu
 // cache, <config>/preview/<guid>.blob, which the UI editor's preview draws; the document's own blob does not change. A
 // text with errors leaves the last good one. The preview's key is the text's hash, so that the editor knows which text
 // a layout that the game reports is of (see docs/editor/ui-editor.md#the-games-side).
-ui_check :: proc(options: Cook_Options, guid: format.Guid, text, path, name: string, kinds: map[format.Guid]format.Asset_Kind) -> (problems: Problems, ok: bool) {
+ui_check :: proc(
+	options: Cook_Options,
+	guid: format.Guid,
+	text, path, name: string,
+	kinds: map[format.Guid]format.Asset_Kind,
+) -> (
+	problems: Problems,
+	ok: bool,
+) {
 	document, parse_problems, parsed := format.ui_parse(text)
 	for p in parse_problems {
 		if p.error {
@@ -122,7 +145,15 @@ ui_check :: proc(options: Cook_Options, guid: format.Guid, text, path, name: str
 		return
 	}
 	buffer: [32]u8
-	blob := format.ui_write({guid = guid, key = hash.fnv64a(transmute([]byte)text), document = document, source_path = name}, context.temp_allocator)
+	blob := format.ui_write(
+		{
+			guid = guid,
+			key = hash.fnv64a(transmute([]byte)text),
+			document = document,
+			source_path = name,
+		},
+		context.temp_allocator,
+	)
 	if !write_blob(fmt.tprintf("%s/%s.blob", dir, format.guid_format(guid, &buffer)), blob) {
 		report_error(&problems, path, 0, 0, "cannot write its preview")
 		return
@@ -148,7 +179,14 @@ ui_attribute_infos :: proc() -> []cook_link.Ui_Attribute_Info {
 
 // check_ui_assets checks the fonts and images that attributes name, and adds them to the document's dependencies.
 @(private = "file")
-check_ui_assets :: proc(path: string, props: []format.Ui_Prop_Contents, kinds: map[format.Guid]format.Asset_Kind, problems: ^Problems, ok: ^bool, dependencies: ^[dynamic]format.Guid) {
+check_ui_assets :: proc(
+	path: string,
+	props: []format.Ui_Prop_Contents,
+	kinds: map[format.Guid]format.Asset_Kind,
+	problems: ^Problems,
+	ok: ^bool,
+	dependencies: ^[dynamic]format.Guid,
+) {
 	for p in props {
 		want: format.Asset_Kind
 		#partial switch p.attr {
@@ -166,9 +204,27 @@ check_ui_assets :: proc(path: string, props: []format.Ui_Prop_Contents, kinds: m
 		kind, found := kinds[guid]
 		switch {
 		case !found:
-			report_warning(problems, path, p.line, p.column, "%s %s is not an asset in the content roots", format.UI_ATTRS[p.attr].name, p.value)
+			report_warning(
+				problems,
+				path,
+				p.line,
+				p.column,
+				"%s %s is not an asset in the content roots",
+				format.UI_ATTRS[p.attr].name,
+				p.value,
+			)
 		case kind != want:
-			report_error(problems, path, p.line, p.column, "%s %s is a %v, not a %v", format.UI_ATTRS[p.attr].name, p.value, kind, want)
+			report_error(
+				problems,
+				path,
+				p.line,
+				p.column,
+				"%s %s is a %v, not a %v",
+				format.UI_ATTRS[p.attr].name,
+				p.value,
+				kind,
+				want,
+			)
 			ok^ = false
 		}
 		if dependencies != nil {

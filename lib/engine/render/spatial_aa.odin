@@ -85,11 +85,25 @@ spatial_aa_init :: proc(s: ^Spatial_Aa, platform: ^core.Platform_API) {
 	s.smaa_edges = shader_pipeline(SMAA_EDGES_SHADER)
 	s.smaa_weights = shader_pipeline(SMAA_WEIGHTS_SHADER)
 	s.smaa_blend = shader_pipeline(SMAA_BLEND_SHADER)
-	assert(len(smaa_area_table) == int(SMAA_AREA_SIZE.x * SMAA_AREA_SIZE.y * 2), "render: vendor/smaa/area.bin is not SMAA_AREA_SIZE in RG8")
-	assert(len(smaa_search_table) == int(SMAA_SEARCH_SIZE.x * SMAA_SEARCH_SIZE.y), "render: vendor/smaa/search.bin is not SMAA_SEARCH_SIZE in R8")
-	s.smaa_area = platform.gpu_create_texture({size = SMAA_AREA_SIZE, format = .RG8_Unorm, usage = {.Sampled}, label = "smaa area"}, smaa_area_table)
-	s.smaa_search = platform.gpu_create_texture({size = SMAA_SEARCH_SIZE, format = .R8_Unorm, usage = {.Sampled}, label = "smaa search"}, smaa_search_table)
-	s.point_sampler = platform.gpu_create_sampler({filter = .Nearest, mip_filter = .Nearest, address = .Clamp, label = "smaa point sampler"})
+	assert(
+		len(smaa_area_table) == int(SMAA_AREA_SIZE.x * SMAA_AREA_SIZE.y * 2),
+		"render: vendor/smaa/area.bin is not SMAA_AREA_SIZE in RG8",
+	)
+	assert(
+		len(smaa_search_table) == int(SMAA_SEARCH_SIZE.x * SMAA_SEARCH_SIZE.y),
+		"render: vendor/smaa/search.bin is not SMAA_SEARCH_SIZE in R8",
+	)
+	s.smaa_area = platform.gpu_create_texture(
+		{size = SMAA_AREA_SIZE, format = .RG8_Unorm, usage = {.Sampled}, label = "smaa area"},
+		smaa_area_table,
+	)
+	s.smaa_search = platform.gpu_create_texture(
+		{size = SMAA_SEARCH_SIZE, format = .R8_Unorm, usage = {.Sampled}, label = "smaa search"},
+		smaa_search_table,
+	)
+	s.point_sampler = platform.gpu_create_sampler(
+		{filter = .Nearest, mip_filter = .Nearest, address = .Clamp, label = "smaa point sampler"},
+	)
 }
 
 spatial_aa_destroy :: proc(s: ^Spatial_Aa, platform: ^core.Platform_API) {
@@ -136,7 +150,11 @@ sync_spatial_aa_pipelines :: proc(r: ^Renderer, force: bool) {
 // spatial_aa_ready is whether a technique is spatial and its pipelines are compiled. Until they are, the frame has no
 // anti-aliasing.
 @(private)
-spatial_aa_ready :: proc(platform: ^core.Platform_API, s: ^Spatial_Aa, technique: Aa_Technique) -> bool {
+spatial_aa_ready :: proc(
+	platform: ^core.Platform_API,
+	s: ^Spatial_Aa,
+	technique: Aa_Technique,
+) -> bool {
 	#partial switch technique {
 	case .Fxaa:
 		return pipeline_ready(platform, &s.tone_map) && pipeline_ready(platform, &s.fxaa)
@@ -160,7 +178,10 @@ add_spatial_aa :: proc(f: ^Frame) {
 	}
 	g := f.graph
 	platform := f.renderer.platform
-	pf.tone_mapped = create_texture(g, {size = f.scene_size, format = DISPLAY_FORMAT, label = "tone mapped scene"})
+	pf.tone_mapped = create_texture(
+		g,
+		{size = f.scene_size, format = DISPLAY_FORMAT, label = "tone mapped scene"},
+	)
 	pass := add_compute_pass(g, "tone map", run_tone_map, f)
 	read(g, pass, f.scene)
 	read(g, pass, f.lut)
@@ -169,22 +190,46 @@ add_spatial_aa :: proc(f: ^Frame) {
 	}
 	write(g, pass, pf.tone_mapped)
 
-	result := create_texture(g, {size = f.scene_size, format = DISPLAY_FORMAT, label = "anti-aliased scene"})
+	result := create_texture(
+		g,
+		{size = f.scene_size, format = DISPLAY_FORMAT, label = "anti-aliased scene"},
+	)
 	#partial switch pf.spatial {
 	case .Fxaa:
 		pass = add_compute_pass(g, "fxaa", run_fxaa, f)
 		read(g, pass, pf.tone_mapped)
 		write(g, pass, result)
 	case .Smaa:
-		pf.smaa_edges = create_texture(g, {size = f.scene_size, format = SMAA_EDGES_FORMAT, label = "smaa edges"})
-		pf.smaa_weights = create_texture(g, {size = f.scene_size, format = SMAA_WEIGHTS_FORMAT, label = "smaa weights"})
-		pass = add_render_pass(g, "smaa edges", run_smaa, new_clone(Smaa_Pass{f, .Edges}, platform.frame_allocator))
+		pf.smaa_edges = create_texture(
+			g,
+			{size = f.scene_size, format = SMAA_EDGES_FORMAT, label = "smaa edges"},
+		)
+		pf.smaa_weights = create_texture(
+			g,
+			{size = f.scene_size, format = SMAA_WEIGHTS_FORMAT, label = "smaa weights"},
+		)
+		pass = add_render_pass(
+			g,
+			"smaa edges",
+			run_smaa,
+			new_clone(Smaa_Pass{f, .Edges}, platform.frame_allocator),
+		)
 		read(g, pass, pf.tone_mapped)
 		color(g, pass, pf.smaa_edges, .Clear)
-		pass = add_render_pass(g, "smaa weights", run_smaa, new_clone(Smaa_Pass{f, .Weights}, platform.frame_allocator))
+		pass = add_render_pass(
+			g,
+			"smaa weights",
+			run_smaa,
+			new_clone(Smaa_Pass{f, .Weights}, platform.frame_allocator),
+		)
 		read(g, pass, pf.smaa_edges)
 		color(g, pass, pf.smaa_weights, .Clear)
-		pass = add_render_pass(g, "smaa blend", run_smaa, new_clone(Smaa_Pass{f, .Blend}, platform.frame_allocator))
+		pass = add_render_pass(
+			g,
+			"smaa blend",
+			run_smaa,
+			new_clone(Smaa_Pass{f, .Blend}, platform.frame_allocator),
+		)
 		read(g, pass, pf.tone_mapped)
 		read(g, pass, pf.smaa_weights)
 		color(g, pass, result, .Discard)
@@ -233,7 +278,12 @@ run_smaa :: proc(ctx: ^Pass_Context) {
 		search         = gpu.read_index(s.smaa_search),
 		linear_sampler = gpu.sampler_index(f.renderer.post.sampler),
 		point_sampler  = gpu.sampler_index(s.point_sampler),
-		metrics        = {1 / f32(f.scene_size.x), 1 / f32(f.scene_size.y), f32(f.scene_size.x), f32(f.scene_size.y)},
+		metrics        = {
+			1 / f32(f.scene_size.x),
+			1 / f32(f.scene_size.y),
+			f32(f.scene_size.x),
+			f32(f.scene_size.y),
+		},
 	}
 	pipeline: gpu.Pipeline
 	switch pass.step {

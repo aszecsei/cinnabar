@@ -16,23 +16,23 @@ import "cinnabar:core/gpu"
 // transfer done. Buffers have no layout: a buffer transfer is done when its batch is complete.
 @(private)
 Streaming :: struct {
-	copy_queue:     ^d3d.ICommandQueue,
-	copy_fence:     ^d3d.IFence,
+	copy_queue:    ^d3d.ICommandQueue,
+	copy_fence:    ^d3d.IFence,
 	// The value of the last executed batch.
-	copy_value:     u64,
-	copy_batches:   [UPLOAD_BATCHES]Upload_Batch,
-	copy_batch:     int,
-	copy_list:      ^d3d.IGraphicsCommandList7,
-	copy_open:      bool,
+	copy_value:    u64,
+	copy_batches:  [UPLOAD_BATCHES]Upload_Batch,
+	copy_batch:    int,
+	copy_list:     ^d3d.IGraphicsCommandList7,
+	copy_open:     bool,
 	// The copy fence value that covers all copies recorded so far: the open batch's value, or the last one.
 	// Releases wait for it. Read and write it atomically.
-	copy_horizon:   u64,
+	copy_horizon:  u64,
 	// Transfers up to this value are done. Read and write it atomically.
-	copy_done:      u64,
+	copy_done:     u64,
 	// Streamed textures whose batches have not been seen complete yet.
-	copy_textures:  [dynamic]Streamed_Texture,
+	copy_textures: [dynamic]Streamed_Texture,
 	// Guards the open batch and copy_textures. Taken before releases_mutex, never after.
-	stream_mutex:   sync.Mutex,
+	stream_mutex:  sync.Mutex,
 }
 
 @(private)
@@ -46,11 +46,24 @@ init_streaming :: proc() -> bool {
 	desc := d3d.COMMAND_QUEUE_DESC {
 		Type = .COPY,
 	}
-	check(dev.device->CreateCommandQueue(&desc, d3d.ICommandQueue_UUID, (^rawptr)(&dev.copy_queue)), "CreateCommandQueue(copy)") or_return
+	check(
+		dev.device->CreateCommandQueue(&desc, d3d.ICommandQueue_UUID, (^rawptr)(&dev.copy_queue)),
+		"CreateCommandQueue(copy)",
+	) or_return
 	dev.copy_queue->SetName(win.L("copy"))
-	check(dev.device->CreateFence(0, {}, d3d.IFence_UUID, (^rawptr)(&dev.copy_fence)), "CreateFence(copy)") or_return
+	check(
+		dev.device->CreateFence(0, {}, d3d.IFence_UUID, (^rawptr)(&dev.copy_fence)),
+		"CreateFence(copy)",
+	) or_return
 	for &batch in dev.copy_batches {
-		check(dev.device->CreateCommandAllocator(.COPY, d3d.ICommandAllocator_UUID, (^rawptr)(&batch.allocator)), "CreateCommandAllocator(copy)") or_return
+		check(
+			dev.device->CreateCommandAllocator(
+				.COPY,
+				d3d.ICommandAllocator_UUID,
+				(^rawptr)(&batch.allocator),
+			),
+			"CreateCommandAllocator(copy)",
+		) or_return
 	}
 	dev.copy_list = create_command_list(dev.copy_batches[0].allocator, .COPY) or_return
 	dev.copy_textures = make([dynamic]Streamed_Texture, dev.allocator)
@@ -127,7 +140,10 @@ stream_texture :: proc(texture: gpu.Texture, data: []byte) -> gpu.Transfer {
 	for subresource in 0 ..< subresources {
 		f, rows, row_size, next := subresource_footprint(&resource_desc, subresource, offset)
 		for row in 0 ..< int(rows) {
-			copy(mapped[int(f.Offset) + row * int(f.Footprint.RowPitch):], data[source:][:row_size])
+			copy(
+				mapped[int(f.Offset) + row * int(f.Footprint.RowPitch):],
+				data[source:][:row_size],
+			)
 			source += int(row_size)
 		}
 		offset = next
@@ -160,10 +176,20 @@ stream_texture :: proc(texture: gpu.Texture, data: []byte) -> gpu.Transfer {
 // subresource_footprint gives where a subresource goes in a staging buffer when it starts at offset, and where the next
 // one starts: after its last row, at the next multiple of the placement alignment.
 @(private = "file")
-subresource_footprint :: proc(desc: ^d3d.RESOURCE_DESC, subresource: u32, offset: u64) -> (f: d3d.PLACED_SUBRESOURCE_FOOTPRINT, rows: u32, row_size, next: u64) {
+subresource_footprint :: proc(
+	desc: ^d3d.RESOURCE_DESC,
+	subresource: u32,
+	offset: u64,
+) -> (
+	f: d3d.PLACED_SUBRESOURCE_FOOTPRINT,
+	rows: u32,
+	row_size, next: u64,
+) {
 	dev.device->GetCopyableFootprints(desc, subresource, 1, offset, &f, &rows, &row_size, nil)
 	end := f.Offset + u64(f.Footprint.RowPitch) * u64(rows - 1) + row_size
-	next = (end + d3d.TEXTURE_DATA_PLACEMENT_ALIGNMENT - 1) &~ u64(d3d.TEXTURE_DATA_PLACEMENT_ALIGNMENT - 1)
+	next =
+		(end + d3d.TEXTURE_DATA_PLACEMENT_ALIGNMENT - 1) &~
+		u64(d3d.TEXTURE_DATA_PLACEMENT_ALIGNMENT - 1)
 	return
 }
 
@@ -202,7 +228,16 @@ finish_streams :: proc(list: ^d3d.IGraphicsCommandList7) {
 		}
 		// A texture destroyed before its transfer finished is skipped.
 		if entry := gpu.pool_get(&dev.textures, streamed.texture); entry != nil {
-			texture_barrier(list, entry.resource, {.NO_ACCESS}, {.SHADER_RESOURCE}, {}, {.ALL_SHADING}, .COMMON, .SHADER_RESOURCE)
+			texture_barrier(
+				list,
+				entry.resource,
+				{.NO_ACCESS},
+				{.SHADER_RESOURCE},
+				{},
+				{.ALL_SHADING},
+				.COMMON,
+				.SHADER_RESOURCE,
+			)
 		}
 		unordered_remove(&dev.copy_textures, i)
 	}
@@ -243,7 +278,10 @@ wait_copy :: proc(value: u64) {
 // the open batch, so the release waits for that batch.
 @(private = "file")
 create_copy_staging :: proc(size: int) -> (resource: ^d3d.IResource, mapped: []byte, ok: bool) {
-	resource = create_buffer_resource({size = u32(size), label = "streaming staging"}, .UPLOAD) or_return
+	resource = create_buffer_resource(
+		{size = u32(size), label = "streaming staging"},
+		.UPLOAD,
+	) or_return
 	ptr: [^]byte
 	if !check(resource->Map(0, &d3d.RANGE{}, (^rawptr)(&ptr)), "Map(streaming staging)") {
 		resource->Release()

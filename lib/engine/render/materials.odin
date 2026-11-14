@@ -26,8 +26,14 @@ DEFAULT_RIBBON_MATERIAL :: #load("../content/materials/default_ribbon.material.m
 // The placeholders that a bin draws with while its material's pipelines compile, one for each blend mode, without
 // parameters, so they read nothing of the draws' blocks (see docs/rendering/materials.md#runtime).
 PLACEHOLDER_MATERIAL :: #load("../content/materials/placeholder.material.meta", string)
-PLACEHOLDER_TRANSPARENT_MATERIAL :: #load("../content/materials/placeholder_transparent.material.meta", string)
-PLACEHOLDER_ADDITIVE_MATERIAL :: #load("../content/materials/placeholder_additive.material.meta", string)
+PLACEHOLDER_TRANSPARENT_MATERIAL :: #load(
+	"../content/materials/placeholder_transparent.material.meta",
+	string,
+)
+PLACEHOLDER_ADDITIVE_MATERIAL :: #load(
+	"../content/materials/placeholder_additive.material.meta",
+	string,
+)
 
 // Substitute is what a bin draws with while its material's pipelines compile: a placeholder in its blend mode, or the
 // default surface material for a bin of patches.
@@ -42,17 +48,17 @@ Substitute :: enum u8 {
 // draw, their pipelines, and the textures that a texture parameter without its texture samples. It lives in the
 // Renderer, and holds handles only.
 Materials :: struct {
-	refs:           [MAX_MATERIALS]Material_Ref,
-	ref_count:      int,
-	pipelines:      [MAX_MATERIAL_PIPELINES]Material_Pipeline,
-	pipeline_count: int,
-	default_guid:   format.Guid,
+	refs:                 [MAX_MATERIALS]Material_Ref,
+	ref_count:            int,
+	pipelines:            [MAX_MATERIAL_PIPELINES]Material_Pipeline,
+	pipeline_count:       int,
+	default_guid:         format.Guid,
 	default_surface_guid: format.Guid,
 	default_ribbon_guid:  format.Guid,
-	substitutes:    [Substitute]format.Guid,
+	substitutes:          [Substitute]format.Guid,
 	// White, black and a flat normal, by Material_Texture_Default.
-	defaults:       [format.Material_Texture_Default]gpu.Texture,
-	sampler:        gpu.Sampler,
+	defaults:             [format.Material_Texture_Default]gpu.Texture,
+	sampler:              gpu.Sampler,
 }
 
 @(private)
@@ -66,40 +72,40 @@ Material_Ref :: struct {
 // material's blob, and updated when the blob changes. The impostor passes are pipelines too, which an impostors' bin
 // draws with in place of the opaque passes (see docs/rendering/gpu-scene.md#impostors).
 Material_Pipeline :: struct {
-	material:     format.Guid,
-	switches:     u32,
-	pipelines:    [format.Material_Pass]gpu.Pipeline,
+	material:           format.Guid,
+	switches:           u32,
+	pipelines:          [format.Material_Pass]gpu.Pipeline,
 	// The blob has each impostor pass, so a submesh of a mesh with an impostor draws it past its coarsest level.
-	impostor_path: bool,
+	impostor_path:      bool,
 	// With Mesh_Shaders, the mesh shader path's pipelines of the opaque passes, which the world's opaque draws draw
 	// with when mesh_path (see docs/rendering/gpu-scene.md#mesh-shader-path). The previews draw with pipelines.
-	meshes:       [format.Material_Pass]gpu.Pipeline,
-	mesh_path:    bool,
-	version:      u32,
-	two_sided:    bool,
-	cast_shadows: bool,
-	blend:        format.Material_Blend,
+	meshes:             [format.Material_Pass]gpu.Pipeline,
+	mesh_path:          bool,
+	version:            u32,
+	two_sided:          bool,
+	cast_shadows:       bool,
+	blend:              format.Material_Blend,
 	// A Transparent material that draws sorted back to front, not with moment-based transparency.
-	sorted:       bool,
+	sorted:             bool,
 	// How far the material's displacement may move a vertex, in meters, which culling adds to each sphere.
 	displacement_bound: f32,
 	// The material draws the patches of Surface_Renderers, with the patch vertex path, not meshes.
-	patches:      bool,
+	patches:            bool,
 	// The material draws its meshes as billboards, which face the camera (see docs/rendering/gpu-scene.md#billboards).
-	billboard:    bool,
+	billboard:          bool,
 	// The material's depth changes with the frame's time: it reads the time and displaces its vertices or discards by its
 	// opacity, so its shadow changes without a move (see docs/rendering/gpu-scene.md#caster-tracking).
-	animated:     bool,
+	animated:           bool,
 	// The material draws particle ribbons, with the ribbon vertex path, not meshes (see
 	// docs/rendering/particles.md#ribbons).
-	ribbon:       bool,
+	ribbon:             bool,
 	// A transparent or additive material's transparent pass, blended over the scene: its back faces, for a two-sided
 	// material, then its front faces. The sorted draws draw with them, and so do the previews of every transparent
 	// material, which have no moments (see docs/rendering/transparency.md#transparency).
-	over:         [2]gpu.Pipeline,
+	over:               [2]gpu.Pipeline,
 	// With Ray_Query, the compute pipeline that evaluates the material at ray hits, for an opaque or masked material of
 	// meshes (see docs/rendering/ray-scene.md#hit-shading). Drawing does not wait for it.
-	hit:          gpu.Pipeline,
+	hit:                gpu.Pipeline,
 }
 
 // material_group is the bins that a material's draws are in: the opaque ones, which the prepass and the forward pass
@@ -133,17 +139,21 @@ material_pipeline_destroy :: proc(p: ^Material_Pipeline, platform: ^core.Platfor
 NORMAL_FORMAT :: gpu.Format.RG16_Float
 VELOCITY_FORMAT :: gpu.Format.RG16_Float
 ROUGHNESS_FORMAT :: gpu.Format.R8_Unorm
-PREPASS_COLORS :: []gpu.Color_Target{{format = NORMAL_FORMAT}, {format = VELOCITY_FORMAT}, {format = ROUGHNESS_FORMAT}}
+PREPASS_COLORS :: []gpu.Color_Target {
+	{format = NORMAL_FORMAT},
+	{format = VELOCITY_FORMAT},
+	{format = ROUGHNESS_FORMAT},
+}
 // The roughness where the prepass draws nothing, which reflects nothing sharp.
 ROUGHNESS_NONE :: 1
 
 // Material_Table is one frame's material table: a parameter block for each material or instance that the frame draws,
 // with its textures' bindless indices written. It is in frame memory, and the frame uploads it.
 Material_Table :: struct {
-	uses:     map[format.Guid]Material_Use,
-	bytes:    [dynamic]byte,
+	uses:    map[format.Guid]Material_Use,
+	bytes:   [dynamic]byte,
 	// A texture of a block is not resident yet, so it samples its default.
-	waiting:  bool,
+	waiting: bool,
 }
 
 // Material_Use is a material or instance as the frame draws it: its pipeline, and its block's offset in the table.
@@ -166,7 +176,10 @@ materials_init :: proc(m: ^Materials, platform: ^core.Platform_API) {
 		.Normal = {128, 128, 255, 255},
 	}
 	for &texel, d in texels {
-		m.defaults[d] = platform.gpu_create_texture({size = {1, 1}, format = .RGBA8_Unorm, usage = {.Sampled}, label = "default texture"}, texel[:])
+		m.defaults[d] = platform.gpu_create_texture(
+			{size = {1, 1}, format = .RGBA8_Unorm, usage = {.Sampled}, label = "default texture"},
+			texel[:],
+		)
 	}
 	m.sampler = platform.gpu_create_sampler({filter = .Linear, label = "material sampler"})
 }
@@ -192,7 +205,14 @@ materials_reload :: proc(m: ^Materials) {
 // use_material gives a material or instance as this frame draws it, and adds its block to the table the first time.
 // A GUID of zero is the default material, and so is one that cannot draw. It fails only when the default material
 // cannot draw either.
-use_material :: proc(r: ^Renderer, table: ^Material_Table, guid: format.Guid) -> (use: Material_Use, ok: bool) {
+use_material :: proc(
+	r: ^Renderer,
+	table: ^Material_Table,
+	guid: format.Guid,
+) -> (
+	use: Material_Use,
+	ok: bool,
+) {
 	wanted := guid if guid != {} else r.materials.default_guid
 	if found, seen := table.uses[wanted]; seen {
 		return found, true
@@ -208,7 +228,14 @@ use_material :: proc(r: ^Renderer, table: ^Material_Table, guid: format.Guid) ->
 }
 
 @(private = "file")
-make_use :: proc(r: ^Renderer, table: ^Material_Table, guid: format.Guid) -> (use: Material_Use, ok: bool) {
+make_use :: proc(
+	r: ^Renderer,
+	table: ^Material_Table,
+	guid: format.Guid,
+) -> (
+	use: Material_Use,
+	ok: bool,
+) {
 	data := material_data(r, guid) or_return
 	b := material_block(data, guid) or_return
 	use.pipeline = material_pipeline(r, b.material, b.switches) or_return
@@ -266,9 +293,16 @@ material_ready :: proc(platform: ^core.Platform_API, p: ^Material_Pipeline) -> b
 // material_status is where a material's pipelines are together: Failed when any failed, since the material then never
 // draws as it is until its shader changes, else Compiling while any compiles, else Ready.
 @(private)
-material_status :: proc(platform: ^core.Platform_API, p: ^Material_Pipeline) -> gpu.Pipeline_Status {
+material_status :: proc(
+	platform: ^core.Platform_API,
+	p: ^Material_Pipeline,
+) -> gpu.Pipeline_Status {
 	// fold takes a pipeline into the status so far: a failed one wins, then a compiling one.
-	fold :: proc(platform: ^core.Platform_API, status: ^gpu.Pipeline_Status, pipeline: gpu.Pipeline) {
+	fold :: proc(
+		platform: ^core.Platform_API,
+		status: ^gpu.Pipeline_Status,
+		pipeline: gpu.Pipeline,
+	) {
 		if pipeline == {} || status^ == .Failed {
 			return
 		}
@@ -315,10 +349,22 @@ Material_Block :: struct {
 @(private)
 material_block :: proc(data: []byte, guid: format.Guid) -> (b: Material_Block, ok: bool) {
 	if blob, is_material := format.material_view(data); is_material {
-		return {guid, blob.default_switches, format.blob_bytes(data, blob.block), format.material_textures(data, blob)}, true
+		return {
+				guid,
+				blob.default_switches,
+				format.blob_bytes(data, blob.block),
+				format.material_textures(data, blob),
+			},
+			true
 	}
 	if instance, is_instance := format.material_instance_view(data); is_instance {
-		return {instance.material, instance.switches, format.blob_bytes(data, instance.block), format.instance_textures(data, instance)}, true
+		return {
+				instance.material,
+				instance.switches,
+				format.blob_bytes(data, instance.block),
+				format.instance_textures(data, instance),
+			},
+			true
 	}
 	return
 }
@@ -365,7 +411,9 @@ material_data :: proc(r: ^Renderer, guid: format.Guid) -> (data: []byte, ok: boo
 		}
 		ref = &m.refs[m.ref_count]
 		m.ref_count += 1
-		ref^ = {guid = guid}
+		ref^ = {
+			guid = guid,
+		}
 	}
 	if asset.guid(r.residency.assets, ref.handle) != guid {
 		if ref.failed_at != 0 && r.residency.frame - ref.failed_at < MATERIAL_RETRY_FRAMES {
@@ -375,7 +423,10 @@ material_data :: proc(r: ^Renderer, guid: format.Guid) -> (data: []byte, ok: boo
 		if !loaded {
 			if ref.failed_at == 0 {
 				buffer: [32]u8
-				log.errorf("render: the material %s is not cooked", format.guid_format(guid, &buffer))
+				log.errorf(
+					"render: the material %s is not cooked",
+					format.guid_format(guid, &buffer),
+				)
 			}
 			ref.failed_at = max(r.residency.frame, 1)
 			return
@@ -388,7 +439,14 @@ material_data :: proc(r: ^Renderer, guid: format.Guid) -> (data: []byte, ok: boo
 // material_pipeline gives the pipelines of a material and switch combination, which it makes, or updates when the
 // material's blob changed. It fails if the material has no such variant, as before the cooker compiles it.
 @(private = "file")
-material_pipeline :: proc(r: ^Renderer, guid: format.Guid, switches: u32) -> (index: int, ok: bool) {
+material_pipeline :: proc(
+	r: ^Renderer,
+	guid: format.Guid,
+	switches: u32,
+) -> (
+	index: int,
+	ok: bool,
+) {
 	data := material_data(r, guid) or_return
 	m := &r.materials
 	blob := format.material_view(data) or_return
@@ -403,7 +461,8 @@ material_pipeline :: proc(r: ^Renderer, guid: format.Guid, switches: u32) -> (in
 	if index >= 0 && m.pipelines[index].version == ref_version {
 		return index, true
 	}
-	if format.material_code(data, blob, switches, format.material_main_pass(blob), .Vertex) == nil {
+	if format.material_code(data, blob, switches, format.material_main_pass(blob), .Vertex) ==
+	   nil {
 		return -1, false
 	}
 	if index < 0 {
@@ -413,7 +472,10 @@ material_pipeline :: proc(r: ^Renderer, guid: format.Guid, switches: u32) -> (in
 		}
 		index = m.pipeline_count
 		m.pipeline_count += 1
-		m.pipelines[index] = {material = guid, switches = switches}
+		m.pipelines[index] = {
+			material = guid,
+			switches = switches,
+		}
 	}
 	make_pipelines(r, &m.pipelines[index], data, blob, switches)
 	m.pipelines[index].version = ref_version
@@ -422,7 +484,13 @@ material_pipeline :: proc(r: ^Renderer, guid: format.Guid, switches: u32) -> (in
 
 // make_pipelines creates or updates the pipelines of each pass of a material and switch combination from its blob.
 @(private)
-make_pipelines :: proc(r: ^Renderer, p: ^Material_Pipeline, data: []byte, blob: ^format.Material_Blob, switches: u32) {
+make_pipelines :: proc(
+	r: ^Renderer,
+	p: ^Material_Pipeline,
+	data: []byte,
+	blob: ^format.Material_Blob,
+	switches: u32,
+) {
 	two_sided := .Two_Sided in blob.flags
 	cull: gpu.Cull_Mode = two_sided ? .None : .Back
 	label := format.blob_string(data, blob.source_path)
@@ -444,7 +512,12 @@ make_pipelines :: proc(r: ^Renderer, p: ^Material_Pipeline, data: []byte, blob: 
 			depth_format = DEPTH_FORMAT,
 			depth_compare = .Greater,
 			depth_write = true,
-			stencil = {compare = .Greater_Equal, pass = .Replace, read_mask = VIEW_MODEL_STENCIL, write_mask = VIEW_MODEL_STENCIL},
+			stencil = {
+				compare = .Greater_Equal,
+				pass = .Replace,
+				read_mask = VIEW_MODEL_STENCIL,
+				write_mask = VIEW_MODEL_STENCIL,
+			},
 			cull = cull,
 			label = label,
 		},
@@ -589,7 +662,10 @@ make_pipelines :: proc(r: ^Renderer, p: ^Material_Pipeline, data: []byte, blob: 
 		platform.gpu_destroy_pipeline(p.hit)
 		p.hit = {}
 	} else {
-		desc := gpu.Compute_Pipeline_Desc{compute = hit, label = label}
+		desc := gpu.Compute_Pipeline_Desc {
+			compute = hit,
+			label   = label,
+		}
 		if p.hit == {} || !platform.gpu_update_compute_pipeline(p.hit, desc) {
 			platform.gpu_destroy_pipeline(p.hit)
 			p.hit = platform.gpu_create_compute_pipeline(desc)
@@ -607,7 +683,11 @@ make_pipelines :: proc(r: ^Renderer, p: ^Material_Pipeline, data: []byte, blob: 
 
 // update_pipeline updates a pipeline to a description, creates it, or destroys it for a description without code.
 @(private = "file")
-update_pipeline :: proc(platform: ^core.Platform_API, pipeline: ^gpu.Pipeline, desc: gpu.Graphics_Pipeline_Desc) {
+update_pipeline :: proc(
+	platform: ^core.Platform_API,
+	pipeline: ^gpu.Pipeline,
+	desc: gpu.Graphics_Pipeline_Desc,
+) {
 	if desc.vertex == nil && desc.mesh == nil {
 		platform.gpu_destroy_pipeline(pipeline^)
 		pipeline^ = {}

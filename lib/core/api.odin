@@ -16,203 +16,230 @@ import script_host "cinnabar:core/script"
 // It is the complete porting surface.
 Platform_API :: struct {
 	// Allocators are built by the host, so their procedures stay valid across reloads.
-	permanent_allocator: runtime.Allocator,
-	frame_allocator:     runtime.Allocator,
+	permanent_allocator:             runtime.Allocator,
+	frame_allocator:                 runtime.Allocator,
 	// A general-purpose allocator for loaded assets, which can free. Its memory is the host's.
-	asset_allocator:     runtime.Allocator,
+	asset_allocator:                 runtime.Allocator,
 	// A general-purpose allocator for other game-side state that grows and shrinks, such as the editor's view of the
 	// world. Its memory is the host's.
-	heap_allocator:      runtime.Allocator,
+	heap_allocator:                  runtime.Allocator,
 
 	// Where the game's files are, as absolute paths in the host's memory: the loose cache of cooked blobs, and the
 	// project's settings file, with the user's beside it (see docs/overview/building-and-running.md#build-layout). The
 	// host fills them from its command line, else from the executable's directory: <exe>/content and
 	// <exe>/project.settings.
-	content_dir:  string,
-	project_path: string,
+	content_dir:                     string,
+	project_path:                    string,
 
 	// Virtual memory for game-side stores that must not move, such as world storage. Reserved memory is usable only
 	// after it is committed, and committed memory starts zeroed. Committing a range again is allowed. core releases
 	// every reservation that the game still holds at a soft restart.
-	memory_reserve: proc(size: int) -> rawptr,
-	memory_commit:  proc(ptr: rawptr, size: int) -> bool,
-	memory_release: proc(ptr: rawptr, size: int),
-
-	time_seconds:     proc() -> f64,
+	memory_reserve:                  proc(size: int) -> rawptr,
+	memory_commit:                   proc(ptr: rawptr, size: int) -> bool,
+	memory_release:                  proc(ptr: rawptr, size: int),
+	time_seconds:                    proc() -> f64,
 	// The keyboard, the mouse, the gamepads and the typed text at the start of the frame. In shared mode the window is
 	// hidden, so the input is empty until the editor link sends input.
-	input:            proc() -> Input,
+	input:                           proc() -> Input,
 	// File I/O for the asset runtime. The game's own files are at content_dir and project_path, which are absolute; a
 	// relative path is relative to the working directory. file_read reads a whole file into
 	// memory from allocator, at the given alignment. file_modified is the file's modification time in nanoseconds,
 	// or 0 if it does not exist. file_write replaces a whole file, such as the user's settings, so a reader never sees
 	// half of it. file_read_range reads part of a file into a buffer, and returns how many bytes it read.
-	file_read:        proc(path: string, align: int, allocator: runtime.Allocator) -> ([]byte, bool),
-	file_read_range:  proc(path: string, offset: i64, buffer: []byte) -> int,
-	file_modified:    proc(path: string) -> i64,
-	file_write:       proc(path: string, data: []byte) -> bool,
+	file_read:                       proc(
+		path: string,
+		align: int,
+		allocator: runtime.Allocator,
+	) -> (
+		[]byte,
+		bool,
+	),
+	file_read_range:                 proc(path: string, offset: i64, buffer: []byte) -> int,
+	file_modified:                   proc(path: string) -> i64,
+	file_write:                      proc(path: string, data: []byte) -> bool,
 	// Reads of file ranges that go on across frames, on the host's threads (see docs/core/platform.md#file-reads).
 	// file_read_begin starts one, and returns its ticket, or 0 if it cannot start. file_read_result is the read's bytes
 	// once it is Done, in the host's memory, valid until file_read_end, which frees the read and cancels one that is
 	// still Pending. A read of more bytes than the file has fails. core ends every read that the game still holds at a
 	// soft restart.
-	file_read_begin:  proc(path: string, offset: i64, size: int) -> File_Read,
-	file_read_result: proc(read: File_Read) -> ([]byte, File_Read_State),
-	file_read_end:    proc(read: File_Read),
+	file_read_begin:                 proc(path: string, offset: i64, size: int) -> File_Read,
+	file_read_result:                proc(read: File_Read) -> ([]byte, File_Read_State),
+	file_read_end:                   proc(read: File_Read),
 	// The client area size at the start of the frame. The frame target has this size. It is zero while minimized.
-	window_size:      proc() -> [2]i32,
-	set_window_title: proc(title: string),
+	window_size:                     proc() -> [2]i32,
+	set_window_title:                proc(title: string),
 
 	// Frame jobs run on fibers and must finish before the frame ends. Wait from a job or from the game's frame code.
 	// Call these, not the jobs package: the DLL's copy of the scheduler is not running.
-	jobs_run:          proc(job_list: []jobs.Job, counter: ^jobs.Counter),
-	jobs_wait:         proc(counter: ^jobs.Counter),
+	jobs_run:                        proc(job_list: []jobs.Job, counter: ^jobs.Counter),
+	jobs_wait:                       proc(counter: ^jobs.Counter),
 	// A fiber-aware lock: a fiber that waits for it suspends and frees its thread, so the holder may wait on
 	// counters while it holds the lock. Use it only from jobs and the frame code.
-	jobs_lock:         proc(mutex: ^jobs.Mutex),
-	jobs_unlock:       proc(mutex: ^jobs.Mutex),
+	jobs_lock:                       proc(mutex: ^jobs.Mutex),
+	jobs_unlock:                     proc(mutex: ^jobs.Mutex),
 	// The number of threads that run jobs, including the main thread.
-	jobs_worker_count: proc() -> int,
+	jobs_worker_count:               proc() -> int,
 
 	// The profiler's zones (see docs/core/profiling.md#zones). Zone through the profile package's front-end, which
 	// compiles to nothing with -define:PROFILE=false: profile.scope(&platform.profile, name).
-	profile: profile.Procs,
+	profile:                         profile.Procs,
 
 	// The audio device (see docs/core/audio.md#audio). audio_write queues 48 kHz stereo frames and returns how many fit,
 	// from one thread at a time. It opens the device on its first frames. The device takes one writer: once the audio
 	// backend's mixer writes, the game's writes are refused and return 0, and the other way round. audio_status is safe from any thread.
 	// audio_test_tone is whether CINNABAR_TEST_TONE asks the game to play the test tone.
-	audio_write:     proc(frames: []Audio_Frame) -> int,
-	audio_status:    proc() -> Audio_Status,
-	audio_test_tone: bool,
-
-	gpu_features:     proc() -> gpu.Features,
+	audio_write:                     proc(frames: []Audio_Frame) -> int,
+	audio_status:                    proc() -> Audio_Status,
+	audio_test_tone:                 bool,
+	gpu_features:                    proc() -> gpu.Features,
 	// The device that the backend chose (see docs/gpu/interface.md#adapter).
-	gpu_adapter:      proc() -> gpu.Adapter,
+	gpu_adapter:                     proc() -> gpu.Adapter,
 	// The frame target is in the render target layout when the frame starts, and the game must leave it there.
 	// Its contents are undefined at the start of each frame.
-	gpu_frame_target: proc() -> gpu.Texture,
+	gpu_frame_target:                proc() -> gpu.Texture,
 	// The frame's output: how the frame target's colors reach the display, the frame target's format, which follows
 	// from it, and the display (see docs/gpu/presentation.md#presentation). gpu_request_output asks for an output mode from the
 	// next frame on; Auto, the default, is HDR10 while the display is in HDR mode. Shared mode is always Sdr.
-	gpu_output:         proc() -> gpu.Output,
-	gpu_request_output: proc(request: gpu.Output_Request),
+	gpu_output:                      proc() -> gpu.Output,
+	gpu_request_output:              proc(request: gpu.Output_Request),
 	// The editor's previews render into shared targets of their own beside the frame target (see
 	// docs/rendering/materials.md#material-previews). gpu_preview_target gives target id's texture for this frame at a size, at
 	// most gpu.MAX_PREVIEW_SIZE on a side, in the render target layout, which the game must leave it in; the frame's end
 	// gives it to the reader. It gives false outside shared mode, and while the reader may still read the texture that
 	// the frame would draw into. id is below gpu.MAX_PREVIEW_TARGETS. gpu_release_preview_target releases a target's
 	// shared objects.
-	gpu_preview_target:         proc(id: int, size: [2]u32) -> (gpu.Preview_Target, bool),
-	gpu_release_preview_target: proc(id: int),
+	gpu_preview_target:              proc(id: int, size: [2]u32) -> (gpu.Preview_Target, bool),
+	gpu_release_preview_target:      proc(id: int),
 	// The editor's viewports have shared targets of the same kind (see docs/editor/viewport.md#views):
 	// gpu_viewport_target gives viewport id's texture for this frame, at most gpu.MAX_VIEWPORT_SIZE on a side, as
 	// gpu_preview_target gives a preview's, and gpu_release_viewport_target releases its shared objects. id is below
 	// gpu.MAX_VIEWPORT_TARGETS.
-	gpu_viewport_target:         proc(id: int, size: [2]u32) -> (gpu.Preview_Target, bool),
-	gpu_release_viewport_target: proc(id: int),
+	gpu_viewport_target:             proc(id: int, size: [2]u32) -> (gpu.Preview_Target, bool),
+	gpu_release_viewport_target:     proc(id: int),
 	// gpu_capture_texture asks for a copy of a texture at this frame's end, which the host gets with the ticket, as the
 	// content browser's thumbnails do. The texture must end the frame in the render target layout. It is false when the
 	// backend has no room this frame, so ask again next frame.
-	gpu_capture_texture:        proc(texture: gpu.Texture, ticket: u32) -> bool,
+	gpu_capture_texture:             proc(texture: gpu.Texture, ticket: u32) -> bool,
 	// gpu_submit runs the command buffers on a queue, in order after the queue's earlier submissions in the frame.
 	// They start after the earlier submissions of the wait_for queues finish. It returns false if the backend
 	// rejected the command buffers. See docs/gpu/queues-streaming-readback.md#queues.
-	gpu_submit:       proc(buffers: []gpu.Command_Buffer, queue := gpu.Queue.Graphics, wait_for := gpu.Queues{}) -> bool,
+	gpu_submit:                      proc(
+		buffers: []gpu.Command_Buffer,
+		queue := gpu.Queue.Graphics,
+		wait_for := gpu.Queues{},
+	) -> bool,
 	// gpu_upload allocates memory in the frame's upload ring. It returns false when the ring is full.
-	gpu_upload:       proc(size, align: int) -> (gpu.Upload, bool),
+	gpu_upload:                      proc(size, align: int) -> (gpu.Upload, bool),
 	// Streaming copies data into a resource on the copy queue, beside the frame's work. The data is copied before the
 	// call returns. Use the resource once gpu_transfer_done is true. A texture needs the Streamed usage, is streamed
 	// once, and takes its whole mip chain. A failed stream logs an error and returns the zero Transfer.
-	gpu_stream_buffer:  proc(buffer: gpu.Buffer, offset: u32, data: []byte) -> gpu.Transfer,
-	gpu_stream_texture: proc(texture: gpu.Texture, data: []byte) -> gpu.Transfer,
-	gpu_transfer_done:  proc(transfer: gpu.Transfer) -> bool,
+	gpu_stream_buffer:               proc(
+		buffer: gpu.Buffer,
+		offset: u32,
+		data: []byte,
+	) -> gpu.Transfer,
+	gpu_stream_texture:              proc(texture: gpu.Texture, data: []byte) -> gpu.Transfer,
+	gpu_transfer_done:               proc(transfer: gpu.Transfer) -> bool,
 	// gpu_read_buffer returns a Readback buffer's memory, or false while the GPU has not finished a frame that copies
 	// into it. The memory is the backend's: read it during the frame, and keep no pointer into it. See
 	// docs/gpu/queues-streaming-readback.md#readback.
-	gpu_read_buffer:    proc(buffer: gpu.Buffer) -> ([]byte, bool),
+	gpu_read_buffer:                 proc(buffer: gpu.Buffer) -> ([]byte, bool),
 
 	// Creation returns the nil handle on failure. data may be nil. The backend copies the description and the data.
-	gpu_create_buffer:            proc(desc: gpu.Buffer_Desc, data: []byte) -> gpu.Buffer,
-	gpu_create_texture:           proc(desc: gpu.Texture_Desc, data: []byte) -> gpu.Texture,
-	gpu_create_texture_view:      proc(desc: gpu.Texture_View_Desc) -> gpu.Texture,
-	gpu_create_sampler:          proc(desc: gpu.Sampler_Desc) -> gpu.Sampler,
-	gpu_create_graphics_pipeline: proc(desc: gpu.Graphics_Pipeline_Desc) -> gpu.Pipeline,
-	gpu_create_compute_pipeline:  proc(desc: gpu.Compute_Pipeline_Desc) -> gpu.Pipeline,
+	gpu_create_buffer:               proc(desc: gpu.Buffer_Desc, data: []byte) -> gpu.Buffer,
+	gpu_create_texture:              proc(desc: gpu.Texture_Desc, data: []byte) -> gpu.Texture,
+	gpu_create_texture_view:         proc(desc: gpu.Texture_View_Desc) -> gpu.Texture,
+	gpu_create_sampler:              proc(desc: gpu.Sampler_Desc) -> gpu.Sampler,
+	gpu_create_graphics_pipeline:    proc(desc: gpu.Graphics_Pipeline_Desc) -> gpu.Pipeline,
+	gpu_create_compute_pipeline:     proc(desc: gpu.Compute_Pipeline_Desc) -> gpu.Pipeline,
 	// An update compiles a new version and keeps the current one in use until the new one is ready. It keeps the
 	// handle and the scope. It returns false, and changes nothing, if the new version changes the attachment
 	// formats or the topology: create a new pipeline for those.
-	gpu_update_graphics_pipeline: proc(pipeline: gpu.Pipeline, desc: gpu.Graphics_Pipeline_Desc) -> bool,
-	gpu_update_compute_pipeline:  proc(pipeline: gpu.Pipeline, desc: gpu.Compute_Pipeline_Desc) -> bool,
+	gpu_update_graphics_pipeline:    proc(
+		pipeline: gpu.Pipeline,
+		desc: gpu.Graphics_Pipeline_Desc,
+	) -> bool,
+	gpu_update_compute_pipeline:     proc(
+		pipeline: gpu.Pipeline,
+		desc: gpu.Compute_Pipeline_Desc,
+	) -> bool,
 	// Where a pipeline's latest version is: Compiling, Ready, so draws with it draw, or Failed, which a caller need not
 	// wait for (see gpu.Pipeline_Status).
-	gpu_pipeline_status:          proc(pipeline: gpu.Pipeline) -> gpu.Pipeline_Status,
+	gpu_pipeline_status:             proc(pipeline: gpu.Pipeline) -> gpu.Pipeline_Status,
 	// Ray tracing pipelines need Ray_Tracing_Pipeline.
 	gpu_create_ray_tracing_pipeline: proc(desc: gpu.Ray_Tracing_Pipeline_Desc) -> gpu.Pipeline,
-	gpu_update_ray_tracing_pipeline: proc(pipeline: gpu.Pipeline, desc: gpu.Ray_Tracing_Pipeline_Desc) -> bool,
+	gpu_update_ray_tracing_pipeline: proc(
+		pipeline: gpu.Pipeline,
+		desc: gpu.Ray_Tracing_Pipeline_Desc,
+	) -> bool,
 	// Acceleration structures need Ray_Query or Ray_Tracing_Pipeline. The reference goes in Accel_Instance records.
-	gpu_create_accel:             proc(desc: gpu.Accel_Struct_Desc) -> gpu.Accel_Struct,
-	gpu_accel_reference:          proc(accel: gpu.Accel_Struct) -> u64,
+	gpu_create_accel:                proc(desc: gpu.Accel_Struct_Desc) -> gpu.Accel_Struct,
+	gpu_accel_reference:             proc(accel: gpu.Accel_Struct) -> u64,
 	// The vendors' upscalers that the device runs, whose libraries the backend found (see docs/gpu/upscalers.md#upscalers).
 	// Creation compiles the upscaler's pipelines before it returns, which can take a moment.
-	gpu_upscalers:                proc() -> gpu.Upscaler_Kinds,
-	gpu_create_upscaler:          proc(desc: gpu.Upscaler_Desc) -> gpu.Upscaler,
+	gpu_upscalers:                   proc() -> gpu.Upscaler_Kinds,
+	gpu_create_upscaler:             proc(desc: gpu.Upscaler_Desc) -> gpu.Upscaler,
 	// Destruction invalidates the handle at once and releases the resource when the GPU no longer uses it.
-	gpu_destroy_buffer:           proc(buffer: gpu.Buffer),
-	gpu_destroy_texture:          proc(texture: gpu.Texture),
-	gpu_destroy_sampler:          proc(sampler: gpu.Sampler),
-	gpu_destroy_pipeline:         proc(pipeline: gpu.Pipeline),
-	gpu_destroy_accel:            proc(accel: gpu.Accel_Struct),
-	gpu_destroy_upscaler:         proc(upscaler: gpu.Upscaler),
+	gpu_destroy_buffer:              proc(buffer: gpu.Buffer),
+	gpu_destroy_texture:             proc(texture: gpu.Texture),
+	gpu_destroy_sampler:             proc(sampler: gpu.Sampler),
+	gpu_destroy_pipeline:            proc(pipeline: gpu.Pipeline),
+	gpu_destroy_accel:               proc(accel: gpu.Accel_Struct),
+	gpu_destroy_upscaler:            proc(upscaler: gpu.Upscaler),
 	// Destroys every resource in the scope and returns how many there were. See gpu.Scope.
-	gpu_destroy_scope:            proc(scope: gpu.Scope) -> int,
+	gpu_destroy_scope:               proc(scope: gpu.Scope) -> int,
 
 	// The script VM lives in host memory, and every function pointer that it stores is host code (see
 	// docs/scripting/embedding.md#host-trampolines). bindings must stay at the same address until script_close, and on_reload
 	// must register every binding again. The VM opens with the built-in libraries. A soft restart closes the VMs
 	// that the game left open.
-	script_open:         proc(bindings: ^script_host.Bindings) -> ^luau.State,
-	script_close:        proc(L: ^luau.State),
+	script_open:                     proc(bindings: ^script_host.Bindings) -> ^luau.State,
+	script_close:                    proc(L: ^luau.State),
 	// Pushes a closure that calls the binding with this name. It stays valid across code reloads.
-	script_push_binding: proc(L: ^luau.State, name: string),
+	script_push_binding:             proc(L: ^luau.State, name: string),
 	// Interns a method or field name and returns its atom, or -1 if the interner is full. Atoms never change meaning.
-	script_atom:         proc(name: string) -> i16,
+	script_atom:                     proc(name: string) -> i16,
 	// Makes the VM call Bindings.direct for a userdata tag (see docs/scripting/embedding.md#direct-field-access). It returns
 	// false when the host was built without LUAU_DIRECT_ACCESS.
-	script_direct_access: proc(L: ^luau.State, tag: i32) -> bool,
+	script_direct_access:            proc(L: ^luau.State, tag: i32) -> bool,
 
 	// The physics backend that the build chose, or the null backend (see docs/physics/design.md#the-boundary). Its
 	// procedures are host code. world_destroy_all and shutdown are the host's; a soft restart destroys the worlds that
 	// the game left.
-	physics: physics.Physics_API,
+	physics:                         physics.Physics_API,
 
 	// The audio backend that the project chose, or the null backend (see docs/audio/backends.md#the-contract). Its
 	// procedures are host code, and its voices keep playing through a code reload. reset and shutdown are the host's; a
 	// soft restart stops what the game left playing.
-	audio: audio.Audio_API,
+	audio:                           audio.Audio_API,
 }
 
 // Game_API is what the game side provides to the host (game -> host).
 // `state` always points at the game's root Game_State, which the host owns.
 Game_API :: struct {
-	init:        proc(state: rawptr, platform: ^Platform_API),
+	init:         proc(state: rawptr, platform: ^Platform_API),
 	// dt is fixed-point (integer nanoseconds), so accumulated world time does not drift.
-	update:      proc(state: rawptr, dt: time.Duration) -> (keep_running: bool),
-	shutdown:    proc(state: rawptr),
-	on_reload:   proc(state: rawptr, platform: ^Platform_API),
-	state_size:  proc() -> int,
-	layout_hash: proc() -> u64,
+	update:       proc(state: rawptr, dt: time.Duration) -> (keep_running: bool),
+	shutdown:     proc(state: rawptr),
+	on_reload:    proc(state: rawptr, platform: ^Platform_API),
+	state_size:   proc() -> int,
+	layout_hash:  proc() -> u64,
 	// The host refuses a DLL whose abi_hash differs from its own: a different GPU command format (see
 	// docs/gpu/command-buffers.md#command-buffers), physics format (see docs/physics/design.md#the-boundary), audio format
 	// (see docs/audio/backends.md#the-contract) or Platform_API.
-	abi_hash:    proc() -> u64,
+	abi_hash:     proc() -> u64,
 	// script_types returns the Luau definition file of the game's scripts, for host.exe --emit-script-types. It
 	// must not need init: it makes its own script runtime. See docs/scripting/tooling-and-hot-reload.md#types-and-tooling.
-	script_types:    proc(platform: ^Platform_API) -> string,
+	script_types: proc(platform: ^Platform_API) -> string,
 	// The game's side of the editor link (see docs/editor/link.md#editor-link). The host calls it between frames with
 	// the editor's messages for the game, and the game appends its own messages, framed, to out. connection changes
 	// for each editor, and is 0 while none is linked. A game without editor support leaves it nil.
-	editor_poll:     proc(state: rawptr, connection: u64, incoming: []Editor_Message, out: ^[dynamic]byte),
+	editor_poll:  proc(
+		state: rawptr,
+		connection: u64,
+		incoming: []Editor_Message,
+		out: ^[dynamic]byte,
+	),
 }
 
 // File_Read is the ticket of a read that file_read_begin started. 0 is no read.
@@ -236,7 +263,12 @@ Editor_Message :: struct {
 // abi_hash identifies what both sides of the DLL boundary must agree on: the GPU command format, the physics and audio
 // formats and Platform_API's layout.
 abi_hash :: proc() -> u64 {
-	return gpu.format_hash() ~ physics.format_hash() ~ audio.format_hash() ~ layout.hash(Platform_API)
+	return(
+		gpu.format_hash() ~
+		physics.format_hash() ~
+		audio.format_hash() ~
+		layout.hash(Platform_API) \
+	)
 }
 
 // The game DLL exports a `proc() -> Game_API` under this name.

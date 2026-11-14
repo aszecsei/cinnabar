@@ -72,21 +72,21 @@ setup_world :: proc(t: ^testing.T) -> ^World_Fixture {
 	f := new(World_Fixture)
 	testing.expect(t, virtual.arena_init_growing(&f.frame) == nil)
 	f.platform = {
-		frame_allocator     = virtual.arena_allocator(&f.frame),
-		time_seconds        = proc() -> f64 {return 0},
-		script_open         = script_host.open,
-		script_close        = script_host.close,
+		frame_allocator = virtual.arena_allocator(&f.frame),
+		time_seconds = proc() -> f64 {return 0},
+		script_open = script_host.open,
+		script_close = script_host.close,
 		script_push_binding = script_host.push_binding,
-		script_atom         = script_host.atom,
+		script_atom = script_host.atom,
 		script_direct_access = script_host.direct_access,
-		memory_reserve      = proc(size: int) -> rawptr {
+		memory_reserve = proc(size: int) -> rawptr {
 			data, err := virtual.reserve(uint(size))
 			return err == nil ? raw_data(data) : nil
 		},
-		memory_commit       = proc(ptr: rawptr, size: int) -> bool {
+		memory_commit = proc(ptr: rawptr, size: int) -> bool {
 			return virtual.commit(ptr, uint(size)) == nil
 		},
-		memory_release      = proc(ptr: rawptr, size: int) {
+		memory_release = proc(ptr: rawptr, size: int) {
 			virtual.release(ptr, uint(size))
 		},
 	}
@@ -126,13 +126,33 @@ run :: proc(t: ^testing.T, f: ^World_Fixture, source: string, loc := #caller_loc
 }
 
 @(private)
-expect_reports :: proc(t: ^testing.T, f: ^World_Fixture, expected: []f64, loc := #caller_location) {
-	testing.expectf(t, len(f.reports) == len(expected), "reports %v, want %v", f.reports[:], expected, loc = loc)
+expect_reports :: proc(
+	t: ^testing.T,
+	f: ^World_Fixture,
+	expected: []f64,
+	loc := #caller_location,
+) {
+	testing.expectf(
+		t,
+		len(f.reports) == len(expected),
+		"reports %v, want %v",
+		f.reports[:],
+		expected,
+		loc = loc,
+	)
 	if len(f.reports) != len(expected) {
 		return
 	}
 	for e, i in expected {
-		testing.expectf(t, f.reports[i] == e, "report %d is %v, want %v", i, f.reports[i], e, loc = loc)
+		testing.expectf(
+			t,
+			f.reports[i] == e,
+			"report %d is %v, want %v",
+			i,
+			f.reports[i],
+			e,
+			loc = loc,
+		)
 	}
 	clear(&f.reports)
 }
@@ -141,7 +161,13 @@ expect_reports :: proc(t: ^testing.T, f: ^World_Fixture, expected: []f64, loc :=
 capture_world_errors :: proc(f: ^World_Fixture) -> log.Logger {
 	f.runner = context.logger
 	return {
-		procedure = proc(data: rawptr, level: log.Level, text: string, options: log.Options, location := #caller_location) {
+		procedure = proc(
+			data: rawptr,
+			level: log.Level,
+			text: string,
+			options: log.Options,
+			location := #caller_location,
+		) {
 			f := (^World_Fixture)(data)
 			// testing.expect reports a failure as an error log from the test file. It must reach the test runner.
 			if strings.has_suffix(location.file_path, "_test.odin") {
@@ -156,7 +182,12 @@ capture_world_errors :: proc(f: ^World_Fixture) -> log.Logger {
 }
 
 @(private)
-expect_world_error :: proc(t: ^testing.T, f: ^World_Fixture, fragment: string, loc := #caller_location) {
+expect_world_error :: proc(
+	t: ^testing.T,
+	f: ^World_Fixture,
+	fragment: string,
+	loc := #caller_location,
+) {
 	for e in f.errors {
 		if strings.contains(e, fragment) {
 			return
@@ -170,7 +201,12 @@ entities_are_values :: proc(t: ^testing.T) {
 	f := setup_world(t)
 	defer teardown_world(f)
 	context.user_ptr = f
-	testing.expect(t, run(t, f, `
+	testing.expect(
+		t,
+		run(
+			t,
+			f,
+			`
 local a, b = World.spawn(), World.spawn()
 local set = {[a] = 7}
 Test.report(set[a])
@@ -180,7 +216,9 @@ Test.report(typeof(a) == "Entity" and 1 or 0)
 Test.report(typeof(Health) == "ComponentType" and 1 or 0)
 Test.report(tostring(Health) == "ComponentType(Health)" and 1 or 0)
 Test.report(Health.name == "Health" and 1 or 0)
-`))
+`,
+		),
+	)
 	expect_reports(t, f, {7, 1, 1, 1, 1, 1, 1})
 }
 
@@ -189,7 +227,12 @@ component_fields_read_and_write_storage :: proc(t: ^testing.T) {
 	f := setup_world(t)
 	defer teardown_world(f)
 	context.user_ptr = f
-	testing.expect(t, run(t, f, `
+	testing.expect(
+		t,
+		run(
+			t,
+			f,
+			`
 local e = World.spawn()
 Test.report(e:get(Health) == nil and 1 or 0)
 local h = e:add(Health, {value = 5, mood = "Angry"})
@@ -202,7 +245,9 @@ Test.report(e:has(Health) and 1 or 0)
 Test.report(h == e:get(Health) and 1 or 0)
 Test.report(h.entity == e and 1 or 0)
 target = e
-`))
+`,
+		),
+	)
 	expect_reports(t, f, {1, 6, 100, 1, 1, 1, 1})
 
 	found := make([dynamic]ecs.Entity, context.temp_allocator)
@@ -222,7 +267,12 @@ scripts_ask_what_changed_since_a_version :: proc(t: ^testing.T) {
 	f := setup_world(t)
 	defer teardown_world(f)
 	context.user_ptr = f
-	testing.expect(t, run(t, f, `
+	testing.expect(
+		t,
+		run(
+			t,
+			f,
+			`
 local a = World.spawn()
 a:add(Health, {value = 1})
 local v = World.version()
@@ -247,7 +297,9 @@ v = World.version()
 a:teleport(pose.position)
 Test.report(#World.changed(v, Transform))
 Test.report(#World.changed(0, Health))
-`))
+`,
+		),
+	)
 	expect_reports(t, f, {0, 1, 0, 1, 1, 1, 0, 1, 0, 1, 1})
 }
 
@@ -285,12 +337,19 @@ destroy_waits_for_the_end_of_the_phase :: proc(t: ^testing.T) {
 	context.user_ptr = f
 	context.logger = capture_world_errors(f)
 	begin_phase(&f.runtime, 16 * time.Millisecond, {})
-	testing.expect(t, run(t, f, `
+	testing.expect(
+		t,
+		run(
+			t,
+			f,
+			`
 local e = World.spawn()
 e:add(Health)
 e:destroy()
 Test.report(e:is_alive() and 1 or 0)
-`))
+`,
+		),
+	)
 	expect_reports(t, f, {1})
 	end_phase(&f.runtime)
 	begin_phase(&f.runtime, 16 * time.Millisecond, {})
@@ -308,11 +367,18 @@ destroy_outside_a_phase_applies_at_once :: proc(t: ^testing.T) {
 	e := ecs.spawn(&f.world)
 	ecs.add(&f.world, e, Health{})
 	// No phase runs, as when spawn_script runs a main script's top level at init.
-	testing.expect(t, run(t, f, `
+	testing.expect(
+		t,
+		run(
+			t,
+			f,
+			`
 local e = World.query(Health)[1]
 e:destroy()
 Test.report(e:is_alive() and 1 or 0)
-`))
+`,
+		),
+	)
 	expect_reports(t, f, {0})
 	testing.expect(t, !ecs.is_alive(&f.world, e))
 	phase(f)
@@ -326,13 +392,17 @@ a_destroyed_entity_raises_an_error :: proc(t: ^testing.T) {
 	context.user_ptr = f
 	context.logger = capture_world_errors(f)
 	begin_phase(&f.runtime, 16 * time.Millisecond, {})
-	thread, ok := spawn_source(&f.runtime, "=stale", `
+	thread, ok := spawn_source(
+		&f.runtime,
+		"=stale",
+		`
 local e = World.spawn()
 local h = e:add(Health)
 e:destroy()
 coroutine.yield()
 local _ = h.value
-`)
+`,
+	)
 	testing.expect(t, ok)
 	end_phase(&f.runtime)
 	begin_phase(&f.runtime, 16 * time.Millisecond, {})
@@ -347,7 +417,12 @@ queries_collect_before_the_loop :: proc(t: ^testing.T) {
 	f := setup_world(t)
 	defer teardown_world(f)
 	context.user_ptr = f
-	testing.expect(t, run(t, f, `
+	testing.expect(
+		t,
+		run(
+			t,
+			f,
+			`
 for i = 1, 3 do World.spawn():add(Health, {value = i}) end
 World.spawn()
 local total = 0
@@ -359,7 +434,9 @@ end
 Test.report(total)
 Test.report(#World.query(Health))
 Test.report(#World.query(Transform))
-`))
+`,
+		),
+	)
 	expect_reports(t, f, {6, 3, 7})
 }
 
@@ -368,7 +445,12 @@ positions_stay_exact_far_from_the_origin :: proc(t: ^testing.T) {
 	f := setup_world(t)
 	defer teardown_world(f)
 	context.user_ptr = f
-	testing.expect(t, run(t, f, `
+	testing.expect(
+		t,
+		run(
+			t,
+			f,
+			`
 local e = World.spawn(WorldPosition.from_meters(1e9, 0, 0))
 local start = e.transform.position
 e.transform.position = start + vector.create(0.5, 0, 0)
@@ -381,7 +463,9 @@ Test.report(tostring(start) == "WorldPosition(1000000000.000, 0.000, 0.000)" and
 Test.report(start == WorldPosition.from_meters(1e9, 0, 0) and 1 or 0)
 local other = World.spawn(start + vector.create(0, 0, 3))
 Test.report(e:offset_to(other).z)
-`))
+`,
+		),
+	)
 	expect_reports(t, f, {0.5, 0.25, 1, 1, 1, 3})
 }
 
@@ -390,7 +474,12 @@ a_child_keeps_the_world_pose_that_a_script_sets :: proc(t: ^testing.T) {
 	f := setup_world(t)
 	defer teardown_world(f)
 	context.user_ptr = f
-	testing.expect(t, run(t, f, `
+	testing.expect(
+		t,
+		run(
+			t,
+			f,
+			`
 local parent = World.spawn(WorldPosition.from_meters(10, 0, 0), Quaternion.angle_axis(90, vector.create(0, 1, 0)))
 parent.transform.scale = vector.create(2, 2, 2)
 local child = World.spawn(WorldPosition.from_meters(10, 0, 4))
@@ -399,7 +488,9 @@ Test.report(child.parent == parent and 1 or 0)
 child.transform.position = WorldPosition.from_meters(12, 1, 0)
 child.transform.rotation = Quaternion.angle_axis(45, vector.create(0, 1, 0))
 the_child = child
-`))
+`,
+		),
+	)
 	expect_reports(t, f, {1})
 
 	found := make([dynamic]ecs.Entity, context.temp_allocator)
@@ -410,9 +501,18 @@ the_child = child
 	}
 	child := found[0]
 	parent := ecs.get(&f.world, child, ecs.Parent).entity
-	composed := ecs.compose(ecs.get(&f.world, parent, ecs.Transform)^, ecs.get(&f.world, child, ecs.Local_Transform)^)
+	composed := ecs.compose(
+		ecs.get(&f.world, parent, ecs.Transform)^,
+		ecs.get(&f.world, child, ecs.Local_Transform)^,
+	)
 	pose := ecs.get(&f.world, child, ecs.Transform)^
-	testing.expectf(t, linalg.length(ecs.position_sub(composed.position, pose.position)) < 1e-5, "composed %v, set %v", ecs.position_to_meters(composed.position), ecs.position_to_meters(pose.position))
+	testing.expectf(
+		t,
+		linalg.length(ecs.position_sub(composed.position, pose.position)) < 1e-5,
+		"composed %v, set %v",
+		ecs.position_to_meters(composed.position),
+		ecs.position_to_meters(pose.position),
+	)
 	testing.expect(t, quaternion_equal(composed.rotation, pose.rotation))
 	testing.expect(t, linalg.length(composed.scale - pose.scale) < 1e-6)
 }
@@ -422,7 +522,12 @@ quaternions_follow_unity :: proc(t: ^testing.T) {
 	f := setup_world(t)
 	defer teardown_world(f)
 	context.user_ptr = f
-	testing.expect(t, run(t, f, `
+	testing.expect(
+		t,
+		run(
+			t,
+			f,
+			`
 local function near(a, b) return math.abs(a - b) < 1e-4 and 1 or 0 end
 local q = Quaternion.euler(vector.create(30, 45, 60))
 local e = q:euler()
@@ -436,7 +541,9 @@ Test.report(near(Quaternion.identity.w, 1))
 Test.report(q == q:normalized() and 1 or 0)
 local halfway = Quaternion.identity:rotate_towards(Quaternion.angle_axis(90, vector.create(1, 0, 0)), 30)
 Test.report(near(Quaternion.angle(Quaternion.identity, halfway), 30))
-`))
+`,
+		),
+	)
 	expect_reports(t, f, {1, 1, 1, 1, 1, 1, 1, 1, 1, 1})
 }
 
@@ -444,13 +551,22 @@ Test.report(near(Quaternion.angle(Quaternion.identity, halfway), 30))
 euler_angles_round_trip :: proc(t: ^testing.T) {
 	for angles in ([?][3]f32{{0, 0, 0}, {10, -20, 30}, {-80, 170, -120}, {45, 90, 0}}) {
 		back := euler_of(quaternion_euler(angles))
-		testing.expectf(t, quaternion_equal(quaternion_euler(back), quaternion_euler(angles)), "%v gave %v", angles, back)
+		testing.expectf(
+			t,
+			quaternion_equal(quaternion_euler(back), quaternion_euler(angles)),
+			"%v gave %v",
+			angles,
+			back,
+		)
 	}
 	// Unity's order: z, then x, then y. Rolling first leaves +Z on the yaw and pitch path.
 	q := quaternion_euler({0, 90, 90})
 	forward := linalg.quaternion_mul_vector3(q, FORWARD)
 	testing.expect(t, linalg.length(forward - [3]f32{1, 0, 0}) < 1e-5)
-	testing.expect(t, abs(quaternion_angle(1, linalg.quaternion_angle_axis_f32(math.PI / 2, UP)) - 90) < 1e-3)
+	testing.expect(
+		t,
+		abs(quaternion_angle(1, linalg.quaternion_angle_axis_f32(math.PI / 2, UP)) - 90) < 1e-3,
+	)
 }
 
 @(test)
@@ -460,7 +576,10 @@ time_and_input_change_between_frames :: proc(t: ^testing.T) {
 	context.user_ptr = f
 	begin_phase(&f.runtime, 16 * time.Millisecond, {down = {.Space}, mouse_position = {10, 20}})
 	// The fields are read when the code runs, not when it loads (see format.script_mutable_globals).
-	thread, ok := spawn_source(&f.runtime, "=frames", `
+	thread, ok := spawn_source(
+		&f.runtime,
+		"=frames",
+		`
 local function sample()
 	Test.report(Time.delta)
 	Test.report(Input.is_down(Key.Space) and 1 or 0)
@@ -471,7 +590,8 @@ while true do
 	sample()
 	coroutine.yield()
 end
-`)
+`,
+	)
 	testing.expect(t, ok)
 	expect_reports(t, f, {0.016, 1, 20, 2})
 	end_phase(&f.runtime)

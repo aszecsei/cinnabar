@@ -96,7 +96,9 @@ change_file_read :: proc(slot: ^File_Read_Slot, event: File_Read_Event) {
 	case File_Read_Ran:
 		switch _ in slot.work {
 		case File_Read_Running:
-			slot.work = File_Read_Finished{whole = e.count == len(slot.buffer)}
+			slot.work = File_Read_Finished {
+				whole = e.count == len(slot.buffer),
+			}
 		case File_Read_Abandoned:
 			release(slot)
 		case File_Read_Finished:
@@ -163,7 +165,10 @@ file_reads_begin :: proc(reads: ^File_Reads, path: string, offset: i64, size: in
 		return 0
 	}
 	slot.owner = reads
-	change_file_read(slot, File_Read_Began{strings.clone(path, runtime.heap_allocator()), offset, buffer})
+	change_file_read(
+		slot,
+		File_Read_Began{strings.clone(path, runtime.heap_allocator()), offset, buffer},
+	)
 	ticket := file_read_ticket(index, slot.generation)
 	sync.unlock(&reads.mutex)
 

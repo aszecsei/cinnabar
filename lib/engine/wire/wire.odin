@@ -39,7 +39,11 @@ read_header :: proc(data: []byte) -> (header: Header, ok: bool) {
 }
 
 // write_message appends a message of a link's union, with its header, to buf.
-write_message :: proc(buf: ^[dynamic]byte, message: $M, request: u32 = 0) where intrinsics.type_is_union(M) {
+write_message :: proc(
+	buf: ^[dynamic]byte,
+	message: $M,
+	request: u32 = 0,
+) where intrinsics.type_is_union(M) {
 	message := message
 	assert(message != nil, "wire: cannot write an empty message")
 	start := len(buf)
@@ -67,7 +71,15 @@ kind_of :: proc($M, $T: typeid) -> u16 where intrinsics.type_is_union(M) {
 
 // decode_message decodes a payload of the given kind. Strings and slices are allocated with allocator. A payload
 // that does not decode to exactly one message of the kind is refused.
-decode_message :: proc($M: typeid, kind: u16, payload: []byte, allocator: mem.Allocator) -> (message: M, ok: bool) where intrinsics.type_is_union(M) {
+decode_message :: proc(
+	$M: typeid,
+	kind: u16,
+	payload: []byte,
+	allocator: mem.Allocator,
+) -> (
+	message: M,
+	ok: bool,
+) where intrinsics.type_is_union(M) {
 	info := runtime.type_info_base(type_info_of(M)).variant.(runtime.Type_Info_Union)
 	if kind == 0 || int(kind) > len(info.variants) {
 		return
@@ -154,7 +166,11 @@ decode_value :: proc(r: ^Reader, data: rawptr, ti: ^runtime.Type_Info) -> bool {
 		(^string)(data)^ = string(s)
 	case runtime.Type_Info_Array:
 		for i in 0 ..< info.count {
-			decode_value(r, rawptr(uintptr(data) + uintptr(i * info.elem_size)), info.elem) or_return
+			decode_value(
+				r,
+				rawptr(uintptr(data) + uintptr(i * info.elem_size)),
+				info.elem,
+			) or_return
 		}
 	case runtime.Type_Info_Slice:
 		count := read_count(r) or_return
@@ -167,7 +183,11 @@ decode_value :: proc(r: ^Reader, data: rawptr, ti: ^runtime.Type_Info) -> bool {
 			return false
 		}
 		for i in 0 ..< count {
-			decode_value(r, rawptr(uintptr(elems) + uintptr(i * info.elem_size)), info.elem) or_return
+			decode_value(
+				r,
+				rawptr(uintptr(elems) + uintptr(i * info.elem_size)),
+				info.elem,
+			) or_return
 		}
 		(^runtime.Raw_Slice)(data)^ = {elems, count}
 	case runtime.Type_Info_Struct:

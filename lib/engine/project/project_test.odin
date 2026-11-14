@@ -26,7 +26,11 @@ settings_files_are_keys_and_values :: proc(t: ^testing.T) {
 	parse(write({output = .Hdr10}, context.temp_allocator), &written)
 	testing.expect_value(t, written.output, gpu.Output_Request.Hdr10)
 
-	testing.expect_value(t, user_path("samples/game/project.settings"), "samples/game/project.user.settings")
+	testing.expect_value(
+		t,
+		user_path("samples/game/project.settings"),
+		"samples/game/project.user.settings",
+	)
 	testing.expect_value(t, user_path("a.b/settings"), "a.b/settings.user")
 }
 
@@ -49,7 +53,14 @@ the_user_file_replaces_the_projects_and_a_change_reads_them_again :: proc(t: ^te
 	defer delete(files)
 	platform := core.Platform_API {
 		frame_allocator = virtual.arena_allocator(&arena),
-		file_read = proc(path: string, align: int, allocator: runtime.Allocator) -> ([]byte, bool) {
+		file_read = proc(
+			path: string,
+			align: int,
+			allocator: runtime.Allocator,
+		) -> (
+			[]byte,
+			bool,
+		) {
 			f, ok := files[path]
 			return transmute([]byte)f.text, ok
 		},
@@ -79,7 +90,9 @@ the_user_file_replaces_the_projects_and_a_change_reads_them_again :: proc(t: ^te
 
 @(test)
 quality_keys_replace_the_presets_features :: proc(t: ^testing.T) {
-	caps := render.Caps{ray_query = true}
+	caps := render.Caps {
+		ray_query = true,
+	}
 	// Without keys, the device's default.
 	testing.expect_value(t, quality({}, caps), render.default_quality(caps))
 
@@ -91,16 +104,32 @@ quality_keys_replace_the_presets_features :: proc(t: ^testing.T) {
 		&problems,
 	)
 	testing.expect_value(t, len(problems), 3)
-	testing.expect_value(t, problems[2], `9: quality.mesh_pool takes a whole number of MiB from 16 to 3584, not "lots"`)
-	testing.expect_value(t, problems[0], `4: quality.fog takes Low, Medium, High, Ultra, not "Loud"`)
-	testing.expect_value(t, problems[1], `6: quality.render_scale takes a number from 0.5 to 1, not "half"`)
+	testing.expect_value(
+		t,
+		problems[2],
+		`9: quality.mesh_pool takes a whole number of MiB from 16 to 3584, not "lots"`,
+	)
+	testing.expect_value(
+		t,
+		problems[0],
+		`4: quality.fog takes Low, Medium, High, Ultra, not "Loud"`,
+	)
+	testing.expect_value(
+		t,
+		problems[1],
+		`6: quality.render_scale takes a number from 0.5 to 1, not "half"`,
+	)
 	q := quality(s, caps)
 	testing.expect_value(t, q.render_scale, 0.75)
 	testing.expect_value(t, q.lod_error, 3)
 	testing.expect_value(t, q.mesh_pool, 512)
 	// A preset's pool of mesh pages is its level's, and a device's at most a quarter of its video memory.
 	testing.expect_value(t, render.preset_quality(.Low, caps).mesh_pool, 256)
-	testing.expect_value(t, render.preset_quality(.Ultra, render.Caps{video_memory = 4 << 30}).mesh_pool, 1024)
+	testing.expect_value(
+		t,
+		render.preset_quality(.Ultra, render.Caps{video_memory = 4 << 30}).mesh_pool,
+		1024,
+	)
 	testing.expect_value(t, render.clamp_quality({mesh_pool = 1}, caps).mesh_pool, 16)
 	testing.expect_value(t, render.clamp_quality({}, caps).mesh_pool, 1024)
 	testing.expect_value(t, q.shadows.level, render.Quality_Level.Low)
@@ -126,14 +155,26 @@ a_settings_file_from_before_the_virtual_shadow_map_reads_without_a_problem :: pr
 	caps := render.Caps{}
 	s: Settings
 	problems := make([dynamic]string, context.temp_allocator)
-	parse("quality.preset = High\nquality.shadows = High\nquality.shadows.ray_traced = false\n", &s, &problems)
+	parse(
+		"quality.preset = High\nquality.shadows = High\nquality.shadows.ray_traced = false\n",
+		&s,
+		&problems,
+	)
 	testing.expect_value(t, len(problems), 0)
 	testing.expect(t, quality(s, caps).shadows.virtual, "the preset's option stays")
 	// The key turns it off, and a value that does not fit is a problem.
 	s = {}
-	parse("quality.preset = High\nquality.shadows.virtual = false\nquality.shadows.virtual = maybe\n", &s, &problems)
+	parse(
+		"quality.preset = High\nquality.shadows.virtual = false\nquality.shadows.virtual = maybe\n",
+		&s,
+		&problems,
+	)
 	testing.expect_value(t, len(problems), 1)
-	testing.expect_value(t, problems[0], `3: quality.shadows.virtual takes true or false, not "maybe"`)
+	testing.expect_value(
+		t,
+		problems[0],
+		`3: quality.shadows.virtual takes true or false, not "maybe"`,
+	)
 	testing.expect(t, !quality(s, caps).shadows.virtual)
 	free_all(context.temp_allocator)
 }
@@ -149,16 +190,32 @@ the_virtual_shadow_cache_is_off_until_its_key_turns_it_on :: proc(t: ^testing.T)
 	}
 	s: Settings
 	problems := make([dynamic]string, context.temp_allocator)
-	parse("quality.preset = High\nquality.shadows.virtual_cache = true\nquality.shadows.virtual_cache = often\n", &s, &problems)
+	parse(
+		"quality.preset = High\nquality.shadows.virtual_cache = true\nquality.shadows.virtual_cache = often\n",
+		&s,
+		&problems,
+	)
 	testing.expect_value(t, len(problems), 1)
-	testing.expect_value(t, problems[0], `3: quality.shadows.virtual_cache takes true or false, not "often"`)
+	testing.expect_value(
+		t,
+		problems[0],
+		`3: quality.shadows.virtual_cache takes true or false, not "often"`,
+	)
 	q := quality(s, caps)
 	testing.expect(t, q.shadows.virtual_cache)
 	testing.expect_value(t, quality_values(q, caps)[.Virtual_Shadow_Cache], "true")
 	testing.expect_value(t, render.quality_preset(q, caps), render.Quality_Preset.Custom)
 	s = {}
-	parse("quality.preset = High\nquality.shadows.virtual = false\nquality.shadows.virtual_cache = true\n", &s, &problems)
-	testing.expect(t, !quality(s, caps).shadows.virtual_cache, "the cache stayed on without the virtual shadow map")
+	parse(
+		"quality.preset = High\nquality.shadows.virtual = false\nquality.shadows.virtual_cache = true\n",
+		&s,
+		&problems,
+	)
+	testing.expect(
+		t,
+		!quality(s, caps).shadows.virtual_cache,
+		"the cache stayed on without the virtual shadow map",
+	)
 	free_all(context.temp_allocator)
 }
 
@@ -173,9 +230,17 @@ the_atlas_shadow_cache_is_on_until_its_key_turns_it_off :: proc(t: ^testing.T) {
 	}
 	s: Settings
 	problems := make([dynamic]string, context.temp_allocator)
-	parse("quality.preset = High\nquality.shadows.atlas_cache = false\nquality.shadows.atlas_cache = seldom\n", &s, &problems)
+	parse(
+		"quality.preset = High\nquality.shadows.atlas_cache = false\nquality.shadows.atlas_cache = seldom\n",
+		&s,
+		&problems,
+	)
 	testing.expect_value(t, len(problems), 1)
-	testing.expect_value(t, problems[0], `3: quality.shadows.atlas_cache takes true or false, not "seldom"`)
+	testing.expect_value(
+		t,
+		problems[0],
+		`3: quality.shadows.atlas_cache takes true or false, not "seldom"`,
+	)
 	q := quality(s, caps)
 	testing.expect(t, !q.shadows.atlas_cache)
 	testing.expect_value(t, quality_values(q, caps)[.Atlas_Shadow_Cache], "false")
@@ -185,20 +250,37 @@ the_atlas_shadow_cache_is_on_until_its_key_turns_it_off :: proc(t: ^testing.T) {
 
 @(test)
 the_reflections_keys_read_write_and_may_be_missing :: proc(t: ^testing.T) {
-	caps := render.Caps{ray_query = true}
+	caps := render.Caps {
+		ray_query = true,
+	}
 	// A file from before the reflections keeps the preset's.
 	s: Settings
 	problems := make([dynamic]string, context.temp_allocator)
 	parse("quality.preset = Medium\nquality.gi = Screen_Cascades\n", &s, &problems)
 	testing.expect_value(t, len(problems), 0)
-	testing.expect(t, .Reflections not_in s.quality_given && .Reflections_Level not_in s.quality_given)
-	testing.expect_value(t, quality(s, caps).reflections, render.preset_quality(.Medium, caps).reflections)
+	testing.expect(
+		t,
+		.Reflections not_in s.quality_given && .Reflections_Level not_in s.quality_given,
+	)
+	testing.expect_value(
+		t,
+		quality(s, caps).reflections,
+		render.preset_quality(.Medium, caps).reflections,
+	)
 
 	// The keys replace the preset's, and a value that does not fit is a problem.
 	s = {}
-	parse("quality.preset = Medium\nquality.reflections = Probes\nquality.reflections.level = Ultra\nquality.reflections = Mirror\n", &s, &problems)
+	parse(
+		"quality.preset = Medium\nquality.reflections = Probes\nquality.reflections.level = Ultra\nquality.reflections = Mirror\n",
+		&s,
+		&problems,
+	)
 	testing.expect_value(t, len(problems), 1)
-	testing.expect_value(t, problems[0], `4: quality.reflections takes Off, Probes, Screen, Ray_Traced, not "Mirror"`)
+	testing.expect_value(
+		t,
+		problems[0],
+		`4: quality.reflections takes Off, Probes, Screen, Ray_Traced, not "Mirror"`,
+	)
 	q := quality(s, caps)
 	testing.expect_value(t, q.reflections, render.Reflection_Quality{.Probes, .Ultra})
 	testing.expect_value(t, render.quality_preset(q, caps), render.Quality_Preset.Custom)
@@ -230,9 +312,17 @@ the_clouds_key_reads_writes_and_may_be_missing :: proc(t: ^testing.T) {
 
 	// The key replaces the preset's, Ultra included, and a value that does not fit is a problem.
 	s = {}
-	parse("quality.preset = Medium\nquality.clouds = Ultra\nquality.clouds = Stormy\n", &s, &problems)
+	parse(
+		"quality.preset = Medium\nquality.clouds = Ultra\nquality.clouds = Stormy\n",
+		&s,
+		&problems,
+	)
 	testing.expect_value(t, len(problems), 1)
-	testing.expect_value(t, problems[0], `3: quality.clouds takes Low, Medium, High, Ultra, not "Stormy"`)
+	testing.expect_value(
+		t,
+		problems[0],
+		`3: quality.clouds takes Low, Medium, High, Ultra, not "Stormy"`,
+	)
 	q := quality(s, caps)
 	testing.expect_value(t, q.clouds, render.Quality_Level.Ultra)
 	testing.expect_value(t, render.quality_preset(q, caps), render.Quality_Preset.Custom)
@@ -254,7 +344,9 @@ the_clouds_key_reads_writes_and_may_be_missing :: proc(t: ^testing.T) {
 a_saved_world_probes_technique_reads_as_the_split_cascades :: proc(t: ^testing.T) {
 	// World_Probes was Split_Cascades' name: a file that a build before the rename saved reads without a problem, and
 	// is written with the new name.
-	caps := render.Caps{ray_query = true}
+	caps := render.Caps {
+		ray_query = true,
+	}
 	s: Settings
 	problems := make([dynamic]string, context.temp_allocator)
 	parse("quality.gi = World_Probes\n", &s, &problems)
@@ -282,8 +374,16 @@ the_voxel_cones_read_and_write_on_any_device :: proc(t: ^testing.T) {
 @(test)
 setting_a_value_keeps_the_files_other_lines :: proc(t: ^testing.T) {
 	text := "# The player's.\noutput = Sdr\nquality.fog = Low\n\nquality.fog = High\n"
-	testing.expect_value(t, set_value(text, "quality.fog", "Ultra"), "# The player's.\noutput = Sdr\n\nquality.fog = Ultra\n")
-	testing.expect_value(t, set_value(text, "quality.aa", "Taa"), "# The player's.\noutput = Sdr\nquality.fog = Low\n\nquality.fog = High\nquality.aa = Taa\n")
+	testing.expect_value(
+		t,
+		set_value(text, "quality.fog", "Ultra"),
+		"# The player's.\noutput = Sdr\n\nquality.fog = Ultra\n",
+	)
+	testing.expect_value(
+		t,
+		set_value(text, "quality.aa", "Taa"),
+		"# The player's.\noutput = Sdr\nquality.fog = Low\n\nquality.fog = High\nquality.aa = Taa\n",
+	)
 	testing.expect_value(t, set_value("", "output", "Hdr10"), "output = Hdr10\n")
 }
 
@@ -313,7 +413,14 @@ a_saved_quality_is_the_user_files :: proc(t: ^testing.T) {
 	saved_files["project.user.settings"] = {strings.clone("output = Sdr\n"), 1}
 	platform := core.Platform_API {
 		frame_allocator = virtual.arena_allocator(&arena),
-		file_read = proc(path: string, align: int, allocator: runtime.Allocator) -> ([]byte, bool) {
+		file_read = proc(
+			path: string,
+			align: int,
+			allocator: runtime.Allocator,
+		) -> (
+			[]byte,
+			bool,
+		) {
 			f, ok := saved_files[path]
 			return transmute([]byte)f.text, ok
 		},
@@ -330,7 +437,11 @@ a_saved_quality_is_the_user_files :: proc(t: ^testing.T) {
 	caps := render.Caps{}
 	w: Watch
 	testing.expect(t, refresh(&w, &platform, "project.settings"))
-	testing.expect_value(t, render.quality_preset(quality(w.settings, caps), caps), render.Quality_Preset.Ultra)
+	testing.expect_value(
+		t,
+		render.quality_preset(quality(w.settings, caps), caps),
+		render.Quality_Preset.Ultra,
+	)
 
 	q := render.preset_quality(.Low, caps)
 	q.aa = .Off
@@ -338,7 +449,10 @@ a_saved_quality_is_the_user_files :: proc(t: ^testing.T) {
 	testing.expect(t, refresh(&w, &platform, "project.settings"))
 	testing.expect_value(t, quality(w.settings, caps), q)
 	// The user file keeps its own lines, and the project's is as it was.
-	testing.expect(t, strings.has_prefix(saved_files["project.user.settings"].text, "output = Sdr\n"))
+	testing.expect(
+		t,
+		strings.has_prefix(saved_files["project.user.settings"].text, "output = Sdr\n"),
+	)
 	testing.expect_value(t, w.settings.output, gpu.Output_Request.Sdr)
 	testing.expect_value(t, saved_files["project.settings"].text, "quality.preset = Ultra\n")
 }
@@ -382,7 +496,11 @@ perception_tags :: proc(t: ^testing.T) {
 physics_layers_and_ignored_pairs :: proc(t: ^testing.T) {
 	s: Settings
 	problems := make([dynamic]string, context.temp_allocator)
-	parse("physics.ignore = Debris:Player, Debris:Debris\nphysics.layers = Default, Player, Debris\n", &s, &problems)
+	parse(
+		"physics.ignore = Debris:Player, Debris:Debris\nphysics.layers = Default, Player, Debris\n",
+		&s,
+		&problems,
+	)
 	testing.expect_value(t, len(problems), 0)
 	l := physics_layers(s)
 	testing.expect_value(t, l.count, 3)
@@ -422,7 +540,11 @@ the_games_keys_name_its_main_scene :: proc(t: ^testing.T) {
 	guid, _ := format.guid_parse("047ea7c35e4dbfb73d2dac450b79b9a8")
 	testing.expect_value(t, s.main_scene, guid)
 	testing.expect_value(t, format.settings_value(text, NAME_KEY), "Demo")
-	testing.expect_value(t, format.settings_value("game.name = A\n# game.name = B\ngame.name = C\n", NAME_KEY), "C")
+	testing.expect_value(
+		t,
+		format.settings_value("game.name = A\n# game.name = B\ngame.name = C\n", NAME_KEY),
+		"C",
+	)
 	testing.expect_value(t, format.settings_value(text, "game.version"), "")
 
 	parse("game.main_scene = main.scene\ngame.name =\n", &s, &problems)
@@ -434,16 +556,37 @@ the_games_keys_name_its_main_scene :: proc(t: ^testing.T) {
 the_navigation_keys_are_checked_line_by_line :: proc(t: ^testing.T) {
 	s: Settings
 	problems := make([dynamic]string, context.temp_allocator)
-	parse("nav.agents = Human, Large\nnav.agent.Human.radius = 0.3\nnav.agent.Large.max_slope = 30\n", &s, &problems)
+	parse(
+		"nav.agents = Human, Large\nnav.agent.Human.radius = 0.3\nnav.agent.Large.max_slope = 30\n",
+		&s,
+		&problems,
+	)
 	testing.expect_value(t, len(problems), 0)
 
 	clear(&problems)
-	parse("nav.agents = Human, Hu man\nnav.agent.Human.width = 1\nnav.agent.Human.radius = -1\nnav.agent.Human.max_slope = 90\n", &s, &problems)
+	parse(
+		"nav.agents = Human, Hu man\nnav.agent.Human.width = 1\nnav.agent.Human.radius = -1\nnav.agent.Human.max_slope = 90\n",
+		&s,
+		&problems,
+	)
 	testing.expect_value(t, len(problems), 4)
 	if len(problems) == 4 {
 		testing.expect(t, strings.has_prefix(problems[0], "1: nav.agents takes names"))
-		testing.expect_value(t, problems[1], `2: there is no setting "nav.agent.Human.width": an agent type has radius, height, step_height and max_slope`)
-		testing.expect(t, strings.has_prefix(problems[2], "3: nav.agent.Human.radius takes a number"))
-		testing.expect(t, strings.has_prefix(problems[3], "4: nav.agent.Human.max_slope takes a number above 0 and below 90"))
+		testing.expect_value(
+			t,
+			problems[1],
+			`2: there is no setting "nav.agent.Human.width": an agent type has radius, height, step_height and max_slope`,
+		)
+		testing.expect(
+			t,
+			strings.has_prefix(problems[2], "3: nav.agent.Human.radius takes a number"),
+		)
+		testing.expect(
+			t,
+			strings.has_prefix(
+				problems[3],
+				"4: nav.agent.Human.max_slope takes a number above 0 and below 90",
+			),
+		)
 	}
 }

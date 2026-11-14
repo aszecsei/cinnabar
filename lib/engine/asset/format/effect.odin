@@ -64,36 +64,36 @@ Effect_Module :: struct {
 
 // Effect_Emitter is one emitter of an effect blob. Ranges are [low, high], from which each particle picks at random.
 Effect_Emitter :: struct {
-	name:          Slice,
+	name:           Slice,
 	// The most particles alive at once.
-	capacity:      u32,
+	capacity:       u32,
 	// Particles a second, and a burst of count at the start and then every burst_interval seconds, or once when it is 0.
-	rate:          f32,
-	burst:         u32,
+	rate:           f32,
+	burst:          u32,
 	burst_interval: f32,
-	lifetime:      [2]f32,
-	speed:         [2]f32,
+	lifetime:       [2]f32,
+	speed:          [2]f32,
 	// The turn of each sprite, in radians per second.
-	spin:          [2]f32,
-	shape:         Effect_Shape,
+	spin:           [2]f32,
+	shape:          Effect_Shape,
 	// A sphere's radius in x; a box's half extents; a cone's base radius in x and its angle from +y in y, in radians.
-	shape_size:    [3]f32,
-	render:        Effect_Render,
+	shape_size:     [3]f32,
+	render:         Effect_Render,
 	// A ribbon's material, or the engine's default ribbon material when zero; or a mesh's material, for each of its
 	// submeshes, or the engine's default material when zero.
-	material:      Guid,
+	material:       Guid,
 	// A mesh emitter's mesh.
-	mesh:          Guid,
-	texture:       Guid,
+	mesh:           Guid,
+	texture:        Guid,
 	// The texture's frames, columns by rows, which play at flipbook_rate frames a second; 1 by 1 is no flipbook.
-	flipbook:      [2]u32,
-	flipbook_rate: f32,
-	softness:      f32,
+	flipbook:       [2]u32,
+	flipbook_rate:  f32,
+	softness:       f32,
 	// Effect_Module records, in the order that they act.
-	modules:       Slice,
+	modules:        Slice,
 	// The first of the emitter's rows in the blob's curves, one for each Effect_Curve.
-	curves:        u32,
-	padding:       u32,
+	curves:         u32,
+	padding:        u32,
 }
 
 // Effect_Blob is the start of an effect blob (see docs/content/kinds/effects.md#effects).
@@ -110,18 +110,28 @@ Effect_Blob :: struct {
 Effect_Curve_Row :: [EFFECT_CURVE_SAMPLES][4]f32
 
 effect_layout :: proc() -> u64 {
-	return layout.hash(Effect_Blob) ~ layout.hash(Effect_Emitter) * 31 ~ layout.hash(Effect_Module) * 961
+	return(
+		layout.hash(Effect_Blob) ~
+		layout.hash(Effect_Emitter) * 31 ~
+		layout.hash(Effect_Module) * 961 \
+	)
 }
 
 // effect_view checks an effect blob: its header, its layout, and that its slices and records are inside it.
 effect_view :: proc(data: []byte) -> (blob: ^Effect_Blob, ok: bool) {
 	header := blob_header(data) or_return
-	if header.kind != .Effect || header.layout != effect_layout() || len(data) < size_of(Effect_Blob) {
+	if header.kind != .Effect ||
+	   header.layout != effect_layout() ||
+	   len(data) < size_of(Effect_Blob) {
 		return
 	}
 	blob = (^Effect_Blob)(raw_data(data))
 	inside :: proc(data: []byte, s: Slice, size, align: int) -> bool {
-		return u64(s.offset) + u64(s.size) <= u64(len(data)) && int(s.size) % size == 0 && int(s.offset) % align == 0
+		return(
+			u64(s.offset) + u64(s.size) <= u64(len(data)) &&
+			int(s.size) % size == 0 &&
+			int(s.offset) % align == 0 \
+		)
 	}
 	if !inside(data, blob.emitters, size_of(Effect_Emitter), align_of(Effect_Emitter)) ||
 	   !inside(data, blob.curves, size_of(Effect_Curve_Row), align_of(Effect_Curve_Row)) ||
@@ -130,10 +140,13 @@ effect_view :: proc(data: []byte) -> (blob: ^Effect_Blob, ok: bool) {
 	}
 	rows := u32(len(effect_curves(data, blob)))
 	for e in effect_emitters(data, blob) {
-		if !inside(data, e.name, 1, 1) || !inside(data, e.modules, size_of(Effect_Module), align_of(Effect_Module)) {
+		if !inside(data, e.name, 1, 1) ||
+		   !inside(data, e.modules, size_of(Effect_Module), align_of(Effect_Module)) {
 			return nil, false
 		}
-		if e.curves + len(Effect_Curve) > rows || e.capacity == 0 || e.capacity > MAX_EMITTER_CAPACITY {
+		if e.curves + len(Effect_Curve) > rows ||
+		   e.capacity == 0 ||
+		   e.capacity > MAX_EMITTER_CAPACITY {
 			return nil, false
 		}
 		if e.render == .Ribbon && e.capacity > MAX_RIBBON_CAPACITY {
@@ -180,14 +193,30 @@ Effect_Contents :: struct {
 // effect_write builds an effect blob.
 effect_write :: proc(contents: Effect_Contents, allocator := context.allocator) -> []byte {
 	buffer := make([dynamic]byte, size_of(Effect_Blob), allocator)
-	emitters := reserve_bytes(&buffer, len(contents.emitters) * size_of(Effect_Emitter), align_of(Effect_Emitter))
-	curves := reserve_bytes(&buffer, len(contents.emitters) * len(Effect_Curve) * size_of(Effect_Curve_Row), BLOB_ALIGN)
+	emitters := reserve_bytes(
+		&buffer,
+		len(contents.emitters) * size_of(Effect_Emitter),
+		align_of(Effect_Emitter),
+	)
+	curves := reserve_bytes(
+		&buffer,
+		len(contents.emitters) * len(Effect_Curve) * size_of(Effect_Curve_Row),
+		BLOB_ALIGN,
+	)
 	for e, i in contents.emitters {
 		record := e.emitter
 		record.name = append_bytes(&buffer, transmute([]byte)e.name)
-		record.modules = reserve_bytes(&buffer, len(e.modules) * size_of(Effect_Module), align_of(Effect_Module))
+		record.modules = reserve_bytes(
+			&buffer,
+			len(e.modules) * size_of(Effect_Module),
+			align_of(Effect_Module),
+		)
 		if len(e.modules) > 0 {
-			mem.copy(&buffer[record.modules.offset], raw_data(e.modules), len(e.modules) * size_of(Effect_Module))
+			mem.copy(
+				&buffer[record.modules.offset],
+				raw_data(e.modules),
+				len(e.modules) * size_of(Effect_Module),
+			)
 		}
 		record.curves = u32(i * len(Effect_Curve))
 		for curve in Effect_Curve {
@@ -195,11 +224,21 @@ effect_write :: proc(contents: Effect_Contents, allocator := context.allocator) 
 			offset := curves.offset + (record.curves + u32(curve)) * size_of(Effect_Curve_Row)
 			mem.copy(&buffer[offset], &row, size_of(row))
 		}
-		mem.copy(&buffer[emitters.offset + u32(i * size_of(Effect_Emitter))], &record, size_of(record))
+		mem.copy(
+			&buffer[emitters.offset + u32(i * size_of(Effect_Emitter))],
+			&record,
+			size_of(record),
+		)
 	}
 	source_path := append_bytes(&buffer, transmute([]byte)contents.source_path)
 	blob := Effect_Blob {
-		header = {magic = BLOB_MAGIC, kind = .Effect, layout = effect_layout(), key = contents.key, guid = contents.guid},
+		header = {
+			magic = BLOB_MAGIC,
+			kind = .Effect,
+			layout = effect_layout(),
+			key = contents.key,
+			guid = contents.guid,
+		},
 		emitters = emitters,
 		curves = curves,
 		source_path = source_path,

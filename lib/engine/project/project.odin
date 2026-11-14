@@ -53,12 +53,12 @@ ENGINE_PATH_KEY :: "engine.path"
 Settings :: struct {
 	// The window's output mode (see docs/rendering/layers-and-output.md#hdr-output). Auto is HDR10 on a display in HDR, and SDR
 	// otherwise. CINNABAR_OUTPUT replaces it.
-	output:        gpu.Output_Request,
+	output:                gpu.Output_Request,
 	// The render quality (see docs/rendering/quality.md#saved-quality): a preset, and the keys that replace its
 	// features. The keys that no file gives come from the device's default_quality (see quality).
-	quality_given: Quality_Keys,
-	preset:        render.Quality_Preset,
-	quality:       render.Quality,
+	quality_given:         Quality_Keys,
+	preset:                render.Quality_Preset,
+	quality:               render.Quality,
 	// The material of new faces in the editor's mesh mode, by GUID, or zero for the engine's dev_gray (see
 	// docs/editor/mesh-editing.md#dev-materials). The editor reads it; the game only knows the key.
 	mesh_default_material: format.Guid,
@@ -79,7 +79,9 @@ Settings :: struct {
 
 // physics_layers gives the layers that settings name, or the default ones.
 physics_layers :: proc(settings: Settings) -> physics.Layers {
-	return settings.physics_layers if settings.physics_layers.count > 0 else physics.default_layers()
+	return(
+		settings.physics_layers if settings.physics_layers.count > 0 else physics.default_layers() \
+	)
 }
 
 // Quality_Key is a render quality key of the settings files, by its name in QUALITY_KEY_NAMES.
@@ -156,12 +158,24 @@ parse :: proc(text: string, settings: ^Settings, problems: ^[dynamic]string = ni
 		}
 	}
 	// enum_value parses an enum's value by its name into value, or says which names it takes.
-	enum_value :: proc(problems: ^[dynamic]string, line: int, key, text: string, value: ^$T) -> bool {
+	enum_value :: proc(
+		problems: ^[dynamic]string,
+		line: int,
+		key, text: string,
+		value: ^$T,
+	) -> bool {
 		if v, ok := reflect.enum_from_name(T, text); ok {
 			value^ = v
 			return true
 		}
-		problem(problems, line, "%s takes %s, not %q", key, strings.join(reflect.enum_field_names(T), ", ", context.temp_allocator), text)
+		problem(
+			problems,
+			line,
+			"%s takes %s, not %q",
+			key,
+			strings.join(reflect.enum_field_names(T), ", ", context.temp_allocator),
+			text,
+		)
 		return false
 	}
 	// physics.ignore names layers, which physics.layers may give after it, so its pairs are read at the end.
@@ -192,7 +206,13 @@ parse :: proc(text: string, settings: ^Settings, problems: ^[dynamic]string = ni
 			if guid, ok := format.guid_parse(value); ok {
 				settings.mesh_default_material = guid
 			} else {
-				problem(problems, line, "%s takes a material's GUID of 32 hex digits, not %q", key, value)
+				problem(
+					problems,
+					line,
+					"%s takes a material's GUID of 32 hex digits, not %q",
+					key,
+					value,
+				)
 			}
 			continue
 		}
@@ -200,7 +220,13 @@ parse :: proc(text: string, settings: ^Settings, problems: ^[dynamic]string = ni
 			if guid, ok := format.guid_parse(value); ok {
 				settings.main_scene = guid
 			} else {
-				problem(problems, line, "%s takes a scene's GUID of 32 hex digits, not %q", key, value)
+				problem(
+					problems,
+					line,
+					"%s takes a scene's GUID of 32 hex digits, not %q",
+					key,
+					value,
+				)
 			}
 			continue
 		}
@@ -216,7 +242,15 @@ parse :: proc(text: string, settings: ^Settings, problems: ^[dynamic]string = ni
 			for part in strings.split(value, ",", context.temp_allocator) {
 				name := strings.trim_space(part)
 				if !physics.add_layer(&layers, name) {
-					problem(problems, line, "%s: %q is empty, longer than %d, given twice, or past %d layers", key, name, physics.MAX_LAYER_NAME, physics.MAX_LAYERS)
+					problem(
+						problems,
+						line,
+						"%s: %q is empty, longer than %d, given twice, or past %d layers",
+						key,
+						name,
+						physics.MAX_LAYER_NAME,
+						physics.MAX_LAYERS,
+					)
 					ok = false
 				}
 			}
@@ -239,7 +273,13 @@ parse :: proc(text: string, settings: ^Settings, problems: ^[dynamic]string = ni
 		// The package step reads it (see docs/content/blobs-and-loading.md#bundles); the game only knows the key.
 		if key == format.BUNDLE_GLOBAL_SCENES_KEY {
 			if _, ok := format.bundle_parse_scenes(value, context.temp_allocator); !ok {
-				problem(problems, line, "%s takes scenes' GUIDs of 32 hex digits between commas, not %q", key, value)
+				problem(
+					problems,
+					line,
+					"%s takes scenes' GUIDs of 32 hex digits between commas, not %q",
+					key,
+					value,
+				)
 			}
 			continue
 		}
@@ -261,7 +301,16 @@ parse :: proc(text: string, settings: ^Settings, problems: ^[dynamic]string = ni
 			for part in strings.split(value, ",", context.temp_allocator) {
 				name := strings.trim_space(part)
 				if !audio.add_bus_name(&buses, name) {
-					problem(problems, line, "%s: %q is empty, longer than %d, %s, given twice, or past %d buses", key, name, audio.MAX_BUS_NAME, audio.MASTER_NAME, audio.MAX_BUSES)
+					problem(
+						problems,
+						line,
+						"%s: %q is empty, longer than %d, %s, given twice, or past %d buses",
+						key,
+						name,
+						audio.MAX_BUS_NAME,
+						audio.MASTER_NAME,
+						audio.MAX_BUSES,
+					)
 					ok = false
 				}
 			}
@@ -276,7 +325,15 @@ parse :: proc(text: string, settings: ^Settings, problems: ^[dynamic]string = ni
 			for part in strings.split(value, ",", context.temp_allocator) {
 				name := strings.trim_space(part)
 				if !ai.add_tag_name(&tags, name) {
-					problem(problems, line, "%s: %q is empty, longer than %d, given twice, or past %d tags", key, name, ai.MAX_TAG_NAME, ai.MAX_TAGS)
+					problem(
+						problems,
+						line,
+						"%s: %q is empty, longer than %d, given twice, or past %d tags",
+						key,
+						name,
+						ai.MAX_TAG_NAME,
+						ai.MAX_TAGS,
+					)
 					ok = false
 				}
 			}
@@ -297,7 +354,13 @@ parse :: proc(text: string, settings: ^Settings, problems: ^[dynamic]string = ni
 			if density, ok := strconv.parse_f32(value); ok && density > 0 {
 				settings.mesh_texel_density = density
 			} else {
-				problem(problems, line, "%s takes a number of texels per meter above 0, not %q", key, value)
+				problem(
+					problems,
+					line,
+					"%s takes a number of texels per meter above 0, not %q",
+					key,
+					value,
+				)
 			}
 			continue
 		}
@@ -346,7 +409,14 @@ parse :: proc(text: string, settings: ^Settings, problems: ^[dynamic]string = ni
 				if ok {
 					q.render_scale = scale
 				} else {
-					problem(problems, line, "%s takes a number from %v to 1, not %q", key, render.MIN_RENDER_SCALE, value)
+					problem(
+						problems,
+						line,
+						"%s takes a number from %v to 1, not %q",
+						key,
+						render.MIN_RENDER_SCALE,
+						value,
+					)
 				}
 			case .Lod_Error:
 				error: f32
@@ -354,7 +424,15 @@ parse :: proc(text: string, settings: ^Settings, problems: ^[dynamic]string = ni
 				if ok {
 					q.lod_error = error
 				} else {
-					problem(problems, line, "%s takes a number of pixels from %v to %v, not %q", key, render.MIN_LOD_ERROR, render.MAX_LOD_ERROR, value)
+					problem(
+						problems,
+						line,
+						"%s takes a number of pixels from %v to %v, not %q",
+						key,
+						render.MIN_LOD_ERROR,
+						render.MAX_LOD_ERROR,
+						value,
+					)
 				}
 			case .Mesh_Pool:
 				megabytes: uint
@@ -363,7 +441,15 @@ parse :: proc(text: string, settings: ^Settings, problems: ^[dynamic]string = ni
 					q.mesh_pool = u32(megabytes)
 				} else {
 					ok = false
-					problem(problems, line, "%s takes a whole number of MiB from %v to %v, not %q", key, render.MIN_MESH_POOL, render.MAX_MESH_POOL, value)
+					problem(
+						problems,
+						line,
+						"%s takes a whole number of MiB from %v to %v, not %q",
+						key,
+						render.MIN_MESH_POOL,
+						render.MAX_MESH_POOL,
+						value,
+					)
 				}
 			case .Virtual_Shadows:
 				switch value {
@@ -415,7 +501,13 @@ parse :: proc(text: string, settings: ^Settings, problems: ^[dynamic]string = ni
 			ia, found_a := physics.layer_index(layers, strings.trim_space(a))
 			ib, found_b := physics.layer_index(layers, strings.trim_space(b))
 			if !found_a || !found_b {
-				problem(problems, ig.line, "%s takes pairs of layers that physics.layers names, as A:B, not %q", PHYSICS_IGNORE_KEY, strings.trim_space(pair))
+				problem(
+					problems,
+					ig.line,
+					"%s takes pairs of layers that physics.layers names, as A:B, not %q",
+					PHYSICS_IGNORE_KEY,
+					strings.trim_space(pair),
+				)
 				ok = false
 				continue
 			}
@@ -530,7 +622,12 @@ set_value :: proc(text, key, value: string, allocator := context.temp_allocator)
 
 // save_quality writes a quality to the user file beside a project file, every key of it, so the user file alone gives
 // it. The file's other lines stay. The next refresh reads it back. It returns false if it could not write the file.
-save_quality :: proc(platform: ^core.Platform_API, path: string, q: render.Quality, caps: render.Caps) -> bool {
+save_quality :: proc(
+	platform: ^core.Platform_API,
+	path: string,
+	q: render.Quality,
+	caps: render.Caps,
+) -> bool {
 	user := user_path(path, platform.frame_allocator)
 	text := ""
 	if data, ok := platform.file_read(user, 1, platform.frame_allocator); ok {
@@ -549,7 +646,14 @@ save_quality :: proc(platform: ^core.Platform_API, path: string, q: render.Quali
 // write is a settings file that holds settings, for the editor's tests and tools.
 write :: proc(settings: Settings, allocator := context.allocator) -> string {
 	name, _ := reflect.enum_name_from_value(settings.output)
-	return strings.concatenate({"# Project settings (see docs/overview/architecture.md#project-settings).\noutput = ", name, "\n"}, allocator)
+	return strings.concatenate(
+		{
+			"# Project settings (see docs/overview/architecture.md#project-settings).\noutput = ",
+			name,
+			"\n",
+		},
+		allocator,
+	)
 }
 
 // refresh reads the project file and its user file the first time, and again when either changed. It returns true

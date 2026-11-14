@@ -57,7 +57,11 @@ a_moving_caster_turns_dynamic_and_reports :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(tr.changes), 1)
 	old, _ := tr.changes[0].old.?
 	testing.expect_value(t, old.center, ecs.World_Position{})
-	testing.expect(t, !tr.changes[0].report && tr.slots[0].volatile, "the moving caster's change was a report, or it is not dynamic")
+	testing.expect(
+		t,
+		!tr.changes[0].report && tr.slots[0].volatile,
+		"the moving caster's change was a report, or it is not dynamic",
+	)
 	reports := 0
 	for x in 2 ..= 33 {
 		frame += 1
@@ -145,18 +149,27 @@ an_inherent_caster_is_dynamic_and_reports_in_place :: proc(t: ^testing.T) {
 a_view_draws_its_near_dynamic_casters_live :: proc(t: ^testing.T) {
 	tr := test_tracking()
 	defer free_tracking(tr)
-	near, far, still, particles := box({10, 0, 0}), box({500, 0, 0}), box({20, 0, 0}), box({900, 0, 0})
+	near, far, still, particles :=
+		box({10, 0, 0}), box({500, 0, 0}), box({20, 0, 0}), box({900, 0, 0})
 	near.inherent, far.inherent, particles.inherent, particles.unbounded = true, true, true, true
 	bounds := []Caster_Bounds{near, far, still, particles}
 	// At a frame where every slot reports.
 	track_casters(tr, bounds, {}, 1)
 	track_casters(tr, bounds, {}, SHADOW_FAR_REFRESH * 4)
 	live := live_slots(tr, 4, {}, 100)
-	testing.expect(t, slot_live(&live, 0) && !slot_live(&live, 1) && !slot_live(&live, 2) && slot_live(&live, 3))
+	testing.expect(
+		t,
+		slot_live(&live, 0) && !slot_live(&live, 1) && !slot_live(&live, 2) && slot_live(&live, 3),
+	)
 	previous := live
 	changes := view_caster_changes(tr, &live, &previous, context.temp_allocator)
 	for c in changes {
-		testing.expectf(t, c.slot == 1, "the view took slot %d's report, which it draws live", c.slot)
+		testing.expectf(
+			t,
+			c.slot == 1,
+			"the view took slot %d's report, which it draws live",
+			c.slot,
+		)
 	}
 	// The far caster comes within the distance: the caches drop it where they hold it.
 	previous = live

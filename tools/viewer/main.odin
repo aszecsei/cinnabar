@@ -18,30 +18,34 @@ TEXTURE_COUNT :: 3
 BACK_BUFFER_COUNT :: 2
 
 state: struct {
-	hwnd:          win.HWND,
-	closed:        bool,
-	factory:       ^dxgi.IFactory6,
-	device:        ^d3d.IDevice,
-	queue:         ^d3d.ICommandQueue,
-	allocator:     ^d3d.ICommandAllocator,
-	list:          ^d3d.IGraphicsCommandList,
-	swapchain:     ^dxgi.ISwapChain3,
-	back_buffers:  [BACK_BUFFER_COUNT]^d3d.IResource,
+	hwnd:         win.HWND,
+	closed:       bool,
+	factory:      ^dxgi.IFactory6,
+	device:       ^d3d.IDevice,
+	queue:        ^d3d.ICommandQueue,
+	allocator:    ^d3d.ICommandAllocator,
+	list:         ^d3d.IGraphicsCommandList,
+	swapchain:    ^dxgi.ISwapChain3,
+	back_buffers: [BACK_BUFFER_COUNT]^d3d.IResource,
 	// The viewer's own fence, which it waits on after each frame.
-	fence:         ^d3d.IFence,
-	fence_value:   u64,
-	event:         win.HANDLE,
+	fence:        ^d3d.IFence,
+	fence_value:  u64,
+	event:        win.HANDLE,
 	// The host's fence and textures. Fence value v means texture v % TEXTURE_COUNT holds frame v.
-	shared_fence:  ^d3d.IFence,
-	textures:      [TEXTURE_COUNT]^d3d.IResource,
-	size:          [2]u32,
+	shared_fence: ^d3d.IFence,
+	textures:     [TEXTURE_COUNT]^d3d.IResource,
+	size:         [2]u32,
 }
 
 main :: proc() {
 	context.logger = log.create_console_logger()
 	name := len(os.args) > 1 ? os.args[1] : DEFAULT_NAME
 	if !open_shared(name) {
-		log.errorf("viewer: cannot open the shared frame %q. Start the host with --shared %s first.", name, name)
+		log.errorf(
+			"viewer: cannot open the shared frame %q. Start the host with --shared %s first.",
+			name,
+			name,
+		)
 		os.exit(1)
 	}
 	if !open_window(fmt.tprintf("cinnabar viewer | %s", name)) || !create_swapchain() {
@@ -75,20 +79,42 @@ open_shared :: proc(name: string) -> bool {
 	}
 	for i: u32 = 0;; i += 1 {
 		adapter: ^dxgi.IAdapter1
-		if win.FAILED(state.factory->EnumAdapterByGpuPreference(i, .HIGH_PERFORMANCE, dxgi.IAdapter1_UUID, (^rawptr)(&adapter))) {
+		if win.FAILED(
+			state.factory->EnumAdapterByGpuPreference(
+				i,
+				.HIGH_PERFORMANCE,
+				dxgi.IAdapter1_UUID,
+				(^rawptr)(&adapter),
+			),
+		) {
 			return false
 		}
 		defer adapter->Release()
 		device: ^d3d.IDevice
-		if win.FAILED(d3d.CreateDevice((^dxgi.IUnknown)(adapter), ._12_0, d3d.IDevice_UUID, (^rawptr)(&device))) {
+		if win.FAILED(
+			d3d.CreateDevice(
+				(^dxgi.IUnknown)(adapter),
+				._12_0,
+				d3d.IDevice_UUID,
+				(^rawptr)(&device),
+			),
+		) {
 			continue
 		}
 		state.device = device
 		// Only an editor resizes the target, so without one it stays at generation 0.
-		if open_object(fmt.tprintf("%s.g0.fence", name), d3d.IFence_UUID, (^rawptr)(&state.shared_fence)) {
+		if open_object(
+			fmt.tprintf("%s.g0.fence", name),
+			d3d.IFence_UUID,
+			(^rawptr)(&state.shared_fence),
+		) {
 			ok := true
 			for &texture, t in state.textures {
-				ok &&= open_object(fmt.tprintf("%s.g0.texture%d", name, t), d3d.IResource_UUID, (^rawptr)(&texture))
+				ok &&= open_object(
+					fmt.tprintf("%s.g0.texture%d", name, t),
+					d3d.IResource_UUID,
+					(^rawptr)(&texture),
+				)
 			}
 			if ok {
 				desc: d3d.RESOURCE_DESC
@@ -105,7 +131,9 @@ open_shared :: proc(name: string) -> bool {
 
 open_object :: proc(name: string, iid: ^d3d.IID, object: ^rawptr) -> bool {
 	handle: win.HANDLE
-	if win.FAILED(state.device->OpenSharedHandleByName(win.utf8_to_wstring(name), win.GENERIC_ALL, &handle)) {
+	if win.FAILED(
+		state.device->OpenSharedHandleByName(win.utf8_to_wstring(name), win.GENERIC_ALL, &handle),
+	) {
 		return false
 	}
 	defer win.CloseHandle(handle)
@@ -125,7 +153,8 @@ open_window :: proc(title: string) -> bool {
 		return false
 	}
 	// The window has the shared textures' size, and does not resize.
-	style := win.WS_OVERLAPPED | win.WS_CAPTION | win.WS_SYSMENU | win.WS_MINIMIZEBOX | win.WS_VISIBLE
+	style :=
+		win.WS_OVERLAPPED | win.WS_CAPTION | win.WS_SYSMENU | win.WS_MINIMIZEBOX | win.WS_VISIBLE
 	rect := win.RECT{0, 0, i32(state.size.x), i32(state.size.y)}
 	win.AdjustWindowRect(&rect, style, false)
 	state.hwnd = win.CreateWindowExW(
@@ -145,7 +174,12 @@ open_window :: proc(title: string) -> bool {
 	return state.hwnd != nil
 }
 
-window_proc :: proc "system" (hwnd: win.HWND, msg: win.UINT, wparam: win.WPARAM, lparam: win.LPARAM) -> win.LRESULT {
+window_proc :: proc "system" (
+	hwnd: win.HWND,
+	msg: win.UINT,
+	wparam: win.WPARAM,
+	lparam: win.LPARAM,
+) -> win.LRESULT {
 	if msg == win.WM_CLOSE {
 		state.closed = true
 		return 0
@@ -157,20 +191,35 @@ create_swapchain :: proc() -> bool {
 	queue_desc := d3d.COMMAND_QUEUE_DESC {
 		Type = .DIRECT,
 	}
-	if win.FAILED(state.device->CreateCommandQueue(&queue_desc, d3d.ICommandQueue_UUID, (^rawptr)(&state.queue))) {
+	if win.FAILED(
+		state.device->CreateCommandQueue(
+			&queue_desc,
+			d3d.ICommandQueue_UUID,
+			(^rawptr)(&state.queue),
+		),
+	) {
 		return false
 	}
 	desc := dxgi.SWAP_CHAIN_DESC1 {
-		Width       = state.size.x,
-		Height      = state.size.y,
-		Format      = .R8G8B8A8_UNORM,
-		SampleDesc  = {Count = 1},
+		Width = state.size.x,
+		Height = state.size.y,
+		Format = .R8G8B8A8_UNORM,
+		SampleDesc = {Count = 1},
 		BufferUsage = {.RENDER_TARGET_OUTPUT},
 		BufferCount = BACK_BUFFER_COUNT,
-		SwapEffect  = .FLIP_DISCARD,
+		SwapEffect = .FLIP_DISCARD,
 	}
 	swapchain1: ^dxgi.ISwapChain1
-	if win.FAILED(state.factory->CreateSwapChainForHwnd((^dxgi.IUnknown)(state.queue), state.hwnd, &desc, nil, nil, &swapchain1)) {
+	if win.FAILED(
+		state.factory->CreateSwapChainForHwnd(
+			(^dxgi.IUnknown)(state.queue),
+			state.hwnd,
+			&desc,
+			nil,
+			nil,
+			&swapchain1,
+		),
+	) {
 		return false
 	}
 	defer swapchain1->Release()
@@ -180,8 +229,19 @@ create_swapchain :: proc() -> bool {
 	for &buffer, i in state.back_buffers {
 		state.swapchain->GetBuffer(u32(i), d3d.IResource_UUID, (^rawptr)(&buffer))
 	}
-	state.device->CreateCommandAllocator(.DIRECT, d3d.ICommandAllocator_UUID, (^rawptr)(&state.allocator))
-	state.device->CreateCommandList(0, .DIRECT, state.allocator, nil, d3d.IGraphicsCommandList_UUID, (^rawptr)(&state.list))
+	state.device->CreateCommandAllocator(
+		.DIRECT,
+		d3d.ICommandAllocator_UUID,
+		(^rawptr)(&state.allocator),
+	)
+	state.device->CreateCommandList(
+		0,
+		.DIRECT,
+		state.allocator,
+		nil,
+		d3d.IGraphicsCommandList_UUID,
+		(^rawptr)(&state.list),
+	)
 	state.list->Close()
 	state.device->CreateFence(0, {}, d3d.IFence_UUID, (^rawptr)(&state.fence))
 	state.event = win.CreateEventW(nil, false, false, nil)

@@ -23,241 +23,285 @@ register_scripts :: proc(r: ^script.Runtime, s: ^State) {
 	luau.setfield(r.L, luau.REGISTRYINDEX, STATE_KEY)
 	script.set_fixed_hook(r, {run_script_actions, s})
 	script.define(r, "Blackboard.get", proc(L: ^luau.State) -> c.int {
-		s := state_of(L)
-		e, name := agent_args(L, s)
-		slot, ready := ready_of(s, s.world, e)
-		if ready == nil {
-			luau.pushnil(L)
-			return 1
-		}
-		board, _ := board_of(s, slot.blackboard)
-		key := key_of(L, board, name)
-		bytes := value_bytes(ready.values, key)
-		switch key.type {
-		case .Float:
-			luau.pushnumber(L, f64((^f32)(raw_data(bytes))^))
-		case .Int:
-			luau.pushnumber(L, f64((^i32)(raw_data(bytes))^))
-		case .Bool:
-			luau.pushboolean(L, b32(bytes[0] != 0))
-		case .Enum:
-			luau.pushodinstring(L, format.blackboard_enum_name(board.data, board.blob, key, (^u32)(raw_data(bytes))^))
-		case .Entity:
-			script.push_entity(L, (^ecs.Entity)(raw_data(bytes))^)
-		case .Position:
-			script.push_position(L, (^ecs.World_Position)(raw_data(bytes))^)
-		case .Vector:
-			script.push_vector(L, (^[3]f32)(raw_data(bytes))^)
-		case .String:
-			luau.pushnil(L)
-		}
-		return 1
-	}, "(entity: Entity, key: string) -> any")
-	script.define(r, "Blackboard.set", proc(L: ^luau.State) -> c.int {
-		s := state_of(L)
-		e, name := agent_args(L, s)
-		slot, ready := ready_of(s, s.world, e)
-		board: Board
-		board_ok := false
-		if slot != nil {
-			board, board_ok = board_of(s, slot.blackboard)
-		}
-		c := Command {
-			entity = e,
-			kind   = .Write_Named,
-			key    = format.animation_graph_hash(name),
-		}
-		if ready == nil || !board_ok {
-			// The agent is not ready, so the write waits for it, and its key's type is found then: a number is a float,
-			// and a string an enum's name, by its hash.
-			if luau.type(L, 3) == .STRING {
-				c.type = .String
-				(^u32)(&c.value)^ = format.animation_graph_hash(string(luau.L_checkstring(L, 3)))
-			} else if value, ok := value_arg(L, 3); ok {
-				c.type, c.value, _ = encode(value)
-			} else {
-				script.raise(L, "Blackboard.set takes a number, a boolean, an enum's name, an Entity, a WorldPosition or a vector")
+			s := state_of(L)
+			e, name := agent_args(L, s)
+			slot, ready := ready_of(s, s.world, e)
+			if ready == nil {
+				luau.pushnil(L)
+				return 1
 			}
-			append(&s.early, c)
-			return 0
-		}
-		key := key_of(L, board, name)
-		bytes: [format.BLACKBOARD_VALUE_SIZE]byte
-		put :: proc(bytes: ^[format.BLACKBOARD_VALUE_SIZE]byte, v: $T) {
-			(^T)(bytes)^ = v
-		}
-		switch key.type {
-		case .Float:
-			put(&bytes, f32(luau.L_checknumber(L, 3)))
-		case .Int:
-			put(&bytes, i32(luau.L_checknumber(L, 3)))
-		case .Bool:
-			put(&bytes, u8(luau.L_checkboolean(L, 3)))
-		case .Enum:
-			value := string(luau.L_checkstring(L, 3))
-			found := false
-			names := format.blackboard_enum_names(board.data, board.blob)[key.first_enum:][:key.enum_count]
-			for n, i in names {
-				if format.blob_string(board.data, n) == value {
-					put(&bytes, u32(i))
-					found = true
+			board, _ := board_of(s, slot.blackboard)
+			key := key_of(L, board, name)
+			bytes := value_bytes(ready.values, key)
+			switch key.type {
+			case .Float:
+				luau.pushnumber(L, f64((^f32)(raw_data(bytes))^))
+			case .Int:
+				luau.pushnumber(L, f64((^i32)(raw_data(bytes))^))
+			case .Bool:
+				luau.pushboolean(L, b32(bytes[0] != 0))
+			case .Enum:
+				luau.pushodinstring(
+					L,
+					format.blackboard_enum_name(
+						board.data,
+						board.blob,
+						key,
+						(^u32)(raw_data(bytes))^,
+					),
+				)
+			case .Entity:
+				script.push_entity(L, (^ecs.Entity)(raw_data(bytes))^)
+			case .Position:
+				script.push_position(L, (^ecs.World_Position)(raw_data(bytes))^)
+			case .Vector:
+				script.push_vector(L, (^[3]f32)(raw_data(bytes))^)
+			case .String:
+				luau.pushnil(L)
+			}
+			return 1
+		}, "(entity: Entity, key: string) -> any")
+	script.define(
+		r,
+		"Blackboard.set",
+		proc(L: ^luau.State) -> c.int {
+			s := state_of(L)
+			e, name := agent_args(L, s)
+			slot, ready := ready_of(s, s.world, e)
+			board: Board
+			board_ok := false
+			if slot != nil {
+				board, board_ok = board_of(s, slot.blackboard)
+			}
+			c := Command {
+				entity = e,
+				kind   = .Write_Named,
+				key    = format.animation_graph_hash(name),
+			}
+			if ready == nil || !board_ok {
+				// The agent is not ready, so the write waits for it, and its key's type is found then: a number is a float,
+				// and a string an enum's name, by its hash.
+				if luau.type(L, 3) == .STRING {
+					c.type = .String
+					(^u32)(&c.value)^ = format.animation_graph_hash(
+						string(luau.L_checkstring(L, 3)),
+					)
+				} else if value, ok := value_arg(L, 3); ok {
+					c.type, c.value, _ = encode(value)
+				} else {
+					script.raise(
+						L,
+						"Blackboard.set takes a number, a boolean, an enum's name, an Entity, a WorldPosition or a vector",
+					)
 				}
+				append(&s.early, c)
+				return 0
 			}
-			if !found {
-				script.raise(L, fmt.tprintf("%s is not one of the enum %s's values", value, name))
+			key := key_of(L, board, name)
+			bytes: [format.BLACKBOARD_VALUE_SIZE]byte
+			put :: proc(bytes: ^[format.BLACKBOARD_VALUE_SIZE]byte, v: $T) {
+				(^T)(bytes)^ = v
 			}
-		case .Entity:
-			put(&bytes, luau.isnil(L, 3) ? ecs.Entity(0) : script.check_entity(L, 3))
-		case .Position:
-			put(&bytes, script.check_position(L, 3))
-		case .Vector:
-			put(&bytes, script.check_vector(L, 3))
-		case .String:
-		}
-		c.type, c.value = key.type, bytes
-		apply_write(s, slot, ready, board, c)
-		return 0
-	}, "(entity: Entity, key: string, value: any) -> ()")
+			switch key.type {
+			case .Float:
+				put(&bytes, f32(luau.L_checknumber(L, 3)))
+			case .Int:
+				put(&bytes, i32(luau.L_checknumber(L, 3)))
+			case .Bool:
+				put(&bytes, u8(luau.L_checkboolean(L, 3)))
+			case .Enum:
+				value := string(luau.L_checkstring(L, 3))
+				found := false
+				names := format.blackboard_enum_names(
+					board.data,
+					board.blob,
+				)[key.first_enum:][:key.enum_count]
+				for n, i in names {
+					if format.blob_string(board.data, n) == value {
+						put(&bytes, u32(i))
+						found = true
+					}
+				}
+				if !found {
+					script.raise(
+						L,
+						fmt.tprintf("%s is not one of the enum %s's values", value, name),
+					)
+				}
+			case .Entity:
+				put(&bytes, luau.isnil(L, 3) ? ecs.Entity(0) : script.check_entity(L, 3))
+			case .Position:
+				put(&bytes, script.check_position(L, 3))
+			case .Vector:
+				put(&bytes, script.check_vector(L, 3))
+			case .String:
+			}
+			c.type, c.value = key.type, bytes
+			apply_write(s, slot, ready, board, c)
+			return 0
+		},
+		"(entity: Entity, key: string, value: any) -> ()",
+	)
 	script.define(r, "Agent.current_action", proc(L: ^luau.State) -> c.int {
-		s := state_of(L)
-		e := script.check_entity(L, 1)
-		if !ecs.is_alive(s.world, e) || !ecs.has(s.world, e, Agent) {
-			script.raise(L, "the entity has no Agent")
-		}
-		name := current_action(s, e)
-		if name == "" {
-			luau.pushnil(L)
-		} else {
-			luau.pushodinstring(L, name)
-		}
-		return 1
-	}, "(entity: Entity) -> string?")
+			s := state_of(L)
+			e := script.check_entity(L, 1)
+			if !ecs.is_alive(s.world, e) || !ecs.has(s.world, e, Agent) {
+				script.raise(L, "the entity has no Agent")
+			}
+			name := current_action(s, e)
+			if name == "" {
+				luau.pushnil(L)
+			} else {
+				luau.pushodinstring(L, name)
+			}
+			return 1
+		}, "(entity: Entity) -> string?")
 	script.define(r, "Agent.decision", proc(L: ^luau.State) -> c.int {
-		s := state_of(L)
-		script.push_asset(script.runtime_of(L), L, ecs.get(s.world, agent_entity(L, s), Agent).decision)
-		return 1
-	}, "(entity: Entity) -> Asset?")
-	script.define(r, "Agent.set_decision", proc(L: ^luau.State) -> c.int {
-		s := state_of(L)
-		e := agent_entity(L, s)
-		decision := script.to_asset(script.runtime_of(L), L, 2)
-		if decision == {} {
-			script.raise(L, "Agent.set_decision takes a decision: an asset from Field.asset(\"decision\")")
-		}
-		// The next think's pool sync sees the change, and the agent starts again with the decision.
-		ecs.get_write(s.world, e, Agent).decision = decision
-		return 0
-	}, "(entity: Entity, decision: Asset) -> ()")
+			s := state_of(L)
+			script.push_asset(
+				script.runtime_of(L),
+				L,
+				ecs.get(s.world, agent_entity(L, s), Agent).decision,
+			)
+			return 1
+		}, "(entity: Entity) -> Asset?")
+	script.define(
+		r,
+		"Agent.set_decision",
+		proc(L: ^luau.State) -> c.int {
+			s := state_of(L)
+			e := agent_entity(L, s)
+			decision := script.to_asset(script.runtime_of(L), L, 2)
+			if decision == {} {
+				script.raise(
+					L,
+					"Agent.set_decision takes a decision: an asset from Field.asset(\"decision\")",
+				)
+			}
+			// The next think's pool sync sees the change, and the agent starts again with the decision.
+			ecs.get_write(s.world, e, Agent).decision = decision
+			return 0
+		},
+		"(entity: Entity, decision: Asset) -> ()",
+	)
 	script.define(r, "Agent.scores", proc(L: ^luau.State) -> c.int {
-		s := state_of(L)
-		e := script.check_entity(L, 1)
-		if !ecs.is_alive(s.world, e) || !ecs.has(s.world, e, Agent) {
-			script.raise(L, "the entity has no Agent")
-		}
-		options, ok := scores(s, e, context.temp_allocator)
-		if !ok {
-			luau.pushnil(L)
-			return 1
-		}
-		luau.createtable(L, c.int(len(options)), 0)
-		for o, i in options {
-			luau.createtable(L, 0, 5)
-			luau.pushnumber(L, f64(o.id))
-			luau.setfield(L, -2, "option")
-			luau.pushodinstring(L, o.action)
-			luau.setfield(L, -2, "action")
-			luau.pushnumber(L, f64(o.score))
-			luau.setfield(L, -2, "score")
-			if o.target != 0 {
-				script.push_entity(L, o.target)
-				luau.setfield(L, -2, "target")
+			s := state_of(L)
+			e := script.check_entity(L, 1)
+			if !ecs.is_alive(s.world, e) || !ecs.has(s.world, e, Agent) {
+				script.raise(L, "the entity has no Agent")
 			}
-			luau.createtable(L, c.int(len(o.considerations)), 0)
-			for cs, k in o.considerations {
-				luau.createtable(L, 0, 3)
-				luau.pushnumber(L, f64(cs.id))
-				luau.setfield(L, -2, "consideration")
-				luau.pushnumber(L, f64(cs.input))
-				luau.setfield(L, -2, "input")
-				luau.pushnumber(L, f64(cs.score))
+			options, ok := scores(s, e, context.temp_allocator)
+			if !ok {
+				luau.pushnil(L)
+				return 1
+			}
+			luau.createtable(L, c.int(len(options)), 0)
+			for o, i in options {
+				luau.createtable(L, 0, 5)
+				luau.pushnumber(L, f64(o.id))
+				luau.setfield(L, -2, "option")
+				luau.pushodinstring(L, o.action)
+				luau.setfield(L, -2, "action")
+				luau.pushnumber(L, f64(o.score))
 				luau.setfield(L, -2, "score")
-				luau.rawseti(L, -2, c.int(k + 1))
+				if o.target != 0 {
+					script.push_entity(L, o.target)
+					luau.setfield(L, -2, "target")
+				}
+				luau.createtable(L, c.int(len(o.considerations)), 0)
+				for cs, k in o.considerations {
+					luau.createtable(L, 0, 3)
+					luau.pushnumber(L, f64(cs.id))
+					luau.setfield(L, -2, "consideration")
+					luau.pushnumber(L, f64(cs.input))
+					luau.setfield(L, -2, "input")
+					luau.pushnumber(L, f64(cs.score))
+					luau.setfield(L, -2, "score")
+					luau.rawseti(L, -2, c.int(k + 1))
+				}
+				luau.setfield(L, -2, "considerations")
+				luau.rawseti(L, -2, c.int(i + 1))
 			}
-			luau.setfield(L, -2, "considerations")
-			luau.rawseti(L, -2, c.int(i + 1))
-		}
-		return 1
-	}, "(entity: Entity) -> { { option: number, action: string, score: number, target: Entity?, considerations: { { consideration: number, input: number, score: number } } } }?")
-	script.define(r, "Agent.plan", proc(L: ^luau.State) -> c.int {
-		s := state_of(L)
-		e := script.check_entity(L, 1)
-		if !ecs.is_alive(s.world, e) || !ecs.has(s.world, e, Agent) {
-			script.raise(L, "the entity has no Agent")
-		}
-		view, ok := plan(s, e, context.temp_allocator)
-		if !ok {
-			luau.pushnil(L)
 			return 1
-		}
-		luau.createtable(L, 0, 7)
-		if view.goal != 0 {
-			luau.pushnumber(L, f64(view.goal))
-			luau.setfield(L, -2, "goal")
-		}
-		luau.createtable(L, c.int(len(view.goals)), 0)
-		for g, i in view.goals {
-			luau.createtable(L, 0, 2)
-			luau.pushnumber(L, f64(g.id))
-			luau.setfield(L, -2, "goal")
-			luau.pushnumber(L, f64(g.priority))
-			luau.setfield(L, -2, "priority")
-			luau.rawseti(L, -2, c.int(i + 1))
-		}
-		luau.setfield(L, -2, "goals")
-		luau.createtable(L, c.int(len(view.steps)), 0)
-		for step, i in view.steps {
-			luau.createtable(L, 0, 2)
-			luau.pushnumber(L, f64(step.id))
-			luau.setfield(L, -2, "node")
-			luau.pushodinstring(L, step.action)
-			luau.setfield(L, -2, "action")
-			luau.rawseti(L, -2, c.int(i + 1))
-		}
-		luau.setfield(L, -2, "steps")
-		luau.createtable(L, c.int(len(view.methods)), 0)
-		for m, i in view.methods {
-			luau.createtable(L, 0, 2)
-			luau.pushnumber(L, f64(m.task))
-			luau.setfield(L, -2, "task")
-			luau.pushnumber(L, f64(m.method))
-			luau.setfield(L, -2, "method")
-			luau.rawseti(L, -2, c.int(i + 1))
-		}
-		luau.setfield(L, -2, "methods")
-		// From 1, as Luau counts.
-		luau.pushnumber(L, f64(view.step + 1))
-		luau.setfield(L, -2, "step")
-		luau.pushnumber(L, f64(view.nodes))
-		luau.setfield(L, -2, "nodes")
-		luau.pushboolean(L, b32(view.searching))
-		luau.setfield(L, -2, "searching")
-		return 1
-	}, "(entity: Entity) -> { goal: number?, goals: { { goal: number, priority: number } }, steps: { { node: number, action: string } }, methods: { { task: number, method: number } }, step: number, nodes: number, searching: boolean }?")
+		}, "(entity: Entity) -> { { option: number, action: string, score: number, target: Entity?, considerations: { { consideration: number, input: number, score: number } } } }?")
+	script.define(
+		r,
+		"Agent.plan",
+		proc(L: ^luau.State) -> c.int {
+			s := state_of(L)
+			e := script.check_entity(L, 1)
+			if !ecs.is_alive(s.world, e) || !ecs.has(s.world, e, Agent) {
+				script.raise(L, "the entity has no Agent")
+			}
+			view, ok := plan(s, e, context.temp_allocator)
+			if !ok {
+				luau.pushnil(L)
+				return 1
+			}
+			luau.createtable(L, 0, 7)
+			if view.goal != 0 {
+				luau.pushnumber(L, f64(view.goal))
+				luau.setfield(L, -2, "goal")
+			}
+			luau.createtable(L, c.int(len(view.goals)), 0)
+			for g, i in view.goals {
+				luau.createtable(L, 0, 2)
+				luau.pushnumber(L, f64(g.id))
+				luau.setfield(L, -2, "goal")
+				luau.pushnumber(L, f64(g.priority))
+				luau.setfield(L, -2, "priority")
+				luau.rawseti(L, -2, c.int(i + 1))
+			}
+			luau.setfield(L, -2, "goals")
+			luau.createtable(L, c.int(len(view.steps)), 0)
+			for step, i in view.steps {
+				luau.createtable(L, 0, 2)
+				luau.pushnumber(L, f64(step.id))
+				luau.setfield(L, -2, "node")
+				luau.pushodinstring(L, step.action)
+				luau.setfield(L, -2, "action")
+				luau.rawseti(L, -2, c.int(i + 1))
+			}
+			luau.setfield(L, -2, "steps")
+			luau.createtable(L, c.int(len(view.methods)), 0)
+			for m, i in view.methods {
+				luau.createtable(L, 0, 2)
+				luau.pushnumber(L, f64(m.task))
+				luau.setfield(L, -2, "task")
+				luau.pushnumber(L, f64(m.method))
+				luau.setfield(L, -2, "method")
+				luau.rawseti(L, -2, c.int(i + 1))
+			}
+			luau.setfield(L, -2, "methods")
+			// From 1, as Luau counts.
+			luau.pushnumber(L, f64(view.step + 1))
+			luau.setfield(L, -2, "step")
+			luau.pushnumber(L, f64(view.nodes))
+			luau.setfield(L, -2, "nodes")
+			luau.pushboolean(L, b32(view.searching))
+			luau.setfield(L, -2, "searching")
+			return 1
+		},
+		"(entity: Entity) -> { goal: number?, goals: { { goal: number, priority: number } }, steps: { { node: number, action: string } }, methods: { { task: number, method: number } }, step: number, nodes: number, searching: boolean }?",
+	)
 	script.define(r, "Perception.noise", proc(L: ^luau.State) -> c.int {
-		s := state_of(L)
-		position := script.check_position(L, 1)
-		loudness := f32(luau.L_checknumber(L, 2))
-		tag := string(luau.L_checkstring(L, 3))
-		source: ecs.Entity
-		if !luau.isnoneornil(L, 4) {
-			source = script.check_entity(L, 4)
-		}
-		if _, found := tag_index(s.tags, tag); !found {
-			script.raise(L, fmt.tprintf("there is no tag %q: perception.tags names the project's", tag))
-		}
-		noise(s, position, loudness, tag, source)
-		return 0
-	}, "(position: WorldPosition, loudness: number, tag: string, source: Entity?) -> ()")
+			s := state_of(L)
+			position := script.check_position(L, 1)
+			loudness := f32(luau.L_checknumber(L, 2))
+			tag := string(luau.L_checkstring(L, 3))
+			source: ecs.Entity
+			if !luau.isnoneornil(L, 4) {
+				source = script.check_entity(L, 4)
+			}
+			if _, found := tag_index(s.tags, tag); !found {
+				script.raise(
+					L,
+					fmt.tprintf("there is no tag %q: perception.tags names the project's", tag),
+				)
+			}
+			noise(s, position, loudness, tag, source)
+			return 0
+		}, "(position: WorldPosition, loudness: number, tag: string, source: Entity?) -> ()")
 }
 
 // current_action is the name of the action that an agent runs or starts, or "".
@@ -302,7 +346,11 @@ agent_entity :: proc(L: ^luau.State, s: ^State) -> ecs.Entity {
 // key_of is the key of a name, which raises an error for a name that the blackboard does not have.
 @(private = "file")
 key_of :: proc(L: ^luau.State, board: Board, name: string) -> format.Blackboard_Key {
-	slot, found := format.blackboard_find(board.data, board.blob, format.animation_graph_hash(name))
+	slot, found := format.blackboard_find(
+		board.data,
+		board.blob,
+		format.animation_graph_hash(name),
+	)
 	if !found {
 		script.raise(L, fmt.tprintf("the agent's blackboard has no key %s", name))
 	}

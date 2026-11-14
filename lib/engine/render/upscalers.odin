@@ -77,7 +77,13 @@ upscaler_state_destroy :: proc(u: ^Upscaler_State, platform: ^core.Platform_API)
 
 @(private)
 sync_upscaler_pipelines :: proc(r: ^Renderer, force: bool) {
-	sync_compute_pipeline(&r.post.upscalers.motion, r.platform, r.residency.assets, {label = "upscale motion"}, force)
+	sync_compute_pipeline(
+		&r.post.upscalers.motion,
+		r.platform,
+		r.residency.assets,
+		{label = "upscale motion"},
+		force,
+	)
 }
 
 // upscaler_kind is the GPU interface's upscaler that an anti-aliasing technique runs, if it runs one.
@@ -97,7 +103,10 @@ frame_upscaler :: proc(f: ^Frame, technique: Aa_Technique) -> gpu.Upscaler {
 	r := f.renderer
 	u := &f.state.post.upscaler
 	kind, ok := upscaler_kind(technique)
-	if !ok || kind not_in r.caps.upscalers || !pipeline_ready(r.platform, &r.post.upscalers.motion) || r.platform.gpu_create_upscaler == nil {
+	if !ok ||
+	   kind not_in r.caps.upscalers ||
+	   !pipeline_ready(r.platform, &r.post.upscalers.motion) ||
+	   r.platform.gpu_create_upscaler == nil {
 		return {}
 	}
 	desc := gpu.Upscaler_Desc {
@@ -129,21 +138,33 @@ frame_upscaler :: proc(f: ^Frame, technique: Aa_Technique) -> gpu.Upscaler {
 add_upscale :: proc(f: ^Frame) {
 	pf := f.post
 	g := f.graph
-	pf.reproject = f.previous_view_projection * linalg.matrix4_translate_f32(f.camera_motion) * linalg.inverse(f.view_projection)
-	pf.motion = create_texture(g, {size = f.size, format = MOTION_FORMAT, label = "upscale motion"})
+	pf.reproject =
+		f.previous_view_projection *
+		linalg.matrix4_translate_f32(f.camera_motion) *
+		linalg.inverse(f.view_projection)
+	pf.motion = create_texture(
+		g,
+		{size = f.size, format = MOTION_FORMAT, label = "upscale motion"},
+	)
 	pass := add_compute_pass(g, "upscale motion", run_motion, f)
 	read(g, pass, f.velocity)
 	read(g, pass, f.depth)
 	write(g, pass, pf.motion)
 	// The overdraw view counts layers in the moments, not their optical depth.
 	if f.moments_zeroth != 0 && f.debug_view != .Transparent_Overdraw {
-		pf.upscale_mask = create_texture(g, {size = f.size, format = UPSCALE_MASK_FORMAT, label = "upscale mask"})
+		pf.upscale_mask = create_texture(
+			g,
+			{size = f.size, format = UPSCALE_MASK_FORMAT, label = "upscale mask"},
+		)
 		read(g, pass, f.moments_zeroth)
 		write(g, pass, pf.upscale_mask)
 	}
 
 	pf.temporal_in = f.scene
-	pf.upscaled = create_texture(g, {size = f.output_size, format = SCENE_FORMAT, label = "upscaled scene"})
+	pf.upscaled = create_texture(
+		g,
+		{size = f.output_size, format = SCENE_FORMAT, label = "upscaled scene"},
+	)
 	pass = add_compute_pass(g, "upscale", run_upscale, f)
 	read(g, pass, f.scene)
 	read(g, pass, f.depth)

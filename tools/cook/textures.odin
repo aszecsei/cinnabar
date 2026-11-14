@@ -22,7 +22,17 @@ TEXTURE_COOK_VERSION :: "textures 1"
 // The images that the cooker decodes.
 TEXTURE_EXTENSIONS :: []string{".png", ".jpg", ".jpeg", ".tga", ".hdr", ".tif", ".tiff", ".exr"}
 // What a texture asset's source can be: an image, or a set that names images (see texture_layers.odin).
-TEXTURE_SOURCE_EXTENSIONS :: []string{".png", ".jpg", ".jpeg", ".tga", ".hdr", ".tif", ".tiff", ".exr", format.TEXTURE_SET_EXTENSION}
+TEXTURE_SOURCE_EXTENSIONS :: []string {
+	".png",
+	".jpg",
+	".jpeg",
+	".tga",
+	".hdr",
+	".tif",
+	".tiff",
+	".exr",
+	format.TEXTURE_SET_EXTENSION,
+}
 // Compressonator's quality, from 0 to 1. Development cooks fast, and release cooks well.
 DEV_TEXTURE_QUALITY :: 0.05
 RELEASE_TEXTURE_QUALITY :: 0.5
@@ -41,7 +51,12 @@ TEXTURE_SETTINGS := []Setting_Info {
 		default = "color",
 		description = "What the texture holds, which picks its format: color is BC7 in sRGB, normal is BC5, mask is BC4 (one channel), hdr is BC6H, and data is RGBA8 without compression.",
 	},
-	{key = "mips", values = {"true", "false"}, default = "true", description = "Make the full mip chain."},
+	{
+		key = "mips",
+		values = {"true", "false"},
+		default = "true",
+		description = "Make the full mip chain.",
+	},
 	{
 		key = "max_size",
 		values = {"256", "512", "1024", "2048", "4096", "8192", "16384"},
@@ -68,7 +83,27 @@ TEXTURE_SETTINGS := []Setting_Info {
 	},
 	{
 		key = "alpha_cutoff",
-		values = {"0.05", "0.1", "0.15", "0.2", "0.25", "0.3", "0.35", "0.4", "0.45", "0.5", "0.55", "0.6", "0.65", "0.7", "0.75", "0.8", "0.85", "0.9", "0.95"},
+		values = {
+			"0.05",
+			"0.1",
+			"0.15",
+			"0.2",
+			"0.25",
+			"0.3",
+			"0.35",
+			"0.4",
+			"0.45",
+			"0.5",
+			"0.55",
+			"0.6",
+			"0.65",
+			"0.7",
+			"0.75",
+			"0.8",
+			"0.85",
+			"0.9",
+			"0.95",
+		},
 		default = "0.5",
 		description = "The cutoff that alpha_coverage keeps the coverage at: the cutoff of the masked material that reads the texture.",
 	},
@@ -128,7 +163,10 @@ cook_textures :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass
 	// An image that turns off standalone is looked at in every pass: whether a set names it is up to every set, and its
 	// check reads only its .meta file.
 	for &a in assets {
-		if a.kind == .Texture && a.carried != nil && !is_texture_set(a) && texture_setting(a, "standalone") == "false" {
+		if a.kind == .Texture &&
+		   a.carried != nil &&
+		   !is_texture_set(a) &&
+		   texture_setting(a, "standalone") == "false" {
 			uncarry(&a)
 		}
 	}
@@ -205,7 +243,13 @@ cook_textures :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass
 		}
 		if !is_texture_set(a^) && texture_setting(a^, "standalone") == "false" {
 			if !named[i] {
-				report_warning(problems, fmt.tprintf("%s%s", a.path, format.META_EXTENSION), 0, 0, "has standalone = false, but no .texture_set or .sprite_sheet names it, so nothing cooks it")
+				report_warning(
+					problems,
+					fmt.tprintf("%s%s", a.path, format.META_EXTENSION),
+					0,
+					0,
+					"has standalone = false, but no .texture_set or .sprite_sheet names it, so nothing cooks it",
+				)
 			}
 			remove_texture_blob(out_dir, a^, problems)
 			// It has nothing to cook.
@@ -217,7 +261,15 @@ cook_textures :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass
 		for child in sets[i].children {
 			asset_source(pass, child)
 		}
-		append(&work.jobs, Texture_Job{asset = i, force = pass.force[a.meta.guid], set = sets[i], scratch = {problems = {log = problems.log}}})
+		append(
+			&work.jobs,
+			Texture_Job {
+				asset = i,
+				force = pass.force[a.meta.guid],
+				set = sets[i],
+				scratch = {problems = {log = problems.log}},
+			},
+		)
 	}
 	Sized :: struct {
 		size, job: int,
@@ -307,7 +359,11 @@ texture_blob_size :: proc(path: string) -> (size: [2]u32) {
 	defer os.close(f)
 	blob: format.Texture_Blob
 	n, read_err := os.read(f, ([^]byte)(&blob)[:size_of(blob)])
-	if read_err != nil || n < size_of(blob) || blob.header.magic != format.BLOB_MAGIC || blob.header.kind != .Texture || blob.header.layout != format.texture_layout() {
+	if read_err != nil ||
+	   n < size_of(blob) ||
+	   blob.header.magic != format.BLOB_MAGIC ||
+	   blob.header.kind != .Texture ||
+	   blob.header.layout != format.texture_layout() {
 		return
 	}
 	return blob.size
@@ -315,9 +371,22 @@ texture_blob_size :: proc(path: string) -> (size: [2]u32) {
 
 // texture_key covers what the blob depends on: the cooker, Compressonator, OpenEXRCore, the configuration, the path, the
 // source, the settings, and a set's images. A set ignores its images' settings, so their .meta files are not in it.
-texture_key :: proc(options: Cook_Options, a: Asset_Source, assets: []Asset_Source, set: Texture_Set) -> u64 {
+texture_key :: proc(
+	options: Cook_Options,
+	a: Asset_Source,
+	assets: []Asset_Source,
+	set: Texture_Set,
+) -> u64 {
 	key := hash.fnv64a(
-		transmute([]byte)fmt.tprintf("%s\x00%s\x00%s\x00%v\x00%s\x00%x\x00", TEXTURE_COOK_VERSION, COMPRESSONATOR_VERSION, openexr_version(), options.config, a.name, format.texture_layout()),
+		transmute([]byte)fmt.tprintf(
+			"%s\x00%s\x00%s\x00%v\x00%s\x00%x\x00",
+			TEXTURE_COOK_VERSION,
+			COMPRESSONATOR_VERSION,
+			openexr_version(),
+			options.config,
+			a.name,
+			format.texture_layout(),
+		),
 	)
 	key = hash.fnv64a(source_of(a), key)
 	for child in set.children {
@@ -396,10 +465,30 @@ texture_cook_of :: proc(a: Asset_Source) -> Texture_Cook {
 }
 
 // cook_texture decodes, sizes, filters and compresses one texture, and gives its blob.
-cook_texture :: proc(options: Cook_Options, a: Asset_Source, assets: []Asset_Source, set: Texture_Set, key: u64, problems: ^Problems) -> (blob: []byte, ok: bool) {
+cook_texture :: proc(
+	options: Cook_Options,
+	a: Asset_Source,
+	assets: []Asset_Source,
+	set: Texture_Set,
+	key: u64,
+	problems: ^Problems,
+) -> (
+	blob: []byte,
+	ok: bool,
+) {
 	t := texture_cook_of(a)
 	layers, dimension := texture_layers(a, assets, set, t, problems) or_return
-	return cook_texture_layers(options, layers, dimension, t, a.meta.guid, key, a.name, a.path, problems)
+	return cook_texture_layers(
+		options,
+		layers,
+		dimension,
+		t,
+		a.meta.guid,
+		key,
+		a.name,
+		a.path,
+		problems,
+	)
 }
 
 // cook_texture_image sizes, filters and compresses one decoded image into a 2D texture, and gives its blob. source_path
@@ -450,8 +539,15 @@ cook_texture_layers :: proc(
 			image = resample(image, max(image.width / 2, 1), max(image.height / 2, 1), wrap, box)
 		}
 		// Mip 0 of a block-compressed texture is whole blocks, so a texture that is not is resized up to the next one.
-		if format.texture_format_block(tex_format) != 0 && (image.width % 4 != 0 || image.height % 4 != 0) {
-			image = resample(image, (image.width + 3) / 4 * 4, (image.height + 3) / 4 * 4, wrap, box)
+		if format.texture_format_block(tex_format) != 0 &&
+		   (image.width % 4 != 0 || image.height % 4 != 0) {
+			image = resample(
+				image,
+				(image.width + 3) / 4 * 4,
+				(image.height + 3) / 4 * 4,
+				wrap,
+				box,
+			)
 		}
 		if usage == .Normal {
 			normalize(&image)
@@ -462,13 +558,23 @@ cook_texture_layers :: proc(
 				mip_count = int(math.floor(math.log2(f32(max(image.width, image.height))))) + 1
 			}
 			size = {u32(image.width), u32(image.height)}
-			mips = make([]byte, format.texture_chain_size(tex_format, size, u32(mip_count)) * len(decoded), context.temp_allocator)
+			mips = make(
+				[]byte,
+				format.texture_chain_size(tex_format, size, u32(mip_count)) * len(decoded),
+				context.temp_allocator,
+			)
 		}
 		level := image
 		coverage := alpha_coverage(image, t.coverage_cutoff)
 		for mip in 0 ..< mip_count {
 			if mip > 0 {
-				level = resample(level, max(level.width / 2, 1), max(level.height / 2, 1), wrap, box)
+				level = resample(
+					level,
+					max(level.width / 2, 1),
+					max(level.height / 2, 1),
+					wrap,
+					box,
+				)
 				if usage == .Normal {
 					normalize(&level)
 				}
@@ -476,11 +582,22 @@ cook_texture_layers :: proc(
 			// The next mip filters from level, so only what this mip stores is scaled, and no scale feeds down the chain.
 			stored := level
 			if mip > 0 && t.coverage_cutoff > 0 {
-				stored = scale_alpha(level, alpha_coverage_scale(level, t.coverage_cutoff, coverage))
+				stored = scale_alpha(
+					level,
+					alpha_coverage_scale(level, t.coverage_cutoff, coverage),
+				)
 			}
 			mip_size := format.texture_mip_size(tex_format, u32(level.width), u32(level.height))
 			if !encode_mip(stored, usage, quality, mips[offset:][:mip_size]) {
-				report_error(problems, path, 0, 0, "cannot compress layer %d's mip %d", layer_index, mip)
+				report_error(
+					problems,
+					path,
+					0,
+					0,
+					"cannot compress layer %d's mip %d",
+					layer_index,
+					mip,
+				)
 				return
 			}
 			offset += mip_size
@@ -520,7 +637,15 @@ texture_format_of :: proc(usage: format.Texture_Usage) -> format.Texture_Format 
 // decode_image_bytes decodes a source into floating point, by its first bytes: OpenEXR, TIFF, Radiance .hdr, or what
 // stb_image reads. Color decodes from sRGB into linear light, a normal map maps to -1..1, and a mask keeps its channel
 // in red. Float images (.exr, .hdr and a TIFF of floats) are linear already, so they skip the sRGB step.
-decode_image_bytes :: proc(source: []byte, path: string, t: Texture_Cook, problems: ^Problems) -> (image: Image, ok: bool) {
+decode_image_bytes :: proc(
+	source: []byte,
+	path: string,
+	t: Texture_Cook,
+	problems: ^Problems,
+) -> (
+	image: Image,
+	ok: bool,
+) {
 	if len(source) == 0 {
 		report_error(problems, path, 0, 0, "is empty")
 		return
@@ -544,26 +669,57 @@ decode_image_bytes :: proc(source: []byte, path: string, t: Texture_Cook, proble
 	case:
 		width, height, channels: c.int
 		if stbi.is_hdr_from_memory(raw_data(source), c.int(len(source))) != 0 {
-			data := stbi.loadf_from_memory(raw_data(source), c.int(len(source)), &width, &height, &channels, 4)
+			data := stbi.loadf_from_memory(
+				raw_data(source),
+				c.int(len(source)),
+				&width,
+				&height,
+				&channels,
+				4,
+			)
 			if data == nil {
 				report_error(problems, path, 0, 0, "cannot decode: %s", stbi.failure_reason())
 				return
 			}
 			defer stbi.image_free(data)
-			image, linear = {int(width), int(height), make([][4]f32, int(width * height), context.temp_allocator)}, true
+			image, linear =
+				{
+					int(width),
+					int(height),
+					make([][4]f32, int(width * height), context.temp_allocator),
+				},
+				true
 			for &p, i in image.pixels {
 				p = {data[i * 4], data[i * 4 + 1], data[i * 4 + 2], data[i * 4 + 3]}
 			}
 		} else {
-			data := stbi.load_from_memory(raw_data(source), c.int(len(source)), &width, &height, &channels, 4)
+			data := stbi.load_from_memory(
+				raw_data(source),
+				c.int(len(source)),
+				&width,
+				&height,
+				&channels,
+				4,
+			)
 			if data == nil {
 				report_error(problems, path, 0, 0, "cannot decode: %s", stbi.failure_reason())
 				return
 			}
 			defer stbi.image_free(data)
-			image = {int(width), int(height), make([][4]f32, int(width * height), context.temp_allocator)}
+			image = {
+				int(width),
+				int(height),
+				make([][4]f32, int(width * height), context.temp_allocator),
+			}
 			for &p, i in image.pixels {
-				p = {f32(data[i * 4]), f32(data[i * 4 + 1]), f32(data[i * 4 + 2]), f32(data[i * 4 + 3])} / 255
+				p =
+					{
+						f32(data[i * 4]),
+						f32(data[i * 4 + 1]),
+						f32(data[i * 4 + 2]),
+						f32(data[i * 4 + 3]),
+					} /
+					255
 			}
 		}
 	}
@@ -665,7 +821,11 @@ alpha_coverage_scale :: proc(image: Image, cutoff, coverage: f32) -> f32 {
 
 // scale_alpha is a copy of an image with its alpha scaled, and clamped to what a texture stores.
 scale_alpha :: proc(image: Image, scale: f32) -> Image {
-	result := Image{image.width, image.height, make([][4]f32, len(image.pixels), context.temp_allocator)}
+	result := Image {
+		image.width,
+		image.height,
+		make([][4]f32, len(image.pixels), context.temp_allocator),
+	}
 	for p, i in image.pixels {
 		result.pixels[i] = {p.r, p.g, p.b, clamp(p.a * scale, 0, 1)}
 	}
@@ -682,7 +842,11 @@ resample :: proc(image: Image, width, height: int, wrap: bool, box := false) -> 
 		return image
 	}
 	// Horizontal, then vertical.
-	across := Image{width, image.height, make([][4]f32, width * image.height, context.temp_allocator)}
+	across := Image {
+		width,
+		image.height,
+		make([][4]f32, width * image.height, context.temp_allocator),
+	}
 	resample_axis(image.pixels, image.width, image.height, across.pixels, width, true, wrap, box)
 	result := Image{width, height, make([][4]f32, width * height, context.temp_allocator)}
 	resample_axis(across.pixels, width, image.height, result.pixels, height, false, wrap, box)
@@ -692,7 +856,13 @@ resample :: proc(image: Image, width, height: int, wrap: bool, box := false) -> 
 // resample_axis resizes along x (horizontal) or y. src is src_width x src_height, and dst has the other axis's size
 // unchanged and dst_length along this one.
 @(private = "file")
-resample_axis :: proc(src: [][4]f32, src_width, src_height: int, dst: [][4]f32, dst_length: int, horizontal, wrap, box: bool) {
+resample_axis :: proc(
+	src: [][4]f32,
+	src_width, src_height: int,
+	dst: [][4]f32,
+	dst_length: int,
+	horizontal, wrap, box: bool,
+) {
 	src_length := horizontal ? src_width : src_height
 	lines := horizontal ? src_height : src_width
 	scale := f32(src_length) / f32(dst_length)
@@ -705,7 +875,9 @@ resample_axis :: proc(src: [][4]f32, src_width, src_height: int, dst: [][4]f32, 
 		first, last := int(math.floor(center - radius)), int(math.ceil(center + radius))
 		if box {
 			// The source texels whose middles the destination texel covers.
-			first, last = int(math.floor(f32(d) * scale)), max(int(math.ceil(f32(d + 1) * scale)) - 1, int(math.floor(f32(d) * scale)))
+			first, last =
+				int(math.floor(f32(d) * scale)),
+				max(int(math.ceil(f32(d + 1) * scale)) - 1, int(math.floor(f32(d) * scale)))
 		}
 		clear(&weights)
 		clear(&indices)
@@ -777,13 +949,29 @@ encode_mip :: proc(image: Image, usage: format.Texture_Usage, quality: f32, out:
 				halves[i][ch] = f16(clamp(p[ch], 0, 65504))
 			}
 		}
-		return cn_compress(.BC6H, quality, false, raw_data(halves), c.uint(image.width), c.uint(image.height), raw_data(out)) == 0
+		return(
+			cn_compress(
+				.BC6H,
+				quality,
+				false,
+				raw_data(halves),
+				c.uint(image.width),
+				c.uint(image.height),
+				raw_data(out),
+			) ==
+			0 \
+		)
 	}
 	bytes := make([][4]u8, count, context.temp_allocator)
 	for p, i in image.pixels {
 		switch usage {
 		case .Color:
-			bytes[i] = {unorm(linear_to_srgb(p.r)), unorm(linear_to_srgb(p.g)), unorm(linear_to_srgb(p.b)), unorm(p.a)}
+			bytes[i] = {
+				unorm(linear_to_srgb(p.r)),
+				unorm(linear_to_srgb(p.g)),
+				unorm(linear_to_srgb(p.b)),
+				unorm(p.a),
+			}
 		case .Normal:
 			bytes[i] = {unorm(p.x * 0.5 + 0.5), unorm(p.y * 0.5 + 0.5), 0, 255}
 		case .Mask, .Data, .HDR:
@@ -802,5 +990,16 @@ encode_mip :: proc(image: Image, usage: format.Texture_Usage, quality: f32, out:
 		copy(out, ([^]byte)(raw_data(bytes))[:count * 4])
 		return true
 	}
-	return cn_compress(compressed, quality, usage == .Color, raw_data(bytes), c.uint(image.width), c.uint(image.height), raw_data(out)) == 0
+	return(
+		cn_compress(
+			compressed,
+			quality,
+			usage == .Color,
+			raw_data(bytes),
+			c.uint(image.width),
+			c.uint(image.height),
+			raw_data(out),
+		) ==
+		0 \
+	)
 }

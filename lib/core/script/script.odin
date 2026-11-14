@@ -30,7 +30,12 @@ LUAU_DIRECT_ACCESS :: #config(LUAU_DIRECT_ACCESS, false)
 // __namecall on the stack, and get the key's atom and the instruction's cached slot (see luau.UserdataDirectAccess).
 // A get pushes one result. A namecall returns its number of results, or YIELD.
 Direct_Proc :: #type proc(L: ^luau.State, data: rawptr, atom: c.int, cachedslot: ^u16)
-Direct_Namecall_Proc :: #type proc(L: ^luau.State, data: rawptr, atom: c.int, cachedslot: ^u16) -> c.int
+Direct_Namecall_Proc :: #type proc(
+	L: ^luau.State,
+	data: rawptr,
+	atom: c.int,
+	cachedslot: ^u16,
+) -> c.int
 
 Direct_Access :: struct {
 	get, set: Direct_Proc,
@@ -57,13 +62,13 @@ Binding :: struct {
 Bindings :: struct {
 	// The context that bindings run with. The game sets it each time before it runs scripts, so it never holds a
 	// stale allocator or logger.
-	ctx:      runtime.Context,
+	ctx:          runtime.Context,
 	// The watchdog stops a script that is still running at this time. The zero tick disables the watchdog.
-	deadline: time.Tick,
-	slots:    [BINDING_SLOTS]Binding,
-	count:    int,
+	deadline:     time.Tick,
+	slots:        [BINDING_SLOTS]Binding,
+	count:        int,
 	// Counts interrupts, so the watchdog reads the clock only once per WATCHDOG_INTERVAL.
-	interrupts: u32,
+	interrupts:   u32,
 	// The direct access handlers of each userdata tag, for direct_access. They point into the DLL image, like the
 	// bindings, so clear empties them.
 	direct:       [luau.UTAG_LIMIT]Direct_Access,
@@ -83,7 +88,7 @@ register :: proc(b: ^Bindings, name: string, procedure: Binding_Proc) -> Binding
 	if b.count == MAX_BINDINGS {
 		log.panicf("script: more than %d bindings", MAX_BINDINGS)
 	}
-	for i := u32(id); ; i += 1 {
+	for i := u32(id);; i += 1 {
 		slot := &b.slots[i & (BINDING_SLOTS - 1)]
 		if slot.id == id {
 			log.panicf("script: binding %s conflicts with another binding", name)
@@ -97,7 +102,7 @@ register :: proc(b: ^Bindings, name: string, procedure: Binding_Proc) -> Binding
 }
 
 find :: proc "contextless" (b: ^Bindings, id: Binding_Id) -> Binding_Proc {
-	for i := u32(id); ; i += 1 {
+	for i := u32(id);; i += 1 {
 		slot := &b.slots[i & (BINDING_SLOTS - 1)]
 		if slot.id == id {
 			return slot.procedure
@@ -119,7 +124,9 @@ clear :: proc(b: ^Bindings) {
 // handlers in Bindings.direct. The tag's metatable must exist. It returns false when LUAU_DIRECT_ACCESS is off.
 direct_access :: proc(L: ^luau.State, tag: c.int) -> bool {
 	when LUAU_DIRECT_ACCESS {
-		return bool(luau.registeruserdatadirectaccess(L, tag, direct_get, direct_set, direct_namecall))
+		return bool(
+			luau.registeruserdatadirectaccess(L, tag, direct_get, direct_set, direct_namecall),
+		)
 	} else {
 		return false
 	}
@@ -150,7 +157,13 @@ direct_set :: proc "c" (L: ^luau.State, data: rawptr, atom: c.int, cachedslot: ^
 }
 
 @(private)
-direct_namecall :: proc "c" (L: ^luau.State, data: rawptr, atom: c.int, cachedslot: ^u16, utag: c.int) -> c.int {
+direct_namecall :: proc "c" (
+	L: ^luau.State,
+	data: rawptr,
+	atom: c.int,
+	cachedslot: ^u16,
+	utag: c.int,
+) -> c.int {
 	b := (^Bindings)(luau.callbacks(L).userdata)
 	b.direct_calls += 1
 	procedure := b.direct[utag].namecall
@@ -211,7 +224,7 @@ atoms: Atoms
 atom :: proc(name: string) -> i16 {
 	sync.guard(&atoms.mutex)
 	h := hash.fnv32a(transmute([]byte)name)
-	for i := h; ; i += 1 {
+	for i := h;; i += 1 {
 		slot := &atoms.slots[i & (ATOM_SLOTS - 1)]
 		if slot.atom == 0 {
 			if atoms.count == MAX_ATOMS {
@@ -250,7 +263,7 @@ useratom :: proc "c" (L: ^luau.State, s: [^]c.char, l: c.size_t) -> i16 {
 	h := hash.fnv32a(transmute([]byte)name)
 	sync.mutex_lock(&atoms.mutex)
 	defer sync.mutex_unlock(&atoms.mutex)
-	for i := h; ; i += 1 {
+	for i := h;; i += 1 {
 		slot := &atoms.slots[i & (ATOM_SLOTS - 1)]
 		if slot.atom == 0 {
 			return -1

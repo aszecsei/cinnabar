@@ -174,7 +174,9 @@ voice_gains :: proc(params: audio.Voice_Params) -> [2]f32 {
 		return params.gain
 	}
 	x := params.position.x
-	distance := math.sqrt(x * x + params.position.y * params.position.y + params.position.z * params.position.z)
+	distance := math.sqrt(
+		x * x + params.position.y * params.position.y + params.position.z * params.position.z,
+	)
 	near, far := params.min_distance, params.max_distance
 	attenuation: f32 = 1
 	if far > near && near > 0 {

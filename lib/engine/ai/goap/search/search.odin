@@ -87,7 +87,10 @@ begin :: proc(s: ^Search, g: format.Goap_Data, goal: format.Goap_Goal) {
 	}
 	// The cook makes one test of each key, and the check keeps tests from being empty, so the desired state is not.
 	for test in g.tests[goal.first_test:][:goal.test_count] {
-		intervals[test.key] = {max(intervals[test.key].lo, test.lo), min(intervals[test.key].hi, test.hi)}
+		intervals[test.key] = {
+			max(intervals[test.key].lo, test.lo),
+			min(intervals[test.key].hi, test.hi),
+		}
 	}
 	root^ = {
 		parent = NO_NODE,
@@ -185,7 +188,11 @@ plan :: proc(s: ^Search, found: int, steps: []u16) -> u32 {
 // to the state: when an effect contradicts it, when no effect touches a key that it constrains, or when the action's
 // preconditions contradict the state before. Effects are regressed from the last, since they apply in their order.
 @(private)
-regress :: proc(g: format.Goap_Data, a: format.Plan_Action, after, before: []format.Plan_Interval) -> bool {
+regress :: proc(
+	g: format.Goap_Data,
+	a: format.Plan_Action,
+	after, before: []format.Plan_Interval,
+) -> bool {
 	copy(before, after)
 	relevant := false
 	effects := g.effects[a.first_effect:][:a.effect_count]
@@ -291,7 +298,17 @@ Whole :: struct {
 // costs, in a state of goap_state_of(g).size bytes, and writes its plan into steps, which hold max_plan. The search is
 // the runtime's, so it finds the plan that an agent finds from the same world state, usable actions and costs. When it
 // fails, its plan is that of its closest node (see closest).
-whole :: proc(g: format.Goap_Data, state: []byte, world: []i32, usable: []u32, costs: []f32, goal: format.Goap_Goal, steps: []u16) -> (w: Whole) {
+whole :: proc(
+	g: format.Goap_Data,
+	state: []byte,
+	world: []i32,
+	usable: []u32,
+	costs: []f32,
+	goal: format.Goap_Goal,
+	steps: []u16,
+) -> (
+	w: Whole,
+) {
 	s := of(g, format.goap_state_of(g), state)
 	copy(s.world, world)
 	copy(s.usable, usable)

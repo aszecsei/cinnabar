@@ -56,124 +56,124 @@ FIRST_SHADOW_VIEW :: 2
 // Frame_Constants matches Frame_Constants in material_common.hlsli: the material passes' constants. A shadow view's
 // copy differs in its view_projection, and the view model's in its projections, its offsets and its near plane.
 Frame_Constants :: struct {
-	view_projection:          matrix[4, 4]f32,
-	previous_view_projection: matrix[4, 4]f32,
-	cluster_view_projection:  matrix[4, 4]f32,
-	camera_offset:            [4]f32,
-	previous_camera_offset:   [4]f32,
-	origin_offset:            [4]f32,
+	view_projection:              matrix[4, 4]f32,
+	previous_view_projection:     matrix[4, 4]f32,
+	cluster_view_projection:      matrix[4, 4]f32,
+	camera_offset:                [4]f32,
+	previous_camera_offset:       [4]f32,
+	origin_offset:                [4]f32,
 	// The ambient light's constant, x, y and z (see Ambient).
-	ambient:                  [4][4]f32,
-	cascade_splits:           [4]f32,
+	ambient:                      [4][4]f32,
+	cascade_splits:               [4]f32,
 	// The view's frustum, which the mesh shader path culls meshlets with, and where it looks from: a point relative to
 	// the camera in w = 1, or the direction it looks along in w = 0.
-	planes:                   [6][4]f32,
-	cull_eye:                 [4]f32,
+	planes:                       [6][4]f32,
+	cull_eye:                     [4]f32,
 	// The camera's right and up, and last frame's camera's, in every view's copy, which billboards face (see
 	// docs/rendering/gpu-scene.md#billboards).
-	camera_right:             [4]f32,
-	camera_up:                [4]f32,
-	previous_camera_right:    [4]f32,
-	previous_camera_up:       [4]f32,
-	instances:                u32,
-	draws:                    u32,
-	meshes:                   u32,
-	materials:                u32,
-	sampler_index:            u32,
-	time:                     f32,
+	camera_right:                 [4]f32,
+	camera_up:                    [4]f32,
+	previous_camera_right:        [4]f32,
+	previous_camera_up:           [4]f32,
+	instances:                    u32,
+	draws:                        u32,
+	meshes:                       u32,
+	materials:                    u32,
+	sampler_index:                u32,
+	time:                         f32,
 	// The mesh records, the material table and the lights are in the upload ring, at these offsets of its buffer.
-	meshes_offset:            u32,
-	materials_offset:         u32,
-	lights:                   u32,
-	lights_offset:            u32,
-	directional_count:        u32,
-	clusters:                 u32,
-	cluster_indices:          u32,
-	cluster_columns:          u32,
-	cluster_rows:             u32,
-	slice_scale:              f32,
-	slice_bias:               f32,
-	near:                     f32,
-	shadow_sampler:           u32,
-	shadow_views:             u32,
-	shadow_views_offset:      u32,
-	clustered:                u32,
-	screen_size:              [2]f32,
+	meshes_offset:                u32,
+	materials_offset:             u32,
+	lights:                       u32,
+	lights_offset:                u32,
+	directional_count:            u32,
+	clusters:                     u32,
+	cluster_indices:              u32,
+	cluster_columns:              u32,
+	cluster_rows:                 u32,
+	slice_scale:                  f32,
+	slice_bias:                   f32,
+	near:                         f32,
+	shadow_sampler:               u32,
+	shadow_views:                 u32,
+	shadow_views_offset:          u32,
+	clustered:                    u32,
+	screen_size:                  [2]f32,
 	// The camera's jitter, which view_projection has, and the exposure buffer.
-	jitter:                   [2]f32,
-	exposure:                 u32,
+	jitter:                       [2]f32,
+	exposure:                     u32,
 	// Whether Material_Push has the fog volume, its sampler, and the share of its width and height that the screen
 	// covers.
-	fog:                      u32,
-	fog_sampler:              u32,
-	fog_scale:                [2]f32,
+	fog:                          u32,
+	fog_sampler:                  u32,
+	fog_scale:                    [2]f32,
 	// Whether Material_Push has the global illumination.
-	gi:                       u32,
+	gi:                           u32,
 	// The area lights' lookup tables and their sampler.
-	ltc_matrix:               u32,
-	ltc_amplitude:            u32,
-	ltc_sampler:              u32,
+	ltc_matrix:                   u32,
+	ltc_amplitude:                u32,
+	ltc_sampler:                  u32,
 	// The editor's debug view, which the forward pass draws for the views that it has.
-	debug_view:               u32,
+	debug_view:                   u32,
 	// The fog volume's depth slices (see FOG_LEVEL_SLICES), and the shadow maps' Shadow_Filter.
-	fog_slices:               u32,
-	shadow_filter:            u32,
+	fog_slices:                   u32,
+	shadow_filter:                u32,
 	// The mesh shader path's level of detail: the camera's, in every view (see lod_scale).
-	lod_scale:                f32,
-	lod_near:                 f32,
+	lod_scale:                    f32,
+	lod_near:                     f32,
 	// Last frame's time, for the previous pose of a material's displacement (see
 	// docs/rendering/materials.md#vertex-displacement).
-	previous_time:            f32,
+	previous_time:                f32,
 	// The frame's Surface_Records in the upload ring, at this offset of its buffer.
-	surfaces:                 u32,
-	surfaces_offset:          u32,
+	surfaces:                     u32,
+	surfaces_offset:              u32,
 	// The particle ribbons' vertices (see docs/rendering/particles.md#ribbons).
-	ribbon_vertices:          u32,
+	ribbon_vertices:              u32,
 	// The mesh particles' instances, which a draw with DRAW_PARTICLES reads (see
 	// docs/rendering/particles.md#mesh-particles).
-	particle_instances:       u32,
+	particle_instances:           u32,
 	// The views' lists of visible instances, which a draw with DRAW_INSTANCES reads (see
 	// docs/rendering/gpu-scene.md#instanced-meshes).
-	visible_instances:        u32,
+	visible_instances:            u32,
 	// The late view's Occlusion_Constants in the upload ring, which its amplification shaders test each meshlet
 	// against (see occlusion.odin): the buffer's read index plus 1, and 0 in every other view.
-	occlusion:                u32,
-	occlusion_offset:         u32,
+	occlusion:                    u32,
+	occlusion_offset:             u32,
 	// The meshlets that select meshlets picked, which a draw with DRAW_SELECTED reads (see meshlet_select.odin).
-	selected_meshlets:        u32,
+	selected_meshlets:            u32,
 	// The virtual shadow map, whose levels are the first shadow views (see virtual_shadows.odin): how many, 0 without it,
 	// how a distance picks one, the level that this view draws, the pool's read and write views, the page table, and
 	// the pool's pages.
-	virtual_levels:             u32,
-	virtual_level:              u32,
-	virtual_first_texel:        f32,
-	virtual_pixel_angle:        f32,
-	virtual_bias:               f32,
-	virtual_pool:               u32,
-	virtual_pool_storage:       u32,
-	virtual_table:              u32,
-	virtual_pool_pages_per_row: u32,
-	virtual_pool_pages:         u32,
+	virtual_levels:               u32,
+	virtual_level:                u32,
+	virtual_first_texel:          f32,
+	virtual_pixel_angle:          f32,
+	virtual_bias:                 f32,
+	virtual_pool:                 u32,
+	virtual_pool_storage:         u32,
+	virtual_table:                u32,
+	virtual_pool_pages_per_row:   u32,
+	virtual_pool_pages:           u32,
 	// Whether this view is one of the levels, which its amplification shaders cull against the level's pages.
-	virtual_draw:               u32,
+	virtual_draw:                 u32,
 	// The global illumination's voxelization, whose views draw a level of its clipmap (see Voxel_View): whether this view
 	// is one, the level's voxels across and their size, its first voxel's corner relative to the camera and its texel,
 	// and the albedo's, the normal's, the emission's and the mask's write views.
-	voxel_draw:                 u32,
-	voxel_res:                  u32,
-	voxel_size:                 f32,
-	voxel_min:                  [3]f32,
-	voxel_phase:                [3]i32,
-	voxel_albedo:               u32,
-	voxel_normal:               u32,
-	voxel_emission:             u32,
-	voxel_mask:                 u32,
+	voxel_draw:                   u32,
+	voxel_res:                    u32,
+	voxel_size:                   f32,
+	voxel_min:                    [3]f32,
+	voxel_phase:                  [3]i32,
+	voxel_albedo:                 u32,
+	voxel_normal:                 u32,
+	voxel_emission:               u32,
+	voxel_mask:                   u32,
 	// The sky's cubemap, which the specular light takes along the reflection (see Sky_Cube_Reads): no mips without one.
-	sky_cube_current:           u32,
-	sky_cube_previous:          u32,
-	sky_cube_blend:             f32,
-	sky_cube_mips:              f32,
-	sky_cube_sampler:           u32,
+	sky_cube_current:             u32,
+	sky_cube_previous:            u32,
+	sky_cube_blend:               f32,
+	sky_cube_mips:                f32,
+	sky_cube_sampler:             u32,
 	// The reflection probes (see Reflection_Probe_Reads): their records in the upload ring at this offset of its
 	// buffer, how many, 0 without them, their lists in the light clusters, their cube array and its mips, and the
 	// roughnesses between which they fade out over the global illumination's specular light.
@@ -308,24 +308,24 @@ MESH_RECORD_PAGED :: 16
 // sphere that they see, for a mesh with one (see docs/rendering/gpu-scene.md#impostors). A skinned entity has a record
 // of its own, whose previous_positions are last frame's posed positions.
 Mesh_Record :: struct {
-	positions:         u32,
-	attributes:        u32,
-	indices:           u32,
-	attribute_stride:  u32,
-	flags:             u32,
-	meshlets:          u32,
-	meshlet_vertices:  u32,
-	meshlet_triangles: u32,
-	impostor:          u32,
-	impostor_size:     u32,
-	meshlet_nodes:     u32,
+	positions:          u32,
+	attributes:         u32,
+	indices:            u32,
+	attribute_stride:   u32,
+	flags:              u32,
+	meshlets:           u32,
+	meshlet_vertices:   u32,
+	meshlet_triangles:  u32,
+	impostor:           u32,
+	impostor_size:      u32,
+	meshlet_nodes:      u32,
 	previous_positions: u32,
-	impostor_sphere:   [4]f32,
-	pages:             u32,
-	page_count:        u32,
+	impostor_sphere:    [4]f32,
+	pages:              u32,
+	page_count:         u32,
 	// Where the vertices start in positions and attributes, which only a shader sets, for a meshlet of a page.
-	positions_offset:  u32,
-	attributes_offset: u32,
+	positions_offset:   u32,
+	attributes_offset:  u32,
 }
 
 // Each group of the scatter pass has this many threads, and each thread copies 16 bytes of a record. Matches
@@ -409,24 +409,24 @@ IMPOSTOR_VERTICES :: 6
 // ITEM_IMPOSTOR or ITEM_HAS_IMPOSTOR has its mesh's sphere in lod_sphere and its impostor's error, which pick between
 // them.
 Cull_Item :: struct {
-	instance: u32,
-	mesh:     u32,
-	first:    u32,
-	count:    u32,
-	material: u32,
-	bin:      u32,
-	flags:    u32,
+	instance:       u32,
+	mesh:           u32,
+	first:          u32,
+	count:          u32,
+	material:       u32,
+	bin:            u32,
+	flags:          u32,
 	// The index of the submesh in its mesh, which the ID buffer gets (see ID_ENTITY_BITS).
-	submesh:  u32,
-	sphere:   [4]f32,
-	bound:    f32,
+	submesh:        u32,
+	sphere:         [4]f32,
+	bound:          f32,
 	impostor_error: f32,
 	// An ITEM_PARTICLES item's entry in Scene_Frame.mesh_particles, an ITEM_INSTANCED item's set in Scene_Frame.sets, or
 	// an ITEM_HIERARCHY item's first meshlet node.
-	entry:    u32,
+	entry:          u32,
 	// An ITEM_INSTANCED item's list of its set's instances, or an ITEM_HIERARCHY item's count of roots.
-	list:     u32,
-	lod_sphere: [4]f32,
+	list:           u32,
+	lod_sphere:     [4]f32,
 }
 
 // A view that draws only the items that cast shadows, and the view that draws only the view model's items, which every
@@ -444,14 +444,14 @@ VIEW_BAKED :: 64
 // Cull_View matches Cull_View in cull_draws.hlsl: a view's planes relative to the camera, the camera's offset from the
 // space of the view's instances, and its first draw.
 Cull_View :: struct {
-	planes:     [6][4]f32,
-	offset:     [4]f32,
-	first_draw: u32,
-	flags:      u32,
+	planes:        [6][4]f32,
+	offset:        [4]f32,
+	first_draw:    u32,
+	flags:         u32,
 	// A virtual shadow map's level, which culls against the pages that it draws (see virtual_page_fields): 0 for another
 	// view.
 	virtual_table: u32,
-	virtual_page: u32,
+	virtual_page:  u32,
 }
 
 // Cull_Constants matches Cull_Constants in cull_draws.hlsl.
@@ -601,77 +601,84 @@ Cell_Range :: struct {
 	first, count: u32,
 }
 
-#assert(size_of(Instance_Record) == 112 && size_of(Cull_Item) == 80 && size_of(Draw_Record) == 32 && size_of(Mesh_Record) == 80)
-#assert(size_of(Cull_View) == 128 && size_of(Frame_Constants) == 976 && size_of(Cull_Constants) == 144)
+#assert(
+	size_of(Instance_Record) == 112 &&
+	size_of(Cull_Item) == 80 &&
+	size_of(Draw_Record) == 32 &&
+	size_of(Mesh_Record) == 80,
+)
+#assert(
+	size_of(Cull_View) == 128 && size_of(Frame_Constants) == 976 && size_of(Cull_Constants) == 144,
+)
 #assert(size_of(Instance_Set_Record) == 112 && size_of(Instance_Cull_Constants) == 112)
 
 // Gpu_Scene is the GPU scene's state between frames, in the Renderer.
 Gpu_Scene :: struct {
-	origin:                   ecs.World_Position,
-	origin_set:               bool,
+	origin:                ecs.World_Position,
+	origin_set:            bool,
 	// The slot of each entity with a Mesh_Renderer, in host memory.
-	slots:                    map[ecs.Entity]u32,
-	slot_entities:            [MAX_INSTANCES]ecs.Entity,
+	slots:                 map[ecs.Entity]u32,
+	slot_entities:         [MAX_INSTANCES]ecs.Entity,
 	// Each slot's presented pose as of its last write, and the frame that last saw its entity.
-	previous:                 [MAX_INSTANCES]ecs.Transform,
-	seen:                     [MAX_INSTANCES]u64,
+	previous:              [MAX_INSTANCES]ecs.Transform,
+	seen:                  [MAX_INSTANCES]u64,
 	// What the persistent buffer holds, or will once this frame's copy runs, and the slots that it does not hold yet.
-	records:                  [MAX_INSTANCES]Instance_Record,
-	dirty:                    [MAX_INSTANCES / 64]u64,
+	records:               [MAX_INSTANCES]Instance_Record,
+	dirty:                 [MAX_INSTANCES / 64]u64,
 	// The world of the last frame. The versions of the last two frames' scans, of which the older is what this frame
 	// compares with: a chunk that stopped moving gets one more write, so that last frame's pose catches up.
-	world:                    ^ecs.World,
-	versions:                 [2]u64,
+	world:                 ^ecs.World,
+	versions:              [2]u64,
 	// The last alpha, and the frame that it changed.
-	alpha:                    f32,
-	alpha_frame:              u64,
+	alpha:                 f32,
+	alpha_frame:           u64,
 	// The last frame whose scatter into the persistent buffer ran. Any other frame's dirty slots were lost.
-	copied_frame:             u64,
+	copied_frame:          u64,
 	// The slots that this frame's upload covers.
-	uploaded_slots:           int,
+	uploaded_slots:        int,
 	// The pass that writes each changed record to its slot (scatter_instances.hlsl).
-	scatter_pipeline:         Shader_Pipeline,
-	free:                     [dynamic]u32,
+	scatter_pipeline:      Shader_Pipeline,
+	free:                  [dynamic]u32,
 	// Slots below this have been used.
-	high:                     u32,
-	frame:                    u64,
-	instances:                gpu.Buffer,
+	high:                  u32,
+	frame:                 u64,
+	instances:             gpu.Buffer,
 	// This frame's indirect draws, the mesh shader path's in a buffer of their own, and draw records, and each view's
 	// bins' counts, which grow with the frame's draws.
-	arguments:                gpu.Buffer,
-	mesh_arguments:           gpu.Buffer,
-	draws:                    gpu.Buffer,
-	counts:                   gpu.Buffer,
-	capacity:                 int,
-	count_capacity:           int,
-	cull_pipeline:            Shader_Pipeline,
+	arguments:             gpu.Buffer,
+	mesh_arguments:        gpu.Buffer,
+	draws:                 gpu.Buffer,
+	counts:                gpu.Buffer,
+	capacity:              int,
+	count_capacity:        int,
+	cull_pipeline:         Shader_Pipeline,
 	// The patch surfaces' selected patches and each surface's count, and the passes that select and cull them.
-	patches:                  gpu.Buffer,
-	patch_counts:             gpu.Buffer,
-	select_pipeline:          Shader_Pipeline,
-	cull_patches_pipeline:    Shader_Pipeline,
+	patches:               gpu.Buffer,
+	patch_counts:          gpu.Buffer,
+	select_pipeline:       Shader_Pipeline,
+	cull_patches_pipeline: Shader_Pipeline,
 	// What select meshlets picks each frame, and the pass (see meshlet_select.odin).
-	meshlet_select:           Meshlet_Select,
+	meshlet_select:        Meshlet_Select,
 	// The skinned entities' buffers and the pass that poses them (see skinning.odin).
-	skins:                    Skin_State,
+	skins:                 Skin_State,
 	// Each Instanced_Mesh_Renderer's slot's range of the instance sets' cells, the free ranges in order, and the end of
 	// the used ones.
-	slot_cells:               [MAX_INSTANCES]Cell_Range,
-	cell_free:                [dynamic]Cell_Range,
-	cell_high:                u32,
+	slot_cells:            [MAX_INSTANCES]Cell_Range,
+	cell_free:             [dynamic]Cell_Range,
+	cell_high:             u32,
 	// The cells' visibility bits in each view, which last from frame to frame while a slot keeps its range, the
 	// instance sets' counters, and the views' lists of visible instances, each grown as a frame needs.
-	instance_bits:            gpu.Buffer,
-	bits_cells:               u32,
-	bits_views:               u32,
-	instance_counters:        gpu.Buffer,
-	counter_capacity:         int,
-	visible_instances:        gpu.Buffer,
-	visible_capacity:         int,
-	instance_pipeline:        Shader_Pipeline,
-	occlusion:                Occlusion,
+	instance_bits:         gpu.Buffer,
+	bits_cells:            u32,
+	bits_views:            u32,
+	instance_counters:     gpu.Buffer,
+	counter_capacity:      int,
+	visible_instances:     gpu.Buffer,
+	visible_capacity:      int,
+	instance_pipeline:     Shader_Pipeline,
+	occlusion:             Occlusion,
 	// Which slots' shadows changed, for the shadow caches (see casters.odin).
-	casters:                  Caster_Tracking,
+	casters:               Caster_Tracking,
 }
 
 // Bin_Group is a range of the frame's bins: the opaque and masked materials', which the prepass, the shadow maps and
@@ -695,30 +702,30 @@ Bin_Filter :: enum u8 {
 // Scene_Frame is what one frame's GPU scene passes need, in frame memory.
 @(private)
 Scene_Frame :: struct {
-	items:           []Cull_Item,
+	items:              []Cull_Item,
 	// A material pipeline for each bin, and each bin's first draw and its count of items, within a view's draws.
-	bin_pipelines:   []int,
+	bin_pipelines:      []int,
 	// The pipeline that each bin draws with this frame: its own, or a substitute while its own compiles.
-	bin_draws:       []int,
+	bin_draws:          []int,
 	// The bins of impostors, which draw with their pipelines' impostor passes, and of mesh particles, which draw with
 	// vertex pulling.
-	bin_impostors:   []bool,
-	bin_particles:   []bool,
+	bin_impostors:      []bool,
+	bin_particles:      []bool,
 	// The bins of skinned entities, which draw with vertex pulling too.
-	bin_skinned:     []bool,
-	bin_offsets:     []u32,
-	bin_counts:      []u32,
+	bin_skinned:        []bool,
+	bin_offsets:        []u32,
+	bin_counts:         []u32,
 	// A texture of a material that the frame draws is not resident yet, so it samples its default.
-	waiting:         bool,
+	waiting:            bool,
 	// The draws of one view: the items, with each surface's reserved patches.
-	draws_per_view:  int,
+	draws_per_view:     int,
 	// The patch surfaces' records, and their upload.
-	surfaces:        []Surface_Record,
-	surface_upload:  gpu.Upload,
+	surfaces:           []Surface_Record,
+	surface_upload:     gpu.Upload,
 	// The particle ribbons, with their items, and their vertices once the ribbons' build writes them (see
 	// docs/rendering/particles.md#ribbons).
-	ribbons:         []Ribbon_Entry,
-	ribbon_vertices: Buffer,
+	ribbons:            []Ribbon_Entry,
+	ribbon_vertices:    Buffer,
 	// The mesh particles' items, and their instances once the particles' update writes them (see
 	// docs/rendering/particles.md#mesh-particles).
 	mesh_particles:     []Mesh_Particle_Entry,
@@ -736,53 +743,53 @@ Scene_Frame :: struct {
 	instance_counters:  Buffer,
 	visible_instances:  Buffer,
 	// Each group's first bin and the bin after its last.
-	groups:          [Bin_Group][2]int,
+	groups:             [Bin_Group][2]int,
 	// The camera, the view model, then each shadow view.
-	view_count:      int,
+	view_count:         int,
 	// With occlusion culling, the late view after them, and the views that have draws: the late view's too.
-	occluding:       bool,
-	late_view:       int,
-	draw_views:      int,
-	occlusion:       Occlusion_Frame,
+	occluding:          bool,
+	late_view:          int,
+	draw_views:         int,
+	occlusion:          Occlusion_Frame,
 	// The camera's tally (see Cull_Stats).
-	stats:           Buffer,
+	stats:              Buffer,
 	// The instance sets' counters this frame, in words, which update_scene zeroes.
-	counter_words:   int,
+	counter_words:      int,
 	// The frame's changed records, and the scatter pass's constants, which name them and their slots in the upload ring.
-	slot_count:      int,
-	scatter:         gpu.Upload,
-	item_upload:     gpu.Upload,
-	mesh_upload:     gpu.Upload,
-	table_upload:    gpu.Upload,
-	bin_upload:      gpu.Upload,
-	zero_upload:     gpu.Upload,
+	slot_count:         int,
+	scatter:            gpu.Upload,
+	item_upload:        gpu.Upload,
+	mesh_upload:        gpu.Upload,
+	table_upload:       gpu.Upload,
+	bin_upload:         gpu.Upload,
+	zero_upload:        gpu.Upload,
 	// Each view's Frame_Constants.
-	view_constants:  []gpu.Upload,
-	cull_constants:  gpu.Upload,
+	view_constants:     []gpu.Upload,
+	cull_constants:     gpu.Upload,
 	// The culling's constants for a virtual shadow map's levels, which run after the page table is written.
-	virtual_cull:    gpu.Upload,
+	virtual_cull:       gpu.Upload,
 	// With the ray scene, the acceleration structure's instance of each mesh instance that casts shadows or has a
 	// surface (see docs/rendering/ray-scene.md#ray-scene), the hit table's records of each slot and of their submeshes,
 	// and the bins that its submeshes use.
-	accel_instances: gpu.Upload,
-	accel_count:     int,
-	hit_instances:   gpu.Upload,
-	hit_submeshes:   gpu.Upload,
+	accel_instances:    gpu.Upload,
+	accel_count:        int,
+	hit_instances:      gpu.Upload,
+	hit_submeshes:      gpu.Upload,
 	hit_instance_count: int,
-	hit_bins:        []u32,
-	instances:       Buffer,
-	arguments:       Buffer,
-	mesh_arguments:  Buffer,
-	draws:           Buffer,
-	counts:          Buffer,
-	patches:         Buffer,
-	patch_counts:    Buffer,
-	meshlet_select:  Meshlet_Select_Frame,
+	hit_bins:           []u32,
+	instances:          Buffer,
+	arguments:          Buffer,
+	mesh_arguments:     Buffer,
+	draws:              Buffer,
+	counts:             Buffer,
+	patches:            Buffer,
+	patch_counts:       Buffer,
+	meshlet_select:     Meshlet_Select_Frame,
 	// The skinned entities' jobs this frame.
-	skin:            Skin_Frame,
+	skin:               Skin_Frame,
 	// The slots that the view draws live over its shadow caches, and its dynamic shadow distance (see casters.odin).
-	live:            ^Live_Slots,
-	dynamic_distance: f32,
+	live:               ^Live_Slots,
+	dynamic_distance:   f32,
 }
 
 scene_init :: proc(s: ^Gpu_Scene, platform: ^core.Platform_API) {
@@ -790,9 +797,26 @@ scene_init :: proc(s: ^Gpu_Scene, platform: ^core.Platform_API) {
 	s.frame = 1
 	s.slots = make(map[ecs.Entity]u32, platform.heap_allocator)
 	s.free = make([dynamic]u32, platform.heap_allocator)
-	s.instances = platform.gpu_create_buffer({size = MAX_INSTANCES * size_of(Instance_Record), usage = {.Storage}, label = "gpu scene instances"}, nil)
-	s.patches = platform.gpu_create_buffer({size = MAX_SURFACES * MAX_SURFACE_PATCHES * 4, usage = {.Storage}, label = "surface patches"}, nil)
-	s.patch_counts = platform.gpu_create_buffer({size = MAX_SURFACES * 4, usage = {.Storage}, label = "surface patch counts"}, nil)
+	s.instances = platform.gpu_create_buffer(
+		{
+			size = MAX_INSTANCES * size_of(Instance_Record),
+			usage = {.Storage},
+			label = "gpu scene instances",
+		},
+		nil,
+	)
+	s.patches = platform.gpu_create_buffer(
+		{
+			size = MAX_SURFACES * MAX_SURFACE_PATCHES * 4,
+			usage = {.Storage},
+			label = "surface patches",
+		},
+		nil,
+	)
+	s.patch_counts = platform.gpu_create_buffer(
+		{size = MAX_SURFACES * 4, usage = {.Storage}, label = "surface patch counts"},
+		nil,
+	)
 	s.cull_pipeline = shader_pipeline(CULL_SHADER)
 	s.scatter_pipeline = shader_pipeline(SCATTER_INSTANCES_SHADER)
 	s.select_pipeline = shader_pipeline(SELECT_PATCHES_SHADER)
@@ -855,7 +879,8 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32, skins: []Skin_Pose)
 		full = s.world != w || s.copied_frame != s.frame - 1
 		s.world = w
 		// The origin moves when the camera is far from it, and then every pose is written relative to the new one.
-		if !s.origin_set || max_abs(ecs.position_sub(f.view.position, s.origin)) > REBASE_CELLS * ORIGIN_CELL {
+		if !s.origin_set ||
+		   max_abs(ecs.position_sub(f.view.position, s.origin)) > REBASE_CELLS * ORIGIN_CELL {
 			s.origin, s.origin_set = snap_origin(f.view.position), true
 			full = true
 		}
@@ -872,14 +897,62 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32, skins: []Skin_Pose)
 			interpolating = s.frame - s.alpha_frame <= 1,
 		}
 	}
-	sync_compute_pipeline(&s.cull_pipeline, r.platform, r.residency.assets, {label = "cull draws"}, r.reloaded)
-	sync_compute_pipeline(&s.scatter_pipeline, r.platform, r.residency.assets, {label = "scatter instances"}, r.reloaded)
-	sync_compute_pipeline(&s.select_pipeline, r.platform, r.residency.assets, {label = "select patches"}, r.reloaded)
-	sync_compute_pipeline(&s.cull_patches_pipeline, r.platform, r.residency.assets, {label = "cull patches"}, r.reloaded)
-	sync_compute_pipeline(&s.instance_pipeline, r.platform, r.residency.assets, {label = "cull instances"}, r.reloaded)
-	sync_compute_pipeline(&s.occlusion.pipeline, r.platform, r.residency.assets, {label = "depth pyramid"}, r.reloaded)
-	sync_compute_pipeline(&s.meshlet_select.pipeline, r.platform, r.residency.assets, {label = "select meshlets"}, r.reloaded)
-	sync_compute_pipeline(&s.skins.pipeline, r.platform, r.residency.assets, {label = "skin meshes"}, r.reloaded)
+	sync_compute_pipeline(
+		&s.cull_pipeline,
+		r.platform,
+		r.residency.assets,
+		{label = "cull draws"},
+		r.reloaded,
+	)
+	sync_compute_pipeline(
+		&s.scatter_pipeline,
+		r.platform,
+		r.residency.assets,
+		{label = "scatter instances"},
+		r.reloaded,
+	)
+	sync_compute_pipeline(
+		&s.select_pipeline,
+		r.platform,
+		r.residency.assets,
+		{label = "select patches"},
+		r.reloaded,
+	)
+	sync_compute_pipeline(
+		&s.cull_patches_pipeline,
+		r.platform,
+		r.residency.assets,
+		{label = "cull patches"},
+		r.reloaded,
+	)
+	sync_compute_pipeline(
+		&s.instance_pipeline,
+		r.platform,
+		r.residency.assets,
+		{label = "cull instances"},
+		r.reloaded,
+	)
+	sync_compute_pipeline(
+		&s.occlusion.pipeline,
+		r.platform,
+		r.residency.assets,
+		{label = "depth pyramid"},
+		r.reloaded,
+	)
+	sync_compute_pipeline(
+		&s.meshlet_select.pipeline,
+		r.platform,
+		r.residency.assets,
+		{label = "select meshlets"},
+		r.reloaded,
+	)
+	sync_compute_pipeline(
+		&s.skins.pipeline,
+		r.platform,
+		r.residency.assets,
+		{label = "skin meshes"},
+		r.reloaded,
+	)
 
 	table := Material_Table {
 		uses  = make(map[format.Guid]Material_Use, r.platform.frame_allocator),
@@ -890,7 +963,10 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32, skins: []Skin_Pose)
 	items := make([dynamic]Cull_Item, r.platform.frame_allocator)
 	accel_instances := make([dynamic]gpu.Accel_Instance, r.platform.frame_allocator)
 	// An entity with a pose draws at rest until the skinning pipeline has compiled.
-	skin := skin_build(extra || pipeline_ready(r.platform, &s.skins.pipeline) ? skins : nil, r.platform.frame_allocator)
+	skin := skin_build(
+		extra || pipeline_ready(r.platform, &s.skins.pipeline) ? skins : nil,
+		r.platform.frame_allocator,
+	)
 	// Once a feature has traced, the meshes have acceleration structures, and hit shading needs the hit table.
 	tracing := r.residency.accels
 	hits: Hit_Table
@@ -923,7 +999,15 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32, skins: []Skin_Pose)
 				last := s.seen[slot] == s.frame - 1 ? s.previous[slot] : pose
 				// Relative to the camera, and last frame's relative to last frame's camera, so it changes without its chunk.
 				last_camera := f.state.previous.valid ? f.state.previous.position : f.view.position
-				scene_write_record(s, slot, {rows = pose_rows(pose, f.view.position), previous_rows = pose_rows(last, last_camera), id = entity_id(e)})
+				scene_write_record(
+					s,
+					slot,
+					{
+						rows = pose_rows(pose, f.view.position),
+						previous_rows = pose_rows(last, last_camera),
+						id = entity_id(e),
+					},
+				)
 				s.previous[slot], s.seen[slot] = pose, s.frame
 			} else if !extra {
 				scene_write_instance(s, w, e, slot, moved, i, current, previous)
@@ -932,9 +1016,24 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32, skins: []Skin_Pose)
 				continue
 			}
 			first_item := len(items)
-			mesh := add_items(r, &table, &meshes, &mesh_indices, &items, &skin, renderers[i], e, slot, view_model, extra)
+			mesh := add_items(
+				r,
+				&table,
+				&meshes,
+				&mesh_indices,
+				&items,
+				&skin,
+				renderers[i],
+				e,
+				slot,
+				view_model,
+				extra,
+			)
 			// A skinned entity's rays see its own structure, over its posed positions, which the ray scene refits.
-			skinned := mesh != nil && first_item < len(items) && items[first_item].flags & ITEM_SKINNED != 0
+			skinned :=
+				mesh != nil &&
+				first_item < len(items) &&
+				items[first_item].flags & ITEM_SKINNED != 0
 			blas := mesh != nil ? mesh.accel : {}
 			if skinned {
 				blas = s.skins.instances[slot].accel
@@ -942,12 +1041,29 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32, skins: []Skin_Pose)
 			// The view model's pose is not its place in the world, so rays do not see it.
 			if tracing && mesh != nil && blas != {} && !view_model {
 				mask: u8 = renderers[i].cast_shadows ? RAY_MASK_SHADOWS : 0
-				if add_hit_entries(&hits, slot, mesh, items[first_item:], r.materials.pipelines[:], hit_pipeline_ready, r.platform) {
+				if add_hit_entries(
+					&hits,
+					slot,
+					mesh,
+					items[first_item:],
+					r.materials.pipelines[:],
+					hit_pipeline_ready,
+					r.platform,
+				) {
 					mask |= RAY_MASK_SURFACES
 				}
 				if mask != 0 {
 					reference := r.platform.gpu_accel_reference(blas)
-					append(&accel_instances, gpu.accel_instance(s.records[slot].rows, reference, id = slot, mask = mask, flags = {.Force_Opaque}))
+					append(
+						&accel_instances,
+						gpu.accel_instance(
+							s.records[slot].rows,
+							reference,
+							id = slot,
+							mask = mask,
+							flags = {.Force_Opaque},
+						),
+					)
 					// The frame's own view refits the skinned structures, over the positions that it posed.
 					if skinned && !extra {
 						append(&skin.refits, Skin_Refit{slot = slot, indices = mesh.indices})
@@ -980,7 +1096,19 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32, skins: []Skin_Pose)
 			if is_hidden(hidden, e) {
 				continue
 			}
-			set_instances += add_instanced_items(r, &table, &meshes, &mesh_indices, &items, &sets, &set_bounds, &jobs, renderers[i], slot, extra)
+			set_instances += add_instanced_items(
+				r,
+				&table,
+				&meshes,
+				&mesh_indices,
+				&items,
+				&sets,
+				&set_bounds,
+				&jobs,
+				renderers[i],
+				slot,
+				extra,
+			)
 		}
 	}
 	// The patch surfaces: an instance record as a mesh's, and one item each, whose draws the GPU adds (see
@@ -1006,7 +1134,17 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32, skins: []Skin_Pose)
 			if is_hidden(hidden, e) || len(surfaces) >= MAX_SURFACES {
 				continue
 			}
-			add_surface(r, &table, &items, &surfaces, renderers[i], slot, s.records[slot].rows, camera_offset, lod)
+			add_surface(
+				r,
+				&table,
+				&items,
+				&surfaces,
+				renderers[i],
+				slot,
+				s.records[slot].rows,
+				camera_offset,
+				lod,
+			)
 		}
 	}
 	// The particle ribbons: a slot each, at their systems' anchors, and an item each, whose draw the GPU writes.
@@ -1027,7 +1165,14 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32, skins: []Skin_Pose)
 			}
 		}
 		// The slots' shadows, before the items are sorted into bins, while each one's bin is its pipeline.
-		bounds := caster_bounds(s.records[:s.high], items[:], r.materials.pipelines[:], set_bounds[:], s.high, r.platform.frame_allocator)
+		bounds := caster_bounds(
+			s.records[:s.high],
+			items[:],
+			r.materials.pipelines[:],
+			set_bounds[:],
+			s.high,
+			r.platform.frame_allocator,
+		)
 		track_casters(&s.casters, bounds, s.origin, s.frame)
 	}
 	// The view draws its dynamic casters within its distance live, over its shadow caches.
@@ -1035,7 +1180,9 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32, skins: []Skin_Pose)
 	sf.live = new(Live_Slots, r.platform.frame_allocator)
 	sf.live^ = live_slots(&s.casters, s.high, f.view.position, sf.dynamic_distance)
 	for &item in items {
-		if item.flags & ITEM_CASTS_SHADOWS != 0 && item.instance < s.high && slot_live(sf.live, item.instance) {
+		if item.flags & ITEM_CASTS_SHADOWS != 0 &&
+		   item.instance < s.high &&
+		   slot_live(sf.live, item.instance) {
 			item.flags |= ITEM_LIVE
 		}
 	}
@@ -1052,12 +1199,16 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32, skins: []Skin_Pose)
 	orthographic := is_orthographic(f.view)
 	sorting := make([]Sort_Item, len(items), r.platform.frame_allocator)
 	for item, i in items {
-		sorting[i] = {item = item, group = material_group(&r.materials.pipelines[item.bin])}
+		sorting[i] = {
+			item  = item,
+			group = material_group(&r.materials.pipelines[item.bin]),
+		}
 		if sorting[i].group == .Sorted {
 			// The view model's instances are relative to the camera already.
 			eye := item.flags & ITEM_VIEW_MODEL != 0 ? [3]f32{} : camera
 			// An orthographic view sorts by the depth along its axis, which is what covers what in it.
-			sorting[i].distance = orthographic ? depth_along(s.records[item.instance].rows, item.sphere.xyz, eye, forward) : squared_distance(s.records[item.instance].rows, item.sphere.xyz, eye)
+			sorting[i].distance =
+				orthographic ? depth_along(s.records[item.instance].rows, item.sphere.xyz, eye, forward) : squared_distance(s.records[item.instance].rows, item.sphere.xyz, eye)
 		}
 	}
 	sf.bin_pipelines, sf.groups = sort_bins(sorting, items[:], r.platform.frame_allocator)
@@ -1067,7 +1218,11 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32, skins: []Skin_Pose)
 	sf.bin_particles = bin_particles(items[:], len(sf.bin_pipelines), r.platform.frame_allocator)
 	sf.bin_skinned = bin_skinned(items[:], len(sf.bin_pipelines), r.platform.frame_allocator)
 	sf.items = items[:]
-	sf.bin_counts, sf.bin_offsets, sf.draws_per_view = bin_sizes(items[:], len(sf.bin_pipelines), r.platform.frame_allocator)
+	sf.bin_counts, sf.bin_offsets, sf.draws_per_view = bin_sizes(
+		items[:],
+		len(sf.bin_pipelines),
+		r.platform.frame_allocator,
+	)
 	// The surfaces' records name their items, now that the bins' order is the items'.
 	for item, i in items {
 		if item.flags & ITEM_SURFACE != 0 {
@@ -1081,7 +1236,12 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32, skins: []Skin_Pose)
 		}
 	}
 	sf.ribbons, sf.mesh_particles = ribbons, mesh_particles
-	sf.meshlet_select.items = meshlet_select_items(r, items[:], f.no_meshlet_hierarchy, r.platform.frame_allocator)
+	sf.meshlet_select.items = meshlet_select_items(
+		r,
+		items[:],
+		f.no_meshlet_hierarchy,
+		r.platform.frame_allocator,
+	)
 
 	platform := r.platform
 	// The frame's own view uploads the records that changed, each with its slot. An extra view uploads none.
@@ -1101,8 +1261,14 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32, skins: []Skin_Pose)
 	hits_ok := true
 	if tracing {
 		instances_ok, submeshes_ok: bool
-		hit_instance_upload, instances_ok = upload_bytes(platform, slice.to_bytes(hits.instances[:s.high]))
-		hit_submesh_upload, submeshes_ok = upload_bytes(platform, slice.to_bytes(hits.submeshes[:]))
+		hit_instance_upload, instances_ok = upload_bytes(
+			platform,
+			slice.to_bytes(hits.instances[:s.high]),
+		)
+		hit_submesh_upload, submeshes_ok = upload_bytes(
+			platform,
+			slice.to_bytes(hits.submeshes[:]),
+		)
 		hits_ok = instances_ok && submeshes_ok
 	}
 	surface_upload, surfaces_ok := upload_bytes(platform, slice.to_bytes(surfaces[:]))
@@ -1113,16 +1279,28 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32, skins: []Skin_Pose)
 	if extra {
 		sf.skin.slots = skin.slots[:]
 	}
-	if !(ok && items_ok && meshes_ok && table_ok && bins_ok && accel_ok && hits_ok && surfaces_ok && sets_ok && jobs_ok && skin_ok) {
+	if !(ok &&
+		   items_ok &&
+		   meshes_ok &&
+		   table_ok &&
+		   bins_ok &&
+		   accel_ok &&
+		   hits_ok &&
+		   surfaces_ok &&
+		   sets_ok &&
+		   jobs_ok &&
+		   skin_ok) {
 		log.error("render: the upload ring is full, so the frame draws no meshes")
 		sf.items = nil
 		return
 	}
-	sf.item_upload, sf.mesh_upload, sf.table_upload, sf.bin_upload = item_upload, mesh_upload, table_upload, bin_upload
+	sf.item_upload, sf.mesh_upload, sf.table_upload, sf.bin_upload =
+		item_upload, mesh_upload, table_upload, bin_upload
 	sf.surfaces, sf.surface_upload = surfaces[:], surface_upload
 	sf.accel_instances, sf.accel_count = accel_upload, len(accel_instances)
 	if tracing {
-		sf.hit_instances, sf.hit_submeshes, sf.hit_instance_count = hit_instance_upload, hit_submesh_upload, int(s.high)
+		sf.hit_instances, sf.hit_submeshes, sf.hit_instance_count =
+			hit_instance_upload, hit_submesh_upload, int(s.high)
 		// The fallback's bin is always dispatched: a hit of a submesh that has no record takes it too.
 		bins := make([dynamic]u32, r.platform.frame_allocator)
 		for used, bin in hits.used {
@@ -1132,7 +1310,8 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32, skins: []Skin_Pose)
 		}
 		sf.hit_bins = bins[:]
 	}
-	sf.sets, sf.set_upload, sf.job_upload, sf.job_count, sf.set_instances = sets[:], set_upload, job_upload, len(jobs), set_instances
+	sf.sets, sf.set_upload, sf.job_upload, sf.job_count, sf.set_instances =
+		sets[:], set_upload, job_upload, len(jobs), set_instances
 }
 
 // Sort_Item is a draw item as build_scene sorts it into bins. Its item's bin is its material pipeline.
@@ -1150,7 +1329,14 @@ Sort_Item :: struct {
 // (ITEM_BIN_KINDS), then a bin for each sorted item, the farthest first. The items of a bin keep their order. A frame has tens of thousands of items, which
 // a counting sort by their bins orders in one pass, and few sorted items, which sort by their distance.
 @(private)
-sort_bins :: proc(sorting: []Sort_Item, items: []Cull_Item, allocator := context.allocator) -> (pipelines: []int, groups: [Bin_Group][2]int) {
+sort_bins :: proc(
+	sorting: []Sort_Item,
+	items: []Cull_Item,
+	allocator := context.allocator,
+) -> (
+	pipelines: []int,
+	groups: [Bin_Group][2]int,
+) {
 	// The kinds of bin that a pipeline has in a group: its own items', its impostors', its mesh particles' and its skinned
 	// entities'.
 	KINDS :: 4
@@ -1201,7 +1387,11 @@ sort_bins :: proc(sorting: []Sort_Item, items: []Cull_Item, allocator := context
 		pipeline := int(entry.item.bin)
 		previous := sorting[order[max(i - 1, 0)]]
 		kind := entry.item.flags & ITEM_BIN_KINDS != previous.item.flags & ITEM_BIN_KINDS
-		if i == 0 || entry.group == .Sorted || entry.group != previous.group || pipeline != int(previous.item.bin) || kind {
+		if i == 0 ||
+		   entry.group == .Sorted ||
+		   entry.group != previous.group ||
+		   pipeline != int(previous.item.bin) ||
+		   kind {
 			append(&bins, pipeline)
 			group_bins[entry.group] += 1
 		}
@@ -1274,7 +1464,14 @@ depth_along :: proc(rows: [3][4]f32, p: [3]f32, from: [3]f32, direction: [3]f32)
 
 // upload_bytes copies data into the upload ring.
 @(private)
-upload_bytes :: proc(platform: ^core.Platform_API, data: []byte, align := 16) -> (u: gpu.Upload, ok: bool) {
+upload_bytes :: proc(
+	platform: ^core.Platform_API,
+	data: []byte,
+	align := 16,
+) -> (
+	u: gpu.Upload,
+	ok: bool,
+) {
 	u = platform.gpu_upload(max(len(data), 16), align) or_return
 	copy(u.data, data)
 	return u, true
@@ -1330,13 +1527,30 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 	sf.draw_views = sf.view_count + (sf.occluding ? 1 : 0)
 	ok: bool
 	if has_items {
-		ensure_draw_buffers(r, sf.draws_per_view * sf.draw_views, len(sf.bin_pipelines) * sf.draw_views)
+		ensure_draw_buffers(
+			r,
+			sf.draws_per_view * sf.draw_views,
+			len(sf.bin_pipelines) * sf.draw_views,
+		)
 		if len(sf.sets) > 0 {
 			sf.counter_words = 3 * len(sf.sets) * sf.draw_views * INSTANCE_LISTS + 1
-			ensure_instance_buffers(r, sf.draw_views, sf.counter_words, min(sf.set_instances * sf.draw_views, MAX_VISIBLE_INSTANCES))
+			ensure_instance_buffers(
+				r,
+				sf.draw_views,
+				sf.counter_words,
+				min(sf.set_instances * sf.draw_views, MAX_VISIBLE_INSTANCES),
+			)
 		}
 		// The zeros clear the bins' counts, the instance sets' counters and this frame's slots' bits.
-		zeros := make([]byte, max(len(sf.bin_pipelines) * sf.draw_views * 4, sf.counter_words * 4, MAX_INSTANCES / 8), platform.frame_allocator)
+		zeros := make(
+			[]byte,
+			max(
+				len(sf.bin_pipelines) * sf.draw_views * 4,
+				sf.counter_words * 4,
+				MAX_INSTANCES / 8,
+			),
+			platform.frame_allocator,
+		)
 		sf.zero_upload, ok = upload_bytes(platform, zeros)
 		if !ok {
 			sf.items = nil
@@ -1425,7 +1639,8 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 		virtual_constants(&constants, f)
 	}
 	if f.fog != nil {
-		constants.fog, constants.fog_sampler, constants.fog_scale = 1, gpu.sampler_index(r.post.sampler), f.fog.scale
+		constants.fog, constants.fog_sampler, constants.fog_scale =
+			1, gpu.sampler_index(r.post.sampler), f.fog.scale
 		constants.fog_slices = f.fog.grid.z
 	}
 	if f.sky != nil && f.sky.has_aerial {
@@ -1508,7 +1723,10 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 			c.cull_eye = shadows.eyes[shadow]
 		}
 		c.planes = views[v].planes
-		sf.view_constants[v], ok = platform.gpu_upload(size_of(Frame_Constants), gpu.PASS_CONSTANTS_ALIGN)
+		sf.view_constants[v], ok = platform.gpu_upload(
+			size_of(Frame_Constants),
+			gpu.PASS_CONSTANTS_ALIGN,
+		)
 		if !ok {
 			sf.items = nil
 			return
@@ -1573,11 +1791,15 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 			sf.items = nil
 			return
 		}
-		cull.occlusion, cull.occlusion_offset = gpu.read_index(sf.occlusion.constants.buffer), sf.occlusion.constants.offset
+		cull.occlusion, cull.occlusion_offset =
+			gpu.read_index(sf.occlusion.constants.buffer), sf.occlusion.constants.offset
 		// The late view's constants are the camera's, with the occlusion constants for its meshlets.
 		late := (^Frame_Constants)(raw_data(sf.view_constants[VIEW_CAMERA].data))^
 		late.occlusion, late.occlusion_offset = cull.occlusion + 1, cull.occlusion_offset
-		sf.view_constants[sf.late_view], ok = platform.gpu_upload(size_of(Frame_Constants), gpu.PASS_CONSTANTS_ALIGN)
+		sf.view_constants[sf.late_view], ok = platform.gpu_upload(
+			size_of(Frame_Constants),
+			gpu.PASS_CONSTANTS_ALIGN,
+		)
 		if !ok {
 			sf.items = nil
 			return
@@ -1610,7 +1832,10 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 	if shadows.virtual.count > 0 && has_items {
 		levels := cull
 		levels.view_first, levels.view_skip = FIRST_SHADOW_VIEW, 0
-		sf.virtual_cull, ok = platform.gpu_upload(size_of(Cull_Constants), gpu.PASS_CONSTANTS_ALIGN)
+		sf.virtual_cull, ok = platform.gpu_upload(
+			size_of(Cull_Constants),
+			gpu.PASS_CONSTANTS_ALIGN,
+		)
 		if !ok {
 			sf.items = nil
 			return
@@ -1620,7 +1845,10 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 	if sf.occluding {
 		late := cull
 		late.view_first, late.view_skip = u32(sf.late_view), 0
-		sf.occlusion.late_cull, ok = platform.gpu_upload(size_of(Cull_Constants), gpu.PASS_CONSTANTS_ALIGN)
+		sf.occlusion.late_cull, ok = platform.gpu_upload(
+			size_of(Cull_Constants),
+			gpu.PASS_CONSTANTS_ALIGN,
+		)
 		if !ok {
 			sf.items = nil
 			return
@@ -1726,7 +1954,11 @@ Pose_Change :: struct {
 // chunk_poses_changed is true if the presented poses of a chunk may differ from what its slots hold, by its Transform
 // and Previous_Transform, the first two terms of the renderers' queries.
 @(private)
-chunk_poses_changed :: proc "contextless" (view: ecs.Chunk_View, change: Pose_Change, has_previous: bool) -> bool {
+chunk_poses_changed :: proc "contextless" (
+	view: ecs.Chunk_View,
+	change: Pose_Change,
+	has_previous: bool,
+) -> bool {
 	return(
 		ecs.changed_since(view, 0, change.since) ||
 		ecs.changed_since(view, 1, change.since) ||
@@ -1737,7 +1969,16 @@ chunk_poses_changed :: proc "contextless" (view: ecs.Chunk_View, change: Pose_Ch
 // scene_write_instance writes the record of a row of a chunk, if its pose may have changed or its slot is new, and says
 // that the slot's entity is still there.
 @(private)
-scene_write_instance :: proc(s: ^Gpu_Scene, w: ^ecs.World, e: ecs.Entity, slot: u32, moved: bool, i: int, current: []ecs.Transform, previous: []ecs.Previous_Transform) {
+scene_write_instance :: proc(
+	s: ^Gpu_Scene,
+	w: ^ecs.World,
+	e: ecs.Entity,
+	slot: u32,
+	moved: bool,
+	i: int,
+	current: []ecs.Transform,
+	previous: []ecs.Previous_Transform,
+) {
 	if moved || s.seen[slot] != s.frame - 1 {
 		pose := current[i]
 		if previous != nil {
@@ -1747,7 +1988,16 @@ scene_write_instance :: proc(s: ^Gpu_Scene, w: ^ecs.World, e: ecs.Entity, slot: 
 		if s.seen[slot] == s.frame - 1 && last != pose {
 			caster_moved(&s.casters, slot, s.frame)
 		}
-		scene_write_record(s, slot, {rows = pose_rows(pose, s.origin), previous_rows = pose_rows(last, s.origin), id = entity_id(e), instance_set = s.records[slot].instance_set})
+		scene_write_record(
+			s,
+			slot,
+			{
+				rows = pose_rows(pose, s.origin),
+				previous_rows = pose_rows(last, s.origin),
+				id = entity_id(e),
+				instance_set = s.records[slot].instance_set,
+			},
+		)
 		s.previous[slot] = pose
 	}
 	s.seen[slot] = s.frame
@@ -1765,7 +2015,12 @@ scene_write_record :: proc "contextless" (s: ^Gpu_Scene, slot: u32, record: Inst
 // dirty_slots gives the slots whose records go to the persistent buffer: all of them below high with full, or the dirty
 // ones, in order.
 @(private)
-dirty_slots :: proc(dirty: ^[MAX_INSTANCES / 64]u64, high: u32, full: bool, allocator := context.allocator) -> []u32 {
+dirty_slots :: proc(
+	dirty: ^[MAX_INSTANCES / 64]u64,
+	high: u32,
+	full: bool,
+	allocator := context.allocator,
+) -> []u32 {
 	slots := make([dynamic]u32, allocator)
 	for word: u32 = 0; word * 64 < high; word += 1 {
 		bits := full ? ~u64(0) : dirty[word]
@@ -1891,7 +2146,8 @@ free_cells :: proc(s: ^Gpu_Scene, slot: u32) {
 		}
 	}
 	inject_at(&s.cell_free, at, cells)
-	if at + 1 < len(s.cell_free) && s.cell_free[at].first + s.cell_free[at].count == s.cell_free[at + 1].first {
+	if at + 1 < len(s.cell_free) &&
+	   s.cell_free[at].first + s.cell_free[at].count == s.cell_free[at + 1].first {
 		s.cell_free[at].count += s.cell_free[at + 1].count
 		ordered_remove(&s.cell_free, at + 1)
 	}
@@ -1956,7 +2212,8 @@ add_instanced_items :: proc(
 		material := renderer.materials[s] if s < MAX_MATERIAL_SLOTS else {}
 		use := use_material(r, table, material) or_continue
 		// A material that draws patches or ribbons draws no mesh: the default material stands in.
-		if r.materials.pipelines[use.pipeline].patches || r.materials.pipelines[use.pipeline].ribbon {
+		if r.materials.pipelines[use.pipeline].patches ||
+		   r.materials.pipelines[use.pipeline].ribbon {
 			use = use_material(r, table, {}) or_continue
 		}
 		pipeline := &r.materials.pipelines[use.pipeline]
@@ -2003,7 +2260,8 @@ add_instanced_items :: proc(
 			if mesh_path {
 				first := mesh.level_first[s][bucket] if s < MAX_SUBMESHES else 0
 				level.flags |= ITEM_MESH_PATH
-				level.first, level.count = submesh.first_meshlet + first, submesh.meshlet_count - first
+				level.first, level.count =
+					submesh.first_meshlet + first, submesh.meshlet_count - first
 			}
 			append(items, level)
 		}
@@ -2025,18 +2283,21 @@ add_instanced_items :: proc(
 		}
 	}
 	m := mesh.bounds
-	append(sets, Instance_Set_Record {
-		instances      = gpu.read_index(set.instances),
-		cells          = gpu.read_index(set.cells),
-		first_cell     = cells.first,
-		first_job      = u32(len(jobs)),
-		slot           = slot,
-		flags          = set_flags,
-		bound          = bound,
-		impostor_error = mesh.impostor_error,
-		sphere         = {m.center.x, m.center.y, m.center.z, m.radius},
-		levels         = mesh.levels,
-	})
+	append(
+		sets,
+		Instance_Set_Record {
+			instances = gpu.read_index(set.instances),
+			cells = gpu.read_index(set.cells),
+			first_cell = cells.first,
+			first_job = u32(len(jobs)),
+			slot = slot,
+			flags = set_flags,
+			bound = bound,
+			impostor_error = mesh.impostor_error,
+			sphere = {m.center.x, m.center.y, m.center.z, m.radius},
+			levels = mesh.levels,
+		},
+	)
 	append(set_bounds, Set_Bounds{set.center, set.radius, set.max_scale})
 	for _ in 0 ..< set.cell_count {
 		append(jobs, index)
@@ -2078,7 +2339,8 @@ add_items :: proc(
 	skinned := false
 	if pose != nil && extra {
 		// The buffers that the frame's own view posed this frame. An entity that it did not pose draws at rest.
-		if instance, posed := skin_posed(&r.scene.skins, r.scene.frame, slot, entity, mesh); posed {
+		if instance, posed := skin_posed(&r.scene.skins, r.scene.frame, slot, entity, mesh);
+		   posed {
 			skinned = true
 			mesh_index = u32(len(meshes))
 			append(meshes, skinned_mesh_record(mesh, instance))
@@ -2121,12 +2383,15 @@ add_items :: proc(
 			continue
 		}
 		// A material that draws patches or ribbons draws no mesh: the default material stands in.
-		if r.materials.pipelines[use.pipeline].patches || r.materials.pipelines[use.pipeline].ribbon {
+		if r.materials.pipelines[use.pipeline].patches ||
+		   r.materials.pipelines[use.pipeline].ribbon {
 			use = use_material(r, table, {}) or_continue
 		}
 		// The view model casts no shadows: its pose is not its place in the world.
 		flags: u32 = view_model ? ITEM_VIEW_MODEL : 0
-		if renderer.cast_shadows && r.materials.pipelines[use.pipeline].cast_shadows && !view_model {
+		if renderer.cast_shadows &&
+		   r.materials.pipelines[use.pipeline].cast_shadows &&
+		   !view_model {
 			flags |= ITEM_CASTS_SHADOWS
 		}
 		// The opaque draws of a material with mesh pipelines draw meshlets, except a skinned entity's, whose posed vertices
@@ -2175,7 +2440,11 @@ add_items :: proc(
 			item.entry, item.list = submesh.first_node, submesh.root_count
 		}
 		// The view model is near the camera, where its impostor never draws.
-		if mesh.impostor != {} && pipeline.impostor_path && material_group(pipeline) == .Opaque && !view_model && !skinned {
+		if mesh.impostor != {} &&
+		   pipeline.impostor_path &&
+		   material_group(pipeline) == .Opaque &&
+		   !view_model &&
+		   !skinned {
 			m := mesh.bounds
 			item.flags |= ITEM_HAS_IMPOSTOR
 			item.lod_sphere = {m.center.x, m.center.y, m.center.z, m.radius}
@@ -2234,7 +2503,12 @@ mesh_record :: proc(mesh: ^Resident_Mesh) -> Mesh_Record {
 		impostor = mesh.impostor != {} ? gpu.read_index(mesh.impostor) : 0,
 		impostor_size = mesh.impostor_size,
 		meshlet_nodes = mesh.meshlet_nodes != {} ? gpu.read_index(mesh.meshlet_nodes) : 0,
-		impostor_sphere = {mesh.bounds.center.x, mesh.bounds.center.y, mesh.bounds.center.z, mesh.bounds.radius},
+		impostor_sphere = {
+			mesh.bounds.center.x,
+			mesh.bounds.center.y,
+			mesh.bounds.center.z,
+			mesh.bounds.radius,
+		},
 	}
 }
 
@@ -2252,9 +2526,14 @@ LOD_FLAT_NEAR :: 1e9
 lod_scale :: proc(view: View, height: u32, error_pixels: f32) -> (scale, near: f32) {
 	switch p in view.projection {
 	case Perspective:
-		return 0.5 * f32(height) / math.tan(p.vertical_fov * 0.5) / max(error_pixels, MIN_LOD_ERROR), p.near
+		return 0.5 *
+			f32(height) /
+			math.tan(p.vertical_fov * 0.5) /
+			max(error_pixels, MIN_LOD_ERROR),
+			p.near
 	case Orthographic:
-		return LOD_FLAT_NEAR * f32(height) / p.height / max(error_pixels, MIN_LOD_ERROR), LOD_FLAT_NEAR
+		return LOD_FLAT_NEAR * f32(height) / p.height / max(error_pixels, MIN_LOD_ERROR),
+			LOD_FLAT_NEAR
 	}
 	return
 }
@@ -2269,14 +2548,42 @@ ensure_draw_buffers :: proc(r: ^Renderer, draws, counts: int) {
 		platform.gpu_destroy_buffer(s.mesh_arguments)
 		platform.gpu_destroy_buffer(s.draws)
 		s.capacity = max(draws, s.capacity * 2, 256)
-		s.arguments = platform.gpu_create_buffer({size = u32(s.capacity * size_of(gpu.Draw_Indirect_Args)), usage = {.Storage, .Indirect}, label = "draw arguments"}, nil)
-		s.mesh_arguments = platform.gpu_create_buffer({size = u32(s.capacity * size_of(gpu.Draw_Mesh_Indirect_Args)), usage = {.Storage, .Indirect}, label = "mesh draw arguments"}, nil)
-		s.draws = platform.gpu_create_buffer({size = u32(s.capacity * size_of(Draw_Record)), usage = {.Storage}, label = "draw records"}, nil)
+		s.arguments = platform.gpu_create_buffer(
+			{
+				size = u32(s.capacity * size_of(gpu.Draw_Indirect_Args)),
+				usage = {.Storage, .Indirect},
+				label = "draw arguments",
+			},
+			nil,
+		)
+		s.mesh_arguments = platform.gpu_create_buffer(
+			{
+				size = u32(s.capacity * size_of(gpu.Draw_Mesh_Indirect_Args)),
+				usage = {.Storage, .Indirect},
+				label = "mesh draw arguments",
+			},
+			nil,
+		)
+		s.draws = platform.gpu_create_buffer(
+			{
+				size = u32(s.capacity * size_of(Draw_Record)),
+				usage = {.Storage},
+				label = "draw records",
+			},
+			nil,
+		)
 	}
 	if counts > s.count_capacity || s.counts == {} {
 		platform.gpu_destroy_buffer(s.counts)
 		s.count_capacity = max(counts, s.count_capacity * 2, 64)
-		s.counts = platform.gpu_create_buffer({size = u32(s.count_capacity * 4), usage = {.Storage, .Indirect}, label = "draw counts"}, nil)
+		s.counts = platform.gpu_create_buffer(
+			{
+				size = u32(s.count_capacity * 4),
+				usage = {.Storage, .Indirect},
+				label = "draw counts",
+			},
+			nil,
+		)
 	}
 }
 
@@ -2290,17 +2597,30 @@ ensure_instance_buffers :: proc(r: ^Renderer, views, counters, visible: int) {
 		platform.gpu_destroy_buffer(s.instance_bits)
 		s.bits_cells = min(max(s.cell_high, s.bits_cells * 2, 1024), MAX_INSTANCE_CELLS)
 		s.bits_views = max(u32(views), s.bits_views)
-		s.instance_bits = platform.gpu_create_buffer({size = s.bits_cells * s.bits_views * INSTANCE_BITS_SIZE, usage = {.Storage}, label = "instance bits"}, nil)
+		s.instance_bits = platform.gpu_create_buffer(
+			{
+				size = s.bits_cells * s.bits_views * INSTANCE_BITS_SIZE,
+				usage = {.Storage},
+				label = "instance bits",
+			},
+			nil,
+		)
 	}
 	if counters > s.counter_capacity || s.instance_counters == {} {
 		platform.gpu_destroy_buffer(s.instance_counters)
 		s.counter_capacity = max(counters, s.counter_capacity * 2, 256)
-		s.instance_counters = platform.gpu_create_buffer({size = u32(s.counter_capacity * 4), usage = {.Storage}, label = "instance counters"}, nil)
+		s.instance_counters = platform.gpu_create_buffer(
+			{size = u32(s.counter_capacity * 4), usage = {.Storage}, label = "instance counters"},
+			nil,
+		)
 	}
 	if visible > s.visible_capacity || s.visible_instances == {} {
 		platform.gpu_destroy_buffer(s.visible_instances)
 		s.visible_capacity = min(max(visible, s.visible_capacity * 2, 1024), MAX_VISIBLE_INSTANCES)
-		s.visible_instances = platform.gpu_create_buffer({size = u32(s.visible_capacity * 4), usage = {.Storage}, label = "visible instances"}, nil)
+		s.visible_instances = platform.gpu_create_buffer(
+			{size = u32(s.visible_capacity * 4), usage = {.Storage}, label = "visible instances"},
+			nil,
+		)
 	}
 }
 
@@ -2351,7 +2671,10 @@ instance_constants :: proc(f: ^Frame, views: gpu.Upload, cull: Cull_Constants) -
 		for &u, phase in phases {
 			c.phase = u32(phase)
 			ok: bool
-			u, ok = f.renderer.platform.gpu_upload(size_of(Instance_Cull_Constants), gpu.PASS_CONSTANTS_ALIGN)
+			u, ok = f.renderer.platform.gpu_upload(
+				size_of(Instance_Cull_Constants),
+				gpu.PASS_CONSTANTS_ALIGN,
+			)
 			if !ok {
 				return false
 			}
@@ -2401,7 +2724,11 @@ add_virtual_instance_passes :: proc(f: ^Frame, table: Buffer) {
 INSTANCE_PASS_NAMES := [Instance_Views][3]string {
 	.Early   = {"cull instances", "place instances", "list instances"},
 	.Late    = {"cull late instances", "place late instances", "list late instances"},
-	.Virtual = {"cull virtual shadow instances", "place virtual shadow instances", "list virtual shadow instances"},
+	.Virtual = {
+		"cull virtual shadow instances",
+		"place virtual shadow instances",
+		"list virtual shadow instances",
+	},
 }
 
 @(private = "file")
@@ -2410,7 +2737,12 @@ add_instance_phases :: proc(f: ^Frame, views: Instance_Views, table: Buffer = 0)
 	g := f.graph
 	alloc := f.renderer.platform.frame_allocator
 	names := INSTANCE_PASS_NAMES[views]
-	p := add_compute_pass(g, names[INSTANCE_PHASE_CULL], run_instance_phase, new_clone(Instance_Step{f, INSTANCE_PHASE_CULL, views}, alloc))
+	p := add_compute_pass(
+		g,
+		names[INSTANCE_PHASE_CULL],
+		run_instance_phase,
+		new_clone(Instance_Step{f, INSTANCE_PHASE_CULL, views}, alloc),
+	)
 	read(g, p, sf.instances)
 	write(g, p, sf.instance_bits)
 	write(g, p, sf.instance_counters)
@@ -2428,9 +2760,19 @@ add_instance_phases :: proc(f: ^Frame, views: Instance_Views, table: Buffer = 0)
 	if sf.stats != 0 {
 		write(g, p, sf.stats)
 	}
-	p = add_compute_pass(g, names[INSTANCE_PHASE_PLACE], run_instance_phase, new_clone(Instance_Step{f, INSTANCE_PHASE_PLACE, views}, alloc))
+	p = add_compute_pass(
+		g,
+		names[INSTANCE_PHASE_PLACE],
+		run_instance_phase,
+		new_clone(Instance_Step{f, INSTANCE_PHASE_PLACE, views}, alloc),
+	)
 	write(g, p, sf.instance_counters)
-	p = add_compute_pass(g, names[INSTANCE_PHASE_LIST], run_instance_phase, new_clone(Instance_Step{f, INSTANCE_PHASE_LIST, views}, alloc))
+	p = add_compute_pass(
+		g,
+		names[INSTANCE_PHASE_LIST],
+		run_instance_phase,
+		new_clone(Instance_Step{f, INSTANCE_PHASE_LIST, views}, alloc),
+	)
 	write(g, p, sf.instance_bits)
 	write(g, p, sf.instance_counters)
 	write(g, p, sf.visible_instances)
@@ -2467,11 +2809,22 @@ run_instance_phase :: proc(ctx: ^Pass_Context) {
 	gpu.cmd_set_pipeline(ctx.cb, pipeline)
 	gpu.cmd_set_pass_constants(ctx.cb, sf.instance_constants[step.views][step.phase])
 	if step.phase == INSTANCE_PHASE_PLACE {
-		gpu.cmd_dispatch(ctx.cb, {u32(len(sf.sets) * rows * INSTANCE_LISTS + format.INSTANCE_CELL_SIZE - 1) / format.INSTANCE_CELL_SIZE, 1, 1})
+		gpu.cmd_dispatch(
+			ctx.cb,
+			{
+				u32(len(sf.sets) * rows * INSTANCE_LISTS + format.INSTANCE_CELL_SIZE - 1) /
+				format.INSTANCE_CELL_SIZE,
+				1,
+				1,
+			},
+		)
 		return
 	}
 	jobs := u32(sf.job_count)
-	gpu.cmd_dispatch(ctx.cb, {min(jobs, INSTANCE_JOB_ROW), (jobs + INSTANCE_JOB_ROW - 1) / INSTANCE_JOB_ROW, u32(rows)})
+	gpu.cmd_dispatch(
+		ctx.cb,
+		{min(jobs, INSTANCE_JOB_ROW), (jobs + INSTANCE_JOB_ROW - 1) / INSTANCE_JOB_ROW, u32(rows)},
+	)
 }
 
 // frustum_planes are the planes of a view's frustum, relative to the camera, from its projection: left, right, bottom
@@ -2495,7 +2848,15 @@ scatter_instances :: proc(ctx: ^Pass_Context) {
 	}
 	gpu.cmd_set_pipeline(ctx.cb, pipeline)
 	gpu.cmd_set_pass_constants(ctx.cb, sf.scatter)
-	gpu.cmd_dispatch(ctx.cb, {u32(sf.slot_count * SCATTER_RECORD_QUADS + SCATTER_GROUP_SIZE - 1) / SCATTER_GROUP_SIZE, 1, 1})
+	gpu.cmd_dispatch(
+		ctx.cb,
+		{
+			u32(sf.slot_count * SCATTER_RECORD_QUADS + SCATTER_GROUP_SIZE - 1) /
+			SCATTER_GROUP_SIZE,
+			1,
+			1,
+		},
+	)
 	f.renderer.scene.copied_frame = f.renderer.scene.frame
 }
 
@@ -2509,19 +2870,54 @@ update_scene :: proc(ctx: ^Pass_Context) {
 	if sf.slot_count == 0 && !f.extra {
 		f.renderer.scene.copied_frame = f.renderer.scene.frame
 	}
-	gpu.cmd_copy_buffer(ctx.cb, sf.zero_upload.buffer, sf.zero_upload.offset, gpu_buffer(g, sf.counts), 0, u32(len(sf.bin_pipelines) * sf.draw_views * 4))
+	gpu.cmd_copy_buffer(
+		ctx.cb,
+		sf.zero_upload.buffer,
+		sf.zero_upload.offset,
+		gpu_buffer(g, sf.counts),
+		0,
+		u32(len(sf.bin_pipelines) * sf.draw_views * 4),
+	)
 	if sf.counter_words > 0 {
-		gpu.cmd_copy_buffer(ctx.cb, sf.zero_upload.buffer, sf.zero_upload.offset, gpu_buffer(g, sf.instance_counters), 0, u32(sf.counter_words * 4))
+		gpu.cmd_copy_buffer(
+			ctx.cb,
+			sf.zero_upload.buffer,
+			sf.zero_upload.offset,
+			gpu_buffer(g, sf.instance_counters),
+			0,
+			u32(sf.counter_words * 4),
+		)
 	}
 	if sf.occluding {
-		gpu.cmd_copy_buffer(ctx.cb, sf.zero_upload.buffer, sf.zero_upload.offset, gpu_buffer(g, sf.occlusion.slot_seen_next), 0, MAX_INSTANCES / 8)
+		gpu.cmd_copy_buffer(
+			ctx.cb,
+			sf.zero_upload.buffer,
+			sf.zero_upload.offset,
+			gpu_buffer(g, sf.occlusion.slot_seen_next),
+			0,
+			MAX_INSTANCES / 8,
+		)
 	}
 	if sf.stats != 0 {
-		gpu.cmd_copy_buffer(ctx.cb, sf.zero_upload.buffer, sf.zero_upload.offset, gpu_buffer(g, sf.stats), 0, CULL_STATS_WORDS * 4)
+		gpu.cmd_copy_buffer(
+			ctx.cb,
+			sf.zero_upload.buffer,
+			sf.zero_upload.offset,
+			gpu_buffer(g, sf.stats),
+			0,
+			CULL_STATS_WORDS * 4,
+		)
 	}
 	// The counter of the selected meshlets' list.
 	if sf.meshlet_select.selections != 0 {
-		gpu.cmd_copy_buffer(ctx.cb, sf.zero_upload.buffer, sf.zero_upload.offset, gpu_buffer(g, sf.meshlet_select.selections), 0, 4)
+		gpu.cmd_copy_buffer(
+			ctx.cb,
+			sf.zero_upload.buffer,
+			sf.zero_upload.offset,
+			gpu_buffer(g, sf.meshlet_select.selections),
+			0,
+			4,
+		)
 	}
 }
 
@@ -2535,7 +2931,14 @@ cull_draws :: proc(ctx: ^Pass_Context) {
 	}
 	gpu.cmd_set_pipeline(ctx.cb, pipeline)
 	gpu.cmd_set_pass_constants(ctx.cb, sf.cull_constants)
-	gpu.cmd_dispatch(ctx.cb, {u32(len(sf.items) + CULL_GROUP_SIZE - 1) / CULL_GROUP_SIZE, u32(sf.view_count - f.shadows.virtual.count), 1})
+	gpu.cmd_dispatch(
+		ctx.cb,
+		{
+			u32(len(sf.items) + CULL_GROUP_SIZE - 1) / CULL_GROUP_SIZE,
+			u32(sf.view_count - f.shadows.virtual.count),
+			1,
+		},
+	)
 }
 
 // draw_scene_view draws each bin of a view's group with one indirect draw, with its material's pipeline for a pass (see
@@ -2545,13 +2948,21 @@ cull_draws :: proc(ctx: ^Pass_Context) {
 // the view model's stencil bit as the reference: set for the view model, clear for the world (see
 // docs/rendering/layers-and-output.md#view-model). filter leaves out the mesh particles' bins, or draws only them.
 @(private)
-draw_scene_view :: proc(f: ^Frame, cb: ^gpu.Command_Buffer, view: int, pass: format.Material_Pass, group := Bin_Group.Opaque, filter := Bin_Filter.All) {
+draw_scene_view :: proc(
+	f: ^Frame,
+	cb: ^gpu.Command_Buffer,
+	view: int,
+	pass: format.Material_Pass,
+	group := Bin_Group.Opaque,
+	filter := Bin_Filter.All,
+) {
 	sf := f.scene_frame
 	if sf == nil || len(sf.items) == 0 || view >= sf.draw_views {
 		return
 	}
 	g := f.graph
-	arguments, mesh_arguments, counts := gpu_buffer(g, sf.arguments), gpu_buffer(g, sf.mesh_arguments), gpu_buffer(g, sf.counts)
+	arguments, mesh_arguments, counts :=
+		gpu_buffer(g, sf.arguments), gpu_buffer(g, sf.mesh_arguments), gpu_buffer(g, sf.counts)
 	pushes := pass == .Forward || pass == .Transparent
 	push: Material_Push
 	if pushes {
@@ -2580,7 +2991,12 @@ draw_scene_view :: proc(f: ^Frame, cb: ^gpu.Command_Buffer, view: int, pass: for
 		if impostors && pass == .Voxelize {
 			continue
 		}
-		mesh_path := f.renderer.materials.pipelines[sf.bin_pipelines[bin]].mesh_path && group == .Opaque && !impostors && !sf.bin_particles[bin] && !sf.bin_skinned[bin]
+		mesh_path :=
+			f.renderer.materials.pipelines[sf.bin_pipelines[bin]].mesh_path &&
+			group == .Opaque &&
+			!impostors &&
+			!sf.bin_particles[bin] &&
+			!sf.bin_skinned[bin]
 		if mesh_path {
 			pipelines[1] = p.meshes[pass]
 		}
@@ -2599,9 +3015,23 @@ draw_scene_view :: proc(f: ^Frame, cb: ^gpu.Command_Buffer, view: int, pass: for
 			}
 			count_offset := u32(view * bin_count + bin) * 4
 			if mesh_path {
-				gpu.cmd_draw_mesh_indirect(cb, mesh_arguments, first * size_of(gpu.Draw_Mesh_Indirect_Args), sf.bin_counts[bin], counts, count_offset)
+				gpu.cmd_draw_mesh_indirect(
+					cb,
+					mesh_arguments,
+					first * size_of(gpu.Draw_Mesh_Indirect_Args),
+					sf.bin_counts[bin],
+					counts,
+					count_offset,
+				)
 			} else {
-				gpu.cmd_draw_indirect(cb, arguments, first * size_of(gpu.Draw_Indirect_Args), sf.bin_counts[bin], counts, count_offset)
+				gpu.cmd_draw_indirect(
+					cb,
+					arguments,
+					first * size_of(gpu.Draw_Indirect_Args),
+					sf.bin_counts[bin],
+					counts,
+					count_offset,
+				)
 			}
 		}
 	}
@@ -2615,7 +3045,16 @@ material_push :: proc(f: ^Frame, pass: format.Material_Pass, group: Bin_Group) -
 	g := f.graph
 	white := gpu.read_index(f.renderer.materials.defaults[.White])
 	black := gpu.read_index(f.renderer.materials.defaults[.Black])
-	push := Material_Push{shadow_atlas = white, shadow_mask = white, ambient_occlusion = white, fog = white, gi_diffuse = white, gi_specular = white, reflections = black, aerial = white}
+	push := Material_Push {
+		shadow_atlas      = white,
+		shadow_mask       = white,
+		ambient_occlusion = white,
+		fog               = white,
+		gi_diffuse        = white,
+		gi_specular       = white,
+		reflections       = black,
+		aerial            = white,
+	}
 	if f.gi_diffuse != 0 {
 		push.gi_diffuse = gpu.read_index(gpu_texture(g, f.gi_diffuse))
 		push.gi_specular = gpu.read_index(gpu_texture(g, f.gi_specular))

@@ -123,7 +123,12 @@ Nav_Detail :: struct {
 	triangle_count: u32,
 }
 
-#assert(size_of(Nav_Polygon) == 32 && size_of(Nav_Link) == 8 && size_of(Nav_Detail) == 16 && size_of(Nav_Tile) == 72)
+#assert(
+	size_of(Nav_Polygon) == 32 &&
+	size_of(Nav_Link) == 8 &&
+	size_of(Nav_Detail) == 16 &&
+	size_of(Nav_Tile) == 72,
+)
 
 nav_mesh_layout :: proc() -> u64 {
 	return(
@@ -139,12 +144,18 @@ nav_mesh_layout :: proc() -> u64 {
 // tiles are its grid, that the tiles' runs of polygons follow each other, and that every index points into its run.
 nav_mesh_view :: proc(data: []byte) -> (blob: ^Nav_Mesh_Blob, ok: bool) {
 	header := blob_header(data) or_return
-	if header.kind != .Nav_Mesh || header.layout != nav_mesh_layout() || len(data) < size_of(Nav_Mesh_Blob) {
+	if header.kind != .Nav_Mesh ||
+	   header.layout != nav_mesh_layout() ||
+	   len(data) < size_of(Nav_Mesh_Blob) {
 		return
 	}
 	blob = (^Nav_Mesh_Blob)(raw_data(data))
 	stream :: proc(data: []byte, s: Slice, size, align: int) -> bool {
-		return u64(s.offset) + u64(s.size) <= u64(len(data)) && int(s.size) % size == 0 && int(s.offset) % align == 0
+		return(
+			u64(s.offset) + u64(s.size) <= u64(len(data)) &&
+			int(s.size) % size == 0 &&
+			int(s.offset) % align == 0 \
+		)
 	}
 	if !stream(data, blob.agent, 1, 1) ||
 	   !stream(data, blob.tiles, size_of(Nav_Tile), align_of(Nav_Tile)) ||
@@ -177,7 +188,8 @@ nav_mesh_view :: proc(data: []byte) -> (blob: ^Nav_Mesh_Blob, ok: bool) {
 			return nil, false
 		}
 		next_polygon += tile.polygon_count
-		if tile.x != u32(i) % max(blob.tiles_x, 1) || tile.z != u32(i) / max(blob.tiles_x, 1) ||
+		if tile.x != u32(i) % max(blob.tiles_x, 1) ||
+		   tile.z != u32(i) / max(blob.tiles_x, 1) ||
 		   !inside(tile.first_vertex, tile.vertex_count, vertex_total) ||
 		   !inside(tile.first_polygon, tile.polygon_count, u64(len(polygons))) ||
 		   !inside(tile.first_detail_vertex, tile.detail_vertex_count, detail_vertex_total) ||
@@ -185,7 +197,8 @@ nav_mesh_view :: proc(data: []byte) -> (blob: ^Nav_Mesh_Blob, ok: bool) {
 			return nil, false
 		}
 		for &p, j in polygons[tile.first_polygon:][:tile.polygon_count] {
-			if p.vertex_count < 3 || p.vertex_count > NAV_MAX_POLYGON_VERTICES ||
+			if p.vertex_count < 3 ||
+			   p.vertex_count > NAV_MAX_POLYGON_VERTICES ||
 			   !inside(p.first_link, u32(p.link_count), u64(len(links))) {
 				return nil, false
 			}
@@ -193,12 +206,16 @@ nav_mesh_view :: proc(data: []byte) -> (blob: ^Nav_Mesh_Blob, ok: bool) {
 				n := p.neighbors[k]
 				if u32(p.vertices[k]) >= tile.vertex_count ||
 				   (n != NAV_NONE && n & NAV_EXTERNAL == 0 && u32(n) >= tile.polygon_count) ||
-				   (n != NAV_NONE && n & NAV_EXTERNAL != 0 && n & ~u16(NAV_EXTERNAL) > u16(max(Nav_Side))) {
+				   (n != NAV_NONE &&
+						   n & NAV_EXTERNAL != 0 &&
+						   n & ~u16(NAV_EXTERNAL) > u16(max(Nav_Side))) {
 					return nil, false
 				}
 			}
 			for l in links[p.first_link:][:p.link_count] {
-				if u64(l.polygon) >= u64(len(polygons)) || l.edge >= p.vertex_count || l.t_min > l.t_max {
+				if u64(l.polygon) >= u64(len(polygons)) ||
+				   l.edge >= p.vertex_count ||
+				   l.t_min > l.t_max {
 					return nil, false
 				}
 			}
@@ -208,7 +225,9 @@ nav_mesh_view :: proc(data: []byte) -> (blob: ^Nav_Mesh_Blob, ok: bool) {
 				return nil, false
 			}
 			for t in triangles[tile.first_detail_triangle + d.first_triangle:][:d.triangle_count] {
-				if u32(t[0]) >= d.vertex_count || u32(t[1]) >= d.vertex_count || u32(t[2]) >= d.vertex_count {
+				if u32(t[0]) >= d.vertex_count ||
+				   u32(t[1]) >= d.vertex_count ||
+				   u32(t[2]) >= d.vertex_count {
 					return nil, false
 				}
 			}
@@ -296,7 +315,13 @@ nav_mesh_write :: proc(contents: Nav_Mesh_Contents, allocator := context.allocat
 	detail_triangles := put(&buffer, contents.detail_triangles)
 	agent := append_bytes(&buffer, transmute([]byte)contents.agent.name)
 	blob := Nav_Mesh_Blob {
-		header = {magic = BLOB_MAGIC, kind = .Nav_Mesh, layout = nav_mesh_layout(), key = contents.key, guid = contents.guid},
+		header = {
+			magic = BLOB_MAGIC,
+			kind = .Nav_Mesh,
+			layout = nav_mesh_layout(),
+			key = contents.key,
+			guid = contents.guid,
+		},
 		anchor = contents.anchor,
 		volume = contents.volume,
 		bounds_min = contents.bounds_min,

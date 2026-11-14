@@ -162,16 +162,23 @@ Ffx_Dispatch_Desc_Upscale :: struct {
 }
 
 #assert(size_of(Ffx_Resource) == 48 && size_of(Ffx_Create_Context_Desc_Upscale) == 48)
-#assert(offset_of(Ffx_Dispatch_Desc_Upscale, jitter_offset) == 360 && size_of(Ffx_Dispatch_Desc_Upscale) == 432)
+#assert(
+	offset_of(Ffx_Dispatch_Desc_Upscale, jitter_offset) == 360 &&
+	size_of(Ffx_Dispatch_Desc_Upscale) == 432,
+)
 
-Ffx_Create_Context :: #type proc "c" (ctx: ^Ffx_Context, desc: ^Ffx_Header, allocation_callbacks: rawptr) -> u32
+Ffx_Create_Context :: #type proc "c" (
+	ctx: ^Ffx_Context,
+	desc: ^Ffx_Header,
+	allocation_callbacks: rawptr,
+) -> u32
 Ffx_Destroy_Context :: #type proc "c" (ctx: ^Ffx_Context, allocation_callbacks: rawptr) -> u32
 Ffx_Query :: #type proc "c" (ctx: ^Ffx_Context, desc: ^Ffx_Header) -> u32
 Ffx_Dispatch :: #type proc "c" (ctx: ^Ffx_Context, desc: ^Ffx_Header) -> u32
 
 // Ffx_Api is the loader's entry points, all nil when it is missing.
 Ffx_Api :: struct {
-	module:         rawptr,
+	module:          rawptr,
 	create_context:  Ffx_Create_Context,
 	destroy_context: Ffx_Destroy_Context,
 	query:           Ffx_Query,

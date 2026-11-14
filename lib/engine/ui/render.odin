@@ -36,9 +36,18 @@ Ui_Pass :: struct {
 // sync_pipelines creates the UI's pipeline from its shader, and again when the cooker compiles the shader again. The
 // game calls it each frame with its own, and with force after a code reload.
 sync_pipelines :: proc(s: ^State, force := false) {
-	render.sync_graphics_pipeline(&s.pipeline, s.platform, s.assets, {.Vertex, .Pixel}, UI_PIPELINE, force)
+	render.sync_graphics_pipeline(
+		&s.pipeline,
+		s.platform,
+		s.assets,
+		{.Vertex, .Pixel},
+		UI_PIPELINE,
+		force,
+	)
 	if s.sampler == {} {
-		s.sampler = s.platform.gpu_create_sampler({filter = .Linear, mip_filter = .Linear, address = .Clamp, label = "ui"})
+		s.sampler = s.platform.gpu_create_sampler(
+			{filter = .Linear, mip_filter = .Linear, address = .Clamp, label = "ui"},
+		)
 	}
 }
 

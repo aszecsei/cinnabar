@@ -35,7 +35,14 @@ impostor_basis :: proc(direction: [3]f32) -> (right, up: [3]f32) {
 // the frame's viewer at its middle, with its first UV set, its depth, its submesh, and its normal and tangent in the
 // mesh's space. A face seen from behind gives its normal flipped, as a two-sided material shades it. size is a
 // frame's side in texels.
-bake_impostor :: proc(vertices: []Vertex, indices: []c.uint, submeshes: []format.Submesh_Entry, sphere: format.Mesh_Bounds, size: int, allocator := context.allocator) -> []format.Impostor_Texel {
+bake_impostor :: proc(
+	vertices: []Vertex,
+	indices: []c.uint,
+	submeshes: []format.Submesh_Entry,
+	sphere: format.Mesh_Bounds,
+	size: int,
+	allocator := context.allocator,
+) -> []format.Impostor_Texel {
 	frames := format.IMPOSTOR_FRAMES
 	texels := make([]format.Impostor_Texel, frames * frames * size * size, allocator)
 	depths := make([]f32, size * size, context.temp_allocator)
@@ -48,7 +55,11 @@ bake_impostor :: proc(vertices: []Vertex, indices: []c.uint, submeshes: []format
 			// x and y in texels, from the frame's top left, and the depth toward the viewer.
 			for v, i in vertices {
 				p := (v.position - sphere.center) / radius
-				screen[i] = {(linalg.dot(p, right) * 0.5 + 0.5) * f32(size), (0.5 - linalg.dot(p, up) * 0.5) * f32(size), linalg.dot(p, direction)}
+				screen[i] = {
+					(linalg.dot(p, right) * 0.5 + 0.5) * f32(size),
+					(0.5 - linalg.dot(p, up) * 0.5) * f32(size),
+					linalg.dot(p, direction),
+				}
 			}
 			frame := texels[(fy * frames + fx) * size * size:][:size * size]
 			for &d in depths {
@@ -68,7 +79,15 @@ bake_impostor :: proc(vertices: []Vertex, indices: []c.uint, submeshes: []format
 // raster_triangle writes a triangle's texels that are nearer than the frame's own, at the middles of the texels that
 // it covers. Front faces are clockwise on the frame, whose y points down.
 @(private = "file")
-raster_triangle :: proc(frame: []format.Impostor_Texel, depths: []f32, size: int, screen: [][3]f32, vertices: []Vertex, corners: [3]u32, owner: int) {
+raster_triangle :: proc(
+	frame: []format.Impostor_Texel,
+	depths: []f32,
+	size: int,
+	screen: [][3]f32,
+	vertices: []Vertex,
+	corners: [3]u32,
+	owner: int,
+) {
 	a, b, c := screen[corners[0]], screen[corners[1]], screen[corners[2]]
 	area := (b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y)
 	if abs(area) < 1e-12 {
@@ -97,7 +116,9 @@ raster_triangle :: proc(frame: []format.Impostor_Texel, depths: []f32, size: int
 			}
 			depths[i] = depth
 			normal := linalg.normalize0(wa * va.normal + wb * vb.normal + wc * vc.normal)
-			tangent := linalg.normalize0(wa * va.tangent.xyz + wb * vb.tangent.xyz + wc * vc.tangent.xyz)
+			tangent := linalg.normalize0(
+				wa * va.tangent.xyz + wb * vb.tangent.xyz + wc * vc.tangent.xyz,
+			)
 			if back {
 				normal = -normal
 			}
@@ -119,7 +140,10 @@ raster_triangle :: proc(frame: []format.Impostor_Texel, depths: []f32, size: int
 
 @(private = "file")
 snorm16_pair :: proc(p: [2]f32) -> [2]i16le {
-	return {i16le(math.round(clamp(p.x, -1, 1) * 32767)), i16le(math.round(clamp(p.y, -1, 1) * 32767))}
+	return {
+		i16le(math.round(clamp(p.x, -1, 1) * 32767)),
+		i16le(math.round(clamp(p.y, -1, 1) * 32767)),
+	}
 }
 
 // impostor_error is how far an impostor may be from its mesh, in meters: the larger of the error of the mesh's

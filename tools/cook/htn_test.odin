@@ -25,7 +25,9 @@ HTN_HEAD :: "decision 1\ntechnique = htn\nblackboard = $" + HTN_BOARD_GUID + "\n
 // A guard: attack a target that it sees, closing in first unless it is near; arm itself when it is not armed; and
 // otherwise patrol.
 @(private = "file")
-GUARD :: HTN_HEAD + `keys = armed, near, sees, ammo
+GUARD ::
+	HTN_HEAD +
+	`keys = armed, near, sees, ammo
 root = 1
 max_plan = 6
 
@@ -79,13 +81,22 @@ htn_keys :: proc(t: ^testing.T) -> []format.Blackboard_Key_Contents {
 // counts.
 @(test)
 an_htn_decision_cooks :: proc(t: ^testing.T) {
-	contents, problems := decision_parse(GUARD, htn_keys(t), TECHNIQUE_READERS, context.temp_allocator)
+	contents, problems := decision_parse(
+		GUARD,
+		htn_keys(t),
+		TECHNIQUE_READERS,
+		context.temp_allocator,
+	)
 	testing.expectf(t, len(problems) == 0, "problems: %v", problems)
 	if len(problems) > 0 {
 		return
 	}
 	h := format.htn_data(contents.technique_data)
-	if h.header == nil || len(h.tasks) != 2 || len(h.methods) != 5 || len(h.actions) != 5 || len(h.subtasks) != 7 {
+	if h.header == nil ||
+	   len(h.tasks) != 2 ||
+	   len(h.methods) != 5 ||
+	   len(h.actions) != 5 ||
+	   len(h.subtasks) != 7 {
 		testing.expect(t, false, "the data's counts")
 		return
 	}
@@ -109,12 +120,17 @@ an_htn_decision_cooks :: proc(t: ^testing.T) {
 	testing.expect_value(t, aim.first_method, 3)
 	testing.expect_value(t, aim.method_count, 2)
 
-	attack, arm, patrol, near, close := h.methods[0], h.methods[1], h.methods[2], h.methods[3], h.methods[4]
+	attack, arm, patrol, near, close :=
+		h.methods[0], h.methods[1], h.methods[2], h.methods[3], h.methods[4]
 	testing.expect_value(t, id(contents, attack.node), 2)
 	testing.expect(t, contents.nodes[attack.node].condition != format.DECISION_NONE)
 	testing.expect_value(t, attack.test_count, 2)
 	testing.expect_value(t, h.tests[attack.first_test], format.Plan_Test{key = 2, lo = 1, hi = 1})
-	testing.expect_value(t, h.tests[attack.first_test + 1], format.Plan_Test{key = 3, lo = 1, hi = MAX})
+	testing.expect_value(
+		t,
+		h.tests[attack.first_test + 1],
+		format.Plan_Test{key = 3, lo = 1, hi = MAX},
+	)
 	testing.expect_value(t, attack.subtask_count, 2)
 	testing.expect_value(t, h.subtasks[attack.first_subtask], format.Htn_Subtask{.Task, 1})
 	testing.expect_value(t, h.subtasks[attack.first_subtask + 1], format.Htn_Subtask{.Action, 0})
@@ -130,14 +146,27 @@ an_htn_decision_cooks :: proc(t: ^testing.T) {
 	testing.expect_value(t, h.subtasks[close.first_subtask], format.Htn_Subtask{.Action, 4})
 	testing.expect_value(t, h.subtasks[close.first_subtask + 1], format.Htn_Subtask{.Action, 3})
 
-	strike, pick_up, walk, point, move := h.actions[0], h.actions[1], h.actions[2], h.actions[3], h.actions[4]
+	strike, pick_up, walk, point, move :=
+		h.actions[0], h.actions[1], h.actions[2], h.actions[3], h.actions[4]
 	testing.expect_value(t, id(contents, strike.node), 10)
 	testing.expect_value(t, contents.nodes[strike.node].write_count, 1)
 	testing.expect_value(t, strike.test_count, 2)
-	testing.expect_value(t, h.effects[strike.first_effect], format.Plan_Effect{key = 3, op = .Add, value = -1})
+	testing.expect_value(
+		t,
+		h.effects[strike.first_effect],
+		format.Plan_Effect{key = 3, op = .Add, value = -1},
+	)
 	testing.expect_value(t, pick_up.effect_count, 2)
-	testing.expect_value(t, h.effects[pick_up.first_effect], format.Plan_Effect{key = 0, op = .Set, value = 1})
-	testing.expect_value(t, h.effects[pick_up.first_effect + 1], format.Plan_Effect{key = 3, op = .Add, value = 6})
+	testing.expect_value(
+		t,
+		h.effects[pick_up.first_effect],
+		format.Plan_Effect{key = 0, op = .Set, value = 1},
+	)
+	testing.expect_value(
+		t,
+		h.effects[pick_up.first_effect + 1],
+		format.Plan_Effect{key = 3, op = .Add, value = 6},
+	)
 	testing.expect_value(t, id(contents, walk.node), 12)
 	testing.expect_value(t, walk.effect_count, 0)
 	testing.expect_value(t, id(contents, point.node), 13)
@@ -154,8 +183,15 @@ an_htn_decision_cooks :: proc(t: ^testing.T) {
 // The settings' defaults, a decision without planning keys, and a task that recurses through its methods.
 @(test)
 htn_settings_have_defaults :: proc(t: ^testing.T) {
-	text := HTN_HEAD + "root = 1\nnode 1 task\n\tmethods = 2\nnode 2 method\n\tsubtasks = 3, 1\nnode 3 action\n\taction = a\n"
-	contents, problems := decision_parse(text, htn_keys(t), TECHNIQUE_READERS, context.temp_allocator)
+	text :=
+		HTN_HEAD +
+		"root = 1\nnode 1 task\n\tmethods = 2\nnode 2 method\n\tsubtasks = 3, 1\nnode 3 action\n\taction = a\n"
+	contents, problems := decision_parse(
+		text,
+		htn_keys(t),
+		TECHNIQUE_READERS,
+		context.temp_allocator,
+	)
 	testing.expectf(t, len(problems) == 0, "problems: %v", problems)
 	h := format.htn_data(contents.technique_data)
 	if h.header == nil {
@@ -164,7 +200,11 @@ htn_settings_have_defaults :: proc(t: ^testing.T) {
 	testing.expect_value(t, h.header.max_plan, HTN_DEFAULT_MAX_PLAN)
 	testing.expect_value(t, len(h.keys), 0)
 	testing.expect_value(t, h.subtasks[1], format.Htn_Subtask{.Task, 0})
-	testing.expect_value(t, contents.state_size, u32(format.htn_state(0, 1, 1, HTN_DEFAULT_MAX_PLAN).size))
+	testing.expect_value(
+		t,
+		contents.state_size,
+		u32(format.htn_state(0, 1, 1, HTN_DEFAULT_MAX_PLAN).size),
+	)
 }
 
 @(test)
@@ -209,8 +249,22 @@ htn_problems_have_their_lines :: proc(t: ^testing.T) {
 		{KEYS + ROOT + TASK + METHOD + ACTION + "node 4 method\n\tsubtasks = 3\n", 12},
 		{KEYS + ROOT + TASK + METHOD + ACTION + "node 4 task\n\tmethods = 2\n", 13},
 		{KEYS + ROOT + TASK + METHOD + ACTION + "node 4 action\n\taction = b\n", 12},
-		{KEYS + ROOT + TASK + "node 2 method\n\tpreconditions = health > 2\n\tsubtasks = 3\n" + ACTION, 9},
-		{KEYS + ROOT + TASK + "node 2 method\n\tpreconditions = ammo > 3 and ammo < 2\n\tsubtasks = 3\n" + ACTION, 9},
+		{
+			KEYS +
+			ROOT +
+			TASK +
+			"node 2 method\n\tpreconditions = health > 2\n\tsubtasks = 3\n" +
+			ACTION,
+			9,
+		},
+		{
+			KEYS +
+			ROOT +
+			TASK +
+			"node 2 method\n\tpreconditions = ammo > 3 and ammo < 2\n\tsubtasks = 3\n" +
+			ACTION,
+			9,
+		},
 		{KEYS + ROOT + TASK + METHOD + ACTION + "\tcost = 2\n", 12},
 		{KEYS + ROOT + TASK + METHOD + ACTION + "\teffects = armed += 1\n", 12},
 		{KEYS + ROOT + TASK + METHOD + ACTION + "\teffects = mood = furious\n", 12},
@@ -218,8 +272,19 @@ htn_problems_have_their_lines :: proc(t: ^testing.T) {
 	}
 	keys := htn_keys(t)
 	for c in cases {
-		_, problems := decision_parse(strings.concatenate({HTN_HEAD, c.text}, context.temp_allocator), keys, TECHNIQUE_READERS, context.temp_allocator)
-		testing.expectf(t, len(problems) > 0 && problems[0].line == c.line, "%q: %v", c.text, problems)
+		_, problems := decision_parse(
+			strings.concatenate({HTN_HEAD, c.text}, context.temp_allocator),
+			keys,
+			TECHNIQUE_READERS,
+			context.temp_allocator,
+		)
+		testing.expectf(
+			t,
+			len(problems) > 0 && problems[0].line == c.line,
+			"%q: %v",
+			c.text,
+			problems,
+		)
 	}
 }
 
@@ -250,5 +315,14 @@ htn_decisions_cook_to_blobs_that_fit_their_blackboards :: proc(t: ^testing.T) {
 	testing.expect_value(t, blob.technique, format.Decision_Technique.Htn)
 	testing.expect_value(t, blob.state_size, 784)
 	testing.expect(t, format.decision_check(data, blob, board_data, board))
-	testing.expect(t, format.htn_check(format.decision_technique_data(data, blob), data, blob, board_data, board))
+	testing.expect(
+		t,
+		format.htn_check(
+			format.decision_technique_data(data, blob),
+			data,
+			blob,
+			board_data,
+			board,
+		),
+	)
 }

@@ -42,7 +42,14 @@ Uploads :: struct {
 @(private)
 init_uploads :: proc() -> bool {
 	for &batch in dev.upload_batches {
-		check(dev.device->CreateCommandAllocator(.DIRECT, d3d.ICommandAllocator_UUID, (^rawptr)(&batch.allocator)), "CreateCommandAllocator") or_return
+		check(
+			dev.device->CreateCommandAllocator(
+				.DIRECT,
+				d3d.ICommandAllocator_UUID,
+				(^rawptr)(&batch.allocator),
+			),
+			"CreateCommandAllocator",
+		) or_return
 	}
 	dev.upload_list = create_command_list(dev.upload_batches[0].allocator) or_return
 	return true
@@ -90,7 +97,8 @@ upload :: proc(size, align: int) -> (gpu.Upload, bool) {
 			return {}, false
 		}
 		if _, ok := sync.atomic_compare_exchange_weak(&ring.offset, offset, start + size); ok {
-			return {data = ring.mapped[start:][:size], buffer = ring.buffer, offset = u32(start)}, true
+			return {data = ring.mapped[start:][:size], buffer = ring.buffer, offset = u32(start)},
+				true
 		}
 	}
 }
@@ -136,7 +144,10 @@ upload_texture :: proc(resource: ^d3d.IResource, desc: ^d3d.RESOURCE_DESC1, data
 		return
 	}
 	for row in 0 ..< int(rows) {
-		copy(mapped[row * int(footprint.Footprint.RowPitch):], data[row * int(row_size):][:row_size])
+		copy(
+			mapped[row * int(footprint.Footprint.RowPitch):],
+			data[row * int(row_size):][:row_size],
+		)
 	}
 
 	sync.guard(&dev.upload_mutex)
@@ -151,7 +162,16 @@ upload_texture :: proc(resource: ^d3d.IResource, desc: ^d3d.RESOURCE_DESC1, data
 	}
 	src.PlacedFootprint = footprint
 	list->CopyTextureRegion(&dst, 0, 0, 0, &src, nil)
-	texture_barrier(list, resource, {.COPY_DEST}, {.SHADER_RESOURCE}, {.COPY}, {.ALL_SHADING}, .COPY_DEST, .SHADER_RESOURCE)
+	texture_barrier(
+		list,
+		resource,
+		{.COPY_DEST},
+		{.SHADER_RESOURCE},
+		{.COPY},
+		{.ALL_SHADING},
+		.COPY_DEST,
+		.SHADER_RESOURCE,
+	)
 }
 
 // create_staging creates a mapped upload buffer that is released after the current batch runs.

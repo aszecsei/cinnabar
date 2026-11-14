@@ -39,7 +39,10 @@ scripts_set_bind_copy_and_take_out_elements :: proc(t: ^testing.T) {
 	f.entity = show(t, f, DOC, MENU)
 	frame(f)
 	context.user_ptr = f
-	_, ok := script.spawn_source(&f.runtime, "=menu", `
+	_, ok := script.spawn_source(
+		&f.runtime,
+		"=menu",
+		`
 local Menu = Behaviour.define("Menu")
 function Menu:start()
 	Ui.set_text(self.entity, "title", "Paused")
@@ -60,7 +63,8 @@ function Menu:on_resume(id)
 	Test.report("resume", id)
 end
 Test.entity():add(Menu)
-`)
+`,
+	)
 	testing.expect(t, ok)
 	frame(f)
 	expected := []string {

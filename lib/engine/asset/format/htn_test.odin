@@ -14,12 +14,29 @@ test_htn :: proc() -> Htn_Contents {
 		keys = slice.clone([]u32{2, 3, 4}, context.temp_allocator),
 		actions = slice.clone(
 			[]Plan_Action {
-				{node = 3, cost = {value = 1}, first_test = 1, test_count = 1, first_effect = 0, effect_count = 1},
-				{node = 4, cost = {value = 1}, first_test = 2, test_count = 0, first_effect = 1, effect_count = 2},
+				{
+					node = 3,
+					cost = {value = 1},
+					first_test = 1,
+					test_count = 1,
+					first_effect = 0,
+					effect_count = 1,
+				},
+				{
+					node = 4,
+					cost = {value = 1},
+					first_test = 2,
+					test_count = 0,
+					first_effect = 1,
+					effect_count = 2,
+				},
 			},
 			context.temp_allocator,
 		),
-		tasks = slice.clone([]Htn_Task{{node = 0, first_method = 0, method_count = 2}}, context.temp_allocator),
+		tasks = slice.clone(
+			[]Htn_Task{{node = 0, first_method = 0, method_count = 2}},
+			context.temp_allocator,
+		),
 		methods = slice.clone(
 			[]Htn_Method {
 				{node = 1, first_test = 0, test_count = 1, first_subtask = 0, subtask_count = 2},
@@ -27,9 +44,22 @@ test_htn :: proc() -> Htn_Contents {
 			},
 			context.temp_allocator,
 		),
-		subtasks = slice.clone([]Htn_Subtask{{.Action, 0}, {.Action, 1}, {.Action, 1}}, context.temp_allocator),
-		tests = slice.clone([]Plan_Test{{key = 0, lo = 1, hi = 1}, {key = 1, lo = 1, hi = max(i32)}}, context.temp_allocator),
-		effects = slice.clone([]Plan_Effect{{key = 0, op = .Set, value = 1}, {key = 1, op = .Add, value = 3}, {key = 2, op = .Set, value = 1}}, context.temp_allocator),
+		subtasks = slice.clone(
+			[]Htn_Subtask{{.Action, 0}, {.Action, 1}, {.Action, 1}},
+			context.temp_allocator,
+		),
+		tests = slice.clone(
+			[]Plan_Test{{key = 0, lo = 1, hi = 1}, {key = 1, lo = 1, hi = max(i32)}},
+			context.temp_allocator,
+		),
+		effects = slice.clone(
+			[]Plan_Effect {
+				{key = 0, op = .Set, value = 1},
+				{key = 1, op = .Add, value = 3},
+				{key = 2, op = .Set, value = 1},
+			},
+			context.temp_allocator,
+		),
 	}
 }
 
@@ -38,7 +68,12 @@ htn_decision :: proc(data: []byte, state_size: u32 = 0) -> []byte {
 	nodes := make([]Decision_Node_Contents, 5, context.temp_allocator)
 	kinds := [5]string{"task", "method", "method", "action", "action"}
 	for &n, i in nodes {
-		n = {id = u32(i + 1), kind = kinds[i], condition = DECISION_NONE, action = DECISION_NONE}
+		n = {
+			id        = u32(i + 1),
+			kind      = kinds[i],
+			condition = DECISION_NONE,
+			action    = DECISION_NONE,
+		}
 	}
 	nodes[3].action = 0
 	nodes[4].action = 1
@@ -86,7 +121,11 @@ htn_round_trips :: proc(t: ^testing.T) {
 	testing.expect(t, slice.equal(h.keys, []u32{2, 3, 4}))
 	testing.expect_value(t, len(h.actions), 2)
 	testing.expect_value(t, h.tasks[0], Htn_Task{node = 0, first_method = 0, method_count = 2})
-	testing.expect_value(t, h.methods[1], Htn_Method{node = 2, first_test = 1, test_count = 0, first_subtask = 2, subtask_count = 1})
+	testing.expect_value(
+		t,
+		h.methods[1],
+		Htn_Method{node = 2, first_test = 1, test_count = 0, first_subtask = 2, subtask_count = 1},
+	)
 	testing.expect_value(t, h.subtasks[2], Htn_Subtask{.Action, 1})
 	testing.expect_value(t, h.tests[1], Plan_Test{key = 1, lo = 1, hi = max(i32)})
 	testing.expect_value(t, h.effects[1], Plan_Effect{key = 1, op = .Add, value = 3})
@@ -94,7 +133,10 @@ htn_round_trips :: proc(t: ^testing.T) {
 	board_blob, board_ok := blackboard_view(board)
 	testing.expect(t, board_ok)
 	if board_ok {
-		testing.expect(t, htn_check(decision_technique_data(data, blob), data, blob, board, board_blob))
+		testing.expect(
+			t,
+			htn_check(decision_technique_data(data, blob), data, blob, board, board_blob),
+		)
 	}
 }
 
@@ -136,7 +178,11 @@ bad_htn_is_refused :: proc(t: ^testing.T) {
 		proc(c: ^Htn_Contents) {c.subtasks[0] = {.Task, 1}},
 		proc(c: ^Htn_Contents) {c.subtasks[0].kind = Htn_Subtask_Kind(2)},
 		proc(c: ^Htn_Contents) {c.tests[0].key = 3},
-		proc(c: ^Htn_Contents) {c.tests[0] = {key = 0, lo = 1, hi = 0}},
+		proc(c: ^Htn_Contents) {c.tests[0] = {
+				key = 0,
+				lo  = 1,
+				hi  = 0,
+			}},
 		proc(c: ^Htn_Contents) {c.effects[0].key = 5},
 		proc(c: ^Htn_Contents) {c.max_plan = 0},
 		proc(c: ^Htn_Contents) {c.max_plan = MAX_PLAN_LENGTH + 1},

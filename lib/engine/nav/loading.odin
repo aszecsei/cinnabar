@@ -81,7 +81,12 @@ State :: struct {
 
 // init makes the state's lists and reserves the searches' memory. Call it once, before register. The crowd moves its
 // agents in physics.
-init :: proc(s: ^State, platform: ^core.Platform_API, assets: ^asset.Assets, physics: ^physics.State = nil) {
+init :: proc(
+	s: ^State,
+	platform: ^core.Platform_API,
+	assets: ^asset.Assets,
+	physics: ^physics.State = nil,
+) {
 	s.platform, s.assets, s.physics = platform, assets, physics
 	heap := platform.heap_allocator
 	s.paths = {
@@ -110,16 +115,49 @@ register :: proc(s: ^State, w: ^ecs.World, agents: ^ai.State = nil) {
 	s.frame = nil
 	s.agents = ecs.query(w, {ecs.read(w, Nav_Path)})
 	s.crowd_agents = ecs.query(w, {ecs.read(w, Nav_Agent)})
-	s.job_requests = ecs.register_job_buffer(w, {name = "path requests", user = s, make = make_job_requests, flush = flush_job_requests})
-	s.job_crowd = ecs.register_job_buffer(w, {name = "crowd requests", user = s, make = make_job_crowd, flush = flush_job_crowd})
+	s.job_requests = ecs.register_job_buffer(
+		w,
+		{name = "path requests", user = s, make = make_job_requests, flush = flush_job_requests},
+	)
+	s.job_crowd = ecs.register_job_buffer(
+		w,
+		{name = "crowd requests", user = s, make = make_job_crowd, flush = flush_job_crowd},
+	)
 	reads := []ecs.Component_Id{ecs.TRANSFORM_ID}
 	writes := []ecs.Component_Id{NAV_PATH_ID}
-	ecs.register_system(w, {name = "nav paths", stage = .Fixed, procedure = tick_paths, reads = reads, writes = writes, data = s})
+	ecs.register_system(
+		w,
+		{
+			name = "nav paths",
+			stage = .Fixed,
+			procedure = tick_paths,
+			reads = reads,
+			writes = writes,
+			data = s,
+		},
+	)
 	// The crowd reads the paths that the paths system solved in the tick, and the moves that the actions asked for.
 	after := []string{"nav paths", "ai actions"} if agents != nil else []string{"nav paths"}
-	crowd_reads := []ecs.Component_Id{NAV_AGENT_ID, NAV_PATH_ID, ecs.TRANSFORM_ID, physics.CHARACTER_ID, physics.PHYSICS_CHARACTER_ID}
+	crowd_reads := []ecs.Component_Id {
+		NAV_AGENT_ID,
+		NAV_PATH_ID,
+		ecs.TRANSFORM_ID,
+		physics.CHARACTER_ID,
+		physics.PHYSICS_CHARACTER_ID,
+	}
 	crowd_writes := []ecs.Component_Id{NAV_AGENT_STATE_ID}
-	ecs.register_system(w, {name = "nav crowd", stage = .Fixed, procedure = crowd_system, reads = crowd_reads, writes = crowd_writes, after = after, data = s})
+	ecs.register_system(
+		w,
+		{
+			name = "nav crowd",
+			stage = .Fixed,
+			procedure = crowd_system,
+			reads = crowd_reads,
+			writes = crowd_writes,
+			after = after,
+			data = s,
+		},
+	)
 	if agents != nil {
 		register_crowd_actions(s, agents)
 	}
@@ -177,7 +215,10 @@ prepare :: proc(s: ^State, w: ^ecs.World) {
 			if r.warned != stamp.version {
 				r.warned = stamp.version
 				buffer: [32]u8
-				log.warnf("nav: the navmesh %s is not a navmesh blob of this build. Cook the content.", format.guid_format(r.guid, &buffer))
+				log.warnf(
+					"nav: the navmesh %s is not a navmesh blob of this build. Cook the content.",
+					format.guid_format(r.guid, &buffer),
+				)
 			}
 			continue
 		}
@@ -256,7 +297,10 @@ list_meshes :: proc(s: ^State, v: ^Scene_Loaded) {
 	listed, ok := format.scene_nav_meshes(data, s.platform.frame_allocator)
 	if !ok {
 		buffer: [32]u8
-		log.warnf("nav: the scene %s is not a scene blob of this build, so its navmeshes do not load.", format.guid_format(v.guid, &buffer))
+		log.warnf(
+			"nav: the scene %s is not a scene blob of this build, so its navmeshes do not load.",
+			format.guid_format(v.guid, &buffer),
+		)
 	}
 	for n in listed {
 		handle, _ := asset.load(s.assets, n.guid)

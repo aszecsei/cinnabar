@@ -22,86 +22,86 @@ GC_STEP_KB :: 64
 
 // Runtime is the script VM of one Game_State. It must not move after init: the VM keeps a pointer to its bindings.
 Runtime :: struct {
-	platform:     ^core.Platform_API,
-	bindings:     script_host.Bindings,
-	L:            ^luau.State,
-	budget:       time.Duration,
+	platform:                 ^core.Platform_API,
+	bindings:                 script_host.Bindings,
+	L:                        ^luau.State,
+	budget:                   time.Duration,
 	// The world and the assets live in Game_State too, so the pointers stay valid across reloads. Tests may leave
 	// them nil.
-	world:            ^ecs.World,
-	assets:           ^asset.Assets,
+	world:                    ^ecs.World,
+	assets:                   ^asset.Assets,
 	// A registry reference to the shared global table, which module environments read through to.
-	globals:          c.int,
-	modules:          [MAX_MODULES]Module,
-	module_count:     int,
+	globals:                  c.int,
+	modules:                  [MAX_MODULES]Module,
+	module_count:             int,
 	// Registrations, which reload clears: the methods of each engine type, and the exposed components.
-	light_methods:    [Light_Tag]Type_Methods,
-	userdata_methods: [Userdata_Tag]Type_Methods,
-	defined:          [MAX_DEFINED]Defined,
-	defined_count:    int,
-	defining_engine:  bool,
-	exposed:          [MAX_EXPOSED]Exposed,
-	exposed_count:    int,
-	fields:           [MAX_FIELDS]Field,
-	field_count:      int,
+	light_methods:            [Light_Tag]Type_Methods,
+	userdata_methods:         [Userdata_Tag]Type_Methods,
+	defined:                  [MAX_DEFINED]Defined,
+	defined_count:            int,
+	defining_engine:          bool,
+	exposed:                  [MAX_EXPOSED]Exposed,
+	exposed_count:            int,
+	fields:                   [MAX_FIELDS]Field,
+	field_count:              int,
 	// Registry references to the Time and Input tables, which begin_phase updates.
-	time_table:       c.int,
-	input_table:      c.int,
-	input:            core.Input,
-	frame:            u64,
+	time_table:               c.int,
+	input_table:              c.int,
+	input:                    core.Input,
+	frame:                    u64,
 	// The input edges of frames that ran no fixed tick, which the next tick gets, and whether a fixed step ran since
 	// the last script phase (see fixed.odin).
-	pending_pressed:  core.Keys,
-	pending_released: core.Keys,
-	fixed_ran:        bool,
+	pending_pressed:          core.Keys,
+	pending_released:         core.Keys,
+	fixed_ran:                bool,
 	// The same for the gamepads' edges and the typed text.
 	pending_gamepad_pressed:  [core.MAX_GAMEPADS]core.Gamepad_Buttons,
 	pending_gamepad_released: [core.MAX_GAMEPADS]core.Gamepad_Buttons,
 	pending_text:             core.Input_Text,
 	// The script step that runs, and its structural changes, in frame memory, which its end applies. The buffer is
 	// empty while no step runs: entity:destroy applies at once then. Only enter_phase and leave_phase change them.
-	phase:            Phase,
-	commands:         ecs.Commands,
+	phase:                    Phase,
+	commands:                 ecs.Commands,
 	// Behaviours and the scheduler. See behaviour.odin and scheduler.odin.
-	instances:        [MAX_INSTANCES]Instance,
-	instance_used:    int,
+	instances:                [MAX_INSTANCES]Instance,
+	instance_used:            int,
 	// The memory category that set_category last gave a thread.
-	category:         c.int,
+	category:                 c.int,
 	// While set, no script code runs for the world's changes (see set_quiet).
-	quiet:            bool,
+	quiet:                    bool,
 	// The GUIDs that scripts hold references to, by the payload of their light userdata. They stay across reloads,
 	// since the VM's values keep their payloads.
-	asset_refs:       [MAX_ASSET_REFS]format.Guid,
-	asset_ref_count:  int,
+	asset_refs:               [MAX_ASSET_REFS]format.Guid,
+	asset_ref_count:          int,
 	// A registration, which reload clears: what World.spawn(prefab) calls, which lib/engine/scene sets, since the
 	// scene loader is above this package (see set_prefab_spawner).
-	prefab_spawner:   Prefab_Spawner,
+	prefab_spawner:           Prefab_Spawner,
 	// Script actions (see actions.odin): their instances, the prelude's table of the classes that modules defined, and
 	// the registration that runs them in the fixed step, which reload clears.
-	actions:          [MAX_ACTIONS]Action_Instance,
-	action_used:      int,
-	action_registry:  c.int,
-	fixed_hook:       Fixed_Hook,
-	waiters:          [MAX_WAITERS]Waiter,
-	waiter_used:      int,
-	waiter_seq:       u64,
+	actions:                  [MAX_ACTIONS]Action_Instance,
+	action_used:              int,
+	action_registry:          c.int,
+	fixed_hook:               Fixed_Hook,
+	waiters:                  [MAX_WAITERS]Waiter,
+	waiter_used:              int,
+	waiter_seq:               u64,
 	// The waiter that is running, or -1, and the wait that its wait call asked for, nil without one.
-	current_waiter:   int,
-	pending_wait:     Wait,
+	current_waiter:           int,
+	pending_wait:             Wait,
 	// Registry references: the event queue, and protected_call's message handler.
-	events:           c.int,
-	traceback:        c.int,
+	events:                   c.int,
+	traceback:                c.int,
 	// The VM has a code generator, so modules with the Native flag run as machine code.
-	native:           bool,
+	native:                   bool,
 	// The host calls the direct access handlers (see direct.odin).
-	direct_access:    bool,
+	direct_access:            bool,
 	// The profiler's depth inside the callback that runs, below which Profile.finish closes nothing (see profile.odin).
-	profile_base:      int,
-	warned_unbalanced: bool,
-	coroutine_name:    profile.Name,
+	profile_base:             int,
+	warned_unbalanced:        bool,
+	coroutine_name:           profile.Name,
 	// The world's seed and its generator, which Random draws from (see random.odin). A code reload keeps both.
-	random_seed:       u64,
-	random:            Random_State,
+	random_seed:              u64,
+	random:                   Random_State,
 }
 
 // Phase is the script step that runs: none, the script phase (begin_phase to end_phase), or a fixed step (fixed_update
@@ -134,7 +134,13 @@ Resume_Result :: enum u8 {
 // init opens the VM, defines the engine's and the game's bindings, and sandboxes the globals. Scripts see the world
 // and load from the assets. Register the world's components before init, because the game's Register_Proc exposes
 // them.
-init :: proc(r: ^Runtime, platform: ^core.Platform_API, world: ^ecs.World, assets: ^asset.Assets, register: Register_Proc) -> bool {
+init :: proc(
+	r: ^Runtime,
+	platform: ^core.Platform_API,
+	world: ^ecs.World,
+	assets: ^asset.Assets,
+	register: Register_Proc,
+) -> bool {
 	r.platform = platform
 	r.world = world
 	r.assets = assets
@@ -273,7 +279,13 @@ spawn_source :: proc(r: ^Runtime, chunkname, source: string) -> (thread: Thread,
 	luau.L_sandboxthread(co)
 
 	bytecode := compile(source)
-	status := luau.load(co, cstring_of(r, chunkname), raw_data(bytecode), c.size_t(len(bytecode)), 0)
+	status := luau.load(
+		co,
+		cstring_of(r, chunkname),
+		raw_data(bytecode),
+		c.size_t(len(bytecode)),
+		0,
+	)
 	luau.free_bytecode(raw_data(bytecode))
 	if status != .OK {
 		log.errorf("script: %s", luau.toodinstring(co, -1))
@@ -341,9 +353,9 @@ step :: proc(r: ^Runtime) {
 // METAMETHODS are the bindings in the engine types' metatables. Each is registered by name, like any binding.
 @(private = "file")
 METAMETHODS :: [?]struct {
-	tag:       Userdata_Tag,
-	event:     cstring,
-	binding:   string,
+	tag:     Userdata_Tag,
+	event:   cstring,
+	binding: string,
 } {
 	{.World_Position, "__add", "WorldPosition.__add"},
 	{.World_Position, "__sub", "WorldPosition.__sub"},
@@ -459,7 +471,10 @@ userdata_namecall :: proc(L: ^luau.State) -> c.int {
 	}
 	procedure := find_method(&r.userdata_methods[tag], atom, name)
 	if procedure == nil {
-		raise(L, strings.concatenate({string(USERDATA_NAMES[tag]), " has no method ", name}, frame(r)))
+		raise(
+			L,
+			strings.concatenate({string(USERDATA_NAMES[tag]), " has no method ", name}, frame(r)),
+		)
 	}
 	return procedure(L)
 }

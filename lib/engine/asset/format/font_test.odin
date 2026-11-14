@@ -5,30 +5,36 @@ import "core:testing"
 // test_font is a font blob of glyphs, at the runtime's alignment.
 @(private = "file")
 test_font :: proc(glyphs: []Font_Glyph) -> []byte {
-	return aligned(font_write(
-		{
-			guid = {0 = 1, 1 = 2, 2 = 3},
-			key = 42,
-			atlas = {0 = 4, 1 = 5, 2 = 6},
-			atlas_size = {64, 32},
-			units_per_em = 1000,
-			em_size = 48,
-			range = 8,
-			ascender = 0.9,
-			descender = -0.25,
-			line_gap = 0.1,
-			glyphs = glyphs,
-			font_data = {0, 1, 0, 0, 7},
-			family = "Test Sans",
-			source_path = "game/fonts/test.ttf",
-		},
-		context.temp_allocator,
-	))
+	return aligned(
+		font_write(
+			{
+				guid = {0 = 1, 1 = 2, 2 = 3},
+				key = 42,
+				atlas = {0 = 4, 1 = 5, 2 = 6},
+				atlas_size = {64, 32},
+				units_per_em = 1000,
+				em_size = 48,
+				range = 8,
+				ascender = 0.9,
+				descender = -0.25,
+				line_gap = 0.1,
+				glyphs = glyphs,
+				font_data = {0, 1, 0, 0, 7},
+				family = "Test Sans",
+				source_path = "game/fonts/test.ttf",
+			},
+			context.temp_allocator,
+		),
+	)
 }
 
 @(test)
 font_blob_round_trips_and_finds_glyphs_by_id :: proc(t: ^testing.T) {
-	glyphs := []Font_Glyph{{id = 0, rect = {0, 0, 10, 12}, plane = {-0.1, -0.1, 0.5, 0.7}}, {id = 3}, {id = 36, rect = {10, 0, 20, 30}}}
+	glyphs := []Font_Glyph {
+		{id = 0, rect = {0, 0, 10, 12}, plane = {-0.1, -0.1, 0.5, 0.7}},
+		{id = 3},
+		{id = 36, rect = {10, 0, 20, 30}},
+	}
 	data := test_font(glyphs)
 	blob, ok := font_view(data)
 	testing.expect(t, ok)

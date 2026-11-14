@@ -18,7 +18,10 @@ component_types :: proc(w: ^ecs.World, allocator: runtime.Allocator) -> link.Com
 		for f, j in fields {
 			values := make([]link.Enum_Value, len(f.enum_values), allocator)
 			for v, k in f.enum_values {
-				values[k] = {name = v.name, value = v.value}
+				values[k] = {
+					name  = v.name,
+					value = v.value,
+				}
 			}
 			infos[j] = {
 				name            = f.name,
@@ -36,7 +39,12 @@ component_types :: proc(w: ^ecs.World, allocator: runtime.Allocator) -> link.Com
 				asset_kind      = f.asset_kind,
 			}
 		}
-		types[i] = {id = u64(info.id), name = info.name, size = u32(info.size), fields = infos}
+		types[i] = {
+			id     = u64(info.id),
+			name   = info.name,
+			size   = u32(info.size),
+			fields = infos,
+		}
 	}
 	return {types = types}
 }

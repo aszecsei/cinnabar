@@ -8,7 +8,9 @@ tone :: proc(frames, channels: int) -> []i16 {
 	samples := make([]i16, frames * channels, context.temp_allocator)
 	for i in 0 ..< frames {
 		for c in 0 ..< channels {
-			samples[i * channels + c] = i16(math.sin(f32(i) * (480 + f32(c) * 240) * math.TAU / 48000) * 16384)
+			samples[i * channels + c] = i16(
+				math.sin(f32(i) * (480 + f32(c) * 240) * math.TAU / 48000) * 16384,
+			)
 		}
 	}
 	return samples
@@ -19,7 +21,14 @@ decode_all :: proc(t: ^testing.T, data: []byte, frames, channels: int) -> []i16 
 	out := make([]i16, (frames + BLOCK_FRAMES) * channels, context.temp_allocator)
 	size := block_bytes(channels)
 	for block in 0 ..< len(data) / size {
-		testing.expect(t, decode_block(data[block * size:][:size], channels, &out[block * BLOCK_FRAMES * channels]))
+		testing.expect(
+			t,
+			decode_block(
+				data[block * size:][:size],
+				channels,
+				&out[block * BLOCK_FRAMES * channels],
+			),
+		)
 	}
 	return out[:frames * channels]
 }

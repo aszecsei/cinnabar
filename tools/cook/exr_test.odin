@@ -15,26 +15,465 @@ import format "cinnabar:engine/asset/format"
 // x + 0.25 * y, its G 2 + x, its B 10 * y, and its A 0.5.
 @(private = "file")
 EXR_TINY := [?]u8 {
-	118, 47, 49, 1, 2, 0, 0, 0, 99, 104, 97, 110, 110, 101, 108, 115, 0, 99, 104, 108, 105, 115, 116, 0,
-	73, 0, 0, 0, 65, 0, 2, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 66, 0,
-	2, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 71, 0, 2, 0, 0, 0, 0, 0,
-	0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 82, 0, 2, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0,
-	1, 0, 0, 0, 0, 99, 111, 109, 112, 114, 101, 115, 115, 105, 111, 110, 0, 99, 111, 109, 112, 114, 101, 115,
-	115, 105, 111, 110, 0, 1, 0, 0, 0, 0, 100, 97, 116, 97, 87, 105, 110, 100, 111, 119, 0, 98, 111, 120,
-	50, 105, 0, 16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0, 100,
-	105, 115, 112, 108, 97, 121, 87, 105, 110, 100, 111, 119, 0, 98, 111, 120, 50, 105, 0, 16, 0, 0, 0, 0,
-	0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0, 108, 105, 110, 101, 79, 114, 100, 101, 114,
-	0, 108, 105, 110, 101, 79, 114, 100, 101, 114, 0, 1, 0, 0, 0, 0, 112, 105, 120, 101, 108, 65, 115, 112,
-	101, 99, 116, 82, 97, 116, 105, 111, 0, 102, 108, 111, 97, 116, 0, 4, 0, 0, 0, 0, 0, 128, 63, 115,
-	99, 114, 101, 101, 110, 87, 105, 110, 100, 111, 119, 67, 101, 110, 116, 101, 114, 0, 118, 50, 102, 0, 8, 0,
-	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 115, 99, 114, 101, 101, 110, 87, 105, 110, 100, 111, 119, 87, 105,
-	100, 116, 104, 0, 102, 108, 111, 97, 116, 0, 4, 0, 0, 0, 0, 0, 128, 63, 0, 91, 1, 0, 0, 0,
-	0, 0, 0, 147, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 48, 0, 0, 0, 0, 0, 0, 63, 0,
-	0, 0, 63, 0, 0, 0, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 64, 0,
-	0, 64, 64, 0, 0, 128, 64, 0, 0, 0, 0, 0, 0, 128, 63, 0, 0, 0, 64, 1, 0, 0, 0, 48,
-	0, 0, 0, 0, 0, 0, 63, 0, 0, 0, 63, 0, 0, 0, 63, 0, 0, 32, 65, 0, 0, 32, 65, 0,
-	0, 32, 65, 0, 0, 0, 64, 0, 0, 64, 64, 0, 0, 128, 64, 0, 0, 128, 62, 0, 0, 160, 63, 0,
-	0, 16, 64,
+	118,
+	47,
+	49,
+	1,
+	2,
+	0,
+	0,
+	0,
+	99,
+	104,
+	97,
+	110,
+	110,
+	101,
+	108,
+	115,
+	0,
+	99,
+	104,
+	108,
+	105,
+	115,
+	116,
+	0,
+	73,
+	0,
+	0,
+	0,
+	65,
+	0,
+	2,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	1,
+	0,
+	0,
+	0,
+	1,
+	0,
+	0,
+	0,
+	66,
+	0,
+	2,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	1,
+	0,
+	0,
+	0,
+	1,
+	0,
+	0,
+	0,
+	71,
+	0,
+	2,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	1,
+	0,
+	0,
+	0,
+	1,
+	0,
+	0,
+	0,
+	82,
+	0,
+	2,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	1,
+	0,
+	0,
+	0,
+	1,
+	0,
+	0,
+	0,
+	0,
+	99,
+	111,
+	109,
+	112,
+	114,
+	101,
+	115,
+	115,
+	105,
+	111,
+	110,
+	0,
+	99,
+	111,
+	109,
+	112,
+	114,
+	101,
+	115,
+	115,
+	105,
+	111,
+	110,
+	0,
+	1,
+	0,
+	0,
+	0,
+	0,
+	100,
+	97,
+	116,
+	97,
+	87,
+	105,
+	110,
+	100,
+	111,
+	119,
+	0,
+	98,
+	111,
+	120,
+	50,
+	105,
+	0,
+	16,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	2,
+	0,
+	0,
+	0,
+	1,
+	0,
+	0,
+	0,
+	100,
+	105,
+	115,
+	112,
+	108,
+	97,
+	121,
+	87,
+	105,
+	110,
+	100,
+	111,
+	119,
+	0,
+	98,
+	111,
+	120,
+	50,
+	105,
+	0,
+	16,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	2,
+	0,
+	0,
+	0,
+	1,
+	0,
+	0,
+	0,
+	108,
+	105,
+	110,
+	101,
+	79,
+	114,
+	100,
+	101,
+	114,
+	0,
+	108,
+	105,
+	110,
+	101,
+	79,
+	114,
+	100,
+	101,
+	114,
+	0,
+	1,
+	0,
+	0,
+	0,
+	0,
+	112,
+	105,
+	120,
+	101,
+	108,
+	65,
+	115,
+	112,
+	101,
+	99,
+	116,
+	82,
+	97,
+	116,
+	105,
+	111,
+	0,
+	102,
+	108,
+	111,
+	97,
+	116,
+	0,
+	4,
+	0,
+	0,
+	0,
+	0,
+	0,
+	128,
+	63,
+	115,
+	99,
+	114,
+	101,
+	101,
+	110,
+	87,
+	105,
+	110,
+	100,
+	111,
+	119,
+	67,
+	101,
+	110,
+	116,
+	101,
+	114,
+	0,
+	118,
+	50,
+	102,
+	0,
+	8,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	115,
+	99,
+	114,
+	101,
+	101,
+	110,
+	87,
+	105,
+	110,
+	100,
+	111,
+	119,
+	87,
+	105,
+	100,
+	116,
+	104,
+	0,
+	102,
+	108,
+	111,
+	97,
+	116,
+	0,
+	4,
+	0,
+	0,
+	0,
+	0,
+	0,
+	128,
+	63,
+	0,
+	91,
+	1,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	147,
+	1,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	48,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	63,
+	0,
+	0,
+	0,
+	63,
+	0,
+	0,
+	0,
+	63,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	64,
+	0,
+	0,
+	64,
+	64,
+	0,
+	0,
+	128,
+	64,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	128,
+	63,
+	0,
+	0,
+	0,
+	64,
+	1,
+	0,
+	0,
+	0,
+	48,
+	0,
+	0,
+	0,
+	0,
+	0,
+	0,
+	63,
+	0,
+	0,
+	0,
+	63,
+	0,
+	0,
+	0,
+	63,
+	0,
+	0,
+	32,
+	65,
+	0,
+	0,
+	32,
+	65,
+	0,
+	0,
+	32,
+	65,
+	0,
+	0,
+	0,
+	64,
+	0,
+	0,
+	64,
+	64,
+	0,
+	0,
+	128,
+	64,
+	0,
+	0,
+	128,
+	62,
+	0,
+	0,
+	160,
+	63,
+	0,
+	0,
+	16,
+	64,
 }
 
 @(test)
@@ -46,7 +485,11 @@ exr_images_decode_to_linear_rgba :: proc(t: ^testing.T) {
 	if err == "" {
 		for y in 0 ..< 2 {
 			for x in 0 ..< 3 {
-				testing.expect_value(t, pixels[y * 3 + x], [4]f32{f32(x) + 0.25 * f32(y), 2 + f32(x), 10 * f32(y), 0.5})
+				testing.expect_value(
+					t,
+					pixels[y * 3 + x],
+					[4]f32{f32(x) + 0.25 * f32(y), 2 + f32(x), 10 * f32(y), 0.5},
+				)
 			}
 		}
 	}
@@ -112,7 +555,13 @@ exr_test_value :: proc(channel: string, x, y: int) -> f32 {
 
 @(private = "file")
 exr_check :: proc(t: ^testing.T, result: exr.result_t, loc := #caller_location) {
-	testing.expectf(t, result == .SUCCESS, "OpenEXRCore gave %s", exr.get_error_code_as_string(result), loc = loc)
+	testing.expectf(
+		t,
+		result == .SUCCESS,
+		"OpenEXRCore gave %s",
+		exr.get_error_code_as_string(result),
+		loc = loc,
+	)
 }
 
 // Exr_Test_Writer encodes chunks with one pipeline from a plane of floats for each channel.
@@ -161,10 +610,27 @@ write_test_exr :: proc(t: ^testing.T, path: string, image: Exr_Test_Image) {
 		pipeline = exr.ENCODE_PIPELINE_INITIALIZER,
 		planes   = make(map[string][]f32, context.temp_allocator),
 	}
-	exr_check(t, exr.start_write(&w.ctx, strings.clone_to_cstring(path, context.temp_allocator), .WRITE_FILE_DIRECTLY, &init))
+	exr_check(
+		t,
+		exr.start_write(
+			&w.ctx,
+			strings.clone_to_cstring(path, context.temp_allocator),
+			.WRITE_FILE_DIRECTLY,
+			&init,
+		),
+	)
 	part: c.int
 	exr_check(t, exr.add_part(w.ctx, "image", image.tile > 0 ? .TILED : .SCANLINE, &part))
-	exr_check(t, exr.initialize_required_attr_simple(w.ctx, part, i32(image.width), i32(image.height), image.compression))
+	exr_check(
+		t,
+		exr.initialize_required_attr_simple(
+			w.ctx,
+			part,
+			i32(image.width),
+			i32(image.height),
+			image.compression,
+		),
+	)
 	if image.origin != {} {
 		window := exr.attr_box2i_t {
 			min = exr.attr_v2i_t(image.origin),
@@ -175,7 +641,18 @@ write_test_exr :: proc(t: ^testing.T, path: string, image: Exr_Test_Image) {
 	sampling := max(image.sampling, 1)
 	for name in image.channels {
 		type := image.half_alpha && name == "A" ? exr.pixel_type_t.HALF : image.type
-		exr_check(t, exr.add_channel(w.ctx, part, strings.clone_to_cstring(name, context.temp_allocator), type, .LOGARITHMIC, sampling, sampling))
+		exr_check(
+			t,
+			exr.add_channel(
+				w.ctx,
+				part,
+				strings.clone_to_cstring(name, context.temp_allocator),
+				type,
+				.LOGARITHMIC,
+				sampling,
+				sampling,
+			),
+		)
 		plane := make([]f32, image.width * image.height, context.temp_allocator)
 		for &v, i in plane {
 			v = exr_test_value(name, i % image.width, i / image.width)
@@ -183,7 +660,17 @@ write_test_exr :: proc(t: ^testing.T, path: string, image: Exr_Test_Image) {
 		w.planes[name] = plane
 	}
 	if image.tile > 0 {
-		exr_check(t, exr.set_tile_descriptor(w.ctx, part, u32(image.tile), u32(image.tile), image.mips ? .MIPMAP_LEVELS : .ONE_LEVEL, .DOWN))
+		exr_check(
+			t,
+			exr.set_tile_descriptor(
+				w.ctx,
+				part,
+				u32(image.tile),
+				u32(image.tile),
+				image.mips ? .MIPMAP_LEVELS : .ONE_LEVEL,
+				.DOWN,
+			),
+		)
 	}
 	exr_check(t, exr.write_header(w.ctx))
 
@@ -196,7 +683,10 @@ write_test_exr :: proc(t: ^testing.T, path: string, image: Exr_Test_Image) {
 			exr_check(t, exr.get_tile_counts(w.ctx, part, level, level, &columns, &rows))
 			for row in 0 ..< rows {
 				for column in 0 ..< columns {
-					exr_check(t, exr.write_tile_chunk_info(w.ctx, part, column, row, level, level, &chunk))
+					exr_check(
+						t,
+						exr.write_tile_chunk_info(w.ctx, part, column, row, level, level, &chunk),
+					)
 					exr_write_chunk(&w, &chunk, int(column) * image.tile, int(row) * image.tile)
 				}
 			}
@@ -229,7 +719,13 @@ read_test_file :: proc(t: ^testing.T, path: string) -> []byte {
 
 // expect_exr_pixels decodes a file and compares its pixels with the values written, RGB being opaque.
 @(private = "file")
-expect_exr_pixels :: proc(t: ^testing.T, path: string, image: Exr_Test_Image, tolerance: f32, loc := #caller_location) {
+expect_exr_pixels :: proc(
+	t: ^testing.T,
+	path: string,
+	image: Exr_Test_Image,
+	tolerance: f32,
+	loc := #caller_location,
+) {
 	width, height, pixels, err := decode_exr(read_test_file(t, path))
 	testing.expect_value(t, err, "", loc = loc)
 	if err != "" {
@@ -240,10 +736,27 @@ expect_exr_pixels :: proc(t: ^testing.T, path: string, image: Exr_Test_Image, to
 	has_alpha := slice.contains(image.channels, "A")
 	for y in 0 ..< image.height {
 		for x in 0 ..< image.width {
-			want := [4]f32{exr_test_value("R", x, y), exr_test_value("G", x, y), exr_test_value("B", x, y), has_alpha ? exr_test_value("A", x, y) : 1}
+			want := [4]f32 {
+				exr_test_value("R", x, y),
+				exr_test_value("G", x, y),
+				exr_test_value("B", x, y),
+				has_alpha ? exr_test_value("A", x, y) : 1,
+			}
 			for got, slot in pixels[y * width + x] {
 				if abs(got - want[slot]) > tolerance {
-					testing.expectf(t, false, "%s %v: pixel %d, %d channel %d is %f, not %f", image.compression, image.type, x, y, slot, got, want[slot], loc = loc)
+					testing.expectf(
+						t,
+						false,
+						"%s %v: pixel %d, %d channel %d is %f, not %f",
+						image.compression,
+						image.type,
+						x,
+						y,
+						slot,
+						got,
+						want[slot],
+						loc = loc,
+					)
 					return
 				}
 			}
@@ -256,7 +769,11 @@ expect_exr_pixels :: proc(t: ^testing.T, path: string, image: Exr_Test_Image, to
 exr_textures_cook_to_bc6h_with_their_mips :: proc(t: ^testing.T) {
 	tree := exr_test_tree(t)
 	defer remove_tree(tree)
-	write_test_exr(t, fmt.tprintf("%s/content/sky.exr", tree.dir), {width = 16, height = 8, channels = {"R", "G", "B"}, type = .FLOAT, compression = .ZIP})
+	write_test_exr(
+		t,
+		fmt.tprintf("%s/content/sky.exr", tree.dir),
+		{width = 16, height = 8, channels = {"R", "G", "B"}, type = .FLOAT, compression = .ZIP},
+	)
 	options := tree_options(tree)
 
 	pass := cook(options, {.Texture})
@@ -279,12 +796,27 @@ exr_textures_cook_to_bc6h_with_their_mips :: proc(t: ^testing.T) {
 		// Green reaches 2 + 7 * 0.5 at the bottom of the image, so mip 0's last block holds it, far past what a color
 		// format could. Half floats decode from the blocks.
 		pixels := make([][4]u16, 16 * 8, context.temp_allocator)
-		testing.expect_value(t, cn_decompress(.BC6H, raw_data(format.blob_bytes(data, blob.mips)), 16, 8, raw_data(pixels)), 0)
+		testing.expect_value(
+			t,
+			cn_decompress(
+				.BC6H,
+				raw_data(format.blob_bytes(data, blob.mips)),
+				16,
+				8,
+				raw_data(pixels),
+			),
+			0,
+		)
 		brightest: f32
 		for p in pixels {
 			brightest = max(brightest, f32(transmute(f16)p.g))
 		}
-		testing.expectf(t, abs(brightest - 5.5) < 0.5, "the brightest green after BC6H is %f, not about 5.5", brightest)
+		testing.expectf(
+			t,
+			abs(brightest - 5.5) < 0.5,
+			"the brightest green after BC6H is %f, not about 5.5",
+			brightest,
+		)
 	}
 	testing.expect_value(t, cook(options, {.Texture}).current[.Texture], 1)
 }
@@ -353,12 +885,7 @@ exr_tiles_and_windows_put_each_pixel_in_place :: proc(t: ^testing.T) {
 	path := fmt.tprintf("%s/content/image.exr", tree.dir)
 	rgba := []string{"R", "G", "B", "A"}
 	// 37x21 leaves narrow tiles at the right and the bottom, and PIZ compresses each tile on its own.
-	for image in ([]Exr_Test_Image {
-			{width = 37, height = 21, channels = rgba, type = .HALF, compression = .PIZ, tile = 8},
-			{width = 37, height = 21, channels = rgba, type = .FLOAT, compression = .ZIP, tile = 8, mips = true},
-			{width = 37, height = 21, channels = rgba, type = .FLOAT, compression = .ZIP, origin = {-5, 300}},
-			{width = 37, height = 21, channels = rgba, type = .FLOAT, compression = .NONE, tile = 8, origin = {7, -11}},
-		}) {
+	for image in ([]Exr_Test_Image{{width = 37, height = 21, channels = rgba, type = .HALF, compression = .PIZ, tile = 8}, {width = 37, height = 21, channels = rgba, type = .FLOAT, compression = .ZIP, tile = 8, mips = true}, {width = 37, height = 21, channels = rgba, type = .FLOAT, compression = .ZIP, origin = {-5, 300}}, {width = 37, height = 21, channels = rgba, type = .FLOAT, compression = .NONE, tile = 8, origin = {7, -11}}}) {
 		write_test_exr(t, path, image)
 		expect_exr_pixels(t, path, image, 0.002)
 	}
@@ -370,7 +897,11 @@ exr_single_channels_are_gray :: proc(t: ^testing.T) {
 	tree := exr_test_tree(t)
 	defer remove_tree(tree)
 	path := fmt.tprintf("%s/content/rough.exr", tree.dir)
-	write_test_exr(t, path, {width = 32, height = 16, channels = {"Y"}, type = .HALF, compression = .ZIP})
+	write_test_exr(
+		t,
+		path,
+		{width = 32, height = 16, channels = {"Y"}, type = .HALF, compression = .ZIP},
+	)
 	testing.expect_value(t, image_undecodable(path), "")
 	width, height, pixels, err := decode_exr(read_test_file(t, path))
 	testing.expect_value(t, err, "")
@@ -411,10 +942,35 @@ exr_other_layouts_are_problems_with_the_file :: proc(t: ^testing.T) {
 		why:   string,
 	}
 	cases := []Case {
-		{{width = 8, height = 8, channels = {"R", "G", "B"}, type = .UINT, compression = .ZIP}, "unsigned integers"},
-		{{width = 8, height = 8, channels = {"R", "G"}, type = .FLOAT, compression = .ZIP}, "no R, G and B channels, only G, R"},
-		{{width = 8, height = 8, channels = {"diffuse.B", "diffuse.G", "diffuse.R"}, type = .FLOAT, compression = .ZIP}, "only diffuse.B, diffuse.G, diffuse.R"},
-		{{width = 8, height = 8, channels = {"R", "G", "B"}, type = .FLOAT, compression = .NONE, sampling = 2}, "subsampled"},
+		{
+			{width = 8, height = 8, channels = {"R", "G", "B"}, type = .UINT, compression = .ZIP},
+			"unsigned integers",
+		},
+		{
+			{width = 8, height = 8, channels = {"R", "G"}, type = .FLOAT, compression = .ZIP},
+			"no R, G and B channels, only G, R",
+		},
+		{
+			{
+				width = 8,
+				height = 8,
+				channels = {"diffuse.B", "diffuse.G", "diffuse.R"},
+				type = .FLOAT,
+				compression = .ZIP,
+			},
+			"only diffuse.B, diffuse.G, diffuse.R",
+		},
+		{
+			{
+				width = 8,
+				height = 8,
+				channels = {"R", "G", "B"},
+				type = .FLOAT,
+				compression = .NONE,
+				sampling = 2,
+			},
+			"subsampled",
+		},
 	}
 	for test in cases {
 		tree := exr_test_tree(t)
@@ -422,9 +978,21 @@ exr_other_layouts_are_problems_with_the_file :: proc(t: ^testing.T) {
 		path := fmt.tprintf("%s/content/image.exr", tree.dir)
 		write_test_exr(t, path, test.image)
 
-		testing.expectf(t, strings.contains(image_undecodable(path), test.why), "the header's problem is %q, not %q", image_undecodable(path), test.why)
+		testing.expectf(
+			t,
+			strings.contains(image_undecodable(path), test.why),
+			"the header's problem is %q, not %q",
+			image_undecodable(path),
+			test.why,
+		)
 		_, _, _, err := decode_exr(read_test_file(t, path))
-		testing.expectf(t, strings.contains(err, test.why), "decoding's problem is %q, not %q", err, test.why)
+		testing.expectf(
+			t,
+			strings.contains(err, test.why),
+			"decoding's problem is %q, not %q",
+			err,
+			test.why,
+		)
 
 		errors: Errors
 		logger := context.logger
@@ -444,7 +1012,11 @@ exr_damaged_files_are_errors :: proc(t: ^testing.T) {
 	tree := exr_test_tree(t)
 	defer remove_tree(tree)
 	path := fmt.tprintf("%s/content/image.exr", tree.dir)
-	write_test_exr(t, path, {width = 64, height = 64, channels = {"R", "G", "B"}, type = .FLOAT, compression = .NONE})
+	write_test_exr(
+		t,
+		path,
+		{width = 64, height = 64, channels = {"R", "G", "B"}, type = .FLOAT, compression = .NONE},
+	)
 	data := read_test_file(t, path)
 	_, _, _, whole := decode_exr(data)
 	testing.expect_value(t, whole, "")

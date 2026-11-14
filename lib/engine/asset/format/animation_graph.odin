@@ -195,22 +195,64 @@ animation_graph_layout :: proc() -> u64 {
 // it, and that every index between its records is in range.
 animation_graph_view :: proc(data: []byte) -> (blob: ^Animation_Graph_Blob, ok: bool) {
 	header := blob_header(data) or_return
-	if header.kind != .Animation_Graph || header.layout != animation_graph_layout() || len(data) < size_of(Animation_Graph_Blob) {
+	if header.kind != .Animation_Graph ||
+	   header.layout != animation_graph_layout() ||
+	   len(data) < size_of(Animation_Graph_Blob) {
 		return
 	}
 	blob = (^Animation_Graph_Blob)(raw_data(data))
 	inside :: proc(data: []byte, s: Slice, size, align: int) -> bool {
-		return u64(s.offset) + u64(s.size) <= u64(len(data)) && int(s.size) % size == 0 && int(s.offset) % align == 0
+		return(
+			u64(s.offset) + u64(s.size) <= u64(len(data)) &&
+			int(s.size) % size == 0 &&
+			int(s.offset) % align == 0 \
+		)
 	}
-	if !inside(data, blob.root_motion, 1, 1) || !inside(data, blob.source_path, 1, 1) ||
-	   !inside(data, blob.parameters, size_of(Animation_Graph_Parameter), align_of(Animation_Graph_Parameter)) ||
+	if !inside(data, blob.root_motion, 1, 1) ||
+	   !inside(data, blob.source_path, 1, 1) ||
+	   !inside(
+			   data,
+			   blob.parameters,
+			   size_of(Animation_Graph_Parameter),
+			   align_of(Animation_Graph_Parameter),
+		   ) ||
 	   !inside(data, blob.clips, size_of(Animation_Graph_Clip), align_of(Animation_Graph_Clip)) ||
-	   !inside(data, blob.markers, size_of(Animation_Graph_Marker), align_of(Animation_Graph_Marker)) ||
-	   !inside(data, blob.events, size_of(Animation_Graph_Event), align_of(Animation_Graph_Event)) ||
-	   !inside(data, blob.points, size_of(Animation_Graph_Point), align_of(Animation_Graph_Point)) ||
-	   !inside(data, blob.states, size_of(Animation_Graph_State), align_of(Animation_Graph_State)) ||
-	   !inside(data, blob.transitions, size_of(Animation_Graph_Transition), align_of(Animation_Graph_Transition)) ||
-	   !inside(data, blob.conditions, size_of(Animation_Graph_Condition), align_of(Animation_Graph_Condition)) {
+	   !inside(
+			   data,
+			   blob.markers,
+			   size_of(Animation_Graph_Marker),
+			   align_of(Animation_Graph_Marker),
+		   ) ||
+	   !inside(
+			   data,
+			   blob.events,
+			   size_of(Animation_Graph_Event),
+			   align_of(Animation_Graph_Event),
+		   ) ||
+	   !inside(
+			   data,
+			   blob.points,
+			   size_of(Animation_Graph_Point),
+			   align_of(Animation_Graph_Point),
+		   ) ||
+	   !inside(
+			   data,
+			   blob.states,
+			   size_of(Animation_Graph_State),
+			   align_of(Animation_Graph_State),
+		   ) ||
+	   !inside(
+			   data,
+			   blob.transitions,
+			   size_of(Animation_Graph_Transition),
+			   align_of(Animation_Graph_Transition),
+		   ) ||
+	   !inside(
+			   data,
+			   blob.conditions,
+			   size_of(Animation_Graph_Condition),
+			   align_of(Animation_Graph_Condition),
+		   ) {
 		return nil, false
 	}
 	parameters := animation_graph_parameters(data, blob)
@@ -227,7 +269,9 @@ animation_graph_view :: proc(data: []byte) -> (blob: ^Animation_Graph_Blob, ok: 
 	optional :: proc(index: u32, length: int) -> bool {
 		return index == ANIMATION_GRAPH_NONE || int(index) < length
 	}
-	if len(parameters) > MAX_ANIMATION_GRAPH_PARAMETERS || len(states) == 0 || int(blob.entry) >= len(states) ||
+	if len(parameters) > MAX_ANIMATION_GRAPH_PARAMETERS ||
+	   len(states) == 0 ||
+	   int(blob.entry) >= len(states) ||
 	   int(blob.first_any) > len(transitions) {
 		return nil, false
 	}
@@ -262,13 +306,19 @@ animation_graph_view :: proc(data: []byte) -> (blob: ^Animation_Graph_Blob, ok: 
 		}
 	}
 	for s in states {
-		if !inside(data, s.name, 1, 1) || s.motion > max(Animation_Graph_Motion) || s.point_count == 0 ||
-		   !range(s.first_point, s.point_count, len(points)) || !range(s.first_transition, s.transition_count, int(blob.first_any)) ||
-		   !optional(s.enter_event, len(events)) || !optional(s.exit_event, len(events)) {
+		if !inside(data, s.name, 1, 1) ||
+		   s.motion > max(Animation_Graph_Motion) ||
+		   s.point_count == 0 ||
+		   !range(s.first_point, s.point_count, len(points)) ||
+		   !range(s.first_transition, s.transition_count, int(blob.first_any)) ||
+		   !optional(s.enter_event, len(events)) ||
+		   !optional(s.exit_event, len(events)) {
 			return nil, false
 		}
 		if s.motion == .Blend_1D {
-			if int(s.parameter) >= len(parameters) || parameters[s.parameter].kind != .Float || s.point_count > MAX_ANIMATION_GRAPH_POINTS {
+			if int(s.parameter) >= len(parameters) ||
+			   parameters[s.parameter].kind != .Float ||
+			   s.point_count > MAX_ANIMATION_GRAPH_POINTS {
 				return nil, false
 			}
 		} else if s.point_count != 1 {
@@ -277,7 +327,9 @@ animation_graph_view :: proc(data: []byte) -> (blob: ^Animation_Graph_Blob, ok: 
 	}
 	for t, i in transitions {
 		any_state := i >= int(blob.first_any)
-		if any_state != (t.from == ANIMATION_GRAPH_NONE) || !optional(t.from, len(states)) || int(t.to) >= len(states) ||
+		if any_state != (t.from == ANIMATION_GRAPH_NONE) ||
+		   !optional(t.from, len(states)) ||
+		   int(t.to) >= len(states) ||
 		   !range(t.first_condition, t.condition_count, len(conditions)) {
 			return nil, false
 		}
@@ -290,44 +342,89 @@ animation_graph_view :: proc(data: []byte) -> (blob: ^Animation_Graph_Blob, ok: 
 	return blob, true
 }
 
-animation_graph_parameters :: proc "contextless" (data: []byte, blob: ^Animation_Graph_Blob) -> []Animation_Graph_Parameter {
+animation_graph_parameters :: proc "contextless" (
+	data: []byte,
+	blob: ^Animation_Graph_Blob,
+) -> []Animation_Graph_Parameter {
 	bytes := blob_bytes(data, blob.parameters)
-	return ([^]Animation_Graph_Parameter)(raw_data(bytes))[:len(bytes) / size_of(Animation_Graph_Parameter)]
+	return(
+		([^]Animation_Graph_Parameter)(raw_data(bytes))[:len(bytes) /
+		size_of(Animation_Graph_Parameter)] \
+	)
 }
 
-animation_graph_clips :: proc "contextless" (data: []byte, blob: ^Animation_Graph_Blob) -> []Animation_Graph_Clip {
+animation_graph_clips :: proc "contextless" (
+	data: []byte,
+	blob: ^Animation_Graph_Blob,
+) -> []Animation_Graph_Clip {
 	bytes := blob_bytes(data, blob.clips)
 	return ([^]Animation_Graph_Clip)(raw_data(bytes))[:len(bytes) / size_of(Animation_Graph_Clip)]
 }
 
-animation_graph_markers :: proc "contextless" (data: []byte, blob: ^Animation_Graph_Blob) -> []Animation_Graph_Marker {
+animation_graph_markers :: proc "contextless" (
+	data: []byte,
+	blob: ^Animation_Graph_Blob,
+) -> []Animation_Graph_Marker {
 	bytes := blob_bytes(data, blob.markers)
-	return ([^]Animation_Graph_Marker)(raw_data(bytes))[:len(bytes) / size_of(Animation_Graph_Marker)]
+	return(
+		([^]Animation_Graph_Marker)(raw_data(bytes))[:len(bytes) /
+		size_of(Animation_Graph_Marker)] \
+	)
 }
 
-animation_graph_events :: proc "contextless" (data: []byte, blob: ^Animation_Graph_Blob) -> []Animation_Graph_Event {
+animation_graph_events :: proc "contextless" (
+	data: []byte,
+	blob: ^Animation_Graph_Blob,
+) -> []Animation_Graph_Event {
 	bytes := blob_bytes(data, blob.events)
-	return ([^]Animation_Graph_Event)(raw_data(bytes))[:len(bytes) / size_of(Animation_Graph_Event)]
+	return(
+		([^]Animation_Graph_Event)(raw_data(bytes))[:len(bytes) /
+		size_of(Animation_Graph_Event)] \
+	)
 }
 
-animation_graph_points :: proc "contextless" (data: []byte, blob: ^Animation_Graph_Blob) -> []Animation_Graph_Point {
+animation_graph_points :: proc "contextless" (
+	data: []byte,
+	blob: ^Animation_Graph_Blob,
+) -> []Animation_Graph_Point {
 	bytes := blob_bytes(data, blob.points)
-	return ([^]Animation_Graph_Point)(raw_data(bytes))[:len(bytes) / size_of(Animation_Graph_Point)]
+	return(
+		([^]Animation_Graph_Point)(raw_data(bytes))[:len(bytes) /
+		size_of(Animation_Graph_Point)] \
+	)
 }
 
-animation_graph_states :: proc "contextless" (data: []byte, blob: ^Animation_Graph_Blob) -> []Animation_Graph_State {
+animation_graph_states :: proc "contextless" (
+	data: []byte,
+	blob: ^Animation_Graph_Blob,
+) -> []Animation_Graph_State {
 	bytes := blob_bytes(data, blob.states)
-	return ([^]Animation_Graph_State)(raw_data(bytes))[:len(bytes) / size_of(Animation_Graph_State)]
+	return(
+		([^]Animation_Graph_State)(raw_data(bytes))[:len(bytes) /
+		size_of(Animation_Graph_State)] \
+	)
 }
 
-animation_graph_transitions :: proc "contextless" (data: []byte, blob: ^Animation_Graph_Blob) -> []Animation_Graph_Transition {
+animation_graph_transitions :: proc "contextless" (
+	data: []byte,
+	blob: ^Animation_Graph_Blob,
+) -> []Animation_Graph_Transition {
 	bytes := blob_bytes(data, blob.transitions)
-	return ([^]Animation_Graph_Transition)(raw_data(bytes))[:len(bytes) / size_of(Animation_Graph_Transition)]
+	return(
+		([^]Animation_Graph_Transition)(raw_data(bytes))[:len(bytes) /
+		size_of(Animation_Graph_Transition)] \
+	)
 }
 
-animation_graph_conditions :: proc "contextless" (data: []byte, blob: ^Animation_Graph_Blob) -> []Animation_Graph_Condition {
+animation_graph_conditions :: proc "contextless" (
+	data: []byte,
+	blob: ^Animation_Graph_Blob,
+) -> []Animation_Graph_Condition {
 	bytes := blob_bytes(data, blob.conditions)
-	return ([^]Animation_Graph_Condition)(raw_data(bytes))[:len(bytes) / size_of(Animation_Graph_Condition)]
+	return(
+		([^]Animation_Graph_Condition)(raw_data(bytes))[:len(bytes) /
+		size_of(Animation_Graph_Condition)] \
+	)
 }
 
 Animation_Graph_Parameter_Contents :: struct {
@@ -394,7 +491,10 @@ Animation_Graph_Contents :: struct {
 
 // animation_graph_write builds an animation graph blob. It groups the transitions by their from state, in the states'
 // order, and puts those from any state last, keeping their order within each group.
-animation_graph_write :: proc(contents: Animation_Graph_Contents, allocator := context.allocator) -> []byte {
+animation_graph_write :: proc(
+	contents: Animation_Graph_Contents,
+	allocator := context.allocator,
+) -> []byte {
 	buffer := make([dynamic]byte, size_of(Animation_Graph_Blob), allocator)
 	records :: proc(buffer: ^[dynamic]byte, $T: typeid, count: int) -> Slice {
 		return reserve_bytes(buffer, count * size_of(T), align_of(T))
@@ -425,12 +525,22 @@ animation_graph_write :: proc(contents: Animation_Graph_Contents, allocator := c
 	}
 
 	for p, i in contents.parameters {
-		record := Animation_Graph_Parameter{name = text(&buffer, p.name), hash = animation_graph_hash(p.name), kind = p.kind, default = p.default}
+		record := Animation_Graph_Parameter {
+			name    = text(&buffer, p.name),
+			hash    = animation_graph_hash(p.name),
+			kind    = p.kind,
+			default = p.default,
+		}
 		put(&buffer, parameters, i, &record)
 	}
 	next_marker := 0
 	for c, i in contents.clips {
-		record := Animation_Graph_Clip{clip = c.clip, name = text(&buffer, c.name), first_marker = u32(next_marker), marker_count = u32(len(c.markers))}
+		record := Animation_Graph_Clip {
+			clip         = c.clip,
+			name         = text(&buffer, c.name),
+			first_marker = u32(next_marker),
+			marker_count = u32(len(c.markers)),
+		}
 		put(&buffer, clips, i, &record)
 		for m in c.markers {
 			m := m
@@ -439,9 +549,16 @@ animation_graph_write :: proc(contents: Animation_Graph_Contents, allocator := c
 		}
 	}
 	for e, i in contents.events {
-		record := Animation_Graph_Event{name = text(&buffer, e.name), hash = animation_graph_hash(e.name)}
+		record := Animation_Graph_Event {
+			name = text(&buffer, e.name),
+			hash = animation_graph_hash(e.name),
+		}
 		for a, j in e.args {
-			record.args[j] = {kind = a.kind, number = a.number, text = text(&buffer, a.text)}
+			record.args[j] = {
+				kind   = a.kind,
+				number = a.number,
+				text   = text(&buffer, a.text),
+			}
 		}
 		put(&buffer, events, i, &record)
 	}
@@ -513,7 +630,13 @@ animation_graph_write :: proc(contents: Animation_Graph_Contents, allocator := c
 	root_motion := text(&buffer, contents.root_motion)
 	source_path := text(&buffer, contents.source_path)
 	blob := Animation_Graph_Blob {
-		header = {magic = BLOB_MAGIC, kind = .Animation_Graph, layout = animation_graph_layout(), key = contents.key, guid = contents.guid},
+		header = {
+			magic = BLOB_MAGIC,
+			kind = .Animation_Graph,
+			layout = animation_graph_layout(),
+			key = contents.key,
+			guid = contents.guid,
+		},
 		entry = contents.entry,
 		first_any = first_any,
 		root_motion = root_motion,

@@ -87,7 +87,9 @@ tiff_values :: proc(r: Tiff_Reader, entry: int) -> (values: []u32, ok: bool) {
 
 // decode_tiff decodes a TIFF's first image, or gives why it cannot.
 decode_tiff :: proc(data: []byte) -> (image: Tiff_Image, err: string) {
-	r := Tiff_Reader{data = data}
+	r := Tiff_Reader {
+		data = data,
+	}
 	switch {
 	case len(data) >= 8 && data[0] == 'I' && data[1] == 'I':
 	case len(data) >= 8 && data[0] == 'M' && data[1] == 'M':
@@ -154,7 +156,11 @@ decode_tiff :: proc(data: []byte) -> (image: Tiff_Image, err: string) {
 		return {}, fmt.tprintf("has %d-bit samples of format %d, which the cooker does not read", depth, sample_format)
 	}
 	switch compression {
-	case TIFF_COMPRESSION_NONE, TIFF_COMPRESSION_LZW, TIFF_COMPRESSION_DEFLATE, TIFF_COMPRESSION_ADOBE_DEFLATE, TIFF_COMPRESSION_PACKBITS:
+	case TIFF_COMPRESSION_NONE,
+	     TIFF_COMPRESSION_LZW,
+	     TIFF_COMPRESSION_DEFLATE,
+	     TIFF_COMPRESSION_ADOBE_DEFLATE,
+	     TIFF_COMPRESSION_PACKBITS:
 	case:
 		return {}, fmt.tprintf("has compression %d, which the cooker does not read", compression)
 	}
@@ -167,7 +173,12 @@ decode_tiff :: proc(data: []byte) -> (image: Tiff_Image, err: string) {
 
 	sample_bytes := int(depth / 8)
 	row_bytes := width * samples * sample_bytes
-	image = {width = width, height = height, pixels = make([][4]f32, width * height, context.temp_allocator), linear = depth == 32}
+	image = {
+		width  = width,
+		height = height,
+		pixels = make([][4]f32, width * height, context.temp_allocator),
+		linear = depth == 32,
+	}
 	for offset, strip in offsets {
 		first_row := strip * rows_per_strip
 		if first_row >= height {
@@ -197,9 +208,13 @@ decode_tiff :: proc(data: []byte) -> (image: Tiff_Image, err: string) {
 					case 8:
 						v[s] = f32(row[at]) / 255
 					case 16:
-						v[s] = f32(endian.get_u16(row[at:], r.big ? .Big : .Little) or_else 0) / 65535
+						v[s] =
+							f32(endian.get_u16(row[at:], r.big ? .Big : .Little) or_else 0) / 65535
 					case 32:
-						v[s] = transmute(f32)(endian.get_u32(row[at:], r.big ? .Big : .Little) or_else 0)
+						v[s] = transmute(f32)(endian.get_u32(
+								row[at:],
+								r.big ? .Big : .Little,
+							) or_else 0)
 					}
 				}
 				if photometric == 0 {
@@ -356,7 +371,9 @@ tiff_undo_predictor :: proc(raw: []byte, rows, width, samples, sample_bytes: int
 					row[at] += row[before]
 				} else {
 					order: endian.Byte_Order = big ? .Big : .Little
-					v := (endian.get_u16(row[at:], order) or_else 0) + (endian.get_u16(row[before:], order) or_else 0)
+					v :=
+						(endian.get_u16(row[at:], order) or_else 0) +
+						(endian.get_u16(row[before:], order) or_else 0)
 					endian.put_u16(row[at:], order, v)
 				}
 			}

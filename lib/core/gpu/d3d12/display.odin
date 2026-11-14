@@ -12,7 +12,10 @@ import "cinnabar:core/gpu"
 find_display :: proc() -> (display: gpu.Display) {
 	if !dev.factory->IsCurrent() {
 		factory: ^dxgi.IFactory6
-		if check(dxgi.CreateDXGIFactory2({}, dxgi.IFactory6_UUID, (^rawptr)(&factory)), "CreateDXGIFactory2") {
+		if check(
+			dxgi.CreateDXGIFactory2({}, dxgi.IFactory6_UUID, (^rawptr)(&factory)),
+			"CreateDXGIFactory2",
+		) {
 			release(&dev.factory)
 			dev.factory = factory
 		}
@@ -35,7 +38,9 @@ find_display :: proc() -> (display: gpu.Display) {
 			if win.SUCCEEDED(output->QueryInterface(dxgi.IOutput6_UUID, (^rawptr)(&output6))) {
 				if win.SUCCEEDED(output6->GetDesc1(&desc)) {
 					r := desc.DesktopCoordinates
-					area := max(0, min(r.right, window.right) - max(r.left, window.left)) * max(0, min(r.bottom, window.bottom) - max(r.top, window.top))
+					area :=
+						max(0, min(r.right, window.right) - max(r.left, window.left)) *
+						max(0, min(r.bottom, window.bottom) - max(r.top, window.top))
 					if area > best {
 						best = area
 						display = {
@@ -66,18 +71,37 @@ sdr_white_level :: proc(device_name: [32]u16) -> f32 {
 	}
 	paths := make([]Displayconfig_Path_Info, path_count, context.temp_allocator)
 	modes := make([]Displayconfig_Mode_Info, mode_count, context.temp_allocator)
-	if QueryDisplayConfig(QDC_ONLY_ACTIVE_PATHS, &path_count, raw_data(paths), &mode_count, raw_data(modes), nil) != 0 {
+	if QueryDisplayConfig(
+		   QDC_ONLY_ACTIVE_PATHS,
+		   &path_count,
+		   raw_data(paths),
+		   &mode_count,
+		   raw_data(modes),
+		   nil,
+	   ) !=
+	   0 {
 		return 0
 	}
 	for path in paths[:path_count] {
 		source := Displayconfig_Source_Device_Name {
-			header = {type = .Get_Source_Name, size = size_of(Displayconfig_Source_Device_Name), adapter_id = path.source_adapter_id, id = path.source_id},
+			header = {
+				type = .Get_Source_Name,
+				size = size_of(Displayconfig_Source_Device_Name),
+				adapter_id = path.source_adapter_id,
+				id = path.source_id,
+			},
 		}
-		if DisplayConfigGetDeviceInfo(&source.header) != 0 || source.view_gdi_device_name != device_name {
+		if DisplayConfigGetDeviceInfo(&source.header) != 0 ||
+		   source.view_gdi_device_name != device_name {
 			continue
 		}
 		white := Displayconfig_Sdr_White_Level {
-			header = {type = .Get_Sdr_White_Level, size = size_of(Displayconfig_Sdr_White_Level), adapter_id = path.target_adapter_id, id = path.target_id},
+			header = {
+				type = .Get_Sdr_White_Level,
+				size = size_of(Displayconfig_Sdr_White_Level),
+				adapter_id = path.target_adapter_id,
+				id = path.target_id,
+			},
 		}
 		if DisplayConfigGetDeviceInfo(&white.header) != 0 {
 			return 0
@@ -135,7 +159,10 @@ Displayconfig_Sdr_White_Level :: struct {
 }
 
 #assert(size_of(Displayconfig_Path_Info) == 72 && size_of(Displayconfig_Mode_Info) == 64)
-#assert(size_of(Displayconfig_Source_Device_Name) == 84 && size_of(Displayconfig_Sdr_White_Level) == 24)
+#assert(
+	size_of(Displayconfig_Source_Device_Name) == 84 &&
+	size_of(Displayconfig_Sdr_White_Level) == 24,
+)
 
 foreign import user32 "system:User32.lib"
 

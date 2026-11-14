@@ -6,7 +6,21 @@ package cook
 
 // The GSUB features that the runtime's shaper, kb_text_shape, applies to text by default, of every script's. A
 // substitution in another feature, such as dlig or smcp, makes glyphs that shaped text never shows.
-OPENTYPE_DEFAULT_FEATURES :: [?]string{"rvrn", "ccmp", "locl", "rlig", "liga", "clig", "calt", "rclt", "ltra", "ltrm", "frac", "numr", "dnom"}
+OPENTYPE_DEFAULT_FEATURES :: [?]string {
+	"rvrn",
+	"ccmp",
+	"locl",
+	"rlig",
+	"liga",
+	"clig",
+	"calt",
+	"rclt",
+	"ltra",
+	"ltrm",
+	"frac",
+	"numr",
+	"dnom",
+}
 
 // Font_Tables is where a font's tables are in its file.
 Font_Tables :: struct {
@@ -37,7 +51,14 @@ opentype_at :: proc(data: []byte, offset: int) -> []byte {
 }
 
 // font_tables reads the table directory of the font that starts at offset in a file, which is 0 but in a collection.
-font_tables :: proc(data: []byte, offset: int, allocator := context.temp_allocator) -> (tables: Font_Tables, ok: bool) {
+font_tables :: proc(
+	data: []byte,
+	offset: int,
+	allocator := context.temp_allocator,
+) -> (
+	tables: Font_Tables,
+	ok: bool,
+) {
 	tables.data = data
 	tables.tables = make(map[string][]byte, allocator)
 	count := opentype_u16(data, offset + 4)
@@ -58,7 +79,11 @@ font_tables :: proc(data: []byte, offset: int, allocator := context.temp_allocat
 
 // opentype_coverage gives a coverage table's glyphs, each with its coverage index.
 @(private = "file")
-opentype_coverage :: proc(table: []byte, each: proc(glyph, index: int, data: rawptr), data: rawptr) {
+opentype_coverage :: proc(
+	table: []byte,
+	each: proc(glyph, index: int, data: rawptr),
+	data: rawptr,
+) {
 	switch opentype_u16(table, 0) {
 	case 1:
 		for i in 0 ..< opentype_u16(table, 2) {
@@ -67,7 +92,10 @@ opentype_coverage :: proc(table: []byte, each: proc(glyph, index: int, data: raw
 	case 2:
 		for i in 0 ..< opentype_u16(table, 2) {
 			record := 4 + i * 6
-			first, last, index := opentype_u16(table, record), opentype_u16(table, record + 2), opentype_u16(table, record + 4)
+			first, last, index :=
+				opentype_u16(table, record),
+				opentype_u16(table, record + 2),
+				opentype_u16(table, record + 4)
 			for g in first ..= last {
 				each(g, index + g - first, data)
 			}
@@ -187,7 +215,8 @@ gsub_closure :: proc(gsub: []byte, glyphs: ^[dynamic]bool) {
 		switch opentype_u16(t, 0) {
 		case 1, 2:
 			// Rule sets, each of rules.
-			sets_at := kind == 5 ? (opentype_u16(t, 0) == 1 ? 4 : 6) : (opentype_u16(t, 0) == 1 ? 4 : 10)
+			sets_at :=
+				kind == 5 ? (opentype_u16(t, 0) == 1 ? 4 : 6) : (opentype_u16(t, 0) == 1 ? 4 : 10)
 			for i in 0 ..< opentype_u16(t, sets_at) {
 				set := opentype_at(t, opentype_u16(t, sets_at + 2 + i * 2))
 				for j in 0 ..< opentype_u16(set, 0) {
@@ -227,12 +256,16 @@ gsub_closure :: proc(gsub: []byte, glyphs: ^[dynamic]bool) {
 		// covered maps each coverage index whose glyph the set has to the glyph.
 		clear(&c.covered)
 		if kind == 1 || kind == 2 || kind == 3 || kind == 4 || kind == 8 {
-			opentype_coverage(opentype_at(t, opentype_u16(t, 2)), proc(glyph, index: int, data: rawptr) {
-				c := (^Closure)(data)
-				if closure_has(c, glyph) {
-					c.covered[index] = glyph
-				}
-			}, c)
+			opentype_coverage(
+				opentype_at(t, opentype_u16(t, 2)),
+				proc(glyph, index: int, data: rawptr) {
+					c := (^Closure)(data)
+					if closure_has(c, glyph) {
+						c.covered[index] = glyph
+					}
+				},
+				c,
+			)
 		}
 		switch kind {
 		case 1:

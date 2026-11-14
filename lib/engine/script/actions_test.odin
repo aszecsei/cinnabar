@@ -18,14 +18,24 @@ action_define_checks_its_parameters :: proc(t: ^testing.T) {
 	testing.expect(t, !run(t, f, `Action.define("bark", { line = 3 })`))
 	testing.expect(t, !run(t, f, `Action.define("bark", { entity = Param.entity() })`))
 	testing.expect(t, !run(t, f, `Action.define("bark", { line = Field.string() })`))
-	testing.expect(t, run(t, f, `Action.define("bark", { line = Param.string(), at = Param.position() })`))
+	testing.expect(
+		t,
+		run(t, f, `Action.define("bark", { line = Param.string(), at = Param.position() })`),
+	)
 	testing.expect(t, action_defined(&f.runtime, "bark"))
 	testing.expect(t, !action_defined(&f.runtime, "growl"))
 	// The first class of a name is kept.
-	testing.expect(t, run(t, f, `
+	testing.expect(
+		t,
+		run(
+			t,
+			f,
+			`
 		local Again = Action.define("bark")
 		Test.report(if Again.__params.line == nil then 1 else 0)
-	`))
+	`,
+		),
+	)
 	expect_reports(t, f, {1})
 }
 
@@ -45,7 +55,12 @@ a_script_action_starts_ticks_and_stops :: proc(t: ^testing.T) {
 	f := setup_world(t)
 	defer teardown_world(f)
 	context.user_ptr = f
-	testing.expect(t, run(t, f, `
+	testing.expect(
+		t,
+		run(
+			t,
+			f,
+			`
 		local Bark = Action.define("bark", { line = Param.string("hey"), times = Param.number(2), at = Param.entity() })
 		function Bark:start()
 			Test.report(#self.line)
@@ -67,24 +82,26 @@ a_script_action_starts_ticks_and_stops :: proc(t: ^testing.T) {
 		function Bark:stop()
 			Test.report(-1)
 		end
-	`))
+	`,
+		),
+	)
 	hook := Action_Hook {
 		entity = ecs.spawn(&f.world),
 	}
 	set_fixed_hook(&f.runtime, {proc(r: ^Runtime, data: rawptr) {
-		h := (^Action_Hook)(data)
-		switch h.step {
-		case 0:
-			args := []Action_Arg{{"line", "hello"}, {"at", h.entity}}
-			h.handle, h.status[0] = start_action(r, "bark", h.entity, args)
-		case 1:
-			h.status[1] = tick_action(r, h.handle, 1.0 / 60)
-		case 2:
-			h.status[2] = tick_action(r, h.handle, 1.0 / 60)
-			stop_action(r, h.handle)
-		}
-		h.step += 1
-	}, &hook})
+			h := (^Action_Hook)(data)
+			switch h.step {
+			case 0:
+				args := []Action_Arg{{"line", "hello"}, {"at", h.entity}}
+				h.handle, h.status[0] = start_action(r, "bark", h.entity, args)
+			case 1:
+				h.status[1] = tick_action(r, h.handle, 1.0 / 60)
+			case 2:
+				h.status[2] = tick_action(r, h.handle, 1.0 / 60)
+				stop_action(r, h.handle)
+			}
+			h.step += 1
+		}, &hook})
 	it := ecs.begin_ticks(&f.world, 50 * time.Millisecond)
 	for ecs.next_tick(&it) {
 		fixed_update(&f.runtime, &it, {})
@@ -111,17 +128,24 @@ a_script_action_with_wrong_arguments_fails :: proc(t: ^testing.T) {
 	defer teardown_world(f)
 	context.user_ptr = f
 	context.logger = testlog.expected_errors()
-	testing.expect(t, run(t, f, `
+	testing.expect(
+		t,
+		run(
+			t,
+			f,
+			`
 		local Bark = Action.define("bark", { line = Param.string() })
 		function Bark:start() Test.report(1) end
-	`))
+	`,
+		),
+	)
 	hook: [3]Action_Status
 	set_fixed_hook(&f.runtime, {proc(r: ^Runtime, data: rawptr) {
-		statuses := (^[3]Action_Status)(data)
-		_, statuses[0] = start_action(r, "bark", 0, {{"volume", f64(3)}})
-		_, statuses[1] = start_action(r, "bark", 0, {{"line", f64(3)}})
-		_, statuses[2] = start_action(r, "growl", 0, {})
-	}, &hook})
+			statuses := (^[3]Action_Status)(data)
+			_, statuses[0] = start_action(r, "bark", 0, {{"volume", f64(3)}})
+			_, statuses[1] = start_action(r, "bark", 0, {{"line", f64(3)}})
+			_, statuses[2] = start_action(r, "growl", 0, {})
+		}, &hook})
 	it := ecs.begin_ticks(&f.world, 16 * time.Millisecond + 700 * time.Microsecond)
 	for ecs.next_tick(&it) {
 		fixed_update(&f.runtime, &it, {})

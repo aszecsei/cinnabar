@@ -33,7 +33,13 @@ compress :: proc(data: []byte, out: []byte) -> []byte {
 	if len(data) == 0 || len(data) > MAX_SIZE || len(out) == 0 {
 		return nil
 	}
-	size := compress_HC(raw_data(data), raw_data(out), c.int(len(data)), c.int(min(len(out), MAX_SIZE)), LEVEL)
+	size := compress_HC(
+		raw_data(data),
+		raw_data(out),
+		c.int(len(data)),
+		c.int(min(len(out), MAX_SIZE)),
+		LEVEL,
+	)
 	return size > 0 ? out[:size] : nil
 }
 

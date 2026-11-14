@@ -17,7 +17,13 @@ import "cinnabar:engine/editor/link"
 
 // agent_view is what an entity's Agent does: empty but for the entity without one, or before it is ready.
 @(private = "file")
-agent_view :: proc(e: ^Editor, entity: ecs.Entity, allocator: runtime.Allocator) -> (view: link.Agent_View) {
+agent_view :: proc(
+	e: ^Editor,
+	entity: ecs.Entity,
+	allocator: runtime.Allocator,
+) -> (
+	view: link.Agent_View,
+) {
 	view.entity = u64(entity)
 	if e.ai == nil {
 		return
@@ -29,19 +35,36 @@ agent_view :: proc(e: ^Editor, entity: ecs.Entity, allocator: runtime.Allocator)
 	view.decision = ([16]u8)(debug.decision)
 	view.nodes = make([]link.Agent_Node, len(debug.nodes), allocator)
 	for n, i in debug.nodes {
-		view.nodes[i] = {id = n.id, running = n.running, last = link.Agent_Result(n.last)}
+		view.nodes[i] = {
+			id      = n.id,
+			running = n.running,
+			last    = link.Agent_Result(n.last),
+		}
 	}
 	view.values = make([]link.Agent_Value, len(debug.keys), allocator)
 	for k, i in debug.keys {
-		view.values[i] = {name = k.name, kind = link.Agent_Kind(k.type), text = value_text(k, allocator)}
+		view.values[i] = {
+			name = k.name,
+			kind = link.Agent_Kind(k.type),
+			text = value_text(k, allocator),
+		}
 	}
 	view.options = make([]link.Agent_Option, len(debug.scores), allocator)
 	for o, i in debug.scores {
 		considerations := make([]link.Agent_Consideration, len(o.considerations), allocator)
 		for c, j in o.considerations {
-			considerations[j] = {id = c.id, input = rounded(c.input), score = rounded(c.score)}
+			considerations[j] = {
+				id    = c.id,
+				input = rounded(c.input),
+				score = rounded(c.score),
+			}
 		}
-		view.options[i] = {id = o.id, score = rounded(o.score), chosen = o.chosen, considerations = considerations}
+		view.options[i] = {
+			id             = o.id,
+			score          = rounded(o.score),
+			chosen         = o.chosen,
+			considerations = considerations,
+		}
 	}
 	if p, plans := debug.plan.?; plans {
 		plan := link.Agent_Plan {
@@ -53,13 +76,19 @@ agent_view :: proc(e: ^Editor, entity: ecs.Entity, allocator: runtime.Allocator)
 			searching = p.searching,
 		}
 		for g, i in p.goals {
-			plan.goals[i] = {id = g.id, priority = rounded(g.priority)}
+			plan.goals[i] = {
+				id       = g.id,
+				priority = rounded(g.priority),
+			}
 		}
 		for s, i in p.steps {
 			plan.steps[i] = s.id
 		}
 		for m, i in p.methods {
-			plan.methods[i] = {task = m.task, method = m.method}
+			plan.methods[i] = {
+				task   = m.task,
+				method = m.method,
+			}
 		}
 		view.plan = make([]link.Agent_Plan, 1, allocator)
 		view.plan[0] = plan
@@ -89,7 +118,12 @@ value_text :: proc(k: ai.Key_View, allocator: runtime.Allocator) -> string {
 		if v == 0 {
 			return "none"
 		}
-		return fmt.aprintf("#%d:%d", ecs.entity_index(v), ecs.entity_generation(v), allocator = allocator)
+		return fmt.aprintf(
+			"#%d:%d",
+			ecs.entity_index(v),
+			ecs.entity_generation(v),
+			allocator = allocator,
+		)
 	case ecs.World_Position:
 		return triple_text(ecs.position_to_meters(v), allocator)
 	case [3]f32:
@@ -110,7 +144,13 @@ number_text :: proc(v: f64, allocator: runtime.Allocator) -> string {
 
 @(private = "file")
 triple_text :: proc(v: [3]f64, allocator: runtime.Allocator) -> string {
-	return fmt.aprintf("[%s, %s, %s]", number_text(v.x, allocator), number_text(v.y, allocator), number_text(v.z, allocator), allocator = allocator)
+	return fmt.aprintf(
+		"[%s, %s, %s]",
+		number_text(v.x, allocator),
+		number_text(v.y, allocator),
+		number_text(v.z, allocator),
+		allocator = allocator,
+	)
 }
 
 // send_agents sends the view of each watched entity's Agent that changed since the editor last got it: the first after a
@@ -142,9 +182,15 @@ agent_actions :: proc(e: ^Editor, allocator: runtime.Allocator) -> link.Agent_Ac
 	for n, i in natives {
 		params := make([]link.Agent_Action_Param, len(n.params), allocator)
 		for p, j in n.params {
-			params[j] = {name = p.name, kind = link.Agent_Kind(p.type)}
+			params[j] = {
+				name = p.name,
+				kind = link.Agent_Kind(p.type),
+			}
 		}
-		actions[i] = {name = n.name, params = params}
+		actions[i] = {
+			name   = n.name,
+			params = params,
+		}
 	}
 	return {actions = actions}
 }

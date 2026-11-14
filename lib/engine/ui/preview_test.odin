@@ -25,7 +25,10 @@ PREVIEW_TEXT :: `ui 1
 preview_blob :: proc(t: ^testing.T, text: string) -> []byte {
 	document, problems, ok := format.ui_parse(text)
 	testing.expectf(t, ok, "%v", problems)
-	return format.ui_write({guid = guid_of(PREVIEW_DOC), key = 1, document = document}, context.temp_allocator)
+	return format.ui_write(
+		{guid = guid_of(PREVIEW_DOC), key = 1, document = document},
+		context.temp_allocator,
+	)
 }
 
 @(test)
@@ -113,7 +116,10 @@ a_new_blob_builds_a_preview_again_with_its_bindings :: proc(t: ^testing.T) {
 	defer close_document(&f.ui, index)
 	d := &f.ui.documents[index]
 	set_binding(&f.ui, d, "name", "Ada")
-	testing.expect(t, set_document_data(&f.ui, index, preview_blob(t, "ui 1\n<ui><box id=\"only\"/></ui>")))
+	testing.expect(
+		t,
+		set_document_data(&f.ui, index, preview_blob(t, "ui 1\n<ui><box id=\"only\"/></ui>")),
+	)
 	_, found := find_node(d, "only")
 	testing.expect(t, found)
 	testing.expect_value(t, len(d.bindings), 1)

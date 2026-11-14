@@ -322,7 +322,11 @@ Lut_Push :: struct {
 	padding:     [2]u32,
 }
 
-#assert(size_of(Temporal_Constants) == 144 && size_of(Bloom_Push) <= 128 && size_of(Exposure_Push) <= 128)
+#assert(
+	size_of(Temporal_Constants) == 144 &&
+	size_of(Bloom_Push) <= 128 &&
+	size_of(Exposure_Push) <= 128,
+)
 
 post_init :: proc(p: ^Post, platform: ^core.Platform_API) {
 	p.temporal_aa = shader_pipeline(TEMPORAL_AA_SHADER)
@@ -330,12 +334,28 @@ post_init :: proc(p: ^Post, platform: ^core.Platform_API) {
 	p.histogram = shader_pipeline(HISTOGRAM_SHADER)
 	p.adapt = shader_pipeline(EXPOSURE_SHADER)
 	p.tone_lut = shader_pipeline(TONE_LUT_SHADER)
-	p.sampler = platform.gpu_create_sampler({filter = .Linear, mip_filter = .Linear, address = .Clamp, label = "post sampler"})
+	p.sampler = platform.gpu_create_sampler(
+		{filter = .Linear, mip_filter = .Linear, address = .Clamp, label = "post sampler"},
+	)
 	ones := [4]f32{1, 1, 0, 0}
-	p.unit_exposure = platform.gpu_create_buffer({size = size_of(ones), label = "unit exposure"}, transmute([]byte)ones[:])
+	p.unit_exposure = platform.gpu_create_buffer(
+		{size = size_of(ones), label = "unit exposure"},
+		transmute([]byte)ones[:],
+	)
 	zeros: [HISTOGRAM_BINS]u32
-	p.histogram_bins = platform.gpu_create_buffer({size = size_of(zeros), usage = {.Storage}, label = "luminance histogram"}, transmute([]byte)zeros[:])
-	p.lut = platform.gpu_create_texture({size = {LUT_SIZE * LUT_SIZE, LUT_SIZE}, format = LUT_FORMAT, usage = {.Sampled, .Storage}, label = "tone mapping lut"}, nil)
+	p.histogram_bins = platform.gpu_create_buffer(
+		{size = size_of(zeros), usage = {.Storage}, label = "luminance histogram"},
+		transmute([]byte)zeros[:],
+	)
+	p.lut = platform.gpu_create_texture(
+		{
+			size = {LUT_SIZE * LUT_SIZE, LUT_SIZE},
+			format = LUT_FORMAT,
+			usage = {.Sampled, .Storage},
+			label = "tone mapping lut",
+		},
+		nil,
+	)
 	spatial_aa_init(&p.spatial, platform)
 	upscalers_init(&p.upscalers)
 }
@@ -344,7 +364,10 @@ post_init :: proc(p: ^Post, platform: ^core.Platform_API) {
 @(private)
 post_state_init :: proc(s: ^Post_State, platform: ^core.Platform_API) {
 	ones := [4]f32{1, 1, 0, 0}
-	s.exposure = platform.gpu_create_buffer({size = size_of(ones), usage = {.Storage}, label = "exposure"}, transmute([]byte)ones[:])
+	s.exposure = platform.gpu_create_buffer(
+		{size = size_of(ones), usage = {.Storage}, label = "exposure"},
+		transmute([]byte)ones[:],
+	)
 }
 
 @(private)
@@ -399,7 +422,10 @@ pipeline_status :: proc(platform: ^core.Platform_API, p: ^Shader_Pipeline) -> gp
 
 // handle_status is where a pipeline is, by its handle, or Ready on a platform that compiles nothing.
 @(private)
-handle_status :: proc(platform: ^core.Platform_API, pipeline: gpu.Pipeline) -> gpu.Pipeline_Status {
+handle_status :: proc(
+	platform: ^core.Platform_API,
+	pipeline: gpu.Pipeline,
+) -> gpu.Pipeline_Status {
 	return platform.gpu_pipeline_status == nil ? .Ready : platform.gpu_pipeline_status(pipeline)
 }
 
@@ -448,7 +474,8 @@ begin_post :: proc(f: ^Frame, settings: Post_Settings) {
 	// Temporal AA stands in for an upscaler that the device cannot make, or while its motion pass compiles.
 	pf.upscaler = frame_upscaler(f, aa)
 	_, upscales := upscaler_kind(aa)
-	pf.temporal = (aa == .Taa || (upscales && pf.upscaler == {})) && pipeline_ready(platform, &p.temporal_aa)
+	pf.temporal =
+		(aa == .Taa || (upscales && pf.upscaler == {})) && pipeline_ready(platform, &p.temporal_aa)
 	if spatial_aa_ready(platform, &p.spatial, aa) {
 		pf.spatial = aa
 	}
@@ -456,7 +483,8 @@ begin_post :: proc(f: ^Frame, settings: Post_Settings) {
 	pf.upscale_reset = !u.active || u.render_size != f.size
 	u.active, u.render_size = pf.upscaler != {}, f.size
 	pf.exposure = pipeline_ready(platform, &p.adapt)
-	pf.exposure_auto = pf.exposure && settings.exposure_mode == .Auto && pipeline_ready(platform, &p.histogram)
+	pf.exposure_auto =
+		pf.exposure && settings.exposure_mode == .Auto && pipeline_ready(platform, &p.histogram)
 	if pf.temporal || pf.upscaler != {} {
 		s.jitter_index += 1
 		ratio := f32(f.output_size.x * f.output_size.y) / f32(max(f.size.x * f.size.y, 1))
@@ -506,10 +534,16 @@ add_post_passes :: proc(f: ^Frame) {
 
 	add_post_effects(f, .Before_Temporal_Aa)
 	if pf.temporal {
-		pf.history = history_texture(g, {size = f.output_size, format = SCENE_FORMAT, label = "temporal aa history"})
+		pf.history = history_texture(
+			g,
+			{size = f.output_size, format = SCENE_FORMAT, label = "temporal aa history"},
+		)
 		if pf.history.current != 0 {
 			pf.temporal_in = f.scene
-			pf.reproject = f.previous_view_projection * linalg.matrix4_translate_f32(f.camera_motion) * linalg.inverse(f.view_projection)
+			pf.reproject =
+				f.previous_view_projection *
+				linalg.matrix4_translate_f32(f.camera_motion) *
+				linalg.inverse(f.view_projection)
 			pass := add_compute_pass(g, "temporal aa", run_temporal_aa, f)
 			read(g, pass, f.scene)
 			read(g, pass, f.velocity)
@@ -545,20 +579,36 @@ add_post_passes :: proc(f: ^Frame) {
 	if !s.no_bloom && pipeline_ready(platform, &p.bloom) {
 		pf.bloom_levels, pf.bloom_sizes = bloom_chain(f.scene_size)
 		for level in 0 ..< pf.bloom_levels {
-			pf.bloom_down[level] = create_texture(g, {size = pf.bloom_sizes[level], format = BLOOM_FORMAT, label = "bloom down"})
+			pf.bloom_down[level] = create_texture(
+				g,
+				{size = pf.bloom_sizes[level], format = BLOOM_FORMAT, label = "bloom down"},
+			)
 		}
 		pf.bloom_in = f.scene
 		source := f.scene
 		for level in 0 ..< pf.bloom_levels {
-			pass := add_compute_pass(g, "bloom down", run_bloom, new_clone(Bloom_Step{f, level, false}, platform.frame_allocator))
+			pass := add_compute_pass(
+				g,
+				"bloom down",
+				run_bloom,
+				new_clone(Bloom_Step{f, level, false}, platform.frame_allocator),
+			)
 			read(g, pass, source)
 			write(g, pass, pf.bloom_down[level])
 			source = pf.bloom_down[level]
 		}
 		// From the smallest level up, each level blends with the level below it by the radius.
 		for level := pf.bloom_levels - 2; level >= 0; level -= 1 {
-			pf.bloom_up[level] = create_texture(g, {size = pf.bloom_sizes[level], format = BLOOM_FORMAT, label = "bloom up"})
-			pass := add_compute_pass(g, "bloom up", run_bloom, new_clone(Bloom_Step{f, level, true}, platform.frame_allocator))
+			pf.bloom_up[level] = create_texture(
+				g,
+				{size = pf.bloom_sizes[level], format = BLOOM_FORMAT, label = "bloom up"},
+			)
+			pass := add_compute_pass(
+				g,
+				"bloom up",
+				run_bloom,
+				new_clone(Bloom_Step{f, level, true}, platform.frame_allocator),
+			)
 			read(g, pass, pf.bloom_down[level])
 			read(g, pass, source)
 			write(g, pass, pf.bloom_up[level])
@@ -581,9 +631,12 @@ add_post_passes :: proc(f: ^Frame) {
 	}
 	if f.output.mode != .Sdr {
 		display := f.output.display
-		peak := s.peak > 0 ? s.peak : display.max_luminance > 0 ? display.max_luminance : DEFAULT_PEAK
-		paper_white := s.paper_white > 0 ? s.paper_white : display.sdr_white > 0 ? display.sdr_white : DEFAULT_PAPER_WHITE
-		pf.grading.hdr, pf.grading.peak, pf.grading.paper_white = true, peak, min(paper_white, peak)
+		peak :=
+			s.peak > 0 ? s.peak : display.max_luminance > 0 ? display.max_luminance : DEFAULT_PEAK
+		paper_white :=
+			s.paper_white > 0 ? s.paper_white : display.sdr_white > 0 ? display.sdr_white : DEFAULT_PAPER_WHITE
+		pf.grading.hdr, pf.grading.peak, pf.grading.paper_white =
+			true, peak, min(paper_white, peak)
 		pf.paper_white = pf.grading.paper_white
 	}
 	bake := Lut_Bake{pf.grading, p.tone_lut.version}

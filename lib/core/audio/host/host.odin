@@ -16,7 +16,10 @@ state: struct {
 
 // table returns the procedures to give a backend's loader. They run with the calling context's logger. The device's
 // procedures are core's, which this package cannot import.
-table :: proc(device_write: proc "c" (frames: [^]audio.Device_Frame, count: i32) -> i32, device_status: proc "c" (out: ^audio.Device_Status)) -> audio.Host {
+table :: proc(
+	device_write: proc "c" (frames: [^]audio.Device_Frame, count: i32) -> i32,
+	device_status: proc "c" (out: ^audio.Device_Status),
+) -> audio.Host {
 	state.ctx = context
 	return {
 		allocate = allocate,

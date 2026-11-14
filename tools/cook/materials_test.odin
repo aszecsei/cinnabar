@@ -29,7 +29,10 @@ material_options :: proc(t: ^testing.T, tree: Tree) -> Cook_Options {
 // engine_file is a file of the engine's content, for a test tree to hold its shading models.
 @(private = "file")
 engine_file :: proc(path: string) -> string {
-	data, _ := os.read_entire_file(fmt.tprintf("lib/engine/content/%s", path), context.temp_allocator)
+	data, _ := os.read_entire_file(
+		fmt.tprintf("lib/engine/content/%s", path),
+		context.temp_allocator,
+	)
 	return string(data)
 }
 
@@ -108,9 +111,20 @@ displacing_materials_compile_every_pass_and_keep_their_bound :: proc(t: ^testing
 	context.logger = capture_errors(&errors)
 	defer release_errors(&errors)
 	bad := "material 1\nshading = lit\ndisplacement_bound = -1\n---\nSurface evaluate(Material_Inputs inputs) { return default_surface(); }\n"
-	testing.expect(t, os.write_entire_file(fmt.tprintf("%s/content/wave.material", tree.dir), transmute([]byte)bad) == nil)
+	testing.expect(
+		t,
+		os.write_entire_file(
+			fmt.tprintf("%s/content/wave.material", tree.dir),
+			transmute([]byte)bad,
+		) ==
+		nil,
+	)
 	testing.expect(t, !cook(options, {.Material}).ok)
-	expect_error(t, &errors, "wave.material:3: displacement_bound is a number of meters, 0 or more")
+	expect_error(
+		t,
+		&errors,
+		"wave.material:3: displacement_bound is a number of meters, 0 or more",
+	)
 }
 
 @(test)
@@ -120,7 +134,10 @@ patch_materials_have_no_mesh_shader_entries :: proc(t: ^testing.T) {
 		{
 			{"content/shading/lit.shading", engine_file("shading/lit.shading")},
 			{"content/shading/lit.hlsli", engine_file("shading/lit.hlsli")},
-			{"content/ground.material", "material 1\nshading = lit\ngeometry = patches\n---\nSurface evaluate(Material_Inputs inputs) {\n\tSurface s = default_surface();\n\ts.base_color = inputs.uv0.xyx;\n\treturn s;\n}\n\nfloat3 displace(Vertex_Inputs v) {\n\treturn float3(0, sin(v.uv0.x * 6.28) * 0.5, 0);\n}\n"},
+			{
+				"content/ground.material",
+				"material 1\nshading = lit\ngeometry = patches\n---\nSurface evaluate(Material_Inputs inputs) {\n\tSurface s = default_surface();\n\ts.base_color = inputs.uv0.xyx;\n\treturn s;\n}\n\nfloat3 displace(Vertex_Inputs v) {\n\treturn float3(0, sin(v.uv0.x * 6.28) * 0.5, 0);\n}\n",
+			},
 			{"content/ground.material.meta", "guid = 00112233445566778899aabbccddeeff\n"},
 		},
 	)
@@ -152,9 +169,20 @@ patch_materials_have_no_mesh_shader_entries :: proc(t: ^testing.T) {
 	context.logger = capture_errors(&errors)
 	defer release_errors(&errors)
 	bad := "material 1\nshading = lit\ngeometry = cloth\n---\nSurface evaluate(Material_Inputs inputs) { return default_surface(); }\n"
-	testing.expect(t, os.write_entire_file(fmt.tprintf("%s/content/ground.material", tree.dir), transmute([]byte)bad) == nil)
+	testing.expect(
+		t,
+		os.write_entire_file(
+			fmt.tprintf("%s/content/ground.material", tree.dir),
+			transmute([]byte)bad,
+		) ==
+		nil,
+	)
 	testing.expect(t, !cook(options, {.Material}).ok)
-	expect_error(t, &errors, "ground.material:3: geometry is mesh, patches, billboard, billboard_axis or ribbon")
+	expect_error(
+		t,
+		&errors,
+		"ground.material:3: geometry is mesh, patches, billboard, billboard_axis or ribbon",
+	)
 }
 
 @(test)
@@ -168,10 +196,16 @@ materials_cook_a_variant_for_each_switch_set_and_instances_resolve :: proc(t: ^t
 			{"content/rock.material.meta", "guid = 00112233445566778899aabbccddeeff\n"},
 			{"content/albedo.png.meta", "guid = 11112222333344445555666677778888\n"},
 			{"content/albedo.png", ""},
-			{"content/mossy.material_instance", "material_instance 1\nparent = $00112233445566778899aabbccddeeff\nroughness = 0.9\nuse_albedo = true\nalbedo = $11112222333344445555666677778888\n"},
+			{
+				"content/mossy.material_instance",
+				"material_instance 1\nparent = $00112233445566778899aabbccddeeff\nroughness = 0.9\nuse_albedo = true\nalbedo = $11112222333344445555666677778888\n",
+			},
 			{"content/mossy.material_instance.meta", "guid = 9999aaaabbbbccccddddeeeeffff0000\n"},
 			// An instance of an instance.
-			{"content/wet.material_instance", "material_instance 1\nparent = $9999aaaabbbbccccddddeeeeffff0000\nroughness = 0.1\n"},
+			{
+				"content/wet.material_instance",
+				"material_instance 1\nparent = $9999aaaabbbbccccddddeeeeffff0000\nroughness = 0.1\n",
+			},
 		},
 	)
 	defer remove_tree(tree)
@@ -215,7 +249,11 @@ materials_cook_a_variant_for_each_switch_set_and_instances_resolve :: proc(t: ^t
 	testing.expect(t, view_ok)
 	if view_ok {
 		// Through mossy to rock: rock's tint, wet's roughness, mossy's switch and texture.
-		testing.expect_value(t, view.material, format.guid_parse("00112233445566778899aabbccddeeff") or_else {})
+		testing.expect_value(
+			t,
+			view.material,
+			format.guid_parse("00112233445566778899aabbccddeeff") or_else {},
+		)
 		testing.expect_value(t, view.switches, 1)
 		block := format.blob_bytes(instance, view.block)
 		roughness: f32
@@ -224,7 +262,11 @@ materials_cook_a_variant_for_each_switch_set_and_instances_resolve :: proc(t: ^t
 		tint: [4]f32
 		mem.copy(&tint, &block[0], 16)
 		testing.expect_value(t, tint, [4]f32{1, 0.5, 0.25, 1})
-		testing.expect_value(t, format.instance_textures(instance, view)[0].guid, format.guid_parse("11112222333344445555666677778888") or_else {})
+		testing.expect_value(
+			t,
+			format.instance_textures(instance, view)[0].guid,
+			format.guid_parse("11112222333344445555666677778888") or_else {},
+		)
 	}
 	testing.expect_value(t, cook(options, {.Material}).current[.Material], 1)
 }
@@ -232,16 +274,28 @@ materials_cook_a_variant_for_each_switch_set_and_instances_resolve :: proc(t: ^t
 @(test)
 material_errors_name_their_file_and_line :: proc(t: ^testing.T) {
 	rock := ROCK
-	broken := strings.concatenate({rock[:strings.index(rock, "s.roughness")], "s.roughness = missing;\n\treturn s;\n}\n"}, context.temp_allocator)
+	broken := strings.concatenate(
+		{rock[:strings.index(rock, "s.roughness")], "s.roughness = missing;\n\treturn s;\n}\n"},
+		context.temp_allocator,
+	)
 	tree := make_tree(
 		t,
 		{
 			{"content/shading/lit.shading", engine_file("shading/lit.shading")},
 			{"content/shading/lit.hlsli", engine_file("shading/lit.hlsli")},
 			{"content/broken.material", broken},
-			{"content/nowhere.material", "material 1\nshading = toon\n---\nSurface evaluate(Material_Inputs inputs) { return default_surface(); }\n"},
-			{"content/orphan.material_instance", "material_instance 1\nparent = $ffeeddccbbaa99887766554433221100\n"},
-			{"content/typo.material_instance", "material_instance 1\nparent = $00112233445566778899aabbccddeeff\nroughnes = 1\n"},
+			{
+				"content/nowhere.material",
+				"material 1\nshading = toon\n---\nSurface evaluate(Material_Inputs inputs) { return default_surface(); }\n",
+			},
+			{
+				"content/orphan.material_instance",
+				"material_instance 1\nparent = $ffeeddccbbaa99887766554433221100\n",
+			},
+			{
+				"content/typo.material_instance",
+				"material_instance 1\nparent = $00112233445566778899aabbccddeeff\nroughnes = 1\n",
+			},
 			{"content/rock.material", ROCK},
 			{"content/rock.material.meta", "guid = 00112233445566778899aabbccddeeff\n"},
 		},
@@ -254,8 +308,16 @@ material_errors_name_their_file_and_line :: proc(t: ^testing.T) {
 	// The #line before evaluate makes DXC name the material's own line.
 	expect_error(t, &errors, "broken.material:14:16: use of undeclared identifier 'missing'")
 	expect_error(t, &errors, "nowhere.material: no shading model is named toon")
-	expect_error(t, &errors, "orphan.material_instance: its parent ffeeddccbbaa99887766554433221100 is not a material or an instance")
-	expect_error(t, &errors, "typo.material_instance:3: its material has no parameter or switch named roughnes")
+	expect_error(
+		t,
+		&errors,
+		"orphan.material_instance: its parent ffeeddccbbaa99887766554433221100 is not a material or an instance",
+	)
+	expect_error(
+		t,
+		&errors,
+		"typo.material_instance:3: its material has no parameter or switch named roughnes",
+	)
 }
 
 @(test)
@@ -265,13 +327,17 @@ unlit_materials_skip_the_light :: proc(t: ^testing.T) {
 		{
 			{"content/unlit.shading", engine_file("shading/unlit.shading")},
 			{"content/unlit.hlsli", engine_file("shading/unlit.hlsli")},
-			{"content/glow.material", "material 1\nshading = unlit\nparam color color = [2, 1, 0.5, 1]\n---\nSurface evaluate(Material_Inputs inputs) {\n\tSurface s = default_surface();\n\ts.color = params.color.rgb;\n\treturn s;\n}\n"},
+			{
+				"content/glow.material",
+				"material 1\nshading = unlit\nparam color color = [2, 1, 0.5, 1]\n---\nSurface evaluate(Material_Inputs inputs) {\n\tSurface s = default_surface();\n\ts.color = params.color.rgb;\n\treturn s;\n}\n",
+			},
 		},
 	)
 	defer remove_tree(tree)
 	pass := cook(material_options(t, tree), {.Material})
 	testing.expect(t, pass.ok)
-	if blob, ok := format.material_view(tree_blob(t, tree, tree_guid(t, tree, "glow.material"))); ok {
+	if blob, ok := format.material_view(tree_blob(t, tree, tree_guid(t, tree, "glow.material")));
+	   ok {
 		testing.expect(t, .No_Lighting in blob.flags)
 	}
 }
@@ -283,7 +349,10 @@ masked_materials_discard_in_their_depth_pass :: proc(t: ^testing.T) {
 		{
 			{"content/shading/lit.shading", engine_file("shading/lit.shading")},
 			{"content/shading/lit.hlsli", engine_file("shading/lit.hlsli")},
-			{"content/leaf.material", "material 1\nshading = lit\nblend = masked\ncutoff = 0.3\nparam mask texture = white\n---\nSurface evaluate(Material_Inputs inputs) {\n\tSurface s = default_surface();\n\ts.opacity = cn_sample(params.mask, inputs.uv0).a;\n\treturn s;\n}\n"},
+			{
+				"content/leaf.material",
+				"material 1\nshading = lit\nblend = masked\ncutoff = 0.3\nparam mask texture = white\n---\nSurface evaluate(Material_Inputs inputs) {\n\tSurface s = default_surface();\n\ts.opacity = cn_sample(params.mask, inputs.uv0).a;\n\treturn s;\n}\n",
+			},
 		},
 	)
 	defer remove_tree(tree)
@@ -296,7 +365,10 @@ masked_materials_discard_in_their_depth_pass :: proc(t: ^testing.T) {
 		testing.expect_value(t, len(format.material_variants(data, blob)), 22)
 		testing.expect(t, format.material_code(data, blob, 0, .Virtual_Depth, .Pixel) != nil)
 		testing.expect(t, format.material_code(data, blob, 0, .Voxelize, .Pixel) != nil)
-		testing.expect(t, format.material_code(data, blob, 0, .Impostor_Virtual_Depth, .Pixel) != nil)
+		testing.expect(
+			t,
+			format.material_code(data, blob, 0, .Impostor_Virtual_Depth, .Pixel) != nil,
+		)
 		testing.expect(t, format.material_code(data, blob, 0, .Hit, .Compute) != nil)
 		testing.expect(t, format.material_code(data, blob, 0, .Depth, .Pixel) != nil)
 	}
@@ -312,9 +384,20 @@ transparent_materials_cook_their_transparent_passes_only :: proc(t: ^testing.T) 
 		{
 			{"content/shading/lit.shading", engine_file("shading/lit.shading")},
 			{"content/shading/lit.hlsli", engine_file("shading/lit.hlsli")},
-			{"content/glass.material", "material 1\nshading = lit\nblend = transparent\ncast_shadows = true\n" + GLASS_BODY},
-			{"content/sorted.material", "material 1\nshading = lit\nblend = transparent\ntransparency = sorted\n" + GLASS_BODY},
-			{"content/glow.material", "material 1\nshading = lit\nblend = additive\n" + GLASS_BODY},
+			{
+				"content/glass.material",
+				"material 1\nshading = lit\nblend = transparent\ncast_shadows = true\n" +
+				GLASS_BODY,
+			},
+			{
+				"content/sorted.material",
+				"material 1\nshading = lit\nblend = transparent\ntransparency = sorted\n" +
+				GLASS_BODY,
+			},
+			{
+				"content/glow.material",
+				"material 1\nshading = lit\nblend = additive\n" + GLASS_BODY,
+			},
 		},
 	)
 	defer remove_tree(tree)
@@ -337,7 +420,11 @@ transparent_materials_cook_their_transparent_passes_only :: proc(t: ^testing.T) 
 		testing.expect(t, format.material_code(data, blob, 0, .Transparent_Ids, .Pixel) != nil)
 		testing.expect(t, .Cast_Shadows not_in blob.flags)
 		// An additive material has no moments: it adds light, and takes none away.
-		testing.expect_value(t, format.material_code(data, blob, 0, .Moments, .Pixel) != nil, blob.blend == .Transparent)
+		testing.expect_value(
+			t,
+			format.material_code(data, blob, 0, .Moments, .Pixel) != nil,
+			blob.blend == .Transparent,
+		)
 		testing.expect_value(t, .Sorted in blob.flags, name == "sorted.material")
 	}
 }
@@ -349,9 +436,19 @@ transparency_settings_belong_to_their_blends :: proc(t: ^testing.T) {
 		{
 			{"content/shading/lit.shading", engine_file("shading/lit.shading")},
 			{"content/shading/lit.hlsli", engine_file("shading/lit.hlsli")},
-			{"content/cut.material", "material 1\nshading = lit\nblend = transparent\ncutoff = 0.5\n" + GLASS_BODY},
-			{"content/opaque.material", "material 1\nshading = lit\ntransparency = sorted\n" + GLASS_BODY},
-			{"content/odd.material", "material 1\nshading = lit\nblend = transparent\ntransparency = layered\n" + GLASS_BODY},
+			{
+				"content/cut.material",
+				"material 1\nshading = lit\nblend = transparent\ncutoff = 0.5\n" + GLASS_BODY,
+			},
+			{
+				"content/opaque.material",
+				"material 1\nshading = lit\ntransparency = sorted\n" + GLASS_BODY,
+			},
+			{
+				"content/odd.material",
+				"material 1\nshading = lit\nblend = transparent\ntransparency = layered\n" +
+				GLASS_BODY,
+			},
 		},
 	)
 	defer remove_tree(tree)
@@ -359,7 +456,11 @@ transparency_settings_belong_to_their_blends :: proc(t: ^testing.T) {
 	context.logger = capture_errors(&errors)
 	defer release_errors(&errors)
 	testing.expect(t, !cook(material_options(t, tree), {.Material}).ok)
-	expect_error(t, &errors, "cut.material:4: cutoff is for masked materials; a transparent one blends by its opacity")
+	expect_error(
+		t,
+		&errors,
+		"cut.material:4: cutoff is for masked materials; a transparent one blends by its opacity",
+	)
 	expect_error(t, &errors, "opaque.material:3: transparency is for transparent materials")
 	expect_error(t, &errors, "odd.material:4: transparency is moments or sorted")
 }
@@ -382,7 +483,14 @@ node 3 texture_sample
 @(test)
 tool_textures_and_hotspots_reach_the_index :: proc(t: ^testing.T) {
 	rock := ROCK
-	lined := strings.concatenate({rock[:strings.index(rock, "---")], "tool_texture = $22223333444455556666777788889999\n", rock[strings.index(rock, "---"):]}, context.temp_allocator)
+	lined := strings.concatenate(
+		{
+			rock[:strings.index(rock, "---")],
+			"tool_texture = $22223333444455556666777788889999\n",
+			rock[strings.index(rock, "---"):],
+		},
+		context.temp_allocator,
+	)
 	tree := make_tree(
 		t,
 		{
@@ -393,12 +501,21 @@ tool_textures_and_hotspots_reach_the_index :: proc(t: ^testing.T) {
 			{"content/dev.material", DEV},
 			{"content/dev.material.meta", "guid = 00112233445566778899aabbccddeeff\n"},
 			// An instance that overrides the sampled parameter measures by its own texture, and a tool_texture line names one.
-			{"content/swap.material_instance", "material_instance 1\nparent = $00112233445566778899aabbccddeeff\ngrid = $22223333444455556666777788889999\n"},
-			{"content/named.material_instance", "material_instance 1\nparent = $00112233445566778899aabbccddeeff\ntool_texture = $33334444555566667777888899990000\n"},
+			{
+				"content/swap.material_instance",
+				"material_instance 1\nparent = $00112233445566778899aabbccddeeff\ngrid = $22223333444455556666777788889999\n",
+			},
+			{
+				"content/named.material_instance",
+				"material_instance 1\nparent = $00112233445566778899aabbccddeeff\ntool_texture = $33334444555566667777888899990000\n",
+			},
 			// An HLSL material without a line measures by its first texture parameter, which rock's leaves at white.
 			{"content/rock.material", ROCK},
 			{"content/lined.material", lined},
-			{"content/bad.material", "material 1\nshading = lit\nhotspot 10 10 5 5\n---\nSurface evaluate(Material_Inputs inputs) { return default_surface(); }\n"},
+			{
+				"content/bad.material",
+				"material 1\nshading = lit\nhotspot 10 10 5 5\n---\nSurface evaluate(Material_Inputs inputs) { return default_surface(); }\n",
+			},
 		},
 	)
 	defer remove_tree(tree)
@@ -418,20 +535,37 @@ tool_textures_and_hotspots_reach_the_index :: proc(t: ^testing.T) {
 	}
 	dev := entry(&index, "dev.material")
 	testing.expect_value(t, dev.tool_texture, "11112222333344445555666677778888")
-	testing.expect(t, len(dev.hotspots) == 2 && dev.hotspots[0] == cook_link.Hotspot{0, 0, 256, 256} && dev.hotspots[1] == cook_link.Hotspot{256, 0, 512, 128})
+	testing.expect(
+		t,
+		len(dev.hotspots) == 2 &&
+		dev.hotspots[0] == cook_link.Hotspot{0, 0, 256, 256} &&
+		dev.hotspots[1] == cook_link.Hotspot{256, 0, 512, 128},
+	)
 	swap := entry(&index, "swap.material_instance")
 	testing.expect_value(t, swap.tool_texture, "22223333444455556666777788889999")
 	testing.expect(t, slice.equal(swap.hotspots, dev.hotspots))
-	testing.expect_value(t, entry(&index, "named.material_instance").tool_texture, "33334444555566667777888899990000")
+	testing.expect_value(
+		t,
+		entry(&index, "named.material_instance").tool_texture,
+		"33334444555566667777888899990000",
+	)
 	testing.expect_value(t, entry(&index, "rock.material").tool_texture, "")
-	testing.expect_value(t, entry(&index, "lined.material").tool_texture, "22223333444455556666777788889999")
+	testing.expect_value(
+		t,
+		entry(&index, "lined.material").tool_texture,
+		"22223333444455556666777788889999",
+	)
 	testing.expect_value(t, entry(&index, "grid.png").size, [2]u32{16, 8})
 	bad := entry(&index, "bad.material")
 	testing.expect_value(t, bad.status, cook_link.Asset_Status.Failed)
 	testing.expect(t, bad.errors >= 1)
 	// A pass that changes nothing keeps the entries equal, so the editor hears no delta.
 	again: Index
-	index_build(&again, cook(options, {.Texture, .Material}, log_problems = false), options.roots[:])
+	index_build(
+		&again,
+		cook(options, {.Texture, .Material}, log_problems = false),
+		options.roots[:],
+	)
 	defer index_destroy(&again)
 	testing.expect(t, !index_changed(index_diff(&index, &again)))
 }
@@ -460,7 +594,15 @@ two_shading_models_with_one_name_both_fail :: proc(t: ^testing.T) {
 	defer index_destroy(&index)
 	testing.expect_value(t, len(index.assets), 3)
 	for _, a in index.assets {
-		testing.expectf(t, a.status == .Failed && a.errors == 1, "%s/%s is %v with %d errors", a.root, a.path, a.status, a.errors)
+		testing.expectf(
+			t,
+			a.status == .Failed && a.errors == 1,
+			"%s/%s is %v with %d errors",
+			a.root,
+			a.path,
+			a.status,
+			a.errors,
+		)
 	}
 	testing.expect_value(t, len(index.shading.models), 0)
 	for a in pass.assets {
@@ -479,7 +621,13 @@ ribbon_materials_draw_ribbons :: proc(t: ^testing.T) {
 		{
 			{"content/shading/lit.shading", engine_file("shading/lit.shading")},
 			{"content/shading/lit.hlsli", engine_file("shading/lit.hlsli")},
-			{"content/trail.material", fmt.tprintf("material 1\nshading = lit\nblend = transparent\ngeometry = ribbon\n%s", evaluate)},
+			{
+				"content/trail.material",
+				fmt.tprintf(
+					"material 1\nshading = lit\nblend = transparent\ngeometry = ribbon\n%s",
+					evaluate,
+				),
+			},
 			{"content/trail.material.meta", "guid = 00112233445566778899aabbccddeeff\n"},
 		},
 	)
@@ -502,9 +650,20 @@ ribbon_materials_draw_ribbons :: proc(t: ^testing.T) {
 	context.logger = capture_errors(&errors)
 	defer release_errors(&errors)
 	opaque := fmt.tprintf("material 1\nshading = lit\ngeometry = ribbon\n%s", evaluate)
-	testing.expect(t, os.write_entire_file(fmt.tprintf("%s/content/trail.material", tree.dir), transmute([]byte)opaque) == nil)
+	testing.expect(
+		t,
+		os.write_entire_file(
+			fmt.tprintf("%s/content/trail.material", tree.dir),
+			transmute([]byte)opaque,
+		) ==
+		nil,
+	)
 	testing.expect(t, !cook(options, {.Material}).ok)
-	expect_error(t, &errors, "trail.material:3: a ribbon material's blend is transparent or additive")
+	expect_error(
+		t,
+		&errors,
+		"trail.material:3: a ribbon material's blend is transparent or additive",
+	)
 }
 
 // A billboard draws its meshes with vertex pulling only: the opaque passes' stages, without the mesh shader path's or
@@ -517,9 +676,18 @@ billboard_materials_pull_their_vertices :: proc(t: ^testing.T) {
 		{
 			{"content/shading/lit.shading", engine_file("shading/lit.shading")},
 			{"content/shading/lit.hlsli", engine_file("shading/lit.hlsli")},
-			{"content/card.material", fmt.tprintf("material 1\nshading = lit\ngeometry = billboard\n%s", evaluate)},
+			{
+				"content/card.material",
+				fmt.tprintf("material 1\nshading = lit\ngeometry = billboard\n%s", evaluate),
+			},
 			{"content/card.material.meta", "guid = 00112233445566778899aabbccddeeff\n"},
-			{"content/tree.material", fmt.tprintf("material 1\nshading = lit\nblend = masked\ngeometry = billboard_axis\n%s", evaluate)},
+			{
+				"content/tree.material",
+				fmt.tprintf(
+					"material 1\nshading = lit\nblend = masked\ngeometry = billboard_axis\n%s",
+					evaluate,
+				),
+			},
 			{"content/tree.material.meta", "guid = 00112233445566778899aabbccddee00\n"},
 		},
 	)
@@ -536,7 +704,10 @@ billboard_materials_pull_their_vertices :: proc(t: ^testing.T) {
 		guid:     string,
 		flags:    format.Material_Flags,
 		variants: int,
-	}{{"00112233445566778899aabbccddeeff", {.Billboard}, 8}, {"00112233445566778899aabbccddee00", {.Billboard, .Billboard_Axis}, 9}}
+	} {
+		{"00112233445566778899aabbccddeeff", {.Billboard}, 8},
+		{"00112233445566778899aabbccddee00", {.Billboard, .Billboard_Axis}, 9},
+	}
 	for c in cases {
 		data := tree_blob(t, tree, format.guid_parse(c.guid) or_else {})
 		blob, ok := format.material_view(data)

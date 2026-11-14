@@ -50,7 +50,10 @@ init_upscalers :: proc() {
 		query           = Ffx_Query(win.GetProcAddress(module, "ffxQuery")),
 		dispatch        = Ffx_Dispatch(win.GetProcAddress(module, "ffxDispatch")),
 	}
-	if api.create_context == nil || api.destroy_context == nil || api.query == nil || api.dispatch == nil {
+	if api.create_context == nil ||
+	   api.destroy_context == nil ||
+	   api.query == nil ||
+	   api.dispatch == nil {
 		log.errorf("d3d12: no FSR: %s lacks the FidelityFX API", FFX_LOADER_DLL)
 		win.FreeLibrary(module)
 		return
@@ -78,7 +81,11 @@ init_upscalers :: proc() {
 	for &name, i in list {
 		name = string(names[i])
 	}
-	log.infof("d3d12: FSR %s, from the FidelityFX API %s", strings.join(list, ", ", context.temp_allocator), FFX_SDK_VERSION)
+	log.infof(
+		"d3d12: FSR %s, from the FidelityFX API %s",
+		strings.join(list, ", ", context.temp_allocator),
+		FFX_SDK_VERSION,
+	)
 }
 
 // shutdown_upscalers destroys the live upscalers and unloads the loader. The GPU must be idle.
@@ -114,7 +121,7 @@ create_upscaler :: proc(desc: gpu.Upscaler_Desc) -> gpu.Upscaler {
 		return {}
 	}
 	version := Ffx_Create_Context_Desc_Upscale_Version {
-		header  = {type = FFX_CREATE_CONTEXT_DESC_TYPE_UPSCALE_VERSION},
+		header = {type = FFX_CREATE_CONTEXT_DESC_TYPE_UPSCALE_VERSION},
 		version = FFX_UPSCALER_VERSION,
 	}
 	backend := Ffx_Create_Backend_Dx12_Desc {
@@ -122,11 +129,11 @@ create_upscaler :: proc(desc: gpu.Upscaler_Desc) -> gpu.Upscaler {
 		device = dev.device,
 	}
 	create := Ffx_Create_Context_Desc_Upscale {
-		header           = {type = FFX_CREATE_CONTEXT_DESC_TYPE_UPSCALE, next = &backend.header},
-		flags            = FFX_UPSCALE_ENABLE_AUTO_EXPOSURE,
-		max_render_size  = desc.max_render_size,
+		header = {type = FFX_CREATE_CONTEXT_DESC_TYPE_UPSCALE, next = &backend.header},
+		flags = FFX_UPSCALE_ENABLE_AUTO_EXPOSURE,
+		max_render_size = desc.max_render_size,
 		max_upscale_size = desc.output_size,
-		message          = on_ffx_message,
+		message = on_ffx_message,
 	}
 	if .Hdr in desc.flags {
 		create.flags |= FFX_UPSCALE_ENABLE_HIGH_DYNAMIC_RANGE
@@ -177,27 +184,27 @@ upscale :: proc(list: rawptr, u: ^gpu.Upscale) {
 	assert(entry != nil, "gpu: invalid upscaler handle")
 	read_state :: FFX_RESOURCE_STATE_COMPUTE_READ | FFX_RESOURCE_STATE_PIXEL_READ
 	dispatch := Ffx_Dispatch_Desc_Upscale {
-		header                       = {type = FFX_DISPATCH_DESC_TYPE_UPSCALE},
-		command_list                 = list,
-		color                        = ffx_resource(u.color, read_state),
-		depth                        = ffx_resource(u.depth, read_state),
-		motion_vectors               = ffx_resource(u.motion, read_state),
-		reactive                     = ffx_resource(u.reactive, read_state),
+		header = {type = FFX_DISPATCH_DESC_TYPE_UPSCALE},
+		command_list = list,
+		color = ffx_resource(u.color, read_state),
+		depth = ffx_resource(u.depth, read_state),
+		motion_vectors = ffx_resource(u.motion, read_state),
+		reactive = ffx_resource(u.reactive, read_state),
 		transparency_and_composition = ffx_resource(u.transparency, read_state),
-		output                       = ffx_resource(u.output, FFX_RESOURCE_STATE_UNORDERED_ACCESS),
-		jitter_offset                = u.jitter,
-		motion_vector_scale          = u.motion_scale,
-		render_size                  = u.render_size,
-		upscale_size                 = entry.desc.output_size,
-		enable_sharpening            = u.sharpness > 0,
-		sharpness                    = u.sharpness,
-		frame_time_delta             = u.delta_time * 1000,
-		pre_exposure                 = 1,
-		reset                        = bool(u.reset),
-		camera_near                  = u.near,
-		camera_far                   = u.far,
-		camera_fov_angle_vertical    = u.fov_y,
-		view_space_to_meters_factor  = 1,
+		output = ffx_resource(u.output, FFX_RESOURCE_STATE_UNORDERED_ACCESS),
+		jitter_offset = u.jitter,
+		motion_vector_scale = u.motion_scale,
+		render_size = u.render_size,
+		upscale_size = entry.desc.output_size,
+		enable_sharpening = u.sharpness > 0,
+		sharpness = u.sharpness,
+		frame_time_delta = u.delta_time * 1000,
+		pre_exposure = 1,
+		reset = bool(u.reset),
+		camera_near = u.near,
+		camera_far = u.far,
+		camera_fov_angle_vertical = u.fov_y,
+		view_space_to_meters_factor = 1,
 	}
 	if code := dev.ffx.dispatch(&entry.ffx_context, &dispatch.header); code != FFX_RETURN_OK {
 		log.errorf("d3d12: ffxDispatch failed: %d", code)

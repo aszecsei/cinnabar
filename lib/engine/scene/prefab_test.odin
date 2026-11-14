@@ -86,22 +86,40 @@ teardown :: proc(f: ^Prefab_Fixture) {
 
 // write_blob writes a scene as a blob of a kind, as the cooker would.
 @(private = "file")
-write_blob :: proc(t: ^testing.T, f: ^Prefab_Fixture, guid: format.Guid, text: string, kind: format.Asset_Kind) {
+write_blob :: proc(
+	t: ^testing.T,
+	f: ^Prefab_Fixture,
+	guid: format.Guid,
+	text: string,
+	kind: format.Asset_Kind,
+) {
 	s, problems, ok := format.scene_parse(text, context.temp_allocator)
 	testing.expectf(t, ok, "problems: %v", problems)
 	blob := format.scene_write(s, guid, 1, kind, allocator = context.temp_allocator)
 	buffer: [32]u8
-	testing.expect(t, os.write_entire_file(fmt.tprintf("%s/%s.blob", f.dir, format.guid_format(guid, &buffer)), blob) == nil)
+	testing.expect(
+		t,
+		os.write_entire_file(
+			fmt.tprintf("%s/%s.blob", f.dir, format.guid_format(guid, &buffer)),
+			blob,
+		) ==
+		nil,
+	)
 }
 
 @(test)
 a_prefab_spawns_as_new_entities_with_its_references_inside :: proc(t: ^testing.T) {
 	f := setup(t)
 	defer teardown(f)
-	guid := format.Guid{0 = 0x7e, 15 = 1}
+	guid := format.Guid {
+		0  = 0x7e,
+		15 = 1,
+	}
 	write_blob(t, f, guid, TURRET, .Prefab)
 	pose := ecs.TRANSFORM_IDENTITY
-	pose.position = {raw = {16777216, 0, 0}}
+	pose.position = {
+		raw = {16777216, 0, 0},
+	}
 
 	first, ok := spawn_prefab(&f.world, nil, &f.assets, guid, pose)
 	testing.expect(t, ok)
@@ -131,12 +149,21 @@ only_a_cooked_prefab_spawns :: proc(t: ^testing.T) {
 	defer teardown(f)
 	// A refused spawn logs an error, which a test would count as its failure.
 	context.logger = testlog.expected_errors()
-	scene_guid := format.Guid{0 = 0x7e, 15 = 2}
+	scene_guid := format.Guid {
+		0  = 0x7e,
+		15 = 2,
+	}
 	write_blob(t, f, scene_guid, TURRET, .Scene)
 
 	_, ok := spawn_prefab(&f.world, nil, &f.assets, scene_guid, ecs.TRANSFORM_IDENTITY)
 	testing.expect(t, !ok)
-	_, ok = spawn_prefab(&f.world, nil, &f.assets, format.Guid{0 = 0x7e, 15 = 3}, ecs.TRANSFORM_IDENTITY)
+	_, ok = spawn_prefab(
+		&f.world,
+		nil,
+		&f.assets,
+		format.Guid{0 = 0x7e, 15 = 3},
+		ecs.TRANSFORM_IDENTITY,
+	)
 	testing.expect(t, !ok)
 	testing.expect_value(t, ecs.entity_count(&f.world), 0)
 }

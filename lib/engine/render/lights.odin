@@ -152,29 +152,29 @@ ambient_constants :: proc(a: Ambient) -> [4][4]f32 {
 // eye, which is relative to the camera, into view space. The reflection probes' records and their lists are 0 without
 // them (see reflection_probe_cluster_fields).
 Cluster_Constants :: struct {
-	right:         [4]f32,
-	up:            [4]f32,
-	forward:       [4]f32,
+	right:          [4]f32,
+	up:             [4]f32,
+	forward:        [4]f32,
 	// The projection's x and y scales, the near plane, and the slices' scale.
-	projection:    [4]f32,
-	size:          [2]f32,
-	columns:       u32,
-	rows:          u32,
-	lights:        u32,
-	lights_offset: u32,
-	first_light:   u32,
-	light_count:   u32,
-	clusters:      u32,
-	indices:       u32,
-	counter:       u32,
-	capacity:      u32,
-	eye:           [3]f32,
-	probes:        u32,
-	probes_offset: u32,
-	probe_count:   u32,
+	projection:     [4]f32,
+	size:           [2]f32,
+	columns:        u32,
+	rows:           u32,
+	lights:         u32,
+	lights_offset:  u32,
+	first_light:    u32,
+	light_count:    u32,
+	clusters:       u32,
+	indices:        u32,
+	counter:        u32,
+	capacity:       u32,
+	eye:            [3]f32,
+	probes:         u32,
+	probes_offset:  u32,
+	probe_count:    u32,
 	probe_clusters: u32,
 	// The view's far plane when it is orthographic, and 0 otherwise.
-	far:           f32,
+	far:            f32,
 }
 
 #assert(size_of(Cluster_Constants) == 144)
@@ -232,10 +232,16 @@ Light_Frame :: struct {
 
 lights_init :: proc(l: ^Lights, platform: ^core.Platform_API, w: ^ecs.World) {
 	lights_register(l, w)
-	l.counter = platform.gpu_create_buffer({size = 4, usage = {.Storage}, label = "light cluster counter"}, nil)
+	l.counter = platform.gpu_create_buffer(
+		{size = 4, usage = {.Storage}, label = "light cluster counter"},
+		nil,
+	)
 	l.pipeline = shader_pipeline(CLUSTER_SHADER)
 	table_size := LTC_SIZE * LTC_SIZE * 16
-	assert(len(ltc_tables) == 2 * table_size, "render: ltc_ggx.bin is not two tables of LTC_SIZE; run just ltc-fit")
+	assert(
+		len(ltc_tables) == 2 * table_size,
+		"render: ltc_ggx.bin is not two tables of LTC_SIZE; run just ltc-fit",
+	)
 	desc := gpu.Texture_Desc {
 		size   = {LTC_SIZE, LTC_SIZE},
 		format = .RGBA32_Float,
@@ -245,7 +251,9 @@ lights_init :: proc(l: ^Lights, platform: ^core.Platform_API, w: ^ecs.World) {
 	l.ltc_matrix = platform.gpu_create_texture(desc, ltc_tables[:table_size])
 	desc.label = "ltc amplitude"
 	l.ltc_amplitude = platform.gpu_create_texture(desc, ltc_tables[table_size:])
-	l.ltc_sampler = platform.gpu_create_sampler({filter = .Linear, address = .Clamp, label = "ltc sampler"})
+	l.ltc_sampler = platform.gpu_create_sampler(
+		{filter = .Linear, address = .Clamp, label = "ltc sampler"},
+	)
 }
 
 // lights_register makes the light extractors, in init and after a code reload.
@@ -270,7 +278,10 @@ lights_destroy :: proc(l: ^Lights, platform: ^core.Platform_API) {
 
 // cluster_grid is the clusters' columns and rows for a frame's size.
 cluster_grid :: proc(size: [2]u32) -> (columns, rows: u32) {
-	return max((size.x + CLUSTER_TILE - 1) / CLUSTER_TILE, 1), max((size.y + CLUSTER_TILE - 1) / CLUSTER_TILE, 1)
+	return max(
+		(size.x + CLUSTER_TILE - 1) / CLUSTER_TILE,
+		1,
+	), max((size.y + CLUSTER_TILE - 1) / CLUSTER_TILE, 1)
 }
 
 // cluster_slice is the depth slice of a view depth, as cluster_of in material_lighting.hlsli finds it: slices are
@@ -279,7 +290,9 @@ cluster_grid :: proc(size: [2]u32) -> (columns, rows: u32) {
 cluster_slice :: proc(depth: f32, projection: Projection) -> int {
 	scale, bias := slice_constants(projection)
 	_, orthographic := projection.(Orthographic)
-	return int(clamp((orthographic ? depth : math.log2(depth)) * scale + bias, 0, CLUSTER_SLICES - 1))
+	return int(
+		clamp((orthographic ? depth : math.log2(depth)) * scale + bias, 0, CLUSTER_SLICES - 1),
+	)
 }
 
 // slice_constants are what a view depth's slice is found with: log2(depth) * scale + bias in perspective, and
@@ -309,7 +322,13 @@ extract_lights :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32) -> ^Light_Frame 
 	lf.positions = make([dynamic]ecs.World_Position, r.platform.frame_allocator)
 	l := &r.lights
 
-	add :: proc(lf: ^Light_Frame, record: Light_Record, casts: bool, entity: ecs.Entity, position: ecs.World_Position) {
+	add :: proc(
+		lf: ^Light_Frame,
+		record: Light_Record,
+		casts: bool,
+		entity: ecs.Entity,
+		position: ecs.World_Position,
+	) {
 		if len(lf.records) == MAX_LIGHTS {
 			return
 		}
@@ -325,7 +344,14 @@ extract_lights :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32) -> ^Light_Frame 
 		return size > 0 ? size : DEFAULT_AREA_SIZE
 	}
 	// area is an area light's record, its range grown by the radius of its shape's bounding sphere.
-	area :: proc(f: ^Frame, pose: ecs.Transform, type: Light_Type, color: [3]f32, range, half_x, half_y, bounds: f32, two_sided: bool) -> Light_Record {
+	area :: proc(
+		f: ^Frame,
+		pose: ecs.Transform,
+		type: Light_Type,
+		color: [3]f32,
+		range, half_x, half_y, bounds: f32,
+		two_sided: bool,
+	) -> Light_Record {
 		return {
 			type = type,
 			position = ecs.position_sub(pose.position, f.view.position),
@@ -354,7 +380,11 @@ extract_lights :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32) -> ^Light_Frame 
 				direction = forward_of(pose),
 				shadow    = -1,
 				mask      = -1,
-				extent    = {math.tan(math.to_radians(clamp(light.angular_diameter, 0, 90)) * 0.5), 0, 0},
+				extent    = {
+					math.tan(math.to_radians(clamp(light.angular_diameter, 0, 90)) * 0.5),
+					0,
+					0,
+				},
 			}
 			add(lf, record, light.cast_shadows, e, pose.position)
 			lf.directional[lf.directional_count] = e
@@ -428,7 +458,23 @@ extract_lights :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32) -> ^Light_Frame 
 			}
 			half_x, half_y := size_or_default(light.width) / 2, size_or_default(light.height) / 2
 			bounds := math.sqrt(half_x * half_x + half_y * half_y)
-			add(lf, area(f, pose, .Quad, color_of(light.color, light.intensity), light.range, half_x, half_y, bounds, light.two_sided), light.cast_shadows, e, pose.position)
+			add(
+				lf,
+				area(
+					f,
+					pose,
+					.Quad,
+					color_of(light.color, light.intensity),
+					light.range,
+					half_x,
+					half_y,
+					bounds,
+					light.two_sided,
+				),
+				light.cast_shadows,
+				e,
+				pose.position,
+			)
 		}
 	}
 	it = ecs.query_iter(w, l.disk.query)
@@ -440,7 +486,23 @@ extract_lights :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32) -> ^Light_Frame 
 				continue
 			}
 			half_x, half_y := size_or_default(light.width) / 2, size_or_default(light.height) / 2
-			add(lf, area(f, pose, .Disk, color_of(light.color, light.intensity), light.range, half_x, half_y, max(half_x, half_y), light.two_sided), light.cast_shadows, e, pose.position)
+			add(
+				lf,
+				area(
+					f,
+					pose,
+					.Disk,
+					color_of(light.color, light.intensity),
+					light.range,
+					half_x,
+					half_y,
+					max(half_x, half_y),
+					light.two_sided,
+				),
+				light.cast_shadows,
+				e,
+				pose.position,
+			)
 		}
 	}
 	it = ecs.query_iter(w, l.line.query)
@@ -452,7 +514,23 @@ extract_lights :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32) -> ^Light_Frame 
 				continue
 			}
 			half, radius := size_or_default(light.length) / 2, max(light.radius, 0)
-			add(lf, area(f, pose, .Line, color_of(light.color, light.intensity), light.range, half, radius, half + radius, false), light.cast_shadows, e, pose.position)
+			add(
+				lf,
+				area(
+					f,
+					pose,
+					.Line,
+					color_of(light.color, light.intensity),
+					light.range,
+					half,
+					radius,
+					half + radius,
+					false,
+				),
+				light.cast_shadows,
+				e,
+				pose.position,
+			)
 		}
 	}
 	if len(lf.records) == MAX_LIGHTS {
@@ -465,7 +543,16 @@ extract_lights :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32) -> ^Light_Frame 
 
 // light_pose is a light's presented pose, unless its entity is hidden.
 @(private)
-light_pose :: proc(w: ^ecs.World, view: ecs.Chunk_View, i: int, hidden: []u32, e: ecs.Entity) -> (pose: ecs.Transform, ok: bool) {
+light_pose :: proc(
+	w: ^ecs.World,
+	view: ecs.Chunk_View,
+	i: int,
+	hidden: []u32,
+	e: ecs.Entity,
+) -> (
+	pose: ecs.Transform,
+	ok: bool,
+) {
 	if is_hidden(hidden, e) {
 		return
 	}
@@ -505,9 +592,16 @@ upload_lights :: proc(f: ^Frame) {
 	}
 	copy(lf.upload.data, ([^]byte)(raw_data(lf.records))[:len(lf.records) * size_of(Light_Record)])
 
-	sync_compute_pipeline(&l.pipeline, platform, r.residency.assets, {label = "cluster lights"}, r.reloaded)
+	sync_compute_pipeline(
+		&l.pipeline,
+		platform,
+		r.residency.assets,
+		{label = "cluster lights"},
+		r.reloaded,
+	)
 	// The reflection probes are binned with the lights, so the clusters are made for them without punctual lights too.
-	if l.pipeline.pipeline == {} || (len(lf.records) == lf.directional_count && !has_reflection_probes(f)) {
+	if l.pipeline.pipeline == {} ||
+	   (len(lf.records) == lf.directional_count && !has_reflection_probes(f)) {
 		return
 	}
 	cluster_count := int(lf.columns * lf.rows) * CLUSTER_SLICES
@@ -516,8 +610,18 @@ upload_lights :: proc(f: ^Frame) {
 		platform.gpu_destroy_buffer(l.indices)
 		l.cluster_capacity = cluster_count
 		l.index_capacity = cluster_count * CLUSTER_AVERAGE_LIGHTS
-		l.clusters = platform.gpu_create_buffer({size = u32(cluster_count * 8), usage = {.Storage}, label = "light clusters"}, nil)
-		l.indices = platform.gpu_create_buffer({size = u32(l.index_capacity * 4), usage = {.Storage}, label = "light cluster indices"}, nil)
+		l.clusters = platform.gpu_create_buffer(
+			{size = u32(cluster_count * 8), usage = {.Storage}, label = "light clusters"},
+			nil,
+		)
+		l.indices = platform.gpu_create_buffer(
+			{
+				size = u32(l.index_capacity * 4),
+				usage = {.Storage},
+				label = "light cluster indices",
+			},
+			nil,
+		)
 	}
 	lf.zero, ok = platform.gpu_upload(4, 4)
 	if !ok {
@@ -566,17 +670,24 @@ add_cluster_passes :: proc(f: ^Frame) {
 	lf.indices = import_buffer(g, l.indices)
 	lf.counter = import_buffer(g, l.counter)
 	p := add_compute_pass(g, "clear light counter", proc(ctx: ^Pass_Context) {
-		lf := (^Frame)(ctx.data).lights
-		gpu.cmd_copy_buffer(ctx.cb, lf.zero.buffer, lf.zero.offset, gpu_buffer(ctx.graph, lf.counter), 0, 4)
-	}, f)
+			lf := (^Frame)(ctx.data).lights
+			gpu.cmd_copy_buffer(
+				ctx.cb,
+				lf.zero.buffer,
+				lf.zero.offset,
+				gpu_buffer(ctx.graph, lf.counter),
+				0,
+				4,
+			)
+		}, f)
 	copy_dest(g, p, lf.counter)
 	p = add_compute_pass(g, "cluster lights", proc(ctx: ^Pass_Context) {
-		f := (^Frame)(ctx.data)
-		count := f.lights.columns * f.lights.rows * CLUSTER_SLICES
-		gpu.cmd_set_pipeline(ctx.cb, f.renderer.lights.pipeline.pipeline)
-		gpu.cmd_set_pass_constants(ctx.cb, f.lights.constants)
-		gpu.cmd_dispatch(ctx.cb, {(count + CLUSTER_GROUP_SIZE - 1) / CLUSTER_GROUP_SIZE, 1, 1})
-	}, f)
+			f := (^Frame)(ctx.data)
+			count := f.lights.columns * f.lights.rows * CLUSTER_SLICES
+			gpu.cmd_set_pipeline(ctx.cb, f.renderer.lights.pipeline.pipeline)
+			gpu.cmd_set_pass_constants(ctx.cb, f.lights.constants)
+			gpu.cmd_dispatch(ctx.cb, {(count + CLUSTER_GROUP_SIZE - 1) / CLUSTER_GROUP_SIZE, 1, 1})
+		}, f)
 	write(g, p, lf.counter)
 	write(g, p, lf.clusters)
 	write(g, p, lf.indices)
@@ -592,5 +703,8 @@ add_cluster_passes :: proc(f: ^Frame) {
 @(private)
 projection_scale :: proc(view_projection: matrix[4, 4]f32) -> [2]f32 {
 	// The rotation keeps each row's length, so the rows' lengths are the scales.
-	return {linalg.length([3]f32{view_projection[0, 0], view_projection[0, 1], view_projection[0, 2]}), linalg.length([3]f32{view_projection[1, 0], view_projection[1, 1], view_projection[1, 2]})}
+	return {
+		linalg.length([3]f32{view_projection[0, 0], view_projection[0, 1], view_projection[0, 2]}),
+		linalg.length([3]f32{view_projection[1, 0], view_projection[1, 1], view_projection[1, 2]}),
+	}
 }

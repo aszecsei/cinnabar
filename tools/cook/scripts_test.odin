@@ -28,7 +28,13 @@ capture_errors :: proc(e: ^Errors) -> log.Logger {
 	e.messages = make([dynamic]string, virtual.arena_allocator(&e.arena))
 	e.runner = context.logger
 	return {
-		procedure = proc(data: rawptr, level: log.Level, text: string, options: log.Options, location := #caller_location) {
+		procedure = proc(
+			data: rawptr,
+			level: log.Level,
+			text: string,
+			options: log.Options,
+			location := #caller_location,
+		) {
 			e := (^Errors)(data)
 			// testing.expect reports a failure as an error log from the test file. It must reach the test runner.
 			if strings.has_suffix(location.file_path, "_test.odin") {
@@ -95,7 +101,10 @@ tree_options :: proc(tree: Tree) -> Cook_Options {
 
 @(private)
 tree_guid :: proc(t: ^testing.T, tree: Tree, path: string) -> format.Guid {
-	data, err := os.read_entire_file(fmt.tprintf("%s/content/%s.meta", tree.dir, path), context.temp_allocator)
+	data, err := os.read_entire_file(
+		fmt.tprintf("%s/content/%s.meta", tree.dir, path),
+		context.temp_allocator,
+	)
 	testing.expectf(t, err == nil, "%s has no .meta file", path)
 	guid, ok := format.meta_guid(string(data))
 	testing.expect(t, ok)
@@ -106,7 +115,10 @@ tree_guid :: proc(t: ^testing.T, tree: Tree, path: string) -> format.Guid {
 @(private)
 tree_blob :: proc(t: ^testing.T, tree: Tree, guid: format.Guid) -> []byte {
 	buffer: [32]u8
-	data, err := os.read_entire_file(fmt.tprintf("%s/cache/%s.blob", tree.dir, format.guid_format(guid, &buffer)), context.temp_allocator)
+	data, err := os.read_entire_file(
+		fmt.tprintf("%s/cache/%s.blob", tree.dir, format.guid_format(guid, &buffer)),
+		context.temp_allocator,
+	)
 	testing.expect(t, err == nil)
 	aligned, _ := mem.alloc_bytes(len(data), format.BLOB_ALIGN, context.temp_allocator)
 	copy(aligned, data)
@@ -148,7 +160,16 @@ requires_resolve_like_luau :: proc(t: ^testing.T) {
 	}
 	for c in cases {
 		target, message := resolve_require(by_path, c.requirer, c.path)
-		testing.expectf(t, message == "" && target == c.target, "%s requires %s: got %d %q, want %d", c.requirer, c.path, target, message, c.target)
+		testing.expectf(
+			t,
+			message == "" && target == c.target,
+			"%s requires %s: got %d %q, want %d",
+			c.requirer,
+			c.path,
+			target,
+			message,
+			c.target,
+		)
 	}
 
 	_, message := resolve_require(by_path, "/c/top.luau", "./missing")
@@ -209,7 +230,10 @@ a_content_root_cooks_with_aliases :: proc(t: ^testing.T) {
 		t,
 		{
 			{".luaurc", `{"aliases": {"Lib": "./content/lib"}}`},
-			{"content/main.luau", `local util = require("./util"); local thing = require("@lib/thing"); return util.x + thing.y`},
+			{
+				"content/main.luau",
+				`local util = require("./util"); local thing = require("@lib/thing"); return util.x + thing.y`,
+			},
 			{"content/util.luau", `return {x = 1}`},
 			{"content/lib/thing/init.luau", `return {y = require("@self/part")}`},
 			{"content/lib/thing/part.luau", `return 2`},
@@ -236,7 +260,11 @@ a_content_root_cooks_with_aliases :: proc(t: ^testing.T) {
 	guid := tree_guid(t, tree, "main.luau")
 	testing.expect(t, cook(options, {.Script}).ok)
 	testing.expect_value(t, tree_guid(t, tree, "main.luau"), guid)
-	testing.expect_value(t, cooked_script_key(fmt.tprintf("%s/cache/%s.blob", tree.dir, guid_text(guid))), key)
+	testing.expect_value(
+		t,
+		cooked_script_key(fmt.tprintf("%s/cache/%s.blob", tree.dir, guid_text(guid))),
+		key,
+	)
 }
 
 @(private)
@@ -247,18 +275,32 @@ guid_text :: proc(guid: format.Guid) -> string {
 
 @(test)
 a_changed_dependency_changes_the_key :: proc(t: ^testing.T) {
-	a := Script_Source{name = "game/a.luau", source = transmute([]byte)string("return 1")}
+	a := Script_Source {
+		name   = "game/a.luau",
+		source = transmute([]byte)string("return 1"),
+	}
 	before := script_key(.Dev, a, 0)
 	a.resolved = make([dynamic]Resolved_Require, context.temp_allocator)
 	append(&a.resolved, Resolved_Require{entry = {"./b", {1 = 1}}})
 	testing.expect(t, script_key(.Dev, a, 0) != before, "a require did not change the key")
-	testing.expect(t, script_key(.Release, a, 0) != script_key(.Dev, a, 0), "the configuration did not change the key")
-	testing.expect(t, script_key(.Dev, a, 1) != script_key(.Dev, a, 0), "a dependency's source did not change the key")
+	testing.expect(
+		t,
+		script_key(.Release, a, 0) != script_key(.Dev, a, 0),
+		"the configuration did not change the key",
+	)
+	testing.expect(
+		t,
+		script_key(.Dev, a, 1) != script_key(.Dev, a, 0),
+		"a dependency's source did not change the key",
+	)
 }
 
 @(test)
 require_cycles_are_errors :: proc(t: ^testing.T) {
-	tree := make_tree(t, {{"content/a.luau", `return require("./b")`}, {"content/b.luau", `return require("./a")`}})
+	tree := make_tree(
+		t,
+		{{"content/a.luau", `return require("./b")`}, {"content/b.luau", `return require("./a")`}},
+	)
 	defer remove_tree(tree)
 	errors: Errors
 	context.logger = capture_errors(&errors)
@@ -270,7 +312,15 @@ require_cycles_are_errors :: proc(t: ^testing.T) {
 @(test)
 copied_meta_files_are_errors :: proc(t: ^testing.T) {
 	meta := "guid = 00112233445566778899aabbccddeeff\n"
-	tree := make_tree(t, {{"content/a.luau", "return 1"}, {"content/a.luau.meta", meta}, {"content/b.luau", "return 2"}, {"content/b.luau.meta", meta}})
+	tree := make_tree(
+		t,
+		{
+			{"content/a.luau", "return 1"},
+			{"content/a.luau.meta", meta},
+			{"content/b.luau", "return 2"},
+			{"content/b.luau.meta", meta},
+		},
+	)
 	defer remove_tree(tree)
 	errors: Errors
 	context.logger = capture_errors(&errors)
@@ -293,9 +343,11 @@ missing_modules_are_errors :: proc(t: ^testing.T) {
 @(test)
 behaviours_get_their_fields_in_the_blob :: proc(t: ^testing.T) {
 	tree := make_tree(
-		t,
+	t,
+	{
 		{
-			{"content/door.luau", `
+			"content/door.luau",
+			`
 local defaults = require("./defaults")
 local Door = Behaviour.define("Door", {
 	speed = Field.number(defaults.speed),
@@ -306,11 +358,12 @@ local Door = Behaviour.define("Door", {
 	turret = Field.asset("prefab"),
 })
 function Door:start() World.spawn() end
-return Door`},
-			{"content/defaults.luau", "return {speed = 4}"},
-			// A script that runs as a coroutine is never run by the cooker: it would not return.
-			{"content/main.luau", "while true do coroutine.yield() end"},
+return Door`,
 		},
+		{"content/defaults.luau", "return {speed = 4}"},
+		// A script that runs as a coroutine is never run by the cooker: it would not return.
+		{"content/main.luau", "while true do coroutine.yield() end"},
+	},
 	)
 	defer remove_tree(tree)
 	options := tree_options(tree)
@@ -344,7 +397,14 @@ return Door`},
 	testing.expect_value(t, main_blob.flags, format.Script_Flags{})
 
 	// A field default that comes from a dependency changes with it.
-	testing.expect(t, os.write_entire_file(fmt.tprintf("%s/content/defaults.luau", tree.dir), transmute([]byte)string("return {speed = 9}")) == nil)
+	testing.expect(
+		t,
+		os.write_entire_file(
+			fmt.tprintf("%s/content/defaults.luau", tree.dir),
+			transmute([]byte)string("return {speed = 9}"),
+		) ==
+		nil,
+	)
 	testing.expect(t, cook(options, {.Script}).ok)
 	data = tree_blob(t, tree, tree_guid(t, tree, "door.luau"))
 	blob, _ = format.script_view(data)
@@ -357,7 +417,9 @@ actions_get_their_parameters_in_the_blob :: proc(t: ^testing.T) {
 	tree := make_tree(
 		t,
 		{
-			{"content/bark.luau", `
+			{
+				"content/bark.luau",
+				`
 local Bark = Action.define("bark", {
 	line = Param.string("hey"),
 	loud = Param.boolean(),
@@ -365,7 +427,8 @@ local Bark = Action.define("bark", {
 	toward = Param.position(),
 })
 function Bark:tick(dt) return "succeeded" end
-return Bark`},
+return Bark`,
+			},
 		},
 	)
 	defer remove_tree(tree)
@@ -382,7 +445,12 @@ return Bark`},
 	testing.expect_value(t, blob.flags, format.Script_Flags{.Action})
 	testing.expect_value(t, format.blob_string(data, blob.class_name), "bark")
 	// The index has the action's name and its parameters sorted by name, from the cook and from an up to date script.
-	expected := []cook_link.Action_Param{{"at", .Entity}, {"line", .String}, {"loud", .Boolean}, {"toward", .Position}}
+	expected := []cook_link.Action_Param {
+		{"at", .Entity},
+		{"line", .String},
+		{"loud", .Boolean},
+		{"toward", .Position},
+	}
 	for a in pass.assets {
 		testing.expect_value(t, a.behaviour, "")
 		testing.expect_value(t, a.action, "bark")
@@ -417,7 +485,10 @@ a_behaviour_top_level_that_calls_the_engine_is_an_error :: proc(t: ^testing.T) {
 	tree := make_tree(
 		t,
 		{
-			{"content/eager.luau", `local Eager = Behaviour.define("Eager") World.spawn() return Eager`},
+			{
+				"content/eager.luau",
+				`local Eager = Behaviour.define("Eager") World.spawn() return Eager`,
+			},
 			{"content/stuck.luau", `local Stuck = Behaviour.define("Stuck") while true do end`},
 		},
 	)
@@ -426,15 +497,25 @@ a_behaviour_top_level_that_calls_the_engine_is_an_error :: proc(t: ^testing.T) {
 	context.logger = capture_errors(&errors)
 	defer release_errors(&errors)
 	testing.expect(t, !cook(tree_options(tree), {.Script}).ok)
-	expect_error(t, &errors, "eager.luau: a behaviour or action script's top level runs when it is cooked")
-	expect_error(t, &errors, "game/eager.luau:1: World is not available when the cooker reads a behaviour's fields")
+	expect_error(
+		t,
+		&errors,
+		"eager.luau: a behaviour or action script's top level runs when it is cooked",
+	)
+	expect_error(
+		t,
+		&errors,
+		"game/eager.luau:1: World is not available when the cooker reads a behaviour's fields",
+	)
 	expect_error(t, &errors, "the top level ran for more than 2 seconds")
 }
 
 // The engine's definitions, with the parts that host.exe --emit-script-types generates cut down to what the tests
 // use.
 @(private)
-TEST_DEFINITIONS :: #load("../../lib/engine/script/engine.d.luau", string) + `
+TEST_DEFINITIONS ::
+	#load("../../lib/engine/script/engine.d.luau", string) +
+	`
 declare extern type Entity with
 	function is_alive(self): boolean
 end
@@ -444,7 +525,10 @@ end
 typed_options :: proc(t: ^testing.T, tree: Tree, definitions := TEST_DEFINITIONS) -> Cook_Options {
 	options := tree_options(tree)
 	options.definitions = fmt.tprintf("%s/types.d.luau", tree.dir)
-	testing.expect(t, os.write_entire_file(options.definitions, transmute([]byte)definitions) == nil)
+	testing.expect(
+		t,
+		os.write_entire_file(options.definitions, transmute([]byte)definitions) == nil,
+	)
 	return options
 }
 
@@ -468,7 +552,13 @@ native_scripts_are_flagged :: proc(t: ^testing.T) {
 	for c in ([]Case{{"comment.luau", true}, {"meta.luau", true}, {"plain.luau", false}}) {
 		data := tree_blob(t, tree, tree_guid(t, tree, c.name))
 		blob, ok := format.script_view(data)
-		testing.expectf(t, ok && (.Native in blob.flags) == c.native, "%s: native should be %v", c.name, c.native)
+		testing.expectf(
+			t,
+			ok && (.Native in blob.flags) == c.native,
+			"%s: native should be %v",
+			c.name,
+			c.native,
+		)
 	}
 }
 
@@ -479,9 +569,18 @@ type_errors_fail_the_cook :: proc(t: ^testing.T) {
 		{
 			// A nonstrict module's exports are loosely typed, so this one is strict.
 			{"content/m.luau", "--!strict\nreturn {x = 1}"},
-			{"content/a.luau", "--!strict\nlocal alive: number = World.spawn():is_alive()\nreturn alive"},
-			{"content/b.luau", "--!strict\nlocal m = require('./m')\nlocal s: string = m.x\nreturn s"},
-			{"content/fine.luau", "--!strict\nlocal q = Quaternion.euler(vector.create(0, 90, 0)) * vector.create(0, 0, 1)\nreturn q.x"},
+			{
+				"content/a.luau",
+				"--!strict\nlocal alive: number = World.spawn():is_alive()\nreturn alive",
+			},
+			{
+				"content/b.luau",
+				"--!strict\nlocal m = require('./m')\nlocal s: string = m.x\nreturn s",
+			},
+			{
+				"content/fine.luau",
+				"--!strict\nlocal q = Quaternion.euler(vector.create(0, 90, 0)) * vector.create(0, 0, 1)\nreturn q.x",
+			},
 		},
 	)
 	defer remove_tree(tree)
@@ -496,8 +595,26 @@ type_errors_fail_the_cook :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(errors.messages), 2)
 	// A script with type errors gets no blob.
 	buffer: [32]u8
-	testing.expect(t, !os.exists(fmt.tprintf("%s/cache/%s.blob", tree.dir, format.guid_format(tree_guid(t, tree, "a.luau"), &buffer))))
-	testing.expect(t, os.exists(fmt.tprintf("%s/cache/%s.blob", tree.dir, format.guid_format(tree_guid(t, tree, "fine.luau"), &buffer))))
+	testing.expect(
+		t,
+		!os.exists(
+			fmt.tprintf(
+				"%s/cache/%s.blob",
+				tree.dir,
+				format.guid_format(tree_guid(t, tree, "a.luau"), &buffer),
+			),
+		),
+	)
+	testing.expect(
+		t,
+		os.exists(
+			fmt.tprintf(
+				"%s/cache/%s.blob",
+				tree.dir,
+				format.guid_format(tree_guid(t, tree, "fine.luau"), &buffer),
+			),
+		),
+	)
 }
 
 @(test)
@@ -549,7 +666,14 @@ a_broken_definition_file_fails_the_cook :: proc(t: ^testing.T) {
 // cooks: not only the first, which opens the type checker (#325).
 @(test)
 a_broken_definition_file_fails_every_dirty_script :: proc(t: ^testing.T) {
-	tree := make_tree(t, {{"content/a.luau", "return 1"}, {"content/b.luau", "return 2"}, {"content/c.luau", "return 3"}})
+	tree := make_tree(
+		t,
+		{
+			{"content/a.luau", "return 1"},
+			{"content/b.luau", "return 2"},
+			{"content/c.luau", "return 3"},
+		},
+	)
 	defer remove_tree(tree)
 	testing.expect(t, cook(typed_options(t, tree), ALL_KINDS, log_problems = false).ok)
 	options := typed_options(t, tree, "declare World: {")
@@ -560,6 +684,13 @@ a_broken_definition_file_fails_every_dirty_script :: proc(t: ^testing.T) {
 	defer index_destroy(&index)
 	testing.expect_value(t, len(index.assets), 3)
 	for _, a in index.assets {
-		testing.expectf(t, a.status == .Failed && a.errors == 1, "%s is %v with %d errors", a.path, a.status, a.errors)
+		testing.expectf(
+			t,
+			a.status == .Failed && a.errors == 1,
+			"%s is %v with %d errors",
+			a.path,
+			a.status,
+			a.errors,
+		)
 	}
 }

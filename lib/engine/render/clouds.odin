@@ -305,16 +305,49 @@ ensure_cloud_noise :: proc(r: ^Renderer) -> bool {
 	v := &r.clouds
 	platform := r.platform
 	if v.shape == {} {
-		v.shape = platform.gpu_create_texture({size = {CLOUD_SHAPE_SIZE, CLOUD_SHAPE_SIZE}, depth = CLOUD_SHAPE_SIZE, format = CLOUD_NOISE_FORMAT, usage = {.Sampled, .Storage}, label = "clouds shape noise"}, nil)
+		v.shape = platform.gpu_create_texture(
+			{
+				size = {CLOUD_SHAPE_SIZE, CLOUD_SHAPE_SIZE},
+				depth = CLOUD_SHAPE_SIZE,
+				format = CLOUD_NOISE_FORMAT,
+				usage = {.Sampled, .Storage},
+				label = "clouds shape noise",
+			},
+			nil,
+		)
 	}
 	if v.detail == {} {
-		v.detail = platform.gpu_create_texture({size = {CLOUD_DETAIL_SIZE, CLOUD_DETAIL_SIZE}, depth = CLOUD_DETAIL_SIZE, format = CLOUD_NOISE_FORMAT, usage = {.Sampled, .Storage}, label = "clouds detail noise"}, nil)
+		v.detail = platform.gpu_create_texture(
+			{
+				size = {CLOUD_DETAIL_SIZE, CLOUD_DETAIL_SIZE},
+				depth = CLOUD_DETAIL_SIZE,
+				format = CLOUD_NOISE_FORMAT,
+				usage = {.Sampled, .Storage},
+				label = "clouds detail noise",
+			},
+			nil,
+		)
 	}
 	if v.curl == {} {
-		v.curl = platform.gpu_create_texture({size = {CLOUD_CURL_SIZE, CLOUD_CURL_SIZE}, format = CLOUD_NOISE_FORMAT, usage = {.Sampled, .Storage}, label = "clouds curl noise"}, nil)
+		v.curl = platform.gpu_create_texture(
+			{
+				size = {CLOUD_CURL_SIZE, CLOUD_CURL_SIZE},
+				format = CLOUD_NOISE_FORMAT,
+				usage = {.Sampled, .Storage},
+				label = "clouds curl noise",
+			},
+			nil,
+		)
 	}
 	if v.noise_sampler == {} {
-		v.noise_sampler = platform.gpu_create_sampler({filter = .Linear, mip_filter = .Linear, address = .Repeat, label = "clouds repeat sampler"})
+		v.noise_sampler = platform.gpu_create_sampler(
+			{
+				filter = .Linear,
+				mip_filter = .Linear,
+				address = .Repeat,
+				label = "clouds repeat sampler",
+			},
+		)
 	}
 	return v.shape != {} && v.detail != {} && v.curl != {} && v.noise_sampler != {}
 }
@@ -329,7 +362,15 @@ ensure_cloud_shadow_map :: proc(r: ^Renderer, v: ^Cloud_State, size: u32) -> boo
 	if v.shadow_map != {} {
 		platform.gpu_destroy_texture(v.shadow_map)
 	}
-	v.shadow_map = platform.gpu_create_texture({size = {size, size}, format = CLOUD_SHADOW_FORMAT, usage = {.Sampled, .Storage}, label = "clouds shadow map"}, nil)
+	v.shadow_map = platform.gpu_create_texture(
+		{
+			size = {size, size},
+			format = CLOUD_SHADOW_FORMAT,
+			usage = {.Sampled, .Storage},
+			label = "clouds shadow map",
+		},
+		nil,
+	)
 	v.shadow_size = size
 	return v.shadow_map != {}
 }
@@ -354,7 +395,10 @@ cloud_offsets :: proc(total: [2]f64, weather_size: f32) -> (weather, noise: [2]f
 		return f32(m)
 	}
 	size := f64(max(weather_size, 1))
-	return {fold(total.x, size), fold(total.y, size)}, {fold(total.x, CLOUD_NOISE_PERIOD), fold(total.y, CLOUD_NOISE_PERIOD)}
+	return {
+		fold(total.x, size),
+		fold(total.y, size),
+	}, {fold(total.x, CLOUD_NOISE_PERIOD), fold(total.y, CLOUD_NOISE_PERIOD)}
 }
 
 // cirrus_offset reduces the cirrus's offset from the camera, in meters, in the wind's frame: along the wind, whose
@@ -372,7 +416,10 @@ cirrus_offset :: proc(total: [2]f64, wind_direction: f32) -> [2]f32 {
 	a := f64(math.to_radians(wind_direction))
 	along := [2]f64{math.sin(a), math.cos(a)}
 	across := [2]f64{-along.y, along.x}
-	return {fold(total.x * along.x + total.y * along.y, CIRRUS_PERIOD * CIRRUS_STRETCH), fold(total.x * across.x + total.y * across.y, CIRRUS_PERIOD)}
+	return {
+		fold(total.x * along.x + total.y * along.y, CIRRUS_PERIOD * CIRRUS_STRETCH),
+		fold(total.x * across.x + total.y * across.y, CIRRUS_PERIOD),
+	}
 }
 
 // The geometry on the CPU, which matches clouds_common.hlsli: a ray from a height h0 above the ground with mu, the
@@ -454,8 +501,12 @@ cloud_gradient :: proc(hf, type: f32) -> f32 {
 	stratus := [4]f32{0, 0.1, 0.2, 0.3}
 	cumulus := [4]f32{0, 0.2, 0.4, 0.6}
 	cumulonimbus := [4]f32{0, 0.1, 0.7, 1.0}
-	k := type < 0.5 ? stratus + (cumulus - stratus) * (type * 2) : cumulus + (cumulonimbus - cumulus) * ((type - 0.5) * 2)
-	return clamp(cloud_remap(hf, k.x, k.y, 0, 1), 0, 1) * clamp(cloud_remap(hf, k.z, k.w, 1, 0), 0, 1)
+	k :=
+		type < 0.5 ? stratus + (cumulus - stratus) * (type * 2) : cumulus + (cumulonimbus - cumulus) * ((type - 0.5) * 2)
+	return(
+		clamp(cloud_remap(hf, k.x, k.y, 0, 1), 0, 1) *
+		clamp(cloud_remap(hf, k.z, k.w, 1, 0), 0, 1) \
+	)
 }
 
 // cloud_far is how far a distance is into the far clouds, from 0 at far_distance to 1 at twice it, where the authored
@@ -471,17 +522,33 @@ cloud_far_coverage :: proc(coverage, far_coverage, far: f32) -> f32 {
 // cloud_shadow_center is the shadow map's center relative to the camera: where the sun's rays through the camera meet
 // the layer's bottom, which is bottom_rel below or above the camera, snapped to a texel in the render origin's space,
 // whose offset from the camera is camera_offset, so the map does not swim as the camera moves.
-cloud_shadow_center :: proc(to_sun: [3]f32, bottom_rel: f32, camera_offset: [2]f32, size: u32) -> [2]f32 {
+cloud_shadow_center :: proc(
+	to_sun: [3]f32,
+	bottom_rel: f32,
+	camera_offset: [2]f32,
+	size: u32,
+) -> [2]f32 {
 	center := to_sun.xz * (bottom_rel / max(to_sun.y, 0.05))
 	texel := f32(CLOUD_SHADOW_EXTENT) / f32(max(size, 1))
 	origin := center + camera_offset
-	snapped := [2]f32{math.floor(origin.x / texel + 0.5) * texel, math.floor(origin.y / texel + 0.5) * texel}
+	snapped := [2]f32 {
+		math.floor(origin.x / texel + 0.5) * texel,
+		math.floor(origin.y / texel + 0.5) * texel,
+	}
 	return snapped - camera_offset
 }
 
 // cloud_shadow_uv is where a point relative to the camera reads the shadow map, along the direction toward the sun,
 // as cloud_shadow in cloud_shadow.hlsli finds it, and whether it is inside the map.
-cloud_shadow_uv :: proc(p, to_sun: [3]f32, bottom_rel: f32, center: [2]f32, extent: f32) -> (uv: [2]f32, inside: bool) {
+cloud_shadow_uv :: proc(
+	p, to_sun: [3]f32,
+	bottom_rel: f32,
+	center: [2]f32,
+	extent: f32,
+) -> (
+	uv: [2]f32,
+	inside: bool,
+) {
 	if to_sun.y <= 0.05 {
 		return
 	}
@@ -570,7 +637,8 @@ begin_clouds :: proc(f: ^Frame, s: Cloud_Settings, sky: Sky_Settings, ambient: A
 	}
 	if !sun {
 		if f.sky != nil {
-			sun, sun_direction, base = true, linalg.normalize0(sky.sun_direction), sky.sun_illuminance
+			sun, sun_direction, base =
+				true, linalg.normalize0(sky.sun_direction), sky.sun_illuminance
 		} else if lf != nil && lf.directional_count > 0 {
 			record := &lf.records[0]
 			sun, shadow_record = true, 0
@@ -580,7 +648,11 @@ begin_clouds :: proc(f: ^Frame, s: Cloud_Settings, sky: Sky_Settings, ambient: A
 	sun_illuminance, cirrus_illuminance := base, base
 	if sun && f.sky != nil {
 		tint :: proc(a: Atmosphere_Params, height_m: f32, direction: [3]f32) -> [3]f32 {
-			return sky_transmittance(a, clamp(height_m / 1000, 0.001, a.top - a.bottom - 0.001), direction)
+			return sky_transmittance(
+				a,
+				clamp(height_m / 1000, 0.001, a.top - a.bottom - 0.001),
+				direction,
+			)
 		}
 		sun_illuminance = base * tint(a, (s.bottom + s.top) * 0.5, sun_direction)
 		cirrus_illuminance = base * tint(a, s.cirrus_height, sun_direction)
@@ -628,7 +700,10 @@ begin_clouds :: proc(f: ^Frame, s: Cloud_Settings, sky: Sky_Settings, ambient: A
 		far_coverage       = s.far_coverage,
 		weather_offset     = weather_offset,
 		noise_offset       = noise_offset,
-		wind_direction     = {math.sin(math.to_radians(s.wind_direction)), math.cos(math.to_radians(s.wind_direction))},
+		wind_direction     = {
+			math.sin(math.to_radians(s.wind_direction)),
+			math.cos(math.to_radians(s.wind_direction)),
+		},
 		screen_size        = {f32(f.size.x), f32(f.size.y)},
 		coverage           = s.coverage,
 		precipitation      = s.precipitation,
@@ -703,7 +778,8 @@ add_cloud_shadow_passes :: proc(f: ^Frame) {
 	}
 	g := f.graph
 	v := &f.renderer.clouds
-	cf.constants.previous = f.previous_view_projection * linalg.matrix4_translate_f32(f.camera_motion)
+	cf.constants.previous =
+		f.previous_view_projection * linalg.matrix4_translate_f32(f.camera_motion)
 	(^Cloud_Constants)(raw_data(cf.upload.data)).previous = cf.constants.previous
 	cf.shape = import_texture(g, v.shape, .Storage)
 	cf.detail = import_texture(g, v.detail, .Storage)
@@ -738,8 +814,14 @@ add_cloud_passes :: proc(f: ^Frame) {
 		return
 	}
 	g := f.graph
-	cf.current = create_texture(g, {size = cf.size, format = CLOUD_FORMAT, label = "clouds current"})
-	cf.distance = create_texture(g, {size = cf.size, format = CLOUD_DISTANCE_FORMAT, label = "clouds distance"})
+	cf.current = create_texture(
+		g,
+		{size = cf.size, format = CLOUD_FORMAT, label = "clouds current"},
+	)
+	cf.distance = create_texture(
+		g,
+		{size = cf.size, format = CLOUD_DISTANCE_FORMAT, label = "clouds distance"},
+	)
 	p := add_compute_pass(g, "clouds march", run_cloud_march, f, queue = .Compute)
 	read(g, p, f.depth)
 	read(g, p, cf.shape)
@@ -786,8 +868,16 @@ run_cloud_noise :: proc(ctx: ^Pass_Context) {
 	gpu.cmd_set_pass_constants(ctx.cb, cf.upload)
 	targets := [3]Texture{cf.shape, cf.detail, cf.curl}
 	dispatches := [3][3]u32 {
-		{CLOUD_SHAPE_SIZE / CLOUD_GROUP_SIZE, CLOUD_SHAPE_SIZE / CLOUD_GROUP_SIZE, CLOUD_SHAPE_SIZE / CLOUD_GROUP_SIZE},
-		{CLOUD_DETAIL_SIZE / CLOUD_GROUP_SIZE, CLOUD_DETAIL_SIZE / CLOUD_GROUP_SIZE, CLOUD_DETAIL_SIZE / CLOUD_GROUP_SIZE},
+		{
+			CLOUD_SHAPE_SIZE / CLOUD_GROUP_SIZE,
+			CLOUD_SHAPE_SIZE / CLOUD_GROUP_SIZE,
+			CLOUD_SHAPE_SIZE / CLOUD_GROUP_SIZE,
+		},
+		{
+			CLOUD_DETAIL_SIZE / CLOUD_GROUP_SIZE,
+			CLOUD_DETAIL_SIZE / CLOUD_GROUP_SIZE,
+			CLOUD_DETAIL_SIZE / CLOUD_GROUP_SIZE,
+		},
 		{CLOUD_CURL_SIZE / CLOUD_GROUP_SIZE, CLOUD_CURL_SIZE / CLOUD_GROUP_SIZE, 1},
 	}
 	for target, kind in targets {
@@ -810,7 +900,10 @@ run_cloud_shadow :: proc(ctx: ^Pass_Context) {
 	gpu.cmd_set_pipeline(ctx.cb, f.renderer.clouds.shadow.pipeline)
 	gpu.cmd_set_pass_constants(ctx.cb, cf.upload)
 	gpu.cmd_push_constants(ctx.cb, &push)
-	gpu.cmd_dispatch(ctx.cb, groups({cf.params.shadow_size, cf.params.shadow_size}, CLOUD_GROUP_SIZE))
+	gpu.cmd_dispatch(
+		ctx.cb,
+		groups({cf.params.shadow_size, cf.params.shadow_size}, CLOUD_GROUP_SIZE),
+	)
 }
 
 @(private = "file")

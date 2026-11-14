@@ -53,7 +53,10 @@ layout_document :: proc(s: ^State, tf: Text_Frame, d: ^Document, index: int) {
 @(private)
 follow_caret :: proc(s: ^State, d: ^Document, index: int) {
 	edit, ok := &s.input.edit.?
-	if !ok || edit.field.document != i32(index) || edit.field.generation != d.generation || int(edit.field.node) >= len(d.nodes) {
+	if !ok ||
+	   edit.field.document != i32(index) ||
+	   edit.field.generation != d.generation ||
+	   int(edit.field.node) >= len(d.nodes) {
 		return
 	}
 	node := &d.nodes[edit.field.node]
@@ -61,7 +64,8 @@ follow_caret :: proc(s: ^State, d: ^Document, index: int) {
 		return
 	}
 	x := caret_x(d, node.text, edit.caret)
-	width := node.rect[2] - node.rect[0] - (node.style.padding[1] + node.style.padding[3]) * s.scale
+	width :=
+		node.rect[2] - node.rect[0] - (node.style.padding[1] + node.style.padding[3]) * s.scale
 	if x - edit.scroll > width - CARET_WIDTH * s.scale {
 		edit.scroll = x - width + CARET_WIDTH * s.scale
 	} else if x < edit.scroll {
@@ -78,7 +82,8 @@ style_tree :: proc(s: ^State, d: ^Document, index: int, n: u32, parent: ^Node) {
 	if states := node_states(s, index, d, n); states != {} {
 		node.style = cascade(d, n, parent_style, states)
 	}
-	node.shown = node.style.visible && .Removed not_in node.flags && (parent == nil || parent.shown)
+	node.shown =
+		node.style.visible && .Removed not_in node.flags && (parent == nil || parent.shown)
 	node.disabled = node.style.disabled || (parent != nil && parent.disabled)
 	node.alpha = node.style.opacity * (parent != nil ? parent.alpha : 1)
 	for c := node.first_child; c != NONE; c = d.nodes[c].next_sibling {
@@ -234,7 +239,8 @@ resolve_tree :: proc(s: ^State, d: ^Document, n: u32, axis: int) {
 	content := max(node.size[axis] - padding_of(s, st, axis), 0)
 	if main_axis(st) == axis {
 		// A scroll box's children share the larger of its content and what they need, which it scrolls through.
-		room := scroll_axis(st) == axis ? max(content, children_fit(s, d, node, axis, content)) : content
+		room :=
+			scroll_axis(st) == axis ? max(content, children_fit(s, d, node, axis, content)) : content
 		resolve_main(s, d, node, axis, content, room)
 	} else {
 		for c := node.first_child; c != NONE; c = d.nodes[c].next_sibling {
@@ -247,7 +253,8 @@ resolve_tree :: proc(s: ^State, d: ^Document, n: u32, axis: int) {
 			if !fixed {
 				stretch := size.unit == .Fill
 				if size.unit == .Fit {
-					stretch = main_axis(st) < 0 ? child.style.anchor == .Fill : st.cross == .Stretch
+					stretch =
+						main_axis(st) < 0 ? child.style.anchor == .Fill : st.cross == .Stretch
 				}
 				px = stretch ? content : child.fit[axis]
 			}
@@ -273,7 +280,9 @@ children_fit :: proc(s: ^State, d: ^Document, node: ^Node, axis: int, content: f
 		}
 		size, _, _ := length_on(&child.style, axis)
 		px, fixed := resolve_length(s, size, content)
-		total += clamp_size(s, &child.style, axis, fixed ? px : child.fit[axis], content) + (count > 0 ? gap : 0)
+		total +=
+			clamp_size(s, &child.style, axis, fixed ? px : child.fit[axis], content) +
+			(count > 0 ? gap : 0)
 		count += 1
 	}
 	return total

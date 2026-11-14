@@ -7,7 +7,14 @@ import "core:strings"
 import "core:time"
 
 // file_read reads a whole file into memory from allocator, at the given alignment.
-file_read :: proc(path: string, align: int, allocator: runtime.Allocator) -> (data: []byte, ok: bool) {
+file_read :: proc(
+	path: string,
+	align: int,
+	allocator: runtime.Allocator,
+) -> (
+	data: []byte,
+	ok: bool,
+) {
 	f, err := os.open(path)
 	if err != nil {
 		return

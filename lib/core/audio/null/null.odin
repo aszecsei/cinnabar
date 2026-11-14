@@ -68,7 +68,15 @@ report :: proc(level: audio.Log_Level, format: string, args: ..any) {
 info :: proc "c" () -> audio.Backend_Info {
 	return {
 		api_version = audio.API_VERSION,
-		features = {.Spatial, .Streaming, .Buses, .Effects, .Stream_ADPCM, .Stream_Vorbis, .Stream_Opus},
+		features = {
+			.Spatial,
+			.Streaming,
+			.Buses,
+			.Effects,
+			.Stream_ADPCM,
+			.Stream_Vorbis,
+			.Stream_Opus,
+		},
 		layout = audio.layout_signature(),
 		name = "null",
 		version = "1",
@@ -102,7 +110,11 @@ update :: proc "c" () {}
 @(private)
 sound_create :: proc "c" (desc: ^audio.Sound_Desc) -> audio.Sound {
 	context = runtime.default_context()
-	if desc == nil || (desc.channels != 1 && desc.channels != 2) || (desc.samples == nil && desc.path == nil) || desc.format > .Opus || (desc.format != .PCM && (desc.samples != nil || desc.size == 0)) {
+	if desc == nil ||
+	   (desc.channels != 1 && desc.channels != 2) ||
+	   (desc.samples == nil && desc.path == nil) ||
+	   desc.format > .Opus ||
+	   (desc.format != .PCM && (desc.samples != nil || desc.size == 0)) {
 		report(.Error, "audio: null: sound_create: invalid description")
 		return {}
 	}
@@ -199,7 +211,9 @@ bus_set_gain :: proc "c" (bus: audio.Bus, gain: f32) {
 @(private)
 bus_set_effect :: proc "c" (bus: audio.Bus, slot: u32, effect: ^audio.Effect) {
 	context = runtime.default_context()
-	if find(state.buses[:], audio.Handle(bus)) == nil || slot >= audio.MAX_BUS_EFFECTS || effect == nil {
+	if find(state.buses[:], audio.Handle(bus)) == nil ||
+	   slot >= audio.MAX_BUS_EFFECTS ||
+	   effect == nil {
 		report(.Warning, "audio: null: bus_set_effect: invalid bus %v or slot %d", bus, slot)
 	}
 }

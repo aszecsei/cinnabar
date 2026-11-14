@@ -33,7 +33,10 @@ keeps_bodies :: proc(t: ^testing.T) {
 	defer api.world_destroy(w)
 	list := physics.command_list(context.temp_allocator)
 	physics.cmd_create_shape(&list, {0, 1}, .Box, {0.5, 0.5, 0.5})
-	physics.cmd_create_body(&list, physics.body_desc({0, 1}, {0, 1}, .Dynamic, {0, 5, 0}, user = 42))
+	physics.cmd_create_body(
+		&list,
+		physics.body_desc({0, 1}, {0, 1}, .Dynamic, {0, 5, 0}, user = 42),
+	)
 	physics.cmd_set_pose(&list, {0, 1}, {1, 2, 3}, {0, 0, 0, 1})
 	physics.cmd_add_force(&list, {0, 1}, {0, 100, 0})
 	testing.expect(t, physics.submit(api, w, list))
@@ -48,7 +51,11 @@ keeps_bodies :: proc(t: ^testing.T) {
 	testing.expect_value(t, s.user, 42)
 	testing.expect_value(t, s.position, physics.Position{1, 2, 3})
 
-	ray := physics.Ray{origin = {1, 10, 3}, direction = {0, -1, 0}, max_distance = 20}
+	ray := physics.Ray {
+		origin       = {1, 10, 3},
+		direction    = {0, -1, 0},
+		max_distance = 20,
+	}
 	hit: physics.Ray_Hit
 	testing.expect(t, !api.raycast(w, &ray, nil, &hit))
 	testing.expect_value(t, string(api.info().name), "null")

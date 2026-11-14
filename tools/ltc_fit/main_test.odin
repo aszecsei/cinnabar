@@ -10,9 +10,19 @@ rough_lobe_at_normal_incidence_fits :: proc(t: ^testing.T) {
 		m11 = 1,
 	}
 	fit := fit_texel(&l, SIZE - 1, 0)
-	testing.expectf(t, fit.error < 0.05, "the roughest lobe puts %.3f of its light in the wrong place", fit.error)
+	testing.expectf(
+		t,
+		fit.error < 0.05,
+		"the roughest lobe puts %.3f of its light in the wrong place",
+		fit.error,
+	)
 	// GGX at alpha 1 is uniform, so with Lit's visibility its magnitude is 1 - ln 2.
-	testing.expectf(t, abs(fit.magnitude - (1 - math.ln(f64(2)))) < 0.01, "magnitude %f", fit.magnitude)
+	testing.expectf(
+		t,
+		abs(fit.magnitude - (1 - math.ln(f64(2)))) < 0.01,
+		"magnitude %f",
+		fit.magnitude,
+	)
 	// At normal incidence, the lobe is isotropic.
 	testing.expect_value(t, fit.m[0, 0], fit.m[1, 1])
 	testing.expect_value(t, fit.m[0, 2], 0)
@@ -23,10 +33,23 @@ smooth_lobes_reflect_most_of_the_light :: proc(t: ^testing.T) {
 	for y in ([]int{0, 20, 40}) {
 		v, alpha := texel_view(4, y)
 		magnitude, fresnel, direction := average_terms(v, alpha)
-		testing.expectf(t, magnitude > 0.9 && magnitude <= 1.01, "y %d: magnitude %f", y, magnitude)
+		testing.expectf(
+			t,
+			magnitude > 0.9 && magnitude <= 1.01,
+			"y %d: magnitude %f",
+			y,
+			magnitude,
+		)
 		testing.expect(t, fresnel >= 0 && fresnel < magnitude)
 		// A smooth lobe's average direction is the view's reflection.
-		testing.expectf(t, abs(direction.x + v.x) < 0.05 && abs(direction.z - v.z) < 0.05, "y %d: direction %v for view %v", y, direction, v)
+		testing.expectf(
+			t,
+			abs(direction.x + v.x) < 0.05 && abs(direction.z - v.z) < 0.05,
+			"y %d: direction %v for view %v",
+			y,
+			direction,
+			v,
+		)
 	}
 }
 

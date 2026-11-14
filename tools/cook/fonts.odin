@@ -57,7 +57,14 @@ FONT_SETTINGS := []Setting_Info {
 @(private = "file")
 CHARSET_ASCII :: [][2]rune{{0x20, 0x7e}}
 @(private = "file")
-CHARSET_LATIN :: [][2]rune{{0x20, 0x7e}, {0xa0, 0xff}, {0x2010, 0x2027}, {0x2030, 0x203a}, {0x20ac, 0x20ac}, {0x2122, 0x2122}}
+CHARSET_LATIN :: [][2]rune {
+	{0x20, 0x7e},
+	{0xa0, 0xff},
+	{0x2010, 0x2027},
+	{0x2030, 0x203a},
+	{0x20ac, 0x20ac},
+	{0x2122, 0x2122},
+}
 @(private = "file")
 CHARSET_LATIN_EXT :: [][2]rune {
 	{0x20, 0x7e},
@@ -107,13 +114,24 @@ Font_Cell :: struct {
 }
 
 @(private = "file")
-cook_font :: proc(options: Cook_Options, a: ^Asset_Source, out_dir: string, pass: ^Pass) -> Asset_Result {
+cook_font :: proc(
+	options: Cook_Options,
+	a: ^Asset_Source,
+	out_dir: string,
+	pass: ^Pass,
+) -> Asset_Result {
 	problems := &pass.problems
 	if !check_settings(a^, problems) {
 		return .Failed
 	}
 	guid := a.meta.guid
-	if !assign_subassets(options.roots[a.root].dir, a, {{kind = .Texture, name = format.FONT_ATLAS_NAME}}, pass.force[guid], problems) {
+	if !assign_subassets(
+		options.roots[a.root].dir,
+		a,
+		{{kind = .Texture, name = format.FONT_ATLAS_NAME}},
+		pass.force[guid],
+		problems,
+	) {
 		return .Failed
 	}
 	atlas_guid: format.Guid
@@ -151,12 +169,15 @@ cook_font :: proc(options: Cook_Options, a: ^Asset_Source, out_dir: string, pass
 	key = hash.fnv64a(atlas_guid[:], key)
 	output := fmt.tprintf("%s/%s.blob", out_dir, guid_text(guid))
 	atlas_output := fmt.tprintf("%s/%s.blob", out_dir, guid_text(atlas_guid))
-	if cooked_key(output, .Font, format.font_layout()) == key && cooked_key(atlas_output, .Texture, format.texture_layout()) == key && !pass.force[guid] {
+	if cooked_key(output, .Font, format.font_layout()) == key &&
+	   cooked_key(atlas_output, .Texture, format.texture_layout()) == key &&
+	   !pass.force[guid] {
 		return .Current
 	}
 
 	data := source_of(a^)
-	offset := int(stbtt.GetFontOffsetForIndex(raw_data(data), i32(index))) if len(data) >= 12 else -1
+	offset :=
+		int(stbtt.GetFontOffsetForIndex(raw_data(data), i32(index))) if len(data) >= 12 else -1
 	if offset < 0 {
 		report_error(problems, a.path, 0, 0, "has no font %d", index)
 		return .Failed
@@ -167,7 +188,13 @@ cook_font :: proc(options: Cook_Options, a: ^Asset_Source, out_dir: string, pass
 		return .Failed
 	}
 	if "fvar" in tables.tables || "CFF2" in tables.tables {
-		report_error(problems, a.path, 0, 0, "is a variable font, which the cooker does not read. Export a static instance of it.")
+		report_error(
+			problems,
+			a.path,
+			0,
+			0,
+			"is a variable font, which the cooker does not read. Export a static instance of it.",
+		)
 		return .Failed
 	}
 	if !("glyf" in tables.tables) && !("CFF " in tables.tables) {
@@ -208,24 +235,66 @@ cook_font :: proc(options: Cook_Options, a: ^Asset_Source, out_dir: string, pass
 		gsub_closure(tables.tables["GSUB"], &wanted)
 	}
 
-	cells := font_cells(&info, wanted[:], f64(em_size) / f64(units_per_em), f64(em_size), range, a.path, problems)
+	cells := font_cells(
+		&info,
+		wanted[:],
+		f64(em_size) / f64(units_per_em),
+		f64(em_size),
+		range,
+		a.path,
+		problems,
+	)
 	if len(cells) > format.MAX_FONT_GLYPHS {
-		report_error(problems, a.path, 0, 0, "has %d glyphs, more than the atlas holds (%d)", len(cells), format.MAX_FONT_GLYPHS)
+		report_error(
+			problems,
+			a.path,
+			0,
+			0,
+			"has %d glyphs, more than the atlas holds (%d)",
+			len(cells),
+			format.MAX_FONT_GLYPHS,
+		)
 		return .Failed
 	}
 	atlas_size, packed := pack_font_cells(cells)
 	if !packed {
-		report_error(problems, a.path, 0, 0, "has %d glyphs, which do not fit in a %d texel atlas at em_size %d. Choose a smaller em_size or charset.", len(cells), MAX_FONT_ATLAS, em_size)
+		report_error(
+			problems,
+			a.path,
+			0,
+			0,
+			"has %d glyphs, which do not fit in a %d texel atlas at em_size %d. Choose a smaller em_size or charset.",
+			len(cells),
+			MAX_FONT_ATLAS,
+			em_size,
+		)
 		return .Failed
 	}
-	atlas := Image{int(atlas_size.x), int(atlas_size.y), make([][4]f32, int(atlas_size.x * atlas_size.y), context.temp_allocator)}
+	atlas := Image {
+		int(atlas_size.x),
+		int(atlas_size.y),
+		make([][4]f32, int(atlas_size.x * atlas_size.y), context.temp_allocator),
+	}
 	if !draw_font_cells(cells, f64(em_size) / f64(units_per_em), f64(range), atlas) {
 		report_error(problems, a.path, 0, 0, "has a glyph whose outline msdfgen cannot use")
 		return .Failed
 	}
 
-	texture := Texture_Cook{usage = .Data, mips = false, max_size = 16384}
-	atlas_blob, atlas_ok := cook_texture_image(options, atlas, texture, atlas_guid, key, fmt.tprintf("%s#%s", a.name, format.FONT_ATLAS_NAME), a.path, problems)
+	texture := Texture_Cook {
+		usage    = .Data,
+		mips     = false,
+		max_size = 16384,
+	}
+	atlas_blob, atlas_ok := cook_texture_image(
+		options,
+		atlas,
+		texture,
+		atlas_guid,
+		key,
+		fmt.tprintf("%s#%s", a.name, format.FONT_ATLAS_NAME),
+		a.path,
+		problems,
+	)
 	if !atlas_ok {
 		return .Failed
 	}
@@ -269,7 +338,14 @@ cook_font :: proc(options: Cook_Options, a: ^Asset_Source, out_dir: string, pass
 // scale is texels to a font unit, and em_size texels to an em. Each cell holds the glyph's outline with range / 2 texels and one more around it, on
 // whole texels from the pen, so the field reaches 0 at its edges. A glyph with no outline has a cell of no size.
 @(private = "file")
-font_cells :: proc(info: ^stbtt.fontinfo, wanted: []bool, scale, em_size: f64, range: int, path: string, problems: ^Problems) -> []Font_Cell {
+font_cells :: proc(
+	info: ^stbtt.fontinfo,
+	wanted: []bool,
+	scale, em_size: f64,
+	range: int,
+	path: string,
+	problems: ^Problems,
+) -> []Font_Cell {
 	cells := make([dynamic]Font_Cell, context.temp_allocator)
 	border := (range + 1) / 2 + 1
 	for want, id in wanted {
@@ -295,12 +371,23 @@ font_cells :: proc(info: ^stbtt.fontinfo, wanted: []bool, scale, em_size: f64, r
 				case u8(stbtt.vmove.vcubic):
 					op = .Cubic
 				}
-				commands[i] = {op, {f32(v.x), f32(v.y)}, {{f32(v.cx), f32(v.cy)}, {f32(v.cx1), f32(v.cy1)}}}
+				commands[i] = {
+					op,
+					{f32(v.x), f32(v.y)},
+					{{f32(v.cx), f32(v.cy)}, {f32(v.cx1), f32(v.cy1)}},
+				}
 			}
 			stbtt.FreeShape(info, vertices)
 			bounds, has_edges, ok := msdf_bounds(commands)
 			if !ok {
-				report_warning(problems, path, 0, 0, "glyph %d's outline is broken, so it draws nothing", id)
+				report_warning(
+					problems,
+					path,
+					0,
+					0,
+					"glyph %d's outline is broken, so it draws nothing",
+					id,
+				)
 			} else if has_edges {
 				x0 := int(math.floor(bounds[0] * scale)) - border
 				y0 := int(math.floor(bounds[1] * scale)) - border
@@ -309,7 +396,12 @@ font_cells :: proc(info: ^stbtt.fontinfo, wanted: []bool, scale, em_size: f64, r
 				cell.commands = commands
 				cell.origin = {x0, y0}
 				cell.size = {x1 - x0, y1 - y0}
-				cell.glyph.plane = {f32(f64(x0) / em_size), f32(f64(y0) / em_size), f32(f64(x1) / em_size), f32(f64(y1) / em_size)}
+				cell.glyph.plane = {
+					f32(f64(x0) / em_size),
+					f32(f64(y0) / em_size),
+					f32(f64(x1) / em_size),
+					f32(f64(y1) / em_size),
+				}
 			}
 		}
 		append(&cells, cell)
@@ -396,7 +488,11 @@ font_family :: proc(name: []byte) -> string {
 	mac := ""
 	for i in 0 ..< count {
 		record := 6 + i * 12
-		platform, encoding, language, id := u16be(name, record), u16be(name, record + 2), u16be(name, record + 4), u16be(name, record + 6)
+		platform, encoding, language, id :=
+			u16be(name, record),
+			u16be(name, record + 2),
+			u16be(name, record + 4),
+			u16be(name, record + 6)
 		length, offset := u16be(name, record + 8), u16be(name, record + 10)
 		if id != 1 || storage + offset + length > len(name) {
 			continue

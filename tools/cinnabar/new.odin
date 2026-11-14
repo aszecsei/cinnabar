@@ -50,7 +50,13 @@ new_project :: proc(e: Engine, dir, name, template: string) -> bool {
 			return false
 		}
 	}
-	log.infof("cinnabar: made %s in %s from the %s template. Open it with `cinnabar edit %s`.", name, dir, template, dir)
+	log.infof(
+		"cinnabar: made %s in %s from the %s template. Open it with `cinnabar edit %s`.",
+		name,
+		dir,
+		template,
+		dir,
+	)
 	return true
 }
 
@@ -63,7 +69,8 @@ is_empty_or_new :: proc(dir: string) -> bool {
 // read_template reads the basic template's files, and then the named template's, which replace those at the same path.
 read_template :: proc(templates, template: string) -> (files: []Template_File, ok: bool) {
 	by_path := make(map[string]string, context.temp_allocator)
-	names := []string{BASE_TEMPLATE} if template == BASE_TEMPLATE else []string{BASE_TEMPLATE, template}
+	names :=
+		[]string{BASE_TEMPLATE} if template == BASE_TEMPLATE else []string{BASE_TEMPLATE, template}
 	for t in names {
 		root := strings.concatenate({templates, "/", t}, context.temp_allocator)
 		if !os.is_dir(root) {
@@ -84,14 +91,16 @@ read_template :: proc(templates, template: string) -> (files: []Template_File, o
 
 @(private = "file")
 read_tree :: proc(root, prefix: string, files: ^map[string]string) -> bool {
-	dir := root if prefix == "" else strings.concatenate({root, "/", prefix}, context.temp_allocator)
+	dir :=
+		root if prefix == "" else strings.concatenate({root, "/", prefix}, context.temp_allocator)
 	entries, err := os.read_all_directory_by_path(dir, context.temp_allocator)
 	if err != nil {
 		log.errorf("cinnabar: %s: %v", dir, err)
 		return false
 	}
 	for e in entries {
-		path := e.name if prefix == "" else strings.concatenate({prefix, "/", e.name}, context.temp_allocator)
+		path :=
+			e.name if prefix == "" else strings.concatenate({prefix, "/", e.name}, context.temp_allocator)
 		if e.type == .Directory {
 			if !read_tree(root, path, files) {
 				return false
@@ -120,7 +129,13 @@ make_project_files :: proc(files: []Template_File, name: string) -> []Template_F
 		buffer := new([32]u8, context.temp_allocator)
 		guid := format.guid_new()
 		guids[f.path] = format.guid_format(guid, buffer)
-		append(&made, Template_File{strings.concatenate({f.path, format.META_EXTENSION}, context.temp_allocator), format.meta_text(guid, "", nil, allocator = context.temp_allocator)})
+		append(
+			&made,
+			Template_File {
+				strings.concatenate({f.path, format.META_EXTENSION}, context.temp_allocator),
+				format.meta_text(guid, "", nil, allocator = context.temp_allocator),
+			},
+		)
 	}
 	package_name := package_of(name)
 	for f in files {

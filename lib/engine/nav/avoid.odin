@@ -93,7 +93,15 @@ prepare_circles :: proc(circles: []Circle, desired: [2]f32) {
 
 // sweep_circles is when a circle at the origin moving at v hits a still one, as dtSweepCircleCircle.
 @(private = "file")
-sweep_circles :: proc "contextless" (radius: f32, v: [2]f32, center: [2]f32, other: f32) -> (tmin, tmax: f32, hit: bool) {
+sweep_circles :: proc "contextless" (
+	radius: f32,
+	v: [2]f32,
+	center: [2]f32,
+	other: f32,
+) -> (
+	tmin, tmax: f32,
+	hit: bool,
+) {
 	EPS :: 0.0001
 	r := radius + other
 	c := dot(center, center) - r * r
@@ -135,12 +143,20 @@ ray_segment :: proc "contextless" (u, a, b: [2]f32) -> (t: f32, hit: bool) {
 // sample_penalty is a sample's penalty, as dtObstacleAvoidanceQuery::processSample. It stops early once the sample
 // cannot beat the best so far.
 @(private = "file")
-sample_penalty :: proc(p: Avoid_Params, candidate, velocity, desired: [2]f32, radius, max_speed: f32, circles: []Circle, walls: []Wall, best: f32) -> f32 {
+sample_penalty :: proc(
+	p: Avoid_Params,
+	candidate, velocity, desired: [2]f32,
+	radius, max_speed: f32,
+	circles: []Circle,
+	walls: []Wall,
+	best: f32,
+) -> f32 {
 	inv_speed := 1 / max_speed
 	inv_horizon := 1 / p.horizon
 	desired_penalty := p.weight_desired * (length(candidate - desired) * inv_speed)
 	current_penalty := p.weight_current * (length(candidate - velocity) * inv_speed)
-	threshold := (p.weight_impact / max(best - desired_penalty - current_penalty, 1e-6) - 0.1) * p.horizon
+	threshold :=
+		(p.weight_impact / max(best - desired_penalty - current_penalty, 1e-6) - 0.1) * p.horizon
 	if threshold - p.horizon > -math.F32_EPSILON {
 		return best
 	}
@@ -205,7 +221,13 @@ sample_penalty :: proc(p: Avoid_Params, candidate, velocity, desired: [2]f32, ra
 // sampleVelocityAdaptive: a pattern of rings around the desired direction, at a scale that halves at each level of
 // depth, around the best sample of the level before.
 @(private)
-choose_velocity :: proc(p: Avoid_Params, velocity, desired: [2]f32, radius, max_speed: f32, circles: []Circle, walls: []Wall) -> [2]f32 {
+choose_velocity :: proc(
+	p: Avoid_Params,
+	velocity, desired: [2]f32,
+	radius, max_speed: f32,
+	circles: []Circle,
+	walls: []Wall,
+) -> [2]f32 {
 	if max_speed <= 0 {
 		return {}
 	}
@@ -224,7 +246,10 @@ choose_velocity :: proc(p: Avoid_Params, velocity, desired: [2]f32, radius, max_
 		direction[0] = {1, 0}
 	}
 	half_c, half_s := math.cos(angle * 0.5), math.sin(angle * 0.5)
-	direction[1] = {direction[0].x * half_c - direction[0].y * half_s, direction[0].x * half_s + direction[0].y * half_c}
+	direction[1] = {
+		direction[0].x * half_c - direction[0].y * half_s,
+		direction[0].x * half_s + direction[0].y * half_c,
+	}
 	pattern[0] = {}
 	count = 1
 	for j in 0 ..< rings {
@@ -255,7 +280,17 @@ choose_velocity :: proc(p: Avoid_Params, velocity, desired: [2]f32, radius, max_
 			if dot(candidate, candidate) > (max_speed + 0.001) * (max_speed + 0.001) {
 				continue
 			}
-			penalty := sample_penalty(p, candidate, velocity, desired, radius, max_speed, circles, walls, best)
+			penalty := sample_penalty(
+				p,
+				candidate,
+				velocity,
+				desired,
+				radius,
+				max_speed,
+				circles,
+				walls,
+				best,
+			)
 			if penalty < best {
 				best, chosen = penalty, candidate
 			}

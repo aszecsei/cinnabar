@@ -116,10 +116,10 @@ Timing :: struct {
 
 // Content matches AutomationContent.
 Content :: struct {
-	folder:    string `json:"folder"`,
-	search:    string `json:"search"`,
-	selection: []string `json:"selection"`,
-	items:     []string `json:"items"`,
+	folder:             string `json:"folder"`,
+	search:             string `json:"search"`,
+	selection:          []string `json:"selection"`,
+	items:              []string `json:"items"`,
 	thumbnails_waiting: int `json:"thumbnailsWaiting"`,
 	thumbnails_failed:  []string `json:"thumbnailsFailed"`,
 }
@@ -226,14 +226,21 @@ parse_args :: proc(args: []string) -> (o: Options, problem: string) {
 		case arg == "--viewport" && i + 1 < len(args):
 			v, ok := strconv.parse_int(args[i + 1])
 			if !ok || v < 0 {
-				return o, fmt.tprintf("--viewport takes a viewport's number, from 0, not %s", args[i + 1])
+				return o, fmt.tprintf(
+					"--viewport takes a viewport's number, from 0, not %s",
+					args[i + 1],
+				)
 			}
 			o.viewport = v
 			i += 1
 		case (arg == "--samples" || arg == "--skip") && i + 1 < len(args):
 			v, ok := strconv.parse_int(args[i + 1])
 			if !ok || v < 0 {
-				return o, fmt.tprintf("%s takes a number of profile summaries, not %s", arg, args[i + 1])
+				return o, fmt.tprintf(
+					"%s takes a number of profile summaries, not %s",
+					arg,
+					args[i + 1],
+				)
 			}
 			if arg == "--samples" {
 				o.samples = v
@@ -257,7 +264,10 @@ parse_args :: proc(args: []string) -> (o: Options, problem: string) {
 			for part, k in parts {
 				v, ok := strconv.parse_f64(strings.trim_space(part))
 				if !ok || len(parts) != 3 {
-					return o, fmt.tprintf("--position takes three numbers, x,y,z in meters, not %s", args[i + 1])
+					return o, fmt.tprintf(
+						"--position takes three numbers, x,y,z in meters, not %s",
+						args[i + 1],
+					)
 				}
 				o.position[k] = v
 			}
@@ -286,10 +296,14 @@ parse_args :: proc(args: []string) -> (o: Options, problem: string) {
 	case "":
 		return o, "no command: status, screenshot, gif, viewport, camera, timing, ui or content"
 	case:
-		return o, fmt.tprintf("unknown command %s: status, screenshot, gif, viewport, camera, timing, ui or content", o.command)
+		return o, fmt.tprintf(
+			"unknown command %s: status, screenshot, gif, viewport, camera, timing, ui or content",
+			o.command,
+		)
 	}
 	if o.command != "content" && (len(o.settings) > 0) != (o.command == "viewport") {
-		return o, o.command == "viewport" ? "viewport takes --set <name>=<value>" : "--set goes with viewport or content"
+		return o,
+			o.command == "viewport" ? "viewport takes --set <name>=<value>" : "--set goes with viewport or content"
 	}
 	camera_options := o.position != nil || o.yaw != nil || o.pitch != nil
 	if o.command == "camera" && o.position == nil {
@@ -307,7 +321,11 @@ parse_args :: proc(args: []string) -> (o: Options, problem: string) {
 	if o.window != "" && o.command != "ui" {
 		return o, "--window goes with ui"
 	}
-	if o.viewport != nil && o.command != "viewport" && o.command != "camera" && o.command != "screenshot" && o.command != "gif" {
+	if o.viewport != nil &&
+	   o.command != "viewport" &&
+	   o.command != "camera" &&
+	   o.command != "screenshot" &&
+	   o.command != "gif" {
 		return o, "--viewport goes with viewport, camera, screenshot or gif"
 	}
 	if o.out != "" && o.command != "screenshot" && o.command != "gif" && o.command != "ui" {
@@ -488,7 +506,15 @@ print_response :: proc(r: Response) {
 		for size in timing.viewports {
 			print_size(size)
 		}
-		fmt.printfln("%-32s %-8s %6s %10s %10s %10s", "pass", "queue", "calls", "median ms", "min ms", "max ms")
+		fmt.printfln(
+			"%-32s %-8s %6s %10s %10s %10s",
+			"pass",
+			"queue",
+			"calls",
+			"median ms",
+			"min ms",
+			"max ms",
+		)
 		for p in timing.passes {
 			fmt.printfln(
 				"%-32s %-8s %6s %10s %10s %10s",
@@ -510,5 +536,11 @@ print_response :: proc(r: Response) {
 }
 
 print_size :: proc(size: Viewport_Size) {
-	fmt.printfln("viewport %d: %dx%d%s", size.viewport, size.width, size.height, size.fixed ? " (fixed)" : "")
+	fmt.printfln(
+		"viewport %d: %dx%d%s",
+		size.viewport,
+		size.width,
+		size.height,
+		size.fixed ? " (fixed)" : "",
+	)
 }

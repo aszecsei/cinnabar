@@ -146,7 +146,10 @@ component 100 Probe
 	// The world takes the slots from the lowest up, so the handles follow the scene's order.
 	testing.expect(t, ecs.entity_index(root) < ecs.entity_index(child))
 	testing.expect_value(t, ecs.get(&f.world, child, ecs.Parent).entity, root)
-	testing.expect(t, ecs.has(&f.world, child, ecs.Disabled) && ecs.has(&f.world, child, ecs.Inactive))
+	testing.expect(
+		t,
+		ecs.has(&f.world, child, ecs.Disabled) && ecs.has(&f.world, child, ecs.Inactive),
+	)
 	testing.expect(t, !ecs.has(&f.world, root, ecs.Inactive))
 
 	pose := ecs.get(&f.world, root, ecs.Transform)
@@ -154,7 +157,11 @@ component 100 Probe
 	testing.expect_value(t, pose.rotation, quaternion128(1))
 	testing.expect_value(t, pose.scale, [3]f32{1, 1, 1})
 	// Nothing interpolates from where the old world was.
-	testing.expect_value(t, ecs.get(&f.world, root, ecs.Previous_Transform)^, ecs.Previous_Transform(pose^))
+	testing.expect_value(
+		t,
+		ecs.get(&f.world, root, ecs.Previous_Transform)^,
+		ecs.Previous_Transform(pose^),
+	)
 
 	p := ecs.get(&f.world, child, Probe)
 	testing.expect(t, p.flag)
@@ -168,8 +175,16 @@ component 100 Probe
 	testing.expect_value(t, jmag(p.turn), 0.7071068)
 	testing.expect_value(t, p.at.raw, [3]i64{1, -2, 3})
 	testing.expect_value(t, p.target, root)
-	testing.expect_value(t, p.model, format.guid_parse("9db8150cc7215ffc2708d20d77cf60bf") or_else {})
-	testing.expect_value(t, p.skins, [2]format.Guid{{}, format.guid_parse("ffeeddccbbaa99887766554433221100") or_else {}})
+	testing.expect_value(
+		t,
+		p.model,
+		format.guid_parse("9db8150cc7215ffc2708d20d77cf60bf") or_else {},
+	)
+	testing.expect_value(
+		t,
+		p.skins,
+		[2]format.Guid{{}, format.guid_parse("ffeeddccbbaa99887766554433221100") or_else {}},
+	)
 	testing.expect_value(t, p.inner.amount, 7)
 	testing.expect_value(t, p.span, [2]f32{0.5, 2})
 }
@@ -260,7 +275,7 @@ Knob :: struct {
 
 @(private = "file")
 KNOB_DEFAULTS :: Knob {
-	gain  = {value = 1},
+	gain = {value = 1},
 	level = {value = {1, 1, 1}},
 }
 
@@ -275,12 +290,20 @@ a_setting_that_the_scene_sets_is_overridden :: proc(t: ^testing.T) {
 	testing.expect_value(t, fields[0].name, "gain")
 	testing.expect_value(t, fields[0].kind, Field_Kind.F32)
 	testing.expect(t, fields[0].has_override && fields[0].has_range)
-	testing.expect_value(t, fields[0].offset, u32(offset_of(Knob, gain) + offset_of(Setting(f32), value)))
+	testing.expect_value(
+		t,
+		fields[0].offset,
+		u32(offset_of(Knob, gain) + offset_of(Setting(f32), value)),
+	)
 	testing.expect_value(t, fields[0].override_offset, u32(offset_of(Knob, gain)))
 	testing.expect(t, fields[1].color && fields[1].has_override)
 
 	// What the scene does not set has the defaults, not overridden. A value of 0 is 0.
-	load(&f.world, nil, parse(t, "scene 1\nentity 0000000000000001\ncomponent 101 Knob\n\tgain = 0\n"))
+	load(
+		&f.world,
+		nil,
+		parse(t, "scene 1\nentity 0000000000000001\ncomponent 101 Knob\n\tgain = 0\n"),
+	)
 	e := find(f, 1)
 	knob := ecs.get(&f.world, e, Knob)
 	testing.expect_value(t, knob.gain, Setting(f32){true, 0})
@@ -295,20 +318,41 @@ a_setting_that_the_scene_sets_is_overridden :: proc(t: ^testing.T) {
 	knobs := ecs.query(&f.world, {ecs.changed(ecs.read(&f.world, Knob))})
 	since := ecs.take_version(&f.world)
 	testing.expect(t, set_field(&f.world, e, 1, 101, level, false, nil))
-	testing.expect_value(t, ecs.get(&f.world, e, Knob).level, Setting([3]f32){false, {0.5, 0.5, 0.5}})
+	testing.expect_value(
+		t,
+		ecs.get(&f.world, e, Knob).level,
+		Setting([3]f32){false, {0.5, 0.5, 0.5}},
+	)
 	// The edit counts as a change, which is how the editor's scan and the GPU scene see it.
 	changed_it := ecs.query_iter(&f.world, knobs, since = since)
 	_, knob_changed := ecs.query_next(&changed_it)
 	testing.expect(t, knob_changed)
-	level_flag := format.Scene_Field{name = "level.override", hash = format.scene_field_hash("level.override")}
+	level_flag := format.Scene_Field {
+		name = "level.override",
+		hash = format.scene_field_hash("level.override"),
+	}
 	testing.expect(t, set_field(&f.world, e, 1, 101, level_flag, true, nil))
-	testing.expect_value(t, ecs.get(&f.world, e, Knob).level, Setting([3]f32){true, {0.5, 0.5, 0.5}})
-	level_flag.value = {kind = .Bool, count = 1}
+	testing.expect_value(
+		t,
+		ecs.get(&f.world, e, Knob).level,
+		Setting([3]f32){true, {0.5, 0.5, 0.5}},
+	)
+	level_flag.value = {
+		kind  = .Bool,
+		count = 1,
+	}
 	testing.expect(t, set_field(&f.world, e, 1, 101, level_flag, false, nil))
-	testing.expect_value(t, ecs.get(&f.world, e, Knob).level, Setting([3]f32){false, {0.5, 0.5, 0.5}})
+	testing.expect_value(
+		t,
+		ecs.get(&f.world, e, Knob).level,
+		Setting([3]f32){false, {0.5, 0.5, 0.5}},
+	)
 
 	// A reset goes back to the default, not overridden.
-	gain := format.Scene_Field{name = "gain", hash = format.scene_field_hash("gain")}
+	gain := format.Scene_Field {
+		name = "gain",
+		hash = format.scene_field_hash("gain"),
+	}
 	testing.expect(t, set_field(&f.world, e, 1, 101, gain, true, nil))
 	testing.expect_value(t, ecs.get(&f.world, e, Knob).gain, Setting(f32){false, 1})
 }
@@ -320,7 +364,14 @@ a_scene_keeps_a_setting_that_it_does_not_override :: proc(t: ^testing.T) {
 	ecs.register_component(&f.world.registry, Knob, ecs.Component_Id(101), KNOB_DEFAULTS)
 
 	// The flag can come before the value.
-	load(&f.world, nil, parse(t, "scene 1\nentity 0000000000000001\ncomponent 101 Knob\n\tgain.override = false\n\tgain = 3\n\tlevel.override = true\n"))
+	load(
+		&f.world,
+		nil,
+		parse(
+			t,
+			"scene 1\nentity 0000000000000001\ncomponent 101 Knob\n\tgain.override = false\n\tgain = 3\n\tlevel.override = true\n",
+		),
+	)
 	knob := ecs.get(&f.world, find(f, 1), Knob)
 	testing.expect_value(t, knob.gain, Setting(f32){false, 3})
 	testing.expect_value(t, knob.level, Setting([3]f32){true, {1, 1, 1}})

@@ -53,7 +53,9 @@ audio_check :: proc "contextless" (blob: ^Audio_Blob, guid: Guid) -> bool {
 // audio_view checks a whole audio blob: its start, and that its slices are inside it.
 audio_view :: proc(data: []byte) -> (blob: ^Audio_Blob, ok: bool) {
 	header := blob_header(data) or_return
-	if header.kind != .Audio || header.layout != audio_layout() || len(data) < size_of(Audio_Blob) {
+	if header.kind != .Audio ||
+	   header.layout != audio_layout() ||
+	   len(data) < size_of(Audio_Blob) {
 		return
 	}
 	blob = (^Audio_Blob)(raw_data(data))
@@ -100,7 +102,13 @@ audio_write :: proc(contents: Audio_Contents, allocator := context.allocator) ->
 		mem.copy(&buffer[data.offset], raw_data(contents.data), int(data.size))
 	}
 	blob := Audio_Blob {
-		header = {magic = BLOB_MAGIC, kind = .Audio, layout = audio_layout(), key = contents.key, guid = contents.guid},
+		header = {
+			magic = BLOB_MAGIC,
+			kind = .Audio,
+			layout = audio_layout(),
+			key = contents.key,
+			guid = contents.guid,
+		},
 		frames = contents.frames,
 		channels = contents.channels,
 		stream = b32(contents.stream),

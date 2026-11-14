@@ -38,13 +38,21 @@ Fixture :: struct {
 }
 
 @(private = "file")
-BOARD :: format.Guid{0 = 0xb9}
+BOARD :: format.Guid {
+	0 = 0xb9,
+}
 @(private = "file")
-DECISION :: format.Guid{0 = 0xda}
+DECISION :: format.Guid {
+	0 = 0xda,
+}
 @(private = "file")
-OTHER :: format.Guid{0 = 0xdb}
+OTHER :: format.Guid {
+	0 = 0xdb,
+}
 @(private = "file")
-TREE :: format.Guid{0 = 0xd9}
+TREE :: format.Guid {
+	0 = 0xd9,
+}
 
 // The test blackboard's keys, at their slots.
 @(private = "file")
@@ -75,7 +83,10 @@ board_contents :: proc() -> format.Blackboard_Contents {
 	names := KEYS
 	keys := make([]format.Blackboard_Key_Contents, len(names), context.temp_allocator)
 	for k, i in names {
-		keys[i] = {name = k.name, type = k.type}
+		keys[i] = {
+			name = k.name,
+			type = k.type,
+		}
 	}
 	keys[0].default = value(f32(0.5))
 	keys[1].default = value(i32(3))
@@ -196,21 +207,39 @@ build :: proc(d: D, guid := DECISION, key: u64 = 1, refused := false) -> []byte 
 	methods := make([dynamic]format.Htn_Method, context.temp_allocator)
 	subtasks := make([dynamic]format.Htn_Subtask, context.temp_allocator)
 	plan_actions := make([dynamic]format.Plan_Action, context.temp_allocator)
-	guard :: proc(ops: ^[dynamic]format.Decision_Op, conditions: ^[dynamic]format.Decision_Condition, text: string) -> u32 {
+	guard :: proc(
+		ops: ^[dynamic]format.Decision_Op,
+		conditions: ^[dynamic]format.Decision_Condition,
+		text: string,
+	) -> u32 {
 		if text == "" {
 			return format.DECISION_NONE
 		}
 		negated := text[0] == '!'
 		first := u32(len(ops))
-		append(ops, format.Decision_Op{code = .Key, operand = slot_of(text[1:] if negated else text)})
+		append(
+			ops,
+			format.Decision_Op{code = .Key, operand = slot_of(text[1:] if negated else text)},
+		)
 		if negated {
 			append(ops, format.Decision_Op{code = .Not})
 		}
-		append(conditions, format.Decision_Condition{first_op = first, op_count = u32(len(ops)) - first})
+		append(
+			conditions,
+			format.Decision_Condition{first_op = first, op_count = u32(len(ops)) - first},
+		)
 		return u32(len(conditions) - 1)
 	}
 	for _, i in d.tasks {
-		append(&nodes, format.Decision_Node_Contents{id = u32(i + 1), kind = "task", condition = format.DECISION_NONE, action = format.DECISION_NONE})
+		append(
+			&nodes,
+			format.Decision_Node_Contents {
+				id = u32(i + 1),
+				kind = "task",
+				condition = format.DECISION_NONE,
+				action = format.DECISION_NONE,
+			},
+		)
 	}
 	for t, i in d.tasks {
 		record := format.Htn_Task {
@@ -219,7 +248,15 @@ build :: proc(d: D, guid := DECISION, key: u64 = 1, refused := false) -> []byte 
 			method_count = u32(len(t.methods)),
 		}
 		for m in t.methods {
-			append(&nodes, format.Decision_Node_Contents{id = u32(200 + len(methods)), kind = "method", condition = guard(&ops, &conditions, m.guard), action = format.DECISION_NONE})
+			append(
+				&nodes,
+				format.Decision_Node_Contents {
+					id = u32(200 + len(methods)),
+					kind = "method",
+					condition = guard(&ops, &conditions, m.guard),
+					action = format.DECISION_NONE,
+				},
+			)
 			append(
 				&methods,
 				format.Htn_Method {
@@ -236,10 +273,33 @@ build :: proc(d: D, guid := DECISION, key: u64 = 1, refused := false) -> []byte 
 		append(&tasks, record)
 	}
 	for a, i in d.actions {
-		append(&nodes, format.Decision_Node_Contents{id = u32(100 + i), kind = "action", condition = guard(&ops, &conditions, a.guard), action = u32(len(actions))})
+		append(
+			&nodes,
+			format.Decision_Node_Contents {
+				id = u32(100 + i),
+				kind = "action",
+				condition = guard(&ops, &conditions, a.guard),
+				action = u32(len(actions)),
+			},
+		)
 		append(&constants, format.Decision_Constant_Contents{type = .Int, value = value(a.n)})
-		append(&args, format.Decision_Arg_Contents{name = "n", source = .Constant, index = u32(len(constants) - 1), type = .Int})
-		append(&actions, format.Decision_Action_Contents{name = a.action, first_arg = u32(len(args) - 1), arg_count = 1})
+		append(
+			&args,
+			format.Decision_Arg_Contents {
+				name = "n",
+				source = .Constant,
+				index = u32(len(constants) - 1),
+				type = .Int,
+			},
+		)
+		append(
+			&actions,
+			format.Decision_Action_Contents {
+				name = a.action,
+				first_arg = u32(len(args) - 1),
+				arg_count = 1,
+			},
+		)
 		append(
 			&plan_actions,
 			format.Plan_Action {
@@ -269,7 +329,8 @@ build :: proc(d: D, guid := DECISION, key: u64 = 1, refused := false) -> []byte 
 		tests    = tests[:],
 		effects  = effects[:],
 	}
-	size := format.htn_state(u32(len(keys)), u32(len(plan_actions)), u32(len(methods)), contents.max_plan).size
+	size :=
+		format.htn_state(u32(len(keys)), u32(len(plan_actions)), u32(len(methods)), contents.max_plan).size
 	if refused {
 		size -= 8
 	}
@@ -300,7 +361,15 @@ build_tree :: proc() -> []byte {
 		{node = 0, end = 4, kind = .Sequence, test = format.DECISION_NONE, state = 0},
 		{node = 1, end = 2, kind = .Action, test = format.DECISION_NONE, state = 16},
 		{node = 2, end = 3, kind = .Set, test = format.DECISION_NONE, state = 32},
-		{node = 3, end = 4, kind = .Wait, test = format.DECISION_NONE, seconds = {seconds = 1000}, state = 48, timers = 64},
+		{
+			node = 3,
+			end = 4,
+			kind = .Wait,
+			test = format.DECISION_NONE,
+			seconds = {seconds = 1000},
+			state = 48,
+			timers = 64,
+		},
 	}
 	contents := format.Decision_Contents {
 		guid           = TREE,
@@ -310,12 +379,32 @@ build_tree :: proc() -> []byte {
 		blackboard     = BOARD,
 		blackboard_key = 77,
 		nodes          = {
-			{id = 1, kind = "sequence", condition = format.DECISION_NONE, action = format.DECISION_NONE},
+			{
+				id = 1,
+				kind = "sequence",
+				condition = format.DECISION_NONE,
+				action = format.DECISION_NONE,
+			},
 			{id = 2, kind = "action", condition = format.DECISION_NONE, action = 0},
-			{id = 3, kind = "set", condition = format.DECISION_NONE, action = format.DECISION_NONE, first_write = 0, write_count = 1},
-			{id = 4, kind = "wait", condition = format.DECISION_NONE, action = format.DECISION_NONE},
+			{
+				id = 3,
+				kind = "set",
+				condition = format.DECISION_NONE,
+				action = format.DECISION_NONE,
+				first_write = 0,
+				write_count = 1,
+			},
+			{
+				id = 4,
+				kind = "wait",
+				condition = format.DECISION_NONE,
+				action = format.DECISION_NONE,
+			},
 		},
-		constants      = {{type = .Int, value = value(i32(2))}, {type = .Int, value = value(i32(7))}},
+		constants      = {
+			{type = .Int, value = value(i32(2))},
+			{type = .Int, value = value(i32(7))},
+		},
 		actions        = {{name = "walk", first_arg = 0, arg_count = 1}},
 		args           = {{name = "n", source = .Constant, index = 0, type = .Int}},
 		writes         = {{key = slot_of("trace"), source = .Constant, index = 1}},
@@ -346,49 +435,44 @@ label :: proc(a: ^ai.Action_Context) -> i32 {
 register_test :: proc(s: ^ai.State) {
 	register(s)
 	behavior_tree.register(s)
-	ai.register_action(s, {name = "step", params = {{"n", .Int}}, start = proc(a: ^ai.Action_Context) {log_event(a, "start step %d", label(a))}})
-	ai.register_action(
-		s,
-		{
-			name = "walk",
-			params = {{"n", .Int}},
-			state_size = 8,
-			start = proc(a: ^ai.Action_Context) {
-				(^i32)(&a.state[0])^ = 3
-				(^i32)(&a.state[4])^ = label(a)
-				log_event(a, "start walk %d", label(a))
-			},
-			tick = proc(a: ^ai.Action_Context) -> ai.Action_Status {
-				left := (^i32)(&a.state[0])
-				left^ -= 1
-				return .Succeeded if left^ <= 0 else .Running
-			},
-			stop = proc(a: ^ai.Action_Context) {log_event(a, "stop walk %d", (^i32)(&a.state[4])^)},
+	ai.register_action(s, {
+		name = "step",
+		params = {{"n", .Int}},
+		start = proc(a: ^ai.Action_Context) {log_event(a, "start step %d", label(a))},
+	})
+	ai.register_action(s, {
+		name = "walk",
+		params = {{"n", .Int}},
+		state_size = 8,
+		start = proc(a: ^ai.Action_Context) {
+			(^i32)(&a.state[0])^ = 3
+			(^i32)(&a.state[4])^ = label(a)
+			log_event(a, "start walk %d", label(a))
 		},
-	)
-	ai.register_action(
-		s,
-		{
-			name = "hold",
-			params = {{"n", .Int}},
-			state_size = 4,
-			start = proc(a: ^ai.Action_Context) {
-				(^i32)(&a.state[0])^ = label(a)
-				log_event(a, "start hold %d", label(a))
-			},
-			tick = proc(a: ^ai.Action_Context) -> ai.Action_Status {return .Running},
-			stop = proc(a: ^ai.Action_Context) {log_event(a, "stop hold %d", (^i32)(&a.state[0])^)},
+		tick = proc(a: ^ai.Action_Context) -> ai.Action_Status {
+			left := (^i32)(&a.state[0])
+			left^ -= 1
+			return .Succeeded if left^ <= 0 else .Running
 		},
-	)
-	ai.register_action(
-		s,
-		{
-			name = "fail",
-			params = {{"n", .Int}},
-			start = proc(a: ^ai.Action_Context) {log_event(a, "start fail %d", label(a))},
-			tick = proc(a: ^ai.Action_Context) -> ai.Action_Status {return .Failed},
+		stop = proc(a: ^ai.Action_Context) {log_event(a, "stop walk %d", (^i32)(&a.state[4])^)},
+	})
+	ai.register_action(s, {
+		name = "hold",
+		params = {{"n", .Int}},
+		state_size = 4,
+		start = proc(a: ^ai.Action_Context) {
+			(^i32)(&a.state[0])^ = label(a)
+			log_event(a, "start hold %d", label(a))
 		},
-	)
+		tick = proc(a: ^ai.Action_Context) -> ai.Action_Status {return .Running},
+		stop = proc(a: ^ai.Action_Context) {log_event(a, "stop hold %d", (^i32)(&a.state[0])^)},
+	})
+	ai.register_action(s, {
+		name = "fail",
+		params = {{"n", .Int}},
+		start = proc(a: ^ai.Action_Context) {log_event(a, "start fail %d", label(a))},
+		tick = proc(a: ^ai.Action_Context) -> ai.Action_Status {return .Failed},
+	})
 }
 
 @(private = "file")
@@ -574,7 +658,14 @@ starts :: proc(f: ^Fixture) -> []string {
 @(private = "file")
 expect_starts :: proc(t: ^testing.T, f: ^Fixture, expected: []string, loc := #caller_location) {
 	got := starts(f)
-	testing.expectf(t, slice.equal(got, expected), "starts %v, expected %v", got, expected, loc = loc)
+	testing.expectf(
+		t,
+		slice.equal(got, expected),
+		"starts %v, expected %v",
+		got,
+		expected,
+		loc = loc,
+	)
 }
 
 @(private = "file")
@@ -601,15 +692,42 @@ backtracking :: proc() -> D {
 				{
 					methods = slice.clone(
 						[]M {
-							{tests = slice.clone([]format.Plan_Test{is(DOWN)}, context.temp_allocator), subtasks = slice.clone([]format.Htn_Subtask{act(3)}, context.temp_allocator)},
-							{subtasks = slice.clone([]format.Htn_Subtask{task(1), act(2)}, context.temp_allocator)},
+							{
+								tests = slice.clone(
+									[]format.Plan_Test{is(DOWN)},
+									context.temp_allocator,
+								),
+								subtasks = slice.clone(
+									[]format.Htn_Subtask{act(3)},
+									context.temp_allocator,
+								),
+							},
+							{
+								subtasks = slice.clone(
+									[]format.Htn_Subtask{task(1), act(2)},
+									context.temp_allocator,
+								),
+							},
 						},
 						context.temp_allocator,
 					),
 				},
 				{
 					methods = slice.clone(
-						[]M{{subtasks = slice.clone([]format.Htn_Subtask{act(0)}, context.temp_allocator)}, {subtasks = slice.clone([]format.Htn_Subtask{act(1)}, context.temp_allocator)}},
+						[]M {
+							{
+								subtasks = slice.clone(
+									[]format.Htn_Subtask{act(0)},
+									context.temp_allocator,
+								),
+							},
+							{
+								subtasks = slice.clone(
+									[]format.Htn_Subtask{act(1)},
+									context.temp_allocator,
+								),
+							},
+						},
 						context.temp_allocator,
 					),
 				},
@@ -618,8 +736,19 @@ backtracking :: proc() -> D {
 		),
 		actions = slice.clone(
 			[]A {
-				{action = "step", n = 1, effects = slice.clone([]format.Plan_Effect{set(ARMED)}, context.temp_allocator)},
-				{action = "step", n = 2, effects = slice.clone([]format.Plan_Effect{set(NEAR)}, context.temp_allocator)},
+				{
+					action = "step",
+					n = 1,
+					effects = slice.clone(
+						[]format.Plan_Effect{set(ARMED)},
+						context.temp_allocator,
+					),
+				},
+				{
+					action = "step",
+					n = 2,
+					effects = slice.clone([]format.Plan_Effect{set(NEAR)}, context.temp_allocator),
+				},
 				{
 					action = "step",
 					n = 3,
@@ -638,8 +767,20 @@ backtracking :: proc() -> D {
 @(test)
 methods_are_tried_in_order :: proc(t: ^testing.T) {
 	d := D {
-		tasks   = {{methods = {{tests = {is(DOWN)}, subtasks = {act(2)}}, {tests = {is(ARMED)}, subtasks = {act(1)}}, {subtasks = {act(0)}}}}},
-		actions = {{action = "walk", n = 1, effects = {set(ARMED)}}, {action = "step", n = 3, effects = {set(DOWN)}}, {action = "hold", n = 9}},
+		tasks   = {
+			{
+				methods = {
+					{tests = {is(DOWN)}, subtasks = {act(2)}},
+					{tests = {is(ARMED)}, subtasks = {act(1)}},
+					{subtasks = {act(0)}},
+				},
+			},
+		},
+		actions = {
+			{action = "walk", n = 1, effects = {set(ARMED)}},
+			{action = "step", n = 3, effects = {set(DOWN)}},
+			{action = "hold", n = 9},
+		},
 	}
 	f := setup(t, d)
 	defer teardown(t, f)
@@ -732,7 +873,14 @@ a_better_method_cuts_in_by_the_record :: proc(t: ^testing.T) {
 @(test)
 an_equal_record_keeps_the_running_action :: proc(t: ^testing.T) {
 	d := D {
-		tasks   = {{methods = {{tests = {is(ARMED)}, subtasks = {act(1)}}, {subtasks = {act(0), act(1)}}}}},
+		tasks   = {
+			{
+				methods = {
+					{tests = {is(ARMED)}, subtasks = {act(1)}},
+					{subtasks = {act(0), act(1)}},
+				},
+			},
+		},
 		actions = {{action = "step", n = 2, effects = {set(ARMED)}}, {action = "hold", n = 1}},
 	}
 	f := setup(t, d)
@@ -740,7 +888,12 @@ an_equal_record_keeps_the_running_action :: proc(t: ^testing.T) {
 	e := spawn_agent(f)
 	start(f, e)
 	frame(f, 20)
-	testing.expectf(t, slice.equal(f.events[:], []string{"start step 2", "start hold 1"}), "events %v", f.events[:])
+	testing.expectf(
+		t,
+		slice.equal(f.events[:], []string{"start step 2", "start hold 1"}),
+		"events %v",
+		f.events[:],
+	)
 	testing.expect(t, runs(f, e))
 	view, _ := ai.plan(&f.ai, e)
 	testing.expect_value(t, len(view.steps), 1)
@@ -755,8 +908,25 @@ an_equal_record_keeps_the_running_action :: proc(t: ^testing.T) {
 @(test)
 a_failed_precondition_replans_from_the_root :: proc(t: ^testing.T) {
 	d := D {
-		tasks   = {{methods = {{tests = {is(DOWN, 0)}, subtasks = {act(0), act(1)}}, {subtasks = {act(2)}}}}},
-		actions = {{action = "walk", n = 1, effects = {set(ARMED)}}, {action = "step", n = 3, guard = "!blocked", tests = {is(ARMED)}, effects = {set(DOWN)}}, {action = "hold", n = 9}},
+		tasks   = {
+			{
+				methods = {
+					{tests = {is(DOWN, 0)}, subtasks = {act(0), act(1)}},
+					{subtasks = {act(2)}},
+				},
+			},
+		},
+		actions = {
+			{action = "walk", n = 1, effects = {set(ARMED)}},
+			{
+				action = "step",
+				n = 3,
+				guard = "!blocked",
+				tests = {is(ARMED)},
+				effects = {set(DOWN)},
+			},
+			{action = "hold", n = 9},
+		},
 	}
 	f := setup(t, d)
 	defer teardown(t, f)
@@ -816,7 +986,10 @@ a_decomposition_is_spread_over_ticks_by_the_budget :: proc(t: ^testing.T) {
 @(test)
 recursion_is_bounded_by_the_depth :: proc(t: ^testing.T) {
 	d := D {
-		tasks   = {{methods = {{subtasks = {task(1)}}, {subtasks = {act(0)}}}}, {methods = {{subtasks = {task(1), act(0)}}}}},
+		tasks   = {
+			{methods = {{subtasks = {task(1)}}, {subtasks = {act(0)}}}},
+			{methods = {{subtasks = {task(1), act(0)}}}},
+		},
 		actions = {{action = "hold", n = 2}},
 	}
 	f := setup(t, d)
@@ -829,14 +1002,21 @@ recursion_is_bounded_by_the_depth :: proc(t: ^testing.T) {
 	if len(view.methods) == 1 {
 		testing.expect_value(t, view.methods[0], ai.Plan_Method{1, 201})
 	}
-	testing.expect(t, view.nodes > format.MAX_HTN_DEPTH, "the decomposition went as deep as the stack")
+	testing.expect(
+		t,
+		view.nodes > format.MAX_HTN_DEPTH,
+		"the decomposition went as deep as the stack",
+	)
 }
 
 // The plan, its record and the decomposition are in the agent's module state, so a code reload keeps them and the
 // running action.
 @(test)
 the_plan_is_kept_across_a_code_reload :: proc(t: ^testing.T) {
-	f := setup(t, {tasks = {{methods = {{subtasks = {act(0)}}}}}, actions = {{action = "hold", n = 1}}})
+	f := setup(
+		t,
+		{tasks = {{methods = {{subtasks = {act(0)}}}}}, actions = {{action = "hold", n = 1}}},
+	)
 	defer teardown(t, f)
 	e := spawn_agent(f)
 	start(f, e)
@@ -849,7 +1029,12 @@ the_plan_is_kept_across_a_code_reload :: proc(t: ^testing.T) {
 	register_test(&f.ai)
 	frame(f, 6)
 	testing.expect(t, runs(f, e))
-	testing.expectf(t, slice.equal(f.events[:], []string{"start hold 1"}), "events %v", f.events[:])
+	testing.expectf(
+		t,
+		slice.equal(f.events[:], []string{"start hold 1"}),
+		"events %v",
+		f.events[:],
+	)
 }
 
 // Data that its check refuses makes the agent wait.
@@ -874,7 +1059,9 @@ a_refused_htn_waits :: proc(t: ^testing.T) {
 @(test)
 an_htn_decision_and_a_behavior_tree_share_a_blackboard_and_actions :: proc(t: ^testing.T) {
 	d := D {
-		tasks   = {{methods = {{tests = {is(ARMED, 0)}, subtasks = {act(0)}}, {subtasks = {act(1)}}}}},
+		tasks   = {
+			{methods = {{tests = {is(ARMED, 0)}, subtasks = {act(0)}}, {subtasks = {act(1)}}}},
+		},
 		actions = {{action = "walk", n = 3, effects = {set(ARMED)}}, {action = "hold", n = 1}},
 	}
 	f := setup(t, d)
@@ -904,7 +1091,7 @@ htn_is_the_same_on_one_job_and_many :: proc(t: ^testing.T) {
 	}
 	run :: proc(t: ^testing.T, serial: bool) -> [dynamic]Outcome {
 		d := D {
-			tasks = {
+			tasks    = {
 				{
 					methods = {
 						{guard = "blocked", tests = {is(DOWN, 0)}, subtasks = {task(1), act(0)}},
@@ -913,10 +1100,20 @@ htn_is_the_same_on_one_job_and_many :: proc(t: ^testing.T) {
 						{subtasks = {act(5)}},
 					},
 				},
-				{methods = {{tests = {is(NEAR)}, subtasks = {act(1)}}, {subtasks = {act(2), act(1)}}}},
+				{
+					methods = {
+						{tests = {is(NEAR)}, subtasks = {act(1)}},
+						{subtasks = {act(2), act(1)}},
+					},
+				},
 			},
-			actions = {
-				{action = "step", n = 3, tests = {is(ARMED), is(NEAR), at_least(AMMO, 1)}, effects = {set(DOWN), add(AMMO, -1)}},
+			actions  = {
+				{
+					action = "step",
+					n = 3,
+					tests = {is(ARMED), is(NEAR), at_least(AMMO, 1)},
+					effects = {set(DOWN), add(AMMO, -1)},
+				},
 				{action = "walk", n = 1, effects = {set(ARMED)}},
 				{action = "walk", n = 2, tests = {is(NEAR, 0)}, effects = {set(NEAR)}},
 				{action = "step", n = 4, effects = {add(AMMO, 2)}},

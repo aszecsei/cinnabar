@@ -362,9 +362,22 @@ start_sprites :: proc(f: ^Frame) {
 	platform := r.platform
 	s := sf.buffers
 	if s.records == {} {
-		s.records = platform.gpu_create_buffer({size = MAX_SPRITES * size_of(Sprite_Record), usage = {.Storage}, label = "sprites"}, nil)
-		s.count = platform.gpu_create_buffer({size = 4, usage = {.Storage}, label = "sprite count"}, nil)
-		s.dispatches = platform.gpu_create_buffer({size = size_of(Sprite_Arguments), usage = {.Storage, .Indirect}, label = "sprite dispatches"}, nil)
+		s.records = platform.gpu_create_buffer(
+			{size = MAX_SPRITES * size_of(Sprite_Record), usage = {.Storage}, label = "sprites"},
+			nil,
+		)
+		s.count = platform.gpu_create_buffer(
+			{size = 4, usage = {.Storage}, label = "sprite count"},
+			nil,
+		)
+		s.dispatches = platform.gpu_create_buffer(
+			{
+				size = size_of(Sprite_Arguments),
+				usage = {.Storage, .Indirect},
+				label = "sprite dispatches",
+			},
+			nil,
+		)
 	}
 	ok: bool
 	sf.initial, ok = platform.gpu_upload(4, 4)
@@ -377,13 +390,27 @@ start_sprites :: proc(f: ^Frame) {
 	sf.count = import_buffer(g, s.count)
 	sf.dispatches = import_buffer(g, s.dispatches)
 	p := add_compute_pass(g, "sprite records", proc(ctx: ^Pass_Context) {
-		sf := (^Frame)(ctx.data).sprites
-		g := ctx.graph
-		if sf.cpu_count > 0 {
-			gpu.cmd_copy_buffer(ctx.cb, sf.cpu.buffer, sf.cpu.offset, gpu_buffer(g, sf.records), 0, sf.cpu_count * size_of(Sprite_Record))
-		}
-		gpu.cmd_copy_buffer(ctx.cb, sf.initial.buffer, sf.initial.offset, gpu_buffer(g, sf.count), 0, 4)
-	}, f)
+			sf := (^Frame)(ctx.data).sprites
+			g := ctx.graph
+			if sf.cpu_count > 0 {
+				gpu.cmd_copy_buffer(
+					ctx.cb,
+					sf.cpu.buffer,
+					sf.cpu.offset,
+					gpu_buffer(g, sf.records),
+					0,
+					sf.cpu_count * size_of(Sprite_Record),
+				)
+			}
+			gpu.cmd_copy_buffer(
+				ctx.cb,
+				sf.initial.buffer,
+				sf.initial.offset,
+				gpu_buffer(g, sf.count),
+				0,
+				4,
+			)
+		}, f)
 	copy_dest(g, p, sf.records)
 	copy_dest(g, p, sf.count)
 	sf.started = true
@@ -412,23 +439,39 @@ add_sprite_bin_passes :: proc(f: ^Frame) {
 	sf.tiles = (f.size + SPRITE_TILE - 1) / SPRITE_TILE
 	rows := (sf.capacity + SPRITE_LIGHT_COLUMNS - 1) / SPRITE_LIGHT_COLUMNS
 	// The rows round up to a power of two, so the transient cache keeps the textures while the capacity changes.
-	sf.light_size = {SPRITE_LIGHT_COLUMNS * SPRITE_LIGHT_TEXELS, next_power_of_two(rows) * SPRITE_LIGHT_TEXELS}
+	sf.light_size = {
+		SPRITE_LIGHT_COLUMNS * SPRITE_LIGHT_TEXELS,
+		next_power_of_two(rows) * SPRITE_LIGHT_TEXELS,
+	}
 	tile_count := int(sf.tiles.x * sf.tiles.y)
 	bin_count := tile_count * int(sf.words)
 	if int(sf.capacity) > s.screen_capacity {
 		platform.gpu_destroy_buffer(s.screen)
 		s.screen_capacity = int(next_power_of_two(sf.capacity))
-		s.screen = platform.gpu_create_buffer({size = u32(s.screen_capacity * SCREEN_SPRITE_SIZE), usage = {.Storage}, label = "screen sprites"}, nil)
+		s.screen = platform.gpu_create_buffer(
+			{
+				size = u32(s.screen_capacity * SCREEN_SPRITE_SIZE),
+				usage = {.Storage},
+				label = "screen sprites",
+			},
+			nil,
+		)
 	}
 	if tile_count > s.tile_capacity {
 		platform.gpu_destroy_buffer(s.tile_depths)
 		s.tile_capacity = tile_count
-		s.tile_depths = platform.gpu_create_buffer({size = u32(tile_count * 4), usage = {.Storage}, label = "sprite tile depths"}, nil)
+		s.tile_depths = platform.gpu_create_buffer(
+			{size = u32(tile_count * 4), usage = {.Storage}, label = "sprite tile depths"},
+			nil,
+		)
 	}
 	if bin_count > s.bin_capacity {
 		platform.gpu_destroy_buffer(s.bins)
 		s.bin_capacity = bin_count
-		s.bins = platform.gpu_create_buffer({size = u32(bin_count * 4), usage = {.Storage}, label = "sprite bins"}, nil)
+		s.bins = platform.gpu_create_buffer(
+			{size = u32(bin_count * 4), usage = {.Storage}, label = "sprite bins"},
+			nil,
+		)
 	}
 	sf.screen = import_buffer(g, s.screen)
 	sf.tile_depths = import_buffer(g, s.tile_depths)
@@ -456,9 +499,9 @@ add_sprite_moments_pass :: proc(f: ^Frame) {
 	sf := f.sprites
 	g := f.graph
 	p := add_compute_pass(g, "sprite moments", proc(ctx: ^Pass_Context) {
-		f := (^Frame)(ctx.data)
-		run_sprite_raster(ctx, f.renderer.sprites.moments.pipeline, 0)
-	}, f)
+			f := (^Frame)(ctx.data)
+			run_sprite_raster(ctx, f.renderer.sprites.moments.pipeline, 0)
+		}, f)
 	read(g, p, f.depth)
 	read(g, p, sf.count)
 	read(g, p, sf.screen)
@@ -473,8 +516,14 @@ add_sprite_moments_pass :: proc(f: ^Frame) {
 add_sprite_shade_passes :: proc(f: ^Frame, accumulated: Texture) {
 	sf := f.sprites
 	g := f.graph
-	sf.light = create_texture(g, {size = sf.light_size, format = SPRITE_LIGHT_FORMAT, label = "sprite light"})
-	sf.fog_light = create_texture(g, {size = sf.light_size, format = SPRITE_LIGHT_FORMAT, label = "sprite fog light"})
+	sf.light = create_texture(
+		g,
+		{size = sf.light_size, format = SPRITE_LIGHT_FORMAT, label = "sprite light"},
+	)
+	sf.fog_light = create_texture(
+		g,
+		{size = sf.light_size, format = SPRITE_LIGHT_FORMAT, label = "sprite fog light"},
+	)
 	p := add_compute_pass(g, "sprite light", run_sprite_light, f)
 	indirect_buffer(g, p, sf.dispatches)
 	read(g, p, sf.records)
@@ -483,11 +532,19 @@ add_sprite_shade_passes :: proc(f: ^Frame, accumulated: Texture) {
 	write(g, p, sf.light)
 	write(g, p, sf.fog_light)
 	sh := new(Shade_Frame, f.renderer.platform.frame_allocator)
-	sh^ = {frame = f, accumulated = accumulated}
+	sh^ = {
+		frame       = f,
+		accumulated = accumulated,
+	}
 	p = add_compute_pass(g, "sprite shade", proc(ctx: ^Pass_Context) {
-		sh := (^Shade_Frame)(ctx.data)
-		run_sprite_raster(ctx, sh.frame.renderer.sprites.shade.pipeline, sh.accumulated, sh.frame)
-	}, sh)
+			sh := (^Shade_Frame)(ctx.data)
+			run_sprite_raster(
+				ctx,
+				sh.frame.renderer.sprites.shade.pipeline,
+				sh.accumulated,
+				sh.frame,
+			)
+		}, sh)
 	read(g, p, f.depth)
 	read(g, p, f.exposure)
 	read(g, p, sf.records)
@@ -560,7 +617,11 @@ run_sprite_bin :: proc(ctx: ^Pass_Context) {
 	gpu.cmd_set_pipeline(ctx.cb, f.renderer.sprites.bin.pipeline)
 	gpu.cmd_set_pass_constants(ctx.cb, f.scene_frame.view_constants[VIEW_CAMERA])
 	gpu.cmd_push_constants(ctx.cb, &push)
-	gpu.cmd_dispatch_indirect(ctx.cb, gpu_buffer(g, sf.dispatches), u32(offset_of(Sprite_Arguments, bin)))
+	gpu.cmd_dispatch_indirect(
+		ctx.cb,
+		gpu_buffer(g, sf.dispatches),
+		u32(offset_of(Sprite_Arguments, bin)),
+	)
 }
 
 @(private = "file")
@@ -597,13 +658,22 @@ run_sprite_light :: proc(ctx: ^Pass_Context) {
 	gpu.cmd_set_pipeline(ctx.cb, r.sprites.light.pipeline)
 	gpu.cmd_set_pass_constants(ctx.cb, f.scene_frame.view_constants[VIEW_CAMERA])
 	gpu.cmd_push_constants(ctx.cb, &push)
-	gpu.cmd_dispatch_indirect(ctx.cb, gpu_buffer(g, sf.dispatches), u32(offset_of(Sprite_Arguments, light)))
+	gpu.cmd_dispatch_indirect(
+		ctx.cb,
+		gpu_buffer(g, sf.dispatches),
+		u32(offset_of(Sprite_Arguments, light)),
+	)
 }
 
 // run_sprite_raster records the moments pass, without accumulated, or the shade pass, which adds to it. Both visit
 // each pixel's sprites, with the camera's constants.
 @(private = "file")
-run_sprite_raster :: proc(ctx: ^Pass_Context, pipeline: gpu.Pipeline, accumulated: Texture, frame: ^Frame = nil) {
+run_sprite_raster :: proc(
+	ctx: ^Pass_Context,
+	pipeline: gpu.Pipeline,
+	accumulated: Texture,
+	frame: ^Frame = nil,
+) {
 	f := frame != nil ? frame : (^Frame)(ctx.data)
 	sf := f.sprites
 	g := ctx.graph

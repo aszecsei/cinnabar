@@ -74,7 +74,8 @@ Game :: struct {
 }
 
 // USER_OFFSET is where the project's state begins, after Game, at the alignment that the host gives the whole state.
-USER_OFFSET :: (size_of(Game) + core.GAME_STATE_ALIGN - 1) / core.GAME_STATE_ALIGN * core.GAME_STATE_ALIGN
+USER_OFFSET ::
+	(size_of(Game) + core.GAME_STATE_ALIGN - 1) / core.GAME_STATE_ALIGN * core.GAME_STATE_ALIGN
 
 // Hooks are what a project with Odin adds to the standard game. Every field may be left out. A project gives them from
 // a procedure, which api calls each time it needs them, so nothing of them is kept in the state: a reload gives the new
@@ -154,7 +155,12 @@ api :: proc($hooks: proc() -> Hooks) -> core.Game_API {
 	script_types :: proc(platform: ^core.Platform_API) -> string {
 		return game_script_types(platform, hooks(), register)
 	}
-	editor_poll :: proc(state: rawptr, connection: u64, incoming: []core.Editor_Message, out: ^[dynamic]byte) {
+	editor_poll :: proc(
+		state: rawptr,
+		connection: u64,
+		incoming: []core.Editor_Message,
+		out: ^[dynamic]byte,
+	) {
 		g := (^Game)(state)
 		editor.poll(&g.editor, &g.world, &g.scripts, connection, incoming, out, g)
 	}
@@ -222,8 +228,8 @@ register_scripts :: proc(r: ^script.Runtime) {
 	sprite.register_scripts(r, &g.sprites)
 	ui.register_scripts(r, &g.ui)
 	script.define(r, "Game.set_paused", proc(L: ^luau.State) -> c.int {
-		luau.L_checktype(L, 1, .BOOLEAN)
-		game_of(L).paused = bool(luau.toboolean(L, 1))
-		return 0
-	}, "(paused: boolean) -> ()")
+			luau.L_checktype(L, 1, .BOOLEAN)
+			game_of(L).paused = bool(luau.toboolean(L, 1))
+			return 0
+		}, "(paused: boolean) -> ()")
 }

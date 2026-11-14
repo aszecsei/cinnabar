@@ -81,11 +81,21 @@ input_bytes :: proc(format: audio.Sound_Format, channels: int) -> int {
 
 // memory_bytes is the memory that a decoder of this format takes, aligned to MEMORY_ALIGN.
 memory_bytes :: proc(format: audio.Sound_Format, channels: int) -> int {
-	return state_bytes(format, channels) + (OUTPUT_FRAMES + SEAM_FRAMES) * channels * size_of(i16) + input_bytes(format, channels)
+	return(
+		state_bytes(format, channels) +
+		(OUTPUT_FRAMES + SEAM_FRAMES) * channels * size_of(i16) +
+		input_bytes(format, channels) \
+	)
 }
 
 // decoder_init sets a decoder up at the start of a sound, in memory of memory_bytes.
-decoder_init :: proc(d: ^Decoder, format: audio.Sound_Format, channels: int, frames, skip, size: u64, memory: []byte) -> bool {
+decoder_init :: proc(
+	d: ^Decoder,
+	format: audio.Sound_Format,
+	channels: int,
+	frames, skip, size: u64,
+	memory: []byte,
+) -> bool {
 	state_size := state_bytes(format, channels)
 	output_size := OUTPUT_FRAMES * channels * size_of(i16)
 	seam_size := SEAM_FRAMES * channels * size_of(i16)
@@ -100,7 +110,9 @@ decoder_init :: proc(d: ^Decoder, format: audio.Sound_Format, channels: int, fra
 		seam     = ([^]i16)(raw_data(memory[state_size + output_size:])),
 		input    = memory[state_size + output_size + seam_size:][:input_bytes(format, channels)],
 	}
-	if format == .Opus && opus.decoder_init((^opus.Decoder)(raw_data(d.state)), audio.SAMPLE_RATE, c.int(channels)) != opus.OK {
+	if format == .Opus &&
+	   opus.decoder_init((^opus.Decoder)(raw_data(d.state)), audio.SAMPLE_RATE, c.int(channels)) !=
+		   opus.OK {
 		return false
 	}
 	decoder_restart(d)
@@ -125,7 +137,15 @@ decoder_restart :: proc(d: ^Decoder) {
 }
 
 // decoder_next gives the next block of frames, interleaved, which last until the next call.
-decoder_next :: proc(d: ^Decoder, read: Read, user: rawptr) -> (frames: [^]i16, count: int, status: Status) {
+decoder_next :: proc(
+	d: ^Decoder,
+	read: Read,
+	user: rawptr,
+) -> (
+	frames: [^]i16,
+	count: int,
+	status: Status,
+) {
 	for d.given < d.frames {
 		decoded, ok := decode_block(d, read, user)
 		if !ok {
@@ -242,7 +262,14 @@ decode_opus :: proc(d: ^Decoder, read: Read, user: rawptr) -> (frames: int, ok: 
 				return 0, false
 			}
 			if held >= 2 + size {
-				decoded := opus.decode((^opus.Decoder)(raw_data(d.state)), &d.input[d.input_start + 2], i32(size), d.output, OUTPUT_FRAMES, 0)
+				decoded := opus.decode(
+					(^opus.Decoder)(raw_data(d.state)),
+					&d.input[d.input_start + 2],
+					i32(size),
+					d.output,
+					OUTPUT_FRAMES,
+					0,
+				)
 				if decoded < 0 {
 					return 0, false
 				}
@@ -265,7 +292,13 @@ vorbis_open :: proc(d: ^Decoder, read: Read, user: rawptr) -> bool {
 		allocation := stb.vorbis_alloc{raw_data(d.state), c.int(len(d.state))}
 		consumed: c.int
 		error: stb.Error
-		d.vorbis = stb.open_pushdata(&d.input[d.input_start], c.int(d.input_end - d.input_start), &consumed, &error, &allocation)
+		d.vorbis = stb.open_pushdata(
+			&d.input[d.input_start],
+			c.int(d.input_end - d.input_start),
+			&consumed,
+			&error,
+			&allocation,
+		)
 		if d.vorbis != nil {
 			d.input_start += int(consumed)
 			info := stb.get_info(d.vorbis)
@@ -286,7 +319,14 @@ decode_vorbis :: proc(d: ^Decoder, read: Read, user: rawptr) -> (frames: int, ok
 		channels, samples: c.int
 		output: [^]^f32
 		held := d.input_end - d.input_start
-		used := stb.decode_frame_pushdata(d.vorbis, raw_data(d.input[d.input_start:]), c.int(held), &channels, &output, &samples)
+		used := stb.decode_frame_pushdata(
+			d.vorbis,
+			raw_data(d.input[d.input_start:]),
+			c.int(held),
+			&channels,
+			&output,
+			&samples,
+		)
 		if used == 0 && samples == 0 {
 			if refill(d, read, user) == 0 {
 				return 0, false
@@ -329,8 +369,20 @@ read_memory :: proc(user: rawptr, offset: u64, buffer: rawptr, size: u64) -> i64
 
 // decode_all decodes a whole sound in memory to out, which holds its frames. It gives what a later pass of a loop gives,
 // crossed over from the end of the data, so a loop of out has no seam, and the first time through is no different to hear.
-decode_all :: proc(format: audio.Sound_Format, data: []byte, channels: int, frames, skip: u64, out: []i16, allocator := context.allocator) -> bool {
-	memory, err := mem.make_aligned([]byte, memory_bytes(format, channels), MEMORY_ALIGN, allocator)
+decode_all :: proc(
+	format: audio.Sound_Format,
+	data: []byte,
+	channels: int,
+	frames, skip: u64,
+	out: []i16,
+	allocator := context.allocator,
+) -> bool {
+	memory, err := mem.make_aligned(
+		[]byte,
+		memory_bytes(format, channels),
+		MEMORY_ALIGN,
+		allocator,
+	)
 	if err != nil {
 		return false
 	}

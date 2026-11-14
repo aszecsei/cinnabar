@@ -15,32 +15,32 @@ import format "cinnabar:engine/asset/format"
 // which has no extension. An Instance_Set is only ever a USD stage's sub-asset, a Skin or an Animation a glTF
 // model's, and a Nav_Mesh a scene's.
 IMPORTERS :: [format.Asset_Kind][]string {
-	.None    = nil,
-	.Script  = {SCRIPT_EXTENSION},
-	.Scene   = {format.SCENE_EXTENSION},
-	.Shader  = {format.SHADER_EXTENSION},
-	.Texture = TEXTURE_SOURCE_EXTENSIONS,
-	.Model   = MODEL_EXTENSIONS,
-	.Mesh    = {format.MESH_EXTENSION},
-	.Shading_Model = {format.SHADING_EXTENSION},
-	.Material = {format.MATERIAL_EXTENSION},
+	.None              = nil,
+	.Script            = {SCRIPT_EXTENSION},
+	.Scene             = {format.SCENE_EXTENSION},
+	.Shader            = {format.SHADER_EXTENSION},
+	.Texture           = TEXTURE_SOURCE_EXTENSIONS,
+	.Model             = MODEL_EXTENSIONS,
+	.Mesh              = {format.MESH_EXTENSION},
+	.Shading_Model     = {format.SHADING_EXTENSION},
+	.Material          = {format.MATERIAL_EXTENSION},
 	.Material_Instance = {format.MATERIAL_INSTANCE_EXTENSION},
 	.Material_Function = {format.MATERIAL_FUNCTION_EXTENSION},
-	.Prefab = {format.PREFAB_EXTENSION},
-	.Effect = {format.EFFECT_EXTENSION},
-	.Stage  = STAGE_EXTENSIONS,
-	.Instance_Set = nil,
-	.Skin = nil,
-	.Animation = nil,
-	.Animation_Graph = {format.ANIMATION_GRAPH_EXTENSION},
-	.Audio = AUDIO_EXTENSIONS,
-	.Font = format.FONT_EXTENSIONS,
-	.Ui = {format.UI_EXTENSION},
-	.Sprite_Sheet = {format.SPRITE_SHEET_EXTENSION},
-	.Nav_Mesh = nil,
-	.Blackboard = {format.BLACKBOARD_EXTENSION},
-	.Decision = {format.DECISION_EXTENSION},
-	.Perception = {format.PERCEPTION_EXTENSION},
+	.Prefab            = {format.PREFAB_EXTENSION},
+	.Effect            = {format.EFFECT_EXTENSION},
+	.Stage             = STAGE_EXTENSIONS,
+	.Instance_Set      = nil,
+	.Skin              = nil,
+	.Animation         = nil,
+	.Animation_Graph   = {format.ANIMATION_GRAPH_EXTENSION},
+	.Audio             = AUDIO_EXTENSIONS,
+	.Font              = format.FONT_EXTENSIONS,
+	.Ui                = {format.UI_EXTENSION},
+	.Sprite_Sheet      = {format.SPRITE_SHEET_EXTENSION},
+	.Nav_Mesh          = nil,
+	.Blackboard        = {format.BLACKBOARD_EXTENSION},
+	.Decision          = {format.DECISION_EXTENSION},
+	.Perception        = {format.PERCEPTION_EXTENSION},
 }
 
 // Setting_Info is an import setting that an importer knows: the values that it takes, and the value of an asset that
@@ -113,7 +113,15 @@ check_settings :: proc(a: Asset_Source, problems: ^Problems) -> bool {
 		if !known {
 			report_warning(problems, meta_path, 0, 0, "unknown setting %q", setting.key)
 		} else if !slice.contains(info.values, setting.value) {
-			report_error(problems, meta_path, 0, 0, "%s must be %s", setting.key, strings.join(info.values, " or ", context.temp_allocator))
+			report_error(
+				problems,
+				meta_path,
+				0,
+				0,
+				"%s must be %s",
+				setting.key,
+				strings.join(info.values, " or ", context.temp_allocator),
+			)
 			ok = false
 		}
 	}
@@ -122,7 +130,30 @@ check_settings :: proc(a: Asset_Source, problems: ^Problems) -> bool {
 
 Asset_Kinds :: bit_set[format.Asset_Kind]
 
-ALL_KINDS :: Asset_Kinds{.Script, .Scene, .Shader, .Texture, .Model, .Mesh, .Shading_Model, .Material, .Material_Instance, .Material_Function, .Prefab, .Effect, .Stage, .Animation_Graph, .Audio, .Font, .Ui, .Sprite_Sheet, .Nav_Mesh, .Blackboard, .Decision, .Perception}
+ALL_KINDS :: Asset_Kinds {
+	.Script,
+	.Scene,
+	.Shader,
+	.Texture,
+	.Model,
+	.Mesh,
+	.Shading_Model,
+	.Material,
+	.Material_Instance,
+	.Material_Function,
+	.Prefab,
+	.Effect,
+	.Stage,
+	.Animation_Graph,
+	.Audio,
+	.Font,
+	.Ui,
+	.Sprite_Sheet,
+	.Nav_Mesh,
+	.Blackboard,
+	.Decision,
+	.Perception,
+}
 
 // Asset_Source is a source asset with its .meta file. A cook fills in what it learns of the asset, for the daemon's
 // index.
@@ -355,7 +386,14 @@ found_assets :: proc(
 		}
 		for guid in guids {
 			if j, seen := first[guid]; seen {
-				report_error(problems, a.path, 0, 0, "has the same GUID as %s. Delete the .meta file of the copy.", found[j].path)
+				report_error(
+					problems,
+					a.path,
+					0,
+					0,
+					"has the same GUID as %s. Delete the .meta file of the copy.",
+					found[j].path,
+				)
 				shared[guid] = true
 				ok = false
 				continue
@@ -375,7 +413,13 @@ found_assets :: proc(
 		}
 		append(&unique, a)
 	}
-	slice.sort_by(found_folders[:], proc(a, b: Folder) -> bool {return a.root < b.root || (a.root == b.root && a.path < b.path)})
+	slice.sort_by(
+		found_folders[:],
+		proc(a, b: Folder) -> bool {return(
+				a.root < b.root ||
+				(a.root == b.root && a.path < b.path) \
+			)},
+	)
 	keys, _ := slice.map_keys(shared, context.temp_allocator)
 	return unique[:], found_folders[:], keys, ok
 }
@@ -507,7 +551,13 @@ read_asset :: proc(root_dir: string, a: ^Asset_Source, problems: ^Problems) -> R
 	a.meta_text = string(meta_bytes)
 	meta, meta_ok := format.meta_parse(a.meta_text, context.temp_allocator)
 	if !meta_ok {
-		report_error(problems, meta_path, 0, 0, "needs `guid = <32 hex digits>`, and `key = value` lines")
+		report_error(
+			problems,
+			meta_path,
+			0,
+			0,
+			"needs `guid = <32 hex digits>`, and `key = value` lines",
+		)
 		return .Failed
 	}
 	a.meta = meta
@@ -517,15 +567,30 @@ read_asset :: proc(root_dir: string, a: ^Asset_Source, problems: ^Problems) -> R
 // assign_guid writes the .meta file of an asset that had none, under the root's lock. Another cook, or an operation
 // of the daemon's, may have written it, or moved the asset, since the scan looked, so it looks again first.
 @(private = "file")
-assign_guid :: proc(root_dir: string, a: ^Asset_Source, meta_path: string, problems: ^Problems) -> (meta_bytes: []byte, result: Read_Result) {
+assign_guid :: proc(
+	root_dir: string,
+	a: ^Asset_Source,
+	meta_path: string,
+	problems: ^Problems,
+) -> (
+	meta_bytes: []byte,
+	result: Read_Result,
+) {
 	lock, locked := lock_root(root_dir)
 	if !locked {
-		report_error(problems, meta_path, 0, 0, "cannot take the lock of its root to give the asset a GUID")
+		report_error(
+			problems,
+			meta_path,
+			0,
+			0,
+			"cannot take the lock of its root to give the asset a GUID",
+		)
 		return nil, .Failed
 	}
 	defer unlock(&lock)
 	meta_err: os.Error
-	if meta_bytes, meta_err = os.read_entire_file(meta_path, context.temp_allocator); meta_err == nil {
+	if meta_bytes, meta_err = os.read_entire_file(meta_path, context.temp_allocator);
+	   meta_err == nil {
 		return meta_bytes, .Read
 	}
 	if meta_err != .Not_Exist {
@@ -551,7 +616,12 @@ new_meta :: proc(settings: []format.Meta_Setting) -> (text: string, guid: format
 }
 
 // meta_with is the text of a .meta file with a GUID, import settings and sub-assets (see format.meta_text).
-meta_with :: proc(guid: format.Guid, old_text: string, settings: []format.Meta_Setting, subassets: Maybe([]format.Meta_Subasset) = nil) -> string {
+meta_with :: proc(
+	guid: format.Guid,
+	old_text: string,
+	settings: []format.Meta_Setting,
+	subassets: Maybe([]format.Meta_Subasset) = nil,
+) -> string {
 	return format.meta_text(guid, old_text, settings, subassets, context.temp_allocator)
 }
 
@@ -581,7 +651,13 @@ subasset_kind_name :: proc(kind: format.Asset_Kind) -> string {
 // assign_subassets gives each sub-asset that a file makes its GUID: the one in the .meta file for its kind and name, or
 // a new one, which it writes into the .meta file, and adds them to the asset's sub-assets. A line whose sub-asset is
 // gone stays, with a warning, so one renamed back gets its GUID again, until a re-import drops it.
-assign_subassets :: proc(root_dir: string, a: ^Asset_Source, wanted: []Subasset, force: bool, problems: ^Problems) -> bool {
+assign_subassets :: proc(
+	root_dir: string,
+	a: ^Asset_Source,
+	wanted: []Subasset,
+	force: bool,
+	problems: ^Problems,
+) -> bool {
 	meta_path := fmt.tprintf("%s%s", a.path, format.META_EXTENSION)
 	if !subassets_changed(a.meta, wanted, force) {
 		subasset_lines(a, meta_path, wanted, force, problems)
@@ -591,7 +667,13 @@ assign_subassets :: proc(root_dir: string, a: ^Asset_Source, wanted: []Subasset,
 	// given a sub-asset its GUID, or the daemon changed an import setting, since the scan read it.
 	lock, locked := lock_root(root_dir)
 	if !locked {
-		report_error(problems, meta_path, 0, 0, "cannot take the lock of its root to write the sub-assets' GUIDs")
+		report_error(
+			problems,
+			meta_path,
+			0,
+			0,
+			"cannot take the lock of its root to write the sub-assets' GUIDs",
+		)
 		return false
 	}
 	defer unlock(&lock)
@@ -645,7 +727,16 @@ subassets_changed :: proc(meta: format.Meta, wanted: []Subasset, force: bool) ->
 // subasset_lines gives each sub-asset its GUID from the asset's .meta file, or a new one, and adds them to the asset's
 // sub-assets. It returns the .meta file's sub-asset lines, and whether they changed.
 @(private = "file")
-subasset_lines :: proc(a: ^Asset_Source, meta_path: string, wanted: []Subasset, force: bool, problems: ^Problems) -> (lines: []format.Meta_Subasset, changed: bool) {
+subasset_lines :: proc(
+	a: ^Asset_Source,
+	meta_path: string,
+	wanted: []Subasset,
+	force: bool,
+	problems: ^Problems,
+) -> (
+	lines: []format.Meta_Subasset,
+	changed: bool,
+) {
 	result := make([dynamic]format.Meta_Subasset, 0, len(wanted), context.temp_allocator)
 	current := make(map[string]bool, len(wanted), context.temp_allocator)
 	for w in wanted {
@@ -668,7 +759,15 @@ subasset_lines :: proc(a: ^Asset_Source, meta_path: string, wanted: []Subasset, 
 			changed = true
 			continue
 		}
-		report_warning(problems, meta_path, 0, 0, "%s.%s is no longer in the file. Its GUID stays here until the file is re-imported.", s.kind, s.name)
+		report_warning(
+			problems,
+			meta_path,
+			0,
+			0,
+			"%s.%s is no longer in the file. Its GUID stays here until the file is re-imported.",
+			s.kind,
+			s.name,
+		)
 		append(&result, s)
 	}
 	return result[:], changed

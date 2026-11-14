@@ -40,7 +40,14 @@ playing :: proc(e: ^Editor) -> []ecs.Entity {
 // simulation reports whether this frame runs the world, its systems and scripts, and with what time step: the frame's
 // in Play, and one fixed tick for a step while paused. A frame that does not run the world still propagates transforms
 // and renders. Call it once per frame.
-simulation :: proc(e: ^Editor, w: ^ecs.World, dt: time.Duration) -> (run: bool, step: time.Duration) {
+simulation :: proc(
+	e: ^Editor,
+	w: ^ecs.World,
+	dt: time.Duration,
+) -> (
+	run: bool,
+	step: time.Duration,
+) {
 	switch mode(e) {
 	case .Play:
 		return true, dt

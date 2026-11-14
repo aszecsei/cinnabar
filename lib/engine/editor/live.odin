@@ -35,22 +35,35 @@ handle_live_message :: proc(e: ^Editor, message: link.Message) -> bool {
 		source, ok := source_of_live(m, e.platform.heap_allocator)
 		if !ok {
 			buffer: [32]u8
-			log.warnf("editor: the live mesh %s has a position count that is not a multiple of three", format.guid_format(guid, &buffer))
+			log.warnf(
+				"editor: the live mesh %s has a position count that is not a multiple of three",
+				format.guid_format(guid, &buffer),
+			)
 			return true
 		}
 		release_live_mesh(e, guid)
-		e.session.live_meshes[guid] = {source = source}
+		e.session.live_meshes[guid] = {
+			source = source,
+		}
 		bake_live_mesh(e, guid)
 	case link.Live_Mesh_Vertices:
 		guid := format.Guid(m.guid)
 		live, found := &e.session.live_meshes[guid]
 		buffer: [32]u8
 		if !found {
-			log.warnf("editor: a drag step came for %s, which is not a live mesh", format.guid_format(guid, &buffer))
+			log.warnf(
+				"editor: a drag step came for %s, which is not a live mesh",
+				format.guid_format(guid, &buffer),
+			)
 			return true
 		}
 		if len(m.positions) != len(live.source.vertices) * 3 {
-			log.warnf("editor: a drag step for %s has %d positions, and the mesh has %d vertices", format.guid_format(guid, &buffer), len(m.positions) / 3, len(live.source.vertices))
+			log.warnf(
+				"editor: a drag step for %s has %d positions, and the mesh has %d vertices",
+				format.guid_format(guid, &buffer),
+				len(m.positions) / 3,
+				len(live.source.vertices),
+			)
 			return true
 		}
 		for &v, i in live.source.vertices {
@@ -120,10 +133,18 @@ bake_live_mesh :: proc(e: ^Editor, guid: format.Guid) {
 	live.triangle_faces = slice.clone(bake.triangle_faces, heap)
 	buffer: [32]u8
 	for p in problems {
-		log.warnf("editor: the live mesh %s, face %d: %s", format.guid_format(guid, &buffer), p.line, p.message)
+		log.warnf(
+			"editor: the live mesh %s, face %d: %s",
+			format.guid_format(guid, &buffer),
+			p.line,
+			p.message,
+		)
 	}
 	if blob == nil {
-		log.warnf("editor: the live mesh %s has no faces that bake, so it draws nothing", format.guid_format(guid, &buffer))
+		log.warnf(
+			"editor: the live mesh %s has no faces that bake, so it draws nothing",
+			format.guid_format(guid, &buffer),
+		)
 	}
 	if e.residency != nil && blob != nil {
 		render.set_live(e.residency, guid, blob)
@@ -134,7 +155,15 @@ bake_live_mesh :: proc(e: ^Editor, guid: format.Guid) {
 // without meshoptimizer's reordering and levels of detail, in allocator at the alignment the runtime loads blobs at.
 // It is nil for a mesh with no faces that bake. The problems are the bake's, with each face's index as its line, and
 // the bake itself is in temporary memory, for the overlay.
-live_blob :: proc(guid: format.Guid, source: format.Mesh_Source, allocator: runtime.Allocator) -> (blob: []byte, problems: []format.Mesh_Problem, bake: format.Mesh_Bake) {
+live_blob :: proc(
+	guid: format.Guid,
+	source: format.Mesh_Source,
+	allocator: runtime.Allocator,
+) -> (
+	blob: []byte,
+	problems: []format.Mesh_Problem,
+	bake: format.Mesh_Bake,
+) {
 	bake = format.mesh_bake(source, context.temp_allocator)
 	problems = make([]format.Mesh_Problem, len(bake.problems), allocator)
 	copy(problems, bake.problems)
@@ -173,7 +202,13 @@ live_blob :: proc(guid: format.Guid, source: format.Mesh_Source, allocator: runt
 	submeshes := make([]format.Submesh_Entry, len(bake.submeshes), context.temp_allocator)
 	for s, i in bake.submeshes {
 		first_meshlet := len(meshlets)
-		count := render.build_simple_meshlets(positions, bake.indices[s.first_index:][:s.index_count], &meshlets, &meshlet_vertices, &meshlet_triangles)
+		count := render.build_simple_meshlets(
+			positions,
+			bake.indices[s.first_index:][:s.index_count],
+			&meshlets,
+			&meshlet_vertices,
+			&meshlet_triangles,
+		)
 		submeshes[i] = {
 			first_index   = s.first_index,
 			index_count   = s.index_count,
@@ -208,7 +243,13 @@ live_blob :: proc(guid: format.Guid, source: format.Mesh_Source, allocator: runt
 
 // source_of_live is a Live_Mesh as the format has it, in allocator. It fails when the positions are not triples.
 @(private = "file")
-source_of_live :: proc(m: link.Live_Mesh, allocator: runtime.Allocator) -> (source: format.Mesh_Source, ok: bool) {
+source_of_live :: proc(
+	m: link.Live_Mesh,
+	allocator: runtime.Allocator,
+) -> (
+	source: format.Mesh_Source,
+	ok: bool,
+) {
 	if len(m.positions) % 3 != 0 {
 		return
 	}
@@ -229,10 +270,10 @@ source_of_live :: proc(m: link.Live_Mesh, allocator: runtime.Allocator) -> (sour
 			slot = f.slot,
 			corners = corners,
 			mapping = {
-				u_axis   = f.mapping.u_axis,
-				v_axis   = f.mapping.v_axis,
-				scale    = f.mapping.scale,
-				shift    = f.mapping.shift,
+				u_axis = f.mapping.u_axis,
+				v_axis = f.mapping.v_axis,
+				scale = f.mapping.scale,
+				shift = f.mapping.shift,
 				rotation = f.mapping.rotation,
 			},
 			// The face's index stands for its line in the messages about it.
@@ -257,7 +298,11 @@ free_source :: proc(source: format.Mesh_Source, allocator: runtime.Allocator) {
 }
 
 // live_message is a mesh as a Live_Mesh message, in allocator: what the editor sends, for tests and tools.
-live_message :: proc(guid: format.Guid, source: format.Mesh_Source, allocator: runtime.Allocator) -> link.Live_Mesh {
+live_message :: proc(
+	guid: format.Guid,
+	source: format.Mesh_Source,
+	allocator: runtime.Allocator,
+) -> link.Live_Mesh {
 	materials := make([dynamic]link.Live_Material, allocator)
 	for material, slot in source.materials {
 		if material != {} {
@@ -274,10 +319,10 @@ live_message :: proc(guid: format.Guid, source: format.Mesh_Source, allocator: r
 			slot = f.slot,
 			corners = f.corners,
 			mapping = {
-				u_axis   = f.mapping.u_axis,
-				v_axis   = f.mapping.v_axis,
-				scale    = f.mapping.scale,
-				shift    = f.mapping.shift,
+				u_axis = f.mapping.u_axis,
+				v_axis = f.mapping.v_axis,
+				scale = f.mapping.scale,
+				shift = f.mapping.shift,
 				rotation = f.mapping.rotation,
 			},
 		}
@@ -286,7 +331,13 @@ live_message :: proc(guid: format.Guid, source: format.Mesh_Source, allocator: r
 	for s, i in source.sharp {
 		sharp[i] = {s.a, s.b}
 	}
-	return {guid = ([16]u8)(guid), materials = materials[:], positions = positions, faces = faces, sharp = sharp}
+	return {
+		guid = ([16]u8)(guid),
+		materials = materials[:],
+		positions = positions,
+		faces = faces,
+		sharp = sharp,
+	}
 }
 
 #assert(format.MESH_MAX_SLOTS == render.MAX_MATERIAL_SLOTS)

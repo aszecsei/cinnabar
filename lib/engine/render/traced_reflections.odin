@@ -131,9 +131,22 @@ ensure_rtr_storage :: proc(r: ^Renderer, count: int) {
 	}
 	t.capacity = max(count, t.capacity * 2)
 	capacity := u32(t.capacity)
-	t.hits = platform.gpu_create_buffer({size = capacity * size_of(Hit_Record), usage = {.Storage}, label = "reflections hits"}, nil)
-	t.surfaces = platform.gpu_create_buffer({size = capacity * size_of(Hit_Surface), usage = {.Storage}, label = "reflections surfaces"}, nil)
-	t.rays = platform.gpu_create_buffer({size = capacity * RTR_LIGHT_STRIDE, usage = {.Storage}, label = "reflections light"}, nil)
+	t.hits = platform.gpu_create_buffer(
+		{size = capacity * size_of(Hit_Record), usage = {.Storage}, label = "reflections hits"},
+		nil,
+	)
+	t.surfaces = platform.gpu_create_buffer(
+		{
+			size = capacity * size_of(Hit_Surface),
+			usage = {.Storage},
+			label = "reflections surfaces",
+		},
+		nil,
+	)
+	t.rays = platform.gpu_create_buffer(
+		{size = capacity * RTR_LIGHT_STRIDE, usage = {.Storage}, label = "reflections light"},
+		nil,
+	)
 }
 
 // add_traced_reflection_passes adds the traced reflections' trace, with the depth pyramid when it marches the screen
@@ -181,7 +194,13 @@ add_traced_reflection_passes :: proc(f: ^Frame) -> bool {
 	write(g, p, sf.radiance[0])
 
 	if reservation, reserved := reservation.?; reserved {
-		shaded := add_hit_shading(f, reservation, {hits = tf.hits, surfaces = tf.surfaces, count = tf.ray_count}, .Compute, "reflections")
+		shaded := add_hit_shading(
+			f,
+			reservation,
+			{hits = tf.hits, surfaces = tf.surfaces, count = tf.ray_count},
+			.Compute,
+			"reflections",
+		)
 		add_hit_light_passes(f, &tf.inputs, "reflections hit", shaded, tf.rays)
 		tf.shaded = shaded
 	}

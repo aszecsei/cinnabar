@@ -83,7 +83,13 @@ untrack_layout :: proc(tracker: ^Layout_Tracker, texture: Texture) {
 	delete_key(&tracker.layouts, texture)
 }
 
-tracked_layout :: proc(tracker: ^Layout_Tracker, texture: Texture) -> (layout: Texture_Layout, ok: bool) {
+tracked_layout :: proc(
+	tracker: ^Layout_Tracker,
+	texture: Texture,
+) -> (
+	layout: Texture_Layout,
+	ok: bool,
+) {
 	sync.guard(&tracker.mutex)
 	return tracker.layouts[texture]
 }
@@ -153,7 +159,8 @@ validate :: proc(
 			}
 			in_pass = true
 			pass_marker_depth = marker_depth
-			graphics_bound, mesh_bound, compute_bound, ray_tracing_bound = false, false, false, false
+			graphics_bound, mesh_bound, compute_bound, ray_tracing_bound =
+				false, false, false, false
 			index_buffer_set = false
 		case .End_Pass:
 			if !in_pass {
@@ -166,7 +173,8 @@ validate :: proc(
 				suspended_at = packet
 			}
 			in_pass = false
-			graphics_bound, mesh_bound, compute_bound, ray_tracing_bound = false, false, false, false
+			graphics_bound, mesh_bound, compute_bound, ray_tracing_bound =
+				false, false, false, false
 			index_buffer_set = false
 		case .Begin_Marker:
 			if payload(p, Begin_Marker).flags - {.Timed} != {} {
@@ -260,11 +268,17 @@ validate :: proc(
 				return .No_Pipeline, packet
 			}
 			d := payload(p, Draw_Indirect)
-			if err = validate_indirect(resources, d.arguments, d.offset, int(d.max_count) * size_of(Draw_Mesh_Indirect_Args)); err != .None {
+			if err = validate_indirect(
+				resources,
+				d.arguments,
+				d.offset,
+				int(d.max_count) * size_of(Draw_Mesh_Indirect_Args),
+			); err != .None {
 				return err, packet
 			}
 			if d.count != {} {
-				if err = validate_indirect(resources, d.count, d.count_offset, size_of(u32)); err != .None {
+				if err = validate_indirect(resources, d.count, d.count_offset, size_of(u32));
+				   err != .None {
 					return err, packet
 				}
 			}
@@ -282,12 +296,19 @@ validate :: proc(
 				return .No_Index_Buffer, packet
 			}
 			d := payload(p, Draw_Indirect)
-			stride := p.kind == .Draw_Indirect ? size_of(Draw_Indirect_Args) : size_of(Draw_Indexed_Indirect_Args)
-			if err = validate_indirect(resources, d.arguments, d.offset, int(d.max_count) * stride); err != .None {
+			stride :=
+				p.kind == .Draw_Indirect ? size_of(Draw_Indirect_Args) : size_of(Draw_Indexed_Indirect_Args)
+			if err = validate_indirect(
+				resources,
+				d.arguments,
+				d.offset,
+				int(d.max_count) * stride,
+			); err != .None {
 				return err, packet
 			}
 			if d.count != {} {
-				if err = validate_indirect(resources, d.count, d.count_offset, size_of(u32)); err != .None {
+				if err = validate_indirect(resources, d.count, d.count_offset, size_of(u32));
+				   err != .None {
 					return err, packet
 				}
 			}
@@ -302,7 +323,9 @@ validate :: proc(
 				return .Invalid_Buffer, packet
 			}
 			aligned := c.source_offset % 4 == 0 && c.dest_offset % 4 == 0 && c.size % 4 == 0
-			in_range := int(c.source_offset) + int(c.size) <= int(source.size) && int(c.dest_offset) + int(c.size) <= int(dest.size)
+			in_range :=
+				int(c.source_offset) + int(c.size) <= int(source.size) &&
+				int(c.dest_offset) + int(c.size) <= int(dest.size)
 			if c.source == c.dest || !aligned || !in_range || .Readback in source.usage {
 				return .Bad_Copy, packet
 			}
@@ -345,7 +368,12 @@ validate :: proc(
 				return .No_Pipeline, packet
 			}
 			d := payload(p, Dispatch_Indirect)
-			if err = validate_indirect(resources, d.arguments, d.offset, size_of(Dispatch_Indirect_Args)); err != .None {
+			if err = validate_indirect(
+				resources,
+				d.arguments,
+				d.offset,
+				size_of(Dispatch_Indirect_Args),
+			); err != .None {
 				return err, packet
 			}
 		case .Upscale:
@@ -373,7 +401,9 @@ validate :: proc(
 					return .Invalid_Accel, packet
 				}
 				valid := b.access_before <= ACCEL_ACCESSES && b.access_after <= ACCEL_ACCESSES
-				if !valid || !valid_sync(b.sync_before, b.access_before) || !valid_sync(b.sync_after, b.access_after) {
+				if !valid ||
+				   !valid_sync(b.sync_before, b.access_before) ||
+				   !valid_sync(b.sync_after, b.access_after) {
 					return .Bad_Barrier, packet
 				}
 			}
@@ -398,7 +428,8 @@ validate :: proc(
 					continue
 				}
 				// Undefined as the layout before discards the contents, whatever the layout is.
-				if current, tracked := layouts.layouts[b.texture]; tracked && b.layout_before != .Undefined && b.layout_before != current {
+				if current, tracked := layouts.layouts[b.texture];
+				   tracked && b.layout_before != .Undefined && b.layout_before != current {
 					return .Layout_Mismatch, packet
 				}
 				layouts.layouts[b.texture] = b.layout_after
@@ -454,12 +485,19 @@ validate_submission :: proc(
 // sampled, cover the render size and are in the Shader_Resource layout, and the output is a storage texture of the output size in the
 // Unordered_Access layout.
 @(private = "file")
-validate_upscale :: proc(resources: Resources, layouts: ^Layout_Tracker, u: ^Upscale) -> Validation_Error {
+validate_upscale :: proc(
+	resources: Resources,
+	layouts: ^Layout_Tracker,
+	u: ^Upscale,
+) -> Validation_Error {
 	desc, ok := resources.upscaler(u.upscaler)
 	if !ok {
 		return .Invalid_Upscaler
 	}
-	if u.render_size.x == 0 || u.render_size.y == 0 || u.render_size.x > desc.max_render_size.x || u.render_size.y > desc.max_render_size.y {
+	if u.render_size.x == 0 ||
+	   u.render_size.y == 0 ||
+	   u.render_size.x > desc.max_render_size.x ||
+	   u.render_size.y > desc.max_render_size.y {
 		return .Bad_Upscale
 	}
 	for input, i in ([]Texture{u.color, u.depth, u.motion, u.reactive, u.transparency}) {
@@ -470,7 +508,10 @@ validate_upscale :: proc(resources: Resources, layouts: ^Layout_Tracker, u: ^Ups
 		if !valid {
 			return .Invalid_Texture
 		}
-		if .Sampled not_in texture.usage || texture.depth != 0 || texture.size.x < u.render_size.x || texture.size.y < u.render_size.y {
+		if .Sampled not_in texture.usage ||
+		   texture.depth != 0 ||
+		   texture.size.x < u.render_size.x ||
+		   texture.size.y < u.render_size.y {
 			return .Bad_Upscale
 		}
 		if !in_layout(layouts, input, .Shader_Resource) {
@@ -563,7 +604,13 @@ same_attachments :: proc(a, b: ^Begin_Pass) -> bool {
 
 // validate_attachments returns the pass's attachment formats in the form a matching pipeline has.
 @(private = "file")
-validate_attachments :: proc(pass: ^Begin_Pass, resources: Resources) -> (formats: Pipeline_Info, err: Validation_Error) {
+validate_attachments :: proc(
+	pass: ^Begin_Pass,
+	resources: Resources,
+) -> (
+	formats: Pipeline_Info,
+	err: Validation_Error,
+) {
 	has_depth := pass.depth.texture != {}
 	has_attachments := pass.color_count > 0 || has_depth
 	sized := pass.size.x > 0 && pass.size.y > 0
@@ -629,13 +676,22 @@ valid_sync :: proc(sync: Syncs, access: Accesses) -> bool {
 // same_formats compares the attachment formats of a pipeline with those of a pass.
 @(private = "file")
 same_formats :: proc(a, b: Pipeline_Info) -> bool {
-	return a.color_count == b.color_count && a.color_formats == b.color_formats && a.depth_format == b.depth_format
+	return(
+		a.color_count == b.color_count &&
+		a.color_formats == b.color_formats &&
+		a.depth_format == b.depth_format \
+	)
 }
 
 // validate_indirect checks an indirect argument or count buffer: the Indirect usage, a 4-byte aligned offset, and
 // size bytes in range.
 @(private = "file")
-validate_indirect :: proc(resources: Resources, buffer: Buffer, offset: u32, size: int) -> Validation_Error {
+validate_indirect :: proc(
+	resources: Resources,
+	buffer: Buffer,
+	offset: u32,
+	size: int,
+) -> Validation_Error {
 	desc, ok := resources.buffer(buffer)
 	if !ok {
 		return .Invalid_Buffer
@@ -693,7 +749,10 @@ validate_accel_size :: proc(resources: Resources, w: ^Write_Accel_Size) -> Valid
 	if !has_buffer {
 		return .Invalid_Buffer
 	}
-	if .Allow_Compaction not_in info.flags || .Storage not_in desc.usage || w.offset % 8 != 0 || int(w.offset) + 8 > int(desc.size) {
+	if .Allow_Compaction not_in info.flags ||
+	   .Storage not_in desc.usage ||
+	   w.offset % 8 != 0 ||
+	   int(w.offset) + 8 > int(desc.size) {
 		return .Bad_Accel_Size
 	}
 	return .None
@@ -714,19 +773,25 @@ validate_compaction :: proc(resources: Resources, c: ^Compact_Accel) -> Validati
 }
 
 @(private = "file")
-compute_queue_barriers :: proc(buffers: []Buffer_Barrier, textures: []Texture_Barrier, accels: []Accel_Barrier) -> bool {
+compute_queue_barriers :: proc(
+	buffers: []Buffer_Barrier,
+	textures: []Texture_Barrier,
+	accels: []Accel_Barrier,
+) -> bool {
 	for b in accels {
 		if !(b.sync_before + b.sync_after <= COMPUTE_QUEUE_SYNCS) {
 			return false
 		}
 	}
 	for b in buffers {
-		if !(b.sync_before + b.sync_after <= COMPUTE_QUEUE_SYNCS) || !(b.access_before + b.access_after <= COMPUTE_QUEUE_ACCESSES) {
+		if !(b.sync_before + b.sync_after <= COMPUTE_QUEUE_SYNCS) ||
+		   !(b.access_before + b.access_after <= COMPUTE_QUEUE_ACCESSES) {
 			return false
 		}
 	}
 	for b in textures {
-		if !(b.sync_before + b.sync_after <= COMPUTE_QUEUE_SYNCS) || !(b.access_before + b.access_after <= COMPUTE_QUEUE_ACCESSES) {
+		if !(b.sync_before + b.sync_after <= COMPUTE_QUEUE_SYNCS) ||
+		   !(b.access_before + b.access_after <= COMPUTE_QUEUE_ACCESSES) {
 			return false
 		}
 		for layout in ([2]Texture_Layout{b.layout_before, b.layout_after}) {
@@ -750,7 +815,12 @@ valid_buffer_barrier :: proc(b: Buffer_Barrier, desc: Buffer_Desc) -> bool {
 	if .Indirect in desc.usage {
 		allowed += {.Indirect_Argument}
 	}
-	return b.access_before <= allowed && b.access_after <= allowed && valid_sync(b.sync_before, b.access_before) && valid_sync(b.sync_after, b.access_after)
+	return(
+		b.access_before <= allowed &&
+		b.access_after <= allowed &&
+		valid_sync(b.sync_before, b.access_before) &&
+		valid_sync(b.sync_after, b.access_after) \
+	)
 }
 
 @(private = "file")
@@ -759,11 +829,19 @@ valid_texture_barrier :: proc(b: Texture_Barrier, desc: Texture_Desc) -> bool {
 		needed, has_need := layout_usage(layout)
 		return !has_need || needed in usage
 	}
-	if b.layout_after == .Undefined || !allowed_layout(b.layout_before, desc.usage) || !allowed_layout(b.layout_after, desc.usage) {
+	if b.layout_after == .Undefined ||
+	   !allowed_layout(b.layout_before, desc.usage) ||
+	   !allowed_layout(b.layout_after, desc.usage) {
 		return false
 	}
-	access_ok := b.access_before <= layout_accesses(b.layout_before) && b.access_after <= layout_accesses(b.layout_after)
-	return access_ok && valid_sync(b.sync_before, b.access_before) && valid_sync(b.sync_after, b.access_after)
+	access_ok :=
+		b.access_before <= layout_accesses(b.layout_before) &&
+		b.access_after <= layout_accesses(b.layout_after)
+	return(
+		access_ok &&
+		valid_sync(b.sync_before, b.access_before) &&
+		valid_sync(b.sync_after, b.access_after) \
+	)
 }
 
 Desc_Error :: enum u8 {
@@ -810,7 +888,9 @@ validate_texture_desc :: proc(desc: Texture_Desc, data: []byte) -> Desc_Error {
 		return .Bad_Format
 	}
 	depth := is_depth_format(desc.format)
-	if desc.usage == {} || (.Depth_Stencil in desc.usage) != depth || (depth && .Render_Target in desc.usage) {
+	if desc.usage == {} ||
+	   (.Depth_Stencil in desc.usage) != depth ||
+	   (depth && .Render_Target in desc.usage) {
 		return .Bad_Usage
 	}
 	// Storage views cannot be sRGB.
@@ -842,15 +922,20 @@ validate_texture_desc :: proc(desc: Texture_Desc, data: []byte) -> Desc_Error {
 		}
 	}
 	if desc.layers > 0 || desc.cube {
-		if desc.depth > 0 || desc.layers > MAX_TEXTURE_LAYERS || (desc.cube && (desc.layers < 6 || desc.layers % 6 != 0 || desc.size.x != desc.size.y)) {
+		if desc.depth > 0 ||
+		   desc.layers > MAX_TEXTURE_LAYERS ||
+		   (desc.cube && (desc.layers < 6 || desc.layers % 6 != 0 || desc.size.x != desc.size.y)) {
 			return .Bad_Layers
 		}
 		// A layered texture's way in is a stream, whose data has every layer, or its shaders' writes.
-		if desc.usage != {.Sampled, .Streamed} && (desc.usage != {.Sampled, .Storage} || data != nil) {
+		if desc.usage != {.Sampled, .Streamed} &&
+		   (desc.usage != {.Sampled, .Storage} || data != nil) {
 			return .Bad_Usage
 		}
 	}
-	if data != nil && (.Sampled not_in desc.usage || len(data) != surface_size(desc.format, desc.size.x, desc.size.y)) {
+	if data != nil &&
+	   (.Sampled not_in desc.usage ||
+			   len(data) != surface_size(desc.format, desc.size.x, desc.size.y)) {
 		return .Bad_Data_Size
 	}
 	return .None
@@ -858,7 +943,11 @@ validate_texture_desc :: proc(desc: Texture_Desc, data: []byte) -> Desc_Error {
 
 // validate_texture_view checks a view against the description of the texture that it views, which is not a view
 // itself.
-validate_texture_view :: proc(desc: Texture_View_Desc, texture: Texture_Desc, texture_is_view: bool) -> Desc_Error {
+validate_texture_view :: proc(
+	desc: Texture_View_Desc,
+	texture: Texture_Desc,
+	texture_is_view: bool,
+) -> Desc_Error {
 	if texture_is_view || .Storage not_in texture.usage {
 		return .Bad_Usage
 	}
@@ -875,7 +964,8 @@ validate_graphics_pipeline_desc :: proc(desc: Graphics_Pipeline_Desc) -> Desc_Er
 	}
 	// With no attachments, the pixel shader's storage writes are all that the pipeline does.
 	no_attachments := len(desc.colors) == 0 && desc.depth_format == .Unknown
-	if (!has_vertex && !has_mesh) || ((len(desc.colors) > 0 || no_attachments) && len(desc.pixel) == 0) {
+	if (!has_vertex && !has_mesh) ||
+	   ((len(desc.colors) > 0 || no_attachments) && len(desc.pixel) == 0) {
 		return .Missing_Shader
 	}
 	if len(desc.colors) > MAX_COLOR_ATTACHMENTS {
@@ -899,7 +989,10 @@ validate_ray_tracing_pipeline_desc :: proc(desc: Ray_Tracing_Pipeline_Desc) -> D
 	if len(desc.library) == 0 || desc.ray_generation == "" {
 		return .Missing_Shader
 	}
-	if desc.max_payload_size == 0 || desc.max_payload_size % 4 != 0 || desc.max_attribute_size % 4 != 0 || desc.max_recursion > 31 {
+	if desc.max_payload_size == 0 ||
+	   desc.max_payload_size % 4 != 0 ||
+	   desc.max_attribute_size % 4 != 0 ||
+	   desc.max_recursion > 31 {
 		return .Bad_Stages
 	}
 	for group in desc.hit_groups {
@@ -917,14 +1010,21 @@ validate_ray_tracing_pipeline_desc :: proc(desc: Ray_Tracing_Pipeline_Desc) -> D
 
 // validate_stream_buffer checks a buffer stream: the data fits at the offset, and both are multiples of 4.
 validate_stream_buffer :: proc(desc: Buffer_Desc, offset: u32, data: []byte) -> Desc_Error {
-	if len(data) == 0 || len(data) % 4 != 0 || offset % 4 != 0 || int(offset) + len(data) > int(desc.size) {
+	if len(data) == 0 ||
+	   len(data) % 4 != 0 ||
+	   offset % 4 != 0 ||
+	   int(offset) + len(data) > int(desc.size) {
 		return .Bad_Data_Size
 	}
 	return .None
 }
 
 // validate_stream_texture checks a texture stream: a Streamed texture, not streamed before, and its whole mip chain.
-validate_stream_texture :: proc(desc: Texture_Desc, streamed_before: bool, data: []byte) -> Desc_Error {
+validate_stream_texture :: proc(
+	desc: Texture_Desc,
+	streamed_before: bool,
+	data: []byte,
+) -> Desc_Error {
 	if .Streamed not_in desc.usage || streamed_before {
 		return .Bad_Usage
 	}
@@ -967,10 +1067,14 @@ validate_accel_desc :: proc(desc: Accel_Struct_Desc) -> Desc_Error {
 		}
 		for g in desc.geometries {
 			min_stride: u32 = g.vertex_format == .RG32_Float ? 8 : 12
-			if g.vertex_count == 0 || g.vertex_stride < min_stride || g.vertex_stride % 4 != 0 || g.vertex_offset % 4 != 0 {
+			if g.vertex_count == 0 ||
+			   g.vertex_stride < min_stride ||
+			   g.vertex_stride % 4 != 0 ||
+			   g.vertex_offset % 4 != 0 {
 				return .Bad_Geometry
 			}
-			triangles_whole := g.indices == {} ? g.vertex_count % 3 == 0 : g.index_count > 0 && g.index_count % 3 == 0
+			triangles_whole :=
+				g.indices == {} ? g.vertex_count % 3 == 0 : g.index_count > 0 && g.index_count % 3 == 0
 			if !triangles_whole {
 				return .Bad_Geometry
 			}

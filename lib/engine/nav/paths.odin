@@ -132,7 +132,9 @@ Active_Search :: struct {
 
 @(private)
 slot_of :: proc(s: ^State, h: Path_Handle) -> ^Path_Slot {
-	if h.generation == 0 || int(h.index) >= len(s.paths.slots) || s.paths.generations[h.index] != h.generation {
+	if h.generation == 0 ||
+	   int(h.index) >= len(s.paths.slots) ||
+	   s.paths.generations[h.index] != h.generation {
 		return nil
 	}
 	slot := &s.paths.slots[h.index]

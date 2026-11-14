@@ -87,9 +87,15 @@ PREVIEW_SURFACE_METAS := [6]string {
 	#load("../../lib/engine/content/materials/preview_surface.material.meta", string),
 	#load("../../lib/engine/content/materials/preview_surface_two_sided.material.meta", string),
 	#load("../../lib/engine/content/materials/preview_surface_masked.material.meta", string),
-	#load("../../lib/engine/content/materials/preview_surface_masked_two_sided.material.meta", string),
+	#load(
+		"../../lib/engine/content/materials/preview_surface_masked_two_sided.material.meta",
+		string,
+	),
 	#load("../../lib/engine/content/materials/preview_surface_transparent.material.meta", string),
-	#load("../../lib/engine/content/materials/preview_surface_transparent_two_sided.material.meta", string),
+	#load(
+		"../../lib/engine/content/materials/preview_surface_transparent_two_sided.material.meta",
+		string,
+	),
 }
 
 @(private = "file")
@@ -122,19 +128,19 @@ Stage_Texture :: struct {
 
 @(private = "file")
 Stage_Material :: struct {
-	material:   i32,
-	two_sided:  bool,
-	name:       string,
-	guid:       format.Guid,
+	material:  i32,
+	two_sided: bool,
+	name:      string,
+	guid:      format.Guid,
 }
 
 // Stage_Part is a run of at most STAGE_MAX_SLOTS of a mesh's subsets, which is a Mesh sub-asset.
 @(private = "file")
 Stage_Part :: struct {
-	mesh:          i32,
-	first, count:  int,
-	name:          string,
-	guid:          format.Guid,
+	mesh:         i32,
+	first, count: int,
+	name:         string,
+	guid:         format.Guid,
 }
 
 // Stage_Meshes is which of a stage's meshes cook. A point instancer's prototype is a mesh of the stage as any other,
@@ -249,8 +255,17 @@ stage_key :: proc(options: Cook_Options, a: Asset_Source) -> u64 {
 	key := hash.fnv64a(
 		transmute([]byte)fmt.tprintf(
 			"%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%v\x00%s\x00%x\x00%x\x00",
-			STAGE_COOK_VERSION, STAGE_PREFAB_VERSION, LIGHTUSD_VERSION, MESHOPTIMIZER_VERSION, COMPRESSONATOR_VERSION, openexr_version(), TEXTURE_COOK_VERSION,
-			options.config, a.name, format.mesh_layout(), format.texture_layout(),
+			STAGE_COOK_VERSION,
+			STAGE_PREFAB_VERSION,
+			LIGHTUSD_VERSION,
+			MESHOPTIMIZER_VERSION,
+			COMPRESSONATOR_VERSION,
+			openexr_version(),
+			TEXTURE_COOK_VERSION,
+			options.config,
+			a.name,
+			format.mesh_layout(),
+			format.texture_layout(),
 		),
 	)
 	for ext in TEXTURE_EXTENSIONS {
@@ -266,7 +281,13 @@ stage_key :: proc(options: Cook_Options, a: Asset_Source) -> u64 {
 }
 
 @(private = "file")
-cook_stage :: proc(options: Cook_Options, a: ^Asset_Source, out_dir: string, pass: ^Pass, generated: ^[dynamic]Asset_Source) -> Asset_Result {
+cook_stage :: proc(
+	options: Cook_Options,
+	a: ^Asset_Source,
+	out_dir: string,
+	pass: ^Pass,
+	generated: ^[dynamic]Asset_Source,
+) -> Asset_Result {
 	problems := &pass.problems
 	if !check_settings(a^, problems) {
 		return .Failed
@@ -274,7 +295,10 @@ cook_stage :: proc(options: Cook_Options, a: ^Asset_Source, out_dir: string, pas
 	key := stage_key(options, a^)
 	manifest_path := fmt.tprintf("%s/stages/%s.deps", out_dir, guid_text(a.meta.guid))
 	old, has_old := read_manifest(manifest_path)
-	if has_old && old.key == key && !pass.force[a.meta.guid] && manifest_current(old, a^, out_dir) {
+	if has_old &&
+	   old.key == key &&
+	   !pass.force[a.meta.guid] &&
+	   manifest_current(old, a^, out_dir) {
 		return .Current if use_manifest(a, old, generated, problems) else .Failed
 	}
 
@@ -287,7 +311,14 @@ cook_stage :: proc(options: Cook_Options, a: ^Asset_Source, out_dir: string, pas
 	if err := usd_string(cn_usd_error(usd)); err != "" {
 		if strings.has_prefix(err, "missing layer") {
 			// A stage whose files are not there, as a sample's downloads, is not an error: the build goes on without it.
-			report_warning(problems, a.path, 0, 0, "not cooked: %s. See the README beside the stage for where its files come from.", err)
+			report_warning(
+				problems,
+				a.path,
+				0,
+				0,
+				"not cooked: %s. See the README beside the stage for where its files come from.",
+				err,
+			)
 			if has_old && !use_manifest(a, old, generated, problems) {
 				return .Failed
 			}
@@ -304,7 +335,8 @@ cook_stage :: proc(options: Cook_Options, a: ^Asset_Source, out_dir: string, pas
 	materials, textures := stage_materials(a^, usd, info, meshes, problems)
 	stage_domes(a^, usd, info, &textures, problems)
 	parts := stage_parts(a^, usd, info, meshes)
-	sets := instancers == "instanced" ? stage_sets(a^, usd, info, meshes, problems) : make([dynamic]Stage_Set, context.temp_allocator)
+	sets :=
+		instancers == "instanced" ? stage_sets(a^, usd, info, meshes, problems) : make([dynamic]Stage_Set, context.temp_allocator)
 
 	wanted := make([dynamic]Subasset, context.temp_allocator)
 	for t in textures {
@@ -320,7 +352,13 @@ cook_stage :: proc(options: Cook_Options, a: ^Asset_Source, out_dir: string, pas
 		append(&wanted, Subasset{kind = .Instance_Set, name = set.name})
 	}
 	append(&wanted, Subasset{kind = .Prefab, name = STAGE_PREFAB_NAME})
-	if !assign_subassets(options.roots[a.root].dir, a, wanted[:], pass.force[a.meta.guid], problems) {
+	if !assign_subassets(
+		options.roots[a.root].dir,
+		a,
+		wanted[:],
+		pass.force[a.meta.guid],
+		problems,
+	) {
 		return .Failed
 	}
 	guid_of := make(map[string]format.Guid, len(a.subassets), context.temp_allocator)
@@ -371,34 +409,82 @@ cook_stage :: proc(options: Cook_Options, a: ^Asset_Source, out_dir: string, pas
 	for t, i in textures {
 		job := &work.jobs[len(parts) + i]
 		if job.file.path != "" {
-			append(&manifest.files, Stage_File{job.file.size, job.file.modified, strings.clone(job.file.path, context.temp_allocator)})
+			append(
+				&manifest.files,
+				Stage_File {
+					job.file.size,
+					job.file.modified,
+					strings.clone(job.file.path, context.temp_allocator),
+				},
+			)
 		}
 		ok &&= finish_job(job.result, &job.scratch, .Texture, pass)
-		append(&manifest.subassets, Stage_Manifest_Subasset{.Texture, t.guid, job.blob_key, t.name, ""})
+		append(
+			&manifest.subassets,
+			Stage_Manifest_Subasset{.Texture, t.guid, job.blob_key, t.name, ""},
+		)
 	}
 	for p, i in parts {
 		job := &work.jobs[i]
 		ok &&= finish_job(job.result, &job.scratch, .Mesh, pass)
-		append(&manifest.subassets, Stage_Manifest_Subasset{.Mesh, p.guid, job.blob_key, p.name, ""})
+		append(
+			&manifest.subassets,
+			Stage_Manifest_Subasset{.Mesh, p.guid, job.blob_key, p.name, ""},
+		)
 	}
 	for set in sets {
 		blob_key, cooked := cook_stage_set(a^, usd, info, set, meshes, out_dir, pass)
 		ok &&= cooked
-		append(&manifest.subassets, Stage_Manifest_Subasset{.Instance_Set, set.guid, blob_key, set.name, ""})
+		append(
+			&manifest.subassets,
+			Stage_Manifest_Subasset{.Instance_Set, set.guid, blob_key, set.name, ""},
+		)
 	}
 
 	// The generated texts, which later passes cook as they would files.
 	for m in materials {
-		text := stage_instance_text(a^, usd, m, textures[:], stage_setting(a^, "normal_y") == "flip")
-		path := fmt.tprintf("%s/generated/stages/%s%s", out_dir, guid_text(m.guid), format.MATERIAL_INSTANCE_EXTENSION)
+		text := stage_instance_text(
+			a^,
+			usd,
+			m,
+			textures[:],
+			stage_setting(a^, "normal_y") == "flip",
+		)
+		path := fmt.tprintf(
+			"%s/generated/stages/%s%s",
+			out_dir,
+			guid_text(m.guid),
+			format.MATERIAL_INSTANCE_EXTENSION,
+		)
 		ok &&= write_generated(path, text, problems)
-		append(&manifest.subassets, Stage_Manifest_Subasset{.Material_Instance, m.guid, 0, m.name, path})
+		append(
+			&manifest.subassets,
+			Stage_Manifest_Subasset{.Material_Instance, m.guid, 0, m.name, path},
+		)
 	}
 	{
-		text := stage_prefab_text(a^, usd, info, meshes, parts[:], sets[:], materials[:], textures[:], problems)
-		path := fmt.tprintf("%s/generated/stages/%s%s", out_dir, guid_text(prefab_guid), format.PREFAB_EXTENSION)
+		text := stage_prefab_text(
+			a^,
+			usd,
+			info,
+			meshes,
+			parts[:],
+			sets[:],
+			materials[:],
+			textures[:],
+			problems,
+		)
+		path := fmt.tprintf(
+			"%s/generated/stages/%s%s",
+			out_dir,
+			guid_text(prefab_guid),
+			format.PREFAB_EXTENSION,
+		)
 		ok &&= write_generated(path, text, problems)
-		append(&manifest.subassets, Stage_Manifest_Subasset{.Prefab, prefab_guid, 0, STAGE_PREFAB_NAME, path})
+		append(
+			&manifest.subassets,
+			Stage_Manifest_Subasset{.Prefab, prefab_guid, 0, STAGE_PREFAB_NAME, path},
+		)
 	}
 	if !ok {
 		return .Failed
@@ -450,7 +536,12 @@ role_name :: proc(r: Stage_Role) -> string {
 // that holds the stage's first sublayer's folder, as a download's, such as main_sponza/textures/a.png, or else from the
 // stage's own folder.
 @(private = "file")
-stage_texture_name :: proc(a: Asset_Source, usd: ^Cn_Usd, resolved: string, role: Stage_Role) -> string {
+stage_texture_name :: proc(
+	a: Asset_Source,
+	usd: ^Cn_Usd,
+	resolved: string,
+	role: Stage_Role,
+) -> string {
 	base := filepath.dir(a.path)
 	info: Cn_Usd_Info
 	cn_usd_info(usd, &info)
@@ -472,7 +563,16 @@ stage_texture_name :: proc(a: Asset_Source, usd: ^Cn_Usd, resolved: string, role
 // stage_materials lists the material instances that the stage's meshes that cook use, with each one's sidedness, and
 // the textures that they read.
 @(private = "file")
-stage_materials :: proc(a: Asset_Source, usd: ^Cn_Usd, info: Cn_Usd_Info, meshes: Stage_Meshes, problems: ^Problems) -> (materials: [dynamic]Stage_Material, textures: [dynamic]Stage_Texture) {
+stage_materials :: proc(
+	a: Asset_Source,
+	usd: ^Cn_Usd,
+	info: Cn_Usd_Info,
+	meshes: Stage_Meshes,
+	problems: ^Problems,
+) -> (
+	materials: [dynamic]Stage_Material,
+	textures: [dynamic]Stage_Texture,
+) {
 	materials = make([dynamic]Stage_Material, context.temp_allocator)
 	textures = make([dynamic]Stage_Texture, context.temp_allocator)
 	used := make(map[[2]i32]bool, context.temp_allocator)
@@ -495,7 +595,10 @@ stage_materials :: proc(a: Asset_Source, usd: ^Cn_Usd, info: Cn_Usd_Info, meshes
 		}
 	}
 	keys, _ := slice.map_keys(used, context.temp_allocator)
-	slice.sort_by(keys, proc(x, y: [2]i32) -> bool {return x[0] < y[0] || (x[0] == y[0] && x[1] < y[1])})
+	slice.sort_by(
+		keys,
+		proc(x, y: [2]i32) -> bool {return x[0] < y[0] || (x[0] == y[0] && x[1] < y[1])},
+	)
 	texture_names := make(map[string]bool, context.temp_allocator)
 	specular, occlusion := 0, 0
 	for k in keys {
@@ -505,17 +608,35 @@ stage_materials :: proc(a: Asset_Source, usd: ^Cn_Usd, info: Cn_Usd_Info, meshes
 		if k[1] != 0 {
 			name = fmt.tprintf("%s#two_sided", name)
 		}
-		append(&materials, Stage_Material{material = k[0], two_sided = k[1] != 0, name = strings.clone(name, context.temp_allocator)})
+		append(
+			&materials,
+			Stage_Material {
+				material = k[0],
+				two_sided = k[1] != 0,
+				name = strings.clone(name, context.temp_allocator),
+			},
+		)
 		specular += int(mat.specular_workflow != 0)
 		occlusion += int(mat.occlusion.texture >= 0)
 		inputs := [?]struct {
 			input: Cn_Usd_Input,
 			usage: format.Texture_Usage,
-		}{{mat.diffuse, .Color}, {mat.emissive, .Color}, {mat.normal, .Normal}, {mat.metallic, .Mask}, {mat.roughness, .Mask}, {mat.opacity, .Mask}}
+		} {
+			{mat.diffuse, .Color},
+			{mat.emissive, .Color},
+			{mat.normal, .Normal},
+			{mat.metallic, .Mask},
+			{mat.roughness, .Mask},
+			{mat.opacity, .Mask},
+		}
 		for input in inputs {
 			t := input.input.texture
 			// Opacity from the base color's alpha samples the base color's texture.
-			if t < 0 || (input.usage == .Mask && t == mat.diffuse.texture && input.input.channel == .A && input.input == mat.opacity) {
+			if t < 0 ||
+			   (input.usage == .Mask &&
+					   t == mat.diffuse.texture &&
+					   input.input.channel == .A &&
+					   input.input == mat.opacity) {
 				continue
 			}
 			role := stage_role(usd, input.input, input.usage)
@@ -523,11 +644,28 @@ stage_materials :: proc(a: Asset_Source, usd: ^Cn_Usd, info: Cn_Usd_Info, meshes
 			cn_usd_texture(usd, t, &tex)
 			resolved := usd_string(tex.resolved)
 			if resolved == "" {
-				report_warning(problems, a.path, 0, 0, "material %s reads %s, which is not there", usd_string(mat.path), usd_string(tex.asset))
+				report_warning(
+					problems,
+					a.path,
+					0,
+					0,
+					"material %s reads %s, which is not there",
+					usd_string(mat.path),
+					usd_string(tex.asset),
+				)
 				continue
 			}
 			if why := image_undecodable(resolved); why != "" {
-				report_warning(problems, a.path, 0, 0, "material %s reads %s, which the cooker cannot decode (%s), so the input keeps its value", usd_string(mat.path), resolved, why)
+				report_warning(
+					problems,
+					a.path,
+					0,
+					0,
+					"material %s reads %s, which the cooker cannot decode (%s), so the input keeps its value",
+					usd_string(mat.path),
+					resolved,
+					why,
+				)
 				continue
 			}
 			texture_name := stage_texture_name(a, usd, resolved, role)
@@ -539,10 +677,24 @@ stage_materials :: proc(a: Asset_Source, usd: ^Cn_Usd, info: Cn_Usd_Info, meshes
 		}
 	}
 	if specular > 0 {
-		report_warning(problems, a.path, 0, 0, "%d materials use the specular workflow, which draws as metallic 0", specular)
+		report_warning(
+			problems,
+			a.path,
+			0,
+			0,
+			"%d materials use the specular workflow, which draws as metallic 0",
+			specular,
+		)
 	}
 	if occlusion > 0 {
-		report_warning(problems, a.path, 0, 0, "%d materials have an occlusion texture, which the lit shading model does not take", occlusion)
+		report_warning(
+			problems,
+			a.path,
+			0,
+			0,
+			"%d materials have an occlusion texture, which the lit shading model does not take",
+			occlusion,
+		)
 	}
 	return
 }
@@ -571,7 +723,12 @@ stage_role :: proc(usd: ^Cn_Usd, input: Cn_Usd_Input, usage: format.Texture_Usag
 // stage_parts splits each mesh that cooks into parts of at most STAGE_MAX_SLOTS subsets. A prototype's mesh is named
 // for its prim alone, under prototypes/, as the copies that share it are in different tiles.
 @(private = "file")
-stage_parts :: proc(a: Asset_Source, usd: ^Cn_Usd, info: Cn_Usd_Info, meshes: Stage_Meshes) -> [dynamic]Stage_Part {
+stage_parts :: proc(
+	a: Asset_Source,
+	usd: ^Cn_Usd,
+	info: Cn_Usd_Info,
+	meshes: Stage_Meshes,
+) -> [dynamic]Stage_Part {
 	parts := make([dynamic]Stage_Part, context.temp_allocator)
 	names := make(map[string]int, context.temp_allocator)
 	for i in 0 ..< info.mesh_count {
@@ -595,8 +752,17 @@ stage_parts :: proc(a: Asset_Source, usd: ^Cn_Usd, info: Cn_Usd_Info, meshes: St
 		part_count := (count + STAGE_MAX_SLOTS - 1) / STAGE_MAX_SLOTS
 		for p in 0 ..< part_count {
 			first := p * STAGE_MAX_SLOTS
-			name := part_count == 1 ? strings.clone(base, context.temp_allocator) : fmt.tprintf("%s#%d", base, p + 1)
-			append(&parts, Stage_Part{mesh = i, first = first, count = min(STAGE_MAX_SLOTS, count - first), name = name})
+			name :=
+				part_count == 1 ? strings.clone(base, context.temp_allocator) : fmt.tprintf("%s#%d", base, p + 1)
+			append(
+				&parts,
+				Stage_Part {
+					mesh = i,
+					first = first,
+					count = min(STAGE_MAX_SLOTS, count - first),
+					name = name,
+				},
+			)
 		}
 	}
 	return parts
@@ -659,7 +825,14 @@ stage_mesh_hash :: proc(m: Cn_Usd_Mesh) -> u64 {
 		m.uv1[:n * 2] if m.uv1 != nil else nil,
 		m.colors[:n * 3] if m.colors != nil else nil,
 	}
-	h := hash.fnv64a(transmute([]byte)fmt.tprintf("%d\x00%d\x00%d\x00", m.corner_count, m.double_sided, m.left_handed))
+	h := hash.fnv64a(
+		transmute([]byte)fmt.tprintf(
+			"%d\x00%d\x00%d\x00",
+			m.corner_count,
+			m.double_sided,
+			m.left_handed,
+		),
+	)
 	for stream, i in streams {
 		h = hash.fnv64a(transmute([]byte)fmt.tprintf("%d:%d\x00", i, len(stream)), h)
 		if len(stream) > 0 {
@@ -668,7 +841,10 @@ stage_mesh_hash :: proc(m: Cn_Usd_Mesh) -> u64 {
 		}
 	}
 	for s in m.subsets[:m.subset_count] {
-		h = hash.fnv64a(transmute([]byte)fmt.tprintf("%d %d %d\x00", s.material, s.first, s.count), h)
+		h = hash.fnv64a(
+			transmute([]byte)fmt.tprintf("%d %d %d\x00", s.material, s.first, s.count),
+			h,
+		)
 	}
 	return h
 }
@@ -676,7 +852,13 @@ stage_mesh_hash :: proc(m: Cn_Usd_Mesh) -> u64 {
 // stage_sets is an instance set for each mesh that each point instancer's prototypes draw, after sharing. A set is
 // named for its instancer's prim, and when it has several, for its mesh's place among them.
 @(private = "file")
-stage_sets :: proc(a: Asset_Source, usd: ^Cn_Usd, info: Cn_Usd_Info, meshes: Stage_Meshes, problems: ^Problems) -> [dynamic]Stage_Set {
+stage_sets :: proc(
+	a: Asset_Source,
+	usd: ^Cn_Usd,
+	info: Cn_Usd_Info,
+	meshes: Stage_Meshes,
+	problems: ^Problems,
+) -> [dynamic]Stage_Set {
 	sets := make([dynamic]Stage_Set, context.temp_allocator)
 	empty, nested := 0, 0
 	for i in 0 ..< info.instancer_count {
@@ -691,7 +873,8 @@ stage_sets :: proc(a: Asset_Source, usd: ^Cn_Usd, info: Cn_Usd_Info, meshes: Sta
 			list: [^]Cn_Usd_Prototype_Mesh
 			count := cn_usd_prototype_meshes(usd, i, p, &list)
 			for pm in list[:count] {
-				if shared := meshes.shared[pm.mesh]; shared >= 0 && !slice.contains(drawn[:], shared) {
+				if shared := meshes.shared[pm.mesh];
+				   shared >= 0 && !slice.contains(drawn[:], shared) {
 					append(&drawn, shared)
 				}
 			}
@@ -708,10 +891,24 @@ stage_sets :: proc(a: Asset_Source, usd: ^Cn_Usd, info: Cn_Usd_Info, meshes: Sta
 		}
 	}
 	if empty > 0 {
-		report_warning(problems, a.path, 0, 0, "%d point instancers have no points or no meshes in their prototypes, so they draw nothing", empty)
+		report_warning(
+			problems,
+			a.path,
+			0,
+			0,
+			"%d point instancers have no points or no meshes in their prototypes, so they draw nothing",
+			empty,
+		)
 	}
 	if nested > 0 {
-		report_warning(problems, a.path, 0, 0, "%d point instancers are in another's prototypes, which the cooker does not draw", nested)
+		report_warning(
+			problems,
+			a.path,
+			0,
+			0,
+			"%d point instancers are in another's prototypes, which the cooker does not draw",
+			nested,
+		)
 	}
 	return sets
 }
@@ -720,7 +917,18 @@ stage_sets :: proc(a: Asset_Source, usd: ^Cn_Usd, info: Cn_Usd_Info, meshes: Sta
 // that it has it, which is the mesh's pose under the prototype, then the point's, in the instancer's space. A pose is
 // in meters on the engine's axes, as a child entity's is.
 @(private = "file")
-cook_stage_set :: proc(a: Asset_Source, usd: ^Cn_Usd, info: Cn_Usd_Info, set: Stage_Set, meshes: Stage_Meshes, out_dir: string, pass: ^Pass) -> (blob_key: u64, ok: bool) {
+cook_stage_set :: proc(
+	a: Asset_Source,
+	usd: ^Cn_Usd,
+	info: Cn_Usd_Info,
+	set: Stage_Set,
+	meshes: Stage_Meshes,
+	out_dir: string,
+	pass: ^Pass,
+) -> (
+	blob_key: u64,
+	ok: bool,
+) {
 	scratch: Scratch
 	scratch_begin(&scratch, pass)
 	context.temp_allocator = virtual.arena_allocator(&scratch.arena)
@@ -730,7 +938,14 @@ cook_stage_set :: proc(a: Asset_Source, usd: ^Cn_Usd, info: Cn_Usd_Info, set: St
 	prototypes := make([]i32, inst.point_count, context.temp_allocator)
 	matrices := make([]f64, int(inst.point_count) * 16, context.temp_allocator)
 	if cn_usd_instancer_points(usd, set.instancer, raw_data(prototypes), raw_data(matrices)) == 0 {
-		report_error(&scratch.problems, a.path, 0, 0, "point instancer %s has arrays of different lengths", usd_string(inst.path))
+		report_error(
+			&scratch.problems,
+			a.path,
+			0,
+			0,
+			"point instancer %s has arrays of different lengths",
+			usd_string(inst.path),
+		)
 		return
 	}
 	// Each prototype's poses of the set's mesh.
@@ -745,14 +960,24 @@ cook_stage_set :: proc(a: Asset_Source, usd: ^Cn_Usd, info: Cn_Usd_Info, set: St
 			}
 		}
 	}
-	blob_key = hash.fnv64a(transmute([]byte)fmt.tprintf("%s\x00%s\x00%x\x00%s\x00%s\x00", STAGE_COOK_VERSION, a.name, format.instance_set_layout(), set.name, stage_setting(a, "scale")))
+	blob_key = hash.fnv64a(
+		transmute([]byte)fmt.tprintf(
+			"%s\x00%s\x00%x\x00%s\x00%s\x00",
+			STAGE_COOK_VERSION,
+			a.name,
+			format.instance_set_layout(),
+			set.name,
+			stage_setting(a, "scale"),
+		),
+	)
 	blob_key = hash.fnv64a(mem.slice_to_bytes(prototypes), blob_key)
 	blob_key = hash.fnv64a(mem.slice_to_bytes(matrices), blob_key)
 	for list in locals {
 		blob_key = hash.fnv64a(mem.slice_to_bytes(list[:]), blob_key)
 	}
 	output := fmt.tprintf("%s/%s.blob", out_dir, guid_text(set.guid))
-	if cooked_key(output, .Instance_Set, format.instance_set_layout()) == blob_key && !pass.force[a.meta.guid] {
+	if cooked_key(output, .Instance_Set, format.instance_set_layout()) == blob_key &&
+	   !pass.force[a.meta.guid] {
 		count_subassets(pass, .Instance_Set, .Current)
 		return blob_key, true
 	}
@@ -783,10 +1008,26 @@ cook_stage_set :: proc(a: Asset_Source, usd: ^Cn_Usd, info: Cn_Usd_Info, set: St
 		}
 	}
 	if skipped > 0 {
-		report_warning(&scratch.problems, a.path, 0, 0, "point instancer %s has %d points whose prototype index is out of range, which are left out", usd_string(inst.path), skipped)
+		report_warning(
+			&scratch.problems,
+			a.path,
+			0,
+			0,
+			"point instancer %s has %d points whose prototype index is out of range, which are left out",
+			usd_string(inst.path),
+			skipped,
+		)
 	}
 	if sheared > 0 {
-		report_warning(&scratch.problems, a.path, 0, 0, "point instancer %s has %d poses with shear, which an instance cannot hold; they are posed without it", usd_string(inst.path), sheared)
+		report_warning(
+			&scratch.problems,
+			a.path,
+			0,
+			0,
+			"point instancer %s has %d poses with shear, which an instance cannot hold; they are posed without it",
+			usd_string(inst.path),
+			sheared,
+		)
 	}
 	contents := stage_cells(instances[:])
 	contents.guid = set.guid
@@ -803,7 +1044,12 @@ cook_stage_set :: proc(a: Asset_Source, usd: ^Cn_Usd, info: Cn_Usd_Info, set: St
 
 // stage_instance packs a pose as an instance, its rotation with w at least 0.
 @(private = "file")
-stage_instance :: proc(offset: [3]f64, rotation: quaternion256, size: [3]f64, point: u32) -> format.Instance {
+stage_instance :: proc(
+	offset: [3]f64,
+	rotation: quaternion256,
+	size: [3]f64,
+	point: u32,
+) -> format.Instance {
 	q := [4]f64{imag(rotation), jmag(rotation), kmag(rotation), real(rotation)}
 	if q.w < 0 {
 		q = -q
@@ -851,7 +1097,13 @@ stage_cells :: proc(instances: []format.Instance) -> (contents: format.Instance_
 		t := (i.position - lo) / extent * f32((1 << 21) - 1)
 		keyed[k] = {spread(u64(t.x)) | spread(u64(t.y)) << 1 | spread(u64(t.z)) << 2, i}
 	}
-	slice.sort_by(keyed, proc(x, y: Keyed) -> bool {return x.code < y.code || (x.code == y.code && x.instance.point < y.instance.point)})
+	slice.sort_by(
+		keyed,
+		proc(x, y: Keyed) -> bool {return(
+				x.code < y.code ||
+				(x.code == y.code && x.instance.point < y.instance.point) \
+			)},
+	)
 	sorted := make([]format.Instance, len(instances), context.temp_allocator)
 	for k, i in keyed {
 		sorted[i] = k.instance
@@ -861,7 +1113,12 @@ stage_cells :: proc(instances: []format.Instance) -> (contents: format.Instance_
 		for i in run {
 			lo = linalg.min(lo, i.position)
 			hi = linalg.max(hi, i.position)
-			max_scale = max(max_scale, abs(f32(i.scale.x)), abs(f32(i.scale.y)), abs(f32(i.scale.z)))
+			max_scale = max(
+				max_scale,
+				abs(f32(i.scale.x)),
+				abs(f32(i.scale.y)),
+				abs(f32(i.scale.z)),
+			)
 		}
 		center = (lo + hi) / 2
 		for i in run {
@@ -873,7 +1130,16 @@ stage_cells :: proc(instances: []format.Instance) -> (contents: format.Instance_
 	for first := 0; first < len(sorted); first += format.INSTANCE_CELL_SIZE {
 		run := sorted[first:min(first + format.INSTANCE_CELL_SIZE, len(sorted))]
 		center, radius, max_scale := sphere(run)
-		append(&cells, format.Instance_Cell{center = center, radius = radius, max_scale = max_scale, first = u32(first), count = u32(len(run))})
+		append(
+			&cells,
+			format.Instance_Cell {
+				center = center,
+				radius = radius,
+				max_scale = max_scale,
+				first = u32(first),
+				count = u32(len(run)),
+			},
+		)
 	}
 	contents.instances = sorted
 	contents.cells = cells[:]
@@ -887,17 +1153,9 @@ stage_cells :: proc(instances: []format.Instance) -> (contents: format.Instance_
 stage_basis :: proc(a: Asset_Source, info: Cn_Usd_Info) -> (basis: matrix[3, 3]f64, scale: f64) {
 	scale = info.meters_per_unit * (strconv.parse_f64(stage_setting(a, "scale")) or_else 1)
 	if info.up == .Z {
-		basis = {
-			-1, 0, 0,
-			0, 0, 1,
-			0, -1, 0,
-		}
+		basis = {-1, 0, 0, 0, 0, 1, 0, -1, 0}
 	} else {
-		basis = {
-			-1, 0, 0,
-			0, 1, 0,
-			0, 0, 1,
-		}
+		basis = {-1, 0, 0, 0, 1, 0, 0, 0, 1}
 	}
 	return
 }
@@ -930,7 +1188,14 @@ stage_watch_layers :: proc(layer: string, manifest: ^Stage_Manifest) {
 			}
 			ext := strings.to_lower(filepath.ext(info.name), context.temp_allocator)
 			if ext == ".usd" || ext == ".usda" || ext == ".usdc" {
-				append(&manifest.files, Stage_File{info.size, time.to_unix_nanoseconds(info.modification_time), forward_slashes(strings.clone(info.fullpath, context.temp_allocator))})
+				append(
+					&manifest.files,
+					Stage_File {
+						info.size,
+						time.to_unix_nanoseconds(info.modification_time),
+						forward_slashes(strings.clone(info.fullpath, context.temp_allocator)),
+					},
+				)
 			}
 		}
 	}
@@ -972,7 +1237,9 @@ Stage_Job :: struct {
 cook_stage_job :: proc(data: rawptr, index: int) {
 	w := (^Stage_Work)(data)
 	job := &w.jobs[index]
-	job.scratch.problems = Problems{log = w.log}
+	job.scratch.problems = Problems {
+		log = w.log,
+	}
 	if index < len(w.parts) {
 		job.result = cook_stage_part(w, w.parts[index], job)
 	} else {
@@ -986,7 +1253,10 @@ cook_stage_job :: proc(data: rawptr, index: int) {
 cook_stage_texture :: proc(w: ^Stage_Work, t: Stage_Texture, job: ^Stage_Job) -> Asset_Result {
 	a := w.a
 	// A dome's image wraps around the sky.
-	tex := Cn_Usd_Texture{wrap_s = .Repeat, wrap_t = .Repeat}
+	tex := Cn_Usd_Texture {
+		wrap_s = .Repeat,
+		wrap_t = .Repeat,
+	}
 	path := t.path
 	if t.texture >= 0 {
 		cn_usd_texture(w.usd, t.texture, &tex)
@@ -1007,26 +1277,67 @@ cook_stage_texture :: proc(w: ^Stage_Work, t: Stage_Texture, job: ^Stage_Job) ->
 		srgb     = t.role.srgb,
 		flip_y   = stage_setting(a, "normal_y") == "flip",
 	}
-	job.blob_key = hash.fnv64a(transmute([]byte)fmt.tprintf("%s\x00%s\x00%s\x00%s\x00%v\x00%x\x00%s\x00%v\x00%d\x00%d\x00", STAGE_COOK_VERSION, TEXTURE_COOK_VERSION, COMPRESSONATOR_VERSION, openexr_version(), w.options.config, format.texture_layout(), path, cook, size, modified))
+	job.blob_key = hash.fnv64a(
+		transmute([]byte)fmt.tprintf(
+			"%s\x00%s\x00%s\x00%s\x00%v\x00%x\x00%s\x00%v\x00%d\x00%d\x00",
+			STAGE_COOK_VERSION,
+			TEXTURE_COOK_VERSION,
+			COMPRESSONATOR_VERSION,
+			openexr_version(),
+			w.options.config,
+			format.texture_layout(),
+			path,
+			cook,
+			size,
+			modified,
+		),
+	)
 	output := fmt.tprintf("%s/%s.blob", w.out_dir, guid_text(t.guid))
 	if cooked_key(output, .Texture, format.texture_layout()) == job.blob_key && !w.force {
 		return .Current
 	}
-	if !cook_stage_texture_blob(w.options, a, path, t, cook, job.blob_key, output, &job.scratch.problems) {
+	if !cook_stage_texture_blob(
+		w.options,
+		a,
+		path,
+		t,
+		cook,
+		job.blob_key,
+		output,
+		&job.scratch.problems,
+	) {
 		return .Failed
 	}
 	return .Cooked
 }
 
 @(private = "file")
-cook_stage_texture_blob :: proc(options: Cook_Options, a: Asset_Source, path: string, t: Stage_Texture, cook: Texture_Cook, key: u64, output: string, problems: ^Problems) -> bool {
+cook_stage_texture_blob :: proc(
+	options: Cook_Options,
+	a: Asset_Source,
+	path: string,
+	t: Stage_Texture,
+	cook: Texture_Cook,
+	key: u64,
+	output: string,
+	problems: ^Problems,
+) -> bool {
 	source, err := os.read_entire_file(path, context.temp_allocator)
 	if err != nil {
 		report_error(problems, path, 0, 0, "%v", err)
 		return false
 	}
 	image := decode_image_bytes(source, path, cook, problems) or_return
-	blob := cook_texture_image(options, image, cook, t.guid, key, fmt.tprintf("%s#%s", a.name, t.name), path, problems) or_return
+	blob := cook_texture_image(
+		options,
+		image,
+		cook,
+		t.guid,
+		key,
+		fmt.tprintf("%s#%s", a.name, t.name),
+		path,
+		problems,
+	) or_return
 	return write_blob(output, blob)
 }
 
@@ -1036,7 +1347,14 @@ cook_stage_part :: proc(w: ^Stage_Work, p: Stage_Part, job: ^Stage_Job) -> Asset
 	problems := &job.scratch.problems
 	m: Cn_Usd_Mesh
 	if cn_usd_mesh(w.usd, p.mesh, &m) == 0 {
-		report_error(problems, a.path, 0, 0, "mesh %s has faces that are not triangles after triangulation", p.name)
+		report_error(
+			problems,
+			a.path,
+			0,
+			0,
+			"mesh %s has faces that are not triangles after triangulation",
+			p.name,
+		)
 		return .Failed
 	}
 	basis, scale := stage_basis(a, w.info)
@@ -1045,7 +1363,21 @@ cook_stage_part :: proc(w: ^Stage_Work, p: Stage_Part, job: ^Stage_Job) -> Asset
 		report_error(problems, a.path, 0, 0, "mesh %s has no triangles", p.name)
 		return .Failed
 	}
-	blob_key := hash.fnv64a(transmute([]byte)fmt.tprintf("%s\x00%s\x00%s\x00%s\x00%x\x00%s\x00%v\x00%v\x00%v\x00%v\x00", STAGE_COOK_VERSION, MESHOPTIMIZER_VERSION, LZ4_VERSION, a.name, format.mesh_layout(), p.name, cook.lod, cook.paged, cook.collision, cook.impostor_size))
+	blob_key := hash.fnv64a(
+		transmute([]byte)fmt.tprintf(
+			"%s\x00%s\x00%s\x00%s\x00%x\x00%s\x00%v\x00%v\x00%v\x00%v\x00",
+			STAGE_COOK_VERSION,
+			MESHOPTIMIZER_VERSION,
+			LZ4_VERSION,
+			a.name,
+			format.mesh_layout(),
+			p.name,
+			cook.lod,
+			cook.paged,
+			cook.collision,
+			cook.impostor_size,
+		),
+	)
 	blob_key = hash.fnv64a(mem.slice_to_bytes(cook.corners), blob_key)
 	blob_key = hash.fnv64a(mem.slice_to_bytes(cook.ranges), blob_key)
 	for n in cook.names {
@@ -1066,7 +1398,13 @@ cook_stage_part :: proc(w: ^Stage_Work, p: Stage_Part, job: ^Stage_Job) -> Asset
 // stage_cook_mesh converts a part of a mesh to corners on the engine's axes in meters, with v down as the engine's
 // textures have it, and makes smooth normals for a mesh without its own.
 @(private = "file")
-stage_cook_mesh :: proc(a: Asset_Source, m: Cn_Usd_Mesh, p: Stage_Part, basis: matrix[3, 3]f64, scale: f64) -> Cook_Mesh {
+stage_cook_mesh :: proc(
+	a: Asset_Source,
+	m: Cn_Usd_Mesh,
+	p: Stage_Part,
+	basis: matrix[3, 3]f64,
+	scale: f64,
+) -> Cook_Mesh {
 	subsets := m.subsets[p.first:][:p.count]
 	total := 0
 	for s in subsets {
@@ -1099,9 +1437,14 @@ stage_cook_mesh :: proc(a: Asset_Source, m: Cn_Usd_Mesh, p: Stage_Part, basis: m
 					tangent = {1, 0, 0, 1},
 					color   = {1, 1, 1, 1},
 				}
-				v.position = b * [3]f32{m.positions[c * 3], m.positions[c * 3 + 1], m.positions[c * 3 + 2]} * s
+				v.position =
+					b *
+					[3]f32{m.positions[c * 3], m.positions[c * 3 + 1], m.positions[c * 3 + 2]} *
+					s
 				if m.normals != nil {
-					v.normal = linalg.normalize0(b * [3]f32{m.normals[c * 3], m.normals[c * 3 + 1], m.normals[c * 3 + 2]})
+					v.normal = linalg.normalize0(
+						b * [3]f32{m.normals[c * 3], m.normals[c * 3 + 1], m.normals[c * 3 + 2]},
+					)
 				}
 				if m.uv0 != nil {
 					v.uv0 = {m.uv0[c * 2], 1 - m.uv0[c * 2 + 1]}
@@ -1144,10 +1487,22 @@ smooth_normals :: proc(corners: []Vertex) {
 		positions[i] = v.position
 	}
 	remap := make([]c.uint, len(corners), context.temp_allocator)
-	count := int(meshopt_generateVertexRemap(&remap[0], nil, c.size_t(len(corners)), &positions[0], c.size_t(len(corners)), 12))
+	count := int(
+		meshopt_generateVertexRemap(
+			&remap[0],
+			nil,
+			c.size_t(len(corners)),
+			&positions[0],
+			c.size_t(len(corners)),
+			12,
+		),
+	)
 	sums := make([][3]f32, count, context.temp_allocator)
 	for t := 0; t + 2 < len(corners); t += 3 {
-		face := linalg.cross(corners[t + 1].position - corners[t].position, corners[t + 2].position - corners[t].position)
+		face := linalg.cross(
+			corners[t + 1].position - corners[t].position,
+			corners[t + 2].position - corners[t].position,
+		)
 		for k in 0 ..< 3 {
 			sums[remap[t + k]] += face
 		}
@@ -1186,16 +1541,36 @@ stage_blend :: proc(mat: Cn_Usd_Material) -> Stage_Blend {
 // stage_instance_text is a material instance of the preview_surface parent that the material's blend and the mesh's
 // sides pick, with the material's values and textures.
 @(private = "file")
-stage_instance_text :: proc(a: Asset_Source, usd: ^Cn_Usd, m: Stage_Material, textures: []Stage_Texture, flip_y: bool) -> string {
+stage_instance_text :: proc(
+	a: Asset_Source,
+	usd: ^Cn_Usd,
+	m: Stage_Material,
+	textures: []Stage_Texture,
+	flip_y: bool,
+) -> string {
 	mat: Cn_Usd_Material
 	cn_usd_material(usd, m.material, &mat)
 	blend := stage_blend(mat)
 	parent, _ := format.meta_guid(PREVIEW_SURFACE_METAS[int(blend) * 2 + int(m.two_sided)])
 	b := strings.builder_make(context.temp_allocator)
 	fmt.sbprintln(&b, "material_instance 1")
-	fmt.sbprintfln(&b, "# Generated from %s's material %s. The stage makes it again at each cook.", a.name, usd_string(mat.path))
+	fmt.sbprintfln(
+		&b,
+		"# Generated from %s's material %s. The stage makes it again at each cook.",
+		a.name,
+		usd_string(mat.path),
+	)
 	fmt.sbprintfln(&b, "parent = $%s", guid_text(parent))
-	find :: proc(textures: []Stage_Texture, usd: ^Cn_Usd, a: Asset_Source, input: Cn_Usd_Input, usage: format.Texture_Usage) -> (format.Guid, bool) {
+	find :: proc(
+		textures: []Stage_Texture,
+		usd: ^Cn_Usd,
+		a: Asset_Source,
+		input: Cn_Usd_Input,
+		usage: format.Texture_Usage,
+	) -> (
+		format.Guid,
+		bool,
+	) {
 		if input.texture < 0 {
 			return {}, false
 		}
@@ -1293,7 +1668,16 @@ entity_id :: proc(path: string) -> u64 {
 // stage_pose is a USD matrix, row-major for row vectors, as an offset, rotation and scale on the engine's axes in meters.
 // It is false for a matrix with shear, which an entity's pose cannot hold; the pose is then the closest without it.
 @(private = "file")
-stage_pose :: proc(m: [16]f64, basis: matrix[3, 3]f64, scale: f64) -> (offset: [3]f64, rotation: quaternion256, size: [3]f64, exact: bool) {
+stage_pose :: proc(
+	m: [16]f64,
+	basis: matrix[3, 3]f64,
+	scale: f64,
+) -> (
+	offset: [3]f64,
+	rotation: quaternion256,
+	size: [3]f64,
+	exact: bool,
+) {
 	// The USD matrix's upper 3x3, for column vectors, is its transpose.
 	l: matrix[3, 3]f64
 	for r in 0 ..< 3 {
@@ -1303,7 +1687,11 @@ stage_pose :: proc(m: [16]f64, basis: matrix[3, 3]f64, scale: f64) -> (offset: [
 	}
 	l = basis * l * linalg.transpose(basis)
 	offset = basis * [3]f64{m[12], m[13], m[14]} * scale
-	columns := [3][3]f64{{l[0, 0], l[1, 0], l[2, 0]}, {l[0, 1], l[1, 1], l[2, 1]}, {l[0, 2], l[1, 2], l[2, 2]}}
+	columns := [3][3]f64 {
+		{l[0, 0], l[1, 0], l[2, 0]},
+		{l[0, 1], l[1, 1], l[2, 1]},
+		{l[0, 2], l[1, 2], l[2, 2]},
+	}
 	for col, i in columns {
 		size[i] = linalg.length(col)
 	}
@@ -1331,7 +1719,17 @@ stage_pose :: proc(m: [16]f64, basis: matrix[3, 3]f64, scale: f64) -> (offset: [
 // or one below it, posed under its parent, but for point instancers' prototypes, an entity for each instance, posed in
 // the stage, and an entity for each point instancer that has instance sets, posed in the stage, which draws them.
 @(private = "file")
-stage_prefab_text :: proc(a: Asset_Source, usd: ^Cn_Usd, info: Cn_Usd_Info, meshes: Stage_Meshes, parts: []Stage_Part, sets: []Stage_Set, materials: []Stage_Material, textures: []Stage_Texture, problems: ^Problems) -> string {
+stage_prefab_text :: proc(
+	a: Asset_Source,
+	usd: ^Cn_Usd,
+	info: Cn_Usd_Info,
+	meshes: Stage_Meshes,
+	parts: []Stage_Part,
+	sets: []Stage_Set,
+	materials: []Stage_Material,
+	textures: []Stage_Texture,
+	problems: ^Problems,
+) -> string {
 	basis, scale := stage_basis(a, info)
 	entities := make([dynamic]Stage_Entity, context.temp_allocator)
 	root := Stage_Entity {
@@ -1350,7 +1748,13 @@ stage_prefab_text :: proc(a: Asset_Source, usd: ^Cn_Usd, info: Cn_Usd_Info, mesh
 	for m in materials {
 		instance_of[{m.material, i32(m.two_sided)}] = m.guid
 	}
-	add_renderer :: proc(e: ^Stage_Entity, p: Stage_Part, mesh: Cn_Usd_Mesh, override: i32, instance_of: map[[2]i32]format.Guid) {
+	add_renderer :: proc(
+		e: ^Stage_Entity,
+		p: Stage_Part,
+		mesh: Cn_Usd_Mesh,
+		override: i32,
+		instance_of: map[[2]i32]format.Guid,
+	) {
 		e.mesh = p.guid
 		for s, i in mesh.subsets[p.first:][:p.count] {
 			material := override >= 0 ? override : s.material
@@ -1360,7 +1764,17 @@ stage_prefab_text :: proc(a: Asset_Source, usd: ^Cn_Usd, info: Cn_Usd_Info, mesh
 		}
 	}
 	// A mesh of several parts is an entity with a child for each. With an instance set, each draws at its instances.
-	add_mesh :: proc(entities: ^[dynamic]Stage_Entity, e: ^Stage_Entity, usd: ^Cn_Usd, mesh: i32, path: string, override: i32, parts_of: map[i32][dynamic]Stage_Part, instance_of: map[[2]i32]format.Guid, instances: format.Guid = {}) {
+	add_mesh :: proc(
+		entities: ^[dynamic]Stage_Entity,
+		e: ^Stage_Entity,
+		usd: ^Cn_Usd,
+		mesh: i32,
+		path: string,
+		override: i32,
+		parts_of: map[i32][dynamic]Stage_Part,
+		instance_of: map[[2]i32]format.Guid,
+		instances: format.Guid = {},
+	) {
 		list, found := parts_of[mesh]
 		if !found {
 			return
@@ -1438,7 +1852,16 @@ stage_prefab_text :: proc(a: Asset_Source, usd: ^Cn_Usd, info: Cn_Usd_Info, mesh
 		exact: bool
 		e.offset, e.rotation, e.scale, exact = stage_pose(inst.world, basis, scale)
 		sheared += int(!exact)
-		add_mesh(&entities, &e, usd, meshes.shared[inst.mesh], path, inst.material, parts_of, instance_of)
+		add_mesh(
+			&entities,
+			&e,
+			usd,
+			meshes.shared[inst.mesh],
+			path,
+			inst.material,
+			parts_of,
+			instance_of,
+		)
 		append(&entities, e)
 	}
 	// An instancer of one set draws it; one of several has a child for each.
@@ -1459,7 +1882,17 @@ stage_prefab_text :: proc(a: Asset_Source, usd: ^Cn_Usd, info: Cn_Usd_Info, mesh
 		e.offset, e.rotation, e.scale, exact = stage_pose(inst.world, basis, scale)
 		sheared += int(!exact)
 		if count == 1 {
-			add_mesh(&entities, &e, usd, sets[first].mesh, path, -1, parts_of, instance_of, sets[first].guid)
+			add_mesh(
+				&entities,
+				&e,
+				usd,
+				sets[first].mesh,
+				path,
+				-1,
+				parts_of,
+				instance_of,
+				sets[first].guid,
+			)
 		} else {
 			for set, k in sets[first:][:count] {
 				child_path := fmt.tprintf("%s#set%d", path, k + 1)
@@ -1470,7 +1903,17 @@ stage_prefab_text :: proc(a: Asset_Source, usd: ^Cn_Usd, info: Cn_Usd_Info, mesh
 					rotation = 1,
 					scale    = {1, 1, 1},
 				}
-				add_mesh(&entities, &child, usd, set.mesh, child_path, -1, parts_of, instance_of, set.guid)
+				add_mesh(
+					&entities,
+					&child,
+					usd,
+					set.mesh,
+					child_path,
+					-1,
+					parts_of,
+					instance_of,
+					set.guid,
+				)
 				append(&entities, child)
 			}
 		}
@@ -1478,13 +1921,24 @@ stage_prefab_text :: proc(a: Asset_Source, usd: ^Cn_Usd, info: Cn_Usd_Info, mesh
 		first += count
 	}
 	if sheared > 0 {
-		report_warning(problems, a.path, 0, 0, "%d prims have a transform with shear, which an entity cannot hold; they are posed without it", sheared)
+		report_warning(
+			problems,
+			a.path,
+			0,
+			0,
+			"%d prims have a transform with shear, which an entity cannot hold; they are posed without it",
+			sheared,
+		)
 	}
 
 	// The scene format sorts entities by ID; the root stays first, as the editor writes a prefab.
 	slice.sort_by(entities[1:], proc(x, y: Stage_Entity) -> bool {return x.id < y.id})
 	b := strings.builder_make(context.temp_allocator)
-	fmt.sbprintfln(&b, "# Generated from %s. The stage makes it again at each cook; place it in a scene, and override", a.name)
+	fmt.sbprintfln(
+		&b,
+		"# Generated from %s. The stage makes it again at each cook; place it in a scene, and override",
+		a.name,
+	)
 	fmt.sbprintln(&b, "# its entities there (see docs/content/kinds/stages.md#prefab).")
 	fmt.sbprintln(&b, "scene 2")
 	for e, i in entities {
@@ -1507,7 +1961,11 @@ stage_prefab_text :: proc(a: Asset_Source, usd: ^Cn_Usd, info: Cn_Usd_Info, mesh
 		fmt.sbprintln(&b, "\tscale = [1.0, 1.0, 1.0]")
 		fmt.sbprintln(&b, "component 2 Local_Transform")
 		fmt.sbprintfln(&b, "\toffset = %s", vector_text([]f64{e.offset.x, e.offset.y, e.offset.z}))
-		fmt.sbprintfln(&b, "\trotation = %s", vector_text([]f64{imag(q), jmag(q), kmag(q), real(q)}))
+		fmt.sbprintfln(
+			&b,
+			"\trotation = %s",
+			vector_text([]f64{imag(q), jmag(q), kmag(q), real(q)}),
+		)
 		fmt.sbprintfln(&b, "\tscale = %s", vector_text([]f64{e.scale.x, e.scale.y, e.scale.z}))
 		if e.mesh != {} {
 			if e.instances != {} {
@@ -1555,7 +2013,11 @@ stage_prefab_text :: proc(a: Asset_Source, usd: ^Cn_Usd, info: Cn_Usd_Info, mesh
 		fmt.sbprintln(&b, "\tmode = Texture")
 		fmt.sbprintfln(&b, "\ttexture = $%s", guid_text(t.guid))
 		gray := (light.color.r + light.color.g + light.color.b) / 3
-		fmt.sbprintfln(&b, "\ttexture_intensity = %v", f64(gray * light.intensity) * math.pow(2, f64(light.exposure)))
+		fmt.sbprintfln(
+			&b,
+			"\ttexture_intensity = %v",
+			f64(gray * light.intensity) * math.pow(2, f64(light.exposure)),
+		)
 		fmt.sbprintfln(&b, "\ttexture_rotation = %v", yaw < 0 ? yaw + 360 : yaw)
 	}
 	return strings.to_string(b)
@@ -1565,7 +2027,13 @@ stage_prefab_text :: proc(a: Asset_Source, usd: ^Cn_Usd, info: Cn_Usd_Info, mesh
 // dome without an image, or with one that the cooker cannot decode, is a warning. The sky's texture has an intensity
 // and no tint, so a dome's color scales it by its average, with a warning when it is not gray.
 @(private = "file")
-stage_domes :: proc(a: Asset_Source, usd: ^Cn_Usd, info: Cn_Usd_Info, textures: ^[dynamic]Stage_Texture, problems: ^Problems) {
+stage_domes :: proc(
+	a: Asset_Source,
+	usd: ^Cn_Usd,
+	info: Cn_Usd_Info,
+	textures: ^[dynamic]Stage_Texture,
+	problems: ^Problems,
+) {
 	for i in 0 ..< info.light_count {
 		light: Cn_Usd_Light
 		cn_usd_light(usd, i, &light)
@@ -1575,18 +2043,55 @@ stage_domes :: proc(a: Asset_Source, usd: ^Cn_Usd, info: Cn_Usd_Info, textures: 
 		resolved := strings.clone(usd_string(light.resolved), context.temp_allocator)
 		path := usd_string(light.path)
 		if resolved == "" {
-			report_warning(problems, a.path, 0, 0, "the dome light %s has no image that is there (%s), so it is left out", path, usd_string(light.texture))
+			report_warning(
+				problems,
+				a.path,
+				0,
+				0,
+				"the dome light %s has no image that is there (%s), so it is left out",
+				path,
+				usd_string(light.texture),
+			)
 			continue
 		}
 		if why := image_undecodable(resolved); why != "" {
-			report_warning(problems, a.path, 0, 0, "the dome light %s's image %s cannot be decoded (%s), so it is left out", path, resolved, why)
+			report_warning(
+				problems,
+				a.path,
+				0,
+				0,
+				"the dome light %s's image %s cannot be decoded (%s), so it is left out",
+				path,
+				resolved,
+				why,
+			)
 			continue
 		}
 		if abs(light.color.r - light.color.g) > 0.01 || abs(light.color.g - light.color.b) > 0.01 {
-			report_warning(problems, a.path, 0, 0, "the dome light %s's color %v is its average: the sky's texture has no tint", path, light.color)
+			report_warning(
+				problems,
+				a.path,
+				0,
+				0,
+				"the dome light %s's color %v is its average: the sky's texture has no tint",
+				path,
+				light.color,
+			)
 		}
-		role := Stage_Role{usage = .HDR}
-		append(textures, Stage_Texture{texture = -1, role = role, name = stage_texture_name(a, usd, resolved, role), dome = true, light = i, path = resolved})
+		role := Stage_Role {
+			usage = .HDR,
+		}
+		append(
+			textures,
+			Stage_Texture {
+				texture = -1,
+				role = role,
+				name = stage_texture_name(a, usd, resolved, role),
+				dome = true,
+				light = i,
+				path = resolved,
+			},
+		)
 	}
 }
 
@@ -1597,7 +2102,10 @@ stage_report :: proc(paths: []string) -> bool {
 	ok := true
 	for path in paths {
 		started := time.now()
-		a := Asset_Source{path = forward_slashes(path), name = path}
+		a := Asset_Source {
+			path = forward_slashes(path),
+			name = path,
+		}
 		options_c := Cn_Usd_Options{}
 		usd := cn_usd_open(strings.clone_to_cstring(path, context.temp_allocator), &options_c)
 		defer cn_usd_close(usd)
@@ -1635,17 +2143,41 @@ stage_report :: proc(paths: []string) -> bool {
 			points += int(inst.point_count)
 		}
 		fmt.printfln("  up %v, %g meters per unit", info.up, info.meters_per_unit)
-		fmt.printfln("  prims %d, meshes %d cooked of %d (%d parts, at most %d subsets in one), triangles %d", info.node_count, cooked, info.mesh_count, len(parts), most_subsets, triangles)
-		fmt.printfln("  point instancers %d, points %d, prototype meshes %d shared as %d, instance sets %d", info.instancer_count, points, prototypes, shared, len(sets))
-		fmt.printfln("  material instances %d, textures %d, lights %d", len(materials), len(textures), info.light_count)
-		fmt.printfln("  resident at once: %d meshes, textures and instance sets", len(parts) + len(textures) + len(sets))
+		fmt.printfln(
+			"  prims %d, meshes %d cooked of %d (%d parts, at most %d subsets in one), triangles %d",
+			info.node_count,
+			cooked,
+			info.mesh_count,
+			len(parts),
+			most_subsets,
+			triangles,
+		)
+		fmt.printfln(
+			"  point instancers %d, points %d, prototype meshes %d shared as %d, instance sets %d",
+			info.instancer_count,
+			points,
+			prototypes,
+			shared,
+			len(sets),
+		)
+		fmt.printfln(
+			"  material instances %d, textures %d, lights %d",
+			len(materials),
+			len(textures),
+			info.light_count,
+		)
+		fmt.printfln(
+			"  resident at once: %d meshes, textures and instance sets",
+			len(parts) + len(textures) + len(sets),
+		)
 	}
 	return ok
 }
 
 @(private = "file")
 write_generated :: proc(path, text: string, problems: ^Problems) -> bool {
-	if existing, err := os.read_entire_file(path, context.temp_allocator); err == nil && string(existing) == text {
+	if existing, err := os.read_entire_file(path, context.temp_allocator);
+	   err == nil && string(existing) == text {
 		return true
 	}
 	if !write_blob(path, transmute([]byte)text) {
@@ -1668,7 +2200,14 @@ write_manifest :: proc(path: string, m: Stage_Manifest) -> bool {
 		fmt.sbprintfln(&b, "file %d %d %s", f.size, f.modified, f.path)
 	}
 	for s in m.subassets {
-		fmt.sbprintfln(&b, "subasset %s %s %016x %s", kind_word(s.kind), guid_text(s.guid), s.key, s.name)
+		fmt.sbprintfln(
+			&b,
+			"subasset %s %s %016x %s",
+			kind_word(s.kind),
+			guid_text(s.guid),
+			s.key,
+			s.name,
+		)
 		if s.generated != "" {
 			fmt.sbprintfln(&b, "generated %s", s.generated)
 		}
@@ -1731,8 +2270,10 @@ manifest_current :: proc(m: Stage_Manifest, a: Asset_Source, out_dir: string) ->
 			return false
 		}
 		if s.key != 0 {
-			layout := s.kind == .Texture ? format.texture_layout() : s.kind == .Instance_Set ? format.instance_set_layout() : format.mesh_layout()
-			if cooked_key(fmt.tprintf("%s/%s.blob", out_dir, guid_text(s.guid)), s.kind, layout) != s.key {
+			layout :=
+				s.kind == .Texture ? format.texture_layout() : s.kind == .Instance_Set ? format.instance_set_layout() : format.mesh_layout()
+			if cooked_key(fmt.tprintf("%s/%s.blob", out_dir, guid_text(s.guid)), s.kind, layout) !=
+			   s.key {
 				return false
 			}
 		}
@@ -1745,7 +2286,12 @@ manifest_current :: proc(m: Stage_Manifest, a: Asset_Source, out_dir: string) ->
 
 // use_manifest takes a stage's sub-assets and generated texts from its last cook.
 @(private = "file")
-use_manifest :: proc(a: ^Asset_Source, m: Stage_Manifest, generated: ^[dynamic]Asset_Source, problems: ^Problems) -> bool {
+use_manifest :: proc(
+	a: ^Asset_Source,
+	m: Stage_Manifest,
+	generated: ^[dynamic]Asset_Source,
+	problems: ^Problems,
+) -> bool {
 	for s in m.subassets {
 		append(&a.subassets, Subasset{s.kind, s.name, s.guid})
 	}
@@ -1755,7 +2301,12 @@ use_manifest :: proc(a: ^Asset_Source, m: Stage_Manifest, generated: ^[dynamic]A
 // add_generated adds a stage's generated texts to the pass's assets, as sources that it owns. The files that the stage
 // read are its inputs, which a change to puts it in a daemon's pass.
 @(private = "file")
-add_generated :: proc(a: ^Asset_Source, m: Stage_Manifest, generated: ^[dynamic]Asset_Source, problems: ^Problems) -> bool {
+add_generated :: proc(
+	a: ^Asset_Source,
+	m: Stage_Manifest,
+	generated: ^[dynamic]Asset_Source,
+	problems: ^Problems,
+) -> bool {
 	for f in m.files {
 		append(&a.inputs, Input_Stamp{f.path, f.size, f.modified})
 	}
@@ -1770,20 +2321,23 @@ add_generated :: proc(a: ^Asset_Source, m: Stage_Manifest, generated: ^[dynamic]
 			ok = false
 			continue
 		}
-		append(generated, Asset_Source {
-			kind         = s.kind,
-			root         = a.root,
-			path         = s.generated,
-			name         = fmt.tprintf("%s#%s", a.name, s.name),
-			meta_text    = fmt.tprintf("guid = %s\n", guid_text(s.guid)),
-			meta         = {guid = s.guid},
-			source       = source,
-			dependencies = make([dynamic]format.Guid, context.temp_allocator),
-			visual       = make([dynamic]format.Guid, context.temp_allocator),
-			subassets    = make([dynamic]Subasset, context.temp_allocator),
-			inputs       = make([dynamic]Input_Stamp, context.temp_allocator),
-			owner        = a.meta.guid,
-		})
+		append(
+			generated,
+			Asset_Source {
+				kind = s.kind,
+				root = a.root,
+				path = s.generated,
+				name = fmt.tprintf("%s#%s", a.name, s.name),
+				meta_text = fmt.tprintf("guid = %s\n", guid_text(s.guid)),
+				meta = {guid = s.guid},
+				source = source,
+				dependencies = make([dynamic]format.Guid, context.temp_allocator),
+				visual = make([dynamic]format.Guid, context.temp_allocator),
+				subassets = make([dynamic]Subasset, context.temp_allocator),
+				inputs = make([dynamic]Input_Stamp, context.temp_allocator),
+				owner = a.meta.guid,
+			},
+		)
 	}
 	return ok
 }

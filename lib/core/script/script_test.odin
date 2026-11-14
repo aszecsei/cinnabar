@@ -80,7 +80,11 @@ closures_call_the_procedure_registered_after_a_reload :: proc(t: ^testing.T) {
 	register(&f.bindings, "Test.combine", add)
 	push_binding(f.L, "Test.combine")
 	luau.setglobal(f.L, "combine")
-	testing.expect_value(t, run(f.L, "local f = combine; before = f(5, 3); function later() return f(5, 3) end"), luau.Status.OK)
+	testing.expect_value(
+		t,
+		run(f.L, "local f = combine; before = f(5, 3); function later() return f(5, 3) end"),
+		luau.Status.OK,
+	)
 
 	clear(&f.bindings)
 	register(&f.bindings, "Test.combine", subtract)
@@ -100,7 +104,12 @@ a_removed_binding_raises_an_error_that_names_it :: proc(t: ^testing.T) {
 	clear(&f.bindings)
 	testing.expect_value(t, run(f.L, "combine(1, 2)"), luau.Status.ERRRUN)
 	message := luau.toodinstring(f.L, -1)
-	testing.expectf(t, strings.contains(message, "binding Test.combine no longer exists"), "message: %s", message)
+	testing.expectf(
+		t,
+		strings.contains(message, "binding Test.combine no longer exists"),
+		"message: %s",
+		message,
+	)
 }
 
 @(test)

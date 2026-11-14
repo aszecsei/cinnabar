@@ -7,25 +7,83 @@ import "core:testing"
 test_graph :: proc() -> []byte {
 	walk, _ := guid_parse(TEST_GUID)
 	contents := Animation_Graph_Contents {
-		key = 7,
-		entry = 0,
+		key         = 7,
+		entry       = 0,
 		root_motion = "Root",
-		parameters = {{name = "speed", kind = .Float}, {name = "look", kind = .Trigger}, {name = "grounded", kind = .Bool, default = 1}},
-		clips = {{name = "walk", clip = walk, markers = {{time = 0.2, event = 0}, {time = 0.6, event = 1}}}, {name = "run", clip = walk}},
-		events = {
+		parameters  = {
+			{name = "speed", kind = .Float},
+			{name = "look", kind = .Trigger},
+			{name = "grounded", kind = .Bool, default = 1},
+		},
+		clips       = {
+			{
+				name = "walk",
+				clip = walk,
+				markers = {{time = 0.2, event = 0}, {time = 0.6, event = 1}},
+			},
+			{name = "run", clip = walk},
+		},
+		events      = {
 			{name = "footstep", args = {{kind = .Text, text = "left"}, {}}},
-			{name = "footstep", args = {{kind = .Text, text = "right"}, {kind = .Number, number = 2}}},
+			{
+				name = "footstep",
+				args = {{kind = .Text, text = "right"}, {kind = .Number, number = 2}},
+			},
 			{name = "started"},
 		},
-		states = {
-			{name = "idle", motion = .Clip, parameter = ANIMATION_GRAPH_NONE, points = {{clip = 0}}, speed = 1, loop = true, enter_event = ANIMATION_GRAPH_NONE, exit_event = ANIMATION_GRAPH_NONE, node = 1},
-			{name = "move", motion = .Blend_1D, parameter = 0, points = {{clip = 0, threshold = 0.5}, {clip = 1, threshold = 3}}, speed = 1, loop = true, enter_event = 2, exit_event = ANIMATION_GRAPH_NONE, node = 2},
+		states      = {
+			{
+				name = "idle",
+				motion = .Clip,
+				parameter = ANIMATION_GRAPH_NONE,
+				points = {{clip = 0}},
+				speed = 1,
+				loop = true,
+				enter_event = ANIMATION_GRAPH_NONE,
+				exit_event = ANIMATION_GRAPH_NONE,
+				node = 1,
+			},
+			{
+				name = "move",
+				motion = .Blend_1D,
+				parameter = 0,
+				points = {{clip = 0, threshold = 0.5}, {clip = 1, threshold = 3}},
+				speed = 1,
+				loop = true,
+				enter_event = 2,
+				exit_event = ANIMATION_GRAPH_NONE,
+				node = 2,
+			},
 		},
 		// Out of their groups' order, which the writer puts right.
 		transitions = {
-			{from = ANIMATION_GRAPH_NONE, to = 0, conditions = {{parameter = 1, op = .Trigger}}, exit_time = -1, duration = 0.1, node = 12},
-			{from = 1, to = 0, conditions = {{parameter = 0, op = .Less, value = 0.1}}, exit_time = -1, duration = 0.3, node = 11},
-			{from = 0, to = 1, conditions = {{parameter = 0, op = .Greater, value = 0.1}, {parameter = 2, op = .True}}, exit_time = -1, duration = 0.25, node = 10},
+			{
+				from = ANIMATION_GRAPH_NONE,
+				to = 0,
+				conditions = {{parameter = 1, op = .Trigger}},
+				exit_time = -1,
+				duration = 0.1,
+				node = 12,
+			},
+			{
+				from = 1,
+				to = 0,
+				conditions = {{parameter = 0, op = .Less, value = 0.1}},
+				exit_time = -1,
+				duration = 0.3,
+				node = 11,
+			},
+			{
+				from = 0,
+				to = 1,
+				conditions = {
+					{parameter = 0, op = .Greater, value = 0.1},
+					{parameter = 2, op = .True},
+				},
+				exit_time = -1,
+				duration = 0.25,
+				node = 10,
+			},
 		},
 		source_path = "game/animations/fox.animation_graph",
 	}
@@ -42,7 +100,11 @@ animation_graph_blobs_round_trip :: proc(t: ^testing.T) {
 	}
 	testing.expect_value(t, blob.header.key, 7)
 	testing.expect_value(t, blob_string(data, blob.root_motion), "Root")
-	testing.expect_value(t, blob_string(data, blob.source_path), "game/animations/fox.animation_graph")
+	testing.expect_value(
+		t,
+		blob_string(data, blob.source_path),
+		"game/animations/fox.animation_graph",
+	)
 
 	parameters := animation_graph_parameters(data, blob)
 	testing.expect_value(t, len(parameters), 3)
@@ -71,7 +133,11 @@ animation_graph_blobs_round_trip :: proc(t: ^testing.T) {
 	conditions := animation_graph_conditions(data, blob)
 	from_idle := transitions[states[0].first_transition]
 	testing.expect_value(t, from_idle.condition_count, 2)
-	testing.expect_value(t, conditions[from_idle.first_condition + 1].op, Animation_Graph_Condition_Op.True)
+	testing.expect_value(
+		t,
+		conditions[from_idle.first_condition + 1].op,
+		Animation_Graph_Condition_Op.True,
+	)
 
 	points := animation_graph_points(data, blob)
 	testing.expect_value(t, states[1].point_count, 2)

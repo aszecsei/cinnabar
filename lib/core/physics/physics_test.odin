@@ -35,7 +35,11 @@ commands_round_trip :: proc(t: ^testing.T) {
 				testing.expect_value(t, command.kind, Command_Kind.Add_Impulse)
 				testing.expect_value(t, payload(command, Add_Vector).vector.y, f32(i))
 			}
-			testing.expect(t, uintptr(raw_data(command.data)) % COMMAND_ALIGN == 0, "payloads are aligned")
+			testing.expect(
+				t,
+				uintptr(raw_data(command.data)) % COMMAND_ALIGN == 0,
+				"payloads are aligned",
+			)
 			seen += 1
 		}
 		testing.expect_value(t, offset, chunk.used)

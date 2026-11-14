@@ -19,8 +19,30 @@ write_icon_resources :: proc(exe: string, r: Icon_Resources) -> bool {
 	}
 	ok := true
 	for image, i in r.images {
-		ok = ok && bool(UpdateResourceW(update, rawptr(win.RT_ICON), rawptr(uintptr(i + 1)), 0, raw_data(image), win.DWORD(len(image))))
+		ok =
+			ok &&
+			bool(
+				UpdateResourceW(
+					update,
+					rawptr(win.RT_ICON),
+					rawptr(uintptr(i + 1)),
+					0,
+					raw_data(image),
+					win.DWORD(len(image)),
+				),
+			)
 	}
-	ok = ok && bool(UpdateResourceW(update, rawptr(win.RT_GROUP_ICON), rawptr(uintptr(ICON_GROUP_ID)), 0, raw_data(r.group), win.DWORD(len(r.group))))
+	ok =
+		ok &&
+		bool(
+			UpdateResourceW(
+				update,
+				rawptr(win.RT_GROUP_ICON),
+				rawptr(uintptr(ICON_GROUP_ID)),
+				0,
+				raw_data(r.group),
+				win.DWORD(len(r.group)),
+			),
+		)
 	return bool(EndUpdateResourceW(update, !ok)) && ok
 }

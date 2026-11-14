@@ -172,7 +172,13 @@ register_components :: proc(r: ^ecs.Registry) {
 
 // init makes the state's lists. scripts is the runtime that runs the script actions, and physics the one that sight and
 // hearing cast rays in, nil for none. Call it once, before register.
-init :: proc(s: ^State, platform: ^core.Platform_API, assets: ^asset.Assets, scripts: ^script.Runtime = nil, physics: ^physics.State = nil) {
+init :: proc(
+	s: ^State,
+	platform: ^core.Platform_API,
+	assets: ^asset.Assets,
+	scripts: ^script.Runtime = nil,
+	physics: ^physics.State = nil,
+) {
 	s.platform, s.assets, s.scripts, s.physics = platform, assets, scripts, physics
 	heap := platform.heap_allocator
 	s.agents = {
@@ -206,20 +212,39 @@ register :: proc(s: ^State, w: ^ecs.World) {
 	s.new_agents = ecs.query(w, {ecs.read(w, Agent), ecs.without(w, Agent_State)})
 	s.states = ecs.query(w, {ecs.read(w, Agent_State)})
 	s.perceivables = ecs.query(w, {ecs.read(w, Perceivable), ecs.read(w, ecs.Transform)})
-	s.job_commands = ecs.register_job_buffer(w, {name = "ai commands", user = s, make = make_job_commands, flush = flush_job_commands})
+	s.job_commands = ecs.register_job_buffer(
+		w,
+		{name = "ai commands", user = s, make = make_job_commands, flush = flush_job_commands},
+	)
 	ecs.register_system(
 		w,
 		{
 			name = "ai perceive",
 			stage = .Fixed,
 			procedure = perceive_system,
-			reads = {AGENT_ID, AGENT_STATE_ID, PERCEIVER_ID, PERCEIVABLE_ID, ecs.TRANSFORM_ID, physics.PHYSICS_BODY_ID, physics.PHYSICS_CHARACTER_ID},
+			reads = {
+				AGENT_ID,
+				AGENT_STATE_ID,
+				PERCEIVER_ID,
+				PERCEIVABLE_ID,
+				ecs.TRANSFORM_ID,
+				physics.PHYSICS_BODY_ID,
+				physics.PHYSICS_CHARACTER_ID,
+			},
 			data = s,
 		},
 	)
 	ecs.register_system(
 		w,
-		{name = "ai think", stage = .Fixed, procedure = think_system, reads = {AGENT_ID, ecs.TRANSFORM_ID}, writes = {AGENT_STATE_ID}, after = {"ai perceive"}, data = s},
+		{
+			name = "ai think",
+			stage = .Fixed,
+			procedure = think_system,
+			reads = {AGENT_ID, ecs.TRANSFORM_ID},
+			writes = {AGENT_STATE_ID},
+			after = {"ai perceive"},
+			data = s,
+		},
 	)
 	ecs.register_system(
 		w,
@@ -287,7 +312,14 @@ set_seed :: proc(s: ^State, seed: u64) {
 
 // scores is what an agent's module scored in its last think, by option, for debuggers and scripts, in the allocator.
 // It is false for an agent that is not ready, or whose module keeps no scores.
-scores :: proc(s: ^State, e: ecs.Entity, allocator := context.temp_allocator) -> ([]Option_Score, bool) {
+scores :: proc(
+	s: ^State,
+	e: ecs.Entity,
+	allocator := context.temp_allocator,
+) -> (
+	[]Option_Score,
+	bool,
+) {
 	slot, ready := ready_of(s, s.world, e)
 	if ready == nil {
 		return nil, false
@@ -413,7 +445,10 @@ prepare :: proc(s: ^State, w: ^ecs.World) {
 		l.checked = version
 		if !valid {
 			if first {
-				log.warnf("ai: %s is not a blackboard, decision or perception blob of this build. Cook the content.", guid_text(l.guid))
+				log.warnf(
+					"ai: %s is not a blackboard, decision or perception blob of this build. Cook the content.",
+					guid_text(l.guid),
+				)
 			}
 			continue
 		}

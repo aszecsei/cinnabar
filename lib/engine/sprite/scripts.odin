@@ -22,39 +22,39 @@ register_scripts :: proc(r: ^script.Runtime, s: ^State) {
 	script.expose(r, render.Sprite_Renderer, render.DEFAULT_SPRITE_RENDERER)
 
 	script.define(r, "Sprites.play", proc(L: ^luau.State) -> c.int {
-		sprite := sprite_arg(L, write = true)
-		name := string(luau.L_checkstring(L, 2))
-		restart := luau.gettop(L) >= 3 && bool(luau.toboolean(L, 3))
-		if play(state_of(L), sprite, name, restart) == .No_Name {
-			script.raise(L, fmt.tprintf("the entity's sprite sheet has no animation %s", name))
-		}
-		return 0
-	}, "(entity: Entity, name: string, restart: boolean?) -> ()")
+			sprite := sprite_arg(L, write = true)
+			name := string(luau.L_checkstring(L, 2))
+			restart := luau.gettop(L) >= 3 && bool(luau.toboolean(L, 3))
+			if play(state_of(L), sprite, name, restart) == .No_Name {
+				script.raise(L, fmt.tprintf("the entity's sprite sheet has no animation %s", name))
+			}
+			return 0
+		}, "(entity: Entity, name: string, restart: boolean?) -> ()")
 	script.define(r, "Sprites.stop", proc(L: ^luau.State) -> c.int {
-		stop(sprite_arg(L, write = true))
-		return 0
-	}, "(entity: Entity) -> ()")
+			stop(sprite_arg(L, write = true))
+			return 0
+		}, "(entity: Entity) -> ()")
 	script.define(r, "Sprites.set_frame", proc(L: ^luau.State) -> c.int {
-		sprite := sprite_arg(L, write = true)
-		name := string(luau.L_checkstring(L, 2))
-		if set_frame(state_of(L), sprite, name) == .No_Name {
-			script.raise(L, fmt.tprintf("the entity's sprite sheet has no frame %s", name))
-		}
-		return 0
-	}, "(entity: Entity, name: string) -> ()")
+			sprite := sprite_arg(L, write = true)
+			name := string(luau.L_checkstring(L, 2))
+			if set_frame(state_of(L), sprite, name) == .No_Name {
+				script.raise(L, fmt.tprintf("the entity's sprite sheet has no frame %s", name))
+			}
+			return 0
+		}, "(entity: Entity, name: string) -> ()")
 	script.define(r, "Sprites.animation", proc(L: ^luau.State) -> c.int {
-		name := animation_name(state_of(L), sprite_arg(L)^)
-		if name == "" {
-			luau.pushnil(L)
-		} else {
-			luau.pushodinstring(L, name)
-		}
-		return 1
-	}, "(entity: Entity) -> string?")
+			name := animation_name(state_of(L), sprite_arg(L)^)
+			if name == "" {
+				luau.pushnil(L)
+			} else {
+				luau.pushodinstring(L, name)
+			}
+			return 1
+		}, "(entity: Entity) -> string?")
 	script.define(r, "Sprites.finished", proc(L: ^luau.State) -> c.int {
-		luau.pushboolean(L, b32(finished(state_of(L), sprite_arg(L)^)))
-		return 1
-	}, "(entity: Entity) -> boolean")
+			luau.pushboolean(L, b32(finished(state_of(L), sprite_arg(L)^)))
+			return 1
+		}, "(entity: Entity) -> boolean")
 }
 
 @(private = "file")

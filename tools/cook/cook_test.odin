@@ -32,7 +32,9 @@ words_match_whole_identifiers :: proc(t: ^testing.T) {
 
 @(test)
 includes_are_found :: proc(t: ^testing.T) {
-	names := include_names("#include \"a.hlsli\"\n  #include \"dir/b.hlsli\" // note\n#include <system>\nint x;")
+	names := include_names(
+		"#include \"a.hlsli\"\n  #include \"dir/b.hlsli\" // note\n#include <system>\nint x;",
+	)
 	testing.expect_value(t, len(names), 2)
 	if len(names) == 2 {
 		testing.expect_value(t, names[0], Include{"a.hlsli", 1})
@@ -40,23 +42,40 @@ includes_are_found :: proc(t: ^testing.T) {
 	}
 
 	// The fixed header resolves from the include directory, like DXC's -I.
-	path, ok := resolve_include("cinnabar.hlsli", "samples/mygame/content/shaders", {"lib/core/gpu/shaders"})
+	path, ok := resolve_include(
+		"cinnabar.hlsli",
+		"samples/mygame/content/shaders",
+		{"lib/core/gpu/shaders"},
+	)
 	testing.expect(t, ok && os.is_file(path))
-	_, missing := resolve_include("nothing.hlsli", "samples/mygame/content/shaders", {"lib/core/gpu/shaders"})
+	_, missing := resolve_include(
+		"nothing.hlsli",
+		"samples/mygame/content/shaders",
+		{"lib/core/gpu/shaders"},
+	)
 	testing.expect(t, !missing)
 }
 
 @(test)
 dxc_messages_become_problems :: proc(t: ^testing.T) {
 	problems: Problems
-	text := "E:\\game\\shaders\\post.hlsl:12:5: error: use of undeclared identifier 'x'\n" +
+	text :=
+		"E:\\game\\shaders\\post.hlsl:12:5: error: use of undeclared identifier 'x'\n" +
 		"    x = 1;\n    ^\n" +
 		"E:/engine/cinnabar.hlsli:3:1: warning: unused variable\n"
 	testing.expect_value(t, report_dxc_messages(text, &problems), 1)
 	testing.expect_value(t, len(problems.list), 2)
 	if len(problems.list) == 2 {
-		testing.expect_value(t, problems.list[0], Problem{"E:/game/shaders/post.hlsl", 12, 5, true, "use of undeclared identifier 'x'"})
-		testing.expect_value(t, problems.list[1], Problem{"E:/engine/cinnabar.hlsli", 3, 1, false, "unused variable"})
+		testing.expect_value(
+			t,
+			problems.list[0],
+			Problem{"E:/game/shaders/post.hlsl", 12, 5, true, "use of undeclared identifier 'x'"},
+		)
+		testing.expect_value(
+			t,
+			problems.list[1],
+			Problem{"E:/engine/cinnabar.hlsli", 3, 1, false, "unused variable"},
+		)
 	}
 	file, line, column := dxc_place("no place")
 	testing.expect_value(t, file, "no place")

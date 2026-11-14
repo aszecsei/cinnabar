@@ -14,8 +14,8 @@ import "cinnabar:core"
 import "cinnabar:core/gpu"
 import "cinnabar:core/testlog"
 import "cinnabar:engine/asset"
-import "cinnabar:engine/debug"
 import format "cinnabar:engine/asset/format"
+import "cinnabar:engine/debug"
 import "cinnabar:engine/ecs"
 import "cinnabar:engine/editor/link"
 import "cinnabar:engine/render"
@@ -160,7 +160,11 @@ step_all :: proc(f: ^Fixture, connection: u64 = 1, incoming: ..link.Message) -> 
 	messages := make([dynamic]link.Message, context.temp_allocator)
 	for rest := f.out[:]; len(rest) > 0; {
 		header, _ := link.read_header(rest)
-		m, ok := link.decode_message(header.kind, rest[link.HEADER_SIZE:][:header.length], context.temp_allocator)
+		m, ok := link.decode_message(
+			header.kind,
+			rest[link.HEADER_SIZE:][:header.length],
+			context.temp_allocator,
+		)
 		if ok {
 			append(&messages, m)
 		}
@@ -217,7 +221,12 @@ fields_are_flattened_tagged_and_hidden :: proc(t: ^testing.T) {
 	for field in tuned.fields {
 		append(&names, field.name)
 	}
-	testing.expectf(t, slice.equal(names[:], []string{"mode", "inner.amount", "locked"}), "fields %v", names[:])
+	testing.expectf(
+		t,
+		slice.equal(names[:], []string{"mode", "inner.amount", "locked"}),
+		"fields %v",
+		names[:],
+	)
 	mode, amount, locked := tuned.fields[0], tuned.fields[1], tuned.fields[2]
 	testing.expect_value(t, mode.kind, link.Field_Kind.Enum)
 	testing.expect_value(t, mode.enum_base, link.Field_Kind.U8)
@@ -423,7 +432,18 @@ a_scene_from_the_editor_replaces_the_world :: proc(t: ^testing.T) {
 	}
 	load := link.Load_Scene {
 		entities = {
-			{id = 0xa1, name = "Door", active = true, components = {{id = u64(ecs.TRANSFORM_ID), name = "Transform", fields = {{name = "position", value = position}}}}},
+			{
+				id = 0xa1,
+				name = "Door",
+				active = true,
+				components = {
+					{
+						id = u64(ecs.TRANSFORM_ID),
+						name = "Transform",
+						fields = {{name = "position", value = position}},
+					},
+				},
+			},
 			{id = 0xb2, name = "Hinge", parent = 0xa1, active = true},
 		},
 	}
@@ -479,8 +499,26 @@ HINGE :: 0xb2
 load_door :: proc(f: ^Fixture) -> (door, hinge: ecs.Entity) {
 	tuned := u64(ecs.registry_find_type(&f.world.registry, Tuned).id)
 	step(f)
-	step(f, 1, link.Load_Scene{entities = {{id = DOOR, name = "Door", active = true, components = {{id = tuned, name = "Tuned"}}}, {id = HINGE, active = true}}})
-	return find_scene_entity(&f.editor, &f.world, DOOR), find_scene_entity(&f.editor, &f.world, HINGE)
+	step(
+		f,
+		1,
+		link.Load_Scene {
+			entities = {
+				{
+					id = DOOR,
+					name = "Door",
+					active = true,
+					components = {{id = tuned, name = "Tuned"}},
+				},
+				{id = HINGE, active = true},
+			},
+		},
+	)
+	return find_scene_entity(
+		&f.editor,
+		&f.world,
+		DOOR,
+	), find_scene_entity(&f.editor, &f.world, HINGE)
 }
 
 @(test)
@@ -494,10 +532,33 @@ operations_edit_the_world :: proc(t: ^testing.T) {
 		{kind = .Rename, entity = DOOR, name = "Front Door"},
 		{kind = .Set_Parent, entity = HINGE, parent = DOOR},
 		{kind = .Set_Active, entity = DOOR, active = false},
-		{kind = .Set_Field, entity = DOOR, component = tuned, fields = {{name = "inner.amount", value = number(2.5)}}},
-		{kind = .Set_Field, entity = DOOR, component = tuned, fields = {{name = "mode", value = {kind = .Name, text = "Busy"}}}},
-		{kind = .Add_Component, entity = HINGE, components = {{id = u64(ecs.TRANSFORM_ID), name = "Transform", fields = {{name = "scale", value = number(1, 2, 3)}}}}},
-		{kind = .Create_Entity, created = {{id = 0xc3, name = "Knob", parent = DOOR, active = true}}},
+		{
+			kind = .Set_Field,
+			entity = DOOR,
+			component = tuned,
+			fields = {{name = "inner.amount", value = number(2.5)}},
+		},
+		{
+			kind = .Set_Field,
+			entity = DOOR,
+			component = tuned,
+			fields = {{name = "mode", value = {kind = .Name, text = "Busy"}}},
+		},
+		{
+			kind = .Add_Component,
+			entity = HINGE,
+			components = {
+				{
+					id = u64(ecs.TRANSFORM_ID),
+					name = "Transform",
+					fields = {{name = "scale", value = number(1, 2, 3)}},
+				},
+			},
+		},
+		{
+			kind = .Create_Entity,
+			created = {{id = 0xc3, name = "Knob", parent = DOOR, active = true}},
+		},
 	}
 	messages := step(f, 1, link.Apply_Operations{operations = ops})
 
@@ -507,7 +568,10 @@ operations_edit_the_world :: proc(t: ^testing.T) {
 	}
 	testing.expect_value(t, ecs.name_of(&f.world, door), "Front Door")
 	testing.expect_value(t, ecs.get(&f.world, hinge, ecs.Parent).entity, door)
-	testing.expect(t, ecs.has(&f.world, door, ecs.Disabled) && ecs.has(&f.world, hinge, ecs.Inactive))
+	testing.expect(
+		t,
+		ecs.has(&f.world, door, ecs.Disabled) && ecs.has(&f.world, hinge, ecs.Inactive),
+	)
 	testing.expect_value(t, ecs.get(&f.world, door, Tuned).inner.amount, 2.5)
 	testing.expect_value(t, ecs.get(&f.world, door, Tuned).mode, Mode.Busy)
 	testing.expect_value(t, ecs.get(&f.world, hinge, ecs.Transform).scale, [3]f32{1, 2, 3})
@@ -516,7 +580,12 @@ operations_edit_the_world :: proc(t: ^testing.T) {
 	testing.expect_value(t, ecs.get(&f.world, knob, ecs.Parent).entity, door)
 
 	undo := []link.Operation {
-		{kind = .Reset_Field, entity = DOOR, component = tuned, fields = {{name = "inner.amount"}}},
+		{
+			kind = .Reset_Field,
+			entity = DOOR,
+			component = tuned,
+			fields = {{name = "inner.amount"}},
+		},
 		{kind = .Remove_Component, entity = HINGE, component = u64(ecs.TRANSFORM_ID)},
 		{kind = .Set_Active, entity = DOOR, active = true},
 		{kind = .Set_Parent, entity = HINGE},
@@ -525,7 +594,10 @@ operations_edit_the_world :: proc(t: ^testing.T) {
 	step(f, 1, link.Apply_Operations{operations = undo})
 
 	testing.expect_value(t, ecs.get(&f.world, door, Tuned).inner.amount, 0)
-	testing.expect(t, !ecs.has(&f.world, hinge, ecs.Transform) && !ecs.has(&f.world, hinge, ecs.Parent))
+	testing.expect(
+		t,
+		!ecs.has(&f.world, hinge, ecs.Transform) && !ecs.has(&f.world, hinge, ecs.Parent),
+	)
 	testing.expect(t, !ecs.has(&f.world, door, ecs.Inactive))
 	testing.expect(t, !ecs.is_alive(&f.world, knob))
 }
@@ -538,8 +610,18 @@ operations_that_the_game_cannot_apply_come_back :: proc(t: ^testing.T) {
 	tuned := u64(ecs.registry_find_type(&f.world.registry, Tuned).id)
 
 	ops := []link.Operation {
-		{kind = .Set_Field, entity = DOOR, component = tuned, fields = {{name = "removed", value = number(1)}}},
-		{kind = .Set_Field, entity = DOOR, component = tuned, fields = {{name = "mode", value = number(1.5)}}},
+		{
+			kind = .Set_Field,
+			entity = DOOR,
+			component = tuned,
+			fields = {{name = "removed", value = number(1)}},
+		},
+		{
+			kind = .Set_Field,
+			entity = DOOR,
+			component = tuned,
+			fields = {{name = "mode", value = number(1.5)}},
+		},
 		{kind = .Rename, entity = 0x99, name = "Ghost"},
 		{kind = .Remove_Component, entity = DOOR, component = u64(scene.SCENE_ENTITY_ID)},
 	}
@@ -567,7 +649,11 @@ the_games_own_scene_is_found_by_scene_id :: proc(t: ^testing.T) {
 	ecs.add(&f.world, e, scene.Scene_Entity{0x51})
 	step(f)
 
-	step(f, 1, link.Apply_Operations{operations = {{kind = .Rename, entity = 0x51, name = "Found"}}})
+	step(
+		f,
+		1,
+		link.Apply_Operations{operations = {{kind = .Rename, entity = 0x51, name = "Found"}}},
+	)
 
 	testing.expect_value(t, ecs.name_of(&f.world, e), "Found")
 }
@@ -623,7 +709,14 @@ picks_read_their_entities_from_the_results :: proc(t: ^testing.T) {
 		index := ecs.entity_index(e)
 		words[4 + index / 32] |= 1 << (index % 32)
 	}
-	result := pick_result(w, {id = 3, width = 1, height = 1}, words, render.Perspective{1, 0.1}, render.Perspective{1, 0.01}, context.temp_allocator)
+	result := pick_result(
+		w,
+		{id = 3, width = 1, height = 1},
+		words,
+		render.Perspective{1, 0.1},
+		render.Perspective{1, 0.01},
+		context.temp_allocator,
+	)
 	testing.expect_value(t, result.id, 3)
 	// The dead entity's slot finds nothing, and the others come in slot order.
 	testing.expect_value(t, len(result.hits), 2)
@@ -635,21 +728,49 @@ picks_read_their_entities_from_the_results :: proc(t: ^testing.T) {
 
 	// On the view model's stencil bit, the depth is the view model's near plane's.
 	words[3] = render.VIEW_MODEL_STENCIL
-	model := pick_result(w, {id = 5, width = 1, height = 1}, words, render.Perspective{1, 0.1}, render.Perspective{1, 0.01}, context.temp_allocator)
+	model := pick_result(
+		w,
+		{id = 5, width = 1, height = 1},
+		words,
+		render.Perspective{1, 0.1},
+		render.Perspective{1, 0.01},
+		context.temp_allocator,
+	)
 	testing.expect(t, abs(model.depth - 0.02) < 1e-6)
 
-	rect := pick_result(w, {id = 4, width = 8, height = 8}, words, render.Perspective{1, 0.1}, render.Perspective{1, 0.01}, context.temp_allocator)
+	rect := pick_result(
+		w,
+		{id = 4, width = 8, height = 8},
+		words,
+		render.Perspective{1, 0.1},
+		render.Perspective{1, 0.01},
+		context.temp_allocator,
+	)
 	testing.expect_value(t, rect.depth, 0)
 	testing.expect_value(t, rect.submesh, -1)
 
 	// An orthographic view's depth is even from its near plane to its far plane: a depth of 0.5 is halfway.
 	words[3] = 0
-	flat := pick_result(w, {id = 7, width = 1, height = 1}, words, render.Orthographic{10, 1, 101}, render.Orthographic{10, 1, 101}, context.temp_allocator)
+	flat := pick_result(
+		w,
+		{id = 7, width = 1, height = 1},
+		words,
+		render.Orthographic{10, 1, 101},
+		render.Orthographic{10, 1, 101},
+		context.temp_allocator,
+	)
 	testing.expect(t, abs(flat.depth - 51) < 1e-4)
 
 	// Nothing at the corner has no submesh.
 	words[1] = 0
-	empty := pick_result(w, {id = 6, width = 1, height = 1}, words, render.Perspective{1, 0.1}, render.Perspective{1, 0.01}, context.temp_allocator)
+	empty := pick_result(
+		w,
+		{id = 6, width = 1, height = 1},
+		words,
+		render.Perspective{1, 0.1},
+		render.Perspective{1, 0.01},
+		context.temp_allocator,
+	)
 	testing.expect_value(t, empty.submesh, -1)
 }
 
@@ -686,7 +807,11 @@ gizmos_are_triangles_with_the_hot_part_highlighted :: proc(t: ^testing.T) {
 	hot := pack_color({GIZMO_HOT.r, GIZMO_HOT.g, GIZMO_HOT.b, 1})
 	for kind in ([]link.Gizmo_Kind{.Translate, .Rotate, .Scale}) {
 		vertices := make([dynamic]Gizmo_Vertex, context.temp_allocator)
-		gizmo_vertices({kind = kind, position = {0, 0, 5 << 24}, rotation = {0, 0, 0, 1}, size = 1, hot = .Y}, v, &vertices)
+		gizmo_vertices(
+			{kind = kind, position = {0, 0, 5 << 24}, rotation = {0, 0, 0, 1}, size = 1, hot = .Y},
+			v,
+			&vertices,
+		)
 		testing.expect(t, len(vertices) > 0 && len(vertices) % 3 == 0)
 		highlighted := 0
 		for vertex in vertices {
@@ -731,7 +856,10 @@ box_handles_are_cubes_with_the_hot_one_highlighted :: proc(t: ^testing.T) {
 		projection = render.Perspective{1, 0.05},
 	}
 	hot := pack_color({GIZMO_HOT.r, GIZMO_HOT.g, GIZMO_HOT.b, 1})
-	handles := []link.Box_Handle{{position = {0, 0, 5 << 24}, kind = .Influence}, {position = {1 << 24, 0, 5 << 24}, kind = .Projection, hot = true}}
+	handles := []link.Box_Handle {
+		{position = {0, 0, 5 << 24}, kind = .Influence},
+		{position = {1 << 24, 0, 5 << 24}, kind = .Projection, hot = true},
+	}
 	vertices := make([dynamic]Gizmo_Vertex, context.temp_allocator)
 	box_handle_vertices(handles, 0.2, v, &vertices)
 	// 6 faces of 2 triangles each.
@@ -739,7 +867,10 @@ box_handles_are_cubes_with_the_hot_one_highlighted :: proc(t: ^testing.T) {
 	for vertex, i in vertices {
 		testing.expect_value(t, vertex.color == hot, i >= 36)
 		center := i < 36 ? [3]f32{0, 0, 5} : [3]f32{1, 0, 5}
-		testing.expect(t, linalg.length(vertex.position - center) <= 0.1 * math.sqrt(f32(3)) + 1e-4)
+		testing.expect(
+			t,
+			linalg.length(vertex.position - center) <= 0.1 * math.sqrt(f32(3)) + 1e-4,
+		)
 	}
 
 	f := setup(t)
@@ -790,14 +921,26 @@ reflection_probes_capture_when_asked_and_report_their_state :: proc(t: ^testing.
 	testing.expect_value(t, len(probe_views(step(f))), 0)
 	rp.params = render.REFLECTION_PARAMS[.Probes][.Low]
 	rp.params.probes = 2
-	rp.cubes.texture = gpu.Texture{index = 1}
+	rp.cubes.texture = gpu.Texture {
+		index = 1,
+	}
 	views = probe_views(step(f))
 	testing.expect_value(t, len(views), 1)
-	testing.expect_value(t, views[0], link.Reflection_Probe_View{entity = u64(probe), status = .No_Slot})
+	testing.expect_value(
+		t,
+		views[0],
+		link.Reflection_Probe_View{entity = u64(probe), status = .No_Slot},
+	)
 	testing.expect_value(t, len(probe_views(step(f))), 0)
 
-	rp.slots[0] = {used = true, entity = probe}
-	rp.slots[1] = {used = true, entity = other}
+	rp.slots[0] = {
+		used   = true,
+		entity = probe,
+	}
+	rp.slots[1] = {
+		used   = true,
+		entity = other,
+	}
 	views = probe_views(step(f))
 	testing.expect_value(t, views[0].status, link.Reflection_Probe_Status.Waiting)
 	views = probe_views(step(f, 1, link.Capture_Reflection_Probes{entities = {u64(probe)}}))
@@ -806,14 +949,21 @@ reflection_probes_capture_when_asked_and_report_their_state :: proc(t: ^testing.
 
 	// The capture finishes, provisional: Captured, with its age, which alone does not send it again.
 	rp.slots[0].forced = false
-	rp.slots[0].cube = render.Reflection_Probe_Cube{index = 1, time = clock}
+	rp.slots[0].cube = render.Reflection_Probe_Cube {
+		index = 1,
+		time  = clock,
+	}
 	views = probe_views(step(f))
 	testing.expect_value(t, len(views), 1)
 	testing.expect(t, views[0].status == .Captured && !views[0].complete && !views[0].capturing)
 	testing.expect(t, views[0].age >= 1)
 	testing.expect_value(t, len(probe_views(step(f))), 0)
 	// Another capture's time sends it again.
-	rp.slots[0].cube = render.Reflection_Probe_Cube{index = 2, time = clock, complete = true}
+	rp.slots[0].cube = render.Reflection_Probe_Cube {
+		index    = 2,
+		time     = clock,
+		complete = true,
+	}
 	views = probe_views(step(f))
 	testing.expect(t, len(views) == 1 && views[0].complete)
 
@@ -947,7 +1097,14 @@ game_commands_go_with_the_types_and_return_operations :: proc(t: ^testing.T) {
 			f := (^Fixture)(ctx.user)
 			testing.expect_value(f.t, len(ctx.selection), 1)
 			for entity in ctx.selection {
-				append(&ctx.operations, link.Operation{kind = .Rename, entity = scene_id(ctx.world, entity), name = "Renamed"})
+				append(
+					&ctx.operations,
+					link.Operation {
+						kind = .Rename,
+						entity = scene_id(ctx.world, entity),
+						name = "Renamed",
+					},
+				)
 			}
 			ctx.message = "renamed"
 		},
@@ -994,16 +1151,49 @@ previews_draw_when_what_they_show_changes :: proc(t: ^testing.T) {
 	// The preview looks for the material's blob to tell an effect, and the cache has none: it says so once, and does
 	// not read the disk again in every frame.
 	f.platform.file_read = core.file_read
-	missing := Counted_Log{text = "no blob for", next = context.logger}
+	missing := Counted_Log {
+		text = "no blob for",
+		next = context.logger,
+	}
 	context.logger = {count_log, &missing, .Debug, {}}
 	asset.init(&assets, &f.platform, asset.loose_cache("missing"))
 	f.editor.assets = &assets
 	f.platform.gpu_preview_target = proc(id: int, size: [2]u32) -> (gpu.Preview_Target, bool) {
-		return {texture = {index = 7, generation = 1}, prefix = "test.preview0.g0", size = size}, id == 0
+		return {texture = {index = 7, generation = 1}, prefix = "test.preview0.g0", size = size},
+			id == 0
 	}
 	f.platform.gpu_release_preview_target = proc(id: int) {}
-	gold := [16]u8{0xf6, 0xd3, 0xde, 0x31, 0x90, 0xe2, 0xdf, 0xb9, 0x7d, 0x68, 0x34, 0xed, 0x51, 0x01, 0xc4, 0xc0}
-	step(f, 1, link.Open_Preview{id = 0, material = gold}, link.Preview_Settings{id = 0, mesh = .Cube, pitch = 0.5, distance = 3, width = 128, height = 64})
+	gold := [16]u8 {
+		0xf6,
+		0xd3,
+		0xde,
+		0x31,
+		0x90,
+		0xe2,
+		0xdf,
+		0xb9,
+		0x7d,
+		0x68,
+		0x34,
+		0xed,
+		0x51,
+		0x01,
+		0xc4,
+		0xc0,
+	}
+	step(
+		f,
+		1,
+		link.Open_Preview{id = 0, material = gold},
+		link.Preview_Settings {
+			id = 0,
+			mesh = .Cube,
+			pitch = 0.5,
+			distance = 3,
+			width = 128,
+			height = 64,
+		},
+	)
 
 	descs := previews(&f.editor)
 	testing.expect_value(t, len(descs), 1)
@@ -1030,7 +1220,18 @@ previews_draw_when_what_they_show_changes :: proc(t: ^testing.T) {
 	}
 	testing.expect_value(t, targets, 1)
 	// A new camera draws it again, and a closed preview draws no more.
-	step(f, 1, link.Preview_Settings{id = 0, mesh = .Cube, pitch = 0.2, distance = 3, width = 128, height = 64})
+	step(
+		f,
+		1,
+		link.Preview_Settings {
+			id = 0,
+			mesh = .Cube,
+			pitch = 0.2,
+			distance = 3,
+			width = 128,
+			height = 64,
+		},
+	)
 	testing.expect_value(t, len(previews(&f.editor)), 1)
 	step(f, 1, link.Close_Preview{id = 0})
 	testing.expect_value(t, len(previews(&f.editor)), 0)
@@ -1047,7 +1248,13 @@ Counted_Log :: struct {
 }
 
 @(private)
-count_log :: proc(data: rawptr, level: log.Level, text: string, options: log.Options, location: runtime.Source_Code_Location) {
+count_log :: proc(
+	data: rawptr,
+	level: log.Level,
+	text: string,
+	options: log.Options,
+	location: runtime.Source_Code_Location,
+) {
 	m := (^Counted_Log)(data)
 	if strings.contains(text, m.text) {
 		m.count += 1
@@ -1063,7 +1270,19 @@ the_viewports_settings_reach_the_frame_while_an_editor_is_linked :: proc(t: ^tes
 
 	step(f)
 	testing.expect_value(t, render_overrides(&f.editor, 0), Render_Overrides{})
-	step(f, 1, link.Set_Viewport_Settings{settings = {debug_view = .Normals, no_bloom = true, no_shadows = true, exposure_offset = -1.5, shading_stats = true}})
+	step(
+		f,
+		1,
+		link.Set_Viewport_Settings {
+			settings = {
+				debug_view = .Normals,
+				no_bloom = true,
+				no_shadows = true,
+				exposure_offset = -1.5,
+				shading_stats = true,
+			},
+		},
+	)
 	o := render_overrides(&f.editor, 0)
 	testing.expect_value(t, o.debug_view, render.Debug_View.Normals)
 	testing.expect_value(t, o.disable, render.Features{.Bloom, .Shadows})
@@ -1081,7 +1300,9 @@ the_viewports_quality_replaces_the_games_where_it_chooses :: proc(t: ^testing.T)
 	// A Renderer is too large for the stack.
 	renderer := new(render.Renderer)
 	defer free(renderer)
-	renderer.caps = {upscalers = {.Fsr}}
+	renderer.caps = {
+		upscalers = {.Fsr},
+	}
 	renderer.quality = render.preset_quality(.High, renderer.caps)
 	renderer.quality.aa, renderer.quality.render_scale = .Smaa, 0.75
 
@@ -1108,14 +1329,22 @@ the_viewports_quality_replaces_the_games_where_it_chooses :: proc(t: ^testing.T)
 	testing.expect_value(t, q.aa, render.Aa_Technique.Taa)
 	// The global illumination's technique replaces the game's, at its level, and the device limits it too: without
 	// Ray_Query, the split cascades are the screen cascades.
-	renderer.caps = {ray_query = true}
+	renderer.caps = {
+		ray_query = true,
+	}
 	step(f, 1, link.Set_Viewport_Settings{settings = {global_illumination = .Voxel_Cones}})
 	q, ok = viewport_quality(&f.editor, renderer.quality, renderer.caps, 0)
 	testing.expect(t, ok)
 	testing.expect_value(t, q.gi.technique, render.Gi_Technique.Voxel_Cones)
 	testing.expect_value(t, q.gi.level, render.Quality_Level.High)
 	testing.expect_value(t, q.aa, render.Aa_Technique.Smaa)
-	step(f, 1, link.Set_Viewport_Settings{settings = {quality_preset = .Low, global_illumination = .Split_Cascades}})
+	step(
+		f,
+		1,
+		link.Set_Viewport_Settings {
+			settings = {quality_preset = .Low, global_illumination = .Split_Cascades},
+		},
+	)
 	q, _ = viewport_quality(&f.editor, renderer.quality, renderer.caps, 0)
 	testing.expect_value(t, q.gi, render.Gi_Quality{technique = .Split_Cascades, level = .Low})
 	renderer.caps = {}
@@ -1130,15 +1359,39 @@ the_viewports_quality_replaces_the_games_where_it_chooses :: proc(t: ^testing.T)
 	step(f, 1, link.Set_Viewport_Settings{settings = {reflections = .Probes}})
 	q, ok = viewport_quality(&f.editor, renderer.quality, renderer.caps, 0)
 	testing.expect(t, ok)
-	testing.expect_value(t, q.reflections, render.Reflection_Quality{technique = .Probes, level = game.level})
+	testing.expect_value(
+		t,
+		q.reflections,
+		render.Reflection_Quality{technique = .Probes, level = game.level},
+	)
 	step(f, 1, link.Set_Viewport_Settings{settings = {reflections_level = .Ultra}})
 	q, ok = viewport_quality(&f.editor, renderer.quality, renderer.caps, 0)
 	testing.expect(t, ok)
-	testing.expect_value(t, q.reflections, render.Reflection_Quality{technique = game.technique, level = .Ultra})
-	step(f, 1, link.Set_Viewport_Settings{settings = {quality_preset = .Ultra, reflections = .Ray_Traced, reflections_level = .Low}})
+	testing.expect_value(
+		t,
+		q.reflections,
+		render.Reflection_Quality{technique = game.technique, level = .Ultra},
+	)
+	step(
+		f,
+		1,
+		link.Set_Viewport_Settings {
+			settings = {
+				quality_preset = .Ultra,
+				reflections = .Ray_Traced,
+				reflections_level = .Low,
+			},
+		},
+	)
 	q, _ = viewport_quality(&f.editor, renderer.quality, renderer.caps, 0)
-	testing.expect_value(t, q.reflections, render.Reflection_Quality{technique = .Screen, level = .Low})
-	renderer.caps = {ray_query = true}
+	testing.expect_value(
+		t,
+		q.reflections,
+		render.Reflection_Quality{technique = .Screen, level = .Low},
+	)
+	renderer.caps = {
+		ray_query = true,
+	}
 	q, _ = viewport_quality(&f.editor, renderer.quality, renderer.caps, 0)
 	testing.expect_value(t, q.reflections.technique, render.Reflection_Technique.Ray_Traced)
 	step(f, 1, link.Set_Viewport_Settings{settings = {reflections = .Off}})
@@ -1170,7 +1423,11 @@ live_meshes_bake_and_draw_in_place_of_their_assets :: proc(t: ^testing.T) {
 			live_buffers -= 1
 		}
 	}
-	f.platform.gpu_stream_buffer = proc(buffer: gpu.Buffer, offset: u32, data: []byte) -> gpu.Transfer {return 1}
+	f.platform.gpu_stream_buffer = proc(
+		buffer: gpu.Buffer,
+		offset: u32,
+		data: []byte,
+	) -> gpu.Transfer {return 1}
 	f.platform.gpu_transfer_done = proc(transfer: gpu.Transfer) -> bool {return true}
 	assets: asset.Assets
 	asset.init(&assets, &f.platform, asset.loose_cache("missing"))
@@ -1255,7 +1512,10 @@ a_live_blob_is_the_cookers_mesh_without_its_levels :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(submeshes), 1)
 	meshlets := format.mesh_meshlets(blob, view)
 	testing.expect_value(t, len(meshlets), 1)
-	testing.expect(t, meshlets[0].depth == 0 && meshlets[0].error == 0 && meshlets[0].cone_cutoff == 127)
+	testing.expect(
+		t,
+		meshlets[0].depth == 0 && meshlets[0].error == 0 && meshlets[0].cone_cutoff == 127,
+	)
 	testing.expect_value(t, view.bounds.center, [3]f32{0.5, 0.5, 0.5})
 
 	// A mesh with no faces that bake gives no blob, with the faces' problems.
@@ -1290,7 +1550,9 @@ the_mesh_overlay_draws_edges_vertices_fills_and_the_grid :: proc(t: ^testing.T) 
 	overlay := link.Mesh_Overlay {
 		active  = true,
 		element = .Edges,
-		meshes  = {{guid = ([16]u8)(guid), entity = u64(entity), hovered_vertex = -1, hovered_face = -1}},
+		meshes  = {
+			{guid = ([16]u8)(guid), entity = u64(entity), hovered_vertex = -1, hovered_face = -1},
+		},
 	}
 	step(f, 1, overlay)
 	testing.expect_value(t, count(f, view), 0)
@@ -1342,7 +1604,13 @@ targets: Viewport_Targets
 with_targets :: proc(f: ^Fixture) {
 	targets = {}
 	f.platform.gpu_viewport_target = proc(id: int, size: [2]u32) -> (gpu.Preview_Target, bool) {
-		return {texture = {index = u32(20 + id), generation = 1}, prefix = "test.viewport", generation = targets.generation[id], size = size}, !targets.busy[id]
+		return {
+				texture = {index = u32(20 + id), generation = 1},
+				prefix = "test.viewport",
+				generation = targets.generation[id],
+				size = size,
+			},
+			!targets.busy[id]
 	}
 	f.platform.gpu_release_viewport_target = proc(id: int) {
 		targets.released[id] += 1
@@ -1390,22 +1658,45 @@ with_renderer :: proc(f: ^Fixture) {
 
 @(private = "file")
 viewport_camera :: proc(viewport: u32, x: i64) -> link.Editor_Camera {
-	return {viewport = viewport, position = {x, 0, 0}, rotation = {0, 0, 0, 1}, vertical_fov = 1, near = 0.05}
+	return {
+		viewport = viewport,
+		position = {x, 0, 0},
+		rotation = {0, 0, 0, 1},
+		vertical_fov = 1,
+		near = 0.05,
+	}
 }
 
 @(private = "file")
-open_viewport :: proc(viewport: u32, kind: link.Viewport_Kind, width := i32(64), height := i32(64)) -> link.Open_Viewport {
+open_viewport :: proc(
+	viewport: u32,
+	kind: link.Viewport_Kind,
+	width := i32(64),
+	height := i32(64),
+) -> link.Open_Viewport {
 	return {viewport = viewport, kind = kind, width = width, height = height}
 }
 
 // expect_viewports expects the viewports that a frame draws, by number, in this order.
 @(private = "file")
-expect_viewports :: proc(t: ^testing.T, views: []Frame_Viewport, want: ..int, loc := #caller_location) {
+expect_viewports :: proc(
+	t: ^testing.T,
+	views: []Frame_Viewport,
+	want: ..int,
+	loc := #caller_location,
+) {
 	got := make([dynamic]int, context.temp_allocator)
 	for v in views {
 		append(&got, v.viewport)
 	}
-	testing.expectf(t, slice.equal(got[:], want), "the frame draws viewports %v, want %v", got[:], want, loc = loc)
+	testing.expectf(
+		t,
+		slice.equal(got[:], want),
+		"the frame draws viewports %v, want %v",
+		got[:],
+		want,
+		loc = loc,
+	)
 }
 
 @(test)
@@ -1435,7 +1726,11 @@ viewports_of_both_kinds_open_resize_and_close :: proc(t: ^testing.T) {
 		camera, has_camera := views[1].view.?
 		testing.expect(t, has_camera)
 		testing.expect_value(t, camera.position.raw.x, 5 << 24)
-		testing.expect(t, views[0].state != nil && views[1].state != nil && views[0].state != views[1].state, "each viewport has a state of its own")
+		testing.expect(
+			t,
+			views[0].state != nil && views[1].state != nil && views[0].state != views[1].state,
+			"each viewport has a state of its own",
+		)
 	}
 
 	// The editor hears of each target once, and of a new generation when the backend makes one, as a new size does.
@@ -1485,7 +1780,13 @@ viewports_of_both_kinds_open_resize_and_close :: proc(t: ^testing.T) {
 	testing.expect_value(t, targets.released, [gpu.MAX_VIEWPORT_TARGETS]int{0, 1, 0, 0, 0})
 	testing.expect_value(t, objects.freed, freed + 1)
 	// A viewport that is not open, and one that is not there, close nothing.
-	step(f, 1, link.Close_Viewport{viewport = 1}, link.Close_Viewport{viewport = 0}, link.Close_Viewport{viewport = 9})
+	step(
+		f,
+		1,
+		link.Close_Viewport{viewport = 1},
+		link.Close_Viewport{viewport = 0},
+		link.Close_Viewport{viewport = 9},
+	)
 	testing.expect_value(t, targets.released, [gpu.MAX_VIEWPORT_TARGETS]int{0, 1, 0, 0, 0})
 	testing.expect_value(t, objects.freed, freed + 1)
 
@@ -1574,7 +1875,14 @@ a_viewport_keeps_its_view_state_while_the_others_open_and_close :: proc(t: ^test
 	defer teardown(f)
 	with_targets(f)
 	with_renderer(f)
-	step(f, 1, viewport_camera(0, 0), viewport_camera(1, 0), open_viewport(0, .Scene), open_viewport(1, .Scene))
+	step(
+		f,
+		1,
+		viewport_camera(0, 0),
+		viewport_camera(1, 0),
+		open_viewport(0, .Scene),
+		open_viewport(1, .Scene),
+	)
 
 	views := frame_viewports(&f.editor)
 	testing.expect_value(t, len(views), 2)
@@ -1585,10 +1893,18 @@ a_viewport_keeps_its_view_state_while_the_others_open_and_close :: proc(t: ^test
 	step(f, 1, open_viewport(2, .Game))
 	views = frame_viewports(&f.editor)
 	expect_viewports(t, views, 2, 0, 1)
-	testing.expect(t, views[1].state == first && views[2].state == second, "a state moved when another viewport opened")
+	testing.expect(
+		t,
+		views[1].state == first && views[2].state == second,
+		"a state moved when another viewport opened",
+	)
 	step(f, 1, link.Close_Viewport{viewport = 2})
 	views = frame_viewports(&f.editor)
-	testing.expect(t, views[0].state == first && views[1].state == second, "a state moved when another viewport closed")
+	testing.expect(
+		t,
+		views[0].state == first && views[1].state == second,
+		"a state moved when another viewport closed",
+	)
 	testing.expect_value(t, objects.made, 3)
 	testing.expect_value(t, objects.freed, 1)
 
@@ -1621,8 +1937,14 @@ each_viewport_has_its_own_gizmo_handles_and_settings :: proc(t: ^testing.T) {
 		link.Gizmo_State{viewport = 0, kind = .Translate, size = 1},
 		link.Gizmo_State{viewport = 2, kind = .Rotate, size = 4},
 		link.Box_Handles{viewport = 2, size = 0.5, handles = {{kind = .Influence}}},
-		link.Set_Viewport_Settings{viewport = 0, settings = {debug_view = .Albedo, show_icons = true}},
-		link.Set_Viewport_Settings{viewport = 2, settings = {debug_view = .Normals, no_fog = true}},
+		link.Set_Viewport_Settings {
+			viewport = 0,
+			settings = {debug_view = .Albedo, show_icons = true},
+		},
+		link.Set_Viewport_Settings {
+			viewport = 2,
+			settings = {debug_view = .Normals, no_fog = true},
+		},
 		// A viewport that the game does not have is dropped.
 		link.Gizmo_State{viewport = MAX_VIEWPORTS, kind = .Scale},
 	)
@@ -1694,7 +2016,12 @@ without_an_editor_the_frame_is_the_games_as_it_is :: proc(t: ^testing.T) {
 	testing.expect_value(t, out.size, desc.size)
 	testing.expect_value(t, out.target, gpu.Texture{})
 	testing.expect(t, out.state == nil && out.quality == nil && out.overlay.draw == nil)
-	testing.expect(t, out.hooks.data == desc.hooks.data && out.hooks.ui == game_ui && out.hooks.debug == game_debug)
+	testing.expect(
+		t,
+		out.hooks.data == desc.hooks.data &&
+		out.hooks.ui == game_ui &&
+		out.hooks.debug == game_debug,
+	)
 	testing.expect(t, raw_data(out.hidden) == raw_data(desc.hidden) && len(out.hidden) == 1)
 	testing.expect(t, len(out.previews) == 0 && len(out.playing) == 0 && len(out.extra_views) == 0)
 	testing.expect(t, !out.no_debug && !out.keep_ids)
@@ -1704,7 +2031,9 @@ without_an_editor_the_frame_is_the_games_as_it_is :: proc(t: ^testing.T) {
 }
 
 @(test)
-the_game_view_draws_the_frame_as_described_and_a_scene_view_adds_the_editor :: proc(t: ^testing.T) {
+the_game_view_draws_the_frame_as_described_and_a_scene_view_adds_the_editor :: proc(
+	t: ^testing.T,
+) {
 	f := setup(t)
 	defer teardown(f)
 	with_targets(f)
@@ -1718,17 +2047,42 @@ the_game_view_draws_the_frame_as_described_and_a_scene_view_adds_the_editor :: p
 		viewport_camera(1, 3 << 24),
 		open_viewport(1, .Scene, 16, 8),
 		open_viewport(2, .Game, 32, 16),
-		link.Set_Viewport_Settings{viewport = 1, settings = {debug_view = .Normals, no_fog = true, exposure_offset = -1, quality_preset = .Low, shading_stats = true}},
-		link.Set_Viewport_Settings{viewport = 2, settings = {no_bloom = true, exposure_offset = 2, anti_aliasing = .Fxaa}},
+		link.Set_Viewport_Settings {
+			viewport = 1,
+			settings = {
+				debug_view = .Normals,
+				no_fog = true,
+				exposure_offset = -1,
+				quality_preset = .Low,
+				shading_stats = true,
+			},
+		},
+		link.Set_Viewport_Settings {
+			viewport = 2,
+			settings = {no_bloom = true, exposure_offset = 2, anti_aliasing = .Fxaa},
+		},
 	)
-	out := plan_frame(&f.editor, &f.world, desc, frame_viewports(&f.editor), f.renderer.quality, f.renderer.caps)
+	out := plan_frame(
+		&f.editor,
+		&f.world,
+		desc,
+		frame_viewports(&f.editor),
+		f.renderer.quality,
+		f.renderer.caps,
+	)
 
 	// The Game view is the frame's own: the game's camera, hooks, UI and settings, at the viewport's size, in its target.
 	testing.expect_value(t, out.view, desc.view)
 	testing.expect_value(t, out.size, [2]u32{32, 16})
 	testing.expect_value(t, out.target, gpu.Texture{index = 22, generation = 1})
 	testing.expect(t, out.state != nil)
-	testing.expect(t, out.hooks.data == desc.hooks.data && out.hooks.ui == game_ui && out.hooks.debug == game_debug && out.hooks.before_world == game_hook)
+	testing.expect(
+		t,
+		out.hooks.data == desc.hooks.data &&
+		out.hooks.ui == game_ui &&
+		out.hooks.debug == game_debug &&
+		out.hooks.before_world == game_hook,
+	)
 	testing.expect(t, out.settings == &settings)
 	testing.expect_value(t, out.delta, 0.25)
 	testing.expect(t, raw_data(out.skins) == raw_data(desc.skins))
@@ -1754,7 +2108,12 @@ the_game_view_draws_the_frame_as_described_and_a_scene_view_adds_the_editor :: p
 	testing.expect(t, scene.state != nil && scene.state != out.state)
 	testing.expect(t, scene.settings == &settings)
 	// The game's hooks, the same data and passes, minus the UI.
-	testing.expect(t, scene.hooks.data == desc.hooks.data && scene.hooks.before_world == game_hook && scene.hooks.debug == game_debug)
+	testing.expect(
+		t,
+		scene.hooks.data == desc.hooks.data &&
+		scene.hooks.before_world == game_hook &&
+		scene.hooks.debug == game_debug,
+	)
 	testing.expect(t, scene.hooks.ui == nil)
 	// The editor's tools as its overlay, the IDs for the picks, and the debug layer in Edit.
 	testing.expect(t, scene.overlay.draw != nil && scene.overlay.data != nil)
@@ -1767,7 +2126,14 @@ the_game_view_draws_the_frame_as_described_and_a_scene_view_adds_the_editor :: p
 	}
 	// The own view's shading stats are the viewport's that is the own view.
 	step(f, 1, link.Close_Viewport{viewport = 2})
-	out = plan_frame(&f.editor, &f.world, desc, frame_viewports(&f.editor), f.renderer.quality, f.renderer.caps)
+	out = plan_frame(
+		&f.editor,
+		&f.world,
+		desc,
+		frame_viewports(&f.editor),
+		f.renderer.quality,
+		f.renderer.caps,
+	)
 	testing.expect(t, out.shading_stats)
 	testing.expect_value(t, out.view.position.raw.x, 3 << 24)
 	testing.expect_value(t, len(out.extra_views), 0)
@@ -1777,18 +2143,45 @@ the_game_view_draws_the_frame_as_described_and_a_scene_view_adds_the_editor :: p
 	// Outside Edit, a scene view keeps its debug layer, where a selected perceiver shows what it perceives, and its tools for
 	// the picks.
 	step(f, 1, open_viewport(2, .Game, 32, 16), link.Set_Mode{mode = .Play})
-	out = plan_frame(&f.editor, &f.world, desc, frame_viewports(&f.editor), f.renderer.quality, f.renderer.caps)
-	testing.expect(t, len(out.extra_views) == 1 && !out.extra_views[0].no_debug && out.extra_views[0].overlay.draw != nil && out.extra_views[0].keep_ids)
+	out = plan_frame(
+		&f.editor,
+		&f.world,
+		desc,
+		frame_viewports(&f.editor),
+		f.renderer.quality,
+		f.renderer.caps,
+	)
+	testing.expect(
+		t,
+		len(out.extra_views) == 1 &&
+		!out.extra_views[0].no_debug &&
+		out.extra_views[0].overlay.draw != nil &&
+		out.extra_views[0].keep_ids,
+	)
 
 	// An orthographic scene view stands back from what it shows, so it draws no fog, whatever its settings say. A
 	// perspective one draws it.
 	step(f, 1, link.Set_Viewport_Settings{viewport = 1, settings = {}})
-	out = plan_frame(&f.editor, &f.world, desc, frame_viewports(&f.editor), f.renderer.quality, f.renderer.caps)
+	out = plan_frame(
+		&f.editor,
+		&f.world,
+		desc,
+		frame_viewports(&f.editor),
+		f.renderer.quality,
+		f.renderer.caps,
+	)
 	testing.expect(t, len(out.extra_views) == 1 && .Fog not_in out.extra_views[0].disable)
 	flat := viewport_camera(1, 3 << 24)
 	flat.projection, flat.orthographic_height, flat.far = .Orthographic, 10, 1000
 	step(f, 1, flat)
-	out = plan_frame(&f.editor, &f.world, desc, frame_viewports(&f.editor), f.renderer.quality, f.renderer.caps)
+	out = plan_frame(
+		&f.editor,
+		&f.world,
+		desc,
+		frame_viewports(&f.editor),
+		f.renderer.quality,
+		f.renderer.caps,
+	)
 	if testing.expect_value(t, len(out.extra_views), 1) {
 		testing.expect(t, .Fog in out.extra_views[0].disable)
 		testing.expect(t, render.is_orthographic(out.extra_views[0].view))
@@ -1810,7 +2203,14 @@ the_frame_with_no_viewport_to_draw_is_the_games_with_the_editors_additions :: pr
 	a := spawn(f, {})
 	// Linked, in Edit, with nothing open: the game's frame into the frame target, with the debug layer.
 	step(f, 1, link.Set_Selection{entities = {u64(a)}})
-	out := plan_frame(&f.editor, &f.world, desc, frame_viewports(&f.editor), f.renderer.quality, f.renderer.caps)
+	out := plan_frame(
+		&f.editor,
+		&f.world,
+		desc,
+		frame_viewports(&f.editor),
+		f.renderer.quality,
+		f.renderer.caps,
+	)
 	testing.expect_value(t, out.view, desc.view)
 	testing.expect_value(t, out.size, desc.size)
 	testing.expect_value(t, out.target, gpu.Texture{})
@@ -1821,13 +2221,27 @@ the_frame_with_no_viewport_to_draw_is_the_games_with_the_editors_additions :: pr
 	testing.expect_value(t, len(out.playing), 1)
 	// In Play there is no debug layer, as in any viewport.
 	step(f, 1, link.Set_Mode{mode = .Play})
-	out = plan_frame(&f.editor, &f.world, desc, frame_viewports(&f.editor), f.renderer.quality, f.renderer.caps)
+	out = plan_frame(
+		&f.editor,
+		&f.world,
+		desc,
+		frame_viewports(&f.editor),
+		f.renderer.quality,
+		f.renderer.caps,
+	)
 	testing.expect(t, out.no_debug)
 
 	// Viewports that are open but cannot draw, as their targets are still read, leave the same frame.
 	step(f, 1, open_viewport(2, .Game, 32, 16))
 	targets.busy[2] = true
-	out = plan_frame(&f.editor, &f.world, desc, frame_viewports(&f.editor), f.renderer.quality, f.renderer.caps)
+	out = plan_frame(
+		&f.editor,
+		&f.world,
+		desc,
+		frame_viewports(&f.editor),
+		f.renderer.quality,
+		f.renderer.caps,
+	)
 	testing.expect_value(t, out.size, desc.size)
 	testing.expect_value(t, out.target, gpu.Texture{})
 }
@@ -1844,7 +2258,14 @@ the_games_hidden_entities_and_the_editors_are_together_in_every_view :: proc(t: 
 	b := spawn(f, {})
 	step(f, 1, open_viewport(2, .Game), open_viewport(0, .Scene), viewport_camera(0, 0))
 	plan :: proc(f: ^Fixture, desc: render.Frame_Desc) -> render.Frame_Desc {
-		return plan_frame(&f.editor, &f.world, desc, frame_viewports(&f.editor), f.renderer.quality, f.renderer.caps)
+		return plan_frame(
+			&f.editor,
+			&f.world,
+			desc,
+			frame_viewports(&f.editor),
+			f.renderer.quality,
+			f.renderer.caps,
+		)
 	}
 	// Nothing hidden by either.
 	testing.expect_value(t, len(plan(f, desc).hidden), 0)
@@ -1862,7 +2283,11 @@ the_games_hidden_entities_and_the_editors_are_together_in_every_view :: proc(t: 
 	testing.expect(t, raw_data(out.hidden) == raw_data(desc.hidden))
 	step(f, 1, link.Set_Hidden{entities = {u64(a)}})
 	out = plan(f, desc)
-	testing.expect(t, render.is_hidden(out.hidden, a) && render.is_hidden(out.hidden, b), "the list hides what either hides")
+	testing.expect(
+		t,
+		render.is_hidden(out.hidden, a) && render.is_hidden(out.hidden, b),
+		"the list hides what either hides",
+	)
 	// The game's list is not changed.
 	testing.expect(t, !render.is_hidden(desc.hidden, a))
 }
@@ -1886,9 +2311,19 @@ a_view_starts_from_the_games_quality_when_it_has_one :: proc(t: ^testing.T) {
 		viewport_camera(0, 0),
 		link.Set_Viewport_Settings{viewport = 0, settings = {render_scale = 0.5}},
 	)
-	out := plan_frame(&f.editor, &f.world, desc, frame_viewports(&f.editor), f.renderer.quality, f.renderer.caps)
+	out := plan_frame(
+		&f.editor,
+		&f.world,
+		desc,
+		frame_viewports(&f.editor),
+		f.renderer.quality,
+		f.renderer.caps,
+	)
 	// The Game view keeps the game's, and the scene view changes only what it chooses.
-	if testing.expect(t, out.quality != nil && len(out.extra_views) == 1 && out.extra_views[0].quality != nil) {
+	if testing.expect(
+		t,
+		out.quality != nil && len(out.extra_views) == 1 && out.extra_views[0].quality != nil,
+	) {
 		testing.expect_value(t, out.quality.aa, render.Aa_Technique.Taa)
 		testing.expect_value(t, out.extra_views[0].quality.aa, render.Aa_Technique.Taa)
 		testing.expect_value(t, out.extra_views[0].quality.render_scale, 0.5)
@@ -1897,7 +2332,9 @@ a_view_starts_from_the_games_quality_when_it_has_one :: proc(t: ^testing.T) {
 }
 
 @(test)
-a_pick_of_the_game_view_or_a_viewport_that_cannot_draw_answers_with_no_hits :: proc(t: ^testing.T) {
+a_pick_of_the_game_view_or_a_viewport_that_cannot_draw_answers_with_no_hits :: proc(
+	t: ^testing.T,
+) {
 	f := setup(t)
 	defer teardown(f)
 	with_targets(f)
@@ -1928,7 +2365,13 @@ a_pick_of_the_game_view_or_a_viewport_that_cannot_draw_answers_with_no_hits :: p
 	// A scene view with a camera runs its pick in a frame of its own.
 	testing.expect_value(t, len(f.editor.session.view.picks), 1)
 	testing.expect_value(t, f.editor.session.view.picks[0].id, 7)
-	testing.expect(t, pickable(&f.editor, 0) && !pickable(&f.editor, 2) && !pickable(&f.editor, 3) && !pickable(&f.editor, 1))
+	testing.expect(
+		t,
+		pickable(&f.editor, 0) &&
+		!pickable(&f.editor, 2) &&
+		!pickable(&f.editor, 3) &&
+		!pickable(&f.editor, 1),
+	)
 }
 
 // The editor's scene document names its GUID, which the world keeps, so the game finds what its cooked blob lists.
@@ -1937,7 +2380,14 @@ a_loaded_scene_gives_the_world_its_guid :: proc(t: ^testing.T) {
 	f := setup(t)
 	defer teardown(f)
 	step(f)
-	step(f, 1, link.Load_Scene{guid = {0 = 0xab, 15 = 1}, entities = {{id = DOOR, name = "Door", active = true}}})
+	step(
+		f,
+		1,
+		link.Load_Scene {
+			guid = {0 = 0xab, 15 = 1},
+			entities = {{id = DOOR, name = "Door", active = true}},
+		},
+	)
 	testing.expect_value(t, f.world.scene, format.Guid{0 = 0xab, 15 = 1})
 	step(f, 1, link.Load_Scene{})
 	testing.expect_value(t, f.world.scene, format.Guid{})
@@ -1948,7 +2398,13 @@ a_loaded_scene_gives_the_world_its_guid :: proc(t: ^testing.T) {
 the_nav_probe_is_the_sessions :: proc(t: ^testing.T) {
 	f := setup(t)
 	defer teardown(f)
-	step(f, 1, link.Nav_Probe{points = {{position = {1, 2, 3}}, {position = {4, 5, 6}}, {position = {7, 8, 9}}}})
+	step(
+		f,
+		1,
+		link.Nav_Probe {
+			points = {{position = {1, 2, 3}}, {position = {4, 5, 6}}, {position = {7, 8, 9}}},
+		},
+	)
 	probe := f.editor.session.view.nav_probe[:]
 	testing.expect_value(t, len(probe), 2)
 	if len(probe) == 2 {

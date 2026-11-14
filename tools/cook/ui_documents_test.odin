@@ -31,7 +31,14 @@ ui_tree :: proc(t: ^testing.T, document: string) -> Tree {
 
 @(test)
 ui_documents_cook_to_blobs_that_depend_on_their_fonts_and_images :: proc(t: ^testing.T) {
-	tree := ui_tree(t, fmt.tprintf("ui 1\n<ui font=$%s>\n\t<style name=\"frame\" image=$%s slice=\"1\"/>\n\t<box style=\"frame\"><text>Hi</text></box>\n</ui>\n", FONT_GUID, IMAGE_GUID))
+	tree := ui_tree(
+		t,
+		fmt.tprintf(
+			"ui 1\n<ui font=$%s>\n\t<style name=\"frame\" image=$%s slice=\"1\"/>\n\t<box style=\"frame\"><text>Hi</text></box>\n</ui>\n",
+			FONT_GUID,
+			IMAGE_GUID,
+		),
+	)
 	defer remove_tree(tree)
 	options := tree_options(tree)
 	pass := cook(options, {.Ui}, log_problems = false)
@@ -48,7 +55,11 @@ ui_documents_cook_to_blobs_that_depend_on_their_fonts_and_images :: proc(t: ^tes
 		if a.kind == .Ui {
 			font, _ := format.guid_parse(FONT_GUID)
 			image, _ := format.guid_parse(IMAGE_GUID)
-			testing.expect(t, slice.contains(a.dependencies[:], font) && slice.contains(a.dependencies[:], image))
+			testing.expect(
+				t,
+				slice.contains(a.dependencies[:], font) &&
+				slice.contains(a.dependencies[:], image),
+			)
 		}
 	}
 	// A second cook finds it up to date.
@@ -59,7 +70,14 @@ ui_documents_cook_to_blobs_that_depend_on_their_fonts_and_images :: proc(t: ^tes
 
 @(test)
 ui_documents_name_fonts_as_fonts_and_images_as_textures :: proc(t: ^testing.T) {
-	tree := ui_tree(t, fmt.tprintf("ui 1\n<ui font=$%s>\n\t<box image=$%s/>\n\t<text font=$00000000000000000000000000000001>a</text>\n</ui>\n", IMAGE_GUID, FONT_GUID))
+	tree := ui_tree(
+		t,
+		fmt.tprintf(
+			"ui 1\n<ui font=$%s>\n\t<box image=$%s/>\n\t<text font=$00000000000000000000000000000001>a</text>\n</ui>\n",
+			IMAGE_GUID,
+			FONT_GUID,
+		),
+	)
 	defer remove_tree(tree)
 	pass := cook(tree_options(tree), {.Ui}, log_problems = false)
 	testing.expect(t, !pass.ok)
@@ -83,20 +101,33 @@ ui_documents_name_fonts_as_fonts_and_images_as_textures :: proc(t: ^testing.T) {
 
 @(test)
 ui_documents_from_the_template_cook_and_broken_ones_keep_their_blobs :: proc(t: ^testing.T) {
-	tree := make_tree(t, {{"content/ui/new.ui", UI_TEMPLATE}, {"content/ui/broken.ui", "ui 1\n<ui><box width=\"wide\"/></ui>\n"}})
+	tree := make_tree(
+		t,
+		{
+			{"content/ui/new.ui", UI_TEMPLATE},
+			{"content/ui/broken.ui", "ui 1\n<ui><box width=\"wide\"/></ui>\n"},
+		},
+	)
 	defer remove_tree(tree)
 	pass := cook(tree_options(tree), {.Ui}, log_problems = false)
 	testing.expect(t, !pass.ok)
 	testing.expect_value(t, pass.cooked[.Ui], 1)
 	for p in pass.problems.list {
-		testing.expectf(t, strings.has_suffix(p.file, "broken.ui"), "the template has a problem: %v", p)
+		testing.expectf(
+			t,
+			strings.has_suffix(p.file, "broken.ui"),
+			"the template has a problem: %v",
+			p,
+		)
 		testing.expect_value(t, p.line, 2)
 		testing.expect_value(t, p.column, 10)
 	}
 }
 
 @(test)
-an_unsaved_ui_documents_problems_keep_their_columns_and_its_preview_its_last_good_text :: proc(t: ^testing.T) {
+an_unsaved_ui_documents_problems_keep_their_columns_and_its_preview_its_last_good_text :: proc(
+	t: ^testing.T,
+) {
 	cache, err := os.make_directory_temp("", "ui_check_*", context.allocator)
 	testing.expect(t, err == nil)
 	defer delete(cache)
@@ -121,7 +152,10 @@ an_unsaved_ui_documents_problems_keep_their_columns_and_its_preview_its_last_goo
 	}
 
 	// A warning does not stop it.
-	text := fmt.tprintf("ui 1\n<ui font=$%s>\n\t<text cross=\"center\">Hi</text>\n</ui>\n", FONT_GUID)
+	text := fmt.tprintf(
+		"ui 1\n<ui font=$%s>\n\t<text cross=\"center\">Hi</text>\n</ui>\n",
+		FONT_GUID,
+	)
 	problems, ok := check_ui(options, guid, text, kinds)
 	testing.expect(t, ok)
 	testing.expect_value(t, len(problems.list), 1)
@@ -163,7 +197,15 @@ an_unsaved_ui_documents_problems_keep_their_columns_and_its_preview_its_last_goo
 }
 
 @(private = "file")
-check_ui :: proc(options: Cook_Options, guid: format.Guid, text: string, kinds: map[format.Guid]format.Asset_Kind) -> (Problems, bool) {
+check_ui :: proc(
+	options: Cook_Options,
+	guid: format.Guid,
+	text: string,
+	kinds: map[format.Guid]format.Asset_Kind,
+) -> (
+	Problems,
+	bool,
+) {
 	return ui_check(options, guid, text, "C:/game/ui/menu.ui", "game/ui/menu.ui", kinds)
 }
 
@@ -177,7 +219,10 @@ the_ui_attributes_go_to_the_editor_by_their_names :: proc(t: ^testing.T) {
 			found = true
 			testing.expect_value(t, info.kind, "text_align")
 			testing.expect(t, info.inherited)
-			testing.expect(t, slice.contains(info.elements, "ui") && slice.contains(info.elements, "button"))
+			testing.expect(
+				t,
+				slice.contains(info.elements, "ui") && slice.contains(info.elements, "button"),
+			)
 		}
 	}
 	testing.expect(t, found)

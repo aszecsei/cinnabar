@@ -16,9 +16,9 @@ LZ4_VERSION :: #config(LZ4_VERSION, "unknown")
 PAGES_DEFAULT :: "true"
 
 PAGES_SETTING :: Setting_Info {
-	key = "pages",
-	values = {"true", "false"},
-	default = PAGES_DEFAULT,
+	key         = "pages",
+	values      = {"true", "false"},
+	default     = PAGES_DEFAULT,
 	description = "Split the meshlets' hierarchy into compressed pages, which stream in as a view comes near and leave when memory is short. Without it, the whole mesh is in memory while it is in use. Needs cluster_lod, and a mesh without a skin.",
 }
 
@@ -58,7 +58,13 @@ Page_Size :: struct {
 
 @(private = "file")
 page_bytes :: proc(s: Page_Size, vertex_stride: int) -> int {
-	return size_of(format.Mesh_Page_Header) + s.meshlets * size_of(format.Meshlet) + s.ref_words * 4 + int(format.mesh_page_padded(u32(s.triangle_bytes))) + s.vertices * vertex_stride
+	return(
+		size_of(format.Mesh_Page_Header) +
+		s.meshlets * size_of(format.Meshlet) +
+		s.ref_words * 4 +
+		int(format.mesh_page_padded(u32(s.triangle_bytes))) +
+		s.vertices * vertex_stride \
+	)
 }
 
 // build_pages splits a mesh's groups into pages and compresses them. A page holds whole groups of one submesh. Each
@@ -66,11 +72,25 @@ page_bytes :: proc(s: Page_Size, vertex_stride: int) -> int {
 // writes each leaf node's page and its first meshlet in it, each meshlet's refined_page, and each submesh's range of
 // the level 0 indices. The meshlets' vertex_offset and triangle_offset are into meshlet_indices, which holds indices
 // into vertices, and meshlet_triangles. It fails if a group does not fit in a page, which leaves the mesh unpaged.
-build_pages :: proc(vertices: []Vertex, flags: format.Mesh_Flags, meshlets: []format.Meshlet, meshlet_indices: []u32, meshlet_triangles: []u8, nodes: []format.Meshlet_Node, submeshes: []format.Submesh_Entry, inputs: Page_Inputs) -> (result: Mesh_Pages, ok: bool) {
+build_pages :: proc(
+	vertices: []Vertex,
+	flags: format.Mesh_Flags,
+	meshlets: []format.Meshlet,
+	meshlet_indices: []u32,
+	meshlet_triangles: []u8,
+	nodes: []format.Meshlet_Node,
+	submeshes: []format.Submesh_Entry,
+	inputs: Page_Inputs,
+) -> (
+	result: Mesh_Pages,
+	ok: bool,
+) {
 	attribute_stride := int(format.mesh_attribute_stride(flags))
 	vertex_stride := 12 + attribute_stride
 	groups := inputs.groups[:]
-	if len(groups) == 0 || len(inputs.owner) != len(meshlets) || len(inputs.node_groups) != len(nodes) {
+	if len(groups) == 0 ||
+	   len(inputs.owner) != len(meshlets) ||
+	   len(inputs.node_groups) != len(nodes) {
 		return
 	}
 
@@ -78,7 +98,14 @@ build_pages :: proc(vertices: []Vertex, flags: format.Mesh_Flags, meshlets: []fo
 	seen := make([]i32, len(vertices), context.temp_allocator)
 	slice.fill(seen, -1)
 	stamp: i32
-	add_group :: proc(size: ^Page_Size, g: Page_Group, meshlets: []format.Meshlet, meshlet_indices: []u32, seen: []i32, stamp: i32) {
+	add_group :: proc(
+		size: ^Page_Size,
+		g: Page_Group,
+		meshlets: []format.Meshlet,
+		meshlet_indices: []u32,
+		seen: []i32,
+		stamp: i32,
+	) {
 		for m in meshlets[g.first_meshlet:][:g.meshlet_count] {
 			size.meshlets += 1
 			size.ref_words += (int(m.vertex_count) + 1) / 2
@@ -101,7 +128,8 @@ build_pages :: proc(vertices: []Vertex, flags: format.Mesh_Flags, meshlets: []fo
 	next_group := 0
 	for s in submeshes {
 		first := next_group
-		for next_group < len(groups) && groups[next_group].first_meshlet < s.first_meshlet + s.meshlet_count {
+		for next_group < len(groups) &&
+		    groups[next_group].first_meshlet < s.first_meshlet + s.meshlet_count {
 			next_group += 1
 		}
 		if next_group == first {
@@ -201,8 +229,14 @@ build_pages :: proc(vertices: []Vertex, flags: format.Mesh_Flags, meshlets: []fo
 			}
 			format.meshlet_write_vertices(&record, own, &refs)
 			assert(record.short_refs == 1, "a page has more vertices than 16-bit refs reach")
-			own_triangles := meshlet_triangles[int(source.triangle_offset) * 3:][:int(source.triangle_count) * 3]
-			format.meshlet_write_triangles(&record, slice.reinterpret([][3]u8, own_triangles), &triangles)
+			own_triangles := meshlet_triangles[int(source.triangle_offset) *
+			3:][:int(source.triangle_count) *
+			3]
+			format.meshlet_write_triangles(
+				&record,
+				slice.reinterpret([][3]u8, own_triangles),
+				&triangles,
+			)
 			refined := inputs.refined[int(first_meshlet) + i]
 			record.refined_page = refined >= 0 ? group_page[refined] : format.MESH_PAGE_NONE
 			if source.depth == 0 {
@@ -223,7 +257,10 @@ build_pages :: proc(vertices: []Vertex, flags: format.Mesh_Flags, meshlets: []fo
 		header.positions = header.triangles + u32(format.mesh_page_padded(header.triangle_bytes))
 		header.attributes = header.positions + header.vertex_count * 12
 		size := int(header.attributes) + len(page_vertices) * attribute_stride
-		assert(size <= format.MESH_PAGE_SIZE && size % 4 == 0, "a page is not the size that it was counted to be")
+		assert(
+			size <= format.MESH_PAGE_SIZE && size % 4 == 0,
+			"a page is not the size that it was counted to be",
+		)
 		page := page_buffer[:size]
 		mem.copy(raw_data(page), &header, size_of(header))
 		copy(page[size_of(format.Mesh_Page_Header):], mem.slice_to_bytes(records[:]))
@@ -232,7 +269,12 @@ build_pages :: proc(vertices: []Vertex, flags: format.Mesh_Flags, meshlets: []fo
 		slice.zero(page[int(header.triangles) + len(triangles):header.positions])
 		copy(page[header.triangles:], triangles[:])
 		for v, i in page_vertices {
-			write_vertex(vertices[v], flags, page[int(header.positions) + i * 12:], page[int(header.attributes) + i * attribute_stride:])
+			write_vertex(
+				vertices[v],
+				flags,
+				page[int(header.positions) + i * 12:],
+				page[int(header.attributes) + i * attribute_stride:],
+			)
 		}
 
 		block := slice.clone(lz4.compress(page, scratch), context.temp_allocator)
@@ -301,7 +343,10 @@ write_vertex :: proc(v: Vertex, flags: format.Mesh_Flags, position: []byte, attr
 // face_area_of is what format.mesh_face_area gives for a mesh's triangles.
 face_area_of :: proc(vertices: []Vertex, indices: []$I) -> (area: [3]f32) {
 	for i := 0; i + 2 < len(indices); i += 3 {
-		a, b, c := vertices[indices[i]].position, vertices[indices[i + 1]].position, vertices[indices[i + 2]].position
+		a, b, c :=
+			vertices[indices[i]].position,
+			vertices[indices[i + 1]].position,
+			vertices[indices[i + 2]].position
 		u, v := b - a, c - a
 		area += [3]f32{u.y * v.z - u.z * v.y, u.z * v.x - u.x * v.z, u.x * v.y - u.y * v.x} / 2
 	}

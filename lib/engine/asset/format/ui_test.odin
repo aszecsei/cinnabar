@@ -16,7 +16,8 @@ ui_documents_report_their_problems_at_their_lines :: proc(t: ^testing.T) {
 	testing.expect(t, len(UI_CORPUS) >= 5)
 	for file in UI_CORPUS {
 		text := string(file.data)
-		errors, warnings := make([dynamic]int, context.temp_allocator), make([dynamic]int, context.temp_allocator)
+		errors, warnings :=
+			make([dynamic]int, context.temp_allocator), make([dynamic]int, context.temp_allocator)
 		for line, i in strings.split_lines(text, context.temp_allocator) {
 			if strings.contains(line, "<!-- problem -->") {
 				append(&errors, i + 1)
@@ -26,7 +27,8 @@ ui_documents_report_their_problems_at_their_lines :: proc(t: ^testing.T) {
 			}
 		}
 		_, problems, ok := ui_parse(text)
-		found_errors, found_warnings := make([dynamic]int, context.temp_allocator), make([dynamic]int, context.temp_allocator)
+		found_errors, found_warnings :=
+			make([dynamic]int, context.temp_allocator), make([dynamic]int, context.temp_allocator)
 		for p in problems {
 			list := p.error ? &found_errors : &found_warnings
 			if !slice.contains(list[:], p.line) {
@@ -35,8 +37,24 @@ ui_documents_report_their_problems_at_their_lines :: proc(t: ^testing.T) {
 		}
 		slice.sort(found_errors[:])
 		slice.sort(found_warnings[:])
-		testing.expectf(t, slice.equal(found_errors[:], errors[:]), "%s: errors at %v, expected at %v: %v", file.name, found_errors, errors, problems)
-		testing.expectf(t, slice.equal(found_warnings[:], warnings[:]), "%s: warnings at %v, expected at %v: %v", file.name, found_warnings, warnings, problems)
+		testing.expectf(
+			t,
+			slice.equal(found_errors[:], errors[:]),
+			"%s: errors at %v, expected at %v: %v",
+			file.name,
+			found_errors,
+			errors,
+			problems,
+		)
+		testing.expectf(
+			t,
+			slice.equal(found_warnings[:], warnings[:]),
+			"%s: warnings at %v, expected at %v: %v",
+			file.name,
+			found_warnings,
+			warnings,
+			problems,
+		)
 		testing.expectf(t, ok == (len(errors) == 0), "%s: ok is %v", file.name, ok)
 	}
 }
@@ -52,14 +70,24 @@ ui_documents_have_the_nodes_that_they_list :: proc(t: ^testing.T) {
 		}
 		listed += 1
 		end := strings.index(text[start:], "-->")
-		expected := strings.fields(text[start + len("<!-- nodes:"):start + end], context.temp_allocator)
+		expected := strings.fields(
+			text[start + len("<!-- nodes:"):start + end],
+			context.temp_allocator,
+		)
 		document, _, ok := ui_parse(text)
 		testing.expectf(t, ok, "%s does not parse", file.name)
 		found := make([dynamic]string, context.temp_allocator)
 		for n in document.nodes {
 			append(&found, UI_ELEMENT_NAMES[n.element])
 		}
-		testing.expectf(t, slice.equal(found[:], expected), "%s: nodes %v, listed %v", file.name, found, expected)
+		testing.expectf(
+			t,
+			slice.equal(found[:], expected),
+			"%s: nodes %v, listed %v",
+			file.name,
+			found,
+			expected,
+		)
 	}
 	testing.expect(t, listed >= 3)
 }
@@ -108,7 +136,12 @@ ui_menu_parses_into_nodes_styles_and_templates :: proc(t: ^testing.T) {
 	// A button's text is a <text> of its own, after it.
 	resume, r := ui_node_by_id(doc, "resume")
 	testing.expect_value(t, resume.element, Ui_Element.Button)
-	testing.expectf(t, slice.equal(resume.styles, []u32{u32(b)}), "resume's styles are %v", resume.styles)
+	testing.expectf(
+		t,
+		slice.equal(resume.styles, []u32{u32(b)}),
+		"resume's styles are %v",
+		resume.styles,
+	)
 	label := doc.nodes[r + 1]
 	testing.expect_value(t, label.element, Ui_Element.Text)
 	testing.expect_value(t, int(label.parent), r)
@@ -118,7 +151,12 @@ ui_menu_parses_into_nodes_styles_and_templates :: proc(t: ^testing.T) {
 	// The kind's style comes first, then the list, without the kind's again.
 	quit, _ := ui_node_by_id(doc, "quit")
 	_, panel := find_style(doc, "panel")
-	testing.expectf(t, slice.equal(quit.styles, []u32{u32(b), u32(panel)}), "quit's styles are %v", quit.styles)
+	testing.expectf(
+		t,
+		slice.equal(quit.styles, []u32{u32(b), u32(panel)}),
+		"quit's styles are %v",
+		quit.styles,
+	)
 
 	// Entities decode, whitespace collapses, and {{ stays in the text for the runtime to unescape.
 	for n in doc.nodes {
@@ -126,7 +164,11 @@ ui_menu_parses_into_nodes_styles_and_templates :: proc(t: ^testing.T) {
 			testing.expect_value(t, v, "Paused & waiting …")
 		}
 	}
-	testing.expect_value(t, ui_prop(doc.nodes[ui_node_by_id_index(doc, "quit") + 1], .Text), "Quit {{not a binding}}")
+	testing.expect_value(
+		t,
+		ui_prop(doc.nodes[ui_node_by_id_index(doc, "quit") + 1], .Text),
+		"Quit {{not a binding}}",
+	)
 
 	// A template and its subtree are flagged, and its ids are its own.
 	slot, s := ui_node_by_id(doc, "slot")
@@ -159,7 +201,12 @@ find_style :: proc(doc: Ui_Document_Contents, name: string) -> (Ui_Style_Content
 ui_blob_round_trips_a_document :: proc(t: ^testing.T) {
 	doc, _, ok := ui_parse(string(#load("testdata/ui/menu.ui")))
 	testing.expect(t, ok)
-	data := aligned(ui_write({guid = {0 = 7}, key = 9, document = doc, source_path = "game/ui/menu.ui"}, context.temp_allocator))
+	data := aligned(
+		ui_write(
+			{guid = {0 = 7}, key = 9, document = doc, source_path = "game/ui/menu.ui"},
+			context.temp_allocator,
+		),
+	)
 	blob, view_ok := ui_view(data)
 	testing.expect(t, view_ok)
 	if !view_ok {
@@ -195,7 +242,13 @@ ui_blob_round_trips_a_document :: proc(t: ^testing.T) {
 
 @(test)
 ui_values_parse_as_their_attributes_take_them :: proc(t: ^testing.T) {
-	check :: proc(t: ^testing.T, attr: Ui_Attr, text: string, want: Ui_Value, loc := #caller_location) {
+	check :: proc(
+		t: ^testing.T,
+		attr: Ui_Attr,
+		text: string,
+		want: Ui_Value,
+		loc := #caller_location,
+	) {
 		v, message := ui_parse_value(attr, text)
 		testing.expectf(t, message == "", "%v %q: %s", attr, text, message, loc = loc)
 		testing.expectf(t, v == want, "%v %q is %v, not %v", attr, text, v, want, loc = loc)
@@ -216,7 +269,12 @@ ui_values_parse_as_their_attributes_take_them :: proc(t: ^testing.T) {
 	check(t, .Color, "#12345678", Ui_Color{0x12, 0x34, 0x56, 0x78})
 	check(t, .Color, "none", Ui_Color{})
 	check(t, .Fill, "#102030", Ui_Paint{colors = {{16, 32, 48, 255}, {16, 32, 48, 255}}})
-	check(t, .Fill, "linear(45, #000, #fff)", Ui_Paint{{{0, 0, 0, 255}, {255, 255, 255, 255}}, 45, true})
+	check(
+		t,
+		.Fill,
+		"linear(45, #000, #fff)",
+		Ui_Paint{{{0, 0, 0, 255}, {255, 255, 255, 255}}, 45, true},
+	)
 	check(t, .Border, "1.5 #fff8", Ui_Border{1.5, {255, 255, 255, 136}})
 	check(t, .Opacity, "0.25", f32(0.25))
 	check(t, .Visible, "false", false)
@@ -227,12 +285,45 @@ ui_values_parse_as_their_attributes_take_them :: proc(t: ^testing.T) {
 	check(t, .Scroll_Bar, "false", false)
 	check(t, .Click, "start_game", "start_game")
 	check(t, .Text, "  keeps its spaces {x} {{ ", "  keeps its spaces {x} {{ ")
-	check(t, .Font, "$00112233445566778899aabbccddeeff", Guid{0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff})
+	check(
+		t,
+		.Font,
+		"$00112233445566778899aabbccddeeff",
+		Guid {
+			0x00,
+			0x11,
+			0x22,
+			0x33,
+			0x44,
+			0x55,
+			0x66,
+			0x77,
+			0x88,
+			0x99,
+			0xaa,
+			0xbb,
+			0xcc,
+			0xdd,
+			0xee,
+			0xff,
+		},
+	)
 
 	bad := []struct {
 		attr: Ui_Attr,
 		text: string,
-	}{{.Width, "-1"}, {.Width, "1e9"}, {.Width, "nan"}, {.Opacity, "2"}, {.Max_Length, "-1"}, {.Color, "#ggg"}, {.Click, "9lives"}, {.Text, "{"}, {.Text, "{a b}"}, {.Overflow, "auto"}}
+	} {
+		{.Width, "-1"},
+		{.Width, "1e9"},
+		{.Width, "nan"},
+		{.Opacity, "2"},
+		{.Max_Length, "-1"},
+		{.Color, "#ggg"},
+		{.Click, "9lives"},
+		{.Text, "{"},
+		{.Text, "{a b}"},
+		{.Overflow, "auto"},
+	}
 	for b in bad {
 		_, message := ui_parse_value(b.attr, b.text)
 		testing.expectf(t, message != "", "%v %q parses", b.attr, b.text)

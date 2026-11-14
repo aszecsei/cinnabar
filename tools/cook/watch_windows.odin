@@ -87,7 +87,11 @@ Dir_Identity :: struct {
 }
 
 @(private = "file")
-WATCH_FILTER :: win.FILE_NOTIFY_CHANGE_FILE_NAME | win.FILE_NOTIFY_CHANGE_DIR_NAME | win.FILE_NOTIFY_CHANGE_LAST_WRITE | win.FILE_NOTIFY_CHANGE_SIZE
+WATCH_FILTER ::
+	win.FILE_NOTIFY_CHANGE_FILE_NAME |
+	win.FILE_NOTIFY_CHANGE_DIR_NAME |
+	win.FILE_NOTIFY_CHANGE_LAST_WRITE |
+	win.FILE_NOTIFY_CHANGE_SIZE
 
 // A read whose changes did not fit in the buffer, which Windows may give instead of a read of no bytes.
 @(private = "file")
@@ -153,7 +157,12 @@ watcher_take :: proc(w: ^Watcher, allocator := context.allocator) -> Watch_Chang
 }
 
 // notify_paths adds the paths that a ReadDirectoryChangesW buffer names, under the directory that it watches, to out.
-notify_paths :: proc(dir: string, buffer: []byte, out: ^[dynamic]string, allocator := context.allocator) {
+notify_paths :: proc(
+	dir: string,
+	buffer: []byte,
+	out: ^[dynamic]string,
+	allocator := context.allocator,
+) {
 	NAME_OFFSET :: int(offset_of(win.FILE_NOTIFY_INFORMATION, FileName))
 	for offset := 0; offset + NAME_OFFSET <= len(buffer); {
 		info := (^win.FILE_NOTIFY_INFORMATION)(raw_data(buffer[offset:]))
@@ -163,7 +172,12 @@ notify_paths :: proc(dir: string, buffer: []byte, out: ^[dynamic]string, allocat
 		}
 		name := ([^]u16)(raw_data(buffer[offset + NAME_OFFSET:]))[:length / 2]
 		utf8, _ := win.utf16_to_utf8(name, context.temp_allocator)
-		path, _ := strings.replace_all(fmt.tprintf("%s/%s", dir, utf8), "\\", "/", context.temp_allocator)
+		path, _ := strings.replace_all(
+			fmt.tprintf("%s/%s", dir, utf8),
+			"\\",
+			"/",
+			context.temp_allocator,
+		)
 		append(out, strings.clone(path, allocator))
 		if info.NextEntryOffset == 0 {
 			return
@@ -238,9 +252,16 @@ watcher_wait :: proc(w: ^Watcher, timeout: u32) -> Wait_Result {
 			}
 			wait = min(wait, REOPEN_MS)
 		}
-		result := win.WaitForMultipleObjects(win.DWORD(len(w.events)), raw_data(w.events), false, wait)
+		result := win.WaitForMultipleObjects(
+			win.DWORD(len(w.events)),
+			raw_data(w.events),
+			false,
+			wait,
+		)
 		if result == win.WAIT_TIMEOUT {
-			if wait == timeout || (timeout != WAIT_FOREVER && u32(time.duration_milliseconds(time.tick_since(start))) >= timeout) {
+			if wait == timeout ||
+			   (timeout != WAIT_FOREVER &&
+					   u32(time.duration_milliseconds(time.tick_since(start))) >= timeout) {
 				return .Timeout
 			}
 			continue
@@ -264,7 +285,12 @@ watcher_wait :: proc(w: ^Watcher, timeout: u32) -> Wait_Result {
 			note_everything(w)
 		case read:
 			paths := make([dynamic]string, context.temp_allocator)
-			notify_paths(d.path, ([^]byte)(&d.buffer)[:transferred], &paths, context.temp_allocator)
+			notify_paths(
+				d.path,
+				([^]byte)(&d.buffer)[:transferred],
+				&paths,
+				context.temp_allocator,
+			)
 			for path in paths {
 				note_path(w, path)
 			}
@@ -339,7 +365,11 @@ break_dir :: proc(d: ^Watched_Dir, error: win.DWORD) {
 	close_dir(d)
 	win.ResetEvent(d.overlapped.hEvent)
 	if error != 0 {
-		log.warnf("cook: %s is not watched, Windows error %d: it is watched again once it can be opened", d.path, error)
+		log.warnf(
+			"cook: %s is not watched, Windows error %d: it is watched again once it can be opened",
+			d.path,
+			error,
+		)
 	} else {
 		log.warnf("cook: %s went: it is watched again once it is back", d.path)
 	}
@@ -399,5 +429,16 @@ handle_identity :: proc(handle: win.HANDLE) -> (Dir_Identity, bool) {
 
 @(private = "file")
 start_read :: proc(d: ^Watched_Dir) -> bool {
-	return bool(win.ReadDirectoryChangesW(d.handle, &d.buffer, size_of(d.buffer), true, WATCH_FILTER, nil, &d.overlapped, nil))
+	return bool(
+		win.ReadDirectoryChangesW(
+			d.handle,
+			&d.buffer,
+			size_of(d.buffer),
+			true,
+			WATCH_FILTER,
+			nil,
+			&d.overlapped,
+			nil,
+		),
+	)
 }

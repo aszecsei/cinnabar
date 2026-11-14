@@ -59,7 +59,13 @@ teardown :: proc(f: ^Fixture) {
 capture_errors :: proc(f: ^Fixture) -> log.Logger {
 	f.runner = context.logger
 	return {
-		procedure = proc(data: rawptr, level: log.Level, text: string, options: log.Options, location := #caller_location) {
+		procedure = proc(
+			data: rawptr,
+			level: log.Level,
+			text: string,
+			options: log.Options,
+			location := #caller_location,
+		) {
 			f := (^Fixture)(data)
 			// testing.expect reports a failure as an error log from the test file. It must reach the test runner.
 			if strings.has_suffix(location.file_path, "_test.odin") {
@@ -81,8 +87,23 @@ test_guid :: proc(n: u8) -> format.Guid {
 // write_blob cooks a script blob into the loose cache, for the given GUID and key. modified sets its modification
 // time, so a rewrite within the clock's resolution still looks new.
 @(private)
-write_blob :: proc(t: ^testing.T, f: ^Fixture, guid: format.Guid, key: u64, modified: time.Time, blob_guid := format.Guid{}) {
-	blob := format.script_write({guid = blob_guid == {} ? guid : blob_guid, key = key, bytecode = {1}, source_path = "x.luau"}, context.temp_allocator)
+write_blob :: proc(
+	t: ^testing.T,
+	f: ^Fixture,
+	guid: format.Guid,
+	key: u64,
+	modified: time.Time,
+	blob_guid := format.Guid{},
+) {
+	blob := format.script_write(
+		{
+			guid = blob_guid == {} ? guid : blob_guid,
+			key = key,
+			bytecode = {1},
+			source_path = "x.luau",
+		},
+		context.temp_allocator,
+	)
 	buffer: [32]u8
 	path := fmt.tprintf("%s/%s.blob", f.dir, format.guid_format(guid, &buffer))
 	testing.expect(t, os.write_entire_file(path, blob) == nil)
@@ -138,8 +159,15 @@ a_paged_mesh_loads_only_its_head :: proc(t: ^testing.T) {
 			meshlet_count = 2,
 			submeshes = {{name = "s", meshlet_count = 2}},
 			pages = {
-				{record = {size = 64, meshlet_count = 1, level0_meshlets = 1, vertex_count = 3}, compressed = stream, dependencies = {1}},
-				{record = {size = 64, first_meshlet = 1, meshlet_count = 1, flags = {.Root}}, compressed = root},
+				{
+					record = {size = 64, meshlet_count = 1, level0_meshlets = 1, vertex_count = 3},
+					compressed = stream,
+					dependencies = {1},
+				},
+				{
+					record = {size = 64, first_meshlet = 1, meshlet_count = 1, flags = {.Root}},
+					compressed = root,
+				},
 			},
 		},
 		context.temp_allocator,

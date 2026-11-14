@@ -43,14 +43,14 @@ Hello :: struct {
 // Daemon to editor, the answer to a Hello with the same protocol version. An Asset_Snapshot and the Shading_Models
 // follow it.
 Welcome :: struct {
-	protocol:  u64,
+	protocol:      u64,
 	// The configuration that the daemon cooks, "dev".
-	config:    string,
-	roots:     []Root,
-	importers: []Importer,
+	config:        string,
+	roots:         []Root,
+	importers:     []Importer,
 	// The kinds of node that material graphs have, which the editor's node editor shows (see
 	// docs/content/kinds/materials.md#material-graphs).
-	nodes:     []Node_Info,
+	nodes:         []Node_Info,
 	// The attributes of UI documents, which the UI editor's properties show (see
 	// docs/content/kinds/ui-documents.md#attributes).
 	ui_attributes: []Ui_Attribute_Info,
@@ -141,39 +141,39 @@ Asset_Status :: enum u8 {
 // Asset is an asset in the daemon's index.
 Asset :: struct {
 	// 32 hex digits, as in its .meta file.
-	guid:         string,
-	kind:         Asset_Kind,
+	guid:            string,
+	kind:            Asset_Kind,
 	// The root's name, and the path in the root with forward slashes, such as "scripts/hello.luau".
-	root:         string,
-	path:         string,
-	status:       Asset_Status,
-	errors:       u32,
-	warnings:     u32,
+	root:            string,
+	path:            string,
+	status:          Asset_Status,
+	errors:          u32,
+	warnings:        u32,
 	// For a script that defines a behaviour, the class's name.
-	behaviour:    string,
+	behaviour:       string,
 	// For a script that defines an action, the action's name, and its parameters sorted by name.
-	action:       string,
-	params:       []Action_Param,
+	action:          string,
+	params:          []Action_Param,
 	// The import settings in its .meta file, in the file's order.
-	settings:     []Setting,
+	settings:        []Setting,
 	// The GUIDs of the assets that it depends on: a script's requires, and the scripts that a scene names.
-	dependencies: []string,
+	dependencies:    []string,
 	// For a sub-asset, such as a mesh of a glTF file, the GUID of the file that makes it and its name in the file. Its
 	// root and path are the file's. "" for a file.
-	parent:       string,
-	subasset:     string,
+	parent:          string,
+	subasset:        string,
 	// For a material, the combinations of static switches that it and its instances use, which each compile its
 	// shaders. 0 for other kinds.
-	permutations: u32,
+	permutations:    u32,
 	// For a texture, its cooked size in texels, or zero before it has cooked. For a material or an instance, the
 	// texture that the editor's texture tools measure by (see docs/editor/mesh-editing.md#texture-tools), by GUID or
 	// "", and the hotspot rectangles of the material's source, in that texture's texels.
-	size:         [2]u32,
-	tool_texture: string,
-	hotspots:     []Hotspot,
+	size:            [2]u32,
+	tool_texture:    string,
+	hotspots:        []Hotspot,
 	// For a sub-asset whose source the cooker generates, as a USD stage's prefab, the generated text's absolute path,
 	// which the editor reads in place of the file's (see docs/content/kinds/stages.md#prefab). "" otherwise.
-	generated:    string,
+	generated:       string,
 	// The absolute path of the PNG that shows the asset, for a kind that has one (see
 	// docs/content/daemon-and-operations.md#thumbnails), or "". The name holds a key of what it shows, so it changes
 	// with the asset. Whether the file is there yet: a material's, a mesh's or a prefab's comes from the host.
@@ -560,7 +560,14 @@ kind_of :: proc($T: typeid) -> u16 {
 	return wire.kind_of(Message, T)
 }
 
-decode_message :: proc(kind: u16, payload: []byte, allocator: mem.Allocator) -> (message: Message, ok: bool) {
+decode_message :: proc(
+	kind: u16,
+	payload: []byte,
+	allocator: mem.Allocator,
+) -> (
+	message: Message,
+	ok: bool,
+) {
 	return wire.decode_message(Message, kind, payload, allocator)
 }
 

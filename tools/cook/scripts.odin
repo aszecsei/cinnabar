@@ -33,28 +33,28 @@ Script_Config :: enum {
 
 Script_Source :: struct {
 	// Its index in the scan's assets.
-	asset:     int,
-	root:      int,
+	asset:          int,
+	root:           int,
 	// Absolute, with forward slashes.
-	path:      string,
+	path:           string,
 	// The root's name and the path relative to the root, such as "game/scripts/hello.luau".
-	name:      string,
-	meta_text: string,
-	meta:      format.Meta,
-	source:    []byte,
-	requires:  [dynamic]Found_Require,
+	name:           string,
+	meta_text:      string,
+	meta:           format.Meta,
+	source:         []byte,
+	requires:       [dynamic]Found_Require,
 	// The source calls Behaviour.define or Action.define, so the cooker runs its top level to read the fields or the
 	// parameters.
-	defines_class:     bool,
+	defines_class:  bool,
 	// The source starts with --!native.
-	native_comment:    bool,
+	native_comment: bool,
 	// The resolved requires, sorted by path.
-	resolved:  [dynamic]Resolved_Require,
+	resolved:       [dynamic]Resolved_Require,
 	// The class that it defines, if it is a behaviour.
-	behaviour: string,
+	behaviour:      string,
 	// The action that it defines, if it is one, and its parameters, sorted by name.
-	action:    string,
-	params:    []cook_link.Action_Param,
+	action:         string,
+	params:         []cook_link.Action_Param,
 }
 
 Resolved_Require :: struct {
@@ -131,16 +131,24 @@ cook_scripts :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass)
 		key := script_key(options.config, s, dependency_hash(scripts, index) ~ definitions)
 		buffer: [32]u8
 		output := fmt.tprintf("%s/%s.blob", out_dir, format.guid_format(s.meta.guid, &buffer))
-		if cooked, behaviour, action, params := cooked_script(output); cooked == key && !pass.force[s.meta.guid] {
+		if cooked, behaviour, action, params := cooked_script(output);
+		   cooked == key && !pass.force[s.meta.guid] {
 			s.behaviour, s.action, s.params = behaviour, action, params
 			settle(pass, s.asset, .Current)
 			continue
 		}
 		if checker_state == .Closed {
-			checker_state = .Open if type_checker_open(&checker, options.definitions, scripts, problems) else .Broken
+			checker_state =
+				.Open if type_checker_open(&checker, options.definitions, scripts, problems) else .Broken
 		}
 		if checker_state == .Broken {
-			report_error(problems, s.path, 0, 0, "not cooked, because the definition file is not valid")
+			report_error(
+				problems,
+				s.path,
+				0,
+				0,
+				"not cooked, because the definition file is not valid",
+			)
 			settle(pass, s.asset, .Failed)
 			ok = false
 			continue
@@ -155,10 +163,17 @@ cook_scripts :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass)
 		class_flag: Maybe(format.Script_Flag)
 		if s.defines_class {
 			if vm_state == .Closed {
-				vm_state = .Open if schema_vm_open(&vm, options.config, scripts, problems) else .Broken
+				vm_state =
+					.Open if schema_vm_open(&vm, options.config, scripts, problems) else .Broken
 			}
 			if vm_state == .Broken {
-				report_error(problems, s.path, 0, 0, "not cooked, because the cooker cannot start the VM that reads behaviours' fields")
+				report_error(
+					problems,
+					s.path,
+					0,
+					0,
+					"not cooked, because the cooker cannot start the VM that reads behaviours' fields",
+				)
 				settle(pass, s.asset, .Failed)
 				ok = false
 				continue
@@ -171,7 +186,16 @@ cook_scripts :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass)
 				continue
 			}
 		}
-		if !compile_script(options.config, s, key, output, class_name, fields, class_flag, problems) {
+		if !compile_script(
+			options.config,
+			s,
+			key,
+			output,
+			class_name,
+			fields,
+			class_flag,
+			problems,
+		) {
 			settle(pass, s.asset, .Failed)
 			ok = false
 			continue
@@ -244,7 +268,14 @@ fail_dependents :: proc(pass: ^Pass, scripts: []Script_Source) {
 			}
 			for r in s.resolved {
 				if asset_failed(script_result(pass, scripts[r.target])) {
-					report_error(&pass.problems, s.path, 0, 0, "not cooked, because it requires %s, which did not cook", scripts[r.target].name)
+					report_error(
+						&pass.problems,
+						s.path,
+						0,
+						0,
+						"not cooked, because it requires %s, which did not cook",
+						scripts[r.target].name,
+					)
 					settle(pass, s.asset, .Blocked)
 					changed = true
 					break
@@ -267,7 +298,10 @@ find_requires :: proc(s: ^Script_Source, problems: ^Problems) -> bool {
 	on_require :: proc "c" (ud: rawptr, text: [^]u8, size: c.size_t, line: c.int) {
 		f := (^Find_Context)(ud)
 		context = f.ctx
-		append(&f.script.requires, Found_Require{strings.clone(string(text[:size]), context.temp_allocator), int(line)})
+		append(
+			&f.script.requires,
+			Found_Require{strings.clone(string(text[:size]), context.temp_allocator), int(line)},
+		)
 	}
 	on_error :: proc "c" (ud: rawptr, text: [^]u8, size: c.size_t, line: c.int) {
 		f := (^Find_Context)(ud)
@@ -275,14 +309,31 @@ find_requires :: proc(s: ^Script_Source, problems: ^Problems) -> bool {
 		report_error(f.problems, f.script.path, int(line), 0, "%s", string(text[:size]))
 		f.failed = true
 	}
-	f := Find_Context{ctx = context, script = s, problems = problems}
-	cn_luau_find_requires(raw_data(s.source), c.size_t(len(s.source)), &f, on_require, on_error, &s.defines_class, &s.native_comment)
+	f := Find_Context {
+		ctx      = context,
+		script   = s,
+		problems = problems,
+	}
+	cn_luau_find_requires(
+		raw_data(s.source),
+		c.size_t(len(s.source)),
+		&f,
+		on_require,
+		on_error,
+		&s.defines_class,
+		&s.native_comment,
+	)
 	return !f.failed
 }
 
 // resolve_requires resolves each require of a script to a script in the roots, as Luau's require does (see
 // docs/scripting/tooling-and-hot-reload.md#modules-and-require).
-resolve_requires :: proc(scripts: []Script_Source, by_path: map[string]int, s: ^Script_Source, problems: ^Problems) -> bool {
+resolve_requires :: proc(
+	scripts: []Script_Source,
+	by_path: map[string]int,
+	s: ^Script_Source,
+	problems: ^Problems,
+) -> bool {
 	ok := true
 	for r in s.requires {
 		target, message := resolve_require(by_path, s.path, r.path)
@@ -299,7 +350,10 @@ resolve_requires :: proc(scripts: []Script_Source, by_path: map[string]int, s: ^
 			append(&s.resolved, Resolved_Require{{r.path, scripts[target].meta.guid}, target})
 		}
 	}
-	slice.sort_by(s.resolved[:], proc(a, b: Resolved_Require) -> bool {return a.entry.path < b.entry.path})
+	slice.sort_by(
+		s.resolved[:],
+		proc(a, b: Resolved_Require) -> bool {return a.entry.path < b.entry.path},
+	)
 	return ok
 }
 
@@ -307,7 +361,13 @@ resolve_requires :: proc(scripts: []Script_Source, by_path: map[string]int, s: ^
 //
 // A file a/b.luau is the module a/b, and a/init.luau is the module a. "./" and "../" start at the module's parent,
 // "@self/" at the module itself, and any other "@alias/" at the directory that the nearest .luaurc names for it.
-resolve_require :: proc(by_path: map[string]int, requirer, path: string) -> (target: int, message: string) {
+resolve_require :: proc(
+	by_path: map[string]int,
+	requirer, path: string,
+) -> (
+	target: int,
+	message: string,
+) {
 	module := module_of(requirer)
 	base, rest: string
 	switch {
@@ -315,13 +375,19 @@ resolve_require :: proc(by_path: map[string]int, requirer, path: string) -> (tar
 		base, rest = slashpath.dir(module, context.temp_allocator), path
 	case strings.has_prefix(path, "@"):
 		slash := strings.index_byte(path, '/')
-		alias := strings.to_lower(path[1:slash if slash >= 0 else len(path)], context.temp_allocator)
+		alias := strings.to_lower(
+			path[1:slash if slash >= 0 else len(path)],
+			context.temp_allocator,
+		)
 		rest = slash >= 0 ? path[slash + 1:] : ""
 		if alias == "self" {
 			base = module
 		} else {
 			found: bool
-			base, found, message = find_alias(slashpath.dir(requirer, context.temp_allocator), alias)
+			base, found, message = find_alias(
+				slashpath.dir(requirer, context.temp_allocator),
+				alias,
+			)
 			if message != "" {
 				return
 			}
@@ -332,12 +398,21 @@ resolve_require :: proc(by_path: map[string]int, requirer, path: string) -> (tar
 	case:
 		return 0, "the path must start with ./, ../ or @"
 	}
-	location := slashpath.clean(slashpath.join({base, rest}, context.temp_allocator), context.temp_allocator)
+	location := slashpath.clean(
+		slashpath.join({base, rest}, context.temp_allocator),
+		context.temp_allocator,
+	)
 	file, file_found := by_path[fmt.tprintf("%s%s", location, SCRIPT_EXTENSION)]
 	init, init_found := by_path[fmt.tprintf("%s/init%s", location, SCRIPT_EXTENSION)]
 	switch {
 	case file_found && init_found:
-		return 0, fmt.tprintf("both %s%s and %s/init%s exist", location, SCRIPT_EXTENSION, location, SCRIPT_EXTENSION)
+		return 0, fmt.tprintf(
+			"both %s%s and %s/init%s exist",
+			location,
+			SCRIPT_EXTENSION,
+			location,
+			SCRIPT_EXTENSION,
+		)
 	case file_found:
 		return file, ""
 	case init_found:
@@ -372,9 +447,18 @@ find_alias :: proc(dir, alias: string) -> (target: string, found: bool, message:
 					continue
 				}
 				if strings.has_prefix(value, "@") {
-					return "", false, fmt.tprintf("%s: the alias @%s names another alias, which the cooker does not support", config_path, name)
+					return "", false, fmt.tprintf(
+						"%s: the alias @%s names another alias, which the cooker does not support",
+						config_path,
+						name,
+					)
 				}
-				return slashpath.clean(slashpath.join({current, value}, context.temp_allocator), context.temp_allocator), true, ""
+				return slashpath.clean(
+						slashpath.join({current, value}, context.temp_allocator),
+						context.temp_allocator,
+					),
+					true,
+					""
 			}
 		}
 		parent := slashpath.dir(current, context.temp_allocator)
@@ -394,7 +478,13 @@ check_cycles :: proc(pass: ^Pass, scripts: []Script_Source) {
 	}
 	states := make([]State, len(scripts), context.temp_allocator)
 	stack := make([dynamic]int, context.temp_allocator)
-	visit :: proc(pass: ^Pass, scripts: []Script_Source, states: []State, stack: ^[dynamic]int, i: int) {
+	visit :: proc(
+		pass: ^Pass,
+		scripts: []Script_Source,
+		states: []State,
+		stack: ^[dynamic]int,
+		i: int,
+	) {
 		states[i] = .Visiting
 		append(stack, i)
 		for r in scripts[i].resolved {
@@ -410,7 +500,14 @@ check_cycles :: proc(pass: ^Pass, scripts: []Script_Source) {
 				}
 				strings.write_string(&builder, scripts[t].name)
 				for s in stack[start:] {
-					report_error(&pass.problems, scripts[s].path, 0, 0, "require cycle: %s", strings.to_string(builder))
+					report_error(
+						&pass.problems,
+						scripts[s].path,
+						0,
+						0,
+						"require cycle: %s",
+						strings.to_string(builder),
+					)
 					// A script in two cycles, or one whose requires did not all resolve, has already failed.
 					if script_result(pass, scripts[s]) == .Pending {
 						settle(pass, scripts[s].asset, .Failed)
@@ -432,7 +529,16 @@ check_cycles :: proc(pass: ^Pass, scripts: []Script_Source) {
 // script_key covers everything that the blob depends on: the cooker, Luau, the configuration, the source, the
 // settings, the GUIDs that the requires resolve to, and the dependencies' sources (see dependency_hash).
 script_key :: proc(config: Script_Config, s: Script_Source, dependencies: u64) -> u64 {
-	key := hash.fnv64a(transmute([]byte)fmt.tprintf("%s\x00%s\x00%v\x00%s\x00%x\x00", SCRIPT_COOK_VERSION, LUAU_VERSION, config, s.name, dependencies))
+	key := hash.fnv64a(
+		transmute([]byte)fmt.tprintf(
+			"%s\x00%s\x00%v\x00%s\x00%x\x00",
+			SCRIPT_COOK_VERSION,
+			LUAU_VERSION,
+			config,
+			s.name,
+			dependencies,
+		),
+	)
 	key = hash.fnv64a(s.source, key)
 	key = hash.fnv64a(transmute([]byte)s.meta_text, key)
 	for r in s.resolved {
@@ -471,7 +577,13 @@ param_kind :: proc(kind: format.Script_Field_Kind) -> cook_link.Action_Param_Kin
 
 // cooked_script reads the key of a cooked script, as cooked_script_key does, and its behaviour class or its action's
 // name and parameters, if any.
-cooked_script :: proc(output: string) -> (key: u64, behaviour, action: string, params: []cook_link.Action_Param) {
+cooked_script :: proc(
+	output: string,
+) -> (
+	key: u64,
+	behaviour, action: string,
+	params: []cook_link.Action_Param,
+) {
 	key = cooked_script_key(output)
 	if key == 0 {
 		return

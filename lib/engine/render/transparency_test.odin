@@ -29,7 +29,11 @@ sorted_items_are_bins_of_their_own_from_back_to_front :: proc(t: ^testing.T) {
 	// A bin for each opaque pipeline, one for moment-based transparency's, and one for each sorted item, the farthest
 	// first, though two of them share a pipeline.
 	testing.expect(t, slice.equal(pipelines, []int{0, 2, 1, 4, 3, 4}))
-	testing.expect_value(t, groups, [Bin_Group][2]int{.Opaque = {0, 2}, .Moments = {2, 3}, .Sorted = {3, 6}})
+	testing.expect_value(
+		t,
+		groups,
+		[Bin_Group][2]int{.Opaque = {0, 2}, .Moments = {2, 3}, .Sorted = {3, 6}},
+	)
 	bins := make([]u32, len(items), context.temp_allocator)
 	instances := make([]u32, len(items), context.temp_allocator)
 	for item, i in items {
@@ -47,7 +51,11 @@ transparent_blob :: proc(blend: format.Material_Blend, flags: format.Material_Fl
 	variants := make([dynamic]format.Material_Variant_Entry, context.temp_allocator)
 	passes := []format.Material_Pass{.Transparent, .Transparent_Ids, .Moments}
 	for pass in passes[:blend == .Transparent ? 3 : 2] {
-		append(&variants, format.Material_Variant_Entry{0, pass, .Vertex, code}, format.Material_Variant_Entry{0, pass, .Pixel, code})
+		append(
+			&variants,
+			format.Material_Variant_Entry{0, pass, .Vertex, code},
+			format.Material_Variant_Entry{0, pass, .Pixel, code},
+		)
 	}
 	contents := format.Material_Contents {
 		flags       = flags,
@@ -91,17 +99,30 @@ the_transparent_passes_match_their_pipelines :: proc(t: ^testing.T) {
 	r := new(Renderer)
 	defer free(r)
 	r.platform = &platform
-	r.materials.defaults[.White] = platform.gpu_create_texture({size = {1, 1}, format = .RGBA8_Unorm, usage = {.Sampled}, label = "white"}, {255, 255, 255, 255})
-	r.transparency_composite.pipeline = platform.gpu_create_compute_pipeline({compute = {1}, label = "test composite"})
+	r.materials.defaults[.White] = platform.gpu_create_texture(
+		{size = {1, 1}, format = .RGBA8_Unorm, usage = {.Sampled}, label = "white"},
+		{255, 255, 255, 255},
+	)
+	r.transparency_composite.pipeline = platform.gpu_create_compute_pipeline(
+		{compute = {1}, label = "test composite"},
+	)
 	// FSR upscales the frame, with the transparent surfaces' mask.
-	r.post.upscalers.motion.pipeline = platform.gpu_create_compute_pipeline({compute = {1}, label = "test motion"})
-	upscaler := platform.gpu_create_upscaler({kind = .Fsr, max_render_size = {64, 32}, output_size = {64, 32}, label = "test"})
+	r.post.upscalers.motion.pipeline = platform.gpu_create_compute_pipeline(
+		{compute = {1}, label = "test motion"},
+	)
+	upscaler := platform.gpu_create_upscaler(
+		{kind = .Fsr, max_render_size = {64, 32}, output_size = {64, 32}, label = "test"},
+	)
 	testing.expect(t, upscaler != {})
 	defer platform.gpu_destroy_upscaler(upscaler)
 	fake_sprite_pipelines(r)
 	defer sprites_destroy(&r.sprites, &platform)
 	// A moment-based material, a sorted two-sided one, and an additive one.
-	blobs := [][]byte{transparent_blob(.Transparent, {}), transparent_blob(.Transparent, {.Sorted, .Two_Sided}), transparent_blob(.Additive, {})}
+	blobs := [][]byte {
+		transparent_blob(.Transparent, {}),
+		transparent_blob(.Transparent, {.Sorted, .Two_Sided}),
+		transparent_blob(.Additive, {}),
+	}
 	for data, i in blobs {
 		blob, ok := format.material_view(data)
 		testing.expect(t, ok)
@@ -111,23 +132,41 @@ the_transparent_passes_match_their_pipelines :: proc(t: ^testing.T) {
 	defer for &p in r.materials.pipelines[:r.materials.pipeline_count] {
 		material_pipeline_destroy(&p, &platform)
 	}
-	moments, sorted, additive := &r.materials.pipelines[0], &r.materials.pipelines[1], &r.materials.pipelines[2]
+	moments, sorted, additive :=
+		&r.materials.pipelines[0], &r.materials.pipelines[1], &r.materials.pipelines[2]
 	testing.expect_value(t, material_group(moments), Bin_Group.Moments)
 	testing.expect_value(t, material_group(sorted), Bin_Group.Sorted)
 	testing.expect_value(t, material_group(additive), Bin_Group.Sorted)
 	// Only moment-based transparency adds up its transparent pass; the others blend over the scene, a two-sided
 	// material's back faces first.
-	testing.expect(t, moments.pipelines[.Transparent] != {} && moments.over[0] == {} && moments.over[1] != {})
-	testing.expect(t, sorted.pipelines[.Transparent] == {} && sorted.over[0] != {} && sorted.pipelines[.Moments] != {})
+	testing.expect(
+		t,
+		moments.pipelines[.Transparent] != {} && moments.over[0] == {} && moments.over[1] != {},
+	)
+	testing.expect(
+		t,
+		sorted.pipelines[.Transparent] == {} &&
+		sorted.over[0] != {} &&
+		sorted.pipelines[.Moments] != {},
+	)
 	testing.expect(t, additive.pipelines[.Moments] == {} && additive.over[1] != {})
 
 	buffers := []gpu.Buffer {
-		platform.gpu_create_buffer({size = 1024, usage = {.Storage, .Indirect}, label = "arguments"}, nil),
-		platform.gpu_create_buffer({size = 256, usage = {.Storage, .Indirect}, label = "counts"}, nil),
+		platform.gpu_create_buffer(
+			{size = 1024, usage = {.Storage, .Indirect}, label = "arguments"},
+			nil,
+		),
+		platform.gpu_create_buffer(
+			{size = 256, usage = {.Storage, .Indirect}, label = "counts"},
+			nil,
+		),
 		platform.gpu_create_buffer({size = 1024, usage = {.Storage}, label = "draws"}, nil),
 		platform.gpu_create_buffer({size = 1024, usage = {.Storage}, label = "instances"}, nil),
 		platform.gpu_create_buffer({size = 16, usage = {.Storage}, label = "exposure"}, nil),
-		platform.gpu_create_buffer({size = 1024, usage = {.Storage, .Indirect}, label = "mesh arguments"}, nil),
+		platform.gpu_create_buffer(
+			{size = 1024, usage = {.Storage, .Indirect}, label = "mesh arguments"},
+			nil,
+		),
 	}
 	defer for b in buffers {
 		platform.gpu_destroy_buffer(b)
@@ -138,14 +177,25 @@ the_transparent_passes_match_their_pipelines :: proc(t: ^testing.T) {
 		defer cache_destroy(&cache, &platform)
 		g := begin(&platform, &cache)
 		f := new(Frame, platform.frame_allocator)
-		f^ = {renderer = r, state = &r.view, graph = &g, size = {64, 32}, output_size = {64, 32}, debug_view = view}
+		f^ = {
+			renderer    = r,
+			state       = &r.view,
+			graph       = &g,
+			size        = {64, 32},
+			output_size = {64, 32},
+			debug_view  = view,
+		}
 		f.post = new(Post_Frame, platform.frame_allocator)
 		f.post.upscaler = upscaler
 		f.lights = new(Light_Frame, platform.frame_allocator)
 		f.shadows = new(Shadow_Frame, platform.frame_allocator)
 		sf := new(Scene_Frame, platform.frame_allocator)
 		f.scene_frame = sf
-		sorting := []Sort_Item{{item = {bin = 0}, group = .Moments}, {item = {bin = 1}, group = .Sorted, distance = 4}, {item = {bin = 2}, group = .Sorted, distance = 1}}
+		sorting := []Sort_Item {
+			{item = {bin = 0}, group = .Moments},
+			{item = {bin = 1}, group = .Sorted, distance = 4},
+			{item = {bin = 2}, group = .Sorted, distance = 1},
+		}
 		sf.items = make([]Cull_Item, len(sorting), platform.frame_allocator)
 		sf.bin_pipelines, sf.groups = sort_bins(sorting, sf.items, platform.frame_allocator)
 		sf.bin_draws = sf.bin_pipelines
@@ -166,7 +216,10 @@ the_transparent_passes_match_their_pipelines :: proc(t: ^testing.T) {
 		f.scene = create_texture(&g, {size = f.size, format = SCENE_FORMAT, label = "scene"})
 		f.ids = create_texture(&g, {size = f.size, format = ID_FORMAT, label = "ids"})
 		f.depth = create_texture(&g, {size = f.size, format = DEPTH_FORMAT, label = "depth"})
-		f.velocity = create_texture(&g, {size = f.size, format = VELOCITY_FORMAT, label = "velocity"})
+		f.velocity = create_texture(
+			&g,
+			{size = f.size, format = VELOCITY_FORMAT, label = "velocity"},
+		)
 		p := add_render_pass(&g, "world", proc(_: ^Pass_Context) {}, f)
 		color(&g, p, f.scene, .Clear)
 		color(&g, p, f.ids, .Clear)
@@ -181,7 +234,13 @@ the_transparent_passes_match_their_pipelines :: proc(t: ^testing.T) {
 		testing.expect_value(t, f.moments_zeroth != 0, true)
 		// The upscale reads the moments' coverage as its masks, except in the overdraw view, whose moments count layers.
 		add_upscale(f)
-		testing.expectf(t, (f.post.upscale_mask != 0) == (view == .Lit), "%v: upscale mask %v", view, f.post.upscale_mask)
+		testing.expectf(
+			t,
+			(f.post.upscale_mask != 0) == (view == .Lit),
+			"%v: upscale mask %v",
+			view,
+			f.post.upscale_mask,
+		)
 		p = add_render_pass(&g, "output", proc(_: ^Pass_Context) {}, f)
 		read(&g, p, f.scene)
 		read(&g, p, f.ids)

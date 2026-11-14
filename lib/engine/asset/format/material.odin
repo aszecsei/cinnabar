@@ -149,24 +149,24 @@ Material_Variant :: struct {
 
 // Material_Blob is the start of a material blob (see docs/content/blobs-and-loading.md#blob-format).
 Material_Blob :: struct {
-	header:           Blob_Header,
-	flags:            Material_Flags,
-	blend:            Material_Blend,
+	header:             Blob_Header,
+	flags:              Material_Flags,
+	blend:              Material_Blend,
 	// The opacity below which a Masked material discards.
 	cutoff:             f32,
 	// How far displace may move a vertex, in meters, which culling adds to each sphere.
 	displacement_bound: f32,
 	// Material_Param records, in the block's order.
-	params:           Slice,
+	params:             Slice,
 	// The switches' names, a Slice each, a switch's bit being its index.
-	switches:         Slice,
-	default_switches: u32,
+	switches:           Slice,
+	default_switches:   u32,
 	// The default parameter block, and its Material_Texture records.
-	block:            Slice,
-	textures:         Slice,
+	block:              Slice,
+	textures:           Slice,
 	// Material_Variant records, sorted by switches, pass and stage.
-	variants:         Slice,
-	source_path:      Slice,
+	variants:           Slice,
+	source_path:        Slice,
 }
 
 // Material_Instance_Blob is the start of a material instance blob: the material that it is an instance of, through any
@@ -181,7 +181,12 @@ Material_Instance_Blob :: struct {
 }
 
 material_layout :: proc() -> u64 {
-	return layout.hash(Material_Blob) ~ layout.hash(Material_Param) * 31 ~ layout.hash(Material_Texture) * 961 ~ layout.hash(Material_Variant) * 29791
+	return(
+		layout.hash(Material_Blob) ~
+		layout.hash(Material_Param) * 31 ~
+		layout.hash(Material_Texture) * 961 ~
+		layout.hash(Material_Variant) * 29791 \
+	)
 }
 
 material_instance_layout :: proc() -> u64 {
@@ -206,14 +211,22 @@ records_fit :: proc(s: Slice, $T: typeid) -> bool {
 // material_view checks a material blob: its header, its layout, and that its slices and records are inside it.
 material_view :: proc(data: []byte) -> (blob: ^Material_Blob, ok: bool) {
 	header := blob_header(data) or_return
-	if header.kind != .Material || header.layout != material_layout() || len(data) < size_of(Material_Blob) {
+	if header.kind != .Material ||
+	   header.layout != material_layout() ||
+	   len(data) < size_of(Material_Blob) {
 		return
 	}
 	blob = (^Material_Blob)(raw_data(data))
-	if !slices_inside(data, {blob.params, blob.switches, blob.block, blob.textures, blob.variants, blob.source_path}) {
+	if !slices_inside(
+		data,
+		{blob.params, blob.switches, blob.block, blob.textures, blob.variants, blob.source_path},
+	) {
 		return nil, false
 	}
-	if !records_fit(blob.params, Material_Param) || !records_fit(blob.switches, Slice) || !records_fit(blob.textures, Material_Texture) || !records_fit(blob.variants, Material_Variant) {
+	if !records_fit(blob.params, Material_Param) ||
+	   !records_fit(blob.switches, Slice) ||
+	   !records_fit(blob.textures, Material_Texture) ||
+	   !records_fit(blob.variants, Material_Variant) {
 		return nil, false
 	}
 	for v in material_variants(data, blob) {
@@ -233,11 +246,14 @@ material_view :: proc(data: []byte) -> (blob: ^Material_Blob, ok: bool) {
 
 material_instance_view :: proc(data: []byte) -> (blob: ^Material_Instance_Blob, ok: bool) {
 	header := blob_header(data) or_return
-	if header.kind != .Material_Instance || header.layout != material_instance_layout() || len(data) < size_of(Material_Instance_Blob) {
+	if header.kind != .Material_Instance ||
+	   header.layout != material_instance_layout() ||
+	   len(data) < size_of(Material_Instance_Blob) {
 		return
 	}
 	blob = (^Material_Instance_Blob)(raw_data(data))
-	if !slices_inside(data, {blob.block, blob.textures, blob.source_path}) || !records_fit(blob.textures, Material_Texture) {
+	if !slices_inside(data, {blob.block, blob.textures, blob.source_path}) ||
+	   !records_fit(blob.textures, Material_Texture) {
 		return nil, false
 	}
 	if !textures_inside(instance_textures(data, blob), blob.block.size) {
@@ -266,23 +282,38 @@ material_switches :: proc "contextless" (data: []byte, blob: ^Material_Blob) -> 
 	return ([^]Slice)(raw_data(bytes))[:len(bytes) / size_of(Slice)]
 }
 
-material_textures :: proc "contextless" (data: []byte, blob: ^Material_Blob) -> []Material_Texture {
+material_textures :: proc "contextless" (
+	data: []byte,
+	blob: ^Material_Blob,
+) -> []Material_Texture {
 	bytes := blob_bytes(data, blob.textures)
 	return ([^]Material_Texture)(raw_data(bytes))[:len(bytes) / size_of(Material_Texture)]
 }
 
-material_variants :: proc "contextless" (data: []byte, blob: ^Material_Blob) -> []Material_Variant {
+material_variants :: proc "contextless" (
+	data: []byte,
+	blob: ^Material_Blob,
+) -> []Material_Variant {
 	bytes := blob_bytes(data, blob.variants)
 	return ([^]Material_Variant)(raw_data(bytes))[:len(bytes) / size_of(Material_Variant)]
 }
 
-instance_textures :: proc "contextless" (data: []byte, blob: ^Material_Instance_Blob) -> []Material_Texture {
+instance_textures :: proc "contextless" (
+	data: []byte,
+	blob: ^Material_Instance_Blob,
+) -> []Material_Texture {
 	bytes := blob_bytes(data, blob.textures)
 	return ([^]Material_Texture)(raw_data(bytes))[:len(bytes) / size_of(Material_Texture)]
 }
 
 // material_code is a variant's bytecode, or nil if the material has no such variant.
-material_code :: proc "contextless" (data: []byte, blob: ^Material_Blob, switches: u32, pass: Material_Pass, stage: Shader_Stage) -> []byte {
+material_code :: proc "contextless" (
+	data: []byte,
+	blob: ^Material_Blob,
+	switches: u32,
+	pass: Material_Pass,
+	stage: Shader_Stage,
+) -> []byte {
 	for v in material_variants(data, blob) {
 		if v.switches == switches && v.pass == pass && v.stage == stage {
 			return blob_bytes(data, v.code)
@@ -305,41 +336,65 @@ Material_Variant_Entry :: struct {
 }
 
 Material_Contents :: struct {
-	guid:             Guid,
-	key:              u64,
-	flags:            Material_Flags,
-	blend:            Material_Blend,
-	cutoff:           f32,
+	guid:               Guid,
+	key:                u64,
+	flags:              Material_Flags,
+	blend:              Material_Blend,
+	cutoff:             f32,
 	displacement_bound: f32,
-	params:           []Material_Param_Entry,
-	switches:         []string,
-	default_switches: u32,
-	block:            []byte,
-	textures:         []Material_Texture,
-	variants:         []Material_Variant_Entry,
-	source_path:      string,
+	params:             []Material_Param_Entry,
+	switches:           []string,
+	default_switches:   u32,
+	block:              []byte,
+	textures:           []Material_Texture,
+	variants:           []Material_Variant_Entry,
+	source_path:        string,
 }
 
 material_write :: proc(contents: Material_Contents, allocator := context.allocator) -> []byte {
 	buffer := make([dynamic]byte, size_of(Material_Blob), allocator)
-	params := reserve_bytes(&buffer, len(contents.params) * size_of(Material_Param), align_of(Material_Param))
+	params := reserve_bytes(
+		&buffer,
+		len(contents.params) * size_of(Material_Param),
+		align_of(Material_Param),
+	)
 	switches := reserve_bytes(&buffer, len(contents.switches) * size_of(Slice), align_of(Slice))
-	textures := reserve_bytes(&buffer, len(contents.textures) * size_of(Material_Texture), align_of(Material_Texture))
+	textures := reserve_bytes(
+		&buffer,
+		len(contents.textures) * size_of(Material_Texture),
+		align_of(Material_Texture),
+	)
 	if len(contents.textures) > 0 {
-		mem.copy(&buffer[textures.offset], raw_data(contents.textures), len(contents.textures) * size_of(Material_Texture))
+		mem.copy(
+			&buffer[textures.offset],
+			raw_data(contents.textures),
+			len(contents.textures) * size_of(Material_Texture),
+		)
 	}
-	variants := reserve_bytes(&buffer, len(contents.variants) * size_of(Material_Variant), align_of(Material_Variant))
+	variants := reserve_bytes(
+		&buffer,
+		len(contents.variants) * size_of(Material_Variant),
+		align_of(Material_Variant),
+	)
 	block := reserve_bytes(&buffer, len(contents.block), BLOB_ALIGN)
 	copy(buffer[block.offset:], contents.block)
 	for v, i in contents.variants {
 		code := reserve_bytes(&buffer, len(v.code), BLOB_ALIGN)
 		copy(buffer[code.offset:], v.code)
 		record := Material_Variant{v.switches, v.pass, v.stage, code}
-		mem.copy(&buffer[variants.offset + u32(i * size_of(Material_Variant))], &record, size_of(record))
+		mem.copy(
+			&buffer[variants.offset + u32(i * size_of(Material_Variant))],
+			&record,
+			size_of(record),
+		)
 	}
 	for p, i in contents.params {
 		record := Material_Param{append_bytes(&buffer, transmute([]byte)p.name), p.type, p.offset}
-		mem.copy(&buffer[params.offset + u32(i * size_of(Material_Param))], &record, size_of(record))
+		mem.copy(
+			&buffer[params.offset + u32(i * size_of(Material_Param))],
+			&record,
+			size_of(record),
+		)
 	}
 	for name, i in contents.switches {
 		record := append_bytes(&buffer, transmute([]byte)name)
@@ -347,7 +402,13 @@ material_write :: proc(contents: Material_Contents, allocator := context.allocat
 	}
 	source_path := append_bytes(&buffer, transmute([]byte)contents.source_path)
 	blob := Material_Blob {
-		header = {magic = BLOB_MAGIC, kind = .Material, layout = material_layout(), key = contents.key, guid = contents.guid},
+		header = {
+			magic = BLOB_MAGIC,
+			kind = .Material,
+			layout = material_layout(),
+			key = contents.key,
+			guid = contents.guid,
+		},
 		flags = contents.flags,
 		blend = contents.blend,
 		cutoff = contents.cutoff,
@@ -374,17 +435,34 @@ Material_Instance_Contents :: struct {
 	source_path: string,
 }
 
-material_instance_write :: proc(contents: Material_Instance_Contents, allocator := context.allocator) -> []byte {
+material_instance_write :: proc(
+	contents: Material_Instance_Contents,
+	allocator := context.allocator,
+) -> []byte {
 	buffer := make([dynamic]byte, size_of(Material_Instance_Blob), allocator)
-	textures := reserve_bytes(&buffer, len(contents.textures) * size_of(Material_Texture), align_of(Material_Texture))
+	textures := reserve_bytes(
+		&buffer,
+		len(contents.textures) * size_of(Material_Texture),
+		align_of(Material_Texture),
+	)
 	if len(contents.textures) > 0 {
-		mem.copy(&buffer[textures.offset], raw_data(contents.textures), len(contents.textures) * size_of(Material_Texture))
+		mem.copy(
+			&buffer[textures.offset],
+			raw_data(contents.textures),
+			len(contents.textures) * size_of(Material_Texture),
+		)
 	}
 	block := reserve_bytes(&buffer, len(contents.block), BLOB_ALIGN)
 	copy(buffer[block.offset:], contents.block)
 	source_path := append_bytes(&buffer, transmute([]byte)contents.source_path)
 	blob := Material_Instance_Blob {
-		header = {magic = BLOB_MAGIC, kind = .Material_Instance, layout = material_instance_layout(), key = contents.key, guid = contents.guid},
+		header = {
+			magic = BLOB_MAGIC,
+			kind = .Material_Instance,
+			layout = material_instance_layout(),
+			key = contents.key,
+			guid = contents.guid,
+		},
 		material = contents.material,
 		switches = contents.switches,
 		block = block,

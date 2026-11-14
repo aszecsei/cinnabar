@@ -21,9 +21,28 @@ UTILITY_DEFAULT_WITHIN :: 0.1
 UTILITY_DEFAULT_MOMENTUM :: 0.25
 
 @(private = "file")
-OPTION_FIELDS :: []string{"action", "when", "weight", "considerations", "target", "target_tag", "cooldown", "position"}
+OPTION_FIELDS :: []string {
+	"action",
+	"when",
+	"weight",
+	"considerations",
+	"target",
+	"target_tag",
+	"cooldown",
+	"position",
+}
 // The fields of a consideration, which GOAP's considerations take too.
-CONSIDERATION_FIELDS :: []string{"input", "range", "curve", "slope", "exponent", "x_shift", "y_shift", "points", "position"}
+CONSIDERATION_FIELDS :: []string {
+	"input",
+	"range",
+	"curve",
+	"slope",
+	"exponent",
+	"x_shift",
+	"y_shift",
+	"points",
+	"position",
+}
 
 @(private = "file")
 Utility_Kind :: enum {
@@ -34,23 +53,29 @@ Utility_Kind :: enum {
 
 @(private = "file")
 Utility_Text_Node :: struct {
-	kind:           Utility_Kind,
-	option:         format.Utility_Option,
-	consideration:  format.Utility_Consideration,
-	points:         [dynamic]format.Utility_Point,
+	kind:            Utility_Kind,
+	option:          format.Utility_Option,
+	consideration:   format.Utility_Consideration,
+	points:          [dynamic]format.Utility_Point,
 	// An option's considerations, by their index in the text's nodes.
-	children:       [dynamic]int,
-	children_line:  int,
+	children:        [dynamic]int,
+	children_line:   int,
 	// Whether an option lists the consideration, and its index among the considerations.
-	listed:         bool,
-	index:          int,
+	listed:          bool,
+	index:           int,
 	// A consideration's input is a bool, which takes no range.
-	is_bool:        bool,
-	range_line:     int,
+	is_bool:         bool,
+	range_line:      int,
 	target_tag_line: int,
 }
 
-read_utility :: proc(p: ^Decision_Parser, text: ^Decision_Text) -> (state_size: u32, data: []byte) {
+read_utility :: proc(
+	p: ^Decision_Parser,
+	text: ^Decision_Text,
+) -> (
+	state_size: u32,
+	data: []byte,
+) {
 	problems := len(p.found)
 	contents := format.Utility_Contents {
 		within   = UTILITY_DEFAULT_WITHIN,
@@ -79,7 +104,12 @@ read_utility :: proc(p: ^Decision_Parser, text: ^Decision_Text) -> (state_size: 
 			}
 			contents.momentum = value
 		case:
-			decision_problem(p, s.line, "a utility decision has no setting %s: its settings are pick, within and momentum", s.key)
+			decision_problem(
+				p,
+				s.line,
+				"a utility decision has no setting %s: its settings are pick, within and momentum",
+				s.key,
+			)
 		}
 	}
 	if within_line != 0 && contents.pick != .Weighted {
@@ -116,7 +146,12 @@ read_utility :: proc(p: ^Decision_Parser, text: ^Decision_Text) -> (state_size: 
 			case:
 				for other in ids[:at] {
 					if other == id {
-						decision_problem(p, n.children_line, "node %d is a consideration of this option twice", id)
+						decision_problem(
+							p,
+							n.children_line,
+							"node %d is a consideration of this option twice",
+							id,
+						)
 					}
 				}
 				nodes[child].listed = true
@@ -126,7 +161,12 @@ read_utility :: proc(p: ^Decision_Parser, text: ^Decision_Text) -> (state_size: 
 	}
 	for n, i in nodes {
 		if n.kind == .Consideration && !n.listed {
-			decision_problem(p, text.nodes[i].line, "no option lists the consideration %d", text.nodes[i].id)
+			decision_problem(
+				p,
+				text.nodes[i].line,
+				"no option lists the consideration %d",
+				text.nodes[i].id,
+			)
 		}
 	}
 	if len(p.found) > problems {
@@ -190,7 +230,12 @@ read_utility_node :: proc(p: ^Decision_Parser, text: ^Decision_Text_Node, n: ^Ut
 	case "consideration":
 		n.kind = .Consideration
 	case:
-		decision_problem(p, text.line, "%s is not a node of a utility decision: a node is option or consideration", text.kind)
+		decision_problem(
+			p,
+			text.line,
+			"%s is not a node of a utility decision: a node is option or consideration",
+			text.kind,
+		)
 		return
 	}
 	takes := OPTION_FIELDS if n.kind == .Option else CONSIDERATION_FIELDS
@@ -205,12 +250,16 @@ read_utility_node :: proc(p: ^Decision_Parser, text: ^Decision_Text_Node, n: ^Ut
 	kind_name := text.kind
 	if n.kind == .Option {
 		n.option = {
-			node       = u32(text.index),
-			weight     = 1,
-			target     = format.DECISION_NONE,
+			node   = u32(text.index),
+			weight = 1,
+			target = format.DECISION_NONE,
 		}
 	} else if text.set_line != 0 {
-		decision_problem(p, text.set_line, "only an option writes keys, and this is a consideration")
+		decision_problem(
+			p,
+			text.set_line,
+			"only an option writes keys, and this is a consideration",
+		)
 	}
 	own_fields := make([dynamic]Decision_Field, context.temp_allocator)
 	for f in text.fields {
@@ -225,7 +274,14 @@ read_utility_node :: proc(p: ^Decision_Parser, text: ^Decision_Text_Node, n: ^Ut
 				known ||= k == f.key
 			}
 			if known {
-				decision_problem(p, f.line, "%s %s has no %s", "an" if n.kind == .Option else "a", kind_name, f.key)
+				decision_problem(
+					p,
+					f.line,
+					"%s %s has no %s",
+					"an" if n.kind == .Option else "a",
+					kind_name,
+					f.key,
+				)
 			} else {
 				decision_problem(p, f.line, "a utility decision's node has no field %s", f.key)
 			}
@@ -261,8 +317,8 @@ read_consideration :: proc(
 	points: [dynamic]format.Utility_Point,
 ) {
 	n := Utility_Text_Node {
-		kind          = .Consideration,
-		points        = make([dynamic]format.Utility_Point, context.temp_allocator),
+		kind = .Consideration,
+		points = make([dynamic]format.Utility_Point, context.temp_allocator),
 		consideration = {node = u32(text.index), max = 1, slope = 1, exponent = 1},
 	}
 	has := proc(fields: []Decision_Field, key: string) -> bool {
@@ -320,7 +376,11 @@ read_option_field :: proc(p: ^Decision_Parser, n: ^Utility_Text_Node, f: Decisio
 		for part in strings.split(f.value, ",", context.temp_allocator) {
 			id, ok := strconv.parse_int(strings.trim_space(part))
 			if !ok {
-				decision_problem(p, f.line, "considerations are node IDs: `considerations = <id>, <id>, ...`")
+				decision_problem(
+					p,
+					f.line,
+					"considerations are node IDs: `considerations = <id>, <id>, ...`",
+				)
 				clear(&n.children)
 				return
 			}
@@ -332,7 +392,13 @@ read_option_field :: proc(p: ^Decision_Parser, n: ^Utility_Text_Node, f: Decisio
 		case !found:
 			decision_problem(p, f.line, "the blackboard has no key named %s", f.value)
 		case type != .Entity:
-			decision_problem(p, f.line, "%s is a %s, and target is an entity key", f.value, type_name(type))
+			decision_problem(
+				p,
+				f.line,
+				"%s is a %s, and target is an entity key",
+				f.value,
+				type_name(type),
+			)
 		case:
 			n.option.target = u32(slot)
 		}
@@ -381,7 +447,11 @@ read_consideration_field :: proc(p: ^Decision_Parser, n: ^Utility_Text_Node, f: 
 	case "curve":
 		curve, ok := name_of(format.UTILITY_CURVE_NAMES, f.value)
 		if !ok {
-			decision_problem(p, f.line, "curve is linear, polynomial, logistic, logit, step or table")
+			decision_problem(
+				p,
+				f.line,
+				"curve is linear, polynomial, logistic, logit, step or table",
+			)
 		}
 		c.curve = curve
 	case "slope":
@@ -409,7 +479,9 @@ read_input :: proc(p: ^Decision_Parser, n: ^Utility_Text_Node, f: Decision_Field
 	value := f.value
 	call :: proc(value, name: string) -> (inner: string, ok: bool) {
 		rest := strings.trim_left_space(strings.trim_prefix(value, name))
-		if !strings.has_prefix(value, name) || !strings.has_prefix(rest, "(") || !strings.has_suffix(rest, ")") {
+		if !strings.has_prefix(value, name) ||
+		   !strings.has_prefix(rest, "(") ||
+		   !strings.has_suffix(rest, ")") {
 			return
 		}
 		return strings.trim_space(rest[1:len(rest) - 1]), true
@@ -433,7 +505,13 @@ read_input :: proc(p: ^Decision_Parser, n: ^Utility_Text_Node, f: Decision_Field
 			case !found:
 				decision_problem(p, f.line, "the blackboard has no key named %s", name)
 			case type != .Entity && type != .Position:
-				decision_problem(p, f.line, "%s is a %s, and a place is self, an entity key or a position key", name, type_name(type))
+				decision_problem(
+					p,
+					f.line,
+					"%s is a %s, and a place is self, an entity key or a position key",
+					name,
+					type_name(type),
+				)
 			case:
 				places[i] = u32(slot)
 			}
@@ -452,7 +530,11 @@ read_input :: proc(p: ^Decision_Parser, n: ^Utility_Text_Node, f: Decision_Field
 		return
 	}
 	if !is_identifier(value) {
-		decision_problem(p, f.line, "input is a number or bool key, distance(<place>, <place>) or since(<key>)")
+		decision_problem(
+			p,
+			f.line,
+			"input is a number or bool key, distance(<place>, <place>) or since(<key>)",
+		)
 		return
 	}
 	slot, type, found := utility_key(p, value)
@@ -460,7 +542,13 @@ read_input :: proc(p: ^Decision_Parser, n: ^Utility_Text_Node, f: Decision_Field
 	case !found:
 		decision_problem(p, f.line, "the blackboard has no key named %s", value)
 	case type != .Float && type != .Int && type != .Bool:
-		decision_problem(p, f.line, "%s is a %s, and an input key is a float, an int or a bool", value, type_name(type))
+		decision_problem(
+			p,
+			f.line,
+			"%s is a %s, and an input key is a float, an int or a bool",
+			value,
+			type_name(type),
+		)
 	case:
 		c.input = .Number
 		c.a = u32(slot)
@@ -513,7 +601,14 @@ read_points :: proc(p: ^Decision_Parser, n: ^Utility_Text_Node, f: Decision_Fiel
 
 // utility_key is the slot and type of the blackboard's key of a name.
 @(private = "file")
-utility_key :: proc(p: ^Decision_Parser, name: string) -> (slot: int, type: format.Blackboard_Type, found: bool) {
+utility_key :: proc(
+	p: ^Decision_Parser,
+	name: string,
+) -> (
+	slot: int,
+	type: format.Blackboard_Type,
+	found: bool,
+) {
 	for k, i in p.keys {
 		if k.name == name {
 			return i, k.type, true

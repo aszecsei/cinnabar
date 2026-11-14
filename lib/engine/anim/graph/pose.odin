@@ -19,7 +19,16 @@ Joint_Pose :: struct {
 // rest_pose writes each joint's rest pose, relative to its parent, into locals.
 rest_pose :: proc(joints: []format.Skin_Joint, locals: []Joint_Pose) {
 	for j, i in joints {
-		locals[i] = {j.translation, quaternion(real = j.rotation.w, imag = j.rotation.x, jmag = j.rotation.y, kmag = j.rotation.z), j.scale}
+		locals[i] = {
+			j.translation,
+			quaternion(
+				real = j.rotation.w,
+				imag = j.rotation.x,
+				jmag = j.rotation.y,
+				kmag = j.rotation.z,
+			),
+			j.scale,
+		}
 	}
 }
 
@@ -36,7 +45,13 @@ sample :: proc(clip_bytes: []byte, clip: ^format.Animation_Blob, time: f32, loca
 }
 
 // sample_joint is sample for one joint, whose pose it replaces the animated parts of.
-sample_joint :: proc(clip_bytes: []byte, clip: ^format.Animation_Blob, joint: int, time: f32, pose: ^Joint_Pose) {
+sample_joint :: proc(
+	clip_bytes: []byte,
+	clip: ^format.Animation_Blob,
+	joint: int,
+	time: f32,
+	pose: ^Joint_Pose,
+) {
 	times := format.animation_times(clip_bytes, clip)
 	values := format.animation_values(clip_bytes, clip)
 	for c in format.animation_channels(clip_bytes, clip) {
@@ -47,7 +62,12 @@ sample_joint :: proc(clip_bytes: []byte, clip: ^format.Animation_Blob, joint: in
 }
 
 @(private = "file")
-sample_channel :: proc(c: format.Animation_Channel, times, values: []f32, time: f32, l: ^Joint_Pose) {
+sample_channel :: proc(
+	c: format.Animation_Channel,
+	times, values: []f32,
+	time: f32,
+	l: ^Joint_Pose,
+) {
 	keys := times[c.first_key:][:c.key_count]
 	width := int(format.animation_path_width(c.path))
 	k, u := find_key(keys, time)
@@ -118,23 +138,43 @@ resolve :: proc(sum: []Joint_Pose, total: f32, rest: []Joint_Pose) {
 		s.translation /= total
 		s.scale /= total
 		length := math.sqrt(linalg.dot(s.rotation, s.rotation))
-		s.rotation = length > 1e-6 ? s.rotation * quaternion(real = 1 / length, imag = 0, jmag = 0, kmag = 0) : rest[i].rotation
+		s.rotation =
+			length > 1e-6 ? s.rotation * quaternion(real = 1 / length, imag = 0, jmag = 0, kmag = 0) : rest[i].rotation
 	}
 }
 
 // compose writes each joint's matrix, from the mesh's bind pose to its posed place, into palette, from the joints'
 // poses relative to their parents, parents first. models is scratch, one matrix a joint. It returns a sphere about the
 // posed mesh: the union of the joints' bind spheres, each posed by its joint.
-compose :: proc(joints: []format.Skin_Joint, locals: []Joint_Pose, models: []matrix[4, 4]f32, palette: [][3][4]f32) -> (sphere: [4]f32) {
+compose :: proc(
+	joints: []format.Skin_Joint,
+	locals: []Joint_Pose,
+	models: []matrix[4, 4]f32,
+	palette: [][3][4]f32,
+) -> (
+	sphere: [4]f32,
+) {
 	sphere.w = -1
 	for j, i in joints {
-		local := linalg.matrix4_from_trs_f32(locals[i].translation, locals[i].rotation, locals[i].scale)
+		local := linalg.matrix4_from_trs_f32(
+			locals[i].translation,
+			locals[i].rotation,
+			locals[i].scale,
+		)
 		models[i] = j.parent < 0 ? local : models[j.parent] * local
 		m := models[i] * rows_matrix(j.inverse_bind)
-		palette[i] = {{m[0, 0], m[0, 1], m[0, 2], m[0, 3]}, {m[1, 0], m[1, 1], m[1, 2], m[1, 3]}, {m[2, 0], m[2, 1], m[2, 2], m[2, 3]}}
+		palette[i] = {
+			{m[0, 0], m[0, 1], m[0, 2], m[0, 3]},
+			{m[1, 0], m[1, 1], m[1, 2], m[1, 3]},
+			{m[2, 0], m[2, 1], m[2, 2], m[2, 3]},
+		}
 		if j.sphere.w >= 0 {
 			center := (models[i] * [4]f32{j.sphere.x, j.sphere.y, j.sphere.z, 1}).xyz
-			scale := max(linalg.length(models[i][0].xyz), linalg.length(models[i][1].xyz), linalg.length(models[i][2].xyz))
+			scale := max(
+				linalg.length(models[i][0].xyz),
+				linalg.length(models[i][1].xyz),
+				linalg.length(models[i][2].xyz),
+			)
 			sphere = merge_spheres(sphere, {center.x, center.y, center.z, j.sphere.w * scale})
 		}
 	}
@@ -167,9 +207,21 @@ merge_spheres :: proc "contextless" (a, b: [4]f32) -> [4]f32 {
 @(private = "file")
 rows_matrix :: proc "contextless" (rows: [3][4]f32) -> matrix[4, 4]f32 {
 	return {
-		rows[0][0], rows[0][1], rows[0][2], rows[0][3],
-		rows[1][0], rows[1][1], rows[1][2], rows[1][3],
-		rows[2][0], rows[2][1], rows[2][2], rows[2][3],
-		0, 0, 0, 1,
+		rows[0][0],
+		rows[0][1],
+		rows[0][2],
+		rows[0][3],
+		rows[1][0],
+		rows[1][1],
+		rows[1][2],
+		rows[1][3],
+		rows[2][0],
+		rows[2][1],
+		rows[2][2],
+		rows[2][3],
+		0,
+		0,
+		0,
+		1,
 	}
 }

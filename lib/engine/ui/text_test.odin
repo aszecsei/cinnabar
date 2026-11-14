@@ -9,7 +9,13 @@ import "cinnabar:engine/ecs"
 DOC :: "7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e"
 
 @(private = "file")
-node_of :: proc(t: ^testing.T, f: ^Fixture, e: ecs.Entity, id: string, loc := #caller_location) -> ^Node {
+node_of :: proc(
+	t: ^testing.T,
+	f: ^Fixture,
+	e: ecs.Entity,
+	id: string,
+	loc := #caller_location,
+) -> ^Node {
 	d := document_of(&f.ui, e)
 	n, found := find_node(d, id)
 	testing.expectf(t, found, "no element %s", id, loc = loc)
@@ -25,12 +31,26 @@ text_document :: proc(body: string) -> string {
 text_is_kerned_and_takes_ligatures :: proc(t: ^testing.T) {
 	f := setup(t)
 	defer teardown(t, f)
-	e := show(t, f, DOC, text_document(`<text id="av">AV</text><text id="a">A</text><text id="v">V</text><text id="office">office</text>`))
+	e := show(
+		t,
+		f,
+		DOC,
+		text_document(
+			`<text id="av">AV</text><text id="a">A</text><text id="v">V</text><text id="office">office</text>`,
+		),
+	)
 	step(f)
 	av, a, v := node_of(t, f, e, "av"), node_of(t, f, e, "a"), node_of(t, f, e, "v")
 	testing.expect(t, av.text.ok && a.text.ok && v.text.ok)
 	// Fira Sans kerns A before V by 14 units of 1000, at 100 pixels to the em.
-	testing.expectf(t, abs(a.text.width + v.text.width - av.text.width - 1.4) < 0.01, "AV is %v wide, A and V %v and %v", av.text.width, a.text.width, v.text.width)
+	testing.expectf(
+		t,
+		abs(a.text.width + v.text.width - av.text.width - 1.4) < 0.01,
+		"AV is %v wide, A and V %v and %v",
+		av.text.width,
+		a.text.width,
+		v.text.width,
+	)
 	// fi is one glyph.
 	office := node_of(t, f, e, "office")
 	testing.expect_value(t, office.text.glyphs.count, 5)
@@ -44,7 +64,14 @@ text_is_kerned_and_takes_ligatures :: proc(t: ^testing.T) {
 text_wraps_at_its_box_after_spaces_and_breaks_at_line_breaks :: proc(t: ^testing.T) {
 	f := setup(t)
 	defer teardown(t, f)
-	e := show(t, f, DOC, text_document(`<text id="w" width="400">one two three four five</text><text id="nowrap" width="100" wrap="false">one two three</text><text id="hard">a</text>`))
+	e := show(
+		t,
+		f,
+		DOC,
+		text_document(
+			`<text id="w" width="400">one two three four five</text><text id="nowrap" width="100" wrap="false">one two three</text><text id="hard">a</text>`,
+		),
+	)
 	step(f)
 	d := document_of(&f.ui, e)
 	w := node_of(t, f, e, "w")
@@ -88,7 +115,14 @@ a_caret_goes_to_the_edges_of_clusters :: proc(t: ^testing.T) {
 bindings_fill_text_and_braces_escape :: proc(t: ^testing.T) {
 	f := setup(t)
 	defer teardown(t, f)
-	e := show(t, f, DOC, text_document(`<text id="score">Score: {score} {{x}} {missing}!</text><button id="b">{score} points</button>`))
+	e := show(
+		t,
+		f,
+		DOC,
+		text_document(
+			`<text id="score">Score: {score} {{x}} {missing}!</text><button id="b">{score} points</button>`,
+		),
+	)
 	step(f)
 	d := document_of(&f.ui, e)
 	text, ok := text_of(&f.ui, d, "score")

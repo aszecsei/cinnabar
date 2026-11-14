@@ -36,13 +36,21 @@ perceptions_parse_their_notices_and_rows :: proc(t: ^testing.T) {
 		{key = "target_visible", source = .Visible, of = 0},
 		{key = "target_since", source = .Since, of = 0},
 		{key = "heard", source = .Heard_Noise, of = format.PERCEPTION_NONE},
-		{key = "heard_position", source = .Loudest_Noise, tag = "Noise_Maker", of = format.PERCEPTION_NONE},
+		{
+			key = "heard_position",
+			source = .Loudest_Noise,
+			tag = "Noise_Maker",
+			of = format.PERCEPTION_NONE,
+		},
 	}
 	for e, i in expected {
 		testing.expectf(t, rows[i] == e, "row %d: %v, not %v", i, rows[i], e)
 	}
 	// Without a notices line, every tag is noticed.
-	contents, problems = perception_parse("perception 1\ntarget = nearest any\n", context.temp_allocator)
+	contents, problems = perception_parse(
+		"perception 1\ntarget = nearest any\n",
+		context.temp_allocator,
+	)
 	testing.expect(t, len(problems) == 0 && len(contents.notices) == 0 && len(contents.rows) == 1)
 }
 
@@ -73,13 +81,25 @@ perception_mistakes_are_problems_at_their_lines :: proc(t: ^testing.T) {
 	}
 	for c in cases {
 		_, problems := perception_parse(c.text, context.temp_allocator)
-		testing.expectf(t, len(problems) > 0 && problems[0].line == c.line, "%q: %v", c.text, problems)
+		testing.expectf(
+			t,
+			len(problems) > 0 && problems[0].line == c.line,
+			"%q: %v",
+			c.text,
+			problems,
+		)
 	}
 }
 
 @(test)
 perceptions_cook_into_blobs :: proc(t: ^testing.T) {
-	tree := make_tree(t, {{"content/ai/guard.perception", PERCEPTION}, {"content/ai/broken.perception", "perception 1\nwhere = position nobody\n"}})
+	tree := make_tree(
+		t,
+		{
+			{"content/ai/guard.perception", PERCEPTION},
+			{"content/ai/broken.perception", "perception 1\nwhere = position nobody\n"},
+		},
+	)
 	defer remove_tree(tree)
 	options := tree_options(tree)
 	pass := cook(options, {.Perception}, log_problems = false)
@@ -99,7 +119,14 @@ perceptions_cook_into_blobs :: proc(t: ^testing.T) {
 	// A second cook finds it up to date, and an edit cooks it again.
 	pass = cook(options, {.Perception}, log_problems = false)
 	testing.expect_value(t, pass.current[.Perception], 1)
-	testing.expect(t, os.write_entire_file(fmt.tprintf("%s/content/ai/guard.perception", tree.dir), string(PERCEPTION + "near = nearest any\n")) == nil)
+	testing.expect(
+		t,
+		os.write_entire_file(
+			fmt.tprintf("%s/content/ai/guard.perception", tree.dir),
+			string(PERCEPTION + "near = nearest any\n"),
+		) ==
+		nil,
+	)
 	pass = cook(options, {.Perception}, log_problems = false)
 	testing.expect_value(t, pass.cooked[.Perception], 1)
 	data = tree_blob(t, tree, tree_guid(t, tree, "ai/guard.perception"))
@@ -108,7 +135,14 @@ perceptions_cook_into_blobs :: proc(t: ^testing.T) {
 	key := blob.header.key
 
 	// A perception with a problem keeps its old blob.
-	testing.expect(t, os.write_entire_file(fmt.tprintf("%s/content/ai/guard.perception", tree.dir), string(PERCEPTION + "near = nearest\n")) == nil)
+	testing.expect(
+		t,
+		os.write_entire_file(
+			fmt.tprintf("%s/content/ai/guard.perception", tree.dir),
+			string(PERCEPTION + "near = nearest\n"),
+		) ==
+		nil,
+	)
 	pass = cook(options, {.Perception}, log_problems = false)
 	testing.expect_value(t, pass.cooked[.Perception], 0)
 	kept := tree_blob(t, tree, tree_guid(t, tree, "ai/guard.perception"))

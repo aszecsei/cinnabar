@@ -171,14 +171,21 @@ decision_layout :: proc() -> u64 {
 // with the blackboard's blob.
 decision_view :: proc(data: []byte) -> (blob: ^Decision_Blob, ok: bool) {
 	header := blob_header(data) or_return
-	if header.kind != .Decision || header.layout != decision_layout() || len(data) < size_of(Decision_Blob) {
+	if header.kind != .Decision ||
+	   header.layout != decision_layout() ||
+	   len(data) < size_of(Decision_Blob) {
 		return
 	}
 	blob = (^Decision_Blob)(raw_data(data))
 	inside :: proc(data: []byte, s: Slice, size, align: int) -> bool {
-		return u64(s.offset) + u64(s.size) <= u64(len(data)) && int(s.size) % size == 0 && int(s.offset) % align == 0
+		return(
+			u64(s.offset) + u64(s.size) <= u64(len(data)) &&
+			int(s.size) % size == 0 &&
+			int(s.offset) % align == 0 \
+		)
 	}
-	if blob.technique > max(Decision_Technique) || blob.state_size > MAX_DECISION_STATE ||
+	if blob.technique > max(Decision_Technique) ||
+	   blob.state_size > MAX_DECISION_STATE ||
 	   !inside(data, blob.nodes, size_of(Decision_Node), align_of(Decision_Node)) ||
 	   !inside(data, blob.conditions, size_of(Decision_Condition), align_of(Decision_Condition)) ||
 	   !inside(data, blob.ops, size_of(Decision_Op), align_of(Decision_Op)) ||
@@ -186,7 +193,8 @@ decision_view :: proc(data: []byte) -> (blob: ^Decision_Blob, ok: bool) {
 	   !inside(data, blob.actions, size_of(Decision_Action), align_of(Decision_Action)) ||
 	   !inside(data, blob.args, size_of(Decision_Arg), align_of(Decision_Arg)) ||
 	   !inside(data, blob.writes, size_of(Decision_Write), align_of(Decision_Write)) ||
-	   !inside(data, blob.technique_data, 1, 16) || !inside(data, blob.source_path, 1, 1) {
+	   !inside(data, blob.technique_data, 1, 16) ||
+	   !inside(data, blob.source_path, 1, 1) {
 		return nil, false
 	}
 	range :: proc(first, count: u32, length: int) -> bool {
@@ -202,7 +210,9 @@ decision_view :: proc(data: []byte) -> (blob: ^Decision_Blob, ok: bool) {
 	args := decision_args(data, blob)
 	writes := decision_writes(data, blob)
 	for n in decision_nodes(data, blob) {
-		if !inside(data, n.kind, 1, 1) || !optional(n.condition, len(conditions)) || !optional(n.action, len(actions)) ||
+		if !inside(data, n.kind, 1, 1) ||
+		   !optional(n.condition, len(conditions)) ||
+		   !optional(n.action, len(actions)) ||
 		   !range(n.first_write, n.write_count, len(writes)) {
 			return nil, false
 		}
@@ -213,7 +223,8 @@ decision_view :: proc(data: []byte) -> (blob: ^Decision_Blob, ok: bool) {
 		}
 	}
 	for o in ops {
-		if o.code > max(Decision_Op_Code) || (o.code == .Constant && int(o.operand) >= len(constants)) {
+		if o.code > max(Decision_Op_Code) ||
+		   (o.code == .Constant && int(o.operand) >= len(constants)) {
 			return nil, false
 		}
 	}
@@ -228,13 +239,16 @@ decision_view :: proc(data: []byte) -> (blob: ^Decision_Blob, ok: bool) {
 		}
 	}
 	for a in args {
-		if !inside(data, a.name, 1, 1) || a.source > max(Decision_Source) || a.type > max(Blackboard_Type) ||
+		if !inside(data, a.name, 1, 1) ||
+		   a.source > max(Decision_Source) ||
+		   a.type > max(Blackboard_Type) ||
 		   (a.source == .Constant && int(a.index) >= len(constants)) {
 			return nil, false
 		}
 	}
 	for w in writes {
-		if w.source > max(Decision_Source) || (w.source == .Constant && int(w.index) >= len(constants)) {
+		if w.source > max(Decision_Source) ||
+		   (w.source == .Constant && int(w.index) >= len(constants)) {
 			return nil, false
 		}
 	}
@@ -243,7 +257,12 @@ decision_view :: proc(data: []byte) -> (blob: ^Decision_Blob, ok: bool) {
 
 // decision_check checks that a decision fits a blackboard: that it was cooked against it, and that every slot that it
 // names is one of its keys, of the type that the decision expects.
-decision_check :: proc(data: []byte, blob: ^Decision_Blob, board_data: []byte, board: ^Blackboard_Blob) -> bool {
+decision_check :: proc(
+	data: []byte,
+	blob: ^Decision_Blob,
+	board_data: []byte,
+	board: ^Blackboard_Blob,
+) -> bool {
 	if blob.blackboard != board.header.guid || blob.blackboard_key != board.header.key {
 		return false
 	}
@@ -259,7 +278,9 @@ decision_check :: proc(data: []byte, blob: ^Decision_Blob, board_data: []byte, b
 		}
 	}
 	for w in decision_writes(data, blob) {
-		if int(w.key) >= len(keys) || (w.source == .Key && (int(w.index) >= len(keys) || keys[w.index].type != keys[w.key].type)) {
+		if int(w.key) >= len(keys) ||
+		   (w.source == .Key &&
+				   (int(w.index) >= len(keys) || keys[w.index].type != keys[w.key].type)) {
 			return false
 		}
 	}
@@ -271,7 +292,10 @@ decision_nodes :: proc "contextless" (data: []byte, blob: ^Decision_Blob) -> []D
 	return ([^]Decision_Node)(raw_data(bytes))[:len(bytes) / size_of(Decision_Node)]
 }
 
-decision_conditions :: proc "contextless" (data: []byte, blob: ^Decision_Blob) -> []Decision_Condition {
+decision_conditions :: proc "contextless" (
+	data: []byte,
+	blob: ^Decision_Blob,
+) -> []Decision_Condition {
 	bytes := blob_bytes(data, blob.conditions)
 	return ([^]Decision_Condition)(raw_data(bytes))[:len(bytes) / size_of(Decision_Condition)]
 }
@@ -281,7 +305,10 @@ decision_ops :: proc "contextless" (data: []byte, blob: ^Decision_Blob) -> []Dec
 	return ([^]Decision_Op)(raw_data(bytes))[:len(bytes) / size_of(Decision_Op)]
 }
 
-decision_constants :: proc "contextless" (data: []byte, blob: ^Decision_Blob) -> []Decision_Constant {
+decision_constants :: proc "contextless" (
+	data: []byte,
+	blob: ^Decision_Blob,
+) -> []Decision_Constant {
 	bytes := blob_bytes(data, blob.constants)
 	return ([^]Decision_Constant)(raw_data(bytes))[:len(bytes) / size_of(Decision_Constant)]
 }
@@ -425,7 +452,13 @@ decision_write :: proc(contents: Decision_Contents, allocator := context.allocat
 	}
 	source_path := text(&buffer, contents.source_path)
 	blob := Decision_Blob {
-		header = {magic = BLOB_MAGIC, kind = .Decision, layout = decision_layout(), key = contents.key, guid = contents.guid},
+		header = {
+			magic = BLOB_MAGIC,
+			kind = .Decision,
+			layout = decision_layout(),
+			key = contents.key,
+			guid = contents.guid,
+		},
 		technique = contents.technique,
 		state_size = contents.state_size,
 		blackboard = contents.blackboard,

@@ -51,7 +51,12 @@ MODULES_KEY :: "cinnabar.modules"
 
 // schema_vm_open makes the VM: the built-in libraries, the prelude with the cook-time natives, and a require that
 // follows the requires that the cooker resolved.
-schema_vm_open :: proc(vm: ^Schema_VM, config: Script_Config, scripts: []Script_Source, problems: ^Problems) -> bool {
+schema_vm_open :: proc(
+	vm: ^Schema_VM,
+	config: Script_Config,
+	scripts: []Script_Source,
+	problems: ^Problems,
+) -> bool {
 	vm^ = {
 		L        = luau.L_newstate(),
 		ctx      = context,
@@ -66,11 +71,16 @@ schema_vm_open :: proc(vm: ^Schema_VM, config: Script_Config, scripts: []Script_
 		vm := (^Schema_VM)(luau.callbacks(L).userdata)
 		if gc < 0 && vm.deadline != {} && time.tick_diff(vm.deadline, time.tick_now()) > 0 {
 			vm.deadline = {}
-			luau.L_errorL(L, "the top level ran for more than %d seconds", c.int(SCHEMA_BUDGET / time.Second))
+			luau.L_errorL(
+				L,
+				"the top level ran for more than %d seconds",
+				c.int(SCHEMA_BUDGET / time.Second),
+			)
 		}
 	}
 	luau.L_openlibs(L)
-	if !run_chunk(vm, "=cook/natives", COOK_NATIVES, 0, 1) || !run_chunk(vm, "=engine/prelude.luau", PRELUDE, 1, 5) {
+	if !run_chunk(vm, "=cook/natives", COOK_NATIVES, 0, 1) ||
+	   !run_chunk(vm, "=engine/prelude.luau", PRELUDE, 1, 5) {
 		return false
 	}
 	// The registry of actions, which only the runtime reads.
@@ -96,7 +106,12 @@ schema_vm_close :: proc(vm: ^Schema_VM) {
 
 // run_chunk compiles and calls source with the top nargs values as arguments.
 @(private = "file")
-run_chunk :: proc(vm: ^Schema_VM, chunkname: cstring, source: string, nargs, nresults: c.int) -> bool {
+run_chunk :: proc(
+	vm: ^Schema_VM,
+	chunkname: cstring,
+	source: string,
+	nargs, nresults: c.int,
+) -> bool {
 	L := vm.L
 	bytecode := compile_source(vm.config, source)
 	defer luau.free_bytecode(raw_data(bytecode))
@@ -115,7 +130,15 @@ run_chunk :: proc(vm: ^Schema_VM, chunkname: cstring, source: string, nargs, nre
 // read_schema runs a behaviour or action script's top level and reads the class that it returns: a behaviour's name
 // and fields, with the Behaviour flag, or an action's name and parameters, with the Action flag. A script that returns
 // no class has no schema, and is not an error.
-read_schema :: proc(vm: ^Schema_VM, index: int) -> (class_name: string, fields: []format.Field_Entry, flag: Maybe(format.Script_Flag), ok: bool) {
+read_schema :: proc(
+	vm: ^Schema_VM,
+	index: int,
+) -> (
+	class_name: string,
+	fields: []format.Field_Entry,
+	flag: Maybe(format.Script_Flag),
+	ok: bool,
+) {
 	L := vm.L
 	s := &vm.scripts[index]
 	top := luau.gettop(L)
@@ -124,7 +147,14 @@ read_schema :: proc(vm: ^Schema_VM, index: int) -> (class_name: string, fields: 
 	luau.L_sandboxthread(co)
 	bytecode := compile_source(vm.config, string(s.source))
 	defer luau.free_bytecode(raw_data(bytecode))
-	if luau.load(co, fmt.ctprintf("@%s", s.name), raw_data(bytecode), c.size_t(len(bytecode)), 0) != .OK {
+	if luau.load(
+		   co,
+		   fmt.ctprintf("@%s", s.name),
+		   raw_data(bytecode),
+		   c.size_t(len(bytecode)),
+		   0,
+	   ) !=
+	   .OK {
 		report_error(vm.problems, s.path, 0, 0, "%s", luau.toodinstring(co, -1))
 		return
 	}
@@ -243,7 +273,13 @@ schema_require :: proc "c" (L: ^luau.State) -> c.int {
 	luau.setmetatable(L, -2)
 	env := luau.gettop(L)
 	bytecode := compile_source(vm.config, string(t.source))
-	status := luau.load(L, fmt.ctprintf("@%s", t.name), raw_data(bytecode), c.size_t(len(bytecode)), env)
+	status := luau.load(
+		L,
+		fmt.ctprintf("@%s", t.name),
+		raw_data(bytecode),
+		c.size_t(len(bytecode)),
+		env,
+	)
 	luau.free_bytecode(raw_data(bytecode))
 	if status != .OK {
 		luau.error(L)

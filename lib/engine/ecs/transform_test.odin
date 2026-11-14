@@ -126,7 +126,11 @@ move_x :: proc(ctx: ^System_Context) {
 		}
 	}
 	if e := (^Mover)(ctx.user).teleport; e != 0 {
-		command_teleport(ctx.commands, e, Transform{position = position_from_meters({100, 0, 0}), rotation = 1, scale = 1})
+		command_teleport(
+			ctx.commands,
+			e,
+			Transform{position = position_from_meters({100, 0, 0}), rotation = 1, scale = 1},
+		)
 	}
 }
 
@@ -143,7 +147,10 @@ fixed_motion_is_interpolated :: proc(t: ^testing.T) {
 	add(w, e, TRANSFORM_IDENTITY)
 	add(w, e, Previous_Transform(TRANSFORM_IDENTITY))
 	mover: Mover
-	register_system(w, {name = "move", stage = .Fixed, procedure = move_x, terms = {write(w, Transform)}})
+	register_system(
+		w,
+		{name = "move", stage = .Fixed, procedure = move_x, terms = {write(w, Transform)}},
+	)
 	set_tick_rate(w, 10)
 
 	// 250 ms at 10 Hz is two ticks and half of the third.

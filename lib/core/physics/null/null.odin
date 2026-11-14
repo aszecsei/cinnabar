@@ -144,7 +144,9 @@ destroy :: proc(w: ^Null_World) {
 	delete(w.shapes, runtime.heap_allocator())
 	delete(w.joints, runtime.heap_allocator())
 	delete(w.characters)
-	w^ = {generation = w.generation}
+	w^ = {
+		generation = w.generation,
+	}
 }
 
 @(private)
@@ -211,17 +213,23 @@ run :: proc(w: ^Null_World, command: physics.Command) -> bool {
 		return true
 	case .Release_Shape:
 		shape := physics.payload(command, physics.Release_Shape).shape
-		if shape.generation == 0 || int(shape.index) >= len(w.shapes) || w.shapes[shape.index] != shape.generation {
+		if shape.generation == 0 ||
+		   int(shape.index) >= len(w.shapes) ||
+		   w.shapes[shape.index] != shape.generation {
 			return false
 		}
 		w.shapes[shape.index] = 0
 		return true
 	case .Create_Body:
 		c := physics.payload(command, physics.Create_Body)
-		if c.body.generation == 0 || int(c.body.index) >= len(w.bodies) || w.bodies[c.body.index].generation != 0 {
+		if c.body.generation == 0 ||
+		   int(c.body.index) >= len(w.bodies) ||
+		   w.bodies[c.body.index].generation != 0 {
 			return false
 		}
-		if c.shape.generation == 0 || int(c.shape.index) >= len(w.shapes) || w.shapes[c.shape.index] != c.shape.generation {
+		if c.shape.generation == 0 ||
+		   int(c.shape.index) >= len(w.shapes) ||
+		   w.shapes[c.shape.index] != c.shape.generation {
 			return false
 		}
 		w.bodies[c.body.index] = {
@@ -279,7 +287,9 @@ run :: proc(w: ^Null_World, command: physics.Command) -> bool {
 		return find_body(w, c.body) != nil
 	case .Create_Character:
 		c := physics.payload(command, physics.Create_Character)
-		if c.body.generation == 0 || int(c.body.index) >= len(w.bodies) || w.bodies[c.body.index].generation != 0 {
+		if c.body.generation == 0 ||
+		   int(c.body.index) >= len(w.bodies) ||
+		   w.bodies[c.body.index].generation != 0 {
 			return false
 		}
 		if !(c.radius > 0) || !(c.height > 2 * c.radius) {
@@ -318,7 +328,9 @@ run :: proc(w: ^Null_World, command: physics.Command) -> bool {
 		return true
 	case .Create_Joint:
 		c := physics.payload(command, physics.Create_Joint)
-		if c.joint.generation == 0 || int(c.joint.index) >= len(w.joints) || find_body(w, c.a) == nil {
+		if c.joint.generation == 0 ||
+		   int(c.joint.index) >= len(w.joints) ||
+		   find_body(w, c.a) == nil {
 			return false
 		}
 		if c.b.generation != 0 && find_body(w, c.b) == nil {
@@ -328,7 +340,9 @@ run :: proc(w: ^Null_World, command: physics.Command) -> bool {
 		return true
 	case .Destroy_Joint, .Set_Joint:
 		joint := physics.payload(command, physics.Destroy_Joint).joint
-		if joint.generation == 0 || int(joint.index) >= len(w.joints) || w.joints[joint.index] != joint.generation {
+		if joint.generation == 0 ||
+		   int(joint.index) >= len(w.joints) ||
+		   w.joints[joint.index] != joint.generation {
 			return false
 		}
 		if command.kind == .Destroy_Joint {
@@ -341,7 +355,9 @@ run :: proc(w: ^Null_World, command: physics.Command) -> bool {
 			return false
 		}
 		for child in physics.compound_children(command) {
-			if child.generation == 0 || int(child.index) >= len(w.shapes) || w.shapes[child.index] != child.generation {
+			if child.generation == 0 ||
+			   int(child.index) >= len(w.shapes) ||
+			   w.shapes[child.index] != child.generation {
 				return false
 			}
 		}
@@ -365,13 +381,16 @@ step :: proc "c" (handle: physics.World, dt: f32, substeps: i32) -> b32 {
 			continue
 		}
 		b.position += physics.Position{f64(b.linear.x), f64(b.linear.y), f64(b.linear.z)} * f64(dt)
-		append(&w.characters, physics.Character_State {
-			body     = {u32(i), b.generation},
-			user     = b.user,
-			position = b.position,
-			rotation = b.rotation,
-			velocity = b.linear,
-		})
+		append(
+			&w.characters,
+			physics.Character_State {
+				body = {u32(i), b.generation},
+				user = b.user,
+				position = b.position,
+				rotation = b.rotation,
+				velocity = b.linear,
+			},
+		)
 	}
 	return true
 }
@@ -387,7 +406,12 @@ results :: proc "c" (handle: physics.World, out: ^physics.Step_Results) {
 }
 
 @(private)
-body_state :: proc "c" (handle: physics.World, bodies: [^]physics.Body, count: u32, out: [^]physics.Body_State) {
+body_state :: proc "c" (
+	handle: physics.World,
+	bodies: [^]physics.Body,
+	count: u32,
+	out: [^]physics.Body_State,
+) {
 	context = runtime.default_context()
 	w := find_world(handle)
 	for i in 0 ..< count {
@@ -425,7 +449,10 @@ create_mesh_shape :: proc "c" (
 ) -> b32 {
 	context = runtime.default_context()
 	w := find_world(handle)
-	if w == nil || shape.generation == 0 || int(shape.index) >= len(w.shapes) || vertex_count == 0 {
+	if w == nil ||
+	   shape.generation == 0 ||
+	   int(shape.index) >= len(w.shapes) ||
+	   vertex_count == 0 {
 		return false
 	}
 	if kind == .Mesh {
@@ -445,30 +472,58 @@ create_mesh_shape :: proc "c" (
 }
 
 @(private)
-raycast_all :: proc "c" (handle: physics.World, ray: ^physics.Ray, filter: ^physics.Query_Filter, out: [^]physics.Ray_Hit, capacity: u32) -> u32 {
+raycast_all :: proc "c" (
+	handle: physics.World,
+	ray: ^physics.Ray,
+	filter: ^physics.Query_Filter,
+	out: [^]physics.Ray_Hit,
+	capacity: u32,
+) -> u32 {
 	return 0
 }
 
 @(private)
-raycast_batch :: proc "c" (handle: physics.World, rays: [^]physics.Ray, count: u32, filter: ^physics.Query_Filter, out: [^]physics.Ray_Hit) {
+raycast_batch :: proc "c" (
+	handle: physics.World,
+	rays: [^]physics.Ray,
+	count: u32,
+	filter: ^physics.Query_Filter,
+	out: [^]physics.Ray_Hit,
+) {
 	for i in 0 ..< count {
 		out[i] = {}
 	}
 }
 
 @(private)
-shape_cast :: proc "c" (handle: physics.World, sweep: ^physics.Shape_Cast, filter: ^physics.Query_Filter, hit: ^physics.Ray_Hit) -> b32 {
+shape_cast :: proc "c" (
+	handle: physics.World,
+	sweep: ^physics.Shape_Cast,
+	filter: ^physics.Query_Filter,
+	hit: ^physics.Ray_Hit,
+) -> b32 {
 	hit^ = {}
 	return false
 }
 
 @(private)
-overlap :: proc "c" (handle: physics.World, query: ^physics.Overlap_Query, filter: ^physics.Query_Filter, out: [^]physics.Overlap_Hit, capacity: u32) -> u32 {
+overlap :: proc "c" (
+	handle: physics.World,
+	query: ^physics.Overlap_Query,
+	filter: ^physics.Query_Filter,
+	out: [^]physics.Overlap_Hit,
+	capacity: u32,
+) -> u32 {
 	return 0
 }
 
 @(private)
-raycast :: proc "c" (handle: physics.World, ray: ^physics.Ray, filter: ^physics.Query_Filter, hit: ^physics.Ray_Hit) -> b32 {
+raycast :: proc "c" (
+	handle: physics.World,
+	ray: ^physics.Ray,
+	filter: ^physics.Query_Filter,
+	hit: ^physics.Ray_Hit,
+) -> b32 {
 	hit^ = {}
 	return false
 }

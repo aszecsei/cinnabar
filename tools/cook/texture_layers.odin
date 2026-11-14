@@ -27,22 +27,46 @@ Texture_Set :: struct {
 }
 
 is_texture_set :: proc(a: Asset_Source) -> bool {
-	return strings.has_suffix(strings.to_lower(a.path, context.temp_allocator), format.TEXTURE_SET_EXTENSION)
+	return strings.has_suffix(
+		strings.to_lower(a.path, context.temp_allocator),
+		format.TEXTURE_SET_EXTENSION,
+	)
 }
 
 // parse_texture_set reads a .texture_set: lines of `px = $guid` for each of a cube's faces, or of `layer = $guid` for
 // each of an array's layers in order, and # comments. It adds the images that it finds to named, also when it fails, so
 // that a mistake in a set does not also warn of its images. A set's image must be a plain image texture, and one whose
 // usage is not the set's is a warning, since the set's is the one that it cooks with.
-parse_texture_set :: proc(a: Asset_Source, assets: []Asset_Source, by_guid: map[format.Guid]int, named: ^map[int]bool, problems: ^Problems) -> (set: Texture_Set, ok: bool) {
+parse_texture_set :: proc(
+	a: Asset_Source,
+	assets: []Asset_Source,
+	by_guid: map[format.Guid]int,
+	named: ^map[int]bool,
+	problems: ^Problems,
+) -> (
+	set: Texture_Set,
+	ok: bool,
+) {
 	meta_path := fmt.tprintf("%s%s", a.path, format.META_EXTENSION)
 	ok = true
 	if texture_setting(a, "standalone") == "false" {
-		report_error(problems, meta_path, 0, 0, "standalone cannot be false for a .texture_set, which has no other way to cook")
+		report_error(
+			problems,
+			meta_path,
+			0,
+			0,
+			"standalone cannot be false for a .texture_set, which has no other way to cook",
+		)
 		ok = false
 	}
 	if texture_setting(a, "layout") != "2d" {
-		report_error(problems, meta_path, 0, 0, "layout is for one image: a .texture_set's layers are the images that it names")
+		report_error(
+			problems,
+			meta_path,
+			0,
+			0,
+			"layout is for one image: a .texture_set's layers are the images that it names",
+		)
 		ok = false
 	}
 	usage := texture_setting(a, "usage")
@@ -60,7 +84,13 @@ parse_texture_set :: proc(a: Asset_Source, assets: []Asset_Source, by_guid: map[
 		}
 		equals := strings.index_byte(line, '=')
 		if equals < 0 {
-			report_error(problems, a.path, line_number, 1, "needs `key = $guid`, where the key is px, nx, py, ny, pz, nz or layer")
+			report_error(
+				problems,
+				a.path,
+				line_number,
+				1,
+				"needs `key = $guid`, where the key is px, nx, py, ny, pz, nz or layer",
+			)
 			ok = false
 			continue
 		}
@@ -73,7 +103,14 @@ parse_texture_set :: proc(a: Asset_Source, assets: []Asset_Source, by_guid: map[
 			}
 		}
 		if face < 0 && key != "layer" {
-			report_error(problems, a.path, line_number, 1, "unknown key %q: a set's keys are px, nx, py, ny, pz, nz or layer", key)
+			report_error(
+				problems,
+				a.path,
+				line_number,
+				1,
+				"unknown key %q: a set's keys are px, nx, py, ny, pz, nz or layer",
+				key,
+			)
 			ok = false
 			continue
 		}
@@ -86,19 +123,38 @@ parse_texture_set :: proc(a: Asset_Source, assets: []Asset_Source, by_guid: map[
 			face_seen[face], has_faces = true, true
 		}
 		if !strings.has_prefix(value, "$") {
-			report_error(problems, a.path, line_number, equals + 2, "an image is a texture asset's GUID after $")
+			report_error(
+				problems,
+				a.path,
+				line_number,
+				equals + 2,
+				"an image is a texture asset's GUID after $",
+			)
 			ok = false
 			continue
 		}
 		guid, guid_ok := format.guid_parse(value[1:])
 		if !guid_ok {
-			report_error(problems, a.path, line_number, equals + 2, "an image is 32 hex digits after $")
+			report_error(
+				problems,
+				a.path,
+				line_number,
+				equals + 2,
+				"an image is 32 hex digits after $",
+			)
 			ok = false
 			continue
 		}
 		child, found := by_guid[guid]
 		if !found {
-			report_error(problems, a.path, line_number, equals + 2, "no asset has the GUID %s", value)
+			report_error(
+				problems,
+				a.path,
+				line_number,
+				equals + 2,
+				"no asset has the GUID %s",
+				value,
+			)
 			ok = false
 			continue
 		}
@@ -110,12 +166,29 @@ parse_texture_set :: proc(a: Asset_Source, assets: []Asset_Source, by_guid: map[
 			ok = false
 			continue
 		case texture_setting(c, "layout") != "2d":
-			report_error(problems, a.path, line_number, equals + 2, "%s has a layout of %s, and a set's image is one layer", c.name, texture_setting(c, "layout"))
+			report_error(
+				problems,
+				a.path,
+				line_number,
+				equals + 2,
+				"%s has a layout of %s, and a set's image is one layer",
+				c.name,
+				texture_setting(c, "layout"),
+			)
 			ok = false
 			continue
 		}
 		if child_usage := texture_setting(c, "usage"); child_usage != usage {
-			report_warning(problems, a.path, line_number, equals + 2, "%s has the usage %s, and this set cooks it as %s", c.name, child_usage, usage)
+			report_warning(
+				problems,
+				a.path,
+				line_number,
+				equals + 2,
+				"%s has the usage %s, and this set cooks it as %s",
+				c.name,
+				child_usage,
+				usage,
+			)
 		}
 		if face >= 0 {
 			faces[face] = child
@@ -128,11 +201,25 @@ parse_texture_set :: proc(a: Asset_Source, assets: []Asset_Source, by_guid: map[
 		ok = false
 	}
 	if !has_faces && len(layers) == 0 {
-		report_error(problems, a.path, 0, 0, "names no images: it needs px, nx, py, ny, pz and nz, or layer lines")
+		report_error(
+			problems,
+			a.path,
+			0,
+			0,
+			"names no images: it needs px, nx, py, ny, pz and nz, or layer lines",
+		)
 		ok = false
 	}
 	if len(layers) > format.MAX_TEXTURE_LAYERS {
-		report_error(problems, a.path, 0, 0, "has %d layers, and an array has at most %d", len(layers), format.MAX_TEXTURE_LAYERS)
+		report_error(
+			problems,
+			a.path,
+			0,
+			0,
+			"has %d layers, and an array has at most %d",
+			len(layers),
+			format.MAX_TEXTURE_LAYERS,
+		)
 		ok = false
 	}
 	if !ok {
@@ -141,7 +228,14 @@ parse_texture_set :: proc(a: Asset_Source, assets: []Asset_Source, by_guid: map[
 	if has_faces {
 		for seen, i in face_seen {
 			if !seen {
-				report_error(problems, a.path, 0, 0, "has no %s: a cube names all six faces", TEXTURE_SET_FACES[i])
+				report_error(
+					problems,
+					a.path,
+					0,
+					0,
+					"has no %s: a cube names all six faces",
+					TEXTURE_SET_FACES[i],
+				)
 				ok = false
 			}
 		}
@@ -156,19 +250,50 @@ parse_texture_set :: proc(a: Asset_Source, assets: []Asset_Source, by_guid: map[
 }
 
 // texture_layers decodes a texture's source into its layers, all of one size, and says what they make.
-texture_layers :: proc(a: Asset_Source, assets: []Asset_Source, set: Texture_Set, t: Texture_Cook, problems: ^Problems) -> (layers: []Image, dimension: format.Texture_Dimension, ok: bool) {
+texture_layers :: proc(
+	a: Asset_Source,
+	assets: []Asset_Source,
+	set: Texture_Set,
+	t: Texture_Cook,
+	problems: ^Problems,
+) -> (
+	layers: []Image,
+	dimension: format.Texture_Dimension,
+	ok: bool,
+) {
 	if len(set.children) > 0 {
 		layers = make([]Image, len(set.children), context.temp_allocator)
 		for child, i in set.children {
 			c := assets[child]
 			layers[i] = decode_image_bytes(source_of(c), c.path, t, problems) or_return
 			if layers[i].width != layers[0].width || layers[i].height != layers[0].height {
-				report_error(problems, a.path, 0, 0, "%s is %dx%d, and %s is %dx%d: a set's images are one size", c.name, layers[i].width, layers[i].height, assets[set.children[0]].name, layers[0].width, layers[0].height)
+				report_error(
+					problems,
+					a.path,
+					0,
+					0,
+					"%s is %dx%d, and %s is %dx%d: a set's images are one size",
+					c.name,
+					layers[i].width,
+					layers[i].height,
+					assets[set.children[0]].name,
+					layers[0].width,
+					layers[0].height,
+				)
 				return
 			}
 		}
 		if set.dimension == .Cube && layers[0].width != layers[0].height {
-			report_error(problems, a.path, 0, 0, "a cube's faces are square, and %s is %dx%d", assets[set.children[0]].name, layers[0].width, layers[0].height)
+			report_error(
+				problems,
+				a.path,
+				0,
+				0,
+				"a cube's faces are square, and %s is %dx%d",
+				assets[set.children[0]].name,
+				layers[0].width,
+				layers[0].height,
+			)
 			return
 		}
 		return layers, set.dimension, true
@@ -182,20 +307,45 @@ texture_layers :: proc(a: Asset_Source, assets: []Asset_Source, set: Texture_Set
 	case .Cube_Cross:
 		layers = cube_from_cross(image)
 		if layers == nil {
-			report_error(problems, a.path, 0, 0, "a cross is 4 faces across and 3 down, or 3 across and 4 down, of square faces, and this image is %dx%d", image.width, image.height)
+			report_error(
+				problems,
+				a.path,
+				0,
+				0,
+				"a cross is 4 faces across and 3 down, or 3 across and 4 down, of square faces, and this image is %dx%d",
+				image.width,
+				image.height,
+			)
 			return
 		}
 		return layers, .Cube, true
 	case .Cube_Equirect:
 		if image.width != image.height * 2 {
-			report_error(problems, a.path, 0, 0, "an equirectangular image is twice as wide as it is tall, and this image is %dx%d", image.width, image.height)
+			report_error(
+				problems,
+				a.path,
+				0,
+				0,
+				"an equirectangular image is twice as wide as it is tall, and this image is %dx%d",
+				image.width,
+				image.height,
+			)
 			return
 		}
 		return cube_from_equirect(image), .Cube, true
 	case .Array_Strip:
 		layers = array_from_strip(image)
 		if layers == nil {
-			report_error(problems, a.path, 0, 0, "a strip is square layers one above the other, at most %d, and this image is %dx%d", format.MAX_TEXTURE_LAYERS, image.width, image.height)
+			report_error(
+				problems,
+				a.path,
+				0,
+				0,
+				"a strip is square layers one above the other, at most %d, and this image is %dx%d",
+				format.MAX_TEXTURE_LAYERS,
+				image.width,
+				image.height,
+			)
 			return
 		}
 		return layers, .D2_Array, true
@@ -227,7 +377,8 @@ copy_rect :: proc(image: Image, x, y, width, height: int, half_turn := false) ->
 	result := Image{width, height, make([][4]f32, width * height, context.temp_allocator)}
 	for row in 0 ..< height {
 		for column in 0 ..< width {
-			to := half_turn ? (height - 1 - row) * width + (width - 1 - column) : row * width + column
+			to :=
+				half_turn ? (height - 1 - row) * width + (width - 1 - column) : row * width + column
 			result.pixels[to] = image.pixels[(y + row) * image.width + x + column]
 		}
 	}

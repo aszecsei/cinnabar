@@ -262,7 +262,12 @@ resolve_tags :: proc(s: ^State, p: ^Perception, warn: bool, allocator: runtime.A
 		} else {
 			p.tags[i] = TAG_UNKNOWN
 			if warn {
-				log.warnf("ai: %s's row %s looks at the tag %s, which perception.tags does not give", path, format.blob_string(p.data, r.key), format.blob_string(p.data, r.tag))
+				log.warnf(
+					"ai: %s's row %s looks at the tag %s, which perception.tags does not give",
+					path,
+					format.blob_string(p.data, r.key),
+					format.blob_string(p.data, r.tag),
+				)
 			}
 		}
 	}
@@ -270,18 +275,35 @@ resolve_tags :: proc(s: ^State, p: ^Perception, warn: bool, allocator: runtime.A
 
 // noise makes a noise, from frame code or a serial script step. Perceivers hear it in the next tick. A tag that the
 // project's perception.tags does not give is warned about, and the noise is dropped.
-noise :: proc(s: ^State, position: ecs.World_Position, loudness: f32, tag: string, source: ecs.Entity = 0) {
+noise :: proc(
+	s: ^State,
+	position: ecs.World_Position,
+	loudness: f32,
+	tag: string,
+	source: ecs.Entity = 0,
+) {
 	apply(s, noise_command(position, loudness, tag, source))
 }
 
 // write_noise asks to make a noise from a system's job. It is made when the job's commands apply, after the tick's
 // Fixed systems, and perceivers hear it in the next tick.
-write_noise :: proc(to: Writer, position: ecs.World_Position, loudness: f32, tag: string, source: ecs.Entity = 0) {
+write_noise :: proc(
+	to: Writer,
+	position: ecs.World_Position,
+	loudness: f32,
+	tag: string,
+	source: ecs.Entity = 0,
+) {
 	append(to.list, noise_command(position, loudness, tag, source))
 }
 
 @(private)
-noise_command :: proc(position: ecs.World_Position, loudness: f32, tag: string, source: ecs.Entity) -> Command {
+noise_command :: proc(
+	position: ecs.World_Position,
+	loudness: f32,
+	tag: string,
+	source: ecs.Entity,
+) -> Command {
 	c := Command {
 		entity = source,
 		kind   = .Noise,
@@ -301,7 +323,15 @@ apply_noise :: proc(s: ^State, c: Command) {
 		return
 	}
 	value := c.value
-	append(&s.noises_pending, Noise{position = (^ecs.World_Position)(&value)^, loudness = c.amount, tag = u8(tag), source = c.entity})
+	append(
+		&s.noises_pending,
+		Noise {
+			position = (^ecs.World_Position)(&value)^,
+			loudness = c.amount,
+			tag = u8(tag),
+			source = c.entity,
+		},
+	)
 }
 
 // perception_debug is an agent's perception memory, for drawing, or nil for an agent that has perceived nothing yet.
@@ -323,7 +353,13 @@ send_events :: proc(s: ^State, w: ^ecs.World, r: ^script.Runtime) {
 		}
 		switch e.kind {
 		case .Perceive:
-			script.send(r, e.agent, "perceive", e.other, "sight" if e.sense == .Sight else "hearing")
+			script.send(
+				r,
+				e.agent,
+				"perceive",
+				e.other,
+				"sight" if e.sense == .Sight else "hearing",
+			)
 		case .Forget:
 			script.send(r, e.agent, "forget", e.other)
 		}
@@ -333,7 +369,13 @@ send_events :: proc(s: ^State, w: ^ecs.World, r: ^script.Runtime) {
 
 // sight_points are a Perceivable's points as positions, at its pose.
 @(private)
-sight_points :: proc(p: Perceivable, t: ecs.Transform) -> (points: [MAX_SIGHT_POINTS]ecs.World_Position, count: int) {
+sight_points :: proc(
+	p: Perceivable,
+	t: ecs.Transform,
+) -> (
+	points: [MAX_SIGHT_POINTS]ecs.World_Position,
+	count: int,
+) {
 	offsets := [MAX_SIGHT_POINTS][3]f32{p.points.p0, p.points.p1, p.points.p2, p.points.p3}
 	count = clamp(int(p.point_count), 0, MAX_SIGHT_POINTS)
 	if count == 0 {
@@ -341,20 +383,31 @@ sight_points :: proc(p: Perceivable, t: ecs.Transform) -> (points: [MAX_SIGHT_PO
 		return points, 1
 	}
 	for i in 0 ..< count {
-		points[i] = ecs.position_offset(t.position, linalg.quaternion128_mul_vector3(t.rotation, offsets[i] * t.scale))
+		points[i] = ecs.position_offset(
+			t.position,
+			linalg.quaternion128_mul_vector3(t.rotation, offsets[i] * t.scale),
+		)
 	}
 	return
 }
 
 // eye_of is a perceiver's eye and forward axis, at its pose.
 eye_of :: proc(p: Perceiver, t: ecs.Transform) -> (eye: ecs.World_Position, forward: [3]f32) {
-	eye = ecs.position_offset(t.position, linalg.quaternion128_mul_vector3(t.rotation, p.eye_offset))
+	eye = ecs.position_offset(
+		t.position,
+		linalg.quaternion128_mul_vector3(t.rotation, p.eye_offset),
+	)
 	forward = linalg.normalize0(linalg.quaternion128_mul_vector3(t.rotation, [3]f32{0, 0, 1}))
 	return
 }
 
 // in_cone is whether a point is within a perceiver's range and cone.
-in_cone :: proc(eye: ecs.World_Position, forward: [3]f32, range, cos_half: f32, point: ecs.World_Position) -> bool {
+in_cone :: proc(
+	eye: ecs.World_Position,
+	forward: [3]f32,
+	range, cos_half: f32,
+	point: ecs.World_Position,
+) -> bool {
 	d := ecs.position_sub(point, eye)
 	length := linalg.length(d)
 	if length > range {
@@ -494,12 +547,24 @@ perceivers :: proc(s: ^State, w: ^ecs.World) -> []Perceiver_Work {
 			ready.perception = new(Perception_Memory, s.platform.heap_allocator)
 		}
 		m := ready.perception
-		if m.checked_rows != perception.blob.header.key || m.checked_board != board.blob.header.key {
+		if m.checked_rows != perception.blob.header.key ||
+		   m.checked_board != board.blob.header.key {
 			m.checked_rows, m.checked_board = perception.blob.header.key, board.blob.header.key
 			check_rows(slot.entity, perception, board)
 		}
 		eye, forward := eye_of(perceiver^, transform^)
-		append(&work, Perceiver_Work{slot = u32(index), entity = slot.entity, perceiver = perceiver^, perception = perception, board = board, eye = eye, forward = forward})
+		append(
+			&work,
+			Perceiver_Work {
+				slot = u32(index),
+				entity = slot.entity,
+				perceiver = perceiver^,
+				perception = perception,
+				board = board,
+				eye = eye,
+				forward = forward,
+			},
+		)
 	}
 	return work[:]
 }
@@ -513,9 +578,21 @@ check_rows :: proc(e: ecs.Entity, p: Perception, board: Board) {
 		name := format.blob_string(p.data, r.key)
 		want := format.perception_source_type(r.source)
 		if index, found := format.blackboard_find(board.data, board.blob, r.key_hash); !found {
-			log.warnf("ai: entity %v's blackboard has no key %s, which its perception %s fills", e, name, path)
+			log.warnf(
+				"ai: entity %v's blackboard has no key %s, which its perception %s fills",
+				e,
+				name,
+				path,
+			)
 		} else if keys[index].type != want {
-			log.warnf("ai: entity %v's key %s is a %v, and its perception %s fills it with a %v", e, name, keys[index].type, path, want)
+			log.warnf(
+				"ai: entity %v's key %s is a %v, and its perception %s fills it with a %v",
+				e,
+				name,
+				keys[index].type,
+				path,
+				want,
+			)
 		}
 	}
 }
@@ -555,7 +632,11 @@ perceivables :: proc(s: ^State, w: ^ecs.World) -> ([]Target, map[[3]i32][dynamic
 @(private)
 cell_of :: proc(p: ecs.World_Position) -> [3]i32 {
 	m := ecs.position_sub_f64(p, {})
-	return {i32(math.floor(m.x / SIGHT_CELL)), i32(math.floor(m.y / SIGHT_CELL)), i32(math.floor(m.z / SIGHT_CELL))}
+	return {
+		i32(math.floor(m.x / SIGHT_CELL)),
+		i32(math.floor(m.y / SIGHT_CELL)),
+		i32(math.floor(m.z / SIGHT_CELL)),
+	}
 }
 
 @(private)
@@ -714,7 +795,14 @@ perceive :: proc(j: ^Perceive_Job, pw: ^Perceiver_Work) {
 // remember finds an entity's entry, or makes one: in a full memory, in place of the entry perceived longest ago that
 // is not perceived now, which is forgotten, or not at all.
 @(private)
-remember :: proc(j: ^Perceive_Job, pw: ^Perceiver_Work, m: ^Perception_Memory, was: ^[MAX_MEMORY]bool, e: ecs.Entity, tag: u8) -> ^Memory_Entry {
+remember :: proc(
+	j: ^Perceive_Job,
+	pw: ^Perceiver_Work,
+	m: ^Perception_Memory,
+	was: ^[MAX_MEMORY]bool,
+	e: ecs.Entity,
+	tag: u8,
+) -> ^Memory_Entry {
 	for &entry in m.entries[:m.count] {
 		if entry.entity == e {
 			return &entry
@@ -731,7 +819,10 @@ remember :: proc(j: ^Perceive_Job, pw: ^Perceiver_Work, m: ^Perception_Memory, w
 		if at < 0 {
 			return nil
 		}
-		append(&j.events, Perception_Event{pw.entity, m.entries[at].entity, .Forget, m.entries[at].sense})
+		append(
+			&j.events,
+			Perception_Event{pw.entity, m.entries[at].entity, .Forget, m.entries[at].sense},
+		)
 	} else {
 		m.count += 1
 	}
@@ -787,7 +878,13 @@ see :: proc(j: ^Perceive_Job, pw: ^Perceiver_Work, m: ^Perception_Memory, was: ^
 	}
 	if j.s.physics != nil {
 		ignore := [1]ecs.Entity{pw.entity}
-		physics.raycast_batch(j.s.physics, w, rays, hits, {layers = pw.perceiver.sight_layers, ignore = ignore[:]})
+		physics.raycast_batch(
+			j.s.physics,
+			w,
+			rays,
+			hits,
+			{layers = pw.perceiver.sight_layers, ignore = ignore[:]},
+		)
 	}
 	m.ray_count = 0
 	n = 0
@@ -837,7 +934,12 @@ part_of :: proc(w: ^ecs.World, e, of: ecs.Entity) -> bool {
 // at once, and up to its range when a ray from its eye reaches NOISE_SURFACE short of the noise. A noise with a source
 // updates its entry. It gives the noises heard, in the order that they were made.
 @(private)
-hear :: proc(j: ^Perceive_Job, pw: ^Perceiver_Work, m: ^Perception_Memory, was: ^[MAX_MEMORY]bool) -> []u32 {
+hear :: proc(
+	j: ^Perceive_Job,
+	pw: ^Perceiver_Work,
+	m: ^Perception_Memory,
+	was: ^[MAX_MEMORY]bool,
+) -> []u32 {
 	s, w := j.s, j.world
 	heard := make([dynamic]u32, w.platform.frame_allocator)
 	for n, index in s.noises {
@@ -852,8 +954,14 @@ hear :: proc(j: ^Perceive_Job, pw: ^Perceiver_Work, m: ^Perception_Memory, was: 
 		if distance > range / 2 && s.physics != nil {
 			ignore := [2]ecs.Entity{pw.entity, n.source}
 			d := ecs.position_sub(n.position, pw.eye)
-			if hit, blocked := physics.raycast(s.physics, w, pw.eye, d, max(distance - NOISE_SURFACE, 0), {layers = pw.perceiver.sight_layers, ignore = ignore[:]});
-			   blocked && !part_of(w, hit.entity, n.source) {
+			if hit, blocked := physics.raycast(
+				s.physics,
+				w,
+				pw.eye,
+				d,
+				max(distance - NOISE_SURFACE, 0),
+				{layers = pw.perceiver.sight_layers, ignore = ignore[:]},
+			); blocked && !part_of(w, hit.entity, n.source) {
 				continue
 			}
 		}
@@ -873,7 +981,14 @@ hear :: proc(j: ^Perceive_Job, pw: ^Perceiver_Work, m: ^Perception_Memory, was: 
 
 // fill writes each row's key that the agent's blackboard has, of the row's type, through the job's commands.
 @(private)
-fill :: proc(j: ^Perceive_Job, pw: ^Perceiver_Work, m: ^Perception_Memory, heard: []u32, ready: ^Agent_Ready, slot: ^Agent_Slot) {
+fill :: proc(
+	j: ^Perceive_Job,
+	pw: ^Perceiver_Work,
+	m: ^Perception_Memory,
+	heard: []u32,
+	ready: ^Agent_Ready,
+	slot: ^Agent_Slot,
+) {
 	p := pw.perception
 	rows := format.perception_rows(p.data, p.blob)
 	keys := format.blackboard_keys(pw.board.data, pw.board.blob)
@@ -893,7 +1008,9 @@ fill :: proc(j: ^Perceive_Job, pw: ^Perceiver_Work, m: ^Perception_Memory, heard
 		if format.perception_source_chooses(r.source) {
 			best := -1
 			for e, k in m.entries[:m.count] {
-				if !matches(tag, e.tag) || (r.source == .Nearest_Seen && !e.seen) || (r.source == .Nearest_Heard && !e.heard) {
+				if !matches(tag, e.tag) ||
+				   (r.source == .Nearest_Seen && !e.seen) ||
+				   (r.source == .Nearest_Heard && !e.heard) {
 					continue
 				}
 				if best < 0 || closer(m, e, m.entries[best]) {
@@ -946,7 +1063,8 @@ fill :: proc(j: ^Perceive_Job, pw: ^Perceiver_Work, m: ^Perception_Memory, heard
 		case .Loudest_Noise:
 			loudest := -1
 			for n in heard {
-				if matches(tag, j.s.noises[n].tag) && (loudest < 0 || j.s.noises[n].loudness > j.s.noises[loudest].loudness) {
+				if matches(tag, j.s.noises[n].tag) &&
+				   (loudest < 0 || j.s.noises[n].loudness > j.s.noises[loudest].loudness) {
 					loudest = int(n)
 				}
 			}
@@ -965,5 +1083,8 @@ closer :: proc(m: ^Perception_Memory, a, b: Memory_Entry) -> bool {
 	if perceived_now(a) != perceived_now(b) {
 		return perceived_now(a)
 	}
-	return linalg.length(ecs.position_sub(a.position, m.eye)) < linalg.length(ecs.position_sub(b.position, m.eye))
+	return(
+		linalg.length(ecs.position_sub(a.position, m.eye)) <
+		linalg.length(ecs.position_sub(b.position, m.eye)) \
+	)
 }

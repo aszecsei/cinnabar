@@ -225,10 +225,15 @@ icons_mark_lights_volumes_and_cameras :: proc(t: ^testing.T) {
 	renderer := new(render.Renderer)
 	defer free(renderer)
 	renderer.reflection_probes.params.probes = 1
-	renderer.reflection_probes.slots[0] = {used = true, entity = probe}
+	renderer.reflection_probes.slots[0] = {
+		used   = true,
+		entity = probe,
+	}
 	icons = icon_instances(&f.world, {}, context.temp_allocator, renderer)
 	testing.expect_value(t, icons[len(icons) - 1].cube, -1)
-	renderer.reflection_probes.slots[0].cube = render.Reflection_Probe_Cube{index = 1}
+	renderer.reflection_probes.slots[0].cube = render.Reflection_Probe_Cube {
+		index = 1,
+	}
 	icons = icon_instances(&f.world, {}, context.temp_allocator, renderer)
 	testing.expect_value(t, icons[len(icons) - 1].entity, probe)
 	testing.expect_value(t, icons[len(icons) - 1].cube, 1)
@@ -236,14 +241,32 @@ icons_mark_lights_volumes_and_cameras :: proc(t: ^testing.T) {
 
 @(test)
 a_pick_covers_the_scenes_pixels_under_it :: proc(t: ^testing.T) {
-	frame := Viewport_Frame{size = {640, 360}, output_size = {1280, 720}}
+	frame := Viewport_Frame {
+		size        = {640, 360},
+		output_size = {1280, 720},
+	}
 	// A click at a pixel picks the scene's pixel under it.
-	testing.expect_value(t, scale_pick({id = 3, x = 101, y = 51, width = 1, height = 1}, frame), link.Pick_Request{id = 3, x = 50, y = 25, width = 1, height = 1})
+	testing.expect_value(
+		t,
+		scale_pick({id = 3, x = 101, y = 51, width = 1, height = 1}, frame),
+		link.Pick_Request{id = 3, x = 50, y = 25, width = 1, height = 1},
+	)
 	// A box covers every scene pixel that it touches.
-	testing.expect_value(t, scale_pick({x = 101, y = 50, width = 4, height = 2}, frame), link.Pick_Request{x = 50, y = 25, width = 3, height = 1})
+	testing.expect_value(
+		t,
+		scale_pick({x = 101, y = 50, width = 4, height = 2}, frame),
+		link.Pick_Request{x = 50, y = 25, width = 3, height = 1},
+	)
 	// At the frame's size, the pick is as it was.
-	same := Viewport_Frame{size = {1280, 720}, output_size = {1280, 720}}
-	testing.expect_value(t, scale_pick({x = 7, y = 9, width = 1, height = 1}, same), link.Pick_Request{x = 7, y = 9, width = 1, height = 1})
+	same := Viewport_Frame {
+		size        = {1280, 720},
+		output_size = {1280, 720},
+	}
+	testing.expect_value(
+		t,
+		scale_pick({x = 7, y = 9, width = 1, height = 1}, same),
+		link.Pick_Request{x = 7, y = 9, width = 1, height = 1},
+	)
 }
 
 // A navmesh of the volume 0x100 for the agent type 0: a floor of two 1 m squares from x = 0 to 2, z = 0 to 1, which
@@ -260,7 +283,13 @@ nav_floor :: proc(f: ^Helper_Fixture) {
 	none := u16(format.NAV_NONE)
 	data := format.nav_mesh_write(
 		{
-			agent = {name = "Human", radius = 0.25, height = 1.8, step_height = 0.3, max_slope = 45},
+			agent = {
+				name = "Human",
+				radius = 0.25,
+				height = 1.8,
+				step_height = 0.3,
+				max_slope = 45,
+			},
 			cell_size = 0.25,
 			cell_height = 0.1,
 			tile_size = 2,
@@ -268,11 +297,28 @@ nav_floor :: proc(f: ^Helper_Fixture) {
 			tiles_z = 1,
 			bounds_min = {0, -1, 0},
 			bounds_max = {2, 1, 1},
-			tiles = {{bounds_min = {0, -1, 0}, bounds_max = {2, 1, 1}, vertex_count = 8, polygon_count = 2, detail_vertex_count = 8, detail_triangle_count = 4}},
+			tiles = {
+				{
+					bounds_min = {0, -1, 0},
+					bounds_max = {2, 1, 1},
+					vertex_count = 8,
+					polygon_count = 2,
+					detail_vertex_count = 8,
+					detail_triangle_count = 4,
+				},
+			},
 			vertices = vertices[:],
 			polygons = {
-				{vertices = {0, 1, 2, 3, 0, 0}, neighbors = {none, none, 1, none, 0, 0}, vertex_count = 4},
-				{vertices = {4, 5, 6, 7, 0, 0}, neighbors = {0, none, none, none, 0, 0}, vertex_count = 4},
+				{
+					vertices = {0, 1, 2, 3, 0, 0},
+					neighbors = {none, none, 1, none, 0, 0},
+					vertex_count = 4,
+				},
+				{
+					vertices = {4, 5, 6, 7, 0, 0},
+					neighbors = {0, none, none, none, 0, 0},
+					vertex_count = 4,
+				},
 			},
 			details = {{0, 4, 0, 2}, {4, 4, 2, 2}},
 			detail_vertices = vertices[:],
@@ -331,7 +377,9 @@ the_nav_probe_draws_paths :: proc(t: ^testing.T) {
 	testing.expect_value(t, line_count(f), spheres)
 	// A selected agent's path, from where it stands to the goal.
 	agent := spawn_with(f, nav.Nav_Path{})
-	ecs.get_write(&f.world, agent, ecs.Transform).position = ecs.position_from_meters({0.5, 0, 0.5})
+	ecs.get_write(&f.world, agent, ecs.Transform).position = ecs.position_from_meters(
+		{0.5, 0, 0.5},
+	)
 	append(&f.editor.session.view.selection, agent)
 	testing.expect_value(t, line_count(f), spheres + 5)
 }
@@ -373,13 +421,27 @@ a_playing_perceiver_draws_its_rays_and_memory :: proc(t: ^testing.T) {
 		count     = 2,
 		ray_count = 2,
 	}
-	memory.entries[0] = {entity = 7, seen = true}
-	memory.entries[1] = {entity = 8, position = ecs.position_from_meters({0, 0, 3})}
-	memory.rays[0] = {to = ecs.position_from_meters({0, 1, 5})}
-	memory.rays[1] = {to = ecs.position_from_meters({1, 1, 5}), blocked = true}
+	memory.entries[0] = {
+		entity = 7,
+		seen   = true,
+	}
+	memory.entries[1] = {
+		entity   = 8,
+		position = ecs.position_from_meters({0, 0, 3}),
+	}
+	memory.rays[0] = {
+		to = ecs.position_from_meters({0, 1, 5}),
+	}
+	memory.rays[1] = {
+		to      = ecs.position_from_meters({1, 1, 5}),
+		blocked = true,
+	}
 	agents.agents.slots = make([dynamic]ai.Agent_Slot, context.temp_allocator)
 	agents.agents.generations = make([dynamic]u32, context.temp_allocator)
-	append(&agents.agents.slots, ai.Agent_Slot{entity = e, phase = ai.Agent_Ready{perception = &memory}})
+	append(
+		&agents.agents.slots,
+		ai.Agent_Slot{entity = e, phase = ai.Agent_Ready{perception = &memory}},
+	)
 	append(&agents.agents.generations, 1)
 	ecs.add(&f.world, e, ai.Agent_State{agent = {0, 1}})
 	f.editor.ai = &agents
@@ -424,16 +486,22 @@ a_playing_nav_agent_draws_its_corners_neighbors_and_velocities :: proc(t: ^testi
 	ecs.get_write(&f.world, other, ecs.Transform).position = ecs.position_from_meters({1, 0, 0})
 	// The crowd's pool, with the agent in its first slot, as the crowd system leaves it.
 	info := nav.Crowd_Debug {
-		corners        = {0 = ecs.position_from_meters({0, 0, 0}), 1 = ecs.position_from_meters({0, 0, 4})},
-		corner_count   = 2,
+		corners = {
+			0 = ecs.position_from_meters({0, 0, 0}),
+			1 = ecs.position_from_meters({0, 0, 4}),
+		},
+		corner_count = 2,
 		neighbor_count = 1,
-		desired        = {0, 0, 2},
-		velocity       = {0.5, 0, 1.5},
+		desired = {0, 0, 2},
+		velocity = {0.5, 0, 1.5},
 	}
 	info.neighbors[0] = other
 	f.nav.crowd.slots = make([dynamic]nav.Crowd_Slot, context.temp_allocator)
 	f.nav.crowd.generations = make([dynamic]u32, context.temp_allocator)
-	append(&f.nav.crowd.slots, nav.Crowd_Slot{entity = e, phase = nav.Crowd_Arrived{}, debug = info})
+	append(
+		&f.nav.crowd.slots,
+		nav.Crowd_Slot{entity = e, phase = nav.Crowd_Arrived{}, debug = info},
+	)
 	append(&f.nav.crowd.generations, 1)
 	ecs.add(&f.world, e, nav.Nav_Agent_State{crowd = {0, 1}})
 	f.editor.session.mode = .Play

@@ -17,7 +17,9 @@ octahedral_point :: proc(p: [2]f64) -> [3]f64 {
 
 @(private = "file")
 texel_point :: proc(texel: [2]int, directions: int, within: [2]f64) -> [3]f64 {
-	return octahedral_point(([2]f64{f64(texel.x), f64(texel.y)} + within) / f64(directions) * 2 - 1)
+	return octahedral_point(
+		([2]f64{f64(texel.x), f64(texel.y)} + within) / f64(directions) * 2 - 1,
+	)
 }
 
 @(private = "file")
@@ -34,7 +36,9 @@ solid_angle_weight :: proc(texel: [2]int, directions: int, normal: [3]f64) -> f6
 
 @(private = "file")
 direction_weight :: proc(texel: [2]int, directions: int, normal: [3]f64) -> f64 {
-	return directions < 6 ? cosine_weight(texel, directions, normal) : solid_angle_weight(texel, directions, normal)
+	return(
+		directions < 6 ? cosine_weight(texel, directions, normal) : solid_angle_weight(texel, directions, normal) \
+	)
 }
 
 // fibonacci is a point of a spherical Fibonacci set of count points.
@@ -111,8 +115,15 @@ gather_errors :: proc(directions: int, shape: Light_Shape) -> (errors: [Weightin
 			texel := [2]int{t % directions, t / directions}
 			mean = 0
 			for s in 0 ..< TEXEL_SAMPLES * TEXEL_SAMPLES {
-				within := [2]f64{(f64(s % TEXEL_SAMPLES) + 0.5) / TEXEL_SAMPLES, (f64(s / TEXEL_SAMPLES) + 0.5) / TEXEL_SAMPLES}
-				mean += light_from(shape, toward, linalg.normalize(texel_point(texel, directions, within)))
+				within := [2]f64 {
+					(f64(s % TEXEL_SAMPLES) + 0.5) / TEXEL_SAMPLES,
+					(f64(s / TEXEL_SAMPLES) + 0.5) / TEXEL_SAMPLES,
+				}
+				mean += light_from(
+					shape,
+					toward,
+					linalg.normalize(texel_point(texel, directions, within)),
+				)
 			}
 			mean /= TEXEL_SAMPLES * TEXEL_SAMPLES
 		}
@@ -153,12 +164,27 @@ the_solid_angle_counts_in_the_gather_from_6_directions :: proc(t: ^testing.T) {
 	for shape in Light_Shape {
 		// With 4 directions the cosine alone is the nearer of the two, so the gather keeps it.
 		e4 := gather_errors(4, shape)
-		testing.expectf(t, e4[.Cosine] <= e4[.Solid_Angle], "%v at 4: cosine %.4f, solid angle %.4f", shape, e4[.Cosine], e4[.Solid_Angle])
+		testing.expectf(
+			t,
+			e4[.Cosine] <= e4[.Solid_Angle],
+			"%v at 4: cosine %.4f, solid angle %.4f",
+			shape,
+			e4[.Cosine],
+			e4[.Solid_Angle],
+		)
 		testing.expectf(t, e4[.Chosen] < 0.045, "%v at 4: %.4f", shape, e4[.Chosen])
 		// From 6, the solid angle is.
 		for directions in ([]int{6, 8}) {
 			e := gather_errors(directions, shape)
-			testing.expectf(t, e[.Solid_Angle] < e[.Cosine], "%v at %d: cosine %.4f, solid angle %.4f", shape, directions, e[.Cosine], e[.Solid_Angle])
+			testing.expectf(
+				t,
+				e[.Solid_Angle] < e[.Cosine],
+				"%v at %d: cosine %.4f, solid angle %.4f",
+				shape,
+				directions,
+				e[.Cosine],
+				e[.Solid_Angle],
+			)
 			testing.expectf(t, e[.Chosen] == e[.Solid_Angle], "%v at %d", shape, directions)
 			if directions == 8 {
 				testing.expectf(t, e[.Chosen] < 0.015, "%v at 8: %.4f", shape, e[.Chosen])
@@ -173,9 +199,20 @@ the_cascades_fit_the_texture_at_every_level :: proc(t: ^testing.T) {
 	for level in Quality_Level {
 		for size in ([][2]u32{{1280, 720}, {1920, 1080}, {2560, 1440}, {3840, 2160}}) {
 			params := gi_fit(size, GI_PARAMS[level])
-			testing.expectf(t, params.cascades == GI_PARAMS[level].cascades, "%v at %v keeps %d cascades", level, size, params.cascades)
+			testing.expectf(
+				t,
+				params.cascades == GI_PARAMS[level].cascades,
+				"%v at %v keeps %d cascades",
+				level,
+				size,
+				params.cascades,
+			)
 			region := gi_region(size, params)
-			testing.expect(t, region.x <= GI_MAX_TEXTURE_SIZE && region.y * params.cascades <= GI_MAX_TEXTURE_SIZE)
+			testing.expect(
+				t,
+				region.x <= GI_MAX_TEXTURE_SIZE &&
+				region.y * params.cascades <= GI_MAX_TEXTURE_SIZE,
+			)
 		}
 	}
 
@@ -183,7 +220,11 @@ the_cascades_fit_the_texture_at_every_level :: proc(t: ^testing.T) {
 	// reach as far: the interval grows with the directions.
 	size := [2]u32{3840, 2160}
 	ultra := GI_PARAMS[.Ultra]
-	before := Gi_Params{cascades = 6, spacing = 4, directions = 4}
+	before := Gi_Params {
+		cascades   = 6,
+		spacing    = 4,
+		directions = 4,
+	}
 	texels :: proc(size: [2]u32, p: Gi_Params) -> u32 {
 		region := gi_region(size, p)
 		return region.x * region.y * p.cascades

@@ -74,55 +74,55 @@ Op :: struct {
 
 @(private)
 dev: struct {
-	logger:            runtime.Logger,
+	logger:              runtime.Logger,
 	// Backend-owned memory uses the host's allocator, not the allocator of whichever caller arrives first.
-	allocator:         runtime.Allocator,
-	factory:           ^dxgi.IFactory6,
-	adapter:           ^dxgi.IAdapter1,
-	device:            ^d3d.IDevice10,
-	info_queue:        ^d3d.IInfoQueue1,
-	callback_cookie:   u32,
-	features:          gpu.Features,
-	adapter_info:      gpu.Adapter,
+	allocator:           runtime.Allocator,
+	factory:             ^dxgi.IFactory6,
+	adapter:             ^dxgi.IAdapter1,
+	device:              ^d3d.IDevice10,
+	info_queue:          ^d3d.IInfoQueue1,
+	callback_cookie:     u32,
+	features:            gpu.Features,
+	adapter_info:        gpu.Adapter,
 	// The graphics queue and its fence. Frame ends, uploads and deferred releases use this fence.
-	queue:             ^d3d.ICommandQueue,
-	fence:             ^d3d.IFence,
-	fence_event:       win.HANDLE,
-	fence_value:       u64,
-	compute_queue:     ^d3d.ICommandQueue,
+	queue:               ^d3d.ICommandQueue,
+	fence:               ^d3d.IFence,
+	fence_event:         win.HANDLE,
+	fence_value:         u64,
+	compute_queue:       ^d3d.ICommandQueue,
 	// The queues' timestamp ticks per second, and the QPC's, for the profiler's GPU spans.
 	timestamp_frequency: [gpu.Queue]u64,
 	qpc_frequency:       win.LARGE_INTEGER,
-	compute_fence:     ^d3d.IFence,
-	compute_value:     u64,
-	frames:            [FRAMES_IN_FLIGHT]Frame,
-	frame_index:       u64,
+	compute_fence:       ^d3d.IFence,
+	compute_value:       u64,
+	frames:              [FRAMES_IN_FLIGHT]Frame,
+	frame_index:         u64,
 	// Guards the current frame's lists, ops and op_lists.
-	lists_mutex:       sync.Mutex,
-	swapchain:         ^dxgi.ISwapChain3,
-	hwnd:              win.HWND,
-	latency_waitable:  win.HANDLE,
-	size:              [2]i32,
-	back_buffers:      [BACK_BUFFER_COUNT]^d3d.IResource,
-	back_buffer_index: u32,
-	frame_target:      gpu.Texture,
+	lists_mutex:         sync.Mutex,
+	swapchain:           ^dxgi.ISwapChain3,
+	hwnd:                win.HWND,
+	latency_waitable:    win.HANDLE,
+	size:                [2]i32,
+	back_buffers:        [BACK_BUFFER_COUNT]^d3d.IResource,
+	back_buffer_index:   u32,
+	frame_target:        gpu.Texture,
 	// The output that the game asked for, and the frame's (see docs/gpu/presentation.md#presentation). Shared mode is always Sdr.
-	request:           gpu.Output_Request,
-	output:            gpu.Output,
+	request:             gpu.Output_Request,
+	output:              gpu.Output,
 	// The modes whose color space the swapchain cannot present, which are not tried again.
-	unsupported:       bit_set[gpu.Output_Mode],
+	unsupported:         bit_set[gpu.Output_Mode],
 	// False while the window is minimized: submissions are dropped and nothing is presented.
-	recording:         bool,
+	recording:           bool,
 	// Shared mode renders into shared textures instead of the swapchain (see shared.odin).
-	shared_mode:       bool,
-	shared:            Shared_State,
+	shared_mode:         bool,
+	shared:              Shared_State,
 	// The host's frame captures (see capture.odin).
-	captures:          Captures,
-	using resources:   Resources,
-	using pipelines:   Pipelines,
-	using uploads:     Uploads,
-	using streaming:   Streaming,
-	using upscalers:   Upscalers,
+	captures:            Captures,
+	using resources:     Resources,
+	using pipelines:     Pipelines,
+	using uploads:       Uploads,
+	using streaming:     Streaming,
+	using upscalers:     Upscalers,
 }
 
 // A non-empty shared_name selects shared mode: the frame target is a set of named shared textures, and nothing presents.
@@ -131,7 +131,9 @@ dev: struct {
 init :: proc(window: rawptr, size: [2]i32, shared_name := "", adapter: u64 = 0) -> bool {
 	dev.logger = context.logger
 	dev.allocator = context.allocator
-	dev.output = {format = gpu.FRAME_TARGET_FORMAT}
+	dev.output = {
+		format = gpu.FRAME_TARGET_FORMAT,
+	}
 	when ODIN_DEBUG {
 		enable_debug_layer()
 	}
@@ -140,9 +142,14 @@ init :: proc(window: rawptr, size: [2]i32, shared_name := "", adapter: u64 = 0) 
 	when ODIN_DEBUG {
 		factory_flags = {.DEBUG}
 	}
-	if win.FAILED(dxgi.CreateDXGIFactory2(factory_flags, dxgi.IFactory6_UUID, (^rawptr)(&dev.factory))) {
+	if win.FAILED(
+		dxgi.CreateDXGIFactory2(factory_flags, dxgi.IFactory6_UUID, (^rawptr)(&dev.factory)),
+	) {
 		// The DXGI debug layer is missing unless Graphics Tools are installed.
-		if !check(dxgi.CreateDXGIFactory2({}, dxgi.IFactory6_UUID, (^rawptr)(&dev.factory)), "CreateDXGIFactory2") {
+		if !check(
+			dxgi.CreateDXGIFactory2({}, dxgi.IFactory6_UUID, (^rawptr)(&dev.factory)),
+			"CreateDXGIFactory2",
+		) {
 			return false
 		}
 	}
@@ -156,13 +163,29 @@ init :: proc(window: rawptr, size: [2]i32, shared_name := "", adapter: u64 = 0) 
 	queue_desc := d3d.COMMAND_QUEUE_DESC {
 		Type = .DIRECT,
 	}
-	check(dev.device->CreateCommandQueue(&queue_desc, d3d.ICommandQueue_UUID, (^rawptr)(&dev.queue)), "CreateCommandQueue") or_return
-	check(dev.device->CreateFence(0, {}, d3d.IFence_UUID, (^rawptr)(&dev.fence)), "CreateFence") or_return
+	check(
+		dev.device->CreateCommandQueue(&queue_desc, d3d.ICommandQueue_UUID, (^rawptr)(&dev.queue)),
+		"CreateCommandQueue",
+	) or_return
+	check(
+		dev.device->CreateFence(0, {}, d3d.IFence_UUID, (^rawptr)(&dev.fence)),
+		"CreateFence",
+	) or_return
 	compute_desc := d3d.COMMAND_QUEUE_DESC {
 		Type = .COMPUTE,
 	}
-	check(dev.device->CreateCommandQueue(&compute_desc, d3d.ICommandQueue_UUID, (^rawptr)(&dev.compute_queue)), "CreateCommandQueue(compute)") or_return
-	check(dev.device->CreateFence(0, {}, d3d.IFence_UUID, (^rawptr)(&dev.compute_fence)), "CreateFence(compute)") or_return
+	check(
+		dev.device->CreateCommandQueue(
+			&compute_desc,
+			d3d.ICommandQueue_UUID,
+			(^rawptr)(&dev.compute_queue),
+		),
+		"CreateCommandQueue(compute)",
+	) or_return
+	check(
+		dev.device->CreateFence(0, {}, d3d.IFence_UUID, (^rawptr)(&dev.compute_fence)),
+		"CreateFence(compute)",
+	) or_return
 	dev.queue->SetName(win.L("graphics"))
 	dev.compute_queue->SetName(win.L("compute"))
 	dev.fence_event = win.CreateEventW(nil, false, false, nil)
@@ -247,7 +270,12 @@ shutdown :: proc() {
 		// The report goes to the debugger output.
 		debug: ^dxgi.IDebug
 		if win.SUCCEEDED(dxgi.GetDebugInterface1(0, dxgi.IDebug_UUID, (^rawptr)(&debug))) {
-			debug->ReportLiveObjects(dxgi.DEBUG_ALL, dxgi.DEBUG_RLO_FLAGS(u32(dxgi.DEBUG_RLO_FLAGS.DETAIL) | u32(dxgi.DEBUG_RLO_FLAGS.IGNORE_INTERNAL)))
+			debug->ReportLiveObjects(
+				dxgi.DEBUG_ALL,
+				dxgi.DEBUG_RLO_FLAGS(
+					u32(dxgi.DEBUG_RLO_FLAGS.DETAIL) | u32(dxgi.DEBUG_RLO_FLAGS.IGNORE_INTERNAL),
+				),
+			)
 			debug->Release()
 		}
 	}
@@ -274,7 +302,8 @@ stats :: proc() -> gpu.Stats {
 	dev.upload_peak = 0
 	s.bottom_accel_memory, s.bottom_accel_memory_uncompacted = accel_memory()
 	adapter: ^dxgi.IAdapter3
-	if dev.adapter != nil && win.SUCCEEDED(dev.adapter->QueryInterface(dxgi.IAdapter3_UUID, (^rawptr)(&adapter))) {
+	if dev.adapter != nil &&
+	   win.SUCCEEDED(dev.adapter->QueryInterface(dxgi.IAdapter3_UUID, (^rawptr)(&adapter))) {
 		info: dxgi.QUERY_VIDEO_MEMORY_INFO
 		if win.SUCCEEDED(adapter->QueryVideoMemoryInfo(0, .LOCAL, &info)) {
 			s.video_memory_used, s.video_memory_budget = info.CurrentUsage, info.Budget
@@ -341,7 +370,16 @@ begin_frame :: proc(size: [2]i32) {
 	clear(&frame.op_lists)
 	list := acquire_list(frame, .Graphics)
 	write_timestamp(frame, list, FRAME_BEGIN_TIMESTAMP)
-	texture_barrier(list, target.resource, {.NO_ACCESS}, {.RENDER_TARGET}, {}, {.RENDER_TARGET}, .UNDEFINED, .RENDER_TARGET)
+	texture_barrier(
+		list,
+		target.resource,
+		{.NO_ACCESS},
+		{.RENDER_TARGET},
+		{},
+		{.RENDER_TARGET},
+		.UNDEFINED,
+		.RENDER_TARGET,
+	)
 	finish_streams(list)
 	check(list->Close(), "ICommandList.Close")
 	append(&frame.ops, Op{queue = .Graphics, first = len(frame.op_lists), count = 1})
@@ -355,10 +393,19 @@ begin_frame :: proc(size: [2]i32) {
 // submission on the queue. end_frame executes the submissions in order. Debug builds validate the buffers first,
 // and drop all of them if any breaks a rule. Call it from the game's frame code or from a job: it waits for the
 // translation jobs.
-submit :: proc(buffers: []gpu.Command_Buffer, queue := gpu.Queue.Graphics, wait_for := gpu.Queues{}) -> bool {
+submit :: proc(
+	buffers: []gpu.Command_Buffer,
+	queue := gpu.Queue.Graphics,
+	wait_for := gpu.Queues{},
+) -> bool {
 	profile.zone_text("GPU submit", .Render)
 	when ODIN_DEBUG {
-		if err, buffer, packet := gpu.validate_submission(buffers, VALIDATION_RESOURCES, &dev.layouts, queue); err != .None {
+		if err, buffer, packet := gpu.validate_submission(
+			buffers,
+			VALIDATION_RESOURCES,
+			&dev.layouts,
+			queue,
+		); err != .None {
 			log.errorf("gpu: command buffer %d, packet %d: %v", buffer, packet, err)
 			return false
 		}
@@ -373,7 +420,11 @@ submit :: proc(buffers: []gpu.Command_Buffer, queue := gpu.Queue.Graphics, wait_
 	translate_jobs := make([]jobs.Job, len(buffers), dev.allocator)
 	defer delete(translate_jobs, dev.allocator)
 	for cb, i in buffers {
-		tasks[i] = {frame = frame, queue = queue, cb = cb}
+		tasks[i] = {
+			frame = frame,
+			queue = queue,
+			cb    = cb,
+		}
 		translate_jobs[i] = {translate_job, &tasks[i]}
 	}
 	// Reserving the submission first keeps the order when several jobs submit at once.
@@ -420,7 +471,14 @@ acquire_list :: proc(frame: ^Frame, queue: gpu.Queue) -> ^d3d.IGraphicsCommandLi
 	if frame.lists_used[queue] == len(lists) {
 		type := LIST_TYPE[queue]
 		entry: Command_List
-		if !check(dev.device->CreateCommandAllocator(type, d3d.ICommandAllocator_UUID, (^rawptr)(&entry.allocator)), "CreateCommandAllocator") {
+		if !check(
+			dev.device->CreateCommandAllocator(
+				type,
+				d3d.ICommandAllocator_UUID,
+				(^rawptr)(&entry.allocator),
+			),
+			"CreateCommandAllocator",
+		) {
 			log.panic("d3d12: cannot create a command allocator")
 		}
 		list, ok := create_command_list(entry.allocator, type)
@@ -461,7 +519,8 @@ end_frame :: proc() {
 		return
 	}
 	when ODIN_DEBUG {
-		if layout, _ := gpu.tracked_layout(&dev.layouts, dev.frame_target); layout != .Render_Target {
+		if layout, _ := gpu.tracked_layout(&dev.layouts, dev.frame_target);
+		   layout != .Render_Target {
 			log.errorf("gpu: the frame target ends the frame in the %v layout", layout)
 		}
 	}
@@ -469,12 +528,30 @@ end_frame :: proc() {
 	target := gpu.pool_get(&dev.textures, dev.frame_target)
 	list := acquire_list(frame, .Graphics)
 	if slot := pending_capture(); slot == nil {
-		texture_barrier(list, target.resource, {.RENDER_TARGET}, {.NO_ACCESS}, {.RENDER_TARGET}, {}, .RENDER_TARGET, .PRESENT)
+		texture_barrier(
+			list,
+			target.resource,
+			{.RENDER_TARGET},
+			{.NO_ACCESS},
+			{.RENDER_TARGET},
+			{},
+			.RENDER_TARGET,
+			.PRESENT,
+		)
 	} else if viewport, is_viewport := slot.viewport.?; is_viewport {
 		// The copy reads the viewport's target, which end_shared_sides then moves to the common layout. The frame target
 		// ends as it does without a capture.
 		record_viewport_capture(slot, list, viewport)
-		texture_barrier(list, target.resource, {.RENDER_TARGET}, {.NO_ACCESS}, {.RENDER_TARGET}, {}, .RENDER_TARGET, .PRESENT)
+		texture_barrier(
+			list,
+			target.resource,
+			{.RENDER_TARGET},
+			{.NO_ACCESS},
+			{.RENDER_TARGET},
+			{},
+			.RENDER_TARGET,
+			.PRESENT,
+		)
 	} else {
 		record_capture(slot, list, target)
 	}
@@ -581,7 +658,17 @@ create_command_list :: proc(
 	list: ^d3d.IGraphicsCommandList7,
 	ok: bool,
 ) {
-	check(dev.device->CreateCommandList(0, type, allocator, nil, d3d.IGraphicsCommandList7_UUID, (^rawptr)(&list)), "CreateCommandList") or_return
+	check(
+		dev.device->CreateCommandList(
+			0,
+			type,
+			allocator,
+			nil,
+			d3d.IGraphicsCommandList7_UUID,
+			(^rawptr)(&list),
+		),
+		"CreateCommandList",
+	) or_return
 	check(list->Close(), "Close") or_return
 	return list, true
 }
@@ -592,10 +679,24 @@ create_device :: proc(luid: u64) -> bool {
 		adapter: ^dxgi.IAdapter1
 		if luid != 0 {
 			// Only the named adapter, so the second pass ends the loop.
-			if i > 0 || win.FAILED(dev.factory->EnumAdapterByLuid(transmute(dxgi.LUID)luid, dxgi.IAdapter1_UUID, (^rawptr)(&adapter))) {
+			if i > 0 ||
+			   win.FAILED(
+				   dev.factory->EnumAdapterByLuid(
+					   transmute(dxgi.LUID)luid,
+					   dxgi.IAdapter1_UUID,
+					   (^rawptr)(&adapter),
+				   ),
+			   ) {
 				break
 			}
-		} else if win.FAILED(dev.factory->EnumAdapterByGpuPreference(i, .HIGH_PERFORMANCE, dxgi.IAdapter1_UUID, (^rawptr)(&adapter))) {
+		} else if win.FAILED(
+			dev.factory->EnumAdapterByGpuPreference(
+				i,
+				.HIGH_PERFORMANCE,
+				dxgi.IAdapter1_UUID,
+				(^rawptr)(&adapter),
+			),
+		) {
 			break
 		}
 		desc: dxgi.ADAPTER_DESC1
@@ -608,7 +709,14 @@ create_device :: proc(luid: u64) -> bool {
 
 		// IDevice10 needs the Agility SDK runtime on older Windows versions, like Enhanced Barriers.
 		device: ^d3d.IDevice10
-		if win.FAILED(d3d.CreateDevice((^d3d.IUnknown)(adapter), ._12_0, d3d.IDevice10_UUID, (^rawptr)(&device))) {
+		if win.FAILED(
+			d3d.CreateDevice(
+				(^d3d.IUnknown)(adapter),
+				._12_0,
+				d3d.IDevice10_UUID,
+				(^rawptr)(&device),
+			),
+		) {
 			adapter->Release()
 			continue
 		}
@@ -632,9 +740,14 @@ create_device :: proc(luid: u64) -> bool {
 		return true
 	}
 	if luid != 0 {
-		log.errorf("d3d12: adapter %16x is missing, or lacks Shader Model 6.6, resource binding tier 3 or Enhanced Barriers", luid)
+		log.errorf(
+			"d3d12: adapter %16x is missing, or lacks Shader Model 6.6, resource binding tier 3 or Enhanced Barriers",
+			luid,
+		)
 	} else {
-		log.error("d3d12: no adapter supports Shader Model 6.6, resource binding tier 3 and Enhanced Barriers")
+		log.error(
+			"d3d12: no adapter supports Shader Model 6.6, resource binding tier 3 and Enhanced Barriers",
+		)
 	}
 	return false
 }
@@ -645,7 +758,9 @@ missing_floor_feature :: proc(device: ^d3d.IDevice10) -> string {
 	shader_model := d3d.FEATURE_DATA_SHADER_MODEL {
 		HighestShaderModel = ._6_6,
 	}
-	if win.FAILED(device->CheckFeatureSupport(.SHADER_MODEL, &shader_model, size_of(shader_model))) ||
+	if win.FAILED(
+		   device->CheckFeatureSupport(.SHADER_MODEL, &shader_model, size_of(shader_model)),
+	   ) ||
 	   shader_model.HighestShaderModel < ._6_6 {
 		return "Shader Model 6.6"
 	}
@@ -674,11 +789,13 @@ query_features :: proc(device: ^d3d.IDevice10) -> (features: gpu.Features) {
 		}
 	}
 	options7: d3d.FEATURE_DATA_OPTIONS7
-	if win.SUCCEEDED(device->CheckFeatureSupport(.OPTIONS7, &options7, size_of(options7))) && options7.MeshShaderTier >= ._1 {
+	if win.SUCCEEDED(device->CheckFeatureSupport(.OPTIONS7, &options7, size_of(options7))) &&
+	   options7.MeshShaderTier >= ._1 {
 		features += {.Mesh_Shaders}
 	}
 	options: d3d.FEATURE_DATA_OPTIONS
-	if win.SUCCEEDED(device->CheckFeatureSupport(.OPTIONS, &options, size_of(options))) && options.ConservativeRasterizationTier >= ._1 {
+	if win.SUCCEEDED(device->CheckFeatureSupport(.OPTIONS, &options, size_of(options))) &&
+	   options.ConservativeRasterizationTier >= ._1 {
 		features += {.Conservative_Raster}
 	}
 	return
@@ -698,20 +815,43 @@ create_swapchain :: proc(hwnd: win.HWND, size: [2]i32) -> bool {
 		Flags = SWAP_CHAIN_FLAGS,
 	}
 	swapchain1: ^dxgi.ISwapChain1
-	check(dev.factory->CreateSwapChainForHwnd((^dxgi.IUnknown)(dev.queue), hwnd, &desc, nil, nil, &swapchain1), "CreateSwapChainForHwnd") or_return
+	check(
+		dev.factory->CreateSwapChainForHwnd(
+			(^dxgi.IUnknown)(dev.queue),
+			hwnd,
+			&desc,
+			nil,
+			nil,
+			&swapchain1,
+		),
+		"CreateSwapChainForHwnd",
+	) or_return
 	defer swapchain1->Release()
-	check(swapchain1->QueryInterface(dxgi.ISwapChain3_UUID, (^rawptr)(&dev.swapchain)), "QueryInterface(ISwapChain3)") or_return
+	check(
+		swapchain1->QueryInterface(dxgi.ISwapChain3_UUID, (^rawptr)(&dev.swapchain)),
+		"QueryInterface(ISwapChain3)",
+	) or_return
 	dev.factory->MakeWindowAssociation(hwnd, {.NO_ALT_ENTER})
 	dev.hwnd = hwnd
 
-	check(dev.swapchain->SetMaximumFrameLatency(FRAMES_IN_FLIGHT), "SetMaximumFrameLatency") or_return
+	check(
+		dev.swapchain->SetMaximumFrameLatency(FRAMES_IN_FLIGHT),
+		"SetMaximumFrameLatency",
+	) or_return
 	dev.latency_waitable = dev.swapchain->GetFrameLatencyWaitableObject()
 
 	dev.size = {i32(desc.Width), i32(desc.Height)}
 	// The frame target's resource and view change every frame to the current back buffer.
 	dev.frame_target = gpu.pool_add(
 		&dev.textures,
-		Texture_Entry{desc = {size = {desc.Width, desc.Height}, format = gpu.FRAME_TARGET_FORMAT, usage = {.Render_Target}, scope = .Permanent}},
+		Texture_Entry {
+			desc = {
+				size = {desc.Width, desc.Height},
+				format = gpu.FRAME_TARGET_FORMAT,
+				usage = {.Render_Target},
+				scope = .Permanent,
+			},
+		},
 	)
 	return create_back_buffers()
 }
@@ -723,7 +863,10 @@ create_back_buffers :: proc() -> bool {
 		ViewDimension = .TEXTURE2D,
 	}
 	for &buffer, i in dev.back_buffers {
-		check(dev.swapchain->GetBuffer(u32(i), d3d.IResource_UUID, (^rawptr)(&buffer)), "GetBuffer") or_return
+		check(
+			dev.swapchain->GetBuffer(u32(i), d3d.IResource_UUID, (^rawptr)(&buffer)),
+			"GetBuffer",
+		) or_return
 		buffer->SetName(win.L("frame target"))
 		dev.device->CreateRenderTargetView(buffer, &view, rtv_handle(gpu.MAX_TEXTURES + u32(i)))
 	}
@@ -741,7 +884,10 @@ release_back_buffers :: proc() {
 resize_swapchain :: proc(size: [2]i32) {
 	wait_idle()
 	release_back_buffers()
-	if !check(dev.swapchain->ResizeBuffers(0, u32(size.x), u32(size.y), .UNKNOWN, SWAP_CHAIN_FLAGS), "ResizeBuffers") {
+	if !check(
+		dev.swapchain->ResizeBuffers(0, u32(size.x), u32(size.y), .UNKNOWN, SWAP_CHAIN_FLAGS),
+		"ResizeBuffers",
+	) {
 		log.panic("d3d12: cannot resize the swapchain")
 	}
 	create_back_buffers()
@@ -798,13 +944,25 @@ update_output :: proc() {
 @(private = "file")
 set_swapchain_mode :: proc(mode: gpu.Output_Mode) -> bool {
 	format := gpu.output_format(mode)
-	if !check(dev.swapchain->ResizeBuffers(0, u32(dev.size.x), u32(dev.size.y), swapchain_format(format), SWAP_CHAIN_FLAGS), "ResizeBuffers") {
+	if !check(
+		dev.swapchain->ResizeBuffers(
+			0,
+			u32(dev.size.x),
+			u32(dev.size.y),
+			swapchain_format(format),
+			SWAP_CHAIN_FLAGS,
+		),
+		"ResizeBuffers",
+	) {
 		log.panic("d3d12: cannot change the swapchain's format")
 	}
 	dev.output.mode, dev.output.format = mode, format
 	support: dxgi.SWAP_CHAIN_COLOR_SPACE_SUPPORT
 	dev.swapchain->CheckColorSpaceSupport(OUTPUT_COLOR_SPACE[mode], &support)
-	return .PRESENT in support && check(dev.swapchain->SetColorSpace1(OUTPUT_COLOR_SPACE[mode]), "SetColorSpace1")
+	return(
+		.PRESENT in support &&
+		check(dev.swapchain->SetColorSpace1(OUTPUT_COLOR_SPACE[mode]), "SetColorSpace1") \
+	)
 }
 
 @(private)
@@ -857,7 +1015,10 @@ signal_queue :: proc(queue: gpu.Queue) {
 		signal()
 	case .Compute:
 		dev.compute_value += 1
-		check(dev.compute_queue->Signal(dev.compute_fence, dev.compute_value), "ICommandQueue.Signal")
+		check(
+			dev.compute_queue->Signal(dev.compute_fence, dev.compute_value),
+			"ICommandQueue.Signal",
+		)
 	}
 }
 
@@ -869,7 +1030,8 @@ queue_of :: proc(queue: gpu.Queue) -> ^d3d.ICommandQueue {
 // fence_of returns a queue's fence and the value of its last signal.
 @(private = "file")
 fence_of :: proc(queue: gpu.Queue) -> (^d3d.IFence, u64) {
-	return queue == .Graphics ? dev.fence : dev.compute_fence, queue == .Graphics ? dev.fence_value : dev.compute_value
+	return queue == .Graphics ? dev.fence : dev.compute_fence,
+		queue == .Graphics ? dev.fence_value : dev.compute_value
 }
 
 // wait_idle waits for both queues. The graphics queue waits for the compute queue, so its fence covers both.
@@ -887,14 +1049,18 @@ wait_idle :: proc() {
 enable_debug_layer :: proc() {
 	debug: ^d3d.IDebug1
 	if win.FAILED(d3d.GetDebugInterface(d3d.IDebug1_UUID, (^rawptr)(&debug))) {
-		log.warn("d3d12: the debug layer is unavailable. Install the Graphics Tools optional feature.")
+		log.warn(
+			"d3d12: the debug layer is unavailable. Install the Graphics Tools optional feature.",
+		)
 		return
 	}
 	debug->EnableDebugLayer()
 	debug->Release()
 
 	dred: ^d3d.IDeviceRemovedExtendedDataSettings
-	if win.SUCCEEDED(d3d.GetDebugInterface(d3d.IDeviceRemovedExtendedDataSettings_UUID, (^rawptr)(&dred))) {
+	if win.SUCCEEDED(
+		d3d.GetDebugInterface(d3d.IDeviceRemovedExtendedDataSettings_UUID, (^rawptr)(&dred)),
+	) {
 		dred->SetAutoBreadcrumbsEnablement(.FORCED_ON)
 		dred->SetPageFaultEnablement(.FORCED_ON)
 		dred->Release()

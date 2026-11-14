@@ -17,17 +17,41 @@ skinned_gltf :: proc() -> string {
 	positions := [6][3]f32{{0, 0, 0}, {1, 0, 0}, {0, 1, 0}, {1, 1, 0}, {0, 2, 0}, {1, 2, 0}}
 	indices := [12]u16{0, 1, 3, 0, 3, 2, 2, 3, 5, 2, 5, 4}
 	// Joint 0 is Knee and joint 1 is Hip, as the skin lists them.
-	joints := [6][4]u8{{1, 0, 0, 0}, {1, 0, 0, 0}, {0, 1, 0, 0}, {0, 1, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}}
-	weights := [6][4]f32{{1, 0, 0, 0}, {1, 0, 0, 0}, {0.5, 0.5, 0, 0}, {0.5, 0.5, 0, 0}, {1, 0, 0, 0}, {1, 0, 0, 0}}
+	joints := [6][4]u8 {
+		{1, 0, 0, 0},
+		{1, 0, 0, 0},
+		{0, 1, 0, 0},
+		{0, 1, 0, 0},
+		{0, 0, 0, 0},
+		{0, 0, 0, 0},
+	}
+	weights := [6][4]f32 {
+		{1, 0, 0, 0},
+		{1, 0, 0, 0},
+		{0.5, 0.5, 0, 0},
+		{0.5, 0.5, 0, 0},
+		{1, 0, 0, 0},
+		{1, 0, 0, 0},
+	}
 	// Column-major: Knee's world is at (1, 1, 3) and Hip's at (1, 0, 3).
-	inverse_binds := [2][16]f32{{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, -1, -1, -3, 1}, {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, -1, 0, -3, 1}}
+	inverse_binds := [2][16]f32 {
+		{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, -1, -1, -3, 1},
+		{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, -1, 0, -3, 1},
+	}
 	times := [2]f32{0, 1}
 	bend := [2][4]f32{{0, 0, 0, 1}, {0, 0, math.SQRT_TWO / 2, math.SQRT_TWO / 2}}
 	sway := [6][3]f32{{0, 0, 0}, {1, 0, 0}, {0, 0, 0}, {0, 0, 0}, {2, 0, 0}, {0, 0, 0}}
 	buffer := make([dynamic]byte, context.temp_allocator)
 	views := make([dynamic]string, context.temp_allocator)
 	add :: proc(buffer: ^[dynamic]byte, views: ^[dynamic]string, data: []byte) {
-		append(views, fmt.tprintf(`{{"buffer": 0, "byteOffset": %d, "byteLength": %d}}`, len(buffer), len(data)))
+		append(
+			views,
+			fmt.tprintf(
+				`{{"buffer": 0, "byteOffset": %d, "byteLength": %d}}`,
+				len(buffer),
+				len(data),
+			),
+		)
 		append(buffer, ..data)
 	}
 	add(&buffer, &views, mem.slice_to_bytes(positions[:]))
@@ -74,13 +98,23 @@ skinned_gltf :: proc() -> string {
 }}`,
 		len(buffer),
 		encoded,
-		views[0], views[1], views[2], views[3], views[4], views[5], views[6], views[7],
+		views[0],
+		views[1],
+		views[2],
+		views[3],
+		views[4],
+		views[5],
+		views[6],
+		views[7],
 	)
 }
 
 @(private = "file")
 skinned_meta :: proc(t: ^testing.T, tree: Tree) -> format.Meta {
-	text, err := os.read_entire_file(fmt.tprintf("%s/content/rig.gltf.meta", tree.dir), context.temp_allocator)
+	text, err := os.read_entire_file(
+		fmt.tprintf("%s/content/rig.gltf.meta", tree.dir),
+		context.temp_allocator,
+	)
 	testing.expect(t, err == nil)
 	meta, ok := format.meta_parse(string(text), context.temp_allocator)
 	testing.expect(t, ok)
@@ -156,7 +190,11 @@ a_skinned_model_imports_its_skin_and_animations :: proc(t: ^testing.T) {
 		case 2:
 			testing.expect(t, v.joints[0] == 2 && v.weights[0] == 65535, "the top row is Knee's")
 		case:
-			testing.expect(t, v.weights[0] > 32000 && v.weights[1] > 32000, "the middle row is shared")
+			testing.expect(
+				t,
+				v.weights[0] > 32000 && v.weights[1] > 32000,
+				"the middle row is shared",
+			)
 		}
 	}
 
@@ -172,9 +210,18 @@ a_skinned_model_imports_its_skin_and_animations :: proc(t: ^testing.T) {
 		testing.expect_value(t, len(channels), 1)
 		if len(channels) == 1 {
 			c := channels[0]
-			testing.expect(t, c.joint == 2 && c.path == .Rotation && c.interpolation == .Linear && c.key_count == 2)
+			testing.expect(
+				t,
+				c.joint == 2 &&
+				c.path == .Rotation &&
+				c.interpolation == .Linear &&
+				c.key_count == 2,
+			)
 			values := format.animation_values(bend_data, bend)[c.first_value:]
-			testing.expect(t, near(values[6], -math.SQRT_TWO / 2) && near(values[7], math.SQRT_TWO / 2))
+			testing.expect(
+				t,
+				near(values[6], -math.SQRT_TWO / 2) && near(values[7], math.SQRT_TWO / 2),
+			)
 		}
 	}
 

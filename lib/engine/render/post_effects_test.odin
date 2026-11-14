@@ -59,13 +59,21 @@ post_effects_run_in_order_where_their_volumes_reach :: proc(t: ^testing.T) {
 	late := proc(f: ^Frame, settings: rawptr) {note(f, "late", settings)}
 	early := proc(f: ^Frame, settings: rawptr) {note(f, "early", settings)}
 	other := proc(f: ^Frame, settings: rawptr) {note(f, "other", settings)}
-	testing.expect(t, register_post_effect(r, w, "late", .Before_Tone_Mapping, Grain, late, order = 5))
+	testing.expect(
+		t,
+		register_post_effect(r, w, "late", .Before_Tone_Mapping, Grain, late, order = 5),
+	)
 	testing.expect(t, register_post_effect(r, w, "early", .Before_Tone_Mapping, Grain, early))
 	testing.expect(t, register_post_effect(r, w, "other", .After_Temporal_Aa, Grain, other))
 
 	calls: Calls
 	pf: Post_Frame
-	f := Frame{renderer = r, state = &r.view, post = &pf, data = &calls}
+	f := Frame {
+		renderer = r,
+		state    = &r.view,
+		post     = &pf,
+		data     = &calls,
+	}
 	run :: proc(f: ^Frame, w: ^ecs.World, point: Post_Point) {
 		f.post.effect_settings = resolve_settings(f.renderer, w, {}).effects
 		add_post_effects(f, point)

@@ -53,7 +53,10 @@ take_log :: proc(w: ^World, allocator := context.allocator) -> []Log_Entry {
 log_append :: proc(w: ^World, entry: Log_Entry) {
 	if w.log_count == MAX_LOG {
 		if !w.log_full {
-			log.errorf("ecs: the log has more than %d entries, so later ones are lost. Drain it every frame.", MAX_LOG)
+			log.errorf(
+				"ecs: the log has more than %d entries, so later ones are lost. Drain it every frame.",
+				MAX_LOG,
+			)
 			w.log_full = true
 		}
 		return
@@ -78,7 +81,11 @@ log_removal :: proc(w: ^World, e: Entity, index: u32, column: u32) {
 		data: u64
 		if a.sizes[column] > 0 {
 			record := live_record(w, e)
-			mem.copy(&data, component_at(w, index, column, record.row), min(int(a.sizes[column]), size_of(u64)))
+			mem.copy(
+				&data,
+				component_at(w, index, column, record.row),
+				min(int(a.sizes[column]), size_of(u64)),
+			)
 		}
 		log_append(w, {entity = e, id = id, data = data, kind = .Removed})
 	}

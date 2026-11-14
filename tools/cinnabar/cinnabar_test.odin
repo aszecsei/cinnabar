@@ -12,7 +12,10 @@ import format "cinnabar:engine/asset/format"
 // temp_dir is a new empty folder for one test, which it deletes.
 @(private = "file")
 temp_dir :: proc(t: ^testing.T, name: string) -> string {
-	dir, _ := filepath.join({os.get_env("TEMP", context.temp_allocator), name}, context.temp_allocator)
+	dir, _ := filepath.join(
+		{os.get_env("TEMP", context.temp_allocator), name},
+		context.temp_allocator,
+	)
 	os.remove_all(dir)
 	testing.expect(t, os.make_directory_all(dir) == nil)
 	return dir
@@ -64,8 +67,17 @@ a_project_without_odin_runs_the_standard_game :: proc(t: ^testing.T) {
 
 	command := release_command(e, mygame, "out/mygame.exe")
 	testing.expect(t, slice.contains(command, "-subsystem:windows"))
-	testing.expect(t, slice.contains(command, "-collection:physics_backend=E:/engine/lib/core/physics/jolt"))
-	testing.expect(t, slice.contains(command, strings.concatenate({"-collection:project=", mygame.dir}, context.temp_allocator)))
+	testing.expect(
+		t,
+		slice.contains(command, "-collection:physics_backend=E:/engine/lib/core/physics/jolt"),
+	)
+	testing.expect(
+		t,
+		slice.contains(
+			command,
+			strings.concatenate({"-collection:project=", mygame.dir}, context.temp_allocator),
+		),
+	)
 	cook := cook_command(e, intel, "release", intel.release_cache, true)
 	testing.expect_value(t, cook[1], "all")
 	testing.expect_value(t, cook[len(cook) - 1], "--prune")
@@ -74,7 +86,11 @@ a_project_without_odin_runs_the_standard_game :: proc(t: ^testing.T) {
 
 @(test)
 names_become_files_and_packages :: proc(t: ^testing.T) {
-	testing.expect_value(t, file_name("My Game: Part 2?", context.temp_allocator), "My Game Part 2")
+	testing.expect_value(
+		t,
+		file_name("My Game: Part 2?", context.temp_allocator),
+		"My Game Part 2",
+	)
 	testing.expect_value(t, file_name("trailing. ", context.temp_allocator), "trailing")
 	testing.expect_value(t, package_of("My Game 2"), "my_game_2")
 	testing.expect_value(t, package_of("2048"), "game_2048")
@@ -108,15 +124,36 @@ a_new_project_has_new_guids_that_its_files_name :: proc(t: ^testing.T) {
 	script, _ := format.meta_guid(read(dir, "content/scripts/spinner.luau.meta"))
 	buffer: [32]u8
 	scene := read(dir, "content/scenes/main.scene")
-	testing.expect(t, strings.contains(scene, strings.concatenate({"behaviour ", format.guid_format(script, &buffer)}, context.temp_allocator)))
-	testing.expect(t, strings.contains(scene, "Spinning Cube"), "the odin template's scene replaces the basic one")
+	testing.expect(
+		t,
+		strings.contains(
+			scene,
+			strings.concatenate(
+				{"behaviour ", format.guid_format(script, &buffer)},
+				context.temp_allocator,
+			),
+		),
+	)
+	testing.expect(
+		t,
+		strings.contains(scene, "Spinning Cube"),
+		"the odin template's scene replaces the basic one",
+	)
 	code := read(dir, "game/game.odin")
 	testing.expect(t, strings.has_prefix(code, "// Demo Game's Odin"))
-	testing.expect(t, has_line(code, "package demo_game"), "the package is the name as a package's")
+	testing.expect(
+		t,
+		has_line(code, "package demo_game"),
+		"the package is the name as a package's",
+	)
 	for text in ([]string{settings, scene, code}) {
 		testing.expect(t, !strings.contains(text, "{{"), "a placeholder is left")
 	}
-	testing.expect(t, !os.exists(strings.concatenate({dir, "/content/.luaurc.meta"}, context.temp_allocator)), "hidden files are not assets")
+	testing.expect(
+		t,
+		!os.exists(strings.concatenate({dir, "/content/.luaurc.meta"}, context.temp_allocator)),
+		"hidden files are not assets",
+	)
 
 	// Another project from the same template gets GUIDs of its own.
 	other := temp_dir(t, "cinnabar_new_test_2")
@@ -124,7 +161,11 @@ a_new_project_has_new_guids_that_its_files_name :: proc(t: ^testing.T) {
 	testing.expect(t, new_project(e, other, "", "basic"))
 	other_scene, _ := format.meta_guid(read(other, "content/scenes/main.scene.meta"))
 	testing.expect(t, other_scene != scene_meta)
-	testing.expect_value(t, format.settings_value(read(other, "project.settings"), NAME_KEY), "cinnabar_new_test_2")
+	testing.expect_value(
+		t,
+		format.settings_value(read(other, "project.settings"), NAME_KEY),
+		"cinnabar_new_test_2",
+	)
 	testing.expect(t, !os.exists(strings.concatenate({other, "/game"}, context.temp_allocator)))
 }
 

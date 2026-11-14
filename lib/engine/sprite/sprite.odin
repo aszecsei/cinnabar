@@ -30,7 +30,16 @@ register :: proc(s: ^State, w: ^ecs.World, assets: ^asset.Assets) {
 	if s.sheets.handles == nil {
 		render.sprite_sheets_init(&s.sheets, w.platform)
 	}
-	ecs.register_system(w, {name = "animate sprites", stage = .Update, procedure = animate, terms = {ecs.write(w, render.Sprite_Renderer)}, data = s})
+	ecs.register_system(
+		w,
+		{
+			name = "animate sprites",
+			stage = .Update,
+			procedure = animate,
+			terms = {ecs.write(w, render.Sprite_Renderer)},
+			data = s,
+		},
+	)
 }
 
 // destroy gives back the sheets that were loaded.

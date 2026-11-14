@@ -28,7 +28,14 @@ capture_probes :: proc(e: ^Editor, entities: []u64) {
 // reflection_probe_view is the state of an entity's probe, and the time of its last capture, which the view gives as
 // an age: None without a probe, a renderer or the probes' cubes, which the reflections being off frees.
 @(private = "file")
-reflection_probe_view :: proc(e: ^Editor, w: ^ecs.World, entity: ecs.Entity) -> (view: link.Reflection_Probe_View, time: f64) {
+reflection_probe_view :: proc(
+	e: ^Editor,
+	w: ^ecs.World,
+	entity: ecs.Entity,
+) -> (
+	view: link.Reflection_Probe_View,
+	time: f64,
+) {
 	view.entity = u64(entity)
 	if e.renderer == nil || !ecs.has(w, entity, render.Reflection_Probe) {
 		return

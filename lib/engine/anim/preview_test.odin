@@ -41,42 +41,131 @@ preview_pose_plays_a_graph_apart_from_any_entity :: proc(t: ^testing.T) {
 	defer asset.destroy(&assets)
 
 	write :: proc(t: ^testing.T, cache, name: string, data: []byte) {
-		testing.expect(t, os.write_entire_file(fmt.tprintf("%s/%s.blob", cache, name), data) == nil)
+		testing.expect(
+			t,
+			os.write_entire_file(fmt.tprintf("%s/%s.blob", cache, name), data) == nil,
+		)
 	}
-	write(t, cache, SKIN, format.skin_write({guid = guid(SKIN), key = 1, joints = {{name = "Root", parent = -1, inverse_bind = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}}, rotation = {0, 0, 0, 1}, scale = 1, sphere = {0, 0, 0, 1}}}}, context.temp_allocator))
-	write(t, cache, WALK, format.animation_write({
-		guid = guid(WALK),
-		key = 2,
-		skin = guid(SKIN),
-		joint_count = 1,
-		duration = 1,
-		channels = {{joint = 0, path = .Translation, interpolation = .Linear, first_key = 0, key_count = 2, first_value = 0}},
-		times = {0, 1},
-		values = {0, 0, 0, 2, 0, 0},
-	}, context.temp_allocator))
-	write(t, cache, IDLE, format.animation_write({
-		guid = guid(IDLE),
-		key = 3,
-		skin = guid(SKIN),
-		joint_count = 1,
-		duration = 1,
-		channels = {{joint = 0, path = .Translation, interpolation = .Linear, first_key = 0, key_count = 1, first_value = 0}},
-		times = {0},
-		values = {0, 0, 0},
-	}, context.temp_allocator))
+	write(
+		t,
+		cache,
+		SKIN,
+		format.skin_write(
+			{
+				guid = guid(SKIN),
+				key = 1,
+				joints = {
+					{
+						name = "Root",
+						parent = -1,
+						inverse_bind = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}},
+						rotation = {0, 0, 0, 1},
+						scale = 1,
+						sphere = {0, 0, 0, 1},
+					},
+				},
+			},
+			context.temp_allocator,
+		),
+	)
+	write(
+		t,
+		cache,
+		WALK,
+		format.animation_write(
+			{
+				guid = guid(WALK),
+				key = 2,
+				skin = guid(SKIN),
+				joint_count = 1,
+				duration = 1,
+				channels = {
+					{
+						joint = 0,
+						path = .Translation,
+						interpolation = .Linear,
+						first_key = 0,
+						key_count = 2,
+						first_value = 0,
+					},
+				},
+				times = {0, 1},
+				values = {0, 0, 0, 2, 0, 0},
+			},
+			context.temp_allocator,
+		),
+	)
+	write(
+		t,
+		cache,
+		IDLE,
+		format.animation_write(
+			{
+				guid = guid(IDLE),
+				key = 3,
+				skin = guid(SKIN),
+				joint_count = 1,
+				duration = 1,
+				channels = {
+					{
+						joint = 0,
+						path = .Translation,
+						interpolation = .Linear,
+						first_key = 0,
+						key_count = 1,
+						first_value = 0,
+					},
+				},
+				times = {0},
+				values = {0, 0, 0},
+			},
+			context.temp_allocator,
+		),
+	)
 
 	graph_blob :: proc(key: u64, parameter: string) -> []byte {
-		written := format.animation_graph_write({
-			guid = {},
-			key = key,
-			parameters = {{name = parameter, kind = .Float}},
-			clips = {{name = "idle", clip = guid(IDLE)}, {name = "walk", clip = guid(WALK)}},
-			states = {
-				{name = "idle", node = 1, motion = .Clip, parameter = format.ANIMATION_GRAPH_NONE, points = {{clip = 0}}, speed = 1, loop = true, enter_event = format.ANIMATION_GRAPH_NONE, exit_event = format.ANIMATION_GRAPH_NONE},
-				{name = "walk", node = 2, motion = .Clip, parameter = format.ANIMATION_GRAPH_NONE, points = {{clip = 1}}, speed = 1, loop = true, enter_event = format.ANIMATION_GRAPH_NONE, exit_event = format.ANIMATION_GRAPH_NONE},
+		written := format.animation_graph_write(
+			{
+				guid = {},
+				key = key,
+				parameters = {{name = parameter, kind = .Float}},
+				clips = {{name = "idle", clip = guid(IDLE)}, {name = "walk", clip = guid(WALK)}},
+				states = {
+					{
+						name = "idle",
+						node = 1,
+						motion = .Clip,
+						parameter = format.ANIMATION_GRAPH_NONE,
+						points = {{clip = 0}},
+						speed = 1,
+						loop = true,
+						enter_event = format.ANIMATION_GRAPH_NONE,
+						exit_event = format.ANIMATION_GRAPH_NONE,
+					},
+					{
+						name = "walk",
+						node = 2,
+						motion = .Clip,
+						parameter = format.ANIMATION_GRAPH_NONE,
+						points = {{clip = 1}},
+						speed = 1,
+						loop = true,
+						enter_event = format.ANIMATION_GRAPH_NONE,
+						exit_event = format.ANIMATION_GRAPH_NONE,
+					},
+				},
+				transitions = {
+					{
+						from = 0,
+						to = 1,
+						conditions = {{parameter = 0, op = .Greater, value = 0.1}},
+						exit_time = -1,
+						node = 20,
+					},
+				},
 			},
-			transitions = {{from = 0, to = 1, conditions = {{parameter = 0, op = .Greater, value = 0.1}}, exit_time = -1, node = 20}},
-		}, context.temp_allocator)
+			context.temp_allocator,
+		)
 		// A blob is read at its alignment, as a file's read is.
 		data, _ := runtime.mem_alloc_bytes(len(written), format.BLOB_ALIGN, context.temp_allocator)
 		copy(data, written)
@@ -116,11 +205,26 @@ preview_pose_plays_a_graph_apart_from_any_entity :: proc(t: ^testing.T) {
 
 	// A clip without an animation yet, as the template's has, leaves it not ready, and its instance alone.
 	empty: anim_graph.Instance
-	unset := format.animation_graph_write({
-		key = 7,
-		clips = {{name = "unset"}},
-		states = {{name = "idle", node = 1, motion = .Clip, parameter = format.ANIMATION_GRAPH_NONE, points = {{clip = 0}}, speed = 1, loop = true, enter_event = format.ANIMATION_GRAPH_NONE, exit_event = format.ANIMATION_GRAPH_NONE}},
-	}, context.temp_allocator)
+	unset := format.animation_graph_write(
+		{
+			key = 7,
+			clips = {{name = "unset"}},
+			states = {
+				{
+					name = "idle",
+					node = 1,
+					motion = .Clip,
+					parameter = format.ANIMATION_GRAPH_NONE,
+					points = {{clip = 0}},
+					speed = 1,
+					loop = true,
+					enter_event = format.ANIMATION_GRAPH_NONE,
+					exit_event = format.ANIMATION_GRAPH_NONE,
+				},
+			},
+		},
+		context.temp_allocator,
+	)
 	aligned, _ := runtime.mem_alloc_bytes(len(unset), format.BLOB_ALIGN, context.temp_allocator)
 	copy(aligned, unset)
 	_, _, ok = preview_pose(&assets, aligned, &empty, 0, context.temp_allocator)

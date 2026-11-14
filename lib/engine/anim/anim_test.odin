@@ -104,43 +104,142 @@ setup :: proc(t: ^testing.T, scripts := false) -> ^Fixture {
 		f.reports = make([dynamic]string)
 		script.register_components(&f.world.registry)
 		context.user_ptr = f
-		testing.expect(t, script.init(&f.runtime, &f.platform, &f.world, nil, register_test_scripts))
+		testing.expect(
+			t,
+			script.init(&f.runtime, &f.platform, &f.world, nil, register_test_scripts),
+		)
 	}
 
-	write_blob(t, f, SKIN, format.skin_write({guid = guid(SKIN), key = 1, joints = {{name = "Root", parent = -1, inverse_bind = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}}, rotation = {0, 0, 0, 1}, scale = 1, sphere = {0, 0, 0, 1}}}}, context.temp_allocator))
-	write_blob(t, f, WALK, format.animation_write({
-		guid = guid(WALK),
-		key = 2,
-		skin = guid(SKIN),
-		joint_count = 1,
-		duration = 1,
-		channels = {{joint = 0, path = .Translation, interpolation = .Linear, first_key = 0, key_count = 2, first_value = 0}},
-		times = {0, 1},
-		values = {0, 0, 0, 0, 0, 2},
-	}, context.temp_allocator))
-	write_blob(t, f, IDLE, format.animation_write({
-		guid = guid(IDLE),
-		key = 3,
-		skin = guid(SKIN),
-		joint_count = 1,
-		duration = 1,
-		channels = {{joint = 0, path = .Translation, interpolation = .Linear, first_key = 0, key_count = 1, first_value = 0}},
-		times = {0},
-		values = {0, 0, 0},
-	}, context.temp_allocator))
-	write_blob(t, f, GRAPH, format.animation_graph_write({
-		guid = guid(GRAPH),
-		key = 4,
-		root_motion = "Root",
-		parameters = {{name = "speed", kind = .Float}},
-		clips = {{name = "idle", clip = guid(IDLE)}, {name = "walk", clip = guid(WALK), markers = {{time = 0.5, event = 0}}}},
-		events = {{name = "footstep", args = {{kind = .Text, text = "left"}, {kind = .Number, number = 2}}}},
-		states = {
-			{name = "idle", motion = .Clip, parameter = format.ANIMATION_GRAPH_NONE, points = {{clip = 0}}, speed = 1, loop = true, enter_event = format.ANIMATION_GRAPH_NONE, exit_event = format.ANIMATION_GRAPH_NONE},
-			{name = "walk", motion = .Clip, parameter = format.ANIMATION_GRAPH_NONE, points = {{clip = 1}}, speed = 1, loop = true, enter_event = format.ANIMATION_GRAPH_NONE, exit_event = format.ANIMATION_GRAPH_NONE},
-		},
-		transitions = {{from = 0, to = 1, conditions = {{parameter = 0, op = .Greater, value = 0.1}}, exit_time = -1}},
-	}, context.temp_allocator))
+	write_blob(
+		t,
+		f,
+		SKIN,
+		format.skin_write(
+			{
+				guid = guid(SKIN),
+				key = 1,
+				joints = {
+					{
+						name = "Root",
+						parent = -1,
+						inverse_bind = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}},
+						rotation = {0, 0, 0, 1},
+						scale = 1,
+						sphere = {0, 0, 0, 1},
+					},
+				},
+			},
+			context.temp_allocator,
+		),
+	)
+	write_blob(
+		t,
+		f,
+		WALK,
+		format.animation_write(
+			{
+				guid = guid(WALK),
+				key = 2,
+				skin = guid(SKIN),
+				joint_count = 1,
+				duration = 1,
+				channels = {
+					{
+						joint = 0,
+						path = .Translation,
+						interpolation = .Linear,
+						first_key = 0,
+						key_count = 2,
+						first_value = 0,
+					},
+				},
+				times = {0, 1},
+				values = {0, 0, 0, 0, 0, 2},
+			},
+			context.temp_allocator,
+		),
+	)
+	write_blob(
+		t,
+		f,
+		IDLE,
+		format.animation_write(
+			{
+				guid = guid(IDLE),
+				key = 3,
+				skin = guid(SKIN),
+				joint_count = 1,
+				duration = 1,
+				channels = {
+					{
+						joint = 0,
+						path = .Translation,
+						interpolation = .Linear,
+						first_key = 0,
+						key_count = 1,
+						first_value = 0,
+					},
+				},
+				times = {0},
+				values = {0, 0, 0},
+			},
+			context.temp_allocator,
+		),
+	)
+	write_blob(
+		t,
+		f,
+		GRAPH,
+		format.animation_graph_write(
+			{
+				guid = guid(GRAPH),
+				key = 4,
+				root_motion = "Root",
+				parameters = {{name = "speed", kind = .Float}},
+				clips = {
+					{name = "idle", clip = guid(IDLE)},
+					{name = "walk", clip = guid(WALK), markers = {{time = 0.5, event = 0}}},
+				},
+				events = {
+					{
+						name = "footstep",
+						args = {{kind = .Text, text = "left"}, {kind = .Number, number = 2}},
+					},
+				},
+				states = {
+					{
+						name = "idle",
+						motion = .Clip,
+						parameter = format.ANIMATION_GRAPH_NONE,
+						points = {{clip = 0}},
+						speed = 1,
+						loop = true,
+						enter_event = format.ANIMATION_GRAPH_NONE,
+						exit_event = format.ANIMATION_GRAPH_NONE,
+					},
+					{
+						name = "walk",
+						motion = .Clip,
+						parameter = format.ANIMATION_GRAPH_NONE,
+						points = {{clip = 1}},
+						speed = 1,
+						loop = true,
+						enter_event = format.ANIMATION_GRAPH_NONE,
+						exit_event = format.ANIMATION_GRAPH_NONE,
+					},
+				},
+				transitions = {
+					{
+						from = 0,
+						to = 1,
+						conditions = {{parameter = 0, op = .Greater, value = 0.1}},
+						exit_time = -1,
+					},
+				},
+			},
+			context.temp_allocator,
+		),
+	)
 	return f
 }
 
@@ -198,7 +297,11 @@ frame :: proc(f: ^Fixture, n: int) {
 	begin_frame(&f.animation)
 	clock := &f.world.clock
 	// To halfway into the tick after the n-th: a tick's length in nanoseconds is rounded.
-	end := ecs.tick_start(clock, clock.tick + u64(n)) + (ecs.tick_start(clock, clock.tick + u64(n) + 1) - ecs.tick_start(clock, clock.tick + u64(n))) / 2
+	end :=
+		ecs.tick_start(clock, clock.tick + u64(n)) +
+		(ecs.tick_start(clock, clock.tick + u64(n) + 1) -
+				ecs.tick_start(clock, clock.tick + u64(n))) /
+			2
 	it := ecs.begin_ticks(&f.world, end - clock.time)
 	for ecs.next_tick(&it) {
 		ecs.run_tick_systems(&it, f)
@@ -368,7 +471,10 @@ a_behaviour_gets_the_graphs_events_in_the_tick_that_raises_them :: proc(t: ^test
 	a.graph = guid(GRAPH)
 	f.entity = spawn(f, a)
 	context.user_ptr = f
-	_, ok := script.spawn_source(&f.runtime, "=listener", `
+	_, ok := script.spawn_source(
+		&f.runtime,
+		"=listener",
+		`
 local Listener = Behaviour.define("Listener")
 function Listener:fixed_update(dt)
 	if not self.set then
@@ -383,7 +489,8 @@ function Listener:on_animation_event(name, side, count)
 	Test.report(name, side, count, Animation.state(self.entity))
 end
 Test.entity():add(Listener)
-`)
+`,
+	)
 	testing.expect(t, ok)
 	// The behaviour sets speed in the first tick's fixed step, so walk starts in the second tick, a tick into its clip,
 	// and its marker at 0.5 s is in the tick that reaches it.
@@ -397,7 +504,11 @@ Test.entity():add(Listener)
 		testing.expect_value(t, f.reports[0], fmt.tprintf("%d set 1 idle", start))
 		testing.expect_value(t, f.reports[1], fmt.tprintf("%d unknown false", start))
 		testing.expect_value(t, f.reports[2], fmt.tprintf("%d kind false", start))
-		testing.expect_value(t, f.reports[3], fmt.tprintf("%d footstep left 2 walk", start + u64(ticks)))
+		testing.expect_value(
+			t,
+			f.reports[3],
+			fmt.tprintf("%d footstep left 2 walk", start + u64(ticks)),
+		)
 	}
 }
 

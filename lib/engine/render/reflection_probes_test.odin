@@ -645,7 +645,8 @@ run_probe_frame :: proc(
 		projection = Perspective{1, 0.1},
 	}
 	f^ = {
-		renderer        = r, state = &r.view,
+		renderer        = r,
+		state           = &r.view,
 		graph           = &g,
 		view            = view,
 		size            = {64, 32},
@@ -694,8 +695,14 @@ run_probe_frame :: proc(
 		f.post = new(Post_Frame, platform.frame_allocator)
 		f.depth = create_texture(&g, {size = f.size, format = DEPTH_FORMAT, label = "depth"})
 		f.normals = create_texture(&g, {size = f.size, format = NORMAL_FORMAT, label = "normals"})
-		f.velocity = create_texture(&g, {size = f.size, format = VELOCITY_FORMAT, label = "velocity"})
-		f.roughness = create_texture(&g, {size = f.size, format = ROUGHNESS_FORMAT, label = "roughness"})
+		f.velocity = create_texture(
+			&g,
+			{size = f.size, format = VELOCITY_FORMAT, label = "velocity"},
+		)
+		f.roughness = create_texture(
+			&g,
+			{size = f.size, format = ROUGHNESS_FORMAT, label = "roughness"},
+		)
 		prepass := add_render_pass(&g, "prepass", proc(_: ^Pass_Context) {}, nil)
 		depth(&g, prepass, f.depth, .Clear)
 		color(&g, prepass, f.normals, .Clear)
@@ -725,7 +732,8 @@ run_probe_frame :: proc(
 	run.face_gi = make([dynamic]u32, platform.frame_allocator)
 	run.gi_reads = make([dynamic]int, platform.frame_allocator)
 	run.lit_reads = make([dynamic]bool, platform.frame_allocator)
-	if pf := f.reflection_probes; pf != nil && pf.capturing && f.scene_frame != nil && f.scene_frame.view_constants != nil {
+	if pf := f.reflection_probes;
+	   pf != nil && pf.capturing && f.scene_frame != nil && f.scene_frame.view_constants != nil {
 		for k in 0 ..< int(pf.face_count) {
 			c := (^Frame_Constants)(raw_data(f.scene_frame.view_constants[pf.first_view + k].data))
 			append(&run.face_gi, c.gi)
@@ -1003,7 +1011,11 @@ a_capture_takes_the_voxel_cones_or_its_own_ambient_occlusion :: proc(t: ^testing
 	defer cache_destroy(&cache, &platform)
 
 	probe := ecs.spawn(w)
-	ecs.add(w, probe, ecs.Transform{position = ecs.position_offset({}, {0, 1.5, 0}), rotation = 1, scale = 1})
+	ecs.add(
+		w,
+		probe,
+		ecs.Transform{position = ecs.position_offset({}, {0, 1.5, 0}), rotation = 1, scale = 1},
+	)
 	ecs.add(w, probe, Reflection_Probe{extent = {3, 1.5, 4}})
 	ultra := Reflection_Settings {
 		technique = .Probes,
@@ -1051,7 +1063,15 @@ a_capture_takes_the_voxel_cones_or_its_own_ambient_occlusion :: proc(t: ^testing
 
 	// With the screen cascades, each face takes the ambient occlusion of its own depth, which its forward pass reads.
 	testing.expect(t, capture_reflection_probe(r, probe))
-	run = run_probe_frame(t, r, &cache, w, ultra, gi = Gi_Settings{technique = .Screen_Cascades, level = .Low}, ao = true)
+	run = run_probe_frame(
+		t,
+		r,
+		&cache,
+		w,
+		ultra,
+		gi = Gi_Settings{technique = .Screen_Cascades, level = .Low},
+		ao = true,
+	)
 	testing.expect(t, run.frame.capturing && run.frame.face_count == 6)
 	testing.expect_value(t, run.passes["reflection probe gi"], 0)
 	testing.expect_value(t, run.face_ao, 6)
@@ -1068,7 +1088,14 @@ a_capture_takes_the_voxel_cones_or_its_own_ambient_occlusion :: proc(t: ^testing
 
 	// Without the camera's ambient occlusion, the faces have none either.
 	testing.expect(t, capture_reflection_probe(r, probe))
-	run = run_probe_frame(t, r, &cache, w, ultra, gi = Gi_Settings{technique = .Screen_Cascades, level = .Low})
+	run = run_probe_frame(
+		t,
+		r,
+		&cache,
+		w,
+		ultra,
+		gi = Gi_Settings{technique = .Screen_Cascades, level = .Low},
+	)
 	testing.expect_value(t, run.face_ao, 0)
 	testing.expect(t, run.frame.face_light == {})
 }
@@ -1118,14 +1145,21 @@ an_on_load_probe_captures_again_once_the_level_streams_in :: proc(t: ^testing.T)
 	defer cache_destroy(&cache, &platform)
 	scene: [5]gpu.Buffer
 	for &b in scene {
-		b = platform.gpu_create_buffer({size = 256, usage = {.Storage, .Indirect}, label = "scene"}, nil)
+		b = platform.gpu_create_buffer(
+			{size = 256, usage = {.Storage, .Indirect}, label = "scene"},
+			nil,
+		)
 	}
 	defer for b in scene {
 		platform.gpu_destroy_buffer(b)
 	}
 
 	probe := ecs.spawn(w)
-	ecs.add(w, probe, ecs.Transform{position = ecs.position_offset({}, {0, 1.5, 0}), rotation = 1, scale = 1})
+	ecs.add(
+		w,
+		probe,
+		ecs.Transform{position = ecs.position_offset({}, {0, 1.5, 0}), rotation = 1, scale = 1},
+	)
 	ecs.add(w, probe, Reflection_Probe{extent = {3, 1.5, 4}})
 	medium := Reflection_Settings {
 		technique = .Probes,
@@ -1218,7 +1252,11 @@ a_capture_face_has_its_own_constants :: proc(t: ^testing.T) {
 	testing.expect_value(t, c.cluster_view_projection, m)
 	testing.expect(
 		t,
-		c.gi == 0 && c.fog == 0 && c.aerial == 0 && c.debug_view == 0 && c.reflection_probe_count == 0,
+		c.gi == 0 &&
+		c.fog == 0 &&
+		c.aerial == 0 &&
+		c.debug_view == 0 &&
+		c.reflection_probe_count == 0,
 	)
 	testing.expect_value(t, c.capture, 1)
 	testing.expect_value(t, c.screen_size, [2]f32{128, 128})

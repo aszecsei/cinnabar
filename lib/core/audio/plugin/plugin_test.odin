@@ -67,17 +67,32 @@ names_choose_backends :: proc(t: ^testing.T) {
 
 @(private = "file")
 other_version :: proc "c" () -> audio.Backend_Info {
-	return {api_version = audio.API_VERSION + 1, layout = audio.layout_signature(), name = "other", version = "1"}
+	return {
+		api_version = audio.API_VERSION + 1,
+		layout = audio.layout_signature(),
+		name = "other",
+		version = "1",
+	}
 }
 
 @(private = "file")
 other_layout :: proc "c" () -> audio.Backend_Info {
-	return {api_version = audio.API_VERSION, layout = audio.layout_signature() + 1, name = "other", version = "1"}
+	return {
+		api_version = audio.API_VERSION,
+		layout = audio.layout_signature() + 1,
+		name = "other",
+		version = "1",
+	}
 }
 
 @(private = "file")
 same :: proc "c" () -> audio.Backend_Info {
-	return {api_version = audio.API_VERSION, layout = audio.layout_signature(), name = "same", version = "1"}
+	return {
+		api_version = audio.API_VERSION,
+		layout = audio.layout_signature(),
+		name = "same",
+		version = "1",
+	}
 }
 
 // A backend built against another boundary never runs: it gives the null backend, as one that does not load does.
@@ -86,8 +101,20 @@ a_backend_of_another_boundary_is_refused :: proc(t: ^testing.T) {
 	sync.guard(&lock)
 	setup()
 	context.logger = testlog.expected_errors()
-	testing.expect_value(t, string(checked(&host, &audio.Audio_API{info = other_version}, "other").info().name), "null")
-	testing.expect_value(t, string(checked(&host, &audio.Audio_API{info = other_layout}, "other").info().name), "null")
+	testing.expect_value(
+		t,
+		string(checked(&host, &audio.Audio_API{info = other_version}, "other").info().name),
+		"null",
+	)
+	testing.expect_value(
+		t,
+		string(checked(&host, &audio.Audio_API{info = other_layout}, "other").info().name),
+		"null",
+	)
 	testing.expect_value(t, string(checked(&host, nil, "other").info().name), "null")
-	testing.expect_value(t, string(checked(&host, &audio.Audio_API{info = same}, "same").info().name), "same")
+	testing.expect_value(
+		t,
+		string(checked(&host, &audio.Audio_API{info = same}, "same").info().name),
+		"same",
+	)
 }

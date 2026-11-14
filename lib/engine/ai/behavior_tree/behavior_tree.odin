@@ -49,7 +49,11 @@ register :: proc(s: ^ai.State) {
 }
 
 // nodes is each node of the agent's tree that runs or has ended, by its decision node's ID, for the editor.
-nodes :: proc(decision: ai.Decision, state: []byte, allocator: runtime.Allocator) -> []ai.Node_View {
+nodes :: proc(
+	decision: ai.Decision,
+	state: []byte,
+	allocator: runtime.Allocator,
+) -> []ai.Node_View {
 	tree := format.tree_nodes(format.decision_technique_data(decision.data, decision.blob))
 	shared := format.decision_nodes(decision.data, decision.blob)
 	views := make([dynamic]ai.Node_View, 0, len(tree), allocator)
@@ -211,7 +215,9 @@ resume :: proc(b: ^Tree, i: u32) -> Result {
 	switch n.kind {
 	case .Selector:
 		for c := i + 1; c < st.child; c = b.nodes[c].end {
-			if (b.nodes[c].abort == .Lower || b.nodes[c].abort == .Both) && !cooling(b, c) && guard(b, c) {
+			if (b.nodes[c].abort == .Lower || b.nodes[c].abort == .Both) &&
+			   !cooling(b, c) &&
+			   guard(b, c) {
 				abort(b, st.child)
 				st.child = c
 				return settle(b, i, run_children(b, i, true))

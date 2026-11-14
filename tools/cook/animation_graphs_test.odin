@@ -118,7 +118,11 @@ animation_graphs_parse_into_states_and_transitions :: proc(t: ^testing.T) {
 	testing.expect_value(t, start.conditions[1].op, format.Animation_Graph_Condition_Op.True)
 	testing.expect_value(t, start.exit_time, -1)
 	testing.expect_value(t, g.transitions[2].from, format.ANIMATION_GRAPH_NONE)
-	testing.expect_value(t, g.transitions[2].conditions[0].op, format.Animation_Graph_Condition_Op.Trigger)
+	testing.expect_value(
+		t,
+		g.transitions[2].conditions[0].op,
+		format.Animation_Graph_Condition_Op.Trigger,
+	)
 	testing.expect_value(t, g.transitions[3].exit_time, 0.95)
 	testing.expect_value(t, len(g.transitions[3].conditions), 0)
 
@@ -143,7 +147,13 @@ an_unsaved_graphs_problems_name_its_file_and_its_lines :: proc(t: ^testing.T) {
 	guid, _ := format.guid_parse("00112233445566778899aabbccddeeff")
 	blob := fmt.tprintf("%s/preview/00112233445566778899aabbccddeeff.blob", config_dir(options))
 
-	problems := animation_graph_check(options, guid, FOX_GRAPH, "C:/game/fox.animation_graph", "game/fox.animation_graph")
+	problems := animation_graph_check(
+		options,
+		guid,
+		FOX_GRAPH,
+		"C:/game/fox.animation_graph",
+		"game/fox.animation_graph",
+	)
 	testing.expect_value(t, len(problems.list), 0)
 	// A text without problems is what the preview plays.
 	read_blob :: proc(path: string) -> (^format.Blob_Header, bool) {
@@ -159,7 +169,13 @@ an_unsaved_graphs_problems_name_its_file_and_its_lines :: proc(t: ^testing.T) {
 	testing.expect(t, valid && header.guid == guid && header.kind == .Animation_Graph)
 	before := header.key
 
-	problems = animation_graph_check(options, guid, "animation_graph 1\nentry = nowhere\nnode 1 state\n\tname = a\n", "C:/game/fox.animation_graph", "game/fox.animation_graph")
+	problems = animation_graph_check(
+		options,
+		guid,
+		"animation_graph 1\nentry = nowhere\nnode 1 state\n\tname = a\n",
+		"C:/game/fox.animation_graph",
+		"game/fox.animation_graph",
+	)
 	defer delete(problems.list)
 	// A text with problems leaves the last good one.
 	header, valid = read_blob(blob)
@@ -186,8 +202,14 @@ animation_graph_mistakes_are_problems_at_their_lines :: proc(t: ^testing.T) {
 		line: int,
 	} {
 		{"entry = a\n", 1},
-		{"animation_graph 1\nparam f float\nclip c = $00112233445566778899aabbccddeeff\nnode 1 state\n\tname = a\n\tmotion = c\n", 1},
-		{"animation_graph 1\nentry = nowhere\nclip c = $00112233445566778899aabbccddeeff\nnode 1 state\n\tname = a\n\tmotion = c\n", 2},
+		{
+			"animation_graph 1\nparam f float\nclip c = $00112233445566778899aabbccddeeff\nnode 1 state\n\tname = a\n\tmotion = c\n",
+			1,
+		},
+		{
+			"animation_graph 1\nentry = nowhere\nclip c = $00112233445566778899aabbccddeeff\nnode 1 state\n\tname = a\n\tmotion = c\n",
+			2,
+		},
 		{HEAD + "param f bool\n", 10},
 		{HEAD + "param x vector\n", 10},
 		{HEAD + "param x trigger 1\n", 10},
@@ -204,10 +226,26 @@ animation_graph_mistakes_are_problems_at_their_lines :: proc(t: ^testing.T) {
 		{HEAD + "node 2 state\n\tname = d\n\tmotion = @1.pose\n", 12},
 		{HEAD + "node 2 state\n\tname = d\n\tmotion = c\n\tloop = maybe\n", 13},
 		{HEAD + "node 2 state\n\tname = d\n\tmotion = c\n\tspeed = -1\n", 13},
-		{HEAD + "node 2 state\n\tname = d\n\tmotion = @3.pose\nnode 3 blend_1d\n\tparameter = b\n\tinput.0 = c\n\tat.0 = 0\n\tinput.1 = c\n\tat.1 = 1\n", 14},
-		{HEAD + "node 2 state\n\tname = d\n\tmotion = @3.pose\nnode 3 blend_1d\n\tparameter = f\n\tinput.0 = c\n\tat.0 = 0\n", 13},
-		{HEAD + "node 2 state\n\tname = d\n\tmotion = @3.pose\nnode 3 blend_1d\n\tparameter = f\n\tinput.0 = c\n\tat.0 = 1\n\tinput.1 = c\n\tat.1 = 1\n", 13},
-		{HEAD + "node 2 state\n\tname = d\n\tmotion = @3.pose\nnode 3 blend_1d\n\tparameter = f\n\tinput.0 = c\n\tat.0 = 0\n\tinput.1 = c\n", 17},
+		{
+			HEAD +
+			"node 2 state\n\tname = d\n\tmotion = @3.pose\nnode 3 blend_1d\n\tparameter = b\n\tinput.0 = c\n\tat.0 = 0\n\tinput.1 = c\n\tat.1 = 1\n",
+			14,
+		},
+		{
+			HEAD +
+			"node 2 state\n\tname = d\n\tmotion = @3.pose\nnode 3 blend_1d\n\tparameter = f\n\tinput.0 = c\n\tat.0 = 0\n",
+			13,
+		},
+		{
+			HEAD +
+			"node 2 state\n\tname = d\n\tmotion = @3.pose\nnode 3 blend_1d\n\tparameter = f\n\tinput.0 = c\n\tat.0 = 1\n\tinput.1 = c\n\tat.1 = 1\n",
+			13,
+		},
+		{
+			HEAD +
+			"node 2 state\n\tname = d\n\tmotion = @3.pose\nnode 3 blend_1d\n\tparameter = f\n\tinput.0 = c\n\tat.0 = 0\n\tinput.1 = c\n",
+			17,
+		},
 		{HEAD + "node 2 transition\n\tfrom = a\n\tto = a\n\twhen = go\n", 10},
 		{HEAD + "node 2 transition\n\tfrom = a\n\tto = z\n\twhen = go\n", 12},
 		{HEAD + "node 2 transition\n\tfrom = any\n\tto = a\n", 10},
@@ -221,13 +259,25 @@ animation_graph_mistakes_are_problems_at_their_lines :: proc(t: ^testing.T) {
 	}
 	for c in cases {
 		_, problems := animation_graph_parse(c.text, context.temp_allocator)
-		testing.expectf(t, len(problems) > 0 && problems[0].line == c.line, "%q: %v", c.text, problems)
+		testing.expectf(
+			t,
+			len(problems) > 0 && problems[0].line == c.line,
+			"%q: %v",
+			c.text,
+			problems,
+		)
 	}
 }
 
 @(test)
 animation_graphs_cook_to_blobs_that_depend_on_their_clips :: proc(t: ^testing.T) {
-	tree := make_tree(t, {{"content/animations/fox.animation_graph", FOX_GRAPH}, {"content/animations/broken.animation_graph", "animation_graph 1\n"}})
+	tree := make_tree(
+		t,
+		{
+			{"content/animations/fox.animation_graph", FOX_GRAPH},
+			{"content/animations/broken.animation_graph", "animation_graph 1\n"},
+		},
+	)
 	defer remove_tree(tree)
 	options := tree_options(tree)
 	pass := cook(options, {.Animation_Graph}, log_problems = false)
@@ -239,7 +289,11 @@ animation_graphs_cook_to_blobs_that_depend_on_their_clips :: proc(t: ^testing.T)
 	testing.expect(t, ok)
 	if ok {
 		testing.expect_value(t, len(format.animation_graph_states(data, blob)), 3)
-		testing.expect_value(t, format.blob_string(data, blob.source_path), "game/animations/fox.animation_graph")
+		testing.expect_value(
+			t,
+			format.blob_string(data, blob.source_path),
+			"game/animations/fox.animation_graph",
+		)
 	}
 	for a in pass.assets {
 		if a.kind == .Animation_Graph && a.result == .Cooked {
@@ -267,7 +321,8 @@ the_shared_files_have_their_problems_at_their_lines_and_their_nodes :: proc(t: ^
 			if strings.contains(line, "# problem") {
 				append(&expected, i + 1)
 			}
-			if listed, found := strings.substring_from(line, len("# nodes: ")); found && strings.has_prefix(line, "# nodes: ") {
+			if listed, found := strings.substring_from(line, len("# nodes: "));
+			   found && strings.has_prefix(line, "# nodes: ") {
 				for field in strings.fields(strings.trim_space(listed), context.temp_allocator) {
 					id, ok := strconv.parse_int(field)
 					testing.expect(t, ok)
@@ -282,14 +337,34 @@ the_shared_files_have_their_problems_at_their_lines_and_their_nodes :: proc(t: ^
 				append(&found, p.line)
 			}
 		}
-		testing.expectf(t, slice.equal(found[:], expected[:]), "%s: problems at %v, expected at %v: %v", file.name, found, expected, problems)
+		testing.expectf(
+			t,
+			slice.equal(found[:], expected[:]),
+			"%s: problems at %v, expected at %v: %v",
+			file.name,
+			found,
+			expected,
+			problems,
+		)
 		// A graph without problems has the nodes that the file names; the blob keeps its states' and transitions'.
 		if len(problems) == 0 {
 			for s in g.states {
-				testing.expectf(t, slice.contains(nodes[:], s.node), "%s: state's node %d", file.name, s.node)
+				testing.expectf(
+					t,
+					slice.contains(nodes[:], s.node),
+					"%s: state's node %d",
+					file.name,
+					s.node,
+				)
 			}
 			for tr in g.transitions {
-				testing.expectf(t, slice.contains(nodes[:], tr.node), "%s: transition's node %d", file.name, tr.node)
+				testing.expectf(
+					t,
+					slice.contains(nodes[:], tr.node),
+					"%s: transition's node %d",
+					file.name,
+					tr.node,
+				)
 			}
 		}
 	}

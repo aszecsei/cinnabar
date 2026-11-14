@@ -40,8 +40,8 @@ a_pass_that_stops_early_fails_its_kind :: proc(t: ^testing.T) {
 		}, context.temp_allocator)
 	for kind in kinds {
 		append(&files, struct {
-				path, text: string,
-			}{fmt.tprintf("content/a%s", extension_of(kind)), "return 1"})
+			path, text: string,
+		}{fmt.tprintf("content/a%s", extension_of(kind)), "return 1"})
 	}
 	tree := make_tree(t, files[:])
 	defer remove_tree(tree)
@@ -49,7 +49,8 @@ a_pass_that_stops_early_fails_its_kind :: proc(t: ^testing.T) {
 	// Windows takes no < in a name, so no pass can make the cache's directory.
 	options.cache = fmt.tprintf("%s/cache<", tree.dir)
 	// With DXC, the shaders reach their directory too.
-	if dxc, err := os.get_absolute_path("vendor/dxc/1.9.2609/dxc.exe", context.temp_allocator); err == nil {
+	if dxc, err := os.get_absolute_path("vendor/dxc/1.9.2609/dxc.exe", context.temp_allocator);
+	   err == nil {
 		if version, ok := dxc_version(dxc); ok {
 			options.dxc, options.dxc_version = dxc, version
 		}

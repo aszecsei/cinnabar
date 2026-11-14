@@ -107,15 +107,35 @@ perception_contents :: proc(guid := PERCEPTION, extra := false) -> format.Percep
 	rows := make([dynamic]format.Perception_Row_Contents, context.temp_allocator)
 	append(
 		&rows,
-		format.Perception_Row_Contents{key = "target", source = .Nearest, tag = "Player", of = format.PERCEPTION_NONE},
+		format.Perception_Row_Contents {
+			key = "target",
+			source = .Nearest,
+			tag = "Player",
+			of = format.PERCEPTION_NONE,
+		},
 		format.Perception_Row_Contents{key = "target_position", source = .Position, of = 0},
 		format.Perception_Row_Contents{key = "target_visible", source = .Visible, of = 0},
 		format.Perception_Row_Contents{key = "target_since", source = .Since, of = 0},
-		format.Perception_Row_Contents{key = "heard", source = .Heard_Noise, of = format.PERCEPTION_NONE},
-		format.Perception_Row_Contents{key = "heard_position", source = .Loudest_Noise, of = format.PERCEPTION_NONE},
+		format.Perception_Row_Contents {
+			key = "heard",
+			source = .Heard_Noise,
+			of = format.PERCEPTION_NONE,
+		},
+		format.Perception_Row_Contents {
+			key = "heard_position",
+			source = .Loudest_Noise,
+			of = format.PERCEPTION_NONE,
+		},
 	)
 	if extra {
-		append(&rows, format.Perception_Row_Contents{key = "missing", source = .Nearest, of = format.PERCEPTION_NONE})
+		append(
+			&rows,
+			format.Perception_Row_Contents {
+				key = "missing",
+				source = .Nearest,
+				of = format.PERCEPTION_NONE,
+			},
+		)
 	}
 	return {
 		guid = guid,
@@ -198,7 +218,10 @@ setup :: proc(t: ^testing.T, serial := true, workers := 0, scripts := false) -> 
 		f.scripts = true
 		f.reports = make([dynamic]f64)
 		context.user_ptr = f
-		testing.expect(t, script.init(&f.runtime, &f.platform, &f.world, nil, register_perception_scripts))
+		testing.expect(
+			t,
+			script.init(&f.runtime, &f.platform, &f.world, nil, register_perception_scripts),
+		)
 	}
 	write :: proc(t: ^testing.T, f: ^Fixture, guid: format.Guid, data: []byte) {
 		buffer: [32]u8
@@ -216,7 +239,12 @@ setup :: proc(t: ^testing.T, serial := true, workers := 0, scripts := false) -> 
 	}
 	write(t, f, DECISION, format.decision_write(decision, context.temp_allocator))
 	write(t, f, PERCEPTION, format.perception_write(perception_contents(), context.temp_allocator))
-	write(t, f, EXTRA, format.perception_write(perception_contents(EXTRA, extra = true), context.temp_allocator))
+	write(
+		t,
+		f,
+		EXTRA,
+		format.perception_write(perception_contents(EXTRA, extra = true), context.temp_allocator),
+	)
 	return f
 }
 
@@ -297,7 +325,12 @@ TURNED :: quaternion(w = 0, x = 0, y = 1, z = 0)
 
 // spawn_perceiver is an agent that perceives, facing +Z, with its eye 1.7 m up.
 @(private = "file")
-spawn_perceiver :: proc(f: ^Fixture, position: ecs.World_Position, perception := PERCEPTION, memory: f32 = 5) -> ecs.Entity {
+spawn_perceiver :: proc(
+	f: ^Fixture,
+	position: ecs.World_Position,
+	perception := PERCEPTION,
+	memory: f32 = 5,
+) -> ecs.Entity {
 	e := ecs.spawn(&f.world)
 	ecs.add(&f.world, e, ecs.Transform{position = position, rotation = 1, scale = 1})
 	ecs.add(&f.world, e, Agent{blackboard = BOARD, decision = DECISION})
@@ -309,13 +342,23 @@ spawn_perceiver :: proc(f: ^Fixture, position: ecs.World_Position, perception :=
 
 // spawn_target is a Perceivable with the points given, or one 1 m up.
 @(private = "file")
-spawn_target :: proc(f: ^Fixture, position: ecs.World_Position, tag: u8 = PLAYER, points: ..[3]f32) -> ecs.Entity {
+spawn_target :: proc(
+	f: ^Fixture,
+	position: ecs.World_Position,
+	tag: u8 = PLAYER,
+	points: ..[3]f32,
+) -> ecs.Entity {
 	e := ecs.spawn(&f.world)
 	ecs.add(&f.world, e, ecs.Transform{position = position, rotation = 1, scale = 1})
 	p := DEFAULT_PERCEIVABLE
 	p.tag = tag
 	if len(points) > 0 {
-		offsets := [MAX_SIGHT_POINTS]^[3]f32{&p.points.p0, &p.points.p1, &p.points.p2, &p.points.p3}
+		offsets := [MAX_SIGHT_POINTS]^[3]f32 {
+			&p.points.p0,
+			&p.points.p1,
+			&p.points.p2,
+			&p.points.p3,
+		}
 		for point, i in points {
 			offsets[i]^ = point
 		}
@@ -453,7 +496,15 @@ a_target_behind_low_cover_is_seen_by_its_head :: proc(t: ^testing.T) {
 @(private = "file")
 targets_in_front :: proc(f: ^Fixture) {
 	for i in 0 ..< MAX_SIGHT_TARGETS {
-		spawn_target(f, at(f32(i) - 3.5, 0, 10), PLAYER, {0, 0.2, 0}, {0, 0.6, 0}, {0, 1, 0}, {0, 1.4, 0})
+		spawn_target(
+			f,
+			at(f32(i) - 3.5, 0, 10),
+			PLAYER,
+			{0, 0.2, 0},
+			{0, 0.6, 0},
+			{0, 1, 0},
+			{0, 1.4, 0},
+		)
 	}
 }
 
@@ -464,7 +515,11 @@ the_ray_budget_spreads_perceivers_over_ticks :: proc(t: ^testing.T) {
 	defer teardown(t, f)
 	set_sight_budget(&f.ai, 1)
 	testing.expect_value(t, f.ai.sight_budget, MAX_PERCEIVER_RAYS)
-	perceivers := [3]ecs.Entity{spawn_perceiver(f, at(-1, 0, 0)), spawn_perceiver(f, {}), spawn_perceiver(f, at(1, 0, 0))}
+	perceivers := [3]ecs.Entity {
+		spawn_perceiver(f, at(-1, 0, 0)),
+		spawn_perceiver(f, {}),
+		spawn_perceiver(f, at(1, 0, 0)),
+	}
 	targets_in_front(f)
 	frame(f, 2)
 	counts :: proc(f: ^Fixture, perceivers: [3]ecs.Entity) -> (out: [3]int) {
@@ -486,7 +541,11 @@ the_ray_budget_spreads_perceivers_over_ticks :: proc(t: ^testing.T) {
 	before := memory_of(f, perceivers[0]).eye
 	ecs.get_write(&f.world, perceivers[0], ecs.Transform).position = at(-1, 0, 0.5)
 	frame(f)
-	testing.expect(t, memory_of(f, perceivers[0]).eye != before, "the first perceiver's turn came again")
+	testing.expect(
+		t,
+		memory_of(f, perceivers[0]).eye != before,
+		"the first perceiver's turn came again",
+	)
 	testing.expect_value(t, memory_of(f, perceivers[0]).ray_count, MAX_PERCEIVER_RAYS)
 
 	// With room for all, each checks in every tick, and a lap ends on the one before where it began.
@@ -645,7 +704,11 @@ rows_fill_the_keys_that_the_blackboard_has :: proc(t: ^testing.T) {
 	testing.expect_value(t, key(f, p, "target").(ecs.Entity), target)
 	testing.expect_value(t, key(f, p, "target_since").(f32), 0)
 	m := memory_of(f, p)
-	testing.expect(t, m.checked_rows == 18 && m.checked_board == BOARD_KEY, "the rows were checked against the blackboard")
+	testing.expect(
+		t,
+		m.checked_rows == 18 && m.checked_board == BOARD_KEY,
+		"the rows were checked against the blackboard",
+	)
 }
 
 // A perceiver's behaviours get on_perceive when it begins to perceive an entity, by sight or hearing, and on_forget when
@@ -672,7 +735,12 @@ Test.agent():add(Watcher)
 	testing.expectf(t, slice.equal(f.reports[:], []f64{1}), "%v", f.reports[:])
 	clear(&f.reports)
 	frame(f)
-	testing.expectf(t, len(f.reports) == 0, "an entity that stays seen is perceived once: %v", f.reports[:])
+	testing.expectf(
+		t,
+		len(f.reports) == 0,
+		"an entity that stays seen is perceived once: %v",
+		f.reports[:],
+	)
 	ecs.despawn(&f.world, target)
 	frame(f)
 	testing.expectf(t, slice.equal(f.reports[:], []f64{3}), "%v", f.reports[:])
@@ -703,9 +771,19 @@ Test.agent():add(Footsteps)
 		}
 		frame(f)
 	}
-	testing.expectf(t, slice.equal(f.reports[:], []f64{20}), "an unknown tag raises an error, and nothing is heard yet: %v", f.reports[:])
+	testing.expectf(
+		t,
+		slice.equal(f.reports[:], []f64{20}),
+		"an unknown tag raises an error, and nothing is heard yet: %v",
+		f.reports[:],
+	)
 	frame(f)
-	testing.expectf(t, slice.equal(f.reports[:], []f64{20, 2}), "the footsteps are heard: %v", f.reports[:])
+	testing.expectf(
+		t,
+		slice.equal(f.reports[:], []f64{20, 2}),
+		"the footsteps are heard: %v",
+		f.reports[:],
+	)
 }
 
 // The perceptions of a crowd, with walls, moving targets and noises, are the same on one job and on eight workers,
@@ -733,7 +811,16 @@ perception_is_the_same_on_one_job_and_many :: proc(t: ^testing.T) {
 			append(&perceivers, e)
 		}
 		for i in 0 ..< 20 {
-			append(&targets, spawn_target(f, at(f32(i % 5) * 7, 0, f32(i / 5) * 7 + 1), PLAYER, {0, 0.5, 0}, {0, 1.7, 0}))
+			append(
+				&targets,
+				spawn_target(
+					f,
+					at(f32(i % 5) * 7, 0, f32(i / 5) * 7 + 1),
+					PLAYER,
+					{0, 0.5, 0},
+					{0, 1.7, 0},
+				),
+			)
 		}
 		for i in 0 ..< 6 {
 			wall(f, at(f32(i) * 5, 0.6, 14), {2, 1.2, 0.5})
@@ -741,7 +828,11 @@ perception_is_the_same_on_one_job_and_many :: proc(t: ^testing.T) {
 		outcomes := make([dynamic]Outcome)
 		for tick in 0 ..< 12 {
 			for e, i in targets {
-				ecs.get_write(&f.world, e, ecs.Transform).position = at(f32(i % 5) * 7 + f32(tick) * 0.5, 0, f32(i / 5) * 7 + 1)
+				ecs.get_write(&f.world, e, ecs.Transform).position = at(
+					f32(i % 5) * 7 + f32(tick) * 0.5,
+					0,
+					f32(i / 5) * 7 + 1,
+				)
 			}
 			if tick % 3 == 0 {
 				noise(&f.ai, at(f32(tick), 0, 12), 15, "Noise_Maker")

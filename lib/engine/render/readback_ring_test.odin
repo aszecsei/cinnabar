@@ -7,8 +7,8 @@ import "core:testing"
 
 import "cinnabar:core"
 import "cinnabar:core/gpu"
-import "cinnabar:core/jobs"
 import null "cinnabar:core/gpu/null"
+import "cinnabar:core/jobs"
 
 @(test)
 a_readback_ring_shows_what_the_frames_that_executed_copied :: proc(t: ^testing.T) {
@@ -47,7 +47,18 @@ a_readback_ring_shows_what_the_frames_that_executed_copied :: proc(t: ^testing.T
 	}
 	// A frame whose copy holds value, since the null backend copies nothing. It reads the ring after it, as draw_frame
 	// does, and gives what the read found.
-	frame :: proc(t: ^testing.T, platform: ^core.Platform_API, cache: ^Texture_Cache, ring: ^Readback_Ring, source: gpu.Buffer, kind: Frame_Kind, value: u32) -> (take: Readback_Take, read: u32) {
+	frame :: proc(
+		t: ^testing.T,
+		platform: ^core.Platform_API,
+		cache: ^Texture_Cache,
+		ring: ^Readback_Ring,
+		source: gpu.Buffer,
+		kind: Frame_Kind,
+		value: u32,
+	) -> (
+		take: Readback_Take,
+		read: u32,
+	) {
 		platform.gpu_submit = kind == .Copies_And_Fails ? fail_submit : null.submit
 		defer platform.gpu_submit = null.submit
 		g := begin(platform, cache)
@@ -129,7 +140,7 @@ a_readback_ring_has_all_of_its_copies_or_none :: proc(t: ^testing.T) {
 	testing.expect(t, null.init(nil, {64, 64}))
 	defer null.shutdown()
 	platform := core.Platform_API {
-		gpu_create_buffer  = proc(desc: gpu.Buffer_Desc, data: []byte) -> gpu.Buffer {
+		gpu_create_buffer = proc(desc: gpu.Buffer_Desc, data: []byte) -> gpu.Buffer {
 			if creates_left == 0 {
 				return {}
 			}

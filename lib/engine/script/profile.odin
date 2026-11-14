@@ -28,7 +28,9 @@ begin_callback :: proc(r: ^Runtime, class: profile.Name, kind: profile.Callback)
 end_callback :: proc(r: ^Runtime, z: Callback_Zone) {
 	p := &r.platform.profile
 	if profile.depth(p) > r.profile_base && !r.warned_unbalanced {
-		log.warn("script: a callback ended with a Profile.begin open, so the profiler closed it. Call Profile.finish before the callback returns or yields.")
+		log.warn(
+			"script: a callback ended with a Profile.begin open, so the profiler closed it. Call Profile.finish before the callback returns or yields.",
+		)
 		r.warned_unbalanced = true
 	}
 	profile.close_to(p, z.depth + 1)
@@ -83,7 +85,10 @@ register_profile :: proc(r: ^Runtime) {
 	r.coroutine_name = profile.name(&r.platform.profile, "coroutine", .Script)
 	define(r, "Profile.begin", proc(L: ^luau.State) -> c.int {
 		r := runtime_of(L)
-		profile.begin(&r.platform.profile, profile.name(&r.platform.profile, checkodinstring(L, 1), .User))
+		profile.begin(
+			&r.platform.profile,
+			profile.name(&r.platform.profile, checkodinstring(L, 1), .User),
+		)
 		return 0
 	})
 	define(r, "Profile.finish", proc(L: ^luau.State) -> c.int {

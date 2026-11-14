@@ -136,7 +136,8 @@ field_kind :: proc(ti: ^runtime.Type_Info) -> (kind: Field_Kind, ok: bool) {
 			return .F64, true
 		}
 	case runtime.Type_Info_Integer:
-		kinds := v.signed ? [4]Field_Kind{.I8, .I16, .I32, .I64} : [4]Field_Kind{.U8, .U16, .U32, .U64}
+		kinds :=
+			v.signed ? [4]Field_Kind{.I8, .I16, .I32, .I64} : [4]Field_Kind{.U8, .U16, .U32, .U64}
 		switch ti.size {
 		case 1:
 			return kinds[0], true
@@ -207,7 +208,10 @@ component_data :: proc(r: ^Runtime, L: ^luau.State, ref: Component_Ref) -> [^]by
 	}
 	data := ecs.get_raw(r.world, ref.entity, ref.id)
 	if data == nil {
-		raise(L, fmt.aprintf("the entity has no %s", component_name(r, ref.id), allocator = frame(r)))
+		raise(
+			L,
+			fmt.aprintf("the entity has no %s", component_name(r, ref.id), allocator = frame(r)),
+		)
 	}
 	return ([^]byte)(data)
 }
@@ -354,10 +358,23 @@ ref_newindex :: proc(L: ^luau.State) -> c.int {
 }
 
 @(private = "file")
-ref_field :: proc(r: ^Runtime, L: ^luau.State, ref: Component_Ref, atom: c.int, key: string) -> ^Field {
+ref_field :: proc(
+	r: ^Runtime,
+	L: ^luau.State,
+	ref: Component_Ref,
+	atom: c.int,
+	key: string,
+) -> ^Field {
 	x := find_exposed(r, ref.id)
 	if x == nil {
-		raise(L, fmt.aprintf("%s is not exposed to scripts", component_name(r, ref.id), allocator = frame(r)))
+		raise(
+			L,
+			fmt.aprintf(
+				"%s is not exposed to scripts",
+				component_name(r, ref.id),
+				allocator = frame(r),
+			),
+		)
 	}
 	f := find_field(r, x, atom, key)
 	if f == nil {
@@ -370,7 +387,15 @@ ref_field :: proc(r: ^Runtime, L: ^luau.State, ref: Component_Ref, atom: c.int, 
 ref_tostring :: proc(L: ^luau.State) -> c.int {
 	r := runtime_of(L)
 	ref, _ := to_component_ref(L, 1)
-	luau.pushodinstring(L, fmt.aprintf("%s(%v)", component_name(r, ref.id), entity_text(r, ref.entity), allocator = frame(r)))
+	luau.pushodinstring(
+		L,
+		fmt.aprintf(
+			"%s(%v)",
+			component_name(r, ref.id),
+			entity_text(r, ref.entity),
+			allocator = frame(r),
+		),
+	)
 	return 1
 }
 
@@ -394,7 +419,10 @@ fill_fields :: proc(r: ^Runtime, L: ^luau.State, ref: Component_Ref, x: ^Exposed
 		if !(ref.id == ecs.TRANSFORM_ID && transform_newindex(r, L, ref, key, value = -1)) {
 			f := find_field(r, x, atom, key)
 			if f == nil {
-				raise(L, fmt.aprintf("%s has no field %s", exposed_name(x), key, allocator = frame(r)))
+				raise(
+					L,
+					fmt.aprintf("%s has no field %s", exposed_name(x), key, allocator = frame(r)),
+				)
 			}
 			set_field(r, L, f, component_write(r, L, ref), luau.absindex(L, -1))
 		}
@@ -434,7 +462,13 @@ transform_index :: proc(r: ^Runtime, L: ^luau.State, ref: Component_Ref, key: st
 // transform_newindex handles the Transform fields that need more than a store. Setting position, rotation or scale
 // on a child computes its Local_Transform, so the pose stays after propagation.
 @(private = "file")
-transform_newindex :: proc(r: ^Runtime, L: ^luau.State, ref: Component_Ref, key: string, value: c.int = 3) -> bool {
+transform_newindex :: proc(
+	r: ^Runtime,
+	L: ^luau.State,
+	ref: Component_Ref,
+	key: string,
+	value: c.int = 3,
+) -> bool {
 	idx := luau.absindex(L, value)
 	switch key {
 	case "position", "rotation", "scale":
@@ -509,7 +543,11 @@ set_pose :: proc(r: ^Runtime, L: ^luau.State, e: ecs.Entity, pose: ecs.Transform
 local_from_world :: proc(parent, pose: ecs.Transform) -> ecs.Local_Transform {
 	inverse := linalg.quaternion_inverse(parent.rotation)
 	return {
-		offset = linalg.quaternion_mul_vector3(inverse, ecs.position_sub(pose.position, parent.position)) / parent.scale,
+		offset = linalg.quaternion_mul_vector3(
+			inverse,
+			ecs.position_sub(pose.position, parent.position),
+		) /
+		parent.scale,
 		rotation = inverse * pose.rotation,
 		scale = pose.scale / parent.scale,
 	}

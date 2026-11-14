@@ -174,7 +174,10 @@ write_schema :: proc(path: string) -> bool {
 		log.errorf("cook: %s: %v", path, err)
 		return false
 	}
-	if err := os.write_entire_file(path, transmute([]byte)cook_link.schema(context.temp_allocator)); err != nil {
+	if err := os.write_entire_file(
+		path,
+		transmute([]byte)cook_link.schema(context.temp_allocator),
+	); err != nil {
 		log.errorf("cook: %s: %v", path, err)
 		return false
 	}
@@ -191,28 +194,54 @@ cook_batch :: proc(options: Cook_Options, kind: format.Asset_Kind) -> bool {
 	case .Locked:
 	case .Held:
 		if options.config == .Dev {
-			log.infof("cook: the cook daemon is running, and keeps %s up to date", config_dir(options))
+			log.infof(
+				"cook: the cook daemon is running, and keeps %s up to date",
+				config_dir(options),
+			)
 			return true
 		}
-		log.errorf("cook: another cook is using %s. Stop the cook daemon (`just watch` or the editor) and cook again.", options.cache)
+		log.errorf(
+			"cook: another cook is using %s. Stop the cook daemon (`just watch` or the editor) and cook again.",
+			options.cache,
+		)
 		return false
 	case .Failed:
 		return false
 	}
 	defer unlock(&lock)
 	pass := cook(options, {kind})
-	log.infof("cook: %d %s cooked, %d up to date", pass.cooked[kind], kind_plural(kind), pass.current[kind])
+	log.infof(
+		"cook: %d %s cooked, %d up to date",
+		pass.cooked[kind],
+		kind_plural(kind),
+		pass.current[kind],
+	)
 	if kind == .Scene {
-		log.infof("cook: %d %s cooked, %d up to date", pass.cooked[.Prefab], kind_plural(.Prefab), pass.current[.Prefab])
+		log.infof(
+			"cook: %d %s cooked, %d up to date",
+			pass.cooked[.Prefab],
+			kind_plural(.Prefab),
+			pass.current[.Prefab],
+		)
 	}
 	if kind == .Model {
 		for sub in ([]format.Asset_Kind{.Mesh, .Skin, .Animation}) {
-			log.infof("cook: %d %s of models cooked, %d up to date", pass.cooked[sub], kind_plural(sub), pass.current[sub])
+			log.infof(
+				"cook: %d %s of models cooked, %d up to date",
+				pass.cooked[sub],
+				kind_plural(sub),
+				pass.current[sub],
+			)
 		}
 	}
 	if kind == .Stage {
 		for sub in ([]format.Asset_Kind{.Mesh, .Texture, .Instance_Set}) {
-			log.infof("cook: %d %s of stages cooked, %d up to date", pass.cooked[sub], kind_plural(sub), pass.current[sub])
+			log.infof(
+				"cook: %d %s of stages cooked, %d up to date",
+				pass.cooked[sub],
+				kind_plural(sub),
+				pass.current[sub],
+			)
 		}
 	}
 	if kind == .Font {
@@ -222,7 +251,11 @@ cook_batch :: proc(options: Cook_Options, kind: format.Asset_Kind) -> bool {
 		log.infof("cook: %d atlases of sprite sheets cooked", pass.cooked[.Texture])
 	}
 	if kind == .Nav_Mesh {
-		log.infof("cook: %d tiles of navmeshes baked, %d up to date", pass.nav_tiles[.Cooked], pass.nav_tiles[.Current])
+		log.infof(
+			"cook: %d tiles of navmeshes baked, %d up to date",
+			pass.nav_tiles[.Cooked],
+			pass.nav_tiles[.Current],
+		)
 	}
 	return pass.ok
 }

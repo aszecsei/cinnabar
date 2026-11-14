@@ -74,9 +74,20 @@ read_shading_stats :: proc(r: ^Renderer, v: ^View_State) {
 ensure_shading_stats :: proc(r: ^Renderer, v: ^View_State) -> bool {
 	s := &v.shading
 	if s.stats == {} {
-		s.stats = r.platform.gpu_create_buffer({size = SHADING_STATS_WORDS * 4, usage = {.Storage}, label = "shading stats"}, nil)
+		s.stats = r.platform.gpu_create_buffer(
+			{size = SHADING_STATS_WORDS * 4, usage = {.Storage}, label = "shading stats"},
+			nil,
+		)
 	}
-	return s.stats != {} && ensure_readback_ring(&s.stats_ring, r.platform, SHADING_STATS_WORDS * 4, "shading stats readback")
+	return(
+		s.stats != {} &&
+		ensure_readback_ring(
+			&s.stats_ring,
+			r.platform,
+			SHADING_STATS_WORDS * 4,
+			"shading stats readback",
+		) \
+	)
 }
 
 // begin_shading gives the frame its measurements: the tally with stats, and the quads' counts with the Quad_Overdraw
@@ -95,15 +106,25 @@ begin_shading :: proc(f: ^Frame, stats: bool) {
 		if sf.zeros, ok = upload_bytes(r.platform, zeros[:]); ok {
 			sf.stats = import_buffer(g, f.state.shading.stats)
 			p := add_compute_pass(g, "shading stats clear", proc(ctx: ^Pass_Context) {
-				f := (^Frame)(ctx.data)
-				zeros := f.shading.zeros
-				gpu.cmd_copy_buffer(ctx.cb, zeros.buffer, zeros.offset, gpu_buffer(ctx.graph, f.shading.stats), 0, SHADING_STATS_WORDS * 4)
-			}, f)
+					f := (^Frame)(ctx.data)
+					zeros := f.shading.zeros
+					gpu.cmd_copy_buffer(
+						ctx.cb,
+						zeros.buffer,
+						zeros.offset,
+						gpu_buffer(ctx.graph, f.shading.stats),
+						0,
+						SHADING_STATS_WORDS * 4,
+					)
+				}, f)
 			copy_dest(g, p, sf.stats)
 		}
 	}
 	size := [2]u32{(f.size.x + 1) / 2, (f.size.y + 1) / 2}
-	sf.quad_counts = create_texture(g, {size = size, format = QUAD_COUNT_FORMAT, label = "quad counts"})
+	sf.quad_counts = create_texture(
+		g,
+		{size = size, format = QUAD_COUNT_FORMAT, label = "quad counts"},
+	)
 	p := add_render_pass(g, "quad counts clear", proc(_: ^Pass_Context) {}, f)
 	color(g, p, sf.quad_counts, .Clear)
 	f.shading = sf
@@ -143,6 +164,12 @@ add_shading_stats_copy :: proc(f: ^Frame) {
 		return
 	}
 	r := f.renderer
-	add_readback_copy(f.graph, r.platform, &f.state.shading.stats_ring, f.shading.stats, SHADING_STATS_WORDS * 4, "shading stats")
+	add_readback_copy(
+		f.graph,
+		r.platform,
+		&f.state.shading.stats_ring,
+		f.shading.stats,
+		SHADING_STATS_WORDS * 4,
+		"shading stats",
+	)
 }
-

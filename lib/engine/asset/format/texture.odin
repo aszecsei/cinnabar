@@ -83,7 +83,13 @@ texture_mip_size :: proc "contextless" (format: Texture_Format, width, height: u
 }
 
 // texture_chain_size is the size of one layer's mip chain.
-texture_chain_size :: proc "contextless" (format: Texture_Format, size: [2]u32, mip_count: u32) -> (total: int) {
+texture_chain_size :: proc "contextless" (
+	format: Texture_Format,
+	size: [2]u32,
+	mip_count: u32,
+) -> (
+	total: int,
+) {
 	for mip in 0 ..< mip_count {
 		total += texture_mip_size(format, max(size.x >> mip, 1), max(size.y >> mip, 1))
 	}
@@ -94,7 +100,9 @@ texture_chain_size :: proc "contextless" (format: Texture_Format, size: [2]u32, 
 // its mips are the size that its format, size, mip count and layer count give.
 texture_view :: proc(data: []byte) -> (blob: ^Texture_Blob, ok: bool) {
 	header := blob_header(data) or_return
-	if header.kind != .Texture || header.layout != texture_layout() || len(data) < size_of(Texture_Blob) {
+	if header.kind != .Texture ||
+	   header.layout != texture_layout() ||
+	   len(data) < size_of(Texture_Blob) {
 		return
 	}
 	blob = (^Texture_Blob)(raw_data(data))
@@ -103,7 +111,10 @@ texture_view :: proc(data: []byte) -> (blob: ^Texture_Blob, ok: bool) {
 			return nil, false
 		}
 	}
-	if blob.format > max(Texture_Format) || blob.mip_count == 0 || blob.size.x == 0 || blob.size.y == 0 {
+	if blob.format > max(Texture_Format) ||
+	   blob.mip_count == 0 ||
+	   blob.size.x == 0 ||
+	   blob.size.y == 0 {
 		return nil, false
 	}
 	switch blob.dimension {
@@ -122,7 +133,8 @@ texture_view :: proc(data: []byte) -> (blob: ^Texture_Blob, ok: bool) {
 	case:
 		return nil, false
 	}
-	if int(blob.mips.size) != texture_chain_size(blob.format, blob.size, blob.mip_count) * int(blob.layer_count) {
+	if int(blob.mips.size) !=
+	   texture_chain_size(blob.format, blob.size, blob.mip_count) * int(blob.layer_count) {
 		return nil, false
 	}
 	return blob, true
@@ -150,7 +162,13 @@ texture_write :: proc(contents: Texture_Contents, allocator := context.allocator
 	copy(buffer[mips.offset:], contents.mips)
 	source_path := append_bytes(&buffer, transmute([]byte)contents.source_path)
 	blob := Texture_Blob {
-		header = {magic = BLOB_MAGIC, kind = .Texture, layout = texture_layout(), key = contents.key, guid = contents.guid},
+		header = {
+			magic = BLOB_MAGIC,
+			kind = .Texture,
+			layout = texture_layout(),
+			key = contents.key,
+			guid = contents.guid,
+		},
 		format = contents.format,
 		usage = contents.usage,
 		dimension = contents.dimension,

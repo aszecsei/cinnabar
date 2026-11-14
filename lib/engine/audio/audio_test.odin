@@ -19,8 +19,8 @@ import audio_host "cinnabar:core/audio/host"
 import audio_null "cinnabar:core/audio/null"
 import "cinnabar:core/jobs"
 import "cinnabar:core/luau"
-import physics_host "cinnabar:core/physics/host"
 import physics_boundary "cinnabar:core/physics"
+import physics_host "cinnabar:core/physics/host"
 import physics_jolt "cinnabar:core/physics/jolt"
 import script_host "cinnabar:core/script"
 import "cinnabar:core/testlog"
@@ -38,17 +38,17 @@ lock: sync.Mutex
 // What the backend was asked, for the running test.
 @(private = "file")
 Record :: struct {
-	null:         ^boundary.Audio_API,
-	sounds:       [dynamic]boundary.Sound_Desc,
-	paths:        [dynamic]string,
-	plays:        [dynamic]boundary.Voice_Desc,
-	stops:        int,
-	last:         boundary.Voice_Params,
-	sets:         int,
-	paused:       bool,
+	null:      ^boundary.Audio_API,
+	sounds:    [dynamic]boundary.Sound_Desc,
+	paths:     [dynamic]string,
+	plays:     [dynamic]boundary.Voice_Desc,
+	stops:     int,
+	last:      boundary.Voice_Params,
+	sets:      int,
+	paused:    bool,
 	// Voices that have ended, as the null backend's never do.
-	ended:        bool,
-	bus_gains:    [dynamic]f32,
+	ended:     bool,
+	bus_gains: [dynamic]f32,
 }
 
 @(private = "file")
@@ -120,11 +120,20 @@ fake_status :: proc "c" (out: ^boundary.Device_Status) {
 }
 
 @(private = "file")
-SOUND :: format.Guid{0 = 0xa0, 15 = 0x01}
+SOUND :: format.Guid {
+	0  = 0xa0,
+	15 = 0x01,
+}
 @(private = "file")
-OTHER :: format.Guid{0 = 0xa0, 15 = 0x02}
+OTHER :: format.Guid {
+	0  = 0xa0,
+	15 = 0x02,
+}
 @(private = "file")
-LONG :: format.Guid{0 = 0xa0, 15 = 0x03}
+LONG :: format.Guid {
+	0  = 0xa0,
+	15 = 0x03,
+}
 
 // A step that a test passes, long enough that the occlusion arrives in one update.
 @(private = "file")
@@ -185,7 +194,10 @@ setup :: proc(t: ^testing.T, scripts := false) -> ^Fixture {
 		f.reports = make([dynamic]f64)
 		script.register_components(&f.world.registry)
 		context.user_ptr = f
-		testing.expect(t, script.init(&f.runtime, &f.platform, &f.world, nil, register_test_scripts))
+		testing.expect(
+			t,
+			script.init(&f.runtime, &f.platform, &f.world, nil, register_test_scripts),
+		)
 	}
 	return f
 }
@@ -243,10 +255,34 @@ frame :: proc(f: ^Fixture, run := true) {
 }
 
 @(private = "file")
-write_sound :: proc(t: ^testing.T, f: ^Fixture, guid: format.Guid, samples: []i16, channels: u32 = 1, stream := false) {
+write_sound :: proc(
+	t: ^testing.T,
+	f: ^Fixture,
+	guid: format.Guid,
+	samples: []i16,
+	channels: u32 = 1,
+	stream := false,
+) {
 	buffer: [32]u8
-	blob := format.audio_write({guid = guid, frames = u64(len(samples)) / u64(channels), channels = channels, stream = stream, data = slice.to_bytes(samples), source_path = "game/audio/test.wav"}, context.temp_allocator)
-	testing.expect(t, os.write_entire_file(fmt.tprintf("%s/%s.blob", f.cache, format.guid_format(guid, &buffer)), blob) == nil)
+	blob := format.audio_write(
+		{
+			guid = guid,
+			frames = u64(len(samples)) / u64(channels),
+			channels = channels,
+			stream = stream,
+			data = slice.to_bytes(samples),
+			source_path = "game/audio/test.wav",
+		},
+		context.temp_allocator,
+	)
+	testing.expect(
+		t,
+		os.write_entire_file(
+			fmt.tprintf("%s/%s.blob", f.cache, format.guid_format(guid, &buffer)),
+			blob,
+		) ==
+		nil,
+	)
 }
 
 @(private = "file")
@@ -299,7 +335,12 @@ a_source_plays_in_the_listeners_axes :: proc(t: ^testing.T) {
 	frame(f)
 	testing.expect_value(t, len(record.plays), 1)
 	testing.expect(t, bool(record.last.spatial))
-	testing.expectf(t, close_to(record.last.position, {3, 0, 0}), "position %v", record.last.position)
+	testing.expectf(
+		t,
+		close_to(record.last.position, {3, 0, 0}),
+		"position %v",
+		record.last.position,
+	)
 }
 
 // A source that moves in ticks is heard between them, as it is drawn.
@@ -319,7 +360,12 @@ a_source_follows_the_presented_pose :: proc(t: ^testing.T) {
 	f.world.clock.alpha = 0.25
 	update(&f.audio, &f.world, nil, true, STEP)
 	free_all(f.platform.frame_allocator)
-	testing.expectf(t, close_to(record.last.position, {12.5, 0, 0}), "position %v", record.last.position)
+	testing.expectf(
+		t,
+		close_to(record.last.position, {12.5, 0, 0}),
+		"position %v",
+		record.last.position,
+	)
 	testing.expect_value(t, len(record.plays), 1)
 }
 
@@ -490,16 +536,44 @@ a_sound_loads_or_streams :: proc(t: ^testing.T) {
 	testing.expect(t, stream.samples == nil)
 	testing.expect(t, stream.offset >= size_of(format.Audio_Blob))
 	buffer: [32]u8
-	testing.expect_value(t, record.paths[1], fmt.tprintf("%s/%s.blob", f.cache, format.guid_format(LONG, &buffer)))
+	testing.expect_value(
+		t,
+		record.paths[1],
+		fmt.tprintf("%s/%s.blob", f.cache, format.guid_format(LONG, &buffer)),
+	)
 	testing.expect_value(t, f.assets.used, 0)
 }
 
 @(private = "file")
-write_adpcm_sound :: proc(t: ^testing.T, f: ^Fixture, guid: format.Guid, samples: []i16, stream: bool) {
+write_adpcm_sound :: proc(
+	t: ^testing.T,
+	f: ^Fixture,
+	guid: format.Guid,
+	samples: []i16,
+	stream: bool,
+) {
 	buffer: [32]u8
 	data := adpcm.encode(samples, 1, context.temp_allocator)
-	blob := format.audio_write({guid = guid, frames = u64(len(samples)), channels = 1, stream = stream, format = .ADPCM, data = data, source_path = "game/audio/test.wav"}, context.temp_allocator)
-	testing.expect(t, os.write_entire_file(fmt.tprintf("%s/%s.blob", f.cache, format.guid_format(guid, &buffer)), blob) == nil)
+	blob := format.audio_write(
+		{
+			guid = guid,
+			frames = u64(len(samples)),
+			channels = 1,
+			stream = stream,
+			format = .ADPCM,
+			data = data,
+			source_path = "game/audio/test.wav",
+		},
+		context.temp_allocator,
+	)
+	testing.expect(
+		t,
+		os.write_entire_file(
+			fmt.tprintf("%s/%s.blob", f.cache, format.guid_format(guid, &buffer)),
+			blob,
+		) ==
+		nil,
+	)
 }
 
 // A compressed sound that streams goes to a backend that can read it with its format and where its data is, and a backend
@@ -605,10 +679,14 @@ a_script_plays_a_sound :: proc(t: ^testing.T) {
 	context.user_ptr = f
 	write_sound(t, f, SOUND, SAMPLES[:])
 	listener(f, {0, 0, 0})
-	_, ok := script.spawn_source(&f.runtime, "=play", `
+	_, ok := script.spawn_source(
+		&f.runtime,
+		"=play",
+		`
 Audio.play(Test.sound(), WorldPosition.from_meters(4, 0, 0), 0.5)
 Audio.play(Test.sound())
-`)
+`,
+	)
 	testing.expect(t, ok)
 	frame(f)
 	testing.expect_value(t, len(record.plays), 2)
@@ -638,16 +716,31 @@ a_script_is_told_what_it_got_wrong :: proc(t: ^testing.T) {
 	names: Bus_Names
 	testing.expect(t, add_bus_name(&names, "Sfx"))
 	set_buses(&f.audio, names)
-	_, ok := script.spawn_source(&f.runtime, "=checks", `
+	_, ok := script.spawn_source(
+		&f.runtime,
+		"=checks",
+		`
 Test.report(pcall(Audio.play, 3) and 1 or 0)
 Test.report(pcall(Audio.play, Test.sound(), nil, 1, "Nope") and 1 or 0)
 Test.report(pcall(Audio.set_bus_gain, "Nope", 1) and 1 or 0)
 Test.report(pcall(Audio.play, Test.sound(), nil, 1, "Sfx") and 1 or 0)
 Test.report(pcall(Audio.set_bus_gain, "Sfx", 0.25) and 1 or 0)
 Test.report(pcall(Audio.set_bus_gain, "Master", 0.5) and 1 or 0)
-`)
+`,
+	)
 	testing.expect(t, ok)
-	testing.expectf(t, len(f.reports) == 6 && f.reports[0] == 0 && f.reports[1] == 0 && f.reports[2] == 0 && f.reports[3] == 1 && f.reports[4] == 1 && f.reports[5] == 1, "reports %v", f.reports[:])
+	testing.expectf(
+		t,
+		len(f.reports) == 6 &&
+		f.reports[0] == 0 &&
+		f.reports[1] == 0 &&
+		f.reports[2] == 0 &&
+		f.reports[3] == 1 &&
+		f.reports[4] == 1 &&
+		f.reports[5] == 1,
+		"reports %v",
+		f.reports[:],
+	)
 	testing.expect_value(t, len(record.bus_gains), 2)
 	testing.expect_value(t, f.audio.one_shots[0].bus, 1)
 }

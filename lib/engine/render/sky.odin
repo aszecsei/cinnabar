@@ -211,7 +211,13 @@ sky_destroy :: proc(s: ^Sky, r: ^Renderer) {
 sync_sky_pipelines :: proc(r: ^Renderer, force: bool) {
 	s := &r.sky
 	assets := r.residency.assets
-	sync_compute_pipeline(&s.transmittance, r.platform, assets, {label = "sky transmittance"}, force)
+	sync_compute_pipeline(
+		&s.transmittance,
+		r.platform,
+		assets,
+		{label = "sky transmittance"},
+		force,
+	)
 	sync_compute_pipeline(&s.multiscatter, r.platform, assets, {label = "sky multiscatter"}, force)
 	sync_compute_pipeline(&s.view, r.platform, assets, {label = "sky view"}, force)
 	sync_compute_pipeline(&s.background, r.platform, assets, {label = "sky"}, force)
@@ -282,7 +288,11 @@ begin_sky :: proc(f: ^Frame, s: Sky_Settings) -> Ambient {
 	}
 	r := f.renderer
 	a := s.atmosphere
-	height := clamp(a.altitude + f32(ecs.position_to_meters(f.view.position).y / 1000), 0.001, a.top - a.bottom - 0.001)
+	height := clamp(
+		a.altitude + f32(ecs.position_to_meters(f.view.position).y / 1000),
+		0.001,
+		a.top - a.bottom - 0.001,
+	)
 	sun_direction, sun_illuminance := linalg.normalize0(s.sun_direction), s.sun_illuminance
 	if s.sun != 0 && f.lights != nil {
 		lf := f.lights
@@ -304,7 +314,11 @@ begin_sky :: proc(f: ^Frame, s: Sky_Settings) -> Ambient {
 	key := Sky_Light_Key{a, height, sun_direction, sun_illuminance, moon_direction, moon_light}
 	cache := &f.state.sky
 	if !cache.ambient_valid || cache.ambient_key != key {
-		cache.ambient = sky_ambient(a, height, {{sun_direction, sun_illuminance}, {moon_direction, moon_light}})
+		cache.ambient = sky_ambient(
+			a,
+			height,
+			{{sun_direction, sun_illuminance}, {moon_direction, moon_light}},
+		)
 		cache.ambient_key, cache.ambient_valid = key, true
 	}
 	ambient := scale_ambient(cache.ambient, s.ambient_intensity)
@@ -322,15 +336,40 @@ begin_sky :: proc(f: ^Frame, s: Sky_Settings) -> Ambient {
 		right            = {right.x, right.y, right.z, scale.x},
 		up               = {up.x, up.y, up.z, scale.y},
 		forward          = {forward.x, forward.y, forward.z, 0},
-		sun_direction    = {sun_direction.x, sun_direction.y, sun_direction.z, math.cos(s.sun_radius)},
+		sun_direction    = {
+			sun_direction.x,
+			sun_direction.y,
+			sun_direction.z,
+			math.cos(s.sun_radius),
+		},
 		sun_illuminance  = {sun_illuminance.r, sun_illuminance.g, sun_illuminance.b, s.sun_radius},
-		moon_direction   = {moon_direction.x, moon_direction.y, moon_direction.z, math.cos(s.moon_radius)},
-		moon_illuminance = {s.moon_illuminance.r, s.moon_illuminance.g, s.moon_illuminance.b, s.moon_radius},
+		moon_direction   = {
+			moon_direction.x,
+			moon_direction.y,
+			moon_direction.z,
+			math.cos(s.moon_radius),
+		},
+		moon_illuminance = {
+			s.moon_illuminance.r,
+			s.moon_illuminance.g,
+			s.moon_illuminance.b,
+			s.moon_radius,
+		},
 		moon_light       = {moon_light.r, moon_light.g, moon_light.b, 0},
-		rayleigh         = {a.rayleigh_scattering.r, a.rayleigh_scattering.g, a.rayleigh_scattering.b, a.rayleigh_height},
+		rayleigh         = {
+			a.rayleigh_scattering.r,
+			a.rayleigh_scattering.g,
+			a.rayleigh_scattering.b,
+			a.rayleigh_height,
+		},
 		mie              = {a.mie_scattering, a.mie_absorption, a.mie_anisotropy, a.mie_height},
 		ozone            = {a.ozone_absorption.r, a.ozone_absorption.g, a.ozone_absorption.b, 0},
-		ground_albedo    = {a.ground_albedo.r, a.ground_albedo.g, a.ground_albedo.b, s.star_intensity},
+		ground_albedo    = {
+			a.ground_albedo.r,
+			a.ground_albedo.g,
+			a.ground_albedo.b,
+			s.star_intensity,
+		},
 		heights          = {height, a.top - a.bottom, a.bottom, 0},
 		star_density     = s.star_density,
 		size             = f.size,
@@ -355,8 +394,14 @@ add_sky_passes :: proc(f: ^Frame) {
 		return
 	}
 	g := f.graph
-	sf.transmittance = create_texture(g, {size = SKY_TRANSMITTANCE_SIZE, format = SKY_FORMAT, label = "sky transmittance"})
-	sf.multiscatter = create_texture(g, {size = SKY_MULTISCATTER_SIZE, format = SKY_FORMAT, label = "sky multiscatter"})
+	sf.transmittance = create_texture(
+		g,
+		{size = SKY_TRANSMITTANCE_SIZE, format = SKY_FORMAT, label = "sky transmittance"},
+	)
+	sf.multiscatter = create_texture(
+		g,
+		{size = SKY_MULTISCATTER_SIZE, format = SKY_FORMAT, label = "sky multiscatter"},
+	)
 	sf.view = create_texture(g, {size = SKY_VIEW_SIZE, format = SKY_FORMAT, label = "sky view"})
 	p := add_compute_pass(g, "sky transmittance", run_sky_transmittance, f)
 	write(g, p, sf.transmittance)
@@ -368,7 +413,15 @@ add_sky_passes :: proc(f: ^Frame) {
 	read(g, p, sf.multiscatter)
 	write(g, p, sf.view)
 	if sf.has_aerial {
-		f.aerial = create_texture(g, {size = SKY_AERIAL_SIZE.xy, depth = SKY_AERIAL_SIZE.z, format = SKY_FORMAT, label = "sky aerial"})
+		f.aerial = create_texture(
+			g,
+			{
+				size = SKY_AERIAL_SIZE.xy,
+				depth = SKY_AERIAL_SIZE.z,
+				format = SKY_FORMAT,
+				label = "sky aerial",
+			},
+		)
 		p = add_compute_pass(g, "sky aerial", run_sky_aerial, f)
 		read(g, p, sf.transmittance)
 		read(g, p, sf.multiscatter)
@@ -505,7 +558,10 @@ medium_at :: proc(a: Atmosphere_Params, height: f64) -> Medium {
 		rayleigh = to_f64(a.rayleigh_scattering) * rayleigh,
 		mie      = f64(a.mie_scattering) * mie,
 	}
-	m.extinction = m.rayleigh + f64(a.mie_scattering + a.mie_absorption) * mie + to_f64(a.ozone_absorption) * ozone
+	m.extinction =
+		m.rayleigh +
+		f64(a.mie_scattering + a.mie_absorption) * mie +
+		to_f64(a.ozone_absorption) * ozone
 	return m
 }
 
@@ -552,7 +608,12 @@ transmittance_from :: proc(a: Atmosphere_Params, origin, direction: [3]f64, step
 // sky_transmittance is the share of light that reaches a height above the ground, in kilometers, from a direction,
 // such as the sun's: 0 from below the horizon.
 sky_transmittance :: proc(a: Atmosphere_Params, height: f32, direction: [3]f32) -> [3]f32 {
-	t := transmittance_from(a, {0, f64(a.bottom + height), 0}, to_f64(linalg.normalize0(direction)), 32)
+	t := transmittance_from(
+		a,
+		{0, f64(a.bottom + height), 0},
+		to_f64(linalg.normalize0(direction)),
+		32,
+	)
 	return {f32(t.x), f32(t.y), f32(t.z)}
 }
 
@@ -565,13 +626,24 @@ rayleigh_phase :: proc(cos_theta: f64) -> f64 {
 @(private = "file")
 mie_phase :: proc(cos_theta, g: f64) -> f64 {
 	g2 := g * g
-	return 3 / (8 * math.PI) * (1 - g2) * (1 + cos_theta * cos_theta) / ((2 + g2) * math.pow(1 + g2 - 2 * g * cos_theta, 1.5))
+	return(
+		3 /
+		(8 * math.PI) *
+		(1 - g2) *
+		(1 + cos_theta * cos_theta) /
+		((2 + g2) * math.pow(1 + g2 - 2 * g * cos_theta, 1.5)) \
+	)
 }
 
 // sky_radiance is the light that reaches the camera from a direction: what the air scatters toward it, and the
 // ground's.
 @(private = "file")
-sky_radiance :: proc(a: Atmosphere_Params, height: f64, direction: [3]f64, lights: []Sky_Light) -> [3]f64 {
+sky_radiance :: proc(
+	a: Atmosphere_Params,
+	height: f64,
+	direction: [3]f64,
+	lights: []Sky_Light,
+) -> [3]f64 {
 	origin := [3]f64{0, f64(a.bottom) + height, 0}
 	ground := ray_ground(origin, direction, f64(a.bottom))
 	length := ground >= 0 ? ground : ray_exit(origin, direction, f64(a.top))
@@ -589,14 +661,17 @@ sky_radiance :: proc(a: Atmosphere_Params, height: f64, direction: [3]f64, light
 			}
 			toward := to_f64(l.direction)
 			cos_theta := linalg.dot(direction, toward)
-			reaching := transmittance_from(a, p, toward, AMBIENT_LIGHT_STEPS) * to_f64(l.illuminance)
+			reaching :=
+				transmittance_from(a, p, toward, AMBIENT_LIGHT_STEPS) * to_f64(l.illuminance)
 			phase := m.rayleigh * rayleigh_phase(cos_theta) + m.mie * mie_phase(cos_theta, g)
-			scattered += reaching * (phase + (m.rayleigh + m.mie) * (AMBIENT_MULTISCATTER / (4 * math.PI)))
+			scattered +=
+				reaching * (phase + (m.rayleigh + m.mie) * (AMBIENT_MULTISCATTER / (4 * math.PI)))
 		}
 		step: [3]f64
 		for c in 0 ..< 3 {
 			step[c] = math.exp(-m.extinction[c] * dt)
-			result[c] += transmittance[c] * scattered[c] * (1 - step[c]) / max(m.extinction[c], 1e-9)
+			result[c] +=
+				transmittance[c] * scattered[c] * (1 - step[c]) / max(m.extinction[c], 1e-9)
 		}
 		transmittance *= step
 	}
@@ -606,7 +681,10 @@ sky_radiance :: proc(a: Atmosphere_Params, height: f64, direction: [3]f64, light
 		lit: [3]f64
 		for l in lights {
 			toward := to_f64(l.direction)
-			lit += transmittance_from(a, p + normal * 1e-3, toward, AMBIENT_LIGHT_STEPS) * to_f64(l.illuminance) * max(linalg.dot(normal, toward), 0)
+			lit +=
+				transmittance_from(a, p + normal * 1e-3, toward, AMBIENT_LIGHT_STEPS) *
+				to_f64(l.illuminance) *
+				max(linalg.dot(normal, toward), 0)
 		}
 		result += transmittance * to_f64(a.ground_albedo) * lit / math.PI
 	}

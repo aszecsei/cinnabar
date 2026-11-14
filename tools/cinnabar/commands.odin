@@ -13,7 +13,12 @@ import format "cinnabar:engine/asset/format"
 GPU_BACKEND :: "d3d12"
 // The runtime libraries that a release needs beside its executable, from the engine's build/dev: the Agility SDK's
 // core, without the debug layer's library, and FSR's (see docs/overview/building-and-running.md#build-layout).
-RELEASE_LIBRARIES :: [?]string{"D3D12/D3D12Core.dll", "amd_fidelityfx_loader_dx12.dll", "amd_fidelityfx_upscaler_dx12.dll", "amd_fidelityfx_LICENSE.txt"}
+RELEASE_LIBRARIES :: [?]string {
+	"D3D12/D3D12Core.dll",
+	"amd_fidelityfx_loader_dx12.dll",
+	"amd_fidelityfx_upscaler_dx12.dll",
+	"amd_fidelityfx_LICENSE.txt",
+}
 
 // game_dll_command builds a project's game package into its development DLL, which the host hot-reloads. Each build
 // writes a PDB of its own, because a running host's debugger keeps the last one open.
@@ -59,11 +64,29 @@ release_command :: proc(e: Engine, p: Project, exe: string) -> []string {
 // docs/content/identity-and-cooking.md#cooking). prune deletes the blobs of assets that left the content.
 cook_command :: proc(e: Engine, p: Project, config, cache: string, prune: bool) -> []string {
 	command := make([dynamic]string)
-	append(&command, e.cook, "all", "--cache", cache, "--config", config, "--definitions", p.types, "--dxc", e.dxc)
+	append(
+		&command,
+		e.cook,
+		"all",
+		"--cache",
+		cache,
+		"--config",
+		config,
+		"--definitions",
+		p.types,
+		"--dxc",
+		e.dxc,
+	)
 	for include in e.includes {
 		append(&command, "--include", include)
 	}
-	append(&command, "--root", fmt.aprintf("game=%s", p.content), "--root", fmt.aprintf("engine=%s", e.content))
+	append(
+		&command,
+		"--root",
+		fmt.aprintf("game=%s", p.content),
+		"--root",
+		fmt.aprintf("engine=%s", e.content),
+	)
 	if prune {
 		append(&command, "--prune")
 	}
@@ -83,11 +106,27 @@ editor_command :: proc(e: Engine, p: Project, scene: string) -> []string {
 	if scene != "" {
 		append(&command, "--scene", scene)
 	}
-	append(&command, "--cook", e.cook, "--cache", p.cache, "--definitions", p.types, "--dxc", e.dxc)
+	append(
+		&command,
+		"--cook",
+		e.cook,
+		"--cache",
+		p.cache,
+		"--definitions",
+		p.types,
+		"--dxc",
+		e.dxc,
+	)
 	for include in e.includes {
 		append(&command, "--include", include)
 	}
-	append(&command, "--root", fmt.aprintf("game=%s", p.content), "--root", fmt.aprintf("engine=%s", e.content))
+	append(
+		&command,
+		"--root",
+		fmt.aprintf("game=%s", p.content),
+		"--root",
+		fmt.aprintf("engine=%s", e.content),
+	)
 	append(&command, "--project", p.settings)
 	return command[:]
 }
@@ -105,10 +144,15 @@ build_project :: proc(e: Engine, p: Project) -> bool {
 		return false
 	}
 	if p.has_code && !run(..game_dll_command(e, p, time.now()._nsec)) {
-		log.errorf("cinnabar: the project's game/ did not build. Is Odin on the PATH? (see docs/overview/getting-started.md#prerequisites)")
+		log.errorf(
+			"cinnabar: the project's game/ did not build. Is Odin on the PATH? (see docs/overview/getting-started.md#prerequisites)",
+		)
 		return false
 	}
-	return run(e.host, p.game_dll, "--emit-script-types", p.types) && run(..cook_command(e, p, "dev", p.cache, false))
+	return(
+		run(e.host, p.game_dll, "--emit-script-types", p.types) &&
+		run(..cook_command(e, p, "dev", p.cache, false)) \
+	)
 }
 
 run_project :: proc(e: Engine, p: Project) -> bool {
@@ -147,14 +191,27 @@ export_project :: proc(e: Engine, p: Project, out: string) -> bool {
 		return false
 	}
 	content := strings.concatenate({out, "/content"}, context.temp_allocator)
-	if !run(e.cook, "package", "--cache", p.release_cache, "--out", content, "--project", p.settings) {
+	if !run(
+		e.cook,
+		"package",
+		"--cache",
+		p.release_cache,
+		"--out",
+		content,
+		"--project",
+		p.settings,
+	) {
 		return false
 	}
 	if !copy_into(p.settings, out, "project.settings") {
 		return false
 	}
 	for library in RELEASE_LIBRARIES {
-		if !copy_into(strings.concatenate({e.dev, "/", library}, context.temp_allocator), out, library) {
+		if !copy_into(
+			strings.concatenate({e.dev, "/", library}, context.temp_allocator),
+			out,
+			library,
+		) {
 			return false
 		}
 	}
@@ -163,7 +220,11 @@ export_project :: proc(e: Engine, p: Project, out: string) -> bool {
 		if !run(..release_command(e, p, exe)) {
 			return false
 		}
-	} else if !copy_into(e.runtime, out, strings.concatenate({p.name, ".exe"}, context.temp_allocator)) {
+	} else if !copy_into(
+		e.runtime,
+		out,
+		strings.concatenate({p.name, ".exe"}, context.temp_allocator),
+	) {
 		log.errorf("cinnabar: build the engine's runtime.exe with `just engine` in %s", e.root)
 		return false
 	}
@@ -188,7 +249,11 @@ clear_release :: proc(out: string) -> bool {
 		switch {
 		case e.type == .Regular && strings.has_suffix(e.name, ".exe"):
 			if remove_err := os.remove(e.fullpath); remove_err != nil {
-				log.errorf("cinnabar: cannot delete %s: %v. Is the game running?", e.fullpath, remove_err)
+				log.errorf(
+					"cinnabar: cannot delete %s: %v. Is the game running?",
+					e.fullpath,
+					remove_err,
+				)
 				return false
 			}
 		case e.type == .Directory && e.name == "content":

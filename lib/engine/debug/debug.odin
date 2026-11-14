@@ -43,7 +43,9 @@ Draw :: struct {
 }
 
 init :: proc(d: ^Draw, allocator: runtime.Allocator) {
-	d^ = {allocator = allocator}
+	d^ = {
+		allocator = allocator,
+	}
 	when DEBUG_DRAW {
 		d.lines = make([]Line, MAX_LINES, allocator)
 	}
@@ -55,7 +57,13 @@ destroy :: proc(d: ^Draw) {
 }
 
 // line draws a line for duration seconds, or for this frame only with 0.
-line :: proc(d: ^Draw, a, b: ecs.World_Position, color: [4]f32, duration: f32 = 0, mode := Mode.Tested) {
+line :: proc(
+	d: ^Draw,
+	a, b: ecs.World_Position,
+	color: [4]f32,
+	duration: f32 = 0,
+	mode := Mode.Tested,
+) {
 	when DEBUG_DRAW {
 		index := sync.atomic_add(&d.count, 1)
 		if index >= len(d.lines) {
@@ -63,17 +71,37 @@ line :: proc(d: ^Draw, a, b: ecs.World_Position, color: [4]f32, duration: f32 = 
 		}
 		expires: time.Tick
 		if duration > 0 {
-			expires = time.tick_add(time.tick_now(), time.Duration(f64(duration) * f64(time.Second)))
+			expires = time.tick_add(
+				time.tick_now(),
+				time.Duration(f64(duration) * f64(time.Second)),
+			)
 		}
 		d.lines[index] = {a, b, color, mode, expires}
 	}
 }
 
 // box draws the edges of a box: its center, its half extents along its axes, and its rotation.
-box :: proc(d: ^Draw, center: ecs.World_Position, half: [3]f32, rotation: quaternion128, color: [4]f32, duration: f32 = 0, mode := Mode.Tested) {
+box :: proc(
+	d: ^Draw,
+	center: ecs.World_Position,
+	half: [3]f32,
+	rotation: quaternion128,
+	color: [4]f32,
+	duration: f32 = 0,
+	mode := Mode.Tested,
+) {
 	when DEBUG_DRAW {
-		corner :: proc(center: ecs.World_Position, half: [3]f32, rotation: quaternion128, i: int) -> ecs.World_Position {
-			local := [3]f32{i & 1 != 0 ? half.x : -half.x, i & 2 != 0 ? half.y : -half.y, i & 4 != 0 ? half.z : -half.z}
+		corner :: proc(
+			center: ecs.World_Position,
+			half: [3]f32,
+			rotation: quaternion128,
+			i: int,
+		) -> ecs.World_Position {
+			local := [3]f32 {
+				i & 1 != 0 ? half.x : -half.x,
+				i & 2 != 0 ? half.y : -half.y,
+				i & 4 != 0 ? half.z : -half.z,
+			}
 			return ecs.position_offset(center, linalg.quaternion128_mul_vector3(rotation, local))
 		}
 		corners: [8]ecs.World_Position
@@ -92,9 +120,20 @@ box :: proc(d: ^Draw, center: ecs.World_Position, half: [3]f32, rotation: quater
 }
 
 // sphere draws a sphere as three circles, one about each axis of the world.
-sphere :: proc(d: ^Draw, center: ecs.World_Position, radius: f32, color: [4]f32, duration: f32 = 0, mode := Mode.Tested) {
+sphere :: proc(
+	d: ^Draw,
+	center: ecs.World_Position,
+	radius: f32,
+	color: [4]f32,
+	duration: f32 = 0,
+	mode := Mode.Tested,
+) {
 	when DEBUG_DRAW {
-		axes := [3][2][3]f32{{{1, 0, 0}, {0, 1, 0}}, {{0, 1, 0}, {0, 0, 1}}, {{0, 0, 1}, {1, 0, 0}}}
+		axes := [3][2][3]f32 {
+			{{1, 0, 0}, {0, 1, 0}},
+			{{0, 1, 0}, {0, 0, 1}},
+			{{0, 0, 1}, {1, 0, 0}},
+		}
 		for plane in axes {
 			circle(d, center, plane[0], plane[1], radius, color, duration, mode)
 		}
@@ -102,11 +141,27 @@ sphere :: proc(d: ^Draw, center: ecs.World_Position, radius: f32, color: [4]f32,
 }
 
 // circle draws a circle in the plane of two unit axes.
-circle :: proc(d: ^Draw, center: ecs.World_Position, u, v: [3]f32, radius: f32, color: [4]f32, duration: f32 = 0, mode := Mode.Tested) {
+circle :: proc(
+	d: ^Draw,
+	center: ecs.World_Position,
+	u, v: [3]f32,
+	radius: f32,
+	color: [4]f32,
+	duration: f32 = 0,
+	mode := Mode.Tested,
+) {
 	when DEBUG_DRAW {
-		point :: proc(center: ecs.World_Position, u, v: [3]f32, radius: f32, k: int) -> ecs.World_Position {
+		point :: proc(
+			center: ecs.World_Position,
+			u, v: [3]f32,
+			radius: f32,
+			k: int,
+		) -> ecs.World_Position {
 			angle := f32(k) * math.TAU / CIRCLE_SEGMENTS
-			return ecs.position_offset(center, (u * math.cos(angle) + v * math.sin(angle)) * radius)
+			return ecs.position_offset(
+				center,
+				(u * math.cos(angle) + v * math.sin(angle)) * radius,
+			)
 		}
 		previous := point(center, u, v, radius, 0)
 		for k in 1 ..= CIRCLE_SEGMENTS {
@@ -118,7 +173,13 @@ circle :: proc(d: ^Draw, center: ecs.World_Position, u, v: [3]f32, radius: f32, 
 }
 
 // arrow draws a line with a head at its end, a fifth of its length.
-arrow :: proc(d: ^Draw, from, to: ecs.World_Position, color: [4]f32, duration: f32 = 0, mode := Mode.Tested) {
+arrow :: proc(
+	d: ^Draw,
+	from, to: ecs.World_Position,
+	color: [4]f32,
+	duration: f32 = 0,
+	mode := Mode.Tested,
+) {
 	when DEBUG_DRAW {
 		line(d, from, to, color, duration, mode)
 		delta := ecs.position_sub(to, from)
@@ -133,7 +194,14 @@ arrow :: proc(d: ^Draw, from, to: ecs.World_Position, color: [4]f32, duration: f
 		up := linalg.cross(side, forward)
 		head := length * 0.2
 		for s in ([4][3]f32{side, -side, up, -up}) {
-			line(d, to, ecs.position_offset(to, (-forward + s * 0.5) * head), color, duration, mode)
+			line(
+				d,
+				to,
+				ecs.position_offset(to, (-forward + s * 0.5) * head),
+				color,
+				duration,
+				mode,
+			)
 		}
 	}
 }
@@ -143,7 +211,10 @@ axes :: proc(d: ^Draw, pose: ecs.Transform, size: f32, duration: f32 = 0, mode :
 	when DEBUG_DRAW {
 		colors := [3][4]f32{{1, 0.15, 0.1, 1}, {0.2, 1, 0.2, 1}, {0.15, 0.4, 1, 1}}
 		for axis, i in ([3][3]f32{{1, 0, 0}, {0, 1, 0}, {0, 0, 1}}) {
-			end := ecs.position_offset(pose.position, linalg.quaternion128_mul_vector3(pose.rotation, axis) * size)
+			end := ecs.position_offset(
+				pose.position,
+				linalg.quaternion128_mul_vector3(pose.rotation, axis) * size,
+			)
 			line(d, pose.position, end, colors[i], duration, mode)
 		}
 	}

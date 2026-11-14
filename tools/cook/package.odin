@@ -58,7 +58,10 @@ package_content :: proc(options: Package_Options) -> bool {
 	switch locked {
 	case .Locked:
 	case .Held:
-		log.errorf("cook: another cook is using %s. Stop the cook daemon and package again.", options.cache)
+		log.errorf(
+			"cook: another cook is using %s. Stop the cook daemon and package again.",
+			options.cache,
+		)
 		return false
 	case .Failed:
 		return false
@@ -105,7 +108,14 @@ package_content :: proc(options: Package_Options) -> bool {
 		if !write_blob(path, bundle) {
 			return false
 		}
-		log.infof("cook: %s%s: %d blobs, %d KiB from %d KiB", name, format.BUNDLE_EXTENSION, len(unit), len(bundle) / 1024, sizes[i] / 1024)
+		log.infof(
+			"cook: %s%s: %d blobs, %d KiB from %d KiB",
+			name,
+			format.BUNDLE_EXTENSION,
+			len(unit),
+			len(bundle) / 1024,
+			sizes[i] / 1024,
+		)
 	}
 	return true
 }
@@ -124,7 +134,12 @@ project_global_scenes :: proc(path: string) -> (scenes: []format.Guid, ok: bool)
 			continue
 		}
 		if scenes, ok = format.bundle_parse_scenes(value, context.temp_allocator); !ok {
-			log.errorf("cook: %s: %s takes scenes' GUIDs between commas, not %q", path, format.BUNDLE_GLOBAL_SCENES_KEY, strings.trim_space(value))
+			log.errorf(
+				"cook: %s: %s takes scenes' GUIDs between commas, not %q",
+				path,
+				format.BUNDLE_GLOBAL_SCENES_KEY,
+				strings.trim_space(value),
+			)
 		}
 		return
 	}
@@ -153,15 +168,32 @@ read_cache_blobs :: proc(cache: string) -> (blobs: []Package_Blob, ok: bool) {
 			log.errorf("cook: %s: %v", entry.fullpath, read_err)
 			return
 		}
-		data := mem.alloc_bytes_non_zeroed(len(text), format.BLOB_ALIGN, context.temp_allocator) or_else nil
+		data :=
+			mem.alloc_bytes_non_zeroed(
+				len(text),
+				format.BLOB_ALIGN,
+				context.temp_allocator,
+			) or_else nil
 		copy(data, text)
 		header, valid := format.blob_header(data)
 		references, references_ok := format.blob_references(data, context.temp_allocator)
 		if !valid || header.guid != guid || !references_ok {
-			log.errorf("cook: %s is not a blob of its GUID that this cooker reads. Cook the content again.", entry.fullpath)
+			log.errorf(
+				"cook: %s is not a blob of its GUID that this cooker reads. Cook the content again.",
+				entry.fullpath,
+			)
 			return
 		}
-		append(&list, Package_Blob{guid = guid, kind = header.kind, data = data, references = references, unit = GLOBAL_UNIT})
+		append(
+			&list,
+			Package_Blob {
+				guid = guid,
+				kind = header.kind,
+				data = data,
+				references = references,
+				unit = GLOBAL_UNIT,
+			},
+		)
 	}
 	slice.sort_by(list[:], proc(a, b: Package_Blob) -> bool {
 		return format.guid_less(a.guid, b.guid)
@@ -226,7 +258,13 @@ assign_units :: proc(blobs: []Package_Blob, global_scenes: []format.Guid) -> []f
 // reach_from is the blobs that the blobs at from reach through the assets that they name, from among them: a walk that
 // does not go into a level's scene but from. seen is the walk's scratch, one for each blob.
 @(private = "file")
-reach_from :: proc(blobs: []Package_Blob, index: map[format.Guid]int, level_of: []int, from: []int, seen: []bool) -> []int {
+reach_from :: proc(
+	blobs: []Package_Blob,
+	index: map[format.Guid]int,
+	level_of: []int,
+	from: []int,
+	seen: []bool,
+) -> []int {
 	slice.fill(seen, false)
 	reached := make([dynamic]int, context.temp_allocator)
 	for i in from {

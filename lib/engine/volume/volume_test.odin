@@ -80,9 +80,23 @@ at :: proc(x, y, z: f64) -> ecs.World_Position {
 }
 
 @(private = "file")
-spawn :: proc(f: ^Fixture, v: Volume, position := [3]f64{}, rotation := quaternion128(1), scale := [3]f32{1, 1, 1}) -> ecs.Entity {
+spawn :: proc(
+	f: ^Fixture,
+	v: Volume,
+	position := [3]f64{},
+	rotation := quaternion128(1),
+	scale := [3]f32{1, 1, 1},
+) -> ecs.Entity {
 	e := ecs.spawn(&f.world)
-	ecs.add(&f.world, e, ecs.Transform{position = at(position.x, position.y, position.z), rotation = rotation, scale = scale})
+	ecs.add(
+		&f.world,
+		e,
+		ecs.Transform {
+			position = at(position.x, position.y, position.z),
+			rotation = rotation,
+			scale = scale,
+		},
+	)
 	ecs.add(&f.world, e, v)
 	return e
 }
@@ -110,7 +124,12 @@ shapes_weigh_a_point :: proc(t: ^testing.T) {
 	ecs.despawn_all(&f.world)
 
 	// Turned a quarter about y and scaled, its x extent lies along the world's -z, twice as long.
-	spawn(f, {shape = .Box, extents = {1, 1, 1}}, rotation = linalg.quaternion_angle_axis_f32(math.PI / 2, {0, 1, 0}), scale = {2, 1, 1})
+	spawn(
+		f,
+		{shape = .Box, extents = {1, 1, 1}},
+		rotation = linalg.quaternion_angle_axis_f32(math.PI / 2, {0, 1, 0}),
+		scale = {2, 1, 1},
+	)
 	testing.expect_value(t, weight_at(f, at(0, 0, 1.9)), 1)
 	testing.expect_value(t, weight_at(f, at(1.9, 0, 0)), 0)
 	ecs.despawn_all(&f.world)
@@ -169,7 +188,16 @@ settings_blend_by_weight :: proc(t: ^testing.T) {
 	ecs.add(&f.world, base, Tone{gain = {true, 3}, mode = {true, .Hard}})
 	local := spawn(f, {shape = .Global, priority = 1, weight = 0.25})
 	// tint overrides with black, which is not its default; inner.depth keeps 9 but does not override it.
-	ecs.add(&f.world, local, Tone{gain = {true, 7}, tint = {true, {}}, mode = {true, .Soft}, inner = {depth = {false, 9}}})
+	ecs.add(
+		&f.world,
+		local,
+		Tone {
+			gain = {true, 7},
+			tint = {true, {}},
+			mode = {true, .Soft},
+			inner = {depth = {false, 9}},
+		},
+	)
 
 	inf = gather(&f.volumes, &f.world, {})
 	result, touched = blend(&f.world, &inf, Tone)

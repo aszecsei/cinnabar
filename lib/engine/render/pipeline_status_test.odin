@@ -18,11 +18,20 @@ fake_status :: proc(pipeline: gpu.Pipeline) -> gpu.Pipeline_Status {
 }
 
 @(private = "file")
-COMPILING :: gpu.Pipeline{index = 1, generation = 1}
+COMPILING :: gpu.Pipeline {
+	index      = 1,
+	generation = 1,
+}
 @(private = "file")
-READY :: gpu.Pipeline{index = 2, generation = 1}
+READY :: gpu.Pipeline {
+	index      = 2,
+	generation = 1,
+}
 @(private = "file")
-FAILED :: gpu.Pipeline{index = 3, generation = 1}
+FAILED :: gpu.Pipeline {
+	index      = 3,
+	generation = 1,
+}
 
 @(test)
 a_pipeline_that_failed_is_not_one_that_compiles :: proc(t: ^testing.T) {
@@ -36,9 +45,13 @@ a_pipeline_that_failed_is_not_one_that_compiles :: proc(t: ^testing.T) {
 	p.failed = true
 	testing.expect_value(t, pipeline_status(&platform, &p), gpu.Pipeline_Status.Failed)
 	testing.expect(t, !pipeline_ready(&platform, &p))
-	p = {pipeline = FAILED}
+	p = {
+		pipeline = FAILED,
+	}
 	testing.expect_value(t, pipeline_status(&platform, &p), gpu.Pipeline_Status.Failed)
-	p = {pipeline = READY}
+	p = {
+		pipeline = READY,
+	}
 	testing.expect(t, pipeline_ready(&platform, &p))
 	// A platform that compiles nothing has every pipeline ready.
 	none := core.Platform_API{}
@@ -61,15 +74,27 @@ a_pipeline_that_failed_is_not_one_that_compiles :: proc(t: ^testing.T) {
 	r.platform = &platform
 	r.materials.pipeline_count = 1
 	f := Frame {
-		renderer    = r, state = &r.view,
-		scene_frame = &Scene_Frame{items = make([]Cull_Item, 1, context.temp_allocator), bin_pipelines = {0}},
+		renderer    = r,
+		state       = &r.view,
+		scene_frame = &Scene_Frame {
+			items = make([]Cull_Item, 1, context.temp_allocator),
+			bin_pipelines = {0},
+		},
 	}
 	r.materials.pipelines[0] = {}
 	r.materials.pipelines[0].pipelines[.Forward] = COMPILING
-	testing.expect(t, !reflection_probe_inputs_complete(&f), "a capture did not wait for a material that compiles")
+	testing.expect(
+		t,
+		!reflection_probe_inputs_complete(&f),
+		"a capture did not wait for a material that compiles",
+	)
 	r.materials.pipelines[0] = {}
 	r.materials.pipelines[0].pipelines[.Forward] = FAILED
-	testing.expect(t, reflection_probe_inputs_complete(&f), "a capture waits for a material that failed")
+	testing.expect(
+		t,
+		reflection_probe_inputs_complete(&f),
+		"a capture waits for a material that failed",
+	)
 	r.materials.pipelines[0] = {}
 	r.materials.pipelines[0].pipelines[.Forward] = READY
 	testing.expect(t, reflection_probe_inputs_complete(&f))

@@ -17,19 +17,19 @@ STATS_INTERVAL :: 250 * time.Millisecond
 // The host's side of the editor link (see docs/editor/link.md#editor-link). Its server listens on loopback for one
 // editor at a time, and owns which connection is linked. The main thread handles the editor's messages between frames.
 Link :: struct {
-	server:          serve.Server,
+	server:       serve.Server,
 	// The main thread's own state.
-	decode_arena:    virtual.Arena,
+	decode_arena: virtual.Arena,
 	// What the game's editor_poll wrote, before it goes into the outbox. The game appends to it with the host's heap.
-	game_out:        [dynamic]byte,
-	game:            string,
-	layout_hash:     u64,
+	game_out:     [dynamic]byte,
+	game:         string,
+	layout_hash:  u64,
 	// The frames since the last Host_Stats.
-	stats:           Frame_Stats,
+	stats:        Frame_Stats,
 	// The editor's capture requests that wait for their frames.
-	captures:        [dynamic]Pending_Capture,
+	captures:     [dynamic]Pending_Capture,
 	// The host's screenshots and history ring, which capture_start sets (see capture.odin).
-	capture:         ^Capture,
+	capture:      ^Capture,
 }
 
 // Frame_Stats adds up the frames of an interval.
@@ -68,8 +68,17 @@ link_logger :: proc(l: ^Link) -> log.Logger {
 
 // write_log is the server's Write_Log: a log line as the editor link's Log.
 @(private = "file")
-write_log :: proc(out: ^[dynamic]byte, level: log.Level, time: i64, location: string, text: string) {
-	link.write_message(out, link.Log{level = log_level(level), time = time, location = location, text = text})
+write_log :: proc(
+	out: ^[dynamic]byte,
+	level: log.Level,
+	time: i64,
+	location: string,
+	text: string,
+) {
+	link.write_message(
+		out,
+		link.Log{level = log_level(level), time = time, location = location, text = text},
+	)
 }
 
 @(private = "file")
@@ -156,7 +165,9 @@ send_stats :: proc(l: ^Link) {
 			bottom_accel_memory_uncompacted = gpu.bottom_accel_memory_uncompacted,
 		},
 	)
-	s^ = {start = time.tick_now()}
+	s^ = {
+		start = time.tick_now(),
+	}
 }
 
 // link_poll handles the editor's messages, passes the game's to Game_API.editor_poll, and sends the events of this
@@ -196,7 +207,14 @@ handle_taken :: proc(l: ^Link, taken: serve.Taken, game: core.Game_API, state: r
 	for_game := make([dynamic]core.Editor_Message, arena)
 	for m in taken.incoming {
 		if !is_host_message(m.header.kind) {
-			append(&for_game, core.Editor_Message{kind = m.header.kind, request = m.header.request, payload = m.payload})
+			append(
+				&for_game,
+				core.Editor_Message {
+					kind = m.header.kind,
+					request = m.header.request,
+					payload = m.payload,
+				},
+			)
 			continue
 		}
 		message, ok := link.decode_message(m.header.kind, m.payload, arena)
@@ -218,7 +236,10 @@ handle_taken :: proc(l: ^Link, taken: serve.Taken, game: core.Game_API, state: r
 	virtual.arena_free_all(&l.decode_arena)
 
 	if taken.dropped_logs > 0 {
-		log.warnf("host: editor link: dropped %d log lines while the editor was slow to read", taken.dropped_logs)
+		log.warnf(
+			"host: editor link: dropped %d log lines while the editor was slow to read",
+			taken.dropped_logs,
+		)
 	}
 	if link_linked(l) {
 		send_captures(l)
@@ -231,9 +252,24 @@ handle_taken :: proc(l: ^Link, taken: serve.Taken, game: core.Game_API, state: r
 @(private = "file")
 is_host_message :: proc(kind: u16) -> bool {
 	switch kind {
-	case link.kind_of(link.Hello), link.kind_of(link.Game_Size), link.kind_of(link.Capture_Source), link.kind_of(link.Preview_Acknowledged), link.kind_of(link.Viewport_Acknowledged), link.kind_of(link.Editor_Input), link.kind_of(link.Profile_Capture_Request), link.kind_of(link.Profile_Recording), link.kind_of(link.Capture_Request):
+	case link.kind_of(link.Hello),
+	     link.kind_of(link.Game_Size),
+	     link.kind_of(link.Capture_Source),
+	     link.kind_of(link.Preview_Acknowledged),
+	     link.kind_of(link.Viewport_Acknowledged),
+	     link.kind_of(link.Editor_Input),
+	     link.kind_of(link.Profile_Capture_Request),
+	     link.kind_of(link.Profile_Recording),
+	     link.kind_of(link.Capture_Request):
 		return true
-	case link.kind_of(link.Welcome), link.kind_of(link.Refused), link.kind_of(link.Log), link.kind_of(link.Game_Reloaded), link.kind_of(link.Host_Stats), link.kind_of(link.Profile_Summary), link.kind_of(link.Profile_Capture), link.kind_of(link.Capture_Result):
+	case link.kind_of(link.Welcome),
+	     link.kind_of(link.Refused),
+	     link.kind_of(link.Log),
+	     link.kind_of(link.Game_Reloaded),
+	     link.kind_of(link.Host_Stats),
+	     link.kind_of(link.Profile_Summary),
+	     link.kind_of(link.Profile_Capture),
+	     link.kind_of(link.Capture_Result):
 		// Only the host sends these, so handle_message reports them.
 		return true
 	}
@@ -248,13 +284,21 @@ handle_message :: proc(l: ^Link, message: link.Message, connection: u64) {
 	case link.Hello:
 		version := link.protocol_version()
 		if m.protocol != version {
-			reason := fmt.tprintf("the editor's protocol is %016x and the host's is %016x. Rebuild both with just build editor.", m.protocol, version)
+			reason := fmt.tprintf(
+				"the editor's protocol is %016x and the host's is %016x. Rebuild both with just build editor.",
+				m.protocol,
+				version,
+			)
 			link_reply(l, connection, link.Refused{reason = reason, protocol = version})
 			log.errorf("host: editor link: %s", reason)
 			return
 		}
 		// The Welcome goes out before the link, and so before the first log line, so the editor sees it first.
-		link_reply(l, connection, link.Welcome{protocol = version, game = l.game, layout_hash = l.layout_hash})
+		link_reply(
+			l,
+			connection,
+			link.Welcome{protocol = version, game = l.game, layout_hash = l.layout_hash},
+		)
 		if !serve.link(&l.server, connection) {
 			log.infof("host: editor link: %s disconnected before it was linked", m.editor)
 			return
@@ -311,16 +355,76 @@ handle_message :: proc(l: ^Link, message: link.Message, connection: u64) {
 		if linked && l.capture != nil {
 			capture_request(l.capture, m)
 		}
-	case link.Welcome, link.Refused, link.Log, link.Game_Reloaded, link.Host_Stats, link.Profile_Summary, link.Profile_Capture, link.Capture_Result:
-		log.warnf("host: editor link: the editor sent a message that only the host sends: %v", message)
-	case link.Component_Types, link.Entity_Snapshot, link.Entity_Delta, link.Watch_Entity, link.Unwatch_Entity, link.Entity_Values, link.Load_Scene, link.Apply_Operations, link.Edit_Problems, link.Editor_Camera, link.Set_Selection, link.Gizmo_State, link.Pick_Request, link.Pick_Result, link.Set_Hidden, link.Set_Mode, link.Step_Frame, link.Game_Stats, link.Game_Commands, link.Run_Game_Command, link.Game_Command_Result, link.Open_Preview, link.Preview_Settings, link.Close_Preview, link.Preview_Target, link.Set_Viewport_Settings, link.Open_Viewport, link.Close_Viewport, link.Viewport_Target, link.Live_Mesh, link.Live_Mesh_Vertices, link.Release_Live_Mesh, link.Mesh_Overlay, link.Sky_Sun_Request, link.Sky_Sun, link.Animator_View, link.Agent_View, link.Agent_Actions, link.Set_Preview_Parameter, link.Restart_Preview, link.Ui_Preview_Settings, link.Ui_Preview_Layout, link.Capture_Reflection_Probes, link.Reflection_Probe_View, link.Box_Handles, link.Bake_Thumbnail, link.Thumbnail_Failed, link.Nav_Probe:
-		// is_host_message sends these to the game.
+	case link.Welcome,
+	     link.Refused,
+	     link.Log,
+	     link.Game_Reloaded,
+	     link.Host_Stats,
+	     link.Profile_Summary,
+	     link.Profile_Capture,
+	     link.Capture_Result:
+		log.warnf(
+			"host: editor link: the editor sent a message that only the host sends: %v",
+			message,
+		)
+	case link.Component_Types,
+	     link.Entity_Snapshot,
+	     link.Entity_Delta,
+	     link.Watch_Entity,
+	     link.Unwatch_Entity,
+	     link.Entity_Values,
+	     link.Load_Scene,
+	     link.Apply_Operations,
+	     link.Edit_Problems,
+	     link.Editor_Camera,
+	     link.Set_Selection,
+	     link.Gizmo_State,
+	     link.Pick_Request,
+	     link.Pick_Result,
+	     link.Set_Hidden,
+	     link.Set_Mode,
+	     link.Step_Frame,
+	     link.Game_Stats,
+	     link.Game_Commands,
+	     link.Run_Game_Command,
+	     link.Game_Command_Result,
+	     link.Open_Preview,
+	     link.Preview_Settings,
+	     link.Close_Preview,
+	     link.Preview_Target,
+	     link.Set_Viewport_Settings,
+	     link.Open_Viewport,
+	     link.Close_Viewport,
+	     link.Viewport_Target,
+	     link.Live_Mesh,
+	     link.Live_Mesh_Vertices,
+	     link.Release_Live_Mesh,
+	     link.Mesh_Overlay,
+	     link.Sky_Sun_Request,
+	     link.Sky_Sun,
+	     link.Animator_View,
+	     link.Agent_View,
+	     link.Agent_Actions,
+	     link.Set_Preview_Parameter,
+	     link.Restart_Preview,
+	     link.Ui_Preview_Settings,
+	     link.Ui_Preview_Layout,
+	     link.Capture_Reflection_Probes,
+	     link.Reflection_Probe_View,
+	     link.Box_Handles,
+	     link.Bake_Thumbnail,
+	     link.Thumbnail_Failed,
+	     link.Nav_Probe:
+	// is_host_message sends these to the game.
 	}
 }
 
 // The editor's input is core's, value for value.
 #assert(len(link.Input_Key) == len(core.Key))
-#assert(int(link.Input_Key.Mouse_5) == int(core.Key.Mouse_5) && int(link.Input_Key.F1) == int(core.Key.F1))
+#assert(
+	int(link.Input_Key.Mouse_5) == int(core.Key.Mouse_5) &&
+	int(link.Input_Key.F1) == int(core.Key.F1),
+)
 #assert(len(link.Input_Event_Kind) == len(core.Input_Event_Kind))
 #assert(int(link.Input_Event_Kind.Release_All) == int(core.Input_Event_Kind.Release_All))
 #assert(int(link.Input_Event_Kind.Composition) == int(core.Input_Event_Kind.Composition))

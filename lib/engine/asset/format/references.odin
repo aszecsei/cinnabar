@@ -7,7 +7,13 @@ import "core:mem/virtual"
 // effect's materials, meshes and textures, an animation's skin, an animation graph's clips, a font's or sprite sheet's
 // atlas, a UI document's fonts and images, and a decision's blackboard. A GUID appears once, and the zero GUID never. ok is false for a blob
 // that does not check.
-blob_references :: proc(data: []byte, allocator := context.allocator) -> (references: []Guid, ok: bool) {
+blob_references :: proc(
+	data: []byte,
+	allocator := context.allocator,
+) -> (
+	references: []Guid,
+	ok: bool,
+) {
 	header := blob_header(data) or_return
 	list := make([dynamic]Guid, allocator)
 	defer if !ok {

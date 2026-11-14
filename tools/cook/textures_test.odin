@@ -15,7 +15,10 @@ import format "cinnabar:engine/asset/format"
 // pass 1.
 @(private)
 write_test_image :: proc(t: ^testing.T, tree: Tree, path: string, width, height: int) {
-	full := strings.clone_to_cstring(fmt.tprintf("%s/content/%s", tree.dir, path), context.temp_allocator)
+	full := strings.clone_to_cstring(
+		fmt.tprintf("%s/content/%s", tree.dir, path),
+		context.temp_allocator,
+	)
 	written: i32
 	if strings.has_suffix(path, ".hdr") {
 		pixels := make([]f32, width * height * 3, context.temp_allocator)
@@ -28,13 +31,28 @@ write_test_image :: proc(t: ^testing.T, tree: Tree, path: string, width, height:
 		for &v, i in pixels {
 			v = u8(i * 37 % 256)
 		}
-		written = stbi.write_png(full, i32(width), i32(height), 4, raw_data(pixels), i32(width * 4))
+		written = stbi.write_png(
+			full,
+			i32(width),
+			i32(height),
+			4,
+			raw_data(pixels),
+			i32(width * 4),
+		)
 	}
 	testing.expectf(t, written != 0, "cannot write %s", path)
 }
 
 @(private = "file")
-texture_blob :: proc(t: ^testing.T, tree: Tree, path: string) -> (data: []byte, blob: ^format.Texture_Blob, ok: bool) {
+texture_blob :: proc(
+	t: ^testing.T,
+	tree: Tree,
+	path: string,
+) -> (
+	data: []byte,
+	blob: ^format.Texture_Blob,
+	ok: bool,
+) {
 	data = tree_blob(t, tree, tree_guid(t, tree, path))
 	blob, ok = format.texture_view(data)
 	testing.expectf(t, ok, "%s did not cook into a texture blob", path)
@@ -71,7 +89,10 @@ textures_cook_by_usage_with_their_mips :: proc(t: ^testing.T) {
 	testing.expect_value(t, pass.cooked[.Texture], 4)
 
 	// The usage comes from the name, and stays in the .meta file.
-	meta, _ := os.read_entire_file(fmt.tprintf("%s/content/bricks_n.png.meta", tree.dir), context.temp_allocator)
+	meta, _ := os.read_entire_file(
+		fmt.tprintf("%s/content/bricks_n.png.meta", tree.dir),
+		context.temp_allocator,
+	)
 	testing.expect(t, strings.contains(string(meta), "usage = normal"))
 
 	if data, blob, ok := texture_blob(t, tree, "albedo.png"); ok {
@@ -96,7 +117,15 @@ textures_cook_by_usage_with_their_mips :: proc(t: ^testing.T) {
 
 @(test)
 texture_settings_size_and_store_textures :: proc(t: ^testing.T) {
-	tree := make_tree(t, {{"content/ui.png.meta", "guid = 00112233445566778899aabbccddeeff\nusage = data\nmips = false\nmax_size = 256\n"}})
+	tree := make_tree(
+		t,
+		{
+			{
+				"content/ui.png.meta",
+				"guid = 00112233445566778899aabbccddeeff\nusage = data\nmips = false\nmax_size = 256\n",
+			},
+		},
+	)
 	defer remove_tree(tree)
 	write_test_image(t, tree, "ui.png", 600, 300)
 
@@ -131,7 +160,12 @@ resampling_keeps_flat_images_flat :: proc(t: ^testing.T) {
 		for size in ([][2]int{{3, 2}, {12, 8}, {1, 1}}) {
 			resized := resample(image, size.x, size.y, wrap)
 			for p in resized.pixels {
-				testing.expectf(t, abs(p.g - 0.5) < 1e-4, "a flat image changed when resized to %v", size)
+				testing.expectf(
+					t,
+					abs(p.g - 0.5) < 1e-4,
+					"a flat image changed when resized to %v",
+					size,
+				)
 			}
 		}
 	}
@@ -142,7 +176,10 @@ resampling_keeps_flat_images_flat :: proc(t: ^testing.T) {
 // stays above 0.5. The density's slant keeps whole columns of texels from crossing a cutoff together in small mips.
 @(private = "file")
 write_foliage_image :: proc(t: ^testing.T, tree: Tree, path: string, size: int) {
-	full := strings.clone_to_cstring(fmt.tprintf("%s/content/%s", tree.dir, path), context.temp_allocator)
+	full := strings.clone_to_cstring(
+		fmt.tprintf("%s/content/%s", tree.dir, path),
+		context.temp_allocator,
+	)
 	pixels := make([][4]u8, size * size, context.temp_allocator)
 	state := u32(2166136261)
 	for &p, i in pixels {
@@ -158,7 +195,12 @@ write_foliage_image :: proc(t: ^testing.T, tree: Tree, path: string, size: int) 
 // mip_coverages decodes a cooked color texture's mips, and gives the coverage of each at a cutoff, to the last mip that
 // is at least 16 texels wide, where a texel's share of the mip is small beside a test's tolerance.
 @(private = "file")
-mip_coverages :: proc(t: ^testing.T, data: []byte, blob: ^format.Texture_Blob, cutoff: f32) -> []f32 {
+mip_coverages :: proc(
+	t: ^testing.T,
+	data: []byte,
+	blob: ^format.Texture_Blob,
+	cutoff: f32,
+) -> []f32 {
 	coverages := make([dynamic]f32, context.temp_allocator)
 	mips := format.blob_bytes(data, blob.mips)
 	width, height := blob.size.x, blob.size.y
@@ -168,7 +210,11 @@ mip_coverages :: proc(t: ^testing.T, data: []byte, blob: ^format.Texture_Blob, c
 			break
 		}
 		decoded := make([][4]u8, int(width * height), context.temp_allocator)
-		testing.expect_value(t, cn_decompress(.BC7, raw_data(mips[offset:]), width, height, raw_data(decoded)), 0)
+		testing.expect_value(
+			t,
+			cn_decompress(.BC7, raw_data(mips[offset:]), width, height, raw_data(decoded)),
+			0,
+		)
 		covered := 0
 		for p in decoded {
 			if f32(p.a) / 255 >= cutoff {
@@ -188,8 +234,14 @@ alpha_coverage_holds_down_the_mips_with_the_setting_on :: proc(t: ^testing.T) {
 		t,
 		{
 			{"content/off.png.meta", "guid = 00112233445566778899aabbccddee00\nusage = color\n"},
-			{"content/on.png.meta", "guid = 00112233445566778899aabbccddee01\nusage = color\nalpha_coverage = true\n"},
-			{"content/low.png.meta", "guid = 00112233445566778899aabbccddee02\nusage = color\nalpha_coverage = true\nalpha_cutoff = 0.25\n"},
+			{
+				"content/on.png.meta",
+				"guid = 00112233445566778899aabbccddee01\nusage = color\nalpha_coverage = true\n",
+			},
+			{
+				"content/low.png.meta",
+				"guid = 00112233445566778899aabbccddee02\nusage = color\nalpha_coverage = true\nalpha_cutoff = 0.25\n",
+			},
 		},
 	)
 	defer remove_tree(tree)
@@ -215,10 +267,25 @@ alpha_coverage_holds_down_the_mips_with_the_setting_on :: proc(t: ^testing.T) {
 		testing.expectf(t, first > 0.1, "%s: mip 0's coverage is %v", test.name, first)
 		if test.kept {
 			for coverage, mip in coverages {
-				testing.expectf(t, abs(coverage - first) <= 0.02, "%s: mip %d covers %v, and mip 0 %v", test.name, mip, coverage, first)
+				testing.expectf(
+					t,
+					abs(coverage - first) <= 0.02,
+					"%s: mip %d covers %v, and mip 0 %v",
+					test.name,
+					mip,
+					coverage,
+					first,
+				)
 			}
 		} else {
-			testing.expectf(t, last < first / 2, "%s: the last mip covers %v, and mip 0 %v", test.name, last, first)
+			testing.expectf(
+				t,
+				last < first / 2,
+				"%s: the last mip covers %v, and mip 0 %v",
+				test.name,
+				last,
+				first,
+			)
 		}
 	}
 }
@@ -231,7 +298,13 @@ the_coverage_search_finds_the_scale :: proc(t: ^testing.T) {
 		p = {0, 0, 0, f32(i) / 512}
 	}
 	scale := alpha_coverage_scale(ramp, 0.5, 0.5)
-	testing.expectf(t, abs(alpha_coverage(ramp, 0.5, scale) - 0.5) <= 1.0 / 256, "a scale of %v covers %v", scale, alpha_coverage(ramp, 0.5, scale))
+	testing.expectf(
+		t,
+		abs(alpha_coverage(ramp, 0.5, scale) - 0.5) <= 1.0 / 256,
+		"a scale of %v covers %v",
+		scale,
+		alpha_coverage(ramp, 0.5, scale),
+	)
 	testing.expectf(t, abs(scale - 2) < 0.05, "the scale is %v", scale)
 
 	// An opaque image already has its coverage, so its alpha stays.
@@ -247,7 +320,9 @@ the_coverage_search_finds_the_scale :: proc(t: ^testing.T) {
 @(test)
 alpha_coverage_is_only_for_color_textures :: proc(t: ^testing.T) {
 	a := Asset_Source {
-		meta = {settings = {{"usage", "mask"}, {"alpha_coverage", "true"}, {"alpha_cutoff", "0.25"}}},
+		meta = {
+			settings = {{"usage", "mask"}, {"alpha_coverage", "true"}, {"alpha_cutoff", "0.25"}},
+		},
 	}
 	testing.expect_value(t, texture_cook_of(a).coverage_cutoff, 0)
 	a.meta.settings[0].value = "color"
@@ -264,29 +339,61 @@ alpha_coverage_settings_are_in_the_key_and_checked :: proc(t: ^testing.T) {
 	testing.expect_value(t, cook(options, {.Texture}).cooked[.Texture], 1)
 
 	meta_path := fmt.tprintf("%s/content/leaf.png.meta", tree.dir)
-	testing.expect(t, os.write_entire_file(meta_path, transmute([]byte)string(META + "alpha_coverage = true\n")) == nil)
+	testing.expect(
+		t,
+		os.write_entire_file(
+			meta_path,
+			transmute([]byte)string(META + "alpha_coverage = true\n"),
+		) ==
+		nil,
+	)
 	testing.expect_value(t, cook(options, {.Texture}).cooked[.Texture], 1)
 
 	errors: Errors
 	context.logger = capture_errors(&errors)
 	defer release_errors(&errors)
-	testing.expect(t, os.write_entire_file(meta_path, transmute([]byte)string(META + "alpha_cutoff = 2\n")) == nil)
+	testing.expect(
+		t,
+		os.write_entire_file(meta_path, transmute([]byte)string(META + "alpha_cutoff = 2\n")) ==
+		nil,
+	)
 	testing.expect(t, !cook(options, {.Texture}).ok)
 	expect_error(t, &errors, "alpha_cutoff must be")
 }
 
 // A distinct color for each of a cube's faces, in the order of its layers.
 @(private = "file")
-FACE_COLORS := [6][4]u8{{255, 0, 0, 255}, {0, 255, 255, 255}, {0, 255, 0, 255}, {255, 0, 255, 255}, {0, 0, 255, 255}, {255, 255, 0, 255}}
+FACE_COLORS := [6][4]u8 {
+	{255, 0, 0, 255},
+	{0, 255, 255, 255},
+	{0, 255, 0, 255},
+	{255, 0, 255, 255},
+	{0, 0, 255, 255},
+	{255, 255, 0, 255},
+}
 
 // A .meta file of a texture that keeps its values and its one mip, so a test reads its blob's texels as they are.
 @(private = "file")
 RAW_SETTINGS :: "usage = data\nmips = false\n"
 
 @(private = "file")
-write_pixels :: proc(t: ^testing.T, tree: Tree, path: string, width, height: int, pixels: [][4]u8) {
-	full := strings.clone_to_cstring(fmt.tprintf("%s/content/%s", tree.dir, path), context.temp_allocator)
-	testing.expectf(t, stbi.write_png(full, i32(width), i32(height), 4, raw_data(pixels), i32(width * 4)) != 0, "cannot write %s", path)
+write_pixels :: proc(
+	t: ^testing.T,
+	tree: Tree,
+	path: string,
+	width, height: int,
+	pixels: [][4]u8,
+) {
+	full := strings.clone_to_cstring(
+		fmt.tprintf("%s/content/%s", tree.dir, path),
+		context.temp_allocator,
+	)
+	testing.expectf(
+		t,
+		stbi.write_png(full, i32(width), i32(height), 4, raw_data(pixels), i32(width * 4)) != 0,
+		"cannot write %s",
+		path,
+	)
 }
 
 @(private = "file")
@@ -301,7 +408,14 @@ write_flat :: proc(t: ^testing.T, tree: Tree, path: string, width, height: int, 
 // write_cross writes a cross of faces of a size, each flat in its face's color but for a gray top-left texel, in cells
 // given by the layer order.
 @(private = "file")
-write_cross :: proc(t: ^testing.T, tree: Tree, path: string, size, across, down: int, cells: [6][2]int, marks: [6][2]int) {
+write_cross :: proc(
+	t: ^testing.T,
+	tree: Tree,
+	path: string,
+	size, across, down: int,
+	cells: [6][2]int,
+	marks: [6][2]int,
+) {
 	pixels := make([][4]u8, size * across * size * down, context.temp_allocator)
 	for cell, face in cells {
 		for y in 0 ..< size {
@@ -310,7 +424,12 @@ write_cross :: proc(t: ^testing.T, tree: Tree, path: string, size, across, down:
 			}
 		}
 		mark := marks[face]
-		pixels[(cell.y * size + mark.y) * size * across + cell.x * size + mark.x] = {128, 128, 128, 255}
+		pixels[(cell.y * size + mark.y) * size * across + cell.x * size + mark.x] = {
+			128,
+			128,
+			128,
+			255,
+		}
 	}
 	write_pixels(t, tree, path, size * across, size * down, pixels)
 }
@@ -338,10 +457,28 @@ a_cross_cooks_into_a_cube_with_its_faces_in_place :: proc(t: ^testing.T) {
 	top_left := [6][2]int{}
 	// +x, -x, +y, -y, +z, -z. In the vertical cross, -z is below -y, turned by half a turn, so the texel that ends at its
 	// top left starts at its bottom right.
-	write_cross(t, tree, "across.png", SIZE, 4, 3, {{2, 1}, {0, 1}, {1, 0}, {1, 2}, {1, 1}, {3, 1}}, top_left)
+	write_cross(
+		t,
+		tree,
+		"across.png",
+		SIZE,
+		4,
+		3,
+		{{2, 1}, {0, 1}, {1, 0}, {1, 2}, {1, 1}, {3, 1}},
+		top_left,
+	)
 	turned := top_left
 	turned[5] = {SIZE - 1, SIZE - 1}
-	write_cross(t, tree, "down.png", SIZE, 3, 4, {{2, 1}, {0, 1}, {1, 0}, {1, 2}, {1, 1}, {1, 3}}, turned)
+	write_cross(
+		t,
+		tree,
+		"down.png",
+		SIZE,
+		3,
+		4,
+		{{2, 1}, {0, 1}, {1, 0}, {1, 2}, {1, 1}, {1, 3}},
+		turned,
+	)
 	testing.expect(t, cook(tree_options(tree), {.Texture}).ok)
 
 	for name in ([]string{"across.png", "down.png"}) {
@@ -354,15 +491,39 @@ a_cross_cooks_into_a_cube_with_its_faces_in_place :: proc(t: ^testing.T) {
 		testing.expect_value(t, blob.size, [2]u32{SIZE, SIZE})
 		for color, face in FACE_COLORS {
 			pixels := layer_pixels(data, blob, face)
-			testing.expectf(t, pixels[0] == {128, 128, 128, 255}, "%s: face %d's top-left texel is %v", name, face, pixels[0])
-			testing.expectf(t, pixels[len(pixels) - 1] == color, "%s: face %d's last texel is %v", name, face, pixels[len(pixels) - 1])
+			testing.expectf(
+				t,
+				pixels[0] == {128, 128, 128, 255},
+				"%s: face %d's top-left texel is %v",
+				name,
+				face,
+				pixels[0],
+			)
+			testing.expectf(
+				t,
+				pixels[len(pixels) - 1] == color,
+				"%s: face %d's last texel is %v",
+				name,
+				face,
+				pixels[len(pixels) - 1],
+			)
 		}
 	}
 }
 
 @(test)
 a_cross_of_the_wrong_shape_fails :: proc(t: ^testing.T) {
-	tree := make_tree(t, {{"content/square.png.meta", "guid = 00112233445566778899aabbccddee12\n" + RAW_SETTINGS + "layout = cube_cross\n"}})
+	tree := make_tree(
+		t,
+		{
+			{
+				"content/square.png.meta",
+				"guid = 00112233445566778899aabbccddee12\n" +
+				RAW_SETTINGS +
+				"layout = cube_cross\n",
+			},
+		},
+	)
 	defer remove_tree(tree)
 	write_flat(t, tree, "square.png", 8, 8, {0, 0, 0, 255})
 	errors: Errors
@@ -374,7 +535,17 @@ a_cross_of_the_wrong_shape_fails :: proc(t: ^testing.T) {
 
 @(test)
 an_equirectangular_image_cooks_into_a_cube_as_the_sky_maps_it :: proc(t: ^testing.T) {
-	tree := make_tree(t, {{"content/sky.png.meta", "guid = 00112233445566778899aabbccddee13\n" + RAW_SETTINGS + "layout = cube_equirect\n"}})
+	tree := make_tree(
+		t,
+		{
+			{
+				"content/sky.png.meta",
+				"guid = 00112233445566778899aabbccddee13\n" +
+				RAW_SETTINGS +
+				"layout = cube_equirect\n",
+			},
+		},
+	)
 	defer remove_tree(tree)
 	// Each texel in the color of the axis nearest to its direction, by texture_direction in sky_texture.hlsli.
 	WIDTH, HEIGHT :: 128, 64
@@ -382,7 +553,11 @@ an_equirectangular_image_cooks_into_a_cube_as_the_sky_maps_it :: proc(t: ^testin
 	for &p, i in pixels {
 		azimuth := ((f32(i % WIDTH) + 0.5) / WIDTH - 0.5) * 2 * math.PI
 		polar := (f32(i / WIDTH) + 0.5) / HEIGHT * math.PI
-		d := [3]f32{math.sin(polar) * math.sin(azimuth), math.cos(polar), math.sin(polar) * math.cos(azimuth)}
+		d := [3]f32 {
+			math.sin(polar) * math.sin(azimuth),
+			math.cos(polar),
+			math.sin(polar) * math.cos(azimuth),
+		}
 		axis := 0
 		for k in 1 ..< 3 {
 			if abs(d[k]) > abs(d[axis]) {
@@ -410,7 +585,17 @@ an_equirectangular_image_cooks_into_a_cube_as_the_sky_maps_it :: proc(t: ^testin
 
 @(test)
 an_equirectangular_image_is_twice_as_wide_as_it_is_tall :: proc(t: ^testing.T) {
-	tree := make_tree(t, {{"content/sky.png.meta", "guid = 00112233445566778899aabbccddee14\n" + RAW_SETTINGS + "layout = cube_equirect\n"}})
+	tree := make_tree(
+		t,
+		{
+			{
+				"content/sky.png.meta",
+				"guid = 00112233445566778899aabbccddee14\n" +
+				RAW_SETTINGS +
+				"layout = cube_equirect\n",
+			},
+		},
+	)
 	defer remove_tree(tree)
 	write_flat(t, tree, "sky.png", 8, 8, {0, 0, 0, 255})
 	errors: Errors
@@ -425,8 +610,18 @@ a_strip_cooks_into_an_array :: proc(t: ^testing.T) {
 	tree := make_tree(
 		t,
 		{
-			{"content/strip.png.meta", "guid = 00112233445566778899aabbccddee15\n" + RAW_SETTINGS + "layout = array_strip\n"},
-			{"content/uneven.png.meta", "guid = 00112233445566778899aabbccddee16\n" + RAW_SETTINGS + "layout = array_strip\n"},
+			{
+				"content/strip.png.meta",
+				"guid = 00112233445566778899aabbccddee15\n" +
+				RAW_SETTINGS +
+				"layout = array_strip\n",
+			},
+			{
+				"content/uneven.png.meta",
+				"guid = 00112233445566778899aabbccddee16\n" +
+				RAW_SETTINGS +
+				"layout = array_strip\n",
+			},
 		},
 	)
 	defer remove_tree(tree)
@@ -474,7 +669,14 @@ CUBE_SET :: "# The faces.\npx = $aabbccddeeff00112233445566778800\nnx = $aabbccd
 write_set_images :: proc(t: ^testing.T, tree: Tree, child_settings: string, size := 4) {
 	for guid, i in SET_GUIDS {
 		name := fmt.tprintf("face%d.png", i)
-		testing.expect(t, os.write_entire_file(fmt.tprintf("%s/content/%s.meta", tree.dir, name), transmute([]byte)fmt.tprintf("guid = %s\n%s", guid, child_settings)) == nil)
+		testing.expect(
+			t,
+			os.write_entire_file(
+				fmt.tprintf("%s/content/%s.meta", tree.dir, name),
+				transmute([]byte)fmt.tprintf("guid = %s\n%s", guid, child_settings),
+			) ==
+			nil,
+		)
 		write_flat(t, tree, name, size, size, FACE_COLORS[i])
 	}
 }
@@ -486,8 +688,14 @@ a_texture_set_cooks_the_images_that_it_names :: proc(t: ^testing.T) {
 		{
 			{"content/sky.texture_set", CUBE_SET},
 			{"content/sky.texture_set.meta", SET_META},
-			{"content/row.texture_set", "layer = $aabbccddeeff00112233445566778802\nlayer = $aabbccddeeff00112233445566778800\n"},
-			{"content/row.texture_set.meta", "guid = aabbccddeeff00112233445566778811\nusage = data\n"},
+			{
+				"content/row.texture_set",
+				"layer = $aabbccddeeff00112233445566778802\nlayer = $aabbccddeeff00112233445566778800\n",
+			},
+			{
+				"content/row.texture_set.meta",
+				"guid = aabbccddeeff00112233445566778811\nusage = data\n",
+			},
 		},
 	)
 	defer remove_tree(tree)
@@ -521,7 +729,14 @@ a_texture_set_cooks_the_images_that_it_names :: proc(t: ^testing.T) {
 		for color, layer in ([2][4]u8{FACE_COLORS[2], FACE_COLORS[0]}) {
 			pixels := mem.slice_data_cast([][4]u8, bytes[layer * chain:][:chain])
 			for offset in ([]int{0, 16, 20}) {
-				testing.expectf(t, pixels[offset] == color, "layer %d at texel %d is %v", layer, offset, pixels[offset])
+				testing.expectf(
+					t,
+					pixels[offset] == color,
+					"layer %d at texel %d is %v",
+					layer,
+					offset,
+					pixels[offset],
+				)
 			}
 		}
 	}
@@ -543,13 +758,31 @@ a_texture_set_cooks_the_images_that_it_names :: proc(t: ^testing.T) {
 	}
 	// An image's settings are not the set's, so they do not cook it again.
 	face := fmt.tprintf("%s/content/face1.png.meta", tree.dir)
-	testing.expect(t, os.write_entire_file(face, transmute([]byte)fmt.tprintf("guid = %s\nusage = data\nmax_size = 256\n", SET_GUIDS[1])) == nil)
+	testing.expect(
+		t,
+		os.write_entire_file(
+			face,
+			transmute([]byte)fmt.tprintf(
+				"guid = %s\nusage = data\nmax_size = 256\n",
+				SET_GUIDS[1],
+			),
+		) ==
+		nil,
+	)
 	testing.expect_value(t, cook(options, {.Texture}).cooked[.Texture], 1)
 }
 
 @(test)
 a_set_of_hdr_images_is_bc6h_with_a_chain_for_each_face :: proc(t: ^testing.T) {
-	tree := make_tree(t, {{"content/sky.hdr.meta", "guid = 00112233445566778899aabbccddee17\nusage = hdr\nlayout = cube_cross\n"}})
+	tree := make_tree(
+		t,
+		{
+			{
+				"content/sky.hdr.meta",
+				"guid = 00112233445566778899aabbccddee17\nusage = hdr\nlayout = cube_cross\n",
+			},
+		},
+	)
 	defer remove_tree(tree)
 	write_test_image(t, tree, "sky.hdr", 32, 24)
 	testing.expect(t, cook(tree_options(tree), {.Texture}).ok)
@@ -557,7 +790,11 @@ a_set_of_hdr_images_is_bc6h_with_a_chain_for_each_face :: proc(t: ^testing.T) {
 		testing.expect_value(t, blob.format, format.Texture_Format.BC6H_Ufloat)
 		testing.expect_value(t, blob.dimension, format.Texture_Dimension.Cube)
 		testing.expect_value(t, blob.mip_count, 4)
-		testing.expect_value(t, len(format.blob_bytes(data, blob.mips)), format.texture_chain_size(.BC6H_Ufloat, {8, 8}, 4) * 6)
+		testing.expect_value(
+			t,
+			len(format.blob_bytes(data, blob.mips)),
+			format.texture_chain_size(.BC6H_Ufloat, {8, 8}, 4) * 6,
+		)
 	}
 }
 
@@ -576,12 +813,22 @@ a_bad_texture_set_says_what_is_wrong :: proc(t: ^testing.T) {
 		{"layer = $aabb\n", "", "32 hex digits"},
 		{"layer = $00000000000000000000000000000abc\n", "", "no asset has the GUID"},
 		{"layer = $aabbccddeeff00112233445566778810\n", "", "is not an image"},
-		{"px = $aabbccddeeff00112233445566778800\npx = $aabbccddeeff00112233445566778800\n", "", "has px twice"},
+		{
+			"px = $aabbccddeeff00112233445566778800\npx = $aabbccddeeff00112233445566778800\n",
+			"",
+			"has px twice",
+		},
 		{LAYER, "layout = cube_cross\n", "layout is for one image"},
 		{LAYER, "standalone = false\n", "standalone cannot be false"},
 	}
 	for test in cases {
-		tree := make_tree(t, {{"content/set.texture_set", test.text}, {"content/set.texture_set.meta", fmt.tprintf("%s%s", SET_META, test.meta)}})
+		tree := make_tree(
+			t,
+			{
+				{"content/set.texture_set", test.text},
+				{"content/set.texture_set.meta", fmt.tprintf("%s%s", SET_META, test.meta)},
+			},
+		)
 		defer remove_tree(tree)
 		write_set_images(t, tree, "usage = data\n")
 		errors: Errors
@@ -596,7 +843,10 @@ a_bad_texture_set_says_what_is_wrong :: proc(t: ^testing.T) {
 a_set_takes_plain_images_of_one_size :: proc(t: ^testing.T) {
 	// One image of another size.
 	{
-		tree := make_tree(t, {{"content/sky.texture_set", CUBE_SET}, {"content/sky.texture_set.meta", SET_META}})
+		tree := make_tree(
+			t,
+			{{"content/sky.texture_set", CUBE_SET}, {"content/sky.texture_set.meta", SET_META}},
+		)
 		defer remove_tree(tree)
 		write_set_images(t, tree, "usage = data\n")
 		write_flat(t, tree, "face3.png", 8, 8, {0, 0, 0, 255})
@@ -614,7 +864,10 @@ a_set_takes_plain_images_of_one_size :: proc(t: ^testing.T) {
 				{"content/sky.texture_set", CUBE_SET},
 				{"content/sky.texture_set.meta", SET_META},
 				{"content/row.texture_set", "layer = $aabbccddeeff00112233445566778800\n"},
-				{"content/row.texture_set.meta", "guid = aabbccddeeff00112233445566778811\n" + RAW_SETTINGS},
+				{
+					"content/row.texture_set.meta",
+					"guid = aabbccddeeff00112233445566778811\n" + RAW_SETTINGS,
+				},
 			},
 		)
 		defer remove_tree(tree)
@@ -638,7 +891,10 @@ a_set_takes_plain_images_of_one_size :: proc(t: ^testing.T) {
 			{
 				{"content/row.texture_set", "layer = $aabbccddeeff00112233445566778812\n"},
 				{"content/row.texture_set.meta", SET_META},
-				{"content/strip.png.meta", "guid = aabbccddeeff00112233445566778812\nusage = data\nlayout = array_strip\n"},
+				{
+					"content/strip.png.meta",
+					"guid = aabbccddeeff00112233445566778812\nusage = data\nlayout = array_strip\n",
+				},
 			},
 		)
 		defer remove_tree(tree)
@@ -653,7 +909,10 @@ a_set_takes_plain_images_of_one_size :: proc(t: ^testing.T) {
 
 @(test)
 an_image_whose_usage_is_not_its_sets_is_a_warning :: proc(t: ^testing.T) {
-	tree := make_tree(t, {{"content/sky.texture_set", CUBE_SET}, {"content/sky.texture_set.meta", SET_META}})
+	tree := make_tree(
+		t,
+		{{"content/sky.texture_set", CUBE_SET}, {"content/sky.texture_set.meta", SET_META}},
+	)
 	defer remove_tree(tree)
 	write_set_images(t, tree, "usage = hdr\n")
 	pass := cook(tree_options(tree), {.Texture}, log_problems = false)
@@ -668,12 +927,22 @@ expect_warning :: proc(t: ^testing.T, pass: Pass, fragment: string, loc := #call
 			return
 		}
 	}
-	testing.expectf(t, false, "no warning contains %q: %v", fragment, pass.problems.list, loc = loc)
+	testing.expectf(
+		t,
+		false,
+		"no warning contains %q: %v",
+		fragment,
+		pass.problems.list,
+		loc = loc,
+	)
 }
 
 @(test)
 an_image_that_is_not_standalone_cooks_only_in_its_set :: proc(t: ^testing.T) {
-	tree := make_tree(t, {{"content/sky.texture_set", CUBE_SET}, {"content/sky.texture_set.meta", SET_META}})
+	tree := make_tree(
+		t,
+		{{"content/sky.texture_set", CUBE_SET}, {"content/sky.texture_set.meta", SET_META}},
+	)
 	defer remove_tree(tree)
 	write_set_images(t, tree, "usage = data\n")
 	options := tree_options(tree)
@@ -719,7 +988,15 @@ an_image_that_is_not_standalone_cooks_only_in_its_set :: proc(t: ^testing.T) {
 
 @(test)
 an_image_that_is_not_standalone_and_in_no_set_is_a_warning :: proc(t: ^testing.T) {
-	tree := make_tree(t, {{"content/lost.png.meta", "guid = 00112233445566778899aabbccddee18\nstandalone = false\n"}})
+	tree := make_tree(
+		t,
+		{
+			{
+				"content/lost.png.meta",
+				"guid = 00112233445566778899aabbccddee18\nstandalone = false\n",
+			},
+		},
+	)
 	defer remove_tree(tree)
 	write_flat(t, tree, "lost.png", 4, 4, {0, 0, 0, 255})
 	pass := cook(tree_options(tree), {.Texture}, log_problems = false)
@@ -756,7 +1033,11 @@ compressed_mips_decode_close_to_their_source :: proc(t: ^testing.T) {
 		encoded := make([]byte, block, context.temp_allocator)
 		testing.expect(t, encode_mip(source, test.usage, DEV_TEXTURE_QUALITY, encoded))
 		decoded := make([][4]u8, width * height, context.temp_allocator)
-		testing.expect_value(t, cn_decompress(test.compressed, raw_data(encoded), width, height, raw_data(decoded)), 0)
+		testing.expect_value(
+			t,
+			cn_decompress(test.compressed, raw_data(encoded), width, height, raw_data(decoded)),
+			0,
+		)
 		worst := 0
 		for p, i in image.pixels {
 			for ch in 0 ..< test.channels {
@@ -767,7 +1048,13 @@ compressed_mips_decode_close_to_their_source :: proc(t: ^testing.T) {
 				worst = max(worst, abs(int(decoded[i][ch]) - int(want * 255 + 0.5)))
 			}
 		}
-		testing.expectf(t, worst <= test.tolerance, "%v decodes %d away from its source", test.usage, worst)
+		testing.expectf(
+			t,
+			worst <= test.tolerance,
+			"%v decodes %d away from its source",
+			test.usage,
+			worst,
+		)
 	}
 
 	// BC6H interpolates the endpoints' half-float bits, which are close to logarithmic, so a block that reaches 0 has
@@ -776,13 +1063,27 @@ compressed_mips_decode_close_to_their_source :: proc(t: ^testing.T) {
 	for &p, i in hdr.pixels {
 		p = {1 + f32(i % width) * 0.5, 4, 0.5, 1}
 	}
-	encoded := make([]byte, format.texture_mip_size(.BC6H_Ufloat, width, height), context.temp_allocator)
+	encoded := make(
+		[]byte,
+		format.texture_mip_size(.BC6H_Ufloat, width, height),
+		context.temp_allocator,
+	)
 	testing.expect(t, encode_mip(hdr, .HDR, DEV_TEXTURE_QUALITY, encoded))
 	decoded := make([][4]f16, width * height, context.temp_allocator)
-	testing.expect_value(t, cn_decompress(.BC6H, raw_data(encoded), width, height, raw_data(decoded)), 0)
+	testing.expect_value(
+		t,
+		cn_decompress(.BC6H, raw_data(encoded), width, height, raw_data(decoded)),
+		0,
+	)
 	for p, i in hdr.pixels {
 		for ch in 0 ..< 3 {
-			testing.expectf(t, abs(f32(decoded[i][ch]) - p[ch]) < p[ch] * 0.05, "BC6H decodes %v for %v", decoded[i][ch], p[ch])
+			testing.expectf(
+				t,
+				abs(f32(decoded[i][ch]) - p[ch]) < p[ch] * 0.05,
+				"BC6H decodes %v for %v",
+				decoded[i][ch],
+				p[ch],
+			)
 		}
 	}
 }

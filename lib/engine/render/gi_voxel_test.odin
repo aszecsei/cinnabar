@@ -54,7 +54,14 @@ a_voxel_box_moves_with_the_world_not_the_render_origin :: proc(t: ^testing.T) {
 	size := f32(0.25)
 	for axis in 0 ..< 3 {
 		// The camera is near the box's middle.
-		testing.expectf(t, -min[axis] >= (32 - VOXEL_SNAP - 1) * size && -min[axis] <= (32 + VOXEL_SNAP + 1) * size, "axis %d's first voxel is %v m away", axis, min[axis])
+		testing.expectf(
+			t,
+			-min[axis] >= (32 - VOXEL_SNAP - 1) * size &&
+			-min[axis] <= (32 + VOXEL_SNAP + 1) * size,
+			"axis %d's first voxel is %v m away",
+			axis,
+			min[axis],
+		)
 	}
 	testing.expect_value(t, voxel_phase({-1, 64, 130}, 64), [3]i32{63, 0, 2})
 }
@@ -64,7 +71,11 @@ the_voxel_schedule_voxelizes_empty_levels_and_every_level_in_turn :: proc(t: ^te
 	boxes := [5]Voxel_Box{}
 	turn: u32
 	// Every level holds nothing at first.
-	testing.expect_value(t, voxel_schedule(boxes[:], &turn), [VOXEL_MAX_LEVELS]bool{true, true, true, true, true, false, false, false})
+	testing.expect_value(
+		t,
+		voxel_schedule(boxes[:], &turn),
+		[VOXEL_MAX_LEVELS]bool{true, true, true, true, true, false, false, false},
+	)
 	for &box in boxes {
 		box.voxelized = true
 	}
@@ -103,7 +114,13 @@ the_voxel_levels_fit_their_budgets :: proc(t: ^testing.T) {
 		.Ultra  = 320,
 	}
 	for params, level in GI_VOXEL_PARAMS {
-		testing.expectf(t, voxel_bytes(params) <= budgets[level] << 20, "%v takes %d MiB", level, voxel_bytes(params) >> 20)
+		testing.expectf(
+			t,
+			voxel_bytes(params) <= budgets[level] << 20,
+			"%v takes %d MiB",
+			level,
+			voxel_bytes(params) >> 20,
+		)
 		testing.expect(t, params.levels <= VOXEL_MAX_LEVELS && params.cones <= VOXEL_MAX_CONES)
 		// A box covers whole voxels of the next level, so the filter's halves are whole.
 		testing.expect_value(t, params.res % (2 * VOXEL_SNAP), 0)
@@ -131,7 +148,13 @@ the_diffuse_cones_weigh_the_hemisphere_by_the_cosine :: proc(t: ^testing.T) {
 		testing.expect_value(t, u32(n), count)
 		testing.expectf(t, abs(total - 1) < 1e-4, "%d cones weigh %v", count, total)
 		// Their mean leans along the normal only.
-		testing.expectf(t, abs(mean.x) < 1e-4 && abs(mean.y) < 1e-4, "%d cones lean %v", count, mean)
+		testing.expectf(
+			t,
+			abs(mean.x) < 1e-4 && abs(mean.y) < 1e-4,
+			"%d cones lean %v",
+			count,
+			mean,
+		)
 		testing.expect(t, aperture > 0.3 && aperture < 0.6)
 	}
 }
@@ -201,16 +224,35 @@ the_voxel_cones_run_without_ray_queries_and_pass_validation :: proc(t: ^testing.
 	cache: Texture_Cache
 	defer cache_destroy(&cache, &platform)
 
-	run_frame :: proc(t: ^testing.T, r: ^Renderer, cache: ^Texture_Cache, settings: Gi_Settings, camera: ecs.World_Position, view := Debug_View.Lit) -> (passes: map[string]int) {
+	run_frame :: proc(
+		t: ^testing.T,
+		r: ^Renderer,
+		cache: ^Texture_Cache,
+		settings: Gi_Settings,
+		camera: ecs.World_Position,
+		view := Debug_View.Lit,
+	) -> (
+		passes: map[string]int,
+	) {
 		platform := r.platform
 		g := begin(platform, cache)
 		f := new(Frame, platform.frame_allocator)
-		f^ = {renderer = r, state = &r.view, graph = &g, size = {64, 32}, view = {position = camera}, debug_view = view}
+		f^ = {
+			renderer = r,
+			state = &r.view,
+			graph = &g,
+			size = {64, 32},
+			view = {position = camera},
+			debug_view = view,
+		}
 		f.lights = new(Light_Frame, platform.frame_allocator)
 		f.depth = create_texture(&g, {size = f.size, format = DEPTH_FORMAT, label = "depth"})
 		f.normals = create_texture(&g, {size = f.size, format = .RG16_Float, label = "normals"})
 		f.velocity = create_texture(&g, {size = f.size, format = .RG16_Float, label = "velocity"})
-		f.roughness = create_texture(&g, {size = f.size, format = ROUGHNESS_FORMAT, label = "roughness"})
+		f.roughness = create_texture(
+			&g,
+			{size = f.size, format = ROUGHNESS_FORMAT, label = "roughness"},
+		)
 		prepass := add_render_pass(&g, "prepass", proc(_: ^Pass_Context) {}, nil)
 		depth(&g, prepass, f.depth, .Clear)
 		color(&g, prepass, f.normals, .Clear)
@@ -219,7 +261,10 @@ the_voxel_cones_run_without_ray_queries_and_pass_validation :: proc(t: ^testing.
 		sf := new(Scene_Frame, platform.frame_allocator)
 		f.scene_frame = sf
 		sf.view_constants = make([]gpu.Upload, 1, platform.frame_allocator)
-		sf.view_constants[0], _ = platform.gpu_upload(size_of(Frame_Constants), gpu.PASS_CONSTANTS_ALIGN)
+		sf.view_constants[0], _ = platform.gpu_upload(
+			size_of(Frame_Constants),
+			gpu.PASS_CONSTANTS_ALIGN,
+		)
 		begin_gi(f, settings, {})
 		testing.expect(t, f.gi != nil && f.gi.voxel != nil)
 		if f.gi == nil || f.gi.voxel == nil {
@@ -245,15 +290,26 @@ the_voxel_cones_run_without_ray_queries_and_pass_validation :: proc(t: ^testing.
 		passes = make(map[string]int, platform.frame_allocator)
 		for node in g.passes {
 			passes[node.name] += 1
-			if node.name == "gi voxel inject" || node.name == "gi voxel filter" || node.name == "gi voxel gather" {
-				testing.expectf(t, node.queue == .Compute, "%s is on the %v queue", node.name, node.queue)
+			if node.name == "gi voxel inject" ||
+			   node.name == "gi voxel filter" ||
+			   node.name == "gi voxel gather" {
+				testing.expectf(
+					t,
+					node.queue == .Compute,
+					"%s is on the %v queue",
+					node.name,
+					node.queue,
+				)
 			}
 		}
 		testing.expect(t, execute(&g), "the frame did not execute")
 		return
 	}
 
-	settings := Gi_Settings{technique = .Voxel_Cones, level = .Low}
+	settings := Gi_Settings {
+		technique = .Voxel_Cones,
+		level     = .Low,
+	}
 	levels := int(GI_VOXEL_PARAMS[.Low].levels)
 	for frame in 0 ..< 3 {
 		passes := run_frame(t, r, &cache, settings, meters(10.5, 2, -3))

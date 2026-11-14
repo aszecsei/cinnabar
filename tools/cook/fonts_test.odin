@@ -37,9 +37,16 @@ fonts_cook_to_font_blobs_and_atlases_of_distance_fields :: proc(t: ^testing.T) {
 	testing.expect_value(t, pass.cooked[.Font], 1)
 	testing.expect_value(t, pass.cooked[.Texture], 1)
 
-	meta_text, _ := os.read_entire_file(fmt.tprintf("%s/content/fonts/sans.ttf.meta", tree.dir), context.temp_allocator)
+	meta_text, _ := os.read_entire_file(
+		fmt.tprintf("%s/content/fonts/sans.ttf.meta", tree.dir),
+		context.temp_allocator,
+	)
 	meta, _ := format.meta_parse(string(meta_text), context.temp_allocator)
-	atlas_guid, has_atlas := format.meta_subasset(meta, format.TEXTURE_KIND, format.FONT_ATLAS_NAME)
+	atlas_guid, has_atlas := format.meta_subasset(
+		meta,
+		format.TEXTURE_KIND,
+		format.FONT_ATLAS_NAME,
+	)
 	testing.expect(t, has_atlas, "the .meta file names the atlas")
 
 	data := tree_blob(t, tree, meta.guid)
@@ -72,7 +79,10 @@ fonts_cook_to_font_blobs_and_atlases_of_distance_fields :: proc(t: ^testing.T) {
 	testing.expect_value(t, atlas.format, format.Texture_Format.RGBA8_Unorm)
 	testing.expect_value(t, atlas.mip_count, 1)
 	testing.expect_value(t, atlas.size, blob.atlas_size)
-	testing.expect(t, strings.has_suffix(format.blob_string(atlas_data, atlas.source_path), "#atlas"))
+	testing.expect(
+		t,
+		strings.has_suffix(format.blob_string(atlas_data, atlas.source_path), "#atlas"),
+	)
 	texels := ([^][4]u8)(raw_data(format.blob_bytes(atlas_data, atlas.mips)))
 	at :: proc(texels: [^][4]u8, width: u32, x, y: int) -> u8 {
 		p := texels[y * int(width) + x]
@@ -85,7 +95,10 @@ fonts_cook_to_font_blobs_and_atlases_of_distance_fields :: proc(t: ^testing.T) {
 	corner := at(texels, atlas.size.x, int(i.rect.x), int(i.rect.y))
 	testing.expectf(t, corner < 32, "the corner of I's cell is %d", corner)
 	// The plane of I reaches from just below the baseline, by its border, to above the cap height.
-	testing.expect(t, i.plane[1] < 0 && i.plane[1] > -0.2 && i.plane[3] > 0.6 && i.plane[0] < i.plane[2])
+	testing.expect(
+		t,
+		i.plane[1] < 0 && i.plane[1] > -0.2 && i.plane[3] > 0.6 && i.plane[0] < i.plane[2],
+	)
 
 	// A second cook finds both blobs up to date.
 	pass = cook(options, {.Font}, log_problems = false)
@@ -100,7 +113,10 @@ fonts_keep_every_glyph_when_asked :: proc(t: ^testing.T) {
 		t,
 		{
 			{"content/fonts/sans.ttf", TEST_FONT},
-			{"content/fonts/sans.ttf.meta", "guid = 0123456789abcdef0123456789abcdef\nglyphs = all\nem_size = 32\n"},
+			{
+				"content/fonts/sans.ttf.meta",
+				"guid = 0123456789abcdef0123456789abcdef\nglyphs = all\nem_size = 32\n",
+			},
 		},
 	)
 	defer remove_tree(tree)
@@ -131,8 +147,20 @@ fonts_that_cannot_cook_report_why :: proc(t: ^testing.T) {
 	} {
 		{{{"content/a.ttf", string(variable)}}, "variable font"},
 		{{{"content/a.ttf", TEST_FONT[:40]}}, "truncated"},
-		{{{"content/a.ttf", TEST_FONT}, {"content/a.ttf.meta", "guid = 0123456789abcdef0123456789abcdef\nem_size = 50\n"}}, "em_size must be"},
-		{{{"content/a.ttf", TEST_FONT}, {"content/a.ttf.meta", "guid = 0123456789abcdef0123456789abcdef\nindex = 1\n"}}, "has no font 1"},
+		{
+			{
+				{"content/a.ttf", TEST_FONT},
+				{"content/a.ttf.meta", "guid = 0123456789abcdef0123456789abcdef\nem_size = 50\n"},
+			},
+			"em_size must be",
+		},
+		{
+			{
+				{"content/a.ttf", TEST_FONT},
+				{"content/a.ttf.meta", "guid = 0123456789abcdef0123456789abcdef\nindex = 1\n"},
+			},
+			"has no font 1",
+		},
 	}
 	for c in cases {
 		tree := make_tree(t, c.files)

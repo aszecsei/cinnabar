@@ -52,7 +52,12 @@ Preview_Bin :: struct {
 // preview_group orders draws so that what one pipeline draws is together, with the opaque first, as a transparent draw
 // blends over them, and gives the runs.
 @(private)
-preview_group :: proc(draws: []Preview_Draw, allocator: runtime.Allocator) -> (bins: []Preview_Bin) {
+preview_group :: proc(
+	draws: []Preview_Draw,
+	allocator: runtime.Allocator,
+) -> (
+	bins: []Preview_Bin,
+) {
 	slice.stable_sort_by(draws, proc(a, b: Preview_Draw) -> bool {
 		if a.transparent != b.transparent {
 			return !a.transparent
@@ -61,10 +66,20 @@ preview_group :: proc(draws: []Preview_Draw, allocator: runtime.Allocator) -> (b
 	})
 	out := make([dynamic]Preview_Bin, allocator)
 	for d, i in draws {
-		if len(out) > 0 && out[len(out) - 1].index == d.pipeline && out[len(out) - 1].transparent == d.transparent {
+		if len(out) > 0 &&
+		   out[len(out) - 1].index == d.pipeline &&
+		   out[len(out) - 1].transparent == d.transparent {
 			out[len(out) - 1].count += 1
 		} else {
-			append(&out, Preview_Bin{index = d.pipeline, first = u32(i), count = 1, transparent = d.transparent})
+			append(
+				&out,
+				Preview_Bin {
+					index = d.pipeline,
+					first = u32(i),
+					count = 1,
+					transparent = d.transparent,
+				},
+			)
 		}
 	}
 	return out[:]
@@ -137,7 +152,11 @@ preview_largest :: proc(radii: []f32, count: int, allocator: runtime.Allocator) 
 // prefab_preview_items is what a prefab's flat entities draw, each mesh in the prefab's space, in which its root stands
 // at the origin as an instance's pose replaces the root's own. With a node, only that entity and its descendants. An
 // inactive entity draws nothing, and neither does what is under it.
-prefab_preview_items :: proc(scene: format.Scene, node: u64, allocator: runtime.Allocator) -> []Preview_Item {
+prefab_preview_items :: proc(
+	scene: format.Scene,
+	node: u64,
+	allocator: runtime.Allocator,
+) -> []Preview_Item {
 	OFFSET := format.scene_field_hash("offset")
 	ROTATION := format.scene_field_hash("rotation")
 	SCALE := format.scene_field_hash("scale")
@@ -150,7 +169,10 @@ prefab_preview_items :: proc(scene: format.Scene, node: u64, allocator: runtime.
 	for &e in scene.entities {
 		by_id[e.id] = &e
 	}
-	local_of :: proc(e: ^format.Scene_Entity, offset_hash, rotation_hash, scale_hash: u64) -> ecs.Local_Transform {
+	local_of :: proc(
+		e: ^format.Scene_Entity,
+		offset_hash, rotation_hash, scale_hash: u64,
+	) -> ecs.Local_Transform {
 		local := ecs.Local_Transform {
 			rotation = 1,
 			scale    = 1,
@@ -165,7 +187,12 @@ prefab_preview_items :: proc(scene: format.Scene, node: u64, allocator: runtime.
 				case offset_hash:
 					local.offset = {f32(v[0]), f32(v[1]), f32(v[2])}
 				case rotation_hash:
-					local.rotation = quaternion(x = f32(v[0]), y = f32(v[1]), z = f32(v[2]), w = f32(v[3]))
+					local.rotation = quaternion(
+						x = f32(v[0]),
+						y = f32(v[1]),
+						z = f32(v[2]),
+						w = f32(v[3]),
+					)
 				case scale_hash:
 					local.scale = {f32(v[0]), f32(v[1]), f32(v[2])}
 				}
@@ -180,12 +207,19 @@ prefab_preview_items :: proc(scene: format.Scene, node: u64, allocator: runtime.
 		inside: bool,
 	}
 	memo := make(map[u64]Found, len(scene.entities), context.temp_allocator)
-	resolve :: proc(e: ^format.Scene_Entity, node: u64, by_id: ^map[u64]^format.Scene_Entity, memo: ^map[u64]Found, hashes: [3]u64, depth: int) -> Found {
+	resolve :: proc(
+		e: ^format.Scene_Entity,
+		node: u64,
+		by_id: ^map[u64]^format.Scene_Entity,
+		memo: ^map[u64]Found,
+		hashes: [3]u64,
+		depth: int,
+	) -> Found {
 		if known, found := memo[e.id]; found {
 			return known
 		}
 		result := Found {
-			pose   = {rotation = 1, scale = 1},
+			pose = {rotation = 1, scale = 1},
 			active = e.active,
 			inside = node == 0 || e.id == node,
 		}
@@ -292,7 +326,9 @@ add_preview_item_passes :: proc(f: ^Frame, desc: ^Preview_Desc) {
 		}
 		center := mesh.bounds.center * item.pose.scale
 		meters := ecs.position_to_meters(item.pose.position)
-		world := [3]f32{f32(meters.x), f32(meters.y), f32(meters.z)} + linalg.quaternion128_mul_vector3(item.pose.rotation, center)
+		world :=
+			[3]f32{f32(meters.x), f32(meters.y), f32(meters.z)} +
+			linalg.quaternion128_mul_vector3(item.pose.rotation, center)
 		scale := max(abs(item.pose.scale.x), abs(item.pose.scale.y), abs(item.pose.scale.z))
 		append(&placed, Placed{mesh, &item, world, mesh.bounds.radius * scale})
 	}
@@ -328,19 +364,27 @@ add_preview_item_passes :: proc(f: ^Frame, desc: ^Preview_Desc) {
 	draws := make([dynamic]Preview_Draw, 0, len(placed), context.temp_allocator)
 	for p, i in placed {
 		rows := pose_rows(p.item.pose, origin)
-		instances[i] = {rows = rows, previous_rows = rows}
+		instances[i] = {
+			rows          = rows,
+			previous_rows = rows,
+		}
 		meshes[i] = mesh_record(p.mesh)
 		for s in 0 ..< p.mesh.submesh_count {
 			if len(draws) == MAX_PREVIEW_DRAWS {
 				break
 			}
-			use, used := use_material(r, &table, p.item.materials[s] if s < MAX_MATERIAL_SLOTS else {})
+			use, used := use_material(
+				r,
+				&table,
+				p.item.materials[s] if s < MAX_MATERIAL_SLOTS else {},
+			)
 			if !used {
 				settled = false
 				continue
 			}
 			// A material that draws patches or ribbons draws no mesh: the default material stands in, as in the scene.
-			if r.materials.pipelines[use.pipeline].patches || r.materials.pipelines[use.pipeline].ribbon {
+			if r.materials.pipelines[use.pipeline].patches ||
+			   r.materials.pipelines[use.pipeline].ribbon {
 				use, used = use_material(r, &table, {})
 				if !used {
 					settled = false
@@ -348,11 +392,20 @@ add_preview_item_passes :: proc(f: ^Frame, desc: ^Preview_Desc) {
 				}
 			}
 			submesh := p.mesh.submeshes[s]
-			append(&draws, Preview_Draw{
-				record = {instance = u32(i), mesh = u32(i), first = submesh.first_index, material = use.block, count = submesh.index_count},
-				pipeline = use.pipeline,
-				transparent = material_group(&r.materials.pipelines[use.pipeline]) != .Opaque,
-			})
+			append(
+				&draws,
+				Preview_Draw {
+					record = {
+						instance = u32(i),
+						mesh = u32(i),
+						first = submesh.first_index,
+						material = use.block,
+						count = submesh.index_count,
+					},
+					pipeline = use.pipeline,
+					transparent = material_group(&r.materials.pipelines[use.pipeline]) != .Opaque,
+				},
+			)
 		}
 	}
 	bins := preview_group(draws[:], platform.frame_allocator)
@@ -360,7 +413,11 @@ add_preview_item_passes :: proc(f: ^Frame, desc: ^Preview_Desc) {
 	arguments := make([]gpu.Draw_Indirect_Args, len(draws), platform.frame_allocator)
 	for d, i in draws {
 		records[i] = d.record
-		arguments[i] = {draw_id = u32(i), vertex_count = d.record.count, instance_count = 1}
+		arguments[i] = {
+			draw_id        = u32(i),
+			vertex_count   = d.record.count,
+			instance_count = 1,
+		}
 	}
 	// A pipeline that failed is as settled as one that compiled: the preview will not change until its shader does.
 	ready := platform.gpu_pipeline_status != nil
@@ -379,10 +436,24 @@ add_preview_item_passes :: proc(f: ^Frame, desc: ^Preview_Desc) {
 	if desc.complete != nil {
 		desc.complete^ = settled && ready && !table.waiting && lut_ready(f)
 	}
-	write_preview_item_records(f, pf, instances, records, arguments, meshes, &table, view_projection, camera, view_near(view))
+	write_preview_item_records(
+		f,
+		pf,
+		instances,
+		records,
+		arguments,
+		meshes,
+		&table,
+		view_projection,
+		camera,
+		view_near(view),
+	)
 
 	pf.target = import_texture(g, desc.target, .Color)
-	pf.scene = create_texture(g, {size = desc.size, format = SCENE_FORMAT, label = "preview scene"})
+	pf.scene = create_texture(
+		g,
+		{size = desc.size, format = SCENE_FORMAT, label = "preview scene"},
+	)
 	if pf.constants.data == nil || len(draws) == 0 {
 		p := add_render_pass(g, "preview background", proc(_: ^Pass_Context) {}, pf)
 		color(g, p, pf.scene, .Clear, PREVIEW_BACKGROUND)
@@ -395,8 +466,14 @@ add_preview_item_passes :: proc(f: ^Frame, desc: ^Preview_Desc) {
 	size := desc.size
 	pf.depth = create_texture(g, {size = size, format = DEPTH_FORMAT, label = "preview depth"})
 	normals := create_texture(g, {size = size, format = NORMAL_FORMAT, label = "preview normals"})
-	velocity := create_texture(g, {size = size, format = VELOCITY_FORMAT, label = "preview velocity"})
-	roughness := create_texture(g, {size = size, format = ROUGHNESS_FORMAT, label = "preview roughness"})
+	velocity := create_texture(
+		g,
+		{size = size, format = VELOCITY_FORMAT, label = "preview velocity"},
+	)
+	roughness := create_texture(
+		g,
+		{size = size, format = ROUGHNESS_FORMAT, label = "preview roughness"},
+	)
 	ids := create_texture(g, {size = size, format = ID_FORMAT, label = "preview ids"})
 	pf.instances = import_buffer(g, r.previews.instances)
 	pf.draws = import_buffer(g, r.previews.draws)
@@ -405,20 +482,35 @@ add_preview_item_passes :: proc(f: ^Frame, desc: ^Preview_Desc) {
 	copy_dest(g, p, pf.instances)
 	copy_dest(g, p, pf.draws)
 	copy_dest(g, p, pf.arguments)
-	p = add_render_pass(g, "preview prepass", proc(ctx: ^Pass_Context) {draw_preview_bins(ctx, .Prepass)}, pf)
+	p = add_render_pass(
+		g,
+		"preview prepass",
+		proc(ctx: ^Pass_Context) {draw_preview_bins(ctx, .Prepass)},
+		pf,
+	)
 	color(g, p, normals, .Clear, store = .Discard)
 	color(g, p, velocity, .Clear, store = .Discard)
 	color(g, p, roughness, .Clear, {ROUGHNESS_NONE, 0, 0, 0}, .Discard)
 	depth(g, p, pf.depth, .Clear)
 	declare_preview_draws(g, p, pf)
-	p = add_render_pass(g, "preview", proc(ctx: ^Pass_Context) {draw_preview_bins(ctx, .Forward)}, pf)
+	p = add_render_pass(
+		g,
+		"preview",
+		proc(ctx: ^Pass_Context) {draw_preview_bins(ctx, .Forward)},
+		pf,
+	)
 	color(g, p, pf.scene, .Clear, PREVIEW_BACKGROUND)
 	color(g, p, ids, .Clear, store = .Discard)
 	depth(g, p, pf.depth, .Load, store = any_transparent ? .Store : .Discard)
 	declare_preview_draws(g, p, pf)
 	if any_transparent {
 		// A transparent draw has one color target, and blends over what the forward pass drew.
-		p = add_render_pass(g, "preview transparent", proc(ctx: ^Pass_Context) {draw_preview_bins(ctx, .Transparent)}, pf)
+		p = add_render_pass(
+			g,
+			"preview transparent",
+			proc(ctx: ^Pass_Context) {draw_preview_bins(ctx, .Transparent)},
+			pf,
+		)
 		color(g, p, pf.scene, .Load)
 		depth(g, p, pf.depth, .Load, store = .Discard)
 		declare_preview_draws(g, p, pf)
@@ -430,13 +522,26 @@ add_preview_item_passes :: proc(f: ^Frame, desc: ^Preview_Desc) {
 }
 
 @(private = "file")
-write_preview_item_records :: proc(f: ^Frame, pf: ^Preview_Frame, instances: []Instance_Record, draws: []Draw_Record, arguments: []gpu.Draw_Indirect_Args, meshes: []Mesh_Record, table: ^Material_Table, view_projection: matrix[4, 4]f32, camera: [3]f32, near: f32) {
+write_preview_item_records :: proc(
+	f: ^Frame,
+	pf: ^Preview_Frame,
+	instances: []Instance_Record,
+	draws: []Draw_Record,
+	arguments: []gpu.Draw_Indirect_Args,
+	meshes: []Mesh_Record,
+	table: ^Material_Table,
+	view_projection: matrix[4, 4]f32,
+	camera: [3]f32,
+	near: f32,
+) {
 	r := f.renderer
 	platform := r.platform
 	desc := pf.desc
 	surface: Surface_Record
 	// The light comes from over the camera's left shoulder, as in a material's preview.
-	direction := linalg.normalize(linalg.quaternion128_mul_vector3(desc.rotation, [3]f32{0.55, -0.6, 0.6}))
+	direction := linalg.normalize(
+		linalg.quaternion128_mul_vector3(desc.rotation, [3]f32{0.55, -0.6, 0.6}),
+	)
 	light := Light_Record {
 		color     = PREVIEW_LIGHT_COLOR,
 		type      = .Directional,
@@ -465,7 +570,19 @@ write_preview_item_records :: proc(f: ^Frame, pf: ^Preview_Frame, instances: []I
 		return
 	}
 	pf.records = upload
-	preview_write_constants(pf, r, desc, upload, view_projection, camera, near, mesh_at, surface_at, table_at, light_at)
+	preview_write_constants(
+		pf,
+		r,
+		desc,
+		upload,
+		view_projection,
+		camera,
+		near,
+		mesh_at,
+		surface_at,
+		table_at,
+		light_at,
+	)
 }
 
 @(private = "file")
@@ -489,10 +606,23 @@ draw_preview_bins :: proc(ctx: ^Pass_Context, pass: format.Material_Pass) {
 			gpu.cmd_set_pass_constants(cb, pf.constants)
 			if pass != .Prepass {
 				white := gpu.read_index(pf.renderer.materials.defaults[.White])
-				push := Material_Push{shadow_atlas = white, shadow_mask = white, ambient_occlusion = white, fog = white, gi_diffuse = white, gi_specular = white, aerial = white}
+				push := Material_Push {
+					shadow_atlas      = white,
+					shadow_mask       = white,
+					ambient_occlusion = white,
+					fog               = white,
+					gi_diffuse        = white,
+					gi_specular       = white,
+					aerial            = white,
+				}
 				gpu.cmd_push_constants(cb, &push)
 			}
-			gpu.cmd_draw_indirect(cb, gpu_buffer(ctx.graph, pf.arguments), bin.first * size_of(gpu.Draw_Indirect_Args), bin.count)
+			gpu.cmd_draw_indirect(
+				cb,
+				gpu_buffer(ctx.graph, pf.arguments),
+				bin.first * size_of(gpu.Draw_Indirect_Args),
+				bin.count,
+			)
 		}
 	}
 }

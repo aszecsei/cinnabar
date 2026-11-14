@@ -114,7 +114,9 @@ cook_scenes :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass) 
 			for e in flat.entities {
 				for c in e.components {
 					for f in c.fields {
-						if f.value.kind == .Asset && f.value.asset != {} && !slice.contains(s.visual[:], f.value.asset) {
+						if f.value.kind == .Asset &&
+						   f.value.asset != {} &&
+						   !slice.contains(s.visual[:], f.value.asset) {
 							append(&s.visual, f.value.asset)
 						}
 					}
@@ -138,7 +140,10 @@ cook_scenes :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass) 
 				settle(pass, i, .Current)
 				continue
 			}
-			if !write_blob(output, format.scene_write(flat, s.meta.guid, key, kind, navs, context.temp_allocator)) {
+			if !write_blob(
+				output,
+				format.scene_write(flat, s.meta.guid, key, kind, navs, context.temp_allocator),
+			) {
 				settle(pass, i, .Failed)
 				ok = false
 				continue
@@ -181,13 +186,30 @@ scene_prefab :: proc(p: ^Scene_Prefabs, guid: format.Guid) -> (format.Scene, boo
 // prefabs inside them, or that it is missing. The sub-asset lines of the .meta file are not in it, because the cooker
 // writes them: the navmeshes' GUIDs are, through the list.
 @(private = "file")
-scene_key :: proc(config: Script_Config, s: Asset_Source, scene: format.Scene, prefabs: ^Scene_Prefabs, navs: []format.Scene_Nav_Mesh) -> u64 {
-	key := hash.fnv64a(transmute([]byte)fmt.tprintf("%s\x00%v\x00%s\x00%x\x00", SCENE_COOK_VERSION, config, s.name, format.scene_layout()))
+scene_key :: proc(
+	config: Script_Config,
+	s: Asset_Source,
+	scene: format.Scene,
+	prefabs: ^Scene_Prefabs,
+	navs: []format.Scene_Nav_Mesh,
+) -> u64 {
+	key := hash.fnv64a(
+		transmute([]byte)fmt.tprintf(
+			"%s\x00%v\x00%s\x00%x\x00",
+			SCENE_COOK_VERSION,
+			config,
+			s.name,
+			format.scene_layout(),
+		),
+	)
 	key = hash.fnv64a(source_of(s), key)
 	guid := s.meta.guid
 	key = hash.fnv64a(guid[:], key)
 	for setting in s.meta.settings {
-		key = hash.fnv64a(transmute([]byte)fmt.tprintf("%s=%s\x00", setting.key, setting.value), key)
+		key = hash.fnv64a(
+			transmute([]byte)fmt.tprintf("%s=%s\x00", setting.key, setting.value),
+			key,
+		)
 	}
 	for &n in navs {
 		key = hash.fnv64a(transmute([]byte)fmt.tprintf("%x\x00%s\x00", n.entity, n.agent), key)
@@ -240,7 +262,10 @@ scene_flat :: proc(pass: ^Pass, index: int) -> (flat: format.Scene, ok: bool) {
 			return scene_prefab((^Scene_Prefabs)(data), prefab)
 		},
 	}
-	scene, _, parsed := format.scene_parse(string(asset_source(pass, index)), context.temp_allocator)
+	scene, _, parsed := format.scene_parse(
+		string(asset_source(pass, index)),
+		context.temp_allocator,
+	)
 	if !parsed {
 		return
 	}
@@ -266,11 +291,29 @@ parse_scene :: proc(s: Asset_Source, problems: ^Problems) -> (scene: format.Scen
 // asset that is not a prefab is an error, as are the expansion's errors. A reference to a scene ID, a script or an
 // asset that does not exist is a warning: the loader skips it, and the editor keeps it. The cooker cannot check an
 // asset's kind, because field types exist only in the game DLL.
-check_scene :: proc(s: Asset_Source, kind: format.Asset_Kind, scene: format.Scene, resolver: format.Prefab_Resolver, scripts: map[format.Guid]bool, known: map[format.Guid]format.Asset_Kind, problems: ^Problems) -> (flat: format.Scene, ok: bool) {
+check_scene :: proc(
+	s: Asset_Source,
+	kind: format.Asset_Kind,
+	scene: format.Scene,
+	resolver: format.Prefab_Resolver,
+	scripts: map[format.Guid]bool,
+	known: map[format.Guid]format.Asset_Kind,
+	problems: ^Problems,
+) -> (
+	flat: format.Scene,
+	ok: bool,
+) {
 	ok = true
 	if kind == .Prefab {
 		if _, roots := format.prefab_root(scene); roots != 1 {
-			report_error(problems, s.path, 0, 0, "a prefab has one root, an entity without a parent, not %d", roots)
+			report_error(
+				problems,
+				s.path,
+				0,
+				0,
+				"a prefab has one root, an entity without a parent, not %d",
+				roots,
+			)
 			ok = false
 		}
 	}
@@ -280,7 +323,15 @@ check_scene :: proc(s: Asset_Source, kind: format.Asset_Kind, scene: format.Scen
 		}
 		if k, found := known[e.prefab]; found && k != .Prefab {
 			buffer: [32]u8
-			report_error(problems, s.path, 0, 0, "entity %016x: the asset %s is not a prefab", e.id, format.guid_format(e.prefab, &buffer))
+			report_error(
+				problems,
+				s.path,
+				0,
+				0,
+				"entity %016x: the asset %s is not a prefab",
+				e.id,
+				format.guid_format(e.prefab, &buffer),
+			)
 			ok = false
 		}
 	}
@@ -288,7 +339,12 @@ check_scene :: proc(s: Asset_Source, kind: format.Asset_Kind, scene: format.Scen
 		return
 	}
 	expanded: []format.Scene_Problem
-	flat, expanded, ok = format.scene_expand(scene, resolver, kind == .Prefab ? s.meta.guid : {}, context.temp_allocator)
+	flat, expanded, ok = format.scene_expand(
+		scene,
+		resolver,
+		kind == .Prefab ? s.meta.guid : {},
+		context.temp_allocator,
+	)
 	for p in expanded {
 		if p.error {
 			report_error(problems, s.path, 0, 0, "%s", p.message)
@@ -303,9 +359,25 @@ check_scene :: proc(s: Asset_Source, kind: format.Asset_Kind, scene: format.Scen
 	for e in flat.entities {
 		ids[e.id] = true
 	}
-	check_reference :: proc(s: Asset_Source, ids: map[u64]bool, entity: u64, what: string, id: u64, problems: ^Problems) {
+	check_reference :: proc(
+		s: Asset_Source,
+		ids: map[u64]bool,
+		entity: u64,
+		what: string,
+		id: u64,
+		problems: ^Problems,
+	) {
 		if id != 0 && !ids[id] {
-			report_warning(problems, s.path, 0, 0, "entity %016x: %s refers to %016x, which is not in the scene", entity, what, id)
+			report_warning(
+				problems,
+				s.path,
+				0,
+				0,
+				"entity %016x: %s refers to %016x, which is not in the scene",
+				entity,
+				what,
+				id,
+			)
 		}
 	}
 	for e in flat.entities {
@@ -313,18 +385,43 @@ check_scene :: proc(s: Asset_Source, kind: format.Asset_Kind, scene: format.Scen
 		for c in e.components {
 			for f in c.fields {
 				if f.value.kind == .Entity {
-					check_reference(s, ids, e.id, fmt.tprintf("%s.%s", c.name, f.name), f.value.entity, problems)
+					check_reference(
+						s,
+						ids,
+						e.id,
+						fmt.tprintf("%s.%s", c.name, f.name),
+						f.value.entity,
+						problems,
+					)
 				}
 				if f.value.kind == .Asset && f.value.asset != {} && f.value.asset not_in known {
 					buffer: [32]u8
-					report_warning(problems, s.path, 0, 0, "entity %016x: %s.%s names the asset %s, which is not in the content", e.id, c.name, f.name, format.guid_format(f.value.asset, &buffer))
+					report_warning(
+						problems,
+						s.path,
+						0,
+						0,
+						"entity %016x: %s.%s names the asset %s, which is not in the content",
+						e.id,
+						c.name,
+						f.name,
+						format.guid_format(f.value.asset, &buffer),
+					)
 				}
 			}
 		}
 		for b in e.behaviours {
 			if !scripts[b.script] {
 				buffer: [32]u8
-				report_warning(problems, s.path, 0, 0, "entity %016x: no script has the GUID %s", e.id, format.guid_format(b.script, &buffer))
+				report_warning(
+					problems,
+					s.path,
+					0,
+					0,
+					"entity %016x: no script has the GUID %s",
+					e.id,
+					format.guid_format(b.script, &buffer),
+				)
 			}
 			for f in b.fields {
 				if f.value.kind == .Entity {

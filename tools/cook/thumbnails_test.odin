@@ -23,15 +23,12 @@ asset_at :: proc(index: ^Index, path: string) -> (entry: cook_link.Asset, found:
 // Blobs' keys by GUID, for the keys of thumbnails with no blobs on disk.
 @(private = "file")
 fake_keys :: proc(sources: map[string]^Asset_Source, blobs: ^map[string]u64) -> Thumbnail_Keys {
-	return {
-		sources = sources,
-		data = blobs,
-		blob_key = proc(data: rawptr, guid: string) -> u64 {
+	return {sources = sources, data = blobs, blob_key = proc(data: rawptr, guid: string) -> u64 {
 			return (^map[string]u64)(data)[guid]
-		},
-		memo = make(map[string]u64, context.temp_allocator),
-		blobs = make(map[string]u64, context.temp_allocator),
-	}
+		}, memo = make(
+			map[string]u64,
+			context.temp_allocator,
+		), blobs = make(map[string]u64, context.temp_allocator)}
 }
 
 @(private = "file")
@@ -47,15 +44,22 @@ a_texture_change_changes_its_materials_thumbnail_key :: proc(t: ^testing.T) {
 	instance := "33333333333333333333333333333333"
 	blobs := make(map[string]u64, context.temp_allocator)
 	blobs[texture], blobs[material], blobs[instance] = 1, 2, 3
-	m := Asset_Source{kind = .Material, dependencies = make([dynamic]format.Guid, context.temp_allocator)}
+	m := Asset_Source {
+		kind         = .Material,
+		dependencies = make([dynamic]format.Guid, context.temp_allocator),
+	}
 	append(&m.dependencies, guid_of(texture))
-	i := Asset_Source{kind = .Material_Instance, dependencies = make([dynamic]format.Guid, context.temp_allocator)}
+	i := Asset_Source {
+		kind         = .Material_Instance,
+		dependencies = make([dynamic]format.Guid, context.temp_allocator),
+	}
 	append(&i.dependencies, guid_of(material))
 	sources := make(map[string]^Asset_Source, context.temp_allocator)
 	sources[material], sources[instance] = &m, &i
 
 	keys := fake_keys(sources, &blobs)
-	before_material, before_instance := thumbnail_key(&keys, material), thumbnail_key(&keys, instance)
+	before_material, before_instance :=
+		thumbnail_key(&keys, material), thumbnail_key(&keys, instance)
 
 	// The texture's new blob reaches the material and the instance of it.
 	blobs[texture] = 9
@@ -105,8 +109,14 @@ a_thumbnail_key_survives_a_cycle :: proc(t: ^testing.T) {
 	a, b := "77777777777777777777777777777777", "88888888888888888888888888888888"
 	blobs := make(map[string]u64, context.temp_allocator)
 	blobs[a], blobs[b] = 1, 2
-	sa := Asset_Source{kind = .Material, dependencies = make([dynamic]format.Guid, context.temp_allocator)}
-	sb := Asset_Source{kind = .Material, dependencies = make([dynamic]format.Guid, context.temp_allocator)}
+	sa := Asset_Source {
+		kind         = .Material,
+		dependencies = make([dynamic]format.Guid, context.temp_allocator),
+	}
+	sb := Asset_Source {
+		kind         = .Material,
+		dependencies = make([dynamic]format.Guid, context.temp_allocator),
+	}
 	append(&sa.dependencies, guid_of(b))
 	append(&sb.dependencies, guid_of(a))
 	sources := make(map[string]^Asset_Source, context.temp_allocator)
@@ -193,7 +203,10 @@ a_parts_picture_goes_with_its_prefabs :: proc(t: ^testing.T) {
 	part := fmt.tprintf("%s.e7e4b781f0a1effe.png", stem)
 	testing.expect(t, os.write_entire_file(part, transmute([]byte)string("part")) == nil)
 	dir := fmt.tprintf("%s/thumbnails", options.cache)
-	other := fmt.tprintf("%s/00000000000000000000000000000000.1111111111111111.e7e4b781f0a1effe.png", dir)
+	other := fmt.tprintf(
+		"%s/00000000000000000000000000000000.1111111111111111.e7e4b781f0a1effe.png",
+		dir,
+	)
 	testing.expect(t, os.write_entire_file(other, transmute([]byte)string("old")) == nil)
 
 	thumbnails_update(&index, &pass, options)

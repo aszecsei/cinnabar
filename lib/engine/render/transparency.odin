@@ -10,7 +10,10 @@ import "cinnabar:core/gpu"
 // material, and an additive one, draws back to front over the scene, an item at a time. The editor gets the IDs and the
 // depth of the surfaces wherever they show, after post-processing.
 
-TRANSPARENCY_COMPOSITE_SHADER :: #load("../content/shaders/transparency_composite.hlsl.meta", string)
+TRANSPARENCY_COMPOSITE_SHADER :: #load(
+	"../content/shaders/transparency_composite.hlsl.meta",
+	string,
+)
 
 // The moments: each pixel's optical depth, b0, and its four power moments, weighted by it. 16-bit moments would need
 // the paper's quantization to stay stable, so they are 32-bit (see MOMENT_BIAS in moments.hlsli).
@@ -20,7 +23,10 @@ MOMENTS_FORMAT :: gpu.Format.RGBA32_Float
 // opacity, pre-exposed.
 ACCUMULATED_FORMAT :: gpu.Format.RGBA16_Float
 
-MOMENT_COLORS :: []gpu.Color_Target{{format = MOMENTS_ZEROTH_FORMAT, blend = .Additive}, {format = MOMENTS_FORMAT, blend = .Additive}}
+MOMENT_COLORS :: []gpu.Color_Target {
+	{format = MOMENTS_ZEROTH_FORMAT, blend = .Additive},
+	{format = MOMENTS_FORMAT, blend = .Additive},
+}
 ACCUMULATED_COLORS :: []gpu.Color_Target{{format = ACCUMULATED_FORMAT, blend = .Additive}}
 // The sorted draws' targets: the scene, under premultiplied colors or additive ones.
 OVER_COLORS :: []gpu.Color_Target{{format = SCENE_FORMAT, blend = .Premultiplied}}
@@ -76,22 +82,27 @@ add_transparency_passes :: proc(f: ^Frame) {
 	g := f.graph
 	overdraw := f.debug_view == .Transparent_Overdraw
 	sprites := has_sprites(f)
-	moments := (has_group(f, .Moments) || sprites) && pipeline_ready(r.platform, &r.transparency_composite)
+	moments :=
+		(has_group(f, .Moments) || sprites) &&
+		pipeline_ready(r.platform, &r.transparency_composite)
 	if overdraw {
 		moments = has_transparency(f) || sprites
 	}
 	if moments {
-		f.moments_zeroth = create_texture(g, {size = f.size, format = MOMENTS_ZEROTH_FORMAT, label = "moments zeroth"})
+		f.moments_zeroth = create_texture(
+			g,
+			{size = f.size, format = MOMENTS_ZEROTH_FORMAT, label = "moments zeroth"},
+		)
 		f.moments = create_texture(g, {size = f.size, format = MOMENTS_FORMAT, label = "moments"})
 		p := add_render_pass(g, "transparent moments", proc(ctx: ^Pass_Context) {
-			f := (^Frame)(ctx.data)
-			for view in ([]int{VIEW_VIEW_MODEL, VIEW_CAMERA}) {
-				draw_scene_view(f, ctx.cb, view, .Moments, .Moments)
-				if f.debug_view == .Transparent_Overdraw {
-					draw_scene_view(f, ctx.cb, view, .Moments, .Sorted)
+				f := (^Frame)(ctx.data)
+				for view in ([]int{VIEW_VIEW_MODEL, VIEW_CAMERA}) {
+					draw_scene_view(f, ctx.cb, view, .Moments, .Moments)
+					if f.debug_view == .Transparent_Overdraw {
+						draw_scene_view(f, ctx.cb, view, .Moments, .Sorted)
+					}
 				}
-			}
-		}, f)
+			}, f)
 		color(g, p, f.moments_zeroth, .Clear)
 		color(g, p, f.moments, .Clear)
 		depth(g, p, f.depth, .Load)
@@ -106,12 +117,19 @@ add_transparency_passes :: proc(f: ^Frame) {
 	}
 	if moments {
 		cf := new(Composite_Frame, r.platform.frame_allocator)
-		cf^ = {frame = f, accumulated = create_texture(g, {size = f.size, format = ACCUMULATED_FORMAT, label = "transparent light"}), scene = f.scene}
+		cf^ = {
+			frame       = f,
+			accumulated = create_texture(
+				g,
+				{size = f.size, format = ACCUMULATED_FORMAT, label = "transparent light"},
+			),
+			scene       = f.scene,
+		}
 		p := add_render_pass(g, "transparent", proc(ctx: ^Pass_Context) {
-			f := (^Frame)(ctx.data)
-			draw_scene_view(f, ctx.cb, VIEW_VIEW_MODEL, .Transparent, .Moments)
-			draw_scene_view(f, ctx.cb, VIEW_CAMERA, .Transparent, .Moments)
-		}, f)
+				f := (^Frame)(ctx.data)
+				draw_scene_view(f, ctx.cb, VIEW_VIEW_MODEL, .Transparent, .Moments)
+				draw_scene_view(f, ctx.cb, VIEW_CAMERA, .Transparent, .Moments)
+			}, f)
 		color(g, p, cf.accumulated, .Clear)
 		depth(g, p, f.depth, .Load)
 		declare_scene_draws(f, p)
@@ -128,10 +146,10 @@ add_transparency_passes :: proc(f: ^Frame) {
 	}
 	if has_group(f, .Sorted) {
 		p := add_render_pass(g, "sorted transparent", proc(ctx: ^Pass_Context) {
-			f := (^Frame)(ctx.data)
-			draw_scene_view(f, ctx.cb, VIEW_VIEW_MODEL, .Transparent, .Sorted)
-			draw_scene_view(f, ctx.cb, VIEW_CAMERA, .Transparent, .Sorted)
-		}, f)
+				f := (^Frame)(ctx.data)
+				draw_scene_view(f, ctx.cb, VIEW_VIEW_MODEL, .Transparent, .Sorted)
+				draw_scene_view(f, ctx.cb, VIEW_CAMERA, .Transparent, .Sorted)
+			}, f)
 		color(g, p, f.scene, .Load)
 		depth(g, p, f.depth, .Load)
 		declare_scene_draws(f, p)
@@ -148,12 +166,12 @@ add_transparent_id_pass :: proc(f: ^Frame, keep_ids: bool) {
 	}
 	g := f.graph
 	p := add_render_pass(g, "transparent ids", proc(ctx: ^Pass_Context) {
-		f := (^Frame)(ctx.data)
-		for view in ([]int{VIEW_VIEW_MODEL, VIEW_CAMERA}) {
-			draw_scene_view(f, ctx.cb, view, .Transparent_Ids, .Moments)
-			draw_scene_view(f, ctx.cb, view, .Transparent_Ids, .Sorted)
-		}
-	}, f)
+			f := (^Frame)(ctx.data)
+			for view in ([]int{VIEW_VIEW_MODEL, VIEW_CAMERA}) {
+				draw_scene_view(f, ctx.cb, view, .Transparent_Ids, .Moments)
+				draw_scene_view(f, ctx.cb, view, .Transparent_Ids, .Sorted)
+			}
+		}, f)
 	color(g, p, f.ids, .Load)
 	depth(g, p, f.depth, .Load)
 	declare_scene_draws(f, p)

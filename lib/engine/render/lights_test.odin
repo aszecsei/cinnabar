@@ -62,7 +62,10 @@ cascades_split_between_even_and_exponential :: proc(t: ^testing.T) {
 	testing.expect(t, splits[0] < SHADOW_DISTANCE / SHADOW_CASCADES)
 	// A volume's Shadows set the reach and the split: evenly, the cascades are a quarter each.
 	even := cascade_splits(0.1, 40, 1e-6)
-	testing.expect(t, abs(even[0] - (0.1 + 39.9 / 4)) < 1e-3 && abs(even[SHADOW_CASCADES - 1] - 40) < 1e-3)
+	testing.expect(
+		t,
+		abs(even[0] - (0.1 + 39.9 / 4)) < 1e-3 && abs(even[SHADOW_CASCADES - 1] - 40) < 1e-3,
+	)
 	// Fewer cascades split the same reach, and the splits past them repeat the last, so no depth reaches past them.
 	two := cascade_splits(0.1, 40, 1e-6, count = 2)
 	testing.expect(t, abs(two[0] - (0.1 + 39.9 / 2)) < 1e-3)
@@ -81,13 +84,26 @@ every_level_fits_its_shadow_views_in_its_atlas :: proc(t: ^testing.T) {
 		}
 		for slot in p.cascades * slots_per_cell(p) ..< max_shadow_views(p) {
 			pixels, rect := slot_viewport(p, slot, p.slot)
-			testing.expectf(t, rect.x + rect.z <= 1 && rect.y + rect.w <= 1, "%v: slot %d is outside the atlas", level, slot)
+			testing.expectf(
+				t,
+				rect.x + rect.z <= 1 && rect.y + rect.w <= 1,
+				"%v: slot %d is outside the atlas",
+				level,
+				slot,
+			)
 			append(&viewports, pixels)
 		}
 		for a, i in viewports {
-			testing.expectf(t, int(a.x + a.z) <= p.atlas && int(a.y + a.w) <= p.atlas, "%v: %v is outside the atlas", level, a)
+			testing.expectf(
+				t,
+				int(a.x + a.z) <= p.atlas && int(a.y + a.w) <= p.atlas,
+				"%v: %v is outside the atlas",
+				level,
+				a,
+			)
 			for b in viewports[i + 1:] {
-				apart := a.x + a.z <= b.x || b.x + b.z <= a.x || a.y + a.w <= b.y || b.y + b.w <= a.y
+				apart :=
+					a.x + a.z <= b.x || b.x + b.z <= a.x || a.y + a.w <= b.y || b.y + b.w <= a.y
 				testing.expectf(t, apart, "%v: %v and %v overlap", level, a, b)
 			}
 		}
@@ -136,8 +152,17 @@ light_setup :: proc(t: ^testing.T) -> ^Light_Fixture {
 	f.renderer = new(Renderer)
 	f.renderer.platform = &f.platform
 	lights_register(&f.renderer.lights, &f.world)
-	view := View{rotation = 1, projection = Perspective{1, 0.1}}
-	f.frame = {renderer = f.renderer, state = &f.state, view = view, size = {64, 32}, view_projection = view_projection(view, 2)}
+	view := View {
+		rotation   = 1,
+		projection = Perspective{1, 0.1},
+	}
+	f.frame = {
+		renderer        = f.renderer,
+		state           = &f.state,
+		view            = view,
+		size            = {64, 32},
+		view_projection = view_projection(view, 2),
+	}
 	return f
 }
 
@@ -151,9 +176,22 @@ light_teardown :: proc(f: ^Light_Fixture) {
 }
 
 @(private = "file")
-spawn_light :: proc(w: ^ecs.World, position: [3]f32, rotation: quaternion128, light: $T) -> ecs.Entity {
+spawn_light :: proc(
+	w: ^ecs.World,
+	position: [3]f32,
+	rotation: quaternion128,
+	light: $T,
+) -> ecs.Entity {
 	e := ecs.spawn(w)
-	ecs.add(w, e, ecs.Transform{position = ecs.position_offset({}, position), rotation = rotation, scale = 1})
+	ecs.add(
+		w,
+		e,
+		ecs.Transform {
+			position = ecs.position_offset({}, position),
+			rotation = rotation,
+			scale = 1,
+		},
+	)
 	ecs.add(w, e, light)
 	return e
 }
@@ -167,7 +205,12 @@ lights_take_their_shadows_in_order :: proc(t: ^testing.T) {
 
 	down := linalg.quaternion_angle_axis_f32(math.PI / 2, {1, 0, 0})
 	spawn_light(w, {}, down, Directional_Light{intensity = 3, cast_shadows = true})
-	spawn_light(w, {0, 2, 5}, down, Spot_Light{intensity = 4, range = 6, outer_angle = 0.6, cast_shadows = true})
+	spawn_light(
+		w,
+		{0, 2, 5},
+		down,
+		Spot_Light{intensity = 4, range = 6, outer_angle = 0.6, cast_shadows = true},
+	)
 	// The near point light brings more light to the view than the spot light, so it takes its shadow first.
 	spawn_light(w, {1, 0, 3}, 1, Point_Light{intensity = 4, cast_shadows = true})
 	// Behind the camera and out of its reach, it lights nothing in view, so it gets no shadow.
@@ -185,14 +228,22 @@ lights_take_their_shadows_in_order :: proc(t: ^testing.T) {
 	// The directional lights, then the point lights, then the spot lights.
 	sun := lf.records[0]
 	testing.expect_value(t, sun.type, Light_Type.Directional)
-	testing.expect(t, linalg.length(sun.direction - {0, -1, 0}) < 1e-5, "the sun shines along its +z")
+	testing.expect(
+		t,
+		linalg.length(sun.direction - {0, -1, 0}) < 1e-5,
+		"the sun shines along its +z",
+	)
 	// A field at 0 takes its default: white, and DEFAULT_LIGHT_RANGE.
 	testing.expect_value(t, lf.records[3].color, [3]f32{1, 1, 1})
 	testing.expect_value(t, lf.records[3].range, DEFAULT_LIGHT_RANGE)
 	testing.expect_value(t, lf.records[4].type, Light_Type.Spot)
 
 	// As resolve_settings gives them without volumes, at High, which has every cascade.
-	frame.shadow_settings = {distance = SHADOW_DISTANCE, split_lambda = SHADOW_SPLIT_LAMBDA, level = .High}
+	frame.shadow_settings = {
+		distance     = SHADOW_DISTANCE,
+		split_lambda = SHADOW_SPLIT_LAMBDA,
+		level        = .High,
+	}
 	assign_shadow_views(frame, trace = false)
 	sf := frame.shadows
 	testing.expect_value(t, lf.records[0].shadow, 0)
@@ -206,8 +257,16 @@ lights_take_their_shadows_in_order :: proc(t: ^testing.T) {
 	// A cascade culls nothing toward the light; the spot light's view culls beyond its range.
 	testing.expect_value(t, sf.planes[0][4], [4]f32{0, 0, 0, 1})
 	spot := sf.planes[SHADOW_CASCADES + 6]
-	testing.expect(t, sphere_in(spot[:], {0, -3, 5}, 0), "a point below the spot light, in range, is in its view")
-	testing.expect(t, !sphere_in(spot[:], {0, -5, 5}, 0), "a point below the spot light, past its range, is not")
+	testing.expect(
+		t,
+		sphere_in(spot[:], {0, -3, 5}, 0),
+		"a point below the spot light, in range, is in its view",
+	)
+	testing.expect(
+		t,
+		!sphere_in(spot[:], {0, -5, 5}, 0),
+		"a point below the spot light, past its range, is not",
+	)
 	testing.expect(t, !sphere_in(spot[:], {0, 3, 5}, 0), "a point above the spot light is not")
 	// The views' rectangles of the atlas do not overlap.
 	for a, i in sf.viewports {
@@ -271,7 +330,12 @@ lights_take_their_shadows_in_order :: proc(t: ^testing.T) {
 		testing.expect_value(t, lf.records[0].shadow, 0)
 		testing.expect(t, .Contact_Shadow in lf.records[0].flags)
 		for record, i in lf.records[1:] {
-			testing.expectf(t, .Contact_Shadow not_in record.flags, "light %d takes the contact shadows", i + 1)
+			testing.expectf(
+				t,
+				.Contact_Shadow not_in record.flags,
+				"light %d takes the contact shadows",
+				i + 1,
+			)
 		}
 	}
 	// The mask's channel is the sun's shadow in a frame that traces, so it takes none.
@@ -282,7 +346,12 @@ lights_take_their_shadows_in_order :: proc(t: ^testing.T) {
 	assign_shadow_views(frame, trace = true, contact = true)
 	testing.expect_value(t, frame.shadows.contact_light, -1)
 	for record, i in lf.records {
-		testing.expectf(t, .Contact_Shadow not_in record.flags, "light %d takes the contact shadows", i)
+		testing.expectf(
+			t,
+			.Contact_Shadow not_in record.flags,
+			"light %d takes the contact shadows",
+			i,
+		)
 	}
 }
 
@@ -293,7 +362,12 @@ a_soft_lights_views_have_a_guard_band :: proc(t: ^testing.T) {
 	defer light_teardown(f)
 	w := &f.world
 
-	spawn_light(w, {1, 0, 3}, 1, Point_Light{intensity = 4, source_radius = 0.1, cast_shadows = true})
+	spawn_light(
+		w,
+		{1, 0, 3},
+		1,
+		Point_Light{intensity = 4, source_radius = 0.1, cast_shadows = true},
+	)
 	spawn_light(w, {-1, 0, 3}, 1, Point_Light{intensity = 1, cast_shadows = true})
 	frame := &f.frame
 	frame.lights = extract_lights(frame, w, nil)
@@ -303,7 +377,11 @@ a_soft_lights_views_have_a_guard_band :: proc(t: ^testing.T) {
 		for &record in lf.records {
 			record.shadow = -1
 		}
-		frame.shadow_settings = {distance = SHADOW_DISTANCE, split_lambda = SHADOW_SPLIT_LAMBDA, level = level}
+		frame.shadow_settings = {
+			distance     = SHADOW_DISTANCE,
+			split_lambda = SHADOW_SPLIT_LAMBDA,
+			level        = level,
+		}
 		assign_shadow_views(frame, trace = false)
 		sf := frame.shadows
 		p := SHADOW_PARAMS[level]
@@ -311,13 +389,31 @@ a_soft_lights_views_have_a_guard_band :: proc(t: ^testing.T) {
 		testing.expect_value(t, guard, level == .Low ? 0 : int(p.soft.radius) + 2)
 		// The soft light's faces are wider than 90 degrees, by its guard of texels on each side; the hard light's are not.
 		soft, hard := sf.views[lf.records[0].shadow], sf.views[lf.records[1].shadow]
-		testing.expectf(t, abs(soft.texel - 2 / f32(p.slot - 2 * guard)) < 1e-7, "%v: a soft face's texel is %v", level, soft.texel)
-		testing.expectf(t, abs(hard.texel - 2 / f32(p.slot)) < 1e-7, "%v: a hard face's texel is %v", level, hard.texel)
+		testing.expectf(
+			t,
+			abs(soft.texel - 2 / f32(p.slot - 2 * guard)) < 1e-7,
+			"%v: a soft face's texel is %v",
+			level,
+			soft.texel,
+		)
+		testing.expectf(
+			t,
+			abs(hard.texel - 2 / f32(p.slot)) < 1e-7,
+			"%v: a hard face's texel is %v",
+			level,
+			hard.texel,
+		)
 		// A point 45 degrees off the +x face's axis is on its 90 degrees' edge, guard texels inside the slot's.
 		m := sf.matrices[lf.records[0].shadow]
 		clip := m * [4]f32{2, 1, 3, 1}
 		edge := (1 - clip.y / clip.w) * 0.5 * f32(p.slot)
-		testing.expectf(t, abs(edge - f32(guard)) < 1e-2, "%v: the face's edge is %v texels in", level, edge)
+		testing.expectf(
+			t,
+			abs(edge - f32(guard)) < 1e-2,
+			"%v: the face's edge is %v texels in",
+			level,
+			edge,
+		)
 	}
 }
 
@@ -329,13 +425,22 @@ traced_soft_lights_take_soft_channels_whose_history_follows_them :: proc(t: ^tes
 	w := &f.world
 
 	sun := spawn_light(w, {}, 1, Directional_Light{intensity = 1, cast_shadows = true})
-	soft := spawn_light(w, {1, 0, 3}, 1, Point_Light{intensity = 4, source_radius = 0.1, cast_shadows = true})
+	soft := spawn_light(
+		w,
+		{1, 0, 3},
+		1,
+		Point_Light{intensity = 4, source_radius = 0.1, cast_shadows = true},
+	)
 	quad := spawn_light(w, {-1, 0, 3}, 1, Quad_Light{intensity = 2, cast_shadows = true})
 	frame := &f.frame
 	frame.lights = extract_lights(frame, w, nil)
 	lf := frame.lights
 	testing.expect_value(t, lf.entities[0], sun)
-	frame.shadow_settings = {distance = SHADOW_DISTANCE, split_lambda = SHADOW_SPLIT_LAMBDA, level = .High}
+	frame.shadow_settings = {
+		distance     = SHADOW_DISTANCE,
+		split_lambda = SHADOW_SPLIT_LAMBDA,
+		level        = .High,
+	}
 	assign_shadow_views(frame, trace = true)
 	sf := frame.shadows
 	// The sun has no size, so its channel is hard; the point light and the quad light have sizes.
@@ -345,10 +450,22 @@ traced_soft_lights_take_soft_channels_whose_history_follows_them :: proc(t: ^tes
 	testing.expect_value(t, lf.entities[sf.mask_lights[2]], quad)
 
 	// A channel takes the history of last frame's channel that held its light, and starts again otherwise.
-	previous := Mask_History{lights = {quad, soft, {}, {}}}
-	current := Mask_History{lights = {soft, {}, quad, sun}}
-	testing.expect_value(t, mask_history_channels(previous, current), [4]u32{1, max(u32), 0, max(u32)})
-	testing.expect_value(t, mask_history_channels({}, current), [4]u32{max(u32), max(u32), max(u32), max(u32)})
+	previous := Mask_History {
+		lights = {quad, soft, {}, {}},
+	}
+	current := Mask_History {
+		lights = {soft, {}, quad, sun},
+	}
+	testing.expect_value(
+		t,
+		mask_history_channels(previous, current),
+		[4]u32{1, max(u32), 0, max(u32)},
+	)
+	testing.expect_value(
+		t,
+		mask_history_channels({}, current),
+		[4]u32{max(u32), max(u32), max(u32), max(u32)},
+	)
 }
 
 @(test)
@@ -360,7 +477,19 @@ area_lights_record_their_shapes :: proc(t: ^testing.T) {
 
 	// Turned a quarter about y: +x goes to -z, +y stays, and +z goes to +x.
 	turn := linalg.quaternion_angle_axis_f32(math.PI / 2, {0, 1, 0})
-	spawn_light(w, {0, 0, 4}, turn, Quad_Light{intensity = 2, width = 2, height = 1, range = 5, two_sided = true, cast_shadows = true})
+	spawn_light(
+		w,
+		{0, 0, 4},
+		turn,
+		Quad_Light {
+			intensity = 2,
+			width = 2,
+			height = 1,
+			range = 5,
+			two_sided = true,
+			cast_shadows = true,
+		},
+	)
 	spawn_light(w, {1, 0, 4}, 1, Disk_Light{intensity = 1, height = 3})
 	spawn_light(w, {-1, 0, 4}, 1, Line_Light{intensity = 1, length = 4, radius = 0.25})
 	hidden := spawn_light(w, {0, 0, 4}, 1, Quad_Light{intensity = 1})
@@ -379,9 +508,17 @@ area_lights_record_their_shapes :: proc(t: ^testing.T) {
 	testing.expect_value(t, quad.type, Light_Type.Quad)
 	testing.expect(t, near(quad.position, {0, 0, 4}), "an area light's position is its middle")
 	testing.expect(t, near(quad.direction, {1, 0, 0}), "a quad shines along its +z")
-	testing.expect(t, near(quad.extent, {0, 0, -1}), "a quad's extent is its half width along its +x")
+	testing.expect(
+		t,
+		near(quad.extent, {0, 0, -1}),
+		"a quad's extent is its half width along its +x",
+	)
 	testing.expect_value(t, quad.extent_y, 0.5)
-	testing.expect(t, near(linalg.cross(quad.direction, linalg.normalize(quad.extent)), {0, 1, 0}), "a quad's height is along its +y")
+	testing.expect(
+		t,
+		near(linalg.cross(quad.direction, linalg.normalize(quad.extent)), {0, 1, 0}),
+		"a quad's height is along its +y",
+	)
 	testing.expect_value(t, quad.flags, bit_set[Light_Flag;u32]{.Two_Sided})
 	// The range reaches past the corners, so the clusters' spheres hold the whole quad.
 	testing.expect(t, abs(quad.range - (5 + math.sqrt(f32(1.25)))) < 1e-5)
@@ -397,7 +534,11 @@ area_lights_record_their_shapes :: proc(t: ^testing.T) {
 
 	line := lf.records[2]
 	testing.expect_value(t, line.type, Light_Type.Line)
-	testing.expect(t, near(line.extent, {2, 0, 0}), "a line's extent is its half length along its +x")
+	testing.expect(
+		t,
+		near(line.extent, {2, 0, 0}),
+		"a line's extent is its half length along its +x",
+	)
 	testing.expect_value(t, line.extent_y, 0.25)
 	testing.expect_value(t, line.range, DEFAULT_LIGHT_RANGE + 2.25)
 
@@ -431,7 +572,10 @@ lights_record_their_sizes :: proc(t: ^testing.T) {
 		return abs(a - b) < 1e-6
 	}
 	// The sun's disk is about 4.6 mm wide 1 m away.
-	testing.expect(t, close(light_size(lf.records[0]), math.tan(math.to_radians(f32(DEFAULT_SUN_DISC)) / 2)))
+	testing.expect(
+		t,
+		close(light_size(lf.records[0]), math.tan(math.to_radians(f32(DEFAULT_SUN_DISC)) / 2)),
+	)
 	// The point lights come before the spot lights.
 	testing.expect(t, close(light_size(lf.records[1]), 0.1))
 	testing.expect_value(t, light_size(lf.records[2]), 0)

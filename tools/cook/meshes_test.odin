@@ -63,7 +63,10 @@ test_gltf :: proc(wedge_name := "Wedge") -> string {
 
 @(private)
 read_meta :: proc(t: ^testing.T, tree: Tree, path: string) -> format.Meta {
-	text, err := os.read_entire_file(fmt.tprintf("%s/content/%s.meta", tree.dir, path), context.temp_allocator)
+	text, err := os.read_entire_file(
+		fmt.tprintf("%s/content/%s.meta", tree.dir, path),
+		context.temp_allocator,
+	)
 	testing.expect(t, err == nil)
 	meta, ok := format.meta_parse(string(text), context.temp_allocator)
 	testing.expect(t, ok)
@@ -71,7 +74,15 @@ read_meta :: proc(t: ^testing.T, tree: Tree, path: string) -> format.Meta {
 }
 
 @(private)
-mesh_blob :: proc(t: ^testing.T, tree: Tree, guid: format.Guid) -> (data: []byte, blob: ^format.Mesh_Blob, ok: bool) {
+mesh_blob :: proc(
+	t: ^testing.T,
+	tree: Tree,
+	guid: format.Guid,
+) -> (
+	data: []byte,
+	blob: ^format.Mesh_Blob,
+	ok: bool,
+) {
 	data = tree_blob(t, tree, guid)
 	blob, ok = format.mesh_view(data)
 	testing.expect(t, ok, "a mesh did not cook into a mesh blob")
@@ -124,7 +135,13 @@ each_gltf_mesh_is_a_subasset_in_its_own_space :: proc(t: ^testing.T) {
 
 @(test)
 combine_bakes_the_scene_into_one_mesh :: proc(t: ^testing.T) {
-	tree := make_tree(t, {{"content/kit.gltf", test_gltf()}, {"content/kit.gltf.meta", "guid = 00112233445566778899aabbccddeeff\ncombine = true\n"}})
+	tree := make_tree(
+		t,
+		{
+			{"content/kit.gltf", test_gltf()},
+			{"content/kit.gltf.meta", "guid = 00112233445566778899aabbccddeeff\ncombine = true\n"},
+		},
+	)
 	defer remove_tree(tree)
 	testing.expect(t, cook(tree_options(tree), {.Model}).ok)
 	meta := read_meta(t, tree, "kit.gltf")
@@ -151,7 +168,14 @@ a_renamed_mesh_gets_a_new_guid_and_reimport_forgets_the_old :: proc(t: ^testing.
 	errors: Errors
 	context.logger = capture_errors(&errors)
 	defer release_errors(&errors)
-	testing.expect(t, os.write_entire_file(fmt.tprintf("%s/content/kit.gltf", tree.dir), transmute([]byte)test_gltf("Ramp")) == nil)
+	testing.expect(
+		t,
+		os.write_entire_file(
+			fmt.tprintf("%s/content/kit.gltf", tree.dir),
+			transmute([]byte)test_gltf("Ramp"),
+		) ==
+		nil,
+	)
 	pass := cook(options, {.Model})
 	testing.expect(t, pass.ok)
 	meta := read_meta(t, tree, "kit.gltf")
@@ -169,7 +193,11 @@ a_renamed_mesh_gets_a_new_guid_and_reimport_forgets_the_old :: proc(t: ^testing.
 	force := make(map[format.Guid]bool, context.temp_allocator)
 	force[meta.guid] = true
 	testing.expect(t, cook(options, {.Model}, force = force).ok)
-	_, still_there := format.meta_subasset(read_meta(t, tree, "kit.gltf"), format.MESH_KIND, "Wedge")
+	_, still_there := format.meta_subasset(
+		read_meta(t, tree, "kit.gltf"),
+		format.MESH_KIND,
+		"Wedge",
+	)
 	testing.expect(t, !still_there)
 }
 
@@ -221,8 +249,15 @@ grid_gltf :: proc(size: int, normals := false) -> string {
 	if normals {
 		up := make([][3]f32, len(positions), context.temp_allocator)
 		slice.fill(up, [3]f32{0, 0, 1})
-		normal_view = fmt.tprintf(`, {{"buffer": 0, "byteOffset": %d, "byteLength": %d}}`, len(buffer), position_bytes)
-		normal_accessor = fmt.tprintf(`, {{"bufferView": 2, "componentType": 5126, "count": %d, "type": "VEC3"}}`, len(positions))
+		normal_view = fmt.tprintf(
+			`, {{"buffer": 0, "byteOffset": %d, "byteLength": %d}}`,
+			len(buffer),
+			position_bytes,
+		)
+		normal_accessor = fmt.tprintf(
+			`, {{"bufferView": 2, "componentType": 5126, "count": %d, "type": "VEC3"}}`,
+			len(positions),
+		)
 		normal_attribute = `, "NORMAL": 2`
 		append(&buffer, ..mem.slice_to_bytes(up))
 	}
@@ -271,14 +306,26 @@ Grid_Mesh :: struct {
 @(private = "file")
 cook_grid :: proc(t: ^testing.T, meta: string) -> (grid: Grid_Mesh, ok: bool) {
 	// The hierarchy's tests read the mesh's own streams, which a mesh with pages does not have (see mesh_pages_test.odin).
-	tree := make_tree(t, {{"content/grid.gltf", grid_gltf(48)}, {"content/grid.gltf.meta", strings.concatenate({meta, "pages = false\n"}, context.temp_allocator)}})
+	tree := make_tree(
+		t,
+		{
+			{"content/grid.gltf", grid_gltf(48)},
+			{
+				"content/grid.gltf.meta",
+				strings.concatenate({meta, "pages = false\n"}, context.temp_allocator),
+			},
+		},
+	)
 	defer remove_tree(tree)
 	testing.expect(t, cook(tree_options(tree), {.Model}).ok)
 	guid, found := format.meta_subasset(read_meta(t, tree, "grid.gltf"), format.MESH_KIND, "Grid")
 	testing.expect(t, found)
 	grid.data, grid.blob = mesh_blob(t, tree, guid) or_return
 	grid.meshlets = format.mesh_meshlets(grid.data, grid.blob)
-	grid.vertices = slice.reinterpret([]u32, format.blob_bytes(grid.data, grid.blob.meshlet_vertices))
+	grid.vertices = slice.reinterpret(
+		[]u32,
+		format.blob_bytes(grid.data, grid.blob.meshlet_vertices),
+	)
 	grid.triangles = format.blob_bytes(grid.data, grid.blob.meshlet_triangles)
 	grid.positions = slice.reinterpret([][3]f32, format.blob_bytes(grid.data, grid.blob.positions))
 	return grid, true
@@ -310,7 +357,15 @@ cluster_lod_builds_a_hierarchy_whose_every_cut_covers_the_mesh :: proc(t: ^testi
 
 	deepest := 0
 	for m, i in grid.meshlets {
-		testing.expectf(t, m.vertex_count <= format.MESHLET_MAX_VERTICES && m.triangle_count <= format.MESHLET_MAX_TRIANGLES, "meshlet %d has %d vertices and %d triangles", i, m.vertex_count, m.triangle_count)
+		testing.expectf(
+			t,
+			m.vertex_count <= format.MESHLET_MAX_VERTICES &&
+			m.triangle_count <= format.MESHLET_MAX_TRIANGLES,
+			"meshlet %d has %d vertices and %d triangles",
+			i,
+			m.vertex_count,
+			m.triangle_count,
+		)
 		for k in 0 ..< int(m.triangle_count) {
 			for corner in format.meshlet_triangle(m, grid.triangles, k) {
 				testing.expect(t, corner < u32(m.vertex_count))
@@ -322,12 +377,25 @@ cluster_lod_builds_a_hierarchy_whose_every_cut_covers_the_mesh :: proc(t: ^testi
 		for k in 0 ..< int(m.vertex_count) {
 			v := format.meshlet_vertex(m, grid.vertices, k)
 			testing.expect(t, v < grid.blob.vertex_count)
-			testing.expectf(t, linalg.distance(grid.positions[v], center) <= radius * (1 + 1e-5), "meshlet %d's sphere does not hold its vertex %d", i, k)
+			testing.expectf(
+				t,
+				linalg.distance(grid.positions[v], center) <= radius * (1 + 1e-5),
+				"meshlet %d's sphere does not hold its vertex %d",
+				i,
+				k,
+			)
 		}
 		// The submesh's own triangles have no error, and errors grow a level up, so each view draws one level of each
 		// part of the mesh.
 		testing.expect(t, m.depth != 0 || m.error == 0)
-		testing.expectf(t, m.error <= m.parent_error, "meshlet %d's error %v is over its parent's %v", i, m.error, m.parent_error)
+		testing.expectf(
+			t,
+			m.error <= m.parent_error,
+			"meshlet %d's error %v is over its parent's %v",
+			i,
+			m.error,
+			m.parent_error,
+		)
 		if i > 0 {
 			testing.expect(t, m.depth >= grid.meshlets[i - 1].depth)
 		}
@@ -352,7 +420,14 @@ cluster_lod_builds_a_hierarchy_whose_every_cut_covers_the_mesh :: proc(t: ^testi
 				triangles += int(m.triangle_count)
 			}
 		}
-		testing.expectf(t, abs(area - full) < full * 0.02, "the cut at %v has an area of %v, not %v", threshold, area, full)
+		testing.expectf(
+			t,
+			abs(area - full) < full * 0.02,
+			"the cut at %v has an area of %v, not %v",
+			threshold,
+			area,
+			full,
+		)
 		testing.expect(t, triangles > 0)
 	}
 }
@@ -377,7 +452,14 @@ meshlet_nodes_lead_to_every_meshlet_of_each_cut :: proc(t: ^testing.T) {
 
 	// Each meshlet is under one leaf, of its own level's tree, whose bounds are its group's.
 	leaves := make([]int, len(meshlets), context.temp_allocator)
-	visit :: proc(t: ^testing.T, nodes: []format.Meshlet_Node, meshlets: []format.Meshlet, leaves: []int, level: u8, i: u32) {
+	visit :: proc(
+		t: ^testing.T,
+		nodes: []format.Meshlet_Node,
+		meshlets: []format.Meshlet,
+		leaves: []int,
+		level: u8,
+		i: u32,
+	) {
 		n := nodes[i]
 		count := n.count & ~format.MESHLET_NODE_LEAF
 		testing.expect(t, count > 0)
@@ -385,13 +467,30 @@ meshlet_nodes_lead_to_every_meshlet_of_each_cut :: proc(t: ^testing.T) {
 			for m, k in meshlets[n.first:][:count] {
 				leaves[int(n.first) + k] += 1
 				testing.expect_value(t, m.depth, level)
-				testing.expect(t, m.parent_center == n.center && m.parent_radius == n.radius && m.parent_error == n.error)
+				testing.expect(
+					t,
+					m.parent_center == n.center &&
+					m.parent_radius == n.radius &&
+					m.parent_error == n.error,
+				)
 			}
 			return
 		}
 		for c in nodes[n.first:][:count] {
-			testing.expectf(t, c.error <= n.error, "node %d's error %v is under its child's %v", i, n.error, c.error)
-			testing.expectf(t, linalg.distance(c.center, n.center) + c.radius <= n.radius * (1 + 1e-6), "node %d does not hold its child", i)
+			testing.expectf(
+				t,
+				c.error <= n.error,
+				"node %d's error %v is under its child's %v",
+				i,
+				n.error,
+				c.error,
+			)
+			testing.expectf(
+				t,
+				linalg.distance(c.center, n.center) + c.radius <= n.radius * (1 + 1e-6),
+				"node %d does not hold its child",
+				i,
+			)
 		}
 		for k in n.first ..< n.first + count {
 			visit(t, nodes, meshlets, leaves, level, k)
@@ -405,7 +504,13 @@ meshlet_nodes_lead_to_every_meshlet_of_each_cut :: proc(t: ^testing.T) {
 	}
 
 	// From near and far, at many levels of detail, the walk finds each meshlet that the view draws, and fewer than all.
-	walk :: proc(nodes: []format.Meshlet_Node, roots: u32, eye: [3]f32, lod_scale: f32, found: []bool) {
+	walk :: proc(
+		nodes: []format.Meshlet_Node,
+		roots: u32,
+		eye: [3]f32,
+		lod_scale: f32,
+		found: []bool,
+	) {
 		queue := make([dynamic]u32, context.temp_allocator)
 		for root in 0 ..< roots {
 			append(&queue, root)
@@ -434,14 +539,37 @@ meshlet_nodes_lead_to_every_meshlet_of_each_cut :: proc(t: ^testing.T) {
 			walk(nodes, s.root_count, eye, lod_scale, found)
 			candidates := 0
 			for m, i in meshlets {
-				drawn := projected_error(m.error_center, m.error_radius, m.error, eye, lod_scale) <= 1 && projected_error(m.parent_center, m.parent_radius, m.parent_error, eye, lod_scale) > 1
-				testing.expectf(t, !drawn || found[i], "from %v at %v, the walk misses meshlet %d", distance, lod_scale, i)
+				drawn :=
+					projected_error(m.error_center, m.error_radius, m.error, eye, lod_scale) <=
+						1 &&
+					projected_error(
+						m.parent_center,
+						m.parent_radius,
+						m.parent_error,
+						eye,
+						lod_scale,
+					) >
+						1
+				testing.expectf(
+					t,
+					!drawn || found[i],
+					"from %v at %v, the walk misses meshlet %d",
+					distance,
+					lod_scale,
+					i,
+				)
 				candidates += int(found[i])
 			}
 			fewest = min(fewest, candidates)
 		}
 	}
-	testing.expectf(t, fewest < len(meshlets) / 2, "the walk found at least %d of %d meshlets", fewest, len(meshlets))
+	testing.expectf(
+		t,
+		fewest < len(meshlets) / 2,
+		"the walk found at least %d of %d meshlets",
+		fewest,
+		len(meshlets),
+	)
 }
 
 @(test)
@@ -472,7 +600,13 @@ meshlets_take_less_than_their_wide_layout :: proc(t: ^testing.T) {
 		wide += 4 * int(m.vertex_count)
 	}
 	compact := int(grid.blob.meshlets.size) + int(grid.blob.meshlet_vertices.size)
-	testing.expectf(t, compact * 10 < wide * 7, "the records and vertices take %d bytes, against %d in the wide layout", compact, wide)
+	testing.expectf(
+		t,
+		compact * 10 < wide * 7,
+		"the records and vertices take %d bytes, against %d in the wide layout",
+		compact,
+		wide,
+	)
 }
 
 // A mesh over 16 bits of vertices gets them in the order that its meshlets use them, so nearly all of its meshlets still
@@ -480,7 +614,16 @@ meshlets_take_less_than_their_wide_layout :: proc(t: ^testing.T) {
 @(test)
 a_large_meshs_vertices_are_in_meshlet_order :: proc(t: ^testing.T) {
 	size := 260
-	tree := make_tree(t, {{"content/grid.gltf", grid_gltf(size)}, {"content/grid.gltf.meta", "guid = 00112233445566778899aabbccddeeff\ncluster_lod = false\n"}})
+	tree := make_tree(
+		t,
+		{
+			{"content/grid.gltf", grid_gltf(size)},
+			{
+				"content/grid.gltf.meta",
+				"guid = 00112233445566778899aabbccddeeff\ncluster_lod = false\n",
+			},
+		},
+	)
 	defer remove_tree(tree)
 	testing.expect(t, cook(tree_options(tree), {.Model}).ok)
 	guid, found := format.meta_subasset(read_meta(t, tree, "grid.gltf"), format.MESH_KIND, "Grid")
@@ -489,7 +632,12 @@ a_large_meshs_vertices_are_in_meshlet_order :: proc(t: ^testing.T) {
 	if !ok {
 		return
 	}
-	testing.expectf(t, blob.vertex_count > 65535, "the grid has only %d vertices", blob.vertex_count)
+	testing.expectf(
+		t,
+		blob.vertex_count > 65535,
+		"the grid has only %d vertices",
+		blob.vertex_count,
+	)
 	testing.expect(t, .Index32 in blob.flags)
 	meshlets := format.mesh_meshlets(data, blob)
 	stream := slice.reinterpret([]u32, format.blob_bytes(data, blob.meshlet_vertices))
@@ -508,11 +656,21 @@ a_large_meshs_vertices_are_in_meshlet_order :: proc(t: ^testing.T) {
 		long += m.short_refs == 0 ? 1 : 0
 		for k in 0 ..< int(m.triangle_count) {
 			local := format.meshlet_triangle(m, triangles, k)
-			corner := [3]u32{format.meshlet_vertex(m, stream, int(local[0])), format.meshlet_vertex(m, stream, int(local[1])), format.meshlet_vertex(m, stream, int(local[2]))}
+			corner := [3]u32 {
+				format.meshlet_vertex(m, stream, int(local[0])),
+				format.meshlet_vertex(m, stream, int(local[1])),
+				format.meshlet_vertex(m, stream, int(local[2])),
+			}
 			drawn[sorted(corner.x, corner.y, corner.z)] += 1
 		}
 	}
-	testing.expectf(t, long * 10 < len(meshlets), "%d of %d meshlets have long refs", long, len(meshlets))
+	testing.expectf(
+		t,
+		long * 10 < len(meshlets),
+		"%d of %d meshlets have long refs",
+		long,
+		len(meshlets),
+	)
 
 	// A renumbering that left the positions behind would stretch triangles across the grid.
 	quad := 1 / f32(size)
@@ -522,7 +680,12 @@ a_large_meshs_vertices_are_in_meshlet_order :: proc(t: ^testing.T) {
 		testing.expect(t, drawn[key] > 0)
 		drawn[key] -= 1
 		a, b, c := positions[indices[i]], positions[indices[i + 1]], positions[indices[i + 2]]
-		testing.expect(t, linalg.distance(a, b) < 2 * quad && linalg.distance(b, c) < 2 * quad && linalg.distance(c, a) < 2 * quad)
+		testing.expect(
+			t,
+			linalg.distance(a, b) < 2 * quad &&
+			linalg.distance(b, c) < 2 * quad &&
+			linalg.distance(c, a) < 2 * quad,
+		)
 		area += linalg.length(linalg.cross(b - a, c - a)) / 2
 	}
 	testing.expectf(t, abs(area - 1) < 0.05, "the grid's area is %v", area)

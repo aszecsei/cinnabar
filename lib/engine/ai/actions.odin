@@ -70,9 +70,18 @@ register_action :: proc(s: ^State, action: Native_Action) {
 	case s.native_count == MAX_NATIVE_ACTIONS:
 		log.errorf("ai: more than %d native actions", MAX_NATIVE_ACTIONS)
 	case a.state_size > MAX_ACTION_STATE:
-		log.errorf("ai: the native action %s keeps %d bytes, more than %d", a.name, a.state_size, MAX_ACTION_STATE)
+		log.errorf(
+			"ai: the native action %s keeps %d bytes, more than %d",
+			a.name,
+			a.state_size,
+			MAX_ACTION_STATE,
+		)
 	case len(a.params) > MAX_ACTION_PARAMS:
-		log.errorf("ai: the native action %s has more than %d parameters", a.name, MAX_ACTION_PARAMS)
+		log.errorf(
+			"ai: the native action %s has more than %d parameters",
+			a.name,
+			MAX_ACTION_PARAMS,
+		)
 	case find_native(s, a.hash) != nil:
 		log.errorf("ai: another native action has the name %s, or its hash", a.name)
 	case:
@@ -141,12 +150,22 @@ get_hashed :: proc(a: ^Action_Context, hash: u32) -> (Value, bool) {
 // vector constant for a position, in meters.
 @(private)
 convertible :: proc(from, to: format.Blackboard_Type, constant: bool) -> bool {
-	return from == to || (from == .Float && to == .Int) || (from == .Int && to == .Float) || (constant && from == .Vector && to == .Position)
+	return(
+		from == to ||
+		(from == .Float && to == .Int) ||
+		(from == .Int && to == .Float) ||
+		(constant && from == .Vector && to == .Position) \
+	)
 }
 
 // convert gives an argument's bytes as a parameter's type.
 @(private)
-convert :: proc(from, to: format.Blackboard_Type, value: [format.BLACKBOARD_VALUE_SIZE]byte) -> (result: [format.BLACKBOARD_VALUE_SIZE]byte) {
+convert :: proc(
+	from, to: format.Blackboard_Type,
+	value: [format.BLACKBOARD_VALUE_SIZE]byte,
+) -> (
+	result: [format.BLACKBOARD_VALUE_SIZE]byte,
+) {
 	value := value
 	switch {
 	case from == .Float && to == .Int:
@@ -163,7 +182,16 @@ convert :: proc(from, to: format.Blackboard_Type, value: [format.BLACKBOARD_VALU
 
 // arg_value is an action reference's argument's value now: a constant, a key's value, or the agent.
 @(private)
-arg_value :: proc(decision: Decision, board: Board, values: []byte, e: ecs.Entity, a: format.Decision_Arg) -> (bytes: [format.BLACKBOARD_VALUE_SIZE]byte, text: string) {
+arg_value :: proc(
+	decision: Decision,
+	board: Board,
+	values: []byte,
+	e: ecs.Entity,
+	a: format.Decision_Arg,
+) -> (
+	bytes: [format.BLACKBOARD_VALUE_SIZE]byte,
+	text: string,
+) {
 	switch a.source {
 	case .Constant:
 		c := format.decision_constants(decision.data, decision.blob)[a.index]
@@ -191,7 +219,11 @@ check_actions :: proc(s: ^State, decision: Decision) {
 		native := find_native(s, a.hash)
 		if native == nil {
 			if s.scripts == nil || !script.action_defined(s.scripts, name) {
-				log.warnf("ai: %s starts the action %s, which no native action or script defines, so it fails", path, name)
+				log.warnf(
+					"ai: %s starts the action %s, which no native action or script defines, so it fails",
+					path,
+					name,
+				)
 			}
 			continue
 		}
@@ -204,9 +236,21 @@ check_actions :: proc(s: ^State, decision: Decision) {
 				}
 			}
 			if p, has := param.?; !has {
-				log.warnf("ai: %s gives the action %s the argument %s, which it has no parameter for", path, name, arg_name)
+				log.warnf(
+					"ai: %s gives the action %s the argument %s, which it has no parameter for",
+					path,
+					name,
+					arg_name,
+				)
 			} else if !convertible(arg.type, p.type, arg.source == .Constant) {
-				log.warnf("ai: %s gives the action %s's parameter %s a %v, and it takes a %v", path, name, arg_name, arg.type, p.type)
+				log.warnf(
+					"ai: %s gives the action %s's parameter %s a %v, and it takes a %v",
+					path,
+					name,
+					arg_name,
+					arg.type,
+					p.type,
+				)
 			}
 		}
 	}
@@ -215,7 +259,15 @@ check_actions :: proc(s: ^State, decision: Decision) {
 // native_args are a native action's arguments for its start, for each of its parameters that the reference gives,
 // as the parameter's type.
 @(private)
-native_args :: proc(native: ^Native_Action, decision: Decision, board: Board, values: []byte, e: ecs.Entity, a: format.Decision_Action, allocator := context.allocator) -> []Arg {
+native_args :: proc(
+	native: ^Native_Action,
+	decision: Decision,
+	board: Board,
+	values: []byte,
+	e: ecs.Entity,
+	a: format.Decision_Action,
+	allocator := context.allocator,
+) -> []Arg {
 	result := make([dynamic]Arg, 0, len(native.params), allocator)
 	args := format.decision_args(decision.data, decision.blob)[a.first_arg:][:a.arg_count]
 	for p in native.params {
@@ -223,7 +275,15 @@ native_args :: proc(native: ^Native_Action, decision: Decision, board: Board, va
 		for x in args {
 			if x.hash == hash && convertible(x.type, p.type, x.source == .Constant) {
 				bytes, text := arg_value(decision, board, values, e, x)
-				append(&result, Arg{hash = hash, type = p.type, value = convert(x.type, p.type, bytes), text = text})
+				append(
+					&result,
+					Arg {
+						hash = hash,
+						type = p.type,
+						value = convert(x.type, p.type, bytes),
+						text = text,
+					},
+				)
 			}
 		}
 	}
@@ -276,11 +336,22 @@ run_native :: proc(s: ^State, ctx: ^ecs.System_Context, slot: ^Agent_Slot, ready
 			ready.action = Action_Done{p.ref, .Failed}
 			return
 		}
-		ready.action = Native_Running{ref = p.ref, hash = ref.hash}
+		ready.action = Native_Running {
+			ref  = p.ref,
+			hash = ref.hash,
+		}
 		running := &ready.action.(Native_Running)
 		a.state = running.memory[:native.state_size]
 		a.data = native.data
-		a.args = native_args(native, decision, board, ready.values, slot.entity, ref, ctx.world.platform.frame_allocator)
+		a.args = native_args(
+			native,
+			decision,
+			board,
+			ready.values,
+			slot.entity,
+			ref,
+			ctx.world.platform.frame_allocator,
+		)
 		if native.start != nil {
 			native.start(&a)
 		}
@@ -344,7 +415,9 @@ run_script_actions :: proc(r: ^script.Runtime, data: rawptr) {
 	for &slot in s.agents.slots {
 		// An agent that a script despawned in this step keeps its slot until the next think, but does not act.
 		ready, ok := &slot.phase.(Agent_Ready)
-		if !ok || !ecs.is_alive(s.world, slot.entity) || ecs.has(s.world, slot.entity, ecs.Inactive) {
+		if !ok ||
+		   !ecs.is_alive(s.world, slot.entity) ||
+		   ecs.has(s.world, slot.entity, ecs.Inactive) {
 			continue
 		}
 		#partial switch p in ready.action {
@@ -355,8 +428,20 @@ run_script_actions :: proc(r: ^script.Runtime, data: rawptr) {
 				continue
 			}
 			ref := format.decision_actions(decision.data, decision.blob)[p.ref]
-			args := script_args(decision, board, ready.values, slot.entity, ref, s.platform.frame_allocator)
-			handle, status := script.start_action(r, format.blob_string(decision.data, ref.name), slot.entity, args)
+			args := script_args(
+				decision,
+				board,
+				ready.values,
+				slot.entity,
+				ref,
+				s.platform.frame_allocator,
+			)
+			handle, status := script.start_action(
+				r,
+				format.blob_string(decision.data, ref.name),
+				slot.entity,
+				args,
+			)
 			if status != .Running {
 				ready.action = Action_Done{p.ref, .Failed}
 				continue
@@ -378,7 +463,14 @@ run_script_actions :: proc(r: ^script.Runtime, data: rawptr) {
 // script_args are a script action's arguments, as Luau takes them: a number for a float or an int, an enum's name, and
 // the rest as they are.
 @(private)
-script_args :: proc(decision: Decision, board: Board, values: []byte, e: ecs.Entity, a: format.Decision_Action, allocator := context.allocator) -> []script.Action_Arg {
+script_args :: proc(
+	decision: Decision,
+	board: Board,
+	values: []byte,
+	e: ecs.Entity,
+	a: format.Decision_Action,
+	allocator := context.allocator,
+) -> []script.Action_Arg {
 	args := format.decision_args(decision.data, decision.blob)[a.first_arg:][:a.arg_count]
 	result := make([]script.Action_Arg, len(args), allocator)
 	for x, i in args {

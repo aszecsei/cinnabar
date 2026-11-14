@@ -83,7 +83,13 @@ draw_mesh :: proc(m: ^Mesh_View, d: ^debug.Draw) {
 				line(d, m, a, b, wall)
 				for l in m.links[polygon.first_link:][:polygon.link_count] {
 					if int(l.edge) == k {
-						line(d, m, math.lerp(a, b, f32(l.t_min) / 255), math.lerp(a, b, f32(l.t_max) / 255), LINK_COLOR)
+						line(
+							d,
+							m,
+							math.lerp(a, b, f32(l.t_min) / 255),
+							math.lerp(a, b, f32(l.t_max) / 255),
+							LINK_COLOR,
+						)
 					}
 				}
 			}
@@ -112,8 +118,18 @@ draw_corners :: proc(d: ^debug.Draw, corners: []ecs.World_Position, color: [4]f3
 		if i > 0 {
 			debug.line(d, corners[i - 1], c, color)
 		}
-		debug.line(d, ecs.position_offset(c, {-MARK, 0, 0}), ecs.position_offset(c, {MARK, 0, 0}), color)
-		debug.line(d, ecs.position_offset(c, {0, 0, -MARK}), ecs.position_offset(c, {0, 0, MARK}), color)
+		debug.line(
+			d,
+			ecs.position_offset(c, {-MARK, 0, 0}),
+			ecs.position_offset(c, {MARK, 0, 0}),
+			color,
+		)
+		debug.line(
+			d,
+			ecs.position_offset(c, {0, 0, -MARK}),
+			ecs.position_offset(c, {0, 0, MARK}),
+			color,
+		)
 	}
 }
 
@@ -125,7 +141,13 @@ draw_path :: proc(s: ^State, w: ^ecs.World, d: ^debug.Draw, e: ecs.Entity, color
 // draw_agent draws an agent's last crowd tick: its corridor's polygons, the corners that it steers by, a line to each
 // neighbor that it avoids, and its desired and chosen velocities as arrows a second long, from at, where it is shown.
 // It returns false for an entity that is not an agent of the crowd.
-draw_agent :: proc(s: ^State, w: ^ecs.World, d: ^debug.Draw, e: ecs.Entity, at: ecs.World_Position) -> bool {
+draw_agent :: proc(
+	s: ^State,
+	w: ^ecs.World,
+	d: ^debug.Draw,
+	e: ecs.Entity,
+	at: ecs.World_Position,
+) -> bool {
 	info, m, corridor := crowd_debug(s, w, e)
 	if info == nil {
 		return false
@@ -135,7 +157,12 @@ draw_agent :: proc(s: ^State, w: ^ecs.World, d: ^debug.Draw, e: ecs.Entity, at: 
 		for polygon in corridor {
 			pts := points_of(m, polygon)
 			for k in 0 ..< pts.count {
-				debug.line(d, world(m, pts.points[k] + lift), world(m, pts.points[(k + 1) % pts.count] + lift), CORRIDOR_COLOR)
+				debug.line(
+					d,
+					world(m, pts.points[k] + lift),
+					world(m, pts.points[(k + 1) % pts.count] + lift),
+					CORRIDOR_COLOR,
+				)
 			}
 		}
 	}

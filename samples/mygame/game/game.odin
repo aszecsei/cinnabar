@@ -14,8 +14,8 @@ import "core:time"
 import "cinnabar:core"
 import "cinnabar:core/gpu"
 import "cinnabar:core/luau"
-import "cinnabar:engine/audio"
 import format "cinnabar:engine/asset/format"
+import "cinnabar:engine/audio"
 import "cinnabar:engine/debug"
 import "cinnabar:engine/ecs"
 import "cinnabar:engine/editor"
@@ -39,7 +39,9 @@ HELLO_META :: #load("../content/scripts/hello.luau.meta", string)
 MAIN_SCENE_META :: #load("../content/scenes/main.scene.meta", string)
 // The sample's scenes are 1.5e11 m from the origin, to test large worlds, so the physics world is anchored there: its
 // broad phase is f32, which would have a resolution of 16 km so far out (see docs/physics/design.md#positions-and-precision).
-PHYSICS_ANCHOR :: ecs.World_Position{raw = {2516582400000000000, 0, 0}}
+PHYSICS_ANCHOR :: ecs.World_Position {
+	raw = {2516582400000000000, 0, 0},
+}
 // The transparency scene, which F7 switches to and back (see docs/rendering/transparency.md#transparency).
 GLASS_SCENE_META :: #load("../content/scenes/glass.scene.meta", string)
 // The patch surfaces scene, a lake with an island (see docs/rendering/surfaces.md#surfaces).
@@ -205,38 +207,38 @@ Pass_Constants :: struct {
 // State is the sample's own state, which follows the standard game's (see game.user). The host owns its memory.
 State :: struct {
 	// F8 cycles the output mode for this run, until the settings' files change.
-	output_override:    Maybe(gpu.Output_Request),
+	output_override: Maybe(gpu.Output_Request),
 	// F7 cycles the main scene, the glass scene, the surfaces scene, the room scene, the billboards scene, the animation
 	// scene, the cube map scene, the audio scene, the 2D scene and the others after them (see switch_scene).
-	scene_index:        u8,
-	next_report:        time.Duration,
-	pipelines:          Pipelines,
-	vertices:           gpu.Buffer,
-	indices:            gpu.Buffer,
-	shadow_mode:        Shadow_Mode,
+	scene_index:     u8,
+	next_report:     time.Duration,
+	pipelines:       Pipelines,
+	vertices:        gpu.Buffer,
+	indices:         gpu.Buffer,
+	shadow_mode:     Shadow_Mode,
 	// The triangle, built once, and the two large triangles as its instances, built every frame.
-	blas:               gpu.Accel_Struct,
-	tlas:               gpu.Accel_Struct,
-	blas_built:         bool,
-	checker:            gpu.Texture,
-	rings:              gpu.Texture,
+	blas:            gpu.Accel_Struct,
+	tlas:            gpu.Accel_Struct,
+	blas_built:      bool,
+	checker:         gpu.Texture,
+	rings:           gpu.Texture,
 	// Zero until the rings are streamed, and rings_ready once the transfer is done.
-	rings_transfer:     gpu.Transfer,
-	rings_ready:        bool,
-	nearest:            gpu.Sampler,
+	rings_transfer:  gpu.Transfer,
+	rings_ready:     bool,
+	nearest:         gpu.Sampler,
 	// A registration, created again in on_reload.
-	triangles:          render.Extractor,
+	triangles:       render.Extractor,
 	// content/scripts/hello.luau, which the scheduler runs.
-	hello:              script.Main_Script,
+	hello:           script.Main_Script,
 }
 
 Pipelines :: struct {
-	scene:     render.Shader_Pipeline,
+	scene:   render.Shader_Pipeline,
 	// A compute pipeline when shadow_mode is Inline, a ray tracing pipeline when it is Pipeline, and not created
 	// otherwise.
-	shadows:   render.Shader_Pipeline,
-	post:      render.Shader_Pipeline,
-	lens:      render.Shader_Pipeline,
+	shadows: render.Shader_Pipeline,
+	post:    render.Shader_Pipeline,
+	lens:    render.Shader_Pipeline,
 }
 
 // Frame is what the pass procedures need for one view of the frame. The renderer runs the hooks once for each view, with
@@ -311,8 +313,14 @@ init :: proc(g: ^game.Game) {
 	}
 	// Buffer sizes are multiples of 4, so the three u16 indices have one u16 of padding.
 	indices := [4]u16{0, 1, 2, 0}
-	s.vertices = platform.gpu_create_buffer({size = size_of(vertices), label = "triangle vertices"}, gpu_bytes(&vertices))
-	s.indices = platform.gpu_create_buffer({size = size_of(indices), usage = {.Index}, label = "triangle indices"}, gpu_bytes(&indices))
+	s.vertices = platform.gpu_create_buffer(
+		{size = size_of(vertices), label = "triangle vertices"},
+		gpu_bytes(&vertices),
+	)
+	s.indices = platform.gpu_create_buffer(
+		{size = size_of(indices), usage = {.Index}, label = "triangle indices"},
+		gpu_bytes(&indices),
+	)
 
 	checker: [CHECKER_SIZE * CHECKER_SIZE][4]u8
 	for &texel, i in checker {
@@ -324,7 +332,13 @@ init :: proc(g: ^game.Game) {
 		gpu_bytes(&checker),
 	)
 	s.rings = platform.gpu_create_texture(
-		{size = RINGS_SIZE, format = .RGBA8_Unorm_Srgb, mip_count = RINGS_MIPS, usage = {.Sampled, .Streamed}, label = "rings"},
+		{
+			size = RINGS_SIZE,
+			format = .RGBA8_Unorm_Srgb,
+			mip_count = RINGS_MIPS,
+			usage = {.Sampled, .Streamed},
+			label = "rings",
+		},
 		nil,
 	)
 	s.nearest = platform.gpu_create_sampler({label = "nearest"})
@@ -347,12 +361,18 @@ init :: proc(g: ^game.Game) {
 			index_format  = .U16,
 			opaque        = true,
 		}
-		s.blas = platform.gpu_create_accel({kind = .Bottom, geometries = {triangle}, label = "triangle"})
-		s.tlas = platform.gpu_create_accel({kind = .Top, max_instances = MAX_TRIANGLES, label = "scene"})
+		s.blas = platform.gpu_create_accel(
+			{kind = .Bottom, geometries = {triangle}, label = "triangle"},
+		)
+		s.tlas = platform.gpu_create_accel(
+			{kind = .Top, max_instances = MAX_TRIANGLES, label = "scene"},
+		)
 	}
 	s.pipelines = {
 		scene   = render.shader_pipeline(TRIANGLE_SHADER),
-		shadows = render.shader_pipeline(s.shadow_mode == .Pipeline ? SHADOWS_RT_SHADER : SHADOWS_SHADER),
+		shadows = render.shader_pipeline(
+			s.shadow_mode == .Pipeline ? SHADOWS_RT_SHADER : SHADOWS_SHADER,
+		),
 		post    = render.shader_pipeline(POST_SHADER),
 		lens    = render.shader_pipeline(LENS_SHADER),
 	}
@@ -373,7 +393,14 @@ register_components :: proc(r: ^ecs.Registry) {
 // register adds the sample's lens to the post-processing, before tone mapping, where a volume with a Lens reaches the
 // camera, and describes its editor commands. init and on_reload call it after the renderer's and the editor's.
 register :: proc(g: ^game.Game) {
-	render.register_post_effect(&g.renderer, &g.world, "lens", .Before_Tone_Mapping, Lens, add_lens)
+	render.register_post_effect(
+		&g.renderer,
+		&g.world,
+		"lens",
+		.Before_Tone_Mapping,
+		Lens,
+		add_lens,
+	)
 	register_editor_commands(g)
 }
 
@@ -399,7 +426,10 @@ add_lens :: proc(f: ^render.Frame, settings: rawptr) {
 		lens   = (^Lens)(settings)^,
 		size   = f.scene_size,
 		input  = f.scene,
-		output = render.create_texture(g, {size = f.scene_size, format = render.SCENE_FORMAT, label = "lens"}),
+		output = render.create_texture(
+			g,
+			{size = f.scene_size, format = render.SCENE_FORMAT, label = "lens"},
+		),
 	}
 	p := render.add_compute_pass(g, "lens", run_lens, pass)
 	render.read(g, p, pass.input)
@@ -426,7 +456,15 @@ run_lens :: proc(ctx: ^render.Pass_Context) {
 // register_world makes the sample's registrations in the world: its system and its query.
 register_world :: proc(g: ^game.Game) {
 	w, s := &g.world, state_of(g)
-	ecs.register_system(w, {name = "spin", stage = .Fixed, procedure = spin, terms = {ecs.write(w, ecs.Transform), ecs.read(w, Spin)}})
+	ecs.register_system(
+		w,
+		{
+			name = "spin",
+			stage = .Fixed,
+			procedure = spin,
+			terms = {ecs.write(w, ecs.Transform), ecs.read(w, Spin)},
+		},
+	)
 	s.triangles = render.extractor(w, {ecs.read(w, Triangle)})
 }
 
@@ -435,13 +473,13 @@ register_scripts :: proc(r: ^script.Runtime) {
 	script.expose(r, Spin)
 	script.expose(r, Triangle)
 	script.define(r, "Game.frame", proc(L: ^luau.State) -> c.int {
-		luau.pushnumber(L, f64(game.game_of(L).frame_count))
-		return 1
-	}, "() -> number")
+			luau.pushnumber(L, f64(game.game_of(L).frame_count))
+			return 1
+		}, "() -> number")
 	script.define(r, "Game.greeting", proc(L: ^luau.State) -> c.int {
-		luau.pushstring(L, "hello from Luau")
-		return 1
-	}, "() -> string")
+			luau.pushstring(L, "hello from Luau")
+			return 1
+		}, "() -> string")
 }
 
 spin :: proc(ctx: ^ecs.System_Context) {
@@ -467,7 +505,12 @@ update :: proc(g: ^game.Game, run: bool) {
 	s := state_of(g)
 	if g.elapsed >= s.next_report {
 		s.next_report += time.Second
-		title := fmt.aprintf("mygame | frame %d | %.1fs", g.frame_count, time.duration_seconds(g.elapsed), allocator = g.platform.frame_allocator)
+		title := fmt.aprintf(
+			"mygame | frame %d | %.1fs",
+			g.frame_count,
+			time.duration_seconds(g.elapsed),
+			allocator = g.platform.frame_allocator,
+		)
 		g.platform.set_window_title(title)
 	}
 
@@ -610,7 +653,10 @@ after_world :: proc(f: ^render.Frame) {
 				(^State)(data).blas_built = true
 			}, s)
 	}
-	frame.post = render.create_texture(g, {size = frame.size, format = render.SCENE_FORMAT, label = "post"})
+	frame.post = render.create_texture(
+		g,
+		{size = frame.size, format = render.SCENE_FORMAT, label = "post"},
+	)
 	p := render.add_compute_pass(g, "post", run_post, frame)
 	render.read(g, p, frame.scene)
 	render.write(g, p, frame.post)
@@ -631,7 +677,13 @@ extract_triangles :: proc(frame: ^Frame, hidden: []u32) {
 	if !ok || count == 0 {
 		return
 	}
-	chunks := render.extract(w, s.triangles, frame.view.position, triangles.data, size_of(Triangle_Instance))
+	chunks := render.extract(
+		w,
+		s.triangles,
+		frame.view.position,
+		triangles.data,
+		size_of(Triangle_Instance),
+	)
 	instances := ([^]Triangle_Instance)(raw_data(triangles.data))[:count]
 	// The others close up behind the hidden ones.
 	kept := 0
@@ -669,7 +721,10 @@ add_shadow_passes :: proc(g: ^render.Graph, frame: ^Frame) -> (building_blas: bo
 	}
 
 	count := min(frame.triangle_count, MAX_TRIANGLES)
-	instances, ok := frame.game.platform.gpu_upload(MAX_TRIANGLES * size_of(gpu.Accel_Instance), 16)
+	instances, ok := frame.game.platform.gpu_upload(
+		MAX_TRIANGLES * size_of(gpu.Accel_Instance),
+		16,
+	)
 	if !ok || count == 0 {
 		return
 	}
@@ -677,7 +732,12 @@ add_shadow_passes :: proc(g: ^render.Graph, frame: ^Frame) -> (building_blas: bo
 	triangles := ([^]Triangle_Instance)(raw_data(frame.triangles.data))[:count]
 	blas := frame.game.platform.gpu_accel_reference(s.blas)
 	for t, i in triangles {
-		records[i] = gpu.accel_instance(t.rows, blas, id = u32(i), flags = {.Cull_Disable, .Force_Opaque})
+		records[i] = gpu.accel_instance(
+			t.rows,
+			blas,
+			id = u32(i),
+			flags = {.Cull_Disable, .Force_Opaque},
+		)
 	}
 	frame.instances = instances
 
@@ -685,7 +745,10 @@ add_shadow_passes :: proc(g: ^render.Graph, frame: ^Frame) -> (building_blas: bo
 	render.build_input(g, p, frame.blas)
 	render.build_accel(g, p, frame.tlas)
 
-	frame.shadows = render.create_texture(g, {size = frame.size, format = .R16_Float, label = "shadows"})
+	frame.shadows = render.create_texture(
+		g,
+		{size = frame.size, format = .R16_Float, label = "shadows"},
+	)
 	if s.shadow_mode == .Pipeline {
 		p = render.add_ray_tracing_pass(g, "shadows", trace_shadows, frame)
 	} else {
@@ -705,7 +768,13 @@ build_tlas :: proc(ctx: ^render.Pass_Context) {
 	frame := (^Frame)(ctx.data)
 	upload := frame.instances
 	count := u32(min(frame.triangle_count, MAX_TRIANGLES))
-	gpu.cmd_build_top_accel(ctx.cb, render.gpu_accel(ctx.graph, frame.tlas), upload.buffer, upload.offset, count)
+	gpu.cmd_build_top_accel(
+		ctx.cb,
+		render.gpu_accel(ctx.graph, frame.tlas),
+		upload.buffer,
+		upload.offset,
+		count,
+	)
 }
 
 trace_shadows :: proc(ctx: ^render.Pass_Context) {
@@ -743,7 +812,8 @@ draw_scene :: proc(f: ^render.Frame, ctx: ^render.Pass_Context) {
 	}
 	if guid, guid_ok := format.meta_guid(TRIANGLE_TINTS_META); guid_ok {
 		if tints, ready := render.resident_texture(&f.renderer.residency, guid, .D2_Array); ready {
-			constants.tints, constants.tint_layers = gpu.read_index(tints.texture), tints.layer_count
+			constants.tints, constants.tint_layers =
+				gpu.read_index(tints.texture), tints.layer_count
 		}
 	}
 	gpu.cmd_set_pipeline(cb, frame.state.pipelines.scene.pipeline)
@@ -813,8 +883,36 @@ switch_scene :: proc(g: ^game.Game) {
 		return
 	}
 	s := state_of(g)
-	metas := [?]string{MAIN_SCENE_META, GLASS_SCENE_META, SURFACES_SCENE_META, ROOM_SCENE_META, BILLBOARDS_SCENE_META, ANIMATION_SCENE_META, CUBE_SKY_SCENE_META, AUDIO_SCENE_META, SPRITES_SCENE_META, PLAYGROUND_SCENE_META, DOORWAY_SCENE_META, GUARD_SCENE_META, SOFT_SHADOWS_SCENE_META}
-	names := [?]string{"main", "glass", "surfaces", "room", "billboards", "animation", "cube map", "audio", "2D", "playground", "doorway", "guard", "soft shadows"}
+	metas := [?]string {
+		MAIN_SCENE_META,
+		GLASS_SCENE_META,
+		SURFACES_SCENE_META,
+		ROOM_SCENE_META,
+		BILLBOARDS_SCENE_META,
+		ANIMATION_SCENE_META,
+		CUBE_SKY_SCENE_META,
+		AUDIO_SCENE_META,
+		SPRITES_SCENE_META,
+		PLAYGROUND_SCENE_META,
+		DOORWAY_SCENE_META,
+		GUARD_SCENE_META,
+		SOFT_SHADOWS_SCENE_META,
+	}
+	names := [?]string {
+		"main",
+		"glass",
+		"surfaces",
+		"room",
+		"billboards",
+		"animation",
+		"cube map",
+		"audio",
+		"2D",
+		"playground",
+		"doorway",
+		"guard",
+		"soft shadows",
+	}
 	s.scene_index = (s.scene_index + 1) % len(metas)
 	if guid, ok := format.meta_guid(metas[s.scene_index]); ok {
 		scene.load_asset(&g.world, &g.scripts, &g.assets, guid)
@@ -834,7 +932,14 @@ on_reload :: proc(g: ^game.Game) {
 sync_pipelines :: proc(g: ^game.Game, force := false) {
 	s := state_of(g)
 	p, platform, assets := &s.pipelines, g.platform, &g.assets
-	render.sync_graphics_pipeline(&p.scene, platform, assets, {.Vertex, .Pixel}, SCENE_PIPELINE, force)
+	render.sync_graphics_pipeline(
+		&p.scene,
+		platform,
+		assets,
+		{.Vertex, .Pixel},
+		SCENE_PIPELINE,
+		force,
+	)
 	render.sync_compute_pipeline(&p.post, platform, assets, POST_PIPELINE, force)
 	render.sync_compute_pipeline(&p.lens, platform, assets, LENS_PIPELINE, force)
 	switch s.shadow_mode {
@@ -857,7 +962,7 @@ SCENE_PIPELINE :: gpu.Graphics_Pipeline_Desc {
 }
 
 SHADOWS_PIPELINE :: gpu.Compute_Pipeline_Desc {
-	label   = "shadows",
+	label = "shadows",
 }
 
 SHADOWS_RT_PIPELINE :: gpu.Ray_Tracing_Pipeline_Desc {
@@ -869,11 +974,11 @@ SHADOWS_RT_PIPELINE :: gpu.Ray_Tracing_Pipeline_Desc {
 }
 
 POST_PIPELINE :: gpu.Compute_Pipeline_Desc {
-	label   = "post",
+	label = "post",
 }
 
 LENS_PIPELINE :: gpu.Compute_Pipeline_Desc {
-	label   = "lens",
+	label = "lens",
 }
 
 destroy_pipelines :: proc(platform: ^core.Platform_API, pipelines: ^Pipelines) {
@@ -890,35 +995,44 @@ gpu_bytes :: proc(data: ^$T) -> []byte {
 // register_editor_commands describes the game's commands, which the editor shows on its Game tab (see
 // docs/editor/shell-and-panels.md#commands). init and on_reload call it.
 register_editor_commands :: proc(g: ^game.Game) {
-	editor.register_command(&g.editor, {
-		id = "mygame.add_triangle",
-		label = "Add Triangle",
-		description = "Add a spinning triangle 2 m in front of the editor's camera.",
-		tab = "Game",
-		group = "Triangles",
-		icon = "add",
-		edits = true,
-		procedure = add_triangle,
-	})
-	editor.register_command(&g.editor, {
-		id = "mygame.reverse_spin",
-		label = "Reverse Spin",
-		description = "Turn the selected triangles the other way.",
-		tab = "Game",
-		group = "Triangles",
-		icon = "rotate",
-		edits = true,
-		procedure = reverse_spin,
-	})
-	editor.register_command(&g.editor, {
-		id = "mygame.world_report",
-		label = "World Report",
-		description = "Write the number of entities and triangles to the console.",
-		tab = "Game",
-		group = "Debug",
-		icon = "stats",
-		procedure = world_report,
-	})
+	editor.register_command(
+		&g.editor,
+		{
+			id = "mygame.add_triangle",
+			label = "Add Triangle",
+			description = "Add a spinning triangle 2 m in front of the editor's camera.",
+			tab = "Game",
+			group = "Triangles",
+			icon = "add",
+			edits = true,
+			procedure = add_triangle,
+		},
+	)
+	editor.register_command(
+		&g.editor,
+		{
+			id = "mygame.reverse_spin",
+			label = "Reverse Spin",
+			description = "Turn the selected triangles the other way.",
+			tab = "Game",
+			group = "Triangles",
+			icon = "rotate",
+			edits = true,
+			procedure = reverse_spin,
+		},
+	)
+	editor.register_command(
+		&g.editor,
+		{
+			id = "mygame.world_report",
+			label = "World Report",
+			description = "Write the number of entities and triangles to the console.",
+			tab = "Game",
+			group = "Debug",
+			icon = "stats",
+			procedure = world_report,
+		},
+	)
 }
 
 // add_triangle creates an entity with the triangle's components, as an operation, so the editor can undo it.
@@ -929,25 +1043,50 @@ add_triangle :: proc(ctx: ^editor.Command_Context) {
 	position := ecs.position_offset({c.position}, forward * 2)
 	id := editor.new_scene_id()
 	triangle := link.Scene_Entity {
-		id     = id,
-		name   = "Triangle",
-		active = true,
-		components = slice.clone([]link.Scene_Component{
-			{
-				id = u64(ecs.TRANSFORM_ID),
-				name = "Transform",
-				fields = slice.clone([]link.Scene_Field{
-					editor.scene_field("position", editor.scene_position(position)),
-					editor.scene_field("rotation", editor.scene_numbers(0, 0, 0, 1)),
-					editor.scene_field("scale", editor.scene_numbers(1, 1, 1)),
-				}),
+		id         = id,
+		name       = "Triangle",
+		active     = true,
+		components = slice.clone(
+			[]link.Scene_Component {
+				{
+					id = u64(ecs.TRANSFORM_ID),
+					name = "Transform",
+					fields = slice.clone(
+						[]link.Scene_Field {
+							editor.scene_field("position", editor.scene_position(position)),
+							editor.scene_field("rotation", editor.scene_numbers(0, 0, 0, 1)),
+							editor.scene_field("scale", editor.scene_numbers(1, 1, 1)),
+						},
+					),
+				},
+				{id = u64(ecs.PREVIOUS_TRANSFORM_ID), name = "Previous_Transform"},
+				{
+					id = u64(SPIN_ID),
+					name = "Spin",
+					fields = slice.clone(
+						[]link.Scene_Field{editor.scene_field("speed", editor.scene_numbers(1))},
+					),
+				},
+				{
+					id = u64(TRIANGLE_ID),
+					name = "Triangle",
+					fields = slice.clone(
+						[]link.Scene_Field {
+							editor.scene_field("brightness", editor.scene_numbers(2)),
+						},
+					),
+				},
 			},
-			{id = u64(ecs.PREVIOUS_TRANSFORM_ID), name = "Previous_Transform"},
-			{id = u64(SPIN_ID), name = "Spin", fields = slice.clone([]link.Scene_Field{editor.scene_field("speed", editor.scene_numbers(1))})},
-			{id = u64(TRIANGLE_ID), name = "Triangle", fields = slice.clone([]link.Scene_Field{editor.scene_field("brightness", editor.scene_numbers(2))})},
-		}),
+		),
 	}
-	append(&ctx.operations, link.Operation{kind = .Create_Entity, entity = id, created = slice.clone([]link.Scene_Entity{triangle})})
+	append(
+		&ctx.operations,
+		link.Operation {
+			kind = .Create_Entity,
+			entity = id,
+			created = slice.clone([]link.Scene_Entity{triangle}),
+		},
+	)
 }
 
 // reverse_spin sets the negated speed of each selected entity that spins.
@@ -956,7 +1095,15 @@ reverse_spin :: proc(ctx: ^editor.Command_Context) {
 		id := editor.scene_id(ctx.world, entity)
 		if spin := ecs.get(ctx.world, entity, Spin); spin != nil && id != 0 {
 			field := editor.scene_field("speed", editor.scene_numbers(f64(-spin.speed)))
-			append(&ctx.operations, link.Operation{kind = .Set_Field, entity = id, component = u64(SPIN_ID), fields = slice.clone([]link.Scene_Field{field})})
+			append(
+				&ctx.operations,
+				link.Operation {
+					kind = .Set_Field,
+					entity = id,
+					component = u64(SPIN_ID),
+					fields = slice.clone([]link.Scene_Field{field}),
+				},
+			)
 		}
 	}
 	if len(ctx.operations) == 0 {
@@ -967,5 +1114,11 @@ reverse_spin :: proc(ctx: ^editor.Command_Context) {
 // world_report counts, and changes nothing.
 world_report :: proc(ctx: ^editor.Command_Context) {
 	g := (^game.Game)(ctx.user)
-	ctx.message = fmt.aprintf("mygame: %d entities, %d triangles, frame %d", ecs.entity_count(ctx.world), render.extract_count(ctx.world, state_of(g).triangles), g.frame_count, allocator = ctx.allocator)
+	ctx.message = fmt.aprintf(
+		"mygame: %d entities, %d triangles, frame %d",
+		ecs.entity_count(ctx.world),
+		render.extract_count(ctx.world, state_of(g).triangles),
+		g.frame_count,
+		allocator = ctx.allocator,
+	)
 }

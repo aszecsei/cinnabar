@@ -72,7 +72,9 @@ audio_ring_carries_every_frame_between_two_threads :: proc(t: ^testing.T) {
 	ring := Audio_Ring {
 		frames = storage[:],
 	}
-	writer := thread.create_and_start_with_data(&ring, proc(data: rawptr) {
+	writer := thread.create_and_start_with_data(
+	&ring,
+	proc(data: rawptr) {
 		ring := (^Audio_Ring)(data)
 		block: [17]Audio_Frame
 		next := 0
@@ -83,7 +85,8 @@ audio_ring_carries_every_frame_between_two_threads :: proc(t: ^testing.T) {
 			// What did not fit is generated again, from the same place.
 			next += sent
 		}
-	})
+	},
+	)
 	defer thread.destroy(writer)
 	received := 0
 	in_order := true
@@ -143,7 +146,13 @@ audio_device_skip_counts_what_it_drains :: proc(t: ^testing.T) {
 audio_device_takes_frames_from_the_writer_that_wrote_first :: proc(t: ^testing.T) {
 	errors := 0
 	context.logger = {
-		procedure = proc(data: rawptr, level: runtime.Logger_Level, text: string, options: runtime.Logger_Options, location := #caller_location) {
+		procedure = proc(
+			data: rawptr,
+			level: runtime.Logger_Level,
+			text: string,
+			options: runtime.Logger_Options,
+			location := #caller_location,
+		) {
 			(^int)(data)^ += 1
 		},
 		data = &errors,
@@ -183,6 +192,10 @@ audio_device_takes_frames_from_the_writer_that_wrote_first :: proc(t: ^testing.T
 			thread.join(th)
 			thread.destroy(th)
 		}
-		testing.expect(t, racers[0].first != racers[1].first, "both writers or neither claimed the device")
+		testing.expect(
+			t,
+			racers[0].first != racers[1].first,
+			"both writers or neither claimed the device",
+		)
 	}
 }

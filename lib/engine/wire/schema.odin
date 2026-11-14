@@ -9,7 +9,12 @@ import "core:strings"
 // docs/editor/link.md#editor-link). Its version is the protocol version.
 schema :: proc(messages: typeid, allocator := context.allocator) -> string {
 	body := schema_body(messages, context.temp_allocator)
-	return fmt.aprintf("{{\n  \"version\": \"%016x\",\n%s}}\n", protocol_version(messages), body, allocator = allocator)
+	return fmt.aprintf(
+		"{{\n  \"version\": \"%016x\",\n%s}}\n",
+		protocol_version(messages),
+		body,
+		allocator = allocator,
+	)
 }
 
 // protocol_version is a hash of the schema, so any change to a message changes it.
@@ -47,9 +52,20 @@ schema_body :: proc(messages: typeid, allocator: runtime.Allocator) -> string {
 	strings.write_string(&w.b, "  ],\n  \"enums\": [\n")
 	for e, i in w.enums {
 		enum_info := runtime.type_info_base(e).variant.(runtime.Type_Info_Enum)
-		fmt.sbprintf(&w.b, "    {{\"name\": %q, \"type\": %q, \"values\": [", type_name(e), type_string(&w, enum_info.base))
+		fmt.sbprintf(
+			&w.b,
+			"    {{\"name\": %q, \"type\": %q, \"values\": [",
+			type_name(e),
+			type_string(&w, enum_info.base),
+		)
 		for name, j in enum_info.names {
-			fmt.sbprintf(&w.b, "{{\"name\": %q, \"value\": %d}}%s", name, enum_info.values[j], ", " if j + 1 < len(enum_info.names) else "")
+			fmt.sbprintf(
+				&w.b,
+				"{{\"name\": %q, \"value\": %d}}%s",
+				name,
+				enum_info.values[j],
+				", " if j + 1 < len(enum_info.names) else "",
+			)
 		}
 		strings.write_string(&w.b, "]}")
 		strings.write_string(&w.b, ",\n" if i + 1 < len(w.enums) else "\n")
@@ -70,7 +86,12 @@ write_struct :: proc(w: ^Schema_Writer, ti: ^runtime.Type_Info, kind: int) {
 	}
 	fmt.sbprintf(&w.b, "\"name\": %q, \"fields\": [", type_name(ti))
 	for i in 0 ..< info.field_count {
-		fmt.sbprintf(&w.b, "{{\"name\": %q, \"type\": %q}}", info.names[i], type_string(w, info.types[i]))
+		fmt.sbprintf(
+			&w.b,
+			"{{\"name\": %q, \"type\": %q}}",
+			info.names[i],
+			type_string(w, info.types[i]),
+		)
 		if i + 1 < info.field_count {
 			strings.write_string(&w.b, ", ")
 		}

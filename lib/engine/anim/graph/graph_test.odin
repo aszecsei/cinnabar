@@ -27,16 +27,50 @@ aligned :: proc(data: []byte) -> []byte {
 @(private = "file")
 moving_clip :: proc(duration: f32, to: [3]f32 = {}, turn: f32 = 0) -> Clip {
 	q := linalg.quaternion_angle_axis_f32(turn, {0, 1, 0})
-	data := aligned(format.animation_write({
-		joint_count = 1,
-		duration = duration,
-		channels = {
-			{joint = 0, path = .Translation, interpolation = .Linear, first_key = 0, key_count = 2, first_value = 0},
-			{joint = 0, path = .Rotation, interpolation = .Linear, first_key = 2, key_count = 2, first_value = 6},
-		},
-		times = {0, duration, 0, duration},
-		values = {0, 0, 0, to.x, to.y, to.z, 0, 0, 0, 1, imag(q), jmag(q), kmag(q), real(q)},
-	}, context.temp_allocator))
+	data := aligned(
+		format.animation_write(
+			{
+				joint_count = 1,
+				duration = duration,
+				channels = {
+					{
+						joint = 0,
+						path = .Translation,
+						interpolation = .Linear,
+						first_key = 0,
+						key_count = 2,
+						first_value = 0,
+					},
+					{
+						joint = 0,
+						path = .Rotation,
+						interpolation = .Linear,
+						first_key = 2,
+						key_count = 2,
+						first_value = 6,
+					},
+				},
+				times = {0, duration, 0, duration},
+				values = {
+					0,
+					0,
+					0,
+					to.x,
+					to.y,
+					to.z,
+					0,
+					0,
+					0,
+					1,
+					imag(q),
+					jmag(q),
+					kmag(q),
+					real(q),
+				},
+			},
+			context.temp_allocator,
+		),
+	)
 	blob, ok := format.animation_view(data)
 	assert(ok)
 	return {data, blob}
@@ -48,19 +82,57 @@ make_graph :: proc(contents: format.Animation_Graph_Contents, clips: []Clip) -> 
 	data := aligned(format.animation_graph_write(contents, context.temp_allocator))
 	blob, ok := format.animation_graph_view(data)
 	assert(ok)
-	return {data = data, blob = blob, clips = clips, root = -1, root_parent = 1, root_parent_rotation = 1, root_rest = {rotation = 1, scale = 1}}
+	return {
+		data = data,
+		blob = blob,
+		clips = clips,
+		root = -1,
+		root_parent = 1,
+		root_parent_rotation = 1,
+		root_rest = {rotation = 1, scale = 1},
+	}
 }
 
 @(private = "file")
-clip_state :: proc(name: string, clip: u32, loop := true, enter := NO, exit := NO) -> format.Animation_Graph_State_Contents {
+clip_state :: proc(
+	name: string,
+	clip: u32,
+	loop := true,
+	enter := NO,
+	exit := NO,
+) -> format.Animation_Graph_State_Contents {
 	points := make([]format.Animation_Graph_Point, 1, context.temp_allocator)
-	points[0] = {clip = clip}
-	return {name = name, motion = .Clip, parameter = NO, points = points, speed = 1, loop = loop, enter_event = enter, exit_event = exit}
+	points[0] = {
+		clip = clip,
+	}
+	return {
+		name = name,
+		motion = .Clip,
+		parameter = NO,
+		points = points,
+		speed = 1,
+		loop = loop,
+		enter_event = enter,
+		exit_event = exit,
+	}
 }
 
 @(private = "file")
-transition :: proc(from, to: u32, conditions: []format.Animation_Graph_Condition = nil, exit_time: f32 = -1, duration: f32 = 0, node: u32 = 0) -> format.Animation_Graph_Transition_Contents {
-	return {from = from, to = to, conditions = conditions, exit_time = exit_time, duration = duration, node = node}
+transition :: proc(
+	from, to: u32,
+	conditions: []format.Animation_Graph_Condition = nil,
+	exit_time: f32 = -1,
+	duration: f32 = 0,
+	node: u32 = 0,
+) -> format.Animation_Graph_Transition_Contents {
+	return {
+		from = from,
+		to = to,
+		conditions = conditions,
+		exit_time = exit_time,
+		duration = duration,
+		node = node,
+	}
 }
 
 @(private = "file")
@@ -82,31 +154,62 @@ three_states :: proc(fade: f32 = 0) -> Graph {
 		c = moving_clip(1)
 	}
 	parameters := make([]format.Animation_Graph_Parameter_Contents, 2, context.temp_allocator)
-	parameters[0] = {name = "speed", kind = .Float}
-	parameters[1] = {name = "look", kind = .Trigger}
+	parameters[0] = {
+		name = "speed",
+		kind = .Float,
+	}
+	parameters[1] = {
+		name = "look",
+		kind = .Trigger,
+	}
 	states := make([]format.Animation_Graph_State_Contents, 3, context.temp_allocator)
 	states[0] = clip_state("idle", 0, exit = 0)
 	states[1] = clip_state("move", 1, enter = 1)
 	states[2] = clip_state("look", 2, loop = false)
 	faster := make([]format.Animation_Graph_Condition, 1, context.temp_allocator)
-	faster[0] = {parameter = 0, op = .Greater, value = 0.1}
+	faster[0] = {
+		parameter = 0,
+		op        = .Greater,
+		value     = 0.1,
+	}
 	looked := make([]format.Animation_Graph_Condition, 1, context.temp_allocator)
-	looked[0] = {parameter = 1, op = .Trigger}
+	looked[0] = {
+		parameter = 1,
+		op        = .Trigger,
+	}
 	transitions := make([]format.Animation_Graph_Transition_Contents, 3, context.temp_allocator)
 	transitions[0] = transition(NO, 2, looked, duration = fade, node = 30)
 	transitions[1] = transition(0, 1, faster, duration = fade, node = 31)
 	transitions[2] = transition(2, 0, exit_time = 1, duration = fade, node = 32)
 	events := make([]format.Animation_Graph_Event_Contents, 2, context.temp_allocator)
-	events[0] = {name = "left_idle"}
-	events[1] = {name = "started"}
+	events[0] = {
+		name = "left_idle",
+	}
+	events[1] = {
+		name = "started",
+	}
 	clip_contents := make([]format.Animation_Graph_Clip_Contents, 3, context.temp_allocator)
-	return make_graph({entry = 0, parameters = parameters, clips = clip_contents, states = states, transitions = transitions, events = events}, clips)
+	return make_graph(
+		{
+			entry = 0,
+			parameters = parameters,
+			clips = clip_contents,
+			states = states,
+			transitions = transitions,
+			events = events,
+		},
+		clips,
+	)
 }
 
 @(test)
 a_clip_without_a_graph_loops_or_holds :: proc(t: ^testing.T) {
 	clips := []Clip{moving_clip(1)}
-	g := Graph{clips = clips, loop = true, root = -1}
+	g := Graph {
+		clips = clips,
+		loop  = true,
+		root  = -1,
+	}
 	inst: Instance
 	init(&g, &inst, 0)
 	out: Tick_Output
@@ -114,14 +217,22 @@ a_clip_without_a_graph_loops_or_holds :: proc(t: ^testing.T) {
 		advance(&g, &inst, 0.25, &out)
 	}
 	testing.expect_value(t, inst.sample_count, 1)
-	testing.expect(t, near(inst.samples[0].time, 0.25) && near(inst.samples[0].step, 0.25), "it wraps")
+	testing.expect(
+		t,
+		near(inst.samples[0].time, 0.25) && near(inst.samples[0].step, 0.25),
+		"it wraps",
+	)
 
 	g.loop = false
 	init(&g, &inst, 0)
 	for _ in 0 ..< 5 {
 		advance(&g, &inst, 0.25, &out)
 	}
-	testing.expect(t, near(inst.samples[0].time, 1) && near(inst.samples[0].step, 0), "it holds at its end")
+	testing.expect(
+		t,
+		near(inst.samples[0].time, 1) && near(inst.samples[0].step, 0),
+		"it holds at its end",
+	)
 }
 
 @(test)
@@ -249,7 +360,11 @@ a_fade_moves_the_weight_and_the_old_state_fades_out_over_a_tick :: proc(t: ^test
 	move, _ = find_sample(&inst, 1)
 	testing.expect_value(t, inst.source, NONE)
 	testing.expect(t, near(move.weight, 1))
-	testing.expect(t, near(idle.weight, 0) && near(idle.previous_weight, 0.5), "a sample that is gone stays a tick at 0")
+	testing.expect(
+		t,
+		near(idle.weight, 0) && near(idle.previous_weight, 0.5),
+		"a sample that is gone stays a tick at 0",
+	)
 	advance(&g, &inst, 0.25, &out)
 	_, found := find_sample(&inst, 0)
 	testing.expect(t, !found)
@@ -288,7 +403,13 @@ samples_past_the_most_drop_the_lightest :: proc(t: ^testing.T) {
 	// Eight frozen samples and the current state's are nine; the lightest frozen one goes.
 	for i in 0 ..< MAX_SAMPLES {
 		base := f32(0.01) if i == 3 else 0.05 + f32(i) * 0.01
-		inst.samples[i] = {state = 1, point = u8(i), flags = {.Frozen}, weight = base, base = base}
+		inst.samples[i] = {
+			state  = 1,
+			point  = u8(i),
+			flags  = {.Frozen},
+			weight = base,
+			base   = base,
+		}
 	}
 	inst.sample_count = MAX_SAMPLES
 	build_samples(&g, &inst, 0, 0)
@@ -305,23 +426,60 @@ blend_graph :: proc() -> Graph {
 	clips[0] = moving_clip(1)
 	clips[1] = moving_clip(0.5)
 	parameters := make([]format.Animation_Graph_Parameter_Contents, 1, context.temp_allocator)
-	parameters[0] = {name = "speed", kind = .Float}
+	parameters[0] = {
+		name = "speed",
+		kind = .Float,
+	}
 	points := make([]format.Animation_Graph_Point, 2, context.temp_allocator)
-	points[0] = {clip = 0, threshold = 0}
-	points[1] = {clip = 1, threshold = 1}
+	points[0] = {
+		clip      = 0,
+		threshold = 0,
+	}
+	points[1] = {
+		clip      = 1,
+		threshold = 1,
+	}
 	markers := make([]format.Animation_Graph_Marker, 1, context.temp_allocator)
-	markers[0] = {time = 0.5, event = 0}
+	markers[0] = {
+		time  = 0.5,
+		event = 0,
+	}
 	run_markers := make([]format.Animation_Graph_Marker, 1, context.temp_allocator)
-	run_markers[0] = {time = 0.25, event = 1}
+	run_markers[0] = {
+		time  = 0.25,
+		event = 1,
+	}
 	clip_contents := make([]format.Animation_Graph_Clip_Contents, 2, context.temp_allocator)
-	clip_contents[0] = {name = "walk", markers = markers}
-	clip_contents[1] = {name = "run", markers = run_markers}
+	clip_contents[0] = {
+		name    = "walk",
+		markers = markers,
+	}
+	clip_contents[1] = {
+		name    = "run",
+		markers = run_markers,
+	}
 	events := make([]format.Animation_Graph_Event_Contents, 2, context.temp_allocator)
-	events[0] = {name = "walk_step"}
-	events[1] = {name = "run_step"}
+	events[0] = {
+		name = "walk_step",
+	}
+	events[1] = {
+		name = "run_step",
+	}
 	states := make([]format.Animation_Graph_State_Contents, 1, context.temp_allocator)
-	states[0] = {name = "move", motion = .Blend_1D, parameter = 0, points = points, speed = 1, loop = true, enter_event = NO, exit_event = NO}
-	return make_graph({parameters = parameters, clips = clip_contents, events = events, states = states}, clips)
+	states[0] = {
+		name        = "move",
+		motion      = .Blend_1D,
+		parameter   = 0,
+		points      = points,
+		speed       = 1,
+		loop        = true,
+		enter_event = NO,
+		exit_event  = NO,
+	}
+	return make_graph(
+		{parameters = parameters, clips = clip_contents, events = events, states = states},
+		clips,
+	)
 }
 
 @(test)
@@ -366,11 +524,23 @@ marked_graph :: proc() -> Graph {
 	clips := make([]Clip, 1, context.temp_allocator)
 	clips[0] = moving_clip(1)
 	markers := make([]format.Animation_Graph_Marker, 3, context.temp_allocator)
-	markers[0] = {time = 0, event = 0}
-	markers[1] = {time = 0.5, event = 1}
-	markers[2] = {time = 0.9, event = 2}
+	markers[0] = {
+		time  = 0,
+		event = 0,
+	}
+	markers[1] = {
+		time  = 0.5,
+		event = 1,
+	}
+	markers[2] = {
+		time  = 0.9,
+		event = 2,
+	}
 	clip_contents := make([]format.Animation_Graph_Clip_Contents, 1, context.temp_allocator)
-	clip_contents[0] = {name = "c", markers = markers}
+	clip_contents[0] = {
+		name    = "c",
+		markers = markers,
+	}
 	events := make([]format.Animation_Graph_Event_Contents, 3, context.temp_allocator)
 	states := make([]format.Animation_Graph_State_Contents, 1, context.temp_allocator)
 	states[0] = clip_state("s", 0)
@@ -416,12 +586,23 @@ markers_are_raised_once_in_the_tick_that_reaches_them :: proc(t: ^testing.T) {
 @(test)
 root_motion_is_the_roots_move_in_its_heading :: proc(t: ^testing.T) {
 	clips := []Clip{moving_clip(1, to = {0, 1, 2})}
-	g := Graph{clips = clips, loop = true, root = 0, root_parent = 1, root_parent_rotation = 1, root_rest = {rotation = 1, scale = 1}}
+	g := Graph {
+		clips = clips,
+		loop = true,
+		root = 0,
+		root_parent = 1,
+		root_parent_rotation = 1,
+		root_rest = {rotation = 1, scale = 1},
+	}
 	inst: Instance
 	init(&g, &inst, 0)
 	out: Tick_Output
 	advance(&g, &inst, 0.25, &out)
-	testing.expect(t, near(out.translation.z, 0.5) && near(out.translation.x, 0), "a quarter of the move")
+	testing.expect(
+		t,
+		near(out.translation.z, 0.5) && near(out.translation.x, 0),
+		"a quarter of the move",
+	)
 	testing.expect(t, near(out.translation.y, 0), "only along x and z")
 	advance(&g, &inst, 0.25, &out)
 	advance(&g, &inst, 0.25, &out)
@@ -440,22 +621,46 @@ root_motion_is_the_roots_move_in_its_heading :: proc(t: ^testing.T) {
 	testing.expect(t, near(out.translation.x, 1))
 	advance(&g, &inst, 0.25, &out)
 	// Turned by π/4, the move along the model's x is partly along the root's z.
-	testing.expect(t, near(out.translation.x, 0.5 * math.cos(f32(math.PI / 4))) && near(out.translation.z, 0.5 * math.sin(f32(math.PI / 4))))
+	testing.expect(
+		t,
+		near(out.translation.x, 0.5 * math.cos(f32(math.PI / 4))) &&
+		near(out.translation.z, 0.5 * math.sin(f32(math.PI / 4))),
+	)
 }
 
 @(test)
 removing_root_motion_keeps_the_roots_height_and_rest_heading :: proc(t: ^testing.T) {
-	g := Graph{root = 0, root_parent = 1, root_parent_rotation = 1, root_rest = {translation = {0, 1, 0}, rotation = 1, scale = 1}}
-	locals := []Joint_Pose{{translation = {3, 2, 4}, rotation = linalg.quaternion_angle_axis_f32(1, {0, 1, 0}), scale = 1}}
+	g := Graph {
+		root = 0,
+		root_parent = 1,
+		root_parent_rotation = 1,
+		root_rest = {translation = {0, 1, 0}, rotation = 1, scale = 1},
+	}
+	locals := []Joint_Pose {
+		{
+			translation = {3, 2, 4},
+			rotation = linalg.quaternion_angle_axis_f32(1, {0, 1, 0}),
+			scale = 1,
+		},
+	}
 	remove_root_motion(&g, locals)
-	testing.expect(t, near(locals[0].translation.x, 0) && near(locals[0].translation.y, 2) && near(locals[0].translation.z, 0))
+	testing.expect(
+		t,
+		near(locals[0].translation.x, 0) &&
+		near(locals[0].translation.y, 2) &&
+		near(locals[0].translation.z, 0),
+	)
 	testing.expect(t, near(abs(real(locals[0].rotation)), 1), "the heading is the rest one")
 }
 
 @(test)
 presentation_interpolates_each_sample_between_ticks :: proc(t: ^testing.T) {
 	clips := []Clip{moving_clip(1, to = {0, 0, 4})}
-	g := Graph{clips = clips, loop = true, root = -1}
+	g := Graph {
+		clips = clips,
+		loop  = true,
+		root  = -1,
+	}
 	inst: Instance
 	init(&g, &inst, 0)
 	out: Tick_Output

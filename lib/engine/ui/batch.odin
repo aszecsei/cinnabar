@@ -4,8 +4,8 @@ import "core:log"
 import "core:math"
 import "core:slice"
 
-import format "cinnabar:engine/asset/format"
 import "cinnabar:core/gpu"
+import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/render"
 
 // A frame's UI draws at most this many instances. Those past it do not draw, and the first frame over it warns.
@@ -69,7 +69,10 @@ push :: proc(b: ^Batch, i: Instance) {
 	}
 	// An instance of no size, or all outside its clip, draws nothing.
 	seen := intersect(i.rect, i.clip)
-	if i.rect[2] <= i.rect[0] || i.rect[3] <= i.rect[1] || seen[2] <= seen[0] || seen[3] <= seen[1] {
+	if i.rect[2] <= i.rect[0] ||
+	   i.rect[3] <= i.rect[1] ||
+	   seen[2] <= seen[0] ||
+	   seen[3] <= seen[1] {
 		return
 	}
 	append(&b.instances, i)
@@ -96,7 +99,10 @@ build_batch :: proc(s: ^State, now: f64, allocator := context.allocator, only :=
 		batch_node(s, &b, &s.documents[entry[1]], entry[1], 0, now)
 	}
 	if b.full && !s.warned_full {
-		log.warnf("ui: a frame has more than %d instances, and those past them do not draw", MAX_UI_INSTANCES)
+		log.warnf(
+			"ui: a frame has more than %d instances, and those past them do not draw",
+			MAX_UI_INSTANCES,
+		)
 		s.warned_full = true
 	}
 	return b
@@ -122,15 +128,31 @@ batch_node :: proc(s: ^State, b: ^Batch, d: ^Document, index: int, n: u32, now: 
 	}
 	// A scroll box's bar draws over its children.
 	if bar, ok := bar_of(s, d, n); ok {
-		batch_box(s, b, snap(bar.track), node.clip, &bar.track_style, alpha * bar.track_style.opacity)
-		batch_box(s, b, snap(bar.thumb), node.clip, &bar.thumb_style, alpha * bar.thumb_style.opacity)
+		batch_box(
+			s,
+			b,
+			snap(bar.track),
+			node.clip,
+			&bar.track_style,
+			alpha * bar.track_style.opacity,
+		)
+		batch_box(
+			s,
+			b,
+			snap(bar.thumb),
+			node.clip,
+			&bar.thumb_style,
+			alpha * bar.thumb_style.opacity,
+		)
 	}
 }
 
 // batch_box draws a box of a style, with its border, which a fill or a border shows.
 @(private)
 batch_box :: proc(s: ^State, b: ^Batch, rect, clip: [4]f32, st: ^Style, alpha: f32) {
-	if !(st.fill.colors[0].a > 0 || st.fill.colors[1].a > 0 || (st.border.width > 0 && st.border.color.a > 0)) {
+	if !(st.fill.colors[0].a > 0 ||
+		   st.fill.colors[1].a > 0 ||
+		   (st.border.width > 0 && st.border.color.a > 0)) {
 		return
 	}
 	i := Instance {
@@ -198,7 +220,14 @@ Slice_Cell :: struct {
 
 // nine_slice cuts a rectangle into a nine-slice's cells: its margins, top, right, bottom and left in the texture's
 // texels, keep their size at the UI scale in the corners, and the edges and the middle stretch.
-nine_slice :: proc(rect: [4]f32, margins: [4]f32, scale: f32, texture: [2]f32) -> (cells: [9]Slice_Cell) {
+nine_slice :: proc(
+	rect: [4]f32,
+	margins: [4]f32,
+	scale: f32,
+	texture: [2]f32,
+) -> (
+	cells: [9]Slice_Cell,
+) {
 	m := margins * scale
 	xs := [4]f32{rect[0], rect[0] + m[3], rect[2] - m[1], rect[2]}
 	ys := [4]f32{rect[1], rect[1] + m[0], rect[3] - m[2], rect[3]}
@@ -206,7 +235,10 @@ nine_slice :: proc(rect: [4]f32, margins: [4]f32, scale: f32, texture: [2]f32) -
 	vs := [4]f32{0, margins[0] / texture.y, 1 - margins[2] / texture.y, 1}
 	for y in 0 ..< 3 {
 		for x in 0 ..< 3 {
-			cells[y * 3 + x] = {{xs[x], ys[y], xs[x + 1], ys[y + 1]}, {us[x], vs[y], us[x + 1], vs[y + 1]}}
+			cells[y * 3 + x] = {
+				{xs[x], ys[y], xs[x + 1], ys[y + 1]},
+				{us[x], vs[y], us[x + 1], vs[y + 1]},
+			}
 		}
 	}
 	return
@@ -277,9 +309,19 @@ batch_text :: proc(s: ^State, b: ^Batch, d: ^Document, index: int, n: u32, now: 
 			push(
 				b,
 				{
-					rect = {pen.x + cell.plane[0] * text.px, pen.y - cell.plane[3] * text.px, pen.x + cell.plane[2] * text.px, pen.y - cell.plane[1] * text.px},
+					rect = {
+						pen.x + cell.plane[0] * text.px,
+						pen.y - cell.plane[3] * text.px,
+						pen.x + cell.plane[2] * text.px,
+						pen.y - cell.plane[1] * text.px,
+					},
 					clip = clip,
-					uv = {f32(cell.rect.x) / atlas_size.x, f32(cell.rect.y) / atlas_size.y, f32(cell.rect.x + cell.rect.z) / atlas_size.x, f32(cell.rect.y + cell.rect.w) / atlas_size.y},
+					uv = {
+						f32(cell.rect.x) / atlas_size.x,
+						f32(cell.rect.y) / atlas_size.y,
+						f32(cell.rect.x + cell.rect.z) / atlas_size.x,
+						f32(cell.rect.y + cell.rect.w) / atlas_size.y,
+					},
 					fill = color,
 					kind = INSTANCE_GLYPH,
 					texture = gpu.read_index(atlas.texture),
@@ -295,18 +337,48 @@ batch_text :: proc(s: ^State, b: ^Batch, d: ^Document, index: int, n: u32, now: 
 
 // batch_selection draws the selection behind a field's text.
 @(private)
-batch_selection :: proc(s: ^State, b: ^Batch, d: ^Document, edit: Field_Edit, text: Node_Text, x0, top: f32, clip: [4]f32, color: format.Ui_Color, alpha: f32) {
+batch_selection :: proc(
+	s: ^State,
+	b: ^Batch,
+	d: ^Document,
+	edit: Field_Edit,
+	text: Node_Text,
+	x0, top: f32,
+	clip: [4]f32,
+	color: format.Ui_Color,
+	alpha: f32,
+) {
 	if edit.caret == edit.anchor || text.placeholder {
 		return
 	}
 	from := caret_x(d, text, min(edit.caret, edit.anchor))
 	to := caret_x(d, text, max(edit.caret, edit.anchor))
-	push(b, {rect = {x0 + from, top, x0 + to, top + text.line}, clip = clip, fill = pack(color, alpha * SELECTION_ALPHA), fill_end = pack(color, alpha * SELECTION_ALPHA), kind = INSTANCE_RECT})
+	push(
+		b,
+		{
+			rect = {x0 + from, top, x0 + to, top + text.line},
+			clip = clip,
+			fill = pack(color, alpha * SELECTION_ALPHA),
+			fill_end = pack(color, alpha * SELECTION_ALPHA),
+			kind = INSTANCE_RECT,
+		},
+	)
 }
 
 // batch_caret draws a field's caret, blinking, and the IME's composition at it, underlined, as it is not text yet.
 @(private)
-batch_caret :: proc(s: ^State, b: ^Batch, d: ^Document, edit: Field_Edit, text: Node_Text, x0, top: f32, clip: [4]f32, color: format.Ui_Color, alpha: f32, now: f64) {
+batch_caret :: proc(
+	s: ^State,
+	b: ^Batch,
+	d: ^Document,
+	edit: Field_Edit,
+	text: Node_Text,
+	x0, top: f32,
+	clip: [4]f32,
+	color: format.Ui_Color,
+	alpha: f32,
+	now: f64,
+) {
 	x := text.placeholder ? 0 : caret_x(d, text, edit.caret)
 	if s.input.composition != "" {
 		// The composition is shaped with the field's font after the caret; its width marks the underline.
@@ -326,9 +398,19 @@ batch_caret :: proc(s: ^State, b: ^Batch, d: ^Document, edit: Field_Edit, text: 
 					push(
 						b,
 						{
-							rect = {pen + g.offset.x + cell.plane[0] * text.px, baseline - cell.plane[3] * text.px, pen + g.offset.x + cell.plane[2] * text.px, baseline - cell.plane[1] * text.px},
+							rect = {
+								pen + g.offset.x + cell.plane[0] * text.px,
+								baseline - cell.plane[3] * text.px,
+								pen + g.offset.x + cell.plane[2] * text.px,
+								baseline - cell.plane[1] * text.px,
+							},
 							clip = clip,
-							uv = {f32(cell.rect.x) / atlas_size.x, f32(cell.rect.y) / atlas_size.y, f32(cell.rect.x + cell.rect.z) / atlas_size.x, f32(cell.rect.y + cell.rect.w) / atlas_size.y},
+							uv = {
+								f32(cell.rect.x) / atlas_size.x,
+								f32(cell.rect.y) / atlas_size.y,
+								f32(cell.rect.x + cell.rect.z) / atlas_size.x,
+								f32(cell.rect.y + cell.rect.w) / atlas_size.y,
+							},
 							fill = pack(color, alpha),
 							kind = INSTANCE_GLYPH,
 							texture = gpu.read_index(atlas.texture),
@@ -341,12 +423,35 @@ batch_caret :: proc(s: ^State, b: ^Batch, d: ^Document, edit: Field_Edit, text: 
 			resize(&d.glyphs, first)
 		}
 		underline := math.round(top + text.line - s.scale)
-		push(b, {rect = {x0 + x, underline, x0 + x + width, underline + max(math.round(s.scale), 1)}, clip = clip, fill = pack(color, alpha), fill_end = pack(color, alpha), kind = INSTANCE_RECT})
+		push(
+			b,
+			{
+				rect = {
+					x0 + x,
+					underline,
+					x0 + x + width,
+					underline + max(math.round(s.scale), 1),
+				},
+				clip = clip,
+				fill = pack(color, alpha),
+				fill_end = pack(color, alpha),
+				kind = INSTANCE_RECT,
+			},
+		)
 		return
 	}
 	if math.mod(now - edit.caret_time, CARET_BLINK) > CARET_BLINK * 0.5 {
 		return
 	}
 	caret := math.round(x0 + x)
-	push(b, {rect = {caret, top, caret + max(CARET_WIDTH * s.scale, 1), top + text.line}, clip = clip, fill = pack(color, alpha), fill_end = pack(color, alpha), kind = INSTANCE_RECT})
+	push(
+		b,
+		{
+			rect = {caret, top, caret + max(CARET_WIDTH * s.scale, 1), top + text.line},
+			clip = clip,
+			fill = pack(color, alpha),
+			fill_end = pack(color, alpha),
+			kind = INSTANCE_RECT,
+		},
+	)
 }

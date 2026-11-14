@@ -11,7 +11,15 @@ import format "cinnabar:engine/asset/format"
 // script_blob is a script blob of a GUID, which a bundle can hold.
 @(private = "file")
 script_blob :: proc(guid: format.Guid, key: u64) -> []byte {
-	return format.script_write({guid = guid, key = key, bytecode = {1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8}, source_path = "x.luau"}, context.temp_allocator)
+	return format.script_write(
+		{
+			guid = guid,
+			key = key,
+			bytecode = {1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8},
+			source_path = "x.luau",
+		},
+		context.temp_allocator,
+	)
 }
 
 // stored is a blob as a bundle stores it, compressed or not.
@@ -25,9 +33,22 @@ stored :: proc(blob: []byte, guid: format.Guid, compress: bool) -> format.Bundle
 }
 
 @(private = "file")
-write_bundle :: proc(t: ^testing.T, f: ^Fixture, name: string, blobs: []format.Bundle_Blob, dependencies: []string) -> string {
+write_bundle :: proc(
+	t: ^testing.T,
+	f: ^Fixture,
+	name: string,
+	blobs: []format.Bundle_Blob,
+	dependencies: []string,
+) -> string {
 	path := fmt.tprintf("%s/%s%s", f.dir, name, format.BUNDLE_EXTENSION)
-	testing.expect(t, os.write_entire_file(path, format.bundle_write(blobs, dependencies, context.temp_allocator)) == nil)
+	testing.expect(
+		t,
+		os.write_entire_file(
+			path,
+			format.bundle_write(blobs, dependencies, context.temp_allocator),
+		) ==
+		nil,
+	)
 	return path
 }
 
@@ -56,8 +77,23 @@ bundles_open_after_what_they_depend_on_and_load_by_guid :: proc(t: ^testing.T) {
 	write_bundle(t, f, format.GLOBAL_BUNDLE, {stored(script_blob(shared, 1), shared, false)}, nil)
 	// The level depends on a bundle that depends on the global one.
 	extra := test_guid(4)
-	write_bundle(t, f, "extra", {stored(script_blob(extra, 4), extra, true)}, {format.GLOBAL_BUNDLE})
-	write_bundle(t, f, level_name(level), {stored(script_blob(level, 2), level, true), stored(script_blob(in_level, 3), in_level, true)}, {"extra"})
+	write_bundle(
+		t,
+		f,
+		"extra",
+		{stored(script_blob(extra, 4), extra, true)},
+		{format.GLOBAL_BUNDLE},
+	)
+	write_bundle(
+		t,
+		f,
+		level_name(level),
+		{
+			stored(script_blob(level, 2), level, true),
+			stored(script_blob(in_level, 3), in_level, true),
+		},
+		{"extra"},
+	)
 	destroy(&f.assets)
 	init(&f.assets, &f.platform, bundle(f.dir))
 	testing.expect(t, slice.equal(open_names(f), []string{format.GLOBAL_BUNDLE}))
@@ -72,7 +108,10 @@ bundles_open_after_what_they_depend_on_and_load_by_guid :: proc(t: ^testing.T) {
 	h, ok = load(&f.assets, level)
 	testing.expect(t, ok)
 	testing.expect_value(t, blob_key(f, h), 2)
-	testing.expect(t, slice.equal(open_names(f), []string{format.GLOBAL_BUNDLE, "extra", level_name(level)}))
+	testing.expect(
+		t,
+		slice.equal(open_names(f), []string{format.GLOBAL_BUNDLE, "extra", level_name(level)}),
+	)
 	h, ok = load(&f.assets, in_level)
 	testing.expect(t, ok)
 	blob, _ := data(&f.assets, h)
@@ -88,7 +127,13 @@ a_blob_stored_as_it_is_is_read_at_its_offset :: proc(t: ^testing.T) {
 	f := setup(t)
 	defer teardown(f)
 	raw, packed := test_guid(1), test_guid(2)
-	path := write_bundle(t, f, format.GLOBAL_BUNDLE, {stored(script_blob(raw, 1), raw, false), stored(script_blob(packed, 2), packed, true)}, nil)
+	path := write_bundle(
+		t,
+		f,
+		format.GLOBAL_BUNDLE,
+		{stored(script_blob(raw, 1), raw, false), stored(script_blob(packed, 2), packed, true)},
+		nil,
+	)
 	destroy(&f.assets)
 	init(&f.assets, &f.platform, bundle(f.dir))
 
@@ -97,7 +142,11 @@ a_blob_stored_as_it_is_is_read_at_its_offset :: proc(t: ^testing.T) {
 	testing.expect_value(t, location.path, path)
 	want := script_blob(raw, 1)
 	got := make([]byte, len(want), context.temp_allocator)
-	testing.expect_value(t, f.platform.file_read_range(location.path, location.offset, got), len(want))
+	testing.expect_value(
+		t,
+		f.platform.file_read_range(location.path, location.offset, got),
+		len(want),
+	)
 	testing.expect(t, slice.equal(got, want))
 	location, ok = blob_location(&f.assets, packed)
 	testing.expect(t, ok && !location.raw)
@@ -117,9 +166,35 @@ a_blob_stored_as_it_is_is_read_at_its_offset :: proc(t: ^testing.T) {
 a_bundle_loads_every_asset_in_it_by_guid :: proc(t: ^testing.T) {
 	f := setup(t)
 	defer teardown(f)
-	script_guid, texture_guid, mesh_guid, paged_guid := test_guid(1), test_guid(2), test_guid(3), test_guid(4)
-	texture := format.texture_write({guid = texture_guid, key = 2, format = .RGBA8_Unorm, usage = .Color, size = {4, 4}, mip_count = 1, mips = make([]byte, 64, context.temp_allocator), source_path = "game/t.png"}, context.temp_allocator)
-	mesh := format.mesh_write({guid = mesh_guid, key = 3, vertex_count = 3, index_count = 3, submeshes = {{name = "s"}}, positions = make([]byte, 36, context.temp_allocator), indices = {0, 0, 1, 0, 2, 0}, name = "m", source_path = "game/m.mesh"}, context.temp_allocator)
+	script_guid, texture_guid, mesh_guid, paged_guid :=
+		test_guid(1), test_guid(2), test_guid(3), test_guid(4)
+	texture := format.texture_write(
+		{
+			guid = texture_guid,
+			key = 2,
+			format = .RGBA8_Unorm,
+			usage = .Color,
+			size = {4, 4},
+			mip_count = 1,
+			mips = make([]byte, 64, context.temp_allocator),
+			source_path = "game/t.png",
+		},
+		context.temp_allocator,
+	)
+	mesh := format.mesh_write(
+		{
+			guid = mesh_guid,
+			key = 3,
+			vertex_count = 3,
+			index_count = 3,
+			submeshes = {{name = "s"}},
+			positions = make([]byte, 36, context.temp_allocator),
+			indices = {0, 0, 1, 0, 2, 0},
+			name = "m",
+			source_path = "game/m.mesh",
+		},
+		context.temp_allocator,
+	)
 	stream := make([]byte, 4096, context.temp_allocator)
 	for &b, i in stream {
 		b = u8(i)
@@ -134,8 +209,15 @@ a_bundle_loads_every_asset_in_it_by_guid :: proc(t: ^testing.T) {
 			meshlet_count = 2,
 			submeshes = {{name = "s", meshlet_count = 2}},
 			pages = {
-				{record = {size = 64, meshlet_count = 1, level0_meshlets = 1, vertex_count = 3}, compressed = stream, dependencies = {1}},
-				{record = {size = 64, first_meshlet = 1, meshlet_count = 1, flags = {.Root}}, compressed = make([]byte, 48, context.temp_allocator)},
+				{
+					record = {size = 64, meshlet_count = 1, level0_meshlets = 1, vertex_count = 3},
+					compressed = stream,
+					dependencies = {1},
+				},
+				{
+					record = {size = 64, first_meshlet = 1, meshlet_count = 1, flags = {.Root}},
+					compressed = make([]byte, 48, context.temp_allocator),
+				},
 			},
 		},
 		context.temp_allocator,
@@ -156,7 +238,12 @@ a_bundle_loads_every_asset_in_it_by_guid :: proc(t: ^testing.T) {
 		h, ok := load(&f.assets, guid)
 		testing.expectf(t, ok, "blob %d does not load", i)
 		blob, _ := data(&f.assets, h)
-		testing.expectf(t, slice.equal(blob, wants[i]), "blob %d is not the blob that was packed", i)
+		testing.expectf(
+			t,
+			slice.equal(blob, wants[i]),
+			"blob %d is not the blob that was packed",
+			i,
+		)
 	}
 	_, texture_ok := format.texture_view(wants[1])
 	testing.expect(t, texture_ok, "the test's texture is a texture blob")
@@ -174,7 +261,11 @@ a_bundle_loads_every_asset_in_it_by_guid :: proc(t: ^testing.T) {
 	testing.expect(t, found && location.raw)
 	page := format.mesh_pages(head, view)[0]
 	got := make([]byte, page.compressed_size, context.temp_allocator)
-	testing.expect_value(t, f.platform.file_read_range(location.path, location.offset + i64(page.offset), got), len(got))
+	testing.expect_value(
+		t,
+		f.platform.file_read_range(location.path, location.offset + i64(page.offset), got),
+		len(got),
+	)
 	testing.expect(t, slice.equal(got, stream))
 	testing.expect_value(t, modified(&f.assets, h), f.platform.file_modified(location.path))
 }
@@ -186,7 +277,13 @@ a_bundle_cut_short_is_refused :: proc(t: ^testing.T) {
 	context.logger = capture_errors(f)
 	write_bundle(t, f, format.GLOBAL_BUNDLE, nil, nil)
 	level := test_guid(1)
-	path := write_bundle(t, f, level_name(level), {stored(script_blob(level, 1), level, false)}, {format.GLOBAL_BUNDLE})
+	path := write_bundle(
+		t,
+		f,
+		level_name(level),
+		{stored(script_blob(level, 1), level, false)},
+		{format.GLOBAL_BUNDLE},
+	)
 	whole, _ := os.read_entire_file(path, context.temp_allocator)
 	testing.expect(t, os.write_entire_file(path, whole[:len(whole) - 1]) == nil)
 	destroy(&f.assets)

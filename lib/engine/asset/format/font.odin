@@ -66,7 +66,11 @@ font_view :: proc(data: []byte) -> (blob: ^Font_Blob, ok: bool) {
 	}
 	blob = (^Font_Blob)(raw_data(data))
 	inside :: proc(data: []byte, s: Slice, size, align: int) -> bool {
-		return u64(s.offset) + u64(s.size) <= u64(len(data)) && int(s.size) % size == 0 && int(s.offset) % align == 0
+		return(
+			u64(s.offset) + u64(s.size) <= u64(len(data)) &&
+			int(s.size) % size == 0 &&
+			int(s.offset) % align == 0 \
+		)
 	}
 	if !inside(data, blob.glyphs, size_of(Font_Glyph), align_of(Font_Glyph)) ||
 	   !inside(data, blob.font_data, 1, BLOB_ALIGN) ||
@@ -79,7 +83,9 @@ font_view :: proc(data: []byte) -> (blob: ^Font_Blob, ok: bool) {
 	}
 	previous := -1
 	for g in font_glyphs(data, blob) {
-		if int(g.id) <= previous || u32(g.rect.x) + u32(g.rect.z) > blob.atlas_size.x || u32(g.rect.y) + u32(g.rect.w) > blob.atlas_size.y {
+		if int(g.id) <= previous ||
+		   u32(g.rect.x) + u32(g.rect.z) > blob.atlas_size.x ||
+		   u32(g.rect.y) + u32(g.rect.w) > blob.atlas_size.y {
 			return nil, false
 		}
 		previous = int(g.id)
@@ -93,7 +99,14 @@ font_glyphs :: proc "contextless" (data: []byte, blob: ^Font_Blob) -> []Font_Gly
 }
 
 // font_find_glyph is the glyph of an id in the atlas, if the atlas has it.
-font_find_glyph :: proc "contextless" (data: []byte, blob: ^Font_Blob, id: u32) -> (glyph: Font_Glyph, ok: bool) {
+font_find_glyph :: proc "contextless" (
+	data: []byte,
+	blob: ^Font_Blob,
+	id: u32,
+) -> (
+	glyph: Font_Glyph,
+	ok: bool,
+) {
 	glyphs := font_glyphs(data, blob)
 	low, high := 0, len(glyphs)
 	for low < high {
@@ -132,16 +145,30 @@ Font_Contents :: struct {
 // font_write builds a font blob.
 font_write :: proc(contents: Font_Contents, allocator := context.allocator) -> []byte {
 	buffer := make([dynamic]byte, size_of(Font_Blob), allocator)
-	glyphs := reserve_bytes(&buffer, len(contents.glyphs) * size_of(Font_Glyph), align_of(Font_Glyph))
+	glyphs := reserve_bytes(
+		&buffer,
+		len(contents.glyphs) * size_of(Font_Glyph),
+		align_of(Font_Glyph),
+	)
 	if len(contents.glyphs) > 0 {
-		mem.copy(&buffer[glyphs.offset], raw_data(contents.glyphs), len(contents.glyphs) * size_of(Font_Glyph))
+		mem.copy(
+			&buffer[glyphs.offset],
+			raw_data(contents.glyphs),
+			len(contents.glyphs) * size_of(Font_Glyph),
+		)
 	}
 	font_data := reserve_bytes(&buffer, len(contents.font_data), BLOB_ALIGN)
 	copy(buffer[font_data.offset:], contents.font_data)
 	family := append_bytes(&buffer, transmute([]byte)contents.family)
 	source_path := append_bytes(&buffer, transmute([]byte)contents.source_path)
 	blob := Font_Blob {
-		header = {magic = BLOB_MAGIC, kind = .Font, layout = font_layout(), key = contents.key, guid = contents.guid},
+		header = {
+			magic = BLOB_MAGIC,
+			kind = .Font,
+			layout = font_layout(),
+			key = contents.key,
+			guid = contents.guid,
+		},
 		atlas = contents.atlas,
 		atlas_size = contents.atlas_size,
 		units_per_em = contents.units_per_em,

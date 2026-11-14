@@ -123,7 +123,15 @@ Crowd_Debug :: struct {
 
 // crowd_debug is an agent's last tick, with its corridor's polygons on its navmesh, or nil when it is not an agent of
 // the crowd. The corridor is valid until the crowd system runs again.
-crowd_debug :: proc(s: ^State, w: ^ecs.World, e: ecs.Entity) -> (debug: ^Crowd_Debug, mesh: ^Mesh_View, corridor: []u32) {
+crowd_debug :: proc(
+	s: ^State,
+	w: ^ecs.World,
+	e: ecs.Entity,
+) -> (
+	debug: ^Crowd_Debug,
+	mesh: ^Mesh_View,
+	corridor: []u32,
+) {
 	_, slot := find_agent(s, w, e)
 	if slot == nil {
 		return nil, nil, nil
@@ -199,7 +207,9 @@ Crowd_Pool :: struct {
 
 @(private)
 crowd_slot_of :: proc(s: ^State, h: Crowd_Handle) -> ^Crowd_Slot {
-	if h.generation == 0 || int(h.index) >= len(s.crowd.slots) || s.crowd.generations[h.index] != h.generation {
+	if h.generation == 0 ||
+	   int(h.index) >= len(s.crowd.slots) ||
+	   s.crowd.generations[h.index] != h.generation {
 		return nil
 	}
 	slot := &s.crowd.slots[h.index]
@@ -652,7 +662,8 @@ steer_agent :: proc(j: ^Crowd_Job, index: int, result: ^Agent_Result) {
 		position := local(mesh, sn.position)
 		// The corridor's start follows the character to where it got to.
 		reached, visited := move_along_surface(mesh, f.corridor[0], f.position, position)
-		if !merge_start_moved(&f.corridor, visited) || distance_2d(reached, position) > 2 * radius {
+		if !merge_start_moved(&f.corridor, visited) ||
+		   distance_2d(reached, position) > 2 * radius {
 			// Pushed off its corridor, or off the navmesh: it asks for its path from where it is.
 			if has_goal && may_ask {
 				result.ask = goal
@@ -733,7 +744,13 @@ next_corners :: proc(m: ^Mesh_View, f: ^Crowd_Following, radius: f32) -> [][3]f3
 			walk := raycast_local(m, f.corridor[0], f.position, ahead, &visited)
 			if len(visited) > 1 && walk.t > 0.99 {
 				merge_start_shortcut(&f.corridor, visited[:])
-				corners = straight_path(m, f.position, f.end, f.corridor[:], context.temp_allocator)
+				corners = straight_path(
+					m,
+					f.position,
+					f.end,
+					f.corridor[:],
+					context.temp_allocator,
+				)
 			}
 		}
 	}
@@ -757,7 +774,16 @@ next_corners :: proc(m: ^Mesh_View, f: ^Crowd_Following, radius: f32) -> [][3]f3
 // avoided around its neighbors and walls by sampling, and then changed from its current velocity by no more than its
 // acceleration allows.
 @(private)
-avoid :: proc(j: ^Crowd_Job, index: int, slot: ^Crowd_Slot, m: ^Mesh_View, polygon: u32, on_mesh: [3]f32, desired: [3]f32, radius: f32) -> [3]f32 {
+avoid :: proc(
+	j: ^Crowd_Job,
+	index: int,
+	slot: ^Crowd_Slot,
+	m: ^Mesh_View,
+	polygon: u32,
+	on_mesh: [3]f32,
+	desired: [3]f32,
+	radius: f32,
+) -> [3]f32 {
 	sn := j.snapshots[index]
 	agent := sn.agent
 	range := QUERY_RANGE * radius
@@ -837,7 +863,15 @@ avoid :: proc(j: ^Crowd_Job, index: int, slot: ^Crowd_Slot, m: ^Mesh_View, polyg
 	chosen := desired_2d
 	if len(circles) > 0 || len(walls) > 0 {
 		prepare_circles(circles[:], desired_2d)
-		chosen = choose_velocity(AVOID_PARAMS, current, desired_2d, radius, agent.max_speed, circles[:], walls[:])
+		chosen = choose_velocity(
+			AVOID_PARAMS,
+			current,
+			desired_2d,
+			radius,
+			agent.max_speed,
+			circles[:],
+			walls[:],
+		)
 	}
 	change := chosen - current
 	limit := max(agent.acceleration, 0) * j.dt
@@ -882,7 +916,10 @@ find_neighbors :: proc(j: ^Crowd_Job, index: int, range: f32) -> []int {
 					continue
 				}
 				at := count
-				for at > 0 && (distances[at - 1] > distance || (distances[at - 1] == distance && j.snapshots[found[at - 1]].slot > other.slot)) {
+				for at > 0 &&
+				    (distances[at - 1] > distance ||
+						    (distances[at - 1] == distance &&
+								    j.snapshots[found[at - 1]].slot > other.slot)) {
 					at -= 1
 				}
 				if at >= MAX_NEIGHBORS {

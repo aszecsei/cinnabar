@@ -294,8 +294,8 @@ DEFAULT_CLOUDS :: Clouds {
 // Shadow_Settings are a frame's cascades, from the Shadows settings, and its shadows' quality. A distance of 0 gives
 // SHADOW_DISTANCE.
 Shadow_Settings :: struct {
-	distance:     f32,
-	split_lambda: f32,
+	distance:      f32,
+	split_lambda:  f32,
 	// The shadow maps' SHADOW_PARAMS, whether the first lights trace their shadows where the device can, whether a
 	// virtual shadow map takes the place of the cascades, whether it keeps its pages from frame to frame, and whether the
 	// atlas keeps its lights' static casters in a cache.
@@ -350,7 +350,12 @@ register_settings_components :: proc(r: ^ecs.Registry) {
 
 // resolve_settings takes the frame's settings from the volumes at a position, usually the camera's, leaving out the
 // hidden entities, as Frame_Desc.hidden gives them.
-resolve_settings :: proc(r: ^Renderer, w: ^ecs.World, position: ecs.World_Position, hidden: []u32 = nil) -> Frame_Settings {
+resolve_settings :: proc(
+	r: ^Renderer,
+	w: ^ecs.World,
+	position: ecs.World_Position,
+	hidden: []u32 = nil,
+) -> Frame_Settings {
 	inf := volume.gather(&r.volumes, w, position, hidden)
 	aa, _ := volume.blend(w, &inf, Anti_Aliasing)
 	exposure, _ := volume.blend(w, &inf, Exposure)

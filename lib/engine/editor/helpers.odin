@@ -151,7 +151,12 @@ draw_nav_probe :: proc(e: ^Editor, d: ^debug.Draw) {
 }
 
 @(private = "file")
-draw_probe_path :: proc(e: ^Editor, d: ^debug.Draw, start, goal: ecs.World_Position, agent: nav.Agent_Type) {
+draw_probe_path :: proc(
+	e: ^Editor,
+	d: ^debug.Draw,
+	start, goal: ecs.World_Position,
+	agent: nav.Agent_Type,
+) {
 	path := nav.find_path(e.nav, start, goal, agent, allocator = e.platform.frame_allocator)
 	color := nav.agent_color(agent)
 	if path.status == .Partial {
@@ -164,7 +169,13 @@ draw_probe_path :: proc(e: ^Editor, d: ^debug.Draw, start, goal: ecs.World_Posit
 // wider than a half sphere. While the game plays, it draws the rays of its last sight check and the last positions of
 // what it remembers too.
 @(private = "file")
-draw_perceiver :: proc(e: ^Editor, d: ^debug.Draw, entity: ecs.Entity, p: ai.Perceiver, pose: ecs.Transform) {
+draw_perceiver :: proc(
+	e: ^Editor,
+	d: ^debug.Draw,
+	entity: ecs.Entity,
+	p: ai.Perceiver,
+	pose: ecs.Transform,
+) {
 	eye, forward := ai.eye_of(p, pose)
 	right := linalg.normalize0(linalg.quaternion128_mul_vector3(pose.rotation, [3]f32{1, 0, 0}))
 	up := linalg.normalize0(linalg.quaternion128_mul_vector3(pose.rotation, [3]f32{0, 1, 0}))
@@ -217,7 +228,14 @@ light_color :: proc(color: [3]f32, selected: bool) -> [4]f32 {
 }
 
 @(private = "file")
-draw_entity_helpers :: proc(e: ^Editor, w: ^ecs.World, d: ^debug.Draw, entity: ecs.Entity, pose: ecs.Transform, selected: bool) {
+draw_entity_helpers :: proc(
+	e: ^Editor,
+	w: ^ecs.World,
+	d: ^debug.Draw,
+	entity: ecs.Entity,
+	pose: ecs.Transform,
+	selected: bool,
+) {
 	right := linalg.quaternion128_mul_vector3(pose.rotation, [3]f32{1, 0, 0})
 	up := linalg.quaternion128_mul_vector3(pose.rotation, [3]f32{0, 1, 0})
 	forward := linalg.quaternion128_mul_vector3(pose.rotation, [3]f32{0, 0, 1})
@@ -247,24 +265,48 @@ draw_entity_helpers :: proc(e: ^Editor, w: ^ecs.World, d: ^debug.Draw, entity: e
 		if inner < outer {
 			faint := color
 			faint.a *= 0.5
-			debug.circle(d, ecs.position_offset(at, forward * reach * math.cos(inner)), right, up, reach * math.sin(inner), faint)
+			debug.circle(
+				d,
+				ecs.position_offset(at, forward * reach * math.cos(inner)),
+				right,
+				up,
+				reach * math.sin(inner),
+				faint,
+			)
 		}
 	}
 	if l := ecs.get(w, entity, render.Directional_Light); l != nil {
-		debug.arrow(d, at, ecs.position_offset(at, forward * ARROW_LENGTH), light_color(l.color, selected))
+		debug.arrow(
+			d,
+			at,
+			ecs.position_offset(at, forward * ARROW_LENGTH),
+			light_color(l.color, selected),
+		)
 	}
 	if l := ecs.get(w, entity, render.Quad_Light); l != nil {
 		color := light_color(l.color, selected)
 		hx, hy := right * size_of_area(l.width) / 2, up * size_of_area(l.height) / 2
 		corners := [4][3]f32{-hx - hy, hx - hy, hx + hy, -hx + hy}
 		for k in 0 ..< 4 {
-			debug.line(d, ecs.position_offset(at, corners[k]), ecs.position_offset(at, corners[(k + 1) % 4]), color)
+			debug.line(
+				d,
+				ecs.position_offset(at, corners[k]),
+				ecs.position_offset(at, corners[(k + 1) % 4]),
+				color,
+			)
 		}
 		debug.arrow(d, at, ecs.position_offset(at, forward * NORMAL_LENGTH), color)
 	}
 	if l := ecs.get(w, entity, render.Disk_Light); l != nil {
 		color := light_color(l.color, selected)
-		debug.circle(d, at, right * size_of_area(l.width) / 2, up * size_of_area(l.height) / 2, 1, color)
+		debug.circle(
+			d,
+			at,
+			right * size_of_area(l.width) / 2,
+			up * size_of_area(l.height) / 2,
+			1,
+			color,
+		)
 		debug.arrow(d, at, ecs.position_offset(at, forward * NORMAL_LENGTH), color)
 	}
 	if l := ecs.get(w, entity, render.Line_Light); l != nil {
@@ -339,7 +381,13 @@ draw_entity_helpers :: proc(e: ^Editor, w: ^ecs.World, d: ^debug.Draw, entity: e
 			debug.box(d, at, extent - blend, pose.rotation, fade)
 		}
 		if p.box_projection {
-			debug.box(d, at, projection, pose.rotation, selected ? PROBE_COLORS[.Projection] : UNSELECTED)
+			debug.box(
+				d,
+				at,
+				projection,
+				pose.rotation,
+				selected ? PROBE_COLORS[.Projection] : UNSELECTED,
+			)
 		}
 	}
 	if c := ecs.get(w, entity, render.Camera); c != nil {
@@ -349,7 +397,9 @@ draw_entity_helpers :: proc(e: ^Editor, w: ^ecs.World, d: ^debug.Draw, entity: e
 		// An orthographic camera shows a box: as wide at the camera as ahead of it.
 		orthographic := c.projection == .Orthographic
 		if orthographic {
-			half_y = (c.orthographic_height > 0 ? c.orthographic_height : render.DEFAULT_ORTHOGRAPHIC_HEIGHT) / 2
+			half_y =
+				(c.orthographic_height > 0 ? c.orthographic_height : render.DEFAULT_ORTHOGRAPHIC_HEIGHT) /
+				2
 		}
 		half_x := half_y * FRUSTUM_ASPECT
 		center := forward * FRUSTUM_LENGTH
@@ -362,7 +412,12 @@ draw_entity_helpers :: proc(e: ^Editor, w: ^ecs.World, d: ^debug.Draw, entity: e
 		for k in 0 ..< 4 {
 			from := orthographic ? ecs.position_offset(at, corners[k]) : at
 			debug.line(d, from, ecs.position_offset(at, center + corners[k]), color)
-			debug.line(d, ecs.position_offset(at, center + corners[k]), ecs.position_offset(at, center + corners[(k + 1) % 4]), color)
+			debug.line(
+				d,
+				ecs.position_offset(at, center + corners[k]),
+				ecs.position_offset(at, center + corners[(k + 1) % 4]),
+				color,
+			)
 			if orthographic {
 				debug.line(d, from, ecs.position_offset(at, corners[(k + 1) % 4]), color)
 			}
@@ -417,7 +472,8 @@ icon_instances :: proc(
 		case ecs.has(w, entity, render.Spot_Light):
 			icon.kind, icon.color = .Spot_Light, ecs.get(w, entity, render.Spot_Light).color
 		case ecs.has(w, entity, render.Directional_Light):
-			icon.kind, icon.color = .Directional_Light, ecs.get(w, entity, render.Directional_Light).color
+			icon.kind, icon.color =
+				.Directional_Light, ecs.get(w, entity, render.Directional_Light).color
 		case ecs.has(w, entity, render.Quad_Light):
 			icon.kind, icon.color = .Area_Light, ecs.get(w, entity, render.Quad_Light).color
 		case ecs.has(w, entity, render.Disk_Light):
@@ -460,13 +516,22 @@ icons_shown :: proc(e: ^Editor, viewport := 0) -> bool {
 // draw_collider draws a collider's shape as the simulation has it, at its offset and rotation in the entity (see
 // docs/physics/design.md#the-editor).
 @(private = "file")
-draw_collider :: proc(e: ^Editor, d: ^debug.Draw, c: physics.Collider, pose: ecs.Transform, selected: bool) {
+draw_collider :: proc(
+	e: ^Editor,
+	d: ^debug.Draw,
+	c: physics.Collider,
+	pose: ecs.Transform,
+	selected: bool,
+) {
 	color := UNSELECTED
 	if selected {
 		color = c.sensor ? SENSOR_COLOR : COLLIDER_COLOR
 	}
 	rotation := pose.rotation * c.rotation
-	at := ecs.position_offset(pose.position, linalg.quaternion128_mul_vector3(pose.rotation, c.offset * pose.scale))
+	at := ecs.position_offset(
+		pose.position,
+		linalg.quaternion128_mul_vector3(pose.rotation, c.offset * pose.scale),
+	)
 	kind, size := physics.collider_size(c, pose.scale)
 	switch kind {
 	case .Box:
@@ -486,7 +551,10 @@ draw_collider :: proc(e: ^Editor, d: ^debug.Draw, c: physics.Collider, pose: ecs
 		}
 		data, _ := asset.data(e.assets, h)
 		if blob, ok := format.mesh_view(data); ok {
-			center := ecs.position_offset(at, linalg.quaternion128_mul_vector3(rotation, blob.bounds.center * size))
+			center := ecs.position_offset(
+				at,
+				linalg.quaternion128_mul_vector3(rotation, blob.bounds.center * size),
+			)
 			debug.box(d, center, (blob.bounds.max - blob.bounds.min) * 0.5 * size, rotation, color)
 		}
 	}
@@ -495,7 +563,14 @@ draw_collider :: proc(e: ^Editor, d: ^debug.Draw, c: physics.Collider, pose: ecs
 // draw_upright draws a capsule or a cylinder along its rotation's y: its radius, and the half height of the cylinder
 // between its caps.
 @(private = "file")
-draw_upright :: proc(d: ^debug.Draw, at: ecs.World_Position, rotation: quaternion128, radius, half: f32, capsule: bool, color: [4]f32) {
+draw_upright :: proc(
+	d: ^debug.Draw,
+	at: ecs.World_Position,
+	rotation: quaternion128,
+	radius, half: f32,
+	capsule: bool,
+	color: [4]f32,
+) {
 	right := linalg.quaternion128_mul_vector3(rotation, [3]f32{1, 0, 0})
 	up := linalg.quaternion128_mul_vector3(rotation, [3]f32{0, 1, 0})
 	forward := linalg.quaternion128_mul_vector3(rotation, [3]f32{0, 0, 1})
@@ -503,7 +578,12 @@ draw_upright :: proc(d: ^debug.Draw, at: ecs.World_Position, rotation: quaternio
 	debug.circle(d, top, right, forward, radius, color)
 	debug.circle(d, bottom, right, forward, radius, color)
 	for side in ([4][3]f32{right, -right, forward, -forward}) {
-		debug.line(d, ecs.position_offset(top, side * radius), ecs.position_offset(bottom, side * radius), color)
+		debug.line(
+			d,
+			ecs.position_offset(top, side * radius),
+			ecs.position_offset(bottom, side * radius),
+			color,
+		)
 	}
 	if capsule {
 		debug.sphere(d, top, radius, color)
@@ -518,7 +598,15 @@ draw_character :: proc(d: ^debug.Draw, c: physics.Character, pose: ecs.Transform
 	radius, height := physics.character_size(c)
 	up := linalg.quaternion128_mul_vector3(pose.rotation, [3]f32{0, 1, 0})
 	at := ecs.position_offset(pose.position, up * height * 0.5)
-	draw_upright(d, at, pose.rotation, radius, height * 0.5 - radius, true, COLLIDER_COLOR if selected else UNSELECTED)
+	draw_upright(
+		d,
+		at,
+		pose.rotation,
+		radius,
+		height * 0.5 - radius,
+		true,
+		COLLIDER_COLOR if selected else UNSELECTED,
+	)
 }
 
 // The axes of a joint's frame, in meters.
@@ -528,9 +616,18 @@ JOINT_AXES :: 0.25
 // draw_joint draws a joint's frame as axes, its x the hinge's or the slider's axis, and a line to its other body's
 // entity (see docs/physics/design.md#the-editor).
 @(private = "file")
-draw_joint :: proc(w: ^ecs.World, d: ^debug.Draw, j: physics.Joint, pose: ecs.Transform, selected: bool) {
+draw_joint :: proc(
+	w: ^ecs.World,
+	d: ^debug.Draw,
+	j: physics.Joint,
+	pose: ecs.Transform,
+	selected: bool,
+) {
 	frame := ecs.Transform {
-		position = ecs.position_offset(pose.position, linalg.quaternion128_mul_vector3(pose.rotation, j.offset * pose.scale)),
+		position = ecs.position_offset(
+			pose.position,
+			linalg.quaternion128_mul_vector3(pose.rotation, j.offset * pose.scale),
+		),
 		rotation = pose.rotation * j.rotation,
 		scale    = 1,
 	}

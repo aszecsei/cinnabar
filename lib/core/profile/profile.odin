@@ -178,5 +178,11 @@ close_to :: #force_inline proc(p: ^Procs, depth: int) {
 
 // procs is the recorder's Procs, for Platform_API.
 procs :: proc() -> Procs {
-	return {name = intern, begin = begin_zone, end = end_zone, depth = zone_depth, close_to = close_zones}
+	return {
+		name = intern,
+		begin = begin_zone,
+		end = end_zone,
+		depth = zone_depth,
+		close_to = close_zones,
+	}
 }

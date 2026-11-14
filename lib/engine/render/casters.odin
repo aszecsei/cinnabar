@@ -84,7 +84,9 @@ caster_bounds :: proc(
 ) -> []Caster_Bounds {
 	bounds := make([]Caster_Bounds, high, allocator)
 	for item in items {
-		if item.flags & ITEM_CASTS_SHADOWS == 0 || item.flags & ITEM_VIEW_MODEL != 0 || item.instance >= high {
+		if item.flags & ITEM_CASTS_SHADOWS == 0 ||
+		   item.flags & ITEM_VIEW_MODEL != 0 ||
+		   item.instance >= high {
 			continue
 		}
 		b := &bounds[item.instance]
@@ -120,13 +122,23 @@ caster_bounds :: proc(
 		}
 		b.casts = true
 		b.unbounded ||= unbounded
-		b.inherent ||= unbounded || item.flags & (ITEM_SKINNED | ITEM_BILLBOARD) != 0 || pipeline.animated
+		b.inherent ||=
+			unbounded || item.flags & (ITEM_SKINNED | ITEM_BILLBOARD) != 0 || pipeline.animated
 		// The signature is what the items draw, but not where: their place in the frame's lists changes from frame to frame.
 		b.signature = signature_add(b.signature, u64(item.first) | u64(item.count) << 32)
 		b.signature = signature_add(b.signature, u64(item.bin) | u64(item.flags) << 32)
-		b.signature = signature_add(b.signature, u64(transmute(u32)item.bound) | u64(item.list) << 32)
-		b.signature = signature_add(b.signature, u64(transmute(u32)item.sphere.x) | u64(transmute(u32)item.sphere.y) << 32)
-		b.signature = signature_add(b.signature, u64(transmute(u32)item.sphere.z) | u64(transmute(u32)item.sphere.w) << 32)
+		b.signature = signature_add(
+			b.signature,
+			u64(transmute(u32)item.bound) | u64(item.list) << 32,
+		)
+		b.signature = signature_add(
+			b.signature,
+			u64(transmute(u32)item.sphere.x) | u64(transmute(u32)item.sphere.y) << 32,
+		)
+		b.signature = signature_add(
+			b.signature,
+			u64(transmute(u32)item.sphere.z) | u64(transmute(u32)item.sphere.w) << 32,
+		)
 	}
 	return bounds
 }
@@ -155,14 +167,21 @@ signature_add :: proc(h: u64, value: u64) -> u64 {
 // static again, whose place joins them; and each dynamic slot's report, every SHADOW_FAR_REFRESH frames, staggered by
 // its slot. A slot's moved is set before this, when its pose changed this frame.
 @(private)
-track_casters :: proc(t: ^Caster_Tracking, bounds: []Caster_Bounds, origin: ecs.World_Position, frame: u64) {
+track_casters :: proc(
+	t: ^Caster_Tracking,
+	bounds: []Caster_Bounds,
+	origin: ecs.World_Position,
+	frame: u64,
+) {
 	clear(&t.changes)
 	t.frame = frame
 	for &c, i in t.slots[:len(bounds)] {
 		slot := u32(i)
 		b := bounds[i]
 		if !c.casts && !b.casts {
-			c = {moved = c.moved}
+			c = {
+				moved = c.moved,
+			}
 			continue
 		}
 		sphere: Caster_Sphere
@@ -173,7 +192,9 @@ track_casters :: proc(t: ^Caster_Tracking, bounds: []Caster_Bounds, origin: ecs.
 		volatile := b.inherent || (c.moved != 0 && frame - c.moved < SHADOW_STILL_FRAMES)
 		switch {
 		case c.casts != b.casts || c.signature != b.signature:
-			change := Caster_Change{slot = slot}
+			change := Caster_Change {
+				slot = slot,
+			}
 			if c.casts {
 				change.old = c.reported
 			}
@@ -185,12 +206,19 @@ track_casters :: proc(t: ^Caster_Tracking, bounds: []Caster_Bounds, origin: ecs.
 		case volatile != c.volatile:
 			append(&t.changes, Caster_Change{slot = slot, old = c.reported, new = sphere})
 			c.reported = sphere
-		case volatile && (frame + u64(slot)) % SHADOW_FAR_REFRESH == 0 && (b.inherent || sphere != c.reported):
-			append(&t.changes, Caster_Change{slot = slot, old = c.reported, new = sphere, report = true})
+		case volatile &&
+		     (frame + u64(slot)) % SHADOW_FAR_REFRESH == 0 &&
+		     (b.inherent || sphere != c.reported):
+			append(
+				&t.changes,
+				Caster_Change{slot = slot, old = c.reported, new = sphere, report = true},
+			)
 			c.reported = sphere
 		}
 		if !b.casts {
-			c = {moved = c.moved}
+			c = {
+				moved = c.moved,
+			}
 			continue
 		}
 		c.sphere, c.signature, c.casts = sphere, b.signature, true
@@ -220,7 +248,14 @@ caster_live :: proc(c: Caster_Slot, camera: ecs.World_Position, distance: f32) -
 Live_Slots :: [MAX_INSTANCES / 64]u64
 
 // live_slots gives the slots below high that a view draws live, from where it looks and its dynamic shadow distance.
-live_slots :: proc(t: ^Caster_Tracking, high: u32, camera: ecs.World_Position, distance: f32) -> (live: Live_Slots) {
+live_slots :: proc(
+	t: ^Caster_Tracking,
+	high: u32,
+	camera: ecs.World_Position,
+	distance: f32,
+) -> (
+	live: Live_Slots,
+) {
 	for c, slot in t.slots[:high] {
 		if caster_live(c, camera, distance) {
 			live[slot / 64] |= 1 << uint(slot % 64)

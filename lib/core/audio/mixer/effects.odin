@@ -23,24 +23,24 @@ REVERB_INPUT :: 0.15
 // and frees it, and the mix thread runs it.
 @(private)
 Effect_State :: struct {
-	kind:     audio.Effect_Kind,
+	kind:               audio.Effect_Kind,
 	// In the list of states to free.
-	next:     ^Effect_State,
+	next:               ^Effect_State,
 	// A biquad's coefficients and its memory for each channel.
 	b0, b1, b2, a1, a2: f32,
-	z1, z2:   [2]f32,
+	z1, z2:             [2]f32,
 	// A delay.
-	lines:    [^][2]f32,
-	head:     int,
-	length:   int,
-	feedback: f32,
-	wet:      f32,
+	lines:              [^][2]f32,
+	head:               int,
+	length:             int,
+	feedback:           f32,
+	wet:                f32,
 	// A reverb: its lines, one channel each, their heads, gains and damping memory.
-	reverb:   [^]f32,
-	heads:    [4]int,
-	gains:    [4]f32,
-	damped:   [4]f32,
-	damping:  f32,
+	reverb:             [^]f32,
+	heads:              [4]int,
+	gains:              [4]f32,
+	damped:             [4]f32,
+	damping:            f32,
 }
 
 // effect_create allocates a kind's state, zeroed. It is the game thread's.
@@ -75,7 +75,13 @@ effect_retire :: proc(m: ^Mixer, effect: ^Effect_State) {
 	for {
 		head := sync.atomic_load_explicit(&m.retired, .Relaxed)
 		effect.next = head
-		_, swapped := sync.atomic_compare_exchange_weak_explicit(&m.retired, head, effect, .Release, .Relaxed)
+		_, swapped := sync.atomic_compare_exchange_weak_explicit(
+			&m.retired,
+			head,
+			effect,
+			.Release,
+			.Relaxed,
+		)
 		if swapped {
 			return
 		}

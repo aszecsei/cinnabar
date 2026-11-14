@@ -23,7 +23,9 @@ submit_accepts_valid_frame :: proc(t: ^testing.T) {
 	defer shutdown()
 
 	shader := []byte{0}
-	pipeline := create_graphics_pipeline({vertex = shader, pixel = shader, colors = {{format = gpu.FRAME_TARGET_FORMAT}}})
+	pipeline := create_graphics_pipeline(
+		{vertex = shader, pixel = shader, colors = {{format = gpu.FRAME_TARGET_FORMAT}}},
+	)
 	testing.expect(t, pipeline != {})
 
 	cb := gpu.command_buffer(virtual.arena_allocator(&arena))
@@ -88,14 +90,44 @@ create_rejects_bad_descs :: proc(t: ^testing.T) {
 	context.logger = testlog.expected_errors()
 	testing.expect_value(t, create_buffer({size = 6}, nil), gpu.Buffer{})
 	testing.expect_value(t, create_buffer({size = 4}, {1, 2, 3, 4, 5}), gpu.Buffer{})
-	testing.expect_value(t, create_texture({size = {4, 4}, format = .D32_Float, usage = {.Sampled}}, nil), gpu.Texture{})
-	testing.expect_value(t, create_texture({size = {4, 4}, format = .RGBA8_Unorm, usage = {.Sampled}}, {1, 2, 3}), gpu.Texture{})
-	testing.expect_value(t, create_texture({size = {4, 4}, format = .RGBA8_Unorm, mip_count = 4, usage = {.Sampled}}, nil), gpu.Texture{})
-	testing.expect_value(t, create_graphics_pipeline({vertex = {0}, colors = {{format = .RGBA8_Unorm}}}), gpu.Pipeline{})
-	testing.expect_value(t, create_graphics_pipeline({vertex = {0}, pixel = {0}, colors = {{format = .D32_Float}}}), gpu.Pipeline{})
+	testing.expect_value(
+		t,
+		create_texture({size = {4, 4}, format = .D32_Float, usage = {.Sampled}}, nil),
+		gpu.Texture{},
+	)
+	testing.expect_value(
+		t,
+		create_texture({size = {4, 4}, format = .RGBA8_Unorm, usage = {.Sampled}}, {1, 2, 3}),
+		gpu.Texture{},
+	)
+	testing.expect_value(
+		t,
+		create_texture(
+			{size = {4, 4}, format = .RGBA8_Unorm, mip_count = 4, usage = {.Sampled}},
+			nil,
+		),
+		gpu.Texture{},
+	)
+	testing.expect_value(
+		t,
+		create_graphics_pipeline({vertex = {0}, colors = {{format = .RGBA8_Unorm}}}),
+		gpu.Pipeline{},
+	)
+	testing.expect_value(
+		t,
+		create_graphics_pipeline({vertex = {0}, pixel = {0}, colors = {{format = .D32_Float}}}),
+		gpu.Pipeline{},
+	)
 	testing.expect_value(t, create_compute_pipeline({}), gpu.Pipeline{})
 
-	testing.expect(t, create_texture({size = {4, 4}, format = .RGBA8_Unorm, mip_count = 3, usage = {.Sampled}}, nil) != {})
+	testing.expect(
+		t,
+		create_texture(
+			{size = {4, 4}, format = .RGBA8_Unorm, mip_count = 3, usage = {.Sampled}},
+			nil,
+		) !=
+		{},
+	)
 	testing.expect(t, create_graphics_pipeline({vertex = {0}, depth_format = .D32_Float}) != {})
 }
 
@@ -106,7 +138,17 @@ texture_views_write_a_cubes_mips :: proc(t: ^testing.T) {
 	testing.expect(t, init(nil, {1280, 720}))
 	defer shutdown()
 
-	cube := create_texture({size = {16, 16}, layers = 6, cube = true, format = .RGBA16_Float, mip_count = 5, usage = {.Sampled, .Storage}}, nil)
+	cube := create_texture(
+		{
+			size = {16, 16},
+			layers = 6,
+			cube = true,
+			format = .RGBA16_Float,
+			mip_count = 5,
+			usage = {.Sampled, .Storage},
+		},
+		nil,
+	)
 	testing.expect(t, cube != {})
 	views: [5]gpu.Texture
 	for &view, mip in views {
@@ -126,7 +168,17 @@ texture_views_write_a_cubes_mips :: proc(t: ^testing.T) {
 	testing.expect_value(t, create_texture_view({texture = cube}), gpu.Texture{})
 
 	// A cube array's views write a mip of every cube.
-	array := create_texture({size = {16, 16}, layers = 12, cube = true, format = .RG11B10_Float, mip_count = 3, usage = {.Sampled, .Storage}}, nil)
+	array := create_texture(
+		{
+			size = {16, 16},
+			layers = 12,
+			cube = true,
+			format = .RG11B10_Float,
+			mip_count = 3,
+			usage = {.Sampled, .Storage},
+		},
+		nil,
+	)
 	testing.expect(t, array != {})
 	array_view := create_texture_view({texture = array, mip = 2})
 	testing.expect(t, array_view != {})
@@ -161,7 +213,10 @@ destroy_scope_keeps_other_scopes :: proc(t: ^testing.T) {
 
 	game_buffer := create_buffer({size = 64}, nil)
 	game_pipeline := create_compute_pipeline({compute = {0}})
-	level_texture := create_texture({size = {4, 4}, format = .RGBA8_Unorm, usage = {.Sampled}, scope = .Level}, nil)
+	level_texture := create_texture(
+		{size = {4, 4}, format = .RGBA8_Unorm, usage = {.Sampled}, scope = .Level},
+		nil,
+	)
 	level_sampler := create_sampler({scope = .Level})
 
 	testing.expect_value(t, destroy_scope(.Game), 2)
@@ -197,10 +252,22 @@ updates_keep_the_attachment_formats :: proc(t: ^testing.T) {
 	context.logger = testlog.expected_errors()
 	other := desc
 	other.colors = {{format = .RGBA16_Float}}
-	testing.expect(t, !update_graphics_pipeline(pipeline, other), "an update changed the attachment formats")
-	testing.expect(t, !update_compute_pipeline(pipeline, {compute = shader}), "an update changed the pipeline kind")
+	testing.expect(
+		t,
+		!update_graphics_pipeline(pipeline, other),
+		"an update changed the attachment formats",
+	)
+	testing.expect(
+		t,
+		!update_compute_pipeline(pipeline, {compute = shader}),
+		"an update changed the pipeline kind",
+	)
 	destroy_pipeline(compute)
-	testing.expect(t, !update_compute_pipeline(compute, {compute = shader}), "an update of a destroyed pipeline")
+	testing.expect(
+		t,
+		!update_compute_pipeline(compute, {compute = shader}),
+		"an update of a destroyed pipeline",
+	)
 }
 
 @(test)
@@ -222,7 +289,11 @@ mesh_updates_keep_the_kind :: proc(t: ^testing.T) {
 	context.logger = testlog.expected_errors()
 	vertex := mesh
 	vertex.mesh, vertex.vertex = nil, shader
-	testing.expect(t, !update_graphics_pipeline(pipeline, vertex), "an update turned a mesh pipeline into a vertex pipeline")
+	testing.expect(
+		t,
+		!update_graphics_pipeline(pipeline, vertex),
+		"an update turned a mesh pipeline into a vertex pipeline",
+	)
 }
 
 @(test)
@@ -241,14 +312,38 @@ ray_tracing_resources :: proc(t: ^testing.T) {
 	testing.expect(t, update_ray_tracing_pipeline(pipeline, desc))
 
 	vertices := create_buffer({size = 96}, nil)
-	blas := create_accel({kind = .Bottom, geometries = {{vertices = vertices, vertex_stride = 32, vertex_count = 3}}})
+	blas := create_accel(
+		{
+			kind = .Bottom,
+			geometries = {{vertices = vertices, vertex_stride = 32, vertex_count = 3}},
+		},
+	)
 	tlas := create_accel({kind = .Top, max_instances = 4})
 	testing.expect(t, blas != {} && tlas != {})
 	testing.expect(t, accel_reference(blas) != accel_reference(tlas))
 
 	context.logger = testlog.expected_errors()
-	testing.expect(t, !update_compute_pipeline(pipeline, {compute = {0}}), "an update turned a ray tracing pipeline into a compute pipeline")
-	testing.expect_value(t, create_accel({kind = .Bottom, geometries = {{vertices = {index = 99, generation = 1}, vertex_stride = 32, vertex_count = 3}}}), gpu.Accel_Struct{})
+	testing.expect(
+		t,
+		!update_compute_pipeline(pipeline, {compute = {0}}),
+		"an update turned a ray tracing pipeline into a compute pipeline",
+	)
+	testing.expect_value(
+		t,
+		create_accel(
+			{
+				kind = .Bottom,
+				geometries = {
+					{
+						vertices = {index = 99, generation = 1},
+						vertex_stride = 32,
+						vertex_count = 3,
+					},
+				},
+			},
+		),
+		gpu.Accel_Struct{},
+	)
 
 	// Destroying a geometry buffer leaves the bottom-level structure unbuildable.
 	cb := gpu.command_buffer(context.temp_allocator)
@@ -291,8 +386,18 @@ accels_are_compacted :: proc(t: ^testing.T) {
 	testing.expect_value(t, s.bottom_accel_memory_uncompacted, 3 * 2 * ACCEL_TRIANGLE_BYTES)
 
 	context.logger = testlog.expected_errors()
-	testing.expect_value(t, create_accel({kind = .Bottom, compact = plain, compacted_size = 40}), gpu.Accel_Struct{})
-	testing.expect_value(t, create_accel({kind = .Bottom, compact = {index = 99, generation = 1}, compacted_size = 40}), gpu.Accel_Struct{})
+	testing.expect_value(
+		t,
+		create_accel({kind = .Bottom, compact = plain, compacted_size = 40}),
+		gpu.Accel_Struct{},
+	)
+	testing.expect_value(
+		t,
+		create_accel(
+			{kind = .Bottom, compact = {index = 99, generation = 1}, compacted_size = 40},
+		),
+		gpu.Accel_Struct{},
+	)
 	bad := gpu.command_buffer(context.temp_allocator)
 	gpu.cmd_build_accel(&bad, compacted)
 	testing.expect(t, !submit({bad}), "a compaction's destination was built")
@@ -308,7 +413,10 @@ streams_are_checked :: proc(t: ^testing.T) {
 	testing.expect(t, init(nil, {1280, 720}))
 	defer shutdown()
 
-	texture := create_texture({size = {4, 4}, format = .RGBA8_Unorm, usage = {.Sampled, .Streamed}}, nil)
+	texture := create_texture(
+		{size = {4, 4}, format = .RGBA8_Unorm, usage = {.Sampled, .Streamed}},
+		nil,
+	)
 	buffer := create_buffer({size = 64}, nil)
 	data := make([]byte, 64, context.temp_allocator)
 	transfer := stream_texture(texture, data)
@@ -318,7 +426,11 @@ streams_are_checked :: proc(t: ^testing.T) {
 	context.logger = testlog.expected_errors()
 	testing.expect_value(t, stream_texture(texture, data), gpu.Transfer(0))
 	testing.expect_value(t, stream_buffer(buffer, 4, data), gpu.Transfer(0))
-	testing.expect_value(t, stream_buffer({index = 99, generation = 1}, 0, data[:4]), gpu.Transfer(0))
+	testing.expect_value(
+		t,
+		stream_buffer({index = 99, generation = 1}, 0, data[:4]),
+		gpu.Transfer(0),
+	)
 }
 
 @(test)
@@ -503,7 +615,15 @@ a_texture_capture_comes_back_with_its_ticket :: proc(t: ^testing.T) {
 	sync.guard(&backend_lock)
 	testing.expect(t, init(nil, {64, 32}))
 	defer shutdown()
-	texture := create_texture({size = {16, 8}, format = gpu.FRAME_TARGET_FORMAT, usage = {.Render_Target}, label = "thumbnail"}, nil)
+	texture := create_texture(
+		{
+			size = {16, 8},
+			format = gpu.FRAME_TARGET_FORMAT,
+			usage = {.Render_Target},
+			label = "thumbnail",
+		},
+		nil,
+	)
 	defer destroy_texture(texture)
 	testing.expect(t, request_texture_capture(texture, 7))
 	// One a frame: the caller asks again next frame.
@@ -536,7 +656,15 @@ a_failed_frame_copy_keeps_the_texture_copy :: proc(t: ^testing.T) {
 	sync.guard(&backend_lock)
 	testing.expect(t, init(nil, {64, 32}))
 	defer shutdown()
-	texture := create_texture({size = {16, 8}, format = gpu.FRAME_TARGET_FORMAT, usage = {.Render_Target}, label = "thumbnail"}, nil)
+	texture := create_texture(
+		{
+			size = {16, 8},
+			format = gpu.FRAME_TARGET_FORMAT,
+			usage = {.Render_Target},
+			label = "thumbnail",
+		},
+		nil,
+	)
 	defer destroy_texture(texture)
 
 	testing.expect(t, request_frame_capture(1))
@@ -753,7 +881,15 @@ a_request_keeps_the_source_that_it_was_made_with :: proc(t: ^testing.T) {
 
 	// A texture's copy is of its texture, whatever the source.
 	set_capture_source(3)
-	texture := create_texture({size = {16, 8}, format = gpu.FRAME_TARGET_FORMAT, usage = {.Render_Target}, label = "thumbnail"}, nil)
+	texture := create_texture(
+		{
+			size = {16, 8},
+			format = gpu.FRAME_TARGET_FORMAT,
+			usage = {.Render_Target},
+			label = "thumbnail",
+		},
+		nil,
+	)
 	defer destroy_texture(texture)
 	begin_frame({64, 32})
 	testing.expect(t, request_texture_capture(texture, 9))

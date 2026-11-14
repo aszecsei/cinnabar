@@ -114,7 +114,9 @@ Ending :: struct {
 
 @(private)
 slot_of :: proc(s: ^State, h: Agent_Handle) -> ^Agent_Slot {
-	if h.generation == 0 || int(h.index) >= len(s.agents.slots) || s.agents.generations[h.index] != h.generation {
+	if h.generation == 0 ||
+	   int(h.index) >= len(s.agents.slots) ||
+	   s.agents.generations[h.index] != h.generation {
 		return nil
 	}
 	slot := &s.agents.slots[h.index]
@@ -254,7 +256,8 @@ check_agents :: proc(s: ^State, w: ^ecs.World, commands: ^ecs.Commands) {
 	for view in ecs.query_next(&it) {
 		for state, row in ecs.column(view, 0, Agent_State) {
 			e := ecs.entities(view)[row]
-			if slot := slot_of(s, state.agent); (slot == nil || slot.entity != e) && ecs.has(w, e, Agent) {
+			if slot := slot_of(s, state.agent);
+			   (slot == nil || slot.entity != e) && ecs.has(w, e, Agent) {
 				append(&fresh, e)
 			}
 		}
@@ -291,7 +294,10 @@ ready_agents :: proc(s: ^State, w: ^ecs.World) {
 		case Agent_Ready:
 			board, board_ok := board_of(s, slot.blackboard)
 			decision, decision_ok := decision_of(s, slot.decision)
-			if board_ok && decision_ok && (board.blob.header.key != p.board_key || decision.blob.header.key != p.decision_key) {
+			if board_ok &&
+			   decision_ok &&
+			   (board.blob.header.key != p.board_key ||
+					   decision.blob.header.key != p.decision_key) {
 				set_phase(s, &slot, Agent_Waiting{})
 				if reason, new_board, new_decision := fits(s, &slot); reason == .None {
 					start_agent(s, w, &slot, index, new_board, new_decision)
@@ -303,7 +309,14 @@ ready_agents :: proc(s: ^State, w: ^ecs.World) {
 
 // fits is why an agent cannot think yet, or None with its blobs.
 @(private)
-fits :: proc(s: ^State, slot: ^Agent_Slot) -> (reason: Wait_Reason, board: Board, decision: Decision) {
+fits :: proc(
+	s: ^State,
+	slot: ^Agent_Slot,
+) -> (
+	reason: Wait_Reason,
+	board: Board,
+	decision: Decision,
+) {
 	board_ok, decision_ok: bool
 	board, board_ok = board_of(s, slot.blackboard)
 	decision, decision_ok = decision_of(s, slot.decision)
@@ -316,7 +329,8 @@ fits :: proc(s: ^State, slot: ^Agent_Slot) -> (reason: Wait_Reason, board: Board
 		reason = .Unfitting
 	case s.modules[decision.blob.technique].think == nil:
 		reason = .No_Module
-	case s.modules[decision.blob.technique].check != nil && !s.modules[decision.blob.technique].check(decision, board):
+	case s.modules[decision.blob.technique].check != nil &&
+	     !s.modules[decision.blob.technique].check(decision, board):
 		reason = .Refused
 	}
 	return
@@ -327,13 +341,29 @@ warn_waiting :: proc(slot: ^Agent_Slot, reason: Wait_Reason) {
 	switch reason {
 	case .None, .Loading:
 	case .Other_Blackboard:
-		log.warnf("ai: entity %v's decision %s is for another blackboard than its Agent's", slot.entity, guid_text(slot.decision))
+		log.warnf(
+			"ai: entity %v's decision %s is for another blackboard than its Agent's",
+			slot.entity,
+			guid_text(slot.decision),
+		)
 	case .Unfitting:
-		log.warnf("ai: entity %v's decision %s was cooked against another version of its blackboard. Cook the content.", slot.entity, guid_text(slot.decision))
+		log.warnf(
+			"ai: entity %v's decision %s was cooked against another version of its blackboard. Cook the content.",
+			slot.entity,
+			guid_text(slot.decision),
+		)
 	case .No_Module:
-		log.warnf("ai: entity %v's decision %s is of a technique that no module runs", slot.entity, guid_text(slot.decision))
+		log.warnf(
+			"ai: entity %v's decision %s is of a technique that no module runs",
+			slot.entity,
+			guid_text(slot.decision),
+		)
 	case .Refused:
-		log.warnf("ai: entity %v's decision %s has technique data that its module refuses. Cook the content.", slot.entity, guid_text(slot.decision))
+		log.warnf(
+			"ai: entity %v's decision %s has technique data that its module refuses. Cook the content.",
+			slot.entity,
+			guid_text(slot.decision),
+		)
 	}
 }
 
@@ -341,7 +371,14 @@ warn_waiting :: proc(slot: ^Agent_Slot, reason: Wait_Reason) {
 // slot, and the writes that scripts made to it before it was ready. Every key counts as changed now. Its first think is
 // placed by its slot, so agents that start together do not all think in the same tick.
 @(private)
-start_agent :: proc(s: ^State, w: ^ecs.World, slot: ^Agent_Slot, index: int, board: Board, decision: Decision) {
+start_agent :: proc(
+	s: ^State,
+	w: ^ecs.World,
+	slot: ^Agent_Slot,
+	index: int,
+	board: Board,
+	decision: Decision,
+) {
 	heap := s.platform.heap_allocator
 	ready := Agent_Ready {
 		board_key    = board.blob.header.key,

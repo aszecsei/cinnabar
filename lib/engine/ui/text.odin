@@ -48,19 +48,19 @@ Line :: struct {
 // Node_Text is a node's text this frame, in pixels: its font, its size, its line metrics, its glyphs and lines in the
 // document's arrays, and its length in bytes. ok is false while it has no font to draw with.
 Node_Text :: struct {
-	ok:        bool,
-	font:      format.Guid,
-	px:        f32,
-	ascender:  f32,
+	ok:          bool,
+	font:        format.Guid,
+	px:          f32,
+	ascender:    f32,
 	// The line's height, with its line_height, and its baseline from the line's top: half of the room that
 	// line_height adds, above the ascender.
-	line:      f32,
-	baseline:  f32,
-	glyphs:    Range,
-	lines:     Range,
-	length:    u32,
+	line:        f32,
+	baseline:    f32,
+	glyphs:      Range,
+	lines:       Range,
+	length:      u32,
 	// Its width on one line.
-	width:     f32,
+	width:       f32,
 	// The text is the field's placeholder.
 	placeholder: bool,
 }
@@ -85,7 +85,12 @@ begin_text :: proc(s: ^State) -> Text_Frame {
 place_shaper :: proc(s: ^State, slot: ^Font_Slot, data: []byte, blob: ^format.Font_Blob) -> bool {
 	file := format.blob_bytes(data, blob.font_data)
 	state: kbts.load_font_state
-	scratch_size, output_size, err := kbts.LoadFont(&slot.shaper.font, &state, file, c.int(blob.index))
+	scratch_size, output_size, err := kbts.LoadFont(
+		&slot.shaper.font,
+		&state,
+		file,
+		c.int(blob.index),
+	)
 	if err != .NONE && err != .NEED_TO_CREATE_BLOB {
 		if !slot.warned {
 			log.errorf("ui: kb_text_shape cannot read font %v: %v", slot.guid, err)
@@ -98,7 +103,8 @@ place_shaper :: proc(s: ^State, slot: ^Font_Slot, data: []byte, blob: ^format.Fo
 	if alloc_err != nil {
 		return false
 	}
-	if place_err := kbts.PlaceBlob(&slot.shaper.font, &state, raw_data(scratch), raw_data(memory)); place_err != .NONE {
+	if place_err := kbts.PlaceBlob(&slot.shaper.font, &state, raw_data(scratch), raw_data(memory));
+	   place_err != .NONE {
 		mem.free_bytes(memory, s.allocator)
 		if !slot.warned {
 			log.errorf("ui: kb_text_shape cannot place font %v: %v", slot.guid, place_err)
@@ -165,7 +171,16 @@ expand :: proc(d: ^Document, text: string, allocator := context.temp_allocator) 
 // shape_text shapes a text with a font at a size in pixels, and appends its glyphs to the document's, each with its
 // cluster's byte and where a line may break. It gives the text's width on one line.
 @(private)
-shape_text :: proc(tf: Text_Frame, d: ^Document, font: Font_Info, text: string, px: f32) -> (glyphs: Range, width: f32) {
+shape_text :: proc(
+	tf: Text_Frame,
+	d: ^Document,
+	font: Font_Info,
+	text: string,
+	px: f32,
+) -> (
+	glyphs: Range,
+	width: f32,
+) {
 	glyphs.first = u32(len(d.glyphs))
 	if tf.ctx == nil || text == "" {
 		return
@@ -203,7 +218,11 @@ shape_text :: proc(tf: Text_Frame, d: ^Document, font: Font_Info, text: string, 
 					glyph.advance = 0
 				}
 				// After spaces or a hyphen, a line may break.
-				if cluster > 0 && text[cluster] != ' ' && (text[cluster - 1] == ' ' || text[cluster - 1] == '-' || text[cluster - 1] == '\t') {
+				if cluster > 0 &&
+				   text[cluster] != ' ' &&
+				   (text[cluster - 1] == ' ' ||
+						   text[cluster - 1] == '-' ||
+						   text[cluster - 1] == '\t') {
 					glyph.flags += {.Break_Before}
 				}
 			}
@@ -292,9 +311,11 @@ measure_text :: proc(s: ^State, tf: Text_Frame, d: ^Document, n: u32) {
 		return
 	}
 	px := st.size * s.scale
-	expanded := node.element == .Field && !placeholder ? text : expand(d, text, s.platform.frame_allocator)
+	expanded :=
+		node.element == .Field && !placeholder ? text : expand(d, text, s.platform.frame_allocator)
 	glyphs, width := shape_text(tf, d, font, expanded, px)
-	ascender, descender, gap := font.blob.ascender * px, font.blob.descender * px, font.blob.line_gap * px
+	ascender, descender, gap :=
+		font.blob.ascender * px, font.blob.descender * px, font.blob.line_gap * px
 	line := (ascender - descender + gap) * st.line_height
 	node.text = {
 		ok          = true,
@@ -322,7 +343,9 @@ caret_x :: proc(d: ^Document, text: Node_Text, at: u32) -> f32 {
 			return g.x
 		}
 	}
-	return line.glyphs.count > 0 ? d.glyphs[line.glyphs.first + line.glyphs.count - 1].x + d.glyphs[line.glyphs.first + line.glyphs.count - 1].advance : 0
+	return(
+		line.glyphs.count > 0 ? d.glyphs[line.glyphs.first + line.glyphs.count - 1].x + d.glyphs[line.glyphs.first + line.glyphs.count - 1].advance : 0 \
+	)
 }
 
 // caret_at is the byte of a node's first line that a point x from the line's start is nearest to, at a cluster's edge.

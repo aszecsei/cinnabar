@@ -35,7 +35,13 @@ add_force :: proc(to: Effects, w: ^ecs.World, e: ecs.Entity, force: [3]f32) -> b
 	return true
 }
 
-add_force_at :: proc(to: Effects, w: ^ecs.World, e: ecs.Entity, force: [3]f32, point: ecs.World_Position) -> bool {
+add_force_at :: proc(
+	to: Effects,
+	w: ^ecs.World,
+	e: ecs.Entity,
+	force: [3]f32,
+	point: ecs.World_Position,
+) -> bool {
 	body := body_of(w, e) or_return
 	core_physics.cmd_add_force_at(to.list, body, force, ecs.position_sub_f64(point, to.anchor))
 	return true
@@ -82,7 +88,13 @@ wake :: proc(to: Effects, w: ^ecs.World, e: ecs.Entity) -> bool {
 // docs/physics/design.md#characters). With gravity, the backend adds gravity: velocity's x and z are the walk, and its
 // y is a jump, added once. Without it, velocity is the character's, as given. Its Physics_Character shows the
 // character's velocity after the tick.
-character_move :: proc(to: Effects, w: ^ecs.World, e: ecs.Entity, velocity: [3]f32, gravity := false) -> bool {
+character_move :: proc(
+	to: Effects,
+	w: ^ecs.World,
+	e: ecs.Entity,
+	velocity: [3]f32,
+	gravity := false,
+) -> bool {
 	body := character_of(w, e) or_return
 	core_physics.cmd_set_character_velocity(to.list, body, velocity, {.Gravity} if gravity else {})
 	return true

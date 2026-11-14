@@ -74,17 +74,17 @@ Fog_Push :: struct {
 // Integrate_Push matches Push in fog_integrate.hlsl.
 @(private = "file")
 Integrate_Push :: struct {
-	input:       u32,
-	output:      u32,
-	grid:        [2]u32,
-	scale:       [2]f32,
-	slices:      [2]f32,
-	screen_size: [2]f32,
-	slice_count: u32,
+	input:        u32,
+	output:       u32,
+	grid:         [2]u32,
+	scale:        [2]f32,
+	slices:       [2]f32,
+	screen_size:  [2]f32,
+	slice_count:  u32,
 	// Whether the view is orthographic, whose slices are even.
 	orthographic: u32,
 	// The froxels' tile in pixels.
-	tile:        f32,
+	tile:         f32,
 }
 
 // Background_Push matches Push in fog_background.hlsl.
@@ -105,17 +105,17 @@ Background_Push :: struct {
 // Fog_Frame is what one frame's fog passes need, in frame memory.
 @(private)
 Fog_Frame :: struct {
-	push:     Fog_Push,
-	traced:   bool,
-	grid:     [3]u32,
+	push:    Fog_Push,
+	traced:  bool,
+	grid:    [3]u32,
 	// The share of the volume's width and height that the screen covers.
-	scale:    [2]f32,
-	history:  History,
+	scale:   [2]f32,
+	history: History,
 	// The integrated volume, which the forward pass reads, and the scene that the background pass fogs: later passes
 	// replace Frame.scene before the passes record.
-	volume:   Texture,
-	scene:    Texture,
-	accel:    Accel,
+	volume:  Texture,
+	scene:   Texture,
+	accel:   Accel,
 }
 
 fog_init :: proc(v: ^Volumetric_Fog) {
@@ -139,7 +139,13 @@ sync_fog_pipelines :: proc(r: ^Renderer, force: bool) {
 	// A device without Ray_Query cannot create the traced pipeline, and has no shadow mask to trace for. With it, both
 	// are kept, since the quality turns tracing on and off.
 	if r.caps.ray_query {
-		sync_compute_pipeline(&v.inject_traced, r.platform, assets, {label = "fog inject (traced)"}, force)
+		sync_compute_pipeline(
+			&v.inject_traced,
+			r.platform,
+			assets,
+			{label = "fog inject (traced)"},
+			force,
+		)
 	}
 	sync_compute_pipeline(&v.inject, r.platform, assets, {label = "fog inject"}, force)
 	sync_compute_pipeline(&v.integrate, r.platform, assets, {label = "fog integrate"}, force)
@@ -164,7 +170,8 @@ begin_fog :: proc(f: ^Frame, fog: Fog_Settings) {
 	platform := r.platform
 	// Until the traced pipeline is ready, the lights in the mask light the fog unshadowed.
 	traced := f.shadows.mask_count > 0 && pipeline_ready(platform, &v.inject_traced)
-	if !pipeline_ready(platform, traced ? &v.inject_traced : &v.inject) || !pipeline_ready(platform, &v.integrate) {
+	if !pipeline_ready(platform, traced ? &v.inject_traced : &v.inject) ||
+	   !pipeline_ready(platform, &v.integrate) {
 		return
 	}
 	if fog.density <= 0 {
@@ -172,7 +179,10 @@ begin_fog :: proc(f: ^Frame, fog: Fog_Settings) {
 	}
 	tile := FOG_LEVEL_TILE[fog.level]
 	grid := fog_grid(f.size, fog.level)
-	history := history_texture(f.graph, {size = grid.xy, depth = grid.z, format = FOG_FORMAT, label = "fog history"})
+	history := history_texture(
+		f.graph,
+		{size = grid.xy, depth = grid.z, format = FOG_FORMAT, label = "fog history"},
+	)
 	if history.current == 0 {
 		return
 	}
@@ -186,20 +196,20 @@ begin_fog :: proc(f: ^Frame, fog: Fog_Settings) {
 		scale = {f32(f.size.x) / f32(grid.x * tile), f32(f.size.y) / f32(grid.y * tile)},
 		history = history,
 		push = {
-			right = {right.x, right.y, right.z, scale.x},
-			up = {up.x, up.y, up.z, scale.y},
-			forward = {forward.x, forward.y, forward.z, 0},
-			albedo = fog.albedo,
-			density = fog.density,
+			right          = {right.x, right.y, right.z, scale.x},
+			up             = {up.x, up.y, up.z, scale.y},
+			forward        = {forward.x, forward.y, forward.z, 0},
+			albedo         = fog.albedo,
+			density        = fog.density,
 			height_falloff = fog.height_falloff,
 			// Relative to the camera, in f64 so a camera far from the origin keeps it exact.
-			base_height = f32(f64(fog.base_height) - ecs.position_to_meters(f.view.position).y),
-			anisotropy = clamp(fog.anisotropy, -0.95, 0.95),
-			jitter = halton(f.state.fog_frame % JITTER_SAMPLES + 1, 2),
-			grid = grid,
-			valid = u32(history.valid),
-			blend = FOG_BLEND,
-			tile = f32(tile),
+			base_height    = f32(f64(fog.base_height) - ecs.position_to_meters(f.view.position).y),
+			anisotropy     = clamp(fog.anisotropy, -0.95, 0.95),
+			jitter         = halton(f.state.fog_frame % JITTER_SAMPLES + 1, 2),
+			grid           = grid,
+			valid          = u32(history.valid),
+			blend          = FOG_BLEND,
+			tile           = f32(tile),
 		},
 	}
 	f.fog = ff
@@ -233,7 +243,10 @@ add_fog_passes :: proc(f: ^Frame) {
 	read(g, p, ff.history.previous)
 	write(g, p, ff.history.current)
 
-	ff.volume = create_texture(g, {size = ff.grid.xy, depth = ff.grid.z, format = FOG_FORMAT, label = "fog volume"})
+	ff.volume = create_texture(
+		g,
+		{size = ff.grid.xy, depth = ff.grid.z, format = FOG_FORMAT, label = "fog volume"},
+	)
 	p = add_compute_pass(g, "fog integrate", run_fog_integrate, f)
 	read(g, p, ff.history.current)
 	write(g, p, ff.volume)
@@ -286,15 +299,15 @@ run_fog_integrate :: proc(ctx: ^Pass_Context) {
 	g := ctx.graph
 	scale, bias := slice_constants(f.view.projection)
 	push := Integrate_Push {
-		input       = gpu.read_index(gpu_texture(g, ff.history.current)),
-		output      = gpu.write_index(gpu_texture(g, ff.volume)),
-		grid        = ff.grid.xy,
-		scale       = {ff.push.right.w, ff.push.up.w},
-		slices      = {scale, bias},
-		screen_size = {f32(f.size.x), f32(f.size.y)},
-		slice_count = ff.grid.z,
+		input        = gpu.read_index(gpu_texture(g, ff.history.current)),
+		output       = gpu.write_index(gpu_texture(g, ff.volume)),
+		grid         = ff.grid.xy,
+		scale        = {ff.push.right.w, ff.push.up.w},
+		slices       = {scale, bias},
+		screen_size  = {f32(f.size.x), f32(f.size.y)},
+		slice_count  = ff.grid.z,
 		orthographic = u32(is_orthographic(f.view)),
-		tile        = ff.push.tile,
+		tile         = ff.push.tile,
 	}
 	gpu.cmd_set_pipeline(ctx.cb, f.renderer.fog.integrate.pipeline)
 	gpu.cmd_push_constants(ctx.cb, &push)

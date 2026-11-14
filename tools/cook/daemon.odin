@@ -34,7 +34,10 @@ run_daemon :: proc(parsed: Cook_Options) -> bool {
 	d.options = clone_options(parsed)
 	lock, locked := lock_cache(d.options.cache)
 	if locked == .Held {
-		log.errorf("cook: another cook is using %s, such as the daemon of another editor or `just watch`. Stop it, and start this one again.", d.options.cache)
+		log.errorf(
+			"cook: another cook is using %s, such as the daemon of another editor or `just watch`. Stop it, and start this one again.",
+			d.options.cache,
+		)
 	}
 	if locked != .Locked {
 		return false
@@ -65,7 +68,14 @@ run_daemon :: proc(parsed: Cook_Options) -> bool {
 		wake :: proc(data: rawptr) {
 			watcher_wake((^Watcher)(data))
 		}
-		serve.start(&d.server, "cook: cook link", d.options.link, write_log, wake, &d.watcher) or_return
+		serve.start(
+			&d.server,
+			"cook: cook link",
+			d.options.link,
+			write_log,
+			wake,
+			&d.watcher,
+		) or_return
 		context.logger = serve.logger(&d.server)
 	}
 	defer serve.stop(&d.server)
@@ -109,7 +119,13 @@ run_daemon :: proc(parsed: Cook_Options) -> bool {
 // cooks, logs the problems that changed, says what it cooked, sends the editor what changed, and saves the index when
 // it changed. It cooks the assets in force whatever their keys.
 @(private)
-daemon_pass :: proc(d: ^Daemon, watched: Watch_Changes, force: map[format.Guid]bool = nil) -> (report: Pass_Report) {
+daemon_pass :: proc(
+	d: ^Daemon,
+	watched: Watch_Changes,
+	force: map[format.Guid]bool = nil,
+) -> (
+	report: Pass_Report,
+) {
 	start := time.tick_now()
 	progress := Progress {
 		data     = d,
@@ -123,7 +139,15 @@ daemon_pass :: proc(d: ^Daemon, watched: Watch_Changes, force: map[format.Guid]b
 			server_send_linked(&d.server, p)
 		}
 	}
-	pass := cook(d.options, ALL_KINDS, log_problems = false, force = force, progress = progress, saved = &d.index, changes = watched)
+	pass := cook(
+		d.options,
+		ALL_KINDS,
+		log_problems = false,
+		force = force,
+		progress = progress,
+		saved = &d.index,
+		changes = watched,
+	)
 	report = pass_report(pass)
 	next: Index
 	index_build(&next, pass, d.options.roots[:])
@@ -134,15 +158,30 @@ daemon_pass :: proc(d: ^Daemon, watched: Watch_Changes, force: map[format.Guid]b
 		index_destroy(&d.index)
 		d.index = next
 	}
-	if index_changed(changes) || changes.shading || len(pass.read) > 0 || next.generation != d.index.generation || !slice.equal(next.files, d.index.files) {
+	if index_changed(changes) ||
+	   changes.shading ||
+	   len(pass.read) > 0 ||
+	   next.generation != d.index.generation ||
+	   !slice.equal(next.files, d.index.files) {
 		if !index_write(&next, d.options) {
-			log.warnf("cook: cannot save the index in %s, so the next daemon reads every source again", config_dir(d.options))
+			log.warnf(
+				"cook: cannot save the index in %s, so the next daemon reads every source again",
+				config_dir(d.options),
+			)
 		}
 	}
 
 	for p in changes.problems {
 		for problem in p.problems {
-			log_problem({problem.file, int(problem.line), int(problem.column), problem.error, problem.text})
+			log_problem(
+				{
+					problem.file,
+					int(problem.line),
+					int(problem.column),
+					problem.error,
+					problem.text,
+				},
+			)
 		}
 	}
 	remove_blobs(d.options, changes.delta.removed, pass.shared)
@@ -160,7 +199,12 @@ daemon_pass :: proc(d: ^Daemon, watched: Watch_Changes, force: map[format.Guid]b
 		}
 	}
 	if len(parts) > 0 {
-		log.infof("cook: cooked %s in %v, generation %d", strings.join(parts[:], ", ", context.temp_allocator), elapsed, pass.generation)
+		log.infof(
+			"cook: cooked %s in %v, generation %d",
+			strings.join(parts[:], ", ", context.temp_allocator),
+			elapsed,
+			pass.generation,
+		)
 	}
 	if serve.linked(&d.server) == 0 {
 		return
@@ -264,8 +308,16 @@ handle_taken :: proc(d: ^Daemon, taken: serve.Taken) {
 		case cook_link.Hello:
 			version := cook_link.protocol_version()
 			if msg.protocol != version {
-				reason := fmt.tprintf("the editor's protocol is %016x and the daemon's is %016x. Rebuild both with just cook editor.", msg.protocol, version)
-				server_send(&d.server, connection, cook_link.Refused{reason = reason, protocol = version})
+				reason := fmt.tprintf(
+					"the editor's protocol is %016x and the daemon's is %016x. Rebuild both with just cook editor.",
+					msg.protocol,
+					version,
+				)
+				server_send(
+					&d.server,
+					connection,
+					cook_link.Refused{reason = reason, protocol = version},
+				)
 				log.errorf("cook: cook link: %s", reason)
 				continue
 			}
@@ -274,7 +326,18 @@ handle_taken :: proc(d: ^Daemon, taken: serve.Taken) {
 				roots[i] = {r.name, r.dir}
 			}
 			// The Welcome and the index go out before the first log line, so the editor has them first.
-			server_send(&d.server, connection, cook_link.Welcome{protocol = version, config = "dev", roots = roots, importers = importers(), nodes = node_infos(), ui_attributes = ui_attribute_infos()})
+			server_send(
+				&d.server,
+				connection,
+				cook_link.Welcome {
+					protocol = version,
+					config = "dev",
+					roots = roots,
+					importers = importers(),
+					nodes = node_infos(),
+					ui_attributes = ui_attribute_infos(),
+				},
+			)
 			snapshot, problems := index_snapshot(&d.index)
 			server_send(&d.server, connection, snapshot)
 			for p in problems {
@@ -293,12 +356,18 @@ handle_taken :: proc(d: ^Daemon, taken: serve.Taken) {
 			server_send(&d.server, connection, preview(d, msg), m.header.request)
 		case:
 			if serve.linked(&d.server) != connection {
-				log.warnf("cook: cook link: the editor sent a message of kind %d before its Hello", m.header.kind)
+				log.warnf(
+					"cook: cook link: the editor sent a message of kind %d before its Hello",
+					m.header.kind,
+				)
 				continue
 			}
 			result, is_operation := run_operation(d.options.roots[:], &d.index, message, &force)
 			if !is_operation {
-				log.warnf("cook: cook link: the editor sent a message that only the daemon sends: %v", m.header.kind)
+				log.warnf(
+					"cook: cook link: the editor sent a message that only the daemon sends: %v",
+					m.header.kind,
+				)
 				continue
 			}
 			if result.error != "" {
@@ -308,7 +377,10 @@ handle_taken :: proc(d: ^Daemon, taken: serve.Taken) {
 		}
 	}
 	if taken.dropped_logs > 0 {
-		log.warnf("cook: cook link: dropped %d log lines while the editor was slow to read", taken.dropped_logs)
+		log.warnf(
+			"cook: cook link: dropped %d log lines while the editor was slow to read",
+			taken.dropped_logs,
+		)
 	}
 	if len(answers) == 0 {
 		return
@@ -430,7 +502,14 @@ importers :: proc() -> []cook_link.Importer {
 		}
 		// An importer with several extensions is one entry for each, and the first is the one for new assets.
 		for extension in extensions {
-			append(&result, cook_link.Importer{kind = link_kind(kind), extension = extension, settings = infos})
+			append(
+				&result,
+				cook_link.Importer {
+					kind = link_kind(kind),
+					extension = extension,
+					settings = infos,
+				},
+			)
 		}
 	}
 	return result[:]
@@ -448,7 +527,10 @@ clone_options :: proc(options: Cook_Options, allocator := context.allocator) -> 
 		includes    = make([dynamic]string, 0, len(options.includes), allocator),
 	}
 	for root in options.roots {
-		append(&result.roots, Root{strings.clone(root.name, allocator), strings.clone(root.dir, allocator)})
+		append(
+			&result.roots,
+			Root{strings.clone(root.name, allocator), strings.clone(root.dir, allocator)},
+		)
 	}
 	for include in options.includes {
 		append(&result.includes, strings.clone(include, allocator))

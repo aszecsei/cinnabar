@@ -54,7 +54,10 @@ SCRIPT_QUALITY_FIELDS := [Quality_Key]cstring {
 
 // script_quality is the Script_Quality of a renderer and a project settings file.
 script_quality :: proc(renderer: ^render.Renderer, path: string) -> (q: Script_Quality) {
-	assert(len(path) <= MAX_SCRIPT_PATH, "project: the settings path is too long for the script API")
+	assert(
+		len(path) <= MAX_SCRIPT_PATH,
+		"project: the settings path is too long for the script API",
+	)
 	q.renderer = renderer
 	q.path_len = copy(q.path[:], path)
 	return
@@ -66,7 +69,12 @@ define_quality_bindings :: proc(r: ^script.Runtime, q: ^Script_Quality) {
 	luau.pushlightuserdata(r.L, q)
 	luau.setfield(r.L, luau.REGISTRYINDEX, REGISTRY_KEY)
 	script.define(r, "Render.quality", quality_binding, "() -> RenderQuality")
-	script.define(r, "Render.set_quality", set_quality_binding, "(quality: RenderQualityChange) -> ()")
+	script.define(
+		r,
+		"Render.set_quality",
+		set_quality_binding,
+		"(quality: RenderQualityChange) -> ()",
+	)
 	script.define(r, "Render.caps", caps_binding, "() -> RenderCaps")
 	script.define(r, "Render.presets", presets_binding, "() -> { string }")
 	script.define(r, "Render.save_quality", save_quality_binding, "() -> boolean")
@@ -130,7 +138,14 @@ set_quality_binding :: proc(L: ^luau.State) -> c.int {
 			}
 		}
 		if !found {
-			script.raise(L, fmt.aprintf("Render.set_quality: there is no quality field %q", name, allocator = allocator))
+			script.raise(
+				L,
+				fmt.aprintf(
+					"Render.set_quality: there is no quality field %q",
+					name,
+					allocator = allocator,
+				),
+			)
 		}
 		value: string
 		#partial switch luau.type(L, -1) {
@@ -141,7 +156,14 @@ set_quality_binding :: proc(L: ^luau.State) -> c.int {
 		case .STRING:
 			value = strings.clone(luau.toodinstring(L, -1), allocator)
 		case:
-			script.raise(L, fmt.aprintf("Render.set_quality: %s takes a string, a number or a boolean", name, allocator = allocator))
+			script.raise(
+				L,
+				fmt.aprintf(
+					"Render.set_quality: %s takes a string, a number or a boolean",
+					name,
+					allocator = allocator,
+				),
+			)
 		}
 		fmt.sbprintf(&text, "%s = %s\n", QUALITY_KEY_NAMES[key], value)
 		luau.pop(L, 1)
@@ -173,24 +195,47 @@ caps_binding :: proc(L: ^luau.State) -> c.int {
 	luau.setfield(L, -2, "vendor")
 	luau.pushnumber(L, f64(caps.video_memory))
 	luau.setfield(L, -2, "video_memory")
-	push_techniques(L, render.Aa_Technique, caps, proc(t: render.Aa_Technique, caps: render.Caps) -> bool {
-		return render.clamp_quality({aa = t}, caps).aa == t
-	})
+	push_techniques(
+		L,
+		render.Aa_Technique,
+		caps,
+		proc(t: render.Aa_Technique, caps: render.Caps) -> bool {
+			return render.clamp_quality({aa = t}, caps).aa == t
+		},
+	)
 	luau.setfield(L, -2, "aa")
-	push_techniques(L, render.Gi_Technique, caps, proc(t: render.Gi_Technique, caps: render.Caps) -> bool {
-		return render.clamp_quality({gi = {technique = t}}, caps).gi.technique == t
-	})
+	push_techniques(
+		L,
+		render.Gi_Technique,
+		caps,
+		proc(t: render.Gi_Technique, caps: render.Caps) -> bool {
+			return render.clamp_quality({gi = {technique = t}}, caps).gi.technique == t
+		},
+	)
 	luau.setfield(L, -2, "gi")
-	push_techniques(L, render.Reflection_Technique, caps, proc(t: render.Reflection_Technique, caps: render.Caps) -> bool {
-		return render.clamp_quality({reflections = {technique = t}}, caps).reflections.technique == t
-	})
+	push_techniques(
+		L,
+		render.Reflection_Technique,
+		caps,
+		proc(t: render.Reflection_Technique, caps: render.Caps) -> bool {
+			return(
+				render.clamp_quality({reflections = {technique = t}}, caps).reflections.technique ==
+				t \
+			)
+		},
+	)
 	luau.setfield(L, -2, "reflections")
 	return 1
 }
 
 // push_techniques pushes a list of the names of the techniques that the device runs: those that clamp_quality keeps.
 @(private = "file")
-push_techniques :: proc(L: ^luau.State, $T: typeid, caps: render.Caps, runs: proc(technique: T, caps: render.Caps) -> bool) {
+push_techniques :: proc(
+	L: ^luau.State,
+	$T: typeid,
+	caps: render.Caps,
+	runs: proc(technique: T, caps: render.Caps) -> bool,
+) {
 	luau.createtable(L, len(T), 0)
 	n: c.int = 0
 	for technique in T {
@@ -222,7 +267,12 @@ presets_binding :: proc(L: ^luau.State) -> c.int {
 save_quality_binding :: proc(L: ^luau.State) -> c.int {
 	sq := script_quality_of(L)
 	r := sq.renderer
-	ok := save_quality(script.runtime_of(L).platform, string(sq.path[:sq.path_len]), r.quality, r.caps)
+	ok := save_quality(
+		script.runtime_of(L).platform,
+		string(sq.path[:sq.path_len]),
+		r.quality,
+		r.caps,
+	)
 	luau.pushboolean(L, b32(ok))
 	return 1
 }

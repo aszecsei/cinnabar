@@ -154,8 +154,12 @@ SHEET_SPRITE_IDS_PIPELINE :: gpu.Graphics_Pipeline_Desc {
 sheet_sprites_init :: proc(s: ^Sheet_Sprites, platform: ^core.Platform_API, w: ^ecs.World) {
 	s.pipeline = shader_pipeline(SHEET_SPRITE_SHADER)
 	s.ids = shader_pipeline(SHEET_SPRITE_IDS_SHADER)
-	s.samplers[.Linear] = platform.gpu_create_sampler({filter = .Linear, address = .Clamp, label = "sprite sampler"})
-	s.samplers[.Nearest] = platform.gpu_create_sampler({filter = .Nearest, address = .Clamp, label = "sprite nearest sampler"})
+	s.samplers[.Linear] = platform.gpu_create_sampler(
+		{filter = .Linear, address = .Clamp, label = "sprite sampler"},
+	)
+	s.samplers[.Nearest] = platform.gpu_create_sampler(
+		{filter = .Nearest, address = .Clamp, label = "sprite nearest sampler"},
+	)
 	sprite_sheets_init(&s.sheets, platform)
 	sheet_sprites_register(s, w)
 }
@@ -165,7 +169,11 @@ sheet_sprites_register :: proc(s: ^Sheet_Sprites, w: ^ecs.World) {
 	s.extract = extractor(w, {ecs.read(w, Sprite_Renderer)})
 }
 
-sheet_sprites_destroy :: proc(s: ^Sheet_Sprites, platform: ^core.Platform_API, assets: ^asset.Assets) {
+sheet_sprites_destroy :: proc(
+	s: ^Sheet_Sprites,
+	platform: ^core.Platform_API,
+	assets: ^asset.Assets,
+) {
 	destroy_shader_pipeline(&s.pipeline, platform)
 	destroy_shader_pipeline(&s.ids, platform)
 	for sampler in s.samplers {
@@ -194,8 +202,22 @@ sprite_sheets_destroy :: proc(s: ^Sprite_Sheets, assets: ^asset.Assets) {
 sync_sheet_sprite_pipelines :: proc(r: ^Renderer, force: bool) {
 	s := &r.sheet_sprites
 	assets := r.residency.assets
-	sync_graphics_pipeline(&s.pipeline, r.platform, assets, {.Vertex, .Pixel}, SHEET_SPRITE_PIPELINE, force)
-	sync_graphics_pipeline(&s.ids, r.platform, assets, {.Vertex, .Pixel}, SHEET_SPRITE_IDS_PIPELINE, force)
+	sync_graphics_pipeline(
+		&s.pipeline,
+		r.platform,
+		assets,
+		{.Vertex, .Pixel},
+		SHEET_SPRITE_PIPELINE,
+		force,
+	)
+	sync_graphics_pipeline(
+		&s.ids,
+		r.platform,
+		assets,
+		{.Vertex, .Pixel},
+		SHEET_SPRITE_IDS_PIPELINE,
+		force,
+	)
 }
 
 // any_sprite_renderers is whether the world has a Sprite_Renderer, and the pipeline to draw it with: a scene of sprites
@@ -223,7 +245,15 @@ has_sheet_sprites :: proc(f: ^Frame) -> bool {
 
 // sprite_sheet_blob gives a sheet's blob, which the first call loads. It is not ok when the sheet is not cooked, which
 // the load says once, or when its blob is not a sprite sheet's.
-sprite_sheet_blob :: proc(s: ^Sprite_Sheets, assets: ^asset.Assets, guid: format.Guid) -> (data: []byte, blob: ^format.Sprite_Sheet_Blob, ok: bool) {
+sprite_sheet_blob :: proc(
+	s: ^Sprite_Sheets,
+	assets: ^asset.Assets,
+	guid: format.Guid,
+) -> (
+	data: []byte,
+	blob: ^format.Sprite_Sheet_Blob,
+	ok: bool,
+) {
 	if guid == {} || assets == nil {
 		return
 	}
@@ -240,14 +270,27 @@ sprite_sheet_blob :: proc(s: ^Sprite_Sheets, assets: ^asset.Assets, guid: format
 
 // sprite_frame is the frame of its sheet that a Sprite_Renderer shows: its animation's at its time, or its own. now, when
 // it is given, is the time that the animation is at instead, for a sprite that plays while the world stands still.
-sprite_frame :: proc(data: []byte, blob: ^format.Sprite_Sheet_Blob, sprite: Sprite_Renderer, now: Maybe(f32) = nil) -> (frame: format.Sprite_Frame, ok: bool) {
+sprite_frame :: proc(
+	data: []byte,
+	blob: ^format.Sprite_Sheet_Blob,
+	sprite: Sprite_Renderer,
+	now: Maybe(f32) = nil,
+) -> (
+	frame: format.Sprite_Frame,
+	ok: bool,
+) {
 	frames := format.sprite_sheet_frames(data, blob)
 	if len(frames) == 0 {
 		return
 	}
 	index := int(sprite.frame)
 	if sprite.animation != 0 {
-		index, _ = format.sprite_sheet_frame_at(data, blob, int(sprite.animation) - 1, now.? or_else sprite.time)
+		index, _ = format.sprite_sheet_frame_at(
+			data,
+			blob,
+			int(sprite.animation) - 1,
+			now.? or_else sprite.time,
+		)
 	}
 	return frames[min(index, len(frames) - 1)], true
 }
@@ -269,15 +312,30 @@ sheet_sprite_before :: proc(a, b: Sorted_Sheet_Sprite) -> bool {
 // and about the view's axis as its pose turns about its own z, with its frame's part of the texture, flipped if it
 // asks.
 @(private)
-sheet_sprite_record :: proc(sprite: Sprite_Renderer, pose: ecs.Transform, frame: format.Sprite_Frame, blob: ^format.Sprite_Sheet_Blob, view: View, texture, sampler, id: u32) -> Sheet_Sprite_Record {
+sheet_sprite_record :: proc(
+	sprite: Sprite_Renderer,
+	pose: ecs.Transform,
+	frame: format.Sprite_Frame,
+	blob: ^format.Sprite_Sheet_Blob,
+	view: View,
+	texture, sampler, id: u32,
+) -> Sheet_Sprite_Record {
 	right, up, _ := view_axes(view)
 	// The pose's turn about its own z, whatever else it turns by: the twist of its rotation about that axis. So a
 	// sprite stands upright in every view until its entity is turned in its plane.
 	angle := 2 * math.atan2(pose.rotation.z, pose.rotation.w)
 	turn := [2]f32{math.cos(angle), math.sin(angle)}
-	size := [2]f32{f32(frame.rect.z), f32(frame.rect.w)} / blob.pixels_per_unit * [2]f32{abs(pose.scale.x), abs(pose.scale.y)}
+	size :=
+		[2]f32{f32(frame.rect.z), f32(frame.rect.w)} /
+		blob.pixels_per_unit *
+		[2]f32{abs(pose.scale.x), abs(pose.scale.y)}
 	atlas := [2]f32{f32(blob.atlas_size.x), f32(blob.atlas_size.y)}
-	uv := [4]f32{f32(frame.rect.x) / atlas.x, f32(frame.rect.y) / atlas.y, f32(frame.rect.z) / atlas.x, f32(frame.rect.w) / atlas.y}
+	uv := [4]f32 {
+		f32(frame.rect.x) / atlas.x,
+		f32(frame.rect.y) / atlas.y,
+		f32(frame.rect.z) / atlas.x,
+		f32(frame.rect.w) / atlas.y,
+	}
 	pivot := frame.pivot
 	if sprite.flip_x {
 		uv.x, uv.z, pivot.x = uv.x + uv.z, -uv.z, 1 - pivot.x
@@ -293,16 +351,16 @@ sheet_sprite_record :: proc(sprite: Sprite_Renderer, pose: ecs.Transform, frame:
 		flags |= SHEET_SPRITE_SNAP
 	}
 	return {
-		center  = ecs.position_sub(pose.position, view.position),
+		center = ecs.position_sub(pose.position, view.position),
 		texture = texture,
-		right   = (right * turn.x + up * turn.y) * size.x,
+		right = (right * turn.x + up * turn.y) * size.x,
 		sampler = sampler,
-		up      = (up * turn.x - right * turn.y) * size.y,
-		id      = id,
+		up = (up * turn.x - right * turn.y) * size.y,
+		id = id,
 		uv_rect = uv,
-		color   = {sprite.color.r, sprite.color.g, sprite.color.b, clamp(sprite.opacity, 0, 1)},
-		pivot   = pivot,
-		flags   = flags,
+		color = {sprite.color.r, sprite.color.g, sprite.color.b, clamp(sprite.opacity, 0, 1)},
+		pivot = pivot,
+		flags = flags,
 	}
 }
 
@@ -311,11 +369,19 @@ sheet_sprite_record :: proc(sprite: Sprite_Renderer, pose: ecs.Transform, frame:
 // sprite in playing plays its animation by the host's time while delta is 0, as the editor plays what it has selected.
 // It runs after add_scene_passes, whose camera constants the pass reads.
 @(private)
-begin_sheet_sprites :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32, playing: []ecs.Entity, delta: f32) {
+begin_sheet_sprites :: proc(
+	f: ^Frame,
+	w: ^ecs.World,
+	hidden: []u32,
+	playing: []ecs.Entity,
+	delta: f32,
+) {
 	r := f.renderer
 	s := &r.sheet_sprites
 	platform := r.platform
-	if !f.wants_sheet_sprites || f.scene_frame == nil || len(f.scene_frame.view_constants) <= VIEW_CAMERA {
+	if !f.wants_sheet_sprites ||
+	   f.scene_frame == nil ||
+	   len(f.scene_frame.view_constants) <= VIEW_CAMERA {
 		return
 	}
 	sorted := make([dynamic]Sorted_Sheet_Sprite, platform.frame_allocator)
@@ -341,7 +407,11 @@ begin_sheet_sprites :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32, playing: []
 			}
 			sheet, seen := sheets[sprite.sheet]
 			if !seen {
-				sheet.data, sheet.blob, sheet.ok = sprite_sheet_blob(&s.sheets, r.residency.assets, sprite.sheet)
+				sheet.data, sheet.blob, sheet.ok = sprite_sheet_blob(
+					&s.sheets,
+					r.residency.assets,
+					sprite.sheet,
+				)
 				sheets[sprite.sheet] = sheet
 			}
 			if !sheet.ok {
@@ -364,12 +434,33 @@ begin_sheet_sprites :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32, playing: []
 				left_out += 1
 				continue
 			}
-			record := sheet_sprite_record(sprite, pose, frame, blob, f.view, gpu.read_index(texture.texture), gpu.sampler_index(s.samplers[blob.filter]), entity_id(e))
-			append(&sorted, Sorted_Sheet_Sprite{record = record, layer = sprite.layer, order = sprite.order, depth = linalg.dot(record.center, forward)})
+			record := sheet_sprite_record(
+				sprite,
+				pose,
+				frame,
+				blob,
+				f.view,
+				gpu.read_index(texture.texture),
+				gpu.sampler_index(s.samplers[blob.filter]),
+				entity_id(e),
+			)
+			append(
+				&sorted,
+				Sorted_Sheet_Sprite {
+					record = record,
+					layer = sprite.layer,
+					order = sprite.order,
+					depth = linalg.dot(record.center, forward),
+				},
+			)
 		}
 	}
 	if left_out > 0 {
-		log.warnf("render: %d sprite renderers, of which only the first %d draw", len(sorted) + left_out, MAX_SHEET_SPRITES)
+		log.warnf(
+			"render: %d sprite renderers, of which only the first %d draw",
+			len(sorted) + left_out,
+			MAX_SHEET_SPRITES,
+		)
 	}
 	if len(sorted) == 0 {
 		return
@@ -400,9 +491,9 @@ add_sheet_sprite_pass :: proc(f: ^Frame) {
 	}
 	g := f.graph
 	p := add_render_pass(g, "sheet sprites", proc(ctx: ^Pass_Context) {
-		f := (^Frame)(ctx.data)
-		draw_sheet_sprites(ctx, f, f.renderer.sheet_sprites.pipeline.pipeline)
-	}, f)
+			f := (^Frame)(ctx.data)
+			draw_sheet_sprites(ctx, f, f.renderer.sheet_sprites.pipeline.pipeline)
+		}, f)
 	color(g, p, f.scene, .Load)
 	depth(g, p, f.depth, .Load)
 	declare_lighting(f, p, opaque = false)
@@ -412,14 +503,16 @@ add_sheet_sprite_pass :: proc(f: ^Frame) {
 // so its picking and its tools see them. It runs after post-processing, as the transparent surfaces' does.
 @(private)
 add_sheet_sprite_id_pass :: proc(f: ^Frame, keep_ids: bool) {
-	if !keep_ids || !has_sheet_sprites(f) || !pipeline_ready(f.renderer.platform, &f.renderer.sheet_sprites.ids) {
+	if !keep_ids ||
+	   !has_sheet_sprites(f) ||
+	   !pipeline_ready(f.renderer.platform, &f.renderer.sheet_sprites.ids) {
 		return
 	}
 	g := f.graph
 	p := add_render_pass(g, "sheet sprite ids", proc(ctx: ^Pass_Context) {
-		f := (^Frame)(ctx.data)
-		draw_sheet_sprites(ctx, f, f.renderer.sheet_sprites.ids.pipeline)
-	}, f)
+			f := (^Frame)(ctx.data)
+			draw_sheet_sprites(ctx, f, f.renderer.sheet_sprites.ids.pipeline)
+		}, f)
 	color(g, p, f.ids, .Load)
 	depth(g, p, f.depth, .Load)
 }

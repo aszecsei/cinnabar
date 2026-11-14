@@ -64,7 +64,13 @@ guid_new :: proc() -> (guid: Guid) {
 // meta_text is the text of a .meta file with a GUID, import settings and sub-assets. It keeps the comments of an old
 // .meta file, or starts with META_HEADER. With no sub-assets given, it keeps the old file's. The cooker and the tools
 // that make projects write .meta files with it.
-meta_text :: proc(guid: Guid, old_text: string, settings: []Meta_Setting, subassets: Maybe([]Meta_Subasset) = nil, allocator := context.allocator) -> string {
+meta_text :: proc(
+	guid: Guid,
+	old_text: string,
+	settings: []Meta_Setting,
+	subassets: Maybe([]Meta_Subasset) = nil,
+	allocator := context.allocator,
+) -> string {
 	b := strings.builder_make(allocator)
 	rest := old_text
 	for line in strings.split_lines_iterator(&rest) {
@@ -300,7 +306,7 @@ Script_Flag :: enum u32 {
 	Action,
 }
 
-Script_Flags :: bit_set[Script_Flag; u32]
+Script_Flags :: bit_set[Script_Flag;u32]
 
 // Script_Blob is the start of a script blob (see docs/content/blobs-and-loading.md#blob-format).
 Script_Blob :: struct {
@@ -347,7 +353,11 @@ Script_Require :: struct {
 }
 
 script_layout :: proc() -> u64 {
-	return layout.hash(Script_Blob) ~ layout.hash(Script_Require) * 31 ~ layout.hash(Script_Field) * 961
+	return(
+		layout.hash(Script_Blob) ~
+		layout.hash(Script_Require) * 31 ~
+		layout.hash(Script_Field) * 961 \
+	)
 }
 
 blob_bytes :: proc "contextless" (data: []byte, s: Slice) -> []byte {
@@ -369,17 +379,26 @@ blob_header :: proc "contextless" (data: []byte) -> (^Blob_Header, bool) {
 // script_view checks a script blob: its header, its layout and that every slice is inside it.
 script_view :: proc(data: []byte) -> (blob: ^Script_Blob, ok: bool) {
 	header := blob_header(data) or_return
-	if header.kind != .Script || header.layout != script_layout() || len(data) < size_of(Script_Blob) {
+	if header.kind != .Script ||
+	   header.layout != script_layout() ||
+	   len(data) < size_of(Script_Blob) {
 		return
 	}
 	blob = (^Script_Blob)(raw_data(data))
-	slices := [?]Slice{blob.bytecode, blob.requires, blob.source_path, blob.class_name, blob.fields}
+	slices := [?]Slice {
+		blob.bytecode,
+		blob.requires,
+		blob.source_path,
+		blob.class_name,
+		blob.fields,
+	}
 	for s in slices {
 		if u64(s.offset) + u64(s.size) > u64(len(data)) {
 			return nil, false
 		}
 	}
-	if blob.requires.size % size_of(Script_Require) != 0 || blob.requires.offset % align_of(Script_Require) != 0 {
+	if blob.requires.size % size_of(Script_Require) != 0 ||
+	   blob.requires.offset % align_of(Script_Require) != 0 {
 		return nil, false
 	}
 	for r in script_requires(data, blob) {
@@ -387,11 +406,13 @@ script_view :: proc(data: []byte) -> (blob: ^Script_Blob, ok: bool) {
 			return nil, false
 		}
 	}
-	if blob.fields.size % size_of(Script_Field) != 0 || blob.fields.offset % align_of(Script_Field) != 0 {
+	if blob.fields.size % size_of(Script_Field) != 0 ||
+	   blob.fields.offset % align_of(Script_Field) != 0 {
 		return nil, false
 	}
 	for f in script_fields(data, blob) {
-		if u64(f.name.offset) + u64(f.name.size) > u64(len(data)) || u64(f.text.offset) + u64(f.text.size) > u64(len(data)) {
+		if u64(f.name.offset) + u64(f.name.size) > u64(len(data)) ||
+		   u64(f.text.offset) + u64(f.text.size) > u64(len(data)) {
 			return nil, false
 		}
 	}
@@ -409,7 +430,14 @@ script_requires :: proc "contextless" (data: []byte, blob: ^Script_Blob) -> []Sc
 }
 
 // script_find_require is the module that a require string resolves to.
-script_find_require :: proc(data: []byte, blob: ^Script_Blob, path: string) -> (target: Guid, ok: bool) {
+script_find_require :: proc(
+	data: []byte,
+	blob: ^Script_Blob,
+	path: string,
+) -> (
+	target: Guid,
+	ok: bool,
+) {
 	requires := script_requires(data, blob)
 	low, high := 0, len(requires)
 	for low < high {
@@ -455,8 +483,16 @@ Script_Contents :: struct {
 // script_write builds a script blob.
 script_write :: proc(contents: Script_Contents, allocator := context.allocator) -> []byte {
 	buffer := make([dynamic]byte, size_of(Script_Blob), allocator)
-	requires := reserve_bytes(&buffer, len(contents.requires) * size_of(Script_Require), align_of(Script_Require))
-	fields := reserve_bytes(&buffer, len(contents.fields) * size_of(Script_Field), align_of(Script_Field))
+	requires := reserve_bytes(
+		&buffer,
+		len(contents.requires) * size_of(Script_Require),
+		align_of(Script_Require),
+	)
+	fields := reserve_bytes(
+		&buffer,
+		len(contents.fields) * size_of(Script_Field),
+		align_of(Script_Field),
+	)
 	bytecode := append_bytes(&buffer, contents.bytecode)
 	source_path := append_bytes(&buffer, transmute([]byte)contents.source_path)
 	class_name := append_bytes(&buffer, transmute([]byte)contents.class_name)
@@ -473,10 +509,20 @@ script_write :: proc(contents: Script_Contents, allocator := context.allocator) 
 	for r, i in contents.requires {
 		path := append_bytes(&buffer, transmute([]byte)r.path)
 		record := Script_Require{path, r.target}
-		mem.copy(&buffer[requires.offset + u32(i * size_of(Script_Require))], &record, size_of(record))
+		mem.copy(
+			&buffer[requires.offset + u32(i * size_of(Script_Require))],
+			&record,
+			size_of(record),
+		)
 	}
 	blob := Script_Blob {
-		header = {magic = BLOB_MAGIC, kind = .Script, layout = script_layout(), key = contents.key, guid = contents.guid},
+		header = {
+			magic = BLOB_MAGIC,
+			kind = .Script,
+			layout = script_layout(),
+			key = contents.key,
+			guid = contents.guid,
+		},
 		flags = contents.flags,
 		bytecode = bytecode,
 		requires = requires,

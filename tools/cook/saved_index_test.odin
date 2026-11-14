@@ -124,11 +124,29 @@ a_pass_after_one_change_looks_at_that_file_and_what_depends_on_it :: proc(t: ^te
 
 	// The lamp changes: the door instantiates it, and the hall the door, so the pass looks at those three, and reads
 	// no other source.
-	write_later(t, content_path(tree, "lamp.prefab"), strings.concatenate({LAMP, "\tradius = 4.0\n"}, context.temp_allocator))
+	write_later(
+		t,
+		content_path(tree, "lamp.prefab"),
+		strings.concatenate({LAMP, "\tradius = 4.0\n"}, context.temp_allocator),
+	)
 	pass := daemon_pass(&d, Changed_Paths{{content_path(tree, "lamp.prefab")}})
 	testing.expect(t, pass.ok)
-	testing.expect(t, slice.equal(checked_paths(tree, pass), []string{"door.prefab", "lamp.prefab", "levels/hall.scene"}), fmt.tprint(checked_paths(tree, pass)))
-	testing.expect(t, slice.equal(read_paths(tree, pass), []string{"door.prefab", "lamp.prefab", "levels/hall.scene"}), fmt.tprint(read_paths(tree, pass)))
+	testing.expect(
+		t,
+		slice.equal(
+			checked_paths(tree, pass),
+			[]string{"door.prefab", "lamp.prefab", "levels/hall.scene"},
+		),
+		fmt.tprint(checked_paths(tree, pass)),
+	)
+	testing.expect(
+		t,
+		slice.equal(
+			read_paths(tree, pass),
+			[]string{"door.prefab", "lamp.prefab", "levels/hall.scene"},
+		),
+		fmt.tprint(read_paths(tree, pass)),
+	)
 	testing.expect_value(t, pass.cooked[.Prefab], 2)
 	testing.expect_value(t, pass.cooked[.Scene], 1)
 	testing.expect_value(t, pass.current[.Scene], 1)
@@ -156,17 +174,30 @@ a_dropped_buffer_makes_a_full_scan :: proc(t: ^testing.T) {
 	defer watcher_close(&watcher)
 	// The first change completes the read. What changes before the next read waits in Windows's buffer, which this
 	// overfills.
-	testing.expect(t, os.write_entire_file(fmt.tprintf("%s/first.txt", dir), transmute([]byte)string("1")) == nil)
+	testing.expect(
+		t,
+		os.write_entire_file(fmt.tprintf("%s/first.txt", dir), transmute([]byte)string("1")) ==
+		nil,
+	)
 	time.sleep(100 * time.Millisecond)
 	for i in 0 ..< 200 {
-		name := fmt.tprintf("%s/%s_%03d.txt", dir, strings.repeat("long_name_", 8, context.temp_allocator), i)
+		name := fmt.tprintf(
+			"%s/%s_%03d.txt",
+			dir,
+			strings.repeat("long_name_", 8, context.temp_allocator),
+			i,
+		)
 		testing.expect(t, os.write_entire_file(name, transmute([]byte)string("x")) == nil)
 	}
 	for watcher_wait(&watcher, 500) == .Changed {
 	}
 	_, everything := watcher_take(&watcher, context.temp_allocator).(Changed_Everything)
 	testing.expect(t, everything, "an overfilled buffer is a change of everything")
-	testing.expect(t, watcher_take(&watcher, context.temp_allocator) == nil, "a take forgets what it handed over")
+	testing.expect(
+		t,
+		watcher_take(&watcher, context.temp_allocator) == nil,
+		"a take forgets what it handed over",
+	)
 
 	d := Daemon {
 		options = tree_options(tree),
@@ -174,9 +205,17 @@ a_dropped_buffer_makes_a_full_scan :: proc(t: ^testing.T) {
 	defer index_destroy(&d.index)
 	daemon_pass(&d, Changed_Everything{})
 	// The change that Windows dropped is found, as the scan compares every file with the saved index.
-	write_later(t, content_path(tree, "levels/yard.scene"), strings.concatenate({YARD, "\tcast_shadows = true\n"}, context.temp_allocator))
+	write_later(
+		t,
+		content_path(tree, "levels/yard.scene"),
+		strings.concatenate({YARD, "\tcast_shadows = true\n"}, context.temp_allocator),
+	)
 	pass := daemon_pass(&d, Changed_Everything{})
-	testing.expect(t, slice.equal(read_paths(tree, pass), []string{"levels/yard.scene"}), fmt.tprint(read_paths(tree, pass)))
+	testing.expect(
+		t,
+		slice.equal(read_paths(tree, pass), []string{"levels/yard.scene"}),
+		fmt.tprint(read_paths(tree, pass)),
+	)
 	testing.expect_value(t, pass.cooked[.Scene], 1)
 }
 
@@ -199,7 +238,11 @@ the_watcher_says_which_paths_changed :: proc(t: ^testing.T) {
 	put(bytes, 32, 0, "sub\\b.txt")
 	paths := make([dynamic]string, context.temp_allocator)
 	notify_paths("C:/root", bytes, &paths, context.temp_allocator)
-	testing.expect(t, slice.equal(paths[:], []string{"C:/root/a.txt", "C:/root/sub/b.txt"}), fmt.tprint(paths[:]))
+	testing.expect(
+		t,
+		slice.equal(paths[:], []string{"C:/root/a.txt", "C:/root/sub/b.txt"}),
+		fmt.tprint(paths[:]),
+	)
 
 	tree := make_tree(t, {{"content/scripts/a.luau", "return 1"}})
 	defer remove_tree(tree)
@@ -242,7 +285,13 @@ a_daemon_that_starts_again_reads_nothing_that_did_not_change :: proc(t: ^testing
 	testing.expect_value(t, cooked, 0)
 	testing.expect_value(t, len(again.index.assets), len(first.index.assets))
 	testing.expect(t, !index_changed(index_diff(&first.index, &again.index)))
-	testing.expect(t, slice.equal(problems_of(&again.index, tree, "levels/yard.scene"), problems_of(&first.index, tree, "levels/yard.scene")))
+	testing.expect(
+		t,
+		slice.equal(
+			problems_of(&again.index, tree, "levels/yard.scene"),
+			problems_of(&first.index, tree, "levels/yard.scene"),
+		),
+	)
 
 	// Another cooker, other options or another generation of the cache make the saved index stand for nothing.
 	other: Index
@@ -262,8 +311,22 @@ a_daemon_that_starts_again_reads_nothing_that_did_not_change :: proc(t: ^testing
 a_pass_looks_at_what_a_change_reaches :: proc(t: ^testing.T) {
 	tree := saved_tree(t)
 	defer remove_tree(tree)
-	testing.expect(t, os.write_entire_file(content_path(tree, "b.luau"), transmute([]byte)string("return require('./a')")) == nil)
-	testing.expect(t, os.write_entire_file(content_path(tree, "broken.scene"), transmute([]byte)string("scene 2\nnonsense\n")) == nil)
+	testing.expect(
+		t,
+		os.write_entire_file(
+			content_path(tree, "b.luau"),
+			transmute([]byte)string("return require('./a')"),
+		) ==
+		nil,
+	)
+	testing.expect(
+		t,
+		os.write_entire_file(
+			content_path(tree, "broken.scene"),
+			transmute([]byte)string("scene 2\nnonsense\n"),
+		) ==
+		nil,
+	)
 	errors: Errors
 	defer release_errors(&errors)
 	context.logger = capture_errors(&errors)
@@ -276,29 +339,59 @@ a_pass_looks_at_what_a_change_reaches :: proc(t: ^testing.T) {
 
 	// Nothing changed, but the broken scene failed, so it is tried again.
 	pass := daemon_pass(&d, Changed_Paths{})
-	testing.expect(t, slice.equal(checked_paths(tree, pass), []string{"broken.scene"}), fmt.tprint(checked_paths(tree, pass)))
+	testing.expect(
+		t,
+		slice.equal(checked_paths(tree, pass), []string{"broken.scene"}),
+		fmt.tprint(checked_paths(tree, pass)),
+	)
 
 	// A script that changes makes the pass look at every script.
 	write_later(t, content_path(tree, "a.luau"), "return 2")
 	pass = daemon_pass(&d, Changed_Paths{{content_path(tree, "a.luau")}})
-	testing.expect(t, slice.equal(checked_paths(tree, pass), []string{"a.luau", "b.luau", "broken.scene"}), fmt.tprint(checked_paths(tree, pass)))
+	testing.expect(
+		t,
+		slice.equal(checked_paths(tree, pass), []string{"a.luau", "b.luau", "broken.scene"}),
+		fmt.tprint(checked_paths(tree, pass)),
+	)
 	testing.expect_value(t, pass.cooked[.Script], 2)
 
 	// The door goes: the hall that instantiates it is looked at, and warns that it is missing.
 	testing.expect(t, os.remove(content_path(tree, "door.prefab")) == nil)
 	testing.expect(t, os.remove(content_path(tree, "door.prefab.meta")) == nil)
-	pass = daemon_pass(&d, Changed_Paths{{content_path(tree, "door.prefab"), content_path(tree, "door.prefab.meta")}})
+	pass = daemon_pass(
+		&d,
+		Changed_Paths{{content_path(tree, "door.prefab"), content_path(tree, "door.prefab.meta")}},
+	)
 	checked := checked_paths(tree, pass)
-	testing.expect(t, slice.contains(checked, "levels/hall.scene") && !slice.contains(checked, "lamp.prefab"), fmt.tprint(checked))
+	testing.expect(
+		t,
+		slice.contains(checked, "levels/hall.scene") && !slice.contains(checked, "lamp.prefab"),
+		fmt.tprint(checked),
+	)
 	hall := problems_of(&d.index, tree, "levels/hall.scene")
 	testing.expect(t, len(hall) == 1 && strings.contains(hall[0], "is missing"), fmt.tprint(hall))
-	testing.expect(t, guid_text(format.guid_parse("22222222222222222222222222222222") or_else {}) not_in d.index.assets)
+	testing.expect(
+		t,
+		guid_text(format.guid_parse("22222222222222222222222222222222") or_else {}) not_in
+		d.index.assets,
+	)
 
 	// A new folder with a scene in it is listed whole.
 	testing.expect(t, os.make_directory(content_path(tree, "new")) == nil)
-	testing.expect(t, os.write_entire_file(content_path(tree, "new/court.scene"), transmute([]byte)string(YARD)) == nil)
+	testing.expect(
+		t,
+		os.write_entire_file(
+			content_path(tree, "new/court.scene"),
+			transmute([]byte)string(YARD),
+		) ==
+		nil,
+	)
 	pass = daemon_pass(&d, Changed_Paths{{content_path(tree, "new")}})
-	testing.expect(t, slice.contains(read_paths(tree, pass), "new/court.scene"), fmt.tprint(read_paths(tree, pass)))
+	testing.expect(
+		t,
+		slice.contains(read_paths(tree, pass), "new/court.scene"),
+		fmt.tprint(read_paths(tree, pass)),
+	)
 	found := false
 	for f in d.index.folders {
 		found ||= f.path == "new"
@@ -312,7 +405,14 @@ a_pass_looks_at_what_a_change_reaches :: proc(t: ^testing.T) {
 a_carried_prefab_keeps_its_problems_once :: proc(t: ^testing.T) {
 	tree := saved_tree(t)
 	defer remove_tree(tree)
-	write_later(t, content_path(tree, "door.prefab"), strings.concatenate({DOOR, "component 1 Transform\n\tpivot = @7000000000000001\n"}, context.temp_allocator))
+	write_later(
+		t,
+		content_path(tree, "door.prefab"),
+		strings.concatenate(
+			{DOOR, "component 1 Transform\n\tpivot = @7000000000000001\n"},
+			context.temp_allocator,
+		),
+	)
 	d := Daemon {
 		options = tree_options(tree),
 	}
@@ -321,9 +421,17 @@ a_carried_prefab_keeps_its_problems_once :: proc(t: ^testing.T) {
 	door := problems_of(&d.index, tree, "door.prefab")
 	testing.expect_value(t, len(door), 1)
 
-	write_later(t, content_path(tree, "levels/hall.scene"), strings.concatenate({HALL, "name = \"Hall\"\n"}, context.temp_allocator))
+	write_later(
+		t,
+		content_path(tree, "levels/hall.scene"),
+		strings.concatenate({HALL, "name = \"Hall\"\n"}, context.temp_allocator),
+	)
 	pass := daemon_pass(&d, Changed_Paths{{content_path(tree, "levels/hall.scene")}})
-	testing.expect(t, slice.equal(checked_paths(tree, pass), []string{"levels/hall.scene"}), fmt.tprint(checked_paths(tree, pass)))
+	testing.expect(
+		t,
+		slice.equal(checked_paths(tree, pass), []string{"levels/hall.scene"}),
+		fmt.tprint(checked_paths(tree, pass)),
+	)
 	testing.expect(t, slice.contains(read_paths(tree, pass), "door.prefab"))
 	testing.expect_value(t, pass.cooked[.Scene], 1)
 	testing.expect(t, slice.equal(problems_of(&d.index, tree, "door.prefab"), door))
@@ -334,7 +442,14 @@ a_carried_prefab_keeps_its_problems_once :: proc(t: ^testing.T) {
 the_shading_models_stay_when_the_materials_are_carried :: proc(t: ^testing.T) {
 	lit, _ := os.read_entire_file("lib/engine/content/shading/lit.shading", context.temp_allocator)
 	hlsli, _ := os.read_entire_file("lib/engine/content/shading/lit.hlsli", context.temp_allocator)
-	tree := make_tree(t, {{"content/shading/lit.shading", string(lit)}, {"content/shading/lit.hlsli", string(hlsli)}, {"content/a.luau", "return 1"}})
+	tree := make_tree(
+		t,
+		{
+			{"content/shading/lit.shading", string(lit)},
+			{"content/shading/lit.hlsli", string(hlsli)},
+			{"content/a.luau", "return 1"},
+		},
+	)
 	defer remove_tree(tree)
 	d := Daemon {
 		options = tree_options(tree),
@@ -345,11 +460,23 @@ the_shading_models_stay_when_the_materials_are_carried :: proc(t: ^testing.T) {
 
 	write_later(t, content_path(tree, "a.luau"), "return 2")
 	pass := daemon_pass(&d, Changed_Paths{{content_path(tree, "a.luau")}})
-	testing.expect(t, slice.equal(checked_paths(tree, pass), []string{"a.luau"}), fmt.tprint(checked_paths(tree, pass)))
+	testing.expect(
+		t,
+		slice.equal(checked_paths(tree, pass), []string{"a.luau"}),
+		fmt.tprint(checked_paths(tree, pass)),
+	)
 	testing.expect_value(t, len(d.index.shading.models), 1)
 
 	// The include is not an asset, so its change looks at the shading models, and every material.
-	write_later(t, content_path(tree, "shading/lit.hlsli"), strings.concatenate({string(hlsli), "\n"}, context.temp_allocator))
+	write_later(
+		t,
+		content_path(tree, "shading/lit.hlsli"),
+		strings.concatenate({string(hlsli), "\n"}, context.temp_allocator),
+	)
 	pass = daemon_pass(&d, Changed_Paths{{content_path(tree, "shading/lit.hlsli")}})
-	testing.expect(t, slice.equal(checked_paths(tree, pass), []string{"shading/lit.shading"}), fmt.tprint(checked_paths(tree, pass)))
+	testing.expect(
+		t,
+		slice.equal(checked_paths(tree, pass), []string{"shading/lit.shading"}),
+		fmt.tprint(checked_paths(tree, pass)),
+	)
 }

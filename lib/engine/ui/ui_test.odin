@@ -6,8 +6,8 @@ import "core:testing"
 import "core:time"
 
 import "cinnabar:engine/asset"
-import "cinnabar:engine/ecs"
 import format "cinnabar:engine/asset/format"
+import "cinnabar:engine/ecs"
 
 @(private = "file")
 DOC :: "d0c0d0c0d0c0d0c0d0c0d0c0d0c0d0c0"
@@ -20,9 +20,15 @@ OTHER :: "0d0c0d0c0d0c0d0c0d0c0d0c0d0c0d0c"
 rewrite :: proc(t: ^testing.T, f: ^Fixture, guid: string, text: string) {
 	write_document(t, f, guid, text)
 	generation := fmt.tprintf("%s/%s", f.cache, format.GENERATION_FILE)
-	testing.expect(t, os.write_entire_file(generation, transmute([]byte)fmt.tprintf("%d", f.generation)) == nil)
+	testing.expect(
+		t,
+		os.write_entire_file(generation, transmute([]byte)fmt.tprintf("%d", f.generation)) == nil,
+	)
 	later := time.time_add(time.now(), time.Minute)
-	testing.expect(t, os.change_times(fmt.tprintf("%s/%s.blob", f.cache, guid), later, later) == nil)
+	testing.expect(
+		t,
+		os.change_times(fmt.tprintf("%s/%s.blob", f.cache, guid), later, later) == nil,
+	)
 	testing.expect(t, os.change_times(generation, later, later) == nil)
 	testing.expect(t, len(asset.poll(&f.assets)) > 0)
 }
@@ -31,7 +37,11 @@ rewrite :: proc(t: ^testing.T, f: ^Fixture, guid: string, text: string) {
 a_row_gives_fixed_and_percent_sizes_first_and_shares_the_rest_by_weight :: proc(t: ^testing.T) {
 	f := setup(t)
 	defer teardown(t, f)
-	e := show(t, f, DOC, `ui 1
+	e := show(
+		t,
+		f,
+		DOC,
+		`ui 1
 <ui>
 	<row id="bar" width="600" height="40" padding="10" gap="10" cross="stretch">
 		<box id="a" width="100"/>
@@ -39,7 +49,8 @@ a_row_gives_fixed_and_percent_sizes_first_and_shares_the_rest_by_weight :: proc(
 		<box id="c" width="fill 3"/>
 		<box id="d" width="25%"/>
 	</row>
-</ui>`)
+</ui>`,
+	)
 	step(f)
 	// 580 of content, less 30 of gaps, 100 and 145: 305 shared 1 to 3.
 	testing.expect_value(t, node_rect(t, f, e, "bar"), [4]f32{0, 0, 600, 40})
@@ -56,14 +67,19 @@ a_row_gives_fixed_and_percent_sizes_first_and_shares_the_rest_by_weight :: proc(
 a_fill_that_its_max_stops_leaves_the_rest_to_the_others :: proc(t: ^testing.T) {
 	f := setup(t)
 	defer teardown(t, f)
-	e := show(t, f, DOC, `ui 1
+	e := show(
+		t,
+		f,
+		DOC,
+		`ui 1
 <ui>
 	<row width="300" height="10">
 		<box id="small" width="fill" max_width="50"/>
 		<box id="big" width="fill"/>
 		<box id="least" width="fill 0.1" min_width="40"/>
 	</row>
-</ui>`)
+</ui>`,
+	)
 	step(f)
 	testing.expect_value(t, node_rect(t, f, e, "small"), [4]f32{0, 0, 50, 0})
 	testing.expect_value(t, node_rect(t, f, e, "big"), [4]f32{50, 0, 260, 0})
@@ -74,7 +90,11 @@ a_fill_that_its_max_stops_leaves_the_rest_to_the_others :: proc(t: ^testing.T) {
 a_column_fits_its_children_and_aligns_them :: proc(t: ^testing.T) {
 	f := setup(t)
 	defer teardown(t, f)
-	e := show(t, f, DOC, `ui 1
+	e := show(
+		t,
+		f,
+		DOC,
+		`ui 1
 <ui>
 	<column id="list" padding="4 8" gap="2" cross="center">
 		<box id="wide" width="100" height="20"/>
@@ -84,7 +104,8 @@ a_column_fits_its_children_and_aligns_them :: proc(t: ^testing.T) {
 		<box id="top" height="10"/>
 		<box id="bottom" height="10"/>
 	</column>
-</ui>`)
+</ui>`,
+	)
 	step(f)
 	testing.expect_value(t, node_rect(t, f, e, "list"), [4]f32{0, 0, 116, 40})
 	testing.expect_value(t, node_rect(t, f, e, "wide"), [4]f32{8, 4, 108, 24})
@@ -97,14 +118,19 @@ a_column_fits_its_children_and_aligns_them :: proc(t: ^testing.T) {
 a_stack_anchors_its_children_and_offsets_them :: proc(t: ^testing.T) {
 	f := setup(t)
 	defer teardown(t, f)
-	e := show(t, f, DOC, `ui 1
+	e := show(
+		t,
+		f,
+		DOC,
+		`ui 1
 <ui>
 	<stack id="s" anchor="bottom_right" width="200" height="100" offset="-20 -10">
 		<box id="corner" width="20" height="10" anchor="bottom_right" offset="-5 -5"/>
 		<box id="middle" width="50" height="50" anchor="center"/>
 		<box id="all" anchor="fill"/>
 	</stack>
-</ui>`)
+</ui>`,
+	)
 	step(f)
 	testing.expect_value(t, node_rect(t, f, e, "s"), [4]f32{1700, 970, 1900, 1070})
 	testing.expect_value(t, node_rect(t, f, e, "corner"), [4]f32{1875, 1055, 1895, 1065})
@@ -116,7 +142,12 @@ a_stack_anchors_its_children_and_offsets_them :: proc(t: ^testing.T) {
 the_scale_follows_the_output_height_and_the_project_setting :: proc(t: ^testing.T) {
 	f := setup(t)
 	defer teardown(t, f)
-	e := show(t, f, DOC, "ui 1\n<ui><box id=\"b\" width=\"300\" height=\"30\" padding=\"6\"/></ui>")
+	e := show(
+		t,
+		f,
+		DOC,
+		"ui 1\n<ui><box id=\"b\" width=\"300\" height=\"30\" padding=\"6\"/></ui>",
+	)
 	step(f, size = {1280, 720})
 	testing.expect_value(t, node_rect(t, f, e, "b"), [4]f32{0, 0, 200, 20})
 	set_scale_factor(&f.ui, 2)
@@ -133,14 +164,19 @@ the_scale_follows_the_output_height_and_the_project_setting :: proc(t: ^testing.
 a_clip_cuts_its_children_and_visible_takes_them_out :: proc(t: ^testing.T) {
 	f := setup(t)
 	defer teardown(t, f)
-	e := show(t, f, DOC, `ui 1
+	e := show(
+		t,
+		f,
+		DOC,
+		`ui 1
 <ui>
 	<row id="r" width="50" height="10" clip="true">
 		<box id="in" width="40"/>
 		<box id="hidden" width="30" visible="false"/>
 		<box id="out" width="40"/>
 	</row>
-</ui>`)
+</ui>`,
+	)
 	step(f)
 	d := document_of(&f.ui, e)
 	out, _ := find_node(d, "out")
@@ -151,17 +187,24 @@ a_clip_cuts_its_children_and_visible_takes_them_out :: proc(t: ^testing.T) {
 }
 
 @(test)
-the_cascade_applies_kind_styles_listed_styles_variants_inline_and_overrides_in_order :: proc(t: ^testing.T) {
+the_cascade_applies_kind_styles_listed_styles_variants_inline_and_overrides_in_order :: proc(
+	t: ^testing.T,
+) {
 	f := setup(t)
 	defer teardown(t, f)
-	e := show(t, f, DOC, `ui 1
+	e := show(
+		t,
+		f,
+		DOC,
+		`ui 1
 <ui color="#123">
 	<style name="button" fill="#100" radius="1" gap="1"/>
 	<style name="button:focus" fill="#200" radius="2"/>
 	<style name="wide" fill="#300" padding="3"/>
 	<style name="wide:focus" padding="4"/>
 	<button id="b" style="wide" gap="9">Hi</button>
-</ui>`)
+</ui>`,
+	)
 	step(f)
 	d := document_of(&f.ui, e)
 	b, _ := find_node(d, "b")
@@ -212,14 +255,19 @@ a_new_version_of_the_document_keeps_what_scripts_set_copied_and_focused :: proc(
 	testing.expect(t, found)
 	testing.expect_value(t, d.nodes[label].style.text, "Saved")
 
-	rewrite(t, f, DOC, `ui 1
+	rewrite(
+		t,
+		f,
+		DOC,
+		`ui 1
 <ui>
 	<column id="list" gap="5">
 		<text>New</text>
 		<button id="first">A</button>
 	</column>
 	<template id="slot"><row><text id="label">Slot</text></row></template>
-</ui>`)
+</ui>`,
+	)
 	generation := d.generation
 	step(f)
 	testing.expect(t, d.generation > generation)
@@ -238,16 +286,31 @@ a_new_version_of_the_document_keeps_what_scripts_set_copied_and_focused :: proc(
 }
 
 @(test)
-a_new_version_of_the_document_keeps_the_edit_of_its_field_while_the_field_is_there :: proc(t: ^testing.T) {
+a_new_version_of_the_document_keeps_the_edit_of_its_field_while_the_field_is_there :: proc(
+	t: ^testing.T,
+) {
 	f := setup(t)
 	defer teardown(t, f)
-	e := show(t, f, DOC, fmt.tprintf(`ui 1
-<ui font=$%s><field id="name" width="300"/></ui>`, TEST_FONT))
+	e := show(
+		t,
+		f,
+		DOC,
+		fmt.tprintf(`ui 1
+<ui font=$%s><field id="name" width="300"/></ui>`, TEST_FONT),
+	)
 	step(f)
 	step(f, {mouse_position = {10, 10}, down = {.Mouse_Left}, pressed = {.Mouse_Left}})
 	d := document_of(&f.ui, e)
-	rewrite(t, f, DOC, fmt.tprintf(`ui 1
-<ui font=$%s><column><text>Name</text><field id="name" width="300"/></column></ui>`, TEST_FONT))
+	rewrite(
+		t,
+		f,
+		DOC,
+		fmt.tprintf(
+			`ui 1
+<ui font=$%s><column><text>Name</text><field id="name" width="300"/></column></ui>`,
+			TEST_FONT,
+		),
+	)
 	step(f)
 	edit, editing := f.ui.input.edit.?
 	testing.expect(t, editing && edit.field == f.ui.input.focus)

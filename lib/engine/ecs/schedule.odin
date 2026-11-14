@@ -103,15 +103,15 @@ Clock :: struct {
 // Schedule holds the systems. It holds procedures and strings from the DLL image, so reload clears it.
 @(private)
 Schedule :: struct {
-	systems: [MAX_SYSTEMS]System,
-	count:   int,
+	systems:          [MAX_SYSTEMS]System,
+	count:            int,
 	// The systems of each stage in run order.
-	order:   [Stage][MAX_SYSTEMS]u16,
-	ordered: [Stage]int,
+	order:            [Stage][MAX_SYSTEMS]u16,
+	ordered:          [Stage]int,
 	// For each system, the systems that it waits for.
-	waits:   [MAX_SYSTEMS][MAX_SYSTEMS / 64]u64,
-	built:   bool,
-	failed:  bool,
+	waits:            [MAX_SYSTEMS][MAX_SYSTEMS / 64]u64,
+	built:            bool,
+	failed:           bool,
 	job_buffers:      [MAX_JOB_BUFFERS]Job_Buffer_Desc,
 	job_buffer_count: int,
 }
@@ -223,7 +223,10 @@ next_tick :: proc(it: ^Ticks) -> bool {
 			it.running = true
 			return true
 		}
-		log.warnf("ecs: the simulation is behind, so it dropped %v", c.time - tick_start(c, c.tick))
+		log.warnf(
+			"ecs: the simulation is behind, so it dropped %v",
+			c.time - tick_start(c, c.tick),
+		)
 		c.time = tick_start(c, c.tick)
 	}
 	start := tick_start(c, c.tick)
@@ -294,7 +297,11 @@ run_fixed :: proc(w: ^World, dt: time.Duration, user: rawptr) -> int {
 // run_stage runs the Update or Late systems and applies their commands. After Late, it propagates transforms.
 run_stage :: proc(w: ^World, stage: Stage, dt: time.Duration, user: rawptr) {
 	assert(stage != .Fixed, "ecs: run the Fixed stage with run_fixed")
-	profile.scope_text(&w.platform.profile, "ECS Update" if stage == .Update else "ECS Late", .Frame)
+	profile.scope_text(
+		&w.platform.profile,
+		"ECS Update" if stage == .Update else "ECS Late",
+		.Frame,
+	)
 	run_systems(w, stage, f32(time.duration_seconds(dt)), user, false)
 	if stage == .Late {
 		propagate(w)
@@ -313,7 +320,10 @@ tick_length :: proc "contextless" (w: ^World) -> time.Duration {
 }
 
 tick_start :: proc "contextless" (c: ^Clock, tick: u64) -> time.Duration {
-	return c.base_time + time.Duration(i64(tick - c.base_tick) * i64(time.Second) / i64(c.tick_rate))
+	return(
+		c.base_time +
+		time.Duration(i64(tick - c.base_tick) * i64(time.Second) / i64(c.tick_rate)) \
+	)
 }
 
 // set_tick_rate changes the rate from the next tick on.
@@ -371,9 +381,9 @@ run_range :: proc(data: rawptr) {
 // A system's driver job waits for the systems before it, then runs the system's batches.
 @(private = "file")
 Driver :: struct {
-	run:     proc(job_list: []jobs.Job, counter: ^jobs.Counter),
-	wait:    proc(counter: ^jobs.Counter),
-	waits:   []^jobs.Counter,
+	run:        proc(job_list: []jobs.Job, counter: ^jobs.Counter),
+	wait:       proc(counter: ^jobs.Counter),
+	waits:      []^jobs.Counter,
 	batches:    []Batch,
 	batch_jobs: []jobs.Job,
 	done:       jobs.Counter,
@@ -516,7 +526,11 @@ build_schedule :: proc(w: ^World) -> bool {
 				}
 			}
 			if after[i][a] < 0 {
-				log.errorf("ecs: system %s runs after %s, which is not in its stage", sys.name, name)
+				log.errorf(
+					"ecs: system %s runs after %s, which is not in its stage",
+					sys.name,
+					name,
+				)
 				return false
 			}
 		}
@@ -579,7 +593,11 @@ build_schedule :: proc(w: ^World) -> bool {
 conflicts :: proc(a, b: ^System) -> bool {
 	a_reads, a_writes := a.reads[:a.read_count], a.writes[:a.write_count]
 	b_reads, b_writes := b.reads[:b.read_count], b.writes[:b.write_count]
-	return overlaps(a_writes, b_reads) || overlaps(a_writes, b_writes) || overlaps(a_reads, b_writes)
+	return(
+		overlaps(a_writes, b_reads) ||
+		overlaps(a_writes, b_writes) ||
+		overlaps(a_reads, b_writes) \
+	)
 }
 
 @(private = "file")

@@ -259,7 +259,10 @@ search_step :: proc(sr: ^Search, m: ^Mesh_View, expansions: int) -> (done: bool)
 			}
 			cost, heuristic: f32
 			if portal.neighbor == sr.goal_polygon {
-				cost = from.cost + linalg.distance(from.position, n.position) + linalg.distance(n.position, sr.goal)
+				cost =
+					from.cost +
+					linalg.distance(from.position, n.position) +
+					linalg.distance(n.position, sr.goal)
 			} else {
 				cost = from.cost + linalg.distance(from.position, n.position)
 				heuristic = linalg.distance(n.position, sr.goal) * H_SCALE
@@ -281,7 +284,15 @@ search_step :: proc(sr: ^Search, m: ^Mesh_View, expansions: int) -> (done: bool)
 // search_finish gives a done search's path: Found to the goal, or Partial to the point of the nearest polygon that it
 // reached nearest the goal. corners and corridor are in allocator.
 @(private)
-search_finish :: proc(sr: ^Search, m: ^Mesh_View, allocator: runtime.Allocator) -> (status: Path_Status, corners: [][3]f32, corridor: []u32) {
+search_finish :: proc(
+	sr: ^Search,
+	m: ^Mesh_View,
+	allocator: runtime.Allocator,
+) -> (
+	status: Path_Status,
+	corners: [][3]f32,
+	corridor: []u32,
+) {
 	g := &sr.graph
 	count := 0
 	for n := sr.best; n != NO_NODE; n = g.nodes[n].parent {
@@ -305,7 +316,12 @@ search_finish :: proc(sr: ^Search, m: ^Mesh_View, allocator: runtime.Allocator) 
 // straight_path pulls a path through the portals of a corridor of polygons, from start on the first to end on the
 // last, with the funnel of Detour's findStraightPath. Its corners start with start and end with end.
 @(private)
-straight_path :: proc(m: ^Mesh_View, start, end: [3]f32, corridor: []u32, allocator: runtime.Allocator) -> [][3]f32 {
+straight_path :: proc(
+	m: ^Mesh_View,
+	start, end: [3]f32,
+	corridor: []u32,
+	allocator: runtime.Allocator,
+) -> [][3]f32 {
 	out := make([dynamic][3]f32, 0, len(corridor) + 1, allocator)
 	add :: proc(out: ^[dynamic][3]f32, p: [3]f32) {
 		if len(out) == 0 || !equal_points(out[len(out) - 1], p) {
@@ -329,7 +345,8 @@ straight_path :: proc(m: ^Mesh_View, start, end: [3]f32, corridor: []u32, alloca
 				next_left, next_right = portal.left, portal.right
 				// A start on the first portal would make the funnel empty.
 				if i == 0 {
-					if d, _ := distance_to_segment_2d(apex, next_left, next_right); d < EQUAL_DISTANCE * EQUAL_DISTANCE {
+					if d, _ := distance_to_segment_2d(apex, next_left, next_right);
+					   d < EQUAL_DISTANCE * EQUAL_DISTANCE {
 						continue
 					}
 				}

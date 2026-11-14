@@ -18,18 +18,18 @@ Root :: struct {
 }
 
 Cook_Options :: struct {
-	cache:       string,
-	config:      Script_Config,
-	roots:       [dynamic]Root,
+	cache:             string,
+	config:            Script_Config,
+	roots:             [dynamic]Root,
 	// The definition file to type check scripts against, or "" for none.
-	definitions: string,
+	definitions:       string,
 	// The daemon's port for the cook link, or 0 for none.
-	link:        int,
+	link:              int,
 	// DXC's absolute path and its version, or "" when shaders cannot cook.
-	dxc:         string,
-	dxc_version: string,
+	dxc:               string,
+	dxc_version:       string,
 	// The directories that shader includes resolve in after the including file's own: absolute, with forward slashes.
-	includes:    [dynamic]string,
+	includes:          [dynamic]string,
 	// Readers that stand in for the cooker's own for a technique of decisions, as tests give; nil for the cooker's.
 	technique_readers: Technique_Readers,
 }
@@ -165,15 +165,41 @@ cook :: proc(
 	pass.progress.start = time.tick_now()
 	pass.saved = saved
 	pass.read = make([dynamic]string, context.temp_allocator)
-	scanned := scan_pass(options.roots[:], options.includes[:], options.definitions, saved, changes, &pass)
-	pass.assets, pass.folders, pass.shared, pass.files = scanned.assets, scanned.folders, scanned.shared, scanned.files
+	scanned := scan_pass(
+		options.roots[:],
+		options.includes[:],
+		options.definitions,
+		saved,
+		changes,
+		&pass,
+	)
+	pass.assets, pass.folders, pass.shared, pass.files =
+		scanned.assets, scanned.folders, scanned.shared, scanned.files
 	pass.ok = scanned.ok
 	if saved != nil {
-		pass_scope(&pass, scanned, saved, options.roots[:], options.includes[:], options.definitions, force)
+		pass_scope(
+			&pass,
+			scanned,
+			saved,
+			options.roots[:],
+			options.includes[:],
+			options.definitions,
+			force,
+		)
 	}
 	// A stage's material instances and prefab are text that its cook generates, which the material and scene passes
 	// then cook as they would files, so the stages go first whenever either pass runs.
-	if kinds & {.Stage, .Scene, .Prefab, .Shading_Model, .Material, .Material_Instance, .Material_Function} != {} {
+	if kinds &
+		   {
+				   .Stage,
+				   .Scene,
+				   .Prefab,
+				   .Shading_Model,
+				   .Material,
+				   .Material_Instance,
+				   .Material_Function,
+			   } !=
+	   {} {
 		pass.ok = cook_stages(options, &pass) && pass.ok
 	}
 	if .Script in kinds {
@@ -253,7 +279,10 @@ config_dir :: proc(options: Cook_Options) -> string {
 
 // read_generation reads the counter in a configuration directory's generation file. It is 0 if there is none.
 read_generation :: proc(dir: string) -> u64 {
-	data, err := os.read_entire_file(fmt.tprintf("%s/%s", dir, format.GENERATION_FILE), context.temp_allocator)
+	data, err := os.read_entire_file(
+		fmt.tprintf("%s/%s", dir, format.GENERATION_FILE),
+		context.temp_allocator,
+	)
 	if err != nil {
 		return 0
 	}
@@ -264,5 +293,8 @@ read_generation :: proc(dir: string) -> u64 {
 write_generation :: proc(dir: string) -> (generation: u64, ok: bool) {
 	generation = read_generation(dir) + 1
 	text := fmt.tprintf("%d\n", generation)
-	return generation, write_blob(fmt.tprintf("%s/%s", dir, format.GENERATION_FILE), transmute([]byte)text)
+	return generation, write_blob(
+		fmt.tprintf("%s/%s", dir, format.GENERATION_FILE),
+		transmute([]byte)text,
+	)
 }
