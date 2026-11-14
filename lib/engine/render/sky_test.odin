@@ -71,6 +71,42 @@ the_fogs_sky_light_is_the_sky_through_the_phase :: proc(t: ^testing.T) {
 	testing.expectf(t, above.b > flat.constant.b && below.b < flat.constant.b, "above %v, below %v", above, below)
 }
 
+// A hemisphere's light is the sky's light averaged over its directions. The sky's light from a direction is the
+// ambient's constant and its gradient times 1.5, which undoes the cosine's convolution.
+@(test)
+the_hemispheres_light_is_the_sky_averaged_over_it :: proc(t: ^testing.T) {
+	a := Ambient{constant = {0.5, 0.6, 0.8}, x = {0.05, 0.02, -0.03}, y = {0.2, 0.25, 0.35}, z = {-0.04, 0.06, 0.01}}
+	N :: 1 << 16
+	golden := math.PI * (3 - math.sqrt(f64(5)))
+	for axis in ([][3]f32{{0, 1, 0}, {0, -1, 0}, linalg.normalize([3]f32{1, -2, 3})}) {
+		sum: [3]f64
+		count := 0
+		for i in 0 ..< N {
+			y := 1 - (f64(i) + 0.5) * 2 / N
+			r := math.sqrt(1 - y * y)
+			w := [3]f64{math.cos(golden * f64(i)) * r, y, math.sin(golden * f64(i)) * r}
+			if w.x * f64(axis.x) + w.y * f64(axis.y) + w.z * f64(axis.z) <= 0 {
+				continue
+			}
+			for c in 0 ..< 3 {
+				sum[c] += f64(a.constant[c]) + 1.5 * (f64(a.x[c]) * w.x + f64(a.y[c]) * w.y + f64(a.z[c]) * w.z)
+			}
+			count += 1
+		}
+		mean := sum / f64(count)
+		expected := [3]f32{f32(mean.x), f32(mean.y), f32(mean.z)}
+		got := ambient_hemisphere(a, axis)
+		testing.expectf(t, near(got, expected, 1e-3), "axis %v: %v, the integral %v", axis, got, expected)
+	}
+	// The two halves of the sphere average to the whole sphere's light.
+	up, down := ambient_hemisphere(a, {0, 1, 0}), ambient_hemisphere(a, {0, -1, 0})
+	testing.expect(t, near((up + down) * 0.5, a.constant))
+	// Under a Flat sky, the upper hemisphere's light is the sky's color more than the average is.
+	flat := flat_ambient({0.4, 0.5, 0.9}, {0.2, 0.1, 0.05})
+	above := ambient_hemisphere(flat, {0, 1, 0})
+	testing.expectf(t, above.b / above.r > flat.constant.b / flat.constant.r, "above %v, the average %v", above, flat.constant)
+}
+
 @(test)
 the_air_dims_and_reddens_the_sun_toward_the_horizon :: proc(t: ^testing.T) {
 	a := sky_settings(DEFAULT_ENVIRONMENT).atmosphere

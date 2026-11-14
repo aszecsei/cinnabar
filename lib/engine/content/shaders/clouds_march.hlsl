@@ -81,14 +81,25 @@ float3 sun_light(float3 p, float h, float t, float mu_sun) {
 	return sun * powder * clouds.sun_illuminance.rgb;
 }
 
-// The share of the sky's ambient light at the bottom of the layer, and the height fraction from which it is whole.
-static const float AMBIENT_BOTTOM = 0.35;
+// At the bottom of the layer, the share of the upper hemisphere's light that comes down through the cloud, and the
+// share of the lower hemisphere's, the ground's; the height fraction from which the light is the upper hemisphere's.
+static const float AMBIENT_BOTTOM_SKY = 0.25;
+static const float AMBIENT_BOTTOM_GROUND = 0.15;
 static const float AMBIENT_WHOLE = 0.3;
+// The local coverage from which the light from above turns grey, wholly grey at 1 and at the bottom of the layer.
+static const float OVERCAST_START = 0.5;
+static const float3 LUMINANCE = float3(0.2126, 0.7152, 0.0722);
 
-// ambient_light_at is the sky's light at a sample: AMBIENT_BOTTOM of it at the bottom of the layer, whole from
-// AMBIENT_WHOLE of its height, and darker in rain.
-float3 ambient_light_at(float hf, float precipitation) {
-	return ambient_average(clouds.ambient) * lerp(AMBIENT_BOTTOM, 1, pow(saturate(hf / AMBIENT_WHOLE), 0.8)) * lerp(1, 0.6, precipitation);
+// ambient_light_at is the sky's light at a sample. From AMBIENT_WHOLE of the layer's height up, a sample sees the sky
+// above it. At the bottom, it sees the ground below it and the sky's light that comes down through the cloud. The
+// ambient light leaves the clouds out, so under a high coverage the light from above is more cloud's, not the clear
+// sky's, and is grey, the more so the more of the layer is above the sample. Rain darkens it.
+float3 ambient_light_at(float hf, float coverage, float precipitation) {
+	float3 up = ambient_hemisphere(clouds.ambient, float3(0, 1, 0));
+	float3 down = ambient_hemisphere(clouds.ambient, float3(0, -1, 0));
+	float3 above = lerp(up, dot(up, LUMINANCE).xxx, smoothstep(OVERCAST_START, 1, coverage) * (1 - hf));
+	float3 bottom = AMBIENT_BOTTOM_SKY * above + AMBIENT_BOTTOM_GROUND * down;
+	return lerp(bottom, above, pow(saturate(hf / AMBIENT_WHOLE), 0.8)) * lerp(1, 0.6, precipitation);
 }
 
 [numthreads(8, 8, 1)]
@@ -156,7 +167,7 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 			float density = w.far < 1 ? cloud_detail(q, hf, base, w.far) : base;
 			float sigma = cloud_sigma(density, w.precipitation, t);
 			if (sigma > 0) {
-				float3 light = ambient_light_at(hf, w.precipitation);
+				float3 light = ambient_light_at(hf, w.coverage, w.precipitation);
 				if (has_sun) {
 					light += sun_light(p, h, t, mu_sun);
 				}
@@ -203,7 +214,7 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 			float n = cn_texture3d(clouds.shape).SampleLevel(cn_sampler(clouds.noise_sampler), float3((along + curl.x) / CIRRUS_PERIOD, 0.37, (across + curl.y) / CIRRUS_PERIOD), 0).r;
 			float od_c = clouds.cirrus * CIRRUS_OPTICAL_DEPTH * saturate(remap(n, 1 - clouds.cirrus, 1, 0, 1)) * clouds.density * (1 - smoothstep(CLOUD_FADE_START, CLOUD_MAX_DISTANCE, tc));
 			float T_c = exp(-od_c);
-			float3 L_c = (clouds.cirrus_illuminance.rgb * hg_phase(mu_sun, 0.7) * 2 + ambient_average(clouds.ambient) * 0.5) * (1 - T_c) * 0.9;
+			float3 L_c = (clouds.cirrus_illuminance.rgb * hg_phase(mu_sun, 0.7) * 2 + ambient_hemisphere(clouds.ambient, float3(0, -1, 0)) * 0.5) * (1 - T_c) * 0.9;
 			scattering += T * L_c;
 			T *= T_c;
 			if (!hit && od_c > 0) {
