@@ -1,7 +1,8 @@
 // The cloud shadow map (see docs/rendering/clouds.md#shadow): a thread for each texel of a square of shadow_extent
 // meters on the layer's bottom, centered on shadow_center. Each marches toward the sun through the low layer in
-// shadow_steps even steps of the cheap density, and writes the transmittance, which every lit thing reads through
-// cloud_shadow in cloud_shadow.hlsli. With the sun near the horizon, the map is 1: the receiver fades it out too.
+// shadow_steps even steps of the expected density (cheap_sigma), and writes the transmittance, which every lit thing
+// reads through cloud_shadow in cloud_shadow.hlsli. With the sun near the horizon, the map is 1: the receiver fades it
+// out too.
 #include "clouds_common.hlsli"
 
 static const float SHADOW_MIN_SUN_Y = 0.05;

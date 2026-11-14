@@ -321,6 +321,10 @@ float cloud_base(float3 q, float hf, float coverage, float type) {
 	return saturate(remap(base, 1 - coverage, 1, 0, 1)) * coverage;
 }
 
+// The most of the base that the detail noise erodes, and the erosion's mean share of it: the detail noise's mean.
+static const float DETAIL_EROSION = 0.35;
+static const float DETAIL_MEAN = 0.5;
+
 // cloud_detail is the full density: the base eroded by the detail noise, which the curl noise swirls at the base of the
 // layer, with wispy edges at the bottom and billows above. The far clouds keep the base alone.
 float cloud_detail(float3 q, float hf, float base, float far) {
@@ -328,7 +332,7 @@ float cloud_detail(float3 q, float hf, float base, float far) {
 	float3 dn = cn_texture3d(clouds.detail).SampleLevel(cn_sampler(clouds.noise_sampler), (q + float3(curl.x, 0, curl.y)) / CLOUD_DETAIL_PERIOD, 0).rgb;
 	float dfbm = dn.r * 0.625 + dn.g * 0.25 + dn.b * 0.125;
 	float dmod = lerp(dfbm, 1 - dfbm, saturate(hf * 10));
-	return saturate(remap(base, dmod * 0.35 * (1 - far), 1, 0, 1));
+	return saturate(remap(base, dmod * DETAIL_EROSION * (1 - far), 1, 0, 1));
 }
 
 // cloud_sigma is the extinction of a meter of cloud at a density, thicker in rain, fading out with the distance so
@@ -337,8 +341,11 @@ float cloud_sigma(float density, float precipitation, float t) {
 	return density * CLOUD_EXTINCTION * clouds.density * lerp(1, 2, precipitation) * (1 - smoothstep(CLOUD_FADE_START, CLOUD_MAX_DISTANCE, t));
 }
 
-// cheap_sigma is the extinction of the cheap density at a point relative to the camera, at a height above the ground,
-// for the light march and the shadow map, with the weather's far blend by a distance.
+// cheap_sigma is the extinction at a point relative to the camera, at a height above the ground, for the light march
+// and the shadow map, with the weather's far blend by a distance: the cheap density, eroded by the detail noise's mean
+// erosion, so it is the full density's expected value without the detail noise's fetches. The cheap density alone
+// is the full density before its erosion, which is several times the full density near a cloud's soft edges, so the
+// light march and the shadow map saw a fatter cloud than the march draws.
 float cheap_sigma(float3 p, float h, float t) {
 	float hf = saturate((h - clouds.bottom) / max(clouds.top - clouds.bottom, 1));
 	if (hf <= 0 || hf >= 1) {
@@ -350,7 +357,8 @@ float cheap_sigma(float3 p, float h, float t) {
 	}
 	float coverage = anvil_coverage(w.coverage, hf, w.type);
 	float base = cloud_base(noise_position(p, h), hf, coverage, w.type);
-	return cloud_sigma(base, w.precipitation, t);
+	float density = saturate(remap(base, DETAIL_MEAN * DETAIL_EROSION * (1 - w.far), 1, 0, 1));
+	return cloud_sigma(density, w.precipitation, t);
 }
 
 // cloud_direction is the direction of a texel of the cloud buffer, from its block's center on the screen.

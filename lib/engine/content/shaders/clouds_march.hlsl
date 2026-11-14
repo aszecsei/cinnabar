@@ -58,7 +58,7 @@ float albedo(float precipitation) {
 }
 
 // sun_light is the sun's light scattered toward the camera at a sample, before the albedo: a light march toward the sun
-// through the cheap density in steps that double, then the octaves and the diffusion floor of its optical depth.
+// through the expected density (cheap_sigma) in steps that double, then the octaves and the diffusion floor of its optical depth.
 float3 sun_light(float3 p, float h, float t, float mu_sun) {
 	float3 to_sun = clouds.sun_direction.xyz;
 	float reach = min((clouds.top - h) / max(to_sun.y, 0.1), LIGHT_REACH_MAX);
