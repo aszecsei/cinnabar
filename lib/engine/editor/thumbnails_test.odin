@@ -141,7 +141,7 @@ write_mesh :: proc(t: ^testing.T, f: ^Bake_Fixture) {
 		indices = mem.slice_to_bytes([]u16{0, 1, 2}),
 		meshlets = {{vertex_count = 3, triangle_count = 1}},
 		meshlet_vertices = mem.slice_to_bytes([]u32{0, 1, 2}),
-		meshlet_triangles = mem.slice_to_bytes([]u32{0 | 1 << 8 | 2 << 16}),
+		meshlet_triangles = []u8{0, 1, 2},
 	}
 	buffer: [32]u8
 	path := fmt.tprintf("%s/%s.blob", f.dir, format.guid_format(format.Guid(BAKE_MESH), &buffer))

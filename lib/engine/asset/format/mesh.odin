@@ -61,11 +61,13 @@ Mesh_Submesh :: struct {
 // Meshlet is a cluster of at most MESHLET_MAX_VERTICES vertices and MESHLET_MAX_TRIANGLES triangles, at one level of
 // its submesh's LOD hierarchy, with the bounds that culling tests and the errors that pick the level (see
 // docs/content/kinds/meshes.md#meshlets). Its vertices are refs in meshlet_vertices, which meshlet_write_vertices writes
-// and meshlet_vertex reads, and its triangles a range of meshlet_triangles. In a paged mesh the offsets, the base and the
-// refs are into its page's streams and vertices. Shaders read it as it is: matches Meshlet in material_mesh.hlsli.
+// and meshlet_vertex reads, and its triangles a range of meshlet_triangles, which meshlet_write_triangles writes and
+// meshlet_triangle reads. In a paged mesh the offsets, the base and the refs are into its page's streams and vertices.
+// Shaders read it as it is: matches Meshlet in material_mesh.hlsli.
 Meshlet :: struct {
 	// In u32 words of meshlet_vertices.
 	vertex_offset:   u32,
+	// In triangles of meshlet_triangles, three bytes each.
 	triangle_offset: u32,
 	// The lowest of its vertices. Each ref is a vertex's index in the mesh less this.
 	base_vertex:     u32,
@@ -147,6 +149,23 @@ meshlet_vertex :: proc "contextless" (m: Meshlet, stream: []u32, i: int) -> u32 
 	}
 	word := stream[int(m.vertex_offset) + i / 2]
 	return m.base_vertex + (i % 2 != 0 ? word >> 16 : word & 0xffff)
+}
+
+// meshlet_write_triangles appends a meshlet's triangles to the stream, three bytes each, the indices into its vertices,
+// and sets the meshlet's fields that say where they are.
+meshlet_write_triangles :: proc(m: ^Meshlet, triangles: [][3]u8, stream: ^[dynamic]u8) {
+	m.triangle_offset = u32(len(stream) / 3)
+	m.triangle_count = u8(len(triangles))
+	for t in triangles {
+		append(stream, t[0], t[1], t[2])
+	}
+}
+
+// meshlet_triangle is a meshlet's triangle i, as indices into its vertices. Matches cluster_triangle in
+// material_mesh.hlsli.
+meshlet_triangle :: proc "contextless" (m: Meshlet, stream: []u8, i: int) -> [3]u32 {
+	t := stream[(int(m.triangle_offset) + i) * 3:][:3]
+	return {u32(t[0]), u32(t[1]), u32(t[2])}
 }
 
 // meshlet_encode_sphere is the smallest f16 sphere near a sphere that holds it, for culling: the center rounds, and the
@@ -321,7 +340,7 @@ Mesh_Blob :: struct {
 	meshlets:          Slice,
 	// Each meshlet's refs to its vertices, in u32 words: two to a word, or one when they do not fit in 16 bits.
 	meshlet_vertices:  Slice,
-	// u32 per meshlet triangle: its three indices into its meshlet's vertices in the low three bytes.
+	// Three bytes per meshlet triangle: its indices into its meshlet's vertices.
 	meshlet_triangles: Slice,
 	// Meshlet_Node records.
 	meshlet_nodes:     Slice,
@@ -395,9 +414,9 @@ Mesh_Page_Flag :: enum u32 {
 Mesh_Page_Flags :: bit_set[Mesh_Page_Flag;u32]
 
 // Mesh_Page_Header starts an uncompressed page. The Meshlet records follow it, and then the streams at its offsets,
-// which are in bytes from the page's start and multiples of 4: the vertex refs and the triangles in u32 words, as
-// meshlet_vertices and meshlet_triangles are, [3]f32 positions, and attributes of the mesh's stride. Shaders read it as
-// it is: matches Mesh_Page_Header in mesh_pages.hlsli.
+// which are in bytes from the page's start and multiples of 4: the vertex refs in u32 words, as meshlet_vertices are,
+// the triangles in three bytes each, as meshlet_triangles are, padded with zeros to a multiple of 4, [3]f32 positions,
+// and attributes of the mesh's stride. Shaders read it as it is: matches Mesh_Page_Header in mesh_pages.hlsli.
 Mesh_Page_Header :: struct {
 	meshlet_count:  u32,
 	vertex_count:   u32,
@@ -406,7 +425,13 @@ Mesh_Page_Header :: struct {
 	positions:      u32,
 	attributes:     u32,
 	ref_words:      u32,
-	triangle_words: u32,
+	// Without the padding.
+	triangle_bytes: u32,
+}
+
+// mesh_page_padded is the size of a page's triangles with their padding, from how many bytes they are.
+mesh_page_padded :: proc "contextless" (triangle_bytes: u32) -> u64 {
+	return (u64(triangle_bytes) + 3) &~ 3
 }
 
 #assert(size_of(Mesh_Page_Header) == 32)
@@ -475,7 +500,7 @@ mesh_view :: proc(data: []byte) -> (blob: ^Mesh_Blob, ok: bool) {
 	     blob.page_dependencies.size % 4 != 0 || blob.page_dependencies.offset % 4 != 0,
 	     blob.submeshes.size % size_of(Mesh_Submesh) != 0 || blob.submeshes.offset % align_of(Mesh_Submesh) != 0,
 	     blob.meshlets.size % size_of(Meshlet) != 0 || blob.meshlets.offset % align_of(Meshlet) != 0,
-	     blob.meshlet_vertices.size % 4 != 0 || blob.meshlet_triangles.size % 4 != 0,
+	     blob.meshlet_vertices.size % 4 != 0 || blob.meshlet_triangles.size % 3 != 0,
 	     blob.meshlet_nodes.size % size_of(Meshlet_Node) != 0 || blob.meshlet_nodes.offset % align_of(Meshlet_Node) != 0,
 	     blob.collision_positions.size % 12 != 0 || blob.collision_triangles.size % 12 != 0,
 	     blob.collision_submeshes.size != blob.collision_triangles.size / 12 * 2,
@@ -607,7 +632,8 @@ mesh_page_view :: proc "contextless" (page: []byte, record: Mesh_Page, stride: u
 	     record.level0_meshlets > 0 && header.vertex_count != record.vertex_count,
 	     u64(header.vertex_refs) != meshlets_end,
 	     u64(header.triangles) != u64(header.vertex_refs) + u64(header.ref_words) * 4,
-	     u64(header.positions) != u64(header.triangles) + u64(header.triangle_words) * 4,
+	     header.triangle_bytes % 3 != 0,
+	     u64(header.positions) != u64(header.triangles) + mesh_page_padded(header.triangle_bytes),
 	     u64(header.attributes) != u64(header.positions) + u64(header.vertex_count) * 12,
 	     size != u64(header.attributes) + u64(header.vertex_count) * u64(stride):
 		return nil, false
@@ -616,7 +642,7 @@ mesh_page_view :: proc "contextless" (page: []byte, record: Mesh_Page, stride: u
 	for m, i in mesh_page_meshlets(page, header) {
 		words := m.short_refs != 0 ? (u64(m.vertex_count) + 1) / 2 : u64(m.vertex_count)
 		if u64(m.vertex_offset) + words > u64(header.ref_words) ||
-		   u64(m.triangle_offset) + u64(m.triangle_count) > u64(header.triangle_words) ||
+		   (u64(m.triangle_offset) + u64(m.triangle_count)) * 3 > u64(header.triangle_bytes) ||
 		   m.vertex_count > MESHLET_MAX_VERTICES ||
 		   m.triangle_count > MESHLET_MAX_TRIANGLES ||
 		   (u32(i) < record.level0_meshlets) != (m.depth == 0) {
@@ -639,8 +665,9 @@ mesh_page_refs :: proc "contextless" (page: []byte, header: ^Mesh_Page_Header) -
 	return ([^]u32)(raw_data(page[header.vertex_refs:]))[:header.ref_words]
 }
 
-mesh_page_triangles :: proc "contextless" (page: []byte, header: ^Mesh_Page_Header) -> []u32 {
-	return ([^]u32)(raw_data(page[header.triangles:]))[:header.triangle_words]
+// mesh_page_triangles is the page's triangles, without their padding.
+mesh_page_triangles :: proc "contextless" (page: []byte, header: ^Mesh_Page_Header) -> []u8 {
+	return page[header.triangles:][:header.triangle_bytes]
 }
 
 mesh_page_positions :: proc "contextless" (page: []byte, header: ^Mesh_Page_Header) -> [][3]f32 {
@@ -661,9 +688,9 @@ mesh_page_level0 :: proc "contextless" (page: []byte, header: ^Mesh_Page_Header,
 	refs := mesh_page_refs(page, header)
 	triangles := mesh_page_triangles(page, header)
 	for m in mesh_page_meshlets(page, header)[:record.level0_meshlets] {
-		for packed in triangles[m.triangle_offset:][:m.triangle_count] {
-			for shift in ([3]u32{0, 8, 16}) {
-				indices[count] = record.first_vertex + meshlet_vertex(m, refs, int((packed >> shift) & 0xff))
+		for i in 0 ..< int(m.triangle_count) {
+			for corner in meshlet_triangle(m, triangles, i) {
+				indices[count] = record.first_vertex + meshlet_vertex(m, refs, int(corner))
 				count += 1
 			}
 		}

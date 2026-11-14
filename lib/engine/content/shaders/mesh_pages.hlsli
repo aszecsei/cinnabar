@@ -17,7 +17,8 @@ static const uint MESH_PAGE_ENTRY_SIZE = 8;
 static const uint MESH_PAGE_SEARCH_STEPS = 17;
 
 // Matches Mesh_Page_Header in lib/engine/asset/format/mesh.odin: what starts a page. Its Meshlet records follow it,
-// and its streams are at these offsets in bytes from the page's start.
+// and its streams are at these offsets in bytes from the page's start. The triangles are three bytes each, padded to a
+// multiple of 4.
 struct Mesh_Page_Header {
 	uint meshlet_count;
 	uint vertex_count;
@@ -26,7 +27,7 @@ struct Mesh_Page_Header {
 	uint positions;
 	uint attributes;
 	uint ref_words;
-	uint triangle_words;
+	uint triangle_bytes;
 };
 
 // mesh_page_slot is a table entry's slot, or MESH_PAGE_ABSENT for a page that is not resident.

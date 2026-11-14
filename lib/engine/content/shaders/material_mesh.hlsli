@@ -269,9 +269,18 @@ Material_Vertex cluster_vertex(Cluster c, uint i) {
 	return v;
 }
 
-// cluster_triangle is a meshlet's triangle, as indices into its vertices.
+// cluster_triangle is a meshlet's triangle, as indices into its vertices: three bytes, which a load of whole aligned
+// words reads from the word that they start in and, when they cross into it, the next. The streams start at multiples
+// of 4 and are padded to them, so the next word is never past the stream. Matches meshlet_triangle in
+// lib/engine/asset/format/mesh.odin.
 uint3 cluster_triangle(Cluster c, uint i) {
-	uint t = cn_buffer(c.triangles).Load(c.triangles_offset + (c.meshlet.triangle_offset + i) * 4);
+	uint at = c.triangles_offset + (c.meshlet.triangle_offset + i) * 3;
+	uint word = at & ~3u;
+	uint shift = (at & 3) * 8;
+	uint t = cn_buffer(c.triangles).Load(word) >> shift;
+	if (shift > 8) {
+		t |= cn_buffer(c.triangles).Load(word + 4) << (32 - shift);
+	}
 	return uint3(t & 0xff, (t >> 8) & 0xff, (t >> 16) & 0xff);
 }
 

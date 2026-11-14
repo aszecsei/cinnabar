@@ -52,13 +52,13 @@ Mesh_Pages :: struct {
 Page_Size :: struct {
 	meshlets:       int,
 	ref_words:      int,
-	triangle_words: int,
+	triangle_bytes: int,
 	vertices:       int,
 }
 
 @(private = "file")
 page_bytes :: proc(s: Page_Size, vertex_stride: int) -> int {
-	return size_of(format.Mesh_Page_Header) + s.meshlets * size_of(format.Meshlet) + (s.ref_words + s.triangle_words) * 4 + s.vertices * vertex_stride
+	return size_of(format.Mesh_Page_Header) + s.meshlets * size_of(format.Meshlet) + s.ref_words * 4 + int(format.mesh_page_padded(u32(s.triangle_bytes))) + s.vertices * vertex_stride
 }
 
 // build_pages splits a mesh's groups into pages and compresses them. A page holds whole groups of one submesh. Each
@@ -66,7 +66,7 @@ page_bytes :: proc(s: Page_Size, vertex_stride: int) -> int {
 // writes each leaf node's page and its first meshlet in it, each meshlet's refined_page, and each submesh's range of
 // the level 0 indices. The meshlets' vertex_offset and triangle_offset are into meshlet_indices, which holds indices
 // into vertices, and meshlet_triangles. It fails if a group does not fit in a page, which leaves the mesh unpaged.
-build_pages :: proc(vertices: []Vertex, flags: format.Mesh_Flags, meshlets: []format.Meshlet, meshlet_indices: []u32, meshlet_triangles: []u32, nodes: []format.Meshlet_Node, submeshes: []format.Submesh_Entry, inputs: Page_Inputs) -> (result: Mesh_Pages, ok: bool) {
+build_pages :: proc(vertices: []Vertex, flags: format.Mesh_Flags, meshlets: []format.Meshlet, meshlet_indices: []u32, meshlet_triangles: []u8, nodes: []format.Meshlet_Node, submeshes: []format.Submesh_Entry, inputs: Page_Inputs) -> (result: Mesh_Pages, ok: bool) {
 	attribute_stride := int(format.mesh_attribute_stride(flags))
 	vertex_stride := 12 + attribute_stride
 	groups := inputs.groups[:]
@@ -82,7 +82,7 @@ build_pages :: proc(vertices: []Vertex, flags: format.Mesh_Flags, meshlets: []fo
 		for m in meshlets[g.first_meshlet:][:g.meshlet_count] {
 			size.meshlets += 1
 			size.ref_words += (int(m.vertex_count) + 1) / 2
-			size.triangle_words += int(m.triangle_count)
+			size.triangle_bytes += int(m.triangle_count) * 3
 			for v in meshlet_indices[m.vertex_offset:][:m.vertex_count] {
 				if seen[v] != stamp {
 					seen[v] = stamp
@@ -167,7 +167,7 @@ build_pages :: proc(vertices: []Vertex, flags: format.Mesh_Flags, meshlets: []fo
 	// compressed blocks stay.
 	records := make([dynamic]format.Meshlet, context.temp_allocator)
 	refs := make([dynamic]u32, context.temp_allocator)
-	triangles := make([dynamic]u32, context.temp_allocator)
+	triangles := make([dynamic]u8, context.temp_allocator)
 	page_vertices := make([dynamic]u32, context.temp_allocator)
 	page_buffer := make([]byte, format.MESH_PAGE_SIZE, context.temp_allocator)
 	scratch := make([]byte, lz4.bound(format.MESH_PAGE_SIZE), context.temp_allocator)
@@ -201,8 +201,8 @@ build_pages :: proc(vertices: []Vertex, flags: format.Mesh_Flags, meshlets: []fo
 			}
 			format.meshlet_write_vertices(&record, own, &refs)
 			assert(record.short_refs == 1, "a page has more vertices than 16-bit refs reach")
-			record.triangle_offset = u32(len(triangles))
-			append(&triangles, ..meshlet_triangles[source.triangle_offset:][:source.triangle_count])
+			own_triangles := meshlet_triangles[int(source.triangle_offset) * 3:][:int(source.triangle_count) * 3]
+			format.meshlet_write_triangles(&record, slice.reinterpret([][3]u8, own_triangles), &triangles)
 			refined := inputs.refined[int(first_meshlet) + i]
 			record.refined_page = refined >= 0 ? group_page[refined] : format.MESH_PAGE_NONE
 			if source.depth == 0 {
@@ -216,11 +216,11 @@ build_pages :: proc(vertices: []Vertex, flags: format.Mesh_Flags, meshlets: []fo
 			meshlet_count  = count,
 			vertex_count   = u32(len(page_vertices)),
 			ref_words      = u32(len(refs)),
-			triangle_words = u32(len(triangles)),
+			triangle_bytes = u32(len(triangles)),
 		}
 		header.vertex_refs = size_of(format.Mesh_Page_Header) + count * size_of(format.Meshlet)
 		header.triangles = header.vertex_refs + header.ref_words * 4
-		header.positions = header.triangles + header.triangle_words * 4
+		header.positions = header.triangles + u32(format.mesh_page_padded(header.triangle_bytes))
 		header.attributes = header.positions + header.vertex_count * 12
 		size := int(header.attributes) + len(page_vertices) * attribute_stride
 		assert(size <= format.MESH_PAGE_SIZE && size % 4 == 0, "a page is not the size that it was counted to be")
@@ -228,7 +228,9 @@ build_pages :: proc(vertices: []Vertex, flags: format.Mesh_Flags, meshlets: []fo
 		mem.copy(raw_data(page), &header, size_of(header))
 		copy(page[size_of(format.Mesh_Page_Header):], mem.slice_to_bytes(records[:]))
 		copy(page[header.vertex_refs:], mem.slice_to_bytes(refs[:]))
-		copy(page[header.triangles:], mem.slice_to_bytes(triangles[:]))
+		// The buffer holds the last page's bytes, so the padding is cleared, and a cook gives the same blob.
+		slice.zero(page[int(header.triangles) + len(triangles):header.positions])
+		copy(page[header.triangles:], triangles[:])
 		for v, i in page_vertices {
 			write_vertex(vertices[v], flags, page[int(header.positions) + i * 12:], page[int(header.attributes) + i * attribute_stride:])
 		}

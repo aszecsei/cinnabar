@@ -189,7 +189,7 @@ mesh_bytes :: proc(guid: format.Guid, vertex_count: u32, nodes := false, skinned
 		indices      = mem.slice_to_bytes(indices),
 		meshlets     = {{vertex_count = 3, triangle_count = 1}},
 		meshlet_vertices = mem.slice_to_bytes([]u32{0, 1, 2}),
-		meshlet_triangles = mem.slice_to_bytes([]u32{0 | 1 << 8 | 2 << 16}),
+		meshlet_triangles = []u8{0, 1, 2},
 	}
 	if skinned {
 		contents.flags += {.Skinned}

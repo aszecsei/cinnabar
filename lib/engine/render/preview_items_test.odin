@@ -124,7 +124,7 @@ flat_mesh :: proc(positions: [][3]f32, indices: []u16) -> (data: []byte, blob: ^
 		indices      = mem.slice_to_bytes(indices),
 		meshlets     = {{vertex_count = 3, triangle_count = 1}},
 		meshlet_vertices = mem.slice_to_bytes([]u32{0, 1, 2}),
-		meshlet_triangles = mem.slice_to_bytes([]u32{0 | 1 << 8 | 2 << 16}),
+		meshlet_triangles = []u8{0, 1, 2},
 	}
 	written := format.mesh_write(contents, context.temp_allocator)
 	data, _ = mem.alloc_bytes(len(written), format.BLOB_ALIGN, context.temp_allocator)

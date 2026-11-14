@@ -235,7 +235,7 @@ mesh_blobs_round_trip :: proc(t: ^testing.T) {
 		indices           = mem.slice_to_bytes(indices),
 		meshlets          = meshlets,
 		meshlet_vertices  = mem.slice_to_bytes([]u32{0, 1, 2}),
-		meshlet_triangles = mem.slice_to_bytes([]u32{0 | 1 << 8 | 2 << 16}),
+		meshlet_triangles = []u8{0, 1, 2},
 		meshlet_nodes     = []Meshlet_Node{{radius = 1, count = 1 | MESHLET_NODE_LEAF}},
 		name              = "Door",
 		source_path       = "game/door.glb",
@@ -270,8 +270,8 @@ mesh_blobs_round_trip :: proc(t: ^testing.T) {
 	testing.expect(t, !ok)
 	node.count = 1 | MESHLET_NODE_LEAF
 
-	// Meshlet triangles are whole u32s, which shaders load.
-	blob.meshlet_triangles.size = 3
+	// Meshlet triangles are three bytes each.
+	blob.meshlet_triangles.size = 4
 	_, ok = mesh_view(data)
 	testing.expect(t, !ok)
 }
@@ -299,6 +299,30 @@ meshlet_vertices_round_trip :: proc(t: ^testing.T) {
 	for vertices, i in cases {
 		for v, k in vertices {
 			testing.expect_value(t, meshlet_vertex(meshlets[i], stream[:], k), v)
+		}
+	}
+}
+
+// A meshlet's triangles take three bytes each, with nothing between meshlets, and read back as they were from every
+// place in a word that they start at.
+@(test)
+meshlet_triangles_round_trip :: proc(t: ^testing.T) {
+	stream := make([dynamic]u8, context.temp_allocator)
+	cases := [][][3]u8{{{0, 1, 2}}, {{3, 4, 5}, {63, 62, 61}}, {{7, 8, 9}, {10, 11, 12}, {13, 14, 15}, {255, 0, 128}}, {{1, 2, 3}, {4, 5, 6}, {7, 8, 9}}}
+	meshlets := make([dynamic]Meshlet, context.temp_allocator)
+	written := 0
+	for triangles in cases {
+		m: Meshlet
+		meshlet_write_triangles(&m, triangles, &stream)
+		append(&meshlets, m)
+		testing.expect_value(t, int(m.triangle_offset), written)
+		testing.expect_value(t, int(m.triangle_count), len(triangles))
+		written += len(triangles)
+		testing.expect_value(t, len(stream), written * 3)
+	}
+	for triangles, i in cases {
+		for triangle, k in triangles {
+			testing.expect_value(t, meshlet_triangle(meshlets[i], stream[:], k), [3]u32{u32(triangle[0]), u32(triangle[1]), u32(triangle[2])})
 		}
 	}
 }

@@ -193,9 +193,11 @@ octahedral_vectors_round_trip :: proc(t: ^testing.T) {
 	testing.expect_value(t, encode_tangent({1, 0, 0, 1}).y & 1, 0)
 }
 
-// grid_gltf is a mesh of one gently bumpy square of size by size quads, which simplifies into several levels.
+// grid_gltf is a mesh of one gently bumpy square of size by size quads, which simplifies into several levels. Without
+// normals, the cooker makes flat ones, which give each corner a vertex of its own. With them, the quads share their
+// vertices, so a meshlet fills to its most triangles before its most vertices.
 @(private)
-grid_gltf :: proc(size: int) -> string {
+grid_gltf :: proc(size: int, normals := false) -> string {
 	positions := make([dynamic][3]f32, context.temp_allocator)
 	for y in 0 ..= size {
 		for x in 0 ..= size {
@@ -214,21 +216,30 @@ grid_gltf :: proc(size: int) -> string {
 	buffer := make([dynamic]byte, context.temp_allocator)
 	append(&buffer, ..mem.slice_to_bytes(positions[:]))
 	append(&buffer, ..mem.slice_to_bytes(indices[:]))
-	encoded := base64.encode(buffer[:], allocator = context.temp_allocator)
 	position_bytes := len(positions) * 12
+	normal_view, normal_accessor, normal_attribute: string
+	if normals {
+		up := make([][3]f32, len(positions), context.temp_allocator)
+		slice.fill(up, [3]f32{0, 0, 1})
+		normal_view = fmt.tprintf(`, {{"buffer": 0, "byteOffset": %d, "byteLength": %d}}`, len(buffer), position_bytes)
+		normal_accessor = fmt.tprintf(`, {{"bufferView": 2, "componentType": 5126, "count": %d, "type": "VEC3"}}`, len(positions))
+		normal_attribute = `, "NORMAL": 2`
+		append(&buffer, ..mem.slice_to_bytes(up))
+	}
+	encoded := base64.encode(buffer[:], allocator = context.temp_allocator)
 	return fmt.tprintf(
 		`{{
   "asset": {{"version": "2.0"}},
   "buffers": [{{"byteLength": %d, "uri": "data:application/octet-stream;base64,%s"}}],
   "bufferViews": [
     {{"buffer": 0, "byteOffset": 0, "byteLength": %d}},
-    {{"buffer": 0, "byteOffset": %d, "byteLength": %d}}
+    {{"buffer": 0, "byteOffset": %d, "byteLength": %d}}%s
   ],
   "accessors": [
     {{"bufferView": 0, "componentType": 5126, "count": %d, "type": "VEC3", "min": [0, 0, -0.05], "max": [1, 1, 0.05]}},
-    {{"bufferView": 1, "componentType": 5125, "count": %d, "type": "SCALAR"}}
+    {{"bufferView": 1, "componentType": 5125, "count": %d, "type": "SCALAR"}}%s
   ],
-  "meshes": [{{"name": "Grid", "primitives": [{{"attributes": {{"POSITION": 0}}, "indices": 1}}]}}],
+  "meshes": [{{"name": "Grid", "primitives": [{{"attributes": {{"POSITION": 0%s}}, "indices": 1}}]}}],
   "nodes": [{{"mesh": 0}}],
   "scenes": [{{"nodes": [0]}}],
   "scene": 0
@@ -238,8 +249,11 @@ grid_gltf :: proc(size: int) -> string {
 		position_bytes,
 		position_bytes,
 		len(indices) * 4,
+		normal_view,
 		len(positions),
 		len(indices),
+		normal_accessor,
+		normal_attribute,
 	)
 }
 
@@ -250,7 +264,7 @@ Grid_Mesh :: struct {
 	blob:      ^format.Mesh_Blob,
 	meshlets:  []format.Meshlet,
 	vertices:  []u32,
-	triangles: []u32,
+	triangles: []u8,
 	positions: [][3]f32,
 }
 
@@ -265,7 +279,7 @@ cook_grid :: proc(t: ^testing.T, meta: string) -> (grid: Grid_Mesh, ok: bool) {
 	grid.data, grid.blob = mesh_blob(t, tree, guid) or_return
 	grid.meshlets = format.mesh_meshlets(grid.data, grid.blob)
 	grid.vertices = slice.reinterpret([]u32, format.blob_bytes(grid.data, grid.blob.meshlet_vertices))
-	grid.triangles = slice.reinterpret([]u32, format.blob_bytes(grid.data, grid.blob.meshlet_triangles))
+	grid.triangles = format.blob_bytes(grid.data, grid.blob.meshlet_triangles)
 	grid.positions = slice.reinterpret([][3]f32, format.blob_bytes(grid.data, grid.blob.positions))
 	return grid, true
 }
@@ -274,11 +288,11 @@ cook_grid :: proc(t: ^testing.T, meta: string) -> (grid: Grid_Mesh, ok: bool) {
 @(private = "file")
 meshlet_area :: proc(grid: Grid_Mesh, m: format.Meshlet) -> f32 {
 	area: f32
-	for packed in grid.triangles[m.triangle_offset:][:m.triangle_count] {
-		corner :: proc(grid: Grid_Mesh, m: format.Meshlet, packed: u32, shift: u32) -> [3]f32 {
-			return grid.positions[format.meshlet_vertex(m, grid.vertices, int((packed >> shift) & 0xff))]
-		}
-		a, b, c := corner(grid, m, packed, 0), corner(grid, m, packed, 8), corner(grid, m, packed, 16)
+	for i in 0 ..< int(m.triangle_count) {
+		corners := format.meshlet_triangle(m, grid.triangles, i)
+		a := grid.positions[format.meshlet_vertex(m, grid.vertices, int(corners[0]))]
+		b := grid.positions[format.meshlet_vertex(m, grid.vertices, int(corners[1]))]
+		c := grid.positions[format.meshlet_vertex(m, grid.vertices, int(corners[2]))]
 		area += linalg.length(linalg.cross(b - a, c - a)) / 2
 	}
 	return area
@@ -297,8 +311,10 @@ cluster_lod_builds_a_hierarchy_whose_every_cut_covers_the_mesh :: proc(t: ^testi
 	deepest := 0
 	for m, i in grid.meshlets {
 		testing.expectf(t, m.vertex_count <= format.MESHLET_MAX_VERTICES && m.triangle_count <= format.MESHLET_MAX_TRIANGLES, "meshlet %d has %d vertices and %d triangles", i, m.vertex_count, m.triangle_count)
-		for packed in grid.triangles[m.triangle_offset:][:m.triangle_count] {
-			testing.expect(t, packed >> 24 == 0 && packed & 0xff < u32(m.vertex_count) && (packed >> 8) & 0xff < u32(m.vertex_count) && (packed >> 16) & 0xff < u32(m.vertex_count))
+		for k in 0 ..< int(m.triangle_count) {
+			for corner in format.meshlet_triangle(m, grid.triangles, k) {
+				testing.expect(t, corner < u32(m.vertex_count))
+			}
 		}
 		// A mesh this small always has short refs. The culling sphere holds the meshlet's vertices.
 		testing.expect_value(t, m.short_refs, 1)
@@ -477,7 +493,7 @@ a_large_meshs_vertices_are_in_meshlet_order :: proc(t: ^testing.T) {
 	testing.expect(t, .Index32 in blob.flags)
 	meshlets := format.mesh_meshlets(data, blob)
 	stream := slice.reinterpret([]u32, format.blob_bytes(data, blob.meshlet_vertices))
-	triangles := slice.reinterpret([]u32, format.blob_bytes(data, blob.meshlet_triangles))
+	triangles := format.blob_bytes(data, blob.meshlet_triangles)
 	indices := slice.reinterpret([]u32, format.blob_bytes(data, blob.indices))
 	positions := slice.reinterpret([][3]f32, format.blob_bytes(data, blob.positions))
 
@@ -490,8 +506,9 @@ a_large_meshs_vertices_are_in_meshlet_order :: proc(t: ^testing.T) {
 	long := 0
 	for m in meshlets {
 		long += m.short_refs == 0 ? 1 : 0
-		for packed in triangles[m.triangle_offset:][:m.triangle_count] {
-			corner := [3]u32{format.meshlet_vertex(m, stream, int(packed & 0xff)), format.meshlet_vertex(m, stream, int((packed >> 8) & 0xff)), format.meshlet_vertex(m, stream, int((packed >> 16) & 0xff))}
+		for k in 0 ..< int(m.triangle_count) {
+			local := format.meshlet_triangle(m, triangles, k)
+			corner := [3]u32{format.meshlet_vertex(m, stream, int(local[0])), format.meshlet_vertex(m, stream, int(local[1])), format.meshlet_vertex(m, stream, int(local[2]))}
 			drawn[sorted(corner.x, corner.y, corner.z)] += 1
 		}
 	}

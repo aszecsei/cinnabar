@@ -169,7 +169,7 @@ live_blob :: proc(guid: format.Guid, source: format.Mesh_Source, allocator: runt
 	}
 	meshlets := make([dynamic]format.Meshlet, context.temp_allocator)
 	meshlet_vertices := make([dynamic]u32, context.temp_allocator)
-	meshlet_triangles := make([dynamic]u32, context.temp_allocator)
+	meshlet_triangles := make([dynamic]u8, context.temp_allocator)
 	submeshes := make([]format.Submesh_Entry, len(bake.submeshes), context.temp_allocator)
 	for s, i in bake.submeshes {
 		first_meshlet := len(meshlets)
@@ -194,7 +194,7 @@ live_blob :: proc(guid: format.Guid, source: format.Mesh_Source, allocator: runt
 		indices           = index_bytes,
 		meshlets          = meshlets[:],
 		meshlet_vertices  = mem.slice_to_bytes(meshlet_vertices[:]),
-		meshlet_triangles = mem.slice_to_bytes(meshlet_triangles[:]),
+		meshlet_triangles = meshlet_triangles[:],
 		name              = "live",
 	}
 	written := format.mesh_write(contents, context.temp_allocator)
