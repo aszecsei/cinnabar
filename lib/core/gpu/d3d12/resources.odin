@@ -31,7 +31,7 @@ Texture_Entry :: struct {
 	streamed: bool,
 	// A view of another texture's resource, which it holds a reference to (see gpu.Texture_View_Desc).
 	view:     bool,
-	rtv:     d3d.CPU_DESCRIPTOR_HANDLE,
+	rtv:      d3d.CPU_DESCRIPTOR_HANDLE,
 	dsv:      d3d.CPU_DESCRIPTOR_HANDLE,
 }
 
@@ -65,27 +65,27 @@ Release :: struct {
 
 @(private)
 Resources :: struct {
-	buffers:          gpu.Pool(gpu.Buffer, Buffer_Entry),
-	textures:         gpu.Pool(gpu.Texture, Texture_Entry),
-	samplers:         gpu.Pool(gpu.Sampler, gpu.Sampler_Desc),
-	accels:           gpu.Pool(gpu.Accel_Struct, Accel_Entry),
+	buffers:        gpu.Pool(gpu.Buffer, Buffer_Entry),
+	textures:       gpu.Pool(gpu.Texture, Texture_Entry),
+	samplers:       gpu.Pool(gpu.Sampler, gpu.Sampler_Desc),
+	accels:         gpu.Pool(gpu.Accel_Struct, Accel_Entry),
 	// Shader-visible heaps, indexed by bindless index.
-	resource_heap:    ^d3d.IDescriptorHeap,
-	sampler_heap:     ^d3d.IDescriptorHeap,
+	resource_heap:  ^d3d.IDescriptorHeap,
+	sampler_heap:   ^d3d.IDescriptorHeap,
 	// CPU-only heaps, indexed by texture pool index. The RTV heap also holds the back buffers after MAX_TEXTURES.
-	rtv_heap:         ^d3d.IDescriptorHeap,
-	dsv_heap:         ^d3d.IDescriptorHeap,
-	resource_size:    u32,
-	sampler_size:     u32,
-	rtv_size:         u32,
-	dsv_size:         u32,
-	releases:         [dynamic]Release,
-	releases_mutex:   sync.Mutex,
+	rtv_heap:       ^d3d.IDescriptorHeap,
+	dsv_heap:       ^d3d.IDescriptorHeap,
+	resource_size:  u32,
+	sampler_size:   u32,
+	rtv_size:       u32,
+	dsv_size:       u32,
+	releases:       [dynamic]Release,
+	releases_mutex: sync.Mutex,
 	// The Readback buffers that the frame's command lists copy into, for end_frame to stamp. Guarded by
 	// releases_mutex.
-	readbacks:        [dynamic]gpu.Buffer,
+	readbacks:      [dynamic]gpu.Buffer,
 	// Only debug validation tracks layouts.
-	layouts:          gpu.Layout_Tracker,
+	layouts:        gpu.Layout_Tracker,
 }
 
 @(private)
@@ -98,10 +98,22 @@ init_resources :: proc() -> bool {
 	dev.readbacks = make([dynamic]gpu.Buffer, dev.allocator)
 	gpu.layout_tracker_init(&dev.layouts, dev.allocator)
 
-	dev.resource_heap = create_descriptor_heap(.CBV_SRV_UAV, gpu.RESOURCE_DESCRIPTOR_COUNT, {.SHADER_VISIBLE}) or_return
-	dev.sampler_heap = create_descriptor_heap(.SAMPLER, gpu.MAX_SAMPLERS, {.SHADER_VISIBLE}) or_return
+	dev.resource_heap = create_descriptor_heap(
+		.CBV_SRV_UAV,
+		gpu.RESOURCE_DESCRIPTOR_COUNT,
+		{.SHADER_VISIBLE},
+	) or_return
+	dev.sampler_heap = create_descriptor_heap(
+		.SAMPLER,
+		gpu.MAX_SAMPLERS,
+		{.SHADER_VISIBLE},
+	) or_return
 	// After the bindless textures: the back buffers, or in shared mode the shared textures and the scratch target.
-	dev.rtv_heap = create_descriptor_heap(.RTV, gpu.MAX_TEXTURES + max(BACK_BUFFER_COUNT, SHARED_RTV_COUNT), {}) or_return
+	dev.rtv_heap = create_descriptor_heap(
+		.RTV,
+		gpu.MAX_TEXTURES + max(BACK_BUFFER_COUNT, SHARED_RTV_COUNT),
+		{},
+	) or_return
 	dev.dsv_heap = create_descriptor_heap(.DSV, gpu.MAX_TEXTURES, {}) or_return
 	dev.resource_size = dev.device->GetDescriptorHandleIncrementSize(.CBV_SRV_UAV)
 	dev.sampler_size = dev.device->GetDescriptorHandleIncrementSize(.SAMPLER)
@@ -174,7 +186,14 @@ create_buffer :: proc(desc: gpu.Buffer_Desc, data: []byte) -> gpu.Buffer {
 add_buffer :: proc(desc: gpu.Buffer_Desc, resource: ^d3d.IResource) -> gpu.Buffer {
 	stored := desc
 	stored.label = ""
-	buffer := gpu.pool_add(&dev.buffers, Buffer_Entry{desc = stored, resource = resource, address = resource->GetGPUVirtualAddress()})
+	buffer := gpu.pool_add(
+		&dev.buffers,
+		Buffer_Entry {
+			desc = stored,
+			resource = resource,
+			address = resource->GetGPUVirtualAddress(),
+		},
+	)
 	if buffer == {} {
 		log.errorf("gpu: buffer %q: more than %d buffers", desc.label, gpu.MAX_BUFFERS)
 		resource->Release()
@@ -194,7 +213,11 @@ add_buffer :: proc(desc: gpu.Buffer_Desc, resource: ^d3d.IResource) -> gpu.Buffe
 		NumElements = desc.size / 4,
 		Flags       = {.RAW},
 	}
-	dev.device->CreateShaderResourceView(resource, &srv, resource_handle(gpu.buffer_read_index(buffer)))
+	dev.device->CreateShaderResourceView(
+		resource,
+		&srv,
+		resource_handle(gpu.buffer_read_index(buffer)),
+	)
 	if .Storage in desc.usage {
 		uav := d3d.UNORDERED_ACCESS_VIEW_DESC {
 			Format        = .R32_TYPELESS,
@@ -204,30 +227,52 @@ add_buffer :: proc(desc: gpu.Buffer_Desc, resource: ^d3d.IResource) -> gpu.Buffe
 			NumElements = desc.size / 4,
 			Flags       = {.RAW},
 		}
-		dev.device->CreateUnorderedAccessView(resource, nil, &uav, resource_handle(gpu.buffer_write_index(buffer)))
+		dev.device->CreateUnorderedAccessView(
+			resource,
+			nil,
+			&uav,
+			resource_handle(gpu.buffer_write_index(buffer)),
+		)
 	}
 	return buffer
 }
 
 @(private)
-create_buffer_resource :: proc(desc: gpu.Buffer_Desc, heap: d3d.HEAP_TYPE) -> (resource: ^d3d.IResource, ok: bool) {
+create_buffer_resource :: proc(
+	desc: gpu.Buffer_Desc,
+	heap: d3d.HEAP_TYPE,
+) -> (
+	resource: ^d3d.IResource,
+	ok: bool,
+) {
 	heap_props := d3d.HEAP_PROPERTIES {
 		Type = heap,
 	}
 	resource_desc := d3d.RESOURCE_DESC1 {
-		Dimension        = .BUFFER,
-		Width            = u64(desc.size),
-		Height           = 1,
+		Dimension = .BUFFER,
+		Width = u64(desc.size),
+		Height = 1,
 		DepthOrArraySize = 1,
-		MipLevels        = 1,
-		SampleDesc       = {Count = 1},
-		Layout           = .ROW_MAJOR,
+		MipLevels = 1,
+		SampleDesc = {Count = 1},
+		Layout = .ROW_MAJOR,
 	}
 	if .Storage in desc.usage {
 		resource_desc.Flags += {.ALLOW_UNORDERED_ACCESS}
 	}
 	// Buffers have no layout, so they start UNDEFINED.
-	hr := dev.device->CreateCommittedResource3(&heap_props, {}, &resource_desc, .UNDEFINED, nil, nil, 0, nil, d3d.IResource_UUID, (^rawptr)(&resource))
+	hr := dev.device->CreateCommittedResource3(
+		&heap_props,
+		{},
+		&resource_desc,
+		.UNDEFINED,
+		nil,
+		nil,
+		0,
+		nil,
+		d3d.IResource_UUID,
+		(^rawptr)(&resource),
+	)
 	if !check(hr, "CreateCommittedResource3(buffer)") {
 		return nil, false
 	}
@@ -248,13 +293,13 @@ create_texture :: proc(desc: gpu.Texture_Desc, data: []byte) -> gpu.Texture {
 		Type = .DEFAULT,
 	}
 	resource_desc := d3d.RESOURCE_DESC1 {
-		Dimension        = desc.depth > 0 ? .TEXTURE3D : .TEXTURE2D,
-		Width            = u64(desc.size.x),
-		Height           = desc.size.y,
+		Dimension = desc.depth > 0 ? .TEXTURE3D : .TEXTURE2D,
+		Width = u64(desc.size.x),
+		Height = desc.size.y,
 		DepthOrArraySize = u16(max(desc.depth, desc.layers, 1)),
-		MipLevels        = u16(stored.mip_count),
-		Format           = resource_format(desc.format),
-		SampleDesc       = {Count = 1},
+		MipLevels = u16(stored.mip_count),
+		Format = resource_format(desc.format),
+		SampleDesc = {Count = 1},
 	}
 	if .Render_Target in desc.usage {
 		resource_desc.Flags += {.ALLOW_RENDER_TARGET}
@@ -279,7 +324,18 @@ create_texture :: proc(desc: gpu.Texture_Desc, data: []byte) -> gpu.Texture {
 		layout = .COMMON
 	}
 	resource: ^d3d.IResource
-	hr := dev.device->CreateCommittedResource3(&heap_props, {}, &resource_desc, layout, nil, nil, 0, nil, d3d.IResource_UUID, (^rawptr)(&resource))
+	hr := dev.device->CreateCommittedResource3(
+		&heap_props,
+		{},
+		&resource_desc,
+		layout,
+		nil,
+		nil,
+		0,
+		nil,
+		d3d.IResource_UUID,
+		(^rawptr)(&resource),
+	)
 	if !check(hr, "CreateCommittedResource3(texture)") {
 		return {}
 	}
@@ -319,7 +375,10 @@ create_texture_view :: proc(desc: gpu.Texture_View_Desc) -> gpu.Texture {
 	stored.mip_count, stored.usage, stored.scope = 1, {.Storage}, desc.scope
 	resource := parent.resource
 	resource->AddRef()
-	view := gpu.pool_add(&dev.textures, Texture_Entry{desc = stored, resource = resource, view = true})
+	view := gpu.pool_add(
+		&dev.textures,
+		Texture_Entry{desc = stored, resource = resource, view = true},
+	)
 	if view == {} {
 		log.errorf("gpu: texture view %q: more than %d textures", desc.label, gpu.MAX_TEXTURES)
 		resource->Release()
@@ -329,12 +388,22 @@ create_texture_view :: proc(desc: gpu.Texture_View_Desc) -> gpu.Texture {
 		Format        = view_format(stored.format),
 		ViewDimension = .TEXTURE2D,
 	}
-	uav.Texture2D = {MipSlice = desc.mip}
+	uav.Texture2D = {
+		MipSlice = desc.mip,
+	}
 	if stored.layers > 0 {
 		uav.ViewDimension = .TEXTURE2DARRAY
-		uav.Texture2DArray = {MipSlice = desc.mip, ArraySize = stored.layers}
+		uav.Texture2DArray = {
+			MipSlice  = desc.mip,
+			ArraySize = stored.layers,
+		}
 	}
-	dev.device->CreateUnorderedAccessView(resource, nil, &uav, resource_handle(gpu.texture_write_index(view)))
+	dev.device->CreateUnorderedAccessView(
+		resource,
+		nil,
+		&uav,
+		resource_handle(gpu.texture_write_index(view)),
+	)
 	return view
 }
 
@@ -350,23 +419,41 @@ write_texture_views :: proc(texture: gpu.Texture, entry: ^Texture_Entry) {
 		srv.Texture2D.MipLevels = desc.mip_count
 		if desc.depth > 0 {
 			srv.ViewDimension = .TEXTURE3D
-			srv.Texture3D = {MipLevels = 1}
+			srv.Texture3D = {
+				MipLevels = 1,
+			}
 		} else if desc.cube && desc.layers > 6 {
 			srv.ViewDimension = .TEXTURECUBEARRAY
-			srv.TextureCubeArray = {MipLevels = desc.mip_count, NumCubes = desc.layers / 6}
+			srv.TextureCubeArray = {
+				MipLevels = desc.mip_count,
+				NumCubes  = desc.layers / 6,
+			}
 		} else if desc.cube {
 			srv.ViewDimension = .TEXTURECUBE
-			srv.TextureCube = {MipLevels = desc.mip_count}
+			srv.TextureCube = {
+				MipLevels = desc.mip_count,
+			}
 		} else if desc.layers > 0 {
 			srv.ViewDimension = .TEXTURE2DARRAY
-			srv.Texture2DArray = {MipLevels = desc.mip_count, ArraySize = desc.layers}
+			srv.Texture2DArray = {
+				MipLevels = desc.mip_count,
+				ArraySize = desc.layers,
+			}
 		}
-		dev.device->CreateShaderResourceView(entry.resource, &srv, resource_handle(gpu.texture_read_index(texture)))
+		dev.device->CreateShaderResourceView(
+			entry.resource,
+			&srv,
+			resource_handle(gpu.texture_read_index(texture)),
+		)
 		// The stencil plane's view takes the write slot, which a depth texture does not use (see gpu.stencil_index).
 		if gpu.has_stencil(desc.format) {
 			srv.Format = .X32_TYPELESS_G8X24_UINT
 			srv.Texture2D.PlaneSlice = 1
-			dev.device->CreateShaderResourceView(entry.resource, &srv, resource_handle(gpu.stencil_index(texture)))
+			dev.device->CreateShaderResourceView(
+				entry.resource,
+				&srv,
+				resource_handle(gpu.stencil_index(texture)),
+			)
 		}
 	}
 	if .Storage in desc.usage {
@@ -376,12 +463,21 @@ write_texture_views :: proc(texture: gpu.Texture, entry: ^Texture_Entry) {
 		}
 		if desc.depth > 0 {
 			uav.ViewDimension = .TEXTURE3D
-			uav.Texture3D = {WSize = desc.depth}
+			uav.Texture3D = {
+				WSize = desc.depth,
+			}
 		} else if desc.layers > 0 {
 			uav.ViewDimension = .TEXTURE2DARRAY
-			uav.Texture2DArray = {ArraySize = desc.layers}
+			uav.Texture2DArray = {
+				ArraySize = desc.layers,
+			}
 		}
-		dev.device->CreateUnorderedAccessView(entry.resource, nil, &uav, resource_handle(gpu.texture_write_index(texture)))
+		dev.device->CreateUnorderedAccessView(
+			entry.resource,
+			nil,
+			&uav,
+			resource_handle(gpu.texture_write_index(texture)),
+		)
 	}
 	if .Render_Target in desc.usage {
 		rtv := d3d.RENDER_TARGET_VIEW_DESC {
@@ -434,8 +530,14 @@ create_sampler :: proc(desc: gpu.Sampler_Desc) -> gpu.Sampler {
 	}
 	if desc.compare != .Always {
 		COMPARISON_FILTER := [gpu.Filter][gpu.Filter]d3d.FILTER {
-			.Nearest = {.Nearest = .COMPARISON_MIN_MAG_MIP_POINT, .Linear = .COMPARISON_MIN_MAG_POINT_MIP_LINEAR},
-			.Linear = {.Nearest = .COMPARISON_MIN_MAG_LINEAR_MIP_POINT, .Linear = .COMPARISON_MIN_MAG_MIP_LINEAR},
+			.Nearest = {
+				.Nearest = .COMPARISON_MIN_MAG_MIP_POINT,
+				.Linear = .COMPARISON_MIN_MAG_POINT_MIP_LINEAR,
+			},
+			.Linear = {
+				.Nearest = .COMPARISON_MIN_MAG_LINEAR_MIP_POINT,
+				.Linear = .COMPARISON_MIN_MAG_MIP_LINEAR,
+			},
 		}
 		sampler_desc.Filter = COMPARISON_FILTER[desc.filter][desc.mip_filter]
 		sampler_desc.ComparisonFunc = COMPARE[desc.compare]
@@ -502,19 +604,22 @@ destroy_sampler :: proc(sampler: gpu.Sampler) {
 destroy_scope :: proc(scope: gpu.Scope) -> (count: int) {
 	assert(scope != .Permanent, "gpu: the Permanent scope belongs to core")
 	for i in 0 ..< dev.buffers.count {
-		if buffer, ok := gpu.pool_handle(&dev.buffers, i); ok && dev.buffers.items[i].desc.scope == scope {
+		if buffer, ok := gpu.pool_handle(&dev.buffers, i);
+		   ok && dev.buffers.items[i].desc.scope == scope {
 			destroy_buffer(buffer)
 			count += 1
 		}
 	}
 	for i in 0 ..< dev.textures.count {
-		if texture, ok := gpu.pool_handle(&dev.textures, i); ok && dev.textures.items[i].desc.scope == scope {
+		if texture, ok := gpu.pool_handle(&dev.textures, i);
+		   ok && dev.textures.items[i].desc.scope == scope {
 			destroy_texture(texture)
 			count += 1
 		}
 	}
 	for i in 0 ..< dev.samplers.count {
-		if sampler, ok := gpu.pool_handle(&dev.samplers, i); ok && dev.samplers.items[i].scope == scope {
+		if sampler, ok := gpu.pool_handle(&dev.samplers, i);
+		   ok && dev.samplers.items[i].scope == scope {
 			destroy_sampler(sampler)
 			count += 1
 		}
@@ -526,13 +631,15 @@ destroy_scope :: proc(scope: gpu.Scope) -> (count: int) {
 		}
 	}
 	for i in 0 ..< dev.upscaler_pool.count {
-		if upscaler, ok := gpu.pool_handle(&dev.upscaler_pool, i); ok && dev.upscaler_pool.items[i].desc.scope == scope {
+		if upscaler, ok := gpu.pool_handle(&dev.upscaler_pool, i);
+		   ok && dev.upscaler_pool.items[i].desc.scope == scope {
 			destroy_upscaler(upscaler)
 			count += 1
 		}
 	}
 	for i in 0 ..< dev.pipeline_pool.count {
-		if pipeline, ok := gpu.pool_handle(&dev.pipeline_pool, i); ok && dev.pipeline_pool.items[i].scope == scope {
+		if pipeline, ok := gpu.pool_handle(&dev.pipeline_pool, i);
+		   ok && dev.pipeline_pool.items[i].scope == scope {
 			destroy_pipeline(pipeline)
 			count += 1
 		}
@@ -544,14 +651,25 @@ destroy_scope :: proc(scope: gpu.Scope) -> (count: int) {
 @(private)
 defer_release :: proc(object: ^d3d.IUnknown, pool: Release_Pool, index: u32) {
 	sync.guard(&dev.releases_mutex)
-	append(&dev.releases, Release{object = object, pool = pool, index = index, copy_value = sync.atomic_load(&dev.copy_horizon)})
+	append(
+		&dev.releases,
+		Release {
+			object = object,
+			pool = pool,
+			index = index,
+			copy_value = sync.atomic_load(&dev.copy_horizon),
+		},
+	)
 }
 
 // defer_free frees backend memory after the GPU finishes the current frame.
 @(private)
 defer_free :: proc(memory: rawptr) {
 	sync.guard(&dev.releases_mutex)
-	append(&dev.releases, Release{memory = memory, copy_value = sync.atomic_load(&dev.copy_horizon)})
+	append(
+		&dev.releases,
+		Release{memory = memory, copy_value = sync.atomic_load(&dev.copy_horizon)},
+	)
 }
 
 // defer_release_upscaler destroys an upscaler's context and frees its pool slot after the GPU finishes the current
@@ -559,7 +677,15 @@ defer_free :: proc(memory: rawptr) {
 @(private)
 defer_release_upscaler :: proc(ctx: Ffx_Context, index: u32) {
 	sync.guard(&dev.releases_mutex)
-	append(&dev.releases, Release{ffx_context = ctx, pool = .Upscaler, index = index, copy_value = sync.atomic_load(&dev.copy_horizon)})
+	append(
+		&dev.releases,
+		Release {
+			ffx_context = ctx,
+			pool = .Upscaler,
+			index = index,
+			copy_value = sync.atomic_load(&dev.copy_horizon),
+		},
+	)
 }
 
 // stamp_releases assigns the fence value that the frame's work signals to the releases queued during the frame.
@@ -626,7 +752,10 @@ create_descriptor_heap :: proc(
 		NumDescriptors = count,
 		Flags          = flags,
 	}
-	check(dev.device->CreateDescriptorHeap(&desc, d3d.IDescriptorHeap_UUID, (^rawptr)(&heap)), "CreateDescriptorHeap") or_return
+	check(
+		dev.device->CreateDescriptorHeap(&desc, d3d.IDescriptorHeap_UUID, (^rawptr)(&heap)),
+		"CreateDescriptorHeap",
+	) or_return
 	return heap, true
 }
 

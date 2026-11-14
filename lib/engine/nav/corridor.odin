@@ -18,7 +18,15 @@ MOVE_SEARCH :: 48
 // moveAlongSurface: end if a polygon near the move holds it, or the nearest point of a wall to it. visited is the
 // polygons from first to the one that holds that point, in allocator.
 @(private)
-move_along_surface :: proc(m: ^Mesh_View, first: u32, start, end: [3]f32, allocator := context.temp_allocator) -> (result: [3]f32, visited: []u32) {
+move_along_surface :: proc(
+	m: ^Mesh_View,
+	first: u32,
+	start, end: [3]f32,
+	allocator := context.temp_allocator,
+) -> (
+	result: [3]f32,
+	visited: []u32,
+) {
 	Visit :: struct {
 		polygon: u32,
 		parent:  int,
@@ -154,7 +162,14 @@ Walk :: struct {
 // their edges on the xz plane, until it reaches p1 or an edge with nothing across. With visited, it appends the
 // polygons that it crosses, first among them.
 @(private)
-raycast_local :: proc(m: ^Mesh_View, first: u32, p0, p1: [3]f32, visited: ^[dynamic]u32 = nil) -> (walk: Walk) {
+raycast_local :: proc(
+	m: ^Mesh_View,
+	first: u32,
+	p0, p1: [3]f32,
+	visited: ^[dynamic]u32 = nil,
+) -> (
+	walk: Walk,
+) {
 	current := first
 	// Each polygon is crossed once at most on a straight line.
 	for _ in 0 ..= len(m.polygons) {
@@ -207,10 +222,24 @@ WALL_SEARCH :: 32
 // getPolyWallSegments together: the polygons whose portals are within range, searched outward, and their edges that
 // nothing crosses, or the parts of them that no link covers. It keeps the MAX_WALLS nearest, in out.
 @(private)
-wall_segments :: proc(m: ^Mesh_View, first: u32, center: [3]f32, range: f32, out: ^[MAX_WALLS]Segment) -> (count: int) {
+wall_segments :: proc(
+	m: ^Mesh_View,
+	first: u32,
+	center: [3]f32,
+	range: f32,
+	out: ^[MAX_WALLS]Segment,
+) -> (
+	count: int,
+) {
 	range_squared := range * range
 	distances: [MAX_WALLS]f32
-	keep :: proc(out: ^[MAX_WALLS]Segment, distances: ^[MAX_WALLS]f32, count: ^int, s: Segment, d: f32) {
+	keep :: proc(
+		out: ^[MAX_WALLS]Segment,
+		distances: ^[MAX_WALLS]f32,
+		count: ^int,
+		s: Segment,
+		d: f32,
+	) {
 		// Insertion by distance, then by the order found, so the walls do not depend on anything but the mesh.
 		at := count^
 		for at > 0 && distances[at - 1] > d {
@@ -253,7 +282,16 @@ wall_segments :: proc(m: ^Mesh_View, first: u32, center: [3]f32, range: f32, out
 						t0, t1 := f32(l.t_min) / 255, f32(l.t_max) / 255
 						spans[span_count] = {t0, t1}
 						span_count += 1
-						add_visit(&visited, &n, m, center, range_squared, l.polygon, math.lerp(a, b, t0), math.lerp(a, b, t1))
+						add_visit(
+							&visited,
+							&n,
+							m,
+							center,
+							range_squared,
+							l.polygon,
+							math.lerp(a, b, t0),
+							math.lerp(a, b, t1),
+						)
 					}
 				}
 			}
@@ -282,7 +320,15 @@ wall_segments :: proc(m: ^Mesh_View, first: u32, center: [3]f32, range: f32, out
 }
 
 @(private = "file")
-add_visit :: proc(visited: ^[WALL_SEARCH]u32, n: ^int, m: ^Mesh_View, center: [3]f32, range_squared: f32, polygon: u32, a, b: [3]f32) {
+add_visit :: proc(
+	visited: ^[WALL_SEARCH]u32,
+	n: ^int,
+	m: ^Mesh_View,
+	center: [3]f32,
+	range_squared: f32,
+	polygon: u32,
+	a, b: [3]f32,
+) {
 	if d, _ := distance_to_segment_2d(center, a, b); d > range_squared || n^ == WALL_SEARCH {
 		return
 	}

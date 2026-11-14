@@ -12,23 +12,34 @@ test_decision :: proc() -> []byte {
 	half: [BLACKBOARD_VALUE_SIZE]byte
 	(^f32)(&half)^ = 0.5
 	contents := Decision_Contents {
-		key = 5,
-		technique = .Utility,
-		state_size = 12,
-		blackboard = board,
+		key            = 5,
+		technique      = .Utility,
+		state_size     = 12,
+		blackboard     = board,
 		blackboard_key = 9,
-		nodes = {
+		nodes          = {
 			{id = 1, kind = "root", condition = DECISION_NONE, action = DECISION_NONE},
 			{id = 2, kind = "leaf", condition = 0, action = 0, first_write = 0, write_count = 1},
 		},
-		conditions = {{first_op = 0, op_count = 3}},
-		ops = {{code = .Key, operand = 0}, {code = .Constant, operand = 1}, {code = .Less, type = u8(Blackboard_Type.Float)}},
-		constants = {{type = .Float, value = speed}, {type = .Float, value = half}, {type = .String, text = "run"}},
-		actions = {{name = "flee", first_arg = 0, arg_count = 2}},
-		args = {{name = "from", source = .Key, index = 1, type = .Entity}, {name = "speed", source = .Constant, index = 0, type = .Float}},
-		writes = {{key = 0, source = .Constant, index = 0}},
+		conditions     = {{first_op = 0, op_count = 3}},
+		ops            = {
+			{code = .Key, operand = 0},
+			{code = .Constant, operand = 1},
+			{code = .Less, type = u8(Blackboard_Type.Float)},
+		},
+		constants      = {
+			{type = .Float, value = speed},
+			{type = .Float, value = half},
+			{type = .String, text = "run"},
+		},
+		actions        = {{name = "flee", first_arg = 0, arg_count = 2}},
+		args           = {
+			{name = "from", source = .Key, index = 1, type = .Entity},
+			{name = "speed", source = .Constant, index = 0, type = .Float},
+		},
+		writes         = {{key = 0, source = .Constant, index = 0}},
 		technique_data = {1, 2, 3},
-		source_path = "game/ai/guard.decision",
+		source_path    = "game/ai/guard.decision",
 	}
 	return aligned(decision_write(contents, context.temp_allocator))
 }
@@ -111,21 +122,52 @@ decisions_fit_only_their_blackboard :: proc(t: ^testing.T) {
 	blob, _ := decision_view(data)
 	guid, _ := guid_parse(TEST_GUID)
 	board := aligned(
-		blackboard_write({guid = guid, key = 9, keys = {{name = "health", type = .Float}, {name = "target", type = .Entity}}}, context.temp_allocator),
+		blackboard_write(
+			{
+				guid = guid,
+				key = 9,
+				keys = {{name = "health", type = .Float}, {name = "target", type = .Entity}},
+			},
+			context.temp_allocator,
+		),
 	)
 	board_blob, ok := blackboard_view(board)
 	testing.expect(t, ok)
 	testing.expect(t, decision_check(data, blob, board, board_blob))
 	board_blob.header.key = 10
-	testing.expect(t, !decision_check(data, blob, board, board_blob), "a blackboard cooked again without its decision")
+	testing.expect(
+		t,
+		!decision_check(data, blob, board, board_blob),
+		"a blackboard cooked again without its decision",
+	)
 	board_blob.header.key = 9
 
 	swapped := aligned(
-		blackboard_write({guid = guid, key = 9, keys = {{name = "health", type = .Float}, {name = "target", type = .Vector}}}, context.temp_allocator),
+		blackboard_write(
+			{
+				guid = guid,
+				key = 9,
+				keys = {{name = "health", type = .Float}, {name = "target", type = .Vector}},
+			},
+			context.temp_allocator,
+		),
 	)
 	swapped_blob, _ := blackboard_view(swapped)
-	testing.expect(t, !decision_check(data, blob, swapped, swapped_blob), "an argument of another type")
-	short := aligned(blackboard_write({guid = guid, key = 9, keys = {{name = "health", type = .Float}}}, context.temp_allocator))
+	testing.expect(
+		t,
+		!decision_check(data, blob, swapped, swapped_blob),
+		"an argument of another type",
+	)
+	short := aligned(
+		blackboard_write(
+			{guid = guid, key = 9, keys = {{name = "health", type = .Float}}},
+			context.temp_allocator,
+		),
+	)
 	short_blob, _ := blackboard_view(short)
-	testing.expect(t, !decision_check(data, blob, short, short_blob), "a slot that the blackboard does not have")
+	testing.expect(
+		t,
+		!decision_check(data, blob, short, short_blob),
+		"a slot that the blackboard does not have",
+	)
 }

@@ -16,7 +16,12 @@ register_direct :: proc(r: ^Runtime) {
 		set = ref_direct_set,
 	}
 	r.bindings.direct[Userdata_Tag.Quaternion] = {
-		get = proc(L: ^luau.State, data: rawptr, atom: c.int, cachedslot: ^u16) {quaternion_index(L)},
+		get = proc(
+			L: ^luau.State,
+			data: rawptr,
+			atom: c.int,
+			cachedslot: ^u16,
+		) {quaternion_index(L)},
 		namecall = direct_namecall,
 	}
 	r.bindings.direct[Userdata_Tag.World_Position] = {
@@ -80,7 +85,10 @@ cached_field :: proc(r: ^Runtime, id: ecs.Component_Id, atom: c.int, cachedslot:
 	if x == nil {
 		return nil
 	}
-	if index := int(cachedslot^) - 1; index >= x.first_field && index < x.first_field + x.field_count && c.int(r.fields[index].atom) == atom {
+	if index := int(cachedslot^) - 1;
+	   index >= x.first_field &&
+	   index < x.first_field + x.field_count &&
+	   c.int(r.fields[index].atom) == atom {
 		return &r.fields[index]
 	}
 	f := find_field(r, x, atom, "")

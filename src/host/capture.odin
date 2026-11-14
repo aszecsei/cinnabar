@@ -33,39 +33,39 @@ GIF_DELAY_CS :: 10
 #assert(len(link.Output_Mode) == len(gpu.Output_Mode))
 
 Capture :: struct {
-	editor:    ^Link,
+	editor:         ^Link,
 	// Main thread: the copies the backend is making, which its answers name by ticket, the ticket that the next one
 	// gets, and the editor's requests that wait for a frame.
-	in_flight: [dynamic]In_Flight,
-	next_ticket: u32,
+	in_flight:      [dynamic]In_Flight,
+	next_ticket:    u32,
 	// The thumbnail that the game is drawing, and the file that it goes to, from the heap.
 	thumbnail_id:   u32,
 	thumbnail_path: string,
-	requests:  [dynamic]Request,
-	ring_last: time.Tick,
-	ring_due:  bool,
+	requests:       [dynamic]Request,
+	ring_last:      time.Tick,
+	ring_due:       bool,
 	// The host's count of frames, which the results report.
-	frame:     u64,
+	frame:          u64,
 	// The worker, and what the threads share under mutex.
-	worker:    ^thread.Thread,
-	mutex:     sync.Mutex,
-	wake:      sync.Cond,
-	closing:   bool,
-	jobs:      [dynamic]Job,
-	done:      [dynamic]link.Capture_Result,
+	worker:         ^thread.Thread,
+	mutex:          sync.Mutex,
+	wake:           sync.Cond,
+	closing:        bool,
+	jobs:           [dynamic]Job,
+	done:           [dynamic]link.Capture_Result,
 	// The worker's own.
-	ring:      Ring,
+	ring:           Ring,
 }
 
 In_Flight :: struct {
 	ticket: u32,
-	frame: u64,
-	tick:  time.Tick,
+	frame:  u64,
+	tick:   time.Tick,
 	// The screenshot request that the frame answers, or 0 for a ring sample only.
-	id:    u32,
+	id:     u32,
 	// The request's path, from the heap.
-	path:  string,
-	ring:  bool,
+	path:   string,
+	ring:   bool,
 }
 
 Request :: struct {
@@ -94,9 +94,9 @@ Job :: struct {
 }
 
 Ring_Frame :: struct {
-	frame: u64,
-	tick:  time.Tick,
-	image: capture.Image,
+	frame:    u64,
+	tick:     time.Tick,
+	image:    capture.Image,
 	// The viewport whose target the frame is of, or nil for the frame target.
 	viewport: Maybe(int),
 }
@@ -274,9 +274,9 @@ capture_tick :: proc(c: ^Capture) {
 	}
 	f := In_Flight {
 		ticket = c.next_ticket,
-		frame = c.frame,
-		tick  = time.tick_now(),
-		ring  = c.ring_due,
+		frame  = c.frame,
+		tick   = time.tick_now(),
+		ring   = c.ring_due,
 	}
 	if screenshot >= 0 {
 		r := c.requests[screenshot]
@@ -300,11 +300,27 @@ take_thumbnail :: proc(c: ^Capture, done: gpu.Frame_Capture) {
 	}
 	switch done.status {
 	case .Ready:
-		post_job(c, Job{kind = .Thumbnail, capture = done, frame = c.frame, id = done.ticket, path = c.thumbnail_path})
+		post_job(
+			c,
+			Job {
+				kind = .Thumbnail,
+				capture = done,
+				frame = c.frame,
+				id = done.ticket,
+				path = c.thumbnail_path,
+			},
+		)
 	case .Cancelled:
 		core.release_frame_capture(done)
 		if c.editor != nil && link_linked(c.editor) {
-			link_send(c.editor, link.Capture_Result{id = done.ticket, kind = .Thumbnail, reason = "the backend could not copy the texture"})
+			link_send(
+				c.editor,
+				link.Capture_Result {
+					id = done.ticket,
+					kind = .Thumbnail,
+					reason = "the backend could not copy the texture",
+				},
+			)
 		}
 		delete(c.thumbnail_path, runtime.heap_allocator())
 	}
@@ -332,7 +348,18 @@ take_frame :: proc(c: ^Capture, done: gpu.Frame_Capture) {
 	switch done.status {
 	case .Ready:
 		if f.id != 0 {
-			post_job(c, Job{kind = .Screenshot, capture = done, frame = f.frame, tick = f.tick, id = f.id, path = f.path, ring = f.ring})
+			post_job(
+				c,
+				Job {
+					kind = .Screenshot,
+					capture = done,
+					frame = f.frame,
+					tick = f.tick,
+					id = f.id,
+					path = f.path,
+					ring = f.ring,
+				},
+			)
 		} else {
 			post_job(c, Job{kind = .Ring_Sample, capture = done, frame = f.frame, tick = f.tick})
 		}
@@ -343,7 +370,11 @@ take_frame :: proc(c: ^Capture, done: gpu.Frame_Capture) {
 		}
 		if f.id != 0 && c.editor != nil && link_linked(c.editor) {
 			// It waits as a request that found no free slot does, so a window that stays minimized fails it.
-			inject_at(&c.requests, 0, Request{id = f.id, kind = .Screenshot, path = f.path, waited = 1})
+			inject_at(
+				&c.requests,
+				0,
+				Request{id = f.id, kind = .Screenshot, path = f.path, waited = 1},
+			)
 		} else {
 			delete(f.path, runtime.heap_allocator())
 		}
@@ -428,17 +459,37 @@ run_job :: proc(c: ^Capture, job: Job) -> (result: link.Capture_Result, send: bo
 		core.release_frame_capture(job.capture)
 		if !ok {
 			delete(job.path, heap)
-			return {id = job.id, kind = .Thumbnail, reason = strings_clone_heap("the texture's format cannot be read")}, true
+			return {
+					id = job.id,
+					kind = .Thumbnail,
+					reason = strings_clone_heap("the texture's format cannot be read"),
+				},
+				true
 		}
 		defer delete(img.pixels, heap)
 		png, encoded := capture.encode_png(img, heap)
 		defer delete(png, heap)
 		if !encoded {
 			delete(job.path, heap)
-			return {id = job.id, kind = .Thumbnail, reason = strings_clone_heap("the PNG could not be encoded")}, true
+			return {
+					id = job.id,
+					kind = .Thumbnail,
+					reason = strings_clone_heap("the PNG could not be encoded"),
+				},
+				true
 		}
 		path, reason := write_capture(job.path, .Thumbnail, job.frame, png)
-		return {id = job.id, kind = .Thumbnail, ok = reason == "", reason = reason, path = path, frame = job.frame, width = size.x, height = size.y}, true
+		return {
+				id = job.id,
+				kind = .Thumbnail,
+				ok = reason == "",
+				reason = reason,
+				path = path,
+				frame = job.frame,
+				width = size.x,
+				height = size.y,
+			},
+			true
 	case .Ring_Sample, .Screenshot:
 		img, ok := capture.to_rgb8(job.capture, heap)
 		mode := link.Output_Mode(job.capture.mode)
@@ -539,7 +590,13 @@ run_job :: proc(c: ^Capture, job: Job) -> (result: link.Capture_Result, send: bo
 
 // ring_push adds a half-size copy of the image to the ring, over its oldest frame.
 @(private)
-ring_push :: proc(r: ^Ring, img: capture.Image, frame: u64, tick: time.Tick, viewport: Maybe(int)) {
+ring_push :: proc(
+	r: ^Ring,
+	img: capture.Image,
+	frame: u64,
+	tick: time.Tick,
+	viewport: Maybe(int),
+) {
 	heap := runtime.heap_allocator()
 	slot := &r.frames[r.next]
 	delete(slot.image.pixels, heap)

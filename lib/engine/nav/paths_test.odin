@@ -43,11 +43,17 @@ Fixture :: struct {
 }
 
 @(private = "file")
-SCENE :: format.Guid{0 = 0x5c}
+SCENE :: format.Guid {
+	0 = 0x5c,
+}
 @(private = "file")
-HUMAN :: format.Guid{0 = 0x41}
+HUMAN :: format.Guid {
+	0 = 0x41,
+}
 @(private = "file")
-SMALL :: format.Guid{0 = 0x42}
+SMALL :: format.Guid {
+	0 = 0x42,
+}
 
 // setup makes a world with nav's components and system, over a loose cache. serial runs every job at once on the
 // calling thread, as one job would; otherwise the scheduler has workers threads.
@@ -106,7 +112,10 @@ setup :: proc(t: ^testing.T, serial := false, workers := 0, scripts := false) ->
 		f.reports = make([dynamic]f64)
 		script.register_components(&f.world.registry)
 		context.user_ptr = f
-		testing.expect(t, script.init(&f.runtime, &f.platform, &f.world, nil, register_test_scripts))
+		testing.expect(
+			t,
+			script.init(&f.runtime, &f.platform, &f.world, nil, register_test_scripts),
+		)
 	}
 	return f
 }
@@ -158,9 +167,18 @@ write_blob :: proc(t: ^testing.T, f: ^Fixture, guid: format.Guid, data: []byte) 
 write_scene :: proc(t: ^testing.T, f: ^Fixture, guid: format.Guid, meshes: []Scene_Mesh) {
 	listed := make([]format.Scene_Nav_Mesh, len(meshes), context.temp_allocator)
 	for m, i in meshes {
-		listed[i] = {entity = 0x100, agent = m.agent, guid = m.guid}
+		listed[i] = {
+			entity = 0x100,
+			agent  = m.agent,
+			guid   = m.guid,
+		}
 	}
-	write_blob(t, f, guid, format.scene_write({}, guid, 1, nav_meshes = listed, allocator = context.temp_allocator))
+	write_blob(
+		t,
+		f,
+		guid,
+		format.scene_write({}, guid, 1, nav_meshes = listed, allocator = context.temp_allocator),
+	)
 }
 
 @(private = "file")
@@ -176,7 +194,10 @@ cook :: proc(t: ^testing.T, f: ^Fixture, written: ..format.Guid) {
 	f.cooks += 1
 	later := time.time_add(time.now(), time.Duration(f.cooks) * time.Minute)
 	generation := fmt.tprintf("%s/%s", f.cache, format.GENERATION_FILE)
-	testing.expect(t, os.write_entire_file(generation, transmute([]byte)fmt.tprintf("%d", f.cooks)) == nil)
+	testing.expect(
+		t,
+		os.write_entire_file(generation, transmute([]byte)fmt.tprintf("%d", f.cooks)) == nil,
+	)
 	testing.expect(t, os.change_times(generation, later, later) == nil)
 	for guid in written {
 		buffer: [32]u8
@@ -240,7 +261,9 @@ navmeshes_load_and_unload_with_the_scene :: proc(t: ^testing.T) {
 	_, loaded := asset.find(&f.assets, HUMAN)
 	testing.expect(t, loaded)
 	// Another scene, without navmeshes: the first's go.
-	OTHER :: format.Guid{0 = 0x77}
+	OTHER :: format.Guid {
+		0 = 0x77,
+	}
 	write_scene(t, f, OTHER, {})
 	f.world.scene = OTHER
 	frame(f)
@@ -333,7 +356,11 @@ run_trips :: proc(t: ^testing.T, f: ^Fixture, budget: int) -> (out: [len(TRIPS)]
 		for e, i in agents {
 			status := status_of(f, e)
 			if status != .Pending && out[i].frame == 0 {
-				out[i] = {status, slice.clone(path_corners(&f.nav, &f.world, e), context.temp_allocator), n}
+				out[i] = {
+					status,
+					slice.clone(path_corners(&f.nav, &f.world, e), context.temp_allocator),
+					n,
+				}
 			}
 			done &&= status != .Pending
 		}
@@ -384,7 +411,13 @@ requests_spread_over_ticks_by_the_node_budget :: proc(t: ^testing.T) {
 		testing.expect(t, slice.equal(path_corners(&f.nav, &f.world, e), want.corners))
 		testing.expect_value(t, ecs.get(&f.world, e, Nav_Path).corners, u32(len(want.corners)))
 	}
-	testing.expectf(t, first > 2 && last > first, "the paths are ready from frame %d to %d", first, last)
+	testing.expectf(
+		t,
+		first > 2 && last > first,
+		"the paths are ready from frame %d to %d",
+		first,
+		last,
+	)
 }
 
 @(test)
@@ -402,7 +435,13 @@ paths_are_the_same_on_one_job_and_many :: proc(t: ^testing.T) {
 	for r, i in results[1:] {
 		for trip, j in r {
 			testing.expect_value(t, trip.status, results[0][j].status)
-			testing.expectf(t, slice.equal(trip.corners, results[0][j].corners), "config %d, trip %d", i + 1, j)
+			testing.expectf(
+				t,
+				slice.equal(trip.corners, results[0][j].corners),
+				"config %d, trip %d",
+				i + 1,
+				j,
+			)
 		}
 	}
 	// The same budget solves each in the same frame on one job or many; a larger one, sooner.
@@ -535,8 +574,26 @@ requests_from_systems_land_in_system_order :: proc(t: ^testing.T) {
 			}
 		}
 	}
-	ecs.register_system(&f.world, {name = "a", stage = .Fixed, procedure = ask, terms = {ecs.read(&f.world, Asker_A)}, data = &f.nav})
-	ecs.register_system(&f.world, {name = "b", stage = .Fixed, procedure = ask, terms = {ecs.read(&f.world, Asker_B)}, data = &f.nav})
+	ecs.register_system(
+		&f.world,
+		{
+			name = "a",
+			stage = .Fixed,
+			procedure = ask,
+			terms = {ecs.read(&f.world, Asker_A)},
+			data = &f.nav,
+		},
+	)
+	ecs.register_system(
+		&f.world,
+		{
+			name = "b",
+			stage = .Fixed,
+			procedure = ask,
+			terms = {ecs.read(&f.world, Asker_B)},
+			data = &f.nav,
+		},
+	)
 	standard_scene(t, f)
 	set_budget(&f.nav, 1)
 	frame(f)
@@ -561,7 +618,10 @@ scripts_find_paths :: proc(t: ^testing.T) {
 	frame(f)
 	f.agent = agent(f, 2.5, 2.5)
 	context.user_ptr = f
-	_, ok := script.spawn_source(&f.runtime, "=queries", `
+	_, ok := script.spawn_source(
+		&f.runtime,
+		"=queries",
+		`
 local origin = WorldPosition.from_meters(1000, 2, -500)
 local function at(x: number, z: number) return origin + vector.create(x, 0, z) end
 local path = Navigation.find_path(at(2.5, 2.5), at(9.5, 5.5), "Human")
@@ -582,28 +642,52 @@ local b = Navigation.random_point(at(2.5, 2.5), 2, "Human")
 Test.report(a ~= nil and (a - b).x == 0 and (a - b).z == 0 and 1 or 0)
 Navigation.request_path(Test.agent(), at(9.5, 5.5))
 Test.report(Navigation.path(Test.agent()) == nil and 1 or 0)
-`)
+`,
+	)
 	testing.expect(t, ok)
 	want := []f64{1, 9.5, 1, 1, 0.5, -1, 1, 6, 1, 1, 1}
 	if testing.expectf(t, len(f.reports) == len(want), "reports %v", f.reports[:]) {
 		for w, i in want {
-			testing.expectf(t, abs(f.reports[i] - w) < 1e-4, "report %d: %v, not %v", i, f.reports[i], w)
+			testing.expectf(
+				t,
+				abs(f.reports[i] - w) < 1e-4,
+				"report %d: %v, not %v",
+				i,
+				f.reports[i],
+				w,
+			)
 		}
 	}
 	frame(f)
 	clear(&f.reports)
-	_, ok = script.spawn_source(&f.runtime, "=path", `
+	_, ok = script.spawn_source(
+		&f.runtime,
+		"=path",
+		`
 local path = Navigation.path(Test.agent())
 Test.report(#path)
 Test.report(Test.agent():get(NavPath).status == "Found" and 1 or 0)
 Test.report(Test.agent():get(NavPath).corners)
-`)
+`,
+	)
 	testing.expect(t, ok)
 	np := ecs.get(&f.world, f.agent, Nav_Path)
-	testing.expectf(t, len(f.reports) == 3 && f.reports[0] == f64(np.corners) && f.reports[1] == 1 && f.reports[2] == f64(np.corners), "reports %v", f.reports[:])
+	testing.expectf(
+		t,
+		len(f.reports) == 3 &&
+		f.reports[0] == f64(np.corners) &&
+		f.reports[1] == 1 &&
+		f.reports[2] == f64(np.corners),
+		"reports %v",
+		f.reports[:],
+	)
 
 	context.logger = testlog.expected_errors()
-	_, ok = script.spawn_source(&f.runtime, "=pathless", `Navigation.request_path(World.spawn(), WorldPosition.origin)`)
+	_, ok = script.spawn_source(
+		&f.runtime,
+		"=pathless",
+		`Navigation.request_path(World.spawn(), WorldPosition.origin)`,
+	)
 	testing.expect(t, !ok, "an entity without a NavPath is an error")
 	_, ok = script.spawn_source(&f.runtime, "=readonly", `Test.agent():get(NavPath).corners = 3`)
 	testing.expect(t, !ok, "a NavPath's corners are the engine's")

@@ -39,13 +39,13 @@ ONE_SHOT_MAX_DISTANCE :: 50
 
 @(private)
 Sound_Slot :: struct {
-	guid:       format.Guid,
+	guid:     format.Guid,
 	// The nil sound for one that would not load, until its blob changes.
-	handle:     boundary.Sound,
+	handle:   boundary.Sound,
 	// The blob's time when it was read.
-	modified:   i64,
+	modified: i64,
 	// Grows with each new version of the blob. A source that started an older one starts again.
-	version:    u32,
+	version:  u32,
 }
 
 // Source_Slot is a playing Audio_Source's voice. update_sources claims a slot for a source that starts to play, and frees
@@ -79,22 +79,22 @@ One_Shot :: struct {
 // State is in Game_State. Its sounds, voices and buses are the backend's, and only their handles are here, so a code
 // reload keeps them all. A soft restart stops them (see docs/audio/design.md#lifetimes).
 State :: struct {
-	platform:        ^core.Platform_API,
-	assets:          ^asset.Assets,
-	features:        boundary.Features,
-	sounds:          [MAX_SOUNDS]Sound_Slot,
-	sound_count:     int,
+	platform:         ^core.Platform_API,
+	assets:           ^asset.Assets,
+	features:         boundary.Features,
+	sounds:           [MAX_SOUNDS]Sound_Slot,
+	sound_count:      int,
 	// The next sound whose blob update looks at.
-	sound_cursor:    int,
-	sources:         [MAX_SOURCES]Source_Slot,
+	sound_cursor:     int,
+	sources:          [MAX_SOURCES]Source_Slot,
 	occlusion_cursor: int,
-	one_shots:       [MAX_ONE_SHOTS]One_Shot,
-	one_shot_count:  int,
-	buses:           [MAX_BUSES]boundary.Bus,
-	bus_names:       Bus_Names,
-	paused:          bool,
+	one_shots:        [MAX_ONE_SHOTS]One_Shot,
+	one_shot_count:   int,
+	buses:            [MAX_BUSES]boundary.Bus,
+	bus_names:        Bus_Names,
+	paused:           bool,
 	// The warnings given, each once.
-	warned:          bit_set[Warning],
+	warned:           bit_set[Warning],
 }
 
 // Warning is a warning that the audio gives once: a spatial source with no listener, and each of the limits.
@@ -176,7 +176,12 @@ destroy :: proc(s: ^State) {
 	stats: boundary.Stats
 	api.stats(&stats)
 	if stats.frames_mixed > 0 {
-		log.infof("audio: mixed %d frames, with %d frames of streams starved and %d voices refused", stats.frames_mixed, stats.stream_starved, stats.voices_refused)
+		log.infof(
+			"audio: mixed %d frames, with %d frames of streams starved and %d voices refused",
+			stats.frames_mixed,
+			stats.stream_starved,
+			stats.voices_refused,
+		)
 	}
 }
 
@@ -196,7 +201,10 @@ set_buses :: proc(s: ^State, names: Bus_Names) {
 			}
 		}
 		if s.buses[i] == {} {
-			s.buses[i] = s.platform.audio.bus_create(strings.clone_to_cstring(name, s.platform.frame_allocator), {})
+			s.buses[i] = s.platform.audio.bus_create(
+				strings.clone_to_cstring(name, s.platform.frame_allocator),
+				{},
+			)
 		}
 	}
 }
@@ -240,11 +248,20 @@ set_bus_effect :: proc(s: ^State, name: string, slot: int, effect: boundary.Effe
 
 // play queues a sound for this frame's update, at a position if it has one, and returns false if the frame has queued
 // too many. The sound plays once, to its end. Call it from the frame's code or its scripts.
-play :: proc(s: ^State, sound: format.Guid, position: Maybe(ecs.World_Position) = nil, gain: f32 = 1, bus := 0) -> bool {
+play :: proc(
+	s: ^State,
+	sound: format.Guid,
+	position: Maybe(ecs.World_Position) = nil,
+	gain: f32 = 1,
+	bus := 0,
+) -> bool {
 	if s.one_shot_count >= MAX_ONE_SHOTS {
 		if .One_Shots not_in s.warned {
 			s.warned += {.One_Shots}
-			log.warnf("audio: more than %d sounds from play at once, so a sound does not play", MAX_ONE_SHOTS)
+			log.warnf(
+				"audio: more than %d sounds from play at once, so a sound does not play",
+				MAX_ONE_SHOTS,
+			)
 		}
 		return false
 	}
@@ -301,12 +318,21 @@ find_listener :: proc(s: ^State, w: ^ecs.World) -> (listener: Listener) {
 // and Y is up. Differences of World_Positions are exact, so this stays good far from the origin.
 @(private)
 listener_space :: proc(listener: Listener, position: ecs.World_Position) -> [3]f32 {
-	return linalg.quaternion128_mul_vector3(linalg.quaternion_inverse(listener.pose.rotation), ecs.position_sub(position, listener.pose.position))
+	return linalg.quaternion128_mul_vector3(
+		linalg.quaternion_inverse(listener.pose.rotation),
+		ecs.position_sub(position, listener.pose.position),
+	)
 }
 
 // is_blocked casts a ray from the listener to the source. The source's and the listener's own bodies do not count.
 @(private)
-is_blocked :: proc(w: ^ecs.World, ph: ^physics.State, listener: Listener, entity: ecs.Entity, position: ecs.World_Position) -> bool {
+is_blocked :: proc(
+	w: ^ecs.World,
+	ph: ^physics.State,
+	listener: Listener,
+	entity: ecs.Entity,
+	position: ecs.World_Position,
+) -> bool {
 	if ph == nil || !listener.found {
 		return false
 	}
@@ -323,7 +349,14 @@ is_blocked :: proc(w: ^ecs.World, ph: ^physics.State, listener: Listener, entity
 }
 
 @(private)
-update_sources :: proc(s: ^State, w: ^ecs.World, ph: ^physics.State, listener: Listener, run: bool, dt: f32) {
+update_sources :: proc(
+	s: ^State,
+	w: ^ecs.World,
+	ph: ^physics.State,
+	listener: Listener,
+	run: bool,
+	dt: f32,
+) {
 	api := &s.platform.audio
 	entities := make([dynamic]ecs.Entity, s.platform.frame_allocator)
 	ecs.collect(w, {AUDIO_SOURCE_ID}, &entities)
@@ -380,7 +413,10 @@ free_source :: proc(s: ^State) -> int {
 	}
 	if .Sources not_in s.warned {
 		s.warned += {.Sources}
-		log.warnf("audio: more than %d Audio_Sources at once, so a source does not play", MAX_SOURCES)
+		log.warnf(
+			"audio: more than %d Audio_Sources at once, so a source does not play",
+			MAX_SOURCES,
+		)
 	}
 	return -1
 }
@@ -391,11 +427,25 @@ free_source :: proc(s: ^State) -> int {
 // slot as a new one does. A source that plays but has no voice yet, as while its sound is cooked or the world does not
 // run, keeps its slot.
 @(private)
-follow_source :: proc(s: ^State, w: ^ecs.World, ph: ^physics.State, listener: Listener, slot: ^Source_Slot, e: ecs.Entity, source: Audio_Source, run: bool) -> (ended: bool) {
+follow_source :: proc(
+	s: ^State,
+	w: ^ecs.World,
+	ph: ^physics.State,
+	listener: Listener,
+	slot: ^Source_Slot,
+	e: ecs.Entity,
+	source: Audio_Source,
+	run: bool,
+) -> (
+	ended: bool,
+) {
 	api := &s.platform.audio
 	sound := find_sound(s, source.sound)
 	if slot.voice != {} {
-		stale := !source.playing || source.sound != slot.guid || (sound != nil && sound.version != slot.version)
+		stale :=
+			!source.playing ||
+			source.sound != slot.guid ||
+			(sound != nil && sound.version != slot.version)
 		if stale {
 			api.voice_stop(slot.voice, STOP_FADE)
 			slot.voice = {}
@@ -417,7 +467,9 @@ follow_source :: proc(s: ^State, w: ^ecs.World, ph: ^physics.State, listener: Li
 	spatial := source.spatial && listener.found
 	if source.spatial && !listener.found && .No_Listener not_in s.warned {
 		s.warned += {.No_Listener}
-		log.warn("audio: a spatial Audio_Source plays with no Audio_Listener in the world, so it plays centred at full gain")
+		log.warn(
+			"audio: a spatial Audio_Source plays with no Audio_Listener in the world, so it plays centred at full gain",
+		)
 	}
 	params := boundary.Voice_Params {
 		gain         = source.gain,
@@ -443,14 +495,27 @@ follow_source :: proc(s: ^State, w: ^ecs.World, ph: ^physics.State, listener: Li
 	params.occlusion = slot.occlusion
 	slot.guid = source.sound
 	slot.version = sound.version
-	slot.voice = api.voice_play(&boundary.Voice_Desc{sound = sound.handle, bus = bus_handle(s, int(source.bus)), params = params, loop = b32(source.loop)})
+	slot.voice = api.voice_play(
+		&boundary.Voice_Desc {
+			sound = sound.handle,
+			bus = bus_handle(s, int(source.bus)),
+			params = params,
+			loop = b32(source.loop),
+		},
+	)
 	return
 }
 
 // update_occlusion casts a few rays, in turn over the sources, and moves each source's occlusion toward what its last
 // ray found. The value reaches the voice in the next frame's voice_set.
 @(private)
-update_occlusion :: proc(s: ^State, w: ^ecs.World, ph: ^physics.State, listener: Listener, dt: f32) {
+update_occlusion :: proc(
+	s: ^State,
+	w: ^ecs.World,
+	ph: ^physics.State,
+	listener: Listener,
+	dt: f32,
+) {
 	rays := 0
 	for _ in 0 ..< MAX_SOURCES {
 		if rays >= OCCLUSION_RAYS {
@@ -483,7 +548,13 @@ update_occlusion :: proc(s: ^State, w: ^ecs.World, ph: ^physics.State, listener:
 // update_one_shots starts what play queued, and moves what plays as the listener moves. Finished ones go, keeping the
 // others in order.
 @(private)
-update_one_shots :: proc(s: ^State, w: ^ecs.World, ph: ^physics.State, listener: Listener, run: bool) {
+update_one_shots :: proc(
+	s: ^State,
+	w: ^ecs.World,
+	ph: ^physics.State,
+	listener: Listener,
+	run: bool,
+) {
 	api := &s.platform.audio
 	kept := 0
 	for i in 0 ..< s.one_shot_count {
@@ -512,7 +583,13 @@ update_one_shots :: proc(s: ^State, w: ^ecs.World, ph: ^physics.State, listener:
 				shot.occluded = 1
 			}
 			params.occlusion = shot.occluded
-			shot.voice = api.voice_play(&boundary.Voice_Desc{sound = sound.handle, bus = bus_handle(s, shot.bus), params = params})
+			shot.voice = api.voice_play(
+				&boundary.Voice_Desc {
+					sound = sound.handle,
+					bus = bus_handle(s, shot.bus),
+					params = params,
+				},
+			)
 			if shot.voice == {} {
 				continue
 			}
@@ -595,7 +672,10 @@ load_sound :: proc(s: ^State, sound: ^Sound_Slot) {
 	// A blob that a bundle compresses does not stream: the asset runtime decompresses all of it.
 	if location.raw {
 		blob: format.Audio_Blob
-		if s.platform.file_read_range(path, location.offset, mem.ptr_to_bytes(&blob)) != size_of(blob) || blob.header.layout != format.audio_layout() || !format.audio_check(&blob, sound.guid) {
+		if s.platform.file_read_range(path, location.offset, mem.ptr_to_bytes(&blob)) !=
+			   size_of(blob) ||
+		   blob.header.layout != format.audio_layout() ||
+		   !format.audio_check(&blob, sound.guid) {
 			log.errorf("audio: %s is not a cooked sound of its GUID. Cook the content.", path)
 			return
 		}
@@ -635,7 +715,15 @@ load_sound :: proc(s: ^State, sound: ^Sound_Slot) {
 	}
 	samples := make([]i16, view.frames * u64(view.channels), s.platform.asset_allocator)
 	defer delete(samples, s.platform.asset_allocator)
-	if !codec.decode_all(view.format, format.audio_data(data, view), int(view.channels), view.frames, u64(view.skip), samples, s.platform.asset_allocator) {
+	if !codec.decode_all(
+		view.format,
+		format.audio_data(data, view),
+		int(view.channels),
+		view.frames,
+		u64(view.skip),
+		samples,
+		s.platform.asset_allocator,
+	) {
 		log.errorf("audio: cannot decode %s. Cook the content.", path)
 		return
 	}
@@ -664,4 +752,3 @@ check_blobs :: proc(s: ^State) {
 	load_sound(s, sound)
 	sound.version += 1
 }
-

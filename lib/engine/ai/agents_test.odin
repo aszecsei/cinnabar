@@ -46,12 +46,18 @@ Fixture :: struct {
 }
 
 @(private = "file")
-BOARD :: format.Guid{0 = 0xb0}
+BOARD :: format.Guid {
+	0 = 0xb0,
+}
 @(private = "file")
-DECISION :: format.Guid{0 = 0xd0}
+DECISION :: format.Guid {
+	0 = 0xd0,
+}
 // A second decision, which a script swaps an agent to.
 @(private = "file")
-OTHER_DECISION :: format.Guid{0 = 0xd1}
+OTHER_DECISION :: format.Guid {
+	0 = 0xd1,
+}
 
 @(private = "file")
 value :: proc(v: $T) -> (bytes: [format.BLACKBOARD_VALUE_SIZE]byte) {
@@ -64,13 +70,39 @@ value :: proc(v: $T) -> (bytes: [format.BLACKBOARD_VALUE_SIZE]byte) {
 @(private = "file")
 board_contents :: proc(key: u64 = 77, health: f32 = 1) -> format.Blackboard_Contents {
 	keys := make([]format.Blackboard_Key_Contents, 7, context.temp_allocator)
-	keys[0] = {name = "health", type = .Float, default = value(health)}
-	keys[1] = {name = "ammo", type = .Int, default = value(i32(3))}
-	keys[2] = {name = "alarmed", type = .Bool}
-	keys[3] = {name = "mood", type = .Enum, enum_names = slice.clone([]string{"calm", "alert"}, context.temp_allocator)}
-	keys[4] = {name = "target", type = .Entity}
-	keys[5] = {name = "home", type = .Position, default = value(ecs.position_offset({}, {1, 0, 0}))}
-	keys[6] = {name = "heading", type = .Vector, default = value([3]f32{0, 0, 1})}
+	keys[0] = {
+		name    = "health",
+		type    = .Float,
+		default = value(health),
+	}
+	keys[1] = {
+		name    = "ammo",
+		type    = .Int,
+		default = value(i32(3)),
+	}
+	keys[2] = {
+		name = "alarmed",
+		type = .Bool,
+	}
+	keys[3] = {
+		name       = "mood",
+		type       = .Enum,
+		enum_names = slice.clone([]string{"calm", "alert"}, context.temp_allocator),
+	}
+	keys[4] = {
+		name = "target",
+		type = .Entity,
+	}
+	keys[5] = {
+		name    = "home",
+		type    = .Position,
+		default = value(ecs.position_offset({}, {1, 0, 0})),
+	}
+	keys[6] = {
+		name    = "heading",
+		type    = .Vector,
+		default = value([3]f32{0, 0, 1}),
+	}
 	return {guid = BOARD, key = key, keys = keys}
 }
 
@@ -88,43 +120,88 @@ decision_contents :: proc(board_key: u64 = 77, walk := "walk") -> format.Decisio
 		state_size = 8,
 		blackboard = BOARD,
 		blackboard_key = board_key,
-		nodes = slice.clone([]format.Decision_Node_Contents{
-			{id = 1, kind = "pick", condition = 0, action = 0, first_write = 0, write_count = 1},
-			{id = 2, kind = "pick", condition = 1, action = 1},
-			{id = 3, kind = "pick", condition = format.DECISION_NONE, action = 2, first_write = 1, write_count = 1},
-		}, context.temp_allocator),
-		conditions = slice.clone([]format.Decision_Condition{{first_op = 0, op_count = 3}, {first_op = 3, op_count = 9}}, context.temp_allocator),
-		ops = slice.clone([]format.Decision_Op{
-			{code = .Key, operand = 0},
-			{code = .Constant, operand = 0},
-			{code = .Less, type = u8(format.Blackboard_Type.Float)},
-			{code = .Key, operand = 4},
-			{code = .Constant, operand = 2},
-			{code = .Not_Equal, type = u8(format.Blackboard_Type.Entity)},
-			{code = .Self},
-			{code = .Key, operand = 4},
-			{code = .Distance},
-			{code = .Constant, operand = 3},
-			{code = .Less, type = u8(format.Blackboard_Type.Float)},
-			{code = .And},
-		}, context.temp_allocator),
-		constants = slice.clone([]format.Decision_Constant_Contents{
-			{type = .Float, value = value(f32(0.5))},
-			{type = .Float, value = value(f32(2))},
-			{type = .Entity},
-			{type = .Float, value = value(f32(3))},
-			{type = .String, text = "hey"},
-			{type = .Enum, value = value(u32(1))},
-			{type = .Bool, value = value(u8(1))},
-		}, context.temp_allocator),
-		actions = slice.clone([]format.Decision_Action_Contents{{name = "flee", first_arg = 0, arg_count = 1}, {name = "bark", first_arg = 1, arg_count = 2}, {name = walk, first_arg = 3, arg_count = 1}}, context.temp_allocator),
-		args = slice.clone([]format.Decision_Arg_Contents{
-			{name = "speed", source = .Constant, index = 1, type = .Float},
-			{name = "line", source = .Constant, index = 4, type = .String},
-			{name = "at", source = .Key, index = 4, type = .Entity},
-			{name = "steps", source = .Key, index = 1, type = .Int},
-		}, context.temp_allocator),
-		writes = slice.clone([]format.Decision_Write{{key = 3, source = .Constant, index = 5}, {key = 2, source = .Constant, index = 6}}, context.temp_allocator),
+		nodes = slice.clone(
+			[]format.Decision_Node_Contents {
+				{
+					id = 1,
+					kind = "pick",
+					condition = 0,
+					action = 0,
+					first_write = 0,
+					write_count = 1,
+				},
+				{id = 2, kind = "pick", condition = 1, action = 1},
+				{
+					id = 3,
+					kind = "pick",
+					condition = format.DECISION_NONE,
+					action = 2,
+					first_write = 1,
+					write_count = 1,
+				},
+			},
+			context.temp_allocator,
+		),
+		conditions = slice.clone(
+			[]format.Decision_Condition {
+				{first_op = 0, op_count = 3},
+				{first_op = 3, op_count = 9},
+			},
+			context.temp_allocator,
+		),
+		ops = slice.clone(
+			[]format.Decision_Op {
+				{code = .Key, operand = 0},
+				{code = .Constant, operand = 0},
+				{code = .Less, type = u8(format.Blackboard_Type.Float)},
+				{code = .Key, operand = 4},
+				{code = .Constant, operand = 2},
+				{code = .Not_Equal, type = u8(format.Blackboard_Type.Entity)},
+				{code = .Self},
+				{code = .Key, operand = 4},
+				{code = .Distance},
+				{code = .Constant, operand = 3},
+				{code = .Less, type = u8(format.Blackboard_Type.Float)},
+				{code = .And},
+			},
+			context.temp_allocator,
+		),
+		constants = slice.clone(
+			[]format.Decision_Constant_Contents {
+				{type = .Float, value = value(f32(0.5))},
+				{type = .Float, value = value(f32(2))},
+				{type = .Entity},
+				{type = .Float, value = value(f32(3))},
+				{type = .String, text = "hey"},
+				{type = .Enum, value = value(u32(1))},
+				{type = .Bool, value = value(u8(1))},
+			},
+			context.temp_allocator,
+		),
+		actions = slice.clone(
+			[]format.Decision_Action_Contents {
+				{name = "flee", first_arg = 0, arg_count = 1},
+				{name = "bark", first_arg = 1, arg_count = 2},
+				{name = walk, first_arg = 3, arg_count = 1},
+			},
+			context.temp_allocator,
+		),
+		args = slice.clone(
+			[]format.Decision_Arg_Contents {
+				{name = "speed", source = .Constant, index = 1, type = .Float},
+				{name = "line", source = .Constant, index = 4, type = .String},
+				{name = "at", source = .Key, index = 4, type = .Entity},
+				{name = "steps", source = .Key, index = 1, type = .Int},
+			},
+			context.temp_allocator,
+		),
+		writes = slice.clone(
+			[]format.Decision_Write {
+				{key = 3, source = .Constant, index = 5},
+				{key = 2, source = .Constant, index = 6},
+			},
+			context.temp_allocator,
+		),
 		source_path = "game/ai/test.decision",
 	}
 }
@@ -147,25 +224,56 @@ test_think :: proc(t: ^Think_Context) {
 
 // test_scores gives one option, with the module's think count as its score's tenths, and one consideration.
 @(private = "file")
-test_scores :: proc(decision: Decision, board: Board, state: []byte, allocator: runtime.Allocator) -> []Option_Score {
+test_scores :: proc(
+	decision: Decision,
+	board: Board,
+	state: []byte,
+	allocator: runtime.Allocator,
+) -> []Option_Score {
 	considerations := make([]Consideration_Score, 1, allocator)
-	considerations[0] = {id = 7, input = 0.25, score = 0.75}
+	considerations[0] = {
+		id    = 7,
+		input = 0.25,
+		score = 0.75,
+	}
 	result := make([]Option_Score, 1, allocator)
-	result[0] = {id = 1, action = "flee", score = f32((^u32)(&state[0])^) / 10, considerations = considerations}
+	result[0] = {
+		id             = 1,
+		action         = "flee",
+		score          = f32((^u32)(&state[0])^) / 10,
+		considerations = considerations,
+	}
 	return result
 }
 
 // test_plan is a plan of two steps, the second of which runs, for a goal whose priority is the thinks so far, by one
 // method of a task.
 @(private = "file")
-test_plan :: proc(decision: Decision, board: Board, state: []byte, allocator: runtime.Allocator) -> Plan_View {
+test_plan :: proc(
+	decision: Decision,
+	board: Board,
+	state: []byte,
+	allocator: runtime.Allocator,
+) -> Plan_View {
 	goals := make([]Goal_Priority, 1, allocator)
-	goals[0] = {id = 3, priority = f32((^u32)(&state[0])^)}
+	goals[0] = {
+		id       = 3,
+		priority = f32((^u32)(&state[0])^),
+	}
 	steps := make([]Plan_Step, 2, allocator)
-	steps[0] = {id = 4, action = "walk"}
-	steps[1] = {id = 5, action = "flee"}
+	steps[0] = {
+		id     = 4,
+		action = "walk",
+	}
+	steps[1] = {
+		id     = 5,
+		action = "flee",
+	}
 	methods := make([]Plan_Method, 1, allocator)
-	methods[0] = {task = 6, method = 7}
+	methods[0] = {
+		task   = 6,
+		method = 7,
+	}
 	return {goal = 3, goals = goals, steps = steps, methods = methods, step = 1, nodes = 9}
 }
 
@@ -181,48 +289,46 @@ log_event :: proc(a: ^Action_Context, f: string, args: ..any) {
 // stopped. Without scripts, bark is a native action that succeeds at once.
 @(private = "file")
 register_test_actions :: proc(s: ^State, scripts := false) {
-	register_module(s, .Behavior_Tree, {think = test_think, scores = test_scores, plan = test_plan})
+	register_module(
+		s,
+		.Behavior_Tree,
+		{think = test_think, scores = test_scores, plan = test_plan},
+	)
 	if !scripts {
 		register_action(s, {name = "bark", params = {{"line", .String}, {"at", .Entity}}})
 	}
-	register_action(
-		s,
-		{
-			name = "walk",
-			params = {{"steps", .Int}},
-			state_size = 4,
-			start = proc(a: ^Action_Context) {
-				steps, _ := arg(a, "steps")
-				(^i32)(&a.state[0])^ = steps.(i32)
-				log_event(a, "walk start %v %d", a.entity, steps.(i32))
-			},
-			tick = proc(a: ^Action_Context) -> Action_Status {
-				left := &(^i32)(&a.state[0])^
-				left^ -= 1
-				return .Succeeded if left^ <= 0 else .Running
-			},
-			stop = proc(a: ^Action_Context) {
-				log_event(a, "walk stop %v %d", a.entity, (^i32)(&a.state[0])^)
-			},
+	register_action(s, {
+		name = "walk",
+		params = {{"steps", .Int}},
+		state_size = 4,
+		start = proc(a: ^Action_Context) {
+			steps, _ := arg(a, "steps")
+			(^i32)(&a.state[0])^ = steps.(i32)
+			log_event(a, "walk start %v %d", a.entity, steps.(i32))
 		},
-	)
-	register_action(
-		s,
-		{
-			name = "flee",
-			params = {{"speed", .Float}},
-			start = proc(a: ^Action_Context) {
-				speed, _ := arg(a, "speed")
-				log_event(a, "flee start %v %v", a.entity, speed.(f32))
-			},
-			tick = proc(a: ^Action_Context) -> Action_Status {
-				return .Running
-			},
-			stop = proc(a: ^Action_Context) {
-				log_event(a, "flee stop %v", a.entity)
-			},
+		tick = proc(a: ^Action_Context) -> Action_Status {
+			left := &(^i32)(&a.state[0])^
+			left^ -= 1
+			return .Succeeded if left^ <= 0 else .Running
 		},
-	)
+		stop = proc(a: ^Action_Context) {
+			log_event(a, "walk stop %v %d", a.entity, (^i32)(&a.state[0])^)
+		},
+	})
+	register_action(s, {
+		name = "flee",
+		params = {{"speed", .Float}},
+		start = proc(a: ^Action_Context) {
+			speed, _ := arg(a, "speed")
+			log_event(a, "flee start %v %v", a.entity, speed.(f32))
+		},
+		tick = proc(a: ^Action_Context) -> Action_Status {
+			return .Running
+		},
+		stop = proc(a: ^Action_Context) {
+			log_event(a, "flee stop %v", a.entity)
+		},
+	})
 }
 
 // setup makes a world with the AI's components and systems, the test module and actions, over a loose cache with the
@@ -283,7 +389,10 @@ setup :: proc(t: ^testing.T, serial := false, workers := 0, scripts := false) ->
 		f.scripts = true
 		f.reports = make([dynamic]f64)
 		context.user_ptr = f
-		testing.expect(t, script.init(&f.runtime, &f.platform, &f.world, nil, register_test_scripts))
+		testing.expect(
+			t,
+			script.init(&f.runtime, &f.platform, &f.world, nil, register_test_scripts),
+		)
 	}
 	write_blob(t, f, BOARD, format.blackboard_write(board_contents(), context.temp_allocator))
 	write_blob(t, f, DECISION, format.decision_write(decision_contents(), context.temp_allocator))
@@ -312,7 +421,11 @@ register_test_scripts :: proc(r: ^script.Runtime) {
 	})
 	// The test decision, or with true the other one, as an asset.
 	script.define(r, "Test.decision", proc(L: ^luau.State) -> c.int {
-		script.push_asset(script.runtime_of(L), L, OTHER_DECISION if luau.toboolean(L, 1) else DECISION)
+		script.push_asset(
+			script.runtime_of(L),
+			L,
+			OTHER_DECISION if luau.toboolean(L, 1) else DECISION,
+		)
 		return 1
 	})
 }
@@ -355,7 +468,10 @@ cook :: proc(t: ^testing.T, f: ^Fixture, written: ..format.Guid) {
 	f.cooks += 1
 	later := time.time_add(time.now(), time.Duration(f.cooks) * time.Minute)
 	generation := fmt.tprintf("%s/%s", f.cache, format.GENERATION_FILE)
-	testing.expect(t, os.write_entire_file(generation, transmute([]byte)fmt.tprintf("%d", f.cooks)) == nil)
+	testing.expect(
+		t,
+		os.write_entire_file(generation, transmute([]byte)fmt.tprintf("%d", f.cooks)) == nil,
+	)
 	testing.expect(t, os.change_times(generation, later, later) == nil)
 	for guid in written {
 		buffer: [32]u8
@@ -400,7 +516,11 @@ at :: proc(x, y, z: f32) -> ecs.World_Position {
 spawn_agent :: proc(f: ^Fixture, x: f32 = 0, interval: f32 = 0, priority: i32 = 0) -> ecs.Entity {
 	e := ecs.spawn(&f.world)
 	ecs.add(&f.world, e, ecs.Transform{position = at(x, 0, 0), rotation = 1, scale = 1})
-	ecs.add(&f.world, e, Agent{blackboard = BOARD, decision = DECISION, interval = interval, priority = priority})
+	ecs.add(
+		&f.world,
+		e,
+		Agent{blackboard = BOARD, decision = DECISION, interval = interval, priority = priority},
+	)
 	return e
 }
 
@@ -469,8 +589,21 @@ conditions_read_the_blackboard_and_the_world :: proc(t: ^testing.T) {
 	testing.expect(t, ready != nil)
 	board, _ := board_of(&f.ai, slot.blackboard)
 	decision, _ := decision_of(&f.ai, slot.decision)
-	think_context :: proc(f: ^Fixture, e: ecs.Entity, board: Board, decision: Decision, ready: ^Agent_Ready) -> Think_Context {
-		return {world = &f.world, entity = e, board = board, decision = decision, values = ready.values, state = ready.state}
+	think_context :: proc(
+		f: ^Fixture,
+		e: ecs.Entity,
+		board: Board,
+		decision: Decision,
+		ready: ^Agent_Ready,
+	) -> Think_Context {
+		return {
+			world = &f.world,
+			entity = e,
+			board = board,
+			decision = decision,
+			values = ready.values,
+			state = ready.state,
+		}
 	}
 	tc := think_context(f, e, board, decision, ready)
 	testing.expect(t, !condition_holds(&tc, 0), "health is 1")
@@ -552,7 +685,13 @@ the_think_budget_spreads_agents_over_ticks :: proc(t: ^testing.T) {
 	testing.expect_value(t, thinks_of(f, high[0]) - high_before, 8)
 	testing.expect_value(t, thinks_of(f, high[1]) - high_before, 8)
 	for e, i in low {
-		testing.expectf(t, thinks_of(f, e) - before[i] == 2, "agent %d thought %d times", i, thinks_of(f, e) - before[i])
+		testing.expectf(
+			t,
+			thinks_of(f, e) - before[i] == 2,
+			"agent %d thought %d times",
+			i,
+			thinks_of(f, e) - before[i],
+		)
 	}
 }
 
@@ -571,7 +710,11 @@ agents_that_start_together_are_staggered :: proc(t: ^testing.T) {
 	for e in agents {
 		ready := ready_agent(f, e)
 		testing.expect(t, ready.next_think < start + 60)
-		testing.expect(t, !slice.contains(ticks[:], ready.next_think), "two agents think first in the same tick")
+		testing.expect(
+			t,
+			!slice.contains(ticks[:], ready.next_think),
+			"two agents think first in the same tick",
+		)
 		append(&ticks, ready.next_think)
 	}
 }
@@ -592,7 +735,10 @@ thinks_are_the_same_on_one_job_and_many :: proc(t: ^testing.T) {
 		set_budget(&f.ai, budget)
 		agents := make([dynamic]ecs.Entity, context.temp_allocator)
 		for i in 0 ..< 100 {
-			append(&agents, spawn_agent(f, x = f32(i), interval = f32(i % 5) * 0.05, priority = i32(i % 3)))
+			append(
+				&agents,
+				spawn_agent(f, x = f32(i), interval = f32(i % 5) * 0.05, priority = i32(i % 3)),
+			)
 		}
 		frame(f, 2)
 		for e, i in agents {
@@ -610,7 +756,16 @@ thinks_are_the_same_on_one_job_and_many :: proc(t: ^testing.T) {
 				ready := ready_agent(f, e)
 				ammo, _ := get_key(&f.ai, e, "ammo")
 				mood, _ := get_key(&f.ai, e, "mood")
-				append(&outcomes, Outcome{(^u32)(&ready.state[0])^, (^u32)(&ready.state[4])^, action_view(ready.action), ammo.(i32), mood.(Enum_Index)})
+				append(
+					&outcomes,
+					Outcome {
+						(^u32)(&ready.state[0])^,
+						(^u32)(&ready.state[4])^,
+						action_view(ready.action),
+						ammo.(i32),
+						mood.(Enum_Index),
+					},
+				)
 			}
 		}
 		return outcomes
@@ -659,8 +814,26 @@ writes_land_in_system_order :: proc(t: ^testing.T) {
 			}
 		}
 	}
-	ecs.register_system(&f.world, {name = "a", stage = .Fixed, procedure = write_a, terms = {ecs.read(&f.world, Writer_A)}, data = &f.ai})
-	ecs.register_system(&f.world, {name = "b", stage = .Fixed, procedure = write_b, terms = {ecs.read(&f.world, Writer_B)}, data = &f.ai})
+	ecs.register_system(
+		&f.world,
+		{
+			name = "a",
+			stage = .Fixed,
+			procedure = write_a,
+			terms = {ecs.read(&f.world, Writer_A)},
+			data = &f.ai,
+		},
+	)
+	ecs.register_system(
+		&f.world,
+		{
+			name = "b",
+			stage = .Fixed,
+			procedure = write_b,
+			terms = {ecs.read(&f.world, Writer_B)},
+			data = &f.ai,
+		},
+	)
 	e := spawn_agent(f, interval = 100)
 	ecs.add(&f.world, e, Writer_B{})
 	ecs.add(&f.world, e, Writer_A{})
@@ -706,8 +879,18 @@ a_recooked_blackboard_restarts_the_agent :: proc(t: ^testing.T) {
 	frame(f, 3)
 	set_key(&f.ai, e, "ammo", i32(42))
 	testing.expect_value(t, current_action(&f.ai, e), "walk")
-	write_blob(t, f, BOARD, format.blackboard_write(board_contents(key = 78, health = 0.75), context.temp_allocator))
-	write_blob(t, f, DECISION, format.decision_write(decision_contents(board_key = 78), context.temp_allocator))
+	write_blob(
+		t,
+		f,
+		BOARD,
+		format.blackboard_write(board_contents(key = 78, health = 0.75), context.temp_allocator),
+	)
+	write_blob(
+		t,
+		f,
+		DECISION,
+		format.decision_write(decision_contents(board_key = 78), context.temp_allocator),
+	)
 	cook(t, f, BOARD, DECISION)
 	frame(f, 2)
 	testing.expect(t, has_event(f, fmt.tprintf("walk stop %v 2", e)))
@@ -726,11 +909,21 @@ an_agent_waits_for_a_decision_that_fits_its_blackboard :: proc(t: ^testing.T) {
 	e := spawn_agent(f)
 	frame(f, 2)
 	context.logger = testlog.expected_errors()
-	write_blob(t, f, BOARD, format.blackboard_write(board_contents(key = 78), context.temp_allocator))
+	write_blob(
+		t,
+		f,
+		BOARD,
+		format.blackboard_write(board_contents(key = 78), context.temp_allocator),
+	)
 	cook(t, f, BOARD)
 	frame(f)
 	testing.expect(t, ready_agent(f, e) == nil)
-	write_blob(t, f, DECISION, format.decision_write(decision_contents(board_key = 78), context.temp_allocator))
+	write_blob(
+		t,
+		f,
+		DECISION,
+		format.decision_write(decision_contents(board_key = 78), context.temp_allocator),
+	)
 	cook(t, f, DECISION)
 	frame(f)
 	testing.expect(t, ready_agent(f, e) != nil)
@@ -741,7 +934,12 @@ an_agent_waits_for_a_decision_that_fits_its_blackboard :: proc(t: ^testing.T) {
 a_missing_action_fails :: proc(t: ^testing.T) {
 	f := setup(t, serial = true)
 	defer teardown(t, f)
-	write_blob(t, f, DECISION, format.decision_write(decision_contents(walk = "dance"), context.temp_allocator))
+	write_blob(
+		t,
+		f,
+		DECISION,
+		format.decision_write(decision_contents(walk = "dance"), context.temp_allocator),
+	)
 	context.logger = testlog.expected_errors()
 	e := spawn_agent(f, interval = 100)
 	frame(f, 3)
@@ -780,7 +978,10 @@ a_duplicated_agent_gets_its_own_slot :: proc(t: ^testing.T) {
 	ecs.add(&f.world, copy, ecs.get(&f.world, e, Agent)^)
 	ecs.add(&f.world, copy, ecs.get(&f.world, e, Agent_State)^)
 	frame(f, 2)
-	testing.expect(t, ecs.get(&f.world, copy, Agent_State).agent != ecs.get(&f.world, e, Agent_State).agent)
+	testing.expect(
+		t,
+		ecs.get(&f.world, copy, Agent_State).agent != ecs.get(&f.world, e, Agent_State).agent,
+	)
 	ammo, _ := get_key(&f.ai, e, "ammo")
 	testing.expect_value(t, ammo.(i32), 42)
 	copy_ammo, _ := get_key(&f.ai, copy, "ammo")
@@ -797,7 +998,10 @@ scripts_act_and_write_the_blackboard :: proc(t: ^testing.T) {
 	f.agent = spawn_agent(f, interval = 100)
 	other := ecs.spawn(&f.world)
 	ecs.add(&f.world, other, ecs.Transform{position = at(1, 0, 0), rotation = 1, scale = 1})
-	_, ok := script.spawn_source(&f.runtime, "=bark", `
+	_, ok := script.spawn_source(
+		&f.runtime,
+		"=bark",
+		`
 		local Bark = Action.define("bark", { line = Param.string(), at = Param.entity(), loud = Param.boolean(true) })
 		function Bark:start()
 			Test.report(#self.line)
@@ -825,7 +1029,8 @@ scripts_act_and_write_the_blackboard :: proc(t: ^testing.T) {
 		Blackboard.set(Test.agent(), "target", nil)
 		Blackboard.set(Test.agent(), "mood", "alert")
 		Blackboard.set(Test.agent(), "ammo", 5)
-	`)
+	`,
+	)
 	testing.expect(t, ok)
 	frame(f, 2)
 	mood, _ := get_key(&f.ai, f.agent, "mood")
@@ -847,23 +1052,40 @@ scripts_act_and_write_the_blackboard :: proc(t: ^testing.T) {
 	testing.expectf(t, slice.equal(f.reports[:], []f64{12, -1}), "%v", f.reports)
 	clear(&f.reports)
 	frame(f, 2)
-	testing.expectf(t, !slice.contains(f.reports[:], 100), "the coroutine ends with the action: %v", f.reports)
-	testing.expect_value(t, action_view(ready_agent(f, f.agent).action), Action_View{1, .Succeeded})
+	testing.expectf(
+		t,
+		!slice.contains(f.reports[:], 100),
+		"the coroutine ends with the action: %v",
+		f.reports,
+	)
+	testing.expect_value(
+		t,
+		action_view(ready_agent(f, f.agent).action),
+		Action_View{1, .Succeeded},
+	)
 
-	_, ok = script.spawn_source(&f.runtime, "=read", `
+	_, ok = script.spawn_source(
+		&f.runtime,
+		"=read",
+		`
 		Test.report(Blackboard.get(Test.agent(), "ammo"))
 		Test.report(if Blackboard.get(Test.agent(), "mood") == "alert" then 1 else 0)
 		Blackboard.set(Test.agent(), "health", 0.25)
 		Test.report(Blackboard.get(Test.agent(), "health"))
 		Test.report(if Agent.current_action(Test.agent()) == nil then 1 else 0)
-	`)
+	`,
+	)
 	testing.expect(t, ok)
 	testing.expectf(t, slice.equal(f.reports[:], []f64{5, 1, 0.25, 1}), "%v", f.reports)
 
 	context.logger = testlog.expected_errors()
 	_, ok = script.spawn_source(&f.runtime, "=bad", `Blackboard.set(Test.agent(), "nothing", 1)`)
 	testing.expect(t, !ok)
-	_, ok = script.spawn_source(&f.runtime, "=bad", `Blackboard.set(Test.agent(), "mood", "furious")`)
+	_, ok = script.spawn_source(
+		&f.runtime,
+		"=bad",
+		`Blackboard.set(Test.agent(), "mood", "furious")`,
+	)
 	testing.expect(t, !ok)
 }
 
@@ -883,11 +1105,15 @@ scripts_swap_an_agents_decision :: proc(t: ^testing.T) {
 	walk_start := fmt.tprintf("walk start %v 3", f.agent)
 	testing.expect_value(t, slice.count(f.events[:], walk_start), 1)
 
-	_, ok := script.spawn_source(&f.runtime, "=swap", `
+	_, ok := script.spawn_source(
+		&f.runtime,
+		"=swap",
+		`
 		Test.report(if Agent.decision(Test.agent()) == Test.decision(false) then 1 else 0)
 		Agent.set_decision(Test.agent(), Test.decision(true))
 		Test.report(if Agent.decision(Test.agent()) == Test.decision(true) then 1 else 0)
-	`)
+	`,
+	)
 	testing.expect(t, ok)
 	testing.expectf(t, slice.equal(f.reports[:], []f64{1, 1}), "%v", f.reports)
 	testing.expect_value(t, ecs.get(&f.world, f.agent, Agent).decision, OTHER_DECISION)
@@ -964,10 +1190,17 @@ agent_scores_reads_the_modules_scores :: proc(t: ^testing.T) {
 	defer teardown(t, f)
 	context.user_ptr = f
 	f.agent = spawn_agent(f, interval = 0)
-	_, ok := script.spawn_source(&f.runtime, "=early", `Test.report(if Agent.scores(Test.agent()) == nil then 1 else 0)`)
+	_, ok := script.spawn_source(
+		&f.runtime,
+		"=early",
+		`Test.report(if Agent.scores(Test.agent()) == nil then 1 else 0)`,
+	)
 	testing.expect(t, ok)
 	frame(f, 4)
-	_, ok = script.spawn_source(&f.runtime, "=scores", `
+	_, ok = script.spawn_source(
+		&f.runtime,
+		"=scores",
+		`
 		local scores = Agent.scores(Test.agent())
 		Test.report(#scores)
 		local s = scores[1]
@@ -979,7 +1212,8 @@ agent_scores_reads_the_modules_scores :: proc(t: ^testing.T) {
 		Test.report(s.considerations[1].consideration)
 		Test.report(s.considerations[1].input)
 		Test.report(s.considerations[1].score)
-	`)
+	`,
+	)
 	testing.expect(t, ok)
 	thinks := f64(thinks_of(f, f.agent))
 	expected := []f64{1, 1, 1, 1, f64(f32(thinks) / 10), 1, 1, 7, 0.25, 0.75}
@@ -994,10 +1228,17 @@ agent_plan_reads_the_modules_plan :: proc(t: ^testing.T) {
 	defer teardown(t, f)
 	context.user_ptr = f
 	f.agent = spawn_agent(f, interval = 0)
-	_, ok := script.spawn_source(&f.runtime, "=early", `Test.report(if Agent.plan(Test.agent()) == nil then 1 else 0)`)
+	_, ok := script.spawn_source(
+		&f.runtime,
+		"=early",
+		`Test.report(if Agent.plan(Test.agent()) == nil then 1 else 0)`,
+	)
 	testing.expect(t, ok)
 	frame(f, 4)
-	_, ok = script.spawn_source(&f.runtime, "=plan", `
+	_, ok = script.spawn_source(
+		&f.runtime,
+		"=plan",
+		`
 		local plan = Agent.plan(Test.agent())
 		Test.report(plan.goal)
 		Test.report(#plan.goals)
@@ -1012,7 +1253,8 @@ agent_plan_reads_the_modules_plan :: proc(t: ^testing.T) {
 		Test.report(plan.step)
 		Test.report(plan.nodes)
 		Test.report(if plan.searching then 1 else 0)
-	`)
+	`,
+	)
 	testing.expect(t, ok)
 	thinks := f64(thinks_of(f, f.agent))
 	expected := []f64{1, 3, 1, 3, thinks, 2, 4, 1, 1, 6, 7, 2, 9, 0}

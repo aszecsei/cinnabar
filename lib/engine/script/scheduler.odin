@@ -89,13 +89,13 @@ Waiter_Owner :: union {
 @(private)
 Waiter :: struct {
 	// A registry reference to the thread, and the thread itself, which the reference keeps alive.
-	thread:  c.int,
-	state:   ^luau.State,
-	owner:   Waiter_Owner,
-	wait:    Wait,
+	thread: c.int,
+	state:  ^luau.State,
+	owner:  Waiter_Owner,
+	wait:   Wait,
 	// The order in which coroutines started, which breaks ties between coroutines that are due together.
-	seq:     u64,
-	status:  Waiter_Status,
+	seq:    u64,
+	status: Waiter_Status,
 }
 
 // become moves a waiter to a status, and checks that the scheduler makes that change: a new waiter waits, a waiting one
@@ -327,7 +327,8 @@ stop_waiter_id :: proc(r: ^Runtime, id: Waiter_Id) {
 start_coroutine_binding :: proc(L: ^luau.State) -> c.int {
 	r := runtime_of(L)
 	owner := check_owner(r, L, 1)
-	if h, is_instance := owner.(Instance_Handle); is_instance && .Active not_in instance_at(r, h).flags {
+	if h, is_instance := owner.(Instance_Handle);
+	   is_instance && .Active not_in instance_at(r, h).flags {
 		raise(L, "a coroutine cannot start on an inactive entity")
 	}
 	luau.L_checktype(L, 2, .FUNCTION)
@@ -366,7 +367,11 @@ register_waits :: proc(r: ^Runtime) {
 	})
 	define(r, "wait_realtime", proc(L: ^luau.State) -> c.int {
 		r := runtime_of(L)
-		return set_wait(r, L, Wait_Real_Time{time = r.platform.time_seconds() + luau.L_checknumber(L, 1)})
+		return set_wait(
+			r,
+			L,
+			Wait_Real_Time{time = r.platform.time_seconds() + luau.L_checknumber(L, 1)},
+		)
 	})
 	define(r, "wait_frames", proc(L: ^luau.State) -> c.int {
 		r := runtime_of(L)
@@ -468,7 +473,10 @@ run_coroutines :: proc(r: ^Runtime) {
 		case:
 		}
 	}
-	slice.sort_by(due[:], proc(a, b: Due) -> bool {return a.key < b.key || a.key == b.key && a.seq < b.seq})
+	slice.sort_by(
+		due[:],
+		proc(a, b: Due) -> bool {return a.key < b.key || a.key == b.key && a.seq < b.seq},
+	)
 	for d in due {
 		if waiter_due(r, d.index, d.seq) {
 			run_waiter(r, d.index)

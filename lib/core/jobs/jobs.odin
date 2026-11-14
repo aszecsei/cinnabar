@@ -342,7 +342,13 @@ worker_main :: proc(data: rawptr) {
 	w := (^Worker)(data)
 	local_worker = w
 	name: [32]byte
-	profile.name_thread(fmt.bprintf(name[:], "Worker %d", (uintptr(w) - uintptr(&state.workers[0])) / size_of(Worker)))
+	profile.name_thread(
+		fmt.bprintf(
+			name[:],
+			"Worker %d",
+			(uintptr(w) - uintptr(&state.workers[0])) / size_of(Worker),
+		),
+	)
 	w.scheduler = _thread_to_fiber(nil)
 	schedule(w, false)
 	_fiber_to_thread()
@@ -381,13 +387,15 @@ schedule :: proc(w: ^Worker, main: bool) {
 					state.queue_head = 0
 				}
 				next = pop(&state.free)
-				next.job, next.counter, next.background, next.parent = pending.job, pending.counter, pending.background, pending.parent
+				next.job, next.counter, next.background, next.parent =
+					pending.job, pending.counter, pending.background, pending.parent
 			case:
 				sync.cond_wait(&state.cond, &state.mutex)
 			}
 		}
 		// A wakeup that the main thread used for its main fiber may have been meant for queued work.
-		if next == &state.main_fiber && (state.queue_head < len(state.queue) || len(state.ready) > 0) {
+		if next == &state.main_fiber &&
+		   (state.queue_head < len(state.queue) || len(state.ready) > 0) {
 			sync.cond_signal(&state.cond)
 		}
 		sync.unlock(&state.mutex)

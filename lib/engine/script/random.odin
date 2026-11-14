@@ -68,7 +68,10 @@ register_random :: proc(r: ^Runtime) {
 		return 1
 	})
 	define(r, "Random.seed", proc(L: ^luau.State) -> c.int {
-		seed_random(runtime_of(L), u64(check_whole(L, 1, "Random.seed: the seed must be an integer from -2^53 to 2^53")))
+		seed_random(
+			runtime_of(L),
+			u64(check_whole(L, 1, "Random.seed: the seed must be an integer from -2^53 to 2^53")),
+		)
 		return 0
 	})
 	define(r, "Random.get_seed", proc(L: ^luau.State) -> c.int {
@@ -78,22 +81,33 @@ register_random :: proc(r: ^Runtime) {
 	define(r, "Random.inside_unit_sphere", proc(L: ^luau.State) -> c.int {
 		g := &runtime_of(L).random
 		for {
-			p := [3]f64{2 * random.float64(g) - 1, 2 * random.float64(g) - 1, 2 * random.float64(g) - 1}
+			p := [3]f64 {
+				2 * random.float64(g) - 1,
+				2 * random.float64(g) - 1,
+				2 * random.float64(g) - 1,
+			}
 			if p.x * p.x + p.y * p.y + p.z * p.z <= 1 {
 				push_vector(L, [3]f32{f32(p.x), f32(p.y), f32(p.z)})
 				return 1
 			}
 		}
 	})
-	define(r, "Random.on_unit_sphere", proc(L: ^luau.State) -> c.int {
-		// A uniform height and angle give a uniform point on the sphere (Archimedes).
-		g := &runtime_of(L).random
-		z := 2 * random.float64(g) - 1
-		angle := math.TAU * random.float64(g)
-		ring := math.sqrt(1 - z * z)
-		push_vector(L, [3]f32{f32(ring * math.cos(angle)), f32(ring * math.sin(angle)), f32(z)})
-		return 1
-	})
+	define(
+		r,
+		"Random.on_unit_sphere",
+		proc(L: ^luau.State) -> c.int {
+			// A uniform height and angle give a uniform point on the sphere (Archimedes).
+			g := &runtime_of(L).random
+			z := 2 * random.float64(g) - 1
+			angle := math.TAU * random.float64(g)
+			ring := math.sqrt(1 - z * z)
+			push_vector(
+				L,
+				[3]f32{f32(ring * math.cos(angle)), f32(ring * math.sin(angle)), f32(z)},
+			)
+			return 1
+		},
+	)
 	define(r, "Random.inside_unit_circle", proc(L: ^luau.State) -> c.int {
 		g := &runtime_of(L).random
 		for {
@@ -104,12 +118,25 @@ register_random :: proc(r: ^Runtime) {
 			}
 		}
 	})
-	define(r, "Random.rotation", proc(L: ^luau.State) -> c.int {
-		// A uniform rotation from three uniform numbers (Shoemake 1992).
-		g := &runtime_of(L).random
-		u1, u2, u3 := random.float64(g), math.TAU * random.float64(g), math.TAU * random.float64(g)
-		a, b := math.sqrt(1 - u1), math.sqrt(u1)
-		push_quaternion(L, quaternion(x = f32(a * math.sin(u2)), y = f32(a * math.cos(u2)), z = f32(b * math.sin(u3)), w = f32(b * math.cos(u3))))
-		return 1
-	})
+	define(
+		r,
+		"Random.rotation",
+		proc(L: ^luau.State) -> c.int {
+			// A uniform rotation from three uniform numbers (Shoemake 1992).
+			g := &runtime_of(L).random
+			u1, u2, u3 :=
+				random.float64(g), math.TAU * random.float64(g), math.TAU * random.float64(g)
+			a, b := math.sqrt(1 - u1), math.sqrt(u1)
+			push_quaternion(
+				L,
+				quaternion(
+					x = f32(a * math.sin(u2)),
+					y = f32(a * math.cos(u2)),
+					z = f32(b * math.sin(u3)),
+					w = f32(b * math.cos(u3)),
+				),
+			)
+			return 1
+		},
+	)
 }

@@ -53,32 +53,32 @@ Ao_Params :: struct {
 AO_PARAMS := [Ao_Technique][Quality_Level]Ao_Params {
 	.Off = {},
 	.Gtao = {
-		.Low    = {samples = 1, steps = 2},
+		.Low = {samples = 1, steps = 2},
 		.Medium = {samples = 2, steps = 2},
-		.High   = {samples = 3, steps = 3},
-		.Ultra  = {samples = 9, steps = 3},
+		.High = {samples = 3, steps = 3},
+		.Ultra = {samples = 9, steps = 3},
 	},
 	.Ssao = {
-		.Low    = {samples = 6},
+		.Low = {samples = 6},
 		.Medium = {samples = 8},
-		.High   = {samples = 12},
-		.Ultra  = {samples = 16},
+		.High = {samples = 12},
+		.Ultra = {samples = 16},
 	},
 	.Hbao = {
-		.Low    = {samples = 4, steps = 3},
+		.Low = {samples = 4, steps = 3},
 		.Medium = {samples = 4, steps = 4},
-		.High   = {samples = 6, steps = 4},
-		.Ultra  = {samples = 8, steps = 6},
+		.High = {samples = 6, steps = 4},
+		.Ultra = {samples = 8, steps = 6},
 	},
 }
 
 // Ao_Settings are a frame's ambient occlusion, in Frame_Settings, from the Ambient_Occlusion settings. Zero gives the defaults.
 Ao_Settings :: struct {
-	off:    bool,
+	off:       bool,
 	// In meters. 0 gives DEFAULT_AO_RADIUS.
-	radius: f32,
+	radius:    f32,
 	// 0 gives DEFAULT_AO_POWER.
-	power:  f32,
+	power:     f32,
 	// The search, and its AO_PARAMS. A frame whose quality turns the ambient occlusion off has off set instead.
 	technique: Ao_Technique,
 	level:     Quality_Level,
@@ -206,13 +206,31 @@ AO_SEARCH_LABELS := [Ao_Technique]string {
 
 @(private)
 sync_ao_pipelines :: proc(r: ^Renderer, force: bool) {
-	sync_compute_pipeline(&r.ao.depth, r.platform, r.residency.assets, {label = "gtao depth"}, force)
+	sync_compute_pipeline(
+		&r.ao.depth,
+		r.platform,
+		r.residency.assets,
+		{label = "gtao depth"},
+		force,
+	)
 	for &search, technique in r.ao.searches {
 		if technique != .Off {
-			sync_compute_pipeline(&search, r.platform, r.residency.assets, {label = AO_SEARCH_LABELS[technique]}, force)
+			sync_compute_pipeline(
+				&search,
+				r.platform,
+				r.residency.assets,
+				{label = AO_SEARCH_LABELS[technique]},
+				force,
+			)
 		}
 	}
-	sync_compute_pipeline(&r.ao.denoise, r.platform, r.residency.assets, {label = "gtao denoise"}, force)
+	sync_compute_pipeline(
+		&r.ao.denoise,
+		r.platform,
+		r.residency.assets,
+		{label = "gtao denoise"},
+		force,
+	)
 }
 
 // add_ao_passes adds the ambient occlusion's passes after the prepass, on the compute queue, and sets
@@ -300,7 +318,8 @@ ao_face :: proc(f: ^Frame, axes: [3][3]f32, size: u32, depth, normals: Texture) 
 	af.depth, af.normals = depth, normals
 	af.denoise_count = AO_DENOISE_PASSES
 	af.depth_constants.size = af.size
-	af.depth_constants.near, af.depth_constants.view_model_near = REFLECTION_PROBE_NEAR, REFLECTION_PROBE_NEAR
+	af.depth_constants.near, af.depth_constants.view_model_near =
+		REFLECTION_PROBE_NEAR, REFLECTION_PROBE_NEAR
 	af.depth_constants.far, af.depth_constants.view_model_far = 0, 0
 	af.constants.right = {right.x, right.y, right.z, 0}
 	af.constants.up = {up.x, up.y, up.z, 0}
@@ -321,12 +340,24 @@ create_ao_textures :: proc(g: ^Graph, af: ^Ao_Frame) {
 	for &level, i in af.levels {
 		round := u32(1) << u32(i) - 1
 		size := [2]u32{(af.size.x + round) >> u32(i), (af.size.y + round) >> u32(i)}
-		level = create_texture(g, {size = size, format = AO_DEPTH_FORMAT, label = "ambient occlusion depth"})
+		level = create_texture(
+			g,
+			{size = size, format = AO_DEPTH_FORMAT, label = "ambient occlusion depth"},
+		)
 	}
-	af.raw = create_texture(g, {size = af.size, format = AO_FORMAT, label = "ambient occlusion raw"})
-	af.edges = create_texture(g, {size = af.size, format = AO_EDGES_FORMAT, label = "ambient occlusion edges"})
+	af.raw = create_texture(
+		g,
+		{size = af.size, format = AO_FORMAT, label = "ambient occlusion raw"},
+	)
+	af.edges = create_texture(
+		g,
+		{size = af.size, format = AO_EDGES_FORMAT, label = "ambient occlusion edges"},
+	)
 	for i in 0 ..< af.denoise_count {
-		af.denoise[i].output = create_texture(g, {size = af.size, format = AO_FORMAT, label = "ambient occlusion"})
+		af.denoise[i].output = create_texture(
+			g,
+			{size = af.size, format = AO_FORMAT, label = "ambient occlusion"},
+		)
 	}
 }
 
@@ -403,7 +434,10 @@ run_ao_search :: proc(ctx: ^Pass_Context) {
 	constants.normals = gpu.read_index(gpu_texture(g, af.normals))
 	constants.output = gpu.write_index(gpu_texture(g, af.raw))
 	constants.edges = gpu.write_index(gpu_texture(g, af.edges))
-	upload, ok := af.frame.renderer.platform.gpu_upload(size_of(Ao_Constants), gpu.PASS_CONSTANTS_ALIGN)
+	upload, ok := af.frame.renderer.platform.gpu_upload(
+		size_of(Ao_Constants),
+		gpu.PASS_CONSTANTS_ALIGN,
+	)
 	if !ok {
 		return
 	}

@@ -108,7 +108,15 @@ nav_project :: proc(options: Cook_Options, pass: ^Pass) -> Nav_Project {
 // one for each active Nav_Mesh_Volume on a box Volume and each agent type that it bakes for, by entity and then by the
 // agent types' order. A scene with a volume records the project's settings files as its inputs. It reports the
 // volumes' problems, and fails only when the .meta file cannot be written.
-scene_nav_meshes :: proc(options: Cook_Options, pass: ^Pass, index: int, flat: format.Scene) -> (navs: []format.Scene_Nav_Mesh, ok: bool) {
+scene_nav_meshes :: proc(
+	options: Cook_Options,
+	pass: ^Pass,
+	index: int,
+	flat: format.Scene,
+) -> (
+	navs: []format.Scene_Nav_Mesh,
+	ok: bool,
+) {
 	a := &pass.assets[index]
 	wanted := make([dynamic]Subasset, context.temp_allocator)
 	Reference :: struct {
@@ -121,17 +129,32 @@ scene_nav_meshes :: proc(options: Cook_Options, pass: ^Pass, index: int, flat: f
 		s := nav_scene_make(flat)
 		for v in nav_volumes(&s, project.agents, a.path, &pass.problems) {
 			for k in v.agents {
-				append(&wanted, Subasset{kind = .Nav_Mesh, name = nav_subasset_name(v.entity, project.agents[k].name)})
+				append(
+					&wanted,
+					Subasset {
+						kind = .Nav_Mesh,
+						name = nav_subasset_name(v.entity, project.agents[k].name),
+					},
+				)
 				append(&references, Reference{v.entity, project.agents[k].name})
 			}
 		}
 		for f in project.files {
 			if size, modified, stamped := file_stamp(f); stamped {
-				append(&a.inputs, Input_Stamp{strings.clone(f, context.temp_allocator), size, modified})
+				append(
+					&a.inputs,
+					Input_Stamp{strings.clone(f, context.temp_allocator), size, modified},
+				)
 			}
 		}
 	}
-	if !assign_subassets(options.roots[a.root].dir, a, wanted[:], pass.force[a.meta.guid], &pass.problems) {
+	if !assign_subassets(
+		options.roots[a.root].dir,
+		a,
+		wanted[:],
+		pass.force[a.meta.guid],
+		&pass.problems,
+	) {
 		return nil, false
 	}
 	navs = make([]format.Scene_Nav_Mesh, len(references), context.temp_allocator)
@@ -207,13 +230,33 @@ cook_nav_meshes :: proc(options: Cook_Options, pass: ^Pass) -> bool {
 				name := nav_subasset_name(v.entity, agent.name)
 				guid, found := nav_mesh_guid(a^, name)
 				if !found {
-					report_warning(&pass.problems, a.path, 0, 0, "the navmesh %s has no GUID yet: cook the scene, and then its navmeshes", name)
+					report_warning(
+						&pass.problems,
+						a.path,
+						0,
+						0,
+						"the navmesh %s has no GUID yet: cook the scene, and then its navmeshes",
+						name,
+					)
 					continue
 				}
-				plan := nav_plan({guid = guid, volume = v.entity, anchor = v.anchor, agent = agent, agent_index = u32(k), settings = v.settings, bounds_min = v.bounds_min, bounds_max = v.bounds_max, triangles = triangles})
+				plan := nav_plan(
+					{
+						guid = guid,
+						volume = v.entity,
+						anchor = v.anchor,
+						agent = agent,
+						agent_index = u32(k),
+						settings = v.settings,
+						bounds_min = v.bounds_min,
+						bounds_max = v.bounds_max,
+						triangles = triangles,
+					},
+				)
 				buffer: [32]u8
 				output := fmt.tprintf("%s/%s.blob", out_dir, format.guid_format(guid, &buffer))
-				if cooked_key(output, .Nav_Mesh, format.nav_mesh_layout()) == plan.key && !pass.force[a.meta.guid] {
+				if cooked_key(output, .Nav_Mesh, format.nav_mesh_layout()) == plan.key &&
+				   !pass.force[a.meta.guid] {
 					count_subassets(pass, .Nav_Mesh, .Current)
 					pass.nav_tiles[.Current] += len(plan.tiles)
 					continue
@@ -222,7 +265,15 @@ cook_nav_meshes :: proc(options: Cook_Options, pass: ^Pass) -> bool {
 				pass.nav_tiles[.Cooked] += result.baked
 				pass.nav_tiles[.Current] += result.reused
 				if result.failed > 0 {
-					report_error(&pass.problems, a.path, 0, 0, "the navmesh %s: Recast could not bake %d of its tiles", name, result.failed)
+					report_error(
+						&pass.problems,
+						a.path,
+						0,
+						0,
+						"the navmesh %s: Recast could not bake %d of its tiles",
+						name,
+						result.failed,
+					)
 					count_subassets(pass, .Nav_Mesh, .Failed)
 					ok = false
 					continue
@@ -333,7 +384,12 @@ read_field :: proc(target: rawptr, type: ^reflect.Type_Info, v: format.Scene_Val
 	case quaternion128:
 		// x, y, z, w, as the files write them.
 		if v.kind == .Number && v.count == 4 {
-			(^quaternion128)(target)^ = quaternion(real = f32(v.floats[3]), imag = f32(v.floats[0]), jmag = f32(v.floats[1]), kmag = f32(v.floats[2]))
+			(^quaternion128)(target)^ = quaternion(
+				real = f32(v.floats[3]),
+				imag = f32(v.floats[0]),
+				jmag = f32(v.floats[1]),
+				kmag = f32(v.floats[2]),
+			)
 		}
 	case format.Guid:
 		if v.kind == .Asset {
@@ -391,13 +447,17 @@ nav_pose :: proc(s: ^Nav_Scene, i: int, depth := 0) -> Nav_Pose {
 		pose.rotation, pose.scale = rest.rotation, rest.scale
 		for f in c.fields {
 			// A position is three integers, the raw value.
-			if f.name == "position" && f.value.kind == .Number && f.value.count == 3 && f.value.integer & 0b111 == 0b111 {
+			if f.name == "position" &&
+			   f.value.kind == .Number &&
+			   f.value.count == 3 &&
+			   f.value.integer & 0b111 == 0b111 {
 				pose.position = {f.value.ints[0], f.value.ints[1], f.value.ints[2]}
 			}
 		}
 	}
 	parent, has_parent := s.index[e.parent]
-	if local := scene_component(e, format.SCENE_LOCAL_TRANSFORM_ID); local != nil && has_parent && e.parent != 0 && depth < MAX_DEPTH {
+	if local := scene_component(e, format.SCENE_LOCAL_TRANSFORM_ID);
+	   local != nil && has_parent && e.parent != 0 && depth < MAX_DEPTH {
 		l := LOCAL_IDENTITY
 		read_component(local, &l)
 		above := nav_pose(s, parent, depth + 1)
@@ -460,7 +520,12 @@ Nav_Volume :: struct {
 
 // nav_volumes finds the volumes of a scene that bake, by scene ID: each active entity with a Nav_Mesh_Volume and a box
 // Volume. A volume of another shape, or one whose agents name a type that the project does not have, is a warning.
-nav_volumes :: proc(s: ^Nav_Scene, agents: []format.Nav_Agent, path: string, problems: ^Problems) -> []Nav_Volume {
+nav_volumes :: proc(
+	s: ^Nav_Scene,
+	agents: []format.Nav_Agent,
+	path: string,
+	problems: ^Problems,
+) -> []Nav_Volume {
 	result := make([dynamic]Nav_Volume, context.temp_allocator)
 	for &e, i in s.flat.entities {
 		c := scene_component(&e, format.SCENE_NAV_MESH_VOLUME_ID)
@@ -474,11 +539,26 @@ nav_volumes :: proc(s: ^Nav_Scene, agents: []format.Nav_Agent, path: string, pro
 			read_component(vc, &volume)
 		}
 		if scene_component(&e, format.SCENE_VOLUME_ID) == nil || volume.shape != .Box {
-			report_warning(problems, path, 0, 0, "entity %016x: a Nav_Mesh_Volume bakes inside its entity's Volume, whose shape must be Box", e.id)
+			report_warning(
+				problems,
+				path,
+				0,
+				0,
+				"entity %016x: a Nav_Mesh_Volume bakes inside its entity's Volume, whose shape must be Box",
+				e.id,
+			)
 			continue
 		}
 		if len(agents) < 32 && settings.agents >> u32(len(agents)) != 0 {
-			report_warning(problems, path, 0, 0, "entity %016x: the Nav_Mesh_Volume's agents name types past the %d that nav.agents gives", e.id, len(agents))
+			report_warning(
+				problems,
+				path,
+				0,
+				0,
+				"entity %016x: the Nav_Mesh_Volume's agents name types past the %d that nav.agents gives",
+				e.id,
+				len(agents),
+			)
 		}
 		chosen := make([dynamic]int, context.temp_allocator)
 		for _, k in agents {
@@ -489,7 +569,9 @@ nav_volumes :: proc(s: ^Nav_Scene, agents: []format.Nav_Agent, path: string, pro
 		pose := nav_pose(s, i)
 		extents: [3]f32
 		for k in 0 ..< 3 {
-			extents[k] = (volume.extents[k] > 0 ? volume.extents[k] : format.VOLUME_DEFAULT_EXTENT) * abs(pose.scale[k])
+			extents[k] =
+				(volume.extents[k] > 0 ? volume.extents[k] : format.VOLUME_DEFAULT_EXTENT) *
+				abs(pose.scale[k])
 		}
 		// The box's bounds along the world's axes: a rotated box bakes the box that holds it.
 		axes := linalg.matrix3_from_quaternion(pose.rotation)
@@ -499,7 +581,17 @@ nav_volumes :: proc(s: ^Nav_Scene, agents: []format.Nav_Agent, path: string, pro
 				half[row] += abs(axes[row, column]) * extents[column]
 			}
 		}
-		append(&result, Nav_Volume{entity = e.id, settings = settings, agents = chosen[:], anchor = pose.position, bounds_min = -half, bounds_max = half})
+		append(
+			&result,
+			Nav_Volume {
+				entity = e.id,
+				settings = settings,
+				agents = chosen[:],
+				anchor = pose.position,
+				bounds_min = -half,
+				bounds_max = half,
+			},
+		)
 	}
 	slice.sort_by(result[:], proc(a, b: Nav_Volume) -> bool {return a.entity < b.entity})
 	return result[:]
@@ -542,14 +634,25 @@ Nav_Mesh_Source :: struct {
 // nav_collect gives the triangles of the static colliders that reach a volume, relative to its center, in the scene's
 // order: those within its bounds, and margin past them across. A collider whose mesh is not cooked, or has no collision
 // data, is a warning, and the mesh is one of the scene's dependencies.
-nav_collect :: proc(s: ^Nav_Scene, v: Nav_Volume, margin: f32, out_dir: string, meshes: ^map[format.Guid]Nav_Mesh_Source, a: ^Asset_Source, problems: ^Problems) -> [][3][3]f32 {
+nav_collect :: proc(
+	s: ^Nav_Scene,
+	v: Nav_Volume,
+	margin: f32,
+	out_dir: string,
+	meshes: ^map[format.Guid]Nav_Mesh_Source,
+	a: ^Asset_Source,
+	problems: ^Problems,
+) -> [][3][3]f32 {
 	result := make([dynamic][3][3]f32, context.temp_allocator)
 	low := v.bounds_min - {margin, 0, margin}
 	high := v.bounds_max + {margin, 0, margin}
 	local := make([dynamic][3][3]f32, context.temp_allocator)
 	for &e, i in s.flat.entities {
 		c := scene_component(&e, format.SCENE_COLLIDER_ID)
-		if c == nil || scene_component(&e, format.SCENE_CHARACTER_ID) != nil || !nav_active(s, i) || !nav_static(s, i) {
+		if c == nil ||
+		   scene_component(&e, format.SCENE_CHARACTER_ID) != nil ||
+		   !nav_active(s, i) ||
+		   !nav_static(s, i) {
 			continue
 		}
 		collider := format.DEFAULT_COLLIDER
@@ -600,10 +703,26 @@ nav_collect :: proc(s: ^Nav_Scene, v: Nav_Volume, margin: f32, out_dir: string, 
 			buffer: [32]u8
 			switch source.state {
 			case .Missing:
-				report_warning(problems, a.path, 0, 0, "entity %016x: its Collider's mesh %s is not cooked, so its navmeshes leave it out", e.id, format.guid_format(collider.mesh, &buffer))
+				report_warning(
+					problems,
+					a.path,
+					0,
+					0,
+					"entity %016x: its Collider's mesh %s is not cooked, so its navmeshes leave it out",
+					e.id,
+					format.guid_format(collider.mesh, &buffer),
+				)
 				continue
 			case .No_Collision:
-				report_warning(problems, a.path, 0, 0, "entity %016x: its Collider's mesh %s has no collision data, so its navmeshes leave it out: its collision import setting is false", e.id, format.guid_format(collider.mesh, &buffer))
+				report_warning(
+					problems,
+					a.path,
+					0,
+					0,
+					"entity %016x: its Collider's mesh %s has no collision data, so its navmeshes leave it out: its collision import setting is false",
+					e.id,
+					format.guid_format(collider.mesh, &buffer),
+				)
 				continue
 			case .Read:
 			}
@@ -612,7 +731,10 @@ nav_collect :: proc(s: ^Nav_Scene, v: Nav_Volume, margin: f32, out_dir: string, 
 			for t in source.triangles {
 				triangle: [3][3]f32
 				for k in 0 ..< 3 {
-					triangle[k] = linalg.quaternion_mul_vector3(collider.rotation, source.positions[t[k]] * pose.scale)
+					triangle[k] = linalg.quaternion_mul_vector3(
+						collider.rotation,
+						source.positions[t[k]] * pose.scale,
+					)
 				}
 				if mirrored {
 					triangle[1], triangle[2] = triangle[2], triangle[1]
@@ -624,12 +746,18 @@ nav_collect :: proc(s: ^Nav_Scene, v: Nav_Volume, margin: f32, out_dir: string, 
 		}
 		for &t in local {
 			placed: [3][3]f32
-			low_t, high_t := [3]f32{max(f32), max(f32), max(f32)}, [3]f32{min(f32), min(f32), min(f32)}
+			low_t, high_t :=
+				[3]f32{max(f32), max(f32), max(f32)}, [3]f32{min(f32), min(f32), min(f32)}
 			for k in 0 ..< 3 {
 				placed[k] = center + linalg.quaternion_mul_vector3(orientation, t[k])
 				low_t, high_t = linalg.min(low_t, placed[k]), linalg.max(high_t, placed[k])
 			}
-			if high_t.x >= low.x && low_t.x <= high.x && high_t.y >= low.y && low_t.y <= high.y && high_t.z >= low.z && low_t.z <= high.z {
+			if high_t.x >= low.x &&
+			   low_t.x <= high.x &&
+			   high_t.y >= low.y &&
+			   low_t.y <= high.y &&
+			   high_t.z >= low.z &&
+			   low_t.z <= high.z {
 				append(&result, placed)
 			}
 		}
@@ -638,7 +766,11 @@ nav_collect :: proc(s: ^Nav_Scene, v: Nav_Volume, margin: f32, out_dir: string, 
 }
 
 @(private = "file")
-nav_mesh_source :: proc(meshes: ^map[format.Guid]Nav_Mesh_Source, out_dir: string, guid: format.Guid) -> Nav_Mesh_Source {
+nav_mesh_source :: proc(
+	meshes: ^map[format.Guid]Nav_Mesh_Source,
+	out_dir: string,
+	guid: format.Guid,
+) -> Nav_Mesh_Source {
 	if source, found := meshes[guid]; found {
 		return source
 	}
@@ -648,7 +780,8 @@ nav_mesh_source :: proc(meshes: ^map[format.Guid]Nav_Mesh_Source, out_dir: strin
 	if blob, ok := format.mesh_view(data); ok && guid != {} {
 		source.positions = format.mesh_collision_positions(data, blob)
 		source.triangles = format.mesh_collision_triangles(data, blob)
-		source.state = .Read if len(source.positions) > 0 && len(source.triangles) > 0 else .No_Collision
+		source.state =
+			.Read if len(source.positions) > 0 && len(source.triangles) > 0 else .No_Collision
 	}
 	meshes[guid] = source
 	return source
@@ -683,10 +816,21 @@ nav_outward :: proc(out: ^[dynamic][3][3]f32, a, b, c: [3]f32) {
 @(private = "file")
 nav_box :: proc(out: ^[dynamic][3][3]f32, half: [3]f32) {
 	corner :: proc(half: [3]f32, i: int) -> [3]f32 {
-		return {i & 1 != 0 ? half.x : -half.x, i & 2 != 0 ? half.y : -half.y, i & 4 != 0 ? half.z : -half.z}
+		return {
+			i & 1 != 0 ? half.x : -half.x,
+			i & 2 != 0 ? half.y : -half.y,
+			i & 4 != 0 ? half.z : -half.z,
+		}
 	}
 	// Each face's corners, around it.
-	FACES :: [6][4]int{{0, 2, 6, 4}, {1, 3, 7, 5}, {0, 1, 5, 4}, {2, 3, 7, 6}, {0, 1, 3, 2}, {4, 5, 7, 6}}
+	FACES :: [6][4]int {
+		{0, 2, 6, 4},
+		{1, 3, 7, 5},
+		{0, 1, 5, 4},
+		{2, 3, 7, 6},
+		{0, 1, 3, 2},
+		{4, 5, 7, 6},
+	}
 	for f in FACES {
 		nav_outward(out, corner(half, f[0]), corner(half, f[1]), corner(half, f[2]))
 		nav_outward(out, corner(half, f[0]), corner(half, f[2]), corner(half, f[3]))
@@ -726,10 +870,10 @@ Nav_Bake_Input :: struct {
 	anchor:      [3]i64,
 	agent:       format.Nav_Agent,
 	agent_index: u32,
-	settings:   format.Nav_Mesh_Volume,
-	bounds_min: [3]f32,
-	bounds_max: [3]f32,
-	triangles:  [][3][3]f32,
+	settings:    format.Nav_Mesh_Volume,
+	bounds_min:  [3]f32,
+	bounds_max:  [3]f32,
+	triangles:   [][3][3]f32,
 }
 
 // Nav_Tile_Params is a tile's bake but its triangles: its place in the grid and Recast's settings. Every field is 4
@@ -804,8 +948,16 @@ nav_plan :: proc(input: Nav_Bake_Input) -> Nav_Plan {
 		p.first_x, p.first_z = i32(p.x) * tile_size, i32(p.z) * tile_size
 		width := min(tile_size, cells_x - p.first_x)
 		depth := min(tile_size, cells_z - p.first_z)
-		p.bounds_min = {input.bounds_min.x + f32(p.first_x) * cell_size, input.bounds_min.y, input.bounds_min.z + f32(p.first_z) * cell_size}
-		p.bounds_max = {input.bounds_min.x + f32(p.first_x + width) * cell_size, input.bounds_max.y, input.bounds_min.z + f32(p.first_z + depth) * cell_size}
+		p.bounds_min = {
+			input.bounds_min.x + f32(p.first_x) * cell_size,
+			input.bounds_min.y,
+			input.bounds_min.z + f32(p.first_z) * cell_size,
+		}
+		p.bounds_max = {
+			input.bounds_min.x + f32(p.first_x + width) * cell_size,
+			input.bounds_max.y,
+			input.bounds_min.z + f32(p.first_z + depth) * cell_size,
+		}
 		p.heightfield_min = p.bounds_min - {pad, 0, pad}
 		p.heightfield_max = p.bounds_max + {pad, 0, pad}
 		p.width, p.height, p.border = width + 2 * border, depth + 2 * border, border
@@ -825,13 +977,19 @@ nav_plan :: proc(input: Nav_Bake_Input) -> Nav_Plan {
 		for t, k in input.triangles {
 			low := linalg.min(linalg.min(t[0], t[1]), t[2])
 			high := linalg.max(linalg.max(t[0], t[1]), t[2])
-			if high.x >= p.heightfield_min.x && low.x <= p.heightfield_max.x && high.z >= p.heightfield_min.z && low.z <= p.heightfield_max.z &&
-			   high.y >= p.bounds_min.y && low.y <= p.bounds_max.y {
+			if high.x >= p.heightfield_min.x &&
+			   low.x <= p.heightfield_max.x &&
+			   high.z >= p.heightfield_min.z &&
+			   low.z <= p.heightfield_max.z &&
+			   high.y >= p.bounds_min.y &&
+			   low.y <= p.bounds_max.y {
 				append(&chosen, k)
 			}
 		}
 		tile.triangles = chosen[:]
-		key := hash.fnv64a(transmute([]byte)fmt.tprintf("%s\x00%s\x00", NAV_COOK_VERSION, RECAST_VERSION))
+		key := hash.fnv64a(
+			transmute([]byte)fmt.tprintf("%s\x00%s\x00", NAV_COOK_VERSION, RECAST_VERSION),
+		)
 		key = hash.fnv64a(mem.ptr_to_bytes(p), key)
 		for k in tile.triangles {
 			key = hash.fnv64a(mem.ptr_to_bytes(&input.triangles[k]), key)
@@ -856,8 +1014,31 @@ nav_plan :: proc(input: Nav_Bake_Input) -> Nav_Plan {
 		tiles_x:     u32,
 		tiles_z:     u32,
 		agent_index: u32,
-	}{input.guid, input.anchor, input.volume, input.bounds_min, input.bounds_max, agent.radius, agent.height, agent.step_height, agent.max_slope, cell_size, cell_height, plan.tile_meters, plan.tiles_x, plan.tiles_z, input.agent_index}
-	key := hash.fnv64a(transmute([]byte)fmt.tprintf("%s\x00%x\x00%s\x00", NAV_COOK_VERSION, format.nav_mesh_layout(), agent.name))
+	} {
+		input.guid,
+		input.anchor,
+		input.volume,
+		input.bounds_min,
+		input.bounds_max,
+		agent.radius,
+		agent.height,
+		agent.step_height,
+		agent.max_slope,
+		cell_size,
+		cell_height,
+		plan.tile_meters,
+		plan.tiles_x,
+		plan.tiles_z,
+		input.agent_index,
+	}
+	key := hash.fnv64a(
+		transmute([]byte)fmt.tprintf(
+			"%s\x00%x\x00%s\x00",
+			NAV_COOK_VERSION,
+			format.nav_mesh_layout(),
+			agent.name,
+		),
+	)
 	key = hash.fnv64a(mem.ptr_to_bytes(&header), key)
 	for &tile in tiles {
 		key = hash.fnv64a(mem.ptr_to_bytes(&tile.key), key)
@@ -896,13 +1077,21 @@ Nav_Tile_Job :: struct {
 
 // nav_bake bakes a navmesh's plan into its blob: the tiles of previous, an old blob of it, whose keys are the plan's are
 // kept, and the others bake on threads threads, or one for each core with 0. The blob is the same on any number.
-nav_bake :: proc(plan: ^Nav_Plan, previous: []byte, threads := 0, allocator := context.temp_allocator) -> (result: Nav_Bake_Result) {
+nav_bake :: proc(
+	plan: ^Nav_Plan,
+	previous: []byte,
+	threads := 0,
+	allocator := context.temp_allocator,
+) -> (
+	result: Nav_Bake_Result,
+) {
 	tiles := make([]Nav_Tile_Data, len(plan.tiles), context.temp_allocator)
 	jobs := make([dynamic]Nav_Tile_Job, context.temp_allocator)
 	old, has_old := format.nav_mesh_view(previous)
 	for &tile, i in plan.tiles {
 		if has_old && tile.params.x < old.tiles_x && tile.params.z < old.tiles_z {
-			record := format.nav_mesh_tiles(previous, old)[tile.params.z * old.tiles_x + tile.params.x]
+			record :=
+				format.nav_mesh_tiles(previous, old)[tile.params.z * old.tiles_x + tile.params.x]
 			if record.key == tile.key {
 				tiles[i] = nav_tile_from_blob(previous, old, record)
 				result.reused += 1
@@ -993,12 +1182,23 @@ nav_tile_job :: proc(data: rawptr, index: int) {
 // nav_tile_from_recast copies a tile out of Recast's meshes. A vertex's place across is in the volume's grid of cells, so
 // the tiles on each side of an edge give its vertices the same position.
 @(private = "file")
-nav_tile_from_recast :: proc(out: ^Recast_Tile_Out, plan: ^Nav_Plan, p: Nav_Tile_Params, allocator: mem.Allocator) -> (data: Nav_Tile_Data) {
+nav_tile_from_recast :: proc(
+	out: ^Recast_Tile_Out,
+	plan: ^Nav_Plan,
+	p: Nav_Tile_Params,
+	allocator: mem.Allocator,
+) -> (
+	data: Nav_Tile_Data,
+) {
 	origin := plan.input.bounds_min
 	data.vertices = make([][3]f32, out.vertex_count, allocator)
 	for &v, i in data.vertices {
 		cell := out.vertices[3 * i:][:3]
-		v = {origin.x + f32(p.first_x + i32(cell[0])) * p.cell_size, origin.y + f32(cell[1]) * p.cell_height, origin.z + f32(p.first_z + i32(cell[2])) * p.cell_size}
+		v = {
+			origin.x + f32(p.first_x + i32(cell[0])) * p.cell_size,
+			origin.y + f32(cell[1]) * p.cell_height,
+			origin.z + f32(p.first_z + i32(cell[2])) * p.cell_size,
+		}
 	}
 	stride := int(out.max_vertices)
 	data.polygons = make([]format.Nav_Polygon, out.polygon_count, allocator)
@@ -1030,15 +1230,28 @@ nav_tile_from_recast :: proc(out: ^Recast_Tile_Out, plan: ^Nav_Plan, p: Nav_Tile
 		m := out.detail_meshes[4 * i:][:4]
 		d = {m[0], m[1], m[2], m[3]}
 	}
-	data.detail_vertices = slice.clone(mem.slice_data_cast([][3]f32, out.detail_vertices[:3 * out.detail_vertex_count]), allocator)
-	data.detail_triangles = slice.clone(mem.slice_data_cast([][4]u8, out.detail_triangles[:4 * out.detail_triangle_count]), allocator)
+	data.detail_vertices = slice.clone(
+		mem.slice_data_cast([][3]f32, out.detail_vertices[:3 * out.detail_vertex_count]),
+		allocator,
+	)
+	data.detail_triangles = slice.clone(
+		mem.slice_data_cast([][4]u8, out.detail_triangles[:4 * out.detail_triangle_count]),
+		allocator,
+	)
 	return
 }
 
 // nav_tile_from_blob is a tile of an old blob, which the bake keeps.
 @(private = "file")
-nav_tile_from_blob :: proc(data: []byte, blob: ^format.Nav_Mesh_Blob, tile: format.Nav_Tile) -> Nav_Tile_Data {
-	polygons := slice.clone(format.nav_mesh_polygons(data, blob)[tile.first_polygon:][:tile.polygon_count], context.temp_allocator)
+nav_tile_from_blob :: proc(
+	data: []byte,
+	blob: ^format.Nav_Mesh_Blob,
+	tile: format.Nav_Tile,
+) -> Nav_Tile_Data {
+	polygons := slice.clone(
+		format.nav_mesh_polygons(data, blob)[tile.first_polygon:][:tile.polygon_count],
+		context.temp_allocator,
+	)
 	for &p in polygons {
 		p.first_link, p.link_count = 0, 0
 	}
@@ -1046,8 +1259,14 @@ nav_tile_from_blob :: proc(data: []byte, blob: ^format.Nav_Mesh_Blob, tile: form
 		vertices = format.nav_mesh_vertices(data, blob)[tile.first_vertex:][:tile.vertex_count],
 		polygons = polygons,
 		details = format.nav_mesh_details(data, blob)[tile.first_polygon:][:tile.polygon_count],
-		detail_vertices = format.nav_mesh_detail_vertices(data, blob)[tile.first_detail_vertex:][:tile.detail_vertex_count],
-		detail_triangles = format.nav_mesh_detail_triangles(data, blob)[tile.first_detail_triangle:][:tile.detail_triangle_count],
+		detail_vertices = format.nav_mesh_detail_vertices(
+			data,
+			blob,
+		)[tile.first_detail_vertex:][:tile.detail_vertex_count],
+		detail_triangles = format.nav_mesh_detail_triangles(
+			data,
+			blob,
+		)[tile.first_detail_triangle:][:tile.detail_triangle_count],
 	}
 }
 
@@ -1115,7 +1334,8 @@ nav_assemble :: proc(plan: ^Nav_Plan, tiles: []Nav_Tile_Data) -> format.Nav_Mesh
 				other := records[z * i64(plan.tiles_x) + x]
 				opposite := format.NAV_EXTERNAL | ((u16(side) + 2) % 4)
 				a := vertices[tile.first_vertex + u32(polygon.vertices[k])]
-				b := vertices[tile.first_vertex + u32(polygon.vertices[(k + 1) % int(polygon.vertex_count)])]
+				b :=
+					vertices[tile.first_vertex + u32(polygon.vertices[(k + 1) % int(polygon.vertex_count)])]
 				for qi in 0 ..< other.polygon_count {
 					q := polygons[other.first_polygon + qi]
 					for m in 0 ..< int(q.vertex_count) {
@@ -1123,9 +1343,26 @@ nav_assemble :: proc(plan: ^Nav_Plan, tiles: []Nav_Tile_Data) -> format.Nav_Mesh
 							continue
 						}
 						c := vertices[other.first_vertex + u32(q.vertices[m])]
-						d := vertices[other.first_vertex + u32(q.vertices[(m + 1) % int(q.vertex_count)])]
-						if t_min, t_max, overlaps := nav_edge_overlap(a, b, c, d, side, climb, plan.cell_size); overlaps && len(links) - int(polygon.first_link) < 255 {
-							append(&links, format.Nav_Link{polygon = other.first_polygon + qi, edge = u8(k), t_min = t_min, t_max = t_max})
+						d :=
+							vertices[other.first_vertex + u32(q.vertices[(m + 1) % int(q.vertex_count)])]
+						if t_min, t_max, overlaps := nav_edge_overlap(
+							a,
+							b,
+							c,
+							d,
+							side,
+							climb,
+							plan.cell_size,
+						); overlaps && len(links) - int(polygon.first_link) < 255 {
+							append(
+								&links,
+								format.Nav_Link {
+									polygon = other.first_polygon + qi,
+									edge = u8(k),
+									t_min = t_min,
+									t_max = t_max,
+								},
+							)
 						}
 					}
 				}
@@ -1161,7 +1398,14 @@ nav_assemble :: proc(plan: ^Nav_Plan, tiles: []Nav_Tile_Data) -> format.Nav_Mesh
 // nav_edge_overlap gives the part of the edge a to b that the edge c to d, on the next tile across side, overlaps, out of
 // 255 from a, where the two are within climb of each other's height.
 @(private = "file")
-nav_edge_overlap :: proc(a, b, c, d: [3]f32, side: format.Nav_Side, climb, cell_size: f32) -> (t_min, t_max: u8, ok: bool) {
+nav_edge_overlap :: proc(
+	a, b, c, d: [3]f32,
+	side: format.Nav_Side,
+	climb, cell_size: f32,
+) -> (
+	t_min, t_max: u8,
+	ok: bool,
+) {
 	// The edges run along u, on a line of w.
 	u, w := 2, 0
 	if side == .North || side == .South {

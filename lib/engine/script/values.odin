@@ -63,17 +63,32 @@ Type_Methods :: struct {
 
 // method adds a method to a light userdata or userdata type. Registrations, like bindings: reload clears them.
 @(private)
-light_method :: proc(r: ^Runtime, tag: Light_Tag, name: string, procedure: script_host.Binding_Proc) {
+light_method :: proc(
+	r: ^Runtime,
+	tag: Light_Tag,
+	name: string,
+	procedure: script_host.Binding_Proc,
+) {
 	add_method(r, &r.light_methods[tag], name, procedure)
 }
 
 @(private)
-userdata_method :: proc(r: ^Runtime, tag: Userdata_Tag, name: string, procedure: script_host.Binding_Proc) {
+userdata_method :: proc(
+	r: ^Runtime,
+	tag: Userdata_Tag,
+	name: string,
+	procedure: script_host.Binding_Proc,
+) {
 	add_method(r, &r.userdata_methods[tag], name, procedure)
 }
 
 @(private = "file")
-add_method :: proc(r: ^Runtime, t: ^Type_Methods, name: string, procedure: script_host.Binding_Proc) {
+add_method :: proc(
+	r: ^Runtime,
+	t: ^Type_Methods,
+	name: string,
+	procedure: script_host.Binding_Proc,
+) {
 	assert(t.count < MAX_TYPE_METHODS, "script: too many methods on one type")
 	t.methods[t.count] = {r.platform.script_atom(name), name, procedure}
 	t.count += 1
@@ -135,7 +150,14 @@ push_asset :: proc(r: ^Runtime, L: ^luau.State, guid: format.Guid) {
 	}
 	if index < 0 {
 		if r.asset_ref_count == MAX_ASSET_REFS {
-			raise(L, fmt.aprintf("scripts refer to more than %d assets", MAX_ASSET_REFS, allocator = frame(r)))
+			raise(
+				L,
+				fmt.aprintf(
+					"scripts refer to more than %d assets",
+					MAX_ASSET_REFS,
+					allocator = frame(r),
+				),
+			)
 		}
 		index = r.asset_ref_count
 		r.asset_refs[index] = guid
@@ -155,7 +177,9 @@ push_component_type :: proc(L: ^luau.State, id: ecs.Component_Id) {
 }
 
 check_component_type :: proc(L: ^luau.State, idx: c.int) -> ecs.Component_Id {
-	id := ecs.Component_Id(uintptr(luau.tolightuserdatatagged(L, idx, c.int(Light_Tag.Component_Type))))
+	id := ecs.Component_Id(
+		uintptr(luau.tolightuserdatatagged(L, idx, c.int(Light_Tag.Component_Type))),
+	)
 	if id == 0 {
 		luau.L_typeerrorL(L, idx, "ComponentType")
 	}
@@ -171,7 +195,15 @@ push_userdata :: proc(L: ^luau.State, tag: Userdata_Tag, value: $T) {
 }
 
 @(private)
-to_userdata :: proc(L: ^luau.State, idx: c.int, tag: Userdata_Tag, $T: typeid) -> (value: T, ok: bool) {
+to_userdata :: proc(
+	L: ^luau.State,
+	idx: c.int,
+	tag: Userdata_Tag,
+	$T: typeid,
+) -> (
+	value: T,
+	ok: bool,
+) {
 	data := luau.touserdatatagged(L, idx, c.int(tag))
 	if data == nil {
 		return

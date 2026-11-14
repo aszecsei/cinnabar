@@ -285,7 +285,10 @@ virtual_level_reach :: proc(s: Virtual_Selection, level: int) -> f32 {
 // while the camera is within VIRTUAL_ANCHOR_REACH of it on every axis, or else the camera's. Measured from the world's
 // origin, level 0's page index would pass 32 bits past 268,000 km, and the sample's playground is at 1.5e11 m. A new
 // anchor moves every page, so the cache starts again.
-virtual_grid_anchor :: proc(cache: Maybe(Virtual_Cache), camera: ecs.World_Position) -> ecs.World_Position {
+virtual_grid_anchor :: proc(
+	cache: Maybe(Virtual_Cache),
+	camera: ecs.World_Position,
+) -> ecs.World_Position {
 	if previous, ok := cache.?; ok {
 		d := ecs.position_sub_f64(camera, previous.anchor)
 		if max(abs(d.x), abs(d.y), abs(d.z)) < VIRTUAL_ANCHOR_REACH {
@@ -327,7 +330,14 @@ virtual_depth_anchor :: proc(camera_depth: f64, level: int, previous: Maybe(f64)
 // one parent. The level's valid rectangle holds the view's frustum out to the level's reach, in pages: a level's pixels
 // are all in there, and a level's depth pass rasterizes only there, so its cost follows the screen. Depth is 1 at the
 // light's end of the level's range, and 0 at the other, as the cascades have it.
-virtual_level :: proc(c: Virtual_Camera, direction: [3]f32, level: int, anchor: Maybe(f64) = nil) -> (l: Virtual_Level) {
+virtual_level :: proc(
+	c: Virtual_Camera,
+	direction: [3]f32,
+	level: int,
+	anchor: Maybe(f64) = nil,
+) -> (
+	l: Virtual_Level,
+) {
 	light_right, light_up := light_basis(direction)
 	extent := virtual_level_extent(level)
 	page := extent / VIRTUAL_PAGES
@@ -481,7 +491,11 @@ page_index :: proc(level: int, page: [2]i32) -> int {
 // virtual_table_slot is an absolute page's entry in its level's table, which is toroidal. Matches virtual_table_slot in
 // virtual_pages.hlsli.
 virtual_table_slot :: proc(level: int, page: [2]i32) -> int {
-	return level * VIRTUAL_LEVEL_PAGES + int(page.y & (VIRTUAL_PAGES - 1)) * VIRTUAL_PAGES + int(page.x & (VIRTUAL_PAGES - 1))
+	return(
+		level * VIRTUAL_LEVEL_PAGES +
+		int(page.y & (VIRTUAL_PAGES - 1)) * VIRTUAL_PAGES +
+		int(page.x & (VIRTUAL_PAGES - 1)) \
+	)
 }
 
 // virtual_entry_page is a table entry's physical page, or VIRTUAL_NO_PAGE.
@@ -516,7 +530,8 @@ virtual_mark :: proc(
 		// The soft shadows' rays read as far around the block as reach, within the valid rectangle.
 		texels := i32(math.ceil(reach / views[l].texel))
 		lower := [2]i32{i32(views[l].rect.x * VIRTUAL_SIZE), i32(views[l].rect.y * VIRTUAL_SIZE)}
-		upper := [2]i32{i32(views[l].rect.z * VIRTUAL_SIZE), i32(views[l].rect.w * VIRTUAL_SIZE)} - 1
+		upper :=
+			[2]i32{i32(views[l].rect.z * VIRTUAL_SIZE), i32(views[l].rect.w * VIRTUAL_SIZE)} - 1
 		low = {max(low.x - texels, lower.x), max(low.y - texels, lower.y)}
 		high = {min(high.x + texels, upper.x), min(high.y + texels, upper.y)}
 		for y in low.y / VIRTUAL_PAGE_TEXELS ..= high.y / VIRTUAL_PAGE_TEXELS {
@@ -564,16 +579,30 @@ virtual_rect_draws :: proc(table: []u32, level: int, origin, low, high: [2]i32) 
 virtual_page_fields :: proc(view: Shadow_View, level: int) -> u32 {
 	x := min(u32(math.round(view.rect.x * VIRTUAL_PAGES)), VIRTUAL_PAGES - 1)
 	y := min(u32(math.round(view.rect.y * VIRTUAL_PAGES)), VIRTUAL_PAGES - 1)
-	origin := [2]u32{u32(view.page_origin.x & (VIRTUAL_PAGES - 1)), u32(view.page_origin.y & (VIRTUAL_PAGES - 1))}
+	origin := [2]u32 {
+		u32(view.page_origin.x & (VIRTUAL_PAGES - 1)),
+		u32(view.page_origin.y & (VIRTUAL_PAGES - 1)),
+	}
 	return u32(level) | x << 4 | y << 11 | origin.x << 18 | origin.y << 25
 }
 
 // virtual_reaches_draws is whether a sphere relative to the camera reaches a page that a level draws, from its culling
 // planes and its page fields. Matches virtual_view_reaches_draws in virtual_pages.hlsli.
-virtual_reaches_draws :: proc(table: []u32, planes: [6][4]f32, fields: u32, center: [3]f32, radius: f32) -> bool {
+virtual_reaches_draws :: proc(
+	table: []u32,
+	planes: [6][4]f32,
+	fields: u32,
+	center: [3]f32,
+	radius: f32,
+) -> bool {
 	level := int(fields & 0xf)
 	page := f32(virtual_level_extent(level)) / VIRTUAL_PAGES
-	at := [2]f32{linalg.dot(planes[0].xyz, center) + planes[0].w, linalg.dot(planes[3].xyz, center) + planes[3].w} / page
+	at :=
+		[2]f32 {
+			linalg.dot(planes[0].xyz, center) + planes[0].w,
+			linalg.dot(planes[3].xyz, center) + planes[3].w,
+		} /
+		page
 	reach := radius / page + 1.0 / VIRTUAL_PAGE_TEXELS
 	first := [2]i32{i32((fields >> 4) & 0x7f), i32((fields >> 11) & 0x7f)}
 	origin := [2]i32{i32((fields >> 18) & 0x7f), i32((fields >> 25) & 0x7f)}
@@ -586,7 +615,13 @@ virtual_reaches_draws :: proc(table: []u32, planes: [6][4]f32, fields: u32, cent
 // in the next coarser level, one page at a time, until they fit. Marks that fit move nothing, so no level draws pages that
 // nothing reads. It returns how many pages the frame asked for, how many moved, and how many marks are left. Matches
 // fit_pool in virtual_shadow_allocate.hlsl.
-virtual_fit_pool :: proc(requests: []u32, views: []Shadow_View, capacity: u32) -> (requested, moved, total: u32) {
+virtual_fit_pool :: proc(
+	requests: []u32,
+	views: []Shadow_View,
+	capacity: u32,
+) -> (
+	requested, moved, total: u32,
+) {
 	for word in requests[:len(views) * VIRTUAL_LEVEL_WORDS] {
 		requested += u32(bits.count_ones(word))
 	}
@@ -607,7 +642,10 @@ virtual_fit_pool :: proc(requests: []u32, views: []Shadow_View, capacity: u32) -
 				moved += 1
 				page := [2]i32{i32(index % VIRTUAL_PAGES), i32(index / VIRTUAL_PAGES)}
 				parent := virtual_parent_page(origin, page, parent_origin)
-				if parent.x >= 0 && parent.y >= 0 && parent.x < VIRTUAL_PAGES && parent.y < VIRTUAL_PAGES {
+				if parent.x >= 0 &&
+				   parent.y >= 0 &&
+				   parent.x < VIRTUAL_PAGES &&
+				   parent.y < VIRTUAL_PAGES {
 					parent_index := page_index(level + 1, parent)
 					mask := u32(1) << uint(parent_index & 31)
 					if requests[parent_index >> 5] & mask == 0 {
@@ -665,7 +703,8 @@ virtual_retire :: proc(
 		keep := level < len(views) && invalidate & (1 << uint(level)) == 0
 		if keep {
 			local = page.page - views[level].page_origin
-			keep = local.x >= 0 && local.y >= 0 && local.x < VIRTUAL_PAGES && local.y < VIRTUAL_PAGES
+			keep =
+				local.x >= 0 && local.y >= 0 && local.x < VIRTUAL_PAGES && local.y < VIRTUAL_PAGES
 		}
 		if keep && dropped != nil {
 			at := page_index(level, local)
@@ -774,7 +813,9 @@ virtual_assign :: proc(
 				p := available[drawn]
 				drawn += 1
 				count += 1
-				page := views[level].page_origin + {i32(index % VIRTUAL_PAGES), i32(index / VIRTUAL_PAGES)}
+				page :=
+					views[level].page_origin +
+					{i32(index % VIRTUAL_PAGES), i32(index / VIRTUAL_PAGES)}
 				table[virtual_table_slot(level, page)] = p | VIRTUAL_DRAW
 				pages[p] = {u32(level), page, now}
 			}
@@ -808,7 +849,11 @@ virtual_allocate :: proc(
 	capacity := u32(len(pages))
 	requested, moved, total := virtual_fit_pool(requests, views, capacity)
 	retired := virtual_retire(requests, table, pages, views, now, invalidate, dropped)
-	threshold, quota := virtual_select(retired.histogram[:], total - retired.hits, capacity - retired.valid)
+	threshold, quota := virtual_select(
+		retired.histogram[:],
+		total - retired.hits,
+		capacity - retired.valid,
+	)
 	available, evicted := virtual_collect(table, pages, now, threshold, quota)
 	drawn, missed := virtual_assign(requests, table, pages, views, available[:], now)
 	return {
@@ -832,8 +877,14 @@ virtual_drop_pages :: proc(views: []Shadow_View, spheres: [][4]f32, dropped: []u
 		for s in spheres {
 			texel, _ := virtual_project(view, s.xyz)
 			reach := s.w / texel_size + 1
-			low := [2]i32{i32(math.floor((texel.x - reach) / VIRTUAL_PAGE_TEXELS)), i32(math.floor((texel.y - reach) / VIRTUAL_PAGE_TEXELS))}
-			high := [2]i32{i32(math.floor((texel.x + reach) / VIRTUAL_PAGE_TEXELS)), i32(math.floor((texel.y + reach) / VIRTUAL_PAGE_TEXELS))}
+			low := [2]i32 {
+				i32(math.floor((texel.x - reach) / VIRTUAL_PAGE_TEXELS)),
+				i32(math.floor((texel.y - reach) / VIRTUAL_PAGE_TEXELS)),
+			}
+			high := [2]i32 {
+				i32(math.floor((texel.x + reach) / VIRTUAL_PAGE_TEXELS)),
+				i32(math.floor((texel.y + reach) / VIRTUAL_PAGE_TEXELS)),
+			}
 			if high.x < 0 || high.y < 0 || low.x >= VIRTUAL_PAGES || low.y >= VIRTUAL_PAGES {
 				continue
 			}
@@ -897,7 +948,8 @@ virtual_lookup :: proc(table: []u32, views: []Shadow_View, p: [3]f32, level: int
 		texel, _ := virtual_project(views[l], p)
 		at := [2]i32{i32(math.floor(texel.x)), i32(math.floor(texel.y))}
 		if virtual_in_rect(views[l], at, at) &&
-		   table[virtual_table_slot(l, views[l].page_origin + at / VIRTUAL_PAGE_TEXELS)] != VIRTUAL_NO_PAGE {
+		   table[virtual_table_slot(l, views[l].page_origin + at / VIRTUAL_PAGE_TEXELS)] !=
+			   VIRTUAL_NO_PAGE {
 			return l
 		}
 	}
@@ -1017,16 +1069,17 @@ ensure_virtual_shadows :: proc(r: ^Renderer, s: ^Virtual_State, p: Shadow_Params
 			nil,
 		)
 	}
-	if !ensure_readback_ring(&s.stats_ring, platform, size_of(Virtual_Shadow_Stats), "virtual shadow stats readback") {
+	if !ensure_readback_ring(
+		&s.stats_ring,
+		platform,
+		size_of(Virtual_Shadow_Stats),
+		"virtual shadow stats readback",
+	) {
 		return false
 	}
 	if s.table == {} {
 		s.table = platform.gpu_create_buffer(
-			{
-				size = VIRTUAL_TABLE_WORDS * 4,
-				usage = {.Storage},
-				label = "virtual shadow table",
-			},
+			{size = VIRTUAL_TABLE_WORDS * 4, usage = {.Storage}, label = "virtual shadow table"},
 			nil,
 		)
 		s.cache = nil
@@ -1066,7 +1119,8 @@ ensure_virtual_shadows :: proc(r: ^Renderer, s: ^Virtual_State, p: Shadow_Params
 		s.stats != {} &&
 		s.table != {} &&
 		s.pool != {} &&
-		s.pages != {} 	)
+		s.pages != {} \
+	)
 }
 
 // virtual_cache_plan is what a frame keeps of the cache, the one place that decides it. A frame starts the table and the
@@ -1139,7 +1193,12 @@ add_virtual_levels :: proc(f: ^Frame, sf: ^Shadow_Frame, direction: [3]f32) {
 	s := &f.renderer.scene
 	scene := f.scene_frame
 	previous, kept := cache.?
-	tracked := kept && scene != nil && scene.live != nil && s.casters.frame == s.frame && previous.frame + 1 == s.frame
+	tracked :=
+		kept &&
+		scene != nil &&
+		scene.live != nil &&
+		s.casters.frame == s.frame &&
+		previous.frame + 1 == s.frame
 	vf.cache, vf.reset, vf.invalidate = virtual_cache_plan(
 		cache,
 		f.shadow_settings.virtual_cache,
@@ -1167,8 +1226,20 @@ add_virtual_levels :: proc(f: ^Frame, sf: ^Shadow_Frame, direction: [3]f32) {
 		return
 	}
 	platform := f.renderer.platform
-	changes := view_caster_changes(&s.casters, scene.live, &previous.live, platform.frame_allocator)
-	spheres := virtual_drop_spheres(&s.casters, changes, scene.live, s.high, f.view.position, platform.frame_allocator)
+	changes := view_caster_changes(
+		&s.casters,
+		scene.live,
+		&previous.live,
+		platform.frame_allocator,
+	)
+	spheres := virtual_drop_spheres(
+		&s.casters,
+		changes,
+		scene.live,
+		s.high,
+		f.view.position,
+		platform.frame_allocator,
+	)
 	if len(spheres) == 0 {
 		return
 	}
@@ -1298,7 +1369,14 @@ add_virtual_shadow_passes :: proc(f: ^Frame) {
 	declare_scene_draws(f, p)
 
 	// The stats' copy, for read_virtual_stats to take once it is back.
-	add_readback_copy(g, f.renderer.platform, &state.stats_ring, vf.stats, size_of(Virtual_Shadow_Stats), "virtual shadow stats")
+	add_readback_copy(
+		g,
+		f.renderer.platform,
+		&state.stats_ring,
+		vf.stats,
+		size_of(Virtual_Shadow_Stats),
+		"virtual shadow stats",
+	)
 	on_executed(g, commit_virtual_cache, f)
 }
 
@@ -1318,8 +1396,8 @@ forget_virtual_cache :: proc(f: ^Frame) {
 		return
 	}
 	on_executed(f.graph, proc(data: rawptr) {
-		(^Frame)(data).state.virtual_shadows.cache = nil
-	}, f)
+			(^Frame)(data).state.virtual_shadows.cache = nil
+		}, f)
 }
 
 // add_virtual_culling adds the culling of the levels' views, which the page table has to be written for: their instance
@@ -1335,16 +1413,23 @@ add_virtual_culling :: proc(f: ^Frame) {
 	table := f.shadows.virtual.table
 	add_virtual_instance_passes(f, table)
 	p := add_compute_pass(g, "cull virtual shadow draws", proc(ctx: ^Pass_Context) {
-		f := (^Frame)(ctx.data)
-		sf := f.scene_frame
-		pipeline := f.renderer.scene.cull_pipeline.pipeline
-		if pipeline == {} {
-			return
-		}
-		gpu.cmd_set_pipeline(ctx.cb, pipeline)
-		gpu.cmd_set_pass_constants(ctx.cb, sf.virtual_cull)
-		gpu.cmd_dispatch(ctx.cb, {u32(len(sf.items) + CULL_GROUP_SIZE - 1) / CULL_GROUP_SIZE, u32(f.shadows.virtual.count), 1})
-	}, f)
+			f := (^Frame)(ctx.data)
+			sf := f.scene_frame
+			pipeline := f.renderer.scene.cull_pipeline.pipeline
+			if pipeline == {} {
+				return
+			}
+			gpu.cmd_set_pipeline(ctx.cb, pipeline)
+			gpu.cmd_set_pass_constants(ctx.cb, sf.virtual_cull)
+			gpu.cmd_dispatch(
+				ctx.cb,
+				{
+					u32(len(sf.items) + CULL_GROUP_SIZE - 1) / CULL_GROUP_SIZE,
+					u32(f.shadows.virtual.count),
+					1,
+				},
+			)
+		}, f)
 	read(g, p, sf.instances)
 	read(g, p, table)
 	if len(sf.sets) > 0 {
@@ -1384,7 +1469,8 @@ set_virtual_allocate :: proc(ctx: ^Pass_Context, phase: Allocate_Phase) -> bool 
 		invalidate = vf.invalidate,
 	}
 	if vf.drops {
-		push.dropped, push.dropped_offset, push.drops = gpu.read_index(vf.dropped.buffer), vf.dropped.offset, 1
+		push.dropped, push.dropped_offset, push.drops =
+			gpu.read_index(vf.dropped.buffer), vf.dropped.offset, 1
 	}
 	gpu.cmd_set_pipeline(ctx.cb, pipeline)
 	gpu.cmd_set_pass_constants(ctx.cb, sf.view_constants[VIEW_CAMERA])
@@ -1410,10 +1496,22 @@ pool_page_count :: proc(f: ^Frame) -> int {
 run_virtual_clear :: proc(ctx: ^Pass_Context) {
 	f := (^Frame)(ctx.data)
 	if f.shadows.virtual.reset && set_virtual_allocate(ctx, .Reset) {
-		gpu.cmd_dispatch(ctx.cb, {allocate_groups(max(VIRTUAL_TABLE_COUNTS, pool_page_count(f))), 1, 1})
+		gpu.cmd_dispatch(
+			ctx.cb,
+			{allocate_groups(max(VIRTUAL_TABLE_COUNTS, pool_page_count(f))), 1, 1},
+		)
 	}
 	if set_virtual_allocate(ctx, .Clear) {
-		gpu.cmd_dispatch(ctx.cb, {allocate_groups(max(VIRTUAL_MAX_LEVELS * VIRTUAL_LEVEL_WORDS, VIRTUAL_SCRATCH_LIST)), 1, 1})
+		gpu.cmd_dispatch(
+			ctx.cb,
+			{
+				allocate_groups(
+					max(VIRTUAL_MAX_LEVELS * VIRTUAL_LEVEL_WORDS, VIRTUAL_SCRATCH_LIST),
+				),
+				1,
+				1,
+			},
+		)
 	}
 }
 
@@ -1494,7 +1592,10 @@ run_virtual_mark :: proc(ctx: ^Pass_Context) {
 		push.phase = u32(Mark_Phase.Volume)
 		gpu.cmd_push_constants(ctx.cb, &push)
 		grid := VIRTUAL_VOLUME_GRID
-		gpu.cmd_dispatch(ctx.cb, {grid.x / VIRTUAL_MARK_GROUP_SIZE, grid.y / VIRTUAL_MARK_GROUP_SIZE, grid.z})
+		gpu.cmd_dispatch(
+			ctx.cb,
+			{grid.x / VIRTUAL_MARK_GROUP_SIZE, grid.y / VIRTUAL_MARK_GROUP_SIZE, grid.z},
+		)
 	}
 }
 

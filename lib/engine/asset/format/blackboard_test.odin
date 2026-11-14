@@ -11,11 +11,16 @@ test_board :: proc() -> []byte {
 		return
 	}
 	contents := Blackboard_Contents {
-		key = 9,
-		keys = {
+		key         = 9,
+		keys        = {
 			{name = "alert", type = .Bool, default = value(u8(1))},
 			{name = "health", type = .Float, default = value(f32(0.75))},
-			{name = "mood", type = .Enum, enum_names = {"calm", "alert", "angry"}, default = value(u32(2))},
+			{
+				name = "mood",
+				type = .Enum,
+				enum_names = {"calm", "alert", "angry"},
+				default = value(u32(2)),
+			},
 			{name = "target", type = .Entity},
 			{name = "home", type = .Position, default = value([3]i64{1 << 24, 0, -(2 << 24)})},
 			{name = "ammo", type = .Int, default = value(i32(-3))},

@@ -30,13 +30,24 @@ Test_Message :: union {
 }
 
 @(private = "file")
-test_write_log :: proc(out: ^[dynamic]byte, level: log.Level, time: i64, location: string, text: string) {
+test_write_log :: proc(
+	out: ^[dynamic]byte,
+	level: log.Level,
+	time: i64,
+	location: string,
+	text: string,
+) {
 	wire.write_message(out, Test_Message(Line{text}))
 }
 
 // A server on a free port, whose console and wakes the test sees. The caller stops it.
 @(private = "file")
-test_start :: proc(t: ^testing.T, s: ^Server, console: ^servetest.Console, waker: ^servetest.Waker) -> bool {
+test_start :: proc(
+	t: ^testing.T,
+	s: ^Server,
+	console: ^servetest.Console,
+	waker: ^servetest.Waker,
+) -> bool {
 	context.logger = servetest.console_logger(console)
 	return testing.expect(t, start(s, "test link", 0, test_write_log, servetest.wake, waker))
 }
@@ -51,7 +62,15 @@ log_through :: proc(s: ^Server, text: string) {
 
 // An editor connects and says Hello, and the test takes the Hello as the main thread would.
 @(private = "file")
-test_hello :: proc(t: ^testing.T, s: ^Server, waker: ^servetest.Waker) -> (client: net.TCP_Socket, taken: Taken, ok: bool) {
+test_hello :: proc(
+	t: ^testing.T,
+	s: ^Server,
+	waker: ^servetest.Waker,
+) -> (
+	client: net.TCP_Socket,
+	taken: Taken,
+	ok: bool,
+) {
 	client = servetest.dial(bound_port(s)) or_return
 	servetest.send(client, Test_Message(Hello{"test editor"}))
 	if !testing.expect(t, servetest.wait(waker), "the Hello did not arrive") {

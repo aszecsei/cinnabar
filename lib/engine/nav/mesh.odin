@@ -199,7 +199,13 @@ next_portal :: proc "contextless" (it: ^Portals) -> (portal: Portal, ok: bool) {
 		}
 		if n & format.NAV_EXTERNAL == 0 {
 			it.edge += 1
-			return {neighbor = tile_of(m, it.polygon).first_polygon + u32(n), edge = k, left = a, right = b}, true
+			return {
+					neighbor = tile_of(m, it.polygon).first_polygon + u32(n),
+					edge = k,
+					left = a,
+					right = b,
+				},
+				true
 		}
 		links := m.links[p.first_link:][:p.link_count]
 		for it.link < len(links) {
@@ -207,7 +213,13 @@ next_portal :: proc "contextless" (it: ^Portals) -> (portal: Portal, ok: bool) {
 			it.link += 1
 			if int(l.edge) == k {
 				t0, t1 := f32(l.t_min) / 255, f32(l.t_max) / 255
-				return {neighbor = l.polygon, edge = k, left = math.lerp(a, b, t0), right = math.lerp(a, b, t1)}, true
+				return {
+						neighbor = l.polygon,
+						edge = k,
+						left = math.lerp(a, b, t0),
+						right = math.lerp(a, b, t1),
+					},
+					true
 			}
 		}
 		it.edge += 1
@@ -243,7 +255,9 @@ across :: proc "contextless" (m: ^Mesh_View, polygon: u32, edge: int, along: f32
 	// A link's ends are rounded to 255ths, so a point a little outside one still crosses by it.
 	SLACK :: 0.5 / 255
 	for l in m.links[p.first_link:][:p.link_count] {
-		if int(l.edge) == edge && along >= f32(l.t_min) / 255 - SLACK && along <= f32(l.t_max) / 255 + SLACK {
+		if int(l.edge) == edge &&
+		   along >= f32(l.t_min) / 255 - SLACK &&
+		   along <= f32(l.t_max) / 255 + SLACK {
 			return l.polygon, true
 		}
 	}
@@ -291,7 +305,8 @@ inside_2d :: proc "contextless" (p: [3]f32, pts: ^Polygon_Points) -> bool {
 	j := pts.count - 1
 	for i in 0 ..< pts.count {
 		vi, vj := pts.points[i], pts.points[j]
-		if ((vi.z > p.z) != (vj.z > p.z)) && (p.x < (vj.x - vi.x) * (p.z - vi.z) / (vj.z - vi.z) + vi.x) {
+		if ((vi.z > p.z) != (vj.z > p.z)) &&
+		   (p.x < (vj.x - vi.x) * (p.z - vi.z) / (vj.z - vi.z) + vi.x) {
 			c = !c
 		}
 		j = i
@@ -306,7 +321,8 @@ height_at :: proc "contextless" (m: ^Mesh_View, polygon: u32, p: [3]f32) -> f32 
 	tile := tile_of(m, polygon)
 	d := m.details[polygon]
 	vertices := m.detail_vertices[tile.first_detail_vertex + d.first_vertex:][:d.vertex_count]
-	triangles := m.detail_triangles[tile.first_detail_triangle + d.first_triangle:][:d.triangle_count]
+	triangles := m.detail_triangles[tile.first_detail_triangle +
+	d.first_triangle:][:d.triangle_count]
 	for t in triangles {
 		if h, ok := height_on_triangle(p, vertices[t[0]], vertices[t[1]], vertices[t[2]]); ok {
 			return h
@@ -351,7 +367,14 @@ height_on_triangle :: proc "contextless" (p, a, b, c: [3]f32) -> (f32, bool) {
 // closest_on_polygon is the point of a polygon nearest p: under it, on the surface, if the polygon holds it on the xz
 // plane, and on the nearest edge otherwise.
 @(private)
-closest_on_polygon :: proc "contextless" (m: ^Mesh_View, polygon: u32, p: [3]f32) -> (q: [3]f32, inside: bool) {
+closest_on_polygon :: proc "contextless" (
+	m: ^Mesh_View,
+	polygon: u32,
+	p: [3]f32,
+) -> (
+	q: [3]f32,
+	inside: bool,
+) {
 	pts := points_of(m, polygon)
 	q = p
 	if inside_2d(p, &pts) {
@@ -390,7 +413,10 @@ tiles_under :: proc "contextless" (m: ^Mesh_View, lo, hi: [3]f32) -> (x0, z0, x1
 	cell :: proc "contextless" (v, origin, size: f32, count: u32) -> int {
 		return clamp(int(math.floor((v - origin) / size)), 0, int(count) - 1)
 	}
-	if hi.x < m.bounds_min.x || hi.z < m.bounds_min.z || lo.x > m.bounds_max.x || lo.z > m.bounds_max.z {
+	if hi.x < m.bounds_min.x ||
+	   hi.z < m.bounds_min.z ||
+	   lo.x > m.bounds_max.x ||
+	   lo.z > m.bounds_max.z {
 		return 0, 0, -1, -1
 	}
 	x0 = cell(lo.x, m.bounds_min.x, m.tile_size, m.tiles_x)
@@ -404,7 +430,14 @@ tiles_under :: proc "contextless" (m: ^Mesh_View, lo, hi: [3]f32) -> (x0, z0, x1
 // findNearestPoly: for a polygon over or under the point, only the height past the agent's climb counts. Ties go to
 // the first polygon in the blob's order. distance is squared.
 @(private)
-nearest_in :: proc "contextless" (m: ^Mesh_View, p, extents: [3]f32) -> (polygon: u32, point: [3]f32, distance: f32) {
+nearest_in :: proc "contextless" (
+	m: ^Mesh_View,
+	p, extents: [3]f32,
+) -> (
+	polygon: u32,
+	point: [3]f32,
+	distance: f32,
+) {
 	polygon, distance = NO_POLYGON, max(f32)
 	lo, hi := p - extents, p + extents
 	x0, z0, x1, z1 := tiles_under(m, lo, hi)
@@ -413,7 +446,12 @@ nearest_in :: proc "contextless" (m: ^Mesh_View, p, extents: [3]f32) -> (polygon
 			tile := &m.tiles[u32(tz) * m.tiles_x + u32(tx)]
 			for i in tile.first_polygon ..< tile.first_polygon + tile.polygon_count {
 				blo, bhi := polygon_bounds(m, i)
-				if bhi.x < lo.x || blo.x > hi.x || bhi.y < lo.y || blo.y > hi.y || bhi.z < lo.z || blo.z > hi.z {
+				if bhi.x < lo.x ||
+				   blo.x > hi.x ||
+				   bhi.y < lo.y ||
+				   blo.y > hi.y ||
+				   bhi.z < lo.z ||
+				   blo.z > hi.z {
 					continue
 				}
 				q, over := closest_on_polygon(m, i, p)

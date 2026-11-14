@@ -99,14 +99,14 @@ Resident_Instance_Set :: struct {
 
 // Resident_Texture is a texture asset's GPU texture.
 Resident_Texture :: struct {
-	texture:   gpu.Texture,
+	texture:      gpu.Texture,
 	pixel_format: gpu.Format,
-	size:      [2]u32,
-	mip_count: u32,
-	usage:     format.Texture_Usage,
+	size:         [2]u32,
+	mip_count:    u32,
+	usage:        format.Texture_Usage,
 	// What its layers are, and how many. A shader must read it through the type of its dimension.
-	dimension:   format.Texture_Dimension,
-	layer_count: u32,
+	dimension:    format.Texture_Dimension,
+	layer_count:  u32,
 }
 
 // Residency gives the GPU resources of the texture and mesh assets that the renderer draws, by GUID (see
@@ -136,24 +136,24 @@ Resident_Key :: struct {
 
 @(private)
 Resident_Entry :: struct {
-	guid:          format.Guid,
-	kind:          format.Asset_Kind,
+	guid:                   format.Guid,
+	kind:                   format.Asset_Kind,
 	// The asset, once loaded. Every source keeps it, so a live mesh that is let go streams its asset's blob again.
-	handle:        asset.Handle,
+	handle:                 asset.Handle,
 	// The resources that draw, from the blob of version, once ready.
-	current:       Resident_Resources,
-	version:       u32,
-	ready:         bool,
+	current:                Resident_Resources,
+	version:                u32,
+	ready:                  bool,
 	// What the resources come from, and what streams in to replace current. Only change writes them.
-	source:        Resident_Source,
-	stream:        Maybe(Resident_Stream),
+	source:                 Resident_Source,
+	stream:                 Maybe(Resident_Stream),
 	// The frame of the last failure, which was logged, or 0.
-	failed_at:     u64,
+	failed_at:              u64,
 	// This version of a texture was read as another dimension, which was logged.
 	wrong_dimension_logged: bool,
 	// Who has asked for it: a thumbnail, or anything else, which keeps it.
-	baked:         bool,
-	world:         bool,
+	baked:                  bool,
+	world:                  bool,
 }
 
 @(private)
@@ -319,12 +319,17 @@ residency_update :: proc(r: ^Residency) {
 			superseded := false
 			if e.kind == .Mesh && s.pending.mesh.paged {
 				if mesh_pool_failed(&r.pool, s.pending.mesh.pool_mesh) {
-					change(r, &e, Event_Stream_Failed{"has a root page that is not what its table names"})
+					change(
+						r,
+						&e,
+						Event_Stream_Failed{"has a root page that is not what its table names"},
+					)
 					continue
 				}
 				done &&= mesh_pool_ready(&r.pool, s.pending.mesh.pool_mesh)
 				// Its roots come from the head of the version that it streams, which a newer blob has replaced.
-				superseded = !done && e.handle != {} && asset.version(r.assets, e.handle) != s.version
+				superseded =
+					!done && e.handle != {} && asset.version(r.assets, e.handle) != s.version
 			}
 			if done {
 				change(r, &e, Event_Landed{})
@@ -362,7 +367,13 @@ resident_mesh :: proc(r: ^Residency, guid: format.Guid) -> (mesh: ^Resident_Mesh
 // resident_whole_mesh gives a mesh asset's resources as resident_mesh does, for what draws its vertices by index: it is
 // ready when the mesh's positions, attributes and indices are resident too, which a paged mesh's are some frames after
 // the first call (see resident_level0).
-resident_whole_mesh :: proc(r: ^Residency, guid: format.Guid) -> (mesh: ^Resident_Mesh, ready: bool) {
+resident_whole_mesh :: proc(
+	r: ^Residency,
+	guid: format.Guid,
+) -> (
+	mesh: ^Resident_Mesh,
+	ready: bool,
+) {
 	mesh, ready = resident_mesh(r, guid)
 	if ready {
 		ready = resident_level0(r, mesh)
@@ -419,7 +430,13 @@ residency_release_baked :: proc(r: ^Residency) -> (released: int) {
 }
 
 // resident_instance_set gives an instance set asset's resources, and whether they are ready, as resident_mesh does.
-resident_instance_set :: proc(r: ^Residency, guid: format.Guid) -> (set: ^Resident_Instance_Set, ready: bool) {
+resident_instance_set :: proc(
+	r: ^Residency,
+	guid: format.Guid,
+) -> (
+	set: ^Resident_Instance_Set,
+	ready: bool,
+) {
 	e := entry(r, guid, .Instance_Set) or_return
 	return &e.current.set, e.ready
 }
@@ -427,7 +444,14 @@ resident_instance_set :: proc(r: ^Residency, guid: format.Guid) -> (set: ^Reside
 // resident_texture gives a texture asset's resources, and whether they are ready. Until it is ready, use a default
 // for its usage. A shader reads a texture through the type of its dimension, and any other is undefined, so a texture of
 // another dimension is never ready, which is logged once for each of its versions.
-resident_texture :: proc(r: ^Residency, guid: format.Guid, dimension := format.Texture_Dimension.D2) -> (texture: ^Resident_Texture, ready: bool) {
+resident_texture :: proc(
+	r: ^Residency,
+	guid: format.Guid,
+	dimension := format.Texture_Dimension.D2,
+) -> (
+	texture: ^Resident_Texture,
+	ready: bool,
+) {
 	e := entry(r, guid, .Texture) or_return
 	if e.ready && e.current.texture.dimension != dimension {
 		log_wrong_dimension(e, dimension)
@@ -438,7 +462,14 @@ resident_texture :: proc(r: ^Residency, guid: format.Guid, dimension := format.T
 
 // resident_texture_of gives a texture asset's resources as resident_texture does, for a reader that takes either of two
 // dimensions and reads the one that it gets.
-resident_texture_of :: proc(r: ^Residency, guid: format.Guid, first, second: format.Texture_Dimension) -> (texture: ^Resident_Texture, ready: bool) {
+resident_texture_of :: proc(
+	r: ^Residency,
+	guid: format.Guid,
+	first, second: format.Texture_Dimension,
+) -> (
+	texture: ^Resident_Texture,
+	ready: bool,
+) {
 	e := entry(r, guid, .Texture) or_return
 	if e.ready && e.current.texture.dimension != first && e.current.texture.dimension != second {
 		log_wrong_dimension(e, first)
@@ -452,14 +483,26 @@ log_wrong_dimension :: proc(e: ^Resident_Entry, wanted: format.Texture_Dimension
 	if !e.wrong_dimension_logged {
 		e.wrong_dimension_logged = true
 		buffer: [32]u8
-		log.errorf("render: texture %s is a %v, and is read as a %v", format.guid_format(e.guid, &buffer), e.current.texture.dimension, wanted)
+		log.errorf(
+			"render: texture %s is a %v, and is read as a %v",
+			format.guid_format(e.guid, &buffer),
+			e.current.texture.dimension,
+			wanted,
+		)
 	}
 }
 
 // entry finds an asset's entry, or makes one and starts streaming. An asset that cannot load is tried again after
 // RESIDENT_RETRY_FRAMES, and logged once. A live mesh never loads its asset.
 @(private = "file")
-entry :: proc(r: ^Residency, guid: format.Guid, kind: format.Asset_Kind) -> (e: ^Resident_Entry, ok: bool) {
+entry :: proc(
+	r: ^Residency,
+	guid: format.Guid,
+	kind: format.Asset_Kind,
+) -> (
+	e: ^Resident_Entry,
+	ok: bool,
+) {
 	e = find_entry(r, guid, kind) or_return
 	if r.baking {
 		e.baked = true
@@ -467,7 +510,10 @@ entry :: proc(r: ^Residency, guid: format.Guid, kind: format.Asset_Kind) -> (e: 
 		e.world = true
 	}
 	_, live := e.source.(Live_Source)
-	if !live && e.handle == {} && e.stream == nil && (e.failed_at == 0 || r.frame - e.failed_at >= RESIDENT_RETRY_FRAMES) {
+	if !live &&
+	   e.handle == {} &&
+	   e.stream == nil &&
+	   (e.failed_at == 0 || r.frame - e.failed_at >= RESIDENT_RETRY_FRAMES) {
 		start_streaming(r, e)
 	}
 	return e, true
@@ -475,7 +521,14 @@ entry :: proc(r: ^Residency, guid: format.Guid, kind: format.Asset_Kind) -> (e: 
 
 // find_entry finds an asset's entry, or makes an empty one.
 @(private = "file")
-find_entry :: proc(r: ^Residency, guid: format.Guid, kind: format.Asset_Kind) -> (e: ^Resident_Entry, ok: bool) {
+find_entry :: proc(
+	r: ^Residency,
+	guid: format.Guid,
+	kind: format.Asset_Kind,
+) -> (
+	e: ^Resident_Entry,
+	ok: bool,
+) {
 	if guid == {} {
 		return
 	}
@@ -489,7 +542,10 @@ find_entry :: proc(r: ^Residency, guid: format.Guid, kind: format.Asset_Kind) ->
 	e = &r.entries[r.count]
 	r.index[{guid, kind}] = r.count
 	r.count += 1
-	e^ = {guid = guid, kind = kind}
+	e^ = {
+		guid = guid,
+		kind = kind,
+	}
 	return e, true
 }
 
@@ -523,7 +579,10 @@ is_live :: proc(r: ^Residency, guid: format.Guid) -> bool {
 change :: proc(r: ^Residency, e: ^Resident_Entry, event: Resident_Event) -> (ok: bool) {
 	defer {
 		live, is_live := e.source.(Live_Source)
-		assert(!is_live || live.next == nil || e.stream != nil, "a live mesh's next blob waits only for a stream")
+		assert(
+			!is_live || live.next == nil || e.stream != nil,
+			"a live mesh's next blob waits only for a stream",
+		)
 	}
 	switch ev in event {
 	case Event_Live_Blob:
@@ -535,7 +594,11 @@ change :: proc(r: ^Residency, e: ^Resident_Entry, event: Resident_Event) -> (ok:
 		// A blob that arrives while one streams waits for it, and the newest wins.
 		if e.stream != nil {
 			free_next(r, &live.next)
-			next, err := mem.alloc_bytes(len(ev.blob), format.BLOB_ALIGN, r.platform.heap_allocator)
+			next, err := mem.alloc_bytes(
+				len(ev.blob),
+				format.BLOB_ALIGN,
+				r.platform.heap_allocator,
+			)
 			if err != nil {
 				return false
 			}
@@ -586,14 +649,20 @@ change :: proc(r: ^Residency, e: ^Resident_Entry, event: Resident_Event) -> (ok:
 		}
 	case Event_Asset_Streaming:
 		_, is_live := e.source.(Live_Source)
-		assert(!is_live && e.stream == nil, "an asset streams only into an entry that is not live and streams nothing")
+		assert(
+			!is_live && e.stream == nil,
+			"an asset streams only into an entry that is not live and streams nothing",
+		)
 		// A live mesh that was let go draws until this is in.
 		stream := ev.stream
 		_, stream.released = e.source.(Released_Source)
 		e.source, e.stream, e.failed_at = Asset_Source{}, stream, 0
 	case Event_Asset_Failed:
 		_, is_live := e.source.(Live_Source)
-		assert(!is_live && e.stream == nil, "an asset fails only in an entry that is not live and streams nothing")
+		assert(
+			!is_live && e.stream == nil,
+			"an asset fails only in an entry that is not live and streams nothing",
+		)
 		// Nothing may go on drawing what the editor gave up.
 		if _, released := e.source.(Released_Source); released {
 			destroy_resources(r, e.kind, &e.current)
@@ -607,11 +676,21 @@ change :: proc(r: ^Residency, e: ^Resident_Entry, event: Resident_Event) -> (ok:
 
 // live_stream streams a live mesh's blob, at the version that draws, as it is not the asset's.
 @(private = "file")
-live_stream :: proc(r: ^Residency, e: ^Resident_Entry, blob: []byte) -> (s: Resident_Stream, ok: bool) {
+live_stream :: proc(
+	r: ^Residency,
+	e: ^Resident_Entry,
+	blob: []byte,
+) -> (
+	s: Resident_Stream,
+	ok: bool,
+) {
 	s, ok = new_stream(r, .Mesh, blob, e.version, {})
 	if !ok {
 		buffer: [32]u8
-		log.errorf("render: the live mesh %s is not a blob that can be made resident", format.guid_format(e.guid, &buffer))
+		log.errorf(
+			"render: the live mesh %s is not a blob that can be made resident",
+			format.guid_format(e.guid, &buffer),
+		)
 	}
 	return
 }
@@ -637,7 +716,13 @@ start_streaming :: proc(r: ^Residency, e: ^Resident_Entry) {
 	}
 	data, _ := asset.data(r.assets, e.handle)
 	version := asset.version(r.assets, e.handle)
-	stream, ok := new_stream(r, e.kind, data, version, {e.guid, e.handle, asset.modified(r.assets, e.handle)})
+	stream, ok := new_stream(
+		r,
+		e.kind,
+		data,
+		version,
+		{e.guid, e.handle, asset.modified(r.assets, e.handle)},
+	)
 	if !ok {
 		// The version stays, so a broken blob is tried again when the cooker writes a new one.
 		e.version = version
@@ -658,7 +743,16 @@ Stream_Origin :: struct {
 
 // new_stream creates new resources from a blob and streams its data into them.
 @(private = "file")
-new_stream :: proc(r: ^Residency, kind: format.Asset_Kind, data: []byte, version: u32, origin: Stream_Origin) -> (s: Resident_Stream, ok: bool) {
+new_stream :: proc(
+	r: ^Residency,
+	kind: format.Asset_Kind,
+	data: []byte,
+	version: u32,
+	origin: Stream_Origin,
+) -> (
+	s: Resident_Stream,
+	ok: bool,
+) {
 	#partial switch kind {
 	case .Mesh:
 		ok = stream_mesh(r, &s, data, version, origin)
@@ -679,13 +773,24 @@ new_stream :: proc(r: ^Residency, kind: format.Asset_Kind, data: []byte, version
 fail :: proc(r: ^Residency, e: ^Resident_Entry, reason: string) {
 	if e.failed_at == 0 {
 		buffer: [32]u8
-		log.errorf("render: the %v asset %s %s", e.kind, format.guid_format(e.guid, &buffer), reason)
+		log.errorf(
+			"render: the %v asset %s %s",
+			e.kind,
+			format.guid_format(e.guid, &buffer),
+			reason,
+		)
 	}
 	e.failed_at = max(r.frame, 1)
 }
 
 @(private = "file")
-stream_mesh :: proc(r: ^Residency, s: ^Resident_Stream, data: []byte, version: u32, origin: Stream_Origin) -> bool {
+stream_mesh :: proc(
+	r: ^Residency,
+	s: ^Resident_Stream,
+	data: []byte,
+	version: u32,
+	origin: Stream_Origin,
+) -> bool {
 	blob, ok := format.mesh_view(data)
 	paged := ok && .Paged in blob.flags
 	// A paged mesh reads its pages from its asset's file, so a blob from memory cannot be one.
@@ -703,30 +808,89 @@ stream_mesh :: proc(r: ^Residency, s: ^Resident_Stream, data: []byte, version: u
 	submeshes := format.mesh_submeshes(data, blob)
 	m.submesh_count = u32(min(len(submeshes), MAX_SUBMESHES))
 	for s, i in submeshes[:m.submesh_count] {
-		m.submeshes[i] = {s.first_index, s.index_count, s.first_meshlet, s.meshlet_count, s.first_node, s.node_count, s.root_count}
+		m.submeshes[i] = {
+			s.first_index,
+			s.index_count,
+			s.first_meshlet,
+			s.meshlet_count,
+			s.first_node,
+			s.node_count,
+			s.root_count,
+		}
 		m.submesh_bounds[i] = s.bounds
 		// A paged mesh's level buckets are in its head, as its meshlets are not.
 		m.level_first[i] = s.level_first
 	}
 	if paged {
 		m.levels = blob.levels
-		m.pool_mesh = mesh_pool_add(&r.pool, r.platform, origin.guid, origin.handle, version, origin.modified, data, blob)
+		m.pool_mesh = mesh_pool_add(
+			&r.pool,
+			r.platform,
+			origin.guid,
+			origin.handle,
+			version,
+			origin.modified,
+			data,
+			blob,
+		)
 		if m.pool_mesh == 0 {
 			return false
 		}
 		m.pages_first, m.page_count = mesh_pool_range(&r.pool, m.pool_mesh)
 	} else {
 		mesh_levels(m, format.mesh_meshlets(data, blob))
-		m.positions = stream_buffer(r, s, format.blob_bytes(data, blob.positions), {}, "mesh positions") or_return
-		m.attributes = stream_buffer(r, s, format.blob_bytes(data, blob.attributes), {}, "mesh attributes") or_return
-		m.indices = stream_buffer(r, s, format.blob_bytes(data, blob.indices), {.Index}, "mesh indices") or_return
-		m.meshlets = stream_buffer(r, s, format.blob_bytes(data, blob.meshlets), {}, "meshlets") or_return
-		m.meshlet_vertices = stream_buffer(r, s, format.blob_bytes(data, blob.meshlet_vertices), {}, "meshlet vertices") or_return
-		m.meshlet_triangles = stream_buffer(r, s, format.blob_bytes(data, blob.meshlet_triangles), {}, "meshlet triangles") or_return
+		m.positions = stream_buffer(
+			r,
+			s,
+			format.blob_bytes(data, blob.positions),
+			{},
+			"mesh positions",
+		) or_return
+		m.attributes = stream_buffer(
+			r,
+			s,
+			format.blob_bytes(data, blob.attributes),
+			{},
+			"mesh attributes",
+		) or_return
+		m.indices = stream_buffer(
+			r,
+			s,
+			format.blob_bytes(data, blob.indices),
+			{.Index},
+			"mesh indices",
+		) or_return
+		m.meshlets = stream_buffer(
+			r,
+			s,
+			format.blob_bytes(data, blob.meshlets),
+			{},
+			"meshlets",
+		) or_return
+		m.meshlet_vertices = stream_buffer(
+			r,
+			s,
+			format.blob_bytes(data, blob.meshlet_vertices),
+			{},
+			"meshlet vertices",
+		) or_return
+		m.meshlet_triangles = stream_buffer(
+			r,
+			s,
+			format.blob_bytes(data, blob.meshlet_triangles),
+			{},
+			"meshlet triangles",
+		) or_return
 	}
 	m.meshlet_nodes = {}
 	if blob.meshlet_nodes.size > 0 {
-		m.meshlet_nodes = stream_buffer(r, s, format.blob_bytes(data, blob.meshlet_nodes), {}, "meshlet nodes") or_return
+		m.meshlet_nodes = stream_buffer(
+			r,
+			s,
+			format.blob_bytes(data, blob.meshlet_nodes),
+			{},
+			"meshlet nodes",
+		) or_return
 	}
 	m.skin = {}
 	if .Skinned in blob.flags {
@@ -734,7 +898,13 @@ stream_mesh :: proc(r: ^Residency, s: ^Resident_Stream, data: []byte, version: u
 	}
 	m.impostor, m.impostor_size, m.impostor_error = {}, 0, 0
 	if blob.impostor.size > 0 {
-		m.impostor = stream_buffer(r, s, format.blob_bytes(data, blob.impostor), {}, "mesh impostor") or_return
+		m.impostor = stream_buffer(
+			r,
+			s,
+			format.blob_bytes(data, blob.impostor),
+			{},
+			"mesh impostor",
+		) or_return
 		m.impostor_size, m.impostor_error = blob.impostor_size, blob.impostor_error
 	}
 	return true
@@ -749,8 +919,20 @@ stream_instance_set :: proc(r: ^Residency, s: ^Resident_Stream, data: []byte) ->
 	set := &s.pending.set
 	set.count, set.cell_count = blob.count, blob.cell_count
 	set.center, set.radius, set.max_scale = blob.center, blob.radius, blob.max_scale
-	set.instances = stream_buffer(r, s, format.blob_bytes(data, blob.instances), {}, "instances") or_return
-	set.cells = stream_buffer(r, s, format.blob_bytes(data, blob.cells), {}, "instance cells") or_return
+	set.instances = stream_buffer(
+		r,
+		s,
+		format.blob_bytes(data, blob.instances),
+		{},
+		"instances",
+	) or_return
+	set.cells = stream_buffer(
+		r,
+		s,
+		format.blob_bytes(data, blob.cells),
+		{},
+		"instance cells",
+	) or_return
 	return true
 }
 
@@ -765,7 +947,11 @@ mesh_levels :: proc(m: ^Resident_Mesh, meshlets: []format.Meshlet) {
 			continue
 		}
 		last: int
-		m.level_first[i], last = format.mesh_level_buckets(meshlets[s.first_meshlet:][:s.meshlet_count], m.bounds.center, &m.levels)
+		m.level_first[i], last = format.mesh_level_buckets(
+			meshlets[s.first_meshlet:][:s.meshlet_count],
+			m.bounds.center,
+			&m.levels,
+		)
 		deepest = max(deepest, last)
 	}
 	for &l in m.levels[clamp(deepest + 1, 0, INSTANCE_LEVEL_BUCKETS):] {
@@ -811,7 +997,9 @@ create_mesh_accel :: proc(r: ^Residency, m: ^Resident_Mesh) {
 		index_format  = m.index_format,
 		opaque        = true,
 	}
-	accel := r.platform.gpu_create_accel({kind = .Bottom, flags = {.Allow_Compaction}, geometries = {geometry}, label = "mesh"})
+	accel := r.platform.gpu_create_accel(
+		{kind = .Bottom, flags = {.Allow_Compaction}, geometries = {geometry}, label = "mesh"},
+	)
 	change_mesh_accel(r, m, Accel_Created{accel})
 }
 
@@ -819,7 +1007,8 @@ create_mesh_accel :: proc(r: ^Residency, m: ^Resident_Mesh) {
 unbuilt_accels :: proc(r: ^Residency) -> []^Resident_Mesh {
 	meshes := make([dynamic]^Resident_Mesh, r.platform.frame_allocator)
 	for &e in r.entries[:r.count] {
-		if _, unbuilt := e.current.mesh.accel_state.(Accel_Unbuilt); e.kind == .Mesh && e.ready && unbuilt {
+		if _, unbuilt := e.current.mesh.accel_state.(Accel_Unbuilt);
+		   e.kind == .Mesh && e.ready && unbuilt {
 			append(&meshes, &e.current.mesh)
 		}
 	}
@@ -829,7 +1018,16 @@ unbuilt_accels :: proc(r: ^Residency) -> []^Resident_Mesh {
 // stream_buffer creates a buffer for data and streams it in. Buffers are multiples of 4 bytes, so 16-bit indices are
 // padded.
 @(private = "file")
-stream_buffer :: proc(r: ^Residency, s: ^Resident_Stream, data: []byte, usage: gpu.Buffer_Usages, label: string) -> (buffer: gpu.Buffer, ok: bool) {
+stream_buffer :: proc(
+	r: ^Residency,
+	s: ^Resident_Stream,
+	data: []byte,
+	usage: gpu.Buffer_Usages,
+	label: string,
+) -> (
+	buffer: gpu.Buffer,
+	ok: bool,
+) {
 	size := (len(data) + 3) &~ 3
 	if size == 0 {
 		return
@@ -860,7 +1058,14 @@ stream_texture :: proc(r: ^Residency, s: ^Resident_Stream, data: []byte) -> bool
 		return false
 	}
 	t := &s.pending.texture
-	t^ = {pixel_format = gpu_format(blob.format), size = blob.size, mip_count = blob.mip_count, usage = blob.usage, dimension = blob.dimension, layer_count = blob.layer_count}
+	t^ = {
+		pixel_format = gpu_format(blob.format),
+		size         = blob.size,
+		mip_count    = blob.mip_count,
+		usage        = blob.usage,
+		dimension    = blob.dimension,
+		layer_count  = blob.layer_count,
+	}
 	desc := gpu.Texture_Desc {
 		size      = blob.size,
 		format    = t.pixel_format,

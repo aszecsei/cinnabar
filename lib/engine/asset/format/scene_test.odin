@@ -52,7 +52,11 @@ scene_files_parse :: proc(t: ^testing.T) {
 	testing.expect_value(t, rotation.floats[3], 0.7071068)
 
 	behaviour := door.behaviours[0]
-	testing.expect_value(t, behaviour.script, guid_parse("9d2e41c0b7a35f6e81c4d2a90b3e7f15") or_else {})
+	testing.expect_value(
+		t,
+		behaviour.script,
+		guid_parse("9d2e41c0b7a35f6e81c4d2a90b3e7f15") or_else {},
+	)
 	testing.expect_value(t, behaviour.fields[0].value.floats[0], 90.5)
 	testing.expect_value(t, behaviour.fields[0].value.integer, 0)
 	testing.expect_value(t, behaviour.fields[1].value.kind, Scene_Value_Kind.Entity)
@@ -70,7 +74,10 @@ scene_blobs_round_trip :: proc(t: ^testing.T) {
 	guid := guid_parse(TEST_GUID) or_else {}
 	blob := aligned(scene_write(scene, guid, 42, allocator = context.temp_allocator))
 	header, header_ok := blob_header(blob)
-	testing.expect(t, header_ok && header.kind == .Scene && header.key == 42 && header.guid == guid)
+	testing.expect(
+		t,
+		header_ok && header.kind == .Scene && header.key == 42 && header.guid == guid,
+	)
 
 	read, read_ok := scene_read(blob, context.temp_allocator)
 	testing.expect(t, read_ok)
@@ -78,7 +85,11 @@ scene_blobs_round_trip :: proc(t: ^testing.T) {
 	door := read.entities[0]
 	testing.expect_value(t, door.name, `Door "A"`)
 	testing.expect_value(t, door.parent, scene.entities[0].parent)
-	testing.expect_value(t, door.components[0].fields[0].value, scene.entities[0].components[0].fields[0].value)
+	testing.expect_value(
+		t,
+		door.components[0].fields[0].value,
+		scene.entities[0].components[0].fields[0].value,
+	)
 	testing.expect_value(t, door.behaviours[0].fields[2].value.text, "Swing")
 	testing.expect(t, !read.entities[1].active)
 
@@ -95,14 +106,22 @@ asset_values_are_guids :: proc(t: ^testing.T) {
 	testing.expect(t, ok)
 	fields := scene.entities[0].components[0].fields
 	testing.expect_value(t, fields[0].value.kind, Scene_Value_Kind.Asset)
-	testing.expect_value(t, fields[0].value.asset, guid_parse("9db8150cc7215ffc2708d20d77cf60bf") or_else {})
+	testing.expect_value(
+		t,
+		fields[0].value.asset,
+		guid_parse("9db8150cc7215ffc2708d20d77cf60bf") or_else {},
+	)
 	testing.expect_value(t, fields[1].value, Scene_Value{kind = .Asset})
 
 	// The GUID survives the blob.
 	data := aligned(scene_write(scene, {}, 0, allocator = context.temp_allocator))
 	read, read_ok := scene_read(data, context.temp_allocator)
 	testing.expect(t, read_ok)
-	testing.expect_value(t, read.entities[0].components[0].fields[0].value.asset, fields[0].value.asset)
+	testing.expect_value(
+		t,
+		read.entities[0].components[0].fields[0].value.asset,
+		fields[0].value.asset,
+	)
 }
 
 @(test)
@@ -120,7 +139,11 @@ scene_errors_name_their_line :: proc(t: ^testing.T) {
 		{"scene 1\nentity 0000000000000001\ncomponent 1 T\n\tx = \"a\\q\"\n", "not an escape", 4},
 		{"scene 1\nentity 0000000000000001\ncomponent 1 T\ncomponent 1 T\n", "twice", 4},
 		{"scene 1\nentity 0000000000000001\ncomponent 1 T\n\tx = 1.2.3\n", "not a number", 4},
-		{"scene 1\nentity 0000000000000001\ncomponent 1 T\n\tx = $12\n", "32 hex digits after $", 4},
+		{
+			"scene 1\nentity 0000000000000001\ncomponent 1 T\n\tx = $12\n",
+			"32 hex digits after $",
+			4,
+		},
 	}
 	for c in cases {
 		_, problems, ok := scene_parse(c.text, context.temp_allocator)
@@ -129,13 +152,27 @@ scene_errors_name_their_line :: proc(t: ^testing.T) {
 		for p in problems {
 			found ||= p.error && p.line == c.line && strings.contains(p.message, c.fragment)
 		}
-		testing.expectf(t, found, "%q: no error at line %d with %q: %v", c.text, c.line, c.fragment, problems)
+		testing.expectf(
+			t,
+			found,
+			"%q: no error at line %d with %q: %v",
+			c.text,
+			c.line,
+			c.fragment,
+			problems,
+		)
 	}
 
-	_, problems, ok := scene_parse("scene 1\nentity 0000000000000001\ncolor = 3\n", context.temp_allocator)
+	_, problems, ok := scene_parse(
+		"scene 1\nentity 0000000000000001\ncolor = 3\n",
+		context.temp_allocator,
+	)
 	testing.expect(t, ok)
 	testing.expect(t, len(problems) == 1 && !problems[0].error && problems[0].line == 3)
 
-	_, problems, ok = scene_parse("scene 1\nentity 0000000000000001\nentity 0000000000000001\n", context.temp_allocator)
+	_, problems, ok = scene_parse(
+		"scene 1\nentity 0000000000000001\nentity 0000000000000001\n",
+		context.temp_allocator,
+	)
 	testing.expect(t, !ok)
 }

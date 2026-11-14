@@ -69,17 +69,24 @@ scripts_read_set_and_save_the_quality :: proc(t: ^testing.T) {
 		delete(written)
 	}
 	platform := core.Platform_API {
-		frame_allocator      = virtual.arena_allocator(&arena),
-		script_open          = script_host.open,
-		script_close         = script_host.close,
-		script_push_binding  = script_host.push_binding,
-		script_atom          = script_host.atom,
+		frame_allocator = virtual.arena_allocator(&arena),
+		script_open = script_host.open,
+		script_close = script_host.close,
+		script_push_binding = script_host.push_binding,
+		script_atom = script_host.atom,
 		script_direct_access = script_host.direct_access,
-		file_read            = proc(path: string, align: int, allocator: runtime.Allocator) -> ([]byte, bool) {
+		file_read = proc(
+			path: string,
+			align: int,
+			allocator: runtime.Allocator,
+		) -> (
+			[]byte,
+			bool,
+		) {
 			text, ok := written[path]
 			return transmute([]byte)text, ok
 		},
-		file_write           = proc(path: string, data: []byte) -> bool {
+		file_write = proc(path: string, data: []byte) -> bool {
 			if old, ok := written[path]; ok {
 				delete(old)
 			}
@@ -90,14 +97,26 @@ scripts_read_set_and_save_the_quality :: proc(t: ^testing.T) {
 	// A Renderer is too large for the stack.
 	renderer := new(render.Renderer)
 	defer free(renderer)
-	renderer.caps = {vendor = .Amd, upscalers = {.Fsr}}
+	renderer.caps = {
+		vendor    = .Amd,
+		upscalers = {.Fsr},
+	}
 	renderer.quality = render.preset_quality(.High, renderer.caps)
 	q := script_quality(renderer, "game/project.settings")
 	test_quality = &q
 
 	r := new(script.Runtime)
 	defer free(r)
-	testing.expect(t, script.init(r, &platform, nil, nil, proc(r: ^script.Runtime) {define_quality_bindings(r, test_quality)}))
+	testing.expect(
+		t,
+		script.init(
+			r,
+			&platform,
+			nil,
+			nil,
+			proc(r: ^script.Runtime) {define_quality_bindings(r, test_quality)},
+		),
+	)
 	defer script.destroy(r)
 	_, ok := script.spawn_source(r, "=quality", QUALITY_SCRIPT)
 	testing.expect(t, ok)

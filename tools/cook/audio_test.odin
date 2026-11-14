@@ -46,7 +46,14 @@ tone :: proc(frames, rate: int) -> []i16 {
 }
 
 @(private = "file")
-cooked :: proc(t: ^testing.T, tree: Tree, name: string) -> (data: []byte, blob: ^format.Audio_Blob) {
+cooked :: proc(
+	t: ^testing.T,
+	tree: Tree,
+	name: string,
+) -> (
+	data: []byte,
+	blob: ^format.Audio_Blob,
+) {
 	data = tree_blob(t, tree, tree_guid(t, tree, name))
 	ok: bool
 	blob, ok = format.audio_view(data)
@@ -58,7 +65,10 @@ cooked :: proc(t: ^testing.T, tree: Tree, name: string) -> (data: []byte, blob: 
 @(private = "file")
 set_settings :: proc(t: ^testing.T, tree: Tree, name: string, settings: []format.Meta_Setting) {
 	text := meta_with(tree_guid(t, tree, name), "", settings)
-	testing.expect(t, os.write_entire_file(fmt.tprintf("%s/content/%s.meta", tree.dir, name), text) == nil)
+	testing.expect(
+		t,
+		os.write_entire_file(fmt.tprintf("%s/content/%s.meta", tree.dir, name), text) == nil,
+	)
 }
 
 // A sound at the engine's rate keeps its exact samples, and a second cook finds it up to date.
@@ -134,14 +144,27 @@ a_converted_sound_loops_without_a_step :: proc(t: ^testing.T) {
 			sample = i16(math.sin(f64(i) * cycles_per_second * math.TAU / 48000) * 12000)
 		}
 		// A frame out of place on this tone is about 25 dB.
-		testing.expectf(t, signal_to_noise(ideal, samples) > 50, "%d Hz: %.1f dB", rate, signal_to_noise(ideal, samples))
+		testing.expectf(
+			t,
+			signal_to_noise(ideal, samples) > 50,
+			"%d Hz: %.1f dB",
+			rate,
+			signal_to_noise(ideal, samples),
+		)
 		// The step from the last frame to the first is one of the sound's own.
 		steepest: i32
 		for i in 1 ..< len(samples) {
 			steepest = max(steepest, abs(i32(samples[i]) - i32(samples[i - 1])))
 		}
 		step := abs(i32(samples[0]) - i32(samples[len(samples) - 1]))
-		testing.expectf(t, step <= steepest + steepest / 4, "%d Hz: a step of %d, and %d elsewhere", rate, step, steepest)
+		testing.expectf(
+			t,
+			step <= steepest + steepest / 4,
+			"%d Hz: a step of %d, and %d elsewhere",
+			rate,
+			step,
+			steepest,
+		)
 	}
 	check(t, 24000, 440)
 	check(t, 44100, 440)
@@ -176,9 +199,19 @@ the_channels_setting_chooses :: proc(t: ^testing.T) {
 // A long sound streams by itself, a short one does not, and the setting says otherwise for either.
 @(test)
 the_stream_setting_and_the_length_choose :: proc(t: ^testing.T) {
-	long := make([]i16, (AUDIO_STREAM_SECONDS + 1) * format.AUDIO_SAMPLE_RATE, context.temp_allocator)
+	long := make(
+		[]i16,
+		(AUDIO_STREAM_SECONDS + 1) * format.AUDIO_SAMPLE_RATE,
+		context.temp_allocator,
+	)
 	short := [?]i16{1, 2, 3, 4}
-	tree := make_tree(t, {{"content/audio/long.wav", wav(long, 1, 48000)}, {"content/audio/short.wav", wav(short[:], 1, 48000)}})
+	tree := make_tree(
+		t,
+		{
+			{"content/audio/long.wav", wav(long, 1, 48000)},
+			{"content/audio/short.wav", wav(short[:], 1, 48000)},
+		},
+	)
 	defer remove_tree(tree)
 	options := tree_options(tree)
 	testing.expect(t, cook(options, {.Audio}, log_problems = false).ok)
@@ -207,7 +240,14 @@ a_bad_sound_fails :: proc(t: ^testing.T) {
 	testing.expect_value(t, pass.cooked[.Audio], 0)
 
 	samples := [?]i16{1, 2}
-	testing.expect(t, os.write_entire_file(fmt.tprintf("%s/content/audio/broken.wav", tree.dir), wav(samples[:], 1, 48000)) == nil)
+	testing.expect(
+		t,
+		os.write_entire_file(
+			fmt.tprintf("%s/content/audio/broken.wav", tree.dir),
+			wav(samples[:], 1, 48000),
+		) ==
+		nil,
+	)
 	testing.expect(t, cook(options, {.Audio}, log_problems = false).ok)
 	set_settings(t, tree, "audio/broken.wav", {{"stream", "maybe"}})
 	testing.expect(t, !cook(options, {.Audio}, log_problems = false).ok)
@@ -237,7 +277,9 @@ loop_tone :: proc(frames, channels: int) -> []i16 {
 	samples := make([]i16, frames * channels, context.temp_allocator)
 	for i in 0 ..< frames {
 		for c in 0 ..< channels {
-			samples[i * channels + c] = i16(math.sin(f64(i) * f64(480 + c * 240) * math.TAU / 48000) * 12000)
+			samples[i * channels + c] = i16(
+				math.sin(f64(i) * f64(480 + c * 240) * math.TAU / 48000) * 12000,
+			)
 		}
 	}
 	return samples
@@ -246,12 +288,25 @@ loop_tone :: proc(frames, channels: int) -> []i16 {
 // Decodes a blob's Vorbis data with miniaudio, as this package must not link stb_vorbis as well, and returns the frames
 // that a pass keeps.
 @(private = "file")
-decode_vorbis_pass :: proc(t: ^testing.T, data: []byte, channels: int, frames, skip: u64) -> []i16 {
+decode_vorbis_pass :: proc(
+	t: ^testing.T,
+	data: []byte,
+	channels: int,
+	frames, skip: u64,
+) -> []i16 {
 	config := ma.decoder_config_init(.s16, u32(channels), 48000)
 	decoder: ma.decoder
-	testing.expect_value(t, ma.decoder_init_memory(raw_data(data), len(data), &config, &decoder), ma.result.SUCCESS)
+	testing.expect_value(
+		t,
+		ma.decoder_init_memory(raw_data(data), len(data), &config, &decoder),
+		ma.result.SUCCESS,
+	)
 	defer ma.decoder_uninit(&decoder)
-	all := make([]i16, (frames + skip + 2 * AUDIO_ROLL_FRAMES) * u64(channels), context.temp_allocator)
+	all := make(
+		[]i16,
+		(frames + skip + 2 * AUDIO_ROLL_FRAMES) * u64(channels),
+		context.temp_allocator,
+	)
 	read: u64
 	ma.decoder_read_pcm_frames(&decoder, raw_data(all), u64(len(all) / channels), &read)
 	testing.expect(t, read >= skip + frames)
@@ -268,7 +323,14 @@ decode_opus_pass :: proc(t: ^testing.T, data: []byte, channels: int, frames, ski
 	block: [AUDIO_OPUS_PACKET_FRAMES * 2]i16
 	for at := 0; at < len(data); {
 		size := int(data[at]) | int(data[at + 1]) << 8
-		count := opus.decode(decoder, &data[at + 2], i32(size), &block[0], AUDIO_OPUS_PACKET_FRAMES, 0)
+		count := opus.decode(
+			decoder,
+			&data[at + 2],
+			i32(size),
+			&block[0],
+			AUDIO_OPUS_PACKET_FRAMES,
+			0,
+		)
 		testing.expect_value(t, count, AUDIO_OPUS_PACKET_FRAMES)
 		append(&all, ..block[:AUDIO_OPUS_PACKET_FRAMES * channels])
 		at += 2 + size
@@ -328,7 +390,14 @@ the_format_setting_chooses :: proc(t: ^testing.T) {
 			testing.expect_value(t, v.frames, FRAMES)
 			bytes := format.audio_data(data_v, v)
 			testing.expect(t, pcm_size / len(bytes) >= 5)
-			testing.expect(t, signal_to_noise(source, decode_vorbis_pass(t, bytes, channels, v.frames, u64(v.skip))) > 15)
+			testing.expect(
+				t,
+				signal_to_noise(
+					source,
+					decode_vorbis_pass(t, bytes, channels, v.frames, u64(v.skip)),
+				) >
+				15,
+			)
 		}
 
 		set_settings(t, tree, "audio/tone.wav", {{"format", "opus"}})
@@ -339,7 +408,14 @@ the_format_setting_chooses :: proc(t: ^testing.T) {
 			testing.expect_value(t, o.frames, FRAMES)
 			bytes := format.audio_data(data_o, o)
 			testing.expect(t, pcm_size / len(bytes) >= 5)
-			testing.expect(t, signal_to_noise(source, decode_opus_pass(t, bytes, channels, o.frames, u64(o.skip))) > 15)
+			testing.expect(
+				t,
+				signal_to_noise(
+					source,
+					decode_opus_pass(t, bytes, channels, o.frames, u64(o.skip)),
+				) >
+				15,
+			)
 		}
 
 		set_settings(t, tree, "audio/tone.wav", {{"format", "mp4"}})
@@ -394,7 +470,12 @@ when WRITE_AUDIO_FIXTURES {
 				endian.put_u32(out[8:], .Little, u32(fixture.channels))
 				endian.put_u32(out[12:], .Little, skip)
 				copy(out[16:], coded)
-				path := fmt.tprintf("%s../../lib/core/audio/codec/testdata/%s.%s", #directory, fixture.name, names[i])
+				path := fmt.tprintf(
+					"%s../../lib/core/audio/codec/testdata/%s.%s",
+					#directory,
+					fixture.name,
+					names[i],
+				)
 				testing.expect(t, os.write_entire_file(path, out) == nil)
 			}
 		}

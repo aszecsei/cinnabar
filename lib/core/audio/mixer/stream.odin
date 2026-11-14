@@ -54,7 +54,9 @@ stream_take :: proc(m: ^Mixer, sound: ^Sound_Data, loop: bool) -> ^Stream {
 			continue
 		}
 		if stream.ring == nil {
-			stream.ring = ([^]i16)(m.host.allocate(STREAM_RING_FRAMES * 2 * size_of(i16), align_of(i16)))
+			stream.ring = ([^]i16)(
+				m.host.allocate(STREAM_RING_FRAMES * 2 * size_of(i16), align_of(i16)),
+			)
 			if stream.ring == nil {
 				return nil
 			}
@@ -91,7 +93,15 @@ stream_decoder_init :: proc(m: ^Mixer, stream: ^Stream, sound: ^Sound_Data) -> b
 		}
 		stream.decoder_memory = ([^]byte)(memory)[:size]
 	}
-	return codec.decoder_init(&stream.decoder, sound.format, channels, sound.frames, u64(sound.skip), sound.size, stream.decoder_memory)
+	return codec.decoder_init(
+		&stream.decoder,
+		sound.format,
+		channels,
+		sound.frames,
+		u64(sound.skip),
+		sound.size,
+		stream.decoder_memory,
+	)
 }
 
 @(private)
@@ -108,7 +118,10 @@ streams_busy :: proc(m: ^Mixer) -> bool {
 @(private)
 stream_ready :: proc(stream: ^Stream) -> bool {
 	ended := sync.atomic_load_explicit(&stream.ended, .Acquire)
-	return bool(ended) || sync.atomic_load_explicit(&stream.write.value, .Acquire) > stream.read.value
+	return(
+		bool(ended) ||
+		sync.atomic_load_explicit(&stream.write.value, .Acquire) > stream.read.value \
+	)
 }
 
 // stream_read takes the next frame on the mix thread. ok is false past the end. A stream that the reader has not kept up
@@ -144,7 +157,8 @@ stream_fill :: proc(m: ^Mixer, stream: ^Stream) {
 		return
 	}
 	write := sync.atomic_load_explicit(&stream.write.value, .Relaxed)
-	free := STREAM_RING_FRAMES - int(write - sync.atomic_load_explicit(&stream.read.value, .Acquire))
+	free :=
+		STREAM_RING_FRAMES - int(write - sync.atomic_load_explicit(&stream.read.value, .Acquire))
 	if free < STREAM_CHUNK_FRAMES {
 		return
 	}

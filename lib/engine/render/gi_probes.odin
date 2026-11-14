@@ -52,10 +52,10 @@ Gi_Probe_Params :: struct {
 
 @(rodata)
 GI_PROBE_PARAMS := [Quality_Level]Gi_Probe_Params {
-	.Low    = {levels = 2, spacing = 1, rays = 32, budget = 1024},
+	.Low = {levels = 2, spacing = 1, rays = 32, budget = 1024},
 	.Medium = {levels = 3, spacing = 0, rays = 64, budget = 2048},
-	.High   = {levels = 3, spacing = 0, rays = 64, budget = 4096},
-	.Ultra  = {levels = 4, spacing = 0, rays = 64, budget = 8192},
+	.High = {levels = 3, spacing = 0, rays = 64, budget = 4096},
+	.Ultra = {levels = 4, spacing = 0, rays = 64, budget = 8192},
 }
 
 // The engine's world probe shaders, by their .meta files.
@@ -114,8 +114,8 @@ Probe_Level :: struct {
 
 // Probe_Grid matches Probe_Grid in gi_probes.hlsli.
 Probe_Grid :: struct {
-	levels:        [MAX_PROBE_LEVELS]Probe_Level,
-	rotation:      [3][4]f32,
+	levels:         [MAX_PROBE_LEVELS]Probe_Level,
+	rotation:       [3][4]f32,
 	level_count:    u32,
 	radiance:       u32,
 	irradiance:     u32,
@@ -256,7 +256,13 @@ probe_box_half :: proc() -> [3]i64 {
 // place_probe_level moves a level's box to follow the camera, when the camera is more than GI_PROBE_RECENTER probes
 // from its middle, and gives how far it moved, in probes. A box's first placement moves it a whole grid, which resets
 // every probe.
-place_probe_level :: proc(level: ^Gi_Probe_Level, camera: ecs.World_Position, spacing: u32) -> (delta: [3]i64) {
+place_probe_level :: proc(
+	level: ^Gi_Probe_Level,
+	camera: ecs.World_Position,
+	spacing: u32,
+) -> (
+	delta: [3]i64,
+) {
 	cell := probe_cell(camera, spacing)
 	half := probe_box_half()
 	if !level.valid {
@@ -295,7 +301,11 @@ probe_level_min :: proc(min_cell: [3]i64, camera: ecs.World_Position, spacing: u
 
 // probe_storage_cell is the place in a level's box of the probe at a storage.
 probe_storage_cell :: proc(storage: u32, phase: [3]i32) -> [3]i32 {
-	s := [3]i32{i32(storage % GI_PROBE_GRID.x), i32((storage / GI_PROBE_GRID.x) % GI_PROBE_GRID.y), i32(storage / (GI_PROBE_GRID.x * GI_PROBE_GRID.y))}
+	s := [3]i32 {
+		i32(storage % GI_PROBE_GRID.x),
+		i32((storage / GI_PROBE_GRID.x) % GI_PROBE_GRID.y),
+		i32(storage / (GI_PROBE_GRID.x * GI_PROBE_GRID.y)),
+	}
 	grid := [3]i32{i32(GI_PROBE_GRID.x), i32(GI_PROBE_GRID.y), i32(GI_PROBE_GRID.z)}
 	return ((s - phase) % grid + grid) % grid
 }
@@ -310,7 +320,12 @@ mark_moved_probes :: proc(schedule: ^Probe_Schedule, level: int, phase: [3]i32, 
 	for storage in u32(0) ..< GI_PROBE_COUNT {
 		cell := probe_storage_cell(storage, phase)
 		before := [3]i64{i64(cell.x), i64(cell.y), i64(cell.z)} + delta
-		if before.x < 0 || before.y < 0 || before.z < 0 || before.x >= grid.x || before.y >= grid.y || before.z >= grid.z {
+		if before.x < 0 ||
+		   before.y < 0 ||
+		   before.z < 0 ||
+		   before.x >= grid.x ||
+		   before.y >= grid.y ||
+		   before.z >= grid.z {
 			schedule.pending[level][storage / 64] |= 1 << (storage % 64)
 		}
 	}
@@ -319,7 +334,12 @@ mark_moved_probes :: proc(schedule: ^Probe_Schedule, level: int, phase: [3]i32, 
 // probe_jobs are the probes that a frame updates, at most budget, each its level above 24 bits and its storage below:
 // the probes that wait since their reset, the finest level's first, then each level's share of the rest in turn from
 // its cursor.
-probe_jobs :: proc(schedule: ^Probe_Schedule, levels: u32, budget: int, allocator := context.allocator) -> []u32 {
+probe_jobs :: proc(
+	schedule: ^Probe_Schedule,
+	levels: u32,
+	budget: int,
+	allocator := context.allocator,
+) -> []u32 {
 	jobs := make([dynamic]u32, 0, budget, allocator)
 	for l in 0 ..< int(levels) {
 		for &word, w in schedule.pending[l] {
@@ -343,14 +363,45 @@ probe_jobs :: proc(schedule: ^Probe_Schedule, levels: u32, budget: int, allocato
 // ensure_probe_storage makes the probes' textures and states for a count of levels and a spacing, and their rays'
 // buffers for a count of rays. New textures reset every level.
 @(private = "file")
-ensure_probe_storage :: proc(r: ^Renderer, p: ^Gi_Probe_State, params: Gi_Probe_Params, rays: int) {
+ensure_probe_storage :: proc(
+	r: ^Renderer,
+	p: ^Gi_Probe_State,
+	params: Gi_Probe_Params,
+	rays: int,
+) {
 	platform := r.platform
 	if p.radiance == {} || p.level_count != params.levels || p.spacing != params.spacing {
 		destroy_probe_storage(p, platform)
-		size := [2]u32{GI_PROBE_GRID.x * GI_PROBE_GRID.y * GI_PROBE_TILE, GI_PROBE_GRID.z * params.levels * GI_PROBE_TILE}
-		p.radiance = platform.gpu_create_texture({size = size, format = GI_PROBE_FORMAT, usage = {.Sampled, .Storage}, label = "gi probe radiance"}, nil)
-		p.irradiance = platform.gpu_create_texture({size = size, format = GI_PROBE_FORMAT, usage = {.Sampled, .Storage}, label = "gi probe irradiance"}, nil)
-		p.states = platform.gpu_create_buffer({size = u32(MAX_PROBE_LEVELS * GI_PROBE_COUNT * 4), usage = {.Storage}, label = "gi probe states"}, nil)
+		size := [2]u32 {
+			GI_PROBE_GRID.x * GI_PROBE_GRID.y * GI_PROBE_TILE,
+			GI_PROBE_GRID.z * params.levels * GI_PROBE_TILE,
+		}
+		p.radiance = platform.gpu_create_texture(
+			{
+				size = size,
+				format = GI_PROBE_FORMAT,
+				usage = {.Sampled, .Storage},
+				label = "gi probe radiance",
+			},
+			nil,
+		)
+		p.irradiance = platform.gpu_create_texture(
+			{
+				size = size,
+				format = GI_PROBE_FORMAT,
+				usage = {.Sampled, .Storage},
+				label = "gi probe irradiance",
+			},
+			nil,
+		)
+		p.states = platform.gpu_create_buffer(
+			{
+				size = u32(MAX_PROBE_LEVELS * GI_PROBE_COUNT * 4),
+				usage = {.Storage},
+				label = "gi probe states",
+			},
+			nil,
+		)
 		p.level_count, p.spacing = params.levels, params.spacing
 		p.levels = {}
 		p.schedule = {}
@@ -362,9 +413,22 @@ ensure_probe_storage :: proc(r: ^Renderer, p: ^Gi_Probe_State, params: Gi_Probe_
 		}
 		shared.ray_capacity = max(rays, shared.ray_capacity * 2)
 		capacity := u32(shared.ray_capacity)
-		shared.hits = platform.gpu_create_buffer({size = capacity * size_of(Hit_Record), usage = {.Storage}, label = "gi probe hits"}, nil)
-		shared.surfaces = platform.gpu_create_buffer({size = capacity * size_of(Hit_Surface), usage = {.Storage}, label = "gi probe surfaces"}, nil)
-		shared.rays = platform.gpu_create_buffer({size = capacity * 16, usage = {.Storage}, label = "gi probe rays"}, nil)
+		shared.hits = platform.gpu_create_buffer(
+			{size = capacity * size_of(Hit_Record), usage = {.Storage}, label = "gi probe hits"},
+			nil,
+		)
+		shared.surfaces = platform.gpu_create_buffer(
+			{
+				size = capacity * size_of(Hit_Surface),
+				usage = {.Storage},
+				label = "gi probe surfaces",
+			},
+			nil,
+		)
+		shared.rays = platform.gpu_create_buffer(
+			{size = capacity * 16, usage = {.Storage}, label = "gi probe rays"},
+			nil,
+		)
 	}
 }
 
@@ -380,7 +444,9 @@ probe_lights :: proc(f: ^Frame, reach: f32) -> []u32 {
 		if record.type == .Directional || linalg.length(record.position) - record.range > reach {
 			continue
 		}
-		importance[i] = max(record.color.r, record.color.g, record.color.b) / max(linalg.length2(record.position), 1)
+		importance[i] =
+			max(record.color.r, record.color.g, record.color.b) /
+			max(linalg.length2(record.position), 1)
 		append(&order, u32(i))
 	}
 	for i in 1 ..< len(order) {
@@ -396,7 +462,12 @@ probe_lights :: proc(f: ^Frame, reach: f32) -> []u32 {
 probe_rotation :: proc(frame: u32) -> (rows: [3][4]f32) {
 	u1, u2, u3 := halton(frame + 1, 2), halton(frame + 1, 3), halton(frame + 1, 5)
 	a, b := math.sqrt(1 - u1), math.sqrt(u1)
-	q := quaternion(x = a * math.sin(math.TAU * u2), y = a * math.cos(math.TAU * u2), z = b * math.sin(math.TAU * u3), w = b * math.cos(math.TAU * u3))
+	q := quaternion(
+		x = a * math.sin(math.TAU * u2),
+		y = a * math.cos(math.TAU * u2),
+		z = b * math.sin(math.TAU * u3),
+		w = b * math.cos(math.TAU * u3),
+	)
 	m := linalg.matrix3_from_quaternion(q)
 	for r in 0 ..< 3 {
 		rows[r] = {m[r, 0], m[r, 1], m[r, 2], 0}
@@ -454,7 +525,12 @@ add_gi_probe_passes :: proc(f: ^Frame, settings: Gi_Settings, lit: History) -> ^
 		grid.levels[l] = {
 			min   = {min.x, min.y, min.z, meters},
 			phase = {phase.x, phase.y, phase.z, 0},
-			delta = {clamp_delta(delta.x, GI_PROBE_GRID.x), clamp_delta(delta.y, GI_PROBE_GRID.y), clamp_delta(delta.z, GI_PROBE_GRID.z), 0},
+			delta = {
+				clamp_delta(delta.x, GI_PROBE_GRID.x),
+				clamp_delta(delta.y, GI_PROBE_GRID.y),
+				clamp_delta(delta.z, GI_PROBE_GRID.z),
+				0,
+			},
 		}
 		reach = meters * f32(GI_PROBE_GRID.x)
 	}
@@ -495,16 +571,42 @@ add_gi_probe_passes :: proc(f: ^Frame, settings: Gi_Settings, lit: History) -> ^
 	ray_count := u32(len(pf.jobs)) * params.rays
 
 	step :: proc(f: ^Frame, pf: ^Gi_Probe_Frame, pass: Probe_Pass, ray_count: u32) -> ^Probe_Step {
-		return new_clone(Probe_Step{f, pf, &pf.hit_light, pass, ray_count, pf.hits, pf.surfaces, pf.rays}, f.renderer.platform.frame_allocator)
+		return new_clone(
+			Probe_Step{f, pf, &pf.hit_light, pass, ray_count, pf.hits, pf.surfaces, pf.rays},
+			f.renderer.platform.frame_allocator,
+		)
 	}
-	pass := add_compute_pass(g, "gi probe reset", run_probe_pass, step(f, pf, .Reset, ray_count), queue = .Compute)
+	pass := add_compute_pass(
+		g,
+		"gi probe reset",
+		run_probe_pass,
+		step(f, pf, .Reset, ray_count),
+		queue = .Compute,
+	)
 	write(g, pass, pf.states)
-	pass = add_compute_pass(g, "gi probe trace", run_probe_pass, step(f, pf, .Trace, ray_count), queue = .Compute)
+	pass = add_compute_pass(
+		g,
+		"gi probe trace",
+		run_probe_pass,
+		step(f, pf, .Trace, ray_count),
+		queue = .Compute,
+	)
 	read_accel(g, pass, ray_scene_accel(f))
 	write(g, pass, pf.hits)
-	shaded := add_hit_shading(f, reservation, {hits = pf.hits, surfaces = pf.surfaces, count = ray_count}, .Compute)
+	shaded := add_hit_shading(
+		f,
+		reservation,
+		{hits = pf.hits, surfaces = pf.surfaces, count = ray_count},
+		.Compute,
+	)
 	add_hit_light_passes(f, &pf.hit_light, "gi probe", shaded, pf.rays)
-	pass = add_compute_pass(g, "gi probe update", run_probe_pass, step(f, pf, .Update, ray_count), queue = .Compute)
+	pass = add_compute_pass(
+		g,
+		"gi probe update",
+		run_probe_pass,
+		step(f, pf, .Update, ray_count),
+		queue = .Compute,
+	)
 	read(g, pass, pf.rays)
 	write(g, pass, pf.radiance)
 	write(g, pass, pf.irradiance)
@@ -517,12 +619,24 @@ add_gi_probe_passes :: proc(f: ^Frame, settings: Gi_Settings, lit: History) -> ^
 // (gi_probe_screen.hlsl), in a pass of its own. The world probes' rays, the split cascades' and the traced reflections'
 // take their light so. It takes the batch that add_hit_shading shaded this frame, so it never reads old surfaces.
 @(private)
-add_hit_light_passes :: proc(f: ^Frame, inputs: ^Hit_Light_Inputs, name: string, shaded: Hit_Shaded, rays: Buffer) {
+add_hit_light_passes :: proc(
+	f: ^Frame,
+	inputs: ^Hit_Light_Inputs,
+	name: string,
+	shaded: Hit_Shaded,
+	rays: Buffer,
+) {
 	hits, surfaces, ray_count := shaded.hits, shaded.surfaces, shaded.count
 	g := f.graph
 	allocator := f.renderer.platform.frame_allocator
 	light_name := strings.concatenate({name, " light"}, allocator)
-	pass := add_compute_pass(g, light_name, run_probe_pass, new_clone(Probe_Step{f, nil, inputs, .Light, ray_count, hits, surfaces, rays}, allocator), queue = .Compute)
+	pass := add_compute_pass(
+		g,
+		light_name,
+		run_probe_pass,
+		new_clone(Probe_Step{f, nil, inputs, .Light, ray_count, hits, surfaces, rays}, allocator),
+		queue = .Compute,
+	)
 	read_accel(g, pass, ray_scene_accel(f))
 	read(g, pass, hits)
 	read(g, pass, surfaces)
@@ -535,7 +649,16 @@ add_hit_light_passes :: proc(f: ^Frame, inputs: ^Hit_Light_Inputs, name: string,
 	write(g, pass, rays)
 	if inputs.lit.valid {
 		screen_name := strings.concatenate({name, " screen"}, allocator)
-		pass = add_compute_pass(g, screen_name, run_probe_pass, new_clone(Probe_Step{f, nil, inputs, .Screen, ray_count, hits, surfaces, rays}, allocator), queue = .Compute)
+		pass = add_compute_pass(
+			g,
+			screen_name,
+			run_probe_pass,
+			new_clone(
+				Probe_Step{f, nil, inputs, .Screen, ray_count, hits, surfaces, rays},
+				allocator,
+			),
+			queue = .Compute,
+		)
 		read(g, pass, hits)
 		read(g, pass, surfaces)
 		read(g, pass, f.depth)
@@ -548,20 +671,34 @@ add_hit_light_passes :: proc(f: ^Frame, inputs: ^Hit_Light_Inputs, name: string,
 // and otherwise a grid of no levels, whose hits take the ambient light; the punctual lights whose spheres come within
 // reach of the camera; and a lit scene of last frame. ok is false when an upload fails.
 @(private)
-hit_light_inputs :: proc(f: ^Frame, reach: f32, lit: History) -> (inputs: Hit_Light_Inputs, ok: bool) {
+hit_light_inputs :: proc(
+	f: ^Frame,
+	reach: f32,
+	lit: History,
+) -> (
+	inputs: Hit_Light_Inputs,
+	ok: bool,
+) {
 	r := f.renderer
 	platform := r.platform
 	lights_upload := platform.gpu_upload(GI_MAX_PROBE_LIGHTS * 4, 16) or_return
 	lights := probe_lights(f, reach)
 	copy(lights_upload.data, ([^]byte)(raw_data(lights))[:len(lights) * 4])
-	inputs = {lights = lights_upload, light_count = u32(len(lights)), lit = lit}
+	inputs = {
+		lights      = lights_upload,
+		light_count = u32(len(lights)),
+		lit         = lit,
+	}
 	if f.gi != nil && f.gi.probes != nil {
 		pf := f.gi.probes
-		inputs.grid, inputs.radiance, inputs.irradiance, inputs.states = pf.upload, pf.radiance, pf.irradiance, pf.states
+		inputs.grid, inputs.radiance, inputs.irradiance, inputs.states =
+			pf.upload, pf.radiance, pf.irradiance, pf.states
 		return inputs, true
 	}
 	inputs.grid = platform.gpu_upload(size_of(Probe_Grid), 16) or_return
-	(^Probe_Grid)(raw_data(inputs.grid.data))^ = {sampler_index = gpu.sampler_index(r.post.sampler)}
+	(^Probe_Grid)(raw_data(inputs.grid.data))^ = {
+		sampler_index = gpu.sampler_index(r.post.sampler),
+	}
 	return inputs, true
 }
 
@@ -630,7 +767,9 @@ run_probe_pass :: proc(ctx: ^Pass_Context) {
 	switch step.pass {
 	case .Reset:
 		probes_count := pf.grid.level_count * GI_PROBE_COUNT
-		pipeline, groups = probes.reset.pipeline, {(probes_count + GI_PROBE_RESET_GROUP - 1) / GI_PROBE_RESET_GROUP, 1, 1}
+		pipeline, groups =
+			probes.reset.pipeline,
+			{(probes_count + GI_PROBE_RESET_GROUP - 1) / GI_PROBE_RESET_GROUP, 1, 1}
 	case .Trace:
 		pipeline, groups = probes.trace.pipeline, {ray_groups, 1, 1}
 	case .Light:

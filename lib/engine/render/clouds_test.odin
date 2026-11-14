@@ -36,7 +36,8 @@ the_default_clouds_are_off_with_a_top_at_4000 :: proc(t: ^testing.T) {
 	testing.expect_value(t, s.far_coverage, 0.5)
 	// The settings keep their ranges, whatever a volume blends.
 	wild := DEFAULT_CLOUDS
-	wild.coverage, wild.weather_size, wild.thickness, wild.shadow_strength = {true, 3}, {true, 10}, {true, 1}, {true, -2}
+	wild.coverage, wild.weather_size, wild.thickness, wild.shadow_strength =
+		{true, 3}, {true, 10}, {true, 1}, {true, -2}
 	wild.base_variation = {true, 7}
 	s = cloud_settings(wild)
 	testing.expect_value(t, s.coverage, 1)
@@ -52,13 +53,27 @@ the_cloud_shell_is_the_segment_through_the_layer :: proc(t: ^testing.T) {
 	// From the ground, looking up: the bottom, then the top, where the heights say.
 	t0, t1, hit := cloud_shell(1, 1, BOTTOM, TOP, EARTH)
 	testing.expect(t, hit && t0 <= t1)
-	testing.expect(t, near(cloud_height_at(1, 1, t0, EARTH), BOTTOM, 1) && near(cloud_height_at(1, 1, t1, EARTH), TOP, 1))
+	testing.expect(
+		t,
+		near(cloud_height_at(1, 1, t0, EARTH), BOTTOM, 1) &&
+		near(cloud_height_at(1, 1, t1, EARTH), TOP, 1),
+	)
 	// Along the horizon from the ground, the layer is about sqrt(2 R bottom) away.
 	horizon := math.sqrt(2 * EARTH * BOTTOM)
 	t0, t1, hit = cloud_shell(1, 0, BOTTOM, TOP, EARTH)
 	testing.expect(t, hit && t0 <= t1)
-	testing.expectf(t, near(t0, horizon, horizon * 0.01), "the horizon's bottom is at %v, not about %v", t0, horizon)
-	testing.expect(t, near(cloud_height_at(1, 0, t0, EARTH), BOTTOM, 1) && near(cloud_height_at(1, 0, t1, EARTH), TOP, 1))
+	testing.expectf(
+		t,
+		near(t0, horizon, horizon * 0.01),
+		"the horizon's bottom is at %v, not about %v",
+		t0,
+		horizon,
+	)
+	testing.expect(
+		t,
+		near(cloud_height_at(1, 0, t0, EARTH), BOTTOM, 1) &&
+		near(cloud_height_at(1, 0, t1, EARTH), TOP, 1),
+	)
 	// Straight down from the ground: the shell is on the far side of the planet, past the ground, so there are no clouds.
 	ground, grounded := cloud_ground(1, -1, EARTH)
 	testing.expect(t, grounded && near(ground, 1, 0.01))
@@ -77,7 +92,10 @@ the_cloud_shell_is_the_segment_through_the_layer :: proc(t: ^testing.T) {
 	t0, t1, hit = cloud_shell(inside, -1, BOTTOM, TOP, EARTH)
 	testing.expect(t, hit && t0 == 0 && near(cloud_height_at(inside, -1, t1, EARTH), BOTTOM, 1))
 	t0, t1, hit = cloud_shell(inside, 0, BOTTOM, TOP, EARTH)
-	testing.expect(t, hit && t0 == 0 && t1 > 0 && near(cloud_height_at(inside, 0, t1, EARTH), TOP, 1))
+	testing.expect(
+		t,
+		hit && t0 == 0 && t1 > 0 && near(cloud_height_at(inside, 0, t1, EARTH), TOP, 1),
+	)
 
 	// Above the layer: nothing looking up or along the horizon, the top then the bottom looking down.
 	above := f32(6000)
@@ -87,7 +105,11 @@ the_cloud_shell_is_the_segment_through_the_layer :: proc(t: ^testing.T) {
 	testing.expect(t, !hit)
 	t0, t1, hit = cloud_shell(above, -1, BOTTOM, TOP, EARTH)
 	testing.expect(t, hit && t0 <= t1)
-	testing.expect(t, near(cloud_height_at(above, -1, t0, EARTH), TOP, 1) && near(cloud_height_at(above, -1, t1, EARTH), BOTTOM, 1))
+	testing.expect(
+		t,
+		near(cloud_height_at(above, -1, t0, EARTH), TOP, 1) &&
+		near(cloud_height_at(above, -1, t1, EARTH), BOTTOM, 1),
+	)
 	t0, t1, hit = cloud_shell(above, -0.05, BOTTOM, TOP, EARTH)
 	testing.expect(t, hit && t0 <= t1 && near(cloud_height_at(above, -0.05, t0, EARTH), TOP, 1))
 	// A ray from above that grazes the layer's top without reaching the bottom leaves through the top.
@@ -106,7 +128,16 @@ the_height_along_a_ray_keeps_its_precision :: proc(t: ^testing.T) {
 				p := [3]f64{0, f64(EARTH) + f64(h0), 0} + d * f64(distance)
 				exact := linalg.length(p) - f64(EARTH)
 				got := cloud_height_at(h0, mu, distance, EARTH)
-				testing.expectf(t, abs(f64(got) - exact) <= 1, "h0 %v mu %v t %v: %v, exactly %v", h0, mu, distance, got, exact)
+				testing.expectf(
+					t,
+					abs(f64(got) - exact) <= 1,
+					"h0 %v mu %v t %v: %v, exactly %v",
+					h0,
+					mu,
+					distance,
+					got,
+					exact,
+				)
 			}
 		}
 	}
@@ -150,17 +181,33 @@ the_shadow_map_is_centered_under_the_camera_along_the_sun :: proc(t: ^testing.T)
 	uv, inside := cloud_shadow_uv({0, 0, 0}, to_sun, bottom_rel, center, CLOUD_SHADOW_EXTENT)
 	testing.expect(t, inside)
 	texel := 0.5 / f32(size)
-	testing.expectf(t, near(uv.x, 0.5, texel + 1e-5) && near(uv.y, 0.5, texel + 1e-5), "the camera reads the map at %v", uv)
+	testing.expectf(
+		t,
+		near(uv.x, 0.5, texel + 1e-5) && near(uv.y, 0.5, texel + 1e-5),
+		"the camera reads the map at %v",
+		uv,
+	)
 	// The center is on the map's texels in the render origin's space, wherever the camera is in it.
 	offset := [2]f32{123.456, -78.9}
 	moved := cloud_shadow_center(to_sun, bottom_rel, offset, size)
 	step := f32(CLOUD_SHADOW_EXTENT) / f32(size)
 	for axis in 0 ..< 2 {
 		snapped := (moved[axis] + offset[axis]) / step
-		testing.expectf(t, near(snapped, math.round(snapped), 1e-3), "the center is not on a texel: %v", moved)
+		testing.expectf(
+			t,
+			near(snapped, math.round(snapped), 1e-3),
+			"the center is not on a texel: %v",
+			moved,
+		)
 	}
 	// A point under the map's edge reads outside it, and so does one with the sun on the horizon.
-	_, inside = cloud_shadow_uv({CLOUD_SHADOW_EXTENT, 0, 0}, to_sun, bottom_rel, center, CLOUD_SHADOW_EXTENT)
+	_, inside = cloud_shadow_uv(
+		{CLOUD_SHADOW_EXTENT, 0, 0},
+		to_sun,
+		bottom_rel,
+		center,
+		CLOUD_SHADOW_EXTENT,
+	)
 	testing.expect(t, !inside)
 	_, inside = cloud_shadow_uv({0, 0, 0}, {1, 0.01, 0}, bottom_rel, center, CLOUD_SHADOW_EXTENT)
 	testing.expect(t, !inside)
@@ -177,7 +224,10 @@ the_weather_and_noise_offsets_reduce_to_their_periods :: proc(t: ^testing.T) {
 	testing.expect(t, near(far_noise.x, noise.x, 1e-3) && near(far_noise.y, noise.y, 1e-3))
 	// A negative offset folds into the period.
 	weather, noise = cloud_offsets({-100, -100}, size)
-	testing.expect(t, near(weather.x, size - 100, 1e-3) && near(noise.x, CLOUD_NOISE_PERIOD - 100, 1e-3))
+	testing.expect(
+		t,
+		near(weather.x, size - 100, 1e-3) && near(noise.x, CLOUD_NOISE_PERIOD - 100, 1e-3),
+	)
 	// The wind blows toward its azimuth, from +z toward +x.
 	wind := wind_vector(3, 90)
 	testing.expect(t, near(wind.x, 3, 1e-5) && near(wind.y, 0, 1e-5))
@@ -187,22 +237,43 @@ the_weather_and_noise_offsets_reduce_to_their_periods :: proc(t: ^testing.T) {
 	along := [2]f64{math.sin(a), math.cos(a)}
 	across := [2]f64{-along.y, along.x}
 	base := cirrus_offset({123.4, -56.7}, 30)
-	wrapped := cirrus_offset({123.4 + along.x * CIRRUS_PERIOD * CIRRUS_STRETCH, -56.7 + along.y * CIRRUS_PERIOD * CIRRUS_STRETCH}, 30)
-	testing.expectf(t, near(wrapped.x, base.x, 1e-2) && near(wrapped.y, base.y, 1e-2), "along: %v != %v", wrapped, base)
-	wrapped = cirrus_offset({123.4 + across.x * CIRRUS_PERIOD, -56.7 + across.y * CIRRUS_PERIOD}, 30)
-	testing.expectf(t, near(wrapped.x, base.x, 1e-2) && near(wrapped.y, base.y, 1e-2), "across: %v != %v", wrapped, base)
+	wrapped := cirrus_offset(
+		{
+			123.4 + along.x * CIRRUS_PERIOD * CIRRUS_STRETCH,
+			-56.7 + along.y * CIRRUS_PERIOD * CIRRUS_STRETCH,
+		},
+		30,
+	)
+	testing.expectf(
+		t,
+		near(wrapped.x, base.x, 1e-2) && near(wrapped.y, base.y, 1e-2),
+		"along: %v != %v",
+		wrapped,
+		base,
+	)
+	wrapped = cirrus_offset(
+		{123.4 + across.x * CIRRUS_PERIOD, -56.7 + across.y * CIRRUS_PERIOD},
+		30,
+	)
+	testing.expectf(
+		t,
+		near(wrapped.x, base.x, 1e-2) && near(wrapped.y, base.y, 1e-2),
+		"across: %v != %v",
+		wrapped,
+		base,
+	)
 }
 
 // What one frame of the clouds did: its live passes by name, and what the frame saw.
 @(private = "file")
 Cloud_Run :: struct {
-	passes:  map[string]int,
-	clouds:  bool,
-	shadow:  bool,
-	valid:   bool,
-	bake:    bool,
-	sun:     bool,
-	ok:      bool,
+	passes: map[string]int,
+	clouds: bool,
+	shadow: bool,
+	valid:  bool,
+	bake:   bool,
+	sun:    bool,
+	ok:     bool,
 }
 
 @(private = "file")
@@ -221,10 +292,11 @@ run_cloud_frame :: proc(
 	g := begin(platform, cache)
 	f := new(Frame, platform.frame_allocator)
 	f^ = {
-		renderer = r, state = &r.view,
-		graph    = &g,
-		size     = {64, 32},
-		view     = {rotation = 1, projection = Perspective{1, 0.05}},
+		renderer = r,
+		state = &r.view,
+		graph = &g,
+		size = {64, 32},
+		view = {rotation = 1, projection = Perspective{1, 0.05}},
 	}
 	f.view_projection = view_projection(f.view, 2)
 	f.depth = create_texture(&g, {size = f.size, format = DEPTH_FORMAT, label = "depth"})
@@ -238,7 +310,16 @@ run_cloud_frame :: proc(
 	// The sun's light record, as extract_lights writes it, which the sky names.
 	lf := new(Light_Frame, platform.frame_allocator)
 	lf.records = make([dynamic]Light_Record, platform.frame_allocator)
-	append(&lf.records, Light_Record{type = .Directional, direction = -linalg.normalize(sky.sun_direction), color = {3, 3, 3}, shadow = -1, mask = -1})
+	append(
+		&lf.records,
+		Light_Record {
+			type = .Directional,
+			direction = -linalg.normalize(sky.sun_direction),
+			color = {3, 3, 3},
+			shadow = -1,
+			mask = -1,
+		},
+	)
 	lf.directional_count = 1
 	lf.directional[0] = sky.sun
 	f.lights = lf
@@ -259,8 +340,13 @@ run_cloud_frame :: proc(
 	keep_pass(&g, consumer)
 	if cf := f.clouds; cf != nil {
 		run.clouds = true
-		run.shadow, run.valid, run.bake, run.sun = cf.shadow != 0, cf.history.valid, cf.bake_noise, cf.sun
-		testing.expect(t, (lf.records[0].flags & {.Cloud_Shadow}) != {}, "the sun's record does not cast the cloud shadow")
+		run.shadow, run.valid, run.bake, run.sun =
+			cf.shadow != 0, cf.history.valid, cf.bake_noise, cf.sun
+		testing.expect(
+			t,
+			(lf.records[0].flags & {.Cloud_Shadow}) != {},
+			"the sun's record does not cast the cloud shadow",
+		)
 	}
 	run.ok = execute(&g)
 	run.passes = make(map[string]int, platform.frame_allocator)
@@ -270,9 +356,21 @@ run_cloud_frame :: proc(
 		}
 		switch node.name {
 		case "clouds noise", "clouds shadow", "clouds march", "clouds temporal":
-			testing.expectf(t, node.queue == .Compute, "%s is on the %v queue", node.name, node.queue)
+			testing.expectf(
+				t,
+				node.queue == .Compute,
+				"%s is on the %v queue",
+				node.name,
+				node.queue,
+			)
 		case "clouds composite":
-			testing.expectf(t, node.queue == .Graphics, "%s is on the %v queue", node.name, node.queue)
+			testing.expectf(
+				t,
+				node.queue == .Graphics,
+				"%s is on the %v queue",
+				node.name,
+				node.queue,
+			)
 		}
 	}
 	return
@@ -317,9 +415,14 @@ the_clouds_bake_their_noise_once_and_draw_every_frame_after :: proc(t: ^testing.
 		p.pipeline = platform.gpu_create_compute_pipeline({compute = []byte{1}, label = "test"})
 	}
 	defer clouds_destroy(v, &platform)
-	r.post.sampler = platform.gpu_create_sampler({filter = .Linear, address = .Clamp, label = "test clamp"})
+	r.post.sampler = platform.gpu_create_sampler(
+		{filter = .Linear, address = .Clamp, label = "test clamp"},
+	)
 	defer platform.gpu_destroy_sampler(r.post.sampler)
-	exposure := platform.gpu_create_buffer({size = 16, usage = {.Storage}, label = "exposure"}, nil)
+	exposure := platform.gpu_create_buffer(
+		{size = 16, usage = {.Storage}, label = "exposure"},
+		nil,
+	)
 	defer platform.gpu_destroy_buffer(exposure)
 	cache: Texture_Cache
 	defer cache_destroy(&cache, &platform)
@@ -346,7 +449,11 @@ the_clouds_bake_their_noise_once_and_draw_every_frame_after :: proc(t: ^testing.
 		testing.expectf(t, run.passes[name] == 1, "%s ran %d times", name, run.passes[name])
 	}
 	testing.expect_value(t, v.noise_state, Cloud_Noise_State.Ready)
-	testing.expect(t, r.view.clouds.shadow_map != {} && r.view.clouds.shadow_size == CLOUD_PARAMS[.Low].shadow_size)
+	testing.expect(
+		t,
+		r.view.clouds.shadow_map != {} &&
+		r.view.clouds.shadow_size == CLOUD_PARAMS[.Low].shadow_size,
+	)
 	free_all(platform.frame_allocator)
 
 	run = run_cloud_frame(t, r, &cache, exposure, settings, sky, true)

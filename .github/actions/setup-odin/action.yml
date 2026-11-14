@@ -1,0 +1,27 @@
+name: Set up Odin
+description: Install the Odin release that the repository builds with, and just.
+
+inputs:
+  version:
+    description: The Odin release tag.
+    default: dev-2026-10
+
+runs:
+  using: composite
+  steps:
+    - uses: taiki-e/install-action@v2
+      with:
+        tool: just@1.58.0
+    - name: Install Odin
+      shell: bash
+      env:
+        ODIN_VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        temp=$(cygpath -u "$RUNNER_TEMP")
+        curl -sSfL -o "$temp/odin.zip" "https://github.com/odin-lang/Odin/releases/download/$ODIN_VERSION/odin-windows-amd64-$ODIN_VERSION.zip"
+        unzip -q "$temp/odin.zip" -d "$temp/odin"
+        # The archive may put odin.exe in a folder of its own.
+        bin=$(dirname "$(find "$temp/odin" -name odin.exe | head -n 1)")
+        cygpath -w "$bin" >> "$GITHUB_PATH"
+        "$bin/odin.exe" version

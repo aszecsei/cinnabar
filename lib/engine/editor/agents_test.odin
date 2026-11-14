@@ -18,11 +18,17 @@ import "cinnabar:engine/ecs"
 import "cinnabar:engine/editor/link"
 
 @(private = "file")
-BOARD :: format.Guid{0 = 0xb8}
+BOARD :: format.Guid {
+	0 = 0xb8,
+}
 @(private = "file")
-DECISION :: format.Guid{0 = 0xd8}
+DECISION :: format.Guid {
+	0 = 0xd8,
+}
 @(private = "file")
-PLANNER :: format.Guid{0 = 0xd9}
+PLANNER :: format.Guid {
+	0 = 0xd9,
+}
 
 @(private = "file")
 Fixture :: struct {
@@ -50,12 +56,35 @@ value :: proc(v: $T) -> (bytes: [format.BLACKBOARD_VALUE_SIZE]byte) {
 @(private = "file")
 board_blob :: proc() -> []byte {
 	keys := make([]format.Blackboard_Key_Contents, 6, context.temp_allocator)
-	keys[0] = {name = "health", type = .Float, default = value(f32(0.25))}
-	keys[1] = {name = "mood", type = .Enum, enum_names = slice.clone([]string{"calm", "alert"}, context.temp_allocator)}
-	keys[2] = {name = "target", type = .Entity}
-	keys[3] = {name = "home", type = .Position, default = value(ecs.position_offset({}, {1, 2.5, 0}))}
-	keys[4] = {name = "heading", type = .Vector, default = value([3]f32{0, 0, 1})}
-	keys[5] = {name = "count", type = .Int, default = value(i32(3))}
+	keys[0] = {
+		name    = "health",
+		type    = .Float,
+		default = value(f32(0.25)),
+	}
+	keys[1] = {
+		name       = "mood",
+		type       = .Enum,
+		enum_names = slice.clone([]string{"calm", "alert"}, context.temp_allocator),
+	}
+	keys[2] = {
+		name = "target",
+		type = .Entity,
+	}
+	keys[3] = {
+		name    = "home",
+		type    = .Position,
+		default = value(ecs.position_offset({}, {1, 2.5, 0})),
+	}
+	keys[4] = {
+		name    = "heading",
+		type    = .Vector,
+		default = value([3]f32{0, 0, 1}),
+	}
+	keys[5] = {
+		name    = "count",
+		type    = .Int,
+		default = value(i32(3)),
+	}
 	return format.blackboard_write({guid = BOARD, key = 77, keys = keys}, context.temp_allocator)
 }
 
@@ -83,12 +112,18 @@ decision_blob :: proc() -> []byte {
 			state_size = timers,
 			blackboard = BOARD,
 			blackboard_key = 77,
-			nodes = slice.clone([]format.Decision_Node_Contents{
-				{id = 1, kind = names[.Selector], condition = none, action = none},
-				{id = 2, kind = names[.Action], condition = none, action = 0},
-				{id = 3, kind = names[.Wait], condition = none, action = none},
-			}, context.temp_allocator),
-			actions = slice.clone([]format.Decision_Action_Contents{{name = "no"}}, context.temp_allocator),
+			nodes = slice.clone(
+				[]format.Decision_Node_Contents {
+					{id = 1, kind = names[.Selector], condition = none, action = none},
+					{id = 2, kind = names[.Action], condition = none, action = 0},
+					{id = 3, kind = names[.Wait], condition = none, action = none},
+				},
+				context.temp_allocator,
+			),
+			actions = slice.clone(
+				[]format.Decision_Action_Contents{{name = "no"}},
+				context.temp_allocator,
+			),
 			technique_data = format.tree_write(tree, context.temp_allocator),
 			source_path = "game/ai/test.decision",
 		},
@@ -109,7 +144,12 @@ planner_blob :: proc() -> []byte {
 			state_size = 8,
 			blackboard = BOARD,
 			blackboard_key = 77,
-			nodes = slice.clone([]format.Decision_Node_Contents{{id = 1, kind = "goal", condition = none, action = none}}, context.temp_allocator),
+			nodes = slice.clone(
+				[]format.Decision_Node_Contents {
+					{id = 1, kind = "goal", condition = none, action = none},
+				},
+				context.temp_allocator,
+			),
 			source_path = "game/ai/planner.decision",
 		},
 		context.temp_allocator,
@@ -123,24 +163,56 @@ planner_think :: proc(t: ^ai.Think_Context) {
 
 // planner_scores is one option, which runs, whose score is a third of the thinks, and one consideration.
 @(private = "file")
-planner_scores :: proc(decision: ai.Decision, board: ai.Board, state: []byte, allocator: runtime.Allocator) -> []ai.Option_Score {
+planner_scores :: proc(
+	decision: ai.Decision,
+	board: ai.Board,
+	state: []byte,
+	allocator: runtime.Allocator,
+) -> []ai.Option_Score {
 	considerations := make([]ai.Consideration_Score, 1, allocator)
-	considerations[0] = {id = 7, input = 0.25, score = 0.123456}
+	considerations[0] = {
+		id    = 7,
+		input = 0.25,
+		score = 0.123456,
+	}
 	result := make([]ai.Option_Score, 1, allocator)
-	result[0] = {id = 1, action = "flee", score = f32((^u32)(&state[0])^) / 3, chosen = true, considerations = considerations}
+	result[0] = {
+		id             = 1,
+		action         = "flee",
+		score          = f32((^u32)(&state[0])^) / 3,
+		chosen         = true,
+		considerations = considerations,
+	}
 	return result
 }
 
 // planner_plan is a plan of two steps, the second of which runs, for goal 3, by one method of a task.
 @(private = "file")
-planner_plan :: proc(decision: ai.Decision, board: ai.Board, state: []byte, allocator: runtime.Allocator) -> ai.Plan_View {
+planner_plan :: proc(
+	decision: ai.Decision,
+	board: ai.Board,
+	state: []byte,
+	allocator: runtime.Allocator,
+) -> ai.Plan_View {
 	goals := make([]ai.Goal_Priority, 1, allocator)
-	goals[0] = {id = 3, priority = 2.5}
+	goals[0] = {
+		id       = 3,
+		priority = 2.5,
+	}
 	steps := make([]ai.Plan_Step, 2, allocator)
-	steps[0] = {id = 4, action = "walk"}
-	steps[1] = {id = 5, action = "flee"}
+	steps[0] = {
+		id     = 4,
+		action = "walk",
+	}
+	steps[1] = {
+		id     = 5,
+		action = "flee",
+	}
 	methods := make([]ai.Plan_Method, 1, allocator)
-	methods[0] = {task = 6, method = 7}
+	methods[0] = {
+		task   = 6,
+		method = 7,
+	}
 	return {goal = 3, goals = goals, steps = steps, methods = methods, step = 1, nodes = 9}
 }
 
@@ -194,8 +266,16 @@ setup :: proc(t: ^testing.T) -> ^Fixture {
 	ai.init(&f.ai, &f.platform, &f.assets)
 	ai.register(&f.ai, &f.world)
 	behavior_tree.register(&f.ai)
-	ai.register_module(&f.ai, .Goap, {think = planner_think, check = proc(_: ai.Decision, _: ai.Board) -> bool {return true}, scores = planner_scores, plan = planner_plan})
-	ai.register_action(&f.ai, {name = "no", tick = proc(a: ^ai.Action_Context) -> ai.Action_Status {return .Failed}})
+	ai.register_module(&f.ai, .Goap, {
+		think = planner_think,
+		check = proc(_: ai.Decision, _: ai.Board) -> bool {return true},
+		scores = planner_scores,
+		plan = planner_plan,
+	})
+	ai.register_action(&f.ai, {
+		name = "no",
+		tick = proc(a: ^ai.Action_Context) -> ai.Action_Status {return .Failed},
+	})
 	ai.register_action(&f.ai, {name = "walk", params = {{"steps", .Int}, {"line", .String}}})
 
 	init(&f.editor, &f.platform, &f.assets, nil, nil, nil, &f.ai)
@@ -248,7 +328,10 @@ polled :: proc(f: ^Fixture, incoming: ..link.Message) -> []link.Message {
 		bytes := make([dynamic]byte, context.temp_allocator)
 		link.write_message(&bytes, m)
 		header, _ := link.read_header(bytes[:])
-		append(&encoded, core.Editor_Message{kind = header.kind, payload = bytes[link.HEADER_SIZE:]})
+		append(
+			&encoded,
+			core.Editor_Message{kind = header.kind, payload = bytes[link.HEADER_SIZE:]},
+		)
 	}
 	clear(&f.out)
 	poll(&f.editor, &f.world, nil, 1, encoded[:], &f.out)
@@ -256,7 +339,11 @@ polled :: proc(f: ^Fixture, incoming: ..link.Message) -> []link.Message {
 	rest := f.out[:]
 	for len(rest) > 0 {
 		header, _ := link.read_header(rest)
-		message, ok := link.decode_message(header.kind, rest[link.HEADER_SIZE:][:header.length], context.temp_allocator)
+		message, ok := link.decode_message(
+			header.kind,
+			rest[link.HEADER_SIZE:][:header.length],
+			context.temp_allocator,
+		)
 		if ok {
 			append(&found, message)
 		}
@@ -311,7 +398,11 @@ a_watched_agents_view_goes_out_when_it_changes :: proc(t: ^testing.T) {
 	testing.expect_value(t, ecs.Entity(view.entity), e)
 	testing.expect_value(t, format.Guid(view.decision), DECISION)
 	// By the nodes' IDs in the text. The selector and the wait run, and the action failed.
-	expected := []link.Agent_Node{{id = 1, running = true}, {id = 2, last = .Failed}, {id = 3, running = true}}
+	expected := []link.Agent_Node {
+		{id = 1, running = true},
+		{id = 2, last = .Failed},
+		{id = 3, running = true},
+	}
 	testing.expect(t, slice.equal(view.nodes, expected), "the nodes differ")
 	testing.expect_value(t, len(view.values), 6)
 	testing.expect_value(t, value_of(view, "health"), link.Agent_Value{"health", .Float, "0.25"})
@@ -327,7 +418,11 @@ a_watched_agents_view_goes_out_when_it_changes :: proc(t: ^testing.T) {
 	list = views(f)
 	if testing.expect_value(t, len(list), 1) {
 		testing.expect_value(t, value_of(list[0], "mood").text, "alert")
-		testing.expect_value(t, value_of(list[0], "target").text, fmt.tprintf("#%d:%d", ecs.entity_index(e), ecs.entity_generation(e)))
+		testing.expect_value(
+			t,
+			value_of(list[0], "target").text,
+			fmt.tprintf("#%d:%d", ecs.entity_index(e), ecs.entity_generation(e)),
+		)
 	}
 	testing.expect_value(t, len(views(f)), 0)
 }
@@ -448,7 +543,11 @@ a_scoring_and_planning_agents_view_has_its_options_and_plan :: proc(t: ^testing.
 		thinks := f32(math.round(f64(o.score) * 3))
 		testing.expect_value(t, o.score, f32(math.round(f64(thinks / 3) * 1000) / 1000))
 		testing.expect_value(t, len(o.considerations), 1)
-		testing.expect_value(t, o.considerations[0], link.Agent_Consideration{id = 7, input = 0.25, score = 0.123})
+		testing.expect_value(
+			t,
+			o.considerations[0],
+			link.Agent_Consideration{id = 7, input = 0.25, score = 0.123},
+		)
 	}
 	if testing.expect_value(t, len(view.plan), 1) {
 		p := view.plan[0]

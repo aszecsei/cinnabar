@@ -47,14 +47,31 @@ teardown_modules :: proc(f: Module_Fixture) {
 
 // add_script compiles source and writes its blob into the cache, as the cooker would.
 @(private)
-add_script :: proc(t: ^testing.T, f: ^Module_Fixture, name, source: string, requires: []format.Require_Entry = nil) -> format.Guid {
+add_script :: proc(
+	t: ^testing.T,
+	f: ^Module_Fixture,
+	name, source: string,
+	requires: []format.Require_Entry = nil,
+) -> format.Guid {
 	f.next += 1
-	guid := format.Guid{0 = f.next}
+	guid := format.Guid {
+		0 = f.next,
+	}
 	bytecode := compile(source)
 	defer luau.free_bytecode(raw_data(bytecode))
-	blob := format.script_write({guid = guid, bytecode = bytecode, requires = requires, source_path = name}, context.temp_allocator)
+	blob := format.script_write(
+		{guid = guid, bytecode = bytecode, requires = requires, source_path = name},
+		context.temp_allocator,
+	)
 	buffer: [32]u8
-	testing.expect(t, os.write_entire_file(fmt.tprintf("%s/%s.blob", f.dir, format.guid_format(guid, &buffer)), blob) == nil)
+	testing.expect(
+		t,
+		os.write_entire_file(
+			fmt.tprintf("%s/%s.blob", f.dir, format.guid_format(guid, &buffer)),
+			blob,
+		) ==
+		nil,
+	)
 	return guid
 }
 
@@ -88,7 +105,13 @@ a_module_that_returns_nothing_gives_true :: proc(t: ^testing.T) {
 	defer teardown_modules(f)
 	context.user_ptr = f.base
 	empty := add_script(t, &f, "game/empty.luau", "local x = 1")
-	main := add_script(t, &f, "game/main.luau", "Test.report(require('./empty') == true and 1 or 0)", {{"./empty", empty}})
+	main := add_script(
+		t,
+		&f,
+		"game/main.luau",
+		"Test.report(require('./empty') == true and 1 or 0)",
+		{{"./empty", empty}},
+	)
 	_, ok := spawn_script(&f.runtime, main)
 	testing.expect(t, ok)
 	testing.expect_value(t, len(f.reports), 1)
@@ -103,7 +126,13 @@ modules_have_their_own_globals :: proc(t: ^testing.T) {
 	defer teardown_modules(f)
 	context.user_ptr = f.base
 	writer := add_script(t, &f, "game/writer.luau", "leaked = 1; return true")
-	main := add_script(t, &f, "game/main.luau", "require('./writer'); Test.report(leaked == nil and 1 or 0)", {{"./writer", writer}})
+	main := add_script(
+		t,
+		&f,
+		"game/main.luau",
+		"require('./writer'); Test.report(leaked == nil and 1 or 0)",
+		{{"./writer", writer}},
+	)
 	_, ok := spawn_script(&f.runtime, main)
 	testing.expect(t, ok)
 	testing.expect_value(t, len(f.reports), 1)
@@ -159,7 +188,9 @@ a_require_cycle_fails_at_runtime_too :: proc(t: ^testing.T) {
 	context.user_ptr = f.base
 	context.logger = capture_errors(f.base)
 	// The cooker rejects cycles. A blob from an old cook can still have one.
-	a_guid := format.Guid{0 = 100}
+	a_guid := format.Guid {
+		0 = 100,
+	}
 	b := add_script(t, &f, "game/b.luau", "return require('./a')", {{"./a", a_guid}})
 	f.next = 99
 	a := add_script(t, &f, "game/a.luau", "return require('./b')", {{"./b", b}})
@@ -176,8 +207,19 @@ memory_counts_toward_the_module_that_allocated_it :: proc(t: ^testing.T) {
 	defer teardown_modules(f)
 	context.user_ptr = f.base
 	// A module whose top level holds about 800 KB, and a main script that holds a little.
-	big := add_script(t, &f, "game/big.luau", "local t = table.create(100000, 1.5); return {t = t}")
-	main := add_script(t, &f, "game/main.luau", "local big = require('./big'); local mine = {1, 2, 3}; coroutine.yield()", {{"./big", big}})
+	big := add_script(
+		t,
+		&f,
+		"game/big.luau",
+		"local t = table.create(100000, 1.5); return {t = t}",
+	)
+	main := add_script(
+		t,
+		&f,
+		"game/main.luau",
+		"local big = require('./big'); local mine = {1, 2, 3}; coroutine.yield()",
+		{{"./big", big}},
+	)
 	_, ok := spawn_script(&f.runtime, main)
 	testing.expect(t, ok)
 
@@ -187,7 +229,12 @@ memory_counts_toward_the_module_that_allocated_it :: proc(t: ^testing.T) {
 	for m in modules {
 		bytes[m.name] = m.bytes
 	}
-	testing.expectf(t, bytes["game/big.luau"] >= 100000 * 8, "big has %d bytes", bytes["game/big.luau"])
+	testing.expectf(
+		t,
+		bytes["game/big.luau"] >= 100000 * 8,
+		"big has %d bytes",
+		bytes["game/big.luau"],
+	)
 	testing.expect(t, bytes["game/main.luau"] > 0 && bytes["game/main.luau"] < 100000)
 	testing.expect(t, total > bytes["game/big.luau"] + bytes["game/main.luau"])
 }

@@ -20,7 +20,13 @@ BUNDLE_MAX_NAME :: 32
 BUNDLE_GLOBAL_SCENES_KEY :: "bundles.global_scenes"
 
 // bundle_parse_scenes parses the value of BUNDLE_GLOBAL_SCENES_KEY: GUIDs between commas, or nothing.
-bundle_parse_scenes :: proc(value: string, allocator := context.allocator) -> (scenes: []Guid, ok: bool) {
+bundle_parse_scenes :: proc(
+	value: string,
+	allocator := context.allocator,
+) -> (
+	scenes: []Guid,
+	ok: bool,
+) {
 	trimmed := strings.trim_space(value)
 	if trimmed == "" {
 		return nil, true
@@ -98,7 +104,9 @@ bundle_head_size :: proc(start: []byte) -> int {
 		return 0
 	}
 	header := (^Bundle_Header)(raw_data(start))
-	if header.magic != BUNDLE_MAGIC || header.layout != bundle_layout() || header.head_size < size_of(Bundle_Header) {
+	if header.magic != BUNDLE_MAGIC ||
+	   header.layout != bundle_layout() ||
+	   header.head_size < size_of(Bundle_Header) {
 		return 0
 	}
 	return int(header.head_size)
@@ -106,7 +114,14 @@ bundle_head_size :: proc(start: []byte) -> int {
 
 // bundle_view checks a bundle's head against the size of its file: its header, that its entries are sorted, aligned and
 // inside the file, and that its dependencies' names are inside the head.
-bundle_view :: proc(head: []byte, file_size: i64) -> (header: ^Bundle_Header, entries: []Bundle_Entry, ok: bool) {
+bundle_view :: proc(
+	head: []byte,
+	file_size: i64,
+) -> (
+	header: ^Bundle_Header,
+	entries: []Bundle_Entry,
+	ok: bool,
+) {
 	size := bundle_head_size(head)
 	if size == 0 || size != len(head) || uintptr(raw_data(head)) % align_of(Bundle_Header) != 0 {
 		return
@@ -116,7 +131,11 @@ bundle_view :: proc(head: []byte, file_size: i64) -> (header: ^Bundle_Header, en
 		return nil, nil, false
 	}
 	inside :: proc(head: []byte, s: Slice, $T: typeid) -> bool {
-		return u64(s.offset) + u64(s.size) <= u64(len(head)) && s.size % size_of(T) == 0 && s.offset % align_of(T) == 0
+		return(
+			u64(s.offset) + u64(s.size) <= u64(len(head)) &&
+			s.size % size_of(T) == 0 &&
+			s.offset % align_of(T) == 0 \
+		)
 	}
 	if !inside(head, header.entries, Bundle_Entry) || !inside(head, header.dependencies, Slice) {
 		return nil, nil, false
@@ -126,7 +145,9 @@ bundle_view :: proc(head: []byte, file_size: i64) -> (header: ^Bundle_Header, en
 		if i > 0 && guid_compare(entries[i - 1].guid, e.guid) != .Less {
 			return nil, nil, false
 		}
-		if e.offset % BLOB_ALIGN != 0 || e.offset < u64(header.head_size) || e.offset + u64(e.stored_size) > header.file_size {
+		if e.offset % BLOB_ALIGN != 0 ||
+		   e.offset < u64(header.head_size) ||
+		   e.offset + u64(e.stored_size) > header.file_size {
 			return nil, nil, false
 		}
 		if e.codec > max(Bundle_Codec) || (e.codec == .None && e.stored_size != e.size) {
@@ -134,7 +155,9 @@ bundle_view :: proc(head: []byte, file_size: i64) -> (header: ^Bundle_Header, en
 		}
 	}
 	for d in bundle_dependency_slices(head, header) {
-		if u64(d.offset) + u64(d.size) > u64(len(head)) || d.size == 0 || d.size > BUNDLE_MAX_NAME {
+		if u64(d.offset) + u64(d.size) > u64(len(head)) ||
+		   d.size == 0 ||
+		   d.size > BUNDLE_MAX_NAME {
 			return nil, nil, false
 		}
 	}
@@ -153,7 +176,11 @@ bundle_dependency_slices :: proc "contextless" (head: []byte, header: ^Bundle_He
 }
 
 // bundle_dependency is the name of a bundle's dependency, which points into its head.
-bundle_dependency :: proc "contextless" (head: []byte, header: ^Bundle_Header, index: int) -> string {
+bundle_dependency :: proc "contextless" (
+	head: []byte,
+	header: ^Bundle_Header,
+	index: int,
+) -> string {
 	return blob_string(head, bundle_dependency_slices(head, header)[index])
 }
 
@@ -163,9 +190,13 @@ bundle_dependency_count :: proc "contextless" (header: ^Bundle_Header) -> int {
 
 // bundle_find is the entry of a GUID, by binary search.
 bundle_find :: proc(entries: []Bundle_Entry, guid: Guid) -> (entry: Bundle_Entry, found: bool) {
-	index := slice.binary_search_by(entries, guid, proc(e: Bundle_Entry, guid: Guid) -> slice.Ordering {
-		return guid_compare(e.guid, guid)
-	}) or_return
+	index := slice.binary_search_by(
+		entries,
+		guid,
+		proc(e: Bundle_Entry, guid: Guid) -> slice.Ordering {
+			return guid_compare(e.guid, guid)
+		},
+	) or_return
 	return entries[index], true
 }
 
@@ -179,7 +210,11 @@ Bundle_Blob :: struct {
 }
 
 // bundle_write builds a bundle of blobs, in any order, that depends on the bundles that dependencies names.
-bundle_write :: proc(blobs: []Bundle_Blob, dependencies: []string, allocator := context.allocator) -> []byte {
+bundle_write :: proc(
+	blobs: []Bundle_Blob,
+	dependencies: []string,
+	allocator := context.allocator,
+) -> []byte {
 	sorted := slice.clone(blobs, context.temp_allocator)
 	slice.sort_by(sorted, proc(a, b: Bundle_Blob) -> bool {
 		return guid_less(a.guid, b.guid)

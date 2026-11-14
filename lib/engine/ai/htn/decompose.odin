@@ -37,7 +37,11 @@ Decompose_Result :: enum u8 {
 }
 
 // decomposition_of is the decomposition in an agent's module state.
-decomposition_of :: proc(h: format.Htn_Data, layout: format.Htn_State, state: []byte) -> Decomposition {
+decomposition_of :: proc(
+	h: format.Htn_Data,
+	layout: format.Htn_State,
+	state: []byte,
+) -> Decomposition {
 	k, m, a := int(h.header.key_count), int(h.header.method_count), int(h.header.action_count)
 	return {
 		header = (^format.Htn_Search)(&state[layout.search]),
@@ -65,7 +69,12 @@ decompose_begin :: proc(d: ^Decomposition, bounded: bool) {
 // decompose_step takes at most budget tasks of a decomposition. It is found when no task is left. A bounded one whose
 // record is equal to the running plan's, record, is not better, since the same record gives the same plan, and neither
 // is one that fails.
-decompose_step :: proc(d: ^Decomposition, h: format.Htn_Data, record: []format.Htn_Choice, budget: int) -> Decompose_Result {
+decompose_step :: proc(
+	d: ^Decomposition,
+	h: format.Htn_Data,
+	record: []format.Htn_Choice,
+	budget: int,
+) -> Decompose_Result {
 	s := d.header
 	budget := budget
 	for {
@@ -116,7 +125,12 @@ is_usable :: proc(bits: []u32, index: u32) -> bool {
 // method that failed. While a bounded decomposition is equal to the running plan's record, it takes no method after
 // the record's. It is false when no method is left, or when the record or the stack of methods is full.
 @(private)
-take_task :: proc(d: ^Decomposition, h: format.Htn_Data, record: []format.Htn_Choice, task: u32) -> bool {
+take_task :: proc(
+	d: ^Decomposition,
+	h: format.Htn_Data,
+	record: []format.Htn_Choice,
+	task: u32,
+) -> bool {
 	s := d.header
 	at := s.choice_count
 	if at >= format.MAX_HTN_RECORD || s.frame_count >= format.MAX_HTN_DEPTH {
@@ -141,7 +155,8 @@ take_task :: proc(d: ^Decomposition, h: format.Htn_Data, record: []format.Htn_Ch
 	for k in first ..< last {
 		index := t.first_method + k
 		m := h.methods[index]
-		if !is_usable(d.usable_methods, index) || !ai.plan_tests_hold(h.tests[m.first_test:][:m.test_count], d.world) {
+		if !is_usable(d.usable_methods, index) ||
+		   !ai.plan_tests_hold(h.tests[m.first_test:][:m.test_count], d.world) {
 			continue
 		}
 		d.choices[at] = {
@@ -167,7 +182,9 @@ take_task :: proc(d: ^Decomposition, h: format.Htn_Data, record: []format.Htn_Ch
 take_action :: proc(d: ^Decomposition, h: format.Htn_Data, action: u32) -> bool {
 	s := d.header
 	a := h.actions[action]
-	if !is_usable(d.usable_actions, action) || int(s.plan_length) >= len(d.plan) || !ai.plan_tests_hold(h.tests[a.first_test:][:a.test_count], d.world) {
+	if !is_usable(d.usable_actions, action) ||
+	   int(s.plan_length) >= len(d.plan) ||
+	   !ai.plan_tests_hold(h.tests[a.first_test:][:a.test_count], d.world) {
 		return false
 	}
 	ai.plan_apply(h.effects[a.first_effect:][:a.effect_count], d.world)

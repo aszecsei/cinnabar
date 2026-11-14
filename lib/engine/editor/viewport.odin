@@ -108,20 +108,20 @@ Target_Told :: struct {
 // Viewport_Tools is what the tools draw and pick with. It lives in Editor and outlives a session.
 Viewport_Tools :: struct {
 	// The ticket of the last pick that the GPU ran. A new session keeps it, so a pick of the old one comes back stale.
-	ticket:           u32,
+	ticket:                     u32,
 	// What the pick needs to read its results: the words of entity bits, and the projections that the world and the
 	// view model were drawn with.
-	pick_words:       u32,
-	pick_projection:  render.Projection,
+	pick_words:                 u32,
+	pick_projection:            render.Projection,
 	pick_view_model_projection: render.Projection,
 	// The GPU objects, made at the first frame that draws the tools. If they cannot be made, the tools stay off.
-	gpu_ready:        bool,
-	gpu_failed:       bool,
-	pick_pipeline:    render.Shader_Pipeline,
-	overlay_pipeline: render.Shader_Pipeline,
-	icons_pipeline:   render.Shader_Pipeline,
-	results:          gpu.Buffer,
-	readback:         gpu.Buffer,
+	gpu_ready:                  bool,
+	gpu_failed:                 bool,
+	pick_pipeline:              render.Shader_Pipeline,
+	overlay_pipeline:           render.Shader_Pipeline,
+	icons_pipeline:             render.Shader_Pipeline,
+	results:                    gpu.Buffer,
+	readback:                   gpu.Buffer,
 }
 
 // Viewport_Frame is what the frame drew of a scene view that the tools draw on and pick from.
@@ -136,10 +136,10 @@ Viewport_Frame :: struct {
 	output_size: [2]u32,
 	// The debug layer, which the tools draw into, over the debug lines (see docs/rendering/layers-and-output.md#debug).
 	// 0 when the frame has no debug layer, outside Edit, where only the pick runs.
-	target: render.Texture,
+	target:      render.Texture,
 	// The ID buffer, in ID_FORMAT, and the depth that the scene pass wrote with render.view_projection.
-	ids:    render.Texture,
-	depth:  render.Texture,
+	ids:         render.Texture,
+	depth:       render.Texture,
 }
 
 // active is true while an editor is linked: draw_frame then draws the editor's viewports, writes the ID buffer for the
@@ -152,7 +152,12 @@ active :: proc(e: ^Editor) -> bool {
 camera_view :: proc(c: link.Editor_Camera) -> render.View {
 	return {
 		position = {c.position},
-		rotation = quaternion(x = c.rotation.x, y = c.rotation.y, z = c.rotation.z, w = c.rotation.w),
+		rotation = quaternion(
+			x = c.rotation.x,
+			y = c.rotation.y,
+			z = c.rotation.z,
+			w = c.rotation.w,
+		),
 		projection = c.projection == .Orthographic ? render.Orthographic{c.orthographic_height, c.near, c.far} : render.Perspective{c.vertical_fov, c.near},
 	}
 }
@@ -209,7 +214,10 @@ frame_viewports :: proc(e: ^Editor) -> []Frame_Viewport {
 			known = a.generation
 		}
 		if known != shared.generation {
-			pending := Target_Pending{generation = shared.generation, size = shared.size}
+			pending := Target_Pending {
+				generation = shared.generation,
+				size       = shared.size,
+			}
 			pending.prefix_length = copy(pending.prefix[:], shared.prefix)
 			open.announce = pending
 		}
@@ -218,7 +226,17 @@ frame_viewports :: proc(e: ^Editor) -> []Frame_Viewport {
 			open.state = render.View_State{}
 			render.view_state_init(&open.state.?, e.renderer)
 		}
-		append(&views, Frame_Viewport{viewport = i, kind = open.kind, view = camera, size = shared.size, target = shared.texture, state = &open.state.?})
+		append(
+			&views,
+			Frame_Viewport {
+				viewport = i,
+				kind = open.kind,
+				view = camera,
+				size = shared.size,
+				target = shared.texture,
+				state = &open.state.?,
+			},
+		)
 	}
 	for v, i in views {
 		if v.kind == .Game {
@@ -280,7 +298,15 @@ render_overrides :: proc(e: ^Editor, viewport: int) -> (o: Render_Overrides) {
 // at the preset's level or the game's. ok is false when the viewport keeps the game's, or no editor is linked. caps is
 // the device's, which limits the result.
 @(private)
-viewport_quality :: proc(e: ^Editor, base: render.Quality, caps: render.Caps, viewport: int) -> (q: render.Quality, ok: bool) {
+viewport_quality :: proc(
+	e: ^Editor,
+	base: render.Quality,
+	caps: render.Caps,
+	viewport: int,
+) -> (
+	q: render.Quality,
+	ok: bool,
+) {
 	if !active(e) || viewport < 0 || viewport >= MAX_VIEWPORTS {
 		return
 	}
@@ -363,12 +389,12 @@ add_viewport_passes :: proc(e: ^Editor, g: ^render.Graph, w: ^ecs.World, frame: 
 			pick := new(Pick_Pass, platform.frame_allocator)
 			pick^ = {
 				pipeline = v.pick_pipeline.pipeline,
-				ids      = frame.ids,
-				depth    = frame.depth,
-				results  = render.import_buffer(g, v.results),
+				ids = frame.ids,
+				depth = frame.depth,
+				results = render.import_buffer(g, v.results),
 				readback = render.import_buffer(g, v.readback),
-				zeros    = zeros,
-				size     = size,
+				zeros = zeros,
+				size = size,
 				constants = {
 					request = v.ticket,
 					origin = {request.x, request.y},
@@ -394,15 +420,22 @@ add_viewport_passes :: proc(e: ^Editor, g: ^render.Graph, w: ^ecs.World, frame: 
 	}
 	overlay := new(Overlay_Pass, platform.frame_allocator)
 	overlay^ = {
-		pipeline = v.overlay_pipeline.pipeline,
-		ids = frame.ids,
-		depth = frame.depth,
-		slots = slots,
-		view_projection = render.view_projection(frame.view, f32(frame.size.x) / f32(max(frame.size.y, 1))),
+		pipeline        = v.overlay_pipeline.pipeline,
+		ids             = frame.ids,
+		depth           = frame.depth,
+		slots           = slots,
+		view_projection = render.view_projection(
+			frame.view,
+			f32(frame.size.x) / f32(max(frame.size.y, 1)),
+		),
 	}
 	if len(tools.selection) > 0 {
 		if upload, ok := platform.gpu_upload(int(max(words, 1)) * 4, 4); ok {
-			with_descendants(w, tools.selection[:], ([^]u32)(raw_data(upload.data))[:max(words, 1)])
+			with_descendants(
+				w,
+				tools.selection[:],
+				([^]u32)(raw_data(upload.data))[:max(words, 1)],
+			)
 			overlay.selection = upload
 			overlay.outline = true
 		}
@@ -411,8 +444,12 @@ add_viewport_passes :: proc(e: ^Editor, g: ^render.Graph, w: ^ecs.World, frame: 
 		vertices := make([dynamic]Gizmo_Vertex, platform.frame_allocator)
 		box_handle_vertices(viewport.handles[:], viewport.handle_size, frame.view, &vertices)
 		gizmo_vertices(viewport.gizmo, frame.view, &vertices)
-		if upload, ok := platform.gpu_upload(max(len(vertices), 1) * size_of(Gizmo_Vertex), 16); ok && len(vertices) > 0 {
-			copy(upload.data, ([^]byte)(raw_data(vertices))[:len(vertices) * size_of(Gizmo_Vertex)])
+		if upload, ok := platform.gpu_upload(max(len(vertices), 1) * size_of(Gizmo_Vertex), 16);
+		   ok && len(vertices) > 0 {
+			copy(
+				upload.data,
+				([^]byte)(raw_data(vertices))[:len(vertices) * size_of(Gizmo_Vertex)],
+			)
 			overlay.vertices = upload
 			overlay.vertex_count = u32(len(vertices))
 		}
@@ -420,8 +457,12 @@ add_viewport_passes :: proc(e: ^Editor, g: ^render.Graph, w: ^ecs.World, frame: 
 	if e.session.mesh_overlay.active {
 		vertices := make([dynamic]Gizmo_Vertex, platform.frame_allocator)
 		mesh_overlay_vertices(e, w, frame.view, frame.size.y, &vertices)
-		if upload, ok := platform.gpu_upload(max(len(vertices), 1) * size_of(Gizmo_Vertex), 16); ok && len(vertices) > 0 {
-			copy(upload.data, ([^]byte)(raw_data(vertices))[:len(vertices) * size_of(Gizmo_Vertex)])
+		if upload, ok := platform.gpu_upload(max(len(vertices), 1) * size_of(Gizmo_Vertex), 16);
+		   ok && len(vertices) > 0 {
+			copy(
+				upload.data,
+				([^]byte)(raw_data(vertices))[:len(vertices) * size_of(Gizmo_Vertex)],
+			)
 			overlay.mesh_vertices = upload
 			overlay.mesh_vertex_count = u32(len(vertices))
 		}
@@ -441,7 +482,10 @@ scale_pick :: proc(request: link.Pick_Request, frame: Viewport_Frame) -> link.Pi
 	if frame.output_size == frame.size || frame.output_size.x == 0 || frame.output_size.y == 0 {
 		return request
 	}
-	scale := [2]f32{f32(frame.size.x) / f32(frame.output_size.x), f32(frame.size.y) / f32(frame.output_size.y)}
+	scale := [2]f32 {
+		f32(frame.size.x) / f32(frame.output_size.x),
+		f32(frame.size.y) / f32(frame.output_size.y),
+	}
 	r := request
 	r.x = i32(f32(request.x) * scale.x)
 	r.y = i32(f32(request.y) * scale.y)
@@ -480,7 +524,14 @@ Pick_Pass :: struct {
 @(private)
 clear_pick :: proc(ctx: ^render.Pass_Context) {
 	pick := (^Pick_Pass)(ctx.data)
-	gpu.cmd_copy_buffer(ctx.cb, pick.zeros.buffer, pick.zeros.offset, render.gpu_buffer(ctx.graph, pick.results), 0, pick.size)
+	gpu.cmd_copy_buffer(
+		ctx.cb,
+		pick.zeros.buffer,
+		pick.zeros.offset,
+		render.gpu_buffer(ctx.graph, pick.results),
+		0,
+		pick.size,
+	)
 }
 
 @(private)
@@ -502,7 +553,14 @@ run_pick :: proc(ctx: ^render.Pass_Context) {
 copy_pick :: proc(ctx: ^render.Pass_Context) {
 	pick := (^Pick_Pass)(ctx.data)
 	g := ctx.graph
-	gpu.cmd_copy_buffer(ctx.cb, render.gpu_buffer(g, pick.results), 0, render.gpu_buffer(g, pick.readback), 0, pick.size)
+	gpu.cmd_copy_buffer(
+		ctx.cb,
+		render.gpu_buffer(g, pick.results),
+		0,
+		render.gpu_buffer(g, pick.readback),
+		0,
+		pick.size,
+	)
 }
 
 // Matches Push in shaders/overlay.hlsl.
@@ -522,15 +580,15 @@ Overlay_Constants :: struct {
 
 @(private)
 Overlay_Pass :: struct {
-	pipeline:        gpu.Pipeline,
-	ids:             render.Texture,
-	depth:           render.Texture,
-	slots:           u32,
-	view_projection: matrix[4, 4]f32,
-	outline:         bool,
-	selection:       gpu.Upload,
-	vertices:        gpu.Upload,
-	vertex_count:    u32,
+	pipeline:          gpu.Pipeline,
+	ids:               render.Texture,
+	depth:             render.Texture,
+	slots:             u32,
+	view_projection:   matrix[4, 4]f32,
+	outline:           bool,
+	selection:         gpu.Upload,
+	vertices:          gpu.Upload,
+	vertex_count:      u32,
 	// Mesh mode's overlay, which draws before the gizmo, faded where the scene hides it (see mesh_overlay.odin).
 	mesh_vertices:     gpu.Upload,
 	mesh_vertex_count: u32,
@@ -649,8 +707,14 @@ create_viewport_gpu :: proc(e: ^Editor) -> bool {
 	v.pick_pipeline = render.shader_pipeline(PICK_SHADER)
 	v.overlay_pipeline = render.shader_pipeline(OVERLAY_SHADER)
 	v.icons_pipeline = render.shader_pipeline(ICONS_SHADER)
-	v.results = platform.gpu_create_buffer({size = PICK_RESULTS_SIZE, usage = {.Storage}, label = "editor pick results"}, nil)
-	v.readback = platform.gpu_create_buffer({size = PICK_RESULTS_SIZE, usage = {.Readback}, label = "editor pick readback"}, nil)
+	v.results = platform.gpu_create_buffer(
+		{size = PICK_RESULTS_SIZE, usage = {.Storage}, label = "editor pick results"},
+		nil,
+	)
+	v.readback = platform.gpu_create_buffer(
+		{size = PICK_RESULTS_SIZE, usage = {.Readback}, label = "editor pick readback"},
+		nil,
+	)
 	v.gpu_ready = e.assets != nil && v.results != {} && v.readback != {}
 	if !v.gpu_ready {
 		log.error("editor: cannot create the viewport tools' GPU objects")
@@ -669,7 +733,8 @@ destroy_viewport_gpu :: proc(e: ^Editor) {
 	render.destroy_shader_pipeline(&v.icons_pipeline, platform)
 	platform.gpu_destroy_buffer(v.results)
 	platform.gpu_destroy_buffer(v.readback)
-	v.pick_pipeline, v.overlay_pipeline, v.icons_pipeline, v.results, v.readback = {}, {}, {}, {}, {}
+	v.pick_pipeline, v.overlay_pipeline, v.icons_pipeline, v.results, v.readback =
+		{}, {}, {}, {}, {}
 	v.gpu_ready = false
 }
 
@@ -683,8 +748,22 @@ sync_viewport_pipelines :: proc(e: ^Editor, force := false) {
 		return
 	}
 	render.sync_compute_pipeline(&v.pick_pipeline, e.platform, e.assets, PICK_PIPELINE, force)
-	render.sync_graphics_pipeline(&v.overlay_pipeline, e.platform, e.assets, {.Vertex, .Pixel}, OVERLAY_PIPELINE, force)
-	render.sync_graphics_pipeline(&v.icons_pipeline, e.platform, e.assets, {.Vertex, .Pixel}, ICONS_PIPELINE, force)
+	render.sync_graphics_pipeline(
+		&v.overlay_pipeline,
+		e.platform,
+		e.assets,
+		{.Vertex, .Pixel},
+		OVERLAY_PIPELINE,
+		force,
+	)
+	render.sync_graphics_pipeline(
+		&v.icons_pipeline,
+		e.platform,
+		e.assets,
+		{.Vertex, .Pixel},
+		ICONS_PIPELINE,
+		force,
+	)
 }
 
 @(private)
@@ -705,7 +784,11 @@ handle_viewport_message :: proc(e: ^Editor, message: link.Message) -> bool {
 	// A message for a viewport that the game does not have is dropped.
 	viewport :: proc(v: ^View, index: u32) -> ^Viewport {
 		if index >= MAX_VIEWPORTS {
-			log.warnf("editor: the editor names viewport %d, and there are %d", index, MAX_VIEWPORTS)
+			log.warnf(
+				"editor: the editor names viewport %d, and there are %d",
+				index,
+				MAX_VIEWPORTS,
+			)
 			return nil
 		}
 		return &v.viewports[index]
@@ -717,7 +800,10 @@ handle_viewport_message :: proc(e: ^Editor, message: link.Message) -> bool {
 		}
 	case link.Open_Viewport:
 		if p := viewport(v, m.viewport); p != nil {
-			size := [2]u32{u32(clamp(m.width, 1, gpu.MAX_VIEWPORT_SIZE)), u32(clamp(m.height, 1, gpu.MAX_VIEWPORT_SIZE))}
+			size := [2]u32 {
+				u32(clamp(m.width, 1, gpu.MAX_VIEWPORT_SIZE)),
+				u32(clamp(m.height, 1, gpu.MAX_VIEWPORT_SIZE)),
+			}
 			if open, is_open := &p.open.?; is_open {
 				// A viewport of another kind is another camera, whose histories are of no use.
 				if open.kind != m.kind {
@@ -725,7 +811,10 @@ handle_viewport_message :: proc(e: ^Editor, message: link.Message) -> bool {
 				}
 				open.kind, open.size = m.kind, size
 			} else {
-				p.open = Viewport_Open{kind = m.kind, size = size}
+				p.open = Viewport_Open {
+					kind = m.kind,
+					size = size,
+				}
 			}
 		}
 	case link.Close_Viewport:
@@ -763,7 +852,11 @@ handle_viewport_message :: proc(e: ^Editor, message: link.Message) -> bool {
 		}
 	case link.Pick_Request:
 		if len(v.picks) == MAX_PICKS {
-			log.warnf("editor: more than %d picks wait for the GPU, so pick %d is dropped", MAX_PICKS, m.id)
+			log.warnf(
+				"editor: more than %d picks wait for the GPU, so pick %d is dropped",
+				MAX_PICKS,
+				m.id,
+			)
 			return true
 		}
 		append(&v.picks, m)
@@ -874,12 +967,28 @@ finish_pick :: proc(e: ^Editor, w: ^ecs.World, out: ^[dynamic]byte, allocator: r
 	}
 	request := tools.picks[0]
 	ordered_remove(&tools.picks, 0)
-	link.write_message(out, pick_result(w, request, words[:PICK_HEADER / 4 + v.pick_words], v.pick_projection, v.pick_view_model_projection, allocator))
+	link.write_message(
+		out,
+		pick_result(
+			w,
+			request,
+			words[:PICK_HEADER / 4 + v.pick_words],
+			v.pick_projection,
+			v.pick_view_model_projection,
+			allocator,
+		),
+	)
 }
 
 // pick_result reads a pick's results: the header and the bits of entity slots.
 @(private)
-pick_result :: proc(w: ^ecs.World, request: link.Pick_Request, words: []u32, projection, view_model_projection: render.Projection, allocator: runtime.Allocator) -> link.Pick_Result {
+pick_result :: proc(
+	w: ^ecs.World,
+	request: link.Pick_Request,
+	words: []u32,
+	projection, view_model_projection: render.Projection,
+	allocator: runtime.Allocator,
+) -> link.Pick_Result {
 	hits := make([dynamic]link.Pick_Hit, allocator)
 	for word, i in words[PICK_HEADER / 4:] {
 		for bit in 0 ..< u32(32) {
@@ -887,7 +996,10 @@ pick_result :: proc(w: ^ecs.World, request: link.Pick_Request, words: []u32, pro
 				continue
 			}
 			if entity, alive := ecs.slot_entity(w, u32(i) * 32 + bit); alive {
-				append(&hits, link.Pick_Hit{entity = u64(entity), scene_id = scene_id_of(w, entity)})
+				append(
+					&hits,
+					link.Pick_Hit{entity = u64(entity), scene_id = scene_id_of(w, entity)},
+				)
 			}
 		}
 	}
@@ -895,7 +1007,10 @@ pick_result :: proc(w: ^ecs.World, request: link.Pick_Request, words: []u32, pro
 	submesh: i32 = -1
 	if request.width <= 1 && request.height <= 1 && render.id_entity(words[1]) != 0 {
 		// The view model's pixels have the view model's projection (see docs/rendering/layers-and-output.md#view-model).
-		depth = render.view_depth(words[3] & render.VIEW_MODEL_STENCIL != 0 ? view_model_projection : projection, transmute(f32)words[2])
+		depth = render.view_depth(
+			words[3] & render.VIEW_MODEL_STENCIL != 0 ? view_model_projection : projection,
+			transmute(f32)words[2],
+		)
 		submesh = i32(render.id_submesh(words[1]))
 	}
 	return {id = request.id, hits = hits[:], depth = depth, submesh = submesh}
@@ -999,18 +1114,47 @@ gizmo_vertices :: proc(gizmo: link.Gizmo_State, view: render.View, out: ^[dynami
 			u, w := axes[i], axes[(i + 1) % 3]
 			c := color(gizmo, part)
 			near, far := GIZMO_PLANE_NEAR * s, GIZMO_PLANE_FAR * s
-			quad(&b, center + u * near + w * near, center + u * far + w * near, center + u * far + w * far, center + u * near + w * far, c)
+			quad(
+				&b,
+				center + u * near + w * near,
+				center + u * far + w * near,
+				center + u * far + w * far,
+				center + u * near + w * far,
+				c,
+			)
 		}
 		for part, i in AXIS_PARTS {
 			c := color(gizmo, part)
 			ribbon(&b, center, center + axes[i] * (GIZMO_SHAFT * s), GIZMO_WIDTH * s, c)
-			cone(&b, center + axes[i] * (GIZMO_SHAFT * s), axes[i], (1 - GIZMO_SHAFT) * s, GIZMO_CONE * s, c)
+			cone(
+				&b,
+				center + axes[i] * (GIZMO_SHAFT * s),
+				axes[i],
+				(1 - GIZMO_SHAFT) * s,
+				GIZMO_CONE * s,
+				c,
+			)
 		}
 		h := GIZMO_CENTER * s
-		quad(&b, center - right * h - up * h, center + right * h - up * h, center + right * h + up * h, center - right * h + up * h, color(gizmo, .View))
+		quad(
+			&b,
+			center - right * h - up * h,
+			center + right * h - up * h,
+			center + right * h + up * h,
+			center - right * h + up * h,
+			color(gizmo, .View),
+		)
 	case .Rotate:
 		for part, i in AXIS_PARTS {
-			ring(&b, center, axes[(i + 1) % 3], axes[(i + 2) % 3], s, GIZMO_WIDTH * s, color(gizmo, part))
+			ring(
+				&b,
+				center,
+				axes[(i + 1) % 3],
+				axes[(i + 2) % 3],
+				s,
+				GIZMO_WIDTH * s,
+				color(gizmo, part),
+			)
 		}
 		ring(&b, center, right, up, GIZMO_VIEW_RING * s, GIZMO_WIDTH * s, color(gizmo, .View))
 	case .Scale:
@@ -1027,7 +1171,12 @@ gizmo_vertices :: proc(gizmo: link.Gizmo_State, view: render.View, out: ^[dynami
 // box_handle_vertices builds the box handles' triangles, relative to the view: a cube of size meters on each handle, in
 // its box's color, and the hot one in the highlight color. They go before the gizmo, which draws over them.
 @(private)
-box_handle_vertices :: proc(handles: []link.Box_Handle, size: f32, view: render.View, out: ^[dynamic]Gizmo_Vertex) {
+box_handle_vertices :: proc(
+	handles: []link.Box_Handle,
+	size: f32,
+	view: render.View,
+	out: ^[dynamic]Gizmo_Vertex,
+) {
 	right, up, forward := render.view_axes(view)
 	b := gizmo_builder(out, view)
 	for h in handles {
@@ -1082,7 +1231,9 @@ ring :: proc(b: ^Gizmo_Builder, center, u, w: [3]f32, radius, width: f32, color:
 @(private)
 cone :: proc(b: ^Gizmo_Builder, base, axis: [3]f32, length, radius: f32, color: u32) {
 	SEGMENTS :: 12
-	u := linalg.normalize(linalg.cross(axis, abs(axis.y) < 0.9 ? [3]f32{0, 1, 0} : [3]f32{1, 0, 0}))
+	u := linalg.normalize(
+		linalg.cross(axis, abs(axis.y) < 0.9 ? [3]f32{0, 1, 0} : [3]f32{1, 0, 0}),
+	)
 	w := linalg.cross(axis, u)
 	tip := base + axis * length
 	for k in 0 ..< SEGMENTS {
@@ -1103,9 +1254,23 @@ cube :: proc(b: ^Gizmo_Builder, center: [3]f32, axes: [3][3]f32, half: f32, colo
 		sz: f32 = i & 4 != 0 ? 1 : -1
 		return center + (axes[0] * sx + axes[1] * sy + axes[2] * sz) * half
 	}
-	FACES :: [6][4]int{{0, 1, 3, 2}, {4, 6, 7, 5}, {0, 4, 5, 1}, {2, 3, 7, 6}, {0, 2, 6, 4}, {1, 5, 7, 3}}
+	FACES :: [6][4]int {
+		{0, 1, 3, 2},
+		{4, 6, 7, 5},
+		{0, 4, 5, 1},
+		{2, 3, 7, 6},
+		{0, 2, 6, 4},
+		{1, 5, 7, 3},
+	}
 	for f in FACES {
-		quad(b, corner(center, axes, half, f[0]), corner(center, axes, half, f[1]), corner(center, axes, half, f[2]), corner(center, axes, half, f[3]), color)
+		quad(
+			b,
+			corner(center, axes, half, f[0]),
+			corner(center, axes, half, f[1]),
+			corner(center, axes, half, f[2]),
+			corner(center, axes, half, f[3]),
+			color,
+		)
 	}
 }
 

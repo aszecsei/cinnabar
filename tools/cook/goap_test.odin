@@ -26,7 +26,9 @@ GOAP_HEAD :: "decision 1\ntechnique = goap\nblackboard = $" + GOAP_BOARD_GUID + 
 // A hunter: down the target when there is one, and otherwise keep ammo. The goals come first, then the actions, and
 // the consideration last.
 @(private = "file")
-HUNTER :: GOAP_HEAD + `keys = armed, ammo, near, down
+HUNTER ::
+	GOAP_HEAD +
+	`keys = armed, ammo, near, down
 max_nodes = 48
 max_plan = 6
 
@@ -70,7 +72,12 @@ goap_keys :: proc(t: ^testing.T) -> []format.Blackboard_Key_Contents {
 // effects are sets and adds, and the module state is sized from the search's size.
 @(test)
 a_goap_decision_cooks :: proc(t: ^testing.T) {
-	contents, problems := decision_parse(HUNTER, goap_keys(t), TECHNIQUE_READERS, context.temp_allocator)
+	contents, problems := decision_parse(
+		HUNTER,
+		goap_keys(t),
+		TECHNIQUE_READERS,
+		context.temp_allocator,
+	)
 	testing.expectf(t, len(problems) == 0, "problems: %v", problems)
 	if len(problems) > 0 {
 		return
@@ -107,16 +114,36 @@ a_goap_decision_cooks :: proc(t: ^testing.T) {
 	testing.expect_value(t, pick_up.cost, format.Plan_Number{value = 2})
 	testing.expect_value(t, pick_up.test_count, 0)
 	testing.expect_value(t, pick_up.effect_count, 2)
-	testing.expect_value(t, g.effects[pick_up.first_effect], format.Plan_Effect{key = 0, op = .Set, value = 1})
-	testing.expect_value(t, g.effects[pick_up.first_effect + 1], format.Plan_Effect{key = 1, op = .Add, value = 6})
+	testing.expect_value(
+		t,
+		g.effects[pick_up.first_effect],
+		format.Plan_Effect{key = 0, op = .Set, value = 1},
+	)
+	testing.expect_value(
+		t,
+		g.effects[pick_up.first_effect + 1],
+		format.Plan_Effect{key = 1, op = .Add, value = 6},
+	)
 	testing.expect_value(t, attack.cost, format.Plan_Number{value = 1})
 	testing.expect(t, contents.nodes[attack.node].condition != format.DECISION_NONE)
 	testing.expect_value(t, contents.nodes[attack.node].write_count, 1)
 	testing.expect_value(t, attack.test_count, 3)
 	testing.expect_value(t, g.tests[attack.first_test], format.Plan_Test{key = 0, lo = 1, hi = 1})
-	testing.expect_value(t, g.tests[attack.first_test + 1], format.Plan_Test{key = 1, lo = 1, hi = MAX})
-	testing.expect_value(t, g.tests[attack.first_test + 2], format.Plan_Test{key = 2, lo = 1, hi = 1})
-	testing.expect_value(t, g.effects[attack.first_effect + 1], format.Plan_Effect{key = 1, op = .Add, value = -1})
+	testing.expect_value(
+		t,
+		g.tests[attack.first_test + 1],
+		format.Plan_Test{key = 1, lo = 1, hi = MAX},
+	)
+	testing.expect_value(
+		t,
+		g.tests[attack.first_test + 2],
+		format.Plan_Test{key = 2, lo = 1, hi = 1},
+	)
+	testing.expect_value(
+		t,
+		g.effects[attack.first_effect + 1],
+		format.Plan_Effect{key = 1, op = .Add, value = -1},
+	)
 	testing.expect_value(t, move.cost, format.Plan_Number{key = 7, source = .Key})
 	testing.expect_value(t, g.tests[move.first_test], format.Plan_Test{key = 2, lo = 0, hi = 0})
 	testing.expect_value(t, g.considerations[0].a, 0)
@@ -129,8 +156,15 @@ a_goap_decision_cooks :: proc(t: ^testing.T) {
 // The settings' defaults, and tests of one key that make one interval.
 @(test)
 goap_settings_have_defaults :: proc(t: ^testing.T) {
-	text := GOAP_HEAD + "keys = ammo, mood\nnode 1 goal\n\tdesired = ammo > 2 and ammo <= 9 and mood == alert\nnode 2 action\n\taction = a\n\teffects = ammo += 1, mood = alert\n"
-	contents, problems := decision_parse(text, goap_keys(t), TECHNIQUE_READERS, context.temp_allocator)
+	text :=
+		GOAP_HEAD +
+		"keys = ammo, mood\nnode 1 goal\n\tdesired = ammo > 2 and ammo <= 9 and mood == alert\nnode 2 action\n\taction = a\n\teffects = ammo += 1, mood = alert\n"
+	contents, problems := decision_parse(
+		text,
+		goap_keys(t),
+		TECHNIQUE_READERS,
+		context.temp_allocator,
+	)
 	testing.expectf(t, len(problems) == 0, "problems: %v", problems)
 	g := format.goap_data(contents.technique_data)
 	if g.header == nil {
@@ -143,7 +177,11 @@ goap_settings_have_defaults :: proc(t: ^testing.T) {
 	testing.expect_value(t, g.tests[0], format.Plan_Test{key = 0, lo = 3, hi = 9})
 	testing.expect_value(t, g.tests[1], format.Plan_Test{key = 1, lo = 1, hi = 1})
 	testing.expect_value(t, g.effects[1], format.Plan_Effect{key = 1, op = .Set, value = 1})
-	testing.expect_value(t, contents.state_size, u32(format.goap_state(2, 1, 1, GOAP_DEFAULT_MAX_NODES, GOAP_DEFAULT_MAX_PLAN).size))
+	testing.expect_value(
+		t,
+		contents.state_size,
+		u32(format.goap_state(2, 1, 1, GOAP_DEFAULT_MAX_NODES, GOAP_DEFAULT_MAX_PLAN).size),
+	)
 }
 
 @(test)
@@ -179,7 +217,14 @@ goap_problems_have_their_lines :: proc(t: ^testing.T) {
 		{KEYS + GOAL + "\tconsiderations = 9\n" + ACTION, 7},
 		{KEYS + GOAL + "\tconsiderations = 2\n" + ACTION, 7},
 		{KEYS + GOAL + ACTION + "node 3 consideration\n\tinput = health\n\tcurve = linear\n", 10},
-		{KEYS + GOAL + "\tconsiderations = 3\n" + ACTION + "node 3 consideration\n\tinput = health\n", 11},
+		{
+			KEYS +
+			GOAL +
+			"\tconsiderations = 3\n" +
+			ACTION +
+			"node 3 consideration\n\tinput = health\n",
+			11,
+		},
 		{KEYS + "node 1 goal\n\tdesired = missing\n" + ACTION, 6},
 		{KEYS + "node 1 goal\n\tdesired = health > 2\n" + ACTION, 6},
 		{KEYS + "node 1 goal\n\tdesired = ammo\n" + ACTION, 6},
@@ -190,7 +235,10 @@ goap_problems_have_their_lines :: proc(t: ^testing.T) {
 		{KEYS + "node 1 goal\n\tdesired = ammo > 3 and ammo < 2\n" + ACTION, 6},
 		{KEYS + "node 1 goal\n\tdesired = ammo == 1.5\n" + ACTION, 6},
 		{KEYS + GOAL + "node 2 action\n\taction = a\n\teffects = armed += 1\n", 9},
-		{KEYS + GOAL + "node 2 action\n\taction = a\n\teffects = armed = true, armed = false\n", 9},
+		{
+			KEYS + GOAL + "node 2 action\n\taction = a\n\teffects = armed = true, armed = false\n",
+			9,
+		},
 		{KEYS + GOAL + "node 2 action\n\taction = a\n\teffects = armed\n", 9},
 		{KEYS + GOAL + "node 2 action\n\taction = a\n\teffects = health = 2\n", 9},
 		{KEYS + GOAL + ACTION + "\tcost = 0\n", 10},
@@ -202,8 +250,19 @@ goap_problems_have_their_lines :: proc(t: ^testing.T) {
 	}
 	keys := goap_keys(t)
 	for c in cases {
-		_, problems := decision_parse(strings.concatenate({GOAP_HEAD, c.text}, context.temp_allocator), keys, TECHNIQUE_READERS, context.temp_allocator)
-		testing.expectf(t, len(problems) > 0 && problems[0].line == c.line, "%q: %v", c.text, problems)
+		_, problems := decision_parse(
+			strings.concatenate({GOAP_HEAD, c.text}, context.temp_allocator),
+			keys,
+			TECHNIQUE_READERS,
+			context.temp_allocator,
+		)
+		testing.expectf(
+			t,
+			len(problems) > 0 && problems[0].line == c.line,
+			"%q: %v",
+			c.text,
+			problems,
+		)
 	}
 }
 
@@ -234,5 +293,14 @@ goap_decisions_cook_to_blobs_that_fit_their_blackboards :: proc(t: ^testing.T) {
 	testing.expect_value(t, blob.technique, format.Decision_Technique.Goap)
 	testing.expect_value(t, blob.state_size, 2432)
 	testing.expect(t, format.decision_check(data, blob, board_data, board))
-	testing.expect(t, format.goap_check(format.decision_technique_data(data, blob), data, blob, board_data, board))
+	testing.expect(
+		t,
+		format.goap_check(
+			format.decision_technique_data(data, blob),
+			data,
+			blob,
+			board_data,
+			board,
+		),
+	)
 }

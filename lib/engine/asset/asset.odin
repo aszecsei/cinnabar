@@ -101,9 +101,9 @@ Record :: struct {
 
 // Assets lives in Game_State. It holds no pointers into the DLL image, so it survives code reload.
 Assets :: struct {
-	platform:  ^core.Platform_API,
-	source:    Source,
-	records:   [MAX_ASSETS]Record,
+	platform:         ^core.Platform_API,
+	source:           Source,
+	records:          [MAX_ASSETS]Record,
 	// Records below this index have been used.
 	used:             u32,
 	// The modification time of the cache's generation file when poll last checked the blobs.
@@ -267,12 +267,25 @@ poll :: proc(a: ^Assets) -> []Handle {
 // preview_blob reads a material's blob from the preview area of the cache, <dir>/preview/<guid>.blob, where the cook
 // daemon cooks the editor's unsaved materials (see docs/rendering/materials.md#material-previews), if it is newer than modified.
 // The data is in the asset allocator, and the caller frees it. Bundles have no previews.
-preview_blob :: proc(a: ^Assets, guid: format.Guid, modified: i64) -> (data: []byte, newer: i64, changed: bool) {
+preview_blob :: proc(
+	a: ^Assets,
+	guid: format.Guid,
+	modified: i64,
+) -> (
+	data: []byte,
+	newer: i64,
+	changed: bool,
+) {
 	buffer: [32]u8
 	path: string
 	switch &source in a.source {
 	case Loose_Cache:
-		path = fmt.aprintf("%s/preview/%s.blob", string(source.dir[:source.dir_len]), format.guid_format(guid, &buffer), allocator = a.platform.frame_allocator)
+		path = fmt.aprintf(
+			"%s/preview/%s.blob",
+			string(source.dir[:source.dir_len]),
+			format.guid_format(guid, &buffer),
+			allocator = a.platform.frame_allocator,
+		)
 	case Bundle:
 		return nil, modified, false
 	}
@@ -293,7 +306,9 @@ preview_blob :: proc(a: ^Assets, guid: format.Guid, modified: i64) -> (data: []b
 
 @(private)
 record :: proc(a: ^Assets, h: Handle) -> ^Record {
-	if h.index >= a.used || a.records[h.index].generation != h.generation || h.generation % 2 == 0 {
+	if h.index >= a.used ||
+	   a.records[h.index].generation != h.generation ||
+	   h.generation % 2 == 0 {
 		return nil
 	}
 	return &a.records[h.index]
@@ -324,7 +339,12 @@ blob_location :: proc(a: ^Assets, guid: format.Guid) -> (location: Blob_Location
 		return {path = loose_path(a, guid), raw = true}, true
 	case Bundle:
 		b, entry := bundle_entry(&source, guid) or_return
-		return {path = bundle_path(a, &source, string(b.name[:b.name_len])), offset = i64(entry.offset), raw = entry.codec == .None}, true
+		return {
+				path = bundle_path(a, &source, string(b.name[:b.name_len])),
+				offset = i64(entry.offset),
+				raw = entry.codec == .None,
+			},
+			true
 	}
 	return
 }
@@ -339,23 +359,46 @@ read :: proc(a: ^Assets, guid: format.Guid) -> (data: []byte, modified: i64, ok:
 loose_path :: proc(a: ^Assets, guid: format.Guid) -> string {
 	buffer: [32]u8
 	source := &a.source.(Loose_Cache)
-	return fmt.aprintf("%s/%s.blob", string(source.dir[:source.dir_len]), format.guid_format(guid, &buffer), allocator = a.platform.frame_allocator)
+	return fmt.aprintf(
+		"%s/%s.blob",
+		string(source.dir[:source.dir_len]),
+		format.guid_format(guid, &buffer),
+		allocator = a.platform.frame_allocator,
+	)
 }
 
 @(private)
 generation_path :: proc(a: ^Assets) -> string {
 	source := &a.source.(Loose_Cache)
-	return fmt.aprintf("%s/%s", string(source.dir[:source.dir_len]), format.GENERATION_FILE, allocator = a.platform.frame_allocator)
+	return fmt.aprintf(
+		"%s/%s",
+		string(source.dir[:source.dir_len]),
+		format.GENERATION_FILE,
+		allocator = a.platform.frame_allocator,
+	)
 }
 
 @(private)
 bundle_path :: proc(a: ^Assets, source: ^Bundle, name: string) -> string {
-	return fmt.aprintf("%s/%s%s", string(source.dir[:source.dir_len]), name, format.BUNDLE_EXTENSION, allocator = a.platform.frame_allocator)
+	return fmt.aprintf(
+		"%s/%s%s",
+		string(source.dir[:source.dir_len]),
+		name,
+		format.BUNDLE_EXTENSION,
+		allocator = a.platform.frame_allocator,
+	)
 }
 
 // bundle_entry is the open bundle that has a GUID, and its entry, by a binary search of each bundle's table.
 @(private)
-bundle_entry :: proc(source: ^Bundle, guid: format.Guid) -> (b: ^Open_Bundle, entry: format.Bundle_Entry, found: bool) {
+bundle_entry :: proc(
+	source: ^Bundle,
+	guid: format.Guid,
+) -> (
+	b: ^Open_Bundle,
+	entry: format.Bundle_Entry,
+	found: bool,
+) {
 	for &open in source.open[:source.count] {
 		if e, in_bundle := format.bundle_find(open.entries, guid); in_bundle {
 			return &open, e, true
@@ -407,7 +450,8 @@ open_bundle_at :: proc(a: ^Assets, source: ^Bundle, name: string, depth: int) ->
 	if a.platform.file_read_range(path, 0, head) == size {
 		end := i64((^format.Bundle_Header)(raw_data(head)).file_size)
 		last: [1]byte
-		if a.platform.file_read_range(path, end - 1, last[:]) == 1 && a.platform.file_read_range(path, end, last[:]) == 0 {
+		if a.platform.file_read_range(path, end - 1, last[:]) == 1 &&
+		   a.platform.file_read_range(path, end, last[:]) == 0 {
 			file_size = end
 		}
 	}
@@ -429,7 +473,11 @@ open_bundle_at :: proc(a: ^Assets, source: ^Bundle, name: string, depth: int) ->
 		return false
 	}
 	b := &source.open[source.count]
-	b^ = {modified = modified, head = head, entries = entries}
+	b^ = {
+		modified = modified,
+		head     = head,
+		entries  = entries,
+	}
 	b.name_len = copy(b.name[:], name)
 	source.count += 1
 	return true
@@ -482,11 +530,20 @@ read_blob :: proc(a: ^Assets, guid: format.Guid) -> (data: []byte, modified: i64
 		modified = a.platform.file_modified(path)
 		data = read_head(a, path, 0)
 		if data == nil {
-			data = a.platform.file_read(path, format.BLOB_ALIGN, a.platform.asset_allocator) or_else nil
+			data =
+				a.platform.file_read(
+					path,
+					format.BLOB_ALIGN,
+					a.platform.asset_allocator,
+				) or_else nil
 		}
 		if data == nil {
 			buffer: [32]u8
-			log.errorf("asset: no blob for %s at %s. Cook the content.", format.guid_format(guid, &buffer), path)
+			log.errorf(
+				"asset: no blob for %s at %s. Cook the content.",
+				format.guid_format(guid, &buffer),
+				path,
+			)
 			return
 		}
 	case Bundle:
@@ -507,11 +564,22 @@ read_blob :: proc(a: ^Assets, guid: format.Guid) -> (data: []byte, modified: i64
 // it opens <guid>.cbb, if there is one, and looks again. A blob that the bundle stores as it is reads as a loose blob
 // does, a paged mesh's head alone, and one that it compresses is decompressed into the asset allocator.
 @(private)
-read_bundled :: proc(a: ^Assets, source: ^Bundle, guid: format.Guid) -> (data: []byte, modified: i64, path: string, ok: bool) {
+read_bundled :: proc(
+	a: ^Assets,
+	source: ^Bundle,
+	guid: format.Guid,
+) -> (
+	data: []byte,
+	modified: i64,
+	path: string,
+	ok: bool,
+) {
 	buffer: [32]u8
 	name := format.guid_format(guid, &buffer)
 	b, entry, found := bundle_entry(source, guid)
-	if !found && a.platform.file_modified(bundle_path(a, source, name)) != 0 && open_bundle_at(a, source, name, 0) {
+	if !found &&
+	   a.platform.file_modified(bundle_path(a, source, name)) != 0 &&
+	   open_bundle_at(a, source, name, 0) {
 		b, entry, found = bundle_entry(source, guid)
 	}
 	if !found {
@@ -525,18 +593,35 @@ read_bundled :: proc(a: ^Assets, source: ^Bundle, guid: format.Guid) -> (data: [
 			data = read_head(a, path, i64(entry.offset))
 		}
 		if data == nil {
-			data = mem.alloc_bytes_non_zeroed(int(entry.size), format.BLOB_ALIGN, a.platform.asset_allocator) or_else nil
-			if data != nil && a.platform.file_read_range(path, i64(entry.offset), data) != len(data) {
+			data =
+				mem.alloc_bytes_non_zeroed(
+					int(entry.size),
+					format.BLOB_ALIGN,
+					a.platform.asset_allocator,
+				) or_else nil
+			if data != nil &&
+			   a.platform.file_read_range(path, i64(entry.offset), data) != len(data) {
 				delete(data, a.platform.asset_allocator)
 				data = nil
 			}
 		}
 	case .Lz4:
-		stored := mem.alloc_bytes_non_zeroed(int(entry.stored_size), 1, a.platform.frame_allocator) or_else nil
-		if stored == nil || a.platform.file_read_range(path, i64(entry.offset), stored) != len(stored) {
+		stored :=
+			mem.alloc_bytes_non_zeroed(
+				int(entry.stored_size),
+				1,
+				a.platform.frame_allocator,
+			) or_else nil
+		if stored == nil ||
+		   a.platform.file_read_range(path, i64(entry.offset), stored) != len(stored) {
 			break
 		}
-		data = mem.alloc_bytes_non_zeroed(int(entry.size), format.BLOB_ALIGN, a.platform.asset_allocator) or_else nil
+		data =
+			mem.alloc_bytes_non_zeroed(
+				int(entry.size),
+				format.BLOB_ALIGN,
+				a.platform.asset_allocator,
+			) or_else nil
 		if data != nil && !lz4.decompress(stored, data) {
 			delete(data, a.platform.asset_allocator)
 			data = nil

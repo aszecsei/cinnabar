@@ -38,7 +38,13 @@ tokenize :: proc(text: string) -> (tokens: []Token, message: string) {
 			return false
 		}
 		last := result[len(result) - 1]
-		return last.kind == .Word || last.kind == .Number || last.kind == .Text || last.text == ")" || last.text == "]"
+		return(
+			last.kind == .Word ||
+			last.kind == .Number ||
+			last.kind == .Text ||
+			last.text == ")" ||
+			last.text == "]" \
+		)
 	}
 	for i := 0; i < len(text); {
 		c := text[i]
@@ -47,15 +53,24 @@ tokenize :: proc(text: string) -> (tokens: []Token, message: string) {
 			i += 1
 		case c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'):
 			start := i
-			for i < len(text) && (text[i] == '_' || (text[i] >= 'a' && text[i] <= 'z') || (text[i] >= 'A' && text[i] <= 'Z') || (text[i] >= '0' && text[i] <= '9')) {
+			for i < len(text) &&
+			    (text[i] == '_' ||
+					    (text[i] >= 'a' && text[i] <= 'z') ||
+					    (text[i] >= 'A' && text[i] <= 'Z') ||
+					    (text[i] >= '0' && text[i] <= '9')) {
 				i += 1
 			}
 			append(&result, Token{kind = .Word, text = text[start:i]})
 		case (c >= '0' && c <= '9') || c == '.' || (c == '-' && !value_ends(result[:])):
 			start := i
 			i += 1
-			for i < len(text) && ((text[i] >= '0' && text[i] <= '9') || text[i] == '.' || text[i] == 'e' || text[i] == 'E' ||
-				    ((text[i] == '-' || text[i] == '+') && (text[i - 1] == 'e' || text[i - 1] == 'E'))) {
+			for i < len(text) &&
+			    ((text[i] >= '0' && text[i] <= '9') ||
+					    text[i] == '.' ||
+					    text[i] == 'e' ||
+					    text[i] == 'E' ||
+					    ((text[i] == '-' || text[i] == '+') &&
+							    (text[i - 1] == 'e' || text[i - 1] == 'E'))) {
 				i += 1
 			}
 			number, ok := strconv.parse_f64(text[start:i])
@@ -86,7 +101,10 @@ tokenize :: proc(text: string) -> (tokens: []Token, message: string) {
 				append(&result, Token{kind = .Punct, text = text[i:i + 1]})
 				i += 1
 			} else {
-				return nil, fmt.tprintf("%q is not part of a condition or an action", text[i:i + 1])
+				return nil, fmt.tprintf(
+					"%q is not part of a condition or an action",
+					text[i:i + 1],
+				)
 			}
 		}
 	}
@@ -152,13 +170,13 @@ Expr_Kind :: enum {
 
 @(private = "file")
 Expr :: struct {
-	kind:        Expr_Kind,
+	kind:   Expr_Kind,
 	// Or, And, Compare and Distance: their two operands; Not: its one, in a.
-	a, b:        int,
-	op:          format.Decision_Op_Code,
-	slot:        int,
-	number:      f64,
-	text:        string,
+	a, b:   int,
+	op:     format.Decision_Op_Code,
+	slot:   int,
+	number: f64,
+	text:   string,
 }
 
 @(private = "file")
@@ -229,7 +247,14 @@ parse_compare :: proc(p: ^Decision_Parser, c: ^Condition_Parse) -> int {
 		text: string,
 		op:   format.Decision_Op_Code,
 	}
-	comparisons := [?]Comparison{{"<", .Less}, {"<=", .Less_Equal}, {">", .Greater}, {">=", .Greater_Equal}, {"==", .Equal}, {"!=", .Not_Equal}}
+	comparisons := [?]Comparison {
+		{"<", .Less},
+		{"<=", .Less_Equal},
+		{">", .Greater},
+		{">=", .Greater_Equal},
+		{"==", .Equal},
+		{"!=", .Not_Equal},
+	}
 	for comparison in comparisons {
 		if peek(c).text == comparison.text {
 			c.at += 1
@@ -333,7 +358,14 @@ key_value_type :: proc(t: format.Blackboard_Type) -> Value_Type {
 
 // type_of is an expression's type, without emitting it. enum_slot is an Enum's key.
 @(private = "file")
-type_of :: proc(p: ^Decision_Parser, c: ^Condition_Parse, index: int) -> (t: Value_Type, enum_slot: int) {
+type_of :: proc(
+	p: ^Decision_Parser,
+	c: ^Condition_Parse,
+	index: int,
+) -> (
+	t: Value_Type,
+	enum_slot: int,
+) {
 	e := c.exprs[index]
 	switch e.kind {
 	case .Or, .And, .Not, .Compare:
@@ -357,10 +389,20 @@ type_of :: proc(p: ^Decision_Parser, c: ^Condition_Parse, index: int) -> (t: Val
 @(private = "file")
 emit :: proc(p: ^Decision_Parser, c: ^Condition_Parse, index: int) -> string {
 	e := c.exprs[index]
-	push :: proc(p: ^Decision_Parser, code: format.Decision_Op_Code, operand: int = 0, type: format.Blackboard_Type = .Float) {
+	push :: proc(
+		p: ^Decision_Parser,
+		code: format.Decision_Op_Code,
+		operand: int = 0,
+		type: format.Blackboard_Type = .Float,
+	) {
 		append(&p.ops, format.Decision_Op{code = code, type = u8(type), operand = u32(operand)})
 	}
-	bool_operand :: proc(p: ^Decision_Parser, c: ^Condition_Parse, index: int, word: string) -> string {
+	bool_operand :: proc(
+		p: ^Decision_Parser,
+		c: ^Condition_Parse,
+		index: int,
+		word: string,
+	) -> string {
 		if t, _ := type_of(p, c, index); t != .Bool {
 			return fmt.tprintf("%s takes conditions, which are true or false", word)
 		}
@@ -384,7 +426,11 @@ emit :: proc(p: ^Decision_Parser, c: ^Condition_Parse, index: int) -> string {
 	case .Key:
 		t := p.keys[e.slot].type
 		if t == .Position || t == .Vector {
-			return fmt.tprintf("%s is a %s, which a condition reads only in distance", p.keys[e.slot].name, type_name(t))
+			return fmt.tprintf(
+				"%s is a %s, which a condition reads only in distance",
+				p.keys[e.slot].name,
+				type_name(t),
+			)
 		}
 		push(p, .Key, e.slot)
 	case .Number:
@@ -420,7 +466,8 @@ emit :: proc(p: ^Decision_Parser, c: ^Condition_Parse, index: int) -> string {
 	case .Compare:
 		a, a_slot := type_of(p, c, e.a)
 		b, b_slot := type_of(p, c, e.b)
-		ordered := e.op == .Less || e.op == .Less_Equal || e.op == .Greater || e.op == .Greater_Equal
+		ordered :=
+			e.op == .Less || e.op == .Less_Equal || e.op == .Greater || e.op == .Greater_Equal
 		// A word beside an enum is one of its names.
 		if (a == .Enum && b == .Word) || (a == .Word && b == .Enum) {
 			slot := a_slot if a == .Enum else b_slot
@@ -428,7 +475,12 @@ emit :: proc(p: ^Decision_Parser, c: ^Condition_Parse, index: int) -> string {
 			names := p.keys[slot].enum_names
 			name_index, found := slice.linear_search(names, word)
 			if !found {
-				return fmt.tprintf("%s is not one of %s's values, %s", word, p.keys[slot].name, strings.join(names, ", ", context.temp_allocator))
+				return fmt.tprintf(
+					"%s is not one of %s's values, %s",
+					word,
+					p.keys[slot].name,
+					strings.join(names, ", ", context.temp_allocator),
+				)
 			}
 			if ordered {
 				return "enums compare only with == and !="
@@ -447,7 +499,10 @@ emit :: proc(p: ^Decision_Parser, c: ^Condition_Parse, index: int) -> string {
 			return ""
 		}
 		if a == .Word || b == .Word {
-			return fmt.tprintf("the blackboard has no key named %s", c.exprs[e.a if a == .Word else e.b].text)
+			return fmt.tprintf(
+				"the blackboard has no key named %s",
+				c.exprs[e.a if a == .Word else e.b].text,
+			)
 		}
 		if a != b {
 			return "a comparison compares two values of one type"
@@ -505,7 +560,11 @@ decision_condition :: proc(p: ^Decision_Parser, text: string, line: int) -> u32 
 		return format.DECISION_NONE
 	}
 	if t, _ := type_of(p, &c, root); t != .Bool {
-		decision_problem(p, line, "a condition is true or false, such as health < 0.3 or has_target")
+		decision_problem(
+			p,
+			line,
+			"a condition is true or false, such as health < 0.3 or has_target",
+		)
 		return format.DECISION_NONE
 	}
 	first := len(p.ops)
@@ -519,7 +578,10 @@ decision_condition :: proc(p: ^Decision_Parser, text: string, line: int) -> u32 
 		decision_problem(p, line, "the condition is too deep: split it")
 		return format.DECISION_NONE
 	}
-	append(&p.conditions, format.Decision_Condition{first_op = u32(first), op_count = u32(len(p.ops) - first)})
+	append(
+		&p.conditions,
+		format.Decision_Condition{first_op = u32(first), op_count = u32(len(p.ops) - first)},
+	)
 	return u32(len(p.conditions) - 1)
 }
 
@@ -531,7 +593,15 @@ stack_depth :: proc(ops: []format.Decision_Op) -> int {
 		switch o.code {
 		case .Key, .Constant, .Self:
 			depth += 1
-		case .Distance, .Less, .Less_Equal, .Greater, .Greater_Equal, .Equal, .Not_Equal, .And, .Or:
+		case .Distance,
+		     .Less,
+		     .Less_Equal,
+		     .Greater,
+		     .Greater_Equal,
+		     .Equal,
+		     .Not_Equal,
+		     .And,
+		     .Or:
 			depth -= 1
 		case .Not:
 		}
@@ -544,9 +614,18 @@ stack_depth :: proc(ops: []format.Decision_Op) -> int {
 // the key's type for a write, which a constant is read as; an argument's constant gives its own type: a number is a
 // Float, [x, y, z] a Vector, a quoted string a String, true or false a Bool, and none an Entity.
 @(private = "file")
-argument_value :: proc(p: ^Decision_Parser, text: string, type: Maybe(format.Blackboard_Type), enum_names: []string) -> (arg: format.Decision_Arg_Contents, message: string) {
+argument_value :: proc(
+	p: ^Decision_Parser,
+	text: string,
+	type: Maybe(format.Blackboard_Type),
+	enum_names: []string,
+) -> (
+	arg: format.Decision_Arg_Contents,
+	message: string,
+) {
 	// A write to an enum takes one of its names before a key of that name.
-	if slot, found := key_slot(p, text); found && !(type != nil && slice.contains(enum_names, text)) {
+	if slot, found := key_slot(p, text);
+	   found && !(type != nil && slice.contains(enum_names, text)) {
 		return {source = .Key, index = u32(slot), type = p.keys[slot].type}, ""
 	}
 	if text == "self" {
@@ -636,7 +715,11 @@ decision_action :: proc(p: ^Decision_Parser, text: string, line: int) -> u32 {
 	if open >= 0 {
 		parts, ok := split_arguments(text[open + 1:len(text) - 1])
 		if !ok {
-			decision_problem(p, line, "an action's arguments are `<argument> = <value>`, split by commas")
+			decision_problem(
+				p,
+				line,
+				"an action's arguments are `<argument> = <value>`, split by commas",
+			)
 			return format.DECISION_NONE
 		}
 		for part in parts {
@@ -644,13 +727,23 @@ decision_action :: proc(p: ^Decision_Parser, text: string, line: int) -> u32 {
 			arg_name, value = strings.trim_space(arg_name), strings.trim_space(value)
 			if !is_identifier(arg_name) || has_value == "" || value == "" {
 				resize(&p.args, first)
-				decision_problem(p, line, "an action's arguments are `<argument> = <value>`, split by commas")
+				decision_problem(
+					p,
+					line,
+					"an action's arguments are `<argument> = <value>`, split by commas",
+				)
 				return format.DECISION_NONE
 			}
 			for a in p.args[first:] {
 				if a.name == arg_name {
 					resize(&p.args, first)
-					decision_problem(p, line, "the action %s has the argument %s twice", name, arg_name)
+					decision_problem(
+						p,
+						line,
+						"the action %s has the argument %s twice",
+						name,
+						arg_name,
+					)
 					return format.DECISION_NONE
 				}
 			}
@@ -664,7 +757,14 @@ decision_action :: proc(p: ^Decision_Parser, text: string, line: int) -> u32 {
 			append(&p.args, arg)
 		}
 	}
-	append(&p.actions, format.Decision_Action_Contents{name = name, first_arg = u32(first), arg_count = u32(len(p.args) - first)})
+	append(
+		&p.actions,
+		format.Decision_Action_Contents {
+			name = name,
+			first_arg = u32(first),
+			arg_count = u32(len(p.args) - first),
+		},
+	)
 	return u32(len(p.actions) - 1)
 }
 
@@ -685,14 +785,25 @@ decision_write :: proc(p: ^Decision_Parser, text: string, line: int) -> u32 {
 	}
 	key := p.keys[slot]
 	arg, message := argument_value(p, value, key.type, key.enum_names)
-	if message == "" && arg.source == .Key &&
-	   (arg.type != key.type || (key.type == .Enum && !slice.equal(key.enum_names, p.keys[arg.index].enum_names))) {
-		message = fmt.tprintf("%s is a %s, and %s a %s", value, type_name(arg.type), key_name, type_name(key.type))
+	if message == "" &&
+	   arg.source == .Key &&
+	   (arg.type != key.type ||
+			   (key.type == .Enum && !slice.equal(key.enum_names, p.keys[arg.index].enum_names))) {
+		message = fmt.tprintf(
+			"%s is a %s, and %s a %s",
+			value,
+			type_name(arg.type),
+			key_name,
+			type_name(key.type),
+		)
 	}
 	if message != "" {
 		decision_problem(p, line, "%s", message)
 		return format.DECISION_NONE
 	}
-	append(&p.writes, format.Decision_Write{key = u32(slot), source = arg.source, index = arg.index})
+	append(
+		&p.writes,
+		format.Decision_Write{key = u32(slot), source = arg.source, index = arg.index},
+	)
 	return u32(len(p.writes) - 1)
 }

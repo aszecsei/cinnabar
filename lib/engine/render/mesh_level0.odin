@@ -114,7 +114,7 @@ change_level0 :: proc(r: ^Residency, m: ^Resident_Mesh, event: Level0_Event) -> 
 			r.platform.gpu_destroy_buffer(s.attributes)
 			r.platform.gpu_destroy_buffer(s.indices)
 		case Level0_Ready:
-			// The mesh's buffers go with the mesh.
+		// The mesh's buffers go with the mesh.
 		case:
 			return false
 		}
@@ -134,7 +134,8 @@ resident_level0 :: proc(r: ^Residency, m: ^Resident_Mesh) -> bool {
 	if _, ready := m.level0.(Level0_Ready); ready {
 		return true
 	}
-	if m.level0 == nil && (m.level0_failed_at == 0 || r.frame - m.level0_failed_at >= RESIDENT_RETRY_FRAMES) {
+	if m.level0 == nil &&
+	   (m.level0_failed_at == 0 || r.frame - m.level0_failed_at >= RESIDENT_RETRY_FRAMES) {
 		heap := r.platform.heap_allocator
 		arrays := Level0_Assembling {
 			positions  = make([]byte, int(m.vertex_count) * 12, heap),
@@ -186,7 +187,9 @@ fail_level0 :: proc(r: ^Residency, m: ^Resident_Mesh, guid: format.Guid, reason:
 assemble_level0 :: proc(r: ^Residency, m: ^Resident_Mesh, s: ^Level0_Assembling) {
 	pool := &r.pool
 	platform := r.platform
-	if m.pool_mesh == 0 || int(m.pool_mesh) > len(pool.meshes) || !pool.meshes[m.pool_mesh - 1].live {
+	if m.pool_mesh == 0 ||
+	   int(m.pool_mesh) > len(pool.meshes) ||
+	   !pool.meshes[m.pool_mesh - 1].live {
 		return
 	}
 	mesh := &pool.meshes[m.pool_mesh - 1]
@@ -204,7 +207,9 @@ assemble_level0 :: proc(r: ^Residency, m: ^Resident_Mesh, s: ^Level0_Assembling)
 		block: []byte
 		if .Root in record.flags {
 			head, loaded := asset.data(r.assets, mesh.handle)
-			if !loaded || asset.version(r.assets, mesh.handle) != mesh.version || u64(record.offset) + u64(record.compressed_size) > u64(len(head)) {
+			if !loaded ||
+			   asset.version(r.assets, mesh.handle) != mesh.version ||
+			   u64(record.offset) + u64(record.compressed_size) > u64(len(head)) {
 				// The blob changed, and the mesh's next version streams.
 				return
 			}
@@ -217,7 +222,12 @@ assemble_level0 :: proc(r: ^Residency, m: ^Resident_Mesh, s: ^Level0_Assembling)
 				}
 				location, found := asset.blob_location(r.assets, mesh.guid)
 				if !found || !location.raw {
-					fail_level0(r, m, mesh.guid, "is not stored as it is, so its pages cannot be read")
+					fail_level0(
+						r,
+						m,
+						mesh.guid,
+						"is not stored as it is, so its pages cannot be read",
+					)
 					return
 				}
 				if platform.file_modified(location.path) != mesh.modified {
@@ -226,7 +236,9 @@ assemble_level0 :: proc(r: ^Residency, m: ^Resident_Mesh, s: ^Level0_Assembling)
 				// The pages from this one that follow each other in the file, up to a read's size.
 				end := s.next_page
 				size: u32
-				for int(end) < len(records) && (.Root not_in records[end].flags) && records[end].level0_meshlets > 0 {
+				for int(end) < len(records) &&
+				    (.Root not_in records[end].flags) &&
+				    records[end].level0_meshlets > 0 {
 					next := records[end].offset + records[end].compressed_size - record.offset
 					if end > s.next_page && next > LEVEL0_READ_SIZE {
 						break
@@ -234,7 +246,11 @@ assemble_level0 :: proc(r: ^Residency, m: ^Resident_Mesh, s: ^Level0_Assembling)
 					size = next
 					end += 1
 				}
-				s.read = platform.file_read_begin(location.path, location.offset + i64(record.offset), int(size))
+				s.read = platform.file_read_begin(
+					location.path,
+					location.offset + i64(record.offset),
+					int(size),
+				)
 				s.read_end, s.read_offset = end, record.offset
 				if s.read == 0 {
 					// The host's reads are all in use. The next frame asks again.
@@ -269,8 +285,14 @@ assemble_level0 :: proc(r: ^Residency, m: ^Resident_Mesh, s: ^Level0_Assembling)
 			fail_level0(r, m, mesh.guid, "has a page that does not decompress into a page of it")
 			return
 		}
-		copy(s.positions[record.first_vertex * 12:], mem.slice_to_bytes(format.mesh_page_positions(page, header)))
-		copy(s.attributes[record.first_vertex * mesh.stride:], format.mesh_page_attributes(page, header))
+		copy(
+			s.positions[record.first_vertex * 12:],
+			mem.slice_to_bytes(format.mesh_page_positions(page, header)),
+		)
+		copy(
+			s.attributes[record.first_vertex * mesh.stride:],
+			format.mesh_page_attributes(page, header),
+		)
 		format.mesh_page_level0(page, header, record, s.indices[s.index_count:])
 		s.index_count += u32(count)
 		s.next_page += 1
@@ -299,12 +321,24 @@ finish_level0 :: proc(r: ^Residency, m: ^Resident_Mesh, mesh: ^Pool_Mesh, s: ^Le
 	}
 	streaming: Level0_Streaming
 	ok := true
-	stream :: proc(r: ^Residency, data: []byte, usage: gpu.Buffer_Usages, label: string, ok: ^bool) -> (buffer: gpu.Buffer, transfer: gpu.Transfer) {
+	stream :: proc(
+		r: ^Residency,
+		data: []byte,
+		usage: gpu.Buffer_Usages,
+		label: string,
+		ok: ^bool,
+	) -> (
+		buffer: gpu.Buffer,
+		transfer: gpu.Transfer,
+	) {
 		if !ok^ || len(data) == 0 {
 			ok^ = false
 			return
 		}
-		buffer = r.platform.gpu_create_buffer({size = u32(len(data)), usage = usage, label = label}, nil)
+		buffer = r.platform.gpu_create_buffer(
+			{size = u32(len(data)), usage = usage, label = label},
+			nil,
+		)
 		if buffer != {} {
 			transfer = r.platform.gpu_stream_buffer(buffer, 0, data)
 		}
@@ -312,8 +346,20 @@ finish_level0 :: proc(r: ^Residency, m: ^Resident_Mesh, mesh: ^Pool_Mesh, s: ^Le
 		return
 	}
 	streaming.positions, streaming.transfers[0] = stream(r, s.positions, {}, "mesh positions", &ok)
-	streaming.attributes, streaming.transfers[1] = stream(r, s.attributes, {}, "mesh attributes", &ok)
-	streaming.indices, streaming.transfers[2] = stream(r, index_bytes, {.Index}, "mesh indices", &ok)
+	streaming.attributes, streaming.transfers[1] = stream(
+		r,
+		s.attributes,
+		{},
+		"mesh attributes",
+		&ok,
+	)
+	streaming.indices, streaming.transfers[2] = stream(
+		r,
+		index_bytes,
+		{.Index},
+		"mesh indices",
+		&ok,
+	)
 	if !ok {
 		r.platform.gpu_destroy_buffer(streaming.positions)
 		r.platform.gpu_destroy_buffer(streaming.attributes)

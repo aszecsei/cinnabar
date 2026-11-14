@@ -46,7 +46,12 @@ allocate :: proc "c" (size, align: uint) -> rawptr {
 @(private)
 reallocate :: proc "c" (ptr: rawptr, old_size, new_size, align: uint) -> rawptr {
 	context = state.ctx
-	data, _ := mem.resize_bytes_non_zeroed(([^]byte)(ptr)[:old_size], int(new_size), int(align), runtime.heap_allocator())
+	data, _ := mem.resize_bytes_non_zeroed(
+		([^]byte)(ptr)[:old_size],
+		int(new_size),
+		int(align),
+		runtime.heap_allocator(),
+	)
 	return raw_data(data)
 }
 

@@ -31,7 +31,13 @@ Fixture :: struct {
 capture_errors :: proc(f: ^Fixture) -> log.Logger {
 	f.runner = context.logger
 	return {
-		procedure = proc(data: rawptr, level: log.Level, text: string, options: log.Options, location := #caller_location) {
+		procedure = proc(
+			data: rawptr,
+			level: log.Level,
+			text: string,
+			options: log.Options,
+			location := #caller_location,
+		) {
 			f := (^Fixture)(data)
 			// testing.expect reports a failure as an error log from the test file. It must reach the test runner.
 			if strings.has_suffix(location.file_path, "_test.odin") {
@@ -64,11 +70,11 @@ setup :: proc(t: ^testing.T, register: Register_Proc) -> ^Fixture {
 	f := new(Fixture)
 	testing.expect(t, virtual.arena_init_growing(&f.frame) == nil)
 	f.platform = {
-		frame_allocator     = virtual.arena_allocator(&f.frame),
-		script_open         = script_host.open,
-		script_close        = script_host.close,
-		script_push_binding = script_host.push_binding,
-		script_atom         = script_host.atom,
+		frame_allocator      = virtual.arena_allocator(&f.frame),
+		script_open          = script_host.open,
+		script_close         = script_host.close,
+		script_push_binding  = script_host.push_binding,
+		script_atom          = script_host.atom,
 		script_direct_access = script_host.direct_access,
 	}
 	f.reports = make([dynamic]f64)
@@ -219,6 +225,10 @@ debug_log_accepts_any_values :: proc(t: ^testing.T) {
 	f := setup(t, register_first_build)
 	defer teardown(f)
 	context.user_ptr = f
-	_, ok := spawn_source(&f.runtime, "=log", "Debug.log('frame', 1, true, nil, vector.create(1, 2, 3))")
+	_, ok := spawn_source(
+		&f.runtime,
+		"=log",
+		"Debug.log('frame', 1, true, nil, vector.create(1, 2, 3))",
+	)
 	testing.expect(t, ok)
 }

@@ -224,11 +224,11 @@ Build_Accel :: struct {
 // Copy_Buffer copies size bytes between two different buffers, outside a render pass. Offsets and size are
 // multiples of 4. The source can be the upload ring, and the dest a Readback buffer, but not the source.
 Copy_Buffer :: struct {
-	source:      Buffer,
+	source:        Buffer,
 	source_offset: u32,
-	dest:        Buffer,
-	dest_offset: u32,
-	size:        u32,
+	dest:          Buffer,
+	dest_offset:   u32,
+	size:          u32,
 }
 
 // Write_Accel_Size writes a built structure's compacted size, a u64 in bytes, at offset in a Storage buffer, outside a
@@ -364,9 +364,17 @@ Packet_Format :: struct {
 
 #assert(size_of(Packet_Header) + size_of(Begin_Pass) <= MAX_PACKET_SIZE)
 #assert(size_of(Packet_Header) + size_of(Begin_Marker) + MAX_LABEL_LENGTH <= MAX_PACKET_SIZE)
-#assert(size_of(Packet_Header) + size_of(Push_Constants) + MAX_PUSH_CONSTANTS_SIZE <= MAX_PACKET_SIZE)
-#assert(size_of(Packet_Header) + size_of(Barriers) + MAX_PACKET_BARRIERS * size_of(Texture_Barrier) <= MAX_PACKET_SIZE)
-#assert(size_of(Buffer_Barrier) <= size_of(Texture_Barrier) && size_of(Accel_Barrier) <= size_of(Texture_Barrier))
+#assert(
+	size_of(Packet_Header) + size_of(Push_Constants) + MAX_PUSH_CONSTANTS_SIZE <= MAX_PACKET_SIZE,
+)
+#assert(
+	size_of(Packet_Header) + size_of(Barriers) + MAX_PACKET_BARRIERS * size_of(Texture_Barrier) <=
+	MAX_PACKET_SIZE,
+)
+#assert(
+	size_of(Buffer_Barrier) <= size_of(Texture_Barrier) &&
+	size_of(Accel_Barrier) <= size_of(Texture_Barrier),
+)
 #assert(size_of(Chunk) + MAX_PACKET_SIZE <= CHUNK_SIZE)
 
 // format_hash identifies the packet format. The host refuses a game DLL with a different hash.
@@ -397,7 +405,13 @@ command_buffer :: proc(allocator: runtime.Allocator) -> Command_Buffer {
 	return {allocator = allocator}
 }
 
-cmd_begin_pass :: proc(cb: ^Command_Buffer, colors: []Color_Attachment, depth: Depth_Attachment = {}, flags: Pass_Flags = {}, size: [2]u32 = {}) {
+cmd_begin_pass :: proc(
+	cb: ^Command_Buffer,
+	colors: []Color_Attachment,
+	depth: Depth_Attachment = {},
+	flags: Pass_Flags = {},
+	size: [2]u32 = {},
+) {
 	packet := Begin_Pass {
 		color_count = u32(len(colors)),
 		depth       = depth,
@@ -417,7 +431,12 @@ cmd_end_pass :: proc(cb: ^Command_Buffer) {
 cmd_begin_marker :: proc(cb: ^Command_Buffer, label: string, timed := false) {
 	truncated := label[:min(len(label), MAX_LABEL_LENGTH)]
 	flags := Marker_Flags{.Timed} if timed else {}
-	push(cb, .Begin_Marker, Begin_Marker{length = u16(len(truncated)), flags = flags}, transmute([]byte)truncated)
+	push(
+		cb,
+		.Begin_Marker,
+		Begin_Marker{length = u16(len(truncated)), flags = flags},
+		transmute([]byte)truncated,
+	)
 }
 
 cmd_end_marker :: proc(cb: ^Command_Buffer) {
@@ -436,15 +455,28 @@ cmd_push_constants :: proc(cb: ^Command_Buffer, constants: ^$T) {
 
 // cmd_set_pass_constants binds an upload as the root CBV. Shaders declare it with CN_PASS_CONSTANTS.
 cmd_set_pass_constants :: proc(cb: ^Command_Buffer, upload: Upload) {
-	assert(upload.offset % PASS_CONSTANTS_ALIGN == 0, "gpu: pass constants must be aligned to PASS_CONSTANTS_ALIGN")
+	assert(
+		upload.offset % PASS_CONSTANTS_ALIGN == 0,
+		"gpu: pass constants must be aligned to PASS_CONSTANTS_ALIGN",
+	)
 	push(cb, .Set_Pass_Constants, Set_Pass_Constants{upload.buffer, upload.offset})
 }
 
-cmd_set_index_buffer :: proc(cb: ^Command_Buffer, buffer: Buffer, format: Index_Format, offset: u32 = 0) {
+cmd_set_index_buffer :: proc(
+	cb: ^Command_Buffer,
+	buffer: Buffer,
+	format: Index_Format,
+	offset: u32 = 0,
+) {
 	push(cb, .Set_Index_Buffer, Set_Index_Buffer{buffer, offset, format})
 }
 
-cmd_set_viewport :: proc(cb: ^Command_Buffer, position, size: [2]f32, min_depth: f32 = 0, max_depth: f32 = 1) {
+cmd_set_viewport :: proc(
+	cb: ^Command_Buffer,
+	position, size: [2]f32,
+	min_depth: f32 = 0,
+	max_depth: f32 = 1,
+) {
 	push(cb, .Set_Viewport, Set_Viewport{position, size, min_depth, max_depth})
 }
 
@@ -457,7 +489,13 @@ cmd_set_stencil_reference :: proc(cb: ^Command_Buffer, reference: u8) {
 	push(cb, .Set_Stencil_Reference, Set_Stencil_Reference{u32(reference)})
 }
 
-cmd_draw :: proc(cb: ^Command_Buffer, vertex_count: u32, instance_count: u32 = 1, first_vertex: u32 = 0, first_instance: u32 = 0) {
+cmd_draw :: proc(
+	cb: ^Command_Buffer,
+	vertex_count: u32,
+	instance_count: u32 = 1,
+	first_vertex: u32 = 0,
+	first_instance: u32 = 0,
+) {
 	push(cb, .Draw, Draw{vertex_count, instance_count, first_vertex, first_instance})
 }
 
@@ -469,7 +507,11 @@ cmd_draw_indexed :: proc(
 	vertex_offset: i32 = 0,
 	first_instance: u32 = 0,
 ) {
-	push(cb, .Draw_Indexed, Draw_Indexed{index_count, instance_count, first_index, vertex_offset, first_instance})
+	push(
+		cb,
+		.Draw_Indexed,
+		Draw_Indexed{index_count, instance_count, first_index, vertex_offset, first_instance},
+	)
 }
 
 cmd_dispatch :: proc(cb: ^Command_Buffer, groups: [3]u32) {
@@ -477,7 +519,13 @@ cmd_dispatch :: proc(cb: ^Command_Buffer, groups: [3]u32) {
 }
 
 // cmd_draw_indirect runs Draw_Indirect_Args records from the arguments buffer. A nil count buffer runs max_count draws.
-cmd_draw_indirect :: proc(cb: ^Command_Buffer, arguments: Buffer, offset, max_count: u32, count: Buffer = {}, count_offset: u32 = 0) {
+cmd_draw_indirect :: proc(
+	cb: ^Command_Buffer,
+	arguments: Buffer,
+	offset, max_count: u32,
+	count: Buffer = {},
+	count_offset: u32 = 0,
+) {
 	push(cb, .Draw_Indirect, Draw_Indirect{arguments, offset, max_count, count, count_offset})
 }
 
@@ -489,7 +537,11 @@ cmd_draw_indexed_indirect :: proc(
 	count: Buffer = {},
 	count_offset: u32 = 0,
 ) {
-	push(cb, .Draw_Indexed_Indirect, Draw_Indirect{arguments, offset, max_count, count, count_offset})
+	push(
+		cb,
+		.Draw_Indexed_Indirect,
+		Draw_Indirect{arguments, offset, max_count, count, count_offset},
+	)
 }
 
 // cmd_draw_mesh needs a mesh pipeline.
@@ -498,7 +550,13 @@ cmd_draw_mesh :: proc(cb: ^Command_Buffer, groups: [3]u32) {
 }
 
 // cmd_draw_mesh_indirect runs Draw_Mesh_Indirect_Args records with a mesh pipeline.
-cmd_draw_mesh_indirect :: proc(cb: ^Command_Buffer, arguments: Buffer, offset, max_count: u32, count: Buffer = {}, count_offset: u32 = 0) {
+cmd_draw_mesh_indirect :: proc(
+	cb: ^Command_Buffer,
+	arguments: Buffer,
+	offset, max_count: u32,
+	count: Buffer = {},
+	count_offset: u32 = 0,
+) {
 	push(cb, .Draw_Mesh_Indirect, Draw_Indirect{arguments, offset, max_count, count, count_offset})
 }
 
@@ -507,7 +565,12 @@ cmd_dispatch_indirect :: proc(cb: ^Command_Buffer, arguments: Buffer, offset: u3
 }
 
 // cmd_barriers records barriers that the backend issues together. The render graph records all barriers.
-cmd_barriers :: proc(cb: ^Command_Buffer, buffers: []Buffer_Barrier, textures: []Texture_Barrier, accels: []Accel_Barrier = nil) {
+cmd_barriers :: proc(
+	cb: ^Command_Buffer,
+	buffers: []Buffer_Barrier,
+	textures: []Texture_Barrier,
+	accels: []Accel_Barrier = nil,
+) {
 	buffers, textures, accels := buffers, textures, accels
 	for len(buffers) > 0 || len(textures) > 0 || len(accels) > 0 {
 		b := min(len(buffers), MAX_PACKET_BARRIERS)
@@ -518,12 +581,26 @@ cmd_barriers :: proc(cb: ^Command_Buffer, buffers: []Buffer_Barrier, textures: [
 			texture_count = u16(t),
 			accel_count   = u16(a),
 		}
-		push(cb, .Barriers, packet, slice.to_bytes(buffers[:b]), slice.to_bytes(textures[:t]), slice.to_bytes(accels[:a]))
+		push(
+			cb,
+			.Barriers,
+			packet,
+			slice.to_bytes(buffers[:b]),
+			slice.to_bytes(textures[:t]),
+			slice.to_bytes(accels[:a]),
+		)
 		buffers, textures, accels = buffers[b:], textures[t:], accels[a:]
 	}
 }
 
-cmd_copy_buffer :: proc(cb: ^Command_Buffer, source: Buffer, source_offset: u32, dest: Buffer, dest_offset: u32, size: u32) {
+cmd_copy_buffer :: proc(
+	cb: ^Command_Buffer,
+	source: Buffer,
+	source_offset: u32,
+	dest: Buffer,
+	dest_offset: u32,
+	size: u32,
+) {
 	push(cb, .Copy_Buffer, Copy_Buffer{source, source_offset, dest, dest_offset, size})
 }
 
@@ -539,13 +616,24 @@ cmd_build_accel :: proc(cb: ^Command_Buffer, accel: Accel_Struct, update := fals
 
 // cmd_build_top_accel builds a top-level acceleration structure from count Accel_Instance records at offset in
 // instances. The offset is a multiple of 16. The instances may be in the upload ring.
-cmd_build_top_accel :: proc(cb: ^Command_Buffer, accel: Accel_Struct, instances: Buffer, offset, count: u32, update := false) {
+cmd_build_top_accel :: proc(
+	cb: ^Command_Buffer,
+	accel: Accel_Struct,
+	instances: Buffer,
+	offset, count: u32,
+	update := false,
+) {
 	push(cb, .Build_Accel, Build_Accel{accel, instances, offset, count, b32(update)})
 }
 
 // cmd_write_accel_size writes a built structure's compacted size, a u64, at offset in a Storage buffer. See
 // Write_Accel_Size.
-cmd_write_accel_size :: proc(cb: ^Command_Buffer, accel: Accel_Struct, buffer: Buffer, offset: u32) {
+cmd_write_accel_size :: proc(
+	cb: ^Command_Buffer,
+	accel: Accel_Struct,
+	buffer: Buffer,
+	offset: u32,
+) {
 	push(cb, .Write_Accel_Size, Write_Accel_Size{accel, buffer, offset})
 }
 
@@ -646,7 +734,13 @@ push_constants_data :: proc(packet: Packet) -> []byte {
 	return packet.data[size_of(Push_Constants):][:constants.size]
 }
 
-barrier_data :: proc(packet: Packet) -> (buffers: []Buffer_Barrier, textures: []Texture_Barrier, accels: []Accel_Barrier) {
+barrier_data :: proc(
+	packet: Packet,
+) -> (
+	buffers: []Buffer_Barrier,
+	textures: []Texture_Barrier,
+	accels: []Accel_Barrier,
+) {
 	barriers := payload(packet, Barriers)
 	data := packet.data[size_of(Barriers):]
 	buffers = slice.reinterpret([]Buffer_Barrier, data)[:barriers.buffer_count]

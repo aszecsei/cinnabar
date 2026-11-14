@@ -39,21 +39,21 @@ Sky_Texture_Key :: struct {
 // Sky_Texture_State is the Texture sky's state between frames, in Sky.
 @(private)
 Sky_Texture_State :: struct {
-	background: Shader_Pipeline,
-	ambient:    Shader_Pipeline,
+	background:    Shader_Pipeline,
+	ambient:       Shader_Pipeline,
 	// The integral's result, and its copy that the CPU reads.
-	result:     gpu.Buffer,
-	readback:   gpu.Buffer,
+	result:        gpu.Buffer,
+	readback:      gpu.Buffer,
 	// The ambient light of key's texture, before its rotation and intensity, and the direction toward its sun, with how
 	// much brighter the sun is than the average.
-	key:        Sky_Texture_Key,
-	light:      Ambient,
-	sun:        [3]f32,
-	sun_ratio:  f32,
-	valid:      bool,
+	key:           Sky_Texture_Key,
+	light:         Ambient,
+	sun:           [3]f32,
+	sun_ratio:     f32,
+	valid:         bool,
 	// The sun in the world, by the rotation of the last frame that drew the texture, and that frame.
-	world_sun:  [3]f32,
-	sun_frame:  u64,
+	world_sun:     [3]f32,
+	sun_frame:     u64,
 	// The integral in flight, of pending_key's texture, and its ticket.
 	pending:       bool,
 	pending_key:   Sky_Texture_Key,
@@ -132,8 +132,20 @@ sky_texture_destroy :: proc(s: ^Sky_Texture_State, r: ^Renderer) {
 @(private)
 sync_sky_texture_pipelines :: proc(r: ^Renderer, force: bool) {
 	s := &r.sky.texture
-	sync_compute_pipeline(&s.background, r.platform, r.residency.assets, {label = "sky texture"}, force)
-	sync_compute_pipeline(&s.ambient, r.platform, r.residency.assets, {label = "sky texture ambient"}, force)
+	sync_compute_pipeline(
+		&s.background,
+		r.platform,
+		r.residency.assets,
+		{label = "sky texture"},
+		force,
+	)
+	sync_compute_pipeline(
+		&s.ambient,
+		r.platform,
+		r.residency.assets,
+		{label = "sky texture ambient"},
+		force,
+	)
 }
 
 // begin_sky_texture readies the frame's texture sky and gives its ambient light: the texture's, turned and scaled,
@@ -157,7 +169,8 @@ begin_sky_texture :: proc(f: ^Frame, settings: Sky_Settings) -> Ambient {
 	// An extra view takes the integral as it is: it takes no result and asks for none, and the sun it leaves to the
 	// frame's own view.
 	if s.pending && !f.extra {
-		if data, back := platform.gpu_read_buffer(s.readback); back && len(data) >= SKY_AMBIENT_RESULT_SIZE {
+		if data, back := platform.gpu_read_buffer(s.readback);
+		   back && len(data) >= SKY_AMBIENT_RESULT_SIZE {
 			values := mem.slice_data_cast([]f32, data[:SKY_AMBIENT_RESULT_SIZE])
 			if transmute(u32)values[20] == s.ticket {
 				for v, i in ([]^[3]f32{&s.light.constant, &s.light.x, &s.light.y, &s.light.z}) {
@@ -174,7 +187,11 @@ begin_sky_texture :: proc(f: ^Frame, settings: Sky_Settings) -> Ambient {
 	}
 	sf := new(Sky_Texture_Frame, platform.frame_allocator)
 	sf.texture, sf.cube = t.texture, cube
-	if !f.extra && (!s.valid || s.key != key) && !s.pending && pipeline_ready(platform, &s.ambient) && ensure_sky_texture_buffers(r) {
+	if !f.extra &&
+	   (!s.valid || s.key != key) &&
+	   !s.pending &&
+	   pipeline_ready(platform, &s.ambient) &&
+	   ensure_sky_texture_buffers(r) {
 		s.ticket += 1
 		s.pending, s.pending_key, s.pending_frame = true, key, r.scene.frame
 		mip := u32(0)
@@ -187,12 +204,16 @@ begin_sky_texture :: proc(f: ^Frame, settings: Sky_Settings) -> Ambient {
 		for sun_mip + 1 < t.mip_count && around >> sun_mip > SKY_SUN_WIDTH {
 			sun_mip += 1
 		}
-		sf.sun_mip, sf.sun_size = sun_mip, {max(t.size.x >> sun_mip, 1), max(t.size.y >> sun_mip, 1)}
+		sf.sun_mip, sf.sun_size =
+			sun_mip, {max(t.size.x >> sun_mip, 1), max(t.size.y >> sun_mip, 1)}
 	}
 	ambient := flat
 	if s.valid && s.key == key {
 		turn := math.to_radians(settings.texture_rotation)
-		ambient = scale_ambient(turn_ambient(s.light, turn), settings.texture_intensity * settings.ambient_intensity)
+		ambient = scale_ambient(
+			turn_ambient(s.light, turn),
+			settings.texture_intensity * settings.ambient_intensity,
+		)
 		if !f.extra {
 			s.world_sun, s.sun_frame = turn_direction(s.sun, turn), r.scene.frame
 		}
@@ -208,7 +229,12 @@ begin_sky_texture :: proc(f: ^Frame, settings: Sky_Settings) -> Ambient {
 				right         = {right.x, right.y, right.z, scale.x},
 				up            = {up.x, up.y, up.z, scale.y},
 				forward       = {forward.x, forward.y, forward.z, 0},
-				turn          = {math.cos(turn), math.sin(turn), settings.texture_intensity, f32(around)},
+				turn          = {
+					math.cos(turn),
+					math.sin(turn),
+					settings.texture_intensity,
+					f32(around),
+				},
 				size          = f.size,
 				texture       = gpu.read_index(t.texture),
 				sampler_index = gpu.sampler_index(r.materials.sampler),
@@ -270,8 +296,18 @@ sky_texture_sun :: proc(r: ^Renderer) -> (direction: [3]f32, state: Sky_Sun_Stat
 ensure_sky_texture_buffers :: proc(r: ^Renderer) -> bool {
 	s := &r.sky.texture
 	if s.result == {} {
-		s.result = r.platform.gpu_create_buffer({size = SKY_AMBIENT_RESULT_SIZE, usage = {.Storage}, label = "sky texture ambient"}, nil)
-		s.readback = r.platform.gpu_create_buffer({size = SKY_AMBIENT_RESULT_SIZE, usage = {.Readback}, label = "sky texture ambient readback"}, nil)
+		s.result = r.platform.gpu_create_buffer(
+			{size = SKY_AMBIENT_RESULT_SIZE, usage = {.Storage}, label = "sky texture ambient"},
+			nil,
+		)
+		s.readback = r.platform.gpu_create_buffer(
+			{
+				size = SKY_AMBIENT_RESULT_SIZE,
+				usage = {.Readback},
+				label = "sky texture ambient readback",
+			},
+			nil,
+		)
 	}
 	return s.result != {} && s.readback != {}
 }
@@ -291,10 +327,17 @@ add_sky_texture_passes :: proc(f: ^Frame) {
 	p := add_compute_pass(g, "sky texture ambient", run_sky_texture_ambient, f)
 	write(g, p, sf.result)
 	p = add_compute_pass(g, "sky texture ambient readback", proc(ctx: ^Pass_Context) {
-		f := (^Frame)(ctx.data)
-		sf := f.sky_texture
-		gpu.cmd_copy_buffer(ctx.cb, gpu_buffer(ctx.graph, sf.result), 0, gpu_buffer(ctx.graph, sf.readback), 0, SKY_AMBIENT_RESULT_SIZE)
-	}, f)
+			f := (^Frame)(ctx.data)
+			sf := f.sky_texture
+			gpu.cmd_copy_buffer(
+				ctx.cb,
+				gpu_buffer(ctx.graph, sf.result),
+				0,
+				gpu_buffer(ctx.graph, sf.readback),
+				0,
+				SKY_AMBIENT_RESULT_SIZE,
+			)
+		}, f)
 	copy_source(g, p, sf.result)
 	copy_dest(g, p, sf.readback)
 }

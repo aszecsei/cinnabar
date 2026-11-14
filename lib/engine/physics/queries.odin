@@ -14,7 +14,9 @@ Filter :: struct {
 	ignore:          []ecs.Entity,
 }
 
-FILTER_ALL :: Filter{layers = max(u32)}
+FILTER_ALL :: Filter {
+	layers = max(u32),
+}
 
 // Hit is where a query hit a body: its entity, the point, the surface's normal, and the distance along the ray or the
 // sweep. The zero Hit is a miss.
@@ -36,7 +38,17 @@ Ray :: struct {
 // tick or sync left it (see docs/physics/design.md#queries). A backend without Queries misses every one.
 
 // raycast gives the closest hit along a ray. direction need not be a unit vector.
-raycast :: proc(s: ^State, w: ^ecs.World, origin: ecs.World_Position, direction: [3]f32, max_distance: f32, filter := FILTER_ALL) -> (hit: Hit, ok: bool) {
+raycast :: proc(
+	s: ^State,
+	w: ^ecs.World,
+	origin: ecs.World_Position,
+	direction: [3]f32,
+	max_distance: f32,
+	filter := FILTER_ALL,
+) -> (
+	hit: Hit,
+	ok: bool,
+) {
 	if .Queries not_in s.features {
 		return
 	}
@@ -51,7 +63,15 @@ raycast :: proc(s: ^State, w: ^ecs.World, origin: ecs.World_Position, direction:
 
 // raycast_all gives every hit along a ray, by distance: the first len(out) of them go to out, and the count is all
 // of them, so a caller can ask again with more room.
-raycast_all :: proc(s: ^State, w: ^ecs.World, origin: ecs.World_Position, direction: [3]f32, max_distance: f32, out: []Hit, filter := FILTER_ALL) -> int {
+raycast_all :: proc(
+	s: ^State,
+	w: ^ecs.World,
+	origin: ecs.World_Position,
+	direction: [3]f32,
+	max_distance: f32,
+	out: []Hit,
+	filter := FILTER_ALL,
+) -> int {
 	if .Queries not_in s.features {
 		return 0
 	}
@@ -123,7 +143,15 @@ shape_cast :: proc(
 
 // overlap gives the entities whose bodies overlap a shape at a pose, in the order of their bodies' handles: the first
 // len(out) of them go to out, and the count is all of them.
-overlap :: proc(s: ^State, w: ^ecs.World, shape: Collider, origin: ecs.World_Position, rotation: quaternion128, out: []ecs.Entity, filter := FILTER_ALL) -> int {
+overlap :: proc(
+	s: ^State,
+	w: ^ecs.World,
+	shape: Collider,
+	origin: ecs.World_Position,
+	rotation: quaternion128,
+	out: []ecs.Entity,
+	filter := FILTER_ALL,
+) -> int {
 	if .Queries not_in s.features {
 		return 0
 	}
@@ -143,7 +171,11 @@ overlap :: proc(s: ^State, w: ^ecs.World, shape: Collider, origin: ecs.World_Pos
 
 @(private)
 to_ray :: proc(s: ^State, r: Ray) -> core_physics.Ray {
-	return {origin = ecs.position_sub_f64(r.origin, s.anchor), direction = linalg.normalize0(r.direction), max_distance = r.max_distance}
+	return {
+		origin = ecs.position_sub_f64(r.origin, s.anchor),
+		direction = linalg.normalize0(r.direction),
+		max_distance = r.max_distance,
+	}
 }
 
 @(private)
@@ -167,7 +199,8 @@ to_filter :: proc(w: ^ecs.World, f: Filter) -> (out: core_physics.Query_Filter) 
 		if out.ignore_count == core_physics.MAX_QUERY_IGNORE {
 			break
 		}
-		if pb := ecs.is_alive(w, e) ? ecs.get(w, e, Physics_Body) : nil; pb != nil && pb.body.generation != 0 {
+		if pb := ecs.is_alive(w, e) ? ecs.get(w, e, Physics_Body) : nil;
+		   pb != nil && pb.body.generation != 0 {
 			out.ignore[out.ignore_count] = pb.body
 			out.ignore_count += 1
 		} else if body, ok := character_of(w, e); ok {

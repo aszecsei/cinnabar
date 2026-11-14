@@ -55,5 +55,13 @@ step_advance :: proc(pass: ^Pass) {
 		return
 	}
 	p.reported, p.sent = now, done
-	p.report(p.data, cook_link.Cook_Progress{kind = link_kind(p.kind), name = p.name, done = u32(done), total = u32(p.total)})
+	p.report(
+		p.data,
+		cook_link.Cook_Progress {
+			kind = link_kind(p.kind),
+			name = p.name,
+			done = u32(done),
+			total = u32(p.total),
+		},
+	)
 }

@@ -129,8 +129,14 @@ register :: proc(s: ^State, w: ^ecs.World, assets: ^asset.Assets) {
 	s.graphs = nil
 	terms := []ecs.Term{ecs.write(w, Animator), ecs.optional(ecs.write(w, Root_Motion))}
 	s.animators = ecs.query(w, terms)
-	s.job_events = ecs.register_job_buffer(w, {name = "animation events", user = s, make = make_job_events, flush = flush_job_events})
-	ecs.register_system(w, {name = "animate", stage = .Fixed, procedure = animate, terms = terms, data = s})
+	s.job_events = ecs.register_job_buffer(
+		w,
+		{name = "animation events", user = s, make = make_job_events, flush = flush_job_events},
+	)
+	ecs.register_system(
+		w,
+		{name = "animate", stage = .Fixed, procedure = animate, terms = terms, data = s},
+	)
 }
 
 // destroy frees the events' strings and lists.
@@ -211,7 +217,10 @@ animate :: proc(ctx: ^ecs.System_Context) {
 				append(events, Job_Event{entities[i], a.slot, f})
 			}
 			if out.dropped > 0 {
-				log.warnf("anim: an entity's graph raised %d events past MAX_TICK_EVENTS in a tick", out.dropped)
+				log.warnf(
+					"anim: an entity's graph raised %d events past MAX_TICK_EVENTS in a tick",
+					out.dropped,
+				)
 			}
 		}
 	}
@@ -225,7 +234,10 @@ ready_graph :: proc(s: ^State, a: ^Animator) -> (^Resolved, bool) {
 		return nil, false
 	}
 	r := &s.graphs[a.slot]
-	if !r.ready || a.instance.key != r.key || r.graph_guid != a.graph || (a.graph == {} && (r.clip_guid != a.clip || r.loop != a.loop)) {
+	if !r.ready ||
+	   a.instance.key != r.key ||
+	   r.graph_guid != a.graph ||
+	   (a.graph == {} && (r.clip_guid != a.clip || r.loop != a.loop)) {
 		return nil, false
 	}
 	return r, true
@@ -394,7 +406,10 @@ present :: proc(s: ^State, w: ^ecs.World, allocator: mem.Allocator) -> []render.
 				anim_graph.remove_root_motion(&r.graph, locals)
 			}
 			sphere := anim_graph.compose(joints, locals, models, palette)
-			append(&poses, render.Skin_Pose{entity = entities[i], palette = palette, sphere = sphere})
+			append(
+				&poses,
+				render.Skin_Pose{entity = entities[i], palette = palette, sphere = sphere},
+			)
 		}
 	}
 	return poses[:]
@@ -404,7 +419,17 @@ present :: proc(s: ^State, w: ^ecs.World, allocator: mem.Allocator) -> []render.
 // gives its pose. The instance is the caller's; it starts again with a new blob, keeping the parameters that the graph
 // still has. data is the graph's blob, which may be one that the editor has not saved, and the clips and the skin load by
 // their GUIDs. The pose leaves out root motion, so the mesh stays in view. It is not ready until they have all loaded.
-preview_pose :: proc(assets: ^asset.Assets, data: []byte, inst: ^anim_graph.Instance, dt: f32, allocator: mem.Allocator) -> (palette: [][3][4]f32, sphere: [4]f32, ok: bool) {
+preview_pose :: proc(
+	assets: ^asset.Assets,
+	data: []byte,
+	inst: ^anim_graph.Instance,
+	dt: f32,
+	allocator: mem.Allocator,
+) -> (
+	palette: [][3][4]f32,
+	sphere: [4]f32,
+	ok: bool,
+) {
 	s := State {
 		assets = assets,
 	}
@@ -434,9 +459,15 @@ preview_pose :: proc(assets: ^asset.Assets, data: []byte, inst: ^anim_graph.Inst
 
 // resolve is the index in a table of an Animator's graph, which it loads and adds if the table does not have it.
 @(private)
-resolve :: proc(s: ^State, table: ^[dynamic]Resolved, a: ^Animator, allocator: mem.Allocator) -> int {
+resolve :: proc(
+	s: ^State,
+	table: ^[dynamic]Resolved,
+	a: ^Animator,
+	allocator: mem.Allocator,
+) -> int {
 	for &r, i in table {
-		if r.graph_guid == a.graph && (a.graph != {} || (r.clip_guid == a.clip && r.loop == a.loop)) {
+		if r.graph_guid == a.graph &&
+		   (a.graph != {} || (r.clip_guid == a.clip && r.loop == a.loop)) {
 			return i
 		}
 	}
@@ -447,8 +478,19 @@ resolve :: proc(s: ^State, table: ^[dynamic]Resolved, a: ^Animator, allocator: m
 // load_graph loads an Animator's graph and its clips, or its clip without a graph, and their skin, and finds the
 // root motion joint by its name. With graph_bytes, those are the graph's blob, and the Animator names none.
 @(private)
-load_graph :: proc(s: ^State, a: ^Animator, allocator: mem.Allocator, graph_bytes: []byte = nil) -> (r: Resolved) {
-	r = {graph_guid = a.graph, clip_guid = a.clip, loop = a.loop}
+load_graph :: proc(
+	s: ^State,
+	a: ^Animator,
+	allocator: mem.Allocator,
+	graph_bytes: []byte = nil,
+) -> (
+	r: Resolved,
+) {
+	r = {
+		graph_guid = a.graph,
+		clip_guid  = a.clip,
+		loop       = a.loop,
+	}
 	r.graph.root, r.graph.root_parent, r.graph.root_parent_rotation = -1, 1, 1
 	clips: []anim_graph.Clip
 	ok: bool
@@ -522,17 +564,28 @@ find_root :: proc(r: ^Resolved, joints: []format.Skin_Joint, name: string) {
 		}
 		for k := count - 1; k >= 0; k -= 1 {
 			pose := joint_rest(joints[chain[k]])
-			parent = parent * linalg.matrix4_from_trs_f32(pose.translation, pose.rotation, pose.scale)
+			parent =
+				parent * linalg.matrix4_from_trs_f32(pose.translation, pose.rotation, pose.scale)
 			rotation = rotation * pose.rotation
 		}
-		r.graph.root, r.graph.root_parent, r.graph.root_parent_rotation, r.graph.root_rest = i, parent, rotation, joint_rest(j)
+		r.graph.root, r.graph.root_parent, r.graph.root_parent_rotation, r.graph.root_rest =
+			i, parent, rotation, joint_rest(j)
 		return
 	}
 }
 
 @(private)
 joint_rest :: proc(j: format.Skin_Joint) -> anim_graph.Joint_Pose {
-	return {j.translation, quaternion(real = j.rotation.w, imag = j.rotation.x, jmag = j.rotation.y, kmag = j.rotation.z), j.scale}
+	return {
+		j.translation,
+		quaternion(
+			real = j.rotation.w,
+			imag = j.rotation.x,
+			jmag = j.rotation.y,
+			kmag = j.rotation.z,
+		),
+		j.scale,
+	}
 }
 
 // warn_graph tells of what the cooker could not check, when an Animator starts a graph: a root motion joint that
@@ -551,7 +604,13 @@ warn_graph :: proc(r: ^Resolved) {
 	for c, i in format.animation_graph_clips(g.data, g.blob) {
 		for m in markers[c.first_marker:][:c.marker_count] {
 			if m.time > g.clips[i].blob.duration {
-				log.warnf("anim: %s: clip %s has an event at %.3f s, past its end at %.3f s", path, format.blob_string(g.data, c.name), m.time, g.clips[i].blob.duration)
+				log.warnf(
+					"anim: %s: clip %s has an event at %.3f s, past its end at %.3f s",
+					path,
+					format.blob_string(g.data, c.name),
+					m.time,
+					g.clips[i].blob.duration,
+				)
 			}
 		}
 	}
@@ -566,7 +625,15 @@ rotate_y :: proc "contextless" (v: [3]f32, angle: f32) -> [3]f32 {
 
 // parameter is the index of an Animator's graph's parameter by its name, in the frame's table, and its kind. It is
 // safe in Fixed systems' jobs, which may then set it with set_parameter or fire.
-parameter :: proc(s: ^State, a: ^Animator, name: string) -> (index: int, kind: format.Animation_Graph_Parameter_Kind, ok: bool) {
+parameter :: proc(
+	s: ^State,
+	a: ^Animator,
+	name: string,
+) -> (
+	index: int,
+	kind: format.Animation_Graph_Parameter_Kind,
+	ok: bool,
+) {
 	r := ready_graph(s, a) or_return
 	if r.graph.blob == nil {
 		return
@@ -600,23 +667,42 @@ state_name :: proc(s: ^State, a: ^Animator) -> string {
 	if !ok || r.graph.blob == nil {
 		return ""
 	}
-	return format.blob_string(r.graph.data, format.animation_graph_states(r.graph.data, r.graph.blob)[a.instance.state].name)
+	return format.blob_string(
+		r.graph.data,
+		format.animation_graph_states(r.graph.data, r.graph.blob)[a.instance.state].name,
+	)
 }
 
 // root_motion_world is an entity's last tick of root motion in the world: its move, turned and scaled by the entity's
 // Transform, and its turn about the world's y. It reads only the entity's own components; what to do with them is the
 // caller's.
-root_motion_world :: proc(w: ^ecs.World, e: ecs.Entity) -> (delta: [3]f32, turn: quaternion128, ok: bool) {
+root_motion_world :: proc(
+	w: ^ecs.World,
+	e: ecs.Entity,
+) -> (
+	delta: [3]f32,
+	turn: quaternion128,
+	ok: bool,
+) {
 	m := ecs.get(w, e, Root_Motion)
 	t := ecs.get(w, e, ecs.Transform)
 	if m == nil || t == nil {
 		return {}, 1, false
 	}
-	return linalg.quaternion_mul_vector3(t.rotation, m.translation * t.scale), linalg.quaternion_angle_axis_f32(m.yaw, {0, 1, 0}), true
+	return linalg.quaternion_mul_vector3(t.rotation, m.translation * t.scale),
+		linalg.quaternion_angle_axis_f32(m.yaw, {0, 1, 0}),
+		true
 }
 
 // graph_data is an animation graph's blob, which it loads if it is not loaded.
-graph_data :: proc(s: ^State, guid: format.Guid) -> (data: []byte, blob: ^format.Animation_Graph_Blob, ok: bool) {
+graph_data :: proc(
+	s: ^State,
+	guid: format.Guid,
+) -> (
+	data: []byte,
+	blob: ^format.Animation_Graph_Blob,
+	ok: bool,
+) {
 	if s.assets == nil || guid == {} {
 		return
 	}
@@ -627,7 +713,14 @@ graph_data :: proc(s: ^State, guid: format.Guid) -> (data: []byte, blob: ^format
 }
 
 // clip_data is an animation clip's blob, which it loads if it is not loaded.
-clip_data :: proc(s: ^State, guid: format.Guid) -> (data: []byte, blob: ^format.Animation_Blob, ok: bool) {
+clip_data :: proc(
+	s: ^State,
+	guid: format.Guid,
+) -> (
+	data: []byte,
+	blob: ^format.Animation_Blob,
+	ok: bool,
+) {
 	if s.assets == nil || guid == {} {
 		return
 	}
@@ -638,7 +731,14 @@ clip_data :: proc(s: ^State, guid: format.Guid) -> (data: []byte, blob: ^format.
 }
 
 // skin_data is a skin's blob, which it loads if it is not loaded.
-skin_data :: proc(s: ^State, guid: format.Guid) -> (data: []byte, blob: ^format.Skin_Blob, ok: bool) {
+skin_data :: proc(
+	s: ^State,
+	guid: format.Guid,
+) -> (
+	data: []byte,
+	blob: ^format.Skin_Blob,
+	ok: bool,
+) {
 	if s.assets == nil || guid == {} {
 		return
 	}

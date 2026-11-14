@@ -9,7 +9,9 @@ import "core:strings"
 // editor's console. It returns whether the command ran and exited with 0.
 run :: proc(command: ..string) -> bool {
 	log.infof("cinnabar: %s", command_line(command))
-	process, err := os.process_start({command = command, stdout = os.stdout, stderr = os.stderr, stdin = os.stdin})
+	process, err := os.process_start(
+		{command = command, stdout = os.stdout, stderr = os.stderr, stdin = os.stdin},
+	)
 	if err != nil {
 		log.errorf("cinnabar: cannot run %s: %v", command[0], err)
 		return false

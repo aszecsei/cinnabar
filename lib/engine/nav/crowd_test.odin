@@ -138,7 +138,10 @@ setup :: proc(t: ^testing.T, serial := true, workers := 0, scripts := false) -> 
 		f.scripts = true
 		f.reports = make([dynamic]f64)
 		context.user_ptr = f
-		testing.expect(t, script.init(&f.runtime, &f.platform, &f.world, nil, register_crowd_scripts))
+		testing.expect(
+			t,
+			script.init(&f.runtime, &f.platform, &f.world, nil, register_crowd_scripts),
+		)
 	}
 	return f
 }
@@ -190,9 +193,24 @@ write_blob :: proc(t: ^testing.T, f: ^Fixture, guid: format.Guid, data: []byte) 
 // the floor and the walls in physics.
 @(private = "file")
 level :: proc(t: ^testing.T, f: ^Fixture, cells_x, cells_z: int, blocked: []bool = nil) {
-	write_blob(t, f, MESH, grid_blob({cells_x = cells_x, cells_z = cells_z, tile_cells = 4, blocked = blocked}, "Human", 0, guid = MESH))
+	write_blob(
+		t,
+		f,
+		MESH,
+		grid_blob(
+			{cells_x = cells_x, cells_z = cells_z, tile_cells = 4, blocked = blocked},
+			"Human",
+			0,
+			guid = MESH,
+		),
+	)
 	listed := []format.Scene_Nav_Mesh{{entity = 0x100, agent = "Human", guid = MESH}}
-	write_blob(t, f, SCENE, format.scene_write({}, SCENE, 1, nav_meshes = listed, allocator = context.temp_allocator))
+	write_blob(
+		t,
+		f,
+		SCENE,
+		format.scene_write({}, SCENE, 1, nav_meshes = listed, allocator = context.temp_allocator),
+	)
 	f.world.scene = SCENE
 	box(f, {f64(cells_x) / 2, -0.5, f64(cells_z) / 2}, {f32(cells_x) + 4, 1, f32(cells_z) + 4})
 	for z in 0 ..< cells_z {
@@ -212,7 +230,11 @@ level :: proc(t: ^testing.T, f: ^Fixture, cells_x, cells_z: int, blocked: []bool
 @(private = "file")
 box :: proc(f: ^Fixture, center: [3]f64, size: [3]f32) -> ecs.Entity {
 	e := ecs.spawn(&f.world)
-	ecs.add(&f.world, e, ecs.Transform{position = at(center.x, center.y, center.z), rotation = 1, scale = 1})
+	ecs.add(
+		&f.world,
+		e,
+		ecs.Transform{position = at(center.x, center.y, center.z), rotation = 1, scale = 1},
+	)
 	collider := physics.DEFAULT_COLLIDER
 	collider.size = size
 	ecs.add(&f.world, e, collider)
@@ -228,7 +250,8 @@ spawn_agent :: proc(f: ^Fixture, x, z: f64, priority: u8 = 50, stopping: f32 = 0
 	character.radius = RADIUS
 	ecs.add(&f.world, e, character)
 	agent := DEFAULT_NAV_AGENT
-	agent.max_speed, agent.radius, agent.priority, agent.stopping_distance = 2, RADIUS, priority, stopping
+	agent.max_speed, agent.radius, agent.priority, agent.stopping_distance =
+		2, RADIUS, priority, stopping
 	ecs.add(&f.world, e, agent)
 	return e
 }
@@ -334,7 +357,12 @@ following_a_path_around_a_corner :: proc(t: ^testing.T) {
 	}
 	testing.expect(t, turned, "the agent went around the corner")
 	testing.expect_value(t, status(f, e), Move_Status.Arrived)
-	testing.expectf(t, distance_xz(where_is(f, e), {7, 0, 7.25}) <= 0.3, "the agent stopped at %v", where_is(f, e))
+	testing.expectf(
+		t,
+		distance_xz(where_is(f, e), {7, 0, 7.25}) <= 0.3,
+		"the agent stopped at %v",
+		where_is(f, e),
+	)
 }
 
 @(test)
@@ -351,8 +379,17 @@ arrives_within_the_stopping_distance :: proc(t: ^testing.T) {
 	// It slows to a stop where it arrived, short of the goal.
 	frame(f, 60)
 	last := where_is(f, e)
-	testing.expectf(t, distance_xz(last, {6.5, 0, 2}) > 0.2, "the agent went past its stopping distance to %v", last)
-	testing.expectf(t, linalg.length(ecs.get(&f.world, e, Nav_Agent_State).velocity) < 0.01, "the agent stopped")
+	testing.expectf(
+		t,
+		distance_xz(last, {6.5, 0, 2}) > 0.2,
+		"the agent went past its stopping distance to %v",
+		last,
+	)
+	testing.expectf(
+		t,
+		linalg.length(ecs.get(&f.world, e, Nav_Agent_State).velocity) < 0.01,
+		"the agent stopped",
+	)
 	testing.expect_value(t, status(f, e), Move_Status.Arrived)
 	stop(crowd_requests(&f.nav, &f.world), e)
 	frame(f)
@@ -373,7 +410,12 @@ a_moved_target_gets_a_new_path :: proc(t: ^testing.T) {
 	// The target goes up the L's other strip: the agent's path goes there too.
 	ecs.get_write(&f.world, target, ecs.Transform).position = at(7, 0, 7)
 	testing.expect(t, run(f, 900, e) < 900, "the agent arrives at the moved target")
-	testing.expectf(t, distance_xz(where_is(f, e), {7, 0, 7}) <= 0.45, "the agent stopped at %v", where_is(f, e))
+	testing.expectf(
+		t,
+		distance_xz(where_is(f, e), {7, 0, 7}) <= 0.45,
+		"the agent stopped at %v",
+		where_is(f, e),
+	)
 	// A followed target that moves away again takes the agent after it.
 	ecs.get_write(&f.world, target, ecs.Transform).position = at(7, 0, 4)
 	frame(f, 3)
@@ -396,7 +438,12 @@ a_pushed_agent_gets_back_on_its_corridor :: proc(t: ^testing.T) {
 	frame(f)
 	testing.expectf(t, where_is(f, e).z > 4, "the agent was pushed to %v", where_is(f, e))
 	testing.expect(t, run(f, 900, e) < 900, "the pushed agent arrives")
-	testing.expectf(t, distance_xz(where_is(f, e), {11, 0, 1}) <= 0.3, "the agent stopped at %v", where_is(f, e))
+	testing.expectf(
+		t,
+		distance_xz(where_is(f, e), {11, 0, 1}) <= 0.3,
+		"the agent stopped at %v",
+		where_is(f, e),
+	)
 	_, slot := find_agent(&f.nav, &f.world, e)
 	following, ok := slot.phase.(Crowd_Following)
 	testing.expect(t, !ok || len(following.corridor) >= 1)
@@ -486,9 +533,22 @@ twenty_agents_cross_a_doorway :: proc(t: ^testing.T) {
 	ticks := run_watching(f, 60 * 60, agents, still, longest)
 	testing.expectf(t, ticks < 60 * 60, "the agents cross in a minute, not %v ticks", ticks)
 	for e, i in agents {
-		testing.expectf(t, status(f, e) == .Arrived, "agent %d is %v at %v", i, status(f, e), where_is(f, e))
+		testing.expectf(
+			t,
+			status(f, e) == .Arrived,
+			"agent %d is %v at %v",
+			i,
+			status(f, e),
+			where_is(f, e),
+		)
 		start_side := i % 2 == 0
-		testing.expectf(t, (where_is(f, e).x > 7) == start_side, "agent %d crossed to %v", i, where_is(f, e))
+		testing.expectf(
+			t,
+			(where_is(f, e).x > 7) == start_side,
+			"agent %d crossed to %v",
+			i,
+			where_is(f, e),
+		)
 		// None stands still on its way for a second.
 		testing.expectf(t, longest[i] < 60, "agent %d stood still for %d ticks", i, longest[i])
 	}
@@ -541,7 +601,11 @@ crowds_are_the_same_on_one_job_and_many :: proc(t: ^testing.T) {
 	defer delete(one)
 	many := crowd_run(t, false, 8, 240)
 	defer delete(many)
-	testing.expect(t, slice.equal(one, many), "the agents are where they are on one job and on eight workers")
+	testing.expect(
+		t,
+		slice.equal(one, many),
+		"the agents are where they are on one job and on eight workers",
+	)
 }
 
 // The test decision runs its one action, which an argument names, once.
@@ -562,7 +626,12 @@ action_blobs :: proc(t: ^testing.T, f: ^Fixture, action: string, goal: ecs.World
 		name = "count",
 		type = .Int,
 	}
-	write_blob(t, f, BOARD, format.blackboard_write({guid = BOARD, key = 11, keys = keys}, context.temp_allocator))
+	write_blob(
+		t,
+		f,
+		BOARD,
+		format.blackboard_write({guid = BOARD, key = 11, keys = keys}, context.temp_allocator),
+	)
 	decision := format.Decision_Contents {
 		guid           = DECISION,
 		key            = 33,
@@ -570,10 +639,28 @@ action_blobs :: proc(t: ^testing.T, f: ^Fixture, action: string, goal: ecs.World
 		state_size     = 8,
 		blackboard     = BOARD,
 		blackboard_key = 11,
-		nodes          = slice.clone([]format.Decision_Node_Contents{{id = 1, kind = "pick", condition = format.DECISION_NONE, action = 0}}, context.temp_allocator),
-		constants      = slice.clone([]format.Decision_Constant_Contents{{type = .String, text = "goal"}}, context.temp_allocator),
-		actions        = slice.clone([]format.Decision_Action_Contents{{name = action, first_arg = 0, arg_count = 1 if action == "move_to" else 0}}, context.temp_allocator),
-		args           = slice.clone([]format.Decision_Arg_Contents{{name = "key", source = .Constant, index = 0, type = .String}}, context.temp_allocator),
+		nodes          = slice.clone(
+			[]format.Decision_Node_Contents {
+				{id = 1, kind = "pick", condition = format.DECISION_NONE, action = 0},
+			},
+			context.temp_allocator,
+		),
+		constants      = slice.clone(
+			[]format.Decision_Constant_Contents{{type = .String, text = "goal"}},
+			context.temp_allocator,
+		),
+		actions        = slice.clone(
+			[]format.Decision_Action_Contents {
+				{name = action, first_arg = 0, arg_count = 1 if action == "move_to" else 0},
+			},
+			context.temp_allocator,
+		),
+		args           = slice.clone(
+			[]format.Decision_Arg_Contents {
+				{name = "key", source = .Constant, index = 0, type = .String},
+			},
+			context.temp_allocator,
+		),
 		source_path    = "game/ai/crowd.decision",
 	}
 	write_blob(t, f, DECISION, format.decision_write(decision, context.temp_allocator))
@@ -614,7 +701,12 @@ move_to_succeeds_on_arrival :: proc(t: ^testing.T) {
 		frame(f)
 	}
 	testing.expect_value(t, seen_action.status, ai.Action_Status.Succeeded)
-	testing.expectf(t, distance_xz(where_is(f, e), {7, 0, 6}) <= 0.3, "the agent stopped at %v", where_is(f, e))
+	testing.expectf(
+		t,
+		distance_xz(where_is(f, e), {7, 0, 6}) <= 0.3,
+		"the agent stopped at %v",
+		where_is(f, e),
+	)
 	testing.expect_value(t, status(f, e), Move_Status.Arrived)
 }
 
@@ -661,7 +753,11 @@ the_stop_action_stops_the_agent :: proc(t: ^testing.T) {
 	testing.expect_value(t, status(f, e), Move_Status.Idle)
 	frame(f, 60)
 	testing.expectf(t, where_is(f, e).x < 8, "the stopped agent stood at %v", where_is(f, e))
-	testing.expectf(t, linalg.length(ecs.get(&f.world, e, Nav_Agent_State).velocity) < 0.01, "the agent stopped")
+	testing.expectf(
+		t,
+		linalg.length(ecs.get(&f.world, e, Nav_Agent_State).velocity) < 0.01,
+		"the agent stopped",
+	)
 }
 
 @(test)
@@ -699,7 +795,8 @@ a_duplicated_agent_gets_its_own_slot :: proc(t: ^testing.T) {
 	ecs.add(&f.world, copy, ecs.get(&f.world, e, Nav_Agent)^)
 	ecs.add(&f.world, copy, ecs.get(&f.world, e, Nav_Agent_State)^)
 	frame(f)
-	a, b := ecs.get(&f.world, e, Nav_Agent_State).crowd, ecs.get(&f.world, copy, Nav_Agent_State).crowd
+	a, b :=
+		ecs.get(&f.world, e, Nav_Agent_State).crowd, ecs.get(&f.world, copy, Nav_Agent_State).crowd
 	testing.expect(t, a != b, "the copy has its own slot")
 	testing.expect_value(t, status(f, e), Move_Status.Moving)
 	testing.expect_value(t, status(f, copy), Move_Status.Idle)
@@ -730,33 +827,62 @@ Test.report(Navigation.move_status(Test.agent(), ticket) == "pending" and 1 or 0
 	// The ticket goes into the chunks that follow, since each has its own globals.
 	ticket := u64(f.reports[0])
 	frame(f, 30)
-	_, ok = script.spawn_source(&f.runtime, "=moving", fmt.tprintf(`
+	_, ok = script.spawn_source(
+		&f.runtime,
+		"=moving",
+		fmt.tprintf(
+			`
 Test.report(vector.magnitude(Navigation.velocity(Test.agent())))
 Test.report(Test.agent():get(NavAgentState).status == "Moving" and 1 or 0)
 Test.report(Navigation.move_status(Test.agent(), %d) == "moving" and 1 or 0)
-`, ticket))
+`,
+			ticket,
+		),
+	)
 	testing.expect(t, ok)
 	testing.expect(t, run(f, 600, f.agent) < 600, "the agent arrives")
-	_, ok = script.spawn_source(&f.runtime, "=arrived", fmt.tprintf(`
+	_, ok = script.spawn_source(
+		&f.runtime,
+		"=arrived",
+		fmt.tprintf(
+			`
 Test.report(Navigation.arrived(Test.agent()) and 1 or 0)
 Test.report(Navigation.move_status(Test.agent(), %d) == "arrived" and 1 or 0)
 Navigation.stop(Test.agent())
-`, ticket))
+`,
+			ticket,
+		),
+	)
 	testing.expect(t, ok)
 	frame(f)
 	testing.expect_value(t, status(f, f.agent), Move_Status.Idle)
 	// A stop leaves the move stopped. A later move replaces it once the crowd applies it.
-	_, ok = script.spawn_source(&f.runtime, "=again", fmt.tprintf(`
+	_, ok = script.spawn_source(
+		&f.runtime,
+		"=again",
+		fmt.tprintf(
+			`
 Test.report(Navigation.move_status(Test.agent(), %d) == "stopped" and 1 or 0)
 Test.report(Navigation.move_to(Test.agent(), WorldPosition.from_meters(1000, 2, -500)))
-`, ticket))
+`,
+			ticket,
+		),
+	)
 	testing.expect(t, ok)
 	second := u64(f.reports[len(f.reports) - 1])
 	frame(f)
-	_, ok = script.spawn_source(&f.runtime, "=replaced", fmt.tprintf(`
+	_, ok = script.spawn_source(
+		&f.runtime,
+		"=replaced",
+		fmt.tprintf(
+			`
 Test.report(Navigation.move_status(Test.agent(), %d) == "replaced" and 1 or 0)
 Test.report(Navigation.move_status(Test.agent(), %d) == "moving" and 1 or 0)
-`, ticket, second))
+`,
+			ticket,
+			second,
+		),
+	)
 	testing.expect(t, ok)
 	if testing.expectf(t, len(f.reports) == 12, "reports %v", f.reports[:]) {
 		testing.expect(t, second > ticket)
@@ -769,7 +895,11 @@ Test.report(Navigation.move_status(Test.agent(), %d) == "moving" and 1 or 0)
 		}
 	}
 	context.logger = testlog.expected_errors()
-	_, ok = script.spawn_source(&f.runtime, "=not_an_agent", `Navigation.move_to(World.spawn(), WorldPosition.origin)`)
+	_, ok = script.spawn_source(
+		&f.runtime,
+		"=not_an_agent",
+		`Navigation.move_to(World.spawn(), WorldPosition.origin)`,
+	)
 	testing.expect(t, !ok, "an entity without a NavAgent is an error")
 	_, ok = script.spawn_source(&f.runtime, "=no_target", `Navigation.move_to(Test.agent(), 3)`)
 	testing.expect(t, !ok, "a target is a position or an entity")

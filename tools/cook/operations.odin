@@ -30,14 +30,21 @@ run_operation :: proc(
 	// asset between roots, so another cook's scan never sees an asset without its .meta file half way through it.
 	pairs := false
 	#partial switch _ in message {
-	case cook_link.Create_Asset, cook_link.Move_Assets, cook_link.Rename_Asset, cook_link.Rename_Folder, cook_link.Duplicate_Assets, cook_link.Delete_Assets, cook_link.Set_Import_Settings:
+	case cook_link.Create_Asset,
+	     cook_link.Move_Assets,
+	     cook_link.Rename_Asset,
+	     cook_link.Rename_Folder,
+	     cook_link.Duplicate_Assets,
+	     cook_link.Delete_Assets,
+	     cook_link.Set_Import_Settings:
 		pairs = true
 	}
 	locks: []Lock
 	if pairs {
 		locked: bool
 		if locks, locked = lock_roots(roots); !locked {
-			return failed("another cook is writing .meta files in the content roots. Try again."), true
+			return failed("another cook is writing .meta files in the content roots. Try again."),
+				true
 		}
 	}
 	defer unlock_all(locks)
@@ -157,7 +164,11 @@ Move :: struct {
 }
 
 @(private = "file")
-move_assets :: proc(roots: []Root, index: ^Index, op: cook_link.Move_Assets) -> cook_link.Operation_Result {
+move_assets :: proc(
+	roots: []Root,
+	index: ^Index,
+	op: cook_link.Move_Assets,
+) -> cook_link.Operation_Result {
 	dir, error := folder_dir(roots, op.root, op.folder)
 	if error != "" {
 		return failed("%s", error)
@@ -186,7 +197,11 @@ move_assets :: proc(roots: []Root, index: ^Index, op: cook_link.Move_Assets) -> 
 }
 
 @(private = "file")
-rename_asset :: proc(roots: []Root, index: ^Index, op: cook_link.Rename_Asset) -> cook_link.Operation_Result {
+rename_asset :: proc(
+	roots: []Root,
+	index: ^Index,
+	op: cook_link.Rename_Asset,
+) -> cook_link.Operation_Result {
 	from, found := asset_path(roots, index, op.guid)
 	if !found {
 		return not_found(index, op.guid)
@@ -223,7 +238,12 @@ do_moves :: proc(roots: []Root, moves: []Move) -> cook_link.Operation_Result {
 				move_file(done.to, done.from)
 				move_file(meta_of(done.to), meta_of(done.from))
 			}
-			return failed("cannot move %s to %s: %s", display(roots, m.from), display(roots, m.to), error)
+			return failed(
+				"cannot move %s to %s: %s",
+				display(roots, m.from),
+				display(roots, m.to),
+				error,
+			)
 		}
 	}
 	for m in moves {
@@ -260,7 +280,11 @@ rename_folder :: proc(roots: []Root, op: cook_link.Rename_Folder) -> cook_link.O
 }
 
 @(private = "file")
-duplicate_assets :: proc(roots: []Root, index: ^Index, op: cook_link.Duplicate_Assets) -> cook_link.Operation_Result {
+duplicate_assets :: proc(
+	roots: []Root,
+	index: ^Index,
+	op: cook_link.Duplicate_Assets,
+) -> cook_link.Operation_Result {
 	Copy :: struct {
 		from, to: string,
 		settings: []format.Meta_Setting,
@@ -275,7 +299,13 @@ duplicate_assets :: proc(roots: []Root, index: ^Index, op: cook_link.Duplicate_A
 		stem := strings.trim_suffix(name_of(from), extension)
 		to: string
 		for n := 1;; n += 1 {
-			to = fmt.tprintf("%s/%s_copy%s%s", parent_of(from), stem, n == 1 ? "" : fmt.tprintf("_%d", n), extension)
+			to = fmt.tprintf(
+				"%s/%s_copy%s%s",
+				parent_of(from),
+				stem,
+				n == 1 ? "" : fmt.tprintf("_%d", n),
+				extension,
+			)
 			taken := os.exists(to) || os.exists(meta_of(to))
 			for c in copies {
 				taken ||= strings.equal_fold(c.to, to)
@@ -312,7 +342,11 @@ duplicate_assets :: proc(roots: []Root, index: ^Index, op: cook_link.Duplicate_A
 }
 
 @(private = "file")
-delete_assets :: proc(roots: []Root, index: ^Index, op: cook_link.Delete_Assets) -> cook_link.Operation_Result {
+delete_assets :: proc(
+	roots: []Root,
+	index: ^Index,
+	op: cook_link.Delete_Assets,
+) -> cook_link.Operation_Result {
 	paths := make([dynamic]string, context.temp_allocator)
 	for guid in op.guids {
 		path, found := asset_path(roots, index, guid)
@@ -335,7 +369,10 @@ delete_assets :: proc(roots: []Root, index: ^Index, op: cook_link.Delete_Assets)
 		append(&paths, dir)
 	}
 	if !recycle(paths[:]) {
-		return failed("cannot send %d files and folders to the Recycle Bin. A program may have one of them open.", len(paths))
+		return failed(
+			"cannot send %d files and folders to the Recycle Bin. A program may have one of them open.",
+			len(paths),
+		)
 	}
 	for path in paths {
 		if !strings.has_suffix(path, format.META_EXTENSION) {
@@ -348,7 +385,11 @@ delete_assets :: proc(roots: []Root, index: ^Index, op: cook_link.Delete_Assets)
 // Checks every asset's settings before it writes any .meta file, and puts back what it wrote when a write fails, so an
 // operation changes all of the assets or none.
 @(private = "file")
-set_import_settings :: proc(roots: []Root, index: ^Index, op: cook_link.Set_Import_Settings) -> cook_link.Operation_Result {
+set_import_settings :: proc(
+	roots: []Root,
+	index: ^Index,
+	op: cook_link.Set_Import_Settings,
+) -> cook_link.Operation_Result {
 	Change :: struct {
 		path, meta_path: string,
 		old, new:        []byte,
@@ -370,7 +411,11 @@ set_import_settings :: proc(roots: []Root, index: ^Index, op: cook_link.Set_Impo
 			}
 			if info, ok := find_setting(known, s.key); ok {
 				if !slice.contains(info.values, s.value) {
-					return failed("%s must be %s", s.key, strings.join(info.values, " or ", context.temp_allocator))
+					return failed(
+						"%s must be %s",
+						s.key,
+						strings.join(info.values, " or ", context.temp_allocator),
+					)
 				}
 			} else if !slice.contains(entry.settings, cook_link.Setting{s.key, s.value}) {
 				// A setting that the importer does not know stays as the .meta file has it, but is never added.
@@ -384,7 +429,12 @@ set_import_settings :: proc(roots: []Root, index: ^Index, op: cook_link.Set_Impo
 			return failed("cannot read %s: %s", display(roots, meta_path), os.error_string(err))
 		}
 		guid, _ := format.guid_parse(a.guid)
-		changes[n] = {path, meta_path, old, transmute([]byte)meta_with(guid, string(old), settings)}
+		changes[n] = {
+			path,
+			meta_path,
+			old,
+			transmute([]byte)meta_with(guid, string(old), settings),
+		}
 	}
 	for c, n in changes {
 		if !write_blob(c.meta_path, c.new) {
@@ -403,7 +453,11 @@ set_import_settings :: proc(roots: []Root, index: ^Index, op: cook_link.Set_Impo
 }
 
 @(private = "file")
-reimport :: proc(index: ^Index, op: cook_link.Reimport, force: ^map[format.Guid]bool) -> cook_link.Operation_Result {
+reimport :: proc(
+	index: ^Index,
+	op: cook_link.Reimport,
+	force: ^map[format.Guid]bool,
+) -> cook_link.Operation_Result {
 	guids := make([dynamic]format.Guid, context.temp_allocator)
 	for guid in op.guids {
 		parsed, ok := format.guid_parse(guid)
@@ -467,7 +521,9 @@ template_text :: proc(template: cook_link.Asset_Template, name: string) -> strin
 	case .Decision_Htn:
 		return HTN_TEMPLATE
 	case .Material_Function:
-		return "material_function 1\n\nnode 1 function_input\n\tposition = [-240, 0]\n\tname = \"input\"\n\tdefault = [0, 0, 0, 0]\nnode 2 function_output\n\tposition = [120, 0]\n\tname = \"output\"\n\tvalue = @1.value\n"
+		return(
+			"material_function 1\n\nnode 1 function_input\n\tposition = [-240, 0]\n\tname = \"input\"\n\tdefault = [0, 0, 0, 0]\nnode 2 function_output\n\tposition = [120, 0]\n\tname = \"output\"\n\tvalue = @1.value\n" \
+		)
 	}
 	return ""
 }
@@ -497,7 +553,12 @@ class_name :: proc(name: string) -> string {
 
 // valid_name is whether Windows takes a name for a file or a folder, and the scan does not skip it.
 valid_name :: proc(name: string) -> bool {
-	if name == "" || len(name) > 200 || name[0] == '.' || name[0] == ' ' || name[len(name) - 1] == '.' || name[len(name) - 1] == ' ' {
+	if name == "" ||
+	   len(name) > 200 ||
+	   name[0] == '.' ||
+	   name[0] == ' ' ||
+	   name[len(name) - 1] == '.' ||
+	   name[len(name) - 1] == ' ' {
 		return false
 	}
 	for r in name {
@@ -514,7 +575,10 @@ valid_name :: proc(name: string) -> bool {
 	case "CON", "PRN", "AUX", "NUL":
 		return false
 	}
-	if len(upper) == 4 && (strings.has_prefix(upper, "COM") || strings.has_prefix(upper, "LPT")) && upper[3] >= '0' && upper[3] <= '9' {
+	if len(upper) == 4 &&
+	   (strings.has_prefix(upper, "COM") || strings.has_prefix(upper, "LPT")) &&
+	   upper[3] >= '0' &&
+	   upper[3] <= '9' {
 		return false
 	}
 	return true
@@ -572,7 +636,11 @@ asset_path :: proc(roots: []Root, index: ^Index, guid: string) -> (path: string,
 @(private = "file")
 not_found :: proc(index: ^Index, guid: string) -> cook_link.Operation_Result {
 	if entry, found := index.assets[guid]; found && entry.parent != "" {
-		return failed("%s is part of %s, and changes with it: move, rename, duplicate, delete or re-import the file instead", entry.subasset, entry.path)
+		return failed(
+			"%s is part of %s, and changes with it: move, rename, duplicate, delete or re-import the file instead",
+			entry.subasset,
+			entry.path,
+		)
 	}
 	return failed("no asset has the GUID %s", guid)
 }

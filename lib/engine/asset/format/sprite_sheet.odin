@@ -68,19 +68,29 @@ Sprite_Sheet_Blob :: struct {
 }
 
 sprite_sheet_layout :: proc() -> u64 {
-	return layout.hash(Sprite_Sheet_Blob) ~ layout.hash(Sprite_Frame) * 31 ~ layout.hash(Sprite_Animation) * 131
+	return(
+		layout.hash(Sprite_Sheet_Blob) ~
+		layout.hash(Sprite_Frame) * 31 ~
+		layout.hash(Sprite_Animation) * 131 \
+	)
 }
 
 // sprite_sheet_view checks a sprite sheet blob: its header, its layout, that its slices are inside it, that each frame
 // is inside the atlas, and that each animation's frames are frames of the sheet.
 sprite_sheet_view :: proc(data: []byte) -> (blob: ^Sprite_Sheet_Blob, ok: bool) {
 	header := blob_header(data) or_return
-	if header.kind != .Sprite_Sheet || header.layout != sprite_sheet_layout() || len(data) < size_of(Sprite_Sheet_Blob) {
+	if header.kind != .Sprite_Sheet ||
+	   header.layout != sprite_sheet_layout() ||
+	   len(data) < size_of(Sprite_Sheet_Blob) {
 		return
 	}
 	blob = (^Sprite_Sheet_Blob)(raw_data(data))
 	inside :: proc(data: []byte, s: Slice, size, align: int) -> bool {
-		return u64(s.offset) + u64(s.size) <= u64(len(data)) && int(s.size) % size == 0 && int(s.offset) % align == 0
+		return(
+			u64(s.offset) + u64(s.size) <= u64(len(data)) &&
+			int(s.size) % size == 0 &&
+			int(s.offset) % align == 0 \
+		)
 	}
 	if !inside(data, blob.frames, size_of(Sprite_Frame), align_of(Sprite_Frame)) ||
 	   !inside(data, blob.animations, size_of(Sprite_Animation), align_of(Sprite_Animation)) ||
@@ -98,12 +108,18 @@ sprite_sheet_view :: proc(data: []byte) -> (blob: ^Sprite_Sheet_Blob, ok: bool) 
 		return nil, false
 	}
 	for f in frames {
-		if u32(f.rect.x) + u32(f.rect.z) > blob.atlas_size.x || u32(f.rect.y) + u32(f.rect.w) > blob.atlas_size.y || f.duration < 0 || !inside(data, f.name, 1, 1) {
+		if u32(f.rect.x) + u32(f.rect.z) > blob.atlas_size.x ||
+		   u32(f.rect.y) + u32(f.rect.w) > blob.atlas_size.y ||
+		   f.duration < 0 ||
+		   !inside(data, f.name, 1, 1) {
 			return nil, false
 		}
 	}
 	for a in animations {
-		if u64(a.first) + u64(a.count) > u64(len(indices)) || a.count == 0 || a.rate < 0 || !inside(data, a.name, 1, 1) {
+		if u64(a.first) + u64(a.count) > u64(len(indices)) ||
+		   a.count == 0 ||
+		   a.rate < 0 ||
+		   !inside(data, a.name, 1, 1) {
 			return nil, false
 		}
 	}
@@ -115,23 +131,39 @@ sprite_sheet_view :: proc(data: []byte) -> (blob: ^Sprite_Sheet_Blob, ok: bool) 
 	return blob, true
 }
 
-sprite_sheet_frames :: proc "contextless" (data: []byte, blob: ^Sprite_Sheet_Blob) -> []Sprite_Frame {
+sprite_sheet_frames :: proc "contextless" (
+	data: []byte,
+	blob: ^Sprite_Sheet_Blob,
+) -> []Sprite_Frame {
 	bytes := blob_bytes(data, blob.frames)
 	return ([^]Sprite_Frame)(raw_data(bytes))[:len(bytes) / size_of(Sprite_Frame)]
 }
 
-sprite_sheet_animations :: proc "contextless" (data: []byte, blob: ^Sprite_Sheet_Blob) -> []Sprite_Animation {
+sprite_sheet_animations :: proc "contextless" (
+	data: []byte,
+	blob: ^Sprite_Sheet_Blob,
+) -> []Sprite_Animation {
 	bytes := blob_bytes(data, blob.animations)
 	return ([^]Sprite_Animation)(raw_data(bytes))[:len(bytes) / size_of(Sprite_Animation)]
 }
 
-sprite_sheet_frame_indices :: proc "contextless" (data: []byte, blob: ^Sprite_Sheet_Blob) -> []u16 {
+sprite_sheet_frame_indices :: proc "contextless" (
+	data: []byte,
+	blob: ^Sprite_Sheet_Blob,
+) -> []u16 {
 	bytes := blob_bytes(data, blob.frame_indices)
 	return ([^]u16)(raw_data(bytes))[:len(bytes) / size_of(u16)]
 }
 
 // sprite_sheet_find_frame is the index of the frame of a name.
-sprite_sheet_find_frame :: proc "contextless" (data: []byte, blob: ^Sprite_Sheet_Blob, name: string) -> (index: int, ok: bool) {
+sprite_sheet_find_frame :: proc "contextless" (
+	data: []byte,
+	blob: ^Sprite_Sheet_Blob,
+	name: string,
+) -> (
+	index: int,
+	ok: bool,
+) {
 	for f, i in sprite_sheet_frames(data, blob) {
 		if string(blob_bytes(data, f.name)) == name {
 			return i, true
@@ -141,7 +173,14 @@ sprite_sheet_find_frame :: proc "contextless" (data: []byte, blob: ^Sprite_Sheet
 }
 
 // sprite_sheet_find_animation is the index of the animation of a name.
-sprite_sheet_find_animation :: proc "contextless" (data: []byte, blob: ^Sprite_Sheet_Blob, name: string) -> (index: int, ok: bool) {
+sprite_sheet_find_animation :: proc "contextless" (
+	data: []byte,
+	blob: ^Sprite_Sheet_Blob,
+	name: string,
+) -> (
+	index: int,
+	ok: bool,
+) {
 	for a, i in sprite_sheet_animations(data, blob) {
 		if string(blob_bytes(data, a.name)) == name {
 			return i, true
@@ -153,7 +192,15 @@ sprite_sheet_find_animation :: proc "contextless" (data: []byte, blob: ^Sprite_S
 // sprite_sheet_frame_at is the frame that an animation shows at a time in seconds from its start, and whether the
 // animation is over: one that does not loop stays on its last frame. Each frame shows for its own duration, or for a
 // share of a second by the animation's rate. An animation whose frames have no time shows its first.
-sprite_sheet_frame_at :: proc "contextless" (data: []byte, blob: ^Sprite_Sheet_Blob, animation: int, time: f32) -> (frame: int, over: bool) {
+sprite_sheet_frame_at :: proc "contextless" (
+	data: []byte,
+	blob: ^Sprite_Sheet_Blob,
+	animation: int,
+	time: f32,
+) -> (
+	frame: int,
+	over: bool,
+) {
 	animations := sprite_sheet_animations(data, blob)
 	if animation < 0 || animation >= len(animations) {
 		return 0, true
@@ -217,10 +264,21 @@ Sprite_Sheet_Contents :: struct {
 }
 
 // sprite_sheet_write builds a sprite sheet blob.
-sprite_sheet_write :: proc(contents: Sprite_Sheet_Contents, allocator := context.allocator) -> []byte {
+sprite_sheet_write :: proc(
+	contents: Sprite_Sheet_Contents,
+	allocator := context.allocator,
+) -> []byte {
 	buffer := make([dynamic]byte, size_of(Sprite_Sheet_Blob), allocator)
-	frames := reserve_bytes(&buffer, len(contents.frames) * size_of(Sprite_Frame), align_of(Sprite_Frame))
-	animations := reserve_bytes(&buffer, len(contents.animations) * size_of(Sprite_Animation), align_of(Sprite_Animation))
+	frames := reserve_bytes(
+		&buffer,
+		len(contents.frames) * size_of(Sprite_Frame),
+		align_of(Sprite_Frame),
+	)
+	animations := reserve_bytes(
+		&buffer,
+		len(contents.animations) * size_of(Sprite_Animation),
+		align_of(Sprite_Animation),
+	)
 	index_count := 0
 	for a in contents.animations {
 		index_count += len(a.frames)
@@ -228,22 +286,47 @@ sprite_sheet_write :: proc(contents: Sprite_Sheet_Contents, allocator := context
 	frame_indices := reserve_bytes(&buffer, index_count * size_of(u16), align_of(u16))
 	for f, i in contents.frames {
 		name := append_bytes(&buffer, transmute([]byte)f.name)
-		record := Sprite_Frame{rect = f.rect, pivot = f.pivot, duration = f.duration, name = name}
+		record := Sprite_Frame {
+			rect     = f.rect,
+			pivot    = f.pivot,
+			duration = f.duration,
+			name     = name,
+		}
 		mem.copy(&buffer[int(frames.offset) + i * size_of(Sprite_Frame)], &record, size_of(record))
 	}
 	first := 0
 	for a, i in contents.animations {
 		name := append_bytes(&buffer, transmute([]byte)a.name)
-		record := Sprite_Animation{name = name, first = u32(first), count = u32(len(a.frames)), rate = a.rate, loop = b32(a.loop)}
-		mem.copy(&buffer[int(animations.offset) + i * size_of(Sprite_Animation)], &record, size_of(record))
+		record := Sprite_Animation {
+			name  = name,
+			first = u32(first),
+			count = u32(len(a.frames)),
+			rate  = a.rate,
+			loop  = b32(a.loop),
+		}
+		mem.copy(
+			&buffer[int(animations.offset) + i * size_of(Sprite_Animation)],
+			&record,
+			size_of(record),
+		)
 		if len(a.frames) > 0 {
-			mem.copy(&buffer[int(frame_indices.offset) + first * size_of(u16)], raw_data(a.frames), len(a.frames) * size_of(u16))
+			mem.copy(
+				&buffer[int(frame_indices.offset) + first * size_of(u16)],
+				raw_data(a.frames),
+				len(a.frames) * size_of(u16),
+			)
 		}
 		first += len(a.frames)
 	}
 	source_path := append_bytes(&buffer, transmute([]byte)contents.source_path)
 	blob := Sprite_Sheet_Blob {
-		header = {magic = BLOB_MAGIC, kind = .Sprite_Sheet, layout = sprite_sheet_layout(), key = contents.key, guid = contents.guid},
+		header = {
+			magic = BLOB_MAGIC,
+			kind = .Sprite_Sheet,
+			layout = sprite_sheet_layout(),
+			key = contents.key,
+			guid = contents.guid,
+		},
 		atlas = contents.atlas,
 		atlas_size = contents.atlas_size,
 		pixels_per_unit = contents.pixels_per_unit,

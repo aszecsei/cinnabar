@@ -50,7 +50,13 @@ send_events :: proc(s: ^State, w: ^ecs.World, r: ^script.Runtime) {
 }
 
 @(private)
-send_one :: proc(w: ^ecs.World, r: ^script.Runtime, c: Contact, self, other: ecs.Entity, sign: f32) {
+send_one :: proc(
+	w: ^ecs.World,
+	r: ^script.Runtime,
+	c: Contact,
+	self, other: ecs.Entity,
+	sign: f32,
+) {
 	if !ecs.is_alive(w, self) || !ecs.has(w, self, script.Behaviours) {
 		return
 	}
@@ -60,7 +66,16 @@ send_one :: proc(w: ^ecs.World, r: ^script.Runtime, c: Contact, self, other: ecs
 	case c.sensor:
 		script.send(r, self, "trigger_exit", other)
 	case c.kind == .Begin:
-		script.send(r, self, "collision_enter", other, c.point, c.normal * sign, c.relative_velocity * sign, f64(c.impulse))
+		script.send(
+			r,
+			self,
+			"collision_enter",
+			other,
+			c.point,
+			c.normal * sign,
+			c.relative_velocity * sign,
+			f64(c.impulse),
+		)
 	case:
 		script.send(r, self, "collision_exit", other)
 	}

@@ -43,7 +43,13 @@ cook_shaders :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass)
 	}
 	if options.dxc == "" {
 		for i in shaders {
-			report_error(problems, assets[i].path, 0, 0, "not cooked: the cooker has no --dxc to compile shaders with")
+			report_error(
+				problems,
+				assets[i].path,
+				0,
+				0,
+				"not cooked: the cooker has no --dxc to compile shaders with",
+			)
 			settle(pass, i, .Failed)
 		}
 		return false
@@ -57,7 +63,12 @@ cook_shaders :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass)
 	for i in shaders {
 		defer step_advance(pass)
 		s := &assets[i]
-		inputs, inputs_ok := gather_includes(s.path, asset_source(pass, i), options.includes[:], problems)
+		inputs, inputs_ok := gather_includes(
+			s.path,
+			asset_source(pass, i),
+			options.includes[:],
+			problems,
+		)
 		if !check_settings(s^, problems) || !inputs_ok {
 			settle(pass, i, .Failed)
 			ok = false
@@ -85,7 +96,10 @@ cook_shaders :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass)
 			ok = false
 			continue
 		}
-		blob := format.shader_write({guid = s.meta.guid, key = key, entries = entries[:], source_path = s.name}, context.temp_allocator)
+		blob := format.shader_write(
+			{guid = s.meta.guid, key = key, entries = entries[:], source_path = s.name},
+			context.temp_allocator,
+		)
 		if !write_blob(output, blob) {
 			settle(pass, i, .Failed)
 			ok = false
@@ -100,7 +114,14 @@ cook_shaders :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass)
 // and every file that it includes, directly or not.
 shader_key :: proc(options: Cook_Options, s: Asset_Source, inputs: []Input) -> u64 {
 	key := hash.fnv64a(
-		transmute([]byte)fmt.tprintf("%s\x00%s\x00%v\x00%s\x00%x\x00", SHADER_COOK_VERSION, options.dxc_version, options.config, s.name, format.shader_layout()),
+		transmute([]byte)fmt.tprintf(
+			"%s\x00%s\x00%v\x00%s\x00%x\x00",
+			SHADER_COOK_VERSION,
+			options.dxc_version,
+			options.config,
+			s.name,
+			format.shader_layout(),
+		),
 	)
 	key = hash.fnv64a(transmute([]byte)s.meta_text, key)
 	for input in inputs {
@@ -114,7 +135,10 @@ shader_key :: proc(options: Cook_Options, s: Asset_Source, inputs: []Input) -> u
 targets :: proc(source: string) -> []Target {
 	if strings.contains(source, "[shader(\"") {
 		result := make([]Target, 1, context.temp_allocator)
-		result[0] = {stage = .Library, profile = "lib_" + SHADER_MODEL}
+		result[0] = {
+			stage   = .Library,
+			profile = "lib_" + SHADER_MODEL,
+		}
 		return result
 	}
 	result := make([dynamic]Target, context.temp_allocator)
@@ -130,7 +154,12 @@ targets :: proc(source: string) -> []Target {
 // contains_word finds a whole identifier, so vs_main does not match my_vs_main.
 contains_word :: proc(text, word: string) -> bool {
 	is_ident :: proc(c: byte) -> bool {
-		return c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+		return(
+			c == '_' ||
+			(c >= 'a' && c <= 'z') ||
+			(c >= 'A' && c <= 'Z') ||
+			(c >= '0' && c <= '9') \
+		)
 	}
 	rest := text
 	for {
@@ -164,7 +193,15 @@ Include :: struct {
 // gather_includes gives a source and every file that it includes, directly or not, in a stable order. An include
 // resolves next to the including file first, then in the include directories, like DXC. An include that cannot be
 // found is a problem of the file that has it.
-gather_includes :: proc(source_path: string, source: []byte, include_dirs: []string, problems: ^Problems) -> (inputs: []Input, ok: bool) {
+gather_includes :: proc(
+	source_path: string,
+	source: []byte,
+	include_dirs: []string,
+	problems: ^Problems,
+) -> (
+	inputs: []Input,
+	ok: bool,
+) {
 	found := make([dynamic]Input, context.temp_allocator)
 	seen := make(map[string]bool, context.temp_allocator)
 	pending := make([dynamic]Input, context.temp_allocator)
@@ -178,9 +215,20 @@ gather_includes :: proc(source_path: string, source: []byte, include_dirs: []str
 		seen[input.path] = true
 		append(&found, input)
 		for include in include_names(string(input.data)) {
-			resolved, resolved_ok := resolve_include(include.name, filepath.dir(input.path), include_dirs)
+			resolved, resolved_ok := resolve_include(
+				include.name,
+				filepath.dir(input.path),
+				include_dirs,
+			)
 			if !resolved_ok {
-				report_error(problems, input.path, include.line, 0, "cannot find the include %q", include.name)
+				report_error(
+					problems,
+					input.path,
+					include.line,
+					0,
+					"cannot find the include %q",
+					include.name,
+				)
 				ok = false
 				continue
 			}
@@ -218,7 +266,13 @@ include_names :: proc(source: string) -> []Include {
 }
 
 // resolve_include finds an included file. The result has forward slashes.
-resolve_include :: proc(name, from_dir: string, include_dirs: []string) -> (path: string, ok: bool) {
+resolve_include :: proc(
+	name, from_dir: string,
+	include_dirs: []string,
+) -> (
+	path: string,
+	ok: bool,
+) {
 	// Generated material sources include their shading model by its absolute path.
 	if filepath.is_abs(name) {
 		return forward_slashes(name), os.is_file(name)
@@ -239,7 +293,13 @@ resolve_include :: proc(name, from_dir: string, include_dirs: []string) -> (path
 dxc_version :: proc(dxc: string) -> (version: string, ok: bool) {
 	state, stdout, _, err := run_process({dxc, "--version"})
 	if err != nil || !state.exited || state.exit_code != 0 {
-		log.errorf("cook: %s --version: %v, exited %v with %d", dxc, err, state.exited, state.exit_code)
+		log.errorf(
+			"cook: %s --version: %v, exited %v with %d",
+			dxc,
+			err,
+			state.exited,
+			state.exit_code,
+		)
 		return
 	}
 	return strings.trim_space(string(stdout)), true
@@ -248,16 +308,41 @@ dxc_version :: proc(dxc: string) -> (version: string, ok: bool) {
 // compile runs DXC for one entry and gives its bytecode. Stage entry points get the fixed root signature, so DXC
 // checks that the shader fits it. A library gets its global root signature from the pipeline (see
 // docs/gpu/ray-tracing.md#ray-tracing). Development builds embed debug information, so PIX shows the source.
-compile :: proc(options: Cook_Options, s: Asset_Source, target: Target, out_dir: string, problems: ^Problems) -> (code: []byte, ok: bool) {
+compile :: proc(
+	options: Cook_Options,
+	s: Asset_Source,
+	target: Target,
+	out_dir: string,
+	problems: ^Problems,
+) -> (
+	code: []byte,
+	ok: bool,
+) {
 	buffer: [32]u8
-	output := fmt.tprintf("%s/%s.%v.dxil.tmp", out_dir, format.guid_format(s.meta.guid, &buffer), target.stage)
+	output := fmt.tprintf(
+		"%s/%s.%v.dxil.tmp",
+		out_dir,
+		format.guid_format(s.meta.guid, &buffer),
+		target.stage,
+	)
 	return compile_file(options, s.path, target, output, problems)
 }
 
 // compile_file compiles a source file's entry into output, a temporary file that it removes, and gives its bytecode. A
 // failure without a message of its own is a problem of owner, the asset that the source is for, which is the source
 // itself unless it is generated. defines, as NAME=VALUE, are the entry's own.
-compile_file :: proc(options: Cook_Options, source_path: string, target: Target, output: string, problems: ^Problems, owner_path := "", defines: []string = nil) -> (code: []byte, ok: bool) {
+compile_file :: proc(
+	options: Cook_Options,
+	source_path: string,
+	target: Target,
+	output: string,
+	problems: ^Problems,
+	owner_path := "",
+	defines: []string = nil,
+) -> (
+	code: []byte,
+	ok: bool,
+) {
 	defer os.remove(output)
 	owner := owner_path if owner_path != "" else source_path
 	args := make([dynamic]string, context.temp_allocator)
@@ -285,10 +370,25 @@ compile_file :: proc(options: Cook_Options, source_path: string, target: Target,
 	errors := report_dxc_messages(output_text, problems)
 	if failed {
 		if errors == 0 {
-			report_error(problems, owner, 0, 0, "%s did not compile:\n%s", target.profile, strings.trim_space(output_text))
+			report_error(
+				problems,
+				owner,
+				0,
+				0,
+				"%s did not compile:\n%s",
+				target.profile,
+				strings.trim_space(output_text),
+			)
 		} else if !has_error_in(problems, owner) {
 			// Every error is in an include, which belongs to no asset, so the shader says why it did not cook.
-			report_error(problems, owner, 0, 0, "%s did not compile, because a file that it includes has errors", target.profile)
+			report_error(
+				problems,
+				owner,
+				0,
+				0,
+				"%s did not compile, because a file that it includes has errors",
+				target.profile,
+			)
 		}
 		return
 	}
@@ -306,7 +406,13 @@ compile_file :: proc(options: Cook_Options, source_path: string, target: Target,
 process_lock: sync.Mutex
 
 // run_process runs a command to its end, and gives its output in the temporary allocator.
-run_process :: proc(command: []string) -> (state: os.Process_State, stdout, stderr: []byte, err: os.Error) {
+run_process :: proc(
+	command: []string,
+) -> (
+	state: os.Process_State,
+	stdout, stderr: []byte,
+	err: os.Error,
+) {
 	sync.mutex_guard(&process_lock)
 	return os.process_exec({command = command}, context.temp_allocator)
 }

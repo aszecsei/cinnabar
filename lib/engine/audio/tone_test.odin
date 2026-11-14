@@ -68,7 +68,14 @@ tone_continues_its_phase_across_calls :: proc(t: ^testing.T) {
 	tone_advance(&tone, 0, len(first), len(first))
 	tone_render(tone, 0, second[:])
 	for frame, i in second {
-		testing.expectf(t, math.abs(frame.x - whole[300 + i].x) < 1e-4, "frame %d: %v against %v", i, frame.x, whole[300 + i].x)
+		testing.expectf(
+			t,
+			math.abs(frame.x - whole[300 + i].x) < 1e-4,
+			"frame %d: %v against %v",
+			i,
+			frame.x,
+			whole[300 + i].x,
+		)
 	}
 }
 
@@ -102,7 +109,11 @@ tone_pans_with_equal_power :: proc(t: ^testing.T) {
 
 	tone_render({pan = -1}, -1, frames[:])
 	left := peak(frames[:])
-	testing.expect(t, math.abs(left.x - TONE_GAIN) < 1e-3, "full left has the whole gain on the left")
+	testing.expect(
+		t,
+		math.abs(left.x - TONE_GAIN) < 1e-3,
+		"full left has the whole gain on the left",
+	)
 	testing.expect(t, left.y < 1e-6, "and nothing on the right")
 
 	tone_render({pan = 1}, 1, frames[:])

@@ -49,7 +49,14 @@ cook_perception :: proc(a: ^Asset_Source, out_dir: string, pass: ^Pass) -> Asset
 	if len(parse_problems) > 0 || !settings_ok {
 		return .Failed
 	}
-	key := hash.fnv64a(transmute([]byte)fmt.tprintf("%s\x00%s\x00%x\x00", PERCEPTION_COOK_VERSION, a.name, format.perception_layout()))
+	key := hash.fnv64a(
+		transmute([]byte)fmt.tprintf(
+			"%s\x00%s\x00%x\x00",
+			PERCEPTION_COOK_VERSION,
+			a.name,
+			format.perception_layout(),
+		),
+	)
 	key = hash.fnv64a(source_of(a^), key)
 	guid := a.meta.guid
 	key = hash.fnv64a(guid[:], key)
@@ -67,7 +74,13 @@ cook_perception :: proc(a: ^Asset_Source, out_dir: string, pass: ^Pass) -> Asset
 // perception_parse parses a perception's text into the contents of its blob, without its GUID, key or path: the first
 // line `perception 1`, at most one `notices <Tag>, <Tag>...`, and rows `<key> = <source>`. It gives every problem that
 // it finds, and the perception is good only without any.
-perception_parse :: proc(text: string, allocator := context.allocator) -> (contents: format.Perception_Contents, problems: []Perception_Problem) {
+perception_parse :: proc(
+	text: string,
+	allocator := context.allocator,
+) -> (
+	contents: format.Perception_Contents,
+	problems: []Perception_Problem,
+) {
 	context.allocator = allocator
 	found := make([dynamic]Perception_Problem)
 	problem :: proc(found: ^[dynamic]Perception_Problem, line: int, f: string, args: ..any) {
@@ -84,14 +97,16 @@ perception_parse :: proc(text: string, allocator := context.allocator) -> (conte
 			continue
 		}
 		if !header {
-			if fields := strings.fields(trimmed); len(fields) == 2 && fields[0] == "perception" && fields[1] == "1" {
+			if fields := strings.fields(trimmed);
+			   len(fields) == 2 && fields[0] == "perception" && fields[1] == "1" {
 				header = true
 				continue
 			}
 			problem(&found, line, "a perception starts with `perception 1`")
 			return {}, found[:]
 		}
-		if word, _, rest := strings.partition(trimmed, " "); word == "notices" && !strings.contains(trimmed, "=") {
+		if word, _, rest := strings.partition(trimmed, " ");
+		   word == "notices" && !strings.contains(trimmed, "=") {
 			if has_notices {
 				problem(&found, line, "a perception has one notices line")
 				continue
@@ -101,11 +116,21 @@ perception_parse :: proc(text: string, allocator := context.allocator) -> (conte
 				tag := strings.trim_space(part)
 				switch {
 				case !is_identifier(tag):
-					problem(&found, line, "notices takes tags' names between commas, such as Player, not %q", tag)
+					problem(
+						&found,
+						line,
+						"notices takes tags' names between commas, such as Player, not %q",
+						tag,
+					)
 				case slice.contains(notices[:], tag):
 					problem(&found, line, "notices gives %s twice", tag)
 				case len(notices) == format.MAX_PERCEPTION_NOTICES:
-					problem(&found, line, "a perception notices at most %d tags", format.MAX_PERCEPTION_NOTICES)
+					problem(
+						&found,
+						line,
+						"a perception notices at most %d tags",
+						format.MAX_PERCEPTION_NOTICES,
+					)
 				case:
 					append(&notices, tag)
 				}
@@ -130,7 +155,13 @@ perception_parse :: proc(text: string, allocator := context.allocator) -> (conte
 				problem(&found, line, "another row fills %s", key)
 				clash = true
 			} else if format.animation_graph_hash(other.key) == format.animation_graph_hash(key) {
-				problem(&found, line, "the keys %s and %s have the same hash: rename one", other.key, key)
+				problem(
+					&found,
+					line,
+					"the keys %s and %s have the same hash: rename one",
+					other.key,
+					key,
+				)
 				clash = true
 			}
 		}
@@ -153,7 +184,13 @@ perception_parse :: proc(text: string, allocator := context.allocator) -> (conte
 // parse_perception_source reads a row's source: the words after its `=`. A row that reads another names a nearest row
 // before it by its key.
 @(private = "file")
-parse_perception_source :: proc(text: string, rows: []format.Perception_Row_Contents) -> (row: format.Perception_Row_Contents, message: string) {
+parse_perception_source :: proc(
+	text: string,
+	rows: []format.Perception_Row_Contents,
+) -> (
+	row: format.Perception_Row_Contents,
+	message: string,
+) {
 	words := strings.fields(text, context.temp_allocator)
 	row.of = format.PERCEPTION_NONE
 	if len(words) == 0 {
@@ -191,12 +228,19 @@ parse_perception_source :: proc(text: string, rows: []format.Perception_Row_Cont
 			row.source = .Since
 		}
 		if len(words) != 2 {
-			return row, fmt.tprintf("%s is `%s <row>`, where the row is a nearest row before it", words[0], words[0])
+			return row, fmt.tprintf(
+				"%s is `%s <row>`, where the row is a nearest row before it",
+				words[0],
+				words[0],
+			)
 		}
 		for r, i in rows {
 			if r.key == words[1] {
 				if !format.perception_source_chooses(r.source) {
-					return row, fmt.tprintf("%s is not a nearest row, so it chooses no entity", words[1])
+					return row, fmt.tprintf(
+						"%s is not a nearest row, so it chooses no entity",
+						words[1],
+					)
 				}
 				row.of = u32(i)
 			}
@@ -213,7 +257,10 @@ parse_perception_source :: proc(text: string, rows: []format.Perception_Row_Cont
 			row.tag, message = tag(words[2])
 		}
 	case:
-		return row, fmt.tprintf("%q is not a source: nearest, position, visible, since, heard noise or loudest noise", words[0])
+		return row, fmt.tprintf(
+			"%q is not a source: nearest, position, visible, since, heard noise or loudest noise",
+			words[0],
+		)
 	}
 	return
 }

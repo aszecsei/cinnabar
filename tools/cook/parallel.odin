@@ -28,7 +28,12 @@ Parallel_Work :: struct {
 // calls take indices in order, so the costliest should come first. Each thread has its own temp allocator, which it
 // frees after each call: what a call keeps belongs in memory that it allocates itself, as a Scratch. The calls must
 // share nothing that they change. threads, when it is above 0, is the most threads that it runs.
-parallel_for :: proc(count: int, data: rawptr, work: proc(data: rawptr, index: int), threads := 0) {
+parallel_for :: proc(
+	count: int,
+	data: rawptr,
+	work: proc(data: rawptr, index: int),
+	threads := 0,
+) {
 	if count <= 0 {
 		return
 	}
@@ -75,7 +80,9 @@ Scratch :: struct {
 scratch_begin :: proc(s: ^Scratch, pass: ^Pass) {
 	_ = virtual.arena_init_growing(&s.arena)
 	s.outer = context.temp_allocator
-	s.problems = Problems{log = pass.problems.log}
+	s.problems = Problems {
+		log = pass.problems.log,
+	}
 	context.temp_allocator = virtual.arena_allocator(&s.arena)
 }
 
@@ -95,7 +102,16 @@ scratch_keep :: proc(s: ^Scratch, keep: ..^string) {
 	problems := s.problems.list
 	s.problems.list = make([dynamic]Problem, 0, len(problems), allocator)
 	for p in problems {
-		append(&s.problems.list, Problem{strings.clone(p.file, allocator), p.line, p.column, p.error, strings.clone(p.text, allocator)})
+		append(
+			&s.problems.list,
+			Problem {
+				strings.clone(p.file, allocator),
+				p.line,
+				p.column,
+				p.error,
+				strings.clone(p.text, allocator),
+			},
+		)
 	}
 }
 
@@ -115,7 +131,12 @@ scratch_merge :: proc(s: ^Scratch, pass: ^Pass) {
 
 // finish_job counts a sub-asset's job of a kind in the pass, moves its problems into the pass's and frees its scratch,
 // on the thread that called parallel_for. It returns whether the job succeeded.
-finish_job :: proc(result: Asset_Result, s: ^Scratch, kind: format.Asset_Kind, pass: ^Pass) -> bool {
+finish_job :: proc(
+	result: Asset_Result,
+	s: ^Scratch,
+	kind: format.Asset_Kind,
+	pass: ^Pass,
+) -> bool {
 	count_subassets(pass, kind, result)
 	scratch_merge(s, pass)
 	return !asset_failed(result)
@@ -123,7 +144,13 @@ finish_job :: proc(result: Asset_Result, s: ^Scratch, kind: format.Asset_Kind, p
 
 // count_subassets counts sub-assets of a kind that a cook made or found up to date, which have no Asset_Source to
 // settle: a model's meshes, a font's atlas, a stage's textures.
-count_subassets :: proc(pass: ^Pass, kind: format.Asset_Kind, result: Asset_Result, n := 1, loc := #caller_location) {
+count_subassets :: proc(
+	pass: ^Pass,
+	kind: format.Asset_Kind,
+	result: Asset_Result,
+	n := 1,
+	loc := #caller_location,
+) {
 	assert(result != .Pending, "a job ends with a result", loc)
 	#partial switch result {
 	case .Current:

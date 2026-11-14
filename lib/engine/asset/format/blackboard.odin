@@ -100,16 +100,25 @@ blackboard_layout :: proc() -> u64 {
 // lies inside the values and its enum names inside the names.
 blackboard_view :: proc(data: []byte) -> (blob: ^Blackboard_Blob, ok: bool) {
 	header := blob_header(data) or_return
-	if header.kind != .Blackboard || header.layout != blackboard_layout() || len(data) < size_of(Blackboard_Blob) {
+	if header.kind != .Blackboard ||
+	   header.layout != blackboard_layout() ||
+	   len(data) < size_of(Blackboard_Blob) {
 		return
 	}
 	blob = (^Blackboard_Blob)(raw_data(data))
 	inside :: proc(data: []byte, s: Slice, size, align: int) -> bool {
-		return u64(s.offset) + u64(s.size) <= u64(len(data)) && int(s.size) % size == 0 && int(s.offset) % align == 0
+		return(
+			u64(s.offset) + u64(s.size) <= u64(len(data)) &&
+			int(s.size) % size == 0 &&
+			int(s.offset) % align == 0 \
+		)
 	}
 	if !inside(data, blob.keys, size_of(Blackboard_Key), align_of(Blackboard_Key)) ||
-	   !inside(data, blob.enum_names, size_of(Slice), align_of(Slice)) || !inside(data, blob.defaults, 1, 8) ||
-	   !inside(data, blob.source_path, 1, 1) || blob.values_size > MAX_BLACKBOARD_SIZE || blob.values_size % 8 != 0 ||
+	   !inside(data, blob.enum_names, size_of(Slice), align_of(Slice)) ||
+	   !inside(data, blob.defaults, 1, 8) ||
+	   !inside(data, blob.source_path, 1, 1) ||
+	   blob.values_size > MAX_BLACKBOARD_SIZE ||
+	   blob.values_size % 8 != 0 ||
 	   blob.defaults.size != blob.values_size {
 		return nil, false
 	}
@@ -119,9 +128,12 @@ blackboard_view :: proc(data: []byte) -> (blob: ^Blackboard_Blob, ok: bool) {
 		return nil, false
 	}
 	for k in keys {
-		if k.type > .Vector || !inside(data, k.name, 1, 1) || int(k.offset) % blackboard_type_align(k.type) != 0 ||
+		if k.type > .Vector ||
+		   !inside(data, k.name, 1, 1) ||
+		   int(k.offset) % blackboard_type_align(k.type) != 0 ||
 		   u64(k.offset) + u64(blackboard_type_size(k.type)) > u64(blob.values_size) ||
-		   u64(k.first_enum) + u64(k.enum_count) > u64(len(names)) || (k.type == .Enum) != (k.enum_count > 0) {
+		   u64(k.first_enum) + u64(k.enum_count) > u64(len(names)) ||
+		   (k.type == .Enum) != (k.enum_count > 0) {
 			return nil, false
 		}
 	}
@@ -144,7 +156,14 @@ blackboard_enum_names :: proc "contextless" (data: []byte, blob: ^Blackboard_Blo
 }
 
 // blackboard_find is the slot of the key whose name has the hash, or false.
-blackboard_find :: proc "contextless" (data: []byte, blob: ^Blackboard_Blob, hash: u32) -> (slot: int, ok: bool) {
+blackboard_find :: proc "contextless" (
+	data: []byte,
+	blob: ^Blackboard_Blob,
+	hash: u32,
+) -> (
+	slot: int,
+	ok: bool,
+) {
 	for k, i in blackboard_keys(data, blob) {
 		if k.hash == hash {
 			return i, true
@@ -154,7 +173,12 @@ blackboard_find :: proc "contextless" (data: []byte, blob: ^Blackboard_Blob, has
 }
 
 // blackboard_enum_name is an Enum key's name for a value, or "" for one out of range.
-blackboard_enum_name :: proc "contextless" (data: []byte, blob: ^Blackboard_Blob, key: Blackboard_Key, value: u32) -> string {
+blackboard_enum_name :: proc "contextless" (
+	data: []byte,
+	blob: ^Blackboard_Blob,
+	key: Blackboard_Key,
+	value: u32,
+) -> string {
 	if value >= key.enum_count {
 		return ""
 	}
@@ -180,7 +204,13 @@ Blackboard_Contents :: struct {
 
 // blackboard_offsets lays the keys out in the values in slot order, each at its type's alignment, and gives the
 // values' size, rounded up to 8.
-blackboard_offsets :: proc(keys: []Blackboard_Key_Contents, allocator := context.allocator) -> (offsets: []u32, size: u32) {
+blackboard_offsets :: proc(
+	keys: []Blackboard_Key_Contents,
+	allocator := context.allocator,
+) -> (
+	offsets: []u32,
+	size: u32,
+) {
 	offsets = make([]u32, len(keys), allocator)
 	end := 0
 	for k, i in keys {
@@ -199,7 +229,11 @@ blackboard_write :: proc(contents: Blackboard_Contents, allocator := context.all
 	for k in contents.keys {
 		name_count += len(k.enum_names)
 	}
-	keys := reserve_bytes(&buffer, len(contents.keys) * size_of(Blackboard_Key), align_of(Blackboard_Key))
+	keys := reserve_bytes(
+		&buffer,
+		len(contents.keys) * size_of(Blackboard_Key),
+		align_of(Blackboard_Key),
+	)
 	enum_names := reserve_bytes(&buffer, name_count * size_of(Slice), align_of(Slice))
 	defaults := reserve_bytes(&buffer, int(values_size), 8)
 	next_name := 0
@@ -219,11 +253,21 @@ blackboard_write :: proc(contents: Blackboard_Contents, allocator := context.all
 			next_name += 1
 		}
 		default := k.default
-		mem.copy(&buffer[int(defaults.offset) + int(offsets[i])], &default, blackboard_type_size(k.type))
+		mem.copy(
+			&buffer[int(defaults.offset) + int(offsets[i])],
+			&default,
+			blackboard_type_size(k.type),
+		)
 	}
 	source_path := append_bytes(&buffer, transmute([]byte)contents.source_path)
 	blob := Blackboard_Blob {
-		header = {magic = BLOB_MAGIC, kind = .Blackboard, layout = blackboard_layout(), key = contents.key, guid = contents.guid},
+		header = {
+			magic = BLOB_MAGIC,
+			kind = .Blackboard,
+			layout = blackboard_layout(),
+			key = contents.key,
+			guid = contents.guid,
+		},
 		values_size = values_size,
 		keys = keys,
 		enum_names = enum_names,

@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  fmt:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v5
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just@1.58.0
+      # odinfmt ships with OLS. Its output changes between releases, so a new release can fail this job on code that
+      # was formatted with an older one: update OLS_VERSION and run just fmt together.
+      - name: Install odinfmt
+        env:
+          OLS_VERSION: dev-2026-10
+        run: |
+          set -euo pipefail
+          temp=$(cygpath -u "$RUNNER_TEMP")
+          curl -sSfL -o "$temp/ols.zip" "https://github.com/DanielGavin/ols/releases/download/$OLS_VERSION/ols-x86_64-pc-windows-msvc.zip"
+          unzip -q "$temp/ols.zip" -d "$temp/ols"
+          mv "$temp/ols/odinfmt-x86_64-pc-windows-msvc.exe" "$temp/ols/odinfmt.exe"
+          cygpath -w "$temp/ols" >> "$GITHUB_PATH"
+      - run: just fmt
+      - name: Check that the source is formatted
+        run: |
+          if ! git diff --quiet; then
+            git diff --stat
+            echo "::error::The Odin source is not formatted. Run just fmt and commit the result."
+            exit 1
+          fi
+
+  lint:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup-odin
+      - run: just lint

@@ -66,8 +66,20 @@ the_noise_is_blue_over_space_and_time :: proc(t: ^testing.T) {
 	// Most of the energy is the pairs' floor, which no order removes, so it falls by a few percent: the spectra show
 	// what it bought.
 	testing.expectf(t, last < first, "the energy went from %f to %f", first, last)
-	testing.expectf(t, blue_space < white_space * 0.5, "the low spatial frequencies went from %f to %f", white_space, blue_space)
-	testing.expectf(t, blue_time < white_time * 0.5, "the low temporal frequency went from %f to %f", white_time, blue_time)
+	testing.expectf(
+		t,
+		blue_space < white_space * 0.5,
+		"the low spatial frequencies went from %f to %f",
+		white_space,
+		blue_space,
+	)
+	testing.expectf(
+		t,
+		blue_time < white_time * 0.5,
+		"the low temporal frequency went from %f to %f",
+		white_time,
+		blue_time,
+	)
 }
 
 @(test)
@@ -108,5 +120,9 @@ the_same_seed_gives_the_same_bytes :: proc(t: ^testing.T) {
 	testing.expect(t, slice.equal(pa, pb), "the same seed gave different textures")
 	c := noise_make(TEST_SIZE, TEST_SLICES, SEED + 1)
 	defer noise_destroy(&c)
-	testing.expect(t, !slice.equal(a.values, c.values), "another seed gave the same starting order")
+	testing.expect(
+		t,
+		!slice.equal(a.values, c.values),
+		"another seed gave the same starting order",
+	)
 }

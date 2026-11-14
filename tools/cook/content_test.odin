@@ -12,7 +12,9 @@ import format "cinnabar:engine/asset/format"
 
 @(private)
 has_blob :: proc(t: ^testing.T, tree: Tree, path: string) -> bool {
-	return os.exists(fmt.tprintf("%s/cache/%s.blob", tree.dir, guid_text(tree_guid(t, tree, path))))
+	return os.exists(
+		fmt.tprintf("%s/cache/%s.blob", tree.dir, guid_text(tree_guid(t, tree, path))),
+	)
 }
 
 @(test)
@@ -90,12 +92,22 @@ a_cook_that_writes_blobs_moves_the_generation :: proc(t: ^testing.T) {
 	testing.expect_value(t, again.current[.Script], 1)
 	testing.expect_value(t, again.current[.Scene], 1)
 
-	testing.expect(t, os.write_entire_file(fmt.tprintf("%s/content/a.luau", tree.dir), transmute([]byte)string("return 2")) == nil)
+	testing.expect(
+		t,
+		os.write_entire_file(
+			fmt.tprintf("%s/content/a.luau", tree.dir),
+			transmute([]byte)string("return 2"),
+		) ==
+		nil,
+	)
 	changed := cook(options, ALL_KINDS)
 	testing.expect_value(t, changed.cooked[.Script], 1)
 	testing.expect_value(t, changed.cooked[.Scene], 0)
 	testing.expect_value(t, changed.generation, 2)
-	data, err := os.read_entire_file(fmt.tprintf("%s/%s", config_dir(options), format.GENERATION_FILE), context.temp_allocator)
+	data, err := os.read_entire_file(
+		fmt.tprintf("%s/%s", config_dir(options), format.GENERATION_FILE),
+		context.temp_allocator,
+	)
 	testing.expect(t, err == nil && string(data) == "2\n")
 }
 
@@ -132,29 +144,36 @@ Root_Cook :: struct {
 
 @(private = "file")
 start_root_cook :: proc(c: ^Root_Cook) -> ^thread.Thread {
-	return thread.create_and_start_with_poly_data(c, proc(c: ^Root_Cook) {
-		sync.sema_post(&c.started)
-		pass := cook(c.options, {.Script}, log_problems = false)
-		c.ok = pass.ok
-		for p in pass.problems.list {
-			c.errors += int(p.error)
-		}
-		// The pass is in this thread's temporary allocator, so the GUIDs are copied out.
-		for a in pass.assets {
-			for name, i in c.names {
-				if strings.has_suffix(a.path, name) {
-					c.guids[i] = a.meta.guid
+	return thread.create_and_start_with_poly_data(
+		c,
+		proc(c: ^Root_Cook) {
+			sync.sema_post(&c.started)
+			pass := cook(c.options, {.Script}, log_problems = false)
+			c.ok = pass.ok
+			for p in pass.problems.list {
+				c.errors += int(p.error)
+			}
+			// The pass is in this thread's temporary allocator, so the GUIDs are copied out.
+			for a in pass.assets {
+				for name, i in c.names {
+					if strings.has_suffix(a.path, name) {
+						c.guids[i] = a.meta.guid
+					}
 				}
 			}
-		}
-	})
+		},
+	)
 }
 
 @(private = "file")
 root_cook :: proc(tree: Tree, cache: string, names: []string) -> Root_Cook {
 	options := tree_options(tree)
 	options.cache = fmt.tprintf("%s/%s", tree.dir, cache)
-	return {options = options, names = names, guids = make([]format.Guid, len(names), context.temp_allocator)}
+	return {
+		options = options,
+		names = names,
+		guids = make([]format.Guid, len(names), context.temp_allocator),
+	}
 }
 
 @(test)
@@ -188,8 +207,21 @@ two_cooks_of_one_root_give_a_new_file_one_guid :: proc(t: ^testing.T) {
 	for name, i in names {
 		guid := tree_guid(t, tree, name[1:])
 		for c in cooks {
-			testing.expectf(t, c.guids[i] == guid, "%s: a cook used %s, and its .meta file has %s", name, guid_text(c.guids[i]), guid_text(guid))
-			testing.expectf(t, os.exists(fmt.tprintf("%s/%s.blob", config_dir(c.options), guid_text(guid))), "%s has no blob in %s", name, c.options.cache)
+			testing.expectf(
+				t,
+				c.guids[i] == guid,
+				"%s: a cook used %s, and its .meta file has %s",
+				name,
+				guid_text(c.guids[i]),
+				guid_text(guid),
+			)
+			testing.expectf(
+				t,
+				os.exists(fmt.tprintf("%s/%s.blob", config_dir(c.options), guid_text(guid))),
+				"%s has no blob in %s",
+				name,
+				c.options.cache,
+			)
 		}
 	}
 	testing.expect(t, !os.exists(fmt.tprintf("%s/content/%s", tree.dir, LOCK_FILE)))
@@ -209,7 +241,10 @@ a_cook_looks_again_under_the_roots_lock_before_it_gives_a_guid :: proc(t: ^testi
 	time.sleep(100 * time.Millisecond)
 	// Another cook gives the file its GUID while this one waits for the lock.
 	meta := "guid = 00112233445566778899aabbccddeeff\n"
-	testing.expect(t, os.write_entire_file(fmt.tprintf("%s/a.luau.meta", root), transmute([]byte)meta) == nil)
+	testing.expect(
+		t,
+		os.write_entire_file(fmt.tprintf("%s/a.luau.meta", root), transmute([]byte)meta) == nil,
+	)
 	unlock(&lock)
 	thread.join(th)
 	thread.destroy(th)
@@ -255,7 +290,14 @@ the_watcher_sees_changes_under_its_directories :: proc(t: ^testing.T) {
 	defer watcher_close(&watcher)
 
 	testing.expect_value(t, watcher_wait(&watcher, 0), Wait_Result.Timeout)
-	testing.expect(t, os.write_entire_file(fmt.tprintf("%s/content/scripts/a.luau", tree.dir), transmute([]byte)string("return 2")) == nil)
+	testing.expect(
+		t,
+		os.write_entire_file(
+			fmt.tprintf("%s/content/scripts/a.luau", tree.dir),
+			transmute([]byte)string("return 2"),
+		) ==
+		nil,
+	)
 	testing.expect_value(t, watcher_wait(&watcher, 5000), Wait_Result.Changed)
 	// Another thread wakes the wait, as the cook link does when a message arrives.
 	for watcher_wait(&watcher, 100) == .Changed {
@@ -285,6 +327,13 @@ the_watcher_watches_a_directory_again_once_it_is_back :: proc(t: ^testing.T) {
 	testing.expect_value(t, watcher_wait(&watcher, 5000), Wait_Result.Changed)
 	for watcher_wait(&watcher, 200) == .Changed {
 	}
-	testing.expect(t, os.write_entire_file(fmt.tprintf("%s/cinnabar.d.luau", dir), transmute([]byte)string("-- 2")) == nil)
+	testing.expect(
+		t,
+		os.write_entire_file(
+			fmt.tprintf("%s/cinnabar.d.luau", dir),
+			transmute([]byte)string("-- 2"),
+		) ==
+		nil,
+	)
 	testing.expect_value(t, watcher_wait(&watcher, 5000), Wait_Result.Changed)
 }

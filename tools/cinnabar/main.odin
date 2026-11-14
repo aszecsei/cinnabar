@@ -105,12 +105,25 @@ run_command :: proc(o: Options) -> bool {
 	exe_dir, _ := os.get_executable_directory(context.temp_allocator)
 	settings, _ := os.join_path({o.project, "project.settings"}, context.temp_allocator)
 	user_engine := setting(settings, ENGINE_PATH_KEY) if o.command != .New else ""
-	root, source, found := find_engine(o.engine, os.get_env(ENGINE_VARIABLE, context.temp_allocator), user_engine, exe_dir)
+	root, source, found := find_engine(
+		o.engine,
+		os.get_env(ENGINE_VARIABLE, context.temp_allocator),
+		user_engine,
+		exe_dir,
+	)
 	if !found {
 		if root == "" {
-			log.errorf("cinnabar: cannot find the engine. Name its checkout with --engine or %s.", ENGINE_VARIABLE)
+			log.errorf(
+				"cinnabar: cannot find the engine. Name its checkout with --engine or %s.",
+				ENGINE_VARIABLE,
+			)
 		} else {
-			log.errorf("cinnabar: %s, from %s, is not the engine's checkout: it has no %s", root, describe(source), ENGINE_CONTENT)
+			log.errorf(
+				"cinnabar: %s, from %s, is not the engine's checkout: it has no %s",
+				root,
+				describe(source),
+				ENGINE_CONTENT,
+			)
 		}
 		return false
 	}
@@ -119,7 +132,10 @@ run_command :: proc(o: Options) -> bool {
 		return new_project(e, o.project, o.name, o.template)
 	}
 	if !os.exists(settings) {
-		log.errorf("cinnabar: %s has no project.settings. Make a project with `cinnabar new <dir>`.", o.project)
+		log.errorf(
+			"cinnabar: %s has no project.settings. Make a project with `cinnabar new <dir>`.",
+			o.project,
+		)
 		return false
 	}
 	p := project_paths(o.project, e)

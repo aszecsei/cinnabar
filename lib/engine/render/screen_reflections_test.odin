@@ -1,13 +1,13 @@
 package render
 
 import "base:runtime"
-import "core:mem/virtual"
-import "core:sync"
-import "core:testing"
 import "cinnabar:core"
 import "cinnabar:core/gpu"
 import null "cinnabar:core/gpu/null"
 import "cinnabar:core/jobs"
+import "core:mem/virtual"
+import "core:sync"
+import "core:testing"
 
 // Each level of the depth pyramid is half the one before, rounded up, down to a texel.
 @(test)
@@ -28,7 +28,9 @@ the_depth_pyramid_halves_and_rounds_up :: proc(t: ^testing.T) {
 }
 
 @(test)
-the_screen_reflections_run_on_the_compute_queue_and_skip_without_their_technique :: proc(t: ^testing.T) {
+the_screen_reflections_run_on_the_compute_queue_and_skip_without_their_technique :: proc(
+	t: ^testing.T,
+) {
 	sync.guard(&backend_lock)
 	arena: virtual.Arena
 	testing.expect(t, virtual.arena_init_growing(&arena) == nil)
@@ -64,9 +66,21 @@ the_screen_reflections_run_on_the_compute_queue_and_skip_without_their_technique
 	}
 	defer screen_reflections_destroy(s, &platform)
 	// No GUID, so the residency is never asked: the test's texture is the noise.
-	r.blue_noise.texture = platform.gpu_create_texture({size = {BLUE_NOISE_SIZE, BLUE_NOISE_SIZE}, layers = BLUE_NOISE_SLICES, format = .RGBA8_Unorm, usage = {.Sampled, .Storage}, label = "noise"}, nil)
+	r.blue_noise.texture = platform.gpu_create_texture(
+		{
+			size = {BLUE_NOISE_SIZE, BLUE_NOISE_SIZE},
+			layers = BLUE_NOISE_SLICES,
+			format = .RGBA8_Unorm,
+			usage = {.Sampled, .Storage},
+			label = "noise",
+		},
+		nil,
+	)
 	defer platform.gpu_destroy_texture(r.blue_noise.texture)
-	exposure := platform.gpu_create_buffer({size = 16, usage = {.Storage}, label = "exposure"}, nil)
+	exposure := platform.gpu_create_buffer(
+		{size = 16, usage = {.Storage}, label = "exposure"},
+		nil,
+	)
 	defer platform.gpu_destroy_buffer(exposure)
 	cache: Texture_Cache
 	defer cache_destroy(&cache, &platform)
@@ -77,15 +91,35 @@ the_screen_reflections_run_on_the_compute_queue_and_skip_without_their_technique
 		valid:       bool,
 		shares_lit:  bool,
 	}
-	run_frame :: proc(t: ^testing.T, r: ^Renderer, cache: ^Texture_Cache, exposure: gpu.Buffer, settings: Reflection_Settings, gi_lit := false) -> (result: Result) {
+	run_frame :: proc(
+		t: ^testing.T,
+		r: ^Renderer,
+		cache: ^Texture_Cache,
+		exposure: gpu.Buffer,
+		settings: Reflection_Settings,
+		gi_lit := false,
+	) -> (
+		result: Result,
+	) {
 		platform := r.platform
 		g := begin(platform, cache)
 		f := new(Frame, platform.frame_allocator)
-		f^ = {renderer = r, state = &r.view, graph = &g, size = {64, 32}}
+		f^ = {
+			renderer = r,
+			state    = &r.view,
+			graph    = &g,
+			size     = {64, 32},
+		}
 		f.depth = create_texture(&g, {size = f.size, format = DEPTH_FORMAT, label = "depth"})
 		f.normals = create_texture(&g, {size = f.size, format = NORMAL_FORMAT, label = "normals"})
-		f.velocity = create_texture(&g, {size = f.size, format = VELOCITY_FORMAT, label = "velocity"})
-		f.roughness = create_texture(&g, {size = f.size, format = ROUGHNESS_FORMAT, label = "roughness"})
+		f.velocity = create_texture(
+			&g,
+			{size = f.size, format = VELOCITY_FORMAT, label = "velocity"},
+		)
+		f.roughness = create_texture(
+			&g,
+			{size = f.size, format = ROUGHNESS_FORMAT, label = "roughness"},
+		)
 		f.scene = create_texture(&g, {size = f.size, format = SCENE_FORMAT, label = "scene"})
 		f.exposure = import_buffer(&g, exposure)
 		prepass := add_render_pass(&g, "prepass", proc(_: ^Pass_Context) {}, nil)
@@ -97,7 +131,10 @@ the_screen_reflections_run_on_the_compute_queue_and_skip_without_their_technique
 		if gi_lit {
 			f.gi = new(Gi_Frame, platform.frame_allocator)
 			f.gi.lit_size = (f.size + 1) / 2
-			f.gi.lit = history_texture(&g, {size = f.gi.lit_size, format = GI_FORMAT, label = "gi lit scene"})
+			f.gi.lit = history_texture(
+				&g,
+				{size = f.gi.lit_size, format = GI_FORMAT, label = "gi lit scene"},
+			)
 		}
 		begin_screen_reflections(f, settings)
 		add_screen_reflection_passes(f)
@@ -117,10 +154,25 @@ the_screen_reflections_run_on_the_compute_queue_and_skip_without_their_technique
 		for node in g.passes {
 			result.passes[node.name] += 1
 			switch node.name {
-			case "reflections depth", "reflections trace", "reflections resolve", "reflections temporal":
-				testing.expectf(t, node.queue == .Compute, "%s is on the %v queue", node.name, node.queue)
+			case "reflections depth",
+			     "reflections trace",
+			     "reflections resolve",
+			     "reflections temporal":
+				testing.expectf(
+					t,
+					node.queue == .Compute,
+					"%s is on the %v queue",
+					node.name,
+					node.queue,
+				)
 			case "reflections lit scene":
-				testing.expectf(t, node.queue == .Graphics, "%s is on the %v queue", node.name, node.queue)
+				testing.expectf(
+					t,
+					node.queue == .Graphics,
+					"%s is on the %v queue",
+					node.name,
+					node.queue,
+				)
 			}
 		}
 		result.reflections = f.reflections != 0
@@ -144,7 +196,14 @@ the_screen_reflections_run_on_the_compute_queue_and_skip_without_their_technique
 			testing.expect_value(t, res.passes["reflections lit scene"], 1)
 			// The history is at the scene's size at every level, so it carries over from every frame but the first.
 			first := level == .Low && frame == 0
-			testing.expectf(t, res.valid == !first, "%v, frame %d: the history's validity is %v", level, frame, res.valid)
+			testing.expectf(
+				t,
+				res.valid == !first,
+				"%v, frame %d: the history's validity is %v",
+				level,
+				frame,
+				res.valid,
+			)
 			free_all(platform.frame_allocator)
 		}
 	}

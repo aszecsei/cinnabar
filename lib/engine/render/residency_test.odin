@@ -96,15 +96,37 @@ resident_textures_are_created_as_their_blobs_say :: proc(t: ^testing.T) {
 	testing.expect(t, err == nil)
 	defer os.remove_all(dir)
 
-	write_texture :: proc(t: ^testing.T, dir: string, name: string, dimension: format.Texture_Dimension, layers: u32) -> format.Guid {
+	write_texture :: proc(
+		t: ^testing.T,
+		dir: string,
+		name: string,
+		dimension: format.Texture_Dimension,
+		layers: u32,
+	) -> format.Guid {
 		guid := format.guid_parse(name) or_else {}
 		chain := format.texture_chain_size(.BC7_Unorm_Srgb, {8, 8}, 4)
 		blob := format.texture_write(
-			{guid = guid, format = .BC7_Unorm_Srgb, usage = .Color, dimension = dimension, layer_count = layers, size = {8, 8}, mip_count = 4, mips = make([]byte, chain * int(layers), context.temp_allocator)},
+			{
+				guid = guid,
+				format = .BC7_Unorm_Srgb,
+				usage = .Color,
+				dimension = dimension,
+				layer_count = layers,
+				size = {8, 8},
+				mip_count = 4,
+				mips = make([]byte, chain * int(layers), context.temp_allocator),
+			},
 			context.temp_allocator,
 		)
 		buffer: [32]u8
-		testing.expect(t, os.write_entire_file(fmt.tprintf("%s/%s.blob", dir, format.guid_format(guid, &buffer)), blob) == nil)
+		testing.expect(
+			t,
+			os.write_entire_file(
+				fmt.tprintf("%s/%s.blob", dir, format.guid_format(guid, &buffer)),
+				blob,
+			) ==
+			nil,
+		)
 		return guid
 	}
 	chain := format.texture_chain_size(.BC7_Unorm_Srgb, {8, 8}, 4)
@@ -176,19 +198,24 @@ resident_textures_are_created_as_their_blobs_say :: proc(t: ^testing.T) {
 // mesh_bytes is a mesh blob of one triangle with vertex_count vertices, at the runtime's alignment, with a hierarchy
 // over its one meshlet when nodes, and a skin stream when skinned.
 @(private)
-mesh_bytes :: proc(guid: format.Guid, vertex_count: u32, nodes := false, skinned := false) -> []byte {
+mesh_bytes :: proc(
+	guid: format.Guid,
+	vertex_count: u32,
+	nodes := false,
+	skinned := false,
+) -> []byte {
 	stride := int(format.mesh_attribute_stride({}))
 	indices := []u16{0, 1, 2}
 	contents := format.Mesh_Contents {
-		guid         = guid,
-		vertex_count = vertex_count,
-		index_count  = 3,
-		submeshes    = {{index_count = 3, meshlet_count = 1}},
-		positions    = make([]byte, int(vertex_count) * 12, context.temp_allocator),
-		attributes   = make([]byte, int(vertex_count) * stride, context.temp_allocator),
-		indices      = mem.slice_to_bytes(indices),
-		meshlets     = {{vertex_count = 3, triangle_count = 1}},
-		meshlet_vertices = mem.slice_to_bytes([]u32{0, 1, 2}),
+		guid              = guid,
+		vertex_count      = vertex_count,
+		index_count       = 3,
+		submeshes         = {{index_count = 3, meshlet_count = 1}},
+		positions         = make([]byte, int(vertex_count) * 12, context.temp_allocator),
+		attributes        = make([]byte, int(vertex_count) * stride, context.temp_allocator),
+		indices           = mem.slice_to_bytes(indices),
+		meshlets          = {{vertex_count = 3, triangle_count = 1}},
+		meshlet_vertices  = mem.slice_to_bytes([]u32{0, 1, 2}),
 		meshlet_triangles = []u8{0, 1, 2},
 	}
 	if skinned {
@@ -200,7 +227,9 @@ mesh_bytes :: proc(guid: format.Guid, vertex_count: u32, nodes := false, skinned
 	}
 	if nodes {
 		contents.submeshes[0].node_count, contents.submeshes[0].root_count = 1, 1
-		contents.meshlet_nodes = {{radius = 1, error = max(f32), count = 1 | format.MESHLET_NODE_LEAF}}
+		contents.meshlet_nodes = {
+			{radius = 1, error = max(f32), count = 1 | format.MESHLET_NODE_LEAF},
+		}
 	}
 	written := format.mesh_write(contents, context.temp_allocator)
 	aligned, _ := mem.alloc_bytes(len(written), format.BLOB_ALIGN, context.temp_allocator)
@@ -211,7 +240,13 @@ mesh_bytes :: proc(guid: format.Guid, vertex_count: u32, nodes := false, skinned
 // write_mesh writes a mesh blob of one triangle with vertex_count vertices, and a generation file at modified, as a
 // cook does.
 @(private)
-write_mesh :: proc(t: ^testing.T, dir: string, guid: format.Guid, vertex_count: u32, modified: time.Time) {
+write_mesh :: proc(
+	t: ^testing.T,
+	dir: string,
+	guid: format.Guid,
+	vertex_count: u32,
+	modified: time.Time,
+) {
 	buffer: [32]u8
 	path := fmt.tprintf("%s/%s.blob", dir, format.guid_format(guid, &buffer))
 	testing.expect(t, os.write_entire_file(path, mesh_bytes(guid, vertex_count)) == nil)
@@ -302,8 +337,22 @@ a_mesh_with_a_hierarchy_streams_its_nodes :: proc(t: ^testing.T) {
 	defer os.remove_all(dir)
 	guid := format.guid_parse("4f0c9a6e2b8d47a1b3e5c7d9f1a2b3c4") or_else {}
 	buffer: [32]u8
-	testing.expect(t, os.write_entire_file(fmt.tprintf("%s/%s.blob", dir, format.guid_format(guid, &buffer)), mesh_bytes(guid, 3, nodes = true)) == nil)
-	testing.expect(t, os.write_entire_file(fmt.tprintf("%s/%s", dir, format.GENERATION_FILE), transmute([]byte)string("1")) == nil)
+	testing.expect(
+		t,
+		os.write_entire_file(
+			fmt.tprintf("%s/%s.blob", dir, format.guid_format(guid, &buffer)),
+			mesh_bytes(guid, 3, nodes = true),
+		) ==
+		nil,
+	)
+	testing.expect(
+		t,
+		os.write_entire_file(
+			fmt.tprintf("%s/%s", dir, format.GENERATION_FILE),
+			transmute([]byte)string("1"),
+		) ==
+		nil,
+	)
 
 	assets: asset.Assets
 	asset.init(&assets, &platform, asset.loose_cache(dir))
@@ -489,8 +538,22 @@ a_live_mesh_over_a_broken_blob_draws_nothing_once_let_go :: proc(t: ^testing.T) 
 	// A blob with only its header loads as the mesh's, but cannot be made resident.
 	start := time.now()
 	buffer: [32]u8
-	testing.expect(t, os.write_entire_file(fmt.tprintf("%s/%s.blob", dir, format.guid_format(guid, &buffer)), mesh_bytes(guid, 3)[:size_of(format.Blob_Header)]) == nil)
-	testing.expect(t, os.write_entire_file(fmt.tprintf("%s/%s", dir, format.GENERATION_FILE), transmute([]byte)string("1")) == nil)
+	testing.expect(
+		t,
+		os.write_entire_file(
+			fmt.tprintf("%s/%s.blob", dir, format.guid_format(guid, &buffer)),
+			mesh_bytes(guid, 3)[:size_of(format.Blob_Header)],
+		) ==
+		nil,
+	)
+	testing.expect(
+		t,
+		os.write_entire_file(
+			fmt.tprintf("%s/%s", dir, format.GENERATION_FILE),
+			transmute([]byte)string("1"),
+		) ==
+		nil,
+	)
 
 	assets: asset.Assets
 	asset.init(&assets, &platform, asset.loose_cache(dir))
@@ -554,8 +617,22 @@ a_skinned_mesh_streams_its_skin :: proc(t: ^testing.T) {
 	defer os.remove_all(dir)
 	guid := format.guid_parse("7a1d3c5e9b2f4086a1b2c3d4e5f60718") or_else {}
 	buffer: [32]u8
-	testing.expect(t, os.write_entire_file(fmt.tprintf("%s/%s.blob", dir, format.guid_format(guid, &buffer)), mesh_bytes(guid, 3, skinned = true)) == nil)
-	testing.expect(t, os.write_entire_file(fmt.tprintf("%s/%s", dir, format.GENERATION_FILE), transmute([]byte)string("1")) == nil)
+	testing.expect(
+		t,
+		os.write_entire_file(
+			fmt.tprintf("%s/%s.blob", dir, format.guid_format(guid, &buffer)),
+			mesh_bytes(guid, 3, skinned = true),
+		) ==
+		nil,
+	)
+	testing.expect(
+		t,
+		os.write_entire_file(
+			fmt.tprintf("%s/%s", dir, format.GENERATION_FILE),
+			transmute([]byte)string("1"),
+		) ==
+		nil,
+	)
 
 	assets: asset.Assets
 	asset.init(&assets, &platform, asset.loose_cache(dir))
@@ -596,7 +673,10 @@ skinned_instances_keep_their_buffers_while_their_mesh_stays :: proc(t: ^testing.
 	// The first use makes the three buffers, and starts the pose from rest.
 	instance, reset, ok := skin_instance(&state, &platform, 1, 3, entity, rest, 5, 16)
 	testing.expect(t, ok && reset)
-	testing.expect(t, instance.positions != {} && instance.previous != {} && instance.attributes != {})
+	testing.expect(
+		t,
+		instance.positions != {} && instance.previous != {} && instance.attributes != {},
+	)
 	testing.expect_value(t, fake.live_buffers, 3)
 	// The next frame uses them as they are: no new buffers, and the pose goes on from last frame's.
 	again: Skinned_Instance

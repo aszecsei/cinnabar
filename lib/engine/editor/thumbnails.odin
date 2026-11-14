@@ -36,25 +36,25 @@ Thumbnail_Phase :: enum u8 {
 
 @(private)
 Thumbnail :: struct {
-	phase:      Thumbnail_Phase,
-	id:         u32,
-	kind:       link.Thumbnail_Kind,
-	asset:      format.Guid,
-	node:       u64,
-	size:       [2]u32,
+	phase:       Thumbnail_Phase,
+	id:          u32,
+	kind:        link.Thumbnail_Kind,
+	asset:       format.Guid,
+	node:        u64,
+	size:        [2]u32,
 	// In the host's heap.
-	items:      []render.Preview_Item,
-	touched:    int,
-	started:    f64,
-	last:       f64,
-	baked:      bool,
-	complete:   bool,
-	captured:   bool,
-	draw_turn:  bool,
-	target:     gpu.Texture,
+	items:       []render.Preview_Item,
+	touched:     int,
+	started:     f64,
+	last:        f64,
+	baked:       bool,
+	complete:    bool,
+	captured:    bool,
+	draw_turn:   bool,
+	target:      gpu.Texture,
 	target_size: [2]u32,
-	failed_id:  u32,
-	failed:     string,
+	failed_id:   u32,
+	failed:      string,
 }
 
 // handle_thumbnail_message starts a thumbnail, in place of one that the editor no longer waits for.
@@ -147,7 +147,13 @@ thumbnail_items :: proc(e: ^Editor, t: ^Thumbnail) -> (items: []render.Preview_I
 
 // thumbnail_preview moves the thumbnail on, and gives what the frame draws of it, if it is the thumbnail's turn.
 @(private)
-thumbnail_preview :: proc(e: ^Editor, others_waiting: bool) -> (desc: render.Preview_Desc, draw: bool) {
+thumbnail_preview :: proc(
+	e: ^Editor,
+	others_waiting: bool,
+) -> (
+	desc: render.Preview_Desc,
+	draw: bool,
+) {
 	t := &e.session.thumbnail
 	now := e.platform.time_seconds()
 	if t.phase == .Idle {
@@ -249,7 +255,15 @@ thumbnail_preview :: proc(e: ^Editor, others_waiting: bool) -> (desc: render.Pre
 			if t.target != {} {
 				e.platform.gpu_destroy_texture(t.target)
 			}
-			t.target = e.platform.gpu_create_texture({size = t.size, format = gpu.FRAME_TARGET_FORMAT, usage = {.Render_Target}, label = "thumbnail"}, nil)
+			t.target = e.platform.gpu_create_texture(
+				{
+					size = t.size,
+					format = gpu.FRAME_TARGET_FORMAT,
+					usage = {.Render_Target},
+					label = "thumbnail",
+				},
+				nil,
+			)
 			t.target_size = t.size
 		}
 		return render.Preview_Desc {

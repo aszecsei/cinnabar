@@ -44,7 +44,11 @@ low_takes_the_probes_medium_the_screen_and_high_the_traced_reflections :: proc(t
 			case preset >= .High && caps.ray_query:
 				technique = .Ray_Traced
 			}
-			testing.expect_value(t, q.reflections, Reflection_Quality{technique, Quality_Level(u8(preset))})
+			testing.expect_value(
+				t,
+				q.reflections,
+				Reflection_Quality{technique, Quality_Level(u8(preset))},
+			)
 			testing.expect_value(t, clamp_quality(q, caps).reflections, q.reflections)
 			// The clouds take the preset's level too, Ultra included.
 			testing.expect_value(t, q.clouds, Quality_Level(u8(preset)))
@@ -65,14 +69,22 @@ low_takes_the_probes_medium_the_screen_and_high_the_traced_reflections :: proc(t
 	for technique in ([]Reflection_Technique{.Probes, .Screen}) {
 		q := preset_quality(.Ultra, {})
 		q.reflections.technique = technique
-		testing.expect_value(t, clamp_quality(q, {}).reflections, Reflection_Quality{technique, .Ultra})
+		testing.expect_value(
+			t,
+			clamp_quality(q, {}).reflections,
+			Reflection_Quality{technique, .Ultra},
+		)
 	}
 	// The traced reflections run at any level with ray queries, and are the screen-space reflections without.
 	for level in Quality_Level {
 		q := preset_quality(.Ultra, {})
 		q.reflections = {.Ray_Traced, level}
 		testing.expect_value(t, clamp_quality(q, {ray_query = true}).reflections, q.reflections)
-		testing.expect_value(t, clamp_quality(q, {}).reflections, Reflection_Quality{.Screen, level})
+		testing.expect_value(
+			t,
+			clamp_quality(q, {}).reflections,
+			Reflection_Quality{.Screen, level},
+		)
 	}
 }
 
@@ -83,10 +95,19 @@ the_screen_reflections_levels_grow :: proc(t: ^testing.T) {
 	for level in Quality_Level {
 		p := REFLECTION_PARAMS[.Screen][level]
 		testing.expect_value(t, p.stride, level <= .Medium ? [2]u32{2, 2} : [2]u32{1, 1})
-		testing.expect(t, p.rays >= 1 && p.rays <= 2 && p.steps > 0 && p.cutoff > 0 && p.cutoff <= 1)
+		testing.expect(
+			t,
+			p.rays >= 1 && p.rays <= 2 && p.steps > 0 && p.cutoff > 0 && p.cutoff <= 1,
+		)
 		if level > .Low {
 			before := REFLECTION_PARAMS[.Screen][Quality_Level(u8(level) - 1)]
-			testing.expectf(t, p.steps > before.steps && p.cutoff > before.cutoff, "%v takes no more than %v", level, Quality_Level(u8(level) - 1))
+			testing.expectf(
+				t,
+				p.steps > before.steps && p.cutoff > before.cutoff,
+				"%v takes no more than %v",
+				level,
+				Quality_Level(u8(level) - 1),
+			)
 		}
 	}
 }
@@ -106,7 +127,13 @@ the_traced_reflections_levels_grow :: proc(t: ^testing.T) {
 		testing.expect(t, p.rays == 1 && p.cutoff > 0 && p.cutoff <= 1 && p.distance > 0)
 		if level > .Low {
 			before := REFLECTION_PARAMS[.Ray_Traced][Quality_Level(u8(level) - 1)]
-			testing.expectf(t, p.distance > before.distance && p.cutoff > before.cutoff, "%v takes no more than %v", level, Quality_Level(u8(level) - 1))
+			testing.expectf(
+				t,
+				p.distance > before.distance && p.cutoff > before.cutoff,
+				"%v takes no more than %v",
+				level,
+				Quality_Level(u8(level) - 1),
+			)
 		}
 	}
 }
@@ -151,17 +178,29 @@ the_virtual_shadow_map_takes_every_level_but_low :: proc(t: ^testing.T) {
 quality_keeps_to_what_the_device_can_do :: proc(t: ^testing.T) {
 	q := preset_quality(.Ultra, {ray_query = true})
 	testing.expect(t, q.shadows.ray_traced)
-	testing.expect(t, !clamp_quality(q, {}).shadows.ray_traced, "without Ray_Query, the shadows are maps")
+	testing.expect(
+		t,
+		!clamp_quality(q, {}).shadows.ray_traced,
+		"without Ray_Query, the shadows are maps",
+	)
 	// Without Ray_Query, the world probes are the screen-space cascades alone.
 	testing.expect_value(t, q.gi.technique, Gi_Technique.Split_Cascades)
 	testing.expect_value(t, clamp_quality(q, {}).gi.technique, Gi_Technique.Screen_Cascades)
-	testing.expect_value(t, clamp_quality(q, {}).reflections.technique, Reflection_Technique.Screen)
+	testing.expect_value(
+		t,
+		clamp_quality(q, {}).reflections.technique,
+		Reflection_Technique.Screen,
+	)
 	testing.expect_value(t, clamp_quality(q, {ray_query = true}), q)
 	// The voxel cones need no ray queries, and no preset chooses them.
 	voxels := q
 	voxels.gi.technique = .Voxel_Cones
 	testing.expect_value(t, clamp_quality(voxels, {}).gi.technique, Gi_Technique.Voxel_Cones)
-	testing.expect_value(t, clamp_quality(voxels, {ray_query = true}).gi.technique, Gi_Technique.Voxel_Cones)
+	testing.expect_value(
+		t,
+		clamp_quality(voxels, {ray_query = true}).gi.technique,
+		Gi_Technique.Voxel_Cones,
+	)
 	for preset in Quality_Preset {
 		testing.expect(t, preset_quality(preset, {}).gi.technique != .Voxel_Cones)
 		testing.expect(t, preset_quality(preset, {ray_query = true}).gi.technique != .Voxel_Cones)
@@ -208,25 +247,58 @@ the_default_quality_follows_the_video_memory :: proc(t: ^testing.T) {
 	gigabytes :: proc(n: u64) -> Caps {
 		return {video_memory = n << 30}
 	}
-	testing.expect_value(t, quality_preset(default_quality(gigabytes(2)), gigabytes(2)), Quality_Preset.Low)
-	testing.expect_value(t, quality_preset(default_quality(gigabytes(4)), gigabytes(4)), Quality_Preset.Medium)
-	testing.expect_value(t, quality_preset(default_quality(gigabytes(8)), gigabytes(8)), Quality_Preset.High)
-	testing.expect_value(t, quality_preset(default_quality(gigabytes(16)), gigabytes(16)), Quality_Preset.Ultra)
+	testing.expect_value(
+		t,
+		quality_preset(default_quality(gigabytes(2)), gigabytes(2)),
+		Quality_Preset.Low,
+	)
+	testing.expect_value(
+		t,
+		quality_preset(default_quality(gigabytes(4)), gigabytes(4)),
+		Quality_Preset.Medium,
+	)
+	testing.expect_value(
+		t,
+		quality_preset(default_quality(gigabytes(8)), gigabytes(8)),
+		Quality_Preset.High,
+	)
+	testing.expect_value(
+		t,
+		quality_preset(default_quality(gigabytes(16)), gigabytes(16)),
+		Quality_Preset.Ultra,
+	)
 	// Unknown memory, as on an adapter that shares the CPU's, is High.
 	testing.expect_value(t, quality_preset(default_quality({}), {}), Quality_Preset.High)
 	// Traced shadows, the world probes and the traced reflections from High up, where the device has them.
-	testing.expect(t, !default_quality({ray_query = true, video_memory = 3 << 30}).shadows.ray_traced)
+	testing.expect(
+		t,
+		!default_quality({ray_query = true, video_memory = 3 << 30}).shadows.ray_traced,
+	)
 	testing.expect(t, default_quality({ray_query = true}).shadows.ray_traced)
-	testing.expect_value(t, default_quality({ray_query = true, video_memory = 3 << 30}).gi.technique, Gi_Technique.Screen_Cascades)
-	testing.expect_value(t, default_quality({ray_query = true}).gi.technique, Gi_Technique.Split_Cascades)
+	testing.expect_value(
+		t,
+		default_quality({ray_query = true, video_memory = 3 << 30}).gi.technique,
+		Gi_Technique.Screen_Cascades,
+	)
+	testing.expect_value(
+		t,
+		default_quality({ray_query = true}).gi.technique,
+		Gi_Technique.Split_Cascades,
+	)
 	testing.expect_value(t, default_quality({}).gi.technique, Gi_Technique.Screen_Cascades)
-	testing.expect_value(t, default_quality({ray_query = true}).reflections.technique, Reflection_Technique.Ray_Traced)
+	testing.expect_value(
+		t,
+		default_quality({ray_query = true}).reflections.technique,
+		Reflection_Technique.Ray_Traced,
+	)
 	testing.expect_value(t, default_quality({}).reflections.technique, Reflection_Technique.Screen)
 }
 
 @(test)
 a_quality_that_differs_from_every_preset_is_custom :: proc(t: ^testing.T) {
-	caps := Caps{ray_query = true}
+	caps := Caps {
+		ray_query = true,
+	}
 	for preset in Quality_Preset.Low ..= Quality_Preset.Ultra {
 		testing.expect_value(t, quality_preset(preset_quality(preset, caps), caps), preset)
 	}
@@ -255,8 +327,22 @@ the_fogs_tiles_follow_the_level :: proc(t: ^testing.T) {
 		for size in ([][2]u32{{1, 1}, {1196, 568}, {1920, 1080}, {2560, 1440}}) {
 			grid := fog_grid(size, level)
 			tile := FOG_LEVEL_TILE[level]
-			testing.expectf(t, grid.x * tile >= size.x && (grid.x - 1) * tile < size.x, "%v at %v: %v", size, level, grid)
-			testing.expectf(t, grid.y * tile >= size.y && (grid.y - 1) * tile < size.y, "%v at %v: %v", size, level, grid)
+			testing.expectf(
+				t,
+				grid.x * tile >= size.x && (grid.x - 1) * tile < size.x,
+				"%v at %v: %v",
+				size,
+				level,
+				grid,
+			)
+			testing.expectf(
+				t,
+				grid.y * tile >= size.y && (grid.y - 1) * tile < size.y,
+				"%v at %v: %v",
+				size,
+				level,
+				grid,
+			)
 		}
 	}
 }

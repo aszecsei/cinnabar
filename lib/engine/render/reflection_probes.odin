@@ -456,7 +456,8 @@ begin_reflection_probes :: proc(
 	pf.cubes = import_texture(f.graph, rp.cubes.texture, .Storage)
 	if reflection_probe_pipelines_ready(r) {
 		complete := reflection_probe_inputs_complete(f)
-		if slot, first, count, ok := plan_reflection_probe_capture(rp, params.faces, complete); ok {
+		if slot, first, count, ok := plan_reflection_probe_capture(rp, params.faces, complete);
+		   ok {
 			key := rp.slots[slot].key
 			pf.capturing, pf.first_face, pf.face_count = true, first, count
 			pf.finish = first + count == 6
@@ -577,7 +578,10 @@ extract_reflection_probes :: proc(
 			distance2 := linalg.length2(ecs.position_sub(pose.position, f.view.position))
 			if f.world != nil {
 				for camera in f.world.cameras {
-					distance2 = min(distance2, linalg.length2(ecs.position_sub(pose.position, camera)))
+					distance2 = min(
+						distance2,
+						linalg.length2(ecs.position_sub(pose.position, camera)),
+					)
 				}
 			}
 			append(
@@ -1329,12 +1333,27 @@ add_reflection_probe_passes :: proc(f: ^Frame) {
 			frame = f,
 			face  = face,
 			view  = pf.first_view + int(k),
-			scene = create_texture(g, {size = size, format = SCENE_FORMAT, label = "reflection probe scene"}),
-			depth = create_texture(g, {size = size, format = DEPTH_FORMAT, label = "reflection probe depth"}),
+			scene = create_texture(
+				g,
+				{size = size, format = SCENE_FORMAT, label = "reflection probe scene"},
+			),
+			depth = create_texture(
+				g,
+				{size = size, format = DEPTH_FORMAT, label = "reflection probe depth"},
+			),
 		}
-		normals := create_texture(g, {size = size, format = NORMAL_FORMAT, label = "reflection probe normals"})
-		velocity := create_texture(g, {size = size, format = VELOCITY_FORMAT, label = "reflection probe velocity"})
-		roughness := create_texture(g, {size = size, format = ROUGHNESS_FORMAT, label = "reflection probe roughness"})
+		normals := create_texture(
+			g,
+			{size = size, format = NORMAL_FORMAT, label = "reflection probe normals"},
+		)
+		velocity := create_texture(
+			g,
+			{size = size, format = VELOCITY_FORMAT, label = "reflection probe velocity"},
+		)
+		roughness := create_texture(
+			g,
+			{size = size, format = ROUGHNESS_FORMAT, label = "reflection probe roughness"},
+		)
 		ids := create_texture(g, {size = size, format = ID_FORMAT, label = "reflection probe ids"})
 		p := add_render_pass(g, "reflection probe prepass", proc(ctx: ^Pass_Context) {
 				step := (^Reflection_Probe_Step)(ctx.data)
@@ -1342,13 +1361,26 @@ add_reflection_probe_passes :: proc(f: ^Frame) {
 			}, step)
 		color(g, p, normals, .Clear, store = keep)
 		color(g, p, velocity, .Clear, {VELOCITY_NONE, VELOCITY_NONE, 0, 0}, store = .Discard)
-		color(g, p, roughness, .Clear, {ROUGHNESS_NONE, 0, 0, 0}, store = voxels ? .Store : .Discard)
+		color(
+			g,
+			p,
+			roughness,
+			.Clear,
+			{ROUGHNESS_NONE, 0, 0, 0},
+			store = voxels ? .Store : .Discard,
+		)
 		depth(g, p, step.depth, .Clear)
 		declare_scene_draws(f, p)
 		if voxels {
 			light := Reflection_Probe_Voxel_Light {
-				diffuse  = create_texture(g, {size = size, format = GI_FORMAT, label = "reflection probe gi diffuse"}),
-				specular = create_texture(g, {size = size, format = GI_FORMAT, label = "reflection probe gi specular"}),
+				diffuse  = create_texture(
+					g,
+					{size = size, format = GI_FORMAT, label = "reflection probe gi diffuse"},
+				),
+				specular = create_texture(
+					g,
+					{size = size, format = GI_FORMAT, label = "reflection probe gi specular"},
+				),
 			}
 			pf.face_light[face] = light
 			capture := new(Voxel_Capture, platform.frame_allocator)

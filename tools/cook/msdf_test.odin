@@ -9,7 +9,10 @@ msdf_square :: proc(reversed: bool) -> []Msdf_Command {
 	commands := make([]Msdf_Command, 5, context.temp_allocator)
 	for i in 0 ..< 5 {
 		corner := corners[(reversed ? 4 - i : i) % 4]
-		commands[i] = {op = i == 0 ? .Move : .Line, to = corner}
+		commands[i] = {
+			op = i == 0 ? .Move : .Line,
+			to = corner,
+		}
 	}
 	return commands
 }
@@ -39,14 +42,32 @@ msdf_field_is_inside_above_half_and_outside_below :: proc(t: ^testing.T) {
 
 		// Either winding fills, as fonts disagree about which one does.
 		center := msdf_at(pixels, SQUARE_PARAMS, 14, 14)
-		testing.expectf(t, msdf_median(center) > 0.5 && center.a > 0.5, "reversed=%v: the center is %v", reversed, center)
+		testing.expectf(
+			t,
+			msdf_median(center) > 0.5 && center.a > 0.5,
+			"reversed=%v: the center is %v",
+			reversed,
+			center,
+		)
 		outside := msdf_at(pixels, SQUARE_PARAMS, 1, 14)
-		testing.expectf(t, msdf_median(outside) < 0.5 && outside.a < 0.5, "reversed=%v: outside is %v", reversed, outside)
+		testing.expectf(
+			t,
+			msdf_median(outside) < 0.5 && outside.a < 0.5,
+			"reversed=%v: outside is %v",
+			reversed,
+			outside,
+		)
 
 		// A pixel's center half a pixel inside the left edge is a quarter of the range from the outline, so its
 		// distance is 0.5 + 0.5 / 4.
 		edge := msdf_at(pixels, SQUARE_PARAMS, 4, 14)
-		testing.expectf(t, abs(msdf_median(edge) - 0.625) < 0.01, "reversed=%v: the edge is %v", reversed, edge)
+		testing.expectf(
+			t,
+			abs(msdf_median(edge) - 0.625) < 0.01,
+			"reversed=%v: the edge is %v",
+			reversed,
+			edge,
+		)
 	}
 }
 
@@ -59,8 +80,18 @@ msdf_field_keeps_a_corner_sharp :: proc(t: ^testing.T) {
 	// distance, sqrt(0.5) pixels, rounds the corner off; the channels' median is the distance to the nearer edge's line,
 	// 0.5 pixels, as a square corner has it.
 	corner := msdf_at(pixels, SQUARE_PARAMS, 24, 24)
-	testing.expectf(t, abs(msdf_median(corner) - (0.5 - 0.5 / 4)) < 0.01, "the corner's median is %v", msdf_median(corner))
-	testing.expectf(t, abs(corner.a - (0.5 - 0.70710678 / 4)) < 0.01, "the corner's true distance is %v", corner.a)
+	testing.expectf(
+		t,
+		abs(msdf_median(corner) - (0.5 - 0.5 / 4)) < 0.01,
+		"the corner's median is %v",
+		msdf_median(corner),
+	)
+	testing.expectf(
+		t,
+		abs(corner.a - (0.5 - 0.70710678 / 4)) < 0.01,
+		"the corner's true distance is %v",
+		corner.a,
+	)
 }
 
 @(test)

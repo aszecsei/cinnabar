@@ -27,16 +27,32 @@ read_planning_keys :: proc(r: ^Plan_Reader, s: Decision_Field) {
 		slot, type, found := plan_board_key(p, name)
 		switch {
 		case !is_identifier(name):
-			decision_problem(p, s.line, "keys are the blackboard's keys: `keys = <key>, <key>, ...`")
+			decision_problem(
+				p,
+				s.line,
+				"keys are the blackboard's keys: `keys = <key>, <key>, ...`",
+			)
 			return
 		case !found:
 			decision_problem(p, s.line, "the blackboard has no key named %s", name)
 		case type != .Bool && type != .Int && type != .Enum:
-			decision_problem(p, s.line, "%s is a %s, and a planning key is a bool, an int or an enum", name, type_name(type))
+			decision_problem(
+				p,
+				s.line,
+				"%s is a %s, and a planning key is a bool, an int or an enum",
+				name,
+				type_name(type),
+			)
 		case slice.contains(r.planning[:], u32(slot)):
 			decision_problem(p, s.line, "%s is a planning key twice", name)
 		case len(r.planning) == format.MAX_PLAN_KEYS:
-			decision_problem(p, s.line, "a %s decision plans over at most %d keys", r.technique, format.MAX_PLAN_KEYS)
+			decision_problem(
+				p,
+				s.line,
+				"a %s decision plans over at most %d keys",
+				r.technique,
+				format.MAX_PLAN_KEYS,
+			)
 			return
 		case:
 			append(&r.planning, u32(slot))
@@ -76,7 +92,14 @@ read_plan_tests :: proc(r: ^Plan_Reader, f: Decision_Field) -> []format.Plan_Tes
 		}
 		switch {
 		case op == "" && key.type != .Bool:
-			decision_problem(p, f.line, "%s is a %s, so a test of it compares it: `%s <op> <value>`", name, type_name(key.type), name)
+			decision_problem(
+				p,
+				f.line,
+				"%s is a %s, so a test of it compares it: `%s <op> <value>`",
+				name,
+				type_name(key.type),
+				name,
+			)
 			continue
 		case op == "":
 			lo = 0 if negated else 1
@@ -95,7 +118,14 @@ read_plan_tests :: proc(r: ^Plan_Reader, f: Decision_Field) -> []format.Plan_Tes
 				case .Bool:
 					allowed = "== and !="
 				}
-				decision_problem(p, f.line, "%s is a %s, which a test compares with %s", name, type_name(key.type), allowed)
+				decision_problem(
+					p,
+					f.line,
+					"%s is a %s, which a test compares with %s",
+					name,
+					type_name(key.type),
+					allowed,
+				)
 				continue
 			}
 			if (op == "<" && v == min(i32)) || (op == ">" && v == max(i32)) {
@@ -144,7 +174,8 @@ read_plan_effects :: proc(r: ^Plan_Reader, f: Decision_Field) -> []format.Plan_E
 		e: format.Plan_Effect
 		name, value: string
 		sign := i32(1)
-		plus, minus, equals := strings.index(term, "+="), strings.index(term, "-="), strings.index_byte(term, '=')
+		plus, minus, equals :=
+			strings.index(term, "+="), strings.index(term, "-="), strings.index_byte(term, '=')
 		switch {
 		case plus >= 0:
 			e.op = .Add
@@ -156,7 +187,11 @@ read_plan_effects :: proc(r: ^Plan_Reader, f: Decision_Field) -> []format.Plan_E
 		case equals >= 0:
 			name, value = term[:equals], term[equals + 1:]
 		case:
-			decision_problem(p, f.line, "an effect is `<key> = <value>`, `<key> += <n>` or `<key> -= <n>`")
+			decision_problem(
+				p,
+				f.line,
+				"an effect is `<key> = <value>`, `<key> += <n>` or `<key> -= <n>`",
+			)
 			continue
 		}
 		name, value = strings.trim_space(name), strings.trim_space(value)
@@ -165,7 +200,13 @@ read_plan_effects :: proc(r: ^Plan_Reader, f: Decision_Field) -> []format.Plan_E
 			continue
 		}
 		if e.op == .Add && key.type != .Int {
-			decision_problem(p, f.line, "%s is a %s, and only an int is added to", name, type_name(key.type))
+			decision_problem(
+				p,
+				f.line,
+				"%s is a %s, and only an int is added to",
+				name,
+				type_name(key.type),
+			)
 			continue
 		}
 		v, value_ok := plan_value(p, key, value, f.line)
@@ -195,7 +236,15 @@ read_plan_effects :: proc(r: ^Plan_Reader, f: Decision_Field) -> []format.Plan_E
 
 // planning_key is the index among the planning keys of a key of a name, and the key.
 @(private = "file")
-planning_key :: proc(r: ^Plan_Reader, name: string, line: int) -> (index: u32, key: format.Blackboard_Key_Contents, ok: bool) {
+planning_key :: proc(
+	r: ^Plan_Reader,
+	name: string,
+	line: int,
+) -> (
+	index: u32,
+	key: format.Blackboard_Key_Contents,
+	ok: bool,
+) {
 	slot, _, found := plan_board_key(r.p, name)
 	if !found {
 		decision_problem(r.p, line, "the blackboard has no key named %s", name)
@@ -213,7 +262,15 @@ planning_key :: proc(r: ^Plan_Reader, name: string, line: int) -> (index: u32, k
 // plan_value is a value of a planning key in the planner's world state: true or false for a bool, as 1 or 0, an
 // integer for an int, and one of its names for an enum, as its index.
 @(private = "file")
-plan_value :: proc(p: ^Decision_Parser, key: format.Blackboard_Key_Contents, value: string, line: int) -> (i32, bool) {
+plan_value :: proc(
+	p: ^Decision_Parser,
+	key: format.Blackboard_Key_Contents,
+	value: string,
+	line: int,
+) -> (
+	i32,
+	bool,
+) {
 	#partial switch key.type {
 	case .Bool:
 		switch value {
@@ -234,13 +291,27 @@ plan_value :: proc(p: ^Decision_Parser, key: format.Blackboard_Key_Contents, val
 				return i32(i), true
 			}
 		}
-		decision_problem(p, line, "%s has no value %s: it is %s", key.name, value, strings.join(key.enum_names, ", ", context.temp_allocator))
+		decision_problem(
+			p,
+			line,
+			"%s has no value %s: it is %s",
+			key.name,
+			value,
+			strings.join(key.enum_names, ", ", context.temp_allocator),
+		)
 	}
 	return 0, false
 }
 
 // plan_board_key is the slot and type of the blackboard's key of a name.
-plan_board_key :: proc(p: ^Decision_Parser, name: string) -> (slot: int, type: format.Blackboard_Type, found: bool) {
+plan_board_key :: proc(
+	p: ^Decision_Parser,
+	name: string,
+) -> (
+	slot: int,
+	type: format.Blackboard_Type,
+	found: bool,
+) {
 	for k, i in p.keys {
 		if k.name == name {
 			return i, k.type, true

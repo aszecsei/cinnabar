@@ -107,7 +107,12 @@ Clod_Node :: struct {
 }
 
 // Clod_Output gets each group with its clusters, in order, and returns the ID that clusters simplified from it get.
-Clod_Output :: #type proc "c" (output_context: rawptr, group: Clod_Group, clusters: [^]Clod_Cluster, cluster_count: c.size_t) -> c.int
+Clod_Output :: #type proc "c" (
+	output_context: rawptr,
+	group: Clod_Group,
+	clusters: [^]Clod_Cluster,
+	cluster_count: c.size_t,
+) -> c.int
 
 @(default_calling_convention = "c")
 foreign clusterlod {

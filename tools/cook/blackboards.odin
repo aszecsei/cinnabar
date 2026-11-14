@@ -66,7 +66,14 @@ cook_blackboards :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^P
 // blackboard's source too, and keeps it, so the runtime uses a decision only with the blackboard it was cooked
 // against.
 blackboard_key :: proc(a: Asset_Source) -> u64 {
-	key := hash.fnv64a(transmute([]byte)fmt.tprintf("%s\x00%s\x00%x\x00", BLACKBOARD_COOK_VERSION, a.name, format.blackboard_layout()))
+	key := hash.fnv64a(
+		transmute([]byte)fmt.tprintf(
+			"%s\x00%s\x00%x\x00",
+			BLACKBOARD_COOK_VERSION,
+			a.name,
+			format.blackboard_layout(),
+		),
+	)
 	key = hash.fnv64a(source_of(a), key)
 	guid := a.meta.guid
 	return hash.fnv64a(guid[:], key)
@@ -125,7 +132,13 @@ strip_line_comment :: proc(line: string) -> string {
 
 // blackboard_parse parses a blackboard's text into the contents of its blob, without its GUID, key or path. It gives
 // every problem that it finds, and the blackboard is good only without any.
-blackboard_parse :: proc(text: string, allocator := context.allocator) -> (contents: format.Blackboard_Contents, problems: []Blackboard_Problem) {
+blackboard_parse :: proc(
+	text: string,
+	allocator := context.allocator,
+) -> (
+	contents: format.Blackboard_Contents,
+	problems: []Blackboard_Problem,
+) {
 	context.allocator = allocator
 	found := make([dynamic]Blackboard_Problem)
 	problem :: proc(found: ^[dynamic]Blackboard_Problem, line: int, f: string, args: ..any) {
@@ -140,7 +153,8 @@ blackboard_parse :: proc(text: string, allocator := context.allocator) -> (conte
 			continue
 		}
 		if !header {
-			if fields := strings.fields(trimmed); len(fields) == 2 && fields[0] == "blackboard" && fields[1] == "1" {
+			if fields := strings.fields(trimmed);
+			   len(fields) == 2 && fields[0] == "blackboard" && fields[1] == "1" {
 				header = true
 				continue
 			}
@@ -159,7 +173,11 @@ blackboard_parse :: proc(text: string, allocator := context.allocator) -> (conte
 			}
 		}
 		if !known {
-			problem(&found, line, "a key is `<type> <name> [= <default>]`, of the types float, int, bool, enum, entity, position and vector")
+			problem(
+				&found,
+				line,
+				"a key is `<type> <name> [= <default>]`, of the types float, int, bool, enum, entity, position and vector",
+			)
 			continue
 		}
 		key := format.Blackboard_Key_Contents {
@@ -169,7 +187,11 @@ blackboard_parse :: proc(text: string, allocator := context.allocator) -> (conte
 		if type == .Enum {
 			open := strings.index_byte(rest, '(')
 			if open < 0 || !strings.has_suffix(rest, ")") {
-				problem(&found, line, "an enum is `enum <name> (<value>, <value>...) [= <default>]`")
+				problem(
+					&found,
+					line,
+					"an enum is `enum <name> (<value>, <value>...) [= <default>]`",
+				)
 				continue
 			}
 			name = strings.trim_space(rest[:open])
@@ -212,8 +234,15 @@ blackboard_parse :: proc(text: string, allocator := context.allocator) -> (conte
 			if other.name == name {
 				problem(&found, line, "another key is named %s", name)
 				clash = true
-			} else if format.animation_graph_hash(other.name) == format.animation_graph_hash(name) {
-				problem(&found, line, "the keys %s and %s have the same hash: rename one", other.name, name)
+			} else if format.animation_graph_hash(other.name) ==
+			   format.animation_graph_hash(name) {
+				problem(
+					&found,
+					line,
+					"the keys %s and %s have the same hash: rename one",
+					other.name,
+					name,
+				)
 				clash = true
 			}
 		}
@@ -225,8 +254,14 @@ blackboard_parse :: proc(text: string, allocator := context.allocator) -> (conte
 			continue
 		}
 		append(&keys, key)
-		if _, size := format.blackboard_offsets(keys[:], context.temp_allocator); size > format.MAX_BLACKBOARD_SIZE {
-			problem(&found, line, "a blackboard's values are at most %d bytes", format.MAX_BLACKBOARD_SIZE)
+		if _, size := format.blackboard_offsets(keys[:], context.temp_allocator);
+		   size > format.MAX_BLACKBOARD_SIZE {
+			problem(
+				&found,
+				line,
+				"a blackboard's values are at most %d bytes",
+				format.MAX_BLACKBOARD_SIZE,
+			)
 			pop(&keys)
 		}
 	}
@@ -240,7 +275,14 @@ blackboard_parse :: proc(text: string, allocator := context.allocator) -> (conte
 // parse_board_value reads a value of a type, as a key's default or a decision's constant holds it, into the bytes that
 // an agent's values hold: a number for a float or an int, true or false, one of an enum's names, none for an entity,
 // [x, y, z] in meters for a position, [x, y, z] for a vector, or a quoted string. It gives a message if it is not one.
-parse_board_value :: proc(type: format.Blackboard_Type, text: string, enum_names: []string) -> (bytes: [format.BLACKBOARD_VALUE_SIZE]byte, message: string) {
+parse_board_value :: proc(
+	type: format.Blackboard_Type,
+	text: string,
+	enum_names: []string,
+) -> (
+	bytes: [format.BLACKBOARD_VALUE_SIZE]byte,
+	message: string,
+) {
 	put :: proc(bytes: ^[format.BLACKBOARD_VALUE_SIZE]byte, v: $T) {
 		(^T)(bytes)^ = v
 	}

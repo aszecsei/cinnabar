@@ -4,11 +4,7 @@ import "core:c"
 
 // lib/core/luau/luau_tools.cpp, which `just luau` builds with the static Luau libraries. The analyzer and its
 // configuration library are only the cooker's.
-foreign import luau_tools {
-	"../../build/obj/luau/static/out/luau_tools.lib",
-	"../../build/obj/luau/static/out/Luau.Analysis.lib",
-	"../../build/obj/luau/static/out/Luau.Config.lib",
-}
+foreign import luau_tools {"../../build/obj/luau/static/out/luau_tools.lib", "../../build/obj/luau/static/out/Luau.Analysis.lib", "../../build/obj/luau/static/out/Luau.Config.lib"}
 
 // Luau_Report receives a require path, or an error message. line is 1-based.
 Luau_Report :: #type proc "c" (ud: rawptr, text: [^]u8, size: c.size_t, line: c.int)
@@ -37,4 +33,11 @@ foreign luau_tools {
 Luau_Checker :: struct {}
 
 // Luau_Type_Error receives a type error. line and column are 1-based.
-Luau_Type_Error :: #type proc "c" (ud: rawptr, module: [^]u8, module_size: c.size_t, line, column: c.int, message: [^]u8, size: c.size_t)
+Luau_Type_Error :: #type proc "c" (
+	ud: rawptr,
+	module: [^]u8,
+	module_size: c.size_t,
+	line, column: c.int,
+	message: [^]u8,
+	size: c.size_t,
+)

@@ -17,7 +17,13 @@ Heard :: struct {
 @(private = "file")
 listener :: proc(heard: ^Heard) -> runtime.Logger {
 	return {
-		procedure = proc(data: rawptr, level: runtime.Logger_Level, text: string, options: runtime.Logger_Options, location := #caller_location) {
+		procedure = proc(
+			data: rawptr,
+			level: runtime.Logger_Level,
+			text: string,
+			options: runtime.Logger_Options,
+			location := #caller_location,
+		) {
 			if level >= .Error {
 				(^Heard)(data).errors += 1
 			}

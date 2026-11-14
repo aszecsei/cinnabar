@@ -66,36 +66,36 @@ Mesh_Stream_Stats :: struct {
 Mesh_Pool :: struct {
 	// The slots, MESH_PAGE_SIZE bytes each, the table, and the feedback: a word for each table entry, which the selection
 	// sets to 1 for a resident page that it draws from and raises to the projected error of a page that it wants.
-	pool:        gpu.Buffer,
-	table:       gpu.Buffer,
-	feedback:    gpu.Buffer,
-	ring:        Readback_Ring,
-	slot_count:  u32,
+	pool:          gpu.Buffer,
+	table:         gpu.Buffer,
+	feedback:      gpu.Buffer,
+	ring:          Readback_Ring,
+	slot_count:    u32,
 	// What the renderer asked the pool to be, in slots. The pool is rebuilt when it differs from slot_count.
-	wanted_slots: u32,
+	wanted_slots:  u32,
 	// Each slot's table entry, or MESH_PAGE_ABSENT, and the free slots.
-	slots:       []u32,
-	free_slots:  [dynamic]u32,
+	slots:         []u32,
+	free_slots:    [dynamic]u32,
 	// Each table entry's page, the table as the GPU should have it, and the entries that it does not have yet.
-	pages:       []Pool_Page,
-	entries:     []Table_Entry,
-	dirty:       [dynamic]u32,
+	pages:         []Pool_Page,
+	entries:       []Table_Entry,
+	dirty:         [dynamic]u32,
 	// The paged meshes, by their id less 1, the free ranges of the table as (first, count), and the ranges that wait.
-	meshes:      [dynamic]Pool_Mesh,
-	free_ranges: [dynamic][2]u32,
-	cooling:     [dynamic]Cooling_Range,
+	meshes:        [dynamic]Pool_Mesh,
+	free_ranges:   [dynamic][2]u32,
+	cooling:       [dynamic]Cooling_Range,
 	// One past the highest table entry that a mesh has had, which the feedback is zeroed and read back up to.
-	high:        u32,
-	frame:       u64,
-	open_reads:  int,
+	high:          u32,
+	frame:         u64,
+	open_reads:    int,
 	// The pages that the last update found wanted and not resident, by priority, most wanted first, in frame memory.
-	wanted:      []Wanted_Page,
-	stats:       Mesh_Stream_Stats,
+	wanted:        []Wanted_Page,
+	stats:         Mesh_Stream_Stats,
 	// Level 0 pages that this frame may still decompress.
 	level0_budget: int,
 	// Whether the GPU's table is of this pool. ensure_pool is its only writer with commit_stream_pages and
 	// mesh_pool_not_sent.
-	table_sync:  Table_Sync,
+	table_sync:    Table_Sync,
 }
 
 // Table_Sync is whether the GPU's page table says where pages are in the pool's buffer as it is now.
@@ -147,16 +147,16 @@ Pool_Mesh :: struct {
 @(private)
 Pool_Page :: struct {
 	// The mesh's id, or 0 for an entry that no mesh has.
-	mesh:         u32,
-	state:        Page_State,
+	mesh:            u32,
+	state:           Page_State,
 	// The last frame that a view drew from it, and that a view wanted it.
-	used_frame:   u64,
-	wanted_frame: u64,
+	used_frame:      u64,
+	wanted_frame:    u64,
 	// The most that anything wanted it by in wanted_frame.
 	wanted_priority: f32,
 	// The pages with a slot that depend on it. It keeps its slot while there are any.
-	dependents:   u32,
-	sync:         Entry_Sync,
+	dependents:      u32,
+	sync:            Entry_Sync,
 }
 
 // Entry_Sync is whether the GPU's table has an entry as the CPU's does. mark_dirty, add_stream_pages_pass, its commit and
@@ -234,7 +234,12 @@ Page_Left :: struct {}
 // with the state what follows from it: the slot's owner, the table's entry, the count of open reads and its
 // dependencies' counts of dependents. It gives false for an event that the state does not take.
 @(private = "file")
-change_page :: proc(pool: ^Mesh_Pool, platform: ^core.Platform_API, entry: u32, event: Page_Event) -> bool {
+change_page :: proc(
+	pool: ^Mesh_Pool,
+	platform: ^core.Platform_API,
+	entry: u32,
+	event: Page_Event,
+) -> bool {
 	page := &pool.pages[entry]
 	take_slot :: proc(pool: ^Mesh_Pool, entry: u32, slot: u32) {
 		pool.slots[slot] = entry
@@ -416,9 +421,26 @@ ensure_pool :: proc(pool: ^Mesh_Pool, platform: ^core.Platform_API) -> bool {
 	pool.table_sync = .Stale
 	// The table, the feedback and its copies are made together or not at all.
 	if pool.table == {} {
-		pool.table = platform.gpu_create_buffer({size = MAX_MESH_PAGES * size_of(Table_Entry), usage = {.Storage}, label = "mesh page table"}, nil)
-		pool.feedback = platform.gpu_create_buffer({size = MAX_MESH_PAGES * 4, usage = {.Storage}, label = "mesh page feedback"}, nil)
-		if pool.table == {} || pool.feedback == {} || !ensure_readback_ring(&pool.ring, platform, MAX_MESH_PAGES * 4, "mesh page feedback copy") {
+		pool.table = platform.gpu_create_buffer(
+			{
+				size = MAX_MESH_PAGES * size_of(Table_Entry),
+				usage = {.Storage},
+				label = "mesh page table",
+			},
+			nil,
+		)
+		pool.feedback = platform.gpu_create_buffer(
+			{size = MAX_MESH_PAGES * 4, usage = {.Storage}, label = "mesh page feedback"},
+			nil,
+		)
+		if pool.table == {} ||
+		   pool.feedback == {} ||
+		   !ensure_readback_ring(
+				   &pool.ring,
+				   platform,
+				   MAX_MESH_PAGES * 4,
+				   "mesh page feedback copy",
+			   ) {
 			platform.gpu_destroy_buffer(pool.table)
 			platform.gpu_destroy_buffer(pool.feedback)
 			destroy_readback_ring(&pool.ring, platform)
@@ -431,7 +453,10 @@ ensure_pool :: proc(pool: ^Mesh_Pool, platform: ^core.Platform_API) -> bool {
 		if u64(slots) * format.MESH_PAGE_SIZE > u64(max(u32)) {
 			continue
 		}
-		pool.pool = platform.gpu_create_buffer({size = slots * format.MESH_PAGE_SIZE, usage = {.Storage}, label = "mesh page pool"}, nil)
+		pool.pool = platform.gpu_create_buffer(
+			{size = slots * format.MESH_PAGE_SIZE, usage = {.Storage}, label = "mesh page pool"},
+			nil,
+		)
 		if pool.pool != {} {
 			pool.slots = make([]u32, slots, platform.heap_allocator)
 			slice.fill(pool.slots, MESH_PAGE_ABSENT)
@@ -450,7 +475,18 @@ ensure_pool :: proc(pool: ^Mesh_Pool, platform: ^core.Platform_API) -> bool {
 
 // mesh_pool_add gives a paged mesh a range of the table, and returns its id, or 0 if the table is full. Its pages are
 // absent: the roots load in the frames after, and the mesh is ready when they are in (see mesh_pool_ready).
-mesh_pool_add :: proc(pool: ^Mesh_Pool, platform: ^core.Platform_API, guid: format.Guid, handle: asset.Handle, version: u32, modified: i64, data: []byte, blob: ^format.Mesh_Blob) -> (id: u32) {
+mesh_pool_add :: proc(
+	pool: ^Mesh_Pool,
+	platform: ^core.Platform_API,
+	guid: format.Guid,
+	handle: asset.Handle,
+	version: u32,
+	modified: i64,
+	data: []byte,
+	blob: ^format.Mesh_Blob,
+) -> (
+	id: u32,
+) {
 	records := format.mesh_pages(data, blob)
 	count := u32(len(records))
 	if count == 0 || !ensure_pool(pool, platform) {
@@ -490,7 +526,9 @@ mesh_pool_add :: proc(pool: ^Mesh_Pool, platform: ^core.Platform_API, guid: form
 	}
 	for record, i in records {
 		entry := first + u32(i)
-		pool.pages[entry] = {mesh = id}
+		pool.pages[entry] = {
+			mesh = id,
+		}
 		pool.entries[entry] = {MESH_PAGE_ABSENT, record.first_meshlet}
 		mark_dirty(pool, entry)
 	}
@@ -511,7 +549,10 @@ mesh_pool_remove :: proc(pool: ^Mesh_Pool, platform: ^core.Platform_API, id: u32
 		change_page(pool, platform, entry, Page_Left{})
 		pool.pages[entry].mesh = 0
 	}
-	append(&pool.cooling, Cooling_Range{{mesh.first, mesh.count}, pool.frame + MESH_TABLE_COOL_FRAMES})
+	append(
+		&pool.cooling,
+		Cooling_Range{{mesh.first, mesh.count}, pool.frame + MESH_TABLE_COOL_FRAMES},
+	)
 	delete(mesh.records, platform.heap_allocator)
 	delete(mesh.dependencies, platform.heap_allocator)
 	mesh^ = {}
@@ -654,7 +695,8 @@ mesh_pool_update :: proc(pool: ^Mesh_Pool, platform: ^core.Platform_API, assets:
 	for i := 0; i < len(wanted); i += 1 {
 		w := wanted[i]
 		for d in page_dependencies(pool, w.entry) {
-			if pool.pages[d].wanted_frame != pool.frame || pool.pages[d].wanted_priority < w.priority {
+			if pool.pages[d].wanted_frame != pool.frame ||
+			   pool.pages[d].wanted_priority < w.priority {
 				want(pool, &wanted, d, w.priority)
 			}
 		}
@@ -678,7 +720,8 @@ mesh_pool_update :: proc(pool: ^Mesh_Pool, platform: ^core.Platform_API, assets:
 	pool.stats.pending_requests = u32(len(wanted))
 
 	for &page, entry in pool.pages[:pool.high] {
-		if _, reading := page.state.(Page_Reading); reading && page.wanted_frame + MESH_PAGE_FORGET_FRAMES < pool.frame {
+		if _, reading := page.state.(Page_Reading);
+		   reading && page.wanted_frame + MESH_PAGE_FORGET_FRAMES < pool.frame {
 			change_page(pool, platform, u32(entry), Page_Left{})
 		}
 	}
@@ -700,7 +743,11 @@ mesh_pool_update :: proc(pool: ^Mesh_Pool, platform: ^core.Platform_API, assets:
 		if !found || !location.raw || platform.file_modified(location.path) != mesh.modified {
 			continue
 		}
-		if read := platform.file_read_begin(location.path, location.offset + i64(record.offset), int(record.compressed_size)); read != 0 {
+		if read := platform.file_read_begin(
+			location.path,
+			location.offset + i64(record.offset),
+			int(record.compressed_size),
+		); read != 0 {
 			change_page(pool, platform, w.entry, Page_Read_Began{read})
 		}
 	}
@@ -721,12 +768,12 @@ Page_Load :: struct {
 // Stream_Pages is what a frame's stream pages pass does, and what its commit makes of it.
 @(private)
 Stream_Pages :: struct {
-	pool:     ^Mesh_Pool,
-	platform: ^core.Platform_API,
-	loads:    []Page_Load,
+	pool:         ^Mesh_Pool,
+	platform:     ^core.Platform_API,
+	loads:        []Page_Load,
 	// Runs of the table that the GPU does not have: the first entry, the count, and where they are in table_upload.
-	runs:     [][2]u32,
-	entries:  []u32,
+	runs:         [][2]u32,
+	entries:      []u32,
 	table_upload: gpu.Upload,
 	zero_upload:  gpu.Upload,
 	pool_buffer:  Buffer,
@@ -749,7 +796,11 @@ Mesh_Pool_Frame :: struct {
 // enough. It gives nil before the pool has a mesh, and when the frame's uploads are full. commit_stream_pages is what
 // the frame leaves once it executes; without it, the next update takes everything back.
 @(private)
-prepare_stream_pages :: proc(pool: ^Mesh_Pool, platform: ^core.Platform_API, assets: ^asset.Assets) -> ^Stream_Pages {
+prepare_stream_pages :: proc(
+	pool: ^Mesh_Pool,
+	platform: ^core.Platform_API,
+	assets: ^asset.Assets,
+) -> ^Stream_Pages {
 	if pool.pool == {} {
 		return nil
 	}
@@ -789,7 +840,9 @@ prepare_stream_pages :: proc(pool: ^Mesh_Pool, platform: ^core.Platform_API, ass
 			}
 			// The head, if it is still the version that the table came from.
 			head, loaded := asset.data(assets, mesh.handle)
-			if !loaded || asset.version(assets, mesh.handle) != mesh.version || u64(record.offset) + u64(record.compressed_size) > u64(len(head)) {
+			if !loaded ||
+			   asset.version(assets, mesh.handle) != mesh.version ||
+			   u64(record.offset) + u64(record.compressed_size) > u64(len(head)) {
 				continue
 			}
 			block = head[record.offset:][:record.compressed_size]
@@ -817,7 +870,17 @@ prepare_stream_pages :: proc(pool: ^Mesh_Pool, platform: ^core.Platform_API, ass
 			break
 		}
 		change_page(pool, platform, w.entry, Page_Took_Slot{slot})
-		append(&loads, Page_Load{entry = w.entry, slot = slot, block = block, record = record, stride = mesh.stride, upload = upload})
+		append(
+			&loads,
+			Page_Load {
+				entry = w.entry,
+				slot = slot,
+				block = block,
+				record = record,
+				stride = mesh.stride,
+				upload = upload,
+			},
+		)
 	}
 
 	// Decompressed on the job threads, each into the frame's upload memory, and checked there.
@@ -898,7 +961,14 @@ mesh_pool_not_sent :: proc(pool: ^Mesh_Pool) {
 // prepare_stream_pages), after a copy of the feedback that the last frame's views wrote. Call it in the frame's own
 // view, before the selection.
 @(private)
-add_stream_pages_pass :: proc(g: ^Graph, pool: ^Mesh_Pool, platform: ^core.Platform_API, assets: ^asset.Assets) -> (frame: Mesh_Pool_Frame) {
+add_stream_pages_pass :: proc(
+	g: ^Graph,
+	pool: ^Mesh_Pool,
+	platform: ^core.Platform_API,
+	assets: ^asset.Assets,
+) -> (
+	frame: Mesh_Pool_Frame,
+) {
 	sp := prepare_stream_pages(pool, platform, assets)
 	if sp == nil {
 		return
@@ -927,7 +997,11 @@ mesh_pool_buffers :: proc(g: ^Graph, pool: ^Mesh_Pool) -> (frame: Mesh_Pool_Fram
 	if pool.pool == {} || pool.table == {} {
 		return
 	}
-	return {pool = import_buffer(g, pool.pool), table = import_buffer(g, pool.table), feedback = import_buffer(g, pool.feedback)}
+	return {
+		pool = import_buffer(g, pool.pool),
+		table = import_buffer(g, pool.table),
+		feedback = import_buffer(g, pool.feedback),
+	}
 }
 
 @(private = "file")
@@ -944,16 +1018,37 @@ stream_pages :: proc(ctx: ^Pass_Context) {
 	sp := (^Stream_Pages)(ctx.data)
 	g := ctx.graph
 	for load in sp.loads {
-		gpu.cmd_copy_buffer(ctx.cb, load.upload.buffer, load.upload.offset, gpu_buffer(g, sp.pool_buffer), load.slot * format.MESH_PAGE_SIZE, load.record.size)
+		gpu.cmd_copy_buffer(
+			ctx.cb,
+			load.upload.buffer,
+			load.upload.offset,
+			gpu_buffer(g, sp.pool_buffer),
+			load.slot * format.MESH_PAGE_SIZE,
+			load.record.size,
+		)
 	}
 	offset := sp.table_upload.offset
 	for run in sp.runs {
 		size := run.y * size_of(Table_Entry)
-		gpu.cmd_copy_buffer(ctx.cb, sp.table_upload.buffer, offset, gpu_buffer(g, sp.table), run.x * size_of(Table_Entry), size)
+		gpu.cmd_copy_buffer(
+			ctx.cb,
+			sp.table_upload.buffer,
+			offset,
+			gpu_buffer(g, sp.table),
+			run.x * size_of(Table_Entry),
+			size,
+		)
 		offset += size
 	}
 	if sp.high > 0 {
-		gpu.cmd_copy_buffer(ctx.cb, sp.zero_upload.buffer, sp.zero_upload.offset, gpu_buffer(g, sp.feedback), 0, sp.high * 4)
+		gpu.cmd_copy_buffer(
+			ctx.cb,
+			sp.zero_upload.buffer,
+			sp.zero_upload.offset,
+			gpu_buffer(g, sp.feedback),
+			0,
+			sp.high * 4,
+		)
 	}
 }
 
@@ -1002,7 +1097,11 @@ take_slot :: proc(pool: ^Mesh_Pool, platform: ^core.Platform_API) -> (slot: u32,
 		page := &pool.pages[entry]
 		mesh, record := page_record(pool, entry)
 		_, resident := page.state.(Page_Resident)
-		if !resident || .Root in record.flags || page.dependents > 0 || mesh_pinned(pool, mesh) || page.used_frame + MESH_PAGE_KEEP_FRAMES >= pool.frame {
+		if !resident ||
+		   .Root in record.flags ||
+		   page.dependents > 0 ||
+		   mesh_pinned(pool, mesh) ||
+		   page.used_frame + MESH_PAGE_KEEP_FRAMES >= pool.frame {
 			continue
 		}
 		if page.used_frame < oldest {
@@ -1025,7 +1124,12 @@ fail_page :: proc(pool: ^Mesh_Pool, platform: ^core.Platform_API, entry: u32, re
 	if !mesh.failed {
 		mesh.failed = true
 		buffer: [32]u8
-		log.errorf("render: page %d of the mesh %s %s", entry - mesh.first, format.guid_format(mesh.guid, &buffer), reason)
+		log.errorf(
+			"render: page %d of the mesh %s %s",
+			entry - mesh.first,
+			format.guid_format(mesh.guid, &buffer),
+			reason,
+		)
 	}
 }
 

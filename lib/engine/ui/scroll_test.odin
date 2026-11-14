@@ -80,7 +80,11 @@ a_scroll_box_lays_its_children_out_at_what_they_need_and_scrolls_them :: proc(t:
 a_scroll_box_shares_its_content_by_percents_of_what_shows :: proc(t: ^testing.T) {
 	f := setup(t)
 	defer teardown(t, f)
-	e := show(t, f, LIST, `ui 1
+	e := show(
+		t,
+		f,
+		LIST,
+		`ui 1
 <ui>
 	<column id="pages" width="50" height="100" cross="stretch" overflow="scroll">
 		<box id="one" height="100%"/>
@@ -88,7 +92,8 @@ a_scroll_box_shares_its_content_by_percents_of_what_shows :: proc(t: ^testing.T)
 		<box id="rest" height="fill"/>
 	</column>
 	<row id="fits" width="100" height="10" overflow="scroll" align="end"><box id="small" width="40" height="10"/></row>
-</ui>`)
+</ui>`,
+	)
 	step(f)
 	d := document_of(&f.ui, e)
 	testing.expect_value(t, node_rect(t, f, e, "one"), [4]f32{0, 0, 50, 100})
@@ -119,7 +124,11 @@ a_scroll_boxs_offset_outlives_a_new_version_by_its_id :: proc(t: ^testing.T) {
 the_wheel_scrolls_the_box_under_the_pointer_and_then_the_one_that_it_is_in :: proc(t: ^testing.T) {
 	f := setup(t)
 	defer teardown(t, f)
-	e := show(t, f, LIST, `ui 1
+	e := show(
+		t,
+		f,
+		LIST,
+		`ui 1
 <ui>
 	<column id="outer" width="200" height="100" cross="stretch" overflow="scroll">
 		<column id="inner" height="60" overflow="scroll">
@@ -128,7 +137,8 @@ the_wheel_scrolls_the_box_under_the_pointer_and_then_the_one_that_it_is_in :: pr
 		</column>
 		<box height="200"/>
 	</column>
-</ui>`)
+</ui>`,
+	)
 	step(f)
 	d := document_of(&f.ui, e)
 	// Over the inner list, a notch toward the player scrolls it 60, as far as it goes.
@@ -334,8 +344,13 @@ a_scroll_bar_draws_over_the_content_with_its_styles :: proc(t: ^testing.T) {
 a_scroll_bar_without_styles_is_a_thumb :: proc(t: ^testing.T) {
 	f := setup(t)
 	defer teardown(t, f)
-	show(t, f, LIST, `ui 1
-<ui><row width="100" height="20" overflow="scroll"><box width="200" height="10"/></row></ui>`)
+	show(
+		t,
+		f,
+		LIST,
+		`ui 1
+<ui><row width="100" height="20" overflow="scroll"><box width="200" height="10"/></row></ui>`,
+	)
 	step(f)
 	b := build_batch(&f.ui, 0, context.temp_allocator)
 	testing.expect_value(t, len(b.instances), 1)

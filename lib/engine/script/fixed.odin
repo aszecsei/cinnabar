@@ -93,7 +93,12 @@ fixed_events :: proc(r: ^Runtime) {
 begin_fixed :: proc(r: ^Runtime) {
 	r.bindings.ctx = context
 	enter_phase(r, .Fixed)
-	set_time(r, 1 / f64(r.world.clock.tick_rate), time.duration_seconds(ecs.tick_time(r.world)), true)
+	set_time(
+		r,
+		1 / f64(r.world.clock.tick_rate),
+		time.duration_seconds(ecs.tick_time(r.world)),
+		true,
+	)
 }
 
 // end_fixed applies the step's structural changes and runs the callbacks for them, after the step ends, as end_phase

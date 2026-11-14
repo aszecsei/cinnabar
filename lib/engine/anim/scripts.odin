@@ -23,70 +23,70 @@ register_scripts :: proc(r: ^script.Runtime, s: ^State) {
 	script.expose(r, Root_Motion)
 
 	script.define(r, "Animation.set_float", proc(L: ^luau.State) -> c.int {
-		a, index, ok := parameter_args(L, .Float, write = true)
-		if !ok {
+			a, index, ok := parameter_args(L, .Float, write = true)
+			if !ok {
+				return 0
+			}
+			set_parameter(a, index, f32(luau.L_checknumber(L, 3)))
 			return 0
-		}
-		set_parameter(a, index, f32(luau.L_checknumber(L, 3)))
-		return 0
-	}, "(entity: Entity, name: string, value: number) -> ()")
+		}, "(entity: Entity, name: string, value: number) -> ()")
 	script.define(r, "Animation.set_bool", proc(L: ^luau.State) -> c.int {
-		a, index, ok := parameter_args(L, .Bool, write = true)
-		if !ok {
+			a, index, ok := parameter_args(L, .Bool, write = true)
+			if !ok {
+				return 0
+			}
+			luau.L_checktype(L, 3, .BOOLEAN)
+			set_parameter(a, index, 1 if luau.toboolean(L, 3) else 0)
 			return 0
-		}
-		luau.L_checktype(L, 3, .BOOLEAN)
-		set_parameter(a, index, 1 if luau.toboolean(L, 3) else 0)
-		return 0
-	}, "(entity: Entity, name: string, value: boolean) -> ()")
+		}, "(entity: Entity, name: string, value: boolean) -> ()")
 	script.define(r, "Animation.trigger", proc(L: ^luau.State) -> c.int {
-		a, index, ok := parameter_args(L, .Trigger, write = true)
-		if !ok {
+			a, index, ok := parameter_args(L, .Trigger, write = true)
+			if !ok {
+				return 0
+			}
+			fire(a, index)
 			return 0
-		}
-		fire(a, index)
-		return 0
-	}, "(entity: Entity, name: string) -> ()")
+		}, "(entity: Entity, name: string) -> ()")
 	script.define(r, "Animation.reset_trigger", proc(L: ^luau.State) -> c.int {
-		a, index, ok := parameter_args(L, .Trigger, write = true)
-		if !ok {
+			a, index, ok := parameter_args(L, .Trigger, write = true)
+			if !ok {
+				return 0
+			}
+			a.instance.triggers &~= 1 << u32(index)
 			return 0
-		}
-		a.instance.triggers &~= 1 << u32(index)
-		return 0
-	}, "(entity: Entity, name: string) -> ()")
+		}, "(entity: Entity, name: string) -> ()")
 	script.define(r, "Animation.get_float", proc(L: ^luau.State) -> c.int {
-		a, index, ok := parameter_args(L, .Float)
-		luau.pushnumber(L, f64(a.instance.parameters[index]) if ok else 0)
-		return 1
-	}, "(entity: Entity, name: string) -> number")
+			a, index, ok := parameter_args(L, .Float)
+			luau.pushnumber(L, f64(a.instance.parameters[index]) if ok else 0)
+			return 1
+		}, "(entity: Entity, name: string) -> number")
 	script.define(r, "Animation.get_bool", proc(L: ^luau.State) -> c.int {
-		a, index, ok := parameter_args(L, .Bool)
-		luau.pushboolean(L, b32(ok && a.instance.parameters[index] != 0))
-		return 1
-	}, "(entity: Entity, name: string) -> boolean")
+			a, index, ok := parameter_args(L, .Bool)
+			luau.pushboolean(L, b32(ok && a.instance.parameters[index] != 0))
+			return 1
+		}, "(entity: Entity, name: string) -> boolean")
 	script.define(r, "Animation.state", proc(L: ^luau.State) -> c.int {
-		a := animator_arg(L)
-		name := state_name(state_of(L), a)
-		if name == "" {
-			luau.pushnil(L)
-		} else {
-			luau.pushodinstring(L, name)
-		}
-		return 1
-	}, "(entity: Entity) -> string?")
+			a := animator_arg(L)
+			name := state_name(state_of(L), a)
+			if name == "" {
+				luau.pushnil(L)
+			} else {
+				luau.pushodinstring(L, name)
+			}
+			return 1
+		}, "(entity: Entity) -> string?")
 	script.define(r, "Animation.root_motion", proc(L: ^luau.State) -> c.int {
-		w := script.runtime_of(L).world
-		e := script.check_entity(L, 1)
-		delta, _, ok := root_motion_world(w, e)
-		yaw: f32
-		if ok {
-			yaw = ecs.get(w, e, Root_Motion).yaw
-		}
-		script.push_vector(L, delta)
-		luau.pushnumber(L, f64(yaw))
-		return 2
-	}, "(entity: Entity) -> (vector, number)")
+			w := script.runtime_of(L).world
+			e := script.check_entity(L, 1)
+			delta, _, ok := root_motion_world(w, e)
+			yaw: f32
+			if ok {
+				yaw = ecs.get(w, e, Root_Motion).yaw
+			}
+			script.push_vector(L, delta)
+			luau.pushnumber(L, f64(yaw))
+			return 2
+		}, "(entity: Entity) -> (vector, number)")
 }
 
 @(private = "file")
@@ -117,7 +117,15 @@ animator_arg :: proc(L: ^luau.State, write := false) -> ^Animator {
 // have, or a parameter of another kind. While the graph loads, or if it cannot load, it is not ok, and the call does
 // nothing: the graph starts with its defaults.
 @(private = "file")
-parameter_args :: proc(L: ^luau.State, kind: format.Animation_Graph_Parameter_Kind, write := false) -> (a: ^Animator, index: int, ok: bool) {
+parameter_args :: proc(
+	L: ^luau.State,
+	kind: format.Animation_Graph_Parameter_Kind,
+	write := false,
+) -> (
+	a: ^Animator,
+	index: int,
+	ok: bool,
+) {
 	a = animator_arg(L, write)
 	name := luau.L_checkstring(L, 2)
 	s := state_of(L)

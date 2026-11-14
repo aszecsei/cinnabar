@@ -71,7 +71,11 @@ Reflection_Technique :: enum u8 {
 	Ray_Traced,
 }
 
-#assert(int(Reflection_Technique.Probes) == 1 && int(Reflection_Technique.Screen) == 2 && int(Reflection_Technique.Ray_Traced) == 3)
+#assert(
+	int(Reflection_Technique.Probes) == 1 &&
+	int(Reflection_Technique.Screen) == 2 &&
+	int(Reflection_Technique.Ray_Traced) == 3,
+)
 
 // The anti-aliasing's techniques (see docs/rendering/anti-aliasing.md#anti-aliasing), in the order that they were
 // added: temporal AA, the sharpest on still images and the softest in motion, then FXAA and SMAA 1x, which see one
@@ -215,7 +219,12 @@ preset_quality :: proc(preset: Quality_Preset, caps: Caps) -> Quality {
 		reflections = .Ray_Traced
 	}
 	return {
-		shadows = {level = level, ray_traced = traced, virtual = level >= .Medium, atlas_cache = true},
+		shadows = {
+			level = level,
+			ray_traced = traced,
+			virtual = level >= .Medium,
+			atlas_cache = true,
+		},
 		ao = {technique = .Gtao, level = level},
 		gi = {technique = traced ? .Split_Cascades : .Screen_Cascades, level = level},
 		reflections = {technique = reflections, level = level},
@@ -295,7 +304,11 @@ clamp_quality :: proc(q: Quality, caps: Caps) -> Quality {
 	// Not a number, or 0, is full resolution.
 	q.render_scale = q.render_scale > 0 ? clamp(q.render_scale, MIN_RENDER_SCALE, 1) : 1
 	q.lod_error = q.lod_error > 0 ? clamp(q.lod_error, MIN_LOD_ERROR, MAX_LOD_ERROR) : 1
-	q.mesh_pool = clamp(q.mesh_pool > 0 ? q.mesh_pool : DEFAULT_MESH_POOL, MIN_MESH_POOL, max_mesh_pool(caps))
+	q.mesh_pool = clamp(
+		q.mesh_pool > 0 ? q.mesh_pool : DEFAULT_MESH_POOL,
+		MIN_MESH_POOL,
+		max_mesh_pool(caps),
+	)
 	return q
 }
 

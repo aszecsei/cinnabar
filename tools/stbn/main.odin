@@ -110,7 +110,10 @@ noise_make :: proc(size, slices: int, seed: u64, allocator := context.allocator)
 	}
 	for t in -RADIUS ..= RADIUS {
 		if t != 0 {
-			append(&window, Offset{0, 0, t, TIME_SHARE * math.exp(-f32(t * t) / (SIGMA_TIME * SIGMA_TIME))})
+			append(
+				&window,
+				Offset{0, 0, t, TIME_SHARE * math.exp(-f32(t * t) / (SIGMA_TIME * SIGMA_TIME))},
+			)
 		}
 	}
 	n.window = window[:]
@@ -203,7 +206,10 @@ optimize_slice :: proc(n: ^Noise, t: int, r: ^Rng) -> (kept: int) {
 // PHASES apart, so none reads a value that another writes, and each draws from its own generator, so the texture is
 // the same whatever the threads' timing.
 optimize :: proc(n: ^Noise, rounds: int, seed: u64, threads := 0) {
-	assert(n.slices % PHASES == 0 && n.slices >= 2 * PHASES, "the slices must be a multiple of PHASES, twice at least")
+	assert(
+		n.slices % PHASES == 0 && n.slices >= 2 * PHASES,
+		"the slices must be a multiple of PHASES, twice at least",
+	)
 	Work :: struct {
 		noise: ^Noise,
 		seed:  u64,
@@ -291,14 +297,21 @@ main :: proc() {
 			seed = u64(number)
 		case:
 			if output != "" {
-				fmt.eprintln("usage: stbn <output.png> [--size N] [--slices N] [--swaps N] [--seed N]")
+				fmt.eprintln(
+					"usage: stbn <output.png> [--size N] [--slices N] [--swaps N] [--seed N]",
+				)
 				os.exit(2)
 			}
 			output = arg
 		}
 	}
 	if output == "" || slices % PHASES != 0 || slices < 2 * PHASES || size < 2 * RADIUS + 1 {
-		fmt.eprintfln("usage: stbn <output.png> [--size N] [--slices N] [--swaps N] [--seed N]; the slices a multiple of %d, %d at least, and the size %d at least", PHASES, 2 * PHASES, 2 * RADIUS + 1)
+		fmt.eprintfln(
+			"usage: stbn <output.png> [--size N] [--slices N] [--swaps N] [--seed N]; the slices a multiple of %d, %d at least, and the size %d at least",
+			PHASES,
+			2 * PHASES,
+			2 * RADIUS + 1,
+		)
 		os.exit(2)
 	}
 	start := time.tick_now()
@@ -307,8 +320,20 @@ main :: proc() {
 	first := energy(&n)
 	optimize(&n, swaps, seed)
 	last := energy(&n)
-	fmt.printfln("stbn: %dx%dx%d, %d swaps a texel, energy %.0f to %.0f, in %.1f s", size, size, slices, swaps, first, last, time.duration_seconds(time.tick_since(start)))
-	encoded, ok := capture.encode_png({size = {u32(size), u32(size * slices)}, pixels = pixels(&n)}, context.temp_allocator)
+	fmt.printfln(
+		"stbn: %dx%dx%d, %d swaps a texel, energy %.0f to %.0f, in %.1f s",
+		size,
+		size,
+		slices,
+		swaps,
+		first,
+		last,
+		time.duration_seconds(time.tick_since(start)),
+	)
+	encoded, ok := capture.encode_png(
+		{size = {u32(size), u32(size * slices)}, pixels = pixels(&n)},
+		context.temp_allocator,
+	)
 	if !ok {
 		fmt.eprintln("stbn: cannot encode the PNG")
 		os.exit(1)

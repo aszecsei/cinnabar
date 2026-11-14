@@ -51,31 +51,34 @@ Meshlet_Select_Frame :: struct {
 // the camera's, as in Cull_Constants.
 @(private)
 Meshlet_Select_Constants :: struct {
-	camera:            [4]f32,
-	lod_scale:         f32,
-	lod_near:          f32,
-	walk_count:        u32,
-	walks:             u32,
-	walks_offset:      u32,
-	items:             u32,
-	items_offset:      u32,
-	meshes:            u32,
-	meshes_offset:     u32,
-	instances:         u32,
-	selections:        u32,
-	selected:          u32,
-	stats:             u32,
+	camera:        [4]f32,
+	lod_scale:     f32,
+	lod_near:      f32,
+	walk_count:    u32,
+	walks:         u32,
+	walks_offset:  u32,
+	items:         u32,
+	items_offset:  u32,
+	meshes:        u32,
+	meshes_offset: u32,
+	instances:     u32,
+	selections:    u32,
+	selected:      u32,
+	stats:         u32,
 	// The page table's read index and the feedback's write index, 0 when the frame has no pool of mesh pages.
-	pages:             u32,
-	feedback:          u32,
-	padding:           u32,
+	pages:         u32,
+	feedback:      u32,
+	padding:       u32,
 }
 
 #assert(size_of(Meshlet_Select_Constants) == 80)
 
 meshlet_select_init :: proc(m: ^Meshlet_Select, platform: ^core.Platform_API) {
 	m.pipeline = shader_pipeline(SELECT_MESHLETS_SHADER)
-	m.selected = platform.gpu_create_buffer({size = MAX_SELECTED_MESHLETS * 4, usage = {.Storage}, label = "selected meshlets"}, nil)
+	m.selected = platform.gpu_create_buffer(
+		{size = MAX_SELECTED_MESHLETS * 4, usage = {.Storage}, label = "selected meshlets"},
+		nil,
+	)
 }
 
 meshlet_select_destroy :: proc(m: ^Meshlet_Select, platform: ^core.Platform_API) {
@@ -88,13 +91,21 @@ meshlet_select_destroy :: proc(m: ^Meshlet_Select, platform: ^core.Platform_API)
 // the frame's items. Without the hierarchy (Feature.Meshlet_Hierarchy in Frame_Desc.disable), or before the walk's
 // pipeline is ready, it takes the flag from each, so each tests all of its meshlets.
 @(private)
-meshlet_select_items :: proc(r: ^Renderer, items: []Cull_Item, disabled: bool, allocator: mem.Allocator) -> []u32 {
+meshlet_select_items :: proc(
+	r: ^Renderer,
+	items: []Cull_Item,
+	disabled: bool,
+	allocator: mem.Allocator,
+) -> []u32 {
 	m := &r.scene.meshlet_select
 	walks := !disabled && m.pipeline.pipeline != {} && m.selected != {}
 	if walks && (len(items) > m.capacity || m.selections == {}) {
 		r.platform.gpu_destroy_buffer(m.selections)
 		m.capacity = max(len(items), m.capacity * 2, 256)
-		m.selections = r.platform.gpu_create_buffer({size = u32(8 + m.capacity * 8), usage = {.Storage}, label = "meshlet selections"}, nil)
+		m.selections = r.platform.gpu_create_buffer(
+			{size = u32(8 + m.capacity * 8), usage = {.Storage}, label = "meshlet selections"},
+			nil,
+		)
 		if m.selections == {} {
 			m.capacity = 0
 			walks = false
@@ -148,9 +159,14 @@ meshlet_select_constants :: proc(f: ^Frame, cull: Cull_Constants) -> bool {
 	}
 	if f.mesh_pool.pool != 0 {
 		pool := &f.renderer.residency.pool
-		constants.pages, constants.feedback = gpu.read_index(pool.table), gpu.write_index(pool.feedback)
+		constants.pages, constants.feedback =
+			gpu.read_index(pool.table), gpu.write_index(pool.feedback)
 	}
-	ms.constants, ok = upload_bytes(platform, mem.ptr_to_bytes(&constants), gpu.PASS_CONSTANTS_ALIGN)
+	ms.constants, ok = upload_bytes(
+		platform,
+		mem.ptr_to_bytes(&constants),
+		gpu.PASS_CONSTANTS_ALIGN,
+	)
 	if !ok {
 		return false
 	}
@@ -194,5 +210,8 @@ select_meshlets :: proc(ctx: ^Pass_Context) {
 	count := u32(len(ms.items))
 	gpu.cmd_set_pipeline(ctx.cb, pipeline)
 	gpu.cmd_set_pass_constants(ctx.cb, ms.constants)
-	gpu.cmd_dispatch(ctx.cb, {min(count, MESHLET_SELECT_ROW), (count + MESHLET_SELECT_ROW - 1) / MESHLET_SELECT_ROW, 1})
+	gpu.cmd_dispatch(
+		ctx.cb,
+		{min(count, MESHLET_SELECT_ROW), (count + MESHLET_SELECT_ROW - 1) / MESHLET_SELECT_ROW, 1},
+	)
 }

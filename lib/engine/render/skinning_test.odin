@@ -42,7 +42,9 @@ the_skinning_pass_poses_the_vertices_before_the_passes_that_read_them :: proc(t:
 	r.platform = &platform
 	skin_init(&r.scene.skins, &platform)
 	defer skin_destroy(&r.scene.skins, &platform)
-	r.scene.skins.pipeline.pipeline = platform.gpu_create_compute_pipeline({compute = {1}, label = "skin meshes"})
+	r.scene.skins.pipeline.pipeline = platform.gpu_create_compute_pipeline(
+		{compute = {1}, label = "skin meshes"},
+	)
 
 	rest := Resident_Mesh {
 		positions        = platform.gpu_create_buffer({size = 36, label = "positions"}, nil),
@@ -62,7 +64,16 @@ the_skinning_pass_poses_the_vertices_before_the_passes_that_read_them :: proc(t:
 		sphere  = {0, 1, 0, 2},
 	}
 	build := skin_build({pose}, platform.frame_allocator)
-	instance, reset, ok := skin_instance(&r.scene.skins, &platform, 1, 0, pose.entity, rest.positions, rest.vertex_count, rest.attribute_stride)
+	instance, reset, ok := skin_instance(
+		&r.scene.skins,
+		&platform,
+		1,
+		0,
+		pose.entity,
+		rest.positions,
+		rest.vertex_count,
+		rest.attribute_stride,
+	)
 	testing.expect(t, ok && reset)
 	skin_add(&build, &rest, instance, 0, build.poses[pose.entity], reset)
 	testing.expect_value(t, len(build.palette), 2)
@@ -73,7 +84,12 @@ the_skinning_pass_poses_the_vertices_before_the_passes_that_read_them :: proc(t:
 	defer cache_destroy(&cache, &platform)
 	g := begin(&platform, &cache)
 	f := new(Frame, platform.frame_allocator)
-	f^ = {renderer = r, state = &r.view, graph = &g, size = {64, 32}}
+	f^ = {
+		renderer = r,
+		state    = &r.view,
+		graph    = &g,
+		size     = {64, 32},
+	}
 	f.scene_frame = new(Scene_Frame, platform.frame_allocator)
 	testing.expect(t, skin_upload(f, &build))
 	add_skinning_pass(f)

@@ -110,18 +110,26 @@ plan_apply :: proc "contextless" (effects: []format.Plan_Effect, world: []i32) {
 		case .Set:
 			world[e.key] = e.value
 		case .Add:
-			world[e.key] = i32(clamp(i64(world[e.key]) + i64(e.value), i64(min(i32)), i64(max(i32))))
+			world[e.key] = i32(
+				clamp(i64(world[e.key]) + i64(e.value), i64(min(i32)), i64(max(i32))),
+			)
 		}
 	}
 }
 
 // plan_action_tests is an action's preconditions.
-plan_action_tests :: proc "contextless" (d: Plan_Domain, a: format.Plan_Action) -> []format.Plan_Test {
+plan_action_tests :: proc "contextless" (
+	d: Plan_Domain,
+	a: format.Plan_Action,
+) -> []format.Plan_Test {
 	return d.tests[a.first_test:][:a.test_count]
 }
 
 // plan_action_effects is an action's effects.
-plan_action_effects :: proc "contextless" (d: Plan_Domain, a: format.Plan_Action) -> []format.Plan_Effect {
+plan_action_effects :: proc "contextless" (
+	d: Plan_Domain,
+	a: format.Plan_Action,
+) -> []format.Plan_Effect {
 	return d.effects[a.first_effect:][:a.effect_count]
 }
 
@@ -141,7 +149,12 @@ plan_number :: proc(t: ^Think_Context, n: format.Plan_Number) -> f64 {
 // plan_holds is whether a plan reaches its goal from a world state: each action's preconditions hold in its turn, with
 // the effects of the actions before it, and the goal's tests hold after the last. A plan without a goal, as an HTN plan,
 // passes no goal tests.
-plan_holds :: proc "contextless" (d: Plan_Domain, steps: []u16, world: Plan_World, goal: []format.Plan_Test) -> bool {
+plan_holds :: proc "contextless" (
+	d: Plan_Domain,
+	steps: []u16,
+	world: Plan_World,
+	goal: []format.Plan_Test,
+) -> bool {
 	world := world
 	for step in steps {
 		a := d.actions[step]
@@ -155,7 +168,13 @@ plan_holds :: proc "contextless" (d: Plan_Domain, steps: []u16, world: Plan_Worl
 
 // plan_depends is the planning keys that the rest of a plan depends on, as a set of their indices: those that the
 // preconditions of its actions from the step that runs test, and those that its goal tests.
-plan_depends :: proc "contextless" (d: Plan_Domain, p: Plan, goal: []format.Plan_Test) -> (keys: u32) {
+plan_depends :: proc "contextless" (
+	d: Plan_Domain,
+	p: Plan,
+	goal: []format.Plan_Test,
+) -> (
+	keys: u32,
+) {
 	for step in p.steps[p.run.step:p.run.length] {
 		for test in plan_action_tests(d, d.actions[step]) {
 			keys |= 1 << test.key
@@ -170,10 +189,18 @@ plan_depends :: proc "contextless" (d: Plan_Domain, p: Plan, goal: []format.Plan
 // plan_start starts a plan whose actions are in its steps, of a length, if it reaches its goal from the world state now
 // and its first action's guard holds: it expects the world state as it is now, and starts the first action. It is
 // false, and starts nothing, when the plan does not hold.
-plan_start :: proc(t: ^Think_Context, d: Plan_Domain, p: Plan, length: u32, goal: []format.Plan_Test) -> bool {
+plan_start :: proc(
+	t: ^Think_Context,
+	d: Plan_Domain,
+	p: Plan,
+	length: u32,
+	goal: []format.Plan_Test,
+) -> bool {
 	world := plan_world(t, d.keys)
 	shared := format.decision_nodes(t.decision.data, t.decision.blob)
-	if length == 0 || !plan_holds(d, p.steps[:length], world, goal) || !condition_holds(t, shared[d.actions[p.steps[0]].node].condition) {
+	if length == 0 ||
+	   !plan_holds(d, p.steps[:length], world, goal) ||
+	   !condition_holds(t, shared[d.actions[p.steps[0]].node].condition) {
 		return false
 	}
 	p.run^ = {
@@ -193,7 +220,13 @@ plan_start :: proc(t: ^Think_Context, d: Plan_Domain, p: Plan, length: u32, goal
 // the world state as the effects leave it. It asks to plan again when the action failed or another replaced it. world is
 // the world state now, as plan_world reads it, and it gains the effects that the runner writes, which apply only after
 // the tick, so the module can pick its goal on the world as they leave it.
-plan_think :: proc(t: ^Think_Context, d: Plan_Domain, p: Plan, goal: []format.Plan_Test, world: ^Plan_World) -> Plan_Result {
+plan_think :: proc(
+	t: ^Think_Context,
+	d: Plan_Domain,
+	p: Plan,
+	goal: []format.Plan_Test,
+	world: ^Plan_World,
+) -> Plan_Result {
 	shared := format.decision_nodes(t.decision.data, t.decision.blob)
 	run := p.run
 	if run.step >= run.length {
@@ -220,7 +253,8 @@ plan_think :: proc(t: ^Think_Context, d: Plan_Domain, p: Plan, goal: []format.Pl
 	}
 	run.depends = plan_depends(d, p, goal)
 	next := d.actions[p.steps[run.step]]
-	if !as_expected(world[:], p.expected, run.depends) || !condition_holds(t, shared[next.node].condition) ||
+	if !as_expected(world[:], p.expected, run.depends) ||
+	   !condition_holds(t, shared[next.node].condition) ||
 	   !plan_tests_hold(plan_action_tests(d, next), world[:]) {
 		return .Replan
 	}
@@ -249,7 +283,12 @@ start_step :: proc(t: ^Think_Context, a: format.Plan_Action) {
 
 // write_effects asks to write the keys of effects with their values in a world state, in the effects' order.
 @(private = "file")
-write_effects :: proc(t: ^Think_Context, d: Plan_Domain, effects: []format.Plan_Effect, world: []i32) {
+write_effects :: proc(
+	t: ^Think_Context,
+	d: Plan_Domain,
+	effects: []format.Plan_Effect,
+	world: []i32,
+) {
 	board_keys := format.blackboard_keys(t.board.data, t.board.blob)
 	for e in effects {
 		slot := d.keys[e.key]

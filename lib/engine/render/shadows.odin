@@ -71,10 +71,54 @@ Soft_Params :: struct {
 
 @(rodata)
 SHADOW_PARAMS := [Quality_Level]Shadow_Params {
-	.Low    = {atlas = 2048, cell = 1024, slot = 512, cascades = 2, filter = .Taps_1, dynamic_distance = 50, refresh_slots = 1},
-	.Medium = {atlas = 4096, cell = 1024, slot = 512, cascades = 3, filter = .Taps_4, virtual_levels = 12, pool_pages = {32, 32}, virtual_bias = 1, soft = {search = 4, taps = 8, radius = 16}, dynamic_distance = 75, refresh_slots = 2},
-	.High   = {atlas = 4096, cell = 1024, slot = 512, cascades = 4, filter = .Taps_4, virtual_levels = 12, pool_pages = {64, 32}, soft = {search = 8, taps = 16, radius = 16}, smrt = {rays = 4, steps = 6, length = SMRT_LENGTH}, dynamic_distance = 100, refresh_slots = 4},
-	.Ultra  = {atlas = 8192, cell = 2048, slot = 1024, cascades = 4, filter = .Taps_9, virtual_levels = 13, pool_pages = {64, 64}, soft = {search = 8, taps = 24, radius = 32}, smrt = {rays = 8, steps = 8, length = SMRT_LENGTH}, dynamic_distance = 150, refresh_slots = 6},
+	.Low = {
+		atlas = 2048,
+		cell = 1024,
+		slot = 512,
+		cascades = 2,
+		filter = .Taps_1,
+		dynamic_distance = 50,
+		refresh_slots = 1,
+	},
+	.Medium = {
+		atlas = 4096,
+		cell = 1024,
+		slot = 512,
+		cascades = 3,
+		filter = .Taps_4,
+		virtual_levels = 12,
+		pool_pages = {32, 32},
+		virtual_bias = 1,
+		soft = {search = 4, taps = 8, radius = 16},
+		dynamic_distance = 75,
+		refresh_slots = 2,
+	},
+	.High = {
+		atlas = 4096,
+		cell = 1024,
+		slot = 512,
+		cascades = 4,
+		filter = .Taps_4,
+		virtual_levels = 12,
+		pool_pages = {64, 32},
+		soft = {search = 8, taps = 16, radius = 16},
+		smrt = {rays = 4, steps = 6, length = SMRT_LENGTH},
+		dynamic_distance = 100,
+		refresh_slots = 4,
+	},
+	.Ultra = {
+		atlas = 8192,
+		cell = 2048,
+		slot = 1024,
+		cascades = 4,
+		filter = .Taps_9,
+		virtual_levels = 13,
+		pool_pages = {64, 64},
+		soft = {search = 8, taps = 24, radius = 32},
+		smrt = {rays = 8, steps = 8, length = SMRT_LENGTH},
+		dynamic_distance = 150,
+		refresh_slots = 6,
+	},
 }
 // How far the virtual shadow map's rays reach toward the light, in meters. A caster farther than this casts a penumbra
 // as wide as one this far.
@@ -136,12 +180,12 @@ CONTACT_SHADOWS_SHADER :: #load("../content/shaders/contact_shadows.hlsl.meta", 
 // camera, as its matrix's rows, its rectangle of the atlas in UV, and the size of a texel. A virtual shadow map's level
 // has its valid rectangle in UV (low, high) as rect, and page_origin, its first page in the level's absolute grid.
 Shadow_View :: struct {
-	rows:            [4][4]f32,
-	rect:            [4]f32,
+	rows:        [4][4]f32,
+	rect:        [4]f32,
 	// In meters for an orthographic view, at 1 m for a perspective one.
-	texel:           f32,
-	perspective:     u32,
-	page_origin:     [2]i32,
+	texel:       f32,
+	perspective: u32,
+	page_origin: [2]i32,
 }
 
 #assert(size_of(Shadow_View) == 96)
@@ -253,8 +297,8 @@ Shadow_Passes :: struct {
 	spatial_pipeline:  Shader_Pipeline,
 	// The atlas's cache's clear and copy (see shadow_cache.odin).
 	cache_pipeline:    Shader_Pipeline,
-	sampler:       gpu.Sampler,
-	virtual:       Virtual_Shadows,
+	sampler:           gpu.Sampler,
+	virtual:           Virtual_Shadows,
 }
 
 // Shadow_Frame is one frame's shadows, in frame memory: the shadow maps' views, the lights of the mask's channels, and
@@ -297,7 +341,14 @@ shadows_init :: proc(s: ^Shadow_Passes, platform: ^core.Platform_API) {
 	s.temporal_pipeline = shader_pipeline(MASK_TEMPORAL_SHADER)
 	s.spatial_pipeline = shader_pipeline(MASK_SPATIAL_SHADER)
 	s.cache_pipeline = shader_pipeline(SHADOW_CACHE_SHADER)
-	s.sampler = platform.gpu_create_sampler({filter = .Linear, address = .Clamp, compare = .Greater_Equal, label = "shadow comparison"})
+	s.sampler = platform.gpu_create_sampler(
+		{
+			filter = .Linear,
+			address = .Clamp,
+			compare = .Greater_Equal,
+			label = "shadow comparison",
+		},
+	)
 	virtual_shadows_init(&s.virtual)
 }
 
@@ -315,7 +366,14 @@ shadows_destroy :: proc(s: ^Shadow_Passes, platform: ^core.Platform_API) {
 // from the near plane to distance, lambda of the way to exponential. The splits past count repeat the last, so no
 // depth reaches a cascade past it. A lambda of 0 gives even splits, which an orthographic view takes: a near plane of
 // 0 has no exponential splits.
-cascade_splits :: proc(near: f32, distance: f32 = SHADOW_DISTANCE, lambda: f32 = SHADOW_SPLIT_LAMBDA, count := SHADOW_CASCADES) -> (splits: [SHADOW_CASCADES]f32) {
+cascade_splits :: proc(
+	near: f32,
+	distance: f32 = SHADOW_DISTANCE,
+	lambda: f32 = SHADOW_SPLIT_LAMBDA,
+	count := SHADOW_CASCADES,
+) -> (
+	splits: [SHADOW_CASCADES]f32,
+) {
 	far := max(distance, near * 2)
 	n := clamp(count, 1, SHADOW_CASCADES)
 	for &split, i in splits {
@@ -336,15 +394,45 @@ assign_shadows :: proc(f: ^Frame) {
 	r := f.renderer
 	if r.caps.ray_query {
 		// Synced whether or not this frame traces, so turning tracing on does not wait for it to compile.
-		sync_compute_pipeline(&r.shadows.mask_pipeline, r.platform, r.residency.assets, {label = "shadow mask"}, r.reloaded)
-		sync_compute_pipeline(&r.shadows.temporal_pipeline, r.platform, r.residency.assets, {label = "shadow mask temporal"}, r.reloaded)
-		sync_compute_pipeline(&r.shadows.spatial_pipeline, r.platform, r.residency.assets, {label = "shadow mask spatial"}, r.reloaded)
+		sync_compute_pipeline(
+			&r.shadows.mask_pipeline,
+			r.platform,
+			r.residency.assets,
+			{label = "shadow mask"},
+			r.reloaded,
+		)
+		sync_compute_pipeline(
+			&r.shadows.temporal_pipeline,
+			r.platform,
+			r.residency.assets,
+			{label = "shadow mask temporal"},
+			r.reloaded,
+		)
+		sync_compute_pipeline(
+			&r.shadows.spatial_pipeline,
+			r.platform,
+			r.residency.assets,
+			{label = "shadow mask spatial"},
+			r.reloaded,
+		)
 	}
-	sync_compute_pipeline(&r.shadows.contact_pipeline, r.platform, r.residency.assets, {label = "contact shadows"}, r.reloaded)
+	sync_compute_pipeline(
+		&r.shadows.contact_pipeline,
+		r.platform,
+		r.residency.assets,
+		{label = "contact shadows"},
+		r.reloaded,
+	)
 	sync_shadow_cache_pipeline(r)
-	trace := f.shadow_settings.ray_traced && r.shadows.mask_pipeline.pipeline != {} && request_ray_scene(f)
+	trace :=
+		f.shadow_settings.ray_traced &&
+		r.shadows.mask_pipeline.pipeline != {} &&
+		request_ray_scene(f)
 	params := SHADOW_PARAMS[f.shadow_settings.level]
-	virtual := f.shadow_settings.virtual && params.virtual_levels > 0 && ensure_virtual_shadows(r, &f.state.virtual_shadows, params)
+	virtual :=
+		f.shadow_settings.virtual &&
+		params.virtual_levels > 0 &&
+		ensure_virtual_shadows(r, &f.state.virtual_shadows, params)
 	contact := !trace && pipeline_ready(r.platform, &r.shadows.contact_pipeline)
 	assign_shadow_views(f, trace, virtual, contact)
 }
@@ -379,7 +467,9 @@ assign_shadow_views :: proc(f: ^Frame, trace: bool, virtual := false, contact :=
 			if !sphere_inside(camera_planes[:], record.position, record.range) {
 				continue
 			}
-			importance[i] = max(record.color.r, record.color.g, record.color.b) / max(linalg.length2(record.position), 1)
+			importance[i] =
+				max(record.color.r, record.color.g, record.color.b) /
+				max(linalg.length2(record.position), 1)
 		}
 		append(&order, i)
 	}
@@ -458,7 +548,8 @@ assign_shadow_views :: proc(f: ^Frame, trace: bool, virtual := false, contact :=
 			if record.type == .Spot {
 				// The cone's half angle is where the falloff reaches 0: cos = -offset / scale.
 				cone := math.acos(clamp(-record.spot_offset / record.spot_scale, -1, 1))
-				taker.light.direction, taker.light.fov = record.direction, min(cone * 2, math.to_radians(f32(170)))
+				taker.light.direction, taker.light.fov =
+					record.direction, min(cone * 2, math.to_radians(f32(170)))
 			}
 			append(&takers, taker)
 			taken += faces
@@ -487,7 +578,16 @@ assign_shadow_views :: proc(f: ^Frame, trace: bool, virtual := false, contact :=
 					append(&sf.cache.redraw, len(sf.views))
 				}
 			}
-			add_perspective_view(f, sf, record.position, direction, t.light.fov, record.range, plans[k].slots[face], t.light.guard)
+			add_perspective_view(
+				f,
+				sf,
+				record.position,
+				direction,
+				t.light.fov,
+				record.range,
+				plans[k].slots[face],
+				t.light.guard,
+			)
 		}
 	}
 	// A reflection probe's capture takes a slot after the others for its own view of the directional light.
@@ -498,7 +598,10 @@ assign_shadow_views :: proc(f: ^Frame, trace: bool, virtual := false, contact :=
 	}
 	if len(sf.views) > 0 {
 		ok: bool
-		sf.views_upload, ok = upload_bytes(r.platform, ([^]byte)(raw_data(sf.views))[:len(sf.views) * size_of(Shadow_View)])
+		sf.views_upload, ok = upload_bytes(
+			r.platform,
+			([^]byte)(raw_data(sf.views))[:len(sf.views) * size_of(Shadow_View)],
+		)
 		if !ok {
 			// Without their views, the lights have no shadow maps.
 			for &record in lf.records {
@@ -664,7 +767,12 @@ add_cascades :: proc(f: ^Frame, sf: ^Shadow_Frame, direction: [3]f32) {
 // add_orthographic_shadow_view adds an orthographic view along a directional light's direction of a sphere relative to
 // the camera, in a slot of the atlas, as a cascade's is but for its snapping. Depth is clamped, not clipped.
 @(private)
-add_orthographic_shadow_view :: proc(sf: ^Shadow_Frame, direction, center: [3]f32, radius: f32, slot: int) {
+add_orthographic_shadow_view :: proc(
+	sf: ^Shadow_Frame,
+	direction, center: [3]f32,
+	radius: f32,
+	slot: int,
+) {
 	light_right, light_up := light_basis(direction)
 	depth_range := 2 * radius
 	d := linalg.dot(direction, center)
@@ -678,7 +786,10 @@ add_orthographic_shadow_view :: proc(sf: ^Shadow_Frame, direction, center: [3]f3
 	planes := frustum_planes_6(m)
 	planes[4] = {0, 0, 0, 1}
 	append(&sf.matrices, m)
-	append(&sf.views, Shadow_View{rows = matrix_rows(m), rect = rect, texel = 2 * radius / f32(sf.params.slot)})
+	append(
+		&sf.views,
+		Shadow_View{rows = matrix_rows(m), rect = rect, texel = 2 * radius / f32(sf.params.slot)},
+	)
 	append(&sf.planes, planes)
 	append(&sf.eyes, [4]f32{direction.x, direction.y, direction.z, 0})
 	append(&sf.viewports, pixels)
@@ -688,7 +799,14 @@ add_orthographic_shadow_view :: proc(sf: ^Shadow_Frame, direction, center: [3]f3
 // with reversed depth from SHADOW_NEAR, and culling to the light's range. With a guard of texels, its field of view
 // widens so that fov fills the slot but for guard texels on each side (see soft_guard).
 @(private = "file")
-add_perspective_view :: proc(f: ^Frame, sf: ^Shadow_Frame, position, direction: [3]f32, fov, range: f32, slot: int, guard := 0) {
+add_perspective_view :: proc(
+	f: ^Frame,
+	sf: ^Shadow_Frame,
+	position, direction: [3]f32,
+	fov, range: f32,
+	slot: int,
+	guard := 0,
+) {
 	right, up := light_basis(direction)
 	slot_size := sf.params.slot
 	s := 1 / math.tan(fov * 0.5) * f32(slot_size - 2 * guard) / f32(slot_size)
@@ -704,7 +822,15 @@ add_perspective_view :: proc(f: ^Frame, sf: ^Shadow_Frame, position, direction: 
 	// The far plane is at the light's range.
 	planes[5] = {-direction.x, -direction.y, -direction.z, linalg.dot(direction, position) + range}
 	append(&sf.matrices, m)
-	append(&sf.views, Shadow_View{rows = matrix_rows(m), rect = rect, texel = 2 / (s * f32(slot_size)), perspective = 1})
+	append(
+		&sf.views,
+		Shadow_View {
+			rows = matrix_rows(m),
+			rect = rect,
+			texel = 2 / (s * f32(slot_size)),
+			perspective = 1,
+		},
+	)
 	append(&sf.planes, planes)
 	append(&sf.eyes, [4]f32{position.x, position.y, position.z, 1})
 	append(&sf.viewports, pixels)
@@ -758,7 +884,10 @@ add_shadow_passes :: proc(f: ^Frame) {
 			add_atlas_cache_pass(f)
 		}
 		atlas := u32(sf.params.atlas)
-		sf.atlas = create_texture(g, {size = {atlas, atlas}, format = SHADOW_FORMAT, label = "shadow atlas"})
+		sf.atlas = create_texture(
+			g,
+			{size = {atlas, atlas}, format = SHADOW_FORMAT, label = "shadow atlas"},
+		)
 		p := add_render_pass(g, "shadow maps", draw_shadow_maps, f, pieces = atlas_views)
 		depth(g, p, sf.atlas, .Clear)
 		if sf.cache.enabled {
@@ -770,16 +899,26 @@ add_shadow_passes :: proc(f: ^Frame) {
 		add_contact_shadows_pass(f)
 		return
 	}
-	sf.mask = create_texture(g, {size = f.size, format = SHADOW_MASK_FORMAT, label = "shadow mask"})
+	sf.mask = create_texture(
+		g,
+		{size = f.size, format = SHADOW_MASK_FORMAT, label = "shadow mask"},
+	)
 	r := f.renderer
 	if sf.mask_soft != 0 &&
-	   (!pipeline_ready(r.platform, &r.shadows.temporal_pipeline) || !pipeline_ready(r.platform, &r.shadows.spatial_pipeline)) {
+	   (!pipeline_ready(r.platform, &r.shadows.temporal_pipeline) ||
+			   !pipeline_ready(r.platform, &r.shadows.spatial_pipeline)) {
 		// Until the denoiser compiles, every channel traces toward its light's middle.
 		sf.mask_soft = 0
 	}
 	if sf.mask_soft != 0 {
-		sf.mask_history = history_texture(g, {size = f.size, format = MASK_HISTORY_FORMAT, label = "shadow mask history"})
-		sf.mask_frames = history_texture(g, {size = f.size, format = MASK_FRAMES_FORMAT, label = "shadow mask frames"})
+		sf.mask_history = history_texture(
+			g,
+			{size = f.size, format = MASK_HISTORY_FORMAT, label = "shadow mask history"},
+		)
+		sf.mask_frames = history_texture(
+			g,
+			{size = f.size, format = MASK_FRAMES_FORMAT, label = "shadow mask frames"},
+		)
 		if sf.mask_history.current == 0 || sf.mask_frames.current == 0 {
 			sf.mask_soft = 0
 		}
@@ -792,8 +931,14 @@ add_shadow_passes :: proc(f: ^Frame) {
 		write(g, p, sf.mask)
 		return
 	}
-	sf.mask_raw = create_texture(g, {size = f.size, format = SHADOW_MASK_FORMAT, label = "shadow mask raw"})
-	sf.mask_penumbra = create_texture(g, {size = f.size, format = MASK_PENUMBRA_FORMAT, label = "shadow mask penumbra"})
+	sf.mask_raw = create_texture(
+		g,
+		{size = f.size, format = SHADOW_MASK_FORMAT, label = "shadow mask raw"},
+	)
+	sf.mask_penumbra = create_texture(
+		g,
+		{size = f.size, format = MASK_PENUMBRA_FORMAT, label = "shadow mask penumbra"},
+	)
 	write(g, p, sf.mask_raw)
 	write(g, p, sf.mask_penumbra)
 
@@ -836,7 +981,12 @@ mask_history_of :: proc(f: ^Frame) -> (h: Mask_History) {
 
 // mask_history_channels is, for each of a frame's channels, the channel of the last frame's history that held its
 // light, or max(u32) when none did, so the channel starts again.
-mask_history_channels :: proc(previous: Mask_History, current: Mask_History) -> (channels: [4]u32) {
+mask_history_channels :: proc(
+	previous: Mask_History,
+	current: Mask_History,
+) -> (
+	channels: [4]u32,
+) {
 	for light, c in current.lights {
 		channels[c] = max(u32)
 		if light == {} {
@@ -944,7 +1094,10 @@ add_contact_shadows_pass :: proc(f: ^Frame) {
 	if sf.contact_light < 0 || f.ao == nil {
 		return
 	}
-	sf.contact = create_texture(g, {size = f.size, format = CONTACT_SHADOWS_FORMAT, label = "contact shadows"})
+	sf.contact = create_texture(
+		g,
+		{size = f.size, format = CONTACT_SHADOWS_FORMAT, label = "contact shadows"},
+	)
 	p := add_compute_pass(g, "contact shadows", run_contact_shadows, f, queue = .Compute)
 	for level in f.ao.levels {
 		read(g, p, level)
@@ -965,7 +1118,12 @@ run_contact_shadows :: proc(ctx: ^Pass_Context) {
 	to_light := -f.lights.records[sf.contact_light].direction
 	constants := Contact_Constants {
 		projection  = f.projection,
-		to_light    = {linalg.dot(to_light, right), linalg.dot(to_light, up), linalg.dot(to_light, forward), 0},
+		to_light    = {
+			linalg.dot(to_light, right),
+			linalg.dot(to_light, up),
+			linalg.dot(to_light, forward),
+			0,
+		},
 		output      = gpu.write_index(gpu_texture(g, sf.contact)),
 		noise       = f.ao.constants.noise,
 		size        = f.size,
@@ -980,7 +1138,10 @@ run_contact_shadows :: proc(ctx: ^Pass_Context) {
 			constants.level4 = index
 		}
 	}
-	upload, ok := f.renderer.platform.gpu_upload(size_of(Contact_Constants), gpu.PASS_CONSTANTS_ALIGN)
+	upload, ok := f.renderer.platform.gpu_upload(
+		size_of(Contact_Constants),
+		gpu.PASS_CONSTANTS_ALIGN,
+	)
 	if !ok {
 		return
 	}
@@ -997,8 +1158,16 @@ draw_shadow_maps :: proc(ctx: ^Pass_Context) {
 	// A virtual shadow map's levels are the first views.
 	view := f.shadows.virtual.count + ctx.piece
 	viewport := f.shadows.viewports[view]
-	gpu.cmd_set_viewport(ctx.cb, {f32(viewport.x), f32(viewport.y)}, {f32(viewport.z), f32(viewport.w)})
-	gpu.cmd_set_scissor(ctx.cb, {i32(viewport.x), i32(viewport.y)}, {i32(viewport.z), i32(viewport.w)})
+	gpu.cmd_set_viewport(
+		ctx.cb,
+		{f32(viewport.x), f32(viewport.y)},
+		{f32(viewport.z), f32(viewport.w)},
+	)
+	gpu.cmd_set_scissor(
+		ctx.cb,
+		{i32(viewport.x), i32(viewport.y)},
+		{i32(viewport.z), i32(viewport.w)},
+	)
 	// A cached view's slot is its cache's, and the view draws only its live casters over it.
 	if f.shadows.cache.enabled && f.shadows.cache.cached[view] {
 		copy_cached_slot(ctx, f)

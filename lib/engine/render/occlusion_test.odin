@@ -14,10 +14,10 @@ the_cull_stats_are_the_newest_copy_that_came_back :: proc(t: ^testing.T) {
 	testing.expect(t, null.init(nil, {64, 32}))
 	defer null.shutdown()
 	platform := core.Platform_API {
-		heap_allocator     = runtime.heap_allocator(),
-		gpu_create_buffer  = null.create_buffer,
-		gpu_destroy_buffer = null.destroy_buffer,
-		gpu_read_buffer    = null.read_buffer,
+		heap_allocator       = runtime.heap_allocator(),
+		gpu_create_buffer    = null.create_buffer,
+		gpu_destroy_buffer   = null.destroy_buffer,
+		gpu_read_buffer      = null.read_buffer,
 		gpu_destroy_pipeline = null.destroy_pipeline,
 	}
 	r := new(Renderer)

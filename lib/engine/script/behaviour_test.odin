@@ -33,7 +33,11 @@ callbacks_run_in_unity_order :: proc(t: ^testing.T) {
 	f := setup_world(t)
 	defer teardown_world(f)
 	context.user_ptr = f
-	thread, ok := spawn_source(&f.runtime, "=door", DOOR + `
+	thread, ok := spawn_source(
+		&f.runtime,
+		"=door",
+		DOOR +
+		`
 local e = World.spawn()
 local d = e:add(Door, {speed = 5})
 Test.report(d.speed)
@@ -42,7 +46,8 @@ Test.report(e:get(Door) == d and 1 or 0)
 Test.report(d.entity == e and 1 or 0)
 coroutine.yield()
 e:destroy()
-`)
+`,
+	)
 	testing.expect(t, ok)
 	// A script's add runs awake and on_enable at once.
 	expect_reports(t, f, {1, 2, 5, 1, 1, 1})
@@ -63,7 +68,10 @@ a_destroy_in_on_destroy_at_the_end_of_a_phase_applies :: proc(t: ^testing.T) {
 	f := setup_world(t)
 	defer teardown_world(f)
 	context.user_ptr = f
-	thread, ok := spawn_source(&f.runtime, "=linked", `
+	thread, ok := spawn_source(
+		&f.runtime,
+		"=linked",
+		`
 Linked = Behaviour.define("Linked", {})
 function Linked:on_destroy()
 	Test.report(6)
@@ -77,7 +85,8 @@ a:destroy()
 coroutine.yield()
 Test.report(a:is_alive() and 1 or 0)
 Test.report(b:is_alive() and 1 or 0)
-`)
+`,
+	)
 	testing.expect(t, ok)
 	// a's on_destroy runs after end_phase applies the phase's changes, so b's destroy applies at once.
 	begin_phase(&f.runtime, FRAME, {})
@@ -95,14 +104,19 @@ disabling_a_behaviour_stops_its_update :: proc(t: ^testing.T) {
 	f := setup_world(t)
 	defer teardown_world(f)
 	context.user_ptr = f
-	thread, ok := spawn_source(&f.runtime, "=door", DOOR + `
+	thread, ok := spawn_source(
+		&f.runtime,
+		"=door",
+		DOOR +
+		`
 local d = World.spawn():add(Door, {enabled = false})
 Test.report(d.enabled and 1 or 0)
 coroutine.yield()
 d.enabled = true
 d.enabled = true
 Test.report(d.enabled and 1 or 0)
-`)
+`,
+	)
 	testing.expect(t, ok)
 	// A disabled instance wakes, but gets no on_enable, start or update.
 	expect_reports(t, f, {1, 0})
@@ -121,7 +135,11 @@ deactivation_reaches_children_and_defers_awake :: proc(t: ^testing.T) {
 	f := setup_world(t)
 	defer teardown_world(f)
 	context.user_ptr = f
-	thread, ok := spawn_source(&f.runtime, "=door", DOOR + `
+	thread, ok := spawn_source(
+		&f.runtime,
+		"=door",
+		DOOR +
+		`
 local parent = World.spawn()
 local child = World.spawn()
 child:set_parent(parent)
@@ -135,7 +153,8 @@ coroutine.yield()
 parent:set_active(true)
 Test.report(11)
 parent:set_active(false)
-`)
+`,
+	)
 	testing.expect(t, ok)
 	// The Door on the inactive child does not wake.
 	expect_reports(t, f, {0, 1, 0, 10})
@@ -152,7 +171,10 @@ coroutines_wait_for_frames_time_and_events :: proc(t: ^testing.T) {
 	f := setup_world(t)
 	defer teardown_world(f)
 	context.user_ptr = f
-	_, ok := spawn_source(&f.runtime, "=waits", `
+	_, ok := spawn_source(
+		&f.runtime,
+		"=waits",
+		`
 local Waiter = Behaviour.define("Waiter")
 function Waiter:start()
 	self:start_coroutine(function()
@@ -168,7 +190,8 @@ end
 function Waiter:on_hit(amount) Test.report(amount + 100) end
 target = World.spawn()
 target:add(Waiter)
-`)
+`,
+	)
 	testing.expect(t, ok)
 	phase(f)
 	// The coroutine runs until its first wait before start_coroutine returns.
@@ -197,7 +220,10 @@ deactivation_stops_coroutines :: proc(t: ^testing.T) {
 	f := setup_world(t)
 	defer teardown_world(f)
 	context.user_ptr = f
-	thread, ok := spawn_source(&f.runtime, "=stop", `
+	thread, ok := spawn_source(
+		&f.runtime,
+		"=stop",
+		`
 local Ticker = Behaviour.define("Ticker")
 function Ticker:start()
 	self:start_coroutine(function()
@@ -213,7 +239,8 @@ coroutine.yield()
 e:set_active(false)
 coroutine.yield()
 e:set_active(true)
-`)
+`,
+	)
 	testing.expect(t, ok)
 	phase(f)
 	phase(f)
@@ -233,7 +260,10 @@ script_events_reach_every_effective_instance :: proc(t: ^testing.T) {
 	f := setup_world(t)
 	defer teardown_world(f)
 	context.user_ptr = f
-	_, ok := spawn_source(&f.runtime, "=events", `
+	_, ok := spawn_source(
+		&f.runtime,
+		"=events",
+		`
 local A = Behaviour.define("A")
 function A:on_ping(n) Test.report(n) end
 local B = Behaviour.define("B")
@@ -245,7 +275,8 @@ e:send("ping", 10)
 local other = World.spawn()
 other:add(B)
 other:send("ping", 20)
-`)
+`,
+	)
 	testing.expect(t, ok)
 	phase(f)
 	expect_reports(t, f, {10, 21})
@@ -257,7 +288,10 @@ a_failing_callback_does_not_stop_the_others :: proc(t: ^testing.T) {
 	defer teardown_world(f)
 	context.user_ptr = f
 	context.logger = capture_world_errors(f)
-	_, ok := spawn_source(&f.runtime, "=errors", `
+	_, ok := spawn_source(
+		&f.runtime,
+		"=errors",
+		`
 local Broken = Behaviour.define("Broken")
 function Broken:update() error("broken update") end
 function Broken:start() wait(1) end
@@ -266,7 +300,8 @@ function Fine:update() Test.report(1) end
 local e = World.spawn()
 e:add(Broken)
 e:add(Fine)
-`)
+`,
+	)
 	testing.expect(t, ok)
 	phase(f)
 	expect_reports(t, f, {1})
@@ -298,13 +333,18 @@ inspect_reads_declared_fields_without_running_scripts :: proc(t: ^testing.T) {
 	f := setup_world(t)
 	defer teardown_world(f)
 	context.user_ptr = f
-	_, ok := spawn_source(&f.runtime, "=inspect", DOOR + `
+	_, ok := spawn_source(
+		&f.runtime,
+		"=inspect",
+		DOOR +
+		`
 local e = World.spawn()
 local d = e:add(Door, {speed = 5})
 d.label = "front"
 d.extra = "runtime state, not a field"
 Test.report(1)
-`)
+`,
+	)
 	testing.expect(t, ok)
 	found: [dynamic]ecs.Entity
 	defer delete(found)
@@ -333,12 +373,17 @@ quiet_changes_run_no_callbacks :: proc(t: ^testing.T) {
 	f := setup_world(t)
 	defer teardown_world(f)
 	context.user_ptr = f
-	thread, ok := spawn_source(&f.runtime, "=door", DOOR + `
+	thread, ok := spawn_source(
+		&f.runtime,
+		"=door",
+		DOOR +
+		`
 World.spawn():add(Door)
 local b = World.spawn()
 b:add(Door)
 b:set_active(false)
-`)
+`,
+	)
 	testing.expect(t, ok)
 	expect_reports(t, f, {1, 2, 1, 2, 5})
 	release(&f.runtime, thread)
@@ -379,12 +424,16 @@ a_deactivation_while_quiet_sends_on_disable_when_quiet_ends :: proc(t: ^testing.
 	f := setup_world(t)
 	defer teardown_world(f)
 	context.user_ptr = f
-	thread, ok := spawn_source(&f.runtime, "=door", DOOR + `
+	thread, ok := spawn_source(
+		&f.runtime,
+		"=door",
+		DOOR + `
 local e = World.spawn()
 e:add(Door)
 coroutine.yield()
 e:set_active(true)
-`)
+`,
+	)
 	testing.expect(t, ok)
 	expect_reports(t, f, {1, 2})
 	e := door_entity(t, f)
@@ -440,7 +489,10 @@ a_predicate_that_restarts_its_coroutines_leaves_the_new_one_alone :: proc(t: ^te
 	f := setup_world(t)
 	defer teardown_world(f)
 	context.user_ptr = f
-	_, ok := spawn_source(&f.runtime, "=restarts", `
+	_, ok := spawn_source(
+		&f.runtime,
+		"=restarts",
+		`
 local function restart(self, first, last)
 	self:stop_all_coroutines()
 	self:start_coroutine(function()
@@ -471,7 +523,8 @@ function Failer:start()
 end
 World.spawn():add(Restarter)
 World.spawn():add(Failer)
-`)
+`,
+	)
 	testing.expect(t, ok)
 	context.logger = testlog.expected_errors()
 	// The phase that each report came in.
@@ -488,8 +541,20 @@ World.spawn():add(Failer)
 	for pair in ([2][2]f64{{1, 2}, {3, 4}}) {
 		first, started := came[pair[0]]
 		last, ended := came[pair[1]]
-		testing.expectf(t, started && ended, "the new coroutine reported %v and %v: %v", started, ended, came)
-		testing.expectf(t, last - first >= 10, "the new coroutine waited %d frames, not 10", last - first)
+		testing.expectf(
+			t,
+			started && ended,
+			"the new coroutine reported %v and %v: %v",
+			started,
+			ended,
+			came,
+		)
+		testing.expectf(
+			t,
+			last - first >= 10,
+			"the new coroutine waited %d frames, not 10",
+			last - first,
+		)
 	}
 }
 
@@ -500,7 +565,10 @@ a_coroutine_started_by_an_event_waits_for_the_next :: proc(t: ^testing.T) {
 	f := setup_world(t)
 	defer teardown_world(f)
 	context.user_ptr = f
-	_, ok := spawn_source(&f.runtime, "=chain", `
+	_, ok := spawn_source(
+		&f.runtime,
+		"=chain",
+		`
 local Chain = Behaviour.define("Chain")
 function Chain:start()
 	self:start_coroutine(function()
@@ -519,7 +587,8 @@ function Chain:on_hit()
 	end)
 end
 World.spawn():add(Chain)
-`)
+`,
+	)
 	testing.expect(t, ok)
 	phase(f)
 	phase(f)
@@ -534,6 +603,10 @@ World.spawn():add(Chain)
 	send(&f.runtime, found[0], "hit", f64(2))
 	phase(f)
 	testing.expect_value(t, len(f.reports), 2)
-	testing.expect(t, slice.contains(f.reports[:], 12) && slice.contains(f.reports[:], 102), "the coroutines that waited did not get the next hit")
+	testing.expect(
+		t,
+		slice.contains(f.reports[:], 12) && slice.contains(f.reports[:], 102),
+		"the coroutines that waited did not get the next hit",
+	)
 	clear(&f.reports)
 }

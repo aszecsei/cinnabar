@@ -20,7 +20,11 @@ root_motion :: proc(g: ^Graph, inst: ^Instance, out: ^Tick_Output) {
 		return
 	}
 	for s in inst.samples[:inst.sample_count] {
-		if s.weight <= 0 || s.step <= 0 || .Frozen in s.flags || int(s.clip) >= len(g.clips) || g.clips[s.clip].blob == nil {
+		if s.weight <= 0 ||
+		   s.step <= 0 ||
+		   .Frozen in s.flags ||
+		   int(s.clip) >= len(g.clips) ||
+		   g.clips[s.clip].blob == nil {
 			continue
 		}
 		c := g.clips[s.clip]
@@ -71,12 +75,19 @@ remove_root_motion :: proc(g: ^Graph, locals: []Joint_Pose) {
 	}
 	l := &locals[g.root]
 	position := (g.root_parent * [4]f32{l.translation.x, l.translation.y, l.translation.z, 1}).xyz
-	rest := (g.root_parent * [4]f32{g.root_rest.translation.x, g.root_rest.translation.y, g.root_rest.translation.z, 1}).xyz
+	rest :=
+		(g.root_parent * [4]f32{g.root_rest.translation.x, g.root_rest.translation.y, g.root_rest.translation.z, 1}).xyz
 	position.x, position.z = rest.x, rest.z
-	l.translation = (linalg.inverse(g.root_parent) * [4]f32{position.x, position.y, position.z, 1}).xyz
+	l.translation =
+		(linalg.inverse(g.root_parent) * [4]f32{position.x, position.y, position.z, 1}).xyz
 	model := g.root_parent_rotation * l.rotation
 	rest_yaw := twist_yaw(g.root_parent_rotation * g.root_rest.rotation)
-	model = linalg.quaternion_angle_axis_f32(angle_between_yaws(rest_yaw - twist_yaw(model)), {0, 1, 0}) * model
+	model =
+		linalg.quaternion_angle_axis_f32(
+			angle_between_yaws(rest_yaw - twist_yaw(model)),
+			{0, 1, 0},
+		) *
+		model
 	l.rotation = linalg.normalize(conj(g.root_parent_rotation) * model)
 }
 

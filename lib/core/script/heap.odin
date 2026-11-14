@@ -38,7 +38,13 @@ heap_init :: proc(h: ^Heap) -> bool {
 	if virtual.arena_init_static(&h.pools, HEAP_RESERVE) != nil {
 		return false
 	}
-	if tlsf.init_from_allocator(&h.tlsf, virtual.arena_allocator(&h.pools), POOL_SIZE, POOL_SIZE) != .None {
+	if tlsf.init_from_allocator(
+		   &h.tlsf,
+		   virtual.arena_allocator(&h.pools),
+		   POOL_SIZE,
+		   POOL_SIZE,
+	   ) !=
+	   .None {
 		virtual.arena_destroy(&h.pools)
 		return false
 	}

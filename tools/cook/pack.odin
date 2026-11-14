@@ -9,7 +9,11 @@ pack_rects :: proc(sizes: [][2]int, max_side: int) -> (corners: [][2]int, size: 
 	rects := make([]stbrp.Rect, len(sizes), context.temp_allocator)
 	area := 0
 	for s, i in sizes {
-		rects[i] = {id = i32(i), w = stbrp.Coord(s.x), h = stbrp.Coord(s.y)}
+		rects[i] = {
+			id = i32(i),
+			w  = stbrp.Coord(s.x),
+			h  = stbrp.Coord(s.y),
+		}
 		area += s.x * s.y
 	}
 	width, height := 64, 64

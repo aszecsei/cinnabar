@@ -66,7 +66,8 @@ finish_read :: proc(read: ^Fake_Read) {
 page_file_reads :: proc(platform: ^core.Platform_API) {
 	fake := page_platform(nil)
 	platform.file_read_range = fake.file_read_range
-	platform.file_read_begin, platform.file_read_result, platform.file_read_end = fake.file_read_begin, fake.file_read_result, fake.file_read_end
+	platform.file_read_begin, platform.file_read_result, platform.file_read_end =
+		fake.file_read_begin, fake.file_read_result, fake.file_read_end
 }
 
 @(private = "file")
@@ -84,7 +85,13 @@ page_platform :: proc(frame: ^virtual.Arena) -> core.Platform_API {
 				if read.open {
 					continue
 				}
-				read = {open = true, pending = true, path = fmt.aprintf("%s", path), offset = offset, data = make([]byte, size)}
+				read = {
+					open    = true,
+					pending = true,
+					path    = fmt.aprintf("%s", path),
+					offset  = offset,
+					data    = make([]byte, size),
+				}
 				fake.reads_begun += 1
 				fake.reads_open += 1
 				if !fake.hold_reads {
@@ -198,10 +205,21 @@ paged_mesh_bytes :: proc(guid: format.Guid, pages: []Test_Page, key: u64 = 0) ->
 		refs := make([dynamic]u32, context.temp_allocator)
 		triangles := make([dynamic]u8, context.temp_allocator)
 		for &m, i in records {
-			m = {triangle_count = 1, depth = page.depth, parent_error = max(f32), refined_page = page.refined[i]}
-			format.meshlet_write_vertices(&m, []u32{u32(i) * 3, u32(i) * 3 + 1, u32(i) * 3 + 2}, &refs)
+			m = {
+				triangle_count = 1,
+				depth          = page.depth,
+				parent_error   = max(f32),
+				refined_page   = page.refined[i],
+			}
+			format.meshlet_write_vertices(
+				&m,
+				[]u32{u32(i) * 3, u32(i) * 3 + 1, u32(i) * 3 + 2},
+				&refs,
+			)
 			format.meshlet_write_triangles(&m, [][3]u8{{0, 1, 2}}, &triangles)
-			if page.refined[i] != format.MESH_PAGE_NONE && int(page.refined[i]) != p && !slice.contains(dependencies[page.refined[i]][:], u32(p)) {
+			if page.refined[i] != format.MESH_PAGE_NONE &&
+			   int(page.refined[i]) != p &&
+			   !slice.contains(dependencies[page.refined[i]][:], u32(p)) {
 				append(&dependencies[page.refined[i]], u32(p))
 			}
 		}
@@ -347,7 +365,14 @@ page_fixture_destroy :: proc(t: ^testing.T, f: ^Page_Fixture) {
 }
 
 @(private = "file")
-write_paged :: proc(t: ^testing.T, f: ^Page_Fixture, guid: format.Guid, pages: []Test_Page, modified: time.Time, key: u64 = 0) {
+write_paged :: proc(
+	t: ^testing.T,
+	f: ^Page_Fixture,
+	guid: format.Guid,
+	pages: []Test_Page,
+	modified: time.Time,
+	key: u64 = 0,
+) {
 	buffer: [32]u8
 	path := fmt.tprintf("%s/%s.blob", f.dir, format.guid_format(guid, &buffer))
 	blob := paged_mesh_bytes(guid, pages, key)
@@ -371,7 +396,12 @@ Want :: struct {
 // step is one frame: the feedback that came back, the residency's update, the stream pages pass, and its commit if the
 // frame executes. After it, every page with a slot has what it depends on in slots too.
 @(private = "file")
-step :: proc(t: ^testing.T, f: ^Page_Fixture, wants: []Want = nil, executes := true) -> ^Stream_Pages {
+step :: proc(
+	t: ^testing.T,
+	f: ^Page_Fixture,
+	wants: []Want = nil,
+	executes := true,
+) -> ^Stream_Pages {
 	pool := &f.r.pool
 	if pool.pool != {} {
 		data, _ := f.platform.gpu_read_buffer(pool.ring.copies[pool.ring.next])
@@ -402,11 +432,23 @@ step :: proc(t: ^testing.T, f: ^Page_Fixture, wants: []Want = nil, executes := t
 			testing.expect_value(t, pool.slots[slot], entry)
 			for d in mesh.dependencies[record.first_dependency:][:record.dependency_count] {
 				_, dependency_has := pool_page_slot(pool, d)
-				testing.expectf(t, dependency_has, "page %d has a slot, and page %d that it depends on has none", entry, d)
+				testing.expectf(
+					t,
+					dependency_has,
+					"page %d has a slot, and page %d that it depends on has none",
+					entry,
+					d,
+				)
 			}
 		}
 	}
-	testing.expectf(t, residents <= u32(len(pool.slots)), "%d pages are in %d slots", residents, len(pool.slots))
+	testing.expectf(
+		t,
+		residents <= u32(len(pool.slots)),
+		"%d pages are in %d slots",
+		residents,
+		len(pool.slots),
+	)
 	return sp
 }
 
@@ -507,7 +549,11 @@ a_wanted_page_comes_in_after_what_it_depends_on :: proc(t: ^testing.T) {
 		testing.expect_value(t, sp.loads[0].entry, 4)
 		testing.expect_value(t, sp.loads[1].entry, 2)
 		testing.expect_value(t, sp.loads[2].entry, 0)
-		testing.expect_value(t, mesh_stream_stats(f.r).streamed_bytes, sp.loads[0].record.size + sp.loads[1].record.size + sp.loads[2].record.size)
+		testing.expect_value(
+			t,
+			mesh_stream_stats(f.r).streamed_bytes,
+			sp.loads[0].record.size + sp.loads[1].record.size + sp.loads[2].record.size,
+		)
 	}
 	set: [64]bool
 	total: int
@@ -625,7 +671,12 @@ the_least_recently_used_pages_leave_a_full_pool :: proc(t: ^testing.T) {
 	}
 	set, _ := residents(f, id, COUNT + 1)
 	for page in 11 ..< 20 {
-		testing.expectf(t, !set[page], "page %d took the slot of a page that a view was using", page)
+		testing.expectf(
+			t,
+			!set[page],
+			"page %d took the slot of a page that a view was using",
+			page,
+		)
 	}
 	testing.expect_value(t, mesh_stream_stats(f.r).pending_requests, 9)
 
@@ -740,7 +791,11 @@ a_paged_meshs_new_blob_takes_the_place_of_the_old :: proc(t: ^testing.T) {
 	step(t, f)
 	ready: bool
 	mesh, ready = resident_mesh(f.r, guid)
-	testing.expect(t, ready && mesh.pool_mesh == old, "the old version draws while the new one streams")
+	testing.expect(
+		t,
+		ready && mesh.pool_mesh == old,
+		"the old version draws while the new one streams",
+	)
 	step(t, f)
 	step(t, f)
 	mesh, ready = resident_mesh(f.r, guid)
@@ -763,7 +818,14 @@ a_paged_meshs_new_blob_takes_the_place_of_the_old :: proc(t: ^testing.T) {
 	root := format.mesh_pages(blob, view)[5]
 	blob[root.offset + 1] ~= 0xff
 	buffer: [32]u8
-	testing.expect(t, os.write_entire_file(fmt.tprintf("%s/%s.blob", f.dir, format.guid_format(broken, &buffer)), blob) == nil)
+	testing.expect(
+		t,
+		os.write_entire_file(
+			fmt.tprintf("%s/%s.blob", f.dir, format.guid_format(broken, &buffer)),
+			blob,
+		) ==
+		nil,
+	)
 	context.logger = testlog.expected_errors()
 	resident_mesh(f.r, broken)
 	for _ in 0 ..< 4 {
@@ -924,10 +986,18 @@ a_pinned_mesh_keeps_every_page :: proc(t: ^testing.T) {
 	testing.expect(t, ready, "the frame's own view draws after its pass, which copies the table")
 	mesh_pool_not_sent(&f.r.pool)
 	_, ready = resident_mesh(f.r, guid)
-	testing.expect(t, !ready, "the frame did not execute, so its other views draw nothing of the mesh")
+	testing.expect(
+		t,
+		!ready,
+		"the frame did not execute, so its other views draw nothing of the mesh",
+	)
 	step(t, f)
 	step(t, f)
 	_, ready = resident_mesh(f.r, guid)
 	testing.expect(t, ready)
-	testing.expect(t, mesh_pool_ready(&f.r.pool, mesh.pool_mesh) && mesh_pool_ready(&f.r.pool, star_mesh.pool_mesh))
+	testing.expect(
+		t,
+		mesh_pool_ready(&f.r.pool, mesh.pool_mesh) &&
+		mesh_pool_ready(&f.r.pool, star_mesh.pool_mesh),
+	)
 }

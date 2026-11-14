@@ -40,9 +40,24 @@ Tree_Read :: struct {
 
 // The fields that each kind takes, besides the decorators, which every kind takes.
 @(private = "file")
-TREE_DECORATORS :: []string{"when", "abort", "invert", "cooldown", "repeat", "time_limit", "force", "position"}
+TREE_DECORATORS :: []string {
+	"when",
+	"abort",
+	"invert",
+	"cooldown",
+	"repeat",
+	"time_limit",
+	"force",
+	"position",
+}
 
-read_behavior_tree :: proc(p: ^Decision_Parser, text: ^Decision_Text) -> (state_size: u32, data: []byte) {
+read_behavior_tree :: proc(
+	p: ^Decision_Parser,
+	text: ^Decision_Text,
+) -> (
+	state_size: u32,
+	data: []byte,
+) {
 	problems := len(p.found)
 	for s in text.settings {
 		decision_problem(p, s.line, "a behavior tree has no setting %s", s.key)
@@ -75,7 +90,12 @@ read_behavior_tree :: proc(p: ^Decision_Parser, text: ^Decision_Text) -> (state_
 	order_tree(&r, root, 1)
 	for n, i in r.nodes {
 		if n.parent >= 0 && n.order < 0 {
-			decision_problem(p, text.nodes[i].line, "node %d is in a cycle: the root does not reach it", text.nodes[i].id)
+			decision_problem(
+				p,
+				text.nodes[i].line,
+				"node %d is in a cycle: the root does not reach it",
+				text.nodes[i].id,
+			)
 		}
 	}
 	if len(p.found) > problems {
@@ -121,7 +141,13 @@ read_node :: proc(r: ^Tree_Read, text: ^Decision_Text_Node, n: ^Tree_Text_Node) 
 		for name in kind_names {
 			append(&names, name)
 		}
-		decision_problem(p, text.line, "%s is not a node of a behavior tree: a node is %s", text.kind, strings.join(names[:], ", ", context.temp_allocator))
+		decision_problem(
+			p,
+			text.line,
+			"%s is not a node of a behavior tree: a node is %s",
+			text.kind,
+			strings.join(names[:], ", ", context.temp_allocator),
+		)
 		return
 	}
 	kind := n.record.kind
@@ -166,7 +192,12 @@ read_node :: proc(r: ^Tree_Read, text: ^Decision_Text_Node, n: ^Tree_Text_Node) 
 	switch kind {
 	case .Sequence, .Selector, .Parallel:
 		if !has(text, "children") {
-			decision_problem(p, text.line, "a %s has children: `children = <id>, <id>, ...`", kind_name)
+			decision_problem(
+				p,
+				text.line,
+				"a %s has children: `children = <id>, <id>, ...`",
+				kind_name,
+			)
 		}
 		if kind == .Parallel {
 			required = "policy"
@@ -186,7 +217,12 @@ read_node :: proc(r: ^Tree_Read, text: ^Decision_Text_Node, n: ^Tree_Text_Node) 
 		decision_problem(p, text.line, "a %s has a %s", kind_name, required)
 	}
 	if kind != .Set && text.set_line != 0 {
-		decision_problem(p, text.set_line, "only a set node writes keys, and this is a %s", kind_name)
+		decision_problem(
+			p,
+			text.set_line,
+			"only a set node writes keys, and this is a %s",
+			kind_name,
+		)
 	}
 	if n.abort_line != 0 && !has(text, "when") {
 		decision_problem(p, n.abort_line, "abort is for a node's when: it has none")
@@ -291,7 +327,14 @@ tree_time :: proc(p: ^Decision_Parser, f: Decision_Field) -> format.Tree_Time {
 				continue
 			}
 			if k.type != .Float && k.type != .Int {
-				decision_problem(p, f.line, "%s is a %s, and %s is a float or an int key", f.value, type_name(k.type), f.key)
+				decision_problem(
+					p,
+					f.line,
+					"%s is a %s, and %s is a float or an int key",
+					f.value,
+					type_name(k.type),
+					f.key,
+				)
 				return {}
 			}
 			return {key = u32(slot), source = .Key}
@@ -316,7 +359,13 @@ link_children :: proc(r: ^Tree_Read, by_id: map[int]int) {
 			case r.nodes[child].parent == i:
 				decision_problem(p, n.children_line, "node %d is a child twice", id)
 			case r.nodes[child].parent >= 0:
-				decision_problem(p, n.children_line, "node %d is a child of node %d too: a node has one parent", id, r.text.nodes[r.nodes[child].parent].id)
+				decision_problem(
+					p,
+					n.children_line,
+					"node %d is a child of node %d too: a node has one parent",
+					id,
+					r.text.nodes[r.nodes[child].parent].id,
+				)
 			case:
 				r.nodes[child].parent = i
 			}
@@ -335,14 +384,24 @@ find_root :: proc(r: ^Tree_Read) -> int {
 			continue
 		}
 		if root >= 0 {
-			decision_problem(r.p, r.text.nodes[i].line, "node %d is not a child of any node, and node %d is the root: a tree has one root", r.text.nodes[i].id, r.text.nodes[root].id)
+			decision_problem(
+				r.p,
+				r.text.nodes[i].line,
+				"node %d is not a child of any node, and node %d is the root: a tree has one root",
+				r.text.nodes[i].id,
+				r.text.nodes[root].id,
+			)
 			many = true
 			continue
 		}
 		root = i
 	}
 	if root < 0 {
-		decision_problem(r.p, r.text.nodes[0].line, "every node is a child of another, in a cycle: a tree has a root")
+		decision_problem(
+			r.p,
+			r.text.nodes[0].line,
+			"every node is a child of another, in a cycle: a tree has a root",
+		)
 	}
 	return -1 if many else root
 }
@@ -359,7 +418,12 @@ order_tree :: proc(r: ^Tree_Read, index: int, depth: int) {
 	n.depth = depth
 	append(&r.order, index)
 	if depth == format.MAX_TREE_DEPTH + 1 {
-		decision_problem(r.p, r.text.nodes[index].line, "the tree is deeper than %d nodes", format.MAX_TREE_DEPTH)
+		decision_problem(
+			r.p,
+			r.text.nodes[index].line,
+			"the tree is deeper than %d nodes",
+			format.MAX_TREE_DEPTH,
+		)
 	}
 	for child in n.children {
 		order_tree(r, child, depth + 1)
@@ -376,7 +440,12 @@ check_tree :: proc(r: ^Tree_Read) {
 	for n, i in r.nodes {
 		if n.record.abort == .Lower || n.record.abort == .Both {
 			if n.parent < 0 || r.nodes[n.parent].record.kind != .Selector {
-				decision_problem(p, n.abort_line, "abort = %s is for a selector's child: lower priorities are its later children", abort_names[n.record.abort])
+				decision_problem(
+					p,
+					n.abort_line,
+					"abort = %s is for a selector's child: lower priorities are its later children",
+					abort_names[n.record.abort],
+				)
 			}
 		}
 		if n.record.kind != .Parallel {
@@ -393,15 +462,28 @@ check_tree :: proc(r: ^Tree_Read) {
 		switch n.record.policy {
 		case .One:
 			if succeed == 0 {
-				decision_problem(p, line, "no child of this parallel can succeed, so its policy one is never met")
+				decision_problem(
+					p,
+					line,
+					"no child of this parallel can succeed, so its policy one is never met",
+				)
 			}
 		case .All:
 			if succeed < len(n.children) {
-				decision_problem(p, line, "a child of this parallel never succeeds, so its policy all is never met")
+				decision_problem(
+					p,
+					line,
+					"a child of this parallel never succeeds, so its policy all is never met",
+				)
 			}
 		}
 		if acting > 1 {
-			decision_problem(p, line, "%d children of this parallel run actions: an agent runs one action at a time", acting)
+			decision_problem(
+				p,
+				line,
+				"%d children of this parallel run actions: an agent runs one action at a time",
+				acting,
+			)
 		}
 	}
 }

@@ -28,7 +28,12 @@ import "cinnabar:engine/sprite"
 import "cinnabar:engine/ui"
 
 @(private)
-game_init :: proc(state: rawptr, platform: ^core.Platform_API, h: Hooks, register_scripts: script.Register_Proc) {
+game_init :: proc(
+	state: rawptr,
+	platform: ^core.Platform_API,
+	h: Hooks,
+	register_scripts: script.Register_Proc,
+) {
 	// The state is too large for a temporary on the stack, so it is zeroed in place, the project's with it.
 	mem.zero(state, state_bytes(h))
 	g := (^Game)(state)
@@ -70,7 +75,11 @@ game_init :: proc(state: rawptr, platform: ^core.Platform_API, h: Hooks, registe
 load_main_scene :: proc(g: ^Game) {
 	guid := g.project.settings.main_scene
 	if guid == {} {
-		log.warnf("game: %s names no %s, so no scene loads", g.platform.project_path, project.MAIN_SCENE_KEY)
+		log.warnf(
+			"game: %s names no %s, so no scene loads",
+			g.platform.project_path,
+			project.MAIN_SCENE_KEY,
+		)
 		return
 	}
 	scene.load_asset(&g.world, &g.scripts, &g.assets, guid)
@@ -204,7 +213,10 @@ camera_view :: proc(g: ^Game) -> render.View {
 	if view, ok := render.camera_view(&g.world, g.camera); ok {
 		return view
 	}
-	return {rotation = 1, projection = render.Perspective{render.DEFAULT_VERTICAL_FOV, render.DEFAULT_NEAR}}
+	return {
+		rotation = 1,
+		projection = render.Perspective{render.DEFAULT_VERTICAL_FOV, render.DEFAULT_NEAR},
+	}
 }
 
 // render_frame describes the frame as the game draws it, with or without an editor, and gives it to the editor package
@@ -213,8 +225,8 @@ camera_view :: proc(g: ^Game) -> render.View {
 @(private)
 render_frame :: proc(g: ^Game, window: [2]u32, h: Hooks) {
 	desc := render.Frame_Desc {
-		view  = camera_view(g),
-		size  = window,
+		view = camera_view(g),
+		size = window,
 		// The particles step by the time that the world stepped, so they stand still in the editor's Edit and Paused.
 		delta = g.frame_step,
 		// The skinned entities' poses, between the last two ticks.
@@ -280,7 +292,12 @@ game_shutdown :: proc(g: ^Game, h: Hooks) {
 
 // game_reload makes the registrations again, because the new DLL's procedures and types are new.
 @(private)
-game_reload :: proc(g: ^Game, platform: ^core.Platform_API, h: Hooks, register_scripts: script.Register_Proc) {
+game_reload :: proc(
+	g: ^Game,
+	platform: ^core.Platform_API,
+	h: Hooks,
+	register_scripts: script.Register_Proc,
+) {
 	g.platform = platform
 	ecs.reload(&g.world, platform)
 	physics.reload(&g.physics, platform)
@@ -320,7 +337,11 @@ game_layout_hash :: proc(h: Hooks) -> u64 {
 // game_script_types writes the scripts' definition file from a world and a script runtime of its own, so it makes no
 // game state and no GPU resources.
 @(private)
-game_script_types :: proc(platform: ^core.Platform_API, h: Hooks, register_scripts: script.Register_Proc) -> string {
+game_script_types :: proc(
+	platform: ^core.Platform_API,
+	h: Hooks,
+	register_scripts: script.Register_Proc,
+) -> string {
 	world := new(ecs.World, platform.permanent_allocator)
 	if !ecs.init(world, platform) {
 		log.panic("game: cannot create a world for the script types")

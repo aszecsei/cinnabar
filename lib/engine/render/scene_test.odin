@@ -39,7 +39,9 @@ frustum_planes_keep_what_the_view_sees :: proc(t: ^testing.T) {
 @(test)
 the_render_origin_snaps_to_cells :: proc(t: ^testing.T) {
 	cell := i64(1) << ORIGIN_CELL_BITS
-	p := ecs.World_Position{raw = {cell * 3 + 5, -5, cell * 2 - 1}}
+	p := ecs.World_Position {
+		raw = {cell * 3 + 5, -5, cell * 2 - 1},
+	}
 	// Negative positions snap down to their cell's corner, as positive ones do.
 	testing.expect_value(t, snap_origin(p).raw, [3]i64{cell * 3, -cell, cell})
 	testing.expect_value(t, ORIGIN_CELL, 1024)
@@ -81,10 +83,17 @@ dirty_slots_are_the_set_bits :: proc(t: ^testing.T) {
 // particles' does: its posed vertices are not the mesh's that the mesh shader path reads.
 @(test)
 skinned_items_have_bins_of_their_own :: proc(t: ^testing.T) {
-	items := []Cull_Item{{bin = 0, flags = ITEM_SKINNED}, {bin = 0, flags = ITEM_MESH_PATH}, {bin = 0, flags = ITEM_SKINNED}, {bin = 0}}
+	items := []Cull_Item {
+		{bin = 0, flags = ITEM_SKINNED},
+		{bin = 0, flags = ITEM_MESH_PATH},
+		{bin = 0, flags = ITEM_SKINNED},
+		{bin = 0},
+	}
 	sorting := make([]Sort_Item, len(items), context.temp_allocator)
 	for item, i in items {
-		sorting[i] = {item = item}
+		sorting[i] = {
+			item = item,
+		}
 	}
 	pipelines, groups := sort_bins(sorting, items, context.temp_allocator)
 	testing.expect_value(t, len(pipelines), 2)

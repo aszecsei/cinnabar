@@ -62,7 +62,11 @@ a_hello_after_its_editor_left_links_nothing :: proc(t: ^testing.T) {
 	handle_logged(&l, taken)
 	testing.expect(t, !link_linked(&l))
 	log_logged(&l, "after the first editor left")
-	testing.expect(t, servetest.heard(&console, "after the first editor left"), "a log line after the editor left did not reach the console")
+	testing.expect(
+		t,
+		servetest.heard(&console, "after the first editor left"),
+		"a log line after the editor left did not reach the console",
+	)
 	testing.expect(t, !servetest.heard(&console, "linked to first editor"))
 
 	second, second_ok := servetest.dial(port)
@@ -135,7 +139,10 @@ the_capture_source_follows_the_editor_and_ends_with_its_link :: proc(t: ^testing
 	handle_next(t, &l, &waker)
 	testing.expect_value(t, core.capture_source(), nil)
 
-	servetest.send(editor, link.Message(link.Hello{protocol = link.protocol_version(), editor = "editor"}))
+	servetest.send(
+		editor,
+		link.Message(link.Hello{protocol = link.protocol_version(), editor = "editor"}),
+	)
 	handle_next(t, &l, &waker)
 	testing.expect(t, link_linked(&l))
 	testing.expect_value(t, core.capture_source(), nil)

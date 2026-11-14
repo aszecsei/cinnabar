@@ -8,7 +8,11 @@ import win "core:sys/windows"
 // a file to another volume, as between roots on two drives. A directory moves only on its volume.
 move_file :: proc(from, to: string) -> (error: string) {
 	flags: win.DWORD = os.is_dir(from) ? 0 : win.MOVEFILE_COPY_ALLOWED | win.MOVEFILE_WRITE_THROUGH
-	if !win.MoveFileExW(win.utf8_to_wstring(from, context.temp_allocator), win.utf8_to_wstring(to, context.temp_allocator), flags) {
+	if !win.MoveFileExW(
+		win.utf8_to_wstring(from, context.temp_allocator),
+		win.utf8_to_wstring(to, context.temp_allocator),
+		flags,
+	) {
 		return os.error_string(os.Platform_Error(win.GetLastError()))
 	}
 	return ""
@@ -22,7 +26,14 @@ recycle :: proc(paths: []string) -> bool {
 	// pFrom is a list of absolute paths with backslashes, each ending with a zero, and another zero after the last.
 	list := make([dynamic]u16, context.temp_allocator)
 	for path in paths {
-		wide := win.utf8_to_utf16(strings.join(strings.split(path, "/", context.temp_allocator), "\\", context.temp_allocator), context.temp_allocator)
+		wide := win.utf8_to_utf16(
+			strings.join(
+				strings.split(path, "/", context.temp_allocator),
+				"\\",
+				context.temp_allocator,
+			),
+			context.temp_allocator,
+		)
 		append(&list, ..wide)
 		append(&list, 0)
 	}

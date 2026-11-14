@@ -48,7 +48,14 @@ Volumes :: struct {
 }
 
 register :: proc(v: ^Volumes, w: ^ecs.World) {
-	v.query = ecs.query(w, {ecs.read(w, ecs.Transform), ecs.optional(ecs.read(w, ecs.Previous_Transform)), ecs.read(w, Volume)})
+	v.query = ecs.query(
+		w,
+		{
+			ecs.read(w, ecs.Transform),
+			ecs.optional(ecs.read(w, ecs.Previous_Transform)),
+			ecs.read(w, Volume),
+		},
+	)
 }
 
 // Influence is a volume that reaches a point, with its weight there.
@@ -69,7 +76,14 @@ Influences :: struct {
 
 // gather finds the volumes that reach a point, at their presented poses. hidden holds the entity slots to leave out, a
 // bit each, as the renderer's Frame_Desc.hidden does. It allocates nothing.
-gather :: proc(v: ^Volumes, w: ^ecs.World, point: ecs.World_Position, hidden: []u32 = nil) -> (inf: Influences) {
+gather :: proc(
+	v: ^Volumes,
+	w: ^ecs.World,
+	point: ecs.World_Position,
+	hidden: []u32 = nil,
+) -> (
+	inf: Influences,
+) {
 	it := ecs.query_iter(w, v.query)
 	for view in ecs.query_next(&it) {
 		poses := ecs.column(view, 0, ecs.Transform)
@@ -85,7 +99,13 @@ gather :: proc(v: ^Volumes, w: ^ecs.World, point: ecs.World_Position, hidden: []
 			}
 			weight, size := influence(volumes[i], pose, point)
 			if weight > 0 {
-				inf.items[inf.count] = {e, weight, volumes[i].priority, size, volumes[i].shape == .Global}
+				inf.items[inf.count] = {
+					e,
+					weight,
+					volumes[i].priority,
+					size,
+					volumes[i].shape == .Global,
+				}
 				inf.count += 1
 			}
 		}
@@ -106,7 +126,13 @@ gather :: proc(v: ^Volumes, w: ^ecs.World, point: ecs.World_Position, hidden: []
 }
 
 // influence is a volume's weight at a point, and the size of its shape.
-influence :: proc(v: Volume, pose: ecs.Transform, point: ecs.World_Position) -> (weight, size: f32) {
+influence :: proc(
+	v: Volume,
+	pose: ecs.Transform,
+	point: ecs.World_Position,
+) -> (
+	weight, size: f32,
+) {
 	base := v.weight > 0 ? min(v.weight, 1) : 1
 	extent :: proc(e: f32) -> f32 {
 		return e > 0 ? e : DEFAULT_EXTENT
@@ -141,7 +167,14 @@ influence :: proc(v: Volume, pose: ecs.Transform, point: ecs.World_Position) -> 
 // overrides toward its own by its weight: numbers and vectors in between, positions along the line, and everything else
 // at a weight of a half or more. out's override flags say which settings a volume gave. touched is whether any volume
 // with the component reaches the point.
-blend_raw :: proc(w: ^ecs.World, inf: ^Influences, component: ecs.Component_Id, out: rawptr) -> (touched: bool) {
+blend_raw :: proc(
+	w: ^ecs.World,
+	inf: ^Influences,
+	component: ecs.Component_Id,
+	out: rawptr,
+) -> (
+	touched: bool,
+) {
 	info := ecs.registry_find(&w.registry, component)
 	if info == nil {
 		return false
@@ -174,7 +207,13 @@ blend :: proc(w: ^ecs.World, inf: ^Influences, $T: typeid) -> (result: T, touche
 }
 
 // sample is a settings component at a point: gather, then blend.
-sample :: proc(v: ^Volumes, w: ^ecs.World, $T: typeid, point: ecs.World_Position, hidden: []u32 = nil) -> T {
+sample :: proc(
+	v: ^Volumes,
+	w: ^ecs.World,
+	$T: typeid,
+	point: ecs.World_Position,
+	hidden: []u32 = nil,
+) -> T {
 	inf := gather(v, w, point, hidden)
 	result, _ := blend(w, &inf, T)
 	return result
@@ -194,7 +233,10 @@ blend_struct :: proc(ti: ^runtime.Type_Info, src, out: uintptr, weight: f32) {
 		if !is_inner {
 			continue
 		}
-		if inner.field_count != 2 || inner.names[0] != "override" || inner.names[1] != "value" || inner.types[0].id != bool {
+		if inner.field_count != 2 ||
+		   inner.names[0] != "override" ||
+		   inner.names[1] != "value" ||
+		   inner.types[0].id != bool {
 			blend_struct(field, src + offset, out + offset, weight)
 			continue
 		}
@@ -210,7 +252,11 @@ blend_struct :: proc(ti: ^runtime.Type_Info, src, out: uintptr, weight: f32) {
 @(private = "file")
 blend_value :: proc(ti: ^runtime.Type_Info, from, out: rawptr, weight: f32) {
 	if ti.id == ecs.World_Position {
-		(^ecs.World_Position)(out)^ = ecs.position_lerp((^ecs.World_Position)(out)^, (^ecs.World_Position)(from)^, weight)
+		(^ecs.World_Position)(out)^ = ecs.position_lerp(
+			(^ecs.World_Position)(out)^,
+			(^ecs.World_Position)(from)^,
+			weight,
+		)
 		return
 	}
 	#partial switch v in runtime.type_info_base(ti).variant {

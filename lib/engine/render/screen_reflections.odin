@@ -53,11 +53,11 @@ ssr_offset :: proc(stride: [2]u32, frame: u32) -> [2]u32 {
 
 // Screen_Reflections is the screen-space reflections' state between frames, in the Renderer.
 Screen_Reflections :: struct {
-	depth:      Shader_Pipeline,
-	trace:      Shader_Pipeline,
-	resolve:    Shader_Pipeline,
-	temporal:   Shader_Pipeline,
-	lit:        Shader_Pipeline,
+	depth:    Shader_Pipeline,
+	trace:    Shader_Pipeline,
+	resolve:  Shader_Pipeline,
+	temporal: Shader_Pipeline,
+	lit:      Shader_Pipeline,
 }
 
 // Ssr_State is one view's screen-space or traced reflections between frames, in View_State.
@@ -233,7 +233,10 @@ begin_screen_reflections :: proc(f: ^Frame, settings: Reflection_Settings) {
 		sf.lit, sf.lit_size, sf.shares_lit = f.gi.lit, f.gi.lit_size, true
 	} else {
 		sf.lit_size = half ? half_size : f.size
-		sf.lit = history_texture(g, {size = sf.lit_size, format = SSR_FORMAT, label = "reflections lit scene"})
+		sf.lit = history_texture(
+			g,
+			{size = sf.lit_size, format = SSR_FORMAT, label = "reflections lit scene"},
+		)
 	}
 	sf.history = history_texture(g, {size = f.size, format = SSR_FORMAT, label = "reflections"})
 	if sf.lit.current == 0 || sf.history.current == 0 {
@@ -312,7 +315,8 @@ add_screen_reflection_passes :: proc(f: ^Frame) {
 	}
 	g := f.graph
 	// Last frame's projection is known once the scene's constants are written.
-	sf.constants.previous = f.previous_view_projection * linalg.matrix4_translate_f32(f.camera_motion)
+	sf.constants.previous =
+		f.previous_view_projection * linalg.matrix4_translate_f32(f.camera_motion)
 	if sf.technique == .Ray_Traced && !add_traced_reflection_passes(f) {
 		configure_ssr(f, sf, .Screen)
 	}
@@ -321,8 +325,14 @@ add_screen_reflection_passes :: proc(f: ^Frame) {
 		add_ssr_trace(f)
 	}
 	rays := int(sf.constants.ray_count)
-	sf.resolved = create_texture(g, {size = f.size, format = SSR_FORMAT, label = "reflections resolved"})
-	sf.distance = create_texture(g, {size = f.size, format = SSR_DISTANCE_FORMAT, label = "reflections distance"})
+	sf.resolved = create_texture(
+		g,
+		{size = f.size, format = SSR_FORMAT, label = "reflections resolved"},
+	)
+	sf.distance = create_texture(
+		g,
+		{size = f.size, format = SSR_DISTANCE_FORMAT, label = "reflections distance"},
+	)
 	p := add_compute_pass(g, "reflections resolve", run_ssr_resolve, f, queue = .Compute)
 	declare_ssr_surface(f, p)
 	for i in 0 ..< rays {
@@ -352,7 +362,14 @@ add_ssr_depth :: proc(f: ^Frame) {
 	}
 	g := f.graph
 	for &level, i in sf.levels {
-		level = create_texture(g, {size = ssr_level_size(f.size, i), format = SSR_DEPTH_FORMAT, label = "reflections depth"})
+		level = create_texture(
+			g,
+			{
+				size = ssr_level_size(f.size, i),
+				format = SSR_DEPTH_FORMAT,
+				label = "reflections depth",
+			},
+		)
 	}
 	sf.depth[0] = {f, true}
 	p := add_compute_pass(g, "reflections depth", run_ssr_depth, &sf.depth[0], queue = .Compute)
@@ -374,8 +391,14 @@ create_ssr_rays :: proc(f: ^Frame) {
 	sf := f.ssr
 	g := f.graph
 	for i in 0 ..< int(sf.constants.ray_count) {
-		sf.rays[i] = create_texture(g, {size = sf.trace_size, format = SSR_FORMAT, label = "reflections rays"})
-		sf.radiance[i] = create_texture(g, {size = sf.trace_size, format = SSR_FORMAT, label = "reflections radiance"})
+		sf.rays[i] = create_texture(
+			g,
+			{size = sf.trace_size, format = SSR_FORMAT, label = "reflections rays"},
+		)
+		sf.radiance[i] = create_texture(
+			g,
+			{size = sf.trace_size, format = SSR_FORMAT, label = "reflections radiance"},
+		)
 	}
 }
 
@@ -439,7 +462,14 @@ ssr_constants :: proc(ctx: ^Pass_Context, f: ^Frame) -> Ssr_Constants {
 
 // dispatch_ssr dispatches a pass with the frame's constants, over a size in groups of group x group threads.
 @(private)
-dispatch_ssr :: proc(ctx: ^Pass_Context, f: ^Frame, pipeline: gpu.Pipeline, c: Ssr_Constants, size: [2]u32, group: u32) {
+dispatch_ssr :: proc(
+	ctx: ^Pass_Context,
+	f: ^Frame,
+	pipeline: gpu.Pipeline,
+	c: Ssr_Constants,
+	size: [2]u32,
+	group: u32,
+) {
 	upload, ok := f.renderer.platform.gpu_upload(size_of(Ssr_Constants), gpu.PASS_CONSTANTS_ALIGN)
 	if !ok {
 		return

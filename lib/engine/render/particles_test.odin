@@ -71,19 +71,37 @@ the_particle_passes_append_sprites :: proc(t: ^testing.T) {
 	r := new(Renderer)
 	defer free(r)
 	r.platform = &platform
-	r.materials.defaults[.White] = platform.gpu_create_texture({size = {1, 1}, format = .RGBA8_Unorm, usage = {.Sampled}, label = "white"}, {255, 255, 255, 255})
+	r.materials.defaults[.White] = platform.gpu_create_texture(
+		{size = {1, 1}, format = .RGBA8_Unorm, usage = {.Sampled}, label = "white"},
+		{255, 255, 255, 255},
+	)
 	defer platform.gpu_destroy_texture(r.materials.defaults[.White])
-	exposure := platform.gpu_create_buffer({size = 16, usage = {.Storage}, label = "exposure"}, nil)
+	exposure := platform.gpu_create_buffer(
+		{size = 16, usage = {.Storage}, label = "exposure"},
+		nil,
+	)
 	defer platform.gpu_destroy_buffer(exposure)
-	r.transparency_composite.pipeline = platform.gpu_create_compute_pipeline({compute = {1}, label = "test composite"})
+	r.transparency_composite.pipeline = platform.gpu_create_compute_pipeline(
+		{compute = {1}, label = "test composite"},
+	)
 	defer destroy_shader_pipeline(&r.transparency_composite, &platform)
 	fake_sprite_pipelines(r)
 	defer sprites_destroy(&r.sprites, &platform)
 	p := &r.particles
-	p.update.pipeline = platform.gpu_create_compute_pipeline({compute = {1}, label = "test particle update"})
-	p.history.pipeline = platform.gpu_create_compute_pipeline({compute = {1}, label = "test particle history"})
-	p.pool = platform.gpu_create_buffer({size = 1024 * PARTICLE_SIZE, usage = {.Storage}, label = "particles"}, nil)
-	p.counters = platform.gpu_create_buffer({size = MAX_FRAME_EMITTERS * 2 * 4, usage = {.Storage}, label = "particle counters"}, nil)
+	p.update.pipeline = platform.gpu_create_compute_pipeline(
+		{compute = {1}, label = "test particle update"},
+	)
+	p.history.pipeline = platform.gpu_create_compute_pipeline(
+		{compute = {1}, label = "test particle history"},
+	)
+	p.pool = platform.gpu_create_buffer(
+		{size = 1024 * PARTICLE_SIZE, usage = {.Storage}, label = "particles"},
+		nil,
+	)
+	p.counters = platform.gpu_create_buffer(
+		{size = MAX_FRAME_EMITTERS * 2 * 4, usage = {.Storage}, label = "particle counters"},
+		nil,
+	)
 	defer particles_destroy(p, &platform)
 
 	// Two frames: the second reads the history that the first wrote.
@@ -92,14 +110,22 @@ the_particle_passes_append_sprites :: proc(t: ^testing.T) {
 	for frame in 0 ..< 2 {
 		g := begin(&platform, &cache)
 		f := new(Frame, platform.frame_allocator)
-		f^ = {renderer = r, state = &r.view, graph = &g, size = {64, 32}}
+		f^ = {
+			renderer = r,
+			state    = &r.view,
+			graph    = &g,
+			size     = {64, 32},
+		}
 		f.lights = new(Light_Frame, platform.frame_allocator)
 		f.shadows = new(Shadow_Frame, platform.frame_allocator)
 		sf := new(Scene_Frame, platform.frame_allocator)
 		f.scene_frame = sf
 		sf.view_count = 1
 		sf.view_constants = make([]gpu.Upload, 1, platform.frame_allocator)
-		sf.view_constants[0], _ = platform.gpu_upload(size_of(Frame_Constants), gpu.PASS_CONSTANTS_ALIGN)
+		sf.view_constants[0], _ = platform.gpu_upload(
+			size_of(Frame_Constants),
+			gpu.PASS_CONSTANTS_ALIGN,
+		)
 		f.exposure = import_buffer(&g, exposure)
 		begin_sprites(f, nil, &r.sprites.main)
 		testing.expect(t, f.sprites != nil)
@@ -109,12 +135,24 @@ the_particle_passes_append_sprites :: proc(t: ^testing.T) {
 		testing.expect(t, reserved)
 		pf := new(Particle_Frame, platform.frame_allocator)
 		pf.target, pf.count, pf.has_previous = target, 1, frame > 0
-		record := Emitter_Record{capacity = 100, spawn = 10, reset = u32(frame == 0), lifetime = {1, 1}, curves = 0}
+		record := Emitter_Record {
+			capacity = 100,
+			spawn    = 10,
+			reset    = u32(frame == 0),
+			lifetime = {1, 1},
+			curves   = 0,
+		}
 		pf.emitters, _ = upload_bytes(&platform, ([^]byte)(&record)[:size_of(record)])
 		pf.modules, _ = platform.gpu_upload(size_of(format.Effect_Module), 16)
-		pf.curves, _ = platform.gpu_upload(len(format.Effect_Curve) * size_of(format.Effect_Curve_Row), 16)
+		pf.curves, _ = platform.gpu_upload(
+			len(format.Effect_Curve) * size_of(format.Effect_Curve_Row),
+			16,
+		)
 		pf.zeros, _ = platform.gpu_upload(4, 4)
-		pf.constants, _ = platform.gpu_upload(size_of(Particle_Constants), gpu.PASS_CONSTANTS_ALIGN)
+		pf.constants, _ = platform.gpu_upload(
+			size_of(Particle_Constants),
+			gpu.PASS_CONSTANTS_ALIGN,
+		)
 		f.particles = pf
 		add_particle_passes(f)
 		testing.expect(t, pf.history.current != 0)
@@ -214,19 +252,36 @@ draw_effect_previews :: proc(t: ^testing.T, count: int, size: [2]u32) -> (stats:
 	defer materials_destroy(&r.materials, &platform)
 	previews_init(&r.previews, r)
 	defer previews_destroy(&r.previews, r)
-	r.post.unit_exposure = platform.gpu_create_buffer({size = 16, usage = {.Storage}, label = "unit exposure"}, nil)
+	r.post.unit_exposure = platform.gpu_create_buffer(
+		{size = 16, usage = {.Storage}, label = "unit exposure"},
+		nil,
+	)
 	defer platform.gpu_destroy_buffer(r.post.unit_exposure)
-	r.transparency_composite.pipeline = platform.gpu_create_compute_pipeline({compute = {1}, label = "test composite"})
+	r.transparency_composite.pipeline = platform.gpu_create_compute_pipeline(
+		{compute = {1}, label = "test composite"},
+	)
 	defer destroy_shader_pipeline(&r.transparency_composite, &platform)
 	fake_sprite_pipelines(r)
 	defer sprites_destroy(&r.sprites, &platform)
 	p := &r.particles
-	p.update.pipeline = platform.gpu_create_compute_pipeline({compute = {1}, label = "test particle update"})
-	p.history.pipeline = platform.gpu_create_compute_pipeline({compute = {1}, label = "test particle history"})
+	p.update.pipeline = platform.gpu_create_compute_pipeline(
+		{compute = {1}, label = "test particle update"},
+	)
+	p.history.pipeline = platform.gpu_create_compute_pipeline(
+		{compute = {1}, label = "test particle history"},
+	)
 	defer particles_destroy(p, &platform)
 	targets: [gpu.MAX_PREVIEW_TARGETS]gpu.Texture
 	for &target in targets[:count] {
-		target = platform.gpu_create_texture({size = size, format = gpu.FRAME_TARGET_FORMAT, usage = {.Render_Target}, label = "preview target"}, nil)
+		target = platform.gpu_create_texture(
+			{
+				size = size,
+				format = gpu.FRAME_TARGET_FORMAT,
+				usage = {.Render_Target},
+				label = "preview target",
+			},
+			nil,
+		)
 	}
 	defer for target in targets[:count] {
 		platform.gpu_destroy_texture(target)
@@ -234,7 +289,18 @@ draw_effect_previews :: proc(t: ^testing.T, count: int, size: [2]u32) -> (stats:
 
 	// The editor's unsaved effect: one emitter of 64 particles.
 	effect := format.guid_parse("00112233445566778899aabbccddeeff") or_else {}
-	data := format.effect_write({guid = effect, emitters = {{emitter = {capacity = 64, rate = 100, lifetime = {1, 1}, flipbook = {1, 1}}, name = "puffs"}}}, context.temp_allocator)
+	data := format.effect_write(
+		{
+			guid = effect,
+			emitters = {
+				{
+					emitter = {capacity = 64, rate = 100, lifetime = {1, 1}, flipbook = {1, 1}},
+					name = "puffs",
+				},
+			},
+		},
+		context.temp_allocator,
+	)
 	blob, _ := mem.alloc_bytes(len(data), format.BLOB_ALIGN, context.temp_allocator)
 	copy(blob, data)
 
@@ -243,7 +309,12 @@ draw_effect_previews :: proc(t: ^testing.T, count: int, size: [2]u32) -> (stats:
 	for frame in 0 ..< 2 {
 		g := begin(&platform, &cache)
 		f := new(Frame, platform.frame_allocator)
-		f^ = {renderer = r, state = &r.view, graph = &g, size = {64, 32}}
+		f^ = {
+			renderer = r,
+			state    = &r.view,
+			graph    = &g,
+			size     = {64, 32},
+		}
 		f.lut = create_texture(&g, {size = {16, 16}, format = .RGBA16_Float, label = "lut"})
 		pass := add_render_pass(&g, "lut", proc(_: ^Pass_Context) {}, f)
 		color(&g, pass, f.lut, .Clear)
@@ -304,12 +375,23 @@ ribbons_build_and_take_their_draws :: proc(t: ^testing.T) {
 	defer free(r)
 	r.platform = &platform
 	p := &r.particles
-	p.ribbon.pipeline = platform.gpu_create_compute_pipeline({compute = {1}, label = "test ribbon build"})
-	p.pool = platform.gpu_create_buffer({size = 1024 * PARTICLE_SIZE, usage = {.Storage}, label = "particles"}, nil)
-	p.ribbon_vertices = platform.gpu_create_buffer({size = 2048 * RIBBON_VERTEX_SIZE, usage = {.Storage}, label = "ribbon vertices"}, nil)
+	p.ribbon.pipeline = platform.gpu_create_compute_pipeline(
+		{compute = {1}, label = "test ribbon build"},
+	)
+	p.pool = platform.gpu_create_buffer(
+		{size = 1024 * PARTICLE_SIZE, usage = {.Storage}, label = "particles"},
+		nil,
+	)
+	p.ribbon_vertices = platform.gpu_create_buffer(
+		{size = 2048 * RIBBON_VERTEX_SIZE, usage = {.Storage}, label = "ribbon vertices"},
+		nil,
+	)
 	defer particles_destroy(p, &platform)
 	scene_buffers := []gpu.Buffer {
-		platform.gpu_create_buffer({size = 1024, usage = {.Storage, .Indirect}, label = "arguments"}, nil),
+		platform.gpu_create_buffer(
+			{size = 1024, usage = {.Storage, .Indirect}, label = "arguments"},
+			nil,
+		),
 		platform.gpu_create_buffer({size = 256, usage = {.Storage}, label = "counts"}, nil),
 		platform.gpu_create_buffer({size = 1024, usage = {.Storage}, label = "draws"}, nil),
 	}
@@ -322,18 +404,40 @@ ribbons_build_and_take_their_draws :: proc(t: ^testing.T) {
 		defer cache_destroy(&cache, &platform)
 		g := begin(&platform, &cache)
 		f := new(Frame, platform.frame_allocator)
-		f^ = {renderer = r, state = &r.view, graph = &g, size = {64, 32}}
+		f^ = {
+			renderer = r,
+			state    = &r.view,
+			graph    = &g,
+			size     = {64, 32},
+		}
 		sf := new(Scene_Frame, platform.frame_allocator)
 		f.scene_frame = sf
 		sf.items = make([]Cull_Item, 1, platform.frame_allocator)
-		sf.items[0] = {flags = ITEM_RIBBON}
+		sf.items[0] = {
+			flags = ITEM_RIBBON,
+		}
 		sf.ribbons = make([]Ribbon_Entry, 1, platform.frame_allocator)
 		// A ribbon draws only once its system stepped, with its emitter's record.
-		sf.ribbons[0] = {emitter = 0, item = 0, first_vertex = 0, record = 0, stepped = stepped}
-		sf.cull_constants, _ = platform.gpu_upload(size_of(Cull_Constants), gpu.PASS_CONSTANTS_ALIGN)
-		sf.arguments, sf.counts, sf.draws = import_buffer(&g, scene_buffers[0]), import_buffer(&g, scene_buffers[1]), import_buffer(&g, scene_buffers[2])
+		sf.ribbons[0] = {
+			emitter      = 0,
+			item         = 0,
+			first_vertex = 0,
+			record       = 0,
+			stepped      = stepped,
+		}
+		sf.cull_constants, _ = platform.gpu_upload(
+			size_of(Cull_Constants),
+			gpu.PASS_CONSTANTS_ALIGN,
+		)
+		sf.arguments, sf.counts, sf.draws =
+			import_buffer(&g, scene_buffers[0]),
+			import_buffer(&g, scene_buffers[1]),
+			import_buffer(&g, scene_buffers[2])
 		pf := new(Particle_Frame, platform.frame_allocator)
-		pf.constants, _ = platform.gpu_upload(size_of(Particle_Constants), gpu.PASS_CONSTANTS_ALIGN)
+		pf.constants, _ = platform.gpu_upload(
+			size_of(Particle_Constants),
+			gpu.PASS_CONSTANTS_ALIGN,
+		)
 		pf.pool = import_buffer(&g, p.pool)
 		f.particles = pf
 		pass := add_compute_pass(&g, "update", proc(_: ^Pass_Context) {}, f)
@@ -346,7 +450,12 @@ ribbons_build_and_take_their_draws :: proc(t: ^testing.T) {
 		read(&g, pass, sf.draws)
 		keep_pass(&g, pass)
 		testing.expect_value(t, len(g.passes), stepped ? 3 : 2)
-		testing.expectf(t, execute(&g), "the frame with a ribbon stepped %v did not execute", stepped)
+		testing.expectf(
+			t,
+			execute(&g),
+			"the frame with a ribbon stepped %v did not execute",
+			stepped,
+		)
 		null.begin_frame({64, 32})
 	}
 }
@@ -380,12 +489,23 @@ mesh_particles_take_their_draws :: proc(t: ^testing.T) {
 	defer free(r)
 	r.platform = &platform
 	p := &r.particles
-	p.meshes.pipeline = platform.gpu_create_compute_pipeline({compute = {1}, label = "test particle meshes"})
-	p.counters = platform.gpu_create_buffer({size = MAX_FRAME_EMITTERS * 2 * 4, usage = {.Storage}, label = "particle counters"}, nil)
-	p.mesh_instances = platform.gpu_create_buffer({size = 64 * size_of(Instance_Record), usage = {.Storage}, label = "particle instances"}, nil)
+	p.meshes.pipeline = platform.gpu_create_compute_pipeline(
+		{compute = {1}, label = "test particle meshes"},
+	)
+	p.counters = platform.gpu_create_buffer(
+		{size = MAX_FRAME_EMITTERS * 2 * 4, usage = {.Storage}, label = "particle counters"},
+		nil,
+	)
+	p.mesh_instances = platform.gpu_create_buffer(
+		{size = 64 * size_of(Instance_Record), usage = {.Storage}, label = "particle instances"},
+		nil,
+	)
 	defer particles_destroy(p, &platform)
 	scene_buffers := []gpu.Buffer {
-		platform.gpu_create_buffer({size = 1024, usage = {.Storage, .Indirect}, label = "arguments"}, nil),
+		platform.gpu_create_buffer(
+			{size = 1024, usage = {.Storage, .Indirect}, label = "arguments"},
+			nil,
+		),
 		platform.gpu_create_buffer({size = 256, usage = {.Storage}, label = "counts"}, nil),
 		platform.gpu_create_buffer({size = 1024, usage = {.Storage}, label = "draws"}, nil),
 	}
@@ -398,19 +518,40 @@ mesh_particles_take_their_draws :: proc(t: ^testing.T) {
 		defer cache_destroy(&cache, &platform)
 		g := begin(&platform, &cache)
 		f := new(Frame, platform.frame_allocator)
-		f^ = {renderer = r, state = &r.view, graph = &g, size = {64, 32}}
+		f^ = {
+			renderer = r,
+			state    = &r.view,
+			graph    = &g,
+			size     = {64, 32},
+		}
 		sf := new(Scene_Frame, platform.frame_allocator)
 		f.scene_frame = sf
 		sf.items = make([]Cull_Item, 1, platform.frame_allocator)
-		sf.items[0] = {flags = ITEM_PARTICLES}
+		sf.items[0] = {
+			flags = ITEM_PARTICLES,
+		}
 		sf.view_count = 3
 		sf.mesh_particles = make([]Mesh_Particle_Entry, 1, platform.frame_allocator)
 		// An emitter's items draw only once its system stepped, with its emitter's record.
-		sf.mesh_particles[0] = {emitter = 0, item = 0, record = 0, stepped = stepped}
-		sf.cull_constants, _ = platform.gpu_upload(size_of(Cull_Constants), gpu.PASS_CONSTANTS_ALIGN)
-		sf.arguments, sf.counts, sf.draws = import_buffer(&g, scene_buffers[0]), import_buffer(&g, scene_buffers[1]), import_buffer(&g, scene_buffers[2])
+		sf.mesh_particles[0] = {
+			emitter = 0,
+			item    = 0,
+			record  = 0,
+			stepped = stepped,
+		}
+		sf.cull_constants, _ = platform.gpu_upload(
+			size_of(Cull_Constants),
+			gpu.PASS_CONSTANTS_ALIGN,
+		)
+		sf.arguments, sf.counts, sf.draws =
+			import_buffer(&g, scene_buffers[0]),
+			import_buffer(&g, scene_buffers[1]),
+			import_buffer(&g, scene_buffers[2])
 		pf := new(Particle_Frame, platform.frame_allocator)
-		pf.constants, _ = platform.gpu_upload(size_of(Particle_Constants), gpu.PASS_CONSTANTS_ALIGN)
+		pf.constants, _ = platform.gpu_upload(
+			size_of(Particle_Constants),
+			gpu.PASS_CONSTANTS_ALIGN,
+		)
 		pf.counters = import_buffer(&g, p.counters)
 		pf.instances = import_buffer(&g, p.mesh_instances)
 		sf.particle_instances = pf.instances
@@ -427,7 +568,12 @@ mesh_particles_take_their_draws :: proc(t: ^testing.T) {
 		read(&g, pass, sf.particle_instances)
 		keep_pass(&g, pass)
 		testing.expect_value(t, len(g.passes), stepped ? 3 : 2)
-		testing.expectf(t, execute(&g), "the frame with mesh particles stepped %v did not execute", stepped)
+		testing.expectf(
+			t,
+			execute(&g),
+			"the frame with mesh particles stepped %v did not execute",
+			stepped,
+		)
 		null.begin_frame({64, 32})
 	}
 }
@@ -436,10 +582,16 @@ mesh_particles_take_their_draws :: proc(t: ^testing.T) {
 // does.
 @(test)
 mesh_particles_have_bins_of_their_own :: proc(t: ^testing.T) {
-	items := []Cull_Item{{bin = 0, flags = ITEM_PARTICLES}, {bin = 0}, {bin = 0, flags = ITEM_MESH_PATH}}
+	items := []Cull_Item {
+		{bin = 0, flags = ITEM_PARTICLES},
+		{bin = 0},
+		{bin = 0, flags = ITEM_MESH_PATH},
+	}
 	sorting := make([]Sort_Item, len(items), context.temp_allocator)
 	for item, i in items {
-		sorting[i] = {item = item}
+		sorting[i] = {
+			item = item,
+		}
 	}
 	pipelines, groups := sort_bins(sorting, items, context.temp_allocator)
 	testing.expect_value(t, len(pipelines), 2)

@@ -94,7 +94,12 @@ prefab_items_compose_parents_and_skip_inactive :: proc(t: ^testing.T) {
 	testing.expect(t, column.materials[1] == {})
 	// The floor is 2 m up, turned -90 degrees about X and twice the size, so the column's (1, 1, 0) goes to (2, 2, -2).
 	at := ecs.position_to_meters(column.pose.position)
-	testing.expectf(t, abs(at.x - 2) < 0.01 && abs(at.y - 2) < 0.01 && abs(at.z + 2) < 0.01, "the column is at %v", at)
+	testing.expectf(
+		t,
+		abs(at.x - 2) < 0.01 && abs(at.y - 2) < 0.01 && abs(at.z + 2) < 0.01,
+		"the column is at %v",
+		at,
+	)
 	testing.expectf(t, abs(column.pose.scale.x - 2) < 0.001, "its scale is %v", column.pose.scale)
 
 	// Only a node and what is under it.
@@ -114,15 +119,15 @@ flat_mesh :: proc(positions: [][3]f32, indices: []u16) -> (data: []byte, blob: ^
 	}
 	stride := int(format.mesh_attribute_stride({}))
 	contents := format.Mesh_Contents {
-		guid         = guid("0000000000000000000000000000000f"),
+		guid = guid("0000000000000000000000000000000f"),
 		vertex_count = u32(len(positions)),
-		index_count  = u32(len(indices)),
-		bounds       = {min = low, max = high, radius = 1},
-		submeshes    = {{index_count = u32(len(indices)), meshlet_count = 1}},
-		positions    = mem.slice_to_bytes(positions),
-		attributes   = make([]byte, len(positions) * stride, context.temp_allocator),
-		indices      = mem.slice_to_bytes(indices),
-		meshlets     = {{vertex_count = 3, triangle_count = 1}},
+		index_count = u32(len(indices)),
+		bounds = {min = low, max = high, radius = 1},
+		submeshes = {{index_count = u32(len(indices)), meshlet_count = 1}},
+		positions = mem.slice_to_bytes(positions),
+		attributes = make([]byte, len(positions) * stride, context.temp_allocator),
+		indices = mem.slice_to_bytes(indices),
+		meshlets = {{vertex_count = 3, triangle_count = 1}},
 		meshlet_vertices = mem.slice_to_bytes([]u32{0, 1, 2}),
 		meshlet_triangles = []u8{0, 1, 2},
 	}
@@ -177,7 +182,14 @@ fit_holds_every_item :: proc(t: ^testing.T) {
 	radii := []f32{1, 2, 0.5}
 	center, radius := preview_fit(centers, radii)
 	for c, i in centers {
-		testing.expectf(t, linalg.length(c - center) + radii[i] <= radius + 0.001, "item %d is outside: %v %f", i, center, radius)
+		testing.expectf(
+			t,
+			linalg.length(c - center) + radii[i] <= radius + 0.001,
+			"item %d is outside: %v %f",
+			i,
+			center,
+			radius,
+		)
 	}
 	// From that far, the whole sphere is in the view.
 	distance := preview_distance(radius)
@@ -258,7 +270,10 @@ released_entries_leave_what_the_world_uses :: proc(t: ^testing.T) {
 	defer free(r)
 	residency_init(r, &platform, &assets)
 	defer residency_destroy(r)
-	shared, only_baked, only_world := guid("11111111111111111111111111111111"), guid("22222222222222222222222222222222"), guid("33333333333333333333333333333333")
+	shared, only_baked, only_world :=
+		guid("11111111111111111111111111111111"),
+		guid("22222222222222222222222222222222"),
+		guid("33333333333333333333333333333333")
 
 	r.baking = true
 	quiet_mesh(r, shared)

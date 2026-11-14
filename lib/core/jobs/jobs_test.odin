@@ -71,7 +71,9 @@ run_nested :: proc(t: ^testing.T, workers: int) {
 	nested: [OUTER]Nested
 	jobs: [OUTER]Job
 	for i in 0 ..< OUTER {
-		nested[i] = {total = &total}
+		nested[i] = {
+			total = &total,
+		}
 		jobs[i] = {spawn, &nested[i]}
 	}
 	counter: Counter

@@ -39,9 +39,17 @@ the_layout_hash_covers_the_projects_state_and_components :: proc(t: ^testing.T) 
 	none := game_layout_hash({})
 	with_state := game_layout_hash({State = Test_State})
 	testing.expect(t, none != with_state, "a project's state changes the hash")
-	testing.expect(t, with_state != game_layout_hash({State = Other_State}), "a change of the state's layout changes the hash")
+	testing.expect(
+		t,
+		with_state != game_layout_hash({State = Other_State}),
+		"a change of the state's layout changes the hash",
+	)
 	testing.expect_value(t, game_layout_hash({State = Test_State}), with_state)
-	testing.expect(t, none != game_layout_hash({register_components = register_test_component}), "a project's component changes the hash")
+	testing.expect(
+		t,
+		none != game_layout_hash({register_components = register_test_component}),
+		"a project's component changes the hash",
+	)
 }
 
 @(test)
@@ -68,28 +76,38 @@ the_standard_games_scripts_have_every_engine_binding :: proc(t: ^testing.T) {
 	testing.expect(t, virtual.arena_init_growing(&arena) == nil)
 	defer virtual.arena_destroy(&arena)
 	platform := core.Platform_API {
-		frame_allocator      = virtual.arena_allocator(&arena),
-		permanent_allocator  = virtual.arena_allocator(&arena),
-		time_seconds         = proc() -> f64 {return 0},
-		script_open          = script_host.open,
-		script_close         = script_host.close,
-		script_push_binding  = script_host.push_binding,
-		script_atom          = script_host.atom,
+		frame_allocator = virtual.arena_allocator(&arena),
+		permanent_allocator = virtual.arena_allocator(&arena),
+		time_seconds = proc() -> f64 {return 0},
+		script_open = script_host.open,
+		script_close = script_host.close,
+		script_push_binding = script_host.push_binding,
+		script_atom = script_host.atom,
 		script_direct_access = script_host.direct_access,
-		memory_reserve       = proc(size: int) -> rawptr {
+		memory_reserve = proc(size: int) -> rawptr {
 			data, err := virtual.reserve(uint(size))
 			return err == nil ? raw_data(data) : nil
 		},
-		memory_commit        = proc(ptr: rawptr, size: int) -> bool {
+		memory_commit = proc(ptr: rawptr, size: int) -> bool {
 			return virtual.commit(ptr, uint(size)) == nil
 		},
-		memory_release       = proc(ptr: rawptr, size: int) {
+		memory_release = proc(ptr: rawptr, size: int) {
 			virtual.release(ptr, uint(size))
 		},
 	}
-	text := game_script_types(&platform, {register_components = register_test_component}, register_test_scripts)
+	text := game_script_types(
+		&platform,
+		{register_components = register_test_component},
+		register_test_scripts,
+	)
 	expect :: proc(t: ^testing.T, text, fragment: string, loc := #caller_location) {
-		testing.expectf(t, strings.contains(text, fragment), "the definitions have no %q", fragment, loc = loc)
+		testing.expectf(
+			t,
+			strings.contains(text, fragment),
+			"the definitions have no %q",
+			fragment,
+			loc = loc,
+		)
 	}
 	// The engine's bindings that a game used to choose are all there: physics, audio, animation, sprites, the UI and
 	// perception.

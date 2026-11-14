@@ -20,7 +20,11 @@ MIN_COST :: search.MIN_COST
 // register registers the module with the agents' AI. Call it in register_world, after ai.register, which clears the
 // modules, so a code reload registers it again.
 register :: proc(s: ^ai.State) {
-	ai.register_module(s, .Goap, {think = think, check = check, searching = searching, plan = plan})
+	ai.register_module(
+		s,
+		.Goap,
+		{think = think, check = check, searching = searching, plan = plan},
+	)
 }
 
 // check checks a decision's goals and actions against the decision and its blackboard, once, before an agent starts
@@ -32,7 +36,10 @@ check :: proc(decision: ai.Decision, board: ai.Board) -> bool {
 
 // searching is whether the agent searches for a plan, so its next think goes on with the search.
 searching :: proc(state: []byte) -> bool {
-	return len(state) >= size_of(format.Goap_Agent) && (^format.Goap_Agent)(raw_data(state)).phase == .Searching
+	return(
+		len(state) >= size_of(format.Goap_Agent) &&
+		(^format.Goap_Agent)(raw_data(state)).phase == .Searching \
+	)
 }
 
 // View is the parts of an agent's module state and its decision's data.
@@ -89,7 +96,8 @@ think :: proc(t: ^ai.Think_Context) {
 	}
 	if v.agent.phase == .Running {
 		// The runner applies the effects that it writes to world, so the goals are picked on the world as they leave it.
-		if ai.plan_think(t, v.domain, v.plan, goal_tests(&v, v.agent.goal - 1), &world) != .Running {
+		if ai.plan_think(t, v.domain, v.plan, goal_tests(&v, v.agent.goal - 1), &world) !=
+		   .Running {
 			v.agent.phase = .Idle
 		}
 	}
@@ -138,7 +146,9 @@ current_goal :: proc(t: ^ai.Think_Context, v: ^View, world: []i32) -> int {
 			}
 		}
 		v.priorities[i] = f32(priority)
-		if priority > best_priority && v.agent.failed & (1 << u32(i)) == 0 && !ai.plan_tests_hold(goal_tests(v, u32(i)), world) {
+		if priority > best_priority &&
+		   v.agent.failed & (1 << u32(i)) == 0 &&
+		   !ai.plan_tests_hold(goal_tests(v, u32(i)), world) {
 			best, best_priority = i, priority
 		}
 	}
@@ -194,7 +204,12 @@ go_on :: proc(t: ^ai.Think_Context, v: ^View) {
 
 // plan gives the agent's goal, the goals' priorities in its last think, and its plan and step while it runs one, for
 // debuggers and scripts (see ai.plan).
-plan :: proc(decision: ai.Decision, board: ai.Board, state: []byte, allocator: runtime.Allocator) -> ai.Plan_View {
+plan :: proc(
+	decision: ai.Decision,
+	board: ai.Board,
+	state: []byte,
+	allocator: runtime.Allocator,
+) -> ai.Plan_View {
 	v := view_of(decision, state)
 	actions := format.decision_actions(decision.data, decision.blob)
 	result := ai.Plan_View {
@@ -213,7 +228,10 @@ plan :: proc(decision: ai.Decision, board: ai.Board, state: []byte, allocator: r
 		result.steps = make([]ai.Plan_Step, run.length, allocator)
 		for step, i in v.plan.steps[:run.length] {
 			node := v.shared[v.g.actions[step].node]
-			result.steps[i] = {node.id, format.blob_string(decision.data, actions[node.action].name)}
+			result.steps[i] = {
+				node.id,
+				format.blob_string(decision.data, actions[node.action].name),
+			}
 		}
 		result.step = int(run.step)
 	}

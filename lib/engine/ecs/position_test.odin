@@ -23,7 +23,11 @@ sub_spans_the_whole_range :: proc(t: ^testing.T) {
 @(test)
 offset_rounds_to_nearest :: proc(t: ^testing.T) {
 	origin: World_Position
-	testing.expect_value(t, position_offset(origin, {0.6 * UNIT, -0.6 * UNIT, 0.4 * UNIT}).raw, [3]i64{1, -1, 0})
+	testing.expect_value(
+		t,
+		position_offset(origin, {0.6 * UNIT, -0.6 * UNIT, 0.4 * UNIT}).raw,
+		[3]i64{1, -1, 0},
+	)
 }
 
 @(test)

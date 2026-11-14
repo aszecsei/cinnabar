@@ -24,11 +24,25 @@ Problems :: struct {
 	log:  bool,
 }
 
-report_error :: proc(p: ^Problems, file: string, line, column: int, format: string, args: ..any, location := #caller_location) {
+report_error :: proc(
+	p: ^Problems,
+	file: string,
+	line, column: int,
+	format: string,
+	args: ..any,
+	location := #caller_location,
+) {
 	report(p, {file, line, column, true, fmt.tprintf(format, ..args)}, location)
 }
 
-report_warning :: proc(p: ^Problems, file: string, line, column: int, format: string, args: ..any, location := #caller_location) {
+report_warning :: proc(
+	p: ^Problems,
+	file: string,
+	line, column: int,
+	format: string,
+	args: ..any,
+	location := #caller_location,
+) {
 	report(p, {file, line, column, false, fmt.tprintf(format, ..args)}, location)
 }
 

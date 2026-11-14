@@ -13,48 +13,48 @@ COMMIT_STEP :: 1 * mem.Megabyte
 // World is the root of the ECS. It lives in Game_State. All its storage is in virtual memory reservations that never
 // move, so it holds no allocators, and every handle and row index stays valid across a code reload.
 World :: struct {
-	platform:        ^core.Platform_API,
-	registry:        Registry,
-	entities:        Entities,
-	archetypes:      Region,
-	archetype_count: u32,
+	platform:         ^core.Platform_API,
+	registry:         Registry,
+	entities:         Entities,
+	archetypes:       Region,
+	archetype_count:  u32,
 	// Open addressing from a component set's hash to an archetype index plus one. Zero is an empty slot.
-	archetype_table: Region,
+	archetype_table:  Region,
 	// MAX_ARCHETYPE_CHUNKS chunk indices for each archetype, committed one page at a time.
-	directory:       Region,
-	chunks:          Chunk_Pool,
-	queries:         Region,
-	query_count:     u32,
+	directory:        Region,
+	chunks:           Chunk_Pool,
+	queries:          Region,
+	query_count:      u32,
 	// MAX_ARCHETYPES matches for each query, committed one page at a time.
-	matches:         Region,
-	schedule:        Schedule,
-	clock:           Clock,
+	matches:          Region,
+	schedule:         Schedule,
+	clock:            Clock,
 	// What a write stamps a chunk's column with. See take_version.
-	version:         u64,
+	version:          u64,
 	// The version that the last tick's Previous_Transform copy took. A Transform stamped after it may differ from its
 	// Previous_Transform.
 	snapshot_version: u64,
 	// How many entities were ever despawned, so a tool can tell whether any entity it knows of died.
-	despawned:       u64,
+	despawned:        u64,
 	// Every child, sorted by depth. See rebuild_hierarchy.
-	hierarchy:       Region,
-	levels:          [MAX_HIERARCHY_DEPTH + 1]u32,
+	hierarchy:        Region,
+	levels:           [MAX_HIERARCHY_DEPTH + 1]u32,
 	// Set when a Parent is added or removed, or a child is despawned.
-	hierarchy_dirty: bool,
+	hierarchy_dirty:  bool,
 	// Set when an entity is despawned, so its children may need to be despawned too.
-	orphans_pending: bool,
+	orphans_pending:  bool,
 	// Set when a Disabled or a Parent is added or removed, so Inactive may need to change. See update_activity.
-	activity_dirty:  bool,
+	activity_dirty:   bool,
 	// The changes that the script runtime reacts to (see watch and take_log).
-	log:             Region,
-	log_count:       u32,
-	log_full:        bool,
-	watched:         [MAX_WATCHED]Component_Id,
-	watched_count:   int,
-	log_activity:    bool,
+	log:              Region,
+	log_count:        u32,
+	log_full:         bool,
+	watched:          [MAX_WATCHED]Component_Id,
+	watched_count:    int,
+	log_activity:     bool,
 	// The GUID of the scene that the world was loaded from, or zero. scene.load writes it; nav loads the scene's
 	// navmeshes by it (see docs/ai/navigation.md#loading).
-	scene:           format.Guid,
+	scene:            format.Guid,
 }
 
 // init reserves the world's storage and creates the empty archetype. Register the components after it.
@@ -71,7 +71,11 @@ init :: proc(w: ^World, platform: ^core.Platform_API) -> bool {
 		region_init(&w.archetypes, platform, MAX_ARCHETYPES * size_of(Archetype)) &&
 		region_init(&w.archetype_table, platform, ARCHETYPE_TABLE_SIZE * size_of(u32)) &&
 		region_commit(&w.archetype_table, platform, ARCHETYPE_TABLE_SIZE * size_of(u32)) &&
-		region_init(&w.directory, platform, MAX_ARCHETYPES * MAX_ARCHETYPE_CHUNKS * size_of(u32)) &&
+		region_init(
+			&w.directory,
+			platform,
+			MAX_ARCHETYPES * MAX_ARCHETYPE_CHUNKS * size_of(u32),
+		) &&
 		region_init(&w.chunks.memory, platform, MAX_CHUNKS * CHUNK_SIZE) &&
 		region_init(&w.chunks.versions, platform, MAX_CHUNKS * size_of([CHUNK_VERSIONS]u64)) &&
 		region_init(&w.queries, platform, MAX_QUERIES * size_of(Query_State)) &&

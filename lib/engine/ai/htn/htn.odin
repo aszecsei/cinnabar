@@ -159,7 +159,8 @@ adopt :: proc(t: ^ai.Think_Context, v: ^View, d: ^Decomposition) -> bool {
 	}
 	steps := d.plan[:length]
 	world := ai.plan_world(t, v.h.keys)
-	if !ai.plan_holds(v.domain, steps, world, nil) || !ai.condition_holds(t, v.shared[v.h.actions[steps[0]].node].condition) {
+	if !ai.plan_holds(v.domain, steps, world, nil) ||
+	   !ai.condition_holds(t, v.shared[v.h.actions[steps[0]].node].condition) {
 		return false
 	}
 	copy(v.plan.steps, steps)
@@ -170,7 +171,12 @@ adopt :: proc(t: ^ai.Think_Context, v: ^View, d: ^Decomposition) -> bool {
 
 // plan gives the agent's plan, the methods that its decomposition chose and its step while it runs one, and the steps
 // of its last decomposition, for debuggers and scripts (see ai.plan). An HTN plan has no goal.
-plan :: proc(decision: ai.Decision, board: ai.Board, state: []byte, allocator: runtime.Allocator) -> ai.Plan_View {
+plan :: proc(
+	decision: ai.Decision,
+	board: ai.Board,
+	state: []byte,
+	allocator: runtime.Allocator,
+) -> ai.Plan_View {
 	v := view_of(decision, state)
 	actions := format.decision_actions(decision.data, decision.blob)
 	result := ai.Plan_View {

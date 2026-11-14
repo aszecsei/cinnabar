@@ -12,7 +12,15 @@ import format "cinnabar:engine/asset/format"
 // every action is usable. An action's cost is its constant, or its key's default, at least search.MIN_COST, as when an
 // agent's search begins. A query on another technique, or of a goal or a key that the decision does not have, is a
 // problem, and has no answer.
-plan_preview :: proc(checked: Checked_Decision, query: cook_link.Plan_Query, path: string, problems: ^Problems) -> (answer: cook_link.Plan_Answer, ok: bool) {
+plan_preview :: proc(
+	checked: Checked_Decision,
+	query: cook_link.Plan_Query,
+	path: string,
+	problems: ^Problems,
+) -> (
+	answer: cook_link.Plan_Answer,
+	ok: bool,
+) {
 	contents := checked.contents
 	if contents.technique != .Goap {
 		report_error(problems, path, 0, 0, "only a GOAP decision has a plan preview")
@@ -26,7 +34,14 @@ plan_preview :: proc(checked: Checked_Decision, query: cook_link.Plan_Query, pat
 		}
 	}
 	if goal < 0 {
-		report_error(problems, path, 0, 0, "the plan preview's goal %d is not a goal of the decision", query.goal)
+		report_error(
+			problems,
+			path,
+			0,
+			0,
+			"the plan preview's goal %d is not a goal of the decision",
+			query.goal,
+		)
 		return
 	}
 	world := make([]i32, len(g.keys), context.temp_allocator)
@@ -48,7 +63,14 @@ plan_preview :: proc(checked: Checked_Decision, query: cook_link.Plan_Query, pat
 				continue next
 			}
 		}
-		report_error(problems, path, 0, 0, "the plan preview's key %q is not a planning key of the decision", v.key)
+		report_error(
+			problems,
+			path,
+			0,
+			0,
+			"the plan preview's key %q is not a planning key of the decision",
+			v.key,
+		)
 		return
 	}
 	usable := make([]u32, (len(g.actions) + 31) / 32, context.temp_allocator)

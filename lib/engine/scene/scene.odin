@@ -39,13 +39,21 @@ Problem :: struct {
 
 // load_asset loads a cooked scene by GUID and replaces the world with it. The blob stays loaded, so a second load is
 // cheap.
-load_asset :: proc(w: ^ecs.World, scripts: ^script.Runtime, assets: ^asset.Assets, guid: format.Guid) -> bool {
+load_asset :: proc(
+	w: ^ecs.World,
+	scripts: ^script.Runtime,
+	assets: ^asset.Assets,
+	guid: format.Guid,
+) -> bool {
 	h := asset.load(assets, guid) or_return
 	data := asset.data(assets, h) or_return
 	s, ok := format.scene_read(data, w.platform.frame_allocator)
 	if !ok {
 		buffer: [32]u8
-		log.errorf("scene: %s is not a scene blob of this build. Cook the content.", format.guid_format(guid, &buffer))
+		log.errorf(
+			"scene: %s is not a scene blob of this build. Cook the content.",
+			format.guid_format(guid, &buffer),
+		)
 		return false
 	}
 	load(w, scripts, s)
@@ -61,7 +69,13 @@ load_asset :: proc(w: ^ecs.World, scripts: ^script.Runtime, assets: ^asset.Asset
 // equal to Transform, so nothing interpolates from where the old world was. The behaviours wake in the next script
 // phase. scripts can be nil, and then the behaviours are skipped. handles, if given, is cleared and gets the entity of
 // each scene ID. problems, if given, gets each warning, in frame memory.
-load :: proc(w: ^ecs.World, scripts: ^script.Runtime, s: format.Scene, handles: ^map[u64]ecs.Entity = nil, problems: ^[dynamic]Problem = nil) {
+load :: proc(
+	w: ^ecs.World,
+	scripts: ^script.Runtime,
+	s: format.Scene,
+	handles: ^map[u64]ecs.Entity = nil,
+	problems: ^[dynamic]Problem = nil,
+) {
 	ecs.despawn_all(w)
 	w.scene = s.guid
 	local: map[u64]ecs.Entity
@@ -78,7 +92,13 @@ load :: proc(w: ^ecs.World, scripts: ^script.Runtime, s: format.Scene, handles: 
 // add_entities adds entities to the world, as load does, and returns how many it spawned. handles maps scene IDs to
 // entities, for the new entities and the ones that their fields refer to, and gets the new ones. An entity whose
 // scene ID handles already has is skipped.
-add_entities :: proc(w: ^ecs.World, scripts: ^script.Runtime, entities: []format.Scene_Entity, handles: ^map[u64]ecs.Entity, problems: ^[dynamic]Problem = nil) -> int {
+add_entities :: proc(
+	w: ^ecs.World,
+	scripts: ^script.Runtime,
+	entities: []format.Scene_Entity,
+	handles: ^map[u64]ecs.Entity,
+	problems: ^[dynamic]Problem = nil,
+) -> int {
 	count, _ := add_entities_to(w, scripts, entities, handles, problems)
 	return count
 }
@@ -105,7 +125,11 @@ add_entities_to :: proc(
 	for e, i in entities {
 		l.entity = e.id
 		if e.id == 0 || e.id in handles {
-			warn(&l, "two entities have the scene ID %016x, or it is 0, so the second is skipped", e.id)
+			warn(
+				&l,
+				"two entities have the scene ID %016x, or it is 0, so the second is skipped",
+				e.id,
+			)
 			continue
 		}
 		entity := ecs.spawn(w)
@@ -155,7 +179,10 @@ add_entities_to :: proc(
 		l.entity = e.id
 		for b in e.behaviours {
 			if pending != nil {
-				append(pending, script.Pending_Behaviour{spawned[i], b.script, behaviour_fields(&l, b.fields)})
+				append(
+					pending,
+					script.Pending_Behaviour{spawned[i], b.script, behaviour_fields(&l, b.fields)},
+				)
 			} else {
 				script.attach_script(scripts, spawned[i], b.script, behaviour_fields(&l, b.fields))
 			}
@@ -170,7 +197,16 @@ add_entities_to :: proc(
 // prefab's references inside it resolve to its own new entities. The children keep their Local_Transform, and
 // propagation places them. The behaviours wake in the next script phase; from a script, World.spawn wakes them before
 // it returns. Call it between frames or in a serial phase.
-spawn_prefab :: proc(w: ^ecs.World, scripts: ^script.Runtime, assets: ^asset.Assets, guid: format.Guid, pose: ecs.Transform) -> (root: ecs.Entity, ok: bool) {
+spawn_prefab :: proc(
+	w: ^ecs.World,
+	scripts: ^script.Runtime,
+	assets: ^asset.Assets,
+	guid: format.Guid,
+	pose: ecs.Transform,
+) -> (
+	root: ecs.Entity,
+	ok: bool,
+) {
 	root, _, ok = spawn_prefab_entities(w, scripts, assets, guid, pose, nil)
 	return
 }
@@ -199,20 +235,36 @@ spawn_prefab_entities :: proc(
 	data, has_data := asset.data(assets, h)
 	header, has_header := format.blob_header(data)
 	if !loaded || !has_data || !has_header || header.kind != .Prefab {
-		message = fmt.aprintf("the prefab %s is missing, or is not a cooked prefab of this build", name, allocator = w.platform.frame_allocator)
+		message = fmt.aprintf(
+			"the prefab %s is missing, or is not a cooked prefab of this build",
+			name,
+			allocator = w.platform.frame_allocator,
+		)
 		log.errorf("scene: %s", message)
 		return 0, message, false
 	}
 	s, read := format.scene_read(data, w.platform.frame_allocator)
 	if !read {
-		message = fmt.aprintf("the prefab %s is not a prefab blob of this build. Cook the content.", name, allocator = w.platform.frame_allocator)
+		message = fmt.aprintf(
+			"the prefab %s is not a prefab blob of this build. Cook the content.",
+			name,
+			allocator = w.platform.frame_allocator,
+		)
 		log.errorf("scene: %s", message)
 		return 0, message, false
 	}
 	// The prefab's own map, so its IDs never meet the scene's.
 	handles := make(map[u64]ecs.Entity, len(s.entities), w.platform.frame_allocator)
 	problems := make([dynamic]Problem, w.platform.frame_allocator)
-	_, spawned := add_entities_to(w, scripts, s.entities, &handles, &problems, scene_ids = false, pending = pending)
+	_, spawned := add_entities_to(
+		w,
+		scripts,
+		s.entities,
+		&handles,
+		&problems,
+		scene_ids = false,
+		pending = pending,
+	)
 	for p in problems {
 		log.warnf("scene: prefab %s: entity %016x: %s", name, p.entity, p.message)
 	}
@@ -223,7 +275,11 @@ spawn_prefab_entities :: proc(
 		}
 	}
 	if root == 0 {
-		message = fmt.aprintf("the prefab %s has no root", name, allocator = w.platform.frame_allocator)
+		message = fmt.aprintf(
+			"the prefab %s has no root",
+			name,
+			allocator = w.platform.frame_allocator,
+		)
 		return 0, message, false
 	}
 	ecs.add(w, root, pose)
@@ -234,20 +290,44 @@ spawn_prefab_entities :: proc(
 // register_scripts gives the script runtime what World.spawn(prefab) calls. Call it in the game's Register_Proc, so
 // a reload sets it again.
 register_scripts :: proc(r: ^script.Runtime) {
-	script.set_prefab_spawner(r, proc(r: ^script.Runtime, guid: format.Guid, pose: ecs.Transform) -> (root: ecs.Entity, behaviours: []script.Pending_Behaviour, message: string, ok: bool) {
-		pending := make([dynamic]script.Pending_Behaviour, r.world.platform.frame_allocator)
-		root, message, ok = spawn_prefab_entities(r.world, r, r.assets, guid, pose, &pending)
-		return root, pending[:], message, ok
-	})
+	script.set_prefab_spawner(
+		r,
+		proc(
+			r: ^script.Runtime,
+			guid: format.Guid,
+			pose: ecs.Transform,
+		) -> (
+			root: ecs.Entity,
+			behaviours: []script.Pending_Behaviour,
+			message: string,
+			ok: bool,
+		) {
+			pending := make([dynamic]script.Pending_Behaviour, r.world.platform.frame_allocator)
+			root, message, ok = spawn_prefab_entities(r.world, r, r.assets, guid, pose, &pending)
+			return root, pending[:], message, ok
+		},
+	)
 }
 
 // add_component adds or replaces a component of the entity with scene ID id, with the scene's values. It returns
 // false, with a problem, for a component that the game does not register or that scenes do not set.
-add_component :: proc(w: ^ecs.World, entity: ecs.Entity, id: u64, c: format.Scene_Component, handles: ^map[u64]ecs.Entity, problems: ^[dynamic]Problem = nil) -> bool {
+add_component :: proc(
+	w: ^ecs.World,
+	entity: ecs.Entity,
+	id: u64,
+	c: format.Scene_Component,
+	handles: ^map[u64]ecs.Entity,
+	problems: ^[dynamic]Problem = nil,
+) -> bool {
 	l := loader(w, handles, problems)
 	l.entity = id
 	if is_derived(ecs.Component_Id(c.id)) {
-		warn(&l, "scenes set component %d (%s) through the entity's keys, not as a component", c.id, c.name)
+		warn(
+			&l,
+			"scenes set component %d (%s) through the entity's keys, not as a component",
+			c.id,
+			c.name,
+		)
 		return false
 	}
 	added := add_component_to(&l, entity, c)
@@ -262,7 +342,16 @@ add_component :: proc(w: ^ecs.World, entity: ecs.Entity, id: u64, c: format.Scen
 // For a volume's setting, setting the value leaves its override flag as it is, and a reset clears the flag. The flag
 // itself is the field <field>.override: setting it sets the flag, and a reset sets it to true, as a scene without the
 // line that sets the value has it. The editor sends the value and the flag together.
-set_field :: proc(w: ^ecs.World, entity: ecs.Entity, id: u64, component: u64, f: format.Scene_Field, reset: bool, handles: ^map[u64]ecs.Entity, problems: ^[dynamic]Problem = nil) -> bool {
+set_field :: proc(
+	w: ^ecs.World,
+	entity: ecs.Entity,
+	id: u64,
+	component: u64,
+	f: format.Scene_Field,
+	reset: bool,
+	handles: ^map[u64]ecs.Entity,
+	problems: ^[dynamic]Problem = nil,
+) -> bool {
 	l := loader(w, handles, problems)
 	l.entity = id
 	info := ecs.registry_find(&w.registry, ecs.Component_Id(component))
@@ -292,7 +381,12 @@ set_field :: proc(w: ^ecs.World, entity: ecs.Entity, id: u64, component: u64, f:
 			flag^ = false
 		}
 	case:
-		if expected := write_field(&l, rawptr(uintptr(data) + uintptr(field.offset)), field^, f.value); expected != "" {
+		if expected := write_field(
+			&l,
+			rawptr(uintptr(data) + uintptr(field.offset)),
+			field^,
+			f.value,
+		); expected != "" {
 			warn(&l, "%s.%s takes %s, so it is not set", info.name, f.name, expected)
 			return false
 		}
@@ -306,7 +400,16 @@ set_field :: proc(w: ^ecs.World, entity: ecs.Entity, id: u64, component: u64, f:
 
 // behaviour_field converts a behaviour's value to a script value, for the entity with scene ID id. The script
 // runtime checks it against the class.
-behaviour_field :: proc(w: ^ecs.World, id: u64, f: format.Scene_Field, handles: ^map[u64]ecs.Entity, problems: ^[dynamic]Problem = nil) -> (field: script.Behaviour_Field, ok: bool) {
+behaviour_field :: proc(
+	w: ^ecs.World,
+	id: u64,
+	f: format.Scene_Field,
+	handles: ^map[u64]ecs.Entity,
+	problems: ^[dynamic]Problem = nil,
+) -> (
+	field: script.Behaviour_Field,
+	ok: bool,
+) {
 	l := loader(w, handles, problems)
 	l.entity = id
 	fields := behaviour_fields(&l, {f})
@@ -329,7 +432,8 @@ is_derived :: proc(id: ecs.Component_Id) -> bool {
 // interpolate from where it was.
 @(private = "file")
 settle :: proc(w: ^ecs.World, entity: ecs.Entity) {
-	if pose := ecs.get(w, entity, ecs.Transform); pose != nil && ecs.has(w, entity, ecs.Previous_Transform) {
+	if pose := ecs.get(w, entity, ecs.Transform);
+	   pose != nil && ecs.has(w, entity, ecs.Previous_Transform) {
 		ecs.teleport(w, entity, pose^)
 	}
 }
@@ -347,8 +451,17 @@ Loader :: struct {
 }
 
 @(private = "file")
-loader :: proc(w: ^ecs.World, handles: ^map[u64]ecs.Entity, problems: ^[dynamic]Problem) -> Loader {
-	return {world = w, handles = handles, fields = make(map[ecs.Component_Id][]Field, w.platform.frame_allocator), problems = problems}
+loader :: proc(
+	w: ^ecs.World,
+	handles: ^map[u64]ecs.Entity,
+	problems: ^[dynamic]Problem,
+) -> Loader {
+	return {
+		world = w,
+		handles = handles,
+		fields = make(map[ecs.Component_Id][]Field, w.platform.frame_allocator),
+		problems = problems,
+	}
 }
 
 // warn logs a problem with the entity being loaded, and keeps it.
@@ -363,7 +476,14 @@ warn :: proc(l: ^Loader, message: string, args: ..any) {
 
 // find_field finds the field whose name has the hash, or the volume setting whose override flag it is.
 @(private = "file")
-find_field :: proc(l: ^Loader, info: ^ecs.Component_Info, name_hash: u64) -> (field: ^Field, is_flag: bool) {
+find_field :: proc(
+	l: ^Loader,
+	info: ^ecs.Component_Info,
+	name_hash: u64,
+) -> (
+	field: ^Field,
+	is_flag: bool,
+) {
 	fields, known := l.fields[info.id]
 	if !known {
 		fields = component_fields(info.type, l.world.platform.frame_allocator)
@@ -374,7 +494,8 @@ find_field :: proc(l: ^Loader, info: ^ecs.Component_Info, name_hash: u64) -> (fi
 		if h == name_hash {
 			return &candidate, false
 		}
-		if candidate.has_override && hash.fnv64a(transmute([]byte)string(OVERRIDE_SUFFIX), h) == name_hash {
+		if candidate.has_override &&
+		   hash.fnv64a(transmute([]byte)string(OVERRIDE_SUFFIX), h) == name_hash {
 			return &candidate, true
 		}
 	}
@@ -412,7 +533,8 @@ add_component_to :: proc(l: ^Loader, entity: ecs.Entity, c: format.Scene_Compone
 			case is_flag:
 				data[field.override_offset] = u8(f.value.ints[0] != 0)
 			case:
-				if expected := write_field(l, raw_data(data[field.offset:]), field^, f.value); expected != "" {
+				if expected := write_field(l, raw_data(data[field.offset:]), field^, f.value);
+				   expected != "" {
 					warn(l, "%s.%s takes %s, so it is skipped", info.name, f.name, expected)
 				} else if field.has_override {
 					data[field.override_offset] = 1
@@ -427,7 +549,14 @@ add_component_to :: proc(l: ^Loader, entity: ecs.Entity, c: format.Scene_Compone
 // write_field writes a value into a field. When the value does not fit the field's kind, it writes nothing and
 // describes what the field takes.
 @(private = "file")
-write_field :: proc(l: ^Loader, dst: rawptr, field: Field, v: format.Scene_Value) -> (expected: string) {
+write_field :: proc(
+	l: ^Loader,
+	dst: rawptr,
+	field: Field,
+	v: format.Scene_Value,
+) -> (
+	expected: string,
+) {
 	scalar := v.kind == .Number && v.count == 1
 	integer := scalar && v.integer & 1 != 0
 	switch field.kind {
@@ -496,7 +625,9 @@ write_field :: proc(l: ^Loader, dst: rawptr, field: Field, v: format.Scene_Value
 				return "raw values within the world's range"
 			}
 		}
-		(^ecs.World_Position)(dst)^ = {raw = {v.ints[0], v.ints[1], v.ints[2]}}
+		(^ecs.World_Position)(dst)^ = {
+			raw = {v.ints[0], v.ints[1], v.ints[2]},
+		}
 	case .Entity:
 		if v.kind != .Entity {
 			return "a scene ID, such as @1b04c7e95a2f3d88"
@@ -598,7 +729,12 @@ resolve :: proc(l: ^Loader, id: u64) -> ecs.Entity {
 // behaviour_fields converts a behaviour's values to script values. The script runtime checks them against the class.
 @(private = "file")
 behaviour_fields :: proc(l: ^Loader, fields: []format.Scene_Field) -> []script.Behaviour_Field {
-	result := make([dynamic]script.Behaviour_Field, 0, len(fields), l.world.platform.frame_allocator)
+	result := make(
+		[dynamic]script.Behaviour_Field,
+		0,
+		len(fields),
+		l.world.platform.frame_allocator,
+	)
 	for f in fields {
 		v := f.value
 		field := script.Behaviour_Field {
@@ -610,7 +746,8 @@ behaviour_fields :: proc(l: ^Loader, fields: []format.Scene_Field) -> []script.B
 		case v.kind == .Number && v.count == 1:
 			field.kind, field.number = .Number, v.floats[0]
 		case v.kind == .Number && v.count == 3:
-			field.kind, field.vector = .Vector, {f32(v.floats[0]), f32(v.floats[1]), f32(v.floats[2])}
+			field.kind, field.vector =
+				.Vector, {f32(v.floats[0]), f32(v.floats[1]), f32(v.floats[2])}
 		case v.kind == .String || v.kind == .Name:
 			field.kind, field.text = .String, v.text
 		case v.kind == .Entity:
@@ -619,7 +756,12 @@ behaviour_fields :: proc(l: ^Loader, fields: []format.Scene_Field) -> []script.B
 		case v.kind == .Asset:
 			field.kind, field.asset = .Asset, v.asset
 		case:
-			warn(l, "a behaviour's field %s has %d numbers, which no field kind takes", f.name, v.count)
+			warn(
+				l,
+				"a behaviour's field %s has %d numbers, which no field kind takes",
+				f.name,
+				v.count,
+			)
 			continue
 		}
 		append(&result, field)

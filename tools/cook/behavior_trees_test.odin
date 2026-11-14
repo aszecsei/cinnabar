@@ -25,7 +25,9 @@ TREE_HEAD :: "decision 1\ntechnique = behavior_tree\nblackboard = $" + TREE_BOAR
 // A guard: attack a close target, chase a seen one, and otherwise patrol, with an alarm when its health is low. The
 // nodes are not in the tree's order, which the cook finds.
 @(private = "file")
-GUARD :: TREE_HEAD + `
+GUARD ::
+	TREE_HEAD +
+	`
 node 1 selector
 	children = 2, 5, 8
 node 8 parallel
@@ -70,7 +72,12 @@ tree_keys :: proc(t: ^testing.T) -> []format.Blackboard_Key_Contents {
 // state and timers laid out after each other.
 @(test)
 a_behavior_tree_cooks_in_depth_first_order :: proc(t: ^testing.T) {
-	contents, problems := decision_parse(GUARD, tree_keys(t), TECHNIQUE_READERS, context.temp_allocator)
+	contents, problems := decision_parse(
+		GUARD,
+		tree_keys(t),
+		TECHNIQUE_READERS,
+		context.temp_allocator,
+	)
 	testing.expectf(t, len(problems) == 0, "problems: %v", problems)
 	if len(problems) > 0 {
 		return
@@ -82,9 +89,26 @@ a_behavior_tree_cooks_in_depth_first_order :: proc(t: ^testing.T) {
 	}
 	ids := [10]u32{1, 2, 3, 4, 5, 8, 9, 10, 11, 12}
 	ends := [10]u32{10, 4, 3, 4, 5, 10, 7, 10, 9, 10}
-	kinds := [10]format.Tree_Kind{.Selector, .Sequence, .Action, .Wait, .Action, .Parallel, .Action, .Sequence, .Condition, .Set}
+	kinds := [10]format.Tree_Kind {
+		.Selector,
+		.Sequence,
+		.Action,
+		.Wait,
+		.Action,
+		.Parallel,
+		.Action,
+		.Sequence,
+		.Condition,
+		.Set,
+	}
 	for n, i in nodes {
-		testing.expectf(t, contents.nodes[n.node].id == ids[i], "node %d is %d", i, contents.nodes[n.node].id)
+		testing.expectf(
+			t,
+			contents.nodes[n.node].id == ids[i],
+			"node %d is %d",
+			i,
+			contents.nodes[n.node].id,
+		)
 		testing.expectf(t, n.end == ends[i], "node %d ends at %d", i, n.end)
 		testing.expectf(t, n.kind == kinds[i], "node %d is a %v", i, n.kind)
 		testing.expect_value(t, n.state, u32(i * format.TREE_STATE_SIZE))
@@ -133,18 +157,36 @@ behavior_tree_problems_have_their_lines :: proc(t: ^testing.T) {
 		{"node 1 sequence\n\tchildren = 2\n", 5},
 		{"node 1 sequence\n\tchildren = 2, x\nnode 2 wait\n\tseconds = 1\n", 5},
 		{"node 1 sequence\n\tchildren = 2, 2\nnode 2 wait\n\tseconds = 1\n", 5},
-		{"node 1 sequence\n\tchildren = 2, 3\nnode 3 sequence\n\tchildren = 2\nnode 2 wait\n\tseconds = 1\n", 7},
+		{
+			"node 1 sequence\n\tchildren = 2, 3\nnode 3 sequence\n\tchildren = 2\nnode 2 wait\n\tseconds = 1\n",
+			7,
+		},
 		{"node 1 wait\n\tseconds = 1\nnode 2 wait\n\tseconds = 1\n", 6},
 		{"node 1 sequence\n\tchildren = 1\n", 4},
-		{"node 1 sequence\n\tchildren = 2\nnode 2 wait\n\tseconds = 1\nnode 3 sequence\n\tchildren = 4\nnode 4 sequence\n\tchildren = 3\n", 8},
+		{
+			"node 1 sequence\n\tchildren = 2\nnode 2 wait\n\tseconds = 1\nnode 3 sequence\n\tchildren = 4\nnode 4 sequence\n\tchildren = 3\n",
+			8,
+		},
 		{strings.to_string(deep), 4 + 2 * format.MAX_TREE_DEPTH},
 		{"node 1 wait\n\tseconds = 1\n\tabort = self\n", 6},
-		{"node 1 sequence\n\tchildren = 2\nnode 2 wait\n\twhen = has_target\n\tabort = lower\n\tseconds = 1\n", 8},
+		{
+			"node 1 sequence\n\tchildren = 2\nnode 2 wait\n\twhen = has_target\n\tabort = lower\n\tseconds = 1\n",
+			8,
+		},
 		{"node 1 wait\n\twhen = has_target\n\tabort = both\n\tseconds = 1\n", 6},
 		{"node 1 parallel\n\tchildren = 2\nnode 2 wait\n\tseconds = 1\n", 4},
-		{"node 1 parallel\n\tpolicy = all\n\tchildren = 2, 3\nnode 2 wait\n\tseconds = 1\n\trepeat = forever\nnode 3 wait\n\tseconds = 1\n", 4},
-		{"node 1 parallel\n\tpolicy = one\n\tchildren = 2\nnode 2 wait\n\tseconds = 1\n\tforce = fail\n", 4},
-		{"node 1 parallel\n\tpolicy = one\n\tchildren = 2, 3\nnode 2 action\n\taction = a\nnode 3 sequence\n\tchildren = 4\nnode 4 action\n\taction = b\n", 4},
+		{
+			"node 1 parallel\n\tpolicy = all\n\tchildren = 2, 3\nnode 2 wait\n\tseconds = 1\n\trepeat = forever\nnode 3 wait\n\tseconds = 1\n",
+			4,
+		},
+		{
+			"node 1 parallel\n\tpolicy = one\n\tchildren = 2\nnode 2 wait\n\tseconds = 1\n\tforce = fail\n",
+			4,
+		},
+		{
+			"node 1 parallel\n\tpolicy = one\n\tchildren = 2, 3\nnode 2 action\n\taction = a\nnode 3 sequence\n\tchildren = 4\nnode 4 action\n\taction = b\n",
+			4,
+		},
 		{"node 1 condition\n\tcondition = missing\n", 5},
 		{"node 1 wait\n\tseconds = has_target\n", 5},
 		{"node 1 wait\n\tseconds = later\n", 5},
@@ -157,8 +199,19 @@ behavior_tree_problems_have_their_lines :: proc(t: ^testing.T) {
 	}
 	keys := tree_keys(t)
 	for c in cases {
-		_, problems := decision_parse(strings.concatenate({TREE_HEAD, c.text}, context.temp_allocator), keys, TECHNIQUE_READERS, context.temp_allocator)
-		testing.expectf(t, len(problems) > 0 && problems[0].line == c.line, "%q: %v", c.text, problems)
+		_, problems := decision_parse(
+			strings.concatenate({TREE_HEAD, c.text}, context.temp_allocator),
+			keys,
+			TECHNIQUE_READERS,
+			context.temp_allocator,
+		)
+		testing.expectf(
+			t,
+			len(problems) > 0 && problems[0].line == c.line,
+			"%q: %v",
+			c.text,
+			problems,
+		)
 	}
 
 	// The decorators that a node takes whatever its kind, and the policies that can be met.
@@ -168,7 +221,12 @@ behavior_tree_problems_have_their_lines :: proc(t: ^testing.T) {
 		"node 1 parallel\n\tpolicy = all\n\tchildren = 2, 3\nnode 2 wait\n\tseconds = 1\n\trepeat = forever\n\tforce = succeed\nnode 3 action\n\taction = a\n",
 	}
 	for g in good {
-		_, problems := decision_parse(strings.concatenate({TREE_HEAD, g}, context.temp_allocator), keys, TECHNIQUE_READERS, context.temp_allocator)
+		_, problems := decision_parse(
+			strings.concatenate({TREE_HEAD, g}, context.temp_allocator),
+			keys,
+			TECHNIQUE_READERS,
+			context.temp_allocator,
+		)
 		testing.expectf(t, len(problems) == 0, "%q: %v", g, problems)
 	}
 }
@@ -200,5 +258,14 @@ behavior_trees_cook_to_blobs_that_fit_their_blackboards :: proc(t: ^testing.T) {
 	testing.expect_value(t, blob.technique, format.Decision_Technique.Behavior_Tree)
 	testing.expect_value(t, blob.state_size, 184)
 	testing.expect(t, format.decision_check(data, blob, board_data, board))
-	testing.expect(t, format.tree_check(format.decision_technique_data(data, blob), data, blob, board_data, board))
+	testing.expect(
+		t,
+		format.tree_check(
+			format.decision_technique_data(data, blob),
+			data,
+			blob,
+			board_data,
+			board,
+		),
+	)
 }

@@ -37,7 +37,17 @@ arguments_are_read_and_checked :: proc(t: ^testing.T) {
 	testing.expect(t, strings.contains(out_problem, "--out"))
 
 	// viewport changes settings by name, and camera places the camera.
-	viewport, viewport_problem := parse_args({"viewport", "--set", "shadingStats=true", "--set", "renderScale=0.5", "--set", "debugView=QuadOverdraw"})
+	viewport, viewport_problem := parse_args(
+		{
+			"viewport",
+			"--set",
+			"shadingStats=true",
+			"--set",
+			"renderScale=0.5",
+			"--set",
+			"debugView=QuadOverdraw",
+		},
+	)
 	defer delete(viewport.settings)
 	testing.expect_value(t, viewport_problem, "")
 	on, _ := viewport.settings["shadingStats"].(json.Boolean)
@@ -203,7 +213,19 @@ the_automation_file_is_found_below_the_repository_root :: proc(t: ^testing.T) {
 
 @(test)
 timing_takes_its_samples_and_passes :: proc(t: ^testing.T) {
-	o, problem := parse_args({"timing", "--samples", "7", "--skip", "2", "--pass", "fog inject", "--pass", "fog integrate"})
+	o, problem := parse_args(
+		{
+			"timing",
+			"--samples",
+			"7",
+			"--skip",
+			"2",
+			"--pass",
+			"fog inject",
+			"--pass",
+			"fog integrate",
+		},
+	)
 	defer delete(o.passes)
 	testing.expect_value(t, problem, "")
 	testing.expect_value(t, o.samples.? or_else 0, 7)

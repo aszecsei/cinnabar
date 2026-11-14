@@ -15,7 +15,12 @@ open_document :: proc(s: ^State, guid: format.Guid, data: []byte) -> (index: int
 		if d.used {
 			continue
 		}
-		d = {used = true, guid = guid, visible = true, forced_node = NONE}
+		d = {
+			used        = true,
+			guid        = guid,
+			visible     = true,
+			forced_node = NONE,
+		}
 		init_document(s, &d)
 		if !set_document_data(s, i, data) {
 			free_document(s, &d)

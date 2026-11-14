@@ -18,11 +18,23 @@ impostor_blob :: proc(impostor: bool, flags: format.Material_Flags = {}) -> []by
 	code := []byte{1}
 	variants := make([dynamic]format.Material_Variant_Entry, context.temp_allocator)
 	for pass in ([]format.Material_Pass{.Forward, .Prepass, .Depth}) {
-		append(&variants, format.Material_Variant_Entry{0, pass, .Vertex, code}, format.Material_Variant_Entry{0, pass, .Pixel, code})
-		append(&variants, format.Material_Variant_Entry{0, pass, .Amplification, code}, format.Material_Variant_Entry{0, pass, .Mesh, code})
+		append(
+			&variants,
+			format.Material_Variant_Entry{0, pass, .Vertex, code},
+			format.Material_Variant_Entry{0, pass, .Pixel, code},
+		)
+		append(
+			&variants,
+			format.Material_Variant_Entry{0, pass, .Amplification, code},
+			format.Material_Variant_Entry{0, pass, .Mesh, code},
+		)
 		if impostor {
 			impostor_pass := format.material_impostor_pass(pass)
-			append(&variants, format.Material_Variant_Entry{0, impostor_pass, .Vertex, code}, format.Material_Variant_Entry{0, impostor_pass, .Pixel, code})
+			append(
+				&variants,
+				format.Material_Variant_Entry{0, impostor_pass, .Vertex, code},
+				format.Material_Variant_Entry{0, impostor_pass, .Pixel, code},
+			)
 		}
 	}
 	contents := format.Material_Contents {
@@ -75,7 +87,12 @@ impostors_take_bins_of_their_own_and_draw_with_the_impostor_passes :: proc(t: ^t
 		blob, _ := format.material_view(data)
 		p: Material_Pipeline
 		make_pipelines(r, &p, data, blob, 0)
-		testing.expect(t, !p.impostor_path && p.pipelines[.Impostor_Forward] == {} && p.pipelines[.Forward] != {})
+		testing.expect(
+			t,
+			!p.impostor_path &&
+			p.pipelines[.Impostor_Forward] == {} &&
+			p.pipelines[.Forward] != {},
+		)
 		testing.expect_value(t, p.billboard, c.billboard)
 		material_pipeline_destroy(&p, &platform)
 	}
@@ -108,9 +125,18 @@ impostors_take_bins_of_their_own_and_draw_with_the_impostor_passes :: proc(t: ^t
 	testing.expect(t, items[1].flags & ITEM_IMPOSTOR != 0 && items[1].bin == 1)
 
 	buffers := []gpu.Buffer {
-		platform.gpu_create_buffer({size = 1024, usage = {.Storage, .Indirect}, label = "arguments"}, nil),
-		platform.gpu_create_buffer({size = 1024, usage = {.Storage, .Indirect}, label = "mesh arguments"}, nil),
-		platform.gpu_create_buffer({size = 256, usage = {.Storage, .Indirect}, label = "counts"}, nil),
+		platform.gpu_create_buffer(
+			{size = 1024, usage = {.Storage, .Indirect}, label = "arguments"},
+			nil,
+		),
+		platform.gpu_create_buffer(
+			{size = 1024, usage = {.Storage, .Indirect}, label = "mesh arguments"},
+			nil,
+		),
+		platform.gpu_create_buffer(
+			{size = 256, usage = {.Storage, .Indirect}, label = "counts"},
+			nil,
+		),
 		platform.gpu_create_buffer({size = 1024, usage = {.Storage}, label = "draws"}, nil),
 		platform.gpu_create_buffer({size = 1024, usage = {.Storage}, label = "instances"}, nil),
 	}
@@ -121,27 +147,40 @@ impostors_take_bins_of_their_own_and_draw_with_the_impostor_passes :: proc(t: ^t
 	defer cache_destroy(&cache, &platform)
 	g := begin(&platform, &cache)
 	f := new(Frame, platform.frame_allocator)
-	f^ = {renderer = r, state = &r.view, graph = &g, size = {64, 32}}
+	f^ = {
+		renderer = r,
+		state    = &r.view,
+		graph    = &g,
+		size     = {64, 32},
+	}
 	sf := new(Scene_Frame, platform.frame_allocator)
 	f.scene_frame = sf
 	// The material is on the mesh shader path, but its impostors' bin draws quads with vertex pulling.
 	sf.items = make([]Cull_Item, 1, platform.frame_allocator)
 	sf.items[0].flags = ITEM_IMPOSTOR
-	sf.bin_pipelines, sf.bin_draws, sf.bin_impostors, sf.bin_particles, sf.bin_skinned = {0}, {0}, {true}, {false}, {false}
+	sf.bin_pipelines, sf.bin_draws, sf.bin_impostors, sf.bin_particles, sf.bin_skinned =
+		{0}, {0}, {true}, {false}, {false}
 	sf.groups[.Opaque] = {0, 1}
 	sf.bin_offsets, sf.bin_counts = {0}, {1}
 	sf.view_count = 1
 	sf.view_constants = make([]gpu.Upload, 1, platform.frame_allocator)
-	sf.view_constants[0], _ = platform.gpu_upload(size_of(Frame_Constants), gpu.PASS_CONSTANTS_ALIGN)
+	sf.view_constants[0], _ = platform.gpu_upload(
+		size_of(Frame_Constants),
+		gpu.PASS_CONSTANTS_ALIGN,
+	)
 	sf.arguments, sf.mesh_arguments = import_buffer(&g, buffers[0]), import_buffer(&g, buffers[1])
-	sf.counts, sf.draws, sf.instances = import_buffer(&g, buffers[2]), import_buffer(&g, buffers[3]), import_buffer(&g, buffers[4])
+	sf.counts, sf.draws, sf.instances =
+		import_buffer(&g, buffers[2]), import_buffer(&g, buffers[3]), import_buffer(&g, buffers[4])
 	normals := create_texture(&g, {size = f.size, format = NORMAL_FORMAT, label = "normals"})
 	velocity := create_texture(&g, {size = f.size, format = VELOCITY_FORMAT, label = "velocity"})
-	roughness := create_texture(&g, {size = f.size, format = ROUGHNESS_FORMAT, label = "roughness"})
+	roughness := create_texture(
+		&g,
+		{size = f.size, format = ROUGHNESS_FORMAT, label = "roughness"},
+	)
 	f.depth = create_texture(&g, {size = f.size, format = DEPTH_FORMAT, label = "depth"})
 	pass := add_render_pass(&g, "prepass", proc(ctx: ^Pass_Context) {
-		draw_scene_view((^Frame)(ctx.data), ctx.cb, VIEW_CAMERA, .Prepass)
-	}, f)
+			draw_scene_view((^Frame)(ctx.data), ctx.cb, VIEW_CAMERA, .Prepass)
+		}, f)
 	color(&g, pass, normals, .Clear)
 	color(&g, pass, velocity, .Clear)
 	color(&g, pass, roughness, .Clear)

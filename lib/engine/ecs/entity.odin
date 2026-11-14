@@ -231,7 +231,11 @@ flush_reserved :: proc(w: ^World) {
 		}
 		es.free_count = 0
 		fresh := u32(min(-cursor, MAX_ENTITIES - i64(es.count)))
-		if !region_commit(&es.records, w.platform, int(es.count + fresh) * size_of(Entity_Record)) {
+		if !region_commit(
+			&es.records,
+			w.platform,
+			int(es.count + fresh) * size_of(Entity_Record),
+		) {
 			panic("ecs: cannot commit entity records")
 		}
 		for index in es.count ..< es.count + fresh {

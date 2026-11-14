@@ -9,7 +9,13 @@ definitions_cover_components_and_game_bindings :: proc(t: ^testing.T) {
 	defer teardown_world(f)
 	text := definitions(&f.runtime, context.temp_allocator)
 	expect :: proc(t: ^testing.T, text, fragment: string, loc := #caller_location) {
-		testing.expectf(t, strings.contains(text, fragment), "the definitions have no %q", fragment, loc = loc)
+		testing.expectf(
+			t,
+			strings.contains(text, fragment),
+			"the definitions have no %q",
+			fragment,
+			loc = loc,
+		)
 	}
 	expect(t, text, "declare extern type WorldPosition with")
 	expect(t, text, "declare Health: HealthType")
@@ -29,7 +35,11 @@ definitions_cover_components_and_game_bindings :: proc(t: ^testing.T) {
 	expect(t, text, "\tgamepad_axis: (pad: number, axis: number) -> number,")
 	expect(t, text, "\tcomposition: string,")
 	// The game's bindings are declared, and the engine's come from engine.d.luau only once.
-	expect(t, text, "declare Test: {\n\tnative: (...any) -> ...any,\n\treport: (...any) -> ...any,\n}")
+	expect(
+		t,
+		text,
+		"declare Test: {\n\tnative: (...any) -> ...any,\n\treport: (...any) -> ...any,\n}",
+	)
 	testing.expect_value(t, strings.count(text, "declare Debug:"), 1)
 	testing.expect_value(t, strings.count(text, "declare Random:"), 1)
 	testing.expect(t, !strings.contains(text, "%!"), "a format string went wrong")

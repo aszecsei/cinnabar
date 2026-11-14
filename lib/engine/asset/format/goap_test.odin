@@ -14,15 +14,64 @@ test_goap :: proc() -> Goap_Contents {
 		keys = slice.clone([]u32{2, 3, 4}, context.temp_allocator),
 		actions = slice.clone(
 			[]Plan_Action {
-				{node = 1, cost = {value = 1}, first_test = 1, test_count = 1, first_effect = 0, effect_count = 1},
-				{node = 2, cost = {key = 0, source = .Key}, first_test = 2, test_count = 0, first_effect = 1, effect_count = 2},
+				{
+					node = 1,
+					cost = {value = 1},
+					first_test = 1,
+					test_count = 1,
+					first_effect = 0,
+					effect_count = 1,
+				},
+				{
+					node = 2,
+					cost = {key = 0, source = .Key},
+					first_test = 2,
+					test_count = 0,
+					first_effect = 1,
+					effect_count = 2,
+				},
 			},
 			context.temp_allocator,
 		),
-		goals = slice.clone([]Goap_Goal{{node = 0, priority = 2, first_link = 0, link_count = 1, first_test = 0, test_count = 1}}, context.temp_allocator),
-		tests = slice.clone([]Plan_Test{{key = 0, lo = 1, hi = 1}, {key = 1, lo = 1, hi = max(i32)}}, context.temp_allocator),
-		effects = slice.clone([]Plan_Effect{{key = 0, op = .Set, value = 1}, {key = 1, op = .Add, value = 3}, {key = 2, op = .Set, value = 1}}, context.temp_allocator),
-		considerations = slice.clone([]Utility_Consideration{{node = 3, input = .Number, curve = .Linear, a = 0, max = 1, slope = 1, exponent = 1}}, context.temp_allocator),
+		goals = slice.clone(
+			[]Goap_Goal {
+				{
+					node = 0,
+					priority = 2,
+					first_link = 0,
+					link_count = 1,
+					first_test = 0,
+					test_count = 1,
+				},
+			},
+			context.temp_allocator,
+		),
+		tests = slice.clone(
+			[]Plan_Test{{key = 0, lo = 1, hi = 1}, {key = 1, lo = 1, hi = max(i32)}},
+			context.temp_allocator,
+		),
+		effects = slice.clone(
+			[]Plan_Effect {
+				{key = 0, op = .Set, value = 1},
+				{key = 1, op = .Add, value = 3},
+				{key = 2, op = .Set, value = 1},
+			},
+			context.temp_allocator,
+		),
+		considerations = slice.clone(
+			[]Utility_Consideration {
+				{
+					node = 3,
+					input = .Number,
+					curve = .Linear,
+					a = 0,
+					max = 1,
+					slope = 1,
+					exponent = 1,
+				},
+			},
+			context.temp_allocator,
+		),
 		links = slice.clone([]u32{0}, context.temp_allocator),
 	}
 }
@@ -32,7 +81,12 @@ goap_decision :: proc(data: []byte, state_size: u32 = 0) -> []byte {
 	nodes := make([]Decision_Node_Contents, 4, context.temp_allocator)
 	kinds := [4]string{"goal", "action", "action", "consideration"}
 	for &n, i in nodes {
-		n = {id = u32(i + 1), kind = kinds[i], condition = DECISION_NONE, action = DECISION_NONE}
+		n = {
+			id        = u32(i + 1),
+			kind      = kinds[i],
+			condition = DECISION_NONE,
+			action    = DECISION_NONE,
+		}
 	}
 	nodes[1].action = 0
 	nodes[2].action = 1
@@ -88,7 +142,10 @@ goap_round_trips :: proc(t: ^testing.T) {
 	board_blob, board_ok := blackboard_view(board)
 	testing.expect(t, board_ok)
 	if board_ok {
-		testing.expect(t, goap_check(decision_technique_data(data, blob), data, blob, board, board_blob))
+		testing.expect(
+			t,
+			goap_check(decision_technique_data(data, blob), data, blob, board, board_blob),
+		)
 	}
 }
 
@@ -117,7 +174,9 @@ bad_goap_is_refused :: proc(t: ^testing.T) {
 	views := []Change {
 		proc(c: ^Goap_Contents) {c.actions[0].node = 9},
 		proc(c: ^Goap_Contents) {c.actions[0].node = 0},
-		proc(c: ^Goap_Contents) {c.actions[0].cost = {value = 0}},
+		proc(c: ^Goap_Contents) {c.actions[0].cost = {
+				value = 0,
+			}},
 		proc(c: ^Goap_Contents) {c.actions[0].effect_count = 0},
 		proc(c: ^Goap_Contents) {c.actions[1].effect_count = 3},
 		proc(c: ^Goap_Contents) {c.goals[0].test_count = 0},
@@ -125,7 +184,11 @@ bad_goap_is_refused :: proc(t: ^testing.T) {
 		proc(c: ^Goap_Contents) {c.goals[0].link_count = 2},
 		proc(c: ^Goap_Contents) {c.links[0] = 1},
 		proc(c: ^Goap_Contents) {c.tests[0].key = 3},
-		proc(c: ^Goap_Contents) {c.tests[0] = {key = 0, lo = 1, hi = 0}},
+		proc(c: ^Goap_Contents) {c.tests[0] = {
+				key = 0,
+				lo  = 1,
+				hi  = 0,
+			}},
 		proc(c: ^Goap_Contents) {c.effects[0].key = 5},
 		proc(c: ^Goap_Contents) {c.max_plan = 0},
 		proc(c: ^Goap_Contents) {c.max_plan = MAX_PLAN_LENGTH + 1},
@@ -158,7 +221,10 @@ bad_goap_is_refused :: proc(t: ^testing.T) {
 		proc(c: ^Goap_Contents) {c.effects[1].key = 0},
 		proc(c: ^Goap_Contents) {c.effects[0].value = 2},
 		proc(c: ^Goap_Contents) {c.effects[2].value = 2},
-		proc(c: ^Goap_Contents) {c.actions[1].cost = {key = 1, source = .Key}},
+		proc(c: ^Goap_Contents) {c.actions[1].cost = {
+				key    = 1,
+				source = .Key,
+			}},
 		proc(c: ^Goap_Contents) {c.considerations[0].a = 1},
 	}
 	board := goap_board()

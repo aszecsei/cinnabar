@@ -45,7 +45,10 @@ views_turn_with_their_rotation :: proc(t: ^testing.T) {
 
 @(test)
 the_view_model_takes_the_views_projection_unless_it_has_its_own :: proc(t: ^testing.T) {
-	view := View{rotation = 1, projection = Perspective{1.2, 0.05}}
+	view := View {
+		rotation   = 1,
+		projection = Perspective{1.2, 0.05},
+	}
 	testing.expect_value(t, view_model_view(view), view)
 	view.view_model_fov, view.view_model_near = 0.9, 0.01
 	own := view_model_view(view)
@@ -107,8 +110,8 @@ the_shaders_projection_gives_back_what_the_matrix_placed :: proc(t: ^testing.T) 
 @(test)
 an_orthographic_view_draws_without_what_takes_a_perspective :: proc(t: ^testing.T) {
 	quality := Quality {
-		aa          = .Fsr,
-		shadows     = {virtual = true},
+		aa = .Fsr,
+		shadows = {virtual = true},
 		reflections = {technique = .Screen},
 	}
 	testing.expect_value(t, limit_quality(perspective_view(1, 1, 0.05), quality), quality)

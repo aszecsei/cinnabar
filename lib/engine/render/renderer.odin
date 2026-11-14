@@ -66,132 +66,132 @@ id_submesh :: proc "contextless" (id: u32) -> int {
 // Renderer is the built-in renderer (see docs/rendering/frame.md#frame). It lives in Game_State and holds handles only, so
 // a code reload keeps it.
 Renderer :: struct {
-	platform:        ^core.Platform_API,
-	residency:       Residency,
-	textures:        Texture_Cache,
+	platform:               ^core.Platform_API,
+	residency:              Residency,
+	textures:               Texture_Cache,
 	// What the last frame's transient textures took, over its views (see Transient_Stats).
-	transients:      Transient_Stats,
+	transients:             Transient_Stats,
 	// The lines that debug draws, which the debug layer draws each frame.
-	debug:           debug.Draw,
+	debug:                  debug.Draw,
 	// Registrations, created again in renderer_reload.
-	meshes:          Extractor,
-	instanced:       Extractor,
-	surfaces:        Extractor,
-	volumes:         volume.Volumes,
-	materials:       Materials,
-	scene:           Gpu_Scene,
-	lights:          Lights,
-	shadows:         Shadow_Passes,
+	meshes:                 Extractor,
+	instanced:              Extractor,
+	surfaces:               Extractor,
+	volumes:                volume.Volumes,
+	materials:              Materials,
+	scene:                  Gpu_Scene,
+	lights:                 Lights,
+	shadows:                Shadow_Passes,
 	// The GPU scene's acceleration structure and hit shading (see docs/rendering/ray-scene.md#ray-scene).
-	ray_scene:       Ray_Scene,
-	previews:        Previews,
+	ray_scene:              Ray_Scene,
+	previews:               Previews,
 	// The spatiotemporal blue noise that the ambient occlusion and the screen-space and traced reflections sample.
-	blue_noise:      Blue_Noise,
-	ao:              Ao_Passes,
-	gi:              Gi_Passes,
+	blue_noise:             Blue_Noise,
+	ao:                     Ao_Passes,
+	gi:                     Gi_Passes,
 	// The screen-space reflections (see screen_reflections.odin).
-	ssr:             Screen_Reflections,
+	ssr:                    Screen_Reflections,
 	// The traced reflections (see traced_reflections.odin).
-	rtr:             Traced_Reflections,
-	fog:             Volumetric_Fog,
-	sky:             Sky,
+	rtr:                    Traced_Reflections,
+	fog:                    Volumetric_Fog,
+	sky:                    Sky,
 	// The volumetric clouds (see clouds.odin).
-	clouds:          Volumetric_Clouds,
+	clouds:                 Volumetric_Clouds,
 	// The last frame's sky, which sky_texture_sun answers for.
-	last_sky_mode:   Sky_Mode,
-	post:            Post,
+	last_sky_mode:          Sky_Mode,
+	post:                   Post,
 	// The game's post effects, in the order that they run at each point. renderer_reload clears them.
-	effects:         [MAX_POST_EFFECTS]Post_Effect,
-	effect_count:    int,
+	effects:                [MAX_POST_EFFECTS]Post_Effect,
+	effect_count:           int,
 	// The output pass's pipeline for each output mode's frame target format. Only the frame's mode's is made.
-	output_pipelines: [gpu.Output_Mode]Shader_Pipeline,
-	debug_tested:    Shader_Pipeline,
-	debug_hidden:    Shader_Pipeline,
+	output_pipelines:       [gpu.Output_Mode]Shader_Pipeline,
+	debug_tested:           Shader_Pipeline,
+	debug_hidden:           Shader_Pipeline,
 	// Tested lines where the view model is, whose depth they cannot compare with.
-	debug_behind:    Shader_Pipeline,
-	debug_overlay:   Shader_Pipeline,
+	debug_behind:           Shader_Pipeline,
+	debug_overlay:          Shader_Pipeline,
 	// The debug views from the frame's textures (see Debug_View).
-	debug_view:      Shader_Pipeline,
+	debug_view:             Shader_Pipeline,
 	// Moment-based transparency's composite over the scene (see docs/rendering/transparency.md#transparency).
 	transparency_composite: Shader_Pipeline,
 	// The compute sprites' pipelines and buffers (see docs/rendering/transparency.md#sprites).
-	sprites:         Sprites,
+	sprites:                Sprites,
 	// The sprite renderers (see sheet_sprites.odin).
-	sheet_sprites:   Sheet_Sprites,
+	sheet_sprites:          Sheet_Sprites,
 	// The frame's own view's state (see View_State) unless Frame_Desc.state names another, which a game with one camera has
 	// no other of.
-	view:            View_State,
+	view:                   View_State,
 	// The state of the last frame's own view when it was not view, which the stats getters read, or nil. view_state_destroy
 	// clears it, so it never dangles.
-	stats_view:      ^View_State,
+	stats_view:             ^View_State,
 	// The particle systems' pool and state (see docs/rendering/particles.md#particles).
-	particles:       Particles,
+	particles:              Particles,
 	// The reflection probes' cubes, slots and capture (see reflection_probes.odin).
-	reflection_probes: Reflection_Probes,
+	reflection_probes:      Reflection_Probes,
 	// What the device can do, and the quality that the frames have unless Frame_Desc.quality replaces it (see
 	// set_quality).
-	caps:            Caps,
-	quality:         Quality,
+	caps:                   Caps,
+	quality:                Quality,
 	// A code reload may bring new descriptions, so the next frame updates every pipeline.
-	reloaded:        bool,
+	reloaded:               bool,
 }
 
 // Frame_Desc is what a game gives draw_frame each frame. It lives in frame memory, and so do its hooks' data.
 Frame_Desc :: struct {
-	view:              View,
-	size:              [2]u32,
+	view:            View,
+	size:            [2]u32,
 	// The frame's own view draws into this texture, in gpu.FRAME_TARGET_FORMAT (always SDR) and the render target layout,
 	// which the view leaves it in, as an Extra_View does, and not into the frame target. 0 draws into the frame target,
 	// in the frame's output mode. size is the texture's size.
-	target:            gpu.Texture,
+	target:          gpu.Texture,
 	// What the renderer keeps for the frame's own view from frame to frame (see View_State): the caller's, made with
 	// view_state_init and freed with view_state_destroy, or nil for Renderer.view. A game whose own view changes between
 	// frames, as the editor's does when viewports open and close, gives each camera a state of its own, so none loses its
 	// histories (see docs/rendering/frame.md#views). It must not be an extra view's.
-	state:             ^View_State,
+	state:           ^View_State,
 	// Keeps the IDs and the depth after the frame's passes need them, for the editor's picking and outline.
-	keep_ids:          bool,
+	keep_ids:        bool,
 	// No debug layer this frame: the debug lines are not drawn, though those with a duration still expire, and the
 	// output pass composites no debug layer. The debug hook still runs, with Frame.debug 0, so passes that read the IDs
 	// and the depth after post-processing, such as the editor's picks, still run; nothing may draw into Frame.debug
 	// then. The editor sets it outside Edit (see docs/rendering/layers-and-output.md#debug).
-	no_debug:          bool,
+	no_debug:        bool,
 	// The entity slots not to draw, a bit each, as the editor hides them. nil hides nothing.
-	hidden:            []u32,
+	hidden:          []u32,
 	// The frame's settings (see docs/rendering/frame.md#settings). nil takes them from the volumes at the view, as
 	// resolve_settings does.
-	settings:          ^Frame_Settings,
+	settings:        ^Frame_Settings,
 	// The frame's quality, as far as the device can do it (see docs/rendering/quality.md#quality). nil takes
 	// Renderer.quality.
-	quality:           ^Quality,
+	quality:         ^Quality,
 	// The editor's debug view, the features that it turns off, and the stops that it adds to the exposure (see
 	// docs/rendering/post-processing.md#debug-views).
-	debug_view:        Debug_View,
-	disable:           Features,
-	exposure_offset:   f32,
+	debug_view:      Debug_View,
+	disable:         Features,
+	exposure_offset: f32,
 	// Count the forward pass's quads and their pixels for shading_stats, which costs the forward pass a little (see
 	// docs/rendering/lighting-and-shadows.md#quad-overdraw).
-	shading_stats:     bool,
-	hooks:             Frame_Hooks,
+	shading_stats:   bool,
+	hooks:           Frame_Hooks,
 	// A second hook, for a caller that adds passes to the frame without owning hooks.data (see Frame_Overlay).
-	overlay:           Frame_Overlay,
+	overlay:         Frame_Overlay,
 	// The editor's material previews that the frame also draws, each into its own target (see
 	// docs/rendering/materials.md#material-previews). draw_frame sets each one's complete.
-	previews:          []Preview_Desc,
+	previews:        []Preview_Desc,
 	// The sprites that the frame draws with the moment-based transparent surfaces, at most MAX_SPRITES (see
 	// docs/rendering/transparency.md#sprites).
-	sprites:           []Sprite,
+	sprites:         []Sprite,
 	// The time that the particles step this frame, in seconds: the game's simulation time, which is 0 while the editor
 	// is in Edit or paused (see docs/rendering/particles.md#time).
-	delta:             f32,
+	delta:           f32,
 	// The Particle_Systems that step by the host's time while delta is 0: those that the editor plays, its selection.
-	playing:           []ecs.Entity,
+	playing:         []ecs.Entity,
 	// The pose of each skinned entity this frame, by entity (see Skin_Pose and docs/rendering/gpu-scene.md#skinned-meshes).
 	// A Mesh_Renderer with no pose here, or whose mesh has no skin stream, draws at rest.
-	skins:             []Skin_Pose,
+	skins:           []Skin_Pose,
 	// Other views of the same world that the frame also draws, each into a target of its own, after its own view (see
 	// docs/rendering/frame.md#views). At most MAX_EXTRA_VIEWS draw.
-	extra_views:       []Extra_View,
+	extra_views:     []Extra_View,
 }
 
 // The most extra views that a frame draws. The texture cache holds the transient textures of this many and the frame's own.
@@ -229,8 +229,10 @@ Extra_View :: struct {
 // docs/rendering/frame.md#views).
 use_view :: proc(desc: ^Frame_Desc, v: Extra_View) {
 	desc.view, desc.size, desc.target, desc.state = v.view, v.size, v.target, v.state
-	desc.quality, desc.settings, desc.keep_ids, desc.no_debug = v.quality, v.settings, v.keep_ids, v.no_debug
-	desc.debug_view, desc.disable, desc.exposure_offset, desc.hooks = v.debug_view, v.disable, v.exposure_offset, v.hooks
+	desc.quality, desc.settings, desc.keep_ids, desc.no_debug =
+		v.quality, v.settings, v.keep_ids, v.no_debug
+	desc.debug_view, desc.disable, desc.exposure_offset, desc.hooks =
+		v.debug_view, v.disable, v.exposure_offset, v.hooks
 	desc.overlay = v.overlay
 }
 
@@ -248,26 +250,26 @@ Frame_Overlay :: struct {
 // Frame_Desc never outlives its frame.
 Frame_Hooks :: struct {
 	// Given to every hook as Frame.data.
-	data:         rawptr,
+	data:          rawptr,
 	// Adds passes before the prepass, such as culling.
 	before_world:  proc(f: ^Frame),
 	// Adds passes after the prepass, which can read Frame.depth, Frame.normals, Frame.velocity and Frame.roughness.
 	after_prepass: proc(f: ^Frame),
 	// Declares the world pass's other uses, such as the buffers that world_draw reads.
-	world_uses:   proc(f: ^Frame, pass: Pass),
+	world_uses:    proc(f: ^Frame, pass: Pass),
 	// Records draws into the world pass, after the Mesh_Renderers in piece 0. The pass has world_pieces pieces.
-	world_draw:   proc(f: ^Frame, ctx: ^Pass_Context),
-	world_pieces: int,
+	world_draw:    proc(f: ^Frame, ctx: ^Pass_Context),
+	world_pieces:  int,
 	// Adds passes after the world pass. A pass that makes a new scene color sets Frame.scene to it.
-	after_world:  proc(f: ^Frame),
+	after_world:   proc(f: ^Frame),
 	// Adds passes just before post-processing, such as a game's own layer that it composites into Frame.scene in
 	// linear HDR. Post-processing then reads Frame.scene.
-	before_post:  proc(f: ^Frame),
+	before_post:   proc(f: ^Frame),
 	// Adds the passes that draw the UI into Frame.ui, after a pass that clears it. They load it.
-	ui:           proc(f: ^Frame),
+	ui:            proc(f: ^Frame),
 	// Adds passes that draw into Frame.debug after the debug lines. They load it. With Frame_Desc.no_debug the hook still
 	// runs, but Frame.debug is 0 and nothing may draw into it.
-	debug:        proc(f: ^Frame),
+	debug:         proc(f: ^Frame),
 }
 
 // Frame is one frame's targets and data, in frame memory, which the hooks and the passes share.
@@ -452,7 +454,12 @@ World_Frame :: struct {
 
 #assert(size_of(Debug_Push) <= 128 && size_of(Output_Push) <= 128)
 
-renderer_init :: proc(r: ^Renderer, platform: ^core.Platform_API, assets: ^asset.Assets, w: ^ecs.World) {
+renderer_init :: proc(
+	r: ^Renderer,
+	platform: ^core.Platform_API,
+	assets: ^asset.Assets,
+	w: ^ecs.World,
+) {
 	// The Renderer is too large for a temporary on the stack, so it is zeroed in place.
 	mem.zero_item(r)
 	r.platform = platform
@@ -564,10 +571,13 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	profile.scope_text(&r.platform.profile, "Build frame", .Render)
 	residency_set_mesh_pool(&r.residency, r.quality.mesh_pool)
 	residency_update(&r.residency)
-	output := r.platform.gpu_output != nil ? r.platform.gpu_output() : gpu.Output{format = gpu.FRAME_TARGET_FORMAT}
+	output :=
+		r.platform.gpu_output != nil ? r.platform.gpu_output() : gpu.Output{format = gpu.FRAME_TARGET_FORMAT}
 	// A target of its own is always SDR, whatever the frame's output is.
 	if desc.target != {} {
-		output = {format = gpu.FRAME_TARGET_FORMAT}
+		output = {
+			format = gpu.FRAME_TARGET_FORMAT,
+		}
 	}
 	own := desc.state != nil ? desc.state : &r.view
 	r.transients = {}
@@ -576,7 +586,11 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 
 	// The extra views that draw, and where every view looks from.
 	if len(desc.extra_views) > MAX_EXTRA_VIEWS {
-		log.warnf("render: %d extra views, of which only the first %d draw", len(desc.extra_views), MAX_EXTRA_VIEWS)
+		log.warnf(
+			"render: %d extra views, of which only the first %d draw",
+			len(desc.extra_views),
+			MAX_EXTRA_VIEWS,
+		)
 	}
 	extras: [MAX_EXTRA_VIEWS]Extra_View
 	count := 0
@@ -586,7 +600,10 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 		if ev.target == {} || ev.size.x == 0 || ev.size.y == 0 {
 			continue
 		}
-		assert(ev.state != nil && ev.state != own, "render: an extra view needs a View_State of its own")
+		assert(
+			ev.state != nil && ev.state != own,
+			"render: an extra view needs a View_State of its own",
+		)
 		for other in extras[:count] {
 			assert(other.state != ev.state, "render: two extra views share a View_State")
 		}
@@ -598,7 +615,17 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	world.cameras = cameras[1:1 + count]
 
 	frame_target := desc.target != {} ? desc.target : r.platform.gpu_frame_target()
-	ok := draw_view(r, w, desc, world, own, output, limit_quality(desc.view, quality), frame_target, false)
+	ok := draw_view(
+		r,
+		w,
+		desc,
+		world,
+		own,
+		output,
+		limit_quality(desc.view, quality),
+		frame_target,
+		false,
+	)
 	if !ok {
 		mesh_pool_not_sent(&r.residency.pool)
 	}
@@ -608,13 +635,26 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	// that fails does not fail the others.
 	for ev in extras[:count] {
 		view := desc
-		view.view, view.size, view.keep_ids, view.no_debug, view.debug_view = ev.view, ev.size, ev.keep_ids, ev.no_debug, ev.debug_view
-		view.disable, view.hooks, view.exposure_offset, view.settings = ev.disable, ev.hooks, ev.exposure_offset, ev.settings
+		view.view, view.size, view.keep_ids, view.no_debug, view.debug_view =
+			ev.view, ev.size, ev.keep_ids, ev.no_debug, ev.debug_view
+		view.disable, view.hooks, view.exposure_offset, view.settings =
+			ev.disable, ev.hooks, ev.exposure_offset, ev.settings
 		view.overlay = ev.overlay
-		view.extra_views, view.previews, view.playing, view.delta, view.shading_stats = nil, nil, nil, 0, false
+		view.extra_views, view.previews, view.playing, view.delta, view.shading_stats =
+			nil, nil, nil, 0, false
 		view_quality := ev.quality != nil ? clamp_quality(ev.quality^, r.caps) : quality
 		// The target is always SDR, whatever the frame's output is.
-		draw_view(r, w, view, world, ev.state, {format = gpu.FRAME_TARGET_FORMAT}, limit_quality(view.view, view_quality), ev.target, true)
+		draw_view(
+			r,
+			w,
+			view,
+			world,
+			ev.state,
+			{format = gpu.FRAME_TARGET_FORMAT},
+			limit_quality(view.view, view_quality),
+			ev.target,
+			true,
+		)
 	}
 	// After the last view, so the lines of this frame reach them all.
 	debug.end_frame(&r.debug)
@@ -640,39 +680,47 @@ draw_view :: proc(
 	// execute, shows none.
 	defer read_view_stats(r, state)
 	state.frames += 1
-	g := extra ? begin_extra(r.platform, &r.textures, &state.histories) : begin(r.platform, &r.textures, &state.histories)
+	g :=
+		extra ? begin_extra(r.platform, &r.textures, &state.histories) : begin(r.platform, &r.textures, &state.histories)
 	size := render_size(desc.size, quality.render_scale)
 	aspect := f32(size.x) / f32(max(size.y, 1))
 	f := new(Frame, r.platform.frame_allocator)
 	f^ = {
-		renderer        = r,
-		graph           = &g,
-		data            = desc.hooks.data,
-		view            = desc.view,
-		size            = size,
-		output_size     = desc.size,
-		scene_size      = size,
-		output          = output,
-		view_projection = view_projection(desc.view, aspect),
-		projection      = projection_constants(desc.view, aspect),
+		renderer              = r,
+		graph                 = &g,
+		data                  = desc.hooks.data,
+		view                  = desc.view,
+		size                  = size,
+		output_size           = desc.size,
+		scene_size            = size,
+		output                = output,
+		view_projection       = view_projection(desc.view, aspect),
+		projection            = projection_constants(desc.view, aspect),
 		view_model_projection = projection_constants(view_model_view(desc.view), aspect),
-		hooks           = desc.hooks,
-		hidden          = desc.hidden,
-		scene_scale     = 1,
-		debug_view      = desc.debug_view,
-		lod_error       = quality.lod_error,
-		state           = state,
-		world           = world,
-		extra           = extra,
+		hooks                 = desc.hooks,
+		hidden                = desc.hidden,
+		scene_scale           = 1,
+		debug_view            = desc.debug_view,
+		lod_error             = quality.lod_error,
+		state                 = state,
+		world                 = world,
+		extra                 = extra,
 	}
 	target := import_texture(&g, frame_target, .Color)
 	f.scene = create_texture(&g, {size = size, format = SCENE_FORMAT, label = "scene"})
 	f.ids = create_texture(&g, {size = size, format = ID_FORMAT, label = "entity ids"})
 	f.depth = create_texture(&g, {size = size, format = DEPTH_FORMAT, label = "scene depth"})
 	f.normals = create_texture(&g, {size = size, format = NORMAL_FORMAT, label = "scene normals"})
-	f.velocity = create_texture(&g, {size = size, format = VELOCITY_FORMAT, label = "scene velocity"})
-	f.roughness = create_texture(&g, {size = size, format = ROUGHNESS_FORMAT, label = "scene roughness"})
-	settings := desc.settings != nil ? desc.settings^ : resolve_settings(r, w, desc.view.position, desc.hidden)
+	f.velocity = create_texture(
+		&g,
+		{size = size, format = VELOCITY_FORMAT, label = "scene velocity"},
+	)
+	f.roughness = create_texture(
+		&g,
+		{size = size, format = ROUGHNESS_FORMAT, label = "scene roughness"},
+	)
+	settings :=
+		desc.settings != nil ? desc.settings^ : resolve_settings(r, w, desc.view.position, desc.hidden)
 	apply_quality(&settings, quality)
 	apply_debug(&settings, desc.debug_view, desc.disable, desc.exposure_offset)
 	apply_view_limits(&settings, desc.view)
@@ -729,7 +777,8 @@ draw_view :: proc(
 		begin_particles(f, w, desc.delta, desc.hidden, desc.playing)
 	}
 	lines := debug.frame_lines(&r.debug)
-	has_debug := !desc.no_debug && (len(lines) > 0 || desc.hooks.debug != nil || desc.overlay.draw != nil)
+	has_debug :=
+		!desc.no_debug && (len(lines) > 0 || desc.hooks.debug != nil || desc.overlay.draw != nil)
 
 	add_particle_passes(f)
 	add_ribbon_pass(f)
@@ -740,9 +789,15 @@ draw_view :: proc(
 	begin_shading(f, desc.shading_stats)
 	// The view model first, which sets its stencil bit, then the world, which draws only where the bit is clear.
 	p := add_render_pass(&g, "prepass", proc(ctx: ^Pass_Context) {
-		draw_scene_view((^Frame)(ctx.data), ctx.cb, VIEW_VIEW_MODEL, .Prepass)
-		draw_scene_view((^Frame)(ctx.data), ctx.cb, VIEW_CAMERA, .Prepass, filter = .No_Particles)
-	}, f)
+			draw_scene_view((^Frame)(ctx.data), ctx.cb, VIEW_VIEW_MODEL, .Prepass)
+			draw_scene_view(
+				(^Frame)(ctx.data),
+				ctx.cb,
+				VIEW_CAMERA,
+				.Prepass,
+				filter = .No_Particles,
+			)
+		}, f)
 	color(&g, p, f.normals, .Clear)
 	color(&g, p, f.velocity, .Clear, {VELOCITY_NONE, VELOCITY_NONE, 0, 0})
 	color(&g, p, f.roughness, .Clear, {ROUGHNESS_NONE, 0, 0, 0})
@@ -776,10 +831,25 @@ draw_view :: proc(
 	background := draws_sky ? {} : settings.sky.background
 	p = add_render_pass(&g, "world", draw_world, f, pieces = max(desc.hooks.world_pieces, 1))
 	color(&g, p, f.scene, .Clear, {background.r, background.g, background.b, 1})
-	color(&g, p, f.ids, .Clear, store = desc.keep_ids || desc.debug_view == .Entity_Ids ? .Store : .Discard)
+	color(
+		&g,
+		p,
+		f.ids,
+		.Clear,
+		store = desc.keep_ids || desc.debug_view == .Entity_Ids ? .Store : .Discard,
+	)
 	// The debug layer tests against the depth, the editor reads it, and so do the sky, the fog over the background, the
 	// transparent surfaces, the sprites, temporal AA, the exposure and the depth's debug view.
-	keep_depth := desc.keep_ids || has_debug || f.fog != nil || draws_sky || has_transparency(f) || has_sprites(f) || has_sheet_sprites(f) || reads_depth(f) || desc.debug_view == .Depth
+	keep_depth :=
+		desc.keep_ids ||
+		has_debug ||
+		f.fog != nil ||
+		draws_sky ||
+		has_transparency(f) ||
+		has_sprites(f) ||
+		has_sheet_sprites(f) ||
+		reads_depth(f) ||
+		desc.debug_view == .Depth
 	depth(&g, p, f.depth, .Load, store = keep_depth ? .Store : .Discard)
 	declare_scene_draws(f, p)
 	declare_lighting(f, p, opaque = true)
@@ -859,7 +929,11 @@ draw_view :: proc(
 	r.transients.taken_bytes += g.transients.taken_bytes
 	if ok {
 		for &preview in desc.previews {
-			if preview.capture != 0 && preview.complete != nil && preview.complete^ && preview.captured != nil && r.platform.gpu_capture_texture != nil {
+			if preview.capture != 0 &&
+			   preview.complete != nil &&
+			   preview.complete^ &&
+			   preview.captured != nil &&
+			   r.platform.gpu_capture_texture != nil {
 				preview.captured^ = r.platform.gpu_capture_texture(preview.target, preview.capture)
 			}
 		}
@@ -902,7 +976,13 @@ sync_frame_pipelines :: proc(r: ^Renderer, mode: gpu.Output_Mode, sdr: bool) {
 	sync_particle_pipelines(r, force)
 	sync_reflection_probe_pipelines(r, force)
 	sync_compute_pipeline(&r.debug_view, r.platform, assets, {label = "debug view"}, force)
-	sync_compute_pipeline(&r.transparency_composite, r.platform, assets, {label = "transparency composite"}, force)
+	sync_compute_pipeline(
+		&r.transparency_composite,
+		r.platform,
+		assets,
+		{label = "transparency composite"},
+		force,
+	)
 	debug_desc := gpu.Graphics_Pipeline_Desc {
 		colors       = {{format = DEBUG_FORMAT, blend = .Alpha}},
 		depth_format = DEPTH_FORMAT,
@@ -910,15 +990,43 @@ sync_frame_pipelines :: proc(r: ^Renderer, mode: gpu.Output_Mode, sdr: bool) {
 	// Tested lines compare depth only with the world's pixels. The view model always hides them, as it hides the world.
 	debug_desc.stencil = WORLD_STENCIL
 	debug_desc.depth_compare, debug_desc.label = .Greater_Equal, "debug lines"
-	sync_graphics_pipeline(&r.debug_tested, r.platform, assets, {.Vertex, .Pixel}, debug_desc, force)
+	sync_graphics_pipeline(
+		&r.debug_tested,
+		r.platform,
+		assets,
+		{.Vertex, .Pixel},
+		debug_desc,
+		force,
+	)
 	debug_desc.depth_compare, debug_desc.label = .Less, "debug lines (hidden)"
-	sync_graphics_pipeline(&r.debug_hidden, r.platform, assets, {.Vertex, .Pixel}, debug_desc, force)
+	sync_graphics_pipeline(
+		&r.debug_hidden,
+		r.platform,
+		assets,
+		{.Vertex, .Pixel},
+		debug_desc,
+		force,
+	)
 	debug_desc.stencil.compare = .Not_Equal
 	debug_desc.depth_compare, debug_desc.label = .Always, "debug lines (behind the view model)"
-	sync_graphics_pipeline(&r.debug_behind, r.platform, assets, {.Vertex, .Pixel}, debug_desc, force)
+	sync_graphics_pipeline(
+		&r.debug_behind,
+		r.platform,
+		assets,
+		{.Vertex, .Pixel},
+		debug_desc,
+		force,
+	)
 	debug_desc.stencil = {}
 	debug_desc.depth_compare, debug_desc.label = .Always, "debug lines (overlay)"
-	sync_graphics_pipeline(&r.debug_overlay, r.platform, assets, {.Vertex, .Pixel}, debug_desc, force)
+	sync_graphics_pipeline(
+		&r.debug_overlay,
+		r.platform,
+		assets,
+		{.Vertex, .Pixel},
+		debug_desc,
+		force,
+	)
 }
 
 @(private = "file")
@@ -927,7 +1035,14 @@ sync_output_pipeline :: proc(r: ^Renderer, mode: gpu.Output_Mode, force: bool) {
 		colors = {{format = gpu.output_format(mode)}},
 		label  = "output",
 	}
-	sync_graphics_pipeline(&r.output_pipelines[mode], r.platform, r.residency.assets, {.Vertex, .Pixel}, desc, force)
+	sync_graphics_pipeline(
+		&r.output_pipelines[mode],
+		r.platform,
+		r.residency.assets,
+		{.Vertex, .Pixel},
+		desc,
+		force,
+	)
 }
 
 @(private = "file")
@@ -948,7 +1063,10 @@ draw_world :: proc(ctx: ^Pass_Context) {
 // upload_debug_lines writes the lines relative to the camera, the tested ones first, then the overlay ones.
 @(private = "file")
 upload_debug_lines :: proc(f: ^Frame, lines: []debug.Line) {
-	upload, ok := f.renderer.platform.gpu_upload(max(len(lines), 1) * size_of(Debug_Vertex_Line), 16)
+	upload, ok := f.renderer.platform.gpu_upload(
+		max(len(lines), 1) * size_of(Debug_Vertex_Line),
+		16,
+	)
 	if !ok {
 		return
 	}
@@ -964,7 +1082,11 @@ upload_debug_lines :: proc(f: ^Frame, lines: []debug.Line) {
 	for mode in debug.Mode {
 		for l in lines {
 			if l.mode == mode {
-				records[next] = {a = ecs.position_sub(l.a, f.view.position), b = ecs.position_sub(l.b, f.view.position), color = pack(l.color)}
+				records[next] = {
+					a     = ecs.position_sub(l.a, f.view.position),
+					b     = ecs.position_sub(l.b, f.view.position),
+					color = pack(l.color),
+				}
 				next += 1
 			}
 		}
@@ -990,7 +1112,13 @@ draw_debug_lines :: proc(ctx: ^Pass_Context) {
 		viewport        = {f32(f.size.x), f32(f.size.y)},
 		width           = DEBUG_LINE_WIDTH,
 	}
-	draw :: proc(cb: ^gpu.Command_Buffer, pipeline: gpu.Pipeline, push: ^Debug_Push, first, count: int, alpha: f32) {
+	draw :: proc(
+		cb: ^gpu.Command_Buffer,
+		pipeline: gpu.Pipeline,
+		push: ^Debug_Push,
+		first, count: int,
+		alpha: f32,
+	) {
 		// A pipeline that does not exist yet, because its shader is not cooked, draws nothing.
 		if count == 0 || pipeline == {} {
 			return

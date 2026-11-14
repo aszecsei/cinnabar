@@ -134,20 +134,10 @@ view_projection :: proc(view: View, aspect: f32) -> matrix[4, 4]f32 {
 	c := projection_constants(view, aspect)
 	projection: matrix[4, 4]f32
 	if c.w == 0 {
-		projection = {
-			c.x, 0, 0, 0,
-			0, c.y, 0, 0,
-			0, 0, 0, c.z,
-			0, 0, 1, 0,
-		}
+		projection = {c.x, 0, 0, 0, 0, c.y, 0, 0, 0, 0, 0, c.z, 0, 0, 1, 0}
 	} else {
 		range := c.w - c.z
-		projection = {
-			c.x, 0, 0, 0,
-			0, c.y, 0, 0,
-			0, 0, -1 / range, c.w / range,
-			0, 0, 0, 1,
-		}
+		projection = {c.x, 0, 0, 0, 0, c.y, 0, 0, 0, 0, -1 / range, c.w / range, 0, 0, 0, 1}
 	}
 	return projection * linalg.matrix4_from_quaternion_f32(conj(view.rotation))
 }

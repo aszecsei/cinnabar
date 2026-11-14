@@ -104,7 +104,13 @@ extract_writes_relative_poses_in_query_order :: proc(t: ^testing.T) {
 	testing.expect_value(t, count, COUNT)
 	records := make([]Record, count)
 	defer delete(records)
-	chunks := extract(w, ex, origin, ([^]byte)(raw_data(records))[:count * size_of(Record)], size_of(Record))
+	chunks := extract(
+		w,
+		ex,
+		origin,
+		([^]byte)(raw_data(records))[:count * size_of(Record)],
+		size_of(Record),
+	)
 	for c in chunks {
 		for tint, i in ecs.column(c.view, EXTRACT_TERMS, Tint) {
 			records[c.first + i].tint = tint.value

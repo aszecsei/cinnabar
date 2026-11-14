@@ -83,13 +83,21 @@ component_fields :: proc(type: typeid, allocator: runtime.Allocator) -> []Field 
 }
 
 @(private = "file")
-add_fields :: proc(fields: ^[dynamic]Field, ti: ^runtime.Type_Info, prefix: string, base: uintptr, read_only: bool, allocator: runtime.Allocator) {
+add_fields :: proc(
+	fields: ^[dynamic]Field,
+	ti: ^runtime.Type_Info,
+	prefix: string,
+	base: uintptr,
+	read_only: bool,
+	allocator: runtime.Allocator,
+) {
 	s, is_struct := runtime.type_info_base(ti).variant.(runtime.Type_Info_Struct)
 	if !is_struct {
 		return
 	}
 	for i in 0 ..< s.field_count {
-		name := s.names[i] if prefix == "" else strings.concatenate({prefix, ".", s.names[i]}, allocator)
+		name :=
+			s.names[i] if prefix == "" else strings.concatenate({prefix, ".", s.names[i]}, allocator)
 		field := Field {
 			name      = name,
 			offset    = u32(base + s.offsets[i]),
@@ -116,7 +124,8 @@ add_fields :: proc(fields: ^[dynamic]Field, ti: ^runtime.Type_Info, prefix: stri
 				field.asset_kind = asset_kind
 			}
 			append(fields, field)
-		} else if array, is_array := runtime.type_info_base(s.types[i]).variant.(runtime.Type_Info_Array); is_array && array.elem.id == format.Guid {
+		} else if array, is_array := runtime.type_info_base(s.types[i]).variant.(runtime.Type_Info_Array);
+		   is_array && array.elem.id == format.Guid {
 			for index in 0 ..< array.count {
 				element := field
 				element.name = fmt.aprintf("%s.%d", name, index, allocator = allocator)
@@ -133,9 +142,19 @@ add_fields :: proc(fields: ^[dynamic]Field, ti: ^runtime.Type_Info, prefix: stri
 // overridable reports whether a type is an overridable setting: a struct of exactly override: bool and value: T, such
 // as volume.Value(T). It gives the value's field and the flag's offset.
 @(private = "file")
-overridable :: proc(ti: ^runtime.Type_Info) -> (value: reflect.Struct_Field, override: uintptr, ok: bool) {
+overridable :: proc(
+	ti: ^runtime.Type_Info,
+) -> (
+	value: reflect.Struct_Field,
+	override: uintptr,
+	ok: bool,
+) {
 	s, is_struct := runtime.type_info_base(ti).variant.(runtime.Type_Info_Struct)
-	if !is_struct || s.field_count != 2 || s.names[0] != "override" || s.names[1] != "value" || s.types[0].id != bool {
+	if !is_struct ||
+	   s.field_count != 2 ||
+	   s.names[0] != "override" ||
+	   s.names[1] != "value" ||
+	   s.types[0].id != bool {
 		return
 	}
 	return {name = s.names[1], type = s.types[1], offset = s.offsets[1]}, s.offsets[0], true
@@ -198,13 +217,19 @@ field_kind :: proc(ti: ^runtime.Type_Info, field: ^Field, allocator: runtime.All
 		field.kind = .Bool
 		return ti.size == 1
 	case runtime.Type_Info_Enum:
-		base, ok := integer_kind(runtime.type_info_base(v.base).variant.(runtime.Type_Info_Integer).signed, ti.size)
+		base, ok := integer_kind(
+			runtime.type_info_base(v.base).variant.(runtime.Type_Info_Integer).signed,
+			ti.size,
+		)
 		if !ok {
 			return false
 		}
 		values := make([]Enum_Value, len(v.names), allocator)
 		for name, i in v.names {
-			values[i] = {name = name, value = i64(v.values[i])}
+			values[i] = {
+				name  = name,
+				value = i64(v.values[i]),
+			}
 		}
 		field.kind, field.enum_base, field.enum_values = .Enum, base, values
 		return true
@@ -222,7 +247,8 @@ field_kind :: proc(ti: ^runtime.Type_Info, field: ^Field, allocator: runtime.All
 
 @(private = "file")
 integer_kind :: proc(signed: bool, size: int) -> (Field_Kind, bool) {
-	kinds := [4]Field_Kind{.I8, .I16, .I32, .I64} if signed else [4]Field_Kind{.U8, .U16, .U32, .U64}
+	kinds :=
+		[4]Field_Kind{.I8, .I16, .I32, .I64} if signed else [4]Field_Kind{.U8, .U16, .U32, .U64}
 	switch size {
 	case 1:
 		return kinds[0], true

@@ -10,7 +10,15 @@ import format "cinnabar:engine/asset/format"
 // state that it fades from raise none, so a step that two blended clips both mark is raised once (see
 // docs/animation/design.md#events).
 @(private)
-markers :: proc(g: ^Graph, inst: ^Instance, m: ^Motion, weights: [format.MAX_ANIMATION_GRAPH_POINTS]f32, previous_progress: f32, entered: bool, out: ^Tick_Output) {
+markers :: proc(
+	g: ^Graph,
+	inst: ^Instance,
+	m: ^Motion,
+	weights: [format.MAX_ANIMATION_GRAPH_POINTS]f32,
+	previous_progress: f32,
+	entered: bool,
+	out: ^Tick_Output,
+) {
 	if g.blob == nil {
 		return
 	}
@@ -26,7 +34,10 @@ markers :: proc(g: ^Graph, inst: ^Instance, m: ^Motion, weights: [format.MAX_ANI
 		return
 	}
 	c := format.animation_graph_clips(g.data, g.blob)[clip]
-	clip_markers := format.animation_graph_markers(g.data, g.blob)[c.first_marker:][:c.marker_count]
+	clip_markers := format.animation_graph_markers(
+		g.data,
+		g.blob,
+	)[c.first_marker:][:c.marker_count]
 	t1 := phase(inst.progress, m.loop) * d
 	t0 := phase(previous_progress, m.loop) * d
 	wrapped := m.loop && math.floor(inst.progress) > math.floor(previous_progress)
@@ -40,7 +51,13 @@ markers :: proc(g: ^Graph, inst: ^Instance, m: ^Motion, weights: [format.MAX_ANI
 
 // pass_markers raises the markers after from, or at it with closed, up to and at to, in the order of their times.
 @(private = "file")
-pass_markers :: proc(markers: []format.Animation_Graph_Marker, from, to: f32, closed: bool, state: u16, out: ^Tick_Output) {
+pass_markers :: proc(
+	markers: []format.Animation_Graph_Marker,
+	from, to: f32,
+	closed: bool,
+	state: u16,
+	out: ^Tick_Output,
+) {
 	for marker in markers {
 		after := marker.time > from || (closed && marker.time == from)
 		if after && marker.time <= to {

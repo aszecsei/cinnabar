@@ -9,10 +9,7 @@ import physics_null "cinnabar:core/physics/null"
 
 // The development host loads physics_jolt.dll as a plugin (see lib/core/physics/plugin); release builds and tests link
 // the backend statically, through this package.
-foreign import lib {
-	"../../../../build/obj/jolt/static/out/physics_jolt.lib",
-	"../../../../build/obj/jolt/static/out/Jolt.lib",
-}
+foreign import lib {"../../../../build/obj/jolt/static/out/physics_jolt.lib", "../../../../build/obj/jolt/static/out/Jolt.lib"}
 
 @(default_calling_convention = "c")
 foreign lib {
@@ -29,7 +26,10 @@ load :: proc(host: ^physics.Host, name := "") -> ^physics.Physics_API {
 		return physics_null.load(host)
 	case "", "jolt":
 	case:
-		log.warnf("physics: this build links the Jolt backend, so physics.backend = %s is not used", name)
+		log.warnf(
+			"physics: this build links the Jolt backend, so physics.backend = %s is not used",
+			name,
+		)
 	}
 	return cinnabar_physics_api(host)
 }

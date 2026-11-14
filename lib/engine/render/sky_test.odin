@@ -22,7 +22,12 @@ the_flat_ambient_is_the_sky_above_and_the_ground_below :: proc(t: ^testing.T) {
 
 @(test)
 the_fogs_sky_light_without_anisotropy_is_the_average :: proc(t: ^testing.T) {
-	a := Ambient{constant = {0.4, 0.5, 0.6}, x = {0.1, 0, 0}, y = {0.2, 0.25, 0.3}, z = {0, -0.05, 0.1}}
+	a := Ambient {
+		constant = {0.4, 0.5, 0.6},
+		x        = {0.1, 0, 0},
+		y        = {0.2, 0.25, 0.3},
+		z        = {0, -0.05, 0.1},
+	}
 	for d in ([][3]f32{{0, 1, 0}, {0, -1, 0}, {1, 0, 0}, linalg.normalize([3]f32{1, -2, 3})}) {
 		testing.expect(t, near(ambient_scattered(a, 0, d), a.constant))
 	}
@@ -40,7 +45,12 @@ henyey_greenstein :: proc(g, cos_theta: f64) -> f64 {
 // cosine's convolution.
 @(test)
 the_fogs_sky_light_is_the_sky_through_the_phase :: proc(t: ^testing.T) {
-	a := Ambient{constant = {0.5, 0.6, 0.8}, x = {0.05, 0.02, -0.03}, y = {0.2, 0.25, 0.35}, z = {-0.04, 0.06, 0.01}}
+	a := Ambient {
+		constant = {0.5, 0.6, 0.8},
+		x        = {0.05, 0.02, -0.03},
+		y        = {0.2, 0.25, 0.35},
+		z        = {-0.04, 0.06, 0.01},
+	}
 	// At g = 0.9 the phase's lobe is about 0.1 radians wide, so the directions are 0.007 radians apart.
 	N :: 1 << 18
 	golden := math.PI * (3 - math.sqrt(f64(5)))
@@ -62,20 +72,40 @@ the_fogs_sky_light_is_the_sky_through_the_phase :: proc(t: ^testing.T) {
 			integral := sum * (4 * math.PI / N)
 			expected := [3]f32{f32(integral.x), f32(integral.y), f32(integral.z)}
 			got := ambient_scattered(a, g, toward)
-			testing.expectf(t, near(got, expected, 1e-3), "g %v toward %v: %v, the integral %v", g, toward, got, expected)
+			testing.expectf(
+				t,
+				near(got, expected, 1e-3),
+				"g %v toward %v: %v, the integral %v",
+				g,
+				toward,
+				got,
+				expected,
+			)
 		}
 	}
 	// Fog that scatters forward, above a camera under a Flat sky, takes more of the sky's light than fog below it.
 	flat := flat_ambient({0.4, 0.5, 0.9}, {0.2, 0.1, 0.05})
-	above, below := ambient_scattered(flat, 0.5, {0, -1, 0}), ambient_scattered(flat, 0.5, {0, 1, 0})
-	testing.expectf(t, above.b > flat.constant.b && below.b < flat.constant.b, "above %v, below %v", above, below)
+	above, below :=
+		ambient_scattered(flat, 0.5, {0, -1, 0}), ambient_scattered(flat, 0.5, {0, 1, 0})
+	testing.expectf(
+		t,
+		above.b > flat.constant.b && below.b < flat.constant.b,
+		"above %v, below %v",
+		above,
+		below,
+	)
 }
 
 // A hemisphere's light is the sky's light averaged over its directions. The sky's light from a direction is the
 // ambient's constant and its gradient times 1.5, which undoes the cosine's convolution.
 @(test)
 the_hemispheres_light_is_the_sky_averaged_over_it :: proc(t: ^testing.T) {
-	a := Ambient{constant = {0.5, 0.6, 0.8}, x = {0.05, 0.02, -0.03}, y = {0.2, 0.25, 0.35}, z = {-0.04, 0.06, 0.01}}
+	a := Ambient {
+		constant = {0.5, 0.6, 0.8},
+		x        = {0.05, 0.02, -0.03},
+		y        = {0.2, 0.25, 0.35},
+		z        = {-0.04, 0.06, 0.01},
+	}
 	N :: 1 << 16
 	golden := math.PI * (3 - math.sqrt(f64(5)))
 	for axis in ([][3]f32{{0, 1, 0}, {0, -1, 0}, linalg.normalize([3]f32{1, -2, 3})}) {
@@ -89,14 +119,23 @@ the_hemispheres_light_is_the_sky_averaged_over_it :: proc(t: ^testing.T) {
 				continue
 			}
 			for c in 0 ..< 3 {
-				sum[c] += f64(a.constant[c]) + 1.5 * (f64(a.x[c]) * w.x + f64(a.y[c]) * w.y + f64(a.z[c]) * w.z)
+				sum[c] +=
+					f64(a.constant[c]) +
+					1.5 * (f64(a.x[c]) * w.x + f64(a.y[c]) * w.y + f64(a.z[c]) * w.z)
 			}
 			count += 1
 		}
 		mean := sum / f64(count)
 		expected := [3]f32{f32(mean.x), f32(mean.y), f32(mean.z)}
 		got := ambient_hemisphere(a, axis)
-		testing.expectf(t, near(got, expected, 1e-3), "axis %v: %v, the integral %v", axis, got, expected)
+		testing.expectf(
+			t,
+			near(got, expected, 1e-3),
+			"axis %v: %v, the integral %v",
+			axis,
+			got,
+			expected,
+		)
 	}
 	// The two halves of the sphere average to the whole sphere's light.
 	up, down := ambient_hemisphere(a, {0, 1, 0}), ambient_hemisphere(a, {0, -1, 0})
@@ -104,7 +143,13 @@ the_hemispheres_light_is_the_sky_averaged_over_it :: proc(t: ^testing.T) {
 	// Under a Flat sky, the upper hemisphere's light is the sky's color more than the average is.
 	flat := flat_ambient({0.4, 0.5, 0.9}, {0.2, 0.1, 0.05})
 	above := ambient_hemisphere(flat, {0, 1, 0})
-	testing.expectf(t, above.b / above.r > flat.constant.b / flat.constant.r, "above %v, the average %v", above, flat.constant)
+	testing.expectf(
+		t,
+		above.b / above.r > flat.constant.b / flat.constant.r,
+		"above %v, the average %v",
+		above,
+		flat.constant,
+	)
 }
 
 @(test)
@@ -126,7 +171,12 @@ a_noon_sky_is_blue_and_a_night_sky_dark :: proc(t: ^testing.T) {
 	up := ambient_at(noon, {0, 1, 0})
 	testing.expectf(t, up.b > up.g && up.g > up.r && up.r > 0, "the sky from above is %v", up)
 	night := sky_ambient(a, 0.001, {{sky_direction(0, -30), 3}})
-	testing.expectf(t, linalg.length(ambient_at(night, {0, 1, 0})) < linalg.length(up) * 0.01, "night %v", night)
+	testing.expectf(
+		t,
+		linalg.length(ambient_at(night, {0, 1, 0})) < linalg.length(up) * 0.01,
+		"night %v",
+		night,
+	)
 }
 
 // The sky's light toward a low sun, where Mie's lobe is, is brighter than the sky's light away from it, so fog that
@@ -139,7 +189,14 @@ a_sunsets_ambient_is_brighter_toward_the_sun :: proc(t: ^testing.T) {
 		ambient := sky_ambient(a, 0.003, {{toward, 3}})
 		along := [3]f32{toward.x, 0, toward.z}
 		gradient := ambient.x * along.x + ambient.z * along.z
-		testing.expectf(t, gradient.r > 0.015 * ambient.constant.r && gradient.b > 0, "elevation %v: the gradient toward the sun is %v, the constant %v", el, gradient, ambient.constant)
+		testing.expectf(
+			t,
+			gradient.r > 0.015 * ambient.constant.r && gradient.b > 0,
+			"elevation %v: the gradient toward the sun is %v, the constant %v",
+			el,
+			gradient,
+			ambient.constant,
+		)
 	}
 }
 
@@ -159,7 +216,10 @@ an_environment_takes_its_sun_from_the_angles :: proc(t: ^testing.T) {
 // +z unturned, comes from +x after a quarter turn, as the background shows the column there.
 @(test)
 a_texture_skys_rotation_turns_its_ambient_light :: proc(t: ^testing.T) {
-	a := Ambient{constant = {1, 1, 1}, z = {0.5, 0.5, 0.5}}
+	a := Ambient {
+		constant = {1, 1, 1},
+		z        = {0.5, 0.5, 0.5},
+	}
 	turned := turn_ambient(a, math.PI / 2)
 	testing.expect(t, near(ambient_at(turned, {1, 0, 0}), {1.5, 1.5, 1.5}))
 	testing.expect(t, near(ambient_at(turned, {0, 0, 1}), {1, 1, 1}))
@@ -171,8 +231,16 @@ a_texture_skys_rotation_turns_its_ambient_light :: proc(t: ^testing.T) {
 a_texture_sky_without_its_texture_is_flat :: proc(t: ^testing.T) {
 	r := new(Renderer)
 	defer free(r)
-	f := Frame{renderer = r}
-	settings := Sky_Settings{mode = .Texture, sky = {0.4, 0.5, 0.9}, ground = {0.2, 0.1, 0.05}, ambient_intensity = 2, texture_intensity = 1}
+	f := Frame {
+		renderer = r,
+	}
+	settings := Sky_Settings {
+		mode              = .Texture,
+		sky               = {0.4, 0.5, 0.9},
+		ground            = {0.2, 0.1, 0.05},
+		ambient_intensity = 2,
+		texture_intensity = 1,
+	}
 	ambient := begin_sky(&f, settings)
 	testing.expect(t, near(ambient_at(ambient, {0, 1, 0}), {0.8, 1, 1.8}))
 	testing.expect(t, f.sky_texture == nil && f.sky == nil)

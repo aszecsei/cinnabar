@@ -62,12 +62,24 @@ conflicting_systems_run_in_order :: proc(t: ^testing.T) {
 		add(w, e, Health{i32(i)})
 		add(w, e, Velocity{})
 	}
-	testing.expect(t, register_system(w, {name = "heal", stage = .Update, procedure = heal, terms = {write(w, Health)}}))
 	testing.expect(
 		t,
 		register_system(
 			w,
-			{name = "copy", stage = .Update, procedure = copy_health, terms = {read(w, Health), write(w, Velocity)}, batch_chunks = 1},
+			{name = "heal", stage = .Update, procedure = heal, terms = {write(w, Health)}},
+		),
+	)
+	testing.expect(
+		t,
+		register_system(
+			w,
+			{
+				name = "copy",
+				stage = .Update,
+				procedure = copy_health,
+				terms = {read(w, Health), write(w, Velocity)},
+				batch_chunks = 1,
+			},
 		),
 	)
 	run_stage(w, .Update, time.Millisecond, nil)
@@ -299,7 +311,9 @@ job_buffers_flush_in_job_order :: proc(t: ^testing.T) {
 	add(w, e, Health{3})
 	add(w, e, Velocity{})
 
-	l := Chunk_Log{flushed = make([dynamic]int, context.temp_allocator)}
+	l := Chunk_Log {
+		flushed = make([dynamic]int, context.temp_allocator),
+	}
 	l.kind = register_job_buffer(w, {
 		name = "chunks",
 		user = &l,
@@ -314,7 +328,16 @@ job_buffers_flush_in_job_order :: proc(t: ^testing.T) {
 		},
 	})
 	testing.expect(t, l.kind != 0)
-	register_system(w, {name = "note", stage = .Update, procedure = note_chunk, terms = {read(w, Health)}, batch_chunks = 1})
+	register_system(
+		w,
+		{
+			name = "note",
+			stage = .Update,
+			procedure = note_chunk,
+			terms = {read(w, Health)},
+			batch_chunks = 1,
+		},
+	)
 	run_stage(w, .Update, 0, &l)
 	testing.expect_value(t, len(l.flushed), 2)
 	if len(l.flushed) == 2 {

@@ -107,12 +107,22 @@ change_mesh_accel :: proc(r: ^Residency, m: ^Resident_Mesh, event: Accel_Event) 
 		_ = m.accel_state.(Accel_Sizing) or_return
 		compacted: gpu.Accel_Struct
 		if e.size > 0 {
-			compacted = r.platform.gpu_create_accel({kind = .Bottom, compact = m.accel, compacted_size = e.size, label = "compacted mesh"})
+			compacted = r.platform.gpu_create_accel(
+				{
+					kind = .Bottom,
+					compact = m.accel,
+					compacted_size = e.size,
+					label = "compacted mesh",
+				},
+			)
 		}
 		if compacted != {} {
 			m.accel_state = Accel_Compacting{compacted}
 		} else {
-			log.debugf("render: a mesh's acceleration structure is not compacted, at a compacted size of %d", e.size)
+			log.debugf(
+				"render: a mesh's acceleration structure is not compacted, at a compacted size of %d",
+				e.size,
+			)
 			m.accel_state = Accel_Compacted{}
 		}
 	case Accel_Compaction_Ran:
@@ -149,10 +159,20 @@ ensure_accel_compaction :: proc(c: ^Accel_Compaction, platform: ^core.Platform_A
 	if c.sizes != {} {
 		return true
 	}
-	c.sizes = platform.gpu_create_buffer({size = MAX_ACCEL_SIZES * size_of(u64), usage = {.Storage}, label = "accel sizes"}, nil)
+	c.sizes = platform.gpu_create_buffer(
+		{size = MAX_ACCEL_SIZES * size_of(u64), usage = {.Storage}, label = "accel sizes"},
+		nil,
+	)
 	ok := c.sizes != {}
 	for &b in c.readbacks {
-		b = platform.gpu_create_buffer({size = MAX_ACCEL_SIZES * size_of(u64), usage = {.Readback}, label = "accel sizes readback"}, nil)
+		b = platform.gpu_create_buffer(
+			{
+				size = MAX_ACCEL_SIZES * size_of(u64),
+				usage = {.Readback},
+				label = "accel sizes readback",
+			},
+			nil,
+		)
 		ok &&= b != {}
 	}
 	if !ok {
@@ -214,7 +234,8 @@ add_accel_size_passes :: proc(f: ^Frame) {
 	}
 	meshes := make([dynamic]^Resident_Mesh, r.platform.frame_allocator)
 	for &e in r.residency.entries[:r.residency.count] {
-		if _, built := e.current.mesh.accel_state.(Accel_Built); e.kind == .Mesh && e.ready && built {
+		if _, built := e.current.mesh.accel_state.(Accel_Built);
+		   e.kind == .Mesh && e.ready && built {
 			append(&meshes, &e.current.mesh)
 			if len(meshes) == MAX_ACCEL_SIZES {
 				break
@@ -227,22 +248,29 @@ add_accel_size_passes :: proc(f: ^Frame) {
 	rf.sized, rf.size_slot = meshes[:], slot
 	sizes := import_buffer(g, c.sizes)
 	p := add_compute_pass(g, "accel sizes", proc(ctx: ^Pass_Context) {
-		f := (^Frame)(ctx.data)
-		sizes := gpu_buffer(ctx.graph, f.ray_scene.sizes)
-		for m, i in f.ray_scene.sized {
-			gpu.cmd_write_accel_size(ctx.cb, m.accel, sizes, u32(i * size_of(u64)))
-		}
-	}, f)
+			f := (^Frame)(ctx.data)
+			sizes := gpu_buffer(ctx.graph, f.ray_scene.sizes)
+			for m, i in f.ray_scene.sized {
+				gpu.cmd_write_accel_size(ctx.cb, m.accel, sizes, u32(i * size_of(u64)))
+			}
+		}, f)
 	for m in meshes {
 		accel_size_source(g, p, import_accel(g, m.accel))
 	}
 	accel_size_dest(g, p, sizes)
 	rf.sizes, rf.sizes_readback = sizes, import_buffer(g, c.readbacks[slot])
 	q := add_compute_pass(g, "copy accel sizes", proc(ctx: ^Pass_Context) {
-		rf := (^Frame)(ctx.data).ray_scene
-		size := u32(len(rf.sized) * size_of(u64))
-		gpu.cmd_copy_buffer(ctx.cb, gpu_buffer(ctx.graph, rf.sizes), 0, gpu_buffer(ctx.graph, rf.sizes_readback), 0, size)
-	}, f)
+			rf := (^Frame)(ctx.data).ray_scene
+			size := u32(len(rf.sized) * size_of(u64))
+			gpu.cmd_copy_buffer(
+				ctx.cb,
+				gpu_buffer(ctx.graph, rf.sizes),
+				0,
+				gpu_buffer(ctx.graph, rf.sizes_readback),
+				0,
+				size,
+			)
+		}, f)
 	copy_source(g, q, sizes)
 	copy_dest(g, q, rf.sizes_readback)
 }
@@ -254,7 +282,8 @@ add_compaction_pass :: proc(f: ^Frame) {
 	r, rf, g := f.renderer, f.ray_scene, f.graph
 	meshes := make([dynamic]^Resident_Mesh, r.platform.frame_allocator)
 	for &e in r.residency.entries[:r.residency.count] {
-		if _, compacting := e.current.mesh.accel_state.(Accel_Compacting); e.kind == .Mesh && e.ready && compacting {
+		if _, compacting := e.current.mesh.accel_state.(Accel_Compacting);
+		   e.kind == .Mesh && e.ready && compacting {
 			append(&meshes, &e.current.mesh)
 		}
 	}
@@ -263,10 +292,10 @@ add_compaction_pass :: proc(f: ^Frame) {
 	}
 	rf.compactions = meshes[:]
 	p := add_compute_pass(g, "compact mesh accels", proc(ctx: ^Pass_Context) {
-		for m in (^Frame)(ctx.data).ray_scene.compactions {
-			gpu.cmd_compact_accel(ctx.cb, m.accel_state.(Accel_Compacting).compacted, m.accel)
-		}
-	}, f)
+			for m in (^Frame)(ctx.data).ray_scene.compactions {
+				gpu.cmd_compact_accel(ctx.cb, m.accel_state.(Accel_Compacting).compacted, m.accel)
+			}
+		}, f)
 	for m in meshes {
 		compact_source(g, p, import_accel(g, m.accel))
 		compact_dest(g, p, import_accel(g, m.accel_state.(Accel_Compacting).compacted))

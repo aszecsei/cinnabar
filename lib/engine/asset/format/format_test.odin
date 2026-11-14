@@ -22,7 +22,10 @@ guids_round_trip_through_text :: proc(t: ^testing.T) {
 
 @(test)
 meta_files_hold_a_guid_and_settings :: proc(t: ^testing.T) {
-	meta, ok := meta_parse("# a comment\nguid = " + TEST_GUID + "\r\nnative = true\n\n", context.temp_allocator)
+	meta, ok := meta_parse(
+		"# a comment\nguid = " + TEST_GUID + "\r\nnative = true\n\n",
+		context.temp_allocator,
+	)
 	testing.expect(t, ok)
 	testing.expect_value(t, meta.guid, guid_parse(TEST_GUID) or_else {})
 	native, found := meta_value(meta, "native")
@@ -48,7 +51,19 @@ script_blobs_round_trip :: proc(t: ^testing.T) {
 	b := a
 	b[0] = 1
 	requires := []Require_Entry{{"./a", a}, {"./b", b}, {"@game/c", a}}
-	data := aligned(script_write({guid = a, key = 42, flags = {.Native}, bytecode = {1, 2, 3}, requires = requires, source_path = "game/x.luau"}, context.temp_allocator))
+	data := aligned(
+		script_write(
+			{
+				guid = a,
+				key = 42,
+				flags = {.Native},
+				bytecode = {1, 2, 3},
+				requires = requires,
+				source_path = "game/x.luau",
+			},
+			context.temp_allocator,
+		),
+	)
 
 	blob, ok := script_view(data)
 	testing.expect(t, ok)
@@ -71,7 +86,9 @@ script_blobs_round_trip :: proc(t: ^testing.T) {
 
 @(test)
 script_view_rejects_bad_blobs :: proc(t: ^testing.T) {
-	data := aligned(script_write({bytecode = {1, 2, 3}, source_path = "x.luau"}, context.temp_allocator))
+	data := aligned(
+		script_write({bytecode = {1, 2, 3}, source_path = "x.luau"}, context.temp_allocator),
+	)
 	_, ok := script_view(data[:size_of(Script_Blob) - 1])
 	testing.expect(t, !ok)
 
@@ -89,7 +106,12 @@ script_view_rejects_bad_blobs :: proc(t: ^testing.T) {
 shader_blobs_round_trip :: proc(t: ^testing.T) {
 	guid := guid_parse(TEST_GUID) or_else {}
 	entries := []Shader_Code{{.Vertex, .DXIL, {1, 2, 3}}, {.Pixel, .DXIL, {4, 5}}}
-	data := aligned(shader_write({guid = guid, key = 7, entries = entries, source_path = "game/x.hlsl"}, context.temp_allocator))
+	data := aligned(
+		shader_write(
+			{guid = guid, key = 7, entries = entries, source_path = "game/x.hlsl"},
+			context.temp_allocator,
+		),
+	)
 
 	blob, ok := shader_view(data)
 	testing.expect(t, ok)
@@ -119,7 +141,16 @@ texture_blobs_round_trip :: proc(t: ^testing.T) {
 	mips := make([]byte, texture_chain_size(.BC7_Unorm_Srgb, {8, 4}, 3), context.temp_allocator)
 	testing.expect_value(t, len(mips), (2 + 1 + 1) * 16)
 	mips[0] = 9
-	contents := Texture_Contents{guid = guid, key = 3, format = .BC7_Unorm_Srgb, usage = .Color, size = {8, 4}, mip_count = 3, mips = mips, source_path = "game/a.png"}
+	contents := Texture_Contents {
+		guid        = guid,
+		key         = 3,
+		format      = .BC7_Unorm_Srgb,
+		usage       = .Color,
+		size        = {8, 4},
+		mip_count   = 3,
+		mips        = mips,
+		source_path = "game/a.png",
+	}
 	data := aligned(texture_write(contents, context.temp_allocator))
 
 	blob, ok := texture_view(data)
@@ -145,7 +176,17 @@ layered_texture_blobs_hold_a_chain_for_each_layer :: proc(t: ^testing.T) {
 	chain := texture_chain_size(.BC6H_Ufloat, {8, 8}, 2)
 	cube := aligned(
 		texture_write(
-			{guid = guid, format = .BC6H_Ufloat, usage = .HDR, dimension = .Cube, layer_count = 6, size = {8, 8}, mip_count = 2, mips = make([]byte, chain * 6, context.temp_allocator), source_path = "game/sky.texture_set"},
+			{
+				guid = guid,
+				format = .BC6H_Ufloat,
+				usage = .HDR,
+				dimension = .Cube,
+				layer_count = 6,
+				size = {8, 8},
+				mip_count = 2,
+				mips = make([]byte, chain * 6, context.temp_allocator),
+				source_path = "game/sky.texture_set",
+			},
 			context.temp_allocator,
 		),
 	)
@@ -163,7 +204,15 @@ layered_texture_blobs_hold_a_chain_for_each_layer :: proc(t: ^testing.T) {
 
 	not_square := aligned(
 		texture_write(
-			{guid = guid, format = .RGBA8_Unorm, dimension = .Cube, layer_count = 6, size = {8, 4}, mip_count = 1, mips = make([]byte, 8 * 4 * 4 * 6, context.temp_allocator)},
+			{
+				guid = guid,
+				format = .RGBA8_Unorm,
+				dimension = .Cube,
+				layer_count = 6,
+				size = {8, 4},
+				mip_count = 1,
+				mips = make([]byte, 8 * 4 * 4 * 6, context.temp_allocator),
+			},
 			context.temp_allocator,
 		),
 	)
@@ -172,7 +221,15 @@ layered_texture_blobs_hold_a_chain_for_each_layer :: proc(t: ^testing.T) {
 
 	array := aligned(
 		texture_write(
-			{guid = guid, format = .RGBA8_Unorm, dimension = .D2_Array, layer_count = 3, size = {4, 2}, mip_count = 1, mips = make([]byte, 4 * 2 * 4 * 3, context.temp_allocator)},
+			{
+				guid = guid,
+				format = .RGBA8_Unorm,
+				dimension = .D2_Array,
+				layer_count = 3,
+				size = {4, 2},
+				mip_count = 1,
+				mips = make([]byte, 4 * 2 * 4 * 3, context.temp_allocator),
+			},
 			context.temp_allocator,
 		),
 	)
@@ -187,7 +244,18 @@ layered_texture_blobs_hold_a_chain_for_each_layer :: proc(t: ^testing.T) {
 	testing.expect(t, !ok)
 
 	// A 2D texture has one layer, also when its writer does not say so.
-	plain := aligned(texture_write({guid = guid, format = .RGBA8_Unorm, size = {1, 1}, mip_count = 1, mips = make([]byte, 4, context.temp_allocator)}, context.temp_allocator))
+	plain := aligned(
+		texture_write(
+			{
+				guid = guid,
+				format = .RGBA8_Unorm,
+				size = {1, 1},
+				mip_count = 1,
+				mips = make([]byte, 4, context.temp_allocator),
+			},
+			context.temp_allocator,
+		),
+	)
 	blob, ok = texture_view(plain)
 	testing.expect(t, ok)
 	if ok {
@@ -202,7 +270,10 @@ layered_texture_blobs_hold_a_chain_for_each_layer :: proc(t: ^testing.T) {
 @(test)
 meta_files_name_their_subassets :: proc(t: ^testing.T) {
 	other :: "ffeeddccbbaa99887766554433221100"
-	meta, ok := meta_parse("guid = " + TEST_GUID + "\ncombine = false\nmesh.Door Frame = " + other + "\n", context.temp_allocator)
+	meta, ok := meta_parse(
+		"guid = " + TEST_GUID + "\ncombine = false\nmesh.Door Frame = " + other + "\n",
+		context.temp_allocator,
+	)
 	testing.expect(t, ok)
 	testing.expect_value(t, len(meta.settings), 1)
 	testing.expect_value(t, len(meta.subassets), 1)
@@ -229,7 +300,9 @@ mesh_blobs_round_trip :: proc(t: ^testing.T) {
 		flags             = {.Color},
 		vertex_count      = 3,
 		index_count       = 3,
-		submeshes         = {{name = "stone", index_count = 3, meshlet_count = 1, node_count = 1, root_count = 1}},
+		submeshes         = {
+			{name = "stone", index_count = 3, meshlet_count = 1, node_count = 1, root_count = 1},
+		},
 		positions         = positions,
 		attributes        = attributes,
 		indices           = mem.slice_to_bytes(indices),
@@ -281,7 +354,14 @@ mesh_blobs_round_trip :: proc(t: ^testing.T) {
 @(test)
 meshlet_vertices_round_trip :: proc(t: ^testing.T) {
 	stream := make([dynamic]u32, context.temp_allocator)
-	cases := [][]u32{{7}, {100000, 100002, 100001}, {70000, 135535}, {5, 65540, 6, 7}, {5, 65541, 6}, {0, max(u32) - 1}}
+	cases := [][]u32 {
+		{7},
+		{100000, 100002, 100001},
+		{70000, 135535},
+		{5, 65540, 6, 7},
+		{5, 65541, 6},
+		{0, max(u32) - 1},
+	}
 	short := []u8{1, 1, 1, 1, 0, 0}
 	words := []int{1, 2, 1, 2, 3, 2}
 	meshlets := make([dynamic]Meshlet, context.temp_allocator)
@@ -308,7 +388,12 @@ meshlet_vertices_round_trip :: proc(t: ^testing.T) {
 @(test)
 meshlet_triangles_round_trip :: proc(t: ^testing.T) {
 	stream := make([dynamic]u8, context.temp_allocator)
-	cases := [][][3]u8{{{0, 1, 2}}, {{3, 4, 5}, {63, 62, 61}}, {{7, 8, 9}, {10, 11, 12}, {13, 14, 15}, {255, 0, 128}}, {{1, 2, 3}, {4, 5, 6}, {7, 8, 9}}}
+	cases := [][][3]u8 {
+		{{0, 1, 2}},
+		{{3, 4, 5}, {63, 62, 61}},
+		{{7, 8, 9}, {10, 11, 12}, {13, 14, 15}, {255, 0, 128}},
+		{{1, 2, 3}, {4, 5, 6}, {7, 8, 9}},
+	}
 	meshlets := make([dynamic]Meshlet, context.temp_allocator)
 	written := 0
 	for triangles in cases {
@@ -322,7 +407,11 @@ meshlet_triangles_round_trip :: proc(t: ^testing.T) {
 	}
 	for triangles, i in cases {
 		for triangle, k in triangles {
-			testing.expect_value(t, meshlet_triangle(meshlets[i], stream[:], k), [3]u32{u32(triangle[0]), u32(triangle[1]), u32(triangle[2])})
+			testing.expect_value(
+				t,
+				meshlet_triangle(meshlets[i], stream[:], k),
+				[3]u32{u32(triangle[0]), u32(triangle[1]), u32(triangle[2])},
+			)
 		}
 	}
 }
@@ -333,13 +422,24 @@ meshlet_triangles_round_trip :: proc(t: ^testing.T) {
 meshlet_spheres_stay_conservative :: proc(t: ^testing.T) {
 	holds :: proc(t: ^testing.T, center: [3]f32, radius: f32) {
 		encoded, encoded_radius := meshlet_encode_sphere(center, radius)
-		m := Meshlet{center = encoded, radius = encoded_radius}
+		m := Meshlet {
+			center = encoded,
+			radius = encoded_radius,
+		}
 		decoded, decoded_radius := meshlet_sphere(m)
 		moved: f64
 		for k in 0 ..< 3 {
 			moved += (f64(center[k]) - f64(decoded[k])) * (f64(center[k]) - f64(decoded[k]))
 		}
-		testing.expectf(t, math.sqrt(moved) + f64(radius) <= f64(decoded_radius), "%v at %v became %v at %v", radius, center, decoded_radius, decoded)
+		testing.expectf(
+			t,
+			math.sqrt(moved) + f64(radius) <= f64(decoded_radius),
+			"%v at %v became %v at %v",
+			radius,
+			center,
+			decoded_radius,
+			decoded,
+		)
 	}
 	holds(t, {0, 0, 0}, 0)
 	holds(t, {0.1, -0.2, 0.3}, 0.05)
@@ -364,7 +464,14 @@ meshlet_spheres_stay_conservative :: proc(t: ^testing.T) {
 
 	infinite :: proc(t: ^testing.T, center: [3]f32, radius: f32) {
 		_, encoded_radius := meshlet_encode_sphere(center, radius)
-		testing.expectf(t, transmute(u16)encoded_radius == 0x7c00, "%v at %v became %v", radius, center, encoded_radius)
+		testing.expectf(
+			t,
+			transmute(u16)encoded_radius == 0x7c00,
+			"%v at %v became %v",
+			radius,
+			center,
+			encoded_radius,
+		)
 	}
 	infinite(t, {0, 0, 0}, 70000)
 	infinite(t, {200000, 0, 0}, 1)
@@ -382,18 +489,18 @@ material_blobs_round_trip :: proc(t: ^testing.T) {
 	block[0] = 7
 	textures := []Material_Texture{{offset = 16, default = .Normal}}
 	contents := Material_Contents {
-		guid             = guid,
-		flags            = {.Two_Sided},
-		blend            = .Masked,
-		cutoff           = 0.5,
+		guid               = guid,
+		flags              = {.Two_Sided},
+		blend              = .Masked,
+		cutoff             = 0.5,
 		displacement_bound = 0.25,
-		params           = {{"tint", .Color, 0}, {"albedo", .Texture, 16}},
-		switches         = {"use_detail"},
-		default_switches = 1,
-		block            = block,
-		textures         = textures,
-		variants         = {{1, .Forward, .Vertex, {1, 2}}, {1, .Forward, .Pixel, {3}}},
-		source_path      = "game/rock.material",
+		params             = {{"tint", .Color, 0}, {"albedo", .Texture, 16}},
+		switches           = {"use_detail"},
+		default_switches   = 1,
+		block              = block,
+		textures           = textures,
+		variants           = {{1, .Forward, .Vertex, {1, 2}}, {1, .Forward, .Pixel, {3}}},
+		source_path        = "game/rock.material",
 	}
 	data := aligned(material_write(contents, context.temp_allocator))
 	blob, ok := material_view(data)
@@ -405,12 +512,28 @@ material_blobs_round_trip :: proc(t: ^testing.T) {
 	testing.expect_value(t, blob.displacement_bound, 0.25)
 	testing.expect_value(t, blob_string(data, material_params(data, blob)[1].name), "albedo")
 	testing.expect_value(t, blob_string(data, material_switches(data, blob)[0]), "use_detail")
-	testing.expect_value(t, material_textures(data, blob)[0].default, Material_Texture_Default.Normal)
+	testing.expect_value(
+		t,
+		material_textures(data, blob)[0].default,
+		Material_Texture_Default.Normal,
+	)
 	testing.expect_value(t, len(material_code(data, blob, 1, .Forward, .Vertex)), 2)
 	testing.expect(t, material_code(data, blob, 0, .Forward, .Vertex) == nil)
 	testing.expect_value(t, blob_bytes(data, blob.block)[0], 7)
 
-	instance := aligned(material_instance_write({guid = guid, material = guid, switches = 0, block = block, textures = textures, source_path = "game/rock_mossy.material_instance"}, context.temp_allocator))
+	instance := aligned(
+		material_instance_write(
+			{
+				guid = guid,
+				material = guid,
+				switches = 0,
+				block = block,
+				textures = textures,
+				source_path = "game/rock_mossy.material_instance",
+			},
+			context.temp_allocator,
+		),
+	)
 	view, view_ok := material_instance_view(instance)
 	testing.expect(t, view_ok)
 	if view_ok {
@@ -428,13 +551,29 @@ material_blobs_round_trip :: proc(t: ^testing.T) {
 
 @(test)
 skins_and_animations_round_trip :: proc(t: ^testing.T) {
-	skin := skin_write({
-		joints = {
-			{name = "Root", parent = -1, rotation = {0, 0, 0, 1}, scale = 1, sphere = {0, 0, 0, -1}},
-			{name = "Tip", parent = 0, translation = {0, 1, 0}, rotation = {0, 0, 0, 1}, scale = 1, sphere = {0, 0.5, 0, 0.5}},
+	skin := skin_write(
+		{
+			joints = {
+				{
+					name = "Root",
+					parent = -1,
+					rotation = {0, 0, 0, 1},
+					scale = 1,
+					sphere = {0, 0, 0, -1},
+				},
+				{
+					name = "Tip",
+					parent = 0,
+					translation = {0, 1, 0},
+					rotation = {0, 0, 0, 1},
+					scale = 1,
+					sphere = {0, 0.5, 0, 0.5},
+				},
+			},
+			name = "Stick",
 		},
-		name = "Stick",
-	}, context.temp_allocator)
+		context.temp_allocator,
+	)
 	skin_aligned := aligned(skin)
 	blob, ok := skin_view(skin_aligned)
 	testing.expect(t, ok)
@@ -450,19 +589,30 @@ skins_and_animations_round_trip :: proc(t: ^testing.T) {
 	_, bad_ok := skin_view(bad_aligned)
 	testing.expect(t, !bad_ok)
 
-	clip := animation_write({
-		joint_count = 2,
-		duration = 1,
-		channels = {{joint = 1, path = .Rotation, interpolation = .Linear, key_count = 2}},
-		times = {0, 1},
-		values = {0, 0, 0, 1, 0, 0, 1, 0},
-	}, context.temp_allocator)
+	clip := animation_write(
+		{
+			joint_count = 2,
+			duration = 1,
+			channels = {{joint = 1, path = .Rotation, interpolation = .Linear, key_count = 2}},
+			times = {0, 1},
+			values = {0, 0, 0, 1, 0, 0, 1, 0},
+		},
+		context.temp_allocator,
+	)
 	clip_aligned := aligned(clip)
 	_, clip_ok := animation_view(clip_aligned)
 	testing.expect(t, clip_ok)
 
 	// A channel of a joint that the skin does not have is refused.
-	stray := animation_write({joint_count = 1, channels = {{joint = 1, path = .Scale, key_count = 1}}, times = {0}, values = {1, 1, 1}}, context.temp_allocator)
+	stray := animation_write(
+		{
+			joint_count = 1,
+			channels = {{joint = 1, path = .Scale, key_count = 1}},
+			times = {0},
+			values = {1, 1, 1},
+		},
+		context.temp_allocator,
+	)
 	stray_aligned := aligned(stray)
 	_, stray_ok := animation_view(stray_aligned)
 	testing.expect(t, !stray_ok)

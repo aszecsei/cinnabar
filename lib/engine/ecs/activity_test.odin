@@ -83,8 +83,16 @@ the_log_records_watched_removals_and_activity :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(entries), 3)
 	if len(entries) == 3 {
 		testing.expect_value(t, entries[0], Log_Entry{entity = a, kind = .Deactivated})
-		testing.expect_value(t, entries[1], Log_Entry{entity = a, id = health, data = 7, kind = .Removed})
-		testing.expect_value(t, entries[2], Log_Entry{entity = b, id = health, data = 8, kind = .Removed})
+		testing.expect_value(
+			t,
+			entries[1],
+			Log_Entry{entity = a, id = health, data = 7, kind = .Removed},
+		)
+		testing.expect_value(
+			t,
+			entries[2],
+			Log_Entry{entity = b, id = health, data = 8, kind = .Removed},
+		)
 	}
 	testing.expect_value(t, len(take_log(w, context.temp_allocator)), 0)
 }

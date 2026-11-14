@@ -253,9 +253,9 @@ atlas_cache_plan :: proc(
 	}
 	for light, i in lights {
 		entry := Atlas_Cache_Light {
-			light = light,
-			slots = plans[i].slots,
-			drawn = frame,
+			light       = light,
+			slots       = plans[i].slots,
+			drawn       = frame,
 			provisional = !complete,
 		}
 		if !plans[i].redraw {
@@ -285,14 +285,20 @@ atlas_light_distance :: proc(position: [3]f32, range: f32) -> f32 {
 // can use it: until the pipeline compiles, the frame draws the atlas in full. A texture of another size holds nothing.
 @(private)
 ensure_atlas_cache :: proc(r: ^Renderer, s: ^Atlas_Cache_State, p: Shadow_Params) -> bool {
-	if !pipeline_ready(r.platform, &r.shadows.cache_pipeline) || max_shadow_views(p) > ATLAS_MAX_SLOTS {
+	if !pipeline_ready(r.platform, &r.shadows.cache_pipeline) ||
+	   max_shadow_views(p) > ATLAS_MAX_SLOTS {
 		return false
 	}
 	if s.size != p.atlas {
 		r.platform.gpu_destroy_texture(s.texture)
 		s.texture, s.size, s.cache = {}, 0, nil
 		s.texture = r.platform.gpu_create_texture(
-			{size = {u32(p.atlas), u32(p.atlas)}, format = SHADOW_FORMAT, usage = {.Depth_Stencil, .Sampled}, label = "shadow atlas cache"},
+			{
+				size = {u32(p.atlas), u32(p.atlas)},
+				format = SHADOW_FORMAT,
+				usage = {.Depth_Stencil, .Sampled},
+				label = "shadow atlas cache",
+			},
 			nil,
 		)
 		if s.texture == {} {
@@ -311,7 +317,12 @@ sync_shadow_cache_pipeline :: proc(r: ^Renderer) {
 		r.platform,
 		r.residency.assets,
 		{.Vertex, .Pixel},
-		{depth_format = SHADOW_FORMAT, depth_compare = .Always, depth_write = true, label = "shadow cache"},
+		{
+			depth_format = SHADOW_FORMAT,
+			depth_compare = .Always,
+			depth_write = true,
+			label = "shadow cache",
+		},
 		r.reloaded,
 	)
 }
@@ -331,14 +342,23 @@ atlas_cache_stats :: proc(r: ^Renderer) -> Atlas_Cache_Stats {
 // plan_atlas_slots gives the frame's lights their slots: with the cache, as atlas_cache_plan keeps them, and without
 // it, one after another from first_slot, as every frame draws them all. It gives the first slot that no light takes.
 @(private)
-plan_atlas_slots :: proc(f: ^Frame, sf: ^Shadow_Frame, lights: []Atlas_Light, first_slot: int) -> (plans: []Atlas_Plan, free_slot: int) {
+plan_atlas_slots :: proc(
+	f: ^Frame,
+	sf: ^Shadow_Frame,
+	lights: []Atlas_Light,
+	first_slot: int,
+) -> (
+	plans: []Atlas_Plan,
+	free_slot: int,
+) {
 	r := f.renderer
 	s := &r.scene
 	ac := &sf.cache
 	state := &f.state.atlas_cache
 	scene := f.scene_frame
 	ac.redraw = make([dynamic]int, r.platform.frame_allocator)
-	ac.enabled = f.shadow_settings.atlas_cache && len(lights) > 0 && ensure_atlas_cache(r, state, sf.params)
+	ac.enabled =
+		f.shadow_settings.atlas_cache && len(lights) > 0 && ensure_atlas_cache(r, state, sf.params)
 	if !ac.enabled {
 		plans = make([]Atlas_Plan, len(lights), r.platform.frame_allocator)
 		next := first_slot
@@ -394,8 +414,16 @@ draw_shadow_cache :: proc(ctx: ^Pass_Context) {
 	sf := f.shadows
 	view := sf.cache.redraw[ctx.piece]
 	viewport := sf.viewports[view]
-	gpu.cmd_set_viewport(ctx.cb, {f32(viewport.x), f32(viewport.y)}, {f32(viewport.z), f32(viewport.w)})
-	gpu.cmd_set_scissor(ctx.cb, {i32(viewport.x), i32(viewport.y)}, {i32(viewport.z), i32(viewport.w)})
+	gpu.cmd_set_viewport(
+		ctx.cb,
+		{f32(viewport.x), f32(viewport.y)},
+		{f32(viewport.z), f32(viewport.w)},
+	)
+	gpu.cmd_set_scissor(
+		ctx.cb,
+		{i32(viewport.x), i32(viewport.y)},
+		{i32(viewport.z), i32(viewport.w)},
+	)
 	pipeline := f.renderer.shadows.cache_pipeline.pipeline
 	if pipeline == {} {
 		return
@@ -443,7 +471,7 @@ commit_atlas_cache :: proc(data: rawptr) {
 @(private)
 forget_atlas_cache :: proc(f: ^Frame) {
 	on_executed(f.graph, proc(data: rawptr) {
-		state := &(^Frame)(data).state.atlas_cache
-		state.cache, state.stats = nil, {}
-	}, f)
+			state := &(^Frame)(data).state.atlas_cache
+			state.cache, state.stats = nil, {}
+		}, f)
 }

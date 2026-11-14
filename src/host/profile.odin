@@ -61,7 +61,13 @@ profile_summary :: proc(allocator: runtime.Allocator) -> link.Profile_Summary {
 // has not ended.
 request_capture :: proc(l: ^Link, m: link.Profile_Capture_Request) {
 	when !profile.ENABLED {
-		link_send(l, link.Profile_Capture{id = m.id, reason = "the host was built without the profiler (-define:PROFILE=false)"})
+		link_send(
+			l,
+			link.Profile_Capture {
+				id = m.id,
+				reason = "the host was built without the profiler (-define:PROFILE=false)",
+			},
+		)
 		return
 	}
 	frame: u64
@@ -88,7 +94,12 @@ send_captures :: proc(l: ^Link) {
 		}
 		unordered_remove(&l.captures, i)
 		if !exists {
-			reason := fmt.tprintf("the host no longer has frame %d: it keeps the last %d frames and the worst frames of the last %d stats intervals", c.frame, profile.FRAME_RING, profile.PINNED_FRAMES)
+			reason := fmt.tprintf(
+				"the host no longer has frame %d: it keeps the last %d frames and the worst frames of the last %d stats intervals",
+				c.frame,
+				profile.FRAME_RING,
+				profile.PINNED_FRAMES,
+			)
 			link_send(l, link.Profile_Capture{id = c.id, frame = c.frame, reason = reason})
 			continue
 		}
@@ -102,7 +113,11 @@ capture_message :: proc(c: Pending_Capture, allocator: runtime.Allocator) -> lin
 	r := captured.frame
 	names := make([dynamic]link.Profile_Name, allocator)
 	indices := make(map[profile.Name]u16, allocator = allocator)
-	index_of :: proc(names: ^[dynamic]link.Profile_Name, indices: ^map[profile.Name]u16, n: profile.Name) -> u16 {
+	index_of :: proc(
+		names: ^[dynamic]link.Profile_Name,
+		indices: ^map[profile.Name]u16,
+		n: profile.Name,
+	) -> u16 {
 		if i, ok := indices[n]; ok {
 			return i
 		}
@@ -118,7 +133,11 @@ capture_message :: proc(c: Pending_Capture, allocator: runtime.Allocator) -> lin
 		append(&lanes, link.Profile_Lane{name, .Thread})
 	}
 	gpu_lanes := [2]u8{u8(len(lanes)), u8(len(lanes) + 1)}
-	append(&lanes, link.Profile_Lane{"GPU graphics", .Gpu_Graphics}, link.Profile_Lane{"GPU compute", .Gpu_Compute})
+	append(
+		&lanes,
+		link.Profile_Lane{"GPU graphics", .Gpu_Graphics},
+		link.Profile_Lane{"GPU compute", .Gpu_Compute},
+	)
 
 	offset :: proc(t, start: u64) -> i64 {
 		return i64(t) - i64(start)

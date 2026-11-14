@@ -107,17 +107,36 @@ blackboard_mistakes_are_problems_at_their_lines :: proc(t: ^testing.T) {
 	}
 	for c in cases {
 		_, problems := blackboard_parse(c.text, context.temp_allocator)
-		testing.expectf(t, len(problems) > 0 && problems[0].line == c.line, "%q: %v", c.text, problems)
+		testing.expectf(
+			t,
+			len(problems) > 0 && problems[0].line == c.line,
+			"%q: %v",
+			c.text,
+			problems,
+		)
 	}
 }
 
 @(test)
 conditions_compile_to_postfix_ops :: proc(t: ^testing.T) {
 	keys := board_keys(t)
-	text := fmt.tprintf("decision 1\ntechnique = utility\nblackboard = $%s\nnode 1 pick\n\twhen = health < 0.3 and (has_target or mood == alert)\n", BOARD_GUID)
+	text := fmt.tprintf(
+		"decision 1\ntechnique = utility\nblackboard = $%s\nnode 1 pick\n\twhen = health < 0.3 and (has_target or mood == alert)\n",
+		BOARD_GUID,
+	)
 	contents, problems := decision_parse(text, keys, TEST_READERS, context.temp_allocator)
 	testing.expectf(t, len(problems) == 0, "problems: %v", problems)
-	codes := [?]format.Decision_Op_Code{.Key, .Constant, .Less, .Key, .Key, .Constant, .Equal, .Or, .And}
+	codes := [?]format.Decision_Op_Code {
+		.Key,
+		.Constant,
+		.Less,
+		.Key,
+		.Key,
+		.Constant,
+		.Equal,
+		.Or,
+		.And,
+	}
 	testing.expect_value(t, len(contents.ops), len(codes))
 	for o, i in contents.ops {
 		testing.expect_value(t, o.code, codes[i])
@@ -142,7 +161,10 @@ conditions_test_entities_and_distances :: proc(t: ^testing.T) {
 	} {
 		{"target != none", {.Key, .Constant, .Not_Equal}},
 		{"distance(self, target) < 10", {.Self, .Key, .Distance, .Constant, .Less}},
-		{"distance(target, last_seen) >= -2.5e1", {.Key, .Key, .Distance, .Constant, .Greater_Equal}},
+		{
+			"distance(target, last_seen) >= -2.5e1",
+			{.Key, .Key, .Distance, .Constant, .Greater_Equal},
+		},
 		{"not has_target", {.Key, .Not}},
 		{"!has_target and ammo > 0", {.Key, .Not, .Key, .Constant, .Greater, .And}},
 		{"alert != mood", {.Constant, .Key, .Not_Equal}},
@@ -150,7 +172,11 @@ conditions_test_entities_and_distances :: proc(t: ^testing.T) {
 		{"has_target == true", {.Key, .Constant, .Equal}},
 	}
 	for c in cases {
-		text := fmt.tprintf("decision 1\ntechnique = utility\nblackboard = $%s\nnode 1 pick\n\twhen = %s\n", BOARD_GUID, c.text)
+		text := fmt.tprintf(
+			"decision 1\ntechnique = utility\nblackboard = $%s\nnode 1 pick\n\twhen = %s\n",
+			BOARD_GUID,
+			c.text,
+		)
 		contents, problems := decision_parse(text, keys, TEST_READERS, context.temp_allocator)
 		testing.expectf(t, len(problems) == 0, "%s: %v", c.text, problems)
 		testing.expectf(t, len(contents.ops) == len(c.codes), "%s: %v", c.text, contents.ops)
@@ -203,11 +229,21 @@ condition_mistakes_are_problems :: proc(t: ^testing.T) {
 		deep_condition(),
 	}
 	for c in cases {
-		text := fmt.tprintf("decision 1\ntechnique = utility\nblackboard = $%s\nnode 1 pick\n\twhen = %s\n", BOARD_GUID, c)
+		text := fmt.tprintf(
+			"decision 1\ntechnique = utility\nblackboard = $%s\nnode 1 pick\n\twhen = %s\n",
+			BOARD_GUID,
+			c,
+		)
 		_, problems := decision_parse(text, keys, TEST_READERS, context.temp_allocator)
 		if c == "((((((((((((((((((has_target))))))))))))))))))" || c == "health # 2" {
 			// Parentheses do not deepen the stack, and a # starts a comment.
-			testing.expectf(t, len(problems) == (1 if c == "health # 2" else 0), "%s: %v", c, problems)
+			testing.expectf(
+				t,
+				len(problems) == (1 if c == "health # 2" else 0),
+				"%s: %v",
+				c,
+				problems,
+			)
 			continue
 		}
 		testing.expectf(t, len(problems) > 0 && problems[0].line == 5, "%s: %v", c, problems)
@@ -217,7 +253,8 @@ condition_mistakes_are_problems :: proc(t: ^testing.T) {
 @(test)
 actions_and_writes_take_constants_keys_and_self :: proc(t: ^testing.T) {
 	keys := board_keys(t)
-	text := fmt.tprintf(`decision 1
+	text := fmt.tprintf(
+		`decision 1
 technique = utility
 blackboard = $%s
 node 1 pick
@@ -229,7 +266,9 @@ node 1 pick
 node 2 pick
 	action = wait
 	set has_target = false
-`, BOARD_GUID)
+`,
+		BOARD_GUID,
+	)
 	contents, problems := decision_parse(text, keys, TEST_READERS, context.temp_allocator)
 	testing.expectf(t, len(problems) == 0, "problems: %v", problems)
 	if len(problems) > 0 {
@@ -253,8 +292,16 @@ node 2 pick
 
 	node := contents.nodes[0]
 	testing.expect_value(t, node.write_count, 4)
-	testing.expect_value(t, contents.writes[node.first_write].source, format.Decision_Source.Constant)
-	testing.expect_value(t, contents.writes[node.first_write + 1].source, format.Decision_Source.Self)
+	testing.expect_value(
+		t,
+		contents.writes[node.first_write].source,
+		format.Decision_Source.Constant,
+	)
+	testing.expect_value(
+		t,
+		contents.writes[node.first_write + 1].source,
+		format.Decision_Source.Self,
+	)
 	testing.expect_value(t, contents.writes[node.first_write + 3].key, 5)
 	testing.expect_value(t, contents.nodes[1].first_write, 4)
 	testing.expect_value(t, contents.nodes[1].write_count, 1)
@@ -297,7 +344,13 @@ decision_mistakes_are_problems_at_their_lines :: proc(t: ^testing.T) {
 	}
 	for c in cases {
 		_, problems := decision_parse(c.text, keys, TEST_READERS, context.temp_allocator)
-		testing.expectf(t, len(problems) > 0 && problems[0].line == c.line, "%q: %v", c.text, problems)
+		testing.expectf(
+			t,
+			len(problems) > 0 && problems[0].line == c.line,
+			"%q: %v",
+			c.text,
+			problems,
+		)
 	}
 }
 
@@ -330,7 +383,10 @@ decisions_cook_against_their_blackboards :: proc(t: ^testing.T) {
 			{"content/ai/guard.blackboard", BOARD},
 			{"content/ai/guard.blackboard.meta", "guid = " + BOARD_GUID + "\n"},
 			{"content/ai/guard.decision", DECISION},
-			{"content/ai/broken.decision", "decision 1\ntechnique = utility\nblackboard = $0123456789abcdef0123456789abcdef\nnode 1 pick\n\twhen = missing\n"},
+			{
+				"content/ai/broken.decision",
+				"decision 1\ntechnique = utility\nblackboard = $0123456789abcdef0123456789abcdef\nnode 1 pick\n\twhen = missing\n",
+			},
 		},
 	)
 	defer remove_tree(tree)
@@ -351,7 +407,11 @@ decisions_cook_against_their_blackboards :: proc(t: ^testing.T) {
 		return
 	}
 	testing.expect_value(t, blob.blackboard, board_guid)
-	testing.expect(t, format.decision_check(data, blob, board_data, board), "the decision fits its blackboard")
+	testing.expect(
+		t,
+		format.decision_check(data, blob, board_data, board),
+		"the decision fits its blackboard",
+	)
 	testing.expect_value(t, format.blob_string(data, blob.source_path), "game/ai/guard.decision")
 	testing.expect_value(t, len(format.decision_technique_data(data, blob)), 2)
 	refs, refs_ok := format.blob_references(data, context.temp_allocator)
@@ -369,17 +429,35 @@ decisions_cook_against_their_blackboards :: proc(t: ^testing.T) {
 	testing.expect_value(t, pass.current[.Blackboard], 1)
 
 	// A blackboard with a new key cooks the decision again, against its new key.
-	testing.expect(t, os.write_entire_file(fmt.tprintf("%s/content/ai/guard.blackboard", tree.dir), string(BOARD + "bool armed\n")) == nil)
+	testing.expect(
+		t,
+		os.write_entire_file(
+			fmt.tprintf("%s/content/ai/guard.blackboard", tree.dir),
+			string(BOARD + "bool armed\n"),
+		) ==
+		nil,
+	)
 	pass = cook(options, {.Blackboard, .Decision}, log_problems = false)
 	testing.expect_value(t, pass.cooked[.Decision], 1)
 	board_data = tree_blob(t, tree, board_guid)
 	board, _ = format.blackboard_view(board_data)
 	data = tree_blob(t, tree, tree_guid(t, tree, "ai/guard.decision"))
 	blob, _ = format.decision_view(data)
-	testing.expect(t, format.decision_check(data, blob, board_data, board), "the decision fits its new blackboard")
+	testing.expect(
+		t,
+		format.decision_check(data, blob, board_data, board),
+		"the decision fits its new blackboard",
+	)
 
 	// A blackboard with a problem fails its decisions, which keep their old blobs.
-	testing.expect(t, os.write_entire_file(fmt.tprintf("%s/content/ai/guard.blackboard", tree.dir), string(BOARD + "bool armed = maybe\n")) == nil)
+	testing.expect(
+		t,
+		os.write_entire_file(
+			fmt.tprintf("%s/content/ai/guard.blackboard", tree.dir),
+			string(BOARD + "bool armed = maybe\n"),
+		) ==
+		nil,
+	)
 	pass = cook(options, {.Blackboard, .Decision}, log_problems = false)
 	testing.expect_value(t, pass.cooked[.Decision], 0)
 	kept := tree_blob(t, tree, tree_guid(t, tree, "ai/guard.decision"))
@@ -396,8 +474,14 @@ a_decision_names_a_blackboard :: proc(t: ^testing.T) {
 			{"content/ai/guard.blackboard.meta", "guid = " + BOARD_GUID + "\n"},
 			{"content/ai/other.blackboard.meta", "guid = 00112233445566778899aabbccddeeff\n"},
 			{"content/ai/other.blackboard", "blackboard 1\nfloat x\n"},
-			{"content/ai/missing.decision", "decision 1\ntechnique = utility\nblackboard = $ffffffffffffffffffffffffffffffff\n"},
-			{"content/ai/scene.decision", "decision 1\ntechnique = utility\nblackboard = $ffffffffffffffffffffffffffffff00\n"},
+			{
+				"content/ai/missing.decision",
+				"decision 1\ntechnique = utility\nblackboard = $ffffffffffffffffffffffffffffffff\n",
+			},
+			{
+				"content/ai/scene.decision",
+				"decision 1\ntechnique = utility\nblackboard = $ffffffffffffffffffffffffffffff00\n",
+			},
 			{"content/ai/scene.scene", "scene 1\n"},
 			{"content/ai/scene.scene.meta", "guid = ffffffffffffffffffffffffffffff00\n"},
 		},
@@ -485,15 +569,35 @@ the_shared_decisions_have_their_problems_at_their_lines_and_their_nodes :: proc(
 		marks := corpus_marks(text, "# nodes:")
 		contents, problems := decision_parse(text, keys, TECHNIQUE_READERS, context.temp_allocator)
 		found := corpus_lines(problems)
-		testing.expectf(t, slice.equal(found, marks.problems[:]), "%s: problems at %v, expected at %v: %v", file.name, found, marks.problems, problems)
+		testing.expectf(
+			t,
+			slice.equal(found, marks.problems[:]),
+			"%s: problems at %v, expected at %v: %v",
+			file.name,
+			found,
+			marks.problems,
+			problems,
+		)
 		if marks.has_list {
 			ids := make([dynamic]int, context.temp_allocator)
 			for n in contents.nodes {
 				append(&ids, int(n.id))
 			}
-			testing.expectf(t, slice.equal(ids[:], marks.listed[:]), "%s: nodes %v, expected %v", file.name, ids, marks.listed)
+			testing.expectf(
+				t,
+				slice.equal(ids[:], marks.listed[:]),
+				"%s: nodes %v, expected %v",
+				file.name,
+				ids,
+				marks.listed,
+			)
 		}
-		testing.expectf(t, marks.has_list || strings.has_prefix(file.name, "refused"), "%s has no # nodes:", file.name)
+		testing.expectf(
+			t,
+			marks.has_list || strings.has_prefix(file.name, "refused"),
+			"%s has no # nodes:",
+			file.name,
+		)
 	}
 	testing.expect(t, count >= 8)
 }
@@ -510,12 +614,27 @@ the_shared_blackboards_have_their_problems_at_their_lines_and_their_keys :: proc
 		marks := corpus_marks(text, "# keys:")
 		contents, problems := blackboard_parse(text, context.temp_allocator)
 		found := corpus_lines(problems)
-		testing.expectf(t, slice.equal(found, marks.problems[:]), "%s: problems at %v, expected at %v: %v", file.name, found, marks.problems, problems)
+		testing.expectf(
+			t,
+			slice.equal(found, marks.problems[:]),
+			"%s: problems at %v, expected at %v: %v",
+			file.name,
+			found,
+			marks.problems,
+			problems,
+		)
 		names := make([dynamic]string, context.temp_allocator)
 		for k in contents.keys {
 			append(&names, k.name)
 		}
-		testing.expectf(t, slice.equal(names[:], marks.words[:]), "%s: keys %v, expected %v", file.name, names, marks.words)
+		testing.expectf(
+			t,
+			slice.equal(names[:], marks.words[:]),
+			"%s: keys %v, expected %v",
+			file.name,
+			names,
+			marks.words,
+		)
 	}
 	testing.expect(t, count >= 3)
 }
@@ -548,16 +667,34 @@ a_decision_is_checked_against_its_blackboard_without_writing :: proc(t: ^testing
 
 	// The text's own problems are at the text's lines: this blackboard has no key named rest.
 	problems, _ := decision_check(options, &index, path, CHECKED_TEXT)
-	testing.expectf(t, len(problems.list) == 1 && problems.list[0].line == 5 && problems.list[0].file == path, "%v", problems.list)
+	testing.expectf(
+		t,
+		len(problems.list) == 1 && problems.list[0].line == 5 && problems.list[0].file == path,
+		"%v",
+		problems.list,
+	)
 	fixed, _ := strings.replace(CHECKED_TEXT, "rest", "health", 1, context.temp_allocator)
 	problems, _ = decision_check(options, &index, path, fixed)
 	testing.expectf(t, len(problems.list) == 0, "%v", problems.list)
 	// A blackboard that does not exist is the problem at the line that names it, and the keys are not reported.
-	missing, _ := strings.replace(CHECKED_TEXT, "0123456789abcdef0123456789abcdef", "ffffffffffffffffffffffffffffffff", 1, context.temp_allocator)
+	missing, _ := strings.replace(
+		CHECKED_TEXT,
+		"0123456789abcdef0123456789abcdef",
+		"ffffffffffffffffffffffffffffffff",
+		1,
+		context.temp_allocator,
+	)
 	problems, _ = decision_check(options, &index, path, missing)
 	testing.expectf(t, len(problems.list) == 1 && problems.list[0].line == 3, "%v", problems.list)
 	// So is a blackboard with problems, as the cook reports it.
-	testing.expect(t, os.write_entire_file(fmt.tprintf("%s/content/ai/guard.blackboard", tree.dir), string(BOARD + "bool armed = maybe\n")) == nil)
+	testing.expect(
+		t,
+		os.write_entire_file(
+			fmt.tprintf("%s/content/ai/guard.blackboard", tree.dir),
+			string(BOARD + "bool armed = maybe\n"),
+		) ==
+		nil,
+	)
 	problems, _ = decision_check(options, &index, path, fixed)
 	testing.expectf(t, len(problems.list) == 1 && problems.list[0].line == 3, "%v", problems.list)
 	// Nothing was written: the cache has no preview area.
@@ -567,7 +704,14 @@ a_decision_is_checked_against_its_blackboard_without_writing :: proc(t: ^testing
 @(test)
 a_blackboard_is_checked_at_its_lines :: proc(t: ^testing.T) {
 	problems := blackboard_check("a.blackboard", "blackboard 1\nfloat health\nfloat health\n")
-	testing.expectf(t, len(problems.list) == 1 && problems.list[0].line == 3 && problems.list[0].file == "a.blackboard", "%v", problems.list)
+	testing.expectf(
+		t,
+		len(problems.list) == 1 &&
+		problems.list[0].line == 3 &&
+		problems.list[0].file == "a.blackboard",
+		"%v",
+		problems.list,
+	)
 	problems = blackboard_check("a.blackboard", BOARD)
 	testing.expectf(t, len(problems.list) == 0, "%v", problems.list)
 }

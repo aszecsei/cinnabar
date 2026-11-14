@@ -83,7 +83,14 @@ scan_space :: proc(s: ^Ui_Scanner) {
 
 @(private = "file")
 is_name_byte :: proc(c: u8) -> bool {
-	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_' || c == '-' || c == ':'
+	return(
+		c >= 'a' && c <= 'z' ||
+		c >= 'A' && c <= 'Z' ||
+		c >= '0' && c <= '9' ||
+		c == '_' ||
+		c == '-' ||
+		c == ':' \
+	)
 }
 
 @(private = "file")
@@ -181,7 +188,12 @@ scan_element :: proc(s: ^Ui_Scanner) -> ^Ui_Raw_Element {
 	scan_advance(s, 1)
 	e.name = scan_name(s)
 	if e.name == "" {
-		scan_error(s, e.line, e.column, "a < that does not start an element. Write &lt; for the character.")
+		scan_error(
+			s,
+			e.line,
+			e.column,
+			"a < that does not start an element. Write &lt; for the character.",
+		)
 	}
 	for {
 		scan_space(s)
@@ -200,7 +212,14 @@ scan_element :: proc(s: ^Ui_Scanner) -> ^Ui_Raw_Element {
 		line, column := s.line, s.column
 		name := scan_name(s)
 		if name == "" {
-			scan_error(s, line, column, "%q in <%s> is not an attribute", s.text[s.pos:][:1], e.name)
+			scan_error(
+				s,
+				line,
+				column,
+				"%q in <%s> is not an attribute",
+				s.text[s.pos:][:1],
+				e.name,
+			)
 			scan_advance(s, 1)
 			continue
 		}
@@ -213,7 +232,7 @@ scan_element :: proc(s: ^Ui_Scanner) -> ^Ui_Raw_Element {
 		scan_space(s)
 		value: string
 		if !scan_done(s) && (s.text[s.pos] == '"' || s.text[s.pos] == '\'') {
-			quote := s.text[s.pos : s.pos + 1]
+			quote := s.text[s.pos:s.pos + 1]
 			end := strings.index(s.text[s.pos + 1:], quote)
 			if end < 0 {
 				scan_error(s, line, column, "%s's value has no closing %s", name, quote)
@@ -229,7 +248,10 @@ scan_element :: proc(s: ^Ui_Scanner) -> ^Ui_Raw_Element {
 			}
 		} else {
 			start := s.pos
-			for !scan_done(s) && !strings.is_space(rune(s.text[s.pos])) && s.text[s.pos] != '>' && !scan_at(s, "/>") {
+			for !scan_done(s) &&
+			    !strings.is_space(rune(s.text[s.pos])) &&
+			    s.text[s.pos] != '>' &&
+			    !scan_at(s, "/>") {
 				scan_advance(s, 1)
 			}
 			value = s.text[start:s.pos]
@@ -325,7 +347,12 @@ compile_warning :: proc(c: ^Ui_Compiler, line, column: int, format_string: strin
 
 // compile_props checks the attributes that are not id, style or name, and parses each value.
 @(private = "file")
-compile_props :: proc(c: ^Ui_Compiler, e: ^Ui_Raw_Element, element: Maybe(Ui_Element), skip: []string) -> []Ui_Prop_Contents {
+compile_props :: proc(
+	c: ^Ui_Compiler,
+	e: ^Ui_Raw_Element,
+	element: Maybe(Ui_Element),
+	skip: []string,
+) -> []Ui_Prop_Contents {
 	props := make([dynamic]Ui_Prop_Contents, context.temp_allocator)
 	seen: bit_set[Ui_Attr]
 	attrs: for a in e.attrs {
@@ -345,7 +372,14 @@ compile_props :: proc(c: ^Ui_Compiler, e: ^Ui_Raw_Element, element: Maybe(Ui_Ele
 		}
 		seen += {attr}
 		if el, is_element := element.?; is_element && el not_in UI_ATTRS[attr].on {
-			compile_warning(c, a.line, a.column, "%s means nothing on <%s>", a.name, UI_ELEMENT_NAMES[el])
+			compile_warning(
+				c,
+				a.line,
+				a.column,
+				"%s means nothing on <%s>",
+				a.name,
+				UI_ELEMENT_NAMES[el],
+			)
 		}
 		if _, message := ui_parse_value(attr, a.value); message != "" {
 			compile_error(c, a.line, a.column, "%s %s", a.name, message)
@@ -379,7 +413,13 @@ compile_styles :: proc(c: ^Ui_Compiler, root: ^Ui_Raw_Element) {
 		}
 		for name in ([]string{"id", "style"}) {
 			if a, has := attr_of(e, name); has {
-				compile_error(c, a.line, a.column, "a <style> has no %s: an element takes it", name)
+				compile_error(
+					c,
+					a.line,
+					a.column,
+					"a <style> has no %s: an element takes it",
+					name,
+				)
 			}
 		}
 		name_attr, named := attr_of(e, "name")
@@ -390,7 +430,13 @@ compile_styles :: proc(c: ^Ui_Compiler, root: ^Ui_Raw_Element) {
 		name := name_attr.value
 		base, _, state := strings.partition(name, ":")
 		if !ui_valid_id(base) {
-			compile_error(c, name_attr.line, name_attr.column, "%q is not a style's name of lowercase letters, digits, _ and -", name)
+			compile_error(
+				c,
+				name_attr.line,
+				name_attr.column,
+				"%q is not a style's name of lowercase letters, digits, _ and -",
+				name,
+			)
 			continue
 		}
 		if state != "" {
@@ -399,16 +445,37 @@ compile_styles :: proc(c: ^Ui_Compiler, root: ^Ui_Raw_Element) {
 				known ||= n == state
 			}
 			if !known {
-				compile_error(c, name_attr.line, name_attr.column, "%q is not a state: a variant is :hover, :focus, :press or :disabled", state)
+				compile_error(
+					c,
+					name_attr.line,
+					name_attr.column,
+					"%q is not a state: a variant is :hover, :focus, :press or :disabled",
+					state,
+				)
 				continue
 			}
 		}
 		if previous, twice := by_name[name]; twice {
-			compile_error(c, name_attr.line, name_attr.column, "the style %s is also on line %d", name, c.styles[previous].line)
+			compile_error(
+				c,
+				name_attr.line,
+				name_attr.column,
+				"the style %s is also on line %d",
+				name,
+				c.styles[previous].line,
+			)
 			continue
 		}
 		by_name[name] = len(c.styles)
-		append(&c.styles, Ui_Style_Contents{name = name, line = e.line, props = compile_props(c, e, nil, {"name"}), variants = UI_NO_VARIANTS})
+		append(
+			&c.styles,
+			Ui_Style_Contents {
+				name = name,
+				line = e.line,
+				props = compile_props(c, e, nil, {"name"}),
+				variants = UI_NO_VARIANTS,
+			},
+		)
 	}
 	for &s, i in c.styles {
 		base, _, state := strings.partition(s.name, ":")
@@ -417,7 +484,14 @@ compile_styles :: proc(c: ^Ui_Compiler, root: ^Ui_Raw_Element) {
 		}
 		b, has_base := by_name[base]
 		if !has_base {
-			compile_warning(c, s.line, 1, "the variant %s has no style %s, so nothing takes it", s.name, base)
+			compile_warning(
+				c,
+				s.line,
+				1,
+				"the variant %s has no style %s, so nothing takes it",
+				s.name,
+				base,
+			)
 			continue
 		}
 		for n, st in UI_STATE_NAMES {
@@ -465,7 +539,13 @@ direction_of :: proc(element: Ui_Element, props: []Ui_Prop_Contents) -> Ui_Direc
 
 // compile_node adds an element and its subtree to the nodes.
 @(private = "file")
-compile_node :: proc(c: ^Ui_Compiler, e: ^Ui_Raw_Element, parent: int, depth: int, flags: Ui_Node_Flags) {
+compile_node :: proc(
+	c: ^Ui_Compiler,
+	e: ^Ui_Raw_Element,
+	parent: int,
+	depth: int,
+	flags: Ui_Node_Flags,
+) {
 	element, known := ui_element_of(e.name)
 	if !known {
 		if e.name == UI_STYLE_ELEMENT {
@@ -498,7 +578,14 @@ compile_node :: proc(c: ^Ui_Compiler, e: ^Ui_Raw_Element, parent: int, depth: in
 }
 
 @(private = "file")
-compile_one :: proc(c: ^Ui_Compiler, e: ^Ui_Raw_Element, element: Ui_Element, parent: int, depth: int, flags: Ui_Node_Flags) {
+compile_one :: proc(
+	c: ^Ui_Compiler,
+	e: ^Ui_Raw_Element,
+	element: Ui_Element,
+	parent: int,
+	depth: int,
+	flags: Ui_Node_Flags,
+) {
 	flags := flags
 	if element == .Template {
 		flags += {.Template}
@@ -519,9 +606,22 @@ compile_one :: proc(c: ^Ui_Compiler, e: ^Ui_Raw_Element, element: Ui_Element, pa
 	}
 	if a, has := attr_of(e, "id"); has {
 		if !ui_valid_id(a.value) {
-			compile_error(c, a.line, a.column, "id %q is not lowercase letters, digits, _ and -", a.value)
+			compile_error(
+				c,
+				a.line,
+				a.column,
+				"id %q is not lowercase letters, digits, _ and -",
+				a.value,
+			)
 		} else if other, twice := c.scope[a.value]; twice {
-			compile_error(c, a.line, a.column, "id %s is also on line %d", a.value, c.nodes[other].line)
+			compile_error(
+				c,
+				a.line,
+				a.column,
+				"id %s is also on line %d",
+				a.value,
+				c.nodes[other].line,
+			)
 		} else {
 			node.id = a.value
 			c.scope[a.value] = len(c.nodes)
@@ -532,7 +632,13 @@ compile_one :: proc(c: ^Ui_Compiler, e: ^Ui_Raw_Element, element: Ui_Element, pa
 	if element == .Template {
 		for a in e.attrs {
 			if a.name != "id" {
-				compile_error(c, a.line, a.column, "a <template> takes only an id: put %s on its element", a.name)
+				compile_error(
+					c,
+					a.line,
+					a.column,
+					"a <template> takes only an id: put %s on its element",
+					a.name,
+				)
 			}
 		}
 	} else {
@@ -546,7 +652,14 @@ compile_one :: proc(c: ^Ui_Compiler, e: ^Ui_Raw_Element, element: Ui_Element, pa
 		rest := a.value
 		for name in strings.fields_iterator(&rest) {
 			if base, _, state := strings.partition(name, ":"); state != "" {
-				compile_error(c, a.line, a.column, "style %s is a variant, which applies with its style: name %s", name, base)
+				compile_error(
+					c,
+					a.line,
+					a.column,
+					"style %s is a variant, which applies with its style: name %s",
+					name,
+					base,
+				)
 				continue
 			}
 			index, found := find_style(c, name)
@@ -566,10 +679,19 @@ compile_one :: proc(c: ^Ui_Compiler, e: ^Ui_Raw_Element, element: Ui_Element, pa
 	node.styles = styles[:]
 	if parent >= 0 {
 		parent_node := c.nodes[parent]
-		if dir := direction_of(parent_node.element, parent_node.props); dir != .Stack && parent_node.element != .Ui {
+		if dir := direction_of(parent_node.element, parent_node.props);
+		   dir != .Stack && parent_node.element != .Ui {
 			for p in node.props {
 				if p.attr == .Anchor {
-					compile_warning(c, p.line, p.column, "anchor places an element in a stack, and <%s> on line %d lays its children out in a %v", UI_ELEMENT_NAMES[parent_node.element], parent_node.line, dir)
+					compile_warning(
+						c,
+						p.line,
+						p.column,
+						"anchor places an element in a stack, and <%s> on line %d lays its children out in a %v",
+						UI_ELEMENT_NAMES[parent_node.element],
+						parent_node.line,
+						dir,
+					)
 				}
 			}
 		}
@@ -581,13 +703,24 @@ compile_one :: proc(c: ^Ui_Compiler, e: ^Ui_Raw_Element, element: Ui_Element, pa
 		case .Text, .Field:
 			for p in node.props {
 				if p.attr == .Text {
-					compile_error(c, e.text_line, e.text_column, "<%s> has both a text attribute and text", e.name)
+					compile_error(
+						c,
+						e.text_line,
+						e.text_column,
+						"<%s> has both a text attribute and text",
+						e.name,
+					)
 				}
 			}
 			if _, message := ui_parse_value(.Text, e.text); message != "" {
 				compile_error(c, e.text_line, e.text_column, "the text %s", message)
 			} else {
-				props := make([dynamic]Ui_Prop_Contents, 0, len(node.props) + 1, context.temp_allocator)
+				props := make(
+					[dynamic]Ui_Prop_Contents,
+					0,
+					len(node.props) + 1,
+					context.temp_allocator,
+				)
 				append(&props, ..node.props)
 				append(&props, Ui_Prop_Contents{.Text, e.text, e.text_line, e.text_column})
 				node.props = props[:]
@@ -595,7 +728,13 @@ compile_one :: proc(c: ^Ui_Compiler, e: ^Ui_Raw_Element, element: Ui_Element, pa
 		case .Button:
 			button_text = true
 		case:
-			compile_error(c, e.text_line, e.text_column, "<%s> holds no text: put it in a <text>", e.name)
+			compile_error(
+				c,
+				e.text_line,
+				e.text_column,
+				"<%s> holds no text: put it in a <text>",
+				e.name,
+			)
 		}
 	}
 	index := len(c.nodes)
@@ -606,13 +745,24 @@ compile_one :: proc(c: ^Ui_Compiler, e: ^Ui_Raw_Element, element: Ui_Element, pa
 		c.scope = &template_ids
 	}
 	if element in (Ui_Elements{.Text, .Image, .Field}) && len(e.children) > 0 {
-		compile_error(c, e.children[0].line, e.children[0].column, "<%s> holds no elements", e.name)
+		compile_error(
+			c,
+			e.children[0].line,
+			e.children[0].column,
+			"<%s> holds no elements",
+			e.name,
+		)
 	} else if element == .Template && len(e.children) != 1 {
 		compile_error(c, e.line, e.column, "a <template> holds one element, which Ui.add copies")
 	} else {
 		if button_text {
 			if len(e.children) > 0 {
-				compile_error(c, e.text_line, e.text_column, "a <button> holds text or elements, not both: put the text in a <text>")
+				compile_error(
+					c,
+					e.text_line,
+					e.text_column,
+					"a <button> holds text or elements, not both: put the text in a <text>",
+				)
 			} else if _, message := ui_parse_value(.Text, e.text); message != "" {
 				compile_error(c, e.text_line, e.text_column, "the text %s", message)
 			} else {
@@ -622,7 +772,18 @@ compile_one :: proc(c: ^Ui_Compiler, e: ^Ui_Raw_Element, element: Ui_Element, pa
 				if s, has := find_style(c, UI_ELEMENT_NAMES[.Text]); has {
 					append(&text_styles, s)
 				}
-				append(&c.nodes, Ui_Node_Contents{element = .Text, flags = flags, parent = u32(index), end = u32(len(c.nodes) + 1), line = e.text_line, props = props, styles = text_styles[:]})
+				append(
+					&c.nodes,
+					Ui_Node_Contents {
+						element = .Text,
+						flags = flags,
+						parent = u32(index),
+						end = u32(len(c.nodes) + 1),
+						line = e.text_line,
+						props = props,
+						styles = text_styles[:],
+					},
+				)
 				append(&c.raw, e)
 			}
 		}
@@ -647,9 +808,22 @@ check_references :: proc(c: ^Ui_Compiler, first, last: int, ids: ^map[string]int
 				target := strings.trim_space(p.value)
 				t, found := ids[target]
 				if !found {
-					compile_error(c, p.line, p.column, "%s names %s, which no element here has as its id", UI_ATTRS[p.attr].name, target)
+					compile_error(
+						c,
+						p.line,
+						p.column,
+						"%s names %s, which no element here has as its id",
+						UI_ATTRS[p.attr].name,
+						target,
+					)
 				} else if p.attr == .Focus && !ui_focusable_node(c.nodes[t]) {
-					compile_error(c, p.line, p.column, "focus names %s, which does not take focus: it is a <button>, a <field> or focusable", target)
+					compile_error(
+						c,
+						p.line,
+						p.column,
+						"focus names %s, which does not take focus: it is a <button>, a <field> or focusable",
+						target,
+					)
 				}
 			}
 		}
@@ -670,7 +844,13 @@ ui_focusable_node :: proc(n: Ui_Node_Contents) -> bool {
 
 // ui_parse parses and checks a UI document's text. It gives every problem that it finds, warnings too, and ok is
 // whether none is an error. The contents' strings point into text or the temp allocator.
-ui_parse :: proc(text: string) -> (document: Ui_Document_Contents, problems: []Ui_Problem, ok: bool) {
+ui_parse :: proc(
+	text: string,
+) -> (
+	document: Ui_Document_Contents,
+	problems: []Ui_Problem,
+	ok: bool,
+) {
 	list := make([dynamic]Ui_Problem, context.temp_allocator)
 	document = ui_parse_into(text, &list)
 	ok = true
@@ -681,7 +861,12 @@ ui_parse :: proc(text: string) -> (document: Ui_Document_Contents, problems: []U
 }
 
 @(private = "file")
-ui_parse_into :: proc(text: string, list: ^[dynamic]Ui_Problem) -> (document: Ui_Document_Contents) {
+ui_parse_into :: proc(
+	text: string,
+	list: ^[dynamic]Ui_Problem,
+) -> (
+	document: Ui_Document_Contents,
+) {
 	// The header: the first line that is not blank.
 	rest := text
 	line_number := 0
@@ -695,11 +880,32 @@ ui_parse_into :: proc(text: string, list: ^[dynamic]Ui_Problem) -> (document: Ui
 	}
 	words := strings.fields(header, context.temp_allocator)
 	if len(words) != 2 || words[0] != "ui" {
-		append(list, Ui_Problem{max(line_number, 1), 1, fmt.tprintf("the first line is `ui %d`", UI_TEXT_VERSION), true})
+		append(
+			list,
+			Ui_Problem {
+				max(line_number, 1),
+				1,
+				fmt.tprintf("the first line is `ui %d`", UI_TEXT_VERSION),
+				true,
+			},
+		)
 		return
 	}
-	if version, version_ok := strconv.parse_int(words[1]); !version_ok || version != UI_TEXT_VERSION {
-		append(list, Ui_Problem{line_number, 1, fmt.tprintf("version %s is not %d, which this build reads", words[1], UI_TEXT_VERSION), true})
+	if version, version_ok := strconv.parse_int(words[1]);
+	   !version_ok || version != UI_TEXT_VERSION {
+		append(
+			list,
+			Ui_Problem {
+				line_number,
+				1,
+				fmt.tprintf(
+					"version %s is not %d, which this build reads",
+					words[1],
+					UI_TEXT_VERSION,
+				),
+				true,
+			},
+		)
 		return
 	}
 	s := Ui_Scanner {
@@ -762,7 +968,16 @@ ui_parse_into :: proc(text: string, list: ^[dynamic]Ui_Problem) -> (document: Ui
 			compile_error(&c, a.line, a.column, "<ui> has no %s", name)
 		}
 	}
-	append(&c.nodes, Ui_Node_Contents{element = .Ui, parent = UI_NONE, line = root.line, props = compile_props(&c, root, Ui_Element.Ui, {"id", "style", "name"}), styles = root_styles[:]})
+	append(
+		&c.nodes,
+		Ui_Node_Contents {
+			element = .Ui,
+			parent = UI_NONE,
+			line = root.line,
+			props = compile_props(&c, root, Ui_Element.Ui, {"id", "style", "name"}),
+			styles = root_styles[:],
+		},
+	)
 	append(&c.raw, root)
 	for child in root.children {
 		if child.name != UI_STYLE_ELEMENT {

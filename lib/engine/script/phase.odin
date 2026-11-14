@@ -181,7 +181,7 @@ queue_event :: proc(r: ^Runtime, L: ^luau.State, first, count: c.int) {
 deliver_events :: proc(r: ^Runtime) {
 	L := r.L
 	profile.scope_text(&r.platform.profile, "Events", .Frame)
-	for round := 0; ; round += 1 {
+	for round := 0;; round += 1 {
 		luau.getref(L, r.events)
 		if luau.objlen(L, -1) == 0 {
 			luau.pop(L, 1)
@@ -193,7 +193,10 @@ deliver_events :: proc(r: ^Runtime) {
 		r.events = luau.ref(L, -1)
 		luau.pop(L, 1)
 		if round == MAX_EVENT_ROUNDS {
-			log.warnf("script: events kept sending events for %d rounds, so the rest are dropped", MAX_EVENT_ROUNDS)
+			log.warnf(
+				"script: events kept sending events for %d rounds, so the rest are dropped",
+				MAX_EVENT_ROUNDS,
+			)
 			luau.pop(L, 1)
 			return
 		}

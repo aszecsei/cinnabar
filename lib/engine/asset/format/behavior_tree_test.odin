@@ -10,10 +10,27 @@ test_tree :: proc() -> []Tree_Node {
 	return slice.clone(
 		[]Tree_Node {
 			{node = 0, end = 5, kind = .Selector, test = DECISION_NONE, state = 0, timers = 80},
-			{node = 1, end = 2, kind = .Condition, test = 0, flags = {.Cooldown}, cooldown = {seconds = 2}, state = 16, timers = 80},
+			{
+				node = 1,
+				end = 2,
+				kind = .Condition,
+				test = 0,
+				flags = {.Cooldown},
+				cooldown = {seconds = 2},
+				state = 16,
+				timers = 80,
+			},
 			{node = 2, end = 5, kind = .Sequence, test = DECISION_NONE, state = 32, timers = 88},
 			{node = 3, end = 4, kind = .Action, test = DECISION_NONE, state = 48, timers = 88},
-			{node = 4, end = 5, kind = .Wait, test = DECISION_NONE, seconds = {key = 0, source = .Key}, state = 64, timers = 88},
+			{
+				node = 4,
+				end = 5,
+				kind = .Wait,
+				test = DECISION_NONE,
+				seconds = {key = 0, source = .Key},
+				state = 64,
+				timers = 88,
+			},
 		},
 		context.temp_allocator,
 	)
@@ -23,7 +40,12 @@ test_tree :: proc() -> []Tree_Node {
 tree_decision :: proc(tree: []byte, state_size: u32 = 96) -> []byte {
 	nodes := make([]Decision_Node_Contents, 5, context.temp_allocator)
 	for &n, i in nodes {
-		n = {id = u32(i + 1), kind = "node", condition = DECISION_NONE, action = DECISION_NONE}
+		n = {
+			id        = u32(i + 1),
+			kind      = "node",
+			condition = DECISION_NONE,
+			action    = DECISION_NONE,
+		}
 	}
 	nodes[3].action = 0
 	contents := Decision_Contents {
@@ -105,7 +127,12 @@ bad_trees_are_refused :: proc(t: ^testing.T) {
 	testing.expect(t, !ok)
 	deep := make([]Tree_Node, MAX_TREE_DEPTH + 1, context.temp_allocator)
 	for &n in deep {
-		n = {node = 0, end = u32(len(deep)), kind = .Sequence, test = DECISION_NONE}
+		n = {
+			node = 0,
+			end  = u32(len(deep)),
+			kind = .Sequence,
+			test = DECISION_NONE,
+		}
 	}
 	deep[len(deep) - 1].kind = .Set
 	data = tree_decision(tree_write(deep, context.temp_allocator))
@@ -122,13 +149,23 @@ bad_trees_are_refused :: proc(t: ^testing.T) {
 	testing.expect(t, ok)
 
 	// A wait for a key that is a bool's, and then a float's.
-	board := aligned(blackboard_write({keys = {{name = "delay", type = .Bool}, {name = "seen", type = .Bool}}}, context.temp_allocator))
+	board := aligned(
+		blackboard_write(
+			{keys = {{name = "delay", type = .Bool}, {name = "seen", type = .Bool}}},
+			context.temp_allocator,
+		),
+	)
 	board_blob, board_ok := blackboard_view(board)
 	testing.expect(t, board_ok)
 	data = tree_decision(tree_write(test_tree(), context.temp_allocator))
 	tree, blob = tree_of(data)
 	testing.expect(t, !tree_check(tree, data, blob, board, board_blob))
-	board = aligned(blackboard_write({keys = {{name = "delay", type = .Float}, {name = "seen", type = .Bool}}}, context.temp_allocator))
+	board = aligned(
+		blackboard_write(
+			{keys = {{name = "delay", type = .Float}, {name = "seen", type = .Bool}}},
+			context.temp_allocator,
+		),
+	)
 	board_blob, _ = blackboard_view(board)
 	testing.expect(t, tree_check(tree, data, blob, board, board_blob))
 }

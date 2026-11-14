@@ -107,7 +107,12 @@ _window_set_title :: proc(title: string) {
 }
 
 @(private = "file")
-window_proc :: proc "system" (hwnd: win.HWND, msg: win.UINT, wparam: win.WPARAM, lparam: win.LPARAM) -> win.LRESULT {
+window_proc :: proc "system" (
+	hwnd: win.HWND,
+	msg: win.UINT,
+	wparam: win.WPARAM,
+	lparam: win.LPARAM,
+) -> win.LRESULT {
 	input := &window.input
 	switch msg {
 	case win.WM_CLOSE:
@@ -186,7 +191,9 @@ key_of :: proc "contextless" (wparam: win.WPARAM, lparam: win.LPARAM) -> Key {
 		return Key(int(Key.F1) + int(vk - win.VK_F1))
 	case win.VK_SHIFT:
 		scan := win.UINT(lparam >> 16) & 0xff
-		return win.MapVirtualKeyW(scan, win.MAPVK_VSC_TO_VK_EX) == win.VK_RSHIFT ? .Right_Shift : .Left_Shift
+		return(
+			win.MapVirtualKeyW(scan, win.MAPVK_VSC_TO_VK_EX) == win.VK_RSHIFT ? .Right_Shift : .Left_Shift \
+		)
 	case win.VK_CONTROL:
 		return extended ? .Right_Control : .Left_Control
 	case win.VK_MENU:

@@ -79,7 +79,12 @@ character_size :: proc(c: Character) -> (radius, height: f32) {
 
 // add_characters makes the characters of the entities that have a Character and no Physics_Character yet.
 @(private)
-add_characters :: proc(s: ^State, w: ^ecs.World, list: ^core_physics.Command_List, commands: ^ecs.Commands) {
+add_characters :: proc(
+	s: ^State,
+	w: ^ecs.World,
+	list: ^core_physics.Command_List,
+	commands: ^ecs.Commands,
+) {
 	it := ecs.query_iter(w, s.queries.new_characters)
 	for view in ecs.query_next(&it) {
 		transforms := ecs.column(view, 0, ecs.Transform)
@@ -114,7 +119,12 @@ update_characters :: proc(s: ^State, w: ^ecs.World, list: ^core_physics.Command_
 			if pc.body.generation == 0 || !moved(pc.position, pc.rotation, pose) {
 				continue
 			}
-			core_physics.cmd_set_character_pose(list, pc.body, ecs.position_sub_f64(pose.position, s.anchor), to_rotation(pose.rotation))
+			core_physics.cmd_set_character_pose(
+				list,
+				pc.body,
+				ecs.position_sub_f64(pose.position, s.anchor),
+				to_rotation(pose.rotation),
+			)
 			pc.position, pc.rotation = pose.position, pose.rotation
 		}
 	}
@@ -123,17 +133,36 @@ update_characters :: proc(s: ^State, w: ^ecs.World, list: ^core_physics.Command_
 // create_character sends the command that makes e's character, and fills pc with it. Without the backend's
 // Characters, the character is nil.
 @(private)
-create_character :: proc(s: ^State, w: ^ecs.World, list: ^core_physics.Command_List, e: ecs.Entity, pose: ecs.Transform, pc: ^Physics_Character) {
-	pc^ = {position = pose.position, rotation = pose.rotation, source = character_hash(w, e)}
+create_character :: proc(
+	s: ^State,
+	w: ^ecs.World,
+	list: ^core_physics.Command_List,
+	e: ecs.Entity,
+	pose: ecs.Transform,
+	pc: ^Physics_Character,
+) {
+	pc^ = {
+		position = pose.position,
+		rotation = pose.rotation,
+		source   = character_hash(w, e),
+	}
 	if !has_feature(s, .Characters, "a Character makes no character") {
 		return
 	}
 	if ecs.has(w, e, Rigid_Body) || ecs.has(w, e, Collider) {
-		log.warnf("physics: entity %v has a Character, which is its body, so its Rigid_Body and Collider make none", e)
+		log.warnf(
+			"physics: entity %v has a Character, which is its body, so its Rigid_Body and Collider make none",
+			e,
+		)
 	}
 	c := ecs.get(w, e, Character)^
 	handle := core_physics.Body(pool_alloc(&s.bodies))
-	desc := core_physics.character_desc(handle, ecs.position_sub_f64(pose.position, s.anchor), u64(e), c.layer)
+	desc := core_physics.character_desc(
+		handle,
+		ecs.position_sub_f64(pose.position, s.anchor),
+		u64(e),
+		c.layer,
+	)
 	desc.rotation = to_rotation(pose.rotation)
 	desc.radius, desc.height = character_size(c)
 	desc.max_slope = math.to_radians(c.max_slope)
@@ -148,7 +177,10 @@ create_character :: proc(s: ^State, w: ^ecs.World, list: ^core_physics.Command_L
 	for int(handle.index) >= len(s.records) {
 		append(&s.records, Body_Record{})
 	}
-	s.records[handle.index] = {entity = e, kind = .Character}
+	s.records[handle.index] = {
+		entity = e,
+		kind   = .Character,
+	}
 	if ecs.has(w, e, ecs.Inactive) {
 		core_physics.cmd_set_enabled(list, handle, false)
 		s.records[handle.index].disabled = true
@@ -178,7 +210,8 @@ write_back_characters :: proc(s: ^State, w: ^ecs.World, states: []core_physics.C
 		pc.ground_normal = state.ground_normal
 		pc.ground_velocity = state.ground_velocity
 		pc.ground_entity = ecs.Entity(state.ground_user)
-		position, rotation := ecs.position_offset_f64(s.anchor, state.position), from_rotation(state.rotation)
+		position, rotation :=
+			ecs.position_offset_f64(s.anchor, state.position), from_rotation(state.rotation)
 		if !moved(pc.position, pc.rotation, {position = position, rotation = rotation}) {
 			continue
 		}

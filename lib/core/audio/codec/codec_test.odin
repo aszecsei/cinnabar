@@ -53,7 +53,9 @@ tone :: proc(frames: u64, channels: int) -> []i16 {
 	samples := make([]i16, int(frames) * channels, context.temp_allocator)
 	for i in 0 ..< int(frames) {
 		for c in 0 ..< channels {
-			samples[i * channels + c] = i16(math.sin(f64(i) * f64(480 + c * 240) * math.TAU / 48000) * 12000)
+			samples[i * channels + c] = i16(
+				math.sin(f64(i) * f64(480 + c * 240) * math.TAU / 48000) * 12000,
+			)
 		}
 	}
 	return samples
@@ -90,9 +92,25 @@ a_pass_is_the_sound :: proc(t: ^testing.T) {
 @(private = "file")
 two_passes :: proc(t: ^testing.T, coded: Coded) -> (first, second: []i16) {
 	h := header_of(coded.file)
-	memory, _ := mem.make_aligned([]byte, memory_bytes(coded.format, h.channels), MEMORY_ALIGN, context.temp_allocator)
+	memory, _ := mem.make_aligned(
+		[]byte,
+		memory_bytes(coded.format, h.channels),
+		MEMORY_ALIGN,
+		context.temp_allocator,
+	)
 	decoder: Decoder
-	testing.expect(t, decoder_init(&decoder, coded.format, h.channels, h.frames, h.skip, u64(len(h.data)), memory))
+	testing.expect(
+		t,
+		decoder_init(
+			&decoder,
+			coded.format,
+			h.channels,
+			h.frames,
+			h.skip,
+			u64(len(h.data)),
+			memory,
+		),
+	)
 	reader := Memory_Reader{h.data}
 	passes: [2][]i16
 	for pass in 0 ..< 2 {
@@ -145,7 +163,11 @@ seam_step :: proc(frames: []i16, channels, channel: int) -> i32 {
 		count := len(frames) / channels
 		return i32(frames[((frame + count) % count) * channels + channel])
 	}
-	return abs(at(frames, channels, channel, 0) - 2 * at(frames, channels, channel, -1) + at(frames, channels, channel, -2))
+	return abs(
+		at(frames, channels, channel, 0) -
+		2 * at(frames, channels, channel, -1) +
+		at(frames, channels, channel, -2),
+	)
 }
 
 // Where a later pass meets the next, the second difference of a slow chord is no more than it is elsewhere, so a loop has
@@ -153,7 +175,10 @@ seam_step :: proc(frames: []i16, channels, channel: int) -> i32 {
 // larger than this sound's second difference: it is what the crossing is for.
 @(test)
 a_loop_has_no_step_at_its_seam :: proc(t: ^testing.T) {
-	files := [?]Coded{{.Vorbis, #load("testdata/pad_mono.vorbis")}, {.Opus, #load("testdata/pad_mono.opus")}}
+	files := [?]Coded {
+		{.Vorbis, #load("testdata/pad_mono.vorbis")},
+		{.Opus, #load("testdata/pad_mono.opus")},
+	}
 	for coded in files {
 		_, second := two_passes(t, coded)
 		h := header_of(coded.file)
@@ -162,9 +187,19 @@ a_loop_has_no_step_at_its_seam :: proc(t: ^testing.T) {
 			for frame in SEAM_FRAMES + 2 ..< int(h.frames) {
 				previous := second[(frame - 1) * h.channels + c]
 				before := second[(frame - 2) * h.channels + c]
-				largest = max(largest, abs(i32(second[frame * h.channels + c]) - 2 * i32(previous) + i32(before)))
+				largest = max(
+					largest,
+					abs(i32(second[frame * h.channels + c]) - 2 * i32(previous) + i32(before)),
+				)
 			}
-			testing.expectf(t, seam_step(second, h.channels, c) <= largest + largest / 2, "%v: a step of %d, and %d elsewhere", coded.format, seam_step(second, h.channels, c), largest)
+			testing.expectf(
+				t,
+				seam_step(second, h.channels, c) <= largest + largest / 2,
+				"%v: a step of %d, and %d elsewhere",
+				coded.format,
+				seam_step(second, h.channels, c),
+				largest,
+			)
 		}
 	}
 }
@@ -181,13 +216,23 @@ the_vorbis_state_is_large_enough :: proc(t: ^testing.T) {
 		allocation := stb.vorbis_alloc{raw_data(state), c.int(len(state))}
 		consumed: c.int
 		error: stb.Error
-		v := stb.open_pushdata(raw_data(h.data), c.int(len(h.data)), &consumed, &error, &allocation)
+		v := stb.open_pushdata(
+			raw_data(h.data),
+			c.int(len(h.data)),
+			&consumed,
+			&error,
+			&allocation,
+		)
 		testing.expect(t, v != nil)
 		if v == nil {
 			continue
 		}
 		info := stb.get_info(v)
-		used := int(info.setup_memory_required + info.setup_temp_memory_required + info.temp_memory_required)
+		used := int(
+			info.setup_memory_required +
+			info.setup_temp_memory_required +
+			info.temp_memory_required,
+		)
 		testing.expectf(t, used * 2 <= VORBIS_STATE_BYTES, "stb_vorbis uses %d bytes", used)
 	}
 }
@@ -198,7 +243,10 @@ bad_data_fails :: proc(t: ^testing.T) {
 	for coded in coded_files() {
 		h := header_of(coded.file)
 		out := make([]i16, int(h.frames) * h.channels, context.temp_allocator)
-		testing.expect(t, !decode_all(coded.format, h.data[:len(h.data) / 8], h.channels, h.frames, h.skip, out))
+		testing.expect(
+			t,
+			!decode_all(coded.format, h.data[:len(h.data) / 8], h.channels, h.frames, h.skip, out),
+		)
 		garbage := make([]byte, 4096, context.temp_allocator)
 		for &b, i in garbage {
 			b = u8(i * 37)

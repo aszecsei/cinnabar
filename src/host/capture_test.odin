@@ -20,7 +20,13 @@ the_ring_starts_again_when_its_source_or_size_changes :: proc(t: ^testing.T) {
 	image :: proc(size: [2]u32, heap: runtime.Allocator) -> capture.Image {
 		return {size = size, pixels = make([]byte, int(size.x * size.y) * 3, heap)}
 	}
-	push :: proc(ring: ^Ring, size: [2]u32, viewport: Maybe(int), frame: u64, heap: runtime.Allocator) {
+	push :: proc(
+		ring: ^Ring,
+		size: [2]u32,
+		viewport: Maybe(int),
+		frame: u64,
+		heap: runtime.Allocator,
+	) {
 		img := image(size, heap)
 		defer delete(img.pixels, heap)
 		ring_push(ring, img, frame, time.tick_now(), viewport)

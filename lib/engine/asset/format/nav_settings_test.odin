@@ -4,7 +4,10 @@ import "core:testing"
 
 @(test)
 a_project_without_agent_types_has_the_default :: proc(t: ^testing.T) {
-	agents, problems := nav_agents_parse("game.name = Demo\nnav.agent.Default.radius = 0.25\n", context.temp_allocator)
+	agents, problems := nav_agents_parse(
+		"game.name = Demo\nnav.agent.Default.radius = 0.25\n",
+		context.temp_allocator,
+	)
 	testing.expect_value(t, len(problems), 0)
 	testing.expect_value(t, len(agents), 1)
 	expected := DEFAULT_NAV_AGENT
@@ -20,7 +23,10 @@ agent_types_take_their_fields_and_a_later_line_wins :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(agents), 2)
 	testing.expect_value(t, agents[0], Nav_Agent{"Human", 0.4, 1.8, 0.4, 45})
 	testing.expect_value(t, agents[1], Nav_Agent{"Large", 1, 3, 0.35, 45})
-	testing.expect(t, nav_volume_agents(0, 1) && nav_volume_agents(0b10, 1) && !nav_volume_agents(0b10, 0))
+	testing.expect(
+		t,
+		nav_volume_agents(0, 1) && nav_volume_agents(0b10, 1) && !nav_volume_agents(0b10, 0),
+	)
 }
 
 @(test)
@@ -32,7 +38,11 @@ agent_types_report_their_problems_by_line :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(problems), 4)
 	if len(problems) == 4 {
 		testing.expect_value(t, problems[0].line, 1)
-		testing.expect_value(t, problems[1], Nav_Settings_Problem{2, `nav.agent.Small.radius: nav.agents does not name "Small"`})
+		testing.expect_value(
+			t,
+			problems[1],
+			Nav_Settings_Problem{2, `nav.agent.Small.radius: nav.agents does not name "Small"`},
+		)
 		testing.expect_value(t, problems[2].line, 3)
 		testing.expect_value(t, problems[3].line, 4)
 	}

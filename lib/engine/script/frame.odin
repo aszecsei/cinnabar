@@ -88,7 +88,10 @@ end_phase :: proc(r: ^Runtime) {
 enter_phase :: proc(r: ^Runtime, kind: Phase) {
 	assert(kind != .None)
 	assert(r.phase == .None, "script: a script step began while another runs")
-	assert(len(r.commands.data) == 0, "script: structural changes were recorded outside a script step")
+	assert(
+		len(r.commands.data) == 0,
+		"script: structural changes were recorded outside a script step",
+	)
 	r.phase = kind
 	r.commands = ecs.commands(frame(r))
 }

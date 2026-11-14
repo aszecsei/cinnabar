@@ -36,13 +36,13 @@ Pipeline_Entry :: struct {
 
 @(private)
 Pipelines :: struct {
-	root_signature:   ^d3d.IRootSignature,
-	pipeline_pool:    gpu.Pool(gpu.Pipeline, Pipeline_Entry),
+	root_signature:     ^d3d.IRootSignature,
+	pipeline_pool:      gpu.Pool(gpu.Pipeline, Pipeline_Entry),
 	// Orders a compile job's result against the pipeline's destruction.
-	pipeline_mutex:   sync.Mutex,
+	pipeline_mutex:     sync.Mutex,
 	// The compile jobs that may still write each slot. A slot is not reused until its count is zero.
-	compiling:        []int,
-	compile_counter:  jobs.Counter,
+	compiling:          []int,
+	compile_counter:    jobs.Counter,
 	// Command signatures for the indirect commands. The draw signatures set ROOT_DRAW_ID from each record.
 	draw_signature:     ^d3d.ICommandSignature,
 	indexed_signature:  ^d3d.ICommandSignature,
@@ -66,7 +66,10 @@ init_pipelines :: proc() -> bool {
 		Flags         = ROOT_SIGNATURE_FLAGS,
 	}
 	blob, error_blob: ^d3d.IBlob
-	if !check(d3d.SerializeVersionedRootSignature(&desc, &blob, &error_blob), "SerializeVersionedRootSignature") {
+	if !check(
+		d3d.SerializeVersionedRootSignature(&desc, &blob, &error_blob),
+		"SerializeVersionedRootSignature",
+	) {
 		if error_blob != nil {
 			log.errorf("d3d12: %s", cstring(error_blob->GetBufferPointer()))
 			error_blob->Release()
@@ -75,7 +78,13 @@ init_pipelines :: proc() -> bool {
 	}
 	defer blob->Release()
 	check(
-		dev.device->CreateRootSignature(0, blob->GetBufferPointer(), blob->GetBufferSize(), d3d.IRootSignature_UUID, (^rawptr)(&dev.root_signature)),
+		dev.device->CreateRootSignature(
+			0,
+			blob->GetBufferPointer(),
+			blob->GetBufferSize(),
+			d3d.IRootSignature_UUID,
+			(^rawptr)(&dev.root_signature),
+		),
 		"CreateRootSignature",
 	) or_return
 
@@ -83,19 +92,35 @@ init_pipelines :: proc() -> bool {
 		Type = .CONSTANT,
 	}
 	draw_id.Constant = {
-		RootParameterIndex = ROOT_DRAW_ID,
+		RootParameterIndex  = ROOT_DRAW_ID,
 		Num32BitValuesToSet = 1,
 	}
 	draw := [2]d3d.INDIRECT_ARGUMENT_DESC{draw_id, {Type = .DRAW}}
 	indexed := [2]d3d.INDIRECT_ARGUMENT_DESC{draw_id, {Type = .DRAW_INDEXED}}
 	dispatch := [1]d3d.INDIRECT_ARGUMENT_DESC{{Type = .DISPATCH}}
-	dev.draw_signature = create_signature(draw[:], size_of(gpu.Draw_Indirect_Args), dev.root_signature) or_return
-	dev.indexed_signature = create_signature(indexed[:], size_of(gpu.Draw_Indexed_Indirect_Args), dev.root_signature) or_return
+	dev.draw_signature = create_signature(
+		draw[:],
+		size_of(gpu.Draw_Indirect_Args),
+		dev.root_signature,
+	) or_return
+	dev.indexed_signature = create_signature(
+		indexed[:],
+		size_of(gpu.Draw_Indexed_Indirect_Args),
+		dev.root_signature,
+	) or_return
 	// A signature that sets no root arguments takes no root signature.
-	dev.dispatch_signature = create_signature(dispatch[:], size_of(gpu.Dispatch_Indirect_Args), nil) or_return
+	dev.dispatch_signature = create_signature(
+		dispatch[:],
+		size_of(gpu.Dispatch_Indirect_Args),
+		nil,
+	) or_return
 	if .Mesh_Shaders in dev.features {
 		mesh := [2]d3d.INDIRECT_ARGUMENT_DESC{draw_id, {Type = .DISPATCH_MESH}}
-		dev.mesh_signature = create_signature(mesh[:], size_of(gpu.Draw_Mesh_Indirect_Args), dev.root_signature) or_return
+		dev.mesh_signature = create_signature(
+			mesh[:],
+			size_of(gpu.Draw_Mesh_Indirect_Args),
+			dev.root_signature,
+		) or_return
 	}
 	return true
 }
@@ -114,14 +139,25 @@ create_signature :: proc(
 		NumArgumentDescs = u32(len(args)),
 		pArgumentDescs   = raw_data(args),
 	}
-	check(dev.device->CreateCommandSignature(&desc, root_signature, d3d.ICommandSignature_UUID, (^rawptr)(&signature)), "CreateCommandSignature") or_return
+	check(
+		dev.device->CreateCommandSignature(
+			&desc,
+			root_signature,
+			d3d.ICommandSignature_UUID,
+			(^rawptr)(&signature),
+		),
+		"CreateCommandSignature",
+	) or_return
 	return signature, true
 }
 
 // The fixed root signature. CN_ROOT_SIGNATURE in lib/core/gpu/shaders/cinnabar.hlsli describes the same one, and
 // tools/cook embeds it in every shader stage.
 @(private = "file")
-ROOT_SIGNATURE_FLAGS :: d3d.ROOT_SIGNATURE_FLAGS{.CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED, .SAMPLER_HEAP_DIRECTLY_INDEXED}
+ROOT_SIGNATURE_FLAGS :: d3d.ROOT_SIGNATURE_FLAGS {
+	.CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED,
+	.SAMPLER_HEAP_DIRECTLY_INDEXED,
+}
 
 // D3D12_ROOT_DESCRIPTOR_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE. vendor:directx/d3d12 numbers ROOT_DESCRIPTOR_FLAG's bits
 // from 2 instead of 1, so its .DATA_STATIC_WHILE_SET_AT_EXECUTE is 0x8, which is DATA_STATIC.
@@ -158,7 +194,14 @@ embedded_root_signature_matches :: proc(blob: []byte) -> bool {
 	}
 	deserializer: ^d3d.IVersionedRootSignatureDeserializer
 	iid := d3d.IVersionedRootSignatureDeserializer_UUID
-	if win.FAILED(d3d.CreateVersionedRootSignatureDeserializer(raw_data(blob), uint(len(blob)), iid, (^rawptr)(&deserializer))) {
+	if win.FAILED(
+		d3d.CreateVersionedRootSignatureDeserializer(
+			raw_data(blob),
+			uint(len(blob)),
+			iid,
+			(^rawptr)(&deserializer),
+		),
+	) {
 		return true
 	}
 	defer deserializer->Release()
@@ -168,7 +211,9 @@ embedded_root_signature_matches :: proc(blob: []byte) -> bool {
 	}
 	got := desc.Desc_1_1
 	expected := root_parameters()
-	if got.NumParameters != len(expected) || got.NumStaticSamplers != 0 || got.Flags != ROOT_SIGNATURE_FLAGS {
+	if got.NumParameters != len(expected) ||
+	   got.NumStaticSamplers != 0 ||
+	   got.Flags != ROOT_SIGNATURE_FLAGS {
 		return false
 	}
 	for e, i in expected {
@@ -259,7 +304,10 @@ create_compute_pipeline :: proc(desc: gpu.Compute_Pipeline_Desc) -> gpu.Pipeline
 // use until the new one is ready, and stays if the new one fails to compile. The attachment formats and the topology
 // must not change, and the scope stays. It returns false, and changes nothing, if the description is invalid or
 // changes the formats or the topology. Create a new pipeline for those.
-update_graphics_pipeline :: proc(pipeline: gpu.Pipeline, desc: gpu.Graphics_Pipeline_Desc) -> bool {
+update_graphics_pipeline :: proc(
+	pipeline: gpu.Pipeline,
+	desc: gpu.Graphics_Pipeline_Desc,
+) -> bool {
 	task, entry := graphics_task(desc) or_return
 	return start_update(pipeline, task, entry)
 }
@@ -274,7 +322,10 @@ create_ray_tracing_pipeline :: proc(desc: gpu.Ray_Tracing_Pipeline_Desc) -> gpu.
 	return ok ? start_compile(task, {info = {kind = .Ray_Tracing}, scope = desc.scope}) : {}
 }
 
-update_ray_tracing_pipeline :: proc(pipeline: gpu.Pipeline, desc: gpu.Ray_Tracing_Pipeline_Desc) -> bool {
+update_ray_tracing_pipeline :: proc(
+	pipeline: gpu.Pipeline,
+	desc: gpu.Ray_Tracing_Pipeline_Desc,
+) -> bool {
 	task := ray_tracing_task(desc) or_return
 	return start_update(pipeline, task, {info = {kind = .Ray_Tracing}})
 }
@@ -320,9 +371,9 @@ SHADER_TABLE_ALIGNMENT :: 64
 // A new version replaces the whole program, which stays alive until the frames that use it finish.
 @(private)
 Ray_Program :: struct {
-	state:  ^d3d.IStateObject,
-	table:  ^d3d.IResource,
-	rays:   d3d.DISPATCH_RAYS_DESC,
+	state: ^d3d.IStateObject,
+	table: ^d3d.IResource,
+	rays:  d3d.DISPATCH_RAYS_DESC,
 }
 
 // release_program releases a program after the GPU finishes the current frame.
@@ -341,7 +392,10 @@ ray_tracing_task :: proc(desc: gpu.Ray_Tracing_Pipeline_Desc) -> (task: ^Compile
 		return
 	}
 	if .Ray_Tracing_Pipeline not_in dev.features {
-		log.errorf("gpu: pipeline %q: the device has no ray tracing pipelines. Check gpu_features.", desc.label)
+		log.errorf(
+			"gpu: pipeline %q: the device has no ray tracing pipelines. Check gpu_features.",
+			desc.label,
+		)
 		return
 	}
 	task = new_task(desc.label, desc.library)
@@ -409,16 +463,25 @@ build_program :: proc(task: ^Compile_Task) -> (program: ^Ray_Program, ok: bool) 
 		pSubobjects   = raw_data(subobjects),
 	}
 	state: ^d3d.IStateObject
-	check(dev.device->CreateStateObject(&desc, d3d.IStateObject_UUID, (^rawptr)(&state)), "CreateStateObject") or_return
+	check(
+		dev.device->CreateStateObject(&desc, d3d.IStateObject_UUID, (^rawptr)(&state)),
+		"CreateStateObject",
+	) or_return
 	properties: ^d3d.IStateObjectProperties
-	if !check(state->QueryInterface(d3d.IStateObjectProperties_IID, (^rawptr)(&properties)), "QueryInterface(IStateObjectProperties)") {
+	if !check(
+		state->QueryInterface(d3d.IStateObjectProperties_IID, (^rawptr)(&properties)),
+		"QueryInterface(IStateObjectProperties)",
+	) {
 		state->Release()
 		return
 	}
 	defer properties->Release()
 
 	miss_start := mem.align_forward_int(SHADER_IDENTIFIER_SIZE, SHADER_TABLE_ALIGNMENT)
-	hit_start := mem.align_forward_int(miss_start + task.miss_count * SHADER_RECORD_ALIGNMENT, SHADER_TABLE_ALIGNMENT)
+	hit_start := mem.align_forward_int(
+		miss_start + task.miss_count * SHADER_RECORD_ALIGNMENT,
+		SHADER_TABLE_ALIGNMENT,
+	)
 	size := hit_start + task.hit_count * SHADER_RECORD_ALIGNMENT
 	table, table_ok := create_buffer_resource({size = u32(size), label = "shader table"}, .UPLOAD)
 	if !table_ok {
@@ -427,7 +490,11 @@ build_program :: proc(task: ^Compile_Task) -> (program: ^Ray_Program, ok: bool) 
 	}
 	mapped: [^]byte
 	check(table->Map(0, &d3d.RANGE{}, (^rawptr)(&mapped)), "Map(shader table)")
-	write_record :: proc(properties: ^d3d.IStateObjectProperties, name: win.wstring, record: [^]byte) -> bool {
+	write_record :: proc(
+		properties: ^d3d.IStateObjectProperties,
+		name: win.wstring,
+		record: [^]byte,
+	) -> bool {
 		identifier := properties->GetShaderIdentifier(name)
 		if identifier == nil {
 			return false
@@ -437,14 +504,25 @@ build_program :: proc(task: ^Compile_Task) -> (program: ^Ray_Program, ok: bool) 
 	}
 	ok = write_record(properties, task.names[0], mapped)
 	for i in 0 ..< task.miss_count {
-		ok &&= write_record(properties, task.names[1 + i], mapped[miss_start + i * SHADER_RECORD_ALIGNMENT:])
+		ok &&= write_record(
+			properties,
+			task.names[1 + i],
+			mapped[miss_start + i * SHADER_RECORD_ALIGNMENT:],
+		)
 	}
 	for i in 0 ..< task.hit_count {
-		ok &&= write_record(properties, task.names[first_group + 3 * i], mapped[hit_start + i * SHADER_RECORD_ALIGNMENT:])
+		ok &&= write_record(
+			properties,
+			task.names[first_group + 3 * i],
+			mapped[hit_start + i * SHADER_RECORD_ALIGNMENT:],
+		)
 	}
 	table->Unmap(0, nil)
 	if !ok {
-		log.errorf("gpu: pipeline %q: the library does not export a named shader or hit group", task.label)
+		log.errorf(
+			"gpu: pipeline %q: the library does not export a named shader or hit group",
+			task.label,
+		)
 		state->Release()
 		table->Release()
 		return nil, false
@@ -472,18 +550,33 @@ build_program :: proc(task: ^Compile_Task) -> (program: ^Ray_Program, ok: bool) 
 
 // graphics_task builds the compile task and the pool entry for a description.
 @(private = "file")
-graphics_task :: proc(desc: gpu.Graphics_Pipeline_Desc) -> (task: ^Compile_Task, entry: Pipeline_Entry, ok: bool) {
+graphics_task :: proc(
+	desc: gpu.Graphics_Pipeline_Desc,
+) -> (
+	task: ^Compile_Task,
+	entry: Pipeline_Entry,
+	ok: bool,
+) {
 	if err := gpu.validate_graphics_pipeline_desc(desc); err != .None {
 		log.errorf("gpu: pipeline %q: %v", desc.label, err)
 		return
 	}
 
 	when ODIN_DEBUG {
-		check_root_signatures(desc.label, desc.vertex, desc.amplification, desc.mesh, desc.pixel) or_return
+		check_root_signatures(
+			desc.label,
+			desc.vertex,
+			desc.amplification,
+			desc.mesh,
+			desc.pixel,
+		) or_return
 	}
 	is_mesh := len(desc.mesh) > 0
 	if is_mesh && .Mesh_Shaders not_in dev.features {
-		log.errorf("gpu: pipeline %q: the device has no mesh shaders. Check gpu_features and use a vertex pipeline.", desc.label)
+		log.errorf(
+			"gpu: pipeline %q: the device has no mesh shaders. Check gpu_features and use a vertex pipeline.",
+			desc.label,
+		)
 		return
 	}
 
@@ -509,7 +602,10 @@ graphics_task :: proc(desc: gpu.Graphics_Pipeline_Desc) -> (task: ^Compile_Task,
 			ConservativeRaster = desc.conservative && .Conservative_Raster in dev.features ? .ON : .OFF,
 		},
 		DepthStencilState = {
-			DepthEnable = d3d.BOOL(desc.depth_format != .Unknown && (desc.depth_compare != .Always || desc.depth_write)),
+			DepthEnable = d3d.BOOL(
+				desc.depth_format != .Unknown &&
+				(desc.depth_compare != .Always || desc.depth_write),
+			),
 			DepthWriteMask = desc.depth_write ? .ALL : .ZERO,
 			DepthFunc = COMPARE[desc.depth_compare],
 			StencilEnable = d3d.BOOL(gpu.stencil_used(desc.stencil)),
@@ -528,11 +624,19 @@ graphics_task :: proc(desc: gpu.Graphics_Pipeline_Desc) -> (task: ^Compile_Task,
 		task.graphics.RTVFormats[i] = view_format(color.format)
 		task.graphics.BlendState.RenderTarget[i] = BLEND[color.blend]
 	}
-	return task, {info = gpu.pipeline_info(desc), topology = TOPOLOGY[desc.topology], scope = desc.scope}, true
+	return task,
+		{info = gpu.pipeline_info(desc), topology = TOPOLOGY[desc.topology], scope = desc.scope},
+		true
 }
 
 @(private = "file")
-compute_task :: proc(desc: gpu.Compute_Pipeline_Desc) -> (task: ^Compile_Task, entry: Pipeline_Entry, ok: bool) {
+compute_task :: proc(
+	desc: gpu.Compute_Pipeline_Desc,
+) -> (
+	task: ^Compile_Task,
+	entry: Pipeline_Entry,
+	ok: bool,
+) {
 	if err := gpu.validate_compute_pipeline_desc(desc); err != .None {
 		log.errorf("gpu: pipeline %q: %v", desc.label, err)
 		return
@@ -558,13 +662,13 @@ pipeline_compiling :: proc(index: u32) -> bool {
 // Compile_Task owns copies of everything the compile job reads.
 @(private = "file")
 Compile_Task :: struct {
-	pipeline:   gpu.Pipeline,
-	serial:     u32,
-	label:      string,
-	blobs:      [][]byte,
-	is_compute: bool,
+	pipeline:       gpu.Pipeline,
+	serial:         u32,
+	label:          string,
+	blobs:          [][]byte,
+	is_compute:     bool,
 	// blobs holds the pixel, amplification and mesh shaders.
-	is_mesh:    bool,
+	is_mesh:        bool,
 	// blobs holds the library, and names the ray generation shader, the miss shaders, then each hit group's
 	// name, closest hit and any hit.
 	is_ray_tracing: bool,
@@ -574,8 +678,8 @@ Compile_Task :: struct {
 	payload_size:   u32,
 	attribute_size: u32,
 	recursion:      u32,
-	graphics:   d3d.GRAPHICS_PIPELINE_STATE_DESC,
-	compute:    d3d.COMPUTE_PIPELINE_STATE_DESC,
+	graphics:       d3d.GRAPHICS_PIPELINE_STATE_DESC,
+	compute:        d3d.COMPUTE_PIPELINE_STATE_DESC,
 }
 
 @(private = "file")
@@ -627,7 +731,10 @@ start_update :: proc(pipeline: gpu.Pipeline, task: ^Compile_Task, entry: Pipelin
 		return false
 	}
 	if current.info != entry.info || current.topology != entry.topology {
-		log.errorf("gpu: pipeline %q: an update must keep the attachment formats and the topology. Create a new pipeline instead.", task.label)
+		log.errorf(
+			"gpu: pipeline %q: an update must keep the attachment formats and the topology. Create a new pipeline instead.",
+			task.label,
+		)
 		free_task(task)
 		return false
 	}
@@ -646,7 +753,10 @@ compile_job :: proc(data: rawptr) {
 	if task.is_ray_tracing {
 		program, ok := build_program(task)
 		if !ok {
-			log.errorf(task.serial == 0 ? "gpu: pipeline %q was not created. Dispatches with it are skipped." : "gpu: pipeline %q was not updated. The previous version stays in use.", task.label)
+			log.errorf(
+				task.serial == 0 ? "gpu: pipeline %q was not created. Dispatches with it are skipped." : "gpu: pipeline %q was not updated. The previous version stays in use.",
+				task.label,
+			)
 		}
 		publish_program(task, program)
 		return
@@ -654,23 +764,38 @@ compile_job :: proc(data: rawptr) {
 	pso: ^d3d.IPipelineState
 	hr: d3d.HRESULT
 	if task.is_compute {
-		hr = dev.device->CreateComputePipelineState(&task.compute, d3d.IPipelineState_UUID, (^rawptr)(&pso))
+		hr = dev.device->CreateComputePipelineState(
+			&task.compute,
+			d3d.IPipelineState_UUID,
+			(^rawptr)(&pso),
+		)
 	} else if task.is_mesh {
 		stream := mesh_stream(task)
 		stream_desc := d3d.PIPELINE_STATE_STREAM_DESC {
 			SizeInBytes                   = size_of(stream),
 			pPipelineStateSubobjectStream = &stream,
 		}
-		hr = dev.device->CreatePipelineState(&stream_desc, d3d.IPipelineState_UUID, (^rawptr)(&pso))
+		hr = dev.device->CreatePipelineState(
+			&stream_desc,
+			d3d.IPipelineState_UUID,
+			(^rawptr)(&pso),
+		)
 	} else {
-		hr = dev.device->CreateGraphicsPipelineState(&task.graphics, d3d.IPipelineState_UUID, (^rawptr)(&pso))
+		hr = dev.device->CreateGraphicsPipelineState(
+			&task.graphics,
+			d3d.IPipelineState_UUID,
+			(^rawptr)(&pso),
+		)
 	}
 	if !check(hr, "CreatePipelineState") {
 		pso = nil
 		if task.serial == 0 {
 			log.errorf("gpu: pipeline %q was not created. Draws with it are skipped.", task.label)
 		} else {
-			log.errorf("gpu: pipeline %q was not updated. The previous version stays in use.", task.label)
+			log.errorf(
+				"gpu: pipeline %q was not updated. The previous version stays in use.",
+				task.label,
+			)
 		}
 	} else {
 		set_name(pso, task.label)
@@ -697,13 +822,16 @@ compile_job :: proc(data: rawptr) {
 
 // A pipeline state stream subobject. Like CD3DX12_PIPELINE_STATE_STREAM_SUBOBJECT, each one is aligned to a pointer.
 @(private = "file")
-Subobject :: struct($T: typeid) #align(8) {
+Subobject :: struct($T: typeid) #align (8) {
 	type:  d3d.PIPELINE_STATE_SUBOBJECT_TYPE,
 	value: T,
 }
 
 #assert(size_of(Subobject(u32)) == 8 && offset_of(Subobject(u32), value) == 4)
-#assert(size_of(Subobject(d3d.SHADER_BYTECODE)) == 24 && offset_of(Subobject(d3d.SHADER_BYTECODE), value) == 8)
+#assert(
+	size_of(Subobject(d3d.SHADER_BYTECODE)) == 24 &&
+	offset_of(Subobject(d3d.SHADER_BYTECODE), value) == 8,
+)
 
 @(private = "file")
 Mesh_Stream :: struct {
@@ -736,7 +864,10 @@ mesh_stream :: proc(task: ^Compile_Task) -> Mesh_Stream {
 		rasterizer = {.RASTERIZER, g.RasterizerState},
 		depth_stencil = {.DEPTH_STENCIL, g.DepthStencilState},
 		topology = {.PRIMITIVE_TOPOLOGY, g.PrimitiveTopologyType},
-		rt_formats = {.RENDER_TARGET_FORMATS, {RTFormats = g.RTVFormats, NumRenderTargets = g.NumRenderTargets}},
+		rt_formats = {
+			.RENDER_TARGET_FORMATS,
+			{RTFormats = g.RTVFormats, NumRenderTargets = g.NumRenderTargets},
+		},
 		dsv_format = {.DEPTH_STENCIL_FORMAT, g.DSVFormat},
 		sample_desc = {.SAMPLE_DESC, g.SampleDesc},
 	}
@@ -784,7 +915,12 @@ stencil_face :: proc(s: gpu.Stencil_State) -> d3d.DEPTH_STENCILOP_DESC {
 		.Decrement_Clamp = .DECR_SAT,
 		.Invert          = .INVERT,
 	}
-	return {StencilFailOp = OP[s.fail], StencilDepthFailOp = OP[s.depth_fail], StencilPassOp = OP[s.pass], StencilFunc = COMPARE[s.compare]}
+	return {
+		StencilFailOp = OP[s.fail],
+		StencilDepthFailOp = OP[s.depth_fail],
+		StencilPassOp = OP[s.pass],
+		StencilFunc = COMPARE[s.compare],
+	}
 }
 
 @(private)
@@ -820,7 +956,15 @@ WRITE_ALL :: 0xf
 
 @(private = "file")
 BLEND := [gpu.Blend]d3d.RENDER_TARGET_BLEND_DESC {
-	.Opaque = {SrcBlend = .ONE, DestBlend = .ZERO, BlendOp = .ADD, SrcBlendAlpha = .ONE, DestBlendAlpha = .ZERO, BlendOpAlpha = .ADD, RenderTargetWriteMask = WRITE_ALL},
+	.Opaque = {
+		SrcBlend = .ONE,
+		DestBlend = .ZERO,
+		BlendOp = .ADD,
+		SrcBlendAlpha = .ONE,
+		DestBlendAlpha = .ZERO,
+		BlendOpAlpha = .ADD,
+		RenderTargetWriteMask = WRITE_ALL,
+	},
 	.Alpha = {
 		BlendEnable = true,
 		SrcBlend = .SRC_ALPHA,

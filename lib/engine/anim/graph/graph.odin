@@ -131,7 +131,8 @@ Motion :: struct {
 motion_of :: proc(g: ^Graph, state: u16) -> (m: Motion) {
 	if g.blob == nil {
 		m.count, m.speed, m.loop = 1, 1, g.loop
-		m.parameter, m.enter_event, m.exit_event = format.ANIMATION_GRAPH_NONE, format.ANIMATION_GRAPH_NONE, format.ANIMATION_GRAPH_NONE
+		m.parameter, m.enter_event, m.exit_event =
+			format.ANIMATION_GRAPH_NONE, format.ANIMATION_GRAPH_NONE, format.ANIMATION_GRAPH_NONE
 		return
 	}
 	s := format.animation_graph_states(g.data, g.blob)[state]
@@ -154,7 +155,12 @@ clip_duration :: proc(g: ^Graph, clip: u32) -> f32 {
 // blend_weights is each of a motion's clips' weight: a clip alone, or for a blend, the two clips whose thresholds the
 // parameter is between, by how near it is to each, and the first or the last alone beyond them.
 @(private)
-blend_weights :: proc(m: ^Motion, inst: ^Instance) -> (weights: [format.MAX_ANIMATION_GRAPH_POINTS]f32) {
+blend_weights :: proc(
+	m: ^Motion,
+	inst: ^Instance,
+) -> (
+	weights: [format.MAX_ANIMATION_GRAPH_POINTS]f32,
+) {
 	if m.kind != .Blend_1D || m.count < 2 {
 		weights[0] = 1
 		return
@@ -167,7 +173,8 @@ blend_weights :: proc(m: ^Motion, inst: ^Instance) -> (weights: [format.MAX_ANIM
 	}
 	for i in 1 ..< len(points) {
 		if value < points[i].threshold {
-			u := (value - points[i - 1].threshold) / (points[i].threshold - points[i - 1].threshold)
+			u :=
+				(value - points[i - 1].threshold) / (points[i].threshold - points[i - 1].threshold)
 			weights[i - 1], weights[i] = 1 - u, u
 			return
 		}
@@ -179,7 +186,11 @@ blend_weights :: proc(m: ^Motion, inst: ^Instance) -> (weights: [format.MAX_ANIM
 // motion_duration is how long one play of a motion lasts: its clips' durations, by their weights, so a blend's clips
 // stay in step, each at the same share of its own length. A motion without a length counts plays by seconds.
 @(private)
-motion_duration :: proc(g: ^Graph, m: ^Motion, weights: [format.MAX_ANIMATION_GRAPH_POINTS]f32) -> f32 {
+motion_duration :: proc(
+	g: ^Graph,
+	m: ^Motion,
+	weights: [format.MAX_ANIMATION_GRAPH_POINTS]f32,
+) -> f32 {
 	d: f32
 	for i in 0 ..< m.count {
 		d += weights[i] * clip_duration(g, m.points[i].clip)
@@ -269,7 +280,8 @@ advance :: proc(g: ^Graph, inst: ^Instance, dt: f32, out: ^Tick_Output) {
 	inst.progress += dt * current.speed / motion_duration(g, &current, weights)
 	if inst.source != NONE {
 		source := motion_of(g, inst.source)
-		inst.source_progress += dt * source.speed / motion_duration(g, &source, blend_weights(&source, inst))
+		inst.source_progress +=
+			dt * source.speed / motion_duration(g, &source, blend_weights(&source, inst))
 	}
 	inst.fade += dt
 	if inst.fade >= inst.fade_duration {
@@ -352,7 +364,12 @@ condition_holds :: proc(c: format.Animation_Graph_Condition, inst: ^Instance) ->
 // fades out as the new one fades in; and if a fade was already under way, everything that played freezes where it is
 // and fades out instead.
 @(private)
-take_transition :: proc(g: ^Graph, inst: ^Instance, t: format.Animation_Graph_Transition, out: ^Tick_Output) {
+take_transition :: proc(
+	g: ^Graph,
+	inst: ^Instance,
+	t: format.Animation_Graph_Transition,
+	out: ^Tick_Output,
+) {
 	old := motion_of(g, inst.state)
 	raise(out, .Exit, inst.state, old.exit_event)
 	fading := inst.fade < inst.fade_duration
@@ -401,11 +418,31 @@ build_samples :: proc(g: ^Graph, inst: ^Instance, previous_progress, source_prev
 		}
 		if inst.source != NONE {
 			source := motion_of(g, inst.source)
-			add_state(g, &source, inst.source, inst.source_progress, source_previous, blend_weights(&source, inst), 1 - f, next[:], &count)
+			add_state(
+				g,
+				&source,
+				inst.source,
+				inst.source_progress,
+				source_previous,
+				blend_weights(&source, inst),
+				1 - f,
+				next[:],
+				&count,
+			)
 		}
 	}
 	current := motion_of(g, inst.state)
-	add_state(g, &current, inst.state, inst.progress, previous_progress, blend_weights(&current, inst), f, next[:], &count)
+	add_state(
+		g,
+		&current,
+		inst.state,
+		inst.progress,
+		previous_progress,
+		blend_weights(&current, inst),
+		f,
+		next[:],
+		&count,
+	)
 
 	// Each sample's weight before the tick is its old one; a sample that is new starts from 0.
 	for &n in next[:count] {
@@ -439,7 +476,8 @@ build_samples :: proc(g: ^Graph, inst: ^Instance, previous_progress, source_prev
 	for count > MAX_SAMPLES {
 		lightest := 0
 		for i in 1 ..< count {
-			if max(next[i].weight, next[i].previous_weight) <= max(next[lightest].weight, next[lightest].previous_weight) {
+			if max(next[i].weight, next[i].previous_weight) <=
+			   max(next[lightest].weight, next[lightest].previous_weight) {
 				lightest = i
 			}
 		}
@@ -458,7 +496,16 @@ same_sample :: proc "contextless" (a, b: Sample) -> bool {
 // add_state adds a state's clips that weigh anything, each at the state's phase of its own duration, with the step
 // from its progress before the tick.
 @(private)
-add_state :: proc(g: ^Graph, m: ^Motion, state: u16, progress, previous: f32, weights: [format.MAX_ANIMATION_GRAPH_POINTS]f32, scale: f32, next: []Sample, count: ^int) {
+add_state :: proc(
+	g: ^Graph,
+	m: ^Motion,
+	state: u16,
+	progress, previous: f32,
+	weights: [format.MAX_ANIMATION_GRAPH_POINTS]f32,
+	scale: f32,
+	next: []Sample,
+	count: ^int,
+) {
 	advanced := phase_step(progress, previous, m.loop)
 	for i in 0 ..< m.count {
 		w := weights[i] * scale
@@ -493,7 +540,14 @@ phase_step :: proc "contextless" (progress, previous: f32, loop: bool) -> f32 {
 // present writes the instance's pose between its last two ticks, by alpha from 0 to 1, into locals: each sample at
 // its time less its step times 1 - alpha, and its weight between the two, blended over rest. scratch is a pose of
 // the same length that it samples each clip into.
-present :: proc(g: ^Graph, inst: ^Instance, alpha: f32, rest: []Joint_Pose, scratch: []Joint_Pose, locals: []Joint_Pose) {
+present :: proc(
+	g: ^Graph,
+	inst: ^Instance,
+	alpha: f32,
+	rest: []Joint_Pose,
+	scratch: []Joint_Pose,
+	locals: []Joint_Pose,
+) {
 	for &l in locals {
 		l = {}
 	}

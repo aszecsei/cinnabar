@@ -26,16 +26,16 @@ CAPTURE_SLOTS :: FRAMES_IN_FLIGHT + 2
 // ready at the end of its frame.
 @(private = "file")
 Null_Capture :: struct {
-	state:   Null_Capture_State,
-	status:  gpu.Capture_Status,
-	source:  gpu.Capture_Source,
-	ticket:  u32,
+	state:    Null_Capture_State,
+	status:   gpu.Capture_Status,
+	source:   gpu.Capture_Source,
+	ticket:   u32,
 	// The capture source when the request was made.
 	viewport: Maybe(int),
-	size:    [2]u32,
-	format:  gpu.Format,
-	mode:    gpu.Output_Mode,
-	pixels:  []byte,
+	size:     [2]u32,
+	format:   gpu.Format,
+	mode:     gpu.Output_Mode,
+	pixels:   []byte,
 }
 
 @(private = "file")
@@ -90,55 +90,55 @@ ACCEL_TRIANGLE_BYTES :: 64
 
 @(private = "file")
 state: struct {
-	frame_start:   time.Tick,
-	frame_target:  gpu.Texture,
+	frame_start:      time.Tick,
+	frame_target:     gpu.Texture,
 	// The null backend has no display, so Auto gives Sdr, but the other requests change the frame target's format.
-	request:       gpu.Output_Request,
-	output:        gpu.Output,
-	buffers:       gpu.Pool(gpu.Buffer, gpu.Buffer_Desc),
-	textures:      gpu.Pool(gpu.Texture, gpu.Texture_Desc),
-	samplers:      gpu.Pool(gpu.Sampler, gpu.Sampler_Desc),
-	pipelines:     gpu.Pool(gpu.Pipeline, Pipeline_Entry),
-	accels:        gpu.Pool(gpu.Accel_Struct, Accel_Entry),
-	upscalers:     gpu.Pool(gpu.Upscaler, gpu.Upscaler_Desc),
-	upload_buffer: gpu.Buffer,
-	upload_memory: []byte,
-	upload_offset: int,
-	upload_peak:   int,
-	layouts:       gpu.Layout_Tracker,
+	request:          gpu.Output_Request,
+	output:           gpu.Output,
+	buffers:          gpu.Pool(gpu.Buffer, gpu.Buffer_Desc),
+	textures:         gpu.Pool(gpu.Texture, gpu.Texture_Desc),
+	samplers:         gpu.Pool(gpu.Sampler, gpu.Sampler_Desc),
+	pipelines:        gpu.Pool(gpu.Pipeline, Pipeline_Entry),
+	accels:           gpu.Pool(gpu.Accel_Struct, Accel_Entry),
+	upscalers:        gpu.Pool(gpu.Upscaler, gpu.Upscaler_Desc),
+	upload_buffer:    gpu.Buffer,
+	upload_memory:    []byte,
+	upload_offset:    int,
+	upload_peak:      int,
+	layouts:          gpu.Layout_Tracker,
 	// Textures that have been streamed. Each is streamed once.
-	streamed:      map[gpu.Texture]bool,
+	streamed:         map[gpu.Texture]bool,
 	// The texture views (see gpu.Texture_View_Desc), which have no layout.
-	views:         map[gpu.Texture]bool,
-	transfers:     u64,
+	views:            map[gpu.Texture]bool,
+	transfers:        u64,
 	// The memory of each Readback buffer. Nothing copies into it, so it stays zero.
-	readbacks:     map[gpu.Buffer][]byte,
+	readbacks:        map[gpu.Buffer][]byte,
 	// A fake clock for each queue, in nanoseconds from the frame's start, and the frames in flight.
-	clock:         [gpu.Queue]u64,
-	frames:        [FRAMES_IN_FLIGHT]Null_Frame,
-	frame_index:   int,
-	timing_mutex:  sync.Mutex,
+	clock:            [gpu.Queue]u64,
+	frames:           [FRAMES_IN_FLIGHT]Null_Frame,
+	frame_index:      int,
+	timing_mutex:     sync.Mutex,
 	// Whether the last begin_frame records, as D3D12's does unless the window is minimized.
-	recording:         bool,
+	recording:        bool,
 	// The slots that this frame's end_frame copies the frame target and a texture into, or -1, and the texture.
-	frame_pending:     int,
-	texture_pending:   int,
-	texture:           gpu.Texture,
+	frame_pending:    int,
+	texture_pending:  int,
+	texture:          gpu.Texture,
 	// Whether the next frame copy fails, as D3D12's does when it cannot make its readback buffer, for tests.
-	fail_frame_copy:   bool,
-	captures:          [CAPTURE_SLOTS]Null_Capture,
-	viewports:         [gpu.MAX_VIEWPORT_TARGETS]Null_Viewport,
+	fail_frame_copy:  bool,
+	captures:         [CAPTURE_SLOTS]Null_Capture,
+	viewports:        [gpu.MAX_VIEWPORT_TARGETS]Null_Viewport,
 	// The viewport whose target the frame's copies read, or nil for the frame target.
-	capture_viewport:  Maybe(int),
+	capture_viewport: Maybe(int),
 }
 
 // The null backend has no shared mode and no adapter: it renders nothing to share.
 init :: proc(window: rawptr, size: [2]i32, shared_name := "", adapter: u64 = 0) -> bool {
 	state = {
-		frame_start     = time.tick_now(),
-		output          = {format = gpu.FRAME_TARGET_FORMAT},
-		recording       = true,
-		frame_pending   = -1,
+		frame_start = time.tick_now(),
+		output = {format = gpu.FRAME_TARGET_FORMAT},
+		recording = true,
+		frame_pending = -1,
 		texture_pending = -1,
 	}
 	gpu.pool_init(&state.buffers, gpu.MAX_BUFFERS)
@@ -150,7 +150,10 @@ init :: proc(window: rawptr, size: [2]i32, shared_name := "", adapter: u64 = 0) 
 	gpu.layout_tracker_init(&state.layouts)
 	state.frame_target = gpu.pool_add(&state.textures, frame_target_desc(size))
 	gpu.track_layout(&state.layouts, state.frame_target, .Render_Target)
-	state.upload_buffer = gpu.pool_add(&state.buffers, gpu.Buffer_Desc{size = UPLOAD_RING_SIZE, scope = .Permanent})
+	state.upload_buffer = gpu.pool_add(
+		&state.buffers,
+		gpu.Buffer_Desc{size = UPLOAD_RING_SIZE, scope = .Permanent},
+	)
 	state.upload_memory = make([]byte, UPLOAD_RING_SIZE)
 	return true
 }
@@ -211,7 +214,8 @@ stats :: proc() -> gpu.Stats {
 	}
 	state.upload_peak = 0
 	for i in 0 ..< state.accels.count {
-		if _, ok := gpu.pool_handle(&state.accels, i); ok && state.accels.items[i].info.kind == .Bottom {
+		if _, ok := gpu.pool_handle(&state.accels, i);
+		   ok && state.accels.items[i].info.kind == .Bottom {
 			s.bottom_accel_memory += state.accels.items[i].size
 			s.bottom_accel_memory_uncompacted += state.accels.items[i].uncompacted_size
 		}
@@ -256,7 +260,12 @@ viewport_target :: proc(id: int, size: [2]u32) -> (target: gpu.Preview_Target, o
 	}
 	v := &state.viewports[id]
 	want := [2]u32{min(size.x, gpu.MAX_VIEWPORT_SIZE), min(size.y, gpu.MAX_VIEWPORT_SIZE)}
-	desc := gpu.Texture_Desc{size = want, format = gpu.FRAME_TARGET_FORMAT, usage = {.Render_Target}, scope = .Permanent}
+	desc := gpu.Texture_Desc {
+		size   = want,
+		format = gpu.FRAME_TARGET_FORMAT,
+		usage  = {.Render_Target},
+		scope  = .Permanent,
+	}
 	if v.texture == {} {
 		v.texture = gpu.pool_add(&state.textures, desc)
 	} else if entry := gpu.pool_get(&state.textures, v.texture); entry.size != want {
@@ -265,7 +274,13 @@ viewport_target :: proc(id: int, size: [2]u32) -> (target: gpu.Preview_Target, o
 	}
 	gpu.track_layout(&state.layouts, v.texture, .Render_Target)
 	v.used = true
-	return {texture = v.texture, prefix = fmt.tprintf("null.viewport%d.g%d", id, v.generation), generation = v.generation, size = want}, true
+	return {
+			texture = v.texture,
+			prefix = fmt.tprintf("null.viewport%d.g%d", id, v.generation),
+			generation = v.generation,
+			size = want,
+		},
+		true
 }
 
 release_viewport_target :: proc(id: int) {
@@ -273,7 +288,9 @@ release_viewport_target :: proc(id: int) {
 		return
 	}
 	destroy_texture(state.viewports[id].texture)
-	state.viewports[id] = {generation = state.viewports[id].generation + 1}
+	state.viewports[id] = {
+		generation = state.viewports[id].generation + 1,
+	}
 }
 
 acknowledge_viewport_frame :: proc(id: int, generation: u32, frame: u64) {}
@@ -295,7 +312,10 @@ begin_frame :: proc(size: [2]i32) {
 	state.frame_start = time.tick_now()
 	state.recording = size.x > 0 && size.y > 0
 	mode := gpu.output_mode(state.request, {})
-	state.output = {mode = mode, format = gpu.output_format(mode)}
+	state.output = {
+		mode   = mode,
+		format = gpu.output_format(mode),
+	}
 	gpu.pool_get(&state.textures, state.frame_target)^ = frame_target_desc(size)
 	gpu.track_layout(&state.layouts, state.frame_target, .Render_Target)
 	state.upload_peak = max(state.upload_peak, state.upload_offset)
@@ -308,14 +328,27 @@ begin_frame :: proc(size: [2]i32) {
 	}
 	clear(&f.spans)
 	start := u64(state.frame_start._nsec)
-	f^ = {frame = profile.current_frame(), begin = start, end = start, spans = f.spans}
-	state.clock = {.Graphics = start, .Compute = start}
+	f^ = {
+		frame = profile.current_frame(),
+		begin = start,
+		end   = start,
+		spans = f.spans,
+	}
+	state.clock = {
+		.Graphics = start,
+		.Compute  = start,
+	}
 }
 
 // submit returns false if any command buffer breaks a rule. It then drops all of them.
 // Nothing runs, so the queues and waits only affect validation.
-submit :: proc(buffers: []gpu.Command_Buffer, queue := gpu.Queue.Graphics, wait_for := gpu.Queues{}) -> bool {
-	if err, buffer, packet := gpu.validate_submission(buffers, RESOURCES, &state.layouts, queue); err != .None {
+submit :: proc(
+	buffers: []gpu.Command_Buffer,
+	queue := gpu.Queue.Graphics,
+	wait_for := gpu.Queues{},
+) -> bool {
+	if err, buffer, packet := gpu.validate_submission(buffers, RESOURCES, &state.layouts, queue);
+	   err != .None {
 		log.errorf("gpu: command buffer %d, packet %d: %v", buffer, packet, err)
 		return false
 	}
@@ -343,7 +376,10 @@ time_markers :: proc(buffers: []gpu.Command_Buffer, queue: gpu.Queue) {
 			clock^ += PACKET_TIME
 			#partial switch p.kind {
 			case .Begin_Marker:
-				o := Open{start = clock^, timed = gpu.marker_timed(p)}
+				o := Open {
+					start = clock^,
+					timed = gpu.marker_timed(p),
+				}
 				if o.timed {
 					o.name = profile.intern(gpu.marker_label(p), .Render)
 				}
@@ -353,7 +389,16 @@ time_markers :: proc(buffers: []gpu.Command_Buffer, queue: gpu.Queue) {
 				o := pop(&open)
 				if o.timed {
 					timed -= 1
-					append(&f.spans, profile.Gpu_Span{start = o.start, end = clock^, name = o.name, queue = u8(queue), depth = u8(timed)})
+					append(
+						&f.spans,
+						profile.Gpu_Span {
+							start = o.start,
+							end = clock^,
+							name = o.name,
+							queue = u8(queue),
+							depth = u8(timed),
+						},
+					)
 				}
 			}
 		}
@@ -364,7 +409,8 @@ time_markers :: proc(buffers: []gpu.Command_Buffer, queue: gpu.Queue) {
 // end_frame checks that the game left the frame target in the render target layout, and finishes the frame's captures:
 // a frame that records nothing cancels them.
 end_frame :: proc() {
-	if layout, _ := gpu.tracked_layout(&state.layouts, state.frame_target); layout != .Render_Target {
+	if layout, _ := gpu.tracked_layout(&state.layouts, state.frame_target);
+	   layout != .Render_Target {
 		log.errorf("gpu: the frame target ends the frame in the %v layout", layout)
 	}
 	if state.texture_pending >= 0 {
@@ -377,7 +423,10 @@ end_frame :: proc() {
 		texture, mode := state.frame_target, state.output.mode
 		// A copy of a viewport's target needs a frame that drew it.
 		if viewport, is_viewport := state.captures[state.frame_pending].viewport.?; is_viewport {
-			drawn := viewport >= 0 && viewport < gpu.MAX_VIEWPORT_TARGETS && state.viewports[viewport].used
+			drawn :=
+				viewport >= 0 &&
+				viewport < gpu.MAX_VIEWPORT_TARGETS &&
+				state.viewports[viewport].used
 			copied &&= drawn
 			if drawn {
 				texture, mode = state.viewports[viewport].texture, .Sdr
@@ -388,7 +437,8 @@ end_frame :: proc() {
 	}
 	for &v in state.viewports {
 		if v.used && v.texture != {} {
-			if layout, _ := gpu.tracked_layout(&state.layouts, v.texture); layout != .Render_Target {
+			if layout, _ := gpu.tracked_layout(&state.layouts, v.texture);
+			   layout != .Render_Target {
 				log.errorf("gpu: a viewport's target ends the frame in the %v layout", layout)
 			}
 		}
@@ -422,7 +472,11 @@ fail_next_frame_copy :: proc() {
 take_capture_slot :: proc(source: gpu.Capture_Source, ticket: u32) -> int {
 	for &c, i in state.captures {
 		if c.state == .Free {
-			c = {state = .Requested, source = source, ticket = ticket}
+			c = {
+				state  = .Requested,
+				source = source,
+				ticket = ticket,
+			}
 			if source == .Frame {
 				c.viewport = state.capture_viewport
 			}
@@ -477,7 +531,13 @@ poll_frame_capture :: proc() -> (capture: gpu.Frame_Capture, ok: bool) {
 			continue
 		}
 		c.state = .Taken
-		capture = {slot = u32(i), status = c.status, source = c.source, ticket = c.ticket, viewport = c.viewport}
+		capture = {
+			slot     = u32(i),
+			status   = c.status,
+			source   = c.source,
+			ticket   = c.ticket,
+			viewport = c.viewport,
+		}
 		if c.status == .Ready {
 			capture.size, capture.format, capture.mode = c.size, c.format, c.mode
 			capture.row_pitch, capture.pixels = capture_row_pitch(c.size.x), c.pixels
@@ -500,7 +560,10 @@ create_buffer :: proc(desc: gpu.Buffer_Desc, data: []byte) -> gpu.Buffer {
 		log.errorf("gpu: buffer %q: %v", desc.label, err)
 		return {}
 	}
-	buffer := gpu.pool_add(&state.buffers, gpu.Buffer_Desc{size = desc.size, usage = desc.usage, scope = desc.scope})
+	buffer := gpu.pool_add(
+		&state.buffers,
+		gpu.Buffer_Desc{size = desc.size, usage = desc.usage, scope = desc.scope},
+	)
 	if buffer != {} && .Readback in desc.usage {
 		state.readbacks[buffer] = make([]byte, desc.size)
 	}
@@ -576,7 +639,10 @@ create_ray_tracing_pipeline :: proc(desc: gpu.Ray_Tracing_Pipeline_Desc) -> gpu.
 	return gpu.pool_add(&state.pipelines, Pipeline_Entry{{kind = .Ray_Tracing}, desc.scope})
 }
 
-update_ray_tracing_pipeline :: proc(pipeline: gpu.Pipeline, desc: gpu.Ray_Tracing_Pipeline_Desc) -> bool {
+update_ray_tracing_pipeline :: proc(
+	pipeline: gpu.Pipeline,
+	desc: gpu.Ray_Tracing_Pipeline_Desc,
+) -> bool {
 	if err := gpu.validate_ray_tracing_pipeline_desc(desc); err != .None {
 		log.errorf("gpu: pipeline %q: %v", desc.label, err)
 		return false
@@ -586,7 +652,10 @@ update_ray_tracing_pipeline :: proc(pipeline: gpu.Pipeline, desc: gpu.Ray_Tracin
 
 // An update must keep the pipeline's attachment formats, as in the real backends. Nothing compiles, so the new
 // version is ready at once.
-update_graphics_pipeline :: proc(pipeline: gpu.Pipeline, desc: gpu.Graphics_Pipeline_Desc) -> bool {
+update_graphics_pipeline :: proc(
+	pipeline: gpu.Pipeline,
+	desc: gpu.Graphics_Pipeline_Desc,
+) -> bool {
 	if err := gpu.validate_graphics_pipeline_desc(desc); err != .None {
 		log.errorf("gpu: pipeline %q: %v", desc.label, err)
 		return false
@@ -610,7 +679,10 @@ update_pipeline :: proc(pipeline: gpu.Pipeline, info: gpu.Pipeline_Info, label: 
 		return false
 	}
 	if entry.info != info {
-		log.errorf("gpu: pipeline %q: an update must keep the attachment formats. Create a new pipeline instead.", label)
+		log.errorf(
+			"gpu: pipeline %q: an update must keep the attachment formats. Create a new pipeline instead.",
+			label,
+		)
 		return false
 	}
 	return true
@@ -657,17 +729,25 @@ create_accel :: proc(desc: gpu.Accel_Struct_Desc) -> gpu.Accel_Struct {
 		_, vertices_ok := gpu.pool_lookup(&state.buffers, g.vertices)
 		_, indices_ok := gpu.pool_lookup(&state.buffers, g.indices)
 		if !vertices_ok || (g.indices != {} && !indices_ok) {
-			log.errorf("gpu: acceleration structure %q: geometry %d has an invalid buffer", desc.label, i)
+			log.errorf(
+				"gpu: acceleration structure %q: geometry %d has an invalid buffer",
+				desc.label,
+				i,
+			)
 			return {}
 		}
 		entry.geometries[i] = {g.vertices, g.indices}
-		entry.size += u64(g.indices != {} ? g.index_count : g.vertex_count) / 3 * ACCEL_TRIANGLE_BYTES
+		entry.size +=
+			u64(g.indices != {} ? g.index_count : g.vertex_count) / 3 * ACCEL_TRIANGLE_BYTES
 	}
 	entry.uncompacted_size = entry.size
 	if desc.compact != {} {
 		source, ok := gpu.pool_lookup(&state.accels, desc.compact)
 		if !ok || .Allow_Compaction not_in source.info.flags || source.info.kind != .Bottom {
-			log.errorf("gpu: acceleration structure %q: its compaction's source is invalid or has no Allow_Compaction", desc.label)
+			log.errorf(
+				"gpu: acceleration structure %q: its compaction's source is invalid or has no Allow_Compaction",
+				desc.label,
+			)
 			return {}
 		}
 		entry.size, entry.uncompacted_size = desc.compacted_size, source.size
@@ -711,37 +791,43 @@ destroy_pipeline :: proc(pipeline: gpu.Pipeline) {
 destroy_scope :: proc(scope: gpu.Scope) -> (count: int) {
 	assert(scope != .Permanent, "gpu: the Permanent scope belongs to core")
 	for i in 0 ..< state.buffers.count {
-		if buffer, ok := gpu.pool_handle(&state.buffers, i); ok && state.buffers.items[i].scope == scope {
+		if buffer, ok := gpu.pool_handle(&state.buffers, i);
+		   ok && state.buffers.items[i].scope == scope {
 			destroy_buffer(buffer)
 			count += 1
 		}
 	}
 	for i in 0 ..< state.textures.count {
-		if texture, ok := gpu.pool_handle(&state.textures, i); ok && state.textures.items[i].scope == scope {
+		if texture, ok := gpu.pool_handle(&state.textures, i);
+		   ok && state.textures.items[i].scope == scope {
 			destroy_texture(texture)
 			count += 1
 		}
 	}
 	for i in 0 ..< state.samplers.count {
-		if sampler, ok := gpu.pool_handle(&state.samplers, i); ok && state.samplers.items[i].scope == scope {
+		if sampler, ok := gpu.pool_handle(&state.samplers, i);
+		   ok && state.samplers.items[i].scope == scope {
 			destroy_sampler(sampler)
 			count += 1
 		}
 	}
 	for i in 0 ..< state.accels.count {
-		if accel, ok := gpu.pool_handle(&state.accels, i); ok && state.accels.items[i].scope == scope {
+		if accel, ok := gpu.pool_handle(&state.accels, i);
+		   ok && state.accels.items[i].scope == scope {
 			destroy_accel(accel)
 			count += 1
 		}
 	}
 	for i in 0 ..< state.upscalers.count {
-		if upscaler, ok := gpu.pool_handle(&state.upscalers, i); ok && state.upscalers.items[i].scope == scope {
+		if upscaler, ok := gpu.pool_handle(&state.upscalers, i);
+		   ok && state.upscalers.items[i].scope == scope {
 			destroy_upscaler(upscaler)
 			count += 1
 		}
 	}
 	for i in 0 ..< state.pipelines.count {
-		if pipeline, ok := gpu.pool_handle(&state.pipelines, i); ok && state.pipelines.items[i].scope == scope {
+		if pipeline, ok := gpu.pool_handle(&state.pipelines, i);
+		   ok && state.pipelines.items[i].scope == scope {
 			destroy_pipeline(pipeline)
 			count += 1
 		}
@@ -797,15 +883,26 @@ upload :: proc(size, align: int) -> (gpu.Upload, bool) {
 		if start + size > len(state.upload_memory) {
 			return {}, false
 		}
-		if _, ok := sync.atomic_compare_exchange_weak(&state.upload_offset, offset, start + size); ok {
-			return {data = state.upload_memory[start:][:size], buffer = state.upload_buffer, offset = u32(start)}, true
+		if _, ok := sync.atomic_compare_exchange_weak(&state.upload_offset, offset, start + size);
+		   ok {
+			return {
+					data = state.upload_memory[start:][:size],
+					buffer = state.upload_buffer,
+					offset = u32(start),
+				},
+				true
 		}
 	}
 }
 
 @(private = "file")
 frame_target_desc :: proc(size: [2]i32) -> gpu.Texture_Desc {
-	return {size = {u32(max(size.x, 1)), u32(max(size.y, 1))}, format = state.output.format, usage = {.Render_Target}, scope = .Permanent}
+	return {
+		size = {u32(max(size.x, 1)), u32(max(size.y, 1))},
+		format = state.output.format,
+		usage = {.Render_Target},
+		scope = .Permanent,
+	}
 }
 
 @(private)

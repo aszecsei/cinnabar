@@ -287,51 +287,58 @@ UI_ANY :: Ui_Elements{.Ui, .Box, .Row, .Column, .Stack, .Text, .Image, .Button, 
 UI_BIG :: f32(1e6)
 
 UI_ATTRS := [Ui_Attr]Ui_Attr_Info {
-	.Width       = {name = "width", kind = .Length, on = UI_BOXES},
-	.Height      = {name = "height", kind = .Length, on = UI_BOXES},
-	.Min_Width   = {name = "min_width", kind = .Length, on = UI_BOXES},
-	.Max_Width   = {name = "max_width", kind = .Length, on = UI_BOXES},
-	.Min_Height  = {name = "min_height", kind = .Length, on = UI_BOXES},
-	.Max_Height  = {name = "max_height", kind = .Length, on = UI_BOXES},
-	.Padding     = {name = "padding", kind = .Edges, on = UI_ANY},
-	.Gap         = {name = "gap", kind = .Number, on = UI_CONTAINERS, max = UI_BIG},
-	.Direction   = {name = "direction", kind = .Direction, on = {.Box, .Button}},
-	.Align       = {name = "align", kind = .Align, on = UI_CONTAINERS},
-	.Cross       = {name = "cross", kind = .Cross, on = UI_CONTAINERS},
-	.Anchor      = {name = "anchor", kind = .Anchor, on = UI_BOXES},
-	.Offset      = {name = "offset", kind = .Offset, on = UI_BOXES},
-	.Visible     = {name = "visible", kind = .Boolean, on = UI_BOXES},
-	.Clip        = {name = "clip", kind = .Boolean, on = UI_CONTAINERS},
-	.Overflow    = {name = "overflow", kind = .Overflow, on = UI_CONTAINERS},
-	.Scroll_Bar  = {name = "scroll_bar", kind = .Boolean, on = UI_CONTAINERS},
-	.Fill        = {name = "fill", kind = .Paint, on = UI_BOXES},
-	.Radius      = {name = "radius", kind = .Corners, on = UI_BOXES},
-	.Border      = {name = "border", kind = .Border, on = UI_BOXES},
-	.Opacity     = {name = "opacity", kind = .Number, on = UI_ANY, max = 1},
-	.Image       = {name = "image", kind = .Guid, on = UI_BOXES},
-	.Tint        = {name = "tint", kind = .Color, on = UI_BOXES},
-	.Slice       = {name = "slice", kind = .Edges, on = UI_BOXES},
-	.Font        = {name = "font", kind = .Guid, on = UI_ANY, inherited = true},
-	.Size        = {name = "size", kind = .Number, on = UI_ANY, inherited = true, min = 1, max = 1000},
-	.Color       = {name = "color", kind = .Color, on = UI_ANY, inherited = true},
-	.Text_Align  = {name = "text_align", kind = .Text_Align, on = UI_ANY, inherited = true},
-	.Line_Height = {name = "line_height", kind = .Number, on = UI_ANY, inherited = true, min = 0.5, max = 4},
-	.Wrap        = {name = "wrap", kind = .Boolean, on = UI_ANY, inherited = true},
-	.Text        = {name = "text", kind = .Text, on = {.Text, .Button, .Field}},
+	.Width = {name = "width", kind = .Length, on = UI_BOXES},
+	.Height = {name = "height", kind = .Length, on = UI_BOXES},
+	.Min_Width = {name = "min_width", kind = .Length, on = UI_BOXES},
+	.Max_Width = {name = "max_width", kind = .Length, on = UI_BOXES},
+	.Min_Height = {name = "min_height", kind = .Length, on = UI_BOXES},
+	.Max_Height = {name = "max_height", kind = .Length, on = UI_BOXES},
+	.Padding = {name = "padding", kind = .Edges, on = UI_ANY},
+	.Gap = {name = "gap", kind = .Number, on = UI_CONTAINERS, max = UI_BIG},
+	.Direction = {name = "direction", kind = .Direction, on = {.Box, .Button}},
+	.Align = {name = "align", kind = .Align, on = UI_CONTAINERS},
+	.Cross = {name = "cross", kind = .Cross, on = UI_CONTAINERS},
+	.Anchor = {name = "anchor", kind = .Anchor, on = UI_BOXES},
+	.Offset = {name = "offset", kind = .Offset, on = UI_BOXES},
+	.Visible = {name = "visible", kind = .Boolean, on = UI_BOXES},
+	.Clip = {name = "clip", kind = .Boolean, on = UI_CONTAINERS},
+	.Overflow = {name = "overflow", kind = .Overflow, on = UI_CONTAINERS},
+	.Scroll_Bar = {name = "scroll_bar", kind = .Boolean, on = UI_CONTAINERS},
+	.Fill = {name = "fill", kind = .Paint, on = UI_BOXES},
+	.Radius = {name = "radius", kind = .Corners, on = UI_BOXES},
+	.Border = {name = "border", kind = .Border, on = UI_BOXES},
+	.Opacity = {name = "opacity", kind = .Number, on = UI_ANY, max = 1},
+	.Image = {name = "image", kind = .Guid, on = UI_BOXES},
+	.Tint = {name = "tint", kind = .Color, on = UI_BOXES},
+	.Slice = {name = "slice", kind = .Edges, on = UI_BOXES},
+	.Font = {name = "font", kind = .Guid, on = UI_ANY, inherited = true},
+	.Size = {name = "size", kind = .Number, on = UI_ANY, inherited = true, min = 1, max = 1000},
+	.Color = {name = "color", kind = .Color, on = UI_ANY, inherited = true},
+	.Text_Align = {name = "text_align", kind = .Text_Align, on = UI_ANY, inherited = true},
+	.Line_Height = {
+		name = "line_height",
+		kind = .Number,
+		on = UI_ANY,
+		inherited = true,
+		min = 0.5,
+		max = 4,
+	},
+	.Wrap = {name = "wrap", kind = .Boolean, on = UI_ANY, inherited = true},
+	.Text = {name = "text", kind = .Text, on = {.Text, .Button, .Field}},
 	.Placeholder = {name = "placeholder", kind = .Text, on = {.Field}},
-	.Max_Length  = {name = "max_length", kind = .Count, on = {.Field}, max = 65535},
-	.Focusable   = {name = "focusable", kind = .Boolean, on = UI_BOXES},
-	.Disabled    = {name = "disabled", kind = .Boolean, on = UI_BOXES},
-	.Click       = {name = "click", kind = .Event, on = UI_BOXES},
-	.Changed     = {name = "changed", kind = .Event, on = {.Field}},
-	.Submit      = {name = "submit", kind = .Event, on = {.Field}},
-	.Nav_Up      = {name = "nav_up", kind = .Id, on = UI_BOXES},
-	.Nav_Down    = {name = "nav_down", kind = .Id, on = UI_BOXES},
-	.Nav_Left    = {name = "nav_left", kind = .Id, on = UI_BOXES},
-	.Nav_Right   = {name = "nav_right", kind = .Id, on = UI_BOXES},
-	.Cancel      = {name = "cancel", kind = .Event, on = {.Ui}},
-	.Focus       = {name = "focus", kind = .Id, on = {.Ui}},
-	.Modal       = {name = "modal", kind = .Boolean, on = {.Ui}},
+	.Max_Length = {name = "max_length", kind = .Count, on = {.Field}, max = 65535},
+	.Focusable = {name = "focusable", kind = .Boolean, on = UI_BOXES},
+	.Disabled = {name = "disabled", kind = .Boolean, on = UI_BOXES},
+	.Click = {name = "click", kind = .Event, on = UI_BOXES},
+	.Changed = {name = "changed", kind = .Event, on = {.Field}},
+	.Submit = {name = "submit", kind = .Event, on = {.Field}},
+	.Nav_Up = {name = "nav_up", kind = .Id, on = UI_BOXES},
+	.Nav_Down = {name = "nav_down", kind = .Id, on = UI_BOXES},
+	.Nav_Left = {name = "nav_left", kind = .Id, on = UI_BOXES},
+	.Nav_Right = {name = "nav_right", kind = .Id, on = UI_BOXES},
+	.Cancel = {name = "cancel", kind = .Event, on = {.Ui}},
+	.Focus = {name = "focus", kind = .Id, on = {.Ui}},
+	.Modal = {name = "modal", kind = .Boolean, on = {.Ui}},
 }
 
 // ui_attr_of is the attribute of a name, such as "min_width".
@@ -467,7 +474,10 @@ ui_check_bindings :: proc(text: string) -> string {
 			}
 			name := text[i + 1:][:end - 1]
 			if !ui_valid_name(name) {
-				return fmt.tprintf("binds {%s}, which is not a name of lowercase letters, digits and _", name)
+				return fmt.tprintf(
+					"binds {%s}, which is not a name of lowercase letters, digits and _",
+					name,
+				)
 			}
 			i += end
 		case '}':
@@ -522,7 +532,10 @@ ui_parse_value :: proc(attr: Ui_Attr, text: string) -> (value: Ui_Value, message
 		return text, ""
 	case .Event:
 		if !ui_valid_name(t) {
-			return nil, fmt.tprintf("is %q, not an event's name of lowercase letters, digits and _", t)
+			return nil, fmt.tprintf(
+				"is %q, not an event's name of lowercase letters, digits and _",
+				t,
+			)
 		}
 		return t, ""
 	case .Id:
@@ -590,20 +603,29 @@ ui_parse_value :: proc(attr: Ui_Attr, text: string) -> (value: Ui_Value, message
 	case .Color:
 		color, ok := ui_parse_color(t)
 		if !ok {
-			return nil, fmt.tprintf("is %q, not a color: #rgb, #rgba, #rrggbb, #rrggbbaa or none", t)
+			return nil, fmt.tprintf(
+				"is %q, not a color: #rgb, #rgba, #rrggbb, #rrggbbaa or none",
+				t,
+			)
 		}
 		return color, ""
 	case .Paint:
 		if strings.has_prefix(t, "linear(") && strings.has_suffix(t, ")") {
 			parts := strings.split(t[len("linear("):len(t) - 1], ",", context.temp_allocator)
 			if len(parts) != 3 {
-				return nil, fmt.tprintf("is %q: a gradient is linear(<degrees>, <color>, <color>)", t)
+				return nil, fmt.tprintf(
+					"is %q: a gradient is linear(<degrees>, <color>, <color>)",
+					t,
+				)
 			}
 			angle, angle_ok := ui_number(strings.trim_space(parts[0]))
 			from, from_ok := ui_parse_color(strings.trim_space(parts[1]))
 			to, to_ok := ui_parse_color(strings.trim_space(parts[2]))
 			if !angle_ok || !from_ok || !to_ok {
-				return nil, fmt.tprintf("is %q: a gradient is linear(<degrees>, <color>, <color>)", t)
+				return nil, fmt.tprintf(
+					"is %q: a gradient is linear(<degrees>, <color>, <color>)",
+					t,
+				)
 			}
 			return Ui_Paint{{from, to}, angle, true}, ""
 		}
@@ -621,7 +643,10 @@ ui_parse_value :: proc(attr: Ui_Attr, text: string) -> (value: Ui_Value, message
 		width, width_ok := ui_number(width_text)
 		color, color_ok := ui_parse_color(strings.trim_space(rest))
 		if !width_ok || width < 0 || !color_ok {
-			return nil, fmt.tprintf("is %q, not a width and a color, such as 1 #ffffff40, or none", t)
+			return nil, fmt.tprintf(
+				"is %q, not a width and a color, such as 1 #ffffff40, or none",
+				t,
+			)
 		}
 		return Ui_Border{width, color}, ""
 	case .Direction:
@@ -640,11 +665,26 @@ ui_parse_value :: proc(attr: Ui_Attr, text: string) -> (value: Ui_Value, message
 		}
 		return nil, fmt.tprintf("is %q, not start, center, end or stretch", t)
 	case .Anchor:
-		names := []string{"top_left", "top", "top_right", "left", "center", "right", "bottom_left", "bottom", "bottom_right", "fill"}
+		names := []string {
+			"top_left",
+			"top",
+			"top_right",
+			"left",
+			"center",
+			"right",
+			"bottom_left",
+			"bottom",
+			"bottom_right",
+			"fill",
+		}
 		if i, ok := ui_enum(t, names); ok {
 			return Ui_Anchor(i), ""
 		}
-		return nil, fmt.tprintf("is %q, not one of %s", t, strings.join(names, ", ", context.temp_allocator))
+		return nil, fmt.tprintf(
+			"is %q, not one of %s",
+			t,
+			strings.join(names, ", ", context.temp_allocator),
+		)
 	case .Text_Align:
 		if i, ok := ui_enum(t, {"start", "center", "end"}); ok {
 			return Ui_Text_Align(i), ""
@@ -726,7 +766,12 @@ Ui_Blob :: struct {
 }
 
 ui_layout :: proc() -> u64 {
-	return layout.hash(Ui_Blob) ~ layout.hash(Ui_Node) * 31 ~ layout.hash(Ui_Style) * 961 ~ layout.hash(Ui_Prop) * 29791
+	return(
+		layout.hash(Ui_Blob) ~
+		layout.hash(Ui_Node) * 31 ~
+		layout.hash(Ui_Style) * 961 ~
+		layout.hash(Ui_Prop) * 29791 \
+	)
 }
 
 // ui_view checks a UI document's blob: its header, its layout, that its slices and ranges are inside it, that its
@@ -738,7 +783,11 @@ ui_view :: proc(data: []byte) -> (blob: ^Ui_Blob, ok: bool) {
 	}
 	blob = (^Ui_Blob)(raw_data(data))
 	inside :: proc(data: []byte, s: Slice, size, align: int) -> bool {
-		return u64(s.offset) + u64(s.size) <= u64(len(data)) && int(s.size) % size == 0 && int(s.offset) % align == 0
+		return(
+			u64(s.offset) + u64(s.size) <= u64(len(data)) &&
+			int(s.size) % size == 0 &&
+			int(s.offset) % align == 0 \
+		)
 	}
 	if !inside(data, blob.nodes, size_of(Ui_Node), align_of(Ui_Node)) ||
 	   !inside(data, blob.styles, size_of(Ui_Style), align_of(Ui_Style)) ||
@@ -747,7 +796,11 @@ ui_view :: proc(data: []byte) -> (blob: ^Ui_Blob, ok: bool) {
 	   !inside(data, blob.source_path, 1, 1) {
 		return nil, false
 	}
-	nodes, styles, props, refs := ui_nodes(data, blob), ui_styles(data, blob), ui_props(data, blob), ui_style_refs(data, blob)
+	nodes, styles, props, refs :=
+		ui_nodes(data, blob),
+		ui_styles(data, blob),
+		ui_props(data, blob),
+		ui_style_refs(data, blob)
 	in_range :: proc(r: Ui_Range, count: int) -> bool {
 		return u64(r.first) + u64(r.count) <= u64(count)
 	}
@@ -771,11 +824,17 @@ ui_view :: proc(data: []byte) -> (blob: ^Ui_Blob, ok: bool) {
 			}
 		}
 	}
-	if len(nodes) == 0 || nodes[0].element != .Ui || nodes[0].parent != UI_NONE || int(nodes[0].subtree_end) != len(nodes) {
+	if len(nodes) == 0 ||
+	   nodes[0].element != .Ui ||
+	   nodes[0].parent != UI_NONE ||
+	   int(nodes[0].subtree_end) != len(nodes) {
 		return nil, false
 	}
 	for n, i in nodes {
-		if n.element > max(Ui_Element) || !inside(data, n.id, 1, 1) || !in_range(n.props, len(props)) || !in_range(n.styles, len(refs)) {
+		if n.element > max(Ui_Element) ||
+		   !inside(data, n.id, 1, 1) ||
+		   !in_range(n.props, len(props)) ||
+		   !in_range(n.styles, len(refs)) {
 			return nil, false
 		}
 		if int(n.subtree_end) <= i || int(n.subtree_end) > len(nodes) {
@@ -881,7 +940,12 @@ ui_write :: proc(contents: Ui_Contents, allocator := context.allocator) -> []byt
 	props := reserve_bytes(&buffer, prop_count * size_of(Ui_Prop), align_of(Ui_Prop))
 	refs := reserve_bytes(&buffer, ref_count * size_of(u32), align_of(u32))
 	next_prop, next_ref := u32(0), u32(0)
-	write_props :: proc(buffer: ^[dynamic]byte, props: Slice, next: ^u32, list: []Ui_Prop_Contents) -> Ui_Range {
+	write_props :: proc(
+		buffer: ^[dynamic]byte,
+		props: Slice,
+		next: ^u32,
+		list: []Ui_Prop_Contents,
+	) -> Ui_Range {
 		r := Ui_Range{next^, u32(len(list))}
 		for p in list {
 			record := Ui_Prop {
@@ -921,7 +985,13 @@ ui_write :: proc(contents: Ui_Contents, allocator := context.allocator) -> []byt
 	}
 	source_path := append_bytes(&buffer, transmute([]byte)contents.source_path)
 	blob := Ui_Blob {
-		header = {magic = BLOB_MAGIC, kind = .Ui, layout = ui_layout(), key = contents.key, guid = contents.guid},
+		header = {
+			magic = BLOB_MAGIC,
+			kind = .Ui,
+			layout = ui_layout(),
+			key = contents.key,
+			guid = contents.guid,
+		},
 		nodes = nodes,
 		styles = styles,
 		props = props,

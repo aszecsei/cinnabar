@@ -27,7 +27,16 @@ fill :: proc(f: ^Fixture, count: int) -> []Entity {
 
 // views is what an iteration gives.
 @(private = "file")
-views :: proc(w: ^World, q: Query, since: u64, first := 0, count := max(int)) -> (chunks: int, rows: int) {
+views :: proc(
+	w: ^World,
+	q: Query,
+	since: u64,
+	first := 0,
+	count := max(int),
+) -> (
+	chunks: int,
+	rows: int,
+) {
 	it := query_iter(w, q, first, count, since)
 	for view in query_next(&it) {
 		chunks += 1
@@ -39,7 +48,9 @@ views :: proc(w: ^World, q: Query, since: u64, first := 0, count := max(int)) ->
 @(private = "file")
 chunk_of :: proc(w: ^World, e: Entity) -> u32 {
 	record := records(w)[entity_index(e)]
-	return chunk_directory(w, record.archetype)[record.row / archetype(w, record.archetype).capacity]
+	return(
+		chunk_directory(w, record.archetype)[record.row / archetype(w, record.archetype).capacity] \
+	)
 }
 
 // A query skips the chunks that did not change, which is what its consumers come for.
@@ -298,7 +309,11 @@ transforms_count_as_changed_only_when_they_change :: proc(t: ^testing.T) {
 
 	// The snapshot copies a Transform that moved, and its version is older than what wrote the Transform.
 	snapshot_previous(w)
-	testing.expect_value(t, get(w, child, Previous_Transform).position, position_offset({}, {1, 0, 0}))
+	testing.expect_value(
+		t,
+		get(w, child, Previous_Transform).position,
+		position_offset({}, {1, 0, 0}),
+	)
 	chunks, _ = views(w, previous, since)
 	testing.expect_value(t, chunks, 1)
 	testing.expect(t, w.snapshot_version > since)

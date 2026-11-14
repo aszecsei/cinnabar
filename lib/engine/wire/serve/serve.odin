@@ -94,7 +94,14 @@ Connection :: struct {
 }
 
 // start listens on 127.0.0.1:port, where port 0 picks a free port. Only the local machine can connect.
-start :: proc(s: ^Server, name: string, port: int, write_log: Write_Log, wake: proc(data: rawptr) = nil, wake_data: rawptr = nil) -> bool {
+start :: proc(
+	s: ^Server,
+	name: string,
+	port: int,
+	write_log: Write_Log,
+	wake: proc(data: rawptr) = nil,
+	wake_data: rawptr = nil,
+) -> bool {
 	listener, err := net.listen_tcp({net.IP4_Loopback, port})
 	if err != nil {
 		log.errorf("%s: cannot listen on port %d: %v", name, port, err)
@@ -148,11 +155,22 @@ stop :: proc(s: ^Server) {
 
 // logger logs to the editor while one is linked, and to the console otherwise.
 logger :: proc(s: ^Server) -> log.Logger {
-	return {procedure = logger_proc, data = s, lowest_level = s.console.lowest_level, options = s.console.options}
+	return {
+		procedure = logger_proc,
+		data = s,
+		lowest_level = s.console.lowest_level,
+		options = s.console.options,
+	}
 }
 
 @(private = "file")
-logger_proc :: proc(data: rawptr, level: log.Level, text: string, options: log.Options, location := #caller_location) {
+logger_proc :: proc(
+	data: rawptr,
+	level: log.Level,
+	text: string,
+	options: log.Options,
+	location := #caller_location,
+) {
 	s := (^Server)(data)
 	sync.lock(&s.mutex)
 	if p, ok := s.peer.?; !ok || p.stage != .Linked {
@@ -167,7 +185,13 @@ logger_proc :: proc(data: rawptr, level: log.Level, text: string, options: log.O
 	}
 	// Any thread logs, inside jobs too, so this allocates nothing but outbox growth.
 	location_buf: [256]byte
-	where_ := fmt.bprintf(location_buf[:], "%s:%d:%s()", filepath.base(location.file_path), location.line, location.procedure)
+	where_ := fmt.bprintf(
+		location_buf[:],
+		"%s:%d:%s()",
+		filepath.base(location.file_path),
+		location.line,
+		location.procedure,
+	)
 	s.write_log(&s.outbox, level, time.to_unix_nanoseconds(time.now()), where_, text)
 	sync.cond_signal(&s.outbox_ready)
 }
@@ -196,7 +220,12 @@ linked :: proc(s: ^Server) -> u64 {
 }
 
 // send queues a message of a link's union for a connection, if it is still the one that is open.
-send :: proc(s: ^Server, connection: u64, message: $M, request: u32 = 0) where intrinsics.type_is_union(M) {
+send :: proc(
+	s: ^Server,
+	connection: u64,
+	message: $M,
+	request: u32 = 0,
+) where intrinsics.type_is_union(M) {
 	sync.lock(&s.mutex)
 	defer sync.unlock(&s.mutex)
 	if p, ok := s.peer.?; ok && p.connection == connection {
@@ -320,7 +349,10 @@ read_loop :: proc(c: Connection) {
 		}
 		header, ok := wire.read_header(header_bytes[:])
 		if !ok {
-			log.warnf("%s: the editor sent a message that is too long, so the link is closed", c.s.name)
+			log.warnf(
+				"%s: the editor sent a message that is too long, so the link is closed",
+				c.s.name,
+			)
 			return
 		}
 		payload := make([]byte, header.length, runtime.heap_allocator())

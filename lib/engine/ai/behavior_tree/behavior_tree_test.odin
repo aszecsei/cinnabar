@@ -41,22 +41,20 @@ Fixture :: struct {
 }
 
 @(private = "file")
-BOARD :: format.Guid{0 = 0xb7}
+BOARD :: format.Guid {
+	0 = 0xb7,
+}
 @(private = "file")
-DECISION :: format.Guid{0 = 0xd7}
+DECISION :: format.Guid {
+	0 = 0xd7,
+}
 
 // The test blackboard's keys, at their slots.
 @(private = "file")
 KEYS :: [?]struct {
 	name: string,
 	type: format.Blackboard_Type,
-} {
-	{"a", .Bool},
-	{"b", .Bool},
-	{"delay", .Float},
-	{"trace", .Int},
-	{"count", .Int},
-}
+}{{"a", .Bool}, {"b", .Bool}, {"delay", .Float}, {"trace", .Int}, {"count", .Int}}
 
 @(private = "file")
 value :: proc(v: $T) -> (bytes: [format.BLACKBOARD_VALUE_SIZE]byte) {
@@ -70,7 +68,10 @@ board_contents :: proc() -> format.Blackboard_Contents {
 	names := KEYS
 	keys := make([]format.Blackboard_Key_Contents, len(names), context.temp_allocator)
 	for k, i in names {
-		keys[i] = {name = k.name, type = k.type}
+		keys[i] = {
+			name = k.name,
+			type = k.type,
+		}
 	}
 	keys[2].default = value(f32(0.25))
 	return {guid = BOARD, key = 77, keys = keys}
@@ -129,11 +130,17 @@ condition :: proc(b: ^Builder, text: string) -> u32 {
 	}
 	first := u32(len(b.ops))
 	negated := text[0] == '!'
-	append(&b.ops, format.Decision_Op{code = .Key, operand = slot_of(text[1:] if negated else text)})
+	append(
+		&b.ops,
+		format.Decision_Op{code = .Key, operand = slot_of(text[1:] if negated else text)},
+	)
 	if negated {
 		append(&b.ops, format.Decision_Op{code = .Not})
 	}
-	append(&b.conditions, format.Decision_Condition{first_op = first, op_count = u32(len(b.ops)) - first})
+	append(
+		&b.conditions,
+		format.Decision_Condition{first_op = first, op_count = u32(len(b.ops)) - first},
+	)
 	return u32(len(b.conditions) - 1)
 }
 
@@ -154,8 +161,19 @@ flatten :: proc(b: ^Builder, n: N) {
 			first_arg = u32(len(b.args)),
 		}
 		if n.steps != 0 {
-			append(&b.constants, format.Decision_Constant_Contents{type = .Int, value = value(n.steps)})
-			append(&b.args, format.Decision_Arg_Contents{name = "steps", source = .Constant, index = u32(len(b.constants) - 1), type = .Int})
+			append(
+				&b.constants,
+				format.Decision_Constant_Contents{type = .Int, value = value(n.steps)},
+			)
+			append(
+				&b.args,
+				format.Decision_Arg_Contents {
+					name = "steps",
+					source = .Constant,
+					index = u32(len(b.constants) - 1),
+					type = .Int,
+				},
+			)
 			action.arg_count = 1
 		}
 		append(&b.actions, action)
@@ -170,31 +188,45 @@ flatten :: proc(b: ^Builder, n: N) {
 		append(&b.constants, constant)
 		shared.first_write = u32(len(b.writes))
 		shared.write_count = 1
-		append(&b.writes, format.Decision_Write{key = slot, source = .Constant, index = u32(len(b.constants) - 1)})
+		append(
+			&b.writes,
+			format.Decision_Write {
+				key = slot,
+				source = .Constant,
+				index = u32(len(b.constants) - 1),
+			},
+		)
 	}
 	record := format.Tree_Node {
-		node    = u32(len(b.nodes)),
-		kind    = n.kind,
-		abort   = n.abort,
-		force   = n.force,
-		policy  = n.policy,
-		repeat  = n.repeat,
-		test    = condition(b, n.test),
+		node = u32(len(b.nodes)),
+		kind = n.kind,
+		abort = n.abort,
+		force = n.force,
+		policy = n.policy,
+		repeat = n.repeat,
+		test = condition(b, n.test),
 		seconds = {seconds = n.seconds},
 	}
 	if n.seconds_key != "" {
-		record.seconds = {key = slot_of(n.seconds_key), source = .Key}
+		record.seconds = {
+			key    = slot_of(n.seconds_key),
+			source = .Key,
+		}
 	}
 	if n.invert {
 		record.flags += {.Invert}
 	}
 	if n.cooldown != 0 {
 		record.flags += {.Cooldown}
-		record.cooldown = {seconds = n.cooldown}
+		record.cooldown = {
+			seconds = n.cooldown,
+		}
 	}
 	if n.time_limit != 0 {
 		record.flags += {.Time_Limit}
-		record.time_limit = {seconds = n.time_limit}
+		record.time_limit = {
+			seconds = n.time_limit,
+		}
 	}
 	append(&b.nodes, shared)
 	append(&b.tree, record)
@@ -258,43 +290,37 @@ log_event :: proc(a: ^ai.Action_Context, event: string) {
 @(private = "file")
 register_test :: proc(s: ^ai.State) {
 	register(s)
-	ai.register_action(s, {name = "ok", start = proc(a: ^ai.Action_Context) {log_event(a, "start ok")}})
-	ai.register_action(
-		s,
-		{
-			name = "no",
-			start = proc(a: ^ai.Action_Context) {log_event(a, "start no")},
-			tick = proc(a: ^ai.Action_Context) -> ai.Action_Status {return .Failed},
+	ai.register_action(s, {
+		name = "ok",
+		start = proc(a: ^ai.Action_Context) {log_event(a, "start ok")},
+	})
+	ai.register_action(s, {
+		name = "no",
+		start = proc(a: ^ai.Action_Context) {log_event(a, "start no")},
+		tick = proc(a: ^ai.Action_Context) -> ai.Action_Status {return .Failed},
+	})
+	ai.register_action(s, {
+		name = "walk",
+		params = {{"steps", .Int}},
+		state_size = 4,
+		start = proc(a: ^ai.Action_Context) {
+			steps, _ := ai.arg(a, "steps")
+			(^i32)(&a.state[0])^ = steps.(i32)
+			log_event(a, "start walk")
 		},
-	)
-	ai.register_action(
-		s,
-		{
-			name = "walk",
-			params = {{"steps", .Int}},
-			state_size = 4,
-			start = proc(a: ^ai.Action_Context) {
-				steps, _ := ai.arg(a, "steps")
-				(^i32)(&a.state[0])^ = steps.(i32)
-				log_event(a, "start walk")
-			},
-			tick = proc(a: ^ai.Action_Context) -> ai.Action_Status {
-				left := (^i32)(&a.state[0])
-				left^ -= 1
-				return .Succeeded if left^ <= 0 else .Running
-			},
-			stop = proc(a: ^ai.Action_Context) {log_event(a, "stop walk")},
+		tick = proc(a: ^ai.Action_Context) -> ai.Action_Status {
+			left := (^i32)(&a.state[0])
+			left^ -= 1
+			return .Succeeded if left^ <= 0 else .Running
 		},
-	)
-	ai.register_action(
-		s,
-		{
-			name = "run",
-			start = proc(a: ^ai.Action_Context) {log_event(a, "start run")},
-			tick = proc(a: ^ai.Action_Context) -> ai.Action_Status {return .Running},
-			stop = proc(a: ^ai.Action_Context) {log_event(a, "stop run")},
-		},
-	)
+		stop = proc(a: ^ai.Action_Context) {log_event(a, "stop walk")},
+	})
+	ai.register_action(s, {
+		name = "run",
+		start = proc(a: ^ai.Action_Context) {log_event(a, "start run")},
+		tick = proc(a: ^ai.Action_Context) -> ai.Action_Status {return .Running},
+		stop = proc(a: ^ai.Action_Context) {log_event(a, "stop run")},
+	})
 }
 
 @(private = "file")
@@ -391,7 +417,10 @@ recook :: proc(t: ^testing.T, f: ^Fixture, root: N) {
 	f.cooks += 1
 	later := time.time_add(time.now(), time.Duration(f.cooks) * time.Minute)
 	generation := fmt.tprintf("%s/%s", f.cache, format.GENERATION_FILE)
-	testing.expect(t, os.write_entire_file(generation, transmute([]byte)fmt.tprintf("%d", f.cooks)) == nil)
+	testing.expect(
+		t,
+		os.write_entire_file(generation, transmute([]byte)fmt.tprintf("%d", f.cooks)) == nil,
+	)
 	testing.expect(t, os.change_times(generation, later, later) == nil)
 	buffer: [32]u8
 	path := fmt.tprintf("%s/%s.blob", f.cache, format.guid_format(DECISION, &buffer))
@@ -475,7 +504,14 @@ count_events :: proc(f: ^Fixture, event: string) -> (count: int) {
 
 @(private = "file")
 expect_events :: proc(t: ^testing.T, f: ^Fixture, expected: []string, loc := #caller_location) {
-	testing.expectf(t, slice.equal(f.events[:], expected), "events %v, expected %v", f.events[:], expected, loc = loc)
+	testing.expectf(
+		t,
+		slice.equal(f.events[:], expected),
+		"events %v, expected %v",
+		f.events[:],
+		expected,
+		loc = loc,
+	)
 }
 
 // HOLD is a wait so long that the tree stays in it, so a test sees where the tree got to.
@@ -495,7 +531,12 @@ a_sequence_runs_its_children_until_one_fails :: proc(t: ^testing.T) {
 			children = {
 				{
 					kind = .Sequence,
-					children = {{kind = .Action, action = "ok"}, {kind = .Set, set_key = "trace", set_value = 1}, {kind = .Action, action = "no"}, {kind = .Set, set_key = "trace", set_value = 2}},
+					children = {
+						{kind = .Action, action = "ok"},
+						{kind = .Set, set_key = "trace", set_value = 1},
+						{kind = .Action, action = "no"},
+						{kind = .Set, set_key = "trace", set_value = 2},
+					},
 				},
 				HOLD,
 			},
@@ -521,9 +562,22 @@ a_selector_runs_its_children_until_one_succeeds :: proc(t: ^testing.T) {
 				{
 					kind = .Sequence,
 					children = {
-						{kind = .Selector, children = {{kind = .Action, action = "no"}, {kind = .Action, action = "ok"}, {kind = .Set, set_key = "count", set_value = 9}}},
+						{
+							kind = .Selector,
+							children = {
+								{kind = .Action, action = "no"},
+								{kind = .Action, action = "ok"},
+								{kind = .Set, set_key = "count", set_value = 9},
+							},
+						},
 						{kind = .Set, set_key = "trace", set_value = 1},
-						{kind = .Selector, children = {{kind = .Action, action = "no"}, {kind = .Condition, test = "a"}}},
+						{
+							kind = .Selector,
+							children = {
+								{kind = .Action, action = "no"},
+								{kind = .Condition, test = "a"},
+							},
+						},
 						{kind = .Set, set_key = "trace", set_value = 2},
 					},
 				},
@@ -551,14 +605,37 @@ a_parallel_succeeds_by_one_or_all_and_stops_the_others :: proc(t: ^testing.T) {
 				{
 					kind = .Sequence,
 					children = {
-						{kind = .Parallel, policy = .One, children = {{kind = .Action, action = "run"}, {kind = .Wait, seconds = 0.05}}},
+						{
+							kind = .Parallel,
+							policy = .One,
+							children = {
+								{kind = .Action, action = "run"},
+								{kind = .Wait, seconds = 0.05},
+							},
+						},
 						{kind = .Set, set_key = "trace", set_value = 1},
-						{kind = .Parallel, policy = .All, children = {{kind = .Action, action = "walk", steps = 2}, {kind = .Wait, seconds = 0.05}}},
+						{
+							kind = .Parallel,
+							policy = .All,
+							children = {
+								{kind = .Action, action = "walk", steps = 2},
+								{kind = .Wait, seconds = 0.05},
+							},
+						},
 						{kind = .Set, set_key = "trace", set_value = 2},
 						{
 							kind = .Parallel,
 							policy = .All,
-							children = {{kind = .Action, action = "run"}, {kind = .Sequence, children = {{kind = .Wait, seconds = 0.05}, {kind = .Condition, test = "a"}}}},
+							children = {
+								{kind = .Action, action = "run"},
+								{
+									kind = .Sequence,
+									children = {
+										{kind = .Wait, seconds = 0.05},
+										{kind = .Condition, test = "a"},
+									},
+								},
+							},
 						},
 						{kind = .Set, set_key = "trace", set_value = 3},
 					},
@@ -570,14 +647,28 @@ a_parallel_succeeds_by_one_or_all_and_stops_the_others :: proc(t: ^testing.T) {
 	defer teardown(t, f)
 	e := spawn_agent(f)
 	frame(f, 40)
-	expect_events(t, f, {"start run", "stop run", "start walk", "stop walk", "start run", "stop run"})
+	expect_events(
+		t,
+		f,
+		{"start run", "stop run", "start walk", "stop walk", "start run", "stop run"},
+	)
 	testing.expect_value(t, int_key(f, e, "trace"), 2)
 }
 
 // An action runs over several thinks, and its node runs until the action ends.
 @(test)
 an_action_runs_over_several_thinks :: proc(t: ^testing.T) {
-	f := setup(t, {kind = .Sequence, children = {{kind = .Action, action = "walk", steps = 4}, {kind = .Set, set_key = "trace", set_value = 1}, HOLD}})
+	f := setup(
+		t,
+		{
+			kind = .Sequence,
+			children = {
+				{kind = .Action, action = "walk", steps = 4},
+				{kind = .Set, set_key = "trace", set_value = 1},
+				HOLD,
+			},
+		},
+	)
 	defer teardown(t, f)
 	e := spawn_agent(f)
 	think_until(f, e, 1)
@@ -640,7 +731,14 @@ set_writes_and_succeeds :: proc(t: ^testing.T) {
 		{
 			kind = .Selector,
 			children = {
-				{kind = .Sequence, children = {{kind = .Set, set_key = "a", set_value = 1}, {kind = .Set, set_key = "count", set_value = 7}, {kind = .Condition, test = "a"}}},
+				{
+					kind = .Sequence,
+					children = {
+						{kind = .Set, set_key = "a", set_value = 1},
+						{kind = .Set, set_key = "count", set_value = 7},
+						{kind = .Condition, test = "a"},
+					},
+				},
 				HOLD,
 			},
 		},
@@ -665,8 +763,20 @@ a_condition_succeeds_when_it_holds :: proc(t: ^testing.T) {
 		{
 			kind = .Selector,
 			children = {
-				{kind = .Sequence, children = {{kind = .Condition, test = "a"}, {kind = .Set, set_key = "trace", set_value = 1}}},
-				{kind = .Sequence, children = {{kind = .Condition, test = "!a"}, {kind = .Set, set_key = "trace", set_value = 2}}},
+				{
+					kind = .Sequence,
+					children = {
+						{kind = .Condition, test = "a"},
+						{kind = .Set, set_key = "trace", set_value = 1},
+					},
+				},
+				{
+					kind = .Sequence,
+					children = {
+						{kind = .Condition, test = "!a"},
+						{kind = .Set, set_key = "trace", set_value = 2},
+					},
+				},
 			},
 		},
 	)
@@ -714,7 +824,16 @@ invert_and_force_change_the_result :: proc(t: ^testing.T) {
 // A node with a cooldown fails without running until its cooldown after it ended has passed.
 @(test)
 a_cooldown_fails_the_node_until_it_ends :: proc(t: ^testing.T) {
-	f := setup(t, {kind = .Selector, children = {{kind = .Action, action = "ok", cooldown = 0.5}, {kind = .Wait, seconds = 0.05}}})
+	f := setup(
+		t,
+		{
+			kind = .Selector,
+			children = {
+				{kind = .Action, action = "ok", cooldown = 0.5},
+				{kind = .Wait, seconds = 0.05},
+			},
+		},
+	)
 	defer teardown(t, f)
 	spawn_agent(f)
 	frame(f, 100)
@@ -723,7 +842,12 @@ a_cooldown_fails_the_node_until_it_ends :: proc(t: ^testing.T) {
 		// The node ends in the think after the action's tick, and its cooldown starts then; the waits that it fails into
 		// end on their own ticks, so the next start is at most one wait later.
 		between := f.ticks[i] - f.ticks[i - 1]
-		testing.expectf(t, between >= 31 && between <= 35, "ok started %d ticks after the one before", between)
+		testing.expectf(
+			t,
+			between >= 31 && between <= 35,
+			"ok started %d ticks after the one before",
+			between,
+		)
 	}
 }
 
@@ -731,7 +855,17 @@ a_cooldown_fails_the_node_until_it_ends :: proc(t: ^testing.T) {
 // started in starts again at the next think.
 @(test)
 repeat_runs_a_count_and_forever :: proc(t: ^testing.T) {
-	f := setup(t, {kind = .Sequence, children = {{kind = .Action, action = "ok", repeat = 3}, {kind = .Set, set_key = "trace", set_value = 1}, HOLD}})
+	f := setup(
+		t,
+		{
+			kind = .Sequence,
+			children = {
+				{kind = .Action, action = "ok", repeat = 3},
+				{kind = .Set, set_key = "trace", set_value = 1},
+				HOLD,
+			},
+		},
+	)
 	defer teardown(t, f)
 	e := spawn_agent(f)
 	frame(f, 30)
@@ -753,7 +887,16 @@ repeat_runs_a_count_and_forever :: proc(t: ^testing.T) {
 // A node that runs longer than its time limit is aborted, and fails.
 @(test)
 a_time_limit_aborts_the_node :: proc(t: ^testing.T) {
-	f := setup(t, {kind = .Selector, children = {{kind = .Action, action = "run", time_limit = 0.1}, {kind = .Set, set_key = "trace", set_value = 1}}})
+	f := setup(
+		t,
+		{
+			kind = .Selector,
+			children = {
+				{kind = .Action, action = "run", time_limit = 0.1},
+				{kind = .Set, set_key = "trace", set_value = 1},
+			},
+		},
+	)
 	defer teardown(t, f)
 	e := spawn_agent(f)
 	think_until(f, e, 1)
@@ -770,7 +913,10 @@ a_time_limit_aborts_the_node :: proc(t: ^testing.T) {
 // A guard without an abort is checked when its node starts, and not while it runs.
 @(test)
 a_guard_without_abort_is_checked_on_entry :: proc(t: ^testing.T) {
-	f := setup(t, {kind = .Selector, children = {{kind = .Action, action = "run", guard = "a"}, HOLD}})
+	f := setup(
+		t,
+		{kind = .Selector, children = {{kind = .Action, action = "run", guard = "a"}, HOLD}},
+	)
 	defer teardown(t, f)
 	e := spawn_agent(f)
 	frame(f, 5)
@@ -780,7 +926,11 @@ a_guard_without_abort_is_checked_on_entry :: proc(t: ^testing.T) {
 	testing.expect_value(t, status(f, e, 2), Status.Running)
 
 	// The agent starts again with a false, so this guard holds, and it is not checked again when a becomes true.
-	recook(t, f, {kind = .Selector, children = {{kind = .Action, action = "run", guard = "!a"}, HOLD}})
+	recook(
+		t,
+		f,
+		{kind = .Selector, children = {{kind = .Action, action = "run", guard = "!a"}, HOLD}},
+	)
 	frame(f, 5)
 	expect_events(t, f, {"start run"})
 	ai.set_key(&f.ai, e, "a", true)
@@ -795,7 +945,18 @@ a_guard_without_abort_is_checked_on_entry :: proc(t: ^testing.T) {
 abort_self_stops_its_branch :: proc(t: ^testing.T) {
 	f := setup(
 		t,
-		{kind = .Selector, children = {{kind = .Sequence, guard = "a", abort = .Self, children = {{kind = .Action, action = "walk", steps = 1000}}}, HOLD}},
+		{
+			kind = .Selector,
+			children = {
+				{
+					kind = .Sequence,
+					guard = "a",
+					abort = .Self,
+					children = {{kind = .Action, action = "walk", steps = 1000}},
+				},
+				HOLD,
+			},
+		},
 	)
 	defer teardown(t, f)
 	e := spawn_agent(f)
@@ -816,7 +977,16 @@ abort_self_stops_its_branch :: proc(t: ^testing.T) {
 // branch goes on when the guard becomes false.
 @(test)
 abort_lower_cuts_in :: proc(t: ^testing.T) {
-	f := setup(t, {kind = .Selector, children = {{kind = .Action, action = "walk", steps = 1000, guard = "a", abort = .Lower}, {kind = .Action, action = "run"}}})
+	f := setup(
+		t,
+		{
+			kind = .Selector,
+			children = {
+				{kind = .Action, action = "walk", steps = 1000, guard = "a", abort = .Lower},
+				{kind = .Action, action = "run"},
+			},
+		},
+	)
 	defer teardown(t, f)
 	e := spawn_agent(f)
 	frame(f, 5)
@@ -833,7 +1003,16 @@ abort_lower_cuts_in :: proc(t: ^testing.T) {
 // abort = both cuts in when the guard becomes true, and stops its own branch when it becomes false.
 @(test)
 abort_both_does_both :: proc(t: ^testing.T) {
-	f := setup(t, {kind = .Selector, children = {{kind = .Action, action = "walk", steps = 1000, guard = "a", abort = .Both}, {kind = .Action, action = "run"}}})
+	f := setup(
+		t,
+		{
+			kind = .Selector,
+			children = {
+				{kind = .Action, action = "walk", steps = 1000, guard = "a", abort = .Both},
+				{kind = .Action, action = "run"},
+			},
+		},
+	)
 	defer teardown(t, f)
 	e := spawn_agent(f)
 	frame(f, 5)
@@ -909,18 +1088,31 @@ trees_are_the_same_on_one_job_and_many :: proc(t: ^testing.T) {
 	}
 	run :: proc(t: ^testing.T, serial: bool) -> [dynamic]Outcome {
 		tree := N {
-			kind = .Selector,
+			kind     = .Selector,
 			children = {
 				{
 					kind = .Sequence,
 					guard = "a",
 					abort = .Both,
-					children = {{kind = .Action, action = "walk", steps = 3}, {kind = .Set, set_key = "count", set_value = 1}, {kind = .Wait, seconds_key = "delay"}},
+					children = {
+						{kind = .Action, action = "walk", steps = 3},
+						{kind = .Set, set_key = "count", set_value = 1},
+						{kind = .Wait, seconds_key = "delay"},
+					},
 				},
 				{
 					kind = .Parallel,
 					policy = .One,
-					children = {{kind = .Action, action = "run", time_limit = 0.2}, {kind = .Sequence, children = {{kind = .Wait, seconds = 0.1}, {kind = .Condition, test = "b"}}}},
+					children = {
+						{kind = .Action, action = "run", time_limit = 0.2},
+						{
+							kind = .Sequence,
+							children = {
+								{kind = .Wait, seconds = 0.1},
+								{kind = .Condition, test = "b"},
+							},
+						},
+					},
 				},
 				{kind = .Set, set_key = "trace", set_value = 3, cooldown = 0.15},
 			},
@@ -972,7 +1164,19 @@ last :: proc(f: ^Fixture, e: ecs.Entity, node: int) -> ai.Node_Result {
 // A node keeps how it last ended, and the module gives the nodes that run or ended, by their IDs in the text.
 @(test)
 last_results_show_for_a_finished_sequence :: proc(t: ^testing.T) {
-	f := setup(t, {kind = .Selector, children = {{kind = .Sequence, children = {{kind = .Action, action = "ok"}, {kind = .Action, action = "no"}}}, HOLD}})
+	f := setup(
+		t,
+		{
+			kind = .Selector,
+			children = {
+				{
+					kind = .Sequence,
+					children = {{kind = .Action, action = "ok"}, {kind = .Action, action = "no"}},
+				},
+				HOLD,
+			},
+		},
+	)
 	defer teardown(t, f)
 	e := spawn_agent(f)
 	frame(f, 20)
@@ -988,7 +1192,13 @@ last_results_show_for_a_finished_sequence :: proc(t: ^testing.T) {
 	testing.expect_value(t, debug.keys[2].name, "delay")
 	testing.expect_value(t, debug.keys[2].value, ai.Value(f32(0.25)))
 	// The IDs are the nodes' indices plus one. The wait runs, and the selector, which has not ended.
-	expected := []ai.Node_View{{id = 1, running = true}, {id = 2, last = .Failed}, {id = 3, last = .Succeeded}, {id = 4, last = .Failed}, {id = 5, running = true}}
+	expected := []ai.Node_View {
+		{id = 1, running = true},
+		{id = 2, last = .Failed},
+		{id = 3, last = .Succeeded},
+		{id = 4, last = .Failed},
+		{id = 5, running = true},
+	}
 	testing.expect(t, slice.equal(debug.nodes, expected), "the nodes differ")
 }
 
@@ -997,7 +1207,18 @@ last_results_show_for_a_finished_sequence :: proc(t: ^testing.T) {
 last_results_are_kept_after_an_abort :: proc(t: ^testing.T) {
 	f := setup(
 		t,
-		{kind = .Selector, children = {{kind = .Sequence, guard = "a", abort = .Self, children = {{kind = .Action, action = "walk", steps = 1000}}}, HOLD}},
+		{
+			kind = .Selector,
+			children = {
+				{
+					kind = .Sequence,
+					guard = "a",
+					abort = .Self,
+					children = {{kind = .Action, action = "walk", steps = 1000}},
+				},
+				HOLD,
+			},
+		},
 	)
 	defer teardown(t, f)
 	e := spawn_agent(f)

@@ -42,12 +42,12 @@ Gi_Params :: struct {
 
 @(rodata)
 GI_PARAMS := [Quality_Level]Gi_Params {
-	.Low    = {cascades = 4, spacing = 16, directions = 4, steps = 4, history_frames = 16},
+	.Low = {cascades = 4, spacing = 16, directions = 4, steps = 4, history_frames = 16},
 	.Medium = {cascades = 5, spacing = 8, directions = 4, steps = 6, history_frames = 12},
-	.High   = {cascades = 5, spacing = 8, directions = 4, steps = 8, history_frames = 12},
+	.High = {cascades = 5, spacing = 8, directions = 4, steps = 8, history_frames = 12},
 	// Ultra's probes are as far apart as High's, with four times the directions: 8 across at spacing 4 would be four
 	// times the texels, past the texture's size at 4K.
-	.Ultra  = {cascades = 5, spacing = 8, directions = 8, steps = 12, history_frames = 10},
+	.Ultra = {cascades = 5, spacing = 8, directions = 8, steps = 12, history_frames = 10},
 }
 
 // Gi_Settings are a frame's global illumination, in Frame_Settings, from the Global_Illumination settings.
@@ -96,41 +96,41 @@ gi_state_destroy :: proc(g: ^Gi_State, platform: ^core.Platform_API) {
 // Gi_Constants matches Gi_Constants in gi_common.hlsli.
 @(private = "file")
 Gi_Constants :: struct {
-	previous:         matrix[4, 4]f32,
-	right:            [4]f32,
-	up:               [4]f32,
-	forward:          [4]f32,
-	projection:       [4]f32,
-	ambient:          [4][4]f32,
-	depth:            u32,
-	stencil:          u32,
-	normals:          u32,
-	velocity:         u32,
-	lit:              u32,
-	lit_valid:        u32,
-	cascades:         u32,
-	sampler_index:    u32,
-	history_diffuse:  u32,
-	history_specular: u32,
-	out_diffuse:      u32,
-	out_specular:     u32,
-	valid:            u32,
-	frame:            u32,
-	cascade:          u32,
-	cascade_count:    u32,
-	size:             [2]u32,
-	lit_size:         [2]u32,
-	region:           [2]u32,
-	scene:            u32,
-	exposure:         u32,
-	interval_scale:   f32,
-	max_frames:       f32,
-	spacing:          u32,
-	steps:            u32,
-	probes:           u32,
-	probe_grid:       u32,
+	previous:          matrix[4, 4]f32,
+	right:             [4]f32,
+	up:                [4]f32,
+	forward:           [4]f32,
+	projection:        [4]f32,
+	ambient:           [4][4]f32,
+	depth:             u32,
+	stencil:           u32,
+	normals:           u32,
+	velocity:          u32,
+	lit:               u32,
+	lit_valid:         u32,
+	cascades:          u32,
+	sampler_index:     u32,
+	history_diffuse:   u32,
+	history_specular:  u32,
+	out_diffuse:       u32,
+	out_specular:      u32,
+	valid:             u32,
+	frame:             u32,
+	cascade:           u32,
+	cascade_count:     u32,
+	size:              [2]u32,
+	lit_size:          [2]u32,
+	region:            [2]u32,
+	scene:             u32,
+	exposure:          u32,
+	interval_scale:    f32,
+	max_frames:        f32,
+	spacing:           u32,
+	steps:             u32,
+	probes:            u32,
+	probe_grid:        u32,
 	probe_grid_offset: u32,
-	directions:       u32,
+	directions:        u32,
 	// The gathers' roughness, and the sky's cubemap that their specular light takes past the probes (see
 	// Sky_Cube_Reads), which the sampler reads.
 	roughness:         u32,
@@ -150,19 +150,19 @@ Gi_Constants :: struct {
 // Gi_Frame is what one frame's global illumination passes need, in frame memory.
 @(private)
 Gi_Frame :: struct {
-	constants: Gi_Constants,
-	params:    Gi_Params,
-	region:    [2]u32,
-	lit_size:  [2]u32,
-	cascades:  Texture,
-	lit:       History,
-	diffuse:   History,
-	specular:  History,
+	constants:  Gi_Constants,
+	params:     Gi_Params,
+	region:     [2]u32,
+	lit_size:   [2]u32,
+	cascades:   Texture,
+	lit:        History,
+	diffuse:    History,
+	specular:   History,
 	// The scene that the lit pass keeps: later passes replace Frame.scene before the passes record.
-	scene:     Texture,
-	settings:  Gi_Settings,
+	scene:      Texture,
+	settings:   Gi_Settings,
 	// The world probes, once add_gi_world_probes has updated them, or nil.
-	probes:    ^Gi_Probe_Frame,
+	probes:     ^Gi_Probe_Frame,
 	// The split cascades' probes, or the voxel cones' voxels, as the Gi_Probes debug view shows them, which their gather
 	// draws when the view is on.
 	probe_view: Texture,
@@ -321,7 +321,8 @@ add_gi_passes :: proc(f: ^Frame) {
 	g := f.graph
 	platform := f.renderer.platform
 	// Last frame's projection is known once the scene's constants are written.
-	gf.constants.previous = f.previous_view_projection * linalg.matrix4_translate_f32(f.camera_motion)
+	gf.constants.previous =
+		f.previous_view_projection * linalg.matrix4_translate_f32(f.camera_motion)
 	// The voxel cones, or with the world probes the split cascades, take the screen cascades' place.
 	if gf.settings.technique == .Voxel_Cones {
 		voxels := add_gi_voxel_passes(f)
@@ -338,7 +339,14 @@ add_gi_passes :: proc(f: ^Frame) {
 		f.gi_diffuse, f.gi_specular = gf.diffuse.current, gf.specular.current
 		return
 	}
-	gf.cascades = create_texture(g, {size = {gf.region.x, gf.region.y * gf.params.cascades}, format = GI_FORMAT, label = "gi cascades"})
+	gf.cascades = create_texture(
+		g,
+		{
+			size = {gf.region.x, gf.region.y * gf.params.cascades},
+			format = GI_FORMAT,
+			label = "gi cascades",
+		},
+	)
 	p := add_compute_pass(g, "gi trace", run_gi_trace, f, queue = .Compute)
 	read(g, p, f.depth)
 	read(g, p, f.normals)
@@ -346,7 +354,13 @@ add_gi_passes :: proc(f: ^Frame) {
 	write(g, p, gf.cascades)
 	declare_probe_reads(f, p)
 	for k := int(gf.params.cascades) - 1; k >= 0; k -= 1 {
-		p = add_compute_pass(g, "gi merge", run_gi_merge, new_clone(Gi_Merge{f, u32(k)}, platform.frame_allocator), queue = .Compute)
+		p = add_compute_pass(
+			g,
+			"gi merge",
+			run_gi_merge,
+			new_clone(Gi_Merge{f, u32(k)}, platform.frame_allocator),
+			queue = .Compute,
+		)
 		read(g, p, f.depth)
 		write(g, p, gf.cascades)
 		declare_probe_reads(f, p)

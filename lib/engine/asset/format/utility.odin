@@ -173,7 +173,13 @@ Utility_Data :: struct {
 // utility_size is the bytes of data of the counts.
 @(private = "file")
 utility_size :: proc "contextless" (options, considerations, links, points: u64) -> u64 {
-	return size_of(Utility_Header) + options * size_of(Utility_Option) + considerations * size_of(Utility_Consideration) + links * 4 + points * size_of(Utility_Point)
+	return(
+		size_of(Utility_Header) +
+		options * size_of(Utility_Option) +
+		considerations * size_of(Utility_Consideration) +
+		links * 4 +
+		points * size_of(Utility_Point) \
+	)
 }
 
 // utility_data is a view of the data, which it does not check, besides its size.
@@ -182,7 +188,13 @@ utility_data :: proc "contextless" (data: []byte) -> (u: Utility_Data) {
 		return
 	}
 	h := (^Utility_Header)(raw_data(data))
-	if u64(len(data)) < utility_size(u64(h.option_count), u64(h.consideration_count), u64(h.link_count), u64(h.point_count)) {
+	if u64(len(data)) <
+	   utility_size(
+		   u64(h.option_count),
+		   u64(h.consideration_count),
+		   u64(h.link_count),
+		   u64(h.point_count),
+	   ) {
 		return
 	}
 	at := size_of(Utility_Header)
@@ -200,13 +212,29 @@ utility_data :: proc "contextless" (data: []byte) -> (u: Utility_Data) {
 // utility_view checks the data against its decision: its layout and size, that each option's decision node has an
 // action, that its links and each table's points are in range, that a table's points go up in x, and that each state is
 // inside the module state. It does not check keys: utility_check does, with the blackboard.
-utility_view :: proc(data: []byte, decision_data: []byte, decision: ^Decision_Blob) -> (u: Utility_Data, ok: bool) {
-	if len(data) < size_of(Utility_Header) || uintptr(raw_data(data)) % align_of(Utility_Header) != 0 {
+utility_view :: proc(
+	data: []byte,
+	decision_data: []byte,
+	decision: ^Decision_Blob,
+) -> (
+	u: Utility_Data,
+	ok: bool,
+) {
+	if len(data) < size_of(Utility_Header) ||
+	   uintptr(raw_data(data)) % align_of(Utility_Header) != 0 {
 		return
 	}
 	h := (^Utility_Header)(raw_data(data))
-	if h.layout != utility_layout() || h.option_count == 0 || h.pick > max(Utility_Pick) ||
-	   u64(len(data)) != utility_size(u64(h.option_count), u64(h.consideration_count), u64(h.link_count), u64(h.point_count)) {
+	if h.layout != utility_layout() ||
+	   h.option_count == 0 ||
+	   h.pick > max(Utility_Pick) ||
+	   u64(len(data)) !=
+		   utility_size(
+			   u64(h.option_count),
+			   u64(h.consideration_count),
+			   u64(h.link_count),
+			   u64(h.point_count),
+		   ) {
 		return
 	}
 	if !(h.within >= 0 && h.within <= 1) || !(h.momentum >= 0) {
@@ -219,7 +247,9 @@ utility_view :: proc(data: []byte, decision_data: []byte, decision: ^Decision_Bl
 		return {}, false
 	}
 	for o in u.options {
-		if int(o.node) >= len(nodes) || nodes[o.node].action == DECISION_NONE || o.cooldown.source > max(Tree_Time_Source) {
+		if int(o.node) >= len(nodes) ||
+		   nodes[o.node].action == DECISION_NONE ||
+		   o.cooldown.source > max(Tree_Time_Source) {
 			return {}, false
 		}
 		if u64(o.first_link) + u64(o.link_count) > u64(len(u.links)) || !(o.weight >= 0) {
@@ -228,7 +258,8 @@ utility_view :: proc(data: []byte, decision_data: []byte, decision: ^Decision_Bl
 		if o.state % 8 != 0 || u64(o.state) + size_of(Utility_Option_State) > state_size {
 			return {}, false
 		}
-		if o.links_state % 4 != 0 || u64(o.links_state) + u64(o.link_count) * size_of(Utility_Link_State) > state_size {
+		if o.links_state % 4 != 0 ||
+		   u64(o.links_state) + u64(o.link_count) * size_of(Utility_Link_State) > state_size {
 			return {}, false
 		}
 	}
@@ -248,16 +279,27 @@ utility_view :: proc(data: []byte, decision_data: []byte, decision: ^Decision_Bl
 // utility_consideration_ok checks a consideration without its keys: its node, its input and curve, that its range and
 // parameters are finite and its range not empty, and that a table's points are in range and go up in x. GOAP's goals
 // use utility's considerations, so its check does this too.
-utility_consideration_ok :: proc "contextless" (c: Utility_Consideration, points: []Utility_Point, node_count: int) -> bool {
+utility_consideration_ok :: proc "contextless" (
+	c: Utility_Consideration,
+	points: []Utility_Point,
+	node_count: int,
+) -> bool {
 	if int(c.node) >= node_count || c.input > max(Utility_Input) || c.curve > max(Utility_Curve) {
 		return false
 	}
-	if !(c.max != c.min) || !is_finite(c.min) || !is_finite(c.max) || !is_finite(c.slope) || !is_finite(c.exponent) ||
-	   !is_finite(c.x_shift) || !is_finite(c.y_shift) {
+	if !(c.max != c.min) ||
+	   !is_finite(c.min) ||
+	   !is_finite(c.max) ||
+	   !is_finite(c.slope) ||
+	   !is_finite(c.exponent) ||
+	   !is_finite(c.x_shift) ||
+	   !is_finite(c.y_shift) {
 		return false
 	}
 	if c.curve == .Table {
-		if c.point_count < 2 || c.point_count > MAX_UTILITY_POINTS || u64(c.first_point) + u64(c.point_count) > u64(len(points)) {
+		if c.point_count < 2 ||
+		   c.point_count > MAX_UTILITY_POINTS ||
+		   u64(c.first_point) + u64(c.point_count) > u64(len(points)) {
 			return false
 		}
 		table := points[c.first_point:][:c.point_count]
@@ -271,8 +313,15 @@ utility_consideration_ok :: proc "contextless" (c: Utility_Consideration, points
 }
 
 // utility_consideration_keys_ok is whether a consideration's keys are of the types that its input reads.
-utility_consideration_keys_ok :: proc "contextless" (keys: []Blackboard_Key, c: Utility_Consideration) -> bool {
-	is :: proc "contextless" (keys: []Blackboard_Key, slot: u32, types: bit_set[Blackboard_Type]) -> bool {
+utility_consideration_keys_ok :: proc "contextless" (
+	keys: []Blackboard_Key,
+	c: Utility_Consideration,
+) -> bool {
+	is :: proc "contextless" (
+		keys: []Blackboard_Key,
+		slot: u32,
+		types: bit_set[Blackboard_Type],
+	) -> bool {
 		return int(slot) < len(keys) && keys[slot].type in types
 	}
 	place :: proc "contextless" (keys: []Blackboard_Key, slot: u32) -> bool {
@@ -296,7 +345,13 @@ is_finite :: proc "contextless" (x: f32) -> bool {
 
 // utility_check checks the data against its decision and the decision's blackboard: utility_view's checks, and that
 // each key that it reads is of a type that it reads.
-utility_check :: proc(data: []byte, decision_data: []byte, decision: ^Decision_Blob, board_data: []byte, board: ^Blackboard_Blob) -> bool {
+utility_check :: proc(
+	data: []byte,
+	decision_data: []byte,
+	decision: ^Decision_Blob,
+	board_data: []byte,
+	board: ^Blackboard_Blob,
+) -> bool {
 	u, ok := utility_view(data, decision_data, decision)
 	if !ok {
 		return false
@@ -334,7 +389,12 @@ Utility_Contents :: struct {
 
 // utility_write builds the data.
 utility_write :: proc(c: Utility_Contents, allocator := context.allocator) -> []byte {
-	size := utility_size(u64(len(c.options)), u64(len(c.considerations)), u64(len(c.links)), u64(len(c.points)))
+	size := utility_size(
+		u64(len(c.options)),
+		u64(len(c.considerations)),
+		u64(len(c.links)),
+		u64(len(c.points)),
+	)
 	data := make([]byte, int(size), allocator)
 	header := Utility_Header {
 		layout              = utility_layout(),
@@ -355,7 +415,12 @@ utility_write :: proc(c: Utility_Contents, allocator := context.allocator) -> []
 	}
 	put(data, &at, &header, size_of(header))
 	put(data, &at, raw_data(c.options), len(c.options) * size_of(Utility_Option))
-	put(data, &at, raw_data(c.considerations), len(c.considerations) * size_of(Utility_Consideration))
+	put(
+		data,
+		&at,
+		raw_data(c.considerations),
+		len(c.considerations) * size_of(Utility_Consideration),
+	)
 	put(data, &at, raw_data(c.links), len(c.links) * 4)
 	put(data, &at, raw_data(c.points), len(c.points) * size_of(Utility_Point))
 	return data

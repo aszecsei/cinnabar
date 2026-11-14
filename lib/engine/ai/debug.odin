@@ -47,7 +47,14 @@ Agent_Debug :: struct {
 // agent_debug is an entity's agent, from the blobs that the assets have loaded and the agent started with, so the
 // editor can read it between frames, when the frame's views are gone. It is false for an agent that is not ready, or
 // whose blobs were recooked and have not restarted it. The slices are in the allocator.
-agent_debug :: proc(s: ^State, e: ecs.Entity, allocator := context.temp_allocator) -> (debug: Agent_Debug, ok: bool) {
+agent_debug :: proc(
+	s: ^State,
+	e: ecs.Entity,
+	allocator := context.temp_allocator,
+) -> (
+	debug: Agent_Debug,
+	ok: bool,
+) {
 	if s.world == nil || s.assets == nil {
 		return {}, false
 	}
@@ -77,8 +84,14 @@ agent_debug :: proc(s: ^State, e: ecs.Entity, allocator := context.temp_allocato
 		debug.keys[i] = view
 	}
 	module := s.modules[decision.technique]
-	d := Decision{data = decision_data, blob = decision}
-	b := Board{data = board_data, blob = board}
+	d := Decision {
+		data = decision_data,
+		blob = decision,
+	}
+	b := Board {
+		data = board_data,
+		blob = board,
+	}
 	if module.nodes != nil {
 		debug.nodes = module.nodes(d, ready.state, allocator)
 	}

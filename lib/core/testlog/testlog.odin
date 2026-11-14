@@ -22,7 +22,13 @@ expected_errors :: proc() -> runtime.Logger {
 }
 
 @(private)
-filter :: proc(data: rawptr, level: runtime.Logger_Level, text: string, options: runtime.Logger_Options, location := #caller_location) {
+filter :: proc(
+	data: rawptr,
+	level: runtime.Logger_Level,
+	text: string,
+	options: runtime.Logger_Options,
+	location := #caller_location,
+) {
 	if strings.has_suffix(location.file_path, "_test.odin") {
 		intrinsics.atomic_load(&runner)(data, level, text, options, location)
 	}

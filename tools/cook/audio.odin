@@ -79,7 +79,17 @@ cook_sound :: proc(a: ^Asset_Source, out_dir: string, pass: ^Pass) -> Asset_Resu
 		return .Failed
 	}
 	// A setting is part of the key through the .meta file's text, and so are the codecs through their versions.
-	key := hash.fnv64a(transmute([]byte)fmt.tprintf("%s\x00%s\x00%s\x00%s\x00%s\x00%x\x00", AUDIO_COOK_VERSION, ma.BINDINGS_VERSION_STRING, OPUS_VERSION, VORBIS_VERSION, a.name, format.audio_layout()))
+	key := hash.fnv64a(
+		transmute([]byte)fmt.tprintf(
+			"%s\x00%s\x00%s\x00%s\x00%s\x00%x\x00",
+			AUDIO_COOK_VERSION,
+			ma.BINDINGS_VERSION_STRING,
+			OPUS_VERSION,
+			VORBIS_VERSION,
+			a.name,
+			format.audio_layout(),
+		),
+	)
 	key = hash.fnv64a(source_of(a^), key)
 	key = hash.fnv64a(transmute([]byte)a.meta_text, key)
 	guid := a.meta.guid
@@ -93,7 +103,13 @@ cook_sound :: proc(a: ^Asset_Source, out_dir: string, pass: ^Pass) -> Asset_Resu
 	defer delete(samples)
 	// A sound that fails keeps its old blob, so the running game keeps the last good version.
 	if !decoded {
-		report_error(problems, a.path, 0, 0, "cannot decode this sound. It takes .wav, .ogg, .flac or .mp3 with at least one sample.")
+		report_error(
+			problems,
+			a.path,
+			0,
+			0,
+			"cannot decode this sound. It takes .wav, .ogg, .flac or .mp3 with at least one sample.",
+		)
 		return .Failed
 	}
 	frames := len(samples) / int(channels)
@@ -121,7 +137,20 @@ cook_sound :: proc(a: ^Asset_Source, out_dir: string, pass: ^Pass) -> Asset_Resu
 		report_error(problems, a.path, 0, 0, "is too long: its data takes more than 4 GiB")
 		return .Failed
 	}
-	blob := format.audio_write({guid = guid, key = key, frames = u64(frames), channels = channels, stream = stream, format = sound_format, skip = skip, data = data, source_path = a.name}, context.temp_allocator)
+	blob := format.audio_write(
+		{
+			guid = guid,
+			key = key,
+			frames = u64(frames),
+			channels = channels,
+			stream = stream,
+			format = sound_format,
+			skip = skip,
+			data = data,
+			source_path = a.name,
+		},
+		context.temp_allocator,
+	)
 	if !write_blob(output, blob) {
 		return .Failed
 	}
@@ -144,7 +173,14 @@ audio_format_of :: proc(setting: string) -> audio.Sound_Format {
 // decode_sound decodes a sound to 16-bit PCM at the engine's rate, in the channels that the setting asks for. The samples
 // are the caller's, from the heap.
 @(private)
-decode_sound :: proc(source: []byte, channels_setting: string) -> (samples: [dynamic]i16, channels: u32, ok: bool) {
+decode_sound :: proc(
+	source: []byte,
+	channels_setting: string,
+) -> (
+	samples: [dynamic]i16,
+	channels: u32,
+	ok: bool,
+) {
 	// The source's channels and rate first, from a decoder that asks for no conversion of them.
 	config := ma.decoder_config_init(.s16, 0, 0)
 	decoder: ma.decoder

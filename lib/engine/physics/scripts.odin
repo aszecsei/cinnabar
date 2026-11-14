@@ -22,128 +22,173 @@ register_scripts :: proc(r: ^script.Runtime, s: ^State) {
 	script.expose(r, Collider, DEFAULT_COLLIDER)
 	script.expose(r, Character, DEFAULT_CHARACTER)
 
-	script.define(r, "Physics.raycast", raycast_binding, "(origin: WorldPosition, direction: vector, max_distance: number?, layers: number?) -> RaycastHit?")
-	script.define(r, "Physics.raycast_all", raycast_all_binding, "(origin: WorldPosition, direction: vector, max_distance: number?, layers: number?) -> { RaycastHit }")
-	script.define(r, "Physics.sphere_cast", sphere_cast_binding, "(origin: WorldPosition, radius: number, direction: vector, distance: number, layers: number?) -> RaycastHit?")
-	script.define(r, "Physics.box_cast", box_cast_binding, "(origin: WorldPosition, size: vector, rotation: Quaternion?, direction: vector, distance: number, layers: number?) -> RaycastHit?")
-	script.define(r, "Physics.capsule_cast", capsule_cast_binding, "(origin: WorldPosition, radius: number, height: number, rotation: Quaternion?, direction: vector, distance: number, layers: number?) -> RaycastHit?")
-	script.define(r, "Physics.overlap_sphere", overlap_sphere_binding, "(center: WorldPosition, radius: number, layers: number?) -> { Entity }")
-	script.define(r, "Physics.overlap_box", overlap_box_binding, "(center: WorldPosition, size: vector, rotation: Quaternion?, layers: number?) -> { Entity }")
-	script.define(r, "Physics.overlap_capsule", overlap_capsule_binding, "(center: WorldPosition, radius: number, height: number, rotation: Quaternion?, layers: number?) -> { Entity }")
+	script.define(
+		r,
+		"Physics.raycast",
+		raycast_binding,
+		"(origin: WorldPosition, direction: vector, max_distance: number?, layers: number?) -> RaycastHit?",
+	)
+	script.define(
+		r,
+		"Physics.raycast_all",
+		raycast_all_binding,
+		"(origin: WorldPosition, direction: vector, max_distance: number?, layers: number?) -> { RaycastHit }",
+	)
+	script.define(
+		r,
+		"Physics.sphere_cast",
+		sphere_cast_binding,
+		"(origin: WorldPosition, radius: number, direction: vector, distance: number, layers: number?) -> RaycastHit?",
+	)
+	script.define(
+		r,
+		"Physics.box_cast",
+		box_cast_binding,
+		"(origin: WorldPosition, size: vector, rotation: Quaternion?, direction: vector, distance: number, layers: number?) -> RaycastHit?",
+	)
+	script.define(
+		r,
+		"Physics.capsule_cast",
+		capsule_cast_binding,
+		"(origin: WorldPosition, radius: number, height: number, rotation: Quaternion?, direction: vector, distance: number, layers: number?) -> RaycastHit?",
+	)
+	script.define(
+		r,
+		"Physics.overlap_sphere",
+		overlap_sphere_binding,
+		"(center: WorldPosition, radius: number, layers: number?) -> { Entity }",
+	)
+	script.define(
+		r,
+		"Physics.overlap_box",
+		overlap_box_binding,
+		"(center: WorldPosition, size: vector, rotation: Quaternion?, layers: number?) -> { Entity }",
+	)
+	script.define(
+		r,
+		"Physics.overlap_capsule",
+		overlap_capsule_binding,
+		"(center: WorldPosition, radius: number, height: number, rotation: Quaternion?, layers: number?) -> { Entity }",
+	)
 	script.define(r, "Physics.layers", layers_binding, "(...string) -> number")
 	script.define(r, "Physics.gravity", proc(L: ^luau.State) -> c.int {
-		script.push_vector(L, state_of(L).gravity)
-		return 1
-	}, "() -> vector")
+			script.push_vector(L, state_of(L).gravity)
+			return 1
+		}, "() -> vector")
 	script.define(r, "Physics.set_gravity", proc(L: ^luau.State) -> c.int {
-		set_gravity(state_of(L), script.check_vector(L, 1))
-		return 0
-	}, "(gravity: vector) -> ()")
+			set_gravity(state_of(L), script.check_vector(L, 1))
+			return 0
+		}, "(gravity: vector) -> ()")
 
 	script.define(r, "Physics.add_force", proc(L: ^luau.State) -> c.int {
-		s, w, e := body_args(L)
-		add_force(effects(s), w, e, script.check_vector(L, 2))
-		return 0
-	}, "(entity: Entity, force: vector) -> ()")
+			s, w, e := body_args(L)
+			add_force(effects(s), w, e, script.check_vector(L, 2))
+			return 0
+		}, "(entity: Entity, force: vector) -> ()")
 	script.define(r, "Physics.add_force_at", proc(L: ^luau.State) -> c.int {
-		s, w, e := body_args(L)
-		add_force_at(effects(s), w, e, script.check_vector(L, 2), script.check_position(L, 3))
-		return 0
-	}, "(entity: Entity, force: vector, point: WorldPosition) -> ()")
+			s, w, e := body_args(L)
+			add_force_at(effects(s), w, e, script.check_vector(L, 2), script.check_position(L, 3))
+			return 0
+		}, "(entity: Entity, force: vector, point: WorldPosition) -> ()")
 	script.define(r, "Physics.add_torque", proc(L: ^luau.State) -> c.int {
-		s, w, e := body_args(L)
-		add_torque(effects(s), w, e, script.check_vector(L, 2))
-		return 0
-	}, "(entity: Entity, torque: vector) -> ()")
+			s, w, e := body_args(L)
+			add_torque(effects(s), w, e, script.check_vector(L, 2))
+			return 0
+		}, "(entity: Entity, torque: vector) -> ()")
 	script.define(r, "Physics.add_impulse", proc(L: ^luau.State) -> c.int {
-		s, w, e := body_args(L)
-		add_impulse(effects(s), w, e, script.check_vector(L, 2))
-		return 0
-	}, "(entity: Entity, impulse: vector) -> ()")
+			s, w, e := body_args(L)
+			add_impulse(effects(s), w, e, script.check_vector(L, 2))
+			return 0
+		}, "(entity: Entity, impulse: vector) -> ()")
 	script.define(r, "Physics.add_angular_impulse", proc(L: ^luau.State) -> c.int {
-		s, w, e := body_args(L)
-		add_angular_impulse(effects(s), w, e, script.check_vector(L, 2))
-		return 0
-	}, "(entity: Entity, impulse: vector) -> ()")
+			s, w, e := body_args(L)
+			add_angular_impulse(effects(s), w, e, script.check_vector(L, 2))
+			return 0
+		}, "(entity: Entity, impulse: vector) -> ()")
 	script.define(r, "Physics.velocity", proc(L: ^luau.State) -> c.int {
-		w, e := script.runtime_of(L).world, script.check_entity(L, 1)
-		if ecs.is_alive(w, e) && ecs.has(w, e, Character) {
-			script.push_vector(L, character_state(w, e).velocity)
+			w, e := script.runtime_of(L).world, script.check_entity(L, 1)
+			if ecs.is_alive(w, e) && ecs.has(w, e, Character) {
+				script.push_vector(L, character_state(w, e).velocity)
+				return 1
+			}
+			body_args(L)
+			script.push_vector(L, ecs.get(w, e, Physics_Body).linear_velocity)
 			return 1
-		}
-		body_args(L)
-		script.push_vector(L, ecs.get(w, e, Physics_Body).linear_velocity)
-		return 1
-	}, "(entity: Entity) -> vector")
+		}, "(entity: Entity) -> vector")
 	script.define(r, "Physics.angular_velocity", proc(L: ^luau.State) -> c.int {
-		_, w, e := body_args(L)
-		script.push_vector(L, ecs.get(w, e, Physics_Body).angular_velocity)
-		return 1
-	}, "(entity: Entity) -> vector")
+			_, w, e := body_args(L)
+			script.push_vector(L, ecs.get(w, e, Physics_Body).angular_velocity)
+			return 1
+		}, "(entity: Entity) -> vector")
 	script.define(r, "Physics.set_velocity", proc(L: ^luau.State) -> c.int {
-		s, w, e := body_args(L)
-		pb := ecs.get(w, e, Physics_Body)
-		set_velocity(effects(s), w, e, script.check_vector(L, 2), pb.angular_velocity)
-		return 0
-	}, "(entity: Entity, velocity: vector) -> ()")
+			s, w, e := body_args(L)
+			pb := ecs.get(w, e, Physics_Body)
+			set_velocity(effects(s), w, e, script.check_vector(L, 2), pb.angular_velocity)
+			return 0
+		}, "(entity: Entity, velocity: vector) -> ()")
 	script.define(r, "Physics.set_angular_velocity", proc(L: ^luau.State) -> c.int {
-		s, w, e := body_args(L)
-		pb := ecs.get(w, e, Physics_Body)
-		set_velocity(effects(s), w, e, pb.linear_velocity, script.check_vector(L, 2))
-		return 0
-	}, "(entity: Entity, velocity: vector) -> ()")
+			s, w, e := body_args(L)
+			pb := ecs.get(w, e, Physics_Body)
+			set_velocity(effects(s), w, e, pb.linear_velocity, script.check_vector(L, 2))
+			return 0
+		}, "(entity: Entity, velocity: vector) -> ()")
 	script.define(r, "Physics.sleep", proc(L: ^luau.State) -> c.int {
-		s, w, e := body_args(L)
-		sleep(effects(s), w, e)
-		return 0
-	}, "(entity: Entity) -> ()")
+			s, w, e := body_args(L)
+			sleep(effects(s), w, e)
+			return 0
+		}, "(entity: Entity) -> ()")
 	script.define(r, "Physics.wake", proc(L: ^luau.State) -> c.int {
-		s, w, e := body_args(L)
-		wake(effects(s), w, e)
-		return 0
-	}, "(entity: Entity) -> ()")
-	script.define(r, "Physics.set_motor", set_motor_binding, "(entity: Entity, mode: \"off\" | \"velocity\" | \"position\", target: number?, max: number?) -> ()")
+			s, w, e := body_args(L)
+			wake(effects(s), w, e)
+			return 0
+		}, "(entity: Entity) -> ()")
+	script.define(
+		r,
+		"Physics.set_motor",
+		set_motor_binding,
+		"(entity: Entity, mode: \"off\" | \"velocity\" | \"position\", target: number?, max: number?) -> ()",
+	)
 	script.define(r, "Physics.set_joint_enabled", proc(L: ^luau.State) -> c.int {
-		w, e := script.runtime_of(L).world, script.check_entity(L, 1)
-		j, kind, ok := joint_of(w, e)
-		if !ok {
-			script.raise(L, "the entity has no joint")
-		}
-		j.enabled = bool(luau.toboolean(L, 2))
-		ecs.mark_changed(w, e, JOINT_IDS[kind])
-		return 0
-	}, "(entity: Entity, enabled: boolean) -> ()")
+			w, e := script.runtime_of(L).world, script.check_entity(L, 1)
+			j, kind, ok := joint_of(w, e)
+			if !ok {
+				script.raise(L, "the entity has no joint")
+			}
+			j.enabled = bool(luau.toboolean(L, 2))
+			ecs.mark_changed(w, e, JOINT_IDS[kind])
+			return 0
+		}, "(entity: Entity, enabled: boolean) -> ()")
 	script.define(r, "Physics.move_character", proc(L: ^luau.State) -> c.int {
-		s, w, e := character_args(L)
-		character_move(effects(s), w, e, script.check_vector(L, 2), bool(luau.toboolean(L, 3)))
-		return 0
-	}, "(entity: Entity, velocity: vector, gravity: boolean?) -> ()")
+			s, w, e := character_args(L)
+			character_move(effects(s), w, e, script.check_vector(L, 2), bool(luau.toboolean(L, 3)))
+			return 0
+		}, "(entity: Entity, velocity: vector, gravity: boolean?) -> ()")
 	script.define(r, "Physics.character_ground", proc(L: ^luau.State) -> c.int {
-		_, w, e := character_args(L)
-		pc := character_state(w, e)
-		luau.createtable(L, 0, 4)
-		luau.pushstring(L, GROUND_NAMES[pc.ground])
-		luau.rawsetfield(L, -2, "state")
-		script.push_vector(L, pc.ground_normal)
-		luau.rawsetfield(L, -2, "normal")
-		script.push_vector(L, pc.ground_velocity)
-		luau.rawsetfield(L, -2, "velocity")
-		if pc.ground_entity != 0 && ecs.is_alive(w, pc.ground_entity) {
-			script.push_entity(L, pc.ground_entity)
-			luau.rawsetfield(L, -2, "entity")
-		}
-		return 1
-	}, "(entity: Entity) -> CharacterGround")
+			_, w, e := character_args(L)
+			pc := character_state(w, e)
+			luau.createtable(L, 0, 4)
+			luau.pushstring(L, GROUND_NAMES[pc.ground])
+			luau.rawsetfield(L, -2, "state")
+			script.push_vector(L, pc.ground_normal)
+			luau.rawsetfield(L, -2, "normal")
+			script.push_vector(L, pc.ground_velocity)
+			luau.rawsetfield(L, -2, "velocity")
+			if pc.ground_entity != 0 && ecs.is_alive(w, pc.ground_entity) {
+				script.push_entity(L, pc.ground_entity)
+				luau.rawsetfield(L, -2, "entity")
+			}
+			return 1
+		}, "(entity: Entity) -> CharacterGround")
 	script.define(r, "Physics.is_grounded", proc(L: ^luau.State) -> c.int {
-		_, w, e := character_args(L)
-		luau.pushboolean(L, b32(character_state(w, e).ground == .Ground))
-		return 1
-	}, "(entity: Entity) -> boolean")
+			_, w, e := character_args(L)
+			luau.pushboolean(L, b32(character_state(w, e).ground == .Ground))
+			return 1
+		}, "(entity: Entity) -> boolean")
 	script.define(r, "Physics.is_sleeping", proc(L: ^luau.State) -> c.int {
-		_, w, e := body_args(L)
-		luau.pushboolean(L, b32(ecs.get(w, e, Physics_Body).asleep))
-		return 1
-	}, "(entity: Entity) -> boolean")
+			_, w, e := body_args(L)
+			luau.pushboolean(L, b32(ecs.get(w, e, Physics_Body).asleep))
+			return 1
+		}, "(entity: Entity) -> boolean")
 }
 
 @(private = "file")
@@ -219,7 +264,14 @@ DEFAULT_RAY_LENGTH :: 1000
 raycast_binding :: proc(L: ^luau.State) -> c.int {
 	s, w := state_of(L), script.runtime_of(L).world
 	origin, direction := script.check_position(L, 1), script.check_vector(L, 2)
-	hit, ok := raycast(s, w, origin, direction, f32(luau.L_optnumber(L, 3, DEFAULT_RAY_LENGTH)), layers_arg(L, 4))
+	hit, ok := raycast(
+		s,
+		w,
+		origin,
+		direction,
+		f32(luau.L_optnumber(L, 3, DEFAULT_RAY_LENGTH)),
+		layers_arg(L, 4),
+	)
 	if !ok {
 		return 0
 	}
@@ -235,7 +287,15 @@ raycast_all_binding :: proc(L: ^luau.State) -> c.int {
 	s, w := state_of(L), script.runtime_of(L).world
 	origin, direction := script.check_position(L, 1), script.check_vector(L, 2)
 	hits: [MAX_SCRIPT_HITS]Hit
-	count := raycast_all(s, w, origin, direction, f32(luau.L_optnumber(L, 3, DEFAULT_RAY_LENGTH)), hits[:], layers_arg(L, 4))
+	count := raycast_all(
+		s,
+		w,
+		origin,
+		direction,
+		f32(luau.L_optnumber(L, 3, DEFAULT_RAY_LENGTH)),
+		hits[:],
+		layers_arg(L, 4),
+	)
 	count = min(count, MAX_SCRIPT_HITS)
 	luau.createtable(L, c.int(count), 0)
 	for i in 0 ..< count {
@@ -255,7 +315,16 @@ rotation_arg :: proc(L: ^luau.State, idx: c.int) -> quaternion128 {
 sweep :: proc(L: ^luau.State, shape: Collider, rotation: quaternion128, first: c.int) -> c.int {
 	s, w := state_of(L), script.runtime_of(L).world
 	direction, distance := script.check_vector(L, first), f32(luau.L_checknumber(L, first + 1))
-	hit, ok := shape_cast(s, w, shape, script.check_position(L, 1), rotation, direction, distance, layers_arg(L, first + 2))
+	hit, ok := shape_cast(
+		s,
+		w,
+		shape,
+		script.check_position(L, 1),
+		rotation,
+		direction,
+		distance,
+		layers_arg(L, first + 2),
+	)
 	if !ok {
 		return 0
 	}
@@ -275,15 +344,35 @@ box_cast_binding :: proc(L: ^luau.State) -> c.int {
 
 @(private = "file")
 capsule_cast_binding :: proc(L: ^luau.State) -> c.int {
-	shape := Collider{shape = .Capsule, radius = f32(luau.L_checknumber(L, 2)), height = f32(luau.L_checknumber(L, 3))}
+	shape := Collider {
+		shape  = .Capsule,
+		radius = f32(luau.L_checknumber(L, 2)),
+		height = f32(luau.L_checknumber(L, 3)),
+	}
 	return sweep(L, shape, rotation_arg(L, 4), 5)
 }
 
 @(private = "file")
-overlap_shape :: proc(L: ^luau.State, shape: Collider, rotation: quaternion128, layers: c.int) -> c.int {
+overlap_shape :: proc(
+	L: ^luau.State,
+	shape: Collider,
+	rotation: quaternion128,
+	layers: c.int,
+) -> c.int {
 	s, w := state_of(L), script.runtime_of(L).world
 	found: [MAX_SCRIPT_HITS]ecs.Entity
-	count := min(overlap(s, w, shape, script.check_position(L, 1), rotation, found[:], layers_arg(L, layers)), MAX_SCRIPT_HITS)
+	count := min(
+		overlap(
+			s,
+			w,
+			shape,
+			script.check_position(L, 1),
+			rotation,
+			found[:],
+			layers_arg(L, layers),
+		),
+		MAX_SCRIPT_HITS,
+	)
 	luau.createtable(L, c.int(count), 0)
 	for i in 0 ..< count {
 		script.push_entity(L, found[i])
@@ -299,12 +388,21 @@ overlap_sphere_binding :: proc(L: ^luau.State) -> c.int {
 
 @(private = "file")
 overlap_box_binding :: proc(L: ^luau.State) -> c.int {
-	return overlap_shape(L, {shape = .Box, size = script.check_vector(L, 2)}, rotation_arg(L, 3), 4)
+	return overlap_shape(
+		L,
+		{shape = .Box, size = script.check_vector(L, 2)},
+		rotation_arg(L, 3),
+		4,
+	)
 }
 
 @(private = "file")
 overlap_capsule_binding :: proc(L: ^luau.State) -> c.int {
-	shape := Collider{shape = .Capsule, radius = f32(luau.L_checknumber(L, 2)), height = f32(luau.L_checknumber(L, 3))}
+	shape := Collider {
+		shape  = .Capsule,
+		radius = f32(luau.L_checknumber(L, 2)),
+		height = f32(luau.L_checknumber(L, 3)),
+	}
 	return overlap_shape(L, shape, rotation_arg(L, 4), 5)
 }
 

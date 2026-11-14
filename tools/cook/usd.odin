@@ -108,18 +108,18 @@ Cn_Usd_Subset :: struct {
 }
 
 Cn_Usd_Mesh :: struct {
-	name:          Cn_Usd_String,
-	path:          Cn_Usd_String,
-	double_sided:  i32,
-	left_handed:   i32,
-	corner_count:  i32,
-	positions:     [^]f32,
-	normals:       [^]f32,
-	uv0:           [^]f32,
-	uv1:           [^]f32,
-	colors:        [^]f32,
-	subset_count:  i32,
-	subsets:       [^]Cn_Usd_Subset,
+	name:         Cn_Usd_String,
+	path:         Cn_Usd_String,
+	double_sided: i32,
+	left_handed:  i32,
+	corner_count: i32,
+	positions:    [^]f32,
+	normals:      [^]f32,
+	uv0:          [^]f32,
+	uv1:          [^]f32,
+	colors:       [^]f32,
+	subset_count: i32,
+	subsets:      [^]Cn_Usd_Subset,
 }
 
 Cn_Usd_Channel :: enum i32 {

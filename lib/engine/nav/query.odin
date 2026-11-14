@@ -73,7 +73,17 @@ agent_type :: proc(s: ^State, name: string) -> (Agent_Type, bool) {
 // snap is the polygon nearest a point within extents of it, of the navmeshes of an agent type whose bounds hold the
 // point, and the point on it. With no extents, each navmesh's default_extents.
 @(private)
-snap :: proc(s: ^State, p: ecs.World_Position, agent: Agent_Type, extents: Maybe([3]f32) = nil) -> (m: ^Mesh_View, polygon: u32, point: [3]f32, ok: bool) {
+snap :: proc(
+	s: ^State,
+	p: ecs.World_Position,
+	agent: Agent_Type,
+	extents: Maybe([3]f32) = nil,
+) -> (
+	m: ^Mesh_View,
+	polygon: u32,
+	point: [3]f32,
+	ok: bool,
+) {
 	best := max(f32)
 	polygon = NO_POLYGON
 	for &v in s.frame {
@@ -94,7 +104,15 @@ snap :: proc(s: ^State, p: ecs.World_Position, agent: Agent_Type, extents: Maybe
 }
 
 // nearest is the point of the navmeshes of an agent type nearest point, within extents of it, and its polygon.
-nearest :: proc(s: ^State, point: ecs.World_Position, extents: [3]f32, agent: Agent_Type) -> (Location, bool) {
+nearest :: proc(
+	s: ^State,
+	point: ecs.World_Position,
+	extents: [3]f32,
+	agent: Agent_Type,
+) -> (
+	Location,
+	bool,
+) {
 	m, polygon, on, ok := snap(s, point, agent, extents)
 	if !ok {
 		return {}, false
@@ -106,7 +124,13 @@ nearest :: proc(s: ^State, point: ecs.World_Position, extents: [3]f32, agent: Ag
 // funnel's straight path through their portals. Both points snap to the navmesh within its default_extents. A goal
 // that no path reaches, or that no polygon is near, gives a Partial path to the nearest point that the search reached;
 // a start that is on no navmesh gives Failed. The corners and the corridor are in allocator.
-find_path :: proc(s: ^State, start, goal: ecs.World_Position, agent: Agent_Type, max_nodes := DEFAULT_MAX_NODES, allocator := context.temp_allocator) -> Path_Result {
+find_path :: proc(
+	s: ^State,
+	start, goal: ecs.World_Position,
+	agent: Agent_Type,
+	max_nodes := DEFAULT_MAX_NODES,
+	allocator := context.temp_allocator,
+) -> Path_Result {
 	m, start_polygon, from, ok := snap(s, start, agent)
 	if !ok {
 		return {status = .Failed}
@@ -116,13 +140,24 @@ find_path :: proc(s: ^State, start, goal: ecs.World_Position, agent: Agent_Type,
 	begin_toward(&sr, m, from, start_polygon, goal)
 	search_step(&sr, m, max(int))
 	status, corners, corridor := search_finish(&sr, m, allocator)
-	return {status = status, mesh = m.id, corners = to_world(m, corners, allocator), corridor = corridor}
+	return {
+		status = status,
+		mesh = m.id,
+		corners = to_world(m, corners, allocator),
+		corridor = corridor,
+	}
 }
 
 // begin_toward starts a search from a point on a polygon toward a goal, which snaps onto the polygon nearest it, if one
 // is.
 @(private)
-begin_toward :: proc(sr: ^Search, m: ^Mesh_View, from: [3]f32, start_polygon: u32, goal: ecs.World_Position) {
+begin_toward :: proc(
+	sr: ^Search,
+	m: ^Mesh_View,
+	from: [3]f32,
+	start_polygon: u32,
+	goal: ecs.World_Position,
+) {
 	to := local(m, goal)
 	goal_polygon, on, _ := nearest_in(m, to, default_extents(m))
 	if goal_polygon != NO_POLYGON {
@@ -132,7 +167,11 @@ begin_toward :: proc(sr: ^Search, m: ^Mesh_View, from: [3]f32, start_polygon: u3
 }
 
 @(private)
-to_world :: proc(m: ^Mesh_View, points: [][3]f32, allocator: runtime.Allocator) -> []ecs.World_Position {
+to_world :: proc(
+	m: ^Mesh_View,
+	points: [][3]f32,
+	allocator: runtime.Allocator,
+) -> []ecs.World_Position {
 	out := make([]ecs.World_Position, len(points), allocator)
 	for p, i in points {
 		out[i] = world(m, p)
@@ -143,19 +182,40 @@ to_world :: proc(m: ^Mesh_View, points: [][3]f32, allocator: runtime.Allocator) 
 // raycast walks straight along the navmesh from start toward end, as Detour's raycast, from polygon to polygon across
 // their edges on the xz plane, until it reaches end or an edge with nothing across. It fails for a start on no navmesh
 // of the agent type.
-raycast :: proc(s: ^State, start, end: ecs.World_Position, agent: Agent_Type) -> (hit: Raycast_Hit, ok: bool) {
+raycast :: proc(
+	s: ^State,
+	start, end: ecs.World_Position,
+	agent: Agent_Type,
+) -> (
+	hit: Raycast_Hit,
+	ok: bool,
+) {
 	m, polygon, p0 := snap(s, start, agent) or_return
 	p1 := local(m, end)
 	walk := raycast_local(m, polygon, p0, p1)
 	p := math.lerp(p0, p1, walk.t)
 	p.y = height_at(m, walk.polygon, p)
-	return {t = walk.t, position = world(m, p), wall = walk.wall, mesh = m.id, polygon = walk.polygon}, true
+	return {
+			t = walk.t,
+			position = world(m, p),
+			wall = walk.wall,
+			mesh = m.id,
+			polygon = walk.polygon,
+		},
+		true
 }
 
 // cross_polygon_2d is where segment p0 p1 enters and leaves a convex polygon on the xz plane, as Detour's
 // dtIntersectSegmentPoly2D: the fractions of the segment, and the edges by their index, or -1 for an end inside.
 @(private)
-cross_polygon_2d :: proc "contextless" (p0, p1: [3]f32, pts: ^Polygon_Points) -> (tmin, tmax: f32, entering, leaving: int, ok: bool) {
+cross_polygon_2d :: proc "contextless" (
+	p0, p1: [3]f32,
+	pts: ^Polygon_Points,
+) -> (
+	tmin, tmax: f32,
+	entering, leaving: int,
+	ok: bool,
+) {
 	EPS :: 1e-6
 	perp :: proc "contextless" (u, v: [3]f32) -> f32 {
 		return u.z * v.x - u.x * v.z
@@ -211,7 +271,18 @@ projection_2d :: proc "contextless" (p, a, b: [3]f32) -> f32 {
 // polygon, as Detour's findRandomPointAroundCircle: the polygons whose portals are within radius are searched outward,
 // one is drawn by its area, and a point in it. Every polygon counts by its whole area, so the point can be outside the
 // circle by up to a polygon's size. It draws from rng, so a seed gives the same points.
-random_point :: proc(s: ^State, around: ecs.World_Position, radius: f32, agent: Agent_Type, rng: ^random.State, max_nodes := DEFAULT_MAX_NODES, allocator := context.temp_allocator) -> (Location, bool) {
+random_point :: proc(
+	s: ^State,
+	around: ecs.World_Position,
+	radius: f32,
+	agent: Agent_Type,
+	rng: ^random.State,
+	max_nodes := DEFAULT_MAX_NODES,
+	allocator := context.temp_allocator,
+) -> (
+	Location,
+	bool,
+) {
 	m, start_polygon, center, ok := snap(s, around, agent)
 	if !ok {
 		return {}, false
@@ -239,7 +310,8 @@ random_point :: proc(s: ^State, around: ecs.World_Position, radius: f32, agent: 
 			if from.parent != NO_NODE && portal.neighbor == g.nodes[from.parent].polygon {
 				continue
 			}
-			if d, _ := distance_to_segment_2d(center, portal.left, portal.right); d > radius_squared {
+			if d, _ := distance_to_segment_2d(center, portal.left, portal.right);
+			   d > radius_squared {
 				continue
 			}
 			next, room := graph_node(&g, portal.neighbor)

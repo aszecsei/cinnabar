@@ -166,7 +166,11 @@ component_sets_share_an_archetype :: proc(t: ^testing.T) {
 	add(w, a, Velocity{})
 	add(w, b, Velocity{})
 	add(w, b, Health{})
-	testing.expect_value(t, records(w)[entity_index(a)].archetype, records(w)[entity_index(b)].archetype)
+	testing.expect_value(
+		t,
+		records(w)[entity_index(a)].archetype,
+		records(w)[entity_index(b)].archetype,
+	)
 	// The empty archetype, {Health}, {Velocity} and {Health, Velocity}.
 	testing.expect_value(t, w.archetype_count, 4)
 }
@@ -225,7 +229,11 @@ columns_fit_in_a_chunk :: proc(t: ^testing.T) {
 	add(w, e, Velocity{})
 	add(w, e, Player{})
 	a := archetype(w, records(w)[entity_index(e)].archetype)
-	testing.expect_value(t, a.capacity, u32(CHUNK_SIZE / (size_of(Entity) + size_of(Health) + size_of(Velocity))))
+	testing.expect_value(
+		t,
+		a.capacity,
+		u32(CHUNK_SIZE / (size_of(Entity) + size_of(Health) + size_of(Velocity))),
+	)
 	for column in 0 ..< a.component_count {
 		testing.expect(t, int(a.offsets[column] + a.sizes[column] * a.capacity) <= CHUNK_SIZE)
 	}

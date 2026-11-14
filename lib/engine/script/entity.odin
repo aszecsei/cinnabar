@@ -57,7 +57,12 @@ alive_entity :: proc(L: ^luau.State, idx: c.int) -> ecs.Entity {
 
 @(private)
 entity_text :: proc(r: ^Runtime, e: ecs.Entity) -> string {
-	return fmt.aprintf("%d:%d", ecs.entity_index(e), ecs.entity_generation(e), allocator = frame(r))
+	return fmt.aprintf(
+		"%d:%d",
+		ecs.entity_index(e),
+		ecs.entity_generation(e),
+		allocator = frame(r),
+	)
 }
 
 // light_index is the __index of every light userdata.
@@ -133,12 +138,29 @@ light_tostring :: proc(L: ^luau.State) -> c.int {
 	r := runtime_of(L)
 	switch Light_Tag(luau.lightuserdatatag(L, 1)) {
 	case .Entity:
-		luau.pushodinstring(L, fmt.aprintf("Entity(%s)", entity_text(r, to_entity(L, 1)), allocator = frame(r)))
+		luau.pushodinstring(
+			L,
+			fmt.aprintf("Entity(%s)", entity_text(r, to_entity(L, 1)), allocator = frame(r)),
+		)
 	case .Component_Type:
-		luau.pushodinstring(L, fmt.aprintf("ComponentType(%s)", component_name(r, check_component_type(L, 1)), allocator = frame(r)))
+		luau.pushodinstring(
+			L,
+			fmt.aprintf(
+				"ComponentType(%s)",
+				component_name(r, check_component_type(L, 1)),
+				allocator = frame(r),
+			),
+		)
 	case .Asset:
 		buffer: [32]u8
-		luau.pushodinstring(L, fmt.aprintf("Asset(%s)", format.guid_format(to_asset(r, L, 1), &buffer), allocator = frame(r)))
+		luau.pushodinstring(
+			L,
+			fmt.aprintf(
+				"Asset(%s)",
+				format.guid_format(to_asset(r, L, 1), &buffer),
+				allocator = frame(r),
+			),
+		)
 	case .None, .Instance_Key, .Action_Key:
 		luau.pushstring(L, "lightuserdata")
 	}
@@ -194,7 +216,14 @@ entity_add :: proc(L: ^luau.State) -> c.int {
 	id := check_component_type(L, 2)
 	x := find_exposed(r, id)
 	if x == nil {
-		raise(L, fmt.aprintf("%s is not exposed to scripts", component_name(r, id), allocator = frame(r)))
+		raise(
+			L,
+			fmt.aprintf(
+				"%s is not exposed to scripts",
+				component_name(r, id),
+				allocator = frame(r),
+			),
+		)
 	}
 	if !luau.isnoneornil(L, 3) {
 		luau.L_checktype(L, 3, .TABLE)

@@ -34,7 +34,13 @@ float4 ps_main() : SV_Target { return COLOR; }
 
 @(test)
 shaders_cook_into_one_blob_with_a_stage_each :: proc(t: ^testing.T) {
-	tree := make_tree(t, {{"content/flat.hlsl", SHADER_SOURCE}, {"content/color.hlsli", "#define COLOR float4(1, 0, 0, 1)\n"}})
+	tree := make_tree(
+		t,
+		{
+			{"content/flat.hlsl", SHADER_SOURCE},
+			{"content/color.hlsli", "#define COLOR float4(1, 0, 0, 1)\n"},
+		},
+	)
 	defer remove_tree(tree)
 	options := shader_options(t, tree)
 
@@ -51,20 +57,37 @@ shaders_cook_into_one_blob_with_a_stage_each :: proc(t: ^testing.T) {
 	if !ok {
 		return
 	}
-	testing.expect_value(t, format.shader_stages(data, blob), format.Shader_Stages{.Vertex, .Pixel})
+	testing.expect_value(
+		t,
+		format.shader_stages(data, blob),
+		format.Shader_Stages{.Vertex, .Pixel},
+	)
 	testing.expect_value(t, format.blob_string(data, blob.source_path), "game/flat.hlsl")
 	// DXIL starts with a DXBC container.
 	testing.expect_value(t, string(format.shader_code(data, blob, .Pixel)[:4]), "DXBC")
 
 	testing.expect_value(t, cook(options, {.Shader}).current[.Shader], 1)
 	// A change to an include cooks the shader again.
-	testing.expect(t, os.write_entire_file(fmt.tprintf("%s/content/color.hlsli", tree.dir), transmute([]byte)string("#define COLOR float4(0, 1, 0, 1)\n")) == nil)
+	testing.expect(
+		t,
+		os.write_entire_file(
+			fmt.tprintf("%s/content/color.hlsli", tree.dir),
+			transmute([]byte)string("#define COLOR float4(0, 1, 0, 1)\n"),
+		) ==
+		nil,
+	)
 	testing.expect_value(t, cook(options, {.Shader}).cooked[.Shader], 1)
 }
 
 @(test)
 a_broken_shader_keeps_its_blob_and_reports_the_line :: proc(t: ^testing.T) {
-	tree := make_tree(t, {{"content/flat.hlsl", SHADER_SOURCE}, {"content/color.hlsli", "#define COLOR float4(1, 0, 0, 1)\n"}})
+	tree := make_tree(
+		t,
+		{
+			{"content/flat.hlsl", SHADER_SOURCE},
+			{"content/color.hlsli", "#define COLOR float4(1, 0, 0, 1)\n"},
+		},
+	)
 	defer remove_tree(tree)
 	options := shader_options(t, tree)
 	testing.expect(t, cook(options, {.Shader}).ok)
@@ -75,18 +98,43 @@ a_broken_shader_keeps_its_blob_and_reports_the_line :: proc(t: ^testing.T) {
 	context.logger = capture_errors(&errors)
 	defer release_errors(&errors)
 	broken := "#include \"cinnabar.hlsli\"\nfloat4 ps_main() : SV_Target {\n\treturn missing;\n}\n"
-	testing.expect(t, os.write_entire_file(fmt.tprintf("%s/content/flat.hlsl", tree.dir), transmute([]byte)broken) == nil)
+	testing.expect(
+		t,
+		os.write_entire_file(
+			fmt.tprintf("%s/content/flat.hlsl", tree.dir),
+			transmute([]byte)broken,
+		) ==
+		nil,
+	)
 	pass := cook(options, {.Shader})
 	testing.expect(t, !pass.ok)
 	expect_error(t, &errors, "flat.hlsl:3:9: use of undeclared identifier 'missing'")
 	testing.expect_value(t, string(tree_blob(t, tree, guid)), string(before))
 
 	// An error in an include belongs to the include's file, and the shader says why it did not cook.
-	testing.expect(t, os.write_entire_file(fmt.tprintf("%s/content/flat.hlsl", tree.dir), transmute([]byte)string(SHADER_SOURCE)) == nil)
+	testing.expect(
+		t,
+		os.write_entire_file(
+			fmt.tprintf("%s/content/flat.hlsl", tree.dir),
+			transmute([]byte)string(SHADER_SOURCE),
+		) ==
+		nil,
+	)
 	broken_include := "#define COLOR float4(1, 0, 0, 1)\nstatic const float bad = ;\n"
-	testing.expect(t, os.write_entire_file(fmt.tprintf("%s/content/color.hlsli", tree.dir), transmute([]byte)broken_include) == nil)
+	testing.expect(
+		t,
+		os.write_entire_file(
+			fmt.tprintf("%s/content/color.hlsli", tree.dir),
+			transmute([]byte)broken_include,
+		) ==
+		nil,
+	)
 	testing.expect(t, !cook(options, {.Shader}).ok)
-	expect_error(t, &errors, "flat.hlsl: vs_6_6 did not compile, because a file that it includes has errors")
+	expect_error(
+		t,
+		&errors,
+		"flat.hlsl: vs_6_6 did not compile, because a file that it includes has errors",
+	)
 }
 
 @(test)

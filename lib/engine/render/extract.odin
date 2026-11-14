@@ -27,7 +27,10 @@ Extracted_Chunk :: struct {
 // extractor creates an extractor. It returns the zero Extractor if the query cannot be created.
 extractor :: proc(w: ^ecs.World, with: []ecs.Term) -> Extractor {
 	if len(with) > ecs.MAX_QUERY_TERMS - EXTRACT_TERMS {
-		log.errorf("render: an extractor has more than %d terms", ecs.MAX_QUERY_TERMS - EXTRACT_TERMS)
+		log.errorf(
+			"render: an extractor has more than %d terms",
+			ecs.MAX_QUERY_TERMS - EXTRACT_TERMS,
+		)
 		return {}
 	}
 	terms: [ecs.MAX_QUERY_TERMS]ecs.Term
@@ -48,8 +51,17 @@ extract_count :: proc(w: ^ecs.World, ex: Extractor) -> int {
 // jobs, and the result is in frame memory.
 //
 // Run it while no system or structural change runs. out must hold extract_count records.
-extract :: proc(w: ^ecs.World, ex: Extractor, origin: ecs.World_Position, out: []byte, stride: int) -> []Extracted_Chunk {
-	assert(stride >= size_of([3][4]f32) && stride % align_of(f32) == 0, "render: the extraction stride is too small")
+extract :: proc(
+	w: ^ecs.World,
+	ex: Extractor,
+	origin: ecs.World_Position,
+	out: []byte,
+	stride: int,
+) -> []Extracted_Chunk {
+	assert(
+		stride >= size_of([3][4]f32) && stride % align_of(f32) == 0,
+		"render: the extraction stride is too small",
+	)
 	allocator := w.platform.frame_allocator
 	chunks := make([dynamic]Extracted_Chunk, allocator)
 	count := 0
@@ -84,7 +96,12 @@ pose_rows :: proc(pose: ecs.Transform, origin: ecs.World_Position) -> (rows: [3]
 	m := linalg.matrix3_from_quaternion_f32(pose.rotation)
 	offset := ecs.position_sub(pose.position, origin)
 	for r in 0 ..< 3 {
-		rows[r] = {m[r, 0] * pose.scale.x, m[r, 1] * pose.scale.y, m[r, 2] * pose.scale.z, offset[r]}
+		rows[r] = {
+			m[r, 0] * pose.scale.x,
+			m[r, 1] * pose.scale.y,
+			m[r, 2] * pose.scale.z,
+			offset[r],
+		}
 	}
 	return
 }

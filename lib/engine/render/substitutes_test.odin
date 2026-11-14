@@ -19,22 +19,44 @@ import format "cinnabar:engine/asset/format"
 @(private = "file")
 compiling: [dynamic]gpu.Pipeline
 
+// pipeline_status is the test backend's gpu_pipeline_status: a pipeline in compiling is still compiling.
+@(private = "file")
+pipeline_status :: proc(pipeline: gpu.Pipeline) -> gpu.Pipeline_Status {
+	return slice.contains(compiling[:], pipeline) ? .Compiling : .Ready
+}
+
 // any_blob is a material blob whose variants are fake bytecode, which the null backend takes, for each pass that its
 // blend has: the opaque passes, with the mesh shader path's stages unless it draws patches, or the transparent ones.
 @(private = "file")
-any_blob :: proc(guid: format.Guid, blend: format.Material_Blend, flags: format.Material_Flags = {}) -> []byte {
+any_blob :: proc(
+	guid: format.Guid,
+	blend: format.Material_Blend,
+	flags: format.Material_Flags = {},
+) -> []byte {
 	code := []byte{1}
 	variants := make([dynamic]format.Material_Variant_Entry, context.temp_allocator)
 	if format.material_transparent(blend) {
 		passes := []format.Material_Pass{.Transparent, .Transparent_Ids, .Moments}
 		for pass in passes[:blend == .Transparent ? 3 : 2] {
-			append(&variants, format.Material_Variant_Entry{0, pass, .Vertex, code}, format.Material_Variant_Entry{0, pass, .Pixel, code})
+			append(
+				&variants,
+				format.Material_Variant_Entry{0, pass, .Vertex, code},
+				format.Material_Variant_Entry{0, pass, .Pixel, code},
+			)
 		}
 	} else {
 		for pass in ([]format.Material_Pass{.Forward, .Prepass, .Depth}) {
-			append(&variants, format.Material_Variant_Entry{0, pass, .Vertex, code}, format.Material_Variant_Entry{0, pass, .Pixel, code})
+			append(
+				&variants,
+				format.Material_Variant_Entry{0, pass, .Vertex, code},
+				format.Material_Variant_Entry{0, pass, .Pixel, code},
+			)
 			if .Patches not_in flags {
-				append(&variants, format.Material_Variant_Entry{0, pass, .Amplification, code}, format.Material_Variant_Entry{0, pass, .Mesh, code})
+				append(
+					&variants,
+					format.Material_Variant_Entry{0, pass, .Amplification, code},
+					format.Material_Variant_Entry{0, pass, .Mesh, code},
+				)
 			}
 		}
 	}
@@ -81,7 +103,7 @@ a_bin_draws_with_its_blend_modes_substitute_until_its_pipelines_compile :: proc(
 		gpu_create_graphics_pipeline = null.create_graphics_pipeline,
 		gpu_update_graphics_pipeline = null.update_graphics_pipeline,
 		gpu_destroy_pipeline         = null.destroy_pipeline,
-		gpu_pipeline_status          = proc(pipeline: gpu.Pipeline) -> gpu.Pipeline_Status {return slice.contains(compiling[:], pipeline) ? .Compiling : .Ready},
+		gpu_pipeline_status          = pipeline_status,
 	}
 	dir, err := os.make_directory_temp("", "substitutes_test_*", context.temp_allocator)
 	testing.expect(t, err == nil)
@@ -131,7 +153,10 @@ a_bin_draws_with_its_blend_modes_substitute_until_its_pipelines_compile :: proc(
 	}
 	bins := make([]int, len(reals), context.temp_allocator)
 	for c, i in reals {
-		guid := format.Guid{0 = u8(i + 1), 15 = 0xbb}
+		guid := format.Guid {
+			0  = u8(i + 1),
+			15 = 0xbb,
+		}
 		data := any_blob(guid, c.blend, c.flags)
 		blob, _ := format.material_view(data)
 		p := &r.materials.pipelines[i]
@@ -155,12 +180,23 @@ a_bin_draws_with_its_blend_modes_substitute_until_its_pipelines_compile :: proc(
 		real := &r.materials.pipelines[i]
 		kind, has := c.kind.?
 		if !has {
-			testing.expectf(t, draws[i] == i, "bin %d has no substitute but draws with %d", i, draws[i])
+			testing.expectf(
+				t,
+				draws[i] == i,
+				"bin %d has no substitute but draws with %d",
+				i,
+				draws[i],
+			)
 			continue
 		}
 		testing.expectf(t, draws[i] != i, "bin %d does not draw with a substitute", i)
 		s := &r.materials.pipelines[draws[i]]
-		testing.expectf(t, s.material == r.materials.substitutes[kind], "bin %d draws with the wrong substitute", i)
+		testing.expectf(
+			t,
+			s.material == r.materials.substitutes[kind],
+			"bin %d draws with the wrong substitute",
+			i,
+		)
 		// The substitute draws the passes of the bin's group: the sorted draws blend over the scene with its over.
 		if material_group(real) == .Sorted {
 			testing.expect(t, s.over[1] != {})

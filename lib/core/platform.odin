@@ -42,33 +42,33 @@ FRAME_RESERVE :: 256 * mem.Megabyte
 
 @(private)
 Platform :: struct {
-	permanent:   virtual.Arena,
-	frame:       [2]virtual.Arena,
-	frame_index: u64,
-	start:       time.Tick,
-	last_frame:  time.Tick,
+	permanent:          virtual.Arena,
+	frame:              [2]virtual.Arena,
+	frame_index:        u64,
+	start:              time.Tick,
+	last_frame:         time.Tick,
 	// Read once per frame, so the game and the GPU backend agree on it.
-	window_size: [2]i32,
+	window_size:        [2]i32,
 	// In shared mode, the size that the reader asked for, which replaces the hidden window's. Zero until it asks.
-	shared_size: [2]i32,
-	disabled_features: gpu.Features,
+	shared_size:        [2]i32,
+	disabled_features:  gpu.Features,
 	// From OUTPUT_VARIABLE, which then ignores the game's requests.
-	output_override: Maybe(gpu.Output_Request),
+	output_override:    Maybe(gpu.Output_Request),
 	// The game's virtual memory reservations, released at a soft restart.
-	reservations: [dynamic][]byte,
+	reservations:       [dynamic][]byte,
 	reservations_mutex: sync.Mutex,
 	// The game's reads of file ranges, ended at a soft restart.
-	file_reads:  File_Reads,
+	file_reads:         File_Reads,
 	// The most that a frame's arena used since memory_stats last read it.
-	frame_peak:  uint,
+	frame_peak:         uint,
 	// Input from the editor, for the next frame.
-	input_queue: [dynamic]Input_Event,
+	input_queue:        [dynamic]Input_Event,
 	// What the physics backend calls. The backend keeps its address.
-	physics_host: physics.Host,
+	physics_host:       physics.Host,
 	// What the audio backend calls. The backend keeps its address.
-	audio_host:  audio_boundary.Host,
-	audio:       Audio_Device,
-	api:         Platform_API,
+	audio_host:         audio_boundary.Host,
+	audio:              Audio_Device,
+	api:                Platform_API,
 }
 
 @(private)
@@ -116,13 +116,15 @@ init :: proc(
 		return false
 	}
 	platform.physics_host = physics_host.table()
-	backend_name := physics_backend_name if physics_backend_name != "" else physics_host.backend_setting(project, context.temp_allocator)
+	backend_name :=
+		physics_backend_name if physics_backend_name != "" else physics_host.backend_setting(project, context.temp_allocator)
 	physics_api := load_physics(&platform.physics_host, backend_name)
 	physics_host.bind(physics_api)
 	info := physics_api.info()
 	log.infof("core: physics %s %s", info.name, info.version)
 	platform.audio_host = audio_host.table(audio_device_write, audio_device_status)
-	audio_name := audio_backend_name if audio_backend_name != "" else audio_host.backend_setting(project, context.temp_allocator)
+	audio_name :=
+		audio_backend_name if audio_backend_name != "" else audio_host.backend_setting(project, context.temp_allocator)
 	audio_api := audio_plugin.load(&platform.audio_host, audio_name)
 	audio_info := audio_api.info()
 	log.infof("core: audio %s %s", audio_info.name, audio_info.version)
@@ -147,80 +149,83 @@ init :: proc(
 	platform.start = time.tick_now()
 	platform.last_frame = platform.start
 	platform.api = {
-		permanent_allocator          = virtual.arena_allocator(&platform.permanent),
-		frame_allocator              = virtual.arena_allocator(&platform.frame[0]),
-		asset_allocator              = runtime.heap_allocator(),
-		heap_allocator               = runtime.heap_allocator(),
-		content_dir                  = content,
-		project_path                 = project,
-		memory_reserve               = memory_reserve,
-		memory_commit                = memory_commit,
-		memory_release               = memory_release,
-		time_seconds                 = time_seconds,
-		input                        = _window_input,
-		file_read                    = file_read,
-		file_read_range              = file_read_range,
-		file_modified                = file_modified,
-		file_write                   = file_write,
-		file_read_begin              = file_read_begin,
-		file_read_result             = file_read_result,
-		file_read_end                = file_read_end,
-		window_size                  = window_size,
-		set_window_title             = _window_set_title,
-		jobs_run                     = jobs.run,
-		jobs_wait                    = jobs.wait,
-		jobs_lock                    = jobs.lock,
-		jobs_unlock                  = jobs.unlock,
-		jobs_worker_count            = jobs.worker_count,
-		profile                      = profile.procs(),
-		audio_write                  = audio_write,
-		audio_status                 = audio_status,
-		audio_test_tone              = os.get_env(TEST_TONE_VARIABLE, context.temp_allocator) == "1",
-		gpu_features                 = gpu_features,
-		gpu_adapter                  = backend.adapter,
-		gpu_frame_target             = backend.frame_target,
-		gpu_output                   = backend.output,
-		gpu_request_output           = gpu_request_output,
-		gpu_preview_target           = backend.preview_target,
-		gpu_release_preview_target   = backend.release_preview_target,
-		gpu_viewport_target          = backend.viewport_target,
-		gpu_release_viewport_target  = backend.release_viewport_target,
-		gpu_capture_texture          = backend.request_texture_capture,
-		gpu_pipeline_status          = backend.pipeline_status,
-		gpu_submit                   = backend.submit,
-		gpu_upload                   = backend.upload,
-		gpu_stream_buffer            = backend.stream_buffer,
-		gpu_stream_texture           = backend.stream_texture,
-		gpu_transfer_done            = backend.transfer_done,
-		gpu_read_buffer              = backend.read_buffer,
-		gpu_create_buffer            = backend.create_buffer,
-		gpu_create_texture           = backend.create_texture,
-		gpu_create_texture_view      = backend.create_texture_view,
-		gpu_create_sampler           = backend.create_sampler,
-		gpu_create_graphics_pipeline = backend.create_graphics_pipeline,
-		gpu_create_compute_pipeline  = backend.create_compute_pipeline,
-		gpu_update_graphics_pipeline = backend.update_graphics_pipeline,
-		gpu_update_compute_pipeline  = backend.update_compute_pipeline,
+		permanent_allocator             = virtual.arena_allocator(&platform.permanent),
+		frame_allocator                 = virtual.arena_allocator(&platform.frame[0]),
+		asset_allocator                 = runtime.heap_allocator(),
+		heap_allocator                  = runtime.heap_allocator(),
+		content_dir                     = content,
+		project_path                    = project,
+		memory_reserve                  = memory_reserve,
+		memory_commit                   = memory_commit,
+		memory_release                  = memory_release,
+		time_seconds                    = time_seconds,
+		input                           = _window_input,
+		file_read                       = file_read,
+		file_read_range                 = file_read_range,
+		file_modified                   = file_modified,
+		file_write                      = file_write,
+		file_read_begin                 = file_read_begin,
+		file_read_result                = file_read_result,
+		file_read_end                   = file_read_end,
+		window_size                     = window_size,
+		set_window_title                = _window_set_title,
+		jobs_run                        = jobs.run,
+		jobs_wait                       = jobs.wait,
+		jobs_lock                       = jobs.lock,
+		jobs_unlock                     = jobs.unlock,
+		jobs_worker_count               = jobs.worker_count,
+		profile                         = profile.procs(),
+		audio_write                     = audio_write,
+		audio_status                    = audio_status,
+		audio_test_tone                 = os.get_env(
+			TEST_TONE_VARIABLE,
+			context.temp_allocator,
+		) == "1",
+		gpu_features                    = gpu_features,
+		gpu_adapter                     = backend.adapter,
+		gpu_frame_target                = backend.frame_target,
+		gpu_output                      = backend.output,
+		gpu_request_output              = gpu_request_output,
+		gpu_preview_target              = backend.preview_target,
+		gpu_release_preview_target      = backend.release_preview_target,
+		gpu_viewport_target             = backend.viewport_target,
+		gpu_release_viewport_target     = backend.release_viewport_target,
+		gpu_capture_texture             = backend.request_texture_capture,
+		gpu_pipeline_status             = backend.pipeline_status,
+		gpu_submit                      = backend.submit,
+		gpu_upload                      = backend.upload,
+		gpu_stream_buffer               = backend.stream_buffer,
+		gpu_stream_texture              = backend.stream_texture,
+		gpu_transfer_done               = backend.transfer_done,
+		gpu_read_buffer                 = backend.read_buffer,
+		gpu_create_buffer               = backend.create_buffer,
+		gpu_create_texture              = backend.create_texture,
+		gpu_create_texture_view         = backend.create_texture_view,
+		gpu_create_sampler              = backend.create_sampler,
+		gpu_create_graphics_pipeline    = backend.create_graphics_pipeline,
+		gpu_create_compute_pipeline     = backend.create_compute_pipeline,
+		gpu_update_graphics_pipeline    = backend.update_graphics_pipeline,
+		gpu_update_compute_pipeline     = backend.update_compute_pipeline,
 		gpu_create_ray_tracing_pipeline = backend.create_ray_tracing_pipeline,
 		gpu_update_ray_tracing_pipeline = backend.update_ray_tracing_pipeline,
-		gpu_create_accel             = backend.create_accel,
-		gpu_accel_reference          = backend.accel_reference,
-		gpu_upscalers                = backend.upscalers,
-		gpu_create_upscaler          = backend.create_upscaler,
-		gpu_destroy_buffer           = backend.destroy_buffer,
-		gpu_destroy_texture          = backend.destroy_texture,
-		gpu_destroy_sampler          = backend.destroy_sampler,
-		gpu_destroy_pipeline         = backend.destroy_pipeline,
-		gpu_destroy_accel            = backend.destroy_accel,
-		gpu_destroy_upscaler         = backend.destroy_upscaler,
-		gpu_destroy_scope            = backend.destroy_scope,
-		script_open                  = script_host.open,
-		script_close                 = script_host.close,
-		script_push_binding          = script_host.push_binding,
-		script_atom                  = script_host.atom,
-		script_direct_access         = script_host.direct_access,
-		physics                      = physics_api^,
-		audio                        = audio_api^,
+		gpu_create_accel                = backend.create_accel,
+		gpu_accel_reference             = backend.accel_reference,
+		gpu_upscalers                   = backend.upscalers,
+		gpu_create_upscaler             = backend.create_upscaler,
+		gpu_destroy_buffer              = backend.destroy_buffer,
+		gpu_destroy_texture             = backend.destroy_texture,
+		gpu_destroy_sampler             = backend.destroy_sampler,
+		gpu_destroy_pipeline            = backend.destroy_pipeline,
+		gpu_destroy_accel               = backend.destroy_accel,
+		gpu_destroy_upscaler            = backend.destroy_upscaler,
+		gpu_destroy_scope               = backend.destroy_scope,
+		script_open                     = script_host.open,
+		script_close                    = script_host.close,
+		script_push_binding             = script_host.push_binding,
+		script_atom                     = script_host.atom,
+		script_direct_access            = script_host.direct_access,
+		physics                         = physics_api^,
+		audio                           = audio_api^,
 	}
 	return true
 }
@@ -252,7 +257,12 @@ load_physics :: proc(host: ^physics.Host, name: string) -> ^physics.Physics_API 
 // game_paths resolves where the game's files are: content_dir and project_path as given, or content and
 // project.settings in the executable's directory when empty. Both come back absolute, so a change of the working
 // directory later cannot move them, and in allocator.
-game_paths :: proc(exe_dir, content_dir, project_path: string, allocator: runtime.Allocator) -> (content, project: string) {
+game_paths :: proc(
+	exe_dir, content_dir, project_path: string,
+	allocator: runtime.Allocator,
+) -> (
+	content, project: string,
+) {
 	content, project = content_dir, project_path
 	if content == "" {
 		content, _ = filepath.join({exe_dir, "content"}, context.temp_allocator)
@@ -325,7 +335,9 @@ begin_frame :: proc() -> (dt: time.Duration, keep_running: bool) {
 end_frame :: proc() {
 	profile.zone_text("End frame", .Frame)
 	if !drain_jobs() {
-		log.error("core: jobs ran past the end of the frame. Wait for every counter before the frame ends.")
+		log.error(
+			"core: jobs ran past the end of the frame. Wait for every counter before the frame ends.",
+		)
 	}
 	backend.end_frame()
 }

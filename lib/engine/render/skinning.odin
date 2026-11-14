@@ -67,7 +67,11 @@ Skin_Constants :: struct {
 	padding:        [2]u32,
 }
 
-#assert(size_of(Skin_Job) == 48 && size_of(Skin_Constants) == 32 && size_of([3][4]f32) == SKIN_JOINT_BYTES)
+#assert(
+	size_of(Skin_Job) == 48 &&
+	size_of(Skin_Constants) == 32 &&
+	size_of([3][4]f32) == SKIN_JOINT_BYTES,
+)
 
 // Skinned_Instance is a skinned entity's buffers, which last from frame to frame while its mesh does, in Skin_State by
 // the entity's instance slot: the posed positions, last frame's, and the posed attributes. source is the rest
@@ -164,9 +168,15 @@ skin_instance :: proc(
 	entity: ecs.Entity,
 	source: gpu.Buffer,
 	vertex_count, attribute_stride: u32,
-) -> (instance: Skinned_Instance, reset, ok: bool) {
+) -> (
+	instance: Skinned_Instance,
+	reset, ok: bool,
+) {
 	found, has := s.instances[slot]
-	if has && found.source == source && found.vertex_count == vertex_count && found.attribute_stride == attribute_stride {
+	if has &&
+	   found.source == source &&
+	   found.vertex_count == vertex_count &&
+	   found.attribute_stride == attribute_stride {
 		reset = found.entity != entity || found.frame + 1 != frame
 		found.entity, found.frame = entity, frame
 		s.instances[slot] = found
@@ -179,9 +189,22 @@ skin_instance :: proc(
 	instance = {
 		entity           = entity,
 		source           = source,
-		positions        = platform.gpu_create_buffer({size = vertex_count * 12, usage = {.Storage}, label = "skinned positions"}, nil),
-		previous         = platform.gpu_create_buffer({size = vertex_count * 12, usage = {.Storage}, label = "skinned previous positions"}, nil),
-		attributes       = platform.gpu_create_buffer({size = vertex_count * attribute_stride, usage = {.Storage}, label = "skinned attributes"}, nil),
+		positions        = platform.gpu_create_buffer(
+			{size = vertex_count * 12, usage = {.Storage}, label = "skinned positions"},
+			nil,
+		),
+		previous         = platform.gpu_create_buffer(
+			{size = vertex_count * 12, usage = {.Storage}, label = "skinned previous positions"},
+			nil,
+		),
+		attributes       = platform.gpu_create_buffer(
+			{
+				size = vertex_count * attribute_stride,
+				usage = {.Storage},
+				label = "skinned attributes",
+			},
+			nil,
+		),
 		vertex_count     = vertex_count,
 		attribute_stride = attribute_stride,
 		frame            = frame,
@@ -198,9 +221,24 @@ skin_instance :: proc(
 // extra view, which poses none: ok is false when they were not posed this frame for this entity and mesh. It changes
 // nothing.
 @(private)
-skin_posed :: proc(s: ^Skin_State, frame: u64, slot: u32, entity: ecs.Entity, mesh: ^Resident_Mesh) -> (instance: Skinned_Instance, ok: bool) {
+skin_posed :: proc(
+	s: ^Skin_State,
+	frame: u64,
+	slot: u32,
+	entity: ecs.Entity,
+	mesh: ^Resident_Mesh,
+) -> (
+	instance: Skinned_Instance,
+	ok: bool,
+) {
 	found, has := s.instances[slot]
-	ok = has && found.frame == frame && found.entity == entity && found.source == mesh.positions && found.vertex_count == mesh.vertex_count && found.attribute_stride == mesh.attribute_stride
+	ok =
+		has &&
+		found.frame == frame &&
+		found.entity == entity &&
+		found.source == mesh.positions &&
+		found.vertex_count == mesh.vertex_count &&
+		found.attribute_stride == mesh.attribute_stride
 	return found, ok
 }
 
@@ -232,7 +270,9 @@ skin_accel :: proc(s: ^Skin_State, platform: ^core.Platform_API, slot: u32, mesh
 		index_format  = mesh.index_format,
 		opaque        = true,
 	}
-	instance.accel = platform.gpu_create_accel({kind = .Bottom, flags = {.Allow_Update}, geometries = {geometry}, label = "skinned mesh"})
+	instance.accel = platform.gpu_create_accel(
+		{kind = .Bottom, flags = {.Allow_Update}, geometries = {geometry}, label = "skinned mesh"},
+	)
 	instance.accel_built = false
 }
 
@@ -271,20 +311,30 @@ skin_build :: proc(poses: []Skin_Pose, allocator: mem.Allocator) -> Skin_Build {
 
 // skin_add adds an entity's job and joints, for the buffers that skin_instance gave.
 @(private)
-skin_add :: proc(b: ^Skin_Build, mesh: ^Resident_Mesh, instance: Skinned_Instance, slot: u32, pose: ^Skin_Pose, reset: bool) {
-	append(&b.jobs, Skin_Job {
-		rest_positions  = gpu.read_index(mesh.positions),
-		rest_attributes = gpu.read_index(mesh.attributes),
-		skin            = gpu.read_index(mesh.skin),
-		attribute_words = mesh.attribute_stride / 4,
-		positions       = gpu.write_index(instance.positions),
-		previous        = gpu.write_index(instance.previous),
-		attributes      = gpu.write_index(instance.attributes),
-		vertex_count    = mesh.vertex_count,
-		first_joint     = u32(len(b.palette)),
-		joint_count     = u32(len(pose.palette)),
-		flags           = reset ? SKIN_RESET : 0,
-	})
+skin_add :: proc(
+	b: ^Skin_Build,
+	mesh: ^Resident_Mesh,
+	instance: Skinned_Instance,
+	slot: u32,
+	pose: ^Skin_Pose,
+	reset: bool,
+) {
+	append(
+		&b.jobs,
+		Skin_Job {
+			rest_positions = gpu.read_index(mesh.positions),
+			rest_attributes = gpu.read_index(mesh.attributes),
+			skin = gpu.read_index(mesh.skin),
+			attribute_words = mesh.attribute_stride / 4,
+			positions = gpu.write_index(instance.positions),
+			previous = gpu.write_index(instance.previous),
+			attributes = gpu.write_index(instance.attributes),
+			vertex_count = mesh.vertex_count,
+			first_joint = u32(len(b.palette)),
+			joint_count = u32(len(pose.palette)),
+			flags = reset ? SKIN_RESET : 0,
+		},
+	)
 	append(&b.slots, slot)
 	append(&b.palette, ..pose.palette)
 	b.max_vertices = max(b.max_vertices, mesh.vertex_count)
@@ -321,8 +371,13 @@ skin_upload :: proc(f: ^Frame, b: ^Skin_Build) -> bool {
 		stride         = groups * SKIN_GROUP_SIZE,
 	}
 	ok: bool
-	sf.skin.constants, ok = upload_bytes(platform, mem.ptr_to_bytes(&constants), gpu.PASS_CONSTANTS_ALIGN)
-	sf.skin.jobs, sf.skin.groups, sf.skin.slots, sf.skin.refits = len(b.jobs), max(groups, 1), b.slots[:], b.refits[:]
+	sf.skin.constants, ok = upload_bytes(
+		platform,
+		mem.ptr_to_bytes(&constants),
+		gpu.PASS_CONSTANTS_ALIGN,
+	)
+	sf.skin.jobs, sf.skin.groups, sf.skin.slots, sf.skin.refits =
+		len(b.jobs), max(groups, 1), b.slots[:], b.refits[:]
 	return ok
 }
 
@@ -343,7 +398,11 @@ add_skinning_pass :: proc(f: ^Frame) {
 	}
 	for slot, i in sf.skin.slots {
 		instance := f.renderer.scene.skins.instances[slot]
-		sf.skin.buffers[i] = {import_buffer(g, instance.positions), import_buffer(g, instance.previous), import_buffer(g, instance.attributes)}
+		sf.skin.buffers[i] = {
+			import_buffer(g, instance.positions),
+			import_buffer(g, instance.previous),
+			import_buffer(g, instance.attributes),
+		}
 		if f.extra {
 			continue
 		}

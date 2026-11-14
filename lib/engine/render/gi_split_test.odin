@@ -49,7 +49,13 @@ a_split_window_follows_the_camera_in_steps_of_whole_snaps :: proc(t: ^testing.T)
 	testing.expect_value(t, cell, [3]i64{1, -2, 0})
 	for axis in 0 ..< 3 {
 		offset := cell[axis] - w.anchor[axis]
-		testing.expectf(t, offset >= SPLIT_WINDOW / 2 && offset < SPLIT_WINDOW / 2 + SPLIT_SNAP, "axis %d: %d", axis, offset)
+		testing.expectf(
+			t,
+			offset >= SPLIT_WINDOW / 2 && offset < SPLIT_WINDOW / 2 + SPLIT_SNAP,
+			"axis %d: %d",
+			axis,
+			offset,
+		)
 	}
 	// Within a snap, the window stays; past it, it moves by whole snaps.
 	testing.expect_value(t, place_split_window(&w, meters(0.6, -0.3, 0), -2), [3]i64{})
@@ -105,9 +111,22 @@ every_probe_that_a_level_allocates_is_inside_its_window :: proc(t: ^testing.T) {
 	// gather and the merge look a cell further; the window holds them all wherever the camera is in its snap.
 	for params, level in GI_SPLIT_PARAMS {
 		reach := i64(2 * params.distance + 2)
-		testing.expectf(t, reach + SPLIT_SNAP < SPLIT_WINDOW / 2, "%v reaches %d cells", level, reach)
-		testing.expect(t, params.levels <= MAX_SPLIT_LEVELS && params.cascades <= MAX_SPLIT_CASCADES)
-		testing.expect(t, params.directions <= 8, "the first cascade's probe is one group of the merge")
+		testing.expectf(
+			t,
+			reach + SPLIT_SNAP < SPLIT_WINDOW / 2,
+			"%v reaches %d cells",
+			level,
+			reach,
+		)
+		testing.expect(
+			t,
+			params.levels <= MAX_SPLIT_LEVELS && params.cascades <= MAX_SPLIT_CASCADES,
+		)
+		testing.expect(
+			t,
+			params.directions <= 8,
+			"the first cascade's probe is one group of the merge",
+		)
 		for l in 0 ..< i32(params.levels) {
 			w: Split_Window
 			for x in 0 ..< 40 {
@@ -115,7 +134,8 @@ every_probe_that_a_level_allocates_is_inside_its_window :: proc(t: ^testing.T) {
 				place_split_window(&w, camera, params.voxel + l)
 				cell := split_cell(camera, params.voxel + l)
 				for axis in 0 ..< 3 {
-					low, high := cell[axis] - reach - w.anchor[axis], cell[axis] + reach - w.anchor[axis]
+					low, high :=
+						cell[axis] - reach - w.anchor[axis], cell[axis] + reach - w.anchor[axis]
 					testing.expect(t, low >= 0 && high < SPLIT_WINDOW)
 				}
 			}
@@ -154,7 +174,14 @@ split_levels_blend_continuously :: proc(t: ^testing.T) {
 		level, blend = split_lod(r, distance, SPLIT_BAND)
 		// The next level's weight, counted from the first.
 		weight := f32(level) + blend
-		testing.expectf(t, weight >= previous - 1e-4 && weight - previous < 0.2, "at %f: %f after %f", r, weight, previous)
+		testing.expectf(
+			t,
+			weight >= previous - 1e-4 && weight - previous < 0.2,
+			"at %f: %f after %f",
+			r,
+			weight,
+			previous,
+		)
 		testing.expect(t, level >= previous_level)
 		previous, previous_level = weight, level
 	}
@@ -170,7 +197,10 @@ split_levels_blend_continuously :: proc(t: ^testing.T) {
 a_hit_splits_into_the_cascade_whose_interval_holds_it :: proc(t: ^testing.T) {
 	for directions in ([]u32{4, 6, 8}) {
 		first := split_interval(directions) * 0.25
-		testing.expect(t, abs(split_interval(directions) - f32(directions) / math.sqrt(f32(4 * math.PI))) < 1e-6)
+		testing.expect(
+			t,
+			abs(split_interval(directions) - f32(directions) / math.sqrt(f32(4 * math.PI))) < 1e-6,
+		)
 		testing.expect_value(t, split_hit_cascade(first * 0.01, first), 0)
 		testing.expect_value(t, split_hit_cascade(first * 0.99, first), 0)
 		for k in u32(1) ..< 6 {
@@ -318,26 +348,54 @@ the_split_cascades_run_on_the_compute_queue_and_pass_validation :: proc(t: ^test
 	for p in pipelines {
 		p.pipeline = platform.gpu_create_compute_pipeline({compute = code, label = "test"})
 	}
-	r.ray_scene.accel = platform.gpu_create_accel({kind = .Top, max_instances = 4, label = "test scene"})
+	r.ray_scene.accel = platform.gpu_create_accel(
+		{kind = .Top, max_instances = 4, label = "test scene"},
+	)
 	defer ray_scene_destroy(&r.ray_scene, &platform)
 	defer gi_destroy(gi, &platform)
-	instances := platform.gpu_create_buffer({size = 1024, usage = {.Storage}, label = "instances"}, nil)
+	instances := platform.gpu_create_buffer(
+		{size = 1024, usage = {.Storage}, label = "instances"},
+		nil,
+	)
 	defer platform.gpu_destroy_buffer(instances)
-	exposure := platform.gpu_create_buffer({size = 16, usage = {.Storage}, label = "exposure"}, nil)
+	exposure := platform.gpu_create_buffer(
+		{size = 16, usage = {.Storage}, label = "exposure"},
+		nil,
+	)
 	defer platform.gpu_destroy_buffer(exposure)
 	cache: Texture_Cache
 	defer cache_destroy(&cache, &platform)
 
-	run_frame :: proc(t: ^testing.T, r: ^Renderer, cache: ^Texture_Cache, instances, exposure: gpu.Buffer, settings: Gi_Settings, camera: ecs.World_Position, view := Debug_View.Lit) -> (passes: map[string]int) {
+	run_frame :: proc(
+		t: ^testing.T,
+		r: ^Renderer,
+		cache: ^Texture_Cache,
+		instances, exposure: gpu.Buffer,
+		settings: Gi_Settings,
+		camera: ecs.World_Position,
+		view := Debug_View.Lit,
+	) -> (
+		passes: map[string]int,
+	) {
 		platform := r.platform
 		g := begin(platform, cache)
 		f := new(Frame, platform.frame_allocator)
-		f^ = {renderer = r, state = &r.view, graph = &g, size = {64, 32}, view = {position = camera}, debug_view = view}
+		f^ = {
+			renderer = r,
+			state = &r.view,
+			graph = &g,
+			size = {64, 32},
+			view = {position = camera},
+			debug_view = view,
+		}
 		f.lights = new(Light_Frame, platform.frame_allocator)
 		f.depth = create_texture(&g, {size = f.size, format = DEPTH_FORMAT, label = "depth"})
 		f.normals = create_texture(&g, {size = f.size, format = .RG16_Float, label = "normals"})
 		f.velocity = create_texture(&g, {size = f.size, format = .RG16_Float, label = "velocity"})
-		f.roughness = create_texture(&g, {size = f.size, format = ROUGHNESS_FORMAT, label = "roughness"})
+		f.roughness = create_texture(
+			&g,
+			{size = f.size, format = ROUGHNESS_FORMAT, label = "roughness"},
+		)
 		prepass := add_render_pass(&g, "prepass", proc(_: ^Pass_Context) {}, nil)
 		depth(&g, prepass, f.depth, .Clear)
 		color(&g, prepass, f.normals, .Clear)
@@ -347,7 +405,10 @@ the_split_cascades_run_on_the_compute_queue_and_pass_validation :: proc(t: ^test
 		sf := new(Scene_Frame, platform.frame_allocator)
 		f.scene_frame = sf
 		sf.view_constants = make([]gpu.Upload, 1, platform.frame_allocator)
-		sf.view_constants[0], _ = platform.gpu_upload(size_of(Frame_Constants), gpu.PASS_CONSTANTS_ALIGN)
+		sf.view_constants[0], _ = platform.gpu_upload(
+			size_of(Frame_Constants),
+			gpu.PASS_CONSTANTS_ALIGN,
+		)
 		sf.instances = import_buffer(&g, instances)
 		sf.hit_instances, _ = platform.gpu_upload(size_of(Hit_Instance), 16)
 		sf.hit_submeshes, _ = platform.gpu_upload(size_of(Hit_Submesh), 16)
@@ -381,11 +442,19 @@ the_split_cascades_run_on_the_compute_queue_and_pass_validation :: proc(t: ^test
 		return
 	}
 
-	settings := Gi_Settings{technique = .Split_Cascades, level = .Low}
+	settings := Gi_Settings {
+		technique = .Split_Cascades,
+		level     = .Low,
+	}
 	for frame in 0 ..< 3 {
 		camera := meters(10.5 + 3 * f64(frame), 2, -3)
 		passes := run_frame(t, r, &cache, instances, exposure, settings, camera)
-		testing.expectf(t, passes["gi split gather"] == 1, "frame %d did not run the split cascades", frame)
+		testing.expectf(
+			t,
+			passes["gi split gather"] == 1,
+			"frame %d did not run the split cascades",
+			frame,
+		)
 		// New storage is cleared once.
 		testing.expect_value(t, passes["gi split clear"], frame == 0 ? 1 : 0)
 		testing.expect_value(t, passes["gi split merge"], int(GI_SPLIT_PARAMS[.Low].cascades))
@@ -450,7 +519,15 @@ the_split_stats_are_the_newest_copy_that_came_back :: proc(t: ^testing.T) {
 	s := &r.view.gi.split
 	defer gi_split_state_destroy(s, &platform)
 	s.layout = split_layout(GI_SPLIT_PARAMS[.High])
-	testing.expect(t, ensure_readback_ring(&s.stats_ring, &platform, MAX_SPLIT_CASCADES * SPLIT_COUNTERS_SIZE, "test"))
+	testing.expect(
+		t,
+		ensure_readback_ring(
+			&s.stats_ring,
+			&platform,
+			MAX_SPLIT_CASCADES * SPLIT_COUNTERS_SIZE,
+			"test",
+		),
+	)
 
 	// Each cascade's counters: free slots, slots taken, active slots and dropped keys, in a frame's copy, as its commit
 	// leaves the ring (see a_readback_ring_shows_what_the_frames_that_executed_copied).
@@ -468,8 +545,16 @@ the_split_stats_are_the_newest_copy_that_came_back :: proc(t: ^testing.T) {
 	read_gi_split_stats(r, &r.view)
 	stats := gi_split_stats(r)
 	testing.expect_value(t, stats.count, 4)
-	testing.expect_value(t, stats.cascades[0], Split_Cascade_Stats{active = 70, slots = 16384, dropped = 3})
-	testing.expect_value(t, stats.cascades[3], Split_Cascade_Stats{active = 73, slots = 256, dropped = 3})
+	testing.expect_value(
+		t,
+		stats.cascades[0],
+		Split_Cascade_Stats{active = 70, slots = 16384, dropped = 3},
+	)
+	testing.expect_value(
+		t,
+		stats.cascades[3],
+		Split_Cascade_Stats{active = 73, slots = 256, dropped = 3},
+	)
 
 	// A frame without the split cascades empties them, even when an older copy comes back then.
 	tally(s, 90, 0)
@@ -480,10 +565,23 @@ the_split_stats_are_the_newest_copy_that_came_back :: proc(t: ^testing.T) {
 
 @(test)
 a_split_cascade_keeps_its_probes_until_its_slots_run_short :: proc(t: ^testing.T) {
-	roomy := Split_Cascade_Stats{active = 100, slots = 1024}
-	between := Split_Cascade_Stats{active = 800, slots = 1024}
-	full := Split_Cascade_Stats{active = 1000, slots = 1024}
-	dropping := Split_Cascade_Stats{active = 100, slots = 1024, dropped = 1}
+	roomy := Split_Cascade_Stats {
+		active = 100,
+		slots  = 1024,
+	}
+	between := Split_Cascade_Stats {
+		active = 800,
+		slots  = 1024,
+	}
+	full := Split_Cascade_Stats {
+		active = 1000,
+		slots  = 1024,
+	}
+	dropping := Split_Cascade_Stats {
+		active  = 100,
+		slots   = 1024,
+		dropped = 1,
+	}
 
 	// With room, it stays at its longest. A key that found no room, however few, halves it.
 	testing.expect_value(t, split_lifetime(SPLIT_LIFETIME, roomy), SPLIT_LIFETIME)
@@ -524,7 +622,13 @@ a_frame_that_loses_the_split_cascades_warns_once :: proc(t: ^testing.T) {
 	defer delete(warnings.text)
 	runner := context.logger
 	context.logger = {
-		procedure = proc(data: rawptr, level: runtime.Logger_Level, text: string, _: runtime.Logger_Options, _ := #caller_location) {
+		procedure = proc(
+			data: rawptr,
+			level: runtime.Logger_Level,
+			text: string,
+			_: runtime.Logger_Options,
+			_ := #caller_location,
+		) {
 			w := (^Warnings)(data)
 			if level == .Warning {
 				w.count += 1
@@ -538,7 +642,11 @@ a_frame_that_loses_the_split_cascades_warns_once :: proc(t: ^testing.T) {
 	}
 	r := new(Renderer)
 	defer free(r)
-	f := Frame{renderer = r, state = &r.view, gi = &Gi_Frame{settings = {technique = .Split_Cascades}}}
+	f := Frame {
+		renderer = r,
+		state    = &r.view,
+		gi       = &Gi_Frame{settings = {technique = .Split_Cascades}},
+	}
 	// Waiting for its first frame is not losing it.
 	note_split_fallback(&f, false)
 	count_while_waiting := warnings.count
@@ -556,7 +664,11 @@ a_frame_that_loses_the_split_cascades_warns_once :: proc(t: ^testing.T) {
 	context.logger = runner
 	testing.expect_value(t, count_while_waiting, 0)
 	testing.expect_value(t, count_after_loss, 1)
-	testing.expect_value(t, reason, "gi: the split cascades gave way to the screen cascades: the world probes did not run")
+	testing.expect_value(
+		t,
+		reason,
+		"gi: the split cascades gave way to the screen cascades: the world probes did not run",
+	)
 	testing.expect_value(t, count_later, 1)
 	testing.expect_value(t, count_by_choice, 1)
 }

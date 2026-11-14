@@ -144,7 +144,8 @@ collect :: proc(w: ^World, ids: []Component_Id, out: ^[dynamic]Entity, since: u6
 	outer: for index in 0 ..< w.archetype_count {
 		a := archetype(w, index)
 		components := archetype_components(a)
-		if _, inactive := slice.binary_search(components, INACTIVE_ID); inactive && !include_inactive {
+		if _, inactive := slice.binary_search(components, INACTIVE_ID);
+		   inactive && !include_inactive {
 			continue
 		}
 		for id in ids {
@@ -153,7 +154,8 @@ collect :: proc(w: ^World, ids: []Component_Id, out: ^[dynamic]Entity, since: u6
 			}
 		}
 		for first: u32 = 0; first < a.count; first += a.capacity {
-			if since != 0 && !columns_changed(w, a, chunk_directory(w, index)[first / a.capacity], ids, since) {
+			if since != 0 &&
+			   !columns_changed(w, a, chunk_directory(w, index)[first / a.capacity], ids, since) {
 				continue
 			}
 			for row in first ..< min(first + a.capacity, a.count) {
@@ -175,7 +177,13 @@ take_version :: proc "contextless" (w: ^World) -> u64 {
 // of chunks this way. See query_chunk_count. With a version from take_version, it leaves out the chunks that the
 // query's changed terms say did not change since it. These still count as chunks of the range, so ranges stay the
 // same.
-query_iter :: proc(w: ^World, q: Query, first := 0, count := max(int), since: u64 = 0) -> Query_Iterator {
+query_iter :: proc(
+	w: ^World,
+	q: Query,
+	first := 0,
+	count := max(int),
+	since: u64 = 0,
+) -> Query_Iterator {
 	it := Query_Iterator {
 		world     = w,
 		query     = u32(q) - 1,
@@ -207,7 +215,9 @@ query_next :: proc(it: ^Query_Iterator) -> (view: Chunk_View, ok: bool) {
 			index := it.chunk
 			it.chunk += 1
 			it.remaining -= 1
-			if it.since != 0 && state.changes != {} && !terms_changed(w, match, state.changes, chunk, it.since) {
+			if it.since != 0 &&
+			   state.changes != {} &&
+			   !terms_changed(w, match, state.changes, chunk, it.since) {
 				continue
 			}
 			// A chunk's writers come through here, so this is where its columns count as written.
@@ -306,7 +316,13 @@ stamp_chunk :: proc "contextless" (w: ^World, a: ^Archetype, chunk: u32) {
 
 // columns_changed is true if the column of one of ids is newer than a version in a chunk of a.
 @(private)
-columns_changed :: proc "contextless" (w: ^World, a: ^Archetype, chunk: u32, ids: []Component_Id, since: u64) -> bool {
+columns_changed :: proc "contextless" (
+	w: ^World,
+	a: ^Archetype,
+	chunk: u32,
+	ids: []Component_Id,
+	since: u64,
+) -> bool {
 	for id in ids {
 		for column in 0 ..< int(a.component_count) {
 			if a.ids[column] == id && chunk_version(w, chunk, column) > since {
@@ -318,7 +334,13 @@ columns_changed :: proc "contextless" (w: ^World, a: ^Archetype, chunk: u32, ids
 }
 
 @(private = "file")
-terms_changed :: proc "contextless" (w: ^World, match: ^Query_Match, terms: Term_Set, chunk: u32, since: u64) -> bool {
+terms_changed :: proc "contextless" (
+	w: ^World,
+	match: ^Query_Match,
+	terms: Term_Set,
+	chunk: u32,
+	since: u64,
+) -> bool {
 	for term in terms {
 		if c := match.columns[term]; c != NO_COLUMN && chunk_version(w, chunk, int(c)) > since {
 			return true

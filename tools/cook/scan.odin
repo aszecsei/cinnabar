@@ -40,7 +40,15 @@ Scan :: struct {
 // scan reads every asset in the roots, with its .meta file, in path order, and lists the folders. An asset without a
 // .meta file gets a new GUID, and the cooker writes its .meta file. A .meta file without its asset, as when Explorer
 // or git moves a source without it, is a warning. Files and directories whose names start with a dot are skipped.
-scan :: proc(roots: []Root, problems: ^Problems) -> (assets: []Asset_Source, folders: []Folder, shared: []format.Guid, ok: bool) {
+scan :: proc(
+	roots: []Root,
+	problems: ^Problems,
+) -> (
+	assets: []Asset_Source,
+	folders: []Folder,
+	shared: []format.Guid,
+	ok: bool,
+) {
 	pass := Pass {
 		problems = problems^,
 		read     = make([dynamic]string, context.temp_allocator),
@@ -54,7 +62,16 @@ scan :: proc(roots: []Root, problems: ^Problems) -> (assets: []Asset_Source, fol
 // and the paths that changed, it lists only the directories that hold them, and those that are new; it reads only the
 // assets whose source or .meta file changed, or that the saved index does not have, and carries the others. Otherwise
 // it lists and reads everything.
-scan_pass :: proc(roots: []Root, includes: []string, definitions: string, saved: ^Index, changes: Watch_Changes, pass: ^Pass) -> (s: Scan) {
+scan_pass :: proc(
+	roots: []Root,
+	includes: []string,
+	definitions: string,
+	saved: ^Index,
+	changes: Watch_Changes,
+	pass: ^Pass,
+) -> (
+	s: Scan,
+) {
 	problems := &pass.problems
 	empty: Index
 	saved := saved if saved != nil else &empty
@@ -132,7 +149,13 @@ scan_pass :: proc(roots: []Root, includes: []string, definitions: string, saved:
 		name := relative[strings.last_index_byte(relative, '/') + 1:]
 		if strings.has_suffix(name, format.META_EXTENSION) {
 			if strings.trim_suffix(r.path, format.META_EXTENSION) not_in records {
-				report_warning(problems, r.path, 0, 0, "has no asset next to it. Move it to its asset, which then keeps its GUID, or delete it.")
+				report_warning(
+					problems,
+					r.path,
+					0,
+					0,
+					"has no asset next to it. Move it to its asset, which then keeps its GUID, or delete it.",
+				)
 			}
 			continue
 		}
@@ -151,7 +174,8 @@ scan_pass :: proc(roots: []Root, includes: []string, definitions: string, saved:
 			inputs       = make([dynamic]Input_Stamp, context.temp_allocator),
 		}
 		meta_path := fmt.tprintf("%s%s", r.path, format.META_EXTENSION)
-		if old, has_old := saved_source(saved, r.path); has_old && !s.changed[r.path] && !s.changed[meta_path] && carry_source(&a, old) {
+		if old, has_old := saved_source(saved, r.path);
+		   has_old && !s.changed[r.path] && !s.changed[meta_path] && carry_source(&a, old) {
 			append(&found, a)
 			continue
 		}
@@ -240,7 +264,15 @@ carried_generated :: proc(pass: ^Pass, saved: Saved_Source) -> Asset_Source {
 // and every asset that depends on one of those, directly or not, through its dependencies, the assets that it draws
 // with, or, for a stage's generated sources, its stage. A kind whose assets depend on each other in ways that no
 // dependency says is looked at as a whole (see carry_kind).
-pass_scope :: proc(pass: ^Pass, s: Scan, saved: ^Index, roots: []Root, includes: []string, definitions: string, force: map[format.Guid]bool) {
+pass_scope :: proc(
+	pass: ^Pass,
+	s: Scan,
+	saved: ^Index,
+	roots: []Root,
+	includes: []string,
+	definitions: string,
+	force: map[format.Guid]bool,
+) {
 	scope := make(map[format.Guid]bool, context.temp_allocator)
 	pass.scope = scope
 	queue := make([dynamic]format.Guid, context.temp_allocator)
@@ -252,10 +284,17 @@ pass_scope :: proc(pass: ^Pass, s: Scan, saved: ^Index, roots: []Root, includes:
 		}
 	}
 	// What depends on each GUID, and the sources that a stage generates, from the saved index.
-	dependents := make(map[format.Guid][dynamic]format.Guid, len(saved.sources), context.temp_allocator)
+	dependents := make(
+		map[format.Guid][dynamic]format.Guid,
+		len(saved.sources),
+		context.temp_allocator,
+	)
 	generated := make(map[format.Guid][dynamic]format.Guid, context.temp_allocator)
 	by_guid := make(map[format.Guid]int, len(saved.sources), context.temp_allocator)
-	add_dependent :: proc(dependents: ^map[format.Guid][dynamic]format.Guid, on, dependent: format.Guid) {
+	add_dependent :: proc(
+		dependents: ^map[format.Guid][dynamic]format.Guid,
+		on, dependent: format.Guid,
+	) {
 		list := dependents[on] or_else make([dynamic]format.Guid, context.temp_allocator)
 		append(&list, dependent)
 		dependents[on] = list
@@ -291,7 +330,8 @@ pass_scope :: proc(pass: ^Pass, s: Scan, saved: ^Index, roots: []Root, includes:
 		}
 	}
 
-	recheck_problems, includes_changed, scripts_changed := guids_changed(pass.assets, saved), false, false
+	recheck_problems, includes_changed, scripts_changed :=
+		guids_changed(pass.assets, saved), false, false
 	for path in s.changed {
 		root, in_root := root_of(roots, path)
 		name := path[strings.last_index_byte(path, '/') + 1:]
@@ -313,7 +353,10 @@ pass_scope :: proc(pass: ^Pass, s: Scan, saved: ^Index, roots: []Root, includes:
 			if was != is {
 				recheck_problems = true
 			}
-			if is && !r.directory && !strings.has_suffix(name, format.META_EXTENSION) && kind_of(name) == .None {
+			if is &&
+			   !r.directory &&
+			   !strings.has_suffix(name, format.META_EXTENSION) &&
+			   kind_of(name) == .None {
 				includes_changed = true
 			}
 		case in_dirs(includes, path):
@@ -328,7 +371,8 @@ pass_scope :: proc(pass: ^Pass, s: Scan, saved: ^Index, roots: []Root, includes:
 		}
 	}
 	for a in pass.assets {
-		if (includes_changed && a.kind in INCLUDING_KINDS) || (scripts_changed && a.kind == .Script) {
+		if (includes_changed && a.kind in INCLUDING_KINDS) ||
+		   (scripts_changed && a.kind == .Script) {
 			append(&queue, a.meta.guid)
 		}
 	}
@@ -356,7 +400,13 @@ pass_scope :: proc(pass: ^Pass, s: Scan, saved: ^Index, roots: []Root, includes:
 
 // The kinds whose cooks read include files, which are not assets.
 @(private = "file")
-INCLUDING_KINDS :: Asset_Kinds{.Shader, .Shading_Model, .Material, .Material_Instance, .Material_Function}
+INCLUDING_KINDS :: Asset_Kinds {
+	.Shader,
+	.Shading_Model,
+	.Material,
+	.Material_Instance,
+	.Material_Function,
+}
 
 // guids_changed is whether the GUIDs that the content's .meta files give came or went since the saved index: an
 // asset came or went, or the scan read a .meta file that gives other GUIDs.
@@ -392,7 +442,12 @@ guids_changed :: proc(assets: []Asset_Source, saved: ^Index) -> bool {
 // list_tree adds a directory's records, and those of everything under it, to records, and marks each as changed. It
 // skips what starts with a dot. A directory that it cannot read is a problem, unless problems is nil.
 @(private = "file")
-list_tree :: proc(dir: string, records: ^map[string]File_Record, changed: ^map[string]bool, problems: ^Problems) -> bool {
+list_tree :: proc(
+	dir: string,
+	records: ^map[string]File_Record,
+	changed: ^map[string]bool,
+	problems: ^Problems,
+) -> bool {
 	ok := true
 	// os.walker leaves the last directory that it reads open, which stops a rename or a delete of it, so the scan
 	// reads each directory itself.
@@ -428,7 +483,12 @@ list_tree :: proc(dir: string, records: ^map[string]File_Record, changed: ^map[s
 // relist lists one directory again: it updates the records of what is in it, lists the directories that are new in
 // it, and drops what went, with everything under it. A directory that went goes with everything under it.
 @(private = "file")
-relist :: proc(dir: string, records: ^map[string]File_Record, changed: ^map[string]bool, problems: ^Problems) -> bool {
+relist :: proc(
+	dir: string,
+	records: ^map[string]File_Record,
+	changed: ^map[string]bool,
+	problems: ^Problems,
+) -> bool {
 	infos, err := os.read_all_directory_by_path(dir, context.temp_allocator)
 	if err == .Not_Exist {
 		drop_tree(dir, records, changed)
@@ -514,7 +574,11 @@ record_of :: proc(info: os.File_Info) -> File_Record {
 	if info.type == .Directory {
 		return {path = path, directory = true}
 	}
-	return {path = path, size = info.size, modified = time.to_unix_nanoseconds(info.modification_time)}
+	return {
+		path = path,
+		size = info.size,
+		modified = time.to_unix_nanoseconds(info.modification_time),
+	}
 }
 
 // saved_file is a path's record in the saved index.
@@ -526,9 +590,13 @@ saved_file :: proc(saved: ^Index, path: string) -> (File_Record, bool) {
 // file_in is a path's record among records in path order.
 @(private = "file")
 file_in :: proc(files: []File_Record, path: string) -> (File_Record, bool) {
-	i, found := slice.binary_search_by(files, path, proc(r: File_Record, path: string) -> slice.Ordering {
-		return slice.Ordering(int(r.path > path) - int(r.path < path))
-	})
+	i, found := slice.binary_search_by(
+		files,
+		path,
+		proc(r: File_Record, path: string) -> slice.Ordering {
+			return slice.Ordering(int(r.path > path) - int(r.path < path))
+		},
+	)
 	return files[i] if found else {}, found
 }
 

@@ -73,18 +73,48 @@ setup :: proc(t: ^testing.T) -> ^Fixture {
 	graph, parsed := format.guid_parse(GRAPH)
 	testing.expect(t, parsed)
 	f.graph = graph
-	written := format.animation_graph_write({
-		guid = graph,
-		key = KEY,
-		parameters = {{name = "speed", kind = .Float}, {name = "grounded", kind = .Bool}, {name = "look", kind = .Trigger}},
-		clips = {{name = "c"}},
-		states = {
-			{name = "idle", node = 1, motion = .Clip, parameter = format.ANIMATION_GRAPH_NONE, points = {{clip = 0}}, speed = 1, loop = true, enter_event = format.ANIMATION_GRAPH_NONE, exit_event = format.ANIMATION_GRAPH_NONE},
-			{name = "move", node = 2, motion = .Clip, parameter = format.ANIMATION_GRAPH_NONE, points = {{clip = 0}}, speed = 1, loop = true, enter_event = format.ANIMATION_GRAPH_NONE, exit_event = format.ANIMATION_GRAPH_NONE},
+	written := format.animation_graph_write(
+		{
+			guid = graph,
+			key = KEY,
+			parameters = {
+				{name = "speed", kind = .Float},
+				{name = "grounded", kind = .Bool},
+				{name = "look", kind = .Trigger},
+			},
+			clips = {{name = "c"}},
+			states = {
+				{
+					name = "idle",
+					node = 1,
+					motion = .Clip,
+					parameter = format.ANIMATION_GRAPH_NONE,
+					points = {{clip = 0}},
+					speed = 1,
+					loop = true,
+					enter_event = format.ANIMATION_GRAPH_NONE,
+					exit_event = format.ANIMATION_GRAPH_NONE,
+				},
+				{
+					name = "move",
+					node = 2,
+					motion = .Clip,
+					parameter = format.ANIMATION_GRAPH_NONE,
+					points = {{clip = 0}},
+					speed = 1,
+					loop = true,
+					enter_event = format.ANIMATION_GRAPH_NONE,
+					exit_event = format.ANIMATION_GRAPH_NONE,
+				},
+			},
+			transitions = {{from = 0, to = 1, exit_time = 1, node = 20}},
 		},
-		transitions = {{from = 0, to = 1, exit_time = 1, node = 20}},
-	}, context.temp_allocator)
-	testing.expect(t, os.write_entire_file(fmt.tprintf("%s/%s.blob", f.cache, GRAPH), written) == nil)
+		context.temp_allocator,
+	)
+	testing.expect(
+		t,
+		os.write_entire_file(fmt.tprintf("%s/%s.blob", f.cache, GRAPH), written) == nil,
+	)
 	_, loaded := asset.load(&f.assets, graph)
 	testing.expect(t, loaded)
 
@@ -112,7 +142,10 @@ views :: proc(f: ^Fixture, incoming: ..link.Message) -> []link.Animator_View {
 		bytes := make([dynamic]byte, context.temp_allocator)
 		link.write_message(&bytes, m)
 		header, _ := link.read_header(bytes[:])
-		append(&encoded, core.Editor_Message{kind = header.kind, payload = bytes[link.HEADER_SIZE:]})
+		append(
+			&encoded,
+			core.Editor_Message{kind = header.kind, payload = bytes[link.HEADER_SIZE:]},
+		)
 	}
 	clear(&f.out)
 	poll(&f.editor, &f.world, nil, 1, encoded[:], &f.out)
@@ -120,7 +153,11 @@ views :: proc(f: ^Fixture, incoming: ..link.Message) -> []link.Animator_View {
 	rest := f.out[:]
 	for len(rest) > 0 {
 		header, _ := link.read_header(rest)
-		message, ok := link.decode_message(header.kind, rest[link.HEADER_SIZE:][:header.length], context.temp_allocator)
+		message, ok := link.decode_message(
+			header.kind,
+			rest[link.HEADER_SIZE:][:header.length],
+			context.temp_allocator,
+		)
 		if view, is_view := message.(link.Animator_View); ok && is_view {
 			append(&found, view)
 		}
@@ -242,7 +279,9 @@ a_watch_again_sends_the_view_even_when_it_is_empty :: proc(t: ^testing.T) {
 }
 
 @(test)
-a_preview_plays_a_graph_whatever_the_mode_and_the_editor_sets_its_parameters :: proc(t: ^testing.T) {
+a_preview_plays_a_graph_whatever_the_mode_and_the_editor_sets_its_parameters :: proc(
+	t: ^testing.T,
+) {
 	f := setup(t)
 	defer teardown(f)
 	id: u32 = 1
@@ -267,7 +306,11 @@ a_preview_plays_a_graph_whatever_the_mode_and_the_editor_sets_its_parameters :: 
 	testing.expect_value(t, len(views(f)), 0)
 
 	// A float, a bool and a trigger, which shows until a tick sees it and can be reset.
-	views(f, link.Set_Preview_Parameter{id, "speed", 5}, link.Set_Preview_Parameter{id, "grounded", 1})
+	views(
+		f,
+		link.Set_Preview_Parameter{id, "speed", 5},
+		link.Set_Preview_Parameter{id, "grounded", 1},
+	)
 	testing.expect_value(t, p.play.instance.parameters[0], 5)
 	testing.expect_value(t, p.play.instance.parameters[1], 1)
 	list = views(f, link.Set_Preview_Parameter{id, "look", 1})
@@ -295,7 +338,10 @@ a_preview_plays_a_graph_whatever_the_mode_and_the_editor_sets_its_parameters :: 
 a_preview_that_shows_another_asset_starts_its_graph_over :: proc(t: ^testing.T) {
 	f := setup(t)
 	defer teardown(f)
-	missing := Counted_Log{text = "no blob for", next = context.logger}
+	missing := Counted_Log {
+		text = "no blob for",
+		next = context.logger,
+	}
 	context.logger = {count_log, &missing, .Debug, {}}
 	open := link.Open_Preview {
 		id       = 1,

@@ -90,12 +90,18 @@ perception_layout :: proc() -> u64 {
 // source is known and reads only a row before it that chooses an entity.
 perception_view :: proc(data: []byte) -> (blob: ^Perception_Blob, ok: bool) {
 	header := blob_header(data) or_return
-	if header.kind != .Perception || header.layout != perception_layout() || len(data) < size_of(Perception_Blob) {
+	if header.kind != .Perception ||
+	   header.layout != perception_layout() ||
+	   len(data) < size_of(Perception_Blob) {
 		return
 	}
 	blob = (^Perception_Blob)(raw_data(data))
 	inside :: proc(data: []byte, s: Slice, size, align: int) -> bool {
-		return u64(s.offset) + u64(s.size) <= u64(len(data)) && int(s.size) % size == 0 && int(s.offset) % align == 0
+		return(
+			u64(s.offset) + u64(s.size) <= u64(len(data)) &&
+			int(s.size) % size == 0 &&
+			int(s.offset) % align == 0 \
+		)
 	}
 	if !inside(data, blob.notices, size_of(Slice), align_of(Slice)) ||
 	   !inside(data, blob.rows, size_of(Perception_Row), align_of(Perception_Row)) ||
@@ -158,7 +164,11 @@ Perception_Contents :: struct {
 perception_write :: proc(contents: Perception_Contents, allocator := context.allocator) -> []byte {
 	buffer := make([dynamic]byte, size_of(Perception_Blob), allocator)
 	notices := reserve_bytes(&buffer, len(contents.notices) * size_of(Slice), align_of(Slice))
-	rows := reserve_bytes(&buffer, len(contents.rows) * size_of(Perception_Row), align_of(Perception_Row))
+	rows := reserve_bytes(
+		&buffer,
+		len(contents.rows) * size_of(Perception_Row),
+		align_of(Perception_Row),
+	)
 	for n, i in contents.notices {
 		s := append_bytes(&buffer, transmute([]byte)n)
 		mem.copy(&buffer[int(notices.offset) + i * size_of(Slice)], &s, size_of(s))
@@ -176,7 +186,13 @@ perception_write :: proc(contents: Perception_Contents, allocator := context.all
 	}
 	source_path := append_bytes(&buffer, transmute([]byte)contents.source_path)
 	blob := Perception_Blob {
-		header = {magic = BLOB_MAGIC, kind = .Perception, layout = perception_layout(), key = contents.key, guid = contents.guid},
+		header = {
+			magic = BLOB_MAGIC,
+			kind = .Perception,
+			layout = perception_layout(),
+			key = contents.key,
+			guid = contents.guid,
+		},
 		notices = notices,
 		rows = rows,
 		source_path = source_path,

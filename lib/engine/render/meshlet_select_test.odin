@@ -12,7 +12,7 @@ only_hierarchy_items_walk_and_only_while_the_walk_can_run :: proc(t: ^testing.T)
 	testing.expect(t, virtual.arena_init_growing(&arena) == nil)
 	defer virtual.arena_destroy(&arena)
 	platform := core.Platform_API {
-		gpu_create_buffer  = proc(desc: gpu.Buffer_Desc, data: []byte) -> gpu.Buffer {
+		gpu_create_buffer = proc(desc: gpu.Buffer_Desc, data: []byte) -> gpu.Buffer {
 			// The handle keeps the size, which the test reads back.
 			return gpu.Buffer{index = desc.size, generation = 1}
 		},

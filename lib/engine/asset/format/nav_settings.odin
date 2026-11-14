@@ -60,7 +60,13 @@ nav_check_setting :: proc(key, value: string) -> (problem: string) {
 // nav_agents_parse reads the agent types from a project's settings text, which is the project's file followed by its
 // user file, so a later line wins. Without nav.agents there is one type, NAV_DEFAULT_AGENT. A problem leaves the
 // value that it is about at its default. The names point into text, and the problems' text is in allocator.
-nav_agents_parse :: proc(text: string, allocator := context.allocator) -> (agents: []Nav_Agent, problems: []Nav_Settings_Problem) {
+nav_agents_parse :: proc(
+	text: string,
+	allocator := context.allocator,
+) -> (
+	agents: []Nav_Agent,
+	problems: []Nav_Settings_Problem,
+) {
 	list := make([dynamic]Nav_Agent, allocator)
 	found := make([dynamic]Nav_Settings_Problem, allocator)
 
@@ -107,7 +113,19 @@ nav_agents_parse :: proc(text: string, allocator := context.allocator) -> (agent
 		}
 		index := nav_agent_index(list[:], name)
 		if index < 0 {
-			append(&found, Nav_Settings_Problem{line, fmt.aprintf("%s: %s does not name %q", key, NAV_AGENTS_KEY, name, allocator = allocator)})
+			append(
+				&found,
+				Nav_Settings_Problem {
+					line,
+					fmt.aprintf(
+						"%s: %s does not name %q",
+						key,
+						NAV_AGENTS_KEY,
+						name,
+						allocator = allocator,
+					),
+				},
+			)
 			continue
 		}
 		agent := &list[index]
@@ -127,17 +145,32 @@ nav_agents_parse :: proc(text: string, allocator := context.allocator) -> (agent
 
 // nav_parse_names parses nav.agents' value: names between commas, each once, at most NAV_MAX_AGENTS. The names that
 // fit are kept, and problem says what did not, or is "".
-nav_parse_names :: proc(value: string, allocator := context.allocator) -> (names: []string, problem: string) {
+nav_parse_names :: proc(
+	value: string,
+	allocator := context.allocator,
+) -> (
+	names: []string,
+	problem: string,
+) {
 	list := make([dynamic]string, allocator)
 	for part in strings.split(value, ",", context.temp_allocator) {
 		name := strings.trim_space(part)
 		switch {
 		case !nav_agent_name_valid(name):
-			problem = fmt.tprintf("%s takes names of letters, digits and _ of at most %d characters between commas, not %q", NAV_AGENTS_KEY, NAV_MAX_AGENT_NAME, name)
+			problem = fmt.tprintf(
+				"%s takes names of letters, digits and _ of at most %d characters between commas, not %q",
+				NAV_AGENTS_KEY,
+				NAV_MAX_AGENT_NAME,
+				name,
+			)
 		case nav_name_index(list[:], name) >= 0:
 			problem = fmt.tprintf("%s gives %q twice", NAV_AGENTS_KEY, name)
 		case len(list) == NAV_MAX_AGENTS:
-			problem = fmt.tprintf("%s gives more than %d agent types", NAV_AGENTS_KEY, NAV_MAX_AGENTS)
+			problem = fmt.tprintf(
+				"%s gives more than %d agent types",
+				NAV_AGENTS_KEY,
+				NAV_MAX_AGENTS,
+			)
 		case:
 			append(&list, name)
 		}
@@ -147,7 +180,13 @@ nav_parse_names :: proc(value: string, allocator := context.allocator) -> (names
 
 // nav_parse_field parses a line `nav.agent.<Name>.<field> = <number>`: a valid name, a field that an agent type has,
 // and a number above 0, and below 90 for max_slope. problem is "" when it fits.
-nav_parse_field :: proc(key, value: string) -> (name, field: string, number: f32, problem: string) {
+nav_parse_field :: proc(
+	key, value: string,
+) -> (
+	name, field: string,
+	number: f32,
+	problem: string,
+) {
 	name, _, field = strings.partition(key[len(NAV_AGENT_PREFIX):], ".")
 	if !nav_agent_name_valid(name) {
 		problem = fmt.tprintf("%s: %q cannot be an agent type's name", key, name)
@@ -156,7 +195,10 @@ nav_parse_field :: proc(key, value: string) -> (name, field: string, number: f32
 	switch field {
 	case "radius", "height", "step_height", "max_slope":
 	case:
-		problem = fmt.tprintf("there is no setting %q: an agent type has radius, height, step_height and max_slope", key)
+		problem = fmt.tprintf(
+			"there is no setting %q: an agent type has radius, height, step_height and max_slope",
+			key,
+		)
 		return
 	}
 	parsed: bool

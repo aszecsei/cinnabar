@@ -40,7 +40,11 @@ command_despawn :: proc(cb: ^Commands, e: Entity) {
 command_add :: proc(cb: ^Commands, w: ^World, e: Entity, value: $T) {
 	value := value
 	if id := type_component(w, T); id != 0 {
-		push_command(cb, {entity = e, id = id, size = size_of(T), op = .Add}, mem.ptr_to_bytes(&value))
+		push_command(
+			cb,
+			{entity = e, id = id, size = size_of(T), op = .Add},
+			mem.ptr_to_bytes(&value),
+		)
 	}
 }
 
@@ -62,7 +66,11 @@ command_remove_raw :: proc(cb: ^Commands, e: Entity, id: Component_Id) {
 // command_teleport records a teleport. See teleport.
 command_teleport :: proc(cb: ^Commands, e: Entity, pose: Transform) {
 	pose := pose
-	push_command(cb, {entity = e, size = size_of(Transform), op = .Teleport}, mem.ptr_to_bytes(&pose))
+	push_command(
+		cb,
+		{entity = e, size = size_of(Transform), op = .Teleport},
+		mem.ptr_to_bytes(&pose),
+	)
 }
 
 // apply creates the reserved entities and applies the buffers in order. Run it only while no job uses the world.

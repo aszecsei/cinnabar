@@ -16,7 +16,11 @@ foreign kernel32 {
 }
 
 @(private)
-_fiber_create :: proc(reserve, commit: uint, start: proc "system" (param: rawptr), param: rawptr) -> rawptr {
+_fiber_create :: proc(
+	reserve, commit: uint,
+	start: proc "system" (param: rawptr),
+	param: rawptr,
+) -> rawptr {
 	return CreateFiberEx(commit, reserve, FIBER_FLAG_FLOAT_SWITCH, start, param)
 }
 

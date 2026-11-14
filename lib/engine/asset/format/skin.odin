@@ -60,11 +60,14 @@ skin_view :: proc(data: []byte) -> (blob: ^Skin_Blob, ok: bool) {
 			return nil, false
 		}
 	}
-	if blob.joints.size != blob.joint_count * size_of(Skin_Joint) || blob.joints.offset % align_of(Skin_Joint) != 0 {
+	if blob.joints.size != blob.joint_count * size_of(Skin_Joint) ||
+	   blob.joints.offset % align_of(Skin_Joint) != 0 {
 		return nil, false
 	}
 	for j, i in skin_joints(data, blob) {
-		if j.parent < -1 || int(j.parent) >= i || u64(j.name.offset) + u64(j.name.size) > u64(len(data)) {
+		if j.parent < -1 ||
+		   int(j.parent) >= i ||
+		   u64(j.name.offset) + u64(j.name.size) > u64(len(data)) {
 			return nil, false
 		}
 	}
@@ -114,7 +117,13 @@ skin_write :: proc(contents: Skin_Contents, allocator := context.allocator) -> [
 		mem.copy(&buffer[joints.offset + u32(i * size_of(Skin_Joint))], &record, size_of(record))
 	}
 	blob := Skin_Blob {
-		header = {magic = BLOB_MAGIC, kind = .Skin, layout = skin_layout(), key = contents.key, guid = contents.guid},
+		header = {
+			magic = BLOB_MAGIC,
+			kind = .Skin,
+			layout = skin_layout(),
+			key = contents.key,
+			guid = contents.guid,
+		},
 		joint_count = u32(len(contents.joints)),
 		joints = joints,
 		name = name,

@@ -129,46 +129,46 @@ Binding :: struct {
 
 // Document is a Ui_Document's document, in a slot of the state, while its entity has one.
 Document :: struct {
-	used:         bool,
-	entity:       ecs.Entity,
-	guid:         format.Guid,
-	handle:       asset.Handle,
+	used:        bool,
+	entity:      ecs.Entity,
+	guid:        format.Guid,
+	handle:      asset.Handle,
 	// Whether nodes are built from the blob, from which version, and a count of rebuilds, which a node index is only
 	// good within.
-	built:        bool,
-	version:      u32,
-	generation:   u32,
-	retry_at:     f64,
-	order:        i32,
-	visible:      bool,
+	built:       bool,
+	version:     u32,
+	generation:  u32,
+	retry_at:    f64,
+	order:       i32,
+	visible:     bool,
 	// Whether the entity had its Ui_Document this frame.
-	seen:         bool,
+	seen:        bool,
 	// The document's blob, copied, which props' strings point into: the asset runtime frees its own when it swaps it.
-	data:         []byte,
-	nodes:        [dynamic]Node,
-	arena:        [dynamic]u8,
-	props:        [dynamic]Prop,
-	styles:       [dynamic]Style_Def,
-	style_refs:   [dynamic]u32,
+	data:        []byte,
+	nodes:       [dynamic]Node,
+	arena:       [dynamic]u8,
+	props:       [dynamic]Prop,
+	styles:      [dynamic]Style_Def,
+	style_refs:  [dynamic]u32,
 	// Node indices by id hash.
-	ids:          map[u64]u32,
-	overrides:    [dynamic]Override,
-	structure:    [dynamic]Structure_Op,
-	bindings:     [dynamic]Binding,
+	ids:         map[u64]u32,
+	overrides:   [dynamic]Override,
+	structure:   [dynamic]Structure_Op,
+	bindings:    [dynamic]Binding,
 	// The next number of a template's copy, which no copy has had.
-	next_clone:   u32,
+	next_clone:  u32,
 	// The text of the last layout, which input reads: glyphs and lines, in the nodes' ranges.
-	glyphs:       [dynamic]Glyph,
-	lines:        [dynamic]Line,
+	glyphs:      [dynamic]Glyph,
+	lines:       [dynamic]Line,
 	// Ids that a script named that no node has, which it warned of once.
-	warned_ids:   map[u64]bool,
+	warned_ids:  map[u64]bool,
 	// The states that the editor's preview shows on the nodes of a blob element, by its index there, in place of the
 	// player's (see set_forced_states).
-	forced_node:  u32,
-	forced:       bit_set[format.Ui_State],
+	forced_node: u32,
+	forced:      bit_set[format.Ui_State],
 	// The styles named scroll_track and scroll_thumb, which scroll bars take, or UI_NONE.
-	track_style:  u32,
-	thumb_style:  u32,
+	track_style: u32,
+	thumb_style: u32,
 }
 
 // Font_Slot is a font that text uses: its blob, and kb_text_shape's font placed from it, which a code reload drops,
@@ -206,7 +206,12 @@ State :: struct {
 }
 
 // init takes the assets that documents and fonts load from, and the residency that their textures are in.
-init :: proc(s: ^State, platform: ^core.Platform_API, assets: ^asset.Assets, residency: ^render.Residency = nil) {
+init :: proc(
+	s: ^State,
+	platform: ^core.Platform_API,
+	assets: ^asset.Assets,
+	residency: ^render.Residency = nil,
+) {
 	s^ = {
 		platform     = platform,
 		allocator    = platform.heap_allocator,
@@ -380,7 +385,11 @@ sync :: proc(s: ^State, w: ^ecs.World) {
 				}
 				continue
 			}
-			d^ = {used = true, entity = e, guid = c.document}
+			d^ = {
+				used   = true,
+				entity = e,
+				guid   = c.document,
+			}
 			init_document(s, d)
 		}
 		d.seen = true
@@ -489,7 +498,10 @@ rebuild :: proc(s: ^State, d: ^Document) {
 		return r
 	}
 	for st in format.ui_styles(data, blob) {
-		append(&d.styles, Style_Def{add_props(d, data, format.ui_range(blob_props, st.props)), st.variants})
+		append(
+			&d.styles,
+			Style_Def{add_props(d, data, format.ui_range(blob_props, st.props)), st.variants},
+		)
 	}
 	nodes := format.ui_nodes(data, blob)
 	refs := format.ui_style_refs(data, blob)
@@ -506,7 +518,16 @@ rebuild :: proc(s: ^State, d: ^Document) {
 		}
 		style_range := Range{u32(len(d.style_refs)), n.styles.count}
 		append(&d.style_refs, ..format.ui_range(refs, n.styles))
-		built[i] = add_node(d, n.element, parent, format.blob_string(data, n.id), add_props(d, data, format.ui_range(blob_props, n.props)), style_range, {}, u32(i))
+		built[i] = add_node(
+			d,
+			n.element,
+			parent,
+			format.blob_string(data, n.id),
+			add_props(d, data, format.ui_range(blob_props, n.props)),
+			style_range,
+			{},
+			u32(i),
+		)
 	}
 	for op in d.structure {
 		switch op.kind {
@@ -528,7 +549,15 @@ rebuild :: proc(s: ^State, d: ^Document) {
 
 // add_node appends a node as its parent's last child, and gives its index.
 @(private)
-add_node :: proc(d: ^Document, element: format.Ui_Element, parent: u32, id: string, props, styles: Range, flags: Node_Flags, source: u32) -> u32 {
+add_node :: proc(
+	d: ^Document,
+	element: format.Ui_Element,
+	parent: u32,
+	id: string,
+	props, styles: Range,
+	flags: Node_Flags,
+	source: u32,
+) -> u32 {
 	index := u32(len(d.nodes))
 	n := Node {
 		element      = element,
@@ -622,7 +651,8 @@ instantiate :: proc(s: ^State, d: ^Document, op: Structure_Op) -> bool {
 		id := op.id
 		if i != first {
 			inner := format.blob_string(data, n.id)
-			id = inner != "" ? strings.concatenate({op.id, ".", inner}, s.platform.frame_allocator) : ""
+			id =
+				inner != "" ? strings.concatenate({op.id, ".", inner}, s.platform.frame_allocator) : ""
 		}
 		props := Range{u32(len(d.props)), 0}
 		for p in format.ui_range(blob_props, n.props) {
@@ -669,7 +699,9 @@ font_of :: proc(s: ^State, guid: format.Guid) -> (info: Font_Info, ok: bool) {
 			return
 		}
 		slot = free_slot
-		slot^ = {guid = guid}
+		slot^ = {
+			guid = guid,
+		}
 	}
 	if !slot.loaded {
 		if s.platform.time_seconds() < slot.retry_at {

@@ -78,7 +78,16 @@ index_keep_sources :: proc(index: ^Index, pass: Pass) {
 	by_file := make(map[string][dynamic]Problem, context.temp_allocator)
 	for p in pass.problems.list {
 		list := by_file[p.file] or_else make([dynamic]Problem, context.temp_allocator)
-		append(&list, Problem{strings.clone(p.file, allocator), p.line, p.column, p.error, strings.clone(p.text, allocator)})
+		append(
+			&list,
+			Problem {
+				strings.clone(p.file, allocator),
+				p.line,
+				p.column,
+				p.error,
+				strings.clone(p.text, allocator),
+			},
+		)
 		by_file[p.file] = list
 	}
 	clone_guids :: proc(guids: []format.Guid, allocator := context.allocator) -> []format.Guid {
@@ -146,12 +155,19 @@ index_write :: proc(index: ^Index, options: Cook_Options) -> bool {
 // another header, as when the cooker or the options changed, loads nothing, so the pass after looks at everything.
 index_load :: proc(index: ^Index, options: Cook_Options) -> bool {
 	data, err := os.read_entire_file(saved_path(options), context.temp_allocator)
-	if err != nil || len(data) < wire.HEADER_SIZE || int(endian.unchecked_get_u32le(data[0:])) != len(data) - wire.HEADER_SIZE {
+	if err != nil ||
+	   len(data) < wire.HEADER_SIZE ||
+	   int(endian.unchecked_get_u32le(data[0:])) != len(data) - wire.HEADER_SIZE {
 		return false
 	}
 	_ = virtual.arena_init_growing(&index.arena)
 	allocator := virtual.arena_allocator(&index.arena)
-	message, decoded := wire.decode_message(Saved_Message, endian.unchecked_get_u16le(data[4:]), data[wire.HEADER_SIZE:], allocator)
+	message, decoded := wire.decode_message(
+		Saved_Message,
+		endian.unchecked_get_u16le(data[4:]),
+		data[wire.HEADER_SIZE:],
+		allocator,
+	)
 	saved, is_saved := message.(Saved_Index)
 	generation := read_generation(config_dir(options))
 	if !decoded || !is_saved || saved.header != saved_header(options, generation) {
@@ -189,7 +205,16 @@ saved_path :: proc(options: Cook_Options) -> string {
 @(private = "file")
 saved_header :: proc(options: Cook_Options, generation: u64) -> u64 {
 	b := strings.builder_make(context.temp_allocator)
-	fmt.sbprintf(&b, "%d\x00%016x\x00%v\x00%s\x00%s\x00%s\x00", SAVED_INDEX_VERSION, wire.protocol_version(Saved_Message), options.config, options.definitions, options.dxc, options.dxc_version)
+	fmt.sbprintf(
+		&b,
+		"%d\x00%016x\x00%v\x00%s\x00%s\x00%s\x00",
+		SAVED_INDEX_VERSION,
+		wire.protocol_version(Saved_Message),
+		options.config,
+		options.definitions,
+		options.dxc,
+		options.dxc_version,
+	)
 	for r in options.roots {
 		fmt.sbprintf(&b, "root %s=%s\x00", r.name, r.dir)
 	}
@@ -198,7 +223,13 @@ saved_header :: proc(options: Cook_Options, generation: u64) -> u64 {
 	}
 	if exe, err := os.get_executable_path(context.temp_allocator); err == nil {
 		if info, stat_err := os.stat(exe, context.temp_allocator); stat_err == nil {
-			fmt.sbprintf(&b, "cooker %s %d %d\x00", exe, info.size, time.to_unix_nanoseconds(info.modification_time))
+			fmt.sbprintf(
+				&b,
+				"cooker %s %d %d\x00",
+				exe,
+				info.size,
+				time.to_unix_nanoseconds(info.modification_time),
+			)
 		}
 	}
 	fmt.sbprintf(&b, "generation %d", generation)

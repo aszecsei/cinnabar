@@ -82,7 +82,9 @@ a_path_crosses_tiles :: proc(t: ^testing.T) {
 @(test)
 a_path_crosses_a_seam_only_where_its_link_reaches :: proc(t: ^testing.T) {
 	// One row of 8 cells in two tiles, whose seam at x = 4 links only z = 0 to 0.5.
-	s := frame_of(grid_blob({cells_x = 8, cells_z = 1, tile_cells = 4, half_seams = true}, "Human", 0))
+	s := frame_of(
+		grid_blob({cells_x = 8, cells_z = 1, tile_cells = 4, half_seams = true}, "Human", 0),
+	)
 	path := find_path(s, at(0.5, 0, 0.9), at(7.5, 0, 0.9), 0)
 	testing.expect_value(t, path.status, Path_Status.Found)
 	dips := false
@@ -141,8 +143,16 @@ a_node_budget_gives_a_partial_path :: proc(t: ^testing.T) {
 @(test)
 a_start_off_every_mesh_fails :: proc(t: ^testing.T) {
 	s := frame_of(standard_grid())
-	testing.expect_value(t, find_path(s, at(-5, 0, -5), at(2.5, 0, 2.5), 0).status, Path_Status.Failed)
-	testing.expect_value(t, find_path(s, at(2.5, 0, 2.5), at(3.5, 0, 2.5), 7).status, Path_Status.Failed)
+	testing.expect_value(
+		t,
+		find_path(s, at(-5, 0, -5), at(2.5, 0, 2.5), 0).status,
+		Path_Status.Failed,
+	)
+	testing.expect_value(
+		t,
+		find_path(s, at(2.5, 0, 2.5), at(3.5, 0, 2.5), 7).status,
+		Path_Status.Failed,
+	)
 }
 
 @(test)
@@ -208,7 +218,12 @@ random_points_are_reachable_and_near_the_circle :: proc(t: ^testing.T) {
 		testing.expect_value(t, b[i], l)
 		p := meters(l.position)
 		testing.expect(t, !is_island(m, l.polygon), "a point on the island")
-		testing.expectf(t, linalg.length(p.xz - {7.5, 2.5}) <= 3 + math.SQRT_TWO, "%v is far from the circle", p)
+		testing.expectf(
+			t,
+			linalg.length(p.xz - {7.5, 2.5}) <= 3 + math.SQRT_TWO,
+			"%v is far from the circle",
+			p,
+		)
 		on, found := nearest(s, l.position, {0.01, 0.5, 0.01}, 0)
 		testing.expect(t, found && on.polygon == l.polygon)
 		spread = {min(spread[0], p.z), max(spread[1], p.z)}
@@ -252,7 +267,9 @@ a_volume_draws_its_edges_links_and_tiles :: proc(t: ^testing.T) {
 	}
 	// One row of 8 cells in two tiles: 3 edges between cells in each tile, 2 walls on each cell's long sides and one at
 	// each end, the 2 sides of the seam as walls with a link over each, and 4 sides of each tile.
-	s := frame_of(grid_blob({cells_x = 8, cells_z = 1, tile_cells = 4, half_seams = true}, "Human", 0))
+	s := frame_of(
+		grid_blob({cells_x = 8, cells_z = 1, tile_cells = 4, half_seams = true}, "Human", 0),
+	)
 	d: debug.Draw
 	debug.init(&d, context.allocator)
 	defer debug.destroy(&d)

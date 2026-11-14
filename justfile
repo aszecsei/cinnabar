@@ -670,8 +670,12 @@ sample-textures:
 sample-weather:
     python -I tools/weather_map.py .
 
+# odinfmt takes one path a call, so each folder is its own line.
 fmt:
-    odinfmt lib src samples -w
+    odinfmt lib -w
+    odinfmt src -w
+    odinfmt samples -w
+    odinfmt tools -w
 
 # =================================
 # Intel sample

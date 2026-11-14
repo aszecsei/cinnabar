@@ -128,7 +128,6 @@ Mixer :: struct {
 	voices_refused: u32,
 	mix_thread:     ^thread.Thread,
 	stream_thread:  ^thread.Thread,
-
 	commands:       [COMMAND_CAPACITY]Command,
 	command_read:   Index,
 	command_write:  Index,
@@ -141,7 +140,6 @@ Mixer :: struct {
 	stream_starved: u64,
 	stream_failed:  u32,
 	faults:         u32,
-
 	streams:        [MAX_STREAMS]Stream,
 
 	// The mix thread's.
@@ -187,7 +185,15 @@ api := audio.Audio_API {
 	info = proc "c" () -> audio.Backend_Info {
 		return {
 			api_version = audio.API_VERSION,
-			features = {.Spatial, .Streaming, .Buses, .Effects, .Stream_ADPCM, .Stream_Vorbis, .Stream_Opus},
+			features = {
+				.Spatial,
+				.Streaming,
+				.Buses,
+				.Effects,
+				.Stream_ADPCM,
+				.Stream_Vorbis,
+				.Stream_Opus,
+			},
 			layout = audio.layout_signature(),
 			name = "mixer",
 			version = "1",
@@ -284,7 +290,12 @@ push_wait :: proc(m: ^Mixer, command: Command) {
 		}
 		sleep_ms(1)
 	}
-	report(m, .Error, "audio: mixer: the command queue stayed full, so a %v was lost", command.kind)
+	report(
+		m,
+		.Error,
+		"audio: mixer: the command queue stayed full, so a %v was lost",
+		command.kind,
+	)
 }
 
 // update is the game thread's work once a frame: it frees what the mix thread has finished with.
@@ -302,12 +313,22 @@ update :: proc(m: ^Mixer) {
 	}
 	failed := sync.atomic_load_explicit(&m.stream_failed, .Relaxed)
 	if failed != m.failed_seen {
-		report(m, .Warning, "audio: mixer: %d streams could not read their files", failed - m.failed_seen)
+		report(
+			m,
+			.Warning,
+			"audio: mixer: %d streams could not read their files",
+			failed - m.failed_seen,
+		)
 		m.failed_seen = failed
 	}
 	faults := sync.atomic_load_explicit(&m.faults, .Relaxed)
 	if faults != m.faults_seen {
-		report(m, .Error, "audio: mixer: %d blocks of the mix were out of range, so they went silent and the effects were cleared", faults - m.faults_seen)
+		report(
+			m,
+			.Error,
+			"audio: mixer: %d blocks of the mix were out of range, so they went silent and the effects were cleared",
+			faults - m.faults_seen,
+		)
 		m.faults_seen = faults
 	}
 }
@@ -324,7 +345,12 @@ free_sound :: proc(m: ^Mixer, data: ^Sound_Data) {
 }
 
 sound_create :: proc(m: ^Mixer, desc: ^audio.Sound_Desc) -> audio.Sound {
-	if desc == nil || (desc.channels != 1 && desc.channels != 2) || desc.frames == 0 || (desc.samples == nil && desc.path == nil) || desc.format > .Opus || (desc.format != .PCM && (desc.samples != nil || desc.size == 0)) {
+	if desc == nil ||
+	   (desc.channels != 1 && desc.channels != 2) ||
+	   desc.frames == 0 ||
+	   (desc.samples == nil && desc.path == nil) ||
+	   desc.format > .Opus ||
+	   (desc.format != .PCM && (desc.samples != nil || desc.size == 0)) {
 		report(m, .Error, "audio: mixer: sound_create: invalid description")
 		return {}
 	}
@@ -439,7 +465,13 @@ voice_play :: proc(m: ^Mixer, desc: ^audio.Voice_Desc) -> audio.Voice {
 		m.voices_refused += 1
 		if !m.pool_warned {
 			m.pool_warned = true
-			report(m, .Warning, "audio: mixer: out of voices or streams (%d and %d), so a sound does not play", MAX_VOICES, MAX_STREAMS)
+			report(
+				m,
+				.Warning,
+				"audio: mixer: out of voices or streams (%d and %d), so a sound does not play",
+				MAX_VOICES,
+				MAX_STREAMS,
+			)
 		}
 		return {}
 	}
@@ -453,7 +485,19 @@ voice_play :: proc(m: ^Mixer, desc: ^audio.Voice_Desc) -> audio.Voice {
 	sync.atomic_store_explicit(&slot.finished, false, .Relaxed)
 	sync.atomic_add_explicit(&sound.data.users, 1, .Relaxed)
 	bus := desc.bus if desc.bus != {} else audio.MASTER_BUS
-	push_wait(m, {kind = .Play, voice = u32(index), generation = slot.generation, bus = bus.index, flag = desc.loop, params = desc.params, sound = sound.data, stream = stream})
+	push_wait(
+		m,
+		{
+			kind = .Play,
+			voice = u32(index),
+			generation = slot.generation,
+			bus = bus.index,
+			flag = desc.loop,
+			params = desc.params,
+			sound = sound.data,
+			stream = stream,
+		},
+	)
 	return {u32(index), slot.generation}
 }
 
@@ -648,10 +692,22 @@ shutdown :: proc(m: ^Mixer) {
 @(private)
 start_threads :: proc(m: ^Mixer, streaming: bool) {
 	if m.mix_thread == nil {
-		m.mix_thread = thread.create_and_start_with_data(m, mix_thread_proc, runtime.default_context(), .High, name = "audio mixer")
+		m.mix_thread = thread.create_and_start_with_data(
+			m,
+			mix_thread_proc,
+			runtime.default_context(),
+			.High,
+			name = "audio mixer",
+		)
 	}
 	if streaming && m.stream_thread == nil {
-		m.stream_thread = thread.create_and_start_with_data(m, stream_thread_proc, runtime.default_context(), .Normal, name = "audio streams")
+		m.stream_thread = thread.create_and_start_with_data(
+			m,
+			stream_thread_proc,
+			runtime.default_context(),
+			.Normal,
+			name = "audio streams",
+		)
 	}
 }
 

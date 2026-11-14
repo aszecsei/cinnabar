@@ -29,10 +29,24 @@ import "cinnabar:engine/random"
 Module :: struct {
 	think:     proc(t: ^Think_Context),
 	check:     proc(decision: Decision, board: Board) -> bool,
-	scores:    proc(decision: Decision, board: Board, state: []byte, allocator: runtime.Allocator) -> []Option_Score,
+	scores:    proc(
+		decision: Decision,
+		board: Board,
+		state: []byte,
+		allocator: runtime.Allocator,
+	) -> []Option_Score,
 	searching: proc(state: []byte) -> bool,
-	plan:      proc(decision: Decision, board: Board, state: []byte, allocator: runtime.Allocator) -> Plan_View,
-	nodes:     proc(decision: Decision, state: []byte, allocator: runtime.Allocator) -> []Node_View,
+	plan:      proc(
+		decision: Decision,
+		board: Board,
+		state: []byte,
+		allocator: runtime.Allocator,
+	) -> Plan_View,
+	nodes:     proc(
+		decision: Decision,
+		state: []byte,
+		allocator: runtime.Allocator,
+	) -> []Node_View,
 }
 
 // Option_Score is an option that a module scored in the agent's last think: its decision node's ID, its action's name,
@@ -64,29 +78,29 @@ Action_View :: struct {
 
 // Think_Context is what a module gets for one agent's think.
 Think_Context :: struct {
-	world:      ^ecs.World,
-	entity:     ecs.Entity,
-	decision:   Decision,
-	board:      Board,
+	world:       ^ecs.World,
+	entity:      ecs.Entity,
+	decision:    Decision,
+	board:       Board,
 	// The agent's values, which the module reads and writes only through writes.
-	values:     []byte,
+	values:      []byte,
 	// The agent's module state, decision.blob.state_size bytes, zero when the agent starts.
-	state:      []byte,
-	action:     Action_View,
+	state:       []byte,
+	action:      Action_View,
 	// Seconds since the agent last thought, 0 at its first think.
-	dt:         f32,
+	dt:          f32,
 	// How many times the agent thought before.
-	thinks:     u32,
-	agent:      Agent_Handle,
+	thinks:      u32,
+	agent:       Agent_Handle,
 	// The job's commands.
-	out:        ^[dynamic]Command,
+	out:         ^[dynamic]Command,
 	// The agent's own generator, which only its thinks draw from, so a run replays the same (see set_seed).
-	random:     ^random.State,
+	random:      ^random.State,
 	// The tick that each key last changed in, by slot.
-	changed:    []u64,
+	changed:     []u64,
 	// What the agent perceives, or nil for an agent that has perceived nothing, and the project's tags.
-	perception: ^Perception_Memory,
-	tags:       ^Tag_Names,
+	perception:  ^Perception_Memory,
+	tags:        ^Tag_Names,
 	// The search nodes that the agent may expand in this think: its share of its technique's plan budget, if its module
 	// state held a search when the think began, and 0 otherwise.
 	plan_budget: int,
@@ -252,12 +266,21 @@ condition_holds :: proc(t: ^Think_Context, index: u32) -> bool {
 		return true
 	}
 	condition := format.decision_conditions(t.decision.data, t.decision.blob)[index]
-	ops := format.decision_ops(t.decision.data, t.decision.blob)[condition.first_op:][:condition.op_count]
+	ops := format.decision_ops(
+		t.decision.data,
+		t.decision.blob,
+	)[condition.first_op:][:condition.op_count]
 	constants := format.decision_constants(t.decision.data, t.decision.blob)
 	keys := format.blackboard_keys(t.board.data, t.board.blob)
 	stack: [format.MAX_DECISION_STACK]Stack_Value
 	top := 0
-	push_bytes :: proc(t: ^Think_Context, type: format.Blackboard_Type, bytes: []byte) -> (v: Stack_Value) {
+	push_bytes :: proc(
+		t: ^Think_Context,
+		type: format.Blackboard_Type,
+		bytes: []byte,
+	) -> (
+		v: Stack_Value,
+	) {
 		switch type {
 		case .Float:
 			v.number = f64((^f32)(raw_data(bytes))^)
@@ -299,7 +322,9 @@ condition_holds :: proc(t: ^Think_Context, index: u32) -> bool {
 			if a.place && b.place {
 				meters = place_distance(a.position, b.position)
 			}
-			stack[top - 1] = {number = meters}
+			stack[top - 1] = {
+				number = meters,
+			}
 		case .Less, .Less_Equal, .Greater, .Greater_Equal, .Equal, .Not_Equal:
 			a, b := stack[top - 2], stack[top - 1]
 			top -= 1
@@ -323,15 +348,23 @@ condition_holds :: proc(t: ^Think_Context, index: u32) -> bool {
 			} else {
 				result = (a.bits == b.bits) == (o.code == .Equal)
 			}
-			stack[top - 1] = {bits = u64(result)}
+			stack[top - 1] = {
+				bits = u64(result),
+			}
 		case .And:
 			top -= 1
-			stack[top - 1] = {bits = u64(stack[top - 1].bits != 0 && stack[top].bits != 0)}
+			stack[top - 1] = {
+				bits = u64(stack[top - 1].bits != 0 && stack[top].bits != 0),
+			}
 		case .Or:
 			top -= 1
-			stack[top - 1] = {bits = u64(stack[top - 1].bits != 0 || stack[top].bits != 0)}
+			stack[top - 1] = {
+				bits = u64(stack[top - 1].bits != 0 || stack[top].bits != 0),
+			}
 		case .Not:
-			stack[top - 1] = {bits = u64(stack[top - 1].bits == 0)}
+			stack[top - 1] = {
+				bits = u64(stack[top - 1].bits == 0),
+			}
 		}
 	}
 	return top == 1 && stack[0].bits != 0
@@ -345,13 +378,13 @@ mem_bytes :: proc(e: ^ecs.Entity) -> []byte {
 // Think_Job is a batch of agents that one job thinks for.
 @(private)
 Think_Job :: struct {
-	s:       ^State,
-	world:   ^ecs.World,
-	agents:  []u32,
+	s:      ^State,
+	world:  ^ecs.World,
+	agents: []u32,
 	// Each agent's share of its technique's plan budget.
-	shares:  []int,
-	out:     [dynamic]Command,
-	ctx:     runtime.Context,
+	shares: []int,
+	out:    [dynamic]Command,
+	ctx:    runtime.Context,
 }
 
 @(private)
@@ -367,21 +400,21 @@ think_job :: proc(data: rawptr) {
 		board, _ := board_of(s, slot.blackboard)
 		decision, _ := decision_of(s, slot.decision)
 		t := Think_Context {
-			world      = w,
-			entity     = slot.entity,
-			decision   = decision,
-			board      = board,
-			values     = ready.values,
-			state      = ready.state,
-			action     = action_view(ready.action),
-			dt         = 0 if ready.thinks == 0 else f32(now - ready.last_think) / f32(w.clock.tick_rate),
-			thinks     = ready.thinks,
-			agent      = {index, s.agents.generations[index]},
-			out        = &j.out,
-			random     = &ready.random,
-			changed    = ready.changed,
-			perception = ready.perception,
-			tags       = &s.tags,
+			world       = w,
+			entity      = slot.entity,
+			decision    = decision,
+			board       = board,
+			values      = ready.values,
+			state       = ready.state,
+			action      = action_view(ready.action),
+			dt          = 0 if ready.thinks == 0 else f32(now - ready.last_think) / f32(w.clock.tick_rate),
+			thinks      = ready.thinks,
+			agent       = {index, s.agents.generations[index]},
+			out         = &j.out,
+			random      = &ready.random,
+			changed     = ready.changed,
+			perception  = ready.perception,
+			tags        = &s.tags,
 			plan_budget = j.shares[k],
 		}
 		s.modules[decision.blob.technique].think(&t)
@@ -474,12 +507,12 @@ think :: proc(s: ^State, w: ^ecs.World, ctx: ^ecs.System_Context) {
 	for b in 0 ..< batches {
 		first, end := b * THINK_BATCH, min((b + 1) * THINK_BATCH, len(agents))
 		work[b] = {
-			s       = s,
-			world   = w,
-			agents  = agents[first:end],
-			shares  = shares[first:end],
-			out     = make([dynamic]Command, w.platform.frame_allocator),
-			ctx     = context,
+			s      = s,
+			world  = w,
+			agents = agents[first:end],
+			shares = shares[first:end],
+			out    = make([dynamic]Command, w.platform.frame_allocator),
+			ctx    = context,
 		}
 		list[b] = {think_job, &work[b]}
 	}
@@ -497,7 +530,8 @@ think :: proc(s: ^State, w: ^ecs.World, ctx: ^ecs.System_Context) {
 		ready := &slot.phase.(Agent_Ready)
 		ready.last_think = now
 		ready.thinks += 1
-		ready.next_think = now + (1 if searching(s, slot, ready) else interval_ticks(w, slot.entity))
+		ready.next_think =
+			now + (1 if searching(s, slot, ready) else interval_ticks(w, slot.entity))
 	}
 }
 

@@ -72,23 +72,42 @@ read_goap :: proc(p: ^Decision_Parser, text: ^Decision_Text) -> (state_size: u32
 			nodes_line = s.line
 			value, ok := strconv.parse_int(s.value)
 			if !ok || value < 1 || value > format.MAX_GOAP_NODES {
-				decision_problem(p, s.line, "max_nodes is a count from 1 to %d", format.MAX_GOAP_NODES)
+				decision_problem(
+					p,
+					s.line,
+					"max_nodes is a count from 1 to %d",
+					format.MAX_GOAP_NODES,
+				)
 			} else {
 				contents.max_nodes = u32(value)
 			}
 		case "max_plan":
 			value, ok := strconv.parse_int(s.value)
 			if !ok || value < 1 || value > format.MAX_PLAN_LENGTH {
-				decision_problem(p, s.line, "max_plan is a count from 1 to %d", format.MAX_PLAN_LENGTH)
+				decision_problem(
+					p,
+					s.line,
+					"max_plan is a count from 1 to %d",
+					format.MAX_PLAN_LENGTH,
+				)
 			} else {
 				contents.max_plan = u32(value)
 			}
 		case:
-			decision_problem(p, s.line, "a GOAP decision has no setting %s: its settings are keys, max_nodes and max_plan", s.key)
+			decision_problem(
+				p,
+				s.line,
+				"a GOAP decision has no setting %s: its settings are keys, max_nodes and max_plan",
+				s.key,
+			)
 		}
 	}
 	if keys_line == 0 {
-		decision_problem(p, 1, "a GOAP decision names its planning keys: `keys = <key>, <key>, ...`")
+		decision_problem(
+			p,
+			1,
+			"a GOAP decision names its planning keys: `keys = <key>, <key>, ...`",
+		)
 	}
 	nodes := make([]Goap_Text_Node, len(text.nodes), context.temp_allocator)
 	by_id := make(map[int]int, len(text.nodes), context.temp_allocator)
@@ -131,7 +150,12 @@ read_goap :: proc(p: ^Decision_Parser, text: ^Decision_Text) -> (state_size: u32
 			case:
 				for other in ids[:at] {
 					if other == id {
-						decision_problem(p, n.children_line, "node %d is a consideration of this goal twice", id)
+						decision_problem(
+							p,
+							n.children_line,
+							"node %d is a consideration of this goal twice",
+							id,
+						)
 					}
 				}
 				nodes[child].listed = true
@@ -141,7 +165,12 @@ read_goap :: proc(p: ^Decision_Parser, text: ^Decision_Text) -> (state_size: u32
 	}
 	for n, i in nodes {
 		if n.kind == .Consideration && !n.listed {
-			decision_problem(p, text.nodes[i].line, "no goal lists the consideration %d", text.nodes[i].id)
+			decision_problem(
+				p,
+				text.nodes[i].line,
+				"no goal lists the consideration %d",
+				text.nodes[i].id,
+			)
 		}
 	}
 	if len(p.found) > problems {
@@ -197,7 +226,13 @@ read_goap :: proc(p: ^Decision_Parser, text: ^Decision_Text) -> (state_size: u32
 	contents.considerations = considerations[:]
 	contents.links = links[:]
 	contents.points = points[:]
-	layout := format.goap_state(u32(len(r.planning)), u32(len(action_records)), u32(len(goal_records)), contents.max_nodes, contents.max_plan)
+	layout := format.goap_state(
+		u32(len(r.planning)),
+		u32(len(action_records)),
+		u32(len(goal_records)),
+		contents.max_nodes,
+		contents.max_plan,
+	)
 	if layout.size > format.MAX_DECISION_STATE {
 		decision_problem(
 			p,
@@ -221,14 +256,25 @@ read_goap_node :: proc(r: ^Plan_Reader, text: ^Decision_Text_Node, n: ^Goap_Text
 	switch text.kind {
 	case "goal":
 		n.kind = .Goal
-		n.goal = {node = u32(text.index), priority = 1}
+		n.goal = {
+			node     = u32(text.index),
+			priority = 1,
+		}
 	case "action":
 		n.kind = .Action
-		n.action = {node = u32(text.index), cost = {value = 1}}
+		n.action = {
+			node = u32(text.index),
+			cost = {value = 1},
+		}
 	case "consideration":
 		n.kind = .Consideration
 	case:
-		decision_problem(p, text.line, "%s is not a node of a GOAP decision: a node is goal, action or consideration", text.kind)
+		decision_problem(
+			p,
+			text.line,
+			"%s is not a node of a GOAP decision: a node is goal, action or consideration",
+			text.kind,
+		)
 		return
 	}
 	kind_fields := [Goap_Kind][]string {
@@ -244,12 +290,22 @@ read_goap_node :: proc(r: ^Plan_Reader, text: ^Decision_Text_Node, n: ^Goap_Text
 		.Consideration = "a consideration",
 	}
 	if n.kind != .Action && text.set_line != 0 {
-		decision_problem(p, text.set_line, "only an action writes keys, and this is %s", articles[n.kind])
+		decision_problem(
+			p,
+			text.set_line,
+			"only an action writes keys, and this is %s",
+			articles[n.kind],
+		)
 	}
 	if n.kind == .Action {
 		for w in p.writes[text.first_write:][:text.write_count] {
 			if slice.contains(r.planning[:], w.key) {
-				decision_problem(p, text.set_line, "%s is a planning key, which an action changes by its effects and not by set", p.keys[w.key].name)
+				decision_problem(
+					p,
+					text.set_line,
+					"%s is a planning key, which an action changes by its effects and not by set",
+					p.keys[w.key].name,
+				)
 			}
 		}
 	}
@@ -288,14 +344,22 @@ read_goap_node :: proc(r: ^Plan_Reader, text: ^Decision_Text_Node, n: ^Goap_Text
 	switch n.kind {
 	case .Goal:
 		if !has(text, "desired") {
-			decision_problem(p, text.line, "a goal has a desired state: `desired = <test> and <test> ...`")
+			decision_problem(
+				p,
+				text.line,
+				"a goal has a desired state: `desired = <test> and <test> ...`",
+			)
 		}
 	case .Action:
 		if !has(text, "action") {
 			decision_problem(p, text.line, "an action has an action")
 		}
 		if !has(text, "effects") {
-			decision_problem(p, text.line, "an action has effects: `effects = <key> = <value>, <key> += <n>, ...`")
+			decision_problem(
+				p,
+				text.line,
+				"an action has effects: `effects = <key> = <value>, <key> += <n>, ...`",
+			)
 		}
 	case .Consideration:
 		n.consideration, n.points = read_consideration(p, text, own_fields[:])
@@ -321,7 +385,11 @@ read_goal_field :: proc(r: ^Plan_Reader, n: ^Goap_Text_Node, f: Decision_Field) 
 		for part in strings.split(f.value, ",", context.temp_allocator) {
 			id, ok := strconv.parse_int(strings.trim_space(part))
 			if !ok {
-				decision_problem(p, f.line, "considerations are node IDs: `considerations = <id>, <id>, ...`")
+				decision_problem(
+					p,
+					f.line,
+					"considerations are node IDs: `considerations = <id>, <id>, ...`",
+				)
 				clear(&n.children)
 				return
 			}
@@ -346,7 +414,9 @@ read_action_field :: proc(r: ^Plan_Reader, n: ^Goap_Text_Node, f: Decision_Field
 				decision_problem(p, f.line, "cost is a number above 0, or a float or int key")
 				return
 			}
-			n.action.cost = {value = value}
+			n.action.cost = {
+				value = value,
+			}
 			return
 		}
 		slot, type, found := plan_board_key(p, f.value)
@@ -356,9 +426,18 @@ read_action_field :: proc(r: ^Plan_Reader, n: ^Goap_Text_Node, f: Decision_Field
 		case !found:
 			decision_problem(p, f.line, "the blackboard has no key named %s", f.value)
 		case type != .Float && type != .Int:
-			decision_problem(p, f.line, "%s is a %s, and cost is a float or an int key", f.value, type_name(type))
+			decision_problem(
+				p,
+				f.line,
+				"%s is a %s, and cost is a float or an int key",
+				f.value,
+				type_name(type),
+			)
 		case:
-			n.action.cost = {key = u32(slot), source = .Key}
+			n.action.cost = {
+				key    = u32(slot),
+				source = .Key,
+			}
 		}
 	case "action", "when", "position":
 	// The shared parts read action and when, and nothing reads position.

@@ -9,21 +9,46 @@ effect_blobs_round_trip :: proc(t: ^testing.T) {
 	smoke[.Size][63] = {0.5, 0, 0, 0}
 	emitters := []Effect_Emitter_Contents {
 		{
-			emitter = {capacity = 100, rate = 5, lifetime = {1, 2}, shape = .Cone, shape_size = {0.1, 0.3, 0}, texture = guid, flipbook = {4, 4}},
+			emitter = {
+				capacity = 100,
+				rate = 5,
+				lifetime = {1, 2},
+				shape = .Cone,
+				shape_size = {0.1, 0.3, 0},
+				texture = guid,
+				flipbook = {4, 4},
+			},
 			name = "smoke",
-			modules = {{kind = .Gravity, values = {0, -9.8, 0, 0}}, {kind = .Collide, values = {0.5, 0.1, 0, 0}}},
+			modules = {
+				{kind = .Gravity, values = {0, -9.8, 0, 0}},
+				{kind = .Collide, values = {0.5, 0.1, 0, 0}},
+			},
 			curves = smoke,
 		},
 		{emitter = {capacity = 7}, name = "sparks"},
 	}
-	data := aligned(effect_write({guid = guid, key = 42, emitters = emitters, source_path = "game/effects/smoke.effect"}, context.temp_allocator))
+	data := aligned(
+		effect_write(
+			{
+				guid = guid,
+				key = 42,
+				emitters = emitters,
+				source_path = "game/effects/smoke.effect",
+			},
+			context.temp_allocator,
+		),
+	)
 	blob, ok := effect_view(data)
 	testing.expect(t, ok)
 	if !ok {
 		return
 	}
 	testing.expect_value(t, blob.header.key, 42)
-	testing.expect_value(t, string(blob_bytes(data, blob.source_path)), "game/effects/smoke.effect")
+	testing.expect_value(
+		t,
+		string(blob_bytes(data, blob.source_path)),
+		"game/effects/smoke.effect",
+	)
 	read := effect_emitters(data, blob)
 	testing.expect_value(t, len(read), 2)
 	testing.expect_value(t, string(blob_bytes(data, read[0].name)), "smoke")
@@ -37,7 +62,11 @@ effect_blobs_round_trip :: proc(t: ^testing.T) {
 	// Each emitter has a row for each curve.
 	curves := effect_curves(data, blob)
 	testing.expect_value(t, len(curves), 2 * len(Effect_Curve))
-	testing.expect_value(t, curves[read[0].curves + u32(Effect_Curve.Size)][63], [4]f32{0.5, 0, 0, 0})
+	testing.expect_value(
+		t,
+		curves[read[0].curves + u32(Effect_Curve.Size)][63],
+		[4]f32{0.5, 0, 0, 0},
+	)
 	testing.expect_value(t, read[1].curves, u32(len(Effect_Curve)))
 
 	// A blob whose emitter claims more particles than an emitter holds is rejected.

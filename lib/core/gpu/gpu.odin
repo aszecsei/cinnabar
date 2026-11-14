@@ -328,7 +328,13 @@ is_srgb_format :: proc(format: Format) -> bool {
 // is_block_format is true for the block-compressed formats, which store 4x4 blocks of texels.
 is_block_format :: proc(format: Format) -> bool {
 	#partial switch format {
-	case .BC1_Unorm, .BC1_Unorm_Srgb, .BC4_Unorm, .BC5_Unorm, .BC6H_Ufloat, .BC7_Unorm, .BC7_Unorm_Srgb:
+	case .BC1_Unorm,
+	     .BC1_Unorm_Srgb,
+	     .BC4_Unorm,
+	     .BC5_Unorm,
+	     .BC6H_Ufloat,
+	     .BC7_Unorm,
+	     .BC7_Unorm_Srgb:
 		return true
 	}
 	return false
@@ -352,7 +358,16 @@ format_size :: proc(format: Format) -> int {
 		return 1
 	case .RG8_Unorm, .R16_Float:
 		return 2
-	case .RGBA8_Unorm, .RGBA8_Unorm_Srgb, .BGRA8_Unorm, .BGRA8_Unorm_Srgb, .RGB10A2_Unorm, .RG11B10_Float, .RG16_Float, .R32_Uint, .R32_Float, .D32_Float:
+	case .RGBA8_Unorm,
+	     .RGBA8_Unorm_Srgb,
+	     .BGRA8_Unorm,
+	     .BGRA8_Unorm_Srgb,
+	     .RGB10A2_Unorm,
+	     .RG11B10_Float,
+	     .RG16_Float,
+	     .R32_Uint,
+	     .R32_Float,
+	     .D32_Float:
 		return 4
 	case .RGBA16_Float, .RG32_Float, .D32_Float_S8_Uint, .BC1_Unorm, .BC1_Unorm_Srgb, .BC4_Unorm:
 		return 8
@@ -499,11 +514,34 @@ Access :: enum u8 {
 
 Accesses :: bit_set[Access;u16]
 
-WRITE_ACCESSES :: Accesses{.Render_Target, .Depth_Stencil_Write, .Unordered_Access, .Accel_Write, .Copy_Dest}
+WRITE_ACCESSES :: Accesses {
+	.Render_Target,
+	.Depth_Stencil_Write,
+	.Unordered_Access,
+	.Accel_Write,
+	.Copy_Dest,
+}
 
 // A compute queue runs no graphics work, so its barriers use only these.
-COMPUTE_QUEUE_SYNCS :: Syncs{.All, .Compute_Shading, .Execute_Indirect, .Build_Accel, .Ray_Tracing, .Copy, .Accel_Info, .Copy_Accel}
-COMPUTE_QUEUE_ACCESSES :: Accesses{.Shader_Resource, .Unordered_Access, .Indirect_Argument, .Accel_Read, .Accel_Write, .Copy_Source, .Copy_Dest}
+COMPUTE_QUEUE_SYNCS :: Syncs {
+	.All,
+	.Compute_Shading,
+	.Execute_Indirect,
+	.Build_Accel,
+	.Ray_Tracing,
+	.Copy,
+	.Accel_Info,
+	.Copy_Accel,
+}
+COMPUTE_QUEUE_ACCESSES :: Accesses {
+	.Shader_Resource,
+	.Unordered_Access,
+	.Indirect_Argument,
+	.Accel_Read,
+	.Accel_Write,
+	.Copy_Source,
+	.Copy_Dest,
+}
 // The accesses an acceleration structure can have.
 ACCEL_ACCESSES :: Accesses{.Accel_Read, .Accel_Write}
 
@@ -721,10 +759,10 @@ Ray_Tracing_Pipeline_Desc :: struct {
 
 // Pipeline_Info is what validation needs to know about a pipeline.
 Pipeline_Info :: struct {
-	kind:         Pipeline_Kind,
-	color_count:  u32,
+	kind:          Pipeline_Kind,
+	color_count:   u32,
 	color_formats: [MAX_COLOR_ATTACHMENTS]Format,
-	depth_format: Format,
+	depth_format:  Format,
 }
 
 pipeline_info :: proc(desc: Graphics_Pipeline_Desc) -> Pipeline_Info {
@@ -806,7 +844,13 @@ Accel_Info :: struct {
 }
 
 accel_info :: proc(desc: Accel_Struct_Desc) -> Accel_Info {
-	return {kind = desc.kind, flags = desc.flags, max_instances = desc.max_instances, compact_source = desc.compact, inputs_valid = true}
+	return {
+		kind = desc.kind,
+		flags = desc.flags,
+		max_instances = desc.max_instances,
+		compact_source = desc.compact,
+		inputs_valid = true,
+	}
 }
 
 Accel_Instance_Flag :: enum u8 {
@@ -882,16 +926,16 @@ Upscaler_Desc :: struct {
 // Stats is what a backend holds, for the editor's resource monitor (see docs/editor/shell-and-panels.md#resource-monitor). The live
 // counts include the backend's own permanent resources.
 Stats :: struct {
-	buffers:             u32,
-	textures:            u32,
-	samplers:            u32,
-	pipelines:           u32,
-	accels:              u32,
+	buffers:                         u32,
+	textures:                        u32,
+	samplers:                        u32,
+	pipelines:                       u32,
+	accels:                          u32,
 	// The most that a frame's upload ring used since the last call.
-	upload_bytes_max:    u64,
+	upload_bytes_max:                u64,
 	// The adapter's local memory that the process uses, and the budget that the OS gives it, or 0 when unknown.
-	video_memory_used:   u64,
-	video_memory_budget: u64,
+	video_memory_used:               u64,
+	video_memory_budget:             u64,
 	// The live bottom-level acceleration structures' memory, and the same with each compacted structure at the size of
 	// the structure it was compacted from.
 	bottom_accel_memory:             u64,

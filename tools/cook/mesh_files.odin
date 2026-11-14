@@ -33,7 +33,8 @@ MESH_SETTINGS := []Setting_Info {
 		values = {"true", "false"},
 		default = "true",
 		description = "Write the welded triangles that a mesh collider is built from. Turn it off for a mesh that nothing collides with, to save its size.",
-	},	{
+	},
+	{
 		key = "impostor",
 		values = {"true", "false"},
 		default = "false",
@@ -76,7 +77,10 @@ cook_mesh_file :: proc(
 ) -> Asset_Result {
 	problems := &pass.problems
 	settings_ok := check_settings(a^, problems)
-	mesh, parsed, parsed_ok := format.mesh_text_parse(string(source_of(a^)), context.temp_allocator)
+	mesh, parsed, parsed_ok := format.mesh_text_parse(
+		string(source_of(a^)),
+		context.temp_allocator,
+	)
 	for p in parsed {
 		if p.error {
 			report_error(problems, a.path, p.line, 0, "%s", p.message)

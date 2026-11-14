@@ -91,7 +91,12 @@ Transition :: struct {
 }
 
 @(private = "file")
-expect_transitions :: proc(t: ^testing.T, got: []gpu.Texture_Barrier, want: []Transition, loc := #caller_location) {
+expect_transitions :: proc(
+	t: ^testing.T,
+	got: []gpu.Texture_Barrier,
+	want: []Transition,
+	loc := #caller_location,
+) {
 	testing.expect_value(t, len(got), len(want), loc = loc)
 	for b, i in got[:min(len(got), len(want))] {
 		testing.expectf(
@@ -150,7 +155,11 @@ multi_pass_barriers :: proc(t: ^testing.T) {
 	if len(r.textures) == 5 {
 		testing.expect_value(t, r.textures[2].sync_before, gpu.Syncs{.Render_Target})
 		testing.expect_value(t, r.textures[2].sync_after, gpu.Syncs{.Compute_Shading})
-		testing.expect_value(t, r.textures[4].sync_after, gpu.Syncs{.Vertex_Shading, .Pixel_Shading})
+		testing.expect_value(
+			t,
+			r.textures[4].sync_after,
+			gpu.Syncs{.Vertex_Shading, .Pixel_Shading},
+		)
 	}
 	testing.expect_value(t, len(r.markers), 3)
 	for entry in f.cache.entries {
@@ -206,7 +215,10 @@ imported_textures_return_to_resting_layout :: proc(t: ^testing.T) {
 	setup(t, &f)
 	defer teardown(&f)
 
-	field := null.create_texture({size = SIZE, format = .RGBA16_Float, usage = {.Sampled, .Storage}, label = "field"}, nil)
+	field := null.create_texture(
+		{size = SIZE, format = .RGBA16_Float, usage = {.Sampled, .Storage}, label = "field"},
+		nil,
+	)
 	defer null.destroy_texture(field)
 
 	// The second frame checks that the first one left the texture in its resting layout.
@@ -224,7 +236,14 @@ imported_textures_return_to_resting_layout :: proc(t: ^testing.T) {
 		cb := all_buffers(subs)
 		testing.expect(t, ok)
 		r := inspect(cb, f.platform.frame_allocator)
-		expect_transitions(t, r.textures[:], {{field, .Unordered_Access, .Shader_Resource}, {field, .Shader_Resource, .Unordered_Access}})
+		expect_transitions(
+			t,
+			r.textures[:],
+			{
+				{field, .Unordered_Access, .Shader_Resource},
+				{field, .Shader_Resource, .Unordered_Access},
+			},
+		)
 		testing.expect(t, null.submit(cb))
 		null.end_frame()
 		virtual.arena_free_all(&f.arena)
@@ -267,7 +286,11 @@ reads_merge_without_barriers :: proc(t: ^testing.T) {
 		b := r.buffers[0]
 		testing.expect_value(t, b.access_before, gpu.Accesses{.Unordered_Access})
 		testing.expect_value(t, b.access_after, gpu.Accesses{.Index_Buffer, .Shader_Resource})
-		testing.expect_value(t, b.sync_after, gpu.Syncs{.Index_Input, .Vertex_Shading, .Pixel_Shading})
+		testing.expect_value(
+			t,
+			b.sync_after,
+			gpu.Syncs{.Index_Input, .Vertex_Shading, .Pixel_Shading},
+		)
 	}
 	testing.expect(t, null.submit(cb))
 }
@@ -389,7 +412,11 @@ textures_whose_lifetimes_overlap_do_not_share :: proc(t: ^testing.T) {
 
 	subs, ok := record(&g)
 	testing.expect(t, ok)
-	testing.expect(t, gpu_texture(&g, first) != gpu_texture(&g, second), "two live textures share one")
+	testing.expect(
+		t,
+		gpu_texture(&g, first) != gpu_texture(&g, second),
+		"two live textures share one",
+	)
 	testing.expect_value(t, g.transients.taken, 2)
 	testing.expect(t, null.submit(all_buffers(subs)))
 	null.end_frame()
@@ -437,7 +464,11 @@ a_texture_on_the_compute_queue_lives_until_the_queues_sync :: proc(t: ^testing.T
 	subs, ok := record(&g)
 	testing.expect(t, ok)
 	shared := gpu_texture(&g, occlusion)
-	testing.expect(t, gpu_texture(&g, early) != shared, "a texture took one that the compute queue may still use")
+	testing.expect(
+		t,
+		gpu_texture(&g, early) != shared,
+		"a texture took one that the compute queue may still use",
+	)
 	testing.expect_value(t, gpu_texture(&g, late), shared)
 	// The waits are the ones that the graph has without sharing: only the light pass waits for the compute queue.
 	testing.expect_value(t, len(subs), 4)
@@ -582,7 +613,11 @@ split_passes_form_a_chain :: proc(t: ^testing.T) {
 			}
 			testing.expect_value(t, pass.flags, want_flags)
 			testing.expect_value(t, pass.colors[0].load, i == 0 ? gpu.Load_Op.Clear : .Load)
-			testing.expect_value(t, pass.depth.store, i == len(ran) - 1 ? gpu.Store_Op.Discard : .Store)
+			testing.expect_value(
+				t,
+				pass.depth.store,
+				i == len(ran) - 1 ? gpu.Store_Op.Discard : .Store,
+			)
 		}
 	}
 	testing.expect(t, null.submit(cbs))
@@ -590,7 +625,11 @@ split_passes_form_a_chain :: proc(t: ^testing.T) {
 	// The test runner fails a test that logs an error, and these rejections are expected.
 	context.logger = testlog.expected_errors()
 	testing.expect(t, !null.submit(cbs[1:]), "a submission started with a resumed piece")
-	testing.expect(t, !null.submit(cbs[:len(cbs) - 1]), "a submission ended with a suspended piece")
+	testing.expect(
+		t,
+		!null.submit(cbs[:len(cbs) - 1]),
+		"a submission ended with a suspended piece",
+	)
 }
 
 @(private = "file")
@@ -648,12 +687,20 @@ async_compute_waits_across_queues :: proc(t: ^testing.T) {
 		testing.expect_value(t, compute.buffers[0].sync_before, gpu.Syncs{.Compute_Shading})
 		testing.expect_value(t, compute.buffers[0].access_after, gpu.Accesses{.Unordered_Access})
 	}
-	expect_transitions(t, compute.textures[:], {{gpu_texture(&g, field), .Undefined, .Unordered_Access}})
+	expect_transitions(
+		t,
+		compute.textures[:],
+		{{gpu_texture(&g, field), .Undefined, .Unordered_Access}},
+	)
 
 	// The wait orders the queues, so the graphics side changes only the texture's layout.
 	graphics := inspect(subs[1].buffers[:], f.platform.frame_allocator)
 	testing.expect_value(t, len(graphics.buffers), 0)
-	expect_transitions(t, graphics.textures[:], {{gpu_texture(&g, field), .Unordered_Access, .Shader_Resource}})
+	expect_transitions(
+		t,
+		graphics.textures[:],
+		{{gpu_texture(&g, field), .Unordered_Access, .Shader_Resource}},
+	)
 	if len(graphics.textures) == 1 {
 		testing.expect_value(t, graphics.textures[0].access_before, gpu.Accesses{})
 	}
@@ -674,7 +721,12 @@ accel_builds_order_before_traces :: proc(t: ^testing.T) {
 	defer null.destroy_buffer(vertices)
 	instances := null.create_buffer({size = 64}, nil)
 	defer null.destroy_buffer(instances)
-	blas := null.create_accel({kind = .Bottom, geometries = {{vertices = vertices, vertex_stride = 32, vertex_count = 3}}})
+	blas := null.create_accel(
+		{
+			kind = .Bottom,
+			geometries = {{vertices = vertices, vertex_stride = 32, vertex_count = 3}},
+		},
+	)
 	defer null.destroy_accel(blas)
 	tlas := null.create_accel({kind = .Top, max_instances = 1})
 	defer null.destroy_accel(tlas)
@@ -742,7 +794,13 @@ accel_sizes_order_after_builds :: proc(t: ^testing.T) {
 	defer null.destroy_buffer(sizes)
 	readback := null.create_buffer({size = 8, usage = {.Readback}}, nil)
 	defer null.destroy_buffer(readback)
-	blas := null.create_accel({kind = .Bottom, flags = {.Allow_Compaction}, geometries = {{vertices = vertices, vertex_stride = 32, vertex_count = 3}}})
+	blas := null.create_accel(
+		{
+			kind = .Bottom,
+			flags = {.Allow_Compaction},
+			geometries = {{vertices = vertices, vertex_stride = 32, vertex_count = 3}},
+		},
+	)
 	defer null.destroy_accel(blas)
 	compacted := null.create_accel({kind = .Bottom, compact = blas, compacted_size = 64})
 	defer null.destroy_accel(compacted)
@@ -888,7 +946,14 @@ history_textures_swap_every_frame_and_start_over_when_skipped_or_resized :: proc
 	defer teardown(&f)
 
 	// One frame of a temporal pass: it reads last frame's history and writes this frame's, which the output reads.
-	frame :: proc(t: ^testing.T, f: ^Fixture, size: [2]u32) -> (current, previous: gpu.Texture, valid: bool) {
+	frame :: proc(
+		t: ^testing.T,
+		f: ^Fixture,
+		size: [2]u32,
+	) -> (
+		current, previous: gpu.Texture,
+		valid: bool,
+	) {
 		g := begin(&f.platform, &f.cache)
 		target := import_texture(&g, null.frame_target(), .Color)
 		h := history_texture(&g, {size = size, format = .RGBA16_Float, label = "taa"})

@@ -41,12 +41,12 @@ Camera_Projection :: enum u8 {
 // camera's entity (see docs/rendering/assets.md#components). 0 in a field means its default.
 Camera :: struct {
 	// In radians.
-	vertical_fov: f32 `editor:"range=0.1,3"`,
+	vertical_fov:        f32 `editor:"range=0.1,3"`,
 	// In meters. A perspective camera's far plane is at infinity.
-	near:            f32 `editor:"range=0.001,10"`,
+	near:                f32 `editor:"range=0.001,10"`,
 	// The view model's projection, in radians and meters (see View_Model). 0 means the camera's own.
-	view_model_fov:  f32 `editor:"range=0,3"`,
-	view_model_near: f32 `editor:"range=0,10"`,
+	view_model_fov:      f32 `editor:"range=0,3"`,
+	view_model_near:     f32 `editor:"range=0,10"`,
 	// An orthographic camera has no perspective (see docs/rendering/frame.md#orthographic-views): it shows
 	// orthographic_height meters from bottom to top at every distance, between near and far.
 	projection:          Camera_Projection,

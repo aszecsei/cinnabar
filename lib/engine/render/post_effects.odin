@@ -44,15 +44,35 @@ Post_Effect :: struct {
 // the same order registered before it. T is its settings component, registered in the world with the defaults that
 // volumes blend from (see ecs.register_component). The effect runs only where a volume with T reaches the camera. Call
 // it after renderer_init and after renderer_reload.
-register_post_effect :: proc(r: ^Renderer, w: ^ecs.World, name: string, point: Post_Point, $T: typeid, add: Post_Effect_Proc, order: i32 = 0) -> bool {
+register_post_effect :: proc(
+	r: ^Renderer,
+	w: ^ecs.World,
+	name: string,
+	point: Post_Point,
+	$T: typeid,
+	add: Post_Effect_Proc,
+	order: i32 = 0,
+) -> bool {
 	return register_post_effect_raw(r, w, name, point, type_info_of(T), add, order)
 }
 
 // register_post_effect_raw is register_post_effect with the settings' type as a runtime value.
-register_post_effect_raw :: proc(r: ^Renderer, w: ^ecs.World, name: string, point: Post_Point, type: ^runtime.Type_Info, add: Post_Effect_Proc, order: i32 = 0) -> bool {
+register_post_effect_raw :: proc(
+	r: ^Renderer,
+	w: ^ecs.World,
+	name: string,
+	point: Post_Point,
+	type: ^runtime.Type_Info,
+	add: Post_Effect_Proc,
+	order: i32 = 0,
+) -> bool {
 	info := ecs.registry_find_type(&w.registry, type.id)
 	if info == nil {
-		log.errorf("render: the post effect %q's settings %v are not a registered component", name, type.id)
+		log.errorf(
+			"render: the post effect %q's settings %v are not a registered component",
+			name,
+			type.id,
+		)
 		return false
 	}
 	if r.effect_count == MAX_POST_EFFECTS {
@@ -60,7 +80,14 @@ register_post_effect_raw :: proc(r: ^Renderer, w: ^ecs.World, name: string, poin
 		return false
 	}
 	e := &r.effects[r.effect_count]
-	e^ = {name = name, point = point, order = order, component = info.id, type = type, add = add}
+	e^ = {
+		name      = name,
+		point     = point,
+		order     = order,
+		component = info.id,
+		type      = type,
+		add       = add,
+	}
 	r.effect_count += 1
 	// Stable, so effects with the same order keep their registration order.
 	slice.stable_sort_by(r.effects[:r.effect_count], proc(a, b: Post_Effect) -> bool {
@@ -76,7 +103,11 @@ Effect_Settings :: struct {
 
 // resolve_effects blends each effect's settings from the volumes that reach a point.
 @(private)
-resolve_effects :: proc(r: ^Renderer, w: ^ecs.World, inf: ^volume.Influences) -> []Effect_Settings {
+resolve_effects :: proc(
+	r: ^Renderer,
+	w: ^ecs.World,
+	inf: ^volume.Influences,
+) -> []Effect_Settings {
 	out := make([]Effect_Settings, r.effect_count, w.platform.frame_allocator)
 	for &e, i in r.effects[:r.effect_count] {
 		data, err := mem.alloc(e.type.size, e.type.align, w.platform.frame_allocator)
@@ -100,7 +131,10 @@ add_post_effects :: proc(f: ^Frame, point: Post_Point) {
 	}
 	running := false
 	for e, i in r.effects[:r.effect_count] {
-		running ||= e.point == point && i < len(f.post.effect_settings) && f.post.effect_settings[i].settings != nil
+		running ||=
+			e.point == point &&
+			i < len(f.post.effect_settings) &&
+			f.post.effect_settings[i].settings != nil
 	}
 	if !running {
 		return
@@ -109,7 +143,9 @@ add_post_effects :: proc(f: ^Frame, point: Post_Point) {
 		add_bloom_composite(f)
 	}
 	for e, i in r.effects[:r.effect_count] {
-		if e.point == point && i < len(f.post.effect_settings) && f.post.effect_settings[i].settings != nil {
+		if e.point == point &&
+		   i < len(f.post.effect_settings) &&
+		   f.post.effect_settings[i].settings != nil {
 			e.add(f, f.post.effect_settings[i].settings)
 		}
 	}
@@ -121,7 +157,10 @@ add_bloom_composite :: proc(f: ^Frame) {
 	g := f.graph
 	pf := f.post
 	pf.composite_in = f.scene
-	pf.composite_out = create_texture(g, {size = f.scene_size, format = SCENE_FORMAT, label = "bloom composite"})
+	pf.composite_out = create_texture(
+		g,
+		{size = f.scene_size, format = SCENE_FORMAT, label = "bloom composite"},
+	)
 	pass := add_compute_pass(g, "bloom composite", run_bloom_composite, f)
 	read(g, pass, f.scene)
 	read(g, pass, f.bloom)

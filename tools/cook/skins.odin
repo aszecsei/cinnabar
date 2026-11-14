@@ -21,15 +21,15 @@ ANIMATION_RESAMPLE_RATE :: 30
 // went, and the points of the skinned meshes that each joint influences, in its space at bind time.
 @(private)
 Model_Skin :: struct {
-	name:    string,
-	gltf:    ^cgltf.skin,
-	nodes:   []^cgltf.node,
-	parents: []i32,
+	name:         string,
+	gltf:         ^cgltf.skin,
+	nodes:        []^cgltf.node,
+	parents:      []i32,
 	// The engine-space inverse bind matrix of each joint; an ancestor that the glTF skin does not list has identity.
 	inverse_bind: []matrix[4, 4]f32,
 	// For each of the glTF skin's joints, its index in nodes.
-	remap:   []u16,
-	points:  [][dynamic][3]f32,
+	remap:        []u16,
+	points:       [][dynamic][3]f32,
 }
 
 // Model_Animation is an animation that a model makes, with the skin it is for.
@@ -52,7 +52,15 @@ model_convert :: proc(m: matrix[4, 4]f32, scale: f32) -> matrix[4, 4]f32 {
 // model_skins lists the skins that a model makes, named as meshes are, and the skin of each mesh: the skin of the first
 // node that draws it with one, or -1.
 @(private)
-model_skins :: proc(data: ^cgltf.data, meshes: []Model_Mesh, problems: ^Problems, path: string) -> (skins: []Model_Skin, mesh_skins: []int) {
+model_skins :: proc(
+	data: ^cgltf.data,
+	meshes: []Model_Mesh,
+	problems: ^Problems,
+	path: string,
+) -> (
+	skins: []Model_Skin,
+	mesh_skins: []int,
+) {
 	result := make([dynamic]Model_Skin, context.temp_allocator)
 	used := make(map[string]int, context.temp_allocator)
 	for &skin, i in data.skins {
@@ -80,7 +88,15 @@ model_skins :: proc(data: ^cgltf.data, meshes: []Model_Mesh, problems: ^Problems
 				if mesh_skins[i] < 0 {
 					mesh_skins[i] = k
 				} else if mesh_skins[i] != k {
-					report_warning(problems, path, 0, 0, "mesh %s is drawn with more than one skin, and takes %s's", m.name, result[mesh_skins[i]].name)
+					report_warning(
+						problems,
+						path,
+						0,
+						0,
+						"mesh %s is drawn with more than one skin, and takes %s's",
+						m.name,
+						result[mesh_skins[i]].name,
+					)
 				}
 			}
 		}
@@ -107,7 +123,12 @@ unique_name :: proc(given, fallback: string, used: ^map[string]int) -> string {
 }
 
 @(private = "file")
-build_model_skin :: proc(skin: ^cgltf.skin, name: string, problems: ^Problems, path: string) -> Model_Skin {
+build_model_skin :: proc(
+	skin: ^cgltf.skin,
+	name: string,
+	problems: ^Problems,
+	path: string,
+) -> Model_Skin {
 	// The joints and every ancestor of theirs, so each pose is relative to a joint's or to the model's space.
 	depth :: proc(n: ^cgltf.node) -> int {
 		d := 0
@@ -178,7 +199,12 @@ skin_read_binds :: proc(skins: []Model_Skin, scale: f32) {
 		}
 		for j in 0 ..< len(s.gltf.joints) {
 			m: matrix[4, 4]f32
-			_ = cgltf.accessor_read_float(s.gltf.inverse_bind_matrices, uint(j), &(cast(^[16]f32)&m)[0], 16)
+			_ = cgltf.accessor_read_float(
+				s.gltf.inverse_bind_matrices,
+				uint(j),
+				&(cast(^[16]f32)&m)[0],
+				16,
+			)
 			s.inverse_bind[s.remap[j]] = model_convert(m, scale)
 		}
 	}
@@ -199,7 +225,14 @@ skin_point :: proc(s: ^Model_Skin, position: [3]f32, joints: [4]u16, weights: [4
 // skin_weights keeps a vertex's four largest influences, normalized and in unorm16 adding up to 65535, with each joint
 // remapped to its skin's order. The largest takes what rounding leaves.
 @(private)
-skin_weights :: proc(s: ^Model_Skin, joints: []u32, weights: []f32) -> (out_joints: [4]u16, out_weights: [4]u16) {
+skin_weights :: proc(
+	s: ^Model_Skin,
+	joints: []u32,
+	weights: []f32,
+) -> (
+	out_joints: [4]u16,
+	out_weights: [4]u16,
+) {
 	Influence :: struct {
 		joint:  u32,
 		weight: f32,
@@ -254,7 +287,13 @@ skin_contents :: proc(s: Model_Skin, scale: f32) -> []format.Skin_Joint_Entry {
 		}
 		points := s.points[i]
 		if len(points) > 0 {
-			sphere := meshopt_computeSphereBounds(&points[0][0], uint(len(points)), size_of([3]f32), nil, 0)
+			sphere := meshopt_computeSphereBounds(
+				&points[0][0],
+				uint(len(points)),
+				size_of([3]f32),
+				nil,
+				0,
+			)
 			joints[i].sphere = {sphere.center.x, sphere.center.y, sphere.center.z, sphere.radius}
 		}
 	}
@@ -264,7 +303,14 @@ skin_contents :: proc(s: Model_Skin, scale: f32) -> []format.Skin_Joint_Entry {
 // node_rest is a node's local transform as a translation, a rotation and a scale in the engine's axes. A node with a
 // matrix is decomposed.
 @(private = "file")
-node_rest :: proc(n: ^cgltf.node, scale: f32) -> (translation: [3]f32, rotation: [4]f32, sc: [3]f32) {
+node_rest :: proc(
+	n: ^cgltf.node,
+	scale: f32,
+) -> (
+	translation: [3]f32,
+	rotation: [4]f32,
+	sc: [3]f32,
+) {
 	translation, rotation, sc = n.translation, n.rotation, n.scale
 	if !n.has_translation {
 		translation = 0
@@ -278,7 +324,11 @@ node_rest :: proc(n: ^cgltf.node, scale: f32) -> (translation: [3]f32, rotation:
 	if n.has_matrix {
 		m := transmute(matrix[4, 4]f32)n.matrix_
 		translation = {m[0, 3], m[1, 3], m[2, 3]}
-		columns := [3][3]f32{{m[0, 0], m[1, 0], m[2, 0]}, {m[0, 1], m[1, 1], m[2, 1]}, {m[0, 2], m[1, 2], m[2, 2]}}
+		columns := [3][3]f32 {
+			{m[0, 0], m[1, 0], m[2, 0]},
+			{m[0, 1], m[1, 1], m[2, 1]},
+			{m[0, 2], m[1, 2], m[2, 2]},
+		}
 		for c, i in columns {
 			sc[i] = linalg.length(c)
 		}
@@ -310,7 +360,12 @@ convert_rotation :: proc(q: [4]f32) -> [4]f32 {
 // model_animations lists the animations that a model makes: each glTF animation that moves a joint of a skin, for the
 // skin whose joints most of its channels move.
 @(private)
-model_animations :: proc(data: ^cgltf.data, skins: []Model_Skin, problems: ^Problems, path: string) -> []Model_Animation {
+model_animations :: proc(
+	data: ^cgltf.data,
+	skins: []Model_Skin,
+	problems: ^Problems,
+	path: string,
+) -> []Model_Animation {
 	result := make([dynamic]Model_Animation, context.temp_allocator)
 	used := make(map[string]int, context.temp_allocator)
 	for &animation, i in data.animations {
@@ -329,7 +384,14 @@ model_animations :: proc(data: ^cgltf.data, skins: []Model_Skin, problems: ^Prob
 			}
 		}
 		if best < 0 {
-			report_warning(problems, path, 0, 0, "animation %d moves no joint of a skin, and is left out", i)
+			report_warning(
+				problems,
+				path,
+				0,
+				0,
+				"animation %d moves no joint of a skin, and is left out",
+				i,
+			)
 			continue
 		}
 		name := unique_name(string(animation.name), fmt.tprintf("animation_%d", i), &used)
@@ -342,7 +404,18 @@ model_animations :: proc(data: ^cgltf.data, skins: []Model_Skin, problems: ^Prob
 // are not its skin's joints, morph weights, and a second channel of a joint's path are left out with a warning. Cubic
 // spline channels are sampled into linear keys.
 @(private)
-animation_contents :: proc(a: Model_Animation, s: Model_Skin, scale: f32, problems: ^Problems, path: string) -> (channels: []format.Animation_Channel, times: []f32, values: []f32, duration: f32) {
+animation_contents :: proc(
+	a: Model_Animation,
+	s: Model_Skin,
+	scale: f32,
+	problems: ^Problems,
+	path: string,
+) -> (
+	channels: []format.Animation_Channel,
+	times: []f32,
+	values: []f32,
+	duration: f32,
+) {
 	out_channels := make([dynamic]format.Animation_Channel, context.temp_allocator)
 	out_times := make([dynamic]f32, context.temp_allocator)
 	out_values := make([dynamic]f32, context.temp_allocator)
@@ -369,7 +442,16 @@ animation_contents :: proc(a: Model_Animation, s: Model_Skin, scale: f32, proble
 			duplicate ||= int(o.joint) == joint && o.path == p
 		}
 		if duplicate {
-			report_warning(problems, path, 0, 0, "animation %s moves the %v of %s twice, and keeps the first", a.name, p, s.nodes[joint].name)
+			report_warning(
+				problems,
+				path,
+				0,
+				0,
+				"animation %s moves the %v of %s twice, and keeps the first",
+				a.name,
+				p,
+				s.nodes[joint].name,
+			)
 			continue
 		}
 		width := int(format.animation_path_width(p))
@@ -428,7 +510,16 @@ animation_contents :: proc(a: Model_Animation, s: Model_Skin, scale: f32, proble
 		append(&out_channels, channel)
 	}
 	if dropped > 0 {
-		report_warning(problems, path, 0, 0, "animation %s leaves out %d channels that do not move a joint of skin %s", a.name, dropped, s.name)
+		report_warning(
+			problems,
+			path,
+			0,
+			0,
+			"animation %s leaves out %d channels that do not move a joint of skin %s",
+			a.name,
+			dropped,
+			s.name,
+		)
 	}
 	slice.sort_by(out_channels[:], proc(a, b: format.Animation_Channel) -> bool {
 		return a.joint < b.joint || a.joint == b.joint && a.path < b.path

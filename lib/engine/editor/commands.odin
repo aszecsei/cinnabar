@@ -107,13 +107,29 @@ scene_field :: proc(name: string, value: link.Scene_Value) -> link.Scene_Field {
 command_infos :: proc(e: ^Editor, allocator: runtime.Allocator) -> link.Game_Commands {
 	infos := make([]link.Game_Command_Info, len(e.commands), allocator)
 	for c, i in e.commands {
-		infos[i] = {id = c.id, label = c.label, description = c.description, tab = c.tab, group = c.group, icon = c.icon, edits = c.edits}
+		infos[i] = {
+			id          = c.id,
+			label       = c.label,
+			description = c.description,
+			tab         = c.tab,
+			group       = c.group,
+			icon        = c.icon,
+			edits       = c.edits,
+		}
 	}
 	return {commands = infos}
 }
 
 @(private)
-run_command :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, user: rawptr, id: string, out: ^[dynamic]byte, allocator: runtime.Allocator) {
+run_command :: proc(
+	e: ^Editor,
+	w: ^ecs.World,
+	scripts: ^script.Runtime,
+	user: rawptr,
+	id: string,
+	out: ^[dynamic]byte,
+	allocator: runtime.Allocator,
+) {
 	for c in e.commands {
 		if c.id != id {
 			continue
@@ -129,11 +145,21 @@ run_command :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, user: r
 		}
 		context.allocator = allocator
 		c.procedure(&ctx)
-		link.write_message(out, link.Game_Command_Result{id = id, operations = ctx.operations[:], message = ctx.message})
+		link.write_message(
+			out,
+			link.Game_Command_Result {
+				id = id,
+				operations = ctx.operations[:],
+				message = ctx.message,
+			},
+		)
 		return
 	}
 	log.warnf("editor: the game has no command %s", id)
-	link.write_message(out, link.Game_Command_Result{id = id, message = "the game has no such command"})
+	link.write_message(
+		out,
+		link.Game_Command_Result{id = id, message = "the game has no such command"},
+	)
 }
 
 // command_camera is the camera that a command sees: the open scene view's with the lowest number, once it has one, and

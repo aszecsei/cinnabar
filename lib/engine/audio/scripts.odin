@@ -19,8 +19,18 @@ register_scripts :: proc(r: ^script.Runtime, s: ^State) {
 	luau.setfield(r.L, luau.REGISTRYINDEX, REGISTRY_KEY)
 	script.expose(r, Audio_Source, DEFAULT_AUDIO_SOURCE)
 	script.expose(r, Audio_Listener)
-	script.define(r, "Audio.play", play_binding, "(sound: Asset, position: WorldPosition?, gain: number?, bus: string?) -> ()")
-	script.define(r, "Audio.set_bus_gain", set_bus_gain_binding, "(bus: string, gain: number) -> ()")
+	script.define(
+		r,
+		"Audio.play",
+		play_binding,
+		"(sound: Asset, position: WorldPosition?, gain: number?, bus: string?) -> ()",
+	)
+	script.define(
+		r,
+		"Audio.set_bus_gain",
+		set_bus_gain_binding,
+		"(bus: string, gain: number) -> ()",
+	)
 }
 
 @(private = "file")

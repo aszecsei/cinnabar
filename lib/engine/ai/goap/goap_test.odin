@@ -39,11 +39,17 @@ Fixture :: struct {
 }
 
 @(private = "file")
-BOARD :: format.Guid{0 = 0xb9}
+BOARD :: format.Guid {
+	0 = 0xb9,
+}
 @(private = "file")
-DECISION :: format.Guid{0 = 0xda}
+DECISION :: format.Guid {
+	0 = 0xda,
+}
 @(private = "file")
-OTHER :: format.Guid{0 = 0xdb}
+OTHER :: format.Guid {
+	0 = 0xdb,
+}
 
 // The test blackboard's keys, at their slots.
 @(private = "file")
@@ -73,7 +79,10 @@ board_contents :: proc() -> format.Blackboard_Contents {
 	names := KEYS
 	keys := make([]format.Blackboard_Key_Contents, len(names), context.temp_allocator)
 	for k, i in names {
-		keys[i] = {name = k.name, type = k.type}
+		keys[i] = {
+			name = k.name,
+			type = k.type,
+		}
 	}
 	keys[0].default = value(f32(0.5))
 	keys[1].default = value(i32(3))
@@ -175,21 +184,39 @@ build :: proc(d: D, guid := DECISION, key: u64 = 1, refused := false) -> []byte 
 	plan_actions := make([dynamic]format.Plan_Action, context.temp_allocator)
 	considerations := make([dynamic]format.Utility_Consideration, context.temp_allocator)
 	links := make([dynamic]u32, context.temp_allocator)
-	guard :: proc(ops: ^[dynamic]format.Decision_Op, conditions: ^[dynamic]format.Decision_Condition, text: string) -> u32 {
+	guard :: proc(
+		ops: ^[dynamic]format.Decision_Op,
+		conditions: ^[dynamic]format.Decision_Condition,
+		text: string,
+	) -> u32 {
 		if text == "" {
 			return format.DECISION_NONE
 		}
 		negated := text[0] == '!'
 		first := u32(len(ops))
-		append(ops, format.Decision_Op{code = .Key, operand = slot_of(text[1:] if negated else text)})
+		append(
+			ops,
+			format.Decision_Op{code = .Key, operand = slot_of(text[1:] if negated else text)},
+		)
 		if negated {
 			append(ops, format.Decision_Op{code = .Not})
 		}
-		append(conditions, format.Decision_Condition{first_op = first, op_count = u32(len(ops)) - first})
+		append(
+			conditions,
+			format.Decision_Condition{first_op = first, op_count = u32(len(ops)) - first},
+		)
 		return u32(len(conditions) - 1)
 	}
 	for g, i in d.goals {
-		append(&nodes, format.Decision_Node_Contents{id = u32(i + 1), kind = "goal", condition = guard(&ops, &conditions, g.guard), action = format.DECISION_NONE})
+		append(
+			&nodes,
+			format.Decision_Node_Contents {
+				id = u32(i + 1),
+				kind = "goal",
+				condition = guard(&ops, &conditions, g.guard),
+				action = format.DECISION_NONE,
+			},
+		)
 		record := format.Goap_Goal {
 			node       = u32(len(nodes) - 1),
 			priority   = g.priority if g.priority != 0 else 1,
@@ -200,26 +227,62 @@ build :: proc(d: D, guid := DECISION, key: u64 = 1, refused := false) -> []byte 
 		append(&tests, ..g.tests)
 		if g.health {
 			append(&links, u32(len(considerations)))
-			append(&considerations, format.Utility_Consideration{input = .Number, curve = .Linear, a = slot_of("health"), max = 1, slope = 1, exponent = 1})
+			append(
+				&considerations,
+				format.Utility_Consideration {
+					input = .Number,
+					curve = .Linear,
+					a = slot_of("health"),
+					max = 1,
+					slope = 1,
+					exponent = 1,
+				},
+			)
 			record.link_count = 1
 		}
 		append(&goals, record)
 	}
 	for a, i in d.actions {
-		append(&nodes, format.Decision_Node_Contents{id = u32(10 + i), kind = "action", condition = guard(&ops, &conditions, a.guard), action = u32(len(actions))})
+		append(
+			&nodes,
+			format.Decision_Node_Contents {
+				id = u32(10 + i),
+				kind = "action",
+				condition = guard(&ops, &conditions, a.guard),
+				action = u32(len(actions)),
+			},
+		)
 		append(&constants, format.Decision_Constant_Contents{type = .Int, value = value(a.n)})
-		append(&args, format.Decision_Arg_Contents{name = "n", source = .Constant, index = u32(len(constants) - 1), type = .Int})
-		append(&actions, format.Decision_Action_Contents{name = a.action, first_arg = u32(len(args) - 1), arg_count = 1})
+		append(
+			&args,
+			format.Decision_Arg_Contents {
+				name = "n",
+				source = .Constant,
+				index = u32(len(constants) - 1),
+				type = .Int,
+			},
+		)
+		append(
+			&actions,
+			format.Decision_Action_Contents {
+				name = a.action,
+				first_arg = u32(len(args) - 1),
+				arg_count = 1,
+			},
+		)
 		record := format.Plan_Action {
-			node         = u32(len(nodes) - 1),
-			cost         = {value = a.cost if a.cost != 0 else 1},
-			first_test   = u32(len(tests)),
-			test_count   = u32(len(a.tests)),
+			node = u32(len(nodes) - 1),
+			cost = {value = a.cost if a.cost != 0 else 1},
+			first_test = u32(len(tests)),
+			test_count = u32(len(a.tests)),
 			first_effect = u32(len(effects)),
 			effect_count = u32(len(a.effects)),
 		}
 		if a.cost_key != "" {
-			record.cost = {key = slot_of(a.cost_key), source = .Key}
+			record.cost = {
+				key    = slot_of(a.cost_key),
+				source = .Key,
+			}
 		}
 		append(&tests, ..a.tests)
 		append(&effects, ..a.effects)
@@ -227,7 +290,15 @@ build :: proc(d: D, guid := DECISION, key: u64 = 1, refused := false) -> []byte 
 	}
 	for &c, i in considerations {
 		c.node = u32(len(nodes))
-		append(&nodes, format.Decision_Node_Contents{id = u32(100 + i), kind = "consideration", condition = format.DECISION_NONE, action = format.DECISION_NONE})
+		append(
+			&nodes,
+			format.Decision_Node_Contents {
+				id = u32(100 + i),
+				kind = "consideration",
+				condition = format.DECISION_NONE,
+				action = format.DECISION_NONE,
+			},
+		)
 	}
 	keys := make([dynamic]u32, context.temp_allocator)
 	for name in PLANNING {
@@ -244,7 +315,8 @@ build :: proc(d: D, guid := DECISION, key: u64 = 1, refused := false) -> []byte 
 		considerations = considerations[:],
 		links          = links[:],
 	}
-	size := format.goap_state(u32(len(keys)), u32(len(plan_actions)), u32(len(goals)), contents.max_nodes, contents.max_plan).size
+	size :=
+		format.goap_state(u32(len(keys)), u32(len(plan_actions)), u32(len(goals)), contents.max_nodes, contents.max_plan).size
 	if refused {
 		size -= 8
 	}
@@ -287,49 +359,44 @@ label :: proc(a: ^ai.Action_Context) -> i32 {
 @(private = "file")
 register_test :: proc(s: ^ai.State) {
 	register(s)
-	ai.register_action(s, {name = "step", params = {{"n", .Int}}, start = proc(a: ^ai.Action_Context) {log_event(a, "start step %d", label(a))}})
-	ai.register_action(
-		s,
-		{
-			name = "walk",
-			params = {{"n", .Int}},
-			state_size = 8,
-			start = proc(a: ^ai.Action_Context) {
-				(^i32)(&a.state[0])^ = 3
-				(^i32)(&a.state[4])^ = label(a)
-				log_event(a, "start walk %d", label(a))
-			},
-			tick = proc(a: ^ai.Action_Context) -> ai.Action_Status {
-				left := (^i32)(&a.state[0])
-				left^ -= 1
-				return .Succeeded if left^ <= 0 else .Running
-			},
-			stop = proc(a: ^ai.Action_Context) {log_event(a, "stop walk %d", (^i32)(&a.state[4])^)},
+	ai.register_action(s, {
+		name = "step",
+		params = {{"n", .Int}},
+		start = proc(a: ^ai.Action_Context) {log_event(a, "start step %d", label(a))},
+	})
+	ai.register_action(s, {
+		name = "walk",
+		params = {{"n", .Int}},
+		state_size = 8,
+		start = proc(a: ^ai.Action_Context) {
+			(^i32)(&a.state[0])^ = 3
+			(^i32)(&a.state[4])^ = label(a)
+			log_event(a, "start walk %d", label(a))
 		},
-	)
-	ai.register_action(
-		s,
-		{
-			name = "hold",
-			params = {{"n", .Int}},
-			state_size = 4,
-			start = proc(a: ^ai.Action_Context) {
-				(^i32)(&a.state[0])^ = label(a)
-				log_event(a, "start hold %d", label(a))
-			},
-			tick = proc(a: ^ai.Action_Context) -> ai.Action_Status {return .Running},
-			stop = proc(a: ^ai.Action_Context) {log_event(a, "stop hold %d", (^i32)(&a.state[0])^)},
+		tick = proc(a: ^ai.Action_Context) -> ai.Action_Status {
+			left := (^i32)(&a.state[0])
+			left^ -= 1
+			return .Succeeded if left^ <= 0 else .Running
 		},
-	)
-	ai.register_action(
-		s,
-		{
-			name = "fail",
-			params = {{"n", .Int}},
-			start = proc(a: ^ai.Action_Context) {log_event(a, "start fail %d", label(a))},
-			tick = proc(a: ^ai.Action_Context) -> ai.Action_Status {return .Failed},
+		stop = proc(a: ^ai.Action_Context) {log_event(a, "stop walk %d", (^i32)(&a.state[4])^)},
+	})
+	ai.register_action(s, {
+		name = "hold",
+		params = {{"n", .Int}},
+		state_size = 4,
+		start = proc(a: ^ai.Action_Context) {
+			(^i32)(&a.state[0])^ = label(a)
+			log_event(a, "start hold %d", label(a))
 		},
-	)
+		tick = proc(a: ^ai.Action_Context) -> ai.Action_Status {return .Running},
+		stop = proc(a: ^ai.Action_Context) {log_event(a, "stop hold %d", (^i32)(&a.state[0])^)},
+	})
+	ai.register_action(s, {
+		name = "fail",
+		params = {{"n", .Int}},
+		start = proc(a: ^ai.Action_Context) {log_event(a, "start fail %d", label(a))},
+		tick = proc(a: ^ai.Action_Context) -> ai.Action_Status {return .Failed},
+	})
 }
 
 @(private = "file")
@@ -511,7 +578,14 @@ starts :: proc(f: ^Fixture) -> []string {
 @(private = "file")
 expect_starts :: proc(t: ^testing.T, f: ^Fixture, expected: []string, loc := #caller_location) {
 	got := starts(f)
-	testing.expectf(t, slice.equal(got, expected), "starts %v, expected %v", got, expected, loc = loc)
+	testing.expectf(
+		t,
+		slice.equal(got, expected),
+		"starts %v, expected %v",
+		got,
+		expected,
+		loc = loc,
+	)
 }
 
 @(private = "file")
@@ -538,12 +612,34 @@ key_value :: proc(f: ^Fixture, e: ecs.Entity, key: string) -> ai.Value {
 @(private = "file")
 down_plan :: proc() -> D {
 	return D {
-		goals = slice.clone([]G{{tests = slice.clone([]format.Plan_Test{is(DOWN)}, context.temp_allocator)}}, context.temp_allocator),
+		goals = slice.clone(
+			[]G{{tests = slice.clone([]format.Plan_Test{is(DOWN)}, context.temp_allocator)}},
+			context.temp_allocator,
+		),
 		actions = slice.clone(
 			[]A {
-				{action = "step", n = 3, tests = slice.clone([]format.Plan_Test{is(ARMED), is(NEAR)}, context.temp_allocator), effects = slice.clone([]format.Plan_Effect{set(DOWN)}, context.temp_allocator)},
-				{action = "step", n = 1, effects = slice.clone([]format.Plan_Effect{set(ARMED)}, context.temp_allocator)},
-				{action = "step", n = 2, effects = slice.clone([]format.Plan_Effect{set(NEAR)}, context.temp_allocator)},
+				{
+					action = "step",
+					n = 3,
+					tests = slice.clone(
+						[]format.Plan_Test{is(ARMED), is(NEAR)},
+						context.temp_allocator,
+					),
+					effects = slice.clone([]format.Plan_Effect{set(DOWN)}, context.temp_allocator),
+				},
+				{
+					action = "step",
+					n = 1,
+					effects = slice.clone(
+						[]format.Plan_Effect{set(ARMED)},
+						context.temp_allocator,
+					),
+				},
+				{
+					action = "step",
+					n = 2,
+					effects = slice.clone([]format.Plan_Effect{set(NEAR)}, context.temp_allocator),
+				},
 			},
 			context.temp_allocator,
 		),
@@ -594,7 +690,15 @@ a_plan_of_several_actions_runs_in_order :: proc(t: ^testing.T) {
 // The effects set bools and enums and add to ints, when the action succeeds.
 @(test)
 effects_are_written_when_an_action_succeeds :: proc(t: ^testing.T) {
-	f := setup(t, {goals = {{tests = {is(MOOD, 1)}}}, actions = {{action = "walk", n = 1, effects = {set(ARMED), add(AMMO, 2), set(MOOD, 1)}}}})
+	f := setup(
+		t,
+		{
+			goals = {{tests = {is(MOOD, 1)}}},
+			actions = {
+				{action = "walk", n = 1, effects = {set(ARMED), add(AMMO, 2), set(MOOD, 1)}},
+			},
+		},
+	)
 	defer teardown(t, f)
 	e := spawn_agent(f)
 	start(f, e)
@@ -615,7 +719,13 @@ the_cheaper_of_two_plans_is_picked :: proc(t: ^testing.T) {
 		actions = {
 			{action = "step", n = 1, effects = {set(DOWN)}, cost = 5},
 			{action = "step", n = 2, effects = {set(ARMED)}},
-			{action = "step", n = 3, tests = {is(ARMED)}, effects = {set(DOWN)}, cost_key = "cost"},
+			{
+				action = "step",
+				n = 3,
+				tests = {is(ARMED)},
+				effects = {set(DOWN)},
+				cost_key = "cost",
+			},
 		},
 	}
 	f := setup(t, d)
@@ -635,7 +745,16 @@ the_cheaper_of_two_plans_is_picked :: proc(t: ^testing.T) {
 // Of two plans of one cost, the one of the earlier action runs.
 @(test)
 ties_break_by_the_actions_order :: proc(t: ^testing.T) {
-	f := setup(t, {goals = {{tests = {is(DOWN)}}}, actions = {{action = "step", n = 1, effects = {set(DOWN)}}, {action = "step", n = 2, effects = {set(DOWN)}}}})
+	f := setup(
+		t,
+		{
+			goals = {{tests = {is(DOWN)}}},
+			actions = {
+				{action = "step", n = 1, effects = {set(DOWN)}},
+				{action = "step", n = 2, effects = {set(DOWN)}},
+			},
+		},
+	)
 	defer teardown(t, f)
 	e := spawn_agent(f)
 	start(f, e)
@@ -743,7 +862,10 @@ the_budget_is_shared_among_searching_agents :: proc(t: ^testing.T) {
 a_failed_action_replans :: proc(t: ^testing.T) {
 	d := D {
 		goals   = {{tests = {is(ARMED)}}},
-		actions = {{action = "fail", n = 1, guard = "!blocked", effects = {set(ARMED)}}, {action = "step", n = 2, effects = {set(ARMED)}, cost = 3}},
+		actions = {
+			{action = "fail", n = 1, guard = "!blocked", effects = {set(ARMED)}},
+			{action = "step", n = 2, effects = {set(ARMED)}, cost = 3},
+		},
 	}
 	f := setup(t, d)
 	defer teardown(t, f)
@@ -768,7 +890,16 @@ a_failed_action_replans :: proc(t: ^testing.T) {
 a_failed_precondition_replans :: proc(t: ^testing.T) {
 	d := D {
 		goals   = {{tests = {is(DOWN)}}},
-		actions = {{action = "step", n = 3, guard = "!blocked", tests = {is(ARMED)}, effects = {set(DOWN)}}, {action = "walk", n = 1, effects = {set(ARMED)}}},
+		actions = {
+			{
+				action = "step",
+				n = 3,
+				guard = "!blocked",
+				tests = {is(ARMED)},
+				effects = {set(DOWN)},
+			},
+			{action = "walk", n = 1, effects = {set(ARMED)}},
+		},
 	}
 	f := setup(t, d)
 	defer teardown(t, f)
@@ -789,7 +920,12 @@ a_changed_planning_key_replans :: proc(t: ^testing.T) {
 	d := D {
 		goals   = {{tests = {is(DOWN)}}},
 		actions = {
-			{action = "step", n = 3, tests = {is(ARMED), at_least(AMMO, 1)}, effects = {set(DOWN), add(AMMO, -1)}},
+			{
+				action = "step",
+				n = 3,
+				tests = {is(ARMED), at_least(AMMO, 1)},
+				effects = {set(DOWN), add(AMMO, -1)},
+			},
 			{action = "walk", n = 1, effects = {set(ARMED)}},
 			{action = "step", n = 2, effects = {add(AMMO, 3)}},
 		},
@@ -812,7 +948,10 @@ a_changed_planning_key_replans :: proc(t: ^testing.T) {
 a_higher_priority_goal_replaces_the_plan :: proc(t: ^testing.T) {
 	d := D {
 		goals   = {{guard = "blocked", tests = {is(DOWN)}, priority = 10}, {tests = {is(ARMED)}}},
-		actions = {{action = "step", n = 1, effects = {set(DOWN)}}, {action = "hold", n = 2, effects = {set(ARMED)}}},
+		actions = {
+			{action = "step", n = 1, effects = {set(DOWN)}},
+			{action = "hold", n = 2, effects = {set(ARMED)}},
+		},
 	}
 	f := setup(t, d)
 	defer teardown(t, f)
@@ -833,7 +972,10 @@ a_higher_priority_goal_replaces_the_plan :: proc(t: ^testing.T) {
 considerations_score_a_goals_priority :: proc(t: ^testing.T) {
 	d := D {
 		goals   = {{tests = {is(DOWN)}, health = true}, {tests = {is(ARMED)}, priority = 0.5}},
-		actions = {{action = "hold", n = 1, effects = {set(DOWN)}}, {action = "hold", n = 2, effects = {set(ARMED)}}},
+		actions = {
+			{action = "hold", n = 1, effects = {set(DOWN)}},
+			{action = "hold", n = 2, effects = {set(ARMED)}},
+		},
 	}
 	f := setup(t, d)
 	defer teardown(t, f)
@@ -860,7 +1002,13 @@ considerations_score_a_goals_priority :: proc(t: ^testing.T) {
 // The plan and the search are in the agent's module state, so a code reload keeps them and the running action.
 @(test)
 the_plan_is_kept_across_a_code_reload :: proc(t: ^testing.T) {
-	f := setup(t, {goals = {{tests = {is(ARMED)}}}, actions = {{action = "hold", n = 1, effects = {set(ARMED)}}}})
+	f := setup(
+		t,
+		{
+			goals = {{tests = {is(ARMED)}}},
+			actions = {{action = "hold", n = 1, effects = {set(ARMED)}}},
+		},
+	)
 	defer teardown(t, f)
 	e := spawn_agent(f)
 	start(f, e)
@@ -873,7 +1021,12 @@ the_plan_is_kept_across_a_code_reload :: proc(t: ^testing.T) {
 	register_test(&f.ai)
 	frame(f, 6)
 	testing.expect_value(t, phase(f, e), format.Goap_Phase.Running)
-	testing.expectf(t, slice.equal(f.events[:], []string{"start hold 1"}), "events %v", f.events[:])
+	testing.expectf(
+		t,
+		slice.equal(f.events[:], []string{"start hold 1"}),
+		"events %v",
+		f.events[:],
+	)
 }
 
 // Data that its check refuses makes the agent wait.
@@ -906,9 +1059,18 @@ goap_is_the_same_on_one_job_and_many :: proc(t: ^testing.T) {
 	}
 	run :: proc(t: ^testing.T, serial: bool) -> [dynamic]Outcome {
 		d := D {
-			goals = {{guard = "blocked", tests = {is(DOWN)}, priority = 5, health = true}, {tests = {at_least(AMMO, 6)}, priority = 2}, {tests = {is(MOOD, 1)}}},
-			actions = {
-				{action = "step", n = 3, tests = {is(ARMED), is(NEAR), at_least(AMMO, 1)}, effects = {set(DOWN), add(AMMO, -1)}},
+			goals     = {
+				{guard = "blocked", tests = {is(DOWN)}, priority = 5, health = true},
+				{tests = {at_least(AMMO, 6)}, priority = 2},
+				{tests = {is(MOOD, 1)}},
+			},
+			actions   = {
+				{
+					action = "step",
+					n = 3,
+					tests = {is(ARMED), is(NEAR), at_least(AMMO, 1)},
+					effects = {set(DOWN), add(AMMO, -1)},
+				},
 				{action = "walk", n = 1, effects = {set(ARMED)}, cost_key = "cost"},
 				{action = "walk", n = 2, tests = {is(NEAR, 0)}, effects = {set(NEAR)}},
 				{action = "step", n = 4, effects = {add(AMMO, 2)}, cost = 2},
@@ -1037,7 +1199,13 @@ a_whole_search_finds_the_agents_plan :: proc(t: ^testing.T) {
 		actions = {
 			{action = "step", n = 1, effects = {set(DOWN)}, cost = 5},
 			{action = "step", n = 2, effects = {set(ARMED)}},
-			{action = "step", n = 3, tests = {is(ARMED)}, effects = {set(DOWN)}, cost_key = "cost"},
+			{
+				action = "step",
+				n = 3,
+				tests = {is(ARMED)},
+				effects = {set(DOWN)},
+				cost_key = "cost",
+			},
 		},
 	}
 	write_blob(t, f, OTHER, build(d, OTHER))
@@ -1047,7 +1215,14 @@ a_whole_search_finds_the_agents_plan :: proc(t: ^testing.T) {
 		start(f, agent)
 		testing.expect(t, run_until(f, agent, .Running) >= 0)
 		_, cheapest := whole_of(f, agent, d, 0)
-		testing.expectf(t, slice.equal(cheapest, plan_ids(f, agent)), "cost %v: whole %v, agent %v", cost, cheapest, plan_ids(f, agent))
+		testing.expectf(
+			t,
+			slice.equal(cheapest, plan_ids(f, agent)),
+			"cost %v: whole %v, agent %v",
+			cost,
+			cheapest,
+			plan_ids(f, agent),
+		)
 	}
 }
 
@@ -1058,7 +1233,10 @@ a_failed_whole_search_gives_its_closest_plan :: proc(t: ^testing.T) {
 	d := down_plan()
 	// Without the action that arms it, the agent can come near and not attack.
 	d.actions = d.actions[:1]
-	d.actions = slice.concatenate([][]A{d.actions, {{action = "step", n = 2, effects = {set(NEAR)}}}}, context.temp_allocator)
+	d.actions = slice.concatenate(
+		[][]A{d.actions, {{action = "step", n = 2, effects = {set(NEAR)}}}},
+		context.temp_allocator,
+	)
 	f := setup(t, d)
 	defer teardown(t, f)
 	e := spawn_agent(f)

@@ -13,15 +13,52 @@ test_utility :: proc() -> Utility_Contents {
 		momentum = 0.25,
 		options = slice.clone(
 			[]Utility_Option {
-				{node = 0, weight = 1, first_link = 0, link_count = 1, target = DECISION_NONE, flags = {.Cooldown}, cooldown = {seconds = 2}, state = 8, links_state = 56},
-				{node = 1, weight = 2, first_link = 1, link_count = 2, target = 1, state = 32, links_state = 64},
+				{
+					node = 0,
+					weight = 1,
+					first_link = 0,
+					link_count = 1,
+					target = DECISION_NONE,
+					flags = {.Cooldown},
+					cooldown = {seconds = 2},
+					state = 8,
+					links_state = 56,
+				},
+				{
+					node = 1,
+					weight = 2,
+					first_link = 1,
+					link_count = 2,
+					target = 1,
+					state = 32,
+					links_state = 64,
+				},
 			},
 			context.temp_allocator,
 		),
 		considerations = slice.clone(
 			[]Utility_Consideration {
-				{node = 2, input = .Number, curve = .Linear, a = 0, max = 1, slope = 1, exponent = 1},
-				{node = 3, input = .Distance, curve = .Table, a = UTILITY_SELF, b = 1, max = 10, slope = 1, exponent = 1, first_point = 0, point_count = 2},
+				{
+					node = 2,
+					input = .Number,
+					curve = .Linear,
+					a = 0,
+					max = 1,
+					slope = 1,
+					exponent = 1,
+				},
+				{
+					node = 3,
+					input = .Distance,
+					curve = .Table,
+					a = UTILITY_SELF,
+					b = 1,
+					max = 10,
+					slope = 1,
+					exponent = 1,
+					first_point = 0,
+					point_count = 2,
+				},
 			},
 			context.temp_allocator,
 		),
@@ -34,7 +71,12 @@ test_utility :: proc() -> Utility_Contents {
 utility_decision :: proc(data: []byte, state_size: u32 = 80) -> []byte {
 	nodes := make([]Decision_Node_Contents, 4, context.temp_allocator)
 	for &n, i in nodes {
-		n = {id = u32(i + 1), kind = "option" if i < 2 else "consideration", condition = DECISION_NONE, action = DECISION_NONE}
+		n = {
+			id        = u32(i + 1),
+			kind      = "option" if i < 2 else "consideration",
+			condition = DECISION_NONE,
+			action    = DECISION_NONE,
+		}
 	}
 	nodes[0].action = 0
 	nodes[1].action = 1
@@ -50,7 +92,11 @@ utility_decision :: proc(data: []byte, state_size: u32 = 80) -> []byte {
 
 @(private = "file")
 utility_board :: proc() -> []byte {
-	keys := []Blackboard_Key_Contents{{name = "health", type = .Float}, {name = "target", type = .Entity}, {name = "mood", type = .Bool}}
+	keys := []Blackboard_Key_Contents {
+		{name = "health", type = .Float},
+		{name = "target", type = .Entity},
+		{name = "mood", type = .Bool},
+	}
 	return aligned(blackboard_write({keys = keys}, context.temp_allocator))
 }
 
@@ -76,7 +122,10 @@ utility_round_trips :: proc(t: ^testing.T) {
 	board_blob, board_ok := blackboard_view(board)
 	testing.expect(t, board_ok)
 	if board_ok {
-		testing.expect(t, utility_check(decision_technique_data(data, blob), data, blob, board, board_blob))
+		testing.expect(
+			t,
+			utility_check(decision_technique_data(data, blob), data, blob, board, board_blob),
+		)
 	}
 }
 
@@ -131,7 +180,10 @@ bad_utility_is_refused :: proc(t: ^testing.T) {
 		proc(c: ^Utility_Contents) {c.considerations[0].a = 1},
 		proc(c: ^Utility_Contents) {c.considerations[1].a = 0},
 		proc(c: ^Utility_Contents) {c.considerations[0].a = 7},
-		proc(c: ^Utility_Contents) {c.options[0].cooldown = {key = 2, source = .Key}},
+		proc(c: ^Utility_Contents) {c.options[0].cooldown = {
+				key    = 2,
+				source = .Key,
+			}},
 	}
 	board := utility_board()
 	board_blob, _ := blackboard_view(board)

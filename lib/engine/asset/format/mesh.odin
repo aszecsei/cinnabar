@@ -172,7 +172,13 @@ meshlet_triangle :: proc "contextless" (m: Meshlet, stream: []u8, i: int) -> [3]
 // radius grows by how far it moved and rounds up. A sphere that f16 cannot reach, or that is not a number, has an
 // infinite radius. An f16 under the smallest normal does not stay in either, so that a shader that flushes it to 0 reads
 // the same sphere.
-meshlet_encode_sphere :: proc "contextless" (center: [3]f32, radius: f32) -> (encoded: [3]f16, encoded_radius: f16) {
+meshlet_encode_sphere :: proc "contextless" (
+	center: [3]f32,
+	radius: f32,
+) -> (
+	encoded: [3]f16,
+	encoded_radius: f16,
+) {
 	infinite := transmute(f16)F16_INFINITE_BITS
 	for v in ([4]f32{center.x, center.y, center.z, radius}) {
 		if v != v {
@@ -215,12 +221,12 @@ meshlet_sphere :: proc "contextless" (m: Meshlet) -> (center: [3]f32, radius: f3
 // first meshlet of its page, which page is the index of. Shaders read it as it is: matches Meshlet_Node in
 // meshlet_lod.hlsli.
 Meshlet_Node :: struct {
-	center:  [3]f32,
-	radius:  f32,
-	error:   f32,
-	first:   u32,
-	count:   u32,
-	page:    u32,
+	center: [3]f32,
+	radius: f32,
+	error:  f32,
+	first:  u32,
+	count:  u32,
+	page:   u32,
 }
 
 #assert(size_of(Meshlet_Node) == 32)
@@ -321,32 +327,32 @@ mesh_attribute_stride :: proc "contextless" (flags: Mesh_Flags) -> u32 {
 // Mesh_Blob is the start of a mesh blob (see docs/content/blobs-and-loading.md#blob-format). Each stream starts at BLOB_ALIGN,
 // so it can stream straight into a GPU buffer.
 Mesh_Blob :: struct {
-	header:            Blob_Header,
-	flags:             Mesh_Flags,
-	vertex_count:      u32,
-	index_count:       u32,
-	bounds:            Mesh_Bounds,
+	header:              Blob_Header,
+	flags:               Mesh_Flags,
+	vertex_count:        u32,
+	index_count:         u32,
+	bounds:              Mesh_Bounds,
 	// Mesh_Submesh records.
-	submeshes:         Slice,
+	submeshes:           Slice,
 	// [3]f32 per vertex.
-	positions:         Slice,
+	positions:           Slice,
 	// mesh_attribute_stride bytes per vertex.
-	attributes:        Slice,
+	attributes:          Slice,
 	// Mesh_Skin_Vertex records, one per vertex with the Skinned flag, or empty.
-	skin:              Slice,
+	skin:                Slice,
 	// u16 or u32 per index, by the Index32 flag, in triangles whose front faces are clockwise on screen.
-	indices:           Slice,
+	indices:             Slice,
 	// Meshlet records.
-	meshlets:          Slice,
+	meshlets:            Slice,
 	// Each meshlet's refs to its vertices, in u32 words: two to a word, or one when they do not fit in 16 bits.
-	meshlet_vertices:  Slice,
+	meshlet_vertices:    Slice,
 	// Three bytes per meshlet triangle: its indices into its meshlet's vertices.
-	meshlet_triangles: Slice,
+	meshlet_triangles:   Slice,
 	// Meshlet_Node records.
-	meshlet_nodes:     Slice,
+	meshlet_nodes:       Slice,
 	// The mesh's name in its model, and the model's path, prefixed with its root's name.
-	name:              Slice,
-	source_path:       Slice,
+	name:                Slice,
+	source_path:         Slice,
 	// The collision data that physics builds a mesh collider from (see docs/physics/design.md#shapes), empty when the
 	// import setting collision is false: positions welded by position alone, so triangles that the render mesh splits
 	// at a seam share their edge, [3]f32 each; triangles of three u32 indices into them, without degenerate ones, front
@@ -437,7 +443,17 @@ mesh_page_padded :: proc "contextless" (triangle_bytes: u32) -> u64 {
 #assert(size_of(Mesh_Page_Header) == 32)
 
 mesh_layout :: proc() -> u64 {
-	return layout.hash(Mesh_Blob) ~ layout.hash(Mesh_Submesh) * 31 ~ layout.hash(Meshlet) * 961 ~ layout.hash(Mesh_Attributes) * 29791 ~ layout.hash(Impostor_Texel) * 923521 ~ layout.hash(Meshlet_Node) * 28629151 ~ layout.hash(Mesh_Skin_Vertex) * 887503681 ~ layout.hash(Mesh_Page) * 27512614111 ~ layout.hash(Mesh_Page_Header) * 852891037441
+	return(
+		layout.hash(Mesh_Blob) ~
+		layout.hash(Mesh_Submesh) * 31 ~
+		layout.hash(Meshlet) * 961 ~
+		layout.hash(Mesh_Attributes) * 29791 ~
+		layout.hash(Impostor_Texel) * 923521 ~
+		layout.hash(Meshlet_Node) * 28629151 ~
+		layout.hash(Mesh_Skin_Vertex) * 887503681 ~
+		layout.hash(Mesh_Page) * 27512614111 ~
+		layout.hash(Mesh_Page_Header) * 852891037441 \
+	)
 }
 
 // mesh_view checks a mesh blob: its header, its layout, its slices, and that its streams have the sizes that its
@@ -482,7 +498,10 @@ mesh_view :: proc(data: []byte) -> (blob: ^Mesh_Blob, ok: bool) {
 				return nil, false
 			}
 		}
-		if .Skinned in blob.flags || u64(blob.head_size) > u64(len(data)) || blob.head_size > blob.file_size || blob.pages.size == 0 {
+		if .Skinned in blob.flags ||
+		   u64(blob.head_size) > u64(len(data)) ||
+		   blob.head_size > blob.file_size ||
+		   blob.pages.size == 0 {
 			return nil, false
 		}
 	} else if blob.positions.size != blob.vertex_count * 12 ||
@@ -494,19 +513,33 @@ mesh_view :: proc(data: []byte) -> (blob: ^Mesh_Blob, ok: bool) {
 		return nil, false
 	}
 	switch {
-	case blob.skin.size != (.Skinned in blob.flags ? blob.vertex_count * size_of(Mesh_Skin_Vertex) : 0),
-	     blob.skin.offset % BLOB_ALIGN != 0,
-	     blob.pages.size % size_of(Mesh_Page) != 0 || blob.pages.offset % align_of(Mesh_Page) != 0,
-	     blob.page_dependencies.size % 4 != 0 || blob.page_dependencies.offset % 4 != 0,
-	     blob.submeshes.size % size_of(Mesh_Submesh) != 0 || blob.submeshes.offset % align_of(Mesh_Submesh) != 0,
-	     blob.meshlets.size % size_of(Meshlet) != 0 || blob.meshlets.offset % align_of(Meshlet) != 0,
-	     blob.meshlet_vertices.size % 4 != 0 || blob.meshlet_triangles.size % 3 != 0,
-	     blob.meshlet_nodes.size % size_of(Meshlet_Node) != 0 || blob.meshlet_nodes.offset % align_of(Meshlet_Node) != 0,
-	     blob.collision_positions.size % 12 != 0 || blob.collision_triangles.size % 12 != 0,
-	     blob.collision_submeshes.size != blob.collision_triangles.size / 12 * 2,
-	     blob.impostor.offset % align_of(Impostor_Texel) != 0,
-	     blob.impostor.size != 0 && (blob.impostor_size < IMPOSTOR_MIN_SIZE || blob.impostor_size > IMPOSTOR_MAX_SIZE),
-	     blob.impostor.size != impostor_texels(blob.impostor.size == 0 ? 0 : blob.impostor_size) * size_of(Impostor_Texel):
+	case blob.skin.size !=
+	     (.Skinned in blob.flags ? blob.vertex_count * size_of(Mesh_Skin_Vertex) : 0),
+	     blob.skin.offset % BLOB_ALIGN !=
+	     0,
+	     blob.pages.size % size_of(Mesh_Page) != 0 ||
+	     blob.pages.offset % align_of(Mesh_Page) != 0,
+	     blob.page_dependencies.size % 4 != 0 ||
+	     blob.page_dependencies.offset % 4 != 0,
+	     blob.submeshes.size % size_of(Mesh_Submesh) != 0 ||
+	     blob.submeshes.offset % align_of(Mesh_Submesh) != 0,
+	     blob.meshlets.size % size_of(Meshlet) != 0 ||
+	     blob.meshlets.offset % align_of(Meshlet) != 0,
+	     blob.meshlet_vertices.size % 4 != 0 ||
+	     blob.meshlet_triangles.size % 3 != 0,
+	     blob.meshlet_nodes.size % size_of(Meshlet_Node) != 0 ||
+	     blob.meshlet_nodes.offset % align_of(Meshlet_Node) != 0,
+	     blob.collision_positions.size % 12 != 0 ||
+	     blob.collision_triangles.size % 12 != 0,
+	     blob.collision_submeshes.size !=
+	     blob.collision_triangles.size / 12 * 2,
+	     blob.impostor.offset % align_of(Impostor_Texel) !=
+	     0,
+	     blob.impostor.size != 0 &&
+	     (blob.impostor_size < IMPOSTOR_MIN_SIZE || blob.impostor_size > IMPOSTOR_MAX_SIZE),
+	     blob.impostor.size !=
+	     impostor_texels(blob.impostor.size == 0 ? 0 : blob.impostor_size) *
+		     size_of(Impostor_Texel):
 		return nil, false
 	}
 	collision_vertices := blob.collision_positions.size / 12
@@ -528,9 +561,11 @@ mesh_view :: proc(data: []byte) -> (blob: ^Mesh_Blob, ok: bool) {
 		     // A root is in the head, and every other page past it.
 		     root ? end > u64(blob.head_size) : p.offset < blob.head_size,
 		     p.size < size_of(Mesh_Page_Header) || p.size > MESH_PAGE_SIZE || p.size % 4 != 0,
-		     p.first_meshlet != next_meshlet || p.meshlet_count == 0 || p.level0_meshlets > p.meshlet_count,
+		     p.first_meshlet !=
+			     next_meshlet || p.meshlet_count == 0 || p.level0_meshlets > p.meshlet_count,
 		     u64(p.first_meshlet) + u64(p.meshlet_count) > u64(meshlet_count),
-		     p.level0_meshlets > 0 && u64(p.first_vertex) + u64(p.vertex_count) > u64(blob.vertex_count),
+		     p.level0_meshlets >
+			     0 && u64(p.first_vertex) + u64(p.vertex_count) > u64(blob.vertex_count),
 		     u64(p.first_dependency) + u64(p.dependency_count) > u64(len(dependencies)):
 			return nil, false
 		}
@@ -565,7 +600,9 @@ mesh_view :: proc(data: []byte) -> (blob: ^Mesh_Blob, ok: bool) {
 					return nil, false
 				}
 				page := pages[n.page]
-				if page.first_meshlet < s.first_meshlet || u64(page.first_meshlet) + u64(page.meshlet_count) > u64(s.first_meshlet) + u64(s.meshlet_count) {
+				if page.first_meshlet < s.first_meshlet ||
+				   u64(page.first_meshlet) + u64(page.meshlet_count) >
+					   u64(s.first_meshlet) + u64(s.meshlet_count) {
 					return nil, false
 				}
 				limit = page.meshlet_count
@@ -578,7 +615,9 @@ mesh_view :: proc(data: []byte) -> (blob: ^Mesh_Blob, ok: bool) {
 			// Its last page is a root.
 			has_root := false
 			for p in pages {
-				if .Root in p.flags && p.first_meshlet >= s.first_meshlet && p.first_meshlet + p.meshlet_count == s.first_meshlet + s.meshlet_count {
+				if .Root in p.flags &&
+				   p.first_meshlet >= s.first_meshlet &&
+				   p.first_meshlet + p.meshlet_count == s.first_meshlet + s.meshlet_count {
 					has_root = true
 				}
 			}
@@ -594,11 +633,16 @@ mesh_view :: proc(data: []byte) -> (blob: ^Mesh_Blob, ok: bool) {
 // the head of a paged mesh. It is 0 for any other blob, which a reader needs the whole of.
 mesh_head_size :: proc(start: []byte) -> int {
 	header, ok := blob_header(start)
-	if !ok || header.kind != .Mesh || header.layout != mesh_layout() || len(start) < size_of(Mesh_Blob) {
+	if !ok ||
+	   header.kind != .Mesh ||
+	   header.layout != mesh_layout() ||
+	   len(start) < size_of(Mesh_Blob) {
 		return 0
 	}
 	blob := (^Mesh_Blob)(raw_data(start))
-	if .Paged not_in blob.flags || blob.head_size < size_of(Mesh_Blob) || blob.head_size > blob.file_size {
+	if .Paged not_in blob.flags ||
+	   blob.head_size < size_of(Mesh_Blob) ||
+	   blob.head_size > blob.file_size {
 		return 0
 	}
 	return int(blob.head_size)
@@ -619,23 +663,41 @@ mesh_page_dependencies :: proc "contextless" (data: []byte, blob: ^Mesh_Blob) ->
 // mesh_page_view checks an uncompressed page against its record in the table and the mesh's attribute stride: its
 // streams are inside it, in order and of the sizes that its counts give, and every meshlet's refs and triangles are
 // inside its streams and name vertices that the page has. A reader checks each page that it decompresses with this.
-mesh_page_view :: proc "contextless" (page: []byte, record: Mesh_Page, stride: u32) -> (header: ^Mesh_Page_Header, ok: bool) {
-	if len(page) != int(record.size) || len(page) < size_of(Mesh_Page_Header) || uintptr(raw_data(page)) % 4 != 0 {
+mesh_page_view :: proc "contextless" (
+	page: []byte,
+	record: Mesh_Page,
+	stride: u32,
+) -> (
+	header: ^Mesh_Page_Header,
+	ok: bool,
+) {
+	if len(page) != int(record.size) ||
+	   len(page) < size_of(Mesh_Page_Header) ||
+	   uintptr(raw_data(page)) % 4 != 0 {
 		return
 	}
 	header = (^Mesh_Page_Header)(raw_data(page))
 	size := u64(len(page))
 	meshlets_end := u64(size_of(Mesh_Page_Header)) + u64(header.meshlet_count) * size_of(Meshlet)
 	switch {
-	case header.meshlet_count != record.meshlet_count,
-	     header.vertex_count == 0 || header.vertex_count > 0x10000,
-	     record.level0_meshlets > 0 && header.vertex_count != record.vertex_count,
-	     u64(header.vertex_refs) != meshlets_end,
-	     u64(header.triangles) != u64(header.vertex_refs) + u64(header.ref_words) * 4,
-	     header.triangle_bytes % 3 != 0,
-	     u64(header.positions) != u64(header.triangles) + mesh_page_padded(header.triangle_bytes),
-	     u64(header.attributes) != u64(header.positions) + u64(header.vertex_count) * 12,
-	     size != u64(header.attributes) + u64(header.vertex_count) * u64(stride):
+	case header.meshlet_count !=
+	     record.meshlet_count,
+	     header.vertex_count == 0 ||
+	     header.vertex_count > 0x10000,
+	     record.level0_meshlets > 0 &&
+	     header.vertex_count != record.vertex_count,
+	     u64(header.vertex_refs) !=
+	     meshlets_end,
+	     u64(header.triangles) !=
+	     u64(header.vertex_refs) + u64(header.ref_words) * 4,
+	     header.triangle_bytes % 3 !=
+	     0,
+	     u64(header.positions) !=
+	     u64(header.triangles) + mesh_page_padded(header.triangle_bytes),
+	     u64(header.attributes) !=
+	     u64(header.positions) + u64(header.vertex_count) * 12,
+	     size !=
+	     u64(header.attributes) + u64(header.vertex_count) * u64(stride):
 		return nil, false
 	}
 	refs := mesh_page_refs(page, header)
@@ -684,7 +746,14 @@ mesh_page_attributes :: proc "contextless" (page: []byte, header: ^Mesh_Page_Hea
 // level 0: the positions and attributes of every page with level 0 meshlets, one page after another (see
 // docs/content/kinds/meshes.md#pages). The page must have passed mesh_page_view, and indices must hold
 // mesh_page_level0_indices.
-mesh_page_level0 :: proc "contextless" (page: []byte, header: ^Mesh_Page_Header, record: Mesh_Page, indices: []u32) -> (count: int) {
+mesh_page_level0 :: proc "contextless" (
+	page: []byte,
+	header: ^Mesh_Page_Header,
+	record: Mesh_Page,
+	indices: []u32,
+) -> (
+	count: int,
+) {
 	refs := mesh_page_refs(page, header)
 	triangles := mesh_page_triangles(page, header)
 	for m in mesh_page_meshlets(page, header)[:record.level0_meshlets] {
@@ -699,7 +768,13 @@ mesh_page_level0 :: proc "contextless" (page: []byte, header: ^Mesh_Page_Header,
 }
 
 // mesh_page_level0_indices is how many indices mesh_page_level0 writes for a page.
-mesh_page_level0_indices :: proc "contextless" (page: []byte, header: ^Mesh_Page_Header, record: Mesh_Page) -> (count: int) {
+mesh_page_level0_indices :: proc "contextless" (
+	page: []byte,
+	header: ^Mesh_Page_Header,
+	record: Mesh_Page,
+) -> (
+	count: int,
+) {
 	for m in mesh_page_meshlets(page, header)[:record.level0_meshlets] {
 		count += int(m.triangle_count) * 3
 	}
@@ -711,7 +786,14 @@ mesh_page_level0_indices :: proc "contextless" (page: []byte, header: ^Mesh_Page
 // submesh reaches holds its deepest level. It raises levels to each level's largest parent error and how far its groups
 // reach from center, and returns the submesh's deepest level. The renderer draws instanced meshes by these (see
 // docs/rendering/gpu-scene.md#instanced-meshes).
-mesh_level_buckets :: proc "contextless" (meshlets: []Meshlet, center: [3]f32, levels: ^[MESH_LEVEL_BUCKETS][2]f32) -> (first: [MESH_LEVEL_BUCKETS]u32, deepest: int) {
+mesh_level_buckets :: proc "contextless" (
+	meshlets: []Meshlet,
+	center: [3]f32,
+	levels: ^[MESH_LEVEL_BUCKETS][2]f32,
+) -> (
+	first: [MESH_LEVEL_BUCKETS]u32,
+	deepest: int,
+) {
 	for m in meshlets {
 		deepest = max(deepest, int(m.depth))
 	}
@@ -732,7 +814,9 @@ mesh_level_buckets :: proc "contextless" (meshlets: []Meshlet, center: [3]f32, l
 		l[0] = max(l[0], m.parent_error)
 		if m.parent_error < max(f32) {
 			offset := m.parent_center - center
-			reach := math.sqrt(offset.x * offset.x + offset.y * offset.y + offset.z * offset.z) + m.parent_radius
+			reach :=
+				math.sqrt(offset.x * offset.x + offset.y * offset.y + offset.z * offset.z) +
+				m.parent_radius
 			l[1] = max(l[1], reach)
 		}
 	}
@@ -838,24 +922,24 @@ Page_Entry :: struct {
 }
 
 Mesh_Contents :: struct {
-	guid:              Guid,
-	key:               u64,
-	flags:             Mesh_Flags,
-	vertex_count:      u32,
-	index_count:       u32,
-	bounds:            Mesh_Bounds,
-	submeshes:         []Submesh_Entry,
-	positions:         []byte,
-	attributes:        []byte,
+	guid:                Guid,
+	key:                 u64,
+	flags:               Mesh_Flags,
+	vertex_count:        u32,
+	index_count:         u32,
+	bounds:              Mesh_Bounds,
+	submeshes:           []Submesh_Entry,
+	positions:           []byte,
+	attributes:          []byte,
 	// With the Skinned flag, one record per vertex.
-	skin:              []Mesh_Skin_Vertex,
-	indices:           []byte,
-	meshlets:          []Meshlet,
-	meshlet_vertices:  []byte,
-	meshlet_triangles: []byte,
-	meshlet_nodes:     []Meshlet_Node,
-	name:              string,
-	source_path:       string,
+	skin:                []Mesh_Skin_Vertex,
+	indices:             []byte,
+	meshlets:            []Meshlet,
+	meshlet_vertices:    []byte,
+	meshlet_triangles:   []byte,
+	meshlet_nodes:       []Meshlet_Node,
+	name:                string,
+	source_path:         string,
 	collision_positions: [][3]f32,
 	collision_triangles: [][3]u32,
 	collision_submeshes: []u16,
@@ -880,7 +964,11 @@ mesh_write :: proc(contents: Mesh_Contents, allocator := context.allocator) -> [
 		copy(buffer[s.offset:], data)
 		return s
 	}
-	submeshes := reserve_bytes(&buffer, len(contents.submeshes) * size_of(Mesh_Submesh), BLOB_ALIGN)
+	submeshes := reserve_bytes(
+		&buffer,
+		len(contents.submeshes) * size_of(Mesh_Submesh),
+		BLOB_ALIGN,
+	)
 	positions := stream(&buffer, contents.positions)
 	attributes := stream(&buffer, contents.attributes)
 	skin := stream(&buffer, mem.slice_to_bytes(contents.skin))
@@ -914,7 +1002,11 @@ mesh_write :: proc(contents: Mesh_Contents, allocator := context.allocator) -> [
 			level_first   = s.level_first,
 			bounds        = s.bounds,
 		}
-		mem.copy(&buffer[submeshes.offset + u32(i * size_of(Mesh_Submesh))], &record, size_of(record))
+		mem.copy(
+			&buffer[submeshes.offset + u32(i * size_of(Mesh_Submesh))],
+			&record,
+			size_of(record),
+		)
 	}
 	// The roots end the head, and the other pages follow it. The buffer grows once for them all.
 	compressed_size := 0
@@ -948,7 +1040,13 @@ mesh_write :: proc(contents: Mesh_Contents, allocator := context.allocator) -> [
 	}
 	copy(buffer[pages.offset:], mem.slice_to_bytes(records))
 	blob := Mesh_Blob {
-		header = {magic = BLOB_MAGIC, kind = .Mesh, layout = mesh_layout(), key = contents.key, guid = contents.guid},
+		header = {
+			magic = BLOB_MAGIC,
+			kind = .Mesh,
+			layout = mesh_layout(),
+			key = contents.key,
+			guid = contents.guid,
+		},
 		flags = contents.flags,
 		vertex_count = contents.vertex_count,
 		index_count = contents.index_count,

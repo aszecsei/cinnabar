@@ -94,7 +94,16 @@ Features :: bit_set[Feature;u16]
 // are, which the output pass only encodes.
 debug_view_shaded :: proc(view: Debug_View) -> bool {
 	#partial switch view {
-	case .Lit, .Lighting_Only, .Direct_Light, .Indirect_Light, .Fog, .Gi_Diffuse, .Gi_Specular, .Emission, .Reflections, .Clouds:
+	case .Lit,
+	     .Lighting_Only,
+	     .Direct_Light,
+	     .Indirect_Light,
+	     .Fog,
+	     .Gi_Diffuse,
+	     .Gi_Specular,
+	     .Emission,
+	     .Reflections,
+	     .Clouds:
 		return true
 	}
 	return false
@@ -103,7 +112,13 @@ debug_view_shaded :: proc(view: Debug_View) -> bool {
 // debug_view_from_textures is whether a view comes from the frame's textures, not the forward pass.
 debug_view_from_textures :: proc(view: Debug_View) -> bool {
 	#partial switch view {
-	case .Lit ..= .Shadow_Cascades, .Meshlets, .Lod_Depth, .Emission, .Shadow_Virtual, .Reflection_Probes:
+	case .Lit ..=
+	     .Shadow_Cascades,
+	     .Meshlets,
+	     .Lod_Depth,
+	     .Emission,
+	     .Shadow_Virtual,
+	     .Reflection_Probes:
 		return false
 	}
 	return true
@@ -113,7 +128,12 @@ debug_view_from_textures :: proc(view: Debug_View) -> bool {
 // exposure offset in stops. A view other than Lit has no bloom and no post effects, and a view that is not shaded no
 // temporal AA, no fog and no clouds, so its colors stay as they are.
 @(private)
-apply_debug :: proc(s: ^Frame_Settings, view: Debug_View, disable: Features, exposure_offset: f32) {
+apply_debug :: proc(
+	s: ^Frame_Settings,
+	view: Debug_View,
+	disable: Features,
+	exposure_offset: f32,
+) {
 	shaded := debug_view_shaded(view)
 	s.post.no_aa ||= .Temporal_Aa in disable || !shaded
 	s.post.no_bloom ||= .Bloom in disable || view != .Lit
@@ -198,7 +218,11 @@ add_debug_view_pass :: proc(f: ^Frame) {
 	}
 	g := f.graph
 	dv := new(Debug_View_Frame, r.platform.frame_allocator)
-	dv^ = {frame = f, source = source, output = create_texture(g, {size = f.size, format = SCENE_FORMAT, label = "debug view"})}
+	dv^ = {
+		frame  = f,
+		source = source,
+		output = create_texture(g, {size = f.size, format = SCENE_FORMAT, label = "debug view"}),
+	}
 	p := add_compute_pass(g, "debug view", run_debug_view, dv)
 	if source != 0 {
 		read(g, p, source)

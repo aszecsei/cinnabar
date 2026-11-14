@@ -13,7 +13,12 @@ import "cinnabar:engine/render"
 // each). When no viewport is open, or none can draw this frame because the editor is still reading their targets, desc is
 // drawn into the frame target with the editor's previews, as without a viewport. It returns whether the frame's own view
 // executed. Call it once a frame, in place of render.draw_frame, with the renderer that init was given.
-draw_frame :: proc(e: ^Editor, r: ^render.Renderer, w: ^ecs.World, desc: render.Frame_Desc) -> bool {
+draw_frame :: proc(
+	e: ^Editor,
+	r: ^render.Renderer,
+	w: ^ecs.World,
+	desc: render.Frame_Desc,
+) -> bool {
 	if !active(e) {
 		return render.draw_frame(r, w, desc)
 	}
@@ -48,7 +53,16 @@ Tools :: struct {
 //   - The own view's shading_stats is the game's or its viewport's.
 // The game's extra views follow the viewports'. Without an editor, desc is returned as it is.
 @(private)
-plan_frame :: proc(e: ^Editor, w: ^ecs.World, desc: render.Frame_Desc, views: []Frame_Viewport, base: render.Quality, caps: render.Caps) -> (out: render.Frame_Desc) {
+plan_frame :: proc(
+	e: ^Editor,
+	w: ^ecs.World,
+	desc: render.Frame_Desc,
+	views: []Frame_Viewport,
+	base: render.Quality,
+	caps: render.Caps,
+) -> (
+	out: render.Frame_Desc,
+) {
 	out = desc
 	if !active(e) {
 		return
@@ -77,7 +91,14 @@ plan_frame :: proc(e: ^Editor, w: ^ecs.World, desc: render.Frame_Desc, views: []
 
 // plan_view describes a viewport's view of the game's frame.
 @(private = "file")
-plan_view :: proc(e: ^Editor, w: ^ecs.World, desc: render.Frame_Desc, v: Frame_Viewport, base: render.Quality, caps: render.Caps) -> render.Extra_View {
+plan_view :: proc(
+	e: ^Editor,
+	w: ^ecs.World,
+	desc: render.Frame_Desc,
+	v: Frame_Viewport,
+	base: render.Quality,
+	caps: render.Caps,
+) -> render.Extra_View {
 	allocator := e.platform.frame_allocator
 	overrides := render_overrides(e, v.viewport)
 	scene := v.kind == .Scene
@@ -115,7 +136,20 @@ plan_view :: proc(e: ^Editor, w: ^ecs.World, desc: render.Frame_Desc, v: Frame_V
 @(private = "file")
 tools_overlay :: proc(f: ^render.Frame, data: rawptr) {
 	t := (^Tools)(data)
-	add_viewport_passes(t.e, f.graph, t.w, {viewport = t.viewport, view = f.view, size = f.size, output_size = f.output_size, target = f.debug, ids = f.ids, depth = f.depth})
+	add_viewport_passes(
+		t.e,
+		f.graph,
+		t.w,
+		{
+			viewport = t.viewport,
+			view = f.view,
+			size = f.size,
+			output_size = f.output_size,
+			target = f.debug,
+			ids = f.ids,
+			depth = f.depth,
+		},
+	)
 }
 
 // hidden_together is the game's hidden entities and the editor's, a bit for each slot. With only one, it is that one.

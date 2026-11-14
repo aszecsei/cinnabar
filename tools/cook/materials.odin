@@ -59,35 +59,35 @@ Switch_Decl :: struct {
 
 // Material_Decl is a parsed .material file.
 Material_Decl :: struct {
-	asset:        int,
-	shading:      string,
-	blend:        format.Material_Blend,
-	cutoff:       f32,
+	asset:              int,
+	shading:            string,
+	blend:              format.Material_Blend,
+	cutoff:             f32,
 	// A Transparent material's transparency: sorted back to front, or moment-based by default.
-	sorted:       bool,
-	two_sided:    bool,
-	cast_shadows: bool,
+	sorted:             bool,
+	two_sided:          bool,
+	cast_shadows:       bool,
 	// How far displace may move a vertex, in meters (see docs/rendering/materials.md#vertex-displacement).
 	displacement_bound: f32,
 	// The material draws the patches of Surface_Renderers (geometry = patches, see docs/rendering/surfaces.md#surfaces).
-	patches:      bool,
+	patches:            bool,
 	// The material draws its meshes as billboards (geometry = billboard or billboard_axis, see
 	// docs/rendering/gpu-scene.md#billboards).
-	billboard:    Billboard,
+	billboard:          Billboard,
 	// The material draws particle ribbons (geometry = ribbon, see docs/rendering/particles.md#ribbons).
-	ribbon:       bool,
-	params:       [dynamic]Param_Decl,
-	switches:     [dynamic]Switch_Decl,
+	ribbon:             bool,
+	params:             [dynamic]Param_Decl,
+	switches:           [dynamic]Switch_Decl,
 	// The HLSL after the `---` line, and the line of the file that it starts at, or the graph.
-	body:         string,
-	body_line:    int,
-	has_body:     bool,
-	graph:        Graph,
+	body:               string,
+	body_line:          int,
+	has_body:           bool,
+	graph:              Graph,
 	// The texture that the editor's texture tools measure by, from a `tool_texture` line, or zero for the first texture
 	// that the graph samples, and the hotspot rectangles in its texels (see docs/editor/mesh-editing.md#texture-tools).
-	tool_texture: format.Guid,
-	hotspots:     [dynamic][4]u32,
-	ok:           bool,
+	tool_texture:       format.Guid,
+	hotspots:           [dynamic][4]u32,
+	ok:                 bool,
 }
 
 // Billboard is how a material's meshes face the camera: not at all, wholly, or turning about their +y.
@@ -117,15 +117,15 @@ Instance_Decl :: struct {
 // and its parameters' values.
 @(private = "file")
 Resolved :: struct {
-	material: ^Material_Decl,
-	switches: u32,
-	params:   []Param_Decl,
+	material:     ^Material_Decl,
+	switches:     u32,
+	params:       []Param_Decl,
 	// The sources of it and every parent, which its key covers.
-	chain:    [dynamic][]byte,
+	chain:        [dynamic][]byte,
 	// The texture that the editor's texture tools measure by: the nearest `tool_texture` line, else the first texture
 	// that the material samples, with the instances' overrides.
 	tool_texture: format.Guid,
-	ok:       bool,
+	ok:           bool,
 }
 
 // Material_Set is what cooking a material needs of the other assets: the shading models by name, the material
@@ -160,7 +160,15 @@ material_set :: proc(pass: ^Pass) -> (set: Material_Set, ok: bool) {
 	for decl in decls {
 		for other in decls {
 			if other != decl && other.name == decl.name {
-				report_error(problems, assets[decl.asset].path, 0, 0, "a shading model named %s is also at %s. Rename one of them.", decl.name, assets[other.asset].path)
+				report_error(
+					problems,
+					assets[decl.asset].path,
+					0,
+					0,
+					"a shading model named %s is also at %s. Rename one of them.",
+					decl.name,
+					assets[other.asset].path,
+				)
 			}
 		}
 		usable := parsed[decl] && files[decl.name] == 1
@@ -201,7 +209,9 @@ add_function_dependency :: proc(a: ^Asset_Source, n: ^Graph_Node) {
 		return
 	}
 	for f in n.fields {
-		if f.name == "function" && f.value.kind == .Asset && !slice.contains(a.dependencies[:], f.value.guid) {
+		if f.name == "function" &&
+		   f.value.kind == .Asset &&
+		   !slice.contains(a.dependencies[:], f.value.guid) {
 			append(&a.dependencies, f.value.guid)
 		}
 	}
@@ -258,7 +268,12 @@ cook_materials :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pas
 	}
 
 	out_dir := config_dir(options)
-	if len(materials) + len(instances) > 0 && !make_output_dir(pass, fmt.tprintf("%s/generated", out_dir), {.Material, .Material_Instance}) {
+	if len(materials) + len(instances) > 0 &&
+	   !make_output_dir(
+			   pass,
+			   fmt.tprintf("%s/generated", out_dir),
+			   {.Material, .Material_Instance},
+		   ) {
 		return false
 	}
 	step_begin(pass, .Material, "", len(materials) + len(instances))
@@ -285,10 +300,27 @@ cook_materials :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pas
 			report_error(problems, a.path, 0, 0, "no shading model is named %s", decl.shading)
 			result = .Failed
 		case !shading_usable(assets, shading):
-			report_error(problems, a.path, 0, 0, "not cooked, because its shading model %s has errors", decl.shading)
+			report_error(
+				problems,
+				a.path,
+				0,
+				0,
+				"not cooked, because its shading model %s has errors",
+				decl.shading,
+			)
 			result = .Blocked
 		case:
-			result = cook_material(options, a^, guid, decl, shading, set, list[:], fmt.tprintf("%s/%s.blob", out_dir, guid_text(guid)), pass)
+			result = cook_material(
+				options,
+				a^,
+				guid,
+				decl,
+				shading,
+				set,
+				list[:],
+				fmt.tprintf("%s/%s.blob", out_dir, guid_text(guid)),
+				pass,
+			)
 		}
 		settle(pass, decl.asset, result)
 		ok &&= !asset_failed(result)
@@ -320,7 +352,14 @@ cook_materials :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pas
 // cook_preview cooks a material's text that the editor has not saved, as the material with this GUID, into the
 // preview area of the cache, <config>/preview/<guid>.blob (see docs/rendering/materials.md#material-previews). It compiles the
 // material's default switches only. Its problems name the material's file, with the lines of the text.
-cook_preview :: proc(options: Cook_Options, guid: format.Guid, text: string) -> (problems: Problems, ok: bool) {
+cook_preview :: proc(
+	options: Cook_Options,
+	guid: format.Guid,
+	text: string,
+) -> (
+	problems: Problems,
+	ok: bool,
+) {
 	// The scan's and the other assets' problems are the content's, which the daemon's passes report.
 	content: Problems
 	assets, _, _, scanned := scan(options.roots[:], &content)
@@ -376,7 +415,19 @@ cook_preview :: proc(options: Cook_Options, guid: format.Guid, text: string) -> 
 		force    = make(map[format.Guid]bool, context.temp_allocator),
 	}
 	pass.force[guid] = true
-	ok = !asset_failed(cook_material(options, a, guid, decl, shading, set, {switches}, fmt.tprintf("%s/%s.blob", dir, guid_text(guid)), &pass))
+	ok = !asset_failed(
+		cook_material(
+			options,
+			a,
+			guid,
+			decl,
+			shading,
+			set,
+			{switches},
+			fmt.tprintf("%s/%s.blob", dir, guid_text(guid)),
+			&pass,
+		),
+	)
 	return pass.problems, ok
 }
 
@@ -387,7 +438,11 @@ guid_text :: proc(guid: format.Guid) -> string {
 }
 
 @(private = "file")
-add_variant :: proc(variants: ^map[^Material_Decl][dynamic]u32, decl: ^Material_Decl, switches: u32) {
+add_variant :: proc(
+	variants: ^map[^Material_Decl][dynamic]u32,
+	decl: ^Material_Decl,
+	switches: u32,
+) {
 	list := variants[decl] or_else make([dynamic]u32, context.temp_allocator)
 	if !slice.contains(list[:], switches) {
 		append(&list, switches)
@@ -412,7 +467,15 @@ Decl_Line :: struct {
 	number:   int,
 }
 
-decl_lines :: proc(text: string, stop_at_body := false) -> (lines: []Decl_Line, body: string, body_line: int, has_body: bool) {
+decl_lines :: proc(
+	text: string,
+	stop_at_body := false,
+) -> (
+	lines: []Decl_Line,
+	body: string,
+	body_line: int,
+	has_body: bool,
+) {
 	result := make([dynamic]Decl_Line, context.temp_allocator)
 	rest := text
 	number := 0
@@ -445,8 +508,19 @@ input_count :: proc(type: string) -> int {
 	return 0
 }
 
-parse_shading :: proc(a: Asset_Source, index: int, problems: ^Problems) -> (decl: Shading_Decl, ok: bool) {
-	decl = {asset = index, name = filepath.stem(a.path), inputs = make([dynamic]Shading_Input, context.temp_allocator)}
+parse_shading :: proc(
+	a: Asset_Source,
+	index: int,
+	problems: ^Problems,
+) -> (
+	decl: Shading_Decl,
+	ok: bool,
+) {
+	decl = {
+		asset  = index,
+		name   = filepath.stem(a.path),
+		inputs = make([dynamic]Shading_Input, context.temp_allocator),
+	}
 	ok = true
 	lines, _, _, _ := decl_lines(string(source_of(a)))
 	if len(lines) == 0 || lines[0].text != "shading 1" {
@@ -468,25 +542,53 @@ parse_shading :: proc(a: Asset_Source, index: int, problems: ^Problems) -> (decl
 			head, _, value := strings.partition(rest, "=")
 			fields := strings.fields(head, context.temp_allocator)
 			if len(fields) != 2 || !is_identifier(fields[0]) || input_count(fields[1]) == 0 {
-				report_error(problems, a.path, l.number, 0, "an input is `input <name> <float, float2, float3 or float4> = <default>`")
+				report_error(
+					problems,
+					a.path,
+					l.number,
+					0,
+					"an input is `input <name> <float, float2, float3 or float4> = <default>`",
+				)
 				ok = false
 				continue
 			}
 			values, count, numbers_ok := parse_numbers(strings.trim_space(value))
 			if !numbers_ok || count != input_count(fields[1]) {
-				report_error(problems, a.path, l.number, 0, "the input %s needs %d numbers as its default", fields[0], input_count(fields[1]))
+				report_error(
+					problems,
+					a.path,
+					l.number,
+					0,
+					"the input %s needs %d numbers as its default",
+					fields[0],
+					input_count(fields[1]),
+				)
 				ok = false
 				continue
 			}
 			append(&decl.inputs, Shading_Input{fields[0], fields[1], count, values})
 		case:
-			report_error(problems, a.path, l.number, 0, "a shading model's lines are `input` and `flag`, not %q", word)
+			report_error(
+				problems,
+				a.path,
+				l.number,
+				0,
+				"a shading model's lines are `input` and `flag`, not %q",
+				word,
+			)
 			ok = false
 		}
 	}
 	decl.implementation = fmt.tprintf("%s/%s.hlsli", filepath.dir(a.path), decl.name)
 	if !os.is_file(decl.implementation) {
-		report_error(problems, a.path, 0, 0, "has no implementation: %s.hlsli is not beside it", decl.name)
+		report_error(
+			problems,
+			a.path,
+			0,
+			0,
+			"has no implementation: %s.hlsli is not beside it",
+			decl.name,
+		)
 		ok = false
 	}
 	return
@@ -494,7 +596,14 @@ parse_shading :: proc(a: Asset_Source, index: int, problems: ^Problems) -> (decl
 
 // parse_texture reads a texture value: a texture asset's GUID after $, or white, black or normal for none.
 @(private = "file")
-parse_texture :: proc(text: string, kinds: map[format.Guid]format.Asset_Kind) -> (guid: format.Guid, default: format.Material_Texture_Default, message: string) {
+parse_texture :: proc(
+	text: string,
+	kinds: map[format.Guid]format.Asset_Kind,
+) -> (
+	guid: format.Guid,
+	default: format.Material_Texture_Default,
+	message: string,
+) {
 	switch text {
 	case "white":
 		return {}, .White, ""
@@ -516,7 +625,14 @@ parse_texture :: proc(text: string, kinds: map[format.Guid]format.Asset_Kind) ->
 	return parsed, .White, ""
 }
 
-parse_material :: proc(a: Asset_Source, index: int, kinds: map[format.Guid]format.Asset_Kind, problems: ^Problems) -> (decl: Material_Decl) {
+parse_material :: proc(
+	a: Asset_Source,
+	index: int,
+	kinds: map[format.Guid]format.Asset_Kind,
+	problems: ^Problems,
+) -> (
+	decl: Material_Decl,
+) {
 	decl = {
 		asset        = index,
 		cast_shadows = true,
@@ -550,13 +666,25 @@ parse_material :: proc(a: Asset_Source, index: int, kinds: map[format.Guid]forma
 				key, _, value := strings.partition(l.text, "=")
 				v, message := parse_graph_value(strings.trim_space(value))
 				if strings.trim_space(key) != "group" || message != "" || v.kind != .Text {
-					report_error(problems, a.path, l.number, 0, "a parameter's line is `group = \"<name>\"`")
+					report_error(
+						problems,
+						a.path,
+						l.number,
+						0,
+						"a parameter's line is `group = \"<name>\"`",
+					)
 					decl.ok = false
 					continue
 				}
 				decl.params[param].group = v.text
 			case:
-				report_error(problems, a.path, l.number, 0, "an indented line belongs to a parameter or a node")
+				report_error(
+					problems,
+					a.path,
+					l.number,
+					0,
+					"an indented line belongs to a parameter or a node",
+				)
 				decl.ok = false
 			}
 			continue
@@ -582,7 +710,13 @@ parse_material :: proc(a: Asset_Source, index: int, kinds: map[format.Guid]forma
 				rect_ok = n_ok && n <= 1 << 16
 			}
 			if !rect_ok || rect[2] <= rect[0] || rect[3] <= rect[1] {
-				report_error(problems, a.path, l.number, 0, "a hotspot is `hotspot <x0> <y0> <x1> <y1>`, in texels of the tool texture, with x1 above x0 and y1 above y0")
+				report_error(
+					problems,
+					a.path,
+					l.number,
+					0,
+					"a hotspot is `hotspot <x0> <y0> <x1> <y1>`, in texels of the tool texture, with x1 above x0 and y1 above y0",
+				)
 				decl.ok = false
 				continue
 			}
@@ -602,12 +736,25 @@ parse_material :: proc(a: Asset_Source, index: int, kinds: map[format.Guid]forma
 			names[name] = true
 			if word == "switch" {
 				if len(fields) != 1 || (value != "true" && value != "false") {
-					report_error(problems, a.path, l.number, 0, "a switch is `switch <name> = true` or `false`")
+					report_error(
+						problems,
+						a.path,
+						l.number,
+						0,
+						"a switch is `switch <name> = true` or `false`",
+					)
 					decl.ok = false
 					continue
 				}
 				if len(decl.switches) == format.MAX_MATERIAL_SWITCHES {
-					report_error(problems, a.path, l.number, 0, "a material has at most %d switches", format.MAX_MATERIAL_SWITCHES)
+					report_error(
+						problems,
+						a.path,
+						l.number,
+						0,
+						"a material has at most %d switches",
+						format.MAX_MATERIAL_SWITCHES,
+					)
 					decl.ok = false
 					continue
 				}
@@ -633,7 +780,13 @@ parse_material :: proc(a: Asset_Source, index: int, kinds: map[format.Guid]forma
 			case "texture":
 				p.type = .Texture
 			case:
-				report_error(problems, a.path, l.number, 0, "a parameter is `param <name> <float, float2, float3, float4, color or texture> = <default>`")
+				report_error(
+					problems,
+					a.path,
+					l.number,
+					0,
+					"a parameter is `param <name> <float, float2, float3, float4, color or texture> = <default>`",
+				)
 				decl.ok = false
 				continue
 			}
@@ -662,7 +815,13 @@ parse_material :: proc(a: Asset_Source, index: int, kinds: map[format.Guid]forma
 			case "additive":
 				decl.blend = .Additive
 			case:
-				report_error(problems, a.path, l.number, 0, "blend is opaque, masked, transparent or additive")
+				report_error(
+					problems,
+					a.path,
+					l.number,
+					0,
+					"blend is opaque, masked, transparent or additive",
+				)
 				decl.ok = false
 			}
 		case "cutoff":
@@ -698,20 +857,38 @@ parse_material :: proc(a: Asset_Source, index: int, kinds: map[format.Guid]forma
 			case "ribbon":
 				decl.ribbon = true
 			case:
-				report_error(problems, a.path, l.number, 0, "geometry is mesh, patches, billboard, billboard_axis or ribbon")
+				report_error(
+					problems,
+					a.path,
+					l.number,
+					0,
+					"geometry is mesh, patches, billboard, billboard_axis or ribbon",
+				)
 				decl.ok = false
 			}
 		case "displacement_bound":
 			bound, bound_ok := strconv.parse_f32(value)
 			if !bound_ok || bound < 0 {
-				report_error(problems, a.path, l.number, 0, "displacement_bound is a number of meters, 0 or more")
+				report_error(
+					problems,
+					a.path,
+					l.number,
+					0,
+					"displacement_bound is a number of meters, 0 or more",
+				)
 				decl.ok = false
 			}
 			decl.displacement_bound = bound
 		case "tool_texture":
 			guid, _, message := parse_texture(value, kinds)
 			if message != "" || guid == {} {
-				report_error(problems, a.path, l.number, 0, "tool_texture is a texture's GUID after $")
+				report_error(
+					problems,
+					a.path,
+					l.number,
+					0,
+					"tool_texture is a texture's GUID after $",
+				)
 				decl.ok = false
 			}
 			decl.tool_texture = guid
@@ -732,15 +909,33 @@ parse_material :: proc(a: Asset_Source, index: int, kinds: map[format.Guid]forma
 	}
 	// The settings can come in any order, so the blend is known only now.
 	if cutoff_line != 0 && format.material_transparent(decl.blend) {
-		report_error(problems, a.path, cutoff_line, 0, "cutoff is for masked materials; a transparent one blends by its opacity")
+		report_error(
+			problems,
+			a.path,
+			cutoff_line,
+			0,
+			"cutoff is for masked materials; a transparent one blends by its opacity",
+		)
 		decl.ok = false
 	}
 	if decl.ribbon && !format.material_transparent(decl.blend) {
-		report_error(problems, a.path, geometry_line, 0, "a ribbon material's blend is transparent or additive")
+		report_error(
+			problems,
+			a.path,
+			geometry_line,
+			0,
+			"a ribbon material's blend is transparent or additive",
+		)
 		decl.ok = false
 	}
 	if transparency_line != 0 && decl.blend != .Transparent {
-		report_error(problems, a.path, transparency_line, 0, "transparency is for transparent materials")
+		report_error(
+			problems,
+			a.path,
+			transparency_line,
+			0,
+			"transparency is for transparent materials",
+		)
 		decl.ok = false
 	}
 	// Transparent surfaces cast no shadows: the shadow maps hold only depth (see docs/rendering/transparency.md#transparency).
@@ -748,25 +943,56 @@ parse_material :: proc(a: Asset_Source, index: int, kinds: map[format.Guid]forma
 		decl.cast_shadows = false
 	}
 	if decl.shading == "" {
-		report_error(problems, a.path, 0, 0, "a material names its shading model, such as `shading = lit`")
+		report_error(
+			problems,
+			a.path,
+			0,
+			0,
+			"a material names its shading model, such as `shading = lit`",
+		)
 		decl.ok = false
 	}
 	switch {
 	case has_body && len(decl.graph.nodes) > 0:
-		report_error(problems, a.path, 0, 0, "a material defines evaluate with nodes or in HLSL after a `---` line, not both")
+		report_error(
+			problems,
+			a.path,
+			0,
+			0,
+			"a material defines evaluate with nodes or in HLSL after a `---` line, not both",
+		)
 		decl.ok = false
 	case !has_body && len(decl.graph.nodes) == 0:
-		report_error(problems, a.path, 0, 0, "a material defines evaluate with nodes, or in HLSL after a `---` line")
+		report_error(
+			problems,
+			a.path,
+			0,
+			0,
+			"a material defines evaluate with nodes, or in HLSL after a `---` line",
+		)
 		decl.ok = false
 	case !has_body:
-		decl.ok = graph_check(&decl.graph, a.path, .Material, decl.params[:], decl.switches[:], problems) && decl.ok
+		decl.ok =
+			graph_check(
+				&decl.graph,
+				a.path,
+				.Material,
+				decl.params[:],
+				decl.switches[:],
+				problems,
+			) &&
+			decl.ok
 	}
 	return
 }
 
 // set_param sets a parameter's value from its text, and gives a message if the text does not fit its type.
 @(private = "file")
-set_param :: proc(p: ^Param_Decl, text: string, kinds: map[format.Guid]format.Asset_Kind) -> string {
+set_param :: proc(
+	p: ^Param_Decl,
+	text: string,
+	kinds: map[format.Guid]format.Asset_Kind,
+) -> string {
 	if p.type == .Texture {
 		guid, default, message := parse_texture(text, kinds)
 		p.texture, p.texture_default = guid, default
@@ -796,10 +1022,20 @@ param_count :: proc(type: format.Material_Param_Type) -> int {
 }
 
 parse_instance :: proc(a: Asset_Source, index: int, problems: ^Problems) -> (decl: Instance_Decl) {
-	decl = {asset = index, overrides = make([dynamic]Override, context.temp_allocator), ok = true}
+	decl = {
+		asset     = index,
+		overrides = make([dynamic]Override, context.temp_allocator),
+		ok        = true,
+	}
 	lines, _, _, _ := decl_lines(string(source_of(a)))
 	if len(lines) == 0 || lines[0].text != "material_instance 1" {
-		report_error(problems, a.path, 1, 0, "a material instance starts with `material_instance 1`")
+		report_error(
+			problems,
+			a.path,
+			1,
+			0,
+			"a material instance starts with `material_instance 1`",
+		)
 		decl.ok = false
 		return
 	}
@@ -809,7 +1045,13 @@ parse_instance :: proc(a: Asset_Source, index: int, problems: ^Problems) -> (dec
 		if key == "parent" {
 			parent, parent_ok := format.guid_parse(strings.trim_prefix(value, "$"))
 			if !parent_ok || !strings.has_prefix(value, "$") {
-				report_error(problems, a.path, l.number, 0, "parent is a material's or an instance's GUID after $")
+				report_error(
+					problems,
+					a.path,
+					l.number,
+					0,
+					"parent is a material's or an instance's GUID after $",
+				)
 				decl.ok = false
 			}
 			decl.parent = parent
@@ -818,7 +1060,13 @@ parse_instance :: proc(a: Asset_Source, index: int, problems: ^Problems) -> (dec
 		if key == "tool_texture" {
 			guid, guid_ok := format.guid_parse(strings.trim_prefix(value, "$"))
 			if !guid_ok || !strings.has_prefix(value, "$") {
-				report_error(problems, a.path, l.number, 0, "tool_texture is a texture's GUID after $")
+				report_error(
+					problems,
+					a.path,
+					l.number,
+					0,
+					"tool_texture is a texture's GUID after $",
+				)
 				decl.ok = false
 			}
 			decl.tool_texture = guid
@@ -827,7 +1075,13 @@ parse_instance :: proc(a: Asset_Source, index: int, problems: ^Problems) -> (dec
 		append(&decl.overrides, Override{key, value, l.number})
 	}
 	if decl.parent == {} && decl.ok {
-		report_error(problems, a.path, 0, 0, "a material instance names its parent, as `parent = $<GUID>`")
+		report_error(
+			problems,
+			a.path,
+			0,
+			0,
+			"a material instance names its parent, as `parent = $<GUID>`",
+		)
 		decl.ok = false
 	}
 	return
@@ -858,13 +1112,26 @@ resolve :: proc(
 		if !is_instance {
 			if len(path) > 0 {
 				buffer: [32]u8
-				report_error(problems, assets[path[len(path) - 1].asset].path, 0, 0, "its parent %s is not a material or an instance", format.guid_format(current, &buffer))
+				report_error(
+					problems,
+					assets[path[len(path) - 1].asset].path,
+					0,
+					0,
+					"its parent %s is not a material or an instance",
+					format.guid_format(current, &buffer),
+				)
 			}
 			return
 		}
 		for seen in path {
 			if seen == decl {
-				report_error(problems, assets[decl.asset].path, 0, 0, "its parents loop back to it")
+				report_error(
+					problems,
+					assets[decl.asset].path,
+					0,
+					0,
+					"its parents loop back to it",
+				)
 				return
 			}
 		}
@@ -894,7 +1161,14 @@ resolve :: proc(
 		for o in decl.overrides {
 			if switch_index, found := find_switch(m, o.name); found {
 				if o.value != "true" && o.value != "false" {
-					report_error(problems, a.path, o.line, 0, "the switch %s is true or false", o.name)
+					report_error(
+						problems,
+						a.path,
+						o.line,
+						0,
+						"the switch %s is true or false",
+						o.name,
+					)
 					r.ok = false
 				} else if o.value == "true" {
 					r.switches |= 1 << u32(switch_index)
@@ -914,7 +1188,14 @@ resolve :: proc(
 				}
 			}
 			if !found {
-				report_error(problems, a.path, o.line, 0, "its material has no parameter or switch named %s", o.name)
+				report_error(
+					problems,
+					a.path,
+					o.line,
+					0,
+					"its material has no parameter or switch named %s",
+					o.name,
+				)
 				r.ok = false
 			}
 		}
@@ -996,7 +1277,13 @@ block_layout :: proc(params: []Param_Decl) -> (l: Block_Layout) {
 // encode_block writes the parameters' values into a block, with each texture's index 0, which the runtime writes, and
 // gives the textures.
 @(private = "file")
-encode_block :: proc(params: []Param_Decl, l: Block_Layout) -> (block: []byte, textures: []format.Material_Texture) {
+encode_block :: proc(
+	params: []Param_Decl,
+	l: Block_Layout,
+) -> (
+	block: []byte,
+	textures: []format.Material_Texture,
+) {
 	block = make([]byte, l.size, context.temp_allocator)
 	list := make([dynamic]format.Material_Texture, context.temp_allocator)
 	for p, i in params {
@@ -1057,14 +1344,23 @@ generate_source :: proc(
 		}
 	}
 	b := strings.builder_make(context.temp_allocator)
-	fmt.sbprintfln(&b, "// Generated by tools/cook from %s, switches %x. See docs/content/kinds/materials.md#materials.", a.name, switches)
+	fmt.sbprintfln(
+		&b,
+		"// Generated by tools/cook from %s, switches %x. See docs/content/kinds/materials.md#materials.",
+		a.name,
+		switches,
+	)
 	fmt.sbprintfln(&b, "#define MATERIAL_TWO_SIDED %d", int(decl.two_sided))
 	fmt.sbprintfln(&b, "#define MATERIAL_DISPLACES %d", int(displaces))
 	fmt.sbprintfln(&b, "#define MATERIAL_PATCHES %d", int(decl.patches))
 	fmt.sbprintfln(&b, "#define MATERIAL_BILLBOARD %d", int(decl.billboard))
 	fmt.sbprintfln(&b, "#define MATERIAL_RIBBON %d", int(decl.ribbon))
 	fmt.sbprintfln(&b, "#define MATERIAL_MASKED %d", int(decl.blend == .Masked))
-	fmt.sbprintfln(&b, "#define MATERIAL_TRANSPARENT %d", int(format.material_transparent(decl.blend)))
+	fmt.sbprintfln(
+		&b,
+		"#define MATERIAL_TRANSPARENT %d",
+		int(format.material_transparent(decl.blend)),
+	)
 	fmt.sbprintfln(&b, "#define MATERIAL_ADDITIVE %d", int(decl.blend == .Additive))
 	fmt.sbprintfln(&b, "#define MATERIAL_CUTOFF %f", decl.cutoff)
 	fmt.sbprintfln(&b, "#define SHADING_NO_LIGHTING %d", int(shading.no_lighting))
@@ -1090,7 +1386,13 @@ generate_source :: proc(
 		for &v, c in values {
 			v = fmt.tprintf("%f", input.default[c])
 		}
-		fmt.sbprintfln(&b, "\ts.%s = %s(%s);", input.name, input.type, strings.join(values, ", ", context.temp_allocator))
+		fmt.sbprintfln(
+			&b,
+			"\ts.%s = %s(%s);",
+			input.name,
+			input.type,
+			strings.join(values, ", ", context.temp_allocator),
+		)
 	}
 	strings.write_string(&b, "\treturn s;\n}\n\n")
 	fmt.sbprintfln(&b, "#include \"%s\"\n", shading.implementation)
@@ -1175,7 +1477,10 @@ material_entries :: proc(decl: ^Material_Decl) -> []Material_Entry {
 	if decl.blend == .Masked {
 		append(&entries, Material_Entry{.Depth, {.Pixel, "ps_" + SHADER_MODEL, "ps_depth"}})
 	}
-	append(&entries, Material_Entry{.Virtual_Depth, {.Pixel, "ps_" + SHADER_MODEL, "ps_virtual_depth"}})
+	append(
+		&entries,
+		Material_Entry{.Virtual_Depth, {.Pixel, "ps_" + SHADER_MODEL, "ps_virtual_depth"}},
+	)
 	// The voxels see every surface that the prepass draws but a ribbon, whose draw only the camera's view has.
 	if !decl.ribbon {
 		append(&entries, Material_Entry{.Voxelize, {.Pixel, "ps_" + SHADER_MODEL, "ps_voxelize"}})
@@ -1190,13 +1495,28 @@ material_entries :: proc(decl: ^Material_Decl) -> []Material_Entry {
 			Material_Entry{.Prepass, {.Mesh, "ms_" + SHADER_MODEL, "ms_prepass"}},
 			Material_Entry{.Depth, {.Amplification, "as_" + SHADER_MODEL, "as_cluster"}},
 			Material_Entry{.Depth, {.Mesh, "ms_" + SHADER_MODEL, "ms_depth"}},
-			Material_Entry{.Impostor_Forward, {.Vertex, "vs_" + SHADER_MODEL, "vs_impostor_forward"}},
-			Material_Entry{.Impostor_Forward, {.Pixel, "ps_" + SHADER_MODEL, "ps_impostor_forward"}},
-			Material_Entry{.Impostor_Prepass, {.Vertex, "vs_" + SHADER_MODEL, "vs_impostor_prepass"}},
-			Material_Entry{.Impostor_Prepass, {.Pixel, "ps_" + SHADER_MODEL, "ps_impostor_prepass"}},
+			Material_Entry {
+				.Impostor_Forward,
+				{.Vertex, "vs_" + SHADER_MODEL, "vs_impostor_forward"},
+			},
+			Material_Entry {
+				.Impostor_Forward,
+				{.Pixel, "ps_" + SHADER_MODEL, "ps_impostor_forward"},
+			},
+			Material_Entry {
+				.Impostor_Prepass,
+				{.Vertex, "vs_" + SHADER_MODEL, "vs_impostor_prepass"},
+			},
+			Material_Entry {
+				.Impostor_Prepass,
+				{.Pixel, "ps_" + SHADER_MODEL, "ps_impostor_prepass"},
+			},
 			Material_Entry{.Impostor_Depth, {.Vertex, "vs_" + SHADER_MODEL, "vs_impostor_depth"}},
 			Material_Entry{.Impostor_Depth, {.Pixel, "ps_" + SHADER_MODEL, "ps_impostor_depth"}},
-			Material_Entry{.Impostor_Virtual_Depth, {.Pixel, "ps_" + SHADER_MODEL, "ps_impostor_virtual_depth"}},
+			Material_Entry {
+				.Impostor_Virtual_Depth,
+				{.Pixel, "ps_" + SHADER_MODEL, "ps_impostor_virtual_depth"},
+			},
 		)
 	}
 	// Rays see the meshes of a material as authored, a billboard's too. A patches or ribbon material draws no meshes.
@@ -1243,7 +1563,10 @@ compile_source :: proc(
 	codes = make([][]byte, len(entries), context.temp_allocator)
 	cached := true
 	for entry, i in entries {
-		data, err := os.read_entire_file(fmt.tprintf("%s.%v.%v.dxil", path, entry.pass, entry.target.stage), context.temp_allocator)
+		data, err := os.read_entire_file(
+			fmt.tprintf("%s.%v.%v.dxil", path, entry.pass, entry.target.stage),
+			context.temp_allocator,
+		)
 		cached &&= err == nil
 		codes[i] = data
 	}
@@ -1254,7 +1577,15 @@ compile_source :: proc(
 		}
 		for entry, i in entries {
 			output := fmt.tprintf("%s.%v.%v.dxil", path, entry.pass, entry.target.stage)
-			code := compile_file(options, path, entry.target, fmt.tprintf("%s.tmp", output), &pass.problems, a.path, entry_defines(entry)) or_return
+			code := compile_file(
+				options,
+				path,
+				entry.target,
+				fmt.tprintf("%s.tmp", output),
+				&pass.problems,
+				a.path,
+				entry_defines(entry),
+			) or_return
 			if err := os.write_entire_file(output, code); err != nil {
 				report_error(&pass.problems, a.path, 0, 0, "cannot write %s: %v", output, err)
 				return
@@ -1281,7 +1612,13 @@ cook_material :: proc(
 ) -> Asset_Result {
 	problems := &pass.problems
 	if options.dxc == "" {
-		report_error(problems, a.path, 0, 0, "not cooked: the cooker has no --dxc to compile materials with")
+		report_error(
+			problems,
+			a.path,
+			0,
+			0,
+			"not cooked: the cooker has no --dxc to compile materials with",
+		)
 		return .Failed
 	}
 	out_dir := config_dir(options)
@@ -1297,18 +1634,37 @@ cook_material :: proc(
 		displaces ||= moves
 	}
 	// Every variant includes the same files.
-	inputs, inputs_ok := gather_includes(fmt.tprintf("%s/generated/material.hlsl", out_dir), transmute([]byte)sources[0], options.includes[:], problems)
+	inputs, inputs_ok := gather_includes(
+		fmt.tprintf("%s/generated/material.hlsl", out_dir),
+		transmute([]byte)sources[0],
+		options.includes[:],
+		problems,
+	)
 	if !inputs_ok {
 		return .Failed
 	}
-	inputs_hash := hash.fnv64a(transmute([]byte)fmt.tprintf("%s\x00%s\x00%v\x00", MATERIAL_COOK_VERSION, options.dxc_version, options.config))
+	inputs_hash := hash.fnv64a(
+		transmute([]byte)fmt.tprintf(
+			"%s\x00%s\x00%v\x00",
+			MATERIAL_COOK_VERSION,
+			options.dxc_version,
+			options.config,
+		),
+	)
 	for input in inputs[1:] {
 		inputs_hash = hash.fnv64a(transmute([]byte)input.path, inputs_hash)
 		inputs_hash = hash.fnv64a(input.data, inputs_hash)
 	}
 	// The sources hold the declarations, the HLSL and the material functions that the graph calls; the source file
 	// adds the parameters' values.
-	key := hash.fnv64a(transmute([]byte)fmt.tprintf("%s\x00%x\x00%x\x00", a.name, format.material_layout(), inputs_hash))
+	key := hash.fnv64a(
+		transmute([]byte)fmt.tprintf(
+			"%s\x00%x\x00%x\x00",
+			a.name,
+			format.material_layout(),
+			inputs_hash,
+		),
+	)
 	key = hash.fnv64a(transmute([]byte)a.meta_text, key)
 	key = hash.fnv64a(source_of(a), key)
 	for source in sources {
@@ -1321,12 +1677,23 @@ cook_material :: proc(
 	entries := material_entries(decl)
 	variants := make([dynamic]format.Material_Variant_Entry, context.temp_allocator)
 	for mask, i in switch_masks {
-		codes, compiled := compile_source(options, a, sources[i], hash.fnv64a(transmute([]byte)sources[i], inputs_hash), entries, out_dir, pass)
+		codes, compiled := compile_source(
+			options,
+			a,
+			sources[i],
+			hash.fnv64a(transmute([]byte)sources[i], inputs_hash),
+			entries,
+			out_dir,
+			pass,
+		)
 		if !compiled {
 			return .Failed
 		}
 		for entry, e in entries {
-			append(&variants, format.Material_Variant_Entry{mask, entry.pass, entry.target.stage, codes[e]})
+			append(
+				&variants,
+				format.Material_Variant_Entry{mask, entry.pass, entry.target.stage, codes[e]},
+			)
 		}
 	}
 	l := block_layout(decl.params[:])
@@ -1376,19 +1743,19 @@ cook_material :: proc(
 		flags += {.Ribbon}
 	}
 	contents := format.Material_Contents {
-		guid             = guid,
-		key              = key,
-		flags            = flags,
-		blend            = decl.blend,
-		cutoff           = decl.cutoff,
+		guid               = guid,
+		key                = key,
+		flags              = flags,
+		blend              = decl.blend,
+		cutoff             = decl.cutoff,
 		displacement_bound = decl.displacement_bound,
-		params           = params,
-		switches         = switch_names,
-		default_switches = default_switches,
-		block            = block,
-		textures         = textures,
-		variants         = variants[:],
-		source_path      = a.name,
+		params             = params,
+		switches           = switch_names,
+		default_switches   = default_switches,
+		block              = block,
+		textures           = textures,
+		variants           = variants[:],
+		source_path        = a.name,
 	}
 	if !write_blob(output, format.material_write(contents, context.temp_allocator)) {
 		return .Failed
@@ -1398,15 +1765,32 @@ cook_material :: proc(
 
 // cook_instance writes the instance's blob, with its values resolved, if its key changed.
 @(private = "file")
-cook_instance :: proc(options: Cook_Options, a: Asset_Source, guid: format.Guid, r: Resolved, assets: []Asset_Source, out_dir: string, pass: ^Pass) -> Asset_Result {
-	key := hash.fnv64a(transmute([]byte)fmt.tprintf("%s\x00%v\x00%s\x00%x\x00", MATERIAL_COOK_VERSION, options.config, a.name, format.material_instance_layout()))
+cook_instance :: proc(
+	options: Cook_Options,
+	a: Asset_Source,
+	guid: format.Guid,
+	r: Resolved,
+	assets: []Asset_Source,
+	out_dir: string,
+	pass: ^Pass,
+) -> Asset_Result {
+	key := hash.fnv64a(
+		transmute([]byte)fmt.tprintf(
+			"%s\x00%v\x00%s\x00%x\x00",
+			MATERIAL_COOK_VERSION,
+			options.config,
+			a.name,
+			format.material_instance_layout(),
+		),
+	)
 	key = hash.fnv64a(transmute([]byte)a.meta_text, key)
 	for source in r.chain {
 		key = hash.fnv64a(source, key)
 	}
 	buffer: [32]u8
 	output := fmt.tprintf("%s/%s.blob", out_dir, format.guid_format(guid, &buffer))
-	if cooked_key(output, .Material_Instance, format.material_instance_layout()) == key && !pass.force[guid] {
+	if cooked_key(output, .Material_Instance, format.material_instance_layout()) == key &&
+	   !pass.force[guid] {
 		return .Current
 	}
 	block, textures := encode_block(r.params, block_layout(r.params))

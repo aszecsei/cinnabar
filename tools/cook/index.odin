@@ -13,19 +13,19 @@ import format "cinnabar:engine/asset/format"
 // they are. Each pass builds a new index, which the daemon compares with the last one, and saves for the next daemon
 // (see saved_index.odin). The next pass carries from it what nothing changed in.
 Index :: struct {
-	arena:     virtual.Arena,
+	arena:      virtual.Arena,
 	// By GUID.
-	assets:    map[string]cook_link.Asset,
-	folders:   []cook_link.Folder,
+	assets:     map[string]cook_link.Asset,
+	folders:    []cook_link.Folder,
 	// By GUID, with "" for the problems that belong to no asset. An asset without problems has no entry.
-	problems:  map[string][]cook_link.Problem,
+	problems:   map[string][]cook_link.Problem,
 	// The shading models that cook, by name.
-	shading:   cook_link.Shading_Models,
+	shading:    cook_link.Shading_Models,
 	// Every file and directory that the pass saw, in path order, and every source with what its cook learnt.
-	files:     []File_Record,
-	sources:   []Saved_Source,
+	files:      []File_Record,
+	sources:    []Saved_Source,
 	// By path, into sources.
-	source_at: map[string]int,
+	source_at:  map[string]int,
 	// The cache's generation after the pass.
 	generation: u64,
 }
@@ -59,7 +59,16 @@ index_build :: proc(index: ^Index, pass: Pass, roots: []Root) {
 	for p in pass.problems.list {
 		guid := owner[p.file] or_else ""
 		list := grouped[guid] or_else make([dynamic]cook_link.Problem, context.temp_allocator)
-		append(&list, cook_link.Problem{clone(p.file, allocator), u32(p.line), u32(p.column), p.error, clone(p.text, allocator)})
+		append(
+			&list,
+			cook_link.Problem {
+				clone(p.file, allocator),
+				u32(p.line),
+				u32(p.column),
+				p.error,
+				clone(p.text, allocator),
+			},
+		)
 		grouped[guid] = list
 	}
 	index.problems = make(map[string][]cook_link.Problem, len(grouped), allocator)
@@ -77,16 +86,16 @@ index_build :: proc(index: ^Index, pass: Pass, roots: []Root) {
 			assert(a.result != .Pending, fmt.tprintf("the pass did not settle %s", a.name))
 		}
 		entry := cook_link.Asset {
-			guid      = guids[i],
-			kind      = link_kind(a.kind),
-			root      = clone(root.name, allocator),
-			path      = clone(a.name[len(root.name) + 1:], allocator),
-			status    = link_status(a.result),
-			behaviour = clone(a.behaviour, allocator),
-			action    = clone(a.action, allocator),
-			params    = clone_params(a.params, allocator),
+			guid         = guids[i],
+			kind         = link_kind(a.kind),
+			root         = clone(root.name, allocator),
+			path         = clone(a.name[len(root.name) + 1:], allocator),
+			status       = link_status(a.result),
+			behaviour    = clone(a.behaviour, allocator),
+			action       = clone(a.action, allocator),
+			params       = clone_params(a.params, allocator),
 			permutations = u32(a.permutations),
-			size      = a.size,
+			size         = a.size,
 		}
 		if a.tool_texture != {} {
 			buffer: [32]u8
@@ -120,13 +129,13 @@ index_build :: proc(index: ^Index, pass: Pass, roots: []Root) {
 		for s in a.subassets {
 			buffer: [32]u8
 			sub := cook_link.Asset {
-				guid     = clone(format.guid_format(s.guid, &buffer), allocator),
-				kind     = link_kind(s.kind),
-				root     = entry.root,
-				path     = entry.path,
-				status   = entry.status,
-				parent   = entry.guid,
-				subasset = clone(s.name, allocator),
+				guid      = clone(format.guid_format(s.guid, &buffer), allocator),
+				kind      = link_kind(s.kind),
+				root      = entry.root,
+				path      = entry.path,
+				status    = entry.status,
+				parent    = entry.guid,
+				subasset  = clone(s.name, allocator),
 				generated = clone(generated[s.guid] or_else "", allocator),
 			}
 			index.assets[sub.guid] = sub
@@ -145,11 +154,26 @@ index_build :: proc(index: ^Index, pass: Pass, roots: []Root) {
 		inputs := make([]cook_link.Node_Pin, len(decl.inputs), allocator)
 		for input, i in decl.inputs {
 			d := input.default
-			inputs[i] = {name = clone(input.name, allocator), type = cook_link.Pin_Type(input.count - 1), default = {f32(d.x), f32(d.y), f32(d.z), f32(d.w)}}
+			inputs[i] = {
+				name    = clone(input.name, allocator),
+				type    = cook_link.Pin_Type(input.count - 1),
+				default = {f32(d.x), f32(d.y), f32(d.z), f32(d.w)},
+			}
 		}
-		append(&models, cook_link.Shading_Model_Info{name = clone(decl.name, allocator), guid = guids[decl.asset], inputs = inputs, no_lighting = decl.no_lighting})
+		append(
+			&models,
+			cook_link.Shading_Model_Info {
+				name = clone(decl.name, allocator),
+				guid = guids[decl.asset],
+				inputs = inputs,
+				no_lighting = decl.no_lighting,
+			},
+		)
 	}
-	slice.sort_by(models[:], proc(a, b: cook_link.Shading_Model_Info) -> bool {return a.name < b.name})
+	slice.sort_by(
+		models[:],
+		proc(a, b: cook_link.Shading_Model_Info) -> bool {return a.name < b.name},
+	)
 	index.shading = {models[:]}
 	// A pass that carries every material parses no shading model, so the models are the last pass's.
 	if pass.shadings == nil && pass.saved != nil {
@@ -160,7 +184,10 @@ index_build :: proc(index: ^Index, pass: Pass, roots: []Root) {
 }
 
 @(private = "file")
-clone_shading_models :: proc(models: []cook_link.Shading_Model_Info, allocator := context.allocator) -> []cook_link.Shading_Model_Info {
+clone_shading_models :: proc(
+	models: []cook_link.Shading_Model_Info,
+	allocator := context.allocator,
+) -> []cook_link.Shading_Model_Info {
 	result := make([]cook_link.Shading_Model_Info, len(models), allocator)
 	for m, i in models {
 		inputs := make([]cook_link.Node_Pin, len(m.inputs), allocator)
@@ -169,7 +196,12 @@ clone_shading_models :: proc(models: []cook_link.Shading_Model_Info, allocator :
 			inputs[j].name = strings.clone(input.name, allocator)
 			inputs[j].default_label = strings.clone(input.default_label, allocator)
 		}
-		result[i] = {name = strings.clone(m.name, allocator), guid = strings.clone(m.guid, allocator), inputs = inputs, no_lighting = m.no_lighting}
+		result[i] = {
+			name        = strings.clone(m.name, allocator),
+			guid        = strings.clone(m.guid, allocator),
+			inputs      = inputs,
+			no_lighting = m.no_lighting,
+		}
 	}
 	return result
 }
@@ -200,7 +232,14 @@ Index_Changes :: struct {
 
 index_changed :: proc(c: Index_Changes) -> bool {
 	d := c.delta
-	return len(d.changed) + len(d.removed) + len(d.added_folders) + len(d.removed_folders) + len(c.problems) > 0
+	return(
+		len(d.changed) +
+			len(d.removed) +
+			len(d.added_folders) +
+			len(d.removed_folders) +
+			len(c.problems) >
+		0 \
+	)
 }
 
 // index_diff compares two indices. The changes point into both, so they must be used before either is destroyed.
@@ -217,7 +256,13 @@ index_diff :: proc(old, new: ^Index) -> (changes: Index_Changes) {
 			append(&removed, guid)
 		}
 	}
-	slice.sort_by(changed[:], proc(a, b: cook_link.Asset) -> bool {return a.root < b.root || (a.root == b.root && a.path < b.path)})
+	slice.sort_by(
+		changed[:],
+		proc(a, b: cook_link.Asset) -> bool {return(
+				a.root < b.root ||
+				(a.root == b.root && a.path < b.path) \
+			)},
+	)
 	slice.sort(removed[:])
 	changes.delta = {
 		changed         = changed[:],
@@ -236,7 +281,10 @@ index_diff :: proc(old, new: ^Index) -> (changes: Index_Changes) {
 			append(&problems, cook_link.Asset_Problems{guid, nil})
 		}
 	}
-	slice.sort_by(problems[:], proc(a, b: cook_link.Asset_Problems) -> bool {return a.guid < b.guid})
+	slice.sort_by(
+		problems[:],
+		proc(a, b: cook_link.Asset_Problems) -> bool {return a.guid < b.guid},
+	)
 	changes.problems = problems[:]
 	changes.shading = !shading_equal(old.shading.models, new.shading.models)
 	return
@@ -248,7 +296,10 @@ shading_equal :: proc(a, b: []cook_link.Shading_Model_Info) -> bool {
 		return false
 	}
 	for m, i in a {
-		if m.name != b[i].name || m.guid != b[i].guid || m.no_lighting != b[i].no_lighting || !slice.equal(m.inputs, b[i].inputs) {
+		if m.name != b[i].name ||
+		   m.guid != b[i].guid ||
+		   m.no_lighting != b[i].no_lighting ||
+		   !slice.equal(m.inputs, b[i].inputs) {
 			return false
 		}
 	}
@@ -256,12 +307,23 @@ shading_equal :: proc(a, b: []cook_link.Shading_Model_Info) -> bool {
 }
 
 // index_snapshot is the whole index, for an editor that has just linked.
-index_snapshot :: proc(index: ^Index) -> (snapshot: cook_link.Asset_Snapshot, problems: []cook_link.Asset_Problems) {
+index_snapshot :: proc(
+	index: ^Index,
+) -> (
+	snapshot: cook_link.Asset_Snapshot,
+	problems: []cook_link.Asset_Problems,
+) {
 	assets := make([dynamic]cook_link.Asset, 0, len(index.assets), context.temp_allocator)
 	for _, a in index.assets {
 		append(&assets, a)
 	}
-	slice.sort_by(assets[:], proc(a, b: cook_link.Asset) -> bool {return a.root < b.root || (a.root == b.root && a.path < b.path)})
+	slice.sort_by(
+		assets[:],
+		proc(a, b: cook_link.Asset) -> bool {return(
+				a.root < b.root ||
+				(a.root == b.root && a.path < b.path) \
+			)},
+	)
 	list := make([dynamic]cook_link.Asset_Problems, 0, len(index.problems), context.temp_allocator)
 	for guid, p in index.problems {
 		append(&list, cook_link.Asset_Problems{guid, p})
@@ -282,7 +344,10 @@ folders_missing :: proc(from, other: []cook_link.Folder) -> []cook_link.Folder {
 }
 
 // clone_params copies an action's parameters, with their names.
-clone_params :: proc(params: []cook_link.Action_Param, allocator := context.allocator) -> []cook_link.Action_Param {
+clone_params :: proc(
+	params: []cook_link.Action_Param,
+	allocator := context.allocator,
+) -> []cook_link.Action_Param {
 	if len(params) == 0 {
 		return nil
 	}
@@ -295,10 +360,31 @@ clone_params :: proc(params: []cook_link.Action_Param, allocator := context.allo
 
 @(private = "file")
 asset_equal :: proc(a, b: cook_link.Asset) -> bool {
-	if a.thumbnail != b.thumbnail || a.thumbnail_ready != b.thumbnail_ready || a.generated != b.generated || a.guid != b.guid || a.kind != b.kind || a.root != b.root || a.path != b.path || a.status != b.status || a.errors != b.errors || a.warnings != b.warnings || a.behaviour != b.behaviour || a.action != b.action || a.parent != b.parent || a.subasset != b.subasset || a.permutations != b.permutations || a.size != b.size || a.tool_texture != b.tool_texture {
+	if a.thumbnail != b.thumbnail ||
+	   a.thumbnail_ready != b.thumbnail_ready ||
+	   a.generated != b.generated ||
+	   a.guid != b.guid ||
+	   a.kind != b.kind ||
+	   a.root != b.root ||
+	   a.path != b.path ||
+	   a.status != b.status ||
+	   a.errors != b.errors ||
+	   a.warnings != b.warnings ||
+	   a.behaviour != b.behaviour ||
+	   a.action != b.action ||
+	   a.parent != b.parent ||
+	   a.subasset != b.subasset ||
+	   a.permutations != b.permutations ||
+	   a.size != b.size ||
+	   a.tool_texture != b.tool_texture {
 		return false
 	}
-	return slice.equal(a.settings, b.settings) && slice.equal(a.dependencies, b.dependencies) && slice.equal(a.hotspots, b.hotspots) && slice.equal(a.params, b.params)
+	return(
+		slice.equal(a.settings, b.settings) &&
+		slice.equal(a.dependencies, b.dependencies) &&
+		slice.equal(a.hotspots, b.hotspots) &&
+		slice.equal(a.params, b.params) \
+	)
 }
 
 @(private = "file")

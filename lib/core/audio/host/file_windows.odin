@@ -8,7 +8,14 @@ import win "core:sys/windows"
 file_open :: proc "c" (path: cstring) -> rawptr {
 	context = host_context()
 	buffer: [win.MAX_PATH_WIDE]u16
-	length := win.MultiByteToWideChar(win.CP_UTF8, 0, (^u8)(rawptr(path)), -1, &buffer[0], i32(len(buffer)))
+	length := win.MultiByteToWideChar(
+		win.CP_UTF8,
+		0,
+		(^u8)(rawptr(path)),
+		-1,
+		&buffer[0],
+		i32(len(buffer)),
+	)
 	if length == 0 {
 		return nil
 	}
@@ -48,7 +55,11 @@ file_modified :: proc "c" (file: rawptr) -> i64 {
 		return 0
 	}
 	// FILETIME counts 100 ns from 1601. Only a comparison reads this, so the epoch does not matter.
-	return (i64(info.ftLastWriteTime.dwHighDateTime) << 32 | i64(info.ftLastWriteTime.dwLowDateTime)) * 100
+	return(
+		(i64(info.ftLastWriteTime.dwHighDateTime) << 32 |
+			i64(info.ftLastWriteTime.dwLowDateTime)) *
+		100 \
+	)
 }
 
 @(private)

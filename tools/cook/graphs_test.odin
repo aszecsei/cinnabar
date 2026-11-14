@@ -25,7 +25,10 @@ graph_options :: proc(t: ^testing.T, tree: Tree) -> Cook_Options {
 
 @(private = "file")
 engine_text :: proc(path: string) -> string {
-	data, _ := os.read_entire_file(fmt.tprintf("lib/engine/content/%s", path), context.temp_allocator)
+	data, _ := os.read_entire_file(
+		fmt.tprintf("lib/engine/content/%s", path),
+		context.temp_allocator,
+	)
 	return string(data)
 }
 
@@ -55,7 +58,10 @@ generated :: proc(tree: Tree) -> string {
 
 @(private = "file")
 count_generated :: proc(tree: Tree, suffix: string) -> (count: int) {
-	infos, _ := os.read_all_directory_by_path(fmt.tprintf("%s/cache/generated", tree.dir), context.temp_allocator)
+	infos, _ := os.read_all_directory_by_path(
+		fmt.tprintf("%s/cache/generated", tree.dir),
+		context.temp_allocator,
+	)
 	for info in infos {
 		count += int(strings.has_suffix(info.name, suffix))
 	}
@@ -116,7 +122,10 @@ graphs_generate_evaluate_and_switches_keep_one_branch :: proc(t: ^testing.T) {
 			{"content/shading/lit.hlsli", engine_text("shading/lit.hlsli")},
 			{"content/tinted.material", TINTED},
 			{"content/tinted.material.meta", "guid = 00112233445566778899aabbccddeeff\n"},
-			{"content/shiny.material_instance", "material_instance 1\nparent = $00112233445566778899aabbccddeeff\nshiny = true\n"},
+			{
+				"content/shiny.material_instance",
+				"material_instance 1\nparent = $00112233445566778899aabbccddeeff\nshiny = true\n",
+			},
 		},
 	)
 	defer remove_tree(tree)
@@ -143,7 +152,10 @@ graphs_generate_evaluate_and_switches_keep_one_branch :: proc(t: ^testing.T) {
 	testing.expect(t, strings.contains(source, "float4 n2_value = params.tint;"))
 	testing.expect(t, strings.contains(source, "float2 n7_uv = inputs.uv1;"))
 	testing.expect(t, strings.contains(source, "float4 n4_rgba = cn_sample((n6_value), (n7_uv));"))
-	testing.expect(t, strings.contains(source, "float4 n3_out = (n2_value) * (float4(n4_rgb, 0.0));"))
+	testing.expect(
+		t,
+		strings.contains(source, "float4 n3_out = (n2_value) * (float4(n4_rgb, 0.0));"),
+	)
 	testing.expect(t, strings.contains(source, "s.base_color = (n3_out).xyz;"))
 	testing.expect(t, strings.contains(source, "s.metallic = 0.25;"))
 	// The switch on: its on branch, and nothing of the lerp. Off: the lerp.
@@ -151,7 +163,10 @@ graphs_generate_evaluate_and_switches_keep_one_branch :: proc(t: ^testing.T) {
 	testing.expect(t, strings.contains(source, "float n5_out = n8_out;"))
 	testing.expect_value(t, strings.count(source, "float n8_out ="), 1)
 	// Each node's HLSL has its line, so DXC's messages name the node.
-	testing.expect(t, strings.contains(source, fmt.tprintf("#line 14 \"%s/content/tinted.material\"", tree.dir)))
+	testing.expect(
+		t,
+		strings.contains(source, fmt.tprintf("#line 14 \"%s/content/tinted.material\"", tree.dir)),
+	)
 }
 
 @(private = "file")
@@ -186,7 +201,14 @@ node 6 one_minus
 
 @(test)
 parallax_and_emission_nodes_generate_and_compile :: proc(t: ^testing.T) {
-	tree := make_tree(t, {{"content/shading/lit.shading", engine_text("shading/lit.shading")}, {"content/shading/lit.hlsli", engine_text("shading/lit.hlsli")}, {"content/relief.material", RELIEF}})
+	tree := make_tree(
+		t,
+		{
+			{"content/shading/lit.shading", engine_text("shading/lit.shading")},
+			{"content/shading/lit.hlsli", engine_text("shading/lit.hlsli")},
+			{"content/relief.material", RELIEF},
+		},
+	)
 	defer remove_tree(tree)
 	options := graph_options(t, tree)
 	pass := cook(options, {.Material})
@@ -194,7 +216,10 @@ parallax_and_emission_nodes_generate_and_compile :: proc(t: ^testing.T) {
 	testing.expect_value(t, pass.cooked[.Material], 1)
 	source := generated(tree)
 	// The march is one helper call, whose later outputs are parts of it.
-	testing.expect(t, strings.contains(source, "cn_parallax((n2_value), (inputs.uv0), (0.1), (16.0), inputs);"))
+	testing.expect(
+		t,
+		strings.contains(source, "cn_parallax((n2_value), (inputs.uv0), (0.1), (16.0), inputs);"),
+	)
 	testing.expect(t, strings.contains(source, "float n3_height = n3_result.z;"))
 	testing.expect(t, strings.contains(source, "* exp2((n6_out));"))
 	testing.expect(t, strings.contains(source, "s.emission = n4_out;"))
@@ -265,10 +290,20 @@ vertex_output_generates_displace_in_the_vertex_stage :: proc(t: ^testing.T) {
 	}
 	source := generated(tree)
 	testing.expect(t, strings.contains(source, "#define MATERIAL_DISPLACES 1"))
-	testing.expect(t, strings.contains(source, "float3 displace(Vertex_Inputs v) {\n\tMaterial_Inputs inputs = vertex_material_inputs(v);"))
+	testing.expect(
+		t,
+		strings.contains(
+			source,
+			"float3 displace(Vertex_Inputs v) {\n\tMaterial_Inputs inputs = vertex_material_inputs(v);",
+		),
+	)
 	// The same texture sample is reached from both outputs: with derivatives in evaluate, and one mip in displace.
 	testing.expect_value(t, strings.count(source, "cn_sample((n7_value), (inputs.uv0));"), 1)
-	testing.expect_value(t, strings.count(source, "cn_sample_level((n7_value), (inputs.uv0), 0);"), 1)
+	testing.expect_value(
+		t,
+		strings.count(source, "cn_sample_level((n7_value), (inputs.uv0), 0);"),
+		1,
+	)
 	testing.expect_value(t, strings.count(source, "float n8_time = inputs.time;"), 1)
 	testing.expect(t, strings.contains(source, "\treturn n3_out;"))
 
@@ -277,14 +312,32 @@ vertex_output_generates_displace_in_the_vertex_stage :: proc(t: ^testing.T) {
 	context.logger = capture_errors(&errors)
 	defer release_errors(&errors)
 	bad := "material 1\nshading = lit\n\nnode 1 output\n\tposition = [0, 0]\nnode 2 vertex_output\n\tposition = [0, 0]\n\toffset = @3.out\nnode 3 fresnel\n\tposition = [0, 0]\n"
-	testing.expect(t, os.write_entire_file(fmt.tprintf("%s/content/ripple.material", tree.dir), transmute([]byte)bad) == nil)
+	testing.expect(
+		t,
+		os.write_entire_file(
+			fmt.tprintf("%s/content/ripple.material", tree.dir),
+			transmute([]byte)bad,
+		) ==
+		nil,
+	)
 	testing.expect(t, !cook(options, {.Material}).ok)
-	expect_error(t, &errors, "ripple.material:9: the fresnel node reads what only a pixel has, so the vertex offset cannot use it")
+	expect_error(
+		t,
+		&errors,
+		"ripple.material:9: the fresnel node reads what only a pixel has, so the vertex offset cannot use it",
+	)
 }
 
 @(test)
 graph_sources_compile_once_and_keep_their_bytecode :: proc(t: ^testing.T) {
-	tree := make_tree(t, {{"content/shading/lit.shading", engine_text("shading/lit.shading")}, {"content/shading/lit.hlsli", engine_text("shading/lit.hlsli")}, {"content/tinted.material", TINTED}})
+	tree := make_tree(
+		t,
+		{
+			{"content/shading/lit.shading", engine_text("shading/lit.shading")},
+			{"content/shading/lit.hlsli", engine_text("shading/lit.hlsli")},
+			{"content/tinted.material", TINTED},
+		},
+	)
 	defer remove_tree(tree)
 	options := graph_options(t, tree)
 	expect_no_errors(t, cook(options, {.Material}))
@@ -293,7 +346,13 @@ graph_sources_compile_once_and_keep_their_bytecode :: proc(t: ^testing.T) {
 	// A parameter's value is not in the source, so a new tint cooks the blob again from the same bytecode.
 	path := fmt.tprintf("%s/content/tinted.material", tree.dir)
 	tinted := TINTED
-	changed, _ := strings.replace(tinted, "[1, 0.5, 0.25, 1]", "[0, 1, 0, 1]", 1, context.temp_allocator)
+	changed, _ := strings.replace(
+		tinted,
+		"[1, 0.5, 0.25, 1]",
+		"[0, 1, 0, 1]",
+		1,
+		context.temp_allocator,
+	)
 	testing.expect(t, os.write_entire_file(path, transmute([]byte)changed) == nil)
 	pass := cook(options, {.Material})
 	expect_no_errors(t, pass)
@@ -339,19 +398,42 @@ graphs_call_material_functions :: proc(t: ^testing.T) {
 	defer release_errors(&errors)
 	// An unknown kind of node is an error, with its line.
 	testing.expect(t, !cook(graph_options(t, tree), {.Material}).ok)
-	expect_error(t, &errors, "glow.material:11: there is no kind of node named output_unused_comment")
+	expect_error(
+		t,
+		&errors,
+		"glow.material:11: there is no kind of node named output_unused_comment",
+	)
 
 	glow := "material 1\nshading = lit\nnode 1 output\n\temission = @2.rim\n\troughness = @3.out\nnode 2 function\n\tfunction = $11112222333344445555666677778888\nnode 3 custom\n\ttype = float\n\tcode = \"float x = a.x * 2; return x;\"\n\ta = 0.25\n"
-	testing.expect(t, os.write_entire_file(fmt.tprintf("%s/content/glow.material", tree.dir), transmute([]byte)glow) == nil)
+	testing.expect(
+		t,
+		os.write_entire_file(
+			fmt.tprintf("%s/content/glow.material", tree.dir),
+			transmute([]byte)glow,
+		) ==
+		nil,
+	)
 	pass := cook(graph_options(t, tree), {.Material})
 	expect_no_errors(t, pass)
 	source := generated(tree)
-	testing.expect(t, strings.contains(source, "void mf0(float in_power, Material_Inputs inputs, out float3 out_rim) {"))
+	testing.expect(
+		t,
+		strings.contains(
+			source,
+			"void mf0(float in_power, Material_Inputs inputs, out float3 out_rim) {",
+		),
+	)
 	testing.expect(t, strings.contains(source, "\tout_rim = ((float3)n2_out);"))
 	// An unlinked input gives the function's default.
 	testing.expect(t, strings.contains(source, "\tmf0(3.0, inputs, n2_rim);"))
 	// A custom node's code is on a line of its own, after the line of its file.
-	testing.expect(t, strings.contains(source, "float custom3(float4 a, float4 b, float4 c, float4 d, Material_Inputs inputs) {\n#line 10"))
+	testing.expect(
+		t,
+		strings.contains(
+			source,
+			"float custom3(float4 a, float4 b, float4 c, float4 d, Material_Inputs inputs) {\n#line 10",
+		),
+	)
 	testing.expect(t, strings.contains(source, "\nfloat x = a.x * 2; return x;\n}"))
 	for a in pass.assets {
 		if a.kind == .Material {
@@ -368,12 +450,30 @@ graph_errors_name_their_nodes :: proc(t: ^testing.T) {
 		{
 			{"content/shading/lit.shading", engine_text("shading/lit.shading")},
 			{"content/shading/lit.hlsli", engine_text("shading/lit.hlsli")},
-			{"content/loop.material", "material 1\nshading = lit\nnode 1 output\n\troughness = @2.out\nnode 2 add\n\ta = @3.out\nnode 3 saturate\n\tx = @2.out\n"},
-			{"content/types.material", "material 1\nshading = lit\nparam albedo texture = white\nnode 1 output\n\tbase_color = @2.value\nnode 2 parameter\n\tname = \"albedo\"\n"},
-			{"content/names.material", "material 1\nshading = lit\nnode 1 output\n\tshininess = 1\n\tbase_color = @2.nope\nnode 2 uv\n"},
-			{"content/hlsl.material", "material 1\nshading = lit\nnode 1 output\n\troughness = @2.out\nnode 2 custom\n\ttype = float\n\tcode = \"missing.x\"\n"},
-			{"content/both.material", "material 1\nshading = lit\nnode 1 output\n---\nSurface evaluate(Material_Inputs inputs) { return default_surface(); }\n"},
-			{"content/scope.material", "material 1\nshading = lit\nnode 1 output\nnode 2 function_input\n"},
+			{
+				"content/loop.material",
+				"material 1\nshading = lit\nnode 1 output\n\troughness = @2.out\nnode 2 add\n\ta = @3.out\nnode 3 saturate\n\tx = @2.out\n",
+			},
+			{
+				"content/types.material",
+				"material 1\nshading = lit\nparam albedo texture = white\nnode 1 output\n\tbase_color = @2.value\nnode 2 parameter\n\tname = \"albedo\"\n",
+			},
+			{
+				"content/names.material",
+				"material 1\nshading = lit\nnode 1 output\n\tshininess = 1\n\tbase_color = @2.nope\nnode 2 uv\n",
+			},
+			{
+				"content/hlsl.material",
+				"material 1\nshading = lit\nnode 1 output\n\troughness = @2.out\nnode 2 custom\n\ttype = float\n\tcode = \"missing.x\"\n",
+			},
+			{
+				"content/both.material",
+				"material 1\nshading = lit\nnode 1 output\n---\nSurface evaluate(Material_Inputs inputs) { return default_surface(); }\n",
+			},
+			{
+				"content/scope.material",
+				"material 1\nshading = lit\nnode 1 output\nnode 2 function_input\n",
+			},
 		},
 	)
 	defer remove_tree(tree)
@@ -382,38 +482,77 @@ graph_errors_name_their_nodes :: proc(t: ^testing.T) {
 	defer release_errors(&errors)
 	testing.expect(t, !cook(graph_options(t, tree), {.Material}).ok)
 	expect_error(t, &errors, "loop.material:5: node 2 links back to itself through its inputs")
-	expect_error(t, &errors, "types.material:4: the output node's base_color input takes numbers, not a texture")
-	expect_error(t, &errors, "names.material:4: the shading model lit has no input named shininess")
+	expect_error(
+		t,
+		&errors,
+		"types.material:4: the output node's base_color input takes numbers, not a texture",
+	)
+	expect_error(
+		t,
+		&errors,
+		"names.material:4: the shading model lit has no input named shininess",
+	)
 	expect_error(t, &errors, "names.material:5: node 2 has no output named nope")
 	expect_error(t, &errors, "hlsl.material:7:8: use of undeclared identifier 'missing'")
 	expect_error(t, &errors, "both.material: a material defines evaluate")
-	expect_error(t, &errors, "both.material: a material defines evaluate with nodes or in HLSL after a `---` line, not both")
-	expect_error(t, &errors, "scope.material:4: a function_input node is only in a material function")
+	expect_error(
+		t,
+		&errors,
+		"both.material: a material defines evaluate with nodes or in HLSL after a `---` line, not both",
+	)
+	expect_error(
+		t,
+		&errors,
+		"scope.material:4: a function_input node is only in a material function",
+	)
 }
 
 @(test)
 previews_cook_unsaved_text_into_the_preview_area :: proc(t: ^testing.T) {
 	tree := make_tree(
 		t,
-		{{"content/shading/lit.shading", engine_text("shading/lit.shading")}, {"content/shading/lit.hlsli", engine_text("shading/lit.hlsli")}, {"content/tinted.material", TINTED}, {"content/tinted.material.meta", "guid = 00112233445566778899aabbccddeeff\n"}},
+		{
+			{"content/shading/lit.shading", engine_text("shading/lit.shading")},
+			{"content/shading/lit.hlsli", engine_text("shading/lit.hlsli")},
+			{"content/tinted.material", TINTED},
+			{"content/tinted.material.meta", "guid = 00112233445566778899aabbccddeeff\n"},
+		},
 	)
 	defer remove_tree(tree)
 	options := graph_options(t, tree)
 	guid := format.guid_parse("00112233445566778899aabbccddeeff") or_else {}
 	tinted := TINTED
-	unsaved, _ := strings.replace(tinted, "metallic = 0.25", "metallic = 1", 1, context.temp_allocator)
+	unsaved, _ := strings.replace(
+		tinted,
+		"metallic = 0.25",
+		"metallic = 1",
+		1,
+		context.temp_allocator,
+	)
 	problems, ok := cook_preview(options, guid, unsaved)
 	testing.expect(t, ok)
 	testing.expect_value(t, len(problems.list), 0)
-	data, err := os.read_entire_file(fmt.tprintf("%s/cache/preview/00112233445566778899aabbccddeeff.blob", tree.dir), context.temp_allocator)
+	data, err := os.read_entire_file(
+		fmt.tprintf("%s/cache/preview/00112233445566778899aabbccddeeff.blob", tree.dir),
+		context.temp_allocator,
+	)
 	testing.expect(t, err == nil)
 	if blob, view_ok := format.material_view(data); view_ok {
 		// The default switches only.
 		testing.expect_value(t, len(format.material_variants(data, blob)), 21)
 	}
 	// The material's own blob is not cooked by a preview.
-	testing.expect(t, !os.exists(fmt.tprintf("%s/cache/00112233445566778899aabbccddeeff.blob", tree.dir)))
-	broken, _ := strings.replace(tinted, "name = \"tint\"", "name = \"tnit\"", 1, context.temp_allocator)
+	testing.expect(
+		t,
+		!os.exists(fmt.tprintf("%s/cache/00112233445566778899aabbccddeeff.blob", tree.dir)),
+	)
+	broken, _ := strings.replace(
+		tinted,
+		"name = \"tint\"",
+		"name = \"tnit\"",
+		1,
+		context.temp_allocator,
+	)
 	problems, ok = cook_preview(options, guid, broken)
 	testing.expect(t, !ok)
 	testing.expect_value(t, len(problems.list), 1)
@@ -430,7 +569,10 @@ position_nodes_read_the_world_and_the_object :: proc(t: ^testing.T) {
 		{
 			{"content/shading/lit.shading", engine_text("shading/lit.shading")},
 			{"content/shading/lit.hlsli", engine_text("shading/lit.hlsli")},
-			{"content/stripes.material", "material 1\nshading = lit\nnode 1 output\n\tbase_color = @4.out\nnode 2 position\nnode 3 object_position\nnode 4 add\n\ta = @2.position\n\tb = @3.position\n"},
+			{
+				"content/stripes.material",
+				"material 1\nshading = lit\nnode 1 output\n\tbase_color = @4.out\nnode 2 position\nnode 3 object_position\nnode 4 add\n\ta = @2.position\n\tb = @3.position\n",
+			},
 		},
 	)
 	defer remove_tree(tree)

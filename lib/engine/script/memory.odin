@@ -18,7 +18,13 @@ Module_Memory :: struct {
 
 // memory is every byte that the VM holds, and the part that each loaded module's code allocated, in allocator. The
 // engine's part is the rest.
-memory :: proc(r: ^Runtime, allocator: runtime.Allocator) -> (total: int, modules: []Module_Memory) {
+memory :: proc(
+	r: ^Runtime,
+	allocator: runtime.Allocator,
+) -> (
+	total: int,
+	modules: []Module_Memory,
+) {
 	if r.L == nil {
 		return
 	}
@@ -27,7 +33,13 @@ memory :: proc(r: ^Runtime, allocator: runtime.Allocator) -> (total: int, module
 		if m.state == .Unloaded {
 			continue
 		}
-		append(&list, Module_Memory{name = module_name(r, &m), bytes = int(luau.totalbytes(r.L, category_of(i)))})
+		append(
+			&list,
+			Module_Memory {
+				name = module_name(r, &m),
+				bytes = int(luau.totalbytes(r.L, category_of(i))),
+			},
+		)
 	}
 	return int(luau.totalbytes(r.L, -1)), list[:]
 }

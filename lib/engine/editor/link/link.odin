@@ -24,7 +24,14 @@ kind_of :: proc($T: typeid) -> u16 {
 
 // decode_message decodes a payload of the given kind. Strings and slices are allocated with allocator. A payload
 // that does not decode to exactly one message of the kind is refused.
-decode_message :: proc(kind: u16, payload: []byte, allocator: mem.Allocator) -> (message: Message, ok: bool) {
+decode_message :: proc(
+	kind: u16,
+	payload: []byte,
+	allocator: mem.Allocator,
+) -> (
+	message: Message,
+	ok: bool,
+) {
 	return wire.decode_message(Message, kind, payload, allocator)
 }
 
@@ -472,15 +479,15 @@ Viewport_Kind :: enum u8 {
 // Editor to game: the camera that the game draws a viewport from while an editor is linked. The editor sends it when
 // it changes, and when the link connects.
 Editor_Camera :: struct {
-	viewport:     u32,
+	viewport:            u32,
 	// A World_Position: units of 2^-24 m.
-	position:     [3]i64,
+	position:            [3]i64,
 	// Camera to world: x, y, z, w. The camera looks down its +z, with +y up and +x right.
-	rotation:     [4]f32,
+	rotation:            [4]f32,
 	// Vertical, in radians.
-	vertical_fov: f32,
+	vertical_fov:        f32,
 	// The near plane's distance in meters. A perspective camera's far plane is at infinity.
-	near:         f32,
+	near:                f32,
 	// An orthographic camera shows orthographic_height meters from bottom to top, between near and far (see
 	// docs/editor/viewport.md#projection). A perspective camera does not read them.
 	projection:          Camera_Projection,
@@ -932,13 +939,80 @@ Ui_Preview_Layout :: struct {
 // A key or a mouse button, as core.Key has them.
 Input_Key :: enum u8 {
 	None,
-	A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z,
-	Num_0, Num_1, Num_2, Num_3, Num_4, Num_5, Num_6, Num_7, Num_8, Num_9,
-	Space, Enter, Escape, Tab, Backspace, Delete, Insert, Home, End, Page_Up, Page_Down,
-	Left, Right, Up, Down,
-	Left_Shift, Right_Shift, Left_Control, Right_Control, Left_Alt, Right_Alt,
-	F1, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, F12,
-	Mouse_Left, Mouse_Right, Mouse_Middle, Mouse_4, Mouse_5,
+	A,
+	B,
+	C,
+	D,
+	E,
+	F,
+	G,
+	H,
+	I,
+	J,
+	K,
+	L,
+	M,
+	N,
+	O,
+	P,
+	Q,
+	R,
+	S,
+	T,
+	U,
+	V,
+	W,
+	X,
+	Y,
+	Z,
+	Num_0,
+	Num_1,
+	Num_2,
+	Num_3,
+	Num_4,
+	Num_5,
+	Num_6,
+	Num_7,
+	Num_8,
+	Num_9,
+	Space,
+	Enter,
+	Escape,
+	Tab,
+	Backspace,
+	Delete,
+	Insert,
+	Home,
+	End,
+	Page_Up,
+	Page_Down,
+	Left,
+	Right,
+	Up,
+	Down,
+	Left_Shift,
+	Right_Shift,
+	Left_Control,
+	Right_Control,
+	Left_Alt,
+	Right_Alt,
+	F1,
+	F2,
+	F3,
+	F4,
+	F5,
+	F6,
+	F7,
+	F8,
+	F9,
+	F10,
+	F11,
+	F12,
+	Mouse_Left,
+	Mouse_Right,
+	Mouse_Middle,
+	Mouse_4,
+	Mouse_5,
 }
 
 // As core.Input_Event_Kind.
@@ -984,28 +1058,28 @@ Editor_Input :: struct {
 // Host to editor: the frames and the memory of the last interval.
 Host_Stats :: struct {
 	// The length of the interval, in seconds, and the frames in it.
-	interval:            f32,
-	frames:              u32,
+	interval:                        f32,
+	frames:                          u32,
 	// The time from one frame's start to the next's, and the part of it that the game's update and the frame's end
 	// took, in milliseconds.
-	frame_ms_average:    f32,
-	frame_ms_max:        f32,
-	work_ms_average:     f32,
-	work_ms_max:         f32,
+	frame_ms_average:                f32,
+	frame_ms_max:                    f32,
+	work_ms_average:                 f32,
+	work_ms_max:                     f32,
 	// The permanent arena's bytes in use, and the most that a frame's arena used.
-	permanent_bytes:     u64,
-	frame_bytes_max:     u64,
+	permanent_bytes:                 u64,
+	frame_bytes_max:                 u64,
 	// The most that a frame's upload ring used.
-	upload_bytes_max:    u64,
+	upload_bytes_max:                u64,
 	// The GPU resources that live now.
-	buffers:             u32,
-	textures:            u32,
-	samplers:            u32,
-	pipelines:           u32,
-	accels:              u32,
+	buffers:                         u32,
+	textures:                        u32,
+	samplers:                        u32,
+	pipelines:                       u32,
+	accels:                          u32,
 	// The adapter's local memory that the process uses, and the budget that the OS gives it, or 0 when unknown.
-	video_memory_used:   u64,
-	video_memory_budget: u64,
+	video_memory_used:               u64,
+	video_memory_budget:             u64,
 	// The bottom-level acceleration structures' memory, and what it would be without their compaction.
 	bottom_accel_memory:             u64,
 	bottom_accel_memory_uncompacted: u64,
@@ -1170,59 +1244,59 @@ Script_Module_Memory :: struct {
 
 // Game to editor: the world and the scripts.
 Game_Stats :: struct {
-	entities:     u32,
-	archetypes:   u32,
-	behaviours:   u32,
+	entities:                  u32,
+	archetypes:                u32,
+	behaviours:                u32,
 	// Every byte that the script VM holds, and the part that each module's code allocated. The engine's own part is
 	// the rest.
-	script_bytes: u64,
-	modules:      []Script_Module_Memory,
+	script_bytes:              u64,
+	modules:                   []Script_Module_Memory,
 	// What the camera drew a frame or two ago (see docs/rendering/gpu-scene.md#occlusion-culling): its items, as
 	// draws, and its instance sets' instances, each drawn early or late, and those that occlusion culling hid.
-	early_items:      u32,
-	late_items:       u32,
-	hidden_items:     u32,
-	early_instances:  u32,
-	late_instances:   u32,
-	hidden_instances: u32,
+	early_items:               u32,
+	late_items:                u32,
+	hidden_items:              u32,
+	early_instances:           u32,
+	late_instances:            u32,
+	hidden_instances:          u32,
 	// Of the items whose meshlets have a hierarchy, their meshlets, and those that the walk of the hierarchy gave the
 	// amplification shaders to test (see docs/rendering/gpu-scene.md#mesh-shader-path).
-	hierarchy_meshlets: u32,
-	selected_meshlets:  u32,
+	hierarchy_meshlets:        u32,
+	selected_meshlets:         u32,
 	// The forward pass's 2x2 quads and their lanes that cover a pixel, with the viewport's shading stats on, a frame or
 	// two ago (see docs/rendering/lighting-and-shadows.md#quad-overdraw).
-	forward_quads:      u32,
-	forward_pixels:     u32,
+	forward_quads:             u32,
+	forward_pixels:            u32,
 	// The virtual shadow map's pages a frame or two ago: those that the frame asked for, those that it got, those that the
 	// pool had no room for, and how many the pool holds, 0 without it (see
 	// docs/rendering/lighting-and-shadows.md#virtual-shadow-maps); of those that it got, those that the pool held and those
 	// that it drew, the pages that left the pool for them, and the pages that the pool holds after the frame (see
 	// docs/rendering/lighting-and-shadows.md#caching).
-	virtual_pages_requested: u32,
-	virtual_pages_allocated: u32,
-	virtual_pages_missed:    u32,
-	virtual_pages_capacity:  u32,
-	virtual_pages_cached:    u32,
-	virtual_pages_drawn:     u32,
-	virtual_pages_evicted:   u32,
-	virtual_pages_resident:  u32,
+	virtual_pages_requested:   u32,
+	virtual_pages_allocated:   u32,
+	virtual_pages_missed:      u32,
+	virtual_pages_capacity:    u32,
+	virtual_pages_cached:      u32,
+	virtual_pages_drawn:       u32,
+	virtual_pages_evicted:     u32,
+	virtual_pages_resident:    u32,
 	// The shadow atlas's cache in the last frame: the lights that it held, 0 without it, the slots that the frame copied
 	// from it, those that it drew, and those of them that a dynamic caster's report drew on the budget (see
 	// docs/rendering/lighting-and-shadows.md#cached-shadow-maps).
-	atlas_cache_lights:    u32,
-	atlas_cache_copied:    u32,
-	atlas_cache_drawn:     u32,
-	atlas_cache_refreshed: u32,
+	atlas_cache_lights:        u32,
+	atlas_cache_copied:        u32,
+	atlas_cache_drawn:         u32,
+	atlas_cache_refreshed:     u32,
 	// The pool of mesh pages: the pages that are resident, the slots that it has, 0 without a paged mesh, the pages that
 	// views want and that are not resident yet, and the bytes a second that the frames since the last stats copied into
 	// it (see docs/rendering/assets.md#mesh-pages).
-	mesh_pages_resident: u32,
-	mesh_pages_capacity: u32,
-	mesh_pages_pending:  u32,
+	mesh_pages_resident:       u32,
+	mesh_pages_capacity:       u32,
+	mesh_pages_pending:        u32,
 	mesh_pages_streamed_bytes: u32,
 	// The split cascades' tables a frame or two ago, a cascade each, none without them (see
 	// docs/rendering/global-illumination.md#split-cascades).
-	gi_cascades:      []Gi_Cascade_Stats,
+	gi_cascades:               []Gi_Cascade_Stats,
 	// The reflection probes in the last frame, the slots whose probe has a cube, of the level's slots, 0 without the
 	// probes, and the faces that the frame captured (see docs/rendering/lighting-and-shadows.md#reflection-probes).
 	reflection_probes:         u32,

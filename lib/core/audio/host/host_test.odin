@@ -15,7 +15,10 @@ the_user_file_names_the_backend_first :: proc(t: ^testing.T) {
 	project := fmt.tprintf("%s/project.settings", dir)
 	user := fmt.tprintf("%s/project.user.settings", dir)
 	testing.expect_value(t, backend_setting(project, context.temp_allocator), "")
-	testing.expect(t, os.write_entire_file(project, "# Audio.\naudio.backend = mixer\noutput = Sdr\n") == nil)
+	testing.expect(
+		t,
+		os.write_entire_file(project, "# Audio.\naudio.backend = mixer\noutput = Sdr\n") == nil,
+	)
 	testing.expect_value(t, backend_setting(project, context.temp_allocator), "mixer")
 	testing.expect(t, os.write_entire_file(user, "audio.backend = none\n") == nil)
 	testing.expect_value(t, backend_setting(project, context.temp_allocator), "none")

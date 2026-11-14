@@ -46,7 +46,9 @@ pool_add :: proc(pool: ^Pool($H, $T), item: T) -> H {
 }
 
 pool_get :: proc(pool: ^Pool($H, $T), handle: H) -> ^T {
-	if handle.generation & 1 == 0 || int(handle.index) >= len(pool.items) || pool.generations[handle.index] != handle.generation {
+	if handle.generation & 1 == 0 ||
+	   int(handle.index) >= len(pool.items) ||
+	   pool.generations[handle.index] != handle.generation {
 		return nil
 	}
 	return &pool.items[handle.index]

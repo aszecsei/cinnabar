@@ -54,42 +54,42 @@ Field_Edit :: struct {
 }
 
 Input_State :: struct {
-	focus:         Node_Ref,
-	focus_stack:   [MAX_FOCUS_STACK]Node_Ref,
-	focus_depth:   int,
+	focus:              Node_Ref,
+	focus_stack:        [MAX_FOCUS_STACK]Node_Ref,
+	focus_depth:        int,
 	// The modal document that showed last frame, or -1.
-	modal:         i32,
-	hovered:       Node_Ref,
-	pressed:       Node_Ref,
+	modal:              i32,
+	hovered:            Node_Ref,
+	pressed:            Node_Ref,
 	// The focused node is held down by Enter, Space or A.
-	key_pressing:  bool,
-	modality:      Modality,
-	last_mouse:    [2]f32,
+	key_pressing:       bool,
+	modality:           Modality,
+	last_mouse:         [2]f32,
 	// The direction that navigation holds, and when it next repeats.
-	nav_held:      Maybe(Direction),
-	nav_next:      f64,
-	stick:         Maybe(Direction),
+	nav_held:           Maybe(Direction),
+	nav_next:           f64,
+	stick:              Maybe(Direction),
 	// The key that a field repeats, and when.
-	key_held:      core.Key,
-	key_next:      f64,
+	key_held:           core.Key,
+	key_next:           f64,
 	// The field that is being edited, which is the focus.
-	edit:          Maybe(Field_Edit),
+	edit:               Maybe(Field_Edit),
 	// What the IME is composing, and its cursor, this frame, for the field to draw. It points into input.
-	composition:   string,
+	composition:        string,
 	composition_cursor: int,
-	events:        [dynamic]Pending_Event,
-	wants_input:   bool,
+	events:             [dynamic]Pending_Event,
+	wants_input:        bool,
 	// The innermost scroll box under the pointer, a scroll bar under it and which part, and a thumb that the pointer
 	// drags, from where on it the pointer took it, along its axis.
-	scroll_hovered: Node_Ref,
-	bar_hovered:   Node_Ref,
-	bar_part:      Bar_Part,
-	drag:          Node_Ref,
-	drag_grab:     f32,
+	scroll_hovered:     Node_Ref,
+	bar_hovered:        Node_Ref,
+	bar_part:           Bar_Part,
+	drag:               Node_Ref,
+	drag_grab:          f32,
 	// A node that the focus has moved to, which the next layout scrolls into view.
-	reveal:        Node_Ref,
+	reveal:             Node_Ref,
 	// The time of the last frame's input, for the right stick's scrolling.
-	last_time:     f64,
+	last_time:          f64,
 }
 
 @(private)
@@ -148,7 +148,8 @@ node_states :: proc(s: ^State, index: int, d: ^Document, n: u32) -> bit_set[form
 	if s.input.focus == here && (s.input.modality == .Keys || node.element == .Field) {
 		states += {.Focus}
 	}
-	if (s.input.pressed == here && s.input.hovered == here) || (s.input.focus == here && s.input.key_pressing) {
+	if (s.input.pressed == here && s.input.hovered == here) ||
+	   (s.input.focus == here && s.input.key_pressing) {
 		states += {.Press}
 	}
 	return states
@@ -216,7 +217,15 @@ forget_document :: proc(s: ^State, d: ^Document) {
 	if edit, ok := s.input.edit.?; ok && edit.field.document == index {
 		end_edit(s)
 	}
-	refs := []^Node_Ref{&s.input.focus, &s.input.hovered, &s.input.pressed, &s.input.scroll_hovered, &s.input.bar_hovered, &s.input.drag, &s.input.reveal}
+	refs := []^Node_Ref {
+		&s.input.focus,
+		&s.input.hovered,
+		&s.input.pressed,
+		&s.input.scroll_hovered,
+		&s.input.bar_hovered,
+		&s.input.drag,
+		&s.input.reveal,
+	}
 	for r in refs {
 		if r.document == index {
 			r^ = NO_NODE
@@ -230,7 +239,13 @@ forget_document :: proc(s: ^State, d: ^Document) {
 // interactive is whether a node takes the pointer: it clicks or takes focus, and is not disabled.
 @(private)
 interactive :: proc(node: ^Node) -> bool {
-	return !node.disabled && (node.style.focusable || node.style.click != "" || node.element == .Button || node.element == .Field)
+	return(
+		!node.disabled &&
+		(node.style.focusable ||
+				node.style.click != "" ||
+				node.element == .Button ||
+				node.element == .Field) \
+	)
 }
 
 @(private)
@@ -241,7 +256,16 @@ inside :: proc(r: [4]f32, p: [2]f32) -> bool {
 // hit is the topmost node under a point that takes the pointer, or the scroll box whose bar is under it and which part,
 // and whether a node with a fill or a scroll box is under it at all, which a modal document blocks with.
 @(private)
-hit :: proc(s: ^State, d: ^Document, n: u32, p: [2]f32) -> (found: u32, part: Bar_Part, covered: bool) {
+hit :: proc(
+	s: ^State,
+	d: ^Document,
+	n: u32,
+	p: [2]f32,
+) -> (
+	found: u32,
+	part: Bar_Part,
+	covered: bool,
+) {
 	node := &d.nodes[n]
 	if !node.shown {
 		return NONE, .None, false
@@ -271,7 +295,9 @@ hit :: proc(s: ^State, d: ^Document, n: u32, p: [2]f32) -> (found: u32, part: Ba
 	if within && interactive(node) {
 		return n, .None, true
 	}
-	solid := node.style.fill.colors[0].a + node.style.fill.colors[1].a > 0 || scroll_axis(&node.style) >= 0
+	solid :=
+		node.style.fill.colors[0].a + node.style.fill.colors[1].a > 0 ||
+		scroll_axis(&node.style) >= 0
 	return NONE, .None, covered || (within && solid)
 }
 
@@ -286,7 +312,10 @@ scope :: proc(s: ^State) -> []i32 {
 			append(&ordered, [2]i32{d.order, i32(i)})
 		}
 	}
-	slice.sort_by(ordered[:], proc(a, b: [2]i32) -> bool {return a[0] > b[0] || (a[0] == b[0] && a[1] > b[1])})
+	slice.sort_by(
+		ordered[:],
+		proc(a, b: [2]i32) -> bool {return a[0] > b[0] || (a[0] == b[0] && a[1] > b[1])},
+	)
 	list := make([]i32, len(ordered), context.temp_allocator)
 	for entry, i in ordered {
 		list[i] = entry[1]
@@ -346,7 +375,11 @@ queue_event :: proc(s: ^State, d: ^Document, name: string, id: string, text: May
 		return
 	}
 	allocator := s.platform.frame_allocator
-	e := Pending_Event{entity = d.entity, name = strings.clone(name, allocator), id = strings.clone(id, allocator)}
+	e := Pending_Event {
+		entity = d.entity,
+		name   = strings.clone(name, allocator),
+		id     = strings.clone(id, allocator),
+	}
 	if t, has := text.?; has {
 		e.text = strings.clone(t, allocator)
 	}
@@ -377,7 +410,8 @@ handle_input :: proc(s: ^State, input: core.Input, now: f64) {
 	update_modal(s, in_scope)
 	s.input.wants_input = s.input.modal >= 0 || s.input.edit != nil
 	// The composition draws after scripts run, so it is kept in frame memory.
-	s.input.composition = strings.clone(core.input_text_string(&input.composition), s.platform.frame_allocator) if s.input.edit != nil else ""
+	s.input.composition =
+		strings.clone(core.input_text_string(&input.composition), s.platform.frame_allocator) if s.input.edit != nil else ""
 	s.input.composition_cursor = int(input.composition_cursor)
 
 	// The pointer.
@@ -477,13 +511,15 @@ handle_input :: proc(s: ^State, input: core.Input, now: f64) {
 			}
 		}
 	}
-	if pad_pressed != {} || input.pressed & ~{.Mouse_Left, .Mouse_Right, .Mouse_Middle, .Mouse_4, .Mouse_5} != {} {
+	if pad_pressed != {} ||
+	   input.pressed & ~{.Mouse_Left, .Mouse_Right, .Mouse_Middle, .Mouse_4, .Mouse_5} != {} {
 		s.input.modality = .Keys
 	}
 
 	// Escape and B in a field end its edit and do nothing else; with no field being edited, they cancel.
 	if edit, ok := &s.input.edit.?; ok {
-		if d, n, found := resolve(s, edit.field); found && d.nodes[n].element == .Field && !d.nodes[n].disabled {
+		if d, n, found := resolve(s, edit.field);
+		   found && d.nodes[n].element == .Field && !d.nodes[n].disabled {
 			edit_field(s, d, n, edit, input, pad_pressed, now)
 		} else {
 			end_edit(s)
@@ -529,7 +565,14 @@ update_modal :: proc(s: ^State, in_scope: []i32) {
 // navigate moves the focus by arrows, Tab, the d-pad and the left stick, with repeat, and activates the focused node
 // with Enter, Space or A.
 @(private)
-navigate :: proc(s: ^State, in_scope: []i32, input: core.Input, pad_pressed, pad_down: core.Gamepad_Buttons, stick: [2]f32, now: f64) {
+navigate :: proc(
+	s: ^State,
+	in_scope: []i32,
+	input: core.Input,
+	pad_pressed, pad_down: core.Gamepad_Buttons,
+	stick: [2]f32,
+	now: f64,
+) {
 	// The stick engages past STICK_ENGAGE on its larger axis, and lets go past STICK_RELEASE.
 	if held, ok := s.input.stick.?; ok {
 		v := held == .Left || held == .Right ? abs(stick.x) : abs(stick.y)
@@ -544,10 +587,23 @@ navigate :: proc(s: ^State, in_scope: []i32, input: core.Input, pad_pressed, pad
 		}
 	}
 	held: Maybe(Direction)
-	KEYS := [Direction]core.Key{.Up = .Up, .Down = .Down, .Left = .Left, .Right = .Right}
-	PAD := [Direction]core.Gamepad_Button{.Up = .Dpad_Up, .Down = .Dpad_Down, .Left = .Dpad_Left, .Right = .Dpad_Right}
+	KEYS := [Direction]core.Key {
+		.Up    = .Up,
+		.Down  = .Down,
+		.Left  = .Left,
+		.Right = .Right,
+	}
+	PAD := [Direction]core.Gamepad_Button {
+		.Up    = .Dpad_Up,
+		.Down  = .Dpad_Down,
+		.Left  = .Dpad_Left,
+		.Right = .Dpad_Right,
+	}
 	for dir in Direction {
-		if KEYS[dir] in input.down || KEYS[dir] in input.pressed || PAD[dir] in pad_down || PAD[dir] in pad_pressed {
+		if KEYS[dir] in input.down ||
+		   KEYS[dir] in input.pressed ||
+		   PAD[dir] in pad_down ||
+		   PAD[dir] in pad_pressed {
 			held = dir
 		}
 	}
@@ -665,7 +721,15 @@ repeat :: proc(s: ^State, input: core.Input, key: core.Key, now: f64) -> bool {
 // edit_field types into the focused field: the committed text at the caret, over the selection, and its keys. The value
 // is the field's text, which the edit sets as a script's Ui.set_text would, so it outlives a rebuild.
 @(private)
-edit_field :: proc(s: ^State, d: ^Document, n: u32, edit: ^Field_Edit, input: core.Input, pad_pressed: core.Gamepad_Buttons, now: f64) {
+edit_field :: proc(
+	s: ^State,
+	d: ^Document,
+	n: u32,
+	edit: ^Field_Edit,
+	input: core.Input,
+	pad_pressed: core.Gamepad_Buttons,
+	now: f64,
+) {
 	input := input
 	node := &d.nodes[n]
 	value := strings.clone(node.style.text, s.platform.frame_allocator)
@@ -673,7 +737,12 @@ edit_field :: proc(s: ^State, d: ^Document, n: u32, edit: ^Field_Edit, input: co
 	changed := false
 	shift := .Left_Shift in input.down || .Right_Shift in input.down
 	ctrl := .Left_Control in input.down || .Right_Control in input.down
-	replace :: proc(value: string, from, to: u32, with: string, allocator := context.allocator) -> string {
+	replace :: proc(
+		value: string,
+		from, to: u32,
+		with: string,
+		allocator := context.allocator,
+	) -> string {
 		return strings.concatenate({value[:from], with, value[to:]}, allocator)
 	}
 	low, high := min(caret, anchor), max(caret, anchor)
@@ -681,7 +750,9 @@ edit_field :: proc(s: ^State, d: ^Document, n: u32, edit: ^Field_Edit, input: co
 	if typed != "" {
 		// Only what fits under max_length, a whole character at a time.
 		if limit := node.style.max_length; limit > 0 {
-			room := limit - (utf8.rune_count_in_string(value) - utf8.rune_count_in_string(value[low:high]))
+			room :=
+				limit -
+				(utf8.rune_count_in_string(value) - utf8.rune_count_in_string(value[low:high]))
 			cut := 0
 			for i := 0; i < len(typed) && room > 0; room -= 1 {
 				_, size := utf8.decode_rune_in_string(typed[i:])
@@ -736,7 +807,13 @@ edit_field :: proc(s: ^State, d: ^Document, n: u32, edit: ^Field_Edit, input: co
 			value = replace(value, low, high, "", s.platform.frame_allocator)
 			caret = low
 		} else if int(caret) < len(value) {
-			value = replace(value, caret, step_forward(value, caret, ctrl), "", s.platform.frame_allocator)
+			value = replace(
+				value,
+				caret,
+				step_forward(value, caret, ctrl),
+				"",
+				s.platform.frame_allocator,
+			)
 		}
 		anchor = caret
 		changed = true
@@ -749,7 +826,12 @@ edit_field :: proc(s: ^State, d: ^Document, n: u32, edit: ^Field_Edit, input: co
 	} else if .End in input.pressed {
 		caret = u32(len(value))
 	}
-	if !changed && !shift && (.Left in input.down || .Right in input.down || .Home in input.pressed || .End in input.pressed) {
+	if !changed &&
+	   !shift &&
+	   (.Left in input.down ||
+			   .Right in input.down ||
+			   .Home in input.pressed ||
+			   .End in input.pressed) {
 		anchor = caret
 	}
 	if caret != edit.caret || changed {

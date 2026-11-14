@@ -80,18 +80,35 @@ create_shared_target :: proc(name: string, size: [2]i32) -> bool {
 	shared := &dev.shared
 	shared.name = strings.clone(name, dev.allocator)
 	shared.rtv_base = gpu.MAX_TEXTURES
-	shared.timer = win.CreateWaitableTimerExW(nil, nil, win.CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, win.TIMER_ALL_ACCESS)
+	shared.timer = win.CreateWaitableTimerExW(
+		nil,
+		nil,
+		win.CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,
+		win.TIMER_ALL_ACCESS,
+	)
 	if shared.timer == nil {
 		log.errorf("d3d12: CreateWaitableTimerExW failed: %d", win.GetLastError())
 		return false
 	}
 	shared.frame_start = time.tick_now()
-	dev.frame_target = gpu.pool_add(&dev.textures, Texture_Entry{desc = {format = gpu.FRAME_TARGET_FORMAT, usage = {.Render_Target}, scope = .Permanent}})
+	dev.frame_target = gpu.pool_add(
+		&dev.textures,
+		Texture_Entry {
+			desc = {
+				format = gpu.FRAME_TARGET_FORMAT,
+				usage = {.Render_Target},
+				scope = .Permanent,
+			},
+		},
+	)
 	if !create_shared_objects(&shared.target, size, scratch = true) {
 		return false
 	}
 	dev.size = shared.size
-	gpu.pool_get(&dev.textures, dev.frame_target).desc.size = {u32(shared.size.x), u32(shared.size.y)}
+	gpu.pool_get(&dev.textures, dev.frame_target).desc.size = {
+		u32(shared.size.x),
+		u32(shared.size.y),
+	}
 	return true
 }
 
@@ -104,14 +121,14 @@ create_shared_objects :: proc(t: ^Shared_Target, size: [2]i32, scratch: bool) ->
 	// Typed, unlike the swapchain's typeless back buffers: D3D11 cannot open a shared typeless texture without
 	// simultaneous access, and the editor opens these with D3D11 (see docs/editor/viewport.md#viewport).
 	desc := d3d.RESOURCE_DESC1 {
-		Dimension        = .TEXTURE2D,
-		Width            = u64(width),
-		Height           = height,
+		Dimension = .TEXTURE2D,
+		Width = u64(width),
+		Height = height,
 		DepthOrArraySize = 1,
-		MipLevels        = 1,
-		Format           = view_format(gpu.FRAME_TARGET_FORMAT),
-		SampleDesc       = {Count = 1},
-		Flags            = {.ALLOW_RENDER_TARGET},
+		MipLevels = 1,
+		Format = view_format(gpu.FRAME_TARGET_FORMAT),
+		SampleDesc = {Count = 1},
+		Flags = {.ALLOW_RENDER_TARGET},
 	}
 	rtv := d3d.RENDER_TARGET_VIEW_DESC {
 		Format        = view_format(gpu.FRAME_TARGET_FORMAT),
@@ -119,30 +136,81 @@ create_shared_objects :: proc(t: ^Shared_Target, size: [2]i32, scratch: bool) ->
 	}
 	prefix := shared_prefix(t)
 	for &texture, i in t.textures {
-		hr := dev.device->CreateCommittedResource3(&heap_props, {.SHARED}, &desc, .COMMON, nil, nil, 0, nil, d3d.IResource_UUID, (^rawptr)(&texture))
+		hr := dev.device->CreateCommittedResource3(
+			&heap_props,
+			{.SHARED},
+			&desc,
+			.COMMON,
+			nil,
+			nil,
+			0,
+			nil,
+			d3d.IResource_UUID,
+			(^rawptr)(&texture),
+		)
 		check(hr, "CreateCommittedResource3(shared texture)") or_return
 		set_name(texture, "frame target (shared)")
 		texture_name := fmt.tprintf("%s.texture%d", prefix, i)
 		check(
-			dev.device->CreateSharedHandle(texture, nil, win.GENERIC_ALL, win.utf8_to_wstring(texture_name), &t.texture_handles[i]),
+			dev.device->CreateSharedHandle(
+				texture,
+				nil,
+				win.GENERIC_ALL,
+				win.utf8_to_wstring(texture_name),
+				&t.texture_handles[i],
+			),
 			"CreateSharedHandle(texture)",
 		) or_return
 		dev.device->CreateRenderTargetView(texture, &rtv, rtv_handle(t.rtv_base + u32(i)))
 	}
 	if scratch {
-		hr := dev.device->CreateCommittedResource3(&heap_props, {}, &desc, .COMMON, nil, nil, 0, nil, d3d.IResource_UUID, (^rawptr)(&t.scratch))
+		hr := dev.device->CreateCommittedResource3(
+			&heap_props,
+			{},
+			&desc,
+			.COMMON,
+			nil,
+			nil,
+			0,
+			nil,
+			d3d.IResource_UUID,
+			(^rawptr)(&t.scratch),
+		)
 		check(hr, "CreateCommittedResource3(scratch frame target)") or_return
 		set_name(t.scratch, "frame target (scratch)")
-		dev.device->CreateRenderTargetView(t.scratch, &rtv, rtv_handle(t.rtv_base + SHARED_TEXTURE_COUNT))
+		dev.device->CreateRenderTargetView(
+			t.scratch,
+			&rtv,
+			rtv_handle(t.rtv_base + SHARED_TEXTURE_COUNT),
+		)
 	}
-	check(dev.device->CreateFence(0, {.SHARED}, d3d.IFence_UUID, (^rawptr)(&t.fence)), "CreateFence(shared)") or_return
+	check(
+		dev.device->CreateFence(0, {.SHARED}, d3d.IFence_UUID, (^rawptr)(&t.fence)),
+		"CreateFence(shared)",
+	) or_return
 	fence_name := fmt.tprintf("%s.fence", prefix)
-	check(dev.device->CreateSharedHandle(t.fence, nil, win.GENERIC_ALL, win.utf8_to_wstring(fence_name), &t.fence_handle), "CreateSharedHandle(fence)") or_return
+	check(
+		dev.device->CreateSharedHandle(
+			t.fence,
+			nil,
+			win.GENERIC_ALL,
+			win.utf8_to_wstring(fence_name),
+			&t.fence_handle,
+		),
+		"CreateSharedHandle(fence)",
+	) or_return
 
 	t.frame = 0
 	t.acknowledged = 0
 	t.size = {i32(width), i32(height)}
-	log.infof("d3d12: rendering %dx%d into shared textures %s.texture0..%d and fence %s", width, height, prefix, SHARED_TEXTURE_COUNT - 1, fence_name)
+	log.infof(
+		"d3d12: rendering %dx%d into shared textures %s.texture0..%d and fence %s",
+		width,
+		height,
+		prefix,
+		SHARED_TEXTURE_COUNT - 1,
+		fence_name,
+	)
 	return true
 }
 
@@ -188,7 +256,12 @@ shared_prefix :: proc(t: ^Shared_Target) -> string {
 // begin_shared_frame resizes the target if the size changed, paces the frame, and points the frame target at the
 // next shared texture, or at the scratch target if the reader may still be reading that texture.
 @(private)
-begin_shared_frame :: proc(size: [2]i32) -> (texture: ^d3d.IResource, rtv: d3d.CPU_DESCRIPTOR_HANDLE) {
+begin_shared_frame :: proc(
+	size: [2]i32,
+) -> (
+	texture: ^d3d.IResource,
+	rtv: d3d.CPU_DESCRIPTOR_HANDLE,
+) {
 	shared := &dev.shared
 	if size.x > 0 && size.y > 0 && size != dev.size {
 		// Readers may hold the old objects. Each keeps them alive until it opens the new generation.
@@ -199,7 +272,10 @@ begin_shared_frame :: proc(size: [2]i32) -> (texture: ^d3d.IResource, rtv: d3d.C
 			log.panic("d3d12: cannot create the resized shared target")
 		}
 		dev.size = shared.size
-		gpu.pool_get(&dev.textures, dev.frame_target).desc.size = {u32(shared.size.x), u32(shared.size.y)}
+		gpu.pool_get(&dev.textures, dev.frame_target).desc.size = {
+			u32(shared.size.x),
+			u32(shared.size.y),
+		}
 	}
 	if elapsed := time.tick_since(shared.frame_start); elapsed < SHARED_FRAME_TIME {
 		// A negative due time is relative, in 100 ns units.
@@ -241,9 +317,19 @@ end_shared_sides :: proc(list: ^d3d.IGraphicsCommandList7) {
 	for &p in dev.shared.sides {
 		if p.used {
 			entry := gpu.pool_get(&dev.textures, p.texture)
-			texture_barrier(list, entry.resource, {.RENDER_TARGET}, {.NO_ACCESS}, {.RENDER_TARGET}, {}, .RENDER_TARGET, .COMMON)
+			texture_barrier(
+				list,
+				entry.resource,
+				{.RENDER_TARGET},
+				{.NO_ACCESS},
+				{.RENDER_TARGET},
+				{},
+				.RENDER_TARGET,
+				.COMMON,
+			)
 			when ODIN_DEBUG {
-				if layout, _ := gpu.tracked_layout(&dev.layouts, p.texture); layout != .Render_Target {
+				if layout, _ := gpu.tracked_layout(&dev.layouts, p.texture);
+				   layout != .Render_Target {
 					log.errorf("gpu: a side target ends the frame in the %v layout", layout)
 				}
 			}
@@ -296,7 +382,10 @@ side_slot :: proc(kind: Side_Kind, id: int) -> (slot: int, name: string, max_siz
 	case .Preview:
 		return id, "preview", gpu.MAX_PREVIEW_SIZE, id >= 0 && id < gpu.MAX_PREVIEW_TARGETS
 	case .Viewport:
-		return gpu.MAX_PREVIEW_TARGETS + id, "viewport", gpu.MAX_VIEWPORT_SIZE, id >= 0 && id < gpu.MAX_VIEWPORT_TARGETS
+		return gpu.MAX_PREVIEW_TARGETS + id,
+			"viewport",
+			gpu.MAX_VIEWPORT_SIZE,
+			id >= 0 && id < gpu.MAX_VIEWPORT_TARGETS
 	}
 	return
 }
@@ -315,7 +404,14 @@ viewport_target :: proc(id: int, size: [2]u32) -> (target: gpu.Preview_Target, o
 }
 
 @(private = "file")
-side_target :: proc(kind: Side_Kind, id: int, size: [2]u32) -> (target: gpu.Preview_Target, ok: bool) {
+side_target :: proc(
+	kind: Side_Kind,
+	id: int,
+	size: [2]u32,
+) -> (
+	target: gpu.Preview_Target,
+	ok: bool,
+) {
 	slot, name, max_size := side_slot(kind, id) or_return
 	if !dev.shared_mode || !dev.recording || size.x == 0 || size.y == 0 {
 		return
@@ -325,7 +421,16 @@ side_target :: proc(kind: Side_Kind, id: int, size: [2]u32) -> (target: gpu.Prev
 	if p.texture == {} {
 		p.name = fmt.aprintf("%s.%s%d", dev.shared.name, name, id, allocator = dev.allocator)
 		p.rtv_base = gpu.MAX_TEXTURES + SHARED_TEXTURE_COUNT + 1 + u32(slot) * SHARED_TEXTURE_COUNT
-		p.texture = gpu.pool_add(&dev.textures, Texture_Entry{desc = {format = gpu.FRAME_TARGET_FORMAT, usage = {.Render_Target}, scope = .Permanent}})
+		p.texture = gpu.pool_add(
+			&dev.textures,
+			Texture_Entry {
+				desc = {
+					format = gpu.FRAME_TARGET_FORMAT,
+					usage = {.Render_Target},
+					scope = .Permanent,
+				},
+			},
+		)
 	}
 	if p.fence == nil || p.size != want {
 		if p.fence != nil {
@@ -341,7 +446,12 @@ side_target :: proc(kind: Side_Kind, id: int, size: [2]u32) -> (target: gpu.Prev
 		p.acknowledged = p.frame
 	}
 	entry := gpu.pool_get(&dev.textures, p.texture)
-	target = {texture = p.texture, prefix = shared_prefix(p), generation = p.generation, size = {u32(p.size.x), u32(p.size.y)}}
+	target = {
+		texture    = p.texture,
+		prefix     = shared_prefix(p),
+		generation = p.generation,
+		size       = {u32(p.size.x), u32(p.size.y)},
+	}
 	if p.used {
 		return target, true
 	}
@@ -350,10 +460,20 @@ side_target :: proc(kind: Side_Kind, id: int, size: [2]u32) -> (target: gpu.Prev
 		return
 	}
 	index := u32(next % SHARED_TEXTURE_COUNT)
-	entry.resource, entry.rtv, entry.desc.size = p.textures[index], rtv_handle(p.rtv_base + index), target.size
+	entry.resource, entry.rtv, entry.desc.size =
+		p.textures[index], rtv_handle(p.rtv_base + index), target.size
 	frame := &dev.frames[dev.frame_index % FRAMES_IN_FLIGHT]
 	list := acquire_list(frame, .Graphics)
-	texture_barrier(list, entry.resource, {.NO_ACCESS}, {.RENDER_TARGET}, {}, {.RENDER_TARGET}, .UNDEFINED, .RENDER_TARGET)
+	texture_barrier(
+		list,
+		entry.resource,
+		{.NO_ACCESS},
+		{.RENDER_TARGET},
+		{},
+		{.RENDER_TARGET},
+		.UNDEFINED,
+		.RENDER_TARGET,
+	)
 	check(list->Close(), "ICommandList.Close")
 	add_op(frame, .Graphics, (^d3d.ICommandList)(list))
 	when ODIN_DEBUG {

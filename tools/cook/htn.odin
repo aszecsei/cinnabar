@@ -78,12 +78,22 @@ read_htn :: proc(p: ^Decision_Parser, text: ^Decision_Text) -> (state_size: u32,
 		case "max_plan":
 			value, ok := strconv.parse_int(s.value)
 			if !ok || value < 1 || value > format.MAX_PLAN_LENGTH {
-				decision_problem(p, s.line, "max_plan is a count from 1 to %d", format.MAX_PLAN_LENGTH)
+				decision_problem(
+					p,
+					s.line,
+					"max_plan is a count from 1 to %d",
+					format.MAX_PLAN_LENGTH,
+				)
 			} else {
 				contents.max_plan = u32(value)
 			}
 		case:
-			decision_problem(p, s.line, "an HTN decision has no setting %s: its settings are keys, root and max_plan", s.key)
+			decision_problem(
+				p,
+				s.line,
+				"an HTN decision has no setting %s: its settings are keys, root and max_plan",
+				s.key,
+			)
 		}
 	}
 	if root_line == 0 {
@@ -148,7 +158,13 @@ read_htn :: proc(p: ^Decision_Parser, text: ^Decision_Text) -> (state_size: u32,
 			case n.kind == .Task && slice.contains(ids[:at], id):
 				decision_problem(p, n.children_line, "node %d is a method of this task twice", id)
 			case n.kind == .Task && nodes[child].owner >= 0:
-				decision_problem(p, n.children_line, "node %d is a method of node %d too: a method has one task", id, text.nodes[nodes[child].owner].id)
+				decision_problem(
+					p,
+					n.children_line,
+					"node %d is a method of node %d too: a method has one task",
+					id,
+					text.nodes[nodes[child].owner].id,
+				)
 			case n.kind == .Task:
 				nodes[child].owner = i
 			}
@@ -157,7 +173,12 @@ read_htn :: proc(p: ^Decision_Parser, text: ^Decision_Text) -> (state_size: u32,
 	}
 	for n, i in nodes {
 		if n.kind == .Method && n.owner < 0 {
-			decision_problem(p, text.nodes[i].line, "no task lists the method %d", text.nodes[i].id)
+			decision_problem(
+				p,
+				text.nodes[i].line,
+				"no task lists the method %d",
+				text.nodes[i].id,
+			)
 		}
 	}
 	if len(p.found) > problems {
@@ -178,7 +199,12 @@ read_htn :: proc(p: ^Decision_Parser, text: ^Decision_Text) -> (state_size: u32,
 	}
 	for n, i in nodes {
 		if !n.reached && n.kind != .Unknown {
-			decision_problem(p, text.nodes[i].line, "the root does not reach node %d", text.nodes[i].id)
+			decision_problem(
+				p,
+				text.nodes[i].line,
+				"the root does not reach node %d",
+				text.nodes[i].id,
+			)
 		}
 	}
 	if len(p.found) > problems {
@@ -217,10 +243,10 @@ read_htn :: proc(p: ^Decision_Parser, text: ^Decision_Text) -> (state_size: u32,
 		switch n.kind {
 		case .Action:
 			actions[n.index] = {
-				node         = node,
-				cost         = {value = 1},
-				first_test   = u32(len(tests)),
-				test_count   = u32(len(n.tests)),
+				node = node,
+				cost = {value = 1},
+				first_test = u32(len(tests)),
+				test_count = u32(len(n.tests)),
 				first_effect = u32(len(effects)),
 				effect_count = u32(len(n.effects)),
 			}
@@ -256,7 +282,12 @@ read_htn :: proc(p: ^Decision_Parser, text: ^Decision_Text) -> (state_size: u32,
 	contents.subtasks = subtasks[:]
 	contents.tests = tests[:]
 	contents.effects = effects[:]
-	layout := format.htn_state(u32(len(r.planning)), u32(len(actions)), u32(len(methods)), contents.max_plan)
+	layout := format.htn_state(
+		u32(len(r.planning)),
+		u32(len(actions)),
+		u32(len(methods)),
+		contents.max_plan,
+	)
 	if layout.size > format.MAX_DECISION_STATE {
 		decision_problem(
 			p,
@@ -287,7 +318,12 @@ read_htn_node :: proc(r: ^Plan_Reader, text: ^Decision_Text_Node, n: ^Htn_Text_N
 	case "action":
 		n.kind = .Action
 	case:
-		decision_problem(p, text.line, "%s is not a node of an HTN decision: a node is task, method or action", text.kind)
+		decision_problem(
+			p,
+			text.line,
+			"%s is not a node of an HTN decision: a node is task, method or action",
+			text.kind,
+		)
 		return
 	}
 	kind_fields := [Htn_Kind][]string {
@@ -303,12 +339,22 @@ read_htn_node :: proc(r: ^Plan_Reader, text: ^Decision_Text_Node, n: ^Htn_Text_N
 		.Action  = "an action",
 	}
 	if n.kind != .Action && text.set_line != 0 {
-		decision_problem(p, text.set_line, "only an action writes keys, and this is %s", articles[n.kind])
+		decision_problem(
+			p,
+			text.set_line,
+			"only an action writes keys, and this is %s",
+			articles[n.kind],
+		)
 	}
 	if n.kind == .Action {
 		for w in p.writes[text.first_write:][:text.write_count] {
 			if slice.contains(r.planning[:], w.key) {
-				decision_problem(p, text.set_line, "%s is a planning key, which an action changes by its effects and not by set", p.keys[w.key].name)
+				decision_problem(
+					p,
+					text.set_line,
+					"%s is a planning key, which an action changes by its effects and not by set",
+					p.keys[w.key].name,
+				)
 			}
 		}
 	}
@@ -339,7 +385,13 @@ read_htn_node :: proc(r: ^Plan_Reader, text: ^Decision_Text_Node, n: ^Htn_Text_N
 			for part in strings.split(f.value, ",", context.temp_allocator) {
 				id, ok := strconv.parse_int(strings.trim_space(part))
 				if !ok {
-					decision_problem(p, f.line, "%s are node IDs: `%s = <id>, <id>, ...`", f.key, f.key)
+					decision_problem(
+						p,
+						f.line,
+						"%s are node IDs: `%s = <id>, <id>, ...`",
+						f.key,
+						f.key,
+					)
 					clear(&n.children)
 					return
 				}

@@ -94,13 +94,26 @@ Sheet_Text :: struct {
 
 // sprite_sheet_parse reads a .sprite_sheet: lines of `key = value`, and # comments. It gives every problem that it
 // finds, and the sheet is good only without any.
-sprite_sheet_parse :: proc(text: string, allocator := context.allocator) -> (sheet: Sheet_Text, problems: []Sheet_Problem) {
+sprite_sheet_parse :: proc(
+	text: string,
+	allocator := context.allocator,
+) -> (
+	sheet: Sheet_Text,
+	problems: []Sheet_Problem,
+) {
 	context.allocator = allocator
 	found := make([dynamic]Sheet_Problem)
 	problem :: proc(found: ^[dynamic]Sheet_Problem, line: int, f: string, args: ..any) {
 		append(found, Sheet_Problem{line, fmt.aprintf(f, ..args)})
 	}
-	guid_of :: proc(found: ^[dynamic]Sheet_Problem, line: int, value: string) -> (guid: format.Guid, ok: bool) {
+	guid_of :: proc(
+		found: ^[dynamic]Sheet_Problem,
+		line: int,
+		value: string,
+	) -> (
+		guid: format.Guid,
+		ok: bool,
+	) {
 		if !strings.has_prefix(value, "$") {
 			problem(found, line, "an image or a texture is an asset's GUID after $")
 			return
@@ -135,14 +148,24 @@ sprite_sheet_parse :: proc(text: string, allocator := context.allocator) -> (she
 		key_fields := strings.fields(line[:equals])
 		value := strings.trim_space(line[equals + 1:])
 		if len(key_fields) == 0 || len(key_fields) > 2 {
-			problem(&found, line_number, "needs `key = value`, where the key is one word, or frame, rect or animation and a name")
+			problem(
+				&found,
+				line_number,
+				"needs `key = value`, where the key is one word, or frame, rect or animation and a name",
+			)
 			continue
 		}
 		key := key_fields[0]
 		name := len(key_fields) == 2 ? key_fields[1] : ""
 		named := key == "frame" || key == "rect" || key == "animation"
 		if named != (name != "") {
-			problem(&found, line_number, named ? "%s needs a name: `%s <name> = ...`" : "%s takes no name", key, key)
+			problem(
+				&found,
+				line_number,
+				named ? "%s needs a name: `%s <name> = ...`" : "%s takes no name",
+				key,
+				key,
+			)
 			continue
 		}
 		fields := strings.fields(value)
@@ -167,7 +190,11 @@ sprite_sheet_parse :: proc(text: string, allocator := context.allocator) -> (she
 			x, x_ok := strconv.parse_f32(len(fields) == 2 ? fields[0] : "")
 			y, y_ok := strconv.parse_f32(len(fields) == 2 ? fields[1] : "")
 			if !x_ok || !y_ok {
-				problem(&found, line_number, "pivot is two numbers: the share of a frame's width and of its height, from its bottom left")
+				problem(
+					&found,
+					line_number,
+					"pivot is two numbers: the share of a frame's width and of its height, from its bottom left",
+				)
 				continue
 			}
 			sheet.pivot = {x, y}
@@ -180,7 +207,11 @@ sprite_sheet_parse :: proc(text: string, allocator := context.allocator) -> (she
 			sheet.texture, sheet.texture_line = guid, line_number
 		case "import":
 			if sheet.import_line != 0 || value == "" {
-				problem(&found, line_number, sheet.import_line != 0 ? "has import twice" : "import is a JSON file's path from this file's directory")
+				problem(
+					&found,
+					line_number,
+					sheet.import_line != 0 ? "has import twice" : "import is a JSON file's path from this file's directory",
+				)
 				continue
 			}
 			sheet.import_path, sheet.import_line = strings.clone(value), line_number
@@ -193,7 +224,11 @@ sprite_sheet_parse :: proc(text: string, allocator := context.allocator) -> (she
 				ok &&= n_ok && n >= 0
 			}
 			if !ok || numbers[0] == 0 || numbers[1] == 0 {
-				problem(&found, line_number, sheet.grid_line != 0 ? "has grid twice" : "grid is `columns rows`, then a margin and a spacing in texels if it has them")
+				problem(
+					&found,
+					line_number,
+					sheet.grid_line != 0 ? "has grid twice" : "grid is `columns rows`, then a margin and a spacing in texels if it has them",
+				)
 				continue
 			}
 			sheet.grid, sheet.grid_line = numbers, line_number
@@ -214,7 +249,11 @@ sprite_sheet_parse :: proc(text: string, allocator := context.allocator) -> (she
 				ok &&= n_ok && n >= 0
 			}
 			if !ok || r.z == 0 || r.w == 0 {
-				problem(&found, line_number, "a rect is `x y width height` in texels from the texture's top left")
+				problem(
+					&found,
+					line_number,
+					"a rect is `x y width height` in texels from the texture's top left",
+				)
 				continue
 			}
 			if names[name] {
@@ -253,7 +292,12 @@ sprite_sheet_parse :: proc(text: string, allocator := context.allocator) -> (she
 					}
 					a.loop = f[option + 1:] == "true"
 				case:
-					problem(&found, line_number, "unknown option %q: an animation takes rate and loop", f[:option])
+					problem(
+						&found,
+						line_number,
+						"unknown option %q: an animation takes rate and loop",
+						f[:option],
+					)
 					ok = false
 				}
 			}
@@ -272,20 +316,41 @@ sprite_sheet_parse :: proc(text: string, allocator := context.allocator) -> (she
 				append(&animations, a)
 			}
 		case:
-			problem(&found, line_number, "unknown key %q: a sheet's keys are pixels_per_unit, filter, pivot, frame, texture, grid, rect, import and animation", key)
+			problem(
+				&found,
+				line_number,
+				"unknown key %q: a sheet's keys are pixels_per_unit, filter, pivot, frame, texture, grid, rect, import and animation",
+				key,
+			)
 		}
 	}
 	sheet.images, sheet.rects, sheet.animations = images[:], rects[:], animations[:]
 	described := sheet.grid_line != 0 || len(sheet.rects) > 0 || sheet.import_line != 0
 	switch {
 	case len(sheet.images) > 0 && (sheet.texture_line != 0 || described):
-		problem(&found, 0, "has both frame lines, which the cooker packs, and a texture's frames: a sheet has one or the other")
+		problem(
+			&found,
+			0,
+			"has both frame lines, which the cooker packs, and a texture's frames: a sheet has one or the other",
+		)
 	case len(sheet.images) == 0 && sheet.texture_line == 0:
-		problem(&found, 0, described ? "has frames of a texture, but no `texture = $guid`" : "names no frames: it needs frame lines, or a texture with a grid, rect lines or an import")
+		problem(
+			&found,
+			0,
+			described ? "has frames of a texture, but no `texture = $guid`" : "names no frames: it needs frame lines, or a texture with a grid, rect lines or an import",
+		)
 	case sheet.texture_line != 0 && !described:
-		problem(&found, sheet.texture_line, "has a texture, but no grid, rect or import to say where its frames are")
+		problem(
+			&found,
+			sheet.texture_line,
+			"has a texture, but no grid, rect or import to say where its frames are",
+		)
 	case sheet.import_line != 0 && (sheet.grid_line != 0 || len(sheet.rects) > 0):
-		problem(&found, sheet.import_line, "has both an import and a grid or rects: the imported file says where the frames are")
+		problem(
+			&found,
+			sheet.import_line,
+			"has both an import and a grid or rects: the imported file says where the frames are",
+		)
 	}
 	return sheet, found[:]
 }
@@ -322,7 +387,13 @@ Imported_Sheet :: struct {
 // array, or TexturePacker's, which has the same shape. A frame's name is its key or its filename, its duration is in
 // milliseconds, and its pivot, if it has one, is a share of the frame from its top left. meta.frameTags are the
 // animations: a range of frames, forward, reverse or pingpong. Rotated frames are not read.
-sprite_sheet_import :: proc(data: []byte, allocator := context.allocator) -> (sheet: Imported_Sheet, problem: string) {
+sprite_sheet_import :: proc(
+	data: []byte,
+	allocator := context.allocator,
+) -> (
+	sheet: Imported_Sheet,
+	problem: string,
+) {
 	context.allocator = allocator
 	root, err := json.parse(data, parse_integers = true, allocator = allocator)
 	if err != .None {
@@ -389,7 +460,10 @@ sprite_sheet_import :: proc(data: []byte, allocator := context.allocator) -> (sh
 			}
 			r[k] = u16(n)
 		}
-		frames[i] = {name = strings.clone(e.name), rect = r}
+		frames[i] = {
+			name = strings.clone(e.name),
+			rect = r,
+		}
 		if ms, ok := number(o["duration"]); ok && ms > 0 {
 			frames[i].duration = f32(ms / 1000)
 		}
@@ -430,7 +504,15 @@ sprite_sheet_import :: proc(data: []byte, allocator := context.allocator) -> (sh
 				append(&indices, u16(i))
 			}
 		}
-		append(&animations, format.Sprite_Animation_Contents{name = strings.clone(name), frames = indices[:], rate = DEFAULT_SPRITE_RATE, loop = true})
+		append(
+			&animations,
+			format.Sprite_Animation_Contents {
+				name = strings.clone(name),
+				frames = indices[:],
+				rate = DEFAULT_SPRITE_RATE,
+				loop = true,
+			},
+		)
 	}
 	return {frames, has_pivot, animations[:]}, ""
 }
@@ -459,14 +541,25 @@ cook_sprite_sheets :: proc(options: Cook_Options, assets: []Asset_Source, pass: 
 
 // sheet_image is the index of the image asset that a sheet names, with its source read.
 @(private = "file")
-sheet_image :: proc(pass: ^Pass, a: ^Asset_Source, assets: []Asset_Source, by_guid: map[format.Guid]int, guid: format.Guid, line: int) -> (child: int, ok: bool) {
+sheet_image :: proc(
+	pass: ^Pass,
+	a: ^Asset_Source,
+	assets: []Asset_Source,
+	by_guid: map[format.Guid]int,
+	guid: format.Guid,
+	line: int,
+) -> (
+	child: int,
+	ok: bool,
+) {
 	problems := &pass.problems
 	child, ok = by_guid[guid]
 	if !ok {
 		report_error(problems, a.path, line, 0, "no asset has the GUID $%s", guid_text(guid))
 		return
 	}
-	if c := assets[child]; c.kind != .Texture || is_texture_set(c) || texture_setting(c, "layout") != "2d" {
+	if c := assets[child];
+	   c.kind != .Texture || is_texture_set(c) || texture_setting(c, "layout") != "2d" {
 		report_error(problems, a.path, line, 0, "%s is not an image", c.name)
 		return child, false
 	}
@@ -475,7 +568,14 @@ sheet_image :: proc(pass: ^Pass, a: ^Asset_Source, assets: []Asset_Source, by_gu
 }
 
 @(private = "file")
-cook_sprite_sheet :: proc(options: Cook_Options, index: int, assets: []Asset_Source, by_guid: map[format.Guid]int, out_dir: string, pass: ^Pass) -> Asset_Result {
+cook_sprite_sheet :: proc(
+	options: Cook_Options,
+	index: int,
+	assets: []Asset_Source,
+	by_guid: map[format.Guid]int,
+	out_dir: string,
+	pass: ^Pass,
+) -> Asset_Result {
 	a := &assets[index]
 	problems := &pass.problems
 	settings_ok := check_settings(a^, problems)
@@ -510,7 +610,13 @@ cook_sprite_sheet :: proc(options: Cook_Options, index: int, assets: []Asset_Sou
 	}
 	atlas_guid := sheet.texture
 	if packed {
-		if !assign_subassets(options.roots[a.root].dir, a, {{kind = .Texture, name = format.SPRITE_SHEET_ATLAS_NAME}}, pass.force[guid], problems) {
+		if !assign_subassets(
+			options.roots[a.root].dir,
+			a,
+			{{kind = .Texture, name = format.SPRITE_SHEET_ATLAS_NAME}},
+			pass.force[guid],
+			problems,
+		) {
 			return .Failed
 		}
 		for s in a.subassets {
@@ -523,18 +629,37 @@ cook_sprite_sheet :: proc(options: Cook_Options, index: int, assets: []Asset_Sou
 	if sheet.import_line != 0 {
 		path := fmt.tprintf("%s/%s", filepath.dir(a.path), sheet.import_path)
 		if size, modified, stamped := file_stamp(path); stamped {
-			append(&a.inputs, Input_Stamp{strings.clone(path, context.temp_allocator), size, modified})
+			append(
+				&a.inputs,
+				Input_Stamp{strings.clone(path, context.temp_allocator), size, modified},
+			)
 		}
 		data, err := os.read_entire_file(path, context.temp_allocator)
 		if err != nil {
-			report_error(problems, a.path, sheet.import_line, 0, "cannot read %s: %v", sheet.import_path, err)
+			report_error(
+				problems,
+				a.path,
+				sheet.import_line,
+				0,
+				"cannot read %s: %v",
+				sheet.import_path,
+				err,
+			)
 			return .Failed
 		}
 		imported = data
 	}
 
 	key := hash.fnv64a(
-		transmute([]byte)fmt.tprintf("%s\x00%s\x00%v\x00%s\x00%x\x00%x\x00", SPRITE_SHEET_COOK_VERSION, TEXTURE_COOK_VERSION, options.config, a.name, format.sprite_sheet_layout(), format.texture_layout()),
+		transmute([]byte)fmt.tprintf(
+			"%s\x00%s\x00%v\x00%s\x00%x\x00%x\x00",
+			SPRITE_SHEET_COOK_VERSION,
+			TEXTURE_COOK_VERSION,
+			options.config,
+			a.name,
+			format.sprite_sheet_layout(),
+			format.texture_layout(),
+		),
 	)
 	key = hash.fnv64a(source_of(a^), key)
 	key = hash.fnv64a(guid[:], key)
@@ -548,7 +673,9 @@ cook_sprite_sheet :: proc(options: Cook_Options, index: int, assets: []Asset_Sou
 	key = hash.fnv64a(imported, key)
 	output := fmt.tprintf("%s/%s.blob", out_dir, guid_text(guid))
 	atlas_output := fmt.tprintf("%s/%s.blob", out_dir, guid_text(atlas_guid))
-	if cooked_key(output, .Sprite_Sheet, format.sprite_sheet_layout()) == key && (!packed || cooked_key(atlas_output, .Texture, format.texture_layout()) == key) && !pass.force[guid] {
+	if cooked_key(output, .Sprite_Sheet, format.sprite_sheet_layout()) == key &&
+	   (!packed || cooked_key(atlas_output, .Texture, format.texture_layout()) == key) &&
+	   !pass.force[guid] {
 		return .Current
 	}
 
@@ -556,25 +683,51 @@ cook_sprite_sheet :: proc(options: Cook_Options, index: int, assets: []Asset_Sou
 	animations := make([dynamic]format.Sprite_Animation_Contents, context.temp_allocator)
 	atlas_size: [2]u32
 	atlas_blob: []byte
-	color := Texture_Cook{usage = .Color, max_size = 16384}
+	color := Texture_Cook {
+		usage    = .Color,
+		max_size = 16384,
+	}
 	if packed {
 		images := make([]Image, len(children), context.temp_allocator)
 		sizes := make([][2]int, len(children), context.temp_allocator)
 		for child, i in children {
-			image, ok := decode_image_bytes(source_of(assets[child]), assets[child].path, color, problems)
+			image, ok := decode_image_bytes(
+				source_of(assets[child]),
+				assets[child].path,
+				color,
+				problems,
+			)
 			if !ok {
 				return .Failed
 			}
 			if image.width > 65535 || image.height > 65535 {
-				report_error(problems, a.path, sheet.images[i].line, 0, "%s is larger than a frame can be", assets[child].name)
+				report_error(
+					problems,
+					a.path,
+					sheet.images[i].line,
+					0,
+					"%s is larger than a frame can be",
+					assets[child].name,
+				)
 				return .Failed
 			}
 			images[i] = image
-			sizes[i] = {image.width + 2 * SPRITE_ATLAS_BORDER, image.height + 2 * SPRITE_ATLAS_BORDER}
+			sizes[i] = {
+				image.width + 2 * SPRITE_ATLAS_BORDER,
+				image.height + 2 * SPRITE_ATLAS_BORDER,
+			}
 		}
 		corners, size, fits := pack_rects(sizes, MAX_SPRITE_ATLAS)
 		if !fits {
-			report_error(problems, a.path, 0, 0, "has %d frames, which do not fit in an atlas of %d texels a side. Use smaller images, or more than one sheet.", len(images), MAX_SPRITE_ATLAS)
+			report_error(
+				problems,
+				a.path,
+				0,
+				0,
+				"has %d frames, which do not fit in an atlas of %d texels a side. Use smaller images, or more than one sheet.",
+				len(images),
+				MAX_SPRITE_ATLAS,
+			)
 			return .Failed
 		}
 		// The atlas compresses in blocks of 4 texels, and a size that is not whole blocks would be resampled.
@@ -585,20 +738,42 @@ cook_sprite_sheet :: proc(options: Cook_Options, index: int, assets: []Asset_Sou
 			// The frame, with its edge's texels again around it.
 			for y in -SPRITE_ATLAS_BORDER ..< image.height + SPRITE_ATLAS_BORDER {
 				for x in -SPRITE_ATLAS_BORDER ..< image.width + SPRITE_ATLAS_BORDER {
-					source := image.pixels[clamp(y, 0, image.height - 1) * image.width + clamp(x, 0, image.width - 1)]
+					source :=
+						image.pixels[clamp(y, 0, image.height - 1) * image.width + clamp(x, 0, image.width - 1)]
 					atlas.pixels[(origin.y + y) * atlas.width + origin.x + x] = source
 				}
 			}
-			append(&frames, format.Sprite_Frame_Contents{name = sheet.images[i].name, rect = {u16(origin.x), u16(origin.y), u16(image.width), u16(image.height)}, pivot = sheet.pivot})
+			append(
+				&frames,
+				format.Sprite_Frame_Contents {
+					name = sheet.images[i].name,
+					rect = {u16(origin.x), u16(origin.y), u16(image.width), u16(image.height)},
+					pivot = sheet.pivot,
+				},
+			)
 		}
 		atlas_size = {u32(size.x), u32(size.y)}
-		blob, ok := cook_texture_image(options, atlas, color, atlas_guid, key, fmt.tprintf("%s#%s", a.name, format.SPRITE_SHEET_ATLAS_NAME), a.path, problems)
+		blob, ok := cook_texture_image(
+			options,
+			atlas,
+			color,
+			atlas_guid,
+			key,
+			fmt.tprintf("%s#%s", a.name, format.SPRITE_SHEET_ATLAS_NAME),
+			a.path,
+			problems,
+		)
 		if !ok {
 			return .Failed
 		}
 		atlas_blob = blob
 	} else {
-		image, ok := decode_image_bytes(source_of(assets[texture]), assets[texture].path, color, problems)
+		image, ok := decode_image_bytes(
+			source_of(assets[texture]),
+			assets[texture].path,
+			color,
+			problems,
+		)
 		if !ok {
 			return .Failed
 		}
@@ -606,7 +781,15 @@ cook_sprite_sheet :: proc(options: Cook_Options, index: int, assets: []Asset_Sou
 		if sheet.import_line != 0 {
 			described, message := sprite_sheet_import(imported, context.temp_allocator)
 			if message != "" {
-				report_error(problems, a.path, sheet.import_line, 0, "%s %s", sheet.import_path, message)
+				report_error(
+					problems,
+					a.path,
+					sheet.import_line,
+					0,
+					"%s %s",
+					sheet.import_path,
+					message,
+				)
 				return .Failed
 			}
 			for f, i in described.frames {
@@ -619,27 +802,67 @@ cook_sprite_sheet :: proc(options: Cook_Options, index: int, assets: []Asset_Sou
 			append(&animations, ..described.animations)
 		}
 		if sheet.grid_line != 0 {
-			columns, rows, margin, spacing := sheet.grid[0], sheet.grid[1], sheet.grid[2], sheet.grid[3]
-			inner := [2]int{image.width - 2 * margin - (columns - 1) * spacing, image.height - 2 * margin - (rows - 1) * spacing}
+			columns, rows, margin, spacing :=
+				sheet.grid[0], sheet.grid[1], sheet.grid[2], sheet.grid[3]
+			inner := [2]int {
+				image.width - 2 * margin - (columns - 1) * spacing,
+				image.height - 2 * margin - (rows - 1) * spacing,
+			}
 			if inner.x <= 0 || inner.y <= 0 || inner.x % columns != 0 || inner.y % rows != 0 {
-				report_error(problems, a.path, sheet.grid_line, 0, "%s is %d by %d texels, which a grid of %d by %d does not divide evenly", assets[texture].name, image.width, image.height, columns, rows)
+				report_error(
+					problems,
+					a.path,
+					sheet.grid_line,
+					0,
+					"%s is %d by %d texels, which a grid of %d by %d does not divide evenly",
+					assets[texture].name,
+					image.width,
+					image.height,
+					columns,
+					rows,
+				)
 				return .Failed
 			}
 			cell := [2]int{inner.x / columns, inner.y / rows}
 			for row in 0 ..< rows {
 				for column in 0 ..< columns {
 					x, y := margin + column * (cell.x + spacing), margin + row * (cell.y + spacing)
-					append(&frames, format.Sprite_Frame_Contents{name = fmt.tprintf("%d", row * columns + column), rect = {u16(x), u16(y), u16(cell.x), u16(cell.y)}, pivot = sheet.pivot})
+					append(
+						&frames,
+						format.Sprite_Frame_Contents {
+							name = fmt.tprintf("%d", row * columns + column),
+							rect = {u16(x), u16(y), u16(cell.x), u16(cell.y)},
+							pivot = sheet.pivot,
+						},
+					)
 				}
 			}
 		}
 		for r in sheet.rects {
-			append(&frames, format.Sprite_Frame_Contents{name = r.name, rect = {u16(r.rect.x), u16(r.rect.y), u16(r.rect.z), u16(r.rect.w)}, pivot = sheet.pivot})
+			append(
+				&frames,
+				format.Sprite_Frame_Contents {
+					name = r.name,
+					rect = {u16(r.rect.x), u16(r.rect.y), u16(r.rect.z), u16(r.rect.w)},
+					pivot = sheet.pivot,
+				},
+			)
 		}
 		good := true
 		for f in frames {
-			if int(f.rect.x) + int(f.rect.z) > image.width || int(f.rect.y) + int(f.rect.w) > image.height {
-				report_error(problems, a.path, 0, 0, "the frame %q reaches outside %s, which is %d by %d texels", f.name, assets[texture].name, image.width, image.height)
+			if int(f.rect.x) + int(f.rect.z) > image.width ||
+			   int(f.rect.y) + int(f.rect.w) > image.height {
+				report_error(
+					problems,
+					a.path,
+					0,
+					0,
+					"the frame %q reaches outside %s, which is %d by %d texels",
+					f.name,
+					assets[texture].name,
+					image.width,
+					image.height,
+				)
 				good = false
 			}
 		}
@@ -648,7 +871,15 @@ cook_sprite_sheet :: proc(options: Cook_Options, index: int, assets: []Asset_Sou
 		}
 	}
 	if len(frames) > format.MAX_SPRITE_FRAMES {
-		report_error(problems, a.path, 0, 0, "has %d frames, and a sheet has at most %d", len(frames), format.MAX_SPRITE_FRAMES)
+		report_error(
+			problems,
+			a.path,
+			0,
+			0,
+			"has %d frames, and a sheet has at most %d",
+			len(frames),
+			format.MAX_SPRITE_FRAMES,
+		)
 		return .Failed
 	}
 	names := make(map[string]int, len(frames), context.temp_allocator)
@@ -663,7 +894,14 @@ cook_sprite_sheet :: proc(options: Cook_Options, index: int, assets: []Asset_Sou
 	for animation in sheet.animations {
 		for other in animations {
 			if other.name == animation.name {
-				report_error(problems, a.path, animation.line, 0, "has the animation %q twice", animation.name)
+				report_error(
+					problems,
+					a.path,
+					animation.line,
+					0,
+					"has the animation %q twice",
+					animation.name,
+				)
 				good = false
 			}
 		}
@@ -680,22 +918,46 @@ cook_sprite_sheet :: proc(options: Cook_Options, index: int, assets: []Asset_Sou
 			first, first_ok := strconv.parse_int(from)
 			last, last_ok := strconv.parse_int(to)
 			if !first_ok || !last_ok || first < 0 || last < 0 || max(first, last) >= len(frames) {
-				report_error(problems, a.path, animation.line, 0, "%q is not a frame's name, nor an index or a range of indices from 0 to %d", token, len(frames) - 1)
+				report_error(
+					problems,
+					a.path,
+					animation.line,
+					0,
+					"%q is not a frame's name, nor an index or a range of indices from 0 to %d",
+					token,
+					len(frames) - 1,
+				)
 				good = false
 				continue
 			}
 			// A range runs either way.
-			for i := first; ; i += first <= last ? 1 : -1 {
+			for i := first;; i += first <= last ? 1 : -1 {
 				append(&indices, u16(i))
 				if i == last {
 					break
 				}
 			}
 		}
-		append(&animations, format.Sprite_Animation_Contents{name = animation.name, frames = indices[:], rate = animation.rate, loop = animation.loop})
+		append(
+			&animations,
+			format.Sprite_Animation_Contents {
+				name = animation.name,
+				frames = indices[:],
+				rate = animation.rate,
+				loop = animation.loop,
+			},
+		)
 	}
 	if len(animations) > format.MAX_SPRITE_ANIMATIONS {
-		report_error(problems, a.path, 0, 0, "has %d animations, and a sheet has at most %d", len(animations), format.MAX_SPRITE_ANIMATIONS)
+		report_error(
+			problems,
+			a.path,
+			0,
+			0,
+			"has %d animations, and a sheet has at most %d",
+			len(animations),
+			format.MAX_SPRITE_ANIMATIONS,
+		)
 		good = false
 	}
 	if !good {

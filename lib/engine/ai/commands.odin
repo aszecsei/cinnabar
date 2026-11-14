@@ -56,7 +56,13 @@ Value :: union {
 }
 
 // encode is a value's type and bytes, as an agent's values hold them.
-encode :: proc(v: Value) -> (type: format.Blackboard_Type, bytes: [format.BLACKBOARD_VALUE_SIZE]byte, ok: bool) {
+encode :: proc(
+	v: Value,
+) -> (
+	type: format.Blackboard_Type,
+	bytes: [format.BLACKBOARD_VALUE_SIZE]byte,
+	ok: bool,
+) {
 	put :: proc(bytes: ^[format.BLACKBOARD_VALUE_SIZE]byte, v: $T) {
 		(^T)(bytes)^ = v
 	}
@@ -128,7 +134,16 @@ write_key :: proc(to: Writer, e: ecs.Entity, key: string, value: Value) {
 	if !ok {
 		return
 	}
-	append(to.list, Command{entity = e, kind = .Write_Named, type = type, key = format.animation_graph_hash(key), value = bytes})
+	append(
+		to.list,
+		Command {
+			entity = e,
+			kind = .Write_Named,
+			type = type,
+			key = format.animation_graph_hash(key),
+			value = bytes,
+		},
+	)
 }
 
 // set_key writes an agent's key, by its name, at once, from frame code or a script step. A write to an agent that is
@@ -136,7 +151,16 @@ write_key :: proc(to: Writer, e: ecs.Entity, key: string, value: Value) {
 set_key :: proc(s: ^State, e: ecs.Entity, key: string, value: Value) {
 	type, bytes, ok := encode(value)
 	if ok {
-		apply(s, Command{entity = e, kind = .Write_Named, type = type, key = format.animation_graph_hash(key), value = bytes})
+		apply(
+			s,
+			Command {
+				entity = e,
+				kind = .Write_Named,
+				type = type,
+				key = format.animation_graph_hash(key),
+				value = bytes,
+			},
+		)
 	}
 }
 
@@ -151,7 +175,11 @@ get_key :: proc(s: ^State, e: ecs.Entity, key: string) -> (Value, bool) {
 	if !ok {
 		return nil, false
 	}
-	index, found := format.blackboard_find(board.data, board.blob, format.animation_graph_hash(key))
+	index, found := format.blackboard_find(
+		board.data,
+		board.blob,
+		format.animation_graph_hash(key),
+	)
 	if !found {
 		return nil, false
 	}
@@ -200,7 +228,10 @@ apply :: proc(s: ^State, c: Command) {
 		slot, _ = agent_slot(s, w, c.entity)
 	}
 	if slot == nil {
-		if c.kind == .Write_Named && c.agent == {} && ecs.is_alive(w, c.entity) && ecs.has(w, c.entity, Agent) {
+		if c.kind == .Write_Named &&
+		   c.agent == {} &&
+		   ecs.is_alive(w, c.entity) &&
+		   ecs.has(w, c.entity, Agent) {
 			append(&s.early, c)
 		}
 		return
@@ -257,13 +288,23 @@ apply_write :: proc(s: ^State, slot: ^Agent_Slot, ready: ^Agent_Ready, board: Bo
 			}
 		}
 		if !found {
-			log.warnf("ai: entity %v's key %s has no value of the name written", slot.entity, format.blob_string(board.data, key.name))
+			log.warnf(
+				"ai: entity %v's key %s has no value of the name written",
+				slot.entity,
+				format.blob_string(board.data, key.name),
+			)
 			return
 		}
 	case convertible(c.type, key.type, false):
 		value = convert(c.type, key.type, value)
 	case:
-		log.warnf("ai: entity %v's key %s is a %v, and the value written is a %v", slot.entity, format.blob_string(board.data, key.name), key.type, c.type)
+		log.warnf(
+			"ai: entity %v's key %s is a %v, and the value written is a %v",
+			slot.entity,
+			format.blob_string(board.data, key.name),
+			key.type,
+			c.type,
+		)
 		return
 	}
 	bytes := value_bytes(ready.values, key)
@@ -290,7 +331,8 @@ start_ref :: proc(s: ^State, slot: ^Agent_Slot, ready: ^Agent_Ready, ref: u32) {
 	switch {
 	case find_native(s, a.hash) != nil:
 		set_action(s, slot.entity, ready, Native_Starting{ref})
-	case s.scripts != nil && script.action_defined(s.scripts, format.blob_string(decision.data, a.name)):
+	case s.scripts != nil &&
+	     script.action_defined(s.scripts, format.blob_string(decision.data, a.name)):
 		set_action(s, slot.entity, ready, Script_Starting{ref})
 	case:
 		set_action(s, slot.entity, ready, Action_Done{ref, .Failed})

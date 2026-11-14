@@ -167,7 +167,11 @@ reload_module :: proc(r: ^Runtime, m: ^Module) {
 	luau.setsafeenv(L, -1, true)
 	env := luau.gettop(L)
 	if luau.load(L, chunkname, raw_data(bytecode), c.size_t(len(bytecode)), env) != .OK {
-		log.errorf("script: %s keeps its old version: %s", module_name(r, m), luau.toodinstring(L, -1))
+		log.errorf(
+			"script: %s keeps its old version: %s",
+			module_name(r, m),
+			luau.toodinstring(L, -1),
+		)
 		return
 	}
 	luau.remove(L, env)
@@ -184,7 +188,10 @@ reload_module :: proc(r: ^Runtime, m: ^Module) {
 	luau.getref(L, m.result)
 	if !luau.istable(L, -1) || !luau.istable(L, -2) {
 		// Nothing can be patched: the cache gets the new value, and modules that required the old one keep it.
-		log.warnf("script: %s does not return a table, so the modules that required it keep the old value", module_name(r, m))
+		log.warnf(
+			"script: %s does not return a table, so the modules that required it keep the old value",
+			module_name(r, m),
+		)
 		luau.pop(L, 1)
 		luau.unref(L, m.result)
 		m.result = luau.ref(L, -1)
@@ -309,7 +316,14 @@ require_binding :: proc(L: ^luau.State) -> c.int {
 	blob, _ := format.script_view(data)
 	target, found := format.script_find_require(data, blob, path)
 	if !found {
-		raise(L, fmt.aprintf("the cooker did not resolve require(%q) in this script. Cook the content again.", path, allocator = frame(r)))
+		raise(
+			L,
+			fmt.aprintf(
+				"the cooker did not resolve require(%q) in this script. Cook the content again.",
+				path,
+				allocator = frame(r),
+			),
+		)
 	}
 	return push_module(r, L, target)
 }
@@ -328,12 +342,22 @@ push_module :: proc(r: ^Runtime, L: ^luau.State, guid: format.Guid) -> c.int {
 	case .Loading:
 		raise(L, fmt.aprintf("require cycle at %s", module_name(r, m), allocator = frame(r)))
 	case .Main, .Ended:
-		raise(L, fmt.aprintf("%s runs as a script, so it cannot be required", module_name(r, m), allocator = frame(r)))
+		raise(
+			L,
+			fmt.aprintf(
+				"%s runs as a script, so it cannot be required",
+				module_name(r, m),
+				allocator = frame(r),
+			),
+		)
 	case .Unloaded:
 	}
 	bytecode, chunkname, native, ok := load_module_asset(r, m)
 	if !ok {
-		raise(L, fmt.aprintf("cannot load the module %s", guid_text(r, guid), allocator = frame(r)))
+		raise(
+			L,
+			fmt.aprintf("cannot load the module %s", guid_text(r, guid), allocator = frame(r)),
+		)
 	}
 	// The module runs in its own environment, which reads through to the shared globals, like a sandboxed thread.
 	luau.newtable(L)
@@ -370,7 +394,15 @@ push_module :: proc(r: ^Runtime, L: ^luau.State, guid: format.Guid) -> c.int {
 // load_module_asset loads a module's blob, and returns its bytecode, its chunk name and whether it is native code. The
 // bytecode is valid until the end of the frame.
 @(private)
-load_module_asset :: proc(r: ^Runtime, m: ^Module) -> (bytecode: []byte, chunkname: cstring, native: bool, ok: bool) {
+load_module_asset :: proc(
+	r: ^Runtime,
+	m: ^Module,
+) -> (
+	bytecode: []byte,
+	chunkname: cstring,
+	native: bool,
+	ok: bool,
+) {
 	m.handle = asset.load(r.assets, m.guid) or_return
 	data, _ := asset.data(r.assets, m.handle)
 	blob, valid := format.script_view(data)
@@ -378,7 +410,11 @@ load_module_asset :: proc(r: ^Runtime, m: ^Module) -> (bytecode: []byte, chunkna
 		log.errorf("script: the blob of %s is not a script from this cooker", guid_text(r, m.guid))
 		return
 	}
-	chunkname = fmt.caprintf("@%s", format.blob_string(data, blob.source_path), allocator = frame(r))
+	chunkname = fmt.caprintf(
+		"@%s",
+		format.blob_string(data, blob.source_path),
+		allocator = frame(r),
+	)
 	return format.blob_bytes(data, blob.bytecode), chunkname, .Native in blob.flags, true
 }
 

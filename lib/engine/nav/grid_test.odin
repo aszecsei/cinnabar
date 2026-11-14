@@ -72,14 +72,30 @@ is_island :: proc(m: ^Mesh_View, polygon: u32) -> bool {
 }
 
 @(private)
-standard_grid :: proc(agent: string = "Human", agent_index: u32 = 0, wall := true, guid := format.Guid{0 = 1}) -> []byte {
+standard_grid :: proc(
+	agent: string = "Human",
+	agent_index: u32 = 0,
+	wall := true,
+	guid := format.Guid{0 = 1},
+) -> []byte {
 	blocked := standard_blocked()
 	if !wall {
 		for z in 0 ..< 7 {
 			blocked[z * STANDARD_X + 6] = false
 		}
 	}
-	return grid_blob({cells_x = STANDARD_X, cells_z = STANDARD_Z, tile_cells = 4, blocked = blocked, height = ramp}, agent, agent_index, guid)
+	return grid_blob(
+		{
+			cells_x = STANDARD_X,
+			cells_z = STANDARD_Z,
+			tile_cells = 4,
+			blocked = blocked,
+			height = ramp,
+		},
+		agent,
+		agent_index,
+		guid,
+	)
 }
 
 // grid_blob builds the blob of a grid, in 16-aligned memory, as an asset's blob is.
@@ -88,7 +104,13 @@ grid_blob :: proc(g: Grid, agent: string, agent_index: u32, guid := format.Guid{
 	tiles_x := (g.cells_x + g.tile_cells - 1) / g.tile_cells
 	tiles_z := (g.cells_z + g.tile_cells - 1) / g.tile_cells
 	open :: proc(g: Grid, x, z: int) -> bool {
-		return x >= 0 && z >= 0 && x < g.cells_x && z < g.cells_z && (g.blocked == nil || !g.blocked[z * g.cells_x + x])
+		return(
+			x >= 0 &&
+			z >= 0 &&
+			x < g.cells_x &&
+			z < g.cells_z &&
+			(g.blocked == nil || !g.blocked[z * g.cells_x + x]) \
+		)
 	}
 	tile_of_cell :: proc(g: Grid, x, z: int, tiles_x: int) -> int {
 		return (z / g.tile_cells) * tiles_x + x / g.tile_cells
@@ -129,13 +151,17 @@ grid_blob :: proc(g: Grid, agent: string, agent_index: u32, guid := format.Guid{
 	for tz in 0 ..< tiles_z {
 		for tx in 0 ..< tiles_x {
 			tile := format.Nav_Tile {
-				x             = u32(tx),
-				z             = u32(tz),
-				bounds_min    = {f32(tx * g.tile_cells), -1, f32(tz * g.tile_cells)},
-				bounds_max    = {f32(min((tx + 1) * g.tile_cells, g.cells_x)), 3, f32(min((tz + 1) * g.tile_cells, g.cells_z))},
-				first_vertex  = u32(len(vertices)),
-				first_polygon = u32(len(polygons)),
-				first_detail_vertex = u32(len(vertices)),
+				x                     = u32(tx),
+				z                     = u32(tz),
+				bounds_min            = {f32(tx * g.tile_cells), -1, f32(tz * g.tile_cells)},
+				bounds_max            = {
+					f32(min((tx + 1) * g.tile_cells, g.cells_x)),
+					3,
+					f32(min((tz + 1) * g.tile_cells, g.cells_z)),
+				},
+				first_vertex          = u32(len(vertices)),
+				first_polygon         = u32(len(polygons)),
+				first_detail_vertex   = u32(len(vertices)),
 				first_detail_triangle = u32(len(triangles)),
 			}
 			for z in tz * g.tile_cells ..< min((tz + 1) * g.tile_cells, g.cells_z) {
@@ -164,7 +190,12 @@ grid_blob :: proc(g: Grid, agent: string, agent_index: u32, guid := format.Guid{
 							continue
 						}
 						p.neighbors[k] = u16(format.NAV_EXTERNAL) | u16(sides[k])
-						link := format.Nav_Link{polygon = u32(index[nz * g.cells_x + nx]), edge = u8(k), t_min = 0, t_max = 255}
+						link := format.Nav_Link {
+							polygon = u32(index[nz * g.cells_x + nx]),
+							edge    = u8(k),
+							t_min   = 0,
+							t_max   = 255,
+						}
 						// East runs from z + 1 down to z, and west from z up to z + 1.
 						if g.half_seams && k == 2 {
 							link.t_min = 128
@@ -175,7 +206,15 @@ grid_blob :: proc(g: Grid, agent: string, agent_index: u32, guid := format.Guid{
 						p.link_count += 1
 					}
 					append(&polygons, p)
-					append(&details, format.Nav_Detail{first_vertex = u32(first), vertex_count = 4, first_triangle = u32(len(triangles)) - tile.first_detail_triangle, triangle_count = 2})
+					append(
+						&details,
+						format.Nav_Detail {
+							first_vertex = u32(first),
+							vertex_count = 4,
+							first_triangle = u32(len(triangles)) - tile.first_detail_triangle,
+							triangle_count = 2,
+						},
+					)
 					append(&triangles, [4]u8{0, 1, 2, 0}, [4]u8{0, 2, 3, 0})
 				}
 			}
@@ -192,7 +231,13 @@ grid_blob :: proc(g: Grid, agent: string, agent_index: u32, guid := format.Guid{
 			key = 1,
 			anchor = ecs.position_from_meters(GRID_ANCHOR).raw,
 			volume = 0x100,
-			agent = {name = agent, radius = 0.25, height = 1.8, step_height = 0.35, max_slope = 45},
+			agent = {
+				name = agent,
+				radius = 0.25,
+				height = 1.8,
+				step_height = 0.35,
+				max_slope = 45,
+			},
 			agent_index = agent_index,
 			cell_size = 0.25,
 			cell_height = 0.1,

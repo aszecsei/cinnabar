@@ -10,7 +10,12 @@ Timer :: win.HANDLE
 
 @(private)
 timer_create :: proc() -> Timer {
-	return win.CreateWaitableTimerExW(nil, nil, win.CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, win.TIMER_ALL_ACCESS)
+	return win.CreateWaitableTimerExW(
+		nil,
+		nil,
+		win.CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,
+		win.TIMER_ALL_ACCESS,
+	)
 }
 
 @(private)

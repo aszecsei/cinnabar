@@ -26,8 +26,14 @@ Shape :: format.Collider_Shape
 Collider :: format.Collider
 DEFAULT_COLLIDER :: format.DEFAULT_COLLIDER
 
-#assert(int(Motion.Static) == int(core_physics.Motion.Static) && int(Motion.Kinematic) == int(core_physics.Motion.Kinematic))
-#assert(int(Motion.Dynamic) == int(core_physics.Motion.Dynamic) && len(Motion) == len(core_physics.Motion))
+#assert(
+	int(Motion.Static) == int(core_physics.Motion.Static) &&
+	int(Motion.Kinematic) == int(core_physics.Motion.Kinematic),
+)
+#assert(
+	int(Motion.Dynamic) == int(core_physics.Motion.Dynamic) &&
+	len(Motion) == len(core_physics.Motion),
+)
 #assert(RIGID_BODY_ID == format.SCENE_RIGID_BODY_ID && COLLIDER_ID == format.SCENE_COLLIDER_ID)
 
 // Physics_Body is the backend's body of its entity, which the sync adds and keeps. Its first 8 bytes are the handle.
@@ -79,7 +85,11 @@ pool_free :: proc(p: ^Pool, h: core_physics.Handle) {
 }
 
 pool_valid :: proc(p: ^Pool, h: core_physics.Handle) -> bool {
-	return h.generation != 0 && int(h.index) < len(p.generations) && p.generations[h.index] == h.generation
+	return(
+		h.generation != 0 &&
+		int(h.index) < len(p.generations) &&
+		p.generations[h.index] == h.generation \
+	)
 }
 
 pool_destroy :: proc(p: ^Pool) {
@@ -105,38 +115,38 @@ Body_Record :: struct {
 // State is the engine's side of one physics world, in Game_State. The queries are registrations: register makes them
 // again after a reload.
 State :: struct {
-	platform: ^core.Platform_API,
+	platform:        ^core.Platform_API,
 	// Where mesh colliders' meshes load from, or nil for a world without them.
-	assets:   ^asset.Assets,
-	world:    core_physics.World,
+	assets:          ^asset.Assets,
+	world:           core_physics.World,
 	// Positions cross the boundary as f64 offsets from here (see docs/physics/design.md#positions-and-precision).
-	anchor:   ecs.World_Position,
-	bodies:   Pool,
-	records:  [dynamic]Body_Record,
-	joints:   Pool,
-	joint_records: [dynamic]Joint_Record,
+	anchor:          ecs.World_Position,
+	bodies:          Pool,
+	records:         [dynamic]Body_Record,
+	joints:          Pool,
+	joint_records:   [dynamic]Joint_Record,
 	// The joints that broke in the last tick.
-	breaks:   [dynamic]Joint_Break,
-	shapes:   Pool,
+	breaks:          [dynamic]Joint_Break,
+	shapes:          Pool,
 	// Shape handles that this sync released, which go back to the pool after its commands are submitted: a mesh
 	// shape is made at once, and must not take a handle that a command still in the list releases.
 	released_shapes: [dynamic]core_physics.Shape,
-	gravity:  [3]f32,
-	layers:   Layers,
+	gravity:         [3]f32,
+	layers:          Layers,
 	// Set_World goes to the backend before the next submit.
-	settings_dirty: bool,
+	settings_dirty:  bool,
 	// What the backend does (see docs/physics/backends.md#features). A component that needs a feature it lacks is
 	// ignored, and warned about once.
-	features: core_physics.Features,
-	warned:   core_physics.Features,
+	features:        core_physics.Features,
+	warned:          core_physics.Features,
 	// The contacts of the last tick, and of every tick since begin_frame (see Contact).
-	tick_contacts:  [dynamic]Contact,
-	frame_contacts: [dynamic]Contact,
+	tick_contacts:   [dynamic]Contact,
+	frame_contacts:  [dynamic]Contact,
 	// The effects that gameplay recorded since the last tick (see effects.odin), in the host's heap, and the kind of
 	// the systems' jobs' own lists, which the world flushes into it.
-	pending:        core_physics.Command_List,
-	job_effects:    ecs.Job_Buffer,
-	queries:  struct {
+	pending:         core_physics.Command_List,
+	job_effects:     ecs.Job_Buffer,
+	queries:         struct {
 		new_colliders:  ecs.Query,
 		new_bodies:     ecs.Query,
 		bodies:         ecs.Query,
@@ -150,25 +160,40 @@ State :: struct {
 DEFAULT_GRAVITY :: [3]f32{0, -9.81, 0}
 
 // init creates the physics world. Call register after it, and destroy in the game's shutdown.
-init :: proc(s: ^State, platform: ^core.Platform_API, desc: core_physics.World_Desc = {}, anchor := ecs.World_Position{}, assets: ^asset.Assets = nil) -> bool {
+init :: proc(
+	s: ^State,
+	platform: ^core.Platform_API,
+	desc: core_physics.World_Desc = {},
+	anchor := ecs.World_Position{},
+	assets: ^asset.Assets = nil,
+) -> bool {
 	desc := desc
 	allocator := platform.heap_allocator
 	s^ = {
-		platform       = platform,
-		assets         = assets,
-		anchor         = anchor,
+		platform = platform,
+		assets = assets,
+		anchor = anchor,
 		released_shapes = make([dynamic]core_physics.Shape, allocator),
-		gravity        = DEFAULT_GRAVITY,
+		gravity = DEFAULT_GRAVITY,
 		settings_dirty = true,
-		bodies         = {generations = make([dynamic]u32, allocator), free = make([dynamic]u32, allocator)},
-		shapes         = {generations = make([dynamic]u32, allocator), free = make([dynamic]u32, allocator)},
-		records        = make([dynamic]Body_Record, allocator),
-		joints         = {generations = make([dynamic]u32, allocator), free = make([dynamic]u32, allocator)},
-		joint_records  = make([dynamic]Joint_Record, allocator),
-		breaks         = make([dynamic]Joint_Break, allocator),
-		tick_contacts  = make([dynamic]Contact, allocator),
+		bodies = {
+			generations = make([dynamic]u32, allocator),
+			free = make([dynamic]u32, allocator),
+		},
+		shapes = {
+			generations = make([dynamic]u32, allocator),
+			free = make([dynamic]u32, allocator),
+		},
+		records = make([dynamic]Body_Record, allocator),
+		joints = {
+			generations = make([dynamic]u32, allocator),
+			free = make([dynamic]u32, allocator),
+		},
+		joint_records = make([dynamic]Joint_Record, allocator),
+		breaks = make([dynamic]Joint_Break, allocator),
+		tick_contacts = make([dynamic]Contact, allocator),
 		frame_contacts = make([dynamic]Contact, allocator),
-		pending        = core_physics.command_list(allocator),
+		pending = core_physics.command_list(allocator),
 	}
 	s.layers = default_layers()
 	info := platform.physics.info()
@@ -182,7 +207,12 @@ register :: proc(s: ^State, w: ^ecs.World) {
 	// A Character is its entity's body, and its Rigid_Body and Collider make none.
 	s.queries.new_colliders = ecs.query(
 		w,
-		{ecs.read(w, ecs.Transform), ecs.read(w, Collider), ecs.without(w, Physics_Body), ecs.without(w, Character)},
+		{
+			ecs.read(w, ecs.Transform),
+			ecs.read(w, Collider),
+			ecs.without(w, Physics_Body),
+			ecs.without(w, Character),
+		},
 	)
 	s.queries.new_bodies = ecs.query(
 		w,
@@ -194,16 +224,34 @@ register :: proc(s: ^State, w: ^ecs.World) {
 			ecs.without(w, Character),
 		},
 	)
-	s.queries.new_characters = ecs.query(w, {ecs.read(w, ecs.Transform), ecs.read(w, Character), ecs.without(w, Physics_Character)})
-	s.queries.characters = ecs.query(w, {ecs.read(w, ecs.Transform), ecs.write(w, Physics_Character), ecs.read(w, Character)})
+	s.queries.new_characters = ecs.query(
+		w,
+		{ecs.read(w, ecs.Transform), ecs.read(w, Character), ecs.without(w, Physics_Character)},
+	)
+	s.queries.characters = ecs.query(
+		w,
+		{ecs.read(w, ecs.Transform), ecs.write(w, Physics_Character), ecs.read(w, Character)},
+	)
 	// The sync removes a character's Physics_Body, and a Physics_Character without its Character, by commands: until
 	// then, they are left alone.
-	s.queries.bodies = ecs.query(w, {ecs.read(w, ecs.Transform), ecs.write(w, Physics_Body), ecs.without(w, Character)})
-	s.queries.parts = ecs.query(w, {ecs.read(w, Collider), ecs.read(w, ecs.Parent), ecs.without(w, Rigid_Body)})
+	s.queries.bodies = ecs.query(
+		w,
+		{ecs.read(w, ecs.Transform), ecs.write(w, Physics_Body), ecs.without(w, Character)},
+	)
+	s.queries.parts = ecs.query(
+		w,
+		{ecs.read(w, Collider), ecs.read(w, ecs.Parent), ecs.without(w, Rigid_Body)},
+	)
 	for id, kind in JOINT_IDS {
-		s.queries.joints[kind] = ecs.query(w, {{id = id, access = .Read}, ecs.optional(ecs.write(w, Physics_Joint))})
+		s.queries.joints[kind] = ecs.query(
+			w,
+			{{id = id, access = .Read}, ecs.optional(ecs.write(w, Physics_Joint))},
+		)
 	}
-	s.job_effects = ecs.register_job_buffer(w, {name = "physics effects", user = s, make = make_job_effects, flush = flush_job_effects})
+	s.job_effects = ecs.register_job_buffer(
+		w,
+		{name = "physics effects", user = s, make = make_job_effects, flush = flush_job_effects},
+	)
 }
 
 // reload takes the new Platform_API after a code reload. The world and its bodies stay.
@@ -307,7 +355,12 @@ has_feature :: proc(s: ^State, feature: core_physics.Feature, what: string) -> b
 	}
 	if feature not_in s.warned {
 		s.warned += {feature}
-		log.warnf("physics: the %s backend does not do %v, so %s", s.platform.physics.info().name, feature, what)
+		log.warnf(
+			"physics: the %s backend does not do %v, so %s",
+			s.platform.physics.info().name,
+			feature,
+			what,
+		)
 	}
 	return false
 }

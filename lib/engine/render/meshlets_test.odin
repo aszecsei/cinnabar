@@ -34,14 +34,26 @@ simple_meshlets_cover_every_triangle_once_within_the_limits :: proc(t: ^testing.
 
 	total := 0
 	for m, i in meshlets {
-		testing.expectf(t, m.vertex_count <= format.MESHLET_MAX_VERTICES && m.triangle_count <= format.MESHLET_MAX_TRIANGLES, "meshlet %d has %d vertices and %d triangles", i, m.vertex_count, m.triangle_count)
+		testing.expectf(
+			t,
+			m.vertex_count <= format.MESHLET_MAX_VERTICES &&
+			m.triangle_count <= format.MESHLET_MAX_TRIANGLES,
+			"meshlet %d has %d vertices and %d triangles",
+			i,
+			m.vertex_count,
+			m.triangle_count,
+		)
 		testing.expect(t, m.depth == 0 && m.error == 0 && m.parent_error == math.F32_MAX)
 		for triangle in 0 ..< int(m.triangle_count) {
 			// Each triangle is the next of the submesh's, in order, and its corners are in the meshlet's vertices.
 			corners := format.meshlet_triangle(m, triangles[:], triangle)
 			for c, k in corners {
 				testing.expect(t, c < u32(m.vertex_count))
-				testing.expect_value(t, format.meshlet_vertex(m, vertices[:], int(c)), indices[total * 3 + k])
+				testing.expect_value(
+					t,
+					format.meshlet_vertex(m, vertices[:], int(c)),
+					indices[total * 3 + k],
+				)
 			}
 			// The sphere holds the triangle.
 			center, radius := format.meshlet_sphere(m)
@@ -64,8 +76,24 @@ simple_meshlets_cover_every_triangle_once_within_the_limits :: proc(t: ^testing.
 @(test)
 simple_meshlets_cones_are_conservative :: proc(t: ^testing.T) {
 	// A box's six faces in one meshlet point every way: no cone can cull it.
-	positions := [][3]f32{{0, 0, 0}, {1, 0, 0}, {1, 0, 1}, {0, 0, 1}, {0, 1, 0}, {1, 1, 0}, {1, 1, 1}, {0, 1, 1}}
-	quads := [][4]u32{{0, 1, 2, 3}, {4, 7, 6, 5}, {0, 4, 5, 1}, {2, 6, 7, 3}, {3, 7, 4, 0}, {1, 5, 6, 2}}
+	positions := [][3]f32 {
+		{0, 0, 0},
+		{1, 0, 0},
+		{1, 0, 1},
+		{0, 0, 1},
+		{0, 1, 0},
+		{1, 1, 0},
+		{1, 1, 1},
+		{0, 1, 1},
+	}
+	quads := [][4]u32 {
+		{0, 1, 2, 3},
+		{4, 7, 6, 5},
+		{0, 4, 5, 1},
+		{2, 6, 7, 3},
+		{3, 7, 4, 0},
+		{1, 5, 6, 2},
+	}
 	indices := make([dynamic]u32, context.temp_allocator)
 	for q in quads {
 		append(&indices, q[0], q[1], q[2], q[0], q[2], q[3])
@@ -73,7 +101,11 @@ simple_meshlets_cones_are_conservative :: proc(t: ^testing.T) {
 	meshlets := make([dynamic]format.Meshlet, context.temp_allocator)
 	vertices := make([dynamic]u32, context.temp_allocator)
 	triangles := make([dynamic]u8, context.temp_allocator)
-	testing.expect_value(t, build_simple_meshlets(positions, indices[:], &meshlets, &vertices, &triangles), 1)
+	testing.expect_value(
+		t,
+		build_simple_meshlets(positions, indices[:], &meshlets, &vertices, &triangles),
+		1,
+	)
 	testing.expect_value(t, meshlets[0].cone_cutoff, 127)
 	testing.expect_value(t, meshlets[0].vertex_count, 8)
 	testing.expect_value(t, meshlets[0].triangle_count, 12)
@@ -84,13 +116,21 @@ simple_meshlets_cones_are_conservative :: proc(t: ^testing.T) {
 	clear(&meshlets)
 	clear(&vertices)
 	clear(&triangles)
-	testing.expect_value(t, build_simple_meshlets(positions, indices[:6], &meshlets, &vertices, &triangles), 1)
+	testing.expect_value(
+		t,
+		build_simple_meshlets(positions, indices[:6], &meshlets, &vertices, &triangles),
+		1,
+	)
 	testing.expect_value(t, meshlets[0].cone_axis, [3]i8{0, -127, 0})
 	testing.expect_value(t, meshlets[0].cone_cutoff, 1)
 	testing.expect_value(t, meshlets[0].vertex_count, 4)
 
 	// Nothing makes nothing.
-	testing.expect_value(t, build_simple_meshlets(positions, nil, &meshlets, &vertices, &triangles), 0)
+	testing.expect_value(
+		t,
+		build_simple_meshlets(positions, nil, &meshlets, &vertices, &triangles),
+		0,
+	)
 }
 
 // A meshlet's vertices are refs from its lowest, 16 bits when they all fit, whichever vertices the mesh gives it.
@@ -100,7 +140,13 @@ simple_meshlets_narrow_their_refs_when_they_fit :: proc(t: ^testing.T) {
 	for &p, i in positions {
 		p = {f32(i % 100), f32(i / 100), 0}
 	}
-	build :: proc(positions: [][3]f32, indices: []u32) -> (m: format.Meshlet, stream: [dynamic]u32) {
+	build :: proc(
+		positions: [][3]f32,
+		indices: []u32,
+	) -> (
+		m: format.Meshlet,
+		stream: [dynamic]u32,
+	) {
 		meshlets := make([dynamic]format.Meshlet, context.temp_allocator)
 		triangles := make([dynamic]u8, context.temp_allocator)
 		stream = make([dynamic]u32, context.temp_allocator)

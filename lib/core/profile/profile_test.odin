@@ -153,7 +153,8 @@ when ENABLED {
 		testing.expect(t, init())
 		defer shutdown()
 
-		outer, inner, system := intern("Outer", .Script), intern("Inner", .Script), intern("spin", .System)
+		outer, inner, system :=
+			intern("Outer", .Script), intern("Inner", .Script), intern("spin", .System)
 		wait := intern("vsync", .Wait)
 		frame_boundary()
 		begin_zone(outer, u16(Callback.Update))
@@ -171,7 +172,10 @@ when ENABLED {
 		s := take_summary(context.temp_allocator)
 		testing.expect_value(t, s.frames, 1)
 		o, has_outer := find_cost(s, {kind = .Script, detail = u16(Callback.Update), name = outer})
-		i, has_inner := find_cost(s, {kind = .Script, detail = u16(Callback.On_Enable), name = inner})
+		i, has_inner := find_cost(
+			s,
+			{kind = .Script, detail = u16(Callback.On_Enable), name = inner},
+		)
 		_, has_system := find_cost(s, {kind = .System, name = system})
 		testing.expect(t, has_outer && has_inner && has_system)
 		testing.expect(t, i.average >= f64(4 * time.Millisecond))
@@ -194,7 +198,15 @@ when ENABLED {
 		frame_boundary()
 		exists, ready := frame_state(frame)
 		testing.expect(t, exists && !ready)
-		add_gpu(frame, {{start = 100, end = 300, name = pass}, {start = 300, end = 400, name = pass, detail = 1}}, 50, 450)
+		add_gpu(
+			frame,
+			{
+				{start = 100, end = 300, name = pass},
+				{start = 300, end = 400, name = pass, detail = 1},
+			},
+			50,
+			450,
+		)
 		exists, ready = frame_state(frame)
 		testing.expect(t, exists && ready)
 

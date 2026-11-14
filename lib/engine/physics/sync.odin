@@ -118,7 +118,11 @@ collect_parts :: proc(s: ^State, w: ^ecs.World) -> (parts: Parts) {
 	for view in ecs.query_next(&it) {
 		colliders := ecs.column(view, 0, Collider)
 		for e, row in ecs.entities(view) {
-			owner, pose := walk_up(w, e, proc(w: ^ecs.World, e: ecs.Entity) -> bool {return ecs.has(w, e, Rigid_Body)})
+			owner, pose := walk_up(
+				w,
+				e,
+				proc(w: ^ecs.World, e: ecs.Entity) -> bool {return ecs.has(w, e, Rigid_Body)},
+			)
 			if owner == 0 || owner == e {
 				continue
 			}
@@ -127,7 +131,16 @@ collect_parts :: proc(s: ^State, w: ^ecs.World) -> (parts: Parts) {
 				parts.by_body[owner] = make([dynamic]Part, allocator)
 				list = &parts.by_body[owner]
 			}
-			append(list, Part{entity = e, collider = colliders[row], offset = pose.offset, rotation = pose.rotation, scale = pose.scale})
+			append(
+				list,
+				Part {
+					entity = e,
+					collider = colliders[row],
+					offset = pose.offset,
+					rotation = pose.rotation,
+					scale = pose.scale,
+				},
+			)
 			parts.owner[e] = owner
 		}
 	}
@@ -138,7 +151,14 @@ collect_parts :: proc(s: ^State, w: ^ecs.World) -> (parts: Parts) {
 // composed from the Local_Transforms between them, so it does not change while they move together. It gives 0 when
 // none is found within the hierarchy's depth limit.
 @(private)
-walk_up :: proc(w: ^ecs.World, e: ecs.Entity, stop: proc(w: ^ecs.World, e: ecs.Entity) -> bool) -> (owner: ecs.Entity, pose: ecs.Local_Transform) {
+walk_up :: proc(
+	w: ^ecs.World,
+	e: ecs.Entity,
+	stop: proc(w: ^ecs.World, e: ecs.Entity) -> bool,
+) -> (
+	owner: ecs.Entity,
+	pose: ecs.Local_Transform,
+) {
 	pose = ecs.LOCAL_TRANSFORM_IDENTITY
 	current := e
 	for _ in 0 ..< ecs.MAX_HIERARCHY_DEPTH {
@@ -146,7 +166,9 @@ walk_up :: proc(w: ^ecs.World, e: ecs.Entity, stop: proc(w: ^ecs.World, e: ecs.E
 			return current, pose
 		}
 		if local := ecs.get(w, current, ecs.Local_Transform); local != nil {
-			pose.offset = local.offset + linalg.quaternion_mul_vector3(local.rotation, local.scale * pose.offset)
+			pose.offset =
+				local.offset +
+				linalg.quaternion_mul_vector3(local.rotation, local.scale * pose.offset)
 			pose.rotation = local.rotation * pose.rotation
 			pose.scale = local.scale * pose.scale
 		}
@@ -164,7 +186,12 @@ walk_up :: proc(w: ^ecs.World, e: ecs.Entity, stop: proc(w: ^ecs.World, e: ecs.E
 // inactive leaves the simulation until it is active again. The world's log has one reader, the script runtime, so the
 // bodies are checked instead.
 @(private)
-check_bodies :: proc(s: ^State, w: ^ecs.World, list: ^core_physics.Command_List, commands: ^ecs.Commands) {
+check_bodies :: proc(
+	s: ^State,
+	w: ^ecs.World,
+	list: ^core_physics.Command_List,
+	commands: ^ecs.Commands,
+) {
 	for &record, index in s.records {
 		handle := core_physics.Body{u32(index), s.bodies.generations[index]}
 		if record.entity == 0 {
@@ -179,7 +206,8 @@ check_bodies :: proc(s: ^State, w: ^ecs.World, list: ^core_physics.Command_List,
 				destroy_body(s, list, handle)
 				continue
 			}
-			if (!ecs.has(w, e, Rigid_Body) && !ecs.has(w, e, Collider)) || ecs.has(w, e, Character) {
+			if (!ecs.has(w, e, Rigid_Body) && !ecs.has(w, e, Collider)) ||
+			   ecs.has(w, e, Character) {
 				destroy_body(s, list, handle)
 				ecs.command_remove(commands, w, e, Physics_Body)
 				continue
@@ -208,12 +236,29 @@ check_bodies :: proc(s: ^State, w: ^ecs.World, list: ^core_physics.Command_List,
 // parts of other bodies. A Rigid_Body with no Collider and no parts gets a nil Physics_Body, so that it is warned
 // about once.
 @(private)
-add_bodies :: proc(s: ^State, w: ^ecs.World, list: ^core_physics.Command_List, commands: ^ecs.Commands, parts: ^Parts) {
-	add :: proc(s: ^State, w: ^ecs.World, list: ^core_physics.Command_List, commands: ^ecs.Commands, parts: ^Parts, e: ecs.Entity, pose: ecs.Transform) {
+add_bodies :: proc(
+	s: ^State,
+	w: ^ecs.World,
+	list: ^core_physics.Command_List,
+	commands: ^ecs.Commands,
+	parts: ^Parts,
+) {
+	add :: proc(
+		s: ^State,
+		w: ^ecs.World,
+		list: ^core_physics.Command_List,
+		commands: ^ecs.Commands,
+		parts: ^Parts,
+		e: ecs.Entity,
+		pose: ecs.Transform,
+	) {
 		pb := Physics_Body{}
 		create_body(s, w, list, e, pose, &pb, parts.by_body[e][:])
 		if pb.body.generation == 0 {
-			log.warnf("physics: entity %v has no collider that makes a shape, so it has no body", e)
+			log.warnf(
+				"physics: entity %v has no collider that makes a shape, so it has no body",
+				e,
+			)
 		}
 		ecs.command_add(commands, w, e, pb)
 		if pb.motion != .Static && !ecs.has(w, e, ecs.Previous_Transform) {
@@ -242,7 +287,14 @@ add_bodies :: proc(s: ^State, w: ^ecs.World, list: ^core_physics.Command_List, c
 // moved: a static body is set where it is, a kinematic one moves there in the tick, and a dynamic one is teleported,
 // as in Unity. An entity that became a part of another body gives up its own.
 @(private)
-update_bodies :: proc(s: ^State, w: ^ecs.World, list: ^core_physics.Command_List, commands: ^ecs.Commands, parts: ^Parts, dt: f32) {
+update_bodies :: proc(
+	s: ^State,
+	w: ^ecs.World,
+	list: ^core_physics.Command_List,
+	commands: ^ecs.Commands,
+	parts: ^Parts,
+	dt: f32,
+) {
 	it := ecs.query_iter(w, s.queries.bodies)
 	for view in ecs.query_next(&it) {
 		transforms := ecs.column(view, 0, ecs.Transform)
@@ -265,13 +317,15 @@ update_bodies :: proc(s: ^State, w: ^ecs.World, list: ^core_physics.Command_List
 				continue
 			}
 			if pb.body.generation == 0 || !moved(pb.position, pb.rotation, pose) {
-				if pb.motion == .Kinematic && (pb.linear_velocity != 0 || pb.angular_velocity != 0) {
+				if pb.motion == .Kinematic &&
+				   (pb.linear_velocity != 0 || pb.angular_velocity != 0) {
 					core_physics.cmd_set_velocity(list, pb.body, 0, 0)
 					pb.linear_velocity, pb.angular_velocity = 0, 0
 				}
 				continue
 			}
-			position, rotation := ecs.position_sub_f64(pose.position, s.anchor), to_rotation(pose.rotation)
+			position, rotation :=
+				ecs.position_sub_f64(pose.position, s.anchor), to_rotation(pose.rotation)
 			switch pb.motion {
 			case .Static:
 				core_physics.cmd_set_pose(list, pb.body, position, rotation, activate = false)
@@ -309,7 +363,13 @@ write_back :: proc(s: ^State, w: ^ecs.World, moved: []core_physics.Body_State) {
 // write_pose writes a pose from the backend to an entity: its Transform, and a child's Local_Transform, which
 // propagation turns into its Transform. It gives the Transform.
 @(private)
-write_pose :: proc(s: ^State, w: ^ecs.World, e: ecs.Entity, position: core_physics.Position, rotation: core_physics.Rotation) -> ecs.Transform {
+write_pose :: proc(
+	s: ^State,
+	w: ^ecs.World,
+	e: ecs.Entity,
+	position: core_physics.Position,
+	rotation: core_physics.Rotation,
+) -> ecs.Transform {
 	pose := ecs.get_write(w, e, ecs.Transform)
 	pose.position = ecs.position_offset_f64(s.anchor, position)
 	pose.rotation = from_rotation(rotation)
@@ -337,7 +397,10 @@ create_body :: proc(
 	parts: []Part,
 ) {
 	velocity, spin := pb.linear_velocity, pb.angular_velocity
-	pb^ = {position = pose.position, rotation = pose.rotation}
+	pb^ = {
+		position = pose.position,
+		rotation = pose.rotation,
+	}
 	// After the shapes load their meshes, so the hash has the versions of the meshes that the body is made from.
 	defer pb.source = source_hash(s, w, e, parts)
 	own := ecs.get(w, e, Collider)
@@ -354,18 +417,42 @@ create_body :: proc(
 	dynamic_body := body.motion == .Dynamic
 	children := make([dynamic]core_physics.Shape, allocator_of(s))
 	if own != nil {
-		if child, ok := child_shape(s, list, e, own^, own.offset * pose.scale, own.rotation, pose.scale, dynamic_body); ok {
+		if child, ok := child_shape(
+			s,
+			list,
+			e,
+			own^,
+			own.offset * pose.scale,
+			own.rotation,
+			pose.scale,
+			dynamic_body,
+		); ok {
 			append(&children, child)
 		}
 	}
 	for part in parts {
 		if len(children) == core_physics.MAX_COMPOUND_CHILDREN {
-			log.warnf("physics: entity %v has more than %d colliders; the rest are left out", e, core_physics.MAX_COMPOUND_CHILDREN)
+			log.warnf(
+				"physics: entity %v has more than %d colliders; the rest are left out",
+				e,
+				core_physics.MAX_COMPOUND_CHILDREN,
+			)
 			break
 		}
 		c := part.collider
-		offset := pose.scale * (part.offset + linalg.quaternion_mul_vector3(part.rotation, part.scale * c.offset))
-		if child, ok := child_shape(s, list, part.entity, c, offset, part.rotation * c.rotation, pose.scale * part.scale, dynamic_body); ok {
+		offset :=
+			pose.scale *
+			(part.offset + linalg.quaternion_mul_vector3(part.rotation, part.scale * c.offset))
+		if child, ok := child_shape(
+			s,
+			list,
+			part.entity,
+			c,
+			offset,
+			part.rotation * c.rotation,
+			pose.scale * part.scale,
+			dynamic_body,
+		); ok {
 			append(&children, child)
 		}
 	}
@@ -386,7 +473,14 @@ create_body :: proc(
 	}
 
 	handle := core_physics.Body(pool_alloc(&s.bodies))
-	desc := core_physics.body_desc(handle, shape, core_physics.Motion(body.motion), ecs.position_sub_f64(pose.position, s.anchor), u64(e), material.layer)
+	desc := core_physics.body_desc(
+		handle,
+		shape,
+		core_physics.Motion(body.motion),
+		ecs.position_sub_f64(pose.position, s.anchor),
+		u64(e),
+		material.layer,
+	)
 	desc.rotation = to_rotation(pose.rotation)
 	desc.mass = body.mass
 	desc.friction = material.friction
@@ -419,7 +513,9 @@ create_body :: proc(
 	for int(handle.index) >= len(s.records) {
 		append(&s.records, Body_Record{})
 	}
-	s.records[handle.index] = {entity = e}
+	s.records[handle.index] = {
+		entity = e,
+	}
 	if ecs.has(w, e, ecs.Inactive) {
 		core_physics.cmd_set_enabled(list, handle, false)
 		s.records[handle.index].disabled = true
@@ -449,7 +545,15 @@ child_shape :: proc(
 	if c.shape != .Mesh && c.shape != .Convex_Mesh {
 		shape := core_physics.Shape(pool_alloc(&s.shapes))
 		kind, size := collider_size(c, scale)
-		core_physics.cmd_create_shape(list, shape, kind, size, c.density, offset, to_rotation(rotation))
+		core_physics.cmd_create_shape(
+			list,
+			shape,
+			kind,
+			size,
+			c.density,
+			offset,
+			to_rotation(rotation),
+		)
 		return shape, true
 	}
 	data, blob, ok := mesh_data(s, c.mesh)
@@ -460,12 +564,18 @@ child_shape :: proc(
 	positions := format.mesh_collision_positions(data, blob)
 	triangles := format.mesh_collision_triangles(data, blob)
 	if len(positions) == 0 || len(triangles) == 0 {
-		log.warnf("physics: mesh %v has no collision data: its collision import setting is false", c.mesh)
+		log.warnf(
+			"physics: mesh %v has no collision data: its collision import setting is false",
+			c.mesh,
+		)
 		return {}, false
 	}
 	kind := core_physics.Shape_Kind.Mesh if c.shape == .Mesh else .Convex_Hull
 	if kind == .Mesh && dynamic_body {
-		log.warnf("physics: entity %v is dynamic, so its mesh collider is the mesh's convex hull", e)
+		log.warnf(
+			"physics: entity %v is dynamic, so its mesh collider is the mesh's convex hull",
+			e,
+		)
 		kind = .Convex_Hull
 	}
 	placed := make([][3]f32, len(positions), allocator_of(s))
@@ -473,7 +583,16 @@ child_shape :: proc(
 		placed[i] = offset + linalg.quaternion_mul_vector3(rotation, p * scale)
 	}
 	shape := core_physics.Shape(pool_alloc(&s.shapes))
-	if !api(s).create_mesh_shape(s.world, shape, kind, raw_data(placed), u32(len(placed)), raw_data(triangles), u32(len(triangles)), c.density) {
+	if !api(s).create_mesh_shape(
+		s.world,
+		shape,
+		kind,
+		raw_data(placed),
+		u32(len(placed)),
+		raw_data(triangles),
+		u32(len(triangles)),
+		c.density,
+	) {
 		pool_free(&s.shapes, core_physics.Handle(shape))
 		return {}, false
 	}
@@ -482,7 +601,14 @@ child_shape :: proc(
 
 // mesh_data is a mesh asset's blob, which it loads if it is not loaded.
 @(private)
-mesh_data :: proc(s: ^State, guid: format.Guid) -> (data: []byte, blob: ^format.Mesh_Blob, ok: bool) {
+mesh_data :: proc(
+	s: ^State,
+	guid: format.Guid,
+) -> (
+	data: []byte,
+	blob: ^format.Mesh_Blob,
+	ok: bool,
+) {
 	if s.assets == nil || guid == {} {
 		return
 	}
@@ -525,7 +651,11 @@ collider_size :: proc(c: Collider, pose_scale: [3]f32) -> (core_physics.Shape_Ki
 		half := max(c.height * scale.y * 0.5 - radius, 1e-3)
 		return .Capsule, {radius, half, 0}
 	case .Cylinder:
-		return .Cylinder, {max(c.radius * max(scale.x, scale.z), 1e-3), max(c.height * scale.y * 0.5, 1e-3), 0}
+		return .Cylinder, {
+			max(c.radius * max(scale.x, scale.z), 1e-3),
+			max(c.height * scale.y * 0.5, 1e-3),
+			0,
+		}
 	case .Mesh:
 		return .Mesh, scale
 	case .Convex_Mesh:
@@ -583,8 +713,15 @@ moved :: proc(position: ecs.World_Position, rotation: quaternion128, pose: ecs.T
 @(private)
 local_from_world :: proc(parent, pose: ecs.Transform, scale: [3]f32) -> ecs.Local_Transform {
 	inverse := linalg.quaternion_inverse(parent.rotation)
-	offset := linalg.quaternion_mul_vector3(inverse, ecs.position_sub(pose.position, parent.position))
-	return {offset = offset / parent.scale, rotation = linalg.normalize(inverse * pose.rotation), scale = scale}
+	offset := linalg.quaternion_mul_vector3(
+		inverse,
+		ecs.position_sub(pose.position, parent.position),
+	)
+	return {
+		offset = offset / parent.scale,
+		rotation = linalg.normalize(inverse * pose.rotation),
+		scale = scale,
+	}
 }
 
 @(private)

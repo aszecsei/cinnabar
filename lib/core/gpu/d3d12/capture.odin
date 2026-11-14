@@ -49,11 +49,11 @@ Capture_Slot :: struct {
 
 @(private)
 Captures :: struct {
-	slots:   [CAPTURE_SLOTS]Capture_Slot,
+	slots:           [CAPTURE_SLOTS]Capture_Slot,
 	// The viewport whose target the frame's copies read, or nil for the frame target.
-	viewport: Maybe(int),
+	viewport:        Maybe(int),
 	// The slot that this frame's end_frame copies into, or -1.
-	pending: i32,
+	pending:         i32,
 	// The slot that this frame's end_frame copies a texture into, or -1, and the texture.
 	texture_pending: i32,
 	texture:         gpu.Texture,
@@ -108,7 +108,14 @@ poll_frame_capture :: proc() -> (capture: gpu.Frame_Capture, ok: bool) {
 	for &slot, i in c.slots {
 		if sync.atomic_load(&slot.state) == .Cancelled {
 			sync.atomic_store(&slot.state, .Taken)
-			return {slot = u32(i), status = .Cancelled, source = slot.source, ticket = slot.ticket, viewport = slot.viewport}, true
+			return {
+					slot = u32(i),
+					status = .Cancelled,
+					source = slot.source,
+					ticket = slot.ticket,
+					viewport = slot.viewport,
+				},
+				true
 		}
 	}
 	completed := dev.fence->GetCompletedValue()
@@ -222,7 +229,11 @@ record_texture_capture :: proc(list: ^d3d.IGraphicsCommandList7) {
 	if c.texture_pending < 0 {
 		return
 	}
-	if !record_target_copy(&c.slots[c.texture_pending], list, gpu.pool_get(&dev.textures, c.texture)) {
+	if !record_target_copy(
+		&c.slots[c.texture_pending],
+		list,
+		gpu.pool_get(&dev.textures, c.texture),
+	) {
 		cancel_texture_capture()
 	}
 }
@@ -231,7 +242,11 @@ record_texture_capture :: proc(list: ^d3d.IGraphicsCommandList7) {
 // frame drew the target. Otherwise the capture is cancelled. The target stays in the render target layout, where the
 // frame's end moves it to the common layout (see end_shared_sides).
 @(private)
-record_viewport_capture :: proc(slot: ^Capture_Slot, list: ^d3d.IGraphicsCommandList7, viewport: int) {
+record_viewport_capture :: proc(
+	slot: ^Capture_Slot,
+	list: ^d3d.IGraphicsCommandList7,
+	viewport: int,
+) {
 	target := drawn_viewport_target(viewport)
 	if target == nil || !record_target_copy(slot, list, target) {
 		cancel_frame_capture()
@@ -241,7 +256,11 @@ record_viewport_capture :: proc(slot: ^Capture_Slot, list: ^d3d.IGraphicsCommand
 // record_target_copy copies a texture that is in the render target layout into a slot, which gets a new buffer if its is
 // too small, and leaves the texture in that layout. It is false when the slot cannot get its buffer.
 @(private = "file")
-record_target_copy :: proc(slot: ^Capture_Slot, list: ^d3d.IGraphicsCommandList7, target: ^Texture_Entry) -> bool {
+record_target_copy :: proc(
+	slot: ^Capture_Slot,
+	list: ^d3d.IGraphicsCommandList7,
+	target: ^Texture_Entry,
+) -> bool {
 	desc: d3d.RESOURCE_DESC
 	target.resource->GetDesc(&desc)
 	footprint: d3d.PLACED_SUBRESOURCE_FOOTPRINT
@@ -255,8 +274,15 @@ record_target_copy :: proc(slot: ^Capture_Slot, list: ^d3d.IGraphicsCommandList7
 			slot.mapped = nil
 			slot.capacity = 0
 		}
-		resource, ok := create_buffer_resource({size = u32(total), usage = {.Readback}, label = "texture capture"}, .READBACK)
-		if !ok || !check(resource->Map(0, nil, (^rawptr)(&slot.mapped)), "IResource.Map(texture capture)") {
+		resource, ok := create_buffer_resource(
+			{size = u32(total), usage = {.Readback}, label = "texture capture"},
+			.READBACK,
+		)
+		if !ok ||
+		   !check(
+				   resource->Map(0, nil, (^rawptr)(&slot.mapped)),
+				   "IResource.Map(texture capture)",
+			   ) {
 			if ok {
 				resource->Release()
 			}
@@ -265,7 +291,16 @@ record_target_copy :: proc(slot: ^Capture_Slot, list: ^d3d.IGraphicsCommandList7
 		slot.resource = resource
 		slot.capacity = u32(total)
 	}
-	texture_barrier(list, target.resource, {.RENDER_TARGET}, {.COPY_SOURCE}, {.RENDER_TARGET}, {.COPY}, .RENDER_TARGET, .COPY_SOURCE)
+	texture_barrier(
+		list,
+		target.resource,
+		{.RENDER_TARGET},
+		{.COPY_SOURCE},
+		{.RENDER_TARGET},
+		{.COPY},
+		.RENDER_TARGET,
+		.COPY_SOURCE,
+	)
 	dst := d3d.TEXTURE_COPY_LOCATION {
 		pResource = slot.resource,
 		Type      = .PLACED_FOOTPRINT,
@@ -276,7 +311,16 @@ record_target_copy :: proc(slot: ^Capture_Slot, list: ^d3d.IGraphicsCommandList7
 		Type      = .SUBRESOURCE_INDEX,
 	}
 	list->CopyTextureRegion(&dst, 0, 0, 0, &src, nil)
-	texture_barrier(list, target.resource, {.COPY_SOURCE}, {.RENDER_TARGET}, {.COPY}, {.RENDER_TARGET}, .COPY_SOURCE, .RENDER_TARGET)
+	texture_barrier(
+		list,
+		target.resource,
+		{.COPY_SOURCE},
+		{.RENDER_TARGET},
+		{.COPY},
+		{.RENDER_TARGET},
+		.COPY_SOURCE,
+		.RENDER_TARGET,
+	)
 	slot.size = {u32(desc.Width), desc.Height}
 	slot.format = target.desc.format
 	slot.mode = .Sdr

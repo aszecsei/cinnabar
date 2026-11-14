@@ -124,7 +124,11 @@ GOAP_RUN :: size_of(Goap_Agent)
 
 // goap_state lays out the module state of a decision of these counts. The cook sizes the state with it, and the module
 // finds its parts with it.
-goap_state :: proc "contextless" (key_count, action_count, goal_count, max_nodes, max_plan: u32) -> (s: Goap_State) {
+goap_state :: proc "contextless" (
+	key_count, action_count, goal_count, max_nodes, max_plan: u32,
+) -> (
+	s: Goap_State,
+) {
 	k, a := u64(key_count), u64(action_count)
 	at := u64(GOAP_RUN + size_of(Plan_Run))
 	s.priorities = at
@@ -166,9 +170,17 @@ Goap_Data :: struct {
 
 @(private = "file")
 goap_size :: proc "contextless" (h: ^Goap_Header) -> u64 {
-	return size_of(Goap_Header) + u64(h.key_count) * 4 + u64(h.action_count) * size_of(Plan_Action) + u64(h.goal_count) * size_of(Goap_Goal) +
-		u64(h.test_count) * size_of(Plan_Test) + u64(h.effect_count) * size_of(Plan_Effect) +
-		u64(h.consideration_count) * size_of(Utility_Consideration) + u64(h.link_count) * 4 + u64(h.point_count) * size_of(Utility_Point)
+	return(
+		size_of(Goap_Header) +
+		u64(h.key_count) * 4 +
+		u64(h.action_count) * size_of(Plan_Action) +
+		u64(h.goal_count) * size_of(Goap_Goal) +
+		u64(h.test_count) * size_of(Plan_Test) +
+		u64(h.effect_count) * size_of(Plan_Effect) +
+		u64(h.consideration_count) * size_of(Utility_Consideration) +
+		u64(h.link_count) * 4 +
+		u64(h.point_count) * size_of(Utility_Point) \
+	)
 }
 
 // goap_data is a view of the data, which it does not check, besides its size.
@@ -208,7 +220,14 @@ goap_state_of :: proc "contextless" (g: Goap_Data) -> Goap_State {
 // holds its layout, that each action's node has an action and a cost above 0, that each goal has a desired state and a
 // priority of 0 or more, that every range and index is in range, and its considerations as utility's are checked. It
 // does not check keys: goap_check does, with the blackboard.
-goap_view :: proc(data: []byte, decision_data: []byte, decision: ^Decision_Blob) -> (g: Goap_Data, ok: bool) {
+goap_view :: proc(
+	data: []byte,
+	decision_data: []byte,
+	decision: ^Decision_Blob,
+) -> (
+	g: Goap_Data,
+	ok: bool,
+) {
 	if len(data) < size_of(Goap_Header) || uintptr(raw_data(data)) % align_of(Goap_Header) != 0 {
 		return
 	}
@@ -216,8 +235,16 @@ goap_view :: proc(data: []byte, decision_data: []byte, decision: ^Decision_Blob)
 	if h.layout != goap_layout() || u64(len(data)) != goap_size(h) {
 		return
 	}
-	if h.key_count == 0 || h.key_count > MAX_PLAN_KEYS || h.action_count == 0 || h.action_count > MAX_GOAP_ACTIONS || h.goal_count == 0 ||
-	   h.goal_count > MAX_GOAP_GOALS || h.max_nodes == 0 || h.max_nodes > MAX_GOAP_NODES || h.max_plan == 0 || h.max_plan > MAX_PLAN_LENGTH {
+	if h.key_count == 0 ||
+	   h.key_count > MAX_PLAN_KEYS ||
+	   h.action_count == 0 ||
+	   h.action_count > MAX_GOAP_ACTIONS ||
+	   h.goal_count == 0 ||
+	   h.goal_count > MAX_GOAP_GOALS ||
+	   h.max_nodes == 0 ||
+	   h.max_nodes > MAX_GOAP_NODES ||
+	   h.max_plan == 0 ||
+	   h.max_plan > MAX_PLAN_LENGTH {
 		return
 	}
 	g = goap_data(data)
@@ -232,21 +259,28 @@ goap_view :: proc(data: []byte, decision_data: []byte, decision: ^Decision_Blob)
 		return {}, false
 	}
 	for a in g.actions {
-		if int(a.node) >= len(nodes) || nodes[a.node].action == DECISION_NONE || a.cost.source > max(Plan_Number_Source) {
+		if int(a.node) >= len(nodes) ||
+		   nodes[a.node].action == DECISION_NONE ||
+		   a.cost.source > max(Plan_Number_Source) {
 			return {}, false
 		}
 		if a.cost.source == .Constant && !(a.cost.value > 0 && a.cost.value - a.cost.value == 0) {
 			return {}, false
 		}
-		if !range(a.first_test, a.test_count, len(g.tests)) || !range(a.first_effect, a.effect_count, len(g.effects)) || a.effect_count == 0 {
+		if !range(a.first_test, a.test_count, len(g.tests)) ||
+		   !range(a.first_effect, a.effect_count, len(g.effects)) ||
+		   a.effect_count == 0 {
 			return {}, false
 		}
 	}
 	for goal in g.goals {
-		if int(goal.node) >= len(nodes) || !(goal.priority >= 0 && goal.priority - goal.priority == 0) || goal.test_count == 0 {
+		if int(goal.node) >= len(nodes) ||
+		   !(goal.priority >= 0 && goal.priority - goal.priority == 0) ||
+		   goal.test_count == 0 {
 			return {}, false
 		}
-		if !range(goal.first_test, goal.test_count, len(g.tests)) || !range(goal.first_link, goal.link_count, len(g.links)) {
+		if !range(goal.first_test, goal.test_count, len(g.tests)) ||
+		   !range(goal.first_link, goal.link_count, len(g.links)) {
 			return {}, false
 		}
 	}
@@ -266,7 +300,13 @@ goap_view :: proc(data: []byte, decision_data: []byte, decision: ^Decision_Blob)
 // goap_check checks the data against its decision and the decision's blackboard: goap_view's checks, that the planning
 // keys are distinct bool, int and enum keys and each effect fits its key, that cost keys are floats or ints, and that
 // the considerations' keys are of the types that they read.
-goap_check :: proc(data: []byte, decision_data: []byte, decision: ^Decision_Blob, board_data: []byte, board: ^Blackboard_Blob) -> bool {
+goap_check :: proc(
+	data: []byte,
+	decision_data: []byte,
+	decision: ^Decision_Blob,
+	board_data: []byte,
+	board: ^Blackboard_Blob,
+) -> bool {
 	g, ok := goap_view(data, decision_data, decision)
 	if !ok {
 		return false
@@ -276,7 +316,9 @@ goap_check :: proc(data: []byte, decision_data: []byte, decision: ^Decision_Blob
 		return false
 	}
 	for a in g.actions {
-		if a.cost.source == .Key && (int(a.cost.key) >= len(keys) || keys[a.cost.key].type not_in (bit_set[Blackboard_Type]{.Float, .Int})) {
+		if a.cost.source == .Key &&
+		   (int(a.cost.key) >= len(keys) ||
+				   keys[a.cost.key].type not_in (bit_set[Blackboard_Type]{.Float, .Int})) {
 			return false
 		}
 	}
@@ -331,7 +373,12 @@ goap_write :: proc(c: Goap_Contents, allocator := context.allocator) -> []byte {
 	put(data, &at, raw_data(c.goals), len(c.goals) * size_of(Goap_Goal))
 	put(data, &at, raw_data(c.tests), len(c.tests) * size_of(Plan_Test))
 	put(data, &at, raw_data(c.effects), len(c.effects) * size_of(Plan_Effect))
-	put(data, &at, raw_data(c.considerations), len(c.considerations) * size_of(Utility_Consideration))
+	put(
+		data,
+		&at,
+		raw_data(c.considerations),
+		len(c.considerations) * size_of(Utility_Consideration),
+	)
 	put(data, &at, raw_data(c.links), len(c.links) * 4)
 	put(data, &at, raw_data(c.points), len(c.points) * size_of(Utility_Point))
 	return data

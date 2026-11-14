@@ -22,23 +22,23 @@ ENGINE_PATH_KEY :: "engine.path"
 // Engine is where a built engine checkout keeps what a project builds and runs with. Every path is absolute, with
 // forward slashes.
 Engine :: struct {
-	root:        string,
-	lib:         string,
+	root:      string,
+	lib:       string,
 	// The engine's content root, which every cook takes with the project's.
-	content:     string,
+	content:   string,
 	// The development host and the standard game's DLL, with the runtime libraries beside them.
-	dev:         string,
-	host:        string,
-	standard:    string,
+	dev:       string,
+	host:      string,
+	standard:  string,
 	// The standard game's release executable, which a project without Odin is exported with.
-	runtime:     string,
-	cook:        string,
-	editor:      string,
-	dxc:         string,
+	runtime:   string,
+	cook:      string,
+	editor:    string,
+	dxc:       string,
 	// The directories that the shaders' includes resolve in.
-	includes:    [3]string,
+	includes:  [3]string,
 	// The project templates (see docs/overview/getting-started.md#a-new-project).
-	templates:   string,
+	templates: string,
 }
 
 engine_paths :: proc(root_dir: string, allocator := context.allocator) -> Engine {
@@ -58,7 +58,11 @@ engine_paths :: proc(root_dir: string, allocator := context.allocator) -> Engine
 		cook = join(root, "build/tools/cook.exe"),
 		editor = join(root, "build/obj/dotnet/bin/Cinnabar.Editor/debug/editor.exe"),
 		dxc = join(root, "vendor/dxc", DXC_VERSION, "dxc.exe"),
-		includes = {join(root, "lib/core/gpu/shaders"), join(root, "lib/engine/content/shaders"), join(root, "vendor/smaa")},
+		includes = {
+			join(root, "lib/core/gpu/shaders"),
+			join(root, "lib/engine/content/shaders"),
+			join(root, "vendor/smaa"),
+		},
 		templates = join(root, "lib/engine/templates"),
 	}
 }
@@ -74,7 +78,13 @@ Engine_Source :: enum u8 {
 // find_engine finds the engine's checkout: --engine, then CINNABAR_ROOT, then engine.path in the project's user
 // settings, then the checkout that this executable was built in, two folders up from build/tools. A candidate is the
 // engine's when it has lib/engine/content. It returns the first candidate that is, and the candidates it tried.
-find_engine :: proc(argument, variable, user_setting, exe_dir: string) -> (root: string, source: Engine_Source, ok: bool) {
+find_engine :: proc(
+	argument, variable, user_setting, exe_dir: string,
+) -> (
+	root: string,
+	source: Engine_Source,
+	ok: bool,
+) {
 	candidates := [Engine_Source]string {
 		.Argument      = argument,
 		.Variable      = variable,
@@ -125,7 +135,13 @@ Project :: struct {
 	editor:        string,
 }
 
-project_paths :: proc(project_dir: string, engine: Engine, allocator := context.allocator) -> (p: Project) {
+project_paths :: proc(
+	project_dir: string,
+	engine: Engine,
+	allocator := context.allocator,
+) -> (
+	p: Project,
+) {
 	context.allocator = allocator
 	dir := slashes(absolute(project_dir))
 	join :: proc(parts: ..string) -> string {
@@ -171,7 +187,10 @@ has_odin :: proc(dir: string) -> bool {
 
 // setting is a key's value in a settings file, its user file's in place of its own, or "".
 setting :: proc(path, key: string) -> string {
-	user := strings.concatenate({strings.trim_suffix(path, ".settings"), ".user.settings"}, context.temp_allocator)
+	user := strings.concatenate(
+		{strings.trim_suffix(path, ".settings"), ".user.settings"},
+		context.temp_allocator,
+	)
 	for file in ([]string{user, path}) {
 		data, err := os.read_entire_file(file, context.temp_allocator)
 		if err != nil {

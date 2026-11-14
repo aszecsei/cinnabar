@@ -60,7 +60,10 @@ cook_animation_graphs :: proc(options: Cook_Options, assets: []Asset_Source, pas
 cook_animation_graph :: proc(a: ^Asset_Source, out_dir: string, pass: ^Pass) -> Asset_Result {
 	problems := &pass.problems
 	settings_ok := check_settings(a^, problems)
-	contents, parse_problems := animation_graph_parse(string(source_of(a^)), context.temp_allocator)
+	contents, parse_problems := animation_graph_parse(
+		string(source_of(a^)),
+		context.temp_allocator,
+	)
 	for p in parse_problems {
 		report_error(problems, a.path, p.line, 0, "%s", p.message)
 	}
@@ -75,7 +78,14 @@ cook_animation_graph :: proc(a: ^Asset_Source, out_dir: string, pass: ^Pass) -> 
 		}
 	}
 	layout := format.animation_graph_layout()
-	key := hash.fnv64a(transmute([]byte)fmt.tprintf("%s\x00%s\x00%x\x00", ANIMATION_GRAPH_COOK_VERSION, a.name, layout))
+	key := hash.fnv64a(
+		transmute([]byte)fmt.tprintf(
+			"%s\x00%s\x00%x\x00",
+			ANIMATION_GRAPH_COOK_VERSION,
+			a.name,
+			layout,
+		),
+	)
 	key = hash.fnv64a(source_of(a^), key)
 	guid := a.meta.guid
 	key = hash.fnv64a(guid[:], key)
@@ -151,7 +161,13 @@ problem :: proc(p: ^Graph_Parse, line: int, f: string, args: ..any) {
 
 // animation_graph_parse parses an animation graph's text into the contents of its blob, without its GUID, key or
 // path. It gives every problem that it finds, and the graph is good only without any.
-animation_graph_parse :: proc(text: string, allocator := context.allocator) -> (contents: format.Animation_Graph_Contents, problems: []Animation_Graph_Problem) {
+animation_graph_parse :: proc(
+	text: string,
+	allocator := context.allocator,
+) -> (
+	contents: format.Animation_Graph_Contents,
+	problems: []Animation_Graph_Problem,
+) {
 	context.allocator = allocator
 	found := make([dynamic]Animation_Graph_Problem)
 	p := Graph_Parse {
@@ -170,7 +186,10 @@ animation_graph_parse :: proc(text: string, allocator := context.allocator) -> (
 		indented := raw[0] == '\t' || raw[0] == ' '
 		fields := strings.fields(trimmed)
 		if !header {
-			if !indented && len(fields) == 2 && fields[0] == "animation_graph" && fields[1] == "1" {
+			if !indented &&
+			   len(fields) == 2 &&
+			   fields[0] == "animation_graph" &&
+			   fields[1] == "1" {
 				header = true
 				continue
 			}
@@ -209,7 +228,11 @@ animation_graph_parse :: proc(text: string, allocator := context.allocator) -> (
 			case key == "root_motion":
 				problem(&p, line, "root_motion is a joint's name in quotes")
 			case:
-				problem(&p, line, "expected `param`, `clip`, `node`, `entry = <state>` or `root_motion = \"<joint>\"`")
+				problem(
+					&p,
+					line,
+					"expected `param`, `clip`, `node`, `entry = <state>` or `root_motion = \"<joint>\"`",
+				)
 			}
 		}
 	}
@@ -238,14 +261,23 @@ animation_graph_parse :: proc(text: string, allocator := context.allocator) -> (
 		states      = p.states[:],
 		transitions = p.transitions[:],
 	}
-	slice.stable_sort_by(found[:], proc(a, b: Animation_Graph_Problem) -> bool {return a.line < b.line})
+	slice.stable_sort_by(
+		found[:],
+		proc(a, b: Animation_Graph_Problem) -> bool {return a.line < b.line},
+	)
 	return contents, found[:]
 }
 
 // animation_graph_check gives the problems of an animation graph's text that the editor has not saved, as a cook of the
 // file at this path would. A text without problems goes in the preview area of the cache, <config>/preview/<guid>.blob,
 // which the editor's preview plays; the graph's own blob does not change. A text with problems leaves the last good one.
-animation_graph_check :: proc(options: Cook_Options, guid: format.Guid, text, path, name: string) -> (problems: Problems) {
+animation_graph_check :: proc(
+	options: Cook_Options,
+	guid: format.Guid,
+	text, path, name: string,
+) -> (
+	problems: Problems,
+) {
 	contents, found := animation_graph_parse(text, context.temp_allocator)
 	for p in found {
 		report_error(&problems, path, p.line, 0, "%s", p.message)
@@ -263,7 +295,10 @@ animation_graph_check :: proc(options: Cook_Options, guid: format.Guid, text, pa
 	// start the preview again.
 	contents.key = hash.fnv64a(format.animation_graph_write(contents, context.temp_allocator))
 	buffer: [32]u8
-	if !write_blob(fmt.tprintf("%s/%s.blob", dir, format.guid_format(guid, &buffer)), format.animation_graph_write(contents, context.temp_allocator)) {
+	if !write_blob(
+		fmt.tprintf("%s/%s.blob", dir, format.guid_format(guid, &buffer)),
+		format.animation_graph_write(contents, context.temp_allocator),
+	) {
 		report_error(&problems, path, 0, 0, "cannot write its preview")
 	}
 	return
@@ -337,12 +372,23 @@ parameter_line :: proc(p: ^Graph_Parse, fields: []string, line: int) {
 	}
 	for other in p.parameters {
 		if format.animation_graph_hash(other.name) == format.animation_graph_hash(name) {
-			problem(p, line, "the parameters %s and %s have the same hash: rename one", other.name, name)
+			problem(
+				p,
+				line,
+				"the parameters %s and %s have the same hash: rename one",
+				other.name,
+				name,
+			)
 			return
 		}
 	}
 	if len(p.parameters) == format.MAX_ANIMATION_GRAPH_PARAMETERS {
-		problem(p, line, "an animation graph has at most %d parameters", format.MAX_ANIMATION_GRAPH_PARAMETERS)
+		problem(
+			p,
+			line,
+			"an animation graph has at most %d parameters",
+			format.MAX_ANIMATION_GRAPH_PARAMETERS,
+		)
 		return
 	}
 	p.parameter[name] = len(p.parameters)
@@ -403,7 +449,8 @@ block_line :: proc(p: ^Graph_Parse, b: ^Graph_Block, text: string, line: int) {
 	key, _, value := strings.partition(text, "=")
 	key, value = strings.trim_space(key), strings.trim_space(value)
 	base, _, index := strings.partition(key, ".")
-	if _, numbered := strconv.parse_uint(index); !is_identifier(base) || (index != "" && !numbered) {
+	if _, numbered := strconv.parse_uint(index);
+	   !is_identifier(base) || (index != "" && !numbered) {
 		problem(p, line, "a node's line is `<field> = <value>`")
 		return
 	}
@@ -489,8 +536,18 @@ resolve_graph :: proc(p: ^Graph_Parse) {
 				append(&markers, marker)
 			}
 		}
-		slice.stable_sort_by(markers[:], proc(a, b: format.Animation_Graph_Marker) -> bool {return a.time < b.time})
-		append(&p.clips, format.Animation_Graph_Clip_Contents{name = b.name, clip = b.guid, markers = markers[:]})
+		slice.stable_sort_by(
+			markers[:],
+			proc(a, b: format.Animation_Graph_Marker) -> bool {return a.time < b.time},
+		)
+		append(
+			&p.clips,
+			format.Animation_Graph_Clip_Contents {
+				name = b.name,
+				clip = b.guid,
+				markers = markers[:],
+			},
+		)
 	}
 	// States first, so that transitions find them by name.
 	for &b in p.blocks {
@@ -508,7 +565,11 @@ resolve_graph :: proc(p: ^Graph_Parse) {
 			for l in b.lines {
 				base, _, _ := strings.partition(l.key, ".")
 				if base != "parameter" && base != "input" && base != "at" && base != "position" {
-					problem(p, l.line, "a blend_1d has a parameter, and input.<n> and at.<n> for each clip")
+					problem(
+						p,
+						l.line,
+						"a blend_1d has a parameter, and input.<n> and at.<n> for each clip",
+					)
 				}
 			}
 		}
@@ -516,7 +577,13 @@ resolve_graph :: proc(p: ^Graph_Parse) {
 }
 
 @(private = "file")
-resolve_event :: proc(p: ^Graph_Parse, l: Graph_Line) -> (marker: format.Animation_Graph_Marker, ok: bool) {
+resolve_event :: proc(
+	p: ^Graph_Parse,
+	l: Graph_Line,
+) -> (
+	marker: format.Animation_Graph_Marker,
+	ok: bool,
+) {
 	tokens, _ := split_tokens(l.text)
 	time, time_ok := strconv.parse_f32(tokens[1])
 	if !time_ok || time < 0 {
@@ -539,9 +606,15 @@ resolve_event :: proc(p: ^Graph_Parse, l: Graph_Line) -> (marker: format.Animati
 		v, message := parse_graph_value(a)
 		switch {
 		case message == "" && v.kind == .Text:
-			event.args[i] = {kind = .Text, text = v.text}
+			event.args[i] = {
+				kind = .Text,
+				text = v.text,
+			}
 		case message == "" && v.kind == .Numbers && v.count == 1 && a[0] != '[':
-			event.args[i] = {kind = .Number, number = f32(v.numbers[0])}
+			event.args[i] = {
+				kind   = .Number,
+				number = f32(v.numbers[0]),
+			}
 		case:
 			problem(p, l.line, "an event's argument is a number or a quoted string")
 			return
@@ -569,7 +642,15 @@ find_line :: proc(b: ^Graph_Block, key: string) -> (Graph_Line, bool) {
 
 // number_field reads a node's number at least 0, or gives the default without it.
 @(private = "file")
-number_field :: proc(p: ^Graph_Parse, b: ^Graph_Block, key: string, default: f32) -> (value: f32, set: bool) {
+number_field :: proc(
+	p: ^Graph_Parse,
+	b: ^Graph_Block,
+	key: string,
+	default: f32,
+) -> (
+	value: f32,
+	set: bool,
+) {
 	l, found := find_line(b, key)
 	if !found {
 		return default, false
@@ -601,7 +682,11 @@ resolve_state :: proc(p: ^Graph_Parse, b: ^Graph_Block) {
 		switch l.key {
 		case "name", "motion", "speed", "loop", "enter_event", "exit_event", "position":
 		case:
-			problem(p, l.line, "a state has a name, a motion, a speed, loop, an enter_event and an exit_event")
+			problem(
+				p,
+				l.line,
+				"a state has a name, a motion, a speed, loop, an enter_event and an exit_event",
+			)
 		}
 	}
 	name, name_line := word_field(p, b, "name")
@@ -610,7 +695,11 @@ resolve_state :: proc(p: ^Graph_Parse, b: ^Graph_Block) {
 		problem(p, b.line, "a state has `name = <name>`")
 		return
 	case name == "any":
-		problem(p, name_line, "any is every state, in a transition's from: name the state otherwise")
+		problem(
+			p,
+			name_line,
+			"any is every state, in a transition's from: name the state otherwise",
+		)
 		return
 	}
 	if _, taken := p.state[name]; taken {
@@ -619,7 +708,13 @@ resolve_state :: proc(p: ^Graph_Parse, b: ^Graph_Block) {
 	}
 	for other in p.states {
 		if format.animation_graph_hash(other.name) == format.animation_graph_hash(name) {
-			problem(p, name_line, "the states %s and %s have the same hash: rename one", other.name, name)
+			problem(
+				p,
+				name_line,
+				"the states %s and %s have the same hash: rename one",
+				other.name,
+				name,
+			)
 			return
 		}
 	}
@@ -700,12 +795,22 @@ resolve_blend :: proc(p: ^Graph_Parse, b: ^Graph_Block) -> (blend: Graph_Blend) 
 	for n in 0 ..< inputs {
 		clip, clip_line := word_field(p, b, fmt.tprintf("input.%d", n))
 		if clip_line == 0 {
-			problem(p, b.line, "a blend_1d's inputs are input.0, input.1 and on, each a clip's name")
+			problem(
+				p,
+				b.line,
+				"a blend_1d's inputs are input.0, input.1 and on, each a clip's name",
+			)
 			return
 		}
 		at, has_at := find_line(b, fmt.tprintf("at.%d", n))
 		if !has_at || at.value.kind != .Numbers || at.value.count != 1 {
-			problem(p, at.line if has_at else clip_line, "input.%d has at.%d, the parameter's value where it plays alone", n, n)
+			problem(
+				p,
+				at.line if has_at else clip_line,
+				"input.%d has at.%d, the parameter's value where it plays alone",
+				n,
+				n,
+			)
 			continue
 		}
 		i, known := p.clip[clip]
@@ -713,7 +818,10 @@ resolve_blend :: proc(p: ^Graph_Parse, b: ^Graph_Block) -> (blend: Graph_Blend) 
 			problem(p, clip_line, "there is no clip named %s", clip)
 			continue
 		}
-		append(&points, format.Animation_Graph_Point{clip = u32(i), threshold = f32(at.value.numbers[0])})
+		append(
+			&points,
+			format.Animation_Graph_Point{clip = u32(i), threshold = f32(at.value.numbers[0])},
+		)
 	}
 	for l in b.lines {
 		if strings.has_prefix(l.key, "at.") {
@@ -727,7 +835,10 @@ resolve_blend :: proc(p: ^Graph_Parse, b: ^Graph_Block) -> (blend: Graph_Blend) 
 		problem(p, b.line, "a blend_1d has from 2 to %d inputs", format.MAX_ANIMATION_GRAPH_POINTS)
 		return
 	}
-	slice.stable_sort_by(points[:], proc(a, b: format.Animation_Graph_Point) -> bool {return a.threshold < b.threshold})
+	slice.stable_sort_by(
+		points[:],
+		proc(a, b: format.Animation_Graph_Point) -> bool {return a.threshold < b.threshold},
+	)
 	for i in 1 ..< len(points) {
 		if points[i].threshold == points[i - 1].threshold {
 			problem(p, b.line, "two of a blend_1d's inputs are at %v", points[i].threshold)
@@ -743,7 +854,11 @@ resolve_transition :: proc(p: ^Graph_Parse, b: ^Graph_Block) {
 		switch l.key {
 		case "from", "to", "when", "exit_time", "duration", "position":
 		case:
-			problem(p, l.line, "a transition has a from, a to, a when, an exit_time and a duration")
+			problem(
+				p,
+				l.line,
+				"a transition has a from, a to, a when, an exit_time and a duration",
+			)
 		}
 	}
 	t := format.Animation_Graph_Transition_Contents {
@@ -797,7 +912,13 @@ resolve_transition :: proc(p: ^Graph_Parse, b: ^Graph_Block) {
 // parse_conditions reads a transition's when: conditions joined by `and`, each a trigger's or a bool's name, a bool's
 // name after !, or a float's name, >, <, == or !=, and a number.
 @(private = "file")
-parse_conditions :: proc(p: ^Graph_Parse, l: Graph_Line) -> (conditions: []format.Animation_Graph_Condition, ok: bool) {
+parse_conditions :: proc(
+	p: ^Graph_Parse,
+	l: Graph_Line,
+) -> (
+	conditions: []format.Animation_Graph_Condition,
+	ok: bool,
+) {
 	result := make([dynamic]format.Animation_Graph_Condition)
 	terms := make([dynamic][dynamic]string)
 	append(&terms, make([dynamic]string))
@@ -810,7 +931,11 @@ parse_conditions :: proc(p: ^Graph_Parse, l: Graph_Line) -> (conditions: []forma
 	}
 	for term in terms {
 		if len(term) == 0 {
-			problem(p, l.line, "when is conditions joined by `and`, such as speed > 0.1 and grounded")
+			problem(
+				p,
+				l.line,
+				"when is conditions joined by `and`, such as speed > 0.1 and grounded",
+			)
 			return
 		}
 		name := term[0]
@@ -853,7 +978,13 @@ parse_conditions :: proc(p: ^Graph_Parse, l: Graph_Line) -> (conditions: []forma
 				return
 			}
 		case kind == .Float:
-			problem(p, l.line, "the float %s is compared with a number, such as %s > 0.5", name, name)
+			problem(
+				p,
+				l.line,
+				"the float %s is compared with a number, such as %s > 0.5",
+				name,
+				name,
+			)
 			return
 		case kind == .Bool:
 			problem(p, l.line, "the bool %s is a condition alone, or after !", name)

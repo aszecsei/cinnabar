@@ -98,7 +98,10 @@ setup :: proc(t: ^testing.T, null := false, quiet := false, scripts := false) ->
 		f.reports = make([dynamic]f64)
 		script.register_components(&f.world.registry)
 		context.user_ptr = f
-		testing.expect(t, script.init(&f.runtime, &f.platform, &f.world, nil, register_test_scripts))
+		testing.expect(
+			t,
+			script.init(&f.runtime, &f.platform, &f.world, nil, register_test_scripts),
+		)
 	}
 	return f
 }
@@ -211,7 +214,12 @@ a_box_falls_and_rests :: proc(t: ^testing.T) {
 	testing.expect(t, !ecs.has(&f.world, g, ecs.Previous_Transform))
 	testing.expect_value(t, ecs.get(&f.world, g, Physics_Body).motion, Motion.Static)
 	ticks(f, 240)
-	testing.expectf(t, abs(height(f, b) - 0.5) < 0.03, "the box rests on the ground: y = %v", height(f, b))
+	testing.expectf(
+		t,
+		abs(height(f, b) - 0.5) < 0.03,
+		"the box rests on the ground: y = %v",
+		height(f, b),
+	)
 	testing.expect(t, ecs.get(&f.world, b, Physics_Body).asleep, "the box fell asleep")
 	testing.expect_value(t, height(f, g), -0.5)
 }
@@ -224,7 +232,10 @@ moved_bodies_count_as_changed :: proc(t: ^testing.T) {
 	ground(f)
 	b := box(f, {0, 5, 0})
 	ticks(f, 1)
-	poses := ecs.query(&f.world, {ecs.changed(ecs.read(&f.world, ecs.Transform)), ecs.read(&f.world, Rigid_Body)})
+	poses := ecs.query(
+		&f.world,
+		{ecs.changed(ecs.read(&f.world, ecs.Transform)), ecs.read(&f.world, Rigid_Body)},
+	)
 	changed_chunks :: proc(f: ^Fixture, q: ecs.Query, since: u64) -> (n: int) {
 		it := ecs.query_iter(&f.world, q, since = since)
 		for _ in ecs.query_next(&it) {
@@ -314,8 +325,17 @@ changes_make_the_body_again :: proc(t: ^testing.T) {
 	ticks(f, 1)
 	after := ecs.get(&f.world, b, Physics_Body)^
 	testing.expect(t, after.body != before.body, "a new body")
-	testing.expect(t, !pool_valid(&f.physics.bodies, core_physics.Handle(before.body)), "the old one is gone")
-	testing.expectf(t, after.linear_velocity.y < before.linear_velocity.y, "it keeps falling: %v", after.linear_velocity)
+	testing.expect(
+		t,
+		!pool_valid(&f.physics.bodies, core_physics.Handle(before.body)),
+		"the old one is gone",
+	)
+	testing.expectf(
+		t,
+		after.linear_velocity.y < before.linear_velocity.y,
+		"it keeps falling: %v",
+		after.linear_velocity,
+	)
 	ecs.get(&f.world, b, ecs.Transform).scale = 2
 	ticks(f, 1)
 	testing.expect(t, ecs.get(&f.world, b, Physics_Body).body != after.body)
@@ -347,11 +367,20 @@ a_kinematic_body_follows_its_transform :: proc(t: ^testing.T) {
 	pose := ecs.get(&f.world, b, ecs.Transform)
 	pose.position = ecs.position_from_meters({1, 5, 0})
 	ticks(f, 1)
-	testing.expectf(t, ecs.get(&f.world, b, Physics_Body).linear_velocity.x > 50, "moves 1 m in a tick: %v", ecs.get(&f.world, b, Physics_Body).linear_velocity)
+	testing.expectf(
+		t,
+		ecs.get(&f.world, b, Physics_Body).linear_velocity.x > 50,
+		"moves 1 m in a tick: %v",
+		ecs.get(&f.world, b, Physics_Body).linear_velocity,
+	)
 	testing.expect_value(t, height(f, b), 5)
 	ticks(f, 2)
 	testing.expect_value(t, ecs.get(&f.world, b, Physics_Body).linear_velocity, [3]f32{})
-	testing.expect_value(t, ecs.position_to_meters(ecs.get(&f.world, b, ecs.Transform).position).x, 1)
+	testing.expect_value(
+		t,
+		ecs.position_to_meters(ecs.get(&f.world, b, ecs.Transform).position).x,
+		1,
+	)
 }
 
 // A Rigid_Body without a Collider has no body, which the sync says once.
@@ -365,7 +394,11 @@ a_rigid_body_needs_a_collider :: proc(t: ^testing.T) {
 	testing.expect_value(t, ecs.get(&f.world, e, Physics_Body).body, core_physics.Body{})
 	ecs.add(&f.world, e, DEFAULT_COLLIDER)
 	ticks(f, 1)
-	testing.expect(t, ecs.get(&f.world, e, Physics_Body).body.generation != 0, "a Collider gives it a body")
+	testing.expect(
+		t,
+		ecs.get(&f.world, e, Physics_Body).body.generation != 0,
+		"a Collider gives it a body",
+	)
 }
 
 // On the null backend, the sync runs and nothing moves.
@@ -380,7 +413,12 @@ the_null_backend_moves_nothing :: proc(t: ^testing.T) {
 }
 
 @(private = "file")
-part :: proc(f: ^Fixture, parent: ecs.Entity, offset: [3]f32, shape := Shape.Sphere) -> ecs.Entity {
+part :: proc(
+	f: ^Fixture,
+	parent: ecs.Entity,
+	offset: [3]f32,
+	shape := Shape.Sphere,
+) -> ecs.Entity {
 	e := ecs.spawn(&f.world)
 	ecs.add(&f.world, e, ecs.TRANSFORM_IDENTITY)
 	ecs.add(&f.world, e, ecs.Parent{parent})
@@ -403,11 +441,27 @@ child_colliders_are_one_body :: proc(t: ^testing.T) {
 	left := part(f, b, {-1, 0, 0})
 	right := part(f, b, {1, 0, 0})
 	ticks(f, 240)
-	testing.expect(t, !ecs.has(&f.world, left, Physics_Body) && !ecs.has(&f.world, right, Physics_Body))
+	testing.expect(
+		t,
+		!ecs.has(&f.world, left, Physics_Body) && !ecs.has(&f.world, right, Physics_Body),
+	)
 	testing.expect(t, ecs.get(&f.world, b, Physics_Body).body.generation != 0)
-	testing.expectf(t, abs(height(f, b) - 0.5) < 0.03, "the body rests on its spheres: y = %v", height(f, b))
-	testing.expectf(t, abs(height(f, right) - height(f, b)) < 0.01, "level, so the parts follow it")
-	ray := core_physics.Ray{origin = {1, 10, 0}, direction = {0, -1, 0}, max_distance = 20}
+	testing.expectf(
+		t,
+		abs(height(f, b) - 0.5) < 0.03,
+		"the body rests on its spheres: y = %v",
+		height(f, b),
+	)
+	testing.expectf(
+		t,
+		abs(height(f, right) - height(f, b)) < 0.01,
+		"level, so the parts follow it",
+	)
+	ray := core_physics.Ray {
+		origin       = {1, 10, 0},
+		direction    = {0, -1, 0},
+		max_distance = 20,
+	}
 	hit: core_physics.Ray_Hit
 	testing.expect(t, bool(f.platform.physics.raycast(f.physics.world, &ray, nil, &hit)))
 	testing.expect_value(t, ecs.Entity(hit.user), b)
@@ -434,7 +488,11 @@ parts_change_the_body :: proc(t: ^testing.T) {
 	after := ecs.get(&f.world, b, Physics_Body).body
 	testing.expect(t, after != before, "the body was made again")
 	testing.expect(t, !ecs.has(&f.world, loose, Physics_Body), "the new part has no Physics_Body")
-	testing.expect(t, !pool_valid(&f.physics.bodies, core_physics.Handle(loose_body)), "and its old body is gone")
+	testing.expect(
+		t,
+		!pool_valid(&f.physics.bodies, core_physics.Handle(loose_body)),
+		"and its old body is gone",
+	)
 	ticks(f, 3)
 	testing.expect_value(t, ecs.get(&f.world, b, Physics_Body).body, after)
 }
@@ -454,7 +512,12 @@ ignored_layers_pass_through :: proc(t: ^testing.T) {
 	solid := box(f, {3, 2, 0})
 	ticks(f, 120)
 	testing.expectf(t, height(f, ghost) < -1, "the ghost fell through: y = %v", height(f, ghost))
-	testing.expectf(t, abs(height(f, solid) - 0.5) < 0.03, "the other box rests: y = %v", height(f, solid))
+	testing.expectf(
+		t,
+		abs(height(f, solid) - 0.5) < 0.03,
+		"the other box rests: y = %v",
+		height(f, solid),
+	)
 }
 
 // The sample's stack, 1.5e11 m from the origin in a world anchored there: four small boxes fall onto a static box and
@@ -463,14 +526,20 @@ ignored_layers_pass_through :: proc(t: ^testing.T) {
 a_stack_rests_far_from_the_origin :: proc(t: ^testing.T) {
 	f := setup(t)
 	defer teardown(t, f)
-	ANCHOR :: ecs.World_Position{raw = {2516582400000000000, 0, 0}}
+	ANCHOR :: ecs.World_Position {
+		raw = {2516582400000000000, 0, 0},
+	}
 	far := ANCHOR
 	destroy(&f.physics)
 	testing.expect(t, init(&f.physics, &f.platform, anchor = ANCHOR))
 	register(&f.physics, &f.world)
 	place :: proc(f: ^Fixture, at: ecs.World_Position, meters: [3]f32, scale: f32) -> ecs.Entity {
 		e := ecs.spawn(&f.world)
-		ecs.add(&f.world, e, ecs.Transform{position = ecs.position_offset(at, meters), rotation = 1, scale = scale})
+		ecs.add(
+			&f.world,
+			e,
+			ecs.Transform{position = ecs.position_offset(at, meters), rotation = 1, scale = scale},
+		)
 		ecs.add(&f.world, e, DEFAULT_COLLIDER)
 		return e
 	}
@@ -486,7 +555,14 @@ a_stack_rests_far_from_the_origin :: proc(t: ^testing.T) {
 		pb := ecs.get(&f.world, b, Physics_Body)
 		y := ecs.position_sub(ecs.get(&f.world, b, ecs.Transform).position, far).y
 		want := 0.6 + 0.075 + 0.15 * f32(i)
-		testing.expectf(t, abs(y - want) < 0.03, "box %d rests on the one below: y = %v, not %v", i, y, want)
+		testing.expectf(
+			t,
+			abs(y - want) < 0.03,
+			"box %d rests on the one below: y = %v, not %v",
+			i,
+			y,
+			want,
+		)
 		testing.expectf(t, pb.asleep, "box %d is asleep", i)
 	}
 }
@@ -505,7 +581,12 @@ contacts_reach_the_lists :: proc(t: ^testing.T) {
 		for c in tick_contacts(&f.physics) {
 			testing.expect_value(t, c.kind, Contact_Kind.Begin)
 			testing.expect(t, c.a == g && c.b == b)
-			testing.expectf(t, abs(ecs.position_to_meters(c.point).y) < 0.05, "at the ground's top: %v", c.point)
+			testing.expectf(
+				t,
+				abs(ecs.position_to_meters(c.point).y) < 0.05,
+				"at the ground's top: %v",
+				c.point,
+			)
 			begins += 1
 		}
 		testing.expect_value(t, len(frame_contacts(&f.physics)), len(tick_contacts(&f.physics)))
@@ -527,7 +608,10 @@ contacts_reach_behaviours :: proc(t: ^testing.T) {
 	ecs.add(&f.world, trigger, c)
 	f.box = box(f, {0, 4, 0})
 	context.user_ptr = f
-	_, ok := script.spawn_source(&f.runtime, "=watcher", `
+	_, ok := script.spawn_source(
+		&f.runtime,
+		"=watcher",
+		`
 local Watcher = Behaviour.define("Watcher")
 function Watcher:on_trigger_enter(other) Test.report(2) end
 function Watcher:on_trigger_exit(other) Test.report(3) end
@@ -540,23 +624,38 @@ function Watcher:on_collision_enter(other, point, normal, velocity, impulse)
 end
 function Watcher:on_collision_exit(other) Test.report(4) end
 Test.box():add(Watcher)
-`)
+`,
+	)
 	testing.expect(t, ok)
 	ticks(f, 120)
-	testing.expectf(t, len(f.reports) == 3 && f.reports[0] == 2 && f.reports[1] == 3 && f.reports[2] == 1111, "reports %v", f.reports[:])
+	testing.expectf(
+		t,
+		len(f.reports) == 3 && f.reports[0] == 2 && f.reports[1] == 3 && f.reports[2] == 1111,
+		"reports %v",
+		f.reports[:],
+	)
 	clear(&f.reports)
 
 	falling := f.box
 	f.box = g
-	_, ok = script.spawn_source(&f.runtime, "=ground", `
+	_, ok = script.spawn_source(
+		&f.runtime,
+		"=ground",
+		`
 local Ground = Behaviour.define("Ground")
 function Ground:on_collision_exit(other) Test.report(5) end
 Test.box():add(Ground)
-`)
+`,
+	)
 	testing.expect(t, ok)
 	ecs.despawn(&f.world, falling)
 	ticks(f, 1)
-	testing.expectf(t, len(f.reports) == 1 && f.reports[0] == 5, "the ground's behaviour sees the box go: %v", f.reports[:])
+	testing.expectf(
+		t,
+		len(f.reports) == 1 && f.reports[0] == 5,
+		"the ground's behaviour sees the box go: %v",
+		f.reports[:],
+	)
 }
 
 // Queries in world positions: a ray that ignores the first box hits the second, a swept sphere stops on a box, and an
@@ -572,21 +671,53 @@ native_queries :: proc(t: ^testing.T) {
 	above := ecs.position_from_meters({0, 10, 0})
 	hit, ok := raycast(&f.physics, &f.world, above, {0, -1, 0}, 20)
 	testing.expect(t, ok && hit.entity == high)
-	testing.expectf(t, abs(ecs.position_to_meters(hit.position).y - 4.5) < 1e-3, "the top of the high box: %v", hit.position)
+	testing.expectf(
+		t,
+		abs(ecs.position_to_meters(hit.position).y - 4.5) < 1e-3,
+		"the top of the high box: %v",
+		hit.position,
+	)
 	ignore := []ecs.Entity{high}
-	hit, ok = raycast(&f.physics, &f.world, above, {0, -2, 0}, 20, {layers = max(u32), ignore = ignore})
+	hit, ok = raycast(
+		&f.physics,
+		&f.world,
+		above,
+		{0, -2, 0},
+		20,
+		{layers = max(u32), ignore = ignore},
+	)
 	testing.expect(t, ok && hit.entity == low, "a ray that ignores the high box hits the low one")
 
 	hits: [4]Hit
 	testing.expect_value(t, raycast_all(&f.physics, &f.world, above, {0, -1, 0}, 20, hits[:]), 3)
 	testing.expect(t, hits[0].entity == high && hits[1].entity == low)
 
-	hit, ok = shape_cast(&f.physics, &f.world, {shape = .Sphere, radius = 0.5}, above, 1, {0, -1, 0}, 20)
+	hit, ok = shape_cast(
+		&f.physics,
+		&f.world,
+		{shape = .Sphere, radius = 0.5},
+		above,
+		1,
+		{0, -1, 0},
+		20,
+	)
 	testing.expect(t, ok && hit.entity == high)
-	testing.expectf(t, abs(hit.distance - 5) < 1e-3, "the sphere stops on the high box: %v", hit.distance)
+	testing.expectf(
+		t,
+		abs(hit.distance - 5) < 1e-3,
+		"the sphere stops on the high box: %v",
+		hit.distance,
+	)
 
 	found: [4]ecs.Entity
-	n := overlap(&f.physics, &f.world, {shape = .Box, size = 0.5}, ecs.position_from_meters({0, 1, 0.6}), 1, found[:])
+	n := overlap(
+		&f.physics,
+		&f.world,
+		{shape = .Box, size = 0.5},
+		ecs.position_from_meters({0, 1, 0.6}),
+		1,
+		found[:],
+	)
 	testing.expect(t, n == 1 && found[0] == low)
 }
 
@@ -599,7 +730,10 @@ scripts_query_and_push :: proc(t: ^testing.T) {
 	f.box = box(f, {0, 0.5, 0})
 	ticks(f, 1)
 	context.user_ptr = f
-	_, ok := script.spawn_source(&f.runtime, "=query", `
+	_, ok := script.spawn_source(
+		&f.runtime,
+		"=query",
+		`
 local hit = Physics.raycast(WorldPosition.from_meters(0, 10, 0), vector.create(0, -1, 0))
 Test.report(hit and hit.entity == Test.box() and 1 or 0)
 Test.report(hit and math.abs(hit.distance - 9) < 0.05 and 1 or 0)
@@ -614,11 +748,27 @@ function Jumper:fixed_update(dt)
 	end
 end
 Test.box():add(Jumper)
-`)
+`,
+	)
 	testing.expect(t, ok)
-	testing.expectf(t, len(f.reports) == 5 && f.reports[0] == 1 && f.reports[1] == 1 && f.reports[2] == 1 && f.reports[3] == 1 && f.reports[4] == 1, "reports %v", f.reports[:])
+	testing.expectf(
+		t,
+		len(f.reports) == 5 &&
+		f.reports[0] == 1 &&
+		f.reports[1] == 1 &&
+		f.reports[2] == 1 &&
+		f.reports[3] == 1 &&
+		f.reports[4] == 1,
+		"reports %v",
+		f.reports[:],
+	)
 	ticks(f, 1)
-	testing.expectf(t, ecs.get(&f.world, f.box, Physics_Body).linear_velocity.y > 0.5, "the impulse applied in the tick: %v", ecs.get(&f.world, f.box, Physics_Body).linear_velocity)
+	testing.expectf(
+		t,
+		ecs.get(&f.world, f.box, Physics_Body).linear_velocity.y > 0.5,
+		"the impulse applied in the tick: %v",
+		ecs.get(&f.world, f.box, Physics_Body).linear_velocity,
+	)
 	ok = native_push(f)
 	testing.expect(t, ok)
 }
@@ -627,7 +777,10 @@ Test.box():add(Jumper)
 @(private = "file")
 native_push :: proc(f: ^Fixture) -> bool {
 	e := spawn_at(f, {9, 9, 9})
-	return !add_impulse(effects(&f.physics), &f.world, e, {0, 1, 0}) && add_impulse(effects(&f.physics), &f.world, f.box, {0, 1, 0})
+	return(
+		!add_impulse(effects(&f.physics), &f.world, e, {0, 1, 0}) &&
+		add_impulse(effects(&f.physics), &f.world, f.box, {0, 1, 0}) \
+	)
 }
 
 // A script's effect on an entity without a body raises an error, which names it.
@@ -637,7 +790,11 @@ effects_need_a_body :: proc(t: ^testing.T) {
 	defer teardown(t, f)
 	context.user_ptr = f
 	context.logger = testlog.expected_errors()
-	_, ok := script.spawn_source(&f.runtime, "=bodiless", `Physics.add_force(World.spawn(), vector.create(0, 1, 0))`)
+	_, ok := script.spawn_source(
+		&f.runtime,
+		"=bodiless",
+		`Physics.add_force(World.spawn(), vector.create(0, 1, 0))`,
+	)
 	testing.expect(t, !ok)
 }
 
@@ -673,7 +830,16 @@ systems_push_from_jobs :: proc(t: ^testing.T) {
 	ecs.add(&f.world, boxes[2], Other{})
 	ticks(f, 1)
 	w := &f.world
-	ecs.register_system(w, {name = "push up", stage = .Fixed, procedure = push_up, terms = {ecs.read(w, Physics_Body)}, batch_chunks = 1})
+	ecs.register_system(
+		w,
+		{
+			name = "push up",
+			stage = .Fixed,
+			procedure = push_up,
+			terms = {ecs.read(w, Physics_Body)},
+			batch_chunks = 1,
+		},
+	)
 	ticks(f, 1)
 	for b, i in boxes {
 		v := ecs.get(w, b, Physics_Body).linear_velocity
@@ -716,9 +882,25 @@ joints_hold_bodies :: proc(t: ^testing.T) {
 	ticks(f, 60)
 	testing.expect(t, ecs.has(&f.world, swing, Physics_Joint))
 	testing.expectf(t, height(f, swing) < 4.5, "the box swung down: %v", height(f, swing))
-	testing.expectf(t, abs(distance_from(f, swing, {0, 5, 0}) - 2) < 0.05, "at 2 m from the pivot: %v", distance_from(f, swing, {0, 5, 0}))
-	testing.expectf(t, abs(height(f, held) - 5) < 0.05, "the child's joint holds its parent's body: %v", height(f, held))
-	testing.expectf(t, abs(height(f, top) - 4) < 0.05 && abs(height(f, bottom) - 3) < 0.05, "the chain hangs: %v, %v", height(f, top), height(f, bottom))
+	testing.expectf(
+		t,
+		abs(distance_from(f, swing, {0, 5, 0}) - 2) < 0.05,
+		"at 2 m from the pivot: %v",
+		distance_from(f, swing, {0, 5, 0}),
+	)
+	testing.expectf(
+		t,
+		abs(height(f, held) - 5) < 0.05,
+		"the child's joint holds its parent's body: %v",
+		height(f, held),
+	)
+	testing.expectf(
+		t,
+		abs(height(f, top) - 4) < 0.05 && abs(height(f, bottom) - 3) < 0.05,
+		"the chain hangs: %v, %v",
+		height(f, top),
+		height(f, bottom),
+	)
 }
 
 // A hinge's motor changes in place, keeping the joint, and removing a joint lets its box fall.
@@ -728,17 +910,30 @@ joints_change :: proc(t: ^testing.T) {
 	defer teardown(t, f)
 	wheel := box(f, {0, 5, 0})
 	ecs.get(&f.world, wheel, Rigid_Body).gravity_factor = 0
-	hinge := Hinge_Joint{joint = DEFAULT_JOINT, motor = {mode = .Velocity, target = 2}}
+	hinge := Hinge_Joint {
+		joint = DEFAULT_JOINT,
+		motor = {mode = .Velocity, target = 2},
+	}
 	// About y: the frame's x turned onto y.
 	hinge.joint.rotation = quaternion(w = 0.70710678, x = 0, y = 0, z = 0.70710678)
 	ecs.add(&f.world, wheel, hinge)
 	ticks(f, 30)
 	before := ecs.get(&f.world, wheel, Physics_Joint).joint
-	testing.expectf(t, abs(abs(ecs.get(&f.world, wheel, Physics_Body).angular_velocity.y) - 2) < 0.05, "it turns at 2: %v", ecs.get(&f.world, wheel, Physics_Body).angular_velocity)
+	testing.expectf(
+		t,
+		abs(abs(ecs.get(&f.world, wheel, Physics_Body).angular_velocity.y) - 2) < 0.05,
+		"it turns at 2: %v",
+		ecs.get(&f.world, wheel, Physics_Body).angular_velocity,
+	)
 	ecs.get(&f.world, wheel, Hinge_Joint).motor.target = 4
 	ticks(f, 30)
 	testing.expect_value(t, ecs.get(&f.world, wheel, Physics_Joint).joint, before)
-	testing.expectf(t, abs(abs(ecs.get(&f.world, wheel, Physics_Body).angular_velocity.y) - 4) < 0.05, "and at 4: %v", ecs.get(&f.world, wheel, Physics_Body).angular_velocity)
+	testing.expectf(
+		t,
+		abs(abs(ecs.get(&f.world, wheel, Physics_Body).angular_velocity.y) - 4) < 0.05,
+		"and at 4: %v",
+		ecs.get(&f.world, wheel, Physics_Body).angular_velocity,
+	)
 
 	hanging := box(f, {5, 5, 0})
 	point_joint(f, hanging, {0, 1, 0})
@@ -746,7 +941,12 @@ joints_change :: proc(t: ^testing.T) {
 	ecs.remove(&f.world, hanging, Point_Joint)
 	ticks(f, 30)
 	testing.expect(t, !ecs.has(&f.world, hanging, Physics_Joint))
-	testing.expectf(t, height(f, hanging) < 4.5, "it falls without its joint: %v", height(f, hanging))
+	testing.expectf(
+		t,
+		height(f, hanging) < 4.5,
+		"it falls without its joint: %v",
+		height(f, hanging),
+	)
 }
 
 // A joint that carries more than its break force breaks: its Physics_Joint says so, and its entity's behaviour gets
@@ -762,11 +962,15 @@ joints_break :: proc(t: ^testing.T) {
 	j.break_force = 1000
 	ecs.add(&f.world, f.box, Point_Joint{j})
 	context.user_ptr = f
-	_, ok := script.spawn_source(&f.runtime, "=breaker", `
+	_, ok := script.spawn_source(
+		&f.runtime,
+		"=breaker",
+		`
 local Breaker = Behaviour.define("Breaker")
 function Breaker:on_joint_break(force, torque) Test.report(force > 1000 and 1 or 0) end
 Test.box():add(Breaker)
-`)
+`,
+	)
 	testing.expect(t, ok)
 	ticks(f, 30)
 	testing.expect(t, ecs.get(&f.world, f.box, Physics_Joint).broken)
@@ -781,7 +985,14 @@ write_mesh :: proc(t: ^testing.T, f: ^Fixture, guid: format.Guid) {
 	for &c, i in corners {
 		c = {f32(i & 1) - 0.5, f32((i >> 1) & 1) - 0.5, f32((i >> 2) & 1) - 0.5}
 	}
-	faces := [6][4]u32{{0, 1, 3, 2}, {4, 5, 7, 6}, {0, 1, 5, 4}, {2, 3, 7, 6}, {0, 2, 6, 4}, {1, 3, 7, 5}}
+	faces := [6][4]u32 {
+		{0, 1, 3, 2},
+		{4, 5, 7, 6},
+		{0, 1, 5, 4},
+		{2, 3, 7, 6},
+		{0, 2, 6, 4},
+		{1, 3, 7, 5},
+	}
 	triangles := make([dynamic][3]u32, context.temp_allocator)
 	for q in faces {
 		for tri in ([2][3]u32{{q[0], q[1], q[2]}, {q[0], q[2], q[3]}}) {
@@ -795,7 +1006,15 @@ write_mesh :: proc(t: ^testing.T, f: ^Fixture, guid: format.Guid) {
 		}
 	}
 	owners := make([]u16, len(triangles), context.temp_allocator)
-	data := format.mesh_write({guid = guid, collision_positions = corners[:], collision_triangles = triangles[:], collision_submeshes = owners}, context.temp_allocator)
+	data := format.mesh_write(
+		{
+			guid = guid,
+			collision_positions = corners[:],
+			collision_triangles = triangles[:],
+			collision_submeshes = owners,
+		},
+		context.temp_allocator,
+	)
 	buffer: [32]u8
 	path := fmt.tprintf("%s/%s.blob", f.cache, format.guid_format(guid, &buffer))
 	testing.expect(t, os.write_entire_file(path, data) == nil)
@@ -815,8 +1034,14 @@ mesh_collider :: proc(f: ^Fixture, e: ecs.Entity, shape: Shape, mesh: format.Gui
 mesh_colliders :: proc(t: ^testing.T) {
 	f := setup(t, quiet = true)
 	defer teardown(t, f)
-	BOX_MESH :: format.Guid{1 = 1, 15 = 7}
-	MISSING :: format.Guid{1 = 2, 15 = 7}
+	BOX_MESH :: format.Guid {
+		1  = 1,
+		15 = 7,
+	}
+	MISSING :: format.Guid {
+		1  = 2,
+		15 = 7,
+	}
 	write_mesh(t, f, BOX_MESH)
 	context.logger = testlog.expected_errors()
 
@@ -837,8 +1062,18 @@ mesh_colliders :: proc(t: ^testing.T) {
 	ticks(f, 179)
 	testing.expect_value(t, ecs.get(&f.world, g, Physics_Body).body, ground)
 	testing.expect(t, ecs.get(&f.world, g, Physics_Body).body.generation != 0)
-	testing.expectf(t, abs(height(f, hull) - 0.5) < 0.03, "the hull rests on the mesh: %v", height(f, hull))
-	testing.expectf(t, abs(height(f, moving) - 0.5) < 0.03, "so does the dynamic mesh, as its hull: %v", height(f, moving))
+	testing.expectf(
+		t,
+		abs(height(f, hull) - 0.5) < 0.03,
+		"the hull rests on the mesh: %v",
+		height(f, hull),
+	)
+	testing.expectf(
+		t,
+		abs(height(f, moving) - 0.5) < 0.03,
+		"so does the dynamic mesh, as its hull: %v",
+		height(f, moving),
+	)
 	testing.expect_value(t, ecs.get(&f.world, lost, Physics_Body).body, core_physics.Body{})
 	hit, ok := raycast(&f.physics, &f.world, ecs.position_from_meters({8, 10, 8}), {0, -1, 0}, 20)
 	testing.expect(t, ok && hit.entity == g, "a ray from above hits the scaled mesh")
@@ -850,7 +1085,12 @@ features_gate_components :: proc(t: ^testing.T) {
 	f := setup(t, null = true)
 	defer teardown(t, f)
 	f.platform.physics.info = proc "c" () -> core_physics.Backend_Info {
-		return {api_version = core_physics.API_VERSION, features = {.Rigid_Bodies}, layout = core_physics.layout_signature(), name = "test"}
+		return {
+			api_version = core_physics.API_VERSION,
+			features = {.Rigid_Bodies},
+			layout = core_physics.layout_signature(),
+			name = "test",
+		}
 	}
 	destroy(&f.physics)
 	testing.expect(t, init(&f.physics, &f.platform, assets = &f.assets))
@@ -895,7 +1135,12 @@ characters_walk :: proc(t: ^testing.T) {
 	testing.expect(t, character_move(effects(&f.physics), &f.world, e, {2, 0, 0}, gravity = true))
 	ticks(f, 60)
 	p := position(f, e)
-	testing.expectf(t, abs(p.x - 2) < 0.15 && abs(p.y) < 0.05, "it walked 2 m on the ground: %v", p)
+	testing.expectf(
+		t,
+		abs(p.x - 2) < 0.15 && abs(p.y) < 0.05,
+		"it walked 2 m on the ground: %v",
+		p,
+	)
 	pc := ecs.get(&f.world, e, Physics_Character)
 	testing.expect_value(t, pc.ground, Ground_State.Ground)
 	testing.expect_value(t, pc.ground_entity, g)
@@ -905,9 +1150,20 @@ characters_walk :: proc(t: ^testing.T) {
 	hit, ok := raycast(&f.physics, &f.world, above, {0, -1, 0}, 20)
 	testing.expect(t, ok && hit.entity == e, "a ray hits the character")
 	ignore := []ecs.Entity{e}
-	hit, ok = raycast(&f.physics, &f.world, above, {0, -1, 0}, 20, {layers = max(u32), ignore = ignore})
+	hit, ok = raycast(
+		&f.physics,
+		&f.world,
+		above,
+		{0, -1, 0},
+		20,
+		{layers = max(u32), ignore = ignore},
+	)
 	testing.expect(t, ok && hit.entity == g, "and one that ignores it hits the ground")
-	testing.expect(t, !character_move(effects(&f.physics), &f.world, g, {1, 0, 0}), "a body is not a character")
+	testing.expect(
+		t,
+		!character_move(effects(&f.physics), &f.world, g, {1, 0, 0}),
+		"a body is not a character",
+	)
 }
 
 // On the null backend, a character moves by its velocity. A Transform write teleports it, an inactive one stays, and a
@@ -920,23 +1176,45 @@ characters_change :: proc(t: ^testing.T) {
 	ticks(f, 1)
 	character_move(effects(&f.physics), &f.world, e, {1, 0, 0})
 	ticks(f, 60)
-	testing.expectf(t, abs(position(f, e).x - 1) < 1e-3, "it moved by its velocity: %v", position(f, e))
+	testing.expectf(
+		t,
+		abs(position(f, e).x - 1) < 1e-3,
+		"it moved by its velocity: %v",
+		position(f, e),
+	)
 
 	ecs.get(&f.world, e, ecs.Transform).position = ecs.position_from_meters({10, 5, 0})
 	ticks(f, 1)
-	testing.expectf(t, abs(position(f, e).x - (10 + 1.0 / 60)) < 1e-3, "a Transform write teleports it: %v", position(f, e))
+	testing.expectf(
+		t,
+		abs(position(f, e).x - (10 + 1.0 / 60)) < 1e-3,
+		"a Transform write teleports it: %v",
+		position(f, e),
+	)
 
 	ecs.set_active(&f.world, e, false)
 	ticks(f, 30)
-	testing.expectf(t, abs(position(f, e).x - (10 + 1.0 / 60)) < 1e-3, "an inactive character stays: %v", position(f, e))
-	testing.expect(t, f.physics.records[ecs.get(&f.world, e, Physics_Character).body.index].disabled)
+	testing.expectf(
+		t,
+		abs(position(f, e).x - (10 + 1.0 / 60)) < 1e-3,
+		"an inactive character stays: %v",
+		position(f, e),
+	)
+	testing.expect(
+		t,
+		f.physics.records[ecs.get(&f.world, e, Physics_Character).body.index].disabled,
+	)
 	ecs.set_active(&f.world, e, true)
 
 	old := ecs.get(&f.world, e, Physics_Character).body
 	c := ecs.get(&f.world, e, Character)
 	c.radius = 0.5
 	ticks(f, 1)
-	testing.expect(t, ecs.get(&f.world, e, Physics_Character).body != old, "a changed Character is made again")
+	testing.expect(
+		t,
+		ecs.get(&f.world, e, Physics_Character).body != old,
+		"a changed Character is made again",
+	)
 	testing.expect(t, !pool_valid(&f.physics.bodies, core_physics.Handle(old)))
 }
 
@@ -956,12 +1234,24 @@ a_character_is_its_entitys_body :: proc(t: ^testing.T) {
 	ecs.remove(&f.world, e, Character)
 	ticks(f, 2)
 	testing.expect(t, !ecs.has(&f.world, e, Physics_Character))
-	testing.expect(t, !pool_valid(&f.physics.bodies, core_physics.Handle(handle)), "its handle went back to the pool")
-	testing.expect(t, ecs.has(&f.world, e, Physics_Body), "the Rigid_Body and Collider make a body")
+	testing.expect(
+		t,
+		!pool_valid(&f.physics.bodies, core_physics.Handle(handle)),
+		"its handle went back to the pool",
+	)
+	testing.expect(
+		t,
+		ecs.has(&f.world, e, Physics_Body),
+		"the Rigid_Body and Collider make a body",
+	)
 
 	ecs.add(&f.world, e, DEFAULT_CHARACTER)
 	ticks(f, 2)
-	testing.expect(t, !ecs.has(&f.world, e, Physics_Body), "an entity that becomes a character gives up its body")
+	testing.expect(
+		t,
+		!ecs.has(&f.world, e, Physics_Body),
+		"an entity that becomes a character gives up its body",
+	)
 	testing.expect(t, ecs.has(&f.world, e, Physics_Character))
 }
 
@@ -974,26 +1264,47 @@ scripts_move_characters :: proc(t: ^testing.T) {
 	ground(f)
 	f.box = character(f, {0, 0.2, 0})
 	context.user_ptr = f
-	_, ok := script.spawn_source(&f.runtime, "=walker", `
+	_, ok := script.spawn_source(
+		&f.runtime,
+		"=walker",
+		`
 local Walker = Behaviour.define("Walker")
 function Walker:fixed_update(dt)
 	Physics.move_character(self.entity, vector.create(0, 0, 2), true)
 end
 function Walker:on_collision_enter(other) Test.report(7) end
 Test.box():add(Walker)
-`)
+`,
+	)
 	testing.expect(t, ok)
 	ticks(f, 60)
-	_, ok = script.spawn_source(&f.runtime, "=ground", `
+	_, ok = script.spawn_source(
+		&f.runtime,
+		"=ground",
+		`
 local ground = Physics.character_ground(Test.box())
 Test.report(Physics.is_grounded(Test.box()) and 1 or 0)
 Test.report(ground.state == "ground" and ground.entity ~= nil and ground.normal.y > 0.99 and 1 or 0)
 Test.report(Physics.velocity(Test.box()).z)
-`)
+`,
+	)
 	testing.expect(t, ok)
-	testing.expectf(t, len(f.reports) == 4 && f.reports[0] == 7 && f.reports[1] == 1 && f.reports[2] == 1 && abs(f.reports[3] - 2) < 0.05, "reports %v", f.reports[:])
+	testing.expectf(
+		t,
+		len(f.reports) == 4 &&
+		f.reports[0] == 7 &&
+		f.reports[1] == 1 &&
+		f.reports[2] == 1 &&
+		abs(f.reports[3] - 2) < 0.05,
+		"reports %v",
+		f.reports[:],
+	)
 
 	context.logger = testlog.expected_errors()
-	_, ok = script.spawn_source(&f.runtime, "=bodiless", `Physics.move_character(World.spawn(), vector.create(0, 0, 1))`)
+	_, ok = script.spawn_source(
+		&f.runtime,
+		"=bodiless",
+		`Physics.move_character(World.spawn(), vector.create(0, 0, 1))`,
+	)
 	testing.expect(t, !ok, "an entity that is not a character is an error")
 }

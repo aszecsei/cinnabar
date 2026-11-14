@@ -100,7 +100,16 @@ panel_stage :: proc(up, points: string) -> string {
 }
 
 @(private = "file")
-stage_mesh :: proc(t: ^testing.T, tree: Tree, meta: format.Meta, name: string) -> (data: []byte, blob: ^format.Mesh_Blob, ok: bool) {
+stage_mesh :: proc(
+	t: ^testing.T,
+	tree: Tree,
+	meta: format.Meta,
+	name: string,
+) -> (
+	data: []byte,
+	blob: ^format.Mesh_Blob,
+	ok: bool,
+) {
 	guid, found := format.meta_subasset(meta, format.MESH_KIND, name)
 	testing.expectf(t, found, "the stage has no mesh %s", name)
 	if !found {
@@ -114,7 +123,10 @@ stage_mesh :: proc(t: ^testing.T, tree: Tree, meta: format.Meta, name: string) -
 
 @(private = "file")
 stage_meta :: proc(t: ^testing.T, tree: Tree, path: string) -> format.Meta {
-	text, err := os.read_entire_file(fmt.tprintf("%s/content/%s.meta", tree.dir, path), context.temp_allocator)
+	text, err := os.read_entire_file(
+		fmt.tprintf("%s/content/%s.meta", tree.dir, path),
+		context.temp_allocator,
+	)
 	testing.expect(t, err == nil)
 	meta, ok := format.meta_parse(string(text), context.temp_allocator)
 	testing.expect(t, ok)
@@ -165,17 +177,34 @@ a_stage_makes_meshes_material_instances_and_a_prefab :: proc(t: ^testing.T) {
 		if a.owner == {} {
 			continue
 		}
-		if a.kind == .Material_Instance && strings.contains(string(source_of(a)), "/root/mtl/glass") {
+		if a.kind == .Material_Instance &&
+		   strings.contains(string(source_of(a)), "/root/mtl/glass") {
 			instance_text = string(source_of(a))
 		}
 		if a.kind == .Prefab {
 			prefab_text = string(source_of(a))
 		}
 	}
-	transparent, _ := format.meta_parse(#load("../../lib/engine/content/materials/preview_surface_transparent.material.meta", string), context.temp_allocator)
-	testing.expectf(t, strings.contains(instance_text, fmt.tprintf("parent = $%s", guid_text(transparent.guid))), "the glass is not transparent: %s", instance_text)
+	transparent, _ := format.meta_parse(
+		#load(
+			"../../lib/engine/content/materials/preview_surface_transparent.material.meta",
+			string,
+		),
+		context.temp_allocator,
+	)
+	testing.expectf(
+		t,
+		strings.contains(instance_text, fmt.tprintf("parent = $%s", guid_text(transparent.guid))),
+		"the glass is not transparent: %s",
+		instance_text,
+	)
 	testing.expect(t, strings.contains(instance_text, "opacity = 0.3"))
-	testing.expectf(t, strings.contains(prefab_text, "offset = [0.0, 0.0, 3.0]"), "the panel is not 3 m along z: %s", prefab_text)
+	testing.expectf(
+		t,
+		strings.contains(prefab_text, "offset = [0.0, 0.0, 3.0]"),
+		"the panel is not 3 m along z: %s",
+		prefab_text,
+	)
 	testing.expect_value(t, again.cooked[.Prefab], 1)
 }
 
@@ -197,7 +226,10 @@ z_up_stages_turn_to_y_up :: proc(t: ^testing.T) {
 @(test)
 a_mesh_of_more_subsets_than_slots_is_split_into_parts :: proc(t: ^testing.T) {
 	b := strings.builder_make(context.temp_allocator)
-	fmt.sbprintln(&b, "#usda 1.0\n(\n    upAxis = \"Y\"\n    metersPerUnit = 1\n)\n\ndef Mesh \"strip\"\n{")
+	fmt.sbprintln(
+		&b,
+		"#usda 1.0\n(\n    upAxis = \"Y\"\n    metersPerUnit = 1\n)\n\ndef Mesh \"strip\"\n{",
+	)
 	counts := make([]string, 10, context.temp_allocator)
 	indices := make([]string, 30, context.temp_allocator)
 	points := make([]string, 30, context.temp_allocator)
@@ -210,17 +242,46 @@ a_mesh_of_more_subsets_than_slots_is_split_into_parts :: proc(t: ^testing.T) {
 		points[i * 3 + 1] = fmt.tprintf("(%d, 0, 0)", i + 1)
 		points[i * 3 + 2] = fmt.tprintf("(%d, 1, 0)", i)
 	}
-	fmt.sbprintfln(&b, "    int[] faceVertexCounts = [%s]", strings.join(counts, ", ", context.temp_allocator))
-	fmt.sbprintfln(&b, "    int[] faceVertexIndices = [%s]", strings.join(indices, ", ", context.temp_allocator))
-	fmt.sbprintfln(&b, "    point3f[] points = [%s]", strings.join(points, ", ", context.temp_allocator))
+	fmt.sbprintfln(
+		&b,
+		"    int[] faceVertexCounts = [%s]",
+		strings.join(counts, ", ", context.temp_allocator),
+	)
+	fmt.sbprintfln(
+		&b,
+		"    int[] faceVertexIndices = [%s]",
+		strings.join(indices, ", ", context.temp_allocator),
+	)
+	fmt.sbprintfln(
+		&b,
+		"    point3f[] points = [%s]",
+		strings.join(points, ", ", context.temp_allocator),
+	)
 	for i in 0 ..< 10 {
-		fmt.sbprintfln(&b, "    def GeomSubset \"s%d\" (\n        prepend apiSchemas = [\"MaterialBindingAPI\"]\n    )\n    {{", i)
-		fmt.sbprintln(&b, "        uniform token elementType = \"face\"\n        uniform token familyName = \"materialBind\"")
-		fmt.sbprintfln(&b, "        int[] indices = [%d]\n        rel material:binding = </m%d>\n    }}", i, i)
+		fmt.sbprintfln(
+			&b,
+			"    def GeomSubset \"s%d\" (\n        prepend apiSchemas = [\"MaterialBindingAPI\"]\n    )\n    {{",
+			i,
+		)
+		fmt.sbprintln(
+			&b,
+			"        uniform token elementType = \"face\"\n        uniform token familyName = \"materialBind\"",
+		)
+		fmt.sbprintfln(
+			&b,
+			"        int[] indices = [%d]\n        rel material:binding = </m%d>\n    }}",
+			i,
+			i,
+		)
 	}
 	fmt.sbprintln(&b, "}")
 	for i in 0 ..< 10 {
-		fmt.sbprintfln(&b, "def Material \"m%d\"\n{{\n    token outputs:surface.connect = </m%d/s.outputs:surface>\n    def Shader \"s\"\n    {{\n        uniform token info:id = \"UsdPreviewSurface\"\n        token outputs:surface\n    }}\n}}", i, i)
+		fmt.sbprintfln(
+			&b,
+			"def Material \"m%d\"\n{{\n    token outputs:surface.connect = </m%d/s.outputs:surface>\n    def Shader \"s\"\n    {{\n        uniform token info:id = \"UsdPreviewSurface\"\n        token outputs:surface\n    }}\n}}",
+			i,
+			i,
+		)
 	}
 	tree := make_tree(t, {{"content/strip.usda", strings.to_string(b)}})
 	defer remove_tree(tree)
@@ -323,7 +384,10 @@ a_texture_through_a_node_graph_is_a_mask_of_its_red :: proc(t: ^testing.T) {
 		testing.expect_value(t, blob.usage, format.Texture_Usage.Mask)
 	}
 	// The image is not an asset of its own: the texture's GUID is the stage's.
-	_, err := os.stat(fmt.tprintf("%s/content/.downloads/metal.png.meta", tree.dir), context.temp_allocator)
+	_, err := os.stat(
+		fmt.tprintf("%s/content/.downloads/metal.png.meta", tree.dir),
+		context.temp_allocator,
+	)
 	testing.expect(t, err != nil)
 	instance := ""
 	for a in pass.assets {
@@ -331,7 +395,12 @@ a_texture_through_a_node_graph_is_a_mask_of_its_red :: proc(t: ^testing.T) {
 			instance = string(source_of(a))
 		}
 	}
-	testing.expectf(t, strings.contains(instance, fmt.tprintf("metallic_tex = $%s", guid_text(guid))), "the metallic texture is not set: %s", instance)
+	testing.expectf(
+		t,
+		strings.contains(instance, fmt.tprintf("metallic_tex = $%s", guid_text(guid))),
+		"the metallic texture is not set: %s",
+		instance,
+	)
 	testing.expect(t, strings.contains(instance, "has_metallic_tex = true"))
 }
 
@@ -395,7 +464,16 @@ def Xform "root"
 `
 
 @(private = "file")
-stage_set :: proc(t: ^testing.T, tree: Tree, meta: format.Meta, name: string) -> (data: []byte, blob: ^format.Instance_Set_Blob, ok: bool) {
+stage_set :: proc(
+	t: ^testing.T,
+	tree: Tree,
+	meta: format.Meta,
+	name: string,
+) -> (
+	data: []byte,
+	blob: ^format.Instance_Set_Blob,
+	ok: bool,
+) {
 	guid, found := format.meta_subasset(meta, format.INSTANCE_SET_KIND, name)
 	testing.expectf(t, found, "the stage has no instance set %s", name)
 	if !found {
@@ -422,7 +500,12 @@ point_instancers_are_instance_sets_of_shared_prototypes :: proc(t: ^testing.T) {
 	tree_mesh, has_tree := format.meta_subasset(meta, format.MESH_KIND, "prototypes/tree")
 	testing.expect(t, has_ground && has_tree)
 	for s in meta.subassets {
-		testing.expectf(t, !strings.contains(s.name, "Prototypes"), "a prototype's prim is a sub-asset of its own: %s", s.name)
+		testing.expectf(
+			t,
+			!strings.contains(s.name, "Prototypes"),
+			"a prototype's prim is a sub-asset of its own: %s",
+			s.name,
+		)
 	}
 
 	// The first instancer's three points, about it, in meters with x mirrored; the second's visible point.
@@ -434,7 +517,14 @@ point_instancers_are_instance_sets_of_shared_prototypes :: proc(t: ^testing.T) {
 		wants := [3][3]f32{{0, 0, 0}, {-1, 0, 0}, {0, 0, 1}}
 		for i in format.instance_set_instances(data, blob) {
 			want := wants[i.point]
-			testing.expectf(t, i.position == want, "point %d is at %v, not %v", i.point, i.position, want)
+			testing.expectf(
+				t,
+				i.position == want,
+				"point %d is at %v, not %v",
+				i.point,
+				i.position,
+				want,
+			)
 			testing.expect_value(t, f32(i.scale.y), i.point == 1 ? 2 : 1)
 			testing.expect_value(t, i.rotation.w, 32767)
 		}
@@ -457,15 +547,33 @@ point_instancers_are_instance_sets_of_shared_prototypes :: proc(t: ^testing.T) {
 		}
 	}
 	testing.expect_value(t, strings.count(prefab_text, "component 53 Instanced_Mesh_Renderer"), 2)
-	testing.expect_value(t, strings.count(prefab_text, fmt.tprintf("mesh = $%s", guid_text(tree_mesh))), 2)
+	testing.expect_value(
+		t,
+		strings.count(prefab_text, fmt.tprintf("mesh = $%s", guid_text(tree_mesh))),
+		2,
+	)
 	testing.expect_value(t, strings.count(prefab_text, "component 33 Mesh_Renderer"), 1)
-	testing.expectf(t, strings.contains(prefab_text, "offset = [-1.0, 0.0, 0.0]"), "trees_a is not 1 m along -x: %s", prefab_text)
+	testing.expectf(
+		t,
+		strings.contains(prefab_text, "offset = [-1.0, 0.0, 0.0]"),
+		"trees_a is not 1 m along -x: %s",
+		prefab_text,
+	)
 	testing.expect(t, !strings.contains(prefab_text, "name = \"tree\""))
 }
 
 @(test)
 skipped_point_instancers_cook_neither_sets_nor_prototypes :: proc(t: ^testing.T) {
-	tree := make_tree(t, {{"content/forest.usda", INSTANCER_STAGE}, {"content/forest.usda.meta", "guid = 0123456789abcdef0123456789abcdef\npoint_instancers = skip\n"}})
+	tree := make_tree(
+		t,
+		{
+			{"content/forest.usda", INSTANCER_STAGE},
+			{
+				"content/forest.usda.meta",
+				"guid = 0123456789abcdef0123456789abcdef\npoint_instancers = skip\n",
+			},
+		},
+	)
 	defer remove_tree(tree)
 	pass := cook(tree_options(tree), {.Stage})
 	testing.expect(t, pass.ok)
@@ -490,7 +598,15 @@ a_stage_without_its_layers_warns_and_cooks_nothing :: proc(t: ^testing.T) {
 
 @(test)
 a_malformed_stage_is_an_error :: proc(t: ^testing.T) {
-	tree := make_tree(t, {{"content/broken.usda", "#usda 1.0\ndef Mesh \"m\" {\n    int[] faceVertexCounts = [3\n"}})
+	tree := make_tree(
+		t,
+		{
+			{
+				"content/broken.usda",
+				"#usda 1.0\ndef Mesh \"m\" {\n    int[] faceVertexCounts = [3\n",
+			},
+		},
+	)
 	defer remove_tree(tree)
 	errors: Errors
 	defer release_errors(&errors)
@@ -559,8 +675,19 @@ a_dome_light_is_a_texture_sky :: proc(t: ^testing.T) {
 		}
 	}
 	for want in ([]string{"component 42 Volume", "shape = Global", "mode = Texture", fmt.tprintf("texture = $%s", guid_text(guid)), "texture_intensity = 4"}) {
-		testing.expectf(t, strings.contains(prefab_text, want), "the prefab has no %q: %s", want, prefab_text)
+		testing.expectf(
+			t,
+			strings.contains(prefab_text, want),
+			"the prefab has no %q: %s",
+			want,
+			prefab_text,
+		)
 	}
 	// USD's quarter turn about +y takes +z to +x, which the stage's mirrored x makes -x: an azimuth of 270 degrees.
-	testing.expectf(t, strings.contains(prefab_text, "texture_rotation = 270"), "the dome's quarter turn is not its rotation: %s", prefab_text)
+	testing.expectf(
+		t,
+		strings.contains(prefab_text, "texture_rotation = 270"),
+		"the dome's quarter turn is not its rotation: %s",
+		prefab_text,
+	)
 }

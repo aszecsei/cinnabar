@@ -83,7 +83,11 @@ scratch_alloc :: proc(pool: ^Scratch_Pool, needed: u64) -> d3d.GPU_VIRTUAL_ADDRE
 		}
 	}
 	block_size := max(size, SCRATCH_BLOCK_SIZE)
-	resource, ok := create_raw_buffer(block_size, {.ALLOW_UNORDERED_ACCESS}, "acceleration structure scratch")
+	resource, ok := create_raw_buffer(
+		block_size,
+		{.ALLOW_UNORDERED_ACCESS},
+		"acceleration structure scratch",
+	)
 	if !ok {
 		log.panic("d3d12: cannot create acceleration structure scratch memory")
 	}
@@ -101,7 +105,10 @@ scratch_alloc :: proc(pool: ^Scratch_Pool, needed: u64) -> d3d.GPU_VIRTUAL_ADDRE
 // structure's max_instances. Only a top-level structure gets a view at its bindless index.
 create_accel :: proc(desc: gpu.Accel_Struct_Desc) -> gpu.Accel_Struct {
 	if dev.features & {.Ray_Query, .Ray_Tracing_Pipeline} == {} {
-		log.errorf("gpu: acceleration structure %q: the device has no ray tracing. Check gpu_features.", desc.label)
+		log.errorf(
+			"gpu: acceleration structure %q: the device has no ray tracing. Check gpu_features.",
+			desc.label,
+		)
 		return {}
 	}
 	if err := gpu.validate_accel_desc(desc); err != .None {
@@ -118,8 +125,13 @@ create_accel :: proc(desc: gpu.Accel_Struct_Desc) -> gpu.Accel_Struct {
 	if desc.compact != {} {
 		// A compaction's destination needs no build inputs: cmd_compact_accel writes it whole.
 		source := gpu.pool_get(&dev.accels, desc.compact)
-		if source == nil || .Allow_Compaction not_in source.info.flags || source.info.kind != .Bottom {
-			log.errorf("gpu: acceleration structure %q: its compaction's source is invalid or has no Allow_Compaction", desc.label)
+		if source == nil ||
+		   .Allow_Compaction not_in source.info.flags ||
+		   source.info.kind != .Bottom {
+			log.errorf(
+				"gpu: acceleration structure %q: its compaction's source is invalid or has no Allow_Compaction",
+				desc.label,
+			)
 			return {}
 		}
 		entry.size = u64(mem.align_forward_int(int(desc.compacted_size), ACCEL_ALIGNMENT))
@@ -128,18 +140,28 @@ create_accel :: proc(desc: gpu.Accel_Struct_Desc) -> gpu.Accel_Struct {
 		geometry_descs: [gpu.MAX_ACCEL_GEOMETRIES]d3d.RAYTRACING_GEOMETRY_DESC
 		inputs, ok := accel_inputs(&entry, &geometry_descs, 0, desc.max_instances)
 		if !ok {
-			log.errorf("gpu: acceleration structure %q: a geometry has an invalid buffer", desc.label)
+			log.errorf(
+				"gpu: acceleration structure %q: a geometry has an invalid buffer",
+				desc.label,
+			)
 			return {}
 		}
 		sizes: d3d.RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO
 		dev.device->GetRaytracingAccelerationStructurePrebuildInfo(&inputs, &sizes)
-		entry.size = u64(mem.align_forward_int(int(sizes.ResultDataMaxSizeInBytes), ACCEL_ALIGNMENT))
+		entry.size = u64(
+			mem.align_forward_int(int(sizes.ResultDataMaxSizeInBytes), ACCEL_ALIGNMENT),
+		)
 		entry.uncompacted_size = entry.size
 		entry.build_scratch = sizes.ScratchDataSizeInBytes
 		entry.update_scratch = sizes.UpdateScratchDataSizeInBytes
 	}
 
-	entry.resource = create_raw_buffer(entry.size, {.ALLOW_UNORDERED_ACCESS, .RAYTRACING_ACCELERATION_STRUCTURE}, desc.label) or_else nil
+	entry.resource =
+		create_raw_buffer(
+			entry.size,
+			{.ALLOW_UNORDERED_ACCESS, .RAYTRACING_ACCELERATION_STRUCTURE},
+			desc.label,
+		) or_else nil
 	if entry.resource == nil {
 		return {}
 	}
@@ -147,7 +169,11 @@ create_accel :: proc(desc: gpu.Accel_Struct_Desc) -> gpu.Accel_Struct {
 
 	accel := gpu.pool_add(&dev.accels, entry)
 	if accel == {} {
-		log.errorf("gpu: acceleration structure %q: more than %d acceleration structures", desc.label, gpu.MAX_ACCEL_STRUCTS)
+		log.errorf(
+			"gpu: acceleration structure %q: more than %d acceleration structures",
+			desc.label,
+			gpu.MAX_ACCEL_STRUCTS,
+		)
 		release(&entry.resource)
 		return {}
 	}
@@ -157,7 +183,11 @@ create_accel :: proc(desc: gpu.Accel_Struct_Desc) -> gpu.Accel_Struct {
 			Shader4ComponentMapping = d3d.DEFAULT_SHADER_4_COMPONENT_MAPPING,
 		}
 		srv.RaytracingAccelerationStructure.Location = entry.address
-		dev.device->CreateShaderResourceView(nil, &srv, resource_handle(gpu.accel_read_index(accel)))
+		dev.device->CreateShaderResourceView(
+			nil,
+			&srv,
+			resource_handle(gpu.accel_read_index(accel)),
+		)
 	}
 	return accel
 }
@@ -193,7 +223,10 @@ build_accel :: proc(list: ^d3d.IGraphicsCommandList7, build: ^gpu.Build_Accel) {
 	desc := d3d.BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC {
 		DestAccelerationStructureData    = entry.address,
 		Inputs                           = inputs,
-		ScratchAccelerationStructureData = scratch_alloc(scratch, build.update ? entry.update_scratch : entry.build_scratch),
+		ScratchAccelerationStructureData = scratch_alloc(
+			scratch,
+			build.update ? entry.update_scratch : entry.build_scratch,
+		),
 	}
 	if build.update {
 		desc.Inputs.Flags += {.PERFORM_UPDATE}
@@ -228,7 +261,8 @@ compact_accel :: proc(list: ^d3d.IGraphicsCommandList7, c: ^gpu.Compact_Accel) {
 @(private)
 accel_memory :: proc() -> (memory, uncompacted: u64) {
 	for i in 0 ..< dev.accels.count {
-		if _, ok := gpu.pool_handle(&dev.accels, i); ok && dev.accels.items[i].info.kind == .Bottom {
+		if _, ok := gpu.pool_handle(&dev.accels, i);
+		   ok && dev.accels.items[i].info.kind == .Bottom {
 			memory += dev.accels.items[i].size
 			uncompacted += dev.accels.items[i].uncompacted_size
 		}
@@ -248,7 +282,8 @@ accel_inputs :: proc(
 	ok: bool,
 ) {
 	inputs.DescsLayout = .ARRAY
-	inputs.Flags = .Prefer_Fast_Build in entry.info.flags ? {.PREFER_FAST_BUILD} : {.PREFER_FAST_TRACE}
+	inputs.Flags =
+		.Prefer_Fast_Build in entry.info.flags ? {.PREFER_FAST_BUILD} : {.PREFER_FAST_TRACE}
 	if .Allow_Update in entry.info.flags {
 		inputs.Flags += {.ALLOW_UPDATE}
 	}
@@ -269,7 +304,10 @@ accel_inputs :: proc(
 			triangles := d3d.RAYTRACING_GEOMETRY_TRIANGLES_DESC {
 				VertexFormat = g.vertex_format == .RG32_Float ? .R32G32_FLOAT : .R32G32B32_FLOAT,
 				VertexCount = g.vertex_count,
-				VertexBuffer = {StartAddress = vertices.address + d3d.GPU_VIRTUAL_ADDRESS(g.vertex_offset), StrideInBytes = u64(g.vertex_stride)},
+				VertexBuffer = {
+					StartAddress = vertices.address + d3d.GPU_VIRTUAL_ADDRESS(g.vertex_offset),
+					StrideInBytes = u64(g.vertex_stride),
+				},
 			}
 			if g.indices != {} {
 				indices := gpu.pool_get(&dev.buffers, g.indices)
@@ -297,7 +335,8 @@ accel_inputs :: proc(
 @(private)
 accel_inputs_valid :: proc(entry: ^Accel_Entry) -> bool {
 	for g in entry.geometries[:entry.geometry_count] {
-		if gpu.pool_get(&dev.buffers, g.vertices) == nil || (g.indices != {} && gpu.pool_get(&dev.buffers, g.indices) == nil) {
+		if gpu.pool_get(&dev.buffers, g.vertices) == nil ||
+		   (g.indices != {} && gpu.pool_get(&dev.buffers, g.indices) == nil) {
 			return false
 		}
 	}
@@ -305,21 +344,39 @@ accel_inputs_valid :: proc(entry: ^Accel_Entry) -> bool {
 }
 
 @(private = "file")
-create_raw_buffer :: proc(size: u64, flags: d3d.RESOURCE_FLAGS, label: string) -> (resource: ^d3d.IResource, ok: bool) {
+create_raw_buffer :: proc(
+	size: u64,
+	flags: d3d.RESOURCE_FLAGS,
+	label: string,
+) -> (
+	resource: ^d3d.IResource,
+	ok: bool,
+) {
 	heap_props := d3d.HEAP_PROPERTIES {
 		Type = .DEFAULT,
 	}
 	desc := d3d.RESOURCE_DESC1 {
-		Dimension        = .BUFFER,
-		Width            = size,
-		Height           = 1,
+		Dimension = .BUFFER,
+		Width = size,
+		Height = 1,
 		DepthOrArraySize = 1,
-		MipLevels        = 1,
-		SampleDesc       = {Count = 1},
-		Layout           = .ROW_MAJOR,
-		Flags            = flags,
+		MipLevels = 1,
+		SampleDesc = {Count = 1},
+		Layout = .ROW_MAJOR,
+		Flags = flags,
 	}
-	hr := dev.device->CreateCommittedResource3(&heap_props, {}, &desc, .UNDEFINED, nil, nil, 0, nil, d3d.IResource_UUID, (^rawptr)(&resource))
+	hr := dev.device->CreateCommittedResource3(
+		&heap_props,
+		{},
+		&desc,
+		.UNDEFINED,
+		nil,
+		nil,
+		0,
+		nil,
+		d3d.IResource_UUID,
+		(^rawptr)(&resource),
+	)
 	check(hr, "CreateCommittedResource3(acceleration structure)") or_return
 	set_name(resource, label)
 	return resource, true

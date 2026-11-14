@@ -49,7 +49,11 @@ the_frame_takes_its_settings_from_the_volumes_at_the_camera :: proc(t: ^testing.
 	testing.expect_value(t, s.sky.ambient_intensity, 1)
 	testing.expect_value(t, s.fog.density, 0)
 	testing.expect_value(t, s.post.paper_white, 0)
-	testing.expect_value(t, s.shadows, Shadow_Settings{distance = SHADOW_DISTANCE, split_lambda = SHADOW_SPLIT_LAMBDA})
+	testing.expect_value(
+		t,
+		s.shadows,
+		Shadow_Settings{distance = SHADOW_DISTANCE, split_lambda = SHADOW_SPLIT_LAMBDA},
+	)
 	// The clouds have no density until a volume gives one, and the default layer.
 	testing.expect_value(t, s.clouds.density, 0)
 	testing.expect_value(t, s.clouds.coverage, 0.5)
@@ -66,7 +70,11 @@ the_frame_takes_its_settings_from_the_volumes_at_the_camera :: proc(t: ^testing.
 	// A box over part of the world turns bloom off, fogs less and clears the sky, and leaves the rest to the global
 	// volume.
 	local := ecs.spawn(w)
-	ecs.add(w, local, ecs.Transform{position = ecs.position_offset({}, {10, 0, 0}), rotation = 1, scale = 1})
+	ecs.add(
+		w,
+		local,
+		ecs.Transform{position = ecs.position_offset({}, {10, 0, 0}), rotation = 1, scale = 1},
+	)
 	ecs.add(w, local, volume.Volume{shape = .Box, extents = {1, 1, 1}})
 	ecs.add(w, local, Bloom{off = {true, true}})
 	ecs.add(w, local, Fog{density = {true, 0.02}})
@@ -75,7 +83,11 @@ the_frame_takes_its_settings_from_the_volumes_at_the_camera :: proc(t: ^testing.
 	s = resolve_settings(r, w, {})
 	testing.expect_value(t, s.sky.background, [3]f32{0.02, 0.02, 0.035})
 	testing.expect_value(t, s.fog.density, 0.1)
-	testing.expect_value(t, s.shadows, Shadow_Settings{distance = 30, split_lambda = SHADOW_SPLIT_LAMBDA})
+	testing.expect_value(
+		t,
+		s.shadows,
+		Shadow_Settings{distance = 30, split_lambda = SHADOW_SPLIT_LAMBDA},
+	)
 	testing.expect(t, !s.post.no_bloom)
 	testing.expect_value(t, s.post.bloom_radius, 0.3)
 	testing.expect_value(t, s.post.bloom_intensity, DEFAULT_BLOOM_INTENSITY)
@@ -107,7 +119,12 @@ blooms_radius_is_a_setting_from_0_to_1 :: proc(t: ^testing.T) {
 	for field in fields {
 		append(&names, field.name)
 	}
-	testing.expectf(t, slice.equal(names[:], []string{"off", "intensity", "radius"}), "fields %v", names[:])
+	testing.expectf(
+		t,
+		slice.equal(names[:], []string{"off", "intensity", "radius"}),
+		"fields %v",
+		names[:],
+	)
 	radius := fields[2]
 	testing.expect(t, radius.has_override && radius.has_range)
 	testing.expect_value(t, radius.range_min, 0)

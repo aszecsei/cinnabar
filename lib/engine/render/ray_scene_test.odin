@@ -13,7 +13,10 @@ import format "cinnabar:engine/asset/format"
 
 // A hit pipeline that the test's ready proc says is still compiling.
 @(private = "file")
-COMPILING :: gpu.Pipeline{index = 7, generation = 1}
+COMPILING :: gpu.Pipeline {
+	index      = 7,
+	generation = 1,
+}
 
 @(private = "file")
 test_ready :: proc(_: ^core.Platform_API, pipeline: gpu.Pipeline) -> bool {
@@ -23,18 +26,37 @@ test_ready :: proc(_: ^core.Platform_API, pipeline: gpu.Pipeline) -> bool {
 @(test)
 hit_entries_map_each_submeshs_primitives_to_its_block_and_bin :: proc(t: ^testing.T) {
 	pipelines := make([]Material_Pipeline, 4, context.temp_allocator)
-	pipelines[0] = {hit = gpu.Pipeline{index = 1, generation = 1}}
-	pipelines[1] = {blend = .Transparent, hit = gpu.Pipeline{index = 2, generation = 1}}
-	pipelines[2] = {hit = COMPILING}
+	pipelines[0] = {
+		hit = gpu.Pipeline{index = 1, generation = 1},
+	}
+	pipelines[1] = {
+		blend = .Transparent,
+		hit = gpu.Pipeline{index = 2, generation = 1},
+	}
+	pipelines[2] = {
+		hit = COMPILING,
+	}
 	// A blob from before the hit pass has no hit pipeline.
 	pipelines[3] = {}
 	mesh := Resident_Mesh {
 		submesh_count = 4,
 	}
-	mesh.submeshes[0] = {first_index = 0, index_count = 30}
-	mesh.submeshes[1] = {first_index = 30, index_count = 6}
-	mesh.submeshes[2] = {first_index = 36, index_count = 3}
-	mesh.submeshes[3] = {first_index = 39, index_count = 9}
+	mesh.submeshes[0] = {
+		first_index = 0,
+		index_count = 30,
+	}
+	mesh.submeshes[1] = {
+		first_index = 30,
+		index_count = 6,
+	}
+	mesh.submeshes[2] = {
+		first_index = 36,
+		index_count = 3,
+	}
+	mesh.submeshes[3] = {
+		first_index = 39,
+		index_count = 9,
+	}
 	items := []Cull_Item {
 		{mesh = 5, submesh = 0, material = 16, bin = 0},
 		// An impostor's item stands for the same submesh, and adds no record.
@@ -52,18 +74,43 @@ hit_entries_map_each_submeshs_primitives_to_its_block_and_bin :: proc(t: ^testin
 	surfaces := add_hit_entries(&table, 3, &mesh, items, pipelines, test_ready, nil)
 	testing.expect(t, surfaces, "the slot has opaque submeshes")
 	testing.expect_value(t, table.instances[3], Hit_Instance{mesh = 5, first = 1, count = 4})
-	testing.expect_value(t, table.submeshes[1], Hit_Submesh{first_primitive = 0, primitive_count = 10, block = 16, bin = 1})
-	testing.expect_value(t, table.submeshes[2], Hit_Submesh{first_primitive = 10, primitive_count = 2, block = 32, bin = HIT_TRANSLUCENT})
-	testing.expect_value(t, table.submeshes[3], Hit_Submesh{first_primitive = 12, primitive_count = 1, block = 48, bin = 0})
-	testing.expect_value(t, table.submeshes[4], Hit_Submesh{first_primitive = 13, primitive_count = 3, block = 64, bin = 0})
-	testing.expect(t, table.used[0] && table.used[1] && !table.used[2] && !table.used[3] && !table.used[4])
+	testing.expect_value(
+		t,
+		table.submeshes[1],
+		Hit_Submesh{first_primitive = 0, primitive_count = 10, block = 16, bin = 1},
+	)
+	testing.expect_value(
+		t,
+		table.submeshes[2],
+		Hit_Submesh{first_primitive = 10, primitive_count = 2, block = 32, bin = HIT_TRANSLUCENT},
+	)
+	testing.expect_value(
+		t,
+		table.submeshes[3],
+		Hit_Submesh{first_primitive = 12, primitive_count = 1, block = 48, bin = 0},
+	)
+	testing.expect_value(
+		t,
+		table.submeshes[4],
+		Hit_Submesh{first_primitive = 13, primitive_count = 3, block = 64, bin = 0},
+	)
+	testing.expect(
+		t,
+		table.used[0] && table.used[1] && !table.used[2] && !table.used[3] && !table.used[4],
+	)
 
 	// A slot of transparent submeshes only has no surface for rays to shade.
 	glass := Resident_Mesh {
 		submesh_count = 1,
 	}
-	glass.submeshes[0] = {first_index = 0, index_count = 3}
-	testing.expect(t, !add_hit_entries(&table, 4, &glass, {{mesh = 6, bin = 1}}, pipelines, test_ready, nil))
+	glass.submeshes[0] = {
+		first_index = 0,
+		index_count = 3,
+	}
+	testing.expect(
+		t,
+		!add_hit_entries(&table, 4, &glass, {{mesh = 6, bin = 1}}, pipelines, test_ready, nil),
+	)
 	testing.expect_value(t, table.instances[4], Hit_Instance{mesh = 6, first = 5, count = 1})
 }
 
@@ -73,7 +120,11 @@ hit_blob :: proc(hit: bool, blend := format.Material_Blend.Opaque) -> []byte {
 	code := []byte{1}
 	variants := make([dynamic]format.Material_Variant_Entry, context.temp_allocator)
 	for pass in ([]format.Material_Pass{.Forward, .Prepass, .Depth}) {
-		append(&variants, format.Material_Variant_Entry{0, pass, .Vertex, code}, format.Material_Variant_Entry{0, pass, .Pixel, code})
+		append(
+			&variants,
+			format.Material_Variant_Entry{0, pass, .Vertex, code},
+			format.Material_Variant_Entry{0, pass, .Pixel, code},
+		)
 	}
 	if hit {
 		append(&variants, format.Material_Variant_Entry{0, .Hit, .Compute, code})
@@ -112,7 +163,14 @@ a_material_has_a_hit_pipeline_only_with_ray_query :: proc(t: ^testing.T) {
 		blob, _ := format.material_view(data)
 		p: Material_Pipeline
 		make_pipelines(r, &p, data, blob, 0)
-		testing.expectf(t, (p.hit != {}) == c.expected, "ray query %v, hit code %v: hit pipeline %v", c.ray_query, c.hit, p.hit)
+		testing.expectf(
+			t,
+			(p.hit != {}) == c.expected,
+			"ray query %v, hit code %v: hit pipeline %v",
+			c.ray_query,
+			c.hit,
+			p.hit,
+		)
 		testing.expect(t, p.pipelines[.Hit] == {} && p.pipelines[.Forward] != {})
 		// Updating a pipeline keeps its hit pipeline.
 		make_pipelines(r, &p, data, blob, 0)
@@ -152,7 +210,8 @@ run_accel_frame :: proc(
 	g := begin(platform, cache)
 	f := new(Frame, platform.frame_allocator)
 	f^ = {
-		renderer = r, state = &r.view,
+		renderer = r,
+		state    = &r.view,
 		graph    = &g,
 		size     = {64, 32},
 	}
@@ -301,9 +360,15 @@ a_built_mesh_accel_is_compacted :: proc(t: ^testing.T) {
 	r.platform = &platform
 	r.caps.ray_query = true
 	r.residency.platform = &platform
-	positions := platform.gpu_create_buffer({size = 36, usage = {.Storage}, label = "positions"}, nil)
+	positions := platform.gpu_create_buffer(
+		{size = 36, usage = {.Storage}, label = "positions"},
+		nil,
+	)
 	indices := platform.gpu_create_buffer({size = 12, usage = {.Index}, label = "indices"}, nil)
-	posed := platform.gpu_create_buffer({size = 36, usage = {.Storage}, label = "posed positions"}, nil)
+	posed := platform.gpu_create_buffer(
+		{size = 36, usage = {.Storage}, label = "posed positions"},
+		nil,
+	)
 	defer for b in ([]gpu.Buffer{positions, indices, posed}) {
 		platform.gpu_destroy_buffer(b)
 	}
@@ -312,7 +377,8 @@ a_built_mesh_accel_is_compacted :: proc(t: ^testing.T) {
 	for &e in r.residency.entries[:2] {
 		e.kind, e.ready = .Mesh, true
 		m := &e.current.mesh
-		m.positions, m.indices, m.vertex_count, m.index_count, m.index_format = positions, indices, 3, 3, .U32
+		m.positions, m.indices, m.vertex_count, m.index_count, m.index_format =
+			positions, indices, 3, 3, .U32
 	}
 	mesh, kept := &r.residency.entries[0].current.mesh, &r.residency.entries[1].current.mesh
 	r.scene.skins.instances = make(map[u32]Skinned_Instance, platform.heap_allocator)
@@ -354,10 +420,22 @@ a_built_mesh_accel_is_compacted :: proc(t: ^testing.T) {
 	run = run_accel_frame(r, &cache, indices, fail_submit)
 	testing.expect_value(t, run.compactions, 1)
 	compacting, is_compacting := mesh.accel_state.(Accel_Compacting)
-	testing.expect(t, is_compacting && mesh.accel == original, "a failed frame swapped the structures")
+	testing.expect(
+		t,
+		is_compacting && mesh.accel == original,
+		"a failed frame swapped the structures",
+	)
 	_, kept_compacted := kept.accel_state.(Accel_Compacted)
-	testing.expect(t, kept_compacted && kept.accel != {}, "a mesh with a compacted size of 0 lost its structure")
-	testing.expect(t, sizing.slot not_in r.ray_scene.compaction.copied, "a slot that was read stays copied")
+	testing.expect(
+		t,
+		kept_compacted && kept.accel != {},
+		"a mesh with a compacted size of 0 lost its structure",
+	)
+	testing.expect(
+		t,
+		sizing.slot not_in r.ray_scene.compaction.copied,
+		"a slot that was read stays copied",
+	)
 
 	// The next frame executes: the mesh's instances use the compacted structure, and the built one goes.
 	run = run_accel_frame(r, &cache, indices, null.submit)
@@ -372,7 +450,10 @@ a_built_mesh_accel_is_compacted :: proc(t: ^testing.T) {
 
 	// Then there is nothing left to do, and the skinned entity's structure refits as it did.
 	run = run_accel_frame(r, &cache, indices, null.submit)
-	testing.expect(t, run.executed && run.builds == 0 && run.sized == 0 && run.compactions == 0 && run.refit)
+	testing.expect(
+		t,
+		run.executed && run.builds == 0 && run.sized == 0 && run.compactions == 0 && run.refit,
+	)
 }
 
 @(private = "file")
@@ -412,18 +493,32 @@ hit_shading_bins_the_hits_and_dispatches_each_bin_indirectly :: proc(t: ^testing
 	r.platform = &platform
 	r.caps.ray_query = true
 	code := []byte{1}
-	r.ray_scene.bin_pipeline.pipeline = platform.gpu_create_compute_pipeline({compute = code, label = "test bins"})
-	r.ray_scene.fallback.pipeline = platform.gpu_create_compute_pipeline({compute = code, label = "test fallback"})
-	r.materials.pipelines[0].hit = platform.gpu_create_compute_pipeline({compute = code, label = "test hit"})
+	r.ray_scene.bin_pipeline.pipeline = platform.gpu_create_compute_pipeline(
+		{compute = code, label = "test bins"},
+	)
+	r.ray_scene.fallback.pipeline = platform.gpu_create_compute_pipeline(
+		{compute = code, label = "test fallback"},
+	)
+	r.materials.pipelines[0].hit = platform.gpu_create_compute_pipeline(
+		{compute = code, label = "test hit"},
+	)
 	r.materials.pipeline_count = 1
-	r.ray_scene.accel = platform.gpu_create_accel({kind = .Top, max_instances = 4, label = "test scene"})
+	r.ray_scene.accel = platform.gpu_create_accel(
+		{kind = .Top, max_instances = 4, label = "test scene"},
+	)
 	defer ray_scene_destroy(&r.ray_scene, &platform)
 	defer material_pipeline_destroy(&r.materials.pipelines[0], &platform)
 
 	rays: u32 = 1000
 	buffers := []gpu.Buffer {
-		platform.gpu_create_buffer({size = rays * size_of(Hit_Record), usage = {.Storage}, label = "hits"}, nil),
-		platform.gpu_create_buffer({size = rays * size_of(Hit_Surface), usage = {.Storage}, label = "surfaces"}, nil),
+		platform.gpu_create_buffer(
+			{size = rays * size_of(Hit_Record), usage = {.Storage}, label = "hits"},
+			nil,
+		),
+		platform.gpu_create_buffer(
+			{size = rays * size_of(Hit_Surface), usage = {.Storage}, label = "surfaces"},
+			nil,
+		),
 		platform.gpu_create_buffer({size = 1024, usage = {.Storage}, label = "instances"}, nil),
 	}
 	defer for b in buffers {
@@ -433,11 +528,19 @@ hit_shading_bins_the_hits_and_dispatches_each_bin_indirectly :: proc(t: ^testing
 		cache: Texture_Cache
 		g := begin(&platform, &cache)
 		f := new(Frame, platform.frame_allocator)
-		f^ = {renderer = r, state = &r.view, graph = &g, size = {64, 32}}
+		f^ = {
+			renderer = r,
+			state    = &r.view,
+			graph    = &g,
+			size     = {64, 32},
+		}
 		sf := new(Scene_Frame, platform.frame_allocator)
 		f.scene_frame = sf
 		sf.view_constants = make([]gpu.Upload, 1, platform.frame_allocator)
-		sf.view_constants[0], _ = platform.gpu_upload(size_of(Frame_Constants), gpu.PASS_CONSTANTS_ALIGN)
+		sf.view_constants[0], _ = platform.gpu_upload(
+			size_of(Frame_Constants),
+			gpu.PASS_CONSTANTS_ALIGN,
+		)
 		sf.instances = import_buffer(&g, buffers[2])
 		sf.hit_instances, _ = platform.gpu_upload(size_of(Hit_Instance), 16)
 		sf.hit_submeshes, _ = platform.gpu_upload(size_of(Hit_Submesh), 16)
@@ -446,7 +549,11 @@ hit_shading_bins_the_hits_and_dispatches_each_bin_indirectly :: proc(t: ^testing
 
 		// Without a request, the frame has no ray scene to shade hits of.
 		hits, surfaces := import_buffer(&g, buffers[0]), import_buffer(&g, buffers[1])
-		batch := Hit_Batch{hits = hits, surfaces = surfaces, count = rays}
+		batch := Hit_Batch {
+			hits     = hits,
+			surfaces = surfaces,
+			count    = rays,
+		}
 		testing.expect(t, reserve_hit_shading(f, rays) == nil)
 		testing.expect(t, request_ray_scene(f))
 		// The structure as add_ray_scene_passes imports it, without the residency's meshes to build.
@@ -454,7 +561,11 @@ hit_shading_bins_the_hits_and_dispatches_each_bin_indirectly :: proc(t: ^testing
 
 		// A turn whose uploads fail takes no batch, so a client that has none adds no pass that reads the surfaces.
 		platform.gpu_upload = fail_upload
-		testing.expect(t, reserve_hit_shading(f, rays) == nil, "a turn was reserved without its uploads")
+		testing.expect(
+			t,
+			reserve_hit_shading(f, rays) == nil,
+			"a turn was reserved without its uploads",
+		)
 		testing.expect_value(t, f.ray_scene.batches, 0)
 		platform.gpu_upload = null.upload
 

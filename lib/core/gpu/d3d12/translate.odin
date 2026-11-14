@@ -9,7 +9,12 @@ import "cinnabar:core/gpu"
 // translate records a command buffer into a command list. Release builds do not validate, so an
 // invalid handle stops at an assert.
 @(private)
-translate :: proc(list: ^d3d.IGraphicsCommandList7, cb: gpu.Command_Buffer, frame: ^Frame, queue: gpu.Queue) {
+translate :: proc(
+	list: ^d3d.IGraphicsCommandList7,
+	cb: gpu.Command_Buffer,
+	frame: ^Frame,
+	queue: gpu.Queue,
+) {
 	timer := marker_timer(frame, queue)
 	defer timer_finish(&timer)
 	in_pass := false
@@ -57,13 +62,24 @@ translate :: proc(list: ^d3d.IGraphicsCommandList7, cb: gpu.Command_Buffer, fram
 		case .Push_Constants:
 			data := gpu.push_constants_data(p)
 			if in_pass {
-				list->SetGraphicsRoot32BitConstants(ROOT_PUSH_CONSTANTS, u32(len(data) / 4), raw_data(data), 0)
+				list->SetGraphicsRoot32BitConstants(
+					ROOT_PUSH_CONSTANTS,
+					u32(len(data) / 4),
+					raw_data(data),
+					0,
+				)
 			} else {
-				list->SetComputeRoot32BitConstants(ROOT_PUSH_CONSTANTS, u32(len(data) / 4), raw_data(data), 0)
+				list->SetComputeRoot32BitConstants(
+					ROOT_PUSH_CONSTANTS,
+					u32(len(data) / 4),
+					raw_data(data),
+					0,
+				)
 			}
 		case .Set_Pass_Constants:
 			constants := gpu.payload(p, gpu.Set_Pass_Constants)
-			address := buffer_entry(constants.buffer).address + d3d.GPU_VIRTUAL_ADDRESS(constants.offset)
+			address :=
+				buffer_entry(constants.buffer).address + d3d.GPU_VIRTUAL_ADDRESS(constants.offset)
 			if in_pass {
 				list->SetGraphicsRootConstantBufferView(ROOT_PASS_CONSTANTS, address)
 			} else {
@@ -80,13 +96,25 @@ translate :: proc(list: ^d3d.IGraphicsCommandList7, cb: gpu.Command_Buffer, fram
 			list->IASetIndexBuffer(&view)
 		case .Set_Viewport:
 			v := gpu.payload(p, gpu.Set_Viewport)
-			viewport := d3d.VIEWPORT{v.position.x, v.position.y, v.size.x, v.size.y, v.min_depth, v.max_depth}
+			viewport := d3d.VIEWPORT {
+				v.position.x,
+				v.position.y,
+				v.size.x,
+				v.size.y,
+				v.min_depth,
+				v.max_depth,
+			}
 			list->RSSetViewports(1, &viewport)
 		case .Set_Stencil_Reference:
 			list->OMSetStencilRef(gpu.payload(p, gpu.Set_Stencil_Reference).reference)
 		case .Set_Scissor:
 			s := gpu.payload(p, gpu.Set_Scissor)
-			rect := d3d.RECT{s.position.x, s.position.y, s.position.x + s.size.x, s.position.y + s.size.y}
+			rect := d3d.RECT {
+				s.position.x,
+				s.position.y,
+				s.position.x + s.size.x,
+				s.position.y + s.size.y,
+			}
 			list->RSSetScissorRects(1, &rect)
 		case .Draw:
 			if !pipeline_ready {
@@ -99,7 +127,13 @@ translate :: proc(list: ^d3d.IGraphicsCommandList7, cb: gpu.Command_Buffer, fram
 				continue
 			}
 			d := gpu.payload(p, gpu.Draw_Indexed)
-			list->DrawIndexedInstanced(d.index_count, d.instance_count, d.first_index, d.vertex_offset, d.first_instance)
+			list->DrawIndexedInstanced(
+				d.index_count,
+				d.instance_count,
+				d.first_index,
+				d.vertex_offset,
+				d.first_instance,
+			)
 		case .Dispatch:
 			if !pipeline_ready {
 				continue
@@ -114,7 +148,15 @@ translate :: proc(list: ^d3d.IGraphicsCommandList7, cb: gpu.Command_Buffer, fram
 			}
 			d := gpu.payload(p, gpu.Draw_Indirect)
 			signature := p.kind == .Draw_Indirect ? dev.draw_signature : dev.indexed_signature
-			execute_indirect(list, signature, d.arguments, d.offset, d.max_count, d.count, d.count_offset)
+			execute_indirect(
+				list,
+				signature,
+				d.arguments,
+				d.offset,
+				d.max_count,
+				d.count,
+				d.count_offset,
+			)
 			// The draws set the draw ID, and ExecuteIndirect leaves it undefined afterward.
 			list->SetGraphicsRoot32BitConstant(ROOT_DRAW_ID, 0, 0)
 		case .Draw_Mesh:
@@ -128,7 +170,15 @@ translate :: proc(list: ^d3d.IGraphicsCommandList7, cb: gpu.Command_Buffer, fram
 				continue
 			}
 			d := gpu.payload(p, gpu.Draw_Indirect)
-			execute_indirect(list, dev.mesh_signature, d.arguments, d.offset, d.max_count, d.count, d.count_offset)
+			execute_indirect(
+				list,
+				dev.mesh_signature,
+				d.arguments,
+				d.offset,
+				d.max_count,
+				d.count,
+				d.count_offset,
+			)
 			list->SetGraphicsRoot32BitConstant(ROOT_DRAW_ID, 0, 0)
 		case .Build_Accel:
 			build_accel(list, gpu.payload(p, gpu.Build_Accel))
@@ -139,7 +189,13 @@ translate :: proc(list: ^d3d.IGraphicsCommandList7, cb: gpu.Command_Buffer, fram
 		case .Copy_Buffer:
 			c := gpu.payload(p, gpu.Copy_Buffer)
 			dest, source := buffer_entry(c.dest), buffer_entry(c.source)
-			list->CopyBufferRegion(dest.resource, u64(c.dest_offset), source.resource, u64(c.source_offset), u64(c.size))
+			list->CopyBufferRegion(
+				dest.resource,
+				u64(c.dest_offset),
+				source.resource,
+				u64(c.source_offset),
+				u64(c.size),
+			)
 			if dest.mapped != nil {
 				mark_readback(c.dest, dest)
 			}
@@ -175,7 +231,11 @@ begin_pass :: proc(list: ^d3d.IGraphicsCommandList7, pass: ^gpu.Begin_Pass) {
 		size = entry.desc.size
 		target := &targets[i]
 		target.cpuDescriptor = entry.rtv
-		target.BeginningAccess = beginning_access(color.load, entry.desc.format, {Color = color.clear})
+		target.BeginningAccess = beginning_access(
+			color.load,
+			entry.desc.format,
+			{Color = color.clear},
+		)
 		target.EndingAccess.Type = ending_access(color.store)
 	}
 
@@ -185,7 +245,10 @@ begin_pass :: proc(list: ^d3d.IGraphicsCommandList7, pass: ^gpu.Begin_Pass) {
 		entry := texture_entry(pass.depth.texture)
 		size = entry.desc.size
 		clear: d3d.CLEAR_VALUE
-		clear.DepthStencil = {Depth = pass.depth.clear, Stencil = pass.depth.stencil_clear}
+		clear.DepthStencil = {
+			Depth   = pass.depth.clear,
+			Stencil = pass.depth.stencil_clear,
+		}
 		depth = {
 			cpuDescriptor = entry.dsv,
 			DepthBeginningAccess = beginning_access(pass.depth.load, entry.desc.format, clear),
@@ -194,8 +257,14 @@ begin_pass :: proc(list: ^d3d.IGraphicsCommandList7, pass: ^gpu.Begin_Pass) {
 			StencilEndingAccess = {Type = .NO_ACCESS},
 		}
 		if gpu.has_stencil(entry.desc.format) {
-			depth.StencilBeginningAccess = beginning_access(pass.depth.load, entry.desc.format, clear)
-			depth.StencilEndingAccess = {Type = ending_access(pass.depth.store)}
+			depth.StencilBeginningAccess = beginning_access(
+				pass.depth.load,
+				entry.desc.format,
+				clear,
+			)
+			depth.StencilEndingAccess = {
+				Type = ending_access(pass.depth.store),
+			}
 		}
 		depth_ptr = &depth
 	}
@@ -229,7 +298,13 @@ begin_pass :: proc(list: ^d3d.IGraphicsCommandList7, pass: ^gpu.Begin_Pass) {
 }
 
 @(private = "file")
-beginning_access :: proc(load: gpu.Load_Op, format: gpu.Format, clear: d3d.CLEAR_VALUE) -> (access: d3d.RENDER_PASS_BEGINNING_ACCESS) {
+beginning_access :: proc(
+	load: gpu.Load_Op,
+	format: gpu.Format,
+	clear: d3d.CLEAR_VALUE,
+) -> (
+	access: d3d.RENDER_PASS_BEGINNING_ACCESS,
+) {
 	switch load {
 	case .Load:
 		access.Type = .PRESERVE
@@ -261,7 +336,14 @@ execute_indirect :: proc(
 	if count != {} {
 		count_resource = buffer_entry(count).resource
 	}
-	list->ExecuteIndirect(signature, max_count, buffer_entry(arguments).resource, u64(offset), count_resource, u64(count_offset))
+	list->ExecuteIndirect(
+		signature,
+		max_count,
+		buffer_entry(arguments).resource,
+		u64(offset),
+		count_resource,
+		u64(count_offset),
+	)
 }
 
 @(private = "file")
@@ -349,13 +431,13 @@ access_flags :: proc(accesses: gpu.Accesses) -> (flags: d3d.BARRIER_ACCESS_FLAGS
 
 @(private = "file")
 SYNC := [gpu.Sync]d3d.BARRIER_SYNC_FLAG {
-	.All             = .ALL,
-	.Index_Input     = .INDEX_INPUT,
-	.Vertex_Shading  = .VERTEX_SHADING,
-	.Pixel_Shading   = .PIXEL_SHADING,
-	.Depth_Stencil   = .DEPTH_STENCIL,
-	.Render_Target   = .RENDER_TARGET,
-	.Compute_Shading = .COMPUTE_SHADING,
+	.All              = .ALL,
+	.Index_Input      = .INDEX_INPUT,
+	.Vertex_Shading   = .VERTEX_SHADING,
+	.Pixel_Shading    = .PIXEL_SHADING,
+	.Depth_Stencil    = .DEPTH_STENCIL,
+	.Render_Target    = .RENDER_TARGET,
+	.Compute_Shading  = .COMPUTE_SHADING,
 	.Execute_Indirect = .EXECUTE_INDIRECT,
 	.Build_Accel      = .BUILD_RAYTRACING_ACCELERATION_STRUCTURE,
 	.Ray_Tracing      = .RAYTRACING,

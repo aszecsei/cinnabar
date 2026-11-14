@@ -56,7 +56,11 @@ emitter debris
 	testing.expect_value(t, smoke.emitter.shape, format.Effect_Shape.Cone)
 	// The cone's angle is in degrees in the text.
 	testing.expect(t, math.abs(smoke.emitter.shape_size.y - math.PI / 6) < 1e-6)
-	testing.expect_value(t, smoke.emitter.texture, format.guid_parse("00112233445566778899aabbccddeeff") or_else {})
+	testing.expect_value(
+		t,
+		smoke.emitter.texture,
+		format.guid_parse("00112233445566778899aabbccddeeff") or_else {},
+	)
 	testing.expect_value(t, smoke.emitter.flipbook, [2]u32{4, 2})
 	testing.expect_value(t, len(smoke.modules), 2)
 	testing.expect_value(t, smoke.modules[1].kind, format.Effect_Module_Kind.Noise)
@@ -76,10 +80,18 @@ emitter debris
 	testing.expect_value(t, sparks.emitter.render, format.Effect_Render.Sprite)
 	trail := emitters[2].emitter
 	testing.expect_value(t, trail.render, format.Effect_Render.Ribbon)
-	testing.expect_value(t, trail.material, format.guid_parse("00112233445566778899aabbccddeeff") or_else {})
+	testing.expect_value(
+		t,
+		trail.material,
+		format.guid_parse("00112233445566778899aabbccddeeff") or_else {},
+	)
 	debris := emitters[3].emitter
 	testing.expect_value(t, debris.render, format.Effect_Render.Mesh)
-	testing.expect_value(t, debris.mesh, format.guid_parse("ffeeddccbbaa99887766554433221100") or_else {})
+	testing.expect_value(
+		t,
+		debris.mesh,
+		format.guid_parse("ffeeddccbbaa99887766554433221100") or_else {},
+	)
 }
 
 @(test)
@@ -107,13 +119,25 @@ effect_mistakes_are_problems_at_their_lines :: proc(t: ^testing.T) {
 	}
 	for c in cases {
 		_, problems := effect_parse(c.text, context.temp_allocator)
-		testing.expectf(t, len(problems) > 0 && problems[0].line == c.line, "%q: %v", c.text, problems)
+		testing.expectf(
+			t,
+			len(problems) > 0 && problems[0].line == c.line,
+			"%q: %v",
+			c.text,
+			problems,
+		)
 	}
 }
 
 @(test)
 effects_cook_to_effect_blobs :: proc(t: ^testing.T) {
-	tree := make_tree(t, {{"content/effects/smoke.effect", EFFECT_TEMPLATE}, {"content/effects/broken.effect", "effect 1\n"}})
+	tree := make_tree(
+		t,
+		{
+			{"content/effects/smoke.effect", EFFECT_TEMPLATE},
+			{"content/effects/broken.effect", "effect 1\n"},
+		},
+	)
 	defer remove_tree(tree)
 	options := tree_options(tree)
 	pass := cook(options, {.Effect}, log_problems = false)

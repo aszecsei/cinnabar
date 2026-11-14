@@ -29,7 +29,13 @@ exr_keep_error :: proc "c" (ctx: exr.const_context_t, code: exr.result_t, messag
 }
 
 @(private = "file")
-exr_read_memory :: proc "c" (ctx: exr.const_context_t, user: rawptr, buffer: rawptr, size, offset: u64, error: exr.stream_error_func_ptr_t) -> i64 {
+exr_read_memory :: proc "c" (
+	ctx: exr.const_context_t,
+	user: rawptr,
+	buffer: rawptr,
+	size, offset: u64,
+	error: exr.stream_error_func_ptr_t,
+) -> i64 {
 	data := (^Exr_Reader)(user).data
 	if offset >= u64(len(data)) {
 		return 0
@@ -76,7 +82,13 @@ Exr_Layout :: struct {
 // exr_layout finds the channels to read, or gives why the part cannot cook. One channel of any name is gray. Otherwise
 // the part needs plain R, G and B, and takes A if it has it, and it ignores the rest, such as Z or another layer.
 @(private = "file")
-exr_layout :: proc(ctx: exr.const_context_t, reader: ^Exr_Reader) -> (layout: Exr_Layout, problem: string) {
+exr_layout :: proc(
+	ctx: exr.const_context_t,
+	reader: ^Exr_Reader,
+) -> (
+	layout: Exr_Layout,
+	problem: string,
+) {
 	if result := exr.get_storage(ctx, 0, &layout.storage); result != .SUCCESS {
 		return layout, exr_failure(reader, result)
 	}
@@ -109,7 +121,10 @@ exr_layout :: proc(ctx: exr.const_context_t, reader: ^Exr_Reader) -> (layout: Ex
 			for entry, i in entries {
 				found[i] = string(entry.name.str)
 			}
-			return layout, fmt.tprintf("it has no R, G and B channels, only %s", strings.join(found, ", ", context.temp_allocator))
+			return layout, fmt.tprintf(
+				"it has no R, G and B channels, only %s",
+				strings.join(found, ", ", context.temp_allocator),
+			)
 		}
 	}
 	for index in layout.channels {
@@ -118,7 +133,10 @@ exr_layout :: proc(ctx: exr.const_context_t, reader: ^Exr_Reader) -> (layout: Ex
 		}
 		entry := entries[index]
 		if entry.pixel_type == .UINT {
-			return layout, fmt.tprintf("its %s channel holds unsigned integers, not half or float", string(entry.name.str))
+			return layout, fmt.tprintf(
+				"its %s channel holds unsigned integers, not half or float",
+				string(entry.name.str),
+			)
 		}
 		if entry.x_sampling != 1 || entry.y_sampling != 1 {
 			return layout, fmt.tprintf("its %s channel is subsampled", string(entry.name.str))
@@ -163,7 +181,8 @@ exr_decode_chunk :: proc(d: ^Exr_Decoder, chunk: ^exr.chunk_info_t, x, y: int) -
 		channel.decode_to_ptr = (^u8)(&d.pixels[y * d.width + x][slot])
 	}
 	if !d.started {
-		if result = exr.decoding_choose_default_routines(d.ctx, 0, &d.pipeline); result != .SUCCESS {
+		if result = exr.decoding_choose_default_routines(d.ctx, 0, &d.pipeline);
+		   result != .SUCCESS {
 			return result
 		}
 		d.started = true
@@ -178,7 +197,8 @@ exr_decode_chunks :: proc(d: ^Exr_Decoder) -> exr.result_t {
 	chunk: exr.chunk_info_t
 	if d.layout.storage == .TILED {
 		tile_width, tile_height: u32
-		if result := exr.get_tile_descriptor(d.ctx, 0, &tile_width, &tile_height, nil, nil); result != .SUCCESS {
+		if result := exr.get_tile_descriptor(d.ctx, 0, &tile_width, &tile_height, nil, nil);
+		   result != .SUCCESS {
 			return result
 		}
 		columns, rows: i32
@@ -187,10 +207,16 @@ exr_decode_chunks :: proc(d: ^Exr_Decoder) -> exr.result_t {
 		}
 		for row in 0 ..< rows {
 			for column in 0 ..< columns {
-				if result := exr.read_tile_chunk_info(d.ctx, 0, column, row, 0, 0, &chunk); result != .SUCCESS {
+				if result := exr.read_tile_chunk_info(d.ctx, 0, column, row, 0, 0, &chunk);
+				   result != .SUCCESS {
 					return result
 				}
-				if result := exr_decode_chunk(d, &chunk, int(column) * int(tile_width), int(row) * int(tile_height)); result != .SUCCESS {
+				if result := exr_decode_chunk(
+					d,
+					&chunk,
+					int(column) * int(tile_width),
+					int(row) * int(tile_height),
+				); result != .SUCCESS {
 					return result
 				}
 			}
@@ -206,7 +232,8 @@ exr_decode_chunks :: proc(d: ^Exr_Decoder) -> exr.result_t {
 		if result := exr.read_scanline_chunk_info(d.ctx, 0, y, &chunk); result != .SUCCESS {
 			return result
 		}
-		if result := exr_decode_chunk(d, &chunk, 0, int(chunk.start_y - window.min.y)); result != .SUCCESS {
+		if result := exr_decode_chunk(d, &chunk, 0, int(chunk.start_y - window.min.y));
+		   result != .SUCCESS {
 			return result
 		}
 	}
@@ -270,7 +297,11 @@ exr_undecodable :: proc(path: string) -> string {
 	reader: Exr_Reader
 	init := exr_initializer(&reader)
 	ctx: exr.context_t
-	if result := exr.start_read(&ctx, strings.clone_to_cstring(path, context.temp_allocator), &init); result != .SUCCESS {
+	if result := exr.start_read(
+		&ctx,
+		strings.clone_to_cstring(path, context.temp_allocator),
+		&init,
+	); result != .SUCCESS {
 		return exr_failure(&reader, result)
 	}
 	defer exr.finish(&ctx)

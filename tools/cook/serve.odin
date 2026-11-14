@@ -10,7 +10,12 @@ import "cinnabar:engine/wire/serve"
 // converts.
 
 // server_send queues a message for a connection, if it is still the one that is open.
-server_send :: proc(s: ^serve.Server, connection: u64, message: cook_link.Message, request: u32 = 0) {
+server_send :: proc(
+	s: ^serve.Server,
+	connection: u64,
+	message: cook_link.Message,
+	request: u32 = 0,
+) {
 	serve.send(s, connection, message, request)
 }
 
@@ -20,8 +25,17 @@ server_send_linked :: proc(s: ^serve.Server, message: cook_link.Message, request
 }
 
 // write_log is the server's Write_Log: a log line as the cook link's Log.
-write_log :: proc(out: ^[dynamic]byte, level: log.Level, time: i64, location: string, text: string) {
-	cook_link.write_message(out, cook_link.Log{level = log_level(level), time = time, location = location, text = text})
+write_log :: proc(
+	out: ^[dynamic]byte,
+	level: log.Level,
+	time: i64,
+	location: string,
+	text: string,
+) {
+	cook_link.write_message(
+		out,
+		cook_link.Log{level = log_level(level), time = time, location = location, text = text},
+	)
 }
 
 @(private = "file")

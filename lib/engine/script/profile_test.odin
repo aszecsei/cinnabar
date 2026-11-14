@@ -82,7 +82,8 @@ when profile.ENABLED {
 		s := profile.take_summary(context.temp_allocator)
 		has_update := false
 		for cost in s.costs {
-			has_update ||= cost.key == {kind = .Script, detail = u16(profile.Callback.Update), name = class}
+			has_update ||=
+				cost.key == {kind = .Script, detail = u16(profile.Callback.Update), name = class}
 		}
 		testing.expect(t, has_update)
 	}
