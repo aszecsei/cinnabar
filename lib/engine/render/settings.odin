@@ -297,11 +297,13 @@ Shadow_Settings :: struct {
 	distance:     f32,
 	split_lambda: f32,
 	// The shadow maps' SHADOW_PARAMS, whether the first lights trace their shadows where the device can, whether a
-	// virtual shadow map takes the place of the cascades, and whether it keeps its pages from frame to frame.
+	// virtual shadow map takes the place of the cascades, whether it keeps its pages from frame to frame, and whether the
+	// atlas keeps its lights' static casters in a cache.
 	level:         Quality_Level,
 	ray_traced:    bool,
 	virtual:       bool,
 	virtual_cache: bool,
+	atlas_cache:   bool,
 }
 
 // Fog_Settings are a frame's fog, from the Fog settings. A density of 0 is no fog.

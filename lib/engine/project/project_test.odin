@@ -162,6 +162,27 @@ the_virtual_shadow_cache_is_off_until_its_key_turns_it_on :: proc(t: ^testing.T)
 	free_all(context.temp_allocator)
 }
 
+// The shadow atlas's cache is on in every preset, since it draws its dynamic casters each frame (see
+// docs/rendering/lighting-and-shadows.md#cached-shadow-maps). Its key turns it off, and a value that does not fit is a
+// problem.
+@(test)
+the_atlas_shadow_cache_is_on_until_its_key_turns_it_off :: proc(t: ^testing.T) {
+	caps := render.Caps{}
+	for preset in render.Quality_Preset.Low ..= render.Quality_Preset.Ultra {
+		testing.expect(t, render.preset_quality(preset, caps).shadows.atlas_cache)
+	}
+	s: Settings
+	problems := make([dynamic]string, context.temp_allocator)
+	parse("quality.preset = High\nquality.shadows.atlas_cache = false\nquality.shadows.atlas_cache = seldom\n", &s, &problems)
+	testing.expect_value(t, len(problems), 1)
+	testing.expect_value(t, problems[0], `3: quality.shadows.atlas_cache takes true or false, not "seldom"`)
+	q := quality(s, caps)
+	testing.expect(t, !q.shadows.atlas_cache)
+	testing.expect_value(t, quality_values(q, caps)[.Atlas_Shadow_Cache], "false")
+	testing.expect_value(t, render.quality_preset(q, caps), render.Quality_Preset.Custom)
+	free_all(context.temp_allocator)
+}
+
 @(test)
 the_reflections_keys_read_write_and_may_be_missing :: proc(t: ^testing.T) {
 	caps := render.Caps{ray_query = true}

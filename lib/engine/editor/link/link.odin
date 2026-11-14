@@ -1203,6 +1203,13 @@ Game_Stats :: struct {
 	virtual_pages_drawn:     u32,
 	virtual_pages_evicted:   u32,
 	virtual_pages_resident:  u32,
+	// The shadow atlas's cache in the last frame: the lights that it held, 0 without it, the slots that the frame copied
+	// from it, those that it drew, and those of them that a dynamic caster's report drew on the budget (see
+	// docs/rendering/lighting-and-shadows.md#cached-shadow-maps).
+	atlas_cache_lights:    u32,
+	atlas_cache_copied:    u32,
+	atlas_cache_drawn:     u32,
+	atlas_cache_refreshed: u32,
 	// The pool of mesh pages: the pages that are resident, the slots that it has, 0 without a paged mesh, the pages that
 	// views want and that are not resident yet, and the bytes a second that the frames since the last stats copied into
 	// it (see docs/rendering/assets.md#mesh-pages).

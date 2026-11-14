@@ -443,6 +443,45 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 	}
 	testing.expectf(t, len(record.problems) == 0, "problems: %v", record.problems)
 
+	// The atlas's cache: with its pipeline, the lamp's six faces draw into the cache, which the frames after copy. A
+	// light that moves draws again, a frame that fails keeps the cache of the last frame that ran, and a frame without the
+	// cache forgets it. The null backend validates the cache's pass and its copy.
+	r.shadows.cache_pipeline.pipeline = platform.gpu_create_graphics_pipeline(
+		{vertex = code, pixel = code, depth_format = SHADOW_FORMAT, depth_compare = .Always, depth_write = true, label = "test"},
+	)
+	{
+		q := r.quality
+		q.shadows = {level = .High, atlas_cache = true}
+		desc.quality = &q
+		testing.expect(t, draw_frame(r, w, desc), "the cache's frame did not execute")
+		testing.expect_value(t, record.shadow_views, SHADOW_CASCADES + 6)
+		testing.expect(t, r.view.atlas_cache.texture != {} && r.view.atlas_cache.size == SHADOW_PARAMS[.High].atlas)
+		cache, cached := r.view.atlas_cache.cache.?
+		testing.expect(t, cached && cache.count == 1 && cache.lights[0].light.entity == lamp, "the frame kept no cache of the lamp")
+		testing.expect_value(t, atlas_cache_stats(r), Atlas_Cache_Stats{lights = 1, copied = 6, drawn = 6})
+		testing.expect(t, draw_frame(r, w, desc), "the cache's frame did not execute")
+		testing.expect_value(t, atlas_cache_stats(r), Atlas_Cache_Stats{lights = 1, copied = 6})
+		ecs.get_write(w, lamp, ecs.Transform).position = ecs.position_offset({}, {0, 0, 3})
+		testing.expect(t, draw_frame(r, w, desc), "the cache's frame did not execute")
+		testing.expect_value(t, atlas_cache_stats(r), Atlas_Cache_Stats{lights = 1, copied = 6, drawn = 6})
+		cache, cached = r.view.atlas_cache.cache.?
+		platform.gpu_submit = fail_submit
+		ecs.get_write(w, lamp, ecs.Transform).position = ecs.position_offset({}, {0, 0, 2})
+		testing.expect(t, !draw_frame(r, w, desc), "the frame executed with a submit that fails")
+		platform.gpu_submit = null.submit
+		kept, _ := r.view.atlas_cache.cache.?
+		testing.expect_value(t, kept, cache)
+		// The frame after the failed one missed its changes, so it starts again.
+		testing.expect(t, draw_frame(r, w, desc), "the cache's frame did not execute")
+		testing.expect_value(t, atlas_cache_stats(r).drawn, 6)
+		q.shadows.atlas_cache = false
+		testing.expect(t, draw_frame(r, w, desc), "the frame without the cache did not execute")
+		testing.expect(t, r.view.atlas_cache.cache == nil, "the frame without the cache kept it")
+		testing.expect_value(t, atlas_cache_stats(r), Atlas_Cache_Stats{})
+		desc.quality = nil
+	}
+	testing.expectf(t, len(record.problems) == 0, "problems: %v", record.problems)
+
 	// The voxel cones, which need no ray queries: the views of the levels that voxelize draw the scene with no
 	// attachments after the shadow views, and the null backend validates their passes.
 	{
@@ -1174,7 +1213,7 @@ gpu_objects :: proc(v: ^View_State) -> (textures, buffers: int) {
 		textures += texture(h.textures[:])
 	}
 	textures += texture(v.occlusion.hzb[:])
-	textures += texture({v.clouds.shadow_map, v.gi.probes.radiance, v.gi.probes.irradiance, v.gi.split.atlas, v.virtual_shadows.pool})
+	textures += texture({v.clouds.shadow_map, v.gi.probes.radiance, v.gi.probes.irradiance, v.gi.split.atlas, v.virtual_shadows.pool, v.atlas_cache.texture})
 	for level in v.gi.voxel.textures {
 		for kind in Voxel_Texture {
 			textures += texture({level[kind]})

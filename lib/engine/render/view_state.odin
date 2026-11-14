@@ -29,6 +29,7 @@ View_State :: struct {
 	sky:             Sky_State,
 	gi:              Gi_State,
 	virtual_shadows: Virtual_State,
+	atlas_cache:     Atlas_Cache_State,
 	mask_history:    Mask_History,
 	shading:         Shading_State,
 }
@@ -66,6 +67,7 @@ view_state_destroy :: proc(v: ^View_State, r: ^Renderer) {
 	cloud_state_destroy(&v.clouds, platform)
 	gi_state_destroy(&v.gi, platform)
 	virtual_state_destroy(&v.virtual_shadows, platform)
+	atlas_cache_state_destroy(&v.atlas_cache, platform)
 	shading_state_destroy(&v.shading, platform)
 	v^ = {}
 }

@@ -99,6 +99,8 @@ public sealed class ResourceMonitorView : Grid
                 .. ShadingRows(g),
                 // The virtual shadow map's pages, while a frame draws one: those it asked for, those it got and those it had no room for, those the pool held, those it drew and those that left for them, and the pool's fill.
                 .. VirtualShadowRows(g),
+                // The shadow atlas's cache, while it holds a light: its lights, and the slots that the frame copied from it and drew into it, with those that a dynamic caster's report drew.
+                .. AtlasCacheRows(g),
                 // The pool of mesh pages, while a paged mesh is resident: the pages in it of its slots, those that views wait for, and what the frames copy in a second.
                 .. MeshPageRows(g),
                 // The split cascades' tables: the probes that rays reached of each cascade's slots, and the keys that found no room.
@@ -125,6 +127,17 @@ public sealed class ResourceMonitorView : Grid
             yield return ("Shadow pages drawn", $"{g.VirtualPagesDrawn:N0}");
             yield return ("Shadow pages evicted", $"{g.VirtualPagesEvicted:N0}");
             yield return ("Shadow page pool", $"{g.VirtualPagesResident:N0} / {g.VirtualPagesCapacity:N0} ({g.VirtualPagesResident * 100.0 / g.VirtualPagesCapacity:0}% full)");
+        }
+    }
+
+    // The shadow atlas's cache's rows, none while it holds no light (see docs/rendering/lighting-and-shadows.md#cached-shadow-maps).
+    internal static IEnumerable<(string Name, string Value)> AtlasCacheRows(Link.Protocol.GameStats g)
+    {
+        if (g.AtlasCacheLights > 0)
+        {
+            yield return ("Cached shadow lights", $"{g.AtlasCacheLights:N0}");
+            yield return ("Shadow slots copied", $"{g.AtlasCacheCopied:N0}");
+            yield return ("Shadow slots drawn", g.AtlasCacheRefreshed > 0 ? $"{g.AtlasCacheDrawn:N0}, {g.AtlasCacheRefreshed:N0} refreshed" : $"{g.AtlasCacheDrawn:N0}");
         }
     }
 

@@ -87,6 +87,9 @@ Material_Pipeline :: struct {
 	patches:      bool,
 	// The material draws its meshes as billboards, which face the camera (see docs/rendering/gpu-scene.md#billboards).
 	billboard:    bool,
+	// The material's depth changes with the frame's time: it reads the time and displaces its vertices or discards by its
+	// opacity, so its shadow changes without a move (see docs/rendering/gpu-scene.md#caster-tracking).
+	animated:     bool,
 	// The material draws particle ribbons, with the ribbon vertex path, not meshes (see
 	// docs/rendering/particles.md#ribbons).
 	ribbon:       bool,
@@ -598,6 +601,7 @@ make_pipelines :: proc(r: ^Renderer, p: ^Material_Pipeline, data: []byte, blob: 
 	p.displacement_bound = .Displaces in blob.flags ? blob.displacement_bound : 0
 	p.patches = .Patches in blob.flags
 	p.billboard = .Billboard in blob.flags
+	p.animated = .Reads_Time in blob.flags && (.Displaces in blob.flags || blob.blend == .Masked)
 	p.ribbon = .Ribbon in blob.flags
 }
 

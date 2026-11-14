@@ -74,6 +74,11 @@ static const uint SET_IMPOSTOR = 2;
 static const uint SET_BILLBOARD = 4;
 // A set whose items are all opaque, which occlusion culling culls.
 static const uint SET_OCCLUDABLE = 8;
+// A set whose slot the view draws live: a cached shadow view takes only these, and a cache view only the others. Match
+// SET_LIVE, VIEW_LIVE and VIEW_BAKED in lib/engine/render/scene.odin.
+static const uint SET_LIVE = 16;
+static const uint VIEW_LIVE = 32;
+static const uint VIEW_BAKED = 64;
 struct Instance_Set_Record {
 	uint instances;
 	uint cells;
@@ -197,6 +202,8 @@ void cull_cell(uint thread, uint set_index, Instance_Set_Record set, uint cell_i
 	float entity_scale = max_axis_scale(entity);
 	// The view model's view draws no set, and a shadow view only a set that casts shadows.
 	bool takes = (view.flags & VIEW_MODEL) == 0 && ((view.flags & VIEW_CASTERS) == 0 || (set.flags & SET_CASTS_SHADOWS) != 0);
+	bool live = (set.flags & SET_LIVE) != 0;
+	takes = takes && ((view.flags & VIEW_LIVE) == 0 || live) && ((view.flags & VIEW_BAKED) == 0 || !live);
 	// The mesh's sphere, moved by an instance's pose, stays within its reach of the instance's position, scaled.
 	float reach = length(set.sphere.xyz) + set.sphere.w;
 	float3 cell_center = transform_point(entity, cell.center) - view.offset.xyz;

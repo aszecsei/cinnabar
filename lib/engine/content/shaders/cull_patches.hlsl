@@ -60,6 +60,15 @@ struct Cull_View {
 // Matches Cull_Item in lib/engine/render/scene.odin.
 static const uint ITEM_CASTS_SHADOWS = 1;
 static const uint ITEM_VIEW_MODEL = 2;
+// A cached shadow view draws only the live items, those of a dynamic caster near the camera, over its slot's copy of the
+// cache, and a cache view draws every other item into the cache. Match VIEW_LIVE, VIEW_BAKED and ITEM_LIVE in
+// lib/engine/render/scene.odin.
+static const uint VIEW_LIVE = 32;
+static const uint VIEW_BAKED = 64;
+static const uint ITEM_LIVE = 4096;
+bool view_takes_live(uint view_flags, bool live) {
+	return ((view_flags & VIEW_LIVE) == 0 || live) && ((view_flags & VIEW_BAKED) == 0 || !live);
+}
 struct Item {
 	uint instance;
 	uint mesh;
@@ -117,6 +126,9 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 		return;
 	}
 	if (((view.flags & VIEW_MODEL) != 0) != ((item.flags & ITEM_VIEW_MODEL) != 0)) {
+		return;
+	}
+	if (!view_takes_live(view.flags, (item.flags & ITEM_LIVE) != 0)) {
 		return;
 	}
 	uint node = cn_buffer(cull.patches_read).Load((id.y * MAX_SURFACE_PATCHES + id.x) * 4);

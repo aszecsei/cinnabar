@@ -2,7 +2,7 @@
 
 The persistent buffer of every instance's pose, the render origin it is relative to, stable slots, culling into bins, the acceleration structure, and the vertex paths beside vertex pulling: the mesh shader path, billboards and impostors. Read [Render extraction](../world/render-extraction.md) first.
 
-**In this document:** [Mesh shader path](#mesh-shader-path) · [Billboards](#billboards) · [Impostors](#impostors) · [Instanced meshes](#instanced-meshes)
+**In this document:** [Caster tracking](#caster-tracking) · [Mesh shader path](#mesh-shader-path) · [Billboards](#billboards) · [Impostors](#impostors) · [Instanced meshes](#instanced-meshes)
 
 The GPU scene holds every instance's record in a persistent buffer, `Gpu_Scene` in `lib/engine/render/scene.odin`: its pose and its last frame's pose as the rows of 3x4 matrices, and its entity's ID for the editor. Each frame's draw items carry the rest: the mesh, the submesh's indices and bounds, and the material.
 
@@ -22,6 +22,17 @@ The GPU scene holds every instance's record in a persistent buffer, `Gpu_Scene` 
 - **The acceleration structure.** With `Ray_Query`, each instance of a `Mesh_Renderer` that casts shadows or has an opaque or masked submesh is an instance of the GPU scene's top-level acceleration structure, in the render origin's space, with its slot as its ID and a mask that says which rays see it. It is built again every frame that a feature traces. Instance sets are not in it. See [Ray scene](ray-scene.md#ray-scene).
 - **Patch surfaces** (see [Surfaces](surfaces.md#surfaces)) have slots and records as meshes do, and one item each with `ITEM_SURFACE`, which `cull_draws.hlsl` skips. The item reserves `MAX_SURFACE_PATCHES` draws in its bin, so each view's draws are the bins' counts, not the items' (`Scene_Frame.draws_per_view`), and two more passes add the patches' draws: `select patches` after the scene's update, and `cull patches` after `cull draws`, both with the culling's constants.
 - **Particles** (see [Particles](particles.md#ribbons)) have a slot at each system's anchor, and their items' draws are the GPU's: a ribbon's item has `ITEM_RIBBON`, and a mesh particle emitter's item of a submesh `ITEM_PARTICLES`, which `cull_draws.hlsl` skips, and whose draw draws the submesh once for each particle (see [Mesh particles](particles.md#mesh-particles)).
+
+## Caster tracking
+
+The shadow caches, the atlas's [cached shadow maps](lighting-and-shadows.md#cached-shadow-maps) and the [virtual shadow map](lighting-and-shadows.md#caching)'s, keep shadows from frame to frame, so they need to know which casters changed (`lib/engine/render/casters.odin`). The frame's own view finds them in `build_scene`, after its items, while each item's bin is still its pipeline, in `Gpu_Scene.casters`.
+
+- **A slot's shadow** is its items that cast shadows, but the view model's (`caster_bounds`): a box around their spheres, each moved by the slot's rows, scaled by the largest scale of its axes and grown by the material's displacement bound, as culling takes them, and a signature of what they draw, their indices or meshlets, pipeline, flags, bound and sphere. An instanced item's sphere is its set's sphere about its instances, grown by the submesh's reach at the instances' largest scale (`Resident_Instance_Set`), and a billboard's turns about its position. The box's sphere is in the world, a `World_Position`, so a rebase moves no caster.
+- **Static and dynamic:** a slot is dynamic (`Caster_Slot.volatile`) when its pose changed in the last `SHADOW_STILL_FRAMES` (30) frames, or when its items change their shape by themselves: skinned meshes, billboards, mesh particles, and a material that reads the time and displaces its vertices or is masked (`Material_Pipeline.animated`). `scene_write_instance` says when a slot's presented pose changed, against the pose that it held, so a rebase, a full write and the catch-up of last frame's pose are not moves.
+- **Changes** (`track_casters`, `Caster_Change`): a slot that starts or stops casting, whose signature changed, or that turns dynamic or static again is a change at once, from its old place to its new one. A dynamic slot reports every `SHADOW_FAR_REFRESH` (8) frames, staggered by its slot, when it moved or changes its shape by itself. A slot that was freed stops casting. The changes are of the scene frame that made them, and every view of that frame reads them.
+- **Live slots:** each view, extra views too, draws the dynamic casters within its dynamic shadow distance live (`live_slots`, `caster_live`), and sets `ITEM_LIVE` on their items and `SET_LIVE` on their sets. Mesh particles have no bounds on the CPU, so they are live at any distance.
+- **A view's changes** (`view_caster_changes`): the frame's, without the reports of what the view draws live, which its caches do not hold, and with a change for each slot that turned live or baked since the caches drew, which they drop where they hold it, or take where it is.
+- **Tests:** `casters_test.odin` covers the changes of a still, a moving, an inherent, a changed and a freed caster, a rebase, and the live slots.
 
 ## Mesh shader path
 
