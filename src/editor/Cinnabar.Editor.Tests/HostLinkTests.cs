@@ -1,10 +1,4 @@
-using System.Collections.Concurrent;
-using System.Diagnostics;
-using System.Net;
-using System.Net.Sockets;
 using System.Runtime.InteropServices;
-using System.Threading.Channels;
-using Cinnabar.Editor.Link;
 using Cinnabar.Editor.Link.Protocol;
 using Cinnabar.Editor.Shell;
 using Cinnabar.Editor.Viewport;
@@ -14,74 +8,16 @@ using Vortice.DXGI;
 namespace Cinnabar.Editor.Tests;
 
 /// <summary>
-/// The editor link against a real host: build/dev/host.exe running build/dev/mygame.dll in shared mode. The test is skipped
-/// when they are not built, and when the host cannot start its GPU device, such as on a machine without one.
+/// The editor link against build/dev/host.exe, which renders with D3D12, with the tests that need a GPU: those that read its
+/// shared frames, the picks that find what it drew, bakes, previews and the GPU's profile, and those that have not moved
+/// to <see cref="HostTests"/>. They are skipped when the host cannot start its GPU device, such as on a machine without one.
 /// </summary>
-public sealed class HostLinkTests : IAsyncDisposable
+public sealed class HostLinkTests() : HostTests("host.exe", "just build", () => ["--adapter", Adapter.Value.ToString("x16")])
 {
-    static readonly TimeSpan Timeout = TimeSpan.FromSeconds(30);
-
-    readonly Process? _host;
-    readonly int _port;
     // The host renders on the adapter that the test names, so the test can open its shared objects.
-    readonly ulong _adapter;
-    readonly ConcurrentQueue<string> _output = new();
+    static readonly Lazy<ulong> Adapter = new(HighPerformanceAdapter);
 
-    public HostLinkTests()
-    {
-        var root = EditorOptions.RepositoryRoot();
-        var hostPath = Path.Combine(root, "build", "dev", "host.exe");
-        var gamePath = Path.Combine(root, "build", "dev", "mygame.dll");
-        if (!File.Exists(hostPath) || !File.Exists(gamePath))
-        {
-            return;
-        }
-        _port = FreePort();
-        _adapter = HighPerformanceAdapter();
-        var info = new ProcessStartInfo(hostPath,
-            // The project's settings name the scene that the game starts with (see docs/world/game-package.md#settings).
-            [gamePath, "--project", Path.Combine(root, "samples", "mygame", "project.settings"), "--shared", $"cinnabar-test-{Guid.NewGuid():N}", "--link", _port.ToString(), "--adapter", _adapter.ToString("x16")])
-        {
-            WorkingDirectory = root,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-        };
-        _host = Process.Start(info)!;
-        _host.OutputDataReceived += (_, e) => _output.Enqueue(e.Data ?? "");
-        _host.ErrorDataReceived += (_, e) => _output.Enqueue(e.Data ?? "");
-        _host.BeginOutputReadLine();
-        _host.BeginErrorReadLine();
-    }
-
-    [Fact]
-    public async Task TheHostWelcomesAnOpenViewportResizesItAndSendsItsLog()
-    {
-        await using var editor = await Connect();
-        editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
-
-        var welcome = await editor.Next<Welcome>();
-        Assert.Equal("mygame", welcome.Game);
-        Assert.Equal(LinkMessages.ProtocolVersion, welcome.Protocol);
-        // The host says that it linked, and that line comes over the link, not its console.
-        try
-        {
-            await editor.Next<Log>(l => l.Text.Contains("linked to test"));
-        }
-        catch (InvalidOperationException e)
-        {
-            Assert.Fail($"{e.Message}\nThe host's console:\n{string.Join("\n", _output)}");
-        }
-        // A viewport has a target only once the editor opens it, at the size it asks for.
-        var first = await Show(editor, 0, ViewportKind.Scene, 1280, 720);
-        Assert.Equal((0u, 0u, 1280, 720), (first.Viewport, first.Generation, first.Width, first.Height));
-        Assert.EndsWith(".g0", first.Prefix);
-
-        editor.Link.Send(new OpenViewport(0, ViewportKind.Scene, 640, 360));
-        var resized = await editor.Next<ViewportTarget>(t => t.Viewport == 0 && t.Generation == 1);
-        Assert.Equal(new ViewportTarget(0, first.Prefix[..^1] + "1", 1, 640, 360), resized);
-    }
+    protected override string? CannotRun(string console) => console.Contains("d3d12: no adapter") ? "the host has no GPU here" : null;
 
     [Fact]
     public async Task WithoutAcknowledgementsTheHostStopsSharingFrames()
@@ -89,7 +25,7 @@ public sealed class HostLinkTests : IAsyncDisposable
         await using var editor = await Connect();
         editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
         var target = await Show(editor, keepUp: false);
-        using var device = new ViewportDevice(_adapter);
+        using var device = new ViewportDevice(Adapter.Value);
         using var frames = await Open(device, target.Prefix);
 
         // Paced from the viewport's opening, the host shares two frames and then renders into its scratch target.
@@ -117,99 +53,12 @@ public sealed class HostLinkTests : IAsyncDisposable
         throw new InvalidOperationException($"cannot open {prefix}");
     }
 
-    // Opens a viewport of the game, as the editor does when its control has a size, and waits for the target that the game
-    // makes for it.
-    // Show opens a viewport and gives its target. With keepUp, it acknowledges every frame of that target ahead of time, as
-    // an editor that always keeps up would, so the game draws the viewport in every frame and its picks and captures run
-    // without the test copying frames. A test of the back-pressure itself passes false.
-    static async Task<ViewportTarget> Show(Editor editor, uint viewport = 0, ViewportKind kind = ViewportKind.Scene, int width = 1280, int height = 720, bool keepUp = true)
-    {
-        editor.Link.Send(new OpenViewport(viewport, kind, width, height));
-        // A scene view draws, and so has a target, once it has a camera, as the editor sends with each one that it opens.
-        if (kind == ViewportKind.Scene)
-        {
-            editor.Link.Send(new EditorCamera(viewport, [0, 0, 0], [0, 0, 0, 1], (float)(60 * Math.PI / 180), 0.05f, CameraProjection.Perspective, 0, 0));
-        }
-        var target = await editor.Next<ViewportTarget>(t => t.Viewport == viewport);
-        if (keepUp)
-        {
-            editor.Link.Send(new ViewportAcknowledged(viewport, target.Generation, ulong.MaxValue / 2));
-        }
-        return target;
-    }
-
     static ulong HighPerformanceAdapter()
     {
         using var factory = DXGI.CreateDXGIFactory2<IDXGIFactory6>(false);
         using var adapter = factory.EnumAdapterByGpuPreference<IDXGIAdapter1>(0, GpuPreference.HighPerformance);
         var luid = adapter.Description1.Luid;
         return (ulong)luid.LowPart | ((ulong)(uint)luid.HighPart << 32);
-    }
-
-    [Fact]
-    public async Task TheGameSendsItsWorldAndAWatchedEntitysValues()
-    {
-        await using var editor = await Connect();
-        editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
-
-        var types = await editor.Next<ComponentTypes>();
-        var transform = Assert.Single(types.Types, t => t.Name == "Transform");
-        Assert.Equal(["position", "rotation", "scale"], transform.Fields.Select(f => f.Name));
-        await editor.Next<EntitySnapshot>();
-        var snapshot = await Load(editor, Scene(Entity(1, "Placed", scale: 2)));
-        var placed = Assert.Single(snapshot.Entities);
-        Assert.Contains(transform.Id, placed.Components);
-
-        editor.Link.Send(new WatchEntity(placed.Entity));
-        var values = await editor.Next<EntityValues>(v => v.Entity == placed.Entity);
-        var data = Assert.Single(values.Components, c => c.Id == transform.Id).Data;
-        Assert.Equal((int)transform.Size, data.Length);
-        Assert.Equal("(2, 2, 2)", Model.FieldValues.Format(transform.Fields[2], data));
-    }
-
-    [Fact]
-    public async Task TheEditorsSceneReplacesTheGamesWorld()
-    {
-        await using var editor = await Connect();
-        editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
-        await editor.Next<EntitySnapshot>();
-
-        var parent = Pulsing(1, "Parent");
-        var child = Entity(2, "Child");
-        child.Parent = parent.Id;
-        var loaded = await Load(editor, Scene(parent, child));
-        Assert.Equal(["Child", "Parent"], loaded.Entities.Select(e => e.Name).Order(StringComparer.Ordinal));
-        var loadedParent = loaded.Entities.Single(e => e.Name == "Parent");
-        Assert.Equal(parent.Id, loadedParent.SceneId);
-        Assert.Equal(loadedParent.Entity, loaded.Entities.Single(e => e.Name == "Child").Parent);
-
-        // In Edit, the game's own behaviours end with their entities, without their callbacks, and the scene's one is
-        // left.
-        await editor.Next<GameStats>(s => s.Behaviours == 1);
-        Assert.DoesNotContain(editor.Skipped, m => m is Log { Level: LogLevel.Error });
-    }
-
-    [Fact]
-    public async Task TheGameAppliesEditsAndSendsBackWhatItCannot()
-    {
-        await using var editor = await Connect();
-        editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
-        var spinner = Spinning(1, "Spinner");
-        var path = Path.Combine(Path.GetTempPath(), $"cinnabar-test-{Guid.NewGuid():N}.scene");
-        var document = new Document.SceneDocument(path, Scene(spinner));
-        document.Applied += ops => editor.Link.Send(new ApplyOperations([.. ops.Select(o => o.ToWire()).OfType<Link.Protocol.Operation>()]));
-        await editor.Next<EntitySnapshot>();
-        await Load(editor, document.Scene);
-
-        document.Apply("Rename", new Document.Rename(spinner.Id, "Edited"));
-        document.Apply("Bad field", new Document.SetField(spinner.Id, SpinId, "no_such_field", Document.SceneValue.Of(true)));
-
-        var problems = await editor.Next<EditProblems>(p => !p.Snapshot);
-        var problem = Assert.Single(problems.Problems);
-        Assert.Equal(spinner.Id, problem.Entity);
-        Assert.Contains("no_such_field", problem.Message);
-        // The rename arrives with the next entity delta.
-        await editor.Next<EntityDelta>(d => d.Changed.Any(e => e.SceneId == spinner.Id && e.Name == "Edited"));
     }
 
     [Fact]
@@ -265,7 +114,7 @@ public sealed class HostLinkTests : IAsyncDisposable
         editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
         await editor.Next<EntitySnapshot>();
         var target = await Show(editor, 0, ViewportKind.Scene, 640, 360);
-        using var device = new ViewportDevice(_adapter);
+        using var device = new ViewportDevice(Adapter.Value);
         using var frames = await Open(device, target.Prefix);
 
         // Two boxes on the z axis, a small one at 0.4 m and a larger one at 1 m, under a red background, seen along +z
@@ -363,7 +212,7 @@ public sealed class HostLinkTests : IAsyncDisposable
         editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
         await editor.Next<EntitySnapshot>();
         var target = await Show(editor, 0, ViewportKind.Scene, 640, 360);
-        using var device = new ViewportDevice(_adapter);
+        using var device = new ViewportDevice(Adapter.Value);
         using var frames = await Open(device, target.Prefix);
 
         // Two boxes on the z axis, a small one at 0.4 m and a larger one at 1 m, under a red background. The first
@@ -485,7 +334,7 @@ public sealed class HostLinkTests : IAsyncDisposable
         await editor.Next<EntitySnapshot>();
         var scene = await Show(editor, 0, ViewportKind.Scene, 320, 240);
         var game = await Show(editor, 4, ViewportKind.Game, 320, 240);
-        using var device = new ViewportDevice(_adapter);
+        using var device = new ViewportDevice(Adapter.Value);
         using var sceneFrames = await Open(device, scene.Prefix);
         using var gameFrames = await Open(device, game.Prefix);
 
@@ -545,7 +394,7 @@ public sealed class HostLinkTests : IAsyncDisposable
         await editor.Next<EntitySnapshot>();
         var target = await Show(editor, 2, ViewportKind.Scene, 320, 240);
         editor.Link.Send(new EditorCamera(2, [Origin, 0, -Meter], [0, 0, 0, 1], (float)(60 * Math.PI / 180), 0.05f, CameraProjection.Perspective, 0, 0));
-        using var device = new ViewportDevice(_adapter);
+        using var device = new ViewportDevice(Adapter.Value);
         using var frames = await Open(device, target.Prefix);
         async Task<ulong> Drawn()
         {
@@ -591,7 +440,7 @@ public sealed class HostLinkTests : IAsyncDisposable
         }
         targets.Add(await Show(editor, 4, ViewportKind.Game, 320, 240));
         Assert.Equal(5, targets.Select(t => t.Prefix).Distinct().Count());
-        using var device = new ViewportDevice(_adapter);
+        using var device = new ViewportDevice(Adapter.Value);
         List<SharedFrames> frames = [];
         foreach (var target in targets)
         {
@@ -637,46 +486,6 @@ public sealed class HostLinkTests : IAsyncDisposable
             await Task.Delay(50, TestContext.Current.CancellationToken);
         }
         Assert.Equal([box.Id], found);
-    }
-
-    [Fact]
-    public async Task TheWorldRunsOnlyInPlayAndInPausedSteps()
-    {
-        await using var editor = await Connect();
-        editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
-        await editor.Next<EntitySnapshot>();
-        // It spins in a Fixed system, so its Transform changes only while the world runs.
-        var spinner = Assert.Single((await Load(editor, Scene(Spinning(1, "Spinner")))).Entities).Entity;
-        // The values as they are now: a watch sends them at once, and values that stream while the world runs are
-        // dropped before the next look.
-        async Task<string> Values()
-        {
-            editor.Link.Send(new WatchEntity(spinner));
-            var values = await editor.Next<EntityValues>(v => v.Entity == spinner);
-            editor.Link.Send(new UnwatchEntity(spinner));
-            await Task.Delay(100, TestContext.Current.CancellationToken);
-            editor.Drain();
-            return string.Join(";", values.Components.Select(c => Convert.ToHexString(c.Data)));
-        }
-
-        // A linked editor starts in Edit, where nothing moves.
-        var still = await Values();
-        await Task.Delay(300, TestContext.Current.CancellationToken);
-        Assert.Equal(still, await Values());
-
-        editor.Link.Send(new SetMode(EditorMode.Play));
-        await Task.Delay(300, TestContext.Current.CancellationToken);
-        var played = await Values();
-        Assert.NotEqual(still, played);
-
-        editor.Link.Send(new SetMode(EditorMode.Paused));
-        await Task.Delay(200, TestContext.Current.CancellationToken);
-        var paused = await Values();
-        await Task.Delay(300, TestContext.Current.CancellationToken);
-        Assert.Equal(paused, await Values());
-        editor.Link.Send(new StepFrame());
-        await Task.Delay(200, TestContext.Current.CancellationToken);
-        Assert.NotEqual(paused, await Values());
     }
 
     // The sample's main script logs the input that it sees through the Input library, so these go from the editor's
@@ -1371,7 +1180,7 @@ public sealed class HostLinkTests : IAsyncDisposable
         var target = await editor.Next<PreviewTarget>();
         Assert.Equal((0u, 0u, 128, 96), (target.Id, target.Generation, target.Width, target.Height));
         Assert.EndsWith(".preview0.g0", target.Prefix);
-        using var device = new ViewportDevice(_adapter);
+        using var device = new ViewportDevice(Adapter.Value);
         using var frames = await Open(device, target.Prefix);
 
         // The preview draws until its mesh, its pipelines and its textures are ready, and then stops, because gold does
@@ -1424,7 +1233,7 @@ public sealed class HostLinkTests : IAsyncDisposable
         editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
         await editor.Next<EntitySnapshot>();
         var target = await Show(editor);
-        using var device = new ViewportDevice(_adapter);
+        using var device = new ViewportDevice(Adapter.Value);
         using var frames = await Open(device, target.Prefix);
 
         // A global volume whose environment's background is red, and nothing else, so the whole frame is background.
@@ -1490,7 +1299,7 @@ public sealed class HostLinkTests : IAsyncDisposable
         editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
         await editor.Next<EntitySnapshot>();
         var target = await Show(editor);
-        using var device = new ViewportDevice(_adapter);
+        using var device = new ViewportDevice(Adapter.Value);
         using var frames = await Open(device, target.Prefix);
 
         // A global volume with an atmosphere whose own sun is high, and nothing else, so the frame is sky. The camera
@@ -1539,7 +1348,7 @@ public sealed class HostLinkTests : IAsyncDisposable
         editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
         await editor.Next<EntitySnapshot>();
         var target = await Show(editor);
-        using var device = new ViewportDevice(_adapter);
+        using var device = new ViewportDevice(Adapter.Value);
         using var frames = await Open(device, target.Prefix);
         await Load(editor, Scene(TextureSky(CubeFaces)));
         editor.Link.Send(new SetViewportSettings(0, EditorShell.DefaultViewportSettings));
@@ -1581,7 +1390,7 @@ public sealed class HostLinkTests : IAsyncDisposable
         editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
         await editor.Next<EntitySnapshot>();
         var target = await Show(editor);
-        using var device = new ViewportDevice(_adapter);
+        using var device = new ViewportDevice(Adapter.Value);
         using var frames = await Open(device, target.Prefix);
         editor.Link.Send(new SetViewportSettings(0, EditorShell.DefaultViewportSettings));
 
@@ -1637,7 +1446,7 @@ public sealed class HostLinkTests : IAsyncDisposable
         editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
         await editor.Next<EntitySnapshot>();
         var target = await Show(editor);
-        using var device = new ViewportDevice(_adapter);
+        using var device = new ViewportDevice(Adapter.Value);
         using var frames = await Open(device, target.Prefix);
 
         // One triangle in one place, after 0, 1 and 2 other entities. Its entity's index picks its layer, and is all that
@@ -1782,188 +1591,4 @@ public sealed class HostLinkTests : IAsyncDisposable
         }
     }
 
-    [Fact]
-    public async Task AnotherProtocolVersionIsRefused()
-    {
-        await using var editor = await Connect();
-        editor.Link.Send(new Hello(LinkMessages.ProtocolVersion + 1, "test"));
-
-        var refused = await editor.Next<Refused>();
-        Assert.Equal(LinkMessages.ProtocolVersion, refused.Protocol);
-        Assert.Contains("protocol", refused.Reason);
-    }
-
-    async Task<Editor> Connect()
-    {
-        if (_host == null)
-        {
-            Assert.Skip("build/dev/host.exe or build/dev/mygame.dll is not built");
-        }
-        var deadline = DateTime.UtcNow + Timeout;
-        while (true)
-        {
-            if (_host.HasExited)
-            {
-                var output = string.Join("\n", _output);
-                if (output.Contains("d3d12: no adapter"))
-                {
-                    Assert.Skip("the host has no GPU here");
-                }
-                Assert.Fail($"the host exited with code {_host.ExitCode}:\n{output}");
-            }
-            try
-            {
-                var link = await LinkClient.ConnectAsync(_port, LinkMessages.Read, TestContext.Current.CancellationToken);
-                return new Editor(link);
-            }
-            catch (SocketException) when (DateTime.UtcNow < deadline)
-            {
-                await Task.Delay(100, TestContext.Current.CancellationToken);
-            }
-        }
-    }
-
-    sealed class Editor : IAsyncDisposable
-    {
-        readonly Channel<ILinkMessage> _received = Channel.CreateUnbounded<ILinkMessage>();
-
-        public LinkClient Link { get; }
-
-        /// <summary>Every message that Next has passed over.</summary>
-        public List<ILinkMessage> Skipped { get; } = [];
-
-        public Editor(LinkClient link)
-        {
-            Link = link;
-            link.Received += (message, _) => _received.Writer.TryWrite(message);
-            link.Closed += _ => _received.Writer.TryComplete();
-            link.Start();
-        }
-
-        /// <summary>The next message of type T that matches, skipping the others, such as log lines.</summary>
-        public async Task<T> Next<T>(Func<T, bool>? match = null) where T : ILinkMessage
-        {
-            using var timeout = new CancellationTokenSource(Timeout);
-            var skipped = new List<ILinkMessage>();
-            try
-            {
-                await foreach (var message in _received.Reader.ReadAllAsync(timeout.Token))
-                {
-                    if (message is T t && (match == null || match(t)))
-                    {
-                        return t;
-                    }
-                    skipped.Add(message);
-                    Skipped.Add(message);
-                }
-            }
-            catch (OperationCanceledException)
-            {
-            }
-            throw new InvalidOperationException($"no {typeof(T).Name} came. These did:\n{string.Join("\n", skipped)}");
-        }
-
-        /// <summary>Drops the messages that have come.</summary>
-        public void Drain()
-        {
-            while (_received.Reader.TryRead(out _))
-            {
-            }
-        }
-
-        public ValueTask DisposeAsync() => Link.DisposeAsync();
-    }
-
-    // The tests' scenes are built here, each with only what its test looks at, so that they do not depend on the
-    // sample's scene. They sit 1.5e11 m along x, in World_Position's units of 2^-24 m, as the sample's scenes do.
-    const long Origin = 2516582400000000000;
-    const long Meter = 1 << 24;
-    // The sample's box mesh (models/shapes.gltf, 1 m across) and scripts/pulse.luau, which pulses a Triangle.
-    const string BoxMesh = "89fc38c8aa19f0cf0cc161d2ab5e015b";
-    const string PulseScript = "7142e05b3941bc44849ed0379727e60b";
-    // The engine's Mesh_Renderer, and the game's Spin and Triangle (samples/mygame/game.odin).
-    const ulong CameraId = 32;
-    const ulong MeshRendererId = 33;
-    const ulong PointLightId = 35;
-    const ulong VolumeId = 42;
-    const ulong EnvironmentId = 49;
-    const ulong SpinId = 1001;
-    const ulong TriangleId = 1002;
-
-    static Document.Scene Scene(params Document.SceneEntity[] entities)
-    {
-        var scene = new Document.Scene();
-        scene.Entities.AddRange(entities);
-        return scene;
-    }
-
-    // Entity is an entity with only a Transform, z meters ahead of the origin.
-    static Document.SceneEntity Entity(ulong id, string name, double z = 0, double scale = 1)
-    {
-        var entity = new Document.SceneEntity(id) { Name = name };
-        entity.Components.Add(new Document.SceneComponent(1, "Transform",
-        [
-            Field("position", Document.SceneValue.Of(Number(Origin), Number(0), Number((long)(z * Meter)))),
-            Field("rotation", Document.SceneValue.Of(Number(0), Number(0), Number(0), Number(1))),
-            Field("scale", Document.SceneValue.Of(Number(scale), Number(scale), Number(scale))),
-        ]));
-        return entity;
-    }
-
-    static Document.SceneEntity Box(ulong id, string name, double z, double scale)
-    {
-        var entity = Entity(id, name, z, scale);
-        entity.Components.Add(new Document.SceneComponent(MeshRendererId, "Mesh_Renderer", [Field("mesh", Document.SceneValue.AssetRef(BoxMesh))]));
-        return entity;
-    }
-
-    // Spinning turns at 1 radian per second while the world runs.
-    static Document.SceneEntity Spinning(ulong id, string name)
-    {
-        var entity = Entity(id, name);
-        entity.Components.Add(new Document.SceneComponent(SpinId, "Spin", [Field("speed", Document.SceneValue.Of(Number(1.0)))]));
-        return entity;
-    }
-
-    // Pulsing is a triangle with the pulse behaviour.
-    static Document.SceneEntity Pulsing(ulong id, string name)
-    {
-        var entity = Entity(id, name);
-        entity.Components.Add(new Document.SceneComponent(TriangleId, "Triangle", [Field("brightness", Document.SceneValue.Of(Number(1.0)))]));
-        entity.Behaviours.Add(new Document.SceneBehaviour(PulseScript, []));
-        return entity;
-    }
-
-    static Document.SceneField Field(string name, Document.SceneValue value) => new(name, value);
-
-    static Document.SceneNumber Number(long value) => Document.SceneNumber.Of(value);
-
-    static Document.SceneNumber Number(double value) => Document.SceneNumber.Of(value);
-
-    /// <summary>Replaces the game's world with a scene, as the editor does, and gives the world once it has loaded.</summary>
-    static async Task<EntitySnapshot> Load(Editor editor, Document.Scene scene, string? name = null, string guid = "")
-    {
-        name ??= scene.Entities[0].Name;
-        editor.Link.Send(Document.SceneSnapshot.ToMessage(scene, guid));
-        return await editor.Next<EntitySnapshot>(s => s.Entities.Any(e => e.Name == name) && s.Entities.Length == scene.Entities.Count);
-    }
-
-    static int FreePort()
-    {
-        var listener = new TcpListener(IPAddress.Loopback, 0);
-        listener.Start();
-        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
-        listener.Stop();
-        return port;
-    }
-
-    public async ValueTask DisposeAsync()
-    {
-        if (_host is { HasExited: false })
-        {
-            _host.Kill();
-            await _host.WaitForExitAsync();
-        }
-        _host?.Dispose();
-    }
 }

@@ -48,9 +48,17 @@ The editor is in `src/editor`. Only the application project references Avalonia.
 | `Cinnabar.Editor.Tools` | The viewport's tools: the editor camera, the gizmo's hit test and drag math, snapping, and the pose edits that a drag makes. The node canvas's geometry and hit test. |
 | `Cinnabar.Editor.Commands` | The command registry. The ribbon, menus, shortcuts and the command palette all run commands from it. |
 | `Cinnabar.Editor` | The Avalonia application: the shell, docking, the ribbon, the panels and the viewport. |
-| `Cinnabar.Editor.Tests` | Tests for the libraries and for the shell, which has no controls of its own, so a test can build one without a window. |
+| `Cinnabar.Editor.Tests` | Tests for the libraries and for the shell, which has no controls of its own, so a test can build one without a window, and tests of the link against a real host (see [Host tests](#host-tests)). |
 
 `just editor` builds the solution with `dotnet build`, `just edit` builds everything and starts the editor with the game's `scenes/main.scene`, and `just test` runs the editor's tests with the engine's. Build output goes to `build/obj/dotnet`. The editor's settings are in `%LOCALAPPDATA%\cinnabar\editor`.
+
+### Host tests
+
+The host tests start a host from `build/dev` for each test, with `mygame.dll`, the sample's `project.settings` and the cooked content, and talk to it over the editor link as the editor does. A test is skipped when its host or the game is not built. Run `just build` first, so that the game and its content are current.
+
+- **`HostTests`** has the tests that run on every host: the handshake, a refused version and a resized viewport; the document model, which is a scene that replaces the game's world, the world and a watched entity's values, and edits with the problems that come back; the modes, in which the world runs only in Play and in a paused step; and the picks that the game answers without drawing, of a closed viewport, of the Game view and of a scene view without a camera.
+- **`HostLinkTests`** runs them on `host.exe`, which renders with D3D12, with the tests that need a GPU: those that read the shared frames, the picks that find what was drawn, bakes, previews, the GPU's profile, the sample's input, animation and agents. They are skipped when the host has no GPU.
+- **`NullHostTests`** runs them on `null-host.exe`, the host on the null GPU backend (see [GPU](../gpu/interface.md#packages)), which `just null-host` builds and `just test` builds first. It needs no GPU, so these tests run on any machine. The null backend runs no shaders, and its shared mode shares nothing, so a pick in a view that draws gets no answer there. Its own test checks that the pick's passes pass the null backend's validation, and that the frames go on.
 
 ## Crash recovery
 
