@@ -1,7 +1,9 @@
 // Marks the virtual shadow map's pages (see docs/rendering/lighting-and-shadows.md#virtual-shadow-maps): each level's
 // bits of the pages that the frame reads. One phase rebuilds each pixel of the prepass from its depth, and marks the
 // pages of its lookup's block. The other marks through the view's frustum, from a coarse grid of points, at levels
-// coarser than their footprints, for what has no prepass: the fog, the transparent surfaces and the sprites.
+// coarser than their footprints, for what has no prepass: the fog, the transparent surfaces and the sprites. With soft
+// shadows (see virtual_soft_shadow in material_lighting.hlsli), a pixel also marks the pages that its rays may read: as
+// far around its block as a ray's end strays from the pixel, the light's size times the rays' length.
 #define MATERIAL_PUSH Virtual_Mark_Push
 // Matches Virtual_Mark_Push in lib/engine/render/virtual_shadows.odin. forward is the view's axis, and the projections
 // are the x and y scales and the near plane of the camera's and of the view model's.
@@ -40,9 +42,9 @@ void mark_page(RWByteAddressBuffer requests, uint level, uint2 page) {
 	}
 }
 
-// mark marks a lookup's pages at the first level from level on whose valid rectangle holds its block. Matches
-// virtual_mark in virtual_shadows.odin.
-void mark(float3 p, uint level) {
+// mark marks a lookup's pages at the first level from level on whose valid rectangle holds its block, and reach meters
+// around it, clamped to the rectangle. Matches virtual_mark in virtual_shadows.odin.
+void mark(float3 p, uint level, float reach) {
 	RWByteAddressBuffer requests = cn_rw_buffer(push.requests);
 	for (; level < frame.virtual_levels; level++) {
 		Shadow_View view = virtual_view(level);
@@ -52,16 +54,14 @@ void mark(float3 p, uint level) {
 		if (!virtual_in_rect(view, low, high)) {
 			continue;
 		}
-		uint2 low_page = uint2(low) >> VIRTUAL_PAGE_SHIFT;
-		uint2 high_page = uint2(high) >> VIRTUAL_PAGE_SHIFT;
-		mark_page(requests, level, low_page);
-		if (high_page.x != low_page.x) {
-			mark_page(requests, level, uint2(high_page.x, low_page.y));
-		}
-		if (high_page.y != low_page.y) {
-			mark_page(requests, level, uint2(low_page.x, high_page.y));
-			if (high_page.x != low_page.x) {
-				mark_page(requests, level, high_page);
+		int texels = int(ceil(reach / view.texel));
+		int2 lower = int2(view.rect.xy * float(VIRTUAL_SIZE));
+		int2 upper = int2(view.rect.zw * float(VIRTUAL_SIZE)) - 1;
+		uint2 low_page = uint2(max(low - texels, lower)) >> VIRTUAL_PAGE_SHIFT;
+		uint2 high_page = uint2(min(high + texels, upper)) >> VIRTUAL_PAGE_SHIFT;
+		for (uint y = low_page.y; y <= high_page.y; y++) {
+			for (uint x = low_page.x; x <= high_page.x; x++) {
+				mark_page(requests, level, uint2(x, y));
 			}
 		}
 		return;
@@ -78,7 +78,7 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 		float z = push.projection.z * pow(push.reach / push.projection.z, (float(id.z) + 0.5) / float(VOLUME_GRID.z));
 		float2 xy = ndc / push.projection.xy * z;
 		float3 p = right * xy.x + up * xy.y + push.forward.xyz * z;
-		mark(p, min(virtual_footprint_level(length(p)) + VOLUME_LEVELS, frame.virtual_levels - 1));
+		mark(p, min(virtual_footprint_level(length(p)) + VOLUME_LEVELS, frame.virtual_levels - 1), 0);
 		return;
 	}
 	if (any(id.xy >= push.size)) {
@@ -95,5 +95,6 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	float2 ndc = float2((id.x + 0.5) / push.size.x * 2 - 1, 1 - (id.y + 0.5) / push.size.y * 2) - frame.jitter;
 	float2 xy = ndc / projection.xy * z;
 	float3 p = right * xy.x + up * xy.y + push.forward.xyz * z;
-	mark(p, virtual_footprint_level(length(p)));
+	// A ray's end strays from the pixel by the light's size times the rays' length; without soft shadows, the size is 0.
+	mark(p, virtual_footprint_level(length(p)), frame.virtual_rays > 0 ? frame.virtual_soft_size * frame.virtual_ray_length : 0);
 }

@@ -203,7 +203,13 @@ struct Frame_Constants {
 	uint shadow_depth_sampler;
 	uint shadow_noise;
 	uint shadow_noise_slice;
-	uint2 soft_padding;
+	// The virtual shadow map's soft shadows (see virtual_soft_shadow in material_lighting.hlsli): its light's size, 0
+	// without them, how far a ray reaches in meters, each pixel's rays and each ray's steps.
+	float virtual_soft_size;
+	float virtual_ray_length;
+	uint virtual_rays;
+	uint virtual_steps;
+	uint2 smrt_padding;
 };
 CN_PASS_CONSTANTS(Frame_Constants, frame);
 

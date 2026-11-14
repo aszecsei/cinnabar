@@ -30,7 +30,8 @@ Shadow_Filter :: enum u32 {
 // Shadow_Params are the shadow maps at a level. The atlas is square. Cascades take cells of cell pixels; spot lights
 // and point lights' faces take slots of slot pixels, several to a cell. A level with virtual_levels has a virtual shadow
 // map, whose pool is pool_pages of VIRTUAL_PAGE_TEXELS on a side. virtual_bias moves its levels: above 0 is coarser.
-// A level with soft has percentage-closer soft shadows for the atlas's lights that have a size (see Soft_Params).
+// A level with soft has percentage-closer soft shadows for the atlas's lights that have a size (see Soft_Params), and a
+// level with smrt rays shadow map ray tracing for the virtual shadow map's light (see Smrt_Params).
 Shadow_Params :: struct {
 	atlas:          int,
 	cell:           int,
@@ -41,6 +42,17 @@ Shadow_Params :: struct {
 	pool_pages:     [2]u32,
 	virtual_bias:   f32,
 	soft:           Soft_Params,
+	smrt:           Smrt_Params,
+}
+
+// Smrt_Params are the virtual shadow map's soft shadows at a level, shadow map ray tracing (see
+// docs/rendering/lighting-and-shadows.md#the-virtual-shadow-map): each pixel's rays toward the light's disk, each ray's
+// steps through the map's depth, and how far a ray reaches, in meters. A level with no rays keeps the comparison taps.
+// Match virtual_soft_shadow in material_lighting.hlsli.
+Smrt_Params :: struct {
+	rays:   u32,
+	steps:  u32,
+	length: f32,
 }
 
 // Soft_Params are the percentage-closer soft shadows of the atlas's spot, point and area lights at a level (see
@@ -57,9 +69,12 @@ Soft_Params :: struct {
 SHADOW_PARAMS := [Quality_Level]Shadow_Params {
 	.Low    = {atlas = 2048, cell = 1024, slot = 512, cascades = 2, filter = .Taps_1},
 	.Medium = {atlas = 4096, cell = 1024, slot = 512, cascades = 3, filter = .Taps_4, virtual_levels = 12, pool_pages = {32, 32}, virtual_bias = 1, soft = {search = 4, taps = 8, radius = 16}},
-	.High   = {atlas = 4096, cell = 1024, slot = 512, cascades = 4, filter = .Taps_4, virtual_levels = 12, pool_pages = {64, 32}, soft = {search = 8, taps = 16, radius = 16}},
-	.Ultra  = {atlas = 8192, cell = 2048, slot = 1024, cascades = 4, filter = .Taps_9, virtual_levels = 13, pool_pages = {64, 64}, soft = {search = 8, taps = 24, radius = 32}},
+	.High   = {atlas = 4096, cell = 1024, slot = 512, cascades = 4, filter = .Taps_4, virtual_levels = 12, pool_pages = {64, 32}, soft = {search = 8, taps = 16, radius = 16}, smrt = {rays = 4, steps = 6, length = SMRT_LENGTH}},
+	.Ultra  = {atlas = 8192, cell = 2048, slot = 1024, cascades = 4, filter = .Taps_9, virtual_levels = 13, pool_pages = {64, 64}, soft = {search = 8, taps = 24, radius = 32}, smrt = {rays = 8, steps = 8, length = SMRT_LENGTH}},
 }
+// How far the virtual shadow map's rays reach toward the light, in meters. A caster farther than this casts a penumbra
+// as wide as one this far.
+SMRT_LENGTH :: 20
 // By default, the cascades cover the view to this depth, in meters, split between even and exponential by this much
 // (see Shadows).
 SHADOW_DISTANCE :: 100
@@ -250,6 +265,8 @@ Shadow_Frame :: struct {
 	params:         Shadow_Params,
 	mask_lights:    [MAX_MASK_LIGHTS]u32,
 	mask_count:     int,
+	// The virtual shadow map's light's size, where the level traces its soft shadows (see Smrt_Params), or 0.
+	virtual_size:   f32,
 	// The soft channels, a bit each, and the denoiser's textures, which a frame with soft channels has.
 	mask_soft:      u32,
 	mask_raw:       Texture,
@@ -393,6 +410,9 @@ assign_shadow_views :: proc(f: ^Frame, trace: bool, virtual := false, contact :=
 			}
 			if virtual {
 				record.flags += {.Virtual_Shadow}
+				if sf.params.smrt.rays > 0 {
+					sf.virtual_size = light_size(record^)
+				}
 				add_virtual_levels(f, sf, record.direction)
 			} else {
 				first_slot = sf.params.cascades * slots_per_cell(sf.params)
@@ -441,21 +461,31 @@ assign_shadow_views :: proc(f: ^Frame, trace: bool, virtual := false, contact :=
 	}
 }
 
-// soft_shadow_constants fills the frame's constants for the atlas's soft shadows, at a level that has them. The blue
-// noise turns the taps of each pixel, and each frame takes its next slice when temporal AA or an upscaler averages
-// them over time; without either, the noise stays where it is, and before it is resident, every pixel's taps take
-// the same turn.
+// soft_shadow_constants fills the frame's constants for the soft shadows of the atlas and of the virtual shadow map, at a
+// level that has them. The blue noise turns the taps and the rays of each pixel, and each frame takes its next slice
+// when temporal AA or an upscaler averages them over time; without either, the noise stays where it is, and before it
+// is resident, every pixel takes the same turn.
 @(private)
 soft_shadow_constants :: proc(constants: ^Frame_Constants, f: ^Frame) {
 	r := f.renderer
-	soft := f.shadows.params.soft
-	if soft.taps == 0 {
+	sf := f.shadows
+	soft, smrt := sf.params.soft, sf.params.smrt
+	traces := sf.virtual_size > 0 && sf.virtual.count > 0 && smrt.rays > 0
+	if soft.taps == 0 && !traces {
 		return
 	}
-	constants.shadow_soft_search = soft.search
-	constants.shadow_soft_taps = soft.taps
-	constants.shadow_soft_radius = soft.radius
-	constants.shadow_depth_sampler = gpu.sampler_index(r.post.sampler)
+	if soft.taps > 0 {
+		constants.shadow_soft_search = soft.search
+		constants.shadow_soft_taps = soft.taps
+		constants.shadow_soft_radius = soft.radius
+		constants.shadow_depth_sampler = gpu.sampler_index(r.post.sampler)
+	}
+	if traces {
+		constants.virtual_soft_size = sf.virtual_size
+		constants.virtual_rays = smrt.rays
+		constants.virtual_steps = smrt.steps
+		constants.virtual_ray_length = smrt.length
+	}
 	if noise := blue_noise(r); noise != {} {
 		temporal := f.post != nil && (f.post.temporal || f.post.upscaler != {})
 		constants.shadow_noise = gpu.read_index(noise)

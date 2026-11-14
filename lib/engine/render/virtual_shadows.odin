@@ -347,14 +347,16 @@ page_index :: proc(level: int, page: [2]i32) -> int {
 	return level * VIRTUAL_LEVEL_PAGES + int(page.y) * VIRTUAL_PAGES + int(page.x)
 }
 
-// virtual_mark marks a lookup's pages in a level's bits, for a point at the first level from level on whose valid
-// rectangle holds its block, and returns that level, or -1. Matches mark in virtual_shadow_mark.hlsl.
+// virtual_mark marks a lookup's pages in a level's bits, and reach meters around them for the soft shadows' rays, for a
+// point at the first level from level on whose valid rectangle holds its block, and returns that level, or -1. Matches
+// mark in virtual_shadow_mark.hlsl.
 virtual_mark :: proc(
 	requests: []u32,
 	views: []Shadow_View,
 	filter: Shadow_Filter,
 	p: [3]f32,
 	level: int,
+	reach: f32 = 0,
 ) -> int {
 	for l in level ..< len(views) {
 		texel, _ := virtual_project(views[l], p)
@@ -364,6 +366,12 @@ virtual_mark :: proc(
 		if !virtual_in_rect(views[l], low, high) {
 			continue
 		}
+		// The soft shadows' rays read as far around the block as reach, within the valid rectangle.
+		texels := i32(math.ceil(reach / views[l].texel))
+		lower := [2]i32{i32(views[l].rect.x * VIRTUAL_SIZE), i32(views[l].rect.y * VIRTUAL_SIZE)}
+		upper := [2]i32{i32(views[l].rect.z * VIRTUAL_SIZE), i32(views[l].rect.w * VIRTUAL_SIZE)} - 1
+		low = {max(low.x - texels, lower.x), max(low.y - texels, lower.y)}
+		high = {min(high.x + texels, upper.x), min(high.y + texels, upper.y)}
 		for y in low.y / VIRTUAL_PAGE_TEXELS ..= high.y / VIRTUAL_PAGE_TEXELS {
 			for x in low.x / VIRTUAL_PAGE_TEXELS ..= high.x / VIRTUAL_PAGE_TEXELS {
 				index := page_index(l, {x, y})

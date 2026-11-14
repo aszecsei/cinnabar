@@ -221,6 +221,79 @@ float soft_shadow_map(uint view_index, float3 p, float3 normal, float3 to_light,
 	}
 	return lit / frame.shadow_soft_taps;
 }
+
+// virtual_depth_at is the virtual shadow map's depth over a point relative to the camera, from the first level from
+// level on that has the point's page, with the point's own depth there, and that level's meters per unit of depth and
+// its texel. It is false with no page in any level.
+bool virtual_depth_at(float3 p, uint level, out float stored, out float z, out float meters, out float texel) {
+	ByteAddressBuffer table = cn_buffer(frame.virtual_table);
+	stored = 0;
+	z = 0;
+	meters = 0;
+	texel = 0;
+	for (; level < frame.virtual_levels; level++) {
+		Shadow_View view = virtual_view(level);
+		float3 at = virtual_project(view, p);
+		int2 t = int2(floor(at.xy));
+		if (!virtual_in_rect(view, t, t)) {
+			continue;
+		}
+		uint page = virtual_block_page(table, level, t >> VIRTUAL_PAGE_SHIFT);
+		if (page == VIRTUAL_NO_PAGE) {
+			continue;
+		}
+		int2 local = t & int(VIRTUAL_PAGE_TEXELS - 1);
+		stored = asfloat(cn_uint_texture(frame.virtual_pool).Load(int3(int2(virtual_physical(page)) + local, 0)));
+		z = at.z;
+		meters = 1 / max(length(view.rows[2].xyz), 1e-9);
+		texel = view.texel;
+		return true;
+	}
+	return false;
+}
+
+// virtual_soft_shadow is how lit a point is by the light of the virtual shadow map, by shadow map ray tracing (SMRT; see
+// docs/rendering/lighting-and-shadows.md#the-virtual-shadow-map), for a light whose angular radius has a tangent of
+// size: frame.virtual_rays rays from the point toward points of the light's disk, each marching frame.virtual_steps
+// steps through the map's depth out to frame.virtual_ray_length meters, the steps nearer together near the point. A
+// step is in shadow when it is behind the map's depth by more than a thickness of two texels and 2% of its distance,
+// against the map's texels and the surfaces' own slopes. Behind the map's depth is solid, which is how the map is
+// extrapolated behind a blocker: a ray that passes behind a thin caster is blocked, whatever its steps' spacing. The
+// last step is at the ray's end, so a caster farther than the rays reach still casts, with the penumbra of one at
+// their reach. The point moves as virtual_find moves it, and the steps read the level that it found, or a coarser one
+// where the page is missing. The blue noise turns the rays' disk and moves their steps for each pixel.
+float virtual_soft_shadow(float3 p, float3 normal, float3 to_light, float size, float2 pixel) {
+	Virtual_Hit hit;
+	if (!virtual_find(p, normal, to_light, hit)) {
+		return 1;
+	}
+	Shadow_View view = virtual_view(hit.level);
+	float cos_light = dot(normal, to_light);
+	float sin_light = sqrt(saturate(1 - cos_light * cos_light));
+	float3 q = p + to_light * (view.texel * 0.5) + normal * (view.texel * 0.5 * sin_light);
+	float3 t1 = normalize(cross(abs(to_light.y) < 0.99 ? float3(0, 1, 0) : float3(1, 0, 0), to_light));
+	float3 t2 = cross(to_light, t1);
+	float2 noise = frame.shadow_noise != 0 ? blue_noise(frame.shadow_noise, uint2(pixel), frame.shadow_noise_slice) : 0.5;
+	float angle = noise.x * 6.28318531;
+	float2 turn = float2(cos(angle), sin(angle));
+	float lit = 0;
+	for (uint r = 0; r < frame.virtual_rays; r++) {
+		float2 d = vogel(r, frame.virtual_rays, turn) * size;
+		float3 direction = normalize(to_light + t1 * d.x + t2 * d.y);
+		bool blocked = false;
+		for (uint s = 0; s < frame.virtual_steps && !blocked; s++) {
+			float u = (s + (s + 1 == frame.virtual_steps ? 1 : noise.y)) / frame.virtual_steps;
+			float t = frame.virtual_ray_length * u * u;
+			float stored, z, meters, texel;
+			if (!virtual_depth_at(q + direction * t, hit.level, stored, z, meters, texel)) {
+				continue;
+			}
+			blocked = (stored - z) * meters > 2 * texel + 0.02 * t;
+		}
+		lit += blocked ? 0 : 1;
+	}
+	return lit / frame.virtual_rays;
+}
 #endif
 
 // shadow_view is the shadow map view of a light at a point at a view depth, or -1 for none: a directional light's first
@@ -278,8 +351,16 @@ float light_shadow(Light_Record light, float3 p, float3 normal, float3 to_light,
 #endif
 	}
 #if MATERIAL_SCREEN_SHADOWS && !MATERIAL_TRANSPARENT
-	// The opaque surfaces take a spot, a point or an area light's map with soft shadows, as wide as its size.
+	// The opaque surfaces take a spot, a point or an area light's map with soft shadows, as wide as its size, and the
+	// virtual shadow map's light by ray tracing the map.
 	float size = light_size(light);
+	if (frame.virtual_rays != 0 && size > 0 && (light.flags & LIGHT_VIRTUAL_SHADOW) != 0) {
+		float soft = virtual_soft_shadow(p, normal, to_light, size, position.xy);
+		if ((light.flags & LIGHT_CONTACT_SHADOW) != 0) {
+			soft *= load_screen(push.shadow_mask, position.xy).r;
+		}
+		return soft;
+	}
 	if (frame.shadow_soft_taps != 0 && size > 0 && light.type != LIGHT_DIRECTIONAL) {
 		int soft_view = shadow_view(light, p, 0);
 		return soft_view < 0 ? 1 : soft_shadow_map(uint(soft_view), p, normal, to_light, size, position.xy);

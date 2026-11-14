@@ -457,6 +457,33 @@ culling_keeps_only_what_reaches_a_page_that_was_allocated :: proc(t: ^testing.T)
 }
 
 @(test)
+marking_for_soft_shadows_reaches_the_pages_around_a_block :: proc(t: ^testing.T) {
+	c := test_camera()
+	views := test_views(c)
+	// The middle of a page, as in the test below, which marks that page alone.
+	p := c.forward * 10
+	level := virtual_footprint_level(c.selection, linalg.length(p))
+	texel, _ := virtual_project(views[level], p)
+	middle :=
+		[2]f32{math.floor(texel.x / VIRTUAL_PAGE_TEXELS) + 0.5, math.floor(texel.y / VIRTUAL_PAGE_TEXELS) + 0.5} *
+		VIRTUAL_PAGE_TEXELS
+	direction := linalg.normalize(TEST_LIGHT)
+	right, up := light_basis(direction)
+	p += right * ((middle.x - texel.x) * views[level].texel) - up * ((middle.y - texel.y) * views[level].texel)
+	// A reach of half a page or less stays on it; one of a page reaches its eight neighbours too.
+	Case :: struct {
+		pages:  f32,
+		marked: int,
+	}
+	for k in ([]Case{{0.4, 1}, {1, 9}}) {
+		requests, _ := test_buffers(len(views))
+		meters := k.pages * VIRTUAL_PAGE_TEXELS * views[level].texel
+		testing.expect_value(t, virtual_mark(requests, views, .Taps_4, p, level, meters), level)
+		testing.expect_value(t, count_marked(requests), k.marked)
+	}
+}
+
+@(test)
 marking_sets_the_one_page_of_a_block_inside_a_page :: proc(t: ^testing.T) {
 	c := test_camera()
 	views := test_views(c)
