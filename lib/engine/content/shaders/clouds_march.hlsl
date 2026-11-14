@@ -9,8 +9,10 @@
 // The march's step is at least the layer's thickness over this, so a short segment is not oversampled; a long one is
 // the segment over the level's steps, so the budget always reaches its end.
 static const float FINE_STEPS = 64;
-// After this many empty samples in a row the march doubles its step, until it finds cloud again.
+// After this many empty samples in a row the march doubles its step at each empty sample, up to EMPTY_MAX_STEPS fine
+// steps, until it finds cloud again.
 static const uint EMPTY_SAMPLES = 3;
+static const float EMPTY_MAX_STEPS = 8;
 // The march stops behind this much cloud.
 static const float MIN_TRANSMITTANCE = 0.01;
 
@@ -126,10 +128,13 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 		float thickness = clouds.top - clouds.bottom;
 		float step = max((t1 - t0) / float(clouds.steps), thickness / FINE_STEPS);
 		float t = t0 + jitter(id.xy) * step;
+		// The last empty sample, which the march steps back to when a coarse step finds cloud, and where that step found
+		// it: the march keeps the fine step until it is past there.
+		float last_empty = t;
+		float found = -1;
 		uint empty = 0;
 		bool coarse = false;
 		for (uint i = 0; i < clouds.steps && t <= t1; i++) {
-			float dt = coarse ? 2 * step : step;
 			float3 p = d * t;
 			float h = height_at(h0, mu, t, R);
 			float hf = saturate((h - clouds.bottom) / thickness);
@@ -141,20 +146,23 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 			}
 			if (base <= 0.01) {
 				empty++;
-				if (empty >= EMPTY_SAMPLES) {
-					coarse = true;
-				}
-				t += dt;
+				last_empty = t;
+				// A whole number of fine steps, so the march stays on the fine steps' grid.
+				float grow = empty >= EMPTY_SAMPLES && t > found + 0.5 * step ? min(exp2(float(empty - EMPTY_SAMPLES + 1)), EMPTY_MAX_STEPS) : 1;
+				coarse = grow > 1;
+				t += step * grow;
 				continue;
 			}
 			if (coarse) {
-				// Back to the fine step, from the sample before this one.
+				// A coarse step found cloud: back to the fine step after the last empty sample.
 				coarse = false;
+				found = t;
 				empty = 0;
-				t -= step;
+				t = last_empty + step;
 				continue;
 			}
 			empty = 0;
+			float dt = step;
 			float density = w.far < 1 ? cloud_detail(q, hf, base, w.far) : base;
 			float sigma = cloud_sigma(density, w.precipitation, t);
 			if (sigma > 0) {
