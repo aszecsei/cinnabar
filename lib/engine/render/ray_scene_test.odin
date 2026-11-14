@@ -121,13 +121,15 @@ a_material_has_a_hit_pipeline_only_with_ray_query :: proc(t: ^testing.T) {
 	}
 }
 
-// What a frame of the ray scene did: how many meshes' structures it built, and whether it refit the skinned entity's
-// structure or built it.
+// What a frame of the ray scene did: how many meshes' structures it built, sized and compacted, and whether it refit the
+// skinned entity's structure or built it.
 @(private = "file")
 Accel_Frame :: struct {
-	builds:   int,
-	refit:    bool,
-	executed: bool,
+	builds:      int,
+	sized:       int,
+	compactions: int,
+	refit:       bool,
+	executed:    bool,
 }
 
 // run_accel_frame builds a frame's ray scene over the residency's mesh and the skinned entity in slot 0, and executes
@@ -167,6 +169,7 @@ run_accel_frame :: proc(
 	if request_ray_scene(f) {
 		add_ray_scene_passes(f)
 		run.builds, run.refit = len(f.ray_scene.builds), sf.skin.refits[0].update
+		run.sized, run.compactions = len(f.ray_scene.sized), len(f.ray_scene.compactions)
 	}
 	run.executed = execute(&g)
 	free_all(platform.frame_allocator)
@@ -243,11 +246,8 @@ a_failed_frame_builds_the_accels_again :: proc(t: ^testing.T) {
 	testing.expect(t, mesh.accel != {} && skin.accel != {})
 	testing.expect_value(t, run.builds, 1)
 	testing.expect(t, !run.refit, "the first frame refit a structure that was never built")
-	testing.expect(
-		t,
-		!mesh.accel_built && !skin.accel_built,
-		"the failed frame's structures count as built",
-	)
+	_, unbuilt := mesh.accel_state.(Accel_Unbuilt)
+	testing.expect(t, unbuilt && !skin.accel_built, "the failed frame's structures count as built")
 
 	// The next builds both again, and the null backend validates the builds.
 	run = run_accel_frame(r, &cache, indices, null.submit)
@@ -258,13 +258,121 @@ a_failed_frame_builds_the_accels_again :: proc(t: ^testing.T) {
 		!run.refit,
 		"the frame after a failed one refit a structure that was never built",
 	)
-	testing.expect(t, mesh.accel_built && skin.accel_built)
+	_, built := mesh.accel_state.(Accel_Built)
+	testing.expect(t, built && skin.accel_built)
 
 	// Then the mesh's is done, and the skinned entity's refits.
 	run = run_accel_frame(r, &cache, indices, null.submit)
 	testing.expect(t, run.executed, "the frame did not execute")
 	testing.expect_value(t, run.builds, 0)
 	testing.expect(t, run.refit, "a built structure did not refit")
+}
+
+// A built mesh's structure is sized, then compacted, and the mesh's instances use the compacted one from the frame
+// after the compaction executed. A frame that fails leaves each step to the next frame. A mesh whose compacted size is
+// 0 keeps its structure, and a skinned entity's structure, which refits, is never compacted.
+@(test)
+a_built_mesh_accel_is_compacted :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	arena: virtual.Arena
+	testing.expect(t, virtual.arena_init_growing(&arena) == nil)
+	defer virtual.arena_destroy(&arena)
+	testing.expect(t, jobs.init(2))
+	defer jobs.shutdown()
+	testing.expect(t, null.init(nil, {64, 32}))
+	defer null.shutdown()
+	platform := core.Platform_API {
+		frame_allocator      = virtual.arena_allocator(&arena),
+		heap_allocator       = runtime.heap_allocator(),
+		jobs_run             = jobs.run,
+		jobs_wait            = jobs.wait,
+		gpu_submit           = null.submit,
+		gpu_upload           = null.upload,
+		gpu_create_buffer    = null.create_buffer,
+		gpu_destroy_buffer   = null.destroy_buffer,
+		gpu_read_buffer      = null.read_buffer,
+		gpu_create_accel     = null.create_accel,
+		gpu_destroy_accel    = null.destroy_accel,
+		gpu_destroy_texture  = null.destroy_texture,
+		gpu_destroy_pipeline = null.destroy_pipeline,
+	}
+	r := new(Renderer)
+	defer free(r)
+	r.platform = &platform
+	r.caps.ray_query = true
+	r.residency.platform = &platform
+	positions := platform.gpu_create_buffer({size = 36, usage = {.Storage}, label = "positions"}, nil)
+	indices := platform.gpu_create_buffer({size = 12, usage = {.Index}, label = "indices"}, nil)
+	posed := platform.gpu_create_buffer({size = 36, usage = {.Storage}, label = "posed positions"}, nil)
+	defer for b in ([]gpu.Buffer{positions, indices, posed}) {
+		platform.gpu_destroy_buffer(b)
+	}
+	// Two ready meshes of one triangle, and a skinned entity of the first.
+	r.residency.count = 2
+	for &e in r.residency.entries[:2] {
+		e.kind, e.ready = .Mesh, true
+		m := &e.current.mesh
+		m.positions, m.indices, m.vertex_count, m.index_count, m.index_format = positions, indices, 3, 3, .U32
+	}
+	mesh, kept := &r.residency.entries[0].current.mesh, &r.residency.entries[1].current.mesh
+	r.scene.skins.instances = make(map[u32]Skinned_Instance, platform.heap_allocator)
+	defer delete(r.scene.skins.instances)
+	r.scene.skins.instances[0] = {
+		positions    = posed,
+		vertex_count = 3,
+	}
+	skin_accel(&r.scene.skins, &platform, 0, mesh)
+	skin := &r.scene.skins.instances[0]
+	defer platform.gpu_destroy_accel(skin.accel)
+	defer change_mesh_accel(&r.residency, kept, Accel_Destroyed{})
+	defer change_mesh_accel(&r.residency, mesh, Accel_Destroyed{})
+	defer ray_scene_destroy(&r.ray_scene, &platform)
+	cache: Texture_Cache
+	defer cache_destroy(&cache, &platform)
+
+	// The first frame builds the structures, and the next writes their compacted sizes. A failed frame copies none.
+	run := run_accel_frame(r, &cache, indices, null.submit)
+	testing.expect(t, run.executed && run.builds == 2 && run.sized == 0)
+	run = run_accel_frame(r, &cache, indices, fail_submit)
+	testing.expect_value(t, run.sized, 2)
+	_, built := mesh.accel_state.(Accel_Built)
+	testing.expect(t, built, "a failed frame's sizes were taken")
+	testing.expect(t, r.ray_scene.compaction.copied == {}, "a failed frame copied into a slot")
+	run = run_accel_frame(r, &cache, indices, null.submit)
+	testing.expect(t, run.executed && run.sized == 2 && run.compactions == 0)
+	sizing, is_sizing := mesh.accel_state.(Accel_Sizing)
+	_, kept_sizing := kept.accel_state.(Accel_Sizing)
+	testing.expect(t, is_sizing && kept_sizing, "the meshes do not wait for their sizes")
+	testing.expect(t, sizing.slot in r.ray_scene.compaction.copied)
+
+	// The null backend writes no sizes, so the test writes the first mesh's. The next frame makes its compaction's
+	// destination and copies into it, but fails, so the mesh keeps its structure and the next frame copies again.
+	data, ready := null.read_buffer(r.ray_scene.compaction.readbacks[sizing.slot])
+	testing.expect(t, ready)
+	([^]u64)(raw_data(data))[sizing.index] = 32
+	original := mesh.accel
+	run = run_accel_frame(r, &cache, indices, fail_submit)
+	testing.expect_value(t, run.compactions, 1)
+	compacting, is_compacting := mesh.accel_state.(Accel_Compacting)
+	testing.expect(t, is_compacting && mesh.accel == original, "a failed frame swapped the structures")
+	_, kept_compacted := kept.accel_state.(Accel_Compacted)
+	testing.expect(t, kept_compacted && kept.accel != {}, "a mesh with a compacted size of 0 lost its structure")
+	testing.expect(t, sizing.slot not_in r.ray_scene.compaction.copied, "a slot that was read stays copied")
+
+	// The next frame executes: the mesh's instances use the compacted structure, and the built one goes.
+	run = run_accel_frame(r, &cache, indices, null.submit)
+	testing.expect(t, run.executed && run.compactions == 1)
+	_, compacted := mesh.accel_state.(Accel_Compacted)
+	testing.expect(t, compacted && mesh.accel == compacting.compacted)
+	// The compacted structure, the kept one, the skinned entity's and the scene's.
+	stats := null.stats()
+	testing.expect_value(t, stats.accels, 4)
+	testing.expect_value(t, stats.bottom_accel_memory, 32 + 2 * null.ACCEL_TRIANGLE_BYTES)
+	testing.expect_value(t, stats.bottom_accel_memory_uncompacted, 3 * null.ACCEL_TRIANGLE_BYTES)
+
+	// Then there is nothing left to do, and the skinned entity's structure refits as it did.
+	run = run_accel_frame(r, &cache, indices, null.submit)
+	testing.expect(t, run.executed && run.builds == 0 && run.sized == 0 && run.compactions == 0 && run.refit)
 }
 
 @(private = "file")

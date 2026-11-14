@@ -132,6 +132,10 @@ translate :: proc(list: ^d3d.IGraphicsCommandList7, cb: gpu.Command_Buffer, fram
 			list->SetGraphicsRoot32BitConstant(ROOT_DRAW_ID, 0, 0)
 		case .Build_Accel:
 			build_accel(list, gpu.payload(p, gpu.Build_Accel))
+		case .Write_Accel_Size:
+			write_accel_size(list, gpu.payload(p, gpu.Write_Accel_Size))
+		case .Compact_Accel:
+			compact_accel(list, gpu.payload(p, gpu.Compact_Accel))
 		case .Copy_Buffer:
 			c := gpu.payload(p, gpu.Copy_Buffer)
 			dest, source := buffer_entry(c.dest), buffer_entry(c.source)
@@ -356,6 +360,8 @@ SYNC := [gpu.Sync]d3d.BARRIER_SYNC_FLAG {
 	.Build_Accel      = .BUILD_RAYTRACING_ACCELERATION_STRUCTURE,
 	.Ray_Tracing      = .RAYTRACING,
 	.Copy             = .COPY,
+	.Accel_Info       = .EMIT_RAYTRACING_ACCELERATION_STRUCTURE_POSTBUILD_INFO,
+	.Copy_Accel       = .COPY_RAYTRACING_ACCELERATION_STRUCTURE,
 }
 
 @(private = "file")

@@ -42,6 +42,11 @@ TLAS :: Accel_Struct{index = 2, generation = 1}
 @(private = "file")
 STALE_BLAS :: Accel_Struct{index = 3, generation = 1}
 @(private = "file")
+COMPACTABLE_BLAS :: Accel_Struct{index = 4, generation = 1}
+// COMPACTABLE_BLAS's compaction's destination.
+@(private = "file")
+COMPACTED_BLAS :: Accel_Struct{index = 5, generation = 1}
+@(private = "file")
 UPSCALER :: Upscaler{index = 0, generation = 1}
 
 @(private = "file")
@@ -101,6 +106,10 @@ RESOURCES :: Resources {
 			return {kind = .Top, max_instances = 2, inputs_valid = true}, true
 		case STALE_BLAS:
 			return {kind = .Bottom}, true
+		case COMPACTABLE_BLAS:
+			return {kind = .Bottom, flags = {.Allow_Compaction}, inputs_valid = true}, true
+		case COMPACTED_BLAS:
+			return {kind = .Bottom, compact_source = COMPACTABLE_BLAS, inputs_valid = true}, true
 		}
 		return {}, false
 	},
@@ -794,6 +803,80 @@ validate_accel_builds :: proc(t: ^testing.T) {
 	bad = shared
 	bad.indices, bad.index_count = INDICES, 4
 	testing.expect_value(t, validate_accel_desc({kind = .Bottom, geometries = {bad}}), Desc_Error.Bad_Geometry)
+}
+
+@(test)
+validate_accel_compactions :: proc(t: ^testing.T) {
+	arena: virtual.Arena
+	testing.expect(t, virtual.arena_init_growing(&arena) == nil)
+	defer virtual.arena_destroy(&arena)
+	allocator := virtual.arena_allocator(&arena)
+
+	Case :: struct {
+		record: proc(cb: ^Command_Buffer),
+		queue:  Queue,
+		err:    Validation_Error,
+	}
+	cases := []Case {
+		// INDIRECT is a Storage buffer of 96 bytes.
+		{
+			proc(cb: ^Command_Buffer) {
+				cmd_write_accel_size(cb, COMPACTABLE_BLAS, INDIRECT, 88)
+				barrier := Accel_Barrier {
+					accel         = COMPACTED_BLAS,
+					sync_before   = {.Copy_Accel},
+					access_before = {.Accel_Write},
+					sync_after    = {.Build_Accel},
+					access_after  = {.Accel_Read},
+				}
+				cmd_compact_accel(cb, COMPACTED_BLAS, COMPACTABLE_BLAS)
+				cmd_barriers(cb, nil, nil, {barrier})
+			},
+			.Compute,
+			.None,
+		},
+		{proc(cb: ^Command_Buffer) {cmd_write_accel_size(cb, {index = 9, generation = 1}, INDIRECT, 0)}, .Graphics, .Invalid_Accel},
+		{proc(cb: ^Command_Buffer) {cmd_write_accel_size(cb, COMPACTABLE_BLAS, {index = 9, generation = 1}, 0)}, .Graphics, .Invalid_Buffer},
+		{proc(cb: ^Command_Buffer) {cmd_write_accel_size(cb, BLAS, INDIRECT, 0)}, .Graphics, .Bad_Accel_Size},
+		{proc(cb: ^Command_Buffer) {cmd_write_accel_size(cb, COMPACTABLE_BLAS, PLAIN, 0)}, .Graphics, .Bad_Accel_Size},
+		{proc(cb: ^Command_Buffer) {cmd_write_accel_size(cb, COMPACTABLE_BLAS, INDIRECT, 4)}, .Graphics, .Bad_Accel_Size},
+		{proc(cb: ^Command_Buffer) {cmd_write_accel_size(cb, COMPACTABLE_BLAS, INDIRECT, 96)}, .Graphics, .Bad_Accel_Size},
+		{proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_write_accel_size(cb, COMPACTABLE_BLAS, INDIRECT, 0)}, .Graphics, .Build_Inside_Pass},
+		{proc(cb: ^Command_Buffer) {cmd_compact_accel(cb, COMPACTED_BLAS, {index = 9, generation = 1})}, .Graphics, .Invalid_Accel},
+		{proc(cb: ^Command_Buffer) {cmd_compact_accel(cb, COMPACTED_BLAS, BLAS)}, .Graphics, .Bad_Compaction},
+		{proc(cb: ^Command_Buffer) {cmd_compact_accel(cb, BLAS, COMPACTABLE_BLAS)}, .Graphics, .Bad_Compaction},
+		{proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_compact_accel(cb, COMPACTED_BLAS, COMPACTABLE_BLAS)}, .Graphics, .Build_Inside_Pass},
+		// A compaction's destination is never built.
+		{proc(cb: ^Command_Buffer) {cmd_build_accel(cb, COMPACTED_BLAS)}, .Graphics, .Bad_Accel_Build},
+	}
+	for c, i in cases {
+		cb := command_buffer(allocator)
+		c.record(&cb)
+		err, _ := validate(cb, RESOURCES, queue = c.queue)
+		testing.expectf(t, err == c.err, "case %d: got %v, want %v", i, err, c.err)
+	}
+
+	triangle := Accel_Geometry {
+		vertices      = PLAIN,
+		vertex_stride = 12,
+		vertex_count  = 3,
+	}
+	testing.expect_value(t, validate_accel_desc({kind = .Bottom, flags = {.Allow_Compaction}, geometries = {triangle}}), Desc_Error.None)
+	testing.expect_value(t, validate_accel_desc({kind = .Top, flags = {.Allow_Compaction}, max_instances = 4}), Desc_Error.Bad_Compaction)
+	testing.expect_value(t, validate_accel_desc({kind = .Bottom, compact = COMPACTABLE_BLAS, compacted_size = 256}), Desc_Error.None)
+	testing.expect_value(t, validate_accel_desc({kind = .Bottom, compact = COMPACTABLE_BLAS}), Desc_Error.Bad_Compaction)
+	testing.expect_value(t, validate_accel_desc({kind = .Bottom, compacted_size = 256}), Desc_Error.Bad_Compaction)
+	testing.expect_value(t, validate_accel_desc({kind = .Top, compact = COMPACTABLE_BLAS, compacted_size = 256}), Desc_Error.Bad_Compaction)
+	testing.expect_value(
+		t,
+		validate_accel_desc({kind = .Bottom, flags = {.Allow_Compaction}, compact = COMPACTABLE_BLAS, compacted_size = 256}),
+		Desc_Error.Bad_Compaction,
+	)
+	testing.expect_value(
+		t,
+		validate_accel_desc({kind = .Bottom, geometries = {triangle}, compact = COMPACTABLE_BLAS, compacted_size = 256}),
+		Desc_Error.Bad_Compaction,
+	)
 }
 
 @(test)

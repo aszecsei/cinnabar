@@ -16,17 +16,20 @@ INSTANCE_ALIGNMENT :: 16
 SCRATCH_BLOCK_SIZE :: 16 * mem.Megabyte
 
 // Accel_Entry is an acceleration structure. A bottom-level structure keeps its geometry, because each build reads it.
-// The scratch sizes are for its largest build and update; the memory comes from the frame's scratch pool.
+// The scratch sizes are for its largest build and update; the memory comes from the frame's scratch pool. size is its
+// memory, and uncompacted_size the memory of the structure that a compaction's destination is compacted from, or size.
 @(private)
 Accel_Entry :: struct {
-	info:           gpu.Accel_Info,
-	scope:          gpu.Scope,
-	geometry_count: int,
-	geometries:     [gpu.MAX_ACCEL_GEOMETRIES]gpu.Accel_Geometry,
-	resource:       ^d3d.IResource,
-	address:        d3d.GPU_VIRTUAL_ADDRESS,
-	build_scratch:  u64,
-	update_scratch: u64,
+	info:             gpu.Accel_Info,
+	scope:            gpu.Scope,
+	geometry_count:   int,
+	geometries:       [gpu.MAX_ACCEL_GEOMETRIES]gpu.Accel_Geometry,
+	resource:         ^d3d.IResource,
+	address:          d3d.GPU_VIRTUAL_ADDRESS,
+	build_scratch:    u64,
+	update_scratch:   u64,
+	size:             u64,
+	uncompacted_size: u64,
 }
 
 // Scratch_Pool is a frame's build scratch memory. Each build gets its own region, so builds in a frame never share
@@ -112,23 +115,35 @@ create_accel :: proc(desc: gpu.Accel_Struct_Desc) -> gpu.Accel_Struct {
 	}
 	copy(entry.geometries[:], desc.geometries)
 
-	geometry_descs: [gpu.MAX_ACCEL_GEOMETRIES]d3d.RAYTRACING_GEOMETRY_DESC
-	inputs, ok := accel_inputs(&entry, &geometry_descs, 0, desc.max_instances)
-	if !ok {
-		log.errorf("gpu: acceleration structure %q: a geometry has an invalid buffer", desc.label)
-		return {}
+	if desc.compact != {} {
+		// A compaction's destination needs no build inputs: cmd_compact_accel writes it whole.
+		source := gpu.pool_get(&dev.accels, desc.compact)
+		if source == nil || .Allow_Compaction not_in source.info.flags || source.info.kind != .Bottom {
+			log.errorf("gpu: acceleration structure %q: its compaction's source is invalid or has no Allow_Compaction", desc.label)
+			return {}
+		}
+		entry.size = u64(mem.align_forward_int(int(desc.compacted_size), ACCEL_ALIGNMENT))
+		entry.uncompacted_size = source.size
+	} else {
+		geometry_descs: [gpu.MAX_ACCEL_GEOMETRIES]d3d.RAYTRACING_GEOMETRY_DESC
+		inputs, ok := accel_inputs(&entry, &geometry_descs, 0, desc.max_instances)
+		if !ok {
+			log.errorf("gpu: acceleration structure %q: a geometry has an invalid buffer", desc.label)
+			return {}
+		}
+		sizes: d3d.RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO
+		dev.device->GetRaytracingAccelerationStructurePrebuildInfo(&inputs, &sizes)
+		entry.size = u64(mem.align_forward_int(int(sizes.ResultDataMaxSizeInBytes), ACCEL_ALIGNMENT))
+		entry.uncompacted_size = entry.size
+		entry.build_scratch = sizes.ScratchDataSizeInBytes
+		entry.update_scratch = sizes.UpdateScratchDataSizeInBytes
 	}
-	sizes: d3d.RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO
-	dev.device->GetRaytracingAccelerationStructurePrebuildInfo(&inputs, &sizes)
 
-	result_size := u64(mem.align_forward_int(int(sizes.ResultDataMaxSizeInBytes), ACCEL_ALIGNMENT))
-	entry.resource = create_raw_buffer(result_size, {.ALLOW_UNORDERED_ACCESS, .RAYTRACING_ACCELERATION_STRUCTURE}, desc.label) or_else nil
+	entry.resource = create_raw_buffer(entry.size, {.ALLOW_UNORDERED_ACCESS, .RAYTRACING_ACCELERATION_STRUCTURE}, desc.label) or_else nil
 	if entry.resource == nil {
 		return {}
 	}
 	entry.address = entry.resource->GetGPUVirtualAddress()
-	entry.build_scratch = sizes.ScratchDataSizeInBytes
-	entry.update_scratch = sizes.UpdateScratchDataSizeInBytes
 
 	accel := gpu.pool_add(&dev.accels, entry)
 	if accel == {} {
@@ -187,6 +202,40 @@ build_accel :: proc(list: ^d3d.IGraphicsCommandList7, build: ^gpu.Build_Accel) {
 	list->BuildRaytracingAccelerationStructure(&desc, 0, nil)
 }
 
+// write_accel_size records the write of a built structure's compacted size. Validation has checked the packet.
+@(private)
+write_accel_size :: proc(list: ^d3d.IGraphicsCommandList7, w: ^gpu.Write_Accel_Size) {
+	entry := gpu.pool_get(&dev.accels, w.accel)
+	buffer := gpu.pool_get(&dev.buffers, w.buffer)
+	assert(entry != nil && buffer != nil, "gpu: invalid handle")
+	desc := d3d.RAYTRACING_ACCELERATION_STRUCTURE_POSTBUILD_INFO_DESC {
+		DestBuffer = buffer.address + d3d.GPU_VIRTUAL_ADDRESS(w.offset),
+		InfoType   = .COMPACTED_SIZE,
+	}
+	list->EmitRaytracingAccelerationStructurePostbuildInfo(&desc, 1, &entry.address)
+}
+
+// compact_accel records the copy of a built structure into its compaction's destination.
+@(private)
+compact_accel :: proc(list: ^d3d.IGraphicsCommandList7, c: ^gpu.Compact_Accel) {
+	dest, source := gpu.pool_get(&dev.accels, c.dest), gpu.pool_get(&dev.accels, c.source)
+	assert(dest != nil && source != nil, "gpu: invalid acceleration structure handle")
+	list->CopyRaytracingAccelerationStructure(dest.address, source.address, .COMPACT)
+}
+
+// accel_memory sums the live bottom-level structures' memory, with each compaction's destination also at its
+// source's size.
+@(private)
+accel_memory :: proc() -> (memory, uncompacted: u64) {
+	for i in 0 ..< dev.accels.count {
+		if _, ok := gpu.pool_handle(&dev.accels, i); ok && dev.accels.items[i].info.kind == .Bottom {
+			memory += dev.accels.items[i].size
+			uncompacted += dev.accels.items[i].uncompacted_size
+		}
+	}
+	return
+}
+
 // accel_inputs describes a build. It returns false if a geometry buffer is invalid.
 @(private)
 accel_inputs :: proc(
@@ -202,6 +251,9 @@ accel_inputs :: proc(
 	inputs.Flags = .Prefer_Fast_Build in entry.info.flags ? {.PREFER_FAST_BUILD} : {.PREFER_FAST_TRACE}
 	if .Allow_Update in entry.info.flags {
 		inputs.Flags += {.ALLOW_UPDATE}
+	}
+	if .Allow_Compaction in entry.info.flags {
+		inputs.Flags += {.ALLOW_COMPACTION}
 	}
 	switch entry.info.kind {
 	case .Top:

@@ -1006,6 +1006,9 @@ Host_Stats :: struct {
 	// The adapter's local memory that the process uses, and the budget that the OS gives it, or 0 when unknown.
 	video_memory_used:   u64,
 	video_memory_budget: u64,
+	// The bottom-level acceleration structures' memory, and what it would be without their compaction.
+	bottom_accel_memory:             u64,
+	bottom_accel_memory_uncompacted: u64,
 }
 
 // The profiler (see docs/editor/link.md#profile). The host handles every profile message: the zones are its own.

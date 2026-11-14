@@ -80,6 +80,8 @@ public sealed class ResourceMonitorView : Grid
                 ("Pipelines", $"{h.Pipelines:N0}"),
                 ("Samplers", $"{h.Samplers:N0}"),
                 ("Acceleration structures", $"{h.Accels:N0}"),
+                // The bottom-level structures' memory, and before their compaction.
+                .. AccelMemoryRows(h),
             ]);
         }
         if (_stats.Game is { } g)
@@ -178,6 +180,17 @@ public sealed class ResourceMonitorView : Grid
         if (g.ReflectionMemory > 0)
         {
             yield return ("Reflection memory", ResourceStats.Bytes(g.ReflectionMemory));
+        }
+    }
+
+    // The bottom-level acceleration structures' memory, and in parentheses what it was before their compaction, none
+    // without a structure (see docs/rendering/ray-scene.md#acceleration-structure).
+    internal static IEnumerable<(string Name, string Value)> AccelMemoryRows(Link.Protocol.HostStats h)
+    {
+        if (h.BottomAccelMemory > 0)
+        {
+            var before = h.BottomAccelMemoryUncompacted > h.BottomAccelMemory ? $" ({ResourceStats.Bytes(h.BottomAccelMemoryUncompacted)} before compaction)" : "";
+            yield return ("Bottom-level structures", ResourceStats.Bytes(h.BottomAccelMemory) + before);
         }
     }
 

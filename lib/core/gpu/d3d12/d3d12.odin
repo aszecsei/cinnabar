@@ -272,6 +272,7 @@ stats :: proc() -> gpu.Stats {
 		upload_bytes_max = u64(dev.upload_peak),
 	}
 	dev.upload_peak = 0
+	s.bottom_accel_memory, s.bottom_accel_memory_uncompacted = accel_memory()
 	adapter: ^dxgi.IAdapter3
 	if dev.adapter != nil && win.SUCCEEDED(dev.adapter->QueryInterface(dxgi.IAdapter3_UUID, (^rawptr)(&adapter))) {
 		info: dxgi.QUERY_VIDEO_MEMORY_INFO

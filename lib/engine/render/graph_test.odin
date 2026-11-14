@@ -727,6 +727,78 @@ accel_builds_order_before_traces :: proc(t: ^testing.T) {
 	testing.expect(t, null.submit(all_buffers(subs)))
 }
 
+// A structure's compacted size is written after its build, and copied after it is written; the compaction reads the
+// structure as the size's write does, so it needs no barrier of its own.
+@(test)
+accel_sizes_order_after_builds :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	f: Fixture
+	setup(t, &f)
+	defer teardown(&f)
+
+	vertices := null.create_buffer({size = 96}, nil)
+	defer null.destroy_buffer(vertices)
+	sizes := null.create_buffer({size = 8, usage = {.Storage}}, nil)
+	defer null.destroy_buffer(sizes)
+	readback := null.create_buffer({size = 8, usage = {.Readback}}, nil)
+	defer null.destroy_buffer(readback)
+	blas := null.create_accel({kind = .Bottom, flags = {.Allow_Compaction}, geometries = {{vertices = vertices, vertex_stride = 32, vertex_count = 3}}})
+	defer null.destroy_accel(blas)
+	compacted := null.create_accel({kind = .Bottom, compact = blas, compacted_size = 64})
+	defer null.destroy_accel(compacted)
+	testing.expect(t, blas != {} && compacted != {})
+
+	g := begin(&f.platform, &f.cache)
+	bottom := import_accel(&g, blas)
+	size := import_buffer(&g, sizes)
+	p := add_compute_pass(&g, "build", nothing)
+	build_input(&g, p, import_buffer(&g, vertices))
+	build_accel(&g, p, bottom)
+	p = add_compute_pass(&g, "size", nothing)
+	accel_size_source(&g, p, bottom)
+	accel_size_dest(&g, p, size)
+	p = add_compute_pass(&g, "copy size", nothing)
+	copy_source(&g, p, size)
+	copy_dest(&g, p, import_buffer(&g, readback))
+	p = add_compute_pass(&g, "compact", nothing)
+	compact_source(&g, p, bottom)
+	compact_dest(&g, p, import_accel(&g, compacted))
+
+	subs, ok := record(&g)
+	testing.expect(t, ok)
+	accels := make([dynamic]gpu.Accel_Barrier, f.platform.frame_allocator)
+	buffers := make([dynamic]gpu.Buffer_Barrier, f.platform.frame_allocator)
+	for s in subs {
+		for cb in s.buffers {
+			it := gpu.packet_iterator(cb)
+			for p in gpu.next_packet(&it) {
+				if p.kind == .Barriers {
+					b, _, a := gpu.barrier_data(p)
+					append(&accels, ..a)
+					append(&buffers, ..b)
+				}
+			}
+		}
+	}
+	testing.expect_value(t, len(accels), 1)
+	if len(accels) == 1 {
+		testing.expect_value(t, accels[0].accel, blas)
+		testing.expect_value(t, accels[0].sync_before, gpu.Syncs{.Build_Accel})
+		testing.expect_value(t, accels[0].access_before, gpu.Accesses{.Accel_Write})
+		testing.expect_value(t, accels[0].sync_after, gpu.Syncs{.Accel_Info})
+		testing.expect_value(t, accels[0].access_after, gpu.Accesses{.Accel_Read})
+	}
+	testing.expect_value(t, len(buffers), 1)
+	if len(buffers) == 1 {
+		testing.expect_value(t, buffers[0].buffer, sizes)
+		testing.expect_value(t, buffers[0].sync_before, gpu.Syncs{.Accel_Info})
+		testing.expect_value(t, buffers[0].access_before, gpu.Accesses{.Unordered_Access})
+		testing.expect_value(t, buffers[0].sync_after, gpu.Syncs{.Copy})
+		testing.expect_value(t, buffers[0].access_after, gpu.Accesses{.Copy_Source})
+	}
+	testing.expect(t, null.submit(all_buffers(subs)))
+}
+
 @(test)
 copies_order_with_their_readers :: proc(t: ^testing.T) {
 	sync.guard(&backend_lock)

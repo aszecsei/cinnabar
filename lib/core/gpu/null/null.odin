@@ -73,14 +73,20 @@ Pipeline_Entry :: struct {
 	scope: gpu.Scope,
 }
 
-// Accel_Entry keeps the geometry buffers of a bottom-level structure, so validation sees when one is destroyed.
+// Accel_Entry keeps the geometry buffers of a bottom-level structure, so validation sees when one is destroyed. size is
+// the memory that it counts in the stats, and uncompacted_size its compaction's source's, or size.
 @(private = "file")
 Accel_Entry :: struct {
-	info:           gpu.Accel_Info,
-	scope:          gpu.Scope,
-	geometry_count: int,
-	geometries:     [gpu.MAX_ACCEL_GEOMETRIES][2]gpu.Buffer,
+	info:             gpu.Accel_Info,
+	scope:            gpu.Scope,
+	geometry_count:   int,
+	geometries:       [gpu.MAX_ACCEL_GEOMETRIES][2]gpu.Buffer,
+	size:             u64,
+	uncompacted_size: u64,
 }
+
+// The memory that the stats count for each triangle of a bottom-level structure that is not compacted.
+ACCEL_TRIANGLE_BYTES :: 64
 
 @(private = "file")
 state: struct {
@@ -204,6 +210,12 @@ stats :: proc() -> gpu.Stats {
 		upload_bytes_max = u64(state.upload_peak),
 	}
 	state.upload_peak = 0
+	for i in 0 ..< state.accels.count {
+		if _, ok := gpu.pool_handle(&state.accels, i); ok && state.accels.items[i].info.kind == .Bottom {
+			s.bottom_accel_memory += state.accels.items[i].size
+			s.bottom_accel_memory_uncompacted += state.accels.items[i].uncompacted_size
+		}
+	}
 	return s
 }
 
@@ -649,6 +661,16 @@ create_accel :: proc(desc: gpu.Accel_Struct_Desc) -> gpu.Accel_Struct {
 			return {}
 		}
 		entry.geometries[i] = {g.vertices, g.indices}
+		entry.size += u64(g.indices != {} ? g.index_count : g.vertex_count) / 3 * ACCEL_TRIANGLE_BYTES
+	}
+	entry.uncompacted_size = entry.size
+	if desc.compact != {} {
+		source, ok := gpu.pool_lookup(&state.accels, desc.compact)
+		if !ok || .Allow_Compaction not_in source.info.flags || source.info.kind != .Bottom {
+			log.errorf("gpu: acceleration structure %q: its compaction's source is invalid or has no Allow_Compaction", desc.label)
+			return {}
+		}
+		entry.size, entry.uncompacted_size = desc.compacted_size, source.size
 	}
 	return gpu.pool_add(&state.accels, entry)
 }

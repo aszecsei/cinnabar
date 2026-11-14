@@ -40,6 +40,8 @@ Buffer_Use :: enum u8 {
 	// The source or destination of cmd_copy_buffer.
 	Copy_Source,
 	Copy_Dest,
+	// Written by cmd_write_accel_size.
+	Accel_Size,
 }
 
 Accel_Use :: enum u8 {
@@ -49,6 +51,11 @@ Accel_Use :: enum u8 {
 	Read,
 	// A build in the pass reads the structure: a top-level build reads its bottom-level structures.
 	Build_Input,
+	// cmd_write_accel_size in the pass reads the structure.
+	Size_Source,
+	// cmd_compact_accel in the pass reads or writes the structure.
+	Compact_Source,
+	Compact_Dest,
 }
 
 Pass_Kind :: enum u8 {
@@ -436,6 +443,26 @@ copy_dest :: proc(g: ^Graph, pass: Pass, buffer: Buffer) {
 	use_buffer(g, pass, buffer, .Copy_Dest)
 }
 
+// accel_size_source declares that the pass writes an acceleration structure's compacted size with
+// cmd_write_accel_size, and accel_size_dest the buffer that it writes the size into.
+accel_size_source :: proc(g: ^Graph, pass: Pass, accel: Accel) {
+	use_accel(g, pass, accel, .Size_Source)
+}
+
+accel_size_dest :: proc(g: ^Graph, pass: Pass, buffer: Buffer) {
+	use_buffer(g, pass, buffer, .Accel_Size)
+}
+
+// compact_source and compact_dest declare that the pass copies a structure into its compaction's destination with
+// cmd_compact_accel.
+compact_source :: proc(g: ^Graph, pass: Pass, accel: Accel) {
+	use_accel(g, pass, accel, .Compact_Source)
+}
+
+compact_dest :: proc(g: ^Graph, pass: Pass, accel: Accel) {
+	use_accel(g, pass, accel, .Compact_Dest)
+}
+
 build_input_buffer :: proc(g: ^Graph, pass: Pass, buffer: Buffer) {
 	use_buffer(g, pass, buffer, .Build_Input)
 }
@@ -751,7 +778,7 @@ use_texture :: proc(g: ^Graph, pass: Pass, texture: Texture, use: Texture_Use, r
 use_accel :: proc(g: ^Graph, pass: Pass, accel: Accel, use: Accel_Use) {
 	p := &g.passes[pass - 1]
 	assert(p.kind != .Render, "render: acceleration structures are built and traced outside render passes")
-	add_use(p, {index = u32(accel - 1), buffer = true, state = accel_state(use, p.kind), reads = use != .Build})
+	add_use(p, {index = u32(accel - 1), buffer = true, state = accel_state(use, p.kind), reads = use != .Build && use != .Compact_Dest})
 }
 
 @(private = "file")
@@ -803,6 +830,12 @@ accel_state :: proc(use: Accel_Use, kind: Pass_Kind) -> State {
 		return {sync = shading_sync(kind), access = {.Accel_Read}}
 	case .Build_Input:
 		return {sync = {.Build_Accel}, access = {.Accel_Read}}
+	case .Size_Source:
+		return {sync = {.Accel_Info}, access = {.Accel_Read}}
+	case .Compact_Source:
+		return {sync = {.Copy_Accel}, access = {.Accel_Read}}
+	case .Compact_Dest:
+		return {sync = {.Copy_Accel}, access = {.Accel_Write}}
 	}
 	return {}
 }
@@ -839,6 +872,8 @@ buffer_state :: proc(use: Buffer_Use, kind: Pass_Kind) -> State {
 		return {sync = {.Copy}, access = {.Copy_Source}}
 	case .Copy_Dest:
 		return {sync = {.Copy}, access = {.Copy_Dest}}
+	case .Accel_Size:
+		return {sync = {.Accel_Info}, access = {.Unordered_Access}}
 	}
 	return {}
 }

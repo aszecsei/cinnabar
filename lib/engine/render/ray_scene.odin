@@ -118,6 +118,8 @@ Ray_Scene :: struct {
 	fallback:     Shader_Pipeline,
 	// The buffers of each of a frame's hit batches.
 	scratch:      [MAX_HIT_BATCHES]Hit_Scratch,
+	// The readback of the meshes' compacted sizes.
+	compaction:   Accel_Compaction,
 }
 
 // Hit_Scratch is one batch's buffers: the rays in bin order, each bin's count, offset and cursor, and each bin's
@@ -134,9 +136,15 @@ Hit_Scratch :: struct {
 Ray_Scene_Frame :: struct {
 	// 0 until add_ray_scene_passes adds the build.
 	accel:   Accel,
-	// The meshes whose acceleration structures this frame builds.
-	builds:  []^Resident_Mesh,
-	batches: int,
+	// The meshes whose acceleration structures this frame builds; whose compacted sizes it writes, into the sizes and
+	// then the readback slot size_slot; and whose structures it compacts.
+	builds:         []^Resident_Mesh,
+	sized:          []^Resident_Mesh,
+	size_slot:      int,
+	sizes:          Buffer,
+	sizes_readback: Buffer,
+	compactions:    []^Resident_Mesh,
+	batches:        int,
 }
 
 // Hit_Batch is a client's rays: hits holds a Hit_Record for each of count rays, which the client writes before, and
@@ -190,6 +198,7 @@ ray_scene_init :: proc(s: ^Ray_Scene) {
 
 ray_scene_destroy :: proc(s: ^Ray_Scene, platform: ^core.Platform_API) {
 	platform.gpu_destroy_accel(s.accel)
+	destroy_accel_compaction(&s.compaction, platform)
 	destroy_shader_pipeline(&s.bin_pipeline, platform)
 	destroy_shader_pipeline(&s.fallback, platform)
 	for scratch in s.scratch {
@@ -244,6 +253,7 @@ add_ray_scene_passes :: proc(f: ^Frame) {
 	r := f.renderer
 	g := f.graph
 	rf.accel = import_accel(g, r.ray_scene.accel)
+	take_accel_sizes(r)
 	rf.builds = unbuilt_accels(&r.residency)
 	blases := make([]Accel, len(rf.builds), r.platform.frame_allocator)
 	if len(rf.builds) > 0 {
@@ -280,6 +290,9 @@ add_ray_scene_passes :: proc(f: ^Frame) {
 			refit.update = instance.accel_built
 		}
 	}
+	// The built meshes' structures are compacted, in steps a frame or more apart (see mesh_accels.odin).
+	add_accel_size_passes(f)
+	add_compaction_pass(f)
 	on_executed(g, commit_ray_scene, f)
 	p := add_compute_pass(g, "build scene accel", proc(ctx: ^Pass_Context) {
 		f := (^Frame)(ctx.data)
@@ -295,14 +308,12 @@ add_ray_scene_passes :: proc(f: ^Frame) {
 	build_accel(g, p, rf.accel)
 }
 
-// commit_ray_scene marks the structures that the frame built as built, once it executed. Until then, the next frame
-// builds a mesh's again, and builds a skinned entity's instead of refitting it.
+// commit_ray_scene marks the structures that the frame built as built, once it executed, and moves on the meshes'
+// compactions. Until then, the next frame builds a mesh's again, and builds a skinned entity's instead of refitting it.
 @(private = "file")
 commit_ray_scene :: proc(data: rawptr) {
 	f := (^Frame)(data)
-	for m in f.ray_scene.builds {
-		m.accel_built = true
-	}
+	commit_mesh_accels(f)
 	if len(f.scene_frame.items) > 0 {
 		for refit in f.scene_frame.skin.refits {
 			if instance := &f.renderer.scene.skins.instances[refit.slot]; instance != nil {
