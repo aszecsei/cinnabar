@@ -65,9 +65,10 @@ Resident_Mesh :: struct {
 	level_first:       [MAX_SUBMESHES][INSTANCE_LEVEL_BUCKETS]u32,
 	levels:            [INSTANCE_LEVEL_BUCKETS][2]f32,
 	// With Ray_Query, the bottom-level acceleration structure of every triangle, which the renderer builds the first
-	// frame after the mesh is ready (see docs/rendering/lighting-and-shadows.md#shadows).
+	// frame after the mesh is ready and then compacts, and where it is in that (see
+	// docs/rendering/ray-scene.md#acceleration-structure).
 	accel:             gpu.Accel_Struct,
-	accel_built:       bool,
+	accel_state:       Mesh_Accel,
 }
 
 // Resident_Submesh is a submesh's ranges of its mesh's indices, meshlets and meshlet nodes, the first root_count of
@@ -810,14 +811,15 @@ create_mesh_accel :: proc(r: ^Residency, m: ^Resident_Mesh) {
 		index_format  = m.index_format,
 		opaque        = true,
 	}
-	m.accel = r.platform.gpu_create_accel({kind = .Bottom, geometries = {geometry}, label = "mesh"})
+	accel := r.platform.gpu_create_accel({kind = .Bottom, flags = {.Allow_Compaction}, geometries = {geometry}, label = "mesh"})
+	change_mesh_accel(r, m, Accel_Created{accel})
 }
 
 // unbuilt_accels are the ready meshes whose acceleration structures have not been built, in frame memory.
 unbuilt_accels :: proc(r: ^Residency) -> []^Resident_Mesh {
 	meshes := make([dynamic]^Resident_Mesh, r.platform.frame_allocator)
 	for &e in r.entries[:r.count] {
-		if e.kind == .Mesh && e.ready && e.current.mesh.accel != {} && !e.current.mesh.accel_built {
+		if _, unbuilt := e.current.mesh.accel_state.(Accel_Unbuilt); e.kind == .Mesh && e.ready && unbuilt {
 			append(&meshes, &e.current.mesh)
 		}
 	}
@@ -927,9 +929,7 @@ destroy_resources :: proc(r: ^Residency, kind: format.Asset_Kind, resources: ^Re
 		if m.impostor != {} {
 			r.platform.gpu_destroy_buffer(m.impostor)
 		}
-		if m.accel != {} {
-			r.platform.gpu_destroy_accel(m.accel)
-		}
+		change_mesh_accel(r, m, Accel_Destroyed{})
 	case .Texture:
 		r.platform.gpu_destroy_texture(resources.texture.texture)
 	case .Instance_Set:

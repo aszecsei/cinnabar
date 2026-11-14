@@ -129,10 +129,10 @@ public sealed class ProfilerTests
     public void ASummaryGoesWithTheNextHostStats()
     {
         var stats = new ResourceStats();
-        stats.Apply(new HostStats(0.25f, 15, 16, 20, 9, 12, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0));
+        stats.Apply(new HostStats(0.25f, 15, 16, 20, 9, 12, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0));
         stats.Apply(Summary());
-        stats.Apply(new HostStats(0.25f, 15, 16, 20, 9, 12, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0));
-        stats.Apply(new HostStats(0.25f, 15, 16, 20, 9, 12, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0));
+        stats.Apply(new HostStats(0.25f, 15, 16, 20, 9, 12, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0));
+        stats.Apply(new HostStats(0.25f, 15, 16, 20, 9, 12, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0));
         var samples = stats.History.ToArray();
         Assert.Equal([false, true, false], samples.Select(s => s.Profiled));
         Assert.Equal((8.0, 4.0, 21ul, 22ul), (samples[1].CpuMs, samples[1].GpuMs, samples[1].CpuWorstFrame, samples[1].GpuWorstFrame));

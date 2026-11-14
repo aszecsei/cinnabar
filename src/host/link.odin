@@ -152,6 +152,8 @@ send_stats :: proc(l: ^Link) {
 			accels = gpu.accels,
 			video_memory_used = gpu.video_memory_used,
 			video_memory_budget = gpu.video_memory_budget,
+			bottom_accel_memory = gpu.bottom_accel_memory,
+			bottom_accel_memory_uncompacted = gpu.bottom_accel_memory_uncompacted,
 		},
 	)
 	s^ = {start = time.tick_now()}

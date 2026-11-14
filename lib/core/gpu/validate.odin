@@ -35,6 +35,11 @@ Validation_Error :: enum u8 {
 	Invalid_Accel,
 	Build_Inside_Pass,
 	Bad_Accel_Build,
+	// A compacted size is written for a structure with Allow_Compaction, into a Storage buffer at an 8-byte aligned
+	// offset in range.
+	Bad_Accel_Size,
+	// A compaction copies a structure with Allow_Compaction into the destination created from it.
+	Bad_Compaction,
 	Copy_Inside_Pass,
 	Bad_Copy,
 	Invalid_Upscaler,
@@ -316,6 +321,20 @@ validate :: proc(
 				return .Build_Inside_Pass, packet
 			}
 			if err = validate_build(resources, payload(p, Build_Accel)); err != .None {
+				return err, packet
+			}
+		case .Write_Accel_Size:
+			if in_pass {
+				return .Build_Inside_Pass, packet
+			}
+			if err = validate_accel_size(resources, payload(p, Write_Accel_Size)); err != .None {
+				return err, packet
+			}
+		case .Compact_Accel:
+			if in_pass {
+				return .Build_Inside_Pass, packet
+			}
+			if err = validate_compaction(resources, payload(p, Compact_Accel)); err != .None {
 				return err, packet
 			}
 		case .Dispatch_Indirect:
@@ -631,14 +650,14 @@ validate_indirect :: proc(resources: Resources, buffer: Buffer, offset: u32, siz
 }
 
 // validate_build checks a build against its acceleration structure. A bottom-level build takes no instances, and a
-// top-level build's instance records are 16-byte aligned and in range.
+// top-level build's instance records are 16-byte aligned and in range. A compaction's destination is never built.
 @(private = "file")
 validate_build :: proc(resources: Resources, build: ^Build_Accel) -> Validation_Error {
 	info, ok := resources.accel(build.accel)
 	if !ok {
 		return .Invalid_Accel
 	}
-	if build.update && .Allow_Update not_in info.flags {
+	if (build.update && .Allow_Update not_in info.flags) || info.compact_source != {} {
 		return .Bad_Accel_Build
 	}
 	switch info.kind {
@@ -658,6 +677,38 @@ validate_build :: proc(resources: Resources, build: ^Build_Accel) -> Validation_
 		if build.offset % 16 != 0 || build.count > info.max_instances || end > int(desc.size) {
 			return .Bad_Accel_Build
 		}
+	}
+	return .None
+}
+
+// validate_accel_size checks the write of a structure's compacted size: a structure with Allow_Compaction, and a u64 at
+// an 8-byte aligned offset in a Storage buffer.
+@(private = "file")
+validate_accel_size :: proc(resources: Resources, w: ^Write_Accel_Size) -> Validation_Error {
+	info, ok := resources.accel(w.accel)
+	if !ok {
+		return .Invalid_Accel
+	}
+	desc, has_buffer := resources.buffer(w.buffer)
+	if !has_buffer {
+		return .Invalid_Buffer
+	}
+	if .Allow_Compaction not_in info.flags || .Storage not_in desc.usage || w.offset % 8 != 0 || int(w.offset) + 8 > int(desc.size) {
+		return .Bad_Accel_Size
+	}
+	return .None
+}
+
+// validate_compaction checks a compaction: a source with Allow_Compaction, into the destination created from it.
+@(private = "file")
+validate_compaction :: proc(resources: Resources, c: ^Compact_Accel) -> Validation_Error {
+	dest, dest_ok := resources.accel(c.dest)
+	source, source_ok := resources.accel(c.source)
+	if !dest_ok || !source_ok {
+		return .Invalid_Accel
+	}
+	if .Allow_Compaction not_in source.flags || dest.compact_source != c.source {
+		return .Bad_Compaction
 	}
 	return .None
 }
@@ -731,6 +782,9 @@ Desc_Error :: enum u8 {
 	// A bottom-level acceleration structure has 1 to MAX_ACCEL_GEOMETRIES whole-triangle geometries, and a top-level
 	// one has no geometries and room for at least one instance.
 	Bad_Geometry,
+	// Only a bottom-level structure has Allow_Compaction. A compaction's destination is a bottom-level structure with
+	// a compacted size, and no geometries, flags or instances.
+	Bad_Compaction,
 }
 
 // Backends check descriptions with these procedures before they create a resource.
@@ -880,7 +934,6 @@ validate_stream_texture :: proc(desc: Texture_Desc, streamed_before: bool, data:
 	return .None
 }
 
-// validate_accel_desc checks the shape of a description. The backend checks that the geometry buffers are valid.
 // An upscaler upscales: its renders are at most its output's size on each side.
 validate_upscaler_desc :: proc(desc: Upscaler_Desc) -> Desc_Error {
 	render, output := desc.max_render_size, desc.output_size
@@ -890,7 +943,19 @@ validate_upscaler_desc :: proc(desc: Upscaler_Desc) -> Desc_Error {
 	return .None
 }
 
+// validate_accel_desc checks the shape of a description. The backend checks that the geometry buffers are valid, and
+// that a compaction's source has Allow_Compaction.
 validate_accel_desc :: proc(desc: Accel_Struct_Desc) -> Desc_Error {
+	if desc.compact != {} || desc.compacted_size != 0 {
+		valid := desc.compact != {} && desc.compacted_size > 0 && desc.kind == .Bottom
+		if !valid || desc.flags != {} || len(desc.geometries) > 0 || desc.max_instances != 0 {
+			return .Bad_Compaction
+		}
+		return .None
+	}
+	if desc.kind == .Top && .Allow_Compaction in desc.flags {
+		return .Bad_Compaction
+	}
 	switch desc.kind {
 	case .Top:
 		if len(desc.geometries) > 0 || desc.max_instances == 0 {

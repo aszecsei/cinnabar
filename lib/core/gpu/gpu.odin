@@ -475,6 +475,10 @@ Sync :: enum u8 {
 	// The shaders of a ray tracing pipeline.
 	Ray_Tracing,
 	Copy,
+	// Writing an acceleration structure's compacted size (cmd_write_accel_size).
+	Accel_Info,
+	// Copying an acceleration structure into its compacted structure (cmd_compact_accel).
+	Copy_Accel,
 }
 
 Syncs :: bit_set[Sync;u16]
@@ -498,7 +502,7 @@ Accesses :: bit_set[Access;u16]
 WRITE_ACCESSES :: Accesses{.Render_Target, .Depth_Stencil_Write, .Unordered_Access, .Accel_Write, .Copy_Dest}
 
 // A compute queue runs no graphics work, so its barriers use only these.
-COMPUTE_QUEUE_SYNCS :: Syncs{.All, .Compute_Shading, .Execute_Indirect, .Build_Accel, .Ray_Tracing, .Copy}
+COMPUTE_QUEUE_SYNCS :: Syncs{.All, .Compute_Shading, .Execute_Indirect, .Build_Accel, .Ray_Tracing, .Copy, .Accel_Info, .Copy_Accel}
 COMPUTE_QUEUE_ACCESSES :: Accesses{.Shader_Resource, .Unordered_Access, .Indirect_Argument, .Accel_Read, .Accel_Write, .Copy_Source, .Copy_Dest}
 // The accesses an acceleration structure can have.
 ACCEL_ACCESSES :: Accesses{.Accel_Read, .Accel_Write}
@@ -747,6 +751,9 @@ Accel_Flag :: enum u8 {
 	Allow_Update,
 	// Faster builds and slower traces. The default prefers fast traces.
 	Prefer_Fast_Build,
+	// The structure's compacted size can be written after a build, and the structure copied into a compacted
+	// structure of that size. Only bottom-level structures.
+	Allow_Compaction,
 }
 
 Accel_Flags :: bit_set[Accel_Flag;u8]
@@ -774,26 +781,32 @@ Accel_Geometry :: struct {
 
 // A bottom-level structure has geometries. A top-level structure has room for max_instances instances.
 // The backend sizes the structure and its build scratch memory at creation.
+// A structure with compact is a compaction's destination: a bottom-level structure of compacted_size bytes, with no
+// geometries or flags, that only cmd_compact_accel from compact writes (see docs/gpu/ray-tracing.md#ray-tracing).
 Accel_Struct_Desc :: struct {
-	kind:          Accel_Kind,
-	flags:         Accel_Flags,
-	geometries:    []Accel_Geometry,
-	max_instances: u32,
-	scope:         Scope,
-	label:         string,
+	kind:           Accel_Kind,
+	flags:          Accel_Flags,
+	geometries:     []Accel_Geometry,
+	max_instances:  u32,
+	compact:        Accel_Struct,
+	compacted_size: u64,
+	scope:          Scope,
+	label:          string,
 }
 
 // Accel_Info is what validation needs to know about an acceleration structure. inputs_valid is false when a
-// geometry buffer of a bottom-level structure was destroyed.
+// geometry buffer of a bottom-level structure was destroyed. compact_source is the structure that a compaction's
+// destination is compacted from.
 Accel_Info :: struct {
-	kind:          Accel_Kind,
-	flags:         Accel_Flags,
-	max_instances: u32,
-	inputs_valid:  bool,
+	kind:           Accel_Kind,
+	flags:          Accel_Flags,
+	max_instances:  u32,
+	compact_source: Accel_Struct,
+	inputs_valid:   bool,
 }
 
 accel_info :: proc(desc: Accel_Struct_Desc) -> Accel_Info {
-	return {kind = desc.kind, flags = desc.flags, max_instances = desc.max_instances, inputs_valid = true}
+	return {kind = desc.kind, flags = desc.flags, max_instances = desc.max_instances, compact_source = desc.compact, inputs_valid = true}
 }
 
 Accel_Instance_Flag :: enum u8 {
@@ -879,6 +892,10 @@ Stats :: struct {
 	// The adapter's local memory that the process uses, and the budget that the OS gives it, or 0 when unknown.
 	video_memory_used:   u64,
 	video_memory_budget: u64,
+	// The live bottom-level acceleration structures' memory, and the same with each compacted structure at the size of
+	// the structure it was compacted from.
+	bottom_accel_memory:             u64,
+	bottom_accel_memory_uncompacted: u64,
 }
 
 // Transfer identifies a streaming copy (see docs/gpu/queues-streaming-readback.md#streaming). gpu_transfer_done reports when the resource can

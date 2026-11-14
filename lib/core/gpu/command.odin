@@ -44,6 +44,8 @@ Packet_Kind :: enum u16 {
 	Dispatch_Rays,
 	Copy_Buffer,
 	Upscale,
+	Write_Accel_Size,
+	Compact_Accel,
 }
 
 // size includes the header and the padding after the payload.
@@ -229,6 +231,21 @@ Copy_Buffer :: struct {
 	size:        u32,
 }
 
+// Write_Accel_Size writes a built structure's compacted size, a u64 in bytes, at offset in a Storage buffer, outside a
+// render pass. The structure has Allow_Compaction, and the offset is a multiple of 8.
+Write_Accel_Size :: struct {
+	accel:  Accel_Struct,
+	buffer: Buffer,
+	offset: u32,
+}
+
+// Compact_Accel copies a built structure into its compaction's destination, outside a render pass. The destination
+// was created with compact = source and the size that Write_Accel_Size wrote.
+Compact_Accel :: struct {
+	dest:   Accel_Struct,
+	source: Accel_Struct,
+}
+
 // Dispatch_Rays launches the bound ray tracing pipeline's ray generation shader once per element of size.
 Dispatch_Rays :: struct {
 	size: [3]u32,
@@ -339,6 +356,8 @@ Packet_Format :: struct {
 	dispatch_rays:      Dispatch_Rays,
 	copy_buffer:        Copy_Buffer,
 	upscale:            Upscale,
+	write_accel_size:   Write_Accel_Size,
+	compact_accel:      Compact_Accel,
 	accel_barrier:      Accel_Barrier,
 	accel_instance:     Accel_Instance,
 }
@@ -522,6 +541,17 @@ cmd_build_accel :: proc(cb: ^Command_Buffer, accel: Accel_Struct, update := fals
 // instances. The offset is a multiple of 16. The instances may be in the upload ring.
 cmd_build_top_accel :: proc(cb: ^Command_Buffer, accel: Accel_Struct, instances: Buffer, offset, count: u32, update := false) {
 	push(cb, .Build_Accel, Build_Accel{accel, instances, offset, count, b32(update)})
+}
+
+// cmd_write_accel_size writes a built structure's compacted size, a u64, at offset in a Storage buffer. See
+// Write_Accel_Size.
+cmd_write_accel_size :: proc(cb: ^Command_Buffer, accel: Accel_Struct, buffer: Buffer, offset: u32) {
+	push(cb, .Write_Accel_Size, Write_Accel_Size{accel, buffer, offset})
+}
+
+// cmd_compact_accel copies a built structure into its compaction's destination. See Compact_Accel.
+cmd_compact_accel :: proc(cb: ^Command_Buffer, dest, source: Accel_Struct) {
+	push(cb, .Compact_Accel, Compact_Accel{dest, source})
 }
 
 // cmd_upscale runs an upscaler. See Upscale.

@@ -259,6 +259,49 @@ ray_tracing_resources :: proc(t: ^testing.T) {
 	testing.expect_value(t, destroy_scope(.Game), 3)
 }
 
+// A compacted structure is made from a built one with Allow_Compaction, at the size that the GPU writes, and the stats
+// count both its memory and its source's.
+@(test)
+accels_are_compacted :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	testing.expect(t, init(nil, {1280, 720}))
+	defer shutdown()
+
+	vertices := create_buffer({size = 72, usage = {.Storage}}, nil)
+	sizes := create_buffer({size = 16, usage = {.Storage}}, nil)
+	geometry := gpu.Accel_Geometry {
+		vertices      = vertices,
+		vertex_stride = 12,
+		vertex_count  = 6,
+	}
+	blas := create_accel({kind = .Bottom, flags = {.Allow_Compaction}, geometries = {geometry}})
+	plain := create_accel({kind = .Bottom, geometries = {geometry}})
+	testing.expect(t, blas != {} && plain != {})
+	compacted := create_accel({kind = .Bottom, compact = blas, compacted_size = 40})
+	testing.expect(t, compacted != {})
+
+	cb := gpu.command_buffer(context.temp_allocator)
+	gpu.cmd_build_accel(&cb, blas)
+	gpu.cmd_write_accel_size(&cb, blas, sizes, 8)
+	gpu.cmd_compact_accel(&cb, compacted, blas)
+	testing.expect(t, submit({cb}))
+
+	s := stats()
+	testing.expect_value(t, s.bottom_accel_memory, 2 * 2 * ACCEL_TRIANGLE_BYTES + 40)
+	testing.expect_value(t, s.bottom_accel_memory_uncompacted, 3 * 2 * ACCEL_TRIANGLE_BYTES)
+
+	context.logger = testlog.expected_errors()
+	testing.expect_value(t, create_accel({kind = .Bottom, compact = plain, compacted_size = 40}), gpu.Accel_Struct{})
+	testing.expect_value(t, create_accel({kind = .Bottom, compact = {index = 99, generation = 1}, compacted_size = 40}), gpu.Accel_Struct{})
+	bad := gpu.command_buffer(context.temp_allocator)
+	gpu.cmd_build_accel(&bad, compacted)
+	testing.expect(t, !submit({bad}), "a compaction's destination was built")
+
+	destroy_accel(blas)
+	testing.expect_value(t, stats().bottom_accel_memory, 2 * ACCEL_TRIANGLE_BYTES + 40)
+	testing.expect_value(t, destroy_scope(.Game), 4)
+}
+
 @(test)
 streams_are_checked :: proc(t: ^testing.T) {
 	sync.guard(&backend_lock)
