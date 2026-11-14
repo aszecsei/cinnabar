@@ -60,7 +60,9 @@ Light_Flag :: enum u32 {
 // An area light's position is its middle, and its range reaches past its shape by the component's range. extent is its
 // half size along its +x in the world: a quad's half width, a disk's radius, a line's half length. extent_y is a quad's
 // half height or a disk's radius along its +y, which is cross(direction, extent), or a line's radius. Its color is a
-// point light's that is as bright, which the shaders spread over its area.
+// point light's that is as bright, which the shaders spread over its area. The other lights have no shape, so extent.x
+// holds their size: a directional light's angular radius as its tangent, and a point or a spot light's source radius
+// (see light_size).
 Light_Record :: struct {
 	position:    [3]f32,
 	range:       f32,
@@ -77,6 +79,22 @@ Light_Record :: struct {
 }
 
 #assert(size_of(Light_Record) == 80)
+
+// light_size is how big a light is to its shadows (see docs/rendering/lighting-and-shadows.md#soft-shadows): a
+// directional light's angular radius as its tangent, which is its disk's radius 1 m away, and any other light's radius
+// in meters. An area light's is the radius of a sphere with its quad's or its disk's area, or its line's half length.
+// A size of 0 is a point, whose shadows are hard. Matches light_size in light_record.hlsli.
+light_size :: proc(l: Light_Record) -> f32 {
+	#partial switch l.type {
+	case .Quad:
+		return math.sqrt(4 * linalg.length(l.extent) * l.extent_y / math.PI)
+	case .Disk:
+		return math.sqrt(linalg.length(l.extent) * l.extent_y)
+	case .Line:
+		return linalg.length(l.extent)
+	}
+	return l.extent.x
+}
 
 // Ambient is the light from everything else until global illumination (see docs/rendering/sky.md#ambient-light): from a
 // direction d, constant + x * d.x + y * d.y + z * d.z, per channel. A linear function holds the Flat sky's light from
@@ -316,7 +334,15 @@ extract_lights :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32) -> ^Light_Frame 
 			if !ok || lf.directional_count == MAX_DIRECTIONAL_LIGHTS {
 				continue
 			}
-			add(lf, {type = .Directional, color = color_of(light.color, light.intensity), direction = forward_of(pose), shadow = -1, mask = -1}, light.cast_shadows)
+			record := Light_Record {
+				type      = .Directional,
+				color     = color_of(light.color, light.intensity),
+				direction = forward_of(pose),
+				shadow    = -1,
+				mask      = -1,
+				extent    = {math.tan(math.to_radians(clamp(light.angular_diameter, 0, 90)) * 0.5), 0, 0},
+			}
+			add(lf, record, light.cast_shadows)
 			lf.directional[lf.directional_count] = e
 			lf.directional_count += 1
 		}
@@ -338,6 +364,7 @@ extract_lights :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32) -> ^Light_Frame 
 					color = color_of(light.color, light.intensity),
 					shadow = -1,
 					mask = -1,
+					extent = {max(light.source_radius, 0), 0, 0},
 				},
 				light.cast_shadows,
 			)
@@ -367,6 +394,7 @@ extract_lights :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32) -> ^Light_Frame 
 					spot_offset = -cos_outer * scale,
 					shadow = -1,
 					mask = -1,
+					extent = {max(light.source_radius, 0), 0, 0},
 				},
 				light.cast_shadows,
 			)

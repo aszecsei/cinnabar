@@ -100,30 +100,38 @@ DEFAULT_AREA_SIZE :: 1
 
 // Directional_Light lights the world from far away, along its entity's +z, as the sun does. Its light is color times
 // intensity, in the same units as the sky's. A color of 0 means white. See docs/rendering/lighting-and-shadows.md#lights-and-clusters.
+// angular_diameter is how wide its disk looks, in degrees (the sun's is DEFAULT_SUN_DISC), and 0 is a point (see
+// docs/rendering/lighting-and-shadows.md#soft-shadows).
 Directional_Light :: struct {
-	color:        [3]f32 `editor:"color"`,
-	intensity:    f32 `editor:"range=0,100"`,
-	cast_shadows: bool,
+	color:            [3]f32 `editor:"color"`,
+	intensity:        f32 `editor:"range=0,100"`,
+	cast_shadows:     bool,
+	angular_diameter: f32 `editor:"range=0,5"`,
 }
 
 // Point_Light lights every direction from its entity's position. Its light falls off with the square of the distance,
-// and reaches 0 at its range in meters (0 means DEFAULT_LIGHT_RANGE).
+// and reaches 0 at its range in meters (0 means DEFAULT_LIGHT_RANGE). source_radius is the radius of its bulb in
+// meters, and 0 is a point (see docs/rendering/lighting-and-shadows.md#soft-shadows). It does not change the light's
+// shading.
 Point_Light :: struct {
-	color:        [3]f32 `editor:"color"`,
-	intensity:    f32 `editor:"range=0,100"`,
-	range:        f32 `editor:"range=0,1000"`,
-	cast_shadows: bool,
+	color:         [3]f32 `editor:"color"`,
+	intensity:     f32 `editor:"range=0,100"`,
+	range:         f32 `editor:"range=0,1000"`,
+	cast_shadows:  bool,
+	source_radius: f32 `editor:"range=0,2"`,
 }
 
 // Spot_Light is a point light in a cone along its entity's +z: full inside inner_angle and none outside outer_angle,
-// both half angles in radians (0 means DEFAULT_SPOT_OUTER for the outer angle, and the outer angle for the inner).
+// both half angles in radians (0 means DEFAULT_SPOT_OUTER for the outer angle, and the outer angle for the inner). Its
+// source_radius is a point light's.
 Spot_Light :: struct {
-	color:        [3]f32 `editor:"color"`,
-	intensity:    f32 `editor:"range=0,100"`,
-	range:        f32 `editor:"range=0,1000"`,
-	inner_angle:  f32 `editor:"range=0,1.5"`,
-	outer_angle:  f32 `editor:"range=0,1.5"`,
-	cast_shadows: bool,
+	color:         [3]f32 `editor:"color"`,
+	intensity:     f32 `editor:"range=0,100"`,
+	range:         f32 `editor:"range=0,1000"`,
+	inner_angle:   f32 `editor:"range=0,1.5"`,
+	outer_angle:   f32 `editor:"range=0,1.5"`,
+	cast_shadows:  bool,
+	source_radius: f32 `editor:"range=0,2"`,
 }
 
 // The area lights (see docs/rendering/lighting-and-shadows.md#area-lights) have a size in meters, and their intensity is as a point light's

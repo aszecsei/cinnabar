@@ -341,6 +341,40 @@ area_lights_record_their_shapes :: proc(t: ^testing.T) {
 	testing.expect_value(t, lf.records[1].shadow, -1)
 }
 
+@(test)
+lights_record_their_sizes :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	f := light_setup(t)
+	defer light_teardown(f)
+	w := &f.world
+
+	spawn_light(w, {}, 1, Directional_Light{intensity = 1, angular_diameter = DEFAULT_SUN_DISC})
+	spawn_light(w, {0, 0, 4}, 1, Point_Light{intensity = 1, source_radius = 0.1})
+	spawn_light(w, {0, 0, 4}, 1, Point_Light{intensity = 1})
+	spawn_light(w, {0, 0, 4}, 1, Spot_Light{intensity = 1, source_radius = 0.2})
+	spawn_light(w, {0, 0, 4}, 1, Quad_Light{intensity = 1, width = 2, height = 1})
+	spawn_light(w, {0, 0, 4}, 1, Disk_Light{intensity = 1, width = 2, height = 4})
+	spawn_light(w, {0, 0, 4}, 1, Line_Light{intensity = 1, length = 3, radius = 0.1})
+
+	frame := &f.frame
+	frame.lights = extract_lights(frame, w, nil)
+	lf := frame.lights
+	testing.expect_value(t, len(lf.records), 7)
+	close :: proc(a, b: f32) -> bool {
+		return abs(a - b) < 1e-6
+	}
+	// The sun's disk is about 4.6 mm wide 1 m away.
+	testing.expect(t, close(light_size(lf.records[0]), math.tan(math.to_radians(f32(DEFAULT_SUN_DISC)) / 2)))
+	// The point lights come before the spot lights.
+	testing.expect(t, close(light_size(lf.records[1]), 0.1))
+	testing.expect_value(t, light_size(lf.records[2]), 0)
+	testing.expect(t, close(light_size(lf.records[3]), 0.2))
+	// An area light's size is the radius of a disk with its area: a 2 m by 1 m quad's is sqrt(2 / pi).
+	testing.expect(t, close(light_size(lf.records[4]), math.sqrt(2 / f32(math.PI))))
+	testing.expect(t, close(light_size(lf.records[5]), math.sqrt(f32(2))))
+	testing.expect(t, close(light_size(lf.records[6]), 1.5))
+}
+
 @(private = "file")
 sphere_in :: proc(planes: [][4]f32, center: [3]f32, radius: f32) -> bool {
 	for p in planes {

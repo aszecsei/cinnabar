@@ -4,6 +4,7 @@
 #include "cinnabar.hlsli"
 #include "view_projection.hlsli"
 #include "ray_scene.hlsli"
+#include "light_record.hlsli"
 
 // Matches Mask_Constants in lib/engine/render/shadows.odin. The view's axes and its projection rebuild each pixel's
 // position relative to the camera from its depth; camera_offset moves it into the acceleration structure's space, which
@@ -32,25 +33,6 @@ struct Mask_Constants {
 };
 CN_PASS_CONSTANTS(Mask_Constants, constants);
 
-// Matches Light_Record in lib/engine/render/lights.odin.
-struct Light_Record {
-	float3 position;
-	float range;
-	float3 color;
-	uint type;
-	float3 direction;
-	float spot_scale;
-	float spot_offset;
-	int shadow;
-	int mask;
-	uint flags;
-	float3 extent;
-	float extent_y;
-};
-
-static const uint LIGHT_DIRECTIONAL = 0;
-// The first area light type; the others follow it.
-static const uint LIGHT_QUAD = 3;
 // Matches VIEW_MODEL_STENCIL in lib/engine/render/renderer.odin.
 static const uint VIEW_MODEL_STENCIL = 1;
 // Directional rays stop this far away, in meters.

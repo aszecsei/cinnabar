@@ -2,7 +2,7 @@
 
 Why the renderer is clustered forward with a prepass, the prepass's outputs, the forward pass's quad overdraw and the visibility buffer that was measured against it, lights and their clusters, area lights with linearly transformed cosines, local reflection probes, stochastic screen-space reflections, and shadows as maps, virtual maps or traced masks.
 
-**In this document:** [Clustered forward](#clustered-forward) · [Prepass](#prepass) · [Quad overdraw](#quad-overdraw) · [Visibility buffer](#visibility-buffer) · [Lights and clusters](#lights-and-clusters) · [Area lights](#area-lights) · [Reflection probes](#reflection-probes) · [Screen-space reflections](#screen-space-reflections) · [Shadows](#shadows) · [Virtual shadow maps](#virtual-shadow-maps)
+**In this document:** [Clustered forward](#clustered-forward) · [Prepass](#prepass) · [Quad overdraw](#quad-overdraw) · [Visibility buffer](#visibility-buffer) · [Lights and clusters](#lights-and-clusters) · [Area lights](#area-lights) · [Reflection probes](#reflection-probes) · [Screen-space reflections](#screen-space-reflections) · [Shadows](#shadows) · [Soft shadows](#soft-shadows) · [Virtual shadow maps](#virtual-shadow-maps)
 
 ## Clustered forward
 
@@ -378,6 +378,13 @@ What they show:
 - **The depth pass:** the shadow maps are one render pass with a piece for each view, each with its own viewport of the atlas. Each draws its view's bins with each material's depth pipeline, so masked materials cast the right shadows. The pipelines have a depth bias and a slope bias against acne, `SHADOW_DEPTH_BIAS` and `SHADOW_SLOPE_BIAS`.
 - **Sampling:** the forward pass moves the point half a texel of the view toward the light, against the map's depth precision, and along its normal by half a texel times the sine of the light's angle to the normal, against the taps' spread where the light grazes the surface. A normal offset moves the edge across the surface by the offset over the tangent of that angle, so the sine keeps a crease's seam within half a texel, and the casters' slope bias covers the rest. It projects the moved point and takes the level's bilinear comparisons with a comparison sampler (`Frame_Constants.shadow_filter`): one, the hardware's 2x2; four a half texel apart, which filter a 3x3 neighbourhood; or nine a texel apart, which filter 4x4. The taps stay inside the view's rectangle. A directional light with cascades picks the first that reaches the pixel's depth; beyond the last, it casts no shadow. A point light picks the face of the direction from the light.
 - The ray-tracing pipeline path stays the sample's alternative (see [GPU](../gpu/ray-tracing.md#ray-tracing)). Every ray-traced path has the shadow map fallback: a device without `Ray_Query`, and the lights after the mask's four, take shadow maps.
+
+### Soft shadows
+
+A light with a size casts shadows whose edges, the penumbrae, widen with the distance from their casters. Each light has one size, for every shadow path that takes it.
+
+- **The sizes:** `Directional_Light.angular_diameter`, in degrees, and `Point_Light.source_radius` and `Spot_Light.source_radius`, in meters (see [Components](assets.md#components)). An area light's size comes from its shape: the radius of a sphere with its quad's or its disk's area, `sqrt(4·hx·hy / π)` or `sqrt(rx·ry)`, or its line's half length. A size of 0 is a point, whose shadows are hard.
+- **The record:** a directional or a punctual light has no shape, so `Light_Record.extent.x` holds its size: the tangent of a directional light's angular radius, which is its disk's radius 1 m away, and a punctual light's source radius. `light_size` (`lights.odin`, `light_record.hlsli`) gives any light's.
 
 ### Virtual shadow maps
 
