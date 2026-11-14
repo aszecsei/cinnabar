@@ -519,6 +519,58 @@ cloud_far_coverage :: proc(coverage, far_coverage, far: f32) -> f32 {
 	return math.lerp(coverage, far_coverage, far)
 }
 
+// The sun term's constants, which match clouds_common.hlsli: the octaves of multiple scattering, and the diffusion
+// floor that tools/cloud_scatter fits (see docs/rendering/clouds.md#multiple-scattering).
+@(private = "file")
+SCATTER_OCTAVES :: 3
+@(private = "file")
+SCATTER_ATTENUATION :: f32(0.5)
+@(private = "file")
+DIFFUSION_WEIGHT :: f32(0.45)
+@(private = "file")
+DIFFUSION_POWER :: f32(1.2)
+@(private = "file")
+DIFFUSION_RISE :: f32(0.44)
+@(private = "file")
+DIFFUSION_DECAY :: f32(0.06)
+
+@(private = "file")
+hg_phase :: proc(mu, g: f32) -> f32 {
+	g2 := g * g
+	return (1 - g2) / (4 * math.PI * math.pow(max(1 + g2 - 2 * g * mu, 1e-4), 1.5))
+}
+
+@(private = "file")
+cloud_phase :: proc(mu, k: f32) -> f32 {
+	return math.lerp(hg_phase(mu, -0.3 * k), hg_phase(mu, 0.8 * k), f32(0.5))
+}
+
+// cloud_sun_scattering is the light of a sun of illuminance 1 that a sample scatters toward the camera, before the
+// albedo, from its optical depth toward the sun, the cosine between the view ray and the direction toward the sun, and
+// the sine of the sun's elevation, as cloud_sun_scattering in clouds_common.hlsli has it.
+cloud_sun_scattering :: proc(od, mu_sun, sun_up: f32) -> f32 {
+	sun := f32(0)
+	a := f32(1)
+	last_phase := f32(0)
+	for _ in 0 ..< SCATTER_OCTAVES {
+		last_phase = cloud_phase(mu_sun, a)
+		sun += a * last_phase * math.exp(-a * od)
+		a *= SCATTER_ATTENUATION
+	}
+	front_lit := clamp(-mu_sun * 0.5 + 0.5, 0, 1)
+	sun *= math.lerp(f32(1), 1 - math.exp(-2 * od), front_lit)
+	up := clamp(sun_up, 0, 1)
+	buildup := 1 - math.exp(-DIFFUSION_RISE * od)
+	floor :=
+		DIFFUSION_WEIGHT *
+		math.pow(up, DIFFUSION_POWER) *
+		buildup *
+		buildup *
+		math.exp(-DIFFUSION_DECAY * od * up) *
+		last_phase
+	return sun + floor
+}
+
 // cloud_shadow_center is the shadow map's center relative to the camera: where the sun's rays through the camera meet
 // the layer's bottom, which is bottom_rel below or above the camera, snapped to a texel in the render origin's space,
 // whose offset from the camera is camera_offset, so the map does not swim as the camera moves.

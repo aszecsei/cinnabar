@@ -2,7 +2,7 @@
 
 A ray-marched layer of clouds above the world, between two heights above the fog volume's far end (`CLUSTER_FAR`, 500 m): a low layer whose type runs from stratus through cumulus to cumulonimbus, and a thin cirrus layer above it. The weather is authored, as four scalars or a painted weather map, and the shapes come from noise that the GPU makes once. The sun and the sky's ambient light light the clouds, the frame marches them at a share of its pixels with a history that it reprojects, and composes them over the [sky](sky.md#sky) before the fog over the background. A shadow map on the layer's bottom darkens the sun on everything that the light loop lights. They come from the `Clouds` settings (stable ID 55, see [Settings](frame.md#settings)) on a volume at the camera (`lib/engine/render/settings.odin`, `clouds.odin`; `clouds_*.hlsl`, `clouds_common.hlsli` and `cloud_shadow.hlsli` in `lib/engine/content/shaders`).
 
-**In this document:** [Settings](#settings) · [Weather](#weather) · [Shape](#shape) · [Lighting](#lighting) · [Far clouds](#far-clouds) · [Shadow](#shadow) · [Temporal](#temporal) · [Passes](#passes) · [Levels](#levels) · [Editor](#editor) · [Limits](#limits)
+**In this document:** [Settings](#settings) · [Weather](#weather) · [Shape](#shape) · [Lighting](#lighting) · [Multiple scattering](#multiple-scattering) · [Far clouds](#far-clouds) · [Shadow](#shadow) · [Temporal](#temporal) · [Passes](#passes) · [Levels](#levels) · [Editor](#editor) · [Limits](#limits)
 
 ## Settings
 
@@ -42,11 +42,30 @@ The noise is three textures that the GPU makes in the first frame with clouds (`
 `clouds_march.hlsl` marches one ray for each texel of the cloud buffer, a block of `divisor` × `divisor` pixels, from the block's center.
 
 - **The segment** ends at the block's farthest surface, the ground, or `CLOUD_MAX_DISTANCE`. The block's depth is the farthest of its pixels', or none when any pixel shows the sky. The step is the segment over the level's `steps`, at least the layer's thickness over 64, and the march starts a blue noise's share of a step in (`stbn_vec2.png`, by the frame's slice; a hash until the noise is resident). After three empty samples in a row it doubles its step, and steps back to the fine step when it finds cloud again. It stops behind 99 % of cloud.
-- **The sun:** at a sample with extinction, a light march toward the sun through the cheap density takes `light_steps` samples whose lengths double, out to the top of the layer or `LIGHT_REACH_MAX` (4 km), and sums their optical depth. The sun's light there is three octaves of multiple scattering (Wrenninge): each takes half the light, half the extinction and half the phase's eccentricity of the one before. The phase is a forward Henyey-Greenstein lobe at 0.8 and a back lobe at -0.3, half each. The powder effect darkens the creases of a front-lit cloud: `1 - e^(-2·od)`, by how much the sun is behind the camera. The sun's illuminance is the untinted sun's times the atmosphere's transmittance at the layer's middle (`sky_transmittance`), and at the cirrus layer's height for the cirrus, so the clouds go orange at dusk with the sun. Under a texture sky, it is the light's own color.
+- **The sun:** at a sample with extinction, a light march toward the sun through the cheap density takes `light_steps` samples whose lengths double, out to the top of the layer or `LIGHT_REACH_MAX` (4 km), and sums their optical depth, `od`. The sun's light there is `cloud_sun_scattering` (`clouds_common.hlsli`, and the same in Odin for the tests): three octaves of multiple scattering (Wrenninge), each of which takes half the light, half the extinction and half the phase's eccentricity of the one before; the powder effect, which darkens the creases of a front-lit cloud by `1 - e^(-2·od)`, by how much the sun is behind the camera; and the [diffusion floor](#multiple-scattering), the light that has scattered many times. The phase is a forward Henyey-Greenstein lobe at 0.8 and a back lobe at -0.3, half each. The sun's illuminance is the untinted sun's times the atmosphere's transmittance at the layer's middle (`sky_transmittance`), and at the cirrus layer's height for the cirrus, so the clouds go orange at dusk with the sun. Under a texture sky, it is the light's own color.
 - **Which sun:** the `Environment`'s linked light, when it has one; else the atmosphere's own sun, which casts no shadow since no light's record carries it; else, under a texture sky, the first directional light. Without any, the ambient light alone lights the clouds.
 - **The ambient light** comes from the frame's `Ambient`, times `ambient_intensity`, as the mean light of its upper and lower hemispheres (`ambient_hemisphere`, see [Ambient light](sky.md#ambient-light)). From 0.3 of the layer's height up, a sample sees the sky above it: the upper hemisphere's light. At the bottom of the layer, it sees the ground below it and the sky's light that comes down through the cloud: 0.25 of the upper hemisphere's light (`AMBIENT_BOTTOM_SKY`) and 0.15 of the lower hemisphere's (`AMBIENT_BOTTOM_GROUND`). So the bottoms take the sky's color, blue by day and pink at dusk. Between the two, the light blends with the height fraction over 0.3, to the power 0.8. The `Ambient` leaves the clouds out, so under a high coverage the light from above is more cloud's, not the clear sky's: the upper hemisphere's light turns grey, toward its luminance, by `smoothstep(0.5, 1, coverage)` of the local coverage (`OVERCAST_START` is 0.5) times the share of the layer above the sample. So an overcast's bottoms stay grey, and its tops keep the sky's color. The light is 0.6 of itself in rain. The albedo is 0.95, and 0.8 in rain.
 - **The march** adds each sample's light times the share of the light that the sample takes, and tracks the mean distance of what it hit, which the [temporal](#temporal) pass reprojects. The result is the light scattered toward the camera, not pre-exposed, with the transmittance in a, in `RGBA16_Float`.
 - **The cirrus** is a thin sheet at `cirrus_height`: the shape noise's R at one slice, stretched three times along the wind and swirled by the curl, remapped by `cirrus`, with an optical depth of `CIRRUS_OPTICAL_DEPTH` (0.8) at a coverage of 1. It is lit by the sun with a Henyey-Greenstein lobe at 0.7 and by half the lower hemisphere's ambient light, which it sees from below, and it dims what is behind it. A ray that finds no low cloud takes its distance.
+
+## Multiple scattering
+
+The octaves fall off as `e^(-0.25·od)` at the slowest. In a thick cloud, most of the sun's light that reaches a sample has scattered many times, and it falls off much more slowly. So the octaves alone leave the bottom of a thick cloud almost unlit by the sun. The diffusion floor adds that light, fitted to a Monte Carlo reference.
+
+- **The floor** is `DIFFUSION_WEIGHT · sun_up^DIFFUSION_POWER · (1 - e^(-DIFFUSION_RISE·od))² · e^(-DIFFUSION_DECAY·od·sun_up)` times the last octave's phase, where `sun_up` is the sine of the sun's elevation. The constants are 0.45, 1.2, 0.44 and 0.06. In a slab that the sun lights from above, the light that has scattered many times comes in through the top, which the sun lights at `sun_up`. It falls off with the vertical depth, `od·sun_up`, as it leaks out of the cloud. It builds up over the first optical depths, so a thin edge keeps the octaves' light: at an `od` of 1 or less, the floor adds at most 9% to them. It costs a few ALU per lit sample and no resource.
+- **The reference** is `tools/cloud_scatter` (`just cloud-scatter`). It traces random paths through a uniform slab of cloud with `cloud_phase`'s lobes, lit from above by a sun of illuminance 1, with no sky and no ground. Each path starts at a sample on the slab's bottom, in the view ray's direction. At each vertex it adds the sun's light that reaches the vertex straight through the slab. A weight window splits the paths as they climb toward the lit top, so the deep samples are not all noise. The sample is on the bottom because the samples that the camera sees with a large `od` are near a cloud's bottom or its far side, not deep inside it. The medium's albedo is 0.999, as water droplets absorb less than a thousandth of the light at each scattering. The march's own albedo, 0.95 (0.8 in rain), darkens the result once, as it darkens the ambient light. The tool's tests check the paths against transport theory's exact rate of fall-off deep in a slab.
+- **The comparison:** the reference at sun elevations of 90°, 45°, 20° and 5°, an `od` of 1, 5, 15 and 30, and views at 0°, 45°, 90°, 135° and 180° from the sun, turned downward in the sun's vertical plane. The error is each case's ratio to the reference, at its worst over the sun's elevations and the views, and the RMS of its log over all the cases:
+
+| Model | od 1 | od 5 | od 15 | od 30 | RMS of the log |
+|---|---|---|---|---|---|
+| The octaves alone, before | 2.3× | 5.2× | 41× | 745× | 3.33 |
+| The octaves and `w / (1 + k·od)` (k 0.052) | 2.8× | 3.6× | 3.4× | 2.5× | 0.59 |
+| A table of `od` and the view's cosine, at its best: the mean over the sun's elevations | 1.7× | 3.4× | 2.9× | 2.5× | 0.54 |
+| The octaves and the diffusion floor, as built | 2.3× | 2.3× | 1.6× | 1.8× | 0.29 |
+
+- **Why the floor, and not a table:** at the same `od`, the reference's light changes up to ten times with the sun's elevation, because a low sun lights the cloud's top at a grazing angle. A table of `od` and the view's cosine, baked as `sky_multiscatter.hlsl` bakes its own, cannot follow that, whatever it holds. The floor follows it through `sun_up`, at the cost of a few ALU, with no bake and no resource.
+- **The test** (`the_sun_term_follows_the_multiple_scattering_reference` in `clouds_test.odin`) holds the reference and checks the Odin port of `cloud_sun_scattering` against it: within a factor of 2.5 at every case, with an RMS of the log error of at most 0.32, and at most 10% more than the octaves at an `od` of 1 or less. After a change to the phase or to the sun term, run `just cloud-scatter` and copy the constants and the reference that it prints.
+- **In the editor**, in the `Clouds` debug view of the Intel Sponza sample with cumulus (`Scalars`, coverage 0.5, no wind), an `Atmosphere` sky and a fixed exposure: at noon, the clouds away from their edges are 8 to 17% brighter, the most in their mid tones, and their bottoms take more of the sun's white and less of the sky's blue. Within 3 pixels of the sky, the median pixel is 7% brighter; that band holds the silhouettes of thick clouds as well as thin edges. With the sun at 5°, the clouds are about 2% brighter, as the reference predicts: a grazing sun puts little light into the top.
 
 ## Far clouds
 
@@ -94,14 +113,14 @@ Past `far_distance`, the authored weather blends over as far again to a cumulus 
 | Ultra | Half on each side | 128 | 6 | 1024², 12 | 16 | 29.5 MB, and 1 MB |
 
 - **Memory** is the history pair and the two transients at the buffer's size, then the shadow map. The noise textures are 8.6 MB at every level, once.
-- **Cost**, in milliseconds on the GPU, in the Intel Sponza sample's editor viewport at 911x481 with the clouds over the upper half of the view, from one capture's profile at each level. The march grows with the buffer's size, so a 1440p viewport costs about nine times these.
+- **Cost**, in milliseconds on the GPU, in the Intel Sponza sample's editor viewport at 911x481, with cumulus (`Scalars`, coverage 0.5) over the upper two thirds of the view and an `Atmosphere` sky, as the medians of `editorctl timing` over nine profile summaries at each level. The march grows with the buffer's size, so a 1440p viewport costs about nine times these. Before and after the [diffusion floor](#multiple-scattering), the march's time is the same within 1%, at noon and with the sun at 5°:
 
-| Level | `clouds shadow` | `clouds march` | `clouds temporal` | `clouds composite` |
-|---|---|---|---|---|
-| Low | 0.006 | 0.081 | 0.005 | 0.009 |
-| Medium | 0.010 | 0.105 | 0.006 | 0.009 |
-| High | 0.011 | 0.165 | 0.006 | 0.009 |
-| Ultra | 0.034 | 0.213 | 0.006 | 0.009 |
+| Level | `clouds shadow` | `clouds march`, before | `clouds march`, after | `clouds temporal` | `clouds composite` |
+|---|---|---|---|---|---|
+| Low | 0.008 | 0.060 | 0.060 | 0.005 | 0.009 |
+| Medium | 0.012 | 0.092 | 0.093 | 0.006 | 0.009 |
+| High | 0.014 | 0.137 | 0.138 | 0.006 | 0.009 |
+| Ultra | 0.037 | 0.174 | 0.175 | 0.006 | 0.009 |
 
 ## Editor
 
@@ -116,4 +135,5 @@ The Atmosphere tab's Clouds group adds the component to the atmosphere's volume 
 - **The shadow map** covers 8 km around the point under the clouds toward the sun, and fades out as the sun nears the horizon. Beyond it, the world is lit.
 - **The stars and the discs are dimmed by the clouds' transmittance**, not occluded one by one.
 - **The march does not read the shadow map** for its own shadow: the light march gives each sample its own.
+- **The diffusion floor knows only `od` toward the sun and the sun's elevation**, and its reference is a slab, which real clouds are not. Near the top of a thick cloud, the light that the cloud below sends back up is missing: at noon, at an `od` of 1 to 5, the sun term is 3 to 10 times darker than in a deep slab. A floor that added it would also brighten thin edges, which have the same `od`. With the sun within a few degrees of the horizon, a thin sheet's sides are up to 2.3 times too bright, from the octaves.
 - **Reflection probe captures see no clouds and no cloud shadow**, so a probe under an overcast reflects a clear sky.

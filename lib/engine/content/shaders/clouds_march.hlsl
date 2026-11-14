@@ -55,9 +55,8 @@ float albedo(float precipitation) {
 	return lerp(0.95, 0.8, precipitation);
 }
 
-// sun_light is the sun's light scattered toward the camera at a sample: a light march toward the sun through the cheap
-// density in steps that double, then the multiple scattering octaves of its optical depth, each with its own phase, and
-// the powder effect, which darkens the creases of a front-lit cloud.
+// sun_light is the sun's light scattered toward the camera at a sample, before the albedo: a light march toward the sun
+// through the cheap density in steps that double, then the octaves and the diffusion floor of its optical depth.
 float3 sun_light(float3 p, float h, float t, float mu_sun) {
 	float3 to_sun = clouds.sun_direction.xyz;
 	float reach = min((clouds.top - h) / max(to_sun.y, 0.1), LIGHT_REACH_MAX);
@@ -70,15 +69,7 @@ float3 sun_light(float3 p, float h, float t, float mu_sun) {
 		od += cheap_sigma(p + to_sun * middle, h + to_sun.y * middle, t) * ds;
 		s += ds;
 	}
-	float3 sun = 0;
-	float a = 1;
-	[unroll] for (uint o = 0; o < SCATTER_OCTAVES; o++) {
-		sun += a * cloud_phase(mu_sun, a) * exp(-a * od);
-		a *= SCATTER_ATTENUATION;
-	}
-	float front_lit = saturate(-mu_sun * 0.5 + 0.5);
-	float powder = lerp(1, 1 - exp(-2 * od), front_lit);
-	return sun * powder * clouds.sun_illuminance.rgb;
+	return cloud_sun_scattering(od, mu_sun, to_sun.y) * clouds.sun_illuminance.rgb;
 }
 
 // At the bottom of the layer, the share of the upper hemisphere's light that comes down through the cloud, and the

@@ -116,6 +116,13 @@ static const float CLOUD_MAX_SCENE = 60000;
 // eccentricity of the one before.
 static const uint SCATTER_OCTAVES = 3;
 static const float SCATTER_ATTENUATION = 0.5;
+// The diffusion floor, fitted by tools/cloud_scatter (see docs/rendering/clouds.md#multiple-scattering): its weight, the
+// power of the sun's elevation's sine that scales it, how fast it builds up with the optical depth toward the sun, and
+// how fast it falls off with the vertical depth.
+static const float DIFFUSION_WEIGHT = 0.45;
+static const float DIFFUSION_POWER = 1.2;
+static const float DIFFUSION_RISE = 0.44;
+static const float DIFFUSION_DECAY = 0.06;
 
 float remap(float v, float lo, float hi, float a, float b) {
 	return a + (v - lo) / max(hi - lo, 1e-4) * (b - a);
@@ -130,6 +137,29 @@ float hg_phase(float mu, float g) {
 // cloud_phase is the clouds' phase: a forward lobe and a weaker back lobe, each scaled by an octave's eccentricity.
 float cloud_phase(float mu, float k) {
 	return lerp(hg_phase(mu, -0.3 * k), hg_phase(mu, 0.8 * k), 0.5);
+}
+
+// cloud_sun_scattering is the light of a sun of illuminance 1 that a sample scatters toward the camera, before the
+// albedo: od is the sample's optical depth toward the sun, mu_sun the cosine between the view ray and the direction
+// toward the sun, and sun_up the sine of the sun's elevation. The octaves of multiple scattering
+// each have their own phase, and the powder effect darkens the creases of a front-lit cloud. The diffusion floor is
+// the light that has scattered many times, as in a slab that the sun lights from above: it builds up over the first
+// optical depths, falls off with the vertical depth od · sun_up, and takes the last octave's phase. Matches
+// cloud_sun_scattering in clouds.odin.
+float cloud_sun_scattering(float od, float mu_sun, float sun_up) {
+	float sun = 0;
+	float a = 1;
+	float last_phase = 0;
+	[unroll] for (uint o = 0; o < SCATTER_OCTAVES; o++) {
+		last_phase = cloud_phase(mu_sun, a);
+		sun += a * last_phase * exp(-a * od);
+		a *= SCATTER_ATTENUATION;
+	}
+	float front_lit = saturate(-mu_sun * 0.5 + 0.5);
+	sun *= lerp(1, 1 - exp(-2 * od), front_lit);
+	float up = saturate(sun_up);
+	float buildup = 1 - exp(-DIFFUSION_RISE * od);
+	return sun + DIFFUSION_WEIGHT * pow(up, DIFFUSION_POWER) * buildup * buildup * exp(-DIFFUSION_DECAY * od * up) * last_phase;
 }
 
 // The geometry: a ray from a point at height h0 above the ground with mu, the cosine of its angle from the zenith, and
