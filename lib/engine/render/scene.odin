@@ -430,7 +430,8 @@ Cull_View :: struct {
 	offset:     [4]f32,
 	first_draw: u32,
 	flags:      u32,
-	// A virtual shadow map's level, which culls against its pages (see virtual_page_fields): 0 for another view.
+	// A virtual shadow map's level, which culls against the pages that it draws (see virtual_page_fields): 0 for another
+	// view.
 	virtual_table: u32,
 	virtual_page: u32,
 }
@@ -1448,7 +1449,7 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 			c.view_projection = shadows.matrices[v - FIRST_SHADOW_VIEW]
 			if v - FIRST_SHADOW_VIEW < shadows.virtual.count {
 				c.virtual_level, c.virtual_draw = u32(v - FIRST_SHADOW_VIEW), 1
-				views[v].virtual_table = gpu.read_index(r.shadows.virtual.table) + 1
+				views[v].virtual_table = gpu.read_index(f.state.virtual_shadows.table) + 1
 				views[v].virtual_page = virtual_page_fields(shadows.views[v - FIRST_SHADOW_VIEW], v - FIRST_SHADOW_VIEW)
 			}
 			views[v].planes = shadows.planes[v - FIRST_SHADOW_VIEW]

@@ -85,13 +85,17 @@ Aa_Technique :: enum u8 {
 }
 
 Shadow_Quality :: struct {
-	level:      Quality_Level,
+	level:         Quality_Level,
 	// Traced shadows for the first MAX_MASK_LIGHTS lights, which needs Ray_Query. The shadow maps still take the rest,
 	// at level.
-	ray_traced: bool,
+	ray_traced:    bool,
 	// A virtual shadow map in place of the cascades, for a directional light that is not traced (see
 	// docs/rendering/lighting-and-shadows.md#virtual-shadow-maps). Low has none.
-	virtual:    bool,
+	virtual:       bool,
+	// Whether the virtual shadow map keeps its pages from frame to frame, and draws only those that are new (see
+	// docs/rendering/lighting-and-shadows.md#caching). A caster that moves leaves its old shadow in the pages that the
+	// pool keeps, so no preset has it.
+	virtual_cache: bool,
 }
 
 Ao_Quality :: struct {
@@ -265,6 +269,7 @@ clamp_quality :: proc(q: Quality, caps: Caps) -> Quality {
 	q.shadows.level = clamp_enum(q.shadows.level, .High)
 	q.shadows.ray_traced &&= caps.ray_query
 	q.shadows.virtual &&= SHADOW_PARAMS[q.shadows.level].virtual_levels > 0
+	q.shadows.virtual_cache &&= q.shadows.virtual
 	q.ao.technique = clamp_enum(q.ao.technique, .Off)
 	q.ao.level = clamp_enum(q.ao.level, .High)
 	q.gi.technique = clamp_enum(q.gi.technique, .Off)
@@ -309,6 +314,7 @@ apply_quality :: proc(settings: ^Frame_Settings, q: Quality) {
 	settings.shadows.level = q.shadows.level
 	settings.shadows.ray_traced = q.shadows.ray_traced
 	settings.shadows.virtual = q.shadows.virtual
+	settings.shadows.virtual_cache = q.shadows.virtual_cache
 	settings.ambient_occlusion.technique = q.ao.technique
 	settings.ambient_occlusion.level = q.ao.level
 	settings.ambient_occlusion.off ||= q.ao.technique == .Off

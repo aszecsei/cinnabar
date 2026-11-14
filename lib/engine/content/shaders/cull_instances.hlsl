@@ -106,7 +106,8 @@ struct Cull_View {
 	float4 offset;
 	uint first_draw;
 	uint flags;
-	// A virtual shadow map's level, which culls against its pages (see virtual_view_reaches_pages): 0 for another view.
+	// A virtual shadow map's level, which culls against the pages that it draws (see virtual_view_reaches_draws): 0 for
+	// another view.
 	uint virtual_table;
 	uint virtual_page;
 };
@@ -135,7 +136,7 @@ bool sphere_in_view(Cull_View view, float3 center, float radius) {
 			return false;
 		}
 	}
-	return view.virtual_table == 0 || virtual_view_reaches_pages(view.planes, view.virtual_table, view.virtual_page, center, radius);
+	return view.virtual_table == 0 || virtual_view_reaches_draws(view.planes, view.virtual_table, view.virtual_page, center, radius);
 }
 
 // counter is a word of the counters for one of a set's lists in a view: its count, then its cursor, then its start,

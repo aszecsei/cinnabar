@@ -97,7 +97,7 @@ public sealed class ResourceMonitorView : Grid
                 ("Meshlets tested", $"{g.SelectedMeshlets:N0} / {g.HierarchyMeshlets:N0}"),
                 // With the viewport's shading stats: the forward pass's 2x2 quads, and the share of their lanes that cover a pixel.
                 .. ShadingRows(g),
-                // The virtual shadow map's pages, while a frame draws one: those it asked for, those it got of the pool's, and those it had no room for.
+                // The virtual shadow map's pages, while a frame draws one: those it asked for, those it got and those it had no room for, those the pool held, those it drew and those that left for them, and the pool's fill.
                 .. VirtualShadowRows(g),
                 // The pool of mesh pages, while a paged mesh is resident: the pages in it of its slots, those that views wait for, and what the frames copy in a second.
                 .. MeshPageRows(g),
@@ -119,8 +119,12 @@ public sealed class ResourceMonitorView : Grid
         if (g.VirtualPagesCapacity > 0)
         {
             yield return ("Shadow pages requested", $"{g.VirtualPagesRequested:N0}");
-            yield return ("Shadow pages allocated", $"{g.VirtualPagesAllocated:N0} / {g.VirtualPagesCapacity:N0} ({g.VirtualPagesAllocated * 100.0 / g.VirtualPagesCapacity:0}% full)");
+            yield return ("Shadow pages allocated", $"{g.VirtualPagesAllocated:N0}");
             yield return ("Shadow pages missed", $"{g.VirtualPagesMissed:N0}");
+            yield return ("Shadow pages cached", $"{g.VirtualPagesCached:N0}");
+            yield return ("Shadow pages drawn", $"{g.VirtualPagesDrawn:N0}");
+            yield return ("Shadow pages evicted", $"{g.VirtualPagesEvicted:N0}");
+            yield return ("Shadow page pool", $"{g.VirtualPagesResident:N0} / {g.VirtualPagesCapacity:N0} ({g.VirtualPagesResident * 100.0 / g.VirtualPagesCapacity:0}% full)");
         }
     }
 

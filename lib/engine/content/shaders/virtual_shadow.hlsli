@@ -17,6 +17,12 @@ Shadow_View virtual_view(uint level) {
 	return cn_buffer(frame.shadow_views).Load<Shadow_View>(frame.shadow_views_offset + level * sizeof(Shadow_View));
 }
 
+// virtual_origin is a level's first page in its absolute grid, its Shadow_View's page_origin, which its table's entries
+// wrap from (see virtual_table_entry).
+int2 virtual_origin(uint level) {
+	return cn_buffer(frame.shadow_views).Load<int2>(frame.shadow_views_offset + level * sizeof(Shadow_View) + 88);
+}
+
 // virtual_footprint_level is the level whose texel is nearest a pixel's footprint at a distance from the camera, with
 // the quality's bias. Only the distance counts, so turning the camera changes no point's level. Matches
 // virtual_footprint_level in virtual_shadows.odin.
@@ -80,21 +86,22 @@ uint2 virtual_physical(uint page) {
 	return uint2(page % frame.virtual_pool_pages_per_row, page / frame.virtual_pool_pages_per_row) * VIRTUAL_PAGE_TEXELS;
 }
 
-// virtual_sphere_has_pages is whether a sphere relative to the camera reaches a page of the level that this view draws.
-// The culling of the level's views has tested each instance and item, so this tests each meshlet, which is much smaller.
-bool virtual_sphere_has_pages(float3 center, float radius) {
+// virtual_sphere_draws is whether a sphere relative to the camera reaches a page that the frame draws in the level that
+// this view draws. The culling of the level's views has tested each instance and item, so this tests each meshlet, which
+// is much smaller.
+bool virtual_sphere_draws(float3 center, float radius) {
 	Shadow_View view = virtual_view(frame.virtual_level);
 	float2 texel = virtual_project(view, center).xy;
 	float reach = radius / view.texel + 1;
-	return virtual_rect_has_pages(cn_buffer(frame.virtual_table), frame.virtual_level, int2(floor(texel - reach)) >> VIRTUAL_PAGE_SHIFT, int2(floor(texel + reach)) >> VIRTUAL_PAGE_SHIFT);
+	return virtual_rect_draws(cn_buffer(frame.virtual_table), frame.virtual_level, view.page_origin, int2(floor(texel - reach)) >> VIRTUAL_PAGE_SHIFT, int2(floor(texel + reach)) >> VIRTUAL_PAGE_SHIFT);
 }
 
-// virtual_quad_has_page is whether a fragment's 2x2 quad has a fragment on a page of the level that this view draws, so a
-// fragment whose search for its surface costs more than this can leave first.
-bool virtual_quad_has_page(float2 pixel) {
-	uint page = cn_buffer(frame.virtual_table).Load(virtual_table_entry(frame.virtual_level, uint2(pixel) >> VIRTUAL_PAGE_SHIFT));
-	uint has_page = page != VIRTUAL_NO_PAGE ? 1 : 0;
-	return (has_page | QuadReadAcrossX(has_page) | QuadReadAcrossY(has_page) | QuadReadAcrossDiagonal(has_page)) != 0;
+// virtual_quad_draws is whether a fragment's 2x2 quad has a fragment on a page that the frame draws in the level that this
+// view draws, so a fragment whose search for its surface costs more than this can leave first.
+bool virtual_quad_draws(float2 pixel) {
+	uint entry = cn_buffer(frame.virtual_table).Load(virtual_table_entry(frame.virtual_level, virtual_origin(frame.virtual_level), int2(pixel) >> VIRTUAL_PAGE_SHIFT));
+	uint draws = virtual_entry_draws(entry) ? 1 : 0;
+	return (draws | QuadReadAcrossX(draws) | QuadReadAcrossY(draws) | QuadReadAcrossDiagonal(draws)) != 0;
 }
 
 // Virtual_Write is a fragment's write to the pool: the pool's texel, and the depth.
@@ -104,17 +111,19 @@ struct Virtual_Write {
 	float depth;
 };
 
-// virtual_test is what a fragment would write to its level's page. It is not wanted if the page does not exist, or if a
-// nearer depth is there already, so a fragment that is not wanted need not run the material. A pass with no depth
+// virtual_test is what a fragment would write to its level's page. It is not wanted if the frame does not draw the page,
+// which the pool may hold from an earlier frame, or if a nearer depth is there already, so a fragment that is not wanted
+// need not run the material. A pass with no depth
 // attachment has no pipeline bias, so this applies it, and clamps depth as the cascades' pipelines do, so casters
 // between the light and the view still cast. Depth is reversed, so the nearest to the light is the largest.
 Virtual_Write virtual_test(float2 pixel, float z, float slope) {
 	Virtual_Write w = (Virtual_Write)0;
 	uint2 texel = uint2(pixel);
-	uint page = cn_buffer(frame.virtual_table).Load(virtual_table_entry(frame.virtual_level, texel >> VIRTUAL_PAGE_SHIFT));
-	if (page == VIRTUAL_NO_PAGE) {
+	uint entry = cn_buffer(frame.virtual_table).Load(virtual_table_entry(frame.virtual_level, virtual_origin(frame.virtual_level), int2(texel >> VIRTUAL_PAGE_SHIFT)));
+	if (!virtual_entry_draws(entry)) {
 		return w;
 	}
+	uint page = virtual_entry_page(entry);
 	// The unit of a 32-bit float at z, as a depth bias's constant is in.
 	float unit = z > 0 ? exp2(floor(log2(z)) - 23) : 0;
 	w.depth = saturate(z + VIRTUAL_DEPTH_BIAS * unit + VIRTUAL_SLOPE_BIAS * slope);
@@ -152,12 +161,13 @@ struct Virtual_Hit {
 	uint center_page;
 };
 
-// virtual_block_page is a page's entry in a level's table, or VIRTUAL_NO_PAGE outside the level.
-uint virtual_block_page(ByteAddressBuffer table, uint level, int2 page) {
+// virtual_block_page is the physical page of a page, by its place in a level whose first page is origin, or
+// VIRTUAL_NO_PAGE outside the level.
+uint virtual_block_page(ByteAddressBuffer table, uint level, int2 origin, int2 page) {
 	if (any(page < 0) || any(page >= int(VIRTUAL_PAGES))) {
 		return VIRTUAL_NO_PAGE;
 	}
-	return table.Load(virtual_table_entry(level, uint2(page)));
+	return virtual_entry_page(table.Load(virtual_table_entry(level, origin, page)));
 }
 
 // virtual_find finds the finest level that has the page that holds the point, from one finer than its footprint's, where
@@ -180,7 +190,7 @@ bool virtual_find(float3 p, float3 normal, float3 to_light, out Virtual_Hit hit)
 			continue;
 		}
 		int2 center = texel >> VIRTUAL_PAGE_SHIFT;
-		uint center_page = virtual_block_page(table, level, center);
+		uint center_page = virtual_block_page(table, level, view.page_origin, center);
 		if (center_page == VIRTUAL_NO_PAGE) {
 			continue;
 		}
@@ -192,10 +202,10 @@ bool virtual_find(float3 p, float3 normal, float3 to_light, out Virtual_Hit hit)
 		hit.center_page = center_page;
 		int2 low = hit.block.base >> VIRTUAL_PAGE_SHIFT;
 		int2 high = (hit.block.base + hit.block.size - 1) >> VIRTUAL_PAGE_SHIFT;
-		hit.pages[0] = virtual_block_page(table, level, low);
-		hit.pages[1] = virtual_block_page(table, level, int2(high.x, low.y));
-		hit.pages[2] = virtual_block_page(table, level, int2(low.x, high.y));
-		hit.pages[3] = virtual_block_page(table, level, high);
+		hit.pages[0] = virtual_block_page(table, level, view.page_origin, low);
+		hit.pages[1] = virtual_block_page(table, level, view.page_origin, int2(high.x, low.y));
+		hit.pages[2] = virtual_block_page(table, level, view.page_origin, int2(low.x, high.y));
+		hit.pages[3] = virtual_block_page(table, level, view.page_origin, high);
 		return true;
 	}
 	return false;

@@ -18,6 +18,7 @@ A volume says how far the ambient occlusion reaches; the quality says how many s
 | `shadows.level` | `Low` … `Ultra` | The shadow maps' atlas, cascades and filter (`SHADOW_PARAMS`) |
 | `shadows.ray_traced` | `bool` | Traced shadows for the first `MAX_MASK_LIGHTS` lights (see [Shadows](lighting-and-shadows.md#shadows)). Needs `Ray_Query` |
 | `shadows.virtual` | `bool` | A [virtual shadow map](lighting-and-shadows.md#virtual-shadow-maps) in place of the cascades, for a directional light that is not traced. Low has none |
+| `shadows.virtual_cache` | `bool` | The virtual shadow map keeps its pages from frame to frame and draws only those that are new (see [Caching](lighting-and-shadows.md#caching)). Off in every preset, because a caster that moves leaves its old shadow in the pages that it keeps, and off without `shadows.virtual` |
 | `ao.technique` | `Off`, `Gtao`, `Ssao`, `Hbao` | The [ambient occlusion](ambient-occlusion.md#techniques)'s search |
 | `ao.level` | `Low` … `Ultra` | The search's samples and steps (`AO_PARAMS`, a table for each technique) |
 | `gi.technique` | `Off`, `Screen_Cascades`, `Split_Cascades`, `Voxel_Cones` | The [global illumination](global-illumination.md#global-illumination). `Split_Cascades` adds its [split cascades](global-illumination.md#split-cascades) and [world probes](global-illumination.md#world-probes), and needs `Ray_Query`. `Voxel_Cones` uses its [voxel cones](global-illumination.md#voxel-cones), needs no cap, and no preset chooses it |
@@ -104,6 +105,7 @@ The player's choice is in the [project settings](../overview/architecture.md#pro
 | `quality.shadows` | `Low` … `Ultra` |
 | `quality.shadows.ray_traced` | `true`, `false` |
 | `quality.shadows.virtual` | `true`, `false`; a file without it keeps the preset's |
+| `quality.shadows.virtual_cache` | `true`, `false`; a file without it keeps the preset's, which is off |
 | `quality.ao` | `Off`, `Gtao`, `Ssao`, `Hbao` |
 | `quality.ao.level` | `Low` … `Ultra` |
 | `quality.gi` | `Off`, `Screen_Cascades`, `Split_Cascades`, `Voxel_Cones`; `World_Probes`, its name before the split cascades, reads as `Split_Cascades` |

@@ -238,7 +238,7 @@ bool virtual_depth_at(float3 p, uint level, out float stored, out float z, out f
 		if (!virtual_in_rect(view, t, t)) {
 			continue;
 		}
-		uint page = virtual_block_page(table, level, t >> VIRTUAL_PAGE_SHIFT);
+		uint page = virtual_block_page(table, level, view.page_origin, t >> VIRTUAL_PAGE_SHIFT);
 		if (page == VIRTUAL_NO_PAGE) {
 			continue;
 		}

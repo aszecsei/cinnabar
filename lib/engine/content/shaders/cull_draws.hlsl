@@ -79,7 +79,8 @@ struct Cull_View {
 	float4 offset;
 	uint first_draw;
 	uint flags;
-	// A virtual shadow map's level, which culls against its pages (see virtual_view_reaches_pages): 0 for another view.
+	// A virtual shadow map's level, which culls against the pages that it draws (see virtual_view_reaches_draws): 0 for
+	// another view.
 	uint virtual_table;
 	uint virtual_page;
 };
@@ -288,5 +289,5 @@ bool item_visible(Item item, Cull_View view, out float3 center, out float radius
 			return false;
 		}
 	}
-	return view.virtual_table == 0 || virtual_view_reaches_pages(view.planes, view.virtual_table, view.virtual_page, p, radius);
+	return view.virtual_table == 0 || virtual_view_reaches_draws(view.planes, view.virtual_table, view.virtual_page, p, radius);
 }

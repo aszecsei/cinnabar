@@ -101,6 +101,8 @@ Light_Fixture :: struct {
 	platform: core.Platform_API,
 	world:    ecs.World,
 	renderer: ^Renderer,
+	// Every frame draws a view, whose state a virtual shadow map's levels read.
+	state:    View_State,
 	frame:    Frame,
 }
 
@@ -135,7 +137,7 @@ light_setup :: proc(t: ^testing.T) -> ^Light_Fixture {
 	f.renderer.platform = &f.platform
 	lights_register(&f.renderer.lights, &f.world)
 	view := View{rotation = 1, projection = Perspective{1, 0.1}}
-	f.frame = {renderer = f.renderer, view = view, size = {64, 32}, view_projection = view_projection(view, 2)}
+	f.frame = {renderer = f.renderer, state = &f.state, view = view, size = {64, 32}, view_projection = view_projection(view, 2)}
 	return f
 }
 

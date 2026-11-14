@@ -401,21 +401,36 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 		testing.expect(t, draw_frame(r, w, desc), "the virtual shadow map's frame did not execute")
 		testing.expect_value(t, record.shadow_views, SHADOW_PARAMS[.High].virtual_levels + 6)
 		testing.expect(t, r.view.virtual_shadows.pool != {})
+		testing.expect(t, r.view.virtual_shadows.table != {} && r.view.virtual_shadows.pages != {})
 		testing.expect_value(t, r.view.virtual_shadows.pool_pages, SHADOW_PARAMS[.High].pool_pages)
-		// A level with another pool remakes it.
+		// The frame that executed keeps what it drew for. With the cache, the next frame keeps it and counts on.
+		cache, cached := r.view.virtual_shadows.cache.?
+		testing.expect(t, cached && cache.epoch == 1 && cache.params == SHADOW_PARAMS[.High], "the frame kept no cache")
+		q.shadows.virtual_cache = true
+		testing.expect(t, draw_frame(r, w, desc), "the virtual shadow map's frame did not execute")
+		cache, cached = r.view.virtual_shadows.cache.?
+		testing.expect(t, cached && cache.epoch == 2 && cache.settings.virtual_cache, "the cache did not count on")
+		// A level with another pool remakes it, whose pages hold nothing, so the cache starts again.
 		q.shadows.level = .Ultra
 		testing.expect(t, draw_frame(r, w, desc), "the virtual shadow map's frame did not execute")
 		testing.expect_value(t, r.view.virtual_shadows.pool_pages, SHADOW_PARAMS[.Ultra].pool_pages)
-		// A frame that records the stats' copy and then fails writes no copy and does not move on, so its stats show none.
+		cache, cached = r.view.virtual_shadows.cache.?
+		testing.expect(t, cached && cache.epoch == 1 && cache.params == SHADOW_PARAMS[.Ultra], "the new pool kept the old cache")
+		// A frame that records the stats' copy and then fails writes no copy and does not move on, so its stats show none,
+		// and it keeps the cache of the last frame that ran.
 		next := r.view.virtual_shadows.stats_ring.next
 		platform.gpu_submit = fail_submit
 		testing.expect(t, !draw_frame(r, w, desc), "the frame executed with a submit that fails")
 		platform.gpu_submit = null.submit
 		testing.expect_value(t, r.view.virtual_shadows.stats_ring.next, next)
 		testing.expect_value(t, virtual_shadow_stats(r), Virtual_Shadow_Stats{})
+		kept, _ := r.view.virtual_shadows.cache.?
+		testing.expect_value(t, kept, cache)
 		q.shadows = {level = .Low, virtual = true}
 		testing.expect(t, draw_frame(r, w, desc), "the cascades' frame did not execute")
 		testing.expect_value(t, record.shadow_views, SHADOW_PARAMS[.Low].cascades + 6)
+		// What moved while the cascades drew is not known, so the cache is gone.
+		testing.expect(t, r.view.virtual_shadows.cache == nil, "the cascades' frame kept the cache")
 		// The cascades' frame copies no virtual stats, so none are written, and none show.
 		testing.expect_value(t, r.view.virtual_shadows.stats_ring.written, [READBACK_COPIES]bool{})
 		testing.expect_value(t, virtual_shadow_stats(r), Virtual_Shadow_Stats{})
@@ -1126,6 +1141,7 @@ gpu_objects :: proc(v: ^View_State) -> (textures, buffers: int) {
 		}
 	}
 	buffers += buffer({v.post.exposure, v.occlusion.cell_seen, v.occlusion.stats, v.gi.probes.states, v.virtual_shadows.stats, v.shading.stats})
+	buffers += buffer({v.virtual_shadows.table, v.virtual_shadows.pages})
 	buffers += buffer(v.occlusion.slot_seen[:])
 	buffers += buffer({v.gi.split.slots, v.gi.split.deposits, v.gi.split.index, v.gi.split.lists, v.gi.split.counters})
 	buffers += buffer({v.gi.split.arguments, v.gi.split.accum, v.gi.split.history, v.gi.split.merged})

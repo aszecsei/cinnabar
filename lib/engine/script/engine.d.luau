@@ -230,6 +230,7 @@ type RenderQuality = {
 	reflections: string,
 	reflections_level: string,
 	clouds: string,
+	virtual_shadow_cache: boolean,
 }
 
 -- What Render.set_quality changes: the fields that it gives. A preset sets every feature first.
@@ -250,6 +251,7 @@ type RenderQualityChange = {
 	reflections: string?,
 	reflections_level: string?,
 	clouds: string?,
+	virtual_shadow_cache: boolean?,
 }
 
 -- What the device can do that the quality depends on. aa lists the anti-aliasing techniques that it runs, gi the

@@ -286,7 +286,7 @@ float ps_impostor_depth(Impostor_Varyings i) : SV_Depth {
 // The virtual shadow map's depth pass, which has no depth attachment. impostor_surface has moved the depth already, so
 // it has no slope bias.
 void ps_impostor_virtual_depth(Impostor_Varyings i) {
-	if (!virtual_quad_has_page(i.position.xy)) {
+	if (!virtual_quad_draws(i.position.xy)) {
 		return;
 	}
 	Impostor_Surface hit;

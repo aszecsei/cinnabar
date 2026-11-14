@@ -32,22 +32,23 @@ REGISTRY_KEY :: "cinnabar.render_quality"
 // The fields of a script's quality table, by the settings files' keys.
 @(rodata)
 SCRIPT_QUALITY_FIELDS := [Quality_Key]cstring {
-	.Preset             = "preset",
-	.Shadows            = "shadows",
-	.Ray_Traced_Shadows = "ray_traced_shadows",
-	.Ao                 = "ao",
-	.Ao_Level           = "ao_level",
-	.Gi                 = "gi",
-	.Gi_Level           = "gi_level",
-	.Fog                = "fog",
-	.Aa                 = "aa",
-	.Render_Scale       = "render_scale",
-	.Lod_Error          = "lod_error",
-	.Mesh_Pool          = "mesh_pool",
-	.Virtual_Shadows    = "virtual_shadows",
-	.Reflections        = "reflections",
-	.Reflections_Level  = "reflections_level",
-	.Clouds             = "clouds",
+	.Preset               = "preset",
+	.Shadows              = "shadows",
+	.Ray_Traced_Shadows   = "ray_traced_shadows",
+	.Ao                   = "ao",
+	.Ao_Level             = "ao_level",
+	.Gi                   = "gi",
+	.Gi_Level             = "gi_level",
+	.Fog                  = "fog",
+	.Aa                   = "aa",
+	.Render_Scale         = "render_scale",
+	.Lod_Error            = "lod_error",
+	.Mesh_Pool            = "mesh_pool",
+	.Virtual_Shadows      = "virtual_shadows",
+	.Reflections          = "reflections",
+	.Reflections_Level    = "reflections_level",
+	.Clouds               = "clouds",
+	.Virtual_Shadow_Cache = "virtual_shadow_cache",
 }
 
 // script_quality is the Script_Quality of a renderer and a project settings file.
@@ -90,6 +91,8 @@ quality_binding :: proc(L: ^luau.State) -> c.int {
 			luau.pushboolean(L, b32(q.shadows.ray_traced))
 		case .Virtual_Shadows:
 			luau.pushboolean(L, b32(q.shadows.virtual))
+		case .Virtual_Shadow_Cache:
+			luau.pushboolean(L, b32(q.shadows.virtual_cache))
 		case .Render_Scale:
 			luau.pushnumber(L, f64(q.render_scale))
 		case .Lod_Error:

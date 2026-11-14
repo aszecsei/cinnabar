@@ -1192,11 +1192,17 @@ Game_Stats :: struct {
 	forward_pixels:     u32,
 	// The virtual shadow map's pages a frame or two ago: those that the frame asked for, those that it got, those that the
 	// pool had no room for, and how many the pool holds, 0 without it (see
-	// docs/rendering/lighting-and-shadows.md#virtual-shadow-maps).
+	// docs/rendering/lighting-and-shadows.md#virtual-shadow-maps); of those that it got, those that the pool held and those
+	// that it drew, the pages that left the pool for them, and the pages that the pool holds after the frame (see
+	// docs/rendering/lighting-and-shadows.md#caching).
 	virtual_pages_requested: u32,
 	virtual_pages_allocated: u32,
 	virtual_pages_missed:    u32,
 	virtual_pages_capacity:  u32,
+	virtual_pages_cached:    u32,
+	virtual_pages_drawn:     u32,
+	virtual_pages_evicted:   u32,
+	virtual_pages_resident:  u32,
 	// The pool of mesh pages: the pages that are resident, the slots that it has, 0 without a paged mesh, the pages that
 	// views want and that are not resident yet, and the bytes a second that the frames since the last stats copied into
 	// it (see docs/rendering/assets.md#mesh-pages).
