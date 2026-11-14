@@ -15,7 +15,7 @@ The recipes that matter most:
 | `just release` | Cooks the `release` configuration and builds the statically linked `<game>.exe` into `build/release`, with its content and settings beside it. The executable has no console and logs to a file (see [The game package](../world/game-package.md#releases)). |
 | `just engine` | Builds everything that a project outside the repository builds and runs with: the host, the cooker, the standard game, the editor and `cinnabar.exe` (see [Getting started](getting-started.md#the-engine)). |
 | `just engine-runtime` | Builds the standard game alone: `build/dev/standard.dll` and the release executable `build/runtime/runtime.exe`, which a project without Odin runs. |
-| `just test` | Runs every Odin package's tests, the script tests with direct field access on and off, and the editor's .NET tests. |
+| `just test` | Runs every Odin package's tests, the script tests with direct field access on and off, and the editor's .NET tests. It builds `null-host.exe` first, the host on the null GPU backend, on which the editor's host tests run without a GPU (see [Editor: Host tests](../editor/processes-and-projects.md#host-tests)). |
 | `just check`, `vet`, `lint`, `fmt` | Type checks and lints every package, and formats the source. |
 | `just script-types`, `link-schema`, `ltc-fit`, `stbn` | Regenerate derived files: the Luau definition file, the links' JSON schemas, the area lights' tables, and the blue noise of the ambient occlusion and the screen-space reflections. |
 | `just screenshot`, `just gif` | With the editor open, write a screenshot or a GIF of its viewport, with a JSON sidecar, into `build/captures` and print the files; `just screenshot --view depth` adds a debug view (see [Editor: Capture](../editor/capture.md#automation)). |
@@ -28,7 +28,8 @@ Everything the justfile makes goes under `build/`, one folder per thing you run,
 
 ```
 build/
-├── dev/        host.exe, <game>.dll or standard.dll (and the <name>_<process>_<version>.dll copies the hosts load),
+├── dev/        host.exe, null-host.exe (for the editor's tests), <game>.dll or standard.dll (and the
+│               <name>_<process>_<version>.dll copies the hosts load),
 │               luau.dll, D3D12/ and the FSR libraries, content/        the development loose cache
 ├── release/    <game>.exe, D3D12/ and the FSR libraries, content/        the bundles, project.settings
 ├── runtime/    runtime.exe        the standard game's release executable
