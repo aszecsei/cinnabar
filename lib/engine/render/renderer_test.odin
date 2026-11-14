@@ -154,6 +154,9 @@ enable_pipelines :: proc(r: ^Renderer) {
 		&r.scene.cull_patches_pipeline,
 		// The traced shadows, so the lights trace their mask, and the frame builds the ray scene before it.
 		&r.shadows.mask_pipeline,
+		// The traced mask's denoiser, for its lights with a size.
+		&r.shadows.temporal_pipeline,
+		&r.shadows.spatial_pipeline,
 		// The contact shadows, which the sun takes where the frame does not trace.
 		&r.shadows.contact_pipeline,
 		&r.ray_scene.bin_pipeline,

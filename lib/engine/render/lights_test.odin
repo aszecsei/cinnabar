@@ -320,6 +320,36 @@ a_soft_lights_views_have_a_guard_band :: proc(t: ^testing.T) {
 }
 
 @(test)
+traced_soft_lights_take_soft_channels_whose_history_follows_them :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	f := light_setup(t)
+	defer light_teardown(f)
+	w := &f.world
+
+	sun := spawn_light(w, {}, 1, Directional_Light{intensity = 1, cast_shadows = true})
+	soft := spawn_light(w, {1, 0, 3}, 1, Point_Light{intensity = 4, source_radius = 0.1, cast_shadows = true})
+	quad := spawn_light(w, {-1, 0, 3}, 1, Quad_Light{intensity = 2, cast_shadows = true})
+	frame := &f.frame
+	frame.lights = extract_lights(frame, w, nil)
+	lf := frame.lights
+	testing.expect_value(t, lf.entities[0], sun)
+	frame.shadow_settings = {distance = SHADOW_DISTANCE, split_lambda = SHADOW_SPLIT_LAMBDA, level = .High}
+	assign_shadow_views(frame, trace = true)
+	sf := frame.shadows
+	// The sun has no size, so its channel is hard; the point light and the quad light have sizes.
+	testing.expect_value(t, sf.mask_count, 3)
+	testing.expect_value(t, sf.mask_soft, u32(0b110))
+	testing.expect_value(t, lf.entities[sf.mask_lights[1]], soft)
+	testing.expect_value(t, lf.entities[sf.mask_lights[2]], quad)
+
+	// A channel takes the history of last frame's channel that held its light, and starts again otherwise.
+	previous := Mask_History{lights = {quad, soft, {}, {}}}
+	current := Mask_History{lights = {soft, {}, quad, sun}}
+	testing.expect_value(t, mask_history_channels(previous, current), [4]u32{1, max(u32), 0, max(u32)})
+	testing.expect_value(t, mask_history_channels({}, current), [4]u32{max(u32), max(u32), max(u32), max(u32)})
+}
+
+@(test)
 area_lights_record_their_shapes :: proc(t: ^testing.T) {
 	sync.guard(&backend_lock)
 	f := light_setup(t)
