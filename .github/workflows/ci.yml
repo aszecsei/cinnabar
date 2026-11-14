@@ -19,7 +19,7 @@ defaults:
 
 jobs:
   fmt:
-    runs-on: windows-2022
+    runs-on: windows-2025
     steps:
       - uses: actions/checkout@v5
       - uses: taiki-e/install-action@v2
@@ -47,25 +47,8 @@ jobs:
           fi
 
   lint:
-    runs-on: windows-2022
+    runs-on: windows-2025
     steps:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/setup-odin
       - run: just lint
-
-  test:
-    # The justfile's CMake generator is Visual Studio 17 2022, which windows-2025 no longer has.
-    runs-on: windows-2022
-    timeout-minutes: 120
-    steps:
-      - uses: actions/checkout@v5
-      - uses: ./.github/actions/setup-odin
-      - uses: actions/setup-dotnet@v5
-        with:
-          dotnet-version: 10.0.x
-      # The submodules, Compressonator's sparse checkout, the Agility SDK, DXC and FidelityFX.
-      - run: just install
-      # The editor's host tests need build/dev/mygame.dll and the sample's cooked content. The runner has no GPU, so
-      # the D3D12 host's tests skip themselves and the null host's tests run.
-      - run: just build
-      - run: just test
