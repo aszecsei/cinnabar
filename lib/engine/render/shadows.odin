@@ -31,18 +31,22 @@ Shadow_Filter :: enum u32 {
 // and point lights' faces take slots of slot pixels, several to a cell. A level with virtual_levels has a virtual shadow
 // map, whose pool is pool_pages of VIRTUAL_PAGE_TEXELS on a side. virtual_bias moves its levels: above 0 is coarser.
 // A level with soft has percentage-closer soft shadows for the atlas's lights that have a size (see Soft_Params), and a
-// level with smrt rays shadow map ray tracing for the virtual shadow map's light (see Smrt_Params).
+// level with smrt rays shadow map ray tracing for the virtual shadow map's light (see Smrt_Params). With the caches, a
+// view draws its dynamic casters within dynamic_distance meters live every frame, and bakes the farther ones into its
+// caches, of which the atlas's redraws at most refresh_slots slots a frame for their reports (see shadow_cache.odin).
 Shadow_Params :: struct {
-	atlas:          int,
-	cell:           int,
-	slot:           int,
-	cascades:       int,
-	filter:         Shadow_Filter,
-	virtual_levels: int,
-	pool_pages:     [2]u32,
-	virtual_bias:   f32,
-	soft:           Soft_Params,
-	smrt:           Smrt_Params,
+	atlas:            int,
+	cell:             int,
+	slot:             int,
+	cascades:         int,
+	filter:           Shadow_Filter,
+	virtual_levels:   int,
+	pool_pages:       [2]u32,
+	virtual_bias:     f32,
+	soft:             Soft_Params,
+	smrt:             Smrt_Params,
+	dynamic_distance: f32,
+	refresh_slots:    int,
 }
 
 // Smrt_Params are the virtual shadow map's soft shadows at a level, shadow map ray tracing (see
@@ -67,10 +71,10 @@ Soft_Params :: struct {
 
 @(rodata)
 SHADOW_PARAMS := [Quality_Level]Shadow_Params {
-	.Low    = {atlas = 2048, cell = 1024, slot = 512, cascades = 2, filter = .Taps_1},
-	.Medium = {atlas = 4096, cell = 1024, slot = 512, cascades = 3, filter = .Taps_4, virtual_levels = 12, pool_pages = {32, 32}, virtual_bias = 1, soft = {search = 4, taps = 8, radius = 16}},
-	.High   = {atlas = 4096, cell = 1024, slot = 512, cascades = 4, filter = .Taps_4, virtual_levels = 12, pool_pages = {64, 32}, soft = {search = 8, taps = 16, radius = 16}, smrt = {rays = 4, steps = 6, length = SMRT_LENGTH}},
-	.Ultra  = {atlas = 8192, cell = 2048, slot = 1024, cascades = 4, filter = .Taps_9, virtual_levels = 13, pool_pages = {64, 64}, soft = {search = 8, taps = 24, radius = 32}, smrt = {rays = 8, steps = 8, length = SMRT_LENGTH}},
+	.Low    = {atlas = 2048, cell = 1024, slot = 512, cascades = 2, filter = .Taps_1, dynamic_distance = 50, refresh_slots = 1},
+	.Medium = {atlas = 4096, cell = 1024, slot = 512, cascades = 3, filter = .Taps_4, virtual_levels = 12, pool_pages = {32, 32}, virtual_bias = 1, soft = {search = 4, taps = 8, radius = 16}, dynamic_distance = 75, refresh_slots = 2},
+	.High   = {atlas = 4096, cell = 1024, slot = 512, cascades = 4, filter = .Taps_4, virtual_levels = 12, pool_pages = {64, 32}, soft = {search = 8, taps = 16, radius = 16}, smrt = {rays = 4, steps = 6, length = SMRT_LENGTH}, dynamic_distance = 100, refresh_slots = 4},
+	.Ultra  = {atlas = 8192, cell = 2048, slot = 1024, cascades = 4, filter = .Taps_9, virtual_levels = 13, pool_pages = {64, 64}, soft = {search = 8, taps = 24, radius = 32}, smrt = {rays = 8, steps = 8, length = SMRT_LENGTH}, dynamic_distance = 150, refresh_slots = 6},
 }
 // How far the virtual shadow map's rays reach toward the light, in meters. A caster farther than this casts a penumbra
 // as wide as one this far.
@@ -247,6 +251,8 @@ Shadow_Passes :: struct {
 	// The traced mask's denoiser.
 	temporal_pipeline: Shader_Pipeline,
 	spatial_pipeline:  Shader_Pipeline,
+	// The atlas's cache's clear and copy (see shadow_cache.odin).
+	cache_pipeline:    Shader_Pipeline,
 	sampler:       gpu.Sampler,
 	virtual:       Virtual_Shadows,
 }
@@ -280,6 +286,7 @@ Shadow_Frame :: struct {
 	mask:           Texture,
 	contact:        Texture,
 	virtual:        Virtual_Frame,
+	cache:          Atlas_Frame,
 	views_upload:   gpu.Upload,
 	mask_constants: gpu.Upload,
 }
@@ -289,6 +296,7 @@ shadows_init :: proc(s: ^Shadow_Passes, platform: ^core.Platform_API) {
 	s.contact_pipeline = shader_pipeline(CONTACT_SHADOWS_SHADER)
 	s.temporal_pipeline = shader_pipeline(MASK_TEMPORAL_SHADER)
 	s.spatial_pipeline = shader_pipeline(MASK_SPATIAL_SHADER)
+	s.cache_pipeline = shader_pipeline(SHADOW_CACHE_SHADER)
 	s.sampler = platform.gpu_create_sampler({filter = .Linear, address = .Clamp, compare = .Greater_Equal, label = "shadow comparison"})
 	virtual_shadows_init(&s.virtual)
 }
@@ -300,6 +308,7 @@ shadows_destroy :: proc(s: ^Shadow_Passes, platform: ^core.Platform_API) {
 	destroy_shader_pipeline(&s.contact_pipeline, platform)
 	destroy_shader_pipeline(&s.temporal_pipeline, platform)
 	destroy_shader_pipeline(&s.spatial_pipeline, platform)
+	destroy_shader_pipeline(&s.cache_pipeline, platform)
 }
 
 // cascade_splits are the view depths at which count cascades end: between even and exponential splits of the range
@@ -332,6 +341,7 @@ assign_shadows :: proc(f: ^Frame) {
 		sync_compute_pipeline(&r.shadows.spatial_pipeline, r.platform, r.residency.assets, {label = "shadow mask spatial"}, r.reloaded)
 	}
 	sync_compute_pipeline(&r.shadows.contact_pipeline, r.platform, r.residency.assets, {label = "contact shadows"}, r.reloaded)
+	sync_shadow_cache_pipeline(r)
 	trace := f.shadow_settings.ray_traced && r.shadows.mask_pipeline.pipeline != {} && request_ray_scene(f)
 	params := SHADOW_PARAMS[f.shadow_settings.level]
 	virtual := f.shadow_settings.virtual && params.virtual_levels > 0 && ensure_virtual_shadows(r, &f.state.virtual_shadows, params)
@@ -382,8 +392,14 @@ assign_shadow_views :: proc(f: ^Frame, trace: bool, virtual := false, contact :=
 	sort_by_importance(order[punctual_start:], importance)
 
 	cascades_taken := false
-	next_slot := 0
+	// The atlas's slots that the punctual lights take, after first_slot, and the lights in their order.
+	taken := 0
 	first_slot := 0
+	Atlas_Taker :: struct {
+		record: int,
+		light:  Atlas_Light,
+	}
+	takers := make([dynamic]Atlas_Taker, r.platform.frame_allocator)
 	for i in order {
 		record := &lf.records[i]
 		// A light with a size takes soft shadows, whose views have a guard band.
@@ -401,7 +417,7 @@ assign_shadow_views :: proc(f: ^Frame, trace: bool, virtual := false, contact :=
 		case .Directional:
 			// The cascades take the first cells, so the slots start after them. A virtual shadow map's levels take none.
 			// A second directional light without a mask channel has no shadow.
-			if cascades_taken || next_slot > 0 {
+			if cascades_taken || taken > 0 {
 				continue
 			}
 			cascades_taken = true
@@ -420,33 +436,66 @@ assign_shadow_views :: proc(f: ^Frame, trace: bool, virtual := false, contact :=
 				first_slot = sf.params.cascades * slots_per_cell(sf.params)
 				add_cascades(f, sf, record.direction)
 			}
-		case .Spot:
-			if first_slot + next_slot + 1 > max_views {
+		case .Spot, .Point, .Quad, .Disk, .Line:
+			// An area light casts its shadows from its middle, as a point light does, as soft as its size. A point light's
+			// six views are the faces of its cube.
+			faces := record.type == .Spot ? 1 : 6
+			if first_slot + taken + faces > max_views {
 				continue
 			}
-			record.shadow = i32(len(sf.views))
-			cone := math.acos(clamp(-record.spot_offset / record.spot_scale, -1, 1))
-			// The cone's half angle is where the falloff reaches 0: cos = -offset / scale.
-			add_perspective_view(f, sf, record.position, record.direction, min(cone * 2, math.to_radians(f32(170))), record.range, first_slot + next_slot, guard)
-			next_slot += 1
-		case .Point, .Quad, .Disk, .Line:
-			// An area light casts its shadows from its middle, as a point light does, as soft as its size.
-			if first_slot + next_slot + 6 > max_views {
-				continue
+			taker := Atlas_Taker {
+				record = i,
+				light = {
+					entity = lf.entities[i],
+					position = i < len(lf.positions) ? lf.positions[i] : ecs.position_offset(f.view.position, record.position),
+					range = record.range,
+					guard = guard,
+					faces = faces,
+					distance = atlas_light_distance(record.position, record.range),
+					fov = math.PI / 2,
+				},
 			}
-			record.shadow = i32(len(sf.views))
-			for axis in CUBE_FACES {
-				add_perspective_view(f, sf, record.position, axis, math.PI / 2, record.range, first_slot + next_slot, guard)
-				next_slot += 1
+			if record.type == .Spot {
+				// The cone's half angle is where the falloff reaches 0: cos = -offset / scale.
+				cone := math.acos(clamp(-record.spot_offset / record.spot_scale, -1, 1))
+				taker.light.direction, taker.light.fov = record.direction, min(cone * 2, math.to_radians(f32(170)))
 			}
+			append(&takers, taker)
+			taken += faces
 		}
 	}
 	if !cascades_taken {
 		// Every view depth is beyond the last split, so no pixel looks for a cascade.
 		sf.cascade_splits = {}
 	}
+	// The lights take their slots, which they keep with the cache.
+	lights := make([]Atlas_Light, len(takers), r.platform.frame_allocator)
+	for t, k in takers {
+		lights[k] = t.light
+	}
+	plans, free_slot := plan_atlas_slots(f, sf, lights, first_slot)
+	cube_faces := CUBE_FACES
+	cached := make([dynamic]int, r.platform.frame_allocator)
+	for t, k in takers {
+		record := &lf.records[t.record]
+		record.shadow = i32(len(sf.views))
+		for face in 0 ..< t.light.faces {
+			direction := t.light.faces == 1 ? record.direction : cube_faces[face]
+			if sf.cache.enabled {
+				append(&cached, len(sf.views))
+				if plans[k].redraw {
+					append(&sf.cache.redraw, len(sf.views))
+				}
+			}
+			add_perspective_view(f, sf, record.position, direction, t.light.fov, record.range, plans[k].slots[face], t.light.guard)
+		}
+	}
 	// A reflection probe's capture takes a slot after the others for its own view of the directional light.
-	add_reflection_probe_shadow(f, sf, first_slot + next_slot, max_views)
+	add_reflection_probe_shadow(f, sf, free_slot < 0 ? max_views : free_slot, max_views)
+	sf.cache.cached = make([]bool, len(sf.views), r.platform.frame_allocator)
+	for view in cached {
+		sf.cache.cached[view] = true
+	}
 	if len(sf.views) > 0 {
 		ok: bool
 		sf.views_upload, ok = upload_bytes(r.platform, ([^]byte)(raw_data(sf.views))[:len(sf.views) * size_of(Shadow_View)])
@@ -459,6 +508,8 @@ assign_shadow_views :: proc(f: ^Frame, trace: bool, virtual := false, contact :=
 			sf.contact_light = -1
 			clear(&sf.views)
 			sf.virtual.count = 0
+			sf.cache.enabled = false
+			clear(&sf.cache.redraw)
 		}
 	}
 }
@@ -697,11 +748,22 @@ add_shadow_passes :: proc(f: ^Frame) {
 	} else {
 		forget_virtual_cache(f)
 	}
+	if sf.cache.enabled {
+		on_executed(g, commit_atlas_cache, f)
+	} else if f.state.atlas_cache.cache != nil {
+		forget_atlas_cache(f)
+	}
 	if atlas_views := len(sf.views) - sf.virtual.count; atlas_views > 0 {
+		if sf.cache.enabled {
+			add_atlas_cache_pass(f)
+		}
 		atlas := u32(sf.params.atlas)
 		sf.atlas = create_texture(g, {size = {atlas, atlas}, format = SHADOW_FORMAT, label = "shadow atlas"})
 		p := add_render_pass(g, "shadow maps", draw_shadow_maps, f, pieces = atlas_views)
 		depth(g, p, sf.atlas, .Clear)
+		if sf.cache.enabled {
+			read(g, p, sf.cache.texture)
+		}
 		declare_scene_draws(f, p)
 	}
 	if sf.mask_count == 0 {
@@ -937,6 +999,10 @@ draw_shadow_maps :: proc(ctx: ^Pass_Context) {
 	viewport := f.shadows.viewports[view]
 	gpu.cmd_set_viewport(ctx.cb, {f32(viewport.x), f32(viewport.y)}, {f32(viewport.z), f32(viewport.w)})
 	gpu.cmd_set_scissor(ctx.cb, {i32(viewport.x), i32(viewport.y)}, {i32(viewport.z), i32(viewport.w)})
+	// A cached view's slot is its cache's, and the view draws only its live casters over it.
+	if f.shadows.cache.enabled && f.shadows.cache.cached[view] {
+		copy_cached_slot(ctx, f)
+	}
 	draw_scene_view(f, ctx.cb, FIRST_SHADOW_VIEW + view, .Depth)
 }
 

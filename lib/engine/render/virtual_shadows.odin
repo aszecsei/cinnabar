@@ -3,6 +3,7 @@ package render
 import "core:math"
 import "core:math/bits"
 import "core:math/linalg"
+import "core:slice"
 
 import "cinnabar:core"
 import "cinnabar:core/gpu"
@@ -118,7 +119,8 @@ Virtual_Page :: struct {
 // Virtual_Cache is what the pool's pages were drawn for, and so what keeps them valid: the world position that the
 // levels' grids are measured from (see virtual_grid_anchor), the light's direction, the shadows' parameters and
 // settings, and each level's depth anchor (see virtual_depth_anchor), with the epoch of the last frame that drew it,
-// which the pages' ages count from.
+// which the pages' ages count from, the scene frame that it drew in, whose changes of casters were the last that it
+// took (see casters.odin), and the slots that it drew live.
 Virtual_Cache :: struct {
 	anchor:    ecs.World_Position,
 	direction: [3]f32,
@@ -126,6 +128,8 @@ Virtual_Cache :: struct {
 	settings:  Shadow_Settings,
 	anchors:   [VIRTUAL_MAX_LEVELS]f64,
 	epoch:     u32,
+	frame:     u64,
+	live:      Live_Slots,
 }
 
 // Virtual_State is one view's virtual shadow map between frames, in View_State: its pool of pages, which the level
@@ -157,6 +161,9 @@ Virtual_Frame :: struct {
 	cache:      Virtual_Cache,
 	reset:      bool,
 	invalidate: u32,
+	// The pages that the frame drops under the casters that changed and the live ones, in the upload ring, if any.
+	dropped:    gpu.Upload,
+	drops:      bool,
 	pool:       Texture,
 	requests:   Buffer,
 	table:      Buffer,
@@ -214,15 +221,18 @@ Virtual_Mark_Push :: struct {
 // Virtual_Allocate_Push matches Virtual_Allocate_Push in virtual_shadow_allocate.hlsl.
 @(private = "file")
 Virtual_Allocate_Push :: struct {
-	requests:   u32,
-	table:      u32,
-	pages:      u32,
-	scratch:    u32,
-	stats:      u32,
-	arguments:  u32,
-	phase:      u32,
-	now:        u32,
-	invalidate: u32,
+	requests:       u32,
+	table:          u32,
+	pages:          u32,
+	scratch:        u32,
+	stats:          u32,
+	arguments:      u32,
+	phase:          u32,
+	now:            u32,
+	invalidate:     u32,
+	dropped:        u32,
+	dropped_offset: u32,
+	drops:          u32,
 }
 
 @(private = "file")
@@ -631,7 +641,8 @@ Virtual_Retired :: struct {
 }
 
 // virtual_retire goes over the pool's pages, as a thread each does on the GPU. A page leaves when its level is one that
-// the frame drops, is past the frame's levels, or no longer holds its page since the level's origin moved. A page that
+// the frame drops, is past the frame's levels, no longer holds its page since the level's origin moved, or is one that
+// dropped has, under a caster that changed (see virtual_drop_pages). A page that
 // stays takes its entry again without VIRTUAL_DRAW. A page that the frame asks for is a hit: the frame keeps it and does
 // not ask for it again, and its age starts over. Every other page's age goes into the histogram. Matches retire in
 // virtual_shadow_allocate.hlsl.
@@ -640,6 +651,7 @@ virtual_retire :: proc(
 	pages: []Virtual_Page,
 	views: []Shadow_View,
 	now, invalidate: u32,
+	dropped: []u32 = nil,
 ) -> (
 	r: Virtual_Retired,
 ) {
@@ -654,6 +666,10 @@ virtual_retire :: proc(
 		if keep {
 			local = page.page - views[level].page_origin
 			keep = local.x >= 0 && local.y >= 0 && local.x < VIRTUAL_PAGES && local.y < VIRTUAL_PAGES
+		}
+		if keep && dropped != nil {
+			at := page_index(level, local)
+			keep = dropped[at >> 5] & (u32(1) << uint(at & 31)) == 0
 		}
 		if !keep {
 			table[slot] = VIRTUAL_NO_PAGE
@@ -779,6 +795,7 @@ virtual_allocate :: proc(
 	now: u32 = 1,
 	invalidate: u32 = 0,
 	reset := false,
+	dropped: []u32 = nil,
 ) -> (
 	stats: Virtual_Shadow_Stats,
 ) {
@@ -790,7 +807,7 @@ virtual_allocate :: proc(
 	}
 	capacity := u32(len(pages))
 	requested, moved, total := virtual_fit_pool(requests, views, capacity)
-	retired := virtual_retire(requests, table, pages, views, now, invalidate)
+	retired := virtual_retire(requests, table, pages, views, now, invalidate, dropped)
 	threshold, quota := virtual_select(retired.histogram[:], total - retired.hits, capacity - retired.valid)
 	available, evicted := virtual_collect(table, pages, now, threshold, quota)
 	drawn, missed := virtual_assign(requests, table, pages, views, available[:], now)
@@ -804,6 +821,72 @@ virtual_allocate :: proc(
 		evicted = evicted,
 		resident = retired.valid - evicted + drawn,
 	}
+}
+
+// virtual_drop_pages sets the bits of each level's pages that a sphere relative to the camera covers, with a texel's
+// margin, as the requests are laid out: the pages that its caster's depth may be in, which the frame drops. dropped
+// holds VIRTUAL_MAX_LEVELS * VIRTUAL_LEVEL_WORDS words.
+virtual_drop_pages :: proc(views: []Shadow_View, spheres: [][4]f32, dropped: []u32) {
+	for view, level in views {
+		texel_size := f32(virtual_level_texel(level))
+		for s in spheres {
+			texel, _ := virtual_project(view, s.xyz)
+			reach := s.w / texel_size + 1
+			low := [2]i32{i32(math.floor((texel.x - reach) / VIRTUAL_PAGE_TEXELS)), i32(math.floor((texel.y - reach) / VIRTUAL_PAGE_TEXELS))}
+			high := [2]i32{i32(math.floor((texel.x + reach) / VIRTUAL_PAGE_TEXELS)), i32(math.floor((texel.y + reach) / VIRTUAL_PAGE_TEXELS))}
+			if high.x < 0 || high.y < 0 || low.x >= VIRTUAL_PAGES || low.y >= VIRTUAL_PAGES {
+				continue
+			}
+			low, high = linalg.max(low, 0), linalg.min(high, VIRTUAL_PAGES - 1)
+			for y in low.y ..= high.y {
+				first := page_index(level, {low.x, y})
+				last := page_index(level, {high.x, y})
+				for at := first; at <= last; {
+					// A word at a time where the run covers it.
+					if at & 31 == 0 && last - at >= 31 {
+						dropped[at >> 5] = max(u32)
+						at += 32
+						continue
+					}
+					dropped[at >> 5] |= u32(1) << uint(at & 31)
+					at += 1
+				}
+			}
+		}
+	}
+}
+
+// virtual_drop_spheres are the spheres, relative to the camera, whose pages a view's virtual shadow map drops: both
+// places of each change of casters that it takes, and every slot that it draws live, whose shadow changes each frame.
+// The live slots without bounds, mesh particles, drop none.
+@(private)
+virtual_drop_spheres :: proc(
+	t: ^Caster_Tracking,
+	changes: []Caster_Change,
+	live: ^Live_Slots,
+	high: u32,
+	camera: ecs.World_Position,
+	allocator := context.allocator,
+) -> [][4]f32 {
+	spheres := make([dynamic][4]f32, allocator)
+	add :: proc(spheres: ^[dynamic][4]f32, s: Caster_Sphere, camera: ecs.World_Position) {
+		c := ecs.position_sub(s.center, camera)
+		append(spheres, [4]f32{c.x, c.y, c.z, s.radius})
+	}
+	for change in changes {
+		if s, has := change.old.?; has {
+			add(&spheres, s, camera)
+		}
+		if s, has := change.new.?; has {
+			add(&spheres, s, camera)
+		}
+	}
+	for c, slot in t.slots[:high] {
+		if slot_live(live, u32(slot)) && !c.unbounded {
+			add(&spheres, c.sphere, camera)
+		}
+	}
+	return spheres[:]
 }
 
 // virtual_lookup is the finest level from level on that has the page that holds the point, or -1. A mark that does not fit
@@ -987,8 +1070,9 @@ ensure_virtual_shadows :: proc(r: ^Renderer, s: ^Virtual_State, p: Shadow_Params
 }
 
 // virtual_cache_plan is what a frame keeps of the cache, the one place that decides it. A frame starts the table and the
-// records again (reset) without a cache, with the cache off, or when the light's direction, the shadows' parameters or
-// their quality's settings changed, or the levels' anchor moved: every page was drawn for those. Otherwise it keeps them, and drops the pages of the levels
+// records again (reset) without a cache, with the cache off, when it does not know every change of casters since the
+// cache was drawn (tracked), or when the light's direction, the shadows' parameters or their quality's settings changed,
+// or the levels' anchor moved: every page was drawn for those. Otherwise it keeps them, and drops the pages of the levels
 // whose depth anchor moved (invalidate, a bit each). next is what the frame draws for, which its commit keeps, with the
 // next epoch, which the pages that it asks for take.
 virtual_cache_plan :: proc(
@@ -999,17 +1083,21 @@ virtual_cache_plan :: proc(
 	direction: [3]f32,
 	params: Shadow_Params,
 	settings: Shadow_Settings,
+	tracked := true,
+	frame: u64 = 0,
 ) -> (
 	next: Virtual_Cache,
 	reset: bool,
 	invalidate: u32,
 ) {
-	// The cascades' distance and split, which a volume may blend from frame to frame, draw nothing of the levels.
+	// The cascades' distance and split, which a volume may blend from frame to frame, and the atlas's cache draw nothing
+	// of the levels.
 	settings := settings
-	settings.distance, settings.split_lambda = 0, 0
+	settings.distance, settings.split_lambda, settings.atlas_cache = 0, 0, false
 	previous, kept := cache.?
 	reset =
 		!enabled ||
+		!tracked ||
 		!kept ||
 		previous.anchor != anchor ||
 		previous.direction != direction ||
@@ -1021,6 +1109,7 @@ virtual_cache_plan :: proc(
 		params    = params,
 		settings  = settings,
 		epoch     = kept ? previous.epoch + 1 : 1,
+		frame     = frame,
 	}
 	depth := virtual_camera_depth(c, direction)
 	for level in 0 ..< c.selection.levels {
@@ -1046,6 +1135,11 @@ add_virtual_levels :: proc(f: ^Frame, sf: ^Shadow_Frame, direction: [3]f32) {
 	vf := &sf.virtual
 	vf.camera = c
 	vf.count = c.selection.levels
+	// The cache knows what changed since it drew only if it drew in the last scene frame, whose changes it took.
+	s := &f.renderer.scene
+	scene := f.scene_frame
+	previous, kept := cache.?
+	tracked := kept && scene != nil && scene.live != nil && s.casters.frame == s.frame && previous.frame + 1 == s.frame
 	vf.cache, vf.reset, vf.invalidate = virtual_cache_plan(
 		cache,
 		f.shadow_settings.virtual_cache,
@@ -1054,7 +1148,12 @@ add_virtual_levels :: proc(f: ^Frame, sf: ^Shadow_Frame, direction: [3]f32) {
 		direction,
 		sf.params,
 		f.shadow_settings,
+		tracked,
+		s.frame,
 	)
+	if scene != nil && scene.live != nil {
+		vf.cache.live = scene.live^
+	}
 	for level in 0 ..< c.selection.levels {
 		l := virtual_level(c, direction, level, vf.cache.anchors[level])
 		append(&sf.matrices, l.projection)
@@ -1063,6 +1162,26 @@ add_virtual_levels :: proc(f: ^Frame, sf: ^Shadow_Frame, direction: [3]f32) {
 		append(&sf.eyes, [4]f32{direction.x, direction.y, direction.z, 0})
 		append(&sf.viewports, l.scissor)
 	}
+	// The pages under the casters that changed since the cache drew, and under the live ones, draw again.
+	if vf.reset || !tracked {
+		return
+	}
+	platform := f.renderer.platform
+	changes := view_caster_changes(&s.casters, scene.live, &previous.live, platform.frame_allocator)
+	spheres := virtual_drop_spheres(&s.casters, changes, scene.live, s.high, f.view.position, platform.frame_allocator)
+	if len(spheres) == 0 {
+		return
+	}
+	dropped := make([]u32, VIRTUAL_MAX_LEVELS * VIRTUAL_LEVEL_WORDS, platform.frame_allocator)
+	virtual_drop_pages(sf.views[len(sf.views) - c.selection.levels:], spheres, dropped)
+	ok: bool
+	vf.dropped, ok = upload_bytes(platform, slice.to_bytes(dropped))
+	if !ok {
+		// Without the drops, nothing that the cache holds is known to be right.
+		vf.reset = true
+		return
+	}
+	vf.drops = true
 }
 
 @(private = "file")
@@ -1263,6 +1382,9 @@ set_virtual_allocate :: proc(ctx: ^Pass_Context, phase: Allocate_Phase) -> bool 
 		phase      = u32(phase),
 		now        = vf.cache.epoch,
 		invalidate = vf.invalidate,
+	}
+	if vf.drops {
+		push.dropped, push.dropped_offset, push.drops = gpu.read_index(vf.dropped.buffer), vf.dropped.offset, 1
 	}
 	gpu.cmd_set_pipeline(ctx.cb, pipeline)
 	gpu.cmd_set_pass_constants(ctx.cb, sf.view_constants[VIEW_CAMERA])

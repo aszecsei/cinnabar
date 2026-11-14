@@ -49,6 +49,7 @@ SCRIPT_QUALITY_FIELDS := [Quality_Key]cstring {
 	.Reflections_Level    = "reflections_level",
 	.Clouds               = "clouds",
 	.Virtual_Shadow_Cache = "virtual_shadow_cache",
+	.Atlas_Shadow_Cache   = "atlas_shadow_cache",
 }
 
 // script_quality is the Script_Quality of a renderer and a project settings file.
@@ -93,6 +94,8 @@ quality_binding :: proc(L: ^luau.State) -> c.int {
 			luau.pushboolean(L, b32(q.shadows.virtual))
 		case .Virtual_Shadow_Cache:
 			luau.pushboolean(L, b32(q.shadows.virtual_cache))
+		case .Atlas_Shadow_Cache:
+			luau.pushboolean(L, b32(q.shadows.atlas_cache))
 		case .Render_Scale:
 			luau.pushnumber(L, f64(q.render_scale))
 		case .Lod_Error:

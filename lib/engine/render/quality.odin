@@ -96,6 +96,10 @@ Shadow_Quality :: struct {
 	// docs/rendering/lighting-and-shadows.md#caching). A caster that moves leaves its old shadow in the pages that the
 	// pool keeps, so no preset has it.
 	virtual_cache: bool,
+	// Whether the atlas keeps each spot, point and area light's static casters from frame to frame in a cache, and draws
+	// only its dynamic casters each frame (see docs/rendering/lighting-and-shadows.md#cached-shadow-maps). Every preset
+	// has it.
+	atlas_cache:   bool,
 }
 
 Ao_Quality :: struct {
@@ -211,7 +215,7 @@ preset_quality :: proc(preset: Quality_Preset, caps: Caps) -> Quality {
 		reflections = .Ray_Traced
 	}
 	return {
-		shadows = {level = level, ray_traced = traced, virtual = level >= .Medium},
+		shadows = {level = level, ray_traced = traced, virtual = level >= .Medium, atlas_cache = true},
 		ao = {technique = .Gtao, level = level},
 		gi = {technique = traced ? .Split_Cascades : .Screen_Cascades, level = level},
 		reflections = {technique = reflections, level = level},
@@ -315,6 +319,7 @@ apply_quality :: proc(settings: ^Frame_Settings, q: Quality) {
 	settings.shadows.ray_traced = q.shadows.ray_traced
 	settings.shadows.virtual = q.shadows.virtual
 	settings.shadows.virtual_cache = q.shadows.virtual_cache
+	settings.shadows.atlas_cache = q.shadows.atlas_cache
 	settings.ambient_occlusion.technique = q.ao.technique
 	settings.ambient_occlusion.level = q.ao.level
 	settings.ambient_occlusion.off ||= q.ao.technique == .Off

@@ -395,6 +395,9 @@ ITEM_HIERARCHY :: 1024
 // docs/rendering/gpu-scene.md#skinned-meshes). It draws with vertex pulling whatever its material's pipelines are, so
 // sort_bins gives it a bin of its own.
 ITEM_SKINNED :: 2048
+// An item whose slot a view draws live over its shadow caches: a dynamic caster within the view's dynamic shadow
+// distance (see casters.odin). The atlas's cached views draw only these, and their cache views every other.
+ITEM_LIVE :: 4096
 // The items that sort_bins gives bins of their own, apart from their pipelines' others.
 ITEM_BIN_KINDS :: ITEM_IMPOSTOR | ITEM_PARTICLES | ITEM_SKINNED
 // The vertices of an impostor's quad.
@@ -433,6 +436,10 @@ VIEW_MODEL :: 2
 // A view of the voxel cones' voxelization, which picks its own level of detail from every level's meshlets, as the
 // camera's walk of a hierarchy does not.
 VIEW_VOXELS :: 16
+// A cached shadow view, which draws only the ITEM_LIVE items over its slot's copy of the cache, and a cache view, which
+// draws every other item into the cache (see shadow_cache.odin).
+VIEW_LIVE :: 32
+VIEW_BAKED :: 64
 
 // Cull_View matches Cull_View in cull_draws.hlsl: a view's planes relative to the camera, the camera's offset from the
 // space of the view's instances, and its first draw.
@@ -532,6 +539,8 @@ SET_IMPOSTOR :: 2
 SET_BILLBOARD :: 4
 // A set whose items are all opaque, which occlusion culling culls (see occlusion.odin).
 SET_OCCLUDABLE :: 8
+// A set whose slot the view draws live, as its items' ITEM_LIVE.
+SET_LIVE :: 16
 
 // Instance_Views are the views of a dispatch of cull_instances.hlsl: the early ones, the late view when the frame culls
 // by occlusion, and a virtual shadow map's levels, once the page table is written.
@@ -661,6 +670,8 @@ Gpu_Scene :: struct {
 	visible_capacity:         int,
 	instance_pipeline:        Shader_Pipeline,
 	occlusion:                Occlusion,
+	// Which slots' shadows changed, for the shadow caches (see casters.odin).
+	casters:                  Caster_Tracking,
 }
 
 // Bin_Group is a range of the frame's bins: the opaque and masked materials', which the prepass, the shadow maps and
@@ -769,6 +780,9 @@ Scene_Frame :: struct {
 	meshlet_select:  Meshlet_Select_Frame,
 	// The skinned entities' jobs this frame.
 	skin:            Skin_Frame,
+	// The slots that the view draws live over its shadow caches, and its dynamic shadow distance (see casters.odin).
+	live:            ^Live_Slots,
+	dynamic_distance: f32,
 }
 
 scene_init :: proc(s: ^Gpu_Scene, platform: ^core.Platform_API) {
@@ -784,6 +798,7 @@ scene_init :: proc(s: ^Gpu_Scene, platform: ^core.Platform_API) {
 	s.select_pipeline = shader_pipeline(SELECT_PATCHES_SHADER)
 	s.cull_patches_pipeline = shader_pipeline(CULL_PATCHES_SHADER)
 	s.cell_free = make([dynamic]Cell_Range, platform.heap_allocator)
+	s.casters.changes = make([dynamic]Caster_Change, platform.heap_allocator)
 	s.instance_pipeline = shader_pipeline(INSTANCE_CULL_SHADER)
 	occlusion_init(&s.occlusion)
 	meshlet_select_init(&s.meshlet_select, platform)
@@ -794,6 +809,7 @@ scene_destroy :: proc(s: ^Gpu_Scene, platform: ^core.Platform_API) {
 	delete(s.slots)
 	delete(s.free)
 	delete(s.cell_free)
+	delete(s.casters.changes)
 	for b in ([]gpu.Buffer{s.instances, s.arguments, s.mesh_arguments, s.draws, s.counts, s.patches, s.patch_counts, s.instance_bits, s.instance_counters, s.visible_instances}) {
 		platform.gpu_destroy_buffer(b)
 	}
@@ -943,6 +959,7 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32, skins: []Skin_Pose)
 	// The Instanced_Mesh_Renderers: a slot each, at the entity's pose, which its set's instances are relative to, and an
 	// item for each submesh, whose draws the GPU writes once it has culled the instances.
 	sets := make([dynamic]Instance_Set_Record, r.platform.frame_allocator)
+	set_bounds := make([dynamic]Set_Bounds, r.platform.frame_allocator)
 	jobs := make([dynamic]u32, r.platform.frame_allocator)
 	set_instances := 0
 	instanced_it := ecs.query_iter(w, r.instanced.query)
@@ -963,7 +980,7 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32, skins: []Skin_Pose)
 			if is_hidden(hidden, e) {
 				continue
 			}
-			set_instances += add_instanced_items(r, &table, &meshes, &mesh_indices, &items, &sets, &jobs, renderers[i], slot, extra)
+			set_instances += add_instanced_items(r, &table, &meshes, &mesh_indices, &items, &sets, &set_bounds, &jobs, renderers[i], slot, extra)
 		}
 	}
 	// The patch surfaces: an instance record as a mesh's, and one item each, whose draws the GPU adds (see
@@ -1008,6 +1025,23 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32, skins: []Skin_Pose)
 				free_cells(s, slot)
 				append(&s.free, slot)
 			}
+		}
+		// The slots' shadows, before the items are sorted into bins, while each one's bin is its pipeline.
+		bounds := caster_bounds(s.records[:s.high], items[:], r.materials.pipelines[:], set_bounds[:], s.high, r.platform.frame_allocator)
+		track_casters(&s.casters, bounds, s.origin, s.frame)
+	}
+	// The view draws its dynamic casters within its distance live, over its shadow caches.
+	sf.dynamic_distance = SHADOW_PARAMS[f.shadow_settings.level].dynamic_distance
+	sf.live = new(Live_Slots, r.platform.frame_allocator)
+	sf.live^ = live_slots(&s.casters, s.high, f.view.position, sf.dynamic_distance)
+	for &item in items {
+		if item.flags & ITEM_CASTS_SHADOWS != 0 && item.instance < s.high && slot_live(sf.live, item.instance) {
+			item.flags |= ITEM_LIVE
+		}
+	}
+	for &set in sets {
+		if slot_live(sf.live, set.slot) {
+			set.flags |= SET_LIVE
 		}
 	}
 
@@ -1279,8 +1313,9 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 	if !has_items && f.fog == nil && voxels == nil && !f.wants_sheet_sprites {
 		return
 	}
-	// The voxel cones' views come after the shadow views (see Voxel_View), then a reflection probe capture's faces.
-	sf.view_count = FIRST_SHADOW_VIEW + len(shadows.views)
+	// The atlas's cache views come after the shadow views (see Atlas_Frame), then the voxel cones' views (see Voxel_View),
+	// then a reflection probe capture's faces.
+	sf.view_count = FIRST_SHADOW_VIEW + len(shadows.views) + len(shadows.cache.redraw)
 	if voxels != nil {
 		voxels.first_view = sf.view_count
 		sf.view_count += len(voxels.views)
@@ -1453,15 +1488,24 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 				c.cull_eye = {0, 0, 0, 1}
 				break
 			}
-			c.view_projection = shadows.matrices[v - FIRST_SHADOW_VIEW]
-			if v - FIRST_SHADOW_VIEW < shadows.virtual.count {
-				c.virtual_level, c.virtual_draw = u32(v - FIRST_SHADOW_VIEW), 1
-				views[v].virtual_table = gpu.read_index(f.state.virtual_shadows.table) + 1
-				views[v].virtual_page = virtual_page_fields(shadows.views[v - FIRST_SHADOW_VIEW], v - FIRST_SHADOW_VIEW)
+			// A cache view draws its shadow view's baked casters into the cache, and a cached shadow view only its live ones.
+			shadow := v - FIRST_SHADOW_VIEW
+			flags: u32 = VIEW_CASTERS
+			if shadow >= len(shadows.views) {
+				shadow = shadows.cache.redraw[shadow - len(shadows.views)]
+				flags |= VIEW_BAKED
+			} else if shadows.cache.enabled && shadows.cache.cached[shadow] {
+				flags |= VIEW_LIVE
 			}
-			views[v].planes = shadows.planes[v - FIRST_SHADOW_VIEW]
-			views[v].flags = VIEW_CASTERS
-			c.cull_eye = shadows.eyes[v - FIRST_SHADOW_VIEW]
+			c.view_projection = shadows.matrices[shadow]
+			if shadow < shadows.virtual.count {
+				c.virtual_level, c.virtual_draw = u32(shadow), 1
+				views[v].virtual_table = gpu.read_index(f.state.virtual_shadows.table) + 1
+				views[v].virtual_page = virtual_page_fields(shadows.views[shadow], shadow)
+			}
+			views[v].planes = shadows.planes[shadow]
+			views[v].flags = flags
+			c.cull_eye = shadows.eyes[shadow]
 		}
 		c.planes = views[v].planes
 		sf.view_constants[v], ok = platform.gpu_upload(size_of(Frame_Constants), gpu.PASS_CONSTANTS_ALIGN)
@@ -1700,6 +1744,9 @@ scene_write_instance :: proc(s: ^Gpu_Scene, w: ^ecs.World, e: ecs.Entity, slot: 
 			pose = ecs.interpolate(ecs.Transform(previous[i]), pose, w.clock.alpha)
 		}
 		last := s.seen[slot] == s.frame - 1 ? s.previous[slot] : pose
+		if s.seen[slot] == s.frame - 1 && last != pose {
+			caster_moved(&s.casters, slot, s.frame)
+		}
 		scene_write_record(s, slot, {rows = pose_rows(pose, s.origin), previous_rows = pose_rows(last, s.origin), id = entity_id(e), instance_set = s.records[slot].instance_set})
 		s.previous[slot] = pose
 	}
@@ -1872,6 +1919,7 @@ add_instanced_items :: proc(
 	mesh_indices: ^map[^Resident_Mesh]u32,
 	items: ^[dynamic]Cull_Item,
 	sets: ^[dynamic]Instance_Set_Record,
+	set_bounds: ^[dynamic]Set_Bounds,
 	jobs: ^[dynamic]u32,
 	renderer: Instanced_Mesh_Renderer,
 	slot: u32,
@@ -1989,6 +2037,7 @@ add_instanced_items :: proc(
 		sphere         = {m.center.x, m.center.y, m.center.z, m.radius},
 		levels         = mesh.levels,
 	})
+	append(set_bounds, Set_Bounds{set.center, set.radius, set.max_scale})
 	for _ in 0 ..< set.cell_count {
 		append(jobs, index)
 	}

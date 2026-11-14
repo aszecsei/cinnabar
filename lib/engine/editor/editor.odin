@@ -339,6 +339,9 @@ poll :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, connection: u6
 			stats.virtual_pages_missed, stats.virtual_pages_capacity = vs.missed, vs.capacity
 			stats.virtual_pages_cached, stats.virtual_pages_drawn = vs.cached, vs.drawn
 			stats.virtual_pages_evicted, stats.virtual_pages_resident = vs.evicted, vs.resident
+			ac := render.atlas_cache_stats(e.renderer)
+			stats.atlas_cache_lights, stats.atlas_cache_copied = ac.lights, ac.copied
+			stats.atlas_cache_drawn, stats.atlas_cache_refreshed = ac.drawn, ac.refreshed
 			pages := render.mesh_stream_stats(&e.renderer.residency)
 			stats.mesh_pages_resident, stats.mesh_pages_capacity = pages.resident_pages, pages.capacity_pages
 			stats.mesh_pages_pending = pages.pending_requests

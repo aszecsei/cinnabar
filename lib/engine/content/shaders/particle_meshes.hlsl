@@ -63,6 +63,15 @@ static const uint VIEW_CASTERS = 1;
 static const uint VIEW_MODEL = 2;
 static const uint ID_ENTITY_BITS = 25;
 static const uint DRAW_PARTICLES = 1;
+// A cached shadow view draws only the live items, those of a dynamic caster near the camera, over its slot's copy of the
+// cache, and a cache view draws every other item into the cache. Match VIEW_LIVE, VIEW_BAKED and ITEM_LIVE in
+// lib/engine/render/scene.odin.
+static const uint VIEW_LIVE = 32;
+static const uint VIEW_BAKED = 64;
+static const uint ITEM_LIVE = 4096;
+bool view_takes_live(uint view_flags, bool live) {
+	return ((view_flags & VIEW_LIVE) == 0 || live) && ((view_flags & VIEW_BAKED) == 0 || !live);
+}
 
 [numthreads(64, 1, 1)]
 void cs_main(uint3 id : SV_DispatchThreadID) {
@@ -73,6 +82,9 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	Item item = cn_buffer(push.items).Load<Item>(push.items_offset + record.item * sizeof(Item));
 	Cull_View view = cn_buffer(push.views).Load<Cull_View>(push.views_offset + id.y * sizeof(Cull_View));
 	if ((view.flags & VIEW_MODEL) != 0 || ((view.flags & VIEW_CASTERS) != 0 && (item.flags & ITEM_CASTS_SHADOWS) == 0)) {
+		return;
+	}
+	if (!view_takes_live(view.flags, (item.flags & ITEM_LIVE) != 0)) {
 		return;
 	}
 	uint living = cn_rw_buffer(constants.counters).Load((MAX_FRAME_EMITTERS + record.emitter) * 4);

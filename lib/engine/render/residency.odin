@@ -89,6 +89,11 @@ Resident_Instance_Set :: struct {
 	cells:      gpu.Buffer,
 	count:      u32,
 	cell_count: u32,
+	// A sphere about every instance's position, in the set's space, and the largest scale of any instance's axes, which
+	// the caster tracking bounds the set's shadow by (see casters.odin).
+	center:     [3]f32,
+	radius:     f32,
+	max_scale:  f32,
 }
 
 // Resident_Texture is a texture asset's GPU texture.
@@ -742,6 +747,7 @@ stream_instance_set :: proc(r: ^Residency, s: ^Resident_Stream, data: []byte) ->
 	}
 	set := &s.pending.set
 	set.count, set.cell_count = blob.count, blob.cell_count
+	set.center, set.radius, set.max_scale = blob.center, blob.radius, blob.max_scale
 	set.instances = stream_buffer(r, s, format.blob_bytes(data, blob.instances), {}, "instances") or_return
 	set.cells = stream_buffer(r, s, format.blob_bytes(data, blob.cells), {}, "instance cells") or_return
 	return true

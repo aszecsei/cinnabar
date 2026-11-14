@@ -1066,6 +1066,52 @@ a_full_pool_leaves_no_holes_as_the_camera_moves :: proc(t: ^testing.T) {
 	testing.expect(t, evicted > 0, "the pool never filled")
 }
 
+// A caster that changed drops the pages under it in every level, and only those: the frame draws them again, and the
+// pool keeps the others.
+@(test)
+a_changed_caster_draws_only_the_pages_under_it_again :: proc(t: ^testing.T) {
+	c := test_camera()
+	views := test_views(c)
+	requests, table, pages := test_buffers(len(views))
+	mark_view(requests, views, c)
+	first := virtual_allocate(requests, table, pages, views, now = 1)
+	// A sphere of half a meter on the marked ground, 5 m in front of the camera.
+	sphere := [4]f32{0, -1, 5, 0.5}
+	dropped := make([]u32, VIRTUAL_MAX_LEVELS * VIRTUAL_LEVEL_WORDS, context.temp_allocator)
+	virtual_drop_pages(views, {sphere}, dropped)
+	for view, level in views {
+		texel, _ := virtual_project(view, sphere.xyz)
+		page := [2]i32{i32(texel.x) / VIRTUAL_PAGE_TEXELS, i32(texel.y) / VIRTUAL_PAGE_TEXELS}
+		testing.expectf(t, is_marked(dropped, level, page), "level %d: the page under the sphere was not dropped", level)
+	}
+	// Level 0's pages are 12.5 cm, so a page 3 m to the side is not under it.
+	far, _ := virtual_project(views[0], sphere.xyz + c.right * 3)
+	testing.expect(t, !is_marked(dropped, 0, {i32(far.x) / VIRTUAL_PAGE_TEXELS, i32(far.y) / VIRTUAL_PAGE_TEXELS}))
+	mark_view(requests, views, c)
+	under: u32
+	for word, i in requests {
+		under += u32(count_marked({word & dropped[i]}))
+	}
+	testing.expect(t, under > 0 && under < first.allocated, "the sphere is not under some of the marked pages")
+	stats := virtual_allocate(requests, table, pages, views, now = 2, dropped = dropped)
+	testing.expect_value(t, stats.drawn, under)
+	testing.expect_value(t, stats.cached, first.allocated - under)
+	// The next frame, with nothing changed, draws nothing.
+	mark_view(requests, views, c)
+	still := virtual_allocate(requests, table, pages, views, now = 3)
+	testing.expect_value(t, still.drawn, 0)
+}
+
+// A sphere off a level's grid drops none of its pages.
+@(test)
+a_sphere_off_the_levels_drops_nothing :: proc(t: ^testing.T) {
+	c := test_camera()
+	views := test_views(c)
+	dropped := make([]u32, VIRTUAL_MAX_LEVELS * VIRTUAL_LEVEL_WORDS, context.temp_allocator)
+	virtual_drop_pages(views, {{1e6, 0, 1e6, 1}}, dropped)
+	testing.expect_value(t, count_marked(dropped), 0)
+}
+
 // A level whose depth anchor moved drops its pages alone, and the frame draws them again. A reset drops every level's.
 @(test)
 an_invalidated_level_draws_its_pages_again :: proc(t: ^testing.T) {
@@ -1105,6 +1151,14 @@ the_cache_plan_keeps_the_pages_only_for_what_they_were_drawn_for :: proc(t: ^tes
 	testing.expect_value(t, next.anchors, first.anchors)
 	_, reset, _ = virtual_cache_plan(first, false, {}, c, direction, params, settings)
 	testing.expect(t, reset, "the cache off kept its pages")
+	// A frame that does not know every change of casters since the cache drew starts again.
+	_, reset, _ = virtual_cache_plan(first, true, {}, c, direction, params, settings, tracked = false)
+	testing.expect(t, reset, "a frame that missed changes kept its pages")
+	// The atlas's cache draws nothing of the levels.
+	atlas := settings
+	atlas.atlas_cache = true
+	_, reset, _ = virtual_cache_plan(first, true, {}, c, direction, params, atlas)
+	testing.expect(t, !reset, "the atlas's cache dropped the pages")
 	turned := linalg.normalize(TEST_LIGHT + {0, 0, 0.001})
 	_, reset, _ = virtual_cache_plan(first, true, {}, c, turned, params, settings)
 	testing.expect(t, reset, "a turned light kept its pages")

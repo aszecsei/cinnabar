@@ -5,7 +5,9 @@
 // longest ago leave first. Matches lib/engine/render/virtual_shadows.odin, whose tests cover the same steps.
 #define MATERIAL_PUSH Virtual_Allocate_Push
 // Matches Virtual_Allocate_Push in lib/engine/render/virtual_shadows.odin. now is the frame's epoch, which the pages that
-// it asks for take, and invalidate the levels whose pages it drops, a bit each.
+// it asks for take, and invalidate the levels whose pages it drops, a bit each. With drops, dropped is a bit for each page
+// of each level that the frame drops, in the upload ring, as the requests are laid out: the pages under the casters that
+// changed and under the live ones (see virtual_drop_pages).
 struct Virtual_Allocate_Push {
 	uint requests;
 	uint table;
@@ -16,6 +18,9 @@ struct Virtual_Allocate_Push {
 	uint phase;
 	uint now;
 	uint invalidate;
+	uint dropped;
+	uint dropped_offset;
+	uint drops;
 };
 #include "virtual_shadow.hlsli"
 
@@ -127,6 +132,10 @@ void retire(uint p) {
 	if (keep) {
 		local = page.page - virtual_view(page.level).page_origin;
 		keep = all(local >= 0) && all(local < int(VIRTUAL_PAGES));
+	}
+	if (keep && push.drops != 0) {
+		uint at = page.level * VIRTUAL_LEVEL_PAGES + uint(local.y) * VIRTUAL_PAGES + uint(local.x);
+		keep = (cn_buffer(push.dropped).Load(push.dropped_offset + (at >> 5) * 4) & (1u << (at & 31))) == 0;
 	}
 	if (!keep) {
 		table.Store(slot, VIRTUAL_NO_PAGE);
