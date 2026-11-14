@@ -19,7 +19,7 @@ defaults:
 
 jobs:
   fmt:
-    runs-on: windows-2025
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v5
       - uses: taiki-e/install-action@v2
@@ -47,14 +47,15 @@ jobs:
           fi
 
   lint:
-    runs-on: windows-2025
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/setup-odin
       - run: just lint
 
   test:
-    runs-on: windows-2025
+    # The justfile's CMake generator is Visual Studio 17 2022, which windows-2025 no longer has.
+    runs-on: windows-2022
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v5
