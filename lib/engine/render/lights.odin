@@ -60,7 +60,9 @@ Light_Flag :: enum u32 {
 // An area light's position is its middle, and its range reaches past its shape by the component's range. extent is its
 // half size along its +x in the world: a quad's half width, a disk's radius, a line's half length. extent_y is a quad's
 // half height or a disk's radius along its +y, which is cross(direction, extent), or a line's radius. Its color is a
-// point light's that is as bright, which the shaders spread over its area.
+// point light's that is as bright, which the shaders spread over its area. The other lights have no shape, so extent.x
+// holds their size: a directional light's angular radius as its tangent, and a point or a spot light's source radius
+// (see light_size).
 Light_Record :: struct {
 	position:    [3]f32,
 	range:       f32,
@@ -77,6 +79,22 @@ Light_Record :: struct {
 }
 
 #assert(size_of(Light_Record) == 80)
+
+// light_size is how big a light is to its shadows (see docs/rendering/lighting-and-shadows.md#soft-shadows): a
+// directional light's angular radius as its tangent, which is its disk's radius 1 m away, and any other light's radius
+// in meters. An area light's is the radius of a sphere with its quad's or its disk's area, or its line's half length.
+// A size of 0 is a point, whose shadows are hard. Matches light_size in light_record.hlsli.
+light_size :: proc(l: Light_Record) -> f32 {
+	#partial switch l.type {
+	case .Quad:
+		return math.sqrt(4 * linalg.length(l.extent) * l.extent_y / math.PI)
+	case .Disk:
+		return math.sqrt(linalg.length(l.extent) * l.extent_y)
+	case .Line:
+		return linalg.length(l.extent)
+	}
+	return l.extent.x
+}
 
 // Ambient is the light from everything else until global illumination (see docs/rendering/sky.md#ambient-light): from a
 // direction d, constant + x * d.x + y * d.y + z * d.z, per channel. A linear function holds the Flat sky's light from
@@ -183,6 +201,8 @@ Lights :: struct {
 Light_Frame :: struct {
 	records:           [dynamic]Light_Record,
 	casts:             [dynamic]bool,
+	// Each record's entity, which a channel of the traced mask's history follows (see Mask_History).
+	entities:          [dynamic]ecs.Entity,
 	directional_count: int,
 	// The directional lights' entities, in their records' order, so the sky finds its sun's.
 	directional:       [MAX_DIRECTIONAL_LIGHTS]ecs.Entity,
@@ -277,14 +297,16 @@ extract_lights :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32) -> ^Light_Frame 
 	lf := new(Light_Frame, r.platform.frame_allocator)
 	lf.records = make([dynamic]Light_Record, r.platform.frame_allocator)
 	lf.casts = make([dynamic]bool, r.platform.frame_allocator)
+	lf.entities = make([dynamic]ecs.Entity, r.platform.frame_allocator)
 	l := &r.lights
 
-	add :: proc(lf: ^Light_Frame, record: Light_Record, casts: bool) {
+	add :: proc(lf: ^Light_Frame, record: Light_Record, casts: bool, entity: ecs.Entity) {
 		if len(lf.records) == MAX_LIGHTS {
 			return
 		}
 		append(&lf.records, record)
 		append(&lf.casts, casts)
+		append(&lf.entities, entity)
 	}
 	color_of :: proc(color: [3]f32, intensity: f32) -> [3]f32 {
 		return (color == {} ? 1 : color) * intensity
@@ -316,7 +338,15 @@ extract_lights :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32) -> ^Light_Frame 
 			if !ok || lf.directional_count == MAX_DIRECTIONAL_LIGHTS {
 				continue
 			}
-			add(lf, {type = .Directional, color = color_of(light.color, light.intensity), direction = forward_of(pose), shadow = -1, mask = -1}, light.cast_shadows)
+			record := Light_Record {
+				type      = .Directional,
+				color     = color_of(light.color, light.intensity),
+				direction = forward_of(pose),
+				shadow    = -1,
+				mask      = -1,
+				extent    = {math.tan(math.to_radians(clamp(light.angular_diameter, 0, 90)) * 0.5), 0, 0},
+			}
+			add(lf, record, light.cast_shadows, e)
 			lf.directional[lf.directional_count] = e
 			lf.directional_count += 1
 		}
@@ -338,8 +368,10 @@ extract_lights :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32) -> ^Light_Frame 
 					color = color_of(light.color, light.intensity),
 					shadow = -1,
 					mask = -1,
+					extent = {max(light.source_radius, 0), 0, 0},
 				},
 				light.cast_shadows,
+				e,
 			)
 		}
 	}
@@ -367,8 +399,10 @@ extract_lights :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32) -> ^Light_Frame 
 					spot_offset = -cos_outer * scale,
 					shadow = -1,
 					mask = -1,
+					extent = {max(light.source_radius, 0), 0, 0},
 				},
 				light.cast_shadows,
+				e,
 			)
 		}
 	}
@@ -382,7 +416,7 @@ extract_lights :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32) -> ^Light_Frame 
 			}
 			half_x, half_y := size_or_default(light.width) / 2, size_or_default(light.height) / 2
 			bounds := math.sqrt(half_x * half_x + half_y * half_y)
-			add(lf, area(f, pose, .Quad, color_of(light.color, light.intensity), light.range, half_x, half_y, bounds, light.two_sided), light.cast_shadows)
+			add(lf, area(f, pose, .Quad, color_of(light.color, light.intensity), light.range, half_x, half_y, bounds, light.two_sided), light.cast_shadows, e)
 		}
 	}
 	it = ecs.query_iter(w, l.disk.query)
@@ -394,7 +428,7 @@ extract_lights :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32) -> ^Light_Frame 
 				continue
 			}
 			half_x, half_y := size_or_default(light.width) / 2, size_or_default(light.height) / 2
-			add(lf, area(f, pose, .Disk, color_of(light.color, light.intensity), light.range, half_x, half_y, max(half_x, half_y), light.two_sided), light.cast_shadows)
+			add(lf, area(f, pose, .Disk, color_of(light.color, light.intensity), light.range, half_x, half_y, max(half_x, half_y), light.two_sided), light.cast_shadows, e)
 		}
 	}
 	it = ecs.query_iter(w, l.line.query)
@@ -406,7 +440,7 @@ extract_lights :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32) -> ^Light_Frame 
 				continue
 			}
 			half, radius := size_or_default(light.length) / 2, max(light.radius, 0)
-			add(lf, area(f, pose, .Line, color_of(light.color, light.intensity), light.range, half, radius, half + radius, false), light.cast_shadows)
+			add(lf, area(f, pose, .Line, color_of(light.color, light.intensity), light.range, half, radius, half + radius, false), light.cast_shadows, e)
 		}
 	}
 	if len(lf.records) == MAX_LIGHTS {

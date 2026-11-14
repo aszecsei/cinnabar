@@ -5,6 +5,7 @@
 
 #include "ambient.hlsli"
 #include "cinnabar.hlsli"
+#include "light_record.hlsli"
 #include "mesh_encoding.hlsli"
 #include "view_projection.hlsli"
 
@@ -193,6 +194,22 @@ struct Frame_Constants {
 	// Whether the push constants have the aerial perspective volume, and its clamping sampler (see fog_at.hlsli).
 	uint aerial;
 	uint aerial_sampler;
+	// The atlas's soft shadows (see soft_shadow_map in material_lighting.hlsli): the blocker search's gathers, the
+	// filter's comparisons, 0 without soft shadows, and its widest reach in texels; the sampler that the search gathers
+	// depths with; and the blue noise that turns the taps, 0 without it, and this frame's slice of it.
+	uint shadow_soft_search;
+	uint shadow_soft_taps;
+	float shadow_soft_radius;
+	uint shadow_depth_sampler;
+	uint shadow_noise;
+	uint shadow_noise_slice;
+	// The virtual shadow map's soft shadows (see virtual_soft_shadow in material_lighting.hlsli): its light's size, 0
+	// without them, how far a ray reaches in meters, each pixel's rays and each ray's steps.
+	float virtual_soft_size;
+	float virtual_ray_length;
+	uint virtual_rays;
+	uint virtual_steps;
+	uint2 smrt_padding;
 };
 CN_PASS_CONSTANTS(Frame_Constants, frame);
 
@@ -415,40 +432,6 @@ struct Vertex_Inputs {
 	float2 uv1;
 	float4 color;
 	float time;
-};
-
-// Matches Light_Record in lib/engine/render/lights.odin. position is relative to the camera, and direction is where
-// the light travels. A spot light's falloff is saturate(cos * spot_scale + spot_offset), squared. shadow is the light's
-// first shadow view, and mask its channel of the shadow mask, or -1 for none. An area light's position is its middle,
-// extent is its half size along its +x, and extent_y a quad's half height, a disk's radius along its +y, or a line's
-// radius; its color is a point light's that is as bright.
-static const uint LIGHT_DIRECTIONAL = 0;
-static const uint LIGHT_POINT = 1;
-static const uint LIGHT_SPOT = 2;
-static const uint LIGHT_QUAD = 3;
-static const uint LIGHT_DISK = 4;
-static const uint LIGHT_LINE = 5;
-// Light_Record's flags.
-static const uint LIGHT_TWO_SIDED = 1;
-// The light's shadow is the virtual shadow map (see virtual_shadow.hlsli).
-static const uint LIGHT_VIRTUAL_SHADOW = 2;
-// The clouds shadow the light (see cloud_shadow.hlsli).
-static const uint LIGHT_CLOUD_SHADOW = 4;
-// The forward pass darkens the light by the contact shadows too (see light_shadow in material_lighting.hlsli).
-static const uint LIGHT_CONTACT_SHADOW = 8;
-struct Light_Record {
-	float3 position;
-	float range;
-	float3 color;
-	uint type;
-	float3 direction;
-	float spot_scale;
-	float spot_offset;
-	int shadow;
-	int mask;
-	uint flags;
-	float3 extent;
-	float extent_y;
 };
 
 // Matches Shadow_View in lib/engine/render/shadows.odin: a shadow map's projection of positions relative to the

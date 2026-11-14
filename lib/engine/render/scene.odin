@@ -213,6 +213,22 @@ Frame_Constants :: struct {
 	// none.
 	aerial:                       u32,
 	aerial_sampler:               u32,
+	// The atlas's soft shadows (see soft_shadow_map in material_lighting.hlsli): the level's Soft_Params, with no taps
+	// without them, the sampler that the blocker search gathers depths with, and the blue noise that turns the taps and
+	// its slice for this frame, 0 without it. Only the camera's view has them.
+	shadow_soft_search:           u32,
+	shadow_soft_taps:             u32,
+	shadow_soft_radius:           f32,
+	shadow_depth_sampler:         u32,
+	shadow_noise:                 u32,
+	shadow_noise_slice:           u32,
+	// The virtual shadow map's soft shadows (see Smrt_Params): its light's size, 0 without them, each pixel's rays, each
+	// ray's steps and how far a ray reaches. Only the camera's views have them, as the atlas's soft shadows.
+	virtual_soft_size:            f32,
+	virtual_ray_length:           f32,
+	virtual_rays:                 u32,
+	virtual_steps:                u32,
+	smrt_padding:                 [2]u32,
 }
 
 // Material_Push matches Material_Push in material_common.hlsli: the forward pass's textures that exist only once the
@@ -565,7 +581,7 @@ Cell_Range :: struct {
 }
 
 #assert(size_of(Instance_Record) == 112 && size_of(Cull_Item) == 80 && size_of(Draw_Record) == 32 && size_of(Mesh_Record) == 80)
-#assert(size_of(Cull_View) == 128 && size_of(Frame_Constants) == 928 && size_of(Cull_Constants) == 144)
+#assert(size_of(Cull_View) == 128 && size_of(Frame_Constants) == 976 && size_of(Cull_Constants) == 144)
 #assert(size_of(Instance_Set_Record) == 112 && size_of(Instance_Cull_Constants) == 112)
 
 // Gpu_Scene is the GPU scene's state between frames, in the Renderer.
@@ -1355,6 +1371,7 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 	}
 	constants.gi = u32(f.gi != nil)
 	constants.reflections = u32(f.ssr != nil)
+	soft_shadow_constants(&constants, f)
 	cube := sky_cube_reads(f)
 	constants.sky_cube_current, constants.sky_cube_previous = cube.current, cube.previous
 	constants.sky_cube_blend, constants.sky_cube_mips = cube.blend, cube.mips
@@ -1384,6 +1401,11 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 		// Only the camera's surfaces are in the reflections' texture.
 		if v != VIEW_CAMERA {
 			c.reflections = 0
+		}
+		// The soft shadows' noise needs temporal AA's history, which only the camera's views have.
+		if v != VIEW_CAMERA && v != VIEW_VIEW_MODEL {
+			c.shadow_soft_taps = 0
+			c.virtual_rays = 0
 		}
 		switch v {
 		case VIEW_CAMERA, VIEW_VIEW_MODEL:

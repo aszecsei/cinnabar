@@ -30,6 +30,8 @@ Shadow_Filter :: enum u32 {
 // Shadow_Params are the shadow maps at a level. The atlas is square. Cascades take cells of cell pixels; spot lights
 // and point lights' faces take slots of slot pixels, several to a cell. A level with virtual_levels has a virtual shadow
 // map, whose pool is pool_pages of VIRTUAL_PAGE_TEXELS on a side. virtual_bias moves its levels: above 0 is coarser.
+// A level with soft has percentage-closer soft shadows for the atlas's lights that have a size (see Soft_Params), and a
+// level with smrt rays shadow map ray tracing for the virtual shadow map's light (see Smrt_Params).
 Shadow_Params :: struct {
 	atlas:          int,
 	cell:           int,
@@ -39,15 +41,40 @@ Shadow_Params :: struct {
 	virtual_levels: int,
 	pool_pages:     [2]u32,
 	virtual_bias:   f32,
+	soft:           Soft_Params,
+	smrt:           Smrt_Params,
+}
+
+// Smrt_Params are the virtual shadow map's soft shadows at a level, shadow map ray tracing (see
+// docs/rendering/lighting-and-shadows.md#the-virtual-shadow-map): each pixel's rays toward the light's disk, each ray's
+// steps through the map's depth, and how far a ray reaches, in meters. A level with no rays keeps the comparison taps.
+// Match virtual_soft_shadow in material_lighting.hlsli.
+Smrt_Params :: struct {
+	rays:   u32,
+	steps:  u32,
+	length: f32,
+}
+
+// Soft_Params are the percentage-closer soft shadows of the atlas's spot, point and area lights at a level (see
+// docs/rendering/lighting-and-shadows.md#soft-shadows): the blocker search's gathers, each of 2x2 texels, the filter's
+// bilinear comparisons, and the widest the filter reaches from its middle, in texels. A level with no taps keeps the
+// comparison taps of Shadow_Params.filter. Match soft_shadow_map in material_lighting.hlsli.
+Soft_Params :: struct {
+	search: u32,
+	taps:   u32,
+	radius: f32,
 }
 
 @(rodata)
 SHADOW_PARAMS := [Quality_Level]Shadow_Params {
 	.Low    = {atlas = 2048, cell = 1024, slot = 512, cascades = 2, filter = .Taps_1},
-	.Medium = {atlas = 4096, cell = 1024, slot = 512, cascades = 3, filter = .Taps_4, virtual_levels = 12, pool_pages = {32, 32}, virtual_bias = 1},
-	.High   = {atlas = 4096, cell = 1024, slot = 512, cascades = 4, filter = .Taps_4, virtual_levels = 12, pool_pages = {64, 32}},
-	.Ultra  = {atlas = 8192, cell = 2048, slot = 1024, cascades = 4, filter = .Taps_9, virtual_levels = 13, pool_pages = {64, 64}},
+	.Medium = {atlas = 4096, cell = 1024, slot = 512, cascades = 3, filter = .Taps_4, virtual_levels = 12, pool_pages = {32, 32}, virtual_bias = 1, soft = {search = 4, taps = 8, radius = 16}},
+	.High   = {atlas = 4096, cell = 1024, slot = 512, cascades = 4, filter = .Taps_4, virtual_levels = 12, pool_pages = {64, 32}, soft = {search = 8, taps = 16, radius = 16}, smrt = {rays = 4, steps = 6, length = SMRT_LENGTH}},
+	.Ultra  = {atlas = 8192, cell = 2048, slot = 1024, cascades = 4, filter = .Taps_9, virtual_levels = 13, pool_pages = {64, 64}, soft = {search = 8, taps = 24, radius = 32}, smrt = {rays = 8, steps = 8, length = SMRT_LENGTH}},
 }
+// How far the virtual shadow map's rays reach toward the light, in meters. A caster farther than this casts a penumbra
+// as wide as one this far.
+SMRT_LENGTH :: 20
 // By default, the cascades cover the view to this depth, in meters, split between even and exponential by this much
 // (see Shadows).
 SHADOW_DISTANCE :: 100
@@ -64,6 +91,14 @@ MASK_GROUP_SIZE :: 8
 // The contact shadows hold one light's visibility: a frame that has them traces no mask.
 CONTACT_SHADOWS_FORMAT :: gpu.Format.R8_Unorm
 
+// soft_guard is the band of texels around a soft light's view, inside its slot, that its filter may read past the
+// view's edge: the filter's reach, and a texel each for a gather's and a comparison's 2x2. A cube face's or a spot
+// light's view is that much wider than its own field of view, so a wide filter at its edge reads what lies beyond the
+// edge, and never a neighbouring view, nor a seam where its taps would clamp. 0 without soft shadows.
+soft_guard :: proc(p: Shadow_Params) -> int {
+	return p.soft.taps > 0 ? int(math.ceil(p.soft.radius)) + 2 : 0
+}
+
 // slots_per_cell is how many slots a cell holds.
 slots_per_cell :: proc(p: Shadow_Params) -> int {
 	return (p.cell / p.slot) * (p.cell / p.slot)
@@ -77,6 +112,19 @@ max_shadow_views :: proc(p: Shadow_Params) -> int {
 
 // SHADOW_MASK_SHADER is the engine's shadow mask shader (lib/engine/content/shaders/shadow_mask.hlsl).
 SHADOW_MASK_SHADER :: #load("../content/shaders/shadow_mask.hlsl.meta", string)
+// The traced mask's denoiser's shaders (lib/engine/content/shaders/shadow_denoise_temporal.hlsl and
+// shadow_denoise_spatial.hlsl).
+MASK_TEMPORAL_SHADER :: #load("../content/shaders/shadow_denoise_temporal.hlsl.meta", string)
+MASK_SPATIAL_SHADER :: #load("../content/shaders/shadow_denoise_spatial.hlsl.meta", string)
+// The traced mask's history averages a soft channel over at most this many frames. Matches MAX_FRAMES in
+// shadow_denoise_temporal.hlsl.
+MASK_HISTORY_FRAMES :: 16
+// The soft channels' raw visibility, their history's average and its frames, and their penumbrae's radii in meters.
+MASK_HISTORY_FORMAT :: gpu.Format.RGBA16_Float
+MASK_FRAMES_FORMAT :: gpu.Format.RGBA8_Unorm
+MASK_PENUMBRA_FORMAT :: gpu.Format.RGBA16_Float
+// The spatial pass's widest disk, in pixels.
+MASK_MAX_BLUR :: 24
 // CONTACT_SHADOWS_SHADER is the engine's contact shadows shader (lib/engine/content/shaders/contact_shadows.hlsl).
 CONTACT_SHADOWS_SHADER :: #load("../content/shaders/contact_shadows.hlsl.meta", string)
 
@@ -114,8 +162,66 @@ Mask_Constants :: struct {
 	stencil:       u32,
 	// The camera's jitter, which the prepass drew with (see Frame.jitter).
 	jitter:        [2]f32,
+	// The channels whose lights have a size, a bit each, which trace toward a point on the light's shape that the blue
+	// noise picks, and write their penumbrae's radii, a write index.
+	soft:          u32,
+	penumbra:      u32,
+	noise:         u32,
+	noise_slice:   u32,
 	padding:       u32,
 }
+
+// Denoise_Temporal_Constants matches Denoise_Temporal_Constants in shadow_denoise_temporal.hlsl.
+Denoise_Temporal_Constants :: struct {
+	// For each channel, last frame's channel that held its light, or max(u32) to start again.
+	history_channel: [4]u32,
+	size:            [2]u32,
+	inverse_size:    [2]f32,
+	raw:             u32,
+	velocity:        u32,
+	previous:        u32,
+	previous_frames: u32,
+	current:         u32,
+	current_frames:  u32,
+	sampler_index:   u32,
+	soft:            u32,
+	valid:           u32,
+	padding:         [3]u32,
+}
+
+// Denoise_Spatial_Constants matches Denoise_Spatial_Constants in shadow_denoise_spatial.hlsl.
+Denoise_Spatial_Constants :: struct {
+	right:       [4]f32,
+	up:          [4]f32,
+	forward:     [4]f32,
+	projection:  [4]f32,
+	view_model:  [4]f32,
+	size:        [2]u32,
+	accumulated: u32,
+	raw:         u32,
+	penumbra:    u32,
+	depth:       u32,
+	normals:     u32,
+	stencil:     u32,
+	output:      u32,
+	noise:       u32,
+	noise_slice: u32,
+	soft:        u32,
+	max_radius:  f32,
+	jitter:      [2]f32,
+	padding:     u32,
+}
+
+// Mask_History is what the traced mask's history holds in a view's state: the light entity of each channel that it
+// averaged, so that a channel whose light was another's last frame starts again, as assign_shadows ranks the lights
+// anew each frame. A frame sets it when it executes (see commit_mask_history).
+Mask_History :: struct {
+	lights: [MAX_MASK_LIGHTS]ecs.Entity,
+}
+
+#assert(size_of(Mask_Constants) == 176)
+#assert(size_of(Denoise_Temporal_Constants) == 80)
+#assert(size_of(Denoise_Spatial_Constants) == 144)
 
 // Contact_Constants matches Contact_Constants in contact_shadows.hlsl.
 Contact_Constants :: struct {
@@ -134,8 +240,11 @@ Contact_Constants :: struct {
 
 // Shadow_Passes is the shadows' state between frames, in the Renderer.
 Shadow_Passes :: struct {
-	mask_pipeline:    Shader_Pipeline,
-	contact_pipeline: Shader_Pipeline,
+	mask_pipeline:     Shader_Pipeline,
+	contact_pipeline:  Shader_Pipeline,
+	// The traced mask's denoiser.
+	temporal_pipeline: Shader_Pipeline,
+	spatial_pipeline:  Shader_Pipeline,
 	sampler:       gpu.Sampler,
 	virtual:       Virtual_Shadows,
 }
@@ -156,6 +265,14 @@ Shadow_Frame :: struct {
 	params:         Shadow_Params,
 	mask_lights:    [MAX_MASK_LIGHTS]u32,
 	mask_count:     int,
+	// The virtual shadow map's light's size, where the level traces its soft shadows (see Smrt_Params), or 0.
+	virtual_size:   f32,
+	// The soft channels, a bit each, and the denoiser's textures, which a frame with soft channels has.
+	mask_soft:      u32,
+	mask_raw:       Texture,
+	mask_penumbra:  Texture,
+	mask_history:   History,
+	mask_frames:    History,
 	contact_light:  i32,
 	atlas:          Texture,
 	mask:           Texture,
@@ -168,6 +285,8 @@ Shadow_Frame :: struct {
 shadows_init :: proc(s: ^Shadow_Passes, platform: ^core.Platform_API) {
 	s.mask_pipeline = shader_pipeline(SHADOW_MASK_SHADER)
 	s.contact_pipeline = shader_pipeline(CONTACT_SHADOWS_SHADER)
+	s.temporal_pipeline = shader_pipeline(MASK_TEMPORAL_SHADER)
+	s.spatial_pipeline = shader_pipeline(MASK_SPATIAL_SHADER)
 	s.sampler = platform.gpu_create_sampler({filter = .Linear, address = .Clamp, compare = .Greater_Equal, label = "shadow comparison"})
 	virtual_shadows_init(&s.virtual)
 }
@@ -177,6 +296,8 @@ shadows_destroy :: proc(s: ^Shadow_Passes, platform: ^core.Platform_API) {
 	platform.gpu_destroy_sampler(s.sampler)
 	destroy_shader_pipeline(&s.mask_pipeline, platform)
 	destroy_shader_pipeline(&s.contact_pipeline, platform)
+	destroy_shader_pipeline(&s.temporal_pipeline, platform)
+	destroy_shader_pipeline(&s.spatial_pipeline, platform)
 }
 
 // cascade_splits are the view depths at which count cascades end: between even and exponential splits of the range
@@ -205,6 +326,8 @@ assign_shadows :: proc(f: ^Frame) {
 	if r.caps.ray_query {
 		// Synced whether or not this frame traces, so turning tracing on does not wait for it to compile.
 		sync_compute_pipeline(&r.shadows.mask_pipeline, r.platform, r.residency.assets, {label = "shadow mask"}, r.reloaded)
+		sync_compute_pipeline(&r.shadows.temporal_pipeline, r.platform, r.residency.assets, {label = "shadow mask temporal"}, r.reloaded)
+		sync_compute_pipeline(&r.shadows.spatial_pipeline, r.platform, r.residency.assets, {label = "shadow mask spatial"}, r.reloaded)
 	}
 	sync_compute_pipeline(&r.shadows.contact_pipeline, r.platform, r.residency.assets, {label = "contact shadows"}, r.reloaded)
 	trace := f.shadow_settings.ray_traced && r.shadows.mask_pipeline.pipeline != {} && request_ray_scene(f)
@@ -261,9 +384,14 @@ assign_shadow_views :: proc(f: ^Frame, trace: bool, virtual := false, contact :=
 	first_slot := 0
 	for i in order {
 		record := &lf.records[i]
+		// A light with a size takes soft shadows, whose views have a guard band.
+		guard := light_size(record^) > 0 ? soft_guard(sf.params) : 0
 		if trace && sf.mask_count < MAX_MASK_LIGHTS {
 			record.mask = i32(sf.mask_count)
 			sf.mask_lights[sf.mask_count] = u32(i)
+			if light_size(record^) > 0 {
+				sf.mask_soft |= 1 << u32(sf.mask_count)
+			}
 			sf.mask_count += 1
 			continue
 		}
@@ -282,6 +410,9 @@ assign_shadow_views :: proc(f: ^Frame, trace: bool, virtual := false, contact :=
 			}
 			if virtual {
 				record.flags += {.Virtual_Shadow}
+				if sf.params.smrt.rays > 0 {
+					sf.virtual_size = light_size(record^)
+				}
 				add_virtual_levels(f, sf, record.direction)
 			} else {
 				first_slot = sf.params.cascades * slots_per_cell(sf.params)
@@ -294,16 +425,16 @@ assign_shadow_views :: proc(f: ^Frame, trace: bool, virtual := false, contact :=
 			record.shadow = i32(len(sf.views))
 			cone := math.acos(clamp(-record.spot_offset / record.spot_scale, -1, 1))
 			// The cone's half angle is where the falloff reaches 0: cos = -offset / scale.
-			add_perspective_view(f, sf, record.position, record.direction, min(cone * 2, math.to_radians(f32(170))), record.range, first_slot + next_slot)
+			add_perspective_view(f, sf, record.position, record.direction, min(cone * 2, math.to_radians(f32(170))), record.range, first_slot + next_slot, guard)
 			next_slot += 1
 		case .Point, .Quad, .Disk, .Line:
-			// An area light casts its shadows from its middle, as a point light does.
+			// An area light casts its shadows from its middle, as a point light does, as soft as its size.
 			if first_slot + next_slot + 6 > max_views {
 				continue
 			}
 			record.shadow = i32(len(sf.views))
 			for axis in CUBE_FACES {
-				add_perspective_view(f, sf, record.position, axis, math.PI / 2, record.range, first_slot + next_slot)
+				add_perspective_view(f, sf, record.position, axis, math.PI / 2, record.range, first_slot + next_slot, guard)
 				next_slot += 1
 			}
 		}
@@ -327,6 +458,38 @@ assign_shadow_views :: proc(f: ^Frame, trace: bool, virtual := false, contact :=
 			clear(&sf.views)
 			sf.virtual.count = 0
 		}
+	}
+}
+
+// soft_shadow_constants fills the frame's constants for the soft shadows of the atlas and of the virtual shadow map, at a
+// level that has them. The blue noise turns the taps and the rays of each pixel, and each frame takes its next slice
+// when temporal AA or an upscaler averages them over time; without either, the noise stays where it is, and before it
+// is resident, every pixel takes the same turn.
+@(private)
+soft_shadow_constants :: proc(constants: ^Frame_Constants, f: ^Frame) {
+	r := f.renderer
+	sf := f.shadows
+	soft, smrt := sf.params.soft, sf.params.smrt
+	traces := sf.virtual_size > 0 && sf.virtual.count > 0 && smrt.rays > 0
+	if soft.taps == 0 && !traces {
+		return
+	}
+	if soft.taps > 0 {
+		constants.shadow_soft_search = soft.search
+		constants.shadow_soft_taps = soft.taps
+		constants.shadow_soft_radius = soft.radius
+		constants.shadow_depth_sampler = gpu.sampler_index(r.post.sampler)
+	}
+	if traces {
+		constants.virtual_soft_size = sf.virtual_size
+		constants.virtual_rays = smrt.rays
+		constants.virtual_steps = smrt.steps
+		constants.virtual_ray_length = smrt.length
+	}
+	if noise := blue_noise(r); noise != {} {
+		temporal := f.post != nil && (f.post.temporal || f.post.upscaler != {})
+		constants.shadow_noise = gpu.read_index(noise)
+		constants.shadow_noise_slice = temporal ? u32(f.state.frames % BLUE_NOISE_SLICES) : 0
 	}
 }
 
@@ -469,11 +632,13 @@ add_orthographic_shadow_view :: proc(sf: ^Shadow_Frame, direction, center: [3]f3
 }
 
 // add_perspective_view adds a perspective view from a light's position, relative to the camera, along a direction,
-// with reversed depth from SHADOW_NEAR, and culling to the light's range.
+// with reversed depth from SHADOW_NEAR, and culling to the light's range. With a guard of texels, its field of view
+// widens so that fov fills the slot but for guard texels on each side (see soft_guard).
 @(private = "file")
-add_perspective_view :: proc(f: ^Frame, sf: ^Shadow_Frame, position, direction: [3]f32, fov, range: f32, slot: int) {
+add_perspective_view :: proc(f: ^Frame, sf: ^Shadow_Frame, position, direction: [3]f32, fov, range: f32, slot: int, guard := 0) {
 	right, up := light_basis(direction)
-	s := 1 / math.tan(fov * 0.5)
+	slot_size := sf.params.slot
+	s := 1 / math.tan(fov * 0.5) * f32(slot_size - 2 * guard) / f32(slot_size)
 	// The rows take a position relative to the camera: its offset from the light along the light's axes, projected.
 	m := matrix[4, 4]f32{
 		right.x * s, right.y * s, right.z * s, -linalg.dot(right, position) * s,
@@ -481,7 +646,6 @@ add_perspective_view :: proc(f: ^Frame, sf: ^Shadow_Frame, position, direction: 
 		0, 0, 0, SHADOW_NEAR,
 		direction.x, direction.y, direction.z, -linalg.dot(direction, position),
 	}
-	slot_size := sf.params.slot
 	pixels, rect := slot_viewport(sf.params, slot, slot_size)
 	planes := frustum_planes_6(m)
 	// The far plane is at the light's range.
@@ -541,11 +705,167 @@ add_shadow_passes :: proc(f: ^Frame) {
 		return
 	}
 	sf.mask = create_texture(g, {size = f.size, format = SHADOW_MASK_FORMAT, label = "shadow mask"})
+	r := f.renderer
+	if sf.mask_soft != 0 &&
+	   (!pipeline_ready(r.platform, &r.shadows.temporal_pipeline) || !pipeline_ready(r.platform, &r.shadows.spatial_pipeline)) {
+		// Until the denoiser compiles, every channel traces toward its light's middle.
+		sf.mask_soft = 0
+	}
+	if sf.mask_soft != 0 {
+		sf.mask_history = history_texture(g, {size = f.size, format = MASK_HISTORY_FORMAT, label = "shadow mask history"})
+		sf.mask_frames = history_texture(g, {size = f.size, format = MASK_FRAMES_FORMAT, label = "shadow mask frames"})
+		if sf.mask_history.current == 0 || sf.mask_frames.current == 0 {
+			sf.mask_soft = 0
+		}
+	}
 	p := add_compute_pass(g, "shadow mask", trace_shadow_mask, f)
 	read(g, p, f.depth)
 	read(g, p, f.normals)
 	read_accel(g, p, ray_scene_accel(f))
-	write(g, p, sf.mask)
+	if sf.mask_soft == 0 {
+		write(g, p, sf.mask)
+		return
+	}
+	sf.mask_raw = create_texture(g, {size = f.size, format = SHADOW_MASK_FORMAT, label = "shadow mask raw"})
+	sf.mask_penumbra = create_texture(g, {size = f.size, format = MASK_PENUMBRA_FORMAT, label = "shadow mask penumbra"})
+	write(g, p, sf.mask_raw)
+	write(g, p, sf.mask_penumbra)
+
+	temporal := add_compute_pass(g, "shadow mask temporal", run_mask_temporal, f)
+	read(g, temporal, sf.mask_raw)
+	read(g, temporal, f.velocity)
+	read(g, temporal, sf.mask_history.previous)
+	read(g, temporal, sf.mask_frames.previous)
+	write(g, temporal, sf.mask_history.current)
+	write(g, temporal, sf.mask_frames.current)
+
+	spatial := add_compute_pass(g, "shadow mask spatial", run_mask_spatial, f)
+	read(g, spatial, sf.mask_history.current)
+	read(g, spatial, sf.mask_raw)
+	read(g, spatial, sf.mask_penumbra)
+	read(g, spatial, f.depth)
+	read(g, spatial, f.normals)
+	write(g, spatial, sf.mask)
+	on_executed(g, commit_mask_history, f)
+}
+
+// commit_mask_history keeps the lights of the channels whose history the frame wrote, once it has executed.
+@(private = "file")
+commit_mask_history :: proc(data: rawptr) {
+	f := (^Frame)(data)
+	f.state.mask_history = mask_history_of(f)
+}
+
+// mask_history_of is the Mask_History that a frame's traced mask leaves: its soft channels' lights.
+@(private = "file")
+mask_history_of :: proc(f: ^Frame) -> (h: Mask_History) {
+	sf := f.shadows
+	for c in 0 ..< sf.mask_count {
+		if sf.mask_soft & (1 << u32(c)) != 0 {
+			h.lights[c] = f.lights.entities[sf.mask_lights[c]]
+		}
+	}
+	return
+}
+
+// mask_history_channels is, for each of a frame's channels, the channel of the last frame's history that held its
+// light, or max(u32) when none did, so the channel starts again.
+mask_history_channels :: proc(previous: Mask_History, current: Mask_History) -> (channels: [4]u32) {
+	for light, c in current.lights {
+		channels[c] = max(u32)
+		if light == {} {
+			continue
+		}
+		for old, p in previous.lights {
+			if old == light {
+				channels[c] = u32(p)
+			}
+		}
+	}
+	return
+}
+
+@(private = "file")
+run_mask_temporal :: proc(ctx: ^Pass_Context) {
+	f := (^Frame)(ctx.data)
+	sf := f.shadows
+	g := ctx.graph
+	pipeline := f.renderer.shadows.temporal_pipeline.pipeline
+	if pipeline == {} {
+		return
+	}
+	constants := Denoise_Temporal_Constants {
+		history_channel = mask_history_channels(f.state.mask_history, mask_history_of(f)),
+		size            = f.size,
+		inverse_size    = {1 / f32(f.size.x), 1 / f32(f.size.y)},
+		raw             = gpu.read_index(gpu_texture(g, sf.mask_raw)),
+		velocity        = gpu.read_index(gpu_texture(g, f.velocity)),
+		previous        = gpu.read_index(gpu_texture(g, sf.mask_history.previous)),
+		previous_frames = gpu.read_index(gpu_texture(g, sf.mask_frames.previous)),
+		current         = gpu.write_index(gpu_texture(g, sf.mask_history.current)),
+		current_frames  = gpu.write_index(gpu_texture(g, sf.mask_frames.current)),
+		sampler_index   = gpu.sampler_index(f.renderer.post.sampler),
+		soft            = sf.mask_soft,
+		valid           = u32(sf.mask_history.valid && sf.mask_frames.valid),
+	}
+	dispatch_mask_pass(ctx, f, pipeline, constants)
+}
+
+@(private = "file")
+run_mask_spatial :: proc(ctx: ^Pass_Context) {
+	f := (^Frame)(ctx.data)
+	sf := f.shadows
+	g := ctx.graph
+	pipeline := f.renderer.shadows.spatial_pipeline.pipeline
+	if pipeline == {} {
+		return
+	}
+	right, up, forward := view_axes(f.view)
+	noise, slice := mask_noise(f)
+	constants := Denoise_Spatial_Constants {
+		right       = {right.x, right.y, right.z, 0},
+		up          = {up.x, up.y, up.z, 0},
+		forward     = {forward.x, forward.y, forward.z, 0},
+		projection  = f.projection,
+		view_model  = f.view_model_projection,
+		size        = f.size,
+		accumulated = gpu.read_index(gpu_texture(g, sf.mask_history.current)),
+		raw         = gpu.read_index(gpu_texture(g, sf.mask_raw)),
+		penumbra    = gpu.read_index(gpu_texture(g, sf.mask_penumbra)),
+		depth       = gpu.read_index(gpu_texture(g, f.depth)),
+		normals     = gpu.read_index(gpu_texture(g, f.normals)),
+		stencil     = gpu.stencil_index(gpu_texture(g, f.depth)),
+		output      = gpu.write_index(gpu_texture(g, sf.mask)),
+		noise       = noise,
+		noise_slice = slice,
+		soft        = sf.mask_soft,
+		max_radius  = MASK_MAX_BLUR,
+		jitter      = f.jitter,
+	}
+	dispatch_mask_pass(ctx, f, pipeline, constants)
+}
+
+// mask_noise is the blue noise's read index, 0 until it is resident, and the slice that the frame takes: a new one each
+// frame, since the mask's own history averages them, whether or not temporal AA runs.
+@(private = "file")
+mask_noise :: proc(f: ^Frame) -> (noise, slice: u32) {
+	if t := blue_noise(f.renderer); t != {} {
+		return gpu.read_index(t), u32(f.state.frames % BLUE_NOISE_SLICES)
+	}
+	return
+}
+
+@(private = "file")
+dispatch_mask_pass :: proc(ctx: ^Pass_Context, f: ^Frame, pipeline: gpu.Pipeline, constants: $T) {
+	upload, ok := f.renderer.platform.gpu_upload(size_of(T), gpu.PASS_CONSTANTS_ALIGN)
+	if !ok {
+		return
+	}
+	(^T)(raw_data(upload.data))^ = constants
+	groups := (f.size + MASK_GROUP_SIZE - 1) / MASK_GROUP_SIZE
+	gpu.cmd_set_pipeline(ctx.cb, pipeline)
+	gpu.cmd_set_pass_constants(ctx.cb, upload)
+	gpu.cmd_dispatch(ctx.cb, {groups.x, groups.y, 1})
 }
 
 // add_contact_shadows_pass adds the contact shadows' pass, on the compute queue beside the ambient occlusion, whose
@@ -637,16 +957,21 @@ trace_shadow_mask :: proc(ctx: ^Pass_Context) {
 		light_index   = {max(u32), max(u32), max(u32), max(u32)},
 		depth         = gpu.read_index(gpu_texture(g, f.depth)),
 		normals       = gpu.read_index(gpu_texture(g, f.normals)),
-		output        = gpu.write_index(gpu_texture(g, sf.mask)),
+		output        = gpu.write_index(gpu_texture(g, sf.mask_soft != 0 ? sf.mask_raw : sf.mask)),
 		accel         = gpu.read_index(gpu_accel(g, ray_scene_accel(f))),
 		lights        = gpu.read_index(f.lights.upload.buffer),
 		lights_offset = f.lights.upload.offset,
 		size          = f.size,
 		stencil       = gpu.stencil_index(gpu_texture(g, f.depth)),
 		jitter        = f.jitter,
+		soft          = sf.mask_soft,
 	}
 	for c in 0 ..< sf.mask_count {
 		constants.light_index[c] = sf.mask_lights[c]
+	}
+	if sf.mask_soft != 0 {
+		constants.penumbra = gpu.write_index(gpu_texture(g, sf.mask_penumbra))
+		constants.noise, constants.noise_slice = mask_noise(f)
 	}
 	upload, ok := f.renderer.platform.gpu_upload(size_of(Mask_Constants), gpu.PASS_CONSTANTS_ALIGN)
 	if !ok {

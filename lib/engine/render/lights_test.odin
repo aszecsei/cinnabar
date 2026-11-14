@@ -285,6 +285,71 @@ lights_take_their_shadows_in_order :: proc(t: ^testing.T) {
 }
 
 @(test)
+a_soft_lights_views_have_a_guard_band :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	f := light_setup(t)
+	defer light_teardown(f)
+	w := &f.world
+
+	spawn_light(w, {1, 0, 3}, 1, Point_Light{intensity = 4, source_radius = 0.1, cast_shadows = true})
+	spawn_light(w, {-1, 0, 3}, 1, Point_Light{intensity = 1, cast_shadows = true})
+	frame := &f.frame
+	frame.lights = extract_lights(frame, w, nil)
+	lf := frame.lights
+
+	for level in ([]Quality_Level{.Low, .High, .Ultra}) {
+		for &record in lf.records {
+			record.shadow = -1
+		}
+		frame.shadow_settings = {distance = SHADOW_DISTANCE, split_lambda = SHADOW_SPLIT_LAMBDA, level = level}
+		assign_shadow_views(frame, trace = false)
+		sf := frame.shadows
+		p := SHADOW_PARAMS[level]
+		guard := soft_guard(p)
+		testing.expect_value(t, guard, level == .Low ? 0 : int(p.soft.radius) + 2)
+		// The soft light's faces are wider than 90 degrees, by its guard of texels on each side; the hard light's are not.
+		soft, hard := sf.views[lf.records[0].shadow], sf.views[lf.records[1].shadow]
+		testing.expectf(t, abs(soft.texel - 2 / f32(p.slot - 2 * guard)) < 1e-7, "%v: a soft face's texel is %v", level, soft.texel)
+		testing.expectf(t, abs(hard.texel - 2 / f32(p.slot)) < 1e-7, "%v: a hard face's texel is %v", level, hard.texel)
+		// A point 45 degrees off the +x face's axis is on its 90 degrees' edge, guard texels inside the slot's.
+		m := sf.matrices[lf.records[0].shadow]
+		clip := m * [4]f32{2, 1, 3, 1}
+		edge := (1 - clip.y / clip.w) * 0.5 * f32(p.slot)
+		testing.expectf(t, abs(edge - f32(guard)) < 1e-2, "%v: the face's edge is %v texels in", level, edge)
+	}
+}
+
+@(test)
+traced_soft_lights_take_soft_channels_whose_history_follows_them :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	f := light_setup(t)
+	defer light_teardown(f)
+	w := &f.world
+
+	sun := spawn_light(w, {}, 1, Directional_Light{intensity = 1, cast_shadows = true})
+	soft := spawn_light(w, {1, 0, 3}, 1, Point_Light{intensity = 4, source_radius = 0.1, cast_shadows = true})
+	quad := spawn_light(w, {-1, 0, 3}, 1, Quad_Light{intensity = 2, cast_shadows = true})
+	frame := &f.frame
+	frame.lights = extract_lights(frame, w, nil)
+	lf := frame.lights
+	testing.expect_value(t, lf.entities[0], sun)
+	frame.shadow_settings = {distance = SHADOW_DISTANCE, split_lambda = SHADOW_SPLIT_LAMBDA, level = .High}
+	assign_shadow_views(frame, trace = true)
+	sf := frame.shadows
+	// The sun has no size, so its channel is hard; the point light and the quad light have sizes.
+	testing.expect_value(t, sf.mask_count, 3)
+	testing.expect_value(t, sf.mask_soft, u32(0b110))
+	testing.expect_value(t, lf.entities[sf.mask_lights[1]], soft)
+	testing.expect_value(t, lf.entities[sf.mask_lights[2]], quad)
+
+	// A channel takes the history of last frame's channel that held its light, and starts again otherwise.
+	previous := Mask_History{lights = {quad, soft, {}, {}}}
+	current := Mask_History{lights = {soft, {}, quad, sun}}
+	testing.expect_value(t, mask_history_channels(previous, current), [4]u32{1, max(u32), 0, max(u32)})
+	testing.expect_value(t, mask_history_channels({}, current), [4]u32{max(u32), max(u32), max(u32), max(u32)})
+}
+
+@(test)
 area_lights_record_their_shapes :: proc(t: ^testing.T) {
 	sync.guard(&backend_lock)
 	f := light_setup(t)
@@ -339,6 +404,40 @@ area_lights_record_their_shapes :: proc(t: ^testing.T) {
 	testing.expect_value(t, lf.records[0].shadow, 0)
 	testing.expect_value(t, len(frame.shadows.views), 6)
 	testing.expect_value(t, lf.records[1].shadow, -1)
+}
+
+@(test)
+lights_record_their_sizes :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	f := light_setup(t)
+	defer light_teardown(f)
+	w := &f.world
+
+	spawn_light(w, {}, 1, Directional_Light{intensity = 1, angular_diameter = DEFAULT_SUN_DISC})
+	spawn_light(w, {0, 0, 4}, 1, Point_Light{intensity = 1, source_radius = 0.1})
+	spawn_light(w, {0, 0, 4}, 1, Point_Light{intensity = 1})
+	spawn_light(w, {0, 0, 4}, 1, Spot_Light{intensity = 1, source_radius = 0.2})
+	spawn_light(w, {0, 0, 4}, 1, Quad_Light{intensity = 1, width = 2, height = 1})
+	spawn_light(w, {0, 0, 4}, 1, Disk_Light{intensity = 1, width = 2, height = 4})
+	spawn_light(w, {0, 0, 4}, 1, Line_Light{intensity = 1, length = 3, radius = 0.1})
+
+	frame := &f.frame
+	frame.lights = extract_lights(frame, w, nil)
+	lf := frame.lights
+	testing.expect_value(t, len(lf.records), 7)
+	close :: proc(a, b: f32) -> bool {
+		return abs(a - b) < 1e-6
+	}
+	// The sun's disk is about 4.6 mm wide 1 m away.
+	testing.expect(t, close(light_size(lf.records[0]), math.tan(math.to_radians(f32(DEFAULT_SUN_DISC)) / 2)))
+	// The point lights come before the spot lights.
+	testing.expect(t, close(light_size(lf.records[1]), 0.1))
+	testing.expect_value(t, light_size(lf.records[2]), 0)
+	testing.expect(t, close(light_size(lf.records[3]), 0.2))
+	// An area light's size is the radius of a disk with its area: a 2 m by 1 m quad's is sqrt(2 / pi).
+	testing.expect(t, close(light_size(lf.records[4]), math.sqrt(2 / f32(math.PI))))
+	testing.expect(t, close(light_size(lf.records[5]), math.sqrt(f32(2))))
+	testing.expect(t, close(light_size(lf.records[6]), 1.5))
 }
 
 @(private = "file")

@@ -29,6 +29,7 @@ View_State :: struct {
 	sky:             Sky_State,
 	gi:              Gi_State,
 	virtual_shadows: Virtual_State,
+	mask_history:    Mask_History,
 	shading:         Shading_State,
 }
 
