@@ -296,11 +296,12 @@ DEFAULT_CLOUDS :: Clouds {
 Shadow_Settings :: struct {
 	distance:     f32,
 	split_lambda: f32,
-	// The shadow maps' SHADOW_PARAMS, whether the first lights trace their shadows where the device can, and whether a
-	// virtual shadow map takes the place of the cascades.
-	level:        Quality_Level,
-	ray_traced:   bool,
-	virtual:      bool,
+	// The shadow maps' SHADOW_PARAMS, whether the first lights trace their shadows where the device can, whether a
+	// virtual shadow map takes the place of the cascades, and whether it keeps its pages from frame to frame.
+	level:         Quality_Level,
+	ray_traced:    bool,
+	virtual:       bool,
+	virtual_cache: bool,
 }
 
 // Fog_Settings are a frame's fog, from the Fog settings. A density of 0 is no fog.

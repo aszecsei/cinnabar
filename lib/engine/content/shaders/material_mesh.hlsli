@@ -122,7 +122,7 @@ bool cluster_visible(Meshlet c, Instance_Record instance, float bound, bool sour
 	if (frame.occlusion != 0 && sphere_occluded(load_occlusion(frame.occlusion - 1, frame.occlusion_offset), center, radius)) {
 		return false;
 	}
-	if (frame.virtual_draw != 0 && !virtual_sphere_has_pages(center, radius)) {
+	if (frame.virtual_draw != 0 && !virtual_sphere_draws(center, radius)) {
 		return false;
 	}
 	return true;

@@ -100,28 +100,30 @@ Quality_Key :: enum u8 {
 	Reflections,
 	Reflections_Level,
 	Clouds,
+	Virtual_Shadow_Cache,
 }
 
 Quality_Keys :: bit_set[Quality_Key]
 
 @(rodata)
 QUALITY_KEY_NAMES := [Quality_Key]string {
-	.Preset             = "quality.preset",
-	.Shadows            = "quality.shadows",
-	.Ray_Traced_Shadows = "quality.shadows.ray_traced",
-	.Ao                 = "quality.ao",
-	.Ao_Level           = "quality.ao.level",
-	.Gi                 = "quality.gi",
-	.Gi_Level           = "quality.gi.level",
-	.Fog                = "quality.fog",
-	.Aa                 = "quality.aa",
-	.Render_Scale       = "quality.render_scale",
-	.Lod_Error          = "quality.lod_error",
-	.Mesh_Pool          = "quality.mesh_pool",
-	.Virtual_Shadows    = "quality.shadows.virtual",
-	.Reflections        = "quality.reflections",
-	.Reflections_Level  = "quality.reflections.level",
-	.Clouds             = "quality.clouds",
+	.Preset               = "quality.preset",
+	.Shadows              = "quality.shadows",
+	.Ray_Traced_Shadows   = "quality.shadows.ray_traced",
+	.Ao                   = "quality.ao",
+	.Ao_Level             = "quality.ao.level",
+	.Gi                   = "quality.gi",
+	.Gi_Level             = "quality.gi.level",
+	.Fog                  = "quality.fog",
+	.Aa                   = "quality.aa",
+	.Render_Scale         = "quality.render_scale",
+	.Lod_Error            = "quality.lod_error",
+	.Mesh_Pool            = "quality.mesh_pool",
+	.Virtual_Shadows      = "quality.shadows.virtual",
+	.Reflections          = "quality.reflections",
+	.Reflections_Level    = "quality.reflections.level",
+	.Clouds               = "quality.clouds",
+	.Virtual_Shadow_Cache = "quality.shadows.virtual_cache",
 }
 
 // Watch is a project's settings and when their files last changed. It is plain data, so a code reload keeps it.
@@ -370,6 +372,15 @@ parse :: proc(text: string, settings: ^Settings, problems: ^[dynamic]string = ni
 				case:
 					problem(problems, line, "%s takes true or false, not %q", key, value)
 				}
+			case .Virtual_Shadow_Cache:
+				switch value {
+				case "true":
+					q.shadows.virtual_cache, ok = true, true
+				case "false":
+					q.shadows.virtual_cache, ok = false, true
+				case:
+					problem(problems, line, "%s takes true or false, not %q", key, value)
+				}
 			case .Reflections:
 				ok = enum_value(problems, line, key, value, &q.reflections.technique)
 			case .Reflections_Level:
@@ -434,6 +445,7 @@ with_keys :: proc(q: render.Quality, settings: Settings, caps: render.Caps) -> r
 	if .Reflections in given {q.reflections.technique = s.reflections.technique}
 	if .Reflections_Level in given {q.reflections.level = s.reflections.level}
 	if .Clouds in given {q.clouds = s.clouds}
+	if .Virtual_Shadow_Cache in given {q.shadows.virtual_cache = s.shadows.virtual_cache}
 	return render.clamp_quality(q, caps)
 }
 
@@ -444,22 +456,23 @@ quality_values :: proc(q: render.Quality, caps: render.Caps) -> (values: [Qualit
 		return n
 	}
 	values = {
-		.Preset             = name(render.quality_preset(q, caps)),
-		.Shadows            = name(q.shadows.level),
-		.Ray_Traced_Shadows = q.shadows.ray_traced ? "true" : "false",
-		.Ao                 = name(q.ao.technique),
-		.Ao_Level           = name(q.ao.level),
-		.Gi                 = name(q.gi.technique),
-		.Gi_Level           = name(q.gi.level),
-		.Fog                = name(q.fog),
-		.Aa                 = name(q.aa),
-		.Render_Scale       = fmt.tprintf("%v", q.render_scale),
-		.Lod_Error          = fmt.tprintf("%v", q.lod_error),
-		.Mesh_Pool          = fmt.tprintf("%v", q.mesh_pool),
-		.Virtual_Shadows    = q.shadows.virtual ? "true" : "false",
-		.Reflections        = name(q.reflections.technique),
-		.Reflections_Level  = name(q.reflections.level),
-		.Clouds             = name(q.clouds),
+		.Preset               = name(render.quality_preset(q, caps)),
+		.Shadows              = name(q.shadows.level),
+		.Ray_Traced_Shadows   = q.shadows.ray_traced ? "true" : "false",
+		.Ao                   = name(q.ao.technique),
+		.Ao_Level             = name(q.ao.level),
+		.Gi                   = name(q.gi.technique),
+		.Gi_Level             = name(q.gi.level),
+		.Fog                  = name(q.fog),
+		.Aa                   = name(q.aa),
+		.Render_Scale         = fmt.tprintf("%v", q.render_scale),
+		.Lod_Error            = fmt.tprintf("%v", q.lod_error),
+		.Mesh_Pool            = fmt.tprintf("%v", q.mesh_pool),
+		.Virtual_Shadows      = q.shadows.virtual ? "true" : "false",
+		.Reflections          = name(q.reflections.technique),
+		.Reflections_Level    = name(q.reflections.level),
+		.Clouds               = name(q.clouds),
+		.Virtual_Shadow_Cache = q.shadows.virtual_cache ? "true" : "false",
 	}
 	return
 }

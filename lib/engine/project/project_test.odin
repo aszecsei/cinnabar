@@ -138,6 +138,30 @@ a_settings_file_from_before_the_virtual_shadow_map_reads_without_a_problem :: pr
 	free_all(context.temp_allocator)
 }
 
+// The virtual shadow map's cache is off in every preset, since a caster that moves leaves its old shadow in the pages that
+// it keeps (see docs/rendering/lighting-and-shadows.md#caching). Its key turns it on, a value that does not fit is a
+// problem, and it is off without the virtual shadow map.
+@(test)
+the_virtual_shadow_cache_is_off_until_its_key_turns_it_on :: proc(t: ^testing.T) {
+	caps := render.Caps{}
+	for preset in render.Quality_Preset.Low ..= render.Quality_Preset.Ultra {
+		testing.expect(t, !render.preset_quality(preset, caps).shadows.virtual_cache)
+	}
+	s: Settings
+	problems := make([dynamic]string, context.temp_allocator)
+	parse("quality.preset = High\nquality.shadows.virtual_cache = true\nquality.shadows.virtual_cache = often\n", &s, &problems)
+	testing.expect_value(t, len(problems), 1)
+	testing.expect_value(t, problems[0], `3: quality.shadows.virtual_cache takes true or false, not "often"`)
+	q := quality(s, caps)
+	testing.expect(t, q.shadows.virtual_cache)
+	testing.expect_value(t, quality_values(q, caps)[.Virtual_Shadow_Cache], "true")
+	testing.expect_value(t, render.quality_preset(q, caps), render.Quality_Preset.Custom)
+	s = {}
+	parse("quality.preset = High\nquality.shadows.virtual = false\nquality.shadows.virtual_cache = true\n", &s, &problems)
+	testing.expect(t, !quality(s, caps).shadows.virtual_cache, "the cache stayed on without the virtual shadow map")
+	free_all(context.temp_allocator)
+}
+
 @(test)
 the_reflections_keys_read_write_and_may_be_missing :: proc(t: ^testing.T) {
 	caps := render.Caps{ray_query = true}

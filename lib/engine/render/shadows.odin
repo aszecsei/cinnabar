@@ -141,6 +141,8 @@ Shadow_View :: struct {
 }
 
 #assert(size_of(Shadow_View) == 96)
+// virtual_origin in virtual_shadow.hlsli loads a level's page_origin alone, at this offset.
+#assert(offset_of(Shadow_View, page_origin) == 88)
 #assert(VIRTUAL_MAX_LEVELS <= MAX_PASS_PIECES)
 
 // Mask_Constants matches Mask_Constants in shadow_mask.hlsl.
@@ -692,6 +694,8 @@ add_shadow_passes :: proc(f: ^Frame) {
 	g := f.graph
 	if sf.virtual.count > 0 {
 		add_virtual_shadow_passes(f)
+	} else {
+		forget_virtual_cache(f)
 	}
 	if atlas_views := len(sf.views) - sf.virtual.count; atlas_views > 0 {
 		atlas := u32(sf.params.atlas)

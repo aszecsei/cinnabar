@@ -4,6 +4,8 @@ import "core:math"
 import "core:math/linalg"
 import "core:testing"
 
+import "cinnabar:engine/ecs"
+
 @(private = "file")
 test_selection :: proc(levels := 11, bias: f32 = 0) -> Virtual_Selection {
 	// 1080 pixels over a 60 degree view.
@@ -18,7 +20,7 @@ test_selection :: proc(levels := 11, bias: f32 = 0) -> Virtual_Selection {
 
 @(private = "file")
 test_camera :: proc(
-	offset: [3]f32 = {},
+	position: [3]f64 = {},
 	forward: [3]f32 = {0, 0, 1},
 	levels := 11,
 	bias: f32 = 0,
@@ -31,7 +33,7 @@ test_camera :: proc(
 		forward = forward,
 		scale = {scale * 1080.0 / 1920.0, scale},
 		near = 0.1,
-		offset = offset,
+		position = position,
 		selection = test_selection(levels, bias),
 	}
 }
@@ -49,19 +51,27 @@ test_views :: proc(c: Virtual_Camera, allocator := context.temp_allocator) -> []
 	return views
 }
 
+// test_buffers are a frame's requests, and a page table and a pool's records that hold nothing, as after a reset.
 @(private = "file")
 test_buffers :: proc(
 	levels: int,
+	capacity := 1024,
 	allocator := context.temp_allocator,
 ) -> (
 	requests, table: []u32,
+	pages: []Virtual_Page,
 ) {
 	requests = make([]u32, levels * VIRTUAL_LEVEL_WORDS, allocator)
-	table = make([]u32, levels * VIRTUAL_LEVEL_PAGES, allocator)
-	for &entry in table {
-		entry = VIRTUAL_NO_PAGE
-	}
+	table = make([]u32, VIRTUAL_TABLE_WORDS, allocator)
+	pages = make([]Virtual_Page, capacity, allocator)
+	virtual_reset(table, pages)
 	return
+}
+
+// relative is a point in meters from the world's origin, relative to the camera.
+@(private = "file")
+relative :: proc(p: [3]f32, c: Virtual_Camera) -> [3]f32 {
+	return p - [3]f32{f32(c.position.x), f32(c.position.y), f32(c.position.z)}
 }
 
 @(private = "file")
@@ -191,7 +201,7 @@ a_level_reaches_as_far_as_the_points_that_pick_it :: proc(t: ^testing.T) {
 
 @(test)
 each_levels_pages_nest_in_the_next_levels :: proc(t: ^testing.T) {
-	c := test_camera(offset = {123.4, 5.6, -789})
+	c := test_camera(position = {123.4, 5.6, -789})
 	views := test_views(c)
 	// A point in a level's page is in the page's parent in the next level.
 	for x in -40 ..= 40 {
@@ -219,23 +229,23 @@ each_levels_pages_nest_in_the_next_levels :: proc(t: ^testing.T) {
 	}
 }
 
-// A level's corner is on a whole page of the render origin's space, wherever the camera is, so a page stays at the same
-// texels as the camera moves, and the shadow's edges do not swim.
+// A level's corner is on a whole page of the world's space, wherever the camera is, so a page stays at the same texels as
+// the camera moves, and the shadow's edges do not swim.
 @(test)
-a_levels_grid_stays_on_the_render_origins_pages_as_the_camera_moves :: proc(t: ^testing.T) {
+a_levels_grid_stays_on_the_worlds_pages_as_the_camera_moves :: proc(t: ^testing.T) {
 	direction := linalg.normalize(TEST_LIGHT)
-	// A point fixed in the render origin's space.
+	// A point fixed in the world's space.
 	anchor := [3]f32{10, 2, 20}
 	for level in ([]int{0, 3, 8}) {
 		first := test_camera()
 		a := virtual_level(first, direction, level).view
-		a_texel, _ := virtual_project(a, anchor - first.offset)
+		a_texel, _ := virtual_project(a, relative(anchor, first))
 		for step in 1 ..= 40 {
 			moved := test_camera(
-				offset = {f32(step) * 0.173, f32(step) * 0.031, f32(step) * -0.219},
+				position = {f64(step) * 0.173, f64(step) * 0.031, f64(step) * -0.219},
 			)
 			b := virtual_level(moved, direction, level).view
-			b_texel, _ := virtual_project(b, anchor - moved.offset)
+			b_texel, _ := virtual_project(b, relative(anchor, moved))
 			// The anchor's texel moves by whole pages, as the level's origin does.
 			pages := b.page_origin - a.page_origin
 			expected := a_texel - [2]f32{f32(pages.x), f32(pages.y)} * VIRTUAL_PAGE_TEXELS
@@ -255,9 +265,9 @@ a_levels_grid_stays_on_the_render_origins_pages_as_the_camera_moves :: proc(t: ^
 @(test)
 turning_the_camera_moves_no_levels_grid_and_no_points_level :: proc(t: ^testing.T) {
 	direction := linalg.normalize(TEST_LIGHT)
-	offset := [3]f32{55.5, 3, -21}
-	ahead := test_camera(offset = offset)
-	turned := test_camera(offset = offset, forward = linalg.normalize([3]f32{0.8, 0.1, 0.6}))
+	position := [3]f64{55.5, 3, -21}
+	ahead := test_camera(position = position)
+	turned := test_camera(position = position, forward = linalg.normalize([3]f32{0.8, 0.1, 0.6}))
 	for level in 0 ..< ahead.selection.levels {
 		a := virtual_level(ahead, direction, level)
 		b := virtual_level(turned, direction, level)
@@ -272,13 +282,12 @@ turning_the_camera_moves_no_levels_grid_and_no_points_level :: proc(t: ^testing.
 	)
 }
 
-// A rebase moves the camera's offset from the origin by whole cells. Every level still holds the camera, and every
-// point near it still finds its pages.
+// Far from the world's origin, every level still holds the camera, and every point near it still finds its pages.
 @(test)
-a_rebase_leaves_every_level_valid_around_the_camera :: proc(t: ^testing.T) {
-	before := [3]f32{1500, 10, -1400}
-	for offset in ([][3]f32{before, before - {ORIGIN_CELL, 0, -ORIGIN_CELL}}) {
-		c := test_camera(offset = offset)
+a_camera_far_from_the_worlds_origin_has_every_level_around_it :: proc(t: ^testing.T) {
+	before := [3]f64{1500, 10, -1400}
+	for position in ([][3]f64{before, before - {f64(ORIGIN_CELL), 0, -f64(ORIGIN_CELL)}, {-3.2e6, 410, 8.7e5}}) {
+		c := test_camera(position = position)
 		views := test_views(c)
 		for view in views {
 			texel, _ := virtual_project(view, {0, 0, 0})
@@ -294,11 +303,11 @@ a_rebase_leaves_every_level_valid_around_the_camera :: proc(t: ^testing.T) {
 				"the valid rectangle holds the camera",
 			)
 		}
-		requests, table := test_buffers(len(views))
+		requests, table, pages := test_buffers(len(views))
 		p := [3]f32{1, -1, 5}
 		level := virtual_footprint_level(c.selection, linalg.length(p))
 		testing.expect_value(t, virtual_mark(requests, views, .Taps_4, p, level), level)
-		virtual_allocate(requests, table, len(views), 1024)
+		virtual_allocate(requests, table, pages, views)
 		testing.expect_value(t, virtual_lookup(table, views, p, level), level)
 	}
 }
@@ -409,14 +418,16 @@ a_block_covers_as_many_texels_as_its_filter_reads :: proc(t: ^testing.T) {
 // The culling has only a level's planes and page fields, so they have to place a point where the level's projection does.
 @(test)
 a_levels_planes_and_page_fields_place_a_point_on_its_page :: proc(t: ^testing.T) {
-	c := test_camera(offset = {123.4, 5.6, -789})
+	c := test_camera(position = {123.4, 5.6, -789})
 	direction := linalg.normalize(TEST_LIGHT)
 	for level in 0 ..< c.selection.levels {
 		l := virtual_level(c, direction, level)
 		fields := virtual_page_fields(l.view, level)
 		page := f32(virtual_level_extent(level)) / VIRTUAL_PAGES
-		first := [2]i32{i32((fields >> 8) & 0xff), i32((fields >> 16) & 0xff)}
-		testing.expect_value(t, int(fields & 0xff), level)
+		first := [2]i32{i32((fields >> 4) & 0x7f), i32((fields >> 11) & 0x7f)}
+		testing.expect_value(t, int(fields & 0xf), level)
+		testing.expect_value(t, i32((fields >> 18) & 0x7f), l.view.page_origin.x & (VIRTUAL_PAGES - 1))
+		testing.expect_value(t, i32((fields >> 25) & 0x7f), l.view.page_origin.y & (VIRTUAL_PAGES - 1))
 		for sx in ([]f32{-0.8, -0.3, 0.1, 0.7}) {
 			for sy in ([]f32{-0.6, 0, 0.5}) {
 				p := c.right * (sx * page * 3) + c.up * (sy * page * 3) + c.forward * page
@@ -431,29 +442,38 @@ a_levels_planes_and_page_fields_place_a_point_on_its_page :: proc(t: ^testing.T)
 }
 
 @(test)
-culling_keeps_only_what_reaches_a_page_that_was_allocated :: proc(t: ^testing.T) {
+culling_keeps_only_what_reaches_a_page_that_draws :: proc(t: ^testing.T) {
 	c := test_camera()
 	direction := linalg.normalize(TEST_LIGHT)
 	views := test_views(c)
-	requests, table := test_buffers(len(views))
+	requests, table, pages := test_buffers(len(views), 64)
 	level := 6
 	l := virtual_level(c, direction, level)
 	fields := virtual_page_fields(l.view, level)
 	p := c.forward * 5
 	testing.expect_value(t, virtual_mark(requests, views, .Taps_1, p, level), level)
-	virtual_allocate(requests, table, len(views), 64)
+	virtual_allocate(requests, table, pages, views)
 	page := f32(virtual_level_extent(level)) / VIRTUAL_PAGES
 	right, _ := light_basis(direction)
 	// On the page, and just reaching it from the next but one.
-	testing.expect(t, virtual_reaches_pages(table, l.planes, fields, p, 0))
-	testing.expect(t, virtual_reaches_pages(table, l.planes, fields, p + right * (page * 4), page * 4.5))
+	testing.expect(t, virtual_reaches_draws(table, l.planes, fields, p, 0))
+	testing.expect(t, virtual_reaches_draws(table, l.planes, fields, p + right * (page * 4), page * 4.5))
 	// Far enough off the page that the sphere misses it.
-	testing.expect(t, !virtual_reaches_pages(table, l.planes, fields, p + right * (page * 4), page * 0.5))
-	// A level with no pages keeps nothing but a sphere too big to test.
-	testing.expect(t, !virtual_reaches_pages(table, virtual_level(c, direction, 3).planes, virtual_page_fields(views[3], 3), p, 0))
-	testing.expect(t, virtual_reaches_pages(table, l.planes, fields, p + right * (page * 4), page * VIRTUAL_CULL_PAGES))
+	testing.expect(t, !virtual_reaches_draws(table, l.planes, fields, p + right * (page * 4), page * 0.5))
+	// A level that draws no page keeps nothing, not even a sphere too big to test, which a level that draws keeps.
+	coarse := virtual_level(c, direction, 3)
+	coarse_page := f32(virtual_level_extent(3)) / VIRTUAL_PAGES
+	testing.expect(t, !virtual_reaches_draws(table, coarse.planes, virtual_page_fields(views[3], 3), p, 0))
+	testing.expect(t, !virtual_reaches_draws(table, coarse.planes, virtual_page_fields(views[3], 3), p, coarse_page * VIRTUAL_CULL_PAGES))
+	testing.expect(t, virtual_reaches_draws(table, l.planes, fields, p + right * (page * 4), page * VIRTUAL_CULL_PAGES))
 	// Outside the level, it reaches nothing.
-	testing.expect(t, !virtual_reaches_pages(table, l.planes, fields, right * f32(virtual_level_extent(level)) * 4, page))
+	testing.expect(t, !virtual_reaches_draws(table, l.planes, fields, right * f32(virtual_level_extent(level)) * 4, page))
+	// The next frame asks for the same page, which the pool holds, so nothing draws, and the culling keeps nothing.
+	testing.expect_value(t, virtual_mark(requests, views, .Taps_1, p, level), level)
+	stats := virtual_allocate(requests, table, pages, views, now = 2)
+	testing.expect_value(t, stats.drawn, 0)
+	testing.expect(t, !virtual_reaches_draws(table, l.planes, fields, p, 0))
+	testing.expect(t, !virtual_reaches_draws(table, l.planes, fields, p + right * (page * 4), page * VIRTUAL_CULL_PAGES))
 }
 
 @(test)
@@ -476,7 +496,7 @@ marking_for_soft_shadows_reaches_the_pages_around_a_block :: proc(t: ^testing.T)
 		marked: int,
 	}
 	for k in ([]Case{{0.4, 1}, {1, 9}}) {
-		requests, _ := test_buffers(len(views))
+		requests, _, _ := test_buffers(len(views))
 		meters := k.pages * VIRTUAL_PAGE_TEXELS * views[level].texel
 		testing.expect_value(t, virtual_mark(requests, views, .Taps_4, p, level, meters), level)
 		testing.expect_value(t, count_marked(requests), k.marked)
@@ -487,7 +507,7 @@ marking_for_soft_shadows_reaches_the_pages_around_a_block :: proc(t: ^testing.T)
 marking_sets_the_one_page_of_a_block_inside_a_page :: proc(t: ^testing.T) {
 	c := test_camera()
 	views := test_views(c)
-	requests, _ := test_buffers(len(views))
+	requests, _, _ := test_buffers(len(views))
 	// The middle of a page of the level at a point's own level.
 	p := c.forward * 10
 	level := virtual_footprint_level(c.selection, linalg.length(p))
@@ -519,7 +539,7 @@ marking_sets_the_one_page_of_a_block_inside_a_page :: proc(t: ^testing.T) {
 marking_sets_every_page_that_a_block_across_a_corner_reads :: proc(t: ^testing.T) {
 	c := test_camera()
 	views := test_views(c)
-	requests, _ := test_buffers(len(views))
+	requests, _, _ := test_buffers(len(views))
 	p := c.forward * 10
 	level := virtual_footprint_level(c.selection, linalg.length(p))
 	texel, _ := virtual_project(views[level], p)
@@ -546,7 +566,7 @@ marking_sets_every_page_that_a_block_across_a_corner_reads :: proc(t: ^testing.T
 a_mark_past_a_levels_valid_rectangle_goes_to_a_coarser_level :: proc(t: ^testing.T) {
 	c := test_camera()
 	views := test_views(c)
-	requests, _ := test_buffers(len(views))
+	requests, _, _ := test_buffers(len(views))
 	// Behind the camera and past level 0's view model reach, where level 0 does not draw.
 	p := c.forward * -f32(VIRTUAL_VIEW_MODEL_REACH + 2)
 	level := virtual_mark(requests, views, .Taps_4, p, 0)
@@ -562,7 +582,7 @@ a_mark_past_a_levels_valid_rectangle_goes_to_a_coarser_level :: proc(t: ^testing
 a_point_past_every_level_marks_nothing :: proc(t: ^testing.T) {
 	c := test_camera(levels = 3)
 	views := test_views(c)
-	requests, table := test_buffers(len(views))
+	requests, table, _ := test_buffers(len(views))
 	p := c.forward * 1e6
 	testing.expect_value(t, virtual_mark(requests, views, .Taps_4, p, 2), -1)
 	testing.expect_value(t, count_marked(requests), 0)
@@ -573,10 +593,10 @@ a_point_past_every_level_marks_nothing :: proc(t: ^testing.T) {
 marks_that_fit_the_pool_move_nothing :: proc(t: ^testing.T) {
 	c := test_camera()
 	views := test_views(c)
-	requests, _ := test_buffers(len(views))
+	requests, _, _ := test_buffers(len(views))
 	virtual_mark(requests, views, .Taps_1, c.forward * 0.5, 0)
 	marked := u32(count_marked(requests))
-	requested, moved := virtual_fit_pool(requests, views, marked)
+	requested, moved, _ := virtual_fit_pool(requests, views, marked)
 	testing.expect_value(t, requested, marked)
 	testing.expect_value(t, moved, u32(0))
 	testing.expect_value(t, u32(count_marked(requests)), marked)
@@ -586,7 +606,7 @@ marks_that_fit_the_pool_move_nothing :: proc(t: ^testing.T) {
 marks_that_do_not_fit_move_the_finest_to_their_parents_only_until_they_fit :: proc(t: ^testing.T) {
 	c := test_camera()
 	views := test_views(c)
-	requests, _ := test_buffers(len(views))
+	requests, _, _ := test_buffers(len(views))
 	// Pages of level 0 in a row, and one of level 3 that nothing moves to.
 	for x in i32(60) ..< 68 {
 		index := VIRTUAL_LEVEL_PAGES * 0 + 64 * VIRTUAL_PAGES + int(x)
@@ -594,7 +614,7 @@ marks_that_do_not_fit_move_the_finest_to_their_parents_only_until_they_fit :: pr
 	}
 	coarse := 3 * VIRTUAL_LEVEL_PAGES + 64 * VIRTUAL_PAGES + 64
 	requests[coarse >> 5] |= 1 << uint(coarse & 31)
-	requested, moved := virtual_fit_pool(requests, views, 7)
+	requested, moved, _ := virtual_fit_pool(requests, views, 7)
 	testing.expect_value(t, requested, u32(9))
 	testing.expect(t, moved >= 2, "at least two moved")
 	testing.expect(t, count_marked(requests) <= 7, "they fit")
@@ -614,7 +634,7 @@ marks_that_do_not_fit_move_the_finest_to_their_parents_only_until_they_fit :: pr
 a_moved_mark_leaves_its_points_to_its_parent :: proc(t: ^testing.T) {
 	c := test_camera()
 	views := test_views(c)
-	requests, table := test_buffers(len(views))
+	requests, table, pages := test_buffers(len(views), 1)
 	// Two points on neighbouring pages of the first level. With room for one page, their marks move up to one parent.
 	right, _ := light_basis(linalg.normalize(TEST_LIGHT))
 	page := f32(virtual_level_extent(0)) / VIRTUAL_PAGES
@@ -622,64 +642,64 @@ a_moved_mark_leaves_its_points_to_its_parent :: proc(t: ^testing.T) {
 	b := a + right * page
 	testing.expect_value(t, virtual_mark(requests, views, .Taps_1, a, 0), 0)
 	testing.expect_value(t, virtual_mark(requests, views, .Taps_1, b, 0), 0)
-	_, moved := virtual_fit_pool(requests, views, 1)
+	_, moved, _ := virtual_fit_pool(requests, views, 1)
 	testing.expect(t, moved > 0)
 	testing.expect_value(t, count_marked(requests), 1)
-	stats := virtual_allocate(requests, table, len(views), 1)
+	stats := virtual_allocate(requests, table, pages, views)
 	testing.expect_value(t, stats.allocated, u32(1))
 	found := virtual_lookup(table, views, a, 0)
 	testing.expect(t, found > 0, "the point falls back to a coarser level")
 	testing.expect_value(t, virtual_lookup(table, views, b, 0), found)
 }
 
+// entry is a level's page's table entry, by its place in the level.
+@(private = "file")
+entry :: proc(table: []u32, views: []Shadow_View, level: int, page: [2]i32) -> u32 {
+	return table[virtual_table_slot(level, views[level].page_origin + page)]
+}
+
 @(test)
 allocation_gives_every_page_a_physical_page_while_the_pool_has_room :: proc(t: ^testing.T) {
-	requests, table := test_buffers(2)
+	views := test_views(test_camera(levels = 2))
+	requests, table, pages := test_buffers(2, 16)
 	requests[0] = 0b1011
 	requests[VIRTUAL_LEVEL_WORDS] = 0b1
-	stats := virtual_allocate(requests, table, 2, 16)
+	stats := virtual_allocate(requests, table, pages, views)
 	testing.expect_value(
 		t,
 		stats,
-		Virtual_Shadow_Stats{requested = 4, allocated = 4, missed = 0, capacity = 16},
+		Virtual_Shadow_Stats{requested = 4, allocated = 4, missed = 0, capacity = 16, drawn = 4, resident = 4},
 	)
-	// The coarsest first, and each page its own.
-	testing.expect_value(t, table[VIRTUAL_LEVEL_PAGES], 0)
-	testing.expect_value(t, table[0], 1)
-	testing.expect_value(t, table[1], 2)
-	testing.expect_value(t, table[3], 3)
-	testing.expect_value(t, table[2], VIRTUAL_NO_PAGE)
+	// The coarsest first, and each page its own, which draws.
+	testing.expect_value(t, entry(table, views, 1, {0, 0}), 0 | VIRTUAL_DRAW)
+	testing.expect_value(t, entry(table, views, 0, {0, 0}), 1 | VIRTUAL_DRAW)
+	testing.expect_value(t, entry(table, views, 0, {1, 0}), 2 | VIRTUAL_DRAW)
+	testing.expect_value(t, entry(table, views, 0, {3, 0}), 3 | VIRTUAL_DRAW)
+	testing.expect_value(t, entry(table, views, 0, {2, 0}), VIRTUAL_NO_PAGE)
+	testing.expect_value(t, table[VIRTUAL_TABLE_COUNTS], 3)
+	testing.expect_value(t, table[VIRTUAL_TABLE_COUNTS + 1], 1)
+	testing.expect_value(t, pages[1], Virtual_Page{level = 0, page = views[0].page_origin, last = 1})
 }
 
 @(test)
 the_finest_levels_go_first_when_pages_are_short :: proc(t: ^testing.T) {
-	requests, table := test_buffers(3)
+	views := test_views(test_camera(levels = 3))
+	requests, table, pages := test_buffers(3, 7)
 	requests[0] = 0xff
 	requests[VIRTUAL_LEVEL_WORDS] = 0xf
 	requests[2 * VIRTUAL_LEVEL_WORDS] = 0x3
-	stats := virtual_allocate(requests, table, 3, 7)
-	testing.expect_value(
-		t,
-		stats,
-		Virtual_Shadow_Stats{requested = 14, allocated = 7, missed = 7, capacity = 7},
-	)
-	for i in 0 ..< 2 {
-		testing.expect(
-			t,
-			table[2 * VIRTUAL_LEVEL_PAGES + i] != VIRTUAL_NO_PAGE,
-			"the coarsest level has its pages",
-		)
+	drawn, missed := virtual_assign(requests, table, pages, views, {0, 1, 2, 3, 4, 5, 6}, 1)
+	testing.expect_value(t, drawn, 7)
+	testing.expect_value(t, missed, 7)
+	for i in i32(0) ..< 2 {
+		testing.expect(t, entry(table, views, 2, {i, 0}) != VIRTUAL_NO_PAGE, "the coarsest level has its pages")
 	}
-	for i in 0 ..< 4 {
-		testing.expect(
-			t,
-			table[VIRTUAL_LEVEL_PAGES + i] != VIRTUAL_NO_PAGE,
-			"the next level has its pages",
-		)
+	for i in i32(0) ..< 4 {
+		testing.expect(t, entry(table, views, 1, {i, 0}) != VIRTUAL_NO_PAGE, "the next level has its pages")
 	}
 	allocated := 0
-	for i in 0 ..< 8 {
-		if table[i] != VIRTUAL_NO_PAGE {
+	for i in i32(0) ..< 8 {
+		if entry(table, views, 0, {i, 0}) != VIRTUAL_NO_PAGE {
 			allocated += 1
 		}
 	}
@@ -690,7 +710,8 @@ the_finest_levels_go_first_when_pages_are_short :: proc(t: ^testing.T) {
 the_pool_stays_within_its_size_and_every_page_is_its_own :: proc(t: ^testing.T) {
 	c := test_camera()
 	views := test_views(c)
-	requests, table := test_buffers(len(views))
+	capacity: u32 = 32
+	requests, table, pages := test_buffers(len(views), int(capacity))
 	for x in -60 ..= 60 {
 		for z in 1 ..= 200 {
 			p := c.right * f32(x) * 0.5 + c.forward * f32(z) * 0.5 - c.up
@@ -703,20 +724,20 @@ the_pool_stays_within_its_size_and_every_page_is_its_own :: proc(t: ^testing.T) 
 			)
 		}
 	}
-	capacity: u32 = 32
-	requested, moved := virtual_fit_pool(requests, views, capacity)
-	stats := virtual_allocate(requests, table, len(views), capacity)
+	requested, moved, _ := virtual_fit_pool(requests, views, capacity)
+	stats := virtual_allocate(requests, table, pages, views)
 	testing.expect(t, requested > capacity, "this view asks for more than the pool holds")
 	testing.expect(t, moved > 0, "some marks moved")
 	testing.expect(t, stats.allocated <= capacity, "the pool stays within its size")
 	seen := make([]bool, capacity, context.temp_allocator)
-	for entry in table {
-		if entry == VIRTUAL_NO_PAGE {
+	for e in table[:VIRTUAL_TABLE_COUNTS] {
+		page := virtual_entry_page(e)
+		if page == VIRTUAL_NO_PAGE {
 			continue
 		}
-		testing.expect(t, entry < capacity, "a page is in the pool")
-		testing.expect(t, !seen[entry], "no two pages share a physical page")
-		seen[entry] = true
+		testing.expect(t, page < capacity, "a page is in the pool")
+		testing.expect(t, !seen[page], "no two pages share a physical page")
+		seen[page] = true
 	}
 }
 
@@ -728,7 +749,7 @@ a_pool_that_cannot_hold_the_coarsest_levels_pages_leaves_the_rest_without_any ::
 ) {
 	c := test_camera(levels = 3)
 	views := test_views(c)
-	requests, table := test_buffers(len(views))
+	requests, table, pages := test_buffers(len(views), 2)
 	points := make([dynamic][3]f32, context.temp_allocator)
 	page := f32(virtual_level_extent(2)) / VIRTUAL_PAGES
 	right, up := light_basis(linalg.normalize(TEST_LIGHT))
@@ -739,7 +760,7 @@ a_pool_that_cannot_hold_the_coarsest_levels_pages_leaves_the_rest_without_any ::
 		}
 	}
 	testing.expect(t, len(points) >= 3)
-	stats := virtual_allocate(requests, table, len(views), 2)
+	stats := virtual_allocate(requests, table, pages, views)
 	testing.expect_value(t, stats.allocated, 2)
 	testing.expect(t, stats.missed > 0)
 	found := 0
@@ -764,7 +785,7 @@ with_a_pool_too_small_every_marked_point_falls_back_to_a_coarser_level_with_no_h
 	c := test_camera()
 	views := test_views(c)
 	filter := Shadow_Filter.Taps_4
-	requests, table := test_buffers(len(views))
+	requests, table, pages := test_buffers(len(views), 48)
 	points := make([dynamic][3]f32, context.temp_allocator)
 	for x in -60 ..= 60 {
 		for z in 1 ..= 200 {
@@ -779,9 +800,9 @@ with_a_pool_too_small_every_marked_point_falls_back_to_a_coarser_level_with_no_h
 			)
 		}
 	}
-	_, moved := virtual_fit_pool(requests, views, 48)
+	_, moved, _ := virtual_fit_pool(requests, views, 48)
 	testing.expect(t, moved > 0, "the pool is too small")
-	virtual_allocate(requests, table, len(views), 48)
+	virtual_allocate(requests, table, pages, views)
 
 	fell_back := 0
 	for p in points {
@@ -800,7 +821,7 @@ with_room_in_the_pool_every_marked_point_has_its_own_level :: proc(t: ^testing.T
 	c := test_camera()
 	views := test_views(c)
 	filter := Shadow_Filter.Taps_9
-	requests, table := test_buffers(len(views))
+	requests, table, pages := test_buffers(len(views), len(views) * VIRTUAL_LEVEL_PAGES)
 	Point :: struct {
 		p:      [3]f32,
 		marked: int,
@@ -824,9 +845,9 @@ with_room_in_the_pool_every_marked_point_has_its_own_level :: proc(t: ^testing.T
 			)
 		}
 	}
-	_, moved := virtual_fit_pool(requests, views, u32(len(views) * VIRTUAL_LEVEL_PAGES))
+	_, moved, _ := virtual_fit_pool(requests, views, u32(len(views) * VIRTUAL_LEVEL_PAGES))
 	testing.expect_value(t, moved, u32(0))
-	stats := virtual_allocate(requests, table, len(views), u32(len(views) * VIRTUAL_LEVEL_PAGES))
+	stats := virtual_allocate(requests, table, pages, views)
 	testing.expect_value(t, stats.missed, 0)
 	for point in points {
 		// A point outside its footprint's valid rectangle marks a coarser level, and a neighbour's mark may give it better.
@@ -841,5 +862,342 @@ with_room_in_the_pool_every_marked_point_has_its_own_level :: proc(t: ^testing.T
 			point.marked,
 			found,
 		)
+	}
+}
+
+// mark_view marks the pages of a grid of points on the ground in front of a camera, as the prepass's pixels would.
+@(private = "file")
+mark_view :: proc(requests: []u32, views: []Shadow_View, c: Virtual_Camera) {
+	for &word in requests {
+		word = 0
+	}
+	for x in -20 ..= 20 {
+		for z in 1 ..= 60 {
+			p := c.right * f32(x) * 0.5 + c.forward * f32(z) * 0.5 - c.up
+			virtual_mark(requests, views, .Taps_4, p, virtual_footprint_level(c.selection, linalg.length(p)))
+		}
+	}
+}
+
+@(test)
+every_levels_pool_fits_the_scratch :: proc(t: ^testing.T) {
+	for p in SHADOW_PARAMS {
+		testing.expect(t, int(p.pool_pages.x * p.pool_pages.y) <= VIRTUAL_MAX_POOL_PAGES)
+	}
+}
+
+// With a still camera, light and scene, every page that the next frames ask for is in the pool, so none draws, and each
+// keeps its physical page.
+@(test)
+a_still_view_draws_no_page_after_the_first_frame :: proc(t: ^testing.T) {
+	c := test_camera()
+	views := test_views(c)
+	requests, table, pages := test_buffers(len(views))
+	mark_view(requests, views, c)
+	first := virtual_allocate(requests, table, pages, views, now = 1)
+	testing.expect(t, first.drawn > 0 && first.cached == 0)
+	before := make([]u32, VIRTUAL_TABLE_COUNTS, context.temp_allocator)
+	copy(before, table[:VIRTUAL_TABLE_COUNTS])
+	for now in u32(2) ..= 4 {
+		mark_view(requests, views, c)
+		stats := virtual_allocate(requests, table, pages, views, now = now)
+		testing.expect_value(
+			t,
+			stats,
+			Virtual_Shadow_Stats {
+				requested = first.requested,
+				allocated = first.allocated,
+				capacity = first.capacity,
+				cached = first.drawn,
+				resident = first.drawn,
+			},
+		)
+		for e, i in table[:VIRTUAL_TABLE_COUNTS] {
+			testing.expect_value(t, e, virtual_entry_page(before[i]))
+		}
+		for count in table[VIRTUAL_TABLE_COUNTS:] {
+			testing.expect_value(t, count, 0)
+		}
+	}
+}
+
+// A camera that moves keeps the pages that stay in each level at their physical pages, through their absolute pages'
+// entries, and draws only the pages that it uncovers. The pages that left a level leave the pool.
+@(test)
+a_camera_that_moves_draws_only_the_pages_it_uncovers :: proc(t: ^testing.T) {
+	a := test_camera()
+	views_a := test_views(a)
+	requests, table, pages := test_buffers(len(views_a), 2048)
+	mark_view(requests, views_a, a)
+	virtual_allocate(requests, table, pages, views_a, now = 1)
+	held := make(map[[3]i32]u32, context.temp_allocator)
+	for page, p in pages {
+		if page.level != VIRTUAL_FREE {
+			held[{i32(page.level), page.page.x, page.page.y}] = u32(p)
+		}
+	}
+
+	// Three of level 0's pages across the light, so its origin moves by three pages, and coarser levels' by fewer.
+	page := f64(virtual_level_extent(0)) / VIRTUAL_PAGES
+	right, _ := light_basis(linalg.normalize(TEST_LIGHT))
+	b := test_camera(position = [3]f64{f64(right.x), f64(right.y), f64(right.z)} * page * 3)
+	views_b := test_views(b)
+	testing.expect(t, views_b[0].page_origin != views_a[0].page_origin, "level 0 did not move")
+	mark_view(requests, views_b, b)
+	wanted := make(map[[3]i32]bool, context.temp_allocator)
+	for word, w in requests {
+		for bit in u32(0) ..< 32 {
+			if word & (1 << bit) != 0 {
+				index := w * 32 + int(bit)
+				level := index / VIRTUAL_LEVEL_PAGES
+				local := index % VIRTUAL_LEVEL_PAGES
+				absolute := views_b[level].page_origin + {i32(local % VIRTUAL_PAGES), i32(local / VIRTUAL_PAGES)}
+				wanted[{i32(level), absolute.x, absolute.y}] = true
+			}
+		}
+	}
+	stats := virtual_allocate(requests, table, pages, views_b, now = 2)
+	kept, uncovered := 0, 0
+	for key in wanted {
+		if key in held {
+			kept += 1
+		} else {
+			uncovered += 1
+		}
+	}
+	testing.expect(t, kept > 0 && uncovered > 0, "the move kept no pages or uncovered none")
+	testing.expect_value(t, int(stats.cached), kept)
+	testing.expect_value(t, int(stats.drawn), uncovered)
+	for key in wanted {
+		e := table[virtual_table_slot(int(key.x), key.yz)]
+		if p, ok := held[key]; ok {
+			testing.expect_value(t, e, p)
+		} else {
+			testing.expect(t, virtual_entry_draws(e), "an uncovered page does not draw")
+		}
+	}
+	// No physical page holds a page outside its level.
+	for page in pages {
+		if page.level == VIRTUAL_FREE {
+			continue
+		}
+		local := page.page - views_b[page.level].page_origin
+		testing.expect(t, local.x >= 0 && local.y >= 0 && local.x < VIRTUAL_PAGES && local.y < VIRTUAL_PAGES)
+	}
+}
+
+// With a full pool, the pages that were asked for longest ago leave first, and none that the frame asks for leaves.
+@(test)
+a_full_pool_evicts_the_least_recently_used :: proc(t: ^testing.T) {
+	views := test_views(test_camera(levels = 1))
+	requests, table, pages := test_buffers(1, 6)
+	ask :: proc(requests: []u32, xs: []i32) {
+		for &word in requests {
+			word = 0
+		}
+		for x in xs {
+			index := 64 * VIRTUAL_PAGES + int(x)
+			requests[index >> 5] |= 1 << uint(index & 31)
+		}
+	}
+	holds :: proc(table: []u32, views: []Shadow_View, x: i32) -> bool {
+		return table[virtual_table_slot(0, views[0].page_origin + {x, 64})] != VIRTUAL_NO_PAGE
+	}
+	ask(requests, {0, 1})
+	virtual_allocate(requests, table, pages, views, now = 1)
+	ask(requests, {2, 3})
+	virtual_allocate(requests, table, pages, views, now = 2)
+	ask(requests, {4, 5})
+	virtual_allocate(requests, table, pages, views, now = 3)
+	// The pool is full. Asking for 2 again and for three new pages takes the three oldest that the frame does not ask
+	// for: 0 and 1 from the first frame, then the second's 3.
+	ask(requests, {2, 6, 7, 8})
+	stats := virtual_allocate(requests, table, pages, views, now = 4)
+	testing.expect_value(
+		t,
+		stats,
+		Virtual_Shadow_Stats{requested = 4, allocated = 4, capacity = 6, cached = 1, drawn = 3, evicted = 3, resident = 6},
+	)
+	for x in ([]i32{0, 1, 3}) {
+		testing.expectf(t, !holds(table, views, x), "page %d stayed", x)
+	}
+	for x in ([]i32{2, 4, 5, 6, 7, 8}) {
+		testing.expectf(t, holds(table, views, x), "page %d left", x)
+	}
+	// Page 2 was asked for again, so 4 and 5 are now the oldest.
+	ask(requests, {9, 10})
+	stats = virtual_allocate(requests, table, pages, views, now = 5)
+	testing.expect_value(t, stats.evicted, 2)
+	for x in ([]i32{4, 5}) {
+		testing.expectf(t, !holds(table, views, x), "page %d stayed", x)
+	}
+	for x in ([]i32{2, 6, 7, 8, 9, 10}) {
+		testing.expectf(t, holds(table, views, x), "page %d left", x)
+	}
+}
+
+// A camera that moves and turns over a pool too small to keep what it saw evicts what it no longer reads, and every
+// point that it marks finds a page: the view shows no holes.
+@(test)
+a_full_pool_leaves_no_holes_as_the_camera_moves :: proc(t: ^testing.T) {
+	capacity := 160
+	views := test_views(test_camera())
+	requests, table, pages := test_buffers(len(views), capacity)
+	evicted: u32
+	for step in 0 ..< 12 {
+		turn := f32(step) * 0.4
+		c := test_camera(
+			position = {f64(step) * 3.7, 0, f64(step) * 2.9},
+			forward = linalg.normalize([3]f32{math.sin(turn), 0, math.cos(turn)}),
+		)
+		views = test_views(c)
+		mark_view(requests, views, c)
+		stats := virtual_allocate(requests, table, pages, views, now = u32(step + 1))
+		evicted += stats.evicted
+		testing.expect(t, int(stats.resident) <= capacity)
+		for x in -20 ..= 20 {
+			for z in 1 ..= 60 {
+				p := c.right * f32(x) * 0.5 + c.forward * f32(z) * 0.5 - c.up
+				found := virtual_lookup(table, views, p, virtual_lookup_level(c.selection, linalg.length(p)))
+				testing.expectf(t, found >= 0, "step %d: %v has no page", step, p)
+			}
+		}
+	}
+	testing.expect(t, evicted > 0, "the pool never filled")
+}
+
+// A level whose depth anchor moved drops its pages alone, and the frame draws them again. A reset drops every level's.
+@(test)
+an_invalidated_level_draws_its_pages_again :: proc(t: ^testing.T) {
+	c := test_camera()
+	views := test_views(c)
+	requests, table, pages := test_buffers(len(views))
+	mark_view(requests, views, c)
+	virtual_allocate(requests, table, pages, views, now = 1)
+	level0 := table[VIRTUAL_TABLE_COUNTS]
+	testing.expect(t, level0 > 0)
+	mark_view(requests, views, c)
+	stats := virtual_allocate(requests, table, pages, views, now = 2, invalidate = 1)
+	testing.expect_value(t, stats.drawn, level0)
+	testing.expect_value(t, table[VIRTUAL_TABLE_COUNTS], level0)
+	for count in table[VIRTUAL_TABLE_COUNTS + 1:] {
+		testing.expect_value(t, count, 0)
+	}
+	mark_view(requests, views, c)
+	all := virtual_allocate(requests, table, pages, views, now = 3, reset = true)
+	testing.expect_value(t, all.cached, 0)
+	testing.expect_value(t, all.drawn, all.allocated)
+}
+
+@(test)
+the_cache_plan_keeps_the_pages_only_for_what_they_were_drawn_for :: proc(t: ^testing.T) {
+	c := test_camera()
+	direction := linalg.normalize(TEST_LIGHT)
+	params := SHADOW_PARAMS[.High]
+	settings := Shadow_Settings{level = .High, virtual = true, virtual_cache = true}
+	first, reset, invalidate := virtual_cache_plan(nil, true, {}, c, direction, params, settings)
+	testing.expect(t, reset, "a frame without a cache kept its pages")
+	testing.expect_value(t, first.epoch, 1)
+	next: Virtual_Cache
+	next, reset, invalidate = virtual_cache_plan(first, true, {}, c, direction, params, settings)
+	testing.expect(t, !reset && invalidate == 0, "a still frame dropped pages")
+	testing.expect_value(t, next.epoch, 2)
+	testing.expect_value(t, next.anchors, first.anchors)
+	_, reset, _ = virtual_cache_plan(first, false, {}, c, direction, params, settings)
+	testing.expect(t, reset, "the cache off kept its pages")
+	turned := linalg.normalize(TEST_LIGHT + {0, 0, 0.001})
+	_, reset, _ = virtual_cache_plan(first, true, {}, c, turned, params, settings)
+	testing.expect(t, reset, "a turned light kept its pages")
+	_, reset, _ = virtual_cache_plan(first, true, {}, c, direction, SHADOW_PARAMS[.Ultra], settings)
+	testing.expect(t, reset, "another level kept its pages")
+	other := settings
+	other.ray_traced = true
+	_, reset, _ = virtual_cache_plan(first, true, {}, c, direction, params, other)
+	testing.expect(t, reset, "other settings kept their pages")
+	// Another anchor moves every page.
+	_, reset, _ = virtual_cache_plan(first, true, {raw = {1, 0, 0}}, c, direction, params, settings)
+	testing.expect(t, reset, "a moved anchor kept its pages")
+	// The cascades' distance, which a volume may blend, draws nothing of the levels.
+	blended := settings
+	blended.distance, blended.split_lambda = 80, 0.7
+	_, reset, _ = virtual_cache_plan(first, true, {}, c, direction, params, blended)
+	testing.expect(t, !reset, "the cascades' settings dropped the pages")
+
+	// Moving along the light by less than level 0's extent keeps every anchor; by more, level 0's moves, alone.
+	along := [3]f64{f64(direction.x), f64(direction.y), f64(direction.z)}
+	near := test_camera(position = along * 0.9 * virtual_level_extent(0))
+	next, reset, invalidate = virtual_cache_plan(first, true, {}, near, direction, params, settings)
+	testing.expect(t, !reset && invalidate == 0, "a small move along the light dropped a level")
+	far := test_camera(position = along * 1.5 * virtual_level_extent(0))
+	next, reset, invalidate = virtual_cache_plan(first, true, {}, far, direction, params, settings)
+	testing.expect(t, !reset)
+	testing.expect_value(t, invalidate, 1)
+	moved := abs(virtual_camera_depth(far, direction) - next.anchors[0])
+	testing.expect(t, moved <= virtual_level_extent(0) / VIRTUAL_PAGES, "the moved anchor is not at the camera")
+}
+
+// A level's depth range holds its extent around the camera from any anchor within its extent, so the anchor can stay
+// as the camera moves.
+@(test)
+a_levels_depth_holds_its_extent_around_the_camera_from_any_anchor :: proc(t: ^testing.T) {
+	direction := linalg.normalize(TEST_LIGHT)
+	c := test_camera(position = {12.5, -3, 40})
+	depth := virtual_camera_depth(c, direction)
+	for level in ([]int{0, 4, 9}) {
+		extent := virtual_level_extent(level)
+		for shift in ([]f64{-1, -0.5, 0, 0.5, 1}) {
+			l := virtual_level(c, direction, level, depth + shift * extent)
+			for along in ([]f32{-1, 0, 1}) {
+				_, z := virtual_project(l.view, direction * along * f32(extent))
+				testing.expectf(t, z >= 0 && z <= 1, "level %d, anchor %v extents off: depth %v at %v", level, shift, z, along)
+			}
+		}
+	}
+}
+
+// The levels are of the world's space, so a rebase, which changes only the render origin, leaves a world point on the
+// same texel of every level.
+@(test)
+a_rebase_keeps_every_levels_pages :: proc(t: ^testing.T) {
+	direction := linalg.normalize(TEST_LIGHT)
+	camera := ecs.World_Position{raw = {i64(1530) << 24, i64(12) << 24, -(i64(1410) << 24)}}
+	point := ecs.position_offset(camera, {3, -1, 7})
+	c := test_camera(position = ecs.position_sub_f64(camera, {}))
+	cell := i64(ORIGIN_CELL) << 24
+	for level in 0 ..< c.selection.levels {
+		l := virtual_level(c, direction, level)
+		texels: [2][2]f32
+		for origin, i in ([]ecs.World_Position{{raw = {cell, 0, -cell}}, {raw = {2 * cell, 0, -cell}}}) {
+			// The shaders' positions are relative to the camera, from the render origin's space.
+			p := ecs.position_sub(point, origin) - ecs.position_sub(camera, origin)
+			texels[i], _ = virtual_project(l.view, p)
+		}
+		testing.expectf(t, linalg.length(texels[0] - texels[1]) < 0.01, "level %d: %v against %v", level, texels[0], texels[1])
+	}
+}
+
+// The levels' grids are measured from an anchor near the camera, so their page indices fit 32 bits wherever the camera
+// is: the sample's playground is at 1.5e11 m. The anchor stays while the camera is within its reach, and moves to the
+// camera past it.
+@(test)
+the_levels_anchor_stays_near_the_camera :: proc(t: ^testing.T) {
+	far_away := ecs.position_offset_f64({}, {1.5e11, 4, -20})
+	testing.expect_value(t, virtual_grid_anchor(nil, far_away), far_away)
+	cache := Virtual_Cache {
+		anchor = far_away,
+	}
+	near := ecs.position_offset_f64(far_away, {3e7, -1e3, 5e7})
+	testing.expect_value(t, virtual_grid_anchor(cache, near), far_away)
+	past := ecs.position_offset_f64(far_away, {0, 0, VIRTUAL_ANCHOR_REACH + 1})
+	testing.expect_value(t, virtual_grid_anchor(cache, past), past)
+	// From the anchor's reach, every level's origin fits in 32 bits with room to spare.
+	direction := linalg.normalize(TEST_LIGHT)
+	edge := VIRTUAL_ANCHOR_REACH * 0.99
+	c := test_camera(position = {edge, -edge, edge})
+	for level in 0 ..< c.selection.levels {
+		l := virtual_level(c, direction, level)
+		page := virtual_level_extent(level) / VIRTUAL_PAGES
+		u := f64(l.view.page_origin.x) * page
+		testing.expectf(t, abs(u) < 2 * edge, "level %d's origin %v is not near the camera", level, l.view.page_origin)
 	}
 }
