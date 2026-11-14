@@ -1,7 +1,9 @@
 package render
 
+import "base:intrinsics"
 import "core:log"
 import "core:math"
+import "core:mem"
 import "core:slice"
 
 import "cinnabar:core"
@@ -43,6 +45,8 @@ MAX_VISIBLE_INSTANCES :: 1 << 25
 CULL_SHADER :: #load("../content/shaders/cull_draws.hlsl.meta", string)
 // INSTANCE_CULL_SHADER culls the instance sets' instances (lib/engine/content/shaders/cull_instances.hlsl).
 INSTANCE_CULL_SHADER :: #load("../content/shaders/cull_instances.hlsl.meta", string)
+// SCATTER_INSTANCES_SHADER writes the changed records to their slots (lib/engine/content/shaders/scatter_instances.hlsl).
+SCATTER_INSTANCES_SHADER :: #load("../content/shaders/scatter_instances.hlsl.meta", string)
 
 // The culling's views: the camera, the view model, then the shadow views.
 VIEW_CAMERA :: 0
@@ -324,17 +328,24 @@ Mesh_Record :: struct {
 	attributes_offset: u32,
 }
 
-// The clean slots that a run of the instance upload may cross, which costs less than a copy of its own.
+// Each group of the scatter pass has this many threads, and each thread copies 16 bytes of a record. Matches
+// scatter_instances.hlsl.
 @(private)
-INSTANCE_RUN_GAP :: 16
-// Past this many runs, one run covers them all.
+SCATTER_GROUP_SIZE :: 64
 @(private)
-MAX_INSTANCE_RUNS :: 256
+SCATTER_RECORD_QUADS :: size_of(Instance_Record) / 16
 
-// Instance_Run is a range of slots whose records go to the persistent buffer.
+// Scatter_Constants matches Scatter_Constants in scatter_instances.hlsl: the frame's changed records and their slots in
+// the upload ring, and the persistent buffer's write view.
 @(private)
-Instance_Run :: struct {
-	first, count: u32,
+Scatter_Constants :: struct {
+	records:        u32,
+	records_offset: u32,
+	slots:          u32,
+	slots_offset:   u32,
+	count:          u32,
+	instances:      u32,
+	_:              [2]u32,
 }
 
 // Instance_Record matches Instance_Record in material_common.hlsli and cull_draws.hlsl: the pose relative to the
@@ -605,10 +616,12 @@ Gpu_Scene :: struct {
 	// The last alpha, and the frame that it changed.
 	alpha:                    f32,
 	alpha_frame:              u64,
-	// The last frame whose copy into the persistent buffer ran. Any other frame's dirty slots were lost.
+	// The last frame whose scatter into the persistent buffer ran. Any other frame's dirty slots were lost.
 	copied_frame:             u64,
 	// The slots that this frame's upload covers.
 	uploaded_slots:           int,
+	// The pass that writes each changed record to its slot (scatter_instances.hlsl).
+	scatter_pipeline:         Shader_Pipeline,
 	free:                     [dynamic]u32,
 	// Slots below this have been used.
 	high:                     u32,
@@ -724,8 +737,9 @@ Scene_Frame :: struct {
 	stats:           Buffer,
 	// The instance sets' counters this frame, in words, which update_scene zeroes.
 	counter_words:   int,
-	instance_upload: gpu.Upload,
-	instance_runs:   []Instance_Run,
+	// The frame's changed records, and the scatter pass's constants, which name them and their slots in the upload ring.
+	slot_count:      int,
+	scatter:         gpu.Upload,
 	item_upload:     gpu.Upload,
 	mesh_upload:     gpu.Upload,
 	table_upload:    gpu.Upload,
@@ -762,10 +776,11 @@ scene_init :: proc(s: ^Gpu_Scene, platform: ^core.Platform_API) {
 	s.frame = 1
 	s.slots = make(map[ecs.Entity]u32, platform.heap_allocator)
 	s.free = make([dynamic]u32, platform.heap_allocator)
-	s.instances = platform.gpu_create_buffer({size = MAX_INSTANCES * size_of(Instance_Record), label = "gpu scene instances"}, nil)
+	s.instances = platform.gpu_create_buffer({size = MAX_INSTANCES * size_of(Instance_Record), usage = {.Storage}, label = "gpu scene instances"}, nil)
 	s.patches = platform.gpu_create_buffer({size = MAX_SURFACES * MAX_SURFACE_PATCHES * 4, usage = {.Storage}, label = "surface patches"}, nil)
 	s.patch_counts = platform.gpu_create_buffer({size = MAX_SURFACES * 4, usage = {.Storage}, label = "surface patch counts"}, nil)
 	s.cull_pipeline = shader_pipeline(CULL_SHADER)
+	s.scatter_pipeline = shader_pipeline(SCATTER_INSTANCES_SHADER)
 	s.select_pipeline = shader_pipeline(SELECT_PATCHES_SHADER)
 	s.cull_patches_pipeline = shader_pipeline(CULL_PATCHES_SHADER)
 	s.cell_free = make([dynamic]Cell_Range, platform.heap_allocator)
@@ -783,6 +798,7 @@ scene_destroy :: proc(s: ^Gpu_Scene, platform: ^core.Platform_API) {
 		platform.gpu_destroy_buffer(b)
 	}
 	destroy_shader_pipeline(&s.cull_pipeline, platform)
+	destroy_shader_pipeline(&s.scatter_pipeline, platform)
 	destroy_shader_pipeline(&s.instance_pipeline, platform)
 	occlusion_destroy(&s.occlusion, platform)
 	meshlet_select_destroy(&s.meshlet_select, platform)
@@ -841,6 +857,7 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32, skins: []Skin_Pose)
 		}
 	}
 	sync_compute_pipeline(&s.cull_pipeline, r.platform, r.residency.assets, {label = "cull draws"}, r.reloaded)
+	sync_compute_pipeline(&s.scatter_pipeline, r.platform, r.residency.assets, {label = "scatter instances"}, r.reloaded)
 	sync_compute_pipeline(&s.select_pipeline, r.platform, r.residency.assets, {label = "select patches"}, r.reloaded)
 	sync_compute_pipeline(&s.cull_patches_pipeline, r.platform, r.residency.assets, {label = "cull patches"}, r.reloaded)
 	sync_compute_pipeline(&s.instance_pipeline, r.platform, r.residency.assets, {label = "cull instances"}, r.reloaded)
@@ -1033,24 +1050,14 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32, skins: []Skin_Pose)
 	sf.meshlet_select.items = meshlet_select_items(r, items[:], f.no_meshlet_hierarchy, r.platform.frame_allocator)
 
 	platform := r.platform
-	// The frame's own view uploads the records that changed. An extra view uploads none, and leaves them dirty for that.
-	uploaded := 0
-	if !extra {
-		sf.instance_runs = instance_runs(&s.dirty, s.high, full, r.platform.frame_allocator)
-		s.dirty = {}
-		s.uploaded_slots = 0
-		for run in sf.instance_runs {
-			s.uploaded_slots += int(run.count)
-		}
-		uploaded = s.uploaded_slots
-	}
-	packed := make([]Instance_Record, uploaded, r.platform.frame_allocator)
-	packed_count := 0
-	for run in sf.instance_runs {
-		packed_count += copy(packed[packed_count:], s.records[run.first:][:run.count])
-	}
+	// The frame's own view uploads the records that changed, each with its slot. An extra view uploads none.
 	ok := true
-	sf.instance_upload, ok = upload_bytes(platform, slice.to_bytes(packed))
+	if !extra {
+		slots := dirty_slots(&s.dirty, s.high, full, r.platform.frame_allocator)
+		s.dirty = {}
+		s.uploaded_slots = len(slots)
+		ok = scatter_upload(f, slots)
+	}
 	item_upload, items_ok := upload_bytes(platform, slice.to_bytes(items[:]))
 	mesh_upload, meshes_ok := upload_bytes(platform, slice.to_bytes(meshes[:]))
 	table_upload, table_ok := upload_bytes(platform, table.bytes[:])
@@ -1578,8 +1585,12 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 	}
 
 	add_skinning_pass(f)
-	p := add_compute_pass(g, "update scene", update_scene, f)
-	copy_dest(g, p, sf.instances)
+	p: Pass
+	if sf.slot_count > 0 {
+		p = add_compute_pass(g, "scatter instances", scatter_instances, f)
+		write(g, p, sf.instances)
+	}
+	p = add_compute_pass(g, "update scene", update_scene, f)
 	copy_dest(g, p, sf.counts)
 	if len(sf.sets) > 0 {
 		copy_dest(g, p, sf.instance_counters)
@@ -1704,38 +1715,56 @@ scene_write_record :: proc "contextless" (s: ^Gpu_Scene, slot: u32, record: Inst
 	}
 }
 
-// instance_runs gives the ranges of slots to copy: all of them below high with full, or the dirty ones, in order. Runs
-// cross small gaps, whose records are the same in both places, and many runs become one.
+// dirty_slots gives the slots whose records go to the persistent buffer: all of them below high with full, or the dirty
+// ones, in order.
 @(private)
-instance_runs :: proc(dirty: ^[MAX_INSTANCES / 64]u64, high: u32, full: bool, allocator := context.allocator) -> []Instance_Run {
-	runs := make([dynamic]Instance_Run, allocator)
-	if full {
-		if high > 0 {
-			append(&runs, Instance_Run{0, high})
-		}
-		return runs[:]
-	}
-	for slot: u32 = 0; slot < high; slot += 1 {
-		if dirty[slot / 64] == 0 && slot % 64 == 0 {
-			slot += 63
-			continue
-		}
-		if dirty[slot / 64] & (1 << (slot % 64)) == 0 {
-			continue
-		}
-		if n := len(runs); n > 0 && slot - (runs[n - 1].first + runs[n - 1].count) <= INSTANCE_RUN_GAP {
-			runs[n - 1].count = slot + 1 - runs[n - 1].first
-		} else {
-			append(&runs, Instance_Run{slot, 1})
+dirty_slots :: proc(dirty: ^[MAX_INSTANCES / 64]u64, high: u32, full: bool, allocator := context.allocator) -> []u32 {
+	slots := make([dynamic]u32, allocator)
+	for word: u32 = 0; word * 64 < high; word += 1 {
+		bits := full ? ~u64(0) : dirty[word]
+		for bits != 0 {
+			slot := word * 64 + u32(intrinsics.count_trailing_zeros(bits))
+			if slot >= high {
+				break
+			}
+			append(&slots, slot)
+			bits &= bits - 1
 		}
 	}
-	if len(runs) > MAX_INSTANCE_RUNS {
-		last := runs[len(runs) - 1]
-		first := runs[0].first
-		clear(&runs)
-		append(&runs, Instance_Run{first, last.first + last.count - first})
+	return slots[:]
+}
+
+// scatter_upload puts the records of slots and the slots into the upload ring, and the scatter pass's constants. It
+// is false only when the ring is full.
+@(private)
+scatter_upload :: proc(f: ^Frame, slots: []u32) -> bool {
+	sf := f.scene_frame
+	s := &f.renderer.scene
+	if len(slots) == 0 {
+		return true
 	}
-	return runs[:]
+	platform := f.renderer.platform
+	packed := make([]Instance_Record, len(slots), platform.frame_allocator)
+	for slot, i in slots {
+		packed[i] = s.records[slot]
+	}
+	records, records_ok := upload_bytes(platform, slice.to_bytes(packed))
+	indices, indices_ok := upload_bytes(platform, slice.to_bytes(slots))
+	if !(records_ok && indices_ok) {
+		return false
+	}
+	constants := Scatter_Constants {
+		records        = gpu.read_index(records.buffer),
+		records_offset = records.offset,
+		slots          = gpu.read_index(indices.buffer),
+		slots_offset   = indices.offset,
+		count          = u32(len(slots)),
+		instances      = gpu.write_index(s.instances),
+	}
+	ok: bool
+	sf.scatter, ok = upload_bytes(platform, mem.ptr_to_bytes(&constants), gpu.PASS_CONSTANTS_ALIGN)
+	sf.slot_count = len(slots)
+	return ok
 }
 
 // scene_slot gives an entity's slot, and a free one the first time.
@@ -2405,19 +2434,30 @@ frustum_planes :: proc(m: matrix[4, 4]f32) -> (planes: [5][4]f32) {
 	return
 }
 
+// scatter_instances writes each of the frame's changed records to its slot, a thread for each 16 bytes. While its
+// pipeline compiles, it writes none, and the next frame writes every slot.
+@(private = "file")
+scatter_instances :: proc(ctx: ^Pass_Context) {
+	f := (^Frame)(ctx.data)
+	sf := f.scene_frame
+	pipeline := f.renderer.scene.scatter_pipeline.pipeline
+	if pipeline == {} {
+		return
+	}
+	gpu.cmd_set_pipeline(ctx.cb, pipeline)
+	gpu.cmd_set_pass_constants(ctx.cb, sf.scatter)
+	gpu.cmd_dispatch(ctx.cb, {u32(sf.slot_count * SCATTER_RECORD_QUADS + SCATTER_GROUP_SIZE - 1) / SCATTER_GROUP_SIZE, 1, 1})
+	f.renderer.scene.copied_frame = f.renderer.scene.frame
+}
+
 @(private = "file")
 update_scene :: proc(ctx: ^Pass_Context) {
 	f := (^Frame)(ctx.data)
 	sf := f.scene_frame
 	g := ctx.graph
-	source := sf.instance_upload.offset
-	for run in sf.instance_runs {
-		size := run.count * size_of(Instance_Record)
-		gpu.cmd_copy_buffer(ctx.cb, sf.instance_upload.buffer, source, gpu_buffer(g, sf.instances), run.first * size_of(Instance_Record), size)
-		source += size
-	}
-	// An extra view uploads no records, so it does not say that the copy ran.
-	if !f.extra {
+	// A frame with no changed records has nothing to lose. An extra view uploads none, so it does not say that the
+	// scatter ran.
+	if sf.slot_count == 0 && !f.extra {
 		f.renderer.scene.copied_frame = f.renderer.scene.frame
 	}
 	gpu.cmd_copy_buffer(ctx.cb, sf.zero_upload.buffer, sf.zero_upload.offset, gpu_buffer(g, sf.counts), 0, u32(len(sf.bin_pipelines) * sf.draw_views * 4))

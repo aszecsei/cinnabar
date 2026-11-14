@@ -2,6 +2,7 @@ package render
 
 import "core:math"
 import "core:math/linalg"
+import "core:slice"
 import "core:testing"
 
 import "cinnabar:engine/ecs"
@@ -45,40 +46,35 @@ the_render_origin_snaps_to_cells :: proc(t: ^testing.T) {
 }
 
 @(test)
-instance_runs_cover_the_dirty_slots :: proc(t: ^testing.T) {
-	runs :: proc(dirty: []u32, high: u32, full := false) -> []Instance_Run {
+dirty_slots_are_the_set_bits :: proc(t: ^testing.T) {
+	slots :: proc(dirty: []u32, high: u32, full := false) -> []u32 {
 		bits: [MAX_INSTANCES / 64]u64
 		for slot in dirty {
 			bits[slot / 64] |= 1 << (slot % 64)
 		}
-		return instance_runs(&bits, high, full, context.temp_allocator)
+		return dirty_slots(&bits, high, full, context.temp_allocator)
 	}
-	testing.expect_value(t, len(runs({}, 100)), 0)
-	testing.expect_value(t, len(runs({}, 0, full = true)), 0)
+	testing.expect_value(t, len(slots({}, 100)), 0)
+	testing.expect_value(t, len(slots({}, 0, full = true)), 0)
 
-	full := runs({}, 100, full = true)
-	testing.expect_value(t, len(full), 1)
-	testing.expect_value(t, full[0], Instance_Run{0, 100})
+	// Every slot below high, whatever is dirty.
+	full := slots({5}, 100, full = true)
+	testing.expect_value(t, len(full), 100)
+	for slot, i in full {
+		testing.expect_value(t, slot, u32(i))
+	}
 
-	// A small gap is crossed, and a large one is not, across the words of the bits.
-	apart := runs({3, 4, 4 + INSTANCE_RUN_GAP + 1, 500}, 1000)
-	testing.expect_value(t, len(apart), 2)
-	testing.expect_value(t, apart[0], Instance_Run{3, INSTANCE_RUN_GAP + 3})
-	testing.expect_value(t, apart[1], Instance_Run{500, 1})
+	// Scattered slots, in order, across the words of the bits and at their edges, and none from high on.
+	apart := slots({500, 3, 63, 64, 127, 999, 1000}, 1000)
+	testing.expect(t, slice.equal(apart, []u32{3, 63, 64, 127, 500, 999}))
 
-	// Slots at the end of a word and from high on.
-	edge := runs({63, 64, 200}, 200)
-	testing.expect_value(t, len(edge), 1)
-	testing.expect_value(t, edge[0], Instance_Run{63, 2})
-
-	// Too many runs are one.
+	// However many and however far apart, each dirty slot and no other.
 	many := make([dynamic]u32, context.temp_allocator)
-	for i in 0 ..< MAX_INSTANCE_RUNS + 1 {
-		append(&many, u32(i) * (INSTANCE_RUN_GAP + 2))
+	for i in 0 ..< u32(1000) {
+		append(&many, i * 16 + 7)
 	}
-	testing.expect_value(t, len(runs(many[:], MAX_INSTANCES)), 1)
-	one := runs(many[:], MAX_INSTANCES)[0]
-	testing.expect_value(t, one, Instance_Run{0, many[len(many) - 1] + 1})
+	testing.expect(t, slice.equal(slots(many[:], MAX_INSTANCES), many[:]))
+	testing.expect_value(t, len(slots({MAX_INSTANCES - 1}, MAX_INSTANCES)), 1)
 }
 
 // A skinned entity's item has a bin of its own after its material's, which draws with vertex pulling, as a mesh

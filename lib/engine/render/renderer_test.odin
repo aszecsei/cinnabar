@@ -150,6 +150,8 @@ enable_pipelines :: proc(r: ^Renderer) {
 		&r.clouds.temporal,
 		&r.clouds.composite,
 		&r.post.upscalers.motion,
+		// The scatter of the GPU scene's changed records.
+		&r.scene.scatter_pipeline,
 		&r.scene.select_pipeline,
 		&r.scene.cull_patches_pipeline,
 		// The traced shadows, so the lights trace their mask, and the frame builds the ray scene before it.
@@ -771,6 +773,44 @@ frames_upload_only_the_records_that_changed :: proc(t: ^testing.T) {
 	testing.expect_value(t, frame(r, w, far), 1)
 	testing.expect_value(t, s.slots[fresh], freed)
 	testing.expect_value(t, s.records[freed].id, entity_id(fresh))
+	testing.expect_value(t, frame(r, w, far), 0)
+
+	// An entity that is deactivated leaves its slot, and one that is activated again takes a slot with its pose.
+	testing.expect(t, ecs.set_active(w, mover, false))
+	left := s.slots[mover]
+	testing.expect_value(t, frame(r, w, far), 1)
+	testing.expect_value(t, s.records[left], Instance_Record{})
+	_, has_slot := s.slots[mover]
+	testing.expect(t, !has_slot)
+	testing.expect(t, ecs.set_active(w, mover, true))
+	testing.expect_value(t, frame(r, w, far), 1)
+	back := s.slots[mover]
+	testing.expect_value(t, s.records[back].id, entity_id(mover))
+	testing.expect_value(t, s.records[back].rows, pose_rows(ecs.get(w, mover, ecs.Transform)^, s.origin))
+	testing.expect_value(t, frame(r, w, far), 0)
+
+	// Many entities of one archetype, of which a scattered few move: each one's record and no other, wherever its slot is.
+	crowd := make([dynamic]ecs.Entity, context.temp_allocator)
+	for _ in 0 ..< 2000 {
+		e := ecs.spawn(w)
+		ecs.add(w, e, ecs.TRANSFORM_IDENTITY)
+		ecs.add(w, e, Mesh_Renderer{})
+		append(&crowd, e)
+	}
+	testing.expect_value(t, frame(r, w, far), 2000)
+	testing.expect_value(t, frame(r, w, far), 0)
+	for e, i in crowd {
+		if i % 40 == 0 {
+			ecs.get_write(w, e, ecs.Transform).position = ecs.position_offset({}, {f32(i + 1), 0, 0})
+		}
+	}
+	testing.expect_value(t, frame(r, w, far), 50)
+	testing.expect_value(t, frame(r, w, far), 50)
+	testing.expect_value(t, frame(r, w, far), 0)
+
+	// An edit of one entity, as the editor's inspector writes it.
+	ecs.get_write(w, crowd[1234], ecs.Transform).scale = {2, 2, 2}
+	testing.expect_value(t, frame(r, w, far), 1)
 }
 
 // The null backend, a world and a renderer, for the tests of the extra views (see Extra_View).
@@ -1193,7 +1233,7 @@ an_extra_view_draws_into_its_own_target :: proc(t: ^testing.T) {
 	targets := [MAX_EXTRA_VIEWS + 1]gpu.Texture{first, second, third, third, first}
 	for &v, i in views {
 		v = {
-			view   = {position = ecs.position_offset({}, {f32(i), 0, 0}), rotation = 1, projection = Perspective{1, 0.05}},
+			view   = {position = ecs.position_offset({}, {f32(i + 1), 0, 0}), rotation = 1, projection = Perspective{1, 0.05}},
 			size   = {32, 16},
 			target = targets[i],
 			state  = &states[i],
