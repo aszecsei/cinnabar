@@ -11,18 +11,16 @@ import format "cinnabar:engine/asset/format"
 // docs/rendering/assets.md#gpu-residency). The game builds the editor's live meshes with it. Each meshlet gets the sphere
 // around its vertices and the normal cone of its triangles, conservative as meshoptimizer's. It appends to the three
 // arrays, with offsets into them, and returns how many meshlets it made.
-build_simple_meshlets :: proc(positions: [][3]f32, indices: []u32, meshlets: ^[dynamic]format.Meshlet, meshlet_vertices: ^[dynamic]u32, meshlet_triangles: ^[dynamic]u32) -> int {
+build_simple_meshlets :: proc(positions: [][3]f32, indices: []u32, meshlets: ^[dynamic]format.Meshlet, meshlet_vertices: ^[dynamic]u32, meshlet_triangles: ^[dynamic]u8) -> int {
 	local: [format.MESHLET_MAX_VERTICES]u32
 	local_count := 0
 	triangles: [format.MESHLET_MAX_TRIANGLES][3]u8
 	triangle_count := 0
 	made := 0
-	flush :: proc(positions: [][3]f32, local: []u32, triangles: [][3]u8, meshlets: ^[dynamic]format.Meshlet, meshlet_vertices: ^[dynamic]u32, meshlet_triangles: ^[dynamic]u32) {
+	flush :: proc(positions: [][3]f32, local: []u32, triangles: [][3]u8, meshlets: ^[dynamic]format.Meshlet, meshlet_vertices: ^[dynamic]u32, meshlet_triangles: ^[dynamic]u8) {
 		m := format.Meshlet {
-			triangle_offset = u32(len(meshlet_triangles)),
-			triangle_count  = u8(len(triangles)),
-			parent_error    = math.F32_MAX,
-			refined_page    = format.MESH_PAGE_NONE,
+			parent_error = math.F32_MAX,
+			refined_page = format.MESH_PAGE_NONE,
 		}
 		// The sphere: the box's center, and the farthest vertex.
 		low, high := [3]f32{math.F32_MAX, math.F32_MAX, math.F32_MAX}, [3]f32{-math.F32_MAX, -math.F32_MAX, -math.F32_MAX}
@@ -59,10 +57,8 @@ build_simple_meshlets :: proc(positions: [][3]f32, indices: []u32, meshlets: ^[d
 			}
 		}
 		format.meshlet_write_vertices(&m, local, meshlet_vertices)
+		format.meshlet_write_triangles(&m, triangles, meshlet_triangles)
 		append(meshlets, m)
-		for t in triangles {
-			append(meshlet_triangles, u32(t[0]) | u32(t[1]) << 8 | u32(t[2]) << 16)
-		}
 	}
 	for t in 0 ..< len(indices) / 3 {
 		corners := indices[t * 3:][:3]

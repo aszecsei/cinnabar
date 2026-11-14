@@ -503,7 +503,7 @@ finish_mesh :: proc(m: Cook_Mesh, guid: format.Guid, key: u64) -> []byte {
 	meshlets := make([dynamic]format.Meshlet, context.temp_allocator)
 	// Each meshlet's vertices as indices into the mesh's, at its vertex_offset, until they are final.
 	meshlet_indices := make([dynamic]u32, context.temp_allocator)
-	meshlet_triangles := make([dynamic]u32, context.temp_allocator)
+	meshlet_triangles := make([dynamic]u8, context.temp_allocator)
 	meshlet_nodes := make([dynamic]format.Meshlet_Node, context.temp_allocator)
 	submeshes := make([]format.Submesh_Entry, len(ranges), context.temp_allocator)
 	page_inputs := Page_Inputs {
@@ -636,7 +636,7 @@ finish_mesh :: proc(m: Cook_Mesh, guid: format.Guid, key: u64) -> []byte {
 		indices           = index_bytes,
 		meshlets          = meshlets[:],
 		meshlet_vertices  = mem.slice_to_bytes(meshlet_vertices[:]),
-		meshlet_triangles = mem.slice_to_bytes(meshlet_triangles[:]),
+		meshlet_triangles = meshlet_triangles[:],
 		meshlet_nodes     = meshlet_nodes[:],
 		name              = m.name,
 		source_path       = m.source_path,
@@ -828,7 +828,7 @@ renumber_by_meshlets :: proc(vertices: []Vertex, indices: []c.uint, meshlet_indi
 // nodes, whose roots it returns the count of, and the groups appended to pages for build_pages. Without it, they are the
 // submesh's own triangles, clustered with a weight on their cones, without nodes.
 @(private = "file")
-build_meshlets :: proc(indices: []c.uint, vertices: []Vertex, lod: bool, meshlets: ^[dynamic]format.Meshlet, meshlet_vertices: ^[dynamic]u32, meshlet_triangles: ^[dynamic]u32, nodes: ^[dynamic]format.Meshlet_Node, pages: ^Page_Inputs) -> (roots: int) {
+build_meshlets :: proc(indices: []c.uint, vertices: []Vertex, lod: bool, meshlets: ^[dynamic]format.Meshlet, meshlet_vertices: ^[dynamic]u32, meshlet_triangles: ^[dynamic]u8, nodes: ^[dynamic]format.Meshlet_Node, pages: ^Page_Inputs) -> (roots: int) {
 	if len(indices) == 0 {
 		return
 	}
@@ -998,38 +998,31 @@ lod_output :: proc "c" (output_context: rawptr, group: Clod_Group, clusters: [^]
 // append_meshlet appends a meshlet of local vertices and triangles, with its culling bounds, the simplification that
 // made it and its group's, a level up.
 @(private = "file")
-append_meshlet :: proc(local_vertices: []c.uint, local_triangles: []u8, vertices: []Vertex, depth: int, made, parent: Clod_Bounds, meshlets: ^[dynamic]format.Meshlet, meshlet_vertices: ^[dynamic]u32, meshlet_triangles: ^[dynamic]u32) {
+append_meshlet :: proc(local_vertices: []c.uint, local_triangles: []u8, vertices: []Vertex, depth: int, made, parent: Clod_Bounds, meshlets: ^[dynamic]format.Meshlet, meshlet_vertices: ^[dynamic]u32, meshlet_triangles: ^[dynamic]u8) {
 	triangle_count := len(local_triangles) / 3
 	b := meshopt_computeMeshletBounds(&local_vertices[0], &local_triangles[0], c.size_t(triangle_count), &vertices[0].position[0], c.size_t(len(vertices)), size_of(Vertex))
 	assert(depth <= int(max(u8)), "a meshlet's level does not fit in its record")
 	center, radius := format.meshlet_encode_sphere(b.center, b.radius)
-	append(
-		meshlets,
-		format.Meshlet {
-			vertex_offset = u32(len(meshlet_vertices)),
-			triangle_offset = u32(len(meshlet_triangles)),
-			vertex_count = u8(len(local_vertices)),
-			triangle_count = u8(triangle_count),
-			depth = u8(depth),
-			cone_axis = b.cone_axis_s8,
-			cone_cutoff = b.cone_cutoff_s8,
-			center = center,
-			radius = radius,
-			error_center = made.center,
-			error_radius = made.radius,
-			parent_center = parent.center,
-			parent_radius = parent.radius,
-			error = made.error,
-			parent_error = parent.error,
-			refined_page = format.MESH_PAGE_NONE,
-		},
-	)
+	m := format.Meshlet {
+		vertex_offset = u32(len(meshlet_vertices)),
+		vertex_count  = u8(len(local_vertices)),
+		depth         = u8(depth),
+		cone_axis     = b.cone_axis_s8,
+		cone_cutoff   = b.cone_cutoff_s8,
+		center        = center,
+		radius        = radius,
+		error_center  = made.center,
+		error_radius  = made.radius,
+		parent_center = parent.center,
+		parent_radius = parent.radius,
+		error         = made.error,
+		parent_error  = parent.error,
+		refined_page  = format.MESH_PAGE_NONE,
+	}
+	format.meshlet_write_triangles(&m, slice.reinterpret([][3]u8, local_triangles[:triangle_count * 3]), meshlet_triangles)
+	append(meshlets, m)
 	for v in local_vertices {
 		append(meshlet_vertices, u32(v))
-	}
-	for i in 0 ..< triangle_count {
-		t := local_triangles[i * 3:]
-		append(meshlet_triangles, u32(t[0]) | u32(t[1]) << 8 | u32(t[2]) << 16)
 	}
 }
 

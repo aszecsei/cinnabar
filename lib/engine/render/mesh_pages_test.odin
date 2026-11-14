@@ -196,12 +196,11 @@ paged_mesh_bytes :: proc(guid: format.Guid, pages: []Test_Page, key: u64 = 0) ->
 		count := u32(len(page.refined))
 		records := make([]format.Meshlet, count, context.temp_allocator)
 		refs := make([dynamic]u32, context.temp_allocator)
-		triangles := make([dynamic]u32, context.temp_allocator)
+		triangles := make([dynamic]u8, context.temp_allocator)
 		for &m, i in records {
 			m = {triangle_count = 1, depth = page.depth, parent_error = max(f32), refined_page = page.refined[i]}
 			format.meshlet_write_vertices(&m, []u32{u32(i) * 3, u32(i) * 3 + 1, u32(i) * 3 + 2}, &refs)
-			m.triangle_offset = u32(len(triangles))
-			append(&triangles, u32(0 | 1 << 8 | 2 << 16))
+			format.meshlet_write_triangles(&m, [][3]u8{{0, 1, 2}}, &triangles)
 			if page.refined[i] != format.MESH_PAGE_NONE && int(page.refined[i]) != p && !slice.contains(dependencies[page.refined[i]][:], u32(p)) {
 				append(&dependencies[page.refined[i]], u32(p))
 			}
@@ -210,18 +209,18 @@ paged_mesh_bytes :: proc(guid: format.Guid, pages: []Test_Page, key: u64 = 0) ->
 			meshlet_count  = count,
 			vertex_count   = count * 3,
 			ref_words      = u32(len(refs)),
-			triangle_words = u32(len(triangles)),
+			triangle_bytes = u32(len(triangles)),
 		}
 		header.vertex_refs = size_of(format.Mesh_Page_Header) + count * size_of(format.Meshlet)
 		header.triangles = header.vertex_refs + header.ref_words * 4
-		header.positions = header.triangles + header.triangle_words * 4
+		header.positions = header.triangles + u32(format.mesh_page_padded(header.triangle_bytes))
 		header.attributes = header.positions + header.vertex_count * 12
 		size := int(header.attributes) + int(header.vertex_count) * stride
 		bytes := make([]byte, size, context.temp_allocator)
 		mem.copy(raw_data(bytes), &header, size_of(header))
 		copy(bytes[size_of(format.Mesh_Page_Header):], mem.slice_to_bytes(records))
 		copy(bytes[header.vertex_refs:], mem.slice_to_bytes(refs[:]))
-		copy(bytes[header.triangles:], mem.slice_to_bytes(triangles[:]))
+		copy(bytes[header.triangles:], triangles[:])
 		// A position that says which vertex of which page it is.
 		for v in 0 ..< int(header.vertex_count) {
 			(^[3]f32)(&bytes[int(header.positions) + v * 12])^ = {f32(p), f32(v), 0}

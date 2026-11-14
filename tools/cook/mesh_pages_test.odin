@@ -25,8 +25,8 @@ Paged_Grid :: struct {
 PAGED_GRID_SIZE :: 160
 
 @(private = "file")
-cook_paged_grid :: proc(t: ^testing.T, size := PAGED_GRID_SIZE, settings := "pages = true\n") -> (grid: Paged_Grid, ok: bool) {
-	tree := make_tree(t, {{"content/grid.gltf", grid_gltf(size)}, {"content/grid.gltf.meta", fmt_meta(settings)}})
+cook_paged_grid :: proc(t: ^testing.T, size := PAGED_GRID_SIZE, settings := "pages = true\n", normals := false) -> (grid: Paged_Grid, ok: bool) {
+	tree := make_tree(t, {{"content/grid.gltf", grid_gltf(size, normals)}, {"content/grid.gltf.meta", fmt_meta(settings)}})
 	defer remove_tree(tree)
 	testing.expect(t, cook(tree_options(tree), {.Model}).ok)
 	guid, found := format.meta_subasset(read_meta(t, tree, "grid.gltf"), format.MESH_KIND, "Grid")
@@ -68,10 +68,11 @@ page_meshlet_area :: proc(grid: Paged_Grid, page: int, m: format.Meshlet) -> f32
 	refs := format.mesh_page_refs(grid.pages[page], header)
 	positions := format.mesh_page_positions(grid.pages[page], header)
 	area: f32
-	for packed in format.mesh_page_triangles(grid.pages[page], header)[m.triangle_offset:][:m.triangle_count] {
+	triangles := format.mesh_page_triangles(grid.pages[page], header)
+	for i in 0 ..< int(m.triangle_count) {
 		corners: [3][3]f32
-		for shift, k in ([3]u32{0, 8, 16}) {
-			corners[k] = positions[format.meshlet_vertex(m, refs, int((packed >> shift) & 0xff))]
+		for local, k in format.meshlet_triangle(m, triangles, i) {
+			corners[k] = positions[format.meshlet_vertex(m, refs, int(local))]
 		}
 		area += linalg.length(linalg.cross(corners[1] - corners[0], corners[2] - corners[0])) / 2
 	}
@@ -292,6 +293,28 @@ residents :: proc(grid: Paged_Grid, more: int, generator: ^rand.Default_Random_S
 	return resident
 }
 
+// A page keeps every triangle of its meshlets, those of a full meshlet too, whose triangles' bytes are more than a u8
+// counts.
+@(test)
+a_page_keeps_every_triangle_of_a_full_meshlet :: proc(t: ^testing.T) {
+	grid, ok := cook_paged_grid(t, normals = true)
+	if !ok {
+		return
+	}
+	testing.expectf(t, len(grid.records) > 1, "the grid has %d pages", len(grid.records))
+	most, level0 := 0, 0
+	for record, i in grid.records {
+		for m, k in format.mesh_page_meshlets(grid.pages[i], grid.headers[i]) {
+			most = max(most, int(m.triangle_count))
+			if u32(k) < record.level0_meshlets {
+				level0 += int(m.triangle_count)
+			}
+		}
+	}
+	testing.expectf(t, most * 3 > int(max(u8)), "the largest meshlet has only %d triangles", most)
+	testing.expect_value(t, level0, PAGED_GRID_SIZE * PAGED_GRID_SIZE * 2)
+}
+
 @(test)
 every_cut_covers_the_mesh_with_pages_missing :: proc(t: ^testing.T) {
 	grid, ok := cook_paged_grid(t)
@@ -495,8 +518,11 @@ a_paged_mesh_blob_that_is_wrong_is_refused :: proc(t: ^testing.T) {
 		header.meshlet_count -= 1
 	}), record, stride), "fewer meshlets than the table says")
 	testing.expect(t, !page_ok(changed(grid, proc(header: ^format.Mesh_Page_Header, meshlets: []format.Meshlet) {
-		meshlets[0].triangle_offset = header.triangle_words
+		meshlets[0].triangle_offset = header.triangle_bytes / 3
 	}), record, stride), "a meshlet whose triangles are past the stream")
+	testing.expect(t, !page_ok(changed(grid, proc(header: ^format.Mesh_Page_Header, meshlets: []format.Meshlet) {
+		header.triangle_bytes -= 1
+	}), record, stride), "triangles that are not three bytes each")
 	testing.expect(t, !page_ok(changed(grid, proc(header: ^format.Mesh_Page_Header, meshlets: []format.Meshlet) {
 		meshlets[0].base_vertex = header.vertex_count
 	}), record, stride), "a meshlet whose vertices the page does not have")

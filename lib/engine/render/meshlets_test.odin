@@ -27,7 +27,7 @@ simple_meshlets_cover_every_triangle_once_within_the_limits :: proc(t: ^testing.
 	}
 	meshlets := make([dynamic]format.Meshlet, context.temp_allocator)
 	vertices := make([dynamic]u32, context.temp_allocator)
-	triangles := make([dynamic]u32, context.temp_allocator)
+	triangles := make([dynamic]u8, context.temp_allocator)
 	made := build_simple_meshlets(positions[:], indices[:], &meshlets, &vertices, &triangles)
 	testing.expect_value(t, made, len(meshlets))
 	testing.expect(t, made > 1)
@@ -36,9 +36,9 @@ simple_meshlets_cover_every_triangle_once_within_the_limits :: proc(t: ^testing.
 	for m, i in meshlets {
 		testing.expectf(t, m.vertex_count <= format.MESHLET_MAX_VERTICES && m.triangle_count <= format.MESHLET_MAX_TRIANGLES, "meshlet %d has %d vertices and %d triangles", i, m.vertex_count, m.triangle_count)
 		testing.expect(t, m.depth == 0 && m.error == 0 && m.parent_error == math.F32_MAX)
-		for packed in triangles[m.triangle_offset:][:m.triangle_count] {
+		for triangle in 0 ..< int(m.triangle_count) {
 			// Each triangle is the next of the submesh's, in order, and its corners are in the meshlet's vertices.
-			corners := [3]u32{packed & 0xff, (packed >> 8) & 0xff, (packed >> 16) & 0xff}
+			corners := format.meshlet_triangle(m, triangles[:], triangle)
 			for c, k in corners {
 				testing.expect(t, c < u32(m.vertex_count))
 				testing.expect_value(t, format.meshlet_vertex(m, vertices[:], int(c)), indices[total * 3 + k])
@@ -72,7 +72,7 @@ simple_meshlets_cones_are_conservative :: proc(t: ^testing.T) {
 	}
 	meshlets := make([dynamic]format.Meshlet, context.temp_allocator)
 	vertices := make([dynamic]u32, context.temp_allocator)
-	triangles := make([dynamic]u32, context.temp_allocator)
+	triangles := make([dynamic]u8, context.temp_allocator)
 	testing.expect_value(t, build_simple_meshlets(positions, indices[:], &meshlets, &vertices, &triangles), 1)
 	testing.expect_value(t, meshlets[0].cone_cutoff, 127)
 	testing.expect_value(t, meshlets[0].vertex_count, 8)
@@ -102,7 +102,7 @@ simple_meshlets_narrow_their_refs_when_they_fit :: proc(t: ^testing.T) {
 	}
 	build :: proc(positions: [][3]f32, indices: []u32) -> (m: format.Meshlet, stream: [dynamic]u32) {
 		meshlets := make([dynamic]format.Meshlet, context.temp_allocator)
-		triangles := make([dynamic]u32, context.temp_allocator)
+		triangles := make([dynamic]u8, context.temp_allocator)
 		stream = make([dynamic]u32, context.temp_allocator)
 		build_simple_meshlets(positions, indices, &meshlets, &stream, &triangles)
 		return meshlets[0], stream
