@@ -194,6 +194,16 @@ struct Frame_Constants {
 	// Whether the push constants have the aerial perspective volume, and its clamping sampler (see fog_at.hlsli).
 	uint aerial;
 	uint aerial_sampler;
+	// The atlas's soft shadows (see soft_shadow_map in material_lighting.hlsli): the blocker search's gathers, the
+	// filter's comparisons, 0 without soft shadows, and its widest reach in texels; the sampler that the search gathers
+	// depths with; and the blue noise that turns the taps, 0 without it, and this frame's slice of it.
+	uint shadow_soft_search;
+	uint shadow_soft_taps;
+	float shadow_soft_radius;
+	uint shadow_depth_sampler;
+	uint shadow_noise;
+	uint shadow_noise_slice;
+	uint2 soft_padding;
 };
 CN_PASS_CONSTANTS(Frame_Constants, frame);
 

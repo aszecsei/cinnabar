@@ -64,6 +64,9 @@ DOORWAY_SCENE_META :: #load("../content/scenes/doorway.scene.meta", string)
 // The guard, an agent that patrols, chases an intruder that it sees, and searches where it lost it (see
 // docs/ai/behavior-trees.md).
 GUARD_SCENE_META :: #load("../content/scenes/guard.scene.meta", string)
+// The soft shadows scene, a spot, a point and a quad light and a sun, each with a size (see
+// docs/rendering/lighting-and-shadows.md#soft-shadows).
+SOFT_SHADOWS_SCENE_META :: #load("../content/scenes/soft_shadows.scene.meta", string)
 // The array that tints the large triangles, a layer for each (see docs/content/kinds/textures.md#cube-maps-and-arrays).
 TRIANGLE_TINTS_META :: #load("../content/textures/cube/tints.texture_set.meta", string)
 
@@ -203,7 +206,7 @@ State :: struct {
 	// F8 cycles the output mode for this run, until the settings' files change.
 	output_override:    Maybe(gpu.Output_Request),
 	// F7 cycles the main scene, the glass scene, the surfaces scene, the room scene, the billboards scene, the animation
-	// scene, the cube map scene, the audio scene and the 2D scene.
+	// scene, the cube map scene, the audio scene, the 2D scene and the others after them (see switch_scene).
 	scene_index:        u8,
 	next_report:        time.Duration,
 	pipelines:          Pipelines,
@@ -802,15 +805,15 @@ update_output :: proc(g: ^game.Game) {
 }
 
 // switch_scene loads the next scene, the glass scene, the surfaces scene, the room scene, the billboards scene, the
-// animation scene, the cube map scene, the audio scene, the 2D scene, the playground, the doorway, the guard, then the
-// main scene again, when F7 is pressed. A linked editor owns the scene, so the key does nothing then.
+// animation scene, the cube map scene, the audio scene, the 2D scene, the playground, the doorway, the guard, the soft
+// shadows, then the main scene again, when F7 is pressed. A linked editor owns the scene, so the key does nothing then.
 switch_scene :: proc(g: ^game.Game) {
 	if .F7 not_in g.platform.input().pressed || editor.active(&g.editor) {
 		return
 	}
 	s := state_of(g)
-	metas := [?]string{MAIN_SCENE_META, GLASS_SCENE_META, SURFACES_SCENE_META, ROOM_SCENE_META, BILLBOARDS_SCENE_META, ANIMATION_SCENE_META, CUBE_SKY_SCENE_META, AUDIO_SCENE_META, SPRITES_SCENE_META, PLAYGROUND_SCENE_META, DOORWAY_SCENE_META, GUARD_SCENE_META}
-	names := [?]string{"main", "glass", "surfaces", "room", "billboards", "animation", "cube map", "audio", "2D", "playground", "doorway", "guard"}
+	metas := [?]string{MAIN_SCENE_META, GLASS_SCENE_META, SURFACES_SCENE_META, ROOM_SCENE_META, BILLBOARDS_SCENE_META, ANIMATION_SCENE_META, CUBE_SKY_SCENE_META, AUDIO_SCENE_META, SPRITES_SCENE_META, PLAYGROUND_SCENE_META, DOORWAY_SCENE_META, GUARD_SCENE_META, SOFT_SHADOWS_SCENE_META}
+	names := [?]string{"main", "glass", "surfaces", "room", "billboards", "animation", "cube map", "audio", "2D", "playground", "doorway", "guard", "soft shadows"}
 	s.scene_index = (s.scene_index + 1) % len(metas)
 	if guid, ok := format.meta_guid(metas[s.scene_index]); ok {
 		scene.load_asset(&g.world, &g.scripts, &g.assets, guid)

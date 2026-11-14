@@ -355,7 +355,7 @@ What they show:
 |---|---|---|
 | Directional | A screen-space mask: a compute pass traces from the prepass depth | A [virtual shadow map](#virtual-shadow-maps), or cascaded shadow maps at Low and when the quality turns it off, with screen-space contact shadows for the sun |
 | Spot, point | A mask for the few most important; maps for the rest | A shadow atlas |
-| Quad, disk, line | As a point light at the light's middle | As a point light at the light's middle |
+| Quad, disk, line | As a point light at the light's middle | As a point light at the light's middle, as soft as the light's size |
 
 - **Which lights:** the lights that cast shadows take them in order: the directional lights, then the punctual lights by how much light they bring to the view (their brightest channel over their squared distance), leaving out those whose spheres miss the view (`assign_shadows`). With `Ray_Query` and traced shadows in the [quality](quality.md#quality), the first `MAX_MASK_LIGHTS` (4) take the mask's channels. The others take shadow maps while the atlas has room. Only one directional light has a virtual shadow map or cascades; another without a mask channel has no shadow.
 - **The cloud shadow:** with [clouds](clouds.md#shadow), the directional light that lights them, the sky's linked sun, also has their shadow map, whatever its own shadow: `light_falloff` darkens its light by the map wherever the light loop runs, so the forward pass, the transparent surfaces, the sprites, the fog, the global illumination's hits and the voxel cones all see it. For the fog, the sprites and the transparent surfaces it is the only directional shadow past the shadow maps' 100 m.
@@ -374,7 +374,7 @@ What they show:
 - **The atlas:** one `D32_Float` texture, a frame's transient, as large as the level's `Shadow_Params` say (`SHADOW_PARAMS`; 4096 at High, see [Quality: Levels](quality.md#levels)). A cascade takes a cell (1024 pixels at High), from the first cells; a spot light takes a slot (512 at High), four to a cell, and a point light six slots, one for each face of its cube.
 - **Cascades:** the level's, up to `SHADOW_CASCADES` (4), which cover the view to `SHADOW_DISTANCE` (100 m), split between even and exponential by `SHADOW_SPLIT_LAMBDA` (0.75), unless the volumes' `Shadows` settings give others (see [Settings](frame.md#settings)). Each is an orthographic view of the bounding sphere of its slice of the view's frustum. The sphere's radius is rounded up to sixteenths of a meter, and its center snaps to the cascade's texels in the render origin's space, so the shadow's edges stay still as the camera moves and turns. Depth is clamped, not clipped, and culling has no plane toward the light, so casters between the light and the view still cast.
 - **In an [orthographic view](frame.md#orthographic-views)** the cascades split evenly from the near plane to the shadows' distance past it, or to the far plane if that is nearer, and each slice of the view is a box. The virtual shadow map gives way to the cascades there, and the screen-space and ray-traced reflections to the reflection probes.
-- **Spot and point lights:** a perspective view with reversed depth from `SHADOW_NEAR` (5 cm), as wide as the spot light's cone or 90° for each cube face, culled at the light's range. An area light's shadows are a point light's from its middle, so they are hard.
+- **Spot and point lights:** a perspective view with reversed depth from `SHADOW_NEAR` (5 cm), as wide as the spot light's cone or 90° for each cube face, culled at the light's range. An area light's shadows are a point light's from its middle, as soft as its size (see [Soft shadows](#soft-shadows)). A light with a size widens its views by a guard band.
 - **The depth pass:** the shadow maps are one render pass with a piece for each view, each with its own viewport of the atlas. Each draws its view's bins with each material's depth pipeline, so masked materials cast the right shadows. The pipelines have a depth bias and a slope bias against acne, `SHADOW_DEPTH_BIAS` and `SHADOW_SLOPE_BIAS`.
 - **Sampling:** the forward pass moves the point half a texel of the view toward the light, against the map's depth precision, and along its normal by half a texel times the sine of the light's angle to the normal, against the taps' spread where the light grazes the surface. A normal offset moves the edge across the surface by the offset over the tangent of that angle, so the sine keeps a crease's seam within half a texel, and the casters' slope bias covers the rest. It projects the moved point and takes the level's bilinear comparisons with a comparison sampler (`Frame_Constants.shadow_filter`): one, the hardware's 2x2; four a half texel apart, which filter a 3x3 neighbourhood; or nine a texel apart, which filter 4x4. The taps stay inside the view's rectangle. A directional light with cascades picks the first that reaches the pixel's depth; beyond the last, it casts no shadow. A point light picks the face of the direction from the light.
 - The ray-tracing pipeline path stays the sample's alternative (see [GPU](../gpu/ray-tracing.md#ray-tracing)). Every ray-traced path has the shadow map fallback: a device without `Ray_Query`, and the lights after the mask's four, take shadow maps.
@@ -385,6 +385,47 @@ A light with a size casts shadows whose edges, the penumbrae, widen with the dis
 
 - **The sizes:** `Directional_Light.angular_diameter`, in degrees, and `Point_Light.source_radius` and `Spot_Light.source_radius`, in meters (see [Components](assets.md#components)). An area light's size comes from its shape: the radius of a sphere with its quad's or its disk's area, `sqrt(4·hx·hy / π)` or `sqrt(rx·ry)`, or its line's half length. A size of 0 is a point, whose shadows are hard.
 - **The record:** a directional or a punctual light has no shape, so `Light_Record.extent.x` holds its size: the tangent of a directional light's angular radius, which is its disk's radius 1 m away, and a punctual light's source radius. `light_size` (`lights.odin`, `light_record.hlsli`) gives any light's.
+
+| Path | Soft shadows |
+|---|---|
+| The atlas's spot, point and area lights | Percentage-closer soft shadows, from Medium up |
+| The traced mask | None: hard |
+| The virtual shadow map, the cascades | None: hard |
+
+#### The atlas
+
+Percentage-closer soft shadows (PCSS; Fernando, 2005) soften the atlas's spot, point and area lights that have a size (`soft_shadow_map` in `material_lighting.hlsli`). A quad, a disk or a line is still one point light's cube from its middle, with its shape's size.
+
+- **The view's depth** is reversed and perspective: a texel holds `SHADOW_NEAR` over its distance from the light. The ratio of two distances is the inverse ratio of their depths, so the near plane cancels out of every formula below. At the point's distance `z`, the light is `size / (z · texel)` texels across its radius, where `texel` is the view's texel 1 m away.
+- **The point** moves toward the light and along its normal as for [the comparison taps](#shadows), and projects into its view.
+- **The receiver plane:** two steps along the surface, projected, give the surface's slope in the map's depth per texel. Each tap compares against the plane's depth at its offset, not the point's, so a wide filter on a sloped surface does not shadow the surface itself. At a grazing angle the slope is held to that of a surface at 85° from the light.
+- **The blocker search** gathers the map's depths, 2x2 texels at a time (`GatherRed`, with no comparison), at `Soft_Params.search` points of a Vogel disk. It reaches as far as a blocker at the near plane could stand from the point, `(z / SHADOW_NEAR − 1)` times the light's texels, and at most `Soft_Params.radius` texels. The texels nearer the light than the plane are blockers. With none, the point is lit and the filter does not run. With every texel a blocker, the filter still runs, since a shortcut to the umbra would flicker along its edge as the noise turns the search.
+- **The penumbra** is the light's texels times `z / z_blocker − 1`, where `z_blocker` is the blockers' mean distance, from the mean of their inverse depths. It is held between 1 texel and `Soft_Params.radius`.
+- **The filter** takes `Soft_Params.taps` bilinear comparisons on a Vogel disk as wide as the penumbra, and averages them.
+- **Noise:** the frame's blue noise (`blue_noise.hlsli`) turns each pixel's disk. With temporal AA or an upscaler, each frame takes the noise's next slice, and the history averages the turns. Without either, the noise stays where it is. Before the noise is resident, every pixel's disk has the same turn.
+- **The guard band:** a soft light's spot view or cube faces are wider than their own field of view, so that the field fills the slot but for `soft_guard` texels on each side: the filter's reach and 2 texels for a gather's and a comparison's 2x2 (`Soft_Params.radius + 2`). A point picks the face of its direction, so it projects inside the face's own field, and its taps reach into the guard band, which holds what lies past the edge. So the taps never read a neighbouring view, and a penumbra crosses a cube's edge with no seam. The band takes some of the slot's texels: 36 of 512 at High.
+- **Who reads it:** the forward pass's opaque and masked surfaces, in the camera's views. The transparent surfaces, the sprites, the GPU particles, the fog, the global illumination's hits and the reflection probes' captures keep the comparison taps, because they have no stable pixel for the noise or no temporal AA history. They read the same widened views.
+- **A light with no size** takes the comparison taps, and its views have no guard band, so its shadows are as they were.
+- **The levels** (`Soft_Params` in `SHADOW_PARAMS`):
+
+  | Level | Search gathers | Filter taps | Widest reach |
+  |---|---|---|---|
+  | Low | – | – | – (comparison taps) |
+  | Medium | 4 (16 texels) | 8 | 16 texels |
+  | High | 8 (32 texels) | 16 | 16 texels |
+  | Ultra | 8 (32 texels) | 24 | 32 texels, in slots of 1024 |
+
+- **The cost** was measured on an RTX 5090 at 1920x1080, with tracing off, in a scene of 12 point lights of a 10 cm radius among 36 posts, whose 10 nearest fill the atlas, as the median of five profile summaries of the `world` pass. Against the same lights with no size:
+
+  | Level | `world`, soft | `world`, hard | Soft shadows |
+  |---|---|---|---|
+  | Low | 0.092 ms | 0.092 ms | None: 2 lights' maps fit, with comparison taps |
+  | Medium | 0.192 ms | 0.130 ms | 0.06 ms |
+  | High | 0.253 ms | 0.130 ms | 0.12 ms |
+  | Ultra | 0.367 ms | 0.144 ms | 0.22 ms |
+
+  The `shadow maps` pass takes the same 0.24 ms either way.
+- **The sample:** `samples/mygame/content/scenes/soft_shadows.scene`, which F7 in mygame cycles to, has a spot light over a tall pillar, a point light low between a pole and a box, whose shadows cross its cube's faces, and a quad light over a box. Below High, or without `Ray_Query`, they take the atlas.
 
 ### Virtual shadow maps
 

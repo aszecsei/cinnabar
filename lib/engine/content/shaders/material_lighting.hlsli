@@ -7,6 +7,7 @@
 #include "material_common.hlsli"
 #include "cloud_shadow.hlsli"
 #include "sky_cube.hlsli"
+#include "blue_noise.hlsli"
 #include "virtual_shadow.hlsli"
 
 // frame_sky_specular is the sky's light along a reflection, from the frame's cubemap at a roughness.
@@ -116,6 +117,112 @@ float shadow_map(uint view_index, float3 p, float3 normal, float3 to_light) {
 	return lit * 0.25;
 }
 
+#if MATERIAL_SCREEN_SHADOWS && !MATERIAL_TRANSPARENT
+// vogel is the ith of count points of a disk of radius 1, on a spiral of the golden angle, turned by a rotation's cosine
+// and sine. Its points cover the disk evenly for any count.
+float2 vogel(uint i, uint count, float2 turn) {
+	float r = sqrt((i + 0.5) / count);
+	float a = i * 2.39996323;
+	float2 d = float2(cos(a), sin(a)) * r;
+	return float2(d.x * turn.x - d.y * turn.y, d.x * turn.y + d.y * turn.x);
+}
+
+// soft_shadow_map is how lit a point is in a spot or a point light's view of the atlas, with percentage-closer soft
+// shadows (see docs/rendering/lighting-and-shadows.md#soft-shadows), for a light of a size in meters: a search for the
+// blockers between the point and the light, and a filter as wide as the penumbra that their mean depth gives. The
+// point moves as shadow_map moves it. Outside the view, it is lit.
+//
+// The view's depth is reversed and perspective: a texel holds SHADOW_NEAR over its distance from the light, so the
+// ratio of two distances is the inverse ratio of their depths, and the near plane cancels out. The light is size /
+// (z * texel) texels wide at the point's distance z. The search reaches as far as a blocker at the near plane could
+// stand from the point, which is that times (z / near - 1), and the penumbra is that times (z / z_blocker - 1), each at
+// most frame.shadow_soft_radius. The view's guard band (see render.soft_guard) holds what lies past the view's edge out
+// to that reach, so the taps never reach a neighbouring view.
+//
+// A wide filter's taps on a sloped surface compare against the surface's own depth there, not the point's, or the
+// surface would shadow itself: each tap's reference is the point's depth plus the receiver plane's slope in the map
+// times the tap's offset. The blue noise turns the search's and the filter's taps for each pixel, and temporal AA
+// averages them.
+float soft_shadow_map(uint view_index, float3 p, float3 normal, float3 to_light, float size, float2 pixel) {
+	Shadow_View view = cn_buffer(frame.shadow_views).Load<Shadow_View>(frame.shadow_views_offset + view_index * sizeof(Shadow_View));
+	float4 clip = shadow_clip(view, p);
+	float texel = view.texel * clip.w;
+	float cos_light = dot(normal, to_light);
+	float sin_light = sqrt(saturate(1 - cos_light * cos_light));
+	float3 q = p + to_light * (texel * 0.5) + normal * (texel * 0.5 * sin_light);
+	clip = shadow_clip(view, q);
+	float3 ndc = clip.xyz / clip.w;
+	float2 uv = ndc.xy * float2(0.5, -0.5) + 0.5;
+	if (clip.w <= 0 || any(uv < 0) || any(uv > 1) || ndc.z <= 0) {
+		return 1;
+	}
+	float2 atlas_size;
+	Texture2D<float4> atlas = cn_texture(push.shadow_atlas);
+	atlas.GetDimensions(atlas_size.x, atlas_size.y);
+	float2 texel_uv = 1 / atlas_size;
+	float2 low = view.rect.xy + texel_uv * 1.5;
+	float2 high = view.rect.xy + view.rect.zw - texel_uv * 1.5;
+	float2 center = view.rect.xy + uv * view.rect.zw;
+
+	// The receiver plane's depth per texel of the map: two steps along the surface, projected, give the depth's change
+	// and the texels' change, whose inverse gives the slope. At a grazing angle the steps' texels barely change, so
+	// the slope is held to where the surface is 85 degrees from the light.
+	float3 t1 = normalize(cross(normal, abs(normal.y) < 0.99 ? float3(0, 1, 0) : float3(1, 0, 0)));
+	float3 t2 = cross(normal, t1);
+	float4 c1 = shadow_clip(view, q + t1 * texel);
+	float4 c2 = shadow_clip(view, q + t2 * texel);
+	float2 to_texels = float2(0.5, -0.5) * view.rect.zw * atlas_size;
+	float3 a = c1.xyz / c1.w - ndc;
+	float3 b = c2.xyz / c2.w - ndc;
+	float2 ua = a.xy * to_texels;
+	float2 ub = b.xy * to_texels;
+	float det = ua.x * ub.y - ua.y * ub.x;
+	float2 slope = abs(det) > 1e-8 ? float2(ub.y * a.z - ua.y * b.z, ua.x * b.z - ub.x * a.z) / det : 0;
+	// A step of a texel along a surface at 85 degrees changes the depth by ndc.z * view.texel * tan(85).
+	float max_slope = ndc.z * view.texel * 11.4;
+	float slope_length = length(slope);
+	slope *= slope_length > max_slope ? max_slope / slope_length : 1;
+
+	float2 noise = frame.shadow_noise != 0 ? blue_noise(frame.shadow_noise, uint2(pixel), frame.shadow_noise_slice) : 0;
+	float angle = noise.x * 6.28318531;
+	float2 turn = float2(cos(angle), sin(angle));
+	float light_texels = size / max(clip.w * view.texel, 1e-7);
+
+	// The blockers: the texels nearer the light than the receiver plane, whose depths are larger.
+	float search = min(light_texels * (1 / ndc.z - 1), frame.shadow_soft_radius);
+	SamplerState gather_sampler = cn_sampler(frame.shadow_depth_sampler);
+	float blockers = 0;
+	float inverse_depths = 0;
+	for (uint i = 0; i < frame.shadow_soft_search; i++) {
+		float2 offset = vogel(i, frame.shadow_soft_search, turn) * search;
+		float4 depths = atlas.GatherRed(gather_sampler, clamp(center + offset * texel_uv, low, high));
+		float reference = ndc.z + dot(slope, offset);
+		[unroll] for (uint k = 0; k < 4; k++) {
+			if (depths[k] > reference) {
+				blockers += 1;
+				inverse_depths += 1 / depths[k];
+			}
+		}
+	}
+	// With every texel a blocker the point is likely in the umbra, but the filter still runs: the noise turns the search,
+	// so a shortcut to 0 would flicker along the umbra's edge.
+	if (blockers == 0) {
+		return 1;
+	}
+	// The blockers' mean distance over the receiver's is the mean of their inverse depths times the receiver's depth.
+	float distance_ratio = ndc.z * inverse_depths / blockers;
+	float radius = clamp(light_texels * (1 / distance_ratio - 1), 1, frame.shadow_soft_radius);
+
+	SamplerComparisonState s = cn_comparison_sampler(frame.shadow_sampler);
+	float lit = 0;
+	for (uint j = 0; j < frame.shadow_soft_taps; j++) {
+		float2 offset = vogel(j, frame.shadow_soft_taps, turn) * radius;
+		lit += atlas.SampleCmpLevelZero(s, clamp(center + offset * texel_uv, low, high), ndc.z + dot(slope, offset));
+	}
+	return lit / frame.shadow_soft_taps;
+}
+#endif
+
 // shadow_view is the shadow map view of a light at a point at a view depth, or -1 for none: a directional light's first
 // cascade that reaches the depth, none beyond the last, or a point light's cube face.
 int shadow_view(Light_Record light, float3 p, float depth) {
@@ -170,6 +277,14 @@ float light_shadow(Light_Record light, float3 p, float3 normal, float3 to_light,
 		return load_screen(push.shadow_mask, position.xy)[light.mask];
 #endif
 	}
+#if MATERIAL_SCREEN_SHADOWS && !MATERIAL_TRANSPARENT
+	// The opaque surfaces take a spot, a point or an area light's map with soft shadows, as wide as its size.
+	float size = light_size(light);
+	if (frame.shadow_soft_taps != 0 && size > 0 && light.type != LIGHT_DIRECTIONAL) {
+		int soft_view = shadow_view(light, p, 0);
+		return soft_view < 0 ? 1 : soft_shadow_map(uint(soft_view), p, normal, to_light, size, position.xy);
+	}
+#endif
 	float shadow = map_shadow(light, p, normal, to_light, view_z(frame.projection, position.z));
 #if MATERIAL_SCREEN_SHADOWS && !MATERIAL_TRANSPARENT
 	if ((light.flags & LIGHT_CONTACT_SHADOW) != 0) {

@@ -285,6 +285,41 @@ lights_take_their_shadows_in_order :: proc(t: ^testing.T) {
 }
 
 @(test)
+a_soft_lights_views_have_a_guard_band :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	f := light_setup(t)
+	defer light_teardown(f)
+	w := &f.world
+
+	spawn_light(w, {1, 0, 3}, 1, Point_Light{intensity = 4, source_radius = 0.1, cast_shadows = true})
+	spawn_light(w, {-1, 0, 3}, 1, Point_Light{intensity = 1, cast_shadows = true})
+	frame := &f.frame
+	frame.lights = extract_lights(frame, w, nil)
+	lf := frame.lights
+
+	for level in ([]Quality_Level{.Low, .High, .Ultra}) {
+		for &record in lf.records {
+			record.shadow = -1
+		}
+		frame.shadow_settings = {distance = SHADOW_DISTANCE, split_lambda = SHADOW_SPLIT_LAMBDA, level = level}
+		assign_shadow_views(frame, trace = false)
+		sf := frame.shadows
+		p := SHADOW_PARAMS[level]
+		guard := soft_guard(p)
+		testing.expect_value(t, guard, level == .Low ? 0 : int(p.soft.radius) + 2)
+		// The soft light's faces are wider than 90 degrees, by its guard of texels on each side; the hard light's are not.
+		soft, hard := sf.views[lf.records[0].shadow], sf.views[lf.records[1].shadow]
+		testing.expectf(t, abs(soft.texel - 2 / f32(p.slot - 2 * guard)) < 1e-7, "%v: a soft face's texel is %v", level, soft.texel)
+		testing.expectf(t, abs(hard.texel - 2 / f32(p.slot)) < 1e-7, "%v: a hard face's texel is %v", level, hard.texel)
+		// A point 45 degrees off the +x face's axis is on its 90 degrees' edge, guard texels inside the slot's.
+		m := sf.matrices[lf.records[0].shadow]
+		clip := m * [4]f32{2, 1, 3, 1}
+		edge := (1 - clip.y / clip.w) * 0.5 * f32(p.slot)
+		testing.expectf(t, abs(edge - f32(guard)) < 1e-2, "%v: the face's edge is %v texels in", level, edge)
+	}
+}
+
+@(test)
 area_lights_record_their_shapes :: proc(t: ^testing.T) {
 	sync.guard(&backend_lock)
 	f := light_setup(t)

@@ -1,0 +1,138 @@
+# The soft shadows scene, which F7 in mygame cycles to: a spot light over a tall pillar, a point light between a pole
+# and a red box, low enough that their shadows cross its cube's faces, a quad light over a box, and a dim sun, each
+# with a size (see docs/rendering/lighting-and-shadows.md#soft-shadows). Their shadows are sharp where a caster meets the
+# floor and widen away from it. Positions are raw World_Position values in units of 2^-24 m. The editor writes this
+# file; see docs/editor/document-and-scenes.md#scenes.
+scene 2
+
+entity 001529f976528f05
+name = "Point Light"
+component 1 Transform
+	position = [2516582400003355443, 16777216, 45298483]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [0.75, 0.85, 1]
+	intensity = 6
+	range = 7
+	cast_shadows = true
+	source_radius = 0.08
+
+entity 07efd163141e4d7d
+name = "Quad Light"
+component 1 Transform
+	position = [2516582400063753421, 43620762, 50331648]
+	rotation = [0.7071068, 0, 0, 0.7071068]
+	scale = [1, 1, 1]
+component 39 Quad_Light
+	color = [1, 0.85, 0.65]
+	intensity = 12
+	width = 1.2
+	height = 0.6
+	range = 8
+	cast_shadows = true
+	two_sided = false
+
+entity 1477f374b9194bd4
+name = "Sun"
+component 1 Transform
+	position = [2516582400000000000, 83886080, 0]
+	rotation = [0.05965884, 0.938476, -0.2691036, 0.2080551]
+	scale = [1, 1, 1]
+component 34 Directional_Light
+	color = [0.8, 0.85, 1]
+	intensity = 0.25
+	cast_shadows = true
+	angular_diameter = 0.53
+
+entity 49348b2e634e0331
+name = "Spot Pillar"
+component 1 Transform
+	position = [2516582399941279744, 20971520, 43620762]
+	rotation = [0, 0, 0, 1]
+	scale = [0.3, 2.5, 0.3]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $a120bc6f08344b128690c05eac5a2125
+	cast_shadows = true
+
+entity 5980426d0bba88bf
+name = "Point Pole"
+component 1 Transform
+	position = [2516582400011744051, 16777216, 31876710]
+	rotation = [0, 0, 0, 1]
+	scale = [0.08, 2, 0.08]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $a120bc6f08344b128690c05eac5a2125
+	cast_shadows = true
+
+entity 6340eb31c4baa78c
+name = "Quad Box"
+component 1 Transform
+	position = [2516582400063753421, 10066330, 33554432]
+	rotation = [-0, -0.1305262, -0, 0.9914449]
+	scale = [0.5, 1.2, 0.5]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $a120bc6f08344b128690c05eac5a2125
+	cast_shadows = true
+
+entity 98f5f88eee58ad6a
+name = "Camera"
+component 1 Transform
+	position = [2516582400008388608, 40265318, -92274688]
+	rotation = [0.1218693, 0, 0, 0.9925462]
+	scale = [1, 1, 1]
+component 32 Camera
+	near = 0.01
+component 97 Audio_Listener
+behaviour 79650b8e784445cba714fef3fd88eec6
+
+entity a73d454601a1d4f1
+name = "Point Box"
+component 1 Transform
+	position = [2516582399991611392, 5033165, 33554432]
+	rotation = [0, 0.1736482, 0, 0.9848078]
+	scale = [0.6, 0.6, 0.6]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $cbeb3ff7d07840a7a816ea35868ee5b0
+	cast_shadows = true
+
+entity be8f29a20a3fa7b8
+name = "Floor"
+component 1 Transform
+	position = [2516582400008388608, -838861, 33554432]
+	rotation = [0, 0, 0, 1]
+	scale = [16, 0.1, 12]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $a120bc6f08344b128690c05eac5a2125
+	cast_shadows = true
+
+entity cf9f194acd2255df
+name = "Global Volume"
+component 1 Transform
+	position = [2516582400000000000, 16777216, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 42 Volume
+	shape = Global
+component 49 Environment
+	background = [0.02, 0.02, 0.035]
+
+entity e7419daca9a3212f
+name = "Spot Light"
+component 1 Transform
+	position = [2516582399941279744, 60397978, 87241523]
+	rotation = [2.34326e-17, 0.9238795, -0.3826834, 5.657131e-17]
+	scale = [1, 1, 1]
+component 36 Spot_Light
+	color = [1, 0.9, 0.75]
+	intensity = 25
+	range = 12
+	inner_angle = 0.45
+	outer_angle = 0.7
+	cast_shadows = true
+	source_radius = 0.1

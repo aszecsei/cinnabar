@@ -136,7 +136,8 @@ Spot_Light :: struct {
 
 // The area lights (see docs/rendering/lighting-and-shadows.md#area-lights) have a size in meters, and their intensity is as a point light's
 // would be along their +z: a bigger light spreads the same light over more of its surface. Each reaches 0 at its range
-// beyond its size (0 means DEFAULT_LIGHT_RANGE), and casts shadows from its center, as a point light does.
+// beyond its size (0 means DEFAULT_LIGHT_RANGE), and casts shadows from its center, as a point light does, as soft as
+// its size (see light_size).
 
 // Quad_Light is a rectangle of light, width by height along its entity's x and y (0 means DEFAULT_AREA_SIZE), that
 // shines along its +z, or both ways when two_sided.
