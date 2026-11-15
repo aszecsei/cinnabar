@@ -56,13 +56,17 @@ jobs:
         if: steps.version.outputs.skip != 'true'
         run: |
           set -euo pipefail
-          vswhere="$(cygpath -u "${ProgramFiles} (x86)")/Microsoft Visual Studio/Installer/vswhere.exe"
+          vswhere="/c/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe"
           major=$("$vswhere" -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationVersion | cut -d. -f1)
-          year=$("$vswhere" -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property catalog_productLineVersion)
-          if [ -z "$major" ] || [ -z "$year" ]; then
-            echo "::error::The runner has no Visual Studio with the C++ build tools."
-            exit 1
-          fi
+          # CMake names a Visual Studio by its major version and its year.
+          case "$major" in
+            17) year=2022 ;;
+            18) year=2026 ;;
+            *)
+              echo "::error::The runner has no Visual Studio 2022 or 2026 with the C++ build tools (found '$major')."
+              exit 1
+              ;;
+          esac
           echo "Visual Studio $major $year"
           echo "CINNABAR_CMAKE_GENERATOR=Visual Studio $major $year" >> "$GITHUB_ENV"
       # Downloads the Agility SDK, DXC and FSR, and checks out the submodules, Compressonator's sparsely.
