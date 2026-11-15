@@ -209,6 +209,17 @@ register_frame :: proc(r: ^Runtime) {
 		)
 		return 1
 	})
+	define(r, "Input.gamepad_rumble", proc(L: ^luau.State) -> c.int {
+		slot := check_gamepad_slot(L, 1)
+		low := luau.L_checknumber(L, 2)
+		high := luau.L_checknumber(L, 3)
+		seconds := luau.L_checknumber(L, 4)
+		platform := runtime_of(L).platform
+		if platform.gamepad_rumble != nil {
+			platform.gamepad_rumble(slot, f32(low), f32(high), seconds)
+		}
+		return 0
+	})
 	register_input_actions(r)
 }
 
@@ -224,11 +235,17 @@ check_gamepad_direction :: proc(L: ^luau.State, idx: c.int) -> core.Gamepad_Dire
 // check_gamepad is the pad in a slot, which scripts count from 1.
 @(private = "file")
 check_gamepad :: proc(L: ^luau.State, idx: c.int) -> ^core.Gamepad {
+	return &runtime_of(L).input.gamepads[check_gamepad_slot(L, idx)]
+}
+
+// check_gamepad_slot is the 0-based slot of the pad that the argument names.
+@(private = "file")
+check_gamepad_slot :: proc(L: ^luau.State, idx: c.int) -> int {
 	n := luau.L_checkinteger(L, idx)
 	if n < 1 || n > core.MAX_GAMEPADS {
 		luau.L_argerrorL(L, idx, "a gamepad slot from 1 to 4 expected")
 	}
-	return &runtime_of(L).input.gamepads[n - 1]
+	return int(n - 1)
 }
 
 @(private = "file")

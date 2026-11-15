@@ -503,3 +503,107 @@ any_pressed_ignores_the_mouse :: proc(t: ^testing.T) {
 	b, found = any_pressed(&input, {.Gamepad})
 	testing.expect(t, found && b == Binding{.Direction, u8(Gamepad_Direction.Left_Stick_Right)})
 }
+
+@(test)
+a_rumble_stops_when_its_time_is_up :: proc(t: ^testing.T) {
+	rumbles: Rumbles
+	now := time.tick_now()
+	active := [MAX_GAMEPADS]bool{true, true, true, true}
+	rumble_set(&rumbles, 1, 0.5, 1, 2, now)
+
+	changes := rumble_update(&rumbles, now, active)
+	testing.expect_value(t, changes[1], Motors{32768, 65535})
+	// Still running just before its time.
+	changes = rumble_update(
+		&rumbles,
+		time.tick_add(now, 2 * time.Second - time.Millisecond),
+		active,
+	)
+	testing.expect_value(t, changes[1], nil)
+	testing.expect(t, rumbles.slots[1] != nil)
+
+	changes = rumble_update(&rumbles, time.tick_add(now, 2 * time.Second), active)
+	testing.expect_value(t, changes[1], Motors{})
+	testing.expect_value(t, rumbles.slots[1], nil)
+}
+
+@(test)
+a_new_rumble_replaces_the_old :: proc(t: ^testing.T) {
+	rumbles: Rumbles
+	now := time.tick_now()
+	active := [MAX_GAMEPADS]bool{true, true, true, true}
+	rumble_set(&rumbles, 0, 1, 0, 5, now)
+	rumble_update(&rumbles, now, active)
+
+	rumble_set(&rumbles, 0, 0, 1, 1, now)
+	changes := rumble_update(&rumbles, now, active)
+	testing.expect_value(t, changes[0], Motors{0, 65535})
+
+	// The new one's time is the one that counts, and a call of no time ends it.
+	changes = rumble_update(&rumbles, time.tick_add(now, time.Second), active)
+	testing.expect_value(t, changes[0], Motors{})
+	rumble_set(&rumbles, 0, 1, 1, 5, now)
+	rumble_set(&rumbles, 0, 1, 1, 0, now)
+	testing.expect_value(t, rumbles.slots[0], nil)
+}
+
+@(test)
+losing_focus_stops_every_motor :: proc(t: ^testing.T) {
+	rumbles: Rumbles
+	now := time.tick_now()
+	active := [MAX_GAMEPADS]bool{true, true, true, true}
+	rumble_set(&rumbles, 0, 1, 1, 5, now)
+	rumble_set(&rumbles, 2, 0.5, 0, 5, now)
+	rumble_update(&rumbles, now, active)
+
+	// The window is not the foreground window: nothing is active.
+	changes := rumble_update(&rumbles, now, {})
+	testing.expect_value(t, changes[0], Motors{})
+	testing.expect_value(t, changes[2], Motors{})
+	testing.expect_value(t, changes[1], nil)
+	for slot in rumbles.slots {
+		testing.expect_value(t, slot, nil)
+	}
+	// The rumble is gone, not paused: the focus coming back does not bring it back.
+	changes = rumble_update(&rumbles, now, active)
+	for change in changes {
+		testing.expect_value(t, change, nil)
+	}
+
+	// A pad that is pulled out loses its rumble the same way, and a stop at a restart stops what still runs.
+	rumble_set(&rumbles, 3, 1, 1, 5, now)
+	rumble_update(&rumbles, now, active)
+	changes = rumble_update(&rumbles, now, {true, true, true, false})
+	testing.expect_value(t, changes[3], Motors{})
+	rumble_set(&rumbles, 1, 1, 1, 5, now)
+	rumble_update(&rumbles, now, active)
+	changes = rumble_stop_all(&rumbles)
+	testing.expect_value(t, changes[1], Motors{})
+}
+
+@(test)
+only_a_change_is_sent :: proc(t: ^testing.T) {
+	rumbles: Rumbles
+	now := time.tick_now()
+	active := [MAX_GAMEPADS]bool{true, true, true, true}
+	// A pad at rest is told nothing.
+	changes := rumble_update(&rumbles, now, active)
+	for change in changes {
+		testing.expect_value(t, change, nil)
+	}
+
+	rumble_set(&rumbles, 0, 1, 0.5, 5, now)
+	changes = rumble_update(&rumbles, now, active)
+	testing.expect_value(t, changes[0], Motors{65535, 32768})
+	// The same call again, and the next frames, change nothing.
+	rumble_set(&rumbles, 0, 1, 0.5, 5, now)
+	changes = rumble_update(&rumbles, time.tick_add(now, time.Second), active)
+	testing.expect_value(t, changes[0], nil)
+	// A value that rounds to the same speed is the same.
+	rumble_set(&rumbles, 0, 1, 0.5 + 1e-7, 5, now)
+	changes = rumble_update(&rumbles, time.tick_add(now, time.Second), active)
+	testing.expect_value(t, changes[0], nil)
+	rumble_set(&rumbles, 0, 1, 0.25, 5, now)
+	changes = rumble_update(&rumbles, time.tick_add(now, time.Second), active)
+	testing.expect_value(t, changes[0], Motors{65535, 16384})
+}

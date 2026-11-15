@@ -63,6 +63,8 @@ Platform :: struct {
 	frame_peak:         uint,
 	// Input from the editor, for the next frame.
 	input_queue:        [dynamic]Input_Event,
+	// What the pads' motors were asked to do and were last told. begin_frame and the game's gamepad_rumble change it.
+	rumble:             Rumbles,
 	// What the physics backend calls. The backend keeps its address.
 	physics_host:       physics.Host,
 	// What the audio backend calls. The backend keeps its address.
@@ -171,6 +173,7 @@ init :: proc(
 		memory_release                  = memory_release,
 		time_seconds                    = time_seconds,
 		input                           = _window_input,
+		gamepad_rumble                  = gamepad_rumble,
 		file_read                       = file_read,
 		file_read_range                 = file_read_range,
 		file_modified                   = file_modified,
@@ -300,6 +303,7 @@ absolute :: proc(path: string, allocator: runtime.Allocator) -> string {
 }
 
 shutdown :: proc() {
+	rumble_send(rumble_stop_all(&platform.rumble))
 	// The backend first: it writes to the device from its own thread.
 	platform.api.audio.shutdown()
 	audio_shutdown(&platform.audio)
@@ -335,6 +339,7 @@ begin_frame :: proc() -> (dt: time.Duration, keep_running: bool) {
 	keep_running = _window_poll()
 	_window_apply_input(platform.input_queue[:])
 	clear(&platform.input_queue)
+	rumble_frame()
 	platform.window_size = platform.shared_size if platform.shared_size != {} else _window_size()
 	backend.begin_frame(platform.window_size)
 
@@ -380,6 +385,7 @@ alloc_game_state :: proc(size: int) -> rawptr {
 // Game scope, the virtual memory reservations, the file reads, the script VMs, the physics worlds and the audio
 // backend's voices, sounds and buses, which the old game may have left, and frees all permanent allocations.
 soft_restart :: proc() {
+	rumble_send(rumble_stop_all(&platform.rumble))
 	if count := platform.api.audio.reset(); count > 0 {
 		log.debugf("core: stopped %d audio voices that the game left playing", count)
 	}
@@ -399,6 +405,34 @@ soft_restart :: proc() {
 		log.debugf("core: ended %d file reads that the game left", count)
 	}
 	virtual.arena_free_all(&platform.permanent)
+}
+
+// gamepad_rumble is Platform_API.gamepad_rumble.
+@(private = "file")
+gamepad_rumble :: proc(slot: int, low, high: f32, seconds: f64) {
+	rumble_set(&platform.rumble, slot, low, high, seconds, time.tick_now())
+}
+
+// rumble_frame ends the rumbles that are over and tells the pads whose motors changed. Only the foreground window
+// vibrates a pad, as only it reads one, and only a connected pad does.
+@(private = "file")
+rumble_frame :: proc() {
+	active: [MAX_GAMEPADS]bool
+	if _window_has_focus() {
+		for pad, slot in _window_input().gamepads {
+			active[slot] = pad.connected
+		}
+	}
+	rumble_send(rumble_update(&platform.rumble, time.tick_now(), active))
+}
+
+@(private = "file")
+rumble_send :: proc(changes: [MAX_GAMEPADS]Maybe(Motors)) {
+	for change, slot in changes {
+		if motors, ok := change.?; ok {
+			xinput_set_motors(slot, motors)
+		}
+	}
 }
 
 // gpu_features is the backend's optional features without those that CINNABAR_DISABLE_FEATURES hides.

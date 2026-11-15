@@ -20,6 +20,10 @@ XInput answers any process, so the window polls only while it is the foreground 
 
 In shared mode the hidden window is never the foreground window, so the host does not poll. The editor polls XInput instead, while the viewport has focus in play mode and the editor's window is active, and sends what changed as `Gamepad` events. The host disconnects every slot when the link drops.
 
+A game vibrates a pad with `Platform_API.gamepad_rumble(slot, low, high, seconds)`, which scripts call as `Input.gamepad_rumble(pad, low, high, seconds)`. `low` is the low-frequency motor, the left one, and `high` is the high-frequency motor, the right one. Each runs from 0 to 1, and `seconds` is cut to `MAX_RUMBLE_SECONDS` (10), so a game that stops asking leaves a pad that stops by itself. A new call replaces the slot's rumble, and a call of 0 seconds ends it. The host owns the motors, not the game: `Platform.rumble` holds one `Maybe(Rumble)` per slot, so no rumble is `nil` and not a zero command, and the motors stop even if the game's DLL is unloaded or fails. Once a frame, in `begin_frame`, `rumble_update` ends the rumbles that are over and returns the motor speeds of the slots whose speeds differ from what `Rumbles.sent` says each pad was last told. Only those go to `XInputSetState`, and `rumble_update` is the only writer of `sent`. A pad's rumble is dropped, and its motors told to stop, when the pad is gone and when the window is not the foreground window, and it does not come back with the focus. A soft restart and `core.shutdown` stop every motor.
+
+Rumble does not reach a pad while the game plays in the editor. The hidden window of shared mode is never the foreground window, so the host drops every rumble, and the editor sends the pad readings one way only, as `Gamepad` events, with no message back to the pad.
+
 The sample's `fly_camera.luau` is a behaviour on the camera of each of its scenes, to try a pad out: the left stick moves the camera, the right stick turns it, the triggers lift and lower it, and the right bumper hurries it.
 
 ## Actions

@@ -45,6 +45,11 @@ Platform_API :: struct {
 	// The keyboard, the mouse, the gamepads and the typed text at the start of the frame. In shared mode the window is
 	// hidden, so the input is empty until the editor link sends input.
 	input:                           proc() -> Input,
+	// gamepad_rumble runs a pad's motors for a time (see docs/core/input.md#gamepads). slot counts from 0, low is the
+	// low-frequency (left) motor and high the high-frequency (right) one, each from 0 to 1, and seconds is cut to
+	// MAX_RUMBLE_SECONDS. A new call replaces the slot's rumble, and a call of 0 seconds ends it. The host owns the
+	// motors and stops them when the window loses the focus, when the pad goes, at a soft restart and at shutdown.
+	gamepad_rumble:                  proc(slot: int, low, high: f32, seconds: f64),
 	// File I/O for the asset runtime. The game's own files are at content_dir and project_path, which are absolute; a
 	// relative path is relative to the working directory. file_read reads a whole file into
 	// memory from allocator, at the given alignment. file_modified is the file's modification time in nanoseconds,
