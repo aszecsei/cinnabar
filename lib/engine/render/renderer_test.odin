@@ -428,7 +428,7 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 	)
 	testing.expect(
 		t,
-		record.clouds && r.clouds.noise_state == .Pending,
+		record.clouds && cloud_noise_stale(r.clouds.noise_state, r.clouds.noise.version),
 		"the failed frame baked the clouds' noise",
 	)
 	for i in 0 ..< 3 {
@@ -447,7 +447,11 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 			record.clouds && record.cloud_shadow,
 			"the frame has no clouds or no cloud shadow",
 		)
-		testing.expect_value(t, r.clouds.noise_state, Cloud_Noise_State.Ready)
+		testing.expect(
+			t,
+			!cloud_noise_stale(r.clouds.noise_state, r.clouds.noise.version),
+			"the noise is not baked",
+		)
 		testing.expect(t, record.sky_background, "the histogram does not count the sky")
 		testing.expect_value(t, record.history_valid, i > 0)
 		testing.expect_value(t, record.baked, i == 0)

@@ -489,7 +489,7 @@ run_cloud_frame :: proc(
 	if cf := f.clouds; cf != nil {
 		run.clouds = true
 		run.shadow, run.valid, run.bake, run.sun =
-			cf.shadow != 0, cf.history.valid, cf.bake_noise, cf.sun
+			cf.shadow != 0, cf.history.valid, cf.bake_noise != nil, cf.sun
 		testing.expect(
 			t,
 			(lf.records[0].flags & {.Cloud_Shadow}) != {},
@@ -587,7 +587,8 @@ the_clouds_bake_their_noise_once_and_draw_every_frame_after :: proc(t: ^testing.
 	platform.gpu_submit = fail_submit
 	run := run_cloud_frame(t, r, &cache, exposure, settings, sky, true)
 	testing.expect(t, !run.ok && run.clouds && run.bake)
-	testing.expect_value(t, v.noise_state, Cloud_Noise_State.Pending)
+	_, pending := v.noise_state.(Cloud_Noise_Pending)
+	testing.expect(t, pending, "a failed frame left the noise baked")
 	platform.gpu_submit = null.submit
 	free_all(platform.frame_allocator)
 
@@ -596,7 +597,8 @@ the_clouds_bake_their_noise_once_and_draw_every_frame_after :: proc(t: ^testing.
 	for name in ([]string{"clouds noise", "clouds shadow", "clouds march", "clouds temporal", "clouds composite"}) {
 		testing.expectf(t, run.passes[name] == 1, "%s ran %d times", name, run.passes[name])
 	}
-	testing.expect_value(t, v.noise_state, Cloud_Noise_State.Ready)
+	ready, baked := v.noise_state.(Cloud_Noise_Ready)
+	testing.expect(t, baked && ready.version == v.noise.version, "the noise is not baked")
 	testing.expect(
 		t,
 		r.view.clouds.shadow_map != {} &&
@@ -609,6 +611,15 @@ the_clouds_bake_their_noise_once_and_draw_every_frame_after :: proc(t: ^testing.
 	testing.expect_value(t, run.passes["clouds noise"], 0)
 	testing.expect_value(t, run.passes["clouds march"], 1)
 	testing.expect_value(t, run.passes["clouds composite"], 1)
+	free_all(platform.frame_allocator)
+
+	// A recooked noise shader, a newer blob, bakes the noise again, and the noise is ready with its version.
+	v.noise.version += 1
+	run = run_cloud_frame(t, r, &cache, exposure, settings, sky, true)
+	testing.expect(t, run.ok && run.clouds && run.bake)
+	testing.expect_value(t, run.passes["clouds noise"], 1)
+	ready, baked = v.noise_state.(Cloud_Noise_Ready)
+	testing.expect(t, baked && ready.version == v.noise.version, "the recooked noise is not baked")
 	free_all(platform.frame_allocator)
 
 	// Another level's shadow map size makes the map again.
