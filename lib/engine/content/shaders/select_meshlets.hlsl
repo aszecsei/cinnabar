@@ -64,6 +64,7 @@ struct Instance_Record {
 	uint id;
 	uint flags;
 	uint2 padding;
+	float4 tint;
 };
 
 // Mesh_Record in lib/engine/render/scene.odin is this many bytes, with its meshlet nodes' index at this byte.

@@ -502,10 +502,17 @@ renderer_init :: proc(
 	view_state_init(&r.view, r)
 }
 
-// mesh_extractor selects the entities with a Mesh_Renderer.
+// mesh_extractor selects the entities with a Mesh_Renderer, with their View_Model and Tint if they have them.
 @(private = "file")
 mesh_extractor :: proc(w: ^ecs.World) -> Extractor {
-	return extractor(w, {ecs.read(w, Mesh_Renderer), ecs.optional(ecs.read(w, View_Model))})
+	return extractor(
+		w,
+		{
+			ecs.read(w, Mesh_Renderer),
+			ecs.optional(ecs.read(w, View_Model)),
+			ecs.optional(ecs.read(w, Tint)),
+		},
+	)
 }
 
 // instanced_extractor selects the entities with an Instanced_Mesh_Renderer.

@@ -111,7 +111,7 @@ the_standard_games_scripts_have_every_engine_binding :: proc(t: ^testing.T) {
 	}
 	// The engine's bindings that a game used to choose are all there: physics, audio, animation, sprites, the UI and
 	// perception.
-	for name in ([]string{"declare Physics:", "declare Audio:", "declare Animator:", "declare Sprites:", "declare Ui:", "declare Render:", "declare Perception:", "declare Save:"}) {
+	for name in ([]string{"declare Physics:", "declare Audio:", "declare Animator:", "declare Sprites:", "declare Tint:", "declare Ui:", "declare Render:", "declare Perception:", "declare Save:"}) {
 		expect(t, text, name)
 	}
 	expect(t, text, "\tset_paused: (paused: boolean) -> (),")

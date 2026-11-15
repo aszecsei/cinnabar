@@ -359,7 +359,13 @@ Instance_Record :: struct {
 	color:         u32,
 	// An Instanced_Mesh_Renderer's instance set's instances, whose poses are relative to these rows.
 	instance_set:  u32,
+	// A Tint's color times its intensity, and its alpha, which scale the mesh's vertex colors when flags has
+	// INSTANCE_TINTED (see docs/rendering/gpu-scene.md#tints).
+	tint:          [4]f32,
 }
+
+// A record whose entity has a Tint, so the vertex paths and hit shading scale its mesh's vertex colors by its tint.
+INSTANCE_TINTED :: 1
 
 // An item that casts shadows: its Mesh_Renderer's cast_shadows, and its material's.
 ITEM_CASTS_SHADOWS :: 1
@@ -602,7 +608,7 @@ Cell_Range :: struct {
 }
 
 #assert(
-	size_of(Instance_Record) == 112 &&
+	size_of(Instance_Record) == 128 &&
 	size_of(Cull_Item) == 80 &&
 	size_of(Draw_Record) == 32 &&
 	size_of(Mesh_Record) == 80,
@@ -982,7 +988,9 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32, skins: []Skin_Pose)
 		previous := ecs.column(view, 1, ecs.Previous_Transform)
 		renderers := ecs.column(view, EXTRACT_TERMS, Mesh_Renderer)
 		view_model := len(ecs.column(view, EXTRACT_TERMS + 1, View_Model)) > 0
+		tints := ecs.column(view, EXTRACT_TERMS + 2, Tint)
 		moved := chunk_poses_changed(view, poses, previous != nil)
+		tint_written := ecs.changed_since(view, EXTRACT_TERMS + 2, poses.since)
 		for e, i in entities {
 			slot, slot_ok := frame_slot(s, e, extra)
 			if !slot_ok {
@@ -1010,7 +1018,18 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32, skins: []Skin_Pose)
 				)
 				s.previous[slot], s.seen[slot] = pose, s.frame
 			} else if !extra {
-				scene_write_instance(s, w, e, slot, moved, i, current, previous)
+				scene_write_instance(
+					s,
+					w,
+					e,
+					slot,
+					moved,
+					i,
+					current,
+					previous,
+					tints[i:i + 1] if tints != nil else nil,
+					tint_written,
+				)
 			}
 			if is_hidden(hidden, e) {
 				continue
@@ -1966,8 +1985,10 @@ chunk_poses_changed :: proc "contextless" (
 	)
 }
 
-// scene_write_instance writes the record of a row of a chunk, if its pose may have changed or its slot is new, and says
-// that the slot's entity is still there.
+// scene_write_instance writes the record of a row of a chunk, if its pose or its Tint may have changed or its slot is
+// new, and says that the slot's entity is still there. tint has the row's Tint, if it has one, and tint_written is
+// whether its chunk's Tint column changed since the poses were last taken. A record whose entity has lost its Tint is
+// written again to clear the tint.
 @(private)
 scene_write_instance :: proc(
 	s: ^Gpu_Scene,
@@ -1978,8 +1999,12 @@ scene_write_instance :: proc(
 	i: int,
 	current: []ecs.Transform,
 	previous: []ecs.Previous_Transform,
+	tint: []Tint = nil,
+	tint_written := false,
 ) {
-	if moved || s.seen[slot] != s.frame - 1 {
+	tinted := len(tint) > 0
+	lost := !tinted && s.records[slot].flags & INSTANCE_TINTED != 0
+	if moved || tint_written || lost || s.seen[slot] != s.frame - 1 {
 		pose := current[i]
 		if previous != nil {
 			pose = ecs.interpolate(ecs.Transform(previous[i]), pose, w.clock.alpha)
@@ -1996,11 +2021,24 @@ scene_write_instance :: proc(
 				previous_rows = pose_rows(last, s.origin),
 				id = entity_id(e),
 				instance_set = s.records[slot].instance_set,
+				flags = tinted ? INSTANCE_TINTED : 0,
+				tint = tinted ? tint_value(tint[0]) : {},
 			},
 		)
 		s.previous[slot] = pose
 	}
 	s.seen[slot] = s.frame
+}
+
+// tint_value is a Tint's record value: its color times its intensity, and its alpha.
+@(private)
+tint_value :: proc "contextless" (tint: Tint) -> [4]f32 {
+	return {
+		tint.color.r * tint.intensity,
+		tint.color.g * tint.intensity,
+		tint.color.b * tint.intensity,
+		tint.alpha,
+	}
 }
 
 // scene_write_record sets a slot's record, and the slot is dirty if that changed it.

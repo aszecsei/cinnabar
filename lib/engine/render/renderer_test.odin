@@ -1111,6 +1111,102 @@ frames_upload_only_the_records_that_changed :: proc(t: ^testing.T) {
 	testing.expect_value(t, frame(r, w, far), 1)
 }
 
+// tint_frame builds a frame's scene in the rig, and gives the count of the records that it uploaded.
+@(private = "file")
+tint_frame :: proc(rig: ^Rig) -> int {
+	context.logger = {record_problems, &rig.record, .Debug, {}}
+	f := new(Frame, rig.platform.frame_allocator)
+	f.renderer = rig.r
+	f.state = &rig.r.view
+	f.view = {
+		rotation   = 1,
+		projection = Perspective{1, 0.05},
+	}
+	f.size = {64, 32}
+	build_scene(f, rig.w, nil, nil)
+	rig.r.scene.copied_frame = rig.r.scene.frame
+	return rig.r.scene.uploaded_slots
+}
+
+// tint_rig starts a rig with a mesh entity, and builds the frames that settle it.
+@(private = "file")
+tint_rig :: proc(t: ^testing.T, rig: ^Rig, tint: Maybe(Tint)) -> ecs.Entity {
+	rig_start(t, rig)
+	context.logger = {record_problems, &rig.record, .Debug, {}}
+	e := ecs.spawn(rig.w)
+	ecs.add(rig.w, e, ecs.TRANSFORM_IDENTITY)
+	ecs.add(rig.w, e, Mesh_Renderer{})
+	if value, ok := tint.?; ok {
+		ecs.add(rig.w, e, value)
+	}
+	testing.expect_value(t, tint_frame(rig), 1)
+	testing.expect_value(t, tint_frame(rig), 0)
+	return e
+}
+
+// A Tint written without a move writes its slot, and only that one, and a write that changes nothing writes nothing.
+@(test)
+a_tint_change_rewrites_its_slot_without_a_move :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	rig := new(Rig)
+	defer free(rig)
+	e := tint_rig(t, rig, DEFAULT_TINT)
+	defer rig_stop(rig)
+	other := ecs.spawn(rig.w)
+	ecs.add(rig.w, other, ecs.TRANSFORM_IDENTITY)
+	ecs.add(rig.w, other, Mesh_Renderer{})
+	testing.expect_value(t, tint_frame(rig), 1)
+	testing.expect_value(t, tint_frame(rig), 0)
+
+	ecs.get_write(rig.w, e, Tint).intensity = 3
+	testing.expect_value(t, tint_frame(rig), 1)
+	testing.expect_value(t, rig.r.scene.records[rig.r.scene.slots[e]].tint, [4]f32{3, 3, 3, 1})
+	testing.expect_value(t, tint_frame(rig), 0)
+
+	ecs.get_write(rig.w, e, Tint)
+	testing.expect_value(t, tint_frame(rig), 0)
+}
+
+@(test)
+an_entity_without_a_tint_has_no_tint_flag :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	rig := new(Rig)
+	defer free(rig)
+	e := tint_rig(t, rig, nil)
+	defer rig_stop(rig)
+	record := rig.r.scene.records[rig.r.scene.slots[e]]
+	testing.expect_value(t, record.flags & INSTANCE_TINTED, 0)
+	testing.expect_value(t, record.tint, [4]f32{})
+}
+
+@(test)
+a_tint_reaches_its_record_as_color_times_intensity :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	rig := new(Rig)
+	defer free(rig)
+	e := tint_rig(t, rig, Tint{color = {1, 0.5, 0}, intensity = 4, alpha = 0.25})
+	defer rig_stop(rig)
+	record := rig.r.scene.records[rig.r.scene.slots[e]]
+	testing.expect_value(t, record.flags & INSTANCE_TINTED, INSTANCE_TINTED)
+	testing.expect_value(t, record.tint, [4]f32{4, 2, 0, 0.25})
+}
+
+@(test)
+removing_a_tint_clears_its_flag :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	rig := new(Rig)
+	defer free(rig)
+	e := tint_rig(t, rig, Tint{color = {1, 0, 0}, intensity = 2, alpha = 1})
+	defer rig_stop(rig)
+	slot := rig.r.scene.slots[e]
+	testing.expect_value(t, rig.r.scene.records[slot].flags & INSTANCE_TINTED, INSTANCE_TINTED)
+	testing.expect(t, ecs.remove(rig.w, e, Tint))
+	testing.expect_value(t, tint_frame(rig), 1)
+	testing.expect_value(t, rig.r.scene.records[slot].flags & INSTANCE_TINTED, 0)
+	testing.expect_value(t, rig.r.scene.records[slot].tint, [4]f32{})
+	testing.expect_value(t, tint_frame(rig), 0)
+}
+
 // The null backend, a world and a renderer, for the tests of the extra views (see Extra_View).
 @(private = "file")
 Rig :: struct {

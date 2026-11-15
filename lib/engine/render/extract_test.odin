@@ -9,7 +9,7 @@ import "cinnabar:core/jobs"
 import "cinnabar:engine/ecs"
 
 @(private = "file")
-Tint :: struct {
+Weight :: struct {
 	value: f32,
 }
 
@@ -53,7 +53,7 @@ world_setup :: proc(t: ^testing.T) -> ^World_Fixture {
 	}
 	testing.expect(t, ecs.init(&f.world, &f.platform))
 	ecs.register_engine_components(&f.world.registry)
-	ecs.register_component(&f.world.registry, Tint)
+	ecs.register_component(&f.world.registry, Weight)
 	ecs.register_component(&f.world.registry, Hidden)
 	return f
 }
@@ -84,7 +84,7 @@ extract_writes_relative_poses_in_query_order :: proc(t: ^testing.T) {
 			scale    = 2,
 		}
 		ecs.add(w, e, pose)
-		ecs.add(w, e, Tint{f32(i)})
+		ecs.add(w, e, Weight{f32(i)})
 		if i % 2 == 0 {
 			// Halfway between a previous pose 10 m behind and the current one.
 			previous := pose
@@ -92,14 +92,14 @@ extract_writes_relative_poses_in_query_order :: proc(t: ^testing.T) {
 			ecs.add(w, e, ecs.Previous_Transform(previous))
 		}
 	}
-	ecs.add(w, ecs.spawn(w), Tint{-1})
+	ecs.add(w, ecs.spawn(w), Weight{-1})
 	hidden := ecs.spawn(w)
 	ecs.add(w, hidden, ecs.TRANSFORM_IDENTITY)
-	ecs.add(w, hidden, Tint{-1})
+	ecs.add(w, hidden, Weight{-1})
 	ecs.add(w, hidden, Hidden{})
 	w.clock.alpha = 0.5
 
-	ex := extractor(w, {ecs.read(w, Tint), ecs.without(w, Hidden)})
+	ex := extractor(w, {ecs.read(w, Weight), ecs.without(w, Hidden)})
 	count := extract_count(w, ex)
 	testing.expect_value(t, count, COUNT)
 	records := make([]Record, count)
@@ -112,7 +112,7 @@ extract_writes_relative_poses_in_query_order :: proc(t: ^testing.T) {
 		size_of(Record),
 	)
 	for c in chunks {
-		for tint, i in ecs.column(c.view, EXTRACT_TERMS, Tint) {
+		for tint, i in ecs.column(c.view, EXTRACT_TERMS, Weight) {
 			records[c.first + i].tint = tint.value
 		}
 	}

@@ -249,6 +249,7 @@ register_scripts :: proc(r: ^script.Runtime) {
 	nav.register_scripts(r, &g.nav)
 	ai.register_scripts(r, &g.ai)
 	sprite.register_scripts(r, &g.sprites)
+	script.expose(r, render.Tint, render.DEFAULT_TINT)
 	ui.register_scripts(r, &g.ui)
 	script.define(r, "Game.set_paused", proc(L: ^luau.State) -> c.int {
 			luau.L_checktype(L, 1, .BOOLEAN)

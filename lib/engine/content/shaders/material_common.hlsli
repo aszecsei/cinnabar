@@ -388,10 +388,14 @@ struct Mesh_Record {
 	uint attributes_offset;
 };
 
+// Matches INSTANCE_TINTED in lib/engine/render/scene.odin.
+static const uint INSTANCE_TINTED = 1;
+
 // Matches Instance_Record in lib/engine/render/scene.odin: the pose relative to the render origin as the rows of a
 // 3x4 matrix, last frame's, and the entity's value in the editor's ID buffer. A mesh particle's instance has its
 // color too, as unorm8, which scales its mesh's vertex colors, and an Instanced_Mesh_Renderer's its set's instances,
-// whose poses are relative to its rows.
+// whose poses are relative to its rows. A record with INSTANCE_TINTED has its entity's Tint in tint: the color times
+// the intensity, and the alpha, which scale its mesh's vertex colors.
 struct Instance_Record {
 	float4 rows[3];
 	float4 previous_rows[3];
@@ -399,6 +403,7 @@ struct Instance_Record {
 	uint flags;
 	uint color;
 	uint instance_set;
+	float4 tint;
 };
 
 // What a material's evaluate reads. position is relative to the camera, object_position is in the mesh's own space,

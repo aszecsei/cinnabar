@@ -66,6 +66,9 @@ Hit_Triangle load_hit_triangle(uint ray) {
 	tri.uv0 = v[0].uv0 * w.x + v[1].uv0 * w.y + v[2].uv0 * w.z;
 	tri.uv1 = v[0].uv1 * w.x + v[1].uv1 * w.y + v[2].uv1 * w.z;
 	tri.color = v[0].color * w.x + v[1].color * w.y + v[2].color * w.z;
+	if ((instance.flags & INSTANCE_TINTED) != 0) {
+		tri.color *= instance.tint;
+	}
 	tri.direction = hit_unpack_unit(hit.direction);
 	tri.front = (hit.instance & HIT_FRONT) != 0;
 	float3 cross_world = cross(corners[1] - corners[0], corners[2] - corners[0]);

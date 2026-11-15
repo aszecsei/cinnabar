@@ -23,6 +23,7 @@ INSTANCED_MESH_RENDERER_ID :: ecs.Component_Id(53)
 REFLECTION_PROBE_ID :: ecs.Component_Id(54)
 // 55 is the Clouds settings component (see settings.odin).
 // 56 is the Sprite_Renderer (see sheet_sprites.odin).
+TINT_ID :: ecs.Component_Id(57)
 
 // The view of a Camera that leaves a field at 0, as a component added in the editor does.
 DEFAULT_VERTICAL_FOV :: math.PI / 3
@@ -65,6 +66,21 @@ Mesh_Renderer :: struct {
 	mesh:         format.Guid `asset:"mesh"`,
 	materials:    [MAX_MATERIAL_SLOTS]format.Guid `asset:"material"`,
 	cast_shadows: bool,
+}
+
+// Tint colors and brightens its entity's Mesh_Renderer at runtime (see docs/rendering/gpu-scene.md#tints): its color
+// times its intensity, which may exceed 1 for an emissive brightening, and its alpha scale the vertex colors that a
+// material reads through inputs.color. It is a component of its own, so an entity without one pays nothing.
+Tint :: struct {
+	color:     [3]f32 `editor:"color"`,
+	intensity: f32,
+	alpha:     f32,
+}
+
+DEFAULT_TINT :: Tint {
+	color     = {1, 1, 1},
+	intensity = 1,
+	alpha     = 1,
 }
 
 // Instanced_Mesh_Renderer draws a mesh at each pose of an instance set (see docs/rendering/gpu-scene.md#instanced-meshes),
@@ -210,6 +226,7 @@ register_components :: proc(r: ^ecs.Registry) {
 	ecs.register_component(r, Camera, CAMERA_ID)
 	ecs.register_component(r, Sprite_Renderer, SPRITE_RENDERER_ID, DEFAULT_SPRITE_RENDERER)
 	ecs.register_component(r, Mesh_Renderer, MESH_RENDERER_ID)
+	ecs.register_component(r, Tint, TINT_ID, DEFAULT_TINT)
 	ecs.register_component(r, Directional_Light, DIRECTIONAL_LIGHT_ID)
 	ecs.register_component(r, Point_Light, POINT_LIGHT_ID)
 	ecs.register_component(r, Spot_Light, SPOT_LIGHT_ID)
