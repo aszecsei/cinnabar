@@ -29,8 +29,11 @@ public sealed class ProjectTests : IDisposable
         Assert.Equal(Path.Combine(Engine, "samples", "intel", "build", "editor", "autosave"), intel.AutosaveDirectory);
         // The scene that game.main_scene names, by its .meta file.
         Assert.Equal(Path.Combine(Engine, "samples", "intel", "content", "scenes", "main.scene"), intel.ScenePath);
-        // The host gets the project's cache and settings.
-        Assert.Equal([intel.GamePath, "--content", intel.Cook.CachePath, "--project", intel.ProjectPath], intel.HostArguments());
+        Assert.Equal(Path.Combine(Engine, "samples", "intel", "build", "editor", "automation.json"), intel.AutomationFile);
+        // The host gets the project's cache and settings, and puts its copies of standard.dll in the project's build/dev,
+        // so the engine's folder can be read-only.
+        var dev = Path.Combine(Engine, "samples", "intel", "build", "dev");
+        Assert.Equal([intel.GamePath, "--content", intel.Cook.CachePath, "--project", intel.ProjectPath, "--load-dir", dev], intel.HostArguments());
     }
 
     [Fact]

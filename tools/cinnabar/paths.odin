@@ -9,6 +9,8 @@ import format "cinnabar:engine/asset/format"
 
 // The DXC release that the engine's cooker compiles shaders with, which the justfile gives (dxc_version).
 DXC_VERSION :: #config(DXC_VERSION, "")
+// The engine's version, from the repository's VERSION file, which the justfile gives (version).
+CINNABAR_VERSION :: #config(CINNABAR_VERSION, "dev")
 // The engine's own content root, by which a folder is known as the engine's checkout.
 ENGINE_CONTENT :: "lib/engine/content"
 // The variable that names the engine's checkout, when the command line does not.
@@ -18,6 +20,7 @@ NAME_KEY :: "game.name"
 ICON_KEY :: "game.icon"
 MAIN_SCENE_KEY :: "game.main_scene"
 ENGINE_PATH_KEY :: "engine.path"
+ENGINE_VERSION_KEY :: "engine.version"
 
 // Engine is where a built engine checkout keeps what a project builds and runs with. Every path is absolute, with
 // forward slashes.
@@ -33,6 +36,8 @@ Engine :: struct {
 	// The standard game's release executable, which a project without Odin is exported with.
 	runtime:   string,
 	cook:      string,
+	// The editor: an SDK package's self-contained publish, else a checkout's build (see
+	// docs/overview/building-and-running.md#build-layout).
 	editor:    string,
 	dxc:       string,
 	// The directories that the shaders' includes resolve in.
@@ -56,7 +61,7 @@ engine_paths :: proc(root_dir: string, allocator := context.allocator) -> Engine
 		standard = join(root, "build/dev/standard.dll"),
 		runtime = join(root, "build/runtime/runtime.exe"),
 		cook = join(root, "build/tools/cook.exe"),
-		editor = join(root, "build/obj/dotnet/bin/Cinnabar.Editor/debug/editor.exe"),
+		editor = editor_path(root),
 		dxc = join(root, "vendor/dxc", DXC_VERSION, "dxc.exe"),
 		includes = {
 			join(root, "lib/core/gpu/shaders"),
@@ -65,6 +70,15 @@ engine_paths :: proc(root_dir: string, allocator := context.allocator) -> Engine
 		},
 		templates = join(root, "lib/engine/templates"),
 	}
+}
+
+// editor_path is the editor in an engine's folder: build/editor/editor.exe, which `just sdk` publishes, when it is
+// there, else the checkout's debug build.
+editor_path :: proc(root: string) -> string {
+	if published := strings.concatenate({root, "/build/editor/editor.exe"}); os.exists(published) {
+		return published
+	}
+	return strings.concatenate({root, "/build/obj/dotnet/bin/Cinnabar.Editor/debug/editor.exe"})
 }
 
 // Engine_Source is where find_engine found the engine's checkout.

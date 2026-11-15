@@ -1,0 +1,74 @@
+name: Release
+
+# A change to VERSION on main publishes the engine's SDK package as the GitHub release v<VERSION> (see
+# docs/overview/building-and-running.md#releases-of-the-engine). A pull request that changes this workflow builds the
+# package without publishing it, so the workflow is tested before it publishes.
+on:
+  push:
+    branches: [main]
+    paths: [VERSION]
+  pull_request:
+    paths: [.github/workflows/release.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  sdk:
+    runs-on: windows-2025
+    timeout-minutes: 150
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PUBLISH: ${{ github.event_name != 'pull_request' }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Read the version
+        id: version
+        run: |
+          set -euo pipefail
+          version=$(tr -d '[:space:]' < VERSION)
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::VERSION must hold a semantic version such as 1.2.3, not '$version'"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [ "$PUBLISH" = true ] && gh release view "v$version" > /dev/null 2>&1; then
+            echo "The release v$version is already published."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.version.outputs.skip != 'true'
+        uses: ./.github/actions/setup-odin
+      - if: steps.version.outputs.skip != 'true'
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+      # Downloads the Agility SDK, DXC and FSR, and checks out the submodules, Compressonator's sparsely.
+      - if: steps.version.outputs.skip != 'true'
+        run: just install
+      - if: steps.version.outputs.skip != 'true'
+        run: just sdk
+      - if: steps.version.outputs.skip != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: cinnabar-${{ steps.version.outputs.version }}
+          path: build/sdk/cinnabar-${{ steps.version.outputs.version }}.zip
+          # Already a zip.
+          compression-level: 0
+          retention-days: 14
+      - name: Publish the release
+        if: steps.version.outputs.skip != 'true' && env.PUBLISH == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          gh release create "v$VERSION" "build/sdk/cinnabar-$VERSION.zip" \
+            --target "$GITHUB_SHA" --title "Cinnabar $VERSION" --generate-notes

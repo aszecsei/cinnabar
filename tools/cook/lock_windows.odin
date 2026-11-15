@@ -3,6 +3,7 @@ package cook
 import "core:fmt"
 import "core:log"
 import "core:os"
+import "core:path/filepath"
 import win "core:sys/windows"
 import "core:time"
 
@@ -98,6 +99,16 @@ lock_file :: proc(path: string) -> (lock: Lock, result: Lock_Result) {
 	)
 	if handle == win.INVALID_HANDLE_VALUE {
 		error := win.GetLastError()
+		// Windows refuses a lock that another cook holds, and a file that it has not yet deleted, with
+		// ERROR_ACCESS_DENIED too. A folder that cannot be written to, as a read-only engine's content, has no lock
+		// file at all.
+		if error == win.ERROR_ACCESS_DENIED && !lock_exists(path) {
+			log.errorf(
+				"cook: %s is read-only, and a cook must write .meta files there. Give each asset in it a .meta file.",
+				filepath.dir(path),
+			)
+			return {}, .Failed
+		}
 		if error == win.ERROR_SHARING_VIOLATION || error == win.ERROR_ACCESS_DENIED {
 			return {}, .Held
 		}
@@ -105,4 +116,13 @@ lock_file :: proc(path: string) -> (lock: Lock, result: Lock_Result) {
 		return {}, .Failed
 	}
 	return {handle}, .Locked
+}
+
+@(private = "file")
+lock_exists :: proc(path: string) -> bool {
+	if win.GetFileAttributesW(win.utf8_to_wstring(path)) != win.INVALID_FILE_ATTRIBUTES {
+		return true
+	}
+	error := win.GetLastError()
+	return error != win.ERROR_FILE_NOT_FOUND && error != win.ERROR_PATH_NOT_FOUND
 }

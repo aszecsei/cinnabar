@@ -6,10 +6,20 @@ import "core:testing"
 each_host_loads_a_copy_of_its_own :: proc(t: ^testing.T) {
 	testing.expect_value(
 		t,
-		copy_path("build/dev/standard.dll", 4120, 0),
+		copy_path("build/dev/standard.dll", "build/dev", 4120, 0),
 		"build/dev/standard_4120_0.dll",
 	)
-	testing.expect_value(t, copy_path("build/dev/game.dll", 7, 3), "build/dev/game_7_3.dll")
+	testing.expect_value(
+		t,
+		copy_path("build/dev/game.dll", "build/dev", 7, 3),
+		"build/dev/game_7_3.dll",
+	)
+	// --load-dir puts the copies outside a read-only engine.
+	testing.expect_value(
+		t,
+		copy_path("C:/engine/build/dev/standard.dll", "D:/game/build/dev", 7, 0),
+		"D:/game/build/dev/standard_7_0.dll",
+	)
 
 	testing.expect(t, is_copy_of("standard_4120_0.dll", "standard.dll"))
 	testing.expect(

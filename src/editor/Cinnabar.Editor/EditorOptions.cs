@@ -8,9 +8,11 @@ namespace Cinnabar.Editor;
 /// <see cref="ForProject"/>), and with no arguments the editor shows its welcome window (see
 /// docs/editor/processes-and-projects.md#projects). The full form, which <c>just edit</c> uses, is <c>editor [--host &lt;host.exe&gt;] [--game &lt;game.dll&gt;] [--scene &lt;file.scene&gt;]
 /// [--cook &lt;cook.exe&gt;] [--cache &lt;dir&gt;] [--definitions &lt;file&gt;] [--dxc &lt;dxc.exe&gt;] [--include &lt;dir&gt;]...
-/// [--root &lt;name&gt;=&lt;dir&gt;]... [--material &lt;file&gt;]... [--effect &lt;file&gt;]... [--animation-graph &lt;file&gt;]... [--ui-document &lt;file&gt;]... [--decision &lt;file&gt;]... [--blackboard &lt;file&gt;]... [--project &lt;project.settings&gt;]</c>. The daemon
+/// [--root &lt;name&gt;=&lt;dir&gt;]... [--load-dir &lt;dir&gt;] [--editor-dir &lt;dir&gt;] [--material &lt;file&gt;]... [--effect &lt;file&gt;]... [--animation-graph &lt;file&gt;]... [--ui-document &lt;file&gt;]... [--decision &lt;file&gt;]... [--blackboard &lt;file&gt;]... [--project &lt;project.settings&gt;]</c>. The daemon
 /// cooks shaders only with <c>--dxc</c>. Each <c>--material</c> opens in the material editor, and each <c>--effect</c> in an
-/// effect preview, and each of the others in its editor, once the cook daemon's index has it.
+/// effect preview, and each of the others in its editor, once the cook daemon's index has it. <c>--load-dir</c> is
+/// where the host puts its copies of the game's DLL, and <c>--editor-dir</c> where the editor's own files go (see
+/// <see cref="InEditorDirectory"/>), so that <c>cinnabar edit</c> writes nothing into a read-only engine.
 /// Paths on the command line are relative to the working directory. The defaults are the repository's build layout
 /// (see docs/overview/building-and-running.md#build-layout), relative to the repository root, which the editor finds above its own
 /// executable, so an editor started from an IDE finds them too. The host and the cook daemon run in their executables'
@@ -52,6 +54,12 @@ public sealed record EditorOptions(string HostPath, string GamePath, string? Sce
     /// <summary>Where the editor writes its automation port for tools such as editorctl (see docs/editor/capture.md#automation).</summary>
     public string AutomationFile { get; init; } = InRepository("build", "obj", "editor", "automation.json");
 
+    /// <summary>
+    /// Where the host puts the copies of the game's DLL that it loads (see docs/overview/building-and-running.md#build-layout),
+    /// or null for beside the DLL.
+    /// </summary>
+    public string? LoadDirectory { get; init; }
+
     /// <summary>How the editor runs the cook daemon (see docs/editor/processes-and-projects.md#processes). The defaults are the repository's.</summary>
     public CookOptions Cook { get; init; } = new(
         InRepository("build", "tools", "cook.exe"),
@@ -65,7 +73,17 @@ public sealed record EditorOptions(string HostPath, string GamePath, string? Sce
     /// docs/editor/processes-and-projects.md#processes).
     /// </summary>
     public string[] HostArguments(params string[] rest) =>
-        [GamePath, "--content", Cook.CachePath, "--project", ProjectPath, .. rest];
+        LoadDirectory is { } load
+            ? [GamePath, "--content", Cook.CachePath, "--project", ProjectPath, "--load-dir", load, .. rest]
+            : [GamePath, "--content", Cook.CachePath, "--project", ProjectPath, .. rest];
+
+    /// <summary>The editor's own files, its autosaves, captures and automation port, in one folder.</summary>
+    public EditorOptions InEditorDirectory(string dir) => this with
+    {
+        AutosaveDirectory = Path.Combine(dir, "autosave"),
+        CaptureDirectory = Path.Combine(dir, "captures"),
+        AutomationFile = Path.Combine(dir, "automation.json"),
+    };
 
     /// <summary>The host runs in its executable's directory.</summary>
     public string HostDirectory => Path.GetDirectoryName(HostPath) is { Length: > 0 } dir ? dir : RepositoryRoot();
@@ -77,7 +95,8 @@ public sealed record EditorOptions(string HostPath, string GamePath, string? Sce
     /// The options of a project's folder with an engine's checkout: the paths that <c>cinnabar.exe</c> builds (see
     /// docs/overview/getting-started.md#a-project). The game is the project's <c>build/dev/game.dll</c> when it has Odin,
     /// and the engine's <c>standard.dll</c> otherwise. The scene is the one that its settings' <c>game.main_scene</c>
-    /// names. The editor's own files, its autosaves and captures, go in the project's <c>build/editor</c>.
+    /// names. The editor's own files, its autosaves and captures, go in the project's <c>build/editor</c>, and the host's
+    /// copies of the game's DLL in its <c>build/dev</c>, so the engine's folder can be read-only.
     /// </summary>
     public static EditorOptions ForProject(string projectDir, string engineRoot)
     {
@@ -93,9 +112,7 @@ public sealed record EditorOptions(string HostPath, string GamePath, string? Sce
         {
             EngineRoot = engineRoot,
             ProjectPath = settings,
-            AutosaveDirectory = Project("build", "editor", "autosave"),
-            CaptureDirectory = Project("build", "editor", "captures"),
-            AutomationFile = Project("build", "editor", "automation.json"),
+            LoadDirectory = Project("build", "dev"),
             Cook = new CookOptions(
                 Engine("build", "tools", "cook.exe"),
                 Project("build", "cache"),
@@ -104,7 +121,7 @@ public sealed record EditorOptions(string HostPath, string GamePath, string? Sce
                 engineRoot,
                 ProjectLayout.Dxc(engineRoot),
                 [Engine("lib", "core", "gpu", "shaders"), Engine("lib", "engine", "content", "shaders"), Engine("vendor", "smaa")]),
-        };
+        }.InEditorDirectory(Project("build", "editor"));
     }
 
     static string InRepository(params string[] parts) => Path.GetFullPath(Path.Combine([RepositoryRoot(), .. parts]));
@@ -128,6 +145,8 @@ public sealed record EditorOptions(string HostPath, string GamePath, string? Sce
         List<string> uiDocuments = [];
         List<string> decisions = [];
         string? project = null;
+        string? load = null;
+        string? editorDir = null;
         for (var i = 0; i < args.Count; i++)
         {
             switch (args[i])
@@ -158,6 +177,12 @@ public sealed record EditorOptions(string HostPath, string GamePath, string? Sce
                     break;
                 case "--project" when i + 1 < args.Count:
                     project = Path.GetFullPath(args[++i]);
+                    break;
+                case "--load-dir" when i + 1 < args.Count:
+                    load = Path.GetFullPath(args[++i]);
+                    break;
+                case "--editor-dir" when i + 1 < args.Count:
+                    editorDir = Path.GetFullPath(args[++i]);
                     break;
                 case "--material" when i + 1 < args.Count:
                     materials.Add(Path.GetFullPath(args[++i]));
@@ -191,7 +216,11 @@ public sealed record EditorOptions(string HostPath, string GamePath, string? Sce
         {
             cook = cook with { Includes = includes };
         }
-        var options = new EditorOptions(Path.GetFullPath(host), Path.GetFullPath(game), scene) { Cook = cook, MaterialPaths = materials, EffectPaths = effects, AnimationGraphPaths = animationGraphs, UiDocumentPaths = uiDocuments, DecisionPaths = decisions };
-        return project != null ? options with { ProjectPath = project } : options;
+        var options = new EditorOptions(Path.GetFullPath(host), Path.GetFullPath(game), scene) { Cook = cook, MaterialPaths = materials, EffectPaths = effects, AnimationGraphPaths = animationGraphs, UiDocumentPaths = uiDocuments, DecisionPaths = decisions, LoadDirectory = load };
+        if (project != null)
+        {
+            options = options with { ProjectPath = project };
+        }
+        return editorDir != null ? options.InEditorDirectory(editorDir) : options;
     }
 }

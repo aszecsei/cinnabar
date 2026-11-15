@@ -93,16 +93,41 @@ cook_command :: proc(e: Engine, p: Project, config, cache: string, prune: bool) 
 	return command[:]
 }
 
-// host_command runs the game in the development host, with the project's cache and settings.
+// host_command runs the game in the development host, with the project's cache and settings. The host loads a copy
+// of the game's DLL from the project's build/dev, so that the engine's folder can be read-only.
 host_command :: proc(e: Engine, p: Project) -> []string {
-	return slice_of(e.host, p.game_dll, "--content", p.cache, "--project", p.settings)
+	return slice_of(
+		e.host,
+		p.game_dll,
+		"--content",
+		p.cache,
+		"--project",
+		p.settings,
+		"--load-dir",
+		p.dev,
+	)
+}
+
+// script_types_command writes the scripts' definition file from the game's DLL. With --project, the host keeps its
+// save folder in the project's build/ too.
+script_types_command :: proc(e: Engine, p: Project) -> []string {
+	return slice_of(
+		e.host,
+		p.game_dll,
+		"--project",
+		p.settings,
+		"--load-dir",
+		p.dev,
+		"--emit-script-types",
+		p.types,
+	)
 }
 
 // editor_command opens the project in the editor, which starts the host and the cook daemon itself (see
 // docs/editor/processes-and-projects.md#processes).
 editor_command :: proc(e: Engine, p: Project, scene: string) -> []string {
 	command := make([dynamic]string)
-	append(&command, e.editor, "--host", e.host, "--game", p.game_dll)
+	append(&command, e.editor, "--host", e.host, "--game", p.game_dll, "--load-dir", p.dev)
 	if scene != "" {
 		append(&command, "--scene", scene)
 	}
@@ -127,7 +152,7 @@ editor_command :: proc(e: Engine, p: Project, scene: string) -> []string {
 		"--root",
 		fmt.aprintf("engine=%s", e.content),
 	)
-	append(&command, "--project", p.settings)
+	append(&command, "--project", p.settings, "--editor-dir", p.editor)
 	return command[:]
 }
 
@@ -149,10 +174,7 @@ build_project :: proc(e: Engine, p: Project) -> bool {
 		)
 		return false
 	}
-	return(
-		run(e.host, p.game_dll, "--emit-script-types", p.types) &&
-		run(..cook_command(e, p, "dev", p.cache, false)) \
-	)
+	return run(..script_types_command(e, p)) && run(..cook_command(e, p, "dev", p.cache, false))
 }
 
 run_project :: proc(e: Engine, p: Project) -> bool {
@@ -180,7 +202,7 @@ export_project :: proc(e: Engine, p: Project, out: string) -> bool {
 	if p.has_code && !run(..game_dll_command(e, p, time.now()._nsec)) {
 		return false
 	}
-	if !run(e.host, p.game_dll, "--emit-script-types", p.types) {
+	if !run(..script_types_command(e, p)) {
 		return false
 	}
 	if !run(..cook_command(e, p, "release", p.release_cache, true)) {

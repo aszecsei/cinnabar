@@ -89,7 +89,7 @@ public sealed class WelcomeWindow : Window
         ShowRecent();
         if (engineRoot == null)
         {
-            Fail($"The editor cannot find the engine's checkout. Set {ProjectLayout.EngineVariable} to it, or run the editor that `just engine` built in it.");
+            Fail($"The editor cannot find the engine. Set {ProjectLayout.EngineVariable} to an engine package or checkout, or run the editor that is in one.");
         }
         else if (!File.Exists(ProjectLayout.Tool(engineRoot)))
         {

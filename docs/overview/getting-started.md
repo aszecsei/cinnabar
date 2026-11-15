@@ -1,6 +1,6 @@
 # Getting started
 
-How to make a game with cinnabar, in a folder of its own, without changing the engine. The engine is a checkout that you build once. A game is a **project**: settings, content and, if it needs it, Odin. `cinnabar.exe` builds, runs, edits and exports a project with the engine, and the editor runs it for New Project and Export.
+How to make a game with cinnabar, in a folder of its own, without changing the engine. The engine is a package that you unzip, or a checkout that you build once. A game is a **project**: settings, content and, if it needs it, Odin. `cinnabar.exe` builds, runs, edits and exports a project with the engine, and the editor runs it for New Project and Export.
 
 **In this document:** [Prerequisites](#prerequisites) · [The engine](#the-engine) · [A new project](#a-new-project) · [A project](#a-project) · [The loop](#the-loop) · [Odin in a project](#odin-in-a-project) · [Releases](#releases)
 
@@ -9,6 +9,11 @@ How to make a game with cinnabar, in a folder of its own, without changing the e
 | What | Why |
 |---|---|
 | Windows 10 or 11 with a D3D12 GPU | The only platform and GPU backend. |
+
+With [the engine's package](#the-package), that is all that a project without Odin needs, and a project with a `game/` folder also needs Odin. A checkout of the engine needs the rest:
+
+| What | Why |
+|---|---|
 | [Odin](https://odin-lang.org), the `dev-2026-10` nightly or later, on the `PATH` | Builds the engine, and a project's `game/` folder. A project without Odin does not need it after the engine is built. |
 | The .NET 10 SDK | Builds the editor. |
 | Visual Studio 2022's C++ build tools and CMake | Build Luau, Jolt and the cooker's libraries. |
@@ -16,6 +21,29 @@ How to make a game with cinnabar, in a folder of its own, without changing the e
 | [just](https://github.com/casey/just) | Builds the engine. A project does not need it. |
 
 ## The engine
+
+The engine is a [package](#the-package) or a [checkout](#a-checkout). Both have the same paths, so `cinnabar.exe` and the editor use them in the same way. `cinnabar --version` prints the engine's version.
+
+### The package
+
+Each [release](https://github.com/aszecsei/cinnabar/releases) has the package, `cinnabar-<version>.zip`. Unzip it anywhere, also in a folder that is read-only, such as one under `Program Files`. It holds:
+
+| Path | What it is |
+|---|---|
+| `build/tools/cinnabar.exe`, `cook.exe` | The tool that builds, runs, edits and exports a project, and the cooker. |
+| `build/editor/editor.exe` | The editor, with its own .NET runtime. |
+| `build/dev/` | The development host, `standard.dll`, and the libraries beside them. |
+| `build/runtime/runtime.exe` | The standard game's release executable. |
+| `vendor/dxc/`, `vendor/smaa/` | The shader compiler, and SMAA's shader and tables. |
+| `lib/` | The engine's content, shaders, templates and Odin source. A project's `game/` builds against it. |
+| `build/obj/` | Only the Luau, Jolt, Opus and LZ4 libraries that a project's `game/` links. |
+| `LICENSE`, `licenses/` | The engine's licence, and the licences of the third-party parts. |
+
+Put `build/tools` on your `PATH`, or call `cinnabar.exe` by its path. The package does not hold the engine's content already cooked: a project's first build cooks it, which takes some time.
+
+Nothing writes into the package's folder. The host loads its copies of `standard.dll` from the project's `build/dev` (see [Build layout](building-and-running.md#build-layout)), and the editor keeps its autosaves and captures in the project's `build/editor`.
+
+### A checkout
 
 Clone the engine and build it once:
 
@@ -31,7 +59,11 @@ just engine     # the host, the cooker, the standard game, the editor and cinnab
 3. `engine.path` in the project's `project.user.settings`, which is not committed, because it is a path on one machine.
 4. The checkout that it was built in, two folders up from `build/tools`.
 
-After a `git pull` of the engine, run `just engine` again. A project's next build cooks what the new engine changed.
+After a `git pull` of the engine, run `just engine` again. A project's next build cooks what the new engine changed. `just sdk` makes a package of the checkout (see [Building and running](building-and-running.md#releases-of-the-engine)).
+
+### Versions
+
+`cinnabar new` writes the engine's version into the project's `project.settings` as `engine.version`. When another version builds the project, `cinnabar.exe` warns, because the project's content or its `game/` can need changes. The warning does not stop the build. When the project works with the new version, change `engine.version`. A project without `engine.version` gets no warning.
 
 ## A new project
 
@@ -47,7 +79,7 @@ Or, in the editor: start it with no project, and choose **New Project** (see [Ed
 
 | File | What it is |
 |---|---|
-| `project.settings` | The name, the main scene's GUID, the icon and the output mode (see [Project settings](architecture.md#project-settings)). |
+| `project.settings` | The engine's version, the name, the main scene's GUID, the icon and the output mode (see [Project settings](architecture.md#project-settings)). |
 | `content/scenes/main.scene` | A camera, a sun, an atmosphere sky, a floor and a cube. |
 | `content/scripts/spinner.luau` | A behaviour that turns the cube (see [Scripting: Behaviours](../scripting/behaviours.md)). |
 | `content/.luaurc` | Strict mode for the scripts, and the `game` alias for `require`. |
@@ -62,7 +94,8 @@ A project is a folder with `project.settings` and `content/`. It needs nothing e
 |---|---|
 | `build/cache/` | The development loose cache, which the host and the editor read. |
 | `build/types/cinnabar.d.luau` | The scripts' type definitions, which the cooker checks the scripts against and luau-lsp reads (see [Scripting](../scripting/tooling-and-hot-reload.md#types-and-tooling)). |
-| `build/dev/game.dll` | The project's own game DLL, when it has a `game/` folder. Without one, the host runs the engine's `standard.dll`. |
+| `build/dev/game.dll` | The project's own game DLL, when it has a `game/` folder. Without one, the host runs the engine's `standard.dll`. The host's copies of the DLL that it loads are here too. |
+| `build/editor/` | The editor's autosaves, captures and automation file. |
 | `build/release-cache/`, `build/release/` | The release loose cache, and the release. |
 
 The engine's samples are projects too: `samples/intel` has no Odin, and `samples/mygame` has its hooks in `game/`. The justfile builds them for engine work (see [Building and running](building-and-running.md)), and `cinnabar.exe` builds them as it builds any project.
