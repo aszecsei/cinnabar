@@ -208,8 +208,10 @@ Post_Frame :: struct {
 	background:       bool,
 	history:          History,
 	reproject:        matrix[4, 4]f32,
-	// The scenes that temporal AA and bloom read.
+	// The scenes that temporal AA, the exposure's histogram and bloom read. Each is the scene when its pass is added: a
+	// post effect added later replaces Frame.scene before the passes record.
 	temporal_in:      Texture,
+	histogram_in:     Texture,
 	bloom_in:         Texture,
 	reset:            bool,
 	delta:            f32,
@@ -586,6 +588,7 @@ add_post_passes :: proc(f: ^Frame) {
 		pf.background = sky_draws(f)
 		pf.histogram = import_buffer(g, p.histogram_bins)
 		if pf.exposure_auto {
+			pf.histogram_in = f.scene
 			pass := add_compute_pass(g, "exposure histogram", run_histogram, f)
 			read(g, pass, f.scene)
 			read(g, pass, f.depth)
@@ -740,7 +743,7 @@ run_histogram :: proc(ctx: ^Pass_Context) {
 	f := (^Frame)(ctx.data)
 	g := ctx.graph
 	push := Histogram_Push {
-		scene         = gpu.read_index(gpu_texture(g, f.scene)),
+		scene         = gpu.read_index(gpu_texture(g, f.post.histogram_in)),
 		depth         = gpu.read_index(gpu_texture(g, f.depth)),
 		exposure      = gpu.read_index(gpu_buffer(g, f.exposure)),
 		histogram     = gpu.write_index(gpu_buffer(g, f.post.histogram)),
