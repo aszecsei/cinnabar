@@ -80,6 +80,7 @@ definitions :: proc(r: ^Runtime, allocator: runtime.Allocator) -> string {
 	write_enum_values(&b, "Key", core.Key, skip = 1)
 	write_enum_values(&b, "GamepadButton", core.Gamepad_Button)
 	write_enum_values(&b, "GamepadAxis", core.Gamepad_Axis)
+	write_enum_values(&b, "GamepadDirection", core.Gamepad_Direction)
 
 	write_game_bindings(r, &b, allocator)
 	return strings.to_string(b)

@@ -137,6 +137,60 @@ Gamepad_Axis :: enum u8 {
 	Right_Trigger,
 }
 
+// Gamepad_Direction is a stick pushed one way, or a trigger pulled, as a digital input. A stick's up is the stick
+// pushed up, positive on its Y axis.
+Gamepad_Direction :: enum u8 {
+	Left_Stick_Up,
+	Left_Stick_Down,
+	Left_Stick_Left,
+	Left_Stick_Right,
+	Right_Stick_Up,
+	Right_Stick_Down,
+	Right_Stick_Left,
+	Right_Stick_Right,
+	Left_Trigger,
+	Right_Trigger,
+}
+
+Gamepad_Directions :: bit_set[Gamepad_Direction;u16]
+
+// A direction engages when its axis passes STICK_ENGAGE, and lets go when the axis falls under STICK_RELEASE, so a
+// stick near the edge does not chatter.
+STICK_ENGAGE :: 0.5
+STICK_RELEASE :: 0.35
+
+// gamepad_direction_value is how far a pad's axes push a direction, from 0 to 1.
+gamepad_direction_value :: proc "contextless" (
+	pad: ^Gamepad,
+	direction: Gamepad_Direction,
+) -> f32 {
+	axes := &pad.axes
+	value: f32
+	switch direction {
+	case .Left_Stick_Up:
+		value = axes[.Left_Y]
+	case .Left_Stick_Down:
+		value = -axes[.Left_Y]
+	case .Left_Stick_Left:
+		value = -axes[.Left_X]
+	case .Left_Stick_Right:
+		value = axes[.Left_X]
+	case .Right_Stick_Up:
+		value = axes[.Right_Y]
+	case .Right_Stick_Down:
+		value = -axes[.Right_Y]
+	case .Right_Stick_Left:
+		value = -axes[.Right_X]
+	case .Right_Stick_Right:
+		value = axes[.Right_X]
+	case .Left_Trigger:
+		value = axes[.Left_Trigger]
+	case .Right_Trigger:
+		value = axes[.Right_Trigger]
+	}
+	return max(value, 0)
+}
+
 // Gamepad_Reading is what a pad reports at one moment, before the dead zones.
 Gamepad_Reading :: struct {
 	connected: bool,
@@ -147,13 +201,17 @@ Gamepad_Reading :: struct {
 // Gamepad is the state of one slot. A slot that has no pad is not connected, and has no buttons down and every axis
 // at 0.
 Gamepad :: struct {
-	connected: bool,
-	down:      Gamepad_Buttons,
+	connected:          bool,
+	down:               Gamepad_Buttons,
 	// The buttons that went down, or up, since the previous frame.
-	pressed:   Gamepad_Buttons,
-	released:  Gamepad_Buttons,
+	pressed:            Gamepad_Buttons,
+	released:           Gamepad_Buttons,
 	// After the dead zones.
-	axes:      [Gamepad_Axis]f32,
+	axes:               [Gamepad_Axis]f32,
+	// The sticks and triggers as digital inputs, with their edges since the previous frame.
+	direction_down:     Gamepad_Directions,
+	direction_pressed:  Gamepad_Directions,
+	direction_released: Gamepad_Directions,
 }
 
 INPUT_TEXT_CAPACITY :: 256
@@ -229,6 +287,8 @@ input_release_all :: proc "contextless" (input: ^Input) {
 		pad.released += pad.down
 		pad.down = {}
 		pad.axes = {}
+		pad.direction_released += pad.direction_down
+		pad.direction_down = {}
 	}
 	input_set_composition(input, {}, 0)
 }
@@ -243,6 +303,8 @@ input_begin_frame :: proc "contextless" (input: ^Input) {
 	for &pad in input.gamepads {
 		pad.pressed = {}
 		pad.released = {}
+		pad.direction_pressed = {}
+		pad.direction_released = {}
 	}
 	input.text.length = 0
 }
@@ -300,6 +362,17 @@ input_gamepad_set :: proc "contextless" (input: ^Input, slot: int, reading: Game
 		pad.axes[.Left_Trigger] = trigger_after_dead_zone(a[.Left_Trigger])
 		pad.axes[.Right_Trigger] = trigger_after_dead_zone(a[.Right_Trigger])
 	}
+	directions: Gamepad_Directions
+	for direction in Gamepad_Direction {
+		value := gamepad_direction_value(pad, direction)
+		held := direction in pad.direction_down
+		if held ? value >= STICK_RELEASE : value > STICK_ENGAGE {
+			directions += {direction}
+		}
+	}
+	pad.direction_pressed += directions - pad.direction_down
+	pad.direction_released += pad.direction_down - directions
+	pad.direction_down = directions
 }
 
 // input_char takes one UTF-16 unit of a WM_CHAR. high_surrogate keeps the first half of a pair between messages.

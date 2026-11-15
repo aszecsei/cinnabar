@@ -182,3 +182,39 @@ World.spawn():add(Pusher)
 	game_frame(f, NO_TICK)
 	expect_reports(t, f, {})
 }
+
+@(test)
+an_action_pressed_between_ticks_reaches_the_next_tick :: proc(t: ^testing.T) {
+	f := setup_world(t)
+	defer teardown_world(f)
+	context.user_ptr = f
+	_, ok := spawn_source(
+		&f.runtime,
+		"=actor",
+		`
+Input.define_action("jump", { "key:Space", "pad:A", "pad:LeftStickUp" })
+local Actor = Behaviour.define("Actor")
+function Actor:fixed_update(dt) Test.report(Input.action_pressed("jump") and 1 or 0) end
+World.spawn():add(Actor)
+`,
+	)
+	testing.expect(t, ok)
+	stick_up := core.Input{}
+	stick_up.gamepads[0] = {
+		connected         = true,
+		direction_down    = {.Left_Stick_Up},
+		direction_pressed = {.Left_Stick_Up},
+	}
+	// The first tick of the frame gets the edge, and the later ticks do not.
+	game_frame(f, THREE_TICKS, stick_up)
+	expect_reports(t, f, {1, 0, 0})
+	// A frame with no tick keeps the edge for the next tick, which gets it once.
+	game_frame(f, NO_TICK, stick_up)
+	expect_reports(t, f, {})
+	held := stick_up
+	held.gamepads[0].direction_pressed = {}
+	game_frame(f, 16 * time.Millisecond, held)
+	expect_reports(t, f, {1})
+	game_frame(f, 17 * time.Millisecond, held)
+	expect_reports(t, f, {0})
+}

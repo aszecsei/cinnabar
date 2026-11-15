@@ -28,8 +28,11 @@ fixed_update :: proc(r: ^Runtime, ticks: ^ecs.Ticks, input: core.Input) {
 		for &pad, i in tick_input.gamepads {
 			pad.pressed += r.pending_gamepad_pressed[i]
 			pad.released += r.pending_gamepad_released[i]
+			pad.direction_pressed += r.pending_direction_pressed[i]
+			pad.direction_released += r.pending_direction_released[i]
 		}
 		r.pending_gamepad_pressed, r.pending_gamepad_released = {}, {}
+		r.pending_direction_pressed, r.pending_direction_released = {}, {}
 		// The older frames' text comes first.
 		core.input_text_append(&r.pending_text, core.input_text_string(&tick_input.text))
 		tick_input.text = r.pending_text
@@ -38,6 +41,7 @@ fixed_update :: proc(r: ^Runtime, ticks: ^ecs.Ticks, input: core.Input) {
 		tick_input.pressed, tick_input.released = {}, {}
 		for &pad in tick_input.gamepads {
 			pad.pressed, pad.released = {}, {}
+			pad.direction_pressed, pad.direction_released = {}, {}
 		}
 		tick_input.text.length = 0
 	}
