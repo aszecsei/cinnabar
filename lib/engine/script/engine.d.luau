@@ -131,7 +131,6 @@ declare Input: {
 	any_pressed: (device: string?) -> string?,
 	-- Runs a pad's motors: low is the low-frequency (left) motor and high the high-frequency (right) one, each from 0 to 1, for up to 10 seconds. A new call replaces the pad's last one, and 0 seconds stops it. The pad stops by itself when the window loses the focus, and under the editor it does not vibrate.
 	gamepad_rumble: (pad: number, low: number, high: number, seconds: number) -> (),
-)
 	-- The characters typed since the last frame, in UTF-8. Backspace and Enter are keys, not text.
 	text: string,
 	-- What an IME is composing, which is not text yet, and the bytes of it before the cursor.
