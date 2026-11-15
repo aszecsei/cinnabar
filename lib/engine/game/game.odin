@@ -55,6 +55,11 @@ Game :: struct {
 	// A paused game's world takes no time: no ticks and no particles, while the scripts and the UI run on, as a pause
 	// menu needs. Scripts set it with Game.set_paused.
 	paused:             bool,
+	// How fast the world's time runs, 0 to 4, while the game is not paused: nil is 1, so a zeroed Game is unscaled.
+	// Scripts set it with Game.set_time_scale, through set_time_scale, which is its one writer. It scales the fixed
+	// ticks, the Update and Late stages, the particles and Time.delta and Time.time. The UI, the audio, Time.real_time
+	// and the editor stay in real time.
+	time_scale:         Maybe(f32),
 	// Whether the game loop goes on. request_quit is the only writer, and game_update ends the loop once it reads
 	// Quitting.
 	run:                Run_State,
@@ -260,4 +265,44 @@ register_scripts :: proc(r: ^script.Runtime) {
 			request_quit(game_of(L))
 			return 0
 		}, "() -> ()")
+	script.define(r, "Game.set_time_scale", proc(L: ^luau.State) -> c.int {
+			set_time_scale(game_of(L), f32(luau.L_checknumber(L, 1)))
+			return 0
+		}, "(scale: number) -> ()")
+	// A camera's fields are 0 for their defaults, so it starts from zeros (see render.Camera).
+	script.expose(r, render.Camera)
+}
+
+// MAX_TIME_SCALE is the greatest scale of the world's time. The fixed ticks catch up by at most
+// ecs.MAX_TICKS_PER_FRAME in a frame, so a larger scale would only drop the time.
+MAX_TIME_SCALE :: 4
+
+// set_time_scale is the one writer of Game.time_scale. The scale is kept between 0 and MAX_TIME_SCALE, and a value
+// that is not a number is 1. A scale of 1 is stored as nil.
+set_time_scale :: proc(g: ^Game, scale: f32) {
+	s := scale
+	if s != s {
+		s = 1
+	}
+	s = clamp(s, 0, MAX_TIME_SCALE)
+	g.time_scale = nil if s == 1 else s
+}
+
+// time_scale_of is the scale that the game's time runs at, 1 without one set.
+time_scale_of :: proc(g: ^Game) -> f32 {
+	return g.time_scale.? or_else 1
+}
+
+// world_step is the time that the world takes in a frame whose step is step: none while the game is paused, and the
+// step times the scale otherwise. The editor's own steps, which a Paused editor takes one tick at a time, are not
+// scaled.
+world_step :: proc(g: ^Game, step: time.Duration, scaled: bool) -> time.Duration {
+	if g.paused {
+		return 0
+	}
+	scale := time_scale_of(g)
+	if !scaled || scale == 1 {
+		return step
+	}
+	return time.Duration(f64(step) * f64(scale))
 }

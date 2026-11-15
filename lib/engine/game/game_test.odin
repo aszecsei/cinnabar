@@ -1,8 +1,10 @@
 package game
 
+import "core:math"
 import "core:mem/virtual"
 import "core:strings"
 import "core:testing"
+import "core:time"
 
 import "cinnabar:core"
 import script_host "cinnabar:core/script"
@@ -115,6 +117,11 @@ the_standard_games_scripts_have_every_engine_binding :: proc(t: ^testing.T) {
 		expect(t, text, name)
 	}
 	expect(t, text, "\tset_paused: (paused: boolean) -> (),")
+	// The time scale, its frame times, and the camera.
+	expect(t, text, "\tset_time_scale: (scale: number) -> (),")
+	expect(t, text, "\treal_delta: number,")
+	expect(t, text, "\tscale: number,")
+	expect(t, text, "declare Camera:")
 	// And the project's.
 	expect(t, text, "declare TestComponent:")
 }
@@ -135,4 +142,25 @@ a_quit_under_an_editor_does_nothing :: proc(t: ^testing.T) {
 	g.editor.session.connection = 1
 	request_quit(g)
 	testing.expect_value(t, g.run, Run_State.Running)
+}
+
+// The time scale is kept between 0 and 4, not a number is 1, and 1 is stored as nil, so a zeroed Game is unscaled. A
+// pause takes the world's whole step, and the editor's own steps take no scale.
+@(test)
+set_time_scale_clamps :: proc(t: ^testing.T) {
+	g := new(Game)
+	defer free(g)
+	testing.expect_value(t, time_scale_of(g), 1)
+	want := [?][2]f32{{0.5, 0.5}, {-3, 0}, {100, 4}, {math.nan_f32(), 1}, {0, 0}, {1, 1}}
+	for pair in want {
+		set_time_scale(g, pair[0])
+		testing.expect_value(t, time_scale_of(g), pair[1])
+	}
+	testing.expect(t, g.time_scale == nil, "a scale of 1 is stored as nil")
+	set_time_scale(g, 0.5)
+	step := 20 * time.Millisecond
+	testing.expect_value(t, world_step(g, step, true), 10 * time.Millisecond)
+	testing.expect_value(t, world_step(g, step, false), step)
+	g.paused = true
+	testing.expect_value(t, world_step(g, step, true), 0)
 }

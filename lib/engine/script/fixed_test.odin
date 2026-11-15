@@ -218,3 +218,99 @@ World.spawn():add(Actor)
 	game_frame(f, 17 * time.Millisecond, held)
 	expect_reports(t, f, {0})
 }
+
+// scaled_frame runs a frame whose real duration is real and whose world takes real times scale, as the game's frame
+// code does with Game.time_scale. It returns the number of ticks.
+@(private = "file")
+scaled_frame :: proc(
+	f: ^World_Fixture,
+	real: time.Duration,
+	scale: f32,
+	input: core.Input = {},
+) -> int {
+	set_frame_time(&f.runtime, real, scale)
+	step := time.Duration(f64(real) * f64(scale))
+	it := ecs.begin_ticks(&f.world, step)
+	for ecs.next_tick(&it) {
+		ecs.run_tick_systems(&it, nil)
+		fixed_update(&f.runtime, &it, input)
+		ecs.update_transforms(&f.world)
+		fixed_events(&f.runtime)
+		ecs.update_transforms(&f.world)
+	}
+	run_phase(&f.runtime, step, input)
+	return it.count
+}
+
+// A world that takes no time runs no tick, and the edges of its frames wait for the first tick that runs, as they do
+// in a pause.
+@(test)
+a_time_scale_of_zero_runs_no_ticks_and_keeps_the_edges :: proc(t: ^testing.T) {
+	f := setup_world(t)
+	defer teardown_world(f)
+	context.user_ptr = f
+	_, ok := spawn_source(
+		&f.runtime,
+		"=jumper",
+		`
+local Jumper = Behaviour.define("Jumper")
+function Jumper:fixed_update(dt) Test.report(Input.was_pressed(Key.Space) and 1 or 0) end
+World.spawn():add(Jumper)
+`,
+	)
+	testing.expect(t, ok)
+	space := core.Input {
+		down    = {.Space},
+		pressed = {.Space},
+	}
+	testing.expect_value(t, scaled_frame(f, THREE_TICKS, 0, space), 0)
+	testing.expect_value(t, scaled_frame(f, THREE_TICKS, 0), 0)
+	expect_reports(t, f, {})
+	testing.expect_value(t, f.world.clock.time, 0)
+	testing.expect_value(t, scaled_frame(f, 16 * time.Millisecond, 1), 0)
+	testing.expect_value(t, scaled_frame(f, 1 * time.Millisecond, 1), 1)
+	expect_reports(t, f, {1})
+	testing.expect_value(t, scaled_frame(f, THREE_TICKS, 1), 3)
+	expect_reports(t, f, {0, 0, 0})
+}
+
+// The ticks come from the scaled time: half the time is half the ticks, without a drift in the accumulator.
+@(test)
+a_time_scale_of_half_runs_half_the_ticks :: proc(t: ^testing.T) {
+	f := setup_world(t)
+	defer teardown_world(f)
+	context.user_ptr = f
+	ticks := 0
+	for _ in 0 ..< 6 {
+		ticks += scaled_frame(f, THREE_TICKS, 0.5)
+	}
+	testing.expect_value(t, ticks, 9)
+	testing.expect_value(t, f.world.clock.time, 150 * time.Millisecond)
+}
+
+// Time.real_delta is the frame's real seconds, and Time.scale the game's scale, while Time.delta is the world's step.
+@(test)
+real_delta_ignores_the_scale :: proc(t: ^testing.T) {
+	f := setup_world(t)
+	defer teardown_world(f)
+	context.user_ptr = f
+	_, ok := spawn_source(
+		&f.runtime,
+		"=clock",
+		`
+local Clock = Behaviour.define("Clock")
+function Clock:update(dt)
+	Test.report(Time.delta)
+	Test.report(Time.real_delta)
+	Test.report(Time.scale)
+	Test.report(Time.time)
+end
+World.spawn():add(Clock)
+`,
+	)
+	testing.expect(t, ok)
+	scaled_frame(f, 20 * time.Millisecond, 0.5)
+	expect_reports(t, f, {0.01, 0.02, 0.5, 0.01})
+	scaled_frame(f, 20 * time.Millisecond, 0)
+	expect_reports(t, f, {0, 0.02, 0, 0.01})
+}

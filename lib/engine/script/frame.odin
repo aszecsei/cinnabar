@@ -34,6 +34,12 @@ begin_phase :: proc(r: ^Runtime, dt: time.Duration, input: core.Input) {
 	set_input(r, input)
 }
 
+// set_frame_time gives Time.real_delta and Time.scale for the frame: the frame's real duration and the game's time
+// scale. Call it before the ticks, which are Time's first reader. The pause is not part of the scale.
+set_frame_time :: proc(r: ^Runtime, real_delta: time.Duration, scale: f32) {
+	r.frame_time = {time.duration_seconds(real_delta), f64(scale)}
+}
+
 // set_time fills the Time table: the step's delta and world time, and whether a fixed step runs.
 @(private)
 set_time :: proc(r: ^Runtime, delta, world_time: f64, in_fixed: bool) {
@@ -42,6 +48,8 @@ set_time :: proc(r: ^Runtime, delta, world_time: f64, in_fixed: bool) {
 	luau.setreadonly(L, -1, false)
 	set_number(L, "delta", delta)
 	set_number(L, "real_time", r.platform.time_seconds())
+	set_number(L, "real_delta", r.frame_time.real_delta)
+	set_number(L, "scale", r.frame_time.scale)
 	set_number(L, "frame", f64(r.frame))
 	if r.world != nil {
 		clock := &r.world.clock
@@ -125,6 +133,7 @@ create_frame_values :: proc(r: ^Runtime) {
 	luau.newtable(L)
 	luau.pushvalue(L, -1)
 	r.time_table = luau.ref(L, -1)
+	r.frame_time = {0, 1}
 	luau.pop(L, 1)
 	set_path(r, "Time")
 

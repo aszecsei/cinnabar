@@ -120,9 +120,9 @@ game_update :: proc(g: ^Game, dt: time.Duration, h: Hooks) -> (keep_running: boo
 	// edits show. No script code runs then, not even on_disable and on_destroy for the behaviours that a new scene
 	// despawns (see docs/editor/document-and-scenes.md#modes).
 	run, step := editor.simulation(&g.editor, &g.world, dt)
-	if g.paused {
-		step = 0
-	}
+	// The editor's own steps, a tick at a time while it pauses, take no scale.
+	step = world_step(g, step, editor.mode(&g.editor) == .Play)
+	script.set_frame_time(&g.scripts, dt, time_scale_of(g))
 	script.set_quiet(&g.scripts, !run)
 	// The documents follow the world in every mode, so the editor's viewport shows them as they are.
 	ui.sync(&g.ui, &g.world)
