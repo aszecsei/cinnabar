@@ -54,6 +54,12 @@ Platform :: struct {
 	disabled_features:  gpu.Features,
 	// From OUTPUT_VARIABLE, which then ignores the game's requests.
 	output_override:    Maybe(gpu.Output_Request),
+	// The output that the game asked for last, or the override's: what Display_State reports.
+	output_request:     gpu.Output_Request,
+	// The host renders into shared textures for the editor, with the window hidden, so window modes do not apply. A
+	// mode change in it is logged once.
+	shared_mode:        bool,
+	mode_ignored:       bool,
 	// The game's virtual memory reservations, released at a soft restart.
 	reservations:       [dynamic][]byte,
 	reservations_mutex: sync.Mutex,
@@ -145,6 +151,7 @@ init :: proc(
 		return false
 	}
 	platform.window_size = _window_size()
+	platform.shared_mode = shared_target != ""
 	if !backend.init(_window_native_handle(), platform.window_size, shared_target, adapter) {
 		log.error("core: failed to initialize the GPU backend")
 		return false
@@ -154,6 +161,7 @@ init :: proc(
 	platform.output_override = read_output_override()
 	if request, ok := platform.output_override.?; ok {
 		backend.request_output(request)
+		platform.output_request = request
 	}
 	platform.reservations = make([dynamic][]byte)
 	audio_init(&platform.audio)
@@ -183,6 +191,9 @@ init :: proc(
 		file_read_end                   = file_read_end,
 		window_size                     = window_size,
 		set_window_title                = _window_set_title,
+		display_resolutions             = display_resolutions,
+		display_state                   = display_state,
+		set_window_mode                 = set_window_mode,
 		jobs_run                        = jobs.run,
 		jobs_wait                       = jobs.wait,
 		jobs_lock                       = jobs.lock,
@@ -444,7 +455,42 @@ gpu_features :: proc() -> gpu.Features {
 gpu_request_output :: proc(request: gpu.Output_Request) {
 	if platform.output_override == nil {
 		backend.request_output(request)
+		platform.output_request = request
 	}
+}
+
+// display_resolutions is the distinct sizes of the display modes of the window's monitor, largest first, in allocator.
+@(private = "file")
+display_resolutions :: proc(allocator: runtime.Allocator) -> [][2]i32 {
+	if platform.shared_mode {
+		return nil
+	}
+	return _window_resolutions(allocator)
+}
+
+// display_state is how the window is shown, and whether the display is in HDR.
+@(private = "file")
+display_state :: proc() -> Display_State {
+	state := _window_display_state()
+	state.hdr_available = backend.output().display.hdr
+	state.output = platform.output_request
+	return state
+}
+
+// set_window_mode shows the window in a mode and a size, from the next frame on (see
+// docs/gpu/presentation.md#window-modes). The swapchain follows the window's size when the frame starts. It returns
+// false, with the window as it was, when the display mode or the window did not change, and always in shared mode,
+// where the editor owns the window's size.
+@(private = "file")
+set_window_mode :: proc(mode: Window_Mode, size: [2]i32) -> bool {
+	if platform.shared_mode {
+		if !platform.mode_ignored {
+			platform.mode_ignored = true
+			log.info("core: shared mode ignores window mode changes")
+		}
+		return false
+	}
+	return _window_set_mode(mode, size)
 }
 
 @(private = "file")

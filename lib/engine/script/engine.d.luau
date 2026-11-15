@@ -284,6 +284,34 @@ type RenderQualityChange = {
 	atlas_shadow_cache: boolean?,
 }
 
+-- A size of the Display bindings, which a game defines with project.define_display_bindings (see
+-- docs/scripting/api.md#display).
+type DisplaySize = {
+	width: number,
+	height: number,
+}
+
+-- How the display is: the window's mode ("Windowed", "Borderless" or "Fullscreen") and client size in pixels, whether
+-- HDR output is on, whether the display is in HDR now, and the paper white of HDR output in nits.
+type DisplayState = {
+	mode: string,
+	width: number,
+	height: number,
+	hdr: boolean,
+	hdr_available: boolean,
+	paper_white: number,
+}
+
+-- What Display.set changes: the fields that it gives, which are DisplayState's but hdr_available. A width and a height
+-- with Fullscreen must be one of Display.resolutions(), and paper_white is from 80 to 500.
+type DisplayChange = {
+	mode: string?,
+	width: number?,
+	height: number?,
+	hdr: boolean?,
+	paper_white: number?,
+}
+
 -- What the device can do that the quality depends on. aa lists the anti-aliasing techniques that it runs, gi the
 -- global illumination's, and reflections the reflections'.
 type RenderCaps = {

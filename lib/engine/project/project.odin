@@ -75,6 +75,8 @@ Settings :: struct {
 	ui_scale:              f32,
 	// The scene that the game starts with, or zero for none.
 	main_scene:            format.Guid,
+	// How the window is shown, and the paper white of HDR output (see docs/gpu/presentation.md#window-modes).
+	display:               Display_Settings,
 }
 
 // physics_layers gives the layers that settings name, or the default ones.
@@ -361,6 +363,12 @@ parse :: proc(text: string, settings: ^Settings, problems: ^[dynamic]string = ni
 					key,
 					value,
 				)
+			}
+			continue
+		}
+		if known, message := parse_display_key(settings, key, value); known {
+			if message != "" {
+				problem(problems, line, "%s", message)
 			}
 			continue
 		}

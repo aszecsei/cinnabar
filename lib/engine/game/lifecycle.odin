@@ -246,7 +246,8 @@ draw_ui_layer :: proc(f: ^render.Frame) {
 }
 
 // update_project reads the project's settings when their files change, and gives them to the renderer, physics, audio,
-// the AI and the UI and asks for the output mode, so the editor's change shows at once.
+// the AI, the UI and the display, which takes the window's mode and size, the output mode and the paper white if their
+// keys changed, so the editor's change shows at once.
 @(private)
 update_project :: proc(g: ^Game, h: Hooks) {
 	now := g.platform.time_seconds()
@@ -263,7 +264,7 @@ update_project :: proc(g: ^Game, h: Hooks) {
 	audio.set_buses(&g.audio, settings.audio_buses)
 	ai.set_tags(&g.ai, settings.perception_tags)
 	ui.set_scale_factor(&g.ui, settings.ui_scale)
-	g.platform.gpu_request_output(settings.output)
+	project.apply_display_settings(&g.display_applied, g.platform, &g.renderer, settings)
 	if h.settings_changed != nil {
 		h.settings_changed(g)
 	}

@@ -45,6 +45,9 @@ Game :: struct {
 	frame_count:        u64,
 	// What the scripts' Render bindings reach: the renderer and the settings file.
 	script_quality:     project.Script_Quality,
+	// The display keys that the files gave when the game last applied them, so a change to other keys leaves what the
+	// player set since (see project.apply_display_settings).
+	display_applied:    Maybe(project.Display_File),
 	// The project's settings, read again when their files change.
 	project:            project.Watch,
 	next_project_check: f64,
@@ -248,6 +251,7 @@ register_scripts :: proc(r: ^script.Runtime) {
 	g := container_of(r, Game, "scripts")
 	project.define_quality_bindings(r, &g.script_quality)
 	save.register_scripts(r)
+	project.define_display_bindings(r)
 	physics.register_scripts(r, &g.physics)
 	audio.register_scripts(r, &g.audio)
 	anim.register_scripts(r, &g.animation)
