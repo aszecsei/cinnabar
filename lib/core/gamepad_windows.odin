@@ -61,3 +61,12 @@ xinput_read :: proc(slot: int) -> (reading: Gamepad_Reading) {
 	}
 	return
 }
+
+// xinput_set_motors runs a slot's two motors. A slot that has no pad ignores it.
+xinput_set_motors :: proc(slot: int, motors: Motors) {
+	vibration := win.XINPUT_VIBRATION {
+		wLeftMotorSpeed  = win.WORD(motors[0]),
+		wRightMotorSpeed = win.WORD(motors[1]),
+	}
+	win.XInputSetState(win.XUSER(slot), &vibration)
+}

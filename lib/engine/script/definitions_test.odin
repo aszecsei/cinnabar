@@ -33,6 +33,11 @@ definitions_cover_components_and_game_bindings :: proc(t: ^testing.T) {
 	expect(t, text, "declare GamepadButton: {\n\tDpadUp: number,\n")
 	expect(t, text, "declare GamepadAxis: {\n\tLeftX: number,\n")
 	expect(t, text, "\tgamepad_axis: (pad: number, axis: number) -> number,")
+	expect(
+		t,
+		text,
+		"\tgamepad_rumble: (pad: number, low: number, high: number, seconds: number) -> (),",
+	)
 	expect(t, text, "\tcomposition: string,")
 	// The game's bindings are declared, and the engine's come from engine.d.luau only once.
 	expect(

@@ -47,6 +47,9 @@ World_Fixture :: struct {
 	reports:  [dynamic]f64,
 	errors:   [dynamic]string,
 	runner:   log.Logger,
+	// What a script's Input.gamepad_rumble asked of the pads, as the host would hold it.
+	rumbles:  core.Rumbles,
+	now:      time.Tick,
 }
 
 @(private)
@@ -74,6 +77,10 @@ setup_world :: proc(t: ^testing.T) -> ^World_Fixture {
 	f.platform = {
 		frame_allocator = virtual.arena_allocator(&f.frame),
 		time_seconds = proc() -> f64 {return 0},
+		gamepad_rumble = proc(slot: int, low, high: f32, seconds: f64) {
+			f := (^World_Fixture)(context.user_ptr)
+			core.rumble_set(&f.rumbles, slot, low, high, seconds, f.now)
+		},
 		script_open = script_host.open,
 		script_close = script_host.close,
 		script_push_binding = script_host.push_binding,
@@ -642,6 +649,47 @@ end
 	testing.expect(t, ok)
 	end_phase(&f.runtime)
 	expect_reports(t, f, {0, 1, 1, 1, 1, 0, 0.5, 0, 0, 0, 0, 0, 0})
+	release(&f.runtime, thread)
+}
+
+@(test)
+input_gamepad_rumble_reaches_the_host_and_clamps :: proc(t: ^testing.T) {
+	f := setup_world(t)
+	defer teardown_world(f)
+	context.user_ptr = f
+	f.now = time.tick_now()
+	begin_phase(&f.runtime, 16 * time.Millisecond, {})
+	thread, ok := spawn_source(
+		&f.runtime,
+		"=rumble",
+		`
+Input.gamepad_rumble(2, 0.25, 4, 3)
+Input.gamepad_rumble(3, -1, 0.5, 600)
+for _, bad in {
+	function() Input.gamepad_rumble(0, 1, 1, 1) end,
+	function() Input.gamepad_rumble(5, 1, 1, 1) end,
+	function() Input.gamepad_rumble(1, "x", 1, 1) end,
+} do
+	Test.report(pcall(bad) and 1 or 0)
+end
+`,
+	)
+	testing.expect(t, ok)
+	end_phase(&f.runtime)
+	expect_reports(t, f, {0, 0, 0})
+	testing.expect_value(t, f.rumbles.slots[0], nil)
+	second, _ := f.rumbles.slots[1].?
+	testing.expect_value(t, second.low, 0.25)
+	testing.expect_value(t, second.high, 1)
+	testing.expect_value(t, time.tick_diff(f.now, second.until), 3 * time.Second)
+	third, _ := f.rumbles.slots[2].?
+	testing.expect_value(t, third.low, 0)
+	testing.expect_value(t, third.high, 0.5)
+	testing.expect_value(
+		t,
+		time.tick_diff(f.now, third.until),
+		core.MAX_RUMBLE_SECONDS * time.Second,
+	)
 	release(&f.runtime, thread)
 }
 

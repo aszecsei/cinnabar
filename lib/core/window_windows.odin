@@ -74,10 +74,15 @@ _window_poll :: proc() -> (open: bool) {
 	}
 	// XInput answers any process, so the pads belong to this window only while it is in the foreground. A hidden
 	// window never does, and in shared mode the editor's viewport sends the pads.
-	if window.hwnd != nil && win.GetForegroundWindow() == window.hwnd {
+	if _window_has_focus() {
 		gamepad_poll(&window.gamepads, &window.input, time.tick_now(), xinput_read)
 	}
 	return !window.close_requested
+}
+
+// _window_has_focus is whether the window is the foreground window. A hidden window, as in shared mode, never is.
+_window_has_focus :: proc() -> bool {
+	return window.hwnd != nil && win.GetForegroundWindow() == window.hwnd
 }
 
 // _window_apply_input applies input from elsewhere after the window's messages of the frame.
