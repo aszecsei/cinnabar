@@ -30,6 +30,10 @@ Platform_API :: struct {
 	// <exe>/project.settings.
 	content_dir:                     string,
 	project_path:                    string,
+	// The folder for the player's data, such as records and options, as an absolute path in the host's memory. It
+	// exists when the game starts. The development host's is build/save in the project's folder; a release's is
+	// %LOCALAPPDATA%\<game.name> (see docs/overview/building-and-running.md#build-layout).
+	save_dir:                        string,
 
 	// Virtual memory for game-side stores that must not move, such as world storage. Reserved memory is usable only
 	// after it is committed, and committed memory starts zeroed. Committing a range again is allowed. core releases

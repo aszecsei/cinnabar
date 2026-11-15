@@ -2,7 +2,7 @@
 
 What scripts see: the value types, entities and component references, the engine's global libraries, and the mapping from Unity's names. Behaviours have [their own document](behaviours.md).
 
-**In this document:** [Values](#values) · [The entity and component view](#the-entity-and-component-view) · [Engine libraries](#engine-libraries) · [Random](#random) · [Unity mapping](#unity-mapping)
+**In this document:** [Values](#values) · [The entity and component view](#the-entity-and-component-view) · [Engine libraries](#engine-libraries) · [Save](#save) · [Game.quit](#gamequit) · [Random](#random) · [Unity mapping](#unity-mapping)
 
 ## Values
 
@@ -64,6 +64,8 @@ Scripts change the world structure **immediately**, except for despawns. The scr
 | `Debug` | `log`, `warn`, `error` |
 | `Random` | The world's generator: `value()`, `range(min, max)`, `integer(min, max)`, `seed(n)`, `get_seed()`, `inside_unit_sphere()`, `on_unit_sphere()`, `inside_unit_circle()`, `rotation()` (see [Random](#random)) |
 | `Render` | The render quality, for a settings menu, where the game defines it (see [Render](#render)) |
+| `Save` | `read(name)` and `write(name, data)`: a table of strings, numbers and booleans in a file of the player's data, where the game defines it (see [Save](#save)) |
+| `Game` | `set_paused(paused)` and `quit()`, where the game defines them (see [Game.quit](#gamequit)) |
 | `Profile` | `begin(name)`, `finish()`, `zone(name, fn, ...)`: zones in the editor's profiler (see [Profile](#profile)) |
 | `Audio` | `play(sound, position?, gain?, bus?)` and `set_bus_gain(bus, gain)`. See [Audio: Scripts](../audio/design.md#scripts). |
 | `Physics` | Queries (`raycast`, `raycast_all`, `sphere_cast`, `box_cast`, `capsule_cast`, `overlap_sphere`, `overlap_box`, `overlap_capsule`), `layers(...)`, `gravity()` and `set_gravity`, the effects on a body, with its entity first (`add_force`, `add_impulse`, `velocity`, `set_velocity`, `sleep` and the rest), and a joint's `set_motor(entity, mode, target?, max?)` and `set_joint_enabled(entity, enabled)`, and a character's `move_character(entity, velocity, gravity?)`, `character_ground(entity)` and `is_grounded(entity)`, where the game defines it (see [Physics: Scripts](../physics/design.md#scripts)) |
@@ -107,6 +109,33 @@ local i = table.find(techniques, q.aa) or 0
 Render.set_quality({ aa = techniques[i % #techniques + 1] })
 Render.save_quality()
 ```
+
+## Save
+
+A save is a table of strings, numbers and booleans in a file of the player's data, such as personal records, options and key bindings (`lib/engine/save`). The standard game defines the bindings, so every project has them. The engine keeps no store: the data lives in the script's own tables, and a script reads a save when it starts and writes it when the player changes something.
+
+| Binding | What it does |
+|---|---|
+| `Save.read(name)` | The save's entries as a `SaveData` table, or nil when there is no file. A malformed line is a warning in the log with its number, and the other lines are in the table |
+| `Save.write(name, data)` | Writes the table to the save, and is true; false if the write failed |
+
+- **Names:** `name` is 1 to 32 of `a` to `z`, `0` to `9`, `_` and `-`. It is the file's stem, so a slash, a dot or a capital raises an error. A save is `<save_dir>/<name>.save`. The folder is `Platform_API.save_dir`: `build/save` in the project's folder under the development host, and `%LOCALAPPDATA%\<game.name>` in a release (see [Building and running](../overview/building-and-running.md#build-layout)).
+- **Keys and values:** a key is one or more of `A` to `Z`, `a` to `z`, `0` to `9`, `_` and `.`, so `options.volume` is one key, not a nested table. A value is a string, a number or a boolean. A bad key, a table, a function or another value, and a number that is not finite, raise an error, and `write` then writes nothing.
+- **Atomic writes:** `write` replaces the whole file through a temporary file and a rename (`file_write`), so a crash leaves the old save or the new one, never half of one. The keys are written in order, so an unchanged table gives an unchanged file.
+- **The format** is text, which a player can read and edit: the first line is `save 1`, then one `key = value` line each. A value is a number, `true`, `false` or a string in double quotes, with the escapes `\"`, `\\`, `\n`, `\r` and `\t`. Blank lines and lines that start with `#` are skipped. A number is the shortest text that reads back as the same value. A file that does not start with `save 1` is not read: `read` gives an empty table and a warning.
+- **Type:** `SaveData`, `{ [string]: string | number | boolean }`, is in `engine.d.luau`.
+
+```lua
+local options = Save.read("options") or { volume = 0.8, invert_y = false }
+options.volume = 0.5
+if not Save.write("options", options) then
+	Debug.warn("could not save the options")
+end
+```
+
+## Game.quit
+
+`Game.quit()` ends the game after the current frame, as a Quit button does: `game_update` returns false, and the host's loop or the release's stops. It does nothing while an editor is linked, and logs that the editor keeps the game running, since the editor decides when its game ends. `Game.set_paused(paused)` stops the world's time (see [The game package: The frame](../world/game-package.md#the-frame)).
 
 ## Profile
 

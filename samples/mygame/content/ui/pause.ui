@@ -30,6 +30,7 @@ ui 1
 		</row>
 		<text style="caption">Saves</text>
 		<column id="slots" height="150" gap="4" cross="stretch" padding="0 12 0 0" overflow="scroll"/>
+		<button id="quit" click="quit">Quit</button>
 		<text style="caption" text_align="center" wrap="true">Quality takes the next preset. Office, fifty, waffle: the text is kerned and has its ligatures.</text>
 	</column>
 

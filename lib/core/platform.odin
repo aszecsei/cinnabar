@@ -78,7 +78,8 @@ platform: Platform
 // hidden (see docs/gpu/presentation.md#presentation). A non-zero adapter is the LUID of the GPU to use. content_dir and
 // project_path are where the game's files are; empty, they are beside the executable (see game_paths). physics is the
 // physics backend's name; empty, it is the project's physics.backend, or jolt. audio is the audio backend's name; empty,
-// it is the project's audio.backend, or the mixer.
+// it is the project's audio.backend, or the mixer. save_dir is the folder for the player's data (see
+// Platform_API.save_dir); empty, it is save beside the executable. init creates it.
 init :: proc(
 	title: string,
 	width: i32 = 1280,
@@ -89,6 +90,7 @@ init :: proc(
 	project_path := "",
 	physics_backend_name := "",
 	audio_backend_name := "",
+	save_dir := "",
 ) -> bool {
 	if err := virtual.arena_init_static(&platform.permanent, PERMANENT_RESERVE); err != nil {
 		log.errorf("core: permanent arena: %v", err)
@@ -101,6 +103,14 @@ init :: proc(
 	}
 	// From the heap, not the permanent arena, which a soft restart frees: the next game reads them too.
 	content, project := game_paths(exe_dir, content_dir, project_path, runtime.heap_allocator())
+	save := save_dir
+	if save == "" {
+		save, _ = filepath.join({exe_dir, "save"}, context.temp_allocator)
+	}
+	save = absolute(save, runtime.heap_allocator())
+	if err := os.make_directory_all(save); err != nil && !os.exists(save) {
+		log.warnf("core: cannot create the save folder %s: %v", save, err)
+	}
 	for &arena in platform.frame {
 		if err := virtual.arena_init_static(&arena, FRAME_RESERVE); err != nil {
 			log.errorf("core: frame arena: %v", err)
@@ -155,6 +165,7 @@ init :: proc(
 		heap_allocator                  = runtime.heap_allocator(),
 		content_dir                     = content,
 		project_path                    = project,
+		save_dir                        = save,
 		memory_reserve                  = memory_reserve,
 		memory_commit                   = memory_commit,
 		memory_release                  = memory_release,
@@ -273,6 +284,13 @@ game_paths :: proc(
 	return absolute(content, allocator), absolute(project, allocator)
 }
 
+// dev_save_dir is the development host's save folder: build/save in the directory of the project's settings file,
+// which the project's gitignored build folder holds. It comes back in allocator.
+dev_save_dir :: proc(project_path: string, allocator: runtime.Allocator) -> string {
+	dir, _ := filepath.join({filepath.dir(project_path), "build", "save"}, allocator)
+	return dir
+}
+
 @(private)
 absolute :: proc(path: string, allocator: runtime.Allocator) -> string {
 	if full, err := os.get_absolute_path(path, allocator); err == nil {
@@ -297,6 +315,7 @@ shutdown :: proc() {
 	delete(platform.reservations)
 	delete(platform.api.content_dir, runtime.heap_allocator())
 	delete(platform.api.project_path, runtime.heap_allocator())
+	delete(platform.api.save_dir, runtime.heap_allocator())
 	delete(platform.input_queue)
 	for &arena in platform.frame {
 		virtual.arena_destroy(&arena)

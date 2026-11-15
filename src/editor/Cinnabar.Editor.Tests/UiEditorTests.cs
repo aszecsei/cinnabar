@@ -117,7 +117,7 @@ public sealed class UiEditorTests : IDisposable
         editor.SetStyleAttribute("button:disabled", "opacity", "0.5");
         Assert.Contains("<style name=\"button:disabled\" opacity=\"0.5\"/>", editor.Document.Text);
         // The slot template's button, which has no id, takes it too.
-        Assert.Equal(["resume", "quality", ""], editor.TakersOf("button:disabled").Select(n => n.Id));
+        Assert.Equal(["resume", "quality", "quit", ""], editor.TakersOf("button:disabled").Select(n => n.Id));
         while (editor.Document.CanUndo)
         {
             editor.Document.Undo();

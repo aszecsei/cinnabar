@@ -111,10 +111,28 @@ the_standard_games_scripts_have_every_engine_binding :: proc(t: ^testing.T) {
 	}
 	// The engine's bindings that a game used to choose are all there: physics, audio, animation, sprites, the UI and
 	// perception.
-	for name in ([]string{"declare Physics:", "declare Audio:", "declare Animator:", "declare Sprites:", "declare Ui:", "declare Render:", "declare Perception:"}) {
+	for name in ([]string{"declare Physics:", "declare Audio:", "declare Animator:", "declare Sprites:", "declare Ui:", "declare Render:", "declare Perception:", "declare Save:"}) {
 		expect(t, text, name)
 	}
 	expect(t, text, "\tset_paused: (paused: boolean) -> (),")
 	// And the project's.
 	expect(t, text, "declare TestComponent:")
+}
+
+@(test)
+a_quit_ends_the_loop :: proc(t: ^testing.T) {
+	g := new(Game)
+	defer free(g)
+	testing.expect_value(t, g.run, Run_State.Running)
+	request_quit(g)
+	testing.expect_value(t, g.run, Run_State.Quitting)
+}
+
+@(test)
+a_quit_under_an_editor_does_nothing :: proc(t: ^testing.T) {
+	g := new(Game)
+	defer free(g)
+	g.editor.session.connection = 1
+	request_quit(g)
+	testing.expect_value(t, g.run, Run_State.Running)
 }

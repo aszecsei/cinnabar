@@ -6,6 +6,7 @@
 package game
 
 import "core:c"
+import "core:log"
 import "core:time"
 
 import "cinnabar:core"
@@ -20,6 +21,7 @@ import "cinnabar:engine/nav"
 import "cinnabar:engine/physics"
 import "cinnabar:engine/project"
 import "cinnabar:engine/render"
+import "cinnabar:engine/save"
 import "cinnabar:engine/scene"
 import "cinnabar:engine/script"
 import "cinnabar:engine/sprite"
@@ -28,6 +30,13 @@ import "cinnabar:engine/volume"
 
 // The game looks for a change to the project's settings' files this often, in seconds.
 PROJECT_CHECK_INTERVAL :: 0.5
+
+// Run_State is whether the game loop goes on. Running is the zero value, and is right for a game that starts: nothing
+// has asked to quit.
+Run_State :: enum u8 {
+	Running,
+	Quitting,
+}
 
 // Game is the root of the standard game's persistent state. The host owns its memory. The project's own state, its
 // Hooks.State, follows it at USER_OFFSET (see user).
@@ -46,6 +55,9 @@ Game :: struct {
 	// A paused game's world takes no time: no ticks and no particles, while the scripts and the UI run on, as a pause
 	// menu needs. Scripts set it with Game.set_paused.
 	paused:             bool,
+	// Whether the game loop goes on. request_quit is the only writer, and game_update ends the loop once it reads
+	// Quitting.
+	run:                Run_State,
 	// The audio device's test tone, which CINNABAR_TEST_TONE plays in place of the game's sounds.
 	tone:               audio.Tone,
 	world:              ecs.World,
@@ -71,6 +83,16 @@ Game :: struct {
 	scripts:            script.Runtime,
 	// What the editor knows of the world (see docs/editor/link.md#world).
 	editor:             editor.Editor,
+}
+
+// request_quit asks the game to end after this frame, as Game.quit does. While an editor is linked it does nothing, since
+// the editor owns the game's life: it logs that, and the game goes on.
+request_quit :: proc(g: ^Game) {
+	if editor.active(&g.editor) {
+		log.info("game: quit ignored: the editor keeps the game running")
+		return
+	}
+	g.run = .Quitting
 }
 
 // USER_OFFSET is where the project's state begins, after Game, at the alignment that the host gives the whole state.
@@ -220,6 +242,7 @@ register_scripts :: proc(r: ^script.Runtime) {
 	// never does.
 	g := container_of(r, Game, "scripts")
 	project.define_quality_bindings(r, &g.script_quality)
+	save.register_scripts(r)
 	physics.register_scripts(r, &g.physics)
 	audio.register_scripts(r, &g.audio)
 	anim.register_scripts(r, &g.animation)
@@ -232,4 +255,8 @@ register_scripts :: proc(r: ^script.Runtime) {
 			game_of(L).paused = bool(luau.toboolean(L, 1))
 			return 0
 		}, "(paused: boolean) -> ()")
+	script.define(r, "Game.quit", proc(L: ^luau.State) -> c.int {
+			request_quit(game_of(L))
+			return 0
+		}, "() -> ()")
 }
