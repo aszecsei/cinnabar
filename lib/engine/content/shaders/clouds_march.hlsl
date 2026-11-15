@@ -9,8 +9,13 @@
 // The march's step is at least the layer's thickness over this, so a short segment is not oversampled; a long one is
 // the segment over the level's steps, so the budget always reaches its end.
 static const float FINE_STEPS = 64;
-// After this many empty samples in a row the march doubles its step, until it finds cloud again.
+// After this many empty samples in a row the march doubles its step at each empty sample, up to EMPTY_MAX_STEPS fine
+// steps, until it finds cloud again.
 static const uint EMPTY_SAMPLES = 3;
+static const float EMPTY_MAX_STEPS = 8;
+// The probe away from the sun takes this many samples, whose lengths double, out to at most BACK_REACH meters.
+static const uint BACK_STEPS = 4;
+static const float BACK_REACH = 1000;
 // The march stops behind this much cloud.
 static const float MIN_TRANSMITTANCE = 0.01;
 
@@ -55,9 +60,9 @@ float albedo(float precipitation) {
 	return lerp(0.95, 0.8, precipitation);
 }
 
-// sun_light is the sun's light scattered toward the camera at a sample: a light march toward the sun through the cheap
-// density in steps that double, then the multiple scattering octaves of its optical depth, each with its own phase, and
-// the powder effect, which darkens the creases of a front-lit cloud.
+// sun_light is the sun's light scattered toward the camera at a sample, before the albedo: a light march toward the sun
+// through the expected density (cheap_sigma) in steps that double, a shorter probe away from the sun, and the sun term
+// of the two optical depths (cloud_sun_scattering).
 float3 sun_light(float3 p, float h, float t, float mu_sun) {
 	float3 to_sun = clouds.sun_direction.xyz;
 	float reach = min((clouds.top - h) / max(to_sun.y, 0.1), LIGHT_REACH_MAX);
@@ -70,15 +75,18 @@ float3 sun_light(float3 p, float h, float t, float mu_sun) {
 		od += cheap_sigma(p + to_sun * middle, h + to_sun.y * middle, t) * ds;
 		s += ds;
 	}
-	float3 sun = 0;
-	float a = 1;
-	[unroll] for (uint o = 0; o < SCATTER_OCTAVES; o++) {
-		sun += a * cloud_phase(mu_sun, a) * exp(-a * od);
-		a *= SCATTER_ATTENUATION;
+	// The probe away from the sun, down to the layer's bottom or BACK_REACH.
+	float back_reach = min((h - clouds.bottom) / max(to_sun.y, 0.1), BACK_REACH);
+	float step_b = back_reach / (exp2(float(BACK_STEPS)) - 1);
+	float od_back = 0;
+	s = 0;
+	[unroll] for (uint j = 0; j < BACK_STEPS; j++) {
+		float ds = step_b * exp2(float(j));
+		float middle = s + ds * 0.5;
+		od_back += cheap_sigma(p - to_sun * middle, h - to_sun.y * middle, t) * ds;
+		s += ds;
 	}
-	float front_lit = saturate(-mu_sun * 0.5 + 0.5);
-	float powder = lerp(1, 1 - exp(-2 * od), front_lit);
-	return sun * powder * clouds.sun_illuminance.rgb;
+	return cloud_sun_scattering(od, od_back, mu_sun, to_sun.y) * clouds.sun_illuminance.rgb;
 }
 
 // At the bottom of the layer, the share of the upper hemisphere's light that comes down through the cloud, and the
@@ -135,36 +143,43 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 		float thickness = clouds.top - clouds.bottom;
 		float step = max((t1 - t0) / float(clouds.steps), thickness / FINE_STEPS);
 		float t = t0 + jitter(id.xy) * step;
+		// The last empty sample, which the march steps back to when a coarse step finds cloud, and where that step found
+		// it: the march keeps the fine step until it is past there.
+		float last_empty = t;
+		float found = -1;
 		uint empty = 0;
 		bool coarse = false;
 		for (uint i = 0; i < clouds.steps && t <= t1; i++) {
-			float dt = coarse ? 2 * step : step;
 			float3 p = d * t;
 			float h = height_at(h0, mu, t, R);
 			float hf = saturate((h - clouds.bottom) / thickness);
 			Cloud_Weather w = weather_at(p, t);
 			float base = 0;
 			float3 q = noise_position(p, h);
+			float coverage = anvil_coverage(w.coverage, hf, w.type);
 			if (w.coverage > 0.005) {
-				base = cloud_base(q, hf, anvil_coverage(w.coverage, hf, w.type), w.type);
+				base = cloud_base(q, hf, coverage, w.type);
 			}
 			if (base <= 0.01) {
 				empty++;
-				if (empty >= EMPTY_SAMPLES) {
-					coarse = true;
-				}
-				t += dt;
+				last_empty = t;
+				// A whole number of fine steps, so the march stays on the fine steps' grid.
+				float grow = empty >= EMPTY_SAMPLES && t > found + 0.5 * step ? min(exp2(float(empty - EMPTY_SAMPLES + 1)), EMPTY_MAX_STEPS) : 1;
+				coarse = grow > 1;
+				t += step * grow;
 				continue;
 			}
 			if (coarse) {
-				// Back to the fine step, from the sample before this one.
+				// A coarse step found cloud: back to the fine step after the last empty sample.
 				coarse = false;
+				found = t;
 				empty = 0;
-				t -= step;
+				t = last_empty + step;
 				continue;
 			}
 			empty = 0;
-			float density = w.far < 1 ? cloud_detail(q, hf, base, w.far) : base;
+			float dt = step;
+			float density = w.far < 1 ? cloud_detail(q, hf, base, w.far, coverage) : base;
 			float sigma = cloud_sigma(density, w.precipitation, t);
 			if (sigma > 0) {
 				float3 light = ambient_light_at(hf, w.coverage, w.precipitation);

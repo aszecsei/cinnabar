@@ -93,7 +93,7 @@ static const float CLOUD_EXTINCTION = 0.05;
 // least common multiple, which noise_offset is reduced by. The cirrus reads the shape stretched CIRRUS_STRETCH times
 // along the wind, through cirrus_offset, which is reduced in the wind's frame (cirrus_offset in clouds.odin).
 static const float CLOUD_SHAPE_PERIOD = 8000;
-static const float CLOUD_DETAIL_PERIOD = 600;
+static const float CLOUD_DETAIL_PERIOD = 300;
 static const float CLOUD_CURL_PERIOD = 4000;
 static const float CIRRUS_PERIOD = 8000;
 static const float CIRRUS_STRETCH = 3;
@@ -116,6 +116,19 @@ static const float CLOUD_MAX_SCENE = 60000;
 // eccentricity of the one before.
 static const uint SCATTER_OCTAVES = 3;
 static const float SCATTER_ATTENUATION = 0.5;
+// The sun term's constants, fitted by tools/cloud_scatter to a slab and a sphere (see
+// docs/rendering/clouds.md#multiple-scattering). The powder effect's strength. The diffusion floor's weight, the power
+// of the sun's elevation's sine that scales it, how fast it builds up with the optical depth toward the sun, and how
+// fast it falls off with the vertical depth. The reflection's weight, how fast it builds up with the optical depth
+// away from the sun, and how fast it falls off with the optical depth toward it.
+static const float POWDER_STRENGTH = 0.35;
+static const float DIFFUSION_WEIGHT = 0.48;
+static const float DIFFUSION_POWER = 1.25;
+static const float DIFFUSION_RISE = 0.28;
+static const float DIFFUSION_DECAY = 0.08;
+static const float REFLECT_WEIGHT = 3;
+static const float REFLECT_THICKNESS = 0.12;
+static const float REFLECT_FALL = 0.1;
 
 float remap(float v, float lo, float hi, float a, float b) {
 	return a + (v - lo) / max(hi - lo, 1e-4) * (b - a);
@@ -130,6 +143,39 @@ float hg_phase(float mu, float g) {
 // cloud_phase is the clouds' phase: a forward lobe and a weaker back lobe, each scaled by an octave's eccentricity.
 float cloud_phase(float mu, float k) {
 	return lerp(hg_phase(mu, -0.3 * k), hg_phase(mu, 0.8 * k), 0.5);
+}
+
+// cloud_sun_scattering is the light of a sun of illuminance 1 that a sample scatters toward the camera, before the
+// albedo: od is the sample's optical depth toward the sun, od_back its optical depth away from the sun, mu_sun the
+// cosine between the view ray and the direction toward the sun, and sun_up the sine of the sun's elevation. The
+// octaves of multiple scattering each have their own phase, and the powder effect darkens the creases of a front-lit
+// cloud, at POWDER_STRENGTH. The diffusion floor is the light that has scattered many times, as in a slab that the
+// sun lights from above: it builds up over the first optical depths, falls off with the vertical depth od · sun_up,
+// and takes the last octave's phase. The reflection is the light that the cloud behind the sample scatters back
+// toward the sun's side, which makes the lit face of a thick cloud glow: it builds up with od_back, falls off with od,
+// and takes the second octave's phase. Both build up quadratically, so a thin edge keeps the octaves' light. Matches
+// cloud_sun_scattering in clouds.odin.
+float cloud_sun_scattering(float od, float od_back, float mu_sun, float sun_up) {
+	float sun = 0;
+	float a = 1;
+	float second_phase = 0;
+	float last_phase = 0;
+	[unroll] for (uint o = 0; o < SCATTER_OCTAVES; o++) {
+		last_phase = cloud_phase(mu_sun, a);
+		if (o == 1) {
+			second_phase = last_phase;
+		}
+		sun += a * last_phase * exp(-a * od);
+		a *= SCATTER_ATTENUATION;
+	}
+	float front_lit = saturate(-mu_sun * 0.5 + 0.5);
+	sun *= lerp(1, 1 - exp(-2 * od), front_lit * POWDER_STRENGTH);
+	float up = saturate(sun_up);
+	float buildup = 1 - exp(-DIFFUSION_RISE * od);
+	float floor_light = DIFFUSION_WEIGHT * pow(up, DIFFUSION_POWER) * buildup * buildup * exp(-DIFFUSION_DECAY * od * up) * last_phase;
+	float behind = 1 - exp(-REFLECT_THICKNESS * od_back);
+	float reflect_light = REFLECT_WEIGHT * behind * behind * exp(-REFLECT_FALL * od) * second_phase;
+	return sun + floor_light + reflect_light;
 }
 
 // The geometry: a ray from a point at height h0 above the ground with mu, the cosine of its angle from the zenith, and
@@ -269,10 +315,12 @@ float3 noise_position(float3 p, float h) {
 	return float3(p.x + clouds.noise_offset.x, h, p.z + clouds.noise_offset.y);
 }
 
-// The share of the shape's Worley octaves that the remap cuts from its R's low end. The R's values sit about 0.7, so
-// cutting SHAPE_EROSION of the octaves' sum (about 0.4) leaves a base about 0.55 with a wide spread, and a coverage
+// How deep the billows cut into a cloud's mass: the shape's G, the masses, loses up to BILLOW_DEPTH where the billows,
+// its B and A, are farthest from their cells' centers, so each billow bulges round its center. BILLOW_MIX is the
+// share of the 500 m billows, B, against the 250 m ones, A. With the masses' contrast in clouds_noise.hlsl, a coverage
 // then covers about its share of the sky.
-static const float SHAPE_EROSION = 0.75;
+static const float BILLOW_DEPTH = 0.5;
+static const float BILLOW_MIX = 0.65;
 
 // base_lift is how far up the layer a cloud's base is at a point of the noise, as a share of the thickness: the
 // shape's R at one slice over CLOUD_LIFT_PERIOD, so neighbouring clouds sit at different heights, scaled by
@@ -282,23 +330,32 @@ float base_lift(float3 q, float type) {
 	return clouds.base_variation * CLOUD_LIFT_MAX * saturate(remap(n, 0.45, 0.95, 0, 1)) * (1 - saturate((type - 0.5) * 2));
 }
 
-// cloud_base is the cheap density at a point of the noise: the shape noise, eroded by its Worley octaves, shaped by the
-// type's height gradient, which each cloud's base lift moves up, and the coverage.
+// cloud_base is the cheap density at a point of the noise: the shape's masses with billows on their surface, shaped by
+// the type's height gradient, which each cloud's base lift moves up, and the coverage.
 float cloud_base(float3 q, float hf, float coverage, float type) {
 	float4 s = cn_texture3d(clouds.shape).SampleLevel(cn_sampler(clouds.noise_sampler), q / CLOUD_SHAPE_PERIOD, 0);
-	float fbm = s.g * 0.625 + s.b * 0.25 + s.a * 0.125;
-	float base = saturate(remap(s.r, SHAPE_EROSION * fbm, 1, 0, 1)) * cloud_gradient(hf - base_lift(q, type), type);
+	float billows = lerp(s.a, s.b, BILLOW_MIX);
+	float base = saturate(remap(s.g, BILLOW_DEPTH * (1 - billows), 1, 0, 1)) * cloud_gradient(hf - base_lift(q, type), type);
 	return saturate(remap(base, 1 - coverage, 1, 0, 1)) * coverage;
 }
 
-// cloud_detail is the full density: the base eroded by the detail noise, which the curl noise swirls at the base of the
-// layer, with wispy edges at the bottom and billows above. The far clouds keep the base alone.
-float cloud_detail(float3 q, float hf, float base, float far) {
+// The most that the detail noise erodes, as a share of the cloud's own range, the base over its coverage, and the
+// erosion's mean share of it: the detail noise's mean. As a share, the erosion carves the same billows at any coverage;
+// taken from the base itself, it ate most of a cloud at a low coverage, whose base is at most the coverage.
+static const float DETAIL_EROSION = 0.7;
+static const float DETAIL_MEAN = 0.5;
+
+// cloud_detail is the full density: the base eroded by the detail noise, as a share of the coverage's range, which the
+// curl noise swirls at the base of the layer, with wispy edges at the bottom and billows above. The far clouds keep
+// the base alone.
+float cloud_detail(float3 q, float hf, float base, float far, float coverage) {
 	float2 curl = (cn_texture(clouds.curl).SampleLevel(cn_sampler(clouds.noise_sampler), q.xz / CLOUD_CURL_PERIOD, 0).rg * 2 - 1) * CLOUD_CURL_STRENGTH * (1 - hf);
 	float3 dn = cn_texture3d(clouds.detail).SampleLevel(cn_sampler(clouds.noise_sampler), (q + float3(curl.x, 0, curl.y)) / CLOUD_DETAIL_PERIOD, 0).rgb;
-	float dfbm = dn.r * 0.625 + dn.g * 0.25 + dn.b * 0.125;
+	// The octaves' weights favour the finer ones, which fray the silhouettes, over the coarse one.
+	float dfbm = dn.r * 0.3 + dn.g * 0.4 + dn.b * 0.3;
 	float dmod = lerp(dfbm, 1 - dfbm, saturate(hf * 10));
-	return saturate(remap(base, dmod * 0.35 * (1 - far), 1, 0, 1));
+	float c = max(coverage, 1e-3);
+	return saturate(remap(base / c, dmod * DETAIL_EROSION * (1 - far), 1, 0, 1)) * c;
 }
 
 // cloud_sigma is the extinction of a meter of cloud at a density, thicker in rain, fading out with the distance so
@@ -307,8 +364,11 @@ float cloud_sigma(float density, float precipitation, float t) {
 	return density * CLOUD_EXTINCTION * clouds.density * lerp(1, 2, precipitation) * (1 - smoothstep(CLOUD_FADE_START, CLOUD_MAX_DISTANCE, t));
 }
 
-// cheap_sigma is the extinction of the cheap density at a point relative to the camera, at a height above the ground,
-// for the light march and the shadow map, with the weather's far blend by a distance.
+// cheap_sigma is the extinction at a point relative to the camera, at a height above the ground, for the light march
+// and the shadow map, with the weather's far blend by a distance: the cheap density, eroded by the detail noise's mean
+// erosion, so it is the full density's expected value without the detail noise's fetches. The cheap density alone
+// is the full density before its erosion, which is several times the full density near a cloud's soft edges, so the
+// light march and the shadow map saw a fatter cloud than the march draws.
 float cheap_sigma(float3 p, float h, float t) {
 	float hf = saturate((h - clouds.bottom) / max(clouds.top - clouds.bottom, 1));
 	if (hf <= 0 || hf >= 1) {
@@ -320,7 +380,9 @@ float cheap_sigma(float3 p, float h, float t) {
 	}
 	float coverage = anvil_coverage(w.coverage, hf, w.type);
 	float base = cloud_base(noise_position(p, h), hf, coverage, w.type);
-	return cloud_sigma(base, w.precipitation, t);
+	float c = max(coverage, 1e-3);
+	float density = saturate(remap(base / c, DETAIL_MEAN * DETAIL_EROSION * (1 - w.far), 1, 0, 1)) * c;
+	return cloud_sigma(density, w.precipitation, t);
 }
 
 // cloud_direction is the direction of a texel of the cloud buffer, from its block's center on the screen.

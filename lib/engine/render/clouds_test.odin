@@ -170,6 +170,154 @@ the_gradient_follows_the_types_knots_and_the_far_clouds_blend_over :: proc(t: ^t
 	testing.expect_value(t, cloud_far_coverage(0.9, 0.5, cloud_far(5000, 15000)), 0.9)
 }
 
+// tools/cloud_scatter's reference (`just cloud-scatter`, see docs/rendering/clouds.md#multiple-scattering): the sun's
+// light that reaches a sample on the bottom of a uniform slab of cloud, scattered toward the viewer, for a sun of
+// illuminance 1 and before the albedo, by the sun's elevation (90, 45, 20 and 5 degrees), the sample's optical depth
+// toward the sun (1, 5, 15 and 30) and the view's angle from the sun (0, 45, 90, 135 and 180 degrees, turned downward
+// in the sun's vertical plane).
+@(private = "file")
+SCATTER_ELEVATIONS := [4]f32{90, 45, 20, 5}
+@(private = "file")
+SCATTER_DEPTHS := [4]f32{1, 5, 15, 30}
+@(private = "file")
+SCATTER_VIEWS := [5]f32{0, 45, 90, 135, 180}
+@(private = "file")
+SCATTER_REFERENCE := [4][4][5]f32 {
+	{
+		{8.038e-01, 7.743e-02, 5.649e-02, 6.182e-02, 8.061e-02},
+		{8.666e-02, 5.837e-02, 3.698e-02, 3.264e-02, 3.615e-02},
+		{2.504e-02, 2.322e-02, 1.412e-02, 1.261e-02, 1.373e-02},
+		{1.025e-02, 9.465e-03, 5.850e-03, 5.200e-03, 5.656e-03},
+	},
+	{
+		{8.011e-01, 6.805e-02, 4.069e-02, 5.601e-02, 7.599e-02},
+		{6.856e-02, 2.924e-02, 2.418e-02, 2.692e-02, 2.627e-02},
+		{1.873e-02, 1.149e-02, 1.022e-02, 1.099e-02, 1.030e-02},
+		{8.654e-03, 5.612e-03, 4.860e-03, 5.137e-03, 4.899e-03},
+	},
+	{
+		{7.894e-01, 4.482e-02, 3.110e-02, 4.643e-02, 6.812e-02},
+		{4.827e-02, 1.406e-02, 1.426e-02, 1.542e-02, 1.585e-02},
+		{1.003e-02, 6.145e-03, 6.789e-03, 7.049e-03, 6.104e-03},
+		{5.635e-03, 3.421e-03, 3.901e-03, 3.792e-03, 3.251e-03},
+	},
+	{
+		{7.364e-01, 2.946e-02, 2.037e-02, 3.438e-02, 5.525e-02},
+		{3.281e-02, 5.664e-03, 5.336e-03, 6.186e-03, 8.914e-03},
+		{4.339e-03, 2.812e-03, 2.880e-03, 2.830e-03, 3.256e-03},
+		{2.316e-03, 1.819e-03, 1.931e-03, 1.910e-03, 2.029e-03},
+	},
+}
+
+// tools/cloud_scatter's sphere (`cloud_scatter back`): the sun's light that reaches a sample of a uniform sphere of
+// cloud, scattered toward a viewer who looks straight into its surface, before the albedo: at optical radii 10 and 30,
+// on the surface and 1 inside it, from the point that faces the sun around to the far side. Each case is its optical
+// depth toward the sun, its optical depth away from it, the cosine between the view and the sun, and the reference.
+@(private = "file")
+SPHERE_REFERENCE := [20][4]f32 {
+	{0.000, 20.000, -1.000, 2.412e-01},
+	{0.000, 14.142, -0.707, 1.760e-01},
+	{0.000, 0.000, -0.000, 7.289e-02},
+	{14.142, 0.000, 0.707, 5.259e-03},
+	{20.000, 0.000, 1.000, 3.770e-03},
+	{1.000, 19.000, -1.000, 2.463e-01},
+	{1.350, 14.078, -0.707, 1.775e-01},
+	{4.359, 4.359, -0.000, 4.741e-02},
+	{14.078, 1.350, 0.707, 1.054e-02},
+	{19.000, 1.000, 1.000, 7.490e-03},
+	{0.000, 60.000, -1.000, 2.737e-01},
+	{0.000, 42.426, -0.707, 1.915e-01},
+	{0.000, 0.000, -0.000, 5.382e-02},
+	{42.426, 0.000, 0.707, 9.886e-04},
+	{60.000, 0.000, 1.000, 6.599e-04},
+	{1.000, 59.000, -1.000, 3.060e-01},
+	{1.391, 42.404, -0.707, 2.078e-01},
+	{7.681, 7.681, -0.000, 1.898e-02},
+	{42.404, 1.391, 0.707, 1.986e-03},
+	{59.000, 1.000, 1.000, 1.282e-03},
+}
+
+// On the slab's bottom, where nothing is behind a sample, the sun term is within a factor of 2.5 of the reference at
+// every case, and the RMS of its log error is at most 0.38. The octaves alone were 745 times too dark at an optical
+// depth of 30 at noon, with an RMS of 3.33. On the sphere, with a sun 45° up, it is within a factor of 3, with an RMS of
+// at most 0.5: the lit face, which the reflection makes glow, within 1.5, and the far side of a large sphere, which loses
+// light that a slab keeps, up to 2.9 too bright. Where a sample has at most 1 optical depth of cloud toward the sun and
+// away from it, the floor and the reflection add at most 10% to the octaves, so a thin edge keeps its light; with the
+// sun on the horizon and nothing behind the sample, the term is the octaves alone, which isolates them.
+@(test)
+the_sun_term_follows_the_multiple_scattering_reference :: proc(t: ^testing.T) {
+	sum: f32
+	for elevation, e in SCATTER_ELEVATIONS {
+		to_sun := [2]f32 {
+			math.cos(math.to_radians(elevation)),
+			math.sin(math.to_radians(elevation)),
+		}
+		for od, o in SCATTER_DEPTHS {
+			for view, v in SCATTER_VIEWS {
+				angle := math.to_radians(elevation - view)
+				mu := math.cos(angle) * to_sun.x + math.sin(angle) * to_sun.y
+				got := cloud_sun_scattering(od, 0, mu, to_sun.y)
+				ratio := got / SCATTER_REFERENCE[e][o][v]
+				testing.expectf(
+					t,
+					ratio >= 1 / 2.5 && ratio <= 2.5,
+					"sun %v° od %v view %v°: %v, the reference %v",
+					elevation,
+					od,
+					view,
+					got,
+					SCATTER_REFERENCE[e][o][v],
+				)
+				sum += math.ln(ratio) * math.ln(ratio)
+			}
+		}
+	}
+	rms := math.sqrt(sum / f32(len(SCATTER_REFERENCE) * len(SCATTER_DEPTHS) * len(SCATTER_VIEWS)))
+	testing.expectf(t, rms <= 0.38, "the RMS of the log error on the slab is %v", rms)
+
+	sum = 0
+	for c in SPHERE_REFERENCE {
+		got := cloud_sun_scattering(c[0], c[1], c[2], math.sin(math.to_radians(f32(45))))
+		ratio := got / c[3]
+		testing.expectf(
+			t,
+			ratio >= 1 / 3.0 && ratio <= 3,
+			"sphere od %v od_back %v mu %v: %v, the reference %v",
+			c[0],
+			c[1],
+			c[2],
+			got,
+			c[3],
+		)
+		sum += math.ln(ratio) * math.ln(ratio)
+	}
+	rms = math.sqrt(sum / f32(len(SPHERE_REFERENCE)))
+	testing.expectf(t, rms <= 0.5, "the RMS of the log error on the sphere is %v", rms)
+
+	for elevation := f32(0); elevation <= 90; elevation += 5 {
+		sun_up := math.sin(math.to_radians(elevation))
+		for mu := f32(-1); mu <= 1; mu += 0.125 {
+			for od := f32(0.05); od <= 1; od += 0.05 {
+				for od_back := f32(0); od_back <= 1; od_back += 0.1 {
+					octaves := cloud_sun_scattering(od, 0, mu, 0)
+					added := cloud_sun_scattering(od, od_back, mu, sun_up) - octaves
+					testing.expectf(
+						t,
+						added <= 0.1 * octaves,
+						"sun %v° mu %v od %v od_back %v: the floor and the reflection add %v to %v",
+						elevation,
+						mu,
+						od,
+						od_back,
+						added,
+						octaves,
+					)
+				}
+			}
+		}
+	}
+}
+
 // The shadow map is centered where the sun's rays through the camera meet the layer's bottom, so the camera reads it at
 // its middle, within the texel that the center snaps to.
 @(test)
@@ -341,7 +489,7 @@ run_cloud_frame :: proc(
 	if cf := f.clouds; cf != nil {
 		run.clouds = true
 		run.shadow, run.valid, run.bake, run.sun =
-			cf.shadow != 0, cf.history.valid, cf.bake_noise, cf.sun
+			cf.shadow != 0, cf.history.valid, cf.bake_noise != nil, cf.sun
 		testing.expect(
 			t,
 			(lf.records[0].flags & {.Cloud_Shadow}) != {},
@@ -439,7 +587,8 @@ the_clouds_bake_their_noise_once_and_draw_every_frame_after :: proc(t: ^testing.
 	platform.gpu_submit = fail_submit
 	run := run_cloud_frame(t, r, &cache, exposure, settings, sky, true)
 	testing.expect(t, !run.ok && run.clouds && run.bake)
-	testing.expect_value(t, v.noise_state, Cloud_Noise_State.Pending)
+	_, pending := v.noise_state.(Cloud_Noise_Pending)
+	testing.expect(t, pending, "a failed frame left the noise baked")
 	platform.gpu_submit = null.submit
 	free_all(platform.frame_allocator)
 
@@ -448,7 +597,8 @@ the_clouds_bake_their_noise_once_and_draw_every_frame_after :: proc(t: ^testing.
 	for name in ([]string{"clouds noise", "clouds shadow", "clouds march", "clouds temporal", "clouds composite"}) {
 		testing.expectf(t, run.passes[name] == 1, "%s ran %d times", name, run.passes[name])
 	}
-	testing.expect_value(t, v.noise_state, Cloud_Noise_State.Ready)
+	ready, baked := v.noise_state.(Cloud_Noise_Ready)
+	testing.expect(t, baked && ready.version == v.noise.version, "the noise is not baked")
 	testing.expect(
 		t,
 		r.view.clouds.shadow_map != {} &&
@@ -461,6 +611,15 @@ the_clouds_bake_their_noise_once_and_draw_every_frame_after :: proc(t: ^testing.
 	testing.expect_value(t, run.passes["clouds noise"], 0)
 	testing.expect_value(t, run.passes["clouds march"], 1)
 	testing.expect_value(t, run.passes["clouds composite"], 1)
+	free_all(platform.frame_allocator)
+
+	// A recooked noise shader, a newer blob, bakes the noise again, and the noise is ready with its version.
+	v.noise.version += 1
+	run = run_cloud_frame(t, r, &cache, exposure, settings, sky, true)
+	testing.expect(t, run.ok && run.clouds && run.bake)
+	testing.expect_value(t, run.passes["clouds noise"], 1)
+	ready, baked = v.noise_state.(Cloud_Noise_Ready)
+	testing.expect(t, baked && ready.version == v.noise.version, "the recooked noise is not baked")
 	free_all(platform.frame_allocator)
 
 	// Another level's shadow map size makes the map again.

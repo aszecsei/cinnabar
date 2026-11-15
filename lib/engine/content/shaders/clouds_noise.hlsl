@@ -10,6 +10,16 @@ static const uint KIND_CURL = 2;
 static const uint SHAPE_SIZE = 128;
 static const uint DETAIL_SIZE = 32;
 static const uint CURL_SIZE = 128;
+// The low layer's masses' gradient noise, from this range to [0, 1]: a coverage then covers about its share of the sky.
+static const float2 MASS_CONTRAST = float2(0.3, 0.7);
+// The warp of the masses and billows: SHAPE_WARP_ITERATIONS passes, each moving the coordinates by gradient noise at
+// SHAPE_WARP_CELLS cells (500 m), times SHAPE_WARP_AMPLITUDE of the texture (about 120 m) across and SHAPE_WARP_VERTICAL
+// times that up and down, from where the pass before moved them. The stronger vertical warp lifts a cumulus's top into
+// rounded bulges; a weaker one smeared the clouds into layers. Baked into the texture, it costs the march nothing.
+static const uint SHAPE_WARP_ITERATIONS = 3;
+static const int SHAPE_WARP_CELLS = 16;
+static const float SHAPE_WARP_AMPLITUDE = 0.015;
+static const float SHAPE_WARP_VERTICAL = 2;
 
 uint pcg(uint x) {
 	uint state = x * 747796405u + 2891336453u;
@@ -73,6 +83,22 @@ float perlin3(float3 p, int cells) {
 		result += dot(g, f - float3(corner)) * w.x * w.y * w.z;
 	}
 	return result;
+}
+
+// warp_shape is a point of the shape texture warped by tiling gradient noise, a vector of three of its lookups at
+// whole-cell offsets, again and again, so the masses and billows swirl and lift into turrets as cumulus do, and the
+// texture still tiles.
+float3 warp_shape(float3 uvw) {
+	float3 warped = uvw;
+	for (uint k = 0; k < SHAPE_WARP_ITERATIONS; k++) {
+		float3 p = warped * float(SHAPE_WARP_CELLS);
+		float3 offset = float3(
+			perlin3(p, SHAPE_WARP_CELLS),
+			perlin3(p + float3(31, 17, 5), SHAPE_WARP_CELLS),
+			perlin3(p + float3(7, 41, 23), SHAPE_WARP_CELLS));
+		warped += offset * SHAPE_WARP_AMPLITUDE * float3(1, SHAPE_WARP_VERTICAL, 1);
+	}
+	return warped;
 }
 
 // perlin_fbm is perlin3 over octaves from a number of cells, each twice the one before with half the amplitude,
@@ -153,9 +179,14 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 		float w8 = inverted_worley(uvw, 8);
 		float w16 = inverted_worley(uvw, 16);
 		float worley = 0.625 * w4 + 0.25 * w8 + 0.125 * w16;
-		// Perlin-Worley: the billows carve the gradient noise's low end.
+		// R is Perlin-Worley, for the cirrus and the bases' lift: the billows carve the gradient noise's low end.
 		float r = remap(perlin, 0, 1, worley, 1);
-		cn_rw_texture3d(push.output)[id] = float4(saturate(r), w4, w8, w16);
+		// G is the low layer's masses: gradient noise over 4, 8 and 16 cells, stretched by MASS_CONTRAST, since its
+		// octaves' sum sits about 0.5. B and A are its billows: inverted Worley noise at 16 and 32 cells. All three are
+		// at the warped point.
+		float3 warped = warp_shape(uvw);
+		float mass = saturate(remap(perlin_fbm(warped, 4, 3), MASS_CONTRAST.x, MASS_CONTRAST.y, 0, 1));
+		cn_rw_texture3d(push.output)[id] = float4(saturate(r), mass, inverted_worley(warped, 16), inverted_worley(warped, 32));
 		break;
 	}
 	case KIND_DETAIL: {

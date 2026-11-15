@@ -25,7 +25,7 @@ CLOUD_SHAPE_SIZE :: 128
 CLOUD_DETAIL_SIZE :: 32
 CLOUD_CURL_SIZE :: 128
 // The least common multiple of the low layer's noise periods in the world (clouds_common.hlsli: the shape's 8000 m, the
-// detail's 600 and the curl's 4000), which the noise offset is reduced by, so hours of wind lose nothing. The cirrus
+// detail's 300 and the curl's 4000), which the noise offset is reduced by, so hours of wind lose nothing. The cirrus
 // reads the shape stretched CIRRUS_STRETCH times along the wind, so its offset is reduced in the wind's frame: by
 // CIRRUS_PERIOD times the stretch along it, and by CIRRUS_PERIOD across it.
 CLOUD_NOISE_PERIOD :: 24000
@@ -142,9 +142,23 @@ Cloud_State :: struct {
 
 // Cloud_Noise_State is whether the noise textures hold noise: Pending until a frame that bakes them executes, whose
 // commit marks Ready. A frame that fails leaves it Pending, so the next frame bakes again.
-Cloud_Noise_State :: enum u8 {
-	Pending,
-	Ready,
+Cloud_Noise_State :: union #no_nil {
+	Cloud_Noise_Pending,
+	Cloud_Noise_Ready,
+}
+
+Cloud_Noise_Pending :: struct {}
+
+// Cloud_Noise_Ready holds the version of the noise shader's blob that baked the textures.
+Cloud_Noise_Ready :: struct {
+	version: u32,
+}
+
+// cloud_noise_stale is whether the noise textures need baking with the noise shader at a blob's version: they hold no
+// noise yet, or a recooked shader makes other noise.
+cloud_noise_stale :: proc(state: Cloud_Noise_State, version: u32) -> bool {
+	ready, ok := state.(Cloud_Noise_Ready)
+	return !ok || ready.version != version
 }
 
 // Cloud_Constants matches Cloud_Constants in clouds_common.hlsli: every cloud pass's constants. right and up have the
@@ -245,8 +259,8 @@ Cloud_Frame :: struct {
 	// The imported shadow map, or 0 without a light that casts it.
 	shadow:      Texture,
 	shadow_fade: f32,
-	// This frame adds the noise pass.
-	bake_noise:  bool,
+	// The noise shader's blob version that this frame's noise pass bakes with, or nil without the pass.
+	bake_noise:  Maybe(u32),
 	// The resident weather map, or 0.
 	weather:     gpu.Texture,
 	// The scene that the composite writes, snapshotted at declaration: later passes replace Frame.scene.
@@ -277,7 +291,7 @@ clouds_destroy :: proc(v: ^Volumetric_Clouds, platform: ^core.Platform_API) {
 		platform.gpu_destroy_sampler(v.noise_sampler)
 		v.noise_sampler = {}
 	}
-	v.noise_state = .Pending
+	v.noise_state = Cloud_Noise_Pending{}
 }
 
 // cloud_state_destroy frees a view's clouds.
@@ -519,6 +533,73 @@ cloud_far_coverage :: proc(coverage, far_coverage, far: f32) -> f32 {
 	return math.lerp(coverage, far_coverage, far)
 }
 
+// The sun term's constants, which match clouds_common.hlsli: the octaves of multiple scattering, and the powder
+// effect's strength, the diffusion floor and the reflection that tools/cloud_scatter fits (see
+// docs/rendering/clouds.md#multiple-scattering).
+@(private = "file")
+SCATTER_OCTAVES :: 3
+@(private = "file")
+SCATTER_ATTENUATION :: f32(0.5)
+@(private = "file")
+POWDER_STRENGTH :: f32(0.35)
+@(private = "file")
+DIFFUSION_WEIGHT :: f32(0.48)
+@(private = "file")
+DIFFUSION_POWER :: f32(1.25)
+@(private = "file")
+DIFFUSION_RISE :: f32(0.28)
+@(private = "file")
+DIFFUSION_DECAY :: f32(0.08)
+@(private = "file")
+REFLECT_WEIGHT :: f32(3)
+@(private = "file")
+REFLECT_THICKNESS :: f32(0.12)
+@(private = "file")
+REFLECT_FALL :: f32(0.1)
+
+@(private = "file")
+hg_phase :: proc(mu, g: f32) -> f32 {
+	g2 := g * g
+	return (1 - g2) / (4 * math.PI * math.pow(max(1 + g2 - 2 * g * mu, 1e-4), 1.5))
+}
+
+@(private = "file")
+cloud_phase :: proc(mu, k: f32) -> f32 {
+	return math.lerp(hg_phase(mu, -0.3 * k), hg_phase(mu, 0.8 * k), f32(0.5))
+}
+
+// cloud_sun_scattering is the light of a sun of illuminance 1 that a sample scatters toward the camera, before the
+// albedo, from its optical depths toward the sun and away from it, the cosine between the view ray and the direction
+// toward the sun, and the sine of the sun's elevation, as cloud_sun_scattering in clouds_common.hlsli has it.
+cloud_sun_scattering :: proc(od, od_back, mu_sun, sun_up: f32) -> f32 {
+	sun := f32(0)
+	a := f32(1)
+	second_phase := f32(0)
+	last_phase := f32(0)
+	for o in 0 ..< SCATTER_OCTAVES {
+		last_phase = cloud_phase(mu_sun, a)
+		if o == 1 {
+			second_phase = last_phase
+		}
+		sun += a * last_phase * math.exp(-a * od)
+		a *= SCATTER_ATTENUATION
+	}
+	front_lit := clamp(-mu_sun * 0.5 + 0.5, 0, 1)
+	sun *= math.lerp(f32(1), 1 - math.exp(-2 * od), front_lit * POWDER_STRENGTH)
+	up := clamp(sun_up, 0, 1)
+	buildup := 1 - math.exp(-DIFFUSION_RISE * od)
+	floor :=
+		DIFFUSION_WEIGHT *
+		math.pow(up, DIFFUSION_POWER) *
+		buildup *
+		buildup *
+		math.exp(-DIFFUSION_DECAY * od * up) *
+		last_phase
+	behind := 1 - math.exp(-REFLECT_THICKNESS * od_back)
+	reflect := REFLECT_WEIGHT * behind * behind * math.exp(-REFLECT_FALL * od) * second_phase
+	return sun + floor + reflect
+}
+
 // cloud_shadow_center is the shadow map's center relative to the camera: where the sun's rays through the camera meet
 // the layer's bottom, which is bottom_rel below or above the camera, snapped to a texel in the render origin's space,
 // whose offset from the camera is camera_offset, so the map does not swim as the camera moves.
@@ -618,7 +699,9 @@ begin_clouds :: proc(f: ^Frame, s: Cloud_Settings, sky: Sky_Settings, ambient: A
 	// texture sky. In an Atmosphere its light is tinted by the air above the layer, from the untinted illuminance.
 	cf := new(Cloud_Frame, platform.frame_allocator)
 	cf.settings, cf.params, cf.size, cf.history, cf.upload = s, params, size, history, upload
-	cf.bake_noise = v.noise_state == .Pending
+	if cloud_noise_stale(v.noise_state, v.noise.version) {
+		cf.bake_noise = v.noise.version
+	}
 	sun := false
 	shadow_record := -1
 	sun_direction, base: [3]f32
@@ -784,7 +867,7 @@ add_cloud_shadow_passes :: proc(f: ^Frame) {
 	cf.shape = import_texture(g, v.shape, .Storage)
 	cf.detail = import_texture(g, v.detail, .Storage)
 	cf.curl = import_texture(g, v.curl, .Storage)
-	if cf.bake_noise {
+	if cf.bake_noise != nil {
 		p := add_compute_pass(g, "clouds noise", run_cloud_noise, f, queue = .Compute)
 		write(g, p, cf.shape)
 		write(g, p, cf.detail)
@@ -798,11 +881,14 @@ add_cloud_shadow_passes :: proc(f: ^Frame) {
 	}
 }
 
-// commit_cloud_noise marks the noise textures made, once the frame that baked them has executed.
+// commit_cloud_noise marks the noise textures made, with the shader's version that made them, once the frame that baked
+// them has executed.
 @(private = "file")
 commit_cloud_noise :: proc(data: rawptr) {
 	f := (^Frame)(data)
-	f.renderer.clouds.noise_state = .Ready
+	if version, ok := f.clouds.bake_noise.?; ok {
+		f.renderer.clouds.noise_state = Cloud_Noise_Ready{version}
+	}
 }
 
 // add_cloud_passes adds the march and the temporal pass, after the shadow maps and before the fog, whose results the
