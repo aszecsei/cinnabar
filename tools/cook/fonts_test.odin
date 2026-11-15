@@ -1,6 +1,7 @@
 package cook
 
 import "core:fmt"
+import "core:math"
 import "core:os"
 import "core:strings"
 import "core:testing"
@@ -173,4 +174,120 @@ fonts_that_cannot_cook_report_why :: proc(t: ^testing.T) {
 		}
 		testing.expectf(t, found, "an error says %q: %v", c.fragment, pass.problems.list)
 	}
+}
+
+// bilinear_median is the shader's median of the three channels after the sampler's bilinear filter, with the atlas
+// clamped at its edges, at the point (x, y) in texels from the atlas's top left. Texel i's centre is at i + 0.5.
+@(private = "file")
+bilinear_median :: proc(texels: [^][4]u8, size: [2]int, x, y: f64) -> f64 {
+	fx, fy := x - 0.5, y - 0.5
+	x0, y0 := int(math.floor(fx)), int(math.floor(fy))
+	tx, ty := fx - f64(x0), fy - f64(y0)
+	channel :: proc(texels: [^][4]u8, size: [2]int, x, y, c: int) -> f64 {
+		p := texels[clamp(y, 0, size.y - 1) * size.x + clamp(x, 0, size.x - 1)]
+		return f64(p[c])
+	}
+	filtered: [3]f64
+	for c in 0 ..< 3 {
+		top := math.lerp(
+			channel(texels, size, x0, y0, c),
+			channel(texels, size, x0 + 1, y0, c),
+			tx,
+		)
+		bottom := math.lerp(
+			channel(texels, size, x0, y0 + 1, c),
+			channel(texels, size, x0 + 1, y0 + 1, c),
+			tx,
+		)
+		filtered[c] = math.lerp(top, bottom, ty)
+	}
+	r, g, b := filtered[0], filtered[1], filtered[2]
+	return max(min(r, g), min(max(r, g), b))
+}
+
+@(test)
+a_glyph_quad_never_samples_outside_its_cell :: proc(t: ^testing.T) {
+	// A quad's edge pixels sample up to half a texel past the cell's edge, where the sampler blends in the next cell's
+	// outermost texels. Rajdhani's o had (0, 255, 0) in the outer rows of its cell and (255, 0, 0) in the cell above,
+	// and half of each has a median of 127, which drew a line along the top of the quad.
+	tree := make_tree(
+		t,
+		{
+			{"content/fonts/sans.ttf", TEST_FONT},
+			{
+				"content/fonts/sans.ttf.meta",
+				"guid = 0123456789abcdef0123456789abcdef\nglyphs = all\n",
+			},
+		},
+	)
+	defer remove_tree(tree)
+	pass := cook(tree_options(tree), {.Font}, log_problems = false)
+	testing.expect(t, pass.ok)
+	guid := tree_guid(t, tree, "fonts/sans.ttf")
+	data := tree_blob(t, tree, guid)
+	blob, ok := format.font_view(data)
+	testing.expect(t, ok)
+	if !ok {
+		return
+	}
+	atlas_data := tree_blob(t, tree, blob.atlas)
+	atlas, atlas_ok := format.texture_view(atlas_data)
+	testing.expect(t, atlas_ok)
+	if !atlas_ok {
+		return
+	}
+	texels := ([^][4]u8)(raw_data(format.blob_bytes(atlas_data, atlas.mips)))
+	size := [2]int{int(atlas.size.x), int(atlas.size.y)}
+	checked, bad := 0, 0
+	for g in format.font_glyphs(data, blob) {
+		if g.rect.z == 0 {
+			continue
+		}
+		x0, y0, w, h := f64(g.rect.x), f64(g.rect.y), f64(g.rect.z), f64(g.rect.w)
+		// Points on the cell's edges and a quarter and half a texel inside them, every quarter texel along each.
+		for inside in ([]f64{0, 0.25, 0.5}) {
+			for along := 0.0; along <= w; along += 0.25 {
+				for p in ([][2]f64{{x0 + along, y0 + inside}, {x0 + along, y0 + h - inside}}) {
+					m := bilinear_median(texels, size, p.x, p.y)
+					if m >= 1 {
+						bad += 1
+						if bad == 1 {
+							testing.expectf(
+								t,
+								false,
+								"glyph %d at (%v, %v) has a median of %v",
+								g.id,
+								p.x,
+								p.y,
+								m,
+							)
+						}
+					}
+					checked += 1
+				}
+			}
+			for along := 0.0; along <= h; along += 0.25 {
+				for p in ([][2]f64{{x0 + inside, y0 + along}, {x0 + w - inside, y0 + along}}) {
+					m := bilinear_median(texels, size, p.x, p.y)
+					if m >= 1 {
+						bad += 1
+						if bad == 1 {
+							testing.expectf(
+								t,
+								false,
+								"glyph %d at (%v, %v) has a median of %v",
+								g.id,
+								p.x,
+								p.y,
+								m,
+							)
+						}
+					}
+					checked += 1
+				}
+			}
+		}
+	}
+	testing.expect_value(t, bad, 0)
+	testing.expect(t, checked > 1000)
 }

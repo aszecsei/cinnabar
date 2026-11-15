@@ -14,7 +14,7 @@ import format "cinnabar:engine/asset/format"
 // Fonts are TrueType and OpenType files. The cooker makes each one's atlas of multi-channel signed distance fields with
 // msdfgen, as a Texture sub-asset, and writes a Font blob of its metrics, its glyphs' cells in the atlas, and the file
 // itself, which the runtime shapes text with (see docs/content/kinds/fonts.md#fonts).
-FONT_COOK_VERSION :: "fonts 1"
+FONT_COOK_VERSION :: "fonts 2"
 
 // An atlas is at most this many texels on a side. A font whose glyphs do not fit fails, and a smaller em_size or
 // charset makes it fit.
@@ -436,6 +436,24 @@ Font_Draw :: struct {
 	failed: bool,
 }
 
+// clear_cell_ring zeroes the outermost texels of a cell's field in every channel. Its median is 0 there already, but its
+// channels are not: a channel's distance to the lines that extend the outline's edges can be far inside, so a texel of
+// the ring may be (0, 255, 0) beside a neighbouring cell's (255, 0, 0). The sampler filters each channel before the
+// shader takes the median, and a sample within half a texel of the cell's edge reads the neighbour's ring, so the
+// filtered texel would have a median of 127 and draw a line along the quad's edge. A ring of zeros reads as 0 whichever
+// side of the edge the sample is on.
+@(private = "file")
+clear_cell_ring :: proc(pixels: [][4]f32, size: [2]int) {
+	for y in 0 ..< size.y {
+		edge_row := y == 0 || y == size.y - 1
+		for x in 0 ..< size.x {
+			if edge_row || x == 0 || x == size.x - 1 {
+				pixels[y * size.x + x] = {}
+			}
+		}
+	}
+}
+
 // draw_font_cells draws each cell's distance field into the atlas, and fills in its plane. It returns false if msdfgen
 // could not use a glyph's outline.
 @(private = "file")
@@ -469,6 +487,7 @@ draw_font_cells :: proc(cells: []Font_Cell, scale, range: f64, atlas: Image) -> 
 			w.failed = true
 			return
 		}
+		clear_cell_ring(pixels, c.size)
 		rect := c.glyph.rect
 		for y in 0 ..< c.size.y {
 			row := (int(rect.y) + y) * w.atlas.width + int(rect.x)
