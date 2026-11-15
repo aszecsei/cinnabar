@@ -10,6 +10,8 @@ static const uint KIND_CURL = 2;
 static const uint SHAPE_SIZE = 128;
 static const uint DETAIL_SIZE = 32;
 static const uint CURL_SIZE = 128;
+// The low layer's masses' gradient noise, from this range to [0, 1]: a coverage then covers about its share of the sky.
+static const float2 MASS_CONTRAST = float2(0.3, 0.7);
 
 uint pcg(uint x) {
 	uint state = x * 747796405u + 2891336453u;
@@ -153,9 +155,13 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 		float w8 = inverted_worley(uvw, 8);
 		float w16 = inverted_worley(uvw, 16);
 		float worley = 0.625 * w4 + 0.25 * w8 + 0.125 * w16;
-		// Perlin-Worley: the billows carve the gradient noise's low end.
+		// R is Perlin-Worley, for the cirrus and the bases' lift: the billows carve the gradient noise's low end.
 		float r = remap(perlin, 0, 1, worley, 1);
-		cn_rw_texture3d(push.output)[id] = float4(saturate(r), w4, w8, w16);
+		// G is the low layer's masses: gradient noise over 4, 8 and 16 cells, stretched by MASS_CONTRAST, since its
+		// octaves' sum sits about 0.5. B and A are its billows: inverted Worley noise at 16 and 32 cells.
+		float mass = saturate(remap(perlin_fbm(uvw, 4, 3), MASS_CONTRAST.x, MASS_CONTRAST.y, 0, 1));
+		float w32 = inverted_worley(uvw, 32);
+		cn_rw_texture3d(push.output)[id] = float4(saturate(r), mass, w16, w32);
 		break;
 	}
 	case KIND_DETAIL: {

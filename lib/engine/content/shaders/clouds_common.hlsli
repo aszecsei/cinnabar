@@ -315,10 +315,12 @@ float3 noise_position(float3 p, float h) {
 	return float3(p.x + clouds.noise_offset.x, h, p.z + clouds.noise_offset.y);
 }
 
-// The share of the shape's Worley octaves that the remap cuts from its R's low end. The R's values sit about 0.7, so
-// cutting SHAPE_EROSION of the octaves' sum (about 0.4) leaves a base about 0.55 with a wide spread, and a coverage
+// How deep the billows cut into a cloud's mass: the shape's G, the masses, loses up to BILLOW_DEPTH where the billows,
+// its B and A, are farthest from their cells' centers, so each billow bulges round its center. BILLOW_MIX is the
+// share of the 500 m billows, B, against the 250 m ones, A. With the masses' contrast in clouds_noise.hlsl, a coverage
 // then covers about its share of the sky.
-static const float SHAPE_EROSION = 0.75;
+static const float BILLOW_DEPTH = 0.5;
+static const float BILLOW_MIX = 0.65;
 
 // base_lift is how far up the layer a cloud's base is at a point of the noise, as a share of the thickness: the
 // shape's R at one slice over CLOUD_LIFT_PERIOD, so neighbouring clouds sit at different heights, scaled by
@@ -328,12 +330,12 @@ float base_lift(float3 q, float type) {
 	return clouds.base_variation * CLOUD_LIFT_MAX * saturate(remap(n, 0.45, 0.95, 0, 1)) * (1 - saturate((type - 0.5) * 2));
 }
 
-// cloud_base is the cheap density at a point of the noise: the shape noise, eroded by its Worley octaves, shaped by the
-// type's height gradient, which each cloud's base lift moves up, and the coverage.
+// cloud_base is the cheap density at a point of the noise: the shape's masses with billows on their surface, shaped by
+// the type's height gradient, which each cloud's base lift moves up, and the coverage.
 float cloud_base(float3 q, float hf, float coverage, float type) {
 	float4 s = cn_texture3d(clouds.shape).SampleLevel(cn_sampler(clouds.noise_sampler), q / CLOUD_SHAPE_PERIOD, 0);
-	float fbm = s.g * 0.625 + s.b * 0.25 + s.a * 0.125;
-	float base = saturate(remap(s.r, SHAPE_EROSION * fbm, 1, 0, 1)) * cloud_gradient(hf - base_lift(q, type), type);
+	float billows = lerp(s.a, s.b, BILLOW_MIX);
+	float base = saturate(remap(s.g, BILLOW_DEPTH * (1 - billows), 1, 0, 1)) * cloud_gradient(hf - base_lift(q, type), type);
 	return saturate(remap(base, 1 - coverage, 1, 0, 1)) * coverage;
 }
 
