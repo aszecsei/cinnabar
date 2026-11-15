@@ -156,8 +156,9 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 			Cloud_Weather w = weather_at(p, t);
 			float base = 0;
 			float3 q = noise_position(p, h);
+			float coverage = anvil_coverage(w.coverage, hf, w.type);
 			if (w.coverage > 0.005) {
-				base = cloud_base(q, hf, anvil_coverage(w.coverage, hf, w.type), w.type);
+				base = cloud_base(q, hf, coverage, w.type);
 			}
 			if (base <= 0.01) {
 				empty++;
@@ -178,7 +179,7 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 			}
 			empty = 0;
 			float dt = step;
-			float density = w.far < 1 ? cloud_detail(q, hf, base, w.far) : base;
+			float density = w.far < 1 ? cloud_detail(q, hf, base, w.far, coverage) : base;
 			float sigma = cloud_sigma(density, w.precipitation, t);
 			if (sigma > 0) {
 				float3 light = ambient_light_at(hf, w.coverage, w.precipitation);

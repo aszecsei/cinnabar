@@ -337,18 +337,22 @@ float cloud_base(float3 q, float hf, float coverage, float type) {
 	return saturate(remap(base, 1 - coverage, 1, 0, 1)) * coverage;
 }
 
-// The most of the base that the detail noise erodes, and the erosion's mean share of it: the detail noise's mean.
-static const float DETAIL_EROSION = 0.35;
+// The most that the detail noise erodes, as a share of the cloud's own range, the base over its coverage, and the
+// erosion's mean share of it: the detail noise's mean. As a share, the erosion carves the same billows at any coverage;
+// taken from the base itself, it ate most of a cloud at a low coverage, whose base is at most the coverage.
+static const float DETAIL_EROSION = 0.7;
 static const float DETAIL_MEAN = 0.5;
 
-// cloud_detail is the full density: the base eroded by the detail noise, which the curl noise swirls at the base of the
-// layer, with wispy edges at the bottom and billows above. The far clouds keep the base alone.
-float cloud_detail(float3 q, float hf, float base, float far) {
+// cloud_detail is the full density: the base eroded by the detail noise, as a share of the coverage's range, which the
+// curl noise swirls at the base of the layer, with wispy edges at the bottom and billows above. The far clouds keep
+// the base alone.
+float cloud_detail(float3 q, float hf, float base, float far, float coverage) {
 	float2 curl = (cn_texture(clouds.curl).SampleLevel(cn_sampler(clouds.noise_sampler), q.xz / CLOUD_CURL_PERIOD, 0).rg * 2 - 1) * CLOUD_CURL_STRENGTH * (1 - hf);
 	float3 dn = cn_texture3d(clouds.detail).SampleLevel(cn_sampler(clouds.noise_sampler), (q + float3(curl.x, 0, curl.y)) / CLOUD_DETAIL_PERIOD, 0).rgb;
 	float dfbm = dn.r * 0.625 + dn.g * 0.25 + dn.b * 0.125;
 	float dmod = lerp(dfbm, 1 - dfbm, saturate(hf * 10));
-	return saturate(remap(base, dmod * DETAIL_EROSION * (1 - far), 1, 0, 1));
+	float c = max(coverage, 1e-3);
+	return saturate(remap(base / c, dmod * DETAIL_EROSION * (1 - far), 1, 0, 1)) * c;
 }
 
 // cloud_sigma is the extinction of a meter of cloud at a density, thicker in rain, fading out with the distance so
@@ -373,7 +377,8 @@ float cheap_sigma(float3 p, float h, float t) {
 	}
 	float coverage = anvil_coverage(w.coverage, hf, w.type);
 	float base = cloud_base(noise_position(p, h), hf, coverage, w.type);
-	float density = saturate(remap(base, DETAIL_MEAN * DETAIL_EROSION * (1 - w.far), 1, 0, 1));
+	float c = max(coverage, 1e-3);
+	float density = saturate(remap(base / c, DETAIL_MEAN * DETAIL_EROSION * (1 - w.far), 1, 0, 1)) * c;
 	return cloud_sigma(density, w.precipitation, t);
 }
 
