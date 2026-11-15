@@ -93,7 +93,7 @@ static const float CLOUD_EXTINCTION = 0.05;
 // least common multiple, which noise_offset is reduced by. The cirrus reads the shape stretched CIRRUS_STRETCH times
 // along the wind, through cirrus_offset, which is reduced in the wind's frame (cirrus_offset in clouds.odin).
 static const float CLOUD_SHAPE_PERIOD = 8000;
-static const float CLOUD_DETAIL_PERIOD = 600;
+static const float CLOUD_DETAIL_PERIOD = 300;
 static const float CLOUD_CURL_PERIOD = 4000;
 static const float CIRRUS_PERIOD = 8000;
 static const float CIRRUS_STRETCH = 3;
@@ -351,7 +351,8 @@ static const float DETAIL_MEAN = 0.5;
 float cloud_detail(float3 q, float hf, float base, float far, float coverage) {
 	float2 curl = (cn_texture(clouds.curl).SampleLevel(cn_sampler(clouds.noise_sampler), q.xz / CLOUD_CURL_PERIOD, 0).rg * 2 - 1) * CLOUD_CURL_STRENGTH * (1 - hf);
 	float3 dn = cn_texture3d(clouds.detail).SampleLevel(cn_sampler(clouds.noise_sampler), (q + float3(curl.x, 0, curl.y)) / CLOUD_DETAIL_PERIOD, 0).rgb;
-	float dfbm = dn.r * 0.625 + dn.g * 0.25 + dn.b * 0.125;
+	// The octaves' weights favour the finer ones, which fray the silhouettes, over the coarse one.
+	float dfbm = dn.r * 0.3 + dn.g * 0.4 + dn.b * 0.3;
 	float dmod = lerp(dfbm, 1 - dfbm, saturate(hf * 10));
 	float c = max(coverage, 1e-3);
 	return saturate(remap(base / c, dmod * DETAIL_EROSION * (1 - far), 1, 0, 1)) * c;

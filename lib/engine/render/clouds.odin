@@ -25,7 +25,7 @@ CLOUD_SHAPE_SIZE :: 128
 CLOUD_DETAIL_SIZE :: 32
 CLOUD_CURL_SIZE :: 128
 // The least common multiple of the low layer's noise periods in the world (clouds_common.hlsli: the shape's 8000 m, the
-// detail's 600 and the curl's 4000), which the noise offset is reduced by, so hours of wind lose nothing. The cirrus
+// detail's 300 and the curl's 4000), which the noise offset is reduced by, so hours of wind lose nothing. The cirrus
 // reads the shape stretched CIRRUS_STRETCH times along the wind, so its offset is reduced in the wind's frame: by
 // CIRRUS_PERIOD times the stretch along it, and by CIRRUS_PERIOD across it.
 CLOUD_NOISE_PERIOD :: 24000
