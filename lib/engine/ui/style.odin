@@ -242,5 +242,16 @@ cascade :: proc(d: ^Document, n: u32, parent: ^Style, states: bit_set[format.Ui_
 			}
 		}
 	}
+	// A button's text is a text node of its own, with no id, so the text that a script set on the button is its.
+	if node.element == .Text && node.id_hash == 0 && node.parent != NONE {
+		button := &d.nodes[node.parent]
+		if button.element == .Button && button.first_child == n && button.id_hash != 0 {
+			for o in d.overrides {
+				if o.id_hash == button.id_hash && o.attr == .Text {
+					apply(&st, o.attr, o.value)
+				}
+			}
+		}
+	}
 	return st
 }
