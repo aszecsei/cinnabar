@@ -150,7 +150,7 @@ end
 
 | Binding | What it does |
 |---|---|
-| `Audio.play(sound, position?, gain?, bus?)` | Plays a sound once, to its end. With a position, it is placed in the world, between `ONE_SHOT_MIN_DISTANCE` (1 m) and `ONE_SHOT_MAX_DISTANCE` (50 m). `bus` is a bus's name. |
+| `Audio.play(sound, position?, gain?, bus?, pitch?)` | Plays a sound once, to its end. With a position, it is placed in the world, between `ONE_SHOT_MIN_DISTANCE` (1 m) and `ONE_SHOT_MAX_DISTANCE` (50 m). `bus` is a bus's name. `pitch` is 1 unless given, and is kept between 0.1 and 4, as `Audio_Source.pitch` is, so a game can raise a pickup's pitch or vary it at random. The pitch is fixed when the sound starts. |
 | `Audio.set_bus_gain(bus, gain)` | Sets a bus's gain by name. |
 
 A value that is not a sound, or a name that is not a bus, raises an error in the script. Sounds start at `update`, after the frame's scripts, so they are heard from the frame's listener.
