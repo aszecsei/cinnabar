@@ -2,7 +2,7 @@
 
 What scripts see: the value types, entities and component references, the engine's global libraries, and the mapping from Unity's names. Behaviours have [their own document](behaviours.md).
 
-**In this document:** [Values](#values) · [The entity and component view](#the-entity-and-component-view) · [Engine libraries](#engine-libraries) · [Save](#save) · [Game.quit](#gamequit) · [Random](#random) · [Unity mapping](#unity-mapping)
+**In this document:** [Values](#values) · [The entity and component view](#the-entity-and-component-view) · [Engine libraries](#engine-libraries) · [Save](#save) · [Game.quit](#gamequit) · [Display](#display) · [Random](#random) · [Unity mapping](#unity-mapping)
 
 ## Values
 
@@ -68,6 +68,7 @@ Scripts change the world structure **immediately**, except for despawns. The scr
 | `Random` | The world's generator: `value()`, `range(min, max)`, `integer(min, max)`, `seed(n)`, `get_seed()`, `inside_unit_sphere()`, `on_unit_sphere()`, `inside_unit_circle()`, `rotation()` (see [Random](#random)) |
 | `Render` | The render quality, for a settings menu, where the game defines it (see [Render](#render)) |
 | `Save` | `read(name)` and `write(name, data)`: a table of strings, numbers and booleans in a file of the player's data, where the game defines it (see [Save](#save)) |
+| `Display` | The window mode, the resolution, HDR and its brightness, for an options menu, where the game defines it (see [Display](#display)) |
 | `Profile` | `begin(name)`, `finish()`, `zone(name, fn, ...)`: zones in the editor's profiler (see [Profile](#profile)) |
 | `Audio` | `play(sound, position?, gain?, bus?, pitch?)` and `set_bus_gain(bus, gain)`. See [Audio: Scripts](../audio/design.md#scripts). |
 | `Physics` | Queries (`raycast`, `raycast_all`, `sphere_cast`, `box_cast`, `capsule_cast`, `overlap_sphere`, `overlap_box`, `overlap_capsule`), `layers(...)`, `gravity()` and `set_gravity`, the effects on a body, with its entity first (`add_force`, `add_impulse`, `velocity`, `set_velocity`, `sleep` and the rest), and a joint's `set_motor(entity, mode, target?, max?)` and `set_joint_enabled(entity, enabled)`, and a character's `move_character(entity, velocity, gravity?)`, `character_ground(entity)` and `is_grounded(entity)`, where the game defines it (see [Physics: Scripts](../physics/design.md#scripts)) |
@@ -138,6 +139,31 @@ end
 ## Game.quit
 
 `Game.quit()` ends the game after the current frame, as a Quit button does: `game_update` returns false, and the host's loop or the release's stops. It does nothing while an editor is linked, and logs that the editor keeps the game running, since the editor decides when its game ends. `Game.set_paused(paused)` stops the world's time (see [The game package: The frame](../world/game-package.md#the-frame)).
+
+## Display
+
+The display's bindings, for the Display section of an options menu in Luau (`lib/engine/project/display_scripts.odin`). `game.register_scripts` defines them with `project.define_display_bindings(r)`, after the Render bindings, whose renderer and settings file they use. The window's modes and sizes are in [Presentation: Window modes](../gpu/presentation.md#window-modes).
+
+| Binding | What it does |
+|---|---|
+| `Display.modes()` | `{ "Windowed", "Borderless", "Fullscreen" }` |
+| `Display.resolutions()` | The sizes of the display modes of the window's monitor as `{ width, height }` tables, largest first, each size once |
+| `Display.get()` | A `DisplayState`: `mode`, the client size as `width` and `height`, `hdr` (HDR output is on), `hdr_available` (the display is in HDR now) and `paper_white` in nits, the one in effect |
+| `Display.set(change)` | Gives the display the fields of a `DisplayChange` that it has, any of `mode`, `width`, `height`, `hdr` and `paper_white`. It applies from the next frame |
+| `Display.save()` | Writes `display.mode`, `display.width`, `display.height`, `output` and, if one was set, `display.paper_white` to the user settings file, as `Render.save_quality` does; false if it could not |
+
+- **`set` raises an error**, which changes nothing, for a field that does not exist (and `hdr_available`, which is read only), a `mode` that is not in `Display.modes()`, a size that is not a whole number of pixels from 1 to 16384, a size in `Fullscreen` that is not in `Display.resolutions()`, and a `paper_white` outside 80 to 500. A `width` or `height` alone takes the other from the mode: the size that `Windowed` last had, or in `Fullscreen` the current display mode, or the monitor's own on the way in. `Borderless` covers the monitor whatever the size, and keeps it for `Windowed`. A change that the window refuses, such as in the editor's shared mode, is logged, and `Display.get` shows what the window is.
+- **`hdr = true`** asks for the output `Auto`, which is HDR10 on a display in HDR, and keeps an explicit HDR request as it is. `hdr = false` asks for `Sdr`. `CINNABAR_OUTPUT` replaces both.
+- **`paper_white`** replaces the volume's and the display's paper white in HDR, in the scene and in the UI.
+- **Types:** `DisplaySize`, `DisplayState` and `DisplayChange`, every field optional, are in `engine.d.luau`.
+- **The sample's** `display_keys.luau` is such a menu on keys: F5 takes the next window mode, Shift+F5 the next resolution, Ctrl+F5 turns HDR on or off, and Ctrl+Shift+F5 takes the next paper white. Each saves.
+
+```lua
+-- Fullscreen at the monitor's largest mode, in HDR, saved as the player's choice.
+local largest = Display.resolutions()[1]
+Display.set({ mode = "Fullscreen", width = largest.width, height = largest.height, hdr = true })
+Display.save()
+```
 
 ## Profile
 

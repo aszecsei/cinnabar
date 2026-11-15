@@ -1,11 +1,12 @@
 --!strict
 -- The game's main script. The scheduler resumes it once per frame, and it stays suspended across code reloads of the
 -- game DLL: its count keeps going, and Game.greeting shows the new code. Space reverses the large triangles' spin,
--- and Tab turns their Pulse off and on, unless the UI takes the keys, as the pause menu does. F9 and its modifiers change the render quality (see quality_keys.luau). It logs
+-- and Tab turns their Pulse off and on, unless the UI takes the keys, as the pause menu does. F9 and its modifiers change the render quality (see quality_keys.luau), and F5 and its modifiers change the display (see display_keys.luau). It logs
 -- gamepads that come and go, their A button, typed text and what an IME composes.
 local greeting = require("./greeting")
 local Pulse = require("./pulse")
 local quality_keys = require("./quality_keys")
+local display_keys = require("./display_keys")
 -- The guard scene's script actions exist once this has run (see ai/actions.luau).
 require("./ai/actions")
 
@@ -58,5 +59,6 @@ while true do
 	end
 	log_input()
 	quality_keys.update()
+	display_keys.update()
 	coroutine.yield()
 end

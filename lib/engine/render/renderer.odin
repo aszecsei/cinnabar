@@ -132,6 +132,8 @@ Renderer :: struct {
 	// set_quality).
 	caps:                   Caps,
 	quality:                Quality,
+	// The player's paper white for HDR output in nits, or 0 for none (see set_paper_white).
+	paper_white:            f32,
 	// A code reload may bring new descriptions, so the next frame updates every pipeline.
 	reloaded:               bool,
 }

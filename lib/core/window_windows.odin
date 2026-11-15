@@ -1,6 +1,9 @@
 #+private
 package core
 
+import "base:runtime"
+import "core:log"
+import "core:slice"
 import win "core:sys/windows"
 import "core:time"
 
@@ -16,6 +19,16 @@ window: struct {
 	// The first half of a character that WM_CHAR sends in two.
 	high_surrogate:  u16,
 	gamepads:        Gamepad_Poller,
+	// How the window is shown, which _window_set_mode alone changes (see docs/gpu/presentation.md#window-modes), and the
+	// client size that its last successful call asked for in Windowed or Borderless.
+	mode:            Window_Mode,
+	requested:       [2]i32,
+	// The GDI name of the monitor whose display mode Fullscreen changed, until it is restored. It is set while the
+	// display mode differs from the desktop's, which is when the mode is Fullscreen, unless a change of the window
+	// failed after the display mode changed.
+	display_changed: Maybe([32]u16),
+	// Alt+Enter was pressed. _window_poll takes it after the messages, since the window procedure has no context.
+	alt_enter:       bool,
 }
 
 _window_open :: proc(title: string, width, height: i32, visible := true) -> bool {
@@ -55,10 +68,15 @@ _window_open :: proc(title: string, width, height: i32, visible := true) -> bool
 		instance,
 		nil,
 	)
+	window.requested = {width, height}
 	return window.hwnd != nil
 }
 
 _window_close :: proc() {
+	if device, changed := window.display_changed.?; changed {
+		restore_display_mode(device)
+		window.display_changed = nil
+	}
 	if window.hwnd != nil {
 		win.DestroyWindow(window.hwnd)
 		window.hwnd = nil
@@ -71,6 +89,10 @@ _window_poll :: proc() -> (open: bool) {
 	for win.PeekMessageW(&msg, nil, 0, 0, win.PM_REMOVE) {
 		win.TranslateMessage(&msg)
 		win.DispatchMessageW(&msg)
+	}
+	if window.alt_enter {
+		window.alt_enter = false
+		_window_set_mode(window.mode == .Windowed ? .Borderless : .Windowed, window.requested)
 	}
 	// XInput answers any process, so the pads belong to this window only while it is in the foreground. A hidden
 	// window never does, and in shared mode the editor's viewport sends the pads.
@@ -111,6 +133,171 @@ _window_set_title :: proc(title: string) {
 	win.SetWindowTextW(window.hwnd, win.utf8_to_wstring(title))
 }
 
+// _window_display_state is how the window is shown. The platform fills in the output.
+_window_display_state :: proc() -> (state: Display_State) {
+	state.mode, state.requested, state.size = window.mode, window.requested, _window_size()
+	if monitor, ok := window_monitor(); ok {
+		state.monitor = screen_rect_size(monitor.rect)
+	}
+	return
+}
+
+// _window_resolutions is the distinct sizes of the display modes of the monitor that the window is on, largest first.
+_window_resolutions :: proc(allocator: runtime.Allocator) -> [][2]i32 {
+	monitor, ok := window_monitor()
+	if !ok {
+		return nil
+	}
+	return resolutions_of(monitor_modes(monitor.device), allocator)
+}
+
+// _window_set_mode shows the window in a mode, with a client size for Windowed and a display mode for Fullscreen, which
+// must be one of _window_resolutions. Borderless covers its monitor and keeps size for Windowed to return to, and
+// Fullscreen leaves that size as it was. It returns false and keeps the window as it was when the display mode or the window did not change. This is the only
+// writer of window.mode, window.requested and window.display_changed.
+_window_set_mode :: proc(mode: Window_Mode, size: [2]i32) -> bool {
+	if window.hwnd == nil || size.x <= 0 || size.y <= 0 {
+		return false
+	}
+	monitor, found := window_monitor()
+	if !found {
+		log.error("core: cannot find the window's monitor")
+		return false
+	}
+	// The display mode first, since the monitor's rectangle follows it.
+	if mode == .Fullscreen {
+		if !slice.contains(
+			resolutions_of(monitor_modes(monitor.device), context.temp_allocator),
+			size,
+		) {
+			log.errorf("core: the monitor has no display mode of %dx%d", size.x, size.y)
+			return false
+		}
+		if !change_display_mode(monitor.device, size) {
+			log.errorf("core: the monitor did not change to %dx%d", size.x, size.y)
+			return false
+		}
+	}
+	if old, changed := window.display_changed.?;
+	   changed && (mode != .Fullscreen || old != monitor.device) {
+		restore_display_mode(old)
+	}
+	window.display_changed = monitor.device if mode == .Fullscreen else nil
+	// The monitor's rectangle is the one of the new display mode.
+	monitor, found = window_monitor()
+	if !found {
+		return false
+	}
+	frame_rect := win.RECT{}
+	win.AdjustWindowRect(&frame_rect, win.WS_OVERLAPPEDWINDOW, false)
+	layout := window_layout(
+		mode,
+		monitor.rect,
+		monitor.work,
+		size,
+		{frame_rect.right - frame_rect.left, frame_rect.bottom - frame_rect.top},
+	)
+	style := win.WS_OVERLAPPEDWINDOW if mode == .Windowed else win.WS_POPUP
+	if win.IsZoomed(window.hwnd) || win.IsIconic(window.hwnd) {
+		win.ShowWindow(window.hwnd, win.SW_RESTORE)
+	}
+	win.SetWindowLongPtrW(window.hwnd, win.GWL_STYLE, win.LONG_PTR(style | win.WS_VISIBLE))
+	rect := layout.rect
+	if !win.SetWindowPos(
+		window.hwnd,
+		win.HWND_TOP,
+		rect.left,
+		rect.top,
+		rect.right - rect.left,
+		rect.bottom - rect.top,
+		win.SWP_FRAMECHANGED | win.SWP_SHOWWINDOW,
+	) {
+		log.error("core: the window did not move")
+		return false
+	}
+	window.mode = mode
+	if mode != .Fullscreen {
+		window.requested = size
+	}
+	return true
+}
+
+@(private = "file")
+Monitor :: struct {
+	rect:   Screen_Rect,
+	work:   Screen_Rect,
+	// The GDI device name, which the display modes are by.
+	device: [32]u16,
+}
+
+@(private = "file")
+window_monitor :: proc() -> (monitor: Monitor, ok: bool) {
+	handle := win.MonitorFromWindow(window.hwnd, .MONITOR_DEFAULTTONEAREST)
+	info: win.MONITORINFOEXW
+	info.cbSize = size_of(win.MONITORINFOEXW)
+	if handle == nil || !win.GetMonitorInfoW(handle, (^win.MONITORINFO)(&info)) {
+		return
+	}
+	rect := proc(r: win.RECT) -> Screen_Rect {
+		return {r.left, r.top, r.right, r.bottom}
+	}
+	return {rect(info.rcMonitor), rect(info.rcWork), info.szDevice}, true
+}
+
+// monitor_modes is the sizes of a monitor's 32-bit display modes, one for each mode, so a size can repeat.
+@(private = "file")
+monitor_modes :: proc(device: [32]u16) -> [][2]i32 {
+	device := device
+	modes := make([dynamic][2]i32, context.temp_allocator)
+	mode := win.DEVMODEW {
+		dmSize = size_of(win.DEVMODEW),
+	}
+	for i: win.DWORD = 0; win.EnumDisplaySettingsW(cast(win.wstring)&device[0], i, &mode); i += 1 {
+		if mode.dmBitsPerPel >= 32 {
+			append(&modes, [2]i32{i32(mode.dmPelsWidth), i32(mode.dmPelsHeight)})
+		}
+	}
+	return modes[:]
+}
+
+@(private = "file")
+change_display_mode :: proc(device: [32]u16, size: [2]i32) -> bool {
+	device := device
+	mode := win.DEVMODEW {
+		dmSize       = size_of(win.DEVMODEW),
+		dmFields     = DM_PELSWIDTH | DM_PELSHEIGHT,
+		dmPelsWidth  = win.DWORD(size.x),
+		dmPelsHeight = win.DWORD(size.y),
+	}
+	// CDS_FULLSCREEN makes the mode temporary: Windows restores the desktop's when the process ends.
+	return(
+		ChangeDisplaySettingsExW(cast(win.wstring)&device[0], &mode, nil, CDS_FULLSCREEN, nil) ==
+		DISP_CHANGE_SUCCESSFUL \
+	)
+}
+
+@(private = "file")
+restore_display_mode :: proc(device: [32]u16) {
+	device := device
+	ChangeDisplaySettingsExW(cast(win.wstring)&device[0], nil, nil, 0, nil)
+}
+
+@(private = "file")
+DM_PELSWIDTH :: 0x80000
+@(private = "file")
+DM_PELSHEIGHT :: 0x100000
+@(private = "file")
+CDS_FULLSCREEN :: 0x4
+@(private = "file")
+DISP_CHANGE_SUCCESSFUL :: 0
+
+foreign import user32 "system:User32.lib"
+
+@(private = "file", default_calling_convention = "system")
+foreign user32 {
+	ChangeDisplaySettingsExW :: proc(device: win.wstring, mode: ^win.DEVMODEW, hwnd: win.HWND, flags: win.DWORD, param: rawptr) -> win.LONG ---
+}
+
 @(private = "file")
 window_proc :: proc "system" (
 	hwnd: win.HWND,
@@ -127,6 +314,11 @@ window_proc :: proc "system" (
 		input_key_down(input, key_of(wparam, lparam))
 		// Let Windows handle Alt+F4 and the other system keys too.
 		if msg == win.WM_SYSKEYDOWN {
+			// Alt+Enter, but not its repeats, switches between Windowed and Borderless.
+			if wparam == win.VK_RETURN && (lparam >> 30) & 1 == 0 {
+				window.alt_enter = true
+				return 0
+			}
 			break
 		}
 		return 0

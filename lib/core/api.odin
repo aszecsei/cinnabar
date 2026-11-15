@@ -77,6 +77,15 @@ Platform_API :: struct {
 	// The client area size at the start of the frame. The frame target has this size. It is zero while minimized.
 	window_size:                     proc() -> [2]i32,
 	set_window_title:                proc(title: string),
+	// How the window is shown (see docs/gpu/presentation.md#window-modes). display_resolutions is the distinct sizes of the
+	// window's monitor's display modes, largest first, in allocator. display_state is the window's mode and sizes, and
+	// whether the display is in HDR now. set_window_mode shows the window in a mode: Windowed with a client size,
+	// Borderless over the monitor, which keeps size for Windowed, and Fullscreen with a display mode, which must be one
+	// of display_resolutions. The frame target follows from the next frame. It returns false, and changes nothing, when
+	// the change did not succeed, and in shared mode, which ignores it.
+	display_resolutions:             proc(allocator: runtime.Allocator) -> [][2]i32,
+	display_state:                   proc() -> Display_State,
+	set_window_mode:                 proc(mode: Window_Mode, size: [2]i32) -> bool,
 
 	// Frame jobs run on fibers and must finish before the frame ends. Wait from a job or from the game's frame code.
 	// Call these, not the jobs package: the DLL's copy of the scheduler is not running.

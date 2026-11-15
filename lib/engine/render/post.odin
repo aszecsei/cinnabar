@@ -58,6 +58,29 @@ LUT_FORMAT :: gpu.Format.RGBA16_Float
 // (see docs/rendering/layers-and-output.md#hdr-output).
 DEFAULT_PAPER_WHITE :: 200
 DEFAULT_PEAK :: 1000
+// The range of the player's paper white in nits (see set_paper_white).
+MIN_PAPER_WHITE :: 80
+MAX_PAPER_WHITE :: 500
+
+// paper_white_nits is SDR's white in HDR output, in nits: the player's choice (see set_paper_white) if there is one,
+// else the volume's, else the display's SDR white, else DEFAULT_PAPER_WHITE. The scene's tone mapping and the UI use it.
+paper_white_nits :: proc(player, volume: f32, display: gpu.Display) -> f32 {
+	switch {
+	case player > 0:
+		return player
+	case volume > 0:
+		return volume
+	case display.sdr_white > 0:
+		return display.sdr_white
+	}
+	return DEFAULT_PAPER_WHITE
+}
+
+// set_paper_white makes nits the paper white of HDR output from the next frame on, over the volume's and the display's,
+// as a player's brightness setting. 0 gives them back. It is limited to MIN_PAPER_WHITE and MAX_PAPER_WHITE.
+set_paper_white :: proc(r: ^Renderer, nits: f32) {
+	r.paper_white = nits > 0 ? clamp(nits, MIN_PAPER_WHITE, MAX_PAPER_WHITE) : 0
+}
 
 Tone_Mapper :: enum u8 {
 	// AgX: a smooth roll-off to white that desaturates bright colors.
@@ -633,8 +656,7 @@ add_post_passes :: proc(f: ^Frame) {
 		display := f.output.display
 		peak :=
 			s.peak > 0 ? s.peak : display.max_luminance > 0 ? display.max_luminance : DEFAULT_PEAK
-		paper_white :=
-			s.paper_white > 0 ? s.paper_white : display.sdr_white > 0 ? display.sdr_white : DEFAULT_PAPER_WHITE
+		paper_white := paper_white_nits(r.paper_white, s.paper_white, display)
 		pf.grading.hdr, pf.grading.peak, pf.grading.paper_white =
 			true, peak, min(paper_white, peak)
 		pf.paper_white = pf.grading.paper_white

@@ -80,7 +80,6 @@ define_quality_bindings :: proc(r: ^script.Runtime, q: ^Script_Quality) {
 	script.define(r, "Render.save_quality", save_quality_binding, "() -> boolean")
 }
 
-@(private = "file")
 script_quality_of :: proc(L: ^luau.State) -> ^Script_Quality {
 	luau.getfield(L, luau.REGISTRYINDEX, REGISTRY_KEY)
 	q := (^Script_Quality)(luau.tolightuserdata(L, -1))
