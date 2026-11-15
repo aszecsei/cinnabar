@@ -126,6 +126,9 @@ Material_Vertex finish_vertex_moved(Draw_Record d, Instance_Record instance, flo
 	v.uv0 = uv0;
 	v.uv1 = uv1;
 	v.color = color;
+	if ((instance.flags & INSTANCE_TINTED) != 0) {
+		v.color *= instance.tint;
+	}
 	v.material = d.material;
 	v.id = instance.id | (d.mesh & ~ID_ENTITY_MASK);
 	v.cluster = 0;

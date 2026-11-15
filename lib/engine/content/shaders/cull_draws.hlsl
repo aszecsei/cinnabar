@@ -155,6 +155,7 @@ struct Instance_Record {
 	uint id;
 	uint flags;
 	uint2 padding;
+	float4 tint;
 };
 
 bool item_visible(Item item, Cull_View view, out float3 center, out float radius);

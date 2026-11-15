@@ -115,6 +115,7 @@ struct Particle_Instance {
 	uint flags;
 	uint color;
 	uint padding;
+	float4 tint;
 };
 
 // instance_rows are the rows of a mesh particle's pose: turned by angle about axis, scaled, at position.
@@ -139,6 +140,7 @@ void append_instance(Emitter_Record e, Particle p, float3 before, float before_r
 	instance_rows(instance.previous_rows, axis, before_rotation, curve_at(e.curves + CURVE_SIZE, before_t).x, before + e.scene_anchor);
 	instance.id = e.id;
 	instance.flags = 0;
+	instance.tint = 0;
 	uint4 color = uint4(round(saturate(curve_at(e.curves + CURVE_COLOR, t)) * 255));
 	instance.color = color.r | (color.g << 8) | (color.b << 16) | (color.a << 24);
 	instance.padding = 0;

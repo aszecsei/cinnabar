@@ -16,7 +16,7 @@ struct Scatter_Constants {
 CN_PASS_CONSTANTS(Scatter_Constants, constants);
 
 // Matches size_of(Instance_Record) and SCATTER_GROUP_SIZE in lib/engine/render/scene.odin.
-static const uint RECORD_SIZE = 112;
+static const uint RECORD_SIZE = 128;
 static const uint RECORD_QUADS = RECORD_SIZE / 16;
 static const uint SCATTER_GROUP_SIZE = 64;
 

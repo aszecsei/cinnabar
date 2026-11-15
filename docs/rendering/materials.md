@@ -113,7 +113,7 @@ A `.material_instance` names its parent (a material or another instance) and ove
 - A dynamic instance cannot change static switches at runtime, because that would need a permutation that was never cooked.
 - The editor shows how many permutations each material has, so a material whose instances set many combinations of switches is easy to see.
 
-At runtime, `render.material_instance(parent)` makes a dynamic instance whose parameters a game or a script sets every frame.
+A material's parameters are cooked, so they do not change at runtime. What changes at runtime is an entity's `Tint` (see [GPU scene](gpu-scene.md#tints)): its color times its intensity, and its alpha, scale the vertex color that a material reads through `inputs.color`. A material that multiplies its base color by `inputs.color`, as the default material does, shows a hit flash, a pulse or a team color without another material.
 
 ## Runtime
 

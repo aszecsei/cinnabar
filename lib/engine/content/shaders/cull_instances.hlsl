@@ -118,7 +118,7 @@ struct Cull_View {
 };
 
 // Matches the size of Instance_Record in lib/engine/render/scene.odin, whose first 48 bytes are its rows.
-static const uint INSTANCE_RECORD_SIZE = 112;
+static const uint INSTANCE_RECORD_SIZE = 128;
 
 groupshared uint visible_bits[8];
 // With occlusion culling, the late view's instances that the depth pyramid shows, which are the cell's bits for next

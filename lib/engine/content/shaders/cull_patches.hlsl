@@ -95,6 +95,7 @@ struct Instance_Record {
 	uint id;
 	uint flags;
 	uint2 padding;
+	float4 tint;
 };
 
 // Matches Surface_Record in lib/engine/render/surfaces.odin.
