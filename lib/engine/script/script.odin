@@ -21,6 +21,13 @@ DEFAULT_BUDGET :: 100 * time.Millisecond
 GC_STEP_KB :: 64
 
 // Runtime is the script VM of one Game_State. It must not move after init: the VM keeps a pointer to its bindings.
+// Frame_Time is what Time shows besides the world's step: the frame's real seconds, which the time scale and the pause
+// leave alone, and the scale that the game set. A zero scale is a game that set 0, so create_frame_values starts it at 1.
+Frame_Time :: struct {
+	real_delta: f64,
+	scale:      f64,
+}
+
 Runtime :: struct {
 	platform:                   ^core.Platform_API,
 	bindings:                   script_host.Bindings,
@@ -47,6 +54,8 @@ Runtime :: struct {
 	// Registry references to the Time and Input tables, which begin_phase updates.
 	time_table:                 c.int,
 	input_table:                c.int,
+	// The frame's time for Time.real_delta and Time.scale, which set_frame_time gives.
+	frame_time:                 Frame_Time,
 	input:                      core.Input,
 	frame:                      u64,
 	// The input edges of frames that ran no fixed tick, which the next tick gets, and whether a fixed step ran since
