@@ -117,6 +117,11 @@ the_standard_games_scripts_have_every_engine_binding :: proc(t: ^testing.T) {
 		expect(t, text, name)
 	}
 	expect(t, text, "\tset_paused: (paused: boolean) -> (),")
+	// The time scale, its frame times, and the camera.
+	expect(t, text, "\tset_time_scale: (scale: number) -> (),")
+	expect(t, text, "\treal_delta: number,")
+	expect(t, text, "\tscale: number,")
+	expect(t, text, "declare Camera:")
 	// And the project's.
 	expect(t, text, "declare TestComponent:")
 }

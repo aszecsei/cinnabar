@@ -87,6 +87,10 @@ declare Time: {
 	delta: number,
 	time: number,
 	real_time: number,
+	-- The frame's real seconds, which neither the time scale nor a pause changes.
+	real_delta: number,
+	-- The scale that the world's time runs at, as Game.set_time_scale set it. A pause is separate.
+	scale: number,
 	frame: number,
 	fixed_delta: number,
 	alpha: number,
