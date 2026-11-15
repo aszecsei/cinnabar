@@ -38,7 +38,7 @@ events :: proc(f: ^Fixture) -> string {
 		}
 		text = fmt.tprintf("%s) ", text)
 	}
-	clear(&f.ui.input.events)
+	clear_events(&f.ui)
 	return text
 }
 
@@ -403,4 +403,60 @@ a_document_that_goes_away_ends_the_edit_of_its_field :: proc(t: ^testing.T) {
 	step(f)
 	testing.expect(t, f.ui.input.edit == nil)
 	testing.expect(t, !wants_input(&f.ui))
+}
+
+// Three buttons in a column, 100 by 40: two of them name a focused event.
+@(private = "file")
+FOCUS_EVENTS :: `ui 1
+<ui>
+	<column>
+		<button id="a" width="100" height="40" focused="focus_a"/>
+		<button id="b" width="100" height="40" focused="focus_b"/>
+		<button id="c" width="100" height="40"/>
+	</column>
+</ui>`
+
+@(test)
+moving_the_focus_sends_the_focused_event_once :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(t, f)
+	show(t, f, MENU, FOCUS_EVENTS)
+	step(f)
+	// Keys: the first move focuses the first element, and the focus stays without another event.
+	step(f, key(.Down))
+	testing.expect_value(t, focused(f), "a")
+	testing.expect_value(t, events(f), "focus_a(a) ")
+	step(f)
+	step(f)
+	testing.expect_value(t, events(f), "")
+	step(f, key(.Down))
+	testing.expect_value(t, focused(f), "b")
+	testing.expect_value(t, events(f), "focus_b(b) ")
+	// The pointer's press on the element that has the focus moves nothing.
+	step(f, {mouse_position = {50, 60}})
+	step(f, {mouse_position = {50, 60}, down = {.Mouse_Left}, pressed = {.Mouse_Left}})
+	testing.expect_value(t, focused(f), "b")
+	testing.expect_value(t, events(f), "")
+	// A press on another element moves it.
+	step(f, {mouse_position = {50, 20}})
+	step(f, {mouse_position = {50, 20}, down = {.Mouse_Left}, pressed = {.Mouse_Left}})
+	testing.expect_value(t, focused(f), "a")
+	testing.expect_value(t, events(f), "focus_a(a) ")
+}
+
+@(test)
+focus_on_an_element_without_the_attribute_sends_nothing :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(t, f)
+	show(t, f, MENU, FOCUS_EVENTS)
+	step(f)
+	step(f, key(.Down))
+	testing.expect_value(t, events(f), "focus_a(a) ")
+	step(f)
+	step(f, key(.Down))
+	testing.expect_value(t, events(f), "focus_b(b) ")
+	step(f)
+	step(f, key(.Down))
+	testing.expect_value(t, focused(f), "c")
+	testing.expect_value(t, events(f), "")
 }

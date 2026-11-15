@@ -203,3 +203,84 @@ Test.entity():add(B)
 		}
 	}
 }
+
+@(private = "file")
+FOCUS :: `ui 1
+<ui>
+	<column id="list">
+		<button id="a" width="100" height="40" focused="a_focused"/>
+		<button id="b" width="100" height="40" focused="b_focused"/>
+	</column>
+	<template id="slot"><row><button id="item" width="100" height="40" focused="item_focused"/></row></template>
+</ui>`
+
+@(test)
+ui_focused_gives_the_id_or_nil :: proc(t: ^testing.T) {
+	f := setup(t, scripts = true)
+	defer teardown(t, f)
+	f.entity = show(t, f, DOC, FOCUS)
+	frame(f)
+	context.user_ptr = f
+	_, ok := script.spawn_source(
+		&f.runtime,
+		"=menu",
+		`
+local Menu = Behaviour.define("Menu")
+function Menu:start()
+	Test.report("none", Ui.focused(self.entity))
+	Ui.focus(self.entity, "b")
+	Test.report("b", Ui.focused(self.entity))
+	local copy = Ui.add(self.entity, "list", "slot")
+	Ui.focus(self.entity, copy .. ".item")
+	Test.report("copy", Ui.focused(self.entity))
+	Ui.focus(self.entity, nil)
+	Test.report("cleared", Ui.focused(self.entity))
+end
+Test.entity():add(Menu)
+`,
+	)
+	testing.expect(t, ok)
+	frame(f)
+	expected := []string{"none nil", "b b", "copy slot#1.item", "cleared nil"}
+	testing.expect_value(t, len(f.reports), len(expected))
+	for e, i in expected {
+		if i < len(f.reports) {
+			testing.expect_value(t, f.reports[i], e)
+		}
+	}
+}
+
+@(test)
+ui_focus_from_a_script_sends_the_event :: proc(t: ^testing.T) {
+	f := setup(t, scripts = true)
+	defer teardown(t, f)
+	f.entity = show(t, f, DOC, FOCUS)
+	frame(f)
+	context.user_ptr = f
+	_, ok := script.spawn_source(
+		&f.runtime,
+		"=menu",
+		`
+local Menu = Behaviour.define("Menu")
+function Menu:start()
+	Ui.focus(self.entity, "b")
+	Ui.focus(self.entity, "b")
+	Ui.focus(self.entity, "a")
+end
+function Menu:on_a_focused(id) Test.report("a_focused", id) end
+function Menu:on_b_focused(id) Test.report("b_focused", id) end
+Test.entity():add(Menu)
+`,
+	)
+	testing.expect(t, ok)
+	frame(f)
+	// The events that the script phase queued reach the behaviour in the next frame's phase.
+	frame(f)
+	expected := []string{"b_focused b", "a_focused a"}
+	testing.expect_value(t, len(f.reports), len(expected))
+	for e, i in expected {
+		if i < len(f.reports) {
+			testing.expect_value(t, f.reports[i], e)
+		}
+	}
+}

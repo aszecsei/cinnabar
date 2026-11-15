@@ -250,6 +250,7 @@ destroy :: proc(s: ^State) {
 			s.platform.gpu_destroy_sampler(s.sampler)
 		}
 	}
+	clear_events(s)
 	delete(s.input.events)
 }
 

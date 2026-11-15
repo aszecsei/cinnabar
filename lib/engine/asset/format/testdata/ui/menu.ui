@@ -12,7 +12,7 @@ ui 1
 
 	<column id="pause" anchor="center" width="fit" style="panel" min_width="320" max_height="90%">
 		<text style="title">Paused &amp; waiting &#x2026;</text>
-		<button id="resume" click="resume" nav_down="quality">Resume</button>
+		<button id="resume" click="resume" focused="resume_focused" nav_down="quality">Resume</button>
 		<button id="quality" click="quality" width="fill">
 			<text>Quality: {quality}</text>
 		</button>

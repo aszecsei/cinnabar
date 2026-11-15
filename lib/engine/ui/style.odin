@@ -47,6 +47,7 @@ Style :: struct {
 	cancel:                 string,
 	focus:                  string,
 	modal:                  bool,
+	focused:                string,
 }
 
 Direction :: enum u8 {
@@ -191,6 +192,8 @@ apply :: proc(st: ^Style, attr: format.Ui_Attr, value: format.Ui_Value) {
 		st.focus = value.(string) or_else st.focus
 	case .Modal:
 		st.modal = value.(bool) or_else st.modal
+	case .Focused:
+		st.focused = value.(string) or_else st.focused
 	}
 }
 

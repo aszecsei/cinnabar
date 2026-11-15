@@ -35,7 +35,8 @@ Modality :: enum u8 {
 	Keys,
 }
 
-// Pending_Event is an event for a document's entity's behaviours, sent by flush_events. Its strings are in frame memory.
+// Pending_Event is an event for a document's entity's behaviours, sent by flush_events. Its strings are
+// the state's own, since a script's Ui.focus queues one after the frame's flush, and flush_events frees them.
 Pending_Event :: struct {
 	entity: ecs.Entity,
 	name:   string,
@@ -360,13 +361,29 @@ initial_focus :: proc(s: ^State, d: ^Document) -> Node_Ref {
 	return NO_NODE
 }
 
+// set_focus is the one writer of the focus that a move makes: keys, the pointer's press, Ui.focus and a modal that takes
+// it. A move onto an element with a focused attribute queues that event; the same element again sends nothing. A
+// rebuilt document puts its focus back in restore_focus, which sends none.
 @(private)
 set_focus :: proc(s: ^State, r: Node_Ref) {
-	if s.input.focus != r {
-		end_edit(s)
-		s.input.reveal = r
+	if s.input.focus == r {
+		return
 	}
+	end_edit(s)
+	s.input.reveal = r
 	s.input.focus = r
+	if d, n, ok := resolve(s, r); ok {
+		queue_event(s, d, d.nodes[n].style.focused, id_of(d, n))
+	}
+}
+
+// focused_id is the id of the element of a document that has the focus, or "" when the focus is in another document or
+// nowhere.
+focused_id :: proc(s: ^State, d: ^Document) -> string {
+	if fd, n, ok := resolve(s, s.input.focus); ok && fd == d {
+		return id_of(d, n)
+	}
+	return ""
 }
 
 @(private)
@@ -374,7 +391,7 @@ queue_event :: proc(s: ^State, d: ^Document, name: string, id: string, text: May
 	if name == "" {
 		return
 	}
-	allocator := s.platform.frame_allocator
+	allocator := s.allocator
 	e := Pending_Event {
 		entity = d.entity,
 		name   = strings.clone(name, allocator),
@@ -859,6 +876,19 @@ flush_events :: proc(s: ^State, r: ^script.Runtime) {
 			script.send(r, e.entity, e.name, e.id, text)
 		} else {
 			script.send(r, e.entity, e.name, e.id)
+		}
+	}
+	clear_events(s)
+}
+
+// clear_events drops the queued events and frees their strings.
+@(private)
+clear_events :: proc(s: ^State) {
+	for e in s.input.events {
+		delete(e.name, s.allocator)
+		delete(e.id, s.allocator)
+		if text, has := e.text.?; has {
+			delete(text, s.allocator)
 		}
 	}
 	clear(&s.input.events)

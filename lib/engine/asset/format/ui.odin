@@ -129,6 +129,8 @@ Ui_Attr :: enum u16 {
 	Cancel,
 	Focus,
 	Modal,
+	// Interaction again, last so that a cooked blob's attribute indices stay.
+	Focused,
 }
 
 // Ui_Value_Kind is what text an attribute takes, and so which variant of Ui_Value it parses to.
@@ -339,6 +341,7 @@ UI_ATTRS := [Ui_Attr]Ui_Attr_Info {
 	.Cancel = {name = "cancel", kind = .Event, on = {.Ui}},
 	.Focus = {name = "focus", kind = .Id, on = {.Ui}},
 	.Modal = {name = "modal", kind = .Boolean, on = {.Ui}},
+	.Focused = {name = "focused", kind = .Event, on = UI_BOXES},
 }
 
 // ui_attr_of is the attribute of a name, such as "min_width".
