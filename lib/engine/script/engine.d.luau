@@ -211,6 +211,10 @@ declare function wait_event(entity: Entity, name: string): ...any
 -- Waits for the end of the next fixed tick, after its physics step, as Unity's WaitForFixedUpdate does.
 declare function wait_fixed(): ()
 
+-- What a save holds (see docs/scripting/api.md#save): keys of A to Z, a to z, 0 to 9, _ and ., with strings, numbers and
+-- booleans.
+type SaveData = { [string]: string | number | boolean }
+
 -- The render quality of the Render bindings, which a game defines with project.define_quality_bindings (see
 -- docs/scripting/api.md#render): the settings files' quality keys, with the enums' values as strings.
 type RenderQuality = {

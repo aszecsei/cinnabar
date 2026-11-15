@@ -119,7 +119,7 @@ public sealed class UiFileTests : IDisposable
     {
         var file = Read(Pause());
         Assert.Equal(Pause(), file.Text);
-        Assert.Equal(["ui", "box", "column", "text", "text", "button", "text", "button", "text", "row", "text", "field", "text", "column", "text", "template", "button", "text"], file.Nodes.Select(n => n.Kind));
+        Assert.Equal(["ui", "box", "column", "text", "text", "button", "text", "button", "text", "row", "text", "field", "text", "column", "button", "text", "text", "template", "button", "text"], file.Nodes.Select(n => n.Kind));
         var resume = file.NodeById("resume")!;
         Assert.True(file.Nodes[resume.Index + 1].ButtonText);
         Assert.Equal("Resume", file.Nodes[resume.Index + 1].Element.Text);

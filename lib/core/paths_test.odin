@@ -30,3 +30,10 @@ game_paths_keep_the_given_paths_and_make_them_absolute :: proc(t: ^testing.T) {
 	)
 	testing.expect(t, filepath.base(content) == "dev", "the content directory keeps its name")
 }
+
+@(test)
+the_dev_save_folder_is_the_projects_build_save :: proc(t: ^testing.T) {
+	dir := dev_save_dir("samples/game/project.settings", context.temp_allocator)
+	expected, _ := filepath.join({"samples/game", "build", "save"}, context.temp_allocator)
+	testing.expect_value(t, dir, expected)
+}

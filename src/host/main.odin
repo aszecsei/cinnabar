@@ -103,6 +103,9 @@ main :: proc() {
 	// Before core.init, so the job system's threads take the link's logger with the rest of the context. Not inside
 	// an if: a change to the context lasts only to the end of its scope.
 	context.logger = link_logger(&editor) if link_port >= 0 else context.logger
+	// Without --project there is no project folder, and core's default, save beside the host, holds the saves.
+	save_dir :=
+		core.dev_save_dir(project_path, context.temp_allocator) if project_path != "" else ""
 	if !core.init(
 		"cinnabar host",
 		shared_target = shared_target,
@@ -111,6 +114,7 @@ main :: proc() {
 		project_path = project_path,
 		physics_backend_name = physics_backend,
 		audio_backend_name = audio_backend,
+		save_dir = save_dir,
 	) {
 		return
 	}

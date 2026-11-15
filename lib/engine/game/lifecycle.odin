@@ -181,10 +181,10 @@ game_update :: proc(g: ^Game, dt: time.Duration, h: Hooks) -> (keep_running: boo
 	// A minimized window has no size, and nothing is rendered.
 	size := g.platform.window_size()
 	if size.x <= 0 || size.y <= 0 {
-		return true
+		return g.run != .Quitting
 	}
 	render_frame(g, {u32(size.x), u32(size.y)}, h)
-	return true
+	return g.run != .Quitting
 }
 
 // end_frame lets the frame's animation graphs, navmeshes, blackboards and decisions go, then swaps the blobs that the cooker rewrote, and

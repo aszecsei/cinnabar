@@ -1,8 +1,9 @@
 --!strict
 -- The pause menu's behaviour, on the entity whose Ui_Document is ui/pause.ui (see docs/ui/design.md#scripts). Escape or a
 -- gamepad's Start shows the menu and pauses the world; Resume, B or Escape hides it and runs the world again. Quality
--- takes the next render preset, as F9 does, and the name field greets whoever types into it. The saves list is 50
--- copies of the slot template, which scrolls.
+-- takes the next render preset, as F9 does, Quit ends the game, and the name field greets whoever types into it and keeps
+-- the name in the save "pause" (see docs/scripting/api.md#save). The saves list is 50 copies of the slot template,
+-- which scrolls.
 local PauseMenu = Behaviour.define("PauseMenu")
 
 local SLOTS = 50
@@ -33,7 +34,14 @@ function PauseMenu:show(visible: boolean)
 end
 
 function PauseMenu:start()
-	Ui.bind(self.entity, "name", "stranger")
+	local saved = Save.read("pause")
+	local name = saved and saved.name
+	if type(name) == "string" and name ~= "" then
+		Ui.set_text(self.entity, "name", name)
+		Ui.bind(self.entity, "name", name)
+	else
+		Ui.bind(self.entity, "name", "stranger")
+	end
 	for i = 1, SLOTS do
 		local id = Ui.add(self.entity, "slots", "slot")
 		Ui.set_text(self.entity, id .. ".label", `Slot {i}`)
@@ -64,7 +72,13 @@ function PauseMenu:on_name_changed(_id: string, text: string)
 end
 
 function PauseMenu:on_name_submitted(_id: string, text: string)
-	Debug.log("the pause menu's name is", text)
+	if not Save.write("pause", { name = text }) then
+		Debug.warn("could not save the name")
+	end
+end
+
+function PauseMenu:on_quit(_id: string)
+	Game.quit()
 end
 
 function PauseMenu:on_slot(id: string)

@@ -4,6 +4,7 @@
 // beside the executable (see docs/overview/building-and-running.md#build-layout).
 package main
 
+import "base:runtime"
 import "core:log"
 import "core:os"
 import "core:path/filepath"
@@ -25,7 +26,7 @@ main :: proc() {
 		os.close(log_file)
 	}
 
-	if !core.init(title) {
+	if !core.init(title, save_dir = data_dir(title, context.temp_allocator)) {
 		return
 	}
 	defer core.shutdown()
@@ -60,12 +61,21 @@ game_name :: proc() -> string {
 	return strings.clone(name) if name != "" else DEFAULT_TITLE
 }
 
-// open_log logs to %LOCALAPPDATA%\<name>\log.txt, because a release has no console: it is a Windows application.
+// data_dir is %LOCALAPPDATA%\<name>, where a release keeps its log and the player's data, or "" without LOCALAPPDATA.
+data_dir :: proc(name: string, allocator: runtime.Allocator) -> string {
+	base := os.get_env("LOCALAPPDATA", context.temp_allocator)
+	if base == "" {
+		return ""
+	}
+	dir, _ := filepath.join({base, name}, allocator)
+	return dir
+}
+
+// open_log logs to <data_dir>\log.txt, because a release has no console: it is a Windows application.
 // Without the folder it logs to the console, which a build for the console subsystem shows.
 open_log :: proc(name: string) -> (log.Logger, ^os.File) {
-	base := os.get_env("LOCALAPPDATA", context.temp_allocator)
-	if base != "" {
-		dir, _ := filepath.join({base, name}, context.temp_allocator)
+	dir := data_dir(name, context.temp_allocator)
+	if dir != "" {
 		path, _ := filepath.join({dir, "log.txt"}, context.temp_allocator)
 		if os.make_directory_all(dir) == nil || os.exists(dir) {
 			if f, err := os.create(path); err == nil {

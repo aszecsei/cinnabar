@@ -26,6 +26,8 @@ A project's scripts reach every engine binding in both cases: the standard game 
 5. Fills one `Frame_Desc` with that camera, the window's size, the time that the particles step and the skinned poses, and the UI's documents in the UI layer. `Hooks.frame` adds the project's render hooks. It calls `editor.draw_frame`, which is `render.draw_frame` without an editor. With one, the editor package draws that frame in the views that the editor has open (see [Rendering: Views](../rendering/frame.md#views)). The hooks run once for each view and keep their data for it in `Frame.user`, so the game never knows how many views there are.
 6. At the end of the frame, polls the asset runtime for blobs that the cooker rewrote and reloads the scripts among them.
 
+`game_update` returns false once the game is quitting, and the host's loop or the release's ends after that frame. `Game.run` is a `Run_State`, `Running` or `Quitting`, which starts as `Running`, and `request_quit` is its only writer: a script's `Game.quit` calls it (see [Scripting: Game.quit](../scripting/api.md#gamequit)). While an editor is linked, `request_quit` logs and does nothing, because the editor owns the game's life.
+
 `game_init` builds the editor package, the world, physics, audio, the asset runtime, the renderer, the UI and the script runtime in that order, reads the settings, and loads the main scene. `game_reload` makes the same registrations again, so that each points at the new code.
 
 ## Hooks
@@ -88,4 +90,4 @@ The host copies the DLL that it loads to `<name>_<process>_<version>.dll` beside
 
 `lib/engine/game/runtime` is the one release entry point. It imports the project's game package as `project:game`, so the build names the project with the `project` collection: `-collection:project=samples/mygame` links `samples/mygame/game`, and `-collection:project=lib/engine/game/standard` links the standard game. `just release` picks the one that the project has.
 
-The executable is a Windows application (`-subsystem:windows`), with no console. It takes its window's title from `game.name` in the `project.settings` beside it, and logs to `%LOCALAPPDATA%\<game.name>\log.txt`. The release folder has `D3D12Core.dll` and not the debug layer's library, because a release build has no debug layer.
+The executable is a Windows application (`-subsystem:windows`), with no console. It takes its window's title from `game.name` in the `project.settings` beside it, and logs to `%LOCALAPPDATA%\<game.name>\log.txt`. The player's data is in the same folder (`Platform_API.save_dir`, see [Scripting: Save](../scripting/api.md#save)). The release ends when `Game.quit` runs or the window closes. The release folder has `D3D12Core.dll` and not the debug layer's library, because a release build has no debug layer.
