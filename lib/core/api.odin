@@ -265,13 +265,15 @@ Editor_Message :: struct {
 }
 
 // abi_hash identifies what both sides of the DLL boundary must agree on: the GPU command format, the physics and audio
-// formats and Platform_API's layout.
+// formats, Platform_API's layout and Input's. Input crosses the boundary by value in a procedure type, which
+// layout.hash does not follow into.
 abi_hash :: proc() -> u64 {
 	return(
 		gpu.format_hash() ~
 		physics.format_hash() ~
 		audio.format_hash() ~
-		layout.hash(Platform_API) \
+		layout.hash(Platform_API) ~
+		layout.hash(Input) \
 	)
 }
 

@@ -107,6 +107,24 @@ declare Input: {
 	gamepad_was_pressed: (pad: number, button: number) -> boolean,
 	gamepad_was_released: (pad: number, button: number) -> boolean,
 	gamepad_axis: (pad: number, axis: number) -> number,
+	-- A stick pushed one way, or a trigger pulled, as a digital input (a GamepadDirection).
+	gamepad_direction_down: (pad: number, direction: number) -> boolean,
+	gamepad_direction_pressed: (pad: number, direction: number) -> boolean,
+	-- Named actions with bindings that the player can change. A binding is "key:W", "pad:A" or "pad:LeftStickUp".
+	-- Defining an action that exists keeps its current bindings and updates its defaults. A pad of 1 to 4 reads only that
+	-- pad, and nil reads the keys and every pad. An unknown action raises.
+	define_action: (name: string, defaults: { string }) -> (),
+	action_down: (name: string, pad: number?) -> boolean,
+	action_pressed: (name: string, pad: number?) -> boolean,
+	action_released: (name: string, pad: number?) -> boolean,
+	action_value: (name: string, pad: number?) -> number,
+	bindings: (name: string) -> { string },
+	-- Raises on a binding that does not parse, or more than 8.
+	set_bindings: (name: string, bindings: { string }) -> (),
+	reset_bindings: (name: string?) -> (),
+	-- The binding of a key, button or direction pressed this frame (this tick in fixed_update), on "keyboard", "gamepad"
+	-- or both for nil. The mouse is not read.
+	any_pressed: (device: string?) -> string?,
 	-- The characters typed since the last frame, in UTF-8. Backspace and Enter are keys, not text.
 	text: string,
 	-- What an IME is composing, which is not text yet, and the bytes of it before the cursor.

@@ -23,6 +23,8 @@ begin_phase :: proc(r: ^Runtime, dt: time.Duration, input: core.Input) {
 		for pad, i in input.gamepads {
 			r.pending_gamepad_pressed[i] += pad.pressed
 			r.pending_gamepad_released[i] += pad.released
+			r.pending_direction_pressed[i] += pad.direction_pressed
+			r.pending_direction_released[i] += pad.direction_released
 		}
 		core.input_text_append(&r.pending_text, core.input_text_string(&r.input.text))
 	}
@@ -114,7 +116,7 @@ set_number :: proc(L: ^luau.State, key: cstring, value: f64) {
 	luau.rawsetfield(L, -2, key)
 }
 
-// create_frame_values makes the Time, Input, Key, GamepadButton and GamepadAxis tables. Time and Input change every
+// create_frame_values makes the Time, Input, Key, GamepadButton, GamepadAxis and GamepadDirection tables. Time and Input change every
 // frame, so they are in format.script_mutable_globals, and the compiler reads their fields each time. The others never
 // change.
 @(private)
@@ -138,6 +140,8 @@ create_frame_values :: proc(r: ^Runtime) {
 	set_path(r, "GamepadButton")
 	push_enum_values(r, core.Gamepad_Axis)
 	set_path(r, "GamepadAxis")
+	push_enum_values(r, core.Gamepad_Direction)
+	set_path(r, "GamepadDirection")
 }
 
 // push_enum_values pushes a table of an enum's values by their script names, without the first skip of them.
@@ -191,6 +195,30 @@ register_frame :: proc(r: ^Runtime) {
 		luau.pushnumber(L, f64(check_gamepad(L, 1).axes[core.Gamepad_Axis(n)]))
 		return 1
 	})
+	define(r, "Input.gamepad_direction_down", proc(L: ^luau.State) -> c.int {
+		luau.pushboolean(
+			L,
+			b32(check_gamepad_direction(L, 2) in check_gamepad(L, 1).direction_down),
+		)
+		return 1
+	})
+	define(r, "Input.gamepad_direction_pressed", proc(L: ^luau.State) -> c.int {
+		luau.pushboolean(
+			L,
+			b32(check_gamepad_direction(L, 2) in check_gamepad(L, 1).direction_pressed),
+		)
+		return 1
+	})
+	register_input_actions(r)
+}
+
+@(private = "file")
+check_gamepad_direction :: proc(L: ^luau.State, idx: c.int) -> core.Gamepad_Direction {
+	n := luau.L_checkinteger(L, idx)
+	if n < 0 || n > c.int(max(core.Gamepad_Direction)) {
+		luau.L_argerrorL(L, idx, "a GamepadDirection value expected")
+	}
+	return core.Gamepad_Direction(n)
 }
 
 // check_gamepad is the pad in a slot, which scripts count from 1.

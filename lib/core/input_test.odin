@@ -307,3 +307,199 @@ a_pad_plugged_in_while_the_game_runs_is_found :: proc(t: ^testing.T) {
 	}
 	testing.expect(t, input.gamepads[2].connected)
 }
+
+@(private = "file")
+push :: proc(input: ^Input, slot: int, axes: [Gamepad_Axis]f32) {
+	input_gamepad_set(input, slot, {connected = true, axes = axes})
+}
+
+@(test)
+a_stick_direction_engages_and_lets_go_with_hysteresis :: proc(t: ^testing.T) {
+	input: Input
+	push(&input, 0, #partial{.Left_Y = 0.2})
+	testing.expect_value(t, input.gamepads[0].direction_down, Gamepad_Directions{})
+	push(&input, 0, #partial{.Left_Y = 0.8})
+	testing.expect_value(t, input.gamepads[0].direction_down, Gamepad_Directions{.Left_Stick_Up})
+	testing.expect_value(
+		t,
+		input.gamepads[0].direction_pressed,
+		Gamepad_Directions{.Left_Stick_Up},
+	)
+
+	input_begin_frame(&input)
+	// 0.56 of the raw range is 0.42 after the dead zone, between the two thresholds, so it stays held.
+	axes: [Gamepad_Axis]f32
+	axes[.Left_Y] = 0.56
+	input_gamepad_set(&input, 0, {connected = true, axes = axes})
+	testing.expect(t, .Left_Stick_Up in input.gamepads[0].direction_down)
+	testing.expect_value(t, input.gamepads[0].direction_pressed, Gamepad_Directions{})
+
+	push(&input, 0, #partial{.Left_Y = 0.2})
+	testing.expect_value(t, input.gamepads[0].direction_down, Gamepad_Directions{})
+	testing.expect_value(
+		t,
+		input.gamepads[0].direction_released,
+		Gamepad_Directions{.Left_Stick_Up},
+	)
+
+	// Down and left are the other signs of the axes.
+	push(&input, 0, #partial{.Left_X = -0.9, .Left_Y = -0.9})
+	testing.expect_value(
+		t,
+		input.gamepads[0].direction_down,
+		Gamepad_Directions{.Left_Stick_Down, .Left_Stick_Left},
+	)
+	push(&input, 0, #partial{.Right_X = 0.9})
+	testing.expect_value(
+		t,
+		input.gamepads[0].direction_down,
+		Gamepad_Directions{.Right_Stick_Right},
+	)
+}
+
+@(test)
+a_trigger_is_a_direction_past_half :: proc(t: ^testing.T) {
+	input: Input
+	push(&input, 1, #partial{.Right_Trigger = 0.5})
+	testing.expect_value(t, input.gamepads[1].direction_down, Gamepad_Directions{})
+	push(&input, 1, #partial{.Right_Trigger = 0.9, .Left_Trigger = 1})
+	testing.expect_value(
+		t,
+		input.gamepads[1].direction_down,
+		Gamepad_Directions{.Left_Trigger, .Right_Trigger},
+	)
+	// A pad that goes releases its directions.
+	input_gamepad_set(&input, 1, {})
+	testing.expect_value(t, input.gamepads[1].direction_down, Gamepad_Directions{})
+	testing.expect_value(
+		t,
+		input.gamepads[1].direction_released,
+		Gamepad_Directions{.Left_Trigger, .Right_Trigger},
+	)
+}
+
+@(private = "file")
+actions_with :: proc(actions: ^Input_Actions, name: string, bindings: ..string) -> (index: int) {
+	parsed: [MAX_ACTION_BINDINGS]Binding
+	for s, i in bindings {
+		b, ok := binding_parse(s)
+		assert(ok)
+		parsed[i] = b
+	}
+	index, _ = input_actions_define(actions, name, parsed[:len(bindings)])
+	return
+}
+
+@(test)
+an_action_is_down_while_any_binding_is :: proc(t: ^testing.T) {
+	actions: Input_Actions
+	jump := actions_with(&actions, "jump", "key:Space", "pad:A", "pad:RightTrigger")
+	input: Input
+	testing.expect(t, !action_down(&actions, &input, jump))
+	input_key_down(&input, .Space)
+	testing.expect(t, action_down(&actions, &input, jump))
+	testing.expect(t, action_pressed(&actions, &input, jump))
+	testing.expect_value(t, action_value(&actions, &input, jump), 1)
+	input_begin_frame(&input)
+	input_key_up(&input, .Space)
+	testing.expect(t, !action_down(&actions, &input, jump))
+	testing.expect(t, action_released(&actions, &input, jump))
+
+	input_begin_frame(&input)
+	input_gamepad_set(&input, 2, {connected = true, buttons = {.A}})
+	testing.expect(t, action_down(&actions, &input, jump))
+	testing.expect(t, action_pressed(&actions, &input, jump))
+
+	input_begin_frame(&input)
+	input_gamepad_set(&input, 2, {connected = true})
+	push(&input, 3, #partial{.Right_Trigger = 1})
+	testing.expect(t, action_down(&actions, &input, jump))
+	testing.expect_value(t, action_value(&actions, &input, jump), 1)
+	testing.expect(t, action_pressed(&actions, &input, jump))
+}
+
+@(test)
+an_action_with_a_pad_reads_only_that_pad :: proc(t: ^testing.T) {
+	actions: Input_Actions
+	fire := actions_with(&actions, "fire", "key:F", "pad:B", "pad:LeftStickUp")
+	input: Input
+	input_key_down(&input, .F)
+	input_gamepad_set(&input, 1, {connected = true, buttons = {.B}})
+	push(&input, 0, #partial{.Left_Y = 1})
+	testing.expect(t, action_down(&actions, &input, fire))
+	testing.expect(t, action_down(&actions, &input, fire, 1))
+	testing.expect(t, action_pressed(&actions, &input, fire, 0))
+	testing.expect(t, !action_down(&actions, &input, fire, 2))
+	testing.expect(t, !action_pressed(&actions, &input, fire, 3))
+	testing.expect(t, !action_down(&actions, &input, fire, 4))
+	// Keys are read only without a pad, so the held F does not count for pad 2.
+	input_gamepad_set(&input, 1, {connected = true})
+	push(&input, 0, {})
+	testing.expect(t, !action_down(&actions, &input, fire, 1))
+	testing.expect(t, action_down(&actions, &input, fire))
+}
+
+@(test)
+a_binding_string_round_trips :: proc(t: ^testing.T) {
+	buffer: [BINDING_FORMAT_CAPACITY]u8
+	check :: proc(t: ^testing.T, b: Binding, buffer: []u8) {
+		text := binding_format(b, buffer)
+		testing.expect(t, text != "")
+		parsed, ok := binding_parse(text)
+		testing.expectf(t, ok && parsed == b, "%v became %q and then %v", b, text, parsed)
+	}
+	for key in Key {
+		if key != .None {
+			check(t, {.Key, u8(key)}, buffer[:])
+		}
+	}
+	for button in Gamepad_Button {
+		check(t, {.Button, u8(button)}, buffer[:])
+	}
+	for direction in Gamepad_Direction {
+		check(t, {.Direction, u8(direction)}, buffer[:])
+	}
+	testing.expect_value(t, binding_format({.Key, u8(Key.W)}, buffer[:]), "key:W")
+	testing.expect_value(t, binding_format({.Key, u8(Key.Page_Up)}, buffer[:]), "key:PageUp")
+	testing.expect_value(
+		t,
+		binding_format({.Button, u8(Gamepad_Button.Dpad_Up)}, buffer[:]),
+		"pad:DpadUp",
+	)
+	testing.expect_value(
+		t,
+		binding_format({.Direction, u8(Gamepad_Direction.Right_Trigger)}, buffer[:]),
+		"pad:RightTrigger",
+	)
+	for bad in ([]string{"", "key:", "key:None", "key:w", "pad:Z", "pad:", "button:A", "W", "key:W "}) {
+		_, ok := binding_parse(bad)
+		testing.expectf(t, !ok, "%q parsed", bad)
+	}
+}
+
+@(test)
+any_pressed_ignores_the_mouse :: proc(t: ^testing.T) {
+	input: Input
+	both := Input_Devices{.Keyboard, .Gamepad}
+	input_key_down(&input, .Mouse_Left)
+	_, ok := any_pressed(&input, both)
+	testing.expect(t, !ok)
+
+	input_key_down(&input, .Escape)
+	b, found := any_pressed(&input, both)
+	testing.expect(t, found && b == Binding{.Key, u8(Key.Escape)})
+	_, found = any_pressed(&input, {.Gamepad})
+	testing.expect(t, !found)
+
+	input_begin_frame(&input)
+	input_gamepad_set(&input, 0, {connected = true, buttons = {.Start}})
+	b, found = any_pressed(&input, {.Gamepad})
+	testing.expect(t, found && b == Binding{.Button, u8(Gamepad_Button.Start)})
+	_, found = any_pressed(&input, {.Keyboard})
+	testing.expect(t, !found)
+
+	input_begin_frame(&input)
+	push(&input, 0, #partial{.Left_X = 1})
+	b, found = any_pressed(&input, {.Gamepad})
+	testing.expect(t, found && b == Binding{.Direction, u8(Gamepad_Direction.Left_Stick_Right)})
+}

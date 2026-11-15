@@ -15,8 +15,8 @@ NAV_DELAY :: 0.4
 NAV_REPEAT :: 0.1
 KEY_REPEAT :: 0.033
 // A stick points in a direction past STICK_ENGAGE on its axis, and stops past STICK_RELEASE back, so it does not chatter.
-STICK_ENGAGE :: 0.5
-STICK_RELEASE :: 0.35
+STICK_ENGAGE :: core.STICK_ENGAGE
+STICK_RELEASE :: core.STICK_RELEASE
 // How many modal documents can open over each other, each keeping the focus that was before it.
 MAX_FOCUS_STACK :: 8
 
