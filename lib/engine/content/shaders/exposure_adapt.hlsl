@@ -1,6 +1,7 @@
 // The exposure (see docs/rendering/post-processing.md#post-processing): from the luminance histogram, the mean log2 luminance between
 // its 10th and 90th percentiles, clamped to the settings' range, gives the exposure that maps it to middle grey. The
-// exposure moves toward it, and pre-exposes the next frame. With a manual exposure, it takes that at once.
+// exposure moves toward it, and pre-exposes the next frame. With a manual exposure, it takes that at once. An empty
+// histogram holds the exposure where it is, and an exposure that is not finite and positive goes to the target at once.
 #include "cinnabar.hlsli"
 
 // Matches Exposure_Push in lib/engine/render/post.odin. The histogram's bins 1 to 255 cover log2 luminance from min_log
@@ -26,6 +27,10 @@ static const uint BINS = 256;
 static const float MIDDLE_GREY = 0.18;
 static const float LOW_PERCENTILE = 0.1;
 static const float HIGH_PERCENTILE = 0.9;
+// The exposure stays in this range, far beyond any that shows a picture, so it is never infinite or zero, from which
+// the adaptation, in log2, could not come back.
+static const float MIN_EXPOSURE = exp2(-64.0);
+static const float MAX_EXPOSURE = exp2(64.0);
 
 groupshared uint bins[BINS];
 
@@ -47,7 +52,11 @@ void cs_main(uint index : SV_GroupIndex) {
 	}
 	RWByteAddressBuffer buffer = cn_rw_buffer(push.exposure);
 	float current = asfloat(buffer.Load(0));
-	float target = push.scale;
+	bool valid = isfinite(current) && current > 0;
+	if (!valid) {
+		current = 1;
+	}
+	float target = push.scale * exp2(push.compensation);
 	if (push.manual == 0) {
 		float total = 0;
 		for (uint i = 0; i < BINS; i++) {
@@ -65,9 +74,14 @@ void cs_main(uint index : SV_GroupIndex) {
 			weight += taken;
 			seen += count;
 		}
-		target = weight > 0 ? MIDDLE_GREY / exp2(clamp(sum / weight, push.low_log, push.high_log)) : current;
+		// With no pixels to count, as while the sky compiles in an empty world, the exposure stays: it holds the
+		// compensation already, so applying it again would compound it each frame.
+		target = weight > 0
+			? MIDDLE_GREY / exp2(clamp(sum / weight, push.low_log, push.high_log)) * exp2(push.compensation)
+			: current;
 	}
-	target *= exp2(push.compensation);
-	float next = push.reset != 0 || push.manual != 0 ? target : exp2(lerp(log2(current), log2(target), push.adapt));
+	bool at_once = push.reset != 0 || push.manual != 0 || !valid;
+	float next = at_once ? target : exp2(lerp(log2(current), log2(target), push.adapt));
+	next = clamp(next, MIN_EXPOSURE, MAX_EXPOSURE);
 	buffer.Store2(0, asuint(float2(next, current)));
 }
