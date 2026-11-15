@@ -16,7 +16,7 @@ With [the engine's package](#the-package), that is all that a project without Od
 |---|---|
 | [Odin](https://odin-lang.org), the `dev-2026-10` nightly or later, on the `PATH` | Builds the engine, and a project's `game/` folder. A project without Odin does not need it after the engine is built. |
 | The .NET 10 SDK | Builds the editor. |
-| Visual Studio 2022's C++ build tools and CMake | Build Luau, Jolt and the cooker's libraries. |
+| Visual Studio 2022's C++ build tools and CMake | Build Luau, Jolt and the cooker's libraries. For another Visual Studio, set `CINNABAR_CMAKE_GENERATOR` to its CMake generator, such as `Visual Studio 18 2026`. |
 | Git, and Git for Windows' Bash at `C:/Program Files/Git/bin/bash.exe` | The justfile's recipes run in it, and `just install` uses its `curl` and `unzip`. |
 | [just](https://github.com/casey/just) | Builds the engine. A project does not need it. |
 

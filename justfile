@@ -60,7 +60,9 @@ luau_dir := obj_dir + "/luau"
 jolt_dir := obj_dir + "/jolt"
 # lib/core/audio/plugin's tests load the mixer's library from here.
 audio_dir := obj_dir + "/audio"
-cmake_generator := "Visual Studio 17 2022"
+# The Visual Studio that CMake builds the C and C++ libraries with. CINNABAR_CMAKE_GENERATOR names another, such as
+# "Visual Studio 18 2026", which the release workflow sets to the runner's.
+cmake_generator := env("CINNABAR_CMAKE_GENERATOR", "Visual Studio 17 2022")
 compressonator_dir := obj_dir + "/compressonator"
 meshoptimizer_dir := obj_dir + "/meshoptimizer"
 opus_dir := obj_dir + "/opus"
