@@ -70,6 +70,7 @@ One_Shot :: struct {
 	position: ecs.World_Position,
 	spatial:  bool,
 	gain:     f32,
+	pitch:    f32,
 	bus:      int,
 	voice:    boundary.Voice,
 	// Fixed at the start: a short sound does not earn a ray each frame.
@@ -247,13 +248,15 @@ set_bus_effect :: proc(s: ^State, name: string, slot: int, effect: boundary.Effe
 }
 
 // play queues a sound for this frame's update, at a position if it has one, and returns false if the frame has queued
-// too many. The sound plays once, to its end. Call it from the frame's code or its scripts.
+// too many. The sound plays once, to its end, at a pitch that is clamped to what Audio_Source.pitch allows, 0.1 to 4
+// (not a number plays at 1). Call it from the frame's code or its scripts.
 play :: proc(
 	s: ^State,
 	sound: format.Guid,
 	position: Maybe(ecs.World_Position) = nil,
 	gain: f32 = 1,
 	bus := 0,
+	pitch: f32 = 1,
 ) -> bool {
 	if s.one_shot_count >= MAX_ONE_SHOTS {
 		if .One_Shots not_in s.warned {
@@ -271,10 +274,24 @@ play :: proc(
 		position = at,
 		spatial  = spatial,
 		gain     = gain,
+		pitch    = clamp_pitch(pitch),
 		bus      = bus,
 	}
 	s.one_shot_count += 1
 	return true
+}
+
+// The range of Audio_Source.pitch in the editor, which a one-shot's pitch keeps to as well.
+MIN_PITCH :: 0.1
+MAX_PITCH :: 4
+
+// clamp_pitch keeps a pitch in MIN_PITCH to MAX_PITCH. A value that is not a number is 1.
+@(private)
+clamp_pitch :: proc(pitch: f32) -> f32 {
+	if pitch != pitch {
+		return 1
+	}
+	return clamp(pitch, MIN_PITCH, MAX_PITCH)
 }
 
 // The listener's pose this frame, once update has found it.
@@ -561,7 +578,7 @@ update_one_shots :: proc(
 		shot := s.one_shots[i]
 		params := boundary.Voice_Params {
 			gain         = shot.gain,
-			pitch        = 1,
+			pitch        = shot.pitch,
 			min_distance = ONE_SHOT_MIN_DISTANCE,
 			max_distance = ONE_SHOT_MAX_DISTANCE,
 			spatial      = b32(shot.spatial && listener.found),

@@ -23,7 +23,7 @@ register_scripts :: proc(r: ^script.Runtime, s: ^State) {
 		r,
 		"Audio.play",
 		play_binding,
-		"(sound: Asset, position: WorldPosition?, gain: number?, bus: string?) -> ()",
+		"(sound: Asset, position: WorldPosition?, gain: number?, bus: string?, pitch: number?) -> ()",
 	)
 	script.define(
 		r,
@@ -68,7 +68,8 @@ play_binding :: proc(L: ^luau.State) -> c.int {
 	if !luau.isnoneornil(L, 4) {
 		bus = check_bus(L, s, 4)
 	}
-	play(s, sound, position, gain, bus)
+	pitch := f32(luau.L_optnumber(L, 5, 1))
+	play(s, sound, position, gain, bus, pitch)
 	return 0
 }
 

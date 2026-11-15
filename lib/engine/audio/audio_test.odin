@@ -671,6 +671,41 @@ a_code_reload_keeps_the_voice :: proc(t: ^testing.T) {
 	testing.expect(t, record.sets > sets)
 }
 
+// A one-shot's pitch reaches its voice, on the frame it starts and on those after. It is 1 unless given, and it stays
+// in the range of Audio_Source.pitch.
+@(test)
+a_one_shots_pitch_reaches_its_voice :: proc(t: ^testing.T) {
+	f := setup(t, scripts = true)
+	defer teardown(t, f)
+	context.user_ptr = f
+	write_sound(t, f, SOUND, SAMPLES[:])
+	listener(f, {0, 0, 0})
+	play(&f.audio, SOUND)
+	play(&f.audio, SOUND, pitch = 1.5)
+	play(&f.audio, SOUND, pitch = 0)
+	play(&f.audio, SOUND, pitch = 100)
+	_, ok := script.spawn_source(
+		&f.runtime,
+		"=pitch",
+		`
+Audio.play(Test.sound(), nil, 1, nil, 2)
+Audio.play(Test.sound(), nil, 1, nil, -3)
+Audio.play(Test.sound())
+`,
+	)
+	testing.expect(t, ok)
+	frame(f)
+	testing.expect_value(t, len(record.plays), 7)
+	want := [?]f32{1, 1.5, MIN_PITCH, MAX_PITCH, 2, MIN_PITCH, 1}
+	for pitch, i in want {
+		testing.expect_value(t, record.plays[i].params.pitch, pitch)
+	}
+	// A playing one-shot keeps its pitch as the voice is updated.
+	frame(f)
+	testing.expect_value(t, record.last.pitch, 1)
+	testing.expect_value(t, f.audio.one_shots[1].pitch, 1.5)
+}
+
 // A behaviour plays a sound through Audio: at a position, heard from the listener, and to its end.
 @(test)
 a_script_plays_a_sound :: proc(t: ^testing.T) {
