@@ -209,10 +209,41 @@ SCATTER_REFERENCE := [4][4][5]f32 {
 	},
 }
 
-// The sun term is within a factor of 2.5 of the reference at every case, and the RMS of its log error is at most 0.32.
-// The octaves alone were 745 times too dark at an optical depth of 30 at noon, with an RMS of 3.33. The diffusion floor
-// adds at most 10% to the octaves at an optical depth of 1 or less, so a thin edge keeps its light. The floor is 0
-// with the sun on the horizon, which isolates it.
+// tools/cloud_scatter's sphere (`cloud_scatter back`): the sun's light that reaches a sample of a uniform sphere of
+// cloud, scattered toward a viewer who looks straight into its surface, before the albedo: at optical radii 10 and 30,
+// on the surface and 1 inside it, from the point that faces the sun around to the far side. Each case is its optical
+// depth toward the sun, its optical depth away from it, the cosine between the view and the sun, and the reference.
+@(private = "file")
+SPHERE_REFERENCE := [20][4]f32 {
+	{0.000, 20.000, -1.000, 2.412e-01},
+	{0.000, 14.142, -0.707, 1.760e-01},
+	{0.000, 0.000, -0.000, 7.289e-02},
+	{14.142, 0.000, 0.707, 5.259e-03},
+	{20.000, 0.000, 1.000, 3.770e-03},
+	{1.000, 19.000, -1.000, 2.463e-01},
+	{1.350, 14.078, -0.707, 1.775e-01},
+	{4.359, 4.359, -0.000, 4.741e-02},
+	{14.078, 1.350, 0.707, 1.054e-02},
+	{19.000, 1.000, 1.000, 7.490e-03},
+	{0.000, 60.000, -1.000, 2.737e-01},
+	{0.000, 42.426, -0.707, 1.915e-01},
+	{0.000, 0.000, -0.000, 5.382e-02},
+	{42.426, 0.000, 0.707, 9.886e-04},
+	{60.000, 0.000, 1.000, 6.599e-04},
+	{1.000, 59.000, -1.000, 3.060e-01},
+	{1.391, 42.404, -0.707, 2.078e-01},
+	{7.681, 7.681, -0.000, 1.898e-02},
+	{42.404, 1.391, 0.707, 1.986e-03},
+	{59.000, 1.000, 1.000, 1.282e-03},
+}
+
+// On the slab's bottom, where nothing is behind a sample, the sun term is within a factor of 2.5 of the reference at
+// every case, and the RMS of its log error is at most 0.38. The octaves alone were 745 times too dark at an optical
+// depth of 30 at noon, with an RMS of 3.33. On the sphere, with a sun 45° up, it is within a factor of 3, with an RMS of
+// at most 0.5: the lit face, which the reflection makes glow, within 1.5, and the far side of a large sphere, which loses
+// light that a slab keeps, up to 2.9 too bright. Where a sample has at most 1 optical depth of cloud toward the sun and
+// away from it, the floor and the reflection add at most 10% to the octaves, so a thin edge keeps its light; with the
+// sun on the horizon and nothing behind the sample, the term is the octaves alone, which isolates them.
 @(test)
 the_sun_term_follows_the_multiple_scattering_reference :: proc(t: ^testing.T) {
 	sum: f32
@@ -225,7 +256,7 @@ the_sun_term_follows_the_multiple_scattering_reference :: proc(t: ^testing.T) {
 			for view, v in SCATTER_VIEWS {
 				angle := math.to_radians(elevation - view)
 				mu := math.cos(angle) * to_sun.x + math.sin(angle) * to_sun.y
-				got := cloud_sun_scattering(od, mu, to_sun.y)
+				got := cloud_sun_scattering(od, 0, mu, to_sun.y)
 				ratio := got / SCATTER_REFERENCE[e][o][v]
 				testing.expectf(
 					t,
@@ -242,24 +273,46 @@ the_sun_term_follows_the_multiple_scattering_reference :: proc(t: ^testing.T) {
 		}
 	}
 	rms := math.sqrt(sum / f32(len(SCATTER_REFERENCE) * len(SCATTER_DEPTHS) * len(SCATTER_VIEWS)))
-	testing.expectf(t, rms <= 0.32, "the RMS of the log error is %v", rms)
+	testing.expectf(t, rms <= 0.38, "the RMS of the log error on the slab is %v", rms)
+
+	sum = 0
+	for c in SPHERE_REFERENCE {
+		got := cloud_sun_scattering(c[0], c[1], c[2], math.sin(math.to_radians(f32(45))))
+		ratio := got / c[3]
+		testing.expectf(
+			t,
+			ratio >= 1 / 3.0 && ratio <= 3,
+			"sphere od %v od_back %v mu %v: %v, the reference %v",
+			c[0],
+			c[1],
+			c[2],
+			got,
+			c[3],
+		)
+		sum += math.ln(ratio) * math.ln(ratio)
+	}
+	rms = math.sqrt(sum / f32(len(SPHERE_REFERENCE)))
+	testing.expectf(t, rms <= 0.5, "the RMS of the log error on the sphere is %v", rms)
 
 	for elevation := f32(0); elevation <= 90; elevation += 5 {
 		sun_up := math.sin(math.to_radians(elevation))
 		for mu := f32(-1); mu <= 1; mu += 0.125 {
 			for od := f32(0.05); od <= 1; od += 0.05 {
-				octaves := cloud_sun_scattering(od, mu, 0)
-				floor := cloud_sun_scattering(od, mu, sun_up) - octaves
-				testing.expectf(
-					t,
-					floor <= 0.1 * octaves,
-					"sun %v° mu %v od %v: the floor adds %v to %v",
-					elevation,
-					mu,
-					od,
-					floor,
-					octaves,
-				)
+				for od_back := f32(0); od_back <= 1; od_back += 0.1 {
+					octaves := cloud_sun_scattering(od, 0, mu, 0)
+					added := cloud_sun_scattering(od, od_back, mu, sun_up) - octaves
+					testing.expectf(
+						t,
+						added <= 0.1 * octaves,
+						"sun %v° mu %v od %v od_back %v: the floor and the reflection add %v to %v",
+						elevation,
+						mu,
+						od,
+						od_back,
+						added,
+						octaves,
+					)
+				}
 			}
 		}
 	}

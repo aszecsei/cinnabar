@@ -1,10 +1,10 @@
-// tools/cloud_scatter measures the clouds' sun term against a Monte Carlo reference (see
-// docs/rendering/clouds.md#multiple-scattering): it prints the reference, each model's error against it, and the
-// diffusion floor's constants fitted to it. Run `just cloud-scatter` after a change to the clouds' phase or sun term.
-// When the fit moves, copy its constants into DIFFUSION_* in clouds_common.hlsli and clouds.odin and into BUILT, and the
-// reference into the table in clouds_test.odin.
+// tools/cloud_scatter measures the clouds' sun term against two Monte Carlo references, a slab and a sphere (see
+// docs/rendering/clouds.md#multiple-scattering): it prints the references, each model's error against them, and the
+// sun term's constants fitted to them. Run `just cloud-scatter` after a change to the clouds' phase or sun term. When
+// the fit moves, copy its constants into POWDER_STRENGTH, DIFFUSION_* and REFLECT_* in clouds_common.hlsli and
+// clouds.odin and into BUILT (sun_term.odin), and the two references into the tables in clouds_test.odin.
 //
-// The reference is a uniform slab of cloud lit from above by a sun of illuminance 1, with no sky and no ground. A
+// The slab (this file) is a uniform slab of cloud lit from above by a sun of illuminance 1, with no sky and no ground. A
 // sample is on the slab's bottom, so the slab is a cloud whose optical depth toward the sun is the sample's: the samples
 // that the camera sees with a large optical depth are near a cloud's bottom or its far side, not deep inside it. The
 // reference is the sun's light that reaches the sample, scattered toward the viewer: ∫ phase · L, the shader's sun term,
@@ -205,19 +205,20 @@ Model :: enum {
 	Octaves,
 	Power,
 	Table,
-	Floor,
+	Built,
 }
 
 @(rodata)
 MODEL_NAMES := [Model]string {
-	.Octaves = "The octaves, before",
+	.Octaves = "The octaves with the whole powder effect, before",
 	.Power   = "The octaves and w / (1 + k·od)",
 	.Table   = "A table of od and mu at its best, the mean over the sun's elevations",
-	.Floor   = "The octaves and the diffusion floor, as built",
+	.Built   = "As built, with nothing behind a sample on the slab's bottom",
 }
 
 // The octaves (SCATTER_OCTAVES, SCATTER_ATTENUATION in clouds_common.hlsli): each takes this share of the light, the
-// extinction and the phase's eccentricity of the one before.
+// extinction and the phase's eccentricity of the one before. octaves is the term before the floor, with the whole
+// powder effect.
 OCTAVES :: 3
 ATTENUATION :: 0.5
 
@@ -237,7 +238,7 @@ octaves :: proc(od, mu: f64) -> f64 {
 	return sun * powder
 }
 
-// Floor is the diffusion floor's constants. The floor is
+// Floor is the diffusion floor's constants (DIFFUSION_* in clouds_common.hlsli). The floor is
 // weight · sun_up^power · (1 - e^(-rise · od))² · e^(-decay · od · sun_up) · the last octave's phase. In a slab, the
 // light that has scattered many times comes in through the top, which the sun lights at sun_up. It falls off with the
 // vertical depth, od · sun_up, as it leaks out of the slab and the cloud absorbs it, and it builds up over the first
@@ -245,9 +246,6 @@ octaves :: proc(od, mu: f64) -> f64 {
 Floor :: struct {
 	weight, power, rise, decay: f64,
 }
-
-// The constants as built: DIFFUSION_* in clouds_common.hlsli.
-BUILT :: Floor{0.45, 1.2, 0.44, 0.06}
 
 floor_term :: proc(f: Floor, od, mu, sun_up: f64) -> f64 {
 	up := max(sun_up, 0)
@@ -270,7 +268,6 @@ Power :: struct {
 }
 
 Fits :: struct {
-	floor: Floor,
 	power: Power,
 	table: [4][5]f64,
 }
@@ -286,8 +283,8 @@ model :: proc(m: Model, fits: ^Fits, e, o, v: int) -> f64 {
 		return octaves(od, mu) + fits.power.weight / (1 + fits.power.k * od) / (4 * math.PI)
 	case .Table:
 		return fits.table[o][v]
-	case .Floor:
-		return octaves(od, mu) + floor_term(fits.floor, od, mu, to_sun.y)
+	case .Built:
+		return sun_term(BUILT, od, 0, mu, to_sun.y)
 	}
 	return 0
 }
@@ -391,25 +388,10 @@ Fit_Data :: struct {
 	ref:  ^Table,
 }
 
-// fit fits the floor and the power floor to the reference on the slab's bottom, in log space, from several restarts,
-// and puts the mean over the sun's elevations in the table.
+// fit fits the power floor to the reference on the slab's bottom, in log space, from several restarts, and puts the
+// mean over the sun's elevations in the table: the options that #438 weighed against the diffusion floor.
 fit :: proc(ref: ^Table) -> (fits: Fits) {
 	data := Fit_Data{&fits, ref}
-	floor_from :: proc(p: [4]f64) -> Floor {
-		return {math.exp(p[0]), p[1], math.exp(p[2]), math.exp(p[3])}
-	}
-	floor_objective :: proc(p: [4]f64, data: rawptr) -> f64 {
-		d := (^Fit_Data)(data)
-		d.fits.floor = floor_from(p)
-		over := max(thin_edge_change(d.fits.floor, 5) - THIN_EDGE_LIMIT, 0)
-		return log_error(.Floor, d.fits, d.ref) + 100 * over * over
-	}
-	p := [4]f64{math.ln(f64(1)), 1, math.ln(f64(0.3)), math.ln(f64(0.1))}
-	for _ in 0 ..< 5 {
-		p = nelder_mead(4, floor_objective, &data, p, [4]f64{0.3, 0.3, 0.3, 0.3})
-	}
-	fits.floor = floor_from(p)
-
 	power_objective :: proc(p: [2]f64, data: rawptr) -> f64 {
 		d := (^Fit_Data)(data)
 		d.fits.power = {math.exp(p[0]), math.exp(p[1])}
@@ -434,26 +416,9 @@ fit :: proc(ref: ^Table) -> (fits: Fits) {
 	return
 }
 
-// The most that the floor may add to a thin edge's light, which the fit keeps it under, with a margin for the sweep
-// that the fit takes, which is coarser than the report's.
+// The most that the floor and the reflection may add to a thin edge's light, which the fit keeps them under, with a
+// margin for the sweep that the fit takes, which is coarser than the report's.
 THIN_EDGE_LIMIT :: 0.09
-
-// thin_edge_change is the most that a floor adds to the octaves at an optical depth of at most 1, over the views and
-// sun elevations every step degrees, as a share of the octaves.
-thin_edge_change :: proc(f: Floor, step := 1) -> f64 {
-	worst := 0.0
-	for e := 0; e <= 90; e += step {
-		to_sun := direction(f64(e))
-		for v := 0; v <= 180; v += step {
-			mu := dot(direction(f64(e - v)), to_sun)
-			for i in 1 ..= 20 {
-				od := f64(i) / 20
-				worst = max(worst, floor_term(f, od, mu, to_sun.y) / octaves(od, mu))
-			}
-		}
-	}
-	return worst
-}
 
 print_header :: proc(last: string) {
 	fmt.printf("\n| Sun | od |")
@@ -487,7 +452,11 @@ print_ratios :: proc(title: string, m: Model, fits: ^Fits, ref: ^Table) {
 
 main :: proc() {
 	table := reference_table()
+	sphere := sphere_table(0)
+	again := sphere_table(1_000_003)
 	fits := fit(&table)
+	refs := References{&table, &sphere}
+	fitted := sun_term_fit(&refs)
 
 	fmt.println("The reference: ∫ phase · L / E on the slab's bottom")
 	print_header("")
@@ -500,29 +469,37 @@ main :: proc() {
 			fmt.println()
 		}
 	}
-	built := fits
-	built.floor = BUILT
 	for m in Model {
-		print_ratios(MODEL_NAMES[m], m, &built, &table)
+		print_ratios(MODEL_NAMES[m], m, &fits, &table)
 	}
-
-	f := fits.floor
-	fmt.printfln(
-		"\nThe fit: weight %.4f, power %.4f, rise %.4f, decay %.4f (as built %v). The RMS of its log error is %.3f.",
-		f.weight,
-		f.power,
-		f.rise,
-		f.decay,
-		BUILT,
-		math.sqrt(log_error(.Floor, &fits, &table)),
-	)
-	fmt.printfln(
-		"At od <= 1, the floor as built adds at most %.1f%% to the octaves.",
-		100 * thin_edge_change(BUILT),
-	)
 	fmt.printfln("The power floor: weight %.4f, k %.4f.", fits.power.weight, fits.power.k)
 
-	fmt.println("\nThe reference for clouds_test.odin, by the sun's elevation, od and the view:")
+	fmt.println("\nThe sphere: as built over the reference, with a sun 45° up")
+	print_sphere(BUILT, &sphere, &again)
+
+	slab, ball, slab_worst, ball_worst := sun_term_errors(BUILT, &refs)
+	fmt.printfln(
+		"\nAs built: the RMS of the log error is %.3f on the slab and %.3f on the sphere, at worst %.1fx and %.1fx.",
+		math.sqrt(slab),
+		math.sqrt(ball),
+		slab_worst,
+		ball_worst,
+	)
+	fmt.printfln(
+		"Where od and od_back are at most 1, the floor and the reflection add at most %.1f%% to the octaves.",
+		100 * thin_edge_change(BUILT),
+	)
+	slab, ball, _, _ = sun_term_errors(fitted, &refs)
+	fmt.printfln("\nThe fit: %v", fitted)
+	fmt.printfln(
+		"The RMS of its log error is %.3f on the slab and %.3f on the sphere.",
+		math.sqrt(slab),
+		math.sqrt(ball),
+	)
+
+	fmt.println(
+		"\nThe slab's reference for clouds_test.odin, by the sun's elevation, od and the view:",
+	)
 	for e in 0 ..< len(ELEVATIONS) {
 		fmt.println("\t{")
 		for o in 0 ..< len(DEPTHS) {
@@ -534,4 +511,5 @@ main :: proc() {
 		}
 		fmt.println("\t},")
 	}
+	print_sphere_test(&sphere)
 }

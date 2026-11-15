@@ -48,9 +48,29 @@ the_reference_falls_off_at_the_exact_rate_in_depth :: proc(t: ^testing.T) {
 	testing.expectf(t, abs(rate - k) < 0.02, "the light falls off at %v, exactly at %v", rate, k)
 }
 
-// The floor as built adds at most 10% to the octaves at an optical depth of 1 or less, so a thin edge keeps its light.
+// The floor and the reflection as built add at most 10% to the octaves where the optical depths toward the sun and
+// away from it are at most 1, so a thin edge keeps its light.
 @(test)
-the_floor_leaves_thin_edges :: proc(t: ^testing.T) {
-	change := thin_edge_change(BUILT)
-	testing.expectf(t, change <= 0.1, "the floor adds %v to a thin edge", change)
+the_floor_and_the_reflection_leave_thin_edges :: proc(t: ^testing.T) {
+	change := thin_edge_change(BUILT, 5)
+	testing.expectf(t, change <= 0.1, "the floor and the reflection add %v to a thin edge", change)
+}
+
+// A point on a sphere's surface that faces the sun sees it through no cloud, and the point opposite sees it through
+// the diameter. A thick sphere's lit face sends back the light that its body scatters, half again as much as a thin
+// sphere's, which keeps little more than its single scattering.
+@(test)
+the_sphere_has_its_chords_and_a_lit_face :: proc(t: ^testing.T) {
+	to_sun := Vec3{0, 0, 1}
+	testing.expect(t, chord_exit({0, 0, 10}, to_sun, 10) < 1e-9)
+	testing.expect(t, abs(chord_exit({0, 0, -10}, to_sun, 10) - 20) < 1e-9)
+	thick := reference_sphere(CLOUDS, 10, {0, 0, 10}, -to_sun, to_sun, 2_000, 1)
+	thin := reference_sphere(CLOUDS, 0.5, {0, 0, 0.5}, -to_sun, to_sun, 2_000, 2)
+	testing.expectf(
+		t,
+		thick > 1.5 * thin && thick > 0.2,
+		"the lit face is %v on a thick sphere, %v on a thin one",
+		thick,
+		thin,
+	)
 }

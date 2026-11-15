@@ -116,13 +116,19 @@ static const float CLOUD_MAX_SCENE = 60000;
 // eccentricity of the one before.
 static const uint SCATTER_OCTAVES = 3;
 static const float SCATTER_ATTENUATION = 0.5;
-// The diffusion floor, fitted by tools/cloud_scatter (see docs/rendering/clouds.md#multiple-scattering): its weight, the
-// power of the sun's elevation's sine that scales it, how fast it builds up with the optical depth toward the sun, and
-// how fast it falls off with the vertical depth.
-static const float DIFFUSION_WEIGHT = 0.45;
-static const float DIFFUSION_POWER = 1.2;
-static const float DIFFUSION_RISE = 0.44;
-static const float DIFFUSION_DECAY = 0.06;
+// The sun term's constants, fitted by tools/cloud_scatter to a slab and a sphere (see
+// docs/rendering/clouds.md#multiple-scattering). The powder effect's strength. The diffusion floor's weight, the power
+// of the sun's elevation's sine that scales it, how fast it builds up with the optical depth toward the sun, and how
+// fast it falls off with the vertical depth. The reflection's weight, how fast it builds up with the optical depth
+// away from the sun, and how fast it falls off with the optical depth toward it.
+static const float POWDER_STRENGTH = 0.35;
+static const float DIFFUSION_WEIGHT = 0.48;
+static const float DIFFUSION_POWER = 1.25;
+static const float DIFFUSION_RISE = 0.28;
+static const float DIFFUSION_DECAY = 0.08;
+static const float REFLECT_WEIGHT = 3;
+static const float REFLECT_THICKNESS = 0.12;
+static const float REFLECT_FALL = 0.1;
 
 float remap(float v, float lo, float hi, float a, float b) {
 	return a + (v - lo) / max(hi - lo, 1e-4) * (b - a);
@@ -140,26 +146,36 @@ float cloud_phase(float mu, float k) {
 }
 
 // cloud_sun_scattering is the light of a sun of illuminance 1 that a sample scatters toward the camera, before the
-// albedo: od is the sample's optical depth toward the sun, mu_sun the cosine between the view ray and the direction
-// toward the sun, and sun_up the sine of the sun's elevation. The octaves of multiple scattering
-// each have their own phase, and the powder effect darkens the creases of a front-lit cloud. The diffusion floor is
-// the light that has scattered many times, as in a slab that the sun lights from above: it builds up over the first
-// optical depths, falls off with the vertical depth od · sun_up, and takes the last octave's phase. Matches
+// albedo: od is the sample's optical depth toward the sun, od_back its optical depth away from the sun, mu_sun the
+// cosine between the view ray and the direction toward the sun, and sun_up the sine of the sun's elevation. The
+// octaves of multiple scattering each have their own phase, and the powder effect darkens the creases of a front-lit
+// cloud, at POWDER_STRENGTH. The diffusion floor is the light that has scattered many times, as in a slab that the
+// sun lights from above: it builds up over the first optical depths, falls off with the vertical depth od · sun_up,
+// and takes the last octave's phase. The reflection is the light that the cloud behind the sample scatters back
+// toward the sun's side, which makes the lit face of a thick cloud glow: it builds up with od_back, falls off with od,
+// and takes the second octave's phase. Both build up quadratically, so a thin edge keeps the octaves' light. Matches
 // cloud_sun_scattering in clouds.odin.
-float cloud_sun_scattering(float od, float mu_sun, float sun_up) {
+float cloud_sun_scattering(float od, float od_back, float mu_sun, float sun_up) {
 	float sun = 0;
 	float a = 1;
+	float second_phase = 0;
 	float last_phase = 0;
 	[unroll] for (uint o = 0; o < SCATTER_OCTAVES; o++) {
 		last_phase = cloud_phase(mu_sun, a);
+		if (o == 1) {
+			second_phase = last_phase;
+		}
 		sun += a * last_phase * exp(-a * od);
 		a *= SCATTER_ATTENUATION;
 	}
 	float front_lit = saturate(-mu_sun * 0.5 + 0.5);
-	sun *= lerp(1, 1 - exp(-2 * od), front_lit);
+	sun *= lerp(1, 1 - exp(-2 * od), front_lit * POWDER_STRENGTH);
 	float up = saturate(sun_up);
 	float buildup = 1 - exp(-DIFFUSION_RISE * od);
-	return sun + DIFFUSION_WEIGHT * pow(up, DIFFUSION_POWER) * buildup * buildup * exp(-DIFFUSION_DECAY * od * up) * last_phase;
+	float floor_light = DIFFUSION_WEIGHT * pow(up, DIFFUSION_POWER) * buildup * buildup * exp(-DIFFUSION_DECAY * od * up) * last_phase;
+	float behind = 1 - exp(-REFLECT_THICKNESS * od_back);
+	float reflect_light = REFLECT_WEIGHT * behind * behind * exp(-REFLECT_FALL * od) * second_phase;
+	return sun + floor_light + reflect_light;
 }
 
 // The geometry: a ray from a point at height h0 above the ground with mu, the cosine of its angle from the zenith, and

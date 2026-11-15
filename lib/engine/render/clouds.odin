@@ -519,20 +519,29 @@ cloud_far_coverage :: proc(coverage, far_coverage, far: f32) -> f32 {
 	return math.lerp(coverage, far_coverage, far)
 }
 
-// The sun term's constants, which match clouds_common.hlsli: the octaves of multiple scattering, and the diffusion
-// floor that tools/cloud_scatter fits (see docs/rendering/clouds.md#multiple-scattering).
+// The sun term's constants, which match clouds_common.hlsli: the octaves of multiple scattering, and the powder
+// effect's strength, the diffusion floor and the reflection that tools/cloud_scatter fits (see
+// docs/rendering/clouds.md#multiple-scattering).
 @(private = "file")
 SCATTER_OCTAVES :: 3
 @(private = "file")
 SCATTER_ATTENUATION :: f32(0.5)
 @(private = "file")
-DIFFUSION_WEIGHT :: f32(0.45)
+POWDER_STRENGTH :: f32(0.35)
 @(private = "file")
-DIFFUSION_POWER :: f32(1.2)
+DIFFUSION_WEIGHT :: f32(0.48)
 @(private = "file")
-DIFFUSION_RISE :: f32(0.44)
+DIFFUSION_POWER :: f32(1.25)
 @(private = "file")
-DIFFUSION_DECAY :: f32(0.06)
+DIFFUSION_RISE :: f32(0.28)
+@(private = "file")
+DIFFUSION_DECAY :: f32(0.08)
+@(private = "file")
+REFLECT_WEIGHT :: f32(3)
+@(private = "file")
+REFLECT_THICKNESS :: f32(0.12)
+@(private = "file")
+REFLECT_FALL :: f32(0.1)
 
 @(private = "file")
 hg_phase :: proc(mu, g: f32) -> f32 {
@@ -546,19 +555,23 @@ cloud_phase :: proc(mu, k: f32) -> f32 {
 }
 
 // cloud_sun_scattering is the light of a sun of illuminance 1 that a sample scatters toward the camera, before the
-// albedo, from its optical depth toward the sun, the cosine between the view ray and the direction toward the sun, and
-// the sine of the sun's elevation, as cloud_sun_scattering in clouds_common.hlsli has it.
-cloud_sun_scattering :: proc(od, mu_sun, sun_up: f32) -> f32 {
+// albedo, from its optical depths toward the sun and away from it, the cosine between the view ray and the direction
+// toward the sun, and the sine of the sun's elevation, as cloud_sun_scattering in clouds_common.hlsli has it.
+cloud_sun_scattering :: proc(od, od_back, mu_sun, sun_up: f32) -> f32 {
 	sun := f32(0)
 	a := f32(1)
+	second_phase := f32(0)
 	last_phase := f32(0)
-	for _ in 0 ..< SCATTER_OCTAVES {
+	for o in 0 ..< SCATTER_OCTAVES {
 		last_phase = cloud_phase(mu_sun, a)
+		if o == 1 {
+			second_phase = last_phase
+		}
 		sun += a * last_phase * math.exp(-a * od)
 		a *= SCATTER_ATTENUATION
 	}
 	front_lit := clamp(-mu_sun * 0.5 + 0.5, 0, 1)
-	sun *= math.lerp(f32(1), 1 - math.exp(-2 * od), front_lit)
+	sun *= math.lerp(f32(1), 1 - math.exp(-2 * od), front_lit * POWDER_STRENGTH)
 	up := clamp(sun_up, 0, 1)
 	buildup := 1 - math.exp(-DIFFUSION_RISE * od)
 	floor :=
@@ -568,7 +581,9 @@ cloud_sun_scattering :: proc(od, mu_sun, sun_up: f32) -> f32 {
 		buildup *
 		math.exp(-DIFFUSION_DECAY * od * up) *
 		last_phase
-	return sun + floor
+	behind := 1 - math.exp(-REFLECT_THICKNESS * od_back)
+	reflect := REFLECT_WEIGHT * behind * behind * math.exp(-REFLECT_FALL * od) * second_phase
+	return sun + floor + reflect
 }
 
 // cloud_shadow_center is the shadow map's center relative to the camera: where the sun's rays through the camera meet

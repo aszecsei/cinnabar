@@ -13,6 +13,9 @@ static const float FINE_STEPS = 64;
 // steps, until it finds cloud again.
 static const uint EMPTY_SAMPLES = 3;
 static const float EMPTY_MAX_STEPS = 8;
+// The probe away from the sun takes this many samples, whose lengths double, out to at most BACK_REACH meters.
+static const uint BACK_STEPS = 4;
+static const float BACK_REACH = 1000;
 // The march stops behind this much cloud.
 static const float MIN_TRANSMITTANCE = 0.01;
 
@@ -58,7 +61,8 @@ float albedo(float precipitation) {
 }
 
 // sun_light is the sun's light scattered toward the camera at a sample, before the albedo: a light march toward the sun
-// through the expected density (cheap_sigma) in steps that double, then the octaves and the diffusion floor of its optical depth.
+// through the expected density (cheap_sigma) in steps that double, a shorter probe away from the sun, and the sun term
+// of the two optical depths (cloud_sun_scattering).
 float3 sun_light(float3 p, float h, float t, float mu_sun) {
 	float3 to_sun = clouds.sun_direction.xyz;
 	float reach = min((clouds.top - h) / max(to_sun.y, 0.1), LIGHT_REACH_MAX);
@@ -71,7 +75,18 @@ float3 sun_light(float3 p, float h, float t, float mu_sun) {
 		od += cheap_sigma(p + to_sun * middle, h + to_sun.y * middle, t) * ds;
 		s += ds;
 	}
-	return cloud_sun_scattering(od, mu_sun, to_sun.y) * clouds.sun_illuminance.rgb;
+	// The probe away from the sun, down to the layer's bottom or BACK_REACH.
+	float back_reach = min((h - clouds.bottom) / max(to_sun.y, 0.1), BACK_REACH);
+	float step_b = back_reach / (exp2(float(BACK_STEPS)) - 1);
+	float od_back = 0;
+	s = 0;
+	[unroll] for (uint j = 0; j < BACK_STEPS; j++) {
+		float ds = step_b * exp2(float(j));
+		float middle = s + ds * 0.5;
+		od_back += cheap_sigma(p - to_sun * middle, h - to_sun.y * middle, t) * ds;
+		s += ds;
+	}
+	return cloud_sun_scattering(od, od_back, mu_sun, to_sun.y) * clouds.sun_illuminance.rgb;
 }
 
 // At the bottom of the layer, the share of the upper hemisphere's light that comes down through the cloud, and the
