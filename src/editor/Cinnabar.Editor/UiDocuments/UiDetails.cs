@@ -26,7 +26,7 @@ sealed class UiDetails : ScrollViewer
         ("Layout", ["width", "height", "min_width", "max_width", "min_height", "max_height", "padding", "gap", "direction", "align", "cross", "anchor", "offset", "visible", "clip", "overflow", "scroll_bar"]),
         ("Paint", ["fill", "radius", "border", "opacity", "image", "tint", "slice"]),
         ("Text", ["text", "placeholder", "font", "size", "color", "text_align", "line_height", "wrap", "max_length"]),
-        ("Interaction", ["focusable", "disabled", "click", "changed", "submit", "nav_up", "nav_down", "nav_left", "nav_right", "cancel", "focus", "modal"]),
+        ("Interaction", ["focusable", "disabled", "click", "focused", "changed", "submit", "nav_up", "nav_down", "nav_left", "nav_right", "cancel", "focus", "modal"]),
     ];
 
     // The words that an enum's kind takes, as format.ui_parse_value reads them.

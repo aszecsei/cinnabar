@@ -106,6 +106,7 @@ The containers are `box`, `row`, `column`, `stack` and `button`. The boxes are t
 | `focusable` | boolean | boxes | Whether the box takes focus. A button and a field do. |
 | `disabled` | boolean | boxes | Whether the box ignores input, and its styles' `disabled` variants apply. |
 | `click` | event | boxes | The script event that a click sends. |
+| `focused` | event | boxes | The script event that the focus's arrival sends, with the element's id (see [UI: Input and focus](../../ui/design.md#input-and-focus)). |
 | `changed`, `submit` | event | `field` | The events that an edit and Enter send. |
 | `nav_up`, `nav_down`, `nav_left`, `nav_right` | id | boxes | Where focus goes from the box in a direction, in place of the nearest box there. |
 | `cancel` | event | `ui` | The event that B or Escape sends. |

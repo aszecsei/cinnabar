@@ -82,6 +82,15 @@ register_scripts :: proc(r: ^script.Runtime, s: ^State) {
 			}
 			return 0
 		}, "(entity: Entity, id: string?) -> ()")
+	script.define(r, "Ui.focused", proc(L: ^luau.State) -> c.int {
+			s, d := document_arg(L)
+			if id := focused_id(s, d); id != "" {
+				luau.pushodinstring(L, id)
+			} else {
+				luau.pushnil(L)
+			}
+			return 1
+		}, "(entity: Entity) -> string?")
 	script.define(r, "Ui.get_text", proc(L: ^luau.State) -> c.int {
 			s, d := document_arg(L)
 			if text, ok := text_of(s, d, check_text(L, 2)); ok {

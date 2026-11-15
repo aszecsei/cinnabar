@@ -146,6 +146,7 @@ ui_menu_parses_into_nodes_styles_and_templates :: proc(t: ^testing.T) {
 	testing.expect_value(t, label.element, Ui_Element.Text)
 	testing.expect_value(t, int(label.parent), r)
 	testing.expect_value(t, ui_prop(label, .Text), "Resume")
+	testing.expect_value(t, ui_prop(resume, .Focused), "resume_focused")
 	testing.expect_value(t, int(resume.end), r + 2)
 
 	// The kind's style comes first, then the list, without the kind's again.
