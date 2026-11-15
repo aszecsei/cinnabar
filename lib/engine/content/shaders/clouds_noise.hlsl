@@ -13,11 +13,13 @@ static const uint CURL_SIZE = 128;
 // The low layer's masses' gradient noise, from this range to [0, 1]: a coverage then covers about its share of the sky.
 static const float2 MASS_CONTRAST = float2(0.3, 0.7);
 // The warp of the masses and billows: SHAPE_WARP_ITERATIONS passes, each moving the coordinates by gradient noise at
-// SHAPE_WARP_CELLS cells (500 m), times SHAPE_WARP_AMPLITUDE of the texture (about 120 m), from where the pass before
-// moved them. Baked into the texture, it costs the march nothing.
+// SHAPE_WARP_CELLS cells (500 m), times SHAPE_WARP_AMPLITUDE of the texture (about 120 m) across and SHAPE_WARP_VERTICAL
+// times that up and down, from where the pass before moved them. The stronger vertical warp lifts a cumulus's top into
+// rounded bulges; a weaker one smeared the clouds into layers. Baked into the texture, it costs the march nothing.
 static const uint SHAPE_WARP_ITERATIONS = 3;
 static const int SHAPE_WARP_CELLS = 16;
 static const float SHAPE_WARP_AMPLITUDE = 0.015;
+static const float SHAPE_WARP_VERTICAL = 2;
 
 uint pcg(uint x) {
 	uint state = x * 747796405u + 2891336453u;
@@ -94,7 +96,7 @@ float3 warp_shape(float3 uvw) {
 			perlin3(p, SHAPE_WARP_CELLS),
 			perlin3(p + float3(31, 17, 5), SHAPE_WARP_CELLS),
 			perlin3(p + float3(7, 41, 23), SHAPE_WARP_CELLS));
-		warped += offset * SHAPE_WARP_AMPLITUDE;
+		warped += offset * SHAPE_WARP_AMPLITUDE * float3(1, SHAPE_WARP_VERTICAL, 1);
 	}
 	return warped;
 }
