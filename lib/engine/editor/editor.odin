@@ -234,7 +234,7 @@ poll :: proc(
 		begin_session(e, connection)
 		// A new editor is in Edit, so its first scene replaces the world without the old behaviours' callbacks.
 		if scripts != nil {
-			script.set_quiet(scripts, connection != 0)
+			script.set_callbacks(scripts, .None if connection != 0 else .All)
 		}
 		snapshot = connection != 0
 	}
@@ -277,7 +277,7 @@ poll :: proc(
 			}
 			// The edits that follow in this poll run no script code outside Play.
 			if scripts != nil {
-				script.set_quiet(scripts, v.mode != .Play)
+				script.set_callbacks(scripts, .All if v.mode == .Play else .None)
 				// Each Play from Edit draws the same numbers (see docs/scripting/api.md#random).
 				if started {
 					script.restart_random(scripts)

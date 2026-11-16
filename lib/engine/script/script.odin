@@ -81,8 +81,8 @@ Runtime :: struct {
 	instance_used:              int,
 	// The memory category that set_category last gave a thread.
 	category:                   c.int,
-	// While set, no script code runs for the world's changes (see set_quiet).
-	quiet:                      bool,
+	// Which behaviours get callbacks: every one, only the edit-mode classes', or none (see set_callbacks).
+	callbacks:                  Callbacks,
 	// The GUIDs that scripts hold references to, by the payload of their light userdata. They stay across reloads,
 	// since the VM's values keep their payloads.
 	asset_refs:                 [MAX_ASSET_REFS]format.Guid,

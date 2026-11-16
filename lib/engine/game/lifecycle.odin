@@ -123,7 +123,7 @@ game_update :: proc(g: ^Game, dt: time.Duration, h: Hooks) -> (keep_running: boo
 	// The editor's own steps, a tick at a time while it pauses, take no scale.
 	step = world_step(g, step, editor.mode(&g.editor) == .Play)
 	script.set_frame_time(&g.scripts, dt, time_scale_of(g))
-	script.set_quiet(&g.scripts, !run)
+	script.set_callbacks(&g.scripts, .All if run else .None)
 	// The documents follow the world in every mode, so the editor's viewport shows them as they are.
 	ui.sync(&g.ui, &g.world)
 	// The Animators' graphs and clips load before the ticks, so the animate system's jobs only read them.

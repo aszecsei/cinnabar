@@ -396,7 +396,7 @@ b:set_active(false)
 	active, inactive := actives[0], inactives[0]
 
 	// As in the editor's edit mode: a despawn ends its behaviour, and an activation waits, without script code.
-	set_quiet(&f.runtime, true)
+	set_callbacks(&f.runtime, .None)
 	ecs.despawn(f.runtime.world, active)
 	ecs.set_active(f.runtime.world, inactive, true)
 	settle(&f.runtime)
@@ -404,7 +404,7 @@ b:set_active(false)
 	testing.expect_value(t, behaviour_count(&f.runtime), 1)
 
 	// The one that is left was awake, so it gets on_enable when quiet ends, and the next script phase starts it.
-	set_quiet(&f.runtime, false)
+	set_callbacks(&f.runtime, .All)
 	expect_reports(t, f, {2})
 	phase(f)
 	expect_reports(t, f, {3, 4})
@@ -439,15 +439,15 @@ e:set_active(true)
 	e := door_entity(t, f)
 
 	// As in the editor's pause: an edit deactivates the entity, and the script hears nothing.
-	set_quiet(&f.runtime, true)
+	set_callbacks(&f.runtime, .None)
 	ecs.set_active(f.runtime.world, e, false)
 	settle(&f.runtime)
 	expect_reports(t, f, {})
 
 	// When quiet ends, the script gets the on_disable that it missed, once.
-	set_quiet(&f.runtime, false)
+	set_callbacks(&f.runtime, .All)
 	expect_reports(t, f, {5})
-	set_quiet(&f.runtime, false)
+	set_callbacks(&f.runtime, .All)
 	expect_reports(t, f, {})
 
 	// A script activates it again: on_enable follows on_disable, never another on_enable.
@@ -468,7 +468,7 @@ a_change_undone_while_quiet_sends_nothing :: proc(t: ^testing.T) {
 	expect_reports(t, f, {3, 4})
 	e := door_entity(t, f)
 
-	set_quiet(&f.runtime, true)
+	set_callbacks(&f.runtime, .None)
 	ecs.set_active(f.runtime.world, e, false)
 	settle(&f.runtime)
 	ecs.set_active(f.runtime.world, e, true)
@@ -476,7 +476,7 @@ a_change_undone_while_quiet_sends_nothing :: proc(t: ^testing.T) {
 	expect_reports(t, f, {})
 
 	// The script was last told enabled, and the door is enabled again, so it gets no second on_enable.
-	set_quiet(&f.runtime, false)
+	set_callbacks(&f.runtime, .All)
 	expect_reports(t, f, {})
 	phase(f)
 	expect_reports(t, f, {4})

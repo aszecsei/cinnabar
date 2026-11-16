@@ -82,7 +82,7 @@ Unity has two switches, and so does cinnabar:
 - `set_active` is a structural change. From a script it takes effect at once, and the callbacks run before `set_active` returns. Activity changes from native code take effect when their buffer is applied, and the callbacks run in the next script phase.
 - Only one callback runs for each change of state. Setting `enabled` to its current value does nothing.
 - **`on_enable` and `on_disable` always alternate.** Each instance records which of the two its script got last, and a callback runs only when the instance's state differs from that record.
-- **Across a quiet period**, as in the editor's Edit and Paused modes ([Editor](../editor/document-and-scenes.md#modes)), neither callback runs, and the record keeps what the script last got. When quiet ends, `script.set_quiet` sends each instance, in slot order, the callback that it missed: `on_disable` to one that stopped being enabled and active, and `on_enable` to an awake one that became enabled and active. An instance that changed and changed back gets neither. One that has not woken gets `awake` and `on_enable` in the next script phase, as after a native spawn.
+- **Across a quiet period**, as in the editor's Edit and Paused modes ([Editor](../editor/document-and-scenes.md#modes)), neither callback runs, and the record keeps what the script last got. When quiet ends, `script.set_callbacks` sends each instance, in slot order, the callback that it missed: `on_disable` to one that stopped being enabled and active, and `on_enable` to an awake one that became enabled and active. An instance that changed and changed back gets neither. One that has not woken gets `awake` and `on_enable` in the next script phase, as after a native spawn.
 
 Script actions are classes too, which `Action.define` makes, but they are not behaviours: agents' decisions start them by name, and an entity cannot add one ([AI: Agents: Script actions](../ai/agents.md#script-actions)).
 
@@ -159,6 +159,6 @@ Script code also runs outside these steps:
 - `on_reload`, and a main script that restarts, in `script.reload_changed` at the end of the frame.
 - A module's top level that `attach_script` runs, as when the editor attaches a script.
 - The `on_disable` and `on_destroy` callbacks that the end of a step runs for the changes that it applied.
-- The `on_enable` and `on_disable` callbacks that `script.set_quiet` runs when quiet ends (see [Enabled state](#enabled-state)).
+- The `on_enable` and `on_disable` callbacks that `script.set_callbacks` runs when quiet ends (see [Enabled state](#enabled-state)).
 
 There, `entity:destroy()` despawns the entity and its descendants at once, and their `on_disable` and `on_destroy` run before `destroy` returns, as the callbacks of `entity:set_active` do. While the runtime is quiet, none of them run. The entity is not alive after the call: `is_alive` is false, and its components are gone.

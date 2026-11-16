@@ -26,7 +26,7 @@ run_phase :: proc(r: ^Runtime, dt: time.Duration, input: core.Input) {
 	deliver_events(r)
 	profile.begin(p, profile.name(p, "Update", .Frame))
 	for &i, index in r.instances[:r.instance_used] {
-		if effective(&i) && i.flags >= {.Started, .Updates} {
+		if effective(&i) && i.flags >= {.Started, .Updates} && !silent(r, &i) {
 			luau.pushnumber(r.L, time.duration_seconds(dt))
 			call_method(r, {u32(index), i.generation}, "update", 1)
 		}
@@ -54,7 +54,7 @@ wake_and_start :: proc(r: ^Runtime) {
 	profile.end(p)
 	profile.begin(p, profile.name(p, "Start", .Frame))
 	for &i, index in r.instances[:r.instance_used] {
-		if effective(&i) && .Started not_in i.flags {
+		if effective(&i) && .Started not_in i.flags && !silent(r, &i) {
 			i.flags += {.Started}
 			call_method(r, {u32(index), i.generation}, "start")
 		}
@@ -62,23 +62,50 @@ wake_and_start :: proc(r: ^Runtime) {
 	profile.end(p)
 }
 
-// set_quiet stops or starts the callbacks that the world's changes run, as the editor's edit mode does (see
-// docs/editor/document-and-scenes.md#modes). While quiet, a despawned behaviour, or one that an edit removes, ends without on_disable or
-// on_destroy, and a deactivated one stops its coroutines without on_disable. An activated one that never woke gets
-// awake and on_enable in the next script phase that runs. When quiet ends, each instance, in slot order, gets the
-// on_enable or on_disable that it missed (see docs/scripting/behaviours.md#enabled-state). The script phase itself
-// still runs everything: the game does not run it while quiet.
-set_quiet :: proc(r: ^Runtime, quiet: bool) {
-	was := r.quiet
-	r.quiet = quiet
-	if !was || quiet {
+// Callbacks says which behaviours get callbacks: every one, as in Play and without an editor; only those of the classes
+// that run in edit mode, as in the editor's Edit; or none, as while the editor pauses (see
+// docs/editor/document-and-scenes.md#modes). A silent behaviour that a despawn, or an edit, removes ends without
+// on_disable or on_destroy, and a deactivated one stops its coroutines without on_disable. An activated one that never
+// woke gets awake and on_enable in the next script phase that it runs in.
+Callbacks :: enum u8 {
+	All,
+	Edit_Mode,
+	None,
+}
+
+// set_callbacks sets which behaviours get callbacks. Each instance that was silent and no longer is gets, in slot order,
+// the on_enable or on_disable that it missed (see docs/scripting/behaviours.md#enabled-state). The script phases
+// themselves still run everything: the game runs the one that fits.
+set_callbacks :: proc(r: ^Runtime, to: Callbacks) {
+	was := r.callbacks
+	r.callbacks = to
+	if was == to {
 		return
 	}
 	for &i, index in r.instances[:r.instance_used] {
-		if .Live in i.flags {
+		if .Live in i.flags && silent_at(was, &i) && !silent_at(to, &i) {
 			sync_enabled(r, {u32(index), i.generation})
 		}
 	}
+}
+
+// silent is true for an instance that gets no callbacks now.
+@(private)
+silent :: proc(r: ^Runtime, i: ^Instance) -> bool {
+	return silent_at(r.callbacks, i)
+}
+
+@(private = "file")
+silent_at :: proc(callbacks: Callbacks, i: ^Instance) -> bool {
+	switch callbacks {
+	case .All:
+		return false
+	case .Edit_Mode:
+		return .Edit_Mode not_in i.flags
+	case .None:
+		return true
+	}
+	return true
 }
 
 // settle applies the world's changes to the scripts without running script code, as a frame that runs no script phase
@@ -87,10 +114,10 @@ settle :: proc(r: ^Runtime) {
 	if r.L == nil {
 		return
 	}
-	quiet := r.quiet
-	r.quiet = true
+	callbacks := r.callbacks
+	r.callbacks = .None
 	drain_log(r)
-	r.quiet = quiet
+	r.callbacks = callbacks
 }
 
 // drain_log runs the callbacks for the world's changes: on_disable and on_destroy for despawned behaviours, and the
