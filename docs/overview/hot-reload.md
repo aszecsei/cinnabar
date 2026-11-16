@@ -27,6 +27,16 @@ These rules apply to all game-side code (`lib/engine` and games).
 3. **No DLL-owned pointers in persistent state.** This includes procedure pointers, `typeid`, `^Type_Info`, `any` and string literals, which all point into the DLL image. Use handles and IDs instead. `on_reload` rebuilds all registrations (systems, callbacks, script bindings).
 4. **Old DLLs stay loaded.** Each build is copied to `<name>_<process>_N.dll` and is never unloaded. This makes a missed case from rule 3 run stale code instead of crashing. It also avoids PDB file locks on Windows.
 
+**The pointer audit.** Rule 4 hides a missed case of rule 3, so debug builds look for it. After `on_reload`, the host gives the new DLL the address range of the old DLL's image, and the new DLL walks `Game_State` through its type info (`layout.audit` in `lib/core/layout`, beside the layout hash). The walk checks procedures, pointers, string data, the data of slices and dynamic arrays, the allocators of dynamic arrays and maps, and the data of an `any`. It goes into struct fields, arrays, slices, dynamic arrays, maps, the active variant of a union and the target of each typed pointer, once each. The host logs each value in the old image as an error, with its field path, such as `State.probe points into the old DLL`. The reload continues.
+
+The audit cannot see everything that rule 3 forbids:
+
+- A `typeid` is a hash of its type, not an address, so it is never in the image.
+- Components are bytes in the world's storage, so the walk does not go into them.
+- The walk does not go through a `rawptr`, a multi-pointer or an `any`, because their length or type is unknown.
+
+The host runs the audit only when it is built with `-debug` (`AUDIT_POINTERS` in `src/host/audit.odin`), as `just host` builds it. A release, and a development host built without `-debug`, do not run it.
+
 ## What survives
 
 There are three ways a running game changes code or state, and each keeps a different amount.
@@ -55,7 +65,7 @@ A code reload is what `just game-dll` gives in the common case. A soft restart h
 3. The host loads its copy of the new build, `<name>_<process>_N.dll`, and resolves `Game_API`.
 4. The host compares the new DLL's `abi_hash` with its own: a hash of the GPU command format (see [GPU](../gpu/command-buffers.md#command-buffers)) and of `Platform_API`'s layout. If they differ, the host keeps the old DLL and asks for a restart.
 5. The host compares the new `layout_hash` with the old one. The DLL computes this hash at runtime by walking the type info of `Game_State` (field names, offsets and types).
-   - **Same hash:** the host calls `on_reload`. State is kept.
+   - **Same hash:** the host calls `on_reload`. State is kept. In a debug build, the host then runs the [pointer audit](#rules) against the old DLL's image.
    - **Different hash:** the host calls `shutdown` and then `init` with fresh state. This is a soft restart. The window, the GPU device and the loaded assets stay up. Between the two calls, `core` destroys the GPU resources that the old game left in the `Game` scope (see [GPU](../gpu/resources-and-pipelines.md#resources)).
 6. While an editor is linked, the host tells it which happened (`Game_Reloaded` with the kind). After a code reload the game sends its types again; after a soft restart the editor sends again what it sends to a new link: its scene, its viewport tools, its live meshes and its previews (see [Editor link](../editor/link.md#a-new-game-state)).
 

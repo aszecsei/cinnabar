@@ -5,11 +5,14 @@
 // docs/world/game-package.md).
 package game
 
+import "base:runtime"
 import "core:c"
+import "core:fmt"
 import "core:log"
 import "core:time"
 
 import "cinnabar:core"
+import "cinnabar:core/layout"
 import "cinnabar:core/luau"
 import "cinnabar:engine/ai"
 import "cinnabar:engine/anim"
@@ -182,6 +185,13 @@ api :: proc($hooks: proc() -> Hooks) -> core.Game_API {
 	layout_hash :: proc() -> u64 {
 		return game_layout_hash(hooks())
 	}
+	pointer_audit :: proc(
+		state: rawptr,
+		image: layout.Range,
+		allocator: runtime.Allocator,
+	) -> []layout.Finding {
+		return game_pointer_audit((^Game)(state), hooks(), image, allocator)
+	}
 	script_types :: proc(platform: ^core.Platform_API) -> string {
 		return game_script_types(platform, hooks(), register)
 	}
@@ -209,6 +219,7 @@ api :: proc($hooks: proc() -> Hooks) -> core.Game_API {
 		on_reload = on_reload,
 		state_size = state_size,
 		layout_hash = layout_hash,
+		pointer_audit = pointer_audit,
 		abi_hash = core.abi_hash,
 		script_types = script_types,
 		editor_poll = editor_poll,
@@ -222,6 +233,27 @@ state_bytes :: proc(h: Hooks) -> int {
 		return size_of(Game)
 	}
 	return USER_OFFSET + type_info_of(h.State).size
+}
+
+// game_pointer_audit finds the values in Game and the project's state that point into image, the old DLL's, for the
+// host's audit after a code reload.
+@(private)
+game_pointer_audit :: proc(
+	g: ^Game,
+	h: Hooks,
+	image: layout.Range,
+	allocator: runtime.Allocator,
+) -> []layout.Finding {
+	findings := make([dynamic]layout.Finding, allocator)
+	append(&findings, ..layout.audit(g, Game, image, "Game", allocator))
+	if h.State != nil {
+		user := rawptr(uintptr(g) + USER_OFFSET)
+		append(
+			&findings,
+			..layout.audit_typeid(user, h.State, image, fmt.tprint(h.State), allocator),
+		)
+	}
+	return findings[:]
 }
 
 // register_components registers the engine's components and then the project's. init and on_reload call it on the

@@ -164,3 +164,30 @@ set_time_scale_clamps :: proc(t: ^testing.T) {
 	g.paused = true
 	testing.expect_value(t, world_step(g, step, true), 0)
 }
+
+@(private = "file")
+Callback_State :: struct {
+	count:  int,
+	on_hit: proc(),
+}
+
+@(private = "file")
+hit :: proc() {}
+
+@(test)
+the_pointer_audit_names_the_projects_field :: proc(t: ^testing.T) {
+	buffer := make([]byte, USER_OFFSET + size_of(Callback_State), context.temp_allocator)
+	g := (^Game)(raw_data(buffer))
+	user(g, Callback_State).on_hit = hit
+	address := uintptr(rawptr(hit))
+	findings := game_pointer_audit(
+		g,
+		{State = Callback_State},
+		{address, address + 1},
+		context.temp_allocator,
+	)
+	testing.expect_value(t, len(findings), 1)
+	if len(findings) == 1 {
+		testing.expect_value(t, findings[0].path, "Callback_State.on_hit")
+	}
+}
