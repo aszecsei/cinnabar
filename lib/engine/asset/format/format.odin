@@ -83,8 +83,20 @@ meta_text :: proc(
 	}
 	buffer: [32]u8
 	fmt.sbprintfln(&b, "guid = %s", guid_format(guid, &buffer))
+	sections := make([dynamic]string, context.temp_allocator)
 	for s in settings {
-		fmt.sbprintfln(&b, "%s = %s", s.key, s.value)
+		section, key := meta_section(s.key)
+		if section == "" {
+			fmt.sbprintfln(&b, "%s = %s", key, s.value)
+			continue
+		}
+		known := false
+		for other in sections {
+			known ||= other == section
+		}
+		if !known {
+			append(&sections, section)
+		}
 	}
 	lines, given := subassets.?
 	if !given {
@@ -94,7 +106,24 @@ meta_text :: proc(
 	for s in lines {
 		fmt.sbprintfln(&b, "%s.%s = %s", s.kind, s.name, guid_format(s.guid, &buffer))
 	}
+	for section in sections {
+		fmt.sbprintfln(&b, "\n[%s]", section)
+		for s in settings {
+			if in_section, key := meta_section(s.key); in_section == section {
+				fmt.sbprintfln(&b, "%s = %s", key, s.value)
+			}
+		}
+	}
 	return strings.to_string(b)
+}
+
+// meta_section splits a setting's key into its section and its key in that section. A key in a `[section]` of a .meta
+// file is `section.key` in its Meta_Setting. A key outside every section has no section.
+meta_section :: proc(key: string) -> (section, name: string) {
+	if dot := strings.index_byte(key, '.'); dot >= 0 {
+		return key[:dot], key[dot + 1:]
+	}
+	return "", key
 }
 
 // After a cook writes blobs into a configuration's cache directory, it writes a counter to this file in it. The
@@ -103,7 +132,9 @@ GENERATION_FILE :: ".generation"
 
 // Meta is a parsed .meta file: lines of `key = value`, with `#` comments. Every .meta has a guid. A key with a dot,
 // `<kind>.<name>`, gives the GUID of a sub-asset that the file makes (see docs/content/identity-and-cooking.md#identity). The other
-// keys are the asset's import settings.
+// keys are the asset's import settings. A `[section]` line starts a group of settings, which lasts to the next section or
+// the end of the file, and a setting in it has the key `section.key`. The guid and the sub-assets come before every
+// section.
 Meta :: struct {
 	guid:      Guid,
 	settings:  []Meta_Setting,
@@ -159,8 +190,9 @@ meta_subasset :: proc(meta: Meta, kind, name: string) -> (guid: Guid, ok: bool) 
 	return
 }
 
-// meta_parse parses a .meta file. The settings and sub-assets point into text. It fails on a malformed line, a
-// sub-asset without a GUID, or a missing guid.
+// meta_parse parses a .meta file. The settings and sub-assets point into text, but for the keys of settings in a
+// section, which are in allocator. It fails on a malformed line, a sub-asset without a GUID, a missing guid, a section
+// whose name is not an identifier, or a key in a section that is not one.
 meta_parse :: proc(text: string, allocator := context.allocator) -> (meta: Meta, ok: bool) {
 	settings := make([dynamic]Meta_Setting, allocator)
 	subassets := make([dynamic]Meta_Subasset, allocator)
@@ -169,10 +201,21 @@ meta_parse :: proc(text: string, allocator := context.allocator) -> (meta: Meta,
 		delete(subassets)
 	}
 	has_guid := false
+	section := ""
 	rest := text
 	for line in strings.split_lines_iterator(&rest) {
 		trimmed := strings.trim_space(line)
 		if trimmed == "" || trimmed[0] == '#' {
+			continue
+		}
+		if trimmed[0] == '[' {
+			if !strings.has_suffix(trimmed, "]") {
+				return
+			}
+			section = strings.trim_space(trimmed[1:len(trimmed) - 1])
+			if !meta_identifier(section) {
+				return
+			}
 			continue
 		}
 		equals := strings.index_byte(trimmed, '=')
@@ -181,7 +224,15 @@ meta_parse :: proc(text: string, allocator := context.allocator) -> (meta: Meta,
 		}
 		key := strings.trim_space(trimmed[:equals])
 		value := strings.trim_space(trimmed[equals + 1:])
-		if key == "guid" {
+		if section != "" {
+			if !meta_identifier(key) {
+				return
+			}
+			append(
+				&settings,
+				Meta_Setting{strings.concatenate({section, ".", key}, allocator), value},
+			)
+		} else if key == "guid" {
 			meta.guid, has_guid = guid_parse(value)
 			if !has_guid {
 				return
@@ -202,6 +253,24 @@ meta_parse :: proc(text: string, allocator := context.allocator) -> (meta: Meta,
 	meta.settings = settings[:]
 	meta.subassets = subassets[:]
 	return meta, true
+}
+
+// meta_identifier is whether a section's name, or a key in a section, is letters, digits and underscores. So a guid or a
+// sub-asset line in a section fails to parse, as `guid` is not a GUID line there and a dotted key is not an identifier.
+@(private = "file")
+meta_identifier :: proc(name: string) -> bool {
+	if name == "" {
+		return false
+	}
+	for c in name {
+		if !(c == '_' ||
+			   (c >= 'a' && c <= 'z') ||
+			   (c >= 'A' && c <= 'Z') ||
+			   (c >= '0' && c <= '9')) {
+			return false
+		}
+	}
+	return name != "guid"
 }
 
 meta_value :: proc(meta: Meta, key: string) -> (value: string, ok: bool) {
