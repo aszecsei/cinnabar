@@ -59,6 +59,8 @@ The sample's `surfaces.scene`, which F7 cycles to, is a lake with an island: a w
 
 A `Collider` whose `shape` is `Height_Field`, on the surface's entity, collides as the surface's `height_map`: a physics height field over the rectangle, from `height_range.x` where the map reads 0 to `height_range.y` where it reads 1, placed by the entity's `Transform` (see [Physics: Shapes](../physics/design.md#shapes)). The collider is defined by the map and the range, not by the material, whose `displace` is HLSL that the CPU cannot run: a material that displaces by the same map, from the same range, as the sample's `terrain.material` does with `height_scale` and `height_range = [0, 30]`, collides where it draws. The field has a sample at each corner of the finest cells, read as the vertex shader reads the map at the finest level. The hole mask's holes are holes in the collision a cell smaller than the drawn ones, since the backend removes the triangles that touch a hole's sample: a sample is a hole only where each of the four cells around it is, so the ground that is drawn always collides. A recooked map or mask, or a change of the `Surface_Renderer`, makes the collider again.
 
+The editor's Landscape tool sculpts the height map and paints the hole mask in the viewport, and the game draws and collides with each stroke before the maps are saved (see [Editor: Landscape](../editor/landscape.md)).
+
 ## In the frame
 
 - `build_scene` writes a surface's instance record as a mesh's, then its `Surface_Record` and its item, with its material's block and pipeline, the hole mask's bindless index or the white default's, and a sphere of its rectangle and its height range. After the bins are sorted, each record names its item.

@@ -10,7 +10,7 @@ A team that makes a game has people with different work, and each of them uses a
 
 | Kind of user | The work | What must be at hand |
 |---|---|---|
-| Level designer | Blocks out spaces, places entities and prefabs, sets up triggers and volumes, and plays the level to test it | The tools and mesh mode in the viewport, a fast way to add a common entity, the outliner, prefabs, Play |
+| Level designer | Blocks out spaces, sculpts terrain, places entities and prefabs, sets up triggers and volumes, and plays the level to test it | The tools, mesh mode and the Landscape tool in the viewport, a fast way to add a common entity, the outliner, prefabs, Play |
 | Environment artist | Dresses a level with meshes, materials and effects, and edits the level's geometry and its texture mapping | The content browser, mesh mode's tools, the Face panel, the material editor |
 | Lighting artist | Places lights and reflection probes, sets the sky, the sun, the fog and the clouds, and sets the exposure and the post-processing | The lights and the atmosphere, the Atmosphere panel, the views that show light and shadow alone, a viewport's quality |
 | Technical artist | Writes materials and effects, and finds what makes a frame slow | The material editor, the views that show cost, a viewport's quality, the profiler and the resource monitor |
@@ -26,7 +26,7 @@ A control is where the thing that it changes is. This is the one rule, and it ha
 | What the control changes | Where it is | Examples |
 |---|---|---|
 | One viewport | That viewport's [toolbar](viewport.md#toolbar) | Which way the view looks, its projection, the debug view, the features that it draws, its quality, its exposure |
-| How every scene view edits | The Scene's [tool strip](viewport.md#tool-strip), with mesh mode's shelf beside it | The tool, the gizmo's space, snapping, Object or Mesh mode, the mesh tools |
+| How every scene view edits | The Scene's [tool strip](viewport.md#tool-strip), with mesh mode's shelf beside it | The tool, the gizmo's space, snapping, Object or Mesh mode, the mesh tools, the landscape brush |
 | The selection | The [properties panel](shell-and-panels.md#properties), a row's menu in the [outliner](shell-and-panels.md#outliner), and the Home tab's Edit, Visibility and Prefab groups | A field, Add Component, Duplicate, Hide, Make Prefab |
 | The scene, the project or the window | The [ribbon](shell-and-panels.md#ribbon) | Save, the [Add](shell-and-panels.md#add) menu, the atmosphere, Export, the panels and the workspace |
 

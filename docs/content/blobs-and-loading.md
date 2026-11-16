@@ -2,7 +2,7 @@
 
 The blob format every kind shares, how the asset runtime loads blobs from the loose cache and hot-reloads them, and the bundles that a release build loads them from.
 
-**In this document:** [Blob format](#blob-format) · [Loading](#loading) · [Bundles](#bundles)
+**In this document:** [Blob format](#blob-format) · [Loading](#loading) · [Live blobs](#live-blobs) · [Bundles](#bundles)
 
 ## Blob format
 
@@ -65,6 +65,16 @@ The format package has its own enum of texture formats, because it imports nothi
 - **Asset hot reload:** only from the loose cache, so only in development. After a cook writes blobs, it writes a counter to the cache's `.generation`, through a temporary file and a rename. The cook daemon and the batch commands both do this. The game calls `asset.poll` at the end of each frame, and `poll` checks the counter's modification time. When the counter changes, `poll` checks the modification time of each loaded blob, and swaps every new blob behind its generational handle in that frame. A script and the modules that it requires therefore change together. The game learns of new blobs only through the cache, so it needs no connection to the daemon, and hot reload works with or without the editor. The game passes `poll`'s result to `script.reload_changed`, which reloads the scripts among the swapped blobs (see [Scripting](../scripting/tooling-and-hot-reload.md#script-hot-reload)).
 - **GPU data:** the asset runtime keeps blobs on the CPU and knows nothing about the GPU. The renderer keeps a residency table (see [Rendering](../rendering/assets.md#gpu-residency)), which creates and streams the GPU resources of texture and mesh assets.
 - **Scripts load on demand.** A script blob stays loaded while its module is loaded. The VM holds the module's result, not the blob, so the blob can be swapped under it.
+
+## Live blobs
+
+The editor's landscape tools give the game texels that no cook has written yet (see [Editor: Landscape](../editor/landscape.md#live-textures)). The game builds a blob of them and puts it in the asset runtime in place of the asset's.
+
+- **`asset.set_live`** copies a blob in place of an asset's, as a new version, and loads an asset that is not cooked with it. Whatever reads the asset by its version, a texture's residency or a height field collider, takes the live blob as it takes a recooked one.
+- **`asset.poll` leaves a live asset alone**, so a cook does not swap the editor's texels out from under a stroke.
+- **`asset.clear_live`** ends it: the cooked blob loads again, as a new version, or, for an asset that is not cooked yet, the live blob stays until a cook writes one, which `poll` then loads.
+- **At most `MAX_LIVE_ASSETS` (16)** are live at once, in a list in `Assets`, so the records do not grow.
+- Meshes are live another way, in the renderer's residency, since a paged mesh reads its pages from its file (see [Rendering: GPU residency](../rendering/assets.md#gpu-residency)).
 
 ## Bundles
 

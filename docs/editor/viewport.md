@@ -122,14 +122,15 @@ The Scene document has one tool strip, down its left edge, for what is the same 
 |---|---|
 | The mode | Object Mode and Edit Mesh (see [Mesh editing](mesh-editing.md#mesh-mode)) |
 | The tools | Select, Move, Rotate and Scale |
-| The tools that make and measure | Block (see [Mesh editing](mesh-editing.md#primitives-and-draw)) and [Navigation Path](#navigation-path) |
+| The tools that make, measure and paint | Block (see [Mesh editing](mesh-editing.md#primitives-and-draw)), [Navigation Path](#navigation-path) and Landscape (see [Landscape](landscape.md#the-tool)) |
 | The gizmo | Local Axes and Snap |
 | The element kinds, while mesh mode is on | Vertices, Edges and Faces |
 | At the bottom | Add, which opens the Add menu (see [Shell: Add](shell-and-panels.md#add)) |
 
 - **Object Mode** is on while mesh mode is off, and a click on it leaves mesh mode.
 - **Mesh mode's shelf** (`MeshToolShelf`) is beside the tool strip while mesh mode is on, with the mode's tools in sections: Select, Edit, Create, Pivot, Texture and Grid (see [Mesh editing](mesh-editing.md#mesh-mode)).
-- **The keys** are the viewport's: Q, W, E, R and N pick a tool, X switches the space, Tab enters and leaves mesh mode, and in mesh mode 1, 2 and 3 pick the element kind (see [Viewport](#viewport)).
+- **The Landscape tool's shelf** (`LandscapeShelf`) is beside the tool strip while the Landscape tool is on, with its brush, radius, strength and falloff (see [Landscape](landscape.md#the-tool)).
+- **The keys** are the viewport's: Q, W, E, R, N and L pick a tool, X switches the space, Tab enters and leaves mesh mode, and in mesh mode 1, 2 and 3 pick the element kind (see [Viewport](#viewport)).
 - **Each scene view** names the tool and the space, and says when snapping is on, in the line of its camera's speed at its bottom left.
 - **The Game document** has no tool strip, since the Game view has no tools.
 - **The ribbon has none of these commands,** which the same test checks.
