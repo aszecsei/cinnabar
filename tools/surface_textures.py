@@ -85,6 +85,19 @@ def terrain_hole(size=256):
     return size, size, rows
 
 
+# playground_hills is the playground's terrain, 0 to 1 of its material's height_scale (8 m) over 64 m (see
+# docs/editor/landscape.md#the-sample): flat where it meets the floor, then rising into rolling hills that a character
+# walks up, 16 bits a texel. Sculpt it further in the editor's Landscape tool.
+def playground_hills(size=128):
+    def height(u, v):
+        rise = smoothstep(0.0, 0.5, v)
+        hills = 0.5 + 0.5 * math.sin(u * 2 * math.pi * 2.5) * math.cos(v * 2 * math.pi * 1.5)
+        return clamp01(rise * (0.3 + 0.35 * hills))
+
+    rows = [[int(round(height((x + 0.5) / size, (y + 0.5) / size) * 65535)) for x in range(size)] for y in range(size)]
+    return size, size, rows, 16
+
+
 # dev_grid: the engine's dev texture (see docs/editor/mesh-editing.md#dev-materials), 1024 texels square: a thick
 # line every 256 texels, a thinner one every 64, and 128-texel checks of two greys between them. At 256 texels per
 # meter it is 4 m across, with the thick lines a meter apart and the thin ones at the grid's quarter meter, so a
@@ -143,6 +156,7 @@ TEXTURES = {
     "samples/mygame/content/textures/terrain_height.png": terrain_height,
     "samples/mygame/content/textures/island_hole.png": island_hole,
     "samples/mygame/content/textures/terrain_hole.png": terrain_hole,
+    "samples/mygame/content/textures/playground_hills.png": playground_hills,
     "samples/mygame/content/textures/foliage.png": foliage,
     "samples/mygame/content/textures/foliage_coverage.png": foliage,
 }
