@@ -41,21 +41,22 @@ GI_PROBE_RESET_GROUP :: 64
 #assert(GI_PROBE_GRID.x * GI_PROBE_GRID.y * GI_PROBE_GRID.z == GI_PROBE_COUNT)
 
 // Gi_Probe_Params are the world probes at a level: how many levels, the first level's spacing as a power of two of
-// meters, so every spacing divides the render origin's 1024 m cell, each probe's rays, and the probes that a frame
-// updates.
+// meters, so every spacing divides the render origin's 1024 m cell, each probe's rays, the probes that a frame
+// updates, and the most pre-exposed luminance that a ray's light keeps before the update blends it (clamp_hit_light).
 Gi_Probe_Params :: struct {
-	levels:  u32,
-	spacing: u32,
-	rays:    u32,
-	budget:  u32,
+	levels:       u32,
+	spacing:      u32,
+	rays:         u32,
+	budget:       u32,
+	radiance_max: f32,
 }
 
 @(rodata)
 GI_PROBE_PARAMS := [Quality_Level]Gi_Probe_Params {
-	.Low = {levels = 2, spacing = 1, rays = 32, budget = 1024},
-	.Medium = {levels = 3, spacing = 0, rays = 64, budget = 2048},
-	.High = {levels = 3, spacing = 0, rays = 64, budget = 4096},
-	.Ultra = {levels = 4, spacing = 0, rays = 64, budget = 8192},
+	.Low = {levels = 2, spacing = 1, rays = 32, budget = 1024, radiance_max = 16},
+	.Medium = {levels = 3, spacing = 0, rays = 64, budget = 2048, radiance_max = 16},
+	.High = {levels = 3, spacing = 0, rays = 64, budget = 4096, radiance_max = 16},
+	.Ultra = {levels = 4, spacing = 0, rays = 64, budget = 8192, radiance_max = 16},
 }
 
 // The engine's world probe shaders, by their .meta files.
@@ -130,7 +131,8 @@ Probe_Grid :: struct {
 	job_count:      u32,
 	hysteresis:     f32,
 	bias:           f32,
-	padding:        [2]u32,
+	radiance_max:   f32,
+	padding:        u32,
 }
 
 // Probe_Push matches Probe_Push in gi_probe_pass.hlsli.
@@ -151,7 +153,7 @@ Probe_Push :: struct {
 	depth:         u32,
 	lit:           u32,
 	lit_valid:     u32,
-	padding:       u32,
+	exposure:      u32,
 }
 
 #assert(size_of(Probe_Push) <= 128)
@@ -556,6 +558,7 @@ add_gi_probe_passes :: proc(f: ^Frame, settings: Gi_Settings, lit: History) -> ^
 		job_count      = u32(len(pf.jobs)),
 		hysteresis     = GI_PROBE_HYSTERESIS,
 		bias           = GI_PROBE_BIAS,
+		radiance_max   = params.radiance_max,
 	}
 	(^Probe_Grid)(raw_data(grid_upload.data))^ = grid^
 	pf.upload = grid_upload
@@ -608,6 +611,7 @@ add_gi_probe_passes :: proc(f: ^Frame, settings: Gi_Settings, lit: History) -> ^
 		queue = .Compute,
 	)
 	read(g, pass, pf.rays)
+	read(g, pass, f.exposure)
 	write(g, pass, pf.radiance)
 	write(g, pass, pf.irradiance)
 	write(g, pass, pf.states)
@@ -754,6 +758,9 @@ run_probe_pass :: proc(ctx: ^Pass_Context) {
 		light_count   = inputs.light_count,
 		ray_count     = step.ray_count,
 		lit_valid     = u32(inputs.lit.valid),
+	}
+	if step.pass == .Update {
+		push.exposure = gpu.read_index(gpu_buffer(g, f.exposure))
 	}
 	if step.pass == .Screen {
 		push.depth = gpu.read_index(gpu_texture(g, f.depth))

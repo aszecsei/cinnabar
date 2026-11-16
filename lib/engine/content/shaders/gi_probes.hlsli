@@ -30,7 +30,8 @@ struct Probe_Level {
 
 // Matches Probe_Grid in lib/engine/render/gi_probes.odin: the levels, the rays' rotation this frame, and the probes'
 // textures and states, for reading and, in the update and the reset, for writing, with the frame's updated probes in
-// jobs, each its level above 24 bits and its storage below.
+// jobs, each its level above 24 bits and its storage below. radiance_max is the most pre-exposed luminance that a
+// ray's light keeps in the update.
 struct Probe_Grid {
 	Probe_Level levels[MAX_PROBE_LEVELS];
 	float4 rotation[3];
@@ -48,7 +49,8 @@ struct Probe_Grid {
 	uint job_count;
 	float hysteresis;
 	float bias;
-	uint2 padding;
+	float radiance_max;
+	uint padding;
 };
 
 Probe_Grid load_probe_grid(uint buffer, uint offset) {

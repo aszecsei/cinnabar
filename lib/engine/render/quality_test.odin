@@ -138,6 +138,29 @@ the_traced_reflections_levels_grow :: proc(t: ^testing.T) {
 	}
 }
 
+// Every level of the world probes and of the traced reflections clamps a ray's light, and no level clamps it harder
+// than the level before.
+@(test)
+every_level_clamps_bright_hits :: proc(t: ^testing.T) {
+	for level in Quality_Level {
+		probes := GI_PROBE_PARAMS[level].radiance_max
+		traced := REFLECTION_PARAMS[.Ray_Traced][level].radiance_max
+		testing.expectf(
+			t,
+			probes > 0 && traced > 0,
+			"%v does not clamp: %v, %v",
+			level,
+			probes,
+			traced,
+		)
+		if level > .Low {
+			before := Quality_Level(u8(level) - 1)
+			testing.expect(t, probes >= GI_PROBE_PARAMS[before].radiance_max)
+			testing.expect(t, traced >= REFLECTION_PARAMS[.Ray_Traced][before].radiance_max)
+		}
+	}
+}
+
 // A frame whose every pixel's ray would not fit one hit shading batch traces one pixel of a larger block.
 @(test)
 the_traced_reflections_stride_fits_a_batch :: proc(t: ^testing.T) {

@@ -2,12 +2,16 @@
 // trace texel whose ray traced the ray scene, after hit shading and the hits' light (see gi_hit_light.hlsli and
 // gi_hit_screen.hlsli). A ray that found nothing sees the sky's cubemap along it, and keeps RTR_FAR as its distance. A
 // ray that hit past the reach, or a back face, has no weight, and the probes fill in. A hit takes its light. The light
-// is pre-exposed by this frame's exposure, into the radiance texture that the screen-space reflections' resolve reads.
+// of a hit or of the sky is clamped by its luminance to radiance_max (clamp_hit_light), so one bright sample, such as a
+// ray that sees the sun in the cubemap, does not go into the temporal pass at full value. The light is pre-exposed by
+// this frame's exposure, into the radiance texture that the screen-space reflections' resolve reads.
 #include "rtr_common.hlsli"
+#include "hit_clamp.hlsli"
 
 // Matches Rtr_Light_Push in lib/engine/render/traced_reflections.odin. It starts with Material_Push's shadow textures,
 // so the light loop's lookups compile. light holds a float4 for each ray from the hits' light: its light, and its
-// distance, negative for a back face. Without shaded, hit shading did not run, and a hit has no weight.
+// distance, negative for a back face. Without shaded, hit shading did not run, and a hit has no weight. radiance_max is
+// the level's (REFLECTION_PARAMS).
 struct Rtr_Light_Push {
 	uint shadow_atlas;
 	uint shadow_mask;
@@ -19,6 +23,7 @@ struct Rtr_Light_Push {
 	uint width;
 	uint height;
 	uint shaded;
+	float radiance_max;
 };
 #define MATERIAL_PUSH Rtr_Light_Push
 #define SHADING_NO_LIGHTING 1
@@ -42,15 +47,16 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 		Hit_Record hit = load_hit(push.hits, index);
 		float exposure = cn_buffer(push.exposure).Load<float>(0);
 		if (hit_missed(hit)) {
-			light = float4(frame_sky_specular(hit_unpack_unit(hit.direction), 0) * exposure, 1);
+			light = float4(frame_sky_specular(hit_unpack_unit(hit.direction), 0), 1);
 			ray.z = RTR_FAR;
 		} else if (push.shaded != 0) {
 			float4 lit = cn_buffer(push.light).Load<float4>(index * 16);
 			if (lit.w > 0) {
-				light = float4(lit.rgb * exposure, 1);
+				light = float4(lit.rgb, 1);
 				ray.z = lit.w;
 			}
 		}
+		light.rgb = clamp_hit_light(light.rgb, exposure, push.radiance_max) * exposure;
 	}
 	if (light.a <= 0) {
 		ray.z = 0;

@@ -1,11 +1,13 @@
 // The world probes' update (see docs/rendering/global-illumination.md#world-probes): a group for each probe that the
-// frame updates, a thread for each texel of its tile. Each texel blends its direction's share of the probe's rays into
-// what it held: the radiance in a narrow lobe around the direction, the cosine-weighted mean radiance, and the mean
-// and squared distance in a narrower lobe. A probe new since its reset takes its rays as they are, and then blends
-// more slowly with each update, down to the grid's hysteresis. The border texels repeat the interior across the
-// octahedron's folds, so bilinear samples at a tile's edge are right. A probe that sees back faces with more than a
-// quarter of its rays is inside geometry and counts for nothing.
+// frame updates, a thread for each texel of its tile. Each ray's light is clamped by its luminance at the frame's
+// exposure (clamp_hit_light), so one bright hit does not stay in the probe for many updates. Each texel blends its
+// direction's share of the probe's rays into what it held: the radiance in a narrow lobe around the direction, the
+// cosine-weighted mean radiance, and the mean and squared distance in a narrower lobe. A probe new since its reset
+// takes its rays as they are, and then blends more slowly with each update, down to the grid's hysteresis. The border
+// texels repeat the interior across the octahedron's folds, so bilinear samples at a tile's edge are right. A probe
+// that sees back faces with more than a quarter of its rays is inside geometry and counts for nothing.
 #include "gi_probe_pass.hlsli"
+#include "hit_clamp.hlsli"
 
 // Matches the largest rays of GI_PROBE_PARAMS.
 static const uint MAX_PROBE_RAYS = 64;
@@ -28,7 +30,9 @@ void cs_main(uint3 group : SV_GroupID, uint3 thread : SV_GroupThreadID, uint ind
 	Probe probe = job_probe(grid, job);
 	uint rays = min(grid.rays, MAX_PROBE_RAYS);
 	if (index < rays) {
-		g_rays[index] = cn_buffer(push.rays).Load<float4>((job * grid.rays + index) * 16);
+		float4 ray = cn_buffer(push.rays).Load<float4>((job * grid.rays + index) * 16);
+		float exposure = cn_buffer(push.exposure).Load<float>(0);
+		g_rays[index] = float4(clamp_hit_light(ray.rgb, exposure, grid.radiance_max), ray.a);
 		g_directions[index] = probe_ray_direction(grid, index);
 	}
 	GroupMemoryBarrierWithGroupSync();
