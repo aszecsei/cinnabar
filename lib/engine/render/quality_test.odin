@@ -145,7 +145,14 @@ every_level_clamps_bright_hits :: proc(t: ^testing.T) {
 	for level in Quality_Level {
 		probes := GI_PROBE_PARAMS[level].radiance_max
 		traced := REFLECTION_PARAMS[.Ray_Traced][level].radiance_max
-		testing.expectf(t, probes > 0 && traced > 0, "%v does not clamp: %v, %v", level, probes, traced)
+		testing.expectf(
+			t,
+			probes > 0 && traced > 0,
+			"%v does not clamp: %v, %v",
+			level,
+			probes,
+			traced,
+		)
 		if level > .Low {
 			before := Quality_Level(u8(level) - 1)
 			testing.expect(t, probes >= GI_PROBE_PARAMS[before].radiance_max)

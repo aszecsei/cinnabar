@@ -87,10 +87,38 @@ REFLECTION_PARAMS := [Reflection_Technique][Quality_Level]Reflection_Params {
 		.Ultra = {stride = {1, 1}, rays = 2, steps = 64, cutoff = 0.6},
 	},
 	.Ray_Traced = {
-		.Low = {stride = {2, 2}, rays = 1, steps = 16, cutoff = 0.3, distance = 50, radiance_max = 16},
-		.Medium = {stride = {2, 2}, rays = 1, steps = 16, cutoff = 0.4, distance = 100, radiance_max = 16},
-		.High = {stride = {2, 1}, rays = 1, steps = 16, cutoff = 0.5, distance = 200, radiance_max = 16},
-		.Ultra = {stride = {1, 1}, rays = 1, steps = 16, cutoff = 0.6, distance = 500, radiance_max = 16},
+		.Low = {
+			stride = {2, 2},
+			rays = 1,
+			steps = 16,
+			cutoff = 0.3,
+			distance = 50,
+			radiance_max = 16,
+		},
+		.Medium = {
+			stride = {2, 2},
+			rays = 1,
+			steps = 16,
+			cutoff = 0.4,
+			distance = 100,
+			radiance_max = 16,
+		},
+		.High = {
+			stride = {2, 1},
+			rays = 1,
+			steps = 16,
+			cutoff = 0.5,
+			distance = 200,
+			radiance_max = 16,
+		},
+		.Ultra = {
+			stride = {1, 1},
+			rays = 1,
+			steps = 16,
+			cutoff = 0.6,
+			distance = 500,
+			radiance_max = 16,
+		},
 	},
 }
 
