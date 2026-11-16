@@ -264,7 +264,7 @@ public sealed class MainWindow : Window
     /// <summary>Asks about unsaved changes, the scene's and its meshes', before they would be lost, and returns whether to go on.</summary>
     async Task<bool> ConfirmDiscard(string doing)
     {
-        if (_shell.Scene is not { } scene || (!scene.IsDirty && !_shell.Mesh.Meshes.AnyDirty))
+        if (_shell.Scene is not { } scene || (!scene.IsDirty && !_shell.Mesh.Meshes.AnyDirty && !_shell.Landscape.AnyDirty))
         {
             return true;
         }

@@ -101,7 +101,8 @@ public sealed partial class EditorShell
     }
 
     /// <summary>
-    /// Saves the open scene, to its file or to a new path, and then every dirty mesh document of the scene. A failure
+    /// Saves the open scene, to its file or to a new path, and then every dirty mesh document and landscape map of the
+    /// scene. A failure
     /// goes to the console. Refused while an entry is open, whose preview the file must not get as saved.
     /// </summary>
     public bool SaveScene(string? path = null)
@@ -126,6 +127,7 @@ public sealed partial class EditorShell
             return false;
         }
         var meshesSaved = Mesh.SaveMeshes();
+        var mapsSaved = Landscape.SaveMaps();
         Autosave.Delete(old);
         Autosave.Delete(Scene.Path);
         // Save As keeps what the user hid and locked for the new file.
@@ -134,7 +136,7 @@ public sealed partial class EditorShell
             Visibility.Save();
         }
         Console.Add(LogLevel.Info, $"scene: saved {Scene.Path}");
-        return meshesSaved;
+        return meshesSaved && mapsSaved;
     }
 
     /// <summary>Forgets the open scene's unsaved changes and their autosave, as when the user closes without saving.</summary>
@@ -426,6 +428,7 @@ public sealed partial class EditorShell
             Scene.Applied -= SendOperations;
             Scene.Changed -= OnDocumentChanged;
             Mesh.CloseMeshes();
+            Landscape.CloseMaps();
         }
         Scene = document;
         ClearNavProbe();
@@ -456,6 +459,7 @@ public sealed partial class EditorShell
 
     void OnDocumentChanged()
     {
+        Landscape.Sync();
         Commands.InvalidateAll();
         SceneChanged?.Invoke();
         SendGizmo();

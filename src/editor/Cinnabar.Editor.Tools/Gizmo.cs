@@ -4,7 +4,10 @@ using Cinnabar.Editor.Maths;
 
 namespace Cinnabar.Editor.Tools;
 
-/// <summary>What the viewport's left button does: select, or move, turn or scale the selection with a gizmo, or pick the points of a navigation path.</summary>
+/// <summary>
+/// What the viewport's left button does: select, or move, turn or scale the selection with a gizmo, pick the points of
+/// a navigation path, or paint the selected terrain with a landscape brush.
+/// </summary>
 public enum Tool
 {
     Select,
@@ -12,6 +15,7 @@ public enum Tool
     Rotate,
     Scale,
     NavPath,
+    Landscape,
 }
 
 /// <summary>Whether the gizmo's axes are the world's or the entity's. Scaling always uses the entity's.</summary>

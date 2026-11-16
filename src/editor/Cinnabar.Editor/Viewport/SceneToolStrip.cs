@@ -108,8 +108,8 @@ static class ToolButton
 
 /// <summary>
 /// The Scene's tool strip, down its left edge (see docs/editor/viewport.md#tool-strip): what is the same in every scene
-/// view, once. From the top: the mode, Object or Mesh; the tools; the tools that make and measure; the gizmo's space
-/// and snapping; in mesh mode, the kind of element; and at the bottom, Add, the menu of the kinds of entity.
+/// view, once. From the top: the mode, Object or Mesh; the tools; the tools that make, measure and paint; the gizmo's
+/// space and snapping; in mesh mode, the kind of element; and at the bottom, Add, the menu of the kinds of entity.
 /// </summary>
 public sealed class SceneToolStrip : Border
 {
@@ -143,6 +143,7 @@ public sealed class SceneToolStrip : Border
         tools.Children.Add(Gap());
         tools.Children.Add(Tool(EditorCommands.MeshBlock));
         tools.Children.Add(Tool(EditorCommands.NavPathTool));
+        tools.Children.Add(Tool(EditorCommands.LandscapeTool));
         tools.Children.Add(Gap());
         tools.Children.Add(Tool(EditorCommands.LocalSpace));
         tools.Children.Add(Tool(EditorCommands.Snap));

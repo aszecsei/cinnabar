@@ -199,6 +199,31 @@ static partial class EditorCommands
             IsCheckedWhen = () => shell.Tool == Tool.NavPath,
             CanExecuteWhen = () => !shell.Mesh.InMeshMode,
         });
+        commands.Register(new Command(LandscapeTool, "Landscape", () => shell.SetTool(Tool.Landscape))
+        {
+            Description = "Sculpt the selected terrain's height map and paint its holes with a brush, in the viewport. L in the viewport.",
+            Icon = "landscape",
+            IsCheckedWhen = () => shell.Tool == Tool.Landscape,
+            CanExecuteWhen = () => !shell.Mesh.InMeshMode,
+        });
+        commands.Register(ChoiceCommand.ForEnum(LandscapeBrush, "Brush", () => shell.Landscape.Brush, shell.Landscape.SetBrush,
+            description: "What a stroke does: raise, lower, smooth, flatten, ramp or add noise to the height map, or paint holes into the hole mask or fill them.",
+            canExecuteWhen: () => shell.Tool == Tool.Landscape));
+        commands.Register(new ChoiceCommand(LandscapeRadius, "Radius", [.. LandscapeSession.Radii.Select(Meters)], () => Meters(NearestOf(LandscapeSession.Radii, shell.Landscape.Radius)), v => shell.Landscape.SetRadius(LandscapeSession.Radii.First(r => Meters(r) == v)))
+        {
+            Description = "The brush's radius on the terrain.",
+            CanExecuteWhen = () => shell.Tool == Tool.Landscape,
+        });
+        commands.Register(new ChoiceCommand(LandscapeStrength, "Strength", [.. LandscapeSession.Shares.Select(Percent)], () => Percent(NearestOf(LandscapeSession.Shares, shell.Landscape.Strength)), v => shell.Landscape.SetStrength(LandscapeSession.Shares.First(s => Percent(s) == v)))
+        {
+            Description = "How much each dab of the brush changes the terrain.",
+            CanExecuteWhen = () => shell.Tool == Tool.Landscape,
+        });
+        commands.Register(new ChoiceCommand(LandscapeFalloff, "Falloff", [.. LandscapeSession.Shares.Select(Percent)], () => Percent(NearestOf(LandscapeSession.Shares, shell.Landscape.Falloff)), v => shell.Landscape.SetFalloff(LandscapeSession.Shares.First(s => Percent(s) == v)))
+        {
+            Description = "How much of the brush's radius, from its edge in, softens to nothing.",
+            CanExecuteWhen = () => shell.Tool == Tool.Landscape,
+        });
         commands.Register(new Command(LocalSpace, "Local Axes", shell.ToggleSpace)
         {
             Description = "Move and turn along the entity's axes, not the world's. X in the viewport.",

@@ -42,6 +42,7 @@ public sealed class ViewportView : Grid
         Pan,
         Dolly,
         Block,
+        Brush,
     }
 
     readonly EditorShell _shell;
@@ -539,6 +540,10 @@ public sealed class ViewportView : Grid
             {
                 _gesture = Gesture.Block;
             }
+            else if (_control.FramePoint(point.Position) is { } dab && _shell.Landscape.BeginStroke(dab))
+            {
+                _gesture = Gesture.Brush;
+            }
             else
             {
                 _gesture = Gesture.Click;
@@ -576,12 +581,19 @@ public sealed class ViewportView : Grid
                 {
                     _shell.HoverGizmo(hover);
                     _shell.Mesh.HoverMesh(hover);
+                    _shell.Landscape.Hover(hover);
                 }
                 break;
             case Gesture.Block:
                 if (_control.FramePoint(position) is { } corner)
                 {
                     _shell.Mesh.DragBlock(corner);
+                }
+                break;
+            case Gesture.Brush:
+                if (_control.FramePoint(position) is { } dab)
+                {
+                    _shell.Landscape.DragStroke(dab);
                 }
                 break;
             case Gesture.Fly:
@@ -641,6 +653,9 @@ public sealed class ViewportView : Grid
             case Gesture.Block:
                 _shell.Mesh.EndBlock(forceEntity: e.KeyModifiers.HasFlag(KeyModifiers.Control));
                 break;
+            case Gesture.Brush:
+                _shell.Landscape.EndStroke();
+                break;
             case Gesture.Click:
                 if (_control.FramePoint(position) is { } pixel && !_shell.Mesh.Tools.AddToolPoint(pixel) && !_shell.AddNavPoint(pixel))
                 {
@@ -668,6 +683,10 @@ public sealed class ViewportView : Grid
         if (_gesture == Gesture.Block)
         {
             _shell.Mesh.CancelBlock();
+        }
+        if (_gesture == Gesture.Brush)
+        {
+            _shell.Landscape.CancelStroke();
         }
         EndGesture();
     }
@@ -797,6 +816,7 @@ public sealed class ViewportView : Grid
             Key.E => EditorCommands.RotateTool,
             Key.R => EditorCommands.ScaleTool,
             Key.N => EditorCommands.NavPathTool,
+            Key.L => EditorCommands.LandscapeTool,
             Key.X => EditorCommands.LocalSpace,
             Key.F => EditorCommands.FrameSelected,
             Key.H => EditorCommands.HideSelected,
@@ -818,6 +838,12 @@ public sealed class ViewportView : Grid
         else if (e.Key == Key.Escape && _gesture == Gesture.Block)
         {
             _shell.Mesh.CancelBlock();
+            EndGesture();
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Escape && _gesture == Gesture.Brush)
+        {
+            _shell.Landscape.CancelStroke();
             EndGesture();
             e.Handled = true;
         }

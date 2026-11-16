@@ -1,5 +1,3 @@
-using System.Buffers.Binary;
-using System.IO.Compression;
 
 namespace Cinnabar.Editor.Document;
 
@@ -213,31 +211,7 @@ public sealed class WeatherMap
     }
 
     /// <summary>The map as an 8-bit RGBA PNG without interlacing.</summary>
-    public byte[] EncodePng()
-    {
-        var raw = new byte[(Width * 4 + 1) * Height];
-        for (var y = 0; y < Height; y++)
-        {
-            // Each row starts with its filter, None.
-            Buffer.BlockCopy(Rgba, y * Width * 4, raw, y * (Width * 4 + 1) + 1, Width * 4);
-        }
-        using var compressed = new MemoryStream();
-        using (var zlib = new ZLibStream(compressed, CompressionLevel.Optimal, leaveOpen: true))
-        {
-            zlib.Write(raw);
-        }
-        var header = new byte[13];
-        BinaryPrimitives.WriteInt32BigEndian(header, Width);
-        BinaryPrimitives.WriteInt32BigEndian(header.AsSpan(4), Height);
-        header[8] = 8; // bit depth
-        header[9] = 6; // RGBA
-        using var png = new MemoryStream();
-        png.Write(PngSignature);
-        WriteChunk(png, "IHDR", header);
-        WriteChunk(png, "IDAT", compressed.ToArray());
-        WriteChunk(png, "IEND", []);
-        return png.ToArray();
-    }
+    public byte[] EncodePng() => Png.Encode(new PngImage(Width, Height, 4, 8, [.. Rgba.Select(b => (ushort)b)]));
 
     /// <summary>
     /// A map from a PNG of 8-bit gray, RGB, gray with alpha or RGBA texels without interlacing, with an alpha of 255,
@@ -246,167 +220,24 @@ public sealed class WeatherMap
     /// </summary>
     public static WeatherMap? DecodePng(byte[] bytes)
     {
-        if (bytes.Length < PngSignature.Length + 12 || !bytes.AsSpan(0, PngSignature.Length).SequenceEqual(PngSignature))
+        if (Png.Decode(bytes) is not { Depth: 8 } image)
         {
             return null;
         }
-        var at = PngSignature.Length;
-        int width = 0, height = 0, channels = 0;
-        using var data = new MemoryStream();
-        while (at + 12 <= bytes.Length)
+        var map = new WeatherMap(image.Width, image.Height);
+        var channels = image.Channels;
+        for (var i = 0; i < image.Width * image.Height; i++)
         {
-            var length = BinaryPrimitives.ReadInt32BigEndian(bytes.AsSpan(at));
-            var type = System.Text.Encoding.ASCII.GetString(bytes, at + 4, 4);
-            if (length < 0 || at + 12 + length > bytes.Length)
-            {
-                return null;
-            }
-            var chunk = bytes.AsSpan(at + 8, length);
-            switch (type)
-            {
-                case "IHDR":
-                    if (length != 13)
-                    {
-                        return null;
-                    }
-                    width = BinaryPrimitives.ReadInt32BigEndian(chunk);
-                    height = BinaryPrimitives.ReadInt32BigEndian(chunk[4..]);
-                    var (depth, color, interlace) = (chunk[8], chunk[9], chunk[12]);
-                    channels = color switch { 0 => 1, 2 => 3, 4 => 2, 6 => 4, _ => 0 };
-                    if (depth != 8 || channels == 0 || interlace != 0 || width <= 0 || height <= 0)
-                    {
-                        return null;
-                    }
-                    break;
-                case "IDAT":
-                    data.Write(chunk);
-                    break;
-                case "IEND":
-                    return channels == 0 ? null : Unfilter(data.ToArray(), width, height, channels);
-            }
-            at += 12 + length;
-        }
-        return null;
-    }
-
-    // Inflates the rows, undoes each row's filter, and widens the texels to RGBA.
-    static WeatherMap? Unfilter(byte[] compressed, int width, int height, int channels)
-    {
-        var stride = width * channels;
-        var raw = new byte[(stride + 1) * height];
-        try
-        {
-            using var zlib = new ZLibStream(new MemoryStream(compressed), CompressionMode.Decompress);
-            var read = 0;
-            while (read < raw.Length)
-            {
-                var n = zlib.Read(raw, read, raw.Length - read);
-                if (n == 0)
-                {
-                    return null;
-                }
-                read += n;
-            }
-        }
-        catch (InvalidDataException)
-        {
-            return null;
-        }
-        var rows = new byte[stride * height];
-        for (var y = 0; y < height; y++)
-        {
-            var filter = raw[y * (stride + 1)];
-            var line = raw.AsSpan(y * (stride + 1) + 1, stride);
-            var output = rows.AsSpan(y * stride, stride);
-            var previous = y > 0 ? rows.AsSpan((y - 1) * stride, stride) : Span<byte>.Empty;
-            for (var i = 0; i < stride; i++)
-            {
-                int left = i >= channels ? output[i - channels] : 0;
-                int up = y > 0 ? previous[i] : 0;
-                int upLeft = y > 0 && i >= channels ? previous[i - channels] : 0;
-                var predicted = filter switch
-                {
-                    0 => 0,
-                    1 => left,
-                    2 => up,
-                    3 => (left + up) / 2,
-                    4 => Paeth(left, up, upLeft),
-                    _ => -1,
-                };
-                if (predicted < 0)
-                {
-                    return null;
-                }
-                output[i] = (byte)(line[i] + predicted);
-            }
-        }
-        var map = new WeatherMap(width, height);
-        for (var i = 0; i < width * height; i++)
-        {
+            var s = image.Samples;
             var (r, g, b) = channels switch
             {
-                1 or 2 => (rows[i * channels], rows[i * channels], rows[i * channels]),
-                _ => (rows[i * channels], rows[i * channels + 1], rows[i * channels + 2]),
+                1 or 2 => (s[i * channels], s[i * channels], s[i * channels]),
+                _ => (s[i * channels], s[i * channels + 1], s[i * channels + 2]),
             };
-            map.Rgba[i * 4] = r;
-            map.Rgba[i * 4 + 1] = g;
-            map.Rgba[i * 4 + 2] = b;
+            map.Rgba[i * 4] = (byte)r;
+            map.Rgba[i * 4 + 1] = (byte)g;
+            map.Rgba[i * 4 + 2] = (byte)b;
         }
         return map;
-    }
-
-    static int Paeth(int a, int b, int c)
-    {
-        var p = a + b - c;
-        var pa = Math.Abs(p - a);
-        var pb = Math.Abs(p - b);
-        var pc = Math.Abs(p - c);
-        return pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
-    }
-
-    static readonly byte[] PngSignature = [137, 80, 78, 71, 13, 10, 26, 10];
-
-    static void WriteChunk(Stream png, string type, byte[] data)
-    {
-        var length = new byte[4];
-        BinaryPrimitives.WriteInt32BigEndian(length, data.Length);
-        png.Write(length);
-        var typeBytes = System.Text.Encoding.ASCII.GetBytes(type);
-        png.Write(typeBytes);
-        png.Write(data);
-        var crc = new byte[4];
-        BinaryPrimitives.WriteUInt32BigEndian(crc, Crc32(typeBytes, data));
-        png.Write(crc);
-    }
-
-    static readonly uint[] CrcTable = MakeCrcTable();
-
-    static uint[] MakeCrcTable()
-    {
-        var table = new uint[256];
-        for (uint n = 0; n < 256; n++)
-        {
-            var c = n;
-            for (var k = 0; k < 8; k++)
-            {
-                c = (c & 1) != 0 ? 0xedb88320 ^ (c >> 1) : c >> 1;
-            }
-            table[n] = c;
-        }
-        return table;
-    }
-
-    static uint Crc32(byte[] type, byte[] data)
-    {
-        var c = 0xffffffff;
-        foreach (var b in type)
-        {
-            c = CrcTable[(c ^ b) & 0xff] ^ (c >> 8);
-        }
-        foreach (var b in data)
-        {
-            c = CrcTable[(c ^ b) & 0xff] ^ (c >> 8);
-        }
-        return c ^ 0xffffffff;
     }
 }

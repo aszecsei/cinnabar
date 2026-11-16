@@ -93,6 +93,8 @@ public sealed partial class EditorShell
     void OnModeChanged()
     {
         Context.Set("mode.play", Mode != EditorMode.Edit);
+        Landscape.CancelStroke();
+        Landscape.Sync();
         SendGizmo();
         Commands.InvalidateAll();
         ModeChanged?.Invoke();

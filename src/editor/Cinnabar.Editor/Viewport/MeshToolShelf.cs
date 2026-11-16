@@ -107,8 +107,8 @@ public sealed class MeshToolShelf : Border
 
 /// <summary>
 /// The Scene document's view (see docs/editor/viewport.md#views): the tool strip, mesh mode's shelf while the mode is on,
-/// and the scene views. The strip and the shelf are the Scene's, not a view's, because the tool, the space, snapping and
-/// mesh mode are the same in every view.
+/// the Landscape tool's shelf while it is the tool, and the scene views. The strip and the shelves are the Scene's, not
+/// a view's, because the tool, the space, snapping and mesh mode are the same in every view.
 /// </summary>
 public sealed class SceneDocumentView : DockPanel
 {
@@ -116,10 +116,13 @@ public sealed class SceneDocumentView : DockPanel
     {
         var strip = new SceneToolStrip(shell);
         var shelf = new MeshToolShelf(shell);
+        var landscape = new LandscapeShelf(shell);
         SetDock(strip, Avalonia.Controls.Dock.Left);
         SetDock(shelf, Avalonia.Controls.Dock.Left);
+        SetDock(landscape, Avalonia.Controls.Dock.Left);
         Children.Add(strip);
         Children.Add(shelf);
+        Children.Add(landscape);
         Children.Add(new SceneLayoutView(shell));
     }
 }
