@@ -235,24 +235,31 @@ Platform_API :: struct {
 // Game_API is what the game side provides to the host (game -> host).
 // `state` always points at the game's root Game_State, which the host owns.
 Game_API :: struct {
-	init:         proc(state: rawptr, platform: ^Platform_API),
+	init:          proc(state: rawptr, platform: ^Platform_API),
 	// dt is fixed-point (integer nanoseconds), so accumulated world time does not drift.
-	update:       proc(state: rawptr, dt: time.Duration) -> (keep_running: bool),
-	shutdown:     proc(state: rawptr),
-	on_reload:    proc(state: rawptr, platform: ^Platform_API),
-	state_size:   proc() -> int,
-	layout_hash:  proc() -> u64,
+	update:        proc(state: rawptr, dt: time.Duration) -> (keep_running: bool),
+	shutdown:      proc(state: rawptr),
+	on_reload:     proc(state: rawptr, platform: ^Platform_API),
+	state_size:    proc() -> int,
+	layout_hash:   proc() -> u64,
+	// pointer_audit returns every value in the state that points into image, the old DLL's, by its field path. The
+	// host calls it after on_reload in debug builds (see docs/overview/hot-reload.md#rules). nil for a game without one.
+	pointer_audit: proc(
+		state: rawptr,
+		image: layout.Range,
+		allocator: runtime.Allocator,
+	) -> []layout.Finding,
 	// The host refuses a DLL whose abi_hash differs from its own: a different GPU command format (see
 	// docs/gpu/command-buffers.md#command-buffers), physics format (see docs/physics/design.md#the-boundary), audio format
 	// (see docs/audio/backends.md#the-contract) or Platform_API.
-	abi_hash:     proc() -> u64,
+	abi_hash:      proc() -> u64,
 	// script_types returns the Luau definition file of the game's scripts, for host.exe --emit-script-types. It
 	// must not need init: it makes its own script runtime. See docs/scripting/tooling-and-hot-reload.md#types-and-tooling.
-	script_types: proc(platform: ^Platform_API) -> string,
+	script_types:  proc(platform: ^Platform_API) -> string,
 	// The game's side of the editor link (see docs/editor/link.md#editor-link). The host calls it between frames with
 	// the editor's messages for the game, and the game appends its own messages, framed, to out. connection changes
 	// for each editor, and is 0 while none is linked. A game without editor support leaves it nil.
-	editor_poll:  proc(
+	editor_poll:   proc(
 		state: rawptr,
 		connection: u64,
 		incoming: []Editor_Message,
