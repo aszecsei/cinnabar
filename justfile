@@ -7,6 +7,9 @@ set script-interpreter := ["C:/Program Files/Git/bin/bash.exe"]
 # =================================
 # Configuration
 # =================================
+# The engine's version: an SDK package's name, `cinnabar --version`, and the release that the release workflow
+# publishes when it changes (see docs/overview/building-and-running.md#releases-of-the-engine).
+version := trim(read("VERSION"))
 game := "mygame"
 # The game's project: its settings, its content and, when it has Odin, its game package (see
 # docs/world/game-package.md). A project without a game/ folder runs the standard game, standard.dll.
@@ -57,7 +60,9 @@ luau_dir := obj_dir + "/luau"
 jolt_dir := obj_dir + "/jolt"
 # lib/core/audio/plugin's tests load the mixer's library from here.
 audio_dir := obj_dir + "/audio"
-cmake_generator := "Visual Studio 17 2022"
+# The Visual Studio that CMake builds the C and C++ libraries with. CINNABAR_CMAKE_GENERATOR names another, such as
+# "Visual Studio 18 2026", which the release workflow sets to the runner's.
+cmake_generator := env("CINNABAR_CMAKE_GENERATOR", "Visual Studio 17 2022")
 compressonator_dir := obj_dir + "/compressonator"
 meshoptimizer_dir := obj_dir + "/meshoptimizer"
 opus_dir := obj_dir + "/opus"
@@ -151,10 +156,11 @@ install-compressonator:
 [script]
 install-agility:
     set -euo pipefail
-    [ -f "{{agility_dir}}/D3D12Core.dll" ] && exit 0
+    [ -f "{{agility_dir}}/D3D12Core.dll" ] && [ -f "{{agility_dir}}/LICENSE.txt" ] && exit 0
     mkdir -p "{{agility_dir}}"
     curl -sSfL -o "{{agility_dir}}/d3d12.nupkg" "https://www.nuget.org/api/v2/package/Microsoft.Direct3D.D3D12/{{agility_version}}"
-    unzip -qjo "{{agility_dir}}/d3d12.nupkg" build/native/bin/x64/D3D12Core.dll build/native/bin/x64/d3d12SDKLayers.dll -d "{{agility_dir}}"
+    # The licence and the list of the files that it lets a game redistribute go with an SDK package (just sdk).
+    unzip -qjo "{{agility_dir}}/d3d12.nupkg" build/native/bin/x64/D3D12Core.dll build/native/bin/x64/d3d12SDKLayers.dll         LICENSE.txt "distributable files.txt" -d "{{agility_dir}}"
     rm "{{agility_dir}}/d3d12.nupkg"
     echo "✓ Agility SDK {{agility_version}}"
 
@@ -163,11 +169,12 @@ install-agility:
 install-dxc:
     set -euo pipefail
     dir="$(dirname "{{dxc}}")"
-    [ -f "{{dxc}}" ] && exit 0
+    [ -f "{{dxc}}" ] && [ -f "$dir/LICENSE-MS.txt" ] && exit 0
     mkdir -p "$dir"
     curl -sSfL -o "$dir/dxc.zip" "https://github.com/microsoft/DirectXShaderCompiler/releases/download/v{{dxc_version}}/{{dxc_release}}.zip"
     # The archive uses backslash separators, so unzip warns and exits with 1. The check below catches real failures.
-    unzip -qjo "$dir/dxc.zip" 'bin?x64?dxc.exe' 'bin?x64?dxcompiler.dll' 'bin?x64?dxil.dll' -d "$dir" 2>/dev/null || true
+    # The licences go with an SDK package (just sdk).
+    unzip -qjo "$dir/dxc.zip" 'bin?x64?dxc.exe' 'bin?x64?dxcompiler.dll' 'bin?x64?dxil.dll' 'LICEN?E-*.txt' -d "$dir" 2>/dev/null || true
     rm "$dir/dxc.zip"
     [ -f "{{dxc}}" ] || { echo "error: dxc.exe is missing from the archive" >&2; exit 1; }
     echo "✓ DXC {{dxc_version}}"
@@ -527,7 +534,108 @@ engine: host cook engine-runtime editor cinnabar install-dxc
 # docs/overview/getting-started.md)
 cinnabar:
     mkdir -p "{{tools_dir}}"
-    odin build tools/cinnabar -collection:cinnabar=lib -define:DXC_VERSION="{{dxc_version}}" -out:"{{tools_dir}}/cinnabar.exe" -o:speed
+    odin build tools/cinnabar -collection:cinnabar=lib -define:DXC_VERSION="{{dxc_version}}" -define:CINNABAR_VERSION="{{version}}" -out:"{{tools_dir}}/cinnabar.exe" -o:speed
+
+# Package the engine for game developers without a checkout: build/sdk/cinnabar-<version>/ and its zip (see
+# docs/overview/getting-started.md#the-engine). The package keeps the checkout's paths, so cinnabar.exe and the editor
+# find its files as they find a checkout's. It holds what `just engine` builds, the editor as a self-contained publish
+# in build/editor, the Odin source and the libraries that a project's game/ builds and links against, and the licences.
+# Files are copied by name, never as whole build folders, which hold PDBs, logs and the hosts' DLL copies.
+[script]
+sdk: engine
+    set -euo pipefail
+    name="cinnabar-{{version}}"
+    out="{{build_dir}}/sdk/$name"
+    rm -rf "$out" "{{build_dir}}/sdk/$name.zip"
+    mkdir -p "$out"
+    put() { # put <file> [<path in the package>]
+        mkdir -p "$(dirname "$out/${2:-$1}")"
+        cp "$1" "$out/${2:-$1}"
+    }
+    for f in host.exe standard.dll luau.dll physics_jolt.dll D3D12/D3D12Core.dll D3D12/d3d12SDKLayers.dll \
+        amd_fidelityfx_loader_dx12.dll amd_fidelityfx_upscaler_dx12.dll amd_fidelityfx_LICENSE.txt; do
+        put "{{dev_dir}}/$f"
+    done
+    put "{{build_dir}}/runtime/runtime.exe"
+    put "{{tools_dir}}/cook.exe"
+    put "{{tools_dir}}/cinnabar.exe"
+    for f in dxc.exe dxcompiler.dll dxil.dll; do put "$(dirname "{{dxc}}")/$f"; done
+    # What a project's game/ links: the Luau, Jolt, Opus and LZ4 libraries that lib/'s foreign imports name.
+    for f in luau/shared/out/luau.lib opus/Release/opus.lib lz4/out/cn_lz4.lib \
+        jolt/static/out/physics_jolt.lib jolt/static/out/Jolt.lib; do
+        put "{{obj_dir}}/$f"
+    done
+    for f in Luau.VM Luau.CodeGen Luau.Compiler Luau.Ast Luau.Bytecode Luau.Common luau_shim; do
+        put "{{obj_dir}}/luau/static/out/$f.lib"
+    done
+    # The engine's Odin source, content, shaders and templates, as the repository has them, without the tests.
+    git ls-files -z lib | while IFS= read -r -d '' f; do
+        case "$f" in *_test.odin|*/testdata/*) continue ;; esac
+        put "$f"
+    done
+    for f in SMAA.hlsl area.bin search.bin; do put "vendor/smaa/$f"; done
+    dotnet publish src/editor/Cinnabar.Editor -nologo -v:quiet -c Release -r win-x64 --self-contained \
+        -p:Version="{{version}}" -o "$out/build/editor"
+    rm -f "$out"/build/editor/*.pdb
+    put LICENSE
+    put VERSION
+    # The licences of the third-party parts that the package holds or that its programs link.
+    licence() { # licence <part> <file>...
+        local part="$1"; shift
+        for f in "$@"; do put "$f" "licenses/$part/$(basename "$f")"; done
+    }
+    licence luau vendor/luau/LICENSE.txt vendor/luau/lua_LICENSE.txt
+    licence jolt vendor/jolt/LICENSE
+    licence opus vendor/opus/COPYING
+    licence lz4 vendor/lz4/lib/LICENSE
+    licence smaa vendor/smaa/LICENSE.txt
+    licence fidelityfx vendor/fidelityfx/LICENSE.txt
+    licence agility "{{agility_dir}}/LICENSE.txt" "{{agility_dir}}/distributable files.txt"
+    licence dxc "$(dirname "{{dxc}}")"/LICEN?E-*.txt
+    # The cooker's parts, which cook.exe links statically.
+    licence meshoptimizer vendor/meshoptimizer/LICENSE.md
+    licence msdfgen vendor/msdfgen/LICENSE.txt
+    licence recastnavigation vendor/recastnavigation/License.txt
+    licence lightusd vendor/lightusd/LICENSE vendor/lightusd/LICENSE.3rdparty
+    licence ogg vendor/ogg/COPYING
+    licence vorbis vendor/vorbis/COPYING
+    licence compressonator vendor/compressonator/license/license.txt vendor/compressonator/license/corelicense.txt
+    # Odin's core library and the vendor libraries that the engine's programs compile in.
+    odin_root="$(odin root)"
+    licence odin "$odin_root/LICENSE"
+    licence kb_text_shape "$odin_root/vendor/kb_text_shape/src/LICENSE"
+    mkdir -p "$out/licenses/stb"
+    sed -n '/This software is available under 2 licenses/,$p' "$odin_root/vendor/stb/src/stb_image.h" > "$out/licenses/stb/LICENSE.txt"
+    # The editor's .NET runtime and its NuGet packages: each package's licence file where it has one, and every
+    # package's licence as its .nuspec names it.
+    dotnet_root="$(dirname "$(dirname "$(command -v dotnet)")")"
+    [ -f "$dotnet_root/LICENSE.txt" ] || dotnet_root="$(dirname "$(command -v dotnet)")"
+    licence dotnet "$dotnet_root/LICENSE.txt" "$dotnet_root/ThirdPartyNotices.txt"
+    packages="$(cygpath -u "${NUGET_PACKAGES:-$USERPROFILE/.nuget/packages}")"
+    list="$out/licenses/editor-packages.txt"
+    echo "The editor's NuGet packages, and the licence that each one's .nuspec names." > "$list"
+    dotnet list src/editor/Cinnabar.Editor package --include-transitive | awk '$1 == ">" {print $2, $NF}' | sort -u |
+        while read -r id ver; do
+            dir="$packages/${id,,}/$ver"
+            spec="$(sed -n 's:.*<license type="expression">\(.*\)</license>.*:\1:p; s:.*<licenseUrl>\(.*\)</licenseUrl>.*:\1:p' "$dir/${id,,}.nuspec" 2>/dev/null | head -n 1)"
+            echo "$id $ver: ${spec:-see the package}" >> "$list"
+            for f in "$dir"/LICENSE* "$dir"/THIRD-PARTY-NOTICES*; do
+                if [ -f "$f" ]; then put "$f" "licenses/nuget/$id/$(basename "$f")"; fi
+            done
+        done
+    printf '%s\n' \
+        "Cinnabar {{version}}: the engine, built, for making a game without the engine's repository." \
+        "" \
+        "Make a project:  build/tools/cinnabar.exe new <dir>" \
+        "Open it:         build/tools/cinnabar.exe edit <dir>, or build/editor/editor.exe" \
+        "" \
+        "Put build/tools on the PATH, or name this folder with CINNABAR_ROOT. A project with a game/ folder of" \
+        "Odin also needs Odin on the PATH. This folder can be read-only: everything that a build writes goes in" \
+        "the project's build/ folder. LICENSE is the engine's licence, and licenses/ holds the third-party parts'." \
+        > "$out/README.txt"
+    # Windows' tar writes zip archives; Git Bash's does not.
+    /c/Windows/System32/tar.exe -a -c -f "{{build_dir}}/sdk/$name.zip" -C "{{build_dir}}/sdk" "$name"
+    echo "✓ $out ($(du -sh "$out" | cut -f1)), $out.zip ($(du -sh "$out.zip" | cut -f1))"
 
 # Build what a project without Odin runs: the standard game's DLL for development, build/dev/standard.dll, and its
 # release executable, build/runtime/runtime.exe, which an export copies beside the project's bundles under the game's
@@ -743,24 +851,21 @@ info:
     @echo ""
     @just --list
 
+# Tag main's commit with VERSION's version and push the tag. The release workflow pushes the same annotated tag itself
+# when VERSION changes on main (see docs/overview/building-and-running.md#releases-of-the-engine), and publishes the
+# release on a tag that this pushed first.
 [script]
 add-tag:
     set -euo pipefail
-    VERSION=$(<VERSION)
-    # if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
-    #     echo "error: VERSION must contain a semantic version such as 1.2.3" >&2
-    #     exit 1
-    # fi # uncomment if you want semantic check for version from file VERSION
+    version="{{version}}"
+    if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+        echo "error: VERSION must hold a semantic version such as 1.2.3, not '$version'" >&2
+        exit 1
+    fi
+    if git rev-parse -q --verify "refs/tags/v$version" > /dev/null; then
+        echo "error: the tag v$version is already there. Change VERSION first." >&2
+        exit 1
+    fi
     git push origin main
-    git tag -a "v${VERSION}" -m "Release v${VERSION}"
-    git push origin "v${VERSION}"
-
-# # `just remove-tag v0.0.0` or `just remove-tag` (uses fzf)
-# remove-tag:
-#     #!/usr/bin/env bash
-#     set -euo pipefail
-#     tag="{{ VERSION }}"
-#     [ -z "$tag" ] && tag=$(git tag | sort -V | fzf --prompt="Select tag to remove: ")
-#     [ -z "$tag" ] && echo "No tag selected" && exit 1
-#     git tag -d "$tag"
-#     git push --delete origin "$tag"
+    git tag -a "v$version" -m "Release v$version"
+    git push origin "v$version"

@@ -85,6 +85,19 @@ a_project_without_odin_runs_the_standard_game :: proc(t: ^testing.T) {
 }
 
 @(test)
+another_engine_version_warns :: proc(t: ^testing.T) {
+	testing.expect_value(t, version_warning("", "0.2.0"), "")
+	testing.expect_value(t, version_warning("0.2.0", "0.2.0"), "")
+	testing.expect(t, strings.contains(version_warning("0.1.0", "0.2.0"), "engine 0.1.0"))
+
+	o, ok := parse_args({"--version"})
+	testing.expect(t, ok)
+	testing.expect_value(t, o.command, Command.Version)
+	_, ok = parse_args({"--version", "extra"})
+	testing.expect(t, !ok)
+}
+
+@(test)
 names_become_files_and_packages :: proc(t: ^testing.T) {
 	testing.expect_value(
 		t,
@@ -115,6 +128,7 @@ a_new_project_has_new_guids_that_its_files_name :: proc(t: ^testing.T) {
 	}
 	settings := read(dir, "project.settings")
 	testing.expect_value(t, format.settings_value(settings, NAME_KEY), "Demo Game")
+	testing.expect_value(t, format.settings_value(settings, ENGINE_VERSION_KEY), CINNABAR_VERSION)
 	scene_meta, _ := format.meta_guid(read(dir, "content/scenes/main.scene.meta"))
 	main_scene, _ := format.guid_parse(format.settings_value(settings, MAIN_SCENE_KEY))
 	testing.expect(t, main_scene != {})

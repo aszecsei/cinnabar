@@ -23,8 +23,8 @@ Template_File :: struct {
 // new_project makes a project in an empty or new folder from a template (see
 // docs/overview/getting-started.md#a-new-project): the basic template's files, and then the named template's over them.
 // Each content file gets a .meta file with a new GUID, and {{guid:<path>}} in the templates' text is that file's GUID,
-// so the scene names its scripts and the settings name the main scene. {{name}} is the game's name, and {{package}}
-// a name of it that Odin takes as a package's.
+// so the scene names its scripts and the settings name the main scene. {{name}} is the game's name, {{package}} a name
+// of it that Odin takes as a package's, and {{engine_version}} the engine's version.
 new_project :: proc(e: Engine, dir, name, template: string) -> bool {
 	if !is_empty_or_new(dir) {
 		log.errorf("cinnabar: %s is not empty. A new project goes in a new or empty folder.", dir)
@@ -141,6 +141,12 @@ make_project_files :: proc(files: []Template_File, name: string) -> []Template_F
 	for f in files {
 		text, _ := strings.replace_all(f.text, "{{name}}", name, context.temp_allocator)
 		text, _ = strings.replace_all(text, "{{package}}", package_name, context.temp_allocator)
+		text, _ = strings.replace_all(
+			text,
+			"{{engine_version}}",
+			CINNABAR_VERSION,
+			context.temp_allocator,
+		)
 		for path, guid in guids {
 			token := strings.concatenate({"{{guid:", path, "}}"}, context.temp_allocator)
 			text, _ = strings.replace_all(text, token, guid, context.temp_allocator)

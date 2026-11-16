@@ -1,6 +1,9 @@
 # The project's settings (see docs/overview/architecture.md#project-settings). The editor edits them, and a running game takes
 # a change at once. project.user.settings beside this file replaces them on one machine, and is not committed.
 
+# The engine version that made the project. cinnabar.exe warns when another version builds it.
+engine.version = {{engine_version}}
+
 # The game's name, which the release's executable and window take.
 game.name = {{name}}
 

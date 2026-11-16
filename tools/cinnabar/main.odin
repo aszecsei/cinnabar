@@ -11,12 +11,14 @@ USAGE :: `usage: cinnabar new <dir> [--name <name>] [--template basic|odin] [--e
        cinnabar run [<project>] [--engine <dir>]
        cinnabar edit [<project>] [--engine <dir>]
        cinnabar export [<project>] [--out <dir>] [--engine <dir>]
+       cinnabar --version
 
 <project> is a folder with project.settings, and the current folder when it is left out. The engine is --engine, then
 CINNABAR_ROOT, then engine.path in the project's project.user.settings, then the checkout that cinnabar.exe was built in.`
 
 Command :: enum u8 {
 	None,
+	Version,
 	New,
 	Build,
 	Run,
@@ -39,6 +41,9 @@ parse_args :: proc(args: []string) -> (o: Options, ok: bool) {
 		return
 	}
 	switch args[0] {
+	case "--version", "version":
+		o.command = .Version
+		return o, len(args) == 1
 	case "new":
 		o.command = .New
 	case "build":
@@ -102,6 +107,10 @@ main :: proc() {
 }
 
 run_command :: proc(o: Options) -> bool {
+	if o.command == .Version {
+		fmt.printfln("cinnabar %s", CINNABAR_VERSION)
+		return true
+	}
 	exe_dir, _ := os.get_executable_directory(context.temp_allocator)
 	settings, _ := os.join_path({o.project, "project.settings"}, context.temp_allocator)
 	user_engine := setting(settings, ENGINE_PATH_KEY) if o.command != .New else ""
@@ -139,8 +148,12 @@ run_command :: proc(o: Options) -> bool {
 		return false
 	}
 	p := project_paths(o.project, e)
+	if warning := version_warning(setting(settings, ENGINE_VERSION_KEY), CINNABAR_VERSION);
+	   warning != "" {
+		log.warn(warning)
+	}
 	switch o.command {
-	case .None, .New:
+	case .None, .Version, .New:
 	case .Build:
 		return build_project(e, p)
 	case .Run:
@@ -151,4 +164,18 @@ run_command :: proc(o: Options) -> bool {
 		return export_project(e, p, slashes(absolute(o.out)) if o.out != "" else p.release)
 	}
 	return false
+}
+
+// version_warning is what to tell the user when a project that one engine version made is built with another, or "".
+// A project without engine.version, made before projects recorded it, gets no warning.
+version_warning :: proc(project_version, engine_version: string) -> string {
+	if project_version == "" || project_version == engine_version {
+		return ""
+	}
+	return fmt.tprintf(
+		"cinnabar: the project was made with engine %s, and this is engine %s. Its content and game/ may need changes; set %s in project.settings when they work.",
+		project_version,
+		engine_version,
+		ENGINE_VERSION_KEY,
+	)
 }

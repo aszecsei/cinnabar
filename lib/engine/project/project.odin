@@ -48,6 +48,9 @@ MAIN_SCENE_KEY :: "game.main_scene"
 // The engine checkout that builds the project, which only the user file gives, because it is a path on one machine
 // (see docs/world/game-package.md#settings). The game only knows the key.
 ENGINE_PATH_KEY :: "engine.path"
+// The engine version that made the project, which cinnabar.exe warns about when another builds it (see
+// docs/overview/getting-started.md#the-engine). The game only knows the key.
+ENGINE_VERSION_KEY :: "engine.version"
 
 // Settings are a project's settings. A key that no file gives keeps its default.
 Settings :: struct {
@@ -232,7 +235,10 @@ parse :: proc(text: string, settings: ^Settings, problems: ^[dynamic]string = ni
 			}
 			continue
 		}
-		if key == NAME_KEY || key == ICON_KEY || key == ENGINE_PATH_KEY {
+		if key == NAME_KEY ||
+		   key == ICON_KEY ||
+		   key == ENGINE_PATH_KEY ||
+		   key == ENGINE_VERSION_KEY {
 			if value == "" {
 				problem(problems, line, "%s takes a value", key)
 			}

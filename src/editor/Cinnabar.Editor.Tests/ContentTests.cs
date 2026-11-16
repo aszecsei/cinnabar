@@ -230,6 +230,19 @@ public sealed class ContentTests : IDisposable
     }
 
     [Fact]
+    public void CinnabarEditKeepsTheEditorsFilesAndTheDllCopiesInTheProject()
+    {
+        var options = EditorOptions.Parse(["--project", "game/project.settings", "--load-dir", "game/build/dev", "--editor-dir", "game/build/editor"]);
+
+        Assert.Equal(
+            [options.GamePath, "--content", options.Cook.CachePath, "--project", Path.GetFullPath("game/project.settings"), "--load-dir", Path.GetFullPath("game/build/dev")],
+            options.HostArguments());
+        Assert.Equal(Path.GetFullPath("game/build/editor/autosave"), options.AutosaveDirectory);
+        Assert.Equal(Path.GetFullPath("game/build/editor/captures"), options.CaptureDirectory);
+        Assert.Equal(Path.GetFullPath("game/build/editor/automation.json"), options.AutomationFile);
+    }
+
+    [Fact]
     public void TheScriptEditorComesFromTheSettings()
     {
         var settings = new EditorSettings(_temp.Combine("settings"));

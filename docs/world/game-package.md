@@ -79,6 +79,7 @@ The standard game reads these keys of `project.settings` (see [Project settings]
 | `game.name` | The window's title and the executable's name in a release. The game only knows the key. |
 | `game.icon` | The release executable's icon, a `.ico` file relative to the settings file. The game only knows the key. |
 | `engine.path` | The engine checkout that builds the project, in `project.user.settings` only, because it is a path on one machine. The game only knows the key. |
+| `engine.version` | The engine version that made the project, which `cinnabar new` writes. `cinnabar.exe` warns when another version builds it (see [Getting started](../overview/getting-started.md#versions)). The game only knows the key. |
 
 ## Development
 

@@ -20,6 +20,8 @@ DEFAULT_GAME_NAME :: "standard.dll"
 
 Game_Module :: struct {
 	source_path: string,
+	// The folder that the DLL's copies go in: --load-dir, or the DLL's own.
+	load_dir:    string,
 	version:     int,
 	modified:    time.Time,
 	api:         core.Game_API,
@@ -29,13 +31,15 @@ main :: proc() {
 	context.logger = log.create_console_logger()
 
 	// host [game.dll] [--content <dir>] [--project <file>] [--physics <name>] [--shared <name>] [--adapter <luid>]
-	// [--link <port>] [--emit-script-types <file>] [--emit-link-schema <file>]. The DLL is standard.dll beside the host by
-	// default. --physics names the physics backend, physics_<name>.dll beside the host or none, in place of the
+	// [--link <port>] [--load-dir <dir>] [--emit-script-types <file>] [--emit-link-schema <file>]. The DLL is
+	// standard.dll beside the host by default. --physics names the physics backend, physics_<name>.dll beside the host or none, in place of the
 	// project's physics.backend (see docs/physics/backends.md#choosing).
 	// --content is the game's loose cache and --project its settings file, which are content and project.settings
 	// beside the host by default (see docs/overview/building-and-running.md#build-layout). --shared renders into shared
 	// textures for the editor or tools/viewer. --adapter names the GPU by its LUID in hex, so that the editor can open
-	// the shared textures on its own device. --link serves the editor link on that port of 127.0.0.1.
+	// the shared textures on its own device. --link serves the editor link on that port of 127.0.0.1. --load-dir is the
+	// folder that the DLL's copies go in, the DLL's own by default, so that a read-only engine can run its standard.dll
+	// (see docs/overview/building-and-running.md#build-layout).
 	// --emit-script-types writes the scripts' definition file, and --emit-link-schema the editor link's schema, and
 	// each exits.
 	exe_dir, exe_err := os.get_executable_directory(context.temp_allocator)
@@ -49,6 +53,7 @@ main :: proc() {
 	adapter: u64
 	link_port := -1
 	script_types := ""
+	load_dir := ""
 	for i := 1; i < len(os.args); i += 1 {
 		switch {
 		case os.args[i] == "--content" && i + 1 < len(os.args):
@@ -81,6 +86,9 @@ main :: proc() {
 				return
 			}
 			link_port = port
+			i += 1
+		case os.args[i] == "--load-dir" && i + 1 < len(os.args):
+			load_dir = os.args[i + 1]
 			i += 1
 		case os.args[i] == "--emit-link-schema" && i + 1 < len(os.args):
 			write_file(os.args[i + 1], link.schema(context.temp_allocator))
@@ -124,7 +132,13 @@ main :: proc() {
 	capture_start(&capture, &editor)
 	defer capture_stop(&capture)
 
-	game, result := game_load(source_path, 0)
+	if load_dir == "" {
+		load_dir = filepath.dir(source_path)
+	} else if err := os.make_directory_all(load_dir); err != nil && err != .Exist {
+		log.fatalf("host: --load-dir %s: %v", load_dir, err)
+		return
+	}
+	game, result := game_load(source_path, load_dir, 0)
 	if result != .Loaded {
 		log.fatalf("host: could not load %s", source_path)
 		return
@@ -152,7 +166,11 @@ main :: proc() {
 			profile.zone_text("Hot reload", .Editor)
 			reload_start := time.tick_now()
 			audio_before := platform.audio_status()
-			switch next, reload := game_load(source_path, game.version + 1); reload {
+			switch next, reload := game_load(
+				source_path,
+				game.load_dir,
+				game.version + 1,
+			); reload {
 			case .Loaded:
 				kind :=
 					link.Reload_Kind.Code if next.api.layout_hash() == game.api.layout_hash() else .Soft_Restart
@@ -211,10 +229,16 @@ Load_Result :: enum {
 	Refused,
 }
 
-// game_load copies the DLL to a versioned name and loads the copy, so the build can overwrite the original. Old copies
-// are never unloaded. The copy's name has the process's ID, so two hosts can run one DLL, as the editor's and its Run
+// game_load copies the DLL to a versioned name in load_dir and loads the copy, so the build can overwrite the original.
+// Old copies are never unloaded. The copy's name has the process's ID, so two hosts can run one DLL, as the editor's and its Run
 // Game do: neither can replace a copy that the other has loaded.
-game_load :: proc(source_path: string, version: int) -> (game: Game_Module, result: Load_Result) {
+game_load :: proc(
+	source_path, load_dir: string,
+	version: int,
+) -> (
+	game: Game_Module,
+	result: Load_Result,
+) {
 	result = .Not_Ready
 	modified, stat_err := os.modification_time_by_path(source_path)
 	if stat_err != nil {
@@ -222,10 +246,10 @@ game_load :: proc(source_path: string, version: int) -> (game: Game_Module, resu
 		return
 	}
 	if version == 0 {
-		remove_old_copies(source_path)
+		remove_old_copies(source_path, load_dir)
 	}
 
-	loaded_path := copy_path(source_path, os.get_pid(), version)
+	loaded_path := copy_path(source_path, load_dir, os.get_pid(), version)
 	if err := os.copy_file(loaded_path, source_path); err != nil {
 		// The linker may still be writing the DLL; the next frame retries.
 		log.debugf("host: copy %s: %v", source_path, err)
@@ -239,11 +263,12 @@ game_load :: proc(source_path: string, version: int) -> (game: Game_Module, resu
 	get_api, found := dynlib.symbol_address(lib, core.GAME_API_SYMBOL)
 	if !found {
 		log.errorf("host: %s does not export %s", loaded_path, core.GAME_API_SYMBOL)
-		return {version = version, modified = modified}, .Refused
+		return {load_dir = load_dir, version = version, modified = modified}, .Refused
 	}
 
 	game = {
 		source_path = source_path,
+		load_dir    = load_dir,
 		version     = version,
 		modified    = modified,
 		api         = (proc() -> core.Game_API)(get_api)(),
@@ -259,15 +284,16 @@ game_load :: proc(source_path: string, version: int) -> (game: Game_Module, resu
 	return game, .Loaded
 }
 
-// copy_path is the name of a DLL's copy that a host loads: <name>_<process>_<version>.dll beside it.
+// copy_path is the name of a DLL's copy that a host loads: <name>_<process>_<version>.dll in load_dir.
 copy_path :: proc(
-	source_path: string,
+	source_path, load_dir: string,
 	pid, version: int,
 	allocator := context.temp_allocator,
 ) -> string {
 	return fmt.aprintf(
-		"%s_%d_%d.dll",
-		strings.trim_suffix(source_path, ".dll"),
+		"%s/%s_%d_%d.dll",
+		load_dir,
+		strings.trim_suffix(filepath.base(source_path), ".dll"),
 		pid,
 		version,
 		allocator = allocator,
@@ -294,14 +320,11 @@ is_copy_of :: proc(name, source_name: string) -> bool {
 	return true
 }
 
-// remove_old_copies removes the copies of a DLL that earlier hosts loaded. Those that a running host has loaded stay,
-// because Windows refuses to remove them.
-remove_old_copies :: proc(source_path: string) {
-	dir, name := filepath.split(source_path)
-	if dir == "" {
-		dir = "."
-	}
-	entries, err := os.read_all_directory_by_path(dir, context.temp_allocator)
+// remove_old_copies removes the copies of a DLL in load_dir that earlier hosts loaded. Those that a running host has
+// loaded stay, because Windows refuses to remove them.
+remove_old_copies :: proc(source_path, load_dir: string) {
+	name := filepath.base(source_path)
+	entries, err := os.read_all_directory_by_path(load_dir, context.temp_allocator)
 	if err != nil {
 		return
 	}
