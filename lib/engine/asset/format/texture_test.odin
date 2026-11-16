@@ -33,3 +33,16 @@ box_chains_of_r16_texels :: proc(t: ^testing.T) {
 		testing.expect_value(t, view.mip_count, 3)
 	}
 }
+
+// An RGBA8 chain's mips are the means of each channel of the texels under them, rounded to the nearest.
+@(test)
+box_chains_of_rgba8_texels :: proc(t: ^testing.T) {
+	texels := []u8{255, 0, 0, 0, 0, 255, 0, 0, 255, 0, 0, 0, 0, 0, 255, 0}
+	mips, count := texture_box_chain_rgba8({2, 2}, texels, context.temp_allocator)
+	testing.expect_value(t, count, 2)
+	testing.expect_value(t, len(mips), 4 * (4 + 1))
+	testing.expect_value(t, mips[16], u8((510 + 2) / 4))
+	testing.expect_value(t, mips[17], u8((255 + 2) / 4))
+	testing.expect_value(t, mips[18], u8((255 + 2) / 4))
+	testing.expect_value(t, mips[19], 0)
+}

@@ -119,6 +119,8 @@ Message :: union {
 	Live_Texture_Region,
 	Release_Live_Texture,
 	Landscape_Overlay,
+	Live_Instances,
+	Release_Live_Instances,
 }
 
 // Editor to host, first: the editor's protocol version and its name.
@@ -1701,18 +1703,26 @@ Release_Live_Mesh :: struct {
 	guid: [16]u8,
 }
 
-// The landscape tools' live textures (see docs/editor/landscape.md#live-textures): a surface's height map or hole mask
-// that the editor paints, which the game draws, and collides with, from memory in place of its cooked blob.
+// The landscape tools' live textures (see docs/editor/landscape.md#live-textures): a surface's height map, hole mask or
+// layer map that the editor paints, which the game draws, and collides with, from memory in place of its cooked blob.
 
 Live_Texture_Usage :: enum u8 {
 	// A height texture: R16_Unorm.
 	Height,
 	// A hole mask: 0 is a hole.
 	Mask,
+	// A layer map: four values a texel, the weights of the layers that a terrain material blends, as RGBA8_Unorm.
+	Layers,
 }
 
-// Editor to game: the whole of the texture asset guid, size.x by size.y texels from 0 to 65535, row-major. The game
-// builds a blob with its mips and puts it in place of the asset's, until a Release_Live_Texture.
+// live_texture_channels is how many values a texel of a live texture has: four for a layer map, one for the others.
+live_texture_channels :: proc "contextless" (usage: Live_Texture_Usage) -> int {
+	return 4 if usage == .Layers else 1
+}
+
+// Editor to game: the whole of the texture asset guid, size.x by size.y texels from 0 to 65535, row-major, each of
+// live_texture_channels values. The game builds a blob with its mips and puts it in place of the asset's, until a
+// Release_Live_Texture.
 Live_Texture :: struct {
 	guid:   [16]u8,
 	usage:  Live_Texture_Usage,
@@ -1730,6 +1740,21 @@ Live_Texture_Region :: struct {
 
 // Editor to game: the editor has let go of the texture. The game loads the asset's cooked blob again.
 Release_Live_Texture :: struct {
+	guid: [16]u8,
+}
+
+// Editor to game: the whole of the instance set asset guid, which the landscape tools' foliage brushes paint (see
+// docs/editor/landscape.md#foliage): each instance's position x, y, z, rotation x, y, z, w and scale x, y, z, relative
+// to its entity. The game builds a blob of them and puts it in place of the asset's, until a Release_Live_Instances.
+Live_Instances :: struct {
+	guid:      [16]u8,
+	positions: []f32,
+	rotations: []f32,
+	scales:    []f32,
+}
+
+// Editor to game: the editor has let go of the instance set. The game loads the asset's cooked blob again.
+Release_Live_Instances :: struct {
 	guid: [16]u8,
 }
 

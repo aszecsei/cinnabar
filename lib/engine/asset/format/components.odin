@@ -112,8 +112,9 @@ DEFAULT_SURFACE_CELL :: 1
 // in meters (0 means DEFAULT_SURFACE_CELL), and height_range how far below and above its plane the material's
 // displacement reaches, which culling allows for. height_map is the height texture that the material displaces by, from
 // height_range.x where it reads 0 to height_range.y where it reads 1, which a Height_Field Collider and the editor's
-// landscape tools read (see docs/rendering/surfaces.md#collision). It is here, not in lib/engine/render, since physics
-// reads it too.
+// landscape tools read (see docs/rendering/surfaces.md#collision). layer_map is the data texture whose red, green, blue
+// and alpha are the weights of the four layers that the material blends, which the landscape tools paint (see
+// docs/rendering/surfaces.md#layers). It is here, not in lib/engine/render, since physics reads it too.
 Surface_Renderer :: struct {
 	size:         [2]f32,
 	material:     Guid `asset:"material"`,
@@ -122,6 +123,7 @@ Surface_Renderer :: struct {
 	height_range: [2]f32,
 	cast_shadows: bool,
 	height_map:   Guid `asset:"texture"`,
+	layer_map:    Guid `asset:"texture"`,
 }
 
 // Nav_Mesh_Volume asks the cooker to bake navmeshes inside its entity's Volume, which must be a Box (see

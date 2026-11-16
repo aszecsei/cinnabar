@@ -404,6 +404,8 @@ handle_message :: proc(l: ^Link, message: link.Message, connection: u64) {
 	     link.Live_Texture_Region,
 	     link.Release_Live_Texture,
 	     link.Landscape_Overlay,
+	     link.Live_Instances,
+	     link.Release_Live_Instances,
 	     link.Sky_Sun_Request,
 	     link.Sky_Sun,
 	     link.Animator_View,

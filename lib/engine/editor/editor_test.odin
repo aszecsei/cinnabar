@@ -2641,3 +2641,82 @@ texels_patch_into_an_image :: proc(t: ^testing.T) {
 	testing.expect(t, !patch_texels(image, {3, 2}, {2, 0}, {2, 2}, {1, 2, 3, 4}))
 	testing.expect(t, !patch_texels(image, {3, 2}, {0, 0}, {2, 2}, {1, 2, 3}))
 }
+
+// A layer map's texels are four values each: a region patches all four, and its blob is an RGBA8 data texture.
+@(test)
+live_layer_maps_are_rgba8_data_textures :: proc(t: ^testing.T) {
+	image := make([]u16, 2 * 2 * 4, context.temp_allocator)
+	testing.expect(t, patch_texels(image, {2, 2}, {1, 1}, {1, 1}, {1, 2, 3, 4}, channels = 4))
+	testing.expect_value(t, image[12], 1)
+	testing.expect_value(t, image[15], 4)
+	testing.expect(t, !patch_texels(image, {2, 2}, {1, 1}, {1, 1}, {1, 2, 3}, channels = 4))
+
+	texels := []u16{65535, 0, 0, 0, 0, 65535, 0, 0, 0, 0, 65535, 0, 0, 0, 0, 65535}
+	guid := format.guid_parse("6d2f0a1b3c4e5f60718293a4b5c6d7e8") or_else {}
+	written := live_texture_blob(guid, .Layers, {2, 2}, texels, context.temp_allocator)
+	data, _ := mem.alloc_bytes(len(written), format.BLOB_ALIGN, context.temp_allocator)
+	copy(data, written)
+	blob, ok := format.texture_view(data)
+	testing.expect(t, ok)
+	if ok {
+		testing.expect_value(t, blob.format, format.Texture_Format.RGBA8_Unorm)
+		testing.expect_value(t, blob.usage, format.Texture_Usage.Data)
+		testing.expect_value(t, blob.mip_count, 2)
+		testing.expect_value(t, data[blob.mips.offset + 5], 255)
+	}
+}
+
+// A Live_Instances puts an instance set blob of its poses in place of the asset's; arrays of different instances are
+// refused, and Release_Live_Instances ends it.
+@(test)
+live_instances_take_their_assets_place :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	f.platform.file_read = core.file_read
+	f.platform.file_modified = core.file_modified
+	f.platform.asset_allocator = runtime.heap_allocator()
+	assets: asset.Assets
+	asset.init(&assets, &f.platform, asset.loose_cache("missing"))
+	defer asset.destroy(&assets)
+	f.editor.assets = &assets
+	defer f.editor.assets = nil
+	guid := format.guid_parse("7e3a1b2c4d5f60718293a4b5c6d7e8f9") or_else {}
+
+	positions := []f32{0, 0, 0, 4, 1, 0, -2, 0, 3}
+	rotations := []f32{0, 0, 0, 1, 0, 0.7071068, 0, 0.7071068, 0, 0, 0, 2}
+	scales := []f32{1, 1, 1, 2, 2, 2, 0.5, 0.5, 0.5}
+	step(
+		f,
+		1,
+		link.Live_Instances {
+			guid = ([16]u8)(guid),
+			positions = positions,
+			rotations = rotations,
+			scales = scales,
+		},
+	)
+	testing.expect(t, asset.is_live(&assets, guid))
+	h, _ := asset.find(&assets, guid)
+	data, _ := asset.data(&assets, h)
+	blob, ok := format.instance_set_view(data)
+	testing.expect(t, ok)
+	if ok {
+		testing.expect_value(t, blob.count, 3)
+		testing.expect_value(t, blob.max_scale, 2)
+	}
+	version := asset.version(&assets, h)
+	context.logger = testlog.expected_errors()
+	step(
+		f,
+		1,
+		link.Live_Instances {
+			guid = ([16]u8)(guid),
+			positions = positions,
+			rotations = rotations[:4],
+			scales = scales,
+		},
+	)
+	testing.expect_value(t, asset.version(&assets, h), version)
+	step(f, 1, link.Release_Live_Instances{guid = ([16]u8)(guid)})
+	testing.expect(t, !asset.is_live(&assets, guid))
+}
