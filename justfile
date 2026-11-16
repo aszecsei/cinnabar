@@ -320,7 +320,7 @@ update-compressonator tag="": install-compressonator
 alias b := build
 
 # Build the host and the game DLL, and cook the game's scripts and scenes
-build: host game-dll script-types scripts scenes shaders textures models meshes stages materials effects animation_graphs audio fonts ui sprite_sheets navmeshes blackboards decisions perceptions
+build: host game-dll script-types scripts scenes shaders textures models meshes stages instance-sets materials effects animation_graphs audio fonts ui sprite_sheets navmeshes blackboards decisions perceptions
 
 # Build the development host
 host: (agility-runtime dev_dir) (fidelityfx-runtime dev_dir) luau jolt opus lz4
@@ -481,6 +481,11 @@ audio config="dev": cook
 # docs/content/kinds/animation-graphs.md#animation-graphs). A graph without a .meta file gets one: commit it.
 animation_graphs config="dev": cook
     "./{{tools_dir}}/cook.exe" animation_graphs --cache "{{ if config == "release" { release_cache } else { cache_dir } }}" --config {{config}} {{roots}}
+
+# Cook the game's instance sets, its .instances files, into the loose cache of the configuration (see
+# docs/content/kinds/instance-sets.md). An instance set without a .meta file gets one: commit it.
+instance-sets config="dev": cook
+    "./{{tools_dir}}/cook.exe" instance-sets --cache "{{ if config == "release" { release_cache } else { cache_dir } }}" --config {{config}} {{roots}}
 
 # Cook the game's blackboards into the loose cache of the configuration (see docs/content/kinds/blackboards.md#blackboards).
 # A blackboard without a .meta file gets one: commit it.

@@ -1004,7 +1004,17 @@ cook_stage_set :: proc(
 			}
 			offset, rotation, size, exact := stage_pose(m, basis, scale)
 			sheared += int(!exact)
-			append(&instances, stage_instance(offset, rotation, size, u32(point)))
+			pose := format.Instance_Pose {
+				position = {f32(offset.x), f32(offset.y), f32(offset.z)},
+				rotation = quaternion(
+					x = f32(imag(rotation)),
+					y = f32(jmag(rotation)),
+					z = f32(kmag(rotation)),
+					w = f32(real(rotation)),
+				),
+				scale    = {f32(size.x), f32(size.y), f32(size.z)},
+			}
+			append(&instances, format.instance_pack(pose, u32(point)))
 		}
 	}
 	if skipped > 0 {
@@ -1029,7 +1039,7 @@ cook_stage_set :: proc(
 			sheared,
 		)
 	}
-	contents := stage_cells(instances[:])
+	contents := format.instance_cells(instances[:], context.temp_allocator)
 	contents.guid = set.guid
 	contents.key = blob_key
 	contents.name = set.name
@@ -1040,111 +1050,6 @@ cook_stage_set :: proc(
 	}
 	count_subassets(pass, .Instance_Set, .Cooked)
 	return blob_key, true
-}
-
-// stage_instance packs a pose as an instance, its rotation with w at least 0.
-@(private = "file")
-stage_instance :: proc(
-	offset: [3]f64,
-	rotation: quaternion256,
-	size: [3]f64,
-	point: u32,
-) -> format.Instance {
-	q := [4]f64{imag(rotation), jmag(rotation), kmag(rotation), real(rotation)}
-	if q.w < 0 {
-		q = -q
-	}
-	snorm :: proc(v: f64) -> i16 {
-		return i16(clamp(v, -1, 1) * 32767 + (v < 0 ? -0.5 : 0.5))
-	}
-	return {
-		position = {f32(offset.x), f32(offset.y), f32(offset.z)},
-		rotation = {snorm(q.x), snorm(q.y), snorm(q.z), snorm(q.w)},
-		scale = {f16(size.x), f16(size.y), f16(size.z)},
-		point = point,
-	}
-}
-
-// stage_cells orders instances along a Morton curve over their bounds, so each run of INSTANCE_CELL_SIZE is near
-// together, and makes a cell of each run.
-@(private = "file")
-stage_cells :: proc(instances: []format.Instance) -> (contents: format.Instance_Set_Contents) {
-	if len(instances) == 0 {
-		return {instances = instances}
-	}
-	lo, hi := instances[0].position, instances[0].position
-	for i in instances {
-		lo = linalg.min(lo, i.position)
-		hi = linalg.max(hi, i.position)
-	}
-	extent := linalg.max(hi - lo, [3]f32{1e-6, 1e-6, 1e-6})
-	// 21 bits an axis, spread to every third bit.
-	spread :: proc(v: u64) -> u64 {
-		x := v & 0x1fffff
-		x = (x | x << 32) & 0x1f00000000ffff
-		x = (x | x << 16) & 0x1f0000ff0000ff
-		x = (x | x << 8) & 0x100f00f00f00f00f
-		x = (x | x << 4) & 0x10c30c30c30c30c3
-		x = (x | x << 2) & 0x1249249249249249
-		return x
-	}
-	Keyed :: struct {
-		code:     u64,
-		instance: format.Instance,
-	}
-	keyed := make([]Keyed, len(instances), context.temp_allocator)
-	for i, k in instances {
-		t := (i.position - lo) / extent * f32((1 << 21) - 1)
-		keyed[k] = {spread(u64(t.x)) | spread(u64(t.y)) << 1 | spread(u64(t.z)) << 2, i}
-	}
-	slice.sort_by(
-		keyed,
-		proc(x, y: Keyed) -> bool {return(
-				x.code < y.code ||
-				(x.code == y.code && x.instance.point < y.instance.point) \
-			)},
-	)
-	sorted := make([]format.Instance, len(instances), context.temp_allocator)
-	for k, i in keyed {
-		sorted[i] = k.instance
-	}
-	sphere :: proc(run: []format.Instance) -> (center: [3]f32, radius: f32, max_scale: f32) {
-		lo, hi := run[0].position, run[0].position
-		for i in run {
-			lo = linalg.min(lo, i.position)
-			hi = linalg.max(hi, i.position)
-			max_scale = max(
-				max_scale,
-				abs(f32(i.scale.x)),
-				abs(f32(i.scale.y)),
-				abs(f32(i.scale.z)),
-			)
-		}
-		center = (lo + hi) / 2
-		for i in run {
-			radius = max(radius, linalg.length(i.position - center))
-		}
-		return
-	}
-	cells := make([dynamic]format.Instance_Cell, context.temp_allocator)
-	for first := 0; first < len(sorted); first += format.INSTANCE_CELL_SIZE {
-		run := sorted[first:min(first + format.INSTANCE_CELL_SIZE, len(sorted))]
-		center, radius, max_scale := sphere(run)
-		append(
-			&cells,
-			format.Instance_Cell {
-				center = center,
-				radius = radius,
-				max_scale = max_scale,
-				first = u32(first),
-				count = u32(len(run)),
-			},
-		)
-	}
-	contents.instances = sorted
-	contents.cells = cells[:]
-	contents.center, contents.radius, contents.max_scale = sphere(sorted)
-	return
 }
 
 // stage_basis is the matrix that takes a stage's axes to the engine's, and the scale that takes its units to meters.

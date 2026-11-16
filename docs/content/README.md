@@ -16,6 +16,7 @@ Read them in this order the first time.
 | [Meshes](kinds/meshes.md) | glTF models, mesh sub-assets and mesh files. |
 | [Skins and animations](kinds/skins-and-animations.md) | glTF skins and clips, the skin stream, and playing a clip. |
 | [Stages](kinds/stages.md) | USD stages: their meshes, textures, material instances and prefab. |
+| [Instance sets](kinds/instance-sets.md) | The `.instances` format: the poses that an `Instanced_Mesh_Renderer` draws its mesh at, their packing and cells, and the blob. |
 | [Materials](kinds/materials.md) | Shading models, materials, instances, functions and graphs. |
 | [Effects](kinds/effects.md) | Emitters of particles, their modules and curves. |
 | [Animation graphs](kinds/animation-graphs.md) | Parameters, clips with their events, and the states, blends and transitions that an Animator plays. |
@@ -59,7 +60,7 @@ The code is in three places:
 
 | Package | Files | What they hold |
 |---|---|---|
-| `tools/cook` | `main.odin` | The commands: `scripts`, `scenes`, `shaders`, `textures`, `models`, `meshes`, `stages`, `materials`, `effects`, `animation_graphs`, `audio`, `fonts`, `ui`, `sprite_sheets`, `navmeshes`, `blackboards`, `decisions`, `perceptions`, `daemon`, `stage-report`, `package`, `--emit-link-schema` |
+| `tools/cook` | `main.odin` | The commands: `scripts`, `scenes`, `shaders`, `textures`, `models`, `meshes`, `stages`, `materials`, `effects`, `animation_graphs`, `audio`, `fonts`, `ui`, `sprite_sheets`, `navmeshes`, `instance-sets`, `blackboards`, `decisions`, `perceptions`, `daemon`, `stage-report`, `package`, `--emit-link-schema` |
 | | `content.odin`, `assets.odin` | The one pass that every command shares: the scan of the roots, `.meta` files for new assets, and each kind's cook. `IMPORTERS`: each kind's extensions and import settings. |
 | | `scripts.odin`, `typecheck.odin`, `schema.odin`, `luau_tools.odin` | Scripts: requires, type checking against the definition file, behaviour fields and action parameters read with the prelude, and the bindings to the Luau compiler and analyzer |
 | | `scenes.odin` | Scenes: the syntax check and the blob |
@@ -75,6 +76,7 @@ The code is in three places:
 | | `fonts.odin`, `opentype.odin`, `msdf.odin`, `msdfgen/cn_msdf.cpp` | Fonts: the glyphs that GSUB reaches from the charset, the atlas's cells, and their distance fields through msdfgen's core |
 | | `ui_documents.odin` | UI documents: the parse from `format`, the kinds of the assets that they name, and the template |
 | | `blackboards.odin`, `decisions.odin`, `conditions.odin`, `behavior_trees.odin`, `utility.odin`, `goap.odin`, `htn.odin`, `plans.odin` | Blackboards and decisions: the keys' slots and defaults, the decisions' shared parts parsed against their blackboard's source, and the techniques' readers, the behavior tree's, utility's, GOAP's and HTN's, with the planning keys, tests and effects that the planners share |
+| | `instance_sets.odin` | Instance sets: the `.instances` files, packed and put in cells by `format` |
 | | `perceptions.odin` | Perceptions: the tags that they notice and their rows |
 | | `sprite_sheets.odin`, `pack.odin` | Sprite sheets: the text's parse, the atlas that packs a sheet's images, a texture's grid and rectangles, and the JSON import; `pack_rects`, which the fonts pack with too |
 | | `daemon.odin`, `watch_windows.odin`, `index.odin`, `serve.odin` | The daemon: the watcher, the passes, the index of the content, and the cook link's server |

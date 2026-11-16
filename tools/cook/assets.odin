@@ -12,8 +12,8 @@ import format "cinnabar:engine/asset/format"
 
 // IMPORTERS gives the extensions of each kind of asset that the cooker cooks, lowercase, the first one for new assets.
 // Other files in the content roots are not assets. A Mesh is a .mesh file of its own, or a glTF model's sub-asset,
-// which has no extension. An Instance_Set is only ever a USD stage's sub-asset, a Skin or an Animation a glTF
-// model's, and a Nav_Mesh a scene's.
+// which has no extension. An Instance_Set is an .instances file, or a USD stage's sub-asset, a Skin or an Animation a
+// glTF model's, and a Nav_Mesh a scene's.
 IMPORTERS :: [format.Asset_Kind][]string {
 	.None              = nil,
 	.Script            = {SCRIPT_EXTENSION},
@@ -29,7 +29,7 @@ IMPORTERS :: [format.Asset_Kind][]string {
 	.Prefab            = {format.PREFAB_EXTENSION},
 	.Effect            = {format.EFFECT_EXTENSION},
 	.Stage             = STAGE_EXTENSIONS,
-	.Instance_Set      = nil,
+	.Instance_Set      = {format.INSTANCES_EXTENSION},
 	.Skin              = nil,
 	.Animation         = nil,
 	.Animation_Graph   = {format.ANIMATION_GRAPH_EXTENSION},
@@ -175,6 +175,7 @@ ALL_KINDS :: Asset_Kinds {
 	.Prefab,
 	.Effect,
 	.Stage,
+	.Instance_Set,
 	.Animation_Graph,
 	.Audio,
 	.Font,

@@ -230,6 +230,9 @@ cook :: proc(
 	if .Animation_Graph in kinds {
 		pass.ok = cook_animation_graphs(options, pass.assets, &pass) && pass.ok
 	}
+	if .Instance_Set in kinds {
+		pass.ok = cook_instance_sets(options, pass.assets, &pass) && pass.ok
+	}
 	if .Blackboard in kinds {
 		pass.ok = cook_blackboards(options, pass.assets, &pass) && pass.ok
 	}

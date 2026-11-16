@@ -3,8 +3,9 @@
 // `cook scripts` cooks scripts (see scripts.odin), `cook scenes` cooks scenes (see scenes.odin), `cook shaders` cooks
 // shaders (see shaders.odin), `cook models` cooks glTF models (see meshes.odin), `cook meshes` cooks mesh files (see
 // mesh_files.odin), `cook stages` cooks USD stages (see stages.odin), `cook navmeshes` bakes the scenes' navmeshes (see
-// nav_meshes.odin), `cook blackboards`, `cook decisions` and `cook perceptions` cook the AI's blackboards, decisions and
-// perceptions (see blackboards.odin, decisions.odin and perceptions.odin), and `cook daemon` cooks every kind whenever the
+// nav_meshes.odin), `cook instance-sets` cooks .instances files (see instance_sets.odin), `cook blackboards`, `cook
+// decisions` and `cook perceptions` cook the AI's blackboards, decisions and perceptions (see blackboards.odin,
+// decisions.odin and perceptions.odin), and `cook daemon` cooks every kind whenever the
 // content changes (see daemon.odin). `cook all` cooks every kind in one pass, and with --prune deletes the blobs of
 // assets that left the content (see all.odin). `cook stage-report` measures stages against the renderer's limits. `cook package`
 // packs a release cache into bundles (see package.odin).
@@ -32,6 +33,7 @@ USAGE :: `usage: cook scripts --cache <dir> --config dev|release [--definitions 
        cook ui --cache <dir> --config dev|release --root <name>=<dir> [--root <name>=<dir>]...
        cook stages --cache <dir> --config dev|release --root <name>=<dir> [--root <name>=<dir>]...
        cook navmeshes --cache <dir> --config dev|release --root <name>=<dir> [--root <name>=<dir>]...
+       cook instance-sets --cache <dir> --config dev|release --root <name>=<dir> [--root <name>=<dir>]...
        cook blackboards --cache <dir> --config dev|release --root <name>=<dir> [--root <name>=<dir>]...
        cook decisions --cache <dir> --config dev|release --root <name>=<dir> [--root <name>=<dir>]...
        cook perceptions --cache <dir> --config dev|release --root <name>=<dir> [--root <name>=<dir>]...
@@ -105,6 +107,10 @@ main :: proc() {
 	case "navmeshes":
 		if options, parsed = parse_cook_args(os.args[2:]); parsed {
 			ok = cook_batch(options, .Nav_Mesh)
+		}
+	case "instance-sets":
+		if options, parsed = parse_cook_args(os.args[2:]); parsed {
+			ok = cook_batch(options, .Instance_Set)
 		}
 	case "blackboards":
 		if options, parsed = parse_cook_args(os.args[2:]); parsed {

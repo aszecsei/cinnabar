@@ -81,7 +81,7 @@ An impostor is a mesh's octahedral impostor: views of the mesh from all around, 
 
 ## Instanced meshes
 
-An `Instanced_Mesh_Renderer` draws its mesh at each instance of an instance set, an `Instance_Set` asset, which a USD stage's point instancer cooks into (see [Stages](../content/kinds/stages.md#point-instancers)). A forest of millions of instances is one entity, with one slot and an item for each submesh, and the GPU culls its instances.
+An `Instanced_Mesh_Renderer` draws its mesh at each instance of an instance set, an `Instance_Set` asset, which a USD stage's point instancer cooks into (see [Stages](../content/kinds/stages.md#point-instancers)) or an `.instances` file does (see [Instance sets](../content/kinds/instance-sets.md)). A forest of millions of instances is one entity, with one slot and an item for each submesh, and the GPU culls its instances.
 
 - **Records.** The entity's slot has its pose, which the instances' poses are relative to, and `Instance_Record.instance_set`, the set's instances. Each frame has an `Instance_Set_Record` for each set (`Scene_Frame.sets`): its buffers, its first cell in the visibility bits, its mesh's sphere, its materials' largest displacement bound, its impostor's error, its mesh's level errors (see Level buckets), and whether it casts shadows, has an impostor, or has a billboard.
 - **Residency.** An instance set is resident as a mesh is (`resident_instance_set`): its instances, 32 bytes each, and its cells, each a buffer. It is ready when both have streamed in. A set draws once its mesh and the set are both ready.

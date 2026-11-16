@@ -67,7 +67,7 @@ A UsdPreviewSurface material is an instance of one of six built-in materials, `l
 
 ## Point instancers
 
-A UsdGeomPointInstancer places its prototypes at its points: Jungle Ruins has 778 of them, with 8.7 million points. The cooker keeps each one whole, as an `Instance_Set` sub-asset for each mesh that its prototypes draw, which an `Instanced_Mesh_Renderer` draws the mesh at (see [Rendering: GPU scene](../../rendering/gpu-scene.md#instanced-meshes)). That is the default, `point_instancers = instanced`.
+A UsdGeomPointInstancer places its prototypes at its points: Jungle Ruins has 778 of them, with 8.7 million points. The cooker keeps each one whole, as an `Instance_Set` sub-asset for each mesh that its prototypes draw, which an `Instanced_Mesh_Renderer` draws the mesh at (see [Rendering: GPU scene](../../rendering/gpu-scene.md#instanced-meshes)). That is the default, `point_instancers = instanced`. An `.instances` file makes the same kind of asset from poses that a person or the editor writes (see [Instance sets](instance-sets.md)).
 
 - **Prototypes** are prims of the stage, under their instancer, which Tydra converts as it does any mesh. The prefab leaves them out, so a prototype is not drawn where it was modeled.
 - **Shared prototypes.** A scene that tiles its instancers has a copy of each prototype in each tile: Jungle Ruins' 773 prototype meshes are 53 meshes. A prototype's mesh that is the same as one before it, by its corners, subsets, materials and sides, draws as that one, which is the only one that cooks. A prototype's mesh is named for its prim alone, `prototypes/<name>`, since its copies are in different tiles; a second mesh of the same name gets `_2`.
