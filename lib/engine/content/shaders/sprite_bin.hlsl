@@ -58,6 +58,7 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	s.opacity = r.color.a;
 	s.softness = r.softness;
 	s.texture = r.texture;
+	s.sampler = r.sampler;
 	s.lod = 0;
 	if (r.texture != SPRITE_NO_TEXTURE) {
 		uint2 size;

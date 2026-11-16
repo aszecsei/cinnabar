@@ -114,7 +114,7 @@ Material_Param_Type :: enum u32 {
 	Float4,
 	// A float4 that the editor shows as a color.
 	Color,
-	// A texture asset, which the block holds as its bindless index.
+	// A texture asset, which the block holds as its bindless index and its sampler's: two u32s.
 	Texture,
 }
 
@@ -132,7 +132,8 @@ Material_Param :: struct {
 	offset: u32,
 }
 
-// Material_Texture is a texture in a parameter block: where its index goes, and the texture, or its default.
+// Material_Texture is a texture in a parameter block: where its index goes, with its sampler's after it, and the
+// texture, or its default.
 Material_Texture :: struct {
 	offset:  u32,
 	default: Material_Texture_Default,

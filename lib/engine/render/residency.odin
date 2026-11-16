@@ -107,6 +107,8 @@ Resident_Texture :: struct {
 	// What its layers are, and how many. A shader must read it through the type of its dimension.
 	dimension:    format.Texture_Dimension,
 	layer_count:  u32,
+	// How the texture asks to be sampled (see texture_sampler).
+	sampler:      format.Texture_Sampler,
 }
 
 // Residency gives the GPU resources of the texture and mesh assets that the renderer draws, by GUID (see
@@ -1065,6 +1067,7 @@ stream_texture :: proc(r: ^Residency, s: ^Resident_Stream, data: []byte) -> bool
 		usage        = blob.usage,
 		dimension    = blob.dimension,
 		layer_count  = blob.layer_count,
+		sampler      = blob.sampler,
 	}
 	desc := gpu.Texture_Desc {
 		size      = blob.size,

@@ -31,7 +31,7 @@ void cs_main(uint3 id : SV_DispatchThreadID, uint3 group : SV_GroupID) {
 			if (s.depth >= opaque || any(abs(q) > 1)) {
 				continue;
 			}
-			float4 texel = sprite_texel(s, q, frame.sampler_index);
+			float4 texel = sprite_texel(s, q);
 			float alpha = sprite_alpha(s, texel, opaque);
 			if (alpha <= 0) {
 				continue;

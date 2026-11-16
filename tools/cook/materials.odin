@@ -19,7 +19,7 @@ import "core:strings"
 import format "cinnabar:engine/asset/format"
 
 // Changing how the cooker cooks materials changes this, which invalidates every cooked material and instance.
-MATERIAL_COOK_VERSION :: "materials 10"
+MATERIAL_COOK_VERSION :: "materials 11"
 
 
 Shading_Input :: struct {
@@ -1255,7 +1255,7 @@ find_switch :: proc(m: ^Material_Decl, name: string) -> (index: int, found: bool
 }
 
 // Block_Layout is where each parameter goes in a parameter block, packed at 4 bytes, as a raw buffer's Load packs the
-// generated Params struct.
+// generated Params struct. A texture takes two: its index and its sampler's (Cn_Texture).
 @(private = "file")
 Block_Layout :: struct {
 	offsets: []u32,
@@ -1267,15 +1267,15 @@ block_layout :: proc(params: []Param_Decl) -> (l: Block_Layout) {
 	l.offsets = make([]u32, len(params), context.temp_allocator)
 	for p, i in params {
 		l.offsets[i] = l.size
-		l.size += u32(param_count(p.type) * 4)
+		l.size += u32(p.type == .Texture ? 8 : param_count(p.type) * 4)
 	}
 	// Blocks start at 16 bytes in the material table.
 	l.size = max((l.size + 15) &~ 15, 16)
 	return
 }
 
-// encode_block writes the parameters' values into a block, with each texture's index 0, which the runtime writes, and
-// gives the textures.
+// encode_block writes the parameters' values into a block, with each texture's index and sampler 0, which the runtime
+// writes, and gives the textures.
 @(private = "file")
 encode_block :: proc(
 	params: []Param_Decl,
@@ -1311,7 +1311,7 @@ hlsl_type :: proc(type: format.Material_Param_Type) -> string {
 	case .Float4, .Color:
 		return "float4"
 	case .Texture:
-		return "uint"
+		return "Cn_Texture"
 	}
 	return "float"
 }

@@ -16,7 +16,7 @@ static const float PARALLAX_MIN_VIEW_Z = 0.05;
 // since the march's steps differ between neighbouring pixels. The depth is not moved: the forward pass's Equal depth
 // test and early depth stay, and silhouettes do not change. At a ray's hit, which has no derivatives, it gives the UV
 // as it is.
-float3 cn_parallax(uint height_texture, float2 uv, float scale, float steps, Material_Inputs inputs) {
+float3 cn_parallax(Cn_Texture height_texture, float2 uv, float scale, float steps, Material_Inputs inputs) {
 #if MATERIAL_HIT
 	return float3(uv, 1);
 #else

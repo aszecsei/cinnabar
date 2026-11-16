@@ -257,6 +257,7 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 		s.uv_rect = float4(float2(frame % e.flipbook.x, frame / e.flipbook.x) * cell, cell);
 	}
 	s.texture = e.texture;
+	s.sampler = e.sampler;
 	s.softness = e.softness;
 	s.padding = 0;
 	append_sprite(constants.sprites, constants.sprite_count, s);

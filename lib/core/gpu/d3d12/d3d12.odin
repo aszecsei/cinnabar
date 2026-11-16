@@ -83,6 +83,8 @@ dev: struct {
 	info_queue:          ^d3d.IInfoQueue1,
 	callback_cookie:     u32,
 	features:            gpu.Features,
+	// Whether a sampler filters anisotropically with the nearest mip (see create_sampler).
+	aniso_point_mip:     bool,
 	adapter_info:        gpu.Adapter,
 	// The graphics queue and its fence. Frame ends, uploads and deferred releases use this fence.
 	queue:               ^d3d.ICommandQueue,
@@ -730,6 +732,12 @@ create_device :: proc(luid: u64) -> bool {
 		dev.adapter = adapter
 		dev.device = device
 		dev.features = query_features(device)
+		options19: d3d.FEATURE_DATA_OPTIONS19
+		dev.aniso_point_mip =
+			win.SUCCEEDED(
+				device->CheckFeatureSupport(.OPTIONS19, &options19, size_of(options19)),
+			) &&
+			bool(options19.AnisoFilterWithPointMipSupported)
 		dev.adapter_info = {
 			vendor       = gpu.vendor_from_id(desc.VendorId),
 			device_id    = desc.DeviceId,

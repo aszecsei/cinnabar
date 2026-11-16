@@ -319,6 +319,8 @@ the_split_cascades_run_on_the_compute_queue_and_pass_validation :: proc(t: ^test
 		gpu_destroy_accel           = null.destroy_accel,
 		gpu_create_compute_pipeline = null.create_compute_pipeline,
 		gpu_destroy_pipeline        = null.destroy_pipeline,
+		gpu_create_sampler          = null.create_sampler,
+		gpu_destroy_sampler         = null.destroy_sampler,
 	}
 	r := new(Renderer)
 	defer free(r)
@@ -512,6 +514,8 @@ the_split_stats_are_the_newest_copy_that_came_back :: proc(t: ^testing.T) {
 		gpu_destroy_texture  = null.destroy_texture,
 		gpu_read_buffer      = null.read_buffer,
 		gpu_destroy_pipeline = null.destroy_pipeline,
+		gpu_create_sampler   = null.create_sampler,
+		gpu_destroy_sampler  = null.destroy_sampler,
 	}
 	r := new(Renderer)
 	defer free(r)

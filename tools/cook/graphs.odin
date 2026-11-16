@@ -12,7 +12,7 @@ import "core:strings"
 import cook_link "cinnabar:engine/asset/cook_link"
 import format "cinnabar:engine/asset/format"
 
-// The widths of values in a graph: 1 to 4 floats, or a texture's bindless index.
+// The widths of values in a graph: 1 to 4 floats, or a texture parameter (Cn_Texture).
 @(private = "file")
 TEXTURE_WIDTH :: 5
 
@@ -994,6 +994,8 @@ width_type :: proc(width: int) -> string {
 		return "float3"
 	case 4:
 		return "float4"
+	case TEXTURE_WIDTH:
+		return "Cn_Texture"
 	}
 	return "uint"
 }

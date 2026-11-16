@@ -497,6 +497,10 @@ write_texture_views :: proc(texture: gpu.Texture, entry: ^Texture_Entry) {
 	}
 }
 
+// D3D12_FILTER_MIN_MAG_ANISOTROPIC_MIP_POINT, from the Agility SDK, which vendor:directx/d3d12 does not have.
+@(private = "file")
+FILTER_MIN_MAG_ANISOTROPIC_MIP_POINT :: d3d.FILTER(0x54)
+
 create_sampler :: proc(desc: gpu.Sampler_Desc) -> gpu.Sampler {
 	stored := desc
 	stored.label = ""
@@ -524,8 +528,13 @@ create_sampler :: proc(desc: gpu.Sampler_Desc) -> gpu.Sampler {
 		ComparisonFunc = .NEVER,
 		MaxLOD         = d3d.FLOAT32_MAX,
 	}
-	if desc.anisotropy > 1 {
+	// Anisotropy needs linear filtering between texels. With the nearest mip, it needs a filter that the binding does not
+	// name, D3D12_FILTER_MIN_MAG_ANISOTROPIC_MIP_POINT, which a device without it takes as linear between mips.
+	if desc.anisotropy > 1 && desc.filter == .Linear {
 		sampler_desc.Filter = .ANISOTROPIC
+		if desc.mip_filter == .Nearest && dev.aniso_point_mip {
+			sampler_desc.Filter = FILTER_MIN_MAG_ANISOTROPIC_MIP_POINT
+		}
 		sampler_desc.MaxAnisotropy = u32(min(desc.anisotropy, 16))
 	}
 	if desc.compare != .Always {
@@ -540,6 +549,7 @@ create_sampler :: proc(desc: gpu.Sampler_Desc) -> gpu.Sampler {
 			},
 		}
 		sampler_desc.Filter = COMPARISON_FILTER[desc.filter][desc.mip_filter]
+		sampler_desc.MaxAnisotropy = 1
 		sampler_desc.ComparisonFunc = COMPARE[desc.compare]
 	}
 	dev.device->CreateSampler(&sampler_desc, sampler_handle(gpu.sampler_index(sampler)))

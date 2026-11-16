@@ -35,6 +35,8 @@ the_skinning_pass_poses_the_vertices_before_the_passes_that_read_them :: proc(t:
 		gpu_create_buffer           = null.create_buffer,
 		gpu_destroy_buffer          = null.destroy_buffer,
 		gpu_destroy_pipeline        = null.destroy_pipeline,
+		gpu_create_sampler          = null.create_sampler,
+		gpu_destroy_sampler         = null.destroy_sampler,
 		gpu_create_compute_pipeline = null.create_compute_pipeline,
 	}
 	r := new(Renderer)

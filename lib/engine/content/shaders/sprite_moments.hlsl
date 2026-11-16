@@ -29,7 +29,7 @@ void cs_main(uint3 id : SV_DispatchThreadID, uint3 group : SV_GroupID) {
 				b0 += 1;
 				continue;
 			}
-			float alpha = sprite_alpha(s, sprite_texel(s, q, frame.sampler_index), opaque);
+			float alpha = sprite_alpha(s, sprite_texel(s, q), opaque);
 			float depth = optical_depth(alpha);
 			b0 += depth;
 			moments += depth_moments(s.z, depth);
