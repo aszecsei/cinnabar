@@ -68,7 +68,7 @@ The format package has its own enum of texture formats, because it imports nothi
 
 ## Live blobs
 
-The editor's landscape tools give the game texels that no cook has written yet (see [Editor: Landscape](../editor/landscape.md#live-textures)). The game builds a blob of them and puts it in the asset runtime in place of the asset's.
+The editor's landscape tools give the game texels and foliage that no cook has written yet (see [Editor: Landscape](../editor/landscape.md#live-textures)). The game builds a blob of them and puts it in the asset runtime in place of the asset's.
 
 - **`asset.set_live`** copies a blob in place of an asset's, as a new version, and loads an asset that is not cooked with it. Whatever reads the asset by its version, a texture's residency or a height field collider, takes the live blob as it takes a recooked one.
 - **`asset.poll` leaves a live asset alone**, so a cook does not swap the editor's texels out from under a stroke.

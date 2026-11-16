@@ -2,7 +2,7 @@
 
 Patch surfaces: a world-space rectangle that the GPU draws as grid patches, fine near the camera and coarse far from it, with holes, shaped by its material's displacement. Water and terrain are both one of these. Read [GPU scene](gpu-scene.md) and [Materials: Vertex displacement](materials.md#vertex-displacement) first.
 
-**In this document:** [Surfaces](#surfaces) · [Selection](#selection) · [Patches](#patches) · [Holes](#holes) · [Materials for patches](#materials-for-patches) · [Collision](#collision) · [In the frame](#in-the-frame) · [Limits](#limits)
+**In this document:** [Surfaces](#surfaces) · [Selection](#selection) · [Patches](#patches) · [Holes](#holes) · [Materials for patches](#materials-for-patches) · [Collision](#collision) · [Layers](#layers) · [In the frame](#in-the-frame) · [Limits](#limits)
 
 ## Surfaces
 
@@ -17,6 +17,7 @@ A mesh's level of detail comes from its own simplification errors, which a flat 
 | `height_range` | How far below and above its plane the material's displacement reaches, in meters, for culling |
 | `cast_shadows` | Whether its patches draw into the shadow maps |
 | `height_map` | The height texture that its material displaces by, reading 0 at `height_range.x` and 1 at `height_range.y`, which a `Height_Field` collider reads (see [Collision](#collision)); 0 for none |
+| `layer_map` | A `data` texture of four layers' weights that its material blends, which the Landscape tool paints (see [Layers](#layers)); 0 for none |
 
 Its entity's `Transform` places it, and it has a slot in the [GPU scene](gpu-scene.md#gpu-scene) like a `Mesh_Renderer`, so the render origin, last frame's pose, the entity ID and picking work as for a mesh. The surface is one draw item (`Cull_Item` with `ITEM_SURFACE`), whose draws the GPU adds: `lib/engine/render/surfaces.odin` holds the records and the passes.
 
@@ -60,6 +61,10 @@ The sample's `surfaces.scene`, which F7 cycles to, is a lake with an island: a w
 A `Collider` whose `shape` is `Height_Field`, on the surface's entity, collides as the surface's `height_map`: a physics height field over the rectangle, from `height_range.x` where the map reads 0 to `height_range.y` where it reads 1, placed by the entity's `Transform` (see [Physics: Shapes](../physics/design.md#shapes)). The collider is defined by the map and the range, not by the material, whose `displace` is HLSL that the CPU cannot run: a material that displaces by the same map, from the same range, as the sample's `terrain.material` does with `height_scale` and `height_range = [0, 30]`, collides where it draws. The field has a sample at each corner of the finest cells, read as the vertex shader reads the map at the finest level. The hole mask's holes are holes in the collision a cell smaller than the drawn ones, since the backend removes the triangles that touch a hole's sample: a sample is a hole only where each of the four cells around it is, so the ground that is drawn always collides. A recooked map or mask, or a change of the `Surface_Renderer`, makes the collider again.
 
 The editor's Landscape tool sculpts the height map and paints the hole mask in the viewport, and the game draws and collides with each stroke before the maps are saved (see [Editor: Landscape](../editor/landscape.md)).
+
+## Layers
+
+A terrain's material can blend layers by the weights of a `data` texture, an RGBA8 texture whose red, green, blue and alpha are four layers' weights, over the rectangle in `uv0`. The `Surface_Renderer`'s `layer_map` names it, which the editor's Landscape tool paints (see [Editor: Landscape](../editor/landscape.md#layers)), and the material samples the same texture, as it displaces by the same height map. The sample's `playground_terrain.material` blends grass, dirt, rock and snow by its weights, divided by their sum, and puts rock on steep slopes. The weights' meaning is the material's: the engine only carries the texture.
 
 ## In the frame
 
