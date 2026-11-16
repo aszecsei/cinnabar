@@ -91,7 +91,12 @@ a:add(Looper, {code = 1})
 
 	// A class without edit_mode starts its coroutine in Play, and Edit leaves it waiting.
 	set_callbacks(&f.runtime, .All)
-	testing.expect(t, run(t, f, `
+	testing.expect(
+		t,
+		run(
+			t,
+			f,
+			`
 Player = Behaviour.define("Player", {})
 function Player:start()
 	self:start_coroutine(function()
@@ -102,7 +107,9 @@ function Player:start()
 	end)
 end
 World.spawn():add(Player)
-`))
+`,
+		),
+	)
 	// The new coroutine runs to its first yield as it starts, before the looper resumes.
 	phase(f)
 	expect_reports(t, f, {2, 1})
@@ -119,11 +126,18 @@ a_script_asks_whether_it_runs_in_edit_mode :: proc(t: ^testing.T) {
 	defer teardown_world(f)
 	context.user_ptr = f
 	set_callbacks(&f.runtime, .Edit_Mode)
-	testing.expect(t, run(t, f, `
+	testing.expect(
+		t,
+		run(
+			t,
+			f,
+			`
 Asker = Behaviour.define("Asker", {}, {edit_mode = true})
 function Asker:update() Test.report(if World.editing() then 1 else 0) end
 World.spawn():add(Asker)
-`))
+`,
+		),
+	)
 	edit_phase(f)
 	expect_reports(t, f, {1})
 	set_callbacks(&f.runtime, .All)

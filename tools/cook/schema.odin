@@ -201,7 +201,8 @@ read_schema :: proc(
 			options.category = strings.clone(luau.toodinstring(co, -1), context.temp_allocator)
 		}
 		luau.pop(co, 1)
-		options.edit_mode = luau.rawgetfield(co, -1, "__edit_mode") == .BOOLEAN && bool(luau.toboolean(co, -1))
+		options.edit_mode =
+			luau.rawgetfield(co, -1, "__edit_mode") == .BOOLEAN && bool(luau.toboolean(co, -1))
 		luau.pop(co, 1)
 	}
 	luau.rawgetfield(co, -1, schema_key)

@@ -412,13 +412,27 @@ an_encoded_component_loads_back_to_the_same_bytes :: proc(t: ^testing.T) {
 	handles[0x42] = target
 	e := ecs.spawn(&f.world)
 	problems := make([dynamic]Problem, context.temp_allocator)
-	testing.expect(t, add_component(&f.world, e, 1, {id = u64(PROBE_ID), name = "Probe", fields = fields}, &handles, &problems))
+	testing.expect(
+		t,
+		add_component(
+			&f.world,
+			e,
+			1,
+			{id = u64(PROBE_ID), name = "Probe", fields = fields},
+			&handles,
+			&problems,
+		),
+	)
 	testing.expectf(t, len(problems) == 0, "problems: %v", problems[:])
 	loaded := ecs.get(&f.world, e, Probe)
 	testing.expect(t, loaded != nil && loaded^ == probe)
 
 	// The defaults are no fields.
-	testing.expect_value(t, len(encode_fields(&f.world, info, &Probe{}, nil, nil, context.temp_allocator)), 0)
+	testing.expect_value(
+		t,
+		len(encode_fields(&f.world, info, &Probe{}, nil, nil, context.temp_allocator)),
+		0,
+	)
 }
 
 @(test)

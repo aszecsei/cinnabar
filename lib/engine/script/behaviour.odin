@@ -370,7 +370,8 @@ attach :: proc(
 // class_runs_in_edit_mode is true for a class that Behaviour.define gave edit_mode.
 @(private)
 class_runs_in_edit_mode :: proc(L: ^luau.State, class: c.int) -> bool {
-	edit_mode := luau.rawgetfield(L, class, "__edit_mode") == .BOOLEAN && bool(luau.toboolean(L, -1))
+	edit_mode :=
+		luau.rawgetfield(L, class, "__edit_mode") == .BOOLEAN && bool(luau.toboolean(L, -1))
 	luau.pop(L, 1)
 	return edit_mode
 }

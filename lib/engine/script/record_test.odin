@@ -85,7 +85,12 @@ a_childs_pose_records_its_local_transform :: proc(t: ^testing.T) {
 	ecs.add(&f.world, child, ecs.TRANSFORM_IDENTITY)
 	ecs.add(&f.world, child, ecs.Parent{parent})
 	ecs.add(&f.world, child, ecs.LOCAL_TRANSFORM_IDENTITY)
-	testing.expect(t, run(t, f, `
+	testing.expect(
+		t,
+		run(
+			t,
+			f,
+			`
 Tool = Behaviour.define("Tool", {}, {edit_mode = true})
 function Tool:update()
 	for _, e in World.query(Score) do
@@ -96,14 +101,20 @@ function Tool:update()
 	end
 end
 World.spawn():add(Tool)
-`))
+`,
+		),
+	)
 	run_edit_phase(&f.runtime, FRAME)
 	expect_reports(t, f, {2})
 	edits := take_edits(&f.runtime)
 	local := edited_in(edits, child, ecs.LOCAL_TRANSFORM_ID)
 	testing.expect(t, local != nil)
 	if local != nil {
-		testing.expect_value(t, (^ecs.Local_Transform)(raw_data(local.after)).offset, [3]f32{0, 2, 0})
+		testing.expect_value(
+			t,
+			(^ecs.Local_Transform)(raw_data(local.after)).offset,
+			[3]f32{0, 2, 0},
+		)
 	}
 	testing.expect_value(t, ecs.get(&f.world, child, ecs.Local_Transform).offset, [3]f32{})
 }
@@ -115,7 +126,10 @@ structural_changes_in_edit_are_recorded :: proc(t: ^testing.T) {
 	context.user_ptr = f
 	e := document_entity(f)
 	other := document_entity(f)
-	tool(t, f, `
+	tool(
+		t,
+		f,
+		`
 	local other = World.query(Score)[2]
 	doc:remove(Health)
 	doc:set_active(false)
@@ -124,7 +138,8 @@ structural_changes_in_edit_are_recorded :: proc(t: ^testing.T) {
 	local added = other:add(Score, {})
 	Test.report(if other:has(Score) then 1 else 0)
 	Test.report(if doc:is_alive() and other:is_alive() then 1 else 0)
-`)
+`,
+	)
 	run_edit_phase(&f.runtime, FRAME)
 	expect_reports(t, f, {1, 1})
 	// The world has none of it.
@@ -150,12 +165,16 @@ a_spawn_in_edit_is_a_draft :: proc(t: ^testing.T) {
 	f := setup_document(t)
 	defer teardown_world(f)
 	context.user_ptr = f
-	tool(t, f, `
+	tool(
+		t,
+		f,
+		`
 	if Time.frame > 2 then return end
 	local draft = World.spawn(doc.transform.position)
 	draft:add(Health, {value = 7})
 	draft:set_parent(doc)
-`)
+`,
+	)
 	document_entity(f)
 	run_edit_phase(&f.runtime, FRAME)
 	edits := take_edits(&f.runtime)
@@ -177,11 +196,15 @@ writes_outside_the_documents_entities_and_its_behaviours_stay_raw :: proc(t: ^te
 	e := document_entity(f)
 	game := ecs.spawn(&f.world)
 	ecs.add(&f.world, game, Health{value = 1})
-	tool(t, f, `
+	tool(
+		t,
+		f,
+		`
 	for _, g in World.query(Health) do
 		if not g:has(Score) then g:get(Health).value = 3 end
 	end
-`)
+`,
+	)
 	run_edit_phase(&f.runtime, FRAME)
 	testing.expect_value(t, ecs.get(&f.world, game, Health).value, 3)
 	testing.expect_value(t, len(take_edits(&f.runtime).list), 0)
@@ -198,13 +221,20 @@ on_destroy_outside_the_phase_records_too :: proc(t: ^testing.T) {
 	defer teardown_world(f)
 	context.user_ptr = f
 	document_entity(f)
-	testing.expect(t, run(t, f, `
+	testing.expect(
+		t,
+		run(
+			t,
+			f,
+			`
 Tool = Behaviour.define("Tool", {}, {edit_mode = true})
 function Tool:on_destroy() World.query(Score)[1]:get(Health).value = 4 end
 local holder = World.spawn()
 holder:add(Tool)
 holder:remove(Tool)
-`))
+`,
+		),
+	)
 	edits := take_edits(&f.runtime)
 	testing.expect_value(t, len(edits.components), 1)
 }

@@ -210,7 +210,10 @@ entity_add :: proc(L: ^luau.State) -> c.int {
 	r, w := world_of(L)
 	e := alive_entity(L, 1)
 	if is_stand_in(r, e) {
-		raise(L, "a prefab that a behaviour spawns in Edit mode takes only a pose, a parent and its active state")
+		raise(
+			L,
+			"a prefab that a behaviour spawns in Edit mode takes only a pose, a parent and its active state",
+		)
 	}
 	recorded := records_writes_to(r, e)
 	if is_class(L, 2) {
@@ -261,7 +264,10 @@ entity_remove :: proc(L: ^luau.State) -> c.int {
 	r, w := world_of(L)
 	e := alive_entity(L, 1)
 	if is_stand_in(r, e) {
-		raise(L, "a prefab that a behaviour spawns in Edit mode takes only a pose, a parent and its active state")
+		raise(
+			L,
+			"a prefab that a behaviour spawns in Edit mode takes only a pose, a parent and its active state",
+		)
 	}
 	recorded := records_writes_to(r, e)
 	if is_class(L, 2) {

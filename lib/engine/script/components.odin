@@ -528,7 +528,9 @@ local_transform :: proc(
 		raise(L, "the entity has no parent, so it has no local pose")
 	}
 	ref := Component_Ref{e, ecs.LOCAL_TRANSFORM_ID}
-	return (^ecs.Local_Transform)(component_write(r, L, ref) if write else component_data(r, L, ref))
+	return (^ecs.Local_Transform)(
+		component_write(r, L, ref) if write else component_data(r, L, ref),
+	)
 }
 
 // parent_pose is the Transform of an entity's parent, if it has one.
