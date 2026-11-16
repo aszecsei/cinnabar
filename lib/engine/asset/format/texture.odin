@@ -147,6 +147,47 @@ texture_chain_size :: proc "contextless" (
 	return
 }
 
+// texture_box_chain_r16 is the mip chain of size R16_Unorm texels, row-major, as Texture_Blob.mips holds it, down to 1
+// by 1: each texel of a mip is the mean of the 2 by 2 texels of the one before it, rounded up, clamped at an odd edge.
+// So a mip reads 0 only where every texel under it does, as a mask's box mips do (see
+// docs/rendering/surfaces.md#holes).
+texture_box_chain_r16 :: proc(
+	size: [2]u32,
+	texels: []u16,
+	allocator := context.allocator,
+) -> (
+	mips: []byte,
+	mip_count: u32,
+) {
+	mip_count = 1
+	for max(size.x >> mip_count, size.y >> mip_count) > 0 {
+		mip_count += 1
+	}
+	mips = make([]byte, texture_chain_size(.R16_Unorm, size, mip_count), allocator)
+	level := ([^]u16)(raw_data(mips))[:int(size.x) * int(size.y)]
+	copy(level, texels)
+	offset := len(level)
+	from := size
+	for mip in 1 ..< mip_count {
+		to := [2]u32{max(size.x >> mip, 1), max(size.y >> mip, 1)}
+		next := ([^]u16)(raw_data(mips))[offset:][:int(to.x) * int(to.y)]
+		for y in 0 ..< to.y {
+			y0, y1 := min(2 * y, from.y - 1), min(2 * y + 1, from.y - 1)
+			for x in 0 ..< to.x {
+				x0, x1 := min(2 * x, from.x - 1), min(2 * x + 1, from.x - 1)
+				sum :=
+					u32(level[y0 * from.x + x0]) +
+					u32(level[y0 * from.x + x1]) +
+					u32(level[y1 * from.x + x0]) +
+					u32(level[y1 * from.x + x1])
+				next[y * to.x + x] = u16((sum + 3) / 4)
+			}
+		}
+		level, offset, from = next, offset + len(next), to
+	}
+	return
+}
+
 // texture_channel decodes the first channel of one mip of size texels, from 0 to 1, row-major with x fastest: R16_Unorm,
 // RGBA8_Unorm's red, or BC4_Unorm. It fails for another format, or a mip of the wrong size.
 texture_channel :: proc(

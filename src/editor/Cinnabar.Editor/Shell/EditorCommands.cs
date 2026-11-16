@@ -168,6 +168,11 @@ static partial class EditorCommands
     public const string RotateTool = "tool.rotate";
     public const string ScaleTool = "tool.scale";
     public const string NavPathTool = "tool.nav-path";
+    public const string LandscapeTool = "tool.landscape";
+    public const string LandscapeBrush = "landscape.brush";
+    public const string LandscapeRadius = "landscape.radius";
+    public const string LandscapeStrength = "landscape.strength";
+    public const string LandscapeFalloff = "landscape.falloff";
     public const string LocalSpace = "tool.localSpace";
     public const string Snap = "tool.snap";
     public const string FrameSelected = "viewport.frameSelected";
@@ -253,4 +258,10 @@ static partial class EditorCommands
 
     static string Nearest(IReadOnlyList<string> options, double value) => options.MinBy(o => Math.Abs(double.Parse(o, System.Globalization.CultureInfo.InvariantCulture) - value))!;
     static double Number(string value) => double.Parse(value, System.Globalization.CultureInfo.InvariantCulture);
+
+    static double NearestOf(IReadOnlyList<double> options, double value) => options.MinBy(o => Math.Abs(o - value));
+
+    static string Meters(double meters) => string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{meters:0.##} m");
+
+    static string Percent(double share) => string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{share * 100:0}%");
 }

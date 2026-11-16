@@ -54,16 +54,18 @@ public sealed partial class EditorShell
 
     public void SetTool(Tool tool)
     {
-        if (tool == Tool.NavPath && Mesh.InMeshMode)
+        if (tool is Tool.NavPath or Tool.Landscape && Mesh.InMeshMode)
         {
             return;
         }
         CancelGizmo();
+        Landscape.CancelStroke();
         Tool = tool;
         if (tool != Tool.NavPath)
         {
             ClearNavProbe();
         }
+        Landscape.Sync();
         OnToolsChanged();
     }
 

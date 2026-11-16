@@ -109,6 +109,7 @@ draw_helpers :: proc(e: ^Editor, w: ^ecs.World, d: ^debug.Draw) {
 		return
 	}
 	draw_nav_probe(e, d)
+	draw_brush(e, d)
 	mode := e.session.view.viewports[index].settings.helpers
 	if mode == .None {
 		return

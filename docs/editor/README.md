@@ -19,6 +19,7 @@ Read them in this order the first time.
 | [Decision editor](decision-editor.md) | The views of `.decision` files: behavior trees and HTN domains on a canvas, utility options with their curves, and GOAP goals and actions with a plan preview; its reader and writer that keep every line, the blackboard editor's table, and the live view of an Agent in play mode. |
 | [UI editor](ui-editor.md) | The WYSIWYG editor for `.ui` documents: its reader and writer that keep every line, the canvas that the game draws at a screen's size and scale, picking, the tree, properties, styles and bindings. |
 | [Mesh editing](mesh-editing.md) | Level geometry as `.mesh` assets: mesh mode, the mesh and texture tools, and the live path that draws an unsaved mesh. |
+| [Landscape](landscape.md) | Terrain sculpting and hole painting: the Landscape tool, its brushes, strokes on the undo stack, and the live textures that draw and collide before the maps are saved. |
 | [Prefabs](prefabs.md) | `.prefab` assets: instances and overrides in the scene format, their expansion into plain entities, editing instances and prefabs, and spawning them at run time. |
 | [Capture](capture.md) | Screenshots and GIFs of the host, the sidecar, and the automation socket that `editorctl` drives. |
 
@@ -59,6 +60,7 @@ The game side is small and lives in `lib/engine/editor`:
 | `preview.odin` | Material previews for the material editor, and effect previews (see [Rendering](../rendering/materials.md#material-previews) and [Particles](../rendering/particles.md#previews)) |
 | `ui_preview.odin` | UI documents' previews for the UI editor, in a `ui.State` of their own (see [UI editor](ui-editor.md#the-games-side)) |
 | `live.odin`, `mesh_overlay.odin` | Live meshes baked and made resident in place of their blobs, and mesh mode's overlay (see [Mesh editing](mesh-editing.md#live-meshes)) |
+| `live_texture.odin` | Live textures, the landscape tools' maps, put in the asset runtime in place of their blobs, and the brush ring (see [Landscape](landscape.md#live-textures)) |
 | `link/link.odin` | The editor link's messages, shared with the host |
 
 Everything in the game's `Editor` is a handle, an ID or a copy, so a code reload keeps it; the commands are registrations, made again in `on_reload` ([Game commands](shell-and-panels.md#game-commands)).

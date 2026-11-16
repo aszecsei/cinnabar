@@ -23,6 +23,8 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
     public CommandRegistry Commands { get; } = new();
     public EditorContext Context { get; } = new();
     public MeshSession Mesh { get; }
+    /// <summary>The landscape tools' brushes and the maps they paint (see docs/editor/landscape.md).</summary>
+    public LandscapeSession Landscape { get; }
     public ConsoleLog Console { get; } = new();
     public HostSession Host { get; }
     public WorldModel World { get; } = new();
@@ -80,6 +82,7 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
         Settings = settings;
         _previewSlots = new PreviewSlots(PreviewOwners);
         Mesh = new MeshSession(this);
+        Landscape = new LandscapeSession(this);
         _gizmo = new GizmoController(label => TryBeginEdit(label, "the gizmo"), SendGizmo);
         Host = new HostSession(options);
         Watches = new EntityWatches(Selection, Host);
@@ -91,6 +94,8 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
         Content = new ContentBrowser(Assets, Cook, Console, MovingScene, Commands.InvalidateAll, ProjectTags.PathFor(options.ProjectPath));
         WireCook();
         Mesh.Subscribe();
+        // A saved map is let go of once its cooked blob is current, as a saved mesh is.
+        Cook.Cooked += _ => Landscape.ReleaseCooked();
         Mesh.MeshModeChanged += () =>
         {
             if (Mesh.InMeshMode)
@@ -133,6 +138,8 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
             SendSelection();
             CancelGizmo();
             SendGizmo();
+            Landscape.CancelStroke();
+            Landscape.Sync();
         };
         // A snapshot means that every entity is new, so the game knows no watches, no selection and nothing hidden,
         // and the mesh overlay names entities by their old handles. What else a new game state lacks is OnNewGameState's.
@@ -254,6 +261,7 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
         SendScene();
         SendViewportTools();
         Mesh.SendLiveMeshes();
+        Landscape.SendLiveMaps();
         // The old state's preview targets are gone. The new state's arrive as Preview_Targets.
         _previewSlots.DisconnectAll();
         _previewSlots.SendAll();

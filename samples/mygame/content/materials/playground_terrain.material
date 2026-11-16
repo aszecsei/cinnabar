@@ -1,0 +1,40 @@
+material 1
+# The playground's terrain (see docs/editor/landscape.md#the-sample): terrain.material's shading over a 64 m surface
+# that rises 8 m, with grass from a meter up. Its height map is the surface's height_map, which the Landscape tool
+# sculpts and its Height_Field collider walks on, so height_scale is its height_range's top. size is the
+# Surface_Renderer's size in meters, which the slope needs per texel.
+shading = lit
+geometry = patches
+param height texture = $edfabe6cd1d243218c8ce53e5023c362
+param height_scale float = 8
+param size float = 64
+param sand color = [0.6, 0.55, 0.4, 1]
+param grass color = [0.18, 0.3, 0.1, 1]
+param rock color = [0.35, 0.32, 0.3, 1]
+---
+float terrain_height(float2 uv) {
+	return cn_sample_level(params.height, uv, 0).r * params.height_scale;
+}
+
+float3 displace(Vertex_Inputs v) {
+	return float3(0, terrain_height(v.uv0), 0);
+}
+
+Surface evaluate(Material_Inputs inputs) {
+	Surface s = default_surface();
+	uint width, height;
+	cn_texture(params.height).GetDimensions(width, height);
+	float2 texel = 1.0 / float2(width, height);
+	float2 uv = inputs.uv0;
+	float dx = terrain_height(uv + float2(texel.x, 0)) - terrain_height(uv - float2(texel.x, 0));
+	float dz = terrain_height(uv + float2(0, texel.y)) - terrain_height(uv - float2(0, texel.y));
+	float2 slope = float2(dx, dz) / (2 * texel * params.size);
+	// The patch's tangent frame is its x, its z and up.
+	s.normal = normalize(float3(-slope, 1));
+	float steep = 1 - s.normal.z;
+	float h = terrain_height(uv);
+	float3 flat = lerp(params.sand.rgb, params.grass.rgb, smoothstep(0.5, 1.5, h));
+	s.base_color = lerp(flat, params.rock.rgb, smoothstep(0.25, 0.5, steep));
+	s.roughness = 0.9;
+	return s;
+}

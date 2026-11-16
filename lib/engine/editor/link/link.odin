@@ -115,6 +115,10 @@ Message :: union {
 	Nav_Probe,
 	Behaviour_Operations,
 	Behaviour_Operations_Answer,
+	Live_Texture,
+	Live_Texture_Region,
+	Release_Live_Texture,
+	Landscape_Overlay,
 }
 
 // Editor to host, first: the editor's protocol version and its name.
@@ -1695,6 +1699,49 @@ Live_Mesh_Vertices :: struct {
 // Editor to game: the editor has let go of the mesh. The game clears the override and draws the asset's blob.
 Release_Live_Mesh :: struct {
 	guid: [16]u8,
+}
+
+// The landscape tools' live textures (see docs/editor/landscape.md#live-textures): a surface's height map or hole mask
+// that the editor paints, which the game draws, and collides with, from memory in place of its cooked blob.
+
+Live_Texture_Usage :: enum u8 {
+	// A height texture: R16_Unorm.
+	Height,
+	// A hole mask: 0 is a hole.
+	Mask,
+}
+
+// Editor to game: the whole of the texture asset guid, size.x by size.y texels from 0 to 65535, row-major. The game
+// builds a blob with its mips and puts it in place of the asset's, until a Release_Live_Texture.
+Live_Texture :: struct {
+	guid:   [16]u8,
+	usage:  Live_Texture_Usage,
+	size:   [2]u32,
+	texels: []u16,
+}
+
+// Editor to game: a stroke's step: size.x by size.y texels at origin, for a texture that a Live_Texture gave.
+Live_Texture_Region :: struct {
+	guid:   [16]u8,
+	origin: [2]u32,
+	size:   [2]u32,
+	texels: []u16,
+}
+
+// Editor to game: the editor has let go of the texture. The game loads the asset's cooked blob again.
+Release_Live_Texture :: struct {
+	guid: [16]u8,
+}
+
+// Editor to game: the landscape brush under the mouse, which the helpers draw while visible: two circles about center,
+// a World_Position's raw value, across the plane whose normal is up, of radius meters and of radius * (1 - falloff),
+// where its strength starts to fall off.
+Landscape_Overlay :: struct {
+	visible: bool,
+	center:  [3]i64,
+	up:      [3]f32,
+	radius:  f32,
+	falloff: f32,
 }
 
 // Mesh mode's overlay (see docs/editor/mesh-editing.md#overlay-and-picking). The editor does the picking itself, and
