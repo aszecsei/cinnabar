@@ -47,9 +47,9 @@ COVERAGE_MAX_SCALE :: 16.0
 TEXTURE_SETTINGS := []Setting_Info {
 	{
 		key = "usage",
-		values = {"color", "normal", "mask", "hdr", "data"},
+		values = {"color", "normal", "mask", "hdr", "data", "height"},
 		default = "color",
-		description = "What the texture holds, which picks its format: color is BC7 in sRGB, normal is BC5, mask is BC4 (one channel), hdr is BC6H, and data is RGBA8 without compression.",
+		description = "What the texture holds, which picks its format: color is BC7 in sRGB, normal is BC5, mask is BC4 (one channel), hdr is BC6H, data is RGBA8 without compression, and height is R16 without compression (one channel of 16 bits, for a terrain's height map).",
 	},
 	{
 		key = "mips",
@@ -437,6 +437,8 @@ texture_cook_of :: proc(a: Asset_Source) -> Texture_Cook {
 		usage = .HDR
 	case "data":
 		usage = .Data
+	case "height":
+		usage = .Height
 	case:
 		usage = .Color
 	}
@@ -630,6 +632,8 @@ texture_format_of :: proc(usage: format.Texture_Usage) -> format.Texture_Format 
 		return .BC6H_Ufloat
 	case .Data:
 		return .RGBA8_Unorm
+	case .Height:
+		return .R16_Unorm
 	}
 	return .RGBA8_Unorm
 }
@@ -692,6 +696,35 @@ decode_image_bytes :: proc(
 			for &p, i in image.pixels {
 				p = {data[i * 4], data[i * 4 + 1], data[i * 4 + 2], data[i * 4 + 3]}
 			}
+		} else if stbi.is_16_bit_from_memory(raw_data(source), c.int(len(source))) != 0 {
+			data := stbi.load_16_from_memory(
+				raw_data(source),
+				c.int(len(source)),
+				&width,
+				&height,
+				&channels,
+				4,
+			)
+			if data == nil {
+				report_error(problems, path, 0, 0, "cannot decode: %s", stbi.failure_reason())
+				return
+			}
+			defer stbi.image_free(data)
+			image = {
+				int(width),
+				int(height),
+				make([][4]f32, int(width * height), context.temp_allocator),
+			}
+			for &p, i in image.pixels {
+				p =
+					{
+						f32(data[i * 4]),
+						f32(data[i * 4 + 1]),
+						f32(data[i * 4 + 2]),
+						f32(data[i * 4 + 3]),
+					} /
+					65535
+			}
 		} else {
 			data := stbi.load_from_memory(
 				raw_data(source),
@@ -728,7 +761,8 @@ decode_image_bytes :: proc(
 }
 
 // convert_image turns decoded values into what a usage cooks from: color from sRGB into linear light, unless the image
-// is linear already, a normal map to -1..1, and a mask's channel into red. An hdr or data texture keeps its values.
+// is linear already, a normal map to -1..1, and a mask's channel into red. An hdr, data or height texture keeps its
+// values.
 convert_image :: proc(image: ^Image, t: Texture_Cook, linear: bool) {
 	usage := t.usage
 	for &p in image.pixels {
@@ -942,6 +976,13 @@ encode_mip :: proc(image: Image, usage: format.Texture_Usage, quality: f32, out:
 	unorm :: proc(v: f32) -> u8 {
 		return u8(clamp(v, 0, 1) * 255 + 0.5)
 	}
+	if usage == .Height {
+		for p, i in image.pixels {
+			texel := u16(clamp(p.r, 0, 1) * 65535 + 0.5)
+			out[i * 2], out[i * 2 + 1] = u8(texel), u8(texel >> 8)
+		}
+		return true
+	}
 	if usage == .HDR {
 		halves := make([][4]f16, count, context.temp_allocator)
 		for p, i in image.pixels {
@@ -974,7 +1015,7 @@ encode_mip :: proc(image: Image, usage: format.Texture_Usage, quality: f32, out:
 			}
 		case .Normal:
 			bytes[i] = {unorm(p.x * 0.5 + 0.5), unorm(p.y * 0.5 + 0.5), 0, 255}
-		case .Mask, .Data, .HDR:
+		case .Mask, .Data, .HDR, .Height:
 			bytes[i] = {unorm(p.r), unorm(p.g), unorm(p.b), unorm(p.a)}
 		}
 	}
@@ -986,7 +1027,7 @@ encode_mip :: proc(image: Image, usage: format.Texture_Usage, quality: f32, out:
 		compressed = .BC5
 	case .Mask:
 		compressed = .BC4
-	case .Data, .HDR:
+	case .Data, .HDR, .Height:
 		copy(out, ([^]byte)(raw_data(bytes))[:count * 4])
 		return true
 	}

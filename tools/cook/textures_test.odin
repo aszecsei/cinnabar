@@ -1,6 +1,9 @@
 package cook
 
+import "core:bytes"
+import "core:encoding/endian"
 import "core:fmt"
+import "core:hash"
 import "core:math"
 import "core:mem"
 import "core:os"
@@ -113,6 +116,109 @@ textures_cook_by_usage_with_their_mips :: proc(t: ^testing.T) {
 		testing.expect_value(t, blob.usage, format.Texture_Usage.HDR)
 	}
 	testing.expect_value(t, cook(options, {.Texture}).current[.Texture], 4)
+}
+
+// write_gray16_png writes a 16-bit grayscale PNG into the tree, which stb_image_write cannot: its zlib stream holds the
+// rows in stored blocks.
+@(private = "file")
+write_gray16_png :: proc(
+	t: ^testing.T,
+	tree: Tree,
+	path: string,
+	width, height: int,
+	values: []u16,
+) {
+	raw: bytes.Buffer
+	bytes.buffer_init_allocator(&raw, 0, 0, context.temp_allocator)
+	for y in 0 ..< height {
+		bytes.buffer_write_byte(&raw, 0)
+		for x in 0 ..< width {
+			v := values[y * width + x]
+			bytes.buffer_write(&raw, {u8(v >> 8), u8(v)})
+		}
+	}
+	rows := bytes.buffer_to_bytes(&raw)
+
+	be32 :: proc(b: ^bytes.Buffer, v: u32) {
+		out: [4]u8
+		endian.put_u32(out[:], .Big, v)
+		bytes.buffer_write(b, out[:])
+	}
+	stream: bytes.Buffer
+	bytes.buffer_init_allocator(&stream, 0, 0, context.temp_allocator)
+	bytes.buffer_write(&stream, {0x78, 0x01})
+	for start := 0; start == 0 || start < len(rows); start += 65535 {
+		block := rows[start:min(start + 65535, len(rows))]
+		last := start + len(block) >= len(rows)
+		n := u16(len(block))
+		bytes.buffer_write(&stream, {last ? 1 : 0, u8(n), u8(n >> 8), u8(~n), u8(~n >> 8)})
+		bytes.buffer_write(&stream, block)
+	}
+	be32(&stream, hash.adler32(rows))
+
+	png: bytes.Buffer
+	bytes.buffer_init_allocator(&png, 0, 0, context.temp_allocator)
+	bytes.buffer_write(&png, {0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'})
+	chunk :: proc(png: ^bytes.Buffer, kind: string, data: []byte) {
+		be32(png, u32(len(data)))
+		body := make([]byte, 4 + len(data), context.temp_allocator)
+		copy(body, kind)
+		copy(body[4:], data)
+		bytes.buffer_write(png, body)
+		be32(png, hash.crc32(body))
+	}
+	header: [13]u8
+	endian.put_u32(header[0:], .Big, u32(width))
+	endian.put_u32(header[4:], .Big, u32(height))
+	header[8] = 16 // Bit depth; color type 0 is gray.
+	chunk(&png, "IHDR", header[:])
+	chunk(&png, "IDAT", bytes.buffer_to_bytes(&stream))
+	chunk(&png, "IEND", nil)
+	testing.expect(
+		t,
+		os.write_entire_file(
+			fmt.tprintf("%s/content/%s", tree.dir, path),
+			bytes.buffer_to_bytes(&png),
+		) ==
+		nil,
+	)
+}
+
+@(test)
+height_textures_cook_16_bit_pngs_to_r16 :: proc(t: ^testing.T) {
+	tree := make_tree(
+		t,
+		{
+			{
+				"content/ground_height.png.meta",
+				"guid = 0f1e2d3c4b5a69788796a5b4c3d2e1f0\nusage = height\n",
+			},
+		},
+	)
+	defer remove_tree(tree)
+	WIDTH :: 6
+	HEIGHT :: 5
+	// Steps of 37 are finer than 1/255, so an 8-bit decode or format would merge them.
+	values: [WIDTH * HEIGHT]u16
+	for &v, i in values {
+		v = u16(20000 + i * 37)
+	}
+	write_gray16_png(t, tree, "ground_height.png", WIDTH, HEIGHT, values[:])
+
+	testing.expect(t, cook(tree_options(tree), {.Texture}).ok)
+	if data, blob, ok := texture_blob(t, tree, "ground_height.png"); ok {
+		testing.expect_value(t, blob.format, format.Texture_Format.R16_Unorm)
+		testing.expect_value(t, blob.usage, format.Texture_Usage.Height)
+		// Not padded to 4x4 blocks, and the full chain.
+		testing.expect_value(t, blob.size, [2]u32{WIDTH, HEIGHT})
+		testing.expect_value(t, blob.mip_count, 3)
+		mips := format.blob_bytes(data, blob.mips)
+		testing.expect_value(t, len(mips), (6 * 5 + 3 * 2 + 1 * 1) * 2)
+		for v, i in values {
+			got, _ := endian.get_u16(mips[i * 2:], .Little)
+			testing.expectf(t, got == v, "texel %d is %d, not %d", i, got, v)
+		}
+	}
 }
 
 @(test)
