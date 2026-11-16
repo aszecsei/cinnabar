@@ -9,7 +9,7 @@ public sealed class SceneLayoutViewTests : IDisposable
     readonly TempDirectory _temp = new("scene-layout");
 
     [Fact]
-    public void EveryViewThatStaysIsTheSameControlAfterAChange()
+    public void EveryViewThatStaysIsTheSameControlAfterAChange() => Ui.Run(() =>
     {
         using var shell = TestShell.Open(_temp, null, null);
         var view = new PlainLayoutView(shell);
@@ -33,7 +33,7 @@ public sealed class SceneLayoutViewTests : IDisposable
         view.Arrange();
         var front = Assert.Single(Views());
         Assert.Contains(front, three);
-    }
+    });
 
     sealed class PlainLayoutView(EditorShell shell) : SceneLayoutView(shell)
     {

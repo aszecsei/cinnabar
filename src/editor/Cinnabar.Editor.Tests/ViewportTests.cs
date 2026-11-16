@@ -1482,7 +1482,7 @@ public sealed class ViewportTests : IDisposable
     }
 
     [Fact]
-    public void TheTextInputRequeryCarriesItsOwnArgs()
+    public void TheTextInputRequeryCarriesItsOwnArgs() => Ui.Run(() =>
     {
         // A handler typed for the event's args, as Avalonia's own are, casts what the view raises; a plain RoutedEventArgs
         // threw here, from the view's attach inside docking, which then showed no document's content again.
@@ -1496,7 +1496,7 @@ public sealed class ViewportTests : IDisposable
         view.RequeryTextInput();
 
         Assert.Equal(1, heard);
-    }
+    });
 
     // --- Input ---
 
