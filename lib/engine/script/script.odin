@@ -118,12 +118,14 @@ Runtime :: struct {
 	random:                     Random_State,
 }
 
-// Phase is the script step that runs: none, the script phase (begin_phase to end_phase), or a fixed step (fixed_update
-// or fixed_events). See docs/scripting/behaviours.md#outside-a-phase.
+// Phase is the script step that runs: none, the script phase (begin_phase to end_phase), a fixed step (fixed_update
+// or fixed_events), or the edit phase (run_edit_phase). See docs/scripting/behaviours.md#outside-a-phase.
 Phase :: enum u8 {
 	None,
 	Variable,
 	Fixed,
+	// The editor's Edit mode's script phase (see run_edit_phase).
+	Edit,
 }
 
 // runtime_of is the Runtime of a VM, for bindings.

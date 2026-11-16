@@ -24,6 +24,37 @@ run_phase :: proc(r: ^Runtime, dt: time.Duration, input: core.Input) {
 	drain_log(r)
 	wake_and_start(r)
 	deliver_events(r)
+	update_and_resume(r, dt)
+	end_phase(r)
+}
+
+// run_edit_phase is the script phase of the editor's Edit mode, for the classes that run in edit mode (see
+// docs/scripting/behaviours.md#edit-mode): the world's changes, awake and start, events, update, their coroutines and
+// their structural changes, as run_phase, without input, fixed steps, main scripts or script actions. Call it with
+// set_callbacks at .Edit_Mode, so the other behaviours stay silent.
+run_edit_phase :: proc(r: ^Runtime, dt: time.Duration) {
+	p := &r.platform.profile
+	profile.scope_text(p, "Edit phase", .Frame)
+	r.bindings.ctx = context
+	r.frame += 1
+	enter_phase(r, .Edit)
+	world_time := time.duration_seconds(r.world.clock.time) if r.world != nil else 0
+	set_time(r, time.duration_seconds(dt), world_time, false)
+	set_input(r, {})
+	drain_log(r)
+	wake_and_start(r)
+	deliver_events(r)
+	update_and_resume(r, dt)
+	leave_phase(r, .Edit)
+	drain_log(r)
+	step(r)
+}
+
+// update_and_resume calls update on each instance that runs and has it, resumes the coroutines that are due, and
+// delivers the events that they sent, in the same phase.
+@(private = "file")
+update_and_resume :: proc(r: ^Runtime, dt: time.Duration) {
+	p := &r.platform.profile
 	profile.begin(p, profile.name(p, "Update", .Frame))
 	for &i, index in r.instances[:r.instance_used] {
 		if effective(&i) && i.flags >= {.Started, .Updates} && !silent(r, &i) {
@@ -35,9 +66,7 @@ run_phase :: proc(r: ^Runtime, dt: time.Duration, input: core.Input) {
 	profile.begin(p, profile.name(p, "Coroutines", .Frame))
 	run_coroutines(r)
 	profile.end(p)
-	// Events that update and the coroutines sent are delivered in the same phase.
 	deliver_events(r)
-	end_phase(r)
 }
 
 // wake_and_start runs awake and on_enable for the instances that native code attached, and start for the instances
@@ -260,7 +289,11 @@ deliver_one :: proc(r: ^Runtime, L: ^luau.State, event: c.int) {
 	}
 	for &w, index in r.waiters[:r.waiter_used] {
 		wait, waits_event := w.wait.(Wait_Event)
-		if !waits_event || w.status != .Waiting || w.seq > last_seq || wait.entity != e {
+		if !waits_event ||
+		   w.status != .Waiting ||
+		   w.seq > last_seq ||
+		   wait.entity != e ||
+		   !waiter_runs(r, &w) {
 			continue
 		}
 		luau.getref(L, wait.event)

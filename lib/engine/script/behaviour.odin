@@ -343,6 +343,9 @@ attach :: proc(
 		i.flags += {.Fixed_Updates}
 	}
 	luau.pop(L, 1)
+	if class_runs_in_edit_mode(L, class) {
+		i.flags += {.Edit_Mode}
+	}
 	luau.pushvalue(L, t)
 	i.table = luau.ref(L, -1)
 	luau.pop(L, 1)
@@ -362,6 +365,14 @@ attach :: proc(
 			i.flags += {.Needs_Awake}
 		}
 	}
+}
+
+// class_runs_in_edit_mode is true for a class that Behaviour.define gave edit_mode.
+@(private)
+class_runs_in_edit_mode :: proc(L: ^luau.State, class: c.int) -> bool {
+	edit_mode := luau.rawgetfield(L, class, "__edit_mode") == .BOOLEAN && bool(luau.toboolean(L, -1))
+	luau.pop(L, 1)
+	return edit_mode
 }
 
 // check_field_value raises an error for a value that the class does not declare, or that has the wrong type.

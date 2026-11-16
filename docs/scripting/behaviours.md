@@ -2,7 +2,7 @@
 
 A behaviour is Unity's `MonoBehaviour`: a script class whose instances are attached to entities, receive events and own coroutines. This document covers the class, its lifecycle, enabled state, coroutines and events, and the script phase that runs them.
 
-**In this document:** [Behaviours](#behaviours) · [Frame](#frame)
+**In this document:** [Behaviours](#behaviours) · [Frame](#frame) · [Edit mode](#edit-mode)
 
 ## Behaviours
 
@@ -40,6 +40,7 @@ return Door
 ```
 
 - **A behaviour module returns its class.** `Behaviour.define` and `Field` are engine globals. `Behaviour.define` takes the class name and its fields. Fields are what Unity serializes: the editor shows them, scenes and prefabs store their values, and the instance gets them as plain table fields. Other table fields are runtime state.
+- **Options:** `Behaviour.define` takes a table of options after the fields. `edit_mode = true` makes the class run in the editor's Edit mode too (see [Edit mode](#edit-mode)). `category` names the folder of the Add Component picker, such as `"Tools/Layout"`, as a native component's category does ([Editor](../editor/shell-and-panels.md#properties)), and `"-"` leaves the class out of it. An option that `Behaviour.define` does not know, or a value of the wrong type, raises an error, and the cooker reports it as a cook error.
 - **Field kinds:** `Field.number(default?)`, `Field.boolean(default?)`, `Field.string(default?)`, `Field.vector(default?)`, `Field.entity()` and `Field.asset(kind?)`, an `Asset` reference, such as a prefab for `World.spawn`. The properties panel's picker offers assets of the kind, such as `"prefab"`, or any without one, and a scene writes the value as `$` and the GUID. `entity`, `transform` and `enabled` are reserved names.
 - **The cooker reads the fields.** For a script that calls `Behaviour.define`, it runs the top level in a sandboxed VM that has the Luau libraries and the prelude, but no engine, and stores the class name and the fields in the blob (see [Content pipeline](../content/kinds/scripts.md#scripts)). Such a top level must therefore only require modules and define classes. Reading an engine global, such as `World`, raises "World is not available when the cooker reads a behaviour's fields", and a top level that runs for more than 2 s is stopped. Both are cook errors. A script without `Behaviour.define`, such as a main script for `spawn_script`, is not run.
 - **Attaching:** `entity:add(Door, values?)` from a script, a `behaviour` block in a scene, or `script.attach_script(r, entity, guid, fields)` from native code. The scene loader skips a field value that the class does not declare, or of the wrong kind, with a warning. `values` is a table of field values, and `enabled = false` starts the instance disabled. A value for a field that the class does not declare, or of the wrong kind, raises an error. `entity:get(Door)`, `entity:has(Door)` and `entity:remove(Door)` work as for components.
@@ -82,7 +83,7 @@ Unity has two switches, and so does cinnabar:
 - `set_active` is a structural change. From a script it takes effect at once, and the callbacks run before `set_active` returns. Activity changes from native code take effect when their buffer is applied, and the callbacks run in the next script phase.
 - Only one callback runs for each change of state. Setting `enabled` to its current value does nothing.
 - **`on_enable` and `on_disable` always alternate.** Each instance records which of the two its script got last, and a callback runs only when the instance's state differs from that record.
-- **Across a quiet period**, as in the editor's Edit and Paused modes ([Editor](../editor/document-and-scenes.md#modes)), neither callback runs, and the record keeps what the script last got. When quiet ends, `script.set_callbacks` sends each instance, in slot order, the callback that it missed: `on_disable` to one that stopped being enabled and active, and `on_enable` to an awake one that became enabled and active. An instance that changed and changed back gets neither. One that has not woken gets `awake` and `on_enable` in the next script phase, as after a native spawn.
+- **Across a quiet period**, as in the editor's Edit mode for a class without `edit_mode` and in its Paused mode ([Editor](../editor/document-and-scenes.md#modes)), neither callback runs, and the record keeps what the script last got. When quiet ends, `script.set_callbacks` sends each instance, in slot order, the callback that it missed: `on_disable` to one that stopped being enabled and active, and `on_enable` to an awake one that became enabled and active. An instance that changed and changed back gets neither. One that has not woken gets `awake` and `on_enable` in the next script phase, as after a native spawn.
 
 Script actions are classes too, which `Action.define` makes, but they are not behaviours: agents' decisions start them by name, and an entity cannot add one ([AI: Agents: Script actions](../ai/agents.md#script-actions)).
 
@@ -147,11 +148,11 @@ for ecs.next_tick(&ticks) {
 
 `script.fixed_events`, at the end of the tick: deliver the tick's events, resume the coroutines that wait in `wait_fixed`, in the order they started, deliver what they sent, and apply their structural changes. The tick's physics contacts are delivered here, after `physics.send_events` queues them ([Physics: Events](../physics/design.md#events)).
 
-What stays per frame: `update`, the other waits, events that `Update` systems queue, and the collector's step. The editor's edit mode runs no ticks, so no `fixed_update`, and a paused step runs one.
+What stays per frame: `update`, the other waits, events that `Update` systems queue, and the collector's step. The editor's edit mode runs no ticks, so no `fixed_update`, not even for a class with `edit_mode`, and a paused step runs one.
 
 ### Outside a phase
 
-The runtime records which step runs: none, the script phase (`begin_phase` to `end_phase`), or a fixed step (`fixed_update` or `fixed_events`). A step begins only when no other step runs, and its command buffer is empty when it begins. The step ends when it applies its structural changes, before the callbacks for them run.
+The runtime records which step runs: none, the script phase (`begin_phase` to `end_phase`), a fixed step (`fixed_update` or `fixed_events`), or the edit phase (`run_edit_phase`). A step begins only when no other step runs, and its command buffer is empty when it begins. The step ends when it applies its structural changes, before the callbacks for them run.
 
 Script code also runs outside these steps:
 
@@ -162,3 +163,23 @@ Script code also runs outside these steps:
 - The `on_enable` and `on_disable` callbacks that `script.set_callbacks` runs when quiet ends (see [Enabled state](#enabled-state)).
 
 There, `entity:destroy()` despawns the entity and its descendants at once, and their `on_disable` and `on_destroy` run before `destroy` returns, as the callbacks of `entity:set_active` do. While the runtime is quiet, none of them run. The entity is not alive after the call: `is_alive` is false, and its components are gone.
+
+## Edit mode
+
+A class with `edit_mode = true` runs in the editor's Edit mode too, as Unity's `ExecuteInEditMode` does, so a tool such as a procedural placer works while the scene is edited. Every other class stays silent in Edit, as before.
+
+```luau
+local Ring = Behaviour.define("Ring", {
+	radius = Field.number(2),
+}, {
+	edit_mode = true,
+	category = "Tools/Layout",
+})
+```
+
+- **Which behaviours run:** `script.set_callbacks` sets one level, `Callbacks`: `.All`, as in Play and without an editor; `.Edit_Mode`, as in Edit, where only the instances of classes with `edit_mode` get callbacks; or `.None`, as while the editor pauses. A silent instance gets no callbacks, as across a quiet period (see [Enabled state](#enabled-state)). When the level changes, each instance that was silent and no longer is gets the `on_enable` or `on_disable` that it missed.
+- **The edit phase:** in Edit, the game calls `script.run_edit_phase(r, dt)` each frame in place of the script phase. It runs the steps of the script phase (see [Frame](#frame)) for the classes with `edit_mode`: the world's log, `awake`, `on_enable` and `start`, events, `update`, their coroutines, and their structural changes. It sets `Time` with the frame's `delta`, and an empty `Input`: the game's input is not the editor's. It runs no fixed step, no main script and no script action.
+- **Coroutines:** only the coroutines of the instances that get callbacks resume, in the edit phase and for events. The world's clock stands still in Edit, so `wait(seconds)` does not end there; `wait_frames`, `wait_realtime`, `wait_until` and `wait_event` do.
+- **`World.editing()`** is true while the level is `.Edit_Mode`, so a script can tell Edit from Play.
+- **Hot reload:** `patch_module` reads `edit_mode` again from the new class. An instance whose class gains it runs from the next edit phase, with `on_reload` at once, and one whose class loses it goes silent.
+- **Play:** an instance that woke in Edit keeps running in Play, and does not wake again. Stop replaces the world with the editor's scene, so its instances start again.

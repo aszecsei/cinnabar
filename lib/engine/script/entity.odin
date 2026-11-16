@@ -27,6 +27,7 @@ register_world :: proc(r: ^Runtime) {
 	define(r, "World.query", world_query)
 	define(r, "World.version", world_version)
 	define(r, "World.changed", world_changed)
+	define(r, "World.editing", world_editing)
 
 	expose(r, ecs.Transform, ecs.TRANSFORM_IDENTITY)
 	expose(r, ecs.Local_Transform, ecs.LOCAL_TRANSFORM_IDENTITY)
@@ -277,7 +278,7 @@ entity_destroy :: proc(L: ^luau.State) -> c.int {
 	case .None:
 		ecs.despawn(w, e)
 		drain_log(r)
-	case .Variable, .Fixed:
+	case .Variable, .Fixed, .Edit:
 		ecs.command_despawn(&r.commands, e)
 	}
 	return 0
@@ -421,6 +422,14 @@ world_changed :: proc(L: ^luau.State) -> c.int {
 	found := make([dynamic]ecs.Entity, frame(r))
 	ecs.collect(w, ids, &found, u64(since))
 	push_entities(L, found[:])
+	return 1
+}
+
+// world_editing is true while the script runs in the editor's Edit mode, as a behaviour with edit_mode does (see
+// docs/scripting/behaviours.md#edit-mode).
+@(private = "file")
+world_editing :: proc(L: ^luau.State) -> c.int {
+	luau.pushboolean(L, b32(runtime_of(L).callbacks == .Edit_Mode))
 	return 1
 }
 

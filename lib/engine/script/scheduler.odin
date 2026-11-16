@@ -419,6 +419,20 @@ world_time :: proc(r: ^Runtime) -> f64 {
 	return r.world != nil ? time.duration_seconds(r.world.clock.time) : r.platform.time_seconds()
 }
 
+// waiter_runs is true for a waiter whose owner gets callbacks now: in the editor's Edit, only the coroutines of the
+// behaviours that run in edit mode, and no main script or script action.
+@(private)
+waiter_runs :: proc(r: ^Runtime, w: ^Waiter) -> bool {
+	switch owner in w.owner {
+	case Instance_Handle:
+		i := instance_at(r, owner)
+		return i != nil && !silent(r, i)
+	case Main_Script, Action_Handle:
+		return r.callbacks == .All
+	}
+	return r.callbacks == .All
+}
+
 // run_coroutines resumes the coroutines that are due: by wake time, and then in the order they started.
 @(private)
 run_coroutines :: proc(r: ^Runtime) {
@@ -432,7 +446,7 @@ run_coroutines :: proc(r: ^Runtime) {
 	// A coroutine that a predicate starts during the scan waits for the next frame's, whichever slot it takes.
 	last_seq := r.waiter_seq
 	for &w, i in r.waiters[:r.waiter_used] {
-		if w.status != .Waiting || w.seq > last_seq {
+		if w.status != .Waiting || w.seq > last_seq || !waiter_runs(r, &w) {
 			continue
 		}
 		switch wait in w.wait {
