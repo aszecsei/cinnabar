@@ -62,7 +62,7 @@ The player's data, such as records, options and key bindings, is in `Platform_AP
 
 It does not copy the samples, the tests, the vendor sources, the CMake intermediates or the PDBs.
 
-To publish a release, change `VERSION` on `main`. The [release workflow](../../.github/workflows/release.yml) then runs `just install` and `just sdk` on Windows, and publishes the zip as the GitHub release `v<version>`. If that release is already there, the workflow does nothing. A pull request that changes the workflow builds the package, but does not publish it. `just add-tag` tags `main` with the version by hand, and the workflow uses that tag.
+To publish a release, change `VERSION` on `main`. The [release workflow](../../.github/workflows/release.yml) then runs `just install` and `just sdk` on Windows, pushes the annotated tag `v<version>` on that commit, and publishes the zip as the GitHub release `v<version>`. If that release is already there, the workflow does nothing. A pull request that changes the workflow builds the package, but does not publish it. `just add-tag` pushes the same tag by hand. If the tag is already there, the workflow publishes the release on it.
 
 ## A frame in the sample
 

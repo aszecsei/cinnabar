@@ -851,8 +851,9 @@ info:
     @echo ""
     @just --list
 
-# Tag main's commit with VERSION's version and push the tag. The release workflow tags a release itself when VERSION
-# changes on main (see docs/overview/building-and-running.md#releases-of-the-engine), and reuses a tag that this pushed.
+# Tag main's commit with VERSION's version and push the tag. The release workflow pushes the same annotated tag itself
+# when VERSION changes on main (see docs/overview/building-and-running.md#releases-of-the-engine), and publishes the
+# release on a tag that this pushed first.
 [script]
 add-tag:
     set -euo pipefail
