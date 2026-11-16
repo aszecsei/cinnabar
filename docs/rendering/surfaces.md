@@ -50,7 +50,7 @@ The hole mask is a `mask` texture over the rectangle, `uv0`'s space, cooked with
 
 A material draws patches when its `.material` says `geometry = patches` (see [Content pipeline](../content/kinds/materials.md#materials)). The cooker compiles its passes from the patch vertex path and leaves out the mesh shader path's entries, and the blob has the `Patches` flag, which `Material_Pipeline.patches` carries. A patches material on a `Mesh_Renderer` draws with the default material, and a mesh material on a `Surface_Renderer`, or no material, draws with the engine's default surface material (`lib/engine/content/materials/default_surface.material`), flat and grey.
 
-A patches material shapes the surface with `displace`, usually along up: the sample's `water.material` sums three waves of the time on the position relative to the render origin, with wavelengths that divide 1024 m so the origin's moves leave no seam, and gives each pixel the waves' analytic normal; its `terrain.material` raises the vertices by a height map and takes the normal from the map's slope. Transparent, two-sided and masked materials all draw patches: the transparent passes use the same vertex path. The material editor previews a patches material as one patch a meter across at the mesh's place, whatever shape is chosen.
+A patches material shapes the surface with `displace`, usually along up: the sample's `water.material` sums three waves of the time on the position relative to the render origin, with wavelengths that divide 1024 m so the origin's moves leave no seam, and gives each pixel the waves' analytic normal; its `terrain.material` raises the vertices by a height map and takes the normal from the map's slope. The map is a 16-bit PNG that cooks as a `height` texture, `R16_Unorm` (see [Content pipeline](../content/kinds/textures.md#textures)), so its steps are 30 m / 65535 and neither the vertices nor the normal show terraces. Transparent, two-sided and masked materials all draw patches: the transparent passes use the same vertex path. The material editor previews a patches material as one patch a meter across at the mesh's place, whatever shape is chosen.
 
 The sample's `surfaces.scene`, which F7 cycles to, is a lake with an island: a water surface with a hole over a terrain surface, 256 m across, with textures that `just sample-textures` writes.
 
@@ -65,6 +65,7 @@ The sample's `surfaces.scene`, which F7 cycles to, is a lake with an island: a w
 - A surface is not in the ray tracing acceleration structure, so a traced shadow mask does not see it as a caster; it receives traced shadows, since the mask is from the depth buffer, and it casts and receives mapped shadows.
 - It has no collision.
 - It draws on the vertex-pulling path only: no mesh shaders, no vertex reuse, and no per-triangle culling of holes, which cost their vertex work.
-- Hole edges are the finest cells' edges, and an 8-bit height map terraces at 1/255 of its scale.
+- Hole edges are the finest cells' edges.
+- A height map terraces at its texels' steps: 1/65535 of its scale for a `height` texture, which is 16 bits a texel, and 1/255 for an 8-bit one, such as a `mask` texture, which is visible on large or tall terrain. A `height` texture is not compressed, so it is four times the size of a `mask` texture.
 - Selection is by the camera, so a shadow map far from it draws coarse patches there, as the meshlets do.
 - A node at the queues' limit draws coarse; `range0`'s cap keeps a surface within it in the common case.
