@@ -17,7 +17,7 @@ QUAD_LIGHT_ID :: ecs.Component_Id(39)
 DISK_LIGHT_ID :: ecs.Component_Id(40)
 LINE_LIGHT_ID :: ecs.Component_Id(41)
 // 42 is the Volume, and 43 to 50 the settings components (see settings.odin).
-SURFACE_RENDERER_ID :: ecs.Component_Id(51)
+SURFACE_RENDERER_ID :: ecs.Component_Id(format.SCENE_SURFACE_RENDERER_ID)
 // 52 is the Particle_System (see particles.odin).
 INSTANCED_MESH_RENDERER_ID :: ecs.Component_Id(53)
 REFLECTION_PROBE_ID :: ecs.Component_Id(54)
@@ -93,20 +93,9 @@ Instanced_Mesh_Renderer :: struct {
 	cast_shadows: bool,
 }
 
-// Surface_Renderer draws a patch surface (see docs/rendering/surfaces.md#surfaces): a rectangle of size meters along its
-// entity's x and z, about its position, as grid patches that the GPU picks by their distance from the camera, with
-// its material, which must draw patches (geometry = patches), or the engine's default surface material without one.
-// The surface has a hole where hole_mask, a mask texture over the rectangle, reads 0. cell is the finest quad's size
-// in meters (0 means DEFAULT_SURFACE_CELL), and height_range how far below and above its plane the material's
-// displacement reaches, which culling allows for.
-Surface_Renderer :: struct {
-	size:         [2]f32,
-	material:     format.Guid `asset:"material"`,
-	hole_mask:    format.Guid `asset:"texture"`,
-	cell:         f32 `editor:"range=0,100"`,
-	height_range: [2]f32,
-	cast_shadows: bool,
-}
+// Surface_Renderer draws a patch surface (see docs/rendering/surfaces.md#surfaces). It is in lib/engine/asset/format,
+// since physics reads it for a Height_Field Collider.
+Surface_Renderer :: format.Surface_Renderer
 
 // The lights' defaults for a field left at 0, as a component added in the editor leaves them.
 DEFAULT_LIGHT_RANGE :: 10

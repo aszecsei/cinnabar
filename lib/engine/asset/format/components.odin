@@ -8,6 +8,7 @@ package asset_format
 SCENE_VOLUME_ID :: 42
 SCENE_RIGID_BODY_ID :: 64
 SCENE_COLLIDER_ID :: 65
+SCENE_SURFACE_RENDERER_ID :: 51
 SCENE_CHARACTER_ID :: 75
 SCENE_NAV_MESH_VOLUME_ID :: 128
 
@@ -59,11 +60,15 @@ Collider_Shape :: enum u8 {
 	Mesh,
 	// The convex hull of the mesh asset's collision data.
 	Convex_Mesh,
+	// The height map of the entity's Surface_Renderer, over its rectangle, with its holes. Only a static or kinematic
+	// body can take one.
+	Height_Field,
 }
 
 // Collider is its entity's shape, scaled by its Transform: a box of size meters, a sphere of radius, a capsule or
 // cylinder of radius and height, its whole height along y, or a mesh asset's collision triangles or their hull, which
-// the cooker writes unless the mesh's collision import setting is false (see docs/physics/design.md#shapes). offset and
+// the cooker writes unless the mesh's collision import setting is false, or the height map of its entity's
+// Surface_Renderer (see docs/physics/design.md#shapes). offset and
 // rotation place it in the entity. A Collider on a descendant of a Rigid_Body, with no Rigid_Body between them, is a
 // part of that body's shape, and the body takes its friction, restitution, layer and sensor from its own Collider, or
 // its first part's.
@@ -95,6 +100,28 @@ DEFAULT_COLLIDER :: Collider {
 	rotation = 1,
 	friction = 0.5,
 	density  = 1000,
+}
+
+// DEFAULT_SURFACE_CELL is a Surface_Renderer's cell, in meters, when its cell is 0.
+DEFAULT_SURFACE_CELL :: 1
+
+// Surface_Renderer draws a patch surface (see docs/rendering/surfaces.md#surfaces): a rectangle of size meters along its
+// entity's x and z, about its position, as grid patches that the GPU picks by their distance from the camera, with
+// its material, which must draw patches (geometry = patches), or the engine's default surface material without one.
+// The surface has a hole where hole_mask, a mask texture over the rectangle, reads 0. cell is the finest quad's size
+// in meters (0 means DEFAULT_SURFACE_CELL), and height_range how far below and above its plane the material's
+// displacement reaches, which culling allows for. height_map is the height texture that the material displaces by, from
+// height_range.x where it reads 0 to height_range.y where it reads 1, which a Height_Field Collider and the editor's
+// landscape tools read (see docs/rendering/surfaces.md#collision). It is here, not in lib/engine/render, since physics
+// reads it too.
+Surface_Renderer :: struct {
+	size:         [2]f32,
+	material:     Guid `asset:"material"`,
+	hole_mask:    Guid `asset:"texture"`,
+	cell:         f32 `editor:"range=0,100"`,
+	height_range: [2]f32,
+	cast_shadows: bool,
+	height_map:   Guid `asset:"texture"`,
 }
 
 // Nav_Mesh_Volume asks the cooker to bake navmeshes inside its entity's Volume, which must be a Box (see

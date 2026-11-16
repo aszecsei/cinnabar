@@ -540,6 +540,8 @@ draw_collider :: proc(
 		debug.sphere(d, at, size.x, color)
 	case .Capsule, .Cylinder:
 		draw_upright(d, at, rotation, size.x, size.y, kind == .Capsule, color)
+	case .Height_Field:
+	// Its surface draws its shape.
 	case .Mesh, .Convex_Hull:
 		// The mesh's bounds, if it is loaded: its triangles would be too many lines.
 		if e.assets == nil {

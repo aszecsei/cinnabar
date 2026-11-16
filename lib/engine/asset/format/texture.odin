@@ -147,6 +147,79 @@ texture_chain_size :: proc "contextless" (
 	return
 }
 
+// texture_channel decodes the first channel of one mip of size texels, from 0 to 1, row-major with x fastest: R16_Unorm,
+// RGBA8_Unorm's red, or BC4_Unorm. It fails for another format, or a mip of the wrong size.
+texture_channel :: proc(
+	format: Texture_Format,
+	size: [2]u32,
+	mip: []byte,
+	allocator := context.allocator,
+) -> (
+	values: []f32,
+	ok: bool,
+) {
+	if len(mip) != texture_mip_size(format, size.x, size.y) {
+		return
+	}
+	#partial switch format {
+	case .R16_Unorm, .RGBA8_Unorm, .BC4_Unorm:
+	case:
+		return
+	}
+	values = make([]f32, int(size.x) * int(size.y), allocator)
+	#partial switch format {
+	case .R16_Unorm:
+		for &v, i in values {
+			v = f32(u16(mip[2 * i]) | u16(mip[2 * i + 1]) << 8) / 65535
+		}
+	case .RGBA8_Unorm:
+		for &v, i in values {
+			v = f32(mip[4 * i]) / 255
+		}
+	case .BC4_Unorm:
+		blocks := [2]int{int(size.x + 3) / 4, int(size.y + 3) / 4}
+		for by in 0 ..< blocks.y {
+			for bx in 0 ..< blocks.x {
+				texels := texture_bc4_block(mip[(by * blocks.x + bx) * 8:][:8])
+				for k in 0 ..< 16 {
+					x, y := bx * 4 + k % 4, by * 4 + k / 4
+					if x < int(size.x) && y < int(size.y) {
+						values[y * int(size.x) + x] = f32(texels[k]) / 255
+					}
+				}
+			}
+		}
+	}
+	return values, true
+}
+
+// texture_bc4_block decodes one BC4 block of 8 bytes into its 16 texels, row-major: two endpoints, then a 3-bit index
+// a texel into the eight values between them, or six between them with 0 and 255 when the first is not above the
+// second.
+texture_bc4_block :: proc(block: []byte) -> (texels: [16]u8) {
+	r0, r1 := u32(block[0]), u32(block[1])
+	palette: [8]u32
+	palette[0], palette[1] = r0, r1
+	if r0 > r1 {
+		for i in u32(1) ..< 7 {
+			palette[i + 1] = ((7 - i) * r0 + i * r1 + 3) / 7
+		}
+	} else {
+		for i in u32(1) ..< 5 {
+			palette[i + 1] = ((5 - i) * r0 + i * r1 + 2) / 5
+		}
+		palette[6], palette[7] = 0, 255
+	}
+	bits: u64
+	for i in 0 ..< 6 {
+		bits |= u64(block[2 + i]) << (8 * u64(i))
+	}
+	for k in 0 ..< 16 {
+		texels[k] = u8(palette[(bits >> (3 * u64(k))) & 7])
+	}
+	return
+}
+
 // texture_view checks a texture blob: its header, its layout, its slices, that its layers suit its dimension, and that
 // its mips are the size that its format, size, mip count and layer count give.
 texture_view :: proc(data: []byte) -> (blob: ^Texture_Blob, ok: bool) {

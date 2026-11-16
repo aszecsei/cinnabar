@@ -25,6 +25,8 @@ DEFAULT_RIGID_BODY :: format.DEFAULT_RIGID_BODY
 Shape :: format.Collider_Shape
 Collider :: format.Collider
 DEFAULT_COLLIDER :: format.DEFAULT_COLLIDER
+// Surface_Renderer is render's component, which a Height_Field Collider reads its height map from.
+Surface_Renderer :: format.Surface_Renderer
 
 #assert(
 	int(Motion.Static) == int(core_physics.Motion.Static) &&

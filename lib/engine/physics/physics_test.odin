@@ -1308,3 +1308,173 @@ Test.report(Physics.velocity(Test.box()).z)
 	)
 	testing.expect(t, !ok, "an entity that is not a character is an error")
 }
+
+// write_texture writes a 2D texture blob of one mip into the fixture's cache.
+@(private = "file")
+write_texture :: proc(
+	t: ^testing.T,
+	f: ^Fixture,
+	guid: format.Guid,
+	texture_format: format.Texture_Format,
+	size: [2]u32,
+	mip: []byte,
+) {
+	data := format.texture_write(
+		{
+			guid = guid,
+			format = texture_format,
+			usage = .Height if texture_format == .R16_Unorm else .Mask,
+			size = size,
+			mip_count = 1,
+			sampler = {wrap = .Clamp},
+			mips = mip,
+		},
+		context.temp_allocator,
+	)
+	buffer: [32]u8
+	path := fmt.tprintf("%s/%s.blob", f.cache, format.guid_format(guid, &buffer))
+	testing.expect(t, os.write_entire_file(path, data) == nil)
+}
+
+// A height field's samples are at its cells' corners, read bilinearly from the map between the surface's heights,
+// scaled; a sample is a hole only where the mask reads 0 at each of the four cells around it, and a cell past the
+// rectangle counts as one.
+@(test)
+height_field_samples :: proc(t: ^testing.T) {
+	// A 2 x 2 map: 0 and 1 in the top row, 1 and 1 in the bottom, over a 2 m square of 1 m cells, 3 samples a side.
+	height := Texels{{2, 2}, []f32{0, 1, 1, 1}}
+	sr := Surface_Renderer {
+		size         = {2, 2},
+		cell         = 1,
+		height_range = {10, 20},
+	}
+	field := height_field(sr, height, {}, {1, 2, 1}, context.temp_allocator)
+	testing.expect_value(t, field.count, [2]u32{3, 3})
+	testing.expect_value(t, field.spacing, [2]f32{1, 1})
+	// The corner reads the corner texel, clamped; the middle reads the four texels' mean.
+	testing.expect_value(t, field.heights[0], 20)
+	testing.expect_value(t, field.heights[4], 2 * (10 + 7.5))
+	testing.expect_value(t, field.heights[8], 40)
+
+	// Every cell but the last is a hole: the first sample's four cells, three past the rectangle, are all holes, and
+	// so is the middle row's first, but the middle sample touches the solid cell.
+	mask := Texels{{2, 2}, []f32{0, 0, 0, 1}}
+	field = height_field(sr, height, mask, 1, context.temp_allocator)
+	hole := core_physics.HEIGHT_FIELD_HOLE
+	testing.expect_value(t, field.heights[0], hole)
+	testing.expect_value(t, field.heights[1], hole)
+	testing.expect_value(t, field.heights[3], hole)
+	testing.expect(t, field.heights[4] != hole, "the middle touches the solid cell")
+	testing.expect(t, field.heights[8] != hole, "and so does the far corner")
+
+	// A rectangle that the cell does not divide takes whole cells, a little smaller.
+	sr.size = {2.5, 1}
+	field = height_field(sr, height, {}, 1, context.temp_allocator)
+	testing.expect_value(t, field.count, [2]u32{4, 2})
+	testing.expectf(t, abs(field.spacing.x - 2.5 / 3) < 1e-6, "spacing %v", field.spacing)
+}
+
+// A BC4 block decodes to its endpoints and the values between them.
+@(test)
+bc4_blocks_decode :: proc(t: ^testing.T) {
+	// Endpoints 255 and 0; texels 0, 1 and 2 take the indices 0, 1 and 2, and the rest 7, the last value between.
+	block := [8]byte{255, 0, 0b10_001_000, 0xfe, 0xff, 0xff, 0xff, 0xff}
+	texels := format.texture_bc4_block(block[:])
+	testing.expect_value(t, texels[0], 255)
+	testing.expect_value(t, texels[1], 0)
+	testing.expect_value(t, texels[2], u8((6 * 255 + 3) / 7))
+	testing.expect_value(t, texels[3], u8((255 + 3) / 7))
+	values, ok := format.texture_channel(.BC4_Unorm, {2, 2}, block[:], context.temp_allocator)
+	testing.expect(t, ok)
+	testing.expect_value(t, len(values), 4)
+	testing.expect_value(t, values[0], 1)
+	testing.expect_value(t, values[1], 0)
+}
+
+// A terrain's height field: a box rests on it at the map's height, a ray over its hole passes through, and a change
+// of its Surface_Renderer makes the body again. A dynamic body takes no height field.
+@(test)
+height_field_colliders :: proc(t: ^testing.T) {
+	f := setup(t, quiet = true)
+	defer teardown(t, f)
+	ecs.register_component(
+		&f.world.registry,
+		Surface_Renderer,
+		ecs.Component_Id(format.SCENE_SURFACE_RENDERER_ID),
+	)
+	HEIGHT :: format.Guid {
+		1  = 3,
+		15 = 7,
+	}
+	MASK :: format.Guid {
+		1  = 4,
+		15 = 7,
+	}
+	// A 16 x 16 map at half height, and a mask with a hole of the cells 10 to 13 along both x and z.
+	heights := make([]byte, 16 * 16 * 2, context.temp_allocator)
+	for i in 0 ..< 16 * 16 {
+		heights[2 * i], heights[2 * i + 1] = 0xff, 0x7f
+	}
+	write_texture(t, f, HEIGHT, .R16_Unorm, {16, 16}, heights)
+	mask := make([]byte, 16 * 16 * 4, context.temp_allocator)
+	for z in 0 ..< 16 {
+		for x in 0 ..< 16 {
+			hole := x >= 10 && x <= 13 && z >= 10 && z <= 13
+			mask[4 * (z * 16 + x)] = 0 if hole else 255
+		}
+	}
+	write_texture(t, f, MASK, .RGBA8_Unorm, {16, 16}, mask)
+	context.logger = testlog.expected_errors()
+
+	terrain := spawn_at(f, {0, 0, 0})
+	ecs.add(
+		&f.world,
+		terrain,
+		Surface_Renderer {
+			size = {16, 16},
+			cell = 1,
+			height_range = {0, 4},
+			height_map = HEIGHT,
+			hole_mask = MASK,
+		},
+	)
+	c := DEFAULT_COLLIDER
+	c.shape = .Height_Field
+	ecs.add(&f.world, terrain, c)
+	b := box(f, {-4, 5, -4})
+	sinker := spawn_at(f, {0, 6, 0})
+	ecs.add(&f.world, sinker, DEFAULT_RIGID_BODY)
+	ecs.add(&f.world, sinker, Surface_Renderer{size = 4, height_map = HEIGHT})
+	ecs.add(&f.world, sinker, c)
+	ticks(f, 1)
+	body := ecs.get(&f.world, terrain, Physics_Body).body
+	testing.expect(t, body.generation != 0, "the terrain has a body")
+	testing.expect_value(t, ecs.get(&f.world, sinker, Physics_Body).body, core_physics.Body{})
+	ticks(f, 179)
+	testing.expectf(
+		t,
+		abs(height(f, b) - 2.5) < 0.05,
+		"the box rests on the terrain: %v",
+		height(f, b),
+	)
+	testing.expect_value(t, ecs.get(&f.world, terrain, Physics_Body).body, body)
+
+	hit, ok := raycast(&f.physics, &f.world, ecs.position_from_meters({-6, 10, 6}), {0, -1, 0}, 20)
+	testing.expect(t, ok && hit.entity == terrain, "a ray from above hits the terrain")
+	testing.expectf(
+		t,
+		abs(ecs.position_to_meters(hit.position).y - 2) < 0.01,
+		"at its height: %v",
+		hit.position,
+	)
+	_, ok = raycast(&f.physics, &f.world, ecs.position_from_meters({4, 10, 4}), {0, -1, 0}, 20)
+	testing.expect(t, !ok, "a ray over the hole passes through")
+
+	ecs.get(&f.world, terrain, Surface_Renderer).height_range = {0, 2}
+	ticks(f, 1)
+	testing.expect(
+		t,
+		ecs.get(&f.world, terrain, Physics_Body).body != body,
+		"a change makes the body again",
+	)
+}

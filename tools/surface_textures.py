@@ -78,6 +78,13 @@ def island_hole(size=256):
     return size, size, rows
 
 
+# terrain_hole is the terrain's hole mask, one texel a finest cell: a round hole 3 m across on the island's west flank,
+# which its collider leaves open too (see docs/rendering/surfaces.md#collision).
+def terrain_hole(size=256):
+    rows = [[0 if math.hypot(x + 0.5 - 0.5 * size, y + 0.5 - 0.48 * size) < 3 else 255 for x in range(size)] for y in range(size)]
+    return size, size, rows
+
+
 # dev_grid: the engine's dev texture (see docs/editor/mesh-editing.md#dev-materials), 1024 texels square: a thick
 # line every 256 texels, a thinner one every 64, and 128-texel checks of two greys between them. At 256 texels per
 # meter it is 4 m across, with the thick lines a meter apart and the thin ones at the grid's quarter meter, so a
@@ -135,6 +142,7 @@ TEXTURES = {
     "samples/mygame/content/textures/bricks_height.png": bricks_height,
     "samples/mygame/content/textures/terrain_height.png": terrain_height,
     "samples/mygame/content/textures/island_hole.png": island_hole,
+    "samples/mygame/content/textures/terrain_hole.png": terrain_hole,
     "samples/mygame/content/textures/foliage.png": foliage,
     "samples/mygame/content/textures/foliage_coverage.png": foliage,
 }
