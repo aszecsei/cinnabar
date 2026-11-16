@@ -14,6 +14,8 @@ import format "cinnabar:engine/asset/format"
 MAX_ASSETS :: 4096
 MAX_PATH :: 260
 MAX_BUNDLES :: 64
+// MAX_LIVE_ASSETS is the most live blobs, from set_live, at once.
+MAX_LIVE_ASSETS :: 16
 
 // BUNDLES is true in a release build, whose content is bundles: content_source then gives the Bundle source.
 BUNDLES :: #config(BUNDLES, false)
@@ -108,12 +110,17 @@ Assets :: struct {
 	used:             u32,
 	// The modification time of the cache's generation file when poll last checked the blobs.
 	cache_generation: i64,
+	// The assets whose blobs are the editor's, from memory, which poll leaves alone until clear_live: a list, not a
+	// flag of each record, since few are live at once.
+	live:             [MAX_LIVE_ASSETS]format.Guid,
+	live_count:       int,
 }
 
 init :: proc(a: ^Assets, platform: ^core.Platform_API, source: Source) {
 	a.platform = platform
 	a.source = source
 	a.used = 0
+	a.live_count = 0
 	switch &source in a.source {
 	case Loose_Cache:
 		a.cache_generation = platform.file_modified(generation_path(a))
@@ -134,6 +141,7 @@ destroy :: proc(a: ^Assets) {
 		free_data(a, &r)
 	}
 	a.used = 0
+	a.live_count = 0
 	if source, is_bundle := &a.source.(Bundle); is_bundle {
 		for &b in source.open[:source.count] {
 			delete(b.head, a.platform.asset_allocator)
@@ -153,14 +161,7 @@ load :: proc(a: ^Assets, guid: format.Guid) -> (h: Handle, ok: bool) {
 		}
 		return found, true
 	}
-	index := u32(0)
-	for index < a.used && a.records[index].generation % 2 == 1 {
-		index += 1
-	}
-	if index == MAX_ASSETS {
-		log.errorf("asset: more than %d assets", MAX_ASSETS)
-		return
-	}
+	index := free_record(a) or_return
 	data, modified := read_blob(a, guid) or_return
 	header, _ := format.blob_header(data)
 	r := &a.records[index]
@@ -175,6 +176,112 @@ load :: proc(a: ^Assets, guid: format.Guid) -> (h: Handle, ok: bool) {
 	}
 	a.used = max(a.used, index + 1)
 	return {index, r.generation}, true
+}
+
+// free_record is the index of a record that holds no asset, or false when every one does.
+@(private)
+free_record :: proc(a: ^Assets) -> (index: u32, ok: bool) {
+	for index < a.used && a.records[index].generation % 2 == 1 {
+		index += 1
+	}
+	if index == MAX_ASSETS {
+		log.errorf("asset: more than %d assets", MAX_ASSETS)
+		return
+	}
+	return index, true
+}
+
+// set_live puts a blob from memory in place of an asset's, until clear_live (see
+// docs/content/blobs-and-loading.md#live-blobs): the editor's live textures. The blob is copied, and its version is a
+// new one, so what reads the asset by its version, a texture's residency or a height field, takes it as it takes a
+// recooked blob. An asset that is not loaded is loaded with it, and stays. It fails for a blob of another GUID.
+set_live :: proc(a: ^Assets, guid: format.Guid, blob: []byte) -> bool {
+	// Copied first, since the header is read at its alignment.
+	data, err := mem.alloc_bytes_non_zeroed(
+		len(blob),
+		format.BLOB_ALIGN,
+		a.platform.asset_allocator,
+	)
+	if err != nil {
+		return false
+	}
+	copy(data, blob)
+	header, valid := format.blob_header(data)
+	if !valid || header.guid != guid {
+		delete(data, a.platform.asset_allocator)
+		return false
+	}
+	if !is_live(a, guid) {
+		if a.live_count == MAX_LIVE_ASSETS {
+			log.errorf("asset: more than %d live blobs", MAX_LIVE_ASSETS)
+			delete(data, a.platform.asset_allocator)
+			return false
+		}
+		a.live[a.live_count] = guid
+		a.live_count += 1
+	}
+	h, loaded := find(a, guid)
+	if !loaded {
+		index, free := free_record(a)
+		if !free {
+			delete(data, a.platform.asset_allocator)
+			return false
+		}
+		r := &a.records[index]
+		r^ = {
+			guid       = guid,
+			generation = r.generation + 1,
+			users      = max(u32),
+		}
+		a.used = max(a.used, index + 1)
+		h = {index, r.generation}
+	}
+	r := &a.records[h.index]
+	free_data(a, r)
+	r.data, r.kind = data, header.kind
+	r.version += 1
+	return true
+}
+
+// clear_live ends an asset's live blob: the cooked blob loads again, as a new version, or, when there is none yet,
+// the live blob stays until a cook writes one.
+clear_live :: proc(a: ^Assets, guid: format.Guid) {
+	live := a.live[:a.live_count]
+	at := -1
+	for g, i in live {
+		if g == guid {
+			at = i
+		}
+	}
+	if at < 0 {
+		return
+	}
+	live[at] = live[len(live) - 1]
+	a.live_count -= 1
+	h, loaded := find(a, guid)
+	if !loaded {
+		return
+	}
+	r := &a.records[h.index]
+	data, modified, ok := read_blob(a, guid)
+	if !ok {
+		// poll reads the file when a cook writes it.
+		r.modified = 0
+		return
+	}
+	free_data(a, r)
+	r.data, r.modified = data, modified
+	r.version += 1
+}
+
+// is_live is whether an asset's blob is a live one, from set_live.
+is_live :: proc(a: ^Assets, guid: format.Guid) -> bool {
+	for g in a.live[:a.live_count] {
+		if g == guid {
+			return true
+		}
+	}
+	return false
 }
 
 // find is the handle of an asset, if it is loaded. It adds no user, so do not unload what it gives.
@@ -243,7 +350,7 @@ poll :: proc(a: ^Assets) -> []Handle {
 	a.cache_generation = generation
 	changed := make([dynamic]Handle, a.platform.frame_allocator)
 	for &r, i in a.records[:a.used] {
-		if r.generation % 2 == 0 {
+		if r.generation % 2 == 0 || is_live(a, r.guid) {
 			continue
 		}
 		path := loose_path(a, r.guid)

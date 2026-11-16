@@ -325,3 +325,63 @@ an_asset_at_the_most_users_stays_loaded :: proc(t: ^testing.T) {
 	_, ok := data(&f.assets, h)
 	testing.expect(t, ok)
 }
+
+// A live blob takes an asset's place as a new version, which poll leaves alone; clear_live loads the cooked blob
+// again. A live blob of an asset that is not cooked loads it, and stays until a cook writes one.
+@(test)
+live_blobs_replace_the_cooked_one :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	start := time.now()
+	write_blob(t, f, test_guid(1), 7, start)
+	h, ok := load(&f.assets, test_guid(1))
+	testing.expect(t, ok)
+	live := format.script_write(
+		{guid = test_guid(1), key = 9, bytecode = {1}},
+		context.temp_allocator,
+	)
+	testing.expect(t, set_live(&f.assets, test_guid(1), live))
+	testing.expect_value(t, blob_key(f, h), 9)
+	testing.expect_value(t, version(&f.assets, h), 2)
+	testing.expect(t, is_live(&f.assets, test_guid(1)))
+	other := format.script_write(
+		{guid = test_guid(2), key = 9, bytecode = {1}},
+		context.temp_allocator,
+	)
+	testing.expect(
+		t,
+		!set_live(&f.assets, test_guid(1), other),
+		"a blob of another GUID is refused",
+	)
+
+	write_blob(t, f, test_guid(1), 8, time.time_add(start, time.Second))
+	write_generation(t, f, time.time_add(start, time.Second))
+	testing.expect_value(t, len(poll(&f.assets)), 0)
+	testing.expect_value(t, blob_key(f, h), 9)
+
+	clear_live(&f.assets, test_guid(1))
+	testing.expect(t, !is_live(&f.assets, test_guid(1)))
+	testing.expect_value(t, blob_key(f, h), 8)
+	testing.expect_value(t, version(&f.assets, h), 3)
+
+	fresh := format.script_write(
+		{guid = test_guid(3), key = 5, bytecode = {1}},
+		context.temp_allocator,
+	)
+	testing.expect(t, set_live(&f.assets, test_guid(3), fresh))
+	made, found := find(&f.assets, test_guid(3))
+	testing.expect(t, found, "a live blob loads an asset that is not cooked")
+	testing.expect_value(t, blob_key(f, made), 5)
+	{
+		// It has no cooked blob to load, which the log says.
+		context.logger = capture_errors(f)
+		clear_live(&f.assets, test_guid(3))
+	}
+	testing.expect_value(t, len(f.errors), 1)
+	testing.expect_value(t, blob_key(f, made), 5)
+	write_blob(t, f, test_guid(3), 6, time.time_add(start, 2 * time.Second))
+	write_generation(t, f, time.time_add(start, 2 * time.Second))
+	changed := poll(&f.assets)
+	testing.expect_value(t, len(changed), 1)
+	testing.expect_value(t, blob_key(f, made), 6)
+}
