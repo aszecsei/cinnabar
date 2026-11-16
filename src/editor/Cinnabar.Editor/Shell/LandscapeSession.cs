@@ -14,7 +14,7 @@ namespace Cinnabar.Editor.Shell;
 /// goes on the scene's undo stack as the tiles that it changed, and saves with the scene as the PNGs that the cooker
 /// reads. A saved map is let go of once the daemon has cooked it.
 /// </summary>
-public sealed class LandscapeSession(EditorShell shell)
+public sealed partial class LandscapeSession(EditorShell shell)
 {
     /// <summary>The context that is set while the one selected entity of the scene is a surface.</summary>
     public const string TerrainContext = "selection.terrain";
@@ -32,9 +32,12 @@ public sealed class LandscapeSession(EditorShell shell)
     Stroking? _stroke;
     Wire.LandscapeOverlay _overlay = new(false, [0, 0, 0], [0, 1, 0], 0, 0);
 
-    // A stroke under way: its map, the surface and pose it paints, its revision, the last hit, and the hole mask that its
-    // first hole made, which the release names in the surface.
-    sealed record Stroking(LandscapeStroke Stroke, LandscapeMap Map, LandscapeSurface Surface, Pose Pose, int Before, int Revision, LandscapeHit Last, bool NewMask);
+    // A stroke under way: its map, the surface and pose it paints, its revision, the last hit, and the field that names
+    // the map that its first dab made, which the release sets in the surface, or null.
+    sealed record Stroking(LandscapeStroke Stroke, LandscapeMap Map, LandscapeSurface Surface, Pose Pose, int Before, int Revision, LandscapeHit Last, string? NewField);
+
+    /// <summary>The layers that Paint can paint: the four channels of a layer map.</summary>
+    public const int Layers = 4;
 
     public LandscapeBrush Brush { get; private set; } = LandscapeBrush.Raise;
 
@@ -45,19 +48,27 @@ public sealed class LandscapeSession(EditorShell shell)
 
     public double Falloff { get; private set; } = 0.5;
 
+    /// <summary>The layer that Paint paints, from 0: the layer map's red, green, blue or alpha.</summary>
+    public int Layer { get; private set; }
+
     /// <summary>The open maps, by GUID.</summary>
     public IReadOnlyCollection<LandscapeMap> Maps => _maps.Values;
 
-    public bool AnyDirty => _maps.Values.Any(m => m.IsDirty);
+    public bool AnyDirty => _maps.Values.Any(m => m.IsDirty) || _sets.Values.Any(s => s.IsDirty);
 
-    public bool IsStroking => _stroke != null;
+    public bool IsStroking => _stroke != null || _foliage != null;
 
     /// <summary>The brush, a map, or its dirty state changed.</summary>
     public event Action? Changed;
 
-    /// <summary>The selected terrain: the one selected entity of the scene, when it has a <c>Surface_Renderer</c>.</summary>
+    /// <summary>
+    /// The selected terrain: the one selected entity of the scene, when it has a <c>Surface_Renderer</c>, or its parent's,
+    /// when it is one of the terrain's foliage layers (see docs/editor/landscape.md#foliage).
+    /// </summary>
     public LandscapeSurface? Surface =>
-        shell.SelectedSceneEntities is [var entity] ? LandscapeSurface.Of(entity) : null;
+        shell.SelectedSceneEntities is [var entity]
+            ? LandscapeSurface.Of(entity) ?? (IsFoliageLayer(entity) && shell.Scene?.Expanded.Flat.Find(entity.Parent) is { } parent ? LandscapeSurface.Of(parent) : null)
+            : null;
 
     /// <summary>Whether the Landscape tool paints: it is the tool, and a terrain is selected in Edit.</summary>
     public bool IsActive => shell.Tool == Tool.Landscape && shell.CanEditScene && !shell.Mesh.InMeshMode && Surface != null;
@@ -69,6 +80,8 @@ public sealed class LandscapeSession(EditorShell shell)
     public void SetStrength(double share) => Set(() => Strength = Math.Clamp(share, 0, 1));
 
     public void SetFalloff(double share) => Set(() => Falloff = Math.Clamp(share, 0, 1));
+
+    public void SetLayer(int layer) => Set(() => Layer = Math.Clamp(layer, 0, Layers - 1));
 
     void Set(Action change)
     {
@@ -93,19 +106,32 @@ public sealed class LandscapeSession(EditorShell shell)
     /// </summary>
     public bool BeginStroke(Vec2 pixel)
     {
-        if (_stroke != null || !IsActive || Surface is not { } surface || PoseOf(surface) is not { } pose || Pick(surface, pose, pixel) is not { } hit)
+        if (IsStroking || !IsActive || Surface is not { } surface || PoseOf(surface) is not { } pose || Pick(surface, pose, pixel) is not { } hit)
         {
             return false;
         }
-        var newMask = false;
+        if (Brush is LandscapeBrush.Scatter or LandscapeBrush.Erase)
+        {
+            return BeginFoliage(surface, pose, hit);
+        }
+        string? newField = null;
         LandscapeMap? map;
         if (Brush is LandscapeBrush.Hole or LandscapeBrush.Fill)
         {
             map = MaskOf(surface);
             if (map == null && surface.HoleMask == "")
             {
-                map = NewMask(surface);
-                newMask = map != null;
+                map = NewMap(surface, LandscapeMapKind.Mask);
+                newField = map != null ? "hole_mask" : null;
+            }
+        }
+        else if (Brush == LandscapeBrush.Paint)
+        {
+            map = LayersOf(surface);
+            if (map == null && surface.LayerMap == "")
+            {
+                map = NewMap(surface, LandscapeMapKind.Layers);
+                newField = map != null ? "layer_map" : null;
             }
         }
         else
@@ -125,8 +151,8 @@ public sealed class LandscapeSession(EditorShell shell)
             SendWhole(map);
         }
         var dab = DabAt(hit, map, surface);
-        var stroke = new LandscapeStroke(map.Grid, Brush, dab);
-        _stroke = new Stroking(stroke, map, surface, pose, map.Revision, LandscapeMap.NextRevision(), hit, newMask);
+        var stroke = new LandscapeStroke(map.Grid, Brush, dab, Layer);
+        _stroke = new Stroking(stroke, map, surface, pose, map.Revision, LandscapeMap.NextRevision(), hit, newField);
         map.Touched(stroke.Apply(dab), _stroke.Revision);
         return true;
     }
@@ -134,6 +160,11 @@ public sealed class LandscapeSession(EditorShell shell)
     /// <summary>Paints the stroke on to a pixel: dabs a quarter of the radius apart from the last hit, or none off the terrain.</summary>
     public void DragStroke(Vec2 pixel)
     {
+        if (_foliage != null)
+        {
+            DragFoliage(pixel);
+            return;
+        }
         if (_stroke is not { } s || Pick(s.Surface, s.Pose, pixel) is not { } hit)
         {
             return;
@@ -157,21 +188,31 @@ public sealed class LandscapeSession(EditorShell shell)
     /// <summary>Ends the stroke as one undo entry on the scene's stack, with the hole mask that it made.</summary>
     public void EndStroke()
     {
+        if (_foliage != null)
+        {
+            EndFoliage();
+            return;
+        }
         if (_stroke is not { } s)
         {
             return;
         }
         var patches = s.Stroke.Patches();
         var ops = new List<Operation>();
-        if (s.NewMask)
+        if (s.NewField is { } field)
         {
-            ops.Add(new SetField(s.Surface.Entity, LandscapeSurface.ComponentId, "hole_mask", SceneValue.AssetRef(s.Map.Guid)));
+            ops.Add(new SetField(s.Surface.Entity, LandscapeSurface.ComponentId, field, SceneValue.AssetRef(s.Map.Guid)));
         }
         if (patches.Count > 0)
         {
             ops.Add(new LandscapeOperation(s.Map, patches, s.Before, s.Revision));
         }
-        var label = Brush is LandscapeBrush.Hole or LandscapeBrush.Fill ? "Paint Holes" : $"Sculpt ({Brush})";
+        var label = Brush switch
+        {
+            LandscapeBrush.Hole or LandscapeBrush.Fill => "Paint Holes",
+            LandscapeBrush.Paint => $"Paint Layer {Layer + 1}",
+            _ => $"Sculpt ({Brush})",
+        };
         if (ops.Count == 0 || !shell.Edit(label, [.. ops]))
         {
             CancelStroke();
@@ -184,13 +225,14 @@ public sealed class LandscapeSession(EditorShell shell)
     /// <summary>Ends the stroke by putting back what it painted, as Escape or a lost capture does.</summary>
     public void CancelStroke()
     {
+        CancelFoliage();
         if (_stroke is not { } s)
         {
             return;
         }
         _stroke = null;
         s.Map.Touched(s.Stroke.Restore(), s.Before);
-        if (s.NewMask)
+        if (s.NewField != null)
         {
             Close(s.Map);
         }
@@ -275,6 +317,9 @@ public sealed class LandscapeSession(EditorShell shell)
     /// <summary>The surface's hole mask, opened from its file the first time, or null when it has none or cannot be read.</summary>
     public LandscapeMap? MaskOf(LandscapeSurface surface) => Open(surface.HoleMask, LandscapeMapKind.Mask);
 
+    /// <summary>The surface's layer map, opened from its file the first time, or null when it has none or cannot be read.</summary>
+    public LandscapeMap? LayersOf(LandscapeSurface surface) => Open(surface.LayerMap, LandscapeMapKind.Layers);
+
     LandscapeMap? Open(string guid, LandscapeMapKind kind)
     {
         if (guid == "")
@@ -298,9 +343,11 @@ public sealed class LandscapeSession(EditorShell shell)
         return map;
     }
 
-    // A new hole mask for a surface that has none (see docs/editor/landscape.md#holes): one texel a finest cell, all solid,
-    // beside the height map, or the scene, named for the entity. Its file and .meta are written when it saves.
-    LandscapeMap? NewMask(LandscapeSurface surface)
+    // A new map for a surface that has none, beside the height map, or the scene, named for the entity, whose file and
+    // .meta are written when it saves: a hole mask of one texel a finest cell, all solid (see
+    // docs/editor/landscape.md#holes), or a layer map the size of the height map, or of the cells, all the first layer
+    // (see docs/editor/landscape.md#layers).
+    LandscapeMap? NewMap(LandscapeSurface surface, LandscapeMapKind kind)
     {
         var beside = HeightOf(surface)?.Path ?? shell.Scene?.Path;
         if (beside == null || shell.Scene?.Expanded.Flat.Find(surface.Entity) is not { } entity)
@@ -309,13 +356,25 @@ public sealed class LandscapeSession(EditorShell shell)
         }
         var name = string.Concat((entity.Name.Length > 0 ? entity.Name : $"{entity.Id:x16}").Select(c => char.IsLetterOrDigit(c) ? char.ToLowerInvariant(c) : '_'));
         var directory = Path.GetDirectoryName(beside)!;
-        var path = Path.Combine(directory, $"{name}_holes.png");
+        var suffix = kind == LandscapeMapKind.Mask ? "holes" : "layers";
+        var path = Path.Combine(directory, $"{name}_{suffix}.png");
         for (var n = 2; File.Exists(path) || _maps.Values.Any(m => string.Equals(m.Path, path, StringComparison.OrdinalIgnoreCase)); n++)
         {
-            path = Path.Combine(directory, $"{name}_holes_{n}.png");
+            path = Path.Combine(directory, $"{name}_{suffix}_{n}.png");
         }
         var (x, z) = surface.Cells;
-        var map = new LandscapeMap(System.Guid.NewGuid().ToString("N"), path, LandscapeMapKind.Mask, new HeightGrid(x, z, 65535));
+        HeightGrid grid;
+        if (kind == LandscapeMapKind.Mask)
+        {
+            grid = new HeightGrid(x, z, 65535);
+        }
+        else
+        {
+            var height = HeightOf(surface)?.Grid;
+            grid = HeightGrid.Of(height?.Width ?? x, height?.Height ?? z, 65535, 0, 0, 0);
+            shell.Console.Add(LogLevel.Info, $"landscape: made {Path.GetFileName(path)} for the terrain's layers. Its material blends them when it samples that texture as its layer weights (see docs/rendering/surfaces.md#layers).");
+        }
+        var map = new LandscapeMap(System.Guid.NewGuid().ToString("N"), path, kind, grid);
         Add(map);
         return map;
     }
@@ -354,7 +413,12 @@ public sealed class LandscapeSession(EditorShell shell)
     {
         map.IsLive = true;
         shell.Host.Send(new Wire.LiveTexture(Convert.FromHexString(map.Guid),
-            map.Kind == LandscapeMapKind.Height ? Wire.LiveTextureUsage.Height : Wire.LiveTextureUsage.Mask,
+            map.Kind switch
+            {
+                LandscapeMapKind.Height => Wire.LiveTextureUsage.Height,
+                LandscapeMapKind.Mask => Wire.LiveTextureUsage.Mask,
+                _ => Wire.LiveTextureUsage.Layers,
+            },
             [(uint)map.Grid.Width, (uint)map.Grid.Height], map.Grid.Texels));
     }
 
@@ -375,7 +439,7 @@ public sealed class LandscapeSession(EditorShell shell)
     {
         var ok = true;
         var named = shell.Scene?.Expanded.Flat.Entities.Select(LandscapeSurface.Of).OfType<LandscapeSurface>()
-            .SelectMany(s => new[] { s.HeightMap, s.HoleMask }).ToHashSet() ?? [];
+            .SelectMany(s => new[] { s.HeightMap, s.HoleMask, s.LayerMap }).ToHashSet() ?? [];
         foreach (var map in _maps.Values.Where(m => m.IsDirty && named.Contains(m.Guid)).ToList())
         {
             try
@@ -383,7 +447,7 @@ public sealed class LandscapeSession(EditorShell shell)
                 var meta = map.Path + ".meta";
                 if (map.SavedRevision == null && !File.Exists(meta))
                 {
-                    SceneDocument.WriteAtomically(meta, MaskMeta(map.Guid));
+                    SceneDocument.WriteAtomically(meta, map.Kind == LandscapeMapKind.Layers ? LayersMeta(map.Guid) : MaskMeta(map.Guid));
                 }
                 map.Save();
                 shell.Console.Add(LogLevel.Info, $"landscape: saved {map.Path}");
@@ -394,6 +458,7 @@ public sealed class LandscapeSession(EditorShell shell)
                 ok = false;
             }
         }
+        ok = SaveSets() && ok;
         Changed?.Invoke();
         return ok;
     }
@@ -402,6 +467,11 @@ public sealed class LandscapeSession(EditorShell shell)
     public static string MaskMeta(string guid) =>
         "# cinnabar asset metadata. Keep this file next to its asset (see docs/content/identity-and-cooking.md#identity).\n" +
         $"guid = {guid}\nusage = mask\n\n[mip_map]\nkernel = box\n\n[sampler]\nwrap = clamp\n";
+
+    /// <summary>A new layer map's <c>.meta</c>: a data texture, its weights as they are, clamped.</summary>
+    public static string LayersMeta(string guid) =>
+        "# cinnabar asset metadata. Keep this file next to its asset (see docs/content/identity-and-cooking.md#identity).\n" +
+        $"guid = {guid}\nusage = data\n\n[sampler]\nwrap = clamp\n";
 
     /// <summary>Lets go of each saved map whose cooked blob is current, so the host draws the blob.</summary>
     internal void ReleaseCooked()
@@ -413,6 +483,7 @@ public sealed class LandscapeSession(EditorShell shell)
                 Release(map);
             }
         }
+        ReleaseCookedSets();
     }
 
     /// <summary>Sends every live map again, and the brush, as after a resync or a soft restart, which lose the host's copies.</summary>
@@ -422,6 +493,7 @@ public sealed class LandscapeSession(EditorShell shell)
         {
             SendWhole(map);
         }
+        SendLiveSets();
         if (_overlay.Visible)
         {
             shell.Host.Send(_overlay);
@@ -437,5 +509,6 @@ public sealed class LandscapeSession(EditorShell shell)
         {
             Close(map);
         }
+        CloseSets();
     }
 }

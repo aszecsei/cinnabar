@@ -173,6 +173,8 @@ static partial class EditorCommands
     public const string LandscapeRadius = "landscape.radius";
     public const string LandscapeStrength = "landscape.strength";
     public const string LandscapeFalloff = "landscape.falloff";
+    public const string LandscapeLayer = "landscape.layer";
+    public const string LandscapeDensity = "landscape.density";
     public const string LocalSpace = "tool.localSpace";
     public const string Snap = "tool.snap";
     public const string FrameSelected = "viewport.frameSelected";

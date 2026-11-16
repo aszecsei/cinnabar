@@ -123,6 +123,40 @@ public sealed class LandscapeTests : IDisposable
     }
 
     [Fact]
+    public void PaintRaisesALayerAndTheWeightsStillAddUpToOne()
+    {
+        var grid = HeightGrid.Of(16, 16, 65535, 0, 0, 0);
+        var stroke = new LandscapeStroke(grid, LandscapeBrush.Paint, Dab(8, 8, 4), layer: 2);
+        // Each dab moves it a quarter of the way: eight make it 1 - 0.75^8, about 0.9.
+        for (var i = 0; i < 8; i++)
+        {
+            stroke.Apply(Dab(8, 8, 4));
+        }
+        Assert.True(grid[8, 8, 2] > 50000, $"the third layer is most of the middle: {grid[8, 8, 2]}");
+        Assert.InRange(grid[8, 8, 0] + grid[8, 8, 1] + grid[8, 8, 2] + grid[8, 8, 3], 65533, 65537);
+        Assert.Equal(65535, grid[0, 0, 0]);
+        Assert.Equal(0, grid[0, 0, 2]);
+        var patch = Assert.Single(stroke.Patches());
+        // The tile is the whole 16 by 16 grid, four values a texel.
+        Assert.Equal(16 * 16 * 4, patch.After.Length);
+        stroke.Restore();
+        Assert.All(Enumerable.Range(0, 256), i => Assert.Equal(65535, grid.Texels[i * 4]));
+    }
+
+    [Fact]
+    public void ALayerMapRoundTripsAsAnRgbaPng()
+    {
+        var grid = HeightGrid.Of(2, 1, 65535, 0, 0, 0);
+        grid[1, 0, 0] = 0;
+        grid[1, 0, 3] = 65535;
+        var map = new LandscapeMap("00000000000000000000000000000002", _temp.Combine("l.png"), LandscapeMapKind.Layers, grid);
+        var png = Png.Decode(map.EncodePng())!;
+        Assert.Equal((4, 8), (png.Channels, png.Depth));
+        Assert.Equal([(ushort)255, 0, 0, 0, 0, 0, 0, 255], png.Samples);
+        Assert.Equal([(ushort)65535, 0, 0, 0, 0, 0, 0, 65535], png.Channels16(4));
+    }
+
+    [Fact]
     public void AStrokesPatchesAreItsChangedTilesAndItsRestorePutsThemBack()
     {
         var grid = Flat();
@@ -302,6 +336,31 @@ public sealed class LandscapeTests : IDisposable
         // Undo takes the mask out of the surface with the hole.
         shell.Scene.Undo();
         Assert.Equal("", LandscapeSurface.Of(shell.Scene.Scene.Find(1)!)!.HoleMask);
+    }
+
+    [Fact]
+    public void PaintOnASurfaceWithoutALayerMapMakesOneTheHeightMapsSizeAndNamesIt()
+    {
+        using var shell = NewShell();
+        shell.SetTool(Tool.Landscape);
+        shell.Landscape.SetBrush(LandscapeBrush.Paint);
+        shell.Landscape.SetLayer(1);
+        _sent.Clear();
+        Assert.True(shell.Landscape.BeginStroke(Middle));
+        shell.Landscape.EndStroke();
+        var layers = Assert.Single(shell.Landscape.Maps, m => m.Kind == LandscapeMapKind.Layers);
+        Assert.Equal((16, 16, 4), (layers.Grid.Width, layers.Grid.Height, layers.Grid.Channels));
+        Assert.True(layers.Grid[8, 8, 1] > 0);
+        Assert.Equal(65535, layers.Grid[0, 0, 0]);
+        var live = Assert.Single(_sent.OfType<Wire.LiveTexture>(), t => t.Usage == Wire.LiveTextureUsage.Layers);
+        Assert.Equal(16 * 16 * 4, live.Texels.Length);
+        Assert.Equal(layers.Guid, LandscapeSurface.Of(shell.Scene!.Scene.Find(1)!)!.LayerMap);
+
+        Assert.True(shell.SaveScene());
+        Assert.Contains("usage = data", File.ReadAllText(layers.Path + ".meta"));
+        Assert.Equal(4, Png.Decode(File.ReadAllBytes(layers.Path))!.Channels);
+        shell.Scene.Undo();
+        Assert.Equal("", LandscapeSurface.Of(shell.Scene.Scene.Find(1)!)!.LayerMap);
     }
 
     [Fact]

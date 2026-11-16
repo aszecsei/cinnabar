@@ -12,6 +12,24 @@ public sealed record PngImage(int Width, int Height, int Channels, int Depth, us
     /// <summary>The largest sample of the depth.</summary>
     public int Max => Depth == 16 ? 65535 : 255;
 
+    /// <summary>
+    /// The first <paramref name="count"/> channels of each texel, widened to 16 bits, and 0 for a channel that the image
+    /// does not have.
+    /// </summary>
+    public ushort[] Channels16(int count)
+    {
+        var out16 = new ushort[Width * Height * count];
+        for (var i = 0; i < Width * Height; i++)
+        {
+            for (var c = 0; c < Math.Min(count, Channels); c++)
+            {
+                var s = Samples[i * Channels + c];
+                out16[i * count + c] = Depth == 16 ? s : (ushort)(s * 257);
+            }
+        }
+        return out16;
+    }
+
     /// <summary>The first channel of each texel, gray or red, widened to 16 bits: an 8-bit 255 is 65535.</summary>
     public ushort[] FirstChannel16()
     {

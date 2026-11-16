@@ -7,6 +7,8 @@ public enum LandscapeMapKind
     Height,
     /// <summary>The <c>hole_mask</c>, an 8-bit gray PNG cooked as a <c>mask</c> texture with box mips.</summary>
     Mask,
+    /// <summary>The <c>layer_map</c>, an 8-bit RGBA PNG cooked as a <c>data</c> texture: four layers' weights.</summary>
+    Layers,
 }
 
 /// <summary>
@@ -69,10 +71,16 @@ public sealed class LandscapeMap(string guid, string path, LandscapeMapKind kind
         Changed?.Invoke(this, rect);
     }
 
-    /// <summary>The map as the PNG that the cooker reads: 16-bit gray for a height map, 8-bit gray for a mask.</summary>
+    /// <summary>
+    /// The map as the PNG that the cooker reads: 16-bit gray for a height map, 8-bit gray for a mask, and 8-bit RGBA for
+    /// a layer map.
+    /// </summary>
     public byte[] EncodePng() => Kind == LandscapeMapKind.Height
         ? Png.Encode(new PngImage(Grid.Width, Grid.Height, 1, 16, Grid.Texels))
-        : Png.Encode(new PngImage(Grid.Width, Grid.Height, 1, 8, [.. Grid.Texels.Select(t => (ushort)(t >> 8))]));
+        : Png.Encode(new PngImage(Grid.Width, Grid.Height, Grid.Channels, 8, [.. Grid.Texels.Select(t => (ushort)(t >> 8))]));
+
+    /// <summary>The values of a texel of a map of a kind: four for a layer map, one for the others.</summary>
+    public static int ChannelsOf(LandscapeMapKind kind) => kind == LandscapeMapKind.Layers ? 4 : 1;
 
     /// <summary>Writes the map to its file, through a temporary file, and the file has this revision.</summary>
     public void Save()
@@ -81,7 +89,10 @@ public sealed class LandscapeMap(string guid, string path, LandscapeMapKind kind
         SavedRevision = Revision;
     }
 
-    /// <summary>A map from its file, whatever PNG it is: its first channel, widened to 16 bits. Null when it cannot be read.</summary>
+    /// <summary>
+    /// A map from its file, whatever PNG it is: its first channel, or for a layer map its first four, widened to 16 bits.
+    /// Null when it cannot be read.
+    /// </summary>
     public static LandscapeMap? Open(string guid, string path, LandscapeMapKind kind)
     {
         byte[] bytes;
@@ -97,7 +108,8 @@ public sealed class LandscapeMap(string guid, string path, LandscapeMapKind kind
         {
             return null;
         }
-        var map = new LandscapeMap(guid, path, kind, new HeightGrid(image.Width, image.Height, image.FirstChannel16()));
+        var channels = ChannelsOf(kind);
+        var map = new LandscapeMap(guid, path, kind, new HeightGrid(image.Width, image.Height, image.Channels16(channels), channels));
         map.SavedRevision = map.Revision;
         return map;
     }

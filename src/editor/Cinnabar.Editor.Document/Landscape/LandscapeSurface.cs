@@ -4,11 +4,12 @@ namespace Cinnabar.Editor.Document;
 
 /// <summary>
 /// A terrain as the landscape tools see it (see docs/editor/landscape.md#the-terrain): a <c>Surface_Renderer</c>'s
-/// entity, its rectangle, its finest cell, its height range, and its height map's and hole mask's GUIDs ("" for none).
+/// entity, its rectangle, its finest cell, its height range, and its height map's, hole mask's and layer map's GUIDs
+/// ("" for none).
 /// A height map texel of 0 is <see cref="Low"/> and 65535 is <see cref="High"/>, which is how a <c>Height_Field</c>
 /// collider reads it.
 /// </summary>
-public sealed record LandscapeSurface(ulong Entity, double SizeX, double SizeZ, double Cell, double Low, double High, string HeightMap, string HoleMask)
+public sealed record LandscapeSurface(ulong Entity, double SizeX, double SizeZ, double Cell, double Low, double High, string HeightMap, string HoleMask, string LayerMap = "")
 {
     /// <summary>The <c>Surface_Renderer</c>'s stable ID.</summary>
     public const ulong ComponentId = 51;
@@ -29,7 +30,7 @@ public sealed record LandscapeSurface(ulong Entity, double SizeX, double SizeZ, 
         string Asset(string name) => Field(name) is { Kind: SceneValueKind.Asset } v ? v.Asset : "";
         var cell = Number("cell", 0, 0);
         return new LandscapeSurface(entity.Id, Number("size", 0, 0), Number("size", 1, 0), cell > 0 ? cell : DefaultCell,
-            Number("height_range", 0, 0), Number("height_range", 1, 0), Asset("height_map"), Asset("hole_mask"));
+            Number("height_range", 0, 0), Number("height_range", 1, 0), Asset("height_map"), Asset("hole_mask"), Asset("layer_map"));
     }
 
     /// <summary>The finest cells along x and z: the size of a new hole mask, one texel each.</summary>

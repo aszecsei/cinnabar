@@ -207,7 +207,7 @@ static partial class EditorCommands
             CanExecuteWhen = () => !shell.Mesh.InMeshMode,
         });
         commands.Register(ChoiceCommand.ForEnum(LandscapeBrush, "Brush", () => shell.Landscape.Brush, shell.Landscape.SetBrush,
-            description: "What a stroke does: raise, lower, smooth, flatten, ramp or add noise to the height map, or paint holes into the hole mask or fill them.",
+            description: "What a stroke does: raise, lower, smooth, flatten, ramp or add noise to the height map, paint holes into the hole mask or fill them, paint a layer into the layer map, or scatter or erase foliage.",
             canExecuteWhen: () => shell.Tool == Tool.Landscape));
         commands.Register(new ChoiceCommand(LandscapeRadius, "Radius", [.. LandscapeSession.Radii.Select(Meters)], () => Meters(NearestOf(LandscapeSession.Radii, shell.Landscape.Radius)), v => shell.Landscape.SetRadius(LandscapeSession.Radii.First(r => Meters(r) == v)))
         {
@@ -222,6 +222,18 @@ static partial class EditorCommands
         commands.Register(new ChoiceCommand(LandscapeFalloff, "Falloff", [.. LandscapeSession.Shares.Select(Percent)], () => Percent(NearestOf(LandscapeSession.Shares, shell.Landscape.Falloff)), v => shell.Landscape.SetFalloff(LandscapeSession.Shares.First(s => Percent(s) == v)))
         {
             Description = "How much of the brush's radius, from its edge in, softens to nothing.",
+            CanExecuteWhen = () => shell.Tool == Tool.Landscape,
+        });
+        string LayerName(int layer) => $"Layer {layer + 1}";
+        commands.Register(new ChoiceCommand(LandscapeLayer, "Layer", [.. Enumerable.Range(0, LandscapeSession.Layers).Select(LayerName)], () => LayerName(shell.Landscape.Layer), v => shell.Landscape.SetLayer(int.Parse(v["Layer ".Length..], System.Globalization.CultureInfo.InvariantCulture) - 1))
+        {
+            Description = "The layer that the Paint brush paints: the red, green, blue or alpha of the terrain's layer map, which its material blends.",
+            CanExecuteWhen = () => shell.Tool == Tool.Landscape,
+        });
+        static string PerHundred(double d) => string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{d:0.##} / 100 m²");
+        commands.Register(new ChoiceCommand(LandscapeDensity, "Density", [.. LandscapeSession.Densities.Select(PerHundred)], () => PerHundred(NearestOf(LandscapeSession.Densities, shell.Landscape.Density)), v => shell.Landscape.SetDensity(LandscapeSession.Densities.First(d => PerHundred(d) == v)))
+        {
+            Description = "How many instances the Scatter brush puts on 100 square meters of the terrain.",
             CanExecuteWhen = () => shell.Tool == Tool.Landscape,
         });
         commands.Register(new Command(LocalSpace, "Local Axes", shell.ToggleSpace)
