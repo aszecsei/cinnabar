@@ -176,10 +176,12 @@ main :: proc() {
 			case .Loaded:
 				kind :=
 					link.Reload_Kind.Code if next.api.layout_hash() == game.api.layout_hash() else .Soft_Restart
-				old := game
-				state = game_swap(&game, next, state)
 				when AUDIT_POINTERS {
+					old := game
+					state = game_swap(&game, next, state)
 					unload_old_image(old, game, state)
+				} else {
+					state = game_swap(&game, next, state)
 				}
 				audio_after := platform.audio_status()
 				log.debugf(

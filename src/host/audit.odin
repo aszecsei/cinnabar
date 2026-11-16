@@ -53,7 +53,11 @@ unload_old_image :: proc(old, next: Game_Module, state: rawptr) -> (unloaded: bo
 		return false
 	}
 	if findings := audit_reload(old, next, state); len(findings) > 0 {
-		log.warnf("host: kept %s loaded: %d values in the state point into it", path, len(findings))
+		log.warnf(
+			"host: kept %s loaded: %d values in the state point into it",
+			path,
+			len(findings),
+		)
 		return false
 	}
 	if !dynlib.unload_library(old.lib) {
