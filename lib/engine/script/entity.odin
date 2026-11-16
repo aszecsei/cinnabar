@@ -181,7 +181,7 @@ entity_get :: proc(L: ^luau.State) -> c.int {
 		return 1
 	}
 	id := check_component_type(L, 2)
-	if ecs.has_raw(w, e, id) {
+	if ecs.has_raw(w, e, id) || edited(r, e, id) != nil {
 		push_userdata(L, .Component_Ref, Component_Ref{e, id})
 	} else {
 		luau.pushnil(L)
@@ -196,20 +196,31 @@ entity_has :: proc(L: ^luau.State) -> c.int {
 		luau.pushboolean(L, !luau.isnil(L, -1))
 		return 1
 	}
-	_, w := world_of(L)
-	luau.pushboolean(L, b32(ecs.has_raw(w, alive_entity(L, 1), check_component_type(L, 2))))
+	r, w := world_of(L)
+	e, id := alive_entity(L, 1), check_component_type(L, 2)
+	luau.pushboolean(L, b32(ecs.has_raw(w, e, id) || edited(r, e, id) != nil))
 	return 1
 }
 
 // entity_add adds a component at once, from its default, and then from the optional table of field values. It
-// returns the component. Adding a component that the entity has resets it.
+// returns the component. Adding a component that the entity has resets it. In Edit mode, an edit-mode behaviour's add
+// to a document entity is an edit: the component reads as added until the phase ends, and a behaviour gives nil.
 @(private = "file")
 entity_add :: proc(L: ^luau.State) -> c.int {
 	r, w := world_of(L)
 	e := alive_entity(L, 1)
+	if is_stand_in(r, e) {
+		raise(L, "a prefab that a behaviour spawns in Edit mode takes only a pose, a parent and its active state")
+	}
+	recorded := records_writes_to(r, e)
 	if is_class(L, 2) {
 		if !luau.isnoneornil(L, 3) {
 			luau.L_checktype(L, 3, .TABLE)
+		}
+		if recorded {
+			attach_edit(r, L, e, 2, luau.isnoneornil(L, 3) ? 0 : 3)
+			luau.pushnil(L)
+			return 1
 		}
 		attach(r, L, e, 2, luau.isnoneornil(L, 3) ? 0 : 3, immediate = true)
 		return 1
@@ -232,7 +243,11 @@ entity_add :: proc(L: ^luau.State) -> c.int {
 	if id == ecs.LOCAL_TRANSFORM_ID || id == ecs.PARENT_ID {
 		raise(L, "use entity:set_parent to change the hierarchy")
 	}
-	ecs.add_raw(w, e, id, x.default[:x.size])
+	if recorded {
+		add_component_edit(r, e, id, x.default[:x.size])
+	} else {
+		ecs.add_raw(w, e, id, x.default[:x.size])
+	}
 	ref := Component_Ref{e, id}
 	if !luau.isnoneornil(L, 3) {
 		fill_fields(r, L, ref, x, 3)
@@ -245,13 +260,25 @@ entity_add :: proc(L: ^luau.State) -> c.int {
 entity_remove :: proc(L: ^luau.State) -> c.int {
 	r, w := world_of(L)
 	e := alive_entity(L, 1)
+	if is_stand_in(r, e) {
+		raise(L, "a prefab that a behaviour spawns in Edit mode takes only a pose, a parent and its active state")
+	}
+	recorded := records_writes_to(r, e)
 	if is_class(L, 2) {
-		luau.pushboolean(L, b32(detach(r, L, e, 2)))
+		luau.pushboolean(L, b32(detach_edit(r, L, e, 2) if recorded else detach(r, L, e, 2)))
 		return 1
 	}
 	id := check_component_type(L, 2)
 	if id == ecs.LOCAL_TRANSFORM_ID || id == ecs.PARENT_ID {
 		raise(L, "use entity:set_parent(nil) to change the hierarchy")
+	}
+	if recorded {
+		has := ecs.has_raw(w, e, id) || edited(r, e, id) != nil
+		if has {
+			record_edit(r, Edit_Remove{e, id})
+		}
+		luau.pushboolean(L, b32(has))
+		return 1
 	}
 	luau.pushboolean(L, b32(ecs.remove_raw(w, e, id)))
 	return 1
@@ -262,7 +289,12 @@ entity_remove :: proc(L: ^luau.State) -> c.int {
 @(private = "file")
 entity_set_active :: proc(L: ^luau.State) -> c.int {
 	r, w := world_of(L)
-	ecs.set_active(w, alive_entity(L, 1), bool(luau.L_checkboolean(L, 2)))
+	e, active := alive_entity(L, 1), bool(luau.L_checkboolean(L, 2))
+	if records_writes_to(r, e) {
+		record_edit(r, Edit_Active{e, active})
+		return 0
+	}
+	ecs.set_active(w, e, active)
 	drain_log(r)
 	return 0
 }
@@ -274,6 +306,10 @@ entity_set_active :: proc(L: ^luau.State) -> c.int {
 entity_destroy :: proc(L: ^luau.State) -> c.int {
 	r, w := world_of(L)
 	e := alive_entity(L, 1)
+	if records_writes_to(r, e) {
+		record_edit(r, Edit_Destroy{e})
+		return 0
+	}
 	switch r.phase {
 	case .None:
 		ecs.despawn(w, e)
@@ -302,7 +338,10 @@ entity_teleport :: proc(L: ^luau.State) -> c.int {
 		pose.rotation = check_quaternion(L, 3)
 	}
 	set_pose(r, L, e, pose)
-	ecs.teleport(w, e, pose)
+	// A document entity moves when the editor's edit comes back, which is not interpolated.
+	if !records_writes_to(r, e) {
+		ecs.teleport(w, e, pose)
+	}
 	return 0
 }
 
@@ -333,6 +372,14 @@ entity_move :: proc(L: ^luau.State) -> c.int {
 entity_set_parent :: proc(L: ^luau.State) -> c.int {
 	r, w := world_of(L)
 	e := alive_entity(L, 1)
+	if records_writes_to(r, e) {
+		parent := luau.isnoneornil(L, 2) ? 0 : alive_entity(L, 2)
+		if parent == e {
+			raise(L, "an entity cannot be its own parent")
+		}
+		record_edit(r, Edit_Parent{e, parent})
+		return 0
+	}
 	pose := (^ecs.Transform)(component_data(r, L, {e, ecs.TRANSFORM_ID}))^
 	if luau.isnoneornil(L, 2) {
 		ecs.remove_raw(w, e, ecs.PARENT_ID)
@@ -369,12 +416,17 @@ world_spawn :: proc(L: ^luau.State) -> c.int {
 	if !luau.isnoneornil(L, first + 1) {
 		pose.rotation = check_quaternion(L, first + 1)
 	}
-	if prefab != {} {
+	// In Edit mode, an edit-mode behaviour's spawn is a draft that becomes an entity of the document, and a prefab's is
+	// a stand-in that becomes an instance (see docs/scripting/behaviours.md#writes-in-edit-mode).
+	if prefab != {} && !writing(r) {
 		spawn_prefab_now(r, L, prefab, pose)
 		return 1
 	}
 	e := ecs.spawn(w)
 	ecs.add(w, e, pose)
+	if writing(r) {
+		record_edit(r, Edit_Spawn{entity = e, prefab = prefab})
+	}
 	push_entity(L, e)
 	return 1
 }

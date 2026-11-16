@@ -641,9 +641,12 @@ call_method :: proc(r: ^Runtime, h: Instance_Handle, name: cstring, nargs: c.int
 	luau.insert(L, -2 - nargs)
 	luau.insert(L, -1 - nargs)
 	previous := set_category(r, L, i.category)
+	writer := r.writer
+	r.writer = h
 	zone := begin_callback(r, i.profile_class, callback_kind(name))
 	protected_call(r, L, nargs + 1, 0)
 	end_callback(r, zone)
+	r.writer = writer
 	set_category(r, L, previous)
 }
 

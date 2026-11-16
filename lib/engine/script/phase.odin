@@ -111,6 +111,10 @@ set_callbacks :: proc(r: ^Runtime, to: Callbacks) {
 	if was == to {
 		return
 	}
+	// What the edit-mode behaviours did belongs to the Edit mode that ends.
+	if was == .Edit_Mode {
+		drop_edits(r)
+	}
 	for &i, index in r.instances[:r.instance_used] {
 		if .Live in i.flags && silent_at(was, &i) && !silent_at(to, &i) {
 			sync_enabled(r, {u32(index), i.generation})

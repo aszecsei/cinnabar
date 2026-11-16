@@ -108,7 +108,7 @@ inspect :: proc(r: ^Runtime, e: ecs.Entity, allocator: runtime.Allocator) -> []B
 }
 
 // script_of is the script asset whose module returned the class at idx, or zero.
-@(private = "file")
+@(private)
 script_of :: proc(r: ^Runtime, L: ^luau.State, idx: c.int) -> format.Guid {
 	for m in r.modules[:r.module_count] {
 		if m.state != .Loaded || m.result == luau.NOREF {
@@ -124,8 +124,8 @@ script_of :: proc(r: ^Runtime, L: ^luau.State, idx: c.int) -> format.Guid {
 	return {}
 }
 
-// read_field pops a key and reads the instance's value for it, without metamethods.
-@(private = "file")
+// read_field pops a key and reads the table's value for it, without metamethods.
+@(private)
 read_field :: proc(
 	r: ^Runtime,
 	L: ^luau.State,

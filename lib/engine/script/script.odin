@@ -83,6 +83,12 @@ Runtime :: struct {
 	category:                   c.int,
 	// Which behaviours get callbacks: every one, only the edit-mode classes', or none (see set_callbacks).
 	callbacks:                  Callbacks,
+	// The instance whose callback or coroutine runs, or the zero handle, and what the edit-mode behaviours did to the
+	// document in Edit mode (see record.odin). A registration, which reload clears: the component of the document's
+	// entities.
+	writer:                     Instance_Handle,
+	edits:                      Edits,
+	document_component:         ecs.Component_Id,
 	// The GUIDs that scripts hold references to, by the payload of their light userdata. They stay across reloads,
 	// since the VM's values keep their payloads.
 	asset_refs:                 [MAX_ASSET_REFS]format.Guid,
@@ -212,6 +218,7 @@ reload :: proc(r: ^Runtime, platform: ^core.Platform_API, register: Register_Pro
 	r.light_methods = {}
 	r.userdata_methods = {}
 	r.prefab_spawner = nil
+	r.document_component = 0
 	r.fixed_hook = {}
 	r.exposed_count = 0
 	r.field_count = 0

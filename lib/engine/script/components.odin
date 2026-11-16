@@ -200,13 +200,13 @@ component_name :: proc(r: ^Runtime, id: ecs.Component_Id) -> string {
 }
 
 // component_data finds the component behind a reference. It raises an error if the entity is destroyed or no longer
-// has the component.
+// has the component. In Edit mode, a component that an edit-mode behaviour wrote reads as it wrote it.
 @(private)
 component_data :: proc(r: ^Runtime, L: ^luau.State, ref: Component_Ref) -> [^]byte {
 	if !ecs.is_alive(r.world, ref.entity) {
 		raise(L, "the entity is destroyed")
 	}
-	data := ecs.get_raw(r.world, ref.entity, ref.id)
+	data := read_component(r, ref.entity, ref.id)
 	if data == nil {
 		raise(
 			L,
@@ -216,10 +216,23 @@ component_data :: proc(r: ^Runtime, L: ^luau.State, ref: Component_Ref) -> [^]by
 	return ([^]byte)(data)
 }
 
-// component_write is component_data for a write: the component counts as changed.
+// read_component is the component's data, as an edit-mode behaviour wrote it in Edit mode, or nil.
+@(private)
+read_component :: proc(r: ^Runtime, e: ecs.Entity, id: ecs.Component_Id) -> rawptr {
+	if c := edited(r, e, id); c != nil {
+		return raw_data(c.after)
+	}
+	return ecs.get_raw(r.world, e, id)
+}
+
+// component_write is component_data for a write: the component counts as changed. An edit-mode behaviour's write to a
+// document entity goes to a copy, which the editor gets as an edit (see record.odin).
 @(private)
 component_write :: proc(r: ^Runtime, L: ^luau.State, ref: Component_Ref) -> [^]byte {
 	data := component_data(r, L, ref)
+	if records_writes_to(r, ref.entity) {
+		return edit_component(r, ref.entity, ref.id, data)
+	}
 	ecs.mark_changed(r.world, ref.entity, ref.id)
 	return data
 }
@@ -440,7 +453,7 @@ RIGHT :: [3]f32{1, 0, 0}
 transform_index :: proc(r: ^Runtime, L: ^luau.State, ref: Component_Ref, key: string) -> bool {
 	switch key {
 	case "local_position", "local_rotation", "local_scale":
-		local := local_transform(r, L, ref.entity)
+		local := local_transform(r, L, ref.entity, write = false)
 		switch key {
 		case "local_position":
 			push_vector(L, local.offset)
@@ -484,7 +497,7 @@ transform_newindex :: proc(
 		set_pose(r, L, ref.entity, pose)
 		return true
 	case "local_position", "local_rotation", "local_scale":
-		local := local_transform(r, L, ref.entity)
+		local := local_transform(r, L, ref.entity, write = true)
 		switch key {
 		case "local_position":
 			local.offset = check_vector(L, idx)
@@ -493,7 +506,6 @@ transform_newindex :: proc(
 		case:
 			local.scale = check_vector(L, idx)
 		}
-		ecs.mark_changed(r.world, ref.entity, ecs.LOCAL_TRANSFORM_ID)
 		if parent, ok := parent_pose(r, ref.entity); ok {
 			(^ecs.Transform)(component_write(r, L, ref))^ = ecs.compose(parent, local^)
 		}
@@ -504,13 +516,19 @@ transform_newindex :: proc(
 	return false
 }
 
+// local_transform is the entity's Local_Transform, to read, or to write, which component_write records in Edit mode.
 @(private = "file")
-local_transform :: proc(r: ^Runtime, L: ^luau.State, e: ecs.Entity) -> ^ecs.Local_Transform {
-	local := ecs.get(r.world, e, ecs.Local_Transform)
-	if local == nil {
+local_transform :: proc(
+	r: ^Runtime,
+	L: ^luau.State,
+	e: ecs.Entity,
+	write: bool,
+) -> ^ecs.Local_Transform {
+	if read_component(r, e, ecs.LOCAL_TRANSFORM_ID) == nil {
 		raise(L, "the entity has no parent, so it has no local pose")
 	}
-	return local
+	ref := Component_Ref{e, ecs.LOCAL_TRANSFORM_ID}
+	return (^ecs.Local_Transform)(component_write(r, L, ref) if write else component_data(r, L, ref))
 }
 
 // parent_pose is the Transform of an entity's parent, if it has one.
@@ -520,7 +538,7 @@ parent_pose :: proc(r: ^Runtime, e: ecs.Entity) -> (pose: ecs.Transform, ok: boo
 	if parent == nil {
 		return
 	}
-	p := ecs.get(r.world, parent.entity, ecs.Transform)
+	p := (^ecs.Transform)(read_component(r, parent.entity, ecs.TRANSFORM_ID))
 	if p == nil {
 		return
 	}
@@ -531,10 +549,9 @@ parent_pose :: proc(r: ^Runtime, e: ecs.Entity) -> (pose: ecs.Transform, ok: boo
 @(private)
 set_pose :: proc(r: ^Runtime, L: ^luau.State, e: ecs.Entity, pose: ecs.Transform) {
 	(^ecs.Transform)(component_write(r, L, {e, ecs.TRANSFORM_ID}))^ = pose
-	if parent, ok := parent_pose(r, e); ok {
-		if local := ecs.get_write(r.world, e, ecs.Local_Transform); local != nil {
-			local^ = local_from_world(parent, pose)
-		}
+	if parent, ok := parent_pose(r, e); ok && read_component(r, e, ecs.LOCAL_TRANSFORM_ID) != nil {
+		local := (^ecs.Local_Transform)(component_write(r, L, {e, ecs.LOCAL_TRANSFORM_ID}))
+		local^ = local_from_world(parent, pose)
 	}
 }
 
