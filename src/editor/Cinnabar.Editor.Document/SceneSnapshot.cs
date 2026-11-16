@@ -9,9 +9,12 @@ namespace Cinnabar.Editor.Document;
 /// </summary>
 public static class SceneSnapshot
 {
-    /// <summary>The scene as a message, with the GUID of its file as hex, or "" for a scene that has none yet, which is 16 zero bytes.</summary>
-    public static Wire.LoadScene ToMessage(Scene scene, string guid) =>
-        new([.. scene.Entities.Select(Entity)], guid.Length == 32 && guid.All(Uri.IsHexDigit) ? Convert.FromHexString(guid) : new byte[16]);
+    /// <summary>
+    /// The scene as a message, with the GUID of its file as hex, or "" for a scene that has none yet, which is 16 zero
+    /// bytes, and the editor's number for the load, which the behaviours' edits name.
+    /// </summary>
+    public static Wire.LoadScene ToMessage(Scene scene, string guid, ulong ticket = 0) =>
+        new([.. scene.Entities.Select(Entity)], guid.Length == 32 && guid.All(Uri.IsHexDigit) ? Convert.FromHexString(guid) : new byte[16], ticket);
 
     public static Wire.SceneEntity Entity(SceneEntity e) => new(
         e.Id,

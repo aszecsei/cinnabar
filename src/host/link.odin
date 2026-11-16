@@ -414,7 +414,9 @@ handle_message :: proc(l: ^Link, message: link.Message, connection: u64) {
 	     link.Box_Handles,
 	     link.Bake_Thumbnail,
 	     link.Thumbnail_Failed,
-	     link.Nav_Probe:
+	     link.Nav_Probe,
+	     link.Behaviour_Operations,
+	     link.Behaviour_Operations_Answer:
 	// is_host_message sends these to the game.
 	}
 }
