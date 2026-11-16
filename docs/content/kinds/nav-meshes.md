@@ -55,6 +55,7 @@ The cooker cannot lay out native components, so it reads the physics components 
 - **Static colliders count:** a `Collider` that is not a sensor, on an active entity whose ancestors are active, without a `Character`, and either without a `Rigid_Body` on it or above it, or whose own or nearest ancestor's `Rigid_Body` is `Static` (see [Physics: Components](../../physics/design.md#components)). Kinematic and dynamic bodies do not.
 - **Shapes** are triangulated at their scale, as the physics sync scales them: a box as 12 triangles, a sphere, a capsule and a cylinder with 16 segments around y.
 - **Mesh and convex colliders** take the cooked mesh's collision data (see [Physics: Shapes](../../physics/design.md#shapes)). A convex collider bakes as its triangles, not their hull. A mirroring scale turns the triangles back the right way. A mesh that is not cooked, or that has no collision data, is a warning, and its collider is left out. The mesh is one of the scene's dependencies, so a change to it bakes again.
+- **Height field colliders** are not baked yet: each is a warning, and its collider is left out.
 - **Positions** are `World_Position`s. The bake works in `f32` relative to the volume's center, which the blob keeps as its anchor. Each triangle that reaches the volume, or the widest agent's border past it across, goes in, in the scene's order.
 
 ## The bake
