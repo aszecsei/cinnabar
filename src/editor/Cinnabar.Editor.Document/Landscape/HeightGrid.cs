@@ -36,24 +36,26 @@ public readonly record struct TexelRect(int X, int Y, int Width, int Height)
 }
 
 /// <summary>
-/// One channel of an image as the landscape tools paint it (see docs/editor/landscape.md#height-maps-and-masks):
-/// <see cref="Width"/> by <see cref="Height"/> texels from 0 to 65535, row-major from the top, which is the least v of
-/// <c>uv0</c> and the least z of the surface. A height map's texel is its height between the surface's
-/// <c>height_range</c>, and a hole mask's is 0 for a hole. Undo keeps it in tiles of <see cref="Tile"/> texels.
+/// An image as the landscape tools paint it (see docs/editor/landscape.md#height-maps-and-masks): <see cref="Width"/>
+/// by <see cref="Height"/> texels of <see cref="Channels"/> values from 0 to 65535 each, row-major from the top, which
+/// is the least v of <c>uv0</c> and the least z of the surface. A height map's texel is its height between the
+/// surface's <c>height_range</c>, a hole mask's is 0 for a hole, and a layer map's four values are its layers' weights.
+/// Undo keeps it in tiles of <see cref="Tile"/> texels.
 /// </summary>
 public sealed class HeightGrid
 {
     /// <summary>A side of the tiles that a stroke's undo keeps.</summary>
     public const int Tile = 32;
 
-    public HeightGrid(int width, int height, ushort[] texels)
+    public HeightGrid(int width, int height, ushort[] texels, int channels = 1)
     {
-        if (width <= 0 || height <= 0 || texels.Length != width * height)
+        if (width <= 0 || height <= 0 || channels <= 0 || texels.Length != width * height * channels)
         {
-            throw new ArgumentException($"a grid of {width} by {height} has {width * height} texels, not {texels.Length}");
+            throw new ArgumentException($"a grid of {width} by {height} of {channels} values has {width * height * channels}, not {texels.Length}");
         }
         Width = width;
         Height = height;
+        Channels = channels;
         Texels = texels;
     }
 
@@ -61,20 +63,35 @@ public sealed class HeightGrid
     {
     }
 
+    /// <summary>A grid whose texels all have these values, one for each channel.</summary>
+    public static HeightGrid Of(int width, int height, params ushort[] texel) => new(width, height, Repeated(width * height, texel), texel.Length);
+
     public int Width { get; }
 
     public int Height { get; }
 
+    /// <summary>The values of a texel.</summary>
+    public int Channels { get; }
+
+    /// <summary>The values, a texel's together.</summary>
     public ushort[] Texels { get; }
 
+    /// <summary>A texel's first value.</summary>
     public ushort this[int x, int y]
     {
-        get => Texels[y * Width + x];
-        set => Texels[y * Width + x] = value;
+        get => Texels[(y * Width + x) * Channels];
+        set => Texels[(y * Width + x) * Channels] = value;
     }
 
-    /// <summary>The texel at a place, clamped to the edges.</summary>
-    public ushort At(int x, int y) => Texels[Math.Clamp(y, 0, Height - 1) * Width + Math.Clamp(x, 0, Width - 1)];
+    /// <summary>A texel's value of a channel.</summary>
+    public ushort this[int x, int y, int channel]
+    {
+        get => Texels[(y * Width + x) * Channels + channel];
+        set => Texels[(y * Width + x) * Channels + channel] = value;
+    }
+
+    /// <summary>The texel's first value at a place, clamped to the edges.</summary>
+    public ushort At(int x, int y) => Texels[(Math.Clamp(y, 0, Height - 1) * Width + Math.Clamp(x, 0, Width - 1)) * Channels];
 
     /// <summary>The grid at a point of <c>uv0</c>, from 0 to 1, as a linear, clamped sampler reads mip 0.</summary>
     public double Sample(double u, double v)
@@ -92,25 +109,27 @@ public sealed class HeightGrid
     /// <summary>The texel at a point of <c>uv0</c>, as a Load of its floor does.</summary>
     public ushort Nearest(double u, double v) => At((int)Math.Floor(u * Width), (int)Math.Floor(v * Height));
 
-    public HeightGrid Copy() => new(Width, Height, (ushort[])Texels.Clone());
+    public HeightGrid Copy() => new(Width, Height, (ushort[])Texels.Clone(), Channels);
 
-    /// <summary>The texels of a rectangle inside the grid, row-major.</summary>
+    /// <summary>The texels of a rectangle inside the grid, row-major, with their values together.</summary>
     public ushort[] Read(TexelRect rect)
     {
-        var out16 = new ushort[rect.Width * rect.Height];
+        var out16 = new ushort[rect.Width * rect.Height * Channels];
+        var row = rect.Width * Channels;
         for (var y = 0; y < rect.Height; y++)
         {
-            Array.Copy(Texels, (rect.Y + y) * Width + rect.X, out16, y * rect.Width, rect.Width);
+            Array.Copy(Texels, ((rect.Y + y) * Width + rect.X) * Channels, out16, y * row, row);
         }
         return out16;
     }
 
-    /// <summary>Writes the texels of a rectangle inside the grid, row-major.</summary>
+    /// <summary>Writes the texels of a rectangle inside the grid, row-major, with their values together.</summary>
     public void Write(TexelRect rect, ushort[] texels)
     {
+        var row = rect.Width * Channels;
         for (var y = 0; y < rect.Height; y++)
         {
-            Array.Copy(texels, y * rect.Width, Texels, (rect.Y + y) * Width + rect.X, rect.Width);
+            Array.Copy(texels, y * row, Texels, ((rect.Y + y) * Width + rect.X) * Channels, row);
         }
     }
 
@@ -132,6 +151,16 @@ public sealed class HeightGrid
                 yield return (tx, ty);
             }
         }
+    }
+
+    static ushort[] Repeated(int count, ushort[] texel)
+    {
+        var texels = new ushort[count * texel.Length];
+        for (var i = 0; i < count; i++)
+        {
+            texel.CopyTo(texels, i * texel.Length);
+        }
+        return texels;
     }
 
     static ushort[] Filled(int count, ushort fill)

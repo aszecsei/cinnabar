@@ -19,6 +19,12 @@ public enum LandscapeBrush
     Hole,
     /// <summary>Paints the hole mask solid.</summary>
     Fill,
+    /// <summary>Paints a layer into the layer map: its weight rises and the others' fall, so they still add up to 1.</summary>
+    Paint,
+    /// <summary>Scatters instances of a foliage layer over the terrain, up to its density.</summary>
+    Scatter,
+    /// <summary>Takes a foliage layer's instances away.</summary>
+    Erase,
 }
 
 /// <summary>
@@ -48,10 +54,14 @@ public sealed class LandscapeStroke
     readonly double _flatten;
     readonly (double X, double Y, double Height) _start;
 
-    public LandscapeStroke(HeightGrid grid, LandscapeBrush brush, BrushDab first)
+    /// <summary>What one dab of Paint at full strength moves a layer's weight toward 1, as a share of the way.</summary>
+    public const double PaintStep = 0.25;
+
+    public LandscapeStroke(HeightGrid grid, LandscapeBrush brush, BrushDab first, int layer = 0)
     {
         Grid = grid;
         Brush = brush;
+        Layer = Math.Clamp(layer, 0, grid.Channels - 1);
         Original = grid.Copy();
         _flatten = Original.Sample(first.X / grid.Width, first.Y / grid.Height);
         _start = (first.X, first.Y, _flatten);
@@ -60,6 +70,9 @@ public sealed class LandscapeStroke
     public HeightGrid Grid { get; }
 
     public LandscapeBrush Brush { get; }
+
+    /// <summary>The channel of a layer map that Paint raises.</summary>
+    public int Layer { get; }
 
     /// <summary>The grid as it was when the stroke began.</summary>
     public HeightGrid Original { get; }
@@ -79,7 +92,7 @@ public sealed class LandscapeStroke
         Touch(rect);
         // Smoothing reads the texels as they were before this dab, one past the rectangle.
         var around = new TexelRect(rect.X - 1, rect.Y - 1, rect.Width + 2, rect.Height + 2).Clamp(Grid.Width, Grid.Height);
-        var before = Brush == LandscapeBrush.Smooth ? new HeightGrid(around.Width, around.Height, Grid.Read(around)) : null;
+        var before = Brush == LandscapeBrush.Smooth ? new HeightGrid(around.Width, around.Height, Grid.Read(around), Grid.Channels) : null;
         var amount = dab.Strength * Step * 65535;
         for (var y = rect.Y; y < rect.Bottom; y++)
         {
@@ -88,6 +101,11 @@ public sealed class LandscapeStroke
                 var w = Weight((x + 0.5 - dab.X) / dab.RadiusX, (y + 0.5 - dab.Y) / dab.RadiusY, dab.Falloff);
                 if (w <= 0)
                 {
+                    continue;
+                }
+                if (Brush == LandscapeBrush.Paint)
+                {
+                    PaintTexel(x, y, w * dab.Strength * PaintStep);
                     continue;
                 }
                 double h = Grid[x, y];
@@ -171,6 +189,25 @@ public sealed class LandscapeStroke
             }
         }
         return restored.Union(rect);
+    }
+
+    // Moves a texel's layer a share of the way to 1, and scales the other layers so the weights add up to what they did,
+    // or to 1 when they were all 0.
+    void PaintTexel(int x, int y, double share)
+    {
+        var others = 0.0;
+        for (var c = 0; c < Grid.Channels; c++)
+        {
+            others += c == Layer ? 0 : Grid[x, y, c];
+        }
+        double layer = Grid[x, y, Layer];
+        var raised = layer + (65535 - layer) * share;
+        var left = Math.Max(0, 65535 - raised);
+        for (var c = 0; c < Grid.Channels; c++)
+        {
+            var v = c == Layer ? raised : others > 0 ? Grid[x, y, c] * left / others : 0;
+            Grid[x, y, c] = (ushort)Math.Clamp(Math.Round(v), 0, 65535);
+        }
     }
 
     void Touch(TexelRect rect)

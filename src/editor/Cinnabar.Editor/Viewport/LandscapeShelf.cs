@@ -8,7 +8,8 @@ namespace Cinnabar.Editor.Viewport;
 
 /// <summary>
 /// The Landscape tool's brush, beside the Scene's views while it is the tool (see docs/editor/landscape.md#the-tool):
-/// what the brush does, its radius, its strength and its falloff. Each is a command, so the command palette has them too.
+/// what the brush does, its radius, its strength, its falloff, the layer that Paint paints, and how dense Scatter is. Each is a command, so
+/// the command palette has them too.
 /// </summary>
 public sealed class LandscapeShelf : Border
 {
@@ -25,6 +26,8 @@ public sealed class LandscapeShelf : Border
         stack.Children.Add(ToolButton.Choice(shell, EditorCommands.LandscapeRadius));
         stack.Children.Add(ToolButton.Choice(shell, EditorCommands.LandscapeStrength));
         stack.Children.Add(ToolButton.Choice(shell, EditorCommands.LandscapeFalloff));
+        stack.Children.Add(ToolButton.Choice(shell, EditorCommands.LandscapeLayer));
+        stack.Children.Add(ToolButton.Choice(shell, EditorCommands.LandscapeDensity));
         stack.Children.Add(_hint);
         var expander = new SectionExpander().Create("Landscape", stack);
         expander.Classes.Add("shelf");

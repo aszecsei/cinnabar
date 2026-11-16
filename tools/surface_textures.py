@@ -1,5 +1,6 @@
-# Writes the sample's generated textures (see docs/rendering/materials.md#parallax-occlusion-mapping,
-# docs/rendering/surfaces.md and docs/content/kinds/textures.md#textures): grayscale or RGBA PNGs that a pattern makes,
+# Writes the sample's generated textures and the playground's bushes (see
+# docs/rendering/materials.md#parallax-occlusion-mapping, docs/rendering/surfaces.md and
+# docs/content/kinds/textures.md#textures): grayscale or RGBA PNGs that a pattern makes,
 # so the repository holds no painted art. It uses the standard library only. `just sample-textures` runs it;
 # commit what it writes, with the .meta files.
 import math
@@ -98,6 +99,25 @@ def playground_hills(size=128):
     return size, size, rows, 16
 
 
+# playground_layers is the playground terrain's layer map (see docs/rendering/surfaces.md#layers): its red, green, blue
+# and alpha are the weights of grass, dirt, rock and snow. Grass everywhere, a dirt path that winds up from the floor,
+# and snow on the tops of the hills. Paint it further with the Landscape tool's Paint brush.
+def playground_layers(size=128):
+    rows = []
+    for y in range(size):
+        line = []
+        for x in range(size):
+            u, v = (x + 0.5) / size, (y + 0.5) / size
+            path = clamp01(1 - abs(u - (0.5 + 0.12 * math.sin(v * 2 * math.pi))) / 0.04)
+            hills = 0.5 + 0.5 * math.sin(u * 2 * math.pi * 2.5) * math.cos(v * 2 * math.pi * 1.5)
+            snow = smoothstep(0.45, 0.6, smoothstep(0.0, 0.5, v) * (0.3 + 0.35 * hills))
+            dirt = path * (1 - snow)
+            grass = 1 - dirt - snow
+            line += [int(round(grass * 255)), int(round(dirt * 255)), 0, int(round(snow * 255))]
+        rows.append(line)
+    return size, size, rows
+
+
 # dev_grid: the engine's dev texture (see docs/editor/mesh-editing.md#dev-materials), 1024 texels square: a thick
 # line every 256 texels, a thinner one every 64, and 128-texel checks of two greys between them. At 256 texels per
 # meter it is 4 m across, with the thick lines a meter apart and the thin ones at the grid's quarter meter, so a
@@ -157,8 +177,39 @@ TEXTURES = {
     "samples/mygame/content/textures/island_hole.png": island_hole,
     "samples/mygame/content/textures/terrain_hole.png": terrain_hole,
     "samples/mygame/content/textures/playground_hills.png": playground_hills,
+    "samples/mygame/content/textures/playground_layers.png": playground_layers,
     "samples/mygame/content/textures/foliage.png": foliage,
     "samples/mygame/content/textures/foliage_coverage.png": foliage,
+}
+
+
+# playground_bushes is the playground hills' foliage, an .instances file (see docs/content/kinds/instance-sets.md):
+# bush cards on a jittered grid 4 m apart over the hills, off the dirt path and below the snow, each turned at random
+# about up and scaled from 0.8 to 1.2, at the hills' height, in the space of the Hills entity, 64 m across and 8 m
+# high. Scatter and erase more with the Landscape tool.
+def playground_bushes():
+    rng = random.Random(65)
+    lines = ["instances 1",
+             "# Each line is an instance: its position x y z in meters, its rotation as a quaternion x y z w, and its scale x y z,",
+             "# relative to the entity whose Instanced_Mesh_Renderer names the set."]
+    for j in range(16):
+        for i in range(16):
+            u = (i + 0.5 + rng.uniform(-0.4, 0.4)) / 16
+            v = (j + 0.5 + rng.uniform(-0.4, 0.4)) / 16
+            path = abs(u - (0.5 + 0.12 * math.sin(v * 2 * math.pi))) < 0.06
+            hills = 0.5 + 0.5 * math.sin(u * 2 * math.pi * 2.5) * math.cos(v * 2 * math.pi * 1.5)
+            height = clamp01(smoothstep(0.0, 0.5, v) * (0.3 + 0.35 * hills))
+            if path or height > 0.45 or v < 0.05:
+                continue
+            yaw = rng.uniform(0, 2 * math.pi)
+            scale = rng.uniform(0.8, 1.2)
+            x, z, y = (u - 0.5) * 64, (v - 0.5) * 64, height * 8
+            lines.append(f"i {x:.3f} {y:.3f} {z:.3f} 0 {math.sin(yaw / 2):.6f} 0 {math.cos(yaw / 2):.6f} {scale:.3f} {scale:.3f} {scale:.3f}")
+    return "\n".join(lines) + "\n"
+
+
+INSTANCES = {
+    "samples/mygame/content/textures/playground_bushes.instances": playground_bushes,
 }
 
 
@@ -167,6 +218,10 @@ def main(argv):
     for path, make in TEXTURES.items():
         w, h, rows, *depth = make()
         write_png(f"{root}/{path}", w, h, rows, *depth)
+        print(path)
+    for path, make in INSTANCES.items():
+        with open(f"{root}/{path}", "w", newline="\n") as f:
+            f.write(make())
         print(path)
 
 
