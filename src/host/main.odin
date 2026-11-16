@@ -24,7 +24,7 @@ Game_Module :: struct {
 	load_dir:    string,
 	version:     int,
 	modified:    time.Time,
-	// The loaded copy, never unloaded. The pointer audit checks the state against its image.
+	// The loaded copy. After a reload, a debug host unloads it when the pointer audit finds nothing in its image.
 	lib:         dynlib.Library,
 	api:         core.Game_API,
 }
@@ -176,7 +176,13 @@ main :: proc() {
 			case .Loaded:
 				kind :=
 					link.Reload_Kind.Code if next.api.layout_hash() == game.api.layout_hash() else .Soft_Restart
-				state = game_swap(&game, next, state)
+				when AUDIT_POINTERS {
+					old := game
+					state = game_swap(&game, next, state)
+					unload_old_image(old, game, state)
+				} else {
+					state = game_swap(&game, next, state)
+				}
 				audio_after := platform.audio_status()
 				log.debugf(
 					"host: the reload took %v, and left %d of %d audio frames queued, with %d starved",
@@ -232,8 +238,9 @@ Load_Result :: enum {
 }
 
 // game_load copies the DLL to a versioned name in load_dir and loads the copy, so the build can overwrite the original.
-// Old copies are never unloaded. The copy's name has the process's ID, so two hosts can run one DLL, as the editor's and its Run
-// Game do: neither can replace a copy that the other has loaded.
+// A debug host unloads an old copy after a reload when the pointer audit allows it (see unload_old_image). The copy's
+// name has the process's ID, so two hosts can run one DLL, as the editor's and its Run Game do: neither can replace a
+// copy that the other has loaded.
 game_load :: proc(
 	source_path, load_dir: string,
 	version: int,
@@ -350,9 +357,6 @@ game_swap :: proc(game: ^Game_Module, next: Game_Module, state: rawptr) -> rawpt
 	state := state
 	if next.api.layout_hash() == game.api.layout_hash() {
 		next.api.on_reload(state, platform)
-		when AUDIT_POINTERS {
-			audit_reload(game^, next, state)
-		}
 	} else {
 		log.info("host: Game_State layout changed, restarting game")
 		game.api.shutdown(state)
