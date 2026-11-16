@@ -376,3 +376,67 @@ a_scene_keeps_a_setting_that_it_does_not_override :: proc(t: ^testing.T) {
 	testing.expect_value(t, knob.gain, Setting(f32){false, 3})
 	testing.expect_value(t, knob.level, Setting([3]f32){true, {1, 1, 1}})
 }
+
+// A probe with a value in every field that scenes set, and a target with a scene ID.
+@(private = "file")
+full_probe :: proc(f: ^Fixture) -> (probe: Probe, target: ecs.Entity) {
+	target = ecs.spawn(&f.world)
+	ecs.add(&f.world, target, Scene_Entity{0x42})
+	probe = {
+		flag = true,
+		small = -7,
+		big = max(u64),
+		ratio = 0.1,
+		mode = .Busy,
+		dir = {1, -2, 3.5},
+		turn = quaternion(x = 0, y = 0.7071068, z = 0, w = 0.7071068),
+		at = {raw = {1 << 40, -3, 99}},
+		target = target,
+		model = format.Guid{1 = 9},
+		skins = {{2 = 7}, {}},
+		span = {0.25, 4},
+	}
+	probe.inner.amount = 1e-9
+	return
+}
+
+@(test)
+an_encoded_component_loads_back_to_the_same_bytes :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	probe, target := full_probe(f)
+	info := ecs.registry_find(&f.world.registry, PROBE_ID)
+	fields := encode_fields(&f.world, info, &probe, nil, nil, context.temp_allocator)
+
+	handles := make(map[u64]ecs.Entity, context.temp_allocator)
+	handles[0x42] = target
+	e := ecs.spawn(&f.world)
+	problems := make([dynamic]Problem, context.temp_allocator)
+	testing.expect(t, add_component(&f.world, e, 1, {id = u64(PROBE_ID), name = "Probe", fields = fields}, &handles, &problems))
+	testing.expectf(t, len(problems) == 0, "problems: %v", problems[:])
+	loaded := ecs.get(&f.world, e, Probe)
+	testing.expect(t, loaded != nil && loaded^ == probe)
+
+	// The defaults are no fields.
+	testing.expect_value(t, len(encode_fields(&f.world, info, &Probe{}, nil, nil, context.temp_allocator)), 0)
+}
+
+@(test)
+an_encoded_change_sets_back_to_the_same_bytes :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	before, _ := full_probe(f)
+	e := ecs.spawn(&f.world)
+	ecs.add(&f.world, e, before)
+	after := before
+	after.mode = .Idle
+	after.at.raw.y += 1
+	info := ecs.registry_find(&f.world.registry, PROBE_ID)
+	fields := encode_fields(&f.world, info, &after, &before, nil, context.temp_allocator)
+	testing.expect_value(t, len(fields), 2)
+	handles := make(map[u64]ecs.Entity, context.temp_allocator)
+	for field in fields {
+		testing.expect(t, set_field(&f.world, e, 1, u64(PROBE_ID), field, false, &handles))
+	}
+	testing.expect(t, ecs.get(&f.world, e, Probe)^ == after)
+}

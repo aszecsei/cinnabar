@@ -655,7 +655,7 @@ reset_field :: proc(data, defaults: rawptr, field: Field) {
 	}
 }
 
-@(private = "file")
+@(private)
 field_size :: proc(field: Field) -> int {
 	switch field.kind {
 	case .Bool, .I8, .U8:
