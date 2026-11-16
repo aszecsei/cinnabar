@@ -24,6 +24,8 @@ Game_Module :: struct {
 	load_dir:    string,
 	version:     int,
 	modified:    time.Time,
+	// The loaded copy, never unloaded. The pointer audit checks the state against its image.
+	lib:         dynlib.Library,
 	api:         core.Game_API,
 }
 
@@ -271,6 +273,7 @@ game_load :: proc(
 		load_dir    = load_dir,
 		version     = version,
 		modified    = modified,
+		lib         = lib,
 		api         = (proc() -> core.Game_API)(get_api)(),
 	}
 	if game.api.abi_hash() != core.abi_hash() {
@@ -347,6 +350,9 @@ game_swap :: proc(game: ^Game_Module, next: Game_Module, state: rawptr) -> rawpt
 	state := state
 	if next.api.layout_hash() == game.api.layout_hash() {
 		next.api.on_reload(state, platform)
+		when AUDIT_POINTERS {
+			audit_reload(game^, next, state)
+		}
 	} else {
 		log.info("host: Game_State layout changed, restarting game")
 		game.api.shutdown(state)
