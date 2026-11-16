@@ -2539,3 +2539,105 @@ the_nav_probe_is_the_sessions :: proc(t: ^testing.T) {
 	step(f, 2)
 	testing.expect_value(t, len(f.editor.session.view.nav_probe), 0)
 }
+
+// A Live_Texture puts a blob of its texels, with their mips, in the asset runtime in place of the asset's, which is not
+// even cooked; a region replaces a rectangle of them, and one outside them is refused; Release_Live_Texture ends it,
+// and so does a new connection. The brush is the session's too.
+@(test)
+live_textures_take_their_assets_place :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	f.platform.file_read = core.file_read
+	f.platform.file_modified = core.file_modified
+	f.platform.asset_allocator = runtime.heap_allocator()
+	assets: asset.Assets
+	asset.init(&assets, &f.platform, asset.loose_cache("missing"))
+	defer asset.destroy(&assets)
+	f.editor.assets = &assets
+	defer f.editor.assets = nil
+	guid := format.guid_parse("5c1e9a7b3d2f4e6a8b0c1d2e3f4a5b6c") or_else {}
+
+	texels := []u16{0, 100, 200, 300, 400, 500, 600, 700}
+	step(
+		f,
+		1,
+		link.Live_Texture{guid = ([16]u8)(guid), usage = .Height, size = {4, 2}, texels = texels},
+	)
+	testing.expect(t, asset.is_live(&assets, guid))
+	texel :: proc(assets: ^asset.Assets, guid: format.Guid, i: int) -> u16 {
+		h, _ := asset.find(assets, guid)
+		data, _ := asset.data(assets, h)
+		blob, ok := format.texture_view(data)
+		if !ok {
+			return 0
+		}
+		return ([^]u16)(&data[blob.mips.offset])[i]
+	}
+	h, _ := asset.find(&assets, guid)
+	data, _ := asset.data(&assets, h)
+	blob, ok := format.texture_view(data)
+	testing.expect(t, ok)
+	testing.expect_value(t, blob.format, format.Texture_Format.R16_Unorm)
+	testing.expect_value(t, blob.usage, format.Texture_Usage.Height)
+	testing.expect_value(t, blob.mip_count, 3)
+	testing.expect_value(t, texel(&assets, guid, 5), 500)
+	version := asset.version(&assets, h)
+
+	region := []u16{9, 9}
+	step(
+		f,
+		1,
+		link.Live_Texture_Region {
+			guid = ([16]u8)(guid),
+			origin = {1, 1},
+			size = {2, 1},
+			texels = region,
+		},
+	)
+	testing.expect_value(t, texel(&assets, guid, 5), 9)
+	testing.expect_value(t, texel(&assets, guid, 6), 9)
+	testing.expect_value(t, texel(&assets, guid, 7), 700)
+	testing.expect_value(t, asset.version(&assets, h), version + 1)
+	context.logger = testlog.expected_errors()
+	step(
+		f,
+		1,
+		link.Live_Texture_Region {
+			guid = ([16]u8)(guid),
+			origin = {3, 1},
+			size = {2, 1},
+			texels = region,
+		},
+	)
+	testing.expect_value(t, asset.version(&assets, h), version + 1)
+
+	step(f, 1, link.Landscape_Overlay{visible = true, radius = 4, falloff = 0.5, up = {0, 1, 0}})
+	testing.expect(t, f.editor.session.brush.visible)
+	step(f, 1, link.Release_Live_Texture{guid = ([16]u8)(guid)})
+	testing.expect(t, !asset.is_live(&assets, guid))
+	testing.expect_value(t, len(f.editor.session.live_textures), 0)
+
+	step(
+		f,
+		1,
+		link.Live_Texture{guid = ([16]u8)(guid), usage = .Mask, size = {4, 2}, texels = texels},
+	)
+	testing.expect(t, asset.is_live(&assets, guid))
+	step(f, 2)
+	testing.expect(t, !asset.is_live(&assets, guid))
+	testing.expect_value(t, len(f.editor.session.live_textures), 0)
+	testing.expect(t, !f.editor.session.brush.visible, "a new connection hides the brush")
+}
+
+// A rectangle of texels goes into an image at its place, and one that is not inside it is refused.
+@(test)
+texels_patch_into_an_image :: proc(t: ^testing.T) {
+	image := make([]u16, 6, context.temp_allocator)
+	testing.expect(t, patch_texels(image, {3, 2}, {1, 0}, {2, 2}, {1, 2, 3, 4}))
+	testing.expect_value(t, image[1], 1)
+	testing.expect_value(t, image[2], 2)
+	testing.expect_value(t, image[4], 3)
+	testing.expect_value(t, image[5], 4)
+	testing.expect(t, !patch_texels(image, {3, 2}, {2, 0}, {2, 2}, {1, 2, 3, 4}))
+	testing.expect(t, !patch_texels(image, {3, 2}, {0, 0}, {2, 2}, {1, 2, 3}))
+}

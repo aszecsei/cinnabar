@@ -89,6 +89,10 @@ Session :: struct {
 	live_meshes:    map[format.Guid]Live_Mesh,
 	// What mesh mode draws over the live meshes (see mesh_overlay.odin), in the host's heap.
 	mesh_overlay:   link.Mesh_Overlay,
+	// The textures that the landscape tools paint, drawn from memory in place of their assets (see live_texture.odin).
+	live_textures:  map[format.Guid]Live_Texture,
+	// The landscape brush that the helpers draw.
+	brush:          link.Landscape_Overlay,
 	// Set while the world is the editor's document in Edit: from the Load_Scene that made it, until the mode changes
 	// (see behaviours.odin).
 	mirror:         Maybe(Mirror),
@@ -181,6 +185,7 @@ begin_session :: proc(e: ^Editor, connection: u64) {
 		known = make([dynamic]Known, heap),
 		watched = make([dynamic]Watched, heap),
 		live_meshes = make(map[format.Guid]Live_Mesh, heap),
+		live_textures = make(map[format.Guid]Live_Texture, heap),
 		outbox = make([dynamic]byte, heap),
 		view = {
 			selection = make([dynamic]ecs.Entity, heap),
@@ -201,8 +206,10 @@ begin_session :: proc(e: ^Editor, connection: u64) {
 end_session :: proc(e: ^Editor) {
 	s := &e.session
 	release_live_meshes(e)
+	release_live_textures(e)
 	close_previews(e)
 	delete(s.live_meshes)
+	delete(s.live_textures)
 	delete(s.outbox)
 	delete(s.known)
 	delete(s.watched)
@@ -360,7 +367,8 @@ poll :: proc(
 			if !handle_thumbnail_message(e, message) &&
 			   !handle_preview_message(e, message) &&
 			   !handle_viewport_message(e, message) &&
-			   !handle_live_message(e, message) {
+			   !handle_live_message(e, message) &&
+			   !handle_live_texture_message(e, message) {
 				log.warnf("editor: the game does not handle %v", message)
 			}
 		}
