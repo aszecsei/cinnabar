@@ -81,8 +81,14 @@ Runtime :: struct {
 	instance_used:              int,
 	// The memory category that set_category last gave a thread.
 	category:                   c.int,
-	// While set, no script code runs for the world's changes (see set_quiet).
-	quiet:                      bool,
+	// Which behaviours get callbacks: every one, only the edit-mode classes', or none (see set_callbacks).
+	callbacks:                  Callbacks,
+	// The instance whose callback or coroutine runs, or the zero handle, and what the edit-mode behaviours did to the
+	// document in Edit mode (see record.odin). A registration, which reload clears: the component of the document's
+	// entities.
+	writer:                     Instance_Handle,
+	edits:                      Edits,
+	document_component:         ecs.Component_Id,
 	// The GUIDs that scripts hold references to, by the payload of their light userdata. They stay across reloads,
 	// since the VM's values keep their payloads.
 	asset_refs:                 [MAX_ASSET_REFS]format.Guid,
@@ -118,12 +124,14 @@ Runtime :: struct {
 	random:                     Random_State,
 }
 
-// Phase is the script step that runs: none, the script phase (begin_phase to end_phase), or a fixed step (fixed_update
-// or fixed_events). See docs/scripting/behaviours.md#outside-a-phase.
+// Phase is the script step that runs: none, the script phase (begin_phase to end_phase), a fixed step (fixed_update
+// or fixed_events), or the edit phase (run_edit_phase). See docs/scripting/behaviours.md#outside-a-phase.
 Phase :: enum u8 {
 	None,
 	Variable,
 	Fixed,
+	// The editor's Edit mode's script phase (see run_edit_phase).
+	Edit,
 }
 
 // runtime_of is the Runtime of a VM, for bindings.
@@ -210,6 +218,7 @@ reload :: proc(r: ^Runtime, platform: ^core.Platform_API, register: Register_Pro
 	r.light_methods = {}
 	r.userdata_methods = {}
 	r.prefab_spawner = nil
+	r.document_component = 0
 	r.fixed_hook = {}
 	r.exposed_count = 0
 	r.field_count = 0

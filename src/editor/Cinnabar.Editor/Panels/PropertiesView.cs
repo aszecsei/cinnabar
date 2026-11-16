@@ -223,7 +223,9 @@ public sealed class PropertiesView : ScrollViewer
                     AssetKind = f.AssetKind,
                 };
             });
-            _content.Children.Add(Group(title, fields, badge: "Script", disabled: !behaviour.Enabled,
+            // A class that runs in the editor's Edit mode says so (see docs/scripting/behaviours.md#edit-mode).
+            var badge = _shell.Assets.Find(script) is { EditMode: true } ? "Script, Edit Mode" : "Script";
+            _content.Children.Add(Group(title, fields, badge: badge, disabled: !behaviour.Enabled,
                 remove: inDocument != null ? () => _shell.Edit($"Remove {title}", new RemoveBehaviour(document!.Id, script)) : null));
         }
         if (document != null)
@@ -689,7 +691,7 @@ public sealed class PropertiesView : ScrollViewer
         }
         if (badge != null)
         {
-            var tag = new Border { Classes = { "badge", "script" }, Child = new TextBlock { Text = disabled && badge == "Script" ? $"{badge}, disabled" : badge } };
+            var tag = new Border { Classes = { "badge", "script" }, Child = new TextBlock { Text = disabled && badge.StartsWith("Script", StringComparison.Ordinal) ? $"{badge}, disabled" : badge } };
             DockPanel.SetDock(tag, Avalonia.Controls.Dock.Right);
             header.Children.Add(tag);
         }

@@ -304,6 +304,8 @@ Script_Flag :: enum u32 {
 	Behaviour,
 	// The module returns an action class: class_name is the action's name, and fields holds its parameters.
 	Action,
+	// The behaviour class runs in the editor's Edit mode too (see docs/scripting/behaviours.md#edit-mode).
+	Edit_Mode,
 }
 
 Script_Flags :: bit_set[Script_Flag;u32]
@@ -321,6 +323,8 @@ Script_Blob :: struct {
 	// parameters as Script_Field records, sorted by name.
 	class_name:  Slice,
 	fields:      Slice,
+	// For a behaviour, the Add Component picker's folder that it names, or "" for none.
+	category:    Slice,
 }
 
 Script_Field_Kind :: enum u32 {
@@ -391,6 +395,7 @@ script_view :: proc(data: []byte) -> (blob: ^Script_Blob, ok: bool) {
 		blob.source_path,
 		blob.class_name,
 		blob.fields,
+		blob.category,
 	}
 	for s in slices {
 		if u64(s.offset) + u64(s.size) > u64(len(data)) {
@@ -478,6 +483,7 @@ Script_Contents :: struct {
 	class_name:  string,
 	// Sorted by name.
 	fields:      []Field_Entry,
+	category:    string,
 }
 
 // script_write builds a script blob.
@@ -496,6 +502,7 @@ script_write :: proc(contents: Script_Contents, allocator := context.allocator) 
 	bytecode := append_bytes(&buffer, contents.bytecode)
 	source_path := append_bytes(&buffer, transmute([]byte)contents.source_path)
 	class_name := append_bytes(&buffer, transmute([]byte)contents.class_name)
+	category := append_bytes(&buffer, transmute([]byte)contents.category)
 	for f, i in contents.fields {
 		record := Script_Field {
 			name   = append_bytes(&buffer, transmute([]byte)f.name),
@@ -529,6 +536,7 @@ script_write :: proc(contents: Script_Contents, allocator := context.allocator) 
 		source_path = source_path,
 		class_name = class_name,
 		fields = fields,
+		category = category,
 	}
 	mem.copy(raw_data(buffer), &blob, size_of(blob))
 	return buffer[:]

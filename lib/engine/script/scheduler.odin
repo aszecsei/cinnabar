@@ -206,10 +206,13 @@ run_waiter :: proc(r: ^Runtime, index: int, nargs: c.int = 0) -> luau.Status {
 	w := &r.waiters[index]
 	saved_current, saved_pending := r.current_waiter, r.pending_wait
 	r.current_waiter, r.pending_wait = index, nil
+	writer := r.writer
+	r.writer = waiter_writer(w)
 	become(w, .Running)
 	zone := begin_callback(r, waiter_class(r, w), .Coroutine)
 	status := resume_state(r, w.state, nargs)
 	end_callback(r, zone)
+	r.writer = writer
 	pending := r.pending_wait
 	r.current_waiter, r.pending_wait = saved_current, saved_pending
 
@@ -419,6 +422,27 @@ world_time :: proc(r: ^Runtime) -> f64 {
 	return r.world != nil ? time.duration_seconds(r.world.clock.time) : r.platform.time_seconds()
 }
 
+// waiter_writer is the instance that owns a waiter, or the zero handle for a main script or a script action.
+@(private = "file")
+waiter_writer :: proc(w: ^Waiter) -> Instance_Handle {
+	h, _ := w.owner.(Instance_Handle)
+	return h
+}
+
+// waiter_runs is true for a waiter whose owner gets callbacks now: in the editor's Edit, only the coroutines of the
+// behaviours that run in edit mode, and no main script or script action.
+@(private)
+waiter_runs :: proc(r: ^Runtime, w: ^Waiter) -> bool {
+	switch owner in w.owner {
+	case Instance_Handle:
+		i := instance_at(r, owner)
+		return i != nil && !silent(r, i)
+	case Main_Script, Action_Handle:
+		return r.callbacks == .All
+	}
+	return r.callbacks == .All
+}
+
 // run_coroutines resumes the coroutines that are due: by wake time, and then in the order they started.
 @(private)
 run_coroutines :: proc(r: ^Runtime) {
@@ -432,7 +456,7 @@ run_coroutines :: proc(r: ^Runtime) {
 	// A coroutine that a predicate starts during the scan waits for the next frame's, whichever slot it takes.
 	last_seq := r.waiter_seq
 	for &w, i in r.waiters[:r.waiter_used] {
-		if w.status != .Waiting || w.seq > last_seq {
+		if w.status != .Waiting || w.seq > last_seq || !waiter_runs(r, &w) {
 			continue
 		}
 		switch wait in w.wait {
@@ -454,9 +478,12 @@ run_coroutines :: proc(r: ^Runtime) {
 			// slot is not freed and given to a coroutine that the predicate starts.
 			luau.getref(r.L, wait.predicate)
 			become(&w, .Running)
+			writer := r.writer
+			r.writer = waiter_writer(&w)
 			zone := begin_callback(r, waiter_class(r, &w), .Coroutine)
 			called := protected_call(r, r.L, 0, 1)
 			end_callback(r, zone)
+			r.writer = writer
 			// A predicate that failed, or that stopped its own coroutine, ends the waiter.
 			if !called || w.status == .Stopping {
 				if called {

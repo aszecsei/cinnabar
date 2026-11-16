@@ -127,9 +127,15 @@ run_chunk :: proc(
 	return true
 }
 
-// read_schema runs a behaviour or action script's top level and reads the class that it returns: a behaviour's name
-// and fields, with the Behaviour flag, or an action's name and parameters, with the Action flag. A script that returns
-// no class has no schema, and is not an error.
+// Class_Options are the options of Behaviour.define that the editor reads (see docs/scripting/behaviours.md#behaviours).
+Class_Options :: struct {
+	category:  string,
+	edit_mode: bool,
+}
+
+// read_schema runs a behaviour or action script's top level and reads the class that it returns: a behaviour's name,
+// fields and options, with the Behaviour flag, or an action's name and parameters, with the Action flag. A script that
+// returns no class has no schema, and is not an error.
 read_schema :: proc(
 	vm: ^Schema_VM,
 	index: int,
@@ -137,6 +143,7 @@ read_schema :: proc(
 	class_name: string,
 	fields: []format.Field_Entry,
 	flag: Maybe(format.Script_Flag),
+	options: Class_Options,
 	ok: bool,
 ) {
 	L := vm.L
@@ -174,7 +181,7 @@ read_schema :: proc(
 		return
 	}
 	if luau.gettop(co) == 0 || !luau.istable(co, -1) {
-		return "", nil, nil, true
+		return "", nil, nil, {}, true
 	}
 	// A behaviour's fields are __fields of Field specs, and an action's parameters __params of Param specs.
 	kind_key, schema_key: cstring
@@ -183,12 +190,21 @@ read_schema :: proc(
 	} else {
 		luau.pop(co, 1)
 		if luau.rawgetfield(co, -1, "__action") != .STRING {
-			return "", nil, nil, true
+			return "", nil, nil, {}, true
 		}
 		flag, schema_key, kind_key = .Action, "__params", "__param"
 	}
 	class_name = strings.clone(luau.toodinstring(co, -1), context.temp_allocator)
 	luau.pop(co, 1)
+	if flag == .Behaviour {
+		if luau.rawgetfield(co, -1, "__category") == .STRING {
+			options.category = strings.clone(luau.toodinstring(co, -1), context.temp_allocator)
+		}
+		luau.pop(co, 1)
+		options.edit_mode =
+			luau.rawgetfield(co, -1, "__edit_mode") == .BOOLEAN && bool(luau.toboolean(co, -1))
+		luau.pop(co, 1)
+	}
 	luau.rawgetfield(co, -1, schema_key)
 	entries := make([dynamic]format.Field_Entry, context.temp_allocator)
 	luau.pushnil(co)
@@ -226,7 +242,7 @@ read_schema :: proc(
 		luau.pop(co, 3)
 	}
 	slice.sort_by(entries[:], proc(a, b: format.Field_Entry) -> bool {return a.name < b.name})
-	return class_name, entries[:], flag, true
+	return class_name, entries[:], flag, options, true
 }
 
 // schema_require loads a module for a behaviour script's top level, as the runtime's require does: by the requires

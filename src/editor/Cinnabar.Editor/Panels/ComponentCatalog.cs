@@ -9,8 +9,8 @@ namespace Cinnabar.Editor.Panels;
 /// <summary>
 /// What the Add Component picker offers, as catalog items (see docs/editor/shell-and-panels.md#properties). A component
 /// type is in the folder that its game registers it in, which for a game's own type is the game's package unless the
-/// game says otherwise. A behaviour is under Behaviours, in the folder that its script is in, so a project's folders of
-/// scripts are the picker's folders.
+/// game says otherwise. A behaviour is in the folder that its class names with <c>category</c>, or else under
+/// Behaviours, in the folder that its script is in, so a project's folders of scripts are the picker's folders.
 /// </summary>
 static class ComponentCatalog
 {
@@ -32,9 +32,13 @@ static class ComponentCatalog
         types.Where(t => t.Category != NoCategory)
             .Select(t => new CatalogItem(ComponentPrefix + t.Id.ToString(System.Globalization.CultureInfo.InvariantCulture), FieldValues.Humanize(t.Name), t.Category));
 
-    /// <summary>The scripts that define a behaviour as items, each named for its class.</summary>
+    /// <summary>
+    /// The scripts that define a behaviour as items, each named for its class, in the folder that its class names, or
+    /// else in its script's folder. A class with the category <see cref="NoCategory"/> is left out.
+    /// </summary>
     public static IEnumerable<CatalogItem> Behaviours(IEnumerable<Asset> scripts) =>
-        scripts.Select(a => new CatalogItem(BehaviourPrefix + a.Guid, FieldValues.Humanize(a.Behaviour), BehaviourFolder(a.Path), Detail: $"{a.Root}/{a.Path}"));
+        scripts.Where(a => a.Category != NoCategory)
+            .Select(a => new CatalogItem(BehaviourPrefix + a.Guid, FieldValues.Humanize(a.Behaviour), a.Category.Length > 0 ? a.Category : BehaviourFolder(a.Path), Detail: $"{a.Root}/{a.Path}"));
 
     /// <summary>The ID of the component type that an item is, or null for an item that is none.</summary>
     public static ulong? ComponentOf(CatalogItem item) =>

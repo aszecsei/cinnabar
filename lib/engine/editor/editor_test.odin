@@ -4,6 +4,7 @@ import "base:runtime"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
+import "core:mem"
 import "core:mem/virtual"
 import "core:slice"
 import "core:strings"
@@ -20,6 +21,7 @@ import "cinnabar:engine/ecs"
 import "cinnabar:engine/editor/link"
 import "cinnabar:engine/render"
 import "cinnabar:engine/scene"
+import "cinnabar:engine/script"
 
 // LIVE_BOX is a 1 m box as a mesh file: the cooker's template, with every edge sharp.
 @(private = "file")
@@ -1019,32 +1021,154 @@ editor_visible :: proc(f: ^Fixture, entity: ecs.Entity) -> bool {
 }
 
 @(test)
-the_editors_mode_decides_whether_the_world_runs :: proc(t: ^testing.T) {
+simulation_says_run_edit_wait_or_hold :: proc(t: ^testing.T) {
 	f := setup(t)
 	defer teardown(f)
 	w := &f.world
 	frame := 16 * time.Millisecond
 
 	// Without an editor, the world runs.
-	run, dt := simulation(&f.editor, w, frame)
-	testing.expect(t, run && dt == frame)
-	// A new editor starts in Edit, where it does not.
+	what, dt := simulation(&f.editor, w, frame)
+	testing.expect(t, what == .Run && dt == frame)
+	// A new editor starts in Edit, where nothing runs until its scene is the world.
 	step(f, 1)
-	run, _ = simulation(&f.editor, w, frame)
-	testing.expect(t, !run)
+	what, _ = simulation(&f.editor, w, frame)
+	testing.expect_value(t, what, Simulation.Hold)
+	step(f, 1, link.Load_Scene{ticket = 4})
+	what, _ = simulation(&f.editor, w, frame)
+	testing.expect_value(t, what, Simulation.Edit)
+	testing.expect_value(t, f.editor.session.mirror.?.scene, 4)
 
 	step(f, 1, link.Set_Mode{mode = .Play})
-	run, dt = simulation(&f.editor, w, frame)
-	testing.expect(t, run && dt == frame)
+	what, dt = simulation(&f.editor, w, frame)
+	testing.expect(t, what == .Run && dt == frame)
+	testing.expect(t, f.editor.session.mirror == nil)
 
 	// Paused, each step runs one frame of one tick.
 	step(f, 1, link.Set_Mode{mode = .Paused}, link.Step_Frame{}, link.Step_Frame{})
 	for _ in 0 ..< 2 {
-		run, dt = simulation(&f.editor, w, frame)
-		testing.expect(t, run && dt == ecs.tick_length(w))
+		what, dt = simulation(&f.editor, w, frame)
+		testing.expect(t, what == .Run && dt == ecs.tick_length(w))
 	}
-	run, _ = simulation(&f.editor, w, frame)
-	testing.expect(t, !run)
+	what, _ = simulation(&f.editor, w, frame)
+	testing.expect_value(t, what, Simulation.Hold)
+
+	// Stop is Edit, and the world is the play world until the editor's scene comes again.
+	step(f, 1, link.Set_Mode{mode = .Edit})
+	what, _ = simulation(&f.editor, w, frame)
+	testing.expect_value(t, what, Simulation.Hold)
+}
+
+@(test)
+the_edit_phase_waits_for_the_answer_and_ignores_a_stale_ticket :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	w := &f.world
+	step(f, 1, link.Load_Scene{ticket = 1})
+	m := &f.editor.session.mirror.?
+	m.batch = Batch_Sent{3}
+	what, _ := simulation(&f.editor, w, 0)
+	testing.expect_value(t, what, Simulation.Wait)
+
+	step(f, 1, link.Behaviour_Operations_Answer{ticket = 2, applied = true})
+	what, _ = simulation(&f.editor, w, 0)
+	testing.expect_value(t, what, Simulation.Wait)
+
+	// A refusal holds the phase for a second, or until the editor's next edit.
+	step(f, 1, link.Behaviour_Operations_Answer{ticket = 3, applied = false})
+	_, refused := f.editor.session.mirror.?.batch.(Batch_Refused)
+	testing.expect(t, refused)
+	step(f, 1, link.Apply_Operations{})
+	what, _ = simulation(&f.editor, w, 0)
+	testing.expect_value(t, what, Simulation.Edit)
+
+	m = &f.editor.session.mirror.?
+	m.batch = Batch_Sent{4}
+	step(f, 1, link.Behaviour_Operations_Answer{ticket = 4, applied = true})
+	what, _ = simulation(&f.editor, w, 0)
+	testing.expect_value(t, what, Simulation.Edit)
+
+	// A new scene forgets the edits that went to the old one.
+	m = &f.editor.session.mirror.?
+	m.batch = Batch_Sent{5}
+	step(f, 1, link.Load_Scene{ticket = 2})
+	what, _ = simulation(&f.editor, w, 0)
+	testing.expect_value(t, what, Simulation.Edit)
+}
+
+@(test)
+recorded_edits_become_operations_that_apply_to_the_world :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	w := &f.world
+	step(f, 1, link.Load_Scene{ticket = 1})
+	door := ecs.spawn(w)
+	ecs.add(w, door, scene.Scene_Entity{0x10})
+	ecs.add(w, door, ecs.TRANSFORM_IDENTITY)
+	ecs.add(w, door, Tuned{mode = .Busy})
+	moved := ecs.TRANSFORM_IDENTITY
+	moved.position = ecs.position_from_meters({0, 3, 0})
+	before := ecs.TRANSFORM_IDENTITY
+	unchanged := Tuned {
+		mode = .Busy,
+	}
+	// A draft under the door, with a component of its own.
+	draft := ecs.spawn(w)
+	ecs.add(w, draft, ecs.TRANSFORM_IDENTITY)
+	ecs.add(w, draft, ecs.Parent{door})
+	ecs.add(w, draft, ecs.LOCAL_TRANSFORM_IDENTITY)
+	ecs.add(w, draft, Tuned{inner = {amount = 7}})
+
+	edits: script.Edits
+	edits.components = make([dynamic]script.Edited_Component, context.temp_allocator)
+	edits.list = make([dynamic]script.Edit, context.temp_allocator)
+	append(
+		&edits.components,
+		script.Edited_Component {
+			entity = door,
+			id = ecs.TRANSFORM_ID,
+			before = mem.ptr_to_bytes(&before),
+			after = mem.ptr_to_bytes(&moved),
+		},
+		script.Edited_Component {
+			entity = door,
+			id = ecs.registry_find_type(&w.registry, Tuned).id,
+			before = mem.ptr_to_bytes(&unchanged),
+			after = mem.ptr_to_bytes(&unchanged),
+		},
+	)
+	append(
+		&edits.list,
+		script.Edit_Component{0},
+		script.Edit_Component{1},
+		script.Edit_Active{door, false},
+		script.Edit_Spawn{entity = draft},
+	)
+	ops := operations_of(w, edits, context.temp_allocator)
+	// The draft first, then the pose's field, nothing for the write that changed nothing, and the active state.
+	testing.expect_value(t, len(ops), 3)
+	if len(ops) != 3 {
+		return
+	}
+	testing.expect_value(t, ops[0].kind, link.Operation_Kind.Create_Entity)
+	testing.expect_value(t, ops[0].created[0].parent, 0x10)
+	testing.expect_value(t, ops[1].kind, link.Operation_Kind.Set_Field)
+	testing.expect_value(t, ops[1].fields[0].name, "position")
+	testing.expect_value(t, ops[2].kind, link.Operation_Kind.Set_Active)
+
+	// As the editor sends them back, they apply to the world.
+	ecs.despawn(w, draft)
+	problems := make([dynamic]scene.Problem, context.temp_allocator)
+	apply_operations(&f.editor, w, nil, ops, &problems)
+	testing.expectf(t, len(problems) == 0, "problems: %v", problems[:])
+	testing.expect(t, ecs.get(w, door, ecs.Transform).position == moved.position)
+	testing.expect(t, ecs.has(w, door, ecs.Disabled))
+	made := find_scene_entity(&f.editor, w, ops[0].entity)
+	testing.expect(t, made != 0)
+	if made != 0 {
+		testing.expect_value(t, ecs.get(w, made, Tuned).inner.amount, 7)
+		testing.expect_value(t, ecs.get(w, made, ecs.Parent).entity, door)
+	}
 }
 
 @(test)

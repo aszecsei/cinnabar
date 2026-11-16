@@ -56,7 +56,7 @@ public sealed class UndoHistoryView : DockPanel
             rows.Add(new HistoryRow(0, $"Open {scene.Title}", scene.Position >= 0, scene.SavedPosition == 0));
             for (var i = 0; i < scene.History.Count; i++)
             {
-                rows.Add(new HistoryRow(i + 1, scene.History[i].Label, i < scene.Position, scene.SavedPosition == i + 1));
+                rows.Add(new HistoryRow(i + 1, scene.History[i].Label, i < scene.Position, scene.SavedPosition == i + 1, scene.History[i].Follows));
             }
         }
         _syncing = true;
@@ -74,13 +74,15 @@ public sealed class UndoHistoryView : DockPanel
         Orientation = Orientation.Horizontal,
         Spacing = 6,
         Opacity = row.Applied ? 1 : 0.45,
+        // An edit-mode behaviour's entry goes with the one before it, so it is indented under it.
+        Margin = new Avalonia.Thickness(row.Follows ? 14 : 0, 0, 0, 0),
         Children =
         {
-            new TextBlock { Text = row.Label },
+            new TextBlock { Text = row.Follows ? $"↳ {row.Label}" : row.Label },
             new TextBlock { Text = row.Saved ? "saved" : "", Classes = { "dim" } },
         },
     };
 }
 
 /// <summary>A row of the history: the entry that makes <see cref="Position"/> entries applied.</summary>
-public sealed record HistoryRow(int Position, string Label, bool Applied, bool Saved);
+public sealed record HistoryRow(int Position, string Label, bool Applied, bool Saved, bool Follows = false);

@@ -64,6 +64,7 @@ declare World: {
 	query: (...ComponentType) -> { Entity },
 	version: () -> number,
 	changed: (since: number, ...ComponentType) -> { Entity },
+	editing: () -> boolean,
 }
 
 declare Quaternion: {
@@ -174,9 +175,16 @@ declare Field: {
 	asset: (kind: string?) -> FieldSpec,
 }
 
+-- What Behaviour.define takes after the fields: edit_mode runs the class in the editor's Edit mode too, and category
+-- is the Add Component picker's folder, such as "Tools/Layout", or "-" to leave the class out of it.
+type BehaviourOptions = {
+	edit_mode: boolean?,
+	category: string?,
+}
+
 -- A class is a table, so its methods can be defined on it. Its instances are untyped for now.
 declare Behaviour: {
-	define: (name: string, fields: { [string]: FieldSpec }?) -> { [any]: any },
+	define: (name: string, fields: { [string]: FieldSpec }?, options: BehaviourOptions?) -> { [any]: any },
 }
 
 declare Param: {

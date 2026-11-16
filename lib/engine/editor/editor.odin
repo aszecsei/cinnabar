@@ -89,6 +89,33 @@ Session :: struct {
 	live_meshes:    map[format.Guid]Live_Mesh,
 	// What mesh mode draws over the live meshes (see mesh_overlay.odin), in the host's heap.
 	mesh_overlay:   link.Mesh_Overlay,
+	// Set while the world is the editor's document in Edit: from the Load_Scene that made it, until the mode changes
+	// (see behaviours.odin).
+	mirror:         Maybe(Mirror),
+	// The last ticket that the behaviours' edits had, and the messages that wait for poll, in the host's heap.
+	edit_tickets:   u64,
+	outbox:         [dynamic]byte,
+}
+
+// Mirror is the world as a copy of the editor's document: the ticket of the Load_Scene that made it, and the
+// behaviours' last edits, while the editor has not answered them or for a second after it refused them.
+Mirror :: struct {
+	scene: u64,
+	batch: Batch,
+}
+
+Batch :: union {
+	Batch_Sent,
+	Batch_Refused,
+}
+
+Batch_Sent :: struct {
+	ticket: u64,
+}
+
+// Batch_Refused holds the edit phase until a time, by time_seconds, or the editor's next edit.
+Batch_Refused :: struct {
+	until: f64,
 }
 
 @(private)
@@ -154,6 +181,7 @@ begin_session :: proc(e: ^Editor, connection: u64) {
 		known = make([dynamic]Known, heap),
 		watched = make([dynamic]Watched, heap),
 		live_meshes = make(map[format.Guid]Live_Mesh, heap),
+		outbox = make([dynamic]byte, heap),
 		view = {
 			selection = make([dynamic]ecs.Entity, heap),
 			hidden = make([dynamic]ecs.Entity, heap),
@@ -175,6 +203,7 @@ end_session :: proc(e: ^Editor) {
 	release_live_meshes(e)
 	close_previews(e)
 	delete(s.live_meshes)
+	delete(s.outbox)
 	delete(s.known)
 	delete(s.watched)
 	for &v, i in s.view.viewports {
@@ -234,7 +263,7 @@ poll :: proc(
 		begin_session(e, connection)
 		// A new editor is in Edit, so its first scene replaces the world without the old behaviours' callbacks.
 		if scripts != nil {
-			script.set_quiet(scripts, connection != 0)
+			script.set_callbacks(scripts, callbacks_between_frames(e))
 		}
 		snapshot = connection != 0
 	}
@@ -256,6 +285,20 @@ poll :: proc(
 		case link.Load_Scene:
 			problems := make([dynamic]scene.Problem, frame)
 			scene.load(w, scripts, scene_of(v, frame), &e.by_scene_id, &problems)
+			// The old world's behaviours end without callbacks, as the editor's scene replaces it, and in Edit, the world
+			// is the editor's document, which the edit-mode behaviours edit from now on.
+			if scripts != nil {
+				script.settle(scripts)
+			}
+			e.session.mirror = nil
+			if e.session.mode == .Edit {
+				e.session.mirror = Mirror {
+					scene = v.ticket,
+				}
+			}
+			if scripts != nil {
+				script.set_callbacks(scripts, callbacks_between_frames(e))
+			}
 			link.write_message(out, edit_problems(problems[:], true, frame))
 			// Every entity is new, so the editor gets a snapshot, and its watches, its selection and what it hides are
 			// of entities that are gone.
@@ -266,6 +309,12 @@ poll :: proc(
 		case link.Apply_Operations:
 			problems := make([dynamic]scene.Problem, frame)
 			apply_operations(e, w, scripts, v.operations, &problems)
+			// The editor edited, so behaviours whose edits it refused may try again.
+			if m, mirrors := &e.session.mirror.?; mirrors {
+				if _, refused := m.batch.(Batch_Refused); refused {
+					m.batch = nil
+				}
+			}
 			if len(problems) > 0 {
 				link.write_message(out, edit_problems(problems[:], false, frame))
 			}
@@ -275,9 +324,11 @@ poll :: proc(
 			if v.mode != .Paused {
 				e.session.steps = 0
 			}
-			// The edits that follow in this poll run no script code outside Play.
+			// The world runs, or stops as it is, and the editor sends its scene again before Edit edits it. The edits that
+			// follow in this poll run no script code outside Play, but the edit-mode behaviours' in Edit.
+			e.session.mirror = nil
 			if scripts != nil {
-				script.set_quiet(scripts, v.mode != .Play)
+				script.set_callbacks(scripts, callbacks_between_frames(e))
 				// Each Play from Edit draws the same numbers (see docs/scripting/api.md#random).
 				if started {
 					script.restart_random(scripts)
@@ -299,6 +350,8 @@ poll :: proc(
 				}
 			}
 			link.write_message(out, answer)
+		case link.Behaviour_Operations_Answer:
+			answer_behaviour_operations(e, v)
 		case link.Step_Frame:
 			if e.session.mode == .Paused {
 				e.session.steps += 1
@@ -312,6 +365,10 @@ poll :: proc(
 			}
 		}
 	}
+	// What the edit-mode behaviours did in this poll's edits goes to the editor too, after what the frame sent.
+	send_behaviour_edits(e, w, scripts)
+	append(out, ..e.session.outbox[:])
+	clear(&e.session.outbox)
 	finish_pick(e, w, out, frame)
 	send_preview_targets(e, out)
 	send_viewport_targets(e, out)

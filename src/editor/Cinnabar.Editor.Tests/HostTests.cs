@@ -220,6 +220,60 @@ public abstract class HostTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task AnEditModeBehavioursWritesComeAsOperations()
+    {
+        await using var editor = await Connect();
+        editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
+        await editor.Next<EntitySnapshot>();
+        // The sample's Ring lays out its entity's children on a circle, in Edit too.
+        var ring = Entity(1, "Ring");
+        ring.Behaviours.Add(new Document.SceneBehaviour(RingScript, [Field("radius", Document.SceneValue.Of(Number(3.0)))]));
+        Document.SceneEntity Child(ulong id)
+        {
+            // A child has its pose in the world and its Local_Transform, as the editor's reparent gives it.
+            var child = Entity(id, $"Child {id}");
+            child.Parent = 1;
+            child.Components.Add(new Document.SceneComponent(2, "Local_Transform",
+            [
+                Field("offset", Document.SceneValue.Of(Number(0.0), Number(0.0), Number(0.0))),
+                Field("rotation", Document.SceneValue.Of(Number(0.0), Number(0.0), Number(0.0), Number(1.0))),
+                Field("scale", Document.SceneValue.Of(Number(1.0), Number(1.0), Number(1.0))),
+            ]));
+            return child;
+        }
+        var scene = Scene(ring, Child(2), Child(3));
+        editor.Link.Send(Document.SceneSnapshot.ToMessage(scene, "", 7));
+
+        // The game does not move the children: it sends their poses, as the editor's scene sets them.
+        var batch = await editor.Next<BehaviourOperations>();
+        Assert.Equal(7UL, batch.Scene);
+        Assert.Equal("Ring", batch.Label);
+        Assert.All(batch.Operations, op => Assert.Equal(OperationKind.SetField, op.Kind));
+        Assert.Equal([2UL, 3UL], batch.Operations.Select(op => op.Entity).Distinct().Order());
+        Assert.All(batch.Operations, op => Assert.Equal("offset", Assert.Single(op.Fields).Name));
+
+        // Nothing more comes before the answer, and once the edit is the world's, the ring has settled.
+        await Task.Delay(300, TestContext.Current.CancellationToken);
+        Assert.DoesNotContain(editor.Skipped.Concat(Drained(editor)), m => m is BehaviourOperations);
+        editor.Link.Send(new ApplyOperations(batch.Operations));
+        editor.Link.Send(new BehaviourOperationsAnswer(batch.Ticket, true));
+        await Task.Delay(500, TestContext.Current.CancellationToken);
+        Assert.DoesNotContain(Drained(editor), m => m is BehaviourOperations);
+        Assert.DoesNotContain(editor.Skipped, m => m is Log { Level: LogLevel.Error });
+    }
+
+    // The messages that have come, which it drops.
+    static List<ILinkMessage> Drained(Editor editor)
+    {
+        var messages = new List<ILinkMessage>();
+        while (editor.TryRead(out var message))
+        {
+            messages.Add(message);
+        }
+        return messages;
+    }
+
+    [Fact]
     public async Task AnotherProtocolVersionIsRefused()
     {
         await using var editor = await Connect();
@@ -319,6 +373,9 @@ public abstract class HostTests : IAsyncDisposable
             throw new InvalidOperationException($"no {typeof(T).Name} came. These did:\n{string.Join("\n", skipped)}");
         }
 
+        /// <summary>The next message that has come, if any.</summary>
+        public bool TryRead(out ILinkMessage message) => _received.Reader.TryRead(out message!);
+
         /// <summary>Drops the messages that have come.</summary>
         public void Drain()
         {
@@ -337,6 +394,8 @@ public abstract class HostTests : IAsyncDisposable
     // The sample's box mesh (models/shapes.gltf, 1 m across) and scripts/pulse.luau, which pulses a Triangle.
     protected const string BoxMesh = "89fc38c8aa19f0cf0cc161d2ab5e015b";
     protected const string PulseScript = "7142e05b3941bc44849ed0379727e60b";
+    // scripts/ring.luau, an edit-mode behaviour that lays out its entity's children on a circle.
+    protected const string RingScript = "c433be522bd64beab865e9d8a30774b2";
     // The engine's Mesh_Renderer, and the game's Spin and Triangle (samples/mygame/game.odin).
     protected const ulong CameraId = 32;
     protected const ulong MeshRendererId = 33;

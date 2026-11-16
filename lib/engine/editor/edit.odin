@@ -31,6 +31,17 @@ apply_operations :: proc(
 			scene.add_entities(w, scripts, created, &e.by_scene_id, problems)
 			continue
 		}
+		if op.kind == .Create_Instance {
+			// Only the game sends it: the editor sends an instance's entities.
+			append(
+				problems,
+				scene.Problem {
+					op.entity,
+					"the game does not make a prefab's instance from an edit",
+				},
+			)
+			continue
+		}
 		entity := find_scene_entity(e, w, op.entity)
 		if entity == 0 {
 			// Destroying a parent destroys its children, so their own operations find nothing.
@@ -47,7 +58,7 @@ apply_operations :: proc(
 		}
 		guid := format.Guid(op.script)
 		switch op.kind {
-		case .Create_Entity:
+		case .Create_Entity, .Create_Instance:
 		case .Destroy_Entity:
 			ecs.despawn(w, entity)
 			delete_key(&e.by_scene_id, op.entity)

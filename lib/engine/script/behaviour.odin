@@ -47,6 +47,8 @@ Instance_Flag :: enum u8 {
 	Needs_Awake,
 	// The script's last enable callback was on_enable, not on_disable. Only sync_enabled and destroy_instance write it.
 	Told_Enabled,
+	// The class runs in the editor's edit mode too (see docs/scripting/behaviours.md#edit-mode).
+	Edit_Mode,
 }
 
 @(private)
@@ -341,6 +343,9 @@ attach :: proc(
 		i.flags += {.Fixed_Updates}
 	}
 	luau.pop(L, 1)
+	if class_runs_in_edit_mode(L, class) {
+		i.flags += {.Edit_Mode}
+	}
 	luau.pushvalue(L, t)
 	i.table = luau.ref(L, -1)
 	luau.pop(L, 1)
@@ -360,6 +365,15 @@ attach :: proc(
 			i.flags += {.Needs_Awake}
 		}
 	}
+}
+
+// class_runs_in_edit_mode is true for a class that Behaviour.define gave edit_mode.
+@(private)
+class_runs_in_edit_mode :: proc(L: ^luau.State, class: c.int) -> bool {
+	edit_mode :=
+		luau.rawgetfield(L, class, "__edit_mode") == .BOOLEAN && bool(luau.toboolean(L, -1))
+	luau.pop(L, 1)
+	return edit_mode
 }
 
 // check_field_value raises an error for a value that the class does not declare, or that has the wrong type.
@@ -430,13 +444,13 @@ field_problem :: proc(
 }
 
 // sync_enabled sends on_enable or on_disable when effective() differs from what the script was last told, so the two
-// always alternate. While quiet it sends nothing and the record keeps what the script last saw: set_quiet calls it for
-// every instance when quiet ends. The record changes before the callback, so a callback that changes enabled or
+// always alternate. While the instance is silent it sends nothing and the record keeps what the script last saw:
+// set_callbacks calls it for every instance that stops being silent. The record changes before the callback, so a callback that changes enabled or
 // activity syncs again from the new record.
 @(private)
 sync_enabled :: proc(r: ^Runtime, h: Instance_Handle) {
 	i := instance_at(r, h)
-	if i == nil || r.quiet {
+	if i == nil || silent(r, i) {
 		return
 	}
 	now := effective(i)
@@ -459,8 +473,8 @@ wake :: proc(r: ^Runtime, h: Instance_Handle) {
 	if i == nil || .Active not_in i.flags {
 		return
 	}
-	// The next script phase wakes it.
-	if r.quiet {
+	// The next script phase that it runs in wakes it.
+	if silent(r, i) {
 		if .Awake not_in i.flags {
 			i.flags += {.Needs_Awake}
 		}
@@ -542,7 +556,7 @@ destroy_instance :: proc(r: ^Runtime, h: Instance_Handle) {
 	if i == nil {
 		return
 	}
-	if .Told_Enabled in i.flags && !r.quiet {
+	if .Told_Enabled in i.flags && !silent(r, i) {
 		i.flags -= {.Told_Enabled}
 		call_method(r, h, "on_disable")
 	}
@@ -613,7 +627,7 @@ on_record_removed :: proc(r: ^Runtime, record: c.int) {
 call_method :: proc(r: ^Runtime, h: Instance_Handle, name: cstring, nargs: c.int = 0) {
 	L := r.L
 	i := instance_at(r, h)
-	if i == nil || r.quiet {
+	if i == nil || silent(r, i) {
 		luau.pop(L, nargs)
 		return
 	}
@@ -628,9 +642,12 @@ call_method :: proc(r: ^Runtime, h: Instance_Handle, name: cstring, nargs: c.int
 	luau.insert(L, -2 - nargs)
 	luau.insert(L, -1 - nargs)
 	previous := set_category(r, L, i.category)
+	writer := r.writer
+	r.writer = h
 	zone := begin_callback(r, i.profile_class, callback_kind(name))
 	protected_call(r, L, nargs + 1, 0)
 	end_callback(r, zone)
+	r.writer = writer
 	set_category(r, L, previous)
 }
 

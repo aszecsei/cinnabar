@@ -47,6 +47,7 @@ Scripts change the world structure **immediately**, except for despawns. The scr
 - `entity:add(T, values?)` and `entity:remove(T)` take effect at once. `values` is a table of field values, and `add` returns the component.
 - `entity:destroy()` is deferred to the end of the script phase or fixed step, as in Unity's `Destroy`. It goes into the step's command buffer, which the end of the step applies: phase 6 of the frame for the script phase. Outside a step, as in a main script's top level or `on_reload`, it despawns at once (see [Behaviours: Outside a phase](behaviours.md#outside-a-phase)).
 - `World.query(T, ...)` returns an array of the matching entities, collected before the loop starts. Structural changes inside the loop are therefore safe. A query from a script scans every archetype, so performance-critical work belongs in a native system.
+- `World.editing()` is true while the script runs in the editor's Edit mode, as a behaviour with `edit_mode` does there ([Behaviours: Edit mode](behaviours.md#edit-mode)).
 - `World.version()` gives a version, and every later write is newer than it. `World.changed(since, T, ...)` returns an array of the entities in the chunks where a component `T` was written since the version, or that gained a row. It works by chunk (see [ECS: Change versions](../world/ecs.md#change-versions)), so it can give entities that did not change, and it does not report the entities that left. A script's own writes count.
 
 ## Engine libraries

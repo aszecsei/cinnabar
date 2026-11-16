@@ -113,6 +113,8 @@ Message :: union {
 	Viewport_Acknowledged,
 	Capture_Source,
 	Nav_Probe,
+	Behaviour_Operations,
+	Behaviour_Operations_Answer,
 }
 
 // Editor to host, first: the editor's protocol version and its name.
@@ -344,6 +346,9 @@ Load_Scene :: struct {
 	// The scene's GUID, so the game finds what its cooked blob lists, such as its navmeshes, or zero for a scene that
 	// has none yet.
 	guid:     [16]u8,
+	// The editor's number for this load, which a Behaviour_Operations repeats, so the editor knows the scene that a
+	// behaviour edited.
+	ticket:   u64,
 }
 
 Scene_Entity :: struct {
@@ -426,6 +431,10 @@ Operation_Kind :: enum u8 {
 	Set_Behaviour_Field,
 	// script, and the field's name in fields. The field gets its class's default.
 	Reset_Behaviour_Field,
+	// An instance of prefab, whose root has the scene ID entity, under parent (or none), with the pose component in
+	// components, and active. Only an edit-mode behaviour's edits have it: the editor makes the instance, and sends its
+	// entities (see Behaviour_Operations).
+	Create_Instance,
 }
 
 // An edit of the scene, by the entity's scene ID. Only the members for its kind are set.
@@ -440,6 +449,7 @@ Operation :: struct {
 	components: []Scene_Component,
 	script:     [16]u8,
 	fields:     []Scene_Field,
+	prefab:     [16]u8,
 }
 
 // Editor to game: edits, in order. The editor has already applied them to its document, and does not wait for an
@@ -1461,6 +1471,25 @@ Game_Command_Result :: struct {
 	id:         string,
 	operations: []Operation,
 	message:    string,
+}
+
+// Game to editor: what the edit-mode behaviours did to the scene in Edit mode (see
+// docs/editor/document-and-scenes.md#behaviours-edits), as operations by scene ID, which the game has not applied.
+// scene is the ticket of the Load_Scene that the world has. label names the behaviour's class, for the undo entry. The
+// editor applies them to its document, which sends them back in Apply_Operations, and then answers with the ticket.
+Behaviour_Operations :: struct {
+	ticket:     u64,
+	scene:      u64,
+	label:      string,
+	operations: []Operation,
+}
+
+// Editor to game: the answer to the Behaviour_Operations with the ticket, after the Apply_Operations that it sent.
+// applied is false when the editor did not apply them: it does not edit now, the scene is another, or an operation
+// does not fit its document.
+Behaviour_Operations_Answer :: struct {
+	ticket:  u64,
+	applied: bool,
 }
 
 // Material previews (see docs/rendering/materials.md#material-previews). The game renders each open preview into a shared

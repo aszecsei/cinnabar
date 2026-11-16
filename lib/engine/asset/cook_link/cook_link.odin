@@ -149,8 +149,11 @@ Asset :: struct {
 	status:          Asset_Status,
 	errors:          u32,
 	warnings:        u32,
-	// For a script that defines a behaviour, the class's name.
+	// For a script that defines a behaviour, the class's name, the Add Component picker's folder that it names, or "",
+	// and whether it runs in the editor's Edit mode (see docs/scripting/behaviours.md#behaviours).
 	behaviour:       string,
+	category:        string,
+	edit_mode:       bool,
 	// For a script that defines an action, the action's name, and its parameters sorted by name.
 	action:          string,
 	params:          []Action_Param,

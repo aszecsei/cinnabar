@@ -287,9 +287,11 @@ spawn_prefab_entities :: proc(
 	return root, "", true
 }
 
-// register_scripts gives the script runtime what World.spawn(prefab) calls. Call it in the game's Register_Proc, so
-// a reload sets it again.
+// register_scripts gives the script runtime what World.spawn(prefab) calls, and the component of a scene's entities,
+// whose writes an edit-mode behaviour records in Edit mode. Call it in the game's Register_Proc, so a reload sets it
+// again.
 register_scripts :: proc(r: ^script.Runtime) {
+	script.set_document_component(r, SCENE_ENTITY_ID)
 	script.set_prefab_spawner(
 		r,
 		proc(
@@ -653,7 +655,7 @@ reset_field :: proc(data, defaults: rawptr, field: Field) {
 	}
 }
 
-@(private = "file")
+@(private)
 field_size :: proc(field: Field) -> int {
 	switch field.kind {
 	case .Bool, .I8, .U8:

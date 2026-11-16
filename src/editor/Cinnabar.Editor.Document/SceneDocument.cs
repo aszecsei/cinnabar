@@ -1,7 +1,11 @@
 namespace Cinnabar.Editor.Document;
 
-/// <summary>One undo entry: the operations of an interaction, and their inverses in the order that undoes them.</summary>
-public sealed record Transaction(string Label, IReadOnlyList<Operation> Operations, IReadOnlyList<Operation> Inverses);
+/// <summary>
+/// One undo entry: the operations of an interaction, and their inverses in the order that undoes them. An entry that
+/// <paramref name="Follows"/> is an edit-mode behaviour's answer to the entries before it, so undo and redo take it with
+/// them (see docs/editor/document-and-scenes.md#behaviours-edits).
+/// </summary>
+public sealed record Transaction(string Label, IReadOnlyList<Operation> Operations, IReadOnlyList<Operation> Inverses, bool Follows = false);
 
 /// <summary>
 /// An open scene and its edits (see docs/editor/document-and-scenes.md#document-model): every change is an operation, applied to the
@@ -28,6 +32,7 @@ public sealed class SceneDocument
     readonly List<Transaction> _history = [];
     // The open transaction: its label, its operations and their inverses in the order applied.
     string? _label;
+    bool _follows;
     readonly List<Operation> _pending = [];
     readonly List<Operation> _pendingInverses = [];
 
@@ -119,14 +124,18 @@ public sealed class SceneDocument
         Commit();
     }
 
-    /// <summary>Starts an undo entry. Only one is open at a time.</summary>
-    public void Begin(string label)
+    /// <summary>
+    /// Starts an undo entry. Only one is open at a time. One that <paramref name="follows"/> goes with the entries before
+    /// it in undo and redo, as an edit-mode behaviour's does.
+    /// </summary>
+    public void Begin(string label, bool follows = false)
     {
         if (_label != null)
         {
             throw new InvalidOperationException($"\"{_label}\" is still open");
         }
         _label = label;
+        _follows = follows;
         _pending.Clear();
         _pendingInverses.Clear();
     }
@@ -234,7 +243,7 @@ public sealed class SceneDocument
         {
             SavedPosition = -1;
         }
-        _history.Add(new Transaction(label, [.. _pending], [.. Enumerable.Reverse(_pendingInverses)]));
+        _history.Add(new Transaction(label, [.. _pending], [.. Enumerable.Reverse(_pendingInverses)], _follows));
         Position = _history.Count;
         Changed?.Invoke();
     }
@@ -259,53 +268,72 @@ public sealed class SceneDocument
         }
     }
 
+    /// <summary>Undoes the last entry, with the entries that follow it, as one step.</summary>
     public void Undo()
     {
         if (CanUndo)
         {
-            Position--;
-            Run(_history[Position].Inverses);
+            MoveTo(GroupStart(Position - 1));
         }
     }
 
+    /// <summary>Redoes the next entry, with the entries that follow it, as one step.</summary>
     public void Redo()
     {
         if (CanRedo)
         {
-            Run(_history[Position].Operations);
-            Position++;
+            MoveTo(Position + 1);
         }
     }
 
-    /// <summary>Undoes or redoes until the first <paramref name="position"/> entries are applied.</summary>
+    /// <summary>
+    /// Undoes or redoes until the first <paramref name="position"/> entries are applied, or the entries that follow
+    /// them too: a position never splits an entry from the ones that follow it. The host gets the operations in one
+    /// message, so the game never runs a frame between them.
+    /// </summary>
     public void MoveTo(int position)
     {
         position = Math.Clamp(position, 0, _history.Count);
+        while (position < _history.Count && _history[position].Follows && position > 0)
+        {
+            position++;
+        }
+        var ops = new List<Operation>();
         while (Position > position && CanUndo)
         {
             Position--;
-            Run(_history[Position].Inverses, notify: false);
+            Run(_history[Position].Inverses, ops);
         }
         while (Position < position && CanRedo)
         {
-            Run(_history[Position].Operations, notify: false);
+            Run(_history[Position].Operations, ops);
             Position++;
+        }
+        if (ops.Count > 0)
+        {
+            Applied?.Invoke(ops);
         }
         Changed?.Invoke();
     }
 
-    void Run(IReadOnlyList<Operation> operations, bool notify = true)
+    // The first entry of the group that the entry at index is in: the entry that the ones after it follow.
+    int GroupStart(int index)
+    {
+        while (index > 0 && _history[index].Follows)
+        {
+            index--;
+        }
+        return index;
+    }
+
+    void Run(IReadOnlyList<Operation> operations, List<Operation> applied)
     {
         foreach (var op in operations)
         {
             op.Apply(Scene);
             Invalidate();
         }
-        Applied?.Invoke(operations);
-        if (notify)
-        {
-            Changed?.Invoke();
-        }
+        applied.AddRange(operations);
     }
 
     /// <summary>

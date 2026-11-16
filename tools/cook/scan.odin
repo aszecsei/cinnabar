@@ -220,6 +220,8 @@ carry_source :: proc(a: ^Asset_Source, saved: Saved_Source) -> bool {
 	append(&a.visual, ..saved.visual)
 	append(&a.inputs, ..saved.inputs)
 	a.behaviour = saved.behaviour
+	a.category = saved.category
+	a.edit_mode = saved.edit_mode
 	a.action = saved.action
 	a.params = saved.params
 	a.permutations = saved.permutations

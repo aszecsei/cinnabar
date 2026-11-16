@@ -49,12 +49,28 @@ local base = {
 
 local Behaviour = {}
 
+-- The options that Behaviour.define takes, and the type of each.
+local OPTIONS = { edit_mode = "boolean", category = "string" }
+
 -- Behaviour.define makes a behaviour class. An instance's metatable is its class. Methods are found in the class
 -- first, so a call does not reach the engine. enabled is never stored in the instance, so its reads and writes reach
--- the engine, which runs on_enable and on_disable.
-function Behaviour.define(name: string, fields: { [string]: any }?)
+-- the engine, which runs on_enable and on_disable. options can set edit_mode, so the class runs in the editor's Edit
+-- mode too, and category, the Add Component picker's folder (see docs/scripting/behaviours.md#behaviours).
+function Behaviour.define(name: string, fields: { [string]: any }?, options: { [string]: any }?)
 	if type(name) ~= "string" then
 		error("Behaviour.define takes the class name first", 2)
+	end
+	if options ~= nil and type(options) ~= "table" then
+		error(`the options of {name} must be a table`, 2)
+	end
+	for key, value in options or {} do
+		local expected = OPTIONS[key]
+		if expected == nil then
+			error(`{name} has an option {key} that Behaviour.define does not know`, 2)
+		end
+		if type(value) ~= expected then
+			error(`the option {key} of {name} takes a {expected}`, 2)
+		end
 	end
 	local schema = {}
 	for key, spec in fields or {} do
@@ -70,6 +86,10 @@ function Behaviour.define(name: string, fields: { [string]: any }?)
 	local class = {}
 	class.__behaviour = name
 	class.__fields = table.freeze(schema)
+	class.__edit_mode = options ~= nil and options.edit_mode == true
+	if options ~= nil and options.category ~= nil then
+		class.__category = options.category
+	end
 	class.__index = function(self, key)
 		local value = rawget(class, key)
 		if value ~= nil then

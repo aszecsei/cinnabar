@@ -258,6 +258,7 @@ patch_module :: proc(r: ^Runtime, L: ^luau.State, old, new: c.int) {
 	luau.pop(L, 1)
 	fixed_updates := luau.rawgetfield(L, old, "fixed_update") == .FUNCTION
 	luau.pop(L, 1)
+	edit_mode := class_runs_in_edit_mode(L, old)
 	for &i, index in r.instances[:r.instance_used] {
 		if .Live not_in i.flags {
 			continue
@@ -297,7 +298,18 @@ patch_module :: proc(r: ^Runtime, L: ^luau.State, old, new: c.int) {
 		} else {
 			i.flags -= {.Fixed_Updates}
 		}
-		call_method(r, {u32(index), i.generation}, "on_reload")
+		// A class that gains edit_mode in Edit runs from now on, and one that loses it goes silent.
+		was_silent := silent(r, &i)
+		if edit_mode {
+			i.flags += {.Edit_Mode}
+		} else {
+			i.flags -= {.Edit_Mode}
+		}
+		h := Instance_Handle{u32(index), i.generation}
+		if was_silent && !silent(r, &i) {
+			sync_enabled(r, h)
+		}
+		call_method(r, h, "on_reload")
 	}
 }
 

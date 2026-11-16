@@ -50,7 +50,7 @@ In development, a changed script reloads at the end of the frame in which the as
 1. The asset runtime swaps the blob behind the script's handle (see [Content pipeline](../content/blobs-and-loading.md#loading)). A script with a type error keeps its old blob, so the game never sees it.
 2. The script runtime runs the new version's top level in a fresh environment. If it fails, the old version stays and the error is logged.
 3. If the old and the new results are both tables, the runtime **patches the old table in place**: it copies every key of the new table, and removes keys that the new table does not have. Modules that hold the old table see the new functions, and instances keep their metatable. If either result is not a table, the cache gets the new value, and modules that required the old one keep it, with a warning.
-4. For a behaviour class, the class keeps its own `__index` and `__newindex`, which find the patched methods in it. Existing instances keep their state, get the default value of each new field, and start or stop getting `update` if the new version adds or removes it. Then each instance gets `on_reload`, if the class defines it.
+4. For a behaviour class, the class keeps its own `__index` and `__newindex`, which find the patched methods in it. Existing instances keep their state, get the default value of each new field, and start or stop getting `update` if the new version adds or removes it, and running in the editor's Edit mode if it adds or removes `edit_mode` ([Behaviours: Edit mode](behaviours.md#edit-mode)). Then each instance gets `on_reload`, if the class defines it and gets callbacks now: in Edit, only an edit-mode class's instances do, and what they write there is an edit of the editor's scene.
 5. **A main script that runs restarts.** A script from `spawn_script` is one thread whose body is its top level, so nothing can be patched: its thread stops, and the new version runs from the top. Its `Main_Script` handle stays valid. Modules reload before main scripts restart, so a restarted script requires the new versions. A main script that ended, failed or was stopped does not restart. The next `spawn_script` of it runs the new version.
 6. A module that no one has required yet loads the new version when it is first required.
 
@@ -60,7 +60,7 @@ Consequences for scripters:
 - **A running coroutine finishes in its old code.** Its stack holds the old functions. New coroutines run the new code.
 - **A main script's state resets.** Keep long-lived state in behaviours, or in a module's table, which survives the patch.
 
-A code reload of the DLL does not touch scripts. The VM, the instances and the coroutines stay, and `on_reload` fills the binding tables again.
+A code reload of the DLL does not touch scripts. The VM, the instances and the coroutines stay, so edit-mode behaviours go on running in Edit, and `on_reload` fills the binding tables again.
 
 ## Native code generation
 
