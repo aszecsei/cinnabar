@@ -54,6 +54,7 @@ Rtr_Light_Push :: struct {
 	width:        u32,
 	height:       u32,
 	shaded:       u32,
+	radiance_max: f32,
 }
 
 #assert(size_of(Rtr_Trace_Push) <= 128 && size_of(Rtr_Light_Push) <= 128)
@@ -260,13 +261,14 @@ run_rtr_light :: proc(ctx: ^Pass_Context) {
 	tf := sf.traced
 	g := ctx.graph
 	push := Rtr_Light_Push {
-		hits     = gpu.read_index(gpu_buffer(g, tf.hits)),
-		rays     = gpu.write_index(gpu_texture(g, sf.rays[0])),
-		radiance = gpu.write_index(gpu_texture(g, sf.radiance[0])),
-		exposure = gpu.read_index(gpu_buffer(g, f.exposure)),
-		width    = sf.trace_size.x,
-		height   = sf.trace_size.y,
-		shaded   = u32(tf.shaded != nil),
+		hits         = gpu.read_index(gpu_buffer(g, tf.hits)),
+		rays         = gpu.write_index(gpu_texture(g, sf.rays[0])),
+		radiance     = gpu.write_index(gpu_texture(g, sf.radiance[0])),
+		exposure     = gpu.read_index(gpu_buffer(g, f.exposure)),
+		width        = sf.trace_size.x,
+		height       = sf.trace_size.y,
+		shaded       = u32(tf.shaded != nil),
+		radiance_max = sf.params.radiance_max,
 	}
 	if tf.shaded != nil {
 		push.light = gpu.read_index(gpu_buffer(g, tf.rays))

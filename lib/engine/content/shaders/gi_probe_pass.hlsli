@@ -6,6 +6,7 @@
 
 // Matches Probe_Push in lib/engine/render/gi_probes.odin. lights lists the punctual lights that the hits see, after the
 // directional ones. depth is this frame's, and lit the global illumination's lit scene of last frame, when lit_valid.
+// exposure is the frame's, which the update reads.
 struct Probe_Push {
 	uint shadow_atlas;
 	uint shadow_mask;
@@ -22,7 +23,7 @@ struct Probe_Push {
 	uint depth;
 	uint lit;
 	uint lit_valid;
-	uint padding;
+	uint exposure;
 };
 #define MATERIAL_PUSH Probe_Push
 // No shading model: the hits need only the light loop's lookups.

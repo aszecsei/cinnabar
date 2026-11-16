@@ -191,6 +191,11 @@ the_probes_update_on_the_compute_queue_and_pass_validation :: proc(t: ^testing.T
 		nil,
 	)
 	defer platform.gpu_destroy_buffer(instances)
+	exposure := platform.gpu_create_buffer(
+		{size = 16, usage = {.Storage}, label = "exposure"},
+		nil,
+	)
+	defer platform.gpu_destroy_buffer(exposure)
 	lit_texture := platform.gpu_create_texture(
 		{size = {32, 16}, format = GI_FORMAT, usage = {.Sampled, .Storage}, label = "lit"},
 		nil,
@@ -214,6 +219,8 @@ the_probes_update_on_the_compute_queue_and_pass_validation :: proc(t: ^testing.T
 			view = {position = camera},
 		}
 		f.lights = new(Light_Frame, platform.frame_allocator)
+		// The exposure, which the update reads to clamp the rays' light.
+		f.exposure = import_buffer(&g, exposure)
 		// The prepass's depth, which the hits' light reads.
 		f.depth = create_texture(&g, {size = f.size, format = DEPTH_FORMAT, label = "depth"})
 		prepass := add_render_pass(&g, "prepass", proc(_: ^Pass_Context) {}, nil)

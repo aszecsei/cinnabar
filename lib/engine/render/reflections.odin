@@ -20,20 +20,22 @@ import "cinnabar:core/gpu"
 // march's steps, and the roughness above which a surface takes none, which its weight fades out to over the 0.1 below.
 //
 // Ray_Traced: the block, one ray from each, the steps of the march on the screen before a ray traces, none for 0, the
-// cutoff, and the distance in meters past which a hit has no weight, and the probes fill in.
+// cutoff, the distance in meters past which a hit has no weight, and the probes fill in, and the most pre-exposed
+// luminance that a hit's light keeps before the temporal pass takes it (clamp_hit_light).
 Reflection_Params :: struct {
-	face:        u32,
-	format:      gpu.Format,
-	probes:      u32,
-	faces:       u32,
-	samples:     u32,
-	rough_start: f32,
-	rough_end:   f32,
-	stride:      [2]u32,
-	rays:        u32,
-	steps:       u32,
-	cutoff:      f32,
-	distance:    f32,
+	face:         u32,
+	format:       gpu.Format,
+	probes:       u32,
+	faces:        u32,
+	samples:      u32,
+	rough_start:  f32,
+	rough_end:    f32,
+	stride:       [2]u32,
+	rays:         u32,
+	steps:        u32,
+	cutoff:       f32,
+	distance:     f32,
+	radiance_max: f32,
 }
 
 // The probes hold prefiltered light, with no alpha, which RG11B10_Float's range fits at every level.
@@ -85,10 +87,10 @@ REFLECTION_PARAMS := [Reflection_Technique][Quality_Level]Reflection_Params {
 		.Ultra = {stride = {1, 1}, rays = 2, steps = 64, cutoff = 0.6},
 	},
 	.Ray_Traced = {
-		.Low = {stride = {2, 2}, rays = 1, steps = 16, cutoff = 0.3, distance = 50},
-		.Medium = {stride = {2, 2}, rays = 1, steps = 16, cutoff = 0.4, distance = 100},
-		.High = {stride = {2, 1}, rays = 1, steps = 16, cutoff = 0.5, distance = 200},
-		.Ultra = {stride = {1, 1}, rays = 1, steps = 16, cutoff = 0.6, distance = 500},
+		.Low = {stride = {2, 2}, rays = 1, steps = 16, cutoff = 0.3, distance = 50, radiance_max = 16},
+		.Medium = {stride = {2, 2}, rays = 1, steps = 16, cutoff = 0.4, distance = 100, radiance_max = 16},
+		.High = {stride = {2, 1}, rays = 1, steps = 16, cutoff = 0.5, distance = 200, radiance_max = 16},
+		.Ultra = {stride = {1, 1}, rays = 1, steps = 16, cutoff = 0.6, distance = 500, radiance_max = 16},
 	},
 }
 
