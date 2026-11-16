@@ -171,14 +171,22 @@ sealed class ContentGridView : Panel
         }
     }
 
-    /// <summary>Scrolls so that an asset shows.</summary>
+    /// <summary>
+    /// Scrolls so that an asset shows, now and again once the rows are laid out: right after the assets change, the
+    /// scroll viewer still has the extent of the assets before, and holds the offset to it.
+    /// </summary>
     public void ScrollTo(string key)
     {
-        var index = _shown.ToList().FindIndex(t => t.Key == key);
-        if (index >= 0)
+        void Scroll()
         {
-            ScrollToRow(_layout.RowOf(index));
+            var index = _shown.ToList().FindIndex(t => t.Key == key);
+            if (index >= 0)
+            {
+                ScrollToRow(_layout.RowOf(index));
+            }
         }
+        Scroll();
+        Avalonia.Threading.Dispatcher.UIThread.Post(Scroll, Avalonia.Threading.DispatcherPriority.Loaded);
     }
 
     void ScrollToRow(int row)

@@ -140,7 +140,15 @@ public sealed class ContentBrowserView : DockPanel
             }
         };
 
-        new ViewSubscriptions(this, attached: Rebuild)
+        new ViewSubscriptions(this, attached: () =>
+            {
+                Rebuild();
+                // What was revealed while the panel was behind another tab was not heard: its asset is the selection.
+                if (_model.SelectedAssets is [var first, ..])
+                {
+                    _grid.ScrollTo(first);
+                }
+            })
             .Add(() => _model.Changed += PostRebuild, () => _model.Changed -= PostRebuild)
             .Add(() => _shell.Layout.Changed += PostRebuild, () => _shell.Layout.Changed -= PostRebuild)
             .Add(() => _model.ContextChanged += OnContextChanged, () => _model.ContextChanged -= OnContextChanged)
@@ -481,6 +489,15 @@ public sealed class ContentBrowserView : DockPanel
         };
         // Assets dragged onto a folder move into it.
         var folder = new ContentFolder(row.Root, row.Path);
+        // A press opens the folder, also the one that the list has selected already, for which the list raises no
+        // change: that press ends a search, or leaves an open file's contents, as the press on any other folder does.
+        view.PointerPressed += (_, e) =>
+        {
+            if (e.GetCurrentPoint(view).Properties.IsLeftButtonPressed && !_syncing)
+            {
+                _model.Open(folder);
+            }
+        };
         DragDrop.SetAllowDrop(view, true);
         view.AddHandler(DragDrop.DragOverEvent, (_, e) =>
         {

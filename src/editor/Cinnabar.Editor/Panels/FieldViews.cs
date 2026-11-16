@@ -96,37 +96,37 @@ abstract class FieldView
     protected static Slider RangeSlider(IFieldEditor editor, double min, double max, Func<bool> showing)
     {
         var slider = new Slider { Minimum = min, Maximum = max, Classes = { "value-slider" }, VerticalAlignment = VerticalAlignment.Center };
-        var dragging = false;
-        // A press on the track moves the value without a drag, after the press reaches the slider.
+        // A press anywhere on the slider starts a scrub, and the release ends it, so that a drag is one undo entry. The
+        // thumb's own drag events do not cover a press on the track, which moves the value and then follows the pointer
+        // without them: each move was an entry of its own.
         var pressed = false;
-        slider.AddHandler(InputElement.PointerPressedEvent, (_, _) => pressed = true, Avalonia.Interactivity.RoutingStrategies.Tunnel, handledEventsToo: true);
-        slider.AddHandler(InputElement.PointerReleasedEvent, (_, _) => pressed = false, Avalonia.Interactivity.RoutingStrategies.Tunnel, handledEventsToo: true);
-        slider.AddHandler(InputElement.PointerCaptureLostEvent, (_, _) => pressed = false, handledEventsToo: true);
-        slider.AddHandler(Avalonia.Controls.Primitives.Thumb.DragStartedEvent, (_, _) =>
+        void End()
         {
-            dragging = true;
-            editor.BeginScrub(0);
-        });
-        slider.AddHandler(Avalonia.Controls.Primitives.Thumb.DragCompletedEvent, (_, _) =>
+            if (pressed)
+            {
+                pressed = false;
+                editor.EndScrub();
+            }
+        }
+        slider.AddHandler(InputElement.PointerPressedEvent, (_, e) =>
         {
-            dragging = false;
-            editor.EndScrub();
-        });
+            if (!pressed && e.GetCurrentPoint(slider).Properties.IsLeftButtonPressed)
+            {
+                pressed = true;
+                editor.BeginScrub(0);
+            }
+        }, Avalonia.Interactivity.RoutingStrategies.Tunnel, handledEventsToo: true);
+        // The release ends the scrub after the slider has seen it.
+        slider.AddHandler(InputElement.PointerReleasedEvent, (_, _) => End(), Avalonia.Interactivity.RoutingStrategies.Bubble, handledEventsToo: true);
+        slider.AddHandler(InputElement.PointerCaptureLostEvent, (_, _) => End(), handledEventsToo: true);
         slider.ValueChanged += (_, e) =>
         {
-            if (!showing() && (dragging || pressed || slider.IsKeyboardFocusWithin))
+            if (!showing() && (pressed || slider.IsKeyboardFocusWithin))
             {
                 editor.SetNumbers([e.NewValue]);
             }
         };
-        slider.DetachedFromVisualTree += (_, _) =>
-        {
-            if (dragging)
-            {
-                dragging = false;
-                editor.EndScrub();
-            }
-        };
+        slider.DetachedFromVisualTree += (_, _) => End();
         return slider;
     }
 
@@ -141,13 +141,36 @@ abstract class FieldView
             TextAlignment = numeric ? TextAlignment.Right : TextAlignment.Left,
             VerticalContentAlignment = VerticalAlignment.Center,
         };
+        // What the box had when it took the focus, or after its last commit: a commit is of a text that differs from it.
+        // The value that shows is not what to compare with. It is the game's, formatted, such as 45° for a typed 45, so
+        // a box that committed on Enter and kept the focus differed from it, and committed again when it lost the
+        // focus: a second undo entry for one edit. And a focused box does not follow the value, so after a scrub of
+        // its field by the name, its old text differed too, and losing the focus put the old value back.
+        string? baseline = null;
+        var committed = false;
         void Commit()
         {
-            if (box.Text is { } text && text != current() && !commit(text))
+            var text = box.Text ?? "";
+            if (text == (baseline ?? current()))
+            {
+                return;
+            }
+            if (commit(text))
+            {
+                baseline = text;
+                committed = true;
+            }
+            else
             {
                 box.Text = current();
+                baseline = box.Text;
             }
         }
+        box.GotFocus += (_, _) =>
+        {
+            baseline = box.Text ?? "";
+            committed = false;
+        };
         box.KeyDown += (_, e) =>
         {
             switch (e.Key)
@@ -158,11 +181,22 @@ abstract class FieldView
                     break;
                 case Key.Escape:
                     box.Text = current();
+                    baseline = box.Text;
                     e.Handled = true;
                     break;
             }
         };
-        box.LostFocus += (_, _) => Commit();
+        box.LostFocus += (_, _) =>
+        {
+            Commit();
+            // A box that committed nothing shows the value again, which may have changed under it. One that committed
+            // keeps its text until the game's value comes, which is the next thing that it shows.
+            if (!committed)
+            {
+                box.Text = current();
+            }
+            baseline = null;
+        };
         return box;
     }
 

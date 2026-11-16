@@ -28,10 +28,22 @@ static class Kit
             TextWrapping = multiline ? TextWrapping.Wrap : TextWrapping.NoWrap,
             MinHeight = multiline ? 60 : 20,
         };
-        var committed = text;
+        CommitOnEnterOrBlur(box, commit, multiline);
+        return new Border { Classes = { "value-box", "editable" }, Child = box };
+    }
+
+    /// <summary>
+    /// Makes a box commit its text on Enter, or Ctrl+Enter with <paramref name="multiline"/>, and when it loses the
+    /// focus, and put the text back on Escape. It commits a text once: a box that commits on Enter and then loses the
+    /// focus, as it does when its view builds again without it, does not commit again. So the commit must not compare
+    /// with a value that it captured, which is old by then.
+    /// </summary>
+    public static void CommitOnEnterOrBlur(TextBox box, Action<string> commit, bool multiline = false)
+    {
+        var committed = box.Text ?? "";
         void Commit()
         {
-            if (box.Text != committed)
+            if ((box.Text ?? "") != committed)
             {
                 committed = box.Text ?? "";
                 commit(committed);
@@ -51,7 +63,6 @@ static class Kit
             }
         };
         box.LostFocus += (_, _) => Commit();
-        return new Border { Classes = { "value-box", "editable" }, Child = box };
     }
 
     public static ComboBox Choice(IEnumerable<string> options, string? selected, Action<string> pick)
@@ -64,10 +75,13 @@ static class Kit
             Classes = { "value-choice" },
             HorizontalAlignment = HorizontalAlignment.Stretch,
         };
+        // The option that the box last picked or started with, so that going back to the first option picks it again.
+        var current = selected;
         combo.SelectionChanged += (_, _) =>
         {
-            if (combo.SelectedItem is string s && s != selected)
+            if (combo.SelectedItem is string s && s != current)
             {
+                current = s;
                 pick(s);
             }
         };

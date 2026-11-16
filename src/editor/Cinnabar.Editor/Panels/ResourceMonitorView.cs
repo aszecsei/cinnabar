@@ -62,6 +62,17 @@ public sealed class ResourceMonitorView : Grid
     {
         _empty.IsVisible = _stats.Host == null && _stats.Game == null;
         _graph.InvalidateVisual();
+        // Without a host or a game, the last one's numbers go: they would show under the message as if they were now.
+        if (_stats.Host == null)
+        {
+            _frames.Text = "";
+            Rows(_host, []);
+        }
+        if (_stats.Game == null)
+        {
+            Rows(_game, []);
+            Rows(_modules, []);
+        }
         if (_stats.Host is { } h)
         {
             var fps = h.Interval > 0 ? h.Frames / h.Interval : 0;
