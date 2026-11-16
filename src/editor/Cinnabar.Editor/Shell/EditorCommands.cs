@@ -12,6 +12,18 @@ static partial class EditorCommands
     public const string CreateEntity = "entity.create";
     public const string CreateVolume = "entity.createVolume";
     public const string CreateReflectionProbe = "entity.createReflectionProbe";
+
+    /// <summary>
+    /// The ID of the command that adds an entity of a kind of the catalog, by the kind's ID. The kinds that had a
+    /// command before the catalog keep its ID, which key bindings may name.
+    /// </summary>
+    public static string AddEntity(string template) => template switch
+    {
+        Document.EntityCatalog.EmptyId => CreateEntity,
+        "globalVolume" => CreateVolume,
+        "reflectionProbe" => CreateReflectionProbe,
+        _ => $"entity.add.{template}",
+    };
     public const string DuplicateEntity = "entity.duplicate";
     public const string DeleteEntity = "entity.delete";
     public const string RestartHost = "host.restart";
@@ -121,6 +133,10 @@ static partial class EditorCommands
     public const string DeleteAsset = "content.delete";
     public const string Reimport = "content.reimport";
     public const string ResetLayout = "view.resetLayout";
+    public const string Workspace = "window.workspace";
+
+    /// <summary>The ID of the command that makes a workspace the active one, by the workspace's ID.</summary>
+    public static string WorkspaceSwitch(string workspace) => $"window.workspace.{workspace}";
     public const string Stats = "view.stats";
     public const string CaptureFrame = "profile.captureFrame";
     public const string CaptureWorstFrame = "profile.captureWorst";

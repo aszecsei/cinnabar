@@ -129,7 +129,7 @@ Past `far_distance`, the authored weather blends over as far again to a cumulus 
 
 ## Editor
 
-The Atmosphere tab's Clouds group adds the component to the atmosphere's volume and turns it on and off, applies a weather preset (Clear, Scattered, Overcast, Storm), chooses the weather source, and opens the Weather Map panel, which paints the map's three channels and generates a map from noise into a texture asset that the daemon cooks (see [Editor](../editor/shell-and-panels.md#atmosphere)). The Atmosphere panel has every field, with its unit.
+The Lighting tab's Weather group adds the component to the atmosphere's volume and turns it on and off, and applies a weather preset (Clear, Scattered, Overcast, Storm). The Atmosphere panel has every field, with its unit, and chooses the weather source. The Weather Map panel, which the tab's Panels group shows, paints the map's three channels and generates a map from noise into a texture asset that the daemon cooks (see [Editor](../editor/shell-and-panels.md#atmosphere)).
 
 ## Limits
 

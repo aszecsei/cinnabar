@@ -5,6 +5,7 @@ using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
 using CommunityToolkit.Mvvm.Input;
+using Cinnabar.Editor.Commands;
 using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Host;
 using Cinnabar.Editor.Model;
@@ -40,6 +41,9 @@ public sealed class PropertiesView : ScrollViewer
     readonly FieldGrid _grid;
     // Groups that the user collapsed, by title, which stay collapsed across selections.
     readonly SectionExpander _sections = new();
+    // The folders of the Add Component picker that the user opened, which stay open across selections.
+    readonly HashSet<string> _pickerFolders = [];
+    readonly RebuildGate _rebuild;
     string _structure = "";
     // The selected reflection probe's state and Capture, which its view and the host's state update in place, and the
     // probe's entity.
@@ -47,12 +51,16 @@ public sealed class PropertiesView : ScrollViewer
     Button? _probeCapture;
     ulong _probeEntity;
 
+    /// <summary>What the panel listens to while it shows. Internal to the tests, which attach it without a window.</summary>
+    internal ViewSubscriptions Subscriptions { get; }
+
     public PropertiesView(EditorShell shell)
     {
         _shell = shell;
         _world = shell.World;
         _selection = shell.Selection;
         _grid = new FieldGrid(shell);
+        _rebuild = new RebuildGate(Build);
         Content = _content;
         HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled;
         // A script that defines a behaviour drags in from the content browser, and adds it to the selected entities.
@@ -67,7 +75,7 @@ public sealed class PropertiesView : ScrollViewer
                 _shell.AddBehaviour(SelectedSceneIds(), script);
             }
         });
-        new ViewSubscriptions(this, attached: Rebuild)
+        Subscriptions = new ViewSubscriptions(this, attached: Rebuild)
             .Add(() => _selection.Changed += OnSelectionChanged, () => _selection.Changed -= OnSelectionChanged)
             .Add(() => _world.EntitiesChanged += Rebuild, () => _world.EntitiesChanged -= Rebuild)
             .Add(() => _world.TypesChanged += Rebuild, () => _world.TypesChanged -= Rebuild)
@@ -131,7 +139,10 @@ public sealed class PropertiesView : ScrollViewer
     Func<bool>? Overridden(ulong entity, ulong? component, Func<bool> isSet) =>
         _shell.InstanceOf(entity) is { } info && !(info.IsInstanceRoot && component is SceneEdits.TransformId or SceneEdits.LocalTransformId) ? isSet : null;
 
-    void Rebuild()
+    // Clearing the rows can commit a focused box's text, and that edit asks for a rebuild: the gate runs it after this one.
+    void Rebuild() => _rebuild.Run();
+
+    void Build()
     {
         _content.Children.Clear();
         _grid.Clear();
@@ -237,7 +248,6 @@ public sealed class PropertiesView : ScrollViewer
         if (document != null)
         {
             _content.Children.Add(AddComponentButton(node, document));
-            _content.Children.Add(AddBehaviourButton(document));
         }
         ShowValues();
     }
@@ -434,16 +444,18 @@ public sealed class PropertiesView : ScrollViewer
     // The component types that some selected entity lacks. Adding one gives it to each entity that lacks it.
     Control AddComponentToMany(List<EntityNode> nodes, IReadOnlyList<SceneEntity> documents)
     {
-        var menu = new MenuFlyout();
-        foreach (var type in _world.Types.Values.Where(t => nodes.Any(n => !n.Components.Contains(t.Id)) && !Derived.Contains(t.Id)).OrderBy(t => FieldValues.Humanize(t.Name)))
-        {
-            var item = new MenuItem { Header = FieldValues.Humanize(type.Name) };
-            item.Click += (_, _) => _shell.Edit($"Add {FieldValues.Humanize(type.Name)}",
-                [.. documents.Where((d, i) => !nodes[i].Components.Contains(type.Id))
-                    .Select(d => new AddComponent(d.Id, new SceneComponent(type.Id, type.Name, DefaultFields(type.Id))))]);
-            menu.Items.Add(item);
-        }
-        return Kit.AddButton("Add Component", menu);
+        var picker = new CatalogPicker("Search components",
+            () => ComponentItems(t => nodes.Any(n => !n.Components.Contains(t.Id))),
+            item =>
+            {
+                if (ComponentOf(item) is { } type)
+                {
+                    _shell.Edit($"Add {FieldValues.Humanize(type.Name)}",
+                        [.. documents.Where((d, i) => !nodes[i].Components.Contains(type.Id))
+                            .Select(d => new AddComponent(d.Id, new SceneComponent(type.Id, type.Name, DefaultFields(type.Id))))]);
+                }
+            }, _pickerFolders, ComponentCatalog.FolderIcon);
+        return picker.Button("Add Component");
     }
 
     // An entity that the world does not know shows as the engine prints it.
@@ -455,27 +467,9 @@ public sealed class PropertiesView : ScrollViewer
         if (document != null)
         {
             var name = new TextBox { Text = document.Name, PlaceholderText = "Name", Classes = { "title-edit" } };
-            void Commit()
-            {
-                if (name.Text != document.Name)
-                {
-                    _shell.Edit("Rename", new Rename(document.Id, name.Text ?? ""));
-                }
-            }
-            name.KeyDown += (_, e) =>
-            {
-                if (e.Key == Key.Enter)
-                {
-                    Commit();
-                    e.Handled = true;
-                }
-                else if (e.Key == Key.Escape)
-                {
-                    name.Text = document.Name;
-                    e.Handled = true;
-                }
-            };
-            name.LostFocus += (_, _) => Commit();
+            // The entity by its ID: this document's entity is old after the first edit.
+            var id = document.Id;
+            Kit.CommitOnEnterOrBlur(name, text => _shell.Edit("Rename", new Rename(id, text)));
             title = name;
         }
         else
@@ -703,45 +697,37 @@ public sealed class PropertiesView : ScrollViewer
         return _sections.Create(title, content, header, disabled ? 0.6 : 1);
     }
 
-    // The component types that the game registers and the entity lacks, in a menu.
+    // What the entity can gain, in one picker (see docs/editor/shell-and-panels.md#properties): the component types that
+    // the game registers and the entity lacks, in the folders that they register in, and the scripts that define a
+    // behaviour, from the cook daemon's index, in the folders that they are in. The picker reads both as it opens, so
+    // it has the types of the latest code and the scripts of the latest cook.
     Control AddComponentButton(EntityNode node, SceneEntity document)
     {
-        var menu = new MenuFlyout();
-        foreach (var type in _world.Types.Values.Where(t => !node.Components.Contains(t.Id) && !Derived.Contains(t.Id)).OrderBy(t => FieldValues.Humanize(t.Name)))
+        var picker = new CatalogPicker("Search components and behaviours",
+            () => [.. ComponentItems(t => !node.Components.Contains(t.Id)), .. ComponentCatalog.Behaviours(_shell.Assets.Behaviours.Where(a => !document.Behaviours.Any(b => b.Script == a.Guid)))],
+            item =>
+            {
+                if (ComponentOf(item) is { } type)
+                {
+                    _shell.Edit($"Add {FieldValues.Humanize(type.Name)}", new AddComponent(document.Id, new SceneComponent(type.Id, type.Name, DefaultFields(type.Id))));
+                }
+                else if (ComponentCatalog.ScriptOf(item) is { } script)
+                {
+                    _shell.AddBehaviour([document.Id], script);
+                }
+            }, _pickerFolders, ComponentCatalog.FolderIcon)
         {
-            var item = new MenuItem { Header = FieldValues.Humanize(type.Name) };
-            item.Click += (_, _) => _shell.Edit($"Add {FieldValues.Humanize(type.Name)}",
-                new AddComponent(document.Id, new SceneComponent(type.Id, type.Name, DefaultFields(type.Id))));
-            menu.Items.Add(item);
-        }
-        return Kit.AddButton("Add Component", menu);
+            Note = () => _shell.Assets.Roots.Count == 0 ? "The scripts that define a behaviour are listed once the cook daemon runs." : null,
+        };
+        return picker.Button("Add Component");
     }
 
-    // The scripts that define a behaviour and that the entity lacks, from the cook daemon's index, in a menu that is
-    // filled when it opens, so it has the scripts of the latest cook.
-    Control AddBehaviourButton(SceneEntity document)
-    {
-        var menu = new MenuFlyout();
-        menu.Opening += (_, _) =>
-        {
-            menu.Items.Clear();
-            foreach (var script in _shell.Assets.Behaviours.Where(a => !document.Behaviours.Any(b => b.Script == a.Guid)))
-            {
-                var item = new MenuItem { Header = FieldValues.Humanize(script.Behaviour) };
-                ToolTip.SetTip(item, $"{script.Root}/{script.Path}");
-                var guid = script.Guid;
-                item.Click += (_, _) => _shell.AddBehaviour([document.Id], guid);
-                menu.Items.Add(item);
-            }
-            if (menu.Items.Count == 0)
-            {
-                var why = _shell.Assets.Roots.Count == 0 ? "The cook daemon lists the scripts once it runs" : "No other script defines a behaviour";
-                menu.Items.Add(new MenuItem { Header = why, IsEnabled = false });
-            }
-        };
-        // The menu fills when it opens, so the button is enabled while it is empty.
-        return Kit.AddButton("Add Behaviour", menu, disabledWhenEmpty: false);
-    }
+    // The component types that the Add Component picker offers: those that pass, without the ones that the header
+    // shows and the ones that the engine adds itself.
+    List<CatalogItem> ComponentItems(Func<Link.Protocol.ComponentType, bool> offer) =>
+        [.. ComponentCatalog.Components(_world.Types.Values.Where(t => !Derived.Contains(t.Id) && offer(t)))];
+
+    Link.Protocol.ComponentType? ComponentOf(CatalogItem item) => ComponentCatalog.ComponentOf(item) is { } id ? _world.Type(id) : null;
 
     // Zero is no rotation and no size, so the pose components start as the identity.
     static List<SceneField> DefaultFields(ulong id) => id switch

@@ -47,7 +47,8 @@ public partial class App : Application
             }
             else
             {
-                desktop.MainWindow = OpenEditor(EditorOptions.Parse(args), settings);
+                var options = EditorOptions.Parse(args);
+                desktop.MainWindow = OpenEditor(options, options.SettingsDirectory is { } directory ? new EditorSettings(directory) : settings);
             }
         }
         base.OnFrameworkInitializationCompleted();

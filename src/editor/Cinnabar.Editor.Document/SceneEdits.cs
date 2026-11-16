@@ -110,15 +110,18 @@ public static class SceneEdits
     }
 
     /// <summary>A new root entity named "Entity", with a Transform at a position, facing as the world does.</summary>
-    public static CreateEntity NewEntity(Scene scene, long[] position)
+    public static CreateEntity NewEntity(Scene scene, long[] position) => NewEntity(scene, new Pose(position, Quat.Identity, [1, 1, 1]), "Entity");
+
+    /// <summary>A new root entity with a name and a Transform at a pose.</summary>
+    public static CreateEntity NewEntity(Scene scene, Pose pose, string name)
     {
         ulong id;
         do
         {
             id = SceneEntity.NewId();
         } while (scene.Find(id) != null);
-        var entity = new SceneEntity(id) { Name = "Entity" };
-        entity.Components.Add(new SceneComponent(TransformId, "Transform", TransformFields(new Pose(position, Quat.Identity, [1, 1, 1]))));
+        var entity = new SceneEntity(id) { Name = name };
+        entity.Components.Add(new SceneComponent(TransformId, "Transform", TransformFields(pose)));
         return new CreateEntity(entity);
     }
 

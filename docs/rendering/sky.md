@@ -150,5 +150,5 @@ Every mode has the [cubemap](#specular-light)'s two passes, in a frame that upda
 - **The stars do not turn with the time.**
 - **A texture sky's light is one image**, which does not change with the time, and its ambient light is as coarse as the atmosphere's. Its reflections are the image's, through the [cubemap](#specular-light).
 - **Reflections show no discs and no stars:** the cubemap leaves out the sun's and the moon's discs, whose highlights are the directional lights', and the stars, which are narrower than its texels. A mirror at night shows the air's light but not the stars.
-- **The sky's sun lights nothing without a link.** A scene that wants sunlight links a directional light, which the Atmosphere tab does (see [Editor](../editor/shell-and-panels.md#atmosphere)).
+- **The sky's sun lights nothing without a link.** A scene that wants sunlight links a directional light, which Link Sun on the Lighting tab does (see [Editor](../editor/shell-and-panels.md#atmosphere)).
 - The camera stays inside the atmosphere: its height is clamped between 1 m and 1 m below the top.

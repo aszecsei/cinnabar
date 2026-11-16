@@ -16,13 +16,16 @@ namespace Cinnabar.Editor.Ribbon;
 
 /// <summary>
 /// Shows a <see cref="RibbonLayout"/> (see docs/editor/shell-and-panels.md#ribbon): the category bands, the tab strip, and the groups
-/// of the selected tab. It rebuilds when the editor's context changes, because contextual tabs come and go.
+/// of the selected tab. Beside the tabs, whatever tab shows and while the ribbon is collapsed, are the layout's quick
+/// access commands, a box that opens the command palette, and the workspace. It rebuilds when the editor's context
+/// changes, because contextual tabs come and go.
 /// </summary>
 public sealed class RibbonView : DockPanel
 {
     readonly EditorShell _shell;
     readonly CommandViews _views;
     readonly StackPanel _tabStrip = new() { Orientation = Orientation.Horizontal };
+    readonly StackPanel _quickAccess = new() { Orientation = Orientation.Horizontal, Spacing = 2, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(18, 0, 0, 3) };
     readonly Border _body = new() { Classes = { "ribbon-body" } };
     // Undoes the subscriptions of the current tab's controls, so a rebuild leaves nothing listening.
     readonly List<Action> _unsubscribe = [];
@@ -49,13 +52,30 @@ public sealed class RibbonView : DockPanel
         var header = new DockPanel { Classes = { "ribbon-header" } };
         SetDock(collapse, DockSide.Right);
         header.Children.Add(collapse);
+        var workspace = Workspace();
+        SetDock(workspace, DockSide.Right);
+        header.Children.Add(workspace);
+        var search = Search();
+        SetDock(search, DockSide.Right);
+        header.Children.Add(search);
+        SetDock(_tabStrip, DockSide.Left);
         header.Children.Add(_tabStrip);
+        _quickAccess.HorizontalAlignment = HorizontalAlignment.Left;
+        header.Children.Add(_quickAccess);
         SetDock(header, DockSide.Top);
         Children.Add(header);
         Children.Add(_body);
 
         shell.Context.Changed += Rebuild;
         shell.RibbonChanged += Rebuild;
+        shell.RibbonTabRequested += tab =>
+        {
+            if (_shell.Ribbon.VisibleTabs(_shell.Context).Any(t => t.Id == tab))
+            {
+                _selectedTab = tab;
+                Rebuild();
+            }
+        };
         shell.RibbonCollapsedChanged += () =>
         {
             collapse.IsChecked = shell.RibbonCollapsed;
@@ -108,6 +128,12 @@ public sealed class RibbonView : DockPanel
             _tabStrip.Children.Add(header);
         }
 
+        _quickAccess.Children.Clear();
+        foreach (var id in _shell.Ribbon.QuickAccess.Where(id => _shell.Commands.Find(id) != null))
+        {
+            _quickAccess.Children.Add(Quick(id));
+        }
+
         var groups = new StackPanel { Orientation = Orientation.Horizontal };
         foreach (var group in tabs.FirstOrDefault(t => t.Id == _selectedTab)?.Groups ?? [])
         {
@@ -127,6 +153,72 @@ public sealed class RibbonView : DockPanel
         _selectedTab = tabId;
         _shell.RibbonCollapsed = false;
         Rebuild();
+    }
+
+    // A quick access command: its icon alone, since it is always in the same place, with its name in its tooltip.
+    Button Quick(string id)
+    {
+        var command = _shell.Commands.Get(id);
+        Button button = command.IsToggle ? new ToggleButton() : new Button();
+        button.Classes.Add("ribbon-quick");
+        button.Content = CommandViews.Icon(command.Icon, 16) ?? (object)command.Label;
+        button.Command = _views.Adapter(id);
+        ToolTip.SetTip(button, _views.Tooltip(command));
+        AutomationProperties.SetName(button, command.Label);
+        if (button is ToggleButton toggle)
+        {
+            void Update() => toggle.IsChecked = command.IsChecked;
+            Update();
+            command.Changed += Update;
+            _unsubscribe.Add(() => command.Changed -= Update);
+        }
+        return button;
+    }
+
+    // What looks like a search box and opens the command palette, which searches every command: the ribbon shows a
+    // command only on its tab, and the palette finds it from anywhere.
+    Control Search()
+    {
+        var palette = _shell.Commands.Get(EditorCommands.Palette);
+        var content = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 8,
+            Children =
+            {
+                CommandViews.Icon("search", 13) ?? new Control(),
+                new TextBlock { Text = "Search commands", VerticalAlignment = VerticalAlignment.Center },
+                new TextBlock { Text = _views.KeyBindings.ShortcutOf(palette.Id) ?? "", Classes = { "dim" }, VerticalAlignment = VerticalAlignment.Center },
+            },
+        };
+        var button = new Button { Classes = { "ribbon-search" }, Content = content, Command = _views.Adapter(palette.Id) };
+        ToolTip.SetTip(button, _views.Tooltip(palette));
+        AutomationProperties.SetName(button, palette.Label);
+        return button;
+    }
+
+    // The workspace, which arranges the panels for a kind of work (see docs/editor/shell-and-panels.md#workspaces).
+    Control Workspace()
+    {
+        var command = (ChoiceCommand)_shell.Commands.Get(EditorCommands.Workspace);
+        var box = new Avalonia.Controls.ComboBox
+        {
+            Classes = { "ribbon-workspace" },
+            ItemsSource = command.Options,
+            SelectedItem = command.Selected,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        box.SelectionChanged += (_, _) =>
+        {
+            if (box.SelectedItem is string option)
+            {
+                command.Select(option);
+            }
+        };
+        command.Changed += () => box.SelectedItem = command.Selected;
+        ToolTip.SetTip(box, _views.Tooltip(command));
+        AutomationProperties.SetName(box, command.Label);
+        return box;
     }
 
     Control Group(RibbonGroup group)
@@ -189,7 +281,7 @@ public sealed class RibbonView : DockPanel
             Classes = { "ribbon-large" },
             Content = Content(command.Label, command.Icon, large: true),
             Command = _views.Adapter(split.Command),
-            Flyout = Menu(split.Menu),
+            Flyout = _views.Flyout(split.Menu, _unsubscribe),
         };
         ToolTip.SetTip(button, _views.Tooltip(command));
         AutomationProperties.SetName(button, command.Label);
@@ -200,19 +292,10 @@ public sealed class RibbonView : DockPanel
     {
         Classes = { "ribbon-large" },
         Content = Content(dropdown.Label, dropdown.Icon, large: true),
-        Flyout = Menu(dropdown.Menu),
+        Flyout = _views.Flyout(dropdown.Menu, _unsubscribe),
         [AutomationProperties.NameProperty] = dropdown.Label,
+        [ToolTip.TipProperty] = dropdown.Description == null ? dropdown.Label : dropdown.Label + "\n" + dropdown.Description,
     };
-
-    MenuFlyout Menu(IReadOnlyList<string> ids)
-    {
-        var menu = new MenuFlyout();
-        foreach (var id in ids)
-        {
-            menu.Items.Add(_views.MenuItem(id, _unsubscribe));
-        }
-        return menu;
-    }
 
     Control Choice(ChoiceCommand command)
     {

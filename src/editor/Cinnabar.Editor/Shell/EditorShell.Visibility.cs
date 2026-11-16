@@ -28,6 +28,12 @@ public sealed partial class EditorShell
 
     public void SetLocked(IEnumerable<ulong> sceneIds, bool locked) => Visibility.SetLocked(sceneIds, locked);
 
+    /// <summary>
+    /// Whether a selected entity is the scene's, in any mode: what is hidden and locked is the editor's, not the
+    /// document's, so Hide, Lock and Frame Selected work while the game plays too, when the document has no selection.
+    /// </summary>
+    public bool HasSceneSelection => Selection.Entities.Any(h => World.Find(h) is { SceneId: not 0 });
+
     public void ToggleHideSelected() => Visibility.ToggleHideSelected();
 
     public void ToggleLockSelected() => Visibility.ToggleLockSelected();

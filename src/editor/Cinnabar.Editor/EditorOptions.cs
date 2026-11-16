@@ -55,6 +55,13 @@ public sealed record EditorOptions(string HostPath, string GamePath, string? Sce
     public string AutomationFile { get; init; } = InRepository("build", "obj", "editor", "automation.json");
 
     /// <summary>
+    /// The directory of the editor's settings, in place of the user's (<c>--settings</c>): the layout, the workspaces, the
+    /// key bindings and the viewports' settings. For a tool or a test that drives an editor, which must neither start
+    /// from the user's layout nor change it. Null is the user's.
+    /// </summary>
+    public string? SettingsDirectory { get; init; }
+
+    /// <summary>
     /// Where the host puts the copies of the game's DLL that it loads (see docs/overview/building-and-running.md#build-layout),
     /// or null for beside the DLL.
     /// </summary>
@@ -147,6 +154,7 @@ public sealed record EditorOptions(string HostPath, string GamePath, string? Sce
         string? project = null;
         string? load = null;
         string? editorDir = null;
+        string? settings = null;
         for (var i = 0; i < args.Count; i++)
         {
             switch (args[i])
@@ -184,6 +192,9 @@ public sealed record EditorOptions(string HostPath, string GamePath, string? Sce
                 case "--editor-dir" when i + 1 < args.Count:
                     editorDir = Path.GetFullPath(args[++i]);
                     break;
+                case "--settings" when i + 1 < args.Count:
+                    settings = Path.GetFullPath(args[++i]);
+                    break;
                 case "--material" when i + 1 < args.Count:
                     materials.Add(Path.GetFullPath(args[++i]));
                     break;
@@ -220,6 +231,10 @@ public sealed record EditorOptions(string HostPath, string GamePath, string? Sce
         if (project != null)
         {
             options = options with { ProjectPath = project };
+        }
+        if (settings != null)
+        {
+            options = options with { SettingsDirectory = settings };
         }
         return editorDir != null ? options.InEditorDirectory(editorDir) : options;
     }

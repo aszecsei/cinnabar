@@ -12,8 +12,8 @@ namespace Cinnabar.Editor.Viewport;
 
 /// <summary>
 /// The view gizmo in a scene view's corner (see docs/editor/viewport.md#view-gizmo): the world's axes as the view's
-/// camera sees them, with a handle at each end that turns the view to look from there, a square in the middle that
-/// switches between orthographic and perspective, and under them the view's name and projection, which switch it too.
+/// camera sees them, with a handle at each end that turns the view to look from there, and a square in the middle that
+/// switches between orthographic and perspective. The view's name and projection are in the viewport's toolbar, once.
 /// Only the left button acts on it: the wheel and the other buttons pass to the viewport, so the camera's controls work
 /// over it.
 /// </summary>
@@ -22,14 +22,12 @@ public sealed class ViewGizmoControl : Control, ICustomHitTest
     // The disc's side and the distance from its middle to a handle, in pixels of the window.
     const double Disc = 96;
     const double Radius = 34;
-    const double LabelHeight = 18;
 
     static readonly Typeface Face = new("Inter", FontStyle.Normal, FontWeight.SemiBold);
     static readonly Color[] AxisColors = [Palette.AxisX, Palette.AxisY, Palette.AxisZ];
     static readonly string[] Letters = ["X", "Y", "Z"];
     static readonly IBrush Backdrop = new SolidColorBrush(Color.FromArgb(0x30, 0x20, 0x20, 0x24));
     static readonly IBrush HoverBackdrop = new SolidColorBrush(Color.FromArgb(0x80, 0x20, 0x20, 0x24));
-    static readonly IBrush LabelBrush = new SolidColorBrush(Color.FromArgb(0xd0, 0xff, 0xff, 0xff));
     static readonly IBrush CenterBrush = new SolidColorBrush(Color.FromArgb(0xe0, 0xcc, 0xcc, 0xcc));
     static readonly IPen CenterPen = new Pen(CenterBrush, 1.5);
     static readonly IPen HotPen = new Pen(Brushes.White, 1.5);
@@ -37,7 +35,6 @@ public sealed class ViewGizmoControl : Control, ICustomHitTest
     readonly EditorShell _shell;
     readonly EditorViewport _viewport;
     ViewGizmoPart _hot;
-    bool _labelHot;
     bool _over;
 
     public ViewGizmoControl(EditorShell shell, EditorViewport viewport)
@@ -45,7 +42,7 @@ public sealed class ViewGizmoControl : Control, ICustomHitTest
         _shell = shell;
         _viewport = viewport;
         Width = Disc;
-        Height = Disc + LabelHeight;
+        Height = Disc;
         AttachedToVisualTree += (_, _) => _viewport.Camera.Changed += InvalidateVisual;
         DetachedFromVisualTree += (_, _) => _viewport.Camera.Changed -= InvalidateVisual;
     }
@@ -56,8 +53,6 @@ public sealed class ViewGizmoControl : Control, ICustomHitTest
     public bool HitTest(Point point) => new Rect(Bounds.Size).Contains(point);
 
     static Point Middle => new(Disc / 2, Disc / 2);
-
-    Rect LabelRect => new(0, Disc, Disc, LabelHeight);
 
     ViewGizmoPart PartAt(Point point) =>
         ViewGizmo.Hit(ViewGizmo.Layout(Camera.Rotation, Radius), new Vec2(point.X - Middle.X, point.Y - Middle.Y), Radius);
@@ -91,13 +86,6 @@ public sealed class ViewGizmoControl : Control, ICustomHitTest
         var half = ViewGizmo.CenterHalf * Radius;
         var square = new Rect(middle.X - half, middle.Y - half, 2 * half, 2 * half);
         context.DrawRectangle(Camera.IsOrthographic ? CenterBrush : null, _hot == ViewGizmoPart.Center ? HotPen : CenterPen, square);
-
-        var label = new FormattedText(ViewGizmo.Label(Camera), CultureInfo.InvariantCulture, FlowDirection.LeftToRight, Face, 11, _labelHot ? Brushes.White : LabelBrush);
-        if (_labelHot)
-        {
-            context.DrawRectangle(HoverBackdrop, null, LabelRect, 3, 3);
-        }
-        context.DrawText(label, new Point((Disc - label.Width) / 2, Disc + (LabelHeight - label.Height) / 2));
     }
 
     protected override void OnPointerMoved(PointerEventArgs e)
@@ -110,7 +98,7 @@ public sealed class ViewGizmoControl : Control, ICustomHitTest
     {
         base.OnPointerExited(e);
         _over = false;
-        SetHot(ViewGizmoPart.None, label: false);
+        SetHot(ViewGizmoPart.None);
     }
 
     protected override void OnPointerPressed(PointerPressedEventArgs e)
@@ -122,12 +110,11 @@ public sealed class ViewGizmoControl : Control, ICustomHitTest
             return;
         }
         var part = PartAt(point.Position);
-        var onLabel = LabelRect.Contains(point.Position);
-        if (part == ViewGizmoPart.None && !onLabel)
+        if (part == ViewGizmoPart.None)
         {
             return;
         }
-        // The gizmo acts on its own view, which becomes the one that the tools and the View tab act on.
+        // The gizmo acts on its own view, which becomes the one that the tools and the viewport commands act on.
         _shell.ActivateViewport(_viewport);
         if (ViewGizmo.AxisOf(part) is { } axis)
         {
@@ -142,23 +129,21 @@ public sealed class ViewGizmoControl : Control, ICustomHitTest
 
     void Hover(Point position)
     {
-        _over = new Rect(0, 0, Disc, Disc).Contains(position) || LabelRect.Contains(position);
-        SetHot(PartAt(position), LabelRect.Contains(position));
+        _over = new Rect(0, 0, Disc, Disc).Contains(position);
+        SetHot(PartAt(position));
     }
 
-    void SetHot(ViewGizmoPart part, bool label)
+    void SetHot(ViewGizmoPart part)
     {
-        if (part == _hot && label == _labelHot)
+        if (part == _hot)
         {
             InvalidateVisual();
             return;
         }
         _hot = part;
-        _labelHot = label;
-        Cursor = part != ViewGizmoPart.None || label ? new Cursor(StandardCursorType.Hand) : Cursor.Default;
+        Cursor = part != ViewGizmoPart.None ? new Cursor(StandardCursorType.Hand) : Cursor.Default;
         ToolTip.SetTip(this, part switch
         {
-            ViewGizmoPart.None when label => "Switch between orthographic and perspective",
             ViewGizmoPart.None => null,
             ViewGizmoPart.Center => "Switch between orthographic and perspective",
             _ => $"{ViewGizmo.AxisOf(part)}: look along {Direction(ViewGizmo.AxisOf(part)!.Value)}",

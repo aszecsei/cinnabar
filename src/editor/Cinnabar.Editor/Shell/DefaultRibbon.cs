@@ -1,47 +1,175 @@
+using Cinnabar.Editor.Commands;
 using Cinnabar.Editor.Commands.Ribbon;
 using Cinnabar.Editor.Docking;
 using Cinnabar.Editor.Document;
 
 namespace Cinnabar.Editor.Shell;
 
-/// <summary>The editor's ribbon. It holds only commands that work today. Later phases add tabs as they add commands.</summary>
+/// <summary>
+/// The editor's ribbon (see docs/editor/shell-and-panels.md#ribbon), a tab for each kind of work (see
+/// docs/editor/workflows.md#who-the-editor-is-for). It holds only commands that work today, and only commands that act
+/// on the scene, the project or the window: what is one viewport's, such as its view, and what is the Scene's, such as
+/// the tool and mesh mode, is where the work is (see docs/editor/viewport.md#toolbar).
+/// </summary>
 static class DefaultRibbon
 {
+    // The categories' bands over their tabs: the disciplines that the tabs are for.
+    const string Art = "art";
+    const string Design = "design";
+    const string Audio = "audio";
+
     public static RibbonLayout Create(IEnumerable<PanelTool> panels)
     {
         var panelCommands = panels.Select(p => EditorCommands.Panel(p.Id)).ToList();
         return new RibbonLayout(
-            Categories: [],
+            Categories:
+            [
+                new RibbonCategory(Art, "Art", "#3F8F5F"),
+                new RibbonCategory(Design, "Design", "#7A62C9"),
+                new RibbonCategory(Audio, "Audio", "#3B82B8"),
+            ],
             Tabs:
             [
+                // What everyone does to a scene: open and save it, undo, add to it, and act on the selection.
                 new RibbonTab("home", "Home",
                 [
                     new RibbonGroup("Scene",
                     [
                         new LargeButton(EditorCommands.OpenScene),
                         new LargeButton(EditorCommands.Save),
-                        new SmallStack([EditorCommands.SaveAs, EditorCommands.CaptureAllProbes]),
+                        new SmallStack([EditorCommands.SaveAs]),
                     ]),
-                    new RibbonGroup("Edit", [new SmallStack([EditorCommands.Undo, EditorCommands.Redo])]),
-                    new RibbonGroup("Entity",
+                    new RibbonGroup("Edit",
                     [
-                        new LargeButton(EditorCommands.CreateEntity),
-                        new SmallStack([EditorCommands.CreateVolume, EditorCommands.CreateReflectionProbe]),
-                        new SmallStack([EditorCommands.DuplicateEntity, EditorCommands.DeleteEntity]),
+                        new SmallStack([EditorCommands.Undo, EditorCommands.Redo]),
+                        new SmallStack([EditorCommands.DuplicateEntity, EditorCommands.DeleteEntity, EditorCommands.SelectAll]),
+                    ]),
+                    new RibbonGroup("Add",
+                    [
+                        new Dropdown("Add", "add", AddMenu()) { Description = "Add an entity of a common kind, ready to use: a light, a camera, a volume, a sound." },
+                        new SmallStack([Add(EntityCatalog.EmptyId), Add("mesh"), Add("camera")]),
+                    ]),
+                    new RibbonGroup("Visibility",
+                    [
                         new SmallStack([EditorCommands.HideSelected, EditorCommands.ShowAll, EditorCommands.LockSelected]),
-                        new SmallStack([EditorCommands.EditMesh, EditorCommands.MeshBlock]),
                     ]),
-                    new RibbonGroup("Tools",
+                    new RibbonGroup("Prefab",
                     [
-                        new SmallStack([EditorCommands.SelectTool, EditorCommands.MoveTool]),
-                        new SmallStack([EditorCommands.RotateTool, EditorCommands.ScaleTool, EditorCommands.NavPathTool]),
-                        new SmallStack([EditorCommands.LocalSpace, EditorCommands.Snap]),
+                        new LargeButton(EditorCommands.MakePrefab),
+                        new SmallStack([EditorCommands.OpenPrefab, EditorCommands.SelectPrefabAsset, EditorCommands.MakeVariant]),
+                        new SmallStack([EditorCommands.ApplyAllPrefab, EditorCommands.RevertAllPrefab]),
+                        new SmallStack([EditorCommands.UnpackPrefab, EditorCommands.UnpackPrefabCompletely]),
                     ]),
-                    new RibbonGroup("Play",
+                ]),
+                // The lighting artist's: the lights, the probes, and the scene's atmosphere, whose panel has every
+                // setting (see docs/editor/shell-and-panels.md#atmosphere).
+                new RibbonTab("lighting", "Lighting",
+                [
+                    new RibbonGroup("Lights",
                     [
-                        new LargeButton(EditorCommands.PlayMode),
-                        new SmallStack([EditorCommands.PauseMode, EditorCommands.StepFrame, EditorCommands.StopMode]),
+                        new LargeButton(Add("directionalLight")),
+                        new LargeButton(Add("pointLight")),
+                        new LargeButton(Add("spotLight")),
+                        new Dropdown("Area Light", "light-area", [Add("quadLight"), Add("diskLight"), Add("lineLight")]) { Description = "Add a light with a shape: a rectangle, a disk or a tube." },
                     ]),
+                    new RibbonGroup("Reflections",
+                    [
+                        new LargeButton(Add("reflectionProbe")),
+                        new SmallStack([EditorCommands.CaptureProbe, EditorCommands.CaptureAllProbes]),
+                    ]),
+                    new RibbonGroup("Volumes",
+                    [
+                        new Dropdown("Volume", "volume", [.. Kinds(EntityCatalog.Volumes)]) { Description = "Add a volume, which gives the settings inside it: the post-processing, the fog, the sky." },
+                    ]),
+                    new RibbonGroup("Atmosphere", [new LargeButton(EditorCommands.AtmosphereSelect), new ComboBox(EditorCommands.AtmosphereMode)]),
+                    new RibbonGroup("Sun",
+                    [
+                        new LargeButton(EditorCommands.LinkSun),
+                        new Dropdown("Time of Day", "sun", [.. Atmosphere.TimesOfDay.Select(t => EditorCommands.TimeOfDay(t.Name))]),
+                    ]),
+                    new RibbonGroup("Sky",
+                    [
+                        new Dropdown("Air", "sky", [.. Atmosphere.Skies.Select(s => EditorCommands.SkyPreset(s.Name))]),
+                        new SmallStack([EditorCommands.Stars, EditorCommands.Moon, EditorCommands.AimSun]),
+                    ]),
+                    // The fog and the clouds are on or off here, with their presets. The panel has their settings, the
+                    // weather's source and Center Weather Here.
+                    new RibbonGroup("Weather",
+                    [
+                        new SmallStack([EditorCommands.AtmosphereFog, EditorCommands.AtmosphereClouds]),
+                        new Dropdown("Fog Density", "fog", [.. Atmosphere.Fogs.Select(f => EditorCommands.FogPreset(f.Name))]),
+                        new Dropdown("Weather", "cloud", [.. Atmosphere.Weathers.Select(w => EditorCommands.WeatherPreset(w.Name))]),
+                    ]),
+                    new RibbonGroup("Panels", [new SmallStack([EditorCommands.Panel("atmosphere"), EditorCommands.Panel("weather")])]),
+                ]) { Category = Art },
+                // The environment artist's: what a level is dressed with, and the assets that it is made of. The mesh
+                // tools are in the Scene, where the meshes are (see docs/editor/mesh-editing.md#mesh-mode).
+                new RibbonTab("environment", "Environment",
+                [
+                    new RibbonGroup("Place",
+                    [
+                        new LargeButton(Add("mesh")),
+                        new SmallStack([Add("particleSystem"), Add("sprite")]),
+                    ]),
+                    new RibbonGroup("New Asset",
+                    [
+                        new LargeButton(EditorCommands.NewMaterial),
+                        new SmallStack([EditorCommands.NewMaterialFunction, EditorCommands.NewMesh, EditorCommands.NewPrefab]),
+                        new SmallStack([EditorCommands.NewEffect, EditorCommands.NewSpriteSheet, EditorCommands.NewFolder]),
+                    ]),
+                    new RibbonGroup("Panels", [new SmallStack([EditorCommands.Panel("contentBrowser"), EditorCommands.Panel("faceEditor")])]),
+                ]) { Category = Art },
+                // The level and gameplay designer's: what makes a level play, and the assets that say how. A game's own
+                // commands that name this tab join it (see docs/editor/shell-and-panels.md#game-commands).
+                new RibbonTab("gameplay", "Gameplay",
+                [
+                    new RibbonGroup("Place",
+                    [
+                        new LargeButton(Add("camera")),
+                        new SmallStack([Add("trigger"), Add("collider"), Add("rigidBody")]),
+                        new SmallStack([Add("character"), Add("agent"), Add("navigationVolume")]),
+                        new SmallStack([Add("uiDocument")]),
+                    ]),
+                    new RibbonGroup("AI",
+                    [
+                        new Dropdown("New Decision", "decision",
+                            [EditorCommands.NewDecision, EditorCommands.NewUtilityDecision, EditorCommands.NewGoapDecision, EditorCommands.NewHtnDecision])
+                        { Description = "Make a decision asset, which says how an agent thinks, in the content browser's folder." },
+                        new SmallStack([EditorCommands.NewBlackboard]),
+                    ]),
+                    new RibbonGroup("New Asset",
+                    [
+                        new SmallStack([EditorCommands.NewSceneAsset, EditorCommands.NewPrefab]),
+                        new SmallStack([EditorCommands.NewUiDocument, EditorCommands.NewAnimationGraph]),
+                    ]),
+                ]) { Category = Design },
+                // The gameplay programmer's: scripts, the build, and where a frame's time goes.
+                new RibbonTab("scripting", "Scripting",
+                [
+                    new RibbonGroup("Scripts",
+                    [
+                        new LargeButton(EditorCommands.NewBehaviour),
+                        new SmallStack([EditorCommands.NewScript]),
+                    ]),
+                    new RibbonGroup("Code", [new LargeButton(EditorCommands.BuildProject)]),
+                    new RibbonGroup("Profiler",
+                    [
+                        new LargeButton(EditorCommands.CaptureFrame),
+                        new SmallStack([EditorCommands.CaptureWorstFrame, EditorCommands.RecordZones]),
+                    ]),
+                    new RibbonGroup("Panels",
+                    [
+                        new SmallStack([EditorCommands.Panel("console"), EditorCommands.Panel("profiler"), EditorCommands.Panel("resourceMonitor")]),
+                    ]),
+                ]) { Category = Design },
+                // The sound designer's.
+                new RibbonTab("audio", "Audio",
+                [
+                    new RibbonGroup("Place", [new LargeButton(Add("audioSource")), new LargeButton(Add("audioListener"))]),
+                ]) { Category = Audio },
+                // The project as a whole: the game in its own window, the build that ships, and the processes behind the editor.
+                new RibbonTab("project", "Project",
+                [
                     new RibbonGroup("Game Window",
                     [
                         new SplitButton(EditorCommands.RunGame, [EditorCommands.RunGame, EditorCommands.StopGame]),
@@ -50,148 +178,53 @@ static class DefaultRibbon
                         new ComboBox(EditorCommands.ProjectQuality),
                         new ComboBox(EditorCommands.UserQuality),
                     ]),
-                    new RibbonGroup("Project",
-                    [
-                        new LargeButton(EditorCommands.ExportProject),
-                        new SmallStack([EditorCommands.BuildProject, EditorCommands.OpenProject]),
-                    ]),
-                    new RibbonGroup("Host",
+                    new RibbonGroup("Release", [new LargeButton(EditorCommands.ExportProject)]),
+                    new RibbonGroup("Project", [new LargeButton(EditorCommands.OpenProject)]),
+                    new RibbonGroup("Processes",
                     [
                         new SplitButton(EditorCommands.RestartHost, [EditorCommands.RestartHost, EditorCommands.StopHost]),
                         new SmallStack([EditorCommands.RestartCook]),
                     ]),
-                    new RibbonGroup("Window",
-                    [
-                        new LargeButton(EditorCommands.Palette),
-                        new Dropdown("Panels", "panels", panelCommands),
-                    ]),
                 ]),
-                new RibbonTab("view", "View",
+                // The editor's own window: how the panels are arranged, which show, and pictures of the viewport.
+                new RibbonTab("window", "Window",
                 [
+                    new RibbonGroup("Workspace", [new ComboBox(EditorCommands.Workspace), new SmallStack([EditorCommands.ResetLayout])]),
                     new RibbonGroup("Panels", panelCommands.Chunk(SmallStack.MaxCommands).Select(c => (RibbonItem)new SmallStack(c)).ToList()),
-                    new RibbonGroup("Viewport",
-                    [
-                        new LargeButton(EditorCommands.Stats),
-                        new SmallStack([EditorCommands.FrameSelected, EditorCommands.FrameScene, EditorCommands.OrbitSelection]),
-                        new ComboBox(EditorCommands.ViewportScale),
-                        new SmallStack([EditorCommands.SceneView, EditorCommands.GameView]),
-                    ]),
-                    new RibbonGroup("Scene Views",
-                    [
-                        new ComboBox(EditorCommands.SceneLayout),
-                        new SmallStack([EditorCommands.ViewProjection, EditorCommands.View2D]),
-                        new SmallStack([EditorCommands.SceneViewToggle(0), EditorCommands.SceneViewToggle(1)]),
-                        new SmallStack([EditorCommands.SceneViewToggle(2), EditorCommands.SceneViewToggle(3)]),
-                    ]),
-                    new RibbonGroup("Rendering",
-                    [
-                        new ComboBox(EditorCommands.DebugView),
-                        new SmallStack([EditorCommands.TemporalAa, EditorCommands.Bloom, EditorCommands.ToneMapping]),
-                        new SmallStack([EditorCommands.Fog, EditorCommands.AmbientOcclusion, EditorCommands.GlobalIllumination]),
-                        new SmallStack([EditorCommands.Shadows, EditorCommands.Clouds, EditorCommands.PostEffects]),
-                        new SmallStack([EditorCommands.OcclusionCulling, EditorCommands.MeshletHierarchy, EditorCommands.ShadingStats]),
-                        new SmallStack([EditorCommands.ExposureUp, EditorCommands.ExposureDown, EditorCommands.ExposureReset]),
-                    ]),
-                    new RibbonGroup("Quality",
-                    [
-                        new ComboBox(EditorCommands.ViewportQuality),
-                        new ComboBox(EditorCommands.ViewportAntiAliasing),
-                        new ComboBox(EditorCommands.ViewportGiTechnique),
-                        new ComboBox(EditorCommands.ViewportReflections),
-                        new ComboBox(EditorCommands.ViewportReflectionsLevel),
-                        new ComboBox(EditorCommands.ViewportRenderScale),
-                    ]),
-                    new RibbonGroup("Helpers", [new SmallStack([EditorCommands.Icons]), new ComboBox(EditorCommands.Helpers)]),
-                    new RibbonGroup("Profiler",
-                    [
-                        new LargeButton(EditorCommands.CaptureFrame),
-                        new SmallStack([EditorCommands.CaptureWorstFrame, EditorCommands.RecordZones]),
-                    ]),
+                    new RibbonGroup("Documents", [new SmallStack([EditorCommands.SceneView, EditorCommands.GameView])]),
                     new RibbonGroup("Capture", [new LargeButton(EditorCommands.Screenshot), new SmallStack([EditorCommands.CaptureGif])]),
-                    new RibbonGroup("Layout", [new LargeButton(EditorCommands.ResetLayout), new LargeButton(EditorCommands.CollapseRibbon)]),
                 ]),
-                // The scene's atmosphere (see docs/editor/shell-and-panels.md#atmosphere). Its panel has every setting.
-                new RibbonTab("atmosphere", "Atmosphere",
-                [
-                    new RibbonGroup("Atmosphere", [new LargeButton(EditorCommands.AtmosphereSelect), new ComboBox(EditorCommands.AtmosphereMode)]),
-                    new RibbonGroup("Sun",
-                    [
-                        new LargeButton(EditorCommands.LinkSun),
-                        new LargeButton(EditorCommands.AimSun),
-                        new Dropdown("Time of Day", "sun", [.. Atmosphere.TimesOfDay.Select(t => EditorCommands.TimeOfDay(t.Name))]),
-                    ]),
-                    new RibbonGroup("Sky",
-                    [
-                        new Dropdown("Air", "sky", [.. Atmosphere.Skies.Select(s => EditorCommands.SkyPreset(s.Name))]),
-                        new SmallStack([EditorCommands.Stars, EditorCommands.Moon]),
-                    ]),
-                    new RibbonGroup("Fog",
-                    [
-                        new LargeButton(EditorCommands.AtmosphereFog),
-                        new Dropdown("Density", "fog", [.. Atmosphere.Fogs.Select(f => EditorCommands.FogPreset(f.Name))]),
-                    ]),
-                    new RibbonGroup("Clouds",
-                    [
-                        new LargeButton(EditorCommands.AtmosphereClouds),
-                        new Dropdown("Weather", "cloud", [.. Atmosphere.Weathers.Select(w => EditorCommands.WeatherPreset(w.Name))]),
-                        new ComboBox(EditorCommands.AtmosphereWeatherSource),
-                        new SmallStack([EditorCommands.AtmosphereCenterWeather, EditorCommands.Panel("weather")]),
-                    ]),
-                    new RibbonGroup("Details", [new LargeButton(EditorCommands.Panel("atmosphere"))]),
-                ]),
-                // The contextual Mesh tab, while mesh mode is on (see docs/editor/mesh-editing.md#mesh-mode).
-                new RibbonTab("mesh", "Mesh",
-                [
-                    new RibbonGroup("Selection",
-                    [
-                        new SmallStack([EditorCommands.MeshVertices, EditorCommands.MeshEdges, EditorCommands.MeshFaces]),
-                        new SmallStack([EditorCommands.SelectAll, EditorCommands.MeshSelectThrough, EditorCommands.MeshSelectLinked]),
-                        new SmallStack([EditorCommands.MeshGrow, EditorCommands.MeshShrink]),
-                    ]),
-                    new RibbonGroup("Edit",
-                    [
-                        new SmallStack([EditorCommands.MeshExtrude, EditorCommands.MeshPushPull, EditorCommands.MeshOffset]),
-                        new SmallStack([EditorCommands.MeshInset, EditorCommands.MeshOutset, EditorCommands.MeshDuplicate]),
-                        new SmallStack([EditorCommands.MeshCollapse, EditorCommands.MeshMergeFaces, EditorCommands.MeshInvert]),
-                        new SmallStack([EditorCommands.DeleteEntity, EditorCommands.MeshDetach, EditorCommands.MeshExtract]),
-                        new SmallStack([EditorCommands.MeshBevel, EditorCommands.MeshClean, EditorCommands.MeshRecalculateNormals]),
-                        new SmallStack([EditorCommands.MeshEditPivot, EditorCommands.MeshCenterPivot, EditorCommands.MeshPivotToGrid]),
-                        new ComboBox(EditorCommands.MeshBevelSegments),
-                        new ComboBox(EditorCommands.MeshNormalAngle),
-                    ]),
-                    new RibbonGroup("Create",
-                    [
-                        new LargeButton(EditorCommands.MeshCreate),
-                        new ComboBox(EditorCommands.MeshPrimitive),
-                        new SmallStack([EditorCommands.MeshCut, EditorCommands.MeshDraw, EditorCommands.MeshApplyPoints]),
-                        new ComboBox(EditorCommands.MeshSides),
-                        new ComboBox(EditorCommands.MeshSegments),
-                        new ComboBox(EditorCommands.MeshRings),
-                        new ComboBox(EditorCommands.MeshSteps),
-                        new ComboBox(EditorCommands.MeshArc),
-                        new ComboBox(EditorCommands.MeshThickness),
-                        new ComboBox(EditorCommands.MeshTubeRadius),
-                    ]),
-                    new RibbonGroup("Texture",
-                    [
-                        new SmallStack([EditorCommands.TextureShiftLeft, EditorCommands.TextureShiftRight, EditorCommands.TextureShiftUp]),
-                        new SmallStack([EditorCommands.TextureShiftDown, EditorCommands.TextureRotateLeft, EditorCommands.TextureRotateRight]),
-                        new SmallStack([EditorCommands.TextureScaleUp, EditorCommands.TextureScaleDown, EditorCommands.TextureResetScale]),
-                        new SmallStack([EditorCommands.TextureAlignWorld, EditorCommands.TextureAlignFace, EditorCommands.TextureAlignEdge]),
-                        new SmallStack([EditorCommands.TextureAlignToFace, EditorCommands.TextureFit, EditorCommands.TextureFlipU]),
-                        new SmallStack([EditorCommands.TextureJustifyLeft, EditorCommands.TextureJustifyRight, EditorCommands.TextureJustifyCenter]),
-                        new SmallStack([EditorCommands.TextureHotspot, EditorCommands.TextureHotspotNext, EditorCommands.TextureHotspotRandom]),
-                        new SmallStack([EditorCommands.MeshTransformTexture]),
-                        new ComboBox(EditorCommands.MeshDevMaterial),
-                        new ComboBox(EditorCommands.MeshTexelDensity),
-                    ]),
-                    new RibbonGroup("Options",
-                    [
-                        new SmallStack([EditorCommands.MeshGridToggle, EditorCommands.MeshGridFiner, EditorCommands.MeshGridCoarser]),
-                        new SmallStack([EditorCommands.Snap, EditorCommands.LocalSpace, EditorCommands.MeshKeepPlanar]),
-                    ]),
-                    new RibbonGroup("Mode", [new LargeButton(EditorCommands.ObjectMode)]),
-                ]) { Context = MeshSession.MeshContext },
-            ]);
+            ])
+        {
+            // Play is every discipline's, whatever tab shows.
+            QuickAccess = [EditorCommands.PlayMode, EditorCommands.PauseMode, EditorCommands.StepFrame, EditorCommands.StopMode],
+        };
     }
+
+    static string Add(string template) => EditorCommands.AddEntity(template);
+
+    static IEnumerable<MenuEntry> Kinds(string category) =>
+        EntityCatalog.All.Where(t => t.Category == category).Select(t => (MenuEntry)Add(t.Id));
+
+    /// <summary>
+    /// The Add menu, which the ribbon, the outliner and the Scene's tool strip show: the empty entity, then a menu for
+    /// each category of the catalog, in the catalog's order.
+    /// </summary>
+    public static IReadOnlyList<MenuEntry> AddMenu() =>
+    [
+        Add(EntityCatalog.EmptyId),
+        new MenuSeparator(),
+        .. EntityCatalog.Categories.Select(c => (MenuEntry)new Submenu(c, CategoryIcon(c), [.. Kinds(c)])),
+    ];
+
+    static string CategoryIcon(string category) => category switch
+    {
+        EntityCatalog.Lighting => "light-point",
+        EntityCatalog.Rendering => "camera",
+        EntityCatalog.Volumes => "volume",
+        EntityCatalog.Physics => "collider",
+        EntityCatalog.Audio => "audio",
+        EntityCatalog.Navigation => "nav-path",
+        _ => "ui-document",
+    };
 }

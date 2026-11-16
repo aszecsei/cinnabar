@@ -17,8 +17,8 @@ using Cinnabar.Editor.Tools;
 namespace Cinnabar.Editor.Viewport;
 
 /// <summary>
-/// One view of the game, as a document (see docs/editor/viewport.md#views): its frames, its view, and the stats over them.
-/// A scene view also has the tool palette and the camera's speed, and its title in a quad, and the input that drives the editor's tools. The right
+/// One view of the game, as a document (see docs/editor/viewport.md#views): its frames, its toolbar, and the stats over them.
+/// A scene view also has the view gizmo and the camera's speed, and the input that drives the editor's tools. The right
 /// button flies with WASD, Q and E; Alt with the left button orbits, the middle button pans, and the wheel dollies. The
 /// left button selects, drags a box, or drags the gizmo. Q, W, E and R pick a tool, X switches the gizmo's space, F frames
 /// the selection, and H hides it. A material dragged from the content browser shows on the submesh under the mouse, and
@@ -48,11 +48,8 @@ public sealed class ViewportView : Grid
     readonly EditorViewport _viewport;
     readonly ViewportSession _session;
     readonly Border _activeFrame;
-    readonly ComboBox _view;
-    readonly TextBlock _title;
-    // The title, the view menu and the view box at the top: their presses are theirs, not the frame's.
-    readonly StackPanel _header;
-    bool _showingView;
+    // The menus at the top left: their presses are theirs, not the frame's.
+    readonly ViewportToolbar _toolbar;
     readonly ViewportControl _control;
     readonly Border _overlay;
     // The Game view's notice that the world has no camera; null in a scene view.
@@ -61,16 +58,12 @@ public sealed class ViewportView : Grid
     readonly Border _box;
     readonly TextBlock _speed;
     readonly Border _modeFrame;
-    readonly List<(ToggleButton Button, string Command)> _tools = [];
-    StackPanel _elements = new();
     readonly DispatcherTimer _timer;
     readonly DispatcherTimer _flyTimer;
     readonly DispatcherTimer _gamepadTimer;
     // Steps the camera's turn to an axis while one runs (see EditorShell.StepTurn).
     readonly DispatcherTimer _turnTimer;
     long _lastTurn;
-    // A scene view's menu of the views along the axes and the projections, and the button that names the view.
-    readonly TextBlock _lookText = new();
     readonly GamepadPoller _gamepads = new(GamepadPoller.ReadXInput);
     bool _pollingGamepads;
     readonly GameInput.Characters _characters = new();
@@ -148,48 +141,9 @@ public sealed class ViewportView : Grid
         if (!_viewport.IsGame)
         {
             Children.Add(speed);
-            Children.Add(Palette());
         }
-        // What this viewport shows in place of the lit scene, which the ribbon's View choice also sets for the one it acts on.
-        _view = new ComboBox
-        {
-            Classes = { "viewport-view" },
-            ItemsSource = EditorShell.DebugViewNames,
-            Focusable = false,
-        };
-        // A scene view is named while it has company in the Scene, so the four can be told apart.
-        _title = new TextBlock
-        {
-            Text = viewport.Title,
-            FontSize = 11,
-            VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(0, 0, 6, 0),
-            Foreground = Brushes.White,
-            Opacity = 0.8,
-        };
-        var header = _header = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Top,
-            Margin = new Thickness(8),
-            IsHitTestVisible = true,
-        };
-        header.Children.Add(_title);
-        if (!_viewport.IsGame)
-        {
-            header.Children.Add(LookButton());
-        }
-        header.Children.Add(_view);
-        ToolTip.SetTip(_view, "What this viewport shows: the lit scene, or a debug view of what makes it.");
-        _view.SelectionChanged += (_, _) =>
-        {
-            if (!_showingView && _view.SelectedIndex >= 0)
-            {
-                _shell.ApplyViewportSettings(_viewport, _viewport.Settings with { DebugView = (Link.Protocol.DebugView)_view.SelectedIndex });
-            }
-        };
-        Children.Add(header);
+        _toolbar = new ViewportToolbar(shell, viewport);
+        Children.Add(_toolbar);
 
         if (!_viewport.IsGame)
         {
@@ -255,15 +209,11 @@ public sealed class ViewportView : Grid
             if (!_viewport.IsGame)
             {
                 _viewport.Camera.Changed += ShowSpeed;
-                _viewport.Camera.Changed += ShowLook;
                 _viewport.TurnStarted += StartTurn;
-                ShowLook();
             }
             _shell.ModeChanged += ShowMode;
             _shell.ActiveViewportChanged += ShowActive;
             _shell.ViewportsChanged += ShowActive;
-            _shell.SceneViewsChanged += ShowTitle;
-            _shell.ViewportSettingsChanged += ShowView;
             _timer.Start();
             if (_viewport.IsGame)
             {
@@ -277,8 +227,6 @@ public sealed class ViewportView : Grid
             ShowTools();
             ShowSpeed();
             ShowActive();
-            ShowTitle();
-            ShowView();
         };
         DetachedFromVisualTree += (_, _) =>
         {
@@ -288,14 +236,11 @@ public sealed class ViewportView : Grid
             if (!_viewport.IsGame)
             {
                 _viewport.Camera.Changed -= ShowSpeed;
-                _viewport.Camera.Changed -= ShowLook;
                 _viewport.TurnStarted -= StartTurn;
             }
             _shell.ModeChanged -= ShowMode;
             _shell.ActiveViewportChanged -= ShowActive;
             _shell.ViewportsChanged -= ShowActive;
-            _shell.SceneViewsChanged -= ShowTitle;
-            _shell.ViewportSettingsChanged -= ShowView;
             if (_viewport.IsGame)
             {
                 _shell.WorldCameraChanged -= ShowCamera;
@@ -309,59 +254,8 @@ public sealed class ViewportView : Grid
         UpdateStats();
     }
 
-    // The viewport that the View tab acts on has a frame around it while more than one viewport is shown.
+    // The viewport that the viewport commands act on has a frame around it while more than one viewport is shown.
     void ShowActive() => _activeFrame.Classes.Set("active", _shell.SettingsViewport == _viewport && _shell.ShownViewports.Skip(1).Any());
-
-    // The button that names the view along an axis and its projection, with a menu of the axes' views and the projections.
-    Control LookButton()
-    {
-        var menu = new MenuFlyout();
-        var axes = new List<(MenuItem Item, ViewAxis Axis)>();
-        foreach (var axis in Enum.GetValues<ViewAxis>())
-        {
-            var item = new MenuItem { Header = axis.ToString(), ToggleType = MenuItemToggleType.Radio, GroupName = "axis" };
-            item.Click += (_, _) =>
-            {
-                _shell.ActivateViewport(_viewport);
-                _shell.LookAlong(_viewport, axis);
-            };
-            menu.Items.Add(item);
-            axes.Add((item, axis));
-        }
-        menu.Items.Add(new Separator());
-        var projections = new List<(MenuItem Item, Link.Protocol.CameraProjection Projection)>();
-        foreach (var projection in Enum.GetValues<Link.Protocol.CameraProjection>())
-        {
-            var item = new MenuItem { Header = projection.ToString(), ToggleType = MenuItemToggleType.Radio, GroupName = "projection" };
-            item.Click += (_, _) =>
-            {
-                _shell.ActivateViewport(_viewport);
-                _shell.SetProjection(_viewport, projection);
-            };
-            menu.Items.Add(item);
-            projections.Add((item, projection));
-        }
-        // The checks show the camera as it is when the menu opens.
-        menu.Opening += (_, _) =>
-        {
-            var aligned = ViewGizmo.Aligned(_viewport.Camera);
-            foreach (var (item, axis) in axes)
-            {
-                item.IsChecked = axis == aligned;
-            }
-            foreach (var (item, projection) in projections)
-            {
-                item.IsChecked = projection == _viewport.Camera.Projection;
-            }
-        };
-        _lookText.VerticalAlignment = VerticalAlignment.Center;
-        var button = new Button { Content = _lookText, Classes = { "viewport-look" }, Focusable = false, Flyout = menu, Margin = new Thickness(0, 0, 4, 0) };
-        ToolTip.SetTip(button, "Which way this view looks, and its projection: look along an axis, or switch between perspective and orthographic.");
-        return button;
-    }
-
-    void ShowLook() =>
-        _lookText.Text = $"{ViewGizmo.Label(_viewport.Camera)} ▾";
 
     void StartTurn()
     {
@@ -381,16 +275,7 @@ public sealed class ViewportView : Grid
         }
     }
 
-    bool OnHeader(RoutedEventArgs e) => e.Source is Visual source && _header.IsVisualAncestorOf(source);
-
-    void ShowTitle() => _title.IsVisible = !_viewport.IsGame && _shell.SceneDocumentViews.Count > 1;
-
-    void ShowView()
-    {
-        _showingView = true;
-        _view.SelectedIndex = (int)_viewport.Settings.DebugView;
-        _showingView = false;
-    }
+    bool OnHeader(RoutedEventArgs e) => e.Source is Visual source && (source == _toolbar || _toolbar.IsVisualAncestorOf(source));
 
     static Border Overlay(Control child, HorizontalAlignment horizontal, VerticalAlignment vertical) => new()
     {
@@ -403,60 +288,8 @@ public sealed class ViewportView : Grid
         Background = new SolidColorBrush(Color.FromArgb(0xc0, 0x20, 0x20, 0x24)),
     };
 
-    // The tools, the gizmo's space and snapping, as buttons for their commands.
-    Control Palette()
-    {
-        var panel = new StackPanel { Spacing = 2 };
-        void Add(string command)
-        {
-            var c = _shell.Commands.Get(command);
-            var button = new ToggleButton
-            {
-                Content = CommandViews.Icon(c.Icon, 16),
-                Classes = { "viewport-tool" },
-                Focusable = false,
-            };
-            ToolTip.SetTip(button, c.Description is { } d ? $"{c.Label}\n{d}" : c.Label);
-            button.Click += (_, _) =>
-            {
-                c.Execute();
-                ShowTools();
-            };
-            panel.Children.Add(button);
-            _tools.Add((button, command));
-        }
-        Add(EditorCommands.SelectTool);
-        Add(EditorCommands.MoveTool);
-        Add(EditorCommands.RotateTool);
-        Add(EditorCommands.ScaleTool);
-        Add(EditorCommands.NavPathTool);
-        panel.Children.Add(new Border { Height = 6 });
-        Add(EditorCommands.LocalSpace);
-        Add(EditorCommands.Snap);
-        // The element kinds, while mesh mode is on.
-        _elements = new StackPanel { Spacing = 2, IsVisible = false };
-        _elements.Children.Add(new Border { Height = 6 });
-        panel.Children.Add(_elements);
-        var elementPanel = panel;
-        panel = _elements;
-        Add(EditorCommands.MeshVertices);
-        Add(EditorCommands.MeshEdges);
-        Add(EditorCommands.MeshFaces);
-        panel = elementPanel;
-        var palette = Overlay(panel, HorizontalAlignment.Left, VerticalAlignment.Top);
-        palette.Padding = new Thickness(3);
-        return palette;
-    }
-
-    void ShowTools()
-    {
-        ShowSpeed();
-        _elements.IsVisible = _shell.Mesh.InMeshMode;
-        foreach (var (button, command) in _tools)
-        {
-            button.IsChecked = _shell.Commands.Get(command).IsChecked;
-        }
-    }
+    // The tool, the space and snapping are the Scene's, in its tool strip: here only what the status line says changes.
+    void ShowTools() => ShowSpeed();
 
     void ShowMode()
     {
@@ -922,7 +755,9 @@ public sealed class ViewportView : Grid
         {
             return;
         }
-        if (_gesture == Gesture.Fly)
+        // A key that flies is the camera's until it is released: when the right button goes up first, the key's repeats
+        // would pick a tool, as W picks Move.
+        if (_gesture == Gesture.Fly || _held.Contains(e.Key))
         {
             _held.Add(e.Key);
             e.Handled = true;

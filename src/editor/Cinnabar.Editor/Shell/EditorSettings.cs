@@ -4,8 +4,9 @@ using Cinnabar.Editor.Document;
 namespace Cinnabar.Editor.Shell;
 
 /// <summary>
-/// Each user's editor settings, in <c>%LOCALAPPDATA%\cinnabar\editor</c>: <c>layout.json</c>, which the editor
-/// writes when it closes, <c>keybindings.json</c>, an object from command ID to key gesture that the user writes,
+/// Each user's editor settings, in <c>%LOCALAPPDATA%\cinnabar\editor</c>, or in the directory that <c>--settings</c>
+/// names: <c>layout.json</c> and <c>workspaces.json</c>, which the editor writes when it closes,
+/// <c>keybindings.json</c>, an object from command ID to key gesture that the user writes,
 /// <c>settings.json</c>, the user's other settings, <c>viewport.json</c>, how the viewport draws, and
 /// <c>content-view.json</c>, how the content browser shows its assets.
 /// </summary>

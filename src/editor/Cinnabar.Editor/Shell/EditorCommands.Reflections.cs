@@ -9,13 +9,8 @@ static partial class EditorCommands
     static void RegisterReflections(EditorShell shell)
     {
         var commands = shell.Commands;
-        commands.Register(new Command(CreateReflectionProbe, "New Reflection Probe", shell.CreateReflectionProbe)
-        {
-            Description = "Add a reflection probe, where the selected entity is, which the surfaces inside its box reflect. Drag its boxes' handles in the viewport to size it.",
-            Icon = "add",
-            CanExecuteWhen = () => shell.CanEditScene,
-        });
-        commands.Register(new Command(CaptureProbe, "Capture", shell.CaptureSelectedProbes)
+        // The probe itself is a kind of the Add catalog (see EntityCatalog).
+        commands.Register(new Command(CaptureProbe, "Capture Probe", shell.CaptureSelectedProbes)
         {
             Description = "Capture the selected reflection probes now: each takes its six faces in one frame, whatever the quality's budget, one probe a frame. A probe that holds no slot is not captured.",
             Icon = "restart",

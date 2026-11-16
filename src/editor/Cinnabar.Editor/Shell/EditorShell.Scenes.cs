@@ -218,6 +218,24 @@ public sealed partial class EditorShell
         return Edit(label, operations);
     }
 
+    /// <summary>
+    /// Undoes or redoes to a position of the scene's history, as a click in the undo history does. Refused while the game
+    /// plays or an entry is open, as Undo and Redo are, with the reason in the console.
+    /// </summary>
+    public bool MoveHistoryTo(int position)
+    {
+        if (Scene == null || position == Scene.Position)
+        {
+            return Scene != null;
+        }
+        if (CannotEdit("move through the history"))
+        {
+            return false;
+        }
+        Scene.MoveTo(position);
+        return true;
+    }
+
     /// <summary>The scene's open undo entry and its owner, or null when none is open.</summary>
     public SceneEdit? OpenEdit { get; private set; }
 
@@ -287,58 +305,37 @@ public sealed partial class EditorShell
         }
     }
 
-    public void CreateEntity()
-    {
-        if (Scene == null)
-        {
-            return;
-        }
-        var at = SelectedSceneEntity is { } selected ? SceneEdits.WorldPose(Scene.Expanded.Flat, selected)?.Position : null;
-        var create = UnderPrefabRoot(SceneEdits.NewEntity(Scene.Expanded.Flat, at ?? [0, 0, 0]));
-        if (Edit("Create Entity", create))
-        {
-            SelectScene(create.Created.Id);
-        }
-    }
+    /// <summary>Adds an entity with a Transform and nothing else, as <see cref="AddEntity"/> adds any kind.</summary>
+    public void CreateEntity() => AddEntity(EntityCatalog.Find(EntityCatalog.EmptyId)!);
 
     /// <summary>
-    /// Adds a global volume where the selected entity is, as New Entity does, for the settings components that volumes
-    /// carry (see docs/world/volumes.md#volumes).
+    /// Adds an entity of a kind of the catalog (see docs/editor/shell-and-panels.md#add), with the components that the
+    /// kind starts with, as one undo entry, and selects it. It goes where the selected entity is, so that the two can be
+    /// told apart by a drag of the gizmo; without a selection, where the active scene view looks, at its pivot, which is
+    /// in view; and with no scene view shown, to the origin.
     /// </summary>
-    public void CreateVolume()
+    public bool AddEntity(EntityTemplate template)
     {
         if (Scene == null)
         {
-            return;
+            return false;
         }
-        var at = SelectedSceneEntity is { } selected ? SceneEdits.WorldPose(Scene.Expanded.Flat, selected)?.Position : null;
-        var create = UnderPrefabRoot(SceneEdits.NewEntity(Scene.Expanded.Flat, at ?? [0, 0, 0]));
-        create.Created.Name = "Volume";
-        create.Created.Components.Add(new SceneComponent(SceneEdits.VolumeId, "Volume", [new SceneField("shape", SceneValue.Name("Global"))]));
-        if (Edit("Create Volume", create))
+        var create = UnderPrefabRoot(EntityCatalog.Create(Scene.Expanded.Flat, template, NewEntityPosition()));
+        if (!Edit(template.Id == EntityCatalog.EmptyId ? "Create Entity" : $"Add {template.Label}", create))
         {
-            SelectScene(create.Created.Id);
+            return false;
         }
+        SelectScene(create.Created.Id);
+        return true;
     }
 
-    /// <summary>
-    /// Adds a reflection probe where the selected entity is, as New Entity does, with its default boxes, which its
-    /// handles resize in the viewport (see docs/editor/viewport.md#reflection-probes).
-    /// </summary>
-    public void CreateReflectionProbe()
+    long[] NewEntityPosition()
     {
-        if (Scene == null)
+        if (SelectedSceneEntity is { } selected && SceneEdits.WorldPose(Scene!.Expanded.Flat, selected)?.Position is { } at)
         {
-            return;
+            return at;
         }
-        var at = SelectedSceneEntity is { } selected ? SceneEdits.WorldPose(Scene.Expanded.Flat, selected)?.Position : null;
-        var create = UnderPrefabRoot(SceneEdits.NewEntity(Scene.Expanded.Flat, at ?? [0, 0, 0]));
-        create.Created.Name = "Reflection Probe";
-        create.Created.Components.Add(new SceneComponent(SceneEdits.ReflectionProbeId, "Reflection_Probe", []));
-        if (Edit("Create Reflection Probe", create))
-        {
-            SelectScene(create.Created.Id);
-        }
+        return ActiveViewport is { IsShown: true, HasCamera: true } view ? view.Camera.Pivot : [0, 0, 0];
     }
 
     /// <summary>Copies the selected entities with their descendants, and selects the copies.</summary>

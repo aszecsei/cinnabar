@@ -11,8 +11,9 @@ Read them in this order the first time.
 | [Processes and projects](processes-and-projects.md) | Processes, the UI framework, the C# projects and crash recovery. |
 | [Document and scenes](document-and-scenes.md) | The document model, modes, and the scene format. |
 | [Editor link](link.md) | The editor link and the game side that mirrors the world. |
-| [Viewport](viewport.md) | Frames, the camera, picking, selection, gizmos, viewport settings, and the Scene's four views and the Game view. |
-| [Shell and panels](shell-and-panels.md) | Docking, the ribbon, commands and every panel. |
+| [Viewport](viewport.md) | Frames, the camera, picking, selection, gizmos, viewport settings, a viewport's toolbar, the Scene's tool strip, and the Scene's four views and the Game view. |
+| [Users and workflows](workflows.md) | Who the editor is for, what each kind of user does in it, and the rule that says where a control is. |
+| [Shell and panels](shell-and-panels.md) | Docking and workspaces, the ribbon, the Add menu, commands and every panel. |
 | [Material editor](material-editor.md) | The node editor and its previews. |
 | [Animation graph editor](animation-graph-editor.md) | The canvas for `.animation_graph` files, its reader and writer that keep every line, and the live view of an Animator in play mode. |
 | [Decision editor](decision-editor.md) | The views of `.decision` files: behavior trees and HTN domains on a canvas, utility options with their curves, and GOAP goals and actions with a plan preview; its reader and writer that keep every line, the blackboard editor's table, and the live view of an Agent in play mode. |

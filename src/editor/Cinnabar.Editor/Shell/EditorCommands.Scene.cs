@@ -1,4 +1,5 @@
 using Cinnabar.Editor.Commands;
+using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Tools;
 
 namespace Cinnabar.Editor.Shell;
@@ -70,19 +71,18 @@ static partial class EditorCommands
             Shortcut = "Ctrl+Y",
             CanExecuteWhen = () => shell.ActiveGraphEditor is { } graph ? graph.Document.CanRedo : shell.IsEditing && shell.Scene?.CanRedo == true,
         });
-        commands.Register(new Command(CreateEntity, "New Entity", shell.CreateEntity)
+        // A command for each kind of entity of the catalog (see docs/editor/shell-and-panels.md#add), which the Add
+        // menus and the command palette show.
+        foreach (var template in EntityCatalog.All)
         {
-            Description = "Add an entity with a Transform, where the selected entity is.",
-            Icon = "add",
-            Shortcut = "Ctrl+Shift+N",
-            CanExecuteWhen = () => shell.CanEditScene,
-        });
-        commands.Register(new Command(CreateVolume, "New Volume", shell.CreateVolume)
-        {
-            Description = "Add a global volume, where the selected entity is, for settings such as the post-processing and the fog. Add its settings components in the properties panel.",
-            Icon = "add",
-            CanExecuteWhen = () => shell.CanEditScene,
-        });
+            commands.Register(new Command(AddEntity(template.Id), template.Label, () => shell.AddEntity(template))
+            {
+                Description = $"{template.Description} It goes where the selected entity is, or else where the view looks.",
+                Icon = template.Icon,
+                Shortcut = template.Id == EntityCatalog.EmptyId ? "Ctrl+Shift+N" : null,
+                CanExecuteWhen = () => shell.CanEditScene,
+            });
+        }
         commands.Register(new Command(DuplicateEntity, "Duplicate", shell.DuplicateSelected)
         {
             Description = "Copy the selected entities and their children.",
@@ -172,7 +172,7 @@ static partial class EditorCommands
         {
             Description = "Hide the selected entities and their children in the viewport, or show them again. The scene does not change. H in the viewport.",
             Icon = "hidden",
-            CanExecuteWhen = () => shell.SelectedSceneEntities.Count > 0,
+            CanExecuteWhen = () => shell.HasSceneSelection,
         });
         commands.Register(new Command(ShowAll, "Show All", shell.ShowAll)
         {
@@ -184,7 +184,7 @@ static partial class EditorCommands
         {
             Description = "Stop the viewport from selecting the selected entities and their children, or let it again.",
             Icon = "locked",
-            CanExecuteWhen = () => shell.SelectedSceneEntities.Count > 0,
+            CanExecuteWhen = () => shell.HasSceneSelection,
         });
         // The viewport's tools have keys of their own, which work while the viewport has focus, so typing in a box
         // does not change tools.
@@ -215,7 +215,7 @@ static partial class EditorCommands
         {
             Description = "Move the camera to the selected entities. F in the viewport.",
             Icon = "frame",
-            CanExecuteWhen = () => shell.SelectedSceneEntities.Count > 0,
+            CanExecuteWhen = () => shell.HasSceneSelection,
         });
         commands.Register(new Command(OrbitSelection, "Orbit Selection", shell.ToggleOrbitSelection)
         {
