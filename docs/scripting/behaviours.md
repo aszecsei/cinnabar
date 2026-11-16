@@ -183,6 +183,8 @@ local Ring = Behaviour.define("Ring", {
 - **`World.editing()`** is true while the level is `.Edit_Mode`, so a script can tell Edit from Play.
 - **Hot reload:** `patch_module` reads `edit_mode` again from the new class. An instance whose class gains it runs from the next edit phase, with `on_reload` at once, and one whose class loses it goes silent.
 - **Play:** an instance that woke in Edit keeps running in Play, and does not wake again. Stop replaces the world with the editor's scene, so its instances start again.
+- **When it runs:** only once the editor's scene is the world, and not while the editor has not answered the last edits, so `update` runs once for each answer while a behaviour writes. A behaviour must settle: one that writes after every frame or every undo fills the undo history (see [Editor: Behaviours' edits](../editor/document-and-scenes.md#behaviours-edits)).
+- **The sample:** `samples/mygame/content/scripts/ring.luau` lays out its entity's children on a circle of its `radius`, in the Add Component picker's Tools/Layout folder.
 
 ### Writes in Edit mode
 

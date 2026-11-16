@@ -33,7 +33,7 @@ One frame runs these phases in order:
 2. Run the fixed ticks that are due (zero or more). Each tick runs the `Fixed` systems (parallel jobs) and applies their structural changes, runs the scripts' fixed step (serial: `fixed_update`, then the tick's events and `wait_fixed` coroutines), and propagates transforms.
 3. Run the `Update` systems (parallel jobs).
 4. Apply queued structural changes to the world.
-5. Run the script phase (serial): behaviour lifecycle callbacks, events, opt-in `update` calls and due coroutines.
+5. Run the script phase (serial): behaviour lifecycle callbacks, events, opt-in `update` calls and due coroutines. In the editor's edit mode, the edit phase runs in its place, for the behaviours that run in edit mode ([Scripting](../scripting/behaviours.md#edit-mode)).
 6. Apply queued structural changes to the world.
 7. Run the `Late` systems, then transform propagation (parallel jobs).
 8. Record render command lists. Render extraction interpolates between the last two ticks.

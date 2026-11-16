@@ -35,7 +35,10 @@ apply_operations :: proc(
 			// Only the game sends it: the editor sends an instance's entities.
 			append(
 				problems,
-				scene.Problem{op.entity, "the game does not make a prefab's instance from an edit"},
+				scene.Problem {
+					op.entity,
+					"the game does not make a prefab's instance from an edit",
+				},
 			)
 			continue
 		}

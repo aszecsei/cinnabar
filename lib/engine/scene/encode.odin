@@ -12,7 +12,8 @@ import "cinnabar:engine/ecs"
 // A loaded value writes back the same bytes.
 
 // encode_fields gives the fields of a component whose bytes in data differ from those in base, as a scene sets them:
-// base is the component's bytes before a change, or nil for its defaults, as for a new component. A volume's setting
+// base is the component's bytes before a change, or nil for its defaults, as for a new component, and with all, every
+// field is given, as a pose that must be whole. A volume's setting
 // whose override flag differs gives the flag too, as <name>.override. ids gives an entity's scene ID: drafts, which
 // have none yet, by the IDs that they will have, and the others by their Scene_Entity. An entity with neither is 0.
 encode_fields :: proc(
@@ -21,6 +22,7 @@ encode_fields :: proc(
 	data, base: rawptr,
 	ids: map[ecs.Entity]u64,
 	allocator: runtime.Allocator,
+	all := false,
 ) -> []format.Scene_Field {
 	base := base
 	if base == nil {
@@ -33,7 +35,13 @@ encode_fields :: proc(
 	result := make([dynamic]format.Scene_Field, allocator)
 	for field in component_fields(info.type, allocator) {
 		at := uintptr(field.offset)
-		if mem.compare_ptrs(rawptr(uintptr(data) + at), rawptr(uintptr(base) + at), field_size(field)) != 0 {
+		if all ||
+		   mem.compare_ptrs(
+			   rawptr(uintptr(data) + at),
+			   rawptr(uintptr(base) + at),
+			   field_size(field),
+		   ) !=
+			   0 {
 			append(
 				&result,
 				format.Scene_Field {

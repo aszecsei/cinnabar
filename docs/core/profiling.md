@@ -28,7 +28,7 @@ What the engine zones:
 | `core` and the host | `Begin frame`, `End frame`, `Drain jobs`, `Game update`, `Hot reload`, `Editor link` |
 | D3D12 backend | `GPU submit`, `Translate` (detail: the queue), `Execute`, and the waits below |
 | ECS | `ECS Fixed`, `ECS Update`, `ECS Late`, `Apply commands`, `Propagate transforms`, and each system's batches by the system's name |
-| Scripts | `Script phase` with `Awake`, `Start`, `Events`, `Update` and `Coroutines`, and each callback by its class's name, with the callback as the detail |
+| Scripts | `Script phase`, or `Edit phase` in the editor's edit mode, with `Awake`, `Start`, `Events`, `Update` and `Coroutines`, and each callback by its class's name, with the callback as the detail |
 | Rendering | `Build frame`, `Compile graph`, `Record passes`, `Submit`, and each pass's recording by the pass's name |
 | Others | `Assets poll`, `Editor poll` |
 

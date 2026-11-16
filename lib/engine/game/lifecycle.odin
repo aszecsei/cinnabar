@@ -117,13 +117,14 @@ game_update :: proc(g: ^Game, dt: time.Duration, h: Hooks) -> (keep_running: boo
 		h.begin_frame(g)
 	}
 	// In the editor's edit mode, and while it pauses, the world stands still and only its transforms propagate, so
-	// edits show. No script code runs then, not even on_disable and on_destroy for the behaviours that a new scene
-	// despawns (see docs/editor/document-and-scenes.md#modes).
-	run, step := editor.simulation(&g.editor, &g.world, dt)
+	// edits show. No script code runs then but the edit phase's, for the behaviours that run in edit mode, whose writes
+	// go to the editor's document (see docs/editor/document-and-scenes.md#modes).
+	what, step := editor.simulation(&g.editor, &g.world, dt)
+	run := what == .Run
 	// The editor's own steps, a tick at a time while it pauses, take no scale.
 	step = world_step(g, step, editor.mode(&g.editor) == .Play)
 	script.set_frame_time(&g.scripts, dt, time_scale_of(g))
-	script.set_callbacks(&g.scripts, .All if run else .None)
+	script.set_callbacks(&g.scripts, editor.script_callbacks(&g.editor, what))
 	// The documents follow the world in every mode, so the editor's viewport shows them as they are.
 	ui.sync(&g.ui, &g.world)
 	// The Animators' graphs and clips load before the ticks, so the animate system's jobs only read them.
@@ -164,7 +165,16 @@ game_update :: proc(g: ^Game, dt: time.Duration, h: Hooks) -> (keep_running: boo
 		ecs.update_transforms(&g.world)
 		// The physics world follows the edits without stepping, so queries see the scene as it is.
 		physics.sync(&g.physics, &g.world)
-		script.settle(&g.scripts)
+		switch what {
+		case .Edit:
+			// The edit-mode behaviours run, and what they did goes to the editor, whose answer the next phase waits for.
+			script.run_edit_phase(&g.scripts, dt)
+			editor.send_behaviour_edits(&g.editor, &g.world, &g.scripts)
+		case .Hold:
+			script.settle(&g.scripts)
+		case .Wait, .Run:
+		// While the editor's answer is due, the world's changes wait for the scripts, which see them in the next phase.
+		}
 	}
 
 	find_camera(g)
@@ -195,6 +205,8 @@ end_frame :: proc(g: ^Game) {
 	nav.end_frame(&g.nav)
 	ai.end_frame(&g.ai)
 	script.reload_changed(&g.scripts, asset.poll(&g.assets))
+	// An edit-mode behaviour's on_reload can edit the editor's document.
+	editor.send_behaviour_edits(&g.editor, &g.world, &g.scripts)
 }
 
 // find_camera finds the scene's camera, after a scene load replaced the one that the game knew.
