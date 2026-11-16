@@ -123,7 +123,7 @@ Packages are small and single-purpose. A package's tests are beside it as `*_tes
 | `lib/core/gpu` | Shared | Backend-agnostic GPU interface: handles and the command list format. Backends execute the command lists that the engine records. |
 | `lib/core/luau` | Shared | Odin bindings to the Luau C API. |
 | `lib/core/script` | Host | The script VM's allocator, and every function pointer that Luau stores. |
-| `lib/core/layout` | Shared | Type layout hashing, used to detect `Game_State` and command format changes across a reload, and the debug [pointer audit](hot-reload.md#rules) of `Game_State` after a code reload. |
+| `lib/core/layout` | Shared | Type layout hashing, used to detect `Game_State` and command format changes across a reload, and the debug [pointer audit](hot-reload.md#rules) of `Game_State` after a reload. |
 | `lib/core/gpu/d3d12` | Host | The D3D12 backend. |
 | `lib/core/gpu/null` | Host | A backend that validates command lists and executes nothing. Used for headless tests. |
 | `lib/engine` | Game | Everything that does not own an OS resource: world, render frontend, asset runtime, script bindings, gameplay systems. |
@@ -171,7 +171,7 @@ Packages are small and single-purpose. A package's tests are beside it as `*_tes
 The two sides communicate only through two structs of procedures, both in `lib/core/api.odin`:
 
 - **`Platform_API`** (host → game): what `core` provides to the engine. Its fields are the complete list of what a game may ask of the platform: allocators and virtual memory, time, input, files, the window, jobs, every `gpu_*` procedure, and the script VM's `script_*` procedures.
-- **`Game_API`** (game → host): `init`, `update`, `shutdown`, `on_reload`, `state_size`, `layout_hash`, `pointer_audit` (the debug [pointer audit](hot-reload.md#rules) after a code reload), `abi_hash` (the GPU command format and `Platform_API`), `script_types` (see [Scripting](../scripting/tooling-and-hot-reload.md#types-and-tooling)), and `editor_poll`, the game's side of the editor link (see [Editor](../editor/link.md#world)).
+- **`Game_API`** (game → host): `init`, `update`, `shutdown`, `on_reload`, `state_size`, `layout_hash`, `pointer_audit` (the debug [pointer audit](hot-reload.md#rules) after a reload, which decides whether the old DLL unloads), `abi_hash` (the GPU command format and `Platform_API`), `script_types` (see [Scripting](../scripting/tooling-and-hot-reload.md#types-and-tooling)), and `editor_poll`, the game's side of the editor link (see [Editor](../editor/link.md#world)).
 
 In development, the host gets `Game_API` from the DLL's exported `cinnabar_game_api` procedure. In release, `lib/engine/game/runtime` calls the same procedure of the game package that it links, and fills `Platform_API` with direct procedure references, so the code paths are the same in both configurations. Code must not branch on `HOT_RELOAD` outside `src/host` and `lib/engine/game/runtime`.
 
