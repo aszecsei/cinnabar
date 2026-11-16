@@ -228,7 +228,8 @@ texture_settings_size_and_store_textures :: proc(t: ^testing.T) {
 		{
 			{
 				"content/ui.png.meta",
-				"guid = 00112233445566778899aabbccddeeff\nusage = data\nmips = false\nmax_size = 256\n",
+				"guid = 00112233445566778899aabbccddeeff\nusage = data\nmax_size = 256\n" +
+				NO_MIPS,
 			},
 		},
 	)
@@ -262,7 +263,7 @@ resampling_keeps_flat_images_flat :: proc(t: ^testing.T) {
 	for &p in image.pixels {
 		p = {0.25, 0.5, 0.75, 1}
 	}
-	for wrap in ([]bool{true, false}) {
+	for wrap in format.Texture_Wrap {
 		for size in ([][2]int{{3, 2}, {12, 8}, {1, 1}}) {
 			resized := resample(image, size.x, size.y, wrap)
 			for p in resized.pixels {
@@ -478,9 +479,15 @@ FACE_COLORS := [6][4]u8 {
 	{255, 255, 0, 255},
 }
 
-// A .meta file of a texture that keeps its values and its one mip, so a test reads its blob's texels as they are.
+// A .meta file of a texture that keeps its values and its one mip, so a test reads its blob's texels as they are: its
+// usage, then the section that turns its mips off. A section lasts to the end of the file, so other settings go
+// between the two.
 @(private = "file")
-RAW_SETTINGS :: "usage = data\nmips = false\n"
+RAW_USAGE :: "usage = data\n"
+@(private = "file")
+NO_MIPS :: "[mip_map]\nenabled = false\n"
+@(private = "file")
+RAW_SETTINGS :: RAW_USAGE + NO_MIPS
 
 @(private = "file")
 write_pixels :: proc(
@@ -550,7 +557,7 @@ layer_pixels :: proc(data: []byte, blob: ^format.Texture_Blob, layer: int) -> []
 
 @(test)
 a_cross_cooks_into_a_cube_with_its_faces_in_place :: proc(t: ^testing.T) {
-	META :: RAW_SETTINGS + "layout = cube_cross\n"
+	META :: RAW_USAGE + "layout = cube_cross\n" + NO_MIPS
 	tree := make_tree(
 		t,
 		{
@@ -625,8 +632,9 @@ a_cross_of_the_wrong_shape_fails :: proc(t: ^testing.T) {
 			{
 				"content/square.png.meta",
 				"guid = 00112233445566778899aabbccddee12\n" +
-				RAW_SETTINGS +
-				"layout = cube_cross\n",
+				RAW_USAGE +
+				"layout = cube_cross\n" +
+				NO_MIPS,
 			},
 		},
 	)
@@ -647,8 +655,9 @@ an_equirectangular_image_cooks_into_a_cube_as_the_sky_maps_it :: proc(t: ^testin
 			{
 				"content/sky.png.meta",
 				"guid = 00112233445566778899aabbccddee13\n" +
-				RAW_SETTINGS +
-				"layout = cube_equirect\n",
+				RAW_USAGE +
+				"layout = cube_equirect\n" +
+				NO_MIPS,
 			},
 		},
 	)
@@ -697,8 +706,9 @@ an_equirectangular_image_is_twice_as_wide_as_it_is_tall :: proc(t: ^testing.T) {
 			{
 				"content/sky.png.meta",
 				"guid = 00112233445566778899aabbccddee14\n" +
-				RAW_SETTINGS +
-				"layout = cube_equirect\n",
+				RAW_USAGE +
+				"layout = cube_equirect\n" +
+				NO_MIPS,
 			},
 		},
 	)
@@ -719,14 +729,16 @@ a_strip_cooks_into_an_array :: proc(t: ^testing.T) {
 			{
 				"content/strip.png.meta",
 				"guid = 00112233445566778899aabbccddee15\n" +
-				RAW_SETTINGS +
-				"layout = array_strip\n",
+				RAW_USAGE +
+				"layout = array_strip\n" +
+				NO_MIPS,
 			},
 			{
 				"content/uneven.png.meta",
 				"guid = 00112233445566778899aabbccddee16\n" +
-				RAW_SETTINGS +
-				"layout = array_strip\n",
+				RAW_USAGE +
+				"layout = array_strip\n" +
+				NO_MIPS,
 			},
 		},
 	)
@@ -767,7 +779,9 @@ SET_GUIDS := [6]string {
 	"aabbccddeeff00112233445566778805",
 }
 @(private = "file")
-SET_META :: "guid = aabbccddeeff00112233445566778810\n" + RAW_SETTINGS
+SET_GUID :: "guid = aabbccddeeff00112233445566778810\n"
+@(private = "file")
+SET_META :: SET_GUID + RAW_SETTINGS
 @(private = "file")
 CUBE_SET :: "# The faces.\npx = $aabbccddeeff00112233445566778800\nnx = $aabbccddeeff00112233445566778801\npy = $aabbccddeeff00112233445566778802\nny = $aabbccddeeff00112233445566778803\n\npz = $aabbccddeeff00112233445566778804\nnz = $aabbccddeeff00112233445566778805\n"
 
@@ -932,7 +946,10 @@ a_bad_texture_set_says_what_is_wrong :: proc(t: ^testing.T) {
 			t,
 			{
 				{"content/set.texture_set", test.text},
-				{"content/set.texture_set.meta", fmt.tprintf("%s%s", SET_META, test.meta)},
+				{
+					"content/set.texture_set.meta",
+					fmt.tprintf("%s%s%s%s", SET_GUID, RAW_USAGE, test.meta, NO_MIPS),
+				},
 			},
 		)
 		defer remove_tree(tree)
@@ -1192,4 +1209,220 @@ compressed_mips_decode_close_to_their_source :: proc(t: ^testing.T) {
 			)
 		}
 	}
+}
+
+// mip_pixels is the texels of one mip of a raw texture's layer 0.
+@(private = "file")
+mip_pixels :: proc(
+	data: []byte,
+	blob: ^format.Texture_Blob,
+	mip: int,
+) -> (
+	pixels: [][4]u8,
+	width: int,
+) {
+	bytes := format.blob_bytes(data, blob.mips)
+	offset := 0
+	for m in 0 ..< mip {
+		offset += int(max(blob.size.x >> uint(m), 1) * max(blob.size.y >> uint(m), 1)) * 4
+	}
+	width = int(max(blob.size.x >> uint(mip), 1))
+	size := width * int(max(blob.size.y >> uint(mip), 1)) * 4
+	return mem.slice_data_cast([][4]u8, bytes[offset:][:size]), width
+}
+
+@(test)
+moved_texture_settings_say_where_they_went :: proc(t: ^testing.T) {
+	tree := make_tree(
+		t,
+		{
+			{
+				"content/old.png.meta",
+				"guid = 00112233445566778899aabbccddee30\nusage = data\nmips = false\nwrap = clamp\nfilter = box\n",
+			},
+		},
+	)
+	defer remove_tree(tree)
+	write_test_image(t, tree, "old.png", 8, 8)
+	errors: Errors
+	context.logger = capture_errors(&errors)
+	defer release_errors(&errors)
+	testing.expect(t, !cook(tree_options(tree), {.Texture}).ok)
+	expect_error(t, &errors, "mips is now enabled in [mip_map]")
+	expect_error(t, &errors, "wrap is now wrap in [sampler]")
+	expect_error(t, &errors, "filter is now kernel in [mip_map]")
+}
+
+@(test)
+a_textures_sampler_settings_go_into_its_blob :: proc(t: ^testing.T) {
+	tree := make_tree(
+		t,
+		{
+			{"content/plain.png.meta", "guid = 00112233445566778899aabbccddee31\n"},
+			{
+				"content/pixel.png.meta",
+				"guid = 00112233445566778899aabbccddee32\n[sampler]\nwrap = mirror\nfilter = nearest\nmip_filter = nearest\nanisotropy = 1\n",
+			},
+		},
+	)
+	defer remove_tree(tree)
+	write_test_image(t, tree, "plain.png", 8, 8)
+	write_test_image(t, tree, "pixel.png", 8, 8)
+	testing.expect(t, cook(tree_options(tree), {.Texture}).ok)
+	if _, blob, ok := texture_blob(t, tree, "plain.png"); ok {
+		testing.expect_value(t, blob.sampler, format.Texture_Sampler{anisotropy = 8})
+	}
+	if _, blob, ok := texture_blob(t, tree, "pixel.png"); ok {
+		testing.expect_value(
+			t,
+			blob.sampler,
+			format.Texture_Sampler {
+				wrap = .Mirror,
+				filter = .Nearest,
+				mip_filter = .Nearest,
+				anisotropy = 1,
+			},
+		)
+	}
+}
+
+@(test)
+border_mips_keep_the_edges_color :: proc(t: ^testing.T) {
+	SIZE :: 8
+	pixels := make([][4]u8, SIZE * SIZE, context.temp_allocator)
+	for y in 0 ..< SIZE {
+		for x in 0 ..< SIZE {
+			edge := x == 0 || y == 0 || x == SIZE - 1 || y == SIZE - 1
+			pixels[y * SIZE + x] = edge ? {255, 0, 0, 255} : {0, 0, 255, 255}
+		}
+	}
+	tree := make_tree(
+		t,
+		{
+			{
+				"content/frame.png.meta",
+				"guid = 00112233445566778899aabbccddee33\nusage = data\n[mip_map]\nkernel = box\nborder = true\n[sampler]\nwrap = clamp\n",
+			},
+		},
+	)
+	defer remove_tree(tree)
+	write_pixels(t, tree, "frame.png", SIZE, SIZE, pixels)
+	testing.expect(t, cook(tree_options(tree), {.Texture}).ok)
+	data, blob, ok := texture_blob(t, tree, "frame.png")
+	if !ok {
+		return
+	}
+	testing.expect_value(t, blob.mip_count, 4)
+	for mip in 1 ..< int(blob.mip_count) {
+		texels, width := mip_pixels(data, blob, mip)
+		height := len(texels) / width
+		for y in 0 ..< height {
+			for x in 0 ..< width {
+				if x == 0 || y == 0 || x == width - 1 || y == height - 1 {
+					testing.expectf(
+						t,
+						texels[y * width + x] == {255, 0, 0, 255},
+						"mip %d's edge at %d, %d is %v",
+						mip,
+						x,
+						y,
+						texels[y * width + x],
+					)
+				}
+			}
+		}
+	}
+	// Inside, mip 1 averages only the inside of mip 0.
+	texels, width := mip_pixels(data, blob, 1)
+	testing.expect_value(t, texels[1 * width + 1], [4]u8{0, 0, 255, 255})
+}
+
+@(test)
+fadeout_takes_the_mips_to_a_neutral_value :: proc(t: ^testing.T) {
+	tree := make_tree(
+		t,
+		{
+			{
+				"content/fade.png.meta",
+				"guid = 00112233445566778899aabbccddee34\nusage = data\n[mip_map]\nfadeout = true\nfade_start = 1\nfade_end = 3\n",
+			},
+		},
+	)
+	defer remove_tree(tree)
+	write_flat(t, tree, "fade.png", 16, 16, {200, 40, 10, 255})
+	testing.expect(t, cook(tree_options(tree), {.Texture}).ok)
+	data, blob, ok := texture_blob(t, tree, "fade.png")
+	if !ok {
+		return
+	}
+	near :: proc(a, b: [4]u8) -> bool {
+		for ch in 0 ..< 4 {
+			if abs(int(a[ch]) - int(b[ch])) > 1 {
+				return false
+			}
+		}
+		return true
+	}
+	expected := [5][4]u8 {
+		{200, 40, 10, 255},
+		{200, 40, 10, 255},
+		{164, 84, 69, 255},
+		{128, 128, 128, 255},
+		{128, 128, 128, 255},
+	}
+	for mip in 0 ..< int(blob.mip_count) {
+		texels, _ := mip_pixels(data, blob, mip)
+		testing.expectf(
+			t,
+			near(texels[0], expected[mip]),
+			"mip %d is %v, not %v",
+			mip,
+			texels[0],
+			expected[mip],
+		)
+	}
+}
+
+@(test)
+mip_settings_that_cannot_work_together_fail :: proc(t: ^testing.T) {
+	tree := make_tree(
+		t,
+		{
+			{
+				"content/backwards.png.meta",
+				"guid = 00112233445566778899aabbccddee35\n[mip_map]\nfadeout = true\nfade_start = 3\nfade_end = 2\n",
+			},
+			{
+				"content/sky.hdr.meta",
+				"guid = 00112233445566778899aabbccddee36\nusage = hdr\n[mip_map]\nfadeout = true\n",
+			},
+		},
+	)
+	defer remove_tree(tree)
+	write_test_image(t, tree, "backwards.png", 8, 8)
+	write_test_image(t, tree, "sky.hdr", 8, 8)
+	errors: Errors
+	context.logger = capture_errors(&errors)
+	defer release_errors(&errors)
+	testing.expect(t, !cook(tree_options(tree), {.Texture}).ok)
+	expect_error(t, &errors, "fade_end must be after fade_start")
+	expect_error(t, &errors, "fadeout is not for hdr")
+}
+
+@(test)
+gamma_mips_keep_a_color_textures_srgb_values :: proc(t: ^testing.T) {
+	a := Asset_Source {
+		meta = {settings = {{"mip_map.linear", "false"}}},
+	}
+	cook := texture_cook_of(a)
+	testing.expect(t, cook.gamma_mips)
+	image := Image{2, 1, {{0.5, 0.5, 0.5, 1}, {0.5, 0.5, 0.5, 1}}}
+	convert_image(&image, cook, false)
+	testing.expect_value(t, image.pixels[0].r, 0.5)
+	// A linear source goes into sRGB, so its mips filter in gamma space too.
+	convert_image(&image, cook, true)
+	testing.expect(t, abs(image.pixels[0].r - linear_to_srgb(0.5)) < 1e-6)
+	// Only color textures filter in gamma space.
+	a.meta.settings = {{"mip_map.linear", "false"}, {"usage", "mask"}}
+	testing.expect(t, !texture_cook_of(a).gamma_mips)
 }

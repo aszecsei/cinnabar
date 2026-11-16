@@ -18,7 +18,7 @@ import stbi "vendor:stb/image"
 import format "cinnabar:engine/asset/format"
 
 // Changing how the cooker cooks textures changes this, which invalidates every cooked texture.
-TEXTURE_COOK_VERSION :: "textures 1"
+TEXTURE_COOK_VERSION :: "textures 2"
 // The images that the cooker decodes.
 TEXTURE_EXTENSIONS :: []string{".png", ".jpg", ".jpeg", ".tga", ".hdr", ".tif", ".tiff", ".exr"}
 // What a texture asset's source can be: an image, or a set that names images (see texture_layers.odin).
@@ -52,28 +52,10 @@ TEXTURE_SETTINGS := []Setting_Info {
 		description = "What the texture holds, which picks its format: color is BC7 in sRGB, normal is BC5, mask is BC4 (one channel), hdr is BC6H, data is RGBA8 without compression, and height is R16 without compression (one channel of 16 bits, for a terrain's height map).",
 	},
 	{
-		key = "mips",
-		values = {"true", "false"},
-		default = "true",
-		description = "Make the full mip chain.",
-	},
-	{
 		key = "max_size",
 		values = {"256", "512", "1024", "2048", "4096", "8192", "16384"},
 		default = "16384",
 		description = "Halve the texture until its larger side fits.",
-	},
-	{
-		key = "wrap",
-		values = {"repeat", "clamp"},
-		default = "repeat",
-		description = "How the mip filter treats the edges. The sampler is the material's choice.",
-	},
-	{
-		key = "filter",
-		values = {"kaiser", "box"},
-		default = "kaiser",
-		description = "The mip filter: a Kaiser-windowed sinc, or the plain average of the covered texels, which keeps a mask's mips as the share of its texels that are set.",
 	},
 	{
 		key = "alpha_coverage",
@@ -119,6 +101,83 @@ TEXTURE_SETTINGS := []Setting_Info {
 		default = "true",
 		description = "Cook this image as a texture of its own. Turn it off for an image that only a .texture_set reads, so that it does not compress twice.",
 	},
+	{
+		key = "mip_map.enabled",
+		values = {"true", "false"},
+		default = "true",
+		description = "Make the full mip chain.",
+	},
+	{
+		key = "mip_map.kernel",
+		values = {"kaiser", "box"},
+		default = "kaiser",
+		description = "The filter that makes each mip: a Kaiser-windowed sinc, or the plain average of the covered texels, which keeps a mask's mips as the share of its texels that are set.",
+	},
+	{
+		key = "mip_map.linear",
+		values = {"true", "false"},
+		default = "true",
+		description = "Filter a color texture's mips in linear light. Turn it off to filter its stored sRGB values, which keeps dark detail darker in the distance.",
+	},
+	{
+		key = "mip_map.border",
+		values = {"true", "false"},
+		default = "false",
+		description = "Keep each mip's outermost texels the color of the texture's edge, so that a clamped texture's edge color does not bleed in at a distance.",
+	},
+	{
+		key = "mip_map.fadeout",
+		values = {"true", "false"},
+		default = "false",
+		description = "Fade the mips from fade_start to fade_end toward a neutral value: mid gray, or a flat normal, so that detail gives way in the distance.",
+	},
+	{
+		key = "mip_map.fade_start",
+		values = MIP_FADE_VALUES,
+		default = "1",
+		description = "The last mip that fadeout leaves as it is.",
+	},
+	{
+		key = "mip_map.fade_end",
+		values = MIP_FADE_VALUES,
+		default = "3",
+		description = "The first mip that fadeout makes wholly neutral.",
+	},
+	{
+		key = "sampler.wrap",
+		values = {"repeat", "clamp", "mirror"},
+		default = "repeat",
+		description = "What sampling past the texture's edges reads, and what its mips filter across them: the other edge, the edge's texels, or the texture mirrored.",
+	},
+	{
+		key = "sampler.filter",
+		values = {"linear", "nearest"},
+		default = "linear",
+		description = "How sampling blends texels: the nearest ones weighted, or the nearest one, which keeps pixel art's texels sharp.",
+	},
+	{
+		key = "sampler.mip_filter",
+		values = {"linear", "nearest"},
+		default = "linear",
+		description = "How sampling blends mips: the two nearest weighted, or the nearest one.",
+	},
+	{
+		key = "sampler.anisotropy",
+		values = {"1", "2", "4", "8", "16"},
+		default = "8",
+		description = "The most texels that sampling takes along a surface seen at a slant, which keeps it sharp. 1 is none. The quality setting texture_anisotropy caps it.",
+	},
+}
+
+// The mips that the fadeout's range can name.
+MIP_FADE_VALUES :: []string{"1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13"}
+
+// MOVED_TEXTURE_SETTINGS are the texture settings that moved into a section. A .meta file that still sets one fails,
+// rather than losing what it asked for.
+MOVED_TEXTURE_SETTINGS := []Moved_Setting {
+	{"mips", "mip_map.enabled"},
+	{"filter", "mip_map.kernel"},
+	{"wrap", "sampler.wrap"},
 }
 
 // texture_usage_for is the usage that a new texture's .meta file gets, from its name: .hdr and .exr files are hdr, a
@@ -147,7 +206,8 @@ texture_usage_for :: proc(path: string) -> string {
 	return "color"
 }
 
-// Image is a decoded texture in floating point: linear light for color and hdr, and the stored values otherwise.
+// Image is a decoded texture in floating point: linear light for color and hdr, and the stored values otherwise. A color
+// texture whose mips filter in gamma space keeps its sRGB values.
 Image :: struct {
 	width, height: int,
 	pixels:        [][4]f32,
@@ -216,7 +276,7 @@ cook_textures :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass
 	sets := make(map[int]Texture_Set, context.temp_allocator)
 	for i in textures {
 		a := &assets[i]
-		if !check_settings(a^, problems) {
+		if !check_settings(a^, problems) || !check_texture_settings(a^, problems) {
 			settle(pass, i, .Failed)
 			ok = false
 			continue
@@ -408,10 +468,18 @@ texture_setting :: proc(a: Asset_Source, key: string) -> string {
 // that it reads (see stages.odin).
 Texture_Cook :: struct {
 	usage:           format.Texture_Usage,
-	// Filter the mips with the edges wrapping, and with a box instead of the Kaiser filter.
-	wrap:            bool,
+	// How the texture is sampled. Its wrap is also what the mips filter across the edges.
+	sampler:         format.Texture_Sampler,
+	// Filter with a box instead of the Kaiser filter.
 	box:             bool,
 	mips:            bool,
+	// For a color texture, filter the mips in its stored sRGB values instead of linear light.
+	gamma_mips:      bool,
+	// Keep each mip's outermost texels those of mip 0's edge.
+	border:          bool,
+	// Fade the mips from fade_start to fade_end toward a neutral value. 0 for fade_end does not fade.
+	fade_start:      int,
+	fade_end:        int,
 	max_size:        int,
 	// For a mask, the source's channel that it keeps, 0 to 3, in red. 0 keeps red as it is.
 	channel:         int,
@@ -455,15 +523,81 @@ texture_cook_of :: proc(a: Asset_Source) -> Texture_Cook {
 	case "array_strip":
 		layout = .Array_Strip
 	}
+	fade_start, fade_end: int
+	if texture_setting(a, "mip_map.fadeout") == "true" {
+		fade_start = strconv.parse_int(texture_setting(a, "mip_map.fade_start")) or_else 1
+		fade_end = strconv.parse_int(texture_setting(a, "mip_map.fade_end")) or_else 3
+	}
 	return {
 		usage = usage,
-		wrap = texture_setting(a, "wrap") == "repeat",
-		box = texture_setting(a, "filter") == "box",
-		mips = texture_setting(a, "mips") == "true",
+		sampler = texture_sampler_of(a),
+		box = texture_setting(a, "mip_map.kernel") == "box",
+		mips = texture_setting(a, "mip_map.enabled") == "true",
+		gamma_mips = usage == .Color && texture_setting(a, "mip_map.linear") == "false",
+		border = texture_setting(a, "mip_map.border") == "true",
+		fade_start = fade_start,
+		fade_end = fade_end,
 		max_size = strconv.parse_int(texture_setting(a, "max_size")) or_else 16384,
 		coverage_cutoff = coverage_cutoff,
 		layout = layout,
 	}
+}
+
+// texture_sampler_of is how a texture asset asks to be sampled, by its `[sampler]` settings. An asset without settings,
+// such as a stage's texture, gets their defaults.
+texture_sampler_of :: proc(a: Asset_Source) -> format.Texture_Sampler {
+	filter_of :: proc(value: string) -> format.Texture_Filter {
+		return value == "nearest" ? .Nearest : .Linear
+	}
+	wrap: format.Texture_Wrap
+	switch texture_setting(a, "sampler.wrap") {
+	case "clamp":
+		wrap = .Clamp
+	case "mirror":
+		wrap = .Mirror
+	}
+	anisotropy := strconv.parse_int(texture_setting(a, "sampler.anisotropy")) or_else 1
+	return {
+		wrap = wrap,
+		filter = filter_of(texture_setting(a, "sampler.filter")),
+		mip_filter = filter_of(texture_setting(a, "sampler.mip_filter")),
+		anisotropy = u8(clamp(anisotropy, 1, format.MAX_TEXTURE_ANISOTROPY)),
+	}
+}
+
+// check_texture_settings checks what a texture's settings mean together, which check_settings does not: a fadeout's
+// range, a fadeout of an hdr texture, and settings that do nothing for this texture, which are warnings.
+check_texture_settings :: proc(a: Asset_Source, problems: ^Problems) -> bool {
+	meta_path := fmt.tprintf("%s%s", a.path, format.META_EXTENSION)
+	t := texture_cook_of(a)
+	ok := true
+	if t.fade_end > 0 && t.fade_end <= t.fade_start {
+		report_error(problems, meta_path, 0, 0, "[mip_map] fade_end must be after fade_start")
+		ok = false
+	}
+	if t.fade_end > 0 && t.usage == .HDR {
+		report_error(
+			problems,
+			meta_path,
+			0,
+			0,
+			"[mip_map] fadeout is not for hdr textures, which have no neutral value",
+		)
+		ok = false
+	}
+	if t.usage != .Color && texture_setting(a, "mip_map.linear") == "false" {
+		report_warning(
+			problems,
+			meta_path,
+			0,
+			0,
+			"[mip_map] linear = false is only for color textures",
+		)
+	}
+	if t.sampler.filter == .Nearest && t.sampler.anisotropy > 1 {
+		report_warning(problems, meta_path, 0, 0, "[sampler] anisotropy needs filter = linear")
+	}
+	return ok
 }
 
 // cook_texture decodes, sizes, filters and compresses one texture, and gives its blob.
@@ -513,7 +647,7 @@ cook_texture_image :: proc(
 
 // cook_texture_layers sizes, filters and compresses decoded layers of one size, and gives their blob: each layer's mip
 // chain, one after the other. A cube's faces meet other faces at their edges, not themselves, so their filter clamps
-// whatever the wrap setting says.
+// whatever the wrap setting says, and they cannot keep a border.
 cook_texture_layers :: proc(
 	options: Cook_Options,
 	decoded: []Image,
@@ -528,7 +662,17 @@ cook_texture_layers :: proc(
 	ok: bool,
 ) {
 	usage, box := t.usage, t.box
-	wrap := t.wrap && dimension != .Cube
+	wrap := dimension == .Cube ? format.Texture_Wrap.Clamp : t.sampler.wrap
+	if t.border && dimension == .Cube {
+		report_error(
+			problems,
+			path,
+			0,
+			0,
+			"a cube's faces cannot keep a border, which would show as seams",
+		)
+		return
+	}
 	tex_format := texture_format_of(usage)
 	quality: f32 = options.config == .Dev ? DEV_TEXTURE_QUALITY : RELEASE_TEXTURE_QUALITY
 	mips: []byte
@@ -577,11 +721,16 @@ cook_texture_layers :: proc(
 					wrap,
 					box,
 				)
+				// The border feeds down the chain, so the next mip filters from it too.
+				if t.border {
+					border_ring(&level, image)
+				}
 				if usage == .Normal {
 					normalize(&level)
 				}
 			}
-			// The next mip filters from level, so only what this mip stores is scaled, and no scale feeds down the chain.
+			// The next mip filters from level, so only what this mip stores is scaled or faded, and neither feeds down
+			// the chain.
 			stored := level
 			if mip > 0 && t.coverage_cutoff > 0 {
 				stored = scale_alpha(
@@ -589,8 +738,15 @@ cook_texture_layers :: proc(
 					alpha_coverage_scale(level, t.coverage_cutoff, coverage),
 				)
 			}
+			if t.fade_end > t.fade_start && mip > t.fade_start {
+				amount := min(f32(mip - t.fade_start) / f32(t.fade_end - t.fade_start), 1)
+				stored = fade_toward(stored, fade_neutral(t), amount)
+				if usage == .Normal {
+					normalize(&stored)
+				}
+			}
 			mip_size := format.texture_mip_size(tex_format, u32(level.width), u32(level.height))
-			if !encode_mip(stored, usage, quality, mips[offset:][:mip_size]) {
+			if !encode_mip(stored, usage, quality, mips[offset:][:mip_size], t.gamma_mips) {
 				report_error(
 					problems,
 					path,
@@ -614,6 +770,7 @@ cook_texture_layers :: proc(
 		layer_count = u32(len(decoded)),
 		size        = size,
 		mip_count   = u32(mip_count),
+		sampler     = t.sampler,
 		mips        = mips,
 		source_path = source_path,
 	}
@@ -761,13 +918,18 @@ decode_image_bytes :: proc(
 }
 
 // convert_image turns decoded values into what a usage cooks from: color from sRGB into linear light, unless the image
-// is linear already, a normal map to -1..1, and a mask's channel into red. An hdr, data or height texture keeps its
+// is linear already, a normal map to -1..1, and a mask's channel into red. A color texture whose mips filter in gamma
+// space keeps its sRGB values instead, and a linear image's go into sRGB. An hdr, data or height texture keeps its
 // values.
 convert_image :: proc(image: ^Image, t: Texture_Cook, linear: bool) {
 	usage := t.usage
 	for &p in image.pixels {
 		for ch in 0 ..< 3 {
 			switch {
+			case usage == .Color && t.gamma_mips:
+				if linear {
+					p[ch] = linear_to_srgb(p[ch])
+				}
 			case (usage == .Color || (usage == .Mask && t.srgb)) && !linear:
 				p[ch] = srgb_to_linear(p[ch])
 			case usage == .Normal:
@@ -867,11 +1029,16 @@ scale_alpha :: proc(image: Image, scale: f32) -> Image {
 }
 
 // resample resizes an image with a Kaiser-windowed sinc filter, one axis after the other. When it shrinks, the filter
-// widens by the scale, so it averages every source texel that a destination texel covers. wrap repeats the edges
-// instead of clamping them. box takes the plain average of the texels that a destination texel covers instead, whose
+// widens by the scale, so it averages every source texel that a destination texel covers. wrap is what the filter reads
+// past the edges. box takes the plain average of the texels that a destination texel covers instead, whose
 // weights are never negative, so a mask's mips are the share of its texels that are set (see
 // docs/rendering/surfaces.md#holes).
-resample :: proc(image: Image, width, height: int, wrap: bool, box := false) -> Image {
+resample :: proc(
+	image: Image,
+	width, height: int,
+	wrap: format.Texture_Wrap,
+	box := false,
+) -> Image {
 	if width == image.width && height == image.height {
 		return image
 	}
@@ -895,7 +1062,9 @@ resample_axis :: proc(
 	src_width, src_height: int,
 	dst: [][4]f32,
 	dst_length: int,
-	horizontal, wrap, box: bool,
+	horizontal: bool,
+	wrap: format.Texture_Wrap,
+	box: bool,
 ) {
 	src_length := horizontal ? src_width : src_height
 	lines := horizontal ? src_height : src_width
@@ -938,11 +1107,83 @@ resample_axis :: proc(
 }
 
 @(private = "file")
-edge :: proc(i, length: int, wrap: bool) -> int {
-	if wrap {
+edge :: proc(i, length: int, wrap: format.Texture_Wrap) -> int {
+	switch wrap {
+	case .Repeat:
 		return ((i % length) + length) % length
+	case .Mirror:
+		// Each period is the texels forwards, then backwards: 0 .. length - 1, length - 1 .. 0.
+		m := ((i % (2 * length)) + 2 * length) % (2 * length)
+		return m < length ? m : 2 * length - 1 - m
+	case .Clamp:
 	}
 	return clamp(i, 0, length - 1)
+}
+
+// border_ring sets a mip's outermost texels to those of top, the texture's mip 0, along the same edge: each to the average
+// of top's edge texels that it covers. So a clamped texture's lower mips keep its edge's color, and do not filter the
+// inside into it.
+border_ring :: proc(level: ^Image, top: Image) {
+	w, h := level.width, level.height
+	// The texels of top's edge, of top_length, that texel i of length covers.
+	span :: proc(i, length, top_length: int) -> (first, last: int) {
+		first = i * top_length / length
+		last = max((i + 1) * top_length / length, first + 1)
+		return
+	}
+	for x in 0 ..< w {
+		first, last := span(x, w, top.width)
+		for side in 0 ..< 2 {
+			top_y := side == 0 ? 0 : top.height - 1
+			sum: [4]f32
+			for top_x in first ..< last {
+				sum += top.pixels[top_y * top.width + top_x]
+			}
+			level.pixels[(side == 0 ? 0 : h - 1) * w + x] = sum / f32(last - first)
+		}
+	}
+	for y in 0 ..< h {
+		first, last := span(y, h, top.height)
+		for side in 0 ..< 2 {
+			top_x := side == 0 ? 0 : top.width - 1
+			sum: [4]f32
+			for top_y in first ..< last {
+				sum += top.pixels[top_y * top.width + top_x]
+			}
+			level.pixels[y * w + (side == 0 ? 0 : w - 1)] = sum / f32(last - first)
+		}
+	}
+}
+
+// fade_neutral is what a texture's mips fade toward: mid gray for color, in the space that its mips filter in, a flat
+// normal, or 0.5 for the rest.
+fade_neutral :: proc(t: Texture_Cook) -> [3]f32 {
+	#partial switch t.usage {
+	case .Color:
+		return t.gamma_mips ? 0.5 : srgb_to_linear(0.5)
+	case .Normal:
+		return {0, 0, 1}
+	}
+	return 0.5
+}
+
+// fade_toward is a copy of an image with its color an amount of the way to a neutral value, from 0 to 1. Its alpha
+// stays.
+fade_toward :: proc(image: Image, neutral: [3]f32, amount: f32) -> Image {
+	result := Image {
+		image.width,
+		image.height,
+		make([][4]f32, len(image.pixels), context.temp_allocator),
+	}
+	for p, i in image.pixels {
+		result.pixels[i] = {
+			math.lerp(p.r, neutral.r, amount),
+			math.lerp(p.g, neutral.g, amount),
+			math.lerp(p.b, neutral.b, amount),
+			p.a,
+		}
+	}
+	return result
 }
 
 // kaiser_sinc is the filter's weight at a distance, in its own texels: a sinc under a Kaiser window of FILTER_RADIUS.
@@ -970,8 +1211,14 @@ bessel_i0 :: proc(x: f32) -> f32 {
 	return sum
 }
 
-// encode_mip writes one mip in its usage's format into out.
-encode_mip :: proc(image: Image, usage: format.Texture_Usage, quality: f32, out: []byte) -> bool {
+// encode_mip writes one mip in its usage's format into out. gamma says that a color mip holds sRGB values already.
+encode_mip :: proc(
+	image: Image,
+	usage: format.Texture_Usage,
+	quality: f32,
+	out: []byte,
+	gamma := false,
+) -> bool {
 	count := len(image.pixels)
 	unorm :: proc(v: f32) -> u8 {
 		return u8(clamp(v, 0, 1) * 255 + 0.5)
@@ -1007,11 +1254,13 @@ encode_mip :: proc(image: Image, usage: format.Texture_Usage, quality: f32, out:
 	for p, i in image.pixels {
 		switch usage {
 		case .Color:
-			bytes[i] = {
-				unorm(linear_to_srgb(p.r)),
-				unorm(linear_to_srgb(p.g)),
-				unorm(linear_to_srgb(p.b)),
-				unorm(p.a),
+			bytes[i] = {unorm(p.r), unorm(p.g), unorm(p.b), unorm(p.a)}
+			if !gamma {
+				bytes[i].rgb = {
+					unorm(linear_to_srgb(p.r)),
+					unorm(linear_to_srgb(p.g)),
+					unorm(linear_to_srgb(p.b)),
+				}
 			}
 		case .Normal:
 			bytes[i] = {unorm(p.x * 0.5 + 0.5), unorm(p.y * 0.5 + 0.5), 0, 255}

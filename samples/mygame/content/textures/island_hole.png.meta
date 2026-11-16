@@ -1,5 +1,9 @@
-# cinnabar asset metadata. Keep this file next to its asset (see docs/content-pipeline.md#identity).
+# cinnabar asset metadata. Keep this file next to its asset (see docs/content/identity-and-cooking.md#identity).
 guid = 1d5f7a9c3e2b4d6f8a0c2e4f6b8d0a2c
 usage = mask
+
+[mip_map]
+kernel = box
+
+[sampler]
 wrap = clamp
-filter = box

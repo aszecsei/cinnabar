@@ -15,7 +15,7 @@ public static class WeatherMapFile
         "# cinnabar asset metadata. Keep this file next to its asset (see docs/content/identity-and-cooking.md#identity).\n" +
         $"guid = {guid}\n" +
         $"usage = {Usage}\n" +
-        "mips = false\n";
+        "\n[mip_map]\nenabled = false\n";
 
     /// <summary>A new asset's GUID, 32 hex digits as the daemon writes them.</summary>
     public static string NewGuid() => Guid.NewGuid().ToString("N");
