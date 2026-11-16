@@ -95,7 +95,7 @@ public class WorldModelTests
     public void ClearForgetsEverything()
     {
         var world = Snapshot(Info(Handle(1)));
-        world.Apply(new ComponentTypes([new ComponentType(1, "Transform", 48, [])]));
+        world.Apply(new ComponentTypes([new ComponentType(1, "Transform", "Transform", 48, [])]));
 
         world.Clear();
 

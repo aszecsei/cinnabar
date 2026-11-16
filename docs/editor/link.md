@@ -90,6 +90,6 @@ A new link, from a start, a restart or a crash, and a soft restart both give the
 
 ### Types
 
-- A component type gives its stable ID, its name, its size and its fields. A field gives its name, offset, kind, read-only flag, range and color flag, and an enum's backing kind and named values.
+- A component type gives its stable ID, its name, its category, its size and its fields. The category is the folder in which the Add Component picker offers the type, or `-` for a type that the picker leaves out (see [Shell: Properties](shell-and-panels.md#properties)). A field gives its name, offset, kind, read-only flag, range and color flag, and an enum's backing kind and named values.
 - **Field kinds:** the integer and float types, `bool`, enums, `[2]f32`, `[3]f32`, `quaternion128`, `World_Position` and `Entity`. A nested struct that is none of these adds its fields with dotted names, such as `inner.amount`. Other fields are hidden. *Asset references come with asset fields.*
 - **Struct tags:** the `editor` tag is a list of words with spaces between them. `-` hides a field, `read` makes it, and anything in it, read-only, `range=0,100` gives a slider range, and `color` marks a `[3]f32` as a linear color, as in `editor:"color range=0,1"`. The walk follows the same rules as `script.expose`. The `Behaviours` component's Luau reference is hidden this way. The walk is `scene.component_fields`, so a scene can set exactly the fields that the editor shows.

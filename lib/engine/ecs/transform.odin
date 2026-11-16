@@ -62,13 +62,19 @@ LOCAL_TRANSFORM_IDENTITY :: Local_Transform {
 // register_engine_components registers the components that the world itself uses. Call it from the game's
 // component registration procedure.
 register_engine_components :: proc(r: ^Registry) {
-	register_component(r, Transform, TRANSFORM_ID, TRANSFORM_IDENTITY)
-	register_component(r, Local_Transform, LOCAL_TRANSFORM_ID, LOCAL_TRANSFORM_IDENTITY)
-	register_component(r, Parent, PARENT_ID)
-	register_component(r, Previous_Transform, PREVIOUS_TRANSFORM_ID)
-	register_component(r, Disabled, DISABLED_ID)
-	register_component(r, Inactive, INACTIVE_ID)
-	register_component(r, Name, NAME_ID)
+	register_component(r, Transform, TRANSFORM_ID, TRANSFORM_IDENTITY, category = "Transform")
+	register_component(
+		r,
+		Local_Transform,
+		LOCAL_TRANSFORM_ID,
+		LOCAL_TRANSFORM_IDENTITY,
+		category = "Transform",
+	)
+	register_component(r, Parent, PARENT_ID, category = NO_CATEGORY)
+	register_component(r, Previous_Transform, PREVIOUS_TRANSFORM_ID, category = "Transform")
+	register_component(r, Disabled, DISABLED_ID, category = NO_CATEGORY)
+	register_component(r, Inactive, INACTIVE_ID, category = NO_CATEGORY)
+	register_component(r, Name, NAME_ID, category = NO_CATEGORY)
 }
 
 // compose gives a child's world-space pose. A non-uniform parent scale is applied before the child's rotation, so

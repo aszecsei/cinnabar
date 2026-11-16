@@ -223,21 +223,32 @@ Reflection_Probe :: struct {
 // the others in settings.odin). Call it with the engine's components and volume.register_components, in init and
 // on_reload.
 register_components :: proc(r: ^ecs.Registry) {
-	ecs.register_component(r, Camera, CAMERA_ID)
-	ecs.register_component(r, Sprite_Renderer, SPRITE_RENDERER_ID, DEFAULT_SPRITE_RENDERER)
-	ecs.register_component(r, Mesh_Renderer, MESH_RENDERER_ID)
-	ecs.register_component(r, Tint, TINT_ID, DEFAULT_TINT)
-	ecs.register_component(r, Directional_Light, DIRECTIONAL_LIGHT_ID)
-	ecs.register_component(r, Point_Light, POINT_LIGHT_ID)
-	ecs.register_component(r, Spot_Light, SPOT_LIGHT_ID)
-	ecs.register_component(r, View_Model, VIEW_MODEL_ID)
-	ecs.register_component(r, Quad_Light, QUAD_LIGHT_ID)
-	ecs.register_component(r, Disk_Light, DISK_LIGHT_ID)
-	ecs.register_component(r, Line_Light, LINE_LIGHT_ID)
-	ecs.register_component(r, Surface_Renderer, SURFACE_RENDERER_ID)
-	ecs.register_component(r, Particle_System, PARTICLE_SYSTEM_ID)
-	ecs.register_component(r, Instanced_Mesh_Renderer, INSTANCED_MESH_RENDERER_ID)
-	ecs.register_component(r, Reflection_Probe, REFLECTION_PROBE_ID)
+	ecs.register_component(r, Camera, CAMERA_ID, category = "Rendering")
+	ecs.register_component(
+		r,
+		Sprite_Renderer,
+		SPRITE_RENDERER_ID,
+		DEFAULT_SPRITE_RENDERER,
+		category = "Rendering",
+	)
+	ecs.register_component(r, Mesh_Renderer, MESH_RENDERER_ID, category = "Rendering")
+	ecs.register_component(r, Tint, TINT_ID, DEFAULT_TINT, category = "Rendering")
+	ecs.register_component(r, Directional_Light, DIRECTIONAL_LIGHT_ID, category = "Lighting")
+	ecs.register_component(r, Point_Light, POINT_LIGHT_ID, category = "Lighting")
+	ecs.register_component(r, Spot_Light, SPOT_LIGHT_ID, category = "Lighting")
+	ecs.register_component(r, View_Model, VIEW_MODEL_ID, category = "Rendering")
+	ecs.register_component(r, Quad_Light, QUAD_LIGHT_ID, category = "Lighting")
+	ecs.register_component(r, Disk_Light, DISK_LIGHT_ID, category = "Lighting")
+	ecs.register_component(r, Line_Light, LINE_LIGHT_ID, category = "Lighting")
+	ecs.register_component(r, Surface_Renderer, SURFACE_RENDERER_ID, category = "Rendering")
+	ecs.register_component(r, Particle_System, PARTICLE_SYSTEM_ID, category = "Rendering")
+	ecs.register_component(
+		r,
+		Instanced_Mesh_Renderer,
+		INSTANCED_MESH_RENDERER_ID,
+		category = "Rendering",
+	)
+	ecs.register_component(r, Reflection_Probe, REFLECTION_PROBE_ID, category = "Lighting")
 	register_settings_components(r)
 }
 

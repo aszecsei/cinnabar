@@ -164,10 +164,10 @@ State :: struct {
 // register_components registers Agent, Agent_State, Perceiver and Perceivable. Call it with the engine's components,
 // in init and on_reload.
 register_components :: proc(r: ^ecs.Registry) {
-	ecs.register_component(r, Agent, AGENT_ID, DEFAULT_AGENT)
-	ecs.register_component(r, Agent_State, AGENT_STATE_ID)
-	ecs.register_component(r, Perceiver, PERCEIVER_ID, DEFAULT_PERCEIVER)
-	ecs.register_component(r, Perceivable, PERCEIVABLE_ID, DEFAULT_PERCEIVABLE)
+	ecs.register_component(r, Agent, AGENT_ID, DEFAULT_AGENT, category = "AI")
+	ecs.register_component(r, Agent_State, AGENT_STATE_ID, category = ecs.NO_CATEGORY)
+	ecs.register_component(r, Perceiver, PERCEIVER_ID, DEFAULT_PERCEIVER, category = "AI")
+	ecs.register_component(r, Perceivable, PERCEIVABLE_ID, DEFAULT_PERCEIVABLE, category = "AI")
 }
 
 // init makes the state's lists. scripts is the runtime that runs the script actions, and physics the one that sight and

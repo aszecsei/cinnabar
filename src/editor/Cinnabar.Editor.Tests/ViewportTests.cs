@@ -1468,7 +1468,7 @@ public sealed class ViewportTests : IDisposable
         using var shell = NewShell();
         var changes = 0;
         shell.WorldCameraChanged += () => changes++;
-        shell.OnGameMessage(new ComponentTypes([new ComponentType(1, "Transform", 48, []), new ComponentType(32, "Camera", 32, [])]));
+        shell.OnGameMessage(new ComponentTypes([new ComponentType(1, "Transform", "Transform", 48, []), new ComponentType(32, "Camera", "Rendering", 32, [])]));
         Assert.False(shell.WorldHasCamera);
 
         shell.OnGameMessage(new EntitySnapshot([new EntityInfo(Box, "Box", 1, 0, true, [1]), new EntityInfo(camera, "Camera", 2, 0, true, [1, 32])]));

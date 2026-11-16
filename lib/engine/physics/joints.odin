@@ -130,8 +130,20 @@ Physics_Joint :: struct {
 }
 
 register_joint_components :: proc(r: ^ecs.Registry) {
-	ecs.register_component(r, Fixed_Joint, FIXED_JOINT_ID, Fixed_Joint{DEFAULT_JOINT})
-	ecs.register_component(r, Point_Joint, POINT_JOINT_ID, Point_Joint{DEFAULT_JOINT})
+	ecs.register_component(
+		r,
+		Fixed_Joint,
+		FIXED_JOINT_ID,
+		Fixed_Joint{DEFAULT_JOINT},
+		category = "Physics/Joints",
+	)
+	ecs.register_component(
+		r,
+		Point_Joint,
+		POINT_JOINT_ID,
+		Point_Joint{DEFAULT_JOINT},
+		category = "Physics/Joints",
+	)
 	ecs.register_component(
 		r,
 		Hinge_Joint,
@@ -142,12 +154,14 @@ register_joint_components :: proc(r: ^ecs.Registry) {
 			max_angle = math.PI / 2,
 			spring_damping = 1,
 		},
+		category = "Physics/Joints",
 	)
 	ecs.register_component(
 		r,
 		Slider_Joint,
 		SLIDER_JOINT_ID,
 		Slider_Joint{joint = DEFAULT_JOINT, min = -1, max = 1, spring_damping = 1},
+		category = "Physics/Joints",
 	)
 	ecs.register_component(
 		r,
@@ -159,20 +173,23 @@ register_joint_components :: proc(r: ^ecs.Registry) {
 			max_distance = -1,
 			spring_damping = 1,
 		},
+		category = "Physics/Joints",
 	)
 	ecs.register_component(
 		r,
 		Cone_Joint,
 		CONE_JOINT_ID,
 		Cone_Joint{joint = DEFAULT_JOINT, half_angle = math.PI / 4},
+		category = "Physics/Joints",
 	)
 	ecs.register_component(
 		r,
 		Six_DOF_Joint,
 		SIX_DOF_JOINT_ID,
 		Six_DOF_Joint{joint = DEFAULT_JOINT, free_angular = true},
+		category = "Physics/Joints",
 	)
-	ecs.register_component(r, Physics_Joint, PHYSICS_JOINT_ID)
+	ecs.register_component(r, Physics_Joint, PHYSICS_JOINT_ID, category = ecs.NO_CATEGORY)
 }
 
 // JOINT_IDS are the joint components' IDs by kind.

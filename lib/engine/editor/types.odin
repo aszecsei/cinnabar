@@ -40,10 +40,11 @@ component_types :: proc(w: ^ecs.World, allocator: runtime.Allocator) -> link.Com
 			}
 		}
 		types[i] = {
-			id     = u64(info.id),
-			name   = info.name,
-			size   = u32(info.size),
-			fields = infos,
+			id       = u64(info.id),
+			name     = info.name,
+			category = info.category,
+			size     = u32(info.size),
+			fields   = infos,
 		}
 	}
 	return {types = types}

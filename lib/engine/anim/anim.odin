@@ -118,8 +118,8 @@ State :: struct {
 }
 
 register_components :: proc(r: ^ecs.Registry) {
-	ecs.register_component(r, Animator, ANIMATOR_ID, DEFAULT_ANIMATOR)
-	ecs.register_component(r, Root_Motion, ROOT_MOTION_ID)
+	ecs.register_component(r, Animator, ANIMATOR_ID, DEFAULT_ANIMATOR, category = "Animation")
+	ecs.register_component(r, Root_Motion, ROOT_MOTION_ID, category = "Animation")
 }
 
 // register makes the queries, the events' job buffer and the animate system. Call it after the world's components
