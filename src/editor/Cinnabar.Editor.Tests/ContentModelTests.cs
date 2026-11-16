@@ -68,6 +68,22 @@ public sealed class ContentModelTests : IDisposable
     const string Rock = "20202020202020202020202020202020";
     const string Moss = "21212121212121212121212121212121";
 
+    [Fact]
+    public void SettingsGroupBySectionAfterTheTopLevelOnes()
+    {
+        ImportSettingRow Make(string key) => new(new SettingInfo(key, ["a", "b"], "a", ""), "a", false);
+        var rows = new[] { Make("sampler.wrap"), Make("usage"), Make("mip_map.border"), Make("max_size"), Make("sampler.filter") };
+
+        var groups = ImportSettingsDraft.Group(rows);
+
+        Assert.Equal(["", "sampler", "mip_map"], groups.Select(g => g.Section));
+        Assert.Equal(["usage", "max_size"], groups[0].Rows.Select(r => r.Label));
+        Assert.Equal(["wrap", "filter"], groups[1].Rows.Select(r => r.Label));
+        Assert.Equal(["border"], groups[2].Rows.Select(r => r.Label));
+        Assert.Equal("sampler.filter", groups[1].Rows[1].Row.Info.Key);
+        Assert.Empty(ImportSettingsDraft.Group([]));
+    }
+
     EditorShell DraftShell()
     {
         var shell = TestShell.Open(_temp, null, null);
