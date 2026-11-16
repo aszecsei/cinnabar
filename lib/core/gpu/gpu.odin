@@ -151,6 +151,7 @@ Format :: enum u8 {
 	BGRA8_Unorm_Srgb,
 	RGB10A2_Unorm,
 	RG11B10_Float,
+	R16_Unorm,
 	R16_Float,
 	RG16_Float,
 	RGBA16_Float,
@@ -356,7 +357,7 @@ format_size :: proc(format: Format) -> int {
 		return 0
 	case .R8_Unorm:
 		return 1
-	case .RG8_Unorm, .R16_Float:
+	case .RG8_Unorm, .R16_Unorm, .R16_Float:
 		return 2
 	case .RGBA8_Unorm,
 	     .RGBA8_Unorm_Srgb,

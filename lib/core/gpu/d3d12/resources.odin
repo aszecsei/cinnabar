@@ -834,6 +834,8 @@ view_format :: proc(format: gpu.Format) -> dxgi.FORMAT {
 		return .R10G10B10A2_UNORM
 	case .RG11B10_Float:
 		return .R11G11B10_FLOAT
+	case .R16_Unorm:
+		return .R16_UNORM
 	case .R16_Float:
 		return .R16_FLOAT
 	case .RG16_Float:
