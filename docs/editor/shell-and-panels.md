@@ -117,7 +117,7 @@ The editor adds an entity of a common kind in one step (`EntityCatalog` in `Cinn
 | Content Browser | The content roots' folders and assets, from the cook daemon's index, with each asset's cook status |
 | Atmosphere | The scene's sky, sun, ambient light, night, fog and clouds, from its atmosphere's volume |
 | Weather Map | The clouds' weather map as an image: a brush that paints its channels, strokes that write the PNG, and a generator from noise |
-| Undo History | The undo stack, after a row for the scene as it opened. Clicking an entry undoes or redoes to it, but not while the game plays or an edit is open, as for Undo and Redo: the console gives the reason (`EditorShell.MoveHistoryTo`). Undone entries are dimmed, and the one that the file has is marked saved. |
+| Undo History | The undo stack, after a row for the scene as it opened. Clicking an entry undoes or redoes to it, but not while the game plays or an edit is open, as for Undo and Redo: the console gives the reason (`EditorShell.MoveHistoryTo`). Undone entries are dimmed, and the one that the file has is marked saved. An edit-mode behaviour's entry is indented under the entry that it follows, and a click on either stops after both. |
 | Console | The host's and the cook daemon's log |
 | Resource Monitor | Frame times, memory, GPU resource counts and script memory by module |
 | Profiler | A captured frame's zones on each thread and GPU queue, and the costs of each pass, system and script |

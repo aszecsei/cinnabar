@@ -473,7 +473,7 @@ public sealed partial class EditorShell
     {
         if (Scene != null && Host.Linked)
         {
-            Host.Send(SceneSnapshot.ToMessage(Scene.Expanded.Flat, AssetGuidOf(Scene.Path) ?? ""));
+            Host.Send(SceneSnapshot.ToMessage(Scene.Expanded.Flat, AssetGuidOf(Scene.Path) ?? "", ++_sceneTicket));
         }
     }
 
@@ -489,6 +489,9 @@ public sealed partial class EditorShell
                 return;
             case Link.Protocol.GameCommandResult result:
                 OnGameCommandResult(result);
+                return;
+            case Link.Protocol.BehaviourOperations batch:
+                OnBehaviourOperations(batch);
                 return;
             case Link.Protocol.SkySun sun:
                 OnSkySun(sun);
