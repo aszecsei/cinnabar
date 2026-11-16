@@ -1108,6 +1108,8 @@ gpu_format :: proc(f: format.Texture_Format) -> gpu.Format {
 		return .BC7_Unorm
 	case .BC7_Unorm_Srgb:
 		return .BC7_Unorm_Srgb
+	case .R16_Unorm:
+		return .R16_Unorm
 	}
 	return .Unknown
 }

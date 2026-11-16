@@ -15,6 +15,7 @@ Texture_Format :: enum u32 {
 	BC6H_Ufloat,
 	BC7_Unorm,
 	BC7_Unorm_Srgb,
+	R16_Unorm,
 }
 
 // Texture_Usage is how a texture is used, which its import setting `usage` names. It selects the format and the mip
@@ -25,6 +26,7 @@ Texture_Usage :: enum u32 {
 	Mask,
 	HDR,
 	Data,
+	Height,
 }
 
 // Texture_Dimension is what a texture blob's layers are. A cube's six layers are its faces, in the order +x, -x, +y, -y,
@@ -64,7 +66,7 @@ texture_layout :: proc() -> u64 {
 // texture_format_block is the size of a format's 4x4 block in bytes, or 0 for a format that is not block-compressed.
 texture_format_block :: proc "contextless" (format: Texture_Format) -> int {
 	switch format {
-	case .RGBA8_Unorm:
+	case .RGBA8_Unorm, .R16_Unorm:
 		return 0
 	case .BC1_Unorm, .BC1_Unorm_Srgb, .BC4_Unorm:
 		return 8
@@ -79,7 +81,26 @@ texture_mip_size :: proc "contextless" (format: Texture_Format, width, height: u
 	if block := texture_format_block(format); block != 0 {
 		return int((width + 3) / 4) * int((height + 3) / 4) * block
 	}
-	return int(width) * int(height) * 4
+	return int(width) * int(height) * texture_format_texel(format)
+}
+
+// texture_format_texel is the size of one texel in bytes of a format that is not block-compressed, or 0 for one that is.
+texture_format_texel :: proc "contextless" (format: Texture_Format) -> int {
+	switch format {
+	case .RGBA8_Unorm:
+		return 4
+	case .R16_Unorm:
+		return 2
+	case .BC1_Unorm,
+	     .BC1_Unorm_Srgb,
+	     .BC4_Unorm,
+	     .BC5_Unorm,
+	     .BC6H_Ufloat,
+	     .BC7_Unorm,
+	     .BC7_Unorm_Srgb:
+		return 0
+	}
+	return 0
 }
 
 // texture_chain_size is the size of one layer's mip chain.

@@ -163,6 +163,8 @@ texture_blobs_round_trip :: proc(t: ^testing.T) {
 	testing.expect_value(t, blob_bytes(data, blob.mips)[0], 9)
 	testing.expect_value(t, blob_string(data, blob.source_path), "game/a.png")
 	testing.expect_value(t, texture_mip_size(.RGBA8_Unorm, 3, 2), 24)
+	testing.expect_value(t, texture_mip_size(.R16_Unorm, 3, 2), 12)
+	testing.expect_value(t, texture_format_block(.R16_Unorm), 0)
 
 	// Mips of the wrong size are not a texture.
 	(^Texture_Blob)(raw_data(data)).mip_count = 2

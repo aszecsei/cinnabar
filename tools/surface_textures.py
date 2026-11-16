@@ -1,6 +1,6 @@
 # Writes the sample's generated textures (see docs/rendering/materials.md#parallax-occlusion-mapping,
-# docs/rendering/surfaces.md and docs/content/kinds/textures.md#textures): 8-bit grayscale or RGBA PNGs that a pattern
-# makes, so the repository holds no painted art. It uses the standard library only. `just sample-textures` runs it;
+# docs/rendering/surfaces.md and docs/content/kinds/textures.md#textures): grayscale or RGBA PNGs that a pattern makes,
+# so the repository holds no painted art. It uses the standard library only. `just sample-textures` runs it;
 # commit what it writes, with the .meta files.
 import math
 import random
@@ -9,16 +9,18 @@ import sys
 import zlib
 
 
-# write_png takes rows of one byte a texel, which is grayscale, or of four, which is RGBA.
-def write_png(path, width, height, rows):
+# write_png takes rows of one value a texel, which is grayscale, or of four, which is RGBA. A depth of 16 writes each
+# value as two bytes, big-endian, as PNG stores them.
+def write_png(path, width, height, rows, depth=8):
     def chunk(kind, data):
         body = kind + data
         return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
 
     color_type = 6 if len(rows[0]) == width * 4 else 0
-    raw = b"".join(b"\x00" + bytes(row) for row in rows)
+    pack = bytes if depth == 8 else lambda row: struct.pack(f">{len(row)}H", *row)
+    raw = b"".join(b"\x00" + pack(row) for row in rows)
     png = b"\x89PNG\r\n\x1a\n"
-    png += chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, color_type, 0, 0, 0))
+    png += chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, depth, color_type, 0, 0, 0))
     png += chunk(b"IDAT", zlib.compress(raw, 9))
     png += chunk(b"IEND", b"")
     with open(path, "wb") as f:
@@ -63,9 +65,10 @@ def smoothstep(a, b, x):
     return t * t * (3 - 2 * t)
 
 
+# terrain_height is 16 bits a texel, which its .meta cooks as a height texture: 8 bits would terrace at 30 m / 255.
 def terrain_height(size=256):
-    rows = [[int(round(lake_height((x + 0.5) / size, (y + 0.5) / size) * 255)) for x in range(size)] for y in range(size)]
-    return size, size, rows
+    rows = [[int(round(lake_height((x + 0.5) / size, (y + 0.5) / size) * 65535)) for x in range(size)] for y in range(size)]
+    return size, size, rows, 16
 
 
 # island_hole is the water's hole mask over the same rectangle, one texel a finest cell: 0 where the land is a little
@@ -140,8 +143,8 @@ TEXTURES = {
 def main(argv):
     root = argv[1] if len(argv) > 1 else "."
     for path, make in TEXTURES.items():
-        w, h, rows = make()
-        write_png(f"{root}/{path}", w, h, rows)
+        w, h, rows, *depth = make()
+        write_png(f"{root}/{path}", w, h, rows, *depth)
         print(path)
 
 

@@ -295,6 +295,13 @@ texture_thumbnail :: proc(
 	switch blob.format {
 	case .RGBA8_Unorm:
 		copy(decoded, texels)
+	case .R16_Unorm:
+		// Gray, from each texel's high byte.
+		for i in 0 ..< int(width) * int(height) {
+			v := texels[i * 2 + 1]
+			decoded[i * 4], decoded[i * 4 + 1], decoded[i * 4 + 2], decoded[i * 4 + 3] =
+				v, v, v, 255
+		}
 	case .BC1_Unorm, .BC1_Unorm_Srgb:
 		compressed = .BC1
 	case .BC4_Unorm:
