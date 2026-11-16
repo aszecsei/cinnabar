@@ -99,15 +99,20 @@ quality_keys_replace_the_presets_features :: proc(t: ^testing.T) {
 	s: Settings
 	problems := make([dynamic]string, context.temp_allocator)
 	parse(
-		"quality.preset = Low\nquality.ao = Off\nquality.shadows.ray_traced = true\nquality.fog = Loud\nquality.render_scale = 0.75\nquality.render_scale = half\nquality.lod_error = 3\nquality.mesh_pool = 512\nquality.mesh_pool = lots\n",
+		"quality.preset = Low\nquality.ao = Off\nquality.shadows.ray_traced = true\nquality.fog = Loud\nquality.render_scale = 0.75\nquality.render_scale = half\nquality.lod_error = 3\nquality.mesh_pool = 512\nquality.mesh_pool = lots\nquality.texture_anisotropy = 4\nquality.texture_anisotropy = 17\n",
 		&s,
 		&problems,
 	)
-	testing.expect_value(t, len(problems), 3)
+	testing.expect_value(t, len(problems), 4)
 	testing.expect_value(
 		t,
 		problems[2],
 		`9: quality.mesh_pool takes a whole number of MiB from 16 to 3584, not "lots"`,
+	)
+	testing.expect_value(
+		t,
+		problems[3],
+		`11: quality.texture_anisotropy takes a whole number from 1 to 16, not "17"`,
 	)
 	testing.expect_value(
 		t,
@@ -132,6 +137,15 @@ quality_keys_replace_the_presets_features :: proc(t: ^testing.T) {
 	)
 	testing.expect_value(t, render.clamp_quality({mesh_pool = 1}, caps).mesh_pool, 16)
 	testing.expect_value(t, render.clamp_quality({}, caps).mesh_pool, 1024)
+	testing.expect_value(t, q.texture_anisotropy, 4)
+	testing.expect_value(t, render.preset_quality(.Low, caps).texture_anisotropy, 2)
+	testing.expect_value(t, render.preset_quality(.Ultra, caps).texture_anisotropy, 16)
+	testing.expect_value(t, render.clamp_quality({}, caps).texture_anisotropy, 8)
+	testing.expect_value(
+		t,
+		render.clamp_quality({texture_anisotropy = 99}, caps).texture_anisotropy,
+		16,
+	)
 	testing.expect_value(t, q.shadows.level, render.Quality_Level.Low)
 	testing.expect(t, q.shadows.ray_traced)
 	testing.expect_value(t, q.ao.technique, render.Ao_Technique.Off)

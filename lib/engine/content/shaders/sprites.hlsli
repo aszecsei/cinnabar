@@ -31,7 +31,9 @@ struct Sprite_Record {
 	float4 uv_rect;
 	uint texture;
 	float softness;
-	uint2 padding;
+	// The bindless index of the sampler that its texture asks for.
+	uint sampler;
+	uint padding;
 };
 
 // Matches SCREEN_SPRITE_SIZE in lib/engine/render/sprites.odin: where sprite_bin.hlsl placed a sprite. center is in
@@ -47,7 +49,8 @@ struct Screen_Sprite {
 	float softness;
 	uint texture;
 	float lod;
-	uint2 padding;
+	uint sampler;
+	uint padding;
 };
 
 Sprite_Record load_sprite(uint records, uint index) {
@@ -78,13 +81,13 @@ float2 sprite_quad(Screen_Sprite s, float2 pixel) {
 
 // sprite_texel is a sprite's texture at a point of it: a tint in rgb and its coverage in a. Without a texture, a sprite
 // is a soft round puff.
-float4 sprite_texel(Screen_Sprite s, float2 q, uint sampler_index) {
+float4 sprite_texel(Screen_Sprite s, float2 q) {
 	if (s.texture == SPRITE_NO_TEXTURE) {
 		float c = saturate(1 - dot(q, q));
 		return float4(1, 1, 1, c * c);
 	}
 	float2 uv = s.uv_rect.xy + (float2(q.x, -q.y) * 0.5 + 0.5) * s.uv_rect.zw;
-	return cn_texture(s.texture).SampleLevel(cn_sampler(sampler_index), uv, s.lod);
+	return cn_texture(s.texture).SampleLevel(cn_sampler(s.sampler), uv, s.lod);
 }
 
 // sprite_alpha is a sprite's opacity at a point of it, faded where it nears the opaque surface behind it.

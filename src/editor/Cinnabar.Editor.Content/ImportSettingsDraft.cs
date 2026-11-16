@@ -5,6 +5,9 @@ namespace Cinnabar.Editor.Content;
 /// <summary>An import setting as the content browser edits it: its value, or null while the assets differ, and whether the draft changed it.</summary>
 public sealed record ImportSettingRow(SettingInfo Info, string? Value, bool Changed);
 
+/// <summary>Import settings of one section, as the content browser shows them under its header: Section is "" for the top-level settings.</summary>
+public sealed record ImportSettingGroup(string Section, IReadOnlyList<(string Label, ImportSettingRow Row)> Rows);
+
 /// <summary>
 /// The import settings that the selected files will have (see docs/editor/shell-and-panels.md#content-browser), until Apply
 /// sends them to the daemon, as a change can mean a long cook. It shows the settings that all of the files take, each with
@@ -67,6 +70,41 @@ public sealed class ImportSettingsDraft(AssetIndex index)
             rows.Add(new ImportSettingRow(info, values.Count == 1 ? values[0] : null, false));
         }
         return rows;
+    }
+
+    /// <summary>
+    /// Groups settings by the section in their key, as in "mip_map.border": the top-level settings come first, then each
+    /// section in the order that it first shows. A label is the key without its section.
+    /// </summary>
+    public static IReadOnlyList<ImportSettingGroup> Group(IEnumerable<ImportSettingRow> rows)
+    {
+        var top = new List<(string, ImportSettingRow)>();
+        var sections = new List<(string Name, List<(string, ImportSettingRow)> Rows)>();
+        foreach (var row in rows)
+        {
+            var key = row.Info.Key;
+            var dot = key.IndexOf('.');
+            if (dot < 0)
+            {
+                top.Add((key, row));
+                continue;
+            }
+            var name = key[..dot];
+            var at = sections.FindIndex(s => s.Name == name);
+            if (at < 0)
+            {
+                sections.Add((name, []));
+                at = sections.Count - 1;
+            }
+            sections[at].Rows.Add((key[(dot + 1)..], row));
+        }
+        var groups = new List<ImportSettingGroup>();
+        if (top.Count > 0)
+        {
+            groups.Add(new ImportSettingGroup("", top));
+        }
+        groups.AddRange(sections.Select(s => new ImportSettingGroup(s.Name, s.Rows)));
+        return groups;
     }
 
     /// <summary>Sets a value for all of the files. A value that each has already is no change.</summary>

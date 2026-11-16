@@ -173,6 +173,8 @@ Emitter_Record :: struct {
 	scene_anchor:    [3]f32,
 	instances:       u32,
 	id:              u32,
+	// The bindless index of the sampler that its texture asks for.
+	sampler:         u32,
 }
 
 // Particle_Constants matches Particle_Constants in particles.hlsli, the update pass's pass constants.
@@ -283,7 +285,7 @@ Mesh_Particle_Push :: struct {
 	draws:              u32,
 }
 
-#assert(size_of(Emitter_Record) == 200 && size_of(Particle_Constants) <= 256)
+#assert(size_of(Emitter_Record) == 204 && size_of(Particle_Constants) <= 256)
 
 // Particle_Frame is what one frame's particle passes need, in frame memory.
 @(private)
@@ -701,8 +703,9 @@ step_slot :: proc(
 			continue
 		}
 		texture := u32(SPRITE_NO_TEXTURE)
+		texture_sampler_settings: format.Texture_Sampler
 		if t, ready := resident_texture(&r.residency, em.texture); ready {
-			texture = gpu.read_index(t.texture)
+			texture, texture_sampler_settings = gpu.read_index(t.texture), t.sampler
 		}
 		em_modules := format.effect_modules(data, em)
 		spawned := u32(min(spawn, int(rng.count)))
@@ -736,6 +739,7 @@ step_slot :: proc(
 				shape = u32(em.shape),
 				shape_size = em.shape_size,
 				texture = texture,
+				sampler = texture_sampler(r, texture_sampler_settings),
 				flipbook = em.flipbook,
 				flipbook_rate = em.flipbook_rate,
 				softness = em.softness,

@@ -523,52 +523,67 @@ float frame_exposure() {
 	return cn_buffer(frame.exposure).Load<float>(0);
 }
 
+// Cn_Texture is a material's texture parameter: its texture's bindless index, and the sampler that the texture asks for
+// (see docs/content/kinds/textures.md#textures). The runtime writes both into the parameter block.
+struct Cn_Texture {
+	uint index;
+	uint sampler;
+};
+
+Texture2D<float4> cn_texture(Cn_Texture t) {
+	return cn_texture(t.index);
+}
+
+SamplerState cn_sampler(Cn_Texture t) {
+	return cn_sampler(t.sampler);
+}
+
 #if MATERIAL_HIT
 // At a ray's hit there are no derivatives: each sample takes one level, which the ray's cone picks (see
 // load_hit_triangle). cn_hit_lod is the level for a texture of one texel; a texture's size adds to it.
 static float cn_hit_lod = 0;
 
-float cn_hit_level(uint texture_index) {
+float cn_hit_level(Cn_Texture t) {
 	uint width, height;
-	cn_texture(texture_index).GetDimensions(width, height);
+	cn_texture(t).GetDimensions(width, height);
 	return max(cn_hit_lod + 0.5 * log2(float(width) * float(height)), 0);
 }
 
-float4 cn_sample(uint texture_index, float2 uv) {
-	return cn_texture(texture_index).SampleLevel(cn_sampler(frame.sampler_index), uv, cn_hit_level(texture_index));
+float4 cn_sample(Cn_Texture t, float2 uv) {
+	return cn_texture(t).SampleLevel(cn_sampler(t), uv, cn_hit_level(t));
 }
 
-float4 cn_sample_grad(uint texture_index, float2 uv, float2 uv_dx, float2 uv_dy) {
-	return cn_sample(texture_index, uv);
+float4 cn_sample_grad(Cn_Texture t, float2 uv, float2 uv_dx, float2 uv_dy) {
+	return cn_sample(t, uv);
 }
 #else
-// cn_sample samples a material's texture with the frame's sampler. A material samples through it, so a path that
-// shades without derivatives gives its own, as hit shading does.
-float4 cn_sample(uint texture_index, float2 uv) {
-	return cn_texture(texture_index).Sample(cn_sampler(frame.sampler_index), uv);
+// cn_sample samples a material's texture with its sampler. A material samples through it, so a path that shades
+// without derivatives gives its own, as hit shading does.
+float4 cn_sample(Cn_Texture t, float2 uv) {
+	return cn_texture(t).Sample(cn_sampler(t), uv);
 }
 
 // cn_sample_grad samples with the derivatives given, for a sample inside a loop or a branch, where the pixel shader's
 // own derivatives are not defined.
-float4 cn_sample_grad(uint texture_index, float2 uv, float2 uv_dx, float2 uv_dy) {
-	return cn_texture(texture_index).SampleGrad(cn_sampler(frame.sampler_index), uv, uv_dx, uv_dy);
+float4 cn_sample_grad(Cn_Texture t, float2 uv, float2 uv_dx, float2 uv_dy) {
+	return cn_texture(t).SampleGrad(cn_sampler(t), uv, uv_dx, uv_dy);
 }
 #endif
 
 // cn_sample_level samples one mip, for a vertex shader, which has no derivatives, or a sample whose level the material
 // chooses.
-float4 cn_sample_level(uint texture_index, float2 uv, float level) {
-	return cn_texture(texture_index).SampleLevel(cn_sampler(frame.sampler_index), uv, level);
+float4 cn_sample_level(Cn_Texture t, float2 uv, float level) {
+	return cn_texture(t).SampleLevel(cn_sampler(t), uv, level);
 }
 
 // cn_normal_map reads a tangent-space normal from a two-channel normal map (BC5), which keeps x and y.
-float3 cn_normal_map(uint texture_index, float2 uv) {
-	float2 xy = cn_sample(texture_index, uv).xy * 2 - 1;
+float3 cn_normal_map(Cn_Texture t, float2 uv) {
+	float2 xy = cn_sample(t, uv).xy * 2 - 1;
 	return float3(xy, sqrt(saturate(1 - dot(xy, xy))));
 }
 
-float3 cn_normal_map_level(uint texture_index, float2 uv, float level) {
-	float2 xy = cn_sample_level(texture_index, uv, level).xy * 2 - 1;
+float3 cn_normal_map_level(Cn_Texture t, float2 uv, float level) {
+	float2 xy = cn_sample_level(t, uv, level).xy * 2 - 1;
 	return float3(xy, sqrt(saturate(1 - dot(xy, xy))));
 }
 

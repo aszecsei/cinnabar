@@ -44,7 +44,7 @@ A patches material's vertex shaders build their vertices in `material_patch.hlsl
 
 ## Holes
 
-The hole mask is a `mask` texture over the rectangle, `uv0`'s space, cooked with `filter = box` (see [Content pipeline](../content/kinds/textures.md#textures)), so that a mip's texel is the share of its finest texels that are not holes, and reads 0 only where every one is. A quad reads the mask's mip of its level at its middle, so a quad of a coarse level is a hole only where every finest cell under it is, with a mask of one texel for each finest cell; a mask of another size is read at the nearest footprint. A quad that is a hole gives its triangles' vertices a NaN position, which the rasterizer does not draw. Hole edges are therefore the finest cells' edges. The default is the white texture, which has no holes.
+The hole mask is a `mask` texture over the rectangle, `uv0`'s space, cooked with `[mip_map] kernel = box` (see [Content pipeline](../content/kinds/textures.md#textures)), so that a mip's texel is the share of its finest texels that are not holes, and reads 0 only where every one is. A quad reads the mask's mip of its level at its middle, so a quad of a coarse level is a hole only where every finest cell under it is, with a mask of one texel for each finest cell; a mask of another size is read at the nearest footprint. A quad that is a hole gives its triangles' vertices a NaN position, which the rasterizer does not draw. Hole edges are therefore the finest cells' edges. The default is the white texture, which has no holes.
 
 ## Materials for patches
 

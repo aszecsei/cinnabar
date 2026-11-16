@@ -64,6 +64,8 @@ opaque_materials_draw_meshlets_where_the_device_has_mesh_shaders :: proc(t: ^tes
 		gpu_create_graphics_pipeline = null.create_graphics_pipeline,
 		gpu_update_graphics_pipeline = null.update_graphics_pipeline,
 		gpu_destroy_pipeline         = null.destroy_pipeline,
+		gpu_create_sampler           = null.create_sampler,
+		gpu_destroy_sampler          = null.destroy_sampler,
 	}
 	r := new(Renderer)
 	defer free(r)
@@ -190,6 +192,8 @@ skinned_bins_draw_with_vertex_pulling :: proc(t: ^testing.T) {
 		gpu_create_graphics_pipeline = null.create_graphics_pipeline,
 		gpu_update_graphics_pipeline = null.update_graphics_pipeline,
 		gpu_destroy_pipeline         = null.destroy_pipeline,
+		gpu_create_sampler           = null.create_sampler,
+		gpu_destroy_sampler          = null.destroy_sampler,
 	}
 	r := new(Renderer)
 	defer free(r)

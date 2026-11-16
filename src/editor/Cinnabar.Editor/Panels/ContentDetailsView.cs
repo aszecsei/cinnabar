@@ -213,9 +213,16 @@ sealed class ContentDetailsView : StackPanel
         {
             row("Settings", new TextBlock { Text = $"Of the {draft.Assets.Count} selected files", Classes = { "dim" } });
         }
-        foreach (var setting in rows)
+        foreach (var group in ImportSettingsDraft.Group(rows))
         {
-            row(setting.Changed ? "\u2022 " + FieldValues.Humanize(setting.Info.Key) : FieldValues.Humanize(setting.Info.Key), SettingEditor(setting));
+            if (group.Section != "")
+            {
+                Children.Add(new TextBlock { Text = FieldValues.Humanize(group.Section), FontWeight = FontWeight.SemiBold, Margin = new Thickness(0, 6, 0, 0) });
+            }
+            foreach (var (label, setting) in group.Rows)
+            {
+                row(setting.Changed ? "\u2022 " + FieldValues.Humanize(label) : FieldValues.Humanize(label), SettingEditor(setting));
+            }
         }
     }
 

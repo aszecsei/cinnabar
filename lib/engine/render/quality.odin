@@ -4,6 +4,7 @@ import "core:mem"
 
 import "cinnabar:core"
 import "cinnabar:core/gpu"
+import format "cinnabar:engine/asset/format"
 
 // Quality (see docs/rendering/quality.md#quality) is what the frame may cost: each feature's technique and its level,
 // which a game's settings menu chooses and the hardware limits. The volumes' settings are the look, and stay the same
@@ -124,25 +125,28 @@ Reflection_Quality :: struct {
 // Quality is plain data, so it lives in Game_State and a code reload keeps it. Its zero value is the cheapest frame
 // at full resolution, with every feature that can be off off; preset_quality and default_quality give the others.
 Quality :: struct {
-	shadows:      Shadow_Quality,
-	ao:           Ao_Quality,
-	gi:           Gi_Quality,
-	reflections:  Reflection_Quality,
-	fog:          Quality_Level,
+	shadows:            Shadow_Quality,
+	ao:                 Ao_Quality,
+	gi:                 Gi_Quality,
+	reflections:        Reflection_Quality,
+	fog:                Quality_Level,
 	// The clouds' march, shadow map and history (CLOUD_PARAMS, see clouds.odin).
-	clouds:       Quality_Level,
-	aa:           Aa_Technique,
+	clouds:             Quality_Level,
+	aa:                 Aa_Technique,
 	// The share of the frame's width and height that the scene renders at, from MIN_RENDER_SCALE to 1, 0 giving 1.
 	// Temporal AA upscales the scene to the frame's size (see docs/rendering/anti-aliasing.md#upscaling); with the
 	// other techniques, the output pass stretches it.
-	render_scale: f32,
+	render_scale:       f32,
 	// The mesh shader path's level of detail: the largest error, in pixels, that a simplified part of a mesh may show,
 	// from MIN_LOD_ERROR to MAX_LOD_ERROR, 0 giving 1 (see docs/rendering/gpu-scene.md#mesh-shader-path).
-	lod_error:    f32,
+	lod_error:          f32,
 	// The budget of the pool of mesh pages in MiB, from MIN_MESH_POOL to MAX_MESH_POOL and at most a quarter of the
 	// device's video memory, 0 giving DEFAULT_MESH_POOL: the meshlets and vertices of paged meshes that are resident at
 	// once (see docs/rendering/assets.md#mesh-pages).
-	mesh_pool:    u32,
+	mesh_pool:          u32,
+	// The most anisotropy that a texture's sampler takes, from 1 to MAX_TEXTURE_ANISOTROPY, 0 giving
+	// DEFAULT_TEXTURE_ANISOTROPY: it caps each texture's own (see docs/content/kinds/textures.md#textures).
+	texture_anisotropy: u8,
 }
 
 // Caps are what the device can do that quality depends on, from Platform_API.gpu_features and gpu_adapter.
@@ -183,6 +187,16 @@ MESH_POOLS := [Quality_Level]u32 {
 MIN_MESH_POOL :: 16
 MAX_MESH_POOL :: 3584
 DEFAULT_MESH_POOL :: 1024
+
+// The most anisotropy that a texture's sampler takes at each level.
+@(rodata)
+TEXTURE_ANISOTROPIES := [Quality_Level]u8 {
+	.Low    = 2,
+	.Medium = 4,
+	.High   = 8,
+	.Ultra  = 16,
+}
+DEFAULT_TEXTURE_ANISOTROPY :: 8
 
 // The video memory below which default_quality picks each preset. Unknown memory picks High.
 QUALITY_LOW_MEMORY :: 4 << 30
@@ -234,6 +248,7 @@ preset_quality :: proc(preset: Quality_Preset, caps: Caps) -> Quality {
 		render_scale = 1,
 		lod_error = LOD_ERRORS[level],
 		mesh_pool = min(MESH_POOLS[level], max_mesh_pool(caps)),
+		texture_anisotropy = TEXTURE_ANISOTROPIES[level],
 	}
 }
 
@@ -309,6 +324,8 @@ clamp_quality :: proc(q: Quality, caps: Caps) -> Quality {
 		MIN_MESH_POOL,
 		max_mesh_pool(caps),
 	)
+	q.texture_anisotropy =
+		q.texture_anisotropy > 0 ? clamp(q.texture_anisotropy, 1, format.MAX_TEXTURE_ANISOTROPY) : DEFAULT_TEXTURE_ANISOTROPY
 	return q
 }
 

@@ -369,7 +369,8 @@ material_block :: proc(data: []byte, guid: format.Guid) -> (b: Material_Block, o
 	return
 }
 
-// add_block adds a parameter block to the table, with its textures' bindless indices, and gives its offset.
+// add_block adds a parameter block to the table, with its textures' bindless indices and their samplers', and gives its
+// offset. A texture that is not resident yet samples its default with a default sampler.
 @(private)
 add_block :: proc(r: ^Renderer, table: ^Material_Table, b: Material_Block) -> u32 {
 	// Blocks start at 16 bytes, so the Params struct loads aligned.
@@ -380,14 +381,16 @@ add_block :: proc(r: ^Renderer, table: ^Material_Table, b: Material_Block) -> u3
 	}
 	for t in b.textures {
 		index := gpu.read_index(r.materials.defaults[t.default])
+		sampler: format.Texture_Sampler
 		if t.guid != {} {
 			if texture, ready := resident_texture(&r.residency, t.guid); ready {
-				index = gpu.read_index(texture.texture)
+				index, sampler = gpu.read_index(texture.texture), texture.sampler
 			} else {
 				table.waiting = true
 			}
 		}
-		(^u32)(&table.bytes[offset + t.offset])^ = index
+		slot := (^[2]u32)(&table.bytes[offset + t.offset])
+		slot^ = {index, texture_sampler(r, sampler)}
 	}
 	return offset
 }

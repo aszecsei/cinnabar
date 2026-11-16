@@ -613,7 +613,7 @@ Sampler_Desc :: struct {
 	filter:     Filter,
 	mip_filter: Filter,
 	address:    Address_Mode,
-	// 0 or 1 disables anisotropic filtering. The maximum is 16.
+	// 0 or 1 disables anisotropic filtering. The maximum is 16. It needs Linear filter, and a comparison sampler has none.
 	anisotropy: u8,
 	// Anything but Always makes a comparison sampler: SampleCmp compares its reference value with each texel by this,
 	// and filters the results, as shadow maps need. Shaders get it with cn_comparison_sampler.

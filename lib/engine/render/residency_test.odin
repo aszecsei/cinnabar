@@ -114,6 +114,7 @@ resident_textures_are_created_as_their_blobs_say :: proc(t: ^testing.T) {
 				layer_count = layers,
 				size = {8, 8},
 				mip_count = 4,
+				sampler = {wrap = .Clamp, filter = .Nearest, anisotropy = 4},
 				mips = make([]byte, chain * int(layers), context.temp_allocator),
 			},
 			context.temp_allocator,
@@ -172,6 +173,11 @@ resident_textures_are_created_as_their_blobs_say :: proc(t: ^testing.T) {
 	testing.expect(t, now_ready)
 	testing.expect_value(t, texture.dimension, format.Texture_Dimension.Cube)
 	testing.expect_value(t, texture.layer_count, 6)
+	testing.expect_value(
+		t,
+		texture.sampler,
+		format.Texture_Sampler{wrap = .Clamp, filter = .Nearest, anisotropy = 4},
+	)
 	_, now_ready = resident_texture(r, array, .D2_Array)
 	testing.expect(t, now_ready)
 	_, now_ready = resident_texture(r, plain)

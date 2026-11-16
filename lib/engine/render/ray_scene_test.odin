@@ -149,6 +149,8 @@ a_material_has_a_hit_pipeline_only_with_ray_query :: proc(t: ^testing.T) {
 		gpu_create_compute_pipeline  = null.create_compute_pipeline,
 		gpu_update_compute_pipeline  = null.update_compute_pipeline,
 		gpu_destroy_pipeline         = null.destroy_pipeline,
+		gpu_create_sampler           = null.create_sampler,
+		gpu_destroy_sampler          = null.destroy_sampler,
 	}
 	r := new(Renderer)
 	defer free(r)
@@ -260,6 +262,8 @@ a_failed_frame_builds_the_accels_again :: proc(t: ^testing.T) {
 		gpu_destroy_accel    = null.destroy_accel,
 		gpu_destroy_texture  = null.destroy_texture,
 		gpu_destroy_pipeline = null.destroy_pipeline,
+		gpu_create_sampler   = null.create_sampler,
+		gpu_destroy_sampler  = null.destroy_sampler,
 	}
 	r := new(Renderer)
 	defer free(r)
@@ -354,6 +358,8 @@ a_built_mesh_accel_is_compacted :: proc(t: ^testing.T) {
 		gpu_destroy_accel    = null.destroy_accel,
 		gpu_destroy_texture  = null.destroy_texture,
 		gpu_destroy_pipeline = null.destroy_pipeline,
+		gpu_create_sampler   = null.create_sampler,
+		gpu_destroy_sampler  = null.destroy_sampler,
 	}
 	r := new(Renderer)
 	defer free(r)
@@ -487,6 +493,8 @@ hit_shading_bins_the_hits_and_dispatches_each_bin_indirectly :: proc(t: ^testing
 		gpu_destroy_accel           = null.destroy_accel,
 		gpu_create_compute_pipeline = null.create_compute_pipeline,
 		gpu_destroy_pipeline        = null.destroy_pipeline,
+		gpu_create_sampler          = null.create_sampler,
+		gpu_destroy_sampler         = null.destroy_sampler,
 	}
 	r := new(Renderer)
 	defer free(r)

@@ -217,7 +217,7 @@ public sealed class CloudsTests : IDisposable
         var expected = "# cinnabar asset metadata. Keep this file next to its asset (see docs/content/identity-and-cooking.md#identity).\n" +
             "guid = 57bed8c5e4eac9bb2c03476331afd35b\n" +
             "usage = data\n" +
-            "mips = false\n";
+            "\n[mip_map]\nenabled = false\n";
 
         Assert.Equal(expected, WeatherMapFile.MetaText(MapGuid));
         Assert.Equal(32, WeatherMapFile.NewGuid().Length);

@@ -93,6 +93,8 @@ the_transparent_passes_match_their_pipelines :: proc(t: ^testing.T) {
 		gpu_update_graphics_pipeline = null.update_graphics_pipeline,
 		gpu_create_compute_pipeline  = null.create_compute_pipeline,
 		gpu_destroy_pipeline         = null.destroy_pipeline,
+		gpu_create_sampler           = null.create_sampler,
+		gpu_destroy_sampler          = null.destroy_sampler,
 		gpu_create_upscaler          = null.create_upscaler,
 		gpu_destroy_upscaler         = null.destroy_upscaler,
 	}

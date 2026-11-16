@@ -71,6 +71,8 @@ impostors_take_bins_of_their_own_and_draw_with_the_impostor_passes :: proc(t: ^t
 		gpu_create_graphics_pipeline = null.create_graphics_pipeline,
 		gpu_update_graphics_pipeline = null.update_graphics_pipeline,
 		gpu_destroy_pipeline         = null.destroy_pipeline,
+		gpu_create_sampler           = null.create_sampler,
+		gpu_destroy_sampler          = null.destroy_sampler,
 	}
 	r := new(Renderer)
 	defer free(r)

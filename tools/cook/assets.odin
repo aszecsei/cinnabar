@@ -94,6 +94,20 @@ initial_settings :: proc(kind: format.Asset_Kind, path: string) -> []format.Meta
 	return nil
 }
 
+// Moved_Setting is an import setting that has another key now: in a section, as `section.key`.
+Moved_Setting :: struct {
+	old, new: string,
+}
+
+// moved_settings are the settings of an asset kind that moved, which check_settings fails on.
+moved_settings :: proc(kind: format.Asset_Kind) -> []Moved_Setting {
+	#partial switch kind {
+	case .Texture:
+		return MOVED_TEXTURE_SETTINGS
+	}
+	return nil
+}
+
 find_setting :: proc(settings: []Setting_Info, key: string) -> (Setting_Info, bool) {
 	for s in settings {
 		if s.key == key {
@@ -104,11 +118,28 @@ find_setting :: proc(settings: []Setting_Info, key: string) -> (Setting_Info, bo
 }
 
 // check_settings checks an asset's import settings with its importer. An unknown setting is a warning, and a value
-// that the setting does not take is an error.
+// that the setting does not take, or a setting that has moved, is an error.
 check_settings :: proc(a: Asset_Source, problems: ^Problems) -> bool {
 	meta_path := fmt.tprintf("%s%s", a.path, format.META_EXTENSION)
 	ok := true
-	for setting in a.meta.settings {
+	settings: for setting in a.meta.settings {
+		for moved in moved_settings(a.kind) {
+			if moved.old == setting.key {
+				section, key := format.meta_section(moved.new)
+				report_error(
+					problems,
+					meta_path,
+					0,
+					0,
+					"%s is now %s in [%s]",
+					moved.old,
+					key,
+					section,
+				)
+				ok = false
+				continue settings
+			}
+		}
 		info, known := find_setting(import_settings(a.kind), setting.key)
 		if !known {
 			report_warning(problems, meta_path, 0, 0, "unknown setting %q", setting.key)

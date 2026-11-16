@@ -142,13 +142,14 @@ texture_blobs_round_trip :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(mips), (2 + 1 + 1) * 16)
 	mips[0] = 9
 	contents := Texture_Contents {
-		guid        = guid,
-		key         = 3,
-		format      = .BC7_Unorm_Srgb,
-		usage       = .Color,
-		size        = {8, 4},
-		mip_count   = 3,
-		mips        = mips,
+		guid = guid,
+		key = 3,
+		format = .BC7_Unorm_Srgb,
+		usage = .Color,
+		size = {8, 4},
+		mip_count = 3,
+		sampler = {wrap = .Mirror, filter = .Nearest, mip_filter = .Linear, anisotropy = 8},
+		mips = mips,
 		source_path = "game/a.png",
 	}
 	data := aligned(texture_write(contents, context.temp_allocator))
@@ -159,12 +160,23 @@ texture_blobs_round_trip :: proc(t: ^testing.T) {
 		return
 	}
 	testing.expect_value(t, blob.size, [2]u32{8, 4})
+	testing.expect_value(t, blob.sampler, contents.sampler)
 	testing.expect_value(t, blob.mips.offset % BLOB_ALIGN, 0)
 	testing.expect_value(t, blob_bytes(data, blob.mips)[0], 9)
 	testing.expect_value(t, blob_string(data, blob.source_path), "game/a.png")
 	testing.expect_value(t, texture_mip_size(.RGBA8_Unorm, 3, 2), 24)
 	testing.expect_value(t, texture_mip_size(.R16_Unorm, 3, 2), 12)
 	testing.expect_value(t, texture_format_block(.R16_Unorm), 0)
+
+	// A sampler out of range is not a texture.
+	(^Texture_Blob)(raw_data(data)).sampler.anisotropy = MAX_TEXTURE_ANISOTROPY + 1
+	_, ok = texture_view(data)
+	testing.expect(t, !ok)
+	(^Texture_Blob)(raw_data(data)).sampler.anisotropy = 0
+	(^Texture_Blob)(raw_data(data)).sampler.wrap = Texture_Wrap(3)
+	_, ok = texture_view(data)
+	testing.expect(t, !ok)
+	(^Texture_Blob)(raw_data(data)).sampler.wrap = .Repeat
 
 	// Mips of the wrong size are not a texture.
 	(^Texture_Blob)(raw_data(data)).mip_count = 2
@@ -287,6 +299,65 @@ meta_files_name_their_subassets :: proc(t: ^testing.T) {
 	// A sub-asset's value must be a GUID.
 	_, ok = meta_parse("guid = " + TEST_GUID + "\nmesh.door = 12\n", context.temp_allocator)
 	testing.expect(t, !ok)
+}
+
+@(test)
+meta_files_group_settings_in_sections :: proc(t: ^testing.T) {
+	other :: "ffeeddccbbaa99887766554433221100"
+	text ::
+		"# a comment\nguid = " +
+		TEST_GUID +
+		"\nusage = mask\nmesh.door = " +
+		other +
+		"\n\n[mip_map]\nkernel = box\n[sampler]\n wrap = clamp \n"
+	meta, ok := meta_parse(text, context.temp_allocator)
+	testing.expect(t, ok)
+	testing.expect_value(t, len(meta.settings), 3)
+	testing.expect_value(t, len(meta.subassets), 1)
+	kernel, _ := meta_value(meta, "mip_map.kernel")
+	testing.expect_value(t, kernel, "box")
+	wrap, _ := meta_value(meta, "sampler.wrap")
+	testing.expect_value(t, wrap, "clamp")
+	usage, _ := meta_value(meta, "usage")
+	testing.expect_value(t, usage, "mask")
+
+	// The writer puts each section after the top-level lines, in the order that the settings first name it.
+	written := meta_text(
+		meta.guid,
+		text,
+		{
+			{"sampler.wrap", "clamp"},
+			{"usage", "mask"},
+			{"mip_map.kernel", "box"},
+			{"sampler.filter", "nearest"},
+		},
+		allocator = context.temp_allocator,
+	)
+	testing.expect_value(
+		t,
+		written,
+		"# a comment\nguid = " +
+		TEST_GUID +
+		"\nusage = mask\nmesh.door = " +
+		other +
+		"\n\n[sampler]\nwrap = clamp\nfilter = nearest\n\n[mip_map]\nkernel = box\n",
+	)
+	again, again_ok := meta_parse(written, context.temp_allocator)
+	testing.expect(t, again_ok)
+	testing.expect_value(t, len(again.settings), 4)
+
+	// A section's name and its keys are identifiers, so a guid or a sub-asset cannot follow a section.
+	bad := []string {
+		"guid = " + TEST_GUID + "\n[sampler]\nmesh.door = " + other + "\n",
+		"guid = " + TEST_GUID + "\n[sampler]\nguid = " + other + "\n",
+		"guid = " + TEST_GUID + "\n[mip map]\nkernel = box\n",
+		"guid = " + TEST_GUID + "\n[sampler\nwrap = clamp\n",
+		"guid = " + TEST_GUID + "\n[]\nwrap = clamp\n",
+	}
+	for b in bad {
+		_, bad_ok := meta_parse(b, context.temp_allocator)
+		testing.expectf(t, !bad_ok, "%q parses", b)
+	}
 }
 
 @(test)

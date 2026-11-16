@@ -240,7 +240,7 @@ materials_cook_a_variant_for_each_switch_set_and_instances_resolve :: proc(t: ^t
 			testing.expect(t, format.material_code(data, blob, 1, pass, .Mesh) != nil)
 		}
 		testing.expect_value(t, blob.default_switches, 0)
-		// tint, roughness, then the albedo's index: 16 + 4 + 4 bytes, in a block of 32.
+		// tint, roughness, then the albedo's index and its sampler's: 16 + 4 + 8 bytes, in a block of 32.
 		testing.expect_value(t, len(format.blob_bytes(data, blob.block)), 32)
 		testing.expect_value(t, format.material_textures(data, blob)[0].offset, 20)
 	}

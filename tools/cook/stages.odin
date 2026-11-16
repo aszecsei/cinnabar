@@ -1268,9 +1268,20 @@ cook_stage_texture :: proc(w: ^Stage_Work, t: Stage_Texture, job: ^Stage_Job) ->
 		return .Failed
 	}
 	job.file = {size, modified, path}
+	// A stage's textures sample as a texture's settings default to, but for USD's wrap. Black, and a wrap that differs
+	// between the axes, clamp.
+	sampler := texture_sampler_of({})
+	switch {
+	case tex.wrap_s == .Repeat && tex.wrap_t == .Repeat:
+		sampler.wrap = .Repeat
+	case tex.wrap_s == .Mirror && tex.wrap_t == .Mirror:
+		sampler.wrap = .Mirror
+	case:
+		sampler.wrap = .Clamp
+	}
 	cook := Texture_Cook {
 		usage    = t.role.usage,
-		wrap     = tex.wrap_s != .Clamp && tex.wrap_t != .Clamp,
+		sampler  = sampler,
 		mips     = true,
 		max_size = strconv.parse_int(stage_setting(a, "texture_max_size")) or_else 4096,
 		channel  = t.role.channel,

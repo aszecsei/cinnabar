@@ -61,8 +61,8 @@ Sprite :: struct {
 	uv_rect:  [4]f32,
 }
 
-// Sprite_Record matches Sprite_Record in sprites.hlsli: a sprite, relative to the camera, with its texture's bindless
-// index, which a GPU pass that appends sprites writes too.
+// Sprite_Record matches Sprite_Record in sprites.hlsli: a sprite, relative to the camera, with the bindless indices of its
+// texture and of the sampler that the texture asks for, which a GPU pass that appends sprites writes too.
 @(private)
 Sprite_Record :: struct {
 	position: [3]f32,
@@ -73,7 +73,8 @@ Sprite_Record :: struct {
 	uv_rect:  [4]f32,
 	texture:  u32,
 	softness: f32,
-	padding:  [2]u32,
+	sampler:  u32,
+	padding:  u32,
 }
 
 // Sprite_Target is where a GPU pass appends the frame's sprites, with append_sprite in sprites.hlsli: the records and
@@ -307,11 +308,12 @@ begin_sprites :: proc(f: ^Frame, sprites: []Sprite, buffers: ^Sprite_Buffers) {
 	// Sprites come in runs that share a texture, such as an emitter's, so its lookup is kept from one to the next.
 	texture: format.Guid
 	index := u32(SPRITE_NO_TEXTURE)
+	sampler := texture_sampler(r, {})
 	for s, i in sprites {
 		if s.texture != texture {
-			texture, index = s.texture, SPRITE_NO_TEXTURE
+			texture, index, sampler = s.texture, SPRITE_NO_TEXTURE, texture_sampler(r, {})
 			if t, ready := resident_texture(&r.residency, s.texture); ready {
-				index = gpu.read_index(t.texture)
+				index, sampler = gpu.read_index(t.texture), texture_sampler(r, t.sampler)
 			}
 		}
 		records[i] = {
@@ -323,6 +325,7 @@ begin_sprites :: proc(f: ^Frame, sprites: []Sprite, buffers: ^Sprite_Buffers) {
 			uv_rect  = s.uv_rect != {} ? s.uv_rect : {0, 0, 1, 1},
 			texture  = index,
 			softness = s.softness,
+			sampler  = sampler,
 		}
 	}
 	sf.cpu = upload

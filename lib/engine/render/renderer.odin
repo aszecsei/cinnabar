@@ -79,6 +79,7 @@ Renderer :: struct {
 	surfaces:               Extractor,
 	volumes:                volume.Volumes,
 	materials:              Materials,
+	texture_samplers:       Texture_Samplers,
 	scene:                  Gpu_Scene,
 	lights:                 Lights,
 	shadows:                Shadow_Passes,
@@ -546,6 +547,7 @@ renderer_destroy :: proc(r: ^Renderer) {
 	cache_destroy(&r.textures, r.platform)
 	debug.destroy(&r.debug)
 	materials_destroy(&r.materials, r.platform)
+	texture_samplers_destroy(&r.texture_samplers, r.platform)
 	scene_destroy(&r.scene, r.platform)
 	lights_destroy(&r.lights, r.platform)
 	shadows_destroy(&r.shadows, r.platform)
@@ -579,6 +581,7 @@ renderer_destroy :: proc(r: ^Renderer) {
 draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	profile.scope_text(&r.platform.profile, "Build frame", .Render)
 	residency_set_mesh_pool(&r.residency, r.quality.mesh_pool)
+	texture_samplers_set_cap(r, r.quality.texture_anisotropy)
 	residency_update(&r.residency)
 	output :=
 		r.platform.gpu_output != nil ? r.platform.gpu_output() : gpu.Output{format = gpu.FRAME_TARGET_FORMAT}

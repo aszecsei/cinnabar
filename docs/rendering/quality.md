@@ -32,6 +32,7 @@ A volume says how far the ambient occlusion reaches; the quality says how many s
 | `render_scale` | `MIN_RENDER_SCALE` (0.5) to 1; 0 gives 1 | The scene's share of the frame's width and height, which temporal AA and FSR [upscale](anti-aliasing.md#upscaling) and the output pass otherwise stretches |
 | `lod_error` | `MIN_LOD_ERROR` (0.25) to `MAX_LOD_ERROR` (8) pixels; 0 gives 1 | The largest error that the mesh shader path's [levels of detail](gpu-scene.md#mesh-shader-path) may show: 2, 1.5, 1 and 0.5 pixels from Low to Ultra (`LOD_ERRORS`) |
 | `mesh_pool` | `MIN_MESH_POOL` (16) to `MAX_MESH_POOL` (3,584) MiB, and at most a quarter of the device's video memory; 0 gives 1,024 | The budget of the pool of [mesh pages](assets.md#mesh-pages): 256, 512, 1,024 and 2,048 MiB from Low to Ultra (`MESH_POOLS`). A change makes the pool again, and every page streams in again |
+| `texture_anisotropy` | 1 to `MAX_TEXTURE_ANISOTROPY` (16); 0 gives 8 | The most anisotropy that a texture's sampler takes: it caps each texture's own (see [Textures](../content/kinds/textures.md#textures)). 2, 4, 8 and 16 from Low to Ultra (`TEXTURE_ANISOTROPIES`) |
 
 - **Each enum lists only what exists**, so a menu never offers a choice that draws nothing. A menu offers `Fsr` where `Caps.upscalers` has it: `clamp_quality` gives temporal AA in its place elsewhere. `Reflection_Technique` has `Off`, `Probes`, `Screen` and `Ray_Traced`: each reflection technique adds its own value, with its preset and its clamp. `clamp_quality` gives `Screen` for `Ray_Traced` without `Ray_Query`.
 - **Presets:** `preset_quality(preset, caps)` puts every feature at one level, with GTAO, the screen cascades, the reflection probes at Low and the screen-space reflections above it, and temporal AA, a virtual shadow map from Medium up, and traced shadows, the split cascades and the traced reflections from High up where the device has `Ray_Query`. `quality_preset(q, caps)` names the preset that a quality is, or `Custom`.
@@ -120,6 +121,7 @@ The player's choice is in the [project settings](../overview/architecture.md#pro
 | `quality.render_scale` | A number from 0.5 to 1 |
 | `quality.lod_error` | A number of pixels from 0.25 to 8 |
 | `quality.mesh_pool` | A number of MiB from 16 to 3584 |
+| `quality.texture_anisotropy` | A whole number from 1 to 16 |
 
 - **Reading:** `project.quality(settings, caps)` starts from the preset, or from `default_quality` without one, and each other key replaces the preset's value for its feature. A fresh machine with no keys gets the defaults for its hardware.
 - **Saving:** `project.save_quality(platform, path, q, caps)` writes every key to the user's file through `Platform_API.file_write`, so the user's file alone gives the quality. It changes each key's line in place and keeps the file's other lines, as the editor's `ProjectSettings.Set` does. The next `project.refresh` reads it back.

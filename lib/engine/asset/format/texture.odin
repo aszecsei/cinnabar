@@ -37,6 +37,35 @@ Texture_Dimension :: enum u32 {
 	D2_Array,
 }
 
+// Texture_Wrap is what a texture's sampler does past its edges, and what its mips filter across them: its import
+// setting `[sampler] wrap`.
+Texture_Wrap :: enum u8 {
+	Repeat,
+	Clamp,
+	Mirror,
+}
+
+// Texture_Filter is how a texture's sampler blends texels, or mips: the nearest one, or the nearest ones weighted.
+Texture_Filter :: enum u8 {
+	Linear,
+	Nearest,
+}
+
+// MAX_TEXTURE_ANISOTROPY is the most anisotropy that a texture's sampler asks for, which is what D3D12 allows.
+MAX_TEXTURE_ANISOTROPY :: 16
+
+// Texture_Sampler is how a texture asks to be sampled: its import settings in `[sampler]` (see
+// docs/content/kinds/textures.md#textures). The zero value repeats and filters linearly, without anisotropy.
+Texture_Sampler :: struct {
+	wrap:       Texture_Wrap,
+	// Between texels, when the texture is magnified or minified.
+	filter:     Texture_Filter,
+	// Between mips.
+	mip_filter: Texture_Filter,
+	// 0 or 1 is none. The renderer's quality caps it.
+	anisotropy: u8,
+}
+
 // TEXTURE_SET_EXTENSION is the text source of a cube or an array that names its layers' images by GUID (see
 // docs/content/kinds/textures.md#texture-sets).
 TEXTURE_SET_EXTENSION :: ".texture_set"
@@ -53,6 +82,7 @@ Texture_Blob :: struct {
 	// Of each layer.
 	size:        [2]u32,
 	mip_count:   u32,
+	sampler:     Texture_Sampler,
 	// Each layer's whole mip chain, layer 0 first, each mip tightly packed, mip 0 first, as gpu_stream_texture takes it.
 	// It starts at BLOB_ALIGN.
 	mips:        Slice,
@@ -133,6 +163,7 @@ texture_view :: proc(data: []byte) -> (blob: ^Texture_Blob, ok: bool) {
 		}
 	}
 	if blob.format > max(Texture_Format) ||
+	   !texture_sampler_valid(blob.sampler) ||
 	   blob.mip_count == 0 ||
 	   blob.size.x == 0 ||
 	   blob.size.y == 0 {
@@ -161,6 +192,16 @@ texture_view :: proc(data: []byte) -> (blob: ^Texture_Blob, ok: bool) {
 	return blob, true
 }
 
+// texture_sampler_valid is whether a sampler's enums are in range and its anisotropy is at most MAX_TEXTURE_ANISOTROPY.
+texture_sampler_valid :: proc(s: Texture_Sampler) -> bool {
+	return(
+		s.wrap <= max(Texture_Wrap) &&
+		s.filter <= max(Texture_Filter) &&
+		s.mip_filter <= max(Texture_Filter) &&
+		s.anisotropy <= MAX_TEXTURE_ANISOTROPY \
+	)
+}
+
 Texture_Contents :: struct {
 	guid:        Guid,
 	key:         u64,
@@ -171,6 +212,7 @@ Texture_Contents :: struct {
 	layer_count: u32,
 	size:        [2]u32,
 	mip_count:   u32,
+	sampler:     Texture_Sampler,
 	// The layers' mip chains, as Texture_Blob.mips holds them.
 	mips:        []byte,
 	source_path: string,
@@ -196,6 +238,7 @@ texture_write :: proc(contents: Texture_Contents, allocator := context.allocator
 		layer_count = max(contents.layer_count, 1),
 		size = contents.size,
 		mip_count = contents.mip_count,
+		sampler = contents.sampler,
 		mips = mips,
 		source_path = source_path,
 	}

@@ -78,6 +78,8 @@ struct Emitter_Record {
 	float3 scene_anchor;
 	uint instances;
 	uint id;
+	// The bindless index of the sampler that its texture asks for.
+	uint sampler;
 };
 
 // Matches format.Effect_Module.

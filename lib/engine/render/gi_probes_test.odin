@@ -171,6 +171,8 @@ the_probes_update_on_the_compute_queue_and_pass_validation :: proc(t: ^testing.T
 		gpu_destroy_accel           = null.destroy_accel,
 		gpu_create_compute_pipeline = null.create_compute_pipeline,
 		gpu_destroy_pipeline        = null.destroy_pipeline,
+		gpu_create_sampler          = null.create_sampler,
+		gpu_destroy_sampler         = null.destroy_sampler,
 	}
 	r := new(Renderer)
 	defer free(r)

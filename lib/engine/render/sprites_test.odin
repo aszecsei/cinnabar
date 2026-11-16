@@ -53,10 +53,13 @@ sprite_frames_match_their_sprites :: proc(t: ^testing.T) {
 		gpu_destroy_buffer          = null.destroy_buffer,
 		gpu_create_compute_pipeline = null.create_compute_pipeline,
 		gpu_destroy_pipeline        = null.destroy_pipeline,
+		gpu_create_sampler          = null.create_sampler,
+		gpu_destroy_sampler         = null.destroy_sampler,
 	}
 	r := new(Renderer)
 	defer free(r)
 	r.platform = &platform
+	defer texture_samplers_destroy(&r.texture_samplers, &platform)
 	r.materials.defaults[.White] = platform.gpu_create_texture(
 		{size = {1, 1}, format = .RGBA8_Unorm, usage = {.Sampled}, label = "white"},
 		{255, 255, 255, 255},
