@@ -17,7 +17,7 @@ A script blob holds:
 | Header | The blob header, and flags (`Native`, `Behaviour`) |
 | Bytecode | The output of `luau_compile` |
 | Requires | Sorted pairs of require string and target GUID |
-| Fields | For a behaviour (flag `Behaviour`): the class name, and each field's name, kind and default, sorted by name. For an action (flag `Action`): the action's name, and its parameters in the same records. |
+| Fields | For a behaviour (flag `Behaviour`): the class name, and each field's name, kind and default, sorted by name, the category that the class names, and the flag `Edit_Mode` for a class that runs in the editor's Edit mode. For an action (flag `Action`): the action's name, and its parameters in the same records. |
 | Source path | The root's name and the path in the root. Error messages and tracebacks use it as the chunk name. |
 
 A scene blob holds a table of entities: the scene ID, the parent's scene ID, the name, the active flag, and slices of component and behaviour records. A component record has the stable ID and the name. A behaviour record has the script's GUID. Each has a slice of field records: the hash of the field's name, the name for messages, and the tagged value. The loader in `lib/engine/scene` matches the hashes to the fields of the registered types.

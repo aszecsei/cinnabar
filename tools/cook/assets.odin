@@ -178,8 +178,10 @@ Asset_Source :: struct {
 	dependencies: [dynamic]format.Guid,
 	// For a scene or a prefab, the assets that its flat entities name: what it looks like, which its dependencies do not say.
 	visual:       [dynamic]format.Guid,
-	// For a script that defines a behaviour, the class's name.
+	// For a script that defines a behaviour, the class's name, its category and whether it runs in Edit mode.
 	behaviour:    string,
+	category:     string,
+	edit_mode:    bool,
 	// For a script that defines an action, its name and its parameters, sorted by name.
 	action:       string,
 	params:       []cook_link.Action_Param,
@@ -246,6 +248,8 @@ uncarry :: proc(a: ^Asset_Source) {
 	clear(&a.subassets)
 	clear(&a.inputs)
 	a.behaviour = ""
+	a.category = ""
+	a.edit_mode = false
 	a.action = ""
 	a.params = nil
 	a.permutations = 0

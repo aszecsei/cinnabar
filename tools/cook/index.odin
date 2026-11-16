@@ -92,6 +92,8 @@ index_build :: proc(index: ^Index, pass: Pass, roots: []Root) {
 			path         = clone(a.name[len(root.name) + 1:], allocator),
 			status       = link_status(a.result),
 			behaviour    = clone(a.behaviour, allocator),
+			category     = clone(a.category, allocator),
+			edit_mode    = a.edit_mode,
 			action       = clone(a.action, allocator),
 			params       = clone_params(a.params, allocator),
 			permutations = u32(a.permutations),
@@ -371,6 +373,8 @@ asset_equal :: proc(a, b: cook_link.Asset) -> bool {
 	   a.errors != b.errors ||
 	   a.warnings != b.warnings ||
 	   a.behaviour != b.behaviour ||
+	   a.category != b.category ||
+	   a.edit_mode != b.edit_mode ||
 	   a.action != b.action ||
 	   a.parent != b.parent ||
 	   a.subasset != b.subasset ||

@@ -413,6 +413,76 @@ return Door`,
 }
 
 @(test)
+behaviours_get_their_options_in_the_blob :: proc(t: ^testing.T) {
+	tree := make_tree(
+		t,
+		{
+			{
+				"content/ring.luau",
+				`
+local Ring = Behaviour.define("Ring", {radius = Field.number(2)}, {edit_mode = true, category = "Tools/Layout"})
+return Ring`,
+			},
+			{"content/door.luau", `return Behaviour.define("Door")`},
+		},
+	)
+	defer remove_tree(tree)
+	options := tree_options(tree)
+	pass := cook(options, {.Script})
+	testing.expect(t, pass.ok)
+	data := tree_blob(t, tree, tree_guid(t, tree, "ring.luau"))
+	blob, ok := format.script_view(data)
+	testing.expect(t, ok)
+	if !ok {
+		return
+	}
+	testing.expect_value(t, blob.flags, format.Script_Flags{.Behaviour, .Edit_Mode})
+	testing.expect_value(t, format.blob_string(data, blob.category), "Tools/Layout")
+	// The index has the options, from the cook and from an up to date script.
+	for round in 0 ..< 2 {
+		if round == 1 {
+			pass = cook(options, {.Script})
+			testing.expect_value(t, pass.current[.Script], 2)
+		}
+		for a in pass.assets {
+			switch a.behaviour {
+			case "Ring":
+				testing.expect_value(t, a.category, "Tools/Layout")
+				testing.expect(t, a.edit_mode)
+			case "Door":
+				testing.expect_value(t, a.category, "")
+				testing.expect(t, !a.edit_mode)
+			case:
+				testing.expectf(t, false, "an asset with the behaviour %q", a.behaviour)
+			}
+		}
+	}
+	index: Index
+	index_build(&index, pass, options.roots[:])
+	defer index_destroy(&index)
+	for _, a in index.assets {
+		if a.behaviour == "Ring" {
+			testing.expect_value(t, a.category, "Tools/Layout")
+			testing.expect(t, a.edit_mode)
+		}
+	}
+}
+
+@(test)
+a_behaviour_option_of_the_wrong_type_is_a_cook_error :: proc(t: ^testing.T) {
+	tree := make_tree(
+		t,
+		{{"content/bad.luau", `return Behaviour.define("Bad", {}, {edit_mode = 1})`}},
+	)
+	defer remove_tree(tree)
+	errors: Errors
+	context.logger = capture_errors(&errors)
+	defer release_errors(&errors)
+	testing.expect(t, !cook(tree_options(tree), {.Script}).ok)
+	expect_error(t, &errors, "the option edit_mode of Bad takes a boolean")
+}
+
+@(test)
 actions_get_their_parameters_in_the_blob :: proc(t: ^testing.T) {
 	tree := make_tree(
 		t,

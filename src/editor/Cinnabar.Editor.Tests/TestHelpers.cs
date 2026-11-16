@@ -99,6 +99,8 @@ static class TestAssets
         uint errors = 0,
         uint warnings = 0,
         string behaviour = "",
+        string category = "",
+        bool editMode = false,
         Link.Cook.Setting[]? settings = null,
         string[]? dependencies = null,
         string parent = "",
@@ -112,7 +114,7 @@ static class TestAssets
         bool thumbnailReady = false,
         string action = "",
         Link.Cook.ActionParam[]? @params = null) =>
-        new(guid, kind, root, path, status, errors, warnings, behaviour, action, @params ?? [], settings ?? [], dependencies ?? [], parent, subasset, permutations, size ?? [0, 0], toolTexture, hotspots ?? [], generated, thumbnail, thumbnailReady);
+        new(guid, kind, root, path, status, errors, warnings, behaviour, category, editMode, action, @params ?? [], settings ?? [], dependencies ?? [], parent, subasset, permutations, size ?? [0, 0], toolTexture, hotspots ?? [], generated, thumbnail, thumbnailReady);
 }
 
 /// <summary>Editor shells over a scene file in a test's temp directory.</summary>

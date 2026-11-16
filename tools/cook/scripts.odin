@@ -50,8 +50,9 @@ Script_Source :: struct {
 	native_comment: bool,
 	// The resolved requires, sorted by path.
 	resolved:       [dynamic]Resolved_Require,
-	// The class that it defines, if it is a behaviour.
+	// The class that it defines, if it is a behaviour, and the options that the editor reads.
 	behaviour:      string,
+	options:        Class_Options,
 	// The action that it defines, if it is one, and its parameters, sorted by name.
 	action:         string,
 	params:         []cook_link.Action_Param,
@@ -87,6 +88,8 @@ cook_scripts :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass)
 			append(&a.dependencies, r.entry.target)
 		}
 		a.behaviour = s.behaviour
+		a.category = s.options.category
+		a.edit_mode = s.options.edit_mode
 		a.action = s.action
 		a.params = s.params
 	}
@@ -131,9 +134,9 @@ cook_scripts :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass)
 		key := script_key(options.config, s, dependency_hash(scripts, index) ~ definitions)
 		buffer: [32]u8
 		output := fmt.tprintf("%s/%s.blob", out_dir, format.guid_format(s.meta.guid, &buffer))
-		if cooked, behaviour, action, params := cooked_script(output);
+		if cooked, behaviour, options, action, params := cooked_script(output);
 		   cooked == key && !pass.force[s.meta.guid] {
-			s.behaviour, s.action, s.params = behaviour, action, params
+			s.behaviour, s.options, s.action, s.params = behaviour, options, action, params
 			settle(pass, s.asset, .Current)
 			continue
 		}
@@ -161,6 +164,7 @@ cook_scripts :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass)
 		class_name: string
 		fields: []format.Field_Entry
 		class_flag: Maybe(format.Script_Flag)
+		class_options: Class_Options
 		if s.defines_class {
 			if vm_state == .Closed {
 				vm_state =
@@ -179,7 +183,7 @@ cook_scripts :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass)
 				continue
 			}
 			schema_ok: bool
-			class_name, fields, class_flag, schema_ok = read_schema(&vm, index)
+			class_name, fields, class_flag, class_options, schema_ok = read_schema(&vm, index)
 			if !schema_ok {
 				settle(pass, s.asset, .Failed)
 				ok = false
@@ -194,6 +198,7 @@ cook_scripts :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass)
 			class_name,
 			fields,
 			class_flag,
+			class_options,
 			problems,
 		) {
 			settle(pass, s.asset, .Failed)
@@ -201,7 +206,7 @@ cook_scripts :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass)
 			continue
 		}
 		if class_flag == .Behaviour {
-			s.behaviour = class_name
+			s.behaviour, s.options = class_name, class_options
 		}
 		if class_flag == .Action {
 			s.action = class_name
@@ -575,13 +580,15 @@ param_kind :: proc(kind: format.Script_Field_Kind) -> cook_link.Action_Param_Kin
 	return .Number
 }
 
-// cooked_script reads the key of a cooked script, as cooked_script_key does, and its behaviour class or its action's
-// name and parameters, if any.
+// cooked_script reads the key of a cooked script, as cooked_script_key does, and its behaviour class and its options,
+// or its action's name and parameters, if any.
 cooked_script :: proc(
 	output: string,
 ) -> (
 	key: u64,
-	behaviour, action: string,
+	behaviour: string,
+	options: Class_Options,
+	action: string,
 	params: []cook_link.Action_Param,
 ) {
 	key = cooked_script_key(output)
@@ -590,7 +597,7 @@ cooked_script :: proc(
 	}
 	data, err := os.read_entire_file(output, context.temp_allocator)
 	if err != nil {
-		return 0, "", "", nil
+		return 0, "", {}, "", nil
 	}
 	// The blob's offsets assume the runtime's alignment.
 	aligned, _ := mem.alloc_bytes(len(data), format.BLOB_ALIGN, context.temp_allocator)
@@ -598,6 +605,10 @@ cooked_script :: proc(
 	if blob, ok := format.script_view(aligned); ok {
 		if .Behaviour in blob.flags {
 			behaviour = format.blob_string(aligned, blob.class_name)
+			options = {
+				category  = format.blob_string(aligned, blob.category),
+				edit_mode = .Edit_Mode in blob.flags,
+			}
 		}
 		if .Action in blob.flags {
 			action = format.blob_string(aligned, blob.class_name)
@@ -620,6 +631,7 @@ compile_script :: proc(
 	class_name: string,
 	fields: []format.Field_Entry,
 	class_flag: Maybe(format.Script_Flag),
+	options: Class_Options,
 	problems: ^Problems,
 ) -> bool {
 	bytecode := compile_source(config, string(s.source))
@@ -653,6 +665,9 @@ compile_script :: proc(
 	if flag, has := class_flag.?; has {
 		flags += {flag}
 	}
+	if options.edit_mode {
+		flags += {.Edit_Mode}
+	}
 	blob := format.script_write(
 		{
 			guid = s.meta.guid,
@@ -663,6 +678,7 @@ compile_script :: proc(
 			source_path = s.name,
 			class_name = class_name,
 			fields = fields,
+			category = options.category,
 		},
 		context.temp_allocator,
 	)

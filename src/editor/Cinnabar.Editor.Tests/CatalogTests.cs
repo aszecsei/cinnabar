@@ -102,6 +102,17 @@ public sealed class CatalogTests
     }
 
     [Fact]
+    public void ABehaviourWithACategoryIsInThatFolder()
+    {
+        var ring = TestAssets.Make("0123456789abcdef0123456789abcdef", AssetKind.Script, "scripts/ring.luau", behaviour: "Ring", category: "Tools/Layout", editMode: true);
+        var hidden = TestAssets.Make("fedcba9876543210fedcba9876543210", AssetKind.Script, "scripts/helper.luau", behaviour: "Helper", category: ComponentCatalog.NoCategory);
+        var item = Assert.Single(ComponentCatalog.Behaviours([ring, hidden]));
+        Assert.Equal("Tools/Layout", item.Category);
+        Assert.Equal("scripts/ring.luau", item.Detail?[(item.Detail.IndexOf('/') + 1)..]);
+        Assert.Equal(["Tools", "Layout", "Ring"], Catalog.Rows([item], "").Select(r => r.Label));
+    }
+
+    [Fact]
     public void AnEntitysIconIsItsMostTellingComponents()
     {
         Assert.Equal("camera", EntityIcons.For(["Transform", "Camera", "Audio_Listener", "Behaviours"]));
