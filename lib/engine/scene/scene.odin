@@ -27,7 +27,7 @@ Scene_Entity :: struct {
 // register_components registers the components that scenes use. Call it from the game's component registration
 // procedure, as with ecs.register_engine_components.
 register_components :: proc(r: ^ecs.Registry) {
-	ecs.register_component(r, Scene_Entity, SCENE_ENTITY_ID)
+	ecs.register_component(r, Scene_Entity, SCENE_ENTITY_ID, category = ecs.NO_CATEGORY)
 }
 
 // Problem is something in a scene that the world cannot use, by the scene ID of its entity. The loader logs each,

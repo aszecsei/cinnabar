@@ -65,8 +65,8 @@ Physics_Character :: struct {
 }
 
 register_character_components :: proc(r: ^ecs.Registry) {
-	ecs.register_component(r, Character, CHARACTER_ID, DEFAULT_CHARACTER)
-	ecs.register_component(r, Physics_Character, PHYSICS_CHARACTER_ID)
+	ecs.register_component(r, Character, CHARACTER_ID, DEFAULT_CHARACTER, category = "Physics")
+	ecs.register_component(r, Physics_Character, PHYSICS_CHARACTER_ID, category = ecs.NO_CATEGORY)
 }
 
 // character_size is the capsule that a Character makes: its radius and its whole height, which holds the two halves of

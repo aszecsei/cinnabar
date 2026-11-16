@@ -27,7 +27,7 @@ Behaviours :: struct {
 // register_components registers the components that the script runtime uses. Call it from the game's component
 // registration procedure, as with ecs.register_engine_components.
 register_components :: proc(r: ^ecs.Registry) {
-	ecs.register_component(r, Behaviours, BEHAVIOURS_ID)
+	ecs.register_component(r, Behaviours, BEHAVIOURS_ID, category = ecs.NO_CATEGORY)
 }
 
 @(private)

@@ -40,7 +40,7 @@ public sealed partial class EditorShell
     public EditorViewport ActiveViewport { get; private set; } = null!;
 
     /// <summary>
-    /// The viewport that the View tab shows and changes: the one that the mouse or the keyboard last used, the Game view
+    /// The viewport that the viewport commands show and change, from the command palette or a key binding: the one that the mouse or the keyboard last used, the Game view
     /// included. It is <see cref="ActiveViewport"/> until the Game view is used.
     /// </summary>
     public EditorViewport SettingsViewport { get; private set; } = null!;
@@ -164,7 +164,7 @@ public sealed partial class EditorShell
 
     /// <summary>
     /// Makes a viewport the one that the mouse or the keyboard last used. A scene view becomes the active one, unless a
-    /// gizmo drag holds the active one, and the one that the View tab acts on. The Game view becomes only the second.
+    /// gizmo drag holds the active one, and the one that the viewport commands act on. The Game view becomes only the second.
     /// </summary>
     public void ActivateViewport(EditorViewport viewport)
     {
@@ -179,7 +179,7 @@ public sealed partial class EditorShell
         SettingsViewport = viewport;
         Commands.InvalidateAll();
         ActiveViewportChanged?.Invoke();
-        // The ribbon's View tab shows the settings of the viewport it acts on.
+        // The viewport commands show the settings of the viewport that they act on.
         ViewportSettingsChanged?.Invoke();
     }
 
@@ -286,7 +286,7 @@ public sealed partial class EditorShell
     /// <summary>Whether a scene view may be toggled: not when it is the only one in.</summary>
     public bool CanToggleSceneView(int index) => SceneViews != ViewBit(index);
 
-    /// <summary>The scene view that the View tab's Projection is of: the one whose settings it shows, or the active one when that is the Game view.</summary>
+    /// <summary>The scene view that the Projection and 2D View commands act on: the settings viewport, or the active one when that is the Game view.</summary>
     public EditorViewport ProjectionViewport => SettingsViewport.HasCamera ? SettingsViewport : ActiveViewport;
 
     /// <summary>
@@ -397,7 +397,7 @@ public sealed partial class EditorShell
         Host.Send(new SetViewportSettings(index, viewport.Settings));
     }
 
-    // A viewport that hides cannot stay the one the tools or the View tab act in, while another one is shown.
+    // A viewport that hides cannot stay the one that the tools or the viewport commands act in, while another one is shown.
     void KeepActiveShown()
     {
         var active = ActiveViewport.IsShown ? ActiveViewport : ShownSceneViews.FirstOrDefault() ?? ActiveViewport;

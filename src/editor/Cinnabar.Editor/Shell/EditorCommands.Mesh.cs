@@ -23,9 +23,9 @@ static partial class EditorCommands
             Icon = "select",
             CanExecuteWhen = () => shell.Mesh.InMeshMode,
         });
-        ElementCommand(shell, MeshVertices, MeshElement.Vertices, "Vertices", "select", "Select and move vertices. 1 in the viewport.");
-        ElementCommand(shell, MeshEdges, MeshElement.Edges, "Edges", "local", "Select and move edges. 2 in the viewport.");
-        ElementCommand(shell, MeshFaces, MeshElement.Faces, "Faces", "mesh", "Select and move faces. 3 in the viewport.");
+        ElementCommand(shell, MeshVertices, MeshElement.Vertices, "Vertices", "vertex", "Select and move vertices. 1 in the viewport.");
+        ElementCommand(shell, MeshEdges, MeshElement.Edges, "Edges", "edge", "Select and move edges. 2 in the viewport.");
+        ElementCommand(shell, MeshFaces, MeshElement.Faces, "Faces", "face", "Select and move faces. 3 in the viewport.");
         commands.Register(new Command(MeshBlock, "Block", () =>
         {
             if (shell.Mesh.MeshTool == MeshTool.Create && shell.Mesh.Tools.Primitive == PrimitiveKind.Block)
@@ -39,7 +39,7 @@ static partial class EditorCommands
         })
         {
             Description = "Drag a rectangle on the grid to add a box a grid cell high: a new mesh file and entity, or faces of the edited mesh in mesh mode. Ctrl at the release makes a new entity anyway.",
-            Icon = "add",
+            Icon = "block",
             CanExecuteWhen = () => shell.CanEditScene,
             IsCheckedWhen = () => shell.Mesh.MeshTool == MeshTool.Create && shell.Mesh.Tools.Primitive == PrimitiveKind.Block,
         });

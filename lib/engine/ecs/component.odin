@@ -18,6 +18,10 @@ MAX_DEFAULTS_SIZE :: 8 * 1024
 // Component_Id is the stable ID of a component type. Cooked scenes, the editor link and scripts use it.
 Component_Id :: distinct u64
 
+// NO_CATEGORY is the category of a component that the engine adds and removes itself, such as a backend's handle or a
+// marker of the scene: the editor's Add Component menu leaves it out, as a field's editor:"-" tag leaves a field out.
+NO_CATEGORY :: "-"
+
 Component_Info :: struct {
 	id:       Component_Id,
 	type:     typeid,
@@ -27,6 +31,10 @@ Component_Info :: struct {
 	layout:   u64,
 	// Where the component's defaults are in Registry.defaults, or -1 for a component without, which starts as zeros.
 	defaults: int,
+	// Where the editor's Add Component menu offers the component (see docs/editor/shell-and-panels.md#properties): its
+	// folders with / between them, such as "Physics/Joints", or NO_CATEGORY. It is for people, so it is not part of
+	// the layout hash, and a change of it changes no scene.
+	category: string,
 }
 
 // Registry maps component types to their stable IDs. It holds typeids and strings from the DLL image, so it is
@@ -49,18 +57,25 @@ component_id :: proc "contextless" (name: string) -> Component_Id {
 // register_component adds T to the registry. The ID is the hash of T's package-qualified name, unless id is given.
 // A type without a name needs an explicit id. A duplicate type or ID is a programming error and panics. defaults, if
 // given, are what a scene starts the component from and what a reset field goes back to (see registry_defaults);
-// otherwise those are zeros.
+// otherwise those are zeros. category is the folder that the editor's Add Component menu offers the component in
+// (see Component_Info.category); without one it is the name of T's package, so a game's own components have a folder
+// of their own.
 register_component :: proc(
 	r: ^Registry,
 	$T: typeid,
 	id := Component_Id(0),
 	defaults: Maybe(T) = nil,
+	category := "",
 ) -> Component_Id {
 	ti := type_info_of(T)
 	name := "(unnamed)"
 	component := id
+	folder := category
 	if named, ok := ti.variant.(runtime.Type_Info_Named); ok {
 		name = named.name
+		if folder == "" {
+			folder = named.pkg
+		}
 		if component == 0 {
 			// FNV-1a is sequential, so this is component_id("package.Type") without joining the strings.
 			h := hash.fnv64a(transmute([]byte)named.pkg)
@@ -99,6 +114,7 @@ register_component :: proc(
 		align    = align_of(T),
 		layout   = layout.hash(T),
 		defaults = at,
+		category = folder,
 	}
 	r.count += 1
 	return component

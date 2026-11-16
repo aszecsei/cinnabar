@@ -9,7 +9,7 @@ namespace Cinnabar.Editor.Shell;
 /// <summary>
 /// How a viewport draws (see docs/editor/viewport.md#viewport): the debug view, the features that it turns off, the exposure
 /// offset, the icons and shapes of lights, volumes and cameras, and its quality in place of the game's. The game draws
-/// them while the editor is linked. Each viewport has its own, and the ribbon shows and changes the settings viewport's. The
+/// them while the editor is linked. Each viewport has its own, which its toolbar shows and changes; the commands change the settings viewport's. The
 /// settings are the user's, in <c>viewport.json</c>, so they stay across sessions.
 /// </summary>
 public sealed partial class EditorShell
@@ -21,40 +21,33 @@ public sealed partial class EditorShell
     /// <summary>The viewport's choice that keeps the game's quality.</summary>
     public const string GameQualityLabel = "Game's";
 
-    /// <summary>The viewport's quality presets, as the ribbon shows them, in <see cref="ViewportPreset"/>'s order.</summary>
+    /// <summary>The viewport's quality presets, as a viewport's Quality menu shows them, in <see cref="ViewportPreset"/>'s order.</summary>
     public static IReadOnlyList<string> ViewportPresetNames { get; } = [GameQualityLabel, "Low", "Medium", "High", "Ultra"];
 
-    /// <summary>The viewport's anti-aliasing, as the ribbon shows it, in <see cref="ViewportAa"/>'s order.</summary>
+    /// <summary>The viewport's anti-aliasing, as the menu shows it, in <see cref="ViewportAa"/>'s order.</summary>
     public static IReadOnlyList<string> ViewportAaNames { get; } = [GameQualityLabel, "Off", "TAA", "FXAA", "SMAA", "FSR"];
 
-    /// <summary>The viewport's global illumination, as the ribbon shows it, in <see cref="ViewportGi"/>'s order.</summary>
+    /// <summary>The viewport's global illumination, as the menu shows it, in <see cref="ViewportGi"/>'s order.</summary>
     public static IReadOnlyList<string> ViewportGiNames { get; } = [GameQualityLabel, "Off", "Screen Cascades", "Split Cascades", "Voxel Cones"];
 
-    /// <summary>The viewport's reflections, as the ribbon shows them, in <see cref="ViewportReflections"/>'s order.</summary>
+    /// <summary>The viewport's reflections, as the menu shows them, in <see cref="ViewportReflections"/>'s order.</summary>
     public static IReadOnlyList<string> ViewportReflectionsNames { get; } = [GameQualityLabel, "Off", "Probes", "Screen Space", "Ray Traced"];
 
-    /// <summary>A level of the viewport's quality, as the ribbon shows it, in <see cref="ViewportLevel"/>'s order.</summary>
+    /// <summary>A level of the viewport's quality, as the menu shows it, in <see cref="ViewportLevel"/>'s order.</summary>
     public static IReadOnlyList<string> ViewportLevelNames { get; } = [GameQualityLabel, "Low", "Medium", "High", "Ultra"];
 
-    /// <summary>The viewport's render scales, as the ribbon shows them, and their values; 0 keeps the game's.</summary>
+    /// <summary>The viewport's render scales, as the menu shows them, and their values; 0 keeps the game's.</summary>
     public static IReadOnlyList<(string Label, float Scale)> ViewportRenderScales { get; } =
         [(GameQualityLabel, 0), ("100%", 1), ("75%", 0.75f), ("67%", 2f / 3), ("50%", 0.5f)];
 
-    public string ViewportRenderScale =>
-        ViewportRenderScales.FirstOrDefault(s => Math.Abs(s.Scale - ViewportSettings.RenderScale) < 1e-3f).Label ?? GameQualityLabel;
+    public string ViewportRenderScale => ViewportOptions.RenderScale.Get(ViewportSettings);
 
-    public void SetViewportRenderScale(string label)
-    {
-        if (ViewportRenderScales.FirstOrDefault(s => s.Label == label) is { Label: not null } choice)
-        {
-            ViewportSettings = ViewportSettings with { RenderScale = choice.Scale };
-        }
-    }
+    public void SetViewportRenderScale(string label) => ViewportSettings = ViewportOptions.RenderScale.Set(ViewportSettings, label);
 
-    // How far one press of Exposure Up or Down moves the exposure, in stops.
-    const float ExposureStep = 0.5f;
+    /// <summary>How far one press of Brighter or Darker moves a viewport's exposure, in stops.</summary>
+    public const float ExposureStep = 0.5f;
 
-    /// <summary>How the viewport that the View tab acts on draws (see <see cref="SettingsViewport"/>).</summary>
+    /// <summary>How the viewport that the viewport commands act on draws (see <see cref="SettingsViewport"/>).</summary>
     public ViewportSettings ViewportSettings
     {
         get => SettingsViewport.Settings;
@@ -78,7 +71,7 @@ public sealed partial class EditorShell
     /// <summary>A viewport's settings changed, or another viewport is the active one.</summary>
     public event Action? ViewportSettingsChanged;
 
-    /// <summary>The debug views, by their names as the ribbon shows them.</summary>
+    /// <summary>The debug views, by their names as a viewport's Shading menu shows them.</summary>
     public static IReadOnlyList<string> DebugViewNames { get; } = [.. Enum.GetValues<DebugView>().Select(v => FieldValues.Humanize(SnakeCase(v.ToString())))];
 
     public static string DebugViewName(DebugView view) => DebugViewNames[(int)view];

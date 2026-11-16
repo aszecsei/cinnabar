@@ -70,6 +70,32 @@ register_components :: proc(r: ^Registry) {
 	register_component(r, Player)
 }
 
+// A component is offered in the folder that it registers in (see Component_Info.category): its package's without one,
+// and none for a component that the engine adds itself.
+@(test)
+components_register_in_a_category :: proc(t: ^testing.T) {
+	r := new(Registry)
+	defer free(r)
+	register_engine_components(r)
+	register_component(r, Health)
+	register_component(r, Velocity, category = "Motion/Linear")
+	register_component(r, Player, category = NO_CATEGORY)
+
+	testing.expect_value(t, registry_find_type(r, Health).category, "ecs")
+	testing.expect_value(t, registry_find_type(r, Velocity).category, "Motion/Linear")
+	testing.expect_value(t, registry_find_type(r, Player).category, NO_CATEGORY)
+	testing.expect_value(t, registry_find_type(r, Transform).category, "Transform")
+	testing.expect_value(t, registry_find_type(r, Name).category, NO_CATEGORY)
+	// The category is for people: it is not part of the layout, so a change of it keeps every cooked scene.
+	other := new(Registry)
+	defer free(other)
+	register_engine_components(other)
+	register_component(other, Health, category = "Elsewhere")
+	register_component(other, Velocity)
+	register_component(other, Player)
+	testing.expect_value(t, registry_layout_hash(other), registry_layout_hash(r))
+}
+
 @(test)
 handles_detect_reuse :: proc(t: ^testing.T) {
 	f := setup(t)

@@ -279,7 +279,7 @@ public sealed class ReflectionProbeTests : IDisposable
         var created = shell.Scene!.Scene.Entities.Single(e => e.Id > 3);
         Assert.Equal("Reflection Probe", created.Name);
         Assert.Contains(created.Components, c => c.Id == SceneEdits.ReflectionProbeId);
-        Assert.Equal("Create Reflection Probe", Assert.Single(shell.Scene.History).Label);
+        Assert.Equal("Add Reflection Probe", Assert.Single(shell.Scene.History).Label);
     }
 
     [Fact]

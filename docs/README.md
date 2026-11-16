@@ -66,7 +66,7 @@ Each layer's README also has an **Overview** of its packages and data flow, and 
 | Write a behaviour | [Scripting: Behaviours](scripting/behaviours.md) and [Unity mapping](scripting/api.md#unity-mapping) |
 | Expose a native type or function to scripts | [Scripting: API](scripting/api.md#the-entity-and-component-view) |
 | Add an asset kind | [Content: Identity and cooking](content/identity-and-cooking.md) and [Blobs and loading](content/blobs-and-loading.md) |
-| Add an editor panel or command | [Editor: Shell and panels](editor/shell-and-panels.md) |
+| Add an editor panel or command | [Editor: Users and workflows](editor/workflows.md#where-a-control-lives) for where it goes, then [Editor: Shell and panels](editor/shell-and-panels.md) |
 | Write a physics backend | [Physics: Backends](physics/backends.md) |
 | Play a sound, or write an audio backend | [Audio: Design](audio/design.md) and [Audio: Backends](audio/backends.md) |
 | Add a message to the editor or cook link | [Editor: Editor link](editor/link.md) and [Content: Cook daemon](content/daemon-and-operations.md#cook-link) |

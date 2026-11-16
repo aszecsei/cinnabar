@@ -6,10 +6,17 @@ namespace Cinnabar.Editor.Commands.Ribbon;
 /// </summary>
 public sealed record RibbonLayout(IReadOnlyList<RibbonCategory> Categories, IReadOnlyList<RibbonTab> Tabs)
 {
+    /// <summary>
+    /// The commands beside the tabs, which show whatever tab is selected and while the ribbon is collapsed: what every
+    /// kind of user reaches for at any moment, such as Play.
+    /// </summary>
+    public IReadOnlyList<string> QuickAccess { get; init; } = [];
+
     /// <summary>The problems that would make the layout show the wrong thing. An empty list means it is valid.</summary>
     public IReadOnlyList<string> Validate(CommandRegistry commands)
     {
         var errors = new List<string>();
+        errors.AddRange(QuickAccess.Where(id => commands.Find(id) == null).Select(id => $"ribbon: quick access: there is no command {id}"));
         var categories = new HashSet<string>();
         foreach (var category in Categories)
         {
@@ -122,21 +129,24 @@ public sealed record SmallStack(IReadOnlyList<string> Commands) : RibbonItem
 }
 
 /// <summary>A large button that runs its command, with an arrow that opens a menu of more commands.</summary>
-public sealed record SplitButton(string Command, IReadOnlyList<string> Menu) : RibbonItem
+public sealed record SplitButton(string Command, IReadOnlyList<MenuEntry> Menu) : RibbonItem
 {
-    internal override IEnumerable<string> Validate(CommandRegistry commands) => Missing(commands, Menu.Prepend(Command));
+    internal override IEnumerable<string> Validate(CommandRegistry commands) => Missing(commands, [Command]).Concat(MenuEntry.Validate(commands, Menu));
 }
 
-/// <summary>A large button that only opens a menu of commands.</summary>
-public sealed record Dropdown(string Label, string? Icon, IReadOnlyList<string> Menu) : RibbonItem
+/// <summary>A large button that only opens a menu of commands, which can have menus under labels in it.</summary>
+public sealed record Dropdown(string Label, string? Icon, IReadOnlyList<MenuEntry> Menu) : RibbonItem
 {
+    /// <summary>What the button is for, as its tooltip.</summary>
+    public string? Description { get; init; }
+
     internal override IEnumerable<string> Validate(CommandRegistry commands)
     {
-        if (Menu.Count == 0)
+        if (!MenuEntry.Commands(Menu).Any())
         {
             yield return $"the dropdown {Label} has no commands";
         }
-        foreach (var error in Missing(commands, Menu))
+        foreach (var error in MenuEntry.Validate(commands, Menu))
         {
             yield return error;
         }

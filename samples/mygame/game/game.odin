@@ -387,7 +387,7 @@ init :: proc(g: ^game.Game) {
 register_components :: proc(r: ^ecs.Registry) {
 	ecs.register_component(r, Spin, SPIN_ID)
 	ecs.register_component(r, Triangle, TRIANGLE_ID)
-	ecs.register_component(r, Lens, LENS_ID, DEFAULT_LENS)
+	ecs.register_component(r, Lens, LENS_ID, DEFAULT_LENS, category = "Volumes/Settings")
 }
 
 // register adds the sample's lens to the post-processing, before tone mapping, where a volume with a Lens reaches the

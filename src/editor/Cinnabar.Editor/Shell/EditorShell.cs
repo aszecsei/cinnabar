@@ -28,7 +28,9 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
     public WorldModel World { get; } = new();
     public ResourceStats Stats { get; } = new();
     public Selection Selection { get; } = new();
+    public OutlinerState Outliner { get; } = new();
     public EditorLayout Layout { get; }
+    public Workspaces Workspaces { get; }
     public RibbonLayout Ribbon { get; private set; }
 
     /// <summary>The ribbon's layout changed, as when the game's commands change.</summary>
@@ -51,6 +53,22 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
     }
 
     public event Action? RibbonCollapsedChanged;
+
+    /// <summary>The ribbon should show a tab, by its ID, as when a workspace becomes the active one.</summary>
+    public event Action<string>? RibbonTabRequested;
+
+    /// <summary>
+    /// Makes a workspace the active one (see docs/editor/shell-and-panels.md#workspaces): the panels as it was left, and
+    /// the ribbon on the tab that its work mostly uses.
+    /// </summary>
+    public void SwitchWorkspace(Workspace workspace)
+    {
+        if (Workspaces.Switch(workspace) && workspace.RibbonTab is { } tab)
+        {
+            RibbonTabRequested?.Invoke(tab);
+        }
+        Commands.InvalidateAll();
+    }
 
     public event Action? PaletteRequested;
 
@@ -82,8 +100,10 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
         };
         Autosave = new Autosave(options.AutosaveDirectory);
         CreateViewports();
-        Layout = new EditorLayout(CreatePanels(), new ViewportDocument(ViewportDocument.SceneId, "Scene", () => new SceneLayoutView(this)),
+        Layout = new EditorLayout(CreatePanels(), new ViewportDocument(ViewportDocument.SceneId, "Scene", () => new SceneDocumentView(this)),
             new ViewportDocument(ViewportDocument.GameId, "Game", () => new ViewportView(this, GameViewport)));
+        // The first workspace is the layout that the editor starts with, before a saved one replaces it.
+        Workspaces = new Workspaces(Layout, WorkspacePresets.Create(Layout.Save()));
         RestoreLayout();
 
         Host.Output += Console.Add;
@@ -240,6 +260,8 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
         Thumbnails.Restart(DateTime.UtcNow);
     }
 
+    // The layout file has the arrangement that the editor closed with, which is the active workspace's, and the
+    // workspaces' file says which workspace that is and has what the user made of the others.
     void RestoreLayout()
     {
         if (Settings.Read(EditorSettings.LayoutFileName) is not { } json)
@@ -249,10 +271,19 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
         if (LayoutFile.FromJson(json) is not { } file || !Layout.Restore(file))
         {
             Console.Add(LogLevel.Warning, $"layout: {Path.Combine(Settings.Directory, EditorSettings.LayoutFileName)} is not a layout of this editor, so the default layout is used");
+            return;
+        }
+        if (Settings.Read(Workspaces.FileName) is { } workspaces && !Workspaces.Load(workspaces))
+        {
+            Console.Add(LogLevel.Warning, $"layout: {Path.Combine(Settings.Directory, Workspaces.FileName)} is not the workspaces of this editor, so the layout is the {Workspaces.Active.Label} workspace's");
         }
     }
 
-    public void SaveLayout() => WriteSetting("layout", EditorSettings.LayoutFileName, Layout.Save().ToJson());
+    public void SaveLayout()
+    {
+        WriteSetting("layout", EditorSettings.LayoutFileName, Layout.Save().ToJson());
+        WriteSetting("layout", Workspaces.FileName, Workspaces.ToJson());
+    }
 
     // Writes a settings file. A file that cannot be written is a warning with its path, not a failure of what changed.
     void WriteSetting(string area, string name, string text)

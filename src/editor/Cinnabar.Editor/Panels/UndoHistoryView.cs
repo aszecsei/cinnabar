@@ -36,9 +36,10 @@ public sealed class UndoHistoryView : DockPanel
         _list.ItemTemplate = new FuncDataTemplate<HistoryRow>((row, _) => row == null ? new Control() : RowView(row));
         _list.SelectionChanged += (_, _) =>
         {
-            if (!_syncing && _list.SelectedItem is HistoryRow row)
+            if (!_syncing && _list.SelectedItem is HistoryRow row && !_shell.MoveHistoryTo(row.Position))
             {
-                _shell.Scene?.MoveTo(row.Position);
+                // A move that the shell refuses leaves the list on the entry that the scene is at.
+                Rebuild();
             }
         };
         new ViewSubscriptions(this, attached: Rebuild)

@@ -43,6 +43,12 @@ Audio_Listener :: struct {}
 // register_components registers the components that this package reads. Call it from the game's component registration
 // procedure.
 register_components :: proc(r: ^ecs.Registry) {
-	ecs.register_component(r, Audio_Source, AUDIO_SOURCE_ID, DEFAULT_AUDIO_SOURCE)
-	ecs.register_component(r, Audio_Listener, AUDIO_LISTENER_ID)
+	ecs.register_component(
+		r,
+		Audio_Source,
+		AUDIO_SOURCE_ID,
+		DEFAULT_AUDIO_SOURCE,
+		category = "Audio",
+	)
+	ecs.register_component(r, Audio_Listener, AUDIO_LISTENER_ID, category = "Audio")
 }

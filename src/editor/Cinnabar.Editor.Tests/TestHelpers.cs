@@ -3,7 +3,15 @@ using Cinnabar.Editor.Mesh;
 using Cinnabar.Editor.Shell;
 using Cinnabar.Editor.Tools;
 
+[assembly: AssemblyFixture(typeof(Cinnabar.Editor.Tests.ControlsThread))]
+
 namespace Cinnabar.Editor.Tests;
+
+/// <summary>Made once, before the tests: the controls' thread takes what Avalonia's controls share (see <see cref="Ui"/>).</summary>
+public sealed class ControlsThread
+{
+    public ControlsThread() => Ui.Run(() => new Avalonia.Controls.ListBox().Items.Add("claimed"));
+}
 
 /// <summary>A unique directory under the system temp directory, deleted with the test that owns it.</summary>
 sealed class TempDirectory(string name) : IDisposable
@@ -18,6 +26,64 @@ sealed class TempDirectory(string name) : IDisposable
         {
             Directory.Delete(Path, recursive: true);
         }
+    }
+}
+
+/// <summary>
+/// The one thread that the tests build Avalonia controls on. A control belongs to the thread that made it, and what the
+/// controls share, such as the manager of the collections that a list or a menu listens to, belongs to the thread that
+/// used it first. The runner has many threads, so a test that builds controls where it stands passes or fails by which
+/// test came first. <see cref="Run"/> does the work on the one thread and waits for it. <see cref="ControlsThread"/>
+/// claims what the controls share for the thread before any test runs, so a test that builds a list or a menu
+/// elsewhere fails every time, not some times.
+/// </summary>
+static class Ui
+{
+    static readonly System.Collections.Concurrent.BlockingCollection<Action> Work = [];
+    static readonly Thread Thread = Start();
+
+    static Thread Start()
+    {
+        var thread = new Thread(() =>
+        {
+            foreach (var work in Work.GetConsumingEnumerable())
+            {
+                work();
+            }
+        })
+        { IsBackground = true, Name = "test controls" };
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        return thread;
+    }
+
+    /// <summary>Runs a test's body on the controls' thread, and throws what it throws.</summary>
+    public static void Run(Action body)
+    {
+        if (Thread.CurrentThread == Thread)
+        {
+            body();
+            return;
+        }
+        System.Runtime.ExceptionServices.ExceptionDispatchInfo? error = null;
+        using var done = new ManualResetEventSlim();
+        Work.Add(() =>
+        {
+            try
+            {
+                body();
+            }
+            catch (Exception e)
+            {
+                error = System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(e);
+            }
+            finally
+            {
+                done.Set();
+            }
+        });
+        done.Wait();
+        error?.Throw();
     }
 }
 

@@ -23,5 +23,5 @@ DEFAULT_UI_DOCUMENT :: Ui_Document {
 // register_components registers the components that this package reads. Call it from the game's component registration
 // procedure.
 register_components :: proc(r: ^ecs.Registry) {
-	ecs.register_component(r, Ui_Document, UI_DOCUMENT_ID, DEFAULT_UI_DOCUMENT)
+	ecs.register_component(r, Ui_Document, UI_DOCUMENT_ID, DEFAULT_UI_DOCUMENT, category = "UI")
 }

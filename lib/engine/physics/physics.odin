@@ -52,9 +52,9 @@ Physics_Body :: struct {
 }
 
 register_components :: proc(r: ^ecs.Registry) {
-	ecs.register_component(r, Rigid_Body, RIGID_BODY_ID, DEFAULT_RIGID_BODY)
-	ecs.register_component(r, Collider, COLLIDER_ID, DEFAULT_COLLIDER)
-	ecs.register_component(r, Physics_Body, PHYSICS_BODY_ID)
+	ecs.register_component(r, Rigid_Body, RIGID_BODY_ID, DEFAULT_RIGID_BODY, category = "Physics")
+	ecs.register_component(r, Collider, COLLIDER_ID, DEFAULT_COLLIDER, category = "Physics")
+	ecs.register_component(r, Physics_Body, PHYSICS_BODY_ID, category = ecs.NO_CATEGORY)
 	register_joint_components(r)
 	register_character_components(r)
 }

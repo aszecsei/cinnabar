@@ -1,0 +1,221 @@
+using Avalonia;
+using Avalonia.Controls;
+using Avalonia.Layout;
+using Cinnabar.Editor.Ribbon;
+using Cinnabar.Editor.Shell;
+using Cinnabar.Editor.Tools;
+using CameraProjection = Cinnabar.Editor.Link.Protocol.CameraProjection;
+using DebugView = Cinnabar.Editor.Link.Protocol.DebugView;
+
+namespace Cinnabar.Editor.Viewport;
+
+/// <summary>
+/// A viewport's toolbar, at its top left (see docs/editor/viewport.md#toolbar): a menu for each part of what is the
+/// viewport's own. A scene view has View, which names how its camera looks and turns it; every viewport has Shading,
+/// which names what it shows in place of the lit scene, Show, the features and helpers that it draws, and Quality,
+/// which draws it at a quality in place of the game's; and a scene view has Layout, the views that the Scene shows.
+/// Each menu reads the viewport's state as it opens, and changes this viewport and no other. The Game view has no
+/// camera of the editor's, so it has no View and no Layout.
+/// </summary>
+public sealed class ViewportToolbar : StackPanel
+{
+    readonly EditorShell _shell;
+    readonly EditorViewport _viewport;
+    readonly TextBlock _viewText = new();
+    readonly TextBlock _shadingText = new();
+
+    public ViewportToolbar(EditorShell shell, EditorViewport viewport)
+    {
+        _shell = shell;
+        _viewport = viewport;
+        Orientation = Orientation.Horizontal;
+        Spacing = 2;
+        HorizontalAlignment = HorizontalAlignment.Left;
+        VerticalAlignment = VerticalAlignment.Top;
+        Margin = new Thickness(8);
+        if (viewport.HasCamera)
+        {
+            Children.Add(Button(_viewText, "Which way this view looks, and its projection.", ViewMenu()));
+        }
+        Children.Add(Button(_shadingText, "What this viewport shows: the lit scene, or a debug view of what makes it.", ShadingMenu()));
+        Children.Add(Button(new TextBlock { Text = "Show" }, "What this viewport draws: the renderer's features, the icons and shapes of lights, volumes and cameras, and its exposure.", ShowMenu()));
+        Children.Add(Button(new TextBlock { Text = "Quality" }, "Draw this viewport at a quality in place of the game's, and choose how its frame fits.", QualityMenu()));
+        if (viewport.HasCamera)
+        {
+            Children.Add(Button(CommandViews.Icon("layout", 13) ?? (Control)new TextBlock { Text = "Layout" }, "Which views the Scene shows: one, two side by side, or the four.", LayoutMenu()));
+        }
+        AttachedToVisualTree += (_, _) =>
+        {
+            if (_viewport.HasCamera)
+            {
+                _viewport.Camera.Changed += ShowView;
+                ShowView();
+            }
+            _shell.ViewportSettingsChanged += ShowShading;
+            ShowShading();
+        };
+        DetachedFromVisualTree += (_, _) =>
+        {
+            if (_viewport.HasCamera)
+            {
+                _viewport.Camera.Changed -= ShowView;
+            }
+            _shell.ViewportSettingsChanged -= ShowShading;
+        };
+        ShowShading();
+    }
+
+    void ShowView() => _viewText.Text = ViewGizmo.Label(_viewport.Camera);
+
+    void ShowShading() => _shadingText.Text = EditorShell.DebugViewName(_viewport.Settings.DebugView);
+
+    Link.Protocol.ViewportSettings Settings
+    {
+        get => _viewport.Settings;
+        set => _shell.ApplyViewportSettings(_viewport, value);
+    }
+
+    // A button that opens a menu. It never takes the focus, so the viewport keeps its keys.
+    static Button Button(Control content, string tip, LiveMenu menu)
+    {
+        content.VerticalAlignment = VerticalAlignment.Center;
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 5, Children = { content } };
+        if (CommandViews.Icon("chevron-down", 8) is { } chevron)
+        {
+            chevron.Opacity = 0.7;
+            row.Children.Add(chevron);
+        }
+        var button = new Button { Content = row, Classes = { "viewport-menu" }, Focusable = false, Flyout = menu.Flyout };
+        ToolTip.SetTip(button, tip);
+        return button;
+    }
+
+    // A command of the editor's, with its own label and state: what is not one viewport's, but belongs with the menu. It
+    // acts in this viewport.
+    void Command(LiveMenu menu, string id) =>
+        menu.Command(menu.Items, _shell.Commands.Get(id), _shell.KeyBindings.ShortcutOf(id), () => _shell.ActivateViewport(_viewport));
+
+    LiveMenu ViewMenu()
+    {
+        var menu = new LiveMenu();
+        foreach (var axis in Enum.GetValues<ViewAxis>())
+        {
+            menu.Radio(menu.Items, axis.ToString(), () => ViewGizmo.Aligned(_viewport.Camera) == axis, () =>
+            {
+                _shell.ActivateViewport(_viewport);
+                _shell.LookAlong(_viewport, axis);
+            });
+        }
+        menu.Items.Add(new Separator());
+        foreach (var projection in Enum.GetValues<CameraProjection>())
+        {
+            menu.Radio(menu.Items, projection.ToString(), () => _viewport.Camera.Projection == projection, () =>
+            {
+                _shell.ActivateViewport(_viewport);
+                _shell.SetProjection(_viewport, projection);
+            }, projection == CameraProjection.Orthographic
+                ? "Draw the view without perspective, as a plan or an elevation is drawn. Orbiting it makes it a perspective view."
+                : "Draw the view with perspective.");
+        }
+        menu.Item(menu.Items, "2D View", () =>
+        {
+            _shell.ActivateViewport(_viewport);
+            _shell.Show2D(_viewport);
+        }, "Look at the scene as a 2D game's camera does: without perspective, along +z, with +x to the right and +y up.");
+        menu.Items.Add(new Separator());
+        Command(menu, EditorCommands.FrameSelected);
+        Command(menu, EditorCommands.FrameScene);
+        Command(menu, EditorCommands.OrbitSelection);
+        return menu;
+    }
+
+    LiveMenu ShadingMenu()
+    {
+        var menu = new LiveMenu();
+        void View(ItemCollection items, DebugView view) =>
+            menu.Radio(items, EditorShell.DebugViewName(view), () => Settings.DebugView == view, () => Settings = Settings with { DebugView = view });
+        View(menu.Items, DebugView.Lit);
+        menu.Items.Add(new Separator());
+        foreach (var (label, views) in ViewportOptions.DebugViewGroups)
+        {
+            var group = new MenuItem { Header = label };
+            foreach (var view in views)
+            {
+                View(group.Items, view);
+            }
+            // The group that has the view that shows is marked, so the view is found again.
+            menu.OnOpening(() => group.Icon = views.Contains(Settings.DebugView) ? CommandViews.Icon("visible", 14) : null);
+            menu.Items.Add(group);
+        }
+        return menu;
+    }
+
+    LiveMenu ShowMenu()
+    {
+        var menu = new LiveMenu();
+        void Toggle(ViewportToggle toggle) =>
+            menu.Check(menu.Items, toggle.Label, () => toggle.IsOn(Settings), () => Settings = toggle.Set(Settings, !toggle.IsOn(Settings)), toggle.Description);
+        foreach (var feature in ViewportOptions.Features)
+        {
+            Toggle(feature);
+        }
+        menu.Items.Add(new Separator());
+        Toggle(ViewportOptions.Icons);
+        Choice(menu, ViewportOptions.Shapes);
+        menu.Items.Add(new Separator());
+        var exposure = menu.Submenu(menu.Items, () => Settings.ExposureOffset == 0 ? "Exposure" : $"Exposure ({Settings.ExposureOffset:+0.#;-0.#} stops)");
+        menu.Item(exposure.Items, "Brighter", () => Settings = Settings with { ExposureOffset = Settings.ExposureOffset + EditorShell.ExposureStep }, "Add half a stop to this viewport's exposure.");
+        menu.Item(exposure.Items, "Darker", () => Settings = Settings with { ExposureOffset = Settings.ExposureOffset - EditorShell.ExposureStep }, "Take half a stop from this viewport's exposure.");
+        menu.Item(exposure.Items, "Reset", () => Settings = Settings with { ExposureOffset = 0 }, "Show the exposure that the volumes give, with no offset.", () => Settings.ExposureOffset != 0);
+        menu.Items.Add(new Separator());
+        menu.Check(menu.Items, "Frame Statistics", () => _viewport.Session.ShowStats, () =>
+        {
+            _viewport.Session.ShowStats = !_viewport.Session.ShowStats;
+            _shell.Commands.InvalidateAll();
+        }, "Show the frame rates and the adapter over this viewport.");
+        Toggle(ViewportOptions.ShadingStats);
+        return menu;
+    }
+
+    // A choice as a menu under its label and its value, with the option that the viewport has marked.
+    void Choice(LiveMenu menu, ViewportChoice choice)
+    {
+        var parent = menu.Submenu(menu.Items, () => $"{choice.Label}: {choice.Get(Settings)}", choice.Description);
+        foreach (var option in choice.Options)
+        {
+            menu.Radio(parent.Items, option, () => choice.Get(Settings) == option, () => Settings = choice.Set(Settings, option));
+        }
+    }
+
+    LiveMenu QualityMenu()
+    {
+        var menu = new LiveMenu();
+        foreach (var choice in ViewportOptions.QualityChoices)
+        {
+            Choice(menu, choice);
+        }
+        menu.Items.Add(new Separator());
+        var frame = menu.Submenu(menu.Items, () => $"Frame Size: {(_viewport.Session.Scale == ViewportScale.Fit ? "Fit" : "100%")}",
+            "Fit the frame to the viewport, or show one frame pixel per screen pixel.");
+        menu.Radio(frame.Items, "Fit", () => _viewport.Session.Scale == ViewportScale.Fit, () => _viewport.Session.Scale = ViewportScale.Fit);
+        menu.Radio(frame.Items, "100%", () => _viewport.Session.Scale == ViewportScale.Actual, () => _viewport.Session.Scale = ViewportScale.Actual);
+        return menu;
+    }
+
+    LiveMenu LayoutMenu()
+    {
+        var menu = new LiveMenu();
+        foreach (var preset in ScenePreset.All)
+        {
+            menu.Radio(menu.Items, preset.Name, () => _shell.SceneViews == preset.Views, () => _shell.SetSceneViews(preset.Views));
+        }
+        menu.Items.Add(new Separator());
+        for (var i = 0; i < EditorViewport.SceneViews; i++)
+        {
+            var index = i;
+            menu.Check(menu.Items, _shell.Viewports[index].Title, () => _shell.SceneViews.HasFlag((SceneViewSet)(1 << index)), () => _shell.ToggleSceneView(index),
+                "Show or hide this view in the Scene. One view always stays.", () => _shell.CanToggleSceneView(index));
+        }
+        return menu;
+    }
+}

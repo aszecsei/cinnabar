@@ -116,8 +116,14 @@ Nav_Agent_State :: struct {
 // register_components registers Nav_Mesh_Volume, Nav_Path, Nav_Agent and Nav_Agent_State. Call it with the engine's
 // components, in init and on_reload.
 register_components :: proc(r: ^ecs.Registry) {
-	ecs.register_component(r, Nav_Mesh_Volume, NAV_MESH_VOLUME_ID, format.DEFAULT_NAV_MESH_VOLUME)
-	ecs.register_component(r, Nav_Path, NAV_PATH_ID)
-	ecs.register_component(r, Nav_Agent, NAV_AGENT_ID, DEFAULT_NAV_AGENT)
-	ecs.register_component(r, Nav_Agent_State, NAV_AGENT_STATE_ID)
+	ecs.register_component(
+		r,
+		Nav_Mesh_Volume,
+		NAV_MESH_VOLUME_ID,
+		format.DEFAULT_NAV_MESH_VOLUME,
+		category = "Navigation",
+	)
+	ecs.register_component(r, Nav_Path, NAV_PATH_ID, category = "Navigation")
+	ecs.register_component(r, Nav_Agent, NAV_AGENT_ID, DEFAULT_NAV_AGENT, category = "Navigation")
+	ecs.register_component(r, Nav_Agent_State, NAV_AGENT_STATE_ID, category = ecs.NO_CATEGORY)
 }

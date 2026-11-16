@@ -17,7 +17,8 @@ namespace Cinnabar.Editor.Panels;
 /// indented by depth. A tree control with one item per entity would not scale to a large world. Dragging a row onto
 /// another reparents it, and onto the empty space below the rows makes it a root. A row also drags onto an entity
 /// field in the properties panel, and a script from the content browser drags onto a row to add its behaviour. Ctrl and Shift select more than one row. Each row of a scene entity has a toggle that
-/// hides it in the viewport and one that locks it against picking, which apply to its descendants too.
+/// hides it in the viewport and one that locks it against picking, which apply to its descendants too. A row has an
+/// icon for what its entity is, by its components, and the button beside the filter adds an entity of a common kind.
 /// </summary>
 public sealed class OutlinerView : DockPanel
 {
@@ -31,9 +32,10 @@ public sealed class OutlinerView : DockPanel
     readonly TextBox _filter = new() { PlaceholderText = "Filter by name, entity or component", Classes = { "outliner-filter" } };
     readonly ListBox _list = new() { Classes = { "outliner" }, SelectionMode = SelectionMode.Multiple };
     readonly TextBlock _empty;
-    // Rows start expanded. The set holds the ones that the user collapsed.
-    readonly HashSet<ulong> _collapsed = [];
     bool _syncing;
+    // The modifiers of the press or the key that last reached the list: with neither Ctrl nor Shift, a click or an
+    // arrow replaces the selection.
+    KeyModifiers _modifiers;
     // The press that may start a drag, and the row it is on.
     PointerPressedEventArgs? _press;
     OutlinerRow? _pressedRow;
@@ -43,8 +45,18 @@ public sealed class OutlinerView : DockPanel
         _shell = shell;
         _world = shell.World;
         _selection = shell.Selection;
-        SetDock(_filter, DockSide.Top);
-        Children.Add(_filter);
+        // The Add menu (see docs/editor/shell-and-panels.md#add), which reads each kind's state as it opens.
+        var addMenu = new LiveMenu();
+        addMenu.Entries(addMenu.Items, _shell.Commands, DefaultRibbon.AddMenu());
+        var add = new Button { Content = CommandViews.Icon("add", 14), Classes = { "outliner-add" }, Flyout = addMenu.Flyout, VerticalAlignment = VerticalAlignment.Center };
+        ToolTip.SetTip(add, "Add\nAdd an entity of a common kind, ready to use: a light, a camera, a volume, a sound.");
+        Avalonia.Automation.AutomationProperties.SetName(add, "Add");
+        var top = new DockPanel();
+        SetDock(add, DockSide.Right);
+        top.Children.Add(add);
+        top.Children.Add(_filter);
+        SetDock(top, DockSide.Top);
+        Children.Add(top);
         _empty = new TextBlock
         {
             Text = "The world's entities appear here when the editor link connects to the host.",
@@ -72,8 +84,12 @@ public sealed class OutlinerView : DockPanel
         });
 
         _list.ItemTemplate = new FuncDataTemplate<OutlinerRow>((row, _) => row == null ? new Control() : RowView(row));
-        // The rows that a click adds come last, so the one clicked is the primary entity. Entities that the filter hides
-        // stay selected.
+        _list.AddHandler(PointerPressedEvent, (_, e) => _modifiers = e.KeyModifiers, Avalonia.Interactivity.RoutingStrategies.Tunnel, handledEventsToo: true);
+        _list.AddHandler(KeyDownEvent, (_, e) => _modifiers = e.KeyModifiers, Avalonia.Interactivity.RoutingStrategies.Tunnel, handledEventsToo: true);
+        // The rows that a click adds come last, so the one clicked is the primary entity. With Ctrl or Shift, the
+        // selected entities that have no row, which a filter or a collapsed parent hides, stay selected. Without, the
+        // rows that the list has selected are the selection: a plain click on a row selects that row alone, as it
+        // looks, and nothing that does not show stays for Delete to take.
         _list.SelectionChanged += (_, e) =>
         {
             if (_syncing)
@@ -82,6 +98,12 @@ public sealed class OutlinerView : DockPanel
             }
             var removed = e.RemovedItems.OfType<OutlinerRow>().Select(r => r.Node.Handle).ToList();
             var added = e.AddedItems.OfType<OutlinerRow>().Select(r => r.Node.Handle).ToList();
+            if ((_modifiers & (KeyModifiers.Control | KeyModifiers.Shift)) == 0)
+            {
+                var rows = (_list.SelectedItems?.OfType<OutlinerRow>() ?? []).Select(r => r.Node.Handle).ToList();
+                _selection.Set([.. rows.Except(added), .. added]);
+                return;
+            }
             _selection.Set([.. _selection.Entities.Except(removed).Except(added), .. added]);
         };
         _filter.TextChanged += (_, _) => Rebuild();
@@ -115,13 +137,20 @@ public sealed class OutlinerView : DockPanel
         {
             return;
         }
-        _syncing = true;
-        selected.Clear();
-        foreach (var row in rows.Where(r => _selection.Contains(r.Node.Handle)))
+        // When the list's rows are the selection's already, as after a change that the list made itself, they stay as
+        // they are: selecting them again would move the list's anchor to the last of them, and the next Shift click
+        // would range from there and not from the row that the user clicked first.
+        var wanted = rows.Where(r => _selection.Contains(r.Node.Handle)).ToList();
+        if (!wanted.ToHashSet().SetEquals(selected.OfType<OutlinerRow>()))
         {
-            selected.Add(row);
+            _syncing = true;
+            selected.Clear();
+            foreach (var row in wanted)
+            {
+                selected.Add(row);
+            }
+            _syncing = false;
         }
-        _syncing = false;
         if (scroll && rows.FirstOrDefault(r => r.Node.Handle == _selection.Entity) is { } primary)
         {
             _list.ScrollIntoView(primary);
@@ -134,7 +163,7 @@ public sealed class OutlinerView : DockPanel
     {
         var summary = string.Join(", ", node.Components.Select(_world.TypeName).Where(n => !Structural.Contains(n)).Select(FieldValues.Humanize));
         var label = node.Label;
-        var row = new OutlinerRow(node, depth, label, summary, node.Children.Count > 0, !_collapsed.Contains(node.Handle));
+        var row = new OutlinerRow(node, depth, label, summary, node.Children.Count > 0, !_shell.Outliner.IsCollapsed(node));
         var at = rows.Count;
         rows.Add(row);
         var matches = filter.Length == 0
@@ -172,10 +201,7 @@ public sealed class OutlinerView : DockPanel
         {
             expander.PointerPressed += (_, e) =>
             {
-                if (!_collapsed.Remove(row.Node.Handle))
-                {
-                    _collapsed.Add(row.Node.Handle);
-                }
+                _shell.Outliner.Toggle(row.Node);
                 e.Handled = true;
                 Rebuild();
             };
@@ -196,6 +222,14 @@ public sealed class OutlinerView : DockPanel
                 new TextBlock { Text = row.Summary, Classes = { "dim" } },
             },
         };
+        // What the entity is, by its components, so that a light or a camera is found in a long list at a glance.
+        Control kind = new Control { Width = 13 };
+        if (CommandViews.Icon(EntityIcons.For(row.Node.Components.Select(_world.TypeName)), 13) is { } icon)
+        {
+            icon.Opacity = 0.75;
+            kind = icon;
+        }
+        content.Children.Insert(1, kind);
         var view = new DockPanel { Background = Brushes.Transparent };
         if (row.Node.SceneId != 0)
         {
@@ -375,35 +409,54 @@ public sealed class OutlinerView : DockPanel
         }
     }
 
+    // A row's menu, which fills as it opens: a list realizes many rows, and few of their menus ever show.
     ContextMenu? RowMenu(OutlinerRow row)
     {
         if (row.Node.SceneId == 0)
         {
             return null;
         }
+        var menu = new ContextMenu();
+        menu.Opening += (_, _) =>
+        {
+            menu.Items.Clear();
+            FillRowMenu(menu, row);
+        };
+        // An empty menu does not open, so it has a first item before it ever does.
+        menu.Items.Add(new MenuItem { Header = "Focus" });
+        return menu;
+    }
+
+    void FillRowMenu(ContextMenu menu, OutlinerRow row)
+    {
+        // A row's menu acts on the selection when the row is in it, and on the row alone otherwise.
+        void SelectRow()
+        {
+            if (!_selection.Contains(row.Node.Handle))
+            {
+                _selection.Select(row.Node.Handle);
+            }
+        }
         MenuItem Item(string header, string command) => new()
         {
             Header = header,
+            IsEnabled = _shell.Commands.Get(command).CanExecute || !_selection.Contains(row.Node.Handle),
             Command = new RelayCommand(() =>
             {
-                // A row's menu acts on the selection when the row is in it, and on the row alone otherwise.
-                if (!_selection.Contains(row.Node.Handle))
-                {
-                    _selection.Select(row.Node.Handle);
-                }
+                SelectRow();
                 _shell.Commands.Get(command).Execute();
             }),
         };
-        var menu = new ContextMenu
-        {
-            Items =
-            {
-                Item("Duplicate", EditorCommands.DuplicateEntity),
-                Item("Delete", EditorCommands.DeleteEntity),
-                new Separator(),
-                Item("New Entity", EditorCommands.CreateEntity),
-            },
-        };
+        menu.Items.Add(Item("Focus", EditorCommands.FrameSelected));
+        menu.Items.Add(new Separator());
+        menu.Items.Add(Item("Duplicate", EditorCommands.DuplicateEntity));
+        menu.Items.Add(Item("Delete", EditorCommands.DeleteEntity));
+        menu.Items.Add(new Separator());
+        // The kinds of the Add menu, each of which goes where this row's entity is: the row alone is selected first,
+        // since a new entity goes where the primary entity of the selection is.
+        var add = new MenuItem { Header = "Add Here", Icon = CommandViews.Icon("add", 14) };
+        CommandViews.Fill(_shell.Commands, add.Items, DefaultRibbon.AddMenu(), () => _selection.Select(row.Node.Handle));
+        menu.Items.Add(add);
         if (row.Node.Parent != 0)
         {
             menu.Items.Add(new MenuItem { Header = "Move to Root", Command = new RelayCommand(() => _shell.Reparent(row.Node.SceneId, 0)) });
@@ -426,12 +479,9 @@ public sealed class OutlinerView : DockPanel
         {
             menu.Items.Add(Item("Make Prefab", EditorCommands.MakePrefab));
         }
-        menu.Items.Insert(0, Item("Focus", EditorCommands.FrameSelected));
-        menu.Items.Insert(1, new Separator());
         menu.Items.Add(new Separator());
         menu.Items.Add(Item("Hide or Show", EditorCommands.HideSelected));
         menu.Items.Add(Item("Lock or Unlock", EditorCommands.LockSelected));
-        return menu;
     }
 
     // A row's toggle: bright while it is on, and faint while it is off, so the rows that are hidden or locked stand out.

@@ -28,7 +28,7 @@ public enum MeshTool
 /// </summary>
 public sealed partial class MeshSession
 {
-    /// <summary>The context that the Mesh tab shows in.</summary>
+    /// <summary>The context that is active while mesh mode is on, for a contextual ribbon tab that a game or a later tool adds.</summary>
     public const string MeshContext = "mode.mesh";
 
     // The edited meshes: each mesh file's GUID and the entity that places it, by scene ID.

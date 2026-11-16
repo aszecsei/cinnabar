@@ -39,7 +39,7 @@ Value :: struct($T: typeid) {
 
 // register_components registers Volume. Call it with the engine's components, in init and on_reload.
 register_components :: proc(r: ^ecs.Registry) {
-	ecs.register_component(r, Volume, VOLUME_ID)
+	ecs.register_component(r, Volume, VOLUME_ID, category = "Volumes")
 }
 
 // Volumes finds the volumes. It is a registration, like a query: make it again in on_reload.

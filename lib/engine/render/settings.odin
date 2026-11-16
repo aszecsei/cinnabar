@@ -336,16 +336,45 @@ Frame_Settings :: struct {
 }
 
 register_settings_components :: proc(r: ^ecs.Registry) {
-	ecs.register_component(r, Anti_Aliasing, ANTI_ALIASING_ID)
-	ecs.register_component(r, Exposure, EXPOSURE_ID, DEFAULT_EXPOSURE)
-	ecs.register_component(r, Tone_Mapping, TONE_MAPPING_ID, DEFAULT_TONE_MAPPING)
-	ecs.register_component(r, Bloom, BLOOM_ID, DEFAULT_BLOOM)
-	ecs.register_component(r, Ambient_Occlusion, AMBIENT_OCCLUSION_ID, DEFAULT_AMBIENT_OCCLUSION)
-	ecs.register_component(r, Global_Illumination, GLOBAL_ILLUMINATION_ID)
-	ecs.register_component(r, Environment, ENVIRONMENT_ID, DEFAULT_ENVIRONMENT)
-	ecs.register_component(r, Fog, FOG_ID, DEFAULT_FOG)
-	ecs.register_component(r, Shadows, SHADOWS_ID, DEFAULT_SHADOWS)
-	ecs.register_component(r, Clouds, CLOUDS_ID, DEFAULT_CLOUDS)
+	ecs.register_component(r, Anti_Aliasing, ANTI_ALIASING_ID, category = "Volumes/Settings")
+	ecs.register_component(
+		r,
+		Exposure,
+		EXPOSURE_ID,
+		DEFAULT_EXPOSURE,
+		category = "Volumes/Settings",
+	)
+	ecs.register_component(
+		r,
+		Tone_Mapping,
+		TONE_MAPPING_ID,
+		DEFAULT_TONE_MAPPING,
+		category = "Volumes/Settings",
+	)
+	ecs.register_component(r, Bloom, BLOOM_ID, DEFAULT_BLOOM, category = "Volumes/Settings")
+	ecs.register_component(
+		r,
+		Ambient_Occlusion,
+		AMBIENT_OCCLUSION_ID,
+		DEFAULT_AMBIENT_OCCLUSION,
+		category = "Volumes/Settings",
+	)
+	ecs.register_component(
+		r,
+		Global_Illumination,
+		GLOBAL_ILLUMINATION_ID,
+		category = "Volumes/Settings",
+	)
+	ecs.register_component(
+		r,
+		Environment,
+		ENVIRONMENT_ID,
+		DEFAULT_ENVIRONMENT,
+		category = "Volumes/Settings",
+	)
+	ecs.register_component(r, Fog, FOG_ID, DEFAULT_FOG, category = "Volumes/Settings")
+	ecs.register_component(r, Shadows, SHADOWS_ID, DEFAULT_SHADOWS, category = "Volumes/Settings")
+	ecs.register_component(r, Clouds, CLOUDS_ID, DEFAULT_CLOUDS, category = "Volumes/Settings")
 }
 
 // resolve_settings takes the frame's settings from the volumes at a position, usually the camera's, leaving out the

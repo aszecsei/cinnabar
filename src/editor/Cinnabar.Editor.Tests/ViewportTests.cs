@@ -1468,7 +1468,7 @@ public sealed class ViewportTests : IDisposable
         using var shell = NewShell();
         var changes = 0;
         shell.WorldCameraChanged += () => changes++;
-        shell.OnGameMessage(new ComponentTypes([new ComponentType(1, "Transform", 48, []), new ComponentType(32, "Camera", 32, [])]));
+        shell.OnGameMessage(new ComponentTypes([new ComponentType(1, "Transform", "Transform", 48, []), new ComponentType(32, "Camera", "Rendering", 32, [])]));
         Assert.False(shell.WorldHasCamera);
 
         shell.OnGameMessage(new EntitySnapshot([new EntityInfo(Box, "Box", 1, 0, true, [1]), new EntityInfo(camera, "Camera", 2, 0, true, [1, 32])]));
@@ -1482,7 +1482,7 @@ public sealed class ViewportTests : IDisposable
     }
 
     [Fact]
-    public void TheTextInputRequeryCarriesItsOwnArgs()
+    public void TheTextInputRequeryCarriesItsOwnArgs() => Ui.Run(() =>
     {
         // A handler typed for the event's args, as Avalonia's own are, casts what the view raises; a plain RoutedEventArgs
         // threw here, from the view's attach inside docking, which then showed no document's content again.
@@ -1496,7 +1496,7 @@ public sealed class ViewportTests : IDisposable
         view.RequeryTextInput();
 
         Assert.Equal(1, heard);
-    }
+    });
 
     // --- Input ---
 

@@ -19,11 +19,29 @@ static partial class EditorCommands
                 IsCheckedWhen = () => shell.Layout.IsOpen(panel.Id),
             });
         }
-        commands.Register(new Command(ResetLayout, "Reset Layout", shell.Layout.Reset)
+        commands.Register(new Command(ResetLayout, "Reset Layout", shell.Workspaces.Reset)
         {
-            Description = "Put every panel back where it starts.",
+            Description = "Put the panels back where the workspace starts them.",
             Icon = "reset",
         });
+        // The workspaces (see docs/editor/shell-and-panels.md#workspaces): a choice for the ribbon, and a command for each,
+        // which the command palette and a key binding can run.
+        var workspaces = shell.Workspaces;
+        commands.Register(new ChoiceCommand(Workspace, "Workspace", [.. workspaces.All.Select(w => w.Label)], () => workspaces.Active.Label,
+            label => shell.SwitchWorkspace(workspaces.Find(label)!))
+        {
+            Description = "Arrange the panels for a kind of work. Each workspace is as it was left, and Reset Layout puts it back as it starts.",
+            Icon = "workspace",
+        });
+        foreach (var workspace in workspaces.All)
+        {
+            commands.Register(new Command(WorkspaceSwitch(workspace.Id), $"{workspace.Label} Workspace", () => shell.SwitchWorkspace(workspace))
+            {
+                Description = workspace.Description,
+                Icon = "workspace",
+                IsCheckedWhen = () => workspaces.Active == workspace,
+            });
+        }
         commands.Register(new Command(Stats, "Viewport Stats", () =>
         {
             var show = !shell.Viewports.Any(v => v.Session.ShowStats);
@@ -123,52 +141,21 @@ static partial class EditorCommands
             view => shell.ViewportSettings = shell.ViewportSettings with { DebugView = view }, EditorShell.DebugViewName,
             description: "Show the lit scene, or a debug view of what makes it: the lighting, the albedo, the normals, the light complexity and more.",
             icon: "viewport"));
-        Feature(shell, TemporalAa, "Temporal AA", "Smooth edges with temporal AA in the viewport.", s => s.NoTemporalAa, (s, v) => s with { NoTemporalAa = v });
-        Feature(shell, Bloom, "Bloom", "Draw bloom in the viewport.", s => s.NoBloom, (s, v) => s with { NoBloom = v });
-        Feature(shell, ToneMapping, "Tone Mapping", "Tone map and grade the viewport; off, a plain roll-off to white.", s => s.NoToneMapping, (s, v) => s with { NoToneMapping = v });
-        Feature(shell, Fog, "Fog", "Draw the volumes' fog in the viewport.", s => s.NoFog, (s, v) => s with { NoFog = v });
-        Feature(shell, Clouds, "Clouds", "Draw the atmosphere's volumetric clouds in the viewport.", s => s.NoClouds, (s, v) => s with { NoClouds = v });
-        Feature(shell, AmbientOcclusion, "Ambient Occlusion", "Darken the indirect light where surfaces meet.", s => s.NoAmbientOcclusion, (s, v) => s with { NoAmbientOcclusion = v });
-        Feature(shell, GlobalIllumination, "Global Illumination", "Light the viewport with the light that bounces; off, with the environment's ambient light.", s => s.NoGi, (s, v) => s with { NoGi = v });
-        Feature(shell, Shadows, "Shadows", "Draw the lights' shadows in the viewport.", s => s.NoShadows, (s, v) => s with { NoShadows = v });
-        Feature(shell, PostEffects, "Post Effects", "Run the game's post effects in the viewport.", s => s.NoPostEffects, (s, v) => s with { NoPostEffects = v });
-        Feature(shell, OcclusionCulling, "Occlusion Culling", "Leave out what other surfaces hide, by last frame's depth and this one's; off, only what is outside the view.", s => s.NoOcclusionCulling, (s, v) => s with { NoOcclusionCulling = v });
-        Feature(shell, MeshletHierarchy, "Meshlet Hierarchy", "Walk each mesh's hierarchy of meshlets to find the ones that its level of detail may draw; off, every meshlet of every level is tested. Both draw the same meshlets.", s => s.NoMeshletHierarchy, (s, v) => s with { NoMeshletHierarchy = v });
-        // A measurement, which is off until asked for (see docs/rendering/lighting-and-shadows.md#quad-overdraw).
-        commands.Register(Command.Toggle(ShadingStats, "Shading Stats", () => shell.ViewportSettings.ShadingStats, on => shell.ViewportSettings = shell.ViewportSettings with { ShadingStats = on },
-            "Count the forward pass's 2x2 quads and the pixels that they cover, which the Resource Monitor shows. It costs the forward pass a little."));
-        commands.Register(Command.Toggle(Icons, "Icons", () => shell.ViewportSettings.ShowIcons, on => shell.ViewportSettings = shell.ViewportSettings with { ShowIcons = on },
-            "Show icons for the lights, volumes and cameras, which select them when clicked.", "visible"));
-        commands.Register(ChoiceCommand.ForEnum<Link.Protocol.HelperMode>(Helpers, "Shapes", () => shell.ViewportSettings.Helpers,
-            mode => shell.ViewportSettings = shell.ViewportSettings with { Helpers = mode },
-            description: "Draw the shapes of lights, volumes and cameras: their ranges, cones and bounds, for the selection or for all of them.",
-            icon: "frame"));
-        commands.Register(ChoiceCommand.ForEnum<Link.Protocol.ViewportPreset>(ViewportQuality, "Quality", () => shell.ViewportSettings.QualityPreset,
-            preset => shell.ViewportSettings = shell.ViewportSettings with { QualityPreset = preset }, preset => EditorShell.ViewportPresetNames[(int)preset],
-            description: "Draw the viewport at a quality preset in place of the game's, to see what each level costs and looks like. The anti-aliasing and the render scale stay the game's unless they are chosen too, and the global illumination and the reflections are the preset's unless they are.",
-            icon: "viewport"));
-        commands.Register(ChoiceCommand.ForEnum<Link.Protocol.ViewportAa>(ViewportAntiAliasing, "Anti-Aliasing", () => shell.ViewportSettings.AntiAliasing,
-            aa => shell.ViewportSettings = shell.ViewportSettings with { AntiAliasing = aa }, aa => EditorShell.ViewportAaNames[(int)aa],
-            description: "Smooth the viewport's edges with a technique in place of the game's. FSR needs a GPU and the library that run it; elsewhere the viewport uses TAA.",
-            icon: "viewport"));
-        commands.Register(ChoiceCommand.ForEnum<Link.Protocol.ViewportGi>(ViewportGiTechnique, "Global Illumination", () => shell.ViewportSettings.GlobalIllumination,
-            gi => shell.ViewportSettings = shell.ViewportSettings with { GlobalIllumination = gi }, gi => EditorShell.ViewportGiNames[(int)gi],
-            description: "Light the viewport's indirect light with a technique in place of the game's, at the quality's level. Split Cascades need ray queries; elsewhere the viewport uses Screen Cascades.",
-            icon: "viewport"));
-        commands.Register(ChoiceCommand.ForEnum<Link.Protocol.ViewportReflections>(ViewportReflections, "Reflections", () => shell.ViewportSettings.Reflections,
-            reflections => shell.ViewportSettings = shell.ViewportSettings with { Reflections = reflections }, reflections => EditorShell.ViewportReflectionsNames[(int)reflections],
-            description: "Draw the viewport's reflections with a technique in place of the game's: the reflection probes alone, the screen-space reflections or the traced ones, both in front of the probes. Ray Traced needs ray queries; elsewhere the viewport uses Screen Space.",
-            icon: "viewport"));
-        commands.Register(ChoiceCommand.ForEnum<Link.Protocol.ViewportLevel>(ViewportReflectionsLevel, "Reflections Level", () => shell.ViewportSettings.ReflectionsLevel,
-            level => shell.ViewportSettings = shell.ViewportSettings with { ReflectionsLevel = level }, level => EditorShell.ViewportLevelNames[(int)level],
-            description: "Draw the viewport's reflections at a level in place of the game's or the preset's: the probes' slots, faces captured a frame and cube size, and the rays' share of the pixels.",
-            icon: "viewport"));
-        commands.Register(new ChoiceCommand(ViewportRenderScale, "Render Scale", [.. EditorShell.ViewportRenderScales.Select(s => s.Label)],
-            () => shell.ViewportRenderScale, shell.SetViewportRenderScale)
+        // Each toggle and choice of a viewport's settings is data, which the viewports' toolbars show too (see ViewportOptions).
+        foreach (var toggle in ViewportOptions.Toggles)
         {
-            Description = "Draw the viewport's scene at a share of its size in place of the game's, which TAA or FSR upscale.",
-            Icon = "viewport",
-        });
+            commands.Register(Command.Toggle(toggle.Command, toggle.Label, () => toggle.IsOn(shell.ViewportSettings),
+                on => shell.ViewportSettings = toggle.Set(shell.ViewportSettings, on), toggle.Description, toggle.Icon));
+        }
+        foreach (var choice in ViewportOptions.Choices)
+        {
+            commands.Register(new ChoiceCommand(choice.Command, choice.Label, choice.Options, () => choice.Get(shell.ViewportSettings),
+                option => shell.ViewportSettings = choice.Set(shell.ViewportSettings, option))
+            {
+                Description = choice.Description,
+                Icon = choice == ViewportOptions.Shapes ? "frame" : "viewport",
+            });
+        }
         commands.Register(new Command(ExposureUp, "Brighter", () => shell.ChangeExposure(1))
         {
             Description = "Add half a stop to the viewport's exposure.",
@@ -184,7 +171,4 @@ static partial class EditorCommands
         });
     }
 
-    static void Feature(EditorShell shell, string id, string label, string description, Func<Link.Protocol.ViewportSettings, bool> off,
-        Func<Link.Protocol.ViewportSettings, bool, Link.Protocol.ViewportSettings> set) =>
-        shell.Commands.Register(Command.Toggle(id, label, () => !off(shell.ViewportSettings), on => shell.ViewportSettings = set(shell.ViewportSettings, !on), description));
 }

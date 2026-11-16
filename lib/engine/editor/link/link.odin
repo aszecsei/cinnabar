@@ -187,11 +187,14 @@ Component_Types :: struct {
 }
 
 Component_Type :: struct {
-	id:     u64,
-	name:   string,
-	size:   u32,
+	id:       u64,
+	name:     string,
+	// Where the Add Component menu offers the type: its folders with / between them, such as "Physics/Joints", or "-"
+	// for a type that the engine adds and removes itself, which the menu leaves out (see ecs.Component_Info).
+	category: string,
+	size:     u32,
 	// The fields that the editor can show. Nested structs are flattened, with dotted names.
-	fields: []Field_Info,
+	fields:   []Field_Info,
 }
 
 Field_Kind :: enum u8 {

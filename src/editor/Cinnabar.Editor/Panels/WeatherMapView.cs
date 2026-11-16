@@ -29,6 +29,13 @@ public sealed class WeatherMapView : DockPanel
     readonly WeatherMapSession _session;
     readonly Image _image = new() { Stretch = Stretch.Uniform, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
     readonly TextBlock _status = new() { Classes = { "dim" }, TextWrapping = TextWrapping.Wrap };
+    // The controls, which scroll, over the map's canvas, which shows while there is a map.
+    readonly ScrollViewer _controls;
+    readonly Border _canvas;
+    // The section that makes a map, and whether there was a map when the section last followed it: null before the
+    // panel first shows.
+    readonly Expander _newMap;
+    bool? _sectionFollowed;
     readonly Button _undo;
     readonly Button _revert;
     Button? _generate;
@@ -68,16 +75,22 @@ public sealed class WeatherMapView : DockPanel
         top.Children.Add(new StackPanel { Classes = { "properties-header" }, Children = { new TextBlock { Text = "Weather Map", Classes = { "title" } } } });
         top.Children.Add(_status);
         top.Children.Add(_sections.Create("Brush", Brush()));
-        top.Children.Add(_sections.Create("New Weather Map", Generation()));
+        _newMap = _sections.Create("New Weather Map", Generation());
+        top.Children.Add(_newMap);
         var buttons = new Grid { ColumnDefinitions = new ColumnDefinitions("*,*"), ColumnSpacing = 4 };
         Grid.SetColumn(_revert, 1);
         buttons.Children.Add(_undo);
         buttons.Children.Add(_revert);
         top.Children.Add(buttons);
-        SetDock(top, Avalonia.Controls.Dock.Top);
-        Children.Add(new ScrollViewer { Content = top, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, MaxHeight = 360 });
+        // The scroll viewer is the dock panel's child, so the dock is its own: on the panel inside it, it did nothing,
+        // and the controls took the panel's width and left the map a sliver. Its height is the panel's to share (see
+        // ShareHeight).
+        _controls = new ScrollViewer { Content = top, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
+        SetDock(_controls, Avalonia.Controls.Dock.Top);
+        Children.Add(_controls);
+        SizeChanged += (_, _) => ShareHeight();
 
-        var canvas = new Border { Background = new SolidColorBrush(Color.FromRgb(24, 24, 24)), Child = _image, Margin = new Thickness(4), Cursor = new Cursor(StandardCursorType.Cross) };
+        var canvas = _canvas = new Border { Background = new SolidColorBrush(Color.FromRgb(24, 24, 24)), Child = _image, Margin = new Thickness(4), Cursor = new Cursor(StandardCursorType.Cross) };
         ToolTip.SetTip(canvas, "Red is the coverage, green the precipitation and blue the type. Drag to paint the brush's channel toward its value, with Shift toward 0.");
         canvas.PointerPressed += OnPointerPressed;
         canvas.PointerMoved += OnPointerMoved;
@@ -153,9 +166,39 @@ public sealed class WeatherMapView : DockPanel
             }
         });
 
+    /// <summary>
+    /// The most of the panel's height that the controls take, which scroll beyond it. While a map shows, the map is
+    /// what the brush paints, so it keeps at least half the panel. Without a map there is nothing to paint: the
+    /// controls have the whole panel, and Generate, which makes the map, is in sight. A fixed height for them left
+    /// most of a tall panel to an empty canvas, with Generate out of sight in a short scroll area.
+    /// </summary>
+    internal static double ControlsMaxHeight(bool hasMap, double panelHeight) =>
+        hasMap && panelHeight > 0 ? Math.Max(panelHeight * ControlsShare, MinControlsHeight) : double.PositiveInfinity;
+
+    const double ControlsShare = 0.5;
+    // Enough for the header and a few rows, in a panel that is docked short.
+    const double MinControlsHeight = 120;
+
+    // Gives the controls and the map their parts of the panel, when the map comes or goes and when the panel's size changes.
+    void ShareHeight()
+    {
+        var hasMap = _session.Map != null;
+        _canvas.IsVisible = hasMap;
+        _controls.MaxHeight = ControlsMaxHeight(hasMap, Bounds.Height);
+        // The section that makes a map is open while there is none, since Generate is what the panel is for then, and
+        // closed once there is one, which leaves the brush over the map. It follows the map only when the map comes or
+        // goes: between, it is as the user leaves it.
+        if (hasMap != _sectionFollowed)
+        {
+            _sectionFollowed = hasMap;
+            _newMap.IsExpanded = !hasMap;
+        }
+    }
+
     // Shows the map, and what the session says of it.
     void Show()
     {
+        ShareHeight();
         _status.Text = _session.Status();
         _undo.IsEnabled = _session.Strokes > 0 && !_session.IsPainting;
         _revert.IsEnabled = _session.State is WeatherMapSession.MapState.Indexed or WeatherMapSession.MapState.Written;

@@ -6,7 +6,7 @@ namespace Cinnabar.Editor.Shell;
 
 /// <summary>
 /// The scene's atmosphere (see docs/editor/shell-and-panels.md#atmosphere): the global volume whose Environment and Fog
-/// the Atmosphere tab and panel edit, and the watches that give the panel its values when they are not selected.
+/// the Lighting tab's atmosphere commands and the Atmosphere panel edit, and the watches that give the panel its values when they are not selected.
 /// </summary>
 public sealed partial class EditorShell
 {
