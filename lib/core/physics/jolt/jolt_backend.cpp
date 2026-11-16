@@ -34,6 +34,7 @@
 #include <Jolt/Physics/Collision/Shape/ConvexHullShape.h>
 #include <Jolt/Physics/Collision/Shape/MeshShape.h>
 #include <Jolt/Physics/Collision/Shape/CylinderShape.h>
+#include <Jolt/Physics/Collision/Shape/HeightFieldShape.h>
 #include <Jolt/Physics/Collision/Shape/RotatedTranslatedShape.h>
 #include <Jolt/Physics/Collision/Shape/SphereShape.h>
 #include <Jolt/Physics/Collision/Shape/StaticCompoundShape.h>
@@ -767,7 +768,7 @@ bool run_create_body(World_Impl& w, const cn_create_body& c)
         return false;
     }
     if (c.motion == CN_MOTION_DYNAMIC && shape->MustBeStatic()) {
-        report(CN_LOG_ERROR, "physics: Create_Body: a triangle mesh has no mass, so a dynamic body cannot take it");
+        report(CN_LOG_ERROR, "physics: Create_Body: a triangle mesh or a height field has no mass, so a dynamic body cannot take it");
         return false;
     }
 
@@ -1756,6 +1757,51 @@ uint32_t create_mesh_shape(cn_world handle, cn_shape shape, uint8_t kind, const 
     return 1;
 }
 
+// The largest error in meters that a height field's compressed samples may have.
+constexpr float HEIGHT_FIELD_ERROR = 0.002f;
+
+uint32_t create_height_field_shape(cn_world handle, cn_shape shape, const cn_height_field_desc* desc)
+{
+    World_Impl* w = find_world(handle);
+    if (w == nullptr || desc == nullptr || shape.generation == 0 || shape.index >= w->shapes.size()) {
+        report(CN_LOG_ERROR, "physics: create_height_field_shape: no world, a bad handle, or no description");
+        return 0;
+    }
+    uint32_t nx = desc->count[0], nz = desc->count[1];
+    if (nx < 2 || nz < 2 || desc->heights == nullptr || !(desc->spacing[0] > 0) || !(desc->spacing[1] > 0)) {
+        report(CN_LOG_ERROR, "physics: create_height_field_shape: %u x %u samples at a spacing of %g x %g", nx, nz,
+            desc->spacing[0], desc->spacing[1]);
+        return 0;
+    }
+    // Jolt's field is square, of at least two blocks: the samples past the grid have no collision.
+    uint32_t n = std::max(std::max(nx, nz), 4u);
+    Array<float> samples(size_t(n) * n, HeightFieldShapeConstants::cNoCollisionValue);
+    for (uint32_t z = 0; z < nz; z++) {
+        for (uint32_t x = 0; x < nx; x++) {
+            float h = desc->heights[size_t(z) * nx + x];
+            samples[size_t(z) * n + x] = h == CN_HEIGHT_FIELD_HOLE ? HeightFieldShapeConstants::cNoCollisionValue : h;
+        }
+    }
+    // Without a rotation, the field's own offset places it; with one, a wrapper turns it and then moves it.
+    Vec3 offset = to_vec3(desc->offset);
+    Quat rotation = to_quat(desc->rotation);
+    bool turned = !rotation.IsClose(Quat::sIdentity());
+    HeightFieldShapeSettings settings(samples.data(), turned ? Vec3::sZero() : offset, Vec3(desc->spacing[0], 1, desc->spacing[1]), n);
+    settings.mBitsPerSample = settings.CalculateBitsPerSampleForError(HEIGHT_FIELD_ERROR);
+    Shape::ShapeResult result = settings.Create();
+    if (!result.HasError() && turned) {
+        result = RotatedTranslatedShapeSettings(offset, rotation, result.Get()).Create();
+    }
+    if (result.HasError()) {
+        report(CN_LOG_ERROR, "physics: create_height_field_shape: %s", result.GetError().c_str());
+        return 0;
+    }
+    Shape_Slot& slot = w->shapes[shape.index];
+    slot.generation = shape.generation;
+    slot.shape = result.Get();
+    return 1;
+}
+
 uint32_t raycast(cn_world handle, const cn_ray* ray, const cn_query_filter* in_filter, cn_ray_hit* hit)
 {
     *hit = {};
@@ -1900,6 +1946,7 @@ const cn_physics_api api = {
     results,
     body_state,
     create_mesh_shape,
+    create_height_field_shape,
     raycast,
     raycast_all,
     raycast_batch,

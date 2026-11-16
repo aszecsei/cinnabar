@@ -419,6 +419,7 @@ create_body :: proc(
 	if own != nil {
 		if child, ok := child_shape(
 			s,
+			w,
 			list,
 			e,
 			own^,
@@ -445,6 +446,7 @@ create_body :: proc(
 			(part.offset + linalg.quaternion_mul_vector3(part.rotation, part.scale * c.offset))
 		if child, ok := child_shape(
 			s,
+			w,
 			list,
 			part.entity,
 			c,
@@ -525,12 +527,13 @@ create_body :: proc(
 }
 
 // child_shape makes a collider's shape at an offset and a rotation in its body, with its dimensions scaled: a primitive
-// through a command, and a mesh at once, from its collision data with the offset, the rotation and the scale applied
-// to its vertices. A dynamic body takes a mesh's convex hull. It returns false, with a warning, when the mesh is
-// missing.
+// through a command, a mesh at once, from its collision data with the offset, the rotation and the scale applied
+// to its vertices, and a height field at once, from its Surface_Renderer's height map. A dynamic body takes a mesh's
+// convex hull. It returns false, with a warning, when the mesh or the height map is missing.
 @(private)
 child_shape :: proc(
 	s: ^State,
+	w: ^ecs.World,
 	list: ^core_physics.Command_List,
 	e: ecs.Entity,
 	c: Collider,
@@ -542,6 +545,9 @@ child_shape :: proc(
 	core_physics.Shape,
 	bool,
 ) {
+	if c.shape == .Height_Field {
+		return height_field_shape(s, w, e, offset, rotation, scale, dynamic_body)
+	}
 	if c.shape != .Mesh && c.shape != .Convex_Mesh {
 		shape := core_physics.Shape(pool_alloc(&s.shapes))
 		kind, size := collider_size(c, scale)
@@ -618,14 +624,36 @@ mesh_data :: proc(
 	return data, blob, true
 }
 
-// mesh_version is how many times hot reload swapped a collider's mesh, so that a body made from it is made again.
+// asset_version is how many times hot reload swapped an asset, so that a body made from it is made again, or 0 for one
+// that is not loaded.
 @(private)
-mesh_version :: proc(s: ^State, c: ^Collider) -> u32 {
-	if s.assets == nil || (c.shape != .Mesh && c.shape != .Convex_Mesh) {
+asset_version :: proc(s: ^State, guid: format.Guid) -> u32 {
+	if s.assets == nil || guid == {} {
 		return 0
 	}
-	h, loaded := asset.find(s.assets, c.mesh)
+	h, loaded := asset.find(s.assets, guid)
 	return asset.version(s.assets, h) if loaded else 0
+}
+
+// hash_sources adds to h what a collider's shape is made from beyond the collider: its mesh's version, or its
+// Surface_Renderer and the versions of its height map and hole mask.
+@(private)
+hash_sources :: proc(s: ^State, w: ^ecs.World, e: ecs.Entity, c: ^Collider, h: u64) -> u64 {
+	h := h
+	#partial switch c.shape {
+	case .Mesh, .Convex_Mesh:
+		version := asset_version(s, c.mesh)
+		h = hash.fnv64a(([^]byte)(&version)[:size_of(version)], h)
+	case .Height_Field:
+		sr := ecs.get(w, e, Surface_Renderer)
+		if sr == nil {
+			return hash.fnv64a({2}, h)
+		}
+		h = hash.fnv64a(([^]byte)(sr)[:size_of(Surface_Renderer)], h)
+		versions := [2]u32{asset_version(s, sr.height_map), asset_version(s, sr.hole_mask)}
+		h = hash.fnv64a(([^]byte)(&versions)[:size_of(versions)], h)
+	}
+	return h
 }
 
 @(private)
@@ -660,12 +688,15 @@ collider_size :: proc(c: Collider, pose_scale: [3]f32) -> (core_physics.Shape_Ki
 		return .Mesh, scale
 	case .Convex_Mesh:
 		return .Convex_Hull, scale
+	case .Height_Field:
+		return .Height_Field, scale
 	}
 	return .Box, 1
 }
 
 // source_hash is what a body is made from: the Rigid_Body, the Collider, the entity's scale, and each part's
-// Collider and pose in the body, with the version of each mesh that a collider names.
+// Collider and pose in the body, with the version of each mesh that a collider names, and a height field's
+// Surface_Renderer and the versions of its textures.
 @(private)
 source_hash :: proc(s: ^State, w: ^ecs.World, e: ecs.Entity, parts: []Part) -> u64 {
 	bytes :: proc(p: ^$T) -> []byte {
@@ -679,8 +710,7 @@ source_hash :: proc(s: ^State, w: ^ecs.World, e: ecs.Entity, parts: []Part) -> u
 	}
 	if c := ecs.get(w, e, Collider); c != nil {
 		h = hash.fnv64a(bytes(c), h)
-		version := mesh_version(s, c)
-		h = hash.fnv64a(bytes(&version), h)
+		h = hash_sources(s, w, e, c, h)
 	} else {
 		h = hash.fnv64a({1}, h)
 	}
@@ -690,8 +720,7 @@ source_hash :: proc(s: ^State, w: ^ecs.World, e: ecs.Entity, parts: []Part) -> u
 	}
 	for &part in parts {
 		h = hash.fnv64a(bytes(&part.collider), h)
-		version := mesh_version(s, &part.collider)
-		h = hash.fnv64a(bytes(&version), h)
+		h = hash_sources(s, w, part.entity, &part.collider, h)
 		h = hash.fnv64a(bytes(&part.offset), h)
 		h = hash.fnv64a(bytes(&part.rotation), h)
 		h = hash.fnv64a(bytes(&part.scale), h)

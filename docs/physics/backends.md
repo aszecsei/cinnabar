@@ -24,7 +24,7 @@ The host reads the key itself, from the user's file first, before the game start
 
 **Threads.**
 
-- `submit`, `step`, `create_mesh_shape`, `world_create` and `world_destroy` run from one job or the frame code at a time, never at once.
+- `submit`, `step`, `create_mesh_shape`, `create_height_field_shape`, `world_create` and `world_destroy` run from one job or the frame code at a time, never at once.
 - Queries (`raycast`, `raycast_all`, `raycast_batch`, `shape_cast`, `overlap`) and `body_state` run from any number of jobs at once, between steps and submits, and must be safe for that.
 - `step` may run its own work on the host's jobs: `Host.jobs_run` starts frame jobs, whose data the host gives back to `Physics_API.run_job`, and `Host.jobs_wait` waits for a counter from a job or the frame code. Every job the step starts must finish before `step` returns. A job must not wait inside itself unless it is the step's caller: a fiber that waits may resume on another thread.
 

@@ -2,11 +2,11 @@
 
 Patch surfaces: a world-space rectangle that the GPU draws as grid patches, fine near the camera and coarse far from it, with holes, shaped by its material's displacement. Water and terrain are both one of these. Read [GPU scene](gpu-scene.md) and [Materials: Vertex displacement](materials.md#vertex-displacement) first.
 
-**In this document:** [Surfaces](#surfaces) · [Selection](#selection) · [Patches](#patches) · [Holes](#holes) · [Materials for patches](#materials-for-patches) · [In the frame](#in-the-frame) · [Limits](#limits)
+**In this document:** [Surfaces](#surfaces) · [Selection](#selection) · [Patches](#patches) · [Holes](#holes) · [Materials for patches](#materials-for-patches) · [Collision](#collision) · [In the frame](#in-the-frame) · [Limits](#limits)
 
 ## Surfaces
 
-A mesh's level of detail comes from its own simplification errors, which a flat plane has none of, and a mesh is as large as its file. A lake or a terrain needs a surface that is dense where the camera is and coarse where it is not, that stays in the world (a shoreline, a hole for a cave, an island), and that can be any size. That is a `Surface_Renderer` (`lib/engine/render/components.odin`, stable ID 51):
+A mesh's level of detail comes from its own simplification errors, which a flat plane has none of, and a mesh is as large as its file. A lake or a terrain needs a surface that is dense where the camera is and coarse where it is not, that stays in the world (a shoreline, a hole for a cave, an island), and that can be any size. That is a `Surface_Renderer` (`lib/engine/asset/format/components.odin`, since physics reads it too, stable ID 51):
 
 | Field | Meaning |
 |---|---|
@@ -16,6 +16,7 @@ A mesh's level of detail comes from its own simplification errors, which a flat 
 | `cell` | The finest quad's size in meters (`DEFAULT_SURFACE_CELL`, 1 m, when 0) |
 | `height_range` | How far below and above its plane the material's displacement reaches, in meters, for culling |
 | `cast_shadows` | Whether its patches draw into the shadow maps |
+| `height_map` | The height texture that its material displaces by, reading 0 at `height_range.x` and 1 at `height_range.y`, which a `Height_Field` collider reads (see [Collision](#collision)); 0 for none |
 
 Its entity's `Transform` places it, and it has a slot in the [GPU scene](gpu-scene.md#gpu-scene) like a `Mesh_Renderer`, so the render origin, last frame's pose, the entity ID and picking work as for a mesh. The surface is one draw item (`Cull_Item` with `ITEM_SURFACE`), whose draws the GPU adds: `lib/engine/render/surfaces.odin` holds the records and the passes.
 
@@ -52,7 +53,11 @@ A material draws patches when its `.material` says `geometry = patches` (see [Co
 
 A patches material shapes the surface with `displace`, usually along up: the sample's `water.material` sums three waves of the time on the position relative to the render origin, with wavelengths that divide 1024 m so the origin's moves leave no seam, and gives each pixel the waves' analytic normal; its `terrain.material` raises the vertices by a height map and takes the normal from the map's slope. The map is a 16-bit PNG that cooks as a `height` texture, `R16_Unorm` (see [Content pipeline](../content/kinds/textures.md#textures)), so its steps are 30 m / 65535 and neither the vertices nor the normal show terraces. Transparent, two-sided and masked materials all draw patches: the transparent passes use the same vertex path. The material editor previews a patches material as one patch a meter across at the mesh's place, whatever shape is chosen.
 
-The sample's `surfaces.scene`, which F7 cycles to, is a lake with an island: a water surface with a hole over a terrain surface, 256 m across, with textures that `just sample-textures` writes.
+The sample's `surfaces.scene`, which F7 cycles to, is a lake with an island: a water surface with a hole over a terrain surface, 256 m across, with textures that `just sample-textures` writes. The terrain collides by its height map, with a hole on the island's west flank, and a crate falls onto the island.
+
+## Collision
+
+A `Collider` whose `shape` is `Height_Field`, on the surface's entity, collides as the surface's `height_map`: a physics height field over the rectangle, from `height_range.x` where the map reads 0 to `height_range.y` where it reads 1, placed by the entity's `Transform` (see [Physics: Shapes](../physics/design.md#shapes)). The collider is defined by the map and the range, not by the material, whose `displace` is HLSL that the CPU cannot run: a material that displaces by the same map, from the same range, as the sample's `terrain.material` does with `height_scale` and `height_range = [0, 30]`, collides where it draws. The field has a sample at each corner of the finest cells, read as the vertex shader reads the map at the finest level. The hole mask's holes are holes in the collision a cell smaller than the drawn ones, since the backend removes the triangles that touch a hole's sample: a sample is a hole only where each of the four cells around it is, so the ground that is drawn always collides. A recooked map or mask, or a change of the `Surface_Renderer`, makes the collider again.
 
 ## In the frame
 
@@ -63,7 +68,7 @@ The sample's `surfaces.scene`, which F7 cycles to, is a lake with an island: a w
 ## Limits
 
 - A surface is not in the ray tracing acceleration structure, so a traced shadow mask does not see it as a caster; it receives traced shadows, since the mask is from the depth buffer, and it casts and receives mapped shadows.
-- It has no collision.
+- Its collision is a height field of its `height_map`, at most 4097 samples a side, and holes in it are a cell smaller than the drawn ones. A material that displaces by anything but that map collides where the map says, not where it draws, and navmeshes leave a height field out.
 - It draws on the vertex-pulling path only: no mesh shaders, no vertex reuse, and no per-triangle culling of holes, which cost their vertex work.
 - Hole edges are the finest cells' edges.
 - A height map terraces at its texels' steps: 1/65535 of its scale for a `height` texture, which is 16 bits a texel, and 1/255 for an 8-bit one, such as a `mask` texture, which is visible on large or tall terrain. A `height` texture is not compressed, so it is four times the size of a `mask` texture.

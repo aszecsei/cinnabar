@@ -9,7 +9,7 @@
 extern "C" {
 #endif
 
-#define CN_PHYSICS_API_VERSION 8
+#define CN_PHYSICS_API_VERSION 9
 #define CN_PHYSICS_MAX_COMPOUND_CHILDREN 1024
 #define CN_PHYSICS_MAX_LAYERS 32
 #define CN_PHYSICS_MAX_QUERY_IGNORE 8
@@ -50,7 +50,10 @@ typedef struct cn_world_desc {
 } cn_world_desc;
 
 enum cn_motion { CN_MOTION_STATIC, CN_MOTION_KINEMATIC, CN_MOTION_DYNAMIC };
-enum cn_shape_kind { CN_SHAPE_BOX, CN_SHAPE_SPHERE, CN_SHAPE_CAPSULE, CN_SHAPE_CYLINDER, CN_SHAPE_MESH, CN_SHAPE_CONVEX_HULL };
+enum cn_shape_kind { CN_SHAPE_BOX, CN_SHAPE_SPHERE, CN_SHAPE_CAPSULE, CN_SHAPE_CYLINDER, CN_SHAPE_MESH, CN_SHAPE_CONVEX_HULL, CN_SHAPE_HEIGHT_FIELD };
+
+// A height field's sample that has no collision: FLT_MAX.
+#define CN_HEIGHT_FIELD_HOLE 3.402823466e+38f
 
 enum cn_body_flag {
     CN_BODY_SENSOR = 1u << 0,
@@ -276,6 +279,17 @@ typedef struct cn_ray_hit {
     uint32_t sub_shape, _pad;
 } cn_ray_hit;
 
+// A grid of count[0] by count[1] heights in meters, row-major with x fastest, whose sample (i, j) is at
+// offset + rotation * (i * spacing[0], height, j * spacing[1]) in its body. A height of CN_HEIGHT_FIELD_HOLE has no
+// collision.
+typedef struct cn_height_field_desc {
+    const float* heights;
+    uint32_t count[2];
+    float spacing[2];
+    float offset[3];
+    float rotation[4];
+} cn_height_field_desc;
+
 typedef struct cn_physics_api {
     cn_backend_info (*info)(void);
     cn_world (*world_create)(const cn_world_desc* desc);
@@ -286,6 +300,7 @@ typedef struct cn_physics_api {
     void (*body_state)(cn_world world, const cn_body* bodies, uint32_t count, cn_body_state* out);
     uint32_t (*create_mesh_shape)(cn_world world, cn_shape shape, uint8_t kind, const float (*vertices)[3], uint32_t vertex_count,
         const uint32_t (*triangles)[3], uint32_t triangle_count, float density);
+    uint32_t (*create_height_field_shape)(cn_world world, cn_shape shape, const cn_height_field_desc* desc);
     uint32_t (*raycast)(cn_world world, const cn_ray* ray, const cn_query_filter* filter, cn_ray_hit* hit);
     uint32_t (*raycast_all)(cn_world world, const cn_ray* ray, const cn_query_filter* filter, cn_ray_hit* out, uint32_t capacity);
     void (*raycast_batch)(cn_world world, const cn_ray* rays, uint32_t count, const cn_query_filter* filter, cn_ray_hit* out);
@@ -351,6 +366,7 @@ static inline uint32_t cn_physics_layout(void)
         (uint32_t)sizeof(cn_create_character),
         (uint32_t)sizeof(cn_set_character_velocity),
         (uint32_t)sizeof(cn_character_state),
+        (uint32_t)sizeof(cn_height_field_desc),
     };
     uint32_t h = 0x811c9dc5u;
     for (size_t i = 0; i < sizeof(sizes) / sizeof(sizes[0]); i++) {
@@ -393,7 +409,8 @@ static_assert(sizeof(cn_overlap_hit) == 16);
 static_assert(sizeof(cn_ray) == 40);
 static_assert(sizeof(cn_query_filter) == 80);
 static_assert(sizeof(cn_ray_hit) == 64);
-static_assert(sizeof(cn_physics_api) == 16 * sizeof(void*));
+static_assert(sizeof(cn_physics_api) == 17 * sizeof(void*));
+static_assert(sizeof(cn_height_field_desc) == 56);
 static_assert(sizeof(cn_physics_host) == 7 * sizeof(void*));
 static_assert(sizeof(cn_counter) == 16);
 #endif

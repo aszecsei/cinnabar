@@ -695,6 +695,16 @@ nav_collect :: proc(
 			radius := max(collider.radius * max(scale.x, scale.z), 1e-3)
 			half := max(collider.height * scale.y * 0.5, 1e-3)
 			nav_lathe(&local, {{0, -half}, {radius, -half}, {radius, half}, {0, half}})
+		case .Height_Field:
+			report_warning(
+				problems,
+				a.path,
+				0,
+				0,
+				"entity %016x: its Collider is a height field, which navmeshes do not bake yet, so they leave it out",
+				e.id,
+			)
+			continue
 		case .Mesh, .Convex_Mesh:
 			source := nav_mesh_source(meshes, out_dir, collider.mesh)
 			if collider.mesh != {} && !slice.contains(a.dependencies[:], collider.mesh) {

@@ -1,5 +1,6 @@
 # The patch surfaces sample, which F7 in mygame cycles to: a lake with an island, as a water surface with a hole over
 # a terrain surface raised by a height map, 256 m across, under the sun (see docs/rendering/surfaces.md#surfaces). The
+# terrain collides by its height map, with a hole on the island's west flank, and a crate falls onto the island. The
 # camera stands over the shore. The editor writes this file; see docs/editor.md#scenes.
 scene 2
 
@@ -57,6 +58,23 @@ component 1 Transform
 component 51 Surface_Renderer
 	size = [256, 256]
 	material = $6e2a8c4f0b1d4a7c9e3f5b7d9a1c3e5f
+	hole_mask = $1b71ec09891240ea84c1761309c16ffe
 	cell = 1
 	height_range = [0, 30]
 	cast_shadows = true
+	height_map = $9b3e5d7f2c1a4e8b9d0c1f2e3a4b5c6d
+component 65 Collider
+	shape = Height_Field
+
+entity 3f6a9c2e7b1d4e58
+name = "Crate"
+component 1 Transform
+	position = [2516582400251658240, 503316480, -83886080]
+	rotation = [0.0871557, 0, 0.0871557, 0.9924039]
+	scale = [2, 2, 2]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $5a1c3e7f9b2d4f608a1c3e5f7a9b0c2d
+	cast_shadows = true
+component 64 Rigid_Body
+component 65 Collider

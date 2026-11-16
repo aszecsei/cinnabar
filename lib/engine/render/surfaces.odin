@@ -26,7 +26,7 @@ MAX_SURFACES :: 16
 // scales the meshlets' errors.
 SURFACE_CELL_PIXELS :: 8
 // The finest cell's size in meters when a Surface_Renderer leaves cell at 0.
-DEFAULT_SURFACE_CELL :: 1
+DEFAULT_SURFACE_CELL :: format.DEFAULT_SURFACE_CELL
 // select_patches.hlsl's group size.
 SURFACE_GROUP_SIZE :: 256
 // Where a level's morph to the next starts, as a share of its range.

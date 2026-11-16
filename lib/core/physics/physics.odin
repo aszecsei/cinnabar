@@ -15,7 +15,7 @@ import "cinnabar:core/jobs"
 import "cinnabar:core/layout"
 
 // The version of Physics_API and the command format. The host refuses a backend whose info reports another one.
-API_VERSION :: 8
+API_VERSION :: 9
 
 // A handle with generation 0 is the nil handle. The engine allocates Body and Shape handles itself, before the
 // backend knows them, so a command can name a body that an earlier command in the same list creates.
@@ -100,6 +100,22 @@ Shape_Kind :: enum u8 {
 	Mesh,
 	// The convex hull of points, from create_mesh_shape.
 	Convex_Hull,
+	// A grid of heights, from create_height_field_shape. Only a static or kinematic body can take one, as a Mesh.
+	Height_Field,
+}
+
+// HEIGHT_FIELD_HOLE is a height field's sample that has no collision: the triangles that touch it are left out.
+HEIGHT_FIELD_HOLE :: max(f32)
+
+// Height_Field_Desc is a grid of count.x by count.y heights in meters, row-major with x fastest, whose sample (i, j) is
+// at offset + rotation * (i * spacing.x, height, j * spacing.y) in its body. A height of HEIGHT_FIELD_HOLE has no
+// collision.
+Height_Field_Desc :: struct {
+	heights:  [^]f32,
+	count:    [2]u32,
+	spacing:  [2]f32,
+	offset:   [3]f32,
+	rotation: Rotation,
 }
 
 Body_Flag :: enum u16 {
@@ -815,6 +831,7 @@ layout_signature :: proc "contextless" () -> u32 {
 		u32(size_of(Create_Character)),
 		u32(size_of(Set_Character_Velocity)),
 		u32(size_of(Character_State)),
+		u32(size_of(Height_Field_Desc)),
 	}
 	h: u32 = 0x811c9dc5
 	for s in sizes {
@@ -999,23 +1016,28 @@ Ray_Hit :: struct {
 // submit and step run from one job or the frame code at a time; queries run from any number of jobs at once, but
 // not during submit or step. See docs/physics/design.md#the-boundary.
 Physics_API :: struct {
-	info:              proc "c" () -> Backend_Info,
+	info:                      proc "c" () -> Backend_Info,
 	// Returns the nil world on failure.
-	world_create:      proc "c" (desc: ^World_Desc) -> World,
-	world_destroy:     proc "c" (world: World),
+	world_create:              proc "c" (desc: ^World_Desc) -> World,
+	world_destroy:             proc "c" (world: World),
 	// Executes the commands in size bytes at data, in order. It returns false if any was invalid, such as one for a
 	// stale handle; the backend logs each and runs the others.
-	submit:            proc "c" (world: World, data: rawptr, size: u32) -> b32,
+	submit:                    proc "c" (world: World, data: rawptr, size: u32) -> b32,
 	// One fixed tick of dt seconds, in substeps collision steps. It returns when the step is done.
-	step:              proc "c" (world: World, dt: f32, substeps: i32) -> b32,
-	results:           proc "c" (world: World, out: ^Step_Results),
+	step:                      proc "c" (world: World, dt: f32, substeps: i32) -> b32,
+	results:                   proc "c" (world: World, out: ^Step_Results),
 	// The state of chosen bodies. A stale handle gives a zeroed state.
-	body_state:        proc "c" (world: World, bodies: [^]Body, count: u32, out: [^]Body_State),
+	body_state:                proc "c" (
+		world: World,
+		bodies: [^]Body,
+		count: u32,
+		out: [^]Body_State,
+	),
 	// create_mesh_shape makes a Mesh shape of triangles over vertices, or a Convex_Hull of the vertices alone, under
 	// an engine handle that later commands use as a Create_Shape's: mesh data does not fit in a command. Front faces
 	// are those whose (b - a) x (c - a) points out. It runs between steps, as submit does, and returns false for a
 	// shape that the backend cannot make, which it logs.
-	create_mesh_shape: proc "c" (
+	create_mesh_shape:         proc "c" (
 		world: World,
 		shape: Shape,
 		kind: Shape_Kind,
@@ -1025,15 +1047,23 @@ Physics_API :: struct {
 		triangle_count: u32,
 		density: f32,
 	) -> b32,
+	// create_height_field_shape makes a Height_Field shape from desc under an engine handle, as create_mesh_shape makes
+	// a mesh. It runs between steps, as submit does, and returns false for a field that the backend cannot make, which
+	// it logs.
+	create_height_field_shape: proc "c" (
+		world: World,
+		shape: Shape,
+		desc: ^Height_Field_Desc,
+	) -> b32,
 	// The closest hit along the ray. filter may be nil, which is FILTER_ALL.
-	raycast:           proc "c" (
+	raycast:                   proc "c" (
 		world: World,
 		ray: ^Ray,
 		filter: ^Query_Filter,
 		hit: ^Ray_Hit,
 	) -> b32,
 	// Every hit along the ray, by distance: the first capacity of them go to out, and the count is all of them.
-	raycast_all:       proc "c" (
+	raycast_all:               proc "c" (
 		world: World,
 		ray: ^Ray,
 		filter: ^Query_Filter,
@@ -1041,7 +1071,7 @@ Physics_API :: struct {
 		capacity: u32,
 	) -> u32,
 	// The closest hit of each ray, in order; a miss is a zeroed hit.
-	raycast_batch:     proc "c" (
+	raycast_batch:             proc "c" (
 		world: World,
 		rays: [^]Ray,
 		count: u32,
@@ -1049,14 +1079,14 @@ Physics_API :: struct {
 		out: [^]Ray_Hit,
 	),
 	// The first hit of a swept shape: the contact point, the normal of the surface it hit, and the distance swept.
-	shape_cast:        proc "c" (
+	shape_cast:                proc "c" (
 		world: World,
 		sweep: ^Shape_Cast,
 		filter: ^Query_Filter,
 		hit: ^Ray_Hit,
 	) -> b32,
 	// The bodies that overlap a shape, by handle: the first capacity of them go to out, and the count is all of them.
-	overlap:           proc "c" (
+	overlap:                   proc "c" (
 		world: World,
 		query: ^Overlap_Query,
 		filter: ^Query_Filter,
@@ -1064,10 +1094,10 @@ Physics_API :: struct {
 		capacity: u32,
 	) -> u32,
 	// The backend runs its jobs through Host.jobs_run, which calls this with each job's data.
-	run_job:           proc "c" (data: rawptr),
+	run_job:                   proc "c" (data: rawptr),
 	// Destroys every world, for a soft restart, and returns how many there were.
-	world_destroy_all: proc "c" () -> i32,
-	shutdown:          proc "c" (),
+	world_destroy_all:         proc "c" () -> i32,
+	shutdown:                  proc "c" (),
 }
 
 Log_Level :: enum i32 {
@@ -1119,6 +1149,7 @@ Host :: struct {
 #assert(size_of(Ray) == 40)
 #assert(size_of(Query_Filter) == 80)
 #assert(size_of(Ray_Hit) == 64)
-#assert(size_of(Physics_API) == 16 * size_of(rawptr))
+#assert(size_of(Physics_API) == 17 * size_of(rawptr))
+#assert(size_of(Height_Field_Desc) == 56)
 #assert(size_of(Host) == 7 * size_of(rawptr))
 #assert(size_of(jobs.Counter) == 16)

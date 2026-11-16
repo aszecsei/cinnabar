@@ -709,6 +709,84 @@ meshes :: proc(t: ^testing.T, api: ^physics.Physics_API) {
 	)
 }
 
+// height_fields: a ray from above hits a field of heights at the height under it, a ray over its hole passes through,
+// a dynamic box rests on it, and a dynamic body on it is refused.
+height_fields :: proc(t: ^testing.T, api: ^physics.Physics_API) {
+	w := api.world_create(&physics.World_Desc{max_bodies = 64, max_shapes = 64})
+	defer api.world_destroy(w)
+	list := physics.command_list(context.temp_allocator)
+	physics.cmd_set_world(&list, GRAVITY, all_layers())
+	testing.expect(t, physics.submit(api, w, list))
+	// 9 x 9 samples, 2.5 m apart, from (-10, -10) to (10, 10), sloping up along x by 0.1 m a meter, with a hole of the
+	// four cells around the sample at (5, 5) m.
+	N :: 9
+	heights: [N * N]f32
+	for j in 0 ..< N {
+		for i in 0 ..< N {
+			heights[j * N + i] = 0.1 * (f32(i) * 2.5 - 10)
+		}
+	}
+	heights[6 * N + 6] = physics.HEIGHT_FIELD_HOLE
+	desc := physics.Height_Field_Desc {
+		heights  = &heights[0],
+		count    = {N, N},
+		spacing  = {2.5, 2.5},
+		offset   = {-10, 0, -10},
+		rotation = {0, 0, 0, 1},
+	}
+	testing.expect(t, bool(api.create_height_field_shape(w, GROUND_SHAPE, &desc)))
+	corners := box_corners()
+	testing.expect(
+		t,
+		bool(api.create_mesh_shape(w, BOX_SHAPE, .Convex_Hull, &corners[0], 8, nil, 0, 1000)),
+	)
+	list = physics.command_list(context.temp_allocator)
+	physics.cmd_create_body(&list, physics.body_desc(GROUND, GROUND_SHAPE, .Static, {}, user = 1))
+	physics.cmd_create_body(&list, physics.body_desc(BOX, BOX_SHAPE, .Dynamic, {-3, 3, -3}))
+	testing.expect(t, physics.submit(api, w, list))
+
+	down := physics.Ray {
+		origin       = {-4, 10, -4},
+		direction    = {0, -1, 0},
+		max_distance = 20,
+	}
+	hit: physics.Ray_Hit
+	testing.expect(t, bool(api.raycast(w, &down, nil, &hit)), "a ray from above hits the field")
+	testing.expect_value(t, hit.body, GROUND)
+	testing.expectf(
+		t,
+		abs(hit.position.y - (-0.4)) < 0.01,
+		"at the height under it: %v",
+		hit.position,
+	)
+	through := down
+	through.origin = {5, 10, 5}
+	testing.expect(
+		t,
+		!bool(api.raycast(w, &through, nil, &hit)),
+		"a ray over the hole passes through",
+	)
+
+	for _ in 0 ..< 180 {
+		api.step(w, STEP, 1)
+	}
+	box := state(api, w, BOX).position
+	testing.expectf(t, box.y > -1 && box.y < 0.5, "the box rests on the field: %v", box)
+
+	list = physics.command_list(context.temp_allocator)
+	physics.cmd_create_body(&list, physics.body_desc({2, 1}, GROUND_SHAPE, .Dynamic, {0, 5, 0}))
+	testing.expect(t, !physics.submit(api, w, list), "a dynamic body on a height field is refused")
+}
+
+// box_corners is a 1 m cube's corners about its center.
+@(private)
+box_corners :: proc() -> (corners: [8][3]f32) {
+	for &c, i in corners {
+		c = {f32(i & 1) - 0.5, f32((i >> 1) & 1) - 0.5, f32((i >> 2) & 1) - 0.5}
+	}
+	return
+}
+
 // =================================
 // Characters
 // =================================
