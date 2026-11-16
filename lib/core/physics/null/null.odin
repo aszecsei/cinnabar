@@ -50,22 +50,23 @@ load :: proc(host: ^physics.Host, name := "") -> ^physics.Physics_API {
 
 @(private)
 api := physics.Physics_API {
-	info              = info,
-	world_create      = world_create,
-	world_destroy     = world_destroy,
-	submit            = submit,
-	step              = step,
-	results           = results,
-	body_state        = body_state,
-	create_mesh_shape = create_mesh_shape,
-	raycast           = raycast,
-	raycast_all       = raycast_all,
-	raycast_batch     = raycast_batch,
-	shape_cast        = shape_cast,
-	overlap           = overlap,
-	run_job           = nil,
-	world_destroy_all = world_destroy_all,
-	shutdown          = shutdown,
+	info                      = info,
+	world_create              = world_create,
+	world_destroy             = world_destroy,
+	submit                    = submit,
+	step                      = step,
+	results                   = results,
+	body_state                = body_state,
+	create_mesh_shape         = create_mesh_shape,
+	create_height_field_shape = create_height_field_shape,
+	raycast                   = raycast,
+	raycast_all               = raycast_all,
+	raycast_batch             = raycast_batch,
+	shape_cast                = shape_cast,
+	overlap                   = overlap,
+	run_job                   = nil,
+	world_destroy_all         = world_destroy_all,
+	shutdown                  = shutdown,
 }
 
 @(private)
@@ -465,6 +466,27 @@ create_mesh_shape :: proc "c" (
 			}
 		}
 	} else if kind != .Convex_Hull {
+		return false
+	}
+	w.shapes[shape.index] = shape.generation
+	return true
+}
+
+@(private)
+create_height_field_shape :: proc "c" (
+	handle: physics.World,
+	shape: physics.Shape,
+	desc: ^physics.Height_Field_Desc,
+) -> b32 {
+	context = runtime.default_context()
+	w := find_world(handle)
+	if w == nil ||
+	   desc == nil ||
+	   shape.generation == 0 ||
+	   int(shape.index) >= len(w.shapes) ||
+	   desc.heights == nil ||
+	   desc.count.x < 2 ||
+	   desc.count.y < 2 {
 		return false
 	}
 	w.shapes[shape.index] = shape.generation

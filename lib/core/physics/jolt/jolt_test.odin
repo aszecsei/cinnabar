@@ -122,6 +122,11 @@ meshes :: proc(t: ^testing.T) {
 }
 
 @(test)
+height_fields :: proc(t: ^testing.T) {
+	with_backend(t, conformance.height_fields, quiet = true)
+}
+
+@(test)
 character_moves :: proc(t: ^testing.T) {
 	with_backend(t, conformance.character_moves, quiet = true)
 }
