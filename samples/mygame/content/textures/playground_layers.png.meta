@@ -1,0 +1,6 @@
+# cinnabar asset metadata. Keep this file next to its asset (see docs/content/identity-and-cooking.md#identity).
+guid = 7efe47a9d6ce4dbb9c3f07f3a0968784
+usage = data
+
+[sampler]
+wrap = clamp

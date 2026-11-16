@@ -2,9 +2,10 @@
 # W, A, S and D or a gamepad's left stick walk it, Space or the gamepad's A jumps, and the right mouse button or the
 # right stick turns the camera. It walks up the stairs, slides along the blue wall, stops below the steep red ramp and
 # walks up the gentle gray one, rides the yellow platform, pushes the green boxes, and walks up the hills past the
-# floor's far edge, a terrain that collides by its height map and that the editor's Landscape tool sculpts. Positions
-# are raw World_Position values in units of 2^-24 m, so 2516582400000000000 is 1.5e11 m. The editor writes this file;
-# see docs/editor/document-and-scenes.md#scenes.
+# floor's far edge: a terrain that collides by its height map, blends four layers by its layer map, and has bushes on
+# it, which the editor's Landscape tool sculpts, paints and scatters. Positions are raw World_Position values in
+# units of 2^-24 m, so 2516582400000000000 is 1.5e11 m. The editor writes this file; see
+# docs/editor/document-and-scenes.md#scenes.
 scene 2
 
 entity 93a963fcc659e42b
@@ -271,5 +272,21 @@ component 51 Surface_Renderer
 	height_range = [0, 8]
 	cast_shadows = true
 	height_map = $edfabe6cd1d243218c8ce53e5023c362
+	layer_map = $7efe47a9d6ce4dbb9c3f07f3a0968784
 component 65 Collider
 	shape = Height_Field
+
+entity 5e9c2a7b1d3f4086
+name = "Bushes"
+parent = @4d8b1f6a2c9e4073
+component 1 Transform
+	position = [2516582400000000000, 0, 939524096]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 2 Local_Transform
+	scale = [1, 1, 1]
+component 53 Instanced_Mesh_Renderer
+	mesh = $4c8e1a3f5b7d4e2a9c6f0b8d2e4a6c13
+	materials.0 = $df6c5dff30e64891ad26b57e65e8150d
+	instances = $51946a45bd7f4bcc9a1aae376986d4dc
+	cast_shadows = true
