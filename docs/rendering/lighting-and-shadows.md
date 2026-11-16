@@ -310,7 +310,7 @@ What they show:
      - A hit past the level's distance is stored as a miss, so hit shading skips it, and has no weight. So does a ray below the surface.
   3. **Hit shading** of the rays as a batch of their own (`add_hit_shading`, named `reflections`): with the world probes and the split cascades, the frame's third of `MAX_HIT_BATCHES`. The turn is taken before the trace. When it fails, as when an upload fails, the trace still runs, and its hits have no weight.
   4. **The hits' light** (`reflections hit light`, `reflections hit screen`): the GI's passes (see [World probes](global-illumination.md#world-probes)). A hit's light is its emission, the directional lights and up to 16 punctual lights whose spheres reach the level's distance, each with a shadow ray, and the world probes' light at the hit where they run. Without them the grid has no levels, and the hit takes the ambient light. A hit that the screen shows takes last frame's lit scene instead.
-  5. **The light** (`reflections ray light`, `rtr_light.hlsl`): each waiting ray's light, pre-exposed, into the trace's radiance texture. A ray that found nothing takes the sky's [cubemap](sky.md#specular-light) along it, at roughness 0, and `RTR_FAR` as its distance, so the temporal pass reprojects a point far away and not the surface. A back face has no weight.
+  5. **The light** (`reflections ray light`, `rtr_light.hlsl`): each waiting ray's light, pre-exposed, into the trace's radiance texture. The light of a hit or of the sky is clamped by its luminance to the level's `radiance_max` (`clamp_hit_light` in `hit_clamp.hlsli`, as the [world probes](global-illumination.md#world-probes)' update does), and its color stays the same, so one bright sample does not go into the temporal pass at full value. In Sponza, the brightest samples are rays that see the sun in the sky's cubemap: the clamp takes the Reflections view's largest step from 255 to 120 codes in the upper gallery, and keeps the lit view's mean (see [World probes](global-illumination.md#world-probes) for the measurements). A mirror's reflection of the sun is clamped too, so it is white but blooms less. A ray that found nothing takes the sky's [cubemap](sky.md#specular-light) along it, at roughness 0, and `RTR_FAR` as its distance, so the temporal pass reprojects a point far away and not the surface. A back face has no weight.
   6. **The resolve and the temporal pass**, the screen-space reflections': the ratio estimator over four trace texels, by the pixel's own lobe, so a mirror takes almost no blur, and the temporal pass reprojects the reflected point by the hit's distance.
   7. **The lit scene** (`reflections lit scene`) after the world pass, or the GI's at Low and Medium.
 - **Metal in reflections.** `Hit_Surface` carries the specular albedo beside the diffuse albedo, in 32 bytes still (see [Hit shading](ray-scene.md#hit-shading)), and the hits' light adds it times the probes' light at the hit, or the sky's cubemap along the hit's reflection. So a gold box in a mirror is gold, not black. The direct lights' highlights on a reflected metal are not drawn.
@@ -318,12 +318,12 @@ What they show:
 - **Parameters:** `REFLECTION_PARAMS[.Ray_Traced]` at the reflections' level. No preset takes Low or Medium, but a custom quality may. A trace larger than `MAX_HIT_RAYS` rays doubles the block along x, then y, until it fits (`reflection_stride`), so Ultra at 3840x2160 traces one pixel of each 2x1 block.
   - Kept is what stays between frames: the screen-space reflections' history and lit scene, and the rays' hits (32 B), surfaces (32 B) and light (16 B) and hit shading's order (4 B), for each ray. Transient is the pyramid, the ray and radiance textures and the resolve. The memory is at 2560x1440.
 
-| Level | Rays from | Steps | Cutoff | Distance | Kept | Transient |
-|---|---|---|---|---|---|---|
-| Low | 1 pixel of 2x2 | 16 | 0.3 | 50 m | 130 MiB, or 144 MiB without the GI | 68 MiB |
-| Medium | 1 pixel of 2x2 | 16 | 0.4 | 100 m | 130 MiB, or 144 MiB without the GI | 68 MiB |
-| High | 1 pixel of 2x1 | 16 | 0.5 | 200 m | 261 MiB | 82 MiB |
-| Ultra | Each pixel | 16 | 0.6 | 500 m | 408 MiB | 110 MiB |
+| Level | Rays from | Steps | Cutoff | Distance | Radiance max | Kept | Transient |
+|---|---|---|---|---|---|---|---|
+| Low | 1 pixel of 2x2 | 16 | 0.3 | 50 m | 16 | 130 MiB, or 144 MiB without the GI | 68 MiB |
+| Medium | 1 pixel of 2x2 | 16 | 0.4 | 100 m | 16 | 130 MiB, or 144 MiB without the GI | 68 MiB |
+| High | 1 pixel of 2x1 | 16 | 0.5 | 200 m | 16 | 261 MiB | 82 MiB |
+| Ultra | Each pixel | 16 | 0.6 | 500 m | 16 | 408 MiB | 110 MiB |
 
 - **Cost** was measured on an RTX 5090, in the editor's viewport at 1461x800, with each preset's own quality and `Ray_Traced` at its level, so the world probes and the split cascades ran too. Each figure is the median of five captures, and each capture is an average over a quarter of a second. The 1440p figures are scaled by the number of pixels, 3.15 times.
   - The room scene: the camera near the front wall, looking down the room at the wall mirror.
