@@ -109,9 +109,11 @@ The header, the entries and the dependencies make the head, which the runtime re
 
 The runtime reads an uncompressed blob from the bundle at its offset, as it reads a loose blob from offset 0 of its own file.
 
-**Load units.** `cook package` writes one bundle for each level and one global bundle:
+**Load units.** `cook package` writes one bundle for each level, one for each streaming chunk, and one global bundle:
 
-- **A level** is a scene that `bundles.global_scenes` in the project's settings does not name. Its bundle is `<scene guid>.cbb`. It holds the scene and what only that level uses.
+- **A level** is a scene that `bundles.global_scenes` in the project's settings does not name, and that is not a world's scene (see [Worlds](kinds/worlds.md)). Its bundle is `<scene guid>.cbb`. It holds the scene and what only that level uses.
+- **A streaming chunk** is a scene that a world lists without `persistent`, and that `bundles.global_scenes` does not name. Its bundle is `<scene guid>.cbb`. It holds the scene and what only that chunk uses.
+- **A chunk's level** is the one level that reaches the world that lists the chunk. The world, its persistent scenes, and what more than one chunk of the level uses go in the level's bundle. A chunk's bundle depends on its level's bundle and on `global.cbb`. If no level reaches the world, or more than one level does, the chunk has no level: its bundle depends on `global.cbb` alone, and what its chunks share is global.
 - **What a blob uses** is the assets that it names (`format.blob_references`):
   - A scene's or prefab's behaviour scripts and asset fields, and a scene's navmeshes.
   - A script's requires.
@@ -122,13 +124,12 @@ The runtime reads an uncompressed blob from the bundle at its offset, as it read
   - A UI document's fonts and images.
   - A decision's blackboard.
 
-  A walk from a level follows these references, but it does not go into another level's scene, which belongs to that level.
+  A walk from a level or a chunk follows these references, but it does not go into another level's or chunk's scene, which belongs to that unit.
 - **The global bundle**, `global.cbb`, holds everything else. Every level's bundle depends on it. It holds:
   - What more than one level uses.
   - The scenes that `bundles.global_scenes` names.
   - What no level uses, such as what code loads by GUID: the engine's shaders and textures, a sample's scripts, and `mesh.default_material`.
   - Whatever a global blob uses, so that a global blob never needs a level's bundle.
-- **Streaming chunks** do not have units yet, because nothing streams part of a scene.
 
 Use `bundles.global_scenes` for scenes that are not levels, such as a menu or a scene that a script adds to another. Their assets go in the global bundle, because code can load them at any time.
 
@@ -137,9 +138,11 @@ Use `bundles.global_scenes` for scenes that are not levels, such as a menu or a 
 - `asset.init` with a `Bundle` source opens `global.cbb`.
 - `asset.load` finds a GUID in the open bundles' entries by binary search. If no open bundle has the GUID, it may be a level's scene: `asset.load` opens `<guid>.cbb`, if it exists, and searches again. Loading a level's scene therefore opens the level's bundle.
 - `asset.open_bundle` opens a bundle by name.
+- `asset.hold_bundle` opens a streaming chunk's bundle, `<scene guid>.cbb`, and gives a `Bundle_Hold`, which `asset.release_bundle` ends. A scene that loads in stages holds its bundle from `scene.begin_load` until it unloads (see [Streaming](../world/streaming.md#loading-in-stages)). A scene without a bundle of its own, a bundle that is open for the session, and the loose cache give the zero hold, which holds nothing.
 - A bundle opens after the bundles that it depends on.
 - The runtime refuses a bundle, with an error, if the file is shorter or longer than its header says, or if its layout is not this build's.
-- A bundle stays open for the session. Only its head stays in memory, about 40 bytes for each blob.
+- A held bundle closes at the `asset.poll` after its last hold is released, when no loaded asset was read from it and no open bundle depends on it. An asset that a chunk's entities loaded therefore keeps the bundle open until its users unload it. A hold of a bundle that closed does nothing.
+- Every other bundle stays open for the session: `global.cbb`, a level's bundle, and the bundles that a bundle depends on. Only a bundle's head stays in memory, about 40 bytes for each blob.
 
 **What a release does not do.** Bundles do not change, so `asset.poll` returns nothing, and `asset.current` is always true. Hot reload of assets and of scripts is therefore for development only. Scripts load from bundles like every other asset (see [Scripting](../scripting/tooling-and-hot-reload.md#script-hot-reload)). There are no material previews.
 

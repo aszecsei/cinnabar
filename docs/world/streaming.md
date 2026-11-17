@@ -82,6 +82,7 @@ A stage goes only to the next stage (`change_stage`). A scene that `add_scene` a
 - **Physics bodies** of hidden entities come a few at a time, disabled, and `check_bodies` enables them when `Loading` goes ([Physics: Components](../physics/design.md#components)).
 - **Unload while loading.** `scene.unload_scene` on a scene that is `Reading` ends the host read (`end_read`). It then despawns what the scene made and frees its memory, as for any scene. The policy does this when a source moves away from a scene that is still loading.
 - **A scene that cannot load** is unloaded with what it made ([Failures](#failures)).
+- **Bundles.** In a release, each chunk of a world has a bundle of its own. `scene.begin_load` holds the chunk's bundle, which it opens if it is not already open. `scene.unload_scene` releases the hold, and the bundle closes when nothing loaded from it is in use ([Blobs and loading: Bundles](../content/blobs-and-loading.md#bundles)).
 
 If the world has no scene, the first scene that begins to load becomes `World.scene`.
 
