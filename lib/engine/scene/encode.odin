@@ -16,6 +16,8 @@ import "cinnabar:engine/ecs"
 // field is given, as a pose that must be whole. A volume's setting
 // whose override flag differs gives the flag too, as <name>.override. ids gives an entity's scene ID: drafts, which
 // have none yet, by the IDs that they will have, and the others by their Scene_Entity. An entity with neither is 0.
+// With scenes, a field that holds an entity of a scene other than holder, the number of the scene of the entity that
+// has the component, is written with that scene's GUID, and none if the GUID is zero.
 encode_fields :: proc(
 	w: ^ecs.World,
 	info: ^ecs.Component_Info,
@@ -23,6 +25,8 @@ encode_fields :: proc(
 	ids: map[ecs.Entity]u64,
 	allocator: runtime.Allocator,
 	all := false,
+	scenes: ^Scenes = nil,
+	holder: u32 = 0,
 ) -> []format.Scene_Field {
 	base := base
 	if base == nil {
@@ -47,7 +51,15 @@ encode_fields :: proc(
 				format.Scene_Field {
 					name = field.name,
 					hash = format.scene_field_hash(field.name),
-					value = field_value(w, rawptr(uintptr(data) + at), field, ids, allocator),
+					value = field_value(
+						w,
+						rawptr(uintptr(data) + at),
+						field,
+						ids,
+						allocator,
+						scenes,
+						holder,
+					),
 				},
 			)
 		}
@@ -77,6 +89,8 @@ field_value :: proc(
 	field: Field,
 	ids: map[ecs.Entity]u64,
 	allocator: runtime.Allocator,
+	scenes: ^Scenes = nil,
+	holder: u32 = 0,
 ) -> (
 	v: format.Scene_Value,
 ) {
@@ -121,9 +135,18 @@ field_value :: proc(
 			v.floats[i] = f64(raw)
 		}
 	case .Entity:
+		target := (^ecs.Entity)(src)^
 		v = {
 			kind   = .Entity,
-			entity = scene_id_for(w, (^ecs.Entity)(src)^, ids),
+			entity = scene_id_for(w, target, ids),
+		}
+		if scenes != nil {
+			if number, owned := scene_of(w, target); owned && number != holder {
+				v.scene = scene_guid(scenes, number)
+				if v.scene == {} {
+					v.entity = 0
+				}
+			}
 		}
 	case .Asset:
 		v = {
@@ -132,6 +155,14 @@ field_value :: proc(
 		}
 	}
 	return
+}
+
+// scene_guid is the GUID of the loaded scene with the number, or zero.
+scene_guid :: proc(s: ^Scenes, number: u32) -> format.Guid {
+	if index, found := find_loaded(s, number); found {
+		return s.loaded[index].guid
+	}
+	return {}
 }
 
 // scene_id_for is an entity's scene ID: a draft's from ids, or its Scene_Entity's, or 0.

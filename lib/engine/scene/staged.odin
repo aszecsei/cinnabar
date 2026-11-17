@@ -290,7 +290,7 @@ advance_scene :: proc(
 			view, _ := format.scene_view(stage.blob)
 			count := min(len(view.entities) - stage.next, remaining.spawns)
 			if count > 0 {
-				l := loader(w, handles_of(s, number), nil)
+				l := loader(w, handles_of(s, number), nil, s, number)
 				for i in stage.next ..< stage.next + count {
 					e, read := format.scene_entity_read(stage.blob, view, i, frame)
 					if !read {
@@ -316,7 +316,7 @@ advance_scene :: proc(
 			view, _ := format.scene_view(stage.blob)
 			count := min(len(view.entities) - stage.next, remaining.fills)
 			if count > 0 {
-				l := loader(w, handles_of(s, number), nil)
+				l := loader(w, handles_of(s, number), nil, s, number)
 				for i in stage.next ..< stage.next + count {
 					if stage.spawned[i] == 0 {
 						continue
@@ -343,6 +343,7 @@ advance_scene :: proc(
 			}
 			reveal(w, scripts, s, number, stage)
 			change_stage(row, Scene_Ready{})
+			links_scene_ready(s, w, number)
 			log.infof("scene: the scene %d is ready", number)
 			return .Ready
 		case Scene_Ready:
@@ -378,7 +379,7 @@ reveal :: proc(
 		return
 	}
 	view, _ := format.scene_view(stage.blob)
-	l := loader(w, handles_of(s, number), nil)
+	l := loader(w, handles_of(s, number), nil, s, number)
 	for entity, i in stage.spawned {
 		if entity == 0 || view.entities[i].behaviours.size == 0 {
 			continue

@@ -53,6 +53,15 @@ component 100 Probe
 	target = @00000000000000d1
 `
 
+// A gate whose probe refers to the door of NORTH, in another scene.
+@(private = "file")
+GATE :: `scene 3
+entity 00000000000000a1
+name = "Gate"
+component 100 Probe
+	target = @51000000000000000000000000000001/00000000000000d1
+`
+
 @(private = "file")
 TURRET :: `scene 2
 entity 1000000000000001
@@ -80,6 +89,12 @@ NORTH_GUID :: format.Guid {
 @(private = "file")
 SOUTH_GUID :: format.Guid {
 	0  = 0x52,
+	15 = 1,
+}
+
+@(private = "file")
+GATE_GUID :: format.Guid {
+	0  = 0x53,
 	15 = 1,
 }
 
@@ -143,6 +158,7 @@ setup :: proc(t: ^testing.T) -> ^Streaming_Fixture {
 	write_blob(t, f, NORTH_GUID, NORTH, .Scene)
 	write_blob(t, f, SOUTH_GUID, SOUTH, .Scene)
 	write_blob(t, f, TURRET_GUID, TURRET, .Prefab)
+	write_blob(t, f, GATE_GUID, GATE, .Scene)
 	return f
 }
 
@@ -386,4 +402,153 @@ a_holder_drops_the_data_of_a_scene_that_unloaded :: proc(t: ^testing.T) {
 	unload_level(w, &f.scenes)
 	testing.expect(t, read(f, &south_holder) == nil)
 	testing.expect_value(t, open_test_scene_memory(), 0)
+}
+
+// A field that names an entity of another scene reads none while that scene is not loaded, is that scene's entity
+// while it is, and is none again once it unloads. A scene that loads again gives the field its new entity.
+@(test)
+a_reference_across_scenes_follows_its_scene :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	w := &f.world
+	gate_scene, gate_ok := add_scene_asset(w, nil, &f.scenes, GATE_GUID)
+	testing.expect(t, gate_ok)
+	gate := find(&f.scenes, w, gate_scene, 0xa1)
+	target :: proc(f: ^Streaming_Fixture, gate: ecs.Entity) -> ecs.Entity {
+		return ecs.get(&f.world, gate, Probe).target
+	}
+	testing.expect_value(t, target(f, gate), 0)
+	waiting, is_waiting := pending(&f.scenes, w, gate, PROBE_ID, "target")
+	testing.expect(t, is_waiting)
+	testing.expect_value(t, waiting, NORTH_GUID)
+
+	north, north_ok := add_scene_asset(w, nil, &f.scenes, NORTH_GUID)
+	testing.expect(t, north_ok)
+	door := find(&f.scenes, w, north, 0xd1)
+	testing.expect(t, door != 0)
+	testing.expect_value(t, target(f, gate), door)
+	_, is_waiting = pending(&f.scenes, w, gate, PROBE_ID, "target")
+	testing.expect(t, !is_waiting)
+
+	unload_scene(w, &f.scenes, north)
+	testing.expect_value(t, target(f, gate), 0)
+	waiting, is_waiting = pending(&f.scenes, w, gate, PROBE_ID, "target")
+	testing.expect(t, is_waiting)
+	testing.expect_value(t, waiting, NORTH_GUID)
+
+	again, _ := add_scene_asset(w, nil, &f.scenes, NORTH_GUID)
+	new_door := find(&f.scenes, w, again, 0xd1)
+	testing.expect(t, new_door != 0)
+	testing.expect_value(t, target(f, gate), new_door)
+
+	// The holder going leaves nothing to follow, and the target going after it is no trouble.
+	unload_scene(w, &f.scenes, gate_scene)
+	testing.expect_value(t, unload_scene(w, &f.scenes, again), 2)
+}
+
+// A gate that loads after its target is bound when it loads, and a second scene with the target's GUID takes over
+// when the first unloads.
+@(test)
+a_reference_across_scenes_moves_to_another_scene_with_the_guid :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	w := &f.world
+	first, _ := add_scene_asset(w, nil, &f.scenes, NORTH_GUID)
+	second, _ := add_scene_asset(w, nil, &f.scenes, NORTH_GUID)
+	gate_scene, _ := add_scene_asset(w, nil, &f.scenes, GATE_GUID)
+	gate := find(&f.scenes, w, gate_scene, 0xa1)
+	first_door := find(&f.scenes, w, first, 0xd1)
+	second_door := find(&f.scenes, w, second, 0xd1)
+	testing.expect_value(t, ecs.get(w, gate, Probe).target, first_door)
+
+	unload_scene(w, &f.scenes, first)
+	testing.expect_value(t, ecs.get(w, gate, Probe).target, second_door)
+	_, is_waiting := pending(&f.scenes, w, gate, PROBE_ID, "target")
+	testing.expect(t, !is_waiting)
+	unload_scene(w, &f.scenes, second)
+	testing.expect_value(t, ecs.get(w, gate, Probe).target, 0)
+}
+
+// A value that something else wrote into the field since the link wrote it stays when the scene loads.
+@(test)
+a_reference_across_scenes_does_not_overwrite_a_newer_value :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	w := &f.world
+	gate_scene, _ := add_scene_asset(w, nil, &f.scenes, GATE_GUID)
+	gate := find(&f.scenes, w, gate_scene, 0xa1)
+	other := ecs.spawn(w)
+	ecs.get(w, gate, Probe).target = other
+	add_scene_asset(w, nil, &f.scenes, NORTH_GUID)
+	testing.expect_value(t, ecs.get(w, gate, Probe).target, other)
+	_, is_waiting := pending(&f.scenes, w, gate, PROBE_ID, "target")
+	testing.expect(t, !is_waiting)
+}
+
+// An edit that sets the field to a local entity ends the link, so the target loading leaves it as it is.
+@(test)
+setting_a_field_ends_its_link :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	w := &f.world
+	gate_scene, _ := add_scene_asset(w, nil, &f.scenes, GATE_GUID)
+	gate := find(&f.scenes, w, gate_scene, 0xa1)
+	handles := handles_of(&f.scenes, gate_scene)
+	handles[0xa2] = gate
+	field := format.Scene_Field {
+		name = "target",
+		hash = format.scene_field_hash("target"),
+		value = {kind = .Entity, entity = 0xa2},
+	}
+	testing.expect(
+		t,
+		set_field(w, gate, 0xa1, u64(PROBE_ID), field, false, handles, nil, &f.scenes),
+	)
+	testing.expect_value(t, ecs.get(w, gate, Probe).target, gate)
+	_, is_waiting := pending(&f.scenes, w, gate, PROBE_ID, "target")
+	testing.expect(t, !is_waiting)
+	add_scene_asset(w, nil, &f.scenes, NORTH_GUID)
+	testing.expect_value(t, ecs.get(w, gate, Probe).target, gate)
+}
+
+// A field that holds an entity of another scene is written with that scene's GUID, and one in its own scene without.
+@(test)
+a_reference_across_scenes_encodes_with_its_scenes_guid :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	w := &f.world
+	gate_scene, _ := add_scene_asset(w, nil, &f.scenes, GATE_GUID)
+	north, _ := add_scene_asset(w, nil, &f.scenes, NORTH_GUID)
+	gate := find(&f.scenes, w, gate_scene, 0xa1)
+	hinge := find(&f.scenes, w, north, 0xd2)
+	info := ecs.registry_find(&w.registry, PROBE_ID)
+	encode :: proc(
+		f: ^Streaming_Fixture,
+		info: ^ecs.Component_Info,
+		entity: ecs.Entity,
+		holder: u32,
+	) -> format.Scene_Value {
+		fields := encode_fields(
+			&f.world,
+			info,
+			ecs.get_raw(&f.world, entity, PROBE_ID),
+			nil,
+			nil,
+			context.temp_allocator,
+			scenes = &f.scenes,
+			holder = holder,
+		)
+		for field in fields {
+			if field.name == "target" {
+				return field.value
+			}
+		}
+		return {}
+	}
+	across := encode(f, info, gate, gate_scene)
+	testing.expect_value(t, across.scene, NORTH_GUID)
+	testing.expect_value(t, across.entity, 0xd1)
+	within := encode(f, info, hinge, north)
+	testing.expect_value(t, within.scene, format.Guid{})
+	testing.expect_value(t, within.entity, 0xd1)
 }
