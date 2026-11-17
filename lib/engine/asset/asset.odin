@@ -514,6 +514,31 @@ bundle_entry :: proc(
 	return
 }
 
+// bundle_entry_opening is bundle_entry, which opens <guid>.cbb, if there is one, when no open bundle has the GUID, as a
+// level's scene has its own bundle, and looks again.
+@(private)
+bundle_entry_opening :: proc(
+	a: ^Assets,
+	source: ^Bundle,
+	guid: format.Guid,
+) -> (
+	b: ^Open_Bundle,
+	entry: format.Bundle_Entry,
+	found: bool,
+) {
+	b, entry, found = bundle_entry(source, guid)
+	if found {
+		return
+	}
+	buffer: [32]u8
+	name := format.guid_format(guid, &buffer)
+	if a.platform.file_modified(bundle_path(a, source, name)) != 0 &&
+	   open_bundle_at(a, source, name, 0) {
+		b, entry, found = bundle_entry(source, guid)
+	}
+	return
+}
+
 // open_bundle opens the bundle <dir>/<name>.cbb after the bundles that it depends on, and reads its head. A bundle that
 // is open already stays as it is. It fails, and logs why, if the bundle or a dependency is missing or does not check, or
 // if the bundles would be more than MAX_BUNDLES.
@@ -683,12 +708,7 @@ read_bundled :: proc(
 ) {
 	buffer: [32]u8
 	name := format.guid_format(guid, &buffer)
-	b, entry, found := bundle_entry(source, guid)
-	if !found &&
-	   a.platform.file_modified(bundle_path(a, source, name)) != 0 &&
-	   open_bundle_at(a, source, name, 0) {
-		b, entry, found = bundle_entry(source, guid)
-	}
+	b, entry, found := bundle_entry_opening(a, source, guid)
 	if !found {
 		log.errorf("asset: no open bundle has %s. Cook and package the content.", name)
 		return

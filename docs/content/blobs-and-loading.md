@@ -2,7 +2,7 @@
 
 The blob format every kind shares, how the asset runtime loads blobs from the loose cache and hot-reloads them, and the bundles that a release build loads them from.
 
-**In this document:** [Blob format](#blob-format) · [Loading](#loading) · [Live blobs](#live-blobs) · [Bundles](#bundles)
+**In this document:** [Blob format](#blob-format) · [Loading](#loading) · [Reads across frames](#reads-across-frames) · [Live blobs](#live-blobs) · [Bundles](#bundles)
 
 ## Blob format
 
@@ -65,6 +65,16 @@ The format package has its own enum of texture formats, because it imports nothi
 - **Asset hot reload:** only from the loose cache, so only in development. After a cook writes blobs, it writes a counter to the cache's `.generation`, through a temporary file and a rename. The cook daemon and the batch commands both do this. The game calls `asset.poll` at the end of each frame, and `poll` checks the counter's modification time. When the counter changes, `poll` checks the modification time of each loaded blob, and swaps every new blob behind its generational handle in that frame. A script and the modules that it requires therefore change together. The game learns of new blobs only through the cache, so it needs no connection to the daemon, and hot reload works with or without the editor. The game passes `poll`'s result to `script.reload_changed`, which reloads the scripts among the swapped blobs (see [Scripting](../scripting/tooling-and-hot-reload.md#script-hot-reload)).
 - **GPU data:** the asset runtime keeps blobs on the CPU and knows nothing about the GPU. The renderer keeps a residency table (see [Rendering](../rendering/assets.md#gpu-residency)), which creates and streams the GPU resources of texture and mesh assets.
 - **Scripts load on demand.** A script blob stays loaded while its module is loaded. The VM holds the module's result, not the blob, so the blob can be swapped under it.
+
+## Reads across frames
+
+`asset.read` and `asset.load` read a blob before they return. A big blob, such as a scene, can take longer than a frame to read. `asset.blob_read_begin` reads it across frames instead, with the host's reads (see [Platform: File reads](../core/platform.md#file-reads)).
+
+- **Begin:** `blob_read_begin(a, guid)` finds the blob as `blob_location` does, and starts a host read of its bytes. A loose blob has the size of its file, from `file_size`. A bundled blob has the size and stored size of its entry. It returns a `Blob_Read`, a union. A read that cannot begin is `Blob_Read_Failed`, and a read that does not exist is not a success. A paged mesh cannot be read this way, because its pages stream.
+- **Poll:** `blob_read_poll(a, &read, allocator)` returns `Pending`, `Done` or `Failed`. When the host read is done, it copies the blob, or decompresses it for an LZ4 entry, into `allocator` at the blob alignment. Then it checks the header, the kind and the GUID as `asset.read` does, and ends the host read. The caller owns the data of a `Done` read.
+- **End:** `blob_read_end(a, &read)` cancels a read that is pending. It does nothing for a read that is finished or failed, so the owner of a read can always end it.
+
+A scene's entities are then made across frames from the blob, one record at a time (see `format.scene_view` and `format.scene_entity_read`).
 
 ## Live blobs
 
