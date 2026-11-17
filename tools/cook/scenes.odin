@@ -10,7 +10,7 @@ import "core:slice"
 import format "cinnabar:engine/asset/format"
 
 // Changing how the cooker cooks scenes changes this, which invalidates every cooked scene.
-SCENE_COOK_VERSION :: "scenes 3"
+SCENE_COOK_VERSION :: "scenes 4"
 
 // cook_scenes cooks the prefabs and the scenes among the assets whose keys changed. The cooker cannot lay out native
 // components, because their types exist only in the game DLL, so it checks only what the file itself says: its
@@ -58,6 +58,9 @@ cook_scenes :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass) 
 		}
 		asset_source(pass, i)
 		scene, ok := parse_scene(s^, problems)
+		if ok {
+			drop_scene_references(scene, s, problems)
+		}
 		prefabs.parsed[s.meta.guid] = scene if ok else nil
 		if ok {
 			parsed[i] = scene
@@ -177,6 +180,9 @@ scene_prefab :: proc(p: ^Scene_Prefabs, guid: format.Guid) -> (format.Scene, boo
 	asset_source(p.pass, i)
 	carried: Problems
 	scene, ok := parse_scene(p.pass.assets[i], &carried)
+	if ok {
+		drop_scene_references(scene, nil, nil)
+	}
 	p.parsed[guid] = scene if ok else nil
 	return scene, ok
 }
@@ -287,6 +293,69 @@ parse_scene :: proc(s: Asset_Source, problems: ^Problems) -> (scene: format.Scen
 	return
 }
 
+// drop_scene_references makes every reference to an entity of another scene none, in place. A prefab has no scene of
+// its own to name them from, and an instance of it can be in any scene. With a problems list, each one is a warning.
+drop_scene_references :: proc(scene: format.Scene, s: ^Asset_Source, problems: ^Problems) {
+	drop :: proc(
+		e: format.Scene_Entity,
+		what: string,
+		fields: []format.Scene_Field,
+		s: ^Asset_Source,
+		problems: ^Problems,
+	) {
+		for &f in fields {
+			if f.value.kind != .Entity || f.value.scene == {} {
+				continue
+			}
+			if problems != nil {
+				buffer: [32]u8
+				report_warning(
+					problems,
+					s.path,
+					0,
+					0,
+					"entity %016x: %s%s refers to an entity of the scene %s, which a prefab cannot do, so it is none",
+					e.id,
+					what,
+					f.name,
+					format.guid_format(f.value.scene, &buffer),
+				)
+			}
+			f.value.entity = 0
+			f.value.scene = {}
+		}
+	}
+	for e in scene.entities {
+		for c in e.components {
+			drop(e, fmt.tprintf("%s.", c.name), c.fields, s, problems)
+		}
+		for b in e.behaviours {
+			drop(e, "", b.fields, s, problems)
+		}
+	}
+}
+
+// localize_scene_references gives a reference to an entity of the scene itself, by its GUID, the form of a reference
+// in its own file: the loader finds these without waiting for a scene.
+localize_scene_references :: proc(scene: format.Scene, guid: format.Guid) {
+	for e in scene.entities {
+		for c in e.components {
+			for &f in c.fields {
+				if f.value.kind == .Entity && f.value.scene == guid {
+					f.value.scene = {}
+				}
+			}
+		}
+		for b in e.behaviours {
+			for &f in b.fields {
+				if f.value.kind == .Entity && f.value.scene == guid {
+					f.value.scene = {}
+				}
+			}
+		}
+	}
+}
+
 // check_scene expands a parsed scene or prefab and reports its problems. A prefab has one root. An instance of an
 // asset that is not a prefab is an error, as are the expansion's errors. A reference to a scene ID, a script or an
 // asset that does not exist is a warning: the loader skips it, and the editor keeps it. The cooker cannot check an
@@ -355,18 +424,41 @@ check_scene :: proc(
 	if !ok {
 		return
 	}
+	if kind == .Scene {
+		localize_scene_references(flat, s.meta.guid)
+	}
 	ids := make(map[u64]bool, len(flat.entities), context.temp_allocator)
 	for e in flat.entities {
 		ids[e.id] = true
 	}
+	// A reference to another scene is checked by its scene's GUID. The entity is in a file that this scene does not
+	// read, and the target is not a dependency, because the scene loads without it.
 	check_reference :: proc(
 		s: Asset_Source,
 		ids: map[u64]bool,
+		known: map[format.Guid]format.Asset_Kind,
 		entity: u64,
 		what: string,
-		id: u64,
+		value: format.Scene_Value,
 		problems: ^Problems,
 	) {
+		if value.scene != {} {
+			if kind, found := known[value.scene]; !found || kind != .Scene {
+				buffer: [32]u8
+				report_warning(
+					problems,
+					s.path,
+					0,
+					0,
+					"entity %016x: %s refers to the scene %s, which is not a scene in the content",
+					entity,
+					what,
+					format.guid_format(value.scene, &buffer),
+				)
+			}
+			return
+		}
+		id := value.entity
 		if id != 0 && !ids[id] {
 			report_warning(
 				problems,
@@ -381,16 +473,25 @@ check_scene :: proc(
 		}
 	}
 	for e in flat.entities {
-		check_reference(s, ids, e.id, "parent", e.parent, problems)
+		check_reference(
+			s,
+			ids,
+			known,
+			e.id,
+			"parent",
+			{kind = .Entity, entity = e.parent},
+			problems,
+		)
 		for c in e.components {
 			for f in c.fields {
 				if f.value.kind == .Entity {
 					check_reference(
 						s,
 						ids,
+						known,
 						e.id,
 						fmt.tprintf("%s.%s", c.name, f.name),
-						f.value.entity,
+						f.value,
 						problems,
 					)
 				}
@@ -425,7 +526,7 @@ check_scene :: proc(
 			}
 			for f in b.fields {
 				if f.value.kind == .Entity {
-					check_reference(s, ids, e.id, f.name, f.value.entity, problems)
+					check_reference(s, ids, known, e.id, f.name, f.value, problems)
 				}
 			}
 		}
