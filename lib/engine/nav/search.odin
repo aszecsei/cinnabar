@@ -4,7 +4,7 @@ import "base:runtime"
 import "core:math/bits"
 import "core:math/linalg"
 
-// The search over a navmesh's polygons, as Detour's dtNavMeshQuery does it, in the engine's own code (see
+// The search over the navmeshes' polygons, as Detour's dtNavMeshQuery does it, in the engine's own code (see
 // docs/ai/navigation.md#queries). A* finds the polygons from the start to the goal, and the funnel pulls the straight
 // path through their portals. A search keeps its state in a Search, so the paths system runs it for a few nodes in each
 // tick, and a search stops only between nodes, so how many nodes a tick gives it changes when its path is ready and
@@ -28,7 +28,7 @@ Node_State :: enum u8 {
 // Node is a polygon that a search reached: from which node, at which point of its portal, and at what cost.
 @(private)
 Node :: struct {
-	polygon:  u32,
+	polygon:  Poly,
 	parent:   u32,
 	position: [3]f32,
 	cost:     f32,
@@ -75,9 +75,9 @@ graph_clear :: proc(g: ^Graph) {
 }
 
 @(private)
-graph_slot :: proc "contextless" (g: ^Graph, polygon: u32) -> int {
+graph_slot :: proc "contextless" (g: ^Graph, polygon: Poly) -> int {
 	mask := len(g.table) - 1
-	i := int((polygon * 0x9E3779B1) >> 7) & mask
+	i := int(((polygon.polygon ~ (polygon.slot * 0x85EBCA6B)) * 0x9E3779B1) >> 7) & mask
 	for g.table[i] != 0 && g.nodes[g.table[i] - 1].polygon != polygon {
 		i = (i + 1) & mask
 	}
@@ -86,7 +86,7 @@ graph_slot :: proc "contextless" (g: ^Graph, polygon: u32) -> int {
 
 // graph_node is a polygon's node, which it adds as New if it has none and there is room.
 @(private)
-graph_node :: proc(g: ^Graph, polygon: u32) -> (index: u32, ok: bool) {
+graph_node :: proc(g: ^Graph, polygon: Poly) -> (index: u32, ok: bool) {
 	slot := graph_slot(g, polygon)
 	if g.table[slot] != 0 {
 		return g.table[slot] - 1, true
@@ -100,7 +100,7 @@ graph_node :: proc(g: ^Graph, polygon: u32) -> (index: u32, ok: bool) {
 }
 
 @(private)
-graph_find :: proc "contextless" (g: ^Graph, polygon: u32) -> u32 {
+graph_find :: proc "contextless" (g: ^Graph, polygon: Poly) -> u32 {
 	slot := graph_slot(g, polygon)
 	return g.table[slot] - 1 if g.table[slot] != 0 else NO_NODE
 }
@@ -190,14 +190,14 @@ Search_State :: enum u8 {
 	Exhausted,
 }
 
-// Search is an A* search from a point on the start polygon to a goal, which goal_polygon holds, or NO_POLYGON for a
-// goal that no polygon holds, which the search can only come near.
+// Search is an A* search from a point on the start polygon to a goal, which goal_polygon holds, or NO_POLY for a goal
+// that no polygon holds, which the search can only come near. Its points are relative to its net's origin.
 @(private)
 Search :: struct {
 	graph:          Graph,
 	start, goal:    [3]f32,
-	start_polygon:  u32,
-	goal_polygon:   u32,
+	start_polygon:  Poly,
+	goal_polygon:   Poly,
 	// The node nearest the goal by its heuristic, where a partial path ends. An earlier node keeps a tie.
 	best:           u32,
 	best_heuristic: f32,
@@ -207,7 +207,7 @@ Search :: struct {
 }
 
 @(private)
-search_begin :: proc(sr: ^Search, start, goal: [3]f32, start_polygon, goal_polygon: u32) {
+search_begin :: proc(sr: ^Search, start, goal: [3]f32, start_polygon, goal_polygon: Poly) {
 	g := &sr.graph
 	graph_clear(g)
 	sr.start, sr.goal = start, goal
@@ -224,7 +224,7 @@ search_begin :: proc(sr: ^Search, start, goal: [3]f32, start_polygon, goal_polyg
 
 // search_step expands at most expansions nodes, and gives whether the search is done.
 @(private)
-search_step :: proc(sr: ^Search, m: ^Mesh_View, expansions: int) -> (done: bool) {
+search_step :: proc(sr: ^Search, n: ^Net, expansions: int) -> (done: bool) {
 	g := &sr.graph
 	for _ in 0 ..< expansions {
 		if sr.state != .Running {
@@ -243,7 +243,7 @@ search_step :: proc(sr: ^Search, m: ^Mesh_View, expansions: int) -> (done: bool)
 			break
 		}
 		from := g.nodes[current]
-		it := portals(m, from.polygon)
+		it := portals(n, from.polygon)
 		for portal in next_portal(&it) {
 			if from.parent != NO_NODE && portal.neighbor == g.nodes[from.parent].polygon {
 				continue
@@ -252,26 +252,26 @@ search_step :: proc(sr: ^Search, m: ^Mesh_View, expansions: int) -> (done: bool)
 			if !ok {
 				continue
 			}
-			n := &g.nodes[next]
+			node := &g.nodes[next]
 			// A new node is at the middle of the portal that first reaches it.
-			if n.state == .New {
-				n.position = (portal.left + portal.right) * 0.5
+			if node.state == .New {
+				node.position = (portal.left + portal.right) * 0.5
 			}
 			cost, heuristic: f32
 			if portal.neighbor == sr.goal_polygon {
 				cost =
 					from.cost +
-					linalg.distance(from.position, n.position) +
-					linalg.distance(n.position, sr.goal)
+					linalg.distance(from.position, node.position) +
+					linalg.distance(node.position, sr.goal)
 			} else {
-				cost = from.cost + linalg.distance(from.position, n.position)
-				heuristic = linalg.distance(n.position, sr.goal) * H_SCALE
+				cost = from.cost + linalg.distance(from.position, node.position)
+				heuristic = linalg.distance(node.position, sr.goal) * H_SCALE
 			}
 			total := cost + heuristic
-			if n.state != .New && total >= n.total {
+			if node.state != .New && total >= node.total {
 				continue
 			}
-			n.parent, n.cost, n.total = current, cost, total
+			node.parent, node.cost, node.total = current, cost, total
 			heap_push(g, next)
 			if heuristic < sr.best_heuristic {
 				sr.best, sr.best_heuristic = next, heuristic
@@ -286,30 +286,30 @@ search_step :: proc(sr: ^Search, m: ^Mesh_View, expansions: int) -> (done: bool)
 @(private)
 search_finish :: proc(
 	sr: ^Search,
-	m: ^Mesh_View,
+	n: ^Net,
 	allocator: runtime.Allocator,
 ) -> (
 	status: Path_Status,
 	corners: [][3]f32,
-	corridor: []u32,
+	corridor: []Poly,
 ) {
 	g := &sr.graph
 	count := 0
-	for n := sr.best; n != NO_NODE; n = g.nodes[n].parent {
+	for x := sr.best; x != NO_NODE; x = g.nodes[x].parent {
 		count += 1
 	}
-	corridor = make([]u32, count, allocator)
-	for n, i := sr.best, count - 1; n != NO_NODE; n, i = g.nodes[n].parent, i - 1 {
-		corridor[i] = g.nodes[n].polygon
+	corridor = make([]Poly, count, allocator)
+	for x, i := sr.best, count - 1; x != NO_NODE; x, i = g.nodes[x].parent, i - 1 {
+		corridor[i] = g.nodes[x].polygon
 	}
 	end := sr.goal
 	if sr.state == .Reached {
 		status = .Found
 	} else {
 		status = .Partial
-		end, _ = closest_on_polygon(m, corridor[count - 1], sr.goal)
+		end, _ = net_closest(n, corridor[count - 1], sr.goal)
 	}
-	corners = straight_path(m, sr.start, end, corridor, allocator)
+	corners = straight_path(n, sr.start, end, corridor, allocator)
 	return
 }
 
@@ -317,9 +317,9 @@ search_finish :: proc(
 // last, with the funnel of Detour's findStraightPath. Its corners start with start and end with end.
 @(private)
 straight_path :: proc(
-	m: ^Mesh_View,
+	n: ^Net,
 	start, end: [3]f32,
-	corridor: []u32,
+	corridor: []Poly,
 	allocator: runtime.Allocator,
 ) -> [][3]f32 {
 	out := make([dynamic][3]f32, 0, len(corridor) + 1, allocator)
@@ -335,10 +335,10 @@ straight_path :: proc(
 		for i := 0; i < len(corridor); i += 1 {
 			next_left, next_right: [3]f32
 			if i + 1 < len(corridor) {
-				portal, ok := portal_between(m, corridor[i], corridor[i + 1])
+				portal, ok := portal_between(n, corridor[i], corridor[i + 1])
 				if !ok {
 					// The corridor is broken: it ends at the nearest point of the last polygon that it reached.
-					q, _ := closest_on_polygon(m, corridor[i], end)
+					q, _ := net_closest(n, corridor[i], end)
 					add(&out, q)
 					return out[:]
 				}

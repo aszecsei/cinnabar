@@ -3,12 +3,10 @@ package nav
 import "core:math"
 import "core:math/linalg"
 
-import format "cinnabar:engine/asset/format"
-
 // An agent's corridor (see docs/ai/navigation.md#crowds): the polygons of its path from the one that it stands on to
 // its target's, as DetourCrowd's dtPathCorridor keeps them. As the agent moves, the corridor's start follows it over
 // the polygons that it crossed; a straight walk to a corner ahead cuts the polygons between; and the funnel over the
-// corridor gives the next corners to steer to. Everything here is relative to the navmesh's anchor.
+// corridor gives the next corners to steer to. Everything here is relative to its net's origin, and crosses seams.
 
 // The polygons that a move along the surface searches, as Detour's moveAlongSurface's MAX_STACK.
 @(private)
@@ -19,16 +17,16 @@ MOVE_SEARCH :: 48
 // polygons from first to the one that holds that point, in allocator.
 @(private)
 move_along_surface :: proc(
-	m: ^Mesh_View,
-	first: u32,
+	n: ^Net,
+	first: Poly,
 	start, end: [3]f32,
 	allocator := context.temp_allocator,
 ) -> (
 	result: [3]f32,
-	visited: []u32,
+	visited: []Poly,
 ) {
 	Visit :: struct {
-		polygon: u32,
+		polygon: Poly,
 		parent:  int,
 	}
 	nodes := make([dynamic]Visit, 0, MOVE_SEARCH, allocator)
@@ -42,30 +40,16 @@ move_along_surface :: proc(
 	radius_squared := radius * radius
 	for i := 0; i < len(nodes); i += 1 {
 		current := nodes[i]
-		pts := points_of(m, current.polygon)
+		pts := net_points(n, current.polygon)
 		if inside_2d(end, &pts) {
 			best = i
 			result = end
 			break
 		}
-		p := &m.polygons[current.polygon]
 		for k in 0 ..< pts.count {
 			a, b := pts.points[k], pts.points[(k + 1) % pts.count]
-			neighbors: [format.NAV_MAX_POLYGON_VERTICES + 8]u32
-			count := 0
-			if p.neighbors[k] != format.NAV_NONE {
-				if p.neighbors[k] & format.NAV_EXTERNAL == 0 {
-					neighbors[0] = tile_of(m, current.polygon).first_polygon + u32(p.neighbors[k])
-					count = 1
-				} else {
-					for l in m.links[p.first_link:][:p.link_count] {
-						if int(l.edge) == k && count < len(neighbors) {
-							neighbors[count] = l.polygon
-							count += 1
-						}
-					}
-				}
-			}
+			neighbors: [MAX_CROSSINGS]Crossing
+			count := crossings(n, current.polygon, k, &neighbors)
 			if count == 0 {
 				// A wall: the nearest point of it to end is where the move stops, if no polygon holds end.
 				distance, along := distance_to_segment_2d(end, a, b)
@@ -79,33 +63,33 @@ move_along_surface :: proc(
 			if distance, _ := distance_to_segment_2d(center, a, b); distance > radius_squared {
 				continue
 			}
-			next: for n in neighbors[:count] {
+			next: for c in neighbors[:count] {
 				for v in nodes {
-					if v.polygon == n {
+					if v.polygon == c.to {
 						continue next
 					}
 				}
 				if len(nodes) < MOVE_SEARCH {
-					append(&nodes, Visit{n, i})
+					append(&nodes, Visit{c.to, i})
 				}
 			}
 		}
 	}
 	length := 0
-	for n := best; n >= 0; n = nodes[n].parent {
+	for x := best; x >= 0; x = nodes[x].parent {
 		length += 1
 	}
-	path := make([]u32, length, allocator)
-	for n, i := best, length - 1; n >= 0; n, i = nodes[n].parent, i - 1 {
-		path[i] = nodes[n].polygon
+	path := make([]Poly, length, allocator)
+	for x, i := best, length - 1; x >= 0; x, i = nodes[x].parent, i - 1 {
+		path[i] = nodes[x].polygon
 	}
-	result.y = height_at(m, nodes[best].polygon, result)
+	result.y = net_height(n, nodes[best].polygon, result)
 	return result, path
 }
 
 // furthest_common is the last polygon of a corridor that visited has, by its index in each, as Detour's merges find it.
 @(private)
-furthest_common :: proc(path, visited: []u32) -> (in_path, in_visited: int, found: bool) {
+furthest_common :: proc(path, visited: []Poly) -> (in_path, in_visited: int, found: bool) {
 	for i := len(path) - 1; i >= 0; i -= 1 {
 		for j := len(visited) - 1; j >= 0; j -= 1 {
 			if path[i] == visited[j] {
@@ -120,10 +104,10 @@ furthest_common :: proc(path, visited: []u32) -> (in_path, in_visited: int, foun
 // the polygons that the move crossed, from the one that it ended on back to the last that the corridor has, and then
 // the corridor after it. A move that crossed none of the corridor leaves it as it was, and returns false.
 @(private)
-merge_start_moved :: proc(path: ^[dynamic]u32, visited: []u32) -> bool {
+merge_start_moved :: proc(path: ^[dynamic]Poly, visited: []Poly) -> bool {
 	in_path, in_visited := furthest_common(path[:], visited) or_return
 	rest := path[in_path + 1:]
-	merged := make([dynamic]u32, 0, len(visited) - in_visited + len(rest), context.temp_allocator)
+	merged := make([dynamic]Poly, 0, len(visited) - in_visited + len(rest), context.temp_allocator)
 	for j := len(visited) - 1; j >= in_visited; j -= 1 {
 		append(&merged, visited[j])
 	}
@@ -136,13 +120,13 @@ merge_start_moved :: proc(path: ^[dynamic]u32, visited: []u32) -> bool {
 // merge_start_shortcut cuts a corridor's start to the polygons that a straight walk crossed, as Detour's
 // dtMergeCorridorStartShortcut: visited up to the last polygon that the corridor has, and then the corridor from it.
 @(private)
-merge_start_shortcut :: proc(path: ^[dynamic]u32, visited: []u32) {
+merge_start_shortcut :: proc(path: ^[dynamic]Poly, visited: []Poly) {
 	in_path, in_visited, found := furthest_common(path[:], visited)
 	if !found || in_visited <= 0 {
 		return
 	}
 	rest := path[in_path:]
-	merged := make([dynamic]u32, 0, in_visited + len(rest), context.temp_allocator)
+	merged := make([dynamic]Poly, 0, in_visited + len(rest), context.temp_allocator)
 	append(&merged, ..visited[:in_visited])
 	append(&merged, ..rest)
 	clear(path)
@@ -155,7 +139,7 @@ merge_start_shortcut :: proc(path: ^[dynamic]u32, visited: []u32) {
 Walk :: struct {
 	t:       f32,
 	wall:    Maybe([3]f32),
-	polygon: u32,
+	polygon: Poly,
 }
 
 // raycast_local walks straight from p0 on polygon first toward p1, as Detour's raycast, from polygon to polygon across
@@ -163,17 +147,17 @@ Walk :: struct {
 // polygons that it crosses, first among them.
 @(private)
 raycast_local :: proc(
-	m: ^Mesh_View,
-	first: u32,
+	n: ^Net,
+	first: Poly,
 	p0, p1: [3]f32,
-	visited: ^[dynamic]u32 = nil,
+	visited: ^[dynamic]Poly = nil,
 ) -> (
 	walk: Walk,
 ) {
 	current := first
 	// Each polygon is crossed once at most on a straight line.
-	for _ in 0 ..= len(m.polygons) {
-		pts := points_of(m, current)
+	for _ in 0 ..= net_polygon_count(n) {
+		pts := net_points(n, current)
 		_, tmax, _, leaving, crossed := cross_polygon_2d(p0, p1, &pts)
 		walk.polygon = current
 		if visited != nil {
@@ -192,7 +176,7 @@ raycast_local :: proc(
 		a, b := pts.points[leaving], pts.points[(leaving + 1) % pts.count]
 		c := math.lerp(p0, p1, tmax)
 		along := projection_2d(c, a, b)
-		next, found := across(m, current, leaving, along)
+		next, found := across(n, current, leaving, along)
 		if !found {
 			normal := [3]f32{b.z - a.z, 0, -(b.x - a.x)}
 			if length := linalg.length(normal); length > 0 {
@@ -223,8 +207,8 @@ WALL_SEARCH :: 32
 // nothing crosses, or the parts of them that no link covers. It keeps the MAX_WALLS nearest, in out.
 @(private)
 wall_segments :: proc(
-	m: ^Mesh_View,
-	first: u32,
+	n: ^Net,
+	first: Poly,
 	center: [3]f32,
 	range: f32,
 	out: ^[MAX_WALLS]Segment,
@@ -255,45 +239,29 @@ wall_segments :: proc(
 		out[at], distances[at] = s, d
 		count^ = min(count^ + 1, MAX_WALLS)
 	}
-	visited: [WALL_SEARCH]u32
+	visited: [WALL_SEARCH]Poly
 	visited[0] = first
-	n := 1
-	for i := 0; i < n; i += 1 {
+	count_visited := 1
+	for i := 0; i < count_visited; i += 1 {
 		polygon := visited[i]
-		p := &m.polygons[polygon]
-		pts := points_of(m, polygon)
+		pts := net_points(n, polygon)
 		for k in 0 ..< pts.count {
 			a, b := pts.points[k], pts.points[(k + 1) % pts.count]
-			neighbor := p.neighbors[k]
 			// The parts of the edge that something crosses, as fractions of it, in order.
-			spans: [8][2]f32
-			span_count := 0
-			if neighbor != format.NAV_NONE {
-				if neighbor & format.NAV_EXTERNAL == 0 {
-					spans[0] = {0, 1}
-					span_count = 1
-					next := tile_of(m, polygon).first_polygon + u32(neighbor)
-					add_visit(&visited, &n, m, center, range_squared, next, a, b)
-				} else {
-					for l in m.links[p.first_link:][:p.link_count] {
-						if int(l.edge) != k || span_count == len(spans) {
-							continue
-						}
-						t0, t1 := f32(l.t_min) / 255, f32(l.t_max) / 255
-						spans[span_count] = {t0, t1}
-						span_count += 1
-						add_visit(
-							&visited,
-							&n,
-							m,
-							center,
-							range_squared,
-							l.polygon,
-							math.lerp(a, b, t0),
-							math.lerp(a, b, t1),
-						)
-					}
-				}
+			across: [MAX_CROSSINGS]Crossing
+			span_count := crossings(n, polygon, k, &across)
+			spans: [MAX_CROSSINGS][2]f32
+			for c, x in across[:span_count] {
+				spans[x] = {c.t0, c.t1}
+				add_visit(
+					&visited,
+					&count_visited,
+					center,
+					range_squared,
+					c.to,
+					math.lerp(a, b, c.t0),
+					math.lerp(a, b, c.t1),
+				)
 			}
 			// The gaps between the spans are wall.
 			for x in 1 ..< span_count {
@@ -321,12 +289,11 @@ wall_segments :: proc(
 
 @(private = "file")
 add_visit :: proc(
-	visited: ^[WALL_SEARCH]u32,
+	visited: ^[WALL_SEARCH]Poly,
 	n: ^int,
-	m: ^Mesh_View,
 	center: [3]f32,
 	range_squared: f32,
-	polygon: u32,
+	polygon: Poly,
 	a, b: [3]f32,
 ) {
 	if d, _ := distance_to_segment_2d(center, a, b); d > range_squared || n^ == WALL_SEARCH {

@@ -60,7 +60,7 @@ The cooker cannot lay out native components, so it reads the physics components 
 
 ## The bake
 
-- **Tiles:** a navmesh is a grid of tiles over the volume's bounds, `tile_size` cells on a side, the last row and column cut at the bounds. Each tile reads the triangles that reach it and its border, which is the agent's radius and 3 cells more, so the polygons of two tiles meet along their edge.
+- **Tiles:** a navmesh is a grid of tiles over the volume's bounds, `tile_size` cells on a side, the last row and column cut at the bounds. Each tile reads the triangles that reach it and its border, which is the agent's radius and 3 cells more, so the polygons of two tiles meet along their edge. The edges on the volume's bounds stay border edges with no link, which the runtime joins to another scene's navmesh where their volumes meet ([AI: Navigation: Seams](../../ai/navigation.md#seams)).
 - **Recast**, for each tile:
   1. A heightfield, with the triangles that the agent's slope allows marked walkable.
   2. Filters: low obstacles that the agent steps over, ledges, and spans with less headroom than its height.

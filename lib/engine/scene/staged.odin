@@ -172,9 +172,7 @@ begin_load :: proc(
 		asset.release_bundle(s.assets, &bundle)
 		return 0, false
 	}
-	if w.scene == {} {
-		w.scene = guid
-	}
+	ecs.add_world_scene(w, guid)
 	return added, true
 }
 

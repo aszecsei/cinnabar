@@ -84,7 +84,7 @@ A stage goes only to the next stage (`change_stage`). A scene that `add_scene` a
 - **A scene that cannot load** is unloaded with what it made ([Failures](#failures)).
 - **Bundles.** In a release, each chunk of a world has a bundle of its own. `scene.begin_load` holds the chunk's bundle, which it opens if it is not already open. `scene.unload_scene` releases the hold, and the bundle closes when nothing loaded from it is in use ([Blobs and loading: Bundles](../content/blobs-and-loading.md#bundles)).
 
-If the world has no scene, the first scene that begins to load becomes `World.scene`.
+A scene joins the world's scenes when it begins to load, and its navmeshes load with it ([Navigation: Loading](../ai/navigation.md#loading)). Paths cross between two streamed scenes' navmeshes where their volumes meet ([Navigation: Seams](../ai/navigation.md#seams)).
 
 ## Budgets
 
@@ -147,7 +147,6 @@ A scene fails when `begin_load` refuses it, its blob cannot be read, it is not a
 
 - **Settle, behaviour attach and the removal of `Loading`** at the reveal are not budgeted. They run in one frame for the whole scene.
 - **Characters and joints** have no loading budget. Only rigid bodies and colliders are made a few at a time.
-- **Navmeshes** follow `World.scene`, which is one scene: the first that loaded ([Scenes: Limits](scenes.md#limits)). The navmeshes of other streamed scenes do not load.
 - **Scene memory:** at most `core.MAX_SCENE_MEMORY` (64) scenes are loaded at once, and the policy keeps `MAX_STREAMED_SCENES` (56) of them.
 - **Streaming stands still in Edit mode.** The editor does not edit or save streamed scenes.
 - **One streamer** selects one world. A second `World_Streamer` is ignored.

@@ -141,7 +141,7 @@ draw_nav_probe :: proc(e: ^Editor, d: ^debug.Draw) {
 	drawn: bit_set[0 ..< 64]
 	for &m in e.nav.frame {
 		agent := m.id.agent
-		if agent < 64 && int(agent) in drawn {
+		if m.stamp == {} || (agent < 64 && int(agent) in drawn) {
 			continue
 		}
 		if agent < 64 {

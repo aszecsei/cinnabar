@@ -189,7 +189,7 @@ is_resident :: proc(f: ^Streaming_Fixture, guid: format.Guid) -> bool {
 }
 
 // Two scenes with the same scene IDs load side by side, each resolving its own. Unloading the first leaves the
-// second's entities, their references and their parents as they were, and the world's scene passes to it.
+// second's entities, their references and their parents as they were, and the world's scenes keep only its GUID.
 @(test)
 unloading_one_scene_keeps_the_other :: proc(t: ^testing.T) {
 	f := setup(t)
@@ -201,7 +201,9 @@ unloading_one_scene_keeps_the_other :: proc(t: ^testing.T) {
 	testing.expect(t, north_ok && south_ok)
 	testing.expect(t, north != south)
 	testing.expect_value(t, north, FIRST_RUNTIME_SCENE)
-	testing.expect_value(t, w.scene, NORTH_GUID)
+	testing.expect_value(t, len(ecs.world_scenes(w)), 2)
+	testing.expect_value(t, ecs.world_scenes(w)[0], NORTH_GUID)
+	testing.expect_value(t, ecs.world_scenes(w)[1], SOUTH_GUID)
 	testing.expect_value(t, len(loaded_scenes(&f.scenes)), 2)
 
 	north_door := find(&f.scenes, w, north, 0xd1)
@@ -217,7 +219,8 @@ unloading_one_scene_keeps_the_other :: proc(t: ^testing.T) {
 	testing.expect(t, !ecs.is_alive(w, north_door))
 	testing.expect_value(t, find(&f.scenes, w, north, 0xd1), 0)
 	testing.expect(t, !is_resident(f, NORTH_GUID))
-	testing.expect_value(t, w.scene, SOUTH_GUID)
+	testing.expect_value(t, len(ecs.world_scenes(w)), 1)
+	testing.expect_value(t, ecs.world_scenes(w)[0], SOUTH_GUID)
 
 	// The second scene, the inactive hinge with it, and the game's own entity stay.
 	testing.expect(t, ecs.is_alive(w, game))
@@ -228,7 +231,7 @@ unloading_one_scene_keeps_the_other :: proc(t: ^testing.T) {
 	testing.expect(t, is_resident(f, SOUTH_GUID))
 
 	unload_scene(w, &f.scenes, south)
-	testing.expect_value(t, w.scene, format.Guid{})
+	testing.expect_value(t, len(ecs.world_scenes(w)), 0)
 	testing.expect_value(t, ecs.entity_count(w), 1)
 }
 

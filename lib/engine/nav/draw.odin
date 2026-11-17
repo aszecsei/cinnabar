@@ -45,12 +45,12 @@ agent_color :: proc "contextless" (agent: Agent_Type) -> [4]f32 {
 	return AGENT_COLORS[int(agent) % len(AGENT_COLORS)]
 }
 
-// draw_volume draws the frame's navmeshes of a volume, by its scene ID: their polygons' edges, faint between two
-// polygons and bright where nothing is across, their links across tiles, and their tiles' borders. The lines are
-// lifted a cell up, over the floor that the navmesh lies on.
+// draw_volume draws the frame's navmeshes of a volume, by its scene ID, in any scene: their polygons' edges, faint
+// between two polygons and bright where nothing is across, their links across tiles and seams, and their tiles'
+// borders. The lines are lifted a cell up, over the floor that the navmesh lies on.
 draw_volume :: proc(s: ^State, d: ^debug.Draw, volume: u64) {
 	for &m in s.frame {
-		if m.id.volume == volume {
+		if m.stamp != {} && m.id.volume == volume {
 			draw_mesh(&m, d)
 		}
 	}
@@ -82,6 +82,17 @@ draw_mesh :: proc(m: ^Mesh_View, d: ^debug.Draw) {
 			case:
 				line(d, m, a, b, wall)
 				for l in m.links[polygon.first_link:][:polygon.link_count] {
+					if int(l.edge) == k {
+						line(
+							d,
+							m,
+							math.lerp(a, b, f32(l.t_min) / 255),
+							math.lerp(a, b, f32(l.t_max) / 255),
+							LINK_COLOR,
+						)
+					}
+				}
+				for l in seams_of(m, p) {
 					if int(l.edge) == k {
 						line(
 							d,
@@ -148,22 +159,22 @@ draw_agent :: proc(
 	e: ecs.Entity,
 	at: ecs.World_Position,
 ) -> bool {
-	info, m, corridor := crowd_debug(s, w, e)
+	info, corridor := crowd_debug(s, w, e)
 	if info == nil {
 		return false
 	}
-	if m != nil {
+	for polygon in corridor {
+		m := &s.frame[polygon.slot]
+		n := net_at(s, m)
 		lift := [3]f32{0, m.cell_height, 0}
-		for polygon in corridor {
-			pts := points_of(m, polygon)
-			for k in 0 ..< pts.count {
-				debug.line(
-					d,
-					world(m, pts.points[k] + lift),
-					world(m, pts.points[(k + 1) % pts.count] + lift),
-					CORRIDOR_COLOR,
-				)
-			}
+		pts := net_points(&n, polygon)
+		for k in 0 ..< pts.count {
+			debug.line(
+				d,
+				net_world(&n, pts.points[k] + lift),
+				net_world(&n, pts.points[(k + 1) % pts.count] + lift),
+				CORRIDOR_COLOR,
+			)
 		}
 	}
 	draw_corners(d, info.corners[:info.corner_count], CORNER_COLOR)

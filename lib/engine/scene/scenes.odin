@@ -121,7 +121,7 @@ reserve_number :: proc(s: ^Scenes) -> u32 {
 // add_scene adds a scene to the world beside the scenes that are loaded, and gives its number: number, or with none,
 // the next of the game's own (see FIRST_RUNTIME_SCENE). The scene gets memory of its own, which goes when it unloads.
 // It refuses a number that is loaded, or a scene when core.MAX_SCENE_MEMORY scenes are loaded, and gives false. The
-// scene's IDs resolve only in the scene. The world's scene GUID, whose navmeshes load, is the first loaded scene's.
+// scene's IDs resolve only in the scene. Its GUID joins the world's scenes, whose navmeshes load.
 // Call it between frames, outside the script phase. problems, if given, gets each warning, in frame memory.
 add_scene :: proc(
 	w: ^ecs.World,
@@ -135,9 +135,7 @@ add_scene :: proc(
 	ok: bool,
 ) {
 	added = append_scene(s, scene.guid, number, Scene_Ready{}) or_return
-	if w.scene == {} {
-		w.scene = scene.guid
-	}
+	ecs.add_world_scene(w, scene.guid)
 	spawned := add_entities(w, scripts, scene.entities, handles_of(s, added), problems, added)
 	log.infof("scene: loaded the scene %d, %d entities", added, spawned)
 	return added, true
@@ -229,15 +227,7 @@ unload_scene :: proc(w: ^ecs.World, s: ^Scenes, number: u32) -> int {
 	if s.assets != nil {
 		asset.release_bundle(s.assets, &gone.bundle)
 	}
-	if w.scene == gone.guid {
-		w.scene = {}
-		for other in s.loaded {
-			if other.guid != {} {
-				w.scene = other.guid
-				break
-			}
-		}
-	}
+	ecs.remove_world_scene(w, gone.guid)
 	delete_key(&s.by_scene, number)
 	s.platform.scene_memory_close(gone.memory)
 	doomed := make([dynamic]ecs.Entity, w.platform.frame_allocator)

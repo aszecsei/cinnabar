@@ -121,27 +121,25 @@ Crowd_Debug :: struct {
 	velocity:       [3]f32,
 }
 
-// crowd_debug is an agent's last tick, with its corridor's polygons on its navmesh, or nil when it is not an agent of
-// the crowd. The corridor is valid until the crowd system runs again.
+// crowd_debug is an agent's last tick, with its corridor's polygons on the frame's navmeshes, or nil when it is not an
+// agent of the crowd. The corridor is valid until the crowd system runs again, and nil when a navmesh that it crosses
+// is gone.
 crowd_debug :: proc(
 	s: ^State,
 	w: ^ecs.World,
 	e: ecs.Entity,
 ) -> (
 	debug: ^Crowd_Debug,
-	mesh: ^Mesh_View,
-	corridor: []u32,
+	corridor: []Poly,
 ) {
 	_, slot := find_agent(s, w, e)
 	if slot == nil {
-		return nil, nil, nil
+		return nil, nil
 	}
-	if f, following := slot.phase.(Crowd_Following); following {
-		if m := mesh_of(s, f.mesh); m != nil && m.stamp == f.stamp {
-			mesh, corridor = m, f.corridor[:]
-		}
+	if f, following := slot.phase.(Crowd_Following); following && stamps_hold(s, f.crossed[:]) {
+		corridor = f.corridor[:]
 	}
-	return &slot.debug, mesh, corridor
+	return &slot.debug, corridor
 }
 
 // The phases of an agent in the crowd. A slot whose phase is nil is free.
@@ -149,10 +147,12 @@ Crowd_Idle :: struct {}
 // Waiting for its first path, which slot.asking is.
 Crowd_Asking :: struct {}
 Crowd_Following :: struct {
-	mesh:     Mesh_Id,
-	stamp:    Mesh_Stamp,
-	// The polygons from the one that the agent is on to its path's end.
-	corridor: [dynamic]u32,
+	// The polygons from the one that the agent is on to its path's end, and the navmeshes that they are on, with their
+	// blobs, which a recook or an unload changes.
+	corridor: [dynamic]Poly,
+	crossed:  [dynamic]Slot_Stamp,
+	// What position and end are relative to: the anchor of the navmesh of the corridor's first polygon.
+	origin:   ecs.World_Position,
 	// Where the agent is on its first polygon, and its path's end.
 	position: [3]f32,
 	end:      [3]f32,
@@ -272,6 +272,7 @@ free_crowd_slot :: proc(s: ^State, index: u32) {
 release_crowd_phase :: proc(slot: ^Crowd_Slot) {
 	if f, ok := &slot.phase.(Crowd_Following); ok {
 		delete(f.corridor)
+		delete(f.crossed)
 	}
 }
 
@@ -594,20 +595,23 @@ adopt_paths :: proc(s: ^State, w: ^ecs.World) {
 		}
 		#partial switch p in path.phase {
 		case Path_Solved:
-			m := mesh_of(s, p.mesh)
-			if m == nil || m.stamp != p.stamp || len(p.corridor) == 0 || len(p.corners) == 0 {
+			if !stamps_hold(s, p.crossed[:]) || len(p.corridor) == 0 || len(p.corners) == 0 {
 				continue
 			}
-			corridor := make([dynamic]u32, 0, len(p.corridor), s.platform.heap_allocator)
+			heap := s.platform.heap_allocator
+			corridor := make([dynamic]Poly, 0, len(p.corridor), heap)
 			append(&corridor, ..p.corridor[:])
+			crossed := make([dynamic]Slot_Stamp, 0, len(p.crossed), heap)
+			append(&crossed, ..p.crossed[:])
+			n := net_at(s, &s.frame[corridor[0].slot])
 			slot.asking = nil
 			slot.planned = ask.goal
 			following := Crowd_Following {
-				mesh     = p.mesh,
-				stamp    = p.stamp,
 				corridor = corridor,
-				position = local(m, p.corners[0]),
-				end      = local(m, p.corners[len(p.corners) - 1]),
+				crossed  = crossed,
+				origin   = n.origin,
+				position = net_local(&n, p.corners[0]),
+				end      = net_local(&n, p.corners[len(p.corners) - 1]),
 				partial  = p.status == .Partial,
 			}
 			set_crowd_phase(s, w, &slot, following)
@@ -638,8 +642,10 @@ steer_agent :: proc(j: ^Crowd_Job, index: int, result: ^Agent_Result) {
 	slot.debug = {}
 
 	desired: [3]f32
-	mesh: ^Mesh_View
-	polygon := NO_POLYGON
+	// The navmeshes that the agent steers on, relative to its corridor's origin or the navmesh that it snaps to.
+	net: Net
+	on_net := false
+	polygon := NO_POLY
 	on_mesh: [3]f32
 	goal, has_goal := target_position(w, slot.target)
 	moved := has_goal && linalg.length(ecs.position_sub(goal, slot.planned)) > max(2 * radius, 0.5)
@@ -648,10 +654,8 @@ steer_agent :: proc(j: ^Crowd_Job, index: int, result: ^Agent_Result) {
 
 	#partial switch &f in slot.phase {
 	case Crowd_Following:
-		mesh = mesh_of(s, f.mesh)
-		if mesh == nil || mesh.stamp != f.stamp {
-			// The navmesh was recooked or unloaded: the agent waits for a path on what is there now.
-			mesh = nil
+		if !stamps_hold(s, f.crossed[:]) {
+			// A navmesh of its corridor was recooked or unloaded: the agent waits for a path on what is there now.
 			if has_goal {
 				result.phase, result.ask = Crowd_Asking{}, goal
 			} else {
@@ -659,9 +663,10 @@ steer_agent :: proc(j: ^Crowd_Job, index: int, result: ^Agent_Result) {
 			}
 			break
 		}
-		position := local(mesh, sn.position)
+		net, on_net = Net{s.frame, f.origin}, true
+		position := net_local(&net, sn.position)
 		// The corridor's start follows the character to where it got to.
-		reached, visited := move_along_surface(mesh, f.corridor[0], f.position, position)
+		reached, visited := move_along_surface(&net, f.corridor[0], f.position, position)
 		if !merge_start_moved(&f.corridor, visited) ||
 		   distance_2d(reached, position) > 2 * radius {
 			// Pushed off its corridor, or off the navmesh: it asks for its path from where it is.
@@ -670,14 +675,27 @@ steer_agent :: proc(j: ^Crowd_Job, index: int, result: ^Agent_Result) {
 			}
 		}
 		f.position = reached
-		polygon, on_mesh = f.corridor[0], reached
 		if moved && may_ask {
 			result.ask = goal
 		}
-		corners := next_corners(mesh, &f, radius)
+		corners := next_corners(&net, &f, radius)
+		stamps_of(s.frame, f.corridor[:], &f.crossed)
+		// Past a seam, the points are kept relative to the navmesh that the agent is on, so they stay small.
+		if first := &s.frame[f.corridor[0].slot]; first.anchor != f.origin {
+			d := offset(&net, first)
+			f.position -= d
+			f.end -= d
+			for &c in corners {
+				c -= d
+			}
+			position -= d
+			reached -= d
+			f.origin, net.origin = first.anchor, first.anchor
+		}
+		polygon, on_mesh = f.corridor[0], reached
 		for c, i in corners {
 			if i <= MAX_CORNERS {
-				slot.debug.corners[i] = world(mesh, c)
+				slot.debug.corners[i] = net_world(&net, c)
 				slot.debug.corner_count = i + 1
 			}
 		}
@@ -717,13 +735,13 @@ steer_agent :: proc(j: ^Crowd_Job, index: int, result: ^Agent_Result) {
 		}
 	}
 
-	if mesh == nil {
+	if !on_net {
 		m, p, q, ok := snap(s, sn.position, agent.agent)
 		if ok {
-			mesh, polygon, on_mesh = m, p, q
+			net, on_net, polygon, on_mesh = net_at(s, m), true, p, q
 		}
 	}
-	velocity := avoid(j, index, slot, mesh, polygon, on_mesh, desired, radius)
+	velocity := avoid(j, index, slot, &net if on_net else nil, polygon, on_mesh, desired, radius)
 	result.desired, result.velocity = desired, velocity
 	slot.debug.desired, slot.debug.velocity = desired, velocity
 }
@@ -732,20 +750,20 @@ steer_agent :: proc(j: ^Crowd_Job, index: int, result: ^Agent_Result) {
 // DetourCrowd's optimizePathVisibility, and gives the funnel's corners from the agent to the path's end: the agent's
 // point first, and up to MAX_CORNERS after it, past those on the agent's point.
 @(private)
-next_corners :: proc(m: ^Mesh_View, f: ^Crowd_Following, radius: f32) -> [][3]f32 {
-	corners := straight_path(m, f.position, f.end, f.corridor[:], context.temp_allocator)
+next_corners :: proc(n: ^Net, f: ^Crowd_Following, radius: f32) -> [][3]f32 {
+	corners := straight_path(n, f.position, f.end, f.corridor[:], context.temp_allocator)
 	if len(corners) > 2 && len(f.corridor) > 1 {
 		target := corners[2]
 		distance := distance_2d(f.position, target)
 		if distance > 0.01 {
 			reach := min(distance + 0.01, SHORTCUT_RANGE * radius)
 			ahead := f.position + (target - f.position) * (reach / distance)
-			visited := make([dynamic]u32, context.temp_allocator)
-			walk := raycast_local(m, f.corridor[0], f.position, ahead, &visited)
+			visited := make([dynamic]Poly, context.temp_allocator)
+			walk := raycast_local(n, f.corridor[0], f.position, ahead, &visited)
 			if len(visited) > 1 && walk.t > 0.99 {
 				merge_start_shortcut(&f.corridor, visited[:])
 				corners = straight_path(
-					m,
+					n,
 					f.position,
 					f.end,
 					f.corridor[:],
@@ -778,8 +796,8 @@ avoid :: proc(
 	j: ^Crowd_Job,
 	index: int,
 	slot: ^Crowd_Slot,
-	m: ^Mesh_View,
-	polygon: u32,
+	n: ^Net,
+	polygon: Poly,
 	on_mesh: [3]f32,
 	desired: [3]f32,
 	radius: f32,
@@ -848,10 +866,10 @@ avoid :: proc(
 		)
 	}
 	walls := make([dynamic]Wall, 0, MAX_WALLS, context.temp_allocator)
-	if m != nil && polygon != NO_POLYGON {
+	if n != nil && polygon != NO_POLY {
 		segments: [MAX_WALLS]Segment
-		count := wall_segments(m, polygon, on_mesh, range, &segments)
-		position := local(m, sn.position)
+		count := wall_segments(n, polygon, on_mesh, range, &segments)
+		position := net_local(n, sn.position)
 		for seg in segments[:count] {
 			a, b := seg.a - position, seg.b - position
 			touch, _ := distance_to_segment_2d({}, a, b)

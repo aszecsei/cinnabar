@@ -214,7 +214,7 @@ standard_scene :: proc(t: ^testing.T, f: ^Fixture) {
 	write_blob(t, f, HUMAN, standard_grid("Human", 0, guid = HUMAN))
 	write_blob(t, f, SMALL, standard_grid("Small", 1, wall = false, guid = SMALL))
 	write_scene(t, f, SCENE, {{"Human", HUMAN}, {"Small", SMALL}})
-	f.world.scene = SCENE
+	ecs.add_world_scene(&f.world, SCENE)
 }
 
 // frame runs a frame of one fixed tick as the frame code does: prepare, the tick's systems, and the frame's end.
@@ -255,7 +255,7 @@ navmeshes_load_and_unload_with_the_scene :: proc(t: ^testing.T) {
 	defer teardown(t, f)
 	standard_scene(t, f)
 	frame(f)
-	testing.expect_value(t, len(f.nav.frame), 2)
+	testing.expect_value(t, mesh_count(&f.nav), 2)
 	small, ok := agent_type(&f.nav, "Small")
 	testing.expect(t, ok && small == 1)
 	_, loaded := asset.find(&f.assets, HUMAN)
@@ -265,19 +265,20 @@ navmeshes_load_and_unload_with_the_scene :: proc(t: ^testing.T) {
 		0 = 0x77,
 	}
 	write_scene(t, f, OTHER, {})
-	f.world.scene = OTHER
+	ecs.remove_world_scene(&f.world, SCENE)
+	ecs.add_world_scene(&f.world, OTHER)
 	frame(f)
-	testing.expect_value(t, len(f.nav.frame), 0)
+	testing.expect_value(t, mesh_count(&f.nav), 0)
 	_, loaded = asset.find(&f.assets, HUMAN)
 	testing.expect(t, !loaded)
 	_, loaded = asset.find(&f.assets, SCENE)
 	testing.expect(t, !loaded)
 	// No scene.
-	f.world.scene = {}
+	ecs.remove_world_scene(&f.world, OTHER)
 	frame(f)
 	_, loaded = asset.find(&f.assets, OTHER)
 	testing.expect(t, !loaded)
-	testing.expect(t, f.nav.scene == nil)
+	testing.expect_value(t, len(f.nav.scenes), 0)
 }
 
 @(test)
@@ -285,20 +286,20 @@ a_missing_scene_loads_after_a_cook :: proc(t: ^testing.T) {
 	f := setup(t, serial = true)
 	defer teardown(t, f)
 	context.logger = testlog.expected_errors()
-	f.world.scene = SCENE
+	ecs.add_world_scene(&f.world, SCENE)
 	frame(f)
-	_, missing := f.nav.scene.(Scene_Missing)
+	_, missing := f.nav.scenes[0].(Scene_Missing)
 	testing.expect(t, missing)
-	testing.expect_value(t, len(f.nav.frame), 0)
+	testing.expect_value(t, mesh_count(&f.nav), 0)
 	// The scene cooks first, and its navmesh in a later cook.
 	write_scene(t, f, SCENE, {{"Human", HUMAN}})
 	cook(t, f, SCENE)
 	frame(f)
-	testing.expect_value(t, len(f.nav.frame), 0)
+	testing.expect_value(t, mesh_count(&f.nav), 0)
 	write_blob(t, f, HUMAN, standard_grid(guid = HUMAN))
 	cook(t, f, HUMAN)
 	frame(f)
-	testing.expect_value(t, len(f.nav.frame), 1)
+	testing.expect_value(t, mesh_count(&f.nav), 1)
 }
 
 @(test)
@@ -307,15 +308,15 @@ a_scene_that_lists_another_navmesh_loads_it :: proc(t: ^testing.T) {
 	defer teardown(t, f)
 	write_blob(t, f, HUMAN, standard_grid(guid = HUMAN))
 	write_scene(t, f, SCENE, {{"Human", HUMAN}})
-	f.world.scene = SCENE
+	ecs.add_world_scene(&f.world, SCENE)
 	frame(f)
-	testing.expect_value(t, len(f.nav.frame), 1)
+	testing.expect_value(t, mesh_count(&f.nav), 1)
 	// A volume for Small is added: the scene cooks again with both, and Human's stays loaded.
 	write_blob(t, f, SMALL, standard_grid("Small", 1, guid = SMALL))
 	write_scene(t, f, SCENE, {{"Human", HUMAN}, {"Small", SMALL}})
 	cook(t, f, SCENE, SMALL)
 	frame(f)
-	testing.expect_value(t, len(f.nav.frame), 2)
+	testing.expect_value(t, mesh_count(&f.nav), 2)
 	h, _ := asset.find(&f.assets, HUMAN)
 	testing.expect_value(t, asset.version(&f.assets, h), 1)
 }
@@ -691,4 +692,125 @@ Test.report(Test.agent():get(NavPath).corners)
 	testing.expect(t, !ok, "an entity without a NavPath is an error")
 	_, ok = script.spawn_source(&f.runtime, "=readonly", `Test.agent():get(NavPath).corners = 3`)
 	testing.expect(t, !ok, "a NavPath's corners are the engine's")
+}
+
+// The scenes of a row of three navmeshes, A, B and C, each 4 by 2 cells, from x = 0 to 12, each on its scene's volume
+// 0x100.
+@(private = "file")
+ROW_SCENES := [3]format.Guid{{0 = 0xa1}, {0 = 0xb1}, {0 = 0xc1}}
+@(private = "file")
+ROW_MESHES := [3]format.Guid{{0 = 0xa2}, {0 = 0xb2}, {0 = 0xc2}}
+
+// row_scenes writes the row's scenes and navmeshes and loads the scenes into the world.
+@(private = "file")
+row_scenes :: proc(t: ^testing.T, f: ^Fixture) {
+	for i in 0 ..< 3 {
+		grid := Grid {
+			cells_x    = 4,
+			cells_z    = 2,
+			tile_cells = 2,
+			border     = true,
+			shift      = {f64(4 * i), 0, 0},
+		}
+		write_blob(t, f, ROW_MESHES[i], grid_blob(grid, "Human", 0, guid = ROW_MESHES[i]))
+		write_scene(t, f, ROW_SCENES[i], {{"Human", ROW_MESHES[i]}})
+		ecs.add_world_scene(&f.world, ROW_SCENES[i])
+	}
+}
+
+@(test)
+each_scenes_navmeshes_load_and_unload_with_it :: proc(t: ^testing.T) {
+	f := setup(t, serial = true)
+	defer teardown(t, f)
+	row_scenes(t, f)
+	// A scene that the world holds twice loads its navmeshes once.
+	ecs.add_world_scene(&f.world, ROW_SCENES[0])
+	frame(f)
+	testing.expect_value(t, mesh_count(&f.nav), 3)
+	testing.expect_value(t, len(f.nav.scenes), 3)
+	// Each scene's navmesh is on the same volume ID, and they are three navmeshes.
+	ids: [3]Mesh_Id
+	for &m, i in f.nav.frame {
+		ids[i] = m.id
+	}
+	testing.expect(t, ids[0] != ids[1] && ids[1] != ids[2] && ids[0] != ids[2])
+	// One of the two listings of A goes, and A stays.
+	ecs.remove_world_scene(&f.world, ROW_SCENES[0])
+	frame(f)
+	testing.expect_value(t, mesh_count(&f.nav), 3)
+	ecs.remove_world_scene(&f.world, ROW_SCENES[1])
+	frame(f)
+	testing.expect_value(t, mesh_count(&f.nav), 2)
+	_, loaded := asset.find(&f.assets, ROW_MESHES[1])
+	testing.expect(t, !loaded)
+	_, loaded = asset.find(&f.assets, ROW_MESHES[0])
+	testing.expect(t, loaded)
+	// B comes back, in the slot that it left.
+	ecs.add_world_scene(&f.world, ROW_SCENES[1])
+	frame(f)
+	testing.expect_value(t, mesh_count(&f.nav), 3)
+	testing.expect_value(t, len(f.nav.frame), 3)
+}
+
+@(test)
+a_path_crosses_from_one_scene_into_another :: proc(t: ^testing.T) {
+	f := setup(t, serial = true)
+	defer teardown(t, f)
+	row_scenes(t, f)
+	frame(f)
+	e := agent(f, 0.5, 0.5)
+	request_path(requests(&f.nav), e, at(11.5, 0, 0.5))
+	frame(f)
+	testing.expect_value(t, status_of(f, e), Path_Status.Found)
+	corners := path_corners(&f.nav, &f.world, e)
+	testing.expect_value(t, len(corners), 2)
+	testing.expect(t, near(meters(corners[1]), {11.5, 0, 0.5}))
+	_, corridor := path_corridor(&f.nav, &f.world, e)
+	slots: [3]bool
+	for p in corridor {
+		slots[p.slot] = true
+	}
+	testing.expect(t, slots[0] && slots[1] && slots[2], "the corridor crosses the three scenes")
+}
+
+@(test)
+a_path_through_an_unloaded_scene_fails :: proc(t: ^testing.T) {
+	f := setup(t, serial = true)
+	defer teardown(t, f)
+	row_scenes(t, f)
+	frame(f)
+	// One path from A through B into C, one from B into A, and one in A alone.
+	through := agent(f, 0.5, 0.5)
+	from_b := agent(f, 5.5, 0.5)
+	in_a := agent(f, 0.5, 1.5)
+	request_path(requests(&f.nav), through, at(11.5, 0, 0.5))
+	request_path(requests(&f.nav), from_b, at(0.5, 0, 0.5))
+	request_path(requests(&f.nav), in_a, at(3.5, 0, 1.5))
+	frame(f)
+	testing.expect_value(t, status_of(f, through), Path_Status.Found)
+	testing.expect_value(t, status_of(f, from_b), Path_Status.Found)
+	testing.expect_value(t, status_of(f, in_a), Path_Status.Found)
+	b_slot := f.nav.frame[1].slot
+	testing.expect_value(t, f.nav.frame[1].id.scene, ROW_SCENES[1])
+
+	// B unloads: its blob goes, and the paths through it are found again on what is left.
+	ecs.remove_world_scene(&f.world, ROW_SCENES[1])
+	frame(f)
+	_, loaded := asset.find(&f.assets, ROW_MESHES[1])
+	testing.expect(t, !loaded)
+	testing.expect_value(t, f.nav.frame[b_slot].stamp, Mesh_Stamp{})
+	// Its start is on no navmesh.
+	testing.expect_value(t, status_of(f, from_b), Path_Status.Failed)
+	// Its goal is past the gap: it goes as far as the seam that is left.
+	testing.expect_value(t, status_of(f, through), Path_Status.Partial)
+	corners := path_corners(&f.nav, &f.world, through)
+	end := meters(corners[len(corners) - 1])
+	testing.expectf(t, abs(end.x - 4) < 0.01, "it ends at %v", end)
+	_, corridor := path_corridor(&f.nav, &f.world, through)
+	for p in corridor {
+		testing.expect(t, p.slot != b_slot, "a path reads the unloaded navmesh")
+	}
+	// The path that never crossed B stays as it was.
+	testing.expect_value(t, status_of(f, in_a), Path_Status.Found)
+	testing.expect_value(t, len(path_corners(&f.nav, &f.world, in_a)), 2)
 }
