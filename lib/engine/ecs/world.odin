@@ -52,9 +52,44 @@ World :: struct {
 	watched:          [MAX_WATCHED]Component_Id,
 	watched_count:    int,
 	log_activity:     bool,
-	// The GUID of the first scene that the world holds, or zero. lib/engine/scene's loads and unloads write it; nav
-	// loads the scene's navmeshes by it (see docs/ai/navigation.md#loading).
-	scene:            format.Guid,
+	// The GUIDs of the cooked scenes that the world holds, in the order that they loaded, which add_world_scene and
+	// remove_world_scene write for lib/engine/scene's loads and unloads. A scene loaded twice is here twice. nav loads
+	// the navmeshes of each (see docs/ai/navigation.md#loading).
+	scenes:           [core.MAX_SCENE_MEMORY]format.Guid,
+	scene_count:      int,
+}
+
+// world_scenes is the GUIDs of the cooked scenes that the world holds, in the order that they loaded.
+world_scenes :: proc(w: ^World) -> []format.Guid {
+	return w.scenes[:w.scene_count]
+}
+
+// add_world_scene lists a scene that loaded into the world. A zero GUID, a scene that was never cooked, is not listed,
+// nor one past core.MAX_SCENE_MEMORY, which lib/engine/scene refuses first.
+add_world_scene :: proc(w: ^World, guid: format.Guid) {
+	if guid == {} || w.scene_count >= len(w.scenes) {
+		return
+	}
+	w.scenes[w.scene_count] = guid
+	w.scene_count += 1
+}
+
+// remove_world_scene forgets one listing of a scene that unloaded, keeping the others' order.
+remove_world_scene :: proc(w: ^World, guid: format.Guid) {
+	for i in 0 ..< w.scene_count {
+		if w.scenes[i] == guid {
+			copy(w.scenes[i:w.scene_count - 1], w.scenes[i + 1:w.scene_count])
+			w.scene_count -= 1
+			w.scenes[w.scene_count] = {}
+			return
+		}
+	}
+}
+
+// clear_world_scenes forgets every scene, as when the level unloads.
+clear_world_scenes :: proc(w: ^World) {
+	w.scenes = {}
+	w.scene_count = 0
 }
 
 // init reserves the world's storage and creates the empty archetype. Register the components after it.

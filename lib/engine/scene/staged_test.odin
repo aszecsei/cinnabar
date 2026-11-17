@@ -285,7 +285,7 @@ a_big_scene_loads_within_the_budget_and_stays_hidden_until_ready :: proc(t: ^tes
 	number, ok := begin_load(w, &f.scenes, BIG_GUID)
 	testing.expect(t, ok)
 	testing.expect_value(t, number, FIRST_RUNTIME_SCENE)
-	testing.expect_value(t, w.scene, BIG_GUID)
+	testing.expect_value(t, ecs.world_scenes(w)[0], BIG_GUID)
 	kind, found := stage_of(&f.scenes, number)
 	testing.expect(t, found && kind == .Reading)
 	testing.expect_value(t, len(loaded_scenes(&f.scenes)), 1)
@@ -517,7 +517,7 @@ a_failed_read_reports_failed_and_frees_the_number :: proc(t: ^testing.T) {
 	testing.expect(t, !is_loaded(&f.scenes, 7))
 	testing.expect_value(t, open_test_scene_memory(), 0)
 	testing.expect_value(t, fake.open, 0)
-	testing.expect_value(t, w.scene, format.Guid{})
+	testing.expect_value(t, len(ecs.world_scenes(w)), 0)
 
 	fake.fail = false
 	again, again_ok := begin_load(w, &f.scenes, SMALL_GUID, u32(7))

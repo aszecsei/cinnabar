@@ -184,8 +184,8 @@ apply_operations :: proc(
 }
 
 // load_scenes unloads the level and replaces every entity in the world with the editor's scenes, each with its own
-// number and scene IDs, and adds what the world cannot use to problems. The world's scene GUID is the first scene's,
-// whose navmeshes load (see docs/editor/document-and-scenes.md#several-scenes).
+// number and scene IDs, and adds what the world cannot use to problems. The world lists each scene's GUID, and the
+// navmeshes of each load (see docs/editor/document-and-scenes.md#several-scenes).
 @(private)
 load_scenes :: proc(
 	e: ^Editor,

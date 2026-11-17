@@ -77,7 +77,7 @@ load_asset :: proc(
 	return true
 }
 
-// load replaces every entity in the world with the scene's, and makes its GUID the world's scene. It unloads the level
+// load replaces every entity in the world with the scene's, and lists its GUID in the world's scenes. It unloads the level
 // first (see unload_level), so the scene is the only one; add_scene adds one beside the others. Call it between
 // frames, outside the script phase. What the world cannot use, such as a component that the game no longer registers
 // or a field that it no longer has, is skipped with a warning: the scene keeps it, so a broken build never deletes
@@ -99,7 +99,7 @@ load :: proc(
 		add_scene(w, scripts, scenes, s, u32(0), problems)
 		return
 	}
-	w.scene = s.guid
+	ecs.add_world_scene(w, s.guid)
 	handles := make(map[u64]ecs.Entity, len(s.entities), w.platform.frame_allocator)
 	spawned := add_entities(w, scripts, s.entities, &handles, problems)
 	log.infof("scene: loaded %d entities", spawned)
@@ -111,7 +111,7 @@ load :: proc(
 // does before it adds a scene.
 unload_level :: proc(w: ^ecs.World, scenes: ^Scenes = nil) {
 	ecs.despawn_all(w)
-	w.scene = {}
+	ecs.clear_world_scenes(w)
 	if scenes != nil {
 		forget_level(scenes)
 	}

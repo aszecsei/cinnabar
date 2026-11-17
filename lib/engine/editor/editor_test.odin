@@ -2528,10 +2528,12 @@ a_loaded_scene_gives_the_world_its_guid :: proc(t: ^testing.T) {
 			},
 		},
 	)
-	// The first scene's GUID is the world's.
-	testing.expect_value(t, f.world.scene, format.Guid{0 = 0xab, 15 = 1})
+	// Both scenes' GUIDs are the world's, in their order.
+	testing.expect_value(t, len(ecs.world_scenes(&f.world)), 2)
+	testing.expect_value(t, ecs.world_scenes(&f.world)[0], format.Guid{0 = 0xab, 15 = 1})
+	testing.expect_value(t, ecs.world_scenes(&f.world)[1], format.Guid{0 = 0xcd})
 	step(f, 1, link.Load_Scene{})
-	testing.expect_value(t, f.world.scene, format.Guid{})
+	testing.expect_value(t, len(ecs.world_scenes(&f.world)), 0)
 }
 
 // Two scenes can have the same scene IDs: each entity is its scene's, an operation names its scene, and a parent or a

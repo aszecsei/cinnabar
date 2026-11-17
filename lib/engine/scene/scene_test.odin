@@ -486,5 +486,5 @@ name = "Root"
 	unload_level(&f.world)
 	testing.expect_value(t, f.platform.level_generation(), before + 2)
 	testing.expect_value(t, count(f), 0)
-	testing.expect_value(t, f.world.scene, format.Guid{})
+	testing.expect_value(t, len(ecs.world_scenes(&f.world)), 0)
 }
