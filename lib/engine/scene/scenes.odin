@@ -37,6 +37,9 @@ Loaded_Scene :: struct {
 	// the editor or from memory.
 	blob:     asset.Handle,
 	has_blob: bool,
+	// The hold of the scene's own bundle that begin_load took, for a streaming chunk in a release, which unload_scene
+	// releases (see docs/content/blobs-and-loading.md#bundles). The zero hold for any other scene.
+	bundle:   asset.Bundle_Hold,
 	// The scene's own memory and GPU scope, which unload_scene closes (see docs/core/jobs-and-memory.md#scene-memory).
 	memory:   core.Scene_Memory,
 	// Where the scene's load is. It is Scene_Ready for a scene that add_scene added. Change it only with change_stage.
@@ -148,6 +151,7 @@ append_scene :: proc(
 	guid: format.Guid,
 	number: Maybe(u32),
 	stage: Scene_Stage,
+	bundle: asset.Bundle_Hold = {},
 ) -> (
 	added: u32,
 	ok: bool,
@@ -172,6 +176,7 @@ append_scene :: proc(
 		number = added,
 		guid   = guid,
 		memory = memory,
+		bundle = bundle,
 	}
 	change_stage(&row, stage)
 	append(&s.loaded, row)
@@ -220,6 +225,9 @@ unload_scene :: proc(w: ^ecs.World, s: ^Scenes, number: u32) -> int {
 	end_read(s, &gone)
 	if gone.has_blob && s.assets != nil {
 		asset.unload(s.assets, gone.blob)
+	}
+	if s.assets != nil {
+		asset.release_bundle(s.assets, &gone.bundle)
 	}
 	if w.scene == gone.guid {
 		w.scene = {}
@@ -386,6 +394,9 @@ release_scenes :: proc(s: ^Scenes) {
 		if loaded.has_blob && s.assets != nil {
 			asset.unload(s.assets, loaded.blob)
 			loaded.has_blob = false
+		}
+		if s.assets != nil {
+			asset.release_bundle(s.assets, &loaded.bundle)
 		}
 		s.platform.scene_memory_close(loaded.memory)
 		loaded.memory = {}

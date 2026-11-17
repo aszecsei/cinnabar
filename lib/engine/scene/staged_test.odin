@@ -570,3 +570,68 @@ a_stage_changes_only_in_order :: proc(t: ^testing.T) {
 	testing.expect(t, !change_stage(&row, Scene_Reading{}))
 	testing.expect(t, !change_stage(&row, Scene_Ready{}))
 }
+
+// From bundles, a scene that loads in stages holds its own bundle, as a streaming chunk does, until it unloads; the
+// bundle then closes at the next poll.
+@(test)
+a_staged_scene_holds_its_bundle_until_it_unloads :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	w := &f.world
+	parsed, problems, parsed_ok := format.scene_parse(big_scene(4), context.temp_allocator)
+	testing.expectf(t, parsed_ok, "problems: %v", problems)
+	blob := format.scene_write(parsed, SMALL_GUID, 1, .Scene, allocator = context.temp_allocator)
+	buffer: [32]u8
+	name := format.guid_format(SMALL_GUID, &buffer)
+	bundles := []struct {
+		name:         string,
+		blobs:        []format.Bundle_Blob,
+		dependencies: []string,
+	} {
+		{format.GLOBAL_BUNDLE, nil, nil},
+		{
+			name,
+			{
+				{
+					guid = SMALL_GUID,
+					kind = .Scene,
+					codec = .None,
+					size = u32(len(blob)),
+					stored = blob,
+				},
+			},
+			{format.GLOBAL_BUNDLE},
+		},
+	}
+	for b in bundles {
+		testing.expect(
+			t,
+			os.write_entire_file(
+				fmt.tprintf("%s/%s%s", f.dir, b.name, format.BUNDLE_EXTENSION),
+				format.bundle_write(b.blobs, b.dependencies, context.temp_allocator),
+			) ==
+			nil,
+		)
+	}
+	f.platform.file_read_range = core.file_read_range
+	asset.destroy(&f.assets)
+	asset.init(&f.assets, &f.platform, asset.bundle(f.dir))
+
+	number, ok := begin_load(w, &f.scenes, SMALL_GUID)
+	testing.expect(t, ok)
+	for _ in 0 ..< 100 {
+		if ready, _, _ := step(f); len(ready) > 0 {
+			break
+		}
+	}
+	// The second entity is disabled.
+	testing.expect_value(t, visible(f), 3)
+	asset.poll(&f.assets)
+	_, open := asset.blob_location(&f.assets, SMALL_GUID)
+	testing.expect(t, open)
+
+	unload_scene(w, &f.scenes, number)
+	asset.poll(&f.assets)
+	_, open = asset.blob_location(&f.assets, SMALL_GUID)
+	testing.expect(t, !open)
+}

@@ -158,14 +158,18 @@ begin_load :: proc(
 		)
 		return 0, false
 	}
+	// A streaming chunk's bundle in a release, which stays open until the scene unloads.
+	bundle := asset.hold_bundle(s.assets, guid)
 	read := asset.blob_read_begin(s.assets, guid)
 	if _, failed := read.(asset.Blob_Read_Failed); failed {
 		buffer: [32]u8
 		log.errorf("scene: cannot begin to read the scene %s", format.guid_format(guid, &buffer))
+		asset.release_bundle(s.assets, &bundle)
 		return 0, false
 	}
-	if added, ok = append_scene(s, guid, number, Scene_Reading{read = read}); !ok {
+	if added, ok = append_scene(s, guid, number, Scene_Reading{read = read}, bundle); !ok {
 		asset.blob_read_end(s.assets, &read)
+		asset.release_bundle(s.assets, &bundle)
 		return 0, false
 	}
 	if w.scene == {} {

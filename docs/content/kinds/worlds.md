@@ -46,6 +46,8 @@ A `World_Blob` (`lib/engine/asset/format/world.odin`) holds:
 
 `world_view` checks the kind, the layout and that every slice is inside the blob. `blob_references` gives the GUID of each scene.
 
+In a release, each scene that is not persistent is a streaming chunk with a bundle of its own. The world and its persistent scenes go in the bundle of the level that names the world (see [Blobs and loading: Bundles](../blobs-and-loading.md#bundles)).
+
 - **Problems** have their line. They include:
   - a first line that is not `world 1`;
   - a `scene` line without a GUID of 32 hex digits, or a scene that the world names twice;

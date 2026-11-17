@@ -170,3 +170,4 @@ The order in which a world's scenes came to load around the camera (see [World s
 4. **Bodies a few at a time:** `LOADING_BODIES_PER_SYNC` and `physics.loading_scenes`, so a scene shows when its bodies exist ([Physics: Components](physics/design.md#components)).
 5. **The policy:** `World_Streamer`, `Stream_Source` and `streaming.update`, with the load and unload distances, persistent scenes, the events as script events, and `Scene.state` ([World streaming](world/streaming.md)).
 6. **The editor:** scene streaming's stats in the Resource Monitor ([Editor: Shell and panels](editor/shell-and-panels.md#resource-monitor)).
+7. **Chunks in bundles:** a bundle for each streaming chunk, which depends on its level's, and `asset.hold_bundle` and `release_bundle`, so a chunk's bundle closes after the chunk unloads ([Content: Bundles](content/blobs-and-loading.md#bundles)).
