@@ -1,5 +1,6 @@
 package asset_format
 
+import "core:fmt"
 import "core:strings"
 import "core:testing"
 
@@ -97,6 +98,30 @@ scene_blobs_round_trip :: proc(t: ^testing.T) {
 	(^Scene_Blob)(raw_data(blob)).entities.size = u32(len(blob))
 	_, read_ok = scene_read(blob, context.temp_allocator)
 	testing.expect(t, !read_ok)
+}
+
+@(test)
+scene_entities_read_one_at_a_time_as_scene_read_gives_them :: proc(t: ^testing.T) {
+	scene, _, ok := scene_parse(DOOR, context.temp_allocator)
+	testing.expect(t, ok)
+	guid := guid_parse(TEST_GUID) or_else {}
+	blob := aligned(scene_write(scene, guid, 42, allocator = context.temp_allocator))
+	whole, whole_ok := scene_read(blob, context.temp_allocator)
+	view, view_ok := scene_view(blob)
+	testing.expect(t, whole_ok && view_ok)
+	testing.expect_value(t, view.guid, guid)
+	testing.expect_value(t, len(view.entities), len(whole.entities))
+	for want, i in whole.entities {
+		got, got_ok := scene_entity_read(blob, view, i, context.temp_allocator)
+		testing.expect(t, got_ok)
+		testing.expect_value(t, fmt.tprintf("%v", got), fmt.tprintf("%v", want))
+	}
+	_, out_ok := scene_entity_read(blob, view, len(view.entities), context.temp_allocator)
+	testing.expect(t, !out_ok)
+
+	(^Scene_Blob)(raw_data(blob)).entities.size = u32(len(blob))
+	_, view_ok = scene_view(blob)
+	testing.expect(t, !view_ok)
 }
 
 @(test)
