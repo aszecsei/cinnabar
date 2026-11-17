@@ -39,7 +39,7 @@ game_init :: proc(
 	mem.zero(state, state_bytes(h))
 	g := (^Game)(state)
 	g.platform = platform
-	scene.init_scenes(&g.scenes, platform, &g.assets)
+	scene.init_scenes(&g.scenes, platform, &g.assets, &g.scripts)
 	streaming.init(&g.streaming, platform, &g.assets)
 	g.scene_requests = make([dynamic]Scene_Request, platform.heap_allocator)
 	editor.init(

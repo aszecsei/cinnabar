@@ -159,3 +159,22 @@ read_field :: proc(
 		}
 	}
 }
+
+// behaviour_at is the entity and the script asset of the behaviour whose instance table is at idx. It is false for any
+// other value.
+behaviour_at :: proc(
+	r: ^Runtime,
+	L: ^luau.State,
+	idx: c.int,
+) -> (
+	entity: ecs.Entity,
+	guid: format.Guid,
+	ok: bool,
+) {
+	i := instance_of(r, L, idx)
+	if i == nil || !luau.getmetatable(L, idx) {
+		return
+	}
+	defer luau.pop(L, 1)
+	return i.entity, script_of(r, L, luau.gettop(L)), true
+}

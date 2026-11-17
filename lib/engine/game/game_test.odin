@@ -124,6 +124,8 @@ the_standard_games_scripts_have_every_engine_binding :: proc(t: ^testing.T) {
 	expect(t, text, "declare Camera:")
 	// The scenes that stream: a scene by its number, and its stage.
 	expect(t, text, "	state: (scene: number) -> string?,")
+	// And the scene that a field waits for, as an asset that Scene.load takes.
+	expect(t, text, "	pending: (behaviour: any, field: string) -> Asset?,")
 	// And the project's.
 	expect(t, text, "declare TestComponent:")
 }
