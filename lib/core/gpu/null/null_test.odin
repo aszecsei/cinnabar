@@ -232,6 +232,27 @@ destroy_scope_keeps_other_scopes :: proc(t: ^testing.T) {
 	_ = level_sampler
 }
 
+// Each scene's scope is destroyed alone: one scene's resources go, and another scene's and the level's stay.
+@(test)
+destroy_scope_of_a_scene_keeps_the_other_scenes :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	testing.expect(t, init(nil, {1280, 720}))
+	defer shutdown()
+
+	north := create_buffer({size = 64, scope = gpu.scene_scope(0)}, nil)
+	south := create_buffer({size = 64, scope = gpu.scene_scope(1)}, nil)
+	level := create_buffer({size = 64, scope = .Level}, nil)
+
+	testing.expect_value(t, destroy_scope(gpu.scene_scope(0)), 1)
+	_, north_ok := RESOURCES.buffer(north)
+	_, south_ok := RESOURCES.buffer(south)
+	_, level_ok := RESOURCES.buffer(level)
+	testing.expect(t, !north_ok, "the scene's buffer survived")
+	testing.expect(t, south_ok && level_ok, "a buffer outside the scene's scope was destroyed")
+	testing.expect_value(t, destroy_scope(gpu.scene_scope(1)), 1)
+	testing.expect_value(t, destroy_scope(.Level), 1)
+}
+
 @(test)
 updates_keep_the_attachment_formats :: proc(t: ^testing.T) {
 	sync.guard(&backend_lock)

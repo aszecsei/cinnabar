@@ -380,12 +380,21 @@ format_size :: proc(format: Format) -> int {
 
 // Scope is a resource's lifetime group. On a soft restart, core destroys every resource in the Game scope. core destroys
 // the Level scope with the level arena, at level_unload and at a soft restart. The engine destroys the Asset scope with
-// gpu_destroy_scope. Permanent resources belong to core.
+// gpu_destroy_scope. Permanent resources belong to core. Each scene's memory has a scope of its own too, which has no
+// name: scene_scope gives it, and core destroys it with the scene's memory (see Platform_API.scene_memory_scope).
 Scope :: enum u8 {
 	Game,
 	Level,
 	Asset,
 	Permanent,
+}
+
+// FIRST_SCENE_SCOPE is the scope of the scene memory in slot 0. The scenes' scopes follow it, one for each slot.
+FIRST_SCENE_SCOPE :: 16
+
+// scene_scope is the scope of the scene memory in the slot.
+scene_scope :: proc(slot: int) -> Scope {
+	return Scope(FIRST_SCENE_SCOPE + slot)
 }
 
 Buffer_Usage :: enum u8 {
