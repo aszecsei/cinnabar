@@ -81,7 +81,9 @@ the_editors_scenes_unload_the_level :: proc(t: ^testing.T) {
 		&f.editor,
 		&f.world,
 		nil,
-		link.Load_Scene{scenes = {{scene = 1, entities = {{id = 0x51, name = "Door", active = true}}}}},
+		link.Load_Scene {
+			scenes = {{scene = 1, entities = {{id = 0x51, name = "Door", active = true}}}},
+		},
 		nil,
 	)
 	testing.expect_value(t, f.platform.level_generation(), before + 1)
@@ -101,7 +103,9 @@ the_maps_go_with_the_level_when_the_game_loads_a_scene :: proc(t: ^testing.T) {
 		&f.editor,
 		&f.world,
 		nil,
-		link.Load_Scene{scenes = {{scene = 0, entities = {{id = 0x51, name = "Old", active = true}}}}},
+		link.Load_Scene {
+			scenes = {{scene = 0, entities = {{id = 0x51, name = "Old", active = true}}}},
+		},
 		nil,
 	)
 	old := find_scene_entity(&f.editor, &f.world, 0, 0x51)
