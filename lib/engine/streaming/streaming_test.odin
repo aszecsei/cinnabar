@@ -444,21 +444,37 @@ a_missing_scene_fails_once :: proc(t: ^testing.T) {
 	testing.expect_value(t, events[0].scene, scene_guid(0))
 }
 
-// Without a source nothing starts and nothing unloads.
+// Without a source nothing unloads, and only a persistent scene starts.
 @(test)
 without_sources_nothing_changes :: proc(t: ^testing.T) {
 	f := setup(t)
 	defer teardown(f)
-	write_scenes(t, f, {0})
-	start(t, f, {box(0, 100, 20, 30)})
+	write_scenes(t, f, {0, 1, 2})
+	start(t, f, {box(0, 100, 20, 30), box(1, 0, 0, 0, {.Persistent}), box(2, 300, 20, 30)})
 	ready_scene(t, f, 95)
-	testing.expect_value(t, len(scene.loaded_scenes(&f.scenes)), 1)
+	testing.expect_value(t, len(scene.loaded_scenes(&f.scenes)), 2)
 	for _ in 0 ..< 3 {
 		unloaded := update(&f.state, &f.world, nil, &f.scenes, nil, nil)
 		testing.expect(t, !unloaded)
 		expect_kinds(t, events(&f.state), {})
 	}
-	testing.expect_value(t, len(scene.loaded_scenes(&f.scenes)), 1)
+	testing.expect_value(t, len(scene.loaded_scenes(&f.scenes)), 2)
+}
+
+// Without a source a persistent scene still loads.
+@(test)
+a_persistent_scene_loads_without_sources :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	write_scenes(t, f, {0, 1})
+	start(t, f, {box(0, 0, 20, 30), box(1, 0, 0, 0, {.Persistent})})
+	unloaded := update(&f.state, &f.world, nil, &f.scenes, nil, nil)
+	testing.expect(t, !unloaded)
+	got := events(&f.state)
+	expect_kinds(t, got, {.Loading})
+	if len(got) == 1 {
+		testing.expect_value(t, got[0].scene, scene_guid(1))
+	}
 }
 
 // The distance is to the scene's bounds, so a source above or beside the box is as far as the nearest face.

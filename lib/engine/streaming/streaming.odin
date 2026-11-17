@@ -1,5 +1,5 @@
 // Package streaming is the policy that loads the scenes of a world near its streaming sources and unloads the far ones
-// (see docs/world/scenes.md#streaming). It decides which scenes load and unload, and the scene package does the loads,
+// (see docs/world/streaming.md#the-policy). It decides which scenes load and unload, and the scene package does the loads,
 // across frames and within a budget. It has no Game: the game gives it the sources' positions each frame.
 package streaming
 
@@ -362,7 +362,8 @@ nearer_first :: proc(a, b: Candidate) -> bool {
 // frame (see scene.advance_loads). It gives whether any scene unloaded, so the caller has the systems that keep data by
 // entity forget the entities that went.
 //
-// With no sources, it starts and unloads nothing, and the scenes that are loading go on loading. A scene unloads when
+// With no sources, only the persistent scenes begin to load, nothing unloads, and the scenes that are loading go on
+// loading. A scene unloads when
 // the nearest source is farther than its unload distance, and begins to load when the nearest is within its load
 // distance; the gap between the two is the hysteresis. Persistent scenes load first, then the nearest, and at most
 // MAX_SCENE_LOADS are not ready at a time. A scene that cannot load is failed, and is not tried again until the world's
@@ -439,6 +440,7 @@ update :: proc(
 		}
 	}
 
+	// Without a source every scene is infinitely far: only the persistent scenes begin, and nothing unloads.
 	distances := make([]f64, len(records), frame)
 	if len(sources) > 0 {
 		for record, index in records {
@@ -453,8 +455,12 @@ update :: proc(
 				}
 			}
 		}
-		begin_loads(st, w, scenes, records, distances)
+	} else {
+		for &distance in distances {
+			distance = math.inf_f64(1)
+		}
 	}
+	begin_loads(st, w, scenes, records, distances)
 	advance(st, w, scripts, scenes, records, distances, bodies_pending)
 	return
 }
