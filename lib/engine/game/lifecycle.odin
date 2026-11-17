@@ -38,7 +38,18 @@ game_init :: proc(
 	mem.zero(state, state_bytes(h))
 	g := (^Game)(state)
 	g.platform = platform
-	editor.init(&g.editor, platform, &g.assets, &g.renderer.residency, &g.renderer, &g.nav, &g.ai)
+	scene.init_scenes(&g.scenes, platform, &g.assets)
+	g.scene_requests = make([dynamic]Scene_Request, platform.heap_allocator)
+	editor.init(
+		&g.editor,
+		platform,
+		&g.assets,
+		&g.renderer.residency,
+		&g.renderer,
+		&g.nav,
+		&g.ai,
+		&g.scenes,
+	)
 	if !ecs.init(&g.world, platform) {
 		log.panic("game: cannot create the world")
 	}
@@ -82,7 +93,7 @@ load_main_scene :: proc(g: ^Game) {
 		)
 		return
 	}
-	scene.load_asset(&g.world, &g.scripts, &g.assets, guid)
+	scene.load_asset(&g.world, &g.scripts, &g.assets, guid, &g.scenes)
 }
 
 // register_world makes the world's registrations: the components, the engine's systems and queries, and then the
@@ -116,6 +127,8 @@ game_update :: proc(g: ^Game, dt: time.Duration, h: Hooks) -> (keep_running: boo
 	if h.begin_frame != nil {
 		h.begin_frame(g)
 	}
+	// The scenes that scripts or begin_frame asked for, before the systems prepare for the world.
+	apply_scene_requests(g)
 	// In the editor's edit mode, and while it pauses, the world stands still and only its transforms propagate, so
 	// edits show. No script code runs then but the edit phase's, for the behaviours that run in edit mode, whose writes
 	// go to the editor's document (see docs/editor/document-and-scenes.md#modes).
@@ -289,6 +302,9 @@ game_shutdown :: proc(g: ^Game, h: Hooks) {
 	}
 	editor.destroy(&g.editor)
 	script.destroy(&g.scripts)
+	// Before the assets, to which the scenes give their blobs back.
+	scene.destroy_scenes(&g.scenes)
+	delete(g.scene_requests)
 	ui.destroy(&g.ui)
 	render.renderer_destroy(&g.renderer)
 	// The sprites give their sheets back to the assets.
@@ -322,6 +338,7 @@ game_reload :: proc(
 	asset.reload(&g.assets, platform)
 	script.reload(&g.scripts, platform, register_scripts)
 	editor.reload(&g.editor, platform)
+	scene.reload_scenes(&g.scenes, platform)
 	ui.on_reload(&g.ui, platform)
 	ui.sync_pipelines(&g.ui, true)
 	if h.register != nil {

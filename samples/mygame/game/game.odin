@@ -915,7 +915,7 @@ switch_scene :: proc(g: ^game.Game) {
 	}
 	s.scene_index = (s.scene_index + 1) % len(metas)
 	if guid, ok := format.meta_guid(metas[s.scene_index]); ok {
-		scene.load_asset(&g.world, &g.scripts, &g.assets, guid)
+		scene.load_asset(&g.world, &g.scripts, &g.assets, guid, &g.scenes)
 		log.infof("mygame: the %s scene (F7 cycles them)", names[s.scene_index])
 	}
 }
