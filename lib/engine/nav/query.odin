@@ -11,7 +11,8 @@ import "cinnabar:engine/random"
 // work in f32 relative to the navmesh's anchor inside. They only read the frame's views, and their scratch memory is
 // the allocator that they are given, a job's own temp_allocator by default, so any number of jobs can call them at
 // once, between prepare and end_frame. A query picks a navmesh by the agent type and by its point: the one of the
-// agent type whose bounds hold the point, and of several, the one with the polygon nearest it.
+// agent type whose bounds hold the point, and of several, the one with the polygon nearest it. A search or a walk then
+// goes on over the seams into the other navmeshes of the agent type (see docs/ai/navigation.md#seams).
 
 // The nodes that a search may reach before it gives its best partial path.
 DEFAULT_MAX_NODES :: 2048
@@ -23,13 +24,13 @@ Location :: struct {
 	polygon:  u32,
 }
 
-// Path_Result is a path: its status, Found, Partial or Failed, its corners from the start to its end, and the corridor
-// of polygons that it crosses.
+// Path_Result is a path: its status, Found, Partial or Failed, the navmesh that it starts on, its corners from the
+// start to its end, and the corridor of polygons that it crosses, which may be of several navmeshes.
 Path_Result :: struct {
 	status:   Path_Status,
 	mesh:     Mesh_Id,
 	corners:  []ecs.World_Position,
-	corridor: []u32,
+	corridor: []Poly,
 }
 
 // Raycast_Hit is how far a straight walk along a navmesh goes: the fraction t of the way to its end, the point that it
@@ -53,17 +54,25 @@ default_extents :: proc "contextless" (m: ^Mesh_View) -> [3]f32 {
 // mesh_of is the frame's view of a navmesh, or nil when it is not loaded.
 mesh_of :: proc(s: ^State, id: Mesh_Id) -> ^Mesh_View {
 	for &m in s.frame {
-		if m.id == id {
+		if m.stamp != {} && m.id == id {
 			return &m
 		}
 	}
 	return nil
 }
 
+// mesh_at is the frame's view in a slot, or nil when the slot is empty or no longer holds the navmesh of stamp.
+mesh_at :: proc "contextless" (s: ^State, slot: u32, stamp: Mesh_Stamp) -> ^Mesh_View {
+	if int(slot) >= len(s.frame) || s.frame[slot].stamp == {} || s.frame[slot].stamp != stamp {
+		return nil
+	}
+	return &s.frame[slot]
+}
+
 // agent_type is the agent type of the frame's navmeshes that has a name.
 agent_type :: proc(s: ^State, name: string) -> (Agent_Type, bool) {
 	for &m in s.frame {
-		if m.name == name {
+		if m.stamp != {} && m.name == name {
 			return m.id.agent, true
 		}
 	}
@@ -71,7 +80,7 @@ agent_type :: proc(s: ^State, name: string) -> (Agent_Type, bool) {
 }
 
 // snap is the polygon nearest a point within extents of it, of the navmeshes of an agent type whose bounds hold the
-// point, and the point on it. With no extents, each navmesh's default_extents.
+// point, and the point on it, relative to the navmesh's anchor. With no extents, each navmesh's default_extents.
 @(private)
 snap :: proc(
 	s: ^State,
@@ -80,14 +89,14 @@ snap :: proc(
 	extents: Maybe([3]f32) = nil,
 ) -> (
 	m: ^Mesh_View,
-	polygon: u32,
+	polygon: Poly,
 	point: [3]f32,
 	ok: bool,
 ) {
 	best := max(f32)
-	polygon = NO_POLYGON
+	polygon = NO_POLY
 	for &v in s.frame {
-		if v.id.agent != agent {
+		if v.stamp == {} || v.id.agent != agent {
 			continue
 		}
 		e := extents.? or_else default_extents(&v)
@@ -97,10 +106,10 @@ snap :: proc(
 		}
 		found, on, distance := nearest_in(&v, q, e)
 		if found != NO_POLYGON && distance < best {
-			m, polygon, point, best = &v, found, on, distance
+			m, polygon, point, best = &v, {v.slot, found}, on, distance
 		}
 	}
-	return m, polygon, point, polygon != NO_POLYGON
+	return m, polygon, point, polygon != NO_POLY
 }
 
 // nearest is the point of the navmeshes of an agent type nearest point, within extents of it, and its polygon.
@@ -117,11 +126,12 @@ nearest :: proc(
 	if !ok {
 		return {}, false
 	}
-	return {position = world(m, on), mesh = m.id, polygon = polygon}, true
+	return {position = world(m, on), mesh = m.id, polygon = polygon.polygon}, true
 }
 
 // find_path is the path from start to goal for an agent type: A* over the polygons, at most max_nodes of them, and the
-// funnel's straight path through their portals. Both points snap to the navmesh within its default_extents. A goal
+// funnel's straight path through their portals, across the seams between navmeshes. Both points snap to the nearest
+// navmesh within its default_extents. A goal
 // that no path reaches, or that no polygon is near, gives a Partial path to the nearest point that the search reached;
 // a start that is on no navmesh gives Failed. The corners and the corridor are in allocator.
 find_path :: proc(
@@ -137,51 +147,50 @@ find_path :: proc(
 	}
 	sr: Search
 	graph_reserve(&sr.graph, max_nodes, allocator)
-	begin_toward(&sr, m, from, start_polygon, goal)
-	search_step(&sr, m, max(int))
-	status, corners, corridor := search_finish(&sr, m, allocator)
+	n := net_at(s, m)
+	begin_toward(s, &sr, &n, m.id.agent, from, start_polygon, goal)
+	search_step(&sr, &n, max(int))
+	status, corners, corridor := search_finish(&sr, &n, allocator)
 	return {
 		status = status,
 		mesh = m.id,
-		corners = to_world(m, corners, allocator),
+		corners = to_world(&n, corners, allocator),
 		corridor = corridor,
 	}
 }
 
-// begin_toward starts a search from a point on a polygon toward a goal, which snaps onto the polygon nearest it, if one
-// is.
+// begin_toward starts a search from a point on a polygon toward a goal, which snaps onto the polygon of the agent
+// type's navmeshes nearest it, if one is. from is relative to the net's origin.
 @(private)
 begin_toward :: proc(
+	s: ^State,
 	sr: ^Search,
-	m: ^Mesh_View,
+	n: ^Net,
+	agent: Agent_Type,
 	from: [3]f32,
-	start_polygon: u32,
+	start_polygon: Poly,
 	goal: ecs.World_Position,
 ) {
-	to := local(m, goal)
-	goal_polygon, on, _ := nearest_in(m, to, default_extents(m))
-	if goal_polygon != NO_POLYGON {
-		to = on
+	to := net_local(n, goal)
+	gm, goal_polygon, on, found := snap(s, goal, agent)
+	if found {
+		to = on + offset(n, gm)
 	}
 	search_begin(sr, from, to, start_polygon, goal_polygon)
 }
 
 @(private)
-to_world :: proc(
-	m: ^Mesh_View,
-	points: [][3]f32,
-	allocator: runtime.Allocator,
-) -> []ecs.World_Position {
+to_world :: proc(n: ^Net, points: [][3]f32, allocator: runtime.Allocator) -> []ecs.World_Position {
 	out := make([]ecs.World_Position, len(points), allocator)
 	for p, i in points {
-		out[i] = world(m, p)
+		out[i] = net_world(n, p)
 	}
 	return out
 }
 
-// raycast walks straight along the navmesh from start toward end, as Detour's raycast, from polygon to polygon across
-// their edges on the xz plane, until it reaches end or an edge with nothing across. It fails for a start on no navmesh
-// of the agent type.
+// raycast walks straight along the navmeshes from start toward end, as Detour's raycast, from polygon to polygon across
+// their edges and seams on the xz plane, until it reaches end or an edge with nothing across. It fails for a start on no
+// navmesh of the agent type.
 raycast :: proc(
 	s: ^State,
 	start, end: ecs.World_Position,
@@ -191,16 +200,17 @@ raycast :: proc(
 	ok: bool,
 ) {
 	m, polygon, p0 := snap(s, start, agent) or_return
-	p1 := local(m, end)
-	walk := raycast_local(m, polygon, p0, p1)
+	n := net_at(s, m)
+	p1 := net_local(&n, end)
+	walk := raycast_local(&n, polygon, p0, p1)
 	p := math.lerp(p0, p1, walk.t)
-	p.y = height_at(m, walk.polygon, p)
+	p.y = net_height(&n, walk.polygon, p)
 	return {
 			t = walk.t,
-			position = world(m, p),
+			position = net_world(&n, p),
 			wall = walk.wall,
-			mesh = m.id,
-			polygon = walk.polygon,
+			mesh = s.frame[walk.polygon.slot].id,
+			polygon = walk.polygon.polygon,
 		},
 		true
 }
@@ -287,25 +297,26 @@ random_point :: proc(
 	if !ok {
 		return {}, false
 	}
+	n := net_at(s, m)
 	g: Graph
 	graph_reserve(&g, max_nodes, allocator)
 	first, _ := graph_node(&g, start_polygon)
 	g.nodes[first].position = center
 	heap_push(&g, first)
-	chosen := NO_POLYGON
+	chosen := NO_POLY
 	area_sum: f32
 	radius_squared := radius * radius
 	for len(g.heap) > 0 {
 		current := heap_pop(&g)
 		g.nodes[current].state = .Closed
 		from := g.nodes[current]
-		pts := points_of(m, from.polygon)
+		pts := net_points(&n, from.polygon)
 		area := polygon_area_2d(&pts)
 		area_sum += area
 		if random.float32(rng) * area_sum <= area {
 			chosen = from.polygon
 		}
-		it := portals(m, from.polygon)
+		it := portals(&n, from.polygon)
 		for portal in next_portal(&it) {
 			if from.parent != NO_NODE && portal.neighbor == g.nodes[from.parent].polygon {
 				continue
@@ -318,28 +329,29 @@ random_point :: proc(
 			if !room {
 				continue
 			}
-			n := &g.nodes[next]
-			if n.state == .Closed {
+			node := &g.nodes[next]
+			if node.state == .Closed {
 				continue
 			}
-			if n.state == .New {
-				n.position = (portal.left + portal.right) * 0.5
+			if node.state == .New {
+				node.position = (portal.left + portal.right) * 0.5
 			}
-			total := from.total + linalg.distance(from.position, n.position)
-			if n.state == .Open && total >= n.total {
+			total := from.total + linalg.distance(from.position, node.position)
+			if node.state == .Open && total >= node.total {
 				continue
 			}
-			n.parent, n.total = current, total
+			node.parent, node.total = current, total
 			heap_push(&g, next)
 		}
 	}
-	if chosen == NO_POLYGON {
+	if chosen == NO_POLY {
 		return {}, false
 	}
-	pts := points_of(m, chosen)
+	pts := net_points(&n, chosen)
 	p := point_in_polygon(&pts, random.float32(rng), random.float32(rng))
-	p.y = height_at(m, chosen, p)
-	return {position = world(m, p), mesh = m.id, polygon = chosen}, true
+	p.y = net_height(&n, chosen, p)
+	return {position = net_world(&n, p), mesh = s.frame[chosen.slot].id, polygon = chosen.polygon},
+		true
 }
 
 // point_in_polygon is the point of a convex polygon that two numbers in [0, 1) pick, uniformly over its area, as

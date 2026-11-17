@@ -329,7 +329,7 @@ nav_floor :: proc(f: ^Helper_Fixture) {
 	)
 	aligned, _ := mem.alloc_bytes_non_zeroed(len(data), format.BLOB_ALIGN, context.temp_allocator)
 	copy(aligned, data)
-	view, ok := nav.view_of(aligned, {}, 0x100)
+	view, ok := nav.view_of(aligned, {handle = {1, 1}, version = 1}, {}, 0x100)
 	assert(ok)
 	views := make([]nav.Mesh_View, 1, context.temp_allocator)
 	views[0] = view

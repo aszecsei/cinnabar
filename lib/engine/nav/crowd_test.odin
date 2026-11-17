@@ -211,7 +211,7 @@ level :: proc(t: ^testing.T, f: ^Fixture, cells_x, cells_z: int, blocked: []bool
 		SCENE,
 		format.scene_write({}, SCENE, 1, nav_meshes = listed, allocator = context.temp_allocator),
 	)
-	f.world.scene = SCENE
+	ecs.add_world_scene(&f.world, SCENE)
 	box(f, {f64(cells_x) / 2, -0.5, f64(cells_z) / 2}, {f32(cells_x) + 4, 1, f32(cells_z) + 4})
 	for z in 0 ..< cells_z {
 		for x in 0 ..< cells_x {
@@ -903,4 +903,97 @@ Test.report(Navigation.move_status(Test.agent(), %d) == "moving" and 1 or 0)
 	testing.expect(t, !ok, "an entity without a NavAgent is an error")
 	_, ok = script.spawn_source(&f.runtime, "=no_target", `Navigation.move_to(Test.agent(), 3)`)
 	testing.expect(t, !ok, "a target is a position or an entity")
+}
+
+// The scenes of two navmeshes side by side, each 4 by 4 cells with border edges, from x = 0 to 8.
+@(private = "file")
+PAIR_SCENES := [2]format.Guid{{0 = 0xa1}, {0 = 0xb1}}
+@(private = "file")
+PAIR_MESHES := [2]format.Guid{{0 = 0xa2}, {0 = 0xb2}}
+
+// two_scenes writes the two scenes and their navmeshes, loads them, and makes their floor and the walls around them.
+@(private = "file")
+two_scenes :: proc(t: ^testing.T, f: ^Fixture) {
+	for i in 0 ..< 2 {
+		grid := Grid {
+			cells_x    = 4,
+			cells_z    = 4,
+			tile_cells = 2,
+			border     = true,
+			shift      = {f64(4 * i), 0, 0},
+		}
+		write_blob(t, f, PAIR_MESHES[i], grid_blob(grid, "Human", 0, guid = PAIR_MESHES[i]))
+		listed := []format.Scene_Nav_Mesh{{entity = 0x100, agent = "Human", guid = PAIR_MESHES[i]}}
+		write_blob(
+			t,
+			f,
+			PAIR_SCENES[i],
+			format.scene_write(
+				{},
+				PAIR_SCENES[i],
+				1,
+				nav_meshes = listed,
+				allocator = context.temp_allocator,
+			),
+		)
+		ecs.add_world_scene(&f.world, PAIR_SCENES[i])
+	}
+	box(f, {4, -0.5, 2}, {12, 1, 8})
+	box(f, {-0.5, 1, 2}, {1, 2, 6})
+	box(f, {8.5, 1, 2}, {1, 2, 6})
+	box(f, {4, 1, -0.5}, {10, 2, 1})
+	box(f, {4, 1, 4.5}, {10, 2, 1})
+}
+
+@(test)
+an_agent_walks_across_the_seam_between_two_scenes :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(t, f)
+	two_scenes(t, f)
+	e := spawn_agent(f, 1, 1)
+	send(f, e, 7, 3)
+	frame(f)
+	testing.expect_value(t, status(f, e), Move_Status.Moving)
+	testing.expect(t, run(f, 600, e) < 600, "the agent arrives")
+	testing.expectf(
+		t,
+		distance_xz(where_is(f, e), {7, 0, 3}) <= 0.3,
+		"the agent stopped at %v",
+		where_is(f, e),
+	)
+}
+
+@(test)
+an_agent_whose_next_scene_unloads_stops_at_the_seam :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(t, f)
+	two_scenes(t, f)
+	e := spawn_agent(f, 1, 2)
+	send(f, e, 7, 2)
+	frame(f, 10)
+	testing.expect_value(t, status(f, e), Move_Status.Moving)
+	// The far scene unloads while the agent's corridor crosses it: the agent asks again, and goes no further than the
+	// seam, as nothing is past it.
+	ecs.remove_world_scene(&f.world, PAIR_SCENES[1])
+	for _ in 0 ..< 600 {
+		frame(f)
+		if status(f, e) == .Failed {
+			break
+		}
+		_, corridor := crowd_debug(&f.nav, &f.world, e)
+		for p in corridor {
+			testing.expect(
+				t,
+				f.nav.frame[p.slot].stamp != {},
+				"the corridor is on an unloaded navmesh",
+			)
+		}
+	}
+	testing.expect_value(t, status(f, e), Move_Status.Failed)
+	testing.expectf(
+		t,
+		where_is(f, e).x <= 4.1,
+		"the agent went past the seam to %v",
+		where_is(f, e),
+	)
 }

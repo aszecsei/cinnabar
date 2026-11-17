@@ -55,13 +55,17 @@ path_corners :: proc(s: ^State, w: ^ecs.World, e: ecs.Entity) -> []ecs.World_Pos
 	return slot.phase.(Path_Solved).corners[:] if ok else nil
 }
 
-// path_corridor is the navmesh and the polygons that an entity's path crosses, or nil.
-path_corridor :: proc(s: ^State, w: ^ecs.World, e: ecs.Entity) -> (Mesh_Id, []u32) {
+// path_corridor is the navmesh that an entity's path starts on and the polygons that it crosses, or nil, also while a
+// navmesh that it crosses is gone and the paths system has not found it again.
+path_corridor :: proc(s: ^State, w: ^ecs.World, e: ecs.Entity) -> (Mesh_Id, []Poly) {
 	slot, ok := solved_slot(s, w, e)
 	if !ok {
 		return {}, nil
 	}
 	solved := slot.phase.(Path_Solved)
+	if !stamps_hold(s, solved.crossed[:]) {
+		return {}, nil
+	}
 	return solved.mesh, solved.corridor[:]
 }
 
@@ -87,11 +91,13 @@ Path_Searching :: struct {
 }
 Path_Solved :: struct {
 	status:   Path_Status,
+	// The navmesh that it starts on.
 	mesh:     Mesh_Id,
-	// The navmesh's blob that it was found on, which a recook changes.
-	stamp:    Mesh_Stamp,
+	// The navmeshes that its corridor crosses, by slot, and their blobs when it was found, which a recook or an unload
+	// changes.
+	crossed:  [dynamic]Slot_Stamp,
 	corners:  [dynamic]ecs.World_Position,
-	corridor: [dynamic]u32,
+	corridor: [dynamic]Poly,
 }
 Path_Failed :: struct {}
 
@@ -120,14 +126,15 @@ Path_Pool :: struct {
 	free:        [dynamic]u32,
 }
 
-// Active_Search is a search that runs, the path that it is for, and the navmesh that it runs on. owner is zero when it
-// is free.
+// Active_Search is a search that runs, the path that it is for, the navmesh that it starts on, the origin of its points,
+// and the state's mesh_epoch when it started. owner is zero when it is free.
 @(private)
 Active_Search :: struct {
 	search: Search,
 	owner:  Path_Handle,
 	mesh:   Mesh_Id,
-	stamp:  Mesh_Stamp,
+	origin: ecs.World_Position,
+	epoch:  u64,
 }
 
 @(private)
@@ -185,6 +192,7 @@ release_phase :: proc(s: ^State, slot: ^Path_Slot) {
 	case Path_Searching:
 		s.searches[p.search].owner = {}
 	case Path_Solved:
+		delete(p.crossed)
 		delete(p.corners)
 		delete(p.corridor)
 	}
@@ -314,8 +322,9 @@ admit_requests :: proc(s: ^State, w: ^ecs.World) {
 	clear(&s.pending)
 }
 
-// revalidate_paths queues again, at the end, the solved paths whose navmesh was recooked or unloaded, and starts
-// again, in place, the searches on one.
+// revalidate_paths queues again, at the end, the solved paths that cross a navmesh that was recooked or unloaded, and
+// starts again, in place, the searches that ran while one was. Nothing reads a path's polygons after their navmesh
+// went.
 @(private)
 revalidate_paths :: proc(s: ^State, w: ^ecs.World) {
 	for i in 0 ..< u32(len(s.paths.slots)) {
@@ -323,13 +332,12 @@ revalidate_paths :: proc(s: ^State, w: ^ecs.World) {
 		h := Path_Handle{i, s.paths.generations[i]}
 		#partial switch p in slot.phase {
 		case Path_Solved:
-			if m := mesh_of(s, p.mesh); m == nil || m.stamp != p.stamp {
+			if !stamps_hold(s, p.crossed[:]) {
 				set_phase(s, w, h, Path_Queued{})
 				append(&s.queue, h)
 			}
 		case Path_Searching:
-			a := &s.searches[p.search]
-			if m := mesh_of(s, a.mesh); m == nil || m.stamp != a.stamp {
+			if s.searches[p.search].epoch != s.mesh_epoch {
 				set_phase(s, w, h, Path_Queued{})
 			}
 		}
@@ -350,7 +358,7 @@ start_searches :: proc(s: ^State, w: ^ecs.World) {
 		}
 		transform := ecs.get(w, slot.entity, ecs.Transform)
 		m: ^Mesh_View
-		polygon: u32
+		polygon: Poly
 		from: [3]f32
 		ok := transform != nil
 		if ok {
@@ -366,8 +374,9 @@ start_searches :: proc(s: ^State, w: ^ecs.World) {
 			free += 1
 		}
 		a := &s.searches[free]
-		a.owner, a.mesh, a.stamp = h, m.id, m.stamp
-		begin_toward(&a.search, m, from, polygon, slot.goal)
+		a.owner, a.mesh, a.origin, a.epoch = h, m.id, m.anchor, s.mesh_epoch
+		n := net_at(s, m)
+		begin_toward(s, &a.search, &n, slot.agent, from, polygon, slot.goal)
 		set_phase(s, w, h, Path_Searching{free})
 		i += 1
 	}
@@ -376,14 +385,14 @@ start_searches :: proc(s: ^State, w: ^ecs.World) {
 @(private)
 Search_Job :: struct {
 	search:     ^Search,
-	mesh:       ^Mesh_View,
+	net:        Net,
 	expansions: int,
 }
 
 @(private)
 search_job :: proc(data: rawptr) {
 	j := (^Search_Job)(data)
-	search_step(j.search, j.mesh, j.expansions)
+	search_step(j.search, &j.net, j.expansions)
 }
 
 // run_searches runs each search for its share of the tick's budget, one job each. A job writes only its own search.
@@ -404,7 +413,7 @@ run_searches :: proc(s: ^State, w: ^ecs.World) {
 		if a.owner == {} {
 			continue
 		}
-		work[n] = {&a.search, mesh_of(s, a.mesh), share}
+		work[n] = {&a.search, {s.frame, a.origin}, share}
 		list[n] = {search_job, &work[n]}
 		n += 1
 	}
@@ -425,20 +434,21 @@ finish_searches :: proc(s: ^State, w: ^ecs.World) {
 			continue
 		}
 		a := &s.searches[p.search]
-		m := mesh_of(s, a.mesh)
-		status, points, polygons := search_finish(&a.search, m, context.temp_allocator)
+		n := Net{s.frame, a.origin}
+		status, points, polygons := search_finish(&a.search, &n, context.temp_allocator)
 		heap := s.platform.heap_allocator
 		solved := Path_Solved {
 			status   = status,
 			mesh     = a.mesh,
-			stamp    = a.stamp,
+			crossed  = make([dynamic]Slot_Stamp, heap),
 			corners  = make([dynamic]ecs.World_Position, 0, len(points), heap),
-			corridor = make([dynamic]u32, 0, len(polygons), heap),
+			corridor = make([dynamic]Poly, 0, len(polygons), heap),
 		}
 		for point in points {
-			append(&solved.corners, world(m, point))
+			append(&solved.corners, net_world(&n, point))
 		}
 		append(&solved.corridor, ..polygons)
+		stamps_of(s.frame, polygons, &solved.crossed)
 		set_phase(s, w, h, solved)
 		ordered_remove(&s.queue, i)
 	}

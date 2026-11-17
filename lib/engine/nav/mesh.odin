@@ -11,8 +11,9 @@ import "cinnabar:engine/ecs"
 // anchor, along the world's axes, with y up. A polygon is named by its index in the blob's polygons (see
 // docs/ai/navigation.md#queries).
 
-// Mesh_Id is a navmesh by its volume's scene ID and its agent type, which hold across a recook.
+// Mesh_Id is a navmesh by its scene, its volume's scene ID in the scene and its agent type, which hold across a recook.
 Mesh_Id :: struct {
+	scene:  format.Guid,
 	volume: u64,
 	agent:  Agent_Type,
 }
@@ -28,6 +29,8 @@ Mesh_Stamp :: struct {
 Mesh_View :: struct {
 	id:               Mesh_Id,
 	stamp:            Mesh_Stamp,
+	// Its place in the frame's views, which it keeps while it is loaded.
+	slot:             u32,
 	// The agent type's name, in the blob.
 	name:             string,
 	anchor:           ecs.World_Position,
@@ -49,6 +52,8 @@ Mesh_View :: struct {
 	details:          []format.Nav_Detail,
 	detail_vertices:  [][3]f32,
 	detail_triangles: [][4]u8,
+	// The seam links from its edges to the other meshes', by polygon and then edge (see seams.odin).
+	seams:            []Seam_Link,
 }
 
 // NO_POLYGON is no polygon.
@@ -58,14 +63,24 @@ NO_POLYGON :: max(u32)
 @(private)
 EQUAL_DISTANCE :: 1.0 / 16384.0
 
-// view_of reads a navmesh blob of a volume into a view, or fails for one that nav_mesh_view refuses. prepare makes the
-// frame's views with it.
-view_of :: proc(data: []byte, stamp: Mesh_Stamp, volume: u64) -> (m: Mesh_View, ok: bool) {
+// view_of reads a navmesh blob of a scene's volume into a view in a slot, or fails for one that nav_mesh_view refuses.
+// prepare makes the frame's views with it.
+view_of :: proc(
+	data: []byte,
+	stamp: Mesh_Stamp,
+	scene: format.Guid,
+	volume: u64,
+	slot: u32 = 0,
+) -> (
+	m: Mesh_View,
+	ok: bool,
+) {
 	blob := format.nav_mesh_view(data) or_return
 	agent := format.nav_mesh_agent(data, blob)
 	return {
-			id = {volume = volume, agent = Agent_Type(blob.agent_index)},
+			id = {scene = scene, volume = volume, agent = Agent_Type(blob.agent_index)},
 			stamp = stamp,
+			slot = slot,
 			name = agent.name,
 			anchor = {raw = blob.anchor},
 			bounds_min = blob.bounds_min,
@@ -158,110 +173,6 @@ polygon_bounds :: proc "contextless" (m: ^Mesh_View, polygon: u32) -> (lo, hi: [
 		lo.y, hi.y = min(lo.y, v.y), max(hi.y, v.y)
 	}
 	return
-}
-
-// Portal is the part of an edge that a polygon crosses to a neighbor by: its left and right ends, as an agent that
-// leaves through it sees them. A link across tiles crosses by the part of the edge that it covers.
-@(private)
-Portal :: struct {
-	neighbor:    u32,
-	edge:        int,
-	left, right: [3]f32,
-}
-
-// Portals goes through a polygon's portals: its edges' neighbors in the tile, and its links to the next tiles, in its
-// edges' order and then its links'.
-@(private)
-Portals :: struct {
-	m:       ^Mesh_View,
-	polygon: u32,
-	points:  Polygon_Points,
-	edge:    int,
-	link:    int,
-}
-
-@(private)
-portals :: proc "contextless" (m: ^Mesh_View, polygon: u32) -> Portals {
-	return {m = m, polygon = polygon, points = points_of(m, polygon)}
-}
-
-@(private)
-next_portal :: proc "contextless" (it: ^Portals) -> (portal: Portal, ok: bool) {
-	m := it.m
-	p := &m.polygons[it.polygon]
-	for it.edge < it.points.count {
-		k := it.edge
-		a, b := it.points.points[k], it.points.points[(k + 1) % it.points.count]
-		n := p.neighbors[k]
-		if n == format.NAV_NONE {
-			it.edge += 1
-			continue
-		}
-		if n & format.NAV_EXTERNAL == 0 {
-			it.edge += 1
-			return {
-					neighbor = tile_of(m, it.polygon).first_polygon + u32(n),
-					edge = k,
-					left = a,
-					right = b,
-				},
-				true
-		}
-		links := m.links[p.first_link:][:p.link_count]
-		for it.link < len(links) {
-			l := links[it.link]
-			it.link += 1
-			if int(l.edge) == k {
-				t0, t1 := f32(l.t_min) / 255, f32(l.t_max) / 255
-				return {
-						neighbor = l.polygon,
-						edge = k,
-						left = math.lerp(a, b, t0),
-						right = math.lerp(a, b, t1),
-					},
-					true
-			}
-		}
-		it.edge += 1
-		it.link = 0
-	}
-	return
-}
-
-// portal_between is the portal that leads from one polygon to another.
-@(private)
-portal_between :: proc "contextless" (m: ^Mesh_View, from, to: u32) -> (Portal, bool) {
-	it := portals(m, from)
-	for portal in next_portal(&it) {
-		if portal.neighbor == to {
-			return portal, true
-		}
-	}
-	return {}, false
-}
-
-// across is the polygon across an edge at a point on it, given by its fraction along the edge: the neighbor in the tile,
-// or the link whose part of the edge holds the point.
-@(private)
-across :: proc "contextless" (m: ^Mesh_View, polygon: u32, edge: int, along: f32) -> (u32, bool) {
-	p := &m.polygons[polygon]
-	n := p.neighbors[edge]
-	if n == format.NAV_NONE {
-		return NO_POLYGON, false
-	}
-	if n & format.NAV_EXTERNAL == 0 {
-		return tile_of(m, polygon).first_polygon + u32(n), true
-	}
-	// A link's ends are rounded to 255ths, so a point a little outside one still crosses by it.
-	SLACK :: 0.5 / 255
-	for l in m.links[p.first_link:][:p.link_count] {
-		if int(l.edge) == edge &&
-		   along >= f32(l.t_min) / 255 - SLACK &&
-		   along <= f32(l.t_max) / 255 + SLACK {
-			return l.polygon, true
-		}
-	}
-	return NO_POLYGON, false
 }
 
 // tri_area_2d is twice the signed area of a triangle on the xz plane, as Detour's dtTriArea2D: positive for the

@@ -8,7 +8,7 @@ import "cinnabar:engine/ecs"
 // A navmesh blob built by hand for the tests, as the cooker lays one out, since the tests cannot link Recast: a floor
 // of 1 m square polygons, one for each open cell of a grid, in tiles of tile_cells cells, with links across the tiles.
 
-@(private = "file")
+@(private)
 Grid :: struct {
 	cells_x, cells_z: int,
 	tile_cells:       int,
@@ -18,6 +18,11 @@ Grid :: struct {
 	height:           proc(x, z: f32) -> f32,
 	// The links across the tiles' sides at x cover only the lower half of the edge in z.
 	half_seams:       bool,
+	// The grid's edges on its bounds are border edges, toward a tile that it does not have, as the cooker's are.
+	border:           bool,
+	// Where the grid is from GRID_ANCHOR, which is its anchor, and its volume's scene ID, or 0x100.
+	shift:            [3]f64,
+	volume:           u64,
 }
 
 // The test's anchor: far from the origin, so the queries' sums are relative to it.
@@ -182,6 +187,11 @@ grid_blob :: proc(g: Grid, agent: string, agent_index: u32, guid := format.Guid{
 					for k in 0 ..< 4 {
 						nx, nz := x + steps[k].x, z + steps[k].y
 						p.neighbors[k] = format.NAV_NONE
+						outside := nx < 0 || nz < 0 || nx >= g.cells_x || nz >= g.cells_z
+						if outside && g.border {
+							p.neighbors[k] = u16(format.NAV_EXTERNAL) | u16(sides[k])
+							continue
+						}
 						if !open(g, nx, nz) {
 							continue
 						}
@@ -229,8 +239,8 @@ grid_blob :: proc(g: Grid, agent: string, agent_index: u32, guid := format.Guid{
 		{
 			guid = guid,
 			key = 1,
-			anchor = ecs.position_from_meters(GRID_ANCHOR).raw,
-			volume = 0x100,
+			anchor = ecs.position_from_meters(GRID_ANCHOR + g.shift).raw,
+			volume = g.volume if g.volume != 0 else 0x100,
 			agent = {
 				name = agent,
 				radius = 0.25,
@@ -261,16 +271,31 @@ grid_blob :: proc(g: Grid, agent: string, agent_index: u32, guid := format.Guid{
 	return aligned
 }
 
-// frame_of is a state whose frame views blobs, as prepare makes it, without the asset runtime.
+// frame_of is a state whose frame views blobs, each in the slot of its order, with the seams between them, as prepare
+// makes it, without the asset runtime. Each is its blob's volume in a scene of its own.
 @(private)
 frame_of :: proc(blobs: ..[]byte) -> ^State {
 	s := new(State, context.temp_allocator)
+	s.seams = make([dynamic]Seam_Link, context.temp_allocator)
+	s.seam_runs = make([dynamic][2]u32, context.temp_allocator)
 	views := make([]Mesh_View, len(blobs), context.temp_allocator)
 	for b, i in blobs {
-		v, ok := view_of(b, {handle = {u32(i), 1}, version = 1}, 0x100)
+		blob, _ := format.nav_mesh_view(b)
+		stamp := Mesh_Stamp{{u32(i + 1), 1}, 1}
+		v, ok := view_of(b, stamp, {0 = u8(i + 1)}, blob.volume if blob != nil else 0, u32(i))
 		assert(ok, "nav: a test grid's blob is refused")
 		views[i] = v
 	}
+	join_seams(s, views)
 	s.frame = views
 	return s
+}
+
+// mesh_count is how many navmeshes the frame views.
+@(private)
+mesh_count :: proc(s: ^State) -> (count: int) {
+	for &m in s.frame {
+		count += 1 if m.stamp != {} else 0
+	}
+	return
 }

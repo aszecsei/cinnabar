@@ -8,7 +8,7 @@ import "cinnabar:engine/debug"
 import "cinnabar:engine/ecs"
 import "cinnabar:engine/random"
 
-@(private = "file")
+@(private)
 near :: proc(a, b: [3]f32, within: f32 = 0.01) -> bool {
 	return linalg.length(a - b) <= within
 }
@@ -69,7 +69,7 @@ a_path_crosses_tiles :: proc(t: ^testing.T) {
 	seen: [6]bool
 	m := &s.frame[0]
 	for p in path.corridor {
-		tile := tile_of(m, p)
+		tile := tile_of(m, p.polygon)
 		seen[tile.z * m.tiles_x + tile.x] = true
 	}
 	count := 0
@@ -116,7 +116,7 @@ an_unreachable_goal_gives_a_partial_path :: proc(t: ^testing.T) {
 	testing.expectf(t, abs(end.x - 8) < 0.01 && end.z >= 1 && end.z <= 2, "it ends at %v", end)
 	testing.expect(t, walkable(s, path.corners))
 	for p in path.corridor {
-		testing.expect(t, !is_island(&s.frame[0], p))
+		testing.expect(t, !is_island(&s.frame[0], p.polygon))
 	}
 }
 
@@ -281,4 +281,77 @@ a_volume_draws_its_edges_links_and_tiles :: proc(t: ^testing.T) {
 	path := find_path(s, at(0.5, 0, 0.9), at(7.5, 0, 0.9), 0)
 	draw_corners(&d, path.corners, {1, 1, 1, 1})
 	testing.expect_value(t, len(debug.frame_lines(&d)), 3 * len(path.corners) - 1)
+}
+
+// seam_grid is a row of 4 by 2 cells in tiles of 2, with border edges, shifted along x from GRID_ANCHOR, of its own
+// volume.
+@(private = "file")
+seam_grid :: proc(shift: [3]f64, volume: u64, wall := false) -> []byte {
+	blocked: []bool
+	if wall {
+		// The cells at x = 0 are walled off, so nothing crosses the grid's west side.
+		blocked = make([]bool, 8, context.temp_allocator)
+		blocked[0], blocked[4] = true, true
+	}
+	return grid_blob(
+		{
+			cells_x = 4,
+			cells_z = 2,
+			tile_cells = 2,
+			border = true,
+			shift = shift,
+			volume = volume,
+			blocked = blocked,
+		},
+		"Human",
+		0,
+	)
+}
+
+@(test)
+a_path_crosses_the_seam_between_two_navmeshes :: proc(t: ^testing.T) {
+	s := frame_of(seam_grid({}, 0x100), seam_grid({4, 0, 0}, 0x200))
+	testing.expect(t, len(s.frame[0].seams) > 0)
+	testing.expect(t, len(s.frame[1].seams) > 0)
+	path := find_path(s, at(0.5, 0, 0.5), at(7.5, 0, 0.5), 0)
+	testing.expect_value(t, path.status, Path_Status.Found)
+	testing.expect_value(t, len(path.corners), 2)
+	testing.expect(t, near(meters(path.corners[1]), {7.5, 0, 0.5}))
+	slots: [2]bool
+	for p in path.corridor {
+		slots[p.slot] = true
+	}
+	testing.expect(t, slots[0] && slots[1], "the corridor is on both navmeshes")
+	// A walk crosses the seam, and stops at the far mesh's east side.
+	hit, ok := raycast(s, at(0.5, 0, 0.5), at(9.5, 0, 0.5), 0)
+	testing.expect(t, ok)
+	testing.expect(t, hit.wall != nil)
+	testing.expect(t, near(meters(hit.position), {8, 0, 0.5}))
+	testing.expect_value(t, hit.mesh.volume, 0x200)
+	// A random point around the seam may be on either.
+	rng: random.State
+	random.seed(&rng, 7)
+	for _ in 0 ..< 16 {
+		l, found := random_point(s, at(4, 0, 1), 1.5, 0, &rng)
+		testing.expect(t, found)
+		p := meters(l.position)
+		testing.expect(t, p.x >= 0 && p.x <= 8 && p.z >= 0 && p.z <= 2)
+	}
+}
+
+@(test)
+navmeshes_apart_or_walled_have_no_seam :: proc(t: ^testing.T) {
+	// A gap of a meter between them.
+	s := frame_of(seam_grid({}, 0x100), seam_grid({5, 0, 0}, 0x200))
+	testing.expect_value(t, len(s.frame[0].seams), 0)
+	path := find_path(s, at(0.5, 0, 0.5), at(7.5, 0, 1.5), 0)
+	testing.expect_value(t, path.status, Path_Status.Partial)
+	// Higher than a step.
+	s = frame_of(seam_grid({}, 0x100), seam_grid({4, 1, 0}, 0x200))
+	testing.expect_value(t, len(s.frame[0].seams), 0)
+	// Touching, but the far mesh's cells at the seam are walled off, so its side there has no border edges.
+	s = frame_of(seam_grid({}, 0x100), seam_grid({4, 0, 0}, 0x200, wall = true))
+	testing.expect_value(t, len(s.frame[0].seams), 0)
+	path = find_path(s, at(0.5, 0, 0.5), at(7.5, 0, 1.5), 0)
+	testing.expect_value(t, path.status, Path_Status.Partial)
 }
