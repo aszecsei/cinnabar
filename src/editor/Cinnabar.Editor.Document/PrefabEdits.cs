@@ -239,7 +239,7 @@ public static partial class PrefabEdits
 
     // A reference to an instance's entity written as its path, so the file keeps it as the prefab changes.
     static SceneValue? Pathed(SceneDocument document, SceneValue? value) =>
-        value is { Kind: SceneValueKind.Entity, Path: null } && PathOf(document.Expanded, value.Entity) is { } path ? SceneValue.EntityRef(path) : value;
+        value is { Kind: SceneValueKind.Entity, Path: null, Scene: "" } && PathOf(document.Expanded, value.Entity) is { } path ? SceneValue.EntityRef(path) : value;
 
     // Sets a component's field in a block, making the component if the block lacks it. A field set back to none
     // leaves a component of the prefab that has no other override out of the block, since it no longer differs.

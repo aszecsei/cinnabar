@@ -358,8 +358,8 @@ Load_Scene :: struct {
 	ticket: u64,
 }
 
-// One scene of a Load_Scene. Its scene IDs are its own: another scene can have the same, and a reference or a parent
-// names an entity of the same scene.
+// One scene of a Load_Scene. Its scene IDs are its own: another scene can have the same, and a parent names an entity
+// of the same scene. A reference names one of the same scene, or by its Scene_Value.scene one of another.
 Loaded_Scene :: struct {
 	// The editor's number for the scene, nonzero and unique among the open scenes, which its entities' Entity_Info and
 	// the operations on them carry.
@@ -419,6 +419,8 @@ Scene_Value :: struct {
 	text:    string,
 	// Entity: a scene ID, or 0 for none.
 	entity:  u64,
+	// Entity: the GUID of the scene that the entity is in, or zero for the field's own scene.
+	scene:   [16]u8,
 	// Asset: a GUID, or zero for none.
 	asset:   [16]u8,
 }
@@ -457,7 +459,7 @@ Operation_Kind :: enum u8 {
 }
 
 // An edit of a scene, by the scene's number and the entity's scene ID. Only the members for its kind are set. A
-// parent and a reference name an entity of the same scene. From the game, a scene of 0 is the editor's active scene,
+// parent names an entity of the same scene, and a reference one of it or by its scene's GUID of another. From the game, a scene of 0 is the editor's active scene,
 // as for an entity that a command or a behaviour creates at the root.
 Operation :: struct {
 	kind:       Operation_Kind,

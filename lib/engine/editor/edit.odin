@@ -40,7 +40,7 @@ apply_operations :: proc(
 			for c, i in op.created {
 				created[i] = scene_entity_of(c, allocator)
 			}
-			scene.add_entities(w, scripts, created, handles, problems, op.scene)
+			scene.add_entities(w, scripts, created, handles, problems, op.scene, e.scenes)
 			continue
 		}
 		if op.kind == .Create_Instance {
@@ -72,6 +72,7 @@ apply_operations :: proc(
 		switch op.kind {
 		case .Create_Entity, .Create_Instance:
 		case .Destroy_Entity:
+			scene.release_slots(e.scenes, w, entity)
 			ecs.despawn(w, entity)
 			delete_key(handles, op.entity)
 		case .Rename:
@@ -106,6 +107,7 @@ apply_operations :: proc(
 					component_of(c, allocator),
 					handles,
 					problems,
+					e.scenes,
 				)
 			}
 		case .Remove_Component:
@@ -118,6 +120,7 @@ apply_operations :: proc(
 					},
 				)
 			} else {
+				scene.release_slots(e.scenes, w, entity, ecs.Component_Id(op.component))
 				ecs.remove_raw(w, entity, ecs.Component_Id(op.component))
 			}
 		case .Set_Field, .Reset_Field:
@@ -131,6 +134,7 @@ apply_operations :: proc(
 					op.kind == .Reset_Field,
 					handles,
 					problems,
+					e.scenes,
 				)
 			}
 		case .Add_Behaviour:
@@ -139,7 +143,16 @@ apply_operations :: proc(
 			}
 			values := make([dynamic]script.Behaviour_Field, allocator)
 			for f in fields_of(op.fields, allocator) {
-				if field, ok := scene.behaviour_field(w, op.entity, f, handles, problems); ok {
+				if field, ok := scene.behaviour_field(
+					w,
+					op.entity,
+					f,
+					handles,
+					problems,
+					e.scenes,
+					entity,
+					guid,
+				); ok {
 					append(&values, field)
 				}
 			}
@@ -151,6 +164,7 @@ apply_operations :: proc(
 			}
 		case .Remove_Behaviour:
 			if scripts != nil {
+				scene.release_behaviour_slots(e.scenes, w, entity, guid)
 				script.detach_script(scripts, entity, guid)
 			}
 		case .Set_Behaviour_Field, .Reset_Behaviour_Field:
@@ -158,22 +172,17 @@ apply_operations :: proc(
 				continue
 			}
 			for f in fields_of(op.fields, allocator) {
-				field := script.Behaviour_Field {
-					name = f.name,
-				}
-				if op.kind == .Set_Behaviour_Field {
-					ok: bool
-					field, ok = scene.behaviour_field(w, op.entity, f, handles, problems)
-					if !ok {
-						continue
-					}
-				}
-				if problem := script.set_behaviour_field(
+				if problem := scene.set_behaviour_field(
+					w,
 					scripts,
+					e.scenes,
 					entity,
+					op.entity,
 					guid,
-					field,
-					reset = op.kind == .Reset_Behaviour_Field,
+					f,
+					op.kind == .Reset_Behaviour_Field,
+					handles,
+					problems,
 				); problem != "" {
 					append(problems, scene.Problem{op.entity, problem})
 				}
@@ -276,6 +285,7 @@ fields_of :: proc(
 				floats = v.floats,
 				text = v.text,
 				entity = v.entity,
+				scene = format.Guid(v.scene),
 				asset = format.Guid(v.asset),
 			},
 		}
