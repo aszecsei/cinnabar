@@ -432,6 +432,8 @@ world_spawn :: proc(L: ^luau.State) -> c.int {
 	ecs.add(w, e, pose)
 	if writing(r) {
 		record_edit(r, Edit_Spawn{entity = e, prefab = prefab})
+	} else {
+		spawned(r, e)
 	}
 	push_entity(L, e)
 	return 1

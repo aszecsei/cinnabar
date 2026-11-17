@@ -94,6 +94,11 @@ Game :: struct {
 	scripts:            script.Runtime,
 	// What the editor knows of the world (see docs/editor/link.md#world).
 	editor:             editor.Editor,
+	// The world's scenes, which load and unload one at a time (see docs/world/scenes.md).
+	scenes:             scene.Scenes,
+	// The scene loads and unloads that load_scene and unload_scene asked for, which the next frame's start applies. On
+	// the heap.
+	scene_requests:     [dynamic]Scene_Request,
 }
 
 // request_quit asks the game to end after this frame, as Game.quit does. While an editor is linked it does nothing, since
@@ -292,6 +297,7 @@ register_scripts :: proc(r: ^script.Runtime) {
 	sprite.register_scripts(r, &g.sprites)
 	script.expose(r, render.Tint, render.DEFAULT_TINT)
 	ui.register_scripts(r, &g.ui)
+	define_scene_bindings(r)
 	script.define(r, "Game.set_paused", proc(L: ^luau.State) -> c.int {
 			luau.L_checktype(L, 1, .BOOLEAN)
 			game_of(L).paused = bool(luau.toboolean(L, 1))

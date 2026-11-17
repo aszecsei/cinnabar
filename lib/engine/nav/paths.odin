@@ -243,6 +243,21 @@ tick_paths :: proc(ctx: ^ecs.System_Context) {
 	finish_searches(s, w)
 }
 
+// forget_despawned frees the paths and the crowd slots of the entities that are gone, at once rather than at their
+// systems' next tick, as after a scene unloads (see docs/world/scenes.md#the-systems).
+forget_despawned :: proc(s: ^State, w: ^ecs.World) {
+	for i in 0 ..< u32(len(s.paths.slots)) {
+		if slot := &s.paths.slots[i]; slot.phase != nil && !ecs.is_alive(w, slot.entity) {
+			free_slot(s, i)
+		}
+	}
+	for i in 0 ..< u32(len(s.crowd.slots)) {
+		if slot := &s.crowd.slots[i]; slot.phase != nil && !ecs.is_alive(w, slot.entity) {
+			free_crowd_slot(s, i)
+		}
+	}
+}
+
 // check_paths frees the paths of entities that are gone, that lost their Nav_Path, or whose Nav_Path names another
 // slot, and clears a Nav_Path that names a slot that is not its own, as a copy of an entity's does.
 @(private)

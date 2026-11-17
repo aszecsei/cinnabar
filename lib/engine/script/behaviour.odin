@@ -708,6 +708,32 @@ set_prefab_spawner :: proc(r: ^Runtime, spawner: Prefab_Spawner) {
 	r.prefab_spawner = spawner
 }
 
+// Spawned_Hook gets each root that World.spawn spawns, with the entity whose behaviour spawned it, or 0 for the main
+// script, a script action or code outside a behaviour.
+Spawned_Hook :: #type proc(r: ^Runtime, root, spawner: ecs.Entity)
+
+// set_spawned_hook gives World.spawn what it calls with each root that it spawns, before the root's behaviours wake.
+// lib/engine/scene's register_scripts sets it, so a spawn belongs to its spawner's scene.
+set_spawned_hook :: proc(r: ^Runtime, hook: Spawned_Hook) {
+	r.spawned_hook = hook
+}
+
+// calling_entity is the entity whose behaviour's callback or coroutine runs, or 0.
+calling_entity :: proc(r: ^Runtime) -> ecs.Entity {
+	if i := instance_at(r, r.writer); r.writer != {} && i != nil {
+		return i.entity
+	}
+	return 0
+}
+
+// spawned calls the spawned hook with a root that a script spawned.
+@(private)
+spawned :: proc(r: ^Runtime, root: ecs.Entity) {
+	if r.spawned_hook != nil {
+		r.spawned_hook(r, root, calling_entity(r))
+	}
+}
+
 // spawn_prefab_now spawns a prefab from a script and pushes its root. Its behaviours attach at once, so awake and
 // on_enable run before it returns, as entity:add does.
 @(private)
@@ -722,6 +748,7 @@ spawn_prefab_now :: proc(r: ^Runtime, L: ^luau.State, guid: format.Guid, pose: e
 	if !ok {
 		raise(L, message)
 	}
+	spawned(r, root)
 	for b in behaviours {
 		attach_fields(r, L, b.entity, b.script, b.fields, immediate = true)
 	}

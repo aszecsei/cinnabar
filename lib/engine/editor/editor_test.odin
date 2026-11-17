@@ -525,12 +525,12 @@ load_door :: proc(f: ^Fixture) -> (door, hinge: ecs.Entity) {
 			},
 		},
 	)
-	return find_scene_entity(
-		&f.editor,
+	return scene.find(
+		f.editor.scenes,
 		&f.world,
 		0,
 		DOOR,
-	), find_scene_entity(&f.editor, &f.world, 0, HINGE)
+	), scene.find(f.editor.scenes, &f.world, 0, HINGE)
 }
 
 @(test)
@@ -587,7 +587,7 @@ operations_edit_the_world :: proc(t: ^testing.T) {
 	testing.expect_value(t, ecs.get(&f.world, door, Tuned).inner.amount, 2.5)
 	testing.expect_value(t, ecs.get(&f.world, door, Tuned).mode, Mode.Busy)
 	testing.expect_value(t, ecs.get(&f.world, hinge, ecs.Transform).scale, [3]f32{1, 2, 3})
-	knob := find_scene_entity(&f.editor, &f.world, 0, 0xc3)
+	knob := scene.find(f.editor.scenes, &f.world, 0, 0xc3)
 	testing.expect(t, knob != 0)
 	testing.expect_value(t, ecs.get(&f.world, knob, ecs.Parent).entity, door)
 
@@ -1173,7 +1173,7 @@ recorded_edits_become_operations_that_apply_to_the_world :: proc(t: ^testing.T) 
 	testing.expectf(t, len(problems) == 0, "problems: %v", problems[:])
 	testing.expect(t, ecs.get(w, door, ecs.Transform).position == moved.position)
 	testing.expect(t, ecs.has(w, door, ecs.Disabled))
-	made := find_scene_entity(&f.editor, w, 0, ops[0].entity)
+	made := scene.find(f.editor.scenes, w, 0, ops[0].entity)
 	testing.expect(t, made != 0)
 	if made != 0 {
 		testing.expect_value(t, ecs.get(w, made, Tuned).inner.amount, 7)
@@ -2572,11 +2572,11 @@ several_scenes_keep_their_own_scene_ids :: proc(t: ^testing.T) {
 			testing.expect_value(t, info.scene, 2)
 		}
 	}
-	north := find_scene_entity(&f.editor, &f.world, 1, DOOR)
-	south := find_scene_entity(&f.editor, &f.world, 2, DOOR)
-	hinge := find_scene_entity(&f.editor, &f.world, 2, HINGE)
+	north := scene.find(f.editor.scenes, &f.world, 1, DOOR)
+	south := scene.find(f.editor.scenes, &f.world, 2, DOOR)
+	hinge := scene.find(f.editor.scenes, &f.world, 2, HINGE)
 	testing.expect(t, north != 0 && south != 0 && north != south)
-	testing.expect_value(t, find_scene_entity(&f.editor, &f.world, 1, HINGE), 0)
+	testing.expect_value(t, scene.find(f.editor.scenes, &f.world, 1, HINGE), 0)
 
 	messages = step(
 	f,

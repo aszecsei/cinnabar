@@ -20,14 +20,14 @@ apply_operations :: proc(
 	reported: ^[dynamic]link.Edit_Problem,
 ) {
 	allocator := e.platform.frame_allocator
-	if len(scene_maps(e)) == 0 {
-		index_by_scene_id(e, w)
+	if !scene.has_maps(e.scenes) {
+		scene.index(e.scenes, w)
 	}
 	found := make([dynamic]scene.Problem, allocator)
 	problems := &found
 	for op in operations {
 		// An operation names its scene, whose IDs its entity, its parent and its references are.
-		handles := scene_handles(e, op.scene)
+		handles := scene.handles_of(e.scenes, op.scene)
 		clear(problems)
 		defer for p in problems^ {
 			append(
@@ -54,7 +54,7 @@ apply_operations :: proc(
 			)
 			continue
 		}
-		entity := find_scene_entity(e, w, op.scene, op.entity)
+		entity := scene.find(e.scenes, w, op.scene, op.entity)
 		if entity == 0 {
 			// Destroying a parent destroys its children, so their own operations find nothing.
 			if op.kind != .Destroy_Entity {
@@ -83,7 +83,7 @@ apply_operations :: proc(
 		case .Set_Parent:
 			if op.parent == 0 {
 				ecs.remove(w, entity, ecs.Parent)
-			} else if parent := find_scene_entity(e, w, op.scene, op.parent); parent != 0 {
+			} else if parent := scene.find(e.scenes, w, op.scene, op.parent); parent != 0 {
 				ecs.add(w, entity, ecs.Parent{parent})
 			} else {
 				append(
@@ -184,8 +184,8 @@ apply_operations :: proc(
 }
 
 // load_scenes unloads the level and replaces every entity in the world with the editor's scenes, each with its own
-// scene IDs, and adds what the world cannot use to problems. The world's scene GUID is the first scene's, whose navmeshes load (see
-// docs/editor/document-and-scenes.md#several-scenes).
+// number and scene IDs, and adds what the world cannot use to problems. The world's scene GUID is the first scene's,
+// whose navmeshes load (see docs/editor/document-and-scenes.md#several-scenes).
 @(private)
 load_scenes :: proc(
 	e: ^Editor,
@@ -195,25 +195,21 @@ load_scenes :: proc(
 	problems: ^[dynamic]link.Edit_Problem,
 ) {
 	allocator := e.platform.frame_allocator
-	scene.unload_level(w)
+	scene.unload_level(w, e.scenes)
 	found := make([dynamic]scene.Problem, allocator)
-	spawned := 0
-	for s, i in m.scenes {
-		if i == 0 {
-			w.scene = format.Guid(s.guid)
-		}
+	for s in m.scenes {
 		entities := make([]format.Scene_Entity, len(s.entities), allocator)
 		for entity, j in s.entities {
 			entities[j] = scene_entity_of(entity, allocator)
 		}
 		clear(&found)
-		spawned += scene.add_entities(
+		scene.add_scene(
 			w,
 			scripts,
-			entities,
-			scene_handles(e, s.scene),
-			&found,
+			e.scenes,
+			format.Scene{entities = entities, guid = format.Guid(s.guid)},
 			s.scene,
+			&found,
 		)
 		for p in found {
 			append(
@@ -222,88 +218,7 @@ load_scenes :: proc(
 			)
 		}
 	}
-	log.infof("editor: loaded %d scenes, %d entities", len(m.scenes), spawned)
-}
-
-// find_scene_entity is the entity with a scene ID in the scene with the number, or 0. A handle that the map has but
-// that is gone, or that another entity's slot now holds, makes the maps be built again.
-@(private)
-find_scene_entity :: proc(e: ^Editor, w: ^ecs.World, number: u32, id: u64) -> ecs.Entity {
-	if handles, ok := scene_maps(e)[number]; ok {
-		if entity, has := handles[id]; has && scene_key_of(w, entity) == {number, id} {
-			return entity
-		}
-	}
-	index_by_scene_id(e, w)
-	if handles, ok := scene_maps(e)[number]; ok {
-		return handles[id] or_else 0
-	}
-	return 0
-}
-
-// index_by_scene_id maps every entity that a scene made from its scene's number and its scene ID. The game's own
-// scene load, at init, does not fill the maps, so the first edit builds them.
-@(private)
-index_by_scene_id :: proc(e: ^Editor, w: ^ecs.World) {
-	clear_scene_handles(e)
-	it := ecs.world_iter(w)
-	for entity in ecs.world_next(&it) {
-		if key := scene_key_of(w, entity); key.id != 0 {
-			scene_handles(e, key.scene)[key.id] = entity
-		}
-	}
-}
-
-// scene_maps is the maps of every scene by its number, in the level's memory. They are level data: once the level
-// unloads, as when a scene loads, they are gone, and the next edit builds them again (see index_by_scene_id). Read
-// by_scene only through it.
-@(private)
-scene_maps :: proc(e: ^Editor) -> ^map[u32]^map[u64]ecs.Entity {
-	if generation := e.platform.level_generation(); e.level != generation {
-		clear(&e.by_scene)
-		e.level = generation
-	}
-	return &e.by_scene
-}
-
-// scene_handles is the map from scene ID to entity of the scene with the number, made at its first use in the level's
-// memory. It stays where it is until the level unloads, so a new scene's map does not move it.
-@(private)
-scene_handles :: proc(e: ^Editor, number: u32) -> ^map[u64]ecs.Entity {
-	maps := scene_maps(e)
-	if handles, ok := maps[number]; ok {
-		return handles
-	}
-	handles := new(map[u64]ecs.Entity, e.platform.level_allocator)
-	handles^ = make(map[u64]ecs.Entity, e.platform.level_allocator)
-	maps[number] = handles
-	return handles
-}
-
-// clear_scene_handles empties every scene's map, and keeps their memory.
-@(private)
-clear_scene_handles :: proc(e: ^Editor) {
-	for _, handles in scene_maps(e) {
-		clear(handles)
-	}
-}
-
-// Scene_Key is an entity of a scene: the scene's number and the entity's scene ID, which is 0 for an entity that the
-// game spawned.
-Scene_Key :: struct {
-	scene: u32,
-	id:    u64,
-}
-
-// scene_key_of is an entity's scene and scene ID, or zero for one that the game spawned.
-scene_key_of :: proc(w: ^ecs.World, entity: ecs.Entity) -> Scene_Key {
-	s := (^scene.Scene_Entity)(ecs.get_raw(w, entity, scene.SCENE_ENTITY_ID))
-	return {s.scene, s.id} if s != nil else {}
-}
-
-@(private)
-scene_id_of :: proc(w: ^ecs.World, entity: ecs.Entity) -> u64 {
-	return scene_key_of(w, entity).id
+	log.infof("editor: loaded %d scenes, %d entities", len(m.scenes), ecs.entity_count(w))
 }
 
 // The editor's scene types convert to the loader's. Strings and slices still point into the message.

@@ -1,6 +1,7 @@
 // Package scene loads scenes into the world: a cooked scene blob, or a snapshot from the editor (see
-// docs/editor/document-and-scenes.md#scenes). Both arrive as an asset_format.Scene, and load replaces the world with it. The editor's
-// operations use the same procedures for one entity, component or field at a time.
+// docs/editor/document-and-scenes.md#scenes). Both arrive as an asset_format.Scene. load replaces the world with it, and
+// add_scene adds it beside the scenes that are loaded, which unload_scene unloads one at a time (see
+// docs/world/scenes.md). The editor's operations use the same procedures for one entity, component or field at a time.
 package scene
 
 import "core:fmt"
@@ -31,6 +32,7 @@ Scene_Entity :: struct {
 // procedure, as with ecs.register_engine_components.
 register_components :: proc(r: ^ecs.Registry) {
 	ecs.register_component(r, Scene_Entity, SCENE_ENTITY_ID, category = ecs.NO_CATEGORY)
+	ecs.register_component(r, Scene_Owned, SCENE_OWNED_ID, category = ecs.NO_CATEGORY)
 }
 
 // Problem is something in a scene that the world cannot use, by the scene ID of its entity. The loader logs each,
@@ -40,14 +42,26 @@ Problem :: struct {
 	message: string,
 }
 
-// load_asset loads a cooked scene by GUID and replaces the world with it. The blob stays loaded, so a second load is
-// cheap.
+// load_asset loads a cooked scene by GUID and replaces the world with it, as load does. With scenes, the scene is
+// their scene 0 and its blob stays loaded until the scene or the level unloads; without, the blob stays loaded, so a
+// second load is cheap.
 load_asset :: proc(
 	w: ^ecs.World,
 	scripts: ^script.Runtime,
 	assets: ^asset.Assets,
 	guid: format.Guid,
+	scenes: ^Scenes = nil,
 ) -> bool {
+	if scenes != nil {
+		// The scenes let the blob go through these assets.
+		scenes.assets = assets
+		// The blob first, so a scene that does not load leaves the world as it is.
+		h, scene := read_scene_blob(w, assets, guid) or_return
+		unload_level(w, scenes)
+		add_scene(w, scripts, scenes, scene, u32(0))
+		keep_blob(scenes, h)
+		return true
+	}
 	h := asset.load(assets, guid) or_return
 	data := asset.data(assets, h) or_return
 	s, ok := format.scene_read(data, w.platform.frame_allocator)
@@ -64,41 +78,47 @@ load_asset :: proc(
 }
 
 // load replaces every entity in the world with the scene's, and makes its GUID the world's scene. It unloads the level
-// first (see unload_level). Call it between frames, outside the script phase. What the world cannot use, such as a component that the game no longer registers
+// first (see unload_level), so the scene is the only one; add_scene adds one beside the others. Call it between
+// frames, outside the script phase. What the world cannot use, such as a component that the game no longer registers
 // or a field that it no longer has, is skipped with a warning: the scene keeps it, so a broken build never deletes
 // scene data.
 //
 // Fields that a scene does not set have the component's registered defaults, or are zero. Previous_Transform starts
 // equal to Transform, so nothing interpolates from where the old world was. The behaviours wake in the next script
-// phase. scripts can be nil, and then the behaviours are skipped. handles, if given, is cleared and gets the entity of
-// each scene ID. problems, if given, gets each warning, in frame memory.
+// phase. scripts can be nil, and then the behaviours are skipped. With scenes, the scene is their scene 0 and its IDs
+// resolve through them (see find). problems, if given, gets each warning, in frame memory.
 load :: proc(
 	w: ^ecs.World,
 	scripts: ^script.Runtime,
 	s: format.Scene,
-	handles: ^map[u64]ecs.Entity = nil,
+	scenes: ^Scenes = nil,
 	problems: ^[dynamic]Problem = nil,
 ) {
-	unload_level(w)
-	w.scene = s.guid
-	local: map[u64]ecs.Entity
-	target := handles
-	if target == nil {
-		local = make(map[u64]ecs.Entity, len(s.entities), w.platform.frame_allocator)
-		target = &local
+	unload_level(w, scenes)
+	if scenes != nil {
+		add_scene(w, scripts, scenes, s, u32(0), problems)
+		return
 	}
-	clear(target)
-	spawned := add_entities(w, scripts, s.entities, target, problems)
+	w.scene = s.guid
+	handles := make(map[u64]ecs.Entity, len(s.entities), w.platform.frame_allocator)
+	spawned := add_entities(w, scripts, s.entities, &handles, problems)
 	log.infof("scene: loaded %d entities", spawned)
 }
 
-// unload_level despawns every entity, leaves the world with no scene, and unloads the level: the level arena's memory
-// and the GPU resources in the Level scope go (see docs/core/jobs-and-memory.md#level-memory). Call it between frames,
-// outside the script phase, as load does before it adds a scene.
-unload_level :: proc(w: ^ecs.World) {
+// unload_level despawns every entity, unloads every scene, leaves the world with no scene, and unloads the level: the
+// level arena's memory and the GPU resources in the Level scope go (see docs/core/jobs-and-memory.md#level-memory).
+// scenes, if given, lets their blobs go and forgets them. Call it between frames, outside the script phase, as load
+// does before it adds a scene.
+unload_level :: proc(w: ^ecs.World, scenes: ^Scenes = nil) {
 	ecs.despawn_all(w)
 	w.scene = {}
+	if scenes != nil {
+		forget_level(scenes)
+	}
 	w.platform.level_unload()
+	if scenes != nil {
+		scenes.level = w.platform.level_generation()
+	}
 }
 
 // add_entities adds entities of the scene with the number to the world, as load does, and returns how many it spawned.
@@ -209,19 +229,24 @@ add_entities_to :: proc(
 // docs/editor/prefabs.md#spawning-at-run-time). It loads the prefab's blob, which stays loaded, so a second spawn reads
 // memory. The entities get no Scene_Entity, as a game's entities have none, so the editor does not edit them, and the
 // prefab's references inside it resolve to its own new entities. The children keep their Local_Transform, and
-// propagation places them. The behaviours wake in the next script phase; from a script, World.spawn wakes them before
-// it returns. Call it between frames or in a serial phase.
+// propagation places them. With an owner, the root is that scene's (see Scene_Owned) and goes when it unloads. The
+// behaviours wake in the next script phase; from a script, World.spawn wakes them before it returns, and the root is
+// its spawner's scene's. Call it between frames or in a serial phase.
 spawn_prefab :: proc(
 	w: ^ecs.World,
 	scripts: ^script.Runtime,
 	assets: ^asset.Assets,
 	guid: format.Guid,
 	pose: ecs.Transform,
+	owner: u32 = 0,
 ) -> (
 	root: ecs.Entity,
 	ok: bool,
 ) {
 	root, _, ok = spawn_prefab_entities(w, scripts, assets, guid, pose, nil)
+	if ok && owner != 0 {
+		ecs.add(w, root, Scene_Owned{owner})
+	}
 	return
 }
 
@@ -301,8 +326,8 @@ spawn_prefab_entities :: proc(
 	return root, "", true
 }
 
-// register_scripts gives the script runtime what World.spawn(prefab) calls, and the component of a scene's entities,
-// whose writes an edit-mode behaviour records in Edit mode. Call it in the game's Register_Proc, so a reload sets it
+// register_scripts gives the script runtime what World.spawn(prefab) calls, what gives a spawn its spawner's scene (see
+// Scene_Owned), and the component of a scene's entities, whose writes an edit-mode behaviour records in Edit mode. Call it in the game's Register_Proc, so a reload sets it
 // again.
 register_scripts :: proc(r: ^script.Runtime) {
 	script.set_document_component(r, SCENE_ENTITY_ID)
@@ -323,6 +348,11 @@ register_scripts :: proc(r: ^script.Runtime) {
 			return root, pending[:], message, ok
 		},
 	)
+	script.set_spawned_hook(r, proc(r: ^script.Runtime, root, spawner: ecs.Entity) {
+		if number, owned := scene_of(r.world, spawner); owned && spawner != 0 {
+			ecs.add(r.world, root, Scene_Owned{number})
+		}
+	})
 }
 
 // add_component adds or replaces a component of the entity with scene ID id, with the scene's values. It returns
@@ -438,7 +468,7 @@ behaviour_field :: proc(
 // is_derived is true for the components that the loader makes from an entity's keys, or that the world makes.
 is_derived :: proc(id: ecs.Component_Id) -> bool {
 	switch id {
-	case SCENE_ENTITY_ID, ecs.INACTIVE_ID, ecs.PARENT_ID, ecs.NAME_ID:
+	case SCENE_ENTITY_ID, SCENE_OWNED_ID, ecs.INACTIVE_ID, ecs.PARENT_ID, ecs.NAME_ID:
 		return true
 	}
 	return false

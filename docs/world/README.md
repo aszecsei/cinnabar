@@ -13,6 +13,7 @@ Read them in this order the first time.
 | [Time](time.md) | Fixed ticks, interpolation and teleports. |
 | [Render extraction](render-extraction.md) | How rendering reads the world. |
 | [Volumes](volumes.md) | Settings that depend on where a point is. |
+| [Scenes](scenes.md) | Loading scenes into the world and unloading them one at a time, what a scene owns, and scene IDs. |
 | [The game package](game-package.md) | The standard game, which runs every package on the world in order, and the hooks that a project's Odin adds to it. |
 
 Animation runs on the world as physics does, in `Fixed` systems with presentation between ticks: see [Animation](../animation/design.md#the-ecs).
@@ -35,7 +36,7 @@ The world is one `ecs.World` in `Game_State`. Its storage is virtual memory that
 | `position.odin` | `World_Position` and its two operations |
 | `name.odin` | The `Name` component |
 
-The data flow in a frame: systems read and write components through queries, in parallel jobs; their structural changes go to command buffers, which `apply` runs at fixed points; the script phase edits the world directly because it is serial; and at the end, [render extraction](render-extraction.md#render-extraction) writes what the GPU needs into frame memory. Two packages sit directly on `ecs`: `lib/engine/volume` ([Volumes](volumes.md#volumes)) and `lib/engine/scene`, the loader that fills a world from a cooked scene or the editor's snapshot ([Editor](../editor/document-and-scenes.md#scenes)).
+The data flow in a frame: systems read and write components through queries, in parallel jobs; their structural changes go to command buffers, which `apply` runs at fixed points; the script phase edits the world directly because it is serial; and at the end, [render extraction](render-extraction.md#render-extraction) writes what the GPU needs into frame memory. Two packages sit directly on `ecs`: `lib/engine/volume` ([Volumes](volumes.md#volumes)) and `lib/engine/scene`, the loader that fills a world from a cooked scene or the editor's snapshot, and loads and unloads scenes one at a time ([Scenes](scenes.md), [Editor](../editor/document-and-scenes.md#scenes)).
 
 ## References
 

@@ -84,6 +84,17 @@ despawn :: proc(w: ^World, e: Entity) -> bool {
 	return true
 }
 
+// despawn_many despawns the entities and their descendants, as despawn does for each, but scans for the descendants
+// once. It skips the entities that are not alive, and returns how many of the given ones it despawned.
+despawn_many :: proc(w: ^World, entities: []Entity) -> (count: int) {
+	flush_reserved(w)
+	for e in entities {
+		count += int(despawn_one(w, e))
+	}
+	despawn_orphans(w)
+	return
+}
+
 // despawn_all despawns every entity. The next spawns take the freed slots from the lowest index up, so a world that is
 // filled again, such as by a scene load, gets its handles in the order that it spawns them.
 despawn_all :: proc(w: ^World) {

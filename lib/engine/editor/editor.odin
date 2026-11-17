@@ -17,6 +17,7 @@ import "cinnabar:engine/ecs"
 import "cinnabar:engine/editor/link"
 import "cinnabar:engine/nav"
 import "cinnabar:engine/render"
+import "cinnabar:engine/scene"
 import "cinnabar:engine/script"
 import "cinnabar:engine/ui"
 
@@ -32,29 +33,28 @@ MAX_WATCHED :: 64
 // survive a code reload. What one editor connection has told the game, and has been told, is its session. A soft
 // restart makes a new Editor, with a new session, which sends everything again.
 Editor :: struct {
-	platform:  ^core.Platform_API,
+	platform:    ^core.Platform_API,
 	// The game's asset runtime, in Game_State, which the viewport tools load their shaders from.
-	assets:    ^asset.Assets,
-	session:   Session,
-	// The entity of each scene ID, by the number of its scene, for the editor's operations (see find_scene_entity). It
-	// follows the world, not the session. The map of maps is on the heap. The maps are in the level's memory, and level
-	// is the level generation that they were made in (see scene_maps).
-	by_scene:  map[u32]^map[u64]ecs.Entity,
-	level:     u64,
+	assets:      ^asset.Assets,
+	session:     Session,
+	// The world's scenes, whose maps find the entity of each scene ID by the number of its scene for the editor's
+	// operations (see scene.find): the game's, or the editor's own (owns_scenes) when init got none.
+	scenes:      ^scene.Scenes,
+	owns_scenes: bool,
 	// The viewport tools' GPU objects (see viewport.odin).
-	tools:     Viewport_Tools,
+	tools:       Viewport_Tools,
 	// The game's commands (see commands.odin). Registrations: reload clears them.
-	commands:  [dynamic]Command,
+	commands:    [dynamic]Command,
 	// The UI documents that previews show, each in a slot of its own, apart from the game's UI (see ui_preview.odin).
-	ui:        ui.State,
+	ui:          ui.State,
 	// The renderer's residency, which draws the live meshes, in Game_State, or nil without a renderer.
-	residency: ^render.Residency,
+	residency:   ^render.Residency,
 	// The renderer, which answers where the texture sky's sun is.
-	renderer:  ^render.Renderer,
+	renderer:    ^render.Renderer,
 	// The game's navigation, in Game_State, whose navmeshes the helpers draw, or nil without one.
-	nav:       ^nav.State,
+	nav:         ^nav.State,
 	// The game's AI, in Game_State, whose perceivers' memories the helpers draw, or nil without one.
-	ai:        ^ai.State,
+	ai:          ^ai.State,
 }
 
 // Session is the state of one editor connection: what the editor has sent the game, and what the game has sent the
@@ -151,7 +151,8 @@ Watched :: struct {
 // init starts the editor's game side. The viewport tools load their shaders from assets, which must outlive the
 // editor; without them (nil), the tools stay off. The live meshes draw through residency, the renderer's, which must
 // outlive the editor too; without it (nil), they are kept and baked but not drawn. The renderer answers for the sky
-// (see Sky_Sun_Request); without it (nil), the sky has no sun.
+// (see Sky_Sun_Request); without it (nil), the sky has no sun. scenes is the game's table of the world's scenes, which
+// the editor's loads and operations use; without it (nil), the editor keeps its own.
 init :: proc(
 	e: ^Editor,
 	platform: ^core.Platform_API,
@@ -160,6 +161,7 @@ init :: proc(
 	renderer: ^render.Renderer = nil,
 	navigation: ^nav.State = nil,
 	agents: ^ai.State = nil,
+	scenes: ^scene.Scenes = nil,
 ) {
 	e^ = {
 		platform  = platform,
@@ -168,9 +170,13 @@ init :: proc(
 		renderer  = renderer,
 		nav       = navigation,
 		ai        = agents,
-		by_scene  = make(map[u32]^map[u64]ecs.Entity, platform.heap_allocator),
-		level     = platform.level_generation(),
+		scenes    = scenes,
 		commands  = make([dynamic]Command, platform.heap_allocator),
+	}
+	if e.scenes == nil {
+		e.scenes = new(scene.Scenes, platform.heap_allocator)
+		scene.init_scenes(e.scenes, platform, assets)
+		e.owns_scenes = true
 	}
 	if assets != nil {
 		ui.init(&e.ui, platform, assets, residency)
@@ -230,6 +236,9 @@ end_session :: proc(e: ^Editor) {
 // whose procedures are the old DLL's, so register them again after it.
 reload :: proc(e: ^Editor, platform: ^core.Platform_API) {
 	e.platform = platform
+	if e.owns_scenes {
+		scene.reload_scenes(e.scenes, platform)
+	}
 	e.session.types_sent = false
 	clear(&e.commands)
 	sync_viewport_pipelines(e, force = true)
@@ -243,8 +252,10 @@ reload :: proc(e: ^Editor, platform: ^core.Platform_API) {
 
 destroy :: proc(e: ^Editor) {
 	end_session(e)
-	// The maps themselves are the level's memory.
-	delete(e.by_scene)
+	if e.owns_scenes {
+		scene.destroy_scenes(e.scenes)
+		free(e.scenes, e.platform.heap_allocator)
+	}
 	delete(e.commands)
 	if e.ui.platform != nil {
 		ui.destroy(&e.ui)
@@ -571,7 +582,7 @@ scan :: proc(
 			for id, i in components {
 				ids[i] = u64(id)
 			}
-			key := scene_key_of(w, entity)
+			key := scene.key_of(w, entity)
 			append(
 				&infos,
 				link.Entity_Info {

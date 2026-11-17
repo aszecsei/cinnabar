@@ -52,8 +52,8 @@ World :: struct {
 	watched:          [MAX_WATCHED]Component_Id,
 	watched_count:    int,
 	log_activity:     bool,
-	// The GUID of the scene that the world was loaded from, or zero. scene.load writes it; nav loads the scene's
-	// navmeshes by it (see docs/ai/navigation.md#loading).
+	// The GUID of the first scene that the world holds, or zero. lib/engine/scene's loads and unloads write it; nav
+	// loads the scene's navmeshes by it (see docs/ai/navigation.md#loading).
 	scene:            format.Guid,
 }
 

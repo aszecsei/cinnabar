@@ -213,6 +213,24 @@ free_slot :: proc(s: ^State, index: u32) {
 	append(&s.agents.free, index)
 }
 
+// forget_despawned frees the slots of the agents whose entities are gone, which stops their actions, and drops the
+// writes that waited for them, at once rather than at the next think, as after a scene unloads (see
+// docs/world/scenes.md#the-systems).
+forget_despawned :: proc(s: ^State, w: ^ecs.World) {
+	for i in 0 ..< u32(len(s.agents.slots)) {
+		if slot := &s.agents.slots[i]; slot.phase != nil && !ecs.is_alive(w, slot.entity) {
+			free_slot(s, i)
+		}
+	}
+	for i := 0; i < len(s.early); {
+		if !ecs.is_alive(w, s.early[i].entity) {
+			ordered_remove(&s.early, i)
+		} else {
+			i += 1
+		}
+	}
+}
+
 // check_agents frees the slots of entities that went, lost their Agent, or whose Agent_State names another slot, starts
 // again those whose Agent names other assets, and gives a slot to each Agent that has none, or whose Agent_State names
 // a slot that is not its own, as a copy of an entity's does. The new Agent_States are added by command, after the tick.

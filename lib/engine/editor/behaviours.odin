@@ -375,7 +375,7 @@ number_of :: proc(w: ^ecs.World, entity: ecs.Entity, numbers: map[ecs.Entity]u32
 	if number, ok := numbers[entity]; ok {
 		return number
 	}
-	return scene_key_of(w, entity).scene if entity != 0 else 0
+	return scene.key_of(w, entity).scene if entity != 0 else 0
 }
 
 // edited_entity is the entity that an edit changes.
