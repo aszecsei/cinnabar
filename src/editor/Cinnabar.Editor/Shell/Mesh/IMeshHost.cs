@@ -16,8 +16,14 @@ namespace Cinnabar.Editor.Shell;
 /// </summary>
 interface IMeshHost
 {
-    /// <summary>The open scene, or null.</summary>
+    /// <summary>The active scene, whose meshes mesh mode edits, or null.</summary>
     SceneDocument? Scene { get; }
+
+    /// <summary>The active scene's number, or 0 without one.</summary>
+    uint ActiveNumber { get; }
+
+    /// <summary>The entity that the active scene made with the scene ID, or null.</summary>
+    EntityNode? FindInScene(ulong sceneId);
 
     /// <summary>The editor's camera.</summary>
     EditorCamera Camera { get; }

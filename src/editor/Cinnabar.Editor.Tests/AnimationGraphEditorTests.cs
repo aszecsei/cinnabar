@@ -499,7 +499,7 @@ public sealed class AnimationGraphEditorTests : IDisposable
         using var _ = shell;
         var changes = 0;
         editor.LiveChanged += () => changes++;
-        shell.OnGameMessage(new EntitySnapshot([new EntityInfo(1, "Fox", 1, 0, true, []), new EntityInfo(2, "Other", 2, 0, true, [])]));
+        shell.OnGameMessage(new EntitySnapshot([new EntityInfo(1, "Fox", 1, 1, 0, true, []), new EntityInfo(2, "Other", 2, 1, 0, true, [])]));
         shell.OnGameMessage(View(1));
 
         // In Edit, there is nothing to show or to wait for.
@@ -577,7 +577,7 @@ public sealed class AnimationGraphEditorTests : IDisposable
         Assert.Equal(1u, editor.PreviewView!.State);
 
         // While the game plays this graph on the selected entity, the canvas shows that, and the preview goes on.
-        shell.OnGameMessage(new EntitySnapshot([new EntityInfo(1, "Fox", 1, 0, true, [])]));
+        shell.OnGameMessage(new EntitySnapshot([new EntityInfo(1, "Fox", 1, 1, 0, true, [])]));
         shell.OnGameMessage(View(1, state: 2));
         shell.Selection.Select(1);
         Assert.Same(editor.PreviewView, editor.ShownView);

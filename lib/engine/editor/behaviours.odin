@@ -88,6 +88,9 @@ operations_of :: proc(
 			append(&drafts, spawn)
 		}
 	}
+	// The scene of each draft is its parent's, and a root's is the editor's active scene, 0. Each draft comes after its
+	// parent, so the parent's is known.
+	numbers := make(map[ecs.Entity]u32, allocator)
 	made := make(map[ecs.Entity]bool, allocator)
 	for len(made) < len(drafts) {
 		progress := false
@@ -96,7 +99,10 @@ operations_of :: proc(
 			if made[d.entity] || (parent in ids && !made[parent]) {
 				continue
 			}
-			append(&ops, draft_operation(w, d, ids, allocator))
+			numbers[d.entity] = number_of(w, parent, numbers)
+			op := draft_operation(w, d, ids, allocator)
+			op.scene = numbers[d.entity]
+			append(&ops, op)
 			made[d.entity], progress = true, true
 		}
 		if !progress {
@@ -104,6 +110,11 @@ operations_of :: proc(
 		}
 	}
 	for edit in edits.list {
+		// The edit's operations name the scene of the entity that it edits.
+		start := len(ops)
+		defer for &op in ops[start:] {
+			op.scene = number_of(w, edited_entity(edit, edits), numbers)
+		}
 		switch v in edit {
 		case script.Edit_Component:
 			component_operations(w, edits.components[v.index], ids, &ops, allocator)
@@ -356,6 +367,39 @@ link_field :: proc(f: format.Scene_Field) -> link.Scene_Field {
 			asset = ([16]u8)(v.asset),
 		},
 	}
+}
+
+// number_of is the number of an entity's scene: a draft's, or its own, or 0 for the editor's active scene.
+@(private = "file")
+number_of :: proc(w: ^ecs.World, entity: ecs.Entity, numbers: map[ecs.Entity]u32) -> u32 {
+	if number, ok := numbers[entity]; ok {
+		return number
+	}
+	return scene_key_of(w, entity).scene if entity != 0 else 0
+}
+
+// edited_entity is the entity that an edit changes.
+@(private = "file")
+edited_entity :: proc(edit: script.Edit, edits: script.Edits) -> ecs.Entity {
+	switch v in edit {
+	case script.Edit_Component:
+		return edits.components[v.index].entity
+	case script.Edit_Remove:
+		return v.entity
+	case script.Edit_Destroy:
+		return v.entity
+	case script.Edit_Parent:
+		return v.entity
+	case script.Edit_Active:
+		return v.entity
+	case script.Edit_Attach:
+		return v.entity
+	case script.Edit_Detach:
+		return v.entity
+	case script.Edit_Spawn:
+		return v.entity
+	}
+	return 0
 }
 
 // id_of is an entity's scene ID: a draft's new one, or its own, or 0.

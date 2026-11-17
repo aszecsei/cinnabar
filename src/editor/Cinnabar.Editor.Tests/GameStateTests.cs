@@ -31,7 +31,7 @@ public sealed class GameStateTests : IDisposable
         {
             shell.Host.LinkForTests(_sent.Add);
         }
-        shell.OnGameMessage(new EntitySnapshot([new EntityInfo(Box, "Box", 1, 0, true, [1])]));
+        shell.OnGameMessage(new EntitySnapshot([new EntityInfo(Box, "Box", 1, 1, 0, true, [1])]));
         shell.Viewports[0].Session.Show(new Avalonia.PixelSize(1600, 900));
         shell.Selection.Select(Box);
         Assert.Equal(0, shell.OpenMaterial(shell.Assets.Find(MaterialGuid)!)!.PreviewId);
@@ -67,7 +67,7 @@ public sealed class GameStateTests : IDisposable
 
         shell.Host.LinkForTests(_sent.Add);
 
-        Assert.Equal(Convert.FromHexString(guid), Assert.Single(_sent.OfType<LoadScene>()).Guid);
+        Assert.Equal(Convert.FromHexString(guid), Assert.Single(Assert.Single(_sent.OfType<LoadScene>()).Scenes).Guid);
     }
 
     [Fact]
@@ -77,7 +77,7 @@ public sealed class GameStateTests : IDisposable
 
         shell.Host.LinkForTests(_sent.Add);
 
-        Assert.Equal(new byte[16], Assert.Single(_sent.OfType<LoadScene>()).Guid);
+        Assert.Equal(new byte[16], Assert.Single(Assert.Single(_sent.OfType<LoadScene>()).Scenes).Guid);
     }
 
     [Fact]

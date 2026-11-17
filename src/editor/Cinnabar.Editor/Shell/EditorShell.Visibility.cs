@@ -1,3 +1,5 @@
+using Cinnabar.Editor.Model;
+
 namespace Cinnabar.Editor.Shell;
 
 /// <summary>Forwards to <see cref="SceneVisibility"/>, which holds the hidden and locked entities.</summary>
@@ -14,9 +16,17 @@ public sealed partial class EditorShell
         remove => Visibility.Changed -= value;
     }
 
-    public bool IsHidden(ulong sceneId) => Visibility.IsHidden(sceneId);
+    /// <summary>Whether the user hid this entity of the active scene itself.</summary>
+    public bool IsHidden(ulong sceneId) => Visibility.IsHidden(ActiveNumber, sceneId);
 
-    public bool IsLocked(ulong sceneId) => Visibility.IsLocked(sceneId);
+    /// <summary>Whether the user locked this entity of the active scene itself.</summary>
+    public bool IsLocked(ulong sceneId) => Visibility.IsLocked(ActiveNumber, sceneId);
+
+    /// <summary>Whether the user hid this entity of any open scene itself.</summary>
+    public bool IsHidden(EntityNode node) => Visibility.IsHidden(node.Scene, node.SceneId);
+
+    /// <summary>Whether the user locked this entity of any open scene itself.</summary>
+    public bool IsLocked(EntityNode node) => Visibility.IsLocked(node.Scene, node.SceneId);
 
     public bool IsHiddenInTree(ulong handle) => Visibility.IsHiddenInTree(handle);
 
@@ -24,9 +34,17 @@ public sealed partial class EditorShell
 
     public bool HasHidden => Visibility.HasHidden;
 
-    public void SetHidden(IEnumerable<ulong> sceneIds, bool hidden) => Visibility.SetHidden(sceneIds, hidden);
+    /// <summary>Hides or shows entities of the active scene by scene ID.</summary>
+    public void SetHidden(IEnumerable<ulong> sceneIds, bool hidden) => Visibility.SetHidden(sceneIds.Select(id => (ActiveNumber, id)), hidden);
 
-    public void SetLocked(IEnumerable<ulong> sceneIds, bool locked) => Visibility.SetLocked(sceneIds, locked);
+    /// <summary>Locks or unlocks entities of the active scene by scene ID.</summary>
+    public void SetLocked(IEnumerable<ulong> sceneIds, bool locked) => Visibility.SetLocked(sceneIds.Select(id => (ActiveNumber, id)), locked);
+
+    /// <summary>Hides or shows an entity of any open scene.</summary>
+    public void SetHidden(EntityNode node, bool hidden) => Visibility.SetHidden([(node.Scene, node.SceneId)], hidden);
+
+    /// <summary>Locks or unlocks an entity of any open scene.</summary>
+    public void SetLocked(EntityNode node, bool locked) => Visibility.SetLocked([(node.Scene, node.SceneId)], locked);
 
     /// <summary>
     /// Whether a selected entity is the scene's, in any mode: what is hidden and locked is the editor's, not the

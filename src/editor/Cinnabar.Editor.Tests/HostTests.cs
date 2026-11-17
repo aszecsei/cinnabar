@@ -164,7 +164,8 @@ public abstract class HostTests : IAsyncDisposable
         var spinner = Spinning(1, "Spinner");
         var path = Path.Combine(Path.GetTempPath(), $"cinnabar-test-{Guid.NewGuid():N}.scene");
         var document = new Document.SceneDocument(path, Scene(spinner));
-        document.Applied += ops => editor.Link.Send(new ApplyOperations([.. ops.Select(o => o.ToWire()).OfType<Link.Protocol.Operation>()]));
+        // Load sends the scene as number 1, so its operations name it.
+        document.Applied += ops => editor.Link.Send(new ApplyOperations([.. ops.Select(o => o.ToWire()).OfType<Link.Protocol.Operation>().Select(o => o with { Scene = 1 })]));
         await editor.Next<EntitySnapshot>();
         await Load(editor, document.Scene);
 

@@ -1099,6 +1099,7 @@ reverse_spin :: proc(ctx: ^editor.Command_Context) {
 				&ctx.operations,
 				link.Operation {
 					kind = .Set_Field,
+					scene = editor.scene_number(ctx.world, entity),
 					entity = id,
 					component = u64(SPIN_ID),
 					fields = slice.clone([]link.Scene_Field{field}),

@@ -42,7 +42,8 @@ public sealed partial class EditorShell
         }
         foreach (var hit in result.Hits)
         {
-            if (hit.SceneId != 0 && Pickable(hit.Entity)
+            // A drop edits the active scene, so it takes only that scene's entities.
+            if (hit.SceneId != 0 && hit.Scene == ActiveNumber && Pickable(hit.Entity)
                 && Scene.Expanded.Flat.Find(hit.SceneId) is { } entity && entity.Components.Any(c => c.Id == SceneEdits.MeshRendererId))
             {
                 return new MaterialTarget(hit.SceneId, result.Submesh);

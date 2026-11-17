@@ -19,9 +19,12 @@ SCENE_ENTITY_ID :: ecs.Component_Id(8)
 // scene that sets the setting overrides it, unless it also sets the flag to false (see docs/world/volumes.md#volumes).
 OVERRIDE_SUFFIX :: ".override"
 
-// Scene_Entity marks an entity that a scene made, with its scene ID. Entities that the game spawns have none.
+// Scene_Entity marks an entity that a scene made, with its scene ID. Entities that the game spawns have none. A world
+// can hold several scenes, which the editor numbers (see docs/editor/document-and-scenes.md#several-scenes): a scene ID
+// is unique only in its scene, so an entity is found by both. The game's own scene is 0.
 Scene_Entity :: struct {
-	id: u64 `editor:"read"`,
+	id:    u64 `editor:"read"`,
+	scene: u32 `editor:"read"`,
 }
 
 // register_components registers the components that scenes use. Call it from the game's component registration
@@ -89,17 +92,18 @@ load :: proc(
 	log.infof("scene: loaded %d entities", spawned)
 }
 
-// add_entities adds entities to the world, as load does, and returns how many it spawned. handles maps scene IDs to
-// entities, for the new entities and the ones that their fields refer to, and gets the new ones. An entity whose
-// scene ID handles already has is skipped.
+// add_entities adds entities of the scene with the number to the world, as load does, and returns how many it spawned.
+// handles maps the scene's IDs to entities, for the new entities and the ones that their fields refer to, and gets the
+// new ones. An entity whose scene ID handles already has is skipped.
 add_entities :: proc(
 	w: ^ecs.World,
 	scripts: ^script.Runtime,
 	entities: []format.Scene_Entity,
 	handles: ^map[u64]ecs.Entity,
 	problems: ^[dynamic]Problem = nil,
+	number: u32 = 0,
 ) -> int {
-	count, _ := add_entities_to(w, scripts, entities, handles, problems)
+	count, _ := add_entities_to(w, scripts, entities, handles, problems, number = number)
 	return count
 }
 
@@ -115,6 +119,7 @@ add_entities_to :: proc(
 	problems: ^[dynamic]Problem = nil,
 	scene_ids := true,
 	pending: ^[dynamic]script.Pending_Behaviour = nil,
+	number: u32 = 0,
 ) -> (
 	count: int,
 	spawned: []ecs.Entity,
@@ -137,7 +142,7 @@ add_entities_to :: proc(
 		count += 1
 		handles[e.id] = entity
 		if scene_ids {
-			ecs.add(w, entity, Scene_Entity{e.id})
+			ecs.add(w, entity, Scene_Entity{e.id, number})
 		}
 		if e.name != "" {
 			ecs.add(w, entity, ecs.make_name(e.name))

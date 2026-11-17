@@ -134,16 +134,17 @@ public sealed partial class EditorShell
         return true;
     }
 
-    // The handle of the outermost root of the instance that an entity is inside, or the entity's own.
-    ulong InstanceRootOf(ulong handle, ulong sceneId) =>
-        IsEditing && InstanceOf(sceneId) is { IsInstanceRoot: false } info && World.FindScene(info.Instance) is { } root ? root.Handle : handle;
+    // The handle of the outermost root of the instance that an entity is inside, in its own scene, or the entity's own.
+    ulong InstanceRootOf(ulong handle, uint scene, ulong sceneId) =>
+        IsEditing && SceneByNumber(scene)?.Expanded.InstanceOf(sceneId) is { IsInstanceRoot: false } info && World.FindScene(scene, info.Instance) is { } root
+            ? root.Handle : handle;
 
     void OnPicked(PickResult result, SelectMode mode, bool click)
     {
         // Locked entities are drawn but not picked. A pick leaves the camera's pivot where it is: it is ahead of the
         // camera, and what was clicked usually is not. An instance is one thing to pick, so a hit inside one picks its
         // outermost root; a double click picks the entity itself.
-        var hits = result.Hits.Where(h => Pickable(h.Entity)).Select(h => InstanceRootOf(h.Entity, h.SceneId)).Distinct().ToList();
+        var hits = result.Hits.Where(h => Pickable(h.Entity)).Select(h => InstanceRootOf(h.Entity, h.Scene, h.SceneId)).Distinct().ToList();
         switch (mode)
         {
             case SelectMode.Replace:
@@ -223,7 +224,7 @@ public sealed partial class EditorShell
         {
             return Mesh.PressMeshGizmo(pixel, extrude);
         }
-        var ids = Selection.Entities.Select(h => World.Find(h)?.SceneId ?? 0).Where(id => id != 0);
+        var ids = Selection.Entities.Select(h => ActiveSceneIdOf(h)).Where(id => id != 0);
         var poseEdit = new PoseEdit(Scene.Expanded.Flat, ids);
         if (poseEdit.IsEmpty)
         {
@@ -259,7 +260,7 @@ public sealed partial class EditorShell
         {
             return;
         }
-        var entities = Selection.Entities.Select(h => World.Find(h)?.SceneId ?? 0).Select(id => Scene.Expanded.Flat.Find(id)).OfType<SceneEntity>();
+        var entities = Selection.Entities.Select(h => ActiveSceneIdOf(h)).Select(id => Scene.Expanded.Flat.Find(id)).OfType<SceneEntity>();
         Frame(entities);
     }
 

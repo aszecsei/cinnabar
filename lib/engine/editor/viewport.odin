@@ -996,9 +996,10 @@ pick_result :: proc(
 				continue
 			}
 			if entity, alive := ecs.slot_entity(w, u32(i) * 32 + bit); alive {
+				key := scene_key_of(w, entity)
 				append(
 					&hits,
-					link.Pick_Hit{entity = u64(entity), scene_id = scene_id_of(w, entity)},
+					link.Pick_Hit{entity = u64(entity), scene_id = key.id, scene = key.scene},
 				)
 			}
 		}

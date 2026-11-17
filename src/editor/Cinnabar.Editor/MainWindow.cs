@@ -67,6 +67,8 @@ public sealed class MainWindow : Window
         var palette = new CommandPalette(views);
         shell.PaletteRequested += palette.Open;
         shell.OpenSceneRequested += () => _ = PickScene();
+        shell.AddSceneRequested += () => _ = PickAddScene();
+        shell.CloseSceneRequested += scene => _ = AskCloseScene(scene);
         shell.OpenProjectRequested += () => _ = PickProject();
         shell.OpenSceneFileRequested += path => _ = OpenSceneFile(path);
         shell.SaveAsRequested += () => _ = PickSaveAs();
@@ -261,22 +263,32 @@ public sealed class MainWindow : Window
         return true;
     }
 
-    /// <summary>Asks about unsaved changes, the scene's and its meshes', before they would be lost, and returns whether to go on.</summary>
+    /// <summary>
+    /// Asks about unsaved changes, every open scene's and their meshes', before they would be lost, and returns whether to
+    /// go on.
+    /// </summary>
     async Task<bool> ConfirmDiscard(string doing)
     {
-        if (_shell.Scene is not { } scene || (!scene.IsDirty && !_shell.Mesh.Meshes.AnyDirty && !_shell.Landscape.AnyDirty))
+        var dirty = _shell.Scenes.Where(s => s.IsDirty).ToList();
+        if (_shell.Scene == null || (dirty.Count == 0 && !_shell.Mesh.Meshes.AnyDirty && !_shell.Landscape.AnyDirty))
         {
             return true;
         }
-        var what = scene.IsDirty
-            ? _shell.Mesh.Meshes.AnyDirty ? $"{scene.Title} and its meshes have" : $"{scene.Title} has"
-            : $"The meshes of {scene.Title} have";
+        var scenes = dirty.Count switch
+        {
+            0 => "",
+            1 => dirty[0].Title,
+            _ => $"{string.Join(", ", dirty.Take(dirty.Count - 1).Select(s => s.Title))} and {dirty[^1].Title}",
+        };
+        var what = dirty.Count > 0
+            ? _shell.Mesh.Meshes.AnyDirty ? $"{scenes} and the meshes have" : dirty.Count == 1 ? $"{scenes} has" : $"{scenes} have"
+            : $"The meshes of {_shell.Scene.Title} have";
         var answer = await Dialogs.Ask(this, "Unsaved changes", $"{what} changes that are not saved. Save them before {doing}?",
             "Save", "Don't Save", "Cancel");
         switch (answer)
         {
             case "Save":
-                return _shell.SaveScene();
+                return _shell.SaveAllScenes();
             case "Don't Save":
                 _shell.DiscardChanges();
                 return true;
@@ -285,9 +297,50 @@ public sealed class MainWindow : Window
         }
     }
 
+    // Closes one of several open scenes, asking about its changes first. The others, and their changes, stay.
+    async Task AskCloseScene(Document.SceneDocument scene)
+    {
+        if (scene.IsDirty)
+        {
+            var answer = await Dialogs.Ask(this, "Unsaved changes", $"{scene.Title} has changes that are not saved. Save them before closing it?",
+                "Save", "Don't Save", "Cancel");
+            switch (answer)
+            {
+                case "Save" when !_shell.SaveScene(scene):
+                case "Cancel" or null:
+                    return;
+                case "Don't Save":
+                    _shell.DiscardChanges(scene);
+                    break;
+            }
+        }
+        _shell.CloseScene(scene);
+    }
+
+    // Picks a scene file to open beside the open scenes, which needs no question: nothing that is open closes.
+    async Task PickAddScene()
+    {
+        var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = "Add Scene",
+            AllowMultiple = true,
+            FileTypeFilter = [new FilePickerFileType("Scenes") { Patterns = [$"*{Document.SceneFile.Extension}"] }],
+            SuggestedStartLocation = _shell.Scene is { } open
+                ? await StorageProvider.TryGetFolderFromPathAsync(System.IO.Path.GetDirectoryName(open.Path)!)
+                : null,
+        });
+        foreach (var file in files)
+        {
+            if (file.TryGetLocalPath() is { } path)
+            {
+                _shell.AddScene(path);
+            }
+        }
+    }
+
     async Task OfferRestore()
     {
-        if (_shell.Scene is not { } scene || _shell.PendingRestore is not { } autosave)
+        if (_shell.PendingRestoreScene is not { } scene || _shell.PendingRestore is not { } autosave)
         {
             return;
         }
@@ -446,7 +499,7 @@ public sealed class MainWindow : Window
 
     async Task PickScene()
     {
-        if (!await ConfirmDiscard("opening another scene"))
+        if (!await ConfirmDiscard("opening another scene in their place"))
         {
             return;
         }
@@ -498,9 +551,12 @@ public sealed class MainWindow : Window
     {
         var scene = _shell.Scene;
         var dirty = scene is { IsDirty: true } ? " •" : "";
-        Title = scene == null ? "cinnabar editor" : $"{scene.Title}{dirty} - cinnabar editor";
+        // With several scenes open, the title names the active one and how many others there are, and marks any that is dirty.
+        var others = _shell.Scenes.Count - 1;
+        var more = others > 0 ? $" + {others} {(others == 1 ? "scene" : "scenes")}{(_shell.Scenes.Any(s => s != scene && s.IsDirty) ? " •" : "")}" : "";
+        Title = scene == null ? "cinnabar editor" : $"{scene.Title}{dirty}{more} - cinnabar editor";
         // A prefab open as the document says so, since its rules differ from a scene's.
-        _sceneStatus.Text = scene == null ? "No scene" : scene.IsPrefab ? $"Prefab  ·  {scene.Title}{dirty}" : scene.Title + dirty;
+        _sceneStatus.Text = scene == null ? "No scene" : scene.IsPrefab ? $"Prefab  ·  {scene.Title}{dirty}" : scene.Title + dirty + more;
         ToolTip.SetTip(_sceneStatus, scene?.Path);
     }
 

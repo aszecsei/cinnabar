@@ -13,6 +13,11 @@ public sealed class EntityNode
     public string Name { get; internal set; } = "";
     /// <summary>The scene ID of an entity that the scene made, or 0 for one that the game spawned.</summary>
     public ulong SceneId { get; internal set; }
+    /// <summary>
+    /// The number of the open scene that made it, or 0 for the game's own scene and for an entity that the game spawned.
+    /// A scene ID is unique only in its scene (see docs/editor/document-and-scenes.md#several-scenes).
+    /// </summary>
+    public uint Scene { get; internal set; }
     public ulong Parent { get; internal set; }
     public bool Active { get; internal set; }
 
@@ -45,7 +50,7 @@ public sealed class WorldModel
 {
     readonly Dictionary<ulong, ComponentType> _types = [];
     readonly Dictionary<ulong, EntityNode> _entities = [];
-    readonly Dictionary<ulong, EntityNode> _bySceneId = [];
+    readonly Dictionary<(uint Scene, ulong Id), EntityNode> _bySceneId = [];
     readonly List<EntityNode> _roots = [];
     readonly Dictionary<ulong, EntityValues> _values = [];
     readonly Dictionary<ulong, AnimatorView> _animators = [];
@@ -89,8 +94,8 @@ public sealed class WorldModel
 
     public EntityNode? Find(ulong handle) => _entities.GetValueOrDefault(handle);
 
-    /// <summary>The entity that a scene made with this scene ID, or null.</summary>
-    public EntityNode? FindScene(ulong sceneId) => sceneId == 0 ? null : _bySceneId.GetValueOrDefault(sceneId);
+    /// <summary>The entity that the scene with the number made with this scene ID, or null.</summary>
+    public EntityNode? FindScene(uint scene, ulong sceneId) => sceneId == 0 ? null : _bySceneId.GetValueOrDefault((scene, sceneId));
 
     public ComponentType? Type(ulong id) => _types.GetValueOrDefault(id);
 
@@ -253,6 +258,7 @@ public sealed class WorldModel
         }
         node.Name = info.Name;
         node.SceneId = info.SceneId;
+        node.Scene = info.Scene;
         node.Parent = info.Parent;
         node.Active = info.Active;
         node.Components = info.Components;
@@ -269,7 +275,7 @@ public sealed class WorldModel
             node.ChildList.Clear();
             if (node.SceneId != 0)
             {
-                _bySceneId[node.SceneId] = node;
+                _bySceneId[(node.Scene, node.SceneId)] = node;
             }
         }
         foreach (var node in _entities.Values.OrderBy(n => n.Index).ThenBy(n => n.Generation))

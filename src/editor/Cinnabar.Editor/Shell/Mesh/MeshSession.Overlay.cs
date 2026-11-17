@@ -39,7 +39,7 @@ public sealed partial class MeshSession
                 {
                     continue;
                 }
-                var handle = _shell.World.FindScene(sceneId)?.Handle ?? 0;
+                var handle = _shell.FindInScene(sceneId)?.Handle ?? 0;
                 var selected = MeshSelection.Of(guid).ToList();
                 var hovered = _hovered is { } h && h.Guid == guid ? h.Index : -1;
                 var edges = MeshElement == MeshElement.Edges ? selected.Where(e => e < mesh.Edges.Length).Select(e => new Wire.LiveEdge((uint)mesh.Edges[e].A, (uint)mesh.Edges[e].B)).ToArray() : [];

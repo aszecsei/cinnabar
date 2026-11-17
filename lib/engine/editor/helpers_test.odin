@@ -346,7 +346,7 @@ a_selected_volume_draws_its_navmesh :: proc(t: ^testing.T) {
 	nav_floor(f)
 	e := spawn_with(f, volume.Volume{shape = .Box})
 	ecs.add(&f.world, e, nav.Nav_Mesh_Volume{})
-	ecs.add(&f.world, e, scene.Scene_Entity{0x100})
+	ecs.add(&f.world, e, scene.Scene_Entity{id = 0x100})
 	f.editor.session.view.viewports[0].settings.helpers = .Selected
 	append(&f.editor.session.view.selection, e)
 	testing.expect_value(t, line_count(f), 12 + 6 + 1 + 4)

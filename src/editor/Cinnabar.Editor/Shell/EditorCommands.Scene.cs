@@ -17,14 +17,29 @@ static partial class EditorCommands
         });
         commands.Register(new Command(OpenScene, "Open Scene", shell.RequestOpenScene)
         {
-            Description = "Open a scene file. The host's world becomes the scene.",
+            Description = "Open a scene file in place of the open scenes. The host's world becomes the scene.",
             Icon = "assets",
             Shortcut = "Ctrl+O",
         });
-        // Save, Undo and Redo act on the graph editor whose document is active, and on the scene otherwise.
+        // Several scenes of a world open together, each its own document (see
+        // docs/editor/document-and-scenes.md#several-scenes).
+        commands.Register(new Command(AddScene, "Add Scene", shell.RequestAddScene)
+        {
+            Description = "Open a scene file beside the open scenes, as the active scene. The host's world holds them all, and each keeps its own undo and save.",
+            Icon = "scene",
+            Shortcut = "Ctrl+Shift+O",
+            CanExecuteWhen = () => shell.Scene is { IsPrefab: false },
+        });
+        commands.Register(new Command(CloseScene, "Close Scene", shell.RequestCloseScene)
+        {
+            Description = "Close the active scene, which asks about its changes first. The other open scenes stay.",
+            Icon = "delete",
+            CanExecuteWhen = () => shell.Scenes.Count > 1,
+        });
+        // Save, Undo and Redo act on the graph editor whose document is active, and on the active scene otherwise.
         commands.Register(new Command(Save, "Save", () => _ = shell.ActiveGraphEditor is { } graph ? shell.SaveGraph(graph) : shell.SaveScene())
         {
-            Description = "Write the scene, or the graph that the active graph editor shows, to its file. Not while a drag or a tool has an edit open.",
+            Description = "Write the active scene, or the graph that the active graph editor shows, to its file. Not while a drag or a tool has an edit open.",
             Icon = "save",
             Shortcut = "Ctrl+S",
             // An open entry's preview can still be put back, so the file waits for it to end.
@@ -32,10 +47,16 @@ static partial class EditorCommands
         });
         commands.Register(new Command(SaveAs, "Save As", shell.RequestSaveAs)
         {
-            Description = "Write the scene to a new file, which it then edits. Not while a drag or a tool has an edit open.",
+            Description = "Write the active scene to a new file, which it then edits. Not while a drag or a tool has an edit open.",
             Icon = "save-as",
             Shortcut = "Ctrl+Shift+S",
             CanExecuteWhen = () => shell.Scene != null && shell.OpenEdit == null,
+        });
+        commands.Register(new Command(SaveAll, "Save All Scenes", () => _ = shell.SaveAllScenes())
+        {
+            Description = "Write every open scene that has changes to its file. Not while a drag or a tool has an edit open.",
+            Icon = "save",
+            CanExecuteWhen = () => shell.AnySceneDirty && shell.OpenEdit == null,
         });
         commands.Register(new Command(Undo, "Undo", () =>
         {
@@ -49,7 +70,7 @@ static partial class EditorCommands
             }
         })
         {
-            Description = "Undo the last edit.",
+            Description = "Undo the last edit of the active scene.",
             Icon = "undo",
             Shortcut = "Ctrl+Z",
             CanExecuteWhen = () => shell.ActiveGraphEditor is { } graph ? graph.Document.CanUndo : shell.IsEditing && shell.Scene?.CanUndo == true,
@@ -66,7 +87,7 @@ static partial class EditorCommands
             }
         })
         {
-            Description = "Apply the last undone edit again.",
+            Description = "Apply the last undone edit of the active scene again.",
             Icon = "redo",
             Shortcut = "Ctrl+Y",
             CanExecuteWhen = () => shell.ActiveGraphEditor is { } graph ? graph.Document.CanRedo : shell.IsEditing && shell.Scene?.CanRedo == true,

@@ -173,7 +173,7 @@ public class SceneFileTests
     {
         var message = SceneSnapshot.ToMessage(Parse(Door), "");
 
-        var door = message.Entities.Single(e => e.Id == 0x5f3a9c01e2b47d10);
+        var door = message.Scenes[0].Entities.Single(e => e.Id == 0x5f3a9c01e2b47d10);
         Assert.Equal(0x1b04c7e95a2f3d88UL, door.Parent);
         var position = door.Components[0].Fields[0].Value;
         Assert.Equal(Link.Protocol.SceneValueKind.Number, position.Kind);
@@ -186,7 +186,7 @@ public class SceneFileTests
         Assert.Equal(0b0101, rotation.Integer);
         Assert.Equal(0.7071068, rotation.Floats[3]);
         Assert.Equal(Convert.FromHexString("9d2e41c0b7a35f6e81c4d2a90b3e7f15"), door.Behaviours[0].Script);
-        Assert.False(message.Entities.Single(e => e.Id == 0x1b04c7e95a2f3d88).Active);
+        Assert.False(message.Scenes[0].Entities.Single(e => e.Id == 0x1b04c7e95a2f3d88).Active);
         Assert.Equal(1L, SceneSnapshot.Value(SceneValue.Of(true)).Ints[0]);
     }
 

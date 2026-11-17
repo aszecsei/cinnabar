@@ -95,7 +95,7 @@ public sealed class PropertiesView : ScrollViewer
 
     void OnSelectionChanged(IReadOnlyList<ulong> old, IReadOnlyList<ulong> entities) => Rebuild();
 
-    IEnumerable<ulong> SelectedSceneIds() => _selection.Entities.Select(e => _world.Find(e)?.SceneId ?? 0).Where(id => id != 0);
+    IEnumerable<ulong> SelectedSceneIds() => _selection.Entities.Select(e => _shell.ActiveSceneIdOf(e)).Where(id => id != 0);
 
     void OnValuesChanged(ulong entity)
     {
@@ -266,7 +266,7 @@ public sealed class PropertiesView : ScrollViewer
         {
             return;
         }
-        ulong SceneIdOf(ulong handle) => _world.Find(handle)?.SceneId ?? 0;
+        ulong SceneIdOf(ulong handle) => _shell.ActiveSceneIdOf(handle);
         foreach (var component in values.Components)
         {
             if (_world.Type(component.Id) is { } type)
@@ -373,7 +373,7 @@ public sealed class PropertiesView : ScrollViewer
         {
             return;
         }
-        ulong SceneIdOf(ulong handle) => _world.Find(handle)?.SceneId ?? 0;
+        ulong SceneIdOf(ulong handle) => _shell.ActiveSceneIdOf(handle);
         foreach (var (key, view) in _grid.Views)
         {
             if (key.Owner.StartsWith("behaviour:", StringComparison.Ordinal) || !ulong.TryParse(key.Owner, System.Globalization.NumberStyles.HexNumber, null, out var id)

@@ -65,6 +65,13 @@ public sealed class SceneDocument
 
     public string Title => System.IO.Path.GetFileName(Path);
 
+    /// <summary>
+    /// The editor's number for the scene among the open scenes, which its entities in the host's world and the
+    /// operations on them carry (see docs/editor/document-and-scenes.md#several-scenes). The shell gives it when it opens
+    /// the document, and it is 0 until then.
+    /// </summary>
+    public uint Number { get; set; }
+
     /// <summary>The undo stack, oldest first. The first <see cref="Position"/> entries are applied.</summary>
     public IReadOnlyList<Transaction> History => _history;
 

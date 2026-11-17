@@ -32,7 +32,7 @@ public sealed class PrefabShellTests : IDisposable
         File.WriteAllText(_temp.Combine("door.prefab"), Fixture("door.prefab"));
         File.WriteAllText(_temp.Combine("lamp.prefab"), Fixture("lamp.prefab"));
         var shell = TestShell.Open(_temp, "level.scene", Text);
-        shell.OnGameMessage(new EntitySnapshot([new EntityInfo(Handle(0), "Crate", Crate, 0, true, [1]), new EntityInfo(Handle(1), "Front Door", Front, 0, true, [1])]));
+        shell.OnGameMessage(new EntitySnapshot([new EntityInfo(Handle(0), "Crate", Crate, 1, 0, true, [1]), new EntityInfo(Handle(1), "Front Door", Front, 1, 0, true, [1])]));
         return shell;
     }
 

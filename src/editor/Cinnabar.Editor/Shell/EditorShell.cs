@@ -86,7 +86,7 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
         _gizmo = new GizmoController(label => TryBeginEdit(label, "the gizmo"), SendGizmo);
         Host = new HostSession(options);
         Watches = new EntityWatches(Selection, Host);
-        Visibility = new SceneVisibility(World, Selection, Host, settings, Console, () => Scene?.Path, WriteSetting, Commands.InvalidateAll);
+        Visibility = new SceneVisibility(World, Selection, Host, settings, Console, () => [.. _scenes.Select(s => (s.Number, s.Path))], WriteSetting, Commands.InvalidateAll);
         Cook = new CookSession(options.Cook, Assets);
         Builder = new ProjectTool(ProjectLayout.Tool(options.EngineRoot), options.EngineRoot, ChildProcess.Start);
         WireTool();
@@ -126,7 +126,9 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
         // The editor watches the selected entities, so the properties panel has their values, and the game outlines them.
         Selection.Changed += (old, entities) =>
         {
-            _selectedSceneIds = [.. entities.Select(e => World.Find(e)?.SceneId ?? 0).Where(id => id != 0)];
+            _selectedSceneIds = [.. entities.Select(World.Find).OfType<EntityNode>().Where(n => n.SceneId != 0).Select(n => (n.Scene, n.SceneId))];
+            // The primary entity's scene is the active one, which edits act on.
+            FollowSelection();
             foreach (var gone in old.Except(entities).Where(e => !Watches.Contains(e)))
             {
                 Host.Send(new UnwatchEntity(gone));

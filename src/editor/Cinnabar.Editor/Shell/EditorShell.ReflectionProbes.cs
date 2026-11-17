@@ -100,7 +100,7 @@ public sealed partial class EditorShell
     /// <summary>Asks the game to capture the selected probes now, each in one frame, one a frame.</summary>
     public void CaptureSelectedProbes()
     {
-        var probes = Selection.Entities.Where(h => World.Find(h)?.SceneId is { } id && Scene?.Expanded.Flat.Find(id)?.Components.Any(c => c.Id == SceneEdits.ReflectionProbeId) == true).ToArray();
+        var probes = Selection.Entities.Where(h => ActiveSceneIdOf(h) is var id and not 0 && Scene?.Expanded.Flat.Find(id)?.Components.Any(c => c.Id == SceneEdits.ReflectionProbeId) == true).ToArray();
         if (probes.Length > 0 && Host.Linked)
         {
             Host.Send(new CaptureReflectionProbes(probes));

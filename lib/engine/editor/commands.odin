@@ -43,7 +43,7 @@ Command_Context :: struct {
 	// The editor's camera, so a command can put something in view: the open scene view's with the lowest number, or
 	// else the lowest viewport's that has one.
 	camera:     link.Editor_Camera,
-	// Edits of the scene, by scene ID, which the editor applies.
+	// Edits of the scenes, by scene number and scene ID, which the editor applies.
 	operations: [dynamic]link.Operation,
 	// A line for the editor's console, or "".
 	message:    string,
@@ -65,6 +65,13 @@ register_command :: proc(e: ^Editor, command: Command) {
 // scene_id is an entity's scene ID, or 0 for one that the game spawned, which no operation can name.
 scene_id :: proc(w: ^ecs.World, entity: ecs.Entity) -> u64 {
 	return scene_id_of(w, entity)
+}
+
+// scene_number is the number of an entity's scene, which an operation on it names, so the editor edits the document
+// that has it (see docs/editor/document-and-scenes.md#several-scenes). An operation with 0 edits the editor's active
+// scene, as for a new entity at the root.
+scene_number :: proc(w: ^ecs.World, entity: ecs.Entity) -> u32 {
+	return scene_key_of(w, entity).scene
 }
 
 // new_scene_id is a random scene ID for an entity that a command creates.

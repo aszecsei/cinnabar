@@ -17,7 +17,6 @@ import "cinnabar:engine/ecs"
 import "cinnabar:engine/editor/link"
 import "cinnabar:engine/nav"
 import "cinnabar:engine/render"
-import "cinnabar:engine/scene"
 import "cinnabar:engine/script"
 import "cinnabar:engine/ui"
 
@@ -33,27 +32,27 @@ MAX_WATCHED :: 64
 // survive a code reload. What one editor connection has told the game, and has been told, is its session. A soft
 // restart makes a new Editor, with a new session, which sends everything again.
 Editor :: struct {
-	platform:    ^core.Platform_API,
+	platform:  ^core.Platform_API,
 	// The game's asset runtime, in Game_State, which the viewport tools load their shaders from.
-	assets:      ^asset.Assets,
-	session:     Session,
-	// The entity of each scene ID, for the editor's operations (see find_scene_entity). It follows the world, not the
-	// session.
-	by_scene_id: map[u64]ecs.Entity,
+	assets:    ^asset.Assets,
+	session:   Session,
+	// The entity of each scene ID, by the number of its scene, for the editor's operations (see find_scene_entity). It
+	// follows the world, not the session.
+	by_scene:  map[u32]^map[u64]ecs.Entity,
 	// The viewport tools' GPU objects (see viewport.odin).
-	tools:       Viewport_Tools,
+	tools:     Viewport_Tools,
 	// The game's commands (see commands.odin). Registrations: reload clears them.
-	commands:    [dynamic]Command,
+	commands:  [dynamic]Command,
 	// The UI documents that previews show, each in a slot of its own, apart from the game's UI (see ui_preview.odin).
-	ui:          ui.State,
+	ui:        ui.State,
 	// The renderer's residency, which draws the live meshes, in Game_State, or nil without a renderer.
-	residency:   ^render.Residency,
+	residency: ^render.Residency,
 	// The renderer, which answers where the texture sky's sun is.
-	renderer:    ^render.Renderer,
+	renderer:  ^render.Renderer,
 	// The game's navigation, in Game_State, whose navmeshes the helpers draw, or nil without one.
-	nav:         ^nav.State,
+	nav:       ^nav.State,
 	// The game's AI, in Game_State, whose perceivers' memories the helpers draw, or nil without one.
-	ai:          ^ai.State,
+	ai:        ^ai.State,
 }
 
 // Session is the state of one editor connection: what the editor has sent the game, and what the game has sent the
@@ -161,14 +160,14 @@ init :: proc(
 	agents: ^ai.State = nil,
 ) {
 	e^ = {
-		platform    = platform,
-		assets      = assets,
-		residency   = residency,
-		renderer    = renderer,
-		nav         = navigation,
-		ai          = agents,
-		by_scene_id = make(map[u64]ecs.Entity, platform.heap_allocator),
-		commands    = make([dynamic]Command, platform.heap_allocator),
+		platform  = platform,
+		assets    = assets,
+		residency = residency,
+		renderer  = renderer,
+		nav       = navigation,
+		ai        = agents,
+		by_scene  = make(map[u32]^map[u64]ecs.Entity, platform.heap_allocator),
+		commands  = make([dynamic]Command, platform.heap_allocator),
 	}
 	if assets != nil {
 		ui.init(&e.ui, platform, assets, residency)
@@ -241,7 +240,7 @@ reload :: proc(e: ^Editor, platform: ^core.Platform_API) {
 
 destroy :: proc(e: ^Editor) {
 	end_session(e)
-	delete(e.by_scene_id)
+	delete_scene_handles(e)
 	delete(e.commands)
 	if e.ui.platform != nil {
 		ui.destroy(&e.ui)
@@ -290,8 +289,8 @@ poll :: proc(
 		case link.Unwatch_Entity:
 			unwatch(e, ecs.Entity(v.entity))
 		case link.Load_Scene:
-			problems := make([dynamic]scene.Problem, frame)
-			scene.load(w, scripts, scene_of(v, frame), &e.by_scene_id, &problems)
+			problems := make([dynamic]link.Edit_Problem, frame)
+			load_scenes(e, w, scripts, v, &problems)
 			// The old world's behaviours end without callbacks, as the editor's scene replaces it, and in Edit, the world
 			// is the editor's document, which the edit-mode behaviours edit from now on.
 			if scripts != nil {
@@ -306,7 +305,7 @@ poll :: proc(
 			if scripts != nil {
 				script.set_callbacks(scripts, callbacks_between_frames(e))
 			}
-			link.write_message(out, edit_problems(problems[:], true, frame))
+			link.write_message(out, edit_problems(problems[:], true))
 			// Every entity is new, so the editor gets a snapshot, and its watches, its selection and what it hides are
 			// of entities that are gone.
 			clear(&e.session.watched)
@@ -314,7 +313,7 @@ poll :: proc(
 			clear(&e.session.view.hidden)
 			snapshot = true
 		case link.Apply_Operations:
-			problems := make([dynamic]scene.Problem, frame)
+			problems := make([dynamic]link.Edit_Problem, frame)
 			apply_operations(e, w, scripts, v.operations, &problems)
 			// The editor edited, so behaviours whose edits it refused may try again.
 			if m, mirrors := &e.session.mirror.?; mirrors {
@@ -323,7 +322,7 @@ poll :: proc(
 				}
 			}
 			if len(problems) > 0 {
-				link.write_message(out, edit_problems(problems[:], false, frame))
+				link.write_message(out, edit_problems(problems[:], false))
 			}
 		case link.Set_Mode:
 			started := e.session.mode == .Edit && v.mode == .Play
@@ -568,17 +567,14 @@ scan :: proc(
 			for id, i in components {
 				ids[i] = u64(id)
 			}
-			scene_id: u64
-			if s := (^scene.Scene_Entity)(ecs.get_raw(w, entity, scene.SCENE_ENTITY_ID));
-			   s != nil {
-				scene_id = s.id
-			}
+			key := scene_key_of(w, entity)
 			append(
 				&infos,
 				link.Entity_Info {
 					entity = u64(entity),
 					name = strings.clone(name, allocator),
-					scene_id = scene_id,
+					scene_id = key.id,
+					scene = key.scene,
 					parent = u64(parent),
 					active = now.active,
 					components = ids,

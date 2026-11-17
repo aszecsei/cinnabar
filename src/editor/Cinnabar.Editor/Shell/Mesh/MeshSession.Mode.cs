@@ -221,6 +221,13 @@ public sealed partial class MeshSession
         {
             var hits = result.Hits.Where(h => _shell.Pickable(h.Entity)).ToList();
             // A double click inside an instance first selects the entity under the mouse, which a click does not.
+            // Mesh mode edits the active scene's meshes: a double click on another scene's entity first selects it,
+            // which makes its scene the active one.
+            if (hits.Count > 0 && hits[0].Scene != _shell.ActiveNumber && !_shell.Selection.Contains(hits[0].Entity))
+            {
+                _shell.Selection.Set([hits[0].Entity]);
+                return;
+            }
             if (hits.Count > 0 && _shell.InstanceOf(hits[0].SceneId) is { IsInstanceRoot: false } && !_shell.Selection.Contains(hits[0].Entity))
             {
                 _shell.Selection.Set([hits[0].Entity]);

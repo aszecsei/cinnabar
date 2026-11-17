@@ -62,8 +62,8 @@ public sealed class FoliageTests : IDisposable
         shell.Host.LinkForTests(_sent.Add);
         shell.OnGameMessage(new Wire.EntitySnapshot(
         [
-            new Wire.EntityInfo(Handle(0), "Terrain", 1, 0, true, [1, 51]),
-            new Wire.EntityInfo(Handle(1), "Grass", 2, Handle(0), true, [1, 53]),
+            new Wire.EntityInfo(Handle(0), "Terrain", 1, 1, 0, true, [1, 51]),
+            new Wire.EntityInfo(Handle(1), "Grass", 2, 1, Handle(0), true, [1, 53]),
         ]));
         shell.Viewports[0].Session.Show(new PixelSize(1600, 900));
         shell.Camera.Place([0, (long)(20 * Pose.Unit), 0], 0, -EditorCamera.MaxPitch);

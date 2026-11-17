@@ -138,9 +138,9 @@ public sealed class ReflectionProbeTests : IDisposable
         }
         shell.OnGameMessage(new EntitySnapshot(
         [
-            new EntityInfo(ProbeHandleId, "Probe", 1, 0, true, [1, SceneEdits.ReflectionProbeId]),
-            new EntityInfo(TinyHandle, "Tiny", 2, 0, true, [1, SceneEdits.ReflectionProbeId]),
-            new EntityInfo(PlainHandle, "Plain", 3, 0, true, [1]),
+            new EntityInfo(ProbeHandleId, "Probe", 1, 1, 0, true, [1, SceneEdits.ReflectionProbeId]),
+            new EntityInfo(TinyHandle, "Tiny", 2, 1, 0, true, [1, SceneEdits.ReflectionProbeId]),
+            new EntityInfo(PlainHandle, "Plain", 3, 1, 0, true, [1]),
         ]));
         shell.Viewports[0].Session.Show(new PixelSize(1600, 900));
         shell.Camera.Place([0, 0, 0], 0, 0);
@@ -303,7 +303,7 @@ public sealed class ReflectionProbeTests : IDisposable
         shell.OnGameMessage(new EntityDelta([], [TinyHandle]));
         Assert.Null(shell.World.Probe(TinyHandle));
         Assert.Equal(TinyHandle, changes[^1]);
-        shell.OnGameMessage(new EntitySnapshot([new EntityInfo(ProbeHandleId, "Probe", 1, 0, true, [1, SceneEdits.ReflectionProbeId])]));
+        shell.OnGameMessage(new EntitySnapshot([new EntityInfo(ProbeHandleId, "Probe", 1, 1, 0, true, [1, SceneEdits.ReflectionProbeId])]));
         Assert.Null(shell.World.Probe(ProbeHandleId));
         shell.OnGameMessage(Captured(ProbeHandleId));
         shell.World.Clear();

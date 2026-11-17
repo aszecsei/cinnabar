@@ -19,7 +19,7 @@ public sealed class EntityCatalogTests : IDisposable
     EditorShell NewShell()
     {
         var shell = TestShell.Open(_temp, "door.scene", SceneText);
-        shell.OnGameMessage(new EntitySnapshot([new EntityInfo(Door, "Door", 1, 0, true, [1])]));
+        shell.OnGameMessage(new EntitySnapshot([new EntityInfo(Door, "Door", 1, 1, 0, true, [1])]));
         return shell;
     }
 

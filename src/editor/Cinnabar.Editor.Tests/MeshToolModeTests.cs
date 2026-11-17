@@ -37,7 +37,7 @@ public sealed class MeshToolModeTests : IDisposable
         var shell = TestShell.Open(_temp, "main.scene", Text);
         shell.Assets.Apply(new Welcome(1, "dev", [new Root("game", _temp.Path)], [new Importer(AssetKind.Mesh, ".mesh", [])], [], []));
         shell.Assets.Apply(new AssetSnapshot([TestAssets.Make(MeshFixtures.MeshGuid, AssetKind.Mesh, "room.mesh")], []));
-        shell.OnGameMessage(new EntitySnapshot([new EntityInfo(Handle(0), "Room", 1, 0, true, [1, 33])]));
+        shell.OnGameMessage(new EntitySnapshot([new EntityInfo(Handle(0), "Room", 1, 1, 0, true, [1, 33])]));
         shell.Viewports[0].Session.Show(new PixelSize((int)Width, (int)Height));
         shell.Camera.Place([0, 0, 0], 0, 0);
         shell.Selection.Select(Handle(0));

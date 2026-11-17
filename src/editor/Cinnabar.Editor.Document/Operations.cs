@@ -58,7 +58,7 @@ public abstract record Operation(ulong Entity)
     protected static Wire.Operation Wire(Wire.OperationKind kind, ulong entity, Wire.SceneEntity[]? created = null, string name = "",
         ulong parent = 0, bool active = false, ulong component = 0, Wire.SceneComponent[]? components = null, string? script = null,
         Wire.SceneField[]? fields = null) =>
-        new(kind, entity, created ?? [], name, parent, active, component, components ?? [],
+        new(kind, 0, entity, created ?? [], name, parent, active, component, components ?? [],
             script == null ? new byte[16] : Convert.FromHexString(script), fields ?? [], new byte[16]);
 }
 

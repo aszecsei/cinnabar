@@ -45,7 +45,7 @@ public sealed class MeshTextureModeTests : IDisposable
             TestAssets.Make(MaterialGuid, AssetKind.Material, "spots.material", dependencies: [TextureGuid], permutations: 1, toolTexture: TextureGuid, hotspots: [new CookHotspot(0, 0, 256, 256), new CookHotspot(256, 0, 768, 256)]),
             TestAssets.Make(TextureGuid, AssetKind.Texture, "spots.png", size: [1024, 1024]),
         ], []));
-        shell.OnGameMessage(new EntitySnapshot([new EntityInfo(Handle(0), "Room", 1, 0, true, [1, 33])]));
+        shell.OnGameMessage(new EntitySnapshot([new EntityInfo(Handle(0), "Room", 1, 1, 0, true, [1, 33])]));
         shell.Viewports[0].Session.Show(new PixelSize((int)Width, (int)Height));
         shell.Camera.Place([0, 0, 0], 0, 0);
         shell.Selection.Select(Handle(0));
