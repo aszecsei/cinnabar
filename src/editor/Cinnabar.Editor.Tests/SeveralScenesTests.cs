@@ -201,6 +201,24 @@ public sealed class SeveralScenesTests : IDisposable
     }
 
     [Fact]
+    public void AnEntityDoesNotGoUnderAnEntityOfAnotherScene()
+    {
+        var (shell, north, south) = Open();
+        using var _ = shell;
+        shell.OnGameMessage(World(north, south));
+        shell.ActivateScene(north);
+
+        // Both entities have the scene ID 1, so only their scenes tell the target from the dragged entity itself.
+        var allowed = shell.CanReparent(shell.World.Find(NorthGate)!, shell.World.Find(SouthGate)!, out var reason);
+
+        Assert.False(allowed);
+        Assert.Contains("an entity's parent is in its own scene", reason);
+        Assert.Contains("south.scene", reason);
+        Assert.False(shell.CanReparent(shell.World.Find(NorthGate)!, null, out reason));
+        Assert.Equal("", reason);
+    }
+
+    [Fact]
     public void SelectingAnEntityOfAnotherSceneMakesItsSceneActive()
     {
         var (shell, north, south) = Open();

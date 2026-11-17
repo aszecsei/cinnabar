@@ -650,6 +650,38 @@ public sealed partial class EditorShell
         })];
     }
 
+    /// <summary>
+    /// Whether an entity of the active scene can go under the target, which is null for the root. The target is of the
+    /// same scene, and not the entity or one of its descendants. With another scene's target, or one that the game
+    /// spawned, the reason is given, as a parent is in its entity's own scene (see docs/editor/document-and-scenes.md#several-scenes).
+    /// </summary>
+    public bool CanReparent(EntityNode dragged, EntityNode? target, out string reason)
+    {
+        reason = "";
+        if (dragged.SceneId == 0 || !InActiveScene(dragged) || !IsEditing)
+        {
+            return false;
+        }
+        if (target == null)
+        {
+            return dragged.Parent != 0;
+        }
+        if (target.SceneId == 0 || target.Scene != dragged.Scene)
+        {
+            var where = SceneOf(target) is { } other ? Path.GetFileName(other.Path) : "no scene";
+            reason = $"an entity's parent is in its own scene: {EntityNode.Format(dragged.Handle)} is in {Path.GetFileName(Scene!.Path)}, and {EntityNode.Format(target.Handle)} is in {where}";
+            return false;
+        }
+        for (var p = target; p != null; p = p.Parent == 0 ? null : World.Find(p.Parent))
+        {
+            if (p.SceneId == dragged.SceneId)
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
     /// <summary>Moves an entity of the active scene under another of it, or to the root with 0, keeping where it is in the world.</summary>
     public bool Reparent(ulong sceneId, ulong parent)
     {
