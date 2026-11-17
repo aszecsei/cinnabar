@@ -89,7 +89,7 @@ public sealed class AtmosphereView : ScrollViewer
         }
         var sun = _shell.AtmosphereSun;
         return $"{volume.Id}|{string.Join(",", volume.Components.Select(c => c.Id))}|{Atmosphere.ModeOf(volume)}|{sun?.Id}|" +
-            $"{_world.FindScene(volume.Id)?.Handle}|{(sun == null ? 0 : _world.FindScene(sun.Id)?.Handle)}|{_world.Types.Count}|" +
+            $"{_shell.FindInScene(volume.Id)?.Handle}|{(sun == null ? 0 : _shell.FindInScene(sun.Id)?.Handle)}|{_world.Types.Count}|" +
             $"{Atmosphere.WeatherSourceOf(volume)}|{WeatherMapWarning(volume)}";
     }
 
@@ -128,7 +128,7 @@ public sealed class AtmosphereView : ScrollViewer
         _grid.Clear();
         _angles.Clear();
         var volume = _shell.AtmosphereVolume;
-        var node = volume == null ? null : _world.FindScene(volume.Id);
+        var node = volume == null ? null : _shell.FindInScene(volume.Id);
         var environment = _world.Type(SceneEdits.EnvironmentId);
         if (volume == null || !volume.Components.Any(c => c.Id == SceneEdits.EnvironmentId))
         {
@@ -151,7 +151,7 @@ public sealed class AtmosphereView : ScrollViewer
             return;
         }
         var sun = _shell.AtmosphereSun;
-        var sunNode = sun == null ? null : _world.FindScene(sun.Id);
+        var sunNode = sun == null ? null : _shell.FindInScene(sun.Id);
         Watch(sunNode == null ? [node.Handle] : [node.Handle, sunNode.Handle]);
 
         _content.Children.Add(Header(volume));
@@ -294,7 +294,7 @@ public sealed class AtmosphereView : ScrollViewer
 
     void ShowValues()
     {
-        ulong SceneIdOf(ulong handle) => _world.Find(handle)?.SceneId ?? 0;
+        ulong SceneIdOf(ulong handle) => _shell.ActiveSceneIdOf(handle);
         foreach (var handle in _watched)
         {
             if (_world.Values(handle) is not { } values || _world.Find(handle) is not { } node)

@@ -25,15 +25,15 @@ public sealed class MaterialDropTests : IDisposable
         var shell = TestShell.Open(_temp, "mesh.scene", Text);
         shell.OnGameMessage(new EntitySnapshot(
         [
-            new EntityInfo(Handle(0), "Mesh", 1, 0, true, [1, 33]),
-            new EntityInfo(Handle(1), "Empty", 2, 0, true, [1]),
-            new EntityInfo(Handle(2), "", 0, 0, true, [1, 33]),
+            new EntityInfo(Handle(0), "Mesh", 1, 1, 0, true, [1, 33]),
+            new EntityInfo(Handle(1), "Empty", 2, 1, 0, true, [1]),
+            new EntityInfo(Handle(2), "", 0, 0, 0, true, [1, 33]),
         ]));
         return shell;
     }
 
     static PickResult Pick(int submesh, params (uint Index, ulong SceneId)[] hits) =>
-        new(1, [.. hits.Select(h => new PickHit(Handle(h.Index), h.SceneId))], 1, submesh);
+        new(1, [.. hits.Select(h => new PickHit(Handle(h.Index), h.SceneId, 1))], 1, submesh);
 
     static string? Material(EditorShell shell, int slot) =>
         shell.Scene!.Scene.Find(1)!.Components.Single(c => c.Id == SceneEdits.MeshRendererId).Fields.Find(f => f.Name == $"materials.{slot}")?.Value.Asset;

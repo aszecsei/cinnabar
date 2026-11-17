@@ -9,8 +9,9 @@ namespace Cinnabar.Editor.Shell;
 /// <summary>
 /// Visibility and lock (see docs/editor/shell-and-panels.md#outliner): the entities that the user hid, which the game does not draw,
 /// and the ones that the user locked, which the viewport does not pick. Both apply to an entity's descendants too.
-/// They are the editor's own state, by scene ID: they change neither the scene nor the game's Disabled, and the editor
-/// keeps them for each user and each scene in <c>scene-views.json</c>.
+/// They are the editor's own state, by scene and scene ID: they change neither the scene nor the game's Disabled, and
+/// the editor keeps them for each user and each scene file in <c>scene-views.json</c>. Each open scene has its own (see
+/// docs/editor/document-and-scenes.md#several-scenes).
 /// </summary>
 public sealed class SceneVisibility(
     WorldModel world,
@@ -18,24 +19,24 @@ public sealed class SceneVisibility(
     HostSession host,
     EditorSettings settings,
     ConsoleLog console,
-    Func<string?> scenePath,
+    Func<IReadOnlyList<(uint Number, string Path)>> scenes,
     Action<string, string, string> write,
     Action changed)
 {
     public const string FileName = "scene-views.json";
 
-    readonly HashSet<ulong> _hidden = [];
-    readonly HashSet<ulong> _locked = [];
+    readonly HashSet<(uint Scene, ulong Id)> _hidden = [];
+    readonly HashSet<(uint Scene, ulong Id)> _locked = [];
     string _sentHidden = "";
 
     /// <summary>An entity was hidden, shown, locked or unlocked.</summary>
     public event Action? Changed;
 
-    /// <summary>Whether the user hid this entity itself.</summary>
-    public bool IsHidden(ulong sceneId) => _hidden.Contains(sceneId);
+    /// <summary>Whether the user hid this entity of the scene with the number itself.</summary>
+    public bool IsHidden(uint scene, ulong sceneId) => _hidden.Contains((scene, sceneId));
 
-    /// <summary>Whether the user locked this entity itself.</summary>
-    public bool IsLocked(ulong sceneId) => _locked.Contains(sceneId);
+    /// <summary>Whether the user locked this entity of the scene with the number itself.</summary>
+    public bool IsLocked(uint scene, ulong sceneId) => _locked.Contains((scene, sceneId));
 
     /// <summary>Whether the entity or one of its ancestors is hidden, so the game does not draw it.</summary>
     public bool IsHiddenInTree(ulong handle) => InTree(handle, _hidden);
@@ -48,12 +49,12 @@ public sealed class SceneVisibility(
     /// <summary>The picks that the viewport may select: not locked, and not hidden.</summary>
     public bool Pickable(ulong handle) => world.Find(handle) != null && !IsLockedInTree(handle) && !IsHiddenInTree(handle);
 
-    bool InTree(ulong handle, HashSet<ulong> set)
+    bool InTree(ulong handle, HashSet<(uint, ulong)> set)
     {
         var node = world.Find(handle);
         for (var depth = 0; node != null && depth < 64; depth++)
         {
-            if (set.Contains(node.SceneId))
+            if (node.SceneId != 0 && set.Contains((node.Scene, node.SceneId)))
             {
                 return true;
             }
@@ -62,11 +63,13 @@ public sealed class SceneVisibility(
         return false;
     }
 
-    /// <summary>Hides or shows entities by scene ID. Entities that the game spawned have none, and are always shown.</summary>
-    public void SetHidden(IEnumerable<ulong> sceneIds, bool hidden) => Change(_hidden, sceneIds, hidden);
+    /// <summary>
+    /// Hides or shows entities by scene and scene ID. Entities that the game spawned have none, and are always shown.
+    /// </summary>
+    public void SetHidden(IEnumerable<(uint Scene, ulong Id)> entities, bool hidden) => Change(_hidden, entities, hidden);
 
-    /// <summary>Locks or unlocks entities by scene ID.</summary>
-    public void SetLocked(IEnumerable<ulong> sceneIds, bool locked) => Change(_locked, sceneIds, locked);
+    /// <summary>Locks or unlocks entities by scene and scene ID.</summary>
+    public void SetLocked(IEnumerable<(uint Scene, ulong Id)> entities, bool locked) => Change(_locked, entities, locked);
 
     /// <summary>Hides the selected entities, or shows them if they are all hidden.</summary>
     public void ToggleHideSelected()
@@ -84,12 +87,13 @@ public sealed class SceneVisibility(
 
     public void ShowAll() => SetHidden([.. _hidden], false);
 
-    List<ulong> SelectedSceneIds() => [.. selection.Entities.Select(h => world.Find(h)?.SceneId ?? 0).Where(id => id != 0)];
+    List<(uint Scene, ulong Id)> SelectedSceneIds() =>
+        [.. selection.Entities.Select(world.Find).OfType<EntityNode>().Where(n => n.SceneId != 0).Select(n => (n.Scene, n.SceneId))];
 
-    void Change(HashSet<ulong> set, IEnumerable<ulong> sceneIds, bool add)
+    void Change(HashSet<(uint, ulong)> set, IEnumerable<(uint Scene, ulong Id)> entities, bool add)
     {
         var any = false;
-        foreach (var id in sceneIds.Where(id => id != 0))
+        foreach (var id in entities.Where(e => e.Id != 0))
         {
             any |= add ? set.Add(id) : set.Remove(id);
         }
@@ -109,7 +113,7 @@ public sealed class SceneVisibility(
     /// </summary>
     public void Send()
     {
-        var handles = _hidden.Select(id => world.FindScene(id)?.Handle ?? 0).Where(h => h != 0).Order().ToArray();
+        var handles = _hidden.Select(e => world.FindScene(e.Scene, e.Id)?.Handle ?? 0).Where(h => h != 0).Order().ToArray();
         var key = string.Join(",", handles);
         if (key != _sentHidden && host.Linked)
         {
@@ -135,38 +139,49 @@ public sealed class SceneVisibility(
         }
     }
 
-    /// <summary>Loads the open scene's hidden and locked entities, as the user left them.</summary>
+    /// <summary>Loads each open scene's hidden and locked entities, as the user left them in its file.</summary>
     public void Load()
     {
         _hidden.Clear();
         _locked.Clear();
-        if (scenePath() is { } path && ReadViews().GetValueOrDefault(SceneKey(path)) is { } view)
+        var views = ReadViews();
+        foreach (var (number, path) in scenes())
         {
-            static IEnumerable<ulong> Ids(List<string>? ids) =>
-                (ids ?? []).Select(s => ulong.TryParse(s, System.Globalization.NumberStyles.HexNumber, null, out var id) ? id : 0).Where(id => id != 0);
-            _hidden.UnionWith(Ids(view.Hidden));
-            _locked.UnionWith(Ids(view.Locked));
+            if (views.GetValueOrDefault(SceneKey(path)) is { } view)
+            {
+                IEnumerable<(uint, ulong)> Ids(List<string>? ids) =>
+                    (ids ?? []).Select(s => ulong.TryParse(s, System.Globalization.NumberStyles.HexNumber, null, out var id) ? id : 0).Where(id => id != 0).Select(id => (number, id));
+                _hidden.UnionWith(Ids(view.Hidden));
+                _locked.UnionWith(Ids(view.Locked));
+            }
         }
         _sentHidden = "";
         Send();
         Changed?.Invoke();
     }
 
+    /// <summary>Writes each open scene's hidden and locked entities under its file.</summary>
     public void Save()
     {
-        if (scenePath() is not { } path)
+        var open = scenes();
+        if (open.Count == 0)
         {
             return;
         }
         var views = ReadViews();
-        var key = SceneKey(path);
-        if (_hidden.Count == 0 && _locked.Count == 0)
+        foreach (var (number, path) in open)
         {
-            views.Remove(key);
-        }
-        else
-        {
-            views[key] = new SceneView([.. _hidden.Order().Select(id => id.ToString("x16"))], [.. _locked.Order().Select(id => id.ToString("x16"))]);
+            var key = SceneKey(path);
+            var hidden = _hidden.Where(e => e.Scene == number).Select(e => e.Id).Order().ToList();
+            var locked = _locked.Where(e => e.Scene == number).Select(e => e.Id).Order().ToList();
+            if (hidden.Count == 0 && locked.Count == 0)
+            {
+                views.Remove(key);
+            }
+            else
+            {
+                views[key] = new SceneView([.. hidden.Select(id => id.ToString("x16"))], [.. locked.Select(id => id.ToString("x16"))]);
+            }
         }
         write("scene views", FileName, JsonSerializer.Serialize(views, new JsonSerializerOptions { WriteIndented = true }));
     }

@@ -281,7 +281,7 @@ sealed class FieldEditor : IFieldEditor
 
     public void SetEntity(ulong handle)
     {
-        var sceneId = handle == 0 ? 0 : _shell.World.Find(handle)?.SceneId ?? 0;
+        var sceneId = handle == 0 ? 0 : _shell.ActiveSceneIdOf(handle);
         if (handle != 0 && sceneId == 0)
         {
             _shell.Console.Add(LogLevel.Warning, $"edit: {EntityNode.Format(handle)} is not in the scene, so a field cannot refer to it");

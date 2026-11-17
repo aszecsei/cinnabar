@@ -302,7 +302,7 @@ public sealed class DecisionEditorTests : IDisposable
         var editor = OpenGuard(shell, guard);
         var changes = 0;
         editor.LiveChanged += () => changes++;
-        shell.OnGameMessage(new EntitySnapshot([new EntityInfo(1, "Guard", 1, 0, true, []), new EntityInfo(2, "Crate", 2, 0, true, [])]));
+        shell.OnGameMessage(new EntitySnapshot([new EntityInfo(1, "Guard", 1, 1, 0, true, []), new EntityInfo(2, "Crate", 2, 1, 0, true, [])]));
         shell.OnGameMessage(View(1));
         Assert.Null(editor.Live);
         Assert.Null(editor.LiveWaiting);

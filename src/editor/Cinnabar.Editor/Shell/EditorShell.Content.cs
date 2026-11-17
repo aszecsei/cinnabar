@@ -31,8 +31,10 @@ public sealed partial class EditorShell
 
     public void RequestOpenScene(string path)
     {
-        if (Scene != null && string.Equals(Path.GetFullPath(Scene.Path), Path.GetFullPath(path), StringComparison.OrdinalIgnoreCase))
+        // A scene that is open already becomes the active one.
+        if (SceneOfPath(path) is { } open)
         {
+            ActivateScene(open);
             return;
         }
         OpenSceneFileRequested?.Invoke(path);

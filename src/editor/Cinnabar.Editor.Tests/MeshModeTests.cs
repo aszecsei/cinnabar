@@ -37,8 +37,8 @@ public sealed class MeshModeTests : IDisposable
         shell.Assets.Apply(new AssetSnapshot([TestAssets.Make(MeshFixtures.MeshGuid, AssetKind.Mesh, "room.mesh")], []));
         shell.OnGameMessage(new EntitySnapshot(
         [
-            new EntityInfo(Handle(0), "Room", 1, 0, true, [1, 33]),
-            new EntityInfo(Handle(1), "Lamp", 2, 0, true, [1]),
+            new EntityInfo(Handle(0), "Room", 1, 1, 0, true, [1, 33]),
+            new EntityInfo(Handle(1), "Lamp", 2, 1, 0, true, [1]),
         ]));
         shell.Viewports[0].Session.Show(new PixelSize((int)Width, (int)Height));
         shell.Camera.Place([0, 0, 0], 0, 0);

@@ -12,7 +12,8 @@ public sealed class Autosave(string directory)
 {
     public static readonly TimeSpan Interval = TimeSpan.FromSeconds(30);
 
-    DateTime _last = DateTime.MinValue;
+    // When each scene file's autosave was last written, so each open scene autosaves on its own.
+    readonly Dictionary<string, DateTime> _last = new(StringComparer.OrdinalIgnoreCase);
 
     public string Directory { get; } = Path.GetFullPath(directory);
 
@@ -28,12 +29,12 @@ public sealed class Autosave(string directory)
     /// <summary>Writes the document's autosave if it is dirty and <see cref="Interval"/> has passed since the last one.</summary>
     public bool WriteIfDue(SceneDocument document, DateTime now)
     {
-        if (!document.IsDirty || now - _last < Interval)
+        if (!document.IsDirty || now - _last.GetValueOrDefault(document.Path, DateTime.MinValue) < Interval)
         {
             return false;
         }
         Write(document);
-        _last = now;
+        _last[document.Path] = now;
         return true;
     }
 

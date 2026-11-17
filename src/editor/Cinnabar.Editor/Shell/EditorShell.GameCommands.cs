@@ -1,6 +1,7 @@
 using Cinnabar.Editor.Commands;
 using Cinnabar.Editor.Commands.Ribbon;
 using Cinnabar.Editor.Model;
+using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Panels;
 using GameCommandResult = Cinnabar.Editor.Link.Protocol.GameCommandResult;
 using GameCommands = Cinnabar.Editor.Link.Protocol.GameCommands;
@@ -71,10 +72,25 @@ public sealed partial class EditorShell
         {
             return;
         }
-        Operation[] ops;
+        // Each operation edits the scene that it names, or the active one for 0, as a new entity at the root does.
+        var byScene = new List<(SceneDocument Document, List<Operation> Ops)>();
         try
         {
-            ops = [.. result.Operations.Select(Operation.FromWire)];
+            foreach (var wire in result.Operations)
+            {
+                if ((wire.Scene == 0 ? Scene : SceneByNumber(wire.Scene)) is not { } document)
+                {
+                    Console.Add(LogLevel.Error, $"commands: {result.Id} edits the scene {wire.Scene}, which is not open");
+                    return;
+                }
+                var at = byScene.FindIndex(s => s.Document == document);
+                if (at < 0)
+                {
+                    byScene.Add((document, []));
+                    at = byScene.Count - 1;
+                }
+                byScene[at].Ops.Add(Operation.FromWire(wire));
+            }
         }
         catch (InvalidOperationException e)
         {
@@ -82,11 +98,17 @@ public sealed partial class EditorShell
             return;
         }
         var label = _gameCommands.TryGetValue(result.Id, out var info) ? info.Label : result.Id;
-        Edit(label, ops);
-        // A command that creates entities selects them, as New Entity does.
-        if (ops.OfType<Document.CreateEntity>().Select(c => c.Created.Id).ToList() is { Count: > 0 } created)
+        foreach (var (document, ops) in byScene)
         {
-            SelectScenes(created);
+            if (!Edit(document, label, [.. ops]))
+            {
+                continue;
+            }
+            // A command that creates entities selects them, as New Entity does.
+            if (ops.OfType<Document.CreateEntity>().Select(c => c.Created.Id).ToList() is { Count: > 0 } created)
+            {
+                SelectScenes(document.Number, created);
+            }
         }
     }
 }

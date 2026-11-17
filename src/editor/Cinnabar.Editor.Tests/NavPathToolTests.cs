@@ -32,7 +32,7 @@ public sealed class NavPathToolTests : IDisposable
         shell.Assets.Apply(new Cinnabar.Editor.Link.Cook.Welcome(1, "dev", [new Root("game", _temp.Path)], [new Importer(AssetKind.Mesh, ".mesh", [])], [], []));
         shell.Assets.Apply(new AssetSnapshot([TestAssets.Make(MeshFixtures.MeshGuid, AssetKind.Mesh, "room.mesh")], []));
         shell.Host.LinkForTests(_sent.Add);
-        shell.OnGameMessage(new EntitySnapshot([new EntityInfo(Room, "Room", 1, 0, true, [1, 33])]));
+        shell.OnGameMessage(new EntitySnapshot([new EntityInfo(Room, "Room", 1, 1, 0, true, [1, 33])]));
         shell.Viewports[0].Session.Show(new PixelSize(1600, 900));
         shell.Camera.Place([0, 0, 0], 0, 0);
         return shell;

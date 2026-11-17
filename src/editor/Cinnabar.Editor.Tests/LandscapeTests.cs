@@ -232,7 +232,7 @@ public sealed class LandscapeTests : IDisposable
         shell.Assets.Apply(new Welcome(1, "dev", [new Root("game", _temp.Path)], [new Importer(AssetKind.Texture, ".png", [])], [], []));
         shell.Assets.Apply(new AssetSnapshot([TestAssets.Make(HeightGuid, AssetKind.Texture, "terrain_height.png")], []));
         shell.Host.LinkForTests(_sent.Add);
-        shell.OnGameMessage(new Wire.EntitySnapshot([new Wire.EntityInfo(Handle(0), "Terrain", 1, 0, true, [1, 51])]));
+        shell.OnGameMessage(new Wire.EntitySnapshot([new Wire.EntityInfo(Handle(0), "Terrain", 1, 1, 0, true, [1, 51])]));
         shell.Viewports[0].Session.Show(new PixelSize(1600, 900));
         // 20 m over the terrain's middle, looking down.
         shell.Camera.Place([0, (long)(20 * Pose.Unit), 0], 0, -EditorCamera.MaxPitch);

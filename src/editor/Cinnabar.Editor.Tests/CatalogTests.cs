@@ -128,14 +128,14 @@ public sealed class CatalogTests
     {
         var state = new OutlinerState();
         var world = new Model.WorldModel();
-        world.Apply(new EntitySnapshot([new EntityInfo(1UL << 32, "Room", 7, 0, true, []), new EntityInfo(2UL << 32, "Spawned", 0, 0, true, [])]));
+        world.Apply(new EntitySnapshot([new EntityInfo(1UL << 32, "Room", 7, 1, 0, true, []), new EntityInfo(2UL << 32, "Spawned", 0, 0, 0, true, [])]));
         state.Toggle(world.Find(1UL << 32)!);
         state.Toggle(world.Find(2UL << 32)!);
         Assert.True(state.IsCollapsed(world.Find(1UL << 32)!));
         Assert.True(state.IsCollapsed(world.Find(2UL << 32)!));
 
         // A resync, as Stop makes, gives every entity a new handle.
-        world.Apply(new EntitySnapshot([new EntityInfo(5UL << 32, "Room", 7, 0, true, []), new EntityInfo(6UL << 32, "Spawned", 0, 0, true, [])]));
+        world.Apply(new EntitySnapshot([new EntityInfo(5UL << 32, "Room", 7, 1, 0, true, []), new EntityInfo(6UL << 32, "Spawned", 0, 0, 0, true, [])]));
 
         Assert.True(state.IsCollapsed(world.Find(5UL << 32)!));
         Assert.False(state.IsCollapsed(world.Find(6UL << 32)!));

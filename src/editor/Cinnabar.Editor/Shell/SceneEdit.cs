@@ -18,6 +18,9 @@ public sealed class SceneEdit
         (Label, Owner, CommitIfInterrupted) = (label, owner, commitIfInterrupted);
     }
 
+    /// <summary>The scene whose entry it is.</summary>
+    internal SceneDocument Document => _document;
+
     /// <summary>The undo entry's label.</summary>
     public string Label { get; }
 

@@ -32,8 +32,9 @@ public sealed partial class EditorShell
         }
     }
 
-    // Applies a batch to the document, or refuses it: without a scene, outside Edit, or for a scene that the game no
-    // longer has. An operation that does not fit puts the batch back.
+    // Applies a batch to the documents that its operations name, or refuses it: without a scene, outside Edit, for a
+    // world that the game no longer has, or for a scene that is not open. An operation that does not fit puts the batch
+    // back. Each scene that it edits gets an entry of its own, which follows the entry before it in that scene.
     bool ApplyBehaviourOperations(BehaviourOperations batch)
     {
         if (Scene == null || !IsEditing || batch.Scene != _sceneTicket)
@@ -45,50 +46,66 @@ public sealed partial class EditorShell
             return true;
         }
         var label = batch.Label.Length > 0 ? FieldValues.Humanize(batch.Label) : "Behaviours";
-        if (OpenEdit is { } open)
+        var targets = new List<(SceneDocument Document, Wire.Operation Wire)>();
+        foreach (var wire in batch.Operations)
         {
-            foreach (var wire in batch.Operations)
+            // A scene of 0 is the active one, as for an entity that a behaviour creates at the root.
+            if ((wire.Scene == 0 ? Scene : SceneByNumber(wire.Scene)) is not { } document)
             {
-                Operation[] ops;
-                try
-                {
-                    ops = ExpandBehaviourOperation(wire);
-                }
-                catch (InvalidOperationException e)
-                {
-                    Console.Add(LogLevel.Error, $"edit: {label} cannot edit the scene: {e.Message}");
-                    return false;
-                }
-                if (!open.Preview(ops))
-                {
-                    return false;
-                }
+                Console.Add(LogLevel.Error, $"edit: {label} cannot edit the scene: the scene {wire.Scene} is not open");
+                return false;
             }
-            return true;
+            targets.Add((document, wire));
         }
-        Scene.Begin(label, follows: true);
+        var open = OpenEdit;
+        var begun = new List<SceneDocument>();
         try
         {
-            foreach (var wire in batch.Operations)
+            foreach (var (document, wire) in targets)
             {
-                Scene.Preview(ExpandBehaviourOperation(wire));
+                var ops = ExpandBehaviourOperation(document, wire);
+                if (open != null && open.Document == document)
+                {
+                    if (!open.Preview(ops))
+                    {
+                        CancelAll(begun);
+                        return false;
+                    }
+                    continue;
+                }
+                if (!begun.Contains(document))
+                {
+                    document.Begin(label, follows: true);
+                    begun.Add(document);
+                }
+                document.Preview(ops);
             }
         }
         catch (InvalidOperationException e)
         {
-            Scene.Cancel();
+            CancelAll(begun);
             Console.Add(LogLevel.Error, $"edit: {label} cannot edit the scene: {e.Message}");
             return false;
         }
-        Scene.Commit();
+        foreach (var document in begun)
+        {
+            document.Commit();
+        }
         return true;
+
+        static void CancelAll(List<SceneDocument> begun)
+        {
+            foreach (var document in begun)
+            {
+                document.Cancel();
+            }
+        }
     }
 
     // A wire operation as the document's operations, against the document as it is now, as the editor's own commands
     // make them: a destroy takes the descendants, a new parent keeps the pose in the world, and an instance is a block.
-    Operation[] ExpandBehaviourOperation(Wire.Operation wire)
+    Operation[] ExpandBehaviourOperation(SceneDocument scene, Wire.Operation wire)
     {
-        var scene = Scene!;
         switch (wire.Kind)
         {
             case Wire.OperationKind.DestroyEntity:

@@ -115,8 +115,8 @@ public sealed class EditingTests : IDisposable
         var changed = 0;
         shell.ProblemsChanged += () => changed++;
 
-        shell.OnGameMessage(new EditProblems(false, [new EditProblem(1, "Spin has no field speed, so it is not set")]));
-        shell.OnGameMessage(new EditProblems(false, [new EditProblem(1, "Spin has no field speed, so it is not set")]));
+        shell.OnGameMessage(new EditProblems(false, [new EditProblem(1, 1, "Spin has no field speed, so it is not set")]));
+        shell.OnGameMessage(new EditProblems(false, [new EditProblem(1, 1, "Spin has no field speed, so it is not set")]));
 
         Assert.Equal(["Spin has no field speed, so it is not set"], shell.ProblemsOf(1));
         Assert.Contains(shell.Console.Lines, l => l.Level == LogLevel.Warning && l.Text.Contains("did not apply"));

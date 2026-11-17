@@ -35,7 +35,7 @@ public sealed class ViewportTests : IDisposable
     {
         var shell = TestShell.Open(_temp, "box.scene", Text);
         shell.Host.LinkForTests(_sent.Add);
-        shell.OnGameMessage(new EntitySnapshot([new EntityInfo(Box, "Box", 1, 0, true, [1])]));
+        shell.OnGameMessage(new EntitySnapshot([new EntityInfo(Box, "Box", 1, 1, 0, true, [1])]));
         if (show)
         {
             Show(shell, 0, 1600, 900);
@@ -1471,12 +1471,12 @@ public sealed class ViewportTests : IDisposable
         shell.OnGameMessage(new ComponentTypes([new ComponentType(1, "Transform", "Transform", 48, []), new ComponentType(32, "Camera", "Rendering", 32, [])]));
         Assert.False(shell.WorldHasCamera);
 
-        shell.OnGameMessage(new EntitySnapshot([new EntityInfo(Box, "Box", 1, 0, true, [1]), new EntityInfo(camera, "Camera", 2, 0, true, [1, 32])]));
+        shell.OnGameMessage(new EntitySnapshot([new EntityInfo(Box, "Box", 1, 1, 0, true, [1]), new EntityInfo(camera, "Camera", 2, 1, 0, true, [1, 32])]));
         Assert.True(shell.WorldHasCamera);
         Assert.Equal(1, changes);
 
         // The camera's entity goes, as a delete in Edit or a despawn in Play does.
-        shell.OnGameMessage(new EntitySnapshot([new EntityInfo(Box, "Box", 1, 0, true, [1])]));
+        shell.OnGameMessage(new EntitySnapshot([new EntityInfo(Box, "Box", 1, 1, 0, true, [1])]));
         Assert.False(shell.WorldHasCamera);
         Assert.Equal(2, changes);
     }

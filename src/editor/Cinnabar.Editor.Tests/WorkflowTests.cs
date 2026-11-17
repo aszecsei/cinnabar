@@ -260,7 +260,7 @@ public sealed class WorkflowTests : IDisposable
     {
         Directory.CreateDirectory(_temp.Path);
         using var shell = TestShell.Open(_temp, "door.scene", "scene 1\n\nentity 0000000000000001\nname = \"Door\"\n");
-        shell.OnGameMessage(new EntitySnapshot([new EntityInfo(1UL << 32, "Door", 1, 0, true, []), new EntityInfo(2UL << 32, "Spawned", 0, 0, true, [])]));
+        shell.OnGameMessage(new EntitySnapshot([new EntityInfo(1UL << 32, "Door", 1, 1, 0, true, []), new EntityInfo(2UL << 32, "Spawned", 0, 0, 0, true, [])]));
         var hide = shell.Commands.Get(EditorCommands.HideSelected);
         Assert.False(hide.CanExecute);
 

@@ -7,6 +7,9 @@ static partial class EditorCommands
     public const string OpenScene = "file.openScene";
     public const string Save = "file.save";
     public const string SaveAs = "file.saveAs";
+    public const string SaveAll = "file.saveAll";
+    public const string AddScene = "file.addScene";
+    public const string CloseScene = "file.closeScene";
     public const string Undo = "edit.undo";
     public const string Redo = "edit.redo";
     public const string CreateEntity = "entity.create";

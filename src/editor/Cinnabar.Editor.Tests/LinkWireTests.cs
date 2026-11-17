@@ -49,13 +49,16 @@ public class LinkWireTests
     public void ALoadSceneRoundTripsItsGuid()
     {
         byte[] guid = [.. Enumerable.Range(1, 16).Select(i => (byte)i)];
-        var frame = LinkFrame.Encode(new LoadScene([], guid, 7));
+        var frame = LinkFrame.Encode(new LoadScene([new LoadedScene(2, [], guid)], 7));
         var header = LinkFrame.ReadHeader(frame);
 
         var back = Assert.IsType<LoadScene>(LinkFrame.Decode(header.Kind, frame.AsSpan(LinkFrame.HeaderSize), LinkMessages.Read));
 
-        Assert.Equal(guid, back.Guid);
-        Assert.Empty(back.Entities);
+        var scene = Assert.Single(back.Scenes);
+        Assert.Equal(2u, scene.Scene);
+        Assert.Equal(guid, scene.Guid);
+        Assert.Empty(scene.Entities);
+        Assert.Equal(7UL, back.Ticket);
     }
 
     [Fact]

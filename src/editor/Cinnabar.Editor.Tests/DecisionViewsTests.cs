@@ -364,7 +364,7 @@ public sealed class DecisionViewsTests : IDisposable
         var utility = Open(shell, Utility);
         var goap = Open(shell, Goap);
         var htn = Open(shell, Htn);
-        shell.OnGameMessage(new EntitySnapshot([new EntityInfo(1, "Guard", 1, 0, true, [])]));
+        shell.OnGameMessage(new EntitySnapshot([new EntityInfo(1, "Guard", 1, 1, 0, true, [])]));
         shell.Play();
         shell.Selection.Select(1);
 

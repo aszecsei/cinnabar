@@ -33,8 +33,8 @@ public sealed class ViewportToolsTests : IDisposable
     // The host's entity list, with the handles of a generation.
     static void Report(EditorShell shell, uint generation) => shell.OnGameMessage(new EntitySnapshot(
     [
-        new EntityInfo(Handle(0, generation), "Left", 1, 0, true, [1]),
-        new EntityInfo(Handle(1, generation), "Right", 2, 0, true, [1]),
+        new EntityInfo(Handle(0, generation), "Left", 1, 1, 0, true, [1]),
+        new EntityInfo(Handle(1, generation), "Right", 2, 1, 0, true, [1]),
     ]));
 
     static long X(EditorShell shell, ulong id) =>
@@ -221,8 +221,8 @@ public sealed class ViewportToolsTests : IDisposable
         using var shell = NewShell();
         shell.OnGameMessage(new EntitySnapshot(
         [
-            new EntityInfo(Handle(0), "Left", 1, 0, true, [1]),
-            new EntityInfo(Handle(1), "Right", 2, Handle(0), true, [1]),
+            new EntityInfo(Handle(0), "Left", 1, 1, 0, true, [1]),
+            new EntityInfo(Handle(1), "Right", 2, 1, Handle(0), true, [1]),
         ]));
         shell.SetHidden([1], true);
         Assert.True(shell.IsHiddenInTree(Handle(1)));

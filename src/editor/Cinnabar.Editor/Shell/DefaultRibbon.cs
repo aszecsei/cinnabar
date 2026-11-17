@@ -37,7 +37,8 @@ static class DefaultRibbon
                     [
                         new LargeButton(EditorCommands.OpenScene),
                         new LargeButton(EditorCommands.Save),
-                        new SmallStack([EditorCommands.SaveAs]),
+                        new SmallStack([EditorCommands.SaveAs, EditorCommands.SaveAll]),
+                        new SmallStack([EditorCommands.AddScene, EditorCommands.CloseScene]),
                     ]),
                     new RibbonGroup("Edit",
                     [

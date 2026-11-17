@@ -59,13 +59,18 @@ public sealed partial class EditorShell
     // clean; a dirty one keeps the editor's version, with a line in the console.
     void ReloadChangedPrefabs()
     {
-        if (Scene == null)
+        foreach (var scene in _scenes.ToList())
         {
-            return;
+            ReloadChangedPrefabs(scene);
         }
-        var before = Scene.Expanded.Flat.Entities.ToList();
+    }
+
+    // Each open scene has its own prefab documents, which each read again.
+    void ReloadChangedPrefabs(SceneDocument scene)
+    {
+        var before = scene.Expanded.Flat.Entities.ToList();
         var kept = new List<PrefabDocument>();
-        var reloaded = Scene.Prefabs.ReloadChanged(kept);
+        var reloaded = scene.Prefabs.ReloadChanged(kept);
         foreach (var k in kept.Where(k => _keptPrefabs.Add(k.Guid)))
         {
             Console.Add(LogLevel.Warning, $"prefab: {k.Path} changed on disk, but it has changes here, so the editor keeps its own. Save to replace the file.");
@@ -79,11 +84,11 @@ public sealed partial class EditorShell
             _keptPrefabs.Remove(r.Guid);
             Console.Add(LogLevel.Info, $"prefab: read {r.Path} again, which changed on disk");
         }
-        if (IsEditing && Host.Linked && PrefabExpansion.Diff(before, Scene.Expanded.Flat.Entities) is { Count: > 0 } wire)
+        if (IsEditing && Host.Linked && PrefabExpansion.Diff(before, scene.Expanded.Flat.Entities) is { Count: > 0 } wire)
         {
-            Host.Send(new Link.Protocol.ApplyOperations([.. wire]));
+            Host.Send(new Link.Protocol.ApplyOperations([.. wire.Select(w => w with { Scene = scene.Number })]));
         }
-        ReportExpansion();
+        ReportExpansion(scene);
         SceneChanged?.Invoke();
     }
 
@@ -222,12 +227,16 @@ public sealed partial class EditorShell
     // An instance whose prefab the index did not have when the scene expanded shows once the index has it.
     void ExpandArrivedPrefabs()
     {
-        if (Scene == null || !Scene.Scene.Entities.Any(e => e.Kind == BlockKind.Instance && IsPrefab(e.Prefab) && Scene.Prefabs.Documents.All(d => d.Guid != e.Prefab)))
+        var arrived = _scenes.Where(s => s.Scene.Entities.Any(e => e.Kind == BlockKind.Instance && IsPrefab(e.Prefab) && s.Prefabs.Documents.All(d => d.Guid != e.Prefab))).ToList();
+        if (arrived.Count == 0)
         {
             return;
         }
-        Scene.Invalidate();
-        ReportExpansion();
+        foreach (var scene in arrived)
+        {
+            scene.Invalidate();
+            ReportExpansion(scene);
+        }
         SceneChanged?.Invoke();
         SendScene();
     }
@@ -236,25 +245,36 @@ public sealed partial class EditorShell
     {
         if (Scene != null)
         {
-            Report(Scene.Path, Scene.Expanded.Problems);
+            ReportExpansion(Scene);
         }
     }
+
+    void ReportExpansion(SceneDocument scene) => Report(scene.Path, scene.Expanded.Problems);
 
     /// <summary>The instance that the entity is inside, by its outermost root's ID, and its path there, or null for a plain entity.</summary>
     public InstanceEntity? InstanceOf(ulong sceneId) => Scene?.Expanded.InstanceOf(sceneId);
 
+    /// <summary>The instance that an entity of any open scene is inside, in its own scene, or null.</summary>
+    public InstanceEntity? InstanceOf(EntityNode node) => SceneOf(node)?.Expanded.InstanceOf(node.SceneId);
+
     /// <summary>Whether the entity's block overrides anything of its prefab, as the outliner marks it.</summary>
-    public bool IsOverridden(ulong sceneId) =>
-        Scene != null && InstanceOf(sceneId) is { IsInstanceRoot: false } && Scene.Scene.Find(sceneId) != null;
+    public bool IsOverridden(ulong sceneId) => Scene != null && IsOverridden(Scene, sceneId);
+
+    /// <summary>Whether the entity's block in a scene overrides anything of its prefab.</summary>
+    public static bool IsOverridden(SceneDocument scene, ulong sceneId) =>
+        scene.Expanded.InstanceOf(sceneId) is { IsInstanceRoot: false } && scene.Scene.Find(sceneId) != null;
 
     /// <summary>Whether a plain entity of the scene is under an instance's entity, as one that the scene added to it.</summary>
-    public bool IsAddedToInstance(ulong sceneId)
+    public bool IsAddedToInstance(ulong sceneId) => Scene != null && IsAddedToInstance(Scene, sceneId);
+
+    /// <summary>Whether a plain entity of a scene is under an instance's entity, as one that the scene added to it.</summary>
+    public static bool IsAddedToInstance(SceneDocument scene, ulong sceneId)
     {
-        var flat = Scene?.Expanded.Flat;
-        var e = flat?.Find(sceneId);
+        var flat = scene.Expanded.Flat;
+        var e = flat.Find(sceneId);
         for (var depth = 0; e is { Parent: not 0 } && depth < 64; depth++)
         {
-            if (InstanceOf(e.Parent) != null)
+            if (scene.Expanded.InstanceOf(e.Parent) != null)
             {
                 return true;
             }

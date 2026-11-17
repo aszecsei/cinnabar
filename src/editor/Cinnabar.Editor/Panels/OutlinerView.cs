@@ -5,6 +5,7 @@ using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
 using CommunityToolkit.Mvvm.Input;
+using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Model;
 using Cinnabar.Editor.Ribbon;
 using Cinnabar.Editor.Shell;
@@ -19,6 +20,8 @@ namespace Cinnabar.Editor.Panels;
 /// field in the properties panel, and a script from the content browser drags onto a row to add its behaviour. Ctrl and Shift select more than one row. Each row of a scene entity has a toggle that
 /// hides it in the viewport and one that locks it against picking, which apply to its descendants too. A row has an
 /// icon for what its entity is, by its components, and the button beside the filter adds an entity of a common kind.
+/// With several scenes open, each scene's entities are under a heading of their own, which makes the scene the active
+/// one when clicked (see docs/editor/document-and-scenes.md#several-scenes).
 /// </summary>
 public sealed class OutlinerView : DockPanel
 {
@@ -39,6 +42,11 @@ public sealed class OutlinerView : DockPanel
     // The press that may start a drag, and the row it is on.
     PointerPressedEventArgs? _press;
     OutlinerRow? _pressedRow;
+
+    internal ViewSubscriptions Subscriptions { get; }
+
+    /// <summary>The rows that the list shows: entities' rows, and with several scenes open, the scenes' headings.</summary>
+    internal IReadOnlyList<object> Rows => _list.ItemsSource as List<object> ?? [];
 
     public OutlinerView(EditorShell shell)
     {
@@ -83,7 +91,12 @@ public sealed class OutlinerView : DockPanel
             Drop(e, 0);
         });
 
-        _list.ItemTemplate = new FuncDataTemplate<OutlinerRow>((row, _) => row == null ? new Control() : RowView(row));
+        _list.ItemTemplate = new FuncDataTemplate<object>((item, _) => item switch
+        {
+            OutlinerRow row => RowView(row),
+            OutlinerHeading heading => HeadingView(heading),
+            _ => new Control(),
+        });
         _list.AddHandler(PointerPressedEvent, (_, e) => _modifiers = e.KeyModifiers, Avalonia.Interactivity.RoutingStrategies.Tunnel, handledEventsToo: true);
         _list.AddHandler(KeyDownEvent, (_, e) => _modifiers = e.KeyModifiers, Avalonia.Interactivity.RoutingStrategies.Tunnel, handledEventsToo: true);
         // The rows that a click adds come last, so the one clicked is the primary entity. With Ctrl or Shift, the
@@ -94,6 +107,23 @@ public sealed class OutlinerView : DockPanel
         {
             if (_syncing)
             {
+                return;
+            }
+            // A scene's heading is not an entity: a click on it makes its scene the active one, and it does not stay
+            // selected.
+            if (e.AddedItems.OfType<OutlinerHeading>().LastOrDefault() is { } heading)
+            {
+                _syncing = true;
+                foreach (var h in _list.SelectedItems?.OfType<OutlinerHeading>().ToList() ?? [])
+                {
+                    _list.SelectedItems!.Remove(h);
+                }
+                _syncing = false;
+                _shell.ActivateScene(heading.Scene);
+                if ((_modifiers & (KeyModifiers.Control | KeyModifiers.Shift)) == 0)
+                {
+                    _selection.Set([]);
+                }
                 return;
             }
             var removed = e.RemovedItems.OfType<OutlinerRow>().Select(r => r.Node.Handle).ToList();
@@ -108,22 +138,61 @@ public sealed class OutlinerView : DockPanel
         };
         _filter.TextChanged += (_, _) => Rebuild();
 
-        new ViewSubscriptions(this, attached: Rebuild)
+        Subscriptions = new ViewSubscriptions(this, attached: Rebuild)
             .Add(() => _world.EntitiesChanged += Rebuild, () => _world.EntitiesChanged -= Rebuild)
             .Add(() => _world.TypesChanged += Rebuild, () => _world.TypesChanged -= Rebuild)
             .Add(() => _selection.Changed += OnSelectionChanged, () => _selection.Changed -= OnSelectionChanged)
             .Add(() => _shell.ProblemsChanged += Rebuild, () => _shell.ProblemsChanged -= Rebuild)
-            .Add(() => _shell.VisibilityChanged += Rebuild, () => _shell.VisibilityChanged -= Rebuild);
+            .Add(() => _shell.VisibilityChanged += Rebuild, () => _shell.VisibilityChanged -= Rebuild)
+            .Add(() => _shell.SceneChanged += OnScenesChanged, () => _shell.SceneChanged -= OnScenesChanged);
+    }
+
+    // The headings show which scene is active and which are dirty, which edits change without a change of the world.
+    string _scenesShown = "";
+
+    void OnScenesChanged()
+    {
+        var shown = string.Join("|", _shell.Scenes.Select(s => $"{s.Number}:{s.Title}:{s.IsDirty}:{s == _shell.Scene}"));
+        if (shown != _scenesShown)
+        {
+            Rebuild();
+        }
     }
 
     void Rebuild()
     {
         _empty.IsVisible = !_world.HasWorld;
         var filter = _filter.Text?.Trim() ?? "";
-        var rows = new List<OutlinerRow>();
-        foreach (var root in _world.Roots)
+        var rows = new List<object>();
+        var scenes = _shell.Scenes;
+        _scenesShown = string.Join("|", scenes.Select(s => $"{s.Number}:{s.Title}:{s.IsDirty}:{s == _shell.Scene}"));
+        if (scenes.Count > 1)
         {
-            Add(rows, root, 0, filter);
+            // Each open scene's entities under its heading, then what no open scene made, as the game's own.
+            foreach (var scene in scenes)
+            {
+                var collapsed = _shell.Outliner.IsCollapsed(scene);
+                rows.Add(new OutlinerHeading(scene, scene == _shell.Scene, !collapsed));
+                if (collapsed && filter.Length == 0)
+                {
+                    continue;
+                }
+                foreach (var root in _world.Roots.Where(r => r.SceneId != 0 && r.Scene == scene.Number))
+                {
+                    Add(rows, root, 0, filter);
+                }
+            }
+            foreach (var root in _world.Roots.Where(r => r.SceneId == 0 || _shell.SceneOf(r) == null))
+            {
+                Add(rows, root, 0, filter);
+            }
+        }
+        else
+        {
+            foreach (var root in _world.Roots)
+            {
+                Add(rows, root, 0, filter);
+            }
         }
         _syncing = true;
         _list.ItemsSource = rows;
@@ -133,15 +202,16 @@ public sealed class OutlinerView : DockPanel
 
     void ShowSelection(bool scroll)
     {
-        if (_list.ItemsSource is not List<OutlinerRow> rows || _list.SelectedItems is not { } selected)
+        if (_list.ItemsSource is not List<object> items || _list.SelectedItems is not { } selected)
         {
             return;
         }
+        var rows = items.OfType<OutlinerRow>().ToList();
         // When the list's rows are the selection's already, as after a change that the list made itself, they stay as
         // they are: selecting them again would move the list's anchor to the last of them, and the next Shift click
         // would range from there and not from the row that the user clicked first.
         var wanted = rows.Where(r => _selection.Contains(r.Node.Handle)).ToList();
-        if (!wanted.ToHashSet().SetEquals(selected.OfType<OutlinerRow>()))
+        if (!wanted.Cast<object>().ToHashSet().SetEquals(selected.OfType<object>()))
         {
             _syncing = true;
             selected.Clear();
@@ -159,7 +229,7 @@ public sealed class OutlinerView : DockPanel
 
     // Adds a node and its visible descendants, and returns whether the node or one of them matches the filter. With a
     // filter, a match shows with its ancestors, expanded or not.
-    bool Add(List<OutlinerRow> rows, EntityNode node, int depth, string filter)
+    bool Add(List<object> rows, EntityNode node, int depth, string filter)
     {
         var summary = string.Join(", ", node.Components.Select(_world.TypeName).Where(n => !Structural.Contains(n)).Select(FieldValues.Humanize));
         var label = node.Label;
@@ -170,7 +240,7 @@ public sealed class OutlinerView : DockPanel
             || label.Contains(filter, StringComparison.OrdinalIgnoreCase)
             || node.ToString().Contains(filter, StringComparison.OrdinalIgnoreCase)
             || summary.Contains(filter, StringComparison.OrdinalIgnoreCase)
-            || _shell.InstanceOf(node.SceneId) is { Prefab: not "" } instance && _shell.PrefabName(instance.Prefab).Contains(filter, StringComparison.OrdinalIgnoreCase);
+            || _shell.InstanceOf(node) is { Prefab: not "" } instance && _shell.PrefabName(instance.Prefab).Contains(filter, StringComparison.OrdinalIgnoreCase);
         var childMatches = false;
         if (row.Expanded || filter.Length > 0)
         {
@@ -233,21 +303,21 @@ public sealed class OutlinerView : DockPanel
         var view = new DockPanel { Background = Brushes.Transparent };
         if (row.Node.SceneId != 0)
         {
-            var id = row.Node.SceneId;
-            var lockButton = Toggle(_shell.IsLocked(id), "locked", "unlocked",
-                _shell.IsLocked(id) ? "Let the viewport select this entity" : "Stop the viewport from selecting this entity and its children",
-                () => _shell.SetLocked([id], !_shell.IsLocked(id)));
-            var eyeButton = Toggle(_shell.IsHidden(id), "hidden", "visible",
-                _shell.IsHidden(id) ? "Show this entity in the viewport" : "Hide this entity and its children in the viewport",
-                () => _shell.SetHidden([id], !_shell.IsHidden(id)));
+            var node = row.Node;
+            var lockButton = Toggle(_shell.IsLocked(node), "locked", "unlocked",
+                _shell.IsLocked(node) ? "Let the viewport select this entity" : "Stop the viewport from selecting this entity and its children",
+                () => _shell.SetLocked(node, !_shell.IsLocked(node)));
+            var eyeButton = Toggle(_shell.IsHidden(node), "hidden", "visible",
+                _shell.IsHidden(node) ? "Show this entity in the viewport" : "Hide this entity and its children in the viewport",
+                () => _shell.SetHidden(node, !_shell.IsHidden(node)));
             SetDock(lockButton, DockSide.Right);
             SetDock(eyeButton, DockSide.Right);
             view.Children.Add(lockButton);
             view.Children.Add(eyeButton);
         }
         view.Children.Add(content);
-        Mark(content, row.Node.SceneId);
-        if (_shell.ProblemsOf(row.Node.SceneId) is { Count: > 0 } problems)
+        Mark(content, row.Node);
+        if (_shell.ProblemsOf(row.Node) is { Count: > 0 } problems)
         {
             var warning = new TextBlock { Text = "⚠", Classes = { "warning" } };
             ToolTip.SetTip(warning, string.Join("\n", problems));
@@ -299,7 +369,9 @@ public sealed class OutlinerView : DockPanel
             }
             else if (ContentBrowserView.Dropped(e) is { } script)
             {
-                e.DragEffects = _shell.CanAddBehaviour([row.Node.SceneId], script) ? DragDropEffects.Link : DragDropEffects.None;
+                // Another scene's row becomes active at the drop, which then checks the behaviour.
+                e.DragEffects = !_shell.InActiveScene(row.Node) && row.Node.SceneId != 0 || _shell.CanAddBehaviour([row.Node.SceneId], script)
+                    ? DragDropEffects.Link : DragDropEffects.None;
             }
             else
             {
@@ -309,6 +381,11 @@ public sealed class OutlinerView : DockPanel
         });
         view.AddHandler(DragDrop.DropEvent, (_, e) =>
         {
+            // A drop edits the row's scene, which becomes the active one.
+            if (_shell.SceneOf(row.Node) is { } scene && (DroppedPrefabs(e).Count > 0 || ContentBrowserView.Dropped(e) != null))
+            {
+                _shell.ActivateScene(scene);
+            }
             if (DroppedPrefabs(e) is { Count: > 0 } prefabs)
             {
                 CreateInstances(prefabs, row.Node.SceneId, e);
@@ -350,22 +427,23 @@ public sealed class OutlinerView : DockPanel
         }
     }
 
-    // An entity can go under any scene entity that is not itself or one of its descendants, or to the root.
+    // An entity of the active scene can go under any entity of its scene that is not itself or one of its descendants,
+    // or to the root. An entity does not move to another scene.
     bool CanDrop(DragEventArgs e, ulong parent)
     {
         var dragged = _world.Find(EntityView.Dropped(e));
-        if (dragged is not { SceneId: not 0 } || _shell.Scene == null || !_shell.IsEditing || (parent == 0 ? dragged.Parent == 0 : parent == dragged.SceneId))
+        if (dragged is not { SceneId: not 0 } || !_shell.InActiveScene(dragged) || !_shell.IsEditing || (parent == 0 ? dragged.Parent == 0 : parent == dragged.SceneId))
         {
             return false;
         }
-        for (var p = _world.FindScene(parent); p != null; p = p.Parent == 0 ? null : _world.Find(p.Parent))
+        for (var p = _world.FindScene(dragged.Scene, parent); p != null; p = p.Parent == 0 ? null : _world.Find(p.Parent))
         {
             if (p.SceneId == dragged.SceneId)
             {
                 return false;
             }
         }
-        return parent == 0 || _world.FindScene(parent) != null;
+        return parent == 0 || _world.FindScene(dragged.Scene, parent) != null;
     }
 
     void Drop(DragEventArgs e, ulong parent)
@@ -377,27 +455,28 @@ public sealed class OutlinerView : DockPanel
     }
 
     // An instance's root has the prefab's icon before its name; an entity of an instance with overrides a dot after
-    // it; and one that the scene added to an instance a plus.
-    void Mark(StackPanel content, ulong id)
+    // it; and one that the scene added to an instance a plus. Each entity is its own scene's.
+    void Mark(StackPanel content, EntityNode node)
     {
-        if (id == 0)
+        if (_shell.SceneOf(node) is not { } scene)
         {
             return;
         }
-        var instance = _shell.InstanceOf(id);
+        var id = node.SceneId;
+        var instance = scene.Expanded.InstanceOf(id);
         if (instance is { Prefab: not "" } && CommandViews.Icon("prefab", 12) is { } icon)
         {
             icon.Classes.Add("prefab");
-            ToolTip.SetTip(icon, $"{(_shell.Scene?.Scene.Find(id)?.Node is not (null or 0) ? "A part of" : "An instance of")} {_shell.PrefabName(instance.Prefab)}");
+            ToolTip.SetTip(icon, $"{(scene.Scene.Find(id)?.Node is not (null or 0) ? "A part of" : "An instance of")} {_shell.PrefabName(instance.Prefab)}");
             content.Children.Insert(1, icon);
         }
         TextBlock? mark = null;
-        if (instance is { IsInstanceRoot: false } && _shell.IsOverridden(id))
+        if (instance is { IsInstanceRoot: false } && EditorShell.IsOverridden(scene, id))
         {
             mark = new TextBlock { Text = "•", Classes = { "prefab" } };
             ToolTip.SetTip(mark, "Overrides its prefab");
         }
-        else if (instance == null && _shell.IsAddedToInstance(id))
+        else if (instance == null && EditorShell.IsAddedToInstance(scene, id))
         {
             mark = new TextBlock { Text = "+", Classes = { "prefab" } };
             ToolTip.SetTip(mark, "Added to the instance, not in its prefab");
@@ -459,10 +538,18 @@ public sealed class OutlinerView : DockPanel
         menu.Items.Add(add);
         if (row.Node.Parent != 0)
         {
-            menu.Items.Add(new MenuItem { Header = "Move to Root", Command = new RelayCommand(() => _shell.Reparent(row.Node.SceneId, 0)) });
+            menu.Items.Add(new MenuItem
+            {
+                Header = "Move to Root",
+                Command = new RelayCommand(() =>
+                {
+                    SelectRow();
+                    _shell.Reparent(row.Node.SceneId, 0);
+                }),
+            });
         }
         menu.Items.Add(new Separator());
-        if (_shell.InstanceOf(row.Node.SceneId) is { } instance)
+        if (_shell.InstanceOf(row.Node) is { } instance)
         {
             menu.Items.Add(Item("Open Prefab", EditorCommands.OpenPrefab));
             menu.Items.Add(Item("Select Prefab Asset", EditorCommands.SelectPrefabAsset));
@@ -482,6 +569,58 @@ public sealed class OutlinerView : DockPanel
         menu.Items.Add(new Separator());
         menu.Items.Add(Item("Hide or Show", EditorCommands.HideSelected));
         menu.Items.Add(Item("Lock or Unlock", EditorCommands.LockSelected));
+    }
+
+    // A scene's heading, with several scenes open: its file's name, a dot while it is dirty, and the active scene in
+    // bold. Its menu makes it active, saves it or closes it.
+    Control HeadingView(OutlinerHeading heading)
+    {
+        var scene = heading.Scene;
+        var expander = new TextBlock { Text = heading.Expanded ? "▾" : "▸", Width = 14, Classes = { "dim" }, Cursor = new Cursor(StandardCursorType.Hand) };
+        expander.PointerPressed += (_, e) =>
+        {
+            _shell.Outliner.Toggle(scene);
+            e.Handled = true;
+            Rebuild();
+        };
+        var title = new TextBlock
+        {
+            Text = scene.Title + (scene.IsDirty ? " •" : ""),
+            FontWeight = heading.Active ? FontWeight.Bold : FontWeight.Normal,
+        };
+        var view = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 6,
+            Background = Brushes.Transparent,
+            Children = { expander, title },
+        };
+        if (heading.Active)
+        {
+            view.Children.Add(new TextBlock { Text = "active", Classes = { "dim" } });
+        }
+        ToolTip.SetTip(view, heading.Active
+            ? $"{scene.Path}\nThe active scene: edits, undo and save act on it."
+            : $"{scene.Path}\nClick to make it the active scene, which edits, undo and save act on.");
+        var menu = new ContextMenu();
+        menu.Items.Add(new MenuItem { Header = "Make Active", IsEnabled = !heading.Active, Command = new RelayCommand(() => _shell.ActivateScene(scene)) });
+        menu.Items.Add(new MenuItem
+        {
+            Header = "Save",
+            IsEnabled = _shell.OpenEdit == null,
+            Command = new RelayCommand(() => _shell.SaveScene(scene)),
+        });
+        menu.Items.Add(new MenuItem
+        {
+            Header = "Close Scene",
+            Command = new RelayCommand(() =>
+            {
+                _shell.ActivateScene(scene);
+                _shell.Commands.Get(EditorCommands.CloseScene).Execute();
+            }),
+        });
+        view.ContextMenu = menu;
+        return view;
     }
 
     // A row's toggle: bright while it is on, and faint while it is off, so the rows that are hidden or locked stand out.
@@ -506,3 +645,6 @@ public sealed class OutlinerView : DockPanel
 }
 
 public sealed record OutlinerRow(EntityNode Node, int Depth, string Label, string Summary, bool HasChildren, bool Expanded);
+
+/// <summary>An open scene's heading in the outliner, with several scenes open.</summary>
+public sealed record OutlinerHeading(SceneDocument Scene, bool Active, bool Expanded);

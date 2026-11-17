@@ -29,7 +29,7 @@ public sealed class PropertiesViewTests : IDisposable
     {
         var shell = TestShell.Open(_temp, "door.scene", SceneText);
         shell.OnGameMessage(new ComponentTypes([Transform]));
-        shell.OnGameMessage(new EntitySnapshot([new EntityInfo(Door, "Door", 1, 0, true, [1])]));
+        shell.OnGameMessage(new EntitySnapshot([new EntityInfo(Door, "Door", 1, 1, 0, true, [1])]));
         shell.Selection.Select(Door);
         var view = new PropertiesView(shell);
         view.Subscriptions.Attach();
@@ -67,7 +67,7 @@ public sealed class PropertiesViewTests : IDisposable
         name.RaiseEvent(new KeyEventArgs { RoutedEvent = InputElement.KeyDownEvent, Key = Key.Enter });
         Assert.Equal("Gate", shell.Scene!.Expanded.Flat.Find(1)!.Name);
         // The game reports the new name, which builds the panel again, and takes the focused box out of it.
-        shell.OnGameMessage(new EntityDelta([new EntityInfo(Door, "Gate", 1, 0, true, [1])], []));
+        shell.OnGameMessage(new EntityDelta([new EntityInfo(Door, "Gate", 1, 1, 0, true, [1])], []));
 
         Assert.Equal(1, Headers(content));
         Assert.Equal(rows, content.Children.Count);

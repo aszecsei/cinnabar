@@ -16,7 +16,7 @@ public sealed class ModeTests : IDisposable
     EditorShell NewShell()
     {
         var shell = TestShell.Open(_temp, "door.scene", "scene 1\n\nentity 0000000000000001\nname = \"Door\"\n");
-        shell.OnGameMessage(new EntitySnapshot([new EntityInfo(1, "Door", 1, 0, true, [])]));
+        shell.OnGameMessage(new EntitySnapshot([new EntityInfo(1, "Door", 1, 1, 0, true, [])]));
         return shell;
     }
 
