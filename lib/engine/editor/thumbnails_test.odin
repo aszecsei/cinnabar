@@ -145,6 +145,7 @@ bake_setup :: proc(t: ^testing.T) -> ^Bake_Fixture {
 			virtual.release(ptr, uint(size))
 		},
 	}
+	use_test_level(&f.platform)
 	dir, err := os.make_directory_temp("", "thumbnails_test_*", context.allocator)
 	testing.expect(t, err == nil)
 	f.dir = dir

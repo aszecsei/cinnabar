@@ -37,8 +37,10 @@ Editor :: struct {
 	assets:    ^asset.Assets,
 	session:   Session,
 	// The entity of each scene ID, by the number of its scene, for the editor's operations (see find_scene_entity). It
-	// follows the world, not the session.
+	// follows the world, not the session. The map of maps is on the heap. The maps are in the level's memory, and level
+	// is the level generation that they were made in (see scene_maps).
 	by_scene:  map[u32]^map[u64]ecs.Entity,
+	level:     u64,
 	// The viewport tools' GPU objects (see viewport.odin).
 	tools:     Viewport_Tools,
 	// The game's commands (see commands.odin). Registrations: reload clears them.
@@ -167,6 +169,7 @@ init :: proc(
 		nav       = navigation,
 		ai        = agents,
 		by_scene  = make(map[u32]^map[u64]ecs.Entity, platform.heap_allocator),
+		level     = platform.level_generation(),
 		commands  = make([dynamic]Command, platform.heap_allocator),
 	}
 	if assets != nil {
@@ -240,7 +243,8 @@ reload :: proc(e: ^Editor, platform: ^core.Platform_API) {
 
 destroy :: proc(e: ^Editor) {
 	end_session(e)
-	delete_scene_handles(e)
+	// The maps themselves are the level's memory.
+	delete(e.by_scene)
 	delete(e.commands)
 	if e.ui.platform != nil {
 		ui.destroy(&e.ui)
