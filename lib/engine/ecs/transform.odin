@@ -74,6 +74,7 @@ register_engine_components :: proc(r: ^Registry) {
 	register_component(r, Previous_Transform, PREVIOUS_TRANSFORM_ID, category = "Transform")
 	register_component(r, Disabled, DISABLED_ID, category = NO_CATEGORY)
 	register_component(r, Inactive, INACTIVE_ID, category = NO_CATEGORY)
+	register_component(r, Loading, LOADING_ID, category = NO_CATEGORY)
 	register_component(r, Name, NAME_ID, category = NO_CATEGORY)
 }
 

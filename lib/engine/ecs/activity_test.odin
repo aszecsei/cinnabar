@@ -134,3 +134,33 @@ nothing_is_logged_without_watch :: proc(t: ^testing.T) {
 	despawn(w, e)
 	testing.expect_value(t, w.log_count, 0)
 }
+
+@(test)
+loading_hides_an_entity_and_its_children_until_it_is_removed :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	w := &f.world
+	root := spawn(w)
+	add(w, root, TRANSFORM_IDENTITY)
+	child := child_of(w, root)
+	add(w, root, Loading{scene = 7})
+	update_activity(w)
+	testing.expect(t, !active_in_hierarchy(w, root))
+	testing.expect(t, !active_in_hierarchy(w, child))
+	testing.expect(t, active_self(w, root))
+
+	remove(w, root, Loading)
+	update_activity(w)
+	testing.expect(t, active_in_hierarchy(w, root))
+	testing.expect(t, active_in_hierarchy(w, child))
+
+	// An entity that is Disabled as well stays inactive when Loading goes.
+	add(w, root, Loading{scene = 7})
+	set_active(w, root, false)
+	remove(w, root, Loading)
+	update_activity(w)
+	testing.expect(t, !active_in_hierarchy(w, root))
+	testing.expect(t, !active_in_hierarchy(w, child))
+	set_active(w, root, true)
+	testing.expect(t, active_in_hierarchy(w, child))
+}
