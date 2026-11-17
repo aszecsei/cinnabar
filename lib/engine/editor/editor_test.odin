@@ -433,20 +433,24 @@ a_scene_from_the_editor_replaces_the_world :: proc(t: ^testing.T) {
 		ints    = {16777216, 0, 0, 0},
 	}
 	load := link.Load_Scene {
-		entities = {
+		scenes = {
 			{
-				id = 0xa1,
-				name = "Door",
-				active = true,
-				components = {
+				entities = {
 					{
-						id = u64(ecs.TRANSFORM_ID),
-						name = "Transform",
-						fields = {{name = "position", value = position}},
+						id = 0xa1,
+						name = "Door",
+						active = true,
+						components = {
+							{
+								id = u64(ecs.TRANSFORM_ID),
+								name = "Transform",
+								fields = {{name = "position", value = position}},
+							},
+						},
 					},
+					{id = 0xb2, name = "Hinge", parent = 0xa1, active = true},
 				},
 			},
-			{id = 0xb2, name = "Hinge", parent = 0xa1, active = true},
 		},
 	}
 	messages := step(f, 1, load)
@@ -505,22 +509,27 @@ load_door :: proc(f: ^Fixture) -> (door, hinge: ecs.Entity) {
 		f,
 		1,
 		link.Load_Scene {
-			entities = {
+			scenes = {
 				{
-					id = DOOR,
-					name = "Door",
-					active = true,
-					components = {{id = tuned, name = "Tuned"}},
+					entities = {
+						{
+							id = DOOR,
+							name = "Door",
+							active = true,
+							components = {{id = tuned, name = "Tuned"}},
+						},
+						{id = HINGE, active = true},
+					},
 				},
-				{id = HINGE, active = true},
 			},
 		},
 	)
 	return find_scene_entity(
 		&f.editor,
 		&f.world,
+		0,
 		DOOR,
-	), find_scene_entity(&f.editor, &f.world, HINGE)
+	), find_scene_entity(&f.editor, &f.world, 0, HINGE)
 }
 
 @(test)
@@ -577,7 +586,7 @@ operations_edit_the_world :: proc(t: ^testing.T) {
 	testing.expect_value(t, ecs.get(&f.world, door, Tuned).inner.amount, 2.5)
 	testing.expect_value(t, ecs.get(&f.world, door, Tuned).mode, Mode.Busy)
 	testing.expect_value(t, ecs.get(&f.world, hinge, ecs.Transform).scale, [3]f32{1, 2, 3})
-	knob := find_scene_entity(&f.editor, &f.world, 0xc3)
+	knob := find_scene_entity(&f.editor, &f.world, 0, 0xc3)
 	testing.expect(t, knob != 0)
 	testing.expect_value(t, ecs.get(&f.world, knob, ecs.Parent).entity, door)
 
@@ -648,7 +657,7 @@ the_games_own_scene_is_found_by_scene_id :: proc(t: ^testing.T) {
 	f := setup(t)
 	defer teardown(f)
 	e := ecs.spawn(&f.world)
-	ecs.add(&f.world, e, scene.Scene_Entity{0x51})
+	ecs.add(&f.world, e, scene.Scene_Entity{id = 0x51})
 	step(f)
 
 	step(
@@ -1103,7 +1112,7 @@ recorded_edits_become_operations_that_apply_to_the_world :: proc(t: ^testing.T) 
 	w := &f.world
 	step(f, 1, link.Load_Scene{ticket = 1})
 	door := ecs.spawn(w)
-	ecs.add(w, door, scene.Scene_Entity{0x10})
+	ecs.add(w, door, scene.Scene_Entity{id = 0x10})
 	ecs.add(w, door, ecs.TRANSFORM_IDENTITY)
 	ecs.add(w, door, Tuned{mode = .Busy})
 	moved := ecs.TRANSFORM_IDENTITY
@@ -1158,12 +1167,12 @@ recorded_edits_become_operations_that_apply_to_the_world :: proc(t: ^testing.T) 
 
 	// As the editor sends them back, they apply to the world.
 	ecs.despawn(w, draft)
-	problems := make([dynamic]scene.Problem, context.temp_allocator)
+	problems := make([dynamic]link.Edit_Problem, context.temp_allocator)
 	apply_operations(&f.editor, w, nil, ops, &problems)
 	testing.expectf(t, len(problems) == 0, "problems: %v", problems[:])
 	testing.expect(t, ecs.get(w, door, ecs.Transform).position == moved.position)
 	testing.expect(t, ecs.has(w, door, ecs.Disabled))
-	made := find_scene_entity(&f.editor, w, ops[0].entity)
+	made := find_scene_entity(&f.editor, w, 0, ops[0].entity)
 	testing.expect(t, made != 0)
 	if made != 0 {
 		testing.expect_value(t, ecs.get(w, made, Tuned).inner.amount, 7)
@@ -2508,13 +2517,92 @@ a_loaded_scene_gives_the_world_its_guid :: proc(t: ^testing.T) {
 		f,
 		1,
 		link.Load_Scene {
-			guid = {0 = 0xab, 15 = 1},
-			entities = {{id = DOOR, name = "Door", active = true}},
+			scenes = {
+				{
+					scene = 1,
+					guid = {0 = 0xab, 15 = 1},
+					entities = {{id = DOOR, name = "Door", active = true}},
+				},
+				{scene = 2, guid = {0 = 0xcd}, entities = {{id = HINGE, active = true}}},
+			},
 		},
 	)
+	// The first scene's GUID is the world's.
 	testing.expect_value(t, f.world.scene, format.Guid{0 = 0xab, 15 = 1})
 	step(f, 1, link.Load_Scene{})
 	testing.expect_value(t, f.world.scene, format.Guid{})
+}
+
+// Two scenes can have the same scene IDs: each entity is its scene's, an operation names its scene, and a parent or a
+// reference resolves in the operation's scene (see docs/editor/document-and-scenes.md#several-scenes).
+@(test)
+several_scenes_keep_their_own_scene_ids :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	step(f)
+	messages := step(
+		f,
+		1,
+		link.Load_Scene {
+			scenes = {
+				{scene = 1, entities = {{id = DOOR, name = "North", active = true}}},
+				{
+					scene = 2,
+					entities = {
+						{id = DOOR, name = "South", active = true},
+						{id = HINGE, name = "Hinge", active = true},
+					},
+				},
+			},
+		},
+	)
+	snapshot: link.Entity_Snapshot
+	for m in messages {
+		if s, ok := m.(link.Entity_Snapshot); ok {
+			snapshot = s
+		}
+	}
+	testing.expect_value(t, len(snapshot.entities), 3)
+	for info in snapshot.entities {
+		switch info.name {
+		case "North":
+			testing.expect_value(t, info.scene, 1)
+		case "South", "Hinge":
+			testing.expect_value(t, info.scene, 2)
+		}
+	}
+	north := find_scene_entity(&f.editor, &f.world, 1, DOOR)
+	south := find_scene_entity(&f.editor, &f.world, 2, DOOR)
+	hinge := find_scene_entity(&f.editor, &f.world, 2, HINGE)
+	testing.expect(t, north != 0 && south != 0 && north != south)
+	testing.expect_value(t, find_scene_entity(&f.editor, &f.world, 1, HINGE), 0)
+
+	messages = step(
+	f,
+	1,
+	link.Apply_Operations {
+		operations = {
+			{kind = .Rename, scene = 2, entity = DOOR, name = "South Door"},
+			{kind = .Set_Parent, scene = 2, entity = HINGE, parent = DOOR},
+			// Scene 1 has no hinge.
+			{kind = .Set_Active, scene = 1, entity = HINGE, active = false},
+		},
+	},
+	)
+	testing.expect_value(t, ecs.name_of(&f.world, north), "North")
+	testing.expect_value(t, ecs.name_of(&f.world, south), "South Door")
+	testing.expect_value(t, ecs.get(&f.world, hinge, ecs.Parent).entity, south)
+	problems: link.Edit_Problems
+	for m in messages {
+		if p, ok := m.(link.Edit_Problems); ok {
+			problems = p
+		}
+	}
+	testing.expect_value(t, len(problems.problems), 1)
+	if len(problems.problems) == 1 {
+		testing.expect_value(t, problems.problems[0].scene, 1)
+		testing.expect_value(t, problems.problems[0].entity, HINGE)
+	}
 }
 
 // The game keeps the Navigation Path tool's last points, at most two, and a new editor's session starts with none.

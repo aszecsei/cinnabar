@@ -268,6 +268,9 @@ Entity_Info :: struct {
 	name:       string,
 	// The scene ID of an entity that a scene made, or 0 for one that the game spawned.
 	scene_id:   u64,
+	// The number of the scene that made it, as Load_Scene gives it, or 0 for the game's own scene and for an entity
+	// that the game spawned.
+	scene:      u32,
 	// The Parent component's entity, or 0.
 	parent:     u64,
 	// False when the entity has the Inactive tag.
@@ -344,17 +347,27 @@ Behaviour_Field :: struct {
 
 // Edit (see docs/editor/document-and-scenes.md#document-model).
 
-// Editor to game: the editor's scene document. The game replaces its world with it, and then sends an
-// Entity_Snapshot and the Edit_Problems of the load. The editor sends it when the link connects and after a soft
-// restart. Values are tagged as the scene file writes them, and the game converts them to its fields' kinds.
+// Editor to game: the editor's open scene documents (see docs/editor/document-and-scenes.md#several-scenes). The game
+// replaces its world with them, and then sends an Entity_Snapshot and the Edit_Problems of the load. The editor sends
+// it when the link connects, after a soft restart, and when it opens or closes a scene. Values are tagged as the scene
+// file writes them, and the game converts them to its fields' kinds.
 Load_Scene :: struct {
+	scenes: []Loaded_Scene,
+	// The editor's number for this load, which a Behaviour_Operations repeats, so the editor knows the scenes that a
+	// behaviour edited.
+	ticket: u64,
+}
+
+// One scene of a Load_Scene. Its scene IDs are its own: another scene can have the same, and a reference or a parent
+// names an entity of the same scene.
+Loaded_Scene :: struct {
+	// The editor's number for the scene, nonzero and unique among the open scenes, which its entities' Entity_Info and
+	// the operations on them carry.
+	scene:    u32,
 	entities: []Scene_Entity,
 	// The scene's GUID, so the game finds what its cooked blob lists, such as its navmeshes, or zero for a scene that
 	// has none yet.
 	guid:     [16]u8,
-	// The editor's number for this load, which a Behaviour_Operations repeats, so the editor knows the scene that a
-	// behaviour edited.
-	ticket:   u64,
 }
 
 Scene_Entity :: struct {
@@ -443,9 +456,12 @@ Operation_Kind :: enum u8 {
 	Create_Instance,
 }
 
-// An edit of the scene, by the entity's scene ID. Only the members for its kind are set.
+// An edit of a scene, by the scene's number and the entity's scene ID. Only the members for its kind are set. A
+// parent and a reference name an entity of the same scene. From the game, a scene of 0 is the editor's active scene,
+// as for an entity that a command or a behaviour creates at the root.
 Operation :: struct {
 	kind:       Operation_Kind,
+	scene:      u32,
 	entity:     u64,
 	created:    []Scene_Entity,
 	name:       string,
@@ -465,7 +481,8 @@ Apply_Operations :: struct {
 }
 
 Edit_Problem :: struct {
-	// The scene ID of the entity.
+	// The number of the entity's scene, and its scene ID.
+	scene:   u32,
 	entity:  u64,
 	message: string,
 }
@@ -578,6 +595,8 @@ Pick_Hit :: struct {
 	entity:   u64,
 	// 0 for an entity that the game spawned.
 	scene_id: u64,
+	// The number of its scene, as Entity_Info has it.
+	scene:    u32,
 }
 
 // Game to editor: the entities that a Pick_Request found, sorted by entity. For one pixel, depth is the view-space

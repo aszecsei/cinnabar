@@ -381,7 +381,7 @@ a_scene_keeps_a_setting_that_it_does_not_override :: proc(t: ^testing.T) {
 @(private = "file")
 full_probe :: proc(f: ^Fixture) -> (probe: Probe, target: ecs.Entity) {
 	target = ecs.spawn(&f.world)
-	ecs.add(&f.world, target, Scene_Entity{0x42})
+	ecs.add(&f.world, target, Scene_Entity{id = 0x42})
 	probe = {
 		flag = true,
 		small = -7,
