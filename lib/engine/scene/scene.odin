@@ -123,7 +123,8 @@ unload_level :: proc(w: ^ecs.World, scenes: ^Scenes = nil) {
 
 // add_entities adds entities of the scene with the number to the world, as load does, and returns how many it spawned.
 // handles maps the scene's IDs to entities, for the new entities and the ones that their fields refer to, and gets the
-// new ones. An entity whose scene ID handles already has is skipped.
+// new ones. An entity whose scene ID handles already has is skipped. With scenes, a field that refers to an entity of
+// another scene is linked to it (see links.odin); without, such a field is none.
 add_entities :: proc(
 	w: ^ecs.World,
 	scripts: ^script.Runtime,
@@ -131,8 +132,17 @@ add_entities :: proc(
 	handles: ^map[u64]ecs.Entity,
 	problems: ^[dynamic]Problem = nil,
 	number: u32 = 0,
+	scenes: ^Scenes = nil,
 ) -> int {
-	count, _ := add_entities_to(w, scripts, entities, handles, problems, number = number)
+	count, _ := add_entities_to(
+		w,
+		scripts,
+		entities,
+		handles,
+		problems,
+		number = number,
+		scenes = scenes,
+	)
 	return count
 }
 
@@ -149,11 +159,12 @@ add_entities_to :: proc(
 	scene_ids := true,
 	pending: ^[dynamic]script.Pending_Behaviour = nil,
 	number: u32 = 0,
+	scenes: ^Scenes = nil,
 ) -> (
 	count: int,
 	spawned: []ecs.Entity,
 ) {
-	l := loader(w, handles, problems)
+	l := loader(w, handles, problems, scenes, number)
 	// Every entity exists before any field is set, so a field can refer to an entity later in the scene.
 	spawned = make([]ecs.Entity, len(entities), w.platform.frame_allocator)
 	for e, i in entities {
@@ -244,10 +255,19 @@ attach_behaviours :: proc(
 		if pending != nil {
 			append(
 				pending,
-				script.Pending_Behaviour{entity, b.script, behaviour_fields(l, b.fields)},
+				script.Pending_Behaviour {
+					entity,
+					b.script,
+					behaviour_fields(l, entity, b.script, b.fields),
+				},
 			)
 		} else if scripts != nil {
-			script.attach_script(scripts, entity, b.script, behaviour_fields(l, b.fields))
+			script.attach_script(
+				scripts,
+				entity,
+				b.script,
+				behaviour_fields(l, entity, b.script, b.fields),
+			)
 		}
 	}
 }
@@ -391,8 +411,9 @@ add_component :: proc(
 	c: format.Scene_Component,
 	handles: ^map[u64]ecs.Entity,
 	problems: ^[dynamic]Problem = nil,
+	scenes: ^Scenes = nil,
 ) -> bool {
-	l := loader(w, handles, problems)
+	l := loader(w, handles, problems, scenes, number_of(w, entity))
 	l.entity = id
 	if is_derived(ecs.Component_Id(c.id)) {
 		warn(
@@ -424,9 +445,11 @@ set_field :: proc(
 	reset: bool,
 	handles: ^map[u64]ecs.Entity,
 	problems: ^[dynamic]Problem = nil,
+	scenes: ^Scenes = nil,
 ) -> bool {
-	l := loader(w, handles, problems)
+	l := loader(w, handles, problems, scenes, number_of(w, entity))
 	l.entity = id
+	l.holder, l.component = entity, ecs.Component_Id(component)
 	info := ecs.registry_find(&w.registry, ecs.Component_Id(component))
 	data := ecs.get_raw(w, entity, ecs.Component_Id(component))
 	if info == nil || data == nil {
@@ -449,6 +472,15 @@ set_field :: proc(
 		}
 		flag^ = f.value.ints[0] != 0
 	case reset:
+		if scenes != nil {
+			release_slots(
+				scenes,
+				w,
+				entity,
+				ecs.Component_Id(component),
+				format.scene_field_hash(field.name),
+			)
+		}
 		reset_field(data, ecs.registry_defaults(&w.registry, info), field^)
 		if field.has_override {
 			flag^ = false
@@ -472,24 +504,62 @@ set_field :: proc(
 }
 
 // behaviour_field converts a behaviour's value to a script value, for the entity with scene ID id. The script
-// runtime checks it against the class.
+// runtime checks it against the class. With scenes, the entity and the GUID of the script that it is a behaviour of, a
+// reference to an entity of another scene is linked (see links.odin); the caller sets the field to the result.
 behaviour_field :: proc(
 	w: ^ecs.World,
 	id: u64,
 	f: format.Scene_Field,
 	handles: ^map[u64]ecs.Entity,
 	problems: ^[dynamic]Problem = nil,
+	scenes: ^Scenes = nil,
+	entity: ecs.Entity = 0,
+	behaviour: format.Guid = {},
 ) -> (
 	field: script.Behaviour_Field,
 	ok: bool,
 ) {
-	l := loader(w, handles, problems)
+	l := loader(w, handles, problems, scenes, number_of(w, entity))
 	l.entity = id
-	fields := behaviour_fields(&l, {f})
+	fields := behaviour_fields(&l, entity, behaviour, {f})
 	if len(fields) == 0 {
 		return
 	}
 	return fields[0], true
+}
+
+// set_behaviour_field sets a field of the entity's behaviour from a script asset to a scene's value, or with reset to
+// the class's default, as script.set_behaviour_field does, and keeps the field's link to an entity of another scene.
+// It returns what keeps it from setting the field, or "".
+set_behaviour_field :: proc(
+	w: ^ecs.World,
+	scripts: ^script.Runtime,
+	scenes: ^Scenes,
+	entity: ecs.Entity,
+	id: u64,
+	behaviour: format.Guid,
+	f: format.Scene_Field,
+	reset: bool,
+	handles: ^map[u64]ecs.Entity,
+	problems: ^[dynamic]Problem = nil,
+) -> (
+	problem: string,
+) {
+	field := script.Behaviour_Field {
+		name = f.name,
+	}
+	if reset {
+		if scenes != nil {
+			release_behaviour_slots(scenes, w, entity, behaviour, f.name)
+		}
+	} else {
+		ok: bool
+		field, ok = behaviour_field(w, id, f, handles, problems, scenes, entity, behaviour)
+		if !ok {
+			return ""
+		}
+	}
+	return script.set_behaviour_field(scripts, entity, behaviour, field, reset)
 }
 
 // is_derived is true for the components that the loader makes from an entity's keys, or that the world makes.
@@ -518,14 +588,21 @@ settle :: proc(w: ^ecs.World, entity: ecs.Entity) {
 
 @(private)
 Loader :: struct {
-	world:    ^ecs.World,
+	world:     ^ecs.World,
 	// From scene ID to entity.
-	handles:  ^map[u64]ecs.Entity,
+	handles:   ^map[u64]ecs.Entity,
 	// The fields of each component type, made at its first use.
-	fields:   map[ecs.Component_Id][]Field,
-	problems: ^[dynamic]Problem,
+	fields:    map[ecs.Component_Id][]Field,
+	problems:  ^[dynamic]Problem,
 	// The scene ID of the entity being loaded, for messages.
-	entity:   u64,
+	entity:    u64,
+	// The scenes that a reference to another scene is followed through, or nil, and the number of the scene that
+	// holds the fields that are written.
+	scenes:    ^Scenes,
+	number:    u32,
+	// The entity and the component whose fields are written, for their links.
+	holder:    ecs.Entity,
+	component: ecs.Component_Id,
 }
 
 @(private)
@@ -533,13 +610,24 @@ loader :: proc(
 	w: ^ecs.World,
 	handles: ^map[u64]ecs.Entity,
 	problems: ^[dynamic]Problem,
+	scenes: ^Scenes = nil,
+	number: u32 = 0,
 ) -> Loader {
 	return {
 		world = w,
 		handles = handles,
 		fields = make(map[ecs.Component_Id][]Field, w.platform.frame_allocator),
 		problems = problems,
+		scenes = scenes,
+		number = number,
 	}
+}
+
+// number_of is the scene that an entity belongs to, or 0.
+@(private = "file")
+number_of :: proc(w: ^ecs.World, entity: ecs.Entity) -> u32 {
+	number, _ := scene_of(w, entity)
+	return number
 }
 
 // warn logs a problem with the entity being loaded, and keeps it.
@@ -591,6 +679,10 @@ add_component_to :: proc(l: ^Loader, entity: ecs.Entity, c: format.Scene_Compone
 	if info == nil {
 		warn(l, "the game has no component %d (%s), so it is skipped", c.id, c.name)
 		return false
+	}
+	l.holder, l.component = entity, id
+	if l.scenes != nil {
+		release_slots(l.scenes, l.world, entity, id)
 	}
 	data := make([]byte, info.size, l.world.platform.frame_allocator)
 	if defaults := ecs.registry_defaults(&l.world.registry, info); defaults != nil {
@@ -710,7 +802,11 @@ write_field :: proc(
 		if v.kind != .Entity {
 			return "a scene ID, such as @1b04c7e95a2f3d88"
 		}
-		(^ecs.Entity)(dst)^ = resolve(l, v.entity)
+		(^ecs.Entity)(dst)^ = follow_reference(
+			l,
+			Component_Slot{l.holder, l.component, format.scene_field_hash(field.name)},
+			v,
+		)
 	case .Asset:
 		if v.kind != .Asset {
 			return "an asset's GUID, such as $9db8150cc7215ffc2708d20d77cf60bf"
@@ -792,7 +888,7 @@ put_integer :: proc(dst: rawptr, kind: Field_Kind, value: i64) -> bool {
 	return true
 }
 
-@(private = "file")
+@(private)
 resolve :: proc(l: ^Loader, id: u64) -> ecs.Entity {
 	if id == 0 {
 		return 0
@@ -806,7 +902,12 @@ resolve :: proc(l: ^Loader, id: u64) -> ecs.Entity {
 
 // behaviour_fields converts a behaviour's values to script values. The script runtime checks them against the class.
 @(private)
-behaviour_fields :: proc(l: ^Loader, fields: []format.Scene_Field) -> []script.Behaviour_Field {
+behaviour_fields :: proc(
+	l: ^Loader,
+	entity: ecs.Entity,
+	behaviour: format.Guid,
+	fields: []format.Scene_Field,
+) -> []script.Behaviour_Field {
 	result := make(
 		[dynamic]script.Behaviour_Field,
 		0,
@@ -829,7 +930,7 @@ behaviour_fields :: proc(l: ^Loader, fields: []format.Scene_Field) -> []script.B
 		case v.kind == .String || v.kind == .Name:
 			field.kind, field.text = .String, v.text
 		case v.kind == .Entity:
-			field.entity = resolve(l, v.entity)
+			field.entity = follow_reference(l, Behaviour_Slot{entity, behaviour, f.name}, v)
 			field.kind = .Entity if field.entity != 0 else .Nil
 		case v.kind == .Asset:
 			field.kind, field.asset = .Asset, v.asset

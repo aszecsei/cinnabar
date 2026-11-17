@@ -229,6 +229,30 @@ public sealed class DocumentTests : IDisposable
     }
 
     [Fact]
+    public void ADuplicateKeepsAReferenceToAnotherScene()
+    {
+        const string Guid = "0123456789abcdef0123456789abcdef";
+        var (scene, _) = SceneFile.Parse($"scene 3\n\nentity 0000000000000001\nbehaviour 9d2e41c0b7a35f6e81c4d2a90b3e7f15\n\ttarget = @{Guid}/0000000000000009\n");
+
+        var (ops, copy) = SceneEdits.Duplicate(scene!, 1);
+        var made = ops.OfType<CreateEntity>().Single(o => o.Entity == copy).Created;
+
+        Assert.Equal(SceneValue.EntityRef(Guid, 9), made.Behaviours[0].Fields.Single(f => f.Name == "target").Value);
+    }
+
+    [Fact]
+    public void AReferenceToAnotherSceneRoundTripsThroughTheWire()
+    {
+        var value = SceneValue.EntityRef("0123456789abcdef0123456789abcdef", 9);
+
+        var wire = SceneSnapshot.Value(value);
+
+        Assert.Equal(value, SceneSnapshot.FromWire(wire));
+        Assert.Equal(Convert.FromHexString("0123456789abcdef0123456789abcdef"), wire.Scene);
+        Assert.All(SceneSnapshot.Value(SceneValue.EntityRef(9)).Scene, b => Assert.Equal(0, b));
+    }
+
+    [Fact]
     public void ReparentingKeepsTheWorldPose()
     {
         var (document, _) = Open();

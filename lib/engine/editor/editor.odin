@@ -283,6 +283,9 @@ poll :: proc(
 	user: rawptr = nil,
 ) {
 	profile.scope_text(&e.platform.profile, "Editor poll", .Editor)
+	if e.scenes.scripts == nil {
+		e.scenes.scripts = scripts
+	}
 	snapshot := false
 	if connection != e.session.connection {
 		end_session(e)

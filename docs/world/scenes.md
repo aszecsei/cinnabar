@@ -2,7 +2,7 @@
 
 How scenes come into the world and leave it, in `lib/engine/scene`. A running world can hold several scenes. The game loads a scene beside the scenes that are already loaded, and it unloads one scene while the others stay. Read [ECS](ecs.md) first. The scene format and the editor's scenes are in [Editor: Document and scenes](../editor/document-and-scenes.md#scenes).
 
-**In this document:** [The level](#the-level) · [Numbers](#numbers) · [Loading](#loading) · [Unloading](#unloading) · [Ownership](#ownership) · [Scene IDs](#scene-ids) · [The systems](#the-systems) · [Streaming](#streaming) · [Loading in stages](#loading-in-stages) · [Scripts](#scripts) · [Limits](#limits)
+**In this document:** [The level](#the-level) · [Numbers](#numbers) · [Loading](#loading) · [Unloading](#unloading) · [Ownership](#ownership) · [Scene IDs](#scene-ids) · [The systems](#the-systems) · [Streaming](#streaming) · [Loading in stages](#loading-in-stages) · [References across scenes](#references-across-scenes) · [Scripts](#scripts) · [Limits](#limits)
 
 ## The level
 
@@ -31,7 +31,7 @@ A number is used only once in a level. `add_scene` refuses a number that is load
 
 `add_scene` adds the scene's entities with `add_entities`, with the scene's number and the scene's own ID map:
 
-- References and parents resolve only in the scene. Two scenes can have the same scene IDs, for example two copies of a file.
+- A local reference and a parent resolve in the scene alone. Two scenes can have the same scene IDs, for example two copies of a file. A reference to another scene binds when that scene is `Ready`, in `add_scene` and in a staged load ([References across scenes](#references-across-scenes)).
 - The behaviours wake in the next script phase, as with `scene.load`.
 - The scene's GUID joins the world's scenes (`ecs.world_scenes`), and the navmeshes of that scene load ([Navigation: Loading](../ai/navigation.md#loading)).
 
@@ -46,7 +46,7 @@ A number is used only once in a level. `add_scene` refuses a number that is load
 3. Clears the scene's ID map, removes the scene from the table, and releases the scene's blob.
 4. Takes the scene's GUID out of the world's scenes, so its navmeshes unload.
 
-The other scenes' entities, their references and their parents do not change. An entity handle into the unloaded scene is no longer alive (`ecs.is_alive` returns false), so a stored reference to it fails safely. The scene's own memory and its GPU resources are freed, and the other scenes' memory stays ([Core: Scene memory](../core/jobs-and-memory.md#scene-memory)).
+A link that is bound to the scene goes to 0, or binds again to another scene with the same GUID ([References across scenes](#references-across-scenes)). The links that the scene holds go with its memory. The other scenes' entities, their local references and their parents do not change. An entity handle into the unloaded scene is no longer alive (`ecs.is_alive` returns false), so a stored reference to it fails safely. The scene's own memory and its GPU resources are freed, and the other scenes' memory stays ([Core: Scene memory](../core/jobs-and-memory.md#scene-memory)).
 
 ## Ownership
 
@@ -93,6 +93,25 @@ A `World_Streamer` loads and unloads the scenes of a world by itself ([World str
 
 `scene.begin_load(w, scenes, guid, number?)` adds a scene that loads across frames, and `scene.advance_loads` moves it on within a budget. The scene goes through `Reading`, `Spawning`, `Filling` and `Settling` to `Ready`. Its entities have `ecs.Loading`, so they stay hidden until it is `Ready`, and its behaviours attach then. `scene.stage_of(scenes, number)` gives the stage. `scene.loaded_scenes` lists the scenes that are loading with the others. Call both procedures between frames, outside the script phase. The stages, the budgets and the events are in [World streaming](streaming.md#loading-in-stages).
 
+## References across scenes
+
+A field names an entity of another scene by the scene's GUID and the entity's scene ID (`@<guid>/<id>` in the scene file, see [Editor: Scenes](../editor/document-and-scenes.md#scenes)). `lib/engine/scene/links.odin` holds these as links, and is the only code that writes them.
+
+- **A link** is a `Scene_Link` in the row of the scene that holds the field. It has the field's slot (a component field, found again by the hash of its name at each write, or a behaviour field), the target's GUID and scene ID, and a state: `Link_Waiting` or `Link_Bound`. It is in the holder's scene memory, so it goes with the holder.
+- **Loading:** a reference to the holder's own GUID is local. A reference to another scene binds to the first `Ready` scene with that GUID, and writes that scene's entity into the field. If no such scene is `Ready`, the field is 0 and the link waits. A scene that still loads is not `Ready`, and its entities do not count.
+- **When a scene becomes ready,** `add_scene` and the staged load (after the scene is revealed) bind the links that wait for its GUID. A link whose entity is not in the scene logs a warning and ends.
+- **When a scene unloads,** each link that is bound to it binds again to the same ID in another `Ready` scene with the same GUID. If there is none, the field is 0 and the link waits.
+- **A write is conditional.** A link writes its field only while the field holds what the link wrote before. A script or an edit that has written the field since keeps its value, and the link ends. The links of a component end when the component is replaced or removed, and the links of a behaviour end when the behaviour or its entity goes.
+- **Pending:** `scene.pending(s, w, entity, component, field)` and `scene.pending_behaviour(s, w, entity, script, field)` return the target's GUID and true while the link waits, and false otherwise. A field that has no link gives false.
+- **Parents** stay in one scene. The text parsers refuse a parent in another scene, and the editor's link drops an `Edit_Parent` to another scene with a warning.
+
+**Known limits:**
+
+- A script that writes nil to a field that waits does not end the wait: the link overwrites the nil when its scene is ready.
+- A runtime `set_parent` across scenes is not refused.
+- Undo of a destroy in the editor makes a new entity. A link that was bound to the old one stays dead, as a reference in the same scene does.
+- Two loaded scenes with one GUID: a link binds to the first one that loaded.
+
 ## Scripts
 
 | Binding | What it does |
@@ -100,6 +119,7 @@ A `World_Streamer` loads and unloads the scenes of a world by itself ([World str
 | `Scene.load(scene: Asset) -> number` | Asks for the scene to load beside the others. Returns the number that it will have. The scene loads at the start of the next frame. |
 | `Scene.unload(number)` | Asks for the scene with the number to unload, with what it owns, at the start of the next frame. |
 | `Scene.of(entity) -> number?` | The scene that the entity belongs to, or nil for an entity that the game spawned. |
+| `Scene.pending(behaviour, field) -> Asset?` | The scene that a behaviour's entity field waits for, as an `Asset` that `Scene.load` takes. It is nil when the field names no other scene, or when that scene is loaded. |
 | `Scene.state(number) -> string?` | `"loading"` for a scene that is still loading (not yet shown), `"ready"` for one that is shown, and nil for a number that is not loaded. A scene that `Scene.load` asked for is `"ready"` once it loads. |
 
 ```luau

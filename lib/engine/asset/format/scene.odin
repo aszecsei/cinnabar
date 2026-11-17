@@ -115,7 +115,7 @@ Scene_Value_Kind :: enum u8 {
 	String,
 	// A bare word, such as an enum value's name.
 	Name,
-	// An entity's scene ID, or 0 for none.
+	// An entity's scene ID, or 0 for none. The scene is its own unless the value names one.
 	Entity,
 	// An asset's GUID, or the zero GUID for none.
 	Asset,
@@ -135,6 +135,8 @@ Scene_Value :: struct {
 	// String and Name.
 	text:    string,
 	entity:  u64,
+	// Entity: the GUID of the scene that the entity is in, or zero for the scene that holds the value.
+	scene:   Guid,
 	asset:   Guid,
 }
 
@@ -199,6 +201,7 @@ Scene_Field_Record :: struct {
 	floats:  [4]f64,
 	text:    Slice,
 	entity:  u64,
+	scene:   Guid,
 	asset:   Guid,
 }
 
@@ -310,6 +313,7 @@ write_fields :: proc(buffer: ^[dynamic]byte, fields: []Scene_Field) -> Slice {
 			floats  = f.value.floats,
 			text    = append_bytes(buffer, transmute([]byte)f.value.text),
 			entity  = f.value.entity,
+			scene   = f.value.scene,
 			asset   = f.value.asset,
 		}
 		put_record(buffer, records, i, &record)
@@ -449,6 +453,7 @@ read_fields :: proc(
 				floats = r.floats,
 				text = text(data, r.text) or_return,
 				entity = r.entity,
+				scene = r.scene,
 				asset = r.asset,
 			},
 		}

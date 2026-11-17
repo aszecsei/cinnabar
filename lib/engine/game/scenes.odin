@@ -139,7 +139,7 @@ check_scene_number :: proc(L: ^luau.State) -> u32 {
 	return u32(number)
 }
 
-// define_scene_bindings defines Scene.load, Scene.unload, Scene.of and Scene.state.
+// define_scene_bindings defines Scene.load, Scene.unload, Scene.of, Scene.state and Scene.pending.
 @(private)
 define_scene_bindings :: proc(r: ^script.Runtime) {
 	script.define(r, "Scene.load", proc(L: ^luau.State) -> c.int {
@@ -175,4 +175,21 @@ define_scene_bindings :: proc(r: ^script.Runtime) {
 			}
 			return 1
 		}, "(scene: number) -> string?")
+	script.define(r, "Scene.pending", proc(L: ^luau.State) -> c.int {
+			g := game_of(L)
+			entity, behaviour, ok := script.behaviour_at(&g.scripts, L, 1)
+			if !ok {
+				script.raise(L, "Scene.pending takes a behaviour")
+			}
+			field := string(luau.L_checkstring(L, 2))
+			target, waiting := scene.pending_behaviour(
+				&g.scenes,
+				&g.world,
+				entity,
+				behaviour,
+				field,
+			)
+			script.push_asset(&g.scripts, L, target if waiting else {})
+			return 1
+		}, "(behaviour: any, field: string) -> Asset?")
 }

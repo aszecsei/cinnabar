@@ -6,9 +6,10 @@ import "core:slice"
 import "core:strconv"
 import "core:strings"
 
-// The version on a scene file's first line, `scene 2`. A change that old loaders cannot read changes it. Version 2
-// adds prefab instances and their overrides, and a reader takes version 1 too.
-SCENE_TEXT_VERSION :: 2
+// The version on a scene file's first line, `scene 3`. A change that old loaders cannot read changes it. Version 2
+// adds prefab instances and their overrides. Version 3 adds references to entities of other scenes, `@<guid>/<id>`. A
+// reader takes versions 1 and 2 too.
+SCENE_TEXT_VERSION :: 3
 
 // The most IDs in a path: an instance at each of SCENE_EXPAND_DEPTH levels, and the entity.
 SCENE_PATH_MAX :: SCENE_EXPAND_DEPTH + 1
@@ -48,7 +49,9 @@ scene_parse :: proc(
 		}
 		if !header {
 			header = true
-			if trimmed != "scene 1" && trimmed != fmt.tprintf("scene %d", SCENE_TEXT_VERSION) {
+			if trimmed != "scene 1" &&
+			   trimmed != "scene 2" &&
+			   trimmed != fmt.tprintf("scene %d", SCENE_TEXT_VERSION) {
 				problem(&p, true, "a scene file starts with `scene %d`", SCENE_TEXT_VERSION)
 				break
 			}
@@ -349,6 +352,8 @@ parse_line :: proc(p: ^Parser, line: string, indented: bool) {
 	case "parent":
 		if value.kind != .Entity {
 			problem(p, true, "parent takes a scene ID, such as @1b04c7e95a2f3d88")
+		} else if value.scene != {} {
+			problem(p, true, "an entity cannot be a child of another scene's entity")
 		}
 		p.entity.parent = value.entity
 		p.entity.keys += {.Parent}
@@ -372,6 +377,8 @@ parse_line :: proc(p: ^Parser, line: string, indented: bool) {
 	case "node":
 		if value.kind != .Entity || value.entity == 0 {
 			problem(p, true, "node takes an entity of the prefab, such as @2000000000000002")
+		} else if value.scene != {} {
+			problem(p, true, "node takes an entity of the prefab, not of another scene")
 		}
 		p.entity.node = value.entity
 	case "removed":
@@ -405,8 +412,9 @@ is_word_char :: proc(c: byte) -> bool {
 }
 
 // parse_value reads a value: true or false, a number, an array of up to four numbers, a quoted string, a scene ID
-// such as @1b04c7e95a2f3d88 (@0 for none) or a path such as @5f3a9c01e2b47d10#a90b3e7f15c4d2e8, an asset's GUID such as $9db8150cc7215ffc2708d20d77cf60bf ($0 for none),
-// or a bare word.
+// such as @1b04c7e95a2f3d88 (@0 for none) or a path such as @5f3a9c01e2b47d10#a90b3e7f15c4d2e8, either one after a
+// scene's GUID and a slash for an entity of another scene, an asset's GUID such as $9db8150cc7215ffc2708d20d77cf60bf
+// ($0 for none), or a bare word.
 @(private = "file")
 parse_value :: proc(p: ^Parser, text: string) -> (value: Scene_Value, ok: bool) {
 	switch {
@@ -417,25 +425,8 @@ parse_value :: proc(p: ^Parser, text: string) -> (value: Scene_Value, ok: bool) 
 		return {kind = .Bool, ints = {0 = text == "true" ? 1 : 0}}, true
 	case text[0] == '"':
 		return parse_string(p, text)
-	case text[0] == '@' && strings.index_byte(text, '#') >= 0:
-		path, path_ok := parse_path(text[1:], context.temp_allocator)
-		if !path_ok {
-			problem(
-				p,
-				true,
-				"a path is scene IDs of 16 hex digits joined by # after @, not %q",
-				text,
-			)
-			return
-		}
-		return {kind = .Entity, entity = scene_path_id_of(path)}, true
 	case text[0] == '@':
-		id, id_ok := parse_hex(text[1:])
-		if !id_ok {
-			problem(p, true, "a scene ID is up to 16 hex digits after @, not %q", text)
-			return
-		}
-		return {kind = .Entity, entity = id}, true
+		return parse_reference(p, text)
 	case text[0] == '$':
 		if text == "$0" {
 			return {kind = .Asset}, true
@@ -480,6 +471,58 @@ parse_value :: proc(p: ^Parser, text: string) -> (value: Scene_Value, ok: bool) 
 		}
 	}
 	return {kind = .Name, text = text}, true
+}
+
+// parse_reference reads an entity reference: @<id>, @<path>, or either one after <guid>/ for an entity of another
+// scene. The ID in another scene is nonzero.
+@(private = "file")
+parse_reference :: proc(p: ^Parser, text: string) -> (value: Scene_Value, ok: bool) {
+	rest := text[1:]
+	value.kind = .Entity
+	if slash := strings.index_byte(rest, '/'); slash >= 0 {
+		scene, scene_ok := guid_parse(rest[:slash])
+		if !scene_ok || scene == {} {
+			problem(
+				p,
+				true,
+				"a reference to another scene starts with its nonzero GUID of 32 hex digits and a slash after @, not %q",
+				text,
+			)
+			return {}, false
+		}
+		value.scene = scene
+		rest = rest[slash + 1:]
+	}
+	if strings.index_byte(rest, '#') >= 0 {
+		path, path_ok := parse_path(rest, context.temp_allocator)
+		if !path_ok {
+			problem(
+				p,
+				true,
+				"a path is scene IDs of 16 hex digits joined by # after @, not %q",
+				text,
+			)
+			return {}, false
+		}
+		value.entity = scene_path_id_of(path)
+		return value, true
+	}
+	id, id_ok := parse_hex(rest)
+	if !id_ok {
+		problem(p, true, "a scene ID is up to 16 hex digits after @, not %q", text)
+		return {}, false
+	}
+	if value.scene != {} && id == 0 {
+		problem(
+			p,
+			true,
+			"a reference to another scene names an entity with a nonzero scene ID, not %q",
+			text,
+		)
+		return {}, false
+	}
+	value.entity = id
+	return value, true
 }
 
 @(private = "file")

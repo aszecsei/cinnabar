@@ -1,6 +1,6 @@
 # A stone that the guard scene's player throws (see scripts/ai/thrower.luau). Its knocks make loud noises that draw the
 # agents, and it hurts an agent that it hits (see scripts/ai/stone.luau).
-scene 2
+scene 3
 
 entity 1000000000000001
 name = "Stone"

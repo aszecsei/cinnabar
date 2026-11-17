@@ -5,7 +5,7 @@
 # docs/rendering/particles.md#particles), under an atmosphere's sky whose sun is the Sun's light (see
 # docs/rendering/sky.md#sky). At the Low quality, two reflection probes overlap over the glass, the sorted side's
 # Realtime, so it follows the spinning lamp (see docs/rendering/lighting-and-shadows.md#reflection-probes). The editor writes this file; see docs/editor.md#scenes.
-scene 2
+scene 3
 
 entity 0c5c7fd0a6a3a450
 name = "Sun"

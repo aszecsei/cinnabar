@@ -138,13 +138,13 @@ sealed class FieldGrid(EditorShell shell)
     }
 
     /// <summary>Shows a component's values from the host in the rows of an owner, and gives their editors the values.</summary>
-    public void ShowComponent(string owner, Link.Protocol.ComponentType type, byte[] data, Func<ulong, ulong> sceneIdOf)
+    public void ShowComponent(string owner, Link.Protocol.ComponentType type, byte[] data, Func<ulong, Document.SceneValue> referenceOf)
     {
         foreach (var field in type.Fields)
         {
             if (Editors.TryGetValue((owner, field.Name), out var editor))
             {
-                editor.Current = FieldEditor.Read(field, data, sceneIdOf);
+                editor.Current = FieldEditor.Read(field, data, referenceOf);
             }
             if (Views.TryGetValue((owner, field.Name), out var view))
             {

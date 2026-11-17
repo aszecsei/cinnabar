@@ -80,7 +80,7 @@ public sealed class OutlinerView : DockPanel
         // A drop below the rows, on the list itself, makes the entity a root.
         DragDrop.SetAllowDrop(_list, true);
         // A prefab from the content browser dropped there makes an instance at the root.
-        _list.AddHandler(DragDrop.DragOverEvent, (_, e) => e.DragEffects = DroppedPrefabs(e).Count > 0 ? DragDropEffects.Copy : CanDrop(e, 0) ? DragDropEffects.Move : DragDropEffects.None);
+        _list.AddHandler(DragDrop.DragOverEvent, (_, e) => e.DragEffects = DroppedPrefabs(e).Count > 0 ? DragDropEffects.Copy : CanDrop(e, null) ? DragDropEffects.Move : DragDropEffects.None);
         _list.AddHandler(DragDrop.DropEvent, (_, e) =>
         {
             if (DroppedPrefabs(e) is { Count: > 0 } prefabs)
@@ -88,7 +88,7 @@ public sealed class OutlinerView : DockPanel
                 CreateInstances(prefabs, 0, e);
                 return;
             }
-            Drop(e, 0);
+            Drop(e, null);
         });
 
         _list.ItemTemplate = new FuncDataTemplate<object>((item, _) => item switch
@@ -375,7 +375,7 @@ public sealed class OutlinerView : DockPanel
             }
             else
             {
-                e.DragEffects = CanDrop(e, row.Node.SceneId) ? DragDropEffects.Move : DragDropEffects.None;
+                e.DragEffects = CanDrop(e, row.Node) ? DragDropEffects.Move : DragDropEffects.None;
             }
             e.Handled = true;
         });
@@ -396,7 +396,7 @@ public sealed class OutlinerView : DockPanel
             }
             else
             {
-                Drop(e, row.Node.SceneId);
+                Drop(e, row.Node);
             }
             e.Handled = true;
         });
@@ -428,29 +428,23 @@ public sealed class OutlinerView : DockPanel
     }
 
     // An entity of the active scene can go under any entity of its scene that is not itself or one of its descendants,
-    // or to the root. An entity does not move to another scene.
-    bool CanDrop(DragEventArgs e, ulong parent)
-    {
-        var dragged = _world.Find(EntityView.Dropped(e));
-        if (dragged is not { SceneId: not 0 } || !_shell.InActiveScene(dragged) || !_shell.IsEditing || (parent == 0 ? dragged.Parent == 0 : parent == dragged.SceneId))
-        {
-            return false;
-        }
-        for (var p = _world.FindScene(dragged.Scene, parent); p != null; p = p.Parent == 0 ? null : _world.Find(p.Parent))
-        {
-            if (p.SceneId == dragged.SceneId)
-            {
-                return false;
-            }
-        }
-        return parent == 0 || _world.FindScene(dragged.Scene, parent) != null;
-    }
+    // or to the root, which is no target. An entity does not move to another scene.
+    bool CanDrop(DragEventArgs e, EntityNode? target) =>
+        _world.Find(EntityView.Dropped(e)) is { } dragged && _shell.CanReparent(dragged, target, out _);
 
-    void Drop(DragEventArgs e, ulong parent)
+    void Drop(DragEventArgs e, EntityNode? target)
     {
-        if (CanDrop(e, parent) && _world.Find(EntityView.Dropped(e)) is { } dragged)
+        if (_world.Find(EntityView.Dropped(e)) is not { } dragged)
         {
-            _shell.Reparent(dragged.SceneId, parent);
+            return;
+        }
+        if (_shell.CanReparent(dragged, target, out var reason))
+        {
+            _shell.Reparent(dragged.SceneId, target?.SceneId ?? 0);
+        }
+        else if (reason != "")
+        {
+            _shell.Console.Add(LogLevel.Warning, $"edit: {reason}");
         }
     }
 

@@ -166,7 +166,7 @@ public static class Atmosphere
 
     /// <summary>The directional light that is the sky's sun, or null when the sky's sun is its own.</summary>
     public static SceneEntity? SunOf(Scene scene, SceneEntity volume) =>
-        Setting(volume, SceneEdits.EnvironmentId, Sun) is { Kind: SceneValueKind.Entity, Entity: not 0 } v
+        Setting(volume, SceneEdits.EnvironmentId, Sun) is { Kind: SceneValueKind.Entity, Entity: not 0, Scene: "" } v
         && scene.Find(v.Entity) is { } light && light.Components.Any(c => c.Id == SceneEdits.DirectionalLightId)
             ? light
             : null;

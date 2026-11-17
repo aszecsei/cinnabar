@@ -241,7 +241,7 @@ public static partial class PrefabExpansion
             for (var i = 0; i < fields.Count; i++)
             {
                 var v = fields[i].Value;
-                if (v.Kind != SceneValueKind.Entity || v.Entity == 0)
+                if (!v.IsLocalEntity || v.Entity == 0)
                 {
                     continue;
                 }
@@ -298,7 +298,7 @@ public static partial class PrefabExpansion
         {
             for (var i = 0; i < fields.Count; i++)
             {
-                if (fields[i].Value.Path != null)
+                if (fields[i].Value is { IsLocalEntity: true, Path: not null })
                 {
                     fields[i] = fields[i] with { Value = SceneValue.EntityRef(fields[i].Value.Entity) };
                 }

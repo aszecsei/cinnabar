@@ -155,7 +155,7 @@ scene_errors_name_their_line :: proc(t: ^testing.T) {
 		text, fragment: string,
 		line:           int,
 	} {
-		{"entity 0000000000000001\n", "starts with `scene 2`", 1},
+		{"entity 0000000000000001\n", "starts with `scene 3`", 1},
 		{"scene 1\nentity 12\n", "16 hex digits", 2},
 		{"scene 1\ncomponent 1 Transform\n", "needs an entity", 2},
 		{"scene 1\nentity 0000000000000001\n\tx = 1\n", "no component or behaviour is open", 3},
@@ -200,4 +200,31 @@ scene_errors_name_their_line :: proc(t: ^testing.T) {
 		context.temp_allocator,
 	)
 	testing.expect(t, !ok)
+}
+
+@(test)
+scene_references_name_their_scene :: proc(t: ^testing.T) {
+	text := `scene 3
+
+entity 0000000000000001
+component 1 T
+	a = @0123456789abcdef0123456789abcdef/00000000000000a2
+	b = @0123456789abcdef0123456789abcdef/0000000000000001#0000000000000002
+	c = @00000000000000a2
+`
+	scene, problems, ok := scene_parse(text, context.temp_allocator)
+	testing.expectf(t, ok, "problems: %v", problems)
+	fields := scene.entities[0].components[0].fields
+	other := guid_parse("0123456789abcdef0123456789abcdef") or_else {}
+	testing.expect_value(t, fields[0].value.scene, other)
+	testing.expect_value(t, fields[0].value.entity, 0xa2)
+	testing.expect_value(t, fields[1].value.scene, other)
+	testing.expect_value(t, fields[1].value.entity, scene_path_id(1, 2))
+	testing.expect_value(t, fields[2].value.scene, Guid{})
+
+	data := aligned(scene_write(scene, {}, 0, allocator = context.temp_allocator))
+	read, read_ok := scene_read(data, context.temp_allocator)
+	testing.expect(t, read_ok)
+	testing.expect_value(t, read.entities[0].components[0].fields[0].value.scene, other)
+	testing.expect_value(t, read.entities[0].components[0].fields[2].value.scene, Guid{})
 }

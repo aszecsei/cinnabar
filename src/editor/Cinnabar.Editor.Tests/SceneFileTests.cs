@@ -6,7 +6,7 @@ public class SceneFileTests
 {
     const string Door = """
         # A door and its trigger.
-        scene 2
+        scene 3
 
         entity 1b04c7e95a2f3d88
         active = false
@@ -63,7 +63,7 @@ public class SceneFileTests
     [Fact]
     public void NodeRoundTrips()
     {
-        const string text = "scene 2\n\nentity 9000000000000001\nprefab = $22222222222222222222222222222222\nnode = @2000000000000002\n";
+        const string text = "scene 3\n\nentity 9000000000000001\nprefab = $22222222222222222222222222222222\nnode = @2000000000000002\n";
         var (scene, problems) = SceneFile.Parse(text);
         Assert.Empty(problems);
         Assert.Equal(0x2000000000000002ul, scene!.Find(0x9000000000000001)!.Node);
@@ -111,6 +111,24 @@ public class SceneFileTests
     }
 
     [Fact]
+    public void AReferenceNamesItsScene()
+    {
+        const string text = "scene 3\n\nentity 0000000000000001\ncomponent 1 T\n"
+            + "\ta = @0123456789abcdef0123456789abcdef/00000000000000a2\n"
+            + "\tb = @0123456789abcdef0123456789abcdef/0000000000000001#0000000000000002\n"
+            + "\tc = @00000000000000a2\n";
+        var scene = Parse(text);
+        var fields = scene.Find(1)!.Components[0].Fields;
+        Assert.Equal(SceneValue.EntityRef("0123456789abcdef0123456789abcdef", 0xa2), fields[0].Value);
+        Assert.Equal(ScenePath.Id(1, 2), fields[1].Value.Entity);
+        Assert.Equal("0123456789abcdef0123456789abcdef", fields[1].Value.Scene);
+        Assert.True(fields[2].Value.IsLocalEntity);
+        Assert.False(fields[0].Value.IsLocalEntity);
+        Assert.NotEqual(SceneValue.EntityRef(0xa2), fields[0].Value);
+        Assert.Equal(text, SceneFile.Write(scene));
+    }
+
+    [Fact]
     public void WritingGivesTheFileBack()
     {
         var text = Door.ReplaceLineEndings("\n");
@@ -136,7 +154,7 @@ public class SceneFileTests
         scene.Entities.Add(new SceneEntity(1));
 
         Assert.Equal("""
-            scene 2
+            scene 3
 
             entity 0000000000000001
 
@@ -150,7 +168,7 @@ public class SceneFileTests
     }
 
     [Theory]
-    [InlineData("entity 0000000000000001\n", 1, "starts with `scene 2`")]
+    [InlineData("entity 0000000000000001\n", 1, "starts with `scene 3`")]
     [InlineData("scene 1\nentity 12\n", 2, "16 hex digits")]
     [InlineData("scene 1\ncomponent 1 Transform\n", 2, "needs an entity")]
     [InlineData("scene 1\nentity 0000000000000001\n\tx = 1\n", 3, "no component or behaviour is open")]
@@ -194,7 +212,7 @@ public class SceneFileTests
     public void AssetReferencesRoundTripAndCrossTheWire()
     {
         const string guid = "9db8150cc7215ffc2708d20d77cf60bf";
-        var text = $"scene 2\n\nentity 0000000000000001\ncomponent 7 Renderer\n\tmesh = ${guid}\n\tnone = $0\n";
+        var text = $"scene 3\n\nentity 0000000000000001\ncomponent 7 Renderer\n\tmesh = ${guid}\n\tnone = $0\n";
         var scene = Parse(text);
         var fields = scene.Entities[0].Components[0].Fields;
         Assert.Equal(SceneValue.AssetRef(guid), fields[0].Value);
@@ -225,7 +243,7 @@ public class SceneFileTests
     public void InstancesAndOverridesRoundTrip()
     {
         const string text = """
-            scene 2
+            scene 3
 
             entity 5f3a9c01e2b47d10
             name = "Front Door"
@@ -315,7 +333,11 @@ public class SceneFileTests
     [InlineData("scene 2\nentity 0000000000000001\nprefab = $0\n", "prefab takes")]
     [InlineData("scene 2\nentity 0000000000000001\nprefab = $9db8150cc7215ffc2708d20d77cf60bf\nremove widget 3\n", "remove takes")]
     [InlineData("scene 2\nentity 0000000000000001\ncomponent 1 T\n\tx = @0000000000000001#\n", "joined by #")]
-    [InlineData("scene 3\n", "starts with `scene 2`")]
+    [InlineData("scene 4\n", "starts with `scene 3`")]
+    [InlineData("scene 3\nentity 0000000000000001\ncomponent 1 T\n\tx = @00000000000000000000000000000000/0000000000000002\n", "nonzero GUID")]
+    [InlineData("scene 3\nentity 0000000000000001\ncomponent 1 T\n\tx = @0123456789abcdef0123456789abcdef/0\n", "nonzero scene ID")]
+    [InlineData("scene 3\nentity 0000000000000001\nparent = @0123456789abcdef0123456789abcdef/0000000000000002\n", "cannot be a child of another scene's entity")]
+    [InlineData("scene 3\nentity 9000000000000001\nprefab = $22222222222222222222222222222222\nnode = @0123456789abcdef0123456789abcdef/0000000000000002\n", "not of another scene")]
     public void Version2ErrorsAreTheCookers(string text, string fragment)
     {
         var (scene, problems) = SceneFile.Parse(text);

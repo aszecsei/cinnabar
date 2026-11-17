@@ -130,6 +130,94 @@ public sealed class SeveralScenesTests : IDisposable
         Assert.Equal(["South Door", "North Door", "North Gate"], edits.Select(o => o.Name));
     }
 
+    const string SouthGuid = "5f0a1c2d3e4b4a6c8d7e9f0a1b2c3d4e";
+    const string NorthGuid = "a1b2c3d4e5f60718293a4b5c6d7e8f90";
+
+    // A Spin component whose target is an entity, as the game describes it.
+    static readonly FieldInfo Target = new("target", 0, FieldKind.Entity, FieldKind.Entity, [], false, false, 0, 0, false, false, 0, "");
+
+    static void GiveGuid(SceneDocument scene, string guid) => File.WriteAllText(scene.Path + ".meta", $"guid = {guid}\n");
+
+    [Fact]
+    public void AReferenceAcrossTwoOpenScenesSetsAndSaves()
+    {
+        var (shell, north, south) = Open(link: true);
+        using var _ = shell;
+        GiveGuid(north, NorthGuid);
+        GiveGuid(south, SouthGuid);
+        shell.OnGameMessage(World(north, south));
+        shell.ActivateScene(north);
+        _sent.Clear();
+
+        FieldEditor.ForComponent(shell, 1, 1001, Target)!.SetEntity(SouthGate);
+
+        var sent = Assert.Single(_sent.OfType<ApplyOperations>().SelectMany(a => a.Operations));
+        Assert.Equal(north.Number, sent.Scene);
+        var value = Assert.Single(sent.Fields).Value;
+        Assert.Equal(1UL, value.Entity);
+        Assert.Equal(Convert.FromHexString(SouthGuid), value.Scene);
+        Assert.True(shell.SaveScene());
+        var text = File.ReadAllText(north.Path);
+        Assert.Contains($"@{SouthGuid}/0000000000000001", text);
+        var saved = SceneFile.Parse(text).Scene!.Find(1)!.Components.Single(c => c.Id == 1001).Fields.Single(f => f.Name == "target").Value;
+        Assert.Equal(SceneValue.EntityRef(SouthGuid, 1), saved);
+        // The entity of the same scene is still by its scene ID alone.
+        FieldEditor.ForComponent(shell, 1, 1001, Target)!.SetEntity(NorthGate);
+        Assert.Equal(SceneValue.EntityRef(1), north.Scene.Find(1)!.Components.Single(c => c.Id == 1001).Fields.Single(f => f.Name == "target").Value);
+    }
+
+    [Fact]
+    public void ASceneWithoutAGuidIsNotReferredTo()
+    {
+        var (shell, north, south) = Open();
+        using var _ = shell;
+        GiveGuid(north, NorthGuid);
+        shell.OnGameMessage(World(north, south));
+        shell.ActivateScene(north);
+
+        FieldEditor.ForComponent(shell, 1, 1001, Target)!.SetEntity(SouthGate);
+
+        Assert.Contains(shell.Console.Lines, l => l.Level == Model.LogLevel.Warning && l.Text.Contains("south.scene has no GUID yet"));
+        Assert.False(north.IsDirty);
+    }
+
+    [Fact]
+    public void AReferenceToASceneThatIsNotOpenIsKeptWhenTheHostHoldsNone()
+    {
+        var (shell, north, south) = Open();
+        using var _ = shell;
+        shell.OnGameMessage(World(north, south));
+        shell.ActivateScene(north);
+        var elsewhere = SceneValue.EntityRef("0123456789abcdef0123456789abcdef", 9);
+        shell.Edit("Set Target", new SetField(1, 1001, "target", elsewhere));
+        var editor = FieldEditor.ForComponent(shell, [1UL], 1001, Target)!;
+        // The host reads a reference to a scene that is not loaded as none.
+        editor.SetCurrent(0, SceneValue.EntityRef(0));
+
+        editor.Override();
+
+        Assert.Equal(elsewhere, north.Scene.Find(1)!.Components.Single(c => c.Id == 1001).Fields.Single(f => f.Name == "target").Value);
+        Assert.Equal(("Missing scene", "@0123456789abcdef0123456789abcdef/0000000000000009"), editor.NotOpen);
+    }
+
+    [Fact]
+    public void AnEntityDoesNotGoUnderAnEntityOfAnotherScene()
+    {
+        var (shell, north, south) = Open();
+        using var _ = shell;
+        shell.OnGameMessage(World(north, south));
+        shell.ActivateScene(north);
+
+        // Both entities have the scene ID 1, so only their scenes tell the target from the dragged entity itself.
+        var allowed = shell.CanReparent(shell.World.Find(NorthGate)!, shell.World.Find(SouthGate)!, out var reason);
+
+        Assert.False(allowed);
+        Assert.Contains("an entity's parent is in its own scene", reason);
+        Assert.Contains("south.scene", reason);
+        Assert.False(shell.CanReparent(shell.World.Find(NorthGate)!, null, out reason));
+        Assert.Equal("", reason);
+    }
+
     [Fact]
     public void SelectingAnEntityOfAnotherSceneMakesItsSceneActive()
     {

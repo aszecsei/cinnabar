@@ -45,7 +45,7 @@ public static partial class PrefabEdits
         // A path in the prefab, rooted at the instance.
         IReadOnlyList<ulong> Inner(IReadOnlyList<ulong> path) => [Remap(path[0]), .. path.Skip(1)];
         var known = prefab.Entities.Select(e => e.Id).ToHashSet();
-        SceneValue InnerValue(SceneValue v) => v.Kind != SceneValueKind.Entity || v.Entity == 0 ? v
+        SceneValue InnerValue(SceneValue v) => !v.IsLocalEntity || v.Entity == 0 ? v
             : !known.Contains(v.Entity) ? SceneValue.EntityRef(0)
             : SceneValue.EntityRef(Inner(v.Path ?? [v.Entity]));
         void SetParent(SceneEntity e, IReadOnlyList<ulong>? path)
@@ -207,7 +207,7 @@ public static partial class PrefabEdits
         {
             for (var i = 0; i < list.Count; i++)
             {
-                if (list[i].Value.Path is { } path && rewrite(path) is var to && !to.SequenceEqual(path))
+                if (list[i].Value is { IsLocalEntity: true, Path: { } path } && rewrite(path) is var to && !to.SequenceEqual(path))
                 {
                     list[i] = list[i] with { Value = SceneValue.EntityRef(to) };
                     changed = true;
@@ -244,7 +244,7 @@ public static partial class PrefabEdits
         {
             for (var i = 0; i < list.Count; i++)
             {
-                if (list[i].Value is { Path: not null } v && ids.Contains(v.Entity))
+                if (list[i].Value is { IsLocalEntity: true, Path: not null } v && ids.Contains(v.Entity))
                 {
                     list[i] = list[i] with { Value = SceneValue.EntityRef(v.Entity) };
                     changed = true;

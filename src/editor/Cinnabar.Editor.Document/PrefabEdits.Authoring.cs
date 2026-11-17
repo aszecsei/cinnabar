@@ -47,7 +47,7 @@ public static partial class PrefabEdits
                 ids[e.Id] = Fresh();
             }
         }
-        SceneValue Remap(SceneValue v) => v.Kind == SceneValueKind.Entity && ids.TryGetValue(v.Entity, out var to)
+        SceneValue Remap(SceneValue v) => v.IsLocalEntity && ids.TryGetValue(v.Entity, out var to)
             ? (paths.TryGetValue(to, out var path) && path.Count > 1 ? SceneValue.EntityRef(path) : SceneValue.EntityRef(to))
             : v;
         void RemapFields(SceneEntity e)
@@ -153,7 +153,7 @@ public static partial class PrefabEdits
             {
                 for (var i = 0; i < list.Count; i++)
                 {
-                    if (list[i].Value is { Kind: SceneValueKind.Entity } v && v.Entity != 0 && !tree.Contains(v.Entity) && !blocks.Any(x => x.Id == v.Entity))
+                    if (list[i].Value is { Kind: SceneValueKind.Entity } v && v.Entity != 0 && (!v.IsLocalEntity || !tree.Contains(v.Entity) && !blocks.Any(x => x.Id == v.Entity)))
                     {
                         list[i] = list[i] with { Value = SceneValue.EntityRef(0) };
                     }
@@ -183,7 +183,7 @@ public static partial class PrefabEdits
             {
                 for (var i = 0; i < list.Count; i++)
                 {
-                    if (list[i].Value is { Kind: SceneValueKind.Entity } v && v.Entity != id && (v.Path is { } vp ? tree.Contains(vp[0]) && vp[0] != id : tree.Contains(v.Entity)))
+                    if (list[i].Value is { Kind: SceneValueKind.Entity } v && v.IsLocalEntity && v.Entity != id && (v.Path is { } vp ? tree.Contains(vp[0]) && vp[0] != id : tree.Contains(v.Entity)))
                     {
                         list[i] = list[i] with { Value = SceneValue.EntityRef(Rerooted(v.Path ?? [v.Entity])) };
                         any = true;

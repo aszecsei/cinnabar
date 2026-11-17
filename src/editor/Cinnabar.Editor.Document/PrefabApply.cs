@@ -59,6 +59,10 @@ public static partial class PrefabEdits
         {
             return v;
         }
+        if (!v.IsLocalEntity)
+        {
+            return null;
+        }
         if (v.Entity == instance)
         {
             return SceneValue.EntityRef(root);
@@ -174,7 +178,7 @@ public static partial class PrefabEdits
             {
                 for (var i = 0; i < list.Count; i++)
                 {
-                    if (list[i].Value is { Kind: SceneValueKind.Entity, Entity: not 0 } v && PathOf(v.Entity) is { } path)
+                    if (list[i].Value is { Kind: SceneValueKind.Entity, Entity: not 0, Scene: "" } v && PathOf(v.Entity) is { } path)
                     {
                         list[i] = list[i] with { Value = SceneValue.EntityRef(path) };
                         any = true;
@@ -390,6 +394,10 @@ public static partial class PrefabEdits
             if (v.Kind != SceneValueKind.Entity || v.Entity == 0)
             {
                 return v;
+            }
+            if (!v.IsLocalEntity)
+            {
+                return null;
             }
             if (v.Entity == instance)
             {

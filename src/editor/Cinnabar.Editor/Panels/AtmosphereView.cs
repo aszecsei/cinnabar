@@ -294,7 +294,7 @@ public sealed class AtmosphereView : ScrollViewer
 
     void ShowValues()
     {
-        ulong SceneIdOf(ulong handle) => _shell.ActiveSceneIdOf(handle);
+        SceneValue ReferenceOf(ulong handle) => _shell.ReferenceOf(handle);
         foreach (var handle in _watched)
         {
             if (_world.Values(handle) is not { } values || _world.Find(handle) is not { } node)
@@ -305,7 +305,7 @@ public sealed class AtmosphereView : ScrollViewer
             {
                 if (_world.Type(component.Id) is { } type)
                 {
-                    _grid.ShowComponent(Owner(node.SceneId, component.Id), type, component.Data, SceneIdOf);
+                    _grid.ShowComponent(Owner(node.SceneId, component.Id), type, component.Data, ReferenceOf);
                 }
             }
         }

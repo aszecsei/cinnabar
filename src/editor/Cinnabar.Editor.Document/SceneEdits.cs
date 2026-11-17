@@ -91,7 +91,7 @@ public static class SceneEdits
             ids[e.Id] = fresh;
         }
         SceneValue Remap(SceneValue v) =>
-            v.Kind == SceneValueKind.Entity && ids.TryGetValue(v.Entity, out var to) ? SceneValue.EntityRef(to) : v;
+            v.IsLocalEntity && ids.TryGetValue(v.Entity, out var to) ? SceneValue.EntityRef(to) : v;
         var ops = originals.Select(e =>
         {
             var copy = e.Copy(ids[e.Id]);

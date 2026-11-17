@@ -44,6 +44,8 @@ Loaded_Scene :: struct {
 	memory:   core.Scene_Memory,
 	// Where the scene's load is. It is Scene_Ready for a scene that add_scene added. Change it only with change_stage.
 	stage:    Scene_Stage,
+	// The fields of this scene's entities that name entities of other scenes, in the scene's memory (see links.odin).
+	links:    [dynamic]Scene_Link,
 }
 
 // Scene_Map is the map from scene ID to entity of one scene, and the memory that it is in: its scene's, or the level's
@@ -63,6 +65,8 @@ Scenes :: struct {
 	platform: ^core.Platform_API,
 	// The blobs of add_scene_asset, or nil.
 	assets:   ^asset.Assets,
+	// What a behaviour's field is set through, or nil (see links.odin).
+	scripts:  ^script.Runtime,
 	loaded:   [dynamic]Loaded_Scene,
 	by_scene: map[u32]Scene_Map,
 	level:    u64,
@@ -70,11 +74,18 @@ Scenes :: struct {
 	next:     u32,
 }
 
-// init_scenes makes an empty table. assets can be nil, and then add_scene_asset loads nothing.
-init_scenes :: proc(s: ^Scenes, platform: ^core.Platform_API, assets: ^asset.Assets = nil) {
+// init_scenes makes an empty table. assets can be nil, and then add_scene_asset loads nothing. scripts can be nil, and
+// then a link of a behaviour's field to an entity of another scene writes nothing.
+init_scenes :: proc(
+	s: ^Scenes,
+	platform: ^core.Platform_API,
+	assets: ^asset.Assets = nil,
+	scripts: ^script.Runtime = nil,
+) {
 	s^ = {
 		platform = platform,
 		assets   = assets,
+		scripts  = scripts,
 		loaded   = make([dynamic]Loaded_Scene, platform.heap_allocator),
 		by_scene = make(map[u32]Scene_Map, platform.heap_allocator),
 		level    = platform.level_generation(),
@@ -136,7 +147,8 @@ add_scene :: proc(
 ) {
 	added = append_scene(s, scene.guid, number, Scene_Ready{}) or_return
 	ecs.add_world_scene(w, scene.guid)
-	spawned := add_entities(w, scripts, scene.entities, handles_of(s, added), problems, added)
+	spawned := add_entities(w, scripts, scene.entities, handles_of(s, added), problems, added, s)
+	links_scene_ready(s, w, added)
 	log.infof("scene: loaded the scene %d, %d entities", added, spawned)
 	return added, true
 }
@@ -220,6 +232,7 @@ unload_scene :: proc(w: ^ecs.World, s: ^Scenes, number: u32) -> int {
 	}
 	gone := s.loaded[index]
 	ordered_remove(&s.loaded, index)
+	links_scene_unloading(s, w, number, gone.guid)
 	end_read(s, &gone)
 	if gone.has_blob && s.assets != nil {
 		asset.unload(s.assets, gone.blob)

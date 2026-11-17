@@ -1,6 +1,7 @@
 package editor
 
 import "base:runtime"
+import "core:log"
 
 import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/ecs"
@@ -34,7 +35,7 @@ send_behaviour_edits :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime
 	if !mirrors {
 		return
 	}
-	operations := operations_of(w, edits, e.platform.frame_allocator)
+	operations := operations_of(w, edits, e.platform.frame_allocator, e.scenes)
 	if len(operations) == 0 {
 		return
 	}
@@ -72,11 +73,14 @@ answer_behaviour_operations :: proc(e: ^Editor, answer: link.Behaviour_Operation
 }
 
 // operations_of turns the edits into operations by scene ID, in allocator: first the drafts, each after its parent, as
-// new entities and instances, then the edits in the order the behaviours made them.
+// new entities and instances, then the edits in the order the behaviours made them. With scenes, a reference to an
+// entity of another scene names that scene's GUID, except for a field of a root draft, whose scene the game does not
+// know.
 operations_of :: proc(
 	w: ^ecs.World,
 	edits: script.Edits,
 	allocator: runtime.Allocator,
+	scenes: ^scene.Scenes = nil,
 ) -> []link.Operation {
 	ops := make([dynamic]link.Operation, allocator)
 	// The drafts' scene IDs, so the edits and the drafts' fields can name them.
@@ -100,7 +104,14 @@ operations_of :: proc(
 				continue
 			}
 			numbers[d.entity] = number_of(w, parent, numbers)
-			op := draft_operation(w, d, ids, allocator)
+			op := draft_operation(
+				w,
+				d,
+				ids,
+				allocator,
+				scenes if numbers[d.entity] != 0 else nil,
+				numbers[d.entity],
+			)
 			op.scene = numbers[d.entity]
 			append(&ops, op)
 			made[d.entity], progress = true, true
@@ -112,12 +123,21 @@ operations_of :: proc(
 	for edit in edits.list {
 		// The edit's operations name the scene of the entity that it edits.
 		start := len(ops)
+		number := number_of(w, edited_entity(edit, edits), numbers)
 		defer for &op in ops[start:] {
-			op.scene = number_of(w, edited_entity(edit, edits), numbers)
+			op.scene = number
 		}
 		switch v in edit {
 		case script.Edit_Component:
-			component_operations(w, edits.components[v.index], ids, &ops, allocator)
+			component_operations(
+				w,
+				edits.components[v.index],
+				ids,
+				&ops,
+				allocator,
+				scenes if number != 0 else nil,
+				number,
+			)
 		case script.Edit_Remove:
 			append(
 				&ops,
@@ -130,6 +150,13 @@ operations_of :: proc(
 		case script.Edit_Destroy:
 			append(&ops, link.Operation{kind = .Destroy_Entity, entity = id_of(w, v.entity, ids)})
 		case script.Edit_Parent:
+			if parent_number := number_of(w, v.parent, numbers);
+			   v.parent != 0 && parent_number != number {
+				log.warnf(
+					"editor: a behaviour set the parent of an entity to one of another scene; the edit is dropped",
+				)
+				continue
+			}
 			append(
 				&ops,
 				link.Operation {
@@ -150,7 +177,8 @@ operations_of :: proc(
 		case script.Edit_Attach:
 			fields := make([dynamic]link.Scene_Field, allocator)
 			for f in v.fields {
-				if value, ok := behaviour_value(w, f, ids); ok {
+				if value, ok := behaviour_value(w, f, ids, scenes if number != 0 else nil, number);
+				   ok {
 					append(&fields, link.Scene_Field{name = f.name, value = value})
 				}
 			}
@@ -188,6 +216,8 @@ component_operations :: proc(
 	ids: map[ecs.Entity]u64,
 	ops: ^[dynamic]link.Operation,
 	allocator: runtime.Allocator,
+	scenes: ^scene.Scenes,
+	holder: u32,
 ) {
 	info := ecs.registry_find(&w.registry, c.id)
 	entity := id_of(w, c.entity, ids)
@@ -200,7 +230,15 @@ component_operations :: proc(
 			link.Operation {
 				kind = .Add_Component,
 				entity = entity,
-				components = component_of_bytes(w, info, raw_data(c.after), ids, allocator),
+				components = component_of_bytes(
+					w,
+					info,
+					raw_data(c.after),
+					ids,
+					allocator,
+					scenes,
+					holder,
+				),
 			},
 		)
 		return
@@ -208,7 +246,7 @@ component_operations :: proc(
 	if c.id == ecs.TRANSFORM_ID && is_child(w, c.entity) {
 		return
 	}
-	for f in scene.encode_fields(w, info, raw_data(c.after), raw_data(c.before), ids, allocator) {
+	for f in scene.encode_fields(w, info, raw_data(c.after), raw_data(c.before), ids, allocator, scenes = scenes, holder = holder) {
 		fields := make([]link.Scene_Field, 1, allocator)
 		fields[0] = link_field(f)
 		append(
@@ -231,6 +269,8 @@ draft_operation :: proc(
 	d: script.Edit_Spawn,
 	ids: map[ecs.Entity]u64,
 	allocator: runtime.Allocator,
+	scenes: ^scene.Scenes,
+	holder: u32,
 ) -> link.Operation {
 	id := ids[d.entity]
 	parent := id_of(w, parent_of(w, d.entity), ids)
@@ -240,7 +280,7 @@ draft_operation :: proc(
 		components := make([]link.Scene_Component, 1, allocator)
 		if info := ecs.registry_find(&w.registry, pose); info != nil {
 			components[0] =
-				component_of_bytes(w, info, ecs.get_raw(w, d.entity, pose), ids, allocator, all = true)[0]
+				component_of_bytes(w, info, ecs.get_raw(w, d.entity, pose), ids, allocator, scenes, holder, all = true)[0]
 		}
 		return {
 			kind = .Create_Instance,
@@ -263,7 +303,15 @@ draft_operation :: proc(
 		}
 		append(
 			&components,
-			..component_of_bytes(w, info, ecs.get_raw(w, d.entity, component), ids, allocator),
+			..component_of_bytes(
+				w,
+				info,
+				ecs.get_raw(w, d.entity, component),
+				ids,
+				allocator,
+				scenes,
+				holder,
+			),
 		)
 	}
 	created := make([]link.Scene_Entity, 1, allocator)
@@ -286,9 +334,21 @@ component_of_bytes :: proc(
 	data: rawptr,
 	ids: map[ecs.Entity]u64,
 	allocator: runtime.Allocator,
+	scenes: ^scene.Scenes,
+	holder: u32,
 	all := false,
 ) -> []link.Scene_Component {
-	encoded := scene.encode_fields(w, info, data, nil, ids, allocator, all = all)
+	encoded := scene.encode_fields(
+		w,
+		info,
+		data,
+		nil,
+		ids,
+		allocator,
+		all = all,
+		scenes = scenes,
+		holder = holder,
+	)
 	fields := make([]link.Scene_Field, len(encoded), allocator)
 	for f, i in encoded {
 		fields[i] = link_field(f)
@@ -308,6 +368,8 @@ behaviour_value :: proc(
 	w: ^ecs.World,
 	f: script.Behaviour_Field,
 	ids: map[ecs.Entity]u64,
+	scenes: ^scene.Scenes,
+	holder: u32,
 ) -> (
 	v: link.Scene_Value,
 	ok: bool,
@@ -342,6 +404,13 @@ behaviour_value :: proc(
 			kind   = .Entity,
 			entity = id_of(w, f.entity, ids),
 		}
+		if number, owned := scene.scene_of(w, f.entity);
+		   scenes != nil && owned && number != holder && f.entity not_in ids {
+			v.scene = ([16]u8)(scene.scene_guid(scenes, number))
+			if v.scene == {} {
+				v.entity = 0
+			}
+		}
 	case .Asset:
 		v = {
 			kind  = .Asset,
@@ -364,6 +433,7 @@ link_field :: proc(f: format.Scene_Field) -> link.Scene_Field {
 			floats = v.floats,
 			text = v.text,
 			entity = v.entity,
+			scene = ([16]u8)(v.scene),
 			asset = ([16]u8)(v.asset),
 		},
 	}

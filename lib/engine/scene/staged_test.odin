@@ -60,6 +60,18 @@ SCRIPT_GUID :: format.Guid {
 }
 
 @(private = "file")
+LINKED_GUID :: format.Guid {
+	0  = 0x64,
+	15 = 1,
+}
+
+@(private = "file")
+TARGET_GUID :: format.Guid {
+	0  = 0x65,
+	15 = 1,
+}
+
+@(private = "file")
 BIG_COUNT :: 2000
 
 @(private = "file")
@@ -171,6 +183,7 @@ setup :: proc(t: ^testing.T, with_scripts := false, delay := 0) -> ^Staged_Fixtu
 			script.init(&f.runtime, &f.platform, &f.world, &f.assets, proc(r: ^script.Runtime) {}),
 		)
 		f.scripts = &f.runtime
+		f.scenes.scripts = f.scripts
 		bytecode := script.compile("local B = Behaviour.define(\"B\")\nreturn B")
 		defer luau.free_bytecode(raw_data(bytecode))
 		blob := format.script_write(
@@ -178,6 +191,19 @@ setup :: proc(t: ^testing.T, with_scripts := false, delay := 0) -> ^Staged_Fixtu
 			context.temp_allocator,
 		)
 		write_bytes(t, f, SCRIPT_GUID, blob)
+		linked := script.compile(
+			"local L = Behaviour.define(\"Linked\", {target = Field.entity()})\nreturn L",
+		)
+		defer luau.free_bytecode(raw_data(linked))
+		write_bytes(
+			t,
+			f,
+			LINKED_GUID,
+			format.script_write(
+				{guid = LINKED_GUID, bytecode = linked, source_path = "game/linked.luau"},
+				context.temp_allocator,
+			),
+		)
 	}
 	return f
 }
@@ -634,4 +660,100 @@ a_staged_scene_holds_its_bundle_until_it_unloads :: proc(t: ^testing.T) {
 	asset.poll(&f.assets)
 	_, open = asset.blob_location(&f.assets, SMALL_GUID)
 	testing.expect(t, !open)
+}
+
+// A behaviour's field that names an entity of another scene is nil until that scene is ready, and then holds its
+// entity.
+@(test)
+a_behaviours_reference_across_scenes_is_nil_until_the_scene_is_ready :: proc(t: ^testing.T) {
+	f := setup(t, with_scripts = true)
+	defer teardown(f)
+	w := &f.world
+	buffer: [32]u8
+	other: [32]u8
+	holder := fmt.tprintf(
+		"scene 3\nentity 00000000000000b1\nbehaviour %s\n\ttarget = @%s/00000000000000d1\n",
+		format.guid_format(LINKED_GUID, &buffer),
+		format.guid_format(TARGET_GUID, &other),
+	)
+	write_scene(t, f, BIG_GUID, holder)
+	write_scene(t, f, TARGET_GUID, "scene 3\nentity 00000000000000d1\n")
+	held, _ := begin_load(w, &f.scenes, BIG_GUID)
+	for calls := 0; calls < 100; calls += 1 {
+		if ready, _, _ := step(f); len(ready) == 1 {
+			break
+		}
+	}
+	linked := find(&f.scenes, w, held, 0xb1)
+	target :: proc(f: ^Staged_Fixture, linked: ecs.Entity) -> ecs.Entity {
+		snapshots := script.inspect(&f.runtime, linked, context.temp_allocator)
+		for field in snapshots[0].fields {
+			if field.name == "target" {
+				return field.entity
+			}
+		}
+		return 1
+	}
+	testing.expect_value(t, target(f, linked), 0)
+	waiting, is_waiting := pending_behaviour(&f.scenes, w, linked, LINKED_GUID, "target")
+	testing.expect(t, is_waiting)
+	testing.expect_value(t, waiting, TARGET_GUID)
+
+	number, ok := begin_load(w, &f.scenes, TARGET_GUID)
+	testing.expect(t, ok)
+	finished := false
+	for calls := 0; calls < 100 && !finished; calls += 1 {
+		ready, _, _ := step(f, {spawns = 1, fills = 1})
+		finished = len(ready) == 1
+		if !finished {
+			testing.expect_value(t, target(f, linked), 0)
+		}
+	}
+	testing.expect(t, finished)
+	door := find(&f.scenes, w, number, 0xd1)
+	testing.expect(t, door != 0)
+	testing.expect_value(t, target(f, linked), door)
+	_, is_waiting = pending_behaviour(&f.scenes, w, linked, LINKED_GUID, "target")
+	testing.expect(t, !is_waiting)
+}
+
+// A reference to a scene that is still loading waits, as one to a scene that is not loaded does, and binds when the
+// scene is ready.
+@(test)
+a_reference_waits_for_a_scene_that_is_loading :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	w := &f.world
+	buffer: [32]u8
+	holder := fmt.tprintf(
+		"scene 3\nentity 00000000000000b1\ncomponent 100 Probe\n\ttarget = @%s/00000000000000d1\n",
+		format.guid_format(TARGET_GUID, &buffer),
+	)
+	write_scene(t, f, BIG_GUID, holder)
+	write_scene(t, f, TARGET_GUID, "scene 3\nentity 00000000000000d1\n")
+	held, _ := begin_load(w, &f.scenes, BIG_GUID)
+	for calls := 0; calls < 100; calls += 1 {
+		if ready, _, _ := step(f); len(ready) == 1 {
+			break
+		}
+	}
+	holder_entity := find(&f.scenes, w, held, 0xb1)
+	testing.expect(t, holder_entity != 0)
+
+	number, ok := begin_load(w, &f.scenes, TARGET_GUID)
+	testing.expect(t, ok)
+	finished := false
+	for calls := 0; calls < 100 && !finished; calls += 1 {
+		ready, _, _ := step(f, {spawns = 1, fills = 1})
+		finished = len(ready) == 1
+		if !finished {
+			testing.expect_value(t, ecs.get(w, holder_entity, Probe).target, 0)
+			_, is_waiting := pending(&f.scenes, w, holder_entity, PROBE_ID, "target")
+			testing.expect(t, is_waiting)
+		}
+	}
+	testing.expect(t, finished)
+	door := find(&f.scenes, w, number, 0xd1)
+	testing.expect(t, door != 0)
+	testing.expect_value(t, ecs.get(w, holder_entity, Probe).target, door)
 }

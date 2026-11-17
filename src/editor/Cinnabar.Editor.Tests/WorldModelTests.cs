@@ -261,8 +261,8 @@ public class WorldModelTests
 
         Assert.Equal(DisplayKind.Asset, FieldValues.DisplayKindOf(field.Kind));
         Assert.Equal("9db8150cc7215ffc2708d20d77cf60bf", FieldValues.Display(field).Text);
-        Assert.Equal(Document.SceneValue.AssetRef("9db8150cc7215ffc2708d20d77cf60bf"), Panels.FieldEditor.Read(field, id => id));
+        Assert.Equal(Document.SceneValue.AssetRef("9db8150cc7215ffc2708d20d77cf60bf"), Panels.FieldEditor.Read(field, id => Document.SceneValue.EntityRef(id)));
         // An empty asset field reads as none.
-        Assert.Equal(Document.SceneValue.AssetRef(""), Panels.FieldEditor.Read(field with { Asset = new byte[16] }, id => id));
+        Assert.Equal(Document.SceneValue.AssetRef(""), Panels.FieldEditor.Read(field with { Asset = new byte[16] }, id => Document.SceneValue.EntityRef(id)));
     }
 }

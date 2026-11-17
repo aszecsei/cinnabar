@@ -266,12 +266,12 @@ public sealed class PropertiesView : ScrollViewer
         {
             return;
         }
-        ulong SceneIdOf(ulong handle) => _shell.ActiveSceneIdOf(handle);
+        SceneValue ReferenceOf(ulong handle) => _shell.ReferenceOf(handle);
         foreach (var component in values.Components)
         {
             if (_world.Type(component.Id) is { } type)
             {
-                _grid.ShowComponent(component.Id.ToString("x16"), type, component.Data, SceneIdOf);
+                _grid.ShowComponent(component.Id.ToString("x16"), type, component.Data, ReferenceOf);
             }
         }
         foreach (var behaviour in values.Behaviours)
@@ -281,7 +281,7 @@ public sealed class PropertiesView : ScrollViewer
                 var key = ("behaviour:" + behaviour.Class, field.Name);
                 if (_grid.Editors.TryGetValue(key, out var editor))
                 {
-                    editor.Current = FieldEditor.Read(field, SceneIdOf);
+                    editor.Current = FieldEditor.Read(field, ReferenceOf);
                 }
                 if (_grid.Views.TryGetValue(key, out var view))
                 {
@@ -373,7 +373,7 @@ public sealed class PropertiesView : ScrollViewer
         {
             return;
         }
-        ulong SceneIdOf(ulong handle) => _shell.ActiveSceneIdOf(handle);
+        SceneValue ReferenceOf(ulong handle) => _shell.ReferenceOf(handle);
         foreach (var (key, view) in _grid.Views)
         {
             if (key.Owner.StartsWith("behaviour:", StringComparison.Ordinal) || !ulong.TryParse(key.Owner, System.Globalization.NumberStyles.HexNumber, null, out var id)
@@ -390,7 +390,7 @@ public sealed class PropertiesView : ScrollViewer
             {
                 for (var i = 0; i < data.Count; i++)
                 {
-                    editor.SetCurrent(i, FieldEditor.Read(field, data[i], SceneIdOf));
+                    editor.SetCurrent(i, FieldEditor.Read(field, data[i], ReferenceOf));
                 }
             }
             view.Show(Mixed([.. data.Select(d => FieldValues.Display(field, d))]));

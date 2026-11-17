@@ -17,7 +17,7 @@ a_content_root_cooks_its_scenes :: proc(t: ^testing.T) {
 			{"content/door.luau.meta", door_meta},
 			{
 				"content/levels/hall.scene",
-				`scene 2
+				`scene 3
 entity 5f3a9c01e2b47d10
 name = "Door"
 component 1 Transform
@@ -112,7 +112,7 @@ LAMP_META :: "guid = 11111111111111111111111111111111\n"
 DOOR_META :: "guid = 22222222222222222222222222222222\n"
 
 @(private = "file")
-LAMP :: `scene 2
+LAMP :: `scene 3
 entity 1000000000000001
 name = "Lamp"
 entity 1000000000000002
@@ -123,7 +123,7 @@ component 35 Point_Light
 `
 
 @(private = "file")
-DOOR :: `scene 2
+DOOR :: `scene 3
 entity 2000000000000001
 name = "Door"
 entity 2000000000000002
@@ -132,7 +132,7 @@ prefab = $11111111111111111111111111111111
 `
 
 @(private = "file")
-HALL :: `scene 2
+HALL :: `scene 3
 entity 5000000000000001
 prefab = $22222222222222222222222222222222
 component 1 Transform
@@ -338,5 +338,86 @@ a_new_prefab_has_one_root_named_for_its_file :: proc(t: ^testing.T) {
 			len(root.components) == 1 &&
 			root.components[0].id == format.SCENE_TRANSFORM_ID,
 		)
+	}
+}
+
+@(test)
+a_reference_to_another_scene_is_checked_by_its_guid :: proc(t: ^testing.T) {
+	north := "00000000000000000000000000000001"
+	level := fmt.tprintf(
+		"scene 3\nentity 0000000000000001\ncomponent 7 Probe\n\tself = @%s/0000000000000001\n\tdoor = @%s/00000000000000d1\n\tlost = @%s/00000000000000d2\n\tnone = @0\n",
+		"00000000000000000000000000000002",
+		north,
+		"00000000000000000000000000000009",
+	)
+	tree := make_tree(
+		t,
+		{
+			{"content/north.scene", "scene 3\nentity 00000000000000d1\n"},
+			{"content/north.scene.meta", fmt.tprintf("guid = %s\n", north)},
+			{"content/level.scene", level},
+			{"content/level.scene.meta", "guid = 00000000000000000000000000000002\n"},
+		},
+	)
+	defer remove_tree(tree)
+	pass := cook(tree_options(tree), {.Scene})
+	testing.expect(t, pass.ok)
+	unknown := 0
+	for p in pass.problems.list {
+		testing.expectf(t, !strings.contains(p.text, "not in the scene"), "%s", p.text)
+		if strings.contains(p.text, "not a scene in the content") {
+			unknown += 1
+			testing.expect(t, strings.contains(p.text, "00000000000000000000000000000009"))
+		}
+	}
+	testing.expect_value(t, unknown, 1)
+
+	level_scene, ok := format.scene_read(
+		tree_blob(t, tree, tree_guid(t, tree, "level.scene")),
+		context.temp_allocator,
+	)
+	testing.expect(t, ok)
+	if !ok {
+		return
+	}
+	fields := level_scene.entities[0].components[0].fields
+	// A reference by the scene's own GUID is local, and one to another scene keeps its GUID.
+	testing.expect_value(t, fields[0].value.scene, format.Guid{})
+	testing.expect_value(t, fields[0].value.entity, 1)
+	testing.expect_value(t, fields[1].value.scene, format.guid_parse(north) or_else {})
+	testing.expect_value(t, fields[1].value.entity, 0xd1)
+	level_source, _ := asset_at(pass, "level.scene")
+	testing.expect_value(t, len(level_source.dependencies), 0)
+}
+
+@(test)
+a_prefab_cannot_refer_to_another_scene :: proc(t: ^testing.T) {
+	tree := make_tree(
+		t,
+		{
+			{
+				"content/lamp.prefab",
+				"scene 3\nentity 0000000000000001\ncomponent 7 Probe\n\tdoor = @00000000000000000000000000000001/00000000000000d1\n",
+			},
+			{"content/lamp.prefab.meta", "guid = 33333333333333333333333333333333\n"},
+		},
+	)
+	defer remove_tree(tree)
+	pass := cook(tree_options(tree), {.Scene})
+	testing.expect(t, pass.ok)
+	warned := false
+	for p in pass.problems.list {
+		warned ||= strings.contains(p.text, "which a prefab cannot do")
+	}
+	testing.expect(t, warned)
+	lamp, ok := format.scene_read(
+		tree_blob(t, tree, format.guid_parse("33333333333333333333333333333333") or_else {}),
+		context.temp_allocator,
+	)
+	testing.expect(t, ok)
+	if ok {
+		value := lamp.entities[0].components[0].fields[0].value
+		testing.expect_value(t, value.entity, 0)
+		testing.expect_value(t, value.scene, format.Guid{})
 	}
 }
