@@ -2,7 +2,7 @@
 # a terrain surface raised by a height map, 256 m across, under the sun (see docs/rendering/surfaces.md#surfaces). The
 # terrain collides by its height map, with a hole on the island's west flank, and a crate falls onto the island. The
 # camera stands over the shore. The editor writes this file; see docs/editor.md#scenes.
-scene 2
+scene 3
 
 entity 0c5c7fd0a6a3a451
 name = "Sun"

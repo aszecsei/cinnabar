@@ -36,7 +36,7 @@ public static partial class SceneFile
                 if (!header)
                 {
                     header = true;
-                    if (trimmed != "scene 1" && trimmed != $"scene {Version}")
+                    if (trimmed is not ("scene 1" or "scene 2") && trimmed != $"scene {Version}")
                     {
                         Error($"a scene file starts with `scene {Version}`");
                         return;
@@ -261,6 +261,9 @@ public static partial class SceneFile
                 case "name":
                     Error("name takes a quoted string");
                     break;
+                case "parent" when value.Kind == SceneValueKind.Entity && value.Scene != "":
+                    Error("an entity cannot be a child of another scene's entity");
+                    break;
                 case "parent" when value.Kind == SceneValueKind.Entity:
                     _entity.Parent = value.Entity;
                     _entity.ParentPath = value.Path;
@@ -291,6 +294,9 @@ public static partial class SceneFile
                     break;
                 case "node" when value.Kind != SceneValueKind.Entity || value.Entity == 0:
                     Error("node takes an entity of the prefab, such as @2000000000000002");
+                    break;
+                case "node" when value.Scene != "":
+                    Error("node takes an entity of the prefab, not of another scene");
                     break;
                 case "node":
                     _node = value.Entity;
@@ -332,20 +338,8 @@ public static partial class SceneFile
             {
                 case '"':
                     return ParseString(text);
-                case '@' when text.Contains('#'):
-                    if (ParsePath(text[1..]) is not { } path)
-                    {
-                        Error($"a path is scene IDs of 16 hex digits joined by # after @, not \"{text}\"");
-                        return null;
-                    }
-                    return SceneValue.EntityRef(path);
                 case '@':
-                    if (text.Length is < 2 or > 17 || !ulong.TryParse(text.AsSpan(1), NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out var id))
-                    {
-                        Error($"a scene ID is up to 16 hex digits after @, not \"{text}\"");
-                        return null;
-                    }
-                    return SceneValue.EntityRef(id);
+                    return ParseReference(text);
                 case '$':
                     if (text == "$0")
                     {
@@ -388,6 +382,44 @@ public static partial class SceneFile
                 return null;
             }
             return SceneValue.Name(text);
+        }
+
+        // An entity reference: @<id>, @<path>, or either one after <guid>/ for an entity of another scene. The ID in
+        // another scene is nonzero.
+        SceneValue? ParseReference(string text)
+        {
+            var rest = text[1..];
+            var scene = "";
+            if (rest.IndexOf('/') is var slash and >= 0)
+            {
+                scene = rest[..slash];
+                if (scene.Length != 32 || !scene.All(Uri.IsHexDigit) || scene.All(c => c == '0'))
+                {
+                    Error($"a reference to another scene starts with its nonzero GUID of 32 hex digits and a slash after @, not \"{text}\"");
+                    return null;
+                }
+                rest = rest[(slash + 1)..];
+            }
+            if (rest.Contains('#'))
+            {
+                if (ParsePath(rest) is not { } path)
+                {
+                    Error($"a path is scene IDs of 16 hex digits joined by # after @, not \"{text}\"");
+                    return null;
+                }
+                return SceneValue.EntityRef(scene, path);
+            }
+            if (rest.Length is < 1 or > 16 || !ulong.TryParse(rest, NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out var id))
+            {
+                Error($"a scene ID is up to 16 hex digits after @, not \"{text}\"");
+                return null;
+            }
+            if (scene != "" && id == 0)
+            {
+                Error($"a reference to another scene names an entity with a nonzero scene ID, not \"{text}\"");
+                return null;
+            }
+            return SceneValue.EntityRef(scene, id);
         }
 
         SceneNumber? ParseNumber(string text)

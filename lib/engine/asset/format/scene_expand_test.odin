@@ -108,7 +108,7 @@ the_fixture_expands_to_its_expected_scene :: proc(t: ^testing.T) {
 
 // A prefab with a root, a part with a child and a reference out of the part, for what the fixture does not show.
 @(private = "file")
-PART_PREFAB := `scene 2
+PART_PREFAB := `scene 3
 
 entity 0000000000000001
 name = "Root"
@@ -121,6 +121,7 @@ parent = @0000000000000001
 behaviour aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 	outside = @0000000000000001
 	child = @0000000000000003
+	elsewhere = @0123456789abcdef0123456789abcdef/00000000000000a2
 
 entity 0000000000000003
 name = "Child"
@@ -186,6 +187,13 @@ a_reference_outside_the_part_becomes_none :: proc(t: ^testing.T) {
 	fields := flat.entities[0].behaviours[0].fields
 	testing.expect_value(t, fields[0].value.entity, 0)
 	testing.expect_value(t, fields[1].value.entity, scene_path_id(9, 3))
+	// A reference to another scene is not one of the prefab's.
+	testing.expect_value(t, fields[2].value.entity, 0xa2)
+	testing.expect_value(
+		t,
+		fields[2].value.scene,
+		guid_parse("0123456789abcdef0123456789abcdef") or_else {},
+	)
 	testing.expect_value(t, len(problems), 1)
 	testing.expect(
 		t,
@@ -461,7 +469,7 @@ parent = @5f3a9c01e2b47d10#a90b3e7f15c4d2e8
 			"scene 2\nentity 0000000000000001\ncomponent 1 T\n\tx = @0000000000000001#\n",
 			"joined by #",
 		},
-		{"scene 3\n", "starts with `scene 2`"},
+		{"scene 4\n", "starts with `scene 3`"},
 	}
 	for c in cases {
 		_, problems, ok = scene_parse(c.text, context.temp_allocator)

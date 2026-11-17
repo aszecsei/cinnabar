@@ -2,7 +2,7 @@
 # entity, an instance of the variant, an instance of a prefab that is missing, an override whose entity is gone, and
 # parts of the door: its frame with an override inside, the nested lamp's bulb, and an entity that it does not have.
 # expected.scene is what it expands to. The blocks are in the order that the editor writes them.
-scene 2
+scene 3
 
 entity 5000000000000001
 name = "Front Door"

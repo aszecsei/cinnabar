@@ -1,6 +1,6 @@
 # A door with a frame, a handle, a hinge and a nested lamp whose bulb the door dims. The behaviour refers to the
 # handle, and to an entity that the prefab does not have, which expands to none.
-scene 2
+scene 3
 
 entity 2000000000000001
 name = "Door"

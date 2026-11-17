@@ -4,7 +4,7 @@
 # one takes the lamp's light and the unlit one shows its colors. A texel is 5 pixels at a height of 720, so the snapped
 # sprites stay sharp. Positions are raw World_Position values in units of 2^-24 m. The editor writes this file; see
 # docs/editor/document-and-scenes.md#scenes.
-scene 2
+scene 3
 
 entity 2d5e000000000001
 name = "Camera"

@@ -345,7 +345,7 @@ flat_prefab :: proc(
 }
 
 // remap_fields gives the references of a prefab's entity the IDs of the instance's entities. A reference to an entity
-// that the prefab does not have becomes none.
+// that the prefab does not have becomes none. A reference to another scene stays as it is.
 @(private = "file")
 remap_fields :: proc(
 	x: ^Expander,
@@ -355,7 +355,7 @@ remap_fields :: proc(
 	outermost: bool,
 ) {
 	for &f in fields {
-		if f.value.kind != .Entity || f.value.entity == 0 {
+		if f.value.kind != .Entity || f.value.entity == 0 || f.value.scene != {} {
 			continue
 		}
 		if !ids[f.value.entity] {

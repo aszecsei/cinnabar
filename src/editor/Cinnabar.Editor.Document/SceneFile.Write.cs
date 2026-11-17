@@ -104,9 +104,11 @@ public static partial class SceneFile
         SceneValueKind.String => TextQuote.Quote(value.Text),
         SceneValueKind.Name => value.Text,
         SceneValueKind.Asset => value.Asset == "" ? "$0" : $"${value.Asset}",
-        _ when value.Path != null => "@" + ScenePath.Format(value.Path),
-        _ => value.Entity == 0 ? "@0" : $"@{value.Entity:x16}",
+        _ when value.Path != null => "@" + ScenePrefix(value) + ScenePath.Format(value.Path),
+        _ => value.Entity == 0 && value.Scene == "" ? "@0" : $"@{ScenePrefix(value)}{value.Entity:x16}",
     };
+
+    static string ScenePrefix(SceneValue value) => value.Scene == "" ? "" : value.Scene + "/";
 
     // A float always has a point or an exponent, so it reads back as a float. A value that an f32 holds exactly, as
     // the editor writes for f32 fields, gets the f32's shortest form, so 0.70710677 is not 0.7071067690849304.

@@ -216,7 +216,7 @@ public enum SceneValueKind
     String,
     /// <summary>A bare word, such as an enum value's name.</summary>
     Name,
-    /// <summary>An entity's scene ID, or 0 for none.</summary>
+    /// <summary>An entity's scene ID, or 0 for none. The scene is its own unless the value names one.</summary>
     Entity,
     /// <summary>An asset's GUID, or none.</summary>
     Asset,
@@ -247,6 +247,8 @@ public sealed record SceneValue
     public ulong Entity { get; private init; }
     /// <summary>A reference written as a path into an instance, kept so that the file writes it back. Null otherwise.</summary>
     public IReadOnlyList<ulong>? Path { get; private init; }
+    /// <summary>The GUID of the scene that an entity reference names, as 32 lowercase hex digits, or "" for the scene that holds the value.</summary>
+    public string Scene { get; private init; } = "";
     /// <summary>An asset's GUID as 32 lowercase hex digits, or "" for none.</summary>
     public string Asset { get; private init; } = "";
 
@@ -267,12 +269,25 @@ public sealed record SceneValue
     public static SceneValue EntityRef(IReadOnlyList<ulong> path) =>
         path.Count == 1 ? EntityRef(path[0]) : new() { Kind = SceneValueKind.Entity, Entity = ScenePath.Id(path), Path = path };
 
+    /// <summary>A reference to an entity of the scene with this GUID, or to the value's own scene when the GUID is "".</summary>
+    public static SceneValue EntityRef(string scene, ulong id) =>
+        scene == "" ? EntityRef(id) : new() { Kind = SceneValueKind.Entity, Entity = id, Scene = scene.ToLowerInvariant() };
+
+    /// <summary>A reference to the entity on a path into an instance of the scene with this GUID, or of the value's own scene when the GUID is "".</summary>
+    public static SceneValue EntityRef(string scene, IReadOnlyList<ulong> path) =>
+        scene == "" ? EntityRef(path)
+        : path.Count == 1 ? EntityRef(scene, path[0])
+        : new() { Kind = SceneValueKind.Entity, Entity = ScenePath.Id(path), Path = path, Scene = scene.ToLowerInvariant() };
+
+    /// <summary>Whether this is an entity reference to the scene that holds it. Other values are not.</summary>
+    public bool IsLocalEntity => Kind == SceneValueKind.Entity && Scene == "";
+
     /// <summary>A reference to an asset by its GUID, or "" for none.</summary>
     public static SceneValue AssetRef(string guid) => new() { Kind = SceneValueKind.Asset, Asset = guid.ToLowerInvariant() };
 
     public bool Equals(SceneValue? other) =>
-        other is not null && Kind == other.Kind && Bool == other.Bool && Text == other.Text && Entity == other.Entity && Asset == other.Asset
+        other is not null && Kind == other.Kind && Bool == other.Bool && Text == other.Text && Entity == other.Entity && Scene == other.Scene && Asset == other.Asset
         && Numbers.SequenceEqual(other.Numbers) && (Path ?? []).SequenceEqual(other.Path ?? []);
 
-    public override int GetHashCode() => HashCode.Combine(Kind, Bool, Text, Entity, Asset, Numbers.Count);
+    public override int GetHashCode() => HashCode.Combine(Kind, Bool, Text, Entity, Scene, Asset, Numbers.Count);
 }

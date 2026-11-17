@@ -1,5 +1,5 @@
 # A variant of the door: its root is an instance of door.prefab, with a red frame light.
-scene 2
+scene 3
 
 entity 3000000000000001
 name = "Red Door"

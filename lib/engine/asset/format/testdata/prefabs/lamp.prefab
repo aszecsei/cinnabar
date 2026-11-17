@@ -1,5 +1,5 @@
 # A lamp: the inner prefab, which door.prefab nests.
-scene 2
+scene 3
 
 entity 1000000000000001
 name = "Lamp"

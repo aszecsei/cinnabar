@@ -1,6 +1,6 @@
 # One of the guard scene's guards, which its Crowd spawns (see scripts/ai/crowd.luau): the scene's guard without the key
 # that swaps its decision. A fox with a character, a crowd agent, eyes, and the behavior tree of ai/guard.decision.
-scene 2
+scene 3
 
 entity 1000000000000001
 name = "Guard"

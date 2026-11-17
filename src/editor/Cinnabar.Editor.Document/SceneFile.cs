@@ -12,11 +12,11 @@ public sealed record SceneProblem(int Line, string Message, bool IsError)
 /// <c>asset_format.scene_parse</c>, and the two must agree. Writing sorts entities by scene ID, with an instance's
 /// override blocks after it by path (see docs/editor/prefabs.md#instances-in-a-scene), and components by ID, so an edit
 /// changes only the lines of the entity that it touches. A prefab is a scene file with one root. The reader takes
-/// version 1 too, which has no instances.
+/// versions 1 and 2 too. Version 1 has no instances, and version 2 no references to other scenes.
 /// </summary>
 public static partial class SceneFile
 {
-    public const int Version = 2;
+    public const int Version = 3;
     public const string Extension = ".scene";
     public const string PrefabExtension = ".prefab";
 

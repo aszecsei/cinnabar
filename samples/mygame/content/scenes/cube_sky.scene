@@ -2,7 +2,7 @@
 # whose texture is a cube map from six images, a color for each face (see docs/content/kinds/textures.md#cube-maps-and-arrays),
 # which lights it. textures/cube/sky_small_cube.hdr is a sky with a sun to try in its place. Positions are raw
 # World_Position values in units of 2^-24 m. The editor writes this file; see docs/editor/document-and-scenes.md#scenes.
-scene 2
+scene 3
 
 entity 7a1c000000000001
 name = "Camera"

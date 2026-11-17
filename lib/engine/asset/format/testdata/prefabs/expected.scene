@@ -1,6 +1,6 @@
 # What level.scene expands to, in the expansion's order: each instance's root, then its prefab's other entities in
 # the prefab's order. The IDs are the paths' IDs.
-scene 2
+scene 3
 
 entity 5000000000000001
 name = "Front Door"
