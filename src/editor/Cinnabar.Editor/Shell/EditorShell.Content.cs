@@ -84,7 +84,7 @@ public sealed partial class EditorShell
                 OpenBlackboard(asset);
                 break;
             case AssetKind.Script or AssetKind.Shader or AssetKind.ShadingModel or AssetKind.Material or AssetKind.MaterialInstance
-                or AssetKind.Perception:
+                or AssetKind.Perception or AssetKind.World:
                 OpenScript(path);
                 break;
         }
@@ -106,7 +106,7 @@ public sealed partial class EditorShell
     public static bool CanOpen(Link.Cook.Asset asset) =>
         asset.Kind is AssetKind.Scene or AssetKind.Prefab or AssetKind.Script or AssetKind.Shader or AssetKind.ShadingModel or AssetKind.Material or AssetKind.MaterialInstance
             or AssetKind.MaterialFunction or AssetKind.Effect or AssetKind.AnimationGraph or AssetKind.Ui or AssetKind.Blackboard or AssetKind.Decision
-            or AssetKind.Perception;
+            or AssetKind.Perception or AssetKind.World;
 
     /// <summary>What opening an asset is called in its menu.</summary>
     public string OpenLabel(Link.Cook.Asset asset) => asset.Kind switch

@@ -438,6 +438,7 @@ public sealed class ContentBrowserView : DockPanel
         AssetKind.Blackboard => "blackboard",
         AssetKind.Decision => "decision",
         AssetKind.Perception => "perception",
+        AssetKind.World => "world",
         _ => "script",
     };
 
