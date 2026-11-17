@@ -28,6 +28,7 @@ import "cinnabar:engine/save"
 import "cinnabar:engine/scene"
 import "cinnabar:engine/script"
 import "cinnabar:engine/sprite"
+import "cinnabar:engine/streaming"
 import "cinnabar:engine/ui"
 import "cinnabar:engine/volume"
 
@@ -96,6 +97,9 @@ Game :: struct {
 	editor:             editor.Editor,
 	// The world's scenes, which load and unload one at a time (see docs/world/scenes.md).
 	scenes:             scene.Scenes,
+	// The policy that loads the scenes of a world near the camera and the Stream_Source entities, and unloads the far ones
+	// (see docs/world/scenes.md#streaming).
+	streaming:          streaming.State,
 	// The scene loads and unloads that load_scene and unload_scene asked for, which the next frame's start applies. On
 	// the heap.
 	scene_requests:     [dynamic]Scene_Request,
@@ -268,6 +272,7 @@ register_components :: proc(r: ^ecs.Registry, h: Hooks) {
 	render.register_components(r)
 	script.register_components(r)
 	scene.register_components(r)
+	streaming.register_components(r)
 	volume.register_components(r)
 	physics.register_components(r)
 	audio.register_components(r)

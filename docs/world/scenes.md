@@ -94,6 +94,7 @@ A request that `begin_frame` makes applies in the same frame. A request that a s
 | `Scene.load(scene: Asset) -> number` | Asks for the scene to load beside the others. Returns the number that it will have. The scene loads at the start of the next frame. |
 | `Scene.unload(number)` | Asks for the scene with the number to unload, with what it owns, at the start of the next frame. |
 | `Scene.of(entity) -> number?` | The scene that the entity belongs to, or nil for an entity that the game spawned. |
+| `Scene.state(number) -> string?` | `"loading"` for a scene that is still loading, `"ready"` for one that is shown, and nil for a number that is not loaded. |
 
 ```luau
 local Portal = Behaviour.define("Portal", { next = Field.asset() })
