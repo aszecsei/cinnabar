@@ -33,7 +33,7 @@ A number is used only once in a level. `add_scene` refuses a number that is load
 
 - References and parents resolve only in the scene. Two scenes can have the same scene IDs, for example two copies of a file.
 - The behaviours wake in the next script phase, as with `scene.load`.
-- If the world has no scene, the scene's GUID becomes `World.scene`, and the navmeshes of that scene load ([Limits](#limits)).
+- The scene's GUID joins the world's scenes (`ecs.world_scenes`), and the navmeshes of that scene load ([Navigation: Loading](../ai/navigation.md#loading)).
 
 `add_scene_asset` keeps the scene's blob loaded until the scene or the level unloads. If the blob does not load, or if it is not a scene of this build, the world does not change. `scene.load_asset` also reads the blob before it unloads the level, so if a load fails, the old level stays.
 
@@ -44,7 +44,7 @@ A number is used only once in a level. `add_scene` refuses a number that is load
 1. Finds each entity of the scene, and each entity that the scene owns ([Ownership](#ownership)), including inactive entities.
 2. Despawns them with `ecs.despawn_many`. Their children go too. `despawn_many` searches for the descendants once, not once for each entity.
 3. Clears the scene's ID map, removes the scene from the table, and releases the scene's blob.
-4. If the scene's GUID is `World.scene`, gives `World.scene` to the next loaded scene, or clears it.
+4. Takes the scene's GUID out of the world's scenes, so its navmeshes unload.
 
 The other scenes' entities, their references and their parents do not change. An entity handle into the unloaded scene is no longer alive (`ecs.is_alive` returns false), so a stored reference to it fails safely. The scene's own memory and its GPU resources are freed, and the other scenes' memory stays ([Core: Scene memory](../core/jobs-and-memory.md#scene-memory)).
 
@@ -116,7 +116,6 @@ return Portal
 
 ## Limits
 
-- **Navmeshes** follow `World.scene`, which is one scene: the first scene that loaded, or the next scene after it unloads ([Navigation](../ai/navigation.md#loading)).
 - **Scene memory:** at most `core.MAX_SCENE_MEMORY` (64) scenes are loaded at once. `add_scene` refuses one more and logs an error ([Core: Scene memory](../core/jobs-and-memory.md#scene-memory)).
 - **Loads across frames** are only for the scenes that a `World_Streamer` loads, and for Odin code that calls `scene.begin_load`. `add_scene` and `Scene.load` load a scene in one frame, from a blob that `asset.load` reads at once ([World streaming](streaming.md)).
 - **The editor** does not edit or save streamed scenes. Its documents are its own scenes, numbered below `FIRST_RUNTIME_SCENE`. A load of its scenes unloads the level, and every streamed scene with it.

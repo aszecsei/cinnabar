@@ -1,13 +1,13 @@
 # Navigation
 
-How agents find their way at runtime: the navmeshes of a scene load with it, queries find points and paths on them, path requests are solved on jobs in fixed ticks within a budget, and the crowd walks agents along their paths around each other. The cooker bakes the navmeshes with Recast ([Content: Navmeshes](../content/kinds/nav-meshes.md)). The runtime, in `lib/engine/nav`, is the engine's own Odin, with nothing of Detour linked. Read [Hot reload](../overview/hot-reload.md#rules), [Core: Jobs and memory](../core/jobs-and-memory.md), [World: ECS](../world/ecs.md) and [Positions and transforms](../world/positions-and-transforms.md) first.
+How agents find their way at runtime: the navmeshes of each loaded scene load with it, queries find points and paths on them and across the seams between them, path requests are solved on jobs in fixed ticks within a budget, and the crowd walks agents along their paths around each other. The cooker bakes the navmeshes with Recast ([Content: Navmeshes](../content/kinds/nav-meshes.md)). The runtime, in `lib/engine/nav`, is the engine's own Odin, with nothing of Detour linked. Read [Hot reload](../overview/hot-reload.md#rules), [Core: Jobs and memory](../core/jobs-and-memory.md), [World: ECS](../world/ecs.md) and [Positions and transforms](../world/positions-and-transforms.md) first.
 
-**In this document:** [Design](#design) · [Loading](#loading) · [Queries](#queries) · [Path requests](#path-requests) · [Crowds](#crowds) · [Movement](#movement) · [Determinism](#determinism) · [Scripts](#scripts) · [Drawing](#drawing) · [Limits](#limits)
+**In this document:** [Design](#design) · [Loading](#loading) · [Queries](#queries) · [Seams](#seams) · [Path requests](#path-requests) · [Crowds](#crowds) · [Movement](#movement) · [Determinism](#determinism) · [Scripts](#scripts) · [Drawing](#drawing) · [Limits](#limits)
 
 ## Design
 
 1. **The runtime is the engine's own.** The queries follow Detour's `dtNavMeshQuery` (`findNearestPoly`, `findPath`, `findStraightPath`, `raycast` and `findRandomPointAroundCircle`), but read the engine's blob ([Content: Navmeshes: The blob](../content/kinds/nav-meshes.md#the-blob)). Nothing has static state, so a code reload keeps all of it.
-2. **The state holds handles, not blobs.** `nav.State` in `Game` holds the asset handles of the scene and its navmeshes, and plain data for the path requests. Each frame, `prepare` reads the loaded blobs into the frame's views, and `end_frame` lets them go before `asset.poll` can swap a blob.
+2. **The state holds handles, not blobs.** `nav.State` in `Game` holds the asset handles of the scenes and their navmeshes, and plain data for the path requests. Each frame, `prepare` reads the loaded blobs into the frame's views, and `end_frame` lets them go before `asset.poll` can swap a blob.
 3. **Queries only read.** Their scratch memory is the allocator they are given, so frame code, any number of jobs and scripts can query at once.
 4. **Positions are `World_Position`s outside, and `f32` inside**, in meters relative to the navmesh's anchor, the center of its volume. A query converts each point once.
 5. **Path requests spread over ticks.** A `Fixed` system solves the queued requests on jobs, a few searches at a time, within a budget of searched nodes in each tick. A search stops only between nodes, so its path does not depend on the budget or the number of jobs, only the tick it is ready in.
@@ -15,16 +15,17 @@ How agents find their way at runtime: the navmeshes of a scene load with it, que
 
 ## Loading
 
-A scene's navmeshes load with it and unload when the world holds another scene.
+Each scene's navmeshes load with it and unload when it leaves the world.
 
-- **The world's scene:** `ecs.World.scene` is the GUID of the scene whose navmeshes load: the first scene that loaded into the level ([World: Scenes](../world/scenes.md#loading)). `scene.load`, `scene.add_scene` and `scene.unload_scene` write it. A scene loaded by GUID (`scene.load_asset`, `scene.add_scene_asset`) gives it the blob's GUID. The editor's document gives it the first scene's GUID of the `Load_Scene` message (see [Editor: Editor link](../editor/link.md#messages)). When that scene unloads, the next loaded scene's GUID takes its place. A scene that was never cooked has none, and the scenes that load beside the first one have no navmeshes.
-- **The list:** `nav.prepare` notices a new scene, loads the scene's blob through the asset runtime, and reads its navmeshes with `format.scene_nav_meshes`. It loads each one by its GUID and unloads the old scene's. In a release, a level's bundle holds its navmeshes ([Blobs and loading: Bundles](../content/blobs-and-loading.md#bundles)).
+- **The world's scenes:** `ecs.World` lists the GUIDs of the cooked scenes that it holds, in the order that they loaded, and `ecs.world_scenes(w)` gives them ([World: Scenes](../world/scenes.md#loading)). `scene.load`, `scene.add_scene`, `scene.begin_load` and `scene.unload_scene` write the list through `ecs.add_world_scene` and `ecs.remove_world_scene`, and `scene.unload_level` clears it. A scene loaded by GUID (`scene.load_asset`, `scene.add_scene_asset`, a streamed scene) is listed by its blob's GUID. The editor's document lists every scene of the `Load_Scene` message (see [Editor: Editor link](../editor/link.md#messages)). A scene that was never cooked has no GUID and is not listed. A scene that the world holds twice is listed twice, and its navmeshes load once.
+- **The list:** `nav.prepare` notices the scenes that came and went. For a new scene it loads the scene's blob through the asset runtime, reads its navmeshes with `format.scene_nav_meshes`, and loads each one by its GUID. A scene that went unloads its navmeshes and its blob. In a release, a level's bundle holds its navmeshes ([Blobs and loading: Bundles](../content/blobs-and-loading.md#bundles)), and a streamed scene's bundle holds its own.
 - **A recook:** a recooked navmesh is the same handle with a new version, so the next frame reads the new blob, and the paths on it are found again ([Path requests](#path-requests)). A recooked scene, such as one with a new volume, has its list read again. The new list loads before the old one unloads, so a navmesh on both stays loaded.
 - **Missing blobs:** a scene or a navmesh that cannot load is tried again when the cache's generation changes, after the next cook.
+- **Slots:** each loaded navmesh takes a slot in the frame's views, which it keeps until it unloads, and a scene's new list after a recook keeps the slots of the navmeshes on both. A freed slot goes to the next navmesh that loads. A `Poly` names a polygon by its navmesh's slot and its index in the blob. A `Mesh_Id` is a navmesh's scene GUID, its volume's scene ID and its agent type, so two scenes' volumes with the same scene ID are two navmeshes.
 - **Agent types:** an `Agent_Type` is the index of the type in the project's `nav.agents`, which is also its bit in `Nav_Mesh_Volume.agents` ([Content: Navmeshes: Agent types](../content/kinds/nav-meshes.md#agent-types)). Each navmesh's blob holds it as `agent_index`. `nav.agent_type(s, name)` finds the type of a name among the loaded navmeshes.
-- **The frame's views:** `prepare` runs in every mode, before the ticks, and `end_frame` runs at the end of the frame. Queries work between them. A blob that the build cannot read is warned about once, and is not used.
+- **The frame's views:** `prepare` runs in every mode, before the ticks, and `end_frame` runs at the end of the frame. Queries work between them. `s.frame` is indexed by slot, and an empty slot's view has no stamp. A blob that the build cannot read is warned about once, and is not used.
 
-`nav.State` has one writer for the loaded scene (`sync_scene`). It is either loaded, with its list and its navmeshes' handles, or missing, waiting for a cook.
+`nav.State` has one writer for its scenes (`sync_scenes`). Each scene is either loaded, with its list and its navmeshes' handles and slots, or missing, waiting for a cook.
 
 ## Queries
 
@@ -35,13 +36,23 @@ A scene's navmeshes load with it and unload when the world holds another scene.
 | `raycast(s, start, end, agent)` | A `Raycast_Hit`: how far a straight walk along the navmesh goes, as the fraction `t`, the point it reaches, and the normal of the wall that stops it, or none |
 | `random_point(s, around, radius, agent, rng, max_nodes, allocator)` | A reachable point near `around`, drawn from the caller's `random.State` |
 
-- **Which navmesh:** a query takes the navmeshes of its agent type whose bounds hold its point, and of several, the one with the nearest polygon. `find_path`, `raycast` and `random_point` work on the navmesh of their start.
+- **Which navmesh:** a query takes the navmeshes of its agent type whose bounds hold its point, and of several, the one with the nearest polygon. `find_path`, `raycast` and `random_point` start on the navmesh of their start, and go on across its seams into the other navmeshes of the agent type ([Seams](#seams)). `find_path`'s goal snaps to the nearest navmesh of the agent type too. Points are relative to the start navmesh's anchor, and another navmesh's points are offset by where its anchor is from that one. A `Path_Result`'s `mesh` is its start's navmesh, and its corridor's `Poly`s can be of several.
 - **Snapping:** a start or a goal snaps to the nearest polygon within `default_extents`: twice the agent's radius across, and its height up and down. A point over a polygon by less than the agent's step height is on it, as in Detour.
 - **Polygons** are named by their index in the blob. A polygon's tile is found by a binary search, because the tiles' runs of polygons follow each other, which `format.nav_mesh_view` checks. Heights come from each polygon's detail triangles.
 - **`find_path`:** A* over the polygons. A polygon's node is at the middle of the portal that first reaches it, and the heuristic is the distance to the goal, scaled by 0.999. Ties go to the earlier node. The search reaches at most `max_nodes` polygons (`DEFAULT_MAX_NODES`, 2048). A goal that it does not reach, because no path goes there, because no polygon is near it, or because the nodes ran out, gives a `Partial` path to the point of the reached polygon nearest the goal. A start on no navmesh gives `Failed`. The funnel then pulls the straight path through the corridor's portals. A portal across tiles is only the part of the edge that its link covers.
 - **`raycast`:** a walk on the xz plane from polygon to polygon across the edges that the segment leaves by. A link holds the walk only inside the part of the edge that it covers. It stops at the end, `t` is 1 and `wall` is none, or at an edge with nothing across, where `wall` is the edge's normal on the ground.
 - **`random_point`:** a search outward from the start's polygon over the portals within `radius` of `around`. Each polygon that it reaches is drawn by its area, and then a point in the polygon. A polygon counts by its whole area, so the point can be outside the circle by up to a polygon's size. The same seed gives the same points.
 - **Memory:** `find_path` and `random_point` take their scratch, and `find_path` its result, from `allocator`: a job's own `context.temp_allocator` by default, or frame memory from frame code.
+
+## Seams
+
+Where two loaded navmeshes of an agent type meet, a path crosses from one into the other. Each navmesh stays its own scene's, baked from that scene alone, and the runtime joins their edges with **seam links**, as the cooker joins a navmesh's tiles with links.
+
+- **Border edges:** the cooker leaves a navmesh's edges on its bounds as border edges, `NAV_EXTERNAL` toward a tile that the navmesh does not have, with no link ([Content: Navmeshes: The blob](../content/kinds/nav-meshes.md#the-blob)).
+- **Joining:** two navmeshes of an agent type meet where a face of one's bounds touches the opposite face of the other's, within a cell, and their heights overlap. The border edges of each on that side are joined to the other's with `format.nav_edge_overlap`, the test that joins tiles: each part of an edge that the other's edge overlaps, within the agents' step height, is a seam link, over that part of it.
+- **When:** `prepare` joins the seams again whenever a navmesh loads, unloads or is recooked, from the frame's views. The links are in `nav.State` on the heap, and each view has its run of them, by polygon and edge. A walk across an edge takes the links within the navmesh first, and then the seam links.
+- **Why seam links, and not tiles that scenes share:** each navmesh stays a sub-asset of one scene, cooked from that scene, so it loads and unloads with it and a streamed scene needs nothing of its neighbors at cook time. The cooker already marks the edges on a navmesh's bounds, so joining them needs no change to the blob. Tiles that scenes share would need one grid for the world and a bake across scenes, and a tile that belongs to two scenes cannot unload with one of them.
+- **What meets:** volumes whose faces touch. The floor must go on past each volume's face by the agent's radius, in its own scene's colliders, or the bake erodes the navmesh back from its face and the two do not meet. Volumes that overlap are not joined ([Limits](#limits)).
 
 ## Path requests
 
@@ -58,11 +69,11 @@ A scene's navmeshes load with it and unload when the world holds another scene.
 - **The system:** `nav paths` is a `Fixed` system that runs as one job. It reads `Transform` and writes `Nav_Path`. In each tick it:
   1. Frees the paths of entities that are gone, that lost their `Nav_Path`, or whose `Nav_Path` names another slot. It clears a `Nav_Path` that names a slot that is not its own, as a duplicated entity's does.
   2. Admits the new requests in order. Each goes to the back of the queue, and its `Nav_Path` becomes `Pending`.
-  3. Queues again, at the back, each found path whose navmesh was recooked or unloaded, and starts again each search on one.
+  3. Queues again, at the back, each found path that crosses a navmesh that was recooked or unloaded, and starts again each search that ran while one was. A found path keeps the slots and stamps of the navmeshes that its corridor crosses, so nothing reads a navmesh's polygons after it went. Found again, a path whose start is on no navmesh fails, and one whose goal is past the gap is `Partial`.
   4. Starts a search for each waiting request among the first `MAX_ACTIVE_SEARCHES` (8) of the queue, from where its entity is now. An entity on no navmesh of its agent type fails at once.
   5. Shares the tick's budget, `DEFAULT_TICK_NODES` (1024) searched nodes, equally among the searches, and runs each for its share on a job of its own.
   6. Writes the paths of the searches that finished, in the queue's order. A path is ready in the tick that its search finishes.
-- **Reading:** `nav.path_corners(s, w, entity)` is the path's corners, from the start to its end, and `nav.path_corridor` its navmesh and polygons. They stay valid until the system runs again. `nav.set_budget` changes the budget.
+- **Reading:** `nav.path_corners(s, w, entity)` is the path's corners, from the start to its end, and `nav.path_corridor` the navmesh that it starts on and its polygons, as `Poly`s. They stay valid until the system runs again. `nav.set_budget` changes the budget.
 - **In the tick:** the system runs with the other `Fixed` systems, before the scripts' `fixed_update`. A system that reads `Nav_Path` waits for it and sees its results in the same tick, and so do scripts. A request from a `Fixed` system's job is admitted in the next tick, after the flush. Edit mode runs no `Fixed` systems, so requests wait for Play.
 - **Memory:** each search keeps its nodes, at most `MAX_PATH_NODES` (2048), in buffers that `init` reserves on the host's heap. A found path's corners and corridor are on the host's heap too, so a code reload keeps them.
 - **Tickets:** a request can carry a ticket, which its path keeps. The crowd gives each of its requests the tick that it asks in, and takes only the path of its last request.
@@ -154,14 +165,14 @@ The `Navigation` library takes the agent type by its name. A name that no loaded
 
 ## Drawing
 
-- **In the editor:** in Edit, the viewport's helpers draw the navmeshes of a selected navigation volume from the cooked blobs, each agent type in its own color: the edges between polygons faintly, the walls brightly, the links across tiles in white, and the tiles' borders in grey ([Editor: Viewport](../editor/viewport.md#viewport)).
+- **In the editor:** in Edit, the viewport's helpers draw the navmeshes of a selected navigation volume from the cooked blobs, each agent type in its own color: the edges between polygons faintly, the walls brightly, the links across tiles and seams in white, and the tiles' borders in grey ([Editor: Viewport](../editor/viewport.md#viewport)).
 - **The Navigation Path tool** picks a start and a goal with two clicks in a scene view ([Editor: Viewport: Navigation path](../editor/viewport.md#navigation-path)). The helpers draw the two points, and the path between them for each loaded agent type, faintly when it is partial. A selected entity with a `Nav_Path` draws its own path from where it stands to the tool's goal.
 - **Agents:** in Edit, a selected `Nav_Agent` draws its avoidance radius at its feet. In Play and Paused, a selected agent draws its last tick with `nav.draw_agent`: its corridor's polygons, its next corners, a line to each neighbor that it avoided, and its desired velocity in blue and its chosen one in green, as arrows a second long.
 - **In a game:** `nav.draw_volume(s, d, volume)` draws a volume's navmeshes, `nav.draw_corners` a path's corners, `nav.draw_path` an entity's path, and `nav.draw_agent` an agent's last tick, into a `debug.Draw`.
 
 ## Limits
 
-- **One navmesh at a time:** a path or a raycast stays on the navmesh of its start. Paths across navmeshes of different volumes are not found.
+- **Seams:** paths cross only between navmeshes whose volumes' faces touch ([Seams](#seams)). Volumes that overlap, or that are apart, are not joined. A path that crosses a navmesh that unloads is found again on what is left.
 - **Corners:** the funnel is the shortest path through the corridor that A* found, which does not always hold the straight line. A path can turn where the corridor bends. The crowd's shortcuts straighten it as the agent walks.
 - **Crowds:** no formations or groups that move together, and no off-mesh links. Agents avoid each other and the navmesh's walls, not dynamic bodies, which their characters push or are pushed by. An agent stands still while it waits for its first path, a tick or more.
 - **Heights:** Recast lifts its detail meshes a cell up, so a point on the navmesh is about one `cell_height` above the floor, as in Detour.
