@@ -5,7 +5,7 @@
 // mesh_files.odin), `cook stages` cooks USD stages (see stages.odin), `cook navmeshes` bakes the scenes' navmeshes (see
 // nav_meshes.odin), `cook instance-sets` cooks .instances files (see instance_sets.odin), `cook blackboards`, `cook
 // decisions` and `cook perceptions` cook the AI's blackboards, decisions and perceptions (see blackboards.odin,
-// decisions.odin and perceptions.odin), and `cook daemon` cooks every kind whenever the
+// decisions.odin and perceptions.odin), `cook worlds` cooks the worlds' lists of scenes (see worlds.odin), and `cook daemon` cooks every kind whenever the
 // content changes (see daemon.odin). `cook all` cooks every kind in one pass, and with --prune deletes the blobs of
 // assets that left the content (see all.odin). `cook stage-report` measures stages against the renderer's limits. `cook package`
 // packs a release cache into bundles (see package.odin).
@@ -37,6 +37,7 @@ USAGE :: `usage: cook scripts --cache <dir> --config dev|release [--definitions 
        cook blackboards --cache <dir> --config dev|release --root <name>=<dir> [--root <name>=<dir>]...
        cook decisions --cache <dir> --config dev|release --root <name>=<dir> [--root <name>=<dir>]...
        cook perceptions --cache <dir> --config dev|release --root <name>=<dir> [--root <name>=<dir>]...
+       cook worlds --cache <dir> --config dev|release --root <name>=<dir> [--root <name>=<dir>]...
        cook all --cache <dir> --config dev|release --dxc <dxc.exe> [--include <dir>]... [--definitions <file>] [--prune] --root <name>=<dir> [--root <name>=<dir>]...
        cook stage-report <stage>...
        cook package --cache <dir> --out <dir> [--project <file>]
@@ -123,6 +124,10 @@ main :: proc() {
 	case "perceptions":
 		if options, parsed = parse_cook_args(os.args[2:]); parsed {
 			ok = cook_batch(options, .Perception)
+		}
+	case "worlds":
+		if options, parsed = parse_cook_args(os.args[2:]); parsed {
+			ok = cook_batch(options, .World)
 		}
 	case "all":
 		args := make([dynamic]string, context.temp_allocator)
@@ -321,6 +326,8 @@ kind_plural :: proc(kind: format.Asset_Kind) -> string {
 		return "decisions"
 	case .Perception:
 		return "perceptions"
+	case .World:
+		return "worlds"
 	}
 	return "assets"
 }

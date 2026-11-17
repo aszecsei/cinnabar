@@ -320,7 +320,7 @@ update-compressonator tag="": install-compressonator
 alias b := build
 
 # Build the host and the game DLL, and cook the game's scripts and scenes
-build: host game-dll script-types scripts scenes shaders textures models meshes stages instance-sets materials effects animation_graphs audio fonts ui sprite_sheets navmeshes blackboards decisions perceptions
+build: host game-dll script-types scripts scenes shaders textures models meshes stages instance-sets materials effects animation_graphs audio fonts ui sprite_sheets navmeshes blackboards decisions perceptions worlds
 
 # Build the development host
 host: (agility-runtime dev_dir) (fidelityfx-runtime dev_dir) luau jolt opus lz4
@@ -501,6 +501,11 @@ decisions config="dev": cook
 # A perception without a .meta file gets one: commit it.
 perceptions config="dev": cook
     "./{{tools_dir}}/cook.exe" perceptions --cache "{{ if config == "release" { release_cache } else { cache_dir } }}" --config {{config}} {{roots}}
+
+# Cook the game's worlds, the lists of scenes that stream, into the loose cache of the configuration (see
+# docs/content/kinds/worlds.md#worlds). A world without a .meta file gets one: commit it.
+worlds config="dev": cook
+    "./{{tools_dir}}/cook.exe" worlds --cache "{{ if config == "release" { release_cache } else { cache_dir } }}" --config {{config}} {{roots}}
 
 # Cook the game's fonts and their atlases into the loose cache of the configuration (see docs/content/kinds/fonts.md#fonts).
 # A font without a .meta file gets one: commit it.

@@ -349,6 +349,8 @@ Asset_Kind :: enum u32 {
 	Decision,
 	// The tags that an agent's Perceiver notices, and the rows that fill its blackboard's keys from what it perceives.
 	Perception,
+	// The scenes of a streamed world: each one's bounds and load and unload distances, or that it is always loaded.
+	World,
 }
 
 // Slice is a range of a blob, in bytes from the blob's start.
