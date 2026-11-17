@@ -10,6 +10,7 @@ import "cinnabar:core/gpu"
 import "cinnabar:engine/ecs"
 import "cinnabar:engine/editor/link"
 import "cinnabar:engine/render"
+import "cinnabar:engine/scene"
 
 // The viewport tools' game side (see docs/editor/viewport.md#viewport). The editor sends its cameras, its selection and its
 // gizmos, and the game draws each viewport from its camera with add_viewport_passes after its own passes: an outline
@@ -996,7 +997,7 @@ pick_result :: proc(
 				continue
 			}
 			if entity, alive := ecs.slot_entity(w, u32(i) * 32 + bit); alive {
-				key := scene_key_of(w, entity)
+				key := scene.key_of(w, entity)
 				append(
 					&hits,
 					link.Pick_Hit{entity = u64(entity), scene_id = key.id, scene = key.scene},

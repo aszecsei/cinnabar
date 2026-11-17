@@ -6,6 +6,7 @@ import "core:math/rand"
 
 import "cinnabar:engine/ecs"
 import "cinnabar:engine/editor/link"
+import "cinnabar:engine/scene"
 import "cinnabar:engine/script"
 
 // Game commands (see docs/editor/shell-and-panels.md#commands): commands that the game describes, which the editor shows in its ribbon
@@ -64,14 +65,14 @@ register_command :: proc(e: ^Editor, command: Command) {
 
 // scene_id is an entity's scene ID, or 0 for one that the game spawned, which no operation can name.
 scene_id :: proc(w: ^ecs.World, entity: ecs.Entity) -> u64 {
-	return scene_id_of(w, entity)
+	return scene.key_of(w, entity).id
 }
 
 // scene_number is the number of an entity's scene, which an operation on it names, so the editor edits the document
 // that has it (see docs/editor/document-and-scenes.md#several-scenes). An operation with 0 edits the editor's active
 // scene, as for a new entity at the root.
 scene_number :: proc(w: ^ecs.World, entity: ecs.Entity) -> u32 {
-	return scene_key_of(w, entity).scene
+	return scene.key_of(w, entity).scene
 }
 
 // new_scene_id is a random scene ID for an entity that a command creates.

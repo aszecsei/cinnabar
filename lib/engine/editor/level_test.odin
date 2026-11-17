@@ -87,8 +87,8 @@ the_editors_scenes_unload_the_level :: proc(t: ^testing.T) {
 		nil,
 	)
 	testing.expect_value(t, f.platform.level_generation(), before + 1)
-	testing.expect_value(t, f.editor.level, before + 1)
-	door := find_scene_entity(&f.editor, &f.world, 1, 0x51)
+	testing.expect_value(t, f.editor.scenes.level, before + 1)
+	door := scene.find(f.editor.scenes, &f.world, 1, 0x51)
 	testing.expect(t, door != 0)
 	testing.expect(t, test_level.total_used > 0)
 }
@@ -108,16 +108,16 @@ the_maps_go_with_the_level_when_the_game_loads_a_scene :: proc(t: ^testing.T) {
 		},
 		nil,
 	)
-	old := find_scene_entity(&f.editor, &f.world, 0, 0x51)
+	old := scene.find(f.editor.scenes, &f.world, 0, 0x51)
 	testing.expect(t, old != 0)
 
 	// As scene.load does.
 	scene.unload_level(&f.world)
-	testing.expect_value(t, len(scene_maps(&f.editor)), 0)
+	testing.expect(t, !scene.has_maps(f.editor.scenes))
 	e := ecs.spawn(&f.world)
 	ecs.add(&f.world, e, scene.Scene_Entity{id = 0x52})
 
-	testing.expect_value(t, find_scene_entity(&f.editor, &f.world, 0, 0x51), 0)
-	testing.expect_value(t, find_scene_entity(&f.editor, &f.world, 0, 0x52), e)
-	testing.expect_value(t, f.editor.level, f.platform.level_generation())
+	testing.expect_value(t, scene.find(f.editor.scenes, &f.world, 0, 0x51), 0)
+	testing.expect_value(t, scene.find(f.editor.scenes, &f.world, 0, 0x52), e)
+	testing.expect_value(t, f.editor.scenes.level, f.platform.level_generation())
 }
