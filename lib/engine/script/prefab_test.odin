@@ -170,3 +170,53 @@ return Spawner`,
 	expect_reports(t, f, {1, 1})
 
 }
+
+// What the test's spawned hook saw: each root and its spawner. Each test thread has its own.
+@(private = "file", thread_local)
+hooked: [dynamic]Hooked_Spawn
+
+@(private = "file")
+Hooked_Spawn :: struct {
+	root, spawner: ecs.Entity,
+}
+
+// World.spawn tells the spawned hook each root that it spawns, with the entity whose behaviour spawned it, so a scene
+// can own what its entities spawn.
+@(test)
+world_spawn_names_its_spawner_to_the_spawned_hook :: proc(t: ^testing.T) {
+	f := setup_reload(t)
+	defer teardown_reload(f)
+	context.user_ptr = f.base
+	context.logger = capture_world_errors(f.base)
+	hooked = make([dynamic]Hooked_Spawn, context.temp_allocator)
+	spawner := write_script(
+		t,
+		&f,
+		9,
+		0,
+		`
+local Spawner = Behaviour.define("Spawner", {prefab = Field.asset()})
+function Spawner:start()
+	World.spawn()
+	World.spawn(self.prefab)
+end
+return Spawner`,
+	)
+	set_prefab_spawner(&f.runtime, test_spawner)
+	set_spawned_hook(&f.runtime, proc(r: ^Runtime, root, spawner: ecs.Entity) {
+		append(&hooked, Hooked_Spawn{root, spawner})
+	})
+	e := ecs.spawn(&f.world)
+	testing.expect(
+		t,
+		attach_script(&f.runtime, e, spawner, {{name = "prefab", kind = .Asset, asset = PREFAB}}),
+	)
+	phase(f.base)
+	testing.expect_value(t, len(hooked), 2)
+	for h in hooked {
+		testing.expect_value(t, h.spawner, e)
+		testing.expect(t, ecs.is_alive(&f.world, h.root) && h.root != e)
+	}
+	// Outside a behaviour, nothing spawns.
+	testing.expect_value(t, calling_entity(&f.runtime), 0)
+}

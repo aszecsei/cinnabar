@@ -153,6 +153,13 @@ settle :: proc(r: ^Runtime) {
 	r.callbacks = callbacks
 }
 
+// forget_despawned ends the behaviours of the entities that are gone, with their on_disable and on_destroy, and runs
+// the activation callbacks, at once rather than at the next script step, as after a scene unloads (see
+// docs/world/scenes.md#the-systems). Call it between frames or in a serial phase.
+forget_despawned :: proc(r: ^Runtime) {
+	drain_log(r)
+}
+
 // drain_log runs the callbacks for the world's changes: on_disable and on_destroy for despawned behaviours, and the
 // activation callbacks. Bindings that change activity drain it at once, so their callbacks run before they return.
 @(private)

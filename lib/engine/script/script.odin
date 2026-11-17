@@ -96,6 +96,9 @@ Runtime :: struct {
 	// A registration, which reload clears: what World.spawn(prefab) calls, which lib/engine/scene sets, since the
 	// scene loader is above this package (see set_prefab_spawner).
 	prefab_spawner:             Prefab_Spawner,
+	// A registration, which reload clears: what World.spawn calls with each root that it spawns, which lib/engine/scene
+	// sets to give it the spawner's scene (see set_spawned_hook).
+	spawned_hook:               Spawned_Hook,
 	// Script actions (see actions.odin): their instances, the prelude's table of the classes that modules defined, and
 	// the registration that runs them in the fixed step, which reload clears.
 	actions:                    [MAX_ACTIONS]Action_Instance,
@@ -218,6 +221,7 @@ reload :: proc(r: ^Runtime, platform: ^core.Platform_API, register: Register_Pro
 	r.light_methods = {}
 	r.userdata_methods = {}
 	r.prefab_spawner = nil
+	r.spawned_hook = nil
 	r.document_component = 0
 	r.fixed_hook = {}
 	r.exposed_count = 0
