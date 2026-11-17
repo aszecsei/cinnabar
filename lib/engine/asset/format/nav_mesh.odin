@@ -1,5 +1,6 @@
 package asset_format
 
+import "core:math"
 import "core:mem"
 
 import "cinnabar:core/layout"
@@ -347,4 +348,48 @@ nav_mesh_write :: proc(contents: Nav_Mesh_Contents, allocator := context.allocat
 	}
 	mem.copy(raw_data(buffer), &blob, size_of(blob))
 	return buffer[:]
+}
+
+// nav_edge_overlap gives the part of the edge a to b that the edge c to d, across side, overlaps, out of 255 from a,
+// where the two are within climb of each other's height. The cook joins a navmesh's tiles by it, and nav joins the
+// edges of two navmeshes that meet at a seam (see docs/ai/navigation.md#seams). The edges' lines may be gap apart, a
+// hundredth of a cell by default.
+nav_edge_overlap :: proc(
+	a, b, c, d: [3]f32,
+	side: Nav_Side,
+	climb, cell_size: f32,
+	gap: f32 = -1,
+) -> (
+	t_min, t_max: u8,
+	ok: bool,
+) {
+	// The edges run along u, on a line of w.
+	u, w := 2, 0
+	if side == .North || side == .South {
+		u, w = 0, 2
+	}
+	gap := gap if gap >= 0 else cell_size * 0.01
+	if abs(a[w] - c[w]) > gap || abs(b[u] - a[u]) < 1e-6 || abs(d[u] - c[u]) < 1e-6 {
+		return
+	}
+	low := max(min(a[u], b[u]), min(c[u], d[u]))
+	high := min(max(a[u], b[u]), max(c[u], d[u]))
+	if high - low < cell_size * 0.01 {
+		return
+	}
+	along :: proc(p, q: [3]f32, u: int, at: f32) -> (t, y: f32) {
+		t = (at - p[u]) / (q[u] - p[u])
+		return t, p.y + (q.y - p.y) * t
+	}
+	t_low, y_low := along(a, b, u, low)
+	t_high, y_high := along(a, b, u, high)
+	_, other_low := along(c, d, u, low)
+	_, other_high := along(c, d, u, high)
+	if abs(y_low - other_low) > climb || abs(y_high - other_high) > climb {
+		return
+	}
+	quantize :: proc(t: f32) -> u8 {
+		return u8(clamp(math.round(t * 255), 0, 255))
+	}
+	return quantize(min(t_low, t_high)), quantize(max(t_low, t_high)), true
 }

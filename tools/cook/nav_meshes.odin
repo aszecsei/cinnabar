@@ -1355,7 +1355,7 @@ nav_assemble :: proc(plan: ^Nav_Plan, tiles: []Nav_Tile_Data) -> format.Nav_Mesh
 						c := vertices[other.first_vertex + u32(q.vertices[m])]
 						d :=
 							vertices[other.first_vertex + u32(q.vertices[(m + 1) % int(q.vertex_count)])]
-						if t_min, t_max, overlaps := nav_edge_overlap(
+						if t_min, t_max, overlaps := format.nav_edge_overlap(
 							a,
 							b,
 							c,
@@ -1403,45 +1403,4 @@ nav_assemble :: proc(plan: ^Nav_Plan, tiles: []Nav_Tile_Data) -> format.Nav_Mesh
 		detail_vertices = detail_vertices[:],
 		detail_triangles = detail_triangles[:],
 	}
-}
-
-// nav_edge_overlap gives the part of the edge a to b that the edge c to d, on the next tile across side, overlaps, out of
-// 255 from a, where the two are within climb of each other's height.
-@(private = "file")
-nav_edge_overlap :: proc(
-	a, b, c, d: [3]f32,
-	side: format.Nav_Side,
-	climb, cell_size: f32,
-) -> (
-	t_min, t_max: u8,
-	ok: bool,
-) {
-	// The edges run along u, on a line of w.
-	u, w := 2, 0
-	if side == .North || side == .South {
-		u, w = 0, 2
-	}
-	if abs(a[w] - c[w]) > cell_size * 0.01 || abs(b[u] - a[u]) < 1e-6 || abs(d[u] - c[u]) < 1e-6 {
-		return
-	}
-	low := max(min(a[u], b[u]), min(c[u], d[u]))
-	high := min(max(a[u], b[u]), max(c[u], d[u]))
-	if high - low < cell_size * 0.01 {
-		return
-	}
-	along :: proc(p, q: [3]f32, u: int, at: f32) -> (t, y: f32) {
-		t = (at - p[u]) / (q[u] - p[u])
-		return t, p.y + (q.y - p.y) * t
-	}
-	t_low, y_low := along(a, b, u, low)
-	t_high, y_high := along(a, b, u, high)
-	_, other_low := along(c, d, u, low)
-	_, other_high := along(c, d, u, high)
-	if abs(y_low - other_low) > climb || abs(y_high - other_high) > climb {
-		return
-	}
-	quantize :: proc(t: f32) -> u8 {
-		return u8(clamp(math.round(t * 255), 0, 255))
-	}
-	return quantize(min(t_low, t_high)), quantize(max(t_low, t_high)), true
 }
