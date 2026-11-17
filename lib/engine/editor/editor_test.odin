@@ -115,6 +115,7 @@ setup :: proc(t: ^testing.T) -> ^Fixture {
 			virtual.release(ptr, uint(size))
 		},
 	}
+	use_test_level(&f.platform)
 	testing.expect(t, ecs.init(&f.world, &f.platform))
 	ecs.register_engine_components(&f.world.registry)
 	scene.register_components(&f.world.registry)

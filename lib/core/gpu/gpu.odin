@@ -378,8 +378,9 @@ format_size :: proc(format: Format) -> int {
 	return 0
 }
 
-// Scope is a resource's lifetime group. On a soft restart, core destroys every resource in the Game scope.
-// The engine destroys the Level and Asset scopes with gpu_destroy_scope. Permanent resources belong to core.
+// Scope is a resource's lifetime group. On a soft restart, core destroys every resource in the Game scope. core destroys
+// the Level scope with the level arena, at level_unload and at a soft restart. The engine destroys the Asset scope with
+// gpu_destroy_scope. Permanent resources belong to core.
 Scope :: enum u8 {
 	Game,
 	Level,

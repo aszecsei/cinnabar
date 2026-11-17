@@ -63,8 +63,8 @@ load_asset :: proc(
 	return true
 }
 
-// load replaces every entity in the world with the scene's, and makes its GUID the world's scene. Call it between
-// frames, outside the script phase. What the world cannot use, such as a component that the game no longer registers
+// load replaces every entity in the world with the scene's, and makes its GUID the world's scene. It unloads the level
+// first (see unload_level). Call it between frames, outside the script phase. What the world cannot use, such as a component that the game no longer registers
 // or a field that it no longer has, is skipped with a warning: the scene keeps it, so a broken build never deletes
 // scene data.
 //
@@ -79,7 +79,7 @@ load :: proc(
 	handles: ^map[u64]ecs.Entity = nil,
 	problems: ^[dynamic]Problem = nil,
 ) {
-	ecs.despawn_all(w)
+	unload_level(w)
 	w.scene = s.guid
 	local: map[u64]ecs.Entity
 	target := handles
@@ -90,6 +90,15 @@ load :: proc(
 	clear(target)
 	spawned := add_entities(w, scripts, s.entities, target, problems)
 	log.infof("scene: loaded %d entities", spawned)
+}
+
+// unload_level despawns every entity, leaves the world with no scene, and unloads the level: the level arena's memory
+// and the GPU resources in the Level scope go (see docs/core/jobs-and-memory.md#level-memory). Call it between frames,
+// outside the script phase, as load does before it adds a scene.
+unload_level :: proc(w: ^ecs.World) {
+	ecs.despawn_all(w)
+	w.scene = {}
+	w.platform.level_unload()
 }
 
 // add_entities adds entities of the scene with the number to the world, as load does, and returns how many it spawned.

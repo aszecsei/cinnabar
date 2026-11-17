@@ -41,6 +41,10 @@ Fixture :: struct {
 	world:    ecs.World,
 }
 
+// The level unloads of the test's thread, which its platform counts.
+@(private = "file", thread_local)
+level_unloads: u64
+
 @(private = "file")
 setup :: proc(t: ^testing.T) -> ^Fixture {
 	f := new(Fixture)
@@ -57,6 +61,13 @@ setup :: proc(t: ^testing.T) -> ^Fixture {
 		},
 		memory_release = proc(ptr: rawptr, size: int) {
 			virtual.release(ptr, uint(size))
+		},
+		level_allocator = virtual.arena_allocator(&f.frame),
+		level_unload = proc() {
+			level_unloads += 1
+		},
+		level_generation = proc() -> u64 {
+			return level_unloads
 		},
 	}
 	testing.expect(t, ecs.init(&f.world, &f.platform))
@@ -453,4 +464,24 @@ an_encoded_change_sets_back_to_the_same_bytes :: proc(t: ^testing.T) {
 		testing.expect(t, set_field(&f.world, e, 1, u64(PROBE_ID), field, false, &handles))
 	}
 	testing.expect(t, ecs.get(&f.world, e, Probe)^ == after)
+}
+
+// A scene replaces the level: load unloads the old one before it adds the scene's entities.
+@(test)
+loading_a_scene_unloads_the_level :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	before := f.platform.level_generation()
+	text := `scene 1
+entity 00000000000000a1
+name = "Root"
+`
+	load(&f.world, nil, parse(t, text))
+	testing.expect_value(t, f.platform.level_generation(), before + 1)
+	testing.expect_value(t, count(f), 1)
+
+	unload_level(&f.world)
+	testing.expect_value(t, f.platform.level_generation(), before + 2)
+	testing.expect_value(t, count(f), 0)
+	testing.expect_value(t, f.world.scene, format.Guid{})
 }

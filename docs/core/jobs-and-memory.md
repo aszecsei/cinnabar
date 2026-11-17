@@ -28,6 +28,7 @@ The pattern is the same everywhere: split work into chunks, start one job per ba
 |---|---|---|
 | Permanent | Process | Yes |
 | Frame | One frame, double-buffered | Not applicable |
+| Level | Until the level unloads, with the GPU `Level` scope (see [Level memory](#level-memory)) | Yes |
 | Asset | Managed by the asset runtime, which allocates from `asset_allocator` (the host's heap) | Yes |
 | Script heap | Managed by the script VM | Yes |
 
@@ -36,3 +37,11 @@ All arenas belong to the host. Game-side code allocates from them through alloca
 Game-side stores that must not move, such as world storage, reserve virtual memory directly with `memory_reserve` and `memory_commit` in `Platform_API`. They hold no allocator, so they survive code reload. `core` releases every reservation that the game still holds at a soft restart.
 
 Frame memory is where almost everything transient goes: command buffers, the render graph, extraction records, the editor's messages for the game, and each job's scratch. It is double-buffered because the GPU backend's translation jobs of frame N can still be reading command buffers when frame N+1 starts recording.
+
+### Level memory
+
+The Level arena holds data that lives as long as the loaded level. The game allocates from it through `level_allocator` in `Platform_API`. `level_unload` frees all of it at once and destroys the GPU resources in the `Level` scope (see [GPU](../gpu/resources-and-pipelines.md#resources)), so a level that unloads leaves no holes in the heap. Freeing one allocation does nothing.
+
+- **Who unloads it:** a level is the world's scene today. `scene.unload_level` despawns every entity and calls `level_unload`. `scene.load` calls it before it adds a scene, and so does the editor's load of its scenes (see [Editor](../editor/document-and-scenes.md#document-model)). A soft restart unloads the level too, because the level belongs to the game that loaded it.
+- **When:** between frames, outside the script phase, when no job holds level memory.
+- **Holders:** `level_generation` counts the unloads. A holder of level data keeps the generation that it allocated in. When the generation changes, its data is gone, and it drops its pointers before it reads them. The editor's maps from scene ID to entity are level data, and they follow this rule (`scene_maps` in `lib/engine/editor/edit.odin`).
