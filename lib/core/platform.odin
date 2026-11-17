@@ -39,11 +39,15 @@ import physics_backend "physics_backend:."
 
 PERMANENT_RESERVE :: 4 * mem.Gigabyte
 FRAME_RESERVE :: 256 * mem.Megabyte
+LEVEL_RESERVE :: 1 * mem.Gigabyte
 
 @(private)
 Platform :: struct {
 	permanent:          virtual.Arena,
 	frame:              [2]virtual.Arena,
+	level:              virtual.Arena,
+	// How many times level_unload freed the level arena.
+	level_generation:   u64,
 	frame_index:        u64,
 	start:              time.Tick,
 	last_frame:         time.Tick,
@@ -125,6 +129,10 @@ init :: proc(
 			return false
 		}
 	}
+	if err := virtual.arena_init_static(&platform.level, LEVEL_RESERVE); err != nil {
+		log.errorf("core: level arena: %v", err)
+		return false
+	}
 	if !profile.init() {
 		log.error("core: failed to start the profiler")
 		return false
@@ -171,6 +179,9 @@ init :: proc(
 	platform.api = {
 		permanent_allocator             = virtual.arena_allocator(&platform.permanent),
 		frame_allocator                 = virtual.arena_allocator(&platform.frame[0]),
+		level_allocator                 = virtual.arena_allocator(&platform.level),
+		level_unload                    = level_unload,
+		level_generation                = level_generation,
 		asset_allocator                 = runtime.heap_allocator(),
 		heap_allocator                  = runtime.heap_allocator(),
 		content_dir                     = content,
@@ -335,6 +346,7 @@ shutdown :: proc() {
 	for &arena in platform.frame {
 		virtual.arena_destroy(&arena)
 	}
+	virtual.arena_destroy(&platform.level)
 	virtual.arena_destroy(&platform.permanent)
 }
 
@@ -392,9 +404,25 @@ alloc_game_state :: proc(size: int) -> rawptr {
 	return ptr
 }
 
-// soft_restart runs between the old game's shutdown and the new game's init. It destroys the GPU resources in the
-// Game scope, the virtual memory reservations, the file reads, the script VMs, the physics worlds and the audio
-// backend's voices, sounds and buses, which the old game may have left, and frees all permanent allocations.
+// level_unload is Platform_API.level_unload: it frees the level arena and destroys the GPU resources in the Level scope.
+@(private = "file")
+level_unload :: proc() {
+	virtual.arena_free_all(&platform.level)
+	if count := backend.destroy_scope(.Level); count > 0 {
+		log.debugf("core: destroyed %d GPU resources in the Level scope", count)
+	}
+	platform.level_generation += 1
+}
+
+// level_generation is Platform_API.level_generation.
+@(private = "file")
+level_generation :: proc() -> u64 {
+	return platform.level_generation
+}
+
+// soft_restart runs between the old game's shutdown and the new game's init. It unloads the level, destroys the GPU
+// resources in the Game scope, the virtual memory reservations, the file reads, the script VMs, the physics worlds and
+// the audio backend's voices, sounds and buses, which the old game may have left, and frees all permanent allocations.
 soft_restart :: proc() {
 	rumble_send(rumble_stop_all(&platform.rumble))
 	if count := platform.api.audio.reset(); count > 0 {
@@ -406,6 +434,7 @@ soft_restart :: proc() {
 	if count := platform.api.physics.world_destroy_all(); count > 0 {
 		log.debugf("core: destroyed %d physics worlds that the game left", count)
 	}
+	level_unload()
 	if count := backend.destroy_scope(.Game); count > 0 {
 		log.debugf("core: destroyed %d GPU resources that the game left in the Game scope", count)
 	}

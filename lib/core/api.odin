@@ -18,6 +18,14 @@ Platform_API :: struct {
 	// Allocators are built by the host, so their procedures stay valid across reloads.
 	permanent_allocator:             runtime.Allocator,
 	frame_allocator:                 runtime.Allocator,
+	// The Level arena: memory that lives as long as the loaded level, such as the world's scene (see
+	// docs/core/jobs-and-memory.md#level-memory). level_unload frees all of it at once and destroys the GPU resources in
+	// the Level scope; call it between frames, when no job holds level memory. level_generation counts the unloads, so a
+	// holder of level data keeps the generation that it allocated in, and its data is gone once the generation changes.
+	// A soft restart unloads the level.
+	level_allocator:                 runtime.Allocator,
+	level_unload:                    proc(),
+	level_generation:                proc() -> u64,
 	// A general-purpose allocator for loaded assets, which can free. Its memory is the host's.
 	asset_allocator:                 runtime.Allocator,
 	// A general-purpose allocator for other game-side state that grows and shrinks, such as the editor's view of the
