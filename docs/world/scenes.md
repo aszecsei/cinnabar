@@ -46,7 +46,7 @@ A number is used only once in a level. `add_scene` refuses a number that is load
 3. Clears the scene's ID map, removes the scene from the table, and releases the scene's blob.
 4. If the scene's GUID is `World.scene`, gives `World.scene` to the next loaded scene, or clears it.
 
-The other scenes' entities, their references and their parents do not change. An entity handle into the unloaded scene is no longer alive (`ecs.is_alive` returns false), so a stored reference to it fails safely. The level's memory stays allocated until the whole level unloads ([Core: Level memory](../core/jobs-and-memory.md#level-memory)).
+The other scenes' entities, their references and their parents do not change. An entity handle into the unloaded scene is no longer alive (`ecs.is_alive` returns false), so a stored reference to it fails safely. The scene's own memory and its GPU resources are freed, and the other scenes' memory stays ([Core: Scene memory](../core/jobs-and-memory.md#scene-memory)).
 
 ## Ownership
 
@@ -61,7 +61,7 @@ A scene owns its own entities, their children, and the entities that its entitie
 
 ## Scene IDs
 
-`scene.find(scenes, w, number, id)` resolves a scene ID in one scene. The editor's operations use the same lookup. Each scene's map from scene ID to entity is in the Level arena. If an entry is stale (the entity is gone, or its slot holds another entity), `find` builds every map again from each entity's `Scene_Entity`. A scene that came into the world without `add_scene` is found in the same way. `scene.key_of(w, entity)` returns an entity's scene number and scene ID.
+`scene.find(scenes, w, number, id)` resolves a scene ID in one scene. The editor's operations use the same lookup. Each loaded scene's map from scene ID to entity is in the scene's memory, and goes with the scene. The map of a scene that came in without `add_scene` is in the Level arena. If an entry is stale (the entity is gone, or its slot holds another entity), `find` builds every map again from each entity's `Scene_Entity`. A scene that came into the world without `add_scene` is found in the same way. `scene.key_of(w, entity)` returns an entity's scene number and scene ID.
 
 ## The systems
 
@@ -110,6 +110,6 @@ return Portal
 ## Limits
 
 - **Navmeshes** follow `World.scene`, which is one scene: the first scene that loaded, or the next scene after it unloads ([Navigation](../ai/navigation.md#loading)).
-- **Level memory** frees only when the whole level unloads. An unloaded scene leaves its empty map in the arena.
+- **Scene memory:** at most `core.MAX_SCENE_MEMORY` (64) scenes are loaded at once. `add_scene` refuses one more and logs an error ([Core: Scene memory](../core/jobs-and-memory.md#scene-memory)).
 - **No asynchronous load:** a scene loads in one frame, from a blob that `asset.load` reads at once.
 - **The editor** does not edit or save streamed scenes. Its documents are its own scenes, numbered below `FIRST_RUNTIME_SCENE`. A load of its scenes unloads the level, and every streamed scene with it.
