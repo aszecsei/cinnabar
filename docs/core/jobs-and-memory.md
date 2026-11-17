@@ -29,6 +29,7 @@ The pattern is the same everywhere: split work into chunks, start one job per ba
 | Permanent | Process | Yes |
 | Frame | One frame, double-buffered | Not applicable |
 | Level | Until the level unloads, with the GPU `Level` scope (see [Level memory](#level-memory)) | Yes |
+| Scene | One for each loaded scene, until that scene or the level unloads, with the scene's GPU scope (see [Scene memory](#scene-memory)) | Yes |
 | Asset | Managed by the asset runtime, which allocates from `asset_allocator` (the host's heap) | Yes |
 | Script heap | Managed by the script VM | Yes |
 
@@ -43,6 +44,17 @@ Frame memory is where almost everything transient goes: command buffers, the ren
 The Level arena holds data that lives as long as the loaded level. The game allocates from it through `level_allocator` in `Platform_API`. `level_unload` frees all of it at once and destroys the GPU resources in the `Level` scope (see [GPU](../gpu/resources-and-pipelines.md#resources)), so a level that unloads leaves no holes in the heap. Freeing one allocation does nothing.
 
 - **Who unloads it:** a level is every scene that the world holds ([World: Scenes](../world/scenes.md#the-level)). `scene.unload_level` despawns every entity, forgets every scene, and calls `level_unload`. `scene.load` calls it before it adds a scene, and so does the editor's load of its scenes (see [Editor](../editor/document-and-scenes.md#document-model)). A soft restart unloads the level too, because the level belongs to the game that loaded it.
-- **One scene:** scenes load into the level and unload from it one at a time (`scene.add_scene`, `scene.unload_scene`). Neither unloads the level. A scene that unloads leaves what it allocated in the arena, such as its empty map from scene ID to entity, until the whole level unloads. So a game that streams many scenes in one level grows the arena by each scene's maps.
+- **One scene:** scenes load into the level and unload from it one at a time (`scene.add_scene`, `scene.unload_scene`). Neither unloads the level. Each loaded scene has its own memory (see [Scene memory](#scene-memory)), which holds its map from scene ID to entity. So a scene that unloads frees its data, and a game that streams many scenes in one level does not grow the Level arena.
 - **When:** between frames, outside the script phase, when no job holds level memory.
-- **Holders:** `level_generation` counts the unloads. A holder of level data keeps the generation that it allocated in. When the generation changes, its data is gone, and it drops its pointers before it reads them. The scenes' maps from scene ID to entity are level data, and they follow this rule (`maps` in `lib/engine/scene/scenes.odin`).
+- **Holders:** `level_generation` counts the unloads. A holder of level data keeps the generation that it allocated in. When the generation changes, its data is gone, and it drops its pointers before it reads them. The map of a scene that came into the world without `scene.add_scene` is level data, and it follows this rule (`maps` in `lib/engine/scene/scenes.odin`).
+
+### Scene memory
+
+Each loaded scene has its own memory and GPU scope, beside the level's. A scene that unloads frees them while the other scenes' data stays.
+
+- **What it is:** `core` keeps a table of `MAX_SCENE_MEMORY` (64) slots in the host (`Scene_Memories` in `lib/core/scene_memory.odin`). `scene_memory_open` in `Platform_API` gives a free slot an arena that reserves its own 256 MB range of addresses, and returns a `Scene_Memory` handle. `scene_memory_allocator` gives the arena's allocator. `scene_memory_close` releases the range and destroys the GPU resources in the scene's scope (`scene_memory_scope`, see [GPU](../gpu/resources-and-pipelines.md#resources)). Freeing one allocation does nothing.
+- **Why a range for each scene:** a closed scene gives its pages and its addresses back to the operating system, so the heap gets no holes and an unloaded scene keeps no committed memory. A pool of reused chunk arenas would keep a large scene's pages after it unloads, or need a free list of chunks that can fragment. 64 bits of address space make one range for each scene cheap. Only the pages that a scene uses are committed.
+- **Who opens and closes it:** `scene.add_scene` opens a scene's memory, and `scene.unload_scene` closes it. `scene.memory_of` and `scene.allocator_of` give it to game code. `add_scene` refuses a scene when every slot is open. `level_unload` closes every scene's memory too, so a soft restart and `scene.unload_level` free it.
+- **When:** between frames, outside the script phase, when no job holds the scene's memory.
+- **Holders:** a `Scene_Memory` has a generation for its slot. A holder of scene data keeps the handle beside its data. When `scene_memory_alive` returns false, the scene unloaded, and the holder drops its pointers before it reads them. A slot that opens again has a new generation, so an old handle never becomes alive again. The scenes' maps from scene ID to entity follow this rule (`maps` in `lib/engine/scene/scenes.odin`).
+- **Code reload:** the table is the host's, so a scene's memory survives a code reload.

@@ -64,12 +64,14 @@ setup :: proc(t: ^testing.T) -> ^Fixture {
 		},
 		level_allocator = virtual.arena_allocator(&f.frame),
 		level_unload = proc() {
+			close_test_scene_memory()
 			level_unloads += 1
 		},
 		level_generation = proc() -> u64 {
 			return level_unloads
 		},
 	}
+	use_test_scene_memory(&f.platform)
 	testing.expect(t, ecs.init(&f.world, &f.platform))
 	ecs.register_engine_components(&f.world.registry)
 	register_components(&f.world.registry)
@@ -79,6 +81,7 @@ setup :: proc(t: ^testing.T) -> ^Fixture {
 
 @(private = "file")
 teardown :: proc(f: ^Fixture) {
+	close_test_scene_memory()
 	ecs.destroy(&f.world)
 	virtual.arena_destroy(&f.frame)
 	free(f)

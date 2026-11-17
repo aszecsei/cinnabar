@@ -1,5 +1,6 @@
 package scene
 
+import "base:runtime"
 import "core:log"
 
 import "cinnabar:core"
@@ -36,18 +37,29 @@ Loaded_Scene :: struct {
 	// the editor or from memory.
 	blob:     asset.Handle,
 	has_blob: bool,
+	// The scene's own memory and GPU scope, which unload_scene closes (see docs/core/jobs-and-memory.md#scene-memory).
+	memory:   core.Scene_Memory,
+}
+
+// Scene_Map is the map from scene ID to entity of one scene, and the memory that it is in: its scene's, or the level's
+// for a scene that index found without add_scene, whose memory is the zero handle.
+@(private)
+Scene_Map :: struct {
+	memory:  core.Scene_Memory,
+	handles: ^map[u64]ecs.Entity,
 }
 
 // Scenes is the world's loaded scenes, and the entity of each scene ID by its scene. The level is every loaded scene:
-// unload_level unloads all of them, and unload_scene one. The table and the map of maps use the heap; each scene's
-// map is in the Level arena, and level is the level generation that they were made in (see maps). It lives beside the
-// world, in Game_State.
+// unload_level unloads all of them, and unload_scene one. The table and the map of maps use the heap. Each loaded
+// scene's map is in its scene's memory, and goes with it; the map of a scene that index found without add_scene is in
+// the Level arena. level is the level generation that they were made in (see maps). It lives beside the world, in
+// Game_State.
 Scenes :: struct {
 	platform: ^core.Platform_API,
 	// The blobs of add_scene_asset, or nil.
 	assets:   ^asset.Assets,
 	loaded:   [dynamic]Loaded_Scene,
-	by_scene: map[u32]^map[u64]ecs.Entity,
+	by_scene: map[u32]Scene_Map,
 	level:    u64,
 	// The number that add_scene gives the next scene without one.
 	next:     u32,
@@ -59,7 +71,7 @@ init_scenes :: proc(s: ^Scenes, platform: ^core.Platform_API, assets: ^asset.Ass
 		platform = platform,
 		assets   = assets,
 		loaded   = make([dynamic]Loaded_Scene, platform.heap_allocator),
-		by_scene = make(map[u32]^map[u64]ecs.Entity, platform.heap_allocator),
+		by_scene = make(map[u32]Scene_Map, platform.heap_allocator),
 		level    = platform.level_generation(),
 		next     = FIRST_RUNTIME_SCENE,
 	}
@@ -70,9 +82,10 @@ reload_scenes :: proc(s: ^Scenes, platform: ^core.Platform_API) {
 	s.platform = platform
 }
 
-// destroy_scenes lets the blobs go and frees the table. The maps themselves are the level's memory.
+// destroy_scenes lets the blobs go, closes the scenes' memory and frees the table. The maps of scenes that index
+// found are the level's memory.
 destroy_scenes :: proc(s: ^Scenes) {
-	release_blobs(s)
+	release_scenes(s)
 	delete(s.loaded)
 	delete(s.by_scene)
 	s^ = {}
@@ -100,7 +113,8 @@ reserve_number :: proc(s: ^Scenes) -> u32 {
 }
 
 // add_scene adds a scene to the world beside the scenes that are loaded, and gives its number: number, or with none,
-// the next of the game's own (see FIRST_RUNTIME_SCENE). It refuses a number that is loaded, and gives false. The
+// the next of the game's own (see FIRST_RUNTIME_SCENE). The scene gets memory of its own, which goes when it unloads.
+// It refuses a number that is loaded, or a scene when core.MAX_SCENE_MEMORY scenes are loaded, and gives false. The
 // scene's IDs resolve only in the scene. The world's scene GUID, whose navmeshes load, is the first loaded scene's.
 // Call it between frames, outside the script phase. problems, if given, gets each warning, in frame memory.
 add_scene :: proc(
@@ -120,10 +134,17 @@ add_scene :: proc(
 		log.warnf("scene: the scene %d is loaded, so it is not loaded again", added)
 		return 0, false
 	}
+	memory, opened := s.platform.scene_memory_open()
+	if !opened {
+		log.errorf("scene: the scene %d has no memory, so it is not loaded", added)
+		return 0, false
+	}
 	if added >= s.next {
 		s.next = added + 1
 	}
-	append(&s.loaded, Loaded_Scene{number = added, guid = scene.guid})
+	// A map that index made in the level's memory before the scene loaded gives way to one in the scene's.
+	delete_key(&s.by_scene, added)
+	append(&s.loaded, Loaded_Scene{number = added, guid = scene.guid, memory = memory})
 	if w.scene == {} {
 		w.scene = scene.guid
 	}
@@ -157,8 +178,8 @@ add_scene_asset :: proc(
 }
 
 // unload_scene despawns the entities of the scene with the number, the entities that they own (see Scene_Owned) and
-// their children, and lets the scene's blob go. The other scenes, their entities and the game's own stay, and so does
-// the level's memory, which goes when the whole level unloads. A scene whose GUID is the world's passes it to the next
+// their children, lets the scene's blob go, and closes the scene's memory, which frees its map and destroys the GPU
+// resources in its scope. The other scenes, their entities, their memory and the game's own stay. A scene whose GUID is the world's passes it to the next
 // loaded scene. It gives how many entities it despawned. Call it between frames, outside the script phase; the
 // systems that keep data by entity drop the despawned ones at their next sweep, which game.forget_despawned runs at
 // once (see docs/world/scenes.md#the-systems).
@@ -183,10 +204,8 @@ unload_scene :: proc(w: ^ecs.World, s: ^Scenes, number: u32) -> int {
 			}
 		}
 	}
-	// The scene's map stays in the Level arena until the level unloads; an empty one costs its header.
-	if handles, has := s.by_scene[number]; has {
-		clear(handles)
-	}
+	delete_key(&s.by_scene, number)
+	s.platform.scene_memory_close(gone.memory)
 	doomed := make([dynamic]ecs.Entity, w.platform.frame_allocator)
 	it := ecs.world_iter(w)
 	for entity in ecs.world_next(&it) {
@@ -223,14 +242,14 @@ key_of :: proc(w: ^ecs.World, entity: ecs.Entity) -> Key {
 // find is the entity with a scene ID in the scene with the number, or 0. A handle that the map has but that is gone,
 // or that another entity's slot now holds, makes the maps be built again from every entity's Scene_Entity.
 find :: proc(s: ^Scenes, w: ^ecs.World, number: u32, id: u64) -> ecs.Entity {
-	if handles, ok := maps(s)[number]; ok {
-		if entity, has := handles[id]; has && key_of(w, entity) == {number, id} {
+	if m, ok := maps(s)[number]; ok {
+		if entity, has := m.handles[id]; has && key_of(w, entity) == {number, id} {
 			return entity
 		}
 	}
 	index(s, w)
-	if handles, ok := maps(s)[number]; ok {
-		return handles[id] or_else 0
+	if m, ok := maps(s)[number]; ok {
+		return m.handles[id] or_else 0
 	}
 	return 0
 }
@@ -238,8 +257,8 @@ find :: proc(s: ^Scenes, w: ^ecs.World, number: u32, id: u64) -> ecs.Entity {
 // index maps every entity that a scene made from its scene's number and its scene ID. A scene that the world got
 // without add_scene, such as the game's own at init before this table, is found this way.
 index :: proc(s: ^Scenes, w: ^ecs.World) {
-	for _, handles in maps(s) {
-		clear(handles)
+	for _, m in maps(s) {
+		clear(m.handles)
 	}
 	it := ecs.world_iter(w)
 	for entity in ecs.world_next(&it) {
@@ -255,29 +274,67 @@ has_maps :: proc(s: ^Scenes) -> bool {
 	return len(maps(s)) != 0
 }
 
-// handles_of is the map from scene ID to entity of the scene with the number, made at its first use in the level's
-// memory. It stays where it is until the level unloads, so a new scene's map does not move it.
+// handles_of is the map from scene ID to entity of the scene with the number, made at its first use in the scene's
+// memory, or in the level's for a scene that is not loaded. It stays where it is until its memory goes, so a new
+// scene's map does not move it.
 handles_of :: proc(s: ^Scenes, number: u32) -> ^map[u64]ecs.Entity {
 	m := maps(s)
-	if handles, ok := m[number]; ok {
-		return handles
+	if existing, ok := m[number]; ok {
+		return existing.handles
 	}
-	handles := new(map[u64]ecs.Entity, s.platform.level_allocator)
-	handles^ = make(map[u64]ecs.Entity, s.platform.level_allocator)
-	m[number] = handles
+	memory, _ := memory_of(s, number)
+	allocator := s.platform.level_allocator
+	if memory != {} {
+		allocator = s.platform.scene_memory_allocator(memory)
+	}
+	handles := new(map[u64]ecs.Entity, allocator)
+	handles^ = make(map[u64]ecs.Entity, allocator)
+	m[number] = {memory, handles}
 	return handles
 }
 
-// maps is the maps of every scene by its number. They are level data: once the level unloads, they are gone, and the
-// next use builds them again. Read by_scene only through it.
+// memory_of is the memory of the loaded scene with the number, or false if it is not loaded. A holder of data in it
+// keeps the handle, and drops its pointers once Platform_API.scene_memory_alive is false: the scene unloaded.
+memory_of :: proc(s: ^Scenes, number: u32) -> (core.Scene_Memory, bool) {
+	index, found := find_loaded(s, number)
+	if !found {
+		return {}, false
+	}
+	return s.loaded[index].memory, true
+}
+
+// allocator_of is the allocator of the memory of the loaded scene with the number, or the nil allocator if it is not
+// loaded. What it allocates goes when the scene unloads.
+allocator_of :: proc(s: ^Scenes, number: u32) -> runtime.Allocator {
+	if memory, ok := memory_of(s, number); ok {
+		return s.platform.scene_memory_allocator(memory)
+	}
+	return runtime.nil_allocator()
+}
+
+// maps is the maps of every scene by its number. A map whose memory went is dropped: the level's maps once the level
+// unloads, and a scene's once its memory closes. The next use builds them again. Read by_scene only through it.
 @(private)
-maps :: proc(s: ^Scenes) -> ^map[u32]^map[u64]ecs.Entity {
+maps :: proc(s: ^Scenes) -> ^map[u32]Scene_Map {
 	follow_level(s)
+	for {
+		stale, found := u32(0), false
+		for number, m in s.by_scene {
+			if m.memory != {} && !s.platform.scene_memory_alive(m.memory) {
+				stale, found = number, true
+				break
+			}
+		}
+		if !found {
+			break
+		}
+		delete_key(&s.by_scene, stale)
+	}
 	return &s.by_scene
 }
 
 // follow_level forgets the maps and the scenes when the level unloaded since they were made. unload_level lets the
-// blobs go first; a level that another caller unloaded lets them go here.
+// blobs go first; a level that another caller unloaded lets them go here. level_unload closed the scenes' memory.
 @(private)
 follow_level :: proc(s: ^Scenes) {
 	if generation := s.platform.level_generation(); s.level != generation {
@@ -288,22 +345,23 @@ follow_level :: proc(s: ^Scenes) {
 
 @(private)
 forget_level :: proc(s: ^Scenes) {
-	release_blobs(s)
+	release_scenes(s)
 	clear(&s.loaded)
 	clear(&s.by_scene)
 	s.next = FIRST_RUNTIME_SCENE
 }
 
+// release_scenes lets the blobs go and closes the memory of the scenes that are loaded. Memory that level_unload
+// closed already stays closed.
 @(private)
-release_blobs :: proc(s: ^Scenes) {
-	if s.assets == nil {
-		return
-	}
+release_scenes :: proc(s: ^Scenes) {
 	for &loaded in s.loaded {
-		if loaded.has_blob {
+		if loaded.has_blob && s.assets != nil {
 			asset.unload(s.assets, loaded.blob)
 			loaded.has_blob = false
 		}
+		s.platform.scene_memory_close(loaded.memory)
+		loaded.memory = {}
 	}
 }
 

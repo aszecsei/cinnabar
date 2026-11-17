@@ -26,6 +26,17 @@ Platform_API :: struct {
 	level_allocator:                 runtime.Allocator,
 	level_unload:                    proc(),
 	level_generation:                proc() -> u64,
+	// The memory of each loaded scene, beside the level's (see docs/core/jobs-and-memory.md#scene-memory).
+	// scene_memory_open gives a scene its own arena and GPU scope, or false when MAX_SCENE_MEMORY scenes have one.
+	// scene_memory_close frees the arena and destroys the GPU resources in the scope, and the handle is then not alive,
+	// so a holder of scene data keeps the handle and drops its pointers once scene_memory_alive is false.
+	// scene_memory_allocator is the nil allocator for a handle that is not alive. level_unload closes every scene's
+	// memory. Open and close them between frames, when no job holds the scene's memory.
+	scene_memory_open:               proc() -> (Scene_Memory, bool),
+	scene_memory_close:              proc(m: Scene_Memory),
+	scene_memory_alive:              proc(m: Scene_Memory) -> bool,
+	scene_memory_allocator:          proc(m: Scene_Memory) -> runtime.Allocator,
+	scene_memory_scope:              proc(m: Scene_Memory) -> gpu.Scope,
 	// A general-purpose allocator for loaded assets, which can free. Its memory is the host's.
 	asset_allocator:                 runtime.Allocator,
 	// A general-purpose allocator for other game-side state that grows and shrinks, such as the editor's view of the
@@ -277,6 +288,13 @@ Game_API :: struct {
 
 // File_Read is the ticket of a read that file_read_begin started. 0 is no read.
 File_Read :: distinct u64
+
+// Scene_Memory names one scene's memory and GPU scope (see Platform_API.scene_memory_open). The zero value names
+// nothing, and a handle of memory that closed stays dead when its slot opens again.
+Scene_Memory :: struct {
+	slot:       u16,
+	generation: u16,
+}
 
 // File_Read_State is where a read is. The zero value is a failure, so a ticket that names no read never reads as done.
 File_Read_State :: enum u8 {

@@ -48,6 +48,8 @@ Platform :: struct {
 	level:              virtual.Arena,
 	// How many times level_unload freed the level arena.
 	level_generation:   u64,
+	// The memory of each loaded scene, which level_unload closes too.
+	scenes:             Scene_Memories,
 	frame_index:        u64,
 	start:              time.Tick,
 	last_frame:         time.Tick,
@@ -182,6 +184,11 @@ init :: proc(
 		level_allocator                 = virtual.arena_allocator(&platform.level),
 		level_unload                    = level_unload,
 		level_generation                = level_generation,
+		scene_memory_open               = scene_memory_open,
+		scene_memory_close              = scene_memory_close,
+		scene_memory_alive              = scene_memory_alive,
+		scene_memory_allocator          = scene_memory_allocator,
+		scene_memory_scope              = scene_memory_scope,
 		asset_allocator                 = runtime.heap_allocator(),
 		heap_allocator                  = runtime.heap_allocator(),
 		content_dir                     = content,
@@ -346,6 +353,7 @@ shutdown :: proc() {
 	for &arena in platform.frame {
 		virtual.arena_destroy(&arena)
 	}
+	scene_memories_close_all(&platform.scenes)
 	virtual.arena_destroy(&platform.level)
 	virtual.arena_destroy(&platform.permanent)
 }
@@ -404,14 +412,62 @@ alloc_game_state :: proc(size: int) -> rawptr {
 	return ptr
 }
 
-// level_unload is Platform_API.level_unload: it frees the level arena and destroys the GPU resources in the Level scope.
+// level_unload is Platform_API.level_unload: it closes every scene's memory, frees the level arena and destroys the
+// GPU resources in the Level scope.
 @(private = "file")
 level_unload :: proc() {
+	if count := scene_memories_close_all(&platform.scenes, destroy_scene_scope); count > 0 {
+		log.debugf("core: closed the memory of %d scenes", count)
+	}
 	virtual.arena_free_all(&platform.level)
 	if count := backend.destroy_scope(.Level); count > 0 {
 		log.debugf("core: destroyed %d GPU resources in the Level scope", count)
 	}
 	platform.level_generation += 1
+}
+
+// scene_memory_open is Platform_API.scene_memory_open.
+@(private = "file")
+scene_memory_open :: proc() -> (Scene_Memory, bool) {
+	return scene_memories_open(&platform.scenes)
+}
+
+// scene_memory_close is Platform_API.scene_memory_close: it frees the scene's arena and destroys the GPU resources in
+// its scope.
+@(private = "file")
+scene_memory_close :: proc(m: Scene_Memory) {
+	if slot, ok := scene_memories_close(&platform.scenes, m); ok {
+		destroy_scene_scope(slot)
+	}
+}
+
+// scene_memory_alive is Platform_API.scene_memory_alive.
+@(private = "file")
+scene_memory_alive :: proc(m: Scene_Memory) -> bool {
+	return scene_memories_alive(&platform.scenes, m)
+}
+
+// scene_memory_allocator is Platform_API.scene_memory_allocator.
+@(private = "file")
+scene_memory_allocator :: proc(m: Scene_Memory) -> runtime.Allocator {
+	return scene_memories_allocator(&platform.scenes, m)
+}
+
+// scene_memory_scope is Platform_API.scene_memory_scope.
+@(private = "file")
+scene_memory_scope :: proc(m: Scene_Memory) -> gpu.Scope {
+	return gpu.scene_scope(int(m.slot))
+}
+
+@(private = "file")
+destroy_scene_scope :: proc(slot: int) {
+	if count := backend.destroy_scope(gpu.scene_scope(slot)); count > 0 {
+		log.debugf(
+			"core: destroyed %d GPU resources in the scope of the scene memory %d",
+			count,
+			slot,
+		)
+	}
 }
 
 // level_generation is Platform_API.level_generation.

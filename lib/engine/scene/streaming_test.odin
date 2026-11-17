@@ -121,6 +121,7 @@ setup :: proc(t: ^testing.T) -> ^Streaming_Fixture {
 		},
 		level_allocator = virtual.arena_allocator(&level),
 		level_unload = proc() {
+			close_test_scene_memory()
 			virtual.arena_free_all(&level)
 			level_unloads += 1
 		},
@@ -128,6 +129,7 @@ setup :: proc(t: ^testing.T) -> ^Streaming_Fixture {
 			return level_unloads
 		},
 	}
+	use_test_scene_memory(&f.platform)
 	testing.expect(t, ecs.init(&f.world, &f.platform))
 	ecs.register_engine_components(&f.world.registry)
 	register_components(&f.world.registry)
@@ -152,6 +154,7 @@ teardown :: proc(f: ^Streaming_Fixture) {
 	ecs.destroy(&f.world)
 	virtual.arena_destroy(&f.frame)
 	virtual.arena_destroy(&level)
+	close_test_scene_memory()
 	free(f)
 }
 
@@ -247,8 +250,10 @@ loading_a_scene_again_leaks_nothing :: proc(t: ^testing.T) {
 		testing.expect_value(t, ecs.slot_count(w), slots)
 		testing.expect(t, find(&f.scenes, w, number, 0xd2) != 0)
 
+		testing.expect_value(t, open_test_scene_memory(), 1)
 		unload_scene(w, &f.scenes, number)
 		testing.expect_value(t, ecs.entity_count(w), 0)
+		testing.expect_value(t, open_test_scene_memory(), 0)
 		testing.expect(t, !is_resident(f, NORTH_GUID))
 		testing.expect_value(t, len(loaded_scenes(&f.scenes)), 0)
 	}
@@ -313,4 +318,68 @@ a_scene_load_unloads_every_scene :: proc(t: ^testing.T) {
 	unload_level(w, &f.scenes)
 	testing.expect_value(t, len(loaded_scenes(&f.scenes)), 0)
 	testing.expect(t, !is_resident(f, SOUTH_GUID))
+	testing.expect_value(t, open_test_scene_memory(), 0)
+}
+
+// Each scene's data is in its own memory. A holder keeps the scene's memory handle beside its data, and drops the data
+// once the handle is not alive: when its scene unloads, the other scene's data and IDs stay.
+@(test)
+a_holder_drops_the_data_of_a_scene_that_unloaded :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	w := &f.world
+
+	Holder :: struct {
+		memory: core.Scene_Memory,
+		data:   []int,
+	}
+	hold :: proc(f: ^Streaming_Fixture, number: u32, value: int) -> Holder {
+		memory, _ := memory_of(&f.scenes, number)
+		data := make([]int, 64, allocator_of(&f.scenes, number))
+		for &d in data {
+			d = value
+		}
+		return {memory, data}
+	}
+	// What the holder reads: its data while its scene's memory is alive, or nothing once the scene is gone.
+	read :: proc(f: ^Streaming_Fixture, h: ^Holder) -> []int {
+		if !f.platform.scene_memory_alive(h.memory) {
+			h^ = {}
+		}
+		return h.data
+	}
+
+	north, _ := add_scene_asset(w, nil, &f.scenes, NORTH_GUID)
+	south, _ := add_scene_asset(w, nil, &f.scenes, SOUTH_GUID)
+	north_holder := hold(f, north, 1)
+	south_holder := hold(f, south, 2)
+	testing.expect(t, north_holder.memory != south_holder.memory)
+	testing.expect_value(t, open_test_scene_memory(), 2)
+
+	old_memory := north_holder.memory
+	unload_scene(w, &f.scenes, north)
+	testing.expect_value(t, open_test_scene_memory(), 1)
+	testing.expect(t, read(f, &north_holder) == nil, "the holder drops the unloaded scene's data")
+	_, has := memory_of(&f.scenes, north)
+	testing.expect(t, !has)
+
+	south_data := read(f, &south_holder)
+	testing.expect_value(t, len(south_data), 64)
+	for d in south_data {
+		testing.expect_value(t, d, 2)
+	}
+	testing.expect(t, find(&f.scenes, w, south, 0xd1) != 0)
+
+	// Loading again takes the freed memory, and the old handle stays dead.
+	again, _ := add_scene_asset(w, nil, &f.scenes, NORTH_GUID)
+	again_memory, _ := memory_of(&f.scenes, again)
+	testing.expect_value(t, again_memory.slot, old_memory.slot)
+	testing.expect(t, !f.platform.scene_memory_alive(old_memory))
+	testing.expect(t, f.platform.scene_memory_alive(again_memory))
+	testing.expect(t, find(&f.scenes, w, again, 0xd2) != 0)
+
+	// The level takes every scene's memory with it.
+	unload_level(w, &f.scenes)
+	testing.expect(t, read(f, &south_holder) == nil)
+	testing.expect_value(t, open_test_scene_memory(), 0)
 }
