@@ -5,6 +5,7 @@ import "core:testing"
 import "core:time"
 
 import "cinnabar:core/testlog"
+import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/ecs"
 
 // The callbacks report these codes, so a test can check their order.
@@ -216,6 +217,34 @@ target:add(Waiter)
 }
 
 @(test)
+events_carry_assets :: proc(t: ^testing.T) {
+	f := setup_world(t)
+	defer teardown_world(f)
+	context.user_ptr = f
+	_, ok := spawn_source(
+		&f.runtime,
+		"=asset_event",
+		`
+local Catcher = Behaviour.define("Catcher")
+function Catcher:on_seen(number, scene)
+	Test.report(number)
+	Test.report(if scene.guid == "0102030405060708090a0b0c0d0e0f10" then 1 else 0)
+end
+World.spawn():add(Catcher)
+`,
+	)
+	testing.expect(t, ok)
+	phase(f)
+	found := make([dynamic]ecs.Entity, context.temp_allocator)
+	ecs.collect(&f.world, {BEHAVIOURS_ID}, &found)
+	testing.expect_value(t, len(found), 1)
+	guid := format.Guid{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
+	send(&f.runtime, found[0], "seen", f64(3), guid)
+	phase(f)
+	expect_reports(t, f, {3, 1})
+}
+
+@(test)
 deactivation_stops_coroutines :: proc(t: ^testing.T) {
 	f := setup_world(t)
 	defer teardown_world(f)
@@ -376,8 +405,7 @@ quiet_changes_run_no_callbacks :: proc(t: ^testing.T) {
 	thread, ok := spawn_source(
 		&f.runtime,
 		"=door",
-		DOOR +
-		`
+		DOOR + `
 World.spawn():add(Door)
 local b = World.spawn()
 b:add(Door)
