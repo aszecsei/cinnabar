@@ -203,6 +203,7 @@ init :: proc(
 		file_read                       = file_read,
 		file_read_range                 = file_read_range,
 		file_modified                   = file_modified,
+		file_size                       = file_size,
 		file_write                      = file_write,
 		file_read_begin                 = file_read_begin,
 		file_read_result                = file_read_result,

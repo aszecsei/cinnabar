@@ -109,6 +109,7 @@ setup :: proc(t: ^testing.T) -> ^Streaming_Fixture {
 		asset_allocator = runtime.heap_allocator(),
 		file_read = core.file_read,
 		file_modified = core.file_modified,
+		file_size = core.file_size,
 		memory_reserve = proc(size: int) -> rawptr {
 			data, err := virtual.reserve(uint(size))
 			return err == nil ? raw_data(data) : nil
