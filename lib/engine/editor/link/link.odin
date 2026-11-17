@@ -1332,6 +1332,11 @@ Game_Stats :: struct {
 	mesh_pages_capacity:       u32,
 	mesh_pages_pending:        u32,
 	mesh_pages_streamed_bytes: u32,
+	// The scenes that the streaming policy is loading, and the entities that the last frame's work made and gave their
+	// components, across all of them (see docs/world/scenes.md#streaming).
+	scenes_loading:            u32,
+	scene_entities_spawned:    u32,
+	scene_entities_filled:     u32,
 	// The split cascades' tables a frame or two ago, a cascade each, none without them (see
 	// docs/rendering/global-illumination.md#split-cascades).
 	gi_cascades:               []Gi_Cascade_Stats,

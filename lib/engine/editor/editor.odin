@@ -19,6 +19,7 @@ import "cinnabar:engine/nav"
 import "cinnabar:engine/render"
 import "cinnabar:engine/scene"
 import "cinnabar:engine/script"
+import "cinnabar:engine/streaming"
 import "cinnabar:engine/ui"
 
 // The entity list changes at most this often in the editor.
@@ -55,6 +56,8 @@ Editor :: struct {
 	nav:         ^nav.State,
 	// The game's AI, in Game_State, whose perceivers' memories the helpers draw, or nil without one.
 	ai:          ^ai.State,
+	// The game's scene streaming, in Game_State, whose work the stats report, or nil without one.
+	streaming:   ^streaming.State,
 }
 
 // Session is the state of one editor connection: what the editor has sent the game, and what the game has sent the
@@ -162,6 +165,7 @@ init :: proc(
 	navigation: ^nav.State = nil,
 	agents: ^ai.State = nil,
 	scenes: ^scene.Scenes = nil,
+	streaming_state: ^streaming.State = nil,
 ) {
 	e^ = {
 		platform  = platform,
@@ -171,6 +175,7 @@ init :: proc(
 		nav       = navigation,
 		ai        = agents,
 		scenes    = scenes,
+		streaming = streaming_state,
 		commands  = make([dynamic]Command, platform.heap_allocator),
 	}
 	if e.scenes == nil {
@@ -422,6 +427,12 @@ poll :: proc(
 		stats_interval := now - s.last_stats
 		s.last_stats = now
 		stats := game_stats(w, scripts, frame)
+		if e.streaming != nil {
+			work := streaming.stats(e.streaming)
+			stats.scenes_loading = u32(work.scenes_loading)
+			stats.scene_entities_spawned = u32(work.entities_spawned)
+			stats.scene_entities_filled = u32(work.entities_filled)
+		}
 		if e.renderer != nil {
 			c := render.cull_stats(e.renderer)
 			stats.early_items, stats.late_items, stats.hidden_items =
