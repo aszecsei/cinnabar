@@ -1,5 +1,6 @@
 package editor
 
+import "base:runtime"
 import "core:mem/virtual"
 import "core:testing"
 
@@ -8,23 +9,42 @@ import "cinnabar:engine/ecs"
 import "cinnabar:engine/editor/link"
 import "cinnabar:engine/scene"
 
-// Each test thread has a level of its own, as core has one: an arena, and a count of its unloads.
+// Each test thread has a level of its own, as core has one: an arena, a count of its unloads, and the scenes' memory.
 @(private = "file", thread_local)
 test_level: virtual.Arena
 
 @(private = "file", thread_local)
+test_scene_memories: core.Scene_Memories
+
+@(private = "file", thread_local)
 test_level_unloads: u64
 
-// use_test_level gives a test's platform the thread's level, with level_unload and level_generation as core's.
+// use_test_level gives a test's platform the thread's level and scene memory, with level_unload, level_generation and
+// the scene memory procs as core's.
 @(private)
 use_test_level :: proc(platform: ^core.Platform_API) {
+	// What the thread's last test left open goes, so each test starts with every slot free.
+	core.scene_memories_close_all(&test_scene_memories)
 	platform.level_allocator = virtual.arena_allocator(&test_level)
 	platform.level_unload = proc() {
+		core.scene_memories_close_all(&test_scene_memories)
 		virtual.arena_free_all(&test_level)
 		test_level_unloads += 1
 	}
 	platform.level_generation = proc() -> u64 {
 		return test_level_unloads
+	}
+	platform.scene_memory_open = proc() -> (core.Scene_Memory, bool) {
+		return core.scene_memories_open(&test_scene_memories)
+	}
+	platform.scene_memory_close = proc(m: core.Scene_Memory) {
+		core.scene_memories_close(&test_scene_memories, m)
+	}
+	platform.scene_memory_alive = proc(m: core.Scene_Memory) -> bool {
+		return core.scene_memories_alive(&test_scene_memories, m)
+	}
+	platform.scene_memory_allocator = proc(m: core.Scene_Memory) -> runtime.Allocator {
+		return core.scene_memories_allocator(&test_scene_memories, m)
 	}
 }
 
@@ -90,7 +110,12 @@ the_editors_scenes_unload_the_level :: proc(t: ^testing.T) {
 	testing.expect_value(t, f.editor.scenes.level, before + 1)
 	door := scene.find(f.editor.scenes, &f.world, 1, 0x51)
 	testing.expect(t, door != 0)
-	testing.expect(t, test_level.total_used > 0)
+	// The scene's map is in the scene's own memory, which the level's unload closes.
+	memory, loaded := scene.memory_of(f.editor.scenes, 1)
+	testing.expect(t, loaded && f.platform.scene_memory_alive(memory))
+	testing.expect_value(t, core.scene_memories_open_count(&test_scene_memories), 1)
+	f.platform.level_unload()
+	testing.expect(t, !f.platform.scene_memory_alive(memory))
 }
 
 // A scene that the game loads unloads the level, and with it the editor's maps. The next lookup builds them again in
