@@ -26,6 +26,9 @@ interface IFieldEditor
     {
     }
 
+    /// <summary>For an entity field that refers to a scene that is not open: how it shows, and its tooltip.</summary>
+    (string Text, string Tooltip)? NotOpen => null;
+
     /// <summary>An asset reference, by GUID, or "" for none.</summary>
     void SetAsset(string guid)
     {
@@ -654,11 +657,13 @@ sealed class EntityView : ReferenceView
     public static readonly DataFormat<string> EntityFormat = DataFormat.CreateStringApplicationFormat("cinnabar-entity");
 
     readonly Func<ulong, string> _label;
+    readonly IFieldEditor? _editor;
     ulong _entity;
 
     public EntityView(Action<ulong> select, Func<ulong, string> label, IFieldEditor? editor = null)
     {
         _label = label;
+        _editor = editor;
         Text.PointerPressed += (_, e) =>
         {
             if (_entity != 0)
@@ -682,6 +687,13 @@ sealed class EntityView : ReferenceView
     public override void Show(FieldDisplay value)
     {
         _entity = value.Entity;
+        if (_entity == 0 && _editor?.NotOpen is var (text, tooltip))
+        {
+            Text.Text = text;
+            SetTooltip(Text, tooltip);
+            ShowState(linked: false, clearable: true);
+            return;
+        }
         Text.Text = _entity != 0 ? _label(_entity) : value.Text;
         SetTooltip(Text, _entity != 0 ? value.Text : null);
         ShowState(linked: _entity != 0, clearable: _entity != 0);

@@ -51,13 +51,16 @@ sealed class FieldEditor : IFieldEditor
     readonly Func<ulong, SceneValue?, Operation>? _flag;
     readonly ulong[] _entities;
     readonly SceneValue?[] _currents;
+    // What the document sets in the field of an entity, by scene ID, which an entity field takes over the host's value.
+    readonly Func<ulong, SceneValue?>? _stored;
     readonly (Int128 Min, Int128 Max) _range;
     readonly EnumValue[] _enum;
     readonly ScrubSession<SceneValue?[]> _scrub = new();
 
-    FieldEditor(EditorShell shell, ulong[] entities, string label, EditKind kind, Func<ulong, SceneValue?, Operation> operation, (Int128, Int128) range = default, EnumValue[]? enumValues = null, Func<ulong, SceneValue?, Operation>? flag = null)
+    FieldEditor(EditorShell shell, ulong[] entities, string label, EditKind kind, Func<ulong, SceneValue?, Operation> operation, (Int128, Int128) range = default, EnumValue[]? enumValues = null, Func<ulong, SceneValue?, Operation>? flag = null, Func<ulong, SceneValue?>? stored = null)
     {
         _shell = shell;
+        _stored = stored;
         _entities = entities;
         _currents = new SceneValue?[entities.Length];
         _label = label;
@@ -96,6 +99,7 @@ sealed class FieldEditor : IFieldEditor
             return null;
         }
         Operation Set(ulong id, SceneValue? v) => new SetField(id, component, field.Name, v);
+        SceneValue? Stored(ulong id) => shell.Scene?.Expanded.Flat.Find(id)?.Components.Find(c => c.Id == component)?.Fields.Find(f => f.Name == field.Name)?.Value;
         Func<ulong, SceneValue?, Operation>? flag = field.HasOverride ? (id, v) => new SetField(id, component, field.Name + OverrideSuffix, v) : null;
         var label = $"Set {FieldValues.Humanize(field.Name)}";
         return field.Kind switch
@@ -108,7 +112,7 @@ sealed class FieldEditor : IFieldEditor
             FieldKind.Vector3 => new FieldEditor(shell, sceneIds, label, EditKind.Vector3, Set, flag: flag),
             FieldKind.Quaternion => new FieldEditor(shell, sceneIds, label, EditKind.Quaternion, Set, flag: flag),
             FieldKind.Position => new FieldEditor(shell, sceneIds, label, EditKind.Position, Set, flag: flag),
-            FieldKind.Entity => new FieldEditor(shell, sceneIds, label, EditKind.Entity, Set, flag: flag),
+            FieldKind.Entity => new FieldEditor(shell, sceneIds, label, EditKind.Entity, Set, flag: flag, stored: Stored),
             FieldKind.Asset => new FieldEditor(shell, sceneIds, label, EditKind.Asset, Set, flag: flag),
             _ => new FieldEditor(shell, sceneIds, label, EditKind.Integer, Set, Range(field.Kind), flag: flag),
         };
@@ -121,6 +125,7 @@ sealed class FieldEditor : IFieldEditor
     public static FieldEditor? ForBehaviour(EditorShell shell, ulong sceneId, string script, BehaviourField field)
     {
         Operation Set(ulong id, SceneValue? v) => new SetBehaviourField(id, script, field.Name, v);
+        SceneValue? Stored(ulong id) => shell.Scene?.Expanded.Flat.Find(id)?.Behaviours.Find(b => b.Script == script)?.Fields.Find(f => f.Name == field.Name)?.Value;
         var label = $"Set {FieldValues.Humanize(field.Name)}";
         EditKind? kind = field.Kind switch
         {
@@ -132,12 +137,33 @@ sealed class FieldEditor : IFieldEditor
             BehaviourFieldKind.Asset => EditKind.Asset,
             _ => null,
         };
-        return kind is { } k ? new FieldEditor(shell, [sceneId], label, k, Set) : null;
+        return kind is { } k ? new FieldEditor(shell, [sceneId], label, k, Set, stored: Stored) : null;
     }
 
     // One operation for each entity, with the value that each gets.
     Operation[] Operations(Func<SceneValue?, SceneValue?> value) =>
-        [.. _entities.Select((id, i) => (id, v: value(_currents[i]))).Where(x => x.v != null).SelectMany(x => Set(x.id, x.v!))];
+        [.. _entities.Select((id, i) => (id, v: value(CurrentOf(i)))).Where(x => x.v != null).SelectMany(x => Set(x.id, x.v!))];
+
+    // An entity field takes the document's value in Edit, as the host holds none for a reference to a scene that is not open.
+    SceneValue? CurrentOf(int index) =>
+        _kind == EditKind.Entity && _shell.IsEditing && _stored?.Invoke(_entities[index]) is { } stored ? stored : _currents[index];
+
+    /// <summary>
+    /// For an entity field of the primary entity that refers to a scene that is not open, how the field shows and its
+    /// tooltip, or null.
+    /// </summary>
+    public (string Text, string Tooltip)? NotOpen
+    {
+        get
+        {
+            if (CurrentOf(_entities.Length - 1) is not { IsLocalEntity: false, Scene: not "" } v || _shell.SceneOfGuid(v.Scene) != null)
+            {
+                return null;
+            }
+            var text = _shell.Assets.Find(v.Scene) is { } asset ? $"Not open: {Path.GetFileName(asset.Path)}" : "Missing scene";
+            return (text, v.Path is { } path ? $"@{v.Scene}/{string.Join('#', path.Select(p => p.ToString("x16")))}" : $"@{v.Scene}/{v.Entity:x16}");
+        }
+    }
 
     Operation[] Operations(SceneValue value) => [.. _entities.SelectMany(id => Set(id, value))];
 
@@ -186,7 +212,7 @@ sealed class FieldEditor : IFieldEditor
     };
 
     /// <summary>A component field's value from the component's bytes, as a scene stores it.</summary>
-    public static SceneValue? Read(FieldInfo field, ReadOnlySpan<byte> component, Func<ulong, ulong> sceneIdOf)
+    public static SceneValue? Read(FieldInfo field, ReadOnlySpan<byte> component, Func<ulong, SceneValue> referenceOf)
     {
         var kind = field.Kind == FieldKind.Enum ? field.EnumBase : field.Kind;
         var size = FieldValues.Size(kind);
@@ -228,7 +254,7 @@ sealed class FieldEditor : IFieldEditor
             case FieldKind.Position:
                 return SceneValue.Of([.. longs.Select(SceneNumber.Of)]);
             case FieldKind.Entity:
-                return SceneValue.EntityRef(sceneIdOf(BinaryPrimitives.ReadUInt64LittleEndian(data)));
+                return referenceOf(BinaryPrimitives.ReadUInt64LittleEndian(data));
             case FieldKind.Asset:
                 return SceneValue.AssetRef(FieldValues.AssetGuid(data));
             case FieldKind.Enum:
@@ -241,13 +267,13 @@ sealed class FieldEditor : IFieldEditor
     }
 
     /// <summary>A behaviour field's value, as a scene stores it.</summary>
-    public static SceneValue? Read(BehaviourField field, Func<ulong, ulong> sceneIdOf) => field.Kind switch
+    public static SceneValue? Read(BehaviourField field, Func<ulong, SceneValue> referenceOf) => field.Kind switch
     {
         BehaviourFieldKind.Number => SceneValue.Of(SceneNumber.Of(field.Number)),
         BehaviourFieldKind.Boolean => SceneValue.Of(field.Boolean),
         BehaviourFieldKind.String => SceneValue.String(field.Text),
         BehaviourFieldKind.Vector => SceneEdits.Floats(field.Vector[0], field.Vector[1], field.Vector[2]),
-        BehaviourFieldKind.Entity => SceneValue.EntityRef(sceneIdOf(field.Entity)),
+        BehaviourFieldKind.Entity => referenceOf(field.Entity),
         BehaviourFieldKind.Nil => SceneValue.EntityRef(0),
         BehaviourFieldKind.Asset => SceneValue.AssetRef(FieldValues.AssetGuid(field.Asset)),
         _ => null,
@@ -281,13 +307,12 @@ sealed class FieldEditor : IFieldEditor
 
     public void SetEntity(ulong handle)
     {
-        var sceneId = handle == 0 ? 0 : _shell.ActiveSceneIdOf(handle);
-        if (handle != 0 && sceneId == 0)
+        if (_shell.ReferenceTo(handle, out var reason) is not { } reference)
         {
-            _shell.Console.Add(LogLevel.Warning, $"edit: {EntityNode.Format(handle)} is not in the scene, so a field cannot refer to it");
+            _shell.Console.Add(LogLevel.Warning, $"edit: {reason}");
             return;
         }
-        _shell.Edit(_label, Operations(SceneValue.EntityRef(sceneId)));
+        _shell.Edit(_label, Operations(reference));
     }
 
     public void SetAsset(string guid) => _shell.Edit(_label, Operations(SceneValue.AssetRef(guid)));

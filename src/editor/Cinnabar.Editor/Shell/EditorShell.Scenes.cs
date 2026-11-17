@@ -64,6 +64,47 @@ public sealed partial class EditorShell
     /// <summary>The scene ID of an entity of the active scene, by handle, or 0 for another scene's or one that the game spawned.</summary>
     public ulong ActiveSceneIdOf(ulong handle) => World.Find(handle) is { } node && InActiveScene(node) ? node.SceneId : 0;
 
+    /// <summary>The GUID of the open scene's file, as its .meta file or the index has it, or null when it has none yet.</summary>
+    public string? GuidOf(SceneDocument scene) => AssetGuidOf(scene.Path);
+
+    /// <summary>The open scene whose file has the GUID, or null.</summary>
+    public SceneDocument? SceneOfGuid(string guid) => guid == "" ? null : _scenes.Find(s => GuidOf(s) == guid);
+
+    /// <summary>
+    /// The reference that a field makes to an entity, by handle, or 0 for none: its scene ID for an entity of the active
+    /// scene, and for an entity of another open scene, that scene's GUID and its ID or its path in an instance. Null with
+    /// the reason when the entity cannot be named: one that the game spawned, and one of a scene that has no GUID yet.
+    /// </summary>
+    public SceneValue? ReferenceTo(ulong handle, out string reason)
+    {
+        reason = "";
+        if (handle == 0)
+        {
+            return SceneValue.EntityRef(0);
+        }
+        if (World.Find(handle) is not { } node || SceneOf(node) is not { } scene)
+        {
+            reason = $"{EntityNode.Format(handle)} is not in the scene, so a field cannot refer to it";
+            return null;
+        }
+        if (scene == Scene)
+        {
+            return SceneValue.EntityRef(node.SceneId);
+        }
+        if (GuidOf(scene) is not { } guid)
+        {
+            reason = $"{Path.GetFileName(scene.Path)} has no GUID yet, so a field cannot refer to its entities: save the scene, and let the cook index it";
+            return null;
+        }
+        return scene.Expanded.InstanceOf(node.SceneId) is { Path.Count: > 1 } info ? SceneValue.EntityRef(guid, info.Path) : SceneValue.EntityRef(guid, node.SceneId);
+    }
+
+    /// <summary>
+    /// What a field that the host reports as an entity holds, as a scene stores it: none for an entity that cannot be
+    /// named (see <see cref="ReferenceTo"/>).
+    /// </summary>
+    public SceneValue ReferenceOf(ulong handle) => ReferenceTo(handle, out _) ?? SceneValue.EntityRef(0);
+
     public Autosave Autosave { get; }
 
     /// <summary>An autosave that is newer than the scene file opened last, which the window offers to restore.</summary>
