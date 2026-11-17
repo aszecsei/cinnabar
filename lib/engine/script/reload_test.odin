@@ -488,3 +488,37 @@ return Door`,
 		"the entity has no Door",
 	)
 }
+
+@(test)
+a_behaviours_entity_field_swaps_only_from_what_it_holds :: proc(t: ^testing.T) {
+	f := setup_reload(t)
+	defer teardown_reload(f)
+	context.user_ptr = f.base
+	door := write_script(
+		t,
+		&f,
+		6,
+		0,
+		`
+local Door = Behaviour.define("Door", {switch = Field.entity()})
+function Door:update() Test.report(self.switch ~= nil and 1 or 0) end
+return Door`,
+	)
+	e := ecs.spawn(&f.world)
+	target := ecs.spawn(&f.world)
+	other := ecs.spawn(&f.world)
+	testing.expect(t, attach_script(&f.runtime, e, door))
+	phase(f.base)
+	expect_reports(t, f, {0})
+
+	testing.expect(t, swap_behaviour_entity(&f.runtime, e, door, "switch", 0, target))
+	phase(f.base)
+	expect_reports(t, f, {1})
+
+	// Something else set it since, so a swap from another value changes nothing.
+	testing.expect(t, !swap_behaviour_entity(&f.runtime, e, door, "switch", other, 0))
+	testing.expect(t, swap_behaviour_entity(&f.runtime, e, door, "switch", target, 0))
+	testing.expect(t, !swap_behaviour_entity(&f.runtime, e, door, "size", 0, target))
+	phase(f.base)
+	expect_reports(t, f, {0})
+}
