@@ -296,6 +296,28 @@ removals_destroy_bodies :: proc(t: ^testing.T) {
 	testing.expect_value(t, states[1].body, core_physics.Body{})
 }
 
+// forget_despawned destroys the bodies of despawned entities at once, without a tick, as a scene unload needs while
+// the game is paused. A live entity keeps its body.
+@(test)
+forgetting_the_despawned_destroys_their_bodies_without_a_tick :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(t, f)
+	a := box(f, {0, 5, 0})
+	b := box(f, {3, 5, 0})
+	ticks(f, 1)
+	body_a := ecs.get(&f.world, a, Physics_Body).body
+	body_b := ecs.get(&f.world, b, Physics_Body).body
+	ecs.despawn(&f.world, a)
+	forget_despawned(&f.physics, &f.world)
+	testing.expect(t, !pool_valid(&f.physics.bodies, core_physics.Handle(body_a)))
+	testing.expect_value(t, f.physics.records[body_a.index].entity, 0)
+	testing.expect(t, pool_valid(&f.physics.bodies, core_physics.Handle(body_b)))
+	states: [1]core_physics.Body_State
+	bodies := [1]core_physics.Body{body_a}
+	f.platform.physics.body_state(f.physics.world, &bodies[0], 1, &states[0])
+	testing.expect_value(t, states[0].body, core_physics.Body{})
+}
+
 // An inactive entity's body leaves the simulation and stays where it is, and comes back when the entity is active.
 @(test)
 inactive_bodies_leave_the_simulation :: proc(t: ^testing.T) {

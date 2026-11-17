@@ -89,6 +89,42 @@ sync :: proc(s: ^State, w: ^ecs.World, dt: f32 = 1.0 / 60) -> bool {
 	return true
 }
 
+// forget_despawned destroys the bodies, characters and joints of the entities that are gone, at once rather than at the
+// next tick or sync, as after a scene unloads (see docs/world/scenes.md#the-systems). Raycasts no longer hit them.
+forget_despawned :: proc(s: ^State, w: ^ecs.World) {
+	if s.world.generation == 0 {
+		return
+	}
+	// Before the destroys, which may destroy the bodies that the effects name.
+	submit_pending(s)
+	list := core_physics.command_list(allocator_of(s))
+	for record, index in s.records {
+		if record.entity == 0 || ecs.is_alive(w, record.entity) {
+			continue
+		}
+		handle := core_physics.Body{u32(index), s.bodies.generations[index]}
+		switch record.kind {
+		case .Body:
+			destroy_body(s, &list, handle)
+		case .Character:
+			destroy_character(s, &list, handle)
+		}
+	}
+	for record, index in s.joint_records {
+		if record.entity != 0 && !ecs.is_alive(w, record.entity) {
+			destroy_joint(s, &list, core_physics.Joint{u32(index), s.joints.generations[index]})
+		}
+	}
+	ok := core_physics.submit(api(s), s.world, list)
+	for shape in s.released_shapes {
+		pool_free(&s.shapes, core_physics.Handle(shape))
+	}
+	clear(&s.released_shapes)
+	if !ok {
+		log.warn("physics: the backend rejected some commands")
+	}
+}
+
 // Part is a Collider of a body's compound shape, on a descendant of the body's entity: its pose in the body's
 // unscaled space, composed from the Local_Transforms between them, so it does not change while the body moves.
 @(private)
