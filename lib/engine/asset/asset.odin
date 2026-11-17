@@ -36,13 +36,21 @@ Loose_Cache :: struct {
 
 // Bundle reads blobs from the bundles in a directory, <dir>/<name>.cbb (see docs/content/blobs-and-loading.md#bundles).
 // It is the release source. init opens the global bundle, and load opens a level's bundle, <scene guid>.cbb, when it
-// loads the scene. A bundle opens after the bundles that it depends on, and stays open for the session.
+// loads the scene. A bundle opens after the bundles that it depends on. hold_bundle opens a streaming chunk's bundle,
+// which closes when its last hold is released and nothing loaded from it is in use; every other bundle stays open for
+// the session.
 Bundle :: struct {
 	dir:     [MAX_PATH]u8,
 	dir_len: int,
-	// In the order that they opened, so each after its dependencies.
-	open:    [MAX_BUNDLES]Open_Bundle,
-	count:   int,
+	// A slot keeps its index while its bundle is open, so a record and a hold can name it.
+	slots:   [MAX_BUNDLES]Bundle_Slot,
+}
+
+// Bundle_Slot is a place for an open bundle. Its generation is odd while a bundle is open in it, and even while it is
+// free, so a hold of a bundle that closed never matches the slot's next bundle.
+Bundle_Slot :: struct {
+	generation: u32,
+	bundle:     Maybe(Open_Bundle),
 }
 
 // Open_Bundle is a bundle's head, in the asset allocator, and its entries, which point into it.
@@ -53,6 +61,27 @@ Open_Bundle :: struct {
 	modified: i64,
 	head:     []byte,
 	entries:  []format.Bundle_Entry,
+	lifetime: Bundle_Lifetime,
+}
+
+// Bundle_Lifetime is how long a bundle stays open: for the session, or while it is held. A held bundle with no holds
+// closes at the next poll when nothing loaded from it is in use and no open bundle depends on it.
+Bundle_Lifetime :: union #no_nil {
+	Bundle_For_Session,
+	Bundle_Held,
+}
+
+Bundle_For_Session :: struct {}
+
+Bundle_Held :: struct {
+	holds: u32,
+}
+
+// Bundle_Hold is a hold of a streaming chunk's bundle, from hold_bundle, which release_bundle ends. The zero hold holds
+// nothing, and so does a hold of a bundle that is open for the session.
+Bundle_Hold :: struct {
+	slot:       u32,
+	generation: u32,
 }
 
 // Source is where blobs come from. A union, so it holds no procedure pointers into the DLL image.
@@ -101,6 +130,9 @@ Record :: struct {
 	modified:   i64,
 }
 
+@(private)
+NO_BUNDLE :: -1
+
 // Assets lives in Game_State. It holds no pointers into the DLL image, so it survives code reload.
 Assets :: struct {
 	platform:         ^core.Platform_API,
@@ -125,7 +157,9 @@ init :: proc(a: ^Assets, platform: ^core.Platform_API, source: Source) {
 	case Loose_Cache:
 		a.cache_generation = platform.file_modified(generation_path(a))
 	case Bundle:
-		source.count = 0
+		for _, i in source.slots {
+			close_slot(a, &source, i)
+		}
 		open_bundle(a, format.GLOBAL_BUNDLE)
 	}
 }
@@ -143,10 +177,9 @@ destroy :: proc(a: ^Assets) {
 	a.used = 0
 	a.live_count = 0
 	if source, is_bundle := &a.source.(Bundle); is_bundle {
-		for &b in source.open[:source.count] {
-			delete(b.head, a.platform.asset_allocator)
+		for _, i in source.slots {
+			close_slot(a, source, i)
 		}
-		source.count = 0
 	}
 }
 
@@ -337,9 +370,14 @@ current :: proc(a: ^Assets) -> bool {
 // poll swaps the blobs that the cooker has written again, and returns their handles in frame memory. Call it at the
 // end of the frame, when nothing holds a blob. It checks the blobs only when the cache's generation file changes,
 // which a cook writes after all of its blobs, so every blob of one cook is swapped in the same frame. Bundles do not
-// change, so with them it returns nothing: hot reload is development's, from the loose cache.
+// change, so with them it returns nothing: hot reload is development's, from the loose cache. With bundles it closes
+// the held bundles whose holds are released, once nothing loaded from them is in use.
 poll :: proc(a: ^Assets) -> []Handle {
 	profile.scope_text(&a.platform.profile, "Assets poll", .Asset)
+	if source, is_bundle := &a.source.(Bundle); is_bundle {
+		close_released_bundles(a, source)
+		return nil
+	}
 	if _, is_cache := a.source.(Loose_Cache); !is_cache {
 		return nil
 	}
@@ -506,12 +544,127 @@ bundle_entry :: proc(
 	entry: format.Bundle_Entry,
 	found: bool,
 ) {
-	for &open in source.open[:source.count] {
+	for &slot in source.slots {
+		open := (&slot.bundle.?) or_continue
 		if e, in_bundle := format.bundle_find(open.entries, guid); in_bundle {
-			return &open, e, true
+			return open, e, true
 		}
 	}
 	return
+}
+
+// bundle_slot_named is the slot of the open bundle of a name, or NO_BUNDLE.
+@(private)
+bundle_slot_named :: proc(source: ^Bundle, name: string) -> int {
+	for &slot, i in source.slots {
+		open := (&slot.bundle.?) or_continue
+		if string(open.name[:open.name_len]) == name {
+			return i
+		}
+	}
+	return NO_BUNDLE
+}
+
+// hold_bundle holds a streaming chunk's bundle, <scene guid>.cbb, which it opens, after the bundles that it depends on,
+// if it is not open. The bundle stays open until release_bundle ends the last hold and nothing loaded from it is in
+// use. It gives the zero hold, which holds nothing, for the loose cache, for a scene that has no bundle of its own, and
+// for a bundle that is open for the session.
+hold_bundle :: proc(a: ^Assets, scene: format.Guid) -> Bundle_Hold {
+	source, is_bundle := &a.source.(Bundle)
+	if !is_bundle {
+		return {}
+	}
+	buffer: [32]u8
+	name := format.guid_format(scene, &buffer)
+	i := bundle_slot_named(source, name)
+	if i == NO_BUNDLE {
+		if a.platform.file_modified(bundle_path(a, source, name)) == 0 ||
+		   !open_bundle_at(a, source, name, 0, Bundle_Held{}) {
+			return {}
+		}
+		i = bundle_slot_named(source, name)
+	}
+	slot := &source.slots[i]
+	held, is_held := &(&slot.bundle.?).lifetime.(Bundle_Held)
+	if !is_held {
+		return {}
+	}
+	held.holds += 1
+	return {u32(i), slot.generation}
+}
+
+// release_bundle ends a hold from hold_bundle, and clears it. Releasing the zero hold, or a hold again, does nothing.
+release_bundle :: proc(a: ^Assets, hold: ^Bundle_Hold) {
+	defer hold^ = {}
+	source, is_bundle := &a.source.(Bundle)
+	if !is_bundle || hold.generation % 2 == 0 || int(hold.slot) >= MAX_BUNDLES {
+		return
+	}
+	slot := &source.slots[hold.slot]
+	if slot.generation != hold.generation {
+		return
+	}
+	held, is_held := &(&slot.bundle.?).lifetime.(Bundle_Held)
+	if is_held && held.holds > 0 {
+		held.holds -= 1
+	}
+}
+
+// close_released_bundles closes each held bundle that has no holds, when no loaded asset was read from it and no open
+// bundle depends on it.
+@(private)
+close_released_bundles :: proc(a: ^Assets, source: ^Bundle) {
+	for &slot, i in source.slots {
+		open := (&slot.bundle.?) or_continue
+		held, is_held := open.lifetime.(Bundle_Held)
+		if !is_held || held.holds > 0 || bundle_in_use(a, source, i) {
+			continue
+		}
+		log.infof("asset: closed %s%s", string(open.name[:open.name_len]), format.BUNDLE_EXTENSION)
+		close_slot(a, source, i)
+	}
+}
+
+// bundle_in_use is whether a loaded asset was read from the bundle in a slot, which is the one bundle that has its GUID,
+// or an open bundle depends on it.
+@(private)
+bundle_in_use :: proc(a: ^Assets, source: ^Bundle, i: int) -> bool {
+	open := &source.slots[i].bundle.?
+	for r in a.records[:a.used] {
+		if r.generation % 2 == 0 || is_live(a, r.guid) {
+			continue
+		}
+		if _, in_bundle := format.bundle_find(open.entries, r.guid); in_bundle {
+			return true
+		}
+	}
+	name := string(open.name[:open.name_len])
+	for &slot, j in source.slots {
+		other := (&slot.bundle.?) or_continue
+		if j == i {
+			continue
+		}
+		header := (^format.Bundle_Header)(raw_data(other.head))
+		for d in 0 ..< format.bundle_dependency_count(header) {
+			if format.bundle_dependency(other.head, header, d) == name {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// close_slot frees the head of the bundle in a slot, if one is open there, and frees the slot.
+@(private)
+close_slot :: proc(a: ^Assets, source: ^Bundle, i: int) {
+	slot := &source.slots[i]
+	open, is_open := &slot.bundle.?
+	if !is_open {
+		return
+	}
+	delete(open.head, a.platform.asset_allocator)
+	slot.bundle = nil
+	slot.generation += 1
 }
 
 // bundle_entry_opening is bundle_entry, which opens <guid>.cbb, if there is one, when no open bundle has the GUID, as a
@@ -547,12 +700,18 @@ open_bundle :: proc(a: ^Assets, name: string) -> bool {
 	return is_bundle && open_bundle_at(a, source, name, 0)
 }
 
+// open_bundle_at opens a bundle with a lifetime, and its dependencies for the session. A bundle that is open already
+// keeps its lifetime.
 @(private)
-open_bundle_at :: proc(a: ^Assets, source: ^Bundle, name: string, depth: int) -> bool {
-	for &b in source.open[:source.count] {
-		if string(b.name[:b.name_len]) == name {
-			return true
-		}
+open_bundle_at :: proc(
+	a: ^Assets,
+	source: ^Bundle,
+	name: string,
+	depth: int,
+	lifetime: Bundle_Lifetime = Bundle_For_Session{},
+) -> bool {
+	if bundle_slot_named(source, name) != NO_BUNDLE {
+		return true
 	}
 	if len(name) > format.BUNDLE_MAX_NAME || depth > MAX_BUNDLES {
 		log.errorf("asset: the bundle %q has a name that is too long, or depends on itself", name)
@@ -599,19 +758,31 @@ open_bundle_at :: proc(a: ^Assets, source: ^Bundle, name: string, depth: int) ->
 			return false
 		}
 	}
-	if source.count == MAX_BUNDLES {
+	free := NO_BUNDLE
+	for &slot, i in source.slots {
+		if slot.bundle == nil {
+			free = i
+			break
+		}
+	}
+	if free == NO_BUNDLE {
 		log.errorf("asset: more than %d bundles", MAX_BUNDLES)
 		delete(head, a.platform.asset_allocator)
 		return false
 	}
-	b := &source.open[source.count]
-	b^ = {
+	b := Open_Bundle {
 		modified = modified,
 		head     = head,
 		entries  = entries,
+		lifetime = lifetime,
 	}
 	b.name_len = copy(b.name[:], name)
-	source.count += 1
+	if _, is_held := lifetime.(Bundle_Held); is_held {
+		log.infof("asset: opened %s%s", name, format.BUNDLE_EXTENSION)
+	}
+	slot := &source.slots[free]
+	slot.bundle = b
+	slot.generation += 1
 	return true
 }
 

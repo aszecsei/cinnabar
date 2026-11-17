@@ -61,11 +61,13 @@ level_name :: proc(guid: format.Guid) -> string {
 @(private = "file")
 open_names :: proc(f: ^Fixture) -> []string {
 	source := &f.assets.source.(Bundle)
-	names := make([]string, source.count, context.temp_allocator)
-	for &b, i in source.open[:source.count] {
-		names[i] = string(b.name[:b.name_len])
+	names := make([dynamic]string, context.temp_allocator)
+	for &slot in source.slots {
+		if b, is_open := &slot.bundle.?; is_open {
+			append(&names, string(b.name[:b.name_len]))
+		}
 	}
-	return names
+	return names[:]
 }
 
 @(test)
@@ -299,4 +301,80 @@ a_bundle_cut_short_is_refused :: proc(t: ^testing.T) {
 	testing.expect(t, os.write_entire_file(path, whole) == nil)
 	_, ok = load(&f.assets, level)
 	testing.expect(t, !ok)
+}
+
+// A streaming chunk's bundle opens when it is held, after its level's, and closes at the poll after its last hold is
+// released and nothing loaded from it is in use. The level's bundle, which opened for the session, stays.
+@(test)
+a_held_bundle_closes_when_released_and_unused :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	context.logger = capture_errors(f)
+	level, chunk, own := test_guid(1), test_guid(2), test_guid(3)
+	write_bundle(t, f, format.GLOBAL_BUNDLE, nil, nil)
+	write_bundle(
+		t,
+		f,
+		level_name(level),
+		{stored(script_blob(level, 1), level, true)},
+		{format.GLOBAL_BUNDLE},
+	)
+	write_bundle(
+		t,
+		f,
+		level_name(chunk),
+		{stored(script_blob(chunk, 2), chunk, true), stored(script_blob(own, 3), own, true)},
+		{level_name(level), format.GLOBAL_BUNDLE},
+	)
+	destroy(&f.assets)
+	init(&f.assets, &f.platform, bundle(f.dir))
+	with_chunk := []string{format.GLOBAL_BUNDLE, level_name(level), level_name(chunk)}
+	without_chunk := []string{format.GLOBAL_BUNDLE, level_name(level)}
+
+	hold := hold_bundle(&f.assets, chunk)
+	second := hold_bundle(&f.assets, chunk)
+	testing.expect(t, hold != {} && second == hold)
+	testing.expect(t, slice.equal(open_names(f), with_chunk))
+	h, ok := load(&f.assets, own)
+	testing.expect(t, ok)
+
+	release_bundle(&f.assets, &hold)
+	testing.expect_value(t, hold, Bundle_Hold{})
+	poll(&f.assets)
+	testing.expect(t, slice.equal(open_names(f), with_chunk))
+	release_bundle(&f.assets, &second)
+	poll(&f.assets)
+	// The asset that was loaded from it keeps it open.
+	testing.expect(t, slice.equal(open_names(f), with_chunk))
+	unload(&f.assets, h)
+	poll(&f.assets)
+	testing.expect(t, slice.equal(open_names(f), without_chunk))
+	_, ok = load(&f.assets, own)
+	testing.expect(t, !ok)
+
+	// A hold of the bundle that closed holds nothing in the slot's next bundle.
+	stale := Bundle_Hold{u32(2), 1}
+	hold = hold_bundle(&f.assets, chunk)
+	testing.expect(t, hold != {} && hold != stale)
+	release_bundle(&f.assets, &stale)
+	poll(&f.assets)
+	testing.expect(t, slice.equal(open_names(f), with_chunk))
+	release_bundle(&f.assets, &hold)
+	poll(&f.assets)
+	testing.expect(t, slice.equal(open_names(f), without_chunk))
+
+	// A scene with no bundle of its own, and a bundle open for the session, hold nothing.
+	testing.expect_value(t, hold_bundle(&f.assets, test_guid(9)), Bundle_Hold{})
+	testing.expect_value(t, hold_bundle(&f.assets, level), Bundle_Hold{})
+	poll(&f.assets)
+	testing.expect(t, slice.equal(open_names(f), without_chunk))
+}
+
+@(test)
+the_loose_cache_holds_no_bundle :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	hold := hold_bundle(&f.assets, test_guid(1))
+	testing.expect_value(t, hold, Bundle_Hold{})
+	release_bundle(&f.assets, &hold)
 }
