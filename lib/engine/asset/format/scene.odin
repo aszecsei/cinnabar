@@ -322,8 +322,15 @@ put_record :: proc(buffer: ^[dynamic]byte, records: Slice, i: int, record: ^$T) 
 	mem.copy(&buffer[records.offset + u32(i * size_of(T))], record, size_of(T))
 }
 
-// scene_read checks a scene or prefab blob and gives its scene. Strings point into the blob, and the slices are in allocator.
-scene_read :: proc(data: []byte, allocator := context.allocator) -> (scene: Scene, ok: bool) {
+// Scene_View is a checked scene or prefab blob, for reading its entities one at a time (see
+// docs/content/blobs-and-loading.md#reads-across-frames).
+Scene_View :: struct {
+	guid:     Guid,
+	entities: []Scene_Entity_Record,
+}
+
+// scene_view checks a scene or prefab blob's header and layout, and gives its GUID and its entity records.
+scene_view :: proc(data: []byte) -> (view: Scene_View, ok: bool) {
 	header := blob_header(data) or_return
 	if (header.kind != .Scene && header.kind != .Prefab) ||
 	   header.layout != scene_layout() ||
@@ -332,35 +339,60 @@ scene_read :: proc(data: []byte, allocator := context.allocator) -> (scene: Scen
 	}
 	blob := (^Scene_Blob)(raw_data(data))
 	entity_records := records(data, blob.entities, Scene_Entity_Record) or_return
-	entities := make([]Scene_Entity, len(entity_records), allocator)
-	for r, i in entity_records {
-		component_records := records(data, r.components, Scene_Component_Record) or_return
-		components := make([]Scene_Component, len(component_records), allocator)
-		for c, j in component_records {
-			components[j] = {
-				id     = c.id,
-				name   = text(data, c.name) or_return,
-				fields = read_fields(data, c.fields, allocator) or_return,
-			}
-		}
-		behaviour_records := records(data, r.behaviours, Scene_Behaviour_Record) or_return
-		behaviours := make([]Scene_Behaviour, len(behaviour_records), allocator)
-		for b, j in behaviour_records {
-			behaviours[j] = {
-				script = b.script,
-				fields = read_fields(data, b.fields, allocator) or_return,
-			}
-		}
-		entities[i] = {
-			id         = r.id,
-			name       = text(data, r.name) or_return,
-			parent     = r.parent,
-			active     = bool(r.active),
-			components = components,
-			behaviours = behaviours,
+	return {guid = header.guid, entities = entity_records}, true
+}
+
+// scene_entity_read reads the i-th entity of a scene_view of data. Strings point into the blob, and the slices are in
+// allocator. It fails for an i out of range, or for records that do not check.
+scene_entity_read :: proc(
+	data: []byte,
+	view: Scene_View,
+	i: int,
+	allocator := context.allocator,
+) -> (
+	entity: Scene_Entity,
+	ok: bool,
+) {
+	if i < 0 || i >= len(view.entities) {
+		return
+	}
+	r := view.entities[i]
+	component_records := records(data, r.components, Scene_Component_Record) or_return
+	components := make([]Scene_Component, len(component_records), allocator)
+	for c, j in component_records {
+		components[j] = {
+			id     = c.id,
+			name   = text(data, c.name) or_return,
+			fields = read_fields(data, c.fields, allocator) or_return,
 		}
 	}
-	return {entities = entities, guid = header.guid}, true
+	behaviour_records := records(data, r.behaviours, Scene_Behaviour_Record) or_return
+	behaviours := make([]Scene_Behaviour, len(behaviour_records), allocator)
+	for b, j in behaviour_records {
+		behaviours[j] = {
+			script = b.script,
+			fields = read_fields(data, b.fields, allocator) or_return,
+		}
+	}
+	return {
+			id = r.id,
+			name = text(data, r.name) or_return,
+			parent = r.parent,
+			active = bool(r.active),
+			components = components,
+			behaviours = behaviours,
+		},
+		true
+}
+
+// scene_read checks a scene or prefab blob and gives its scene. Strings point into the blob, and the slices are in allocator.
+scene_read :: proc(data: []byte, allocator := context.allocator) -> (scene: Scene, ok: bool) {
+	view := scene_view(data) or_return
+	entities := make([]Scene_Entity, len(view.entities), allocator)
+	for &e, i in entities {
+		e = scene_entity_read(data, view, i, allocator) or_return
+	}
+	return {entities = entities, guid = view.guid}, true
 }
 
 // scene_nav_meshes checks a scene or prefab blob and gives the navmeshes that it lists. The agents' names point into

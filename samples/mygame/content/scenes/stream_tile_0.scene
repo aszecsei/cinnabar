@@ -1,0 +1,96 @@
+# Streaming tile 0 of 5 (see docs/world/scenes.md#streaming): a 40 m square of ground in red, 0 m along +x from the anchor, with a pillar, a few boxes that fall onto
+# it and a light. content/worlds/streaming.world lays the tiles out and keeps this one loaded. Positions are raw World_Position values in units of 2^-24 m, so
+# 2516582400000000000 is 1.5e11 m. The editor writes this file; see docs/editor/document-and-scenes.md#scenes.
+scene 2
+
+entity 4fb2430bdea7b417
+name = "Ground"
+component 1 Transform
+	position = [2516582400000000000, -8388608, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [40, 1, 40]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $cbeb3ff7d07840a7a816ea35868ee5b0
+	cast_shadows = true
+component 65 Collider
+
+entity ad48f4734a702324
+name = "Pillar"
+component 1 Transform
+	position = [2516582400000000000, 50331648, 167772160]
+	rotation = [0, 0, 0, 1]
+	scale = [2, 6, 2]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $cbeb3ff7d07840a7a816ea35868ee5b0
+	cast_shadows = true
+component 65 Collider
+
+entity 92633e2cbcc3ef83
+name = "Box 1"
+component 1 Transform
+	position = [2516582399899336704, 25165824, -33554432]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $a120bc6f08344b128690c05eac5a2125
+	cast_shadows = true
+component 65 Collider
+component 64 Rigid_Body
+	mass = 5
+
+entity 745989ea8809faff
+name = "Box 2"
+component 1 Transform
+	position = [2516582399966445568, 45298483, 33554432]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $a120bc6f08344b128690c05eac5a2125
+	cast_shadows = true
+component 65 Collider
+component 64 Rigid_Body
+	mass = 5
+
+entity 19d067fa20ae0708
+name = "Box 3"
+component 1 Transform
+	position = [2516582400050331648, 65431142, -67108864]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $a120bc6f08344b128690c05eac5a2125
+	cast_shadows = true
+component 65 Collider
+component 64 Rigid_Body
+	mass = 5
+
+entity 25b03f851b5dfb4b
+name = "Box 4"
+component 1 Transform
+	position = [2516582400117440512, 85563802, 16777216]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $a120bc6f08344b128690c05eac5a2125
+	cast_shadows = true
+component 65 Collider
+component 64 Rigid_Body
+	mass = 5
+
+entity be295b807600e295
+name = "Light"
+component 1 Transform
+	position = [2516582400000000000, 134217728, -83886080]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [1, 0.5, 0.4]
+	intensity = 8
+	range = 25
+	cast_shadows = false

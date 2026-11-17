@@ -39,6 +39,8 @@ Loaded_Scene :: struct {
 	has_blob: bool,
 	// The scene's own memory and GPU scope, which unload_scene closes (see docs/core/jobs-and-memory.md#scene-memory).
 	memory:   core.Scene_Memory,
+	// Where the scene's load is. It is Scene_Ready for a scene that add_scene added. Change it only with change_stage.
+	stage:    Scene_Stage,
 }
 
 // Scene_Map is the map from scene ID to entity of one scene, and the memory that it is in: its scene's, or the level's
@@ -91,7 +93,8 @@ destroy_scenes :: proc(s: ^Scenes) {
 	s^ = {}
 }
 
-// loaded_scenes is the world's scenes, in the order that they loaded.
+// loaded_scenes is the world's scenes, in the order that they loaded. A scene that is still loading is one of them
+// (see stage_of).
 loaded_scenes :: proc(s: ^Scenes) -> []Loaded_Scene {
 	follow_level(s)
 	return s.loaded[:]
@@ -128,6 +131,27 @@ add_scene :: proc(
 	added: u32,
 	ok: bool,
 ) {
+	added = append_scene(s, scene.guid, number, Scene_Ready{}) or_return
+	if w.scene == {} {
+		w.scene = scene.guid
+	}
+	spawned := add_entities(w, scripts, scene.entities, handles_of(s, added), problems, added)
+	log.infof("scene: loaded the scene %d, %d entities", added, spawned)
+	return added, true
+}
+
+// append_scene adds a row for a scene to the table, with its number as add_scene gives it, its memory and its first
+// stage, and refuses as add_scene does.
+@(private)
+append_scene :: proc(
+	s: ^Scenes,
+	guid: format.Guid,
+	number: Maybe(u32),
+	stage: Scene_Stage,
+) -> (
+	added: u32,
+	ok: bool,
+) {
 	follow_level(s)
 	added = number.? or_else s.next
 	if is_loaded(s, added) {
@@ -144,12 +168,13 @@ add_scene :: proc(
 	}
 	// A map that index made in the level's memory before the scene loaded gives way to one in the scene's.
 	delete_key(&s.by_scene, added)
-	append(&s.loaded, Loaded_Scene{number = added, guid = scene.guid, memory = memory})
-	if w.scene == {} {
-		w.scene = scene.guid
+	row := Loaded_Scene {
+		number = added,
+		guid   = guid,
+		memory = memory,
 	}
-	spawned := add_entities(w, scripts, scene.entities, handles_of(s, added), problems, added)
-	log.infof("scene: loaded the scene %d, %d entities", added, spawned)
+	change_stage(&row, stage)
+	append(&s.loaded, row)
 	return added, true
 }
 
@@ -192,6 +217,7 @@ unload_scene :: proc(w: ^ecs.World, s: ^Scenes, number: u32) -> int {
 	}
 	gone := s.loaded[index]
 	ordered_remove(&s.loaded, index)
+	end_read(s, &gone)
 	if gone.has_blob && s.assets != nil {
 		asset.unload(s.assets, gone.blob)
 	}
@@ -356,6 +382,7 @@ forget_level :: proc(s: ^Scenes) {
 @(private)
 release_scenes :: proc(s: ^Scenes) {
 	for &loaded in s.loaded {
+		end_read(s, &loaded)
 		if loaded.has_blob && s.assets != nil {
 			asset.unload(s.assets, loaded.blob)
 			loaded.has_blob = false

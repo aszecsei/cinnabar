@@ -116,6 +116,8 @@ public sealed class ResourceMonitorView : Grid
                 .. AtlasCacheRows(g),
                 // The pool of mesh pages, while a paged mesh is resident: the pages in it of its slots, those that views wait for, and what the frames copy in a second.
                 .. MeshPageRows(g),
+                // The scenes that stream in, while one loads: how many, and the entities that the last frame made and gave their components.
+                .. SceneLoadRows(g),
                 // The split cascades' tables: the probes that rays reached of each cascade's slots, and the keys that found no room.
                 .. g.GiCascades.Select((c, k) => ($"GI cascade {k} probes", c.Dropped > 0 ? $"{c.Active:N0} / {c.Slots:N0}, {c.Dropped:N0} dropped" : $"{c.Active:N0} / {c.Slots:N0}")),
                 // The reflections: while the quality has the probes, the probes, the slots whose probe has a cube and the faces captured, and their memory.
@@ -164,6 +166,17 @@ public sealed class ResourceMonitorView : Grid
             yield return ("Mesh page pool", $"{ResourceStats.Bytes(g.MeshPagesResident * PageBytes)} / {ResourceStats.Bytes(g.MeshPagesCapacity * PageBytes)}");
             yield return ("Mesh pages pending", $"{g.MeshPagesPending:N0}");
             yield return ("Mesh pages streamed", $"{ResourceStats.Bytes(g.MeshPagesStreamedBytes)} / s");
+        }
+    }
+
+    // The scene streaming's rows, none while no scene loads (see docs/world/streaming.md#budgets).
+    internal static IEnumerable<(string Name, string Value)> SceneLoadRows(Link.Protocol.GameStats g)
+    {
+        if (g.ScenesLoading > 0 || g.SceneEntitiesSpawned > 0 || g.SceneEntitiesFilled > 0)
+        {
+            yield return ("Scenes loading", $"{g.ScenesLoading:N0}");
+            yield return ("Scene entities spawned", $"{g.SceneEntitiesSpawned:N0}");
+            yield return ("Scene entities filled", $"{g.SceneEntitiesFilled:N0}");
         }
     }
 

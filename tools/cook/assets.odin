@@ -41,6 +41,7 @@ IMPORTERS :: [format.Asset_Kind][]string {
 	.Blackboard        = {format.BLACKBOARD_EXTENSION},
 	.Decision          = {format.DECISION_EXTENSION},
 	.Perception        = {format.PERCEPTION_EXTENSION},
+	.World             = {format.WORLD_EXTENSION},
 }
 
 // Setting_Info is an import setting that an importer knows: the values that it takes, and the value of an asset that
@@ -185,6 +186,7 @@ ALL_KINDS :: Asset_Kinds {
 	.Blackboard,
 	.Decision,
 	.Perception,
+	.World,
 }
 
 // Asset_Source is a source asset with its .meta file. A cook fills in what it learns of the asset, for the daemon's
@@ -542,6 +544,8 @@ link_kind :: proc(kind: format.Asset_Kind) -> cook_link.Asset_Kind {
 		return .Decision
 	case .Perception:
 		return .Perception
+	case .World:
+		return .World
 	}
 	return .Script
 }

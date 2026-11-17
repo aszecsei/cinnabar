@@ -5,12 +5,19 @@ import "core:mem"
 
 DISABLED_ID :: Component_Id(5)
 INACTIVE_ID :: Component_Id(6)
+LOADING_ID :: Component_Id(10)
 
 // Disabled marks an entity that was deactivated itself, like a GameObject with activeSelf false. Change it only with
 // set_active.
 Disabled :: struct {}
 
-// Inactive marks an entity that has Disabled or an inactive ancestor. The world maintains it. A query skips Inactive
+// Loading marks an entity of a scene that is still loading, and hides it as Disabled does. The scene's loader adds it
+// and removes it when the scene is ready; scene is the scene's number. See docs/world/ecs.md#queries.
+Loading :: struct {
+	scene: u32,
+}
+
+// Inactive marks an entity that has Disabled, Loading or an inactive ancestor. The world maintains it. A query skips Inactive
 // entities unless one of its terms names Inactive. See docs/world/ecs.md#queries.
 Inactive :: struct {}
 
@@ -128,9 +135,9 @@ active_in_hierarchy :: proc(w: ^World, e: Entity) -> bool {
 	return is_alive(w, e) && !has_raw(w, e, INACTIVE_ID)
 }
 
-// update_activity gives Inactive to every entity that has Disabled or an inactive ancestor, and takes it from the
-// others. apply and set_active call it. Code that adds or removes Parent or Disabled without them calls it before
-// the next query. It does nothing if no Disabled or Parent changed since it last ran.
+// update_activity gives Inactive to every entity that has Disabled or Loading or an inactive ancestor, and takes it from the
+// others. apply and set_active call it. Code that adds or removes Parent, Disabled or Loading without them calls it before
+// the next query. It does nothing if no Disabled, Loading or Parent changed since it last ran.
 update_activity :: proc(w: ^World) {
 	if !w.activity_dirty || registry_find(&w.registry, INACTIVE_ID) == nil {
 		return
@@ -145,16 +152,17 @@ update_activity :: proc(w: ^World) {
 	for index in 0 ..< w.archetype_count {
 		a := archetype(w, index)
 		_, disabled := column_index(a, DISABLED_ID)
+		_, loading := column_index(a, LOADING_ID)
 		_, inactive := column_index(a, INACTIVE_ID)
 		_, child := column_index(a, PARENT_ID)
-		if (disabled || inactive) && !child {
+		if (disabled || loading || inactive) && !child {
 			for row in 0 ..< a.count {
 				append(&roots, entity_at(w, index, row)^)
 			}
 		}
 	}
 	for e in roots {
-		set_inactive(w, e, has_raw(w, e, DISABLED_ID))
+		set_inactive(w, e, has_raw(w, e, DISABLED_ID) || has_raw(w, e, LOADING_ID))
 	}
 
 	// Then children, in depth order, so each parent is already up to date.
@@ -164,7 +172,13 @@ update_activity :: proc(w: ^World) {
 		if parent == nil {
 			continue
 		}
-		set_inactive(w, e, has_raw(w, e, DISABLED_ID) || has_raw(w, parent.entity, INACTIVE_ID))
+		set_inactive(
+			w,
+			e,
+			has_raw(w, e, DISABLED_ID) ||
+			has_raw(w, e, LOADING_ID) ||
+			has_raw(w, parent.entity, INACTIVE_ID),
+		)
 	}
 }
 

@@ -62,6 +62,16 @@ file_write :: proc(path: string, data: []byte) -> bool {
 	return true
 }
 
+// file_size is a file's size in bytes. ok is false if the file does not exist.
+file_size :: proc(path: string) -> (size: i64, ok: bool) {
+	info, err := os.stat(path, context.temp_allocator)
+	if err != nil {
+		return 0, false
+	}
+	defer os.file_info_delete(info, context.temp_allocator)
+	return info.size, true
+}
+
 // file_modified is a file's modification time in nanoseconds since the Unix epoch, or 0 if it does not exist.
 file_modified :: proc(path: string) -> i64 {
 	modified, err := os.modification_time_by_path(path)

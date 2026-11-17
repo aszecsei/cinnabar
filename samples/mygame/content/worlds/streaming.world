@@ -1,0 +1,25 @@
+# The streaming sample's world (see docs/content/kinds/worlds.md): five 40 m tiles along +x from the 1.5e11 m anchor. Tile 0 always loads. The others load
+# within 25 m of the camera and unload past 40 m.
+world 1
+scene $aae627e32417d3edb166d3ee07c5176c
+	persistent = true
+scene $2db69102fb44c615805573e397d483bb
+	min = [150000000020, -5, -25]
+	max = [150000000060, 30, 25]
+	load_distance = 25
+	unload_distance = 40
+scene $3eb9fa7a0ab06652b1f2bbf9d4b96f79
+	min = [150000000060, -5, -25]
+	max = [150000000100, 30, 25]
+	load_distance = 25
+	unload_distance = 40
+scene $dbe5765a71d715a6b49ea2e1218a3f60
+	min = [150000000100, -5, -25]
+	max = [150000000140, 30, 25]
+	load_distance = 25
+	unload_distance = 40
+scene $e4902cfac160f5e6ad3bf9142a490969
+	min = [150000000140, -5, -25]
+	max = [150000000180, 30, 25]
+	load_distance = 25
+	unload_distance = 40

@@ -149,13 +149,17 @@ State :: struct {
 	pending:         core_physics.Command_List,
 	job_effects:     ecs.Job_Buffer,
 	queries:         struct {
-		new_colliders:  ecs.Query,
-		new_bodies:     ecs.Query,
-		bodies:         ecs.Query,
-		parts:          ecs.Query,
-		joints:         [Joint_Kind]ecs.Query,
-		new_characters: ecs.Query,
-		characters:     ecs.Query,
+		new_colliders:         ecs.Query,
+		new_bodies:            ecs.Query,
+		// The same two for the entities of a scene that is loading, which are hidden (see add_loading_bodies).
+		new_loading_colliders: ecs.Query,
+		new_loading_bodies:    ecs.Query,
+		loading_parts:         ecs.Query,
+		bodies:                ecs.Query,
+		parts:                 ecs.Query,
+		joints:                [Joint_Kind]ecs.Query,
+		new_characters:        ecs.Query,
+		characters:            ecs.Query,
 	},
 }
 
@@ -224,6 +228,39 @@ register :: proc(s: ^State, w: ^ecs.World) {
 			ecs.without(w, Collider),
 			ecs.without(w, Physics_Body),
 			ecs.without(w, Character),
+		},
+	)
+	s.queries.new_loading_colliders = ecs.query(
+		w,
+		{
+			ecs.read(w, ecs.Transform),
+			ecs.read(w, Collider),
+			ecs.read(w, ecs.Loading),
+			ecs.optional(ecs.read(w, ecs.Inactive)),
+			ecs.without(w, Physics_Body),
+			ecs.without(w, Character),
+		},
+	)
+	s.queries.new_loading_bodies = ecs.query(
+		w,
+		{
+			ecs.read(w, ecs.Transform),
+			ecs.read(w, Rigid_Body),
+			ecs.read(w, ecs.Loading),
+			ecs.optional(ecs.read(w, ecs.Inactive)),
+			ecs.without(w, Collider),
+			ecs.without(w, Physics_Body),
+			ecs.without(w, Character),
+		},
+	)
+	s.queries.loading_parts = ecs.query(
+		w,
+		{
+			ecs.read(w, Collider),
+			ecs.read(w, ecs.Parent),
+			ecs.read(w, ecs.Loading),
+			ecs.optional(ecs.read(w, ecs.Inactive)),
+			ecs.without(w, Rigid_Body),
 		},
 	)
 	s.queries.new_characters = ecs.query(

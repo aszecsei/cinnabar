@@ -160,3 +160,13 @@ The order in which a game became a project that the engine runs, instead of a fo
 1. **The standard game:** `lib/engine/game`, the frame that every game wrote, with `Hooks` for a project's Odin, `game.main_scene` in place of a scene that the game's code named, `standard.dll` and `runtime.exe` for a project without Odin, one release entry point with no console, and a copy of the DLL for each host. `samples/intel` lost its Odin, and `samples/mygame` keeps only its hooks.
 2. **cinnabar.exe:** `tools/cinnabar`, which makes a project from `lib/engine/templates`, with new GUIDs, and builds, runs, edits and exports it with a built engine checkout, without the justfile. `cook all`, every kind in one pass, and `--prune`, which deletes the blobs of assets that left the content. A release cache for each game, a release without the debug layer's library, and the game's icon in its executable ([Getting started](overview/getting-started.md)).
 3. **The editor's projects:** the welcome window with New Project, Open Project and the recent projects, `EditorOptions.ForProject`, and the Project group's Build Project, Export and Open Project, which run `cinnabar.exe` ([Editor: Projects](editor/processes-and-projects.md#projects)).
+
+## World streaming
+The order in which a world's scenes came to load around the camera (see [World streaming](world/streaming.md)).
+
+1. **Reads across frames:** `file_size` in `core`, `asset.blob_read_begin`, `blob_read_poll` and `blob_read_end`, and a scene's entities read one record at a time ([Blobs and loading](content/blobs-and-loading.md#reads-across-frames)).
+2. **The world kind:** the `.world` text, its blob with each scene's bounds and distances, the cooker's checks, and worlds in the editor's content browser ([Content: Worlds](content/kinds/worlds.md)).
+3. **Loading in stages:** `ecs.Loading`, which hides a loading scene's entities as `Disabled` does, and `scene.begin_load` and `advance_loads`, which read, spawn, fill and settle a scene within a budget ([Scenes](world/scenes.md#loading-in-stages)).
+4. **Bodies a few at a time:** `LOADING_BODIES_PER_SYNC` and `physics.loading_scenes`, so a scene shows when its bodies exist ([Physics: Components](physics/design.md#components)).
+5. **The policy:** `World_Streamer`, `Stream_Source` and `streaming.update`, with the load and unload distances, persistent scenes, the events as script events, and `Scene.state` ([World streaming](world/streaming.md)).
+6. **The editor:** scene streaming's stats in the Resource Monitor ([Editor: Shell and panels](editor/shell-and-panels.md#resource-monitor)).

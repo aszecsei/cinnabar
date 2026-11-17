@@ -8,6 +8,7 @@ import "core:time"
 import "cinnabar:core"
 import "cinnabar:core/luau"
 import "cinnabar:core/profile"
+import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/ecs"
 
 // Events delivered in one phase can send more events. Delivery stops after this many rounds, so a loop of events
@@ -189,6 +190,7 @@ Event_Arg :: union {
 	[3]f32,
 	ecs.Entity,
 	ecs.World_Position,
+	format.Guid,
 }
 
 // send queues an event for an entity's behaviours, like a script's entity:send. Call it from the frame code, not
@@ -212,6 +214,8 @@ send :: proc(r: ^Runtime, e: ecs.Entity, name: string, args: ..Event_Arg) {
 			push_entity(L, v)
 		case ecs.World_Position:
 			push_position(L, v)
+		case format.Guid:
+			push_asset(r, L, v)
 		}
 	}
 	queue_event(r, L, base + 1, luau.gettop(L) - base)

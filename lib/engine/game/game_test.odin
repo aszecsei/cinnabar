@@ -122,6 +122,8 @@ the_standard_games_scripts_have_every_engine_binding :: proc(t: ^testing.T) {
 	expect(t, text, "\treal_delta: number,")
 	expect(t, text, "\tscale: number,")
 	expect(t, text, "declare Camera:")
+	// The scenes that stream: a scene by its number, and its stage.
+	expect(t, text, "	state: (scene: number) -> string?,")
 	// And the project's.
 	expect(t, text, "declare TestComponent:")
 }

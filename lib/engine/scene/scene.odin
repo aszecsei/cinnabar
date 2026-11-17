@@ -157,44 +157,14 @@ add_entities_to :: proc(
 	// Every entity exists before any field is set, so a field can refer to an entity later in the scene.
 	spawned = make([]ecs.Entity, len(entities), w.platform.frame_allocator)
 	for e, i in entities {
-		l.entity = e.id
-		if e.id == 0 || e.id in handles {
-			warn(
-				&l,
-				"two entities have the scene ID %016x, or it is 0, so the second is skipped",
-				e.id,
-			)
-			continue
-		}
-		entity := ecs.spawn(w)
-		spawned[i] = entity
-		count += 1
-		handles[e.id] = entity
-		if scene_ids {
-			ecs.add(w, entity, Scene_Entity{e.id, number})
-		}
-		if e.name != "" {
-			ecs.add(w, entity, ecs.make_name(e.name))
+		spawned[i] = spawn_entity(&l, e, scene_ids, number)
+		if spawned[i] != 0 {
+			count += 1
 		}
 	}
 	for e, i in entities {
-		entity := spawned[i]
-		if entity == 0 {
-			continue
-		}
-		l.entity = e.id
-		for c in e.components {
-			add_component_to(&l, entity, c)
-		}
-		if e.parent != 0 {
-			if parent, found := handles[e.parent]; found {
-				ecs.add(w, entity, ecs.Parent{parent})
-			} else {
-				warn(&l, "its parent %016x is not in the scene", e.parent)
-			}
-		}
-		if !e.active {
-			ecs.add(w, entity, ecs.Disabled{})
+		if spawned[i] != 0 {
+			fill_entity(&l, spawned[i], e)
 		}
 	}
 	ecs.update_activity(w)
@@ -207,22 +177,79 @@ add_entities_to :: proc(
 		return
 	}
 	for e, i in entities {
-		if spawned[i] == 0 {
-			continue
-		}
-		l.entity = e.id
-		for b in e.behaviours {
-			if pending != nil {
-				append(
-					pending,
-					script.Pending_Behaviour{spawned[i], b.script, behaviour_fields(&l, b.fields)},
-				)
-			} else {
-				script.attach_script(scripts, spawned[i], b.script, behaviour_fields(&l, b.fields))
-			}
+		if spawned[i] != 0 {
+			attach_behaviours(&l, scripts, pending, spawned[i], e)
 		}
 	}
 	return
+}
+
+// spawn_entity makes the entity of a scene's entity, with its Scene_Entity (unless scene_ids is false) and its Name,
+// and records it in the loader's handles. It gives 0, with a warning, for an entity whose scene ID is 0 or taken. The
+// fields are set later, by fill_entity, so that they can refer to any entity of the scene.
+@(private)
+spawn_entity :: proc(
+	l: ^Loader,
+	e: format.Scene_Entity,
+	scene_ids: bool,
+	number: u32,
+) -> ecs.Entity {
+	l.entity = e.id
+	if e.id == 0 || e.id in l.handles {
+		warn(l, "two entities have the scene ID %016x, or it is 0, so the second is skipped", e.id)
+		return 0
+	}
+	entity := ecs.spawn(l.world)
+	l.handles[e.id] = entity
+	if scene_ids {
+		ecs.add(l.world, entity, Scene_Entity{e.id, number})
+	}
+	if e.name != "" {
+		ecs.add(l.world, entity, ecs.make_name(e.name))
+	}
+	return entity
+}
+
+// fill_entity gives an entity that spawn_entity made its components, its parent and its Disabled. The caller then runs
+// ecs.update_activity.
+@(private)
+fill_entity :: proc(l: ^Loader, entity: ecs.Entity, e: format.Scene_Entity) {
+	l.entity = e.id
+	for c in e.components {
+		add_component_to(l, entity, c)
+	}
+	if e.parent != 0 {
+		if parent, found := l.handles[e.parent]; found {
+			ecs.add(l.world, entity, ecs.Parent{parent})
+		} else {
+			warn(l, "its parent %016x is not in the scene", e.parent)
+		}
+	}
+	if !e.active {
+		ecs.add(l.world, entity, ecs.Disabled{})
+	}
+}
+
+// attach_behaviours attaches the behaviours of a scene's entity to its entity, or with pending, collects them there.
+@(private)
+attach_behaviours :: proc(
+	l: ^Loader,
+	scripts: ^script.Runtime,
+	pending: ^[dynamic]script.Pending_Behaviour,
+	entity: ecs.Entity,
+	e: format.Scene_Entity,
+) {
+	l.entity = e.id
+	for b in e.behaviours {
+		if pending != nil {
+			append(
+				pending,
+				script.Pending_Behaviour{entity, b.script, behaviour_fields(l, b.fields)},
+			)
+		} else if scripts != nil {
+			script.attach_script(scripts, entity, b.script, behaviour_fields(l, b.fields))
+		}
+	}
 }
 
 // spawn_prefab adds an instance of a cooked prefab to the world, with its root at a pose, and gives the root (see
@@ -468,7 +495,12 @@ behaviour_field :: proc(
 // is_derived is true for the components that the loader makes from an entity's keys, or that the world makes.
 is_derived :: proc(id: ecs.Component_Id) -> bool {
 	switch id {
-	case SCENE_ENTITY_ID, SCENE_OWNED_ID, ecs.INACTIVE_ID, ecs.PARENT_ID, ecs.NAME_ID:
+	case SCENE_ENTITY_ID,
+	     SCENE_OWNED_ID,
+	     ecs.INACTIVE_ID,
+	     ecs.LOADING_ID,
+	     ecs.PARENT_ID,
+	     ecs.NAME_ID:
 		return true
 	}
 	return false
@@ -476,7 +508,7 @@ is_derived :: proc(id: ecs.Component_Id) -> bool {
 
 // settle makes Previous_Transform equal to Transform, so an entity that a scene or an edit placed does not
 // interpolate from where it was.
-@(private = "file")
+@(private)
 settle :: proc(w: ^ecs.World, entity: ecs.Entity) {
 	if pose := ecs.get(w, entity, ecs.Transform);
 	   pose != nil && ecs.has(w, entity, ecs.Previous_Transform) {
@@ -484,7 +516,7 @@ settle :: proc(w: ^ecs.World, entity: ecs.Entity) {
 	}
 }
 
-@(private = "file")
+@(private)
 Loader :: struct {
 	world:    ^ecs.World,
 	// From scene ID to entity.
@@ -496,7 +528,7 @@ Loader :: struct {
 	entity:   u64,
 }
 
-@(private = "file")
+@(private)
 loader :: proc(
 	w: ^ecs.World,
 	handles: ^map[u64]ecs.Entity,
@@ -511,7 +543,7 @@ loader :: proc(
 }
 
 // warn logs a problem with the entity being loaded, and keeps it.
-@(private = "file")
+@(private)
 warn :: proc(l: ^Loader, message: string, args: ..any) {
 	text := fmt.aprintf(message, ..args, allocator = l.world.platform.frame_allocator)
 	log.warnf("scene: entity %016x: %s", l.entity, text)
@@ -548,7 +580,7 @@ find_field :: proc(
 	return nil, false
 }
 
-@(private = "file")
+@(private)
 add_component_to :: proc(l: ^Loader, entity: ecs.Entity, c: format.Scene_Component) -> bool {
 	id := ecs.Component_Id(c.id)
 	if is_derived(id) {
@@ -773,7 +805,7 @@ resolve :: proc(l: ^Loader, id: u64) -> ecs.Entity {
 }
 
 // behaviour_fields converts a behaviour's values to script values. The script runtime checks them against the class.
-@(private = "file")
+@(private)
 behaviour_fields :: proc(l: ^Loader, fields: []format.Scene_Field) -> []script.Behaviour_Field {
 	result := make(
 		[dynamic]script.Behaviour_Field,

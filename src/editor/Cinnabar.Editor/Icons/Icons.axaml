@@ -70,6 +70,8 @@
     <StreamGeometry x:Key="Icon.decision">F0 M9 2H15V8H12.75V11.25H19.75V16H22V22H16V16H18.25V12.75H5.75V16H8V22H2V16H4.25V11.25H11.25V8H9ZM10.5 3.5V6.5H13.5V3.5ZM3.5 17.5V20.5H6.5V17.5ZM17.5 17.5V20.5H20.5V17.5Z</StreamGeometry>
     <!-- Not from Fluent: a perception, an eye. -->
     <StreamGeometry x:Key="Icon.perception">F0 M12 5C6.5 5 2.5 9 1 12C2.5 15 6.5 19 12 19C17.5 19 21.5 15 23 12C21.5 9 17.5 5 12 5ZM12 6.5C16.6 6.5 20 9.7 21.3 12C20 14.3 16.6 17.5 12 17.5C7.4 17.5 4 14.3 2.7 12C4 9.7 7.4 6.5 12 6.5ZM12 8.5A3.5 3.5 0 1 0 12 15.5A3.5 3.5 0 1 0 12 8.5Z</StreamGeometry>
+    <!-- Not from Fluent: a world, a globe with its equator and a meridian. -->
+    <StreamGeometry x:Key="Icon.world">F0 M12 2A10 10 0 1 1 12 22A10 10 0 1 1 12 2ZM12 3.5A8.5 8.5 0 1 0 12 20.5A8.5 8.5 0 1 0 12 3.5ZM3.5 11.25H20.5V12.75H3.5ZM11.25 3.5H12.75V20.5H11.25Z</StreamGeometry>
     <StreamGeometry x:Key="Icon.mesh">F0 M12 2.5L22 20H2ZM12 5.5L4.6 18.5H19.4Z</StreamGeometry>
     <StreamGeometry x:Key="Icon.model">F0 M3 3H21V21H3ZM4.5 4.5V19.5H19.5V4.5ZM12 7L17.5 17H6.5Z</StreamGeometry>
     <!-- Not from Fluent: a stage, a whole USD scene, a frame around two triangles. -->

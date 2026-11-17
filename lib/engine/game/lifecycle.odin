@@ -25,6 +25,7 @@ import "cinnabar:engine/render"
 import "cinnabar:engine/scene"
 import "cinnabar:engine/script"
 import "cinnabar:engine/sprite"
+import "cinnabar:engine/streaming"
 import "cinnabar:engine/ui"
 
 @(private)
@@ -39,6 +40,7 @@ game_init :: proc(
 	g := (^Game)(state)
 	g.platform = platform
 	scene.init_scenes(&g.scenes, platform, &g.assets)
+	streaming.init(&g.streaming, platform, &g.assets)
 	g.scene_requests = make([dynamic]Scene_Request, platform.heap_allocator)
 	editor.init(
 		&g.editor,
@@ -49,6 +51,7 @@ game_init :: proc(
 		&g.nav,
 		&g.ai,
 		&g.scenes,
+		&g.streaming,
 	)
 	if !ecs.init(&g.world, platform) {
 		log.panic("game: cannot create the world")
@@ -129,6 +132,8 @@ game_update :: proc(g: ^Game, dt: time.Duration, h: Hooks) -> (keep_running: boo
 	}
 	// The scenes that scripts or begin_frame asked for, before the systems prepare for the world.
 	apply_scene_requests(g)
+	// The world's scenes that the camera and the sources are near, which load a few entities at a time.
+	stream_scenes(g)
 	// In the editor's edit mode, and while it pauses, the world stands still and only its transforms propagate, so
 	// edits show. No script code runs then but the edit phase's, for the behaviours that run in edit mode, whose writes
 	// go to the editor's document (see docs/editor/document-and-scenes.md#modes).
@@ -302,7 +307,8 @@ game_shutdown :: proc(g: ^Game, h: Hooks) {
 	}
 	editor.destroy(&g.editor)
 	script.destroy(&g.scripts)
-	// Before the assets, to which the scenes give their blobs back.
+	// Before the assets, to which the streaming and the scenes give their blobs back.
+	streaming.destroy(&g.streaming)
 	scene.destroy_scenes(&g.scenes)
 	delete(g.scene_requests)
 	ui.destroy(&g.ui)
@@ -339,6 +345,7 @@ game_reload :: proc(
 	script.reload(&g.scripts, platform, register_scripts)
 	editor.reload(&g.editor, platform)
 	scene.reload_scenes(&g.scenes, platform)
+	streaming.reload(&g.streaming, platform)
 	ui.on_reload(&g.ui, platform)
 	ui.sync_pipelines(&g.ui, true)
 	if h.register != nil {

@@ -84,6 +84,8 @@ Platform_API :: struct {
 	),
 	file_read_range:                 proc(path: string, offset: i64, buffer: []byte) -> int,
 	file_modified:                   proc(path: string) -> i64,
+	// file_size is a file's size in bytes. ok is false if the file does not exist.
+	file_size:                       proc(path: string) -> (size: i64, ok: bool),
 	file_write:                      proc(path: string, data: []byte) -> bool,
 	// Reads of file ranges that go on across frames, on the host's threads (see docs/core/platform.md#file-reads).
 	// file_read_begin starts one, and returns its ticket, or 0 if it cannot start. file_read_result is the read's bytes

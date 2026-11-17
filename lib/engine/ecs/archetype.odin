@@ -145,7 +145,7 @@ add_raw :: proc(w: ^World, e: Entity, id: Component_Id, data: []byte) -> bool {
 	if id == PARENT_ID {
 		w.hierarchy_dirty = true
 	}
-	if id == PARENT_ID || id == DISABLED_ID {
+	if id == PARENT_ID || id == DISABLED_ID || id == LOADING_ID {
 		w.activity_dirty = true
 	}
 	a := archetype(w, record.archetype)
@@ -197,7 +197,7 @@ remove_raw :: proc(w: ^World, e: Entity, id: Component_Id) -> bool {
 	if id == PARENT_ID {
 		w.hierarchy_dirty = true
 	}
-	if id == PARENT_ID || id == DISABLED_ID {
+	if id == PARENT_ID || id == DISABLED_ID || id == LOADING_ID {
 		w.activity_dirty = true
 	}
 	log_removal(w, e, record.archetype, u32(column))

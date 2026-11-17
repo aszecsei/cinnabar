@@ -2,7 +2,7 @@
 
 How scenes come into the world and leave it, in `lib/engine/scene`. A running world can hold several scenes. The game loads a scene beside the scenes that are already loaded, and it unloads one scene while the others stay. Read [ECS](ecs.md) first. The scene format and the editor's scenes are in [Editor: Document and scenes](../editor/document-and-scenes.md#scenes).
 
-**In this document:** [The level](#the-level) · [Numbers](#numbers) · [Loading](#loading) · [Unloading](#unloading) · [Ownership](#ownership) · [Scene IDs](#scene-ids) · [The systems](#the-systems) · [Streaming](#streaming) · [Scripts](#scripts) · [Limits](#limits)
+**In this document:** [The level](#the-level) · [Numbers](#numbers) · [Loading](#loading) · [Unloading](#unloading) · [Ownership](#ownership) · [Scene IDs](#scene-ids) · [The systems](#the-systems) · [Streaming](#streaming) · [Loading in stages](#loading-in-stages) · [Scripts](#scripts) · [Limits](#limits)
 
 ## The level
 
@@ -87,6 +87,12 @@ Some systems keep data by entity outside the world. These systems drop the entit
 
 A request that `begin_frame` makes applies in the same frame. A request that a script makes applies in the next frame. A load that fails logs an error, and its number stays unused.
 
+A `World_Streamer` loads and unloads the scenes of a world by itself ([World streaming](streaming.md)). Its scenes load in stages.
+
+## Loading in stages
+
+`scene.begin_load(w, scenes, guid, number?)` adds a scene that loads across frames, and `scene.advance_loads` moves it on within a budget. The scene goes through `Reading`, `Spawning`, `Filling` and `Settling` to `Ready`. Its entities have `ecs.Loading`, so they stay hidden until it is `Ready`, and its behaviours attach then. `scene.stage_of(scenes, number)` gives the stage. `scene.loaded_scenes` lists the scenes that are loading with the others. Call both procedures between frames, outside the script phase. The stages, the budgets and the events are in [World streaming](streaming.md#loading-in-stages).
+
 ## Scripts
 
 | Binding | What it does |
@@ -94,6 +100,7 @@ A request that `begin_frame` makes applies in the same frame. A request that a s
 | `Scene.load(scene: Asset) -> number` | Asks for the scene to load beside the others. Returns the number that it will have. The scene loads at the start of the next frame. |
 | `Scene.unload(number)` | Asks for the scene with the number to unload, with what it owns, at the start of the next frame. |
 | `Scene.of(entity) -> number?` | The scene that the entity belongs to, or nil for an entity that the game spawned. |
+| `Scene.state(number) -> string?` | `"loading"` for a scene that is still loading (not yet shown), `"ready"` for one that is shown, and nil for a number that is not loaded. A scene that `Scene.load` asked for is `"ready"` once it loads. |
 
 ```luau
 local Portal = Behaviour.define("Portal", { next = Field.asset() })
@@ -111,5 +118,5 @@ return Portal
 
 - **Navmeshes** follow `World.scene`, which is one scene: the first scene that loaded, or the next scene after it unloads ([Navigation](../ai/navigation.md#loading)).
 - **Scene memory:** at most `core.MAX_SCENE_MEMORY` (64) scenes are loaded at once. `add_scene` refuses one more and logs an error ([Core: Scene memory](../core/jobs-and-memory.md#scene-memory)).
-- **No asynchronous load:** a scene loads in one frame, from a blob that `asset.load` reads at once.
+- **Loads across frames** are only for the scenes that a `World_Streamer` loads, and for Odin code that calls `scene.begin_load`. `add_scene` and `Scene.load` load a scene in one frame, from a blob that `asset.load` reads at once ([World streaming](streaming.md)).
 - **The editor** does not edit or save streamed scenes. Its documents are its own scenes, numbered below `FIRST_RUNTIME_SCENE`. A load of its scenes unloads the level, and every streamed scene with it.

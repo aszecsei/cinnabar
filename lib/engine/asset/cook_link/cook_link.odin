@@ -129,6 +129,7 @@ Asset_Kind :: enum u8 {
 	Blackboard,
 	Decision,
 	Perception,
+	World,
 }
 
 Asset_Status :: enum u8 {
