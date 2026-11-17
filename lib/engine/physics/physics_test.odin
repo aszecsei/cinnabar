@@ -1500,3 +1500,78 @@ height_field_colliders :: proc(t: ^testing.T) {
 		"a change makes the body again",
 	)
 }
+
+@(private = "file")
+bodies_made :: proc(f: ^Fixture, entities: []ecs.Entity) -> (count: int) {
+	for e in entities {
+		if ecs.has(&f.world, e, Physics_Body) {
+			count += 1
+		}
+	}
+	return
+}
+
+// The bodies of a scene that is loading come LOADING_BODIES_PER_SYNC at a sync, disabled. The scene is listed until
+// every body exists, and the bodies come into the simulation when Loading goes.
+@(test)
+loading_bodies_come_a_few_at_a_time_and_wait_disabled :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(t, f)
+	w := &f.world
+	boxes: [100]ecs.Entity
+	for &e, i in boxes {
+		e = box(f, {f64(i) * 3, 5, 0})
+		ecs.add(w, e, ecs.Loading{scene = 5})
+	}
+	ecs.update_activity(w)
+	scenes := loading_scenes(&f.physics, w, context.temp_allocator)
+	testing.expect_value(t, len(scenes), 1)
+
+	made := 0
+	for round in 1 ..= 4 {
+		ticks(f, 1)
+		now := bodies_made(f, boxes[:])
+		testing.expect(t, now - made <= LOADING_BODIES_PER_SYNC)
+		testing.expect(t, now > made)
+		made = now
+		if round < 4 {
+			testing.expect(t, len(loading_scenes(&f.physics, w, context.temp_allocator)) == 1)
+		}
+	}
+	testing.expect_value(t, made, 100)
+	testing.expect_value(t, len(loading_scenes(&f.physics, w, context.temp_allocator)), 0)
+
+	for e in boxes {
+		pb := ecs.get(w, e, Physics_Body)
+		testing.expect(t, f.physics.records[pb.body.index].disabled)
+	}
+	y := height(f, boxes[0])
+	ticks(f, 30)
+	testing.expect_value(t, height(f, boxes[0]), y)
+
+	for e in boxes {
+		ecs.remove(w, e, ecs.Loading)
+	}
+	ecs.update_activity(w)
+	ticks(f, 30)
+	for e in boxes {
+		pb := ecs.get(w, e, Physics_Body)
+		testing.expect(t, !f.physics.records[pb.body.index].disabled)
+	}
+	testing.expect(t, height(f, boxes[0]) < y, "a revealed body falls")
+}
+
+// A scene never waits for bodies that the backend cannot make.
+@(test)
+a_backend_without_bodies_lists_no_loading_scene :: proc(t: ^testing.T) {
+	f := setup(t, null = true)
+	defer teardown(t, f)
+	b := box(f, {0, 5, 0})
+	ecs.add(&f.world, b, ecs.Loading{scene = 5})
+	ecs.update_activity(&f.world)
+	testing.expect_value(t, len(loading_scenes(&f.physics, &f.world, context.temp_allocator)), 1)
+	f.physics.features -= {.Rigid_Bodies}
+	testing.expect_value(t, len(loading_scenes(&f.physics, &f.world, context.temp_allocator)), 0)
+	var_state: State
+	testing.expect_value(t, len(loading_scenes(&var_state, &f.world, context.temp_allocator)), 0)
+}

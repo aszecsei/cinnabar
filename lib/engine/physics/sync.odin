@@ -4,6 +4,7 @@ import "core:hash"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
+import "core:slice"
 
 import core_physics "cinnabar:core/physics"
 import "cinnabar:engine/asset"
@@ -16,6 +17,9 @@ import "cinnabar:engine/ecs"
 MOVED_DISTANCE :: 1e-5
 @(private)
 MOVED_ANGLE_COS :: 1 - 1e-7
+
+// LOADING_BODIES_PER_SYNC is how many bodies a sync makes for the hidden entities of scenes that are loading.
+LOADING_BODIES_PER_SYNC :: 32
 
 // tick is the physics tick of a fixed tick, after the scripts' fixed_update and the propagation of transforms: it
 // syncs the world into the backend, steps it by the tick, and writes the bodies that moved back to their Transforms.
@@ -144,43 +148,56 @@ Parts :: struct {
 }
 
 // collect_parts finds the parts of every body: each Collider without a Rigid_Body that has an ancestor with one, the
-// nearest. The world keeps no child lists, so this is a walk up from each such Collider, in query order.
+// nearest. The world keeps no child lists, so this is a walk up from each such Collider, in query order. A collider of
+// a scene that is loading is a part too, though it is hidden, so it makes no body of its own.
 @(private)
 collect_parts :: proc(s: ^State, w: ^ecs.World) -> (parts: Parts) {
 	allocator := allocator_of(s)
 	parts.by_body = make(map[ecs.Entity][dynamic]Part, allocator)
 	parts.owner = make(map[ecs.Entity]ecs.Entity, allocator)
-	it := ecs.query_iter(w, s.queries.parts)
-	for view in ecs.query_next(&it) {
-		colliders := ecs.column(view, 0, Collider)
-		for e, row in ecs.entities(view) {
-			owner, pose := walk_up(
-				w,
-				e,
-				proc(w: ^ecs.World, e: ecs.Entity) -> bool {return ecs.has(w, e, Rigid_Body)},
-			)
-			if owner == 0 || owner == e {
-				continue
+	for query in ([2]ecs.Query{s.queries.parts, s.queries.loading_parts}) {
+		it := ecs.query_iter(w, query)
+		for view in ecs.query_next(&it) {
+			colliders := ecs.column(view, 0, Collider)
+			for e, row in ecs.entities(view) {
+				if _, known := parts.owner[e]; known {
+					continue
+				}
+				collect_part(&parts, w, e, colliders[row])
 			}
-			list, found := &parts.by_body[owner]
-			if !found {
-				parts.by_body[owner] = make([dynamic]Part, allocator)
-				list = &parts.by_body[owner]
-			}
-			append(
-				list,
-				Part {
-					entity = e,
-					collider = colliders[row],
-					offset = pose.offset,
-					rotation = pose.rotation,
-					scale = pose.scale,
-				},
-			)
-			parts.owner[e] = owner
 		}
 	}
 	return
+}
+
+@(private)
+has_rigid_body :: proc(w: ^ecs.World, e: ecs.Entity) -> bool {
+	return ecs.has(w, e, Rigid_Body)
+}
+
+// collect_part makes the collider of e a part of the nearest body above it, if there is one.
+@(private)
+collect_part :: proc(parts: ^Parts, w: ^ecs.World, e: ecs.Entity, collider: Collider) {
+	owner, pose := walk_up(w, e, has_rigid_body)
+	if owner == 0 || owner == e {
+		return
+	}
+	list, found := &parts.by_body[owner]
+	if !found {
+		parts.by_body[owner] = make([dynamic]Part, parts.by_body.allocator)
+		list = &parts.by_body[owner]
+	}
+	append(
+		list,
+		Part {
+			entity = e,
+			collider = collider,
+			offset = pose.offset,
+			rotation = pose.rotation,
+			scale = pose.scale,
+		},
+	)
+	parts.owner[e] = owner
 }
 
 // walk_up finds the nearest of e and its ancestors that stop accepts, and e's pose in that entity's unscaled space,
@@ -317,6 +334,76 @@ add_bodies :: proc(
 			add(s, w, list, commands, parts, e, transforms[row])
 		}
 	}
+	add_loading_bodies(s, w, list, commands, parts)
+}
+
+// add_loading_bodies makes the bodies of the hidden entities of the scenes that are loading, at most
+// LOADING_BODIES_PER_SYNC in a sync, so a big scene's bodies do not all come in one frame. The bodies are made
+// disabled, and check_bodies enables them when the scene is ready (see docs/physics/design.md#components). An
+// entity that is not hidden yet is the other loops'.
+@(private)
+add_loading_bodies :: proc(
+	s: ^State,
+	w: ^ecs.World,
+	list: ^core_physics.Command_List,
+	commands: ^ecs.Commands,
+	parts: ^Parts,
+) {
+	made := 0
+	for query in ([2]ecs.Query{s.queries.new_loading_colliders, s.queries.new_loading_bodies}) {
+		it := ecs.query_iter(w, query)
+		for view in ecs.query_next(&it) {
+			transforms := ecs.column(view, 0, ecs.Transform)
+			for e, row in ecs.entities(view) {
+				if made == LOADING_BODIES_PER_SYNC {
+					return
+				}
+				if e in parts.owner || !ecs.has(w, e, ecs.Inactive) {
+					continue
+				}
+				pb := Physics_Body{}
+				create_body(s, w, list, e, transforms[row], &pb, parts.by_body[e][:])
+				if pb.body.generation == 0 {
+					log.warnf(
+						"physics: entity %v has no collider that makes a shape, so it has no body",
+						e,
+					)
+				}
+				ecs.command_add(commands, w, e, pb)
+				if pb.motion != .Static && !ecs.has(w, e, ecs.Previous_Transform) {
+					ecs.command_add(commands, w, e, ecs.Previous_Transform(transforms[row]))
+				}
+				made += 1
+			}
+		}
+	}
+}
+
+// loading_scenes is the numbers of the scenes that have a hidden entity with a collider or a rigid body and no body
+// yet, in allocator. The scene loader holds a scene back until its number is not here (see
+// docs/physics/design.md#components). It is empty when there is no physics world, or the backend makes no
+// bodies, so a scene never waits for bodies that cannot come.
+loading_scenes :: proc(s: ^State, w: ^ecs.World, allocator := context.allocator) -> []u32 {
+	scenes := make([dynamic]u32, allocator)
+	if s.world.generation == 0 || .Rigid_Bodies not_in s.features {
+		return scenes[:]
+	}
+	for query in ([2]ecs.Query{s.queries.new_loading_colliders, s.queries.new_loading_bodies}) {
+		it := ecs.query_iter(w, query)
+		for view in ecs.query_next(&it) {
+			loadings := ecs.column(view, 2, ecs.Loading)
+			for e, row in ecs.entities(view) {
+				if owner, _ := walk_up(w, e, has_rigid_body); owner != 0 && owner != e {
+					continue
+				}
+				number := loadings[row].scene
+				if !slice.contains(scenes[:], number) {
+					append(&scenes, number)
+				}
+			}
+		}
+	}
+	return scenes[:]
 }
 
 // update_bodies makes again the bodies whose components or parts changed, and sends the poses that someone else
