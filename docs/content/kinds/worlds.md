@@ -4,7 +4,7 @@ Worlds are `.world` text files in the content roots. A world lists the scenes th
 
 `just worlds` runs `cook worlds --cache build/<target>/content --config dev|release --root game=<content root> --root engine=lib/engine/content`. The daemon cooks worlds like any other kind (`tools/cook/worlds.odin`).
 
-How the runtime streams the scenes is in World: Streaming (`docs/world/streaming.md`).
+How the runtime streams the scenes is in [World: Streaming](../../world/streaming.md).
 
 ```
 world 1

@@ -1333,7 +1333,7 @@ Game_Stats :: struct {
 	mesh_pages_pending:        u32,
 	mesh_pages_streamed_bytes: u32,
 	// The scenes that the streaming policy is loading, and the entities that the last frame's work made and gave their
-	// components, across all of them (see docs/world/scenes.md#streaming).
+	// components, across all of them (see docs/world/streaming.md#budgets).
 	scenes_loading:            u32,
 	scene_entities_spawned:    u32,
 	scene_entities_filled:     u32,

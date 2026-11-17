@@ -339,7 +339,7 @@ add_bodies :: proc(
 
 // add_loading_bodies makes the bodies of the hidden entities of the scenes that are loading, at most
 // LOADING_BODIES_PER_SYNC in a sync, so a big scene's bodies do not all come in one frame. The bodies are made
-// disabled, and check_bodies enables them when the scene is ready (see docs/physics/design.md#components). An
+// disabled, and check_bodies enables them when the scene is ready (see docs/world/streaming.md#budgets). An
 // entity that is not hidden yet is the other loops'.
 @(private)
 add_loading_bodies :: proc(
@@ -381,7 +381,7 @@ add_loading_bodies :: proc(
 
 // loading_scenes is the numbers of the scenes that have a hidden entity with a collider or a rigid body and no body
 // yet, in allocator. The scene loader holds a scene back until its number is not here (see
-// docs/physics/design.md#components). It is empty when there is no physics world, or the backend makes no
+// docs/world/streaming.md#budgets). It is empty when there is no physics world, or the backend makes no
 // bodies, so a scene never waits for bodies that cannot come.
 loading_scenes :: proc(s: ^State, w: ^ecs.World, allocator := context.allocator) -> []u32 {
 	scenes := make([dynamic]u32, allocator)

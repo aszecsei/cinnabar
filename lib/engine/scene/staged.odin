@@ -14,7 +14,7 @@ SCENE_SPAWNS_PER_FRAME :: 1024
 // that load.
 SCENE_FILLS_PER_FRAME :: 128
 
-// Scene_Stage is where a scene is in its load (see docs/world/scenes.md#loading). The stages come in order, and a
+// Scene_Stage is where a scene is in its load (see docs/world/streaming.md#loading-in-stages). The stages come in order, and a
 // scene's row has its stage's data: the blob and the entities live in the scene's memory, which goes with the scene.
 // The zero value is no stage, and no row has it. Change it only with change_stage.
 Scene_Stage :: union {
@@ -135,7 +135,7 @@ end_read :: proc(s: ^Scenes, loaded: ^Loaded_Scene) {
 // begin_load adds a scene to the table that loads in stages, and gives its number as add_scene does: number, or with
 // none, the next of the game's own. It refuses a number that is loaded, a scene when core.MAX_SCENE_MEMORY scenes are
 // loaded, and a scene whose blob cannot be read, and gives false. advance_loads does the rest, a few entities each
-// frame, and the scene's entities stay hidden until it is ready (see docs/world/scenes.md#loading). Call it between
+// frame, and the scene's entities stay hidden until it is ready (see docs/world/streaming.md#loading-in-stages). Call it between
 // frames, outside the script phase.
 begin_load :: proc(
 	w: ^ecs.World,

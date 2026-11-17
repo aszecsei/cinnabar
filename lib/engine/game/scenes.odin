@@ -70,8 +70,9 @@ apply_scene_requests :: proc(g: ^Game) {
 }
 
 // stream_scenes is a frame of the streaming policy: the camera and the Stream_Source entities are the sources, and the
-// scenes of the World_Streamer's world load and unload around them (see streaming.update). The streamer's behaviours get
-// the events as on_scene_loading, on_scene_ready, on_scene_unloaded and on_scene_failed, each with the scene's number
+// scenes of the World_Streamer's world load and unload around them (see streaming.update and
+// docs/world/streaming.md#the-policy). The streamer's behaviours get
+// the events (docs/world/streaming.md#events) as on_scene_loading, on_scene_ready, on_scene_unloaded and on_scene_failed, each with the scene's number
 // and its asset. It stands still while the editor edits, as the world does. Call it after apply_scene_requests, outside
 // the script phase.
 @(private)

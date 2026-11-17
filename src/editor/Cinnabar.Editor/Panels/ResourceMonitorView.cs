@@ -169,7 +169,7 @@ public sealed class ResourceMonitorView : Grid
         }
     }
 
-    // The scene streaming's rows, none while no scene loads (see docs/world/scenes.md#streaming).
+    // The scene streaming's rows, none while no scene loads (see docs/world/streaming.md#budgets).
     internal static IEnumerable<(string Name, string Value)> SceneLoadRows(Link.Protocol.GameStats g)
     {
         if (g.ScenesLoading > 0 || g.SceneEntitiesSpawned > 0 || g.SceneEntitiesFilled > 0)

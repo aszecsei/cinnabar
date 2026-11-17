@@ -98,7 +98,7 @@ Game :: struct {
 	// The world's scenes, which load and unload one at a time (see docs/world/scenes.md).
 	scenes:             scene.Scenes,
 	// The policy that loads the scenes of a world near the camera and the Stream_Source entities, and unloads the far ones
-	// (see docs/world/scenes.md#streaming).
+	// (see docs/world/streaming.md#world-streamer).
 	streaming:          streaming.State,
 	// The scene loads and unloads that load_scene and unload_scene asked for, which the next frame's start applies. On
 	// the heap.
