@@ -72,6 +72,7 @@ So a room whose volume turns the ambient occlusion off has none at Ultra, and a 
 | Ultra | 13, 32 km | 64 × 64, 256 MB | None |
 
 - **Before levels,** the frame drew High's shadows and GI, Ultra's GTAO, and High's fog.
+- **The virtual shadow map's streaming budget** is `Shadow_Params.stream_pages`, the most pages that the meshlets and the masked textures that stream drop from its cache each frame: 64 at Medium, 128 at High and 256 at Ultra (see [Streaming](lighting-and-shadows.md#streaming)).
 - **The virtual shadow map's memory** stays at its pool, whatever the view's reach, with about 880 KB for its page table and requests. The atlas stays too, for spot and point lights, and its first cells take slots in place of cascades.
 - **Shadow cascades:** with fewer than four, `cascade_splits` divides the same reach among them, and repeats the last split in the unused places of `Frame_Constants.cascade_splits`, so no depth looks for a cascade past them. The slots for spot and point lights start after the cascades' cells, so a level with fewer cascades has room for more lights' maps.
 - **The shadow filter** is `Frame_Constants.shadow_filter`, a `Shadow_Filter`. `shadow_map` in `material_lighting.hlsli` branches on it. Every pixel takes the same branch, so it costs no material permutation.
