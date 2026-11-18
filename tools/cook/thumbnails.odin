@@ -276,9 +276,13 @@ texture_thumbnail :: proc(
 	ok: bool,
 ) {
 	blob := format.texture_view(data) or_return
+	// A virtual texture's pages are not in data's head, so its thumbnail is of its tail's largest mip.
 	mips := format.blob_bytes(data, blob.mips)
-	offset := 0
 	mip := u32(0)
+	if .Virtual in blob.flags {
+		mips, mip = format.texture_tail(data, blob), blob.tail_mip
+	}
+	offset := 0
 	for mip + 1 < blob.mip_count &&
 	    max(max(blob.size.x >> (mip + 1), 1), max(blob.size.y >> (mip + 1), 1)) >= THUMBNAIL_SIZE {
 		offset += format.texture_mip_size(

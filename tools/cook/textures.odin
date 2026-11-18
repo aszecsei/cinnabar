@@ -18,7 +18,7 @@ import stbi "vendor:stb/image"
 import format "cinnabar:engine/asset/format"
 
 // Changing how the cooker cooks textures changes this, which invalidates every cooked texture.
-TEXTURE_COOK_VERSION :: "textures 2"
+TEXTURE_COOK_VERSION :: "textures 3"
 // The images that the cooker decodes.
 TEXTURE_EXTENSIONS :: []string{".png", ".jpg", ".jpeg", ".tga", ".hdr", ".tif", ".tiff", ".exr"}
 // What a texture asset's source can be: an image, or a set that names images (see texture_layers.odin).
@@ -166,6 +166,12 @@ TEXTURE_SETTINGS := []Setting_Info {
 		values = {"1", "2", "4", "8", "16"},
 		default = "8",
 		description = "The most texels that sampling takes along a surface seen at a slant, which keeps it sharp. 1 is none. The quality setting texture_anisotropy caps it.",
+	},
+	{
+		key = "streaming.virtual",
+		values = {"true", "false"},
+		default = "true",
+		description = "Split a large color, normal or mask texture's mips into compressed pages of 128 texels a side, which stream in as the renderer needs them, and keep only its smallest mips resident. A texture of 128 texels or fewer a side, one without mips, a cube, an array and an hdr, data or height texture are never virtual.",
 	},
 }
 
@@ -491,6 +497,8 @@ Texture_Cook :: struct {
 	coverage_cutoff: f32,
 	// How one image holds its layers.
 	layout:          Source_Layout,
+	// Cook a large 2D color, normal or mask texture as pages (see texture_pages.odin).
+	virtual:         bool,
 }
 
 // texture_cook_of is how a texture asset cooks, by its settings.
@@ -540,6 +548,7 @@ texture_cook_of :: proc(a: Asset_Source) -> Texture_Cook {
 		max_size = strconv.parse_int(texture_setting(a, "max_size")) or_else 16384,
 		coverage_cutoff = coverage_cutoff,
 		layout = layout,
+		virtual = texture_setting(a, "streaming.virtual") == "true",
 	}
 }
 
@@ -679,6 +688,9 @@ cook_texture_layers :: proc(
 	size: [2]u32
 	mip_count := 1
 	offset := 0
+	virtual: bool
+	tail_mip: u32
+	pages := make([dynamic]format.Texture_Page_Contents, context.temp_allocator)
 	for layer, layer_index in decoded {
 		image := layer
 		for max(image.width, image.height) > t.max_size {
@@ -704,11 +716,13 @@ cook_texture_layers :: proc(
 				mip_count = int(math.floor(math.log2(f32(max(image.width, image.height))))) + 1
 			}
 			size = {u32(image.width), u32(image.height)}
-			mips = make(
-				[]byte,
-				format.texture_chain_size(tex_format, size, u32(mip_count)) * len(decoded),
-				context.temp_allocator,
-			)
+			virtual = texture_is_virtual(t, dimension, len(decoded), size, mip_count)
+			mips_size := format.texture_chain_size(tex_format, size, u32(mip_count)) * len(decoded)
+			if virtual {
+				tail_mip = format.texture_tail_mip(size, u32(mip_count))
+				mips_size = format.texture_tail_size(tex_format, size, tail_mip, u32(mip_count))
+			}
+			mips = make([]byte, mips_size, context.temp_allocator)
 		}
 		level := image
 		coverage := alpha_coverage(image, t.coverage_cutoff)
@@ -745,6 +759,22 @@ cook_texture_layers :: proc(
 					normalize(&stored)
 				}
 			}
+			if virtual && u32(mip) < tail_mip {
+				if !cook_virtual_level(
+					stored,
+					tex_format,
+					usage,
+					quality,
+					t.gamma_mips,
+					wrap,
+					u32(mip) + 1 == tail_mip,
+					&pages,
+				) {
+					report_error(problems, path, 0, 0, "cannot compress mip %d's pages", mip)
+					return
+				}
+				continue
+			}
 			mip_size := format.texture_mip_size(tex_format, u32(level.width), u32(level.height))
 			if !encode_mip(stored, usage, quality, mips[offset:][:mip_size], t.gamma_mips) {
 				report_error(
@@ -773,6 +803,8 @@ cook_texture_layers :: proc(
 		sampler     = t.sampler,
 		mips        = mips,
 		source_path = source_path,
+		flags       = virtual ? {.Virtual} : {},
+		pages       = pages[:],
 	}
 	return format.texture_write(contents, context.temp_allocator), true
 }
@@ -1106,7 +1138,6 @@ resample_axis :: proc(
 	}
 }
 
-@(private = "file")
 edge :: proc(i, length: int, wrap: format.Texture_Wrap) -> int {
 	switch wrap {
 	case .Repeat:

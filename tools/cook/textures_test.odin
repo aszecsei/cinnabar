@@ -46,7 +46,6 @@ write_test_image :: proc(t: ^testing.T, tree: Tree, path: string, width, height:
 	testing.expectf(t, written != 0, "cannot write %s", path)
 }
 
-@(private = "file")
 texture_blob :: proc(
 	t: ^testing.T,
 	tree: Tree,
@@ -340,14 +339,17 @@ alpha_coverage_holds_down_the_mips_with_the_setting_on :: proc(t: ^testing.T) {
 	tree := make_tree(
 		t,
 		{
-			{"content/off.png.meta", "guid = 00112233445566778899aabbccddee00\nusage = color\n"},
+			{
+				"content/off.png.meta",
+				"guid = 00112233445566778899aabbccddee00\nusage = color\n[streaming]\nvirtual = false\n",
+			},
 			{
 				"content/on.png.meta",
-				"guid = 00112233445566778899aabbccddee01\nusage = color\nalpha_coverage = true\n",
+				"guid = 00112233445566778899aabbccddee01\nusage = color\nalpha_coverage = true\n[streaming]\nvirtual = false\n",
 			},
 			{
 				"content/low.png.meta",
-				"guid = 00112233445566778899aabbccddee02\nusage = color\nalpha_coverage = true\nalpha_cutoff = 0.25\n",
+				"guid = 00112233445566778899aabbccddee02\nusage = color\nalpha_coverage = true\nalpha_cutoff = 0.25\n[streaming]\nvirtual = false\n",
 			},
 		},
 	)

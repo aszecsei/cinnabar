@@ -7,7 +7,7 @@ Textures are `.png`, `.jpg`, `.tga`, `.hdr`, `.tif` and `.exr` files, and `.text
 - **OpenEXR:** the data window of the first part, as RGBA floats, in scanlines or tiles, in any compression, DWAA and DWAB included. A tiled image with mips gives its largest level, and the cooker makes its own mips. Its channels are half or float: `R`, `G` and `B`, and `A` if it has it, or else opaque. Other channels, such as `Z` or another layer's, are ignored. One channel of any name is gray and opaque. Deep data, no plain `R`, `G` and `B`, and a read channel that is `uint` or subsampled are each an error that says which.
 - **Linear images.** An `.exr`, an `.hdr` and a TIFF of floats hold linear values, so a `color` texture takes them as they are, where it decodes an 8- or 16-bit image from sRGB. A `normal` and a `mask` texture treat them as they treat any image's values.
 
-The settings are in three groups: those at the top of the `.meta` file, then those under `[mip_map]` and `[sampler]` (see [Identity](../identity-and-cooking.md#identity)). A section lasts to the next one or to the end of the file. For example:
+The settings are in four groups: those at the top of the `.meta` file, then those under `[mip_map]`, `[sampler]` and `[streaming]` (see [Identity](../identity-and-cooking.md#identity)). A section lasts to the next one or to the end of the file. For example:
 
 ```
 guid = 1d5f7a9c3e2b4d6f8a0c2e4f6b8d0a2c
@@ -46,6 +46,10 @@ wrap = clamp
 | `mip_filter` | `linear`, `nearest` | `linear` | How sampling blends mips |
 | `anisotropy` | `1`, `2`, `4`, `8`, `16` | `8` | The most texels that sampling takes along a surface seen at a slant. `1` is none. It needs `filter = linear`, or it is a warning. |
 
+| `[streaming]` | Values | Default | Effect |
+|---|---|---|---|
+| `virtual` | `true`, `false` | `true` | Cook a large 2D `color`, `normal` or `mask` texture as pages that stream, see [Virtual textures](#virtual-textures). `false` cooks it whole. |
+
 **Moved settings.** `mips`, `filter` and `wrap` at the top of a `.meta` file are errors that say where each went: `[mip_map] enabled`, `[mip_map] kernel` and `[sampler] wrap`.
 
 | Usage | Format | Mips |
@@ -68,6 +72,19 @@ wrap = clamp
 - **Quality:** development compresses at Compressonator's quality 0.05, and release at 0.5. The configuration is in the key, so release textures cook again in a release cook.
 - **Stage textures** take the `[sampler]` defaults, but for their USD `wrapS` and `wrapT`: both `repeat` repeat, both `mirror` mirror, and anything else clamps.
 - **The cache key** covers the cooker version, the Compressonator and OpenEXRCore versions, the configuration, the source and the `.meta` file. A `.texture_set`'s also covers the bytes of the images that it names.
+
+## Virtual textures
+
+A texture is **virtual** when it is 2D, its usage is `color`, `normal` or `mask`, it has mips, a side of its mip 0 is over 128 texels, and `[streaming] virtual` is not `false`. Any other texture, a cube, an array, `hdr`, `data` and `height` included, cooks whole, as above. The blob has `Texture_Flag.Virtual`, no `mips`, and these instead (`format/texture.odin`). It follows a [paged mesh](meshes.md#pages).
+
+- **Pages.** Each mip from 0 up to `tail_mip` is cut into tiles of 128 by 128 texels. A `Texture_Level` holds its mip's `size`, its `grid` of pages across and down, and its `first_page`. The pages of the `pages` table are level by level, and row by row in a level.
+- **Tail:** `tail_mip` is the first mip whose sides are both at most 64. Its mips on, down to 1 by 1, are `tail`, packed as `mips` is and not compressed. The last paged mip has both sides at most 128, so it is one page: the **root**, flagged `Root`.
+- **A page** is a tile of 136 by 136 texels, its 128 and a border of 4 on each side, block-compressed in the texture's format, with its rows of blocks tightly packed, and then LZ4 compressed. A `Texture_Page` holds its block's `offset`, `compressed_size` and decompressed `size`, an `fnv32a` `checksum` of the compressed bytes, and its `mip`, `x` and `y`, which the table's order gives and the view checks.
+- **Borders** are real texels: the cooker cuts each tile from the mip's texels before it encodes them, so a texel past the mip's edge is what `[sampler] wrap` reads there (`edge` in `textures.odin`), and an inner border is the neighbouring page's texels. A mip that is smaller than its tile fills the rest of the tile the same way. The encoder takes each 4 by 4 block from its own texels, so a tile's inner blocks are the blocks of the whole mip, which the tests compare.
+- **Blob order:** the header, `levels`, `pages`, `tail` and the source path, then the root's block, which ends the **head** (`head_size`), then every other page's block, each at `BLOB_ALIGN`. `file_size` is the whole blob. A reader that holds only the head views it with `texture_view`, which checks the levels, the page table and the tail. `texture_head_size` gives the head's size, and `asset.read_head` reads only that, as it does for a paged mesh. A texture that is not virtual has `head_size` and `file_size` of its whole size.
+- **Helpers:** `texture_page_payload_size(format)`, `texture_page_level(levels, page)`, and `texture_page_strip(format, payload, level, page_x, page_y, dst_mip)`, which copies a page's own 128 by 128 texels' blocks, clipped to the mip, into a whole mip.
+- **Cook:** the cooker's version is `textures 3`, so every texture cooks again.
+- **Thumbnails** of a virtual texture are from its tail's largest mip.
 
 ## Cube maps and arrays
 

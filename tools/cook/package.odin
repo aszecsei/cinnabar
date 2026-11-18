@@ -424,8 +424,8 @@ encode_blobs :: proc(blobs: []Package_Blob) -> []format.Bundle_Blob {
 	return work.stored
 }
 
-// blob_is_ranged is whether something reads ranges of a blob from its file: a sound that streams, and a paged mesh's
-// pages.
+// blob_is_ranged is whether something reads ranges of a blob from its file: a sound that streams, a paged mesh's pages,
+// and a virtual texture's.
 blob_is_ranged :: proc(b: Package_Blob) -> bool {
 	#partial switch b.kind {
 	case .Audio:
@@ -433,6 +433,9 @@ blob_is_ranged :: proc(b: Package_Blob) -> bool {
 		return ok && bool(blob.stream)
 	case .Mesh:
 		return format.mesh_head_size(b.data) != 0
+	case .Texture:
+		_, virtual := format.texture_head_size(b.data)
+		return virtual
 	}
 	return false
 }
