@@ -374,6 +374,8 @@ handle_message :: proc(l: ^Link, message: link.Message, connection: u64) {
 	     link.Unwatch_Entity,
 	     link.Entity_Values,
 	     link.Load_Scene,
+	     link.Add_Scene,
+	     link.Remove_Scene,
 	     link.Apply_Operations,
 	     link.Edit_Problems,
 	     link.Editor_Camera,

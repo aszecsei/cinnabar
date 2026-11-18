@@ -1,6 +1,7 @@
 package editor
 
 import "base:runtime"
+import "core:fmt"
 import "core:log"
 
 import format "cinnabar:engine/asset/format"
@@ -203,31 +204,72 @@ load_scenes :: proc(
 	m: link.Load_Scene,
 	problems: ^[dynamic]link.Edit_Problem,
 ) {
-	allocator := e.platform.frame_allocator
 	scene.unload_level(w, e.scenes)
-	found := make([dynamic]scene.Problem, allocator)
 	for s in m.scenes {
-		entities := make([]format.Scene_Entity, len(s.entities), allocator)
-		for entity, j in s.entities {
-			entities[j] = scene_entity_of(entity, allocator)
-		}
-		clear(&found)
-		scene.add_scene(
-			w,
-			scripts,
-			e.scenes,
-			format.Scene{entities = entities, guid = format.Guid(s.guid)},
-			s.scene,
-			&found,
-		)
-		for p in found {
-			append(
-				problems,
-				link.Edit_Problem{scene = s.scene, entity = p.entity, message = p.message},
-			)
-		}
+		add_editor_scene(e, w, scripts, s, problems)
 	}
 	log.infof("editor: loaded %d scenes, %d entities", len(m.scenes), ecs.entity_count(w))
+}
+
+// add_editor_scene adds one of the editor's scenes to the world with its number, beside the scenes that are loaded,
+// whose entities stay as they are. What the world cannot use goes to problems, and so does a scene that the world
+// refuses (see scene.add_scene), which adds nothing.
+@(private)
+add_editor_scene :: proc(
+	e: ^Editor,
+	w: ^ecs.World,
+	scripts: ^script.Runtime,
+	s: link.Loaded_Scene,
+	problems: ^[dynamic]link.Edit_Problem,
+) -> bool {
+	allocator := e.platform.frame_allocator
+	entities := make([]format.Scene_Entity, len(s.entities), allocator)
+	for entity, j in s.entities {
+		entities[j] = scene_entity_of(entity, allocator)
+	}
+	found := make([dynamic]scene.Problem, allocator)
+	_, ok := scene.add_scene(
+		w,
+		scripts,
+		e.scenes,
+		format.Scene{entities = entities, guid = format.Guid(s.guid)},
+		s.scene,
+		&found,
+	)
+	for p in found {
+		append(
+			problems,
+			link.Edit_Problem{scene = s.scene, entity = p.entity, message = p.message},
+		)
+	}
+	if !ok {
+		append(
+			problems,
+			link.Edit_Problem {
+				scene = s.scene,
+				message = fmt.aprintf(
+					"the game cannot add the scene %d: a scene with its number is loaded, or as many scenes as it holds",
+					s.scene,
+					allocator = allocator,
+				),
+			},
+		)
+	}
+	return ok
+}
+
+// remove_editor_scene despawns the entities of one of the editor's scenes, and what they own, and the other scenes'
+// entities stay as they are. It reports whether the scene was loaded. The systems that keep data by entity must forget
+// the despawned ones before the next frame (see game.forget_despawned).
+@(private)
+remove_editor_scene :: proc(e: ^Editor, w: ^ecs.World, number: u32) -> bool {
+	if !scene.is_loaded(e.scenes, number) {
+		log.warnf("editor: the scene %d is not loaded", number)
+		return false
+	}
+	despawned := scene.unload_scene(w, e.scenes, number)
+	log.infof("editor: removed scene %d, %d entities", number, despawned)
+	return true
 }
 
 // The editor's scene types convert to the loader's. Strings and slices still point into the message.
