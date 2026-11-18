@@ -103,6 +103,7 @@ Quality_Key :: enum u8 {
 	Render_Scale,
 	Lod_Error,
 	Mesh_Pool,
+	Texture_Pool,
 	Texture_Anisotropy,
 	Virtual_Shadows,
 	Reflections,
@@ -128,6 +129,7 @@ QUALITY_KEY_NAMES := [Quality_Key]string {
 	.Render_Scale         = "quality.render_scale",
 	.Lod_Error            = "quality.lod_error",
 	.Mesh_Pool            = "quality.mesh_pool",
+	.Texture_Pool         = "quality.texture_pool",
 	.Texture_Anisotropy   = "quality.texture_anisotropy",
 	.Virtual_Shadows      = "quality.shadows.virtual",
 	.Reflections          = "quality.reflections",
@@ -467,6 +469,23 @@ parse :: proc(text: string, settings: ^Settings, problems: ^[dynamic]string = ni
 						value,
 					)
 				}
+			case .Texture_Pool:
+				megabytes: uint
+				megabytes, ok = strconv.parse_uint(value, 10)
+				if ok && megabytes <= render.MAX_TEXTURE_POOL {
+					q.texture_pool = u32(megabytes)
+				} else {
+					ok = false
+					problem(
+						problems,
+						line,
+						"%s takes a whole number of MiB from %v to %v, not %q",
+						key,
+						render.MIN_TEXTURE_POOL,
+						render.MAX_TEXTURE_POOL,
+						value,
+					)
+				}
 			case .Texture_Anisotropy:
 				taps: uint
 				taps, ok = strconv.parse_uint(value, 10)
@@ -576,6 +595,7 @@ with_keys :: proc(q: render.Quality, settings: Settings, caps: render.Caps) -> r
 	if .Render_Scale in given {q.render_scale = s.render_scale}
 	if .Lod_Error in given {q.lod_error = s.lod_error}
 	if .Mesh_Pool in given {q.mesh_pool = s.mesh_pool}
+	if .Texture_Pool in given {q.texture_pool = s.texture_pool}
 	if .Texture_Anisotropy in given {q.texture_anisotropy = s.texture_anisotropy}
 	if .Virtual_Shadows in given {q.shadows.virtual = s.shadows.virtual}
 	if .Reflections in given {q.reflections.technique = s.reflections.technique}
@@ -605,6 +625,7 @@ quality_values :: proc(q: render.Quality, caps: render.Caps) -> (values: [Qualit
 		.Render_Scale         = fmt.tprintf("%v", q.render_scale),
 		.Lod_Error            = fmt.tprintf("%v", q.lod_error),
 		.Mesh_Pool            = fmt.tprintf("%v", q.mesh_pool),
+		.Texture_Pool         = fmt.tprintf("%v", q.texture_pool),
 		.Texture_Anisotropy   = fmt.tprintf("%v", q.texture_anisotropy),
 		.Virtual_Shadows      = q.shadows.virtual ? "true" : "false",
 		.Reflections          = name(q.reflections.technique),

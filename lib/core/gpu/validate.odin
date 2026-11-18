@@ -329,6 +329,17 @@ validate :: proc(
 			if c.source == c.dest || !aligned || !in_range || .Readback in source.usage {
 				return .Bad_Copy, packet
 			}
+		case .Copy_Buffer_To_Texture:
+			if in_pass {
+				return .Copy_Inside_Pass, packet
+			}
+			if queue != .Graphics {
+				return .Wrong_Queue, packet
+			}
+			if err = validate_texture_copy(resources, layouts, payload(p, Copy_Buffer_To_Texture));
+			   err != .None {
+				return err, packet
+			}
 		case .Dispatch_Rays:
 			if in_pass {
 				return .Dispatch_Inside_Pass, packet
@@ -526,6 +537,66 @@ validate_upscale :: proc(
 		return .Bad_Upscale
 	}
 	if !in_layout(layouts, u.output, .Unordered_Access) {
+		return .Layout_Mismatch
+	}
+	return .None
+}
+
+// validate_texture_copy checks a copy into a texture: the texture, the buffer range, the alignments and the region. The
+// caller holds the tracker's lock.
+@(private = "file")
+validate_texture_copy :: proc(
+	resources: Resources,
+	layouts: ^Layout_Tracker,
+	c: ^Copy_Buffer_To_Texture,
+) -> Validation_Error {
+	source, source_ok := resources.buffer(c.source)
+	if !source_ok {
+		return .Invalid_Buffer
+	}
+	texture, texture_ok := resources.texture(c.texture)
+	if !texture_ok {
+		return .Invalid_Texture
+	}
+	if .Streamed in texture.usage ||
+	   texture.depth != 0 ||
+	   is_depth_format(texture.format) ||
+	   .Readback in source.usage {
+		return .Bad_Copy
+	}
+	if c.mip >= max(texture.mip_count, 1) || c.layer >= max(texture.layers, 1) {
+		return .Bad_Copy
+	}
+	mip_size := [2]u32{max(texture.size.x >> c.mip, 1), max(texture.size.y >> c.mip, 1)}
+	if c.size.x == 0 || c.size.y == 0 {
+		return .Bad_Copy
+	}
+	if c.origin.x > mip_size.x ||
+	   c.origin.y > mip_size.y ||
+	   c.size.x > mip_size.x - c.origin.x ||
+	   c.size.y > mip_size.y - c.origin.y {
+		return .Bad_Copy
+	}
+	row_texels, rows := c.size.x, c.size.y
+	if is_block_format(texture.format) {
+		for axis in 0 ..< 2 {
+			ends_at_edge := c.origin[axis] + c.size[axis] == mip_size[axis]
+			if c.origin[axis] % 4 != 0 || (c.size[axis] % 4 != 0 && !ends_at_edge) {
+				return .Bad_Copy
+			}
+		}
+		row_texels, rows = (c.size.x + 3) / 4, (c.size.y + 3) / 4
+	}
+	row_size := int(row_texels) * format_size(texture.format)
+	if c.offset % TEXTURE_COPY_OFFSET_ALIGN != 0 ||
+	   c.row_pitch % TEXTURE_COPY_PITCH_ALIGN != 0 ||
+	   int(c.row_pitch) < row_size {
+		return .Bad_Copy
+	}
+	if int(c.offset) + int(c.row_pitch) * int(rows - 1) + row_size > int(source.size) {
+		return .Bad_Copy
+	}
+	if !in_layout(layouts, c.texture, .Copy_Dest) {
 		return .Layout_Mismatch
 	}
 	return .None
@@ -929,7 +1000,7 @@ validate_texture_desc :: proc(desc: Texture_Desc, data: []byte) -> Desc_Error {
 		}
 		// A layered texture's way in is a stream, whose data has every layer, or its shaders' writes.
 		if desc.usage != {.Sampled, .Streamed} &&
-		   (desc.usage != {.Sampled, .Storage} || data != nil) {
+		   ((desc.usage != {.Sampled, .Storage} && desc.usage != {.Sampled}) || data != nil) {
 			return .Bad_Usage
 		}
 	}

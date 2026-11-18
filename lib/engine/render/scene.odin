@@ -213,6 +213,15 @@ Frame_Constants :: struct {
 	// meshlets from (see mesh_pages.odin).
 	mesh_pool:                    u32,
 	mesh_pages:                   u32,
+	// The pool of virtual texture pages (see texture_pages.odin): the records' and the page table's read indices, and the
+	// feedback's write index plus 1, which a material's sample of a virtual texture reads and writes (see
+	// texture_pages.hlsli). texture_feedback is 0 in a view whose passes do not declare the feedback written, which
+	// writes none, and every pass that writes it declares it (see declare_texture_feedback). texture_frame is the pool's
+	// frame, which picks the pixel of each 4x4 block that writes the feedback.
+	texture_records:              u32,
+	texture_pages:                u32,
+	texture_feedback:             u32,
+	texture_frame:                u32,
 	// Whether Material_Push has the aerial perspective volume, and its clamping sampler. A reflection probe's faces have
 	// none.
 	aerial:                       u32,
@@ -614,7 +623,7 @@ Cell_Range :: struct {
 	size_of(Mesh_Record) == 80,
 )
 #assert(
-	size_of(Cull_View) == 128 && size_of(Frame_Constants) == 976 && size_of(Cull_Constants) == 144,
+	size_of(Cull_View) == 128 && size_of(Frame_Constants) == 992 && size_of(Cull_Constants) == 144,
 )
 #assert(size_of(Instance_Set_Record) == 112 && size_of(Instance_Cull_Constants) == 112)
 
@@ -1644,6 +1653,12 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 		selected_meshlets        = gpu.read_index(s.meshlet_select.selected),
 		mesh_pool                = gpu.read_index(r.residency.pool.pool),
 		mesh_pages               = gpu.read_index(r.residency.pool.table),
+		texture_records          = gpu.read_index(r.residency.texture_pool.records),
+		texture_pages            = gpu.read_index(r.residency.texture_pool.table),
+		texture_frame            = u32(r.residency.texture_pool.frame),
+	}
+	if f.texture_pool.feedback != 0 {
+		constants.texture_feedback = gpu.write_index(r.residency.texture_pool.feedback) + 1
 	}
 	constants.gi = u32(f.gi != nil)
 	constants.reflections = u32(f.ssr != nil)
@@ -1683,6 +1698,8 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 		if v != VIEW_CAMERA && v != VIEW_VIEW_MODEL {
 			c.shadow_soft_taps = 0
 			c.virtual_rays = 0
+			// Only the camera's views, which the world and the transparent passes draw, declare the feedback written.
+			c.texture_feedback = 0
 		}
 		switch v {
 		case VIEW_CAMERA, VIEW_VIEW_MODEL:
@@ -1948,6 +1965,7 @@ declare_scene_draws :: proc(f: ^Frame, p: Pass) {
 		read(g, p, f.mesh_pool.pool)
 		read(g, p, f.mesh_pool.table)
 	}
+	declare_texture_pool_reads(g, p, f.texture_pool)
 	declare_skinned_reads(f, p)
 }
 

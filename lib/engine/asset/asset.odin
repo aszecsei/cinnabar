@@ -793,7 +793,7 @@ modified :: proc(a: ^Assets, h: Handle) -> i64 {
 	return r != nil ? r.modified : 0
 }
 
-// read_head reads a paged mesh's head from its blob at offset in a file: the blob without the pages that stream (see
+// read_head reads a paged mesh's or a virtual texture's head from its blob at offset in a file: the blob without the pages that stream (see
 // docs/content/blobs-and-loading.md#loading). It gives nil for any other blob, and for a platform without ranged reads.
 @(private)
 read_head :: proc(a: ^Assets, path: string, offset: i64) -> []byte {
@@ -804,10 +804,13 @@ read_head :: proc(a: ^Assets, path: string, offset: i64) -> []byte {
 		bytes: [size_of(format.Mesh_Blob)]byte,
 	}
 	start: Start
-	if a.platform.file_read_range(path, offset, start.bytes[:]) != len(start.bytes) {
-		return nil
+	// A texture's blob is smaller than a mesh's, so the start can be short.
+	count := a.platform.file_read_range(path, offset, start.bytes[:])
+	size := count == len(start.bytes) ? format.mesh_head_size(start.bytes[:]) : 0
+	if size == 0 && count >= size_of(format.Texture_Blob) {
+		head_size, virtual := format.texture_head_size(start.bytes[:count])
+		size = int(head_size) if virtual else 0
 	}
-	size := format.mesh_head_size(start.bytes[:])
 	if size == 0 {
 		return nil
 	}

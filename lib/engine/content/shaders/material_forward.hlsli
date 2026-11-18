@@ -218,6 +218,7 @@ void count_quad(float4 position) {
 [earlydepthstencil]
 Targets ps_forward(Varyings i, bool front : SV_IsFrontFace) {
 	count_quad(i.position);
+	cn_feedback_begin(i.position);
 	Material_Inputs inputs = material_inputs(i, front);
 	Surface s = evaluate(inputs);
 #if MATERIAL_MASKED

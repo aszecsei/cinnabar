@@ -133,6 +133,7 @@ add_transparency_passes :: proc(f: ^Frame) {
 		color(g, p, cf.accumulated, .Clear)
 		depth(g, p, f.depth, .Load)
 		declare_scene_draws(f, p)
+		declare_texture_feedback(g, p, f.texture_pool)
 		declare_lighting(f, p, opaque = false)
 		read(g, p, f.moments_zeroth)
 		read(g, p, f.moments)
@@ -153,6 +154,7 @@ add_transparency_passes :: proc(f: ^Frame) {
 		color(g, p, f.scene, .Load)
 		depth(g, p, f.depth, .Load)
 		declare_scene_draws(f, p)
+		declare_texture_feedback(g, p, f.texture_pool)
 		declare_lighting(f, p, opaque = false)
 	}
 }

@@ -291,7 +291,7 @@ adapter :: proc() -> gpu.Adapter {
 	return dev.adapter_info
 }
 
-// stats counts the live resources, and reads the adapter's memory use. Call it between frames.
+// stats counts the live resources, and reads the adapter's memory use with video_memory. Call it between frames.
 stats :: proc() -> gpu.Stats {
 	s := gpu.Stats {
 		buffers          = gpu.pool_live(&dev.buffers),
@@ -303,16 +303,23 @@ stats :: proc() -> gpu.Stats {
 	}
 	dev.upload_peak = 0
 	s.bottom_accel_memory, s.bottom_accel_memory_uncompacted = accel_memory()
+	s.video_memory_used, s.video_memory_budget = video_memory()
+	return s
+}
+
+// video_memory is the adapter's local video memory in use and the budget that the OS gives this process, in bytes,
+// or 0, 0 when the adapter does not say. It does not reset anything, so call it any time from the main thread.
+video_memory :: proc() -> (used, budget: u64) {
 	adapter: ^dxgi.IAdapter3
 	if dev.adapter != nil &&
 	   win.SUCCEEDED(dev.adapter->QueryInterface(dxgi.IAdapter3_UUID, (^rawptr)(&adapter))) {
 		info: dxgi.QUERY_VIDEO_MEMORY_INFO
 		if win.SUCCEEDED(adapter->QueryVideoMemoryInfo(0, .LOCAL, &info)) {
-			s.video_memory_used, s.video_memory_budget = info.CurrentUsage, info.Budget
+			used, budget = info.CurrentUsage, info.Budget
 		}
 		adapter->Release()
 	}
-	return s
+	return
 }
 
 frame_target :: proc() -> gpu.Texture {

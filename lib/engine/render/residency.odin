@@ -109,25 +109,31 @@ Resident_Texture :: struct {
 	layer_count:  u32,
 	// How the texture asks to be sampled (see texture_sampler).
 	sampler:      format.Texture_Sampler,
+	// For a virtual texture, its record's index in the pool of virtual texture pages and 1, which a material names it by
+	// (see VIRTUAL_TEXTURE_BIT); 0 for any other texture. Its texture is then the tail's, whose mip 0 is the asset's mip
+	// tail_mip, and size and mip_count are the asset's.
+	virtual:      u32,
 }
 
 // Residency gives the GPU resources of the texture and mesh assets that the renderer draws, by GUID (see
 // docs/rendering/assets.md#gpu-residency). It lives in Game_State and holds handles only, so a code reload keeps it.
 Residency :: struct {
-	platform: ^core.Platform_API,
-	assets:   ^asset.Assets,
-	entries:  [MAX_RESIDENT]Resident_Entry,
-	count:    int,
+	platform:     ^core.Platform_API,
+	assets:       ^asset.Assets,
+	entries:      [MAX_RESIDENT]Resident_Entry,
+	count:        int,
 	// Each entry's index, by its GUID and kind.
-	index:    map[Resident_Key]int,
-	frame:    u64,
+	index:        map[Resident_Key]int,
+	frame:        u64,
 	// Whether meshes get acceleration structures, which the renderer sets the first frame that traces (see
 	// residency_enable_accels).
-	accels:   bool,
+	accels:       bool,
 	// What this asks for is for a thumbnail, not the world, so it can go when the thumbnails are done.
-	baking:   bool,
+	baking:       bool,
 	// The pages of the paged meshes that are resident (see mesh_pages.odin).
-	pool:     Mesh_Pool,
+	pool:         Mesh_Pool,
+	// The pages of the virtual textures that are resident (see texture_pages.odin).
+	texture_pool: Texture_Pool,
 }
 
 @(private)
@@ -160,9 +166,14 @@ Resident_Entry :: struct {
 
 @(private)
 Resident_Resources :: struct {
-	mesh:    Resident_Mesh,
-	texture: Resident_Texture,
-	set:     Resident_Instance_Set,
+	mesh:            Resident_Mesh,
+	texture:         Resident_Texture,
+	set:             Resident_Instance_Set,
+	// A virtual texture's whole texture, for the readers that cannot sample pages, once one asked for it (see
+	// texture_whole.odin), and the frame of the last failure to assemble it, which was logged, or 0.
+	whole:           Resident_Texture,
+	whole_state:     Texture_Whole,
+	whole_failed_at: u64,
 }
 
 // Resident_Source is what an entry's resources come from.
@@ -257,6 +268,7 @@ residency_init :: proc(r: ^Residency, platform: ^core.Platform_API, assets: ^ass
 	r.platform, r.assets = platform, assets
 	r.index = make(map[Resident_Key]int, platform.heap_allocator)
 	mesh_pool_init(&r.pool, platform)
+	texture_pool_init(&r.texture_pool, platform)
 }
 
 // residency_reload keeps every resident asset after a code reload.
@@ -278,12 +290,29 @@ residency_destroy :: proc(r: ^Residency) {
 	r.count = 0
 	delete(r.index)
 	mesh_pool_destroy(&r.pool, r.platform)
+	texture_pool_destroy(&r.texture_pool, r.platform)
 }
 
 // residency_set_mesh_pool sets the budget of the pool of mesh pages, in MiB. The pool is made again at its new size at
 // the next update, and every page streams in again, the roots first.
 residency_set_mesh_pool :: proc(r: ^Residency, megabytes: u32) {
 	r.pool.wanted_slots = mesh_pool_slots(megabytes)
+}
+
+// residency_set_texture_pool sets the budget of the pool of virtual texture pages, in MiB. The atlases are made again at
+// their new size at the next update, and every page streams in again, the roots first.
+residency_set_texture_pool :: proc(r: ^Residency, megabytes: u32) {
+	bytes := texture_pool_bytes(megabytes)
+	if r.texture_pool.quality_bytes != bytes {
+		// A new budget replaces what the video memory had limited it to.
+		r.texture_pool.quality_bytes, r.texture_pool.limit_bytes = bytes, 0
+	}
+}
+
+// texture_stream_stats is what the pool of virtual texture pages holds and what it waits for, and the video memory that
+// the process uses of its budget.
+texture_stream_stats :: proc(r: ^Residency) -> Texture_Stream_Stats {
+	return r.texture_pool.stats
 }
 
 // mesh_stream_stats is what the pool of mesh pages holds and what it waits for.
@@ -304,7 +333,12 @@ resident_pin :: proc(r: ^Residency, m: ^Resident_Mesh) {
 residency_update :: proc(r: ^Residency) {
 	r.frame += 1
 	mesh_pool_update(&r.pool, r.platform, r.assets)
+	texture_pool_update(&r.texture_pool, r.platform, r.assets)
 	for &e in r.entries[:r.count] {
+		// A virtual texture's whole texture comes in over some frames, for what asked for it.
+		if e.kind == .Texture && e.ready && e.current.texture.virtual != 0 {
+			advance_whole(r, &e)
+		}
 		// A paged mesh's level 0 comes in over some frames, for what asked for it, and for the ray scene.
 		if e.kind == .Mesh && e.ready && e.current.mesh.paged {
 			if r.accels {
@@ -330,6 +364,22 @@ residency_update :: proc(r: ^Residency) {
 				}
 				done &&= mesh_pool_ready(&r.pool, s.pending.mesh.pool_mesh)
 				// Its roots come from the head of the version that it streams, which a newer blob has replaced.
+				superseded =
+					!done && e.handle != {} && asset.version(r.assets, e.handle) != s.version
+			}
+			// A virtual texture is in when its root is in the pool.
+			if e.kind == .Texture && s.pending.texture.virtual != 0 {
+				id := s.pending.texture.virtual
+				if texture_pool_failed(&r.texture_pool, id) {
+					change(
+						r,
+						&e,
+						Event_Stream_Failed{"has a page that is not what its table names"},
+					)
+					continue
+				}
+				done &&= texture_pool_ready(&r.texture_pool, id)
+				// Its root comes from the head of the version that it streams, which a newer blob has replaced.
 				superseded =
 					!done && e.handle != {} && asset.version(r.assets, e.handle) != s.version
 			}
@@ -459,7 +509,31 @@ resident_texture :: proc(
 		log_wrong_dimension(e, dimension)
 		return &e.current.texture, false
 	}
+	if e.current.texture.virtual != 0 {
+		return resident_whole(r, e)
+	}
 	return &e.current.texture, e.ready
+}
+
+// resident_virtual_texture gives a texture asset's resources as a material samples it, and whether they are ready: a
+// virtual texture is not assembled whole, and its resources are its tail's, with its record in virtual (see
+// VIRTUAL_TEXTURE_BIT). It is not ready while the pool's atlases were made again and no pass has copied the table for
+// them. Until it is ready, use a default for its usage. Every other reader of a texture asks resident_texture, which
+// gives a virtual texture's whole texture.
+resident_virtual_texture :: proc(
+	r: ^Residency,
+	guid: format.Guid,
+) -> (
+	texture: ^Resident_Texture,
+	ready: bool,
+) {
+	e := entry(r, guid, .Texture) or_return
+	if e.ready && e.current.texture.dimension != .D2 {
+		log_wrong_dimension(e, .D2)
+		return &e.current.texture, false
+	}
+	virtual := e.current.texture.virtual != 0
+	return &e.current.texture, e.ready && (!virtual || texture_pool_drawable(&r.texture_pool))
 }
 
 // resident_texture_of gives a texture asset's resources as resident_texture does, for a reader that takes either of two
@@ -476,6 +550,9 @@ resident_texture_of :: proc(
 	if e.ready && e.current.texture.dimension != first && e.current.texture.dimension != second {
 		log_wrong_dimension(e, first)
 		return &e.current.texture, false
+	}
+	if e.current.texture.virtual != 0 {
+		return resident_whole(r, e)
 	}
 	return &e.current.texture, e.ready
 }
@@ -734,8 +811,8 @@ start_streaming :: proc(r: ^Residency, e: ^Resident_Entry) {
 	change(r, e, Event_Asset_Streaming{stream})
 }
 
-// Stream_Origin is the asset that a blob is the head of, which a paged mesh reads its pages from: its GUID, its handle
-// and its file's time. A blob from memory, a live mesh's, has none.
+// Stream_Origin is the asset that a blob is the head of, which a paged mesh or a virtual texture reads its pages from: its
+// GUID, its handle and its file's time. A blob from memory, a live mesh's, has none.
 @(private = "file")
 Stream_Origin :: struct {
 	guid:     format.Guid,
@@ -759,7 +836,7 @@ new_stream :: proc(
 	case .Mesh:
 		ok = stream_mesh(r, &s, data, version, origin)
 	case .Texture:
-		ok = stream_texture(r, &s, data)
+		ok = stream_texture(r, &s, data, version, origin)
 	case .Instance_Set:
 		ok = stream_instance_set(r, &s, data)
 	}
@@ -1054,9 +1131,17 @@ stream_buffer :: proc(
 }
 
 @(private = "file")
-stream_texture :: proc(r: ^Residency, s: ^Resident_Stream, data: []byte) -> bool {
+stream_texture :: proc(
+	r: ^Residency,
+	s: ^Resident_Stream,
+	data: []byte,
+	version: u32,
+	origin: Stream_Origin,
+) -> bool {
 	blob, ok := format.texture_view(data)
-	if !ok {
+	virtual := ok && .Virtual in blob.flags
+	// A virtual texture reads its pages from its asset's file, so a blob from memory cannot be one.
+	if !ok || (virtual && origin.handle == {}) {
 		return false
 	}
 	t := &s.pending.texture
@@ -1080,15 +1165,36 @@ stream_texture :: proc(r: ^Residency, s: ^Resident_Stream, data: []byte) -> bool
 		desc.layers = blob.layer_count
 		desc.cube = blob.dimension == .Cube
 	}
+	mips := format.blob_bytes(data, blob.mips)
+	// A virtual texture's own texture is its tail: the mips whose sides are small enough to stay whole.
+	if virtual {
+		desc.size = {max(blob.size.x >> blob.tail_mip, 1), max(blob.size.y >> blob.tail_mip, 1)}
+		desc.mip_count = blob.mip_count - blob.tail_mip
+		mips = format.texture_tail(data, blob)
+	}
 	t.texture = r.platform.gpu_create_texture(desc, nil)
 	if t.texture == {} {
 		return false
 	}
-	transfer := r.platform.gpu_stream_texture(t.texture, format.blob_bytes(data, blob.mips))
+	transfer := r.platform.gpu_stream_texture(t.texture, mips)
 	if transfer == 0 {
 		return false
 	}
 	s.transfers[0], s.transfer_count = transfer, 1
+	if virtual {
+		t.virtual = texture_pool_add(
+			&r.texture_pool,
+			r.platform,
+			origin.guid,
+			origin.handle,
+			version,
+			origin.modified,
+			data,
+			blob,
+			t.texture,
+		)
+		return t.virtual != 0
+	}
 	return true
 }
 
@@ -1141,6 +1247,8 @@ destroy_resources :: proc(r: ^Residency, kind: format.Asset_Kind, resources: ^Re
 		}
 		change_mesh_accel(r, m, Accel_Destroyed{})
 	case .Texture:
+		drop_whole(r, resources)
+		texture_pool_remove(&r.texture_pool, r.platform, resources.texture.virtual)
 		r.platform.gpu_destroy_texture(resources.texture.texture)
 	case .Instance_Set:
 		r.platform.gpu_destroy_buffer(resources.set.instances)

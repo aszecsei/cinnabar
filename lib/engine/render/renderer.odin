@@ -295,6 +295,8 @@ Frame :: struct {
 	extra:                    bool,
 	// The pool of mesh pages' buffers in the frame's graph, 0 before any paged mesh is resident.
 	mesh_pool:                Mesh_Pool_Frame,
+	// The pool of virtual texture pages' resources in the frame's graph, 0 before any virtual texture is resident.
+	texture_pool:             Texture_Pool_Frame,
 	view:                     View,
 	// The scene's size, which the world's targets, the debug layer and every pass before temporal AA have: the frame's
 	// size at the quality's render scale (see docs/rendering/anti-aliasing.md#upscaling).
@@ -581,7 +583,9 @@ renderer_destroy :: proc(r: ^Renderer) {
 draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	profile.scope_text(&r.platform.profile, "Build frame", .Render)
 	residency_set_mesh_pool(&r.residency, r.quality.mesh_pool)
+	residency_set_texture_pool(&r.residency, r.quality.texture_pool)
 	texture_samplers_set_cap(r, r.quality.texture_anisotropy)
+	texture_pool_set_anisotropy(&r.residency.texture_pool, r.quality.texture_anisotropy)
 	residency_update(&r.residency)
 	output :=
 		r.platform.gpu_output != nil ? r.platform.gpu_output() : gpu.Output{format = gpu.FRAME_TARGET_FORMAT}
@@ -640,6 +644,7 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	)
 	if !ok {
 		mesh_pool_not_sent(&r.residency.pool)
+		texture_pool_not_sent(&r.residency.texture_pool)
 	}
 	// The stats are the frame's own view's, whichever state that is this frame.
 	r.stats_view = own != &r.view ? own : nil
@@ -758,6 +763,18 @@ draw_view :: proc(
 	if f.mesh_pool.pool == 0 {
 		f.mesh_pool = mesh_pool_buffers(&g, &r.residency.pool)
 	}
+	// The same for the pool of virtual texture pages: a texture's root comes in this way.
+	if !extra {
+		f.texture_pool = add_stream_texture_pages_pass(
+			&g,
+			&r.residency.texture_pool,
+			r.platform,
+			r.residency.assets,
+		)
+	}
+	if f.texture_pool.records == 0 {
+		f.texture_pool = texture_pool_buffers(&g, &r.residency.texture_pool)
+	}
 	build_scene(f, w, desc.hidden, desc.skins)
 	f.lights = extract_lights(f, w, desc.hidden)
 	if .Shadows in desc.disable {
@@ -864,6 +881,7 @@ draw_view :: proc(
 		desc.debug_view == .Depth
 	depth(&g, p, f.depth, .Load, store = keep_depth ? .Store : .Discard)
 	declare_scene_draws(f, p)
+	declare_texture_feedback(&g, p, f.texture_pool)
 	declare_lighting(f, p, opaque = true)
 	declare_shading(f, p)
 	if desc.hooks.world_uses != nil {

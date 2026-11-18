@@ -202,6 +202,11 @@ adapter :: proc() -> gpu.Adapter {
 	return a
 }
 
+// video_memory is 0, 0: the null backend has no video memory, so it does not know a use or a budget.
+video_memory :: proc() -> (used, budget: u64) {
+	return 0, 0
+}
+
 // stats counts the live resources. The null backend has no video memory.
 stats :: proc() -> gpu.Stats {
 	s := gpu.Stats {

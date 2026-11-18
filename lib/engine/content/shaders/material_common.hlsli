@@ -191,6 +191,13 @@ struct Frame_Constants {
 	// mesh_pages.hlsli).
 	uint mesh_pool;
 	uint mesh_pages;
+	// The pool of virtual texture pages (see texture_pages.hlsli): the records' and the page table's read indices, the
+	// feedback's write index plus 1, 0 in a view whose pixel shaders write none (see cn_feedback_begin), and the frame's
+	// number, which picks the pixels of each 4x4 block that write it.
+	uint texture_records;
+	uint texture_pages;
+	uint texture_feedback;
+	uint texture_frame;
 	// Whether the push constants have the aerial perspective volume, and its clamping sampler (see fog_at.hlsli).
 	uint aerial;
 	uint aerial_sampler;
@@ -530,13 +537,22 @@ struct Cn_Texture {
 	uint sampler;
 };
 
+#include "material_virtual.hlsli"
+
 Texture2D<float4> cn_texture(Cn_Texture t) {
 	return cn_texture(t.index);
+}
+
+// A texture whose slot has VIRTUAL_TEXTURE_BIT is virtual: its index names a record, and cn_texture does not apply (see
+// material_virtual.hlsli).
+bool cn_is_virtual(Cn_Texture t) {
+	return (t.index & VIRTUAL_TEXTURE_BIT) != 0;
 }
 
 SamplerState cn_sampler(Cn_Texture t) {
 	return cn_sampler(t.sampler);
 }
+
 
 #if MATERIAL_HIT
 // At a ray's hit there are no derivatives: each sample takes one level, which the ray's cone picks (see
@@ -545,11 +561,20 @@ static float cn_hit_lod = 0;
 
 float cn_hit_level(Cn_Texture t) {
 	uint width, height;
-	cn_texture(t).GetDimensions(width, height);
+	if (cn_is_virtual(t)) {
+		uint2 size = virtual_header(t.index & ~VIRTUAL_TEXTURE_BIT).size;
+		width = size.x;
+		height = size.y;
+	} else {
+		cn_texture(t).GetDimensions(width, height);
+	}
 	return max(cn_hit_lod + 0.5 * log2(float(width) * float(height)), 0);
 }
 
 float4 cn_sample(Cn_Texture t, float2 uv) {
+	if (cn_is_virtual(t)) {
+		return virtual_sample(t, uv, 0, 0, cn_hit_level(t), false);
+	}
 	return cn_texture(t).SampleLevel(cn_sampler(t), uv, cn_hit_level(t));
 }
 
@@ -558,14 +583,21 @@ float4 cn_sample_grad(Cn_Texture t, float2 uv, float2 uv_dx, float2 uv_dy) {
 }
 #else
 // cn_sample samples a material's texture with its sampler. A material samples through it, so a path that shades
-// without derivatives gives its own, as hit shading does.
+// without derivatives gives its own, as hit shading does. A virtual texture takes the pixel's derivatives too, and its
+// pixel writes the feedback for the pages that it wanted.
 float4 cn_sample(Cn_Texture t, float2 uv) {
+	if (cn_is_virtual(t)) {
+		return virtual_sample(t, uv, ddx(uv), ddy(uv), 0, true);
+	}
 	return cn_texture(t).Sample(cn_sampler(t), uv);
 }
 
 // cn_sample_grad samples with the derivatives given, for a sample inside a loop or a branch, where the pixel shader's
 // own derivatives are not defined.
 float4 cn_sample_grad(Cn_Texture t, float2 uv, float2 uv_dx, float2 uv_dy) {
+	if (cn_is_virtual(t)) {
+		return virtual_sample(t, uv, uv_dx, uv_dy, 0, true);
+	}
 	return cn_texture(t).SampleGrad(cn_sampler(t), uv, uv_dx, uv_dy);
 }
 #endif
@@ -573,6 +605,9 @@ float4 cn_sample_grad(Cn_Texture t, float2 uv, float2 uv_dx, float2 uv_dy) {
 // cn_sample_level samples one mip, for a vertex shader, which has no derivatives, or a sample whose level the material
 // chooses.
 float4 cn_sample_level(Cn_Texture t, float2 uv, float level) {
+	if (cn_is_virtual(t)) {
+		return virtual_sample(t, uv, 0, 0, level, false);
+	}
 	return cn_texture(t).SampleLevel(cn_sampler(t), uv, level);
 }
 

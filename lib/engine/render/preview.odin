@@ -292,7 +292,7 @@ add_preview_passes :: proc(f: ^Frame, desc: ^Preview_Desc) {
 		desc = animated
 	}
 	pf := new(Preview_Frame, platform.frame_allocator)
-	pf.renderer, pf.desc = r, desc
+	pf.renderer, pf.desc, pf.frame = r, desc, f
 	size := desc.size
 	aspect := f32(size.x) / f32(max(size.y, 1))
 	view := View {
@@ -414,7 +414,6 @@ add_preview_passes :: proc(f: ^Frame, desc: ^Preview_Desc) {
 		p := add_render_pass(g, "preview background", proc(_: ^Pass_Context) {}, pf)
 		color(g, p, pf.scene, .Clear, PREVIEW_BACKGROUND)
 	}
-	pf.frame = f
 	p := add_render_pass(g, "preview output", draw_preview_output, pf)
 	read(g, p, pf.scene)
 	read(g, p, f.lut)
@@ -760,6 +759,9 @@ preview_write_constants :: proc(
 		ltc_matrix               = gpu.read_index(r.lights.ltc_matrix),
 		ltc_amplitude            = gpu.read_index(r.lights.ltc_amplitude),
 		ltc_sampler              = gpu.sampler_index(r.lights.ltc_sampler),
+		// A preview samples the pool's pages and asks for none, so it has no feedback.
+		texture_records          = gpu.read_index(r.residency.texture_pool.records),
+		texture_pages            = gpu.read_index(r.residency.texture_pool.table),
 	}
 	constants_upload, ok := platform.gpu_upload(size_of(Frame_Constants), gpu.PASS_CONSTANTS_ALIGN)
 	if !ok {
@@ -774,6 +776,7 @@ declare_preview_draws :: proc(g: ^Graph, p: Pass, pf: ^Preview_Frame) {
 	indirect_buffer(g, p, pf.arguments)
 	read(g, p, pf.draws)
 	read(g, p, pf.instances)
+	declare_texture_pool_reads(g, p, pf.frame.texture_pool)
 	if pf.posed {
 		for buffer in pf.skin_buffers {
 			read(g, p, buffer)

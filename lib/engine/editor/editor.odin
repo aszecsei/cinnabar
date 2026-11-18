@@ -85,6 +85,8 @@ Session :: struct {
 	last_stats:     f64,
 	// The bytes of mesh pages that the renderer had streamed when the stats were last sent.
 	pages_streamed: u64,
+	// The bytes of virtual texture pages that the renderer had streamed when the stats were last sent.
+	texture_bytes:  u64,
 	// The material editor's previews, by ID, and the one to draw next (see preview.odin).
 	previews:       [MAX_PREVIEWS]Preview,
 	next_preview:   int,
@@ -469,6 +471,22 @@ poll :: proc(
 				)
 			}
 			s.pages_streamed = pages.streamed_total
+			textures := render.texture_stream_stats(&e.renderer.residency)
+			stats.texture_pages_resident, stats.texture_pages_capacity =
+				textures.resident_pages, textures.capacity_pages
+			stats.texture_pages_pending = textures.pending_pages
+			if textures.streamed_total >= s.texture_bytes && stats_interval > 0 {
+				stats.texture_streamed_bytes = u32(
+					min(
+						f64(textures.streamed_total - s.texture_bytes) / stats_interval,
+						f64(max(u32)),
+					),
+				)
+			}
+			s.texture_bytes = textures.streamed_total
+			stats.texture_pool_bytes = textures.pool_bytes
+			stats.video_memory_used, stats.video_memory_budget =
+				textures.video_used, textures.video_budget
 			gi := render.gi_split_stats(e.renderer)
 			cascades := make([]link.Gi_Cascade_Stats, gi.count, frame)
 			for &cascade, k in cascades {

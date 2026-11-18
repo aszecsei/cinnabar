@@ -88,6 +88,35 @@ the_user_file_replaces_the_projects_and_a_change_reads_them_again :: proc(t: ^te
 	testing.expect_value(t, w.settings.output, gpu.Output_Request.Hdr10)
 }
 
+// The pool of virtual texture pages' budget is a quality key like the pool of mesh pages', with its own presets.
+@(test)
+the_texture_pool_is_a_quality_key :: proc(t: ^testing.T) {
+	caps := render.Caps{}
+	s: Settings
+	problems := make([dynamic]string, context.temp_allocator)
+	parse("quality.texture_pool = 512\nquality.texture_pool = lots\n", &s, &problems)
+	testing.expect_value(t, len(problems), 1)
+	testing.expect_value(
+		t,
+		problems[0],
+		`2: quality.texture_pool takes a whole number of MiB from 16 to 3584, not "lots"`,
+	)
+	testing.expect_value(t, quality(s, caps).texture_pool, 512)
+	testing.expect_value(t, render.preset_quality(.Low, caps).texture_pool, 256)
+	testing.expect_value(
+		t,
+		render.preset_quality(.Ultra, render.Caps{video_memory = 4 << 30}).texture_pool,
+		1024,
+	)
+	testing.expect_value(t, render.clamp_quality({texture_pool = 1}, caps).texture_pool, 16)
+	testing.expect_value(t, render.clamp_quality({}, caps).texture_pool, 1024)
+	testing.expect_value(
+		t,
+		quality_values(render.default_quality(caps), caps)[.Texture_Pool],
+		"1024",
+	)
+}
+
 @(test)
 quality_keys_replace_the_presets_features :: proc(t: ^testing.T) {
 	caps := render.Caps {
