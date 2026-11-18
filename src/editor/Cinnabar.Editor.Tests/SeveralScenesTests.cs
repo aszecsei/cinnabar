@@ -109,15 +109,19 @@ public sealed class SeveralScenesTests : IDisposable
     }
 
     [Fact]
-    public void TheHostGetsEveryOpenSceneAndEachEditNamesItsScene()
+    public void TheHostGetsEachSceneThatOpensAndEachEditNamesItsScene()
     {
         var (shell, north, south) = Open(link: true);
         using var _ = shell;
 
-        var load = _sent.OfType<LoadScene>().Last();
-        Assert.Equal([north.Number, south.Number], load.Scenes.Select(s => s.Scene));
-        Assert.All(load.Scenes, s => Assert.Equal(1UL, Assert.Single(s.Entities).Id));
-        Assert.Equal("North Gate", load.Scenes[0].Entities[0].Name);
+        // The first scene replaces the world, and the second joins it without loading the first again.
+        var load = Assert.Single(_sent.OfType<LoadScene>());
+        Assert.Equal([north.Number], load.Scenes.Select(s => s.Scene));
+        Assert.Equal("North Gate", Assert.Single(load.Scenes[0].Entities).Name);
+        var added = Assert.Single(_sent.OfType<AddScene>());
+        Assert.Equal(south.Number, added.Scene.Scene);
+        Assert.Equal("South Gate", Assert.Single(added.Scene.Entities).Name);
+        Assert.True(added.Ticket > load.Ticket);
 
         _sent.Clear();
         shell.Edit("Rename", Rename("South Door"));
@@ -256,7 +260,7 @@ public sealed class SeveralScenesTests : IDisposable
     }
 
     [Fact]
-    public void ClosingASceneSendsTheOthersAndTheLastOneStays()
+    public void ClosingASceneRemovesOnlyItAndTheLastOneStays()
     {
         var (shell, north, south) = Open(link: true);
         using var _ = shell;
@@ -268,9 +272,40 @@ public sealed class SeveralScenesTests : IDisposable
 
         Assert.Equal([north], shell.Scenes);
         Assert.Same(north, shell.Scene);
-        Assert.Equal([north.Number], Assert.Single(_sent.OfType<LoadScene>()).Scenes.Select(s => s.Scene));
+        Assert.Equal(south.Number, Assert.Single(_sent.OfType<RemoveScene>()).Scene);
+        Assert.Empty(_sent.OfType<LoadScene>());
         Assert.False(shell.CloseScene(north));
         Assert.False(shell.Commands.Get(EditorCommands.CloseScene).CanExecute);
+    }
+
+    [Fact]
+    public void TheOtherScenesKeepTheirProblemsAndWhatIsHiddenAndLockedAsASceneOpensAndCloses()
+    {
+        var (shell, north, south) = Open(link: true);
+        using var _ = shell;
+        shell.OnGameMessage(World(north, south));
+        shell.OnGameMessage(new EditProblems(false, [new EditProblem(north.Number, 1, "Spin has no field speed, so it is not set")]));
+        shell.SetHidden(shell.World.Find(NorthGate)!, true);
+        shell.SetLocked(shell.World.Find(NorthGate)!, true);
+        shell.Selection.Select(NorthGate);
+        _sent.Clear();
+
+        File.WriteAllText(_temp.Combine("east.scene"), Text("East Gate"));
+        Assert.True(shell.AddScene(_temp.Combine("east.scene")));
+        var east = shell.Scene!;
+        const ulong EastGate = 1UL << 32 | 2;
+        shell.OnGameMessage(new EntityDelta([new EntityInfo(EastGate, "East Gate", 1, east.Number, 0, true, [1])], []));
+        Assert.True(shell.CloseScene(south));
+        shell.OnGameMessage(new EntityDelta([], [SouthGate]));
+
+        Assert.Empty(_sent.OfType<LoadScene>());
+        Assert.Equal(east.Number, Assert.Single(_sent.OfType<AddScene>()).Scene.Scene);
+        Assert.Equal(south.Number, Assert.Single(_sent.OfType<RemoveScene>()).Scene);
+        var gate = shell.World.Find(NorthGate)!;
+        Assert.Single(shell.ProblemsOf(gate));
+        Assert.True(shell.IsHidden(gate));
+        Assert.True(shell.IsLocked(gate));
+        Assert.Equal([NorthGate], shell.Selection.Entities);
     }
 
     [Fact]
@@ -295,7 +330,7 @@ public sealed class SeveralScenesTests : IDisposable
     {
         var (shell, north, south) = Open(link: true);
         using var _ = shell;
-        var ticket = _sent.OfType<LoadScene>().Last().Ticket;
+        var ticket = _sent.OfType<AddScene>().Last().Ticket;
         static Link.Protocol.Operation SetSpeed(SceneDocument scene, double speed) =>
             new SetField(1, 1001, "speed", SceneValue.Of(SceneNumber.Of(speed))).ToWire()! with { Scene = scene.Number };
 

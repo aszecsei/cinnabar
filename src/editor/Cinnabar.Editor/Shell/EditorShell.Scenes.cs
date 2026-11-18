@@ -4,6 +4,7 @@ using Cinnabar.Editor.Panels;
 using ApplyOperations = Cinnabar.Editor.Link.Protocol.ApplyOperations;
 using EditProblems = Cinnabar.Editor.Link.Protocol.EditProblems;
 using PickResult = Cinnabar.Editor.Link.Protocol.PickResult;
+using Wire = Cinnabar.Editor.Link.Protocol;
 
 namespace Cinnabar.Editor.Shell;
 
@@ -212,7 +213,7 @@ public sealed partial class EditorShell
         Commands.InvalidateAll();
         SceneChanged?.Invoke();
         Visibility.Load();
-        SendScene();
+        SendAddedScene(document);
         Console.Add(LogLevel.Info, $"scene: opened {document.Path} beside {_scenes.Count - 1} other scenes, {document.Scene.Entities.Count} entities");
         OfferRestore(document);
         return true;
@@ -220,7 +221,7 @@ public sealed partial class EditorShell
 
     /// <summary>
     /// Closes an open scene, without asking about its changes: the window asks first. The last open scene does not close,
-    /// as the host's world would have nothing of the editor's. The host's world drops its entities.
+    /// as the host's world would have nothing of the editor's. The host's world drops its entities, and only them.
     /// </summary>
     public bool CloseScene(SceneDocument document)
     {
@@ -250,7 +251,7 @@ public sealed partial class EditorShell
         Commands.InvalidateAll();
         SceneChanged?.Invoke();
         Visibility.Load();
-        SendScene();
+        SendRemovedScene(document);
         Console.Add(LogLevel.Info, $"scene: closed {document.Path}");
         return true;
     }
@@ -807,6 +808,25 @@ public sealed partial class EditorShell
         if (_scenes.Count > 0 && Host.Linked)
         {
             Host.Send(SceneSnapshot.ToMessage(_scenes.Select(s => SceneSnapshot.Loaded(s.Number, s.Expanded.Flat, AssetGuidOf(s.Path) ?? "")), ++_sceneTicket));
+        }
+    }
+
+    // The host adds a scene that opened beside the others, and their entities keep their handles. Its next entity delta
+    // shows the result.
+    void SendAddedScene(SceneDocument document)
+    {
+        if (Host.Linked)
+        {
+            Host.Send(new Wire.AddScene(SceneSnapshot.Loaded(document.Number, document.Expanded.Flat, AssetGuidOf(document.Path) ?? ""), ++_sceneTicket));
+        }
+    }
+
+    // The host despawns the entities of a scene that closed, and the others' stay as they are.
+    void SendRemovedScene(SceneDocument document)
+    {
+        if (Host.Linked)
+        {
+            Host.Send(new Wire.RemoveScene(document.Number, ++_sceneTicket));
         }
     }
 
