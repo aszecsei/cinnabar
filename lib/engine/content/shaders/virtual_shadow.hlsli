@@ -253,4 +253,26 @@ float3 virtual_debug_color(float3 p) {
 	return hit.level <= virtual_footprint_level(length(p)) ? color : lerp(color, float3(1, 0, 0), 0.5);
 }
 
+// virtual_invalidated_debug_color is the Shadow_Virtual_Invalidated debug view's color: red where the point's page drew
+// again this frame since a caster that changed dropped it, yellow where it drew as new to the pool, and otherwise the
+// level's own, dimmed, so the pages that drew stand out (see docs/rendering/lighting-and-shadows.md#caching).
+float3 virtual_invalidated_debug_color(float3 p) {
+	if (frame.virtual_levels == 0) {
+		return 0.4;
+	}
+	Virtual_Hit hit;
+	if (!virtual_find(p, 0, 0, hit)) {
+		return float3(1, 0, 1);
+	}
+	uint entry = cn_buffer(frame.virtual_table).Load(
+		virtual_table_entry(hit.level, virtual_view(hit.level).page_origin, hit.center));
+	if ((entry & VIRTUAL_DROPPED) != 0) {
+		return float3(1, 0.1, 0.1);
+	}
+	if (virtual_entry_draws(entry)) {
+		return float3(1, 0.9, 0.2);
+	}
+	return hash_color(hit.level + 1) * 0.25;
+}
+
 #endif

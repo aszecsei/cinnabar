@@ -2,7 +2,7 @@
 
 Patch surfaces: a world-space rectangle that the GPU draws as grid patches, fine near the camera and coarse far from it, with holes, shaped by its material's displacement. Water and terrain are both one of these. Read [GPU scene](gpu-scene.md) and [Materials: Vertex displacement](materials.md#vertex-displacement) first.
 
-**In this document:** [Surfaces](#surfaces) · [Selection](#selection) · [Patches](#patches) · [Holes](#holes) · [Materials for patches](#materials-for-patches) · [Collision](#collision) · [Layers](#layers) · [In the frame](#in-the-frame) · [Limits](#limits)
+**In this document:** [Surfaces](#surfaces) · [Selection](#selection) · [Shadows](#shadows) · [Patches](#patches) · [Holes](#holes) · [Materials for patches](#materials-for-patches) · [Collision](#collision) · [Layers](#layers) · [In the frame](#in-the-frame) · [Limits](#limits)
 
 ## Surfaces
 
@@ -30,10 +30,22 @@ The surface is a quadtree. Its root is a square of `SURFACE_PATCH_QUADS` (16) fi
 - Level 0's range, `Surface_Record.range0`, is the distance at which a finest cell covers `SURFACE_CELL_PIXELS` (8) pixels, `cell × lod_scale / 8`, where `lod_scale` is the camera's pixels per meter at a distance of 1 over `Quality.lod_error` (see [Quality](quality.md#quality)), so a lower quality draws coarser patches. It is at least a patch, and at most what keeps every level's ring of patches within the item's reserved draws. Level L's range is `range0 × 2^L`.
 - A node of level L splits while its box, the square between the surface's heights, is nearer the camera than level L − 1's range; a node outside the rectangle is dropped; the rest are the frame's patches. A node that the queues cannot hold draws as it is.
 - The camera is `camera_local`, the camera in the surface's space, which the CPU computes from the instance's rows, so a turned or scaled surface selects right.
-- Selection is by the camera only, with no frustum test, as the meshlets' levels are, so every view, the shadow maps' included, draws the same patches, and the prepass and the forward pass agree.
+- Selection is by the camera only, with no frustum test, as the meshlets' levels are, so every view but the virtual shadow map's levels draws the same patches, and the prepass and the forward pass agree (see [Shadows](#shadows)).
 - The walk writes each surface's patches, `x | y << 12 | level << 24`, into a persistent buffer of `MAX_SURFACES` (16) × `MAX_SURFACE_PATCHES` (2048), and their count. `select_patches_reference` is the same walk on the CPU, for the tests.
 
 `cull_patches.hlsl` then runs a thread for each patch, surface and view, after `cull_draws.hlsl`: it tests the patch's box, moved by the instance and grown by the material's displacement bound, against the view's planes, honours the casters' and the view model's rules, and takes the next draw of the surface's item's bin of that view, exactly as a mesh's item does, writing an indirect draw of `SURFACE_PATCH_VERTICES` (1536) vertices and a `Draw_Record` whose `first` is the packed patch and whose `mesh` is the surface's record. The item reserves `MAX_SURFACE_PATCHES` draws in its bin (`bin_sizes`), so the frame's draw buffers have room, and `draw_scene_view` draws the bin as any other.
+
+## Shadows
+
+The [virtual shadow map](lighting-and-shadows.md#caching)'s levels do not take the camera's patches, since a camera that moves would change what its cached pages hold. Once the page table is written, a second walk, `select shadow patches` (`select_patches.hlsl` with `Cull_Constants.shadow_levels`), picks their patches by texels, as the levels' own cut picks meshlets (see [Streaming](lighting-and-shadows.md#streaming)), into `shadow_patches` and `shadow_patch_counts`:
+
+- **The split:** a node splits while its child's cell, at the instance's scale, is more than `SURFACE_CELL_PIXELS` (8) texels of the finest level whose drawn pages the node's box, grown by its own size on each side, reaches. A node that reaches no drawn page is dropped. A box over 8 pages on a side tests tiles of 8x8 pages, whose bits each surface's group builds in group memory, so a large node does not count as reaching every page of a level that draws any. The cut follows only the pages that draw, not the camera, so a cached page keeps its shape.
+- **Balance:** the grown box keeps the tree 2:1 balanced: a box inside another reaches no finer level.
+- **Edges:** each patch has four bits above its level, from bit 28 of the packed patch, for its -x, +x, -z and +z edges, set where the neighbour across the edge is coarser: where its parent's neighbour does not split.
+- **Culling and drawing:** `cull virtual shadow patches`, after the levels' draws are culled, runs `cull_patches.hlsl` over the walk's patches for the levels' views, and keeps the patches that reach a page that draws; the camera's dispatch skips the levels. Its draws have `DRAW_SNAPPED`, whose vertices have no camera morph: the odd vertices of an edge with a coarser neighbour snap onto the even ones, so the levels meet without a crack.
+- **Fallback:** a frame without the walk's buffers draws the levels with the camera's patches and morph.
+- **Edits:** the surface item's signature (`surface_signature`, in its `list`) hashes the `Surface_Renderer`'s fields, whether the hole mask is resident, and the versions of the height map, the hole mask and the layer map, so a Landscape stroke, which a live asset carries (`asset.set_live`), or a recook is a [change of casters](gpu-scene.md#caster-tracking), and both shadow caches drop the pages under the whole surface.
+- `select_patches_shadow_reference` is the same walk on the CPU, for the tests in `surface_shadows_test.odin`: the cut does not follow the camera and covers only the pages that draw, the tree is balanced with its edge bits where the neighbour is coarser, and an edit is a change of casters.
 
 ## Patches
 
@@ -79,5 +91,6 @@ A terrain's material can blend layers by the weights of a `data` texture, an RGB
 - It draws on the vertex-pulling path only: no mesh shaders, no vertex reuse, and no per-triangle culling of holes, which cost their vertex work.
 - Hole edges are the finest cells' edges.
 - A height map terraces at its texels' steps: 1/65535 of its scale for a `height` texture, which is 16 bits a texel, and 1/255 for an 8-bit one, such as a `mask` texture, which is visible on large or tall terrain. A `height` texture is not compressed, so it is four times the size of a `mask` texture.
-- Selection is by the camera, so a shadow map far from it draws coarse patches there, as the meshlets do.
+- Selection is by the camera, so a shadow map of the atlas far from it draws coarse patches there, as the meshlets do. The virtual shadow map's levels cut by their texels instead, but a surface that wants more than `MAX_SURFACE_PATCHES` patches in their cut stops refining, and which nodes get the room is not deterministic.
+- A height map's virtual texture pages that stream in change its displacement without a new version, so the shadow caches do not drop the pages under them.
 - A node at the queues' limit draws coarse; `range0`'s cap keeps a surface within it in the common case.

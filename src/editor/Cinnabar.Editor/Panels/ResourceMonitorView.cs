@@ -147,6 +147,8 @@ public sealed class ResourceMonitorView : Grid
             yield return ("Shadow pages evicted", $"{g.VirtualPagesEvicted:N0}");
             // The pages that streaming drew again, and those that wait for their turn (see docs/rendering/lighting-and-shadows.md#streaming).
             yield return ("Shadow pages streamed", g.VirtualPagesWaiting > 0 ? $"{g.VirtualPagesStreamed:N0}, {g.VirtualPagesWaiting:N0} waiting" : $"{g.VirtualPagesStreamed:N0}");
+            // The pages that the casters that changed drew again or let go, and the levels that drew whole past the limit (see docs/rendering/lighting-and-shadows.md#caching).
+            yield return ("Shadow pages invalidated", g.VirtualLevelsInvalidated > 0 ? $"{g.VirtualPagesInvalidated:N0}, {g.VirtualLevelsInvalidated:N0} whole levels" : $"{g.VirtualPagesInvalidated:N0}");
             yield return ("Shadow page pool", $"{g.VirtualPagesResident:N0} / {g.VirtualPagesCapacity:N0} ({g.VirtualPagesResident * 100.0 / g.VirtualPagesCapacity:0}% full)");
         }
     }

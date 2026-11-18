@@ -2,6 +2,7 @@ package render
 
 import "core:math"
 import "core:math/linalg"
+import "core:slice"
 import "core:testing"
 
 import format "cinnabar:engine/asset/format"
@@ -1239,6 +1240,108 @@ a_changed_caster_draws_only_the_pages_under_it_again :: proc(t: ^testing.T) {
 
 // A sphere off a level's grid drops none of its pages.
 @(test)
+an_invalid_page_that_the_frame_asks_for_draws_again_in_its_own_physical_page :: proc(
+	t: ^testing.T,
+) {
+	c := test_camera()
+	views := test_views(c)
+	requests, table, pages := test_buffers(len(views))
+	mark_view(requests, views, c)
+	virtual_allocate(requests, table, pages, views, now = 1)
+	before := slice.clone(table, context.temp_allocator)
+	dropped := make([]u32, VIRTUAL_MAX_LEVELS * VIRTUAL_LEVEL_WORDS, context.temp_allocator)
+	virtual_drop_pages(views, {[4]f32{0, -1, 5, 0.5}}, dropped)
+	mark_view(requests, views, c)
+	stats := virtual_allocate(requests, table, pages, views, now = 2, dropped = dropped)
+	testing.expect(t, stats.drawn > 0, "nothing drew again")
+	testing.expect_value(t, stats.evicted, 0)
+	testing.expect_value(t, stats.invalidated, stats.drawn)
+	again: u32
+	for entry, slot in table[:VIRTUAL_TABLE_COUNTS] {
+		if !virtual_entry_draws(entry) {
+			continue
+		}
+		again += 1
+		testing.expect(
+			t,
+			entry & VIRTUAL_DROPPED != 0,
+			"a page drew again without VIRTUAL_DROPPED",
+		)
+		testing.expect_value(t, virtual_entry_page(entry), virtual_entry_page(before[slot]))
+	}
+	testing.expect_value(t, again, stats.drawn)
+	counted: u32
+	for count in table[VIRTUAL_TABLE_COUNTS:] {
+		counted += count
+	}
+	testing.expect_value(t, counted, stats.drawn)
+}
+
+@(test)
+an_invalid_page_that_the_frame_does_not_ask_for_leaves_the_pool :: proc(t: ^testing.T) {
+	c := test_camera()
+	views := test_views(c)
+	requests, table, pages := test_buffers(len(views))
+	mark_view(requests, views, c)
+	first := virtual_allocate(requests, table, pages, views, now = 1)
+	dropped := make([]u32, VIRTUAL_MAX_LEVELS * VIRTUAL_LEVEL_WORDS, context.temp_allocator)
+	virtual_drop_pages(views, {[4]f32{0, -1, 5, 0.5}}, dropped)
+	// The frame asks for nothing, so the pages under the sphere leave and the others stay.
+	slice.zero(requests)
+	stats := virtual_allocate(requests, table, pages, views, now = 2, dropped = dropped)
+	testing.expect(t, stats.invalidated > 0, "no page was under the sphere")
+	testing.expect_value(t, stats.drawn, 0)
+	testing.expect_value(t, stats.resident, first.resident - stats.invalidated)
+}
+
+@(test)
+drops_past_the_limit_drop_the_whole_level :: proc(t: ^testing.T) {
+	c := test_camera()
+	views := test_views(c)
+	dropped := make([]u32, VIRTUAL_MAX_LEVELS * VIRTUAL_LEVEL_WORDS, context.temp_allocator)
+	// A sphere of 20 m covers most of level 0's 16 m, and a few pages of the coarse levels.
+	virtual_drop_pages(views, {[4]f32{0, -1, 5, 20}}, dropped)
+	limit := 64
+	capped := virtual_cap_drops(dropped, len(views), limit, 1 << 3)
+	testing.expect(t, capped & 1 != 0, "level 0 did not drop whole")
+	testing.expect(t, capped & (1 << uint(len(views) - 1)) == 0, "the last level dropped whole")
+	testing.expect(t, capped & (1 << 3) == 0, "an invalidated level counts as capped")
+	for level in 0 ..< len(views) {
+		words := dropped[level * VIRTUAL_LEVEL_WORDS:][:VIRTUAL_LEVEL_WORDS]
+		whole := capped & (1 << uint(level)) != 0 || level == 3
+		if whole {
+			testing.expectf(t, virtual_no_drops(words), "level %d kept its drops", level)
+		} else {
+			testing.expectf(
+				t,
+				count_marked(words) <= limit,
+				"level %d has more drops than the limit",
+				level,
+			)
+		}
+	}
+	// An invalidated level draws every page that it holds again.
+	requests, table, pages := test_buffers(len(views))
+	mark_view(requests, views, c)
+	first := virtual_allocate(requests, table, pages, views, now = 1)
+	mark_view(requests, views, c)
+	stats := virtual_allocate(
+		requests,
+		table,
+		pages,
+		views,
+		now = 2,
+		invalidate = capped,
+		dropped = dropped,
+	)
+	testing.expect(
+		t,
+		stats.drawn > 0 && stats.drawn < first.allocated,
+		"the capped level did not draw again alone",
+	)
+}
+
+@(test)
 a_sphere_off_the_levels_drops_nothing :: proc(t: ^testing.T) {
 	c := test_camera()
 	views := test_views(c)
@@ -1604,12 +1707,12 @@ a_mesh_that_becomes_resident_drops_the_pages_under_it :: proc(t: ^testing.T) {
 	records[0].rows = {{1, 0, 0, 0}, {0, 1, 0, -1}, {0, 0, 1, 5}}
 	pipelines := make([]Material_Pipeline, 1, context.temp_allocator)
 	// Not resident yet: no item.
-	bounds := caster_bounds(records, nil, pipelines, nil, 1, context.temp_allocator)
+	bounds := caster_bounds(records, nil, pipelines, nil, nil, 1, context.temp_allocator)
 	track_casters(tracking, bounds, {}, 1)
 	testing.expect_value(t, len(tracking.changes), 0)
 	// Resident: its item casts.
 	items := []Cull_Item{{instance = 0, flags = ITEM_CASTS_SHADOWS, sphere = {0, 0, 0, 0.5}}}
-	bounds = caster_bounds(records, items, pipelines, nil, 1, context.temp_allocator)
+	bounds = caster_bounds(records, items, pipelines, nil, nil, 1, context.temp_allocator)
 	track_casters(tracking, bounds, {}, 2)
 	testing.expect_value(t, len(tracking.changes), 1)
 	live: Live_Slots
@@ -1635,6 +1738,67 @@ a_mesh_that_becomes_resident_drops_the_pages_under_it :: proc(t: ^testing.T) {
 			"level %d kept the page under the mesh",
 			level,
 		)
+	}
+}
+
+// A mesh particle system's slot has bounds: it is live, and every frame the pages under its sphere drop. An emitter whose
+// modules leave it no bound leaves its slot without, which drops none.
+@(test)
+a_particle_slot_has_bounds_and_drops_the_pages_under_them :: proc(t: ^testing.T) {
+	tracking := new(Caster_Tracking)
+	defer {
+		delete(tracking.changes)
+		free(tracking)
+	}
+	records := make([]Instance_Record, 1, context.temp_allocator)
+	records[0].rows = {{1, 0, 0, 0}, {0, 1, 0, -1}, {0, 0, 1, 5}}
+	pipelines := make([]Material_Pipeline, 1, context.temp_allocator)
+	slot := Particle_Slot {
+		started    = true,
+		reach_span = 0.25,
+	}
+	em := format.Effect_Emitter {
+		lifetime = {1, 2},
+		speed    = {0.5, 1},
+	}
+	size: format.Effect_Curve_Row
+	c := test_camera()
+	views := test_views(c)
+	for unbounded in ([]bool{false, true}) {
+		modules := []format.Effect_Module{}
+		if unbounded {
+			modules = {{kind = .Collide, values = {0.5, 0.5, 0, 0}}}
+		}
+		sphere := particle_sphere(&slot, em, modules, size, {0, 0, 0, 0.5})
+		items := []Cull_Item{{flags = ITEM_PARTICLES | ITEM_CASTS_SHADOWS, sphere = sphere}}
+		bounds := caster_bounds(records, items, pipelines, nil, nil, 1, context.temp_allocator)
+		track_casters(tracking, bounds, {}, 1)
+		testing.expect_value(t, tracking.slots[0].unbounded, unbounded)
+		testing.expect(t, tracking.slots[0].inherent && tracking.slots[0].volatile)
+		live := live_slots(tracking, 1, {}, 100)
+		testing.expect(t, slot_live(&live, 0))
+		spheres := virtual_drop_spheres(tracking, nil, &live, 1, {}, context.temp_allocator)
+		testing.expect_value(t, len(spheres), unbounded ? 0 : 1)
+		// Without a bound, the levels drop every page instead.
+		testing.expect_value(t, virtual_live_unbounded(tracking, &live, 1), unbounded)
+		dropped := make([]u32, VIRTUAL_MAX_LEVELS * VIRTUAL_LEVEL_WORDS, context.temp_allocator)
+		virtual_drop_pages(views, spheres, dropped)
+		for view, level in views {
+			texel, _ := virtual_project(view, {0, -1, 5})
+			page := [2]i32{i32(texel.x) / VIRTUAL_PAGE_TEXELS, i32(texel.y) / VIRTUAL_PAGE_TEXELS}
+			testing.expectf(
+				t,
+				is_marked(dropped, level, page) != unbounded,
+				"level %d: the page under the particles %s",
+				level,
+				unbounded ? "dropped" : "stayed",
+			)
+		}
+		// The frames after, nothing changes, and the live slot still drops.
+		track_casters(tracking, bounds, {}, 2)
+		live = live_slots(tracking, 1, {}, 100)
+		spheres = virtual_drop_spheres(tracking, nil, &live, 1, {}, context.temp_allocator)
+		testing.expect_value(t, len(spheres), unbounded ? 0 : 1)
 	}
 }
 

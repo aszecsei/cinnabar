@@ -222,19 +222,22 @@ a_settings_file_from_before_the_virtual_shadow_map_reads_without_a_problem :: pr
 	free_all(context.temp_allocator)
 }
 
-// The virtual shadow map's cache is off in every preset, since a caster that moves leaves its old shadow in the pages that
-// it keeps (see docs/rendering/lighting-and-shadows.md#caching). Its key turns it on, a value that does not fit is a
-// problem, and it is off without the virtual shadow map.
+// The virtual shadow map's cache is on in every preset with a virtual shadow map, since the pages under a caster that
+// changed draw again (see docs/rendering/lighting-and-shadows.md#caching). Its key turns it off, a value that does not fit
+// is a problem, and it is off without the virtual shadow map.
 @(test)
-the_virtual_shadow_cache_is_off_until_its_key_turns_it_on :: proc(t: ^testing.T) {
+the_virtual_shadow_cache_is_on_with_the_virtual_shadow_map_until_its_key_turns_it_off :: proc(
+	t: ^testing.T,
+) {
 	caps := render.Caps{}
 	for preset in render.Quality_Preset.Low ..= render.Quality_Preset.Ultra {
-		testing.expect(t, !render.preset_quality(preset, caps).shadows.virtual_cache)
+		q := render.preset_quality(preset, caps)
+		testing.expect_value(t, q.shadows.virtual_cache, q.shadows.virtual)
 	}
 	s: Settings
 	problems := make([dynamic]string, context.temp_allocator)
 	parse(
-		"quality.preset = High\nquality.shadows.virtual_cache = true\nquality.shadows.virtual_cache = often\n",
+		"quality.preset = High\nquality.shadows.virtual_cache = false\nquality.shadows.virtual_cache = often\n",
 		&s,
 		&problems,
 	)
@@ -245,8 +248,8 @@ the_virtual_shadow_cache_is_off_until_its_key_turns_it_on :: proc(t: ^testing.T)
 		`3: quality.shadows.virtual_cache takes true or false, not "often"`,
 	)
 	q := quality(s, caps)
-	testing.expect(t, q.shadows.virtual_cache)
-	testing.expect_value(t, quality_values(q, caps)[.Virtual_Shadow_Cache], "true")
+	testing.expect(t, !q.shadows.virtual_cache)
+	testing.expect_value(t, quality_values(q, caps)[.Virtual_Shadow_Cache], "false")
 	testing.expect_value(t, render.quality_preset(q, caps), render.Quality_Preset.Custom)
 	s = {}
 	parse(

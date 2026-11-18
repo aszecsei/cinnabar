@@ -35,6 +35,10 @@ VIRTUAL_MAX_LEVELS :: 13
 // draws, which only the depth pass and its culling look for; the lookups take its physical page without the bit.
 VIRTUAL_NO_PAGE :: max(u32)
 VIRTUAL_DRAW :: u32(1) << 31
+// An entry of a page that draws again in the physical page that it had, since a caster that changed dropped it, which
+// only the Shadow_Virtual_Invalidated debug view looks for. It goes with VIRTUAL_DRAW. Matches VIRTUAL_DROPPED in
+// virtual_pages.hlsli.
+VIRTUAL_DROPPED :: u32(1) << 30
 // A level's table is toroidal: a page's entry is at its absolute page modulo VIRTUAL_PAGES on each axis, so a page keeps
 // its entry as the level's origin moves. After the levels' entries, the table holds each level's count of the pages that
 // the frame draws, at VIRTUAL_TABLE_COUNTS.
@@ -52,6 +56,9 @@ VIRTUAL_MAX_POOL_PAGES :: 64 * 64
 VIRTUAL_SCRATCH_HISTOGRAM :: 16
 VIRTUAL_SCRATCH_LIST :: VIRTUAL_SCRATCH_HISTOGRAM + VIRTUAL_AGE_BINS
 VIRTUAL_SCRATCH_WORDS :: VIRTUAL_SCRATCH_LIST + VIRTUAL_MAX_POOL_PAGES
+// The most spheres that a frame's casters that changed drop page by page. Past it, every level drops every page, so the
+// marking on the CPU costs no more than drawing.
+VIRTUAL_MAX_DROP_SPHERES :: 4096
 // How far the camera may be from the levels' anchor, in meters on each axis, before the anchor moves to it (see
 // virtual_grid_anchor). Level 0's pages are 12.5 cm, so its page indices stay within 2^30.
 VIRTUAL_ANCHOR_REACH :: f64(1 << 26)
@@ -88,16 +95,19 @@ VIRTUAL_ALLOCATE_SHADER :: #load("../content/shaders/virtual_shadow_allocate.hls
 // Virtual_Shadow_Stats are the virtual shadow map's pages a frame or two ago, which the editor shows: those that the
 // frame asked for, those that it got, those that the pool had no room for, and how many the pool holds; of those that
 // it got, those that the pool still held and those that it drew; the pages that left the pool for them, and the pages
-// that the pool holds after the frame. Matches the words that virtual_shadow_allocate.hlsl stores.
+// that the pool holds after the frame; and the pages that the pool held that a caster that changed dropped, whether they
+// drew again or left (see docs/rendering/lighting-and-shadows.md#caching). Matches the words that
+// virtual_shadow_allocate.hlsl stores.
 Virtual_Shadow_Stats :: struct {
-	requested: u32,
-	allocated: u32,
-	missed:    u32,
-	capacity:  u32,
-	cached:    u32,
-	drawn:     u32,
-	evicted:   u32,
-	resident:  u32,
+	requested:   u32,
+	allocated:   u32,
+	missed:      u32,
+	capacity:    u32,
+	cached:      u32,
+	drawn:       u32,
+	evicted:     u32,
+	resident:    u32,
+	invalidated: u32,
 }
 
 // Virtual_Stream_Stats are the pages that the last frame that executed dropped for streaming, and those that the drops
@@ -105,6 +115,15 @@ Virtual_Shadow_Stats :: struct {
 Virtual_Stream_Stats :: struct {
 	dropped: u32,
 	waiting: u32,
+}
+
+// Virtual_Drop_Stats are what the casters that changed dropped in the last frame that executed: the spheres, and the
+// levels that dropped every page since their drops passed Shadow_Params.drop_pages, since the spheres passed
+// VIRTUAL_MAX_DROP_SPHERES, or since the view draws a slot live that has no bounds (see
+// docs/rendering/lighting-and-shadows.md#caching).
+Virtual_Drop_Stats :: struct {
+	spheres: u32,
+	levels:  u32,
 }
 
 // Virtual_Waiting is the pages that streaming dropped and that a frame's budget left for later, a bit each, at their
@@ -180,6 +199,8 @@ Virtual_State :: struct {
 	// streaming. Only a frame's commit changes them, with the cache.
 	waiting:    ^Virtual_Waiting,
 	stream:     Virtual_Stream_Stats,
+	// What the last frame's casters that changed dropped. Only a frame's commit changes it.
+	drop:       Virtual_Drop_Stats,
 }
 
 // Virtual_Frame is one frame's virtual shadow map, in Shadow_Frame. count is its levels, 0 without it, which are the
@@ -199,6 +220,7 @@ Virtual_Frame :: struct {
 	// memory, nil for none, and what it dropped for streaming, which its commit keeps.
 	waiting:    []u32,
 	stream:     Virtual_Stream_Stats,
+	drop:       Virtual_Drop_Stats,
 	pool:       Texture,
 	requests:   Buffer,
 	table:      Buffer,
@@ -561,7 +583,7 @@ virtual_table_slot :: proc(level: int, page: [2]i32) -> int {
 
 // virtual_entry_page is a table entry's physical page, or VIRTUAL_NO_PAGE.
 virtual_entry_page :: proc(entry: u32) -> u32 {
-	return entry == VIRTUAL_NO_PAGE ? VIRTUAL_NO_PAGE : entry & ~VIRTUAL_DRAW
+	return entry == VIRTUAL_NO_PAGE ? VIRTUAL_NO_PAGE : entry & ~(VIRTUAL_DRAW | VIRTUAL_DROPPED)
 }
 
 // virtual_entry_draws is whether a table entry's page draws this frame.
@@ -731,20 +753,24 @@ virtual_reset :: proc(table: []u32, pages: []Virtual_Page) {
 	}
 }
 
-// Virtual_Retired is what virtual_retire counts: the pages that the frame asked for and the pool holds, the pages that
-// the pool holds once those that are no longer valid leave, and the others' ages.
+// Virtual_Retired is what virtual_retire counts: the pages that the frame asked for and the pool holds, those of them
+// that draw again since a caster that changed dropped them, the pages that the pool holds once those that are no longer
+// valid leave, the pages that the pool held that a drop covered, and the others' ages.
 Virtual_Retired :: struct {
-	hits:      u32,
-	valid:     u32,
-	histogram: [VIRTUAL_AGE_BINS]u32,
+	hits:        u32,
+	redrawn:     u32,
+	valid:       u32,
+	invalidated: u32,
+	histogram:   [VIRTUAL_AGE_BINS]u32,
 }
 
 // virtual_retire goes over the pool's pages, as a thread each does on the GPU. A page leaves when its level is one that
-// the frame drops, is past the frame's levels, no longer holds its page since the level's origin moved, or is one that
-// dropped has, under a caster that changed (see virtual_drop_pages). A page that
+// the frame drops, is past the frame's levels, or no longer holds its page since the level's origin moved. A page that
 // stays takes its entry again without VIRTUAL_DRAW. A page that the frame asks for is a hit: the frame keeps it and does
-// not ask for it again, and its age starts over. Every other page's age goes into the histogram. Matches retire in
-// virtual_shadow_allocate.hlsl.
+// not ask for it again, and its age starts over. Every other page's age goes into the histogram. A page that dropped
+// has, under a caster that changed (see virtual_drop_pages), is invalid: if the frame asks for it, it keeps its physical
+// page and draws again there, with VIRTUAL_DROPPED, and counts toward its level's pages that draw; otherwise it leaves.
+// Matches retire in virtual_shadow_allocate.hlsl.
 virtual_retire :: proc(
 	requests, table: []u32,
 	pages: []Virtual_Page,
@@ -767,20 +793,30 @@ virtual_retire :: proc(
 			keep =
 				local.x >= 0 && local.y >= 0 && local.x < VIRTUAL_PAGES && local.y < VIRTUAL_PAGES
 		}
-		if keep && dropped != nil {
-			at := page_index(level, local)
-			keep = dropped[at >> 5] & (u32(1) << uint(at & 31)) == 0
+		index := page_index(level, local)
+		mask := u32(1) << uint(index & 31)
+		invalid := keep && dropped != nil && dropped[index >> 5] & mask != 0
+		asked := keep && requests[index >> 5] & mask != 0
+		if invalid {
+			r.invalidated += 1
+			keep = asked
 		}
 		if !keep {
 			table[slot] = VIRTUAL_NO_PAGE
 			page.level = VIRTUAL_FREE
 			continue
 		}
-		table[slot] = u32(p)
 		r.valid += 1
-		index := page_index(level, local)
-		mask := u32(1) << uint(index & 31)
-		if requests[index >> 5] & mask != 0 {
+		if invalid {
+			requests[index >> 5] &~= mask
+			page.last = now
+			table[slot] = u32(p) | VIRTUAL_DRAW | VIRTUAL_DROPPED
+			table[VIRTUAL_TABLE_COUNTS + level] += 1
+			r.redrawn += 1
+			continue
+		}
+		table[slot] = u32(p)
+		if asked {
 			requests[index >> 5] &~= mask
 			page.last = now
 			r.hits += 1
@@ -850,7 +886,7 @@ virtual_collect :: proc(
 
 // virtual_assign gives each page that the frame asks for and the pool does not hold the next page of the list, coarsest
 // level first, so the finest go without when the list runs out, and marks it to draw. It returns how many it gave and
-// how many went without, and counts each level's in the table. Matches assign in virtual_shadow_allocate.hlsl.
+// how many went without, and adds each level's to the table's counts. Matches assign in virtual_shadow_allocate.hlsl.
 virtual_assign :: proc(
 	requests, table: []u32,
 	pages: []Virtual_Page,
@@ -881,7 +917,7 @@ virtual_assign :: proc(
 				pages[p] = {u32(level), page, now}
 			}
 		}
-		table[VIRTUAL_TABLE_COUNTS + level] = count
+		table[VIRTUAL_TABLE_COUNTS + level] += count
 	}
 	return
 }
@@ -912,20 +948,21 @@ virtual_allocate :: proc(
 	retired := virtual_retire(requests, table, pages, views, now, invalidate, dropped)
 	threshold, quota := virtual_select(
 		retired.histogram[:],
-		total - retired.hits,
+		total - retired.hits - retired.redrawn,
 		capacity - retired.valid,
 	)
 	available, evicted := virtual_collect(table, pages, now, threshold, quota)
 	drawn, missed := virtual_assign(requests, table, pages, views, available[:], now)
 	return {
 		requested = requested,
-		allocated = retired.hits + drawn,
+		allocated = retired.hits + retired.redrawn + drawn,
 		missed = moved + missed,
 		capacity = capacity,
 		cached = retired.hits,
-		drawn = drawn,
+		drawn = retired.redrawn + drawn,
 		evicted = evicted,
 		resident = retired.valid - evicted + drawn,
+		invalidated = retired.invalidated,
 	}
 }
 
@@ -938,6 +975,37 @@ virtual_drop_pages :: proc(views: []Shadow_View, spheres: [][4]f32, dropped: []u
 			virtual_drop_sphere(view, level, s, dropped)
 		}
 	}
+}
+
+// virtual_cap_drops gives the levels, a bit each, whose dropped pages are more than limit, which drop every page instead,
+// so that marking them page by page does not cost more than drawing them, and clears their words in dropped, with those
+// of the levels that invalidate already drops whole.
+virtual_cap_drops :: proc(dropped: []u32, levels, limit: int, invalidate: u32) -> (capped: u32) {
+	for level in 0 ..< levels {
+		words := dropped[level * VIRTUAL_LEVEL_WORDS:][:VIRTUAL_LEVEL_WORDS]
+		if invalidate & (1 << uint(level)) == 0 {
+			count := 0
+			for word in words {
+				count += int(bits.count_ones(word))
+			}
+			if count <= limit {
+				continue
+			}
+			capped |= 1 << uint(level)
+		}
+		slice.zero(words)
+	}
+	return
+}
+
+// virtual_no_drops is whether dropped has no page.
+virtual_no_drops :: proc(dropped: []u32) -> bool {
+	for word in dropped {
+		if word != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // virtual_drop_sphere sets the bits of one level's pages that a sphere relative to the camera covers, with a texel's
@@ -1067,7 +1135,8 @@ drop_sphere :: proc(drop: Stream_Drop, camera: ecs.World_Position) -> [4]f32 {
 
 // virtual_drop_spheres are the spheres, relative to the camera, whose pages a view's virtual shadow map drops: both
 // places of each change of casters that it takes, and every slot that it draws live, whose shadow changes each frame.
-// The live slots without bounds, mesh particles, drop none.
+// The live slots without bounds, mesh particles whose emitters have none, drop none: they drop every level (see
+// virtual_live_unbounded).
 @(private)
 virtual_drop_spheres :: proc(
 	t: ^Caster_Tracking,
@@ -1096,6 +1165,18 @@ virtual_drop_spheres :: proc(
 		}
 	}
 	return spheres[:]
+}
+
+// virtual_live_unbounded is whether a view draws a slot live that has no bounds: mesh particles whose emitter's modules
+// give none (see particle_sphere). Its shadow may be anywhere, so the view's levels drop every page.
+@(private)
+virtual_live_unbounded :: proc(t: ^Caster_Tracking, live: ^Live_Slots, high: u32) -> bool {
+	for c, slot in t.slots[:high] {
+		if c.unbounded && slot_live(live, u32(slot)) {
+			return true
+		}
+	}
+	return false
 }
 
 // virtual_lookup is the finest level from level on that has the page that holds the point, or -1. A mark that does not fit
@@ -1130,6 +1211,11 @@ virtual_shadow_stats :: proc(r: ^Renderer) -> Virtual_Shadow_Stats {
 // executed, and what waits.
 virtual_stream_stats :: proc(r: ^Renderer) -> Virtual_Stream_Stats {
 	return stats_state(r).virtual_shadows.stream
+}
+
+// virtual_drop_stats is what the last frame's casters that changed dropped (see Virtual_Drop_Stats).
+virtual_drop_stats :: proc(r: ^Renderer) -> Virtual_Drop_Stats {
+	return stats_state(r).virtual_shadows.drop
 }
 
 @(private)
@@ -1406,14 +1492,24 @@ add_virtual_levels :: proc(f: ^Frame, sf: ^Shadow_Frame, direction: [3]f32) {
 		f.view.position,
 		platform.frame_allocator,
 	)
+	unbounded := virtual_live_unbounded(&s.casters, scene.live, s.high)
 	waiting := f.state.virtual_shadows.waiting
-	if len(spheres) == 0 && len(scene.stream_drops) == 0 && waiting == nil {
+	if len(spheres) == 0 && !unbounded && len(scene.stream_drops) == 0 && waiting == nil {
 		return
 	}
 	views := sf.views[len(sf.views) - c.selection.levels:]
 	words := VIRTUAL_MAX_LEVELS * VIRTUAL_LEVEL_WORDS
 	dropped := make([]u32, words, platform.frame_allocator)
-	virtual_drop_pages(views, spheres, dropped)
+	vf.drop.spheres = u32(len(spheres))
+	whole := len(spheres) > VIRTUAL_MAX_DROP_SPHERES || unbounded
+	if whole {
+		vf.invalidate |= (u32(1) << uint(c.selection.levels)) - 1
+	} else {
+		virtual_drop_pages(views, spheres, dropped)
+	}
+	capped := virtual_cap_drops(dropped, c.selection.levels, sf.params.drop_pages, vf.invalidate)
+	vf.invalidate |= capped
+	vf.drop.levels = whole ? u32(c.selection.levels) : u32(bits.count_ones(capped))
 	// The pages that streaming drops: those that waited and the frame's, but none of a level that drops every page.
 	wanted := make([]u32, words, platform.frame_allocator)
 	if waiting != nil {
@@ -1435,7 +1531,7 @@ add_virtual_levels :: proc(f: ^Frame, sf: ^Shadow_Frame, direction: [3]f32) {
 		vf.waiting = make([]u32, words, platform.frame_allocator)
 		virtual_waiting_table(views, wanted, vf.waiting)
 	}
-	if len(spheres) == 0 && taken == 0 {
+	if virtual_no_drops(dropped[:c.selection.levels * VIRTUAL_LEVEL_WORDS]) && taken == 0 {
 		return
 	}
 	ok: bool
@@ -1584,7 +1680,7 @@ commit_virtual_cache :: proc(data: rawptr) {
 	f := (^Frame)(data)
 	v := &f.state.virtual_shadows
 	v.cache = f.shadows.virtual.cache
-	v.stream = f.shadows.virtual.stream
+	v.stream, v.drop = f.shadows.virtual.stream, f.shadows.virtual.drop
 	if waiting := f.shadows.virtual.waiting; waiting != nil {
 		if v.waiting == nil {
 			v.waiting = new(Virtual_Waiting, f.renderer.platform.heap_allocator)
@@ -1605,7 +1701,7 @@ forget_virtual_cache :: proc(f: ^Frame) {
 	}
 	on_executed(f.graph, proc(data: rawptr) {
 			v := &(^Frame)(data).state.virtual_shadows
-			v.cache, v.stream = nil, {}
+			v.cache, v.stream, v.drop = nil, {}, {}
 			free(v.waiting, (^Frame)(data).renderer.platform.heap_allocator)
 			v.waiting = nil
 		}, f)
@@ -1623,6 +1719,7 @@ add_virtual_culling :: proc(f: ^Frame) {
 	g := f.graph
 	table := f.shadows.virtual.table
 	add_shadow_meshlet_select_pass(f, table)
+	add_shadow_select_patches_pass(f, table)
 	add_virtual_instance_passes(f, table)
 	p := add_compute_pass(g, "cull virtual shadow draws", proc(ctx: ^Pass_Context) {
 			f := (^Frame)(ctx.data)
@@ -1660,6 +1757,7 @@ add_virtual_culling :: proc(f: ^Frame) {
 	if sf.stats != 0 {
 		write(g, p, sf.stats)
 	}
+	add_shadow_cull_patches_pass(f)
 }
 
 @(private = "file")

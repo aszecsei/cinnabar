@@ -253,6 +253,9 @@ static const uint DEBUG_REFLECTION_PROBES = 25;
 static const uint DEBUG_REFLECTIONS = 26;
 // The clouds' history, which debug_view.hlsl draws from their texture.
 static const uint DEBUG_CLOUDS = 27;
+// The virtual shadow map's pages that drew this frame, and which of them a caster that changed dropped (see
+// virtual_invalidated_debug_color).
+static const uint DEBUG_SHADOW_VIRTUAL_INVALIDATED = 28;
 
 // Match Shading_Stats in lib/engine/render/shading.odin: the words of the forward pass's tally, in bytes.
 static const uint SHADING_STATS_FORWARD_QUADS = 0;
@@ -348,6 +351,8 @@ static const uint ID_ENTITY_MASK = (1u << ID_ENTITY_BITS) - 1;
 static const uint DRAW_PARTICLES = 1;
 static const uint DRAW_INSTANCES = 2;
 static const uint DRAW_SELECTED = 4;
+// A patch from the virtual shadow map's walk, whose edge bits snap its vertices (see material_patch.hlsli).
+static const uint DRAW_SNAPPED = 8;
 struct Draw_Record {
 	uint instance;
 	uint mesh;

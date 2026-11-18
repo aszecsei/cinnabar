@@ -518,7 +518,9 @@ Cull_Constants :: struct {
 	// The virtual shadow map's levels, which the early dispatch's rows skip: they cull after the page table is written, in
 	// a dispatch of their own.
 	view_skip:          u32,
-	padding:            u32,
+	// The levels' count when patches and patch_counts hold the virtual shadow map's own patches (see
+	// select_patches.hlsl), and 0 for the camera's.
+	shadow_levels:      u32,
 }
 
 // Instance_Set_Record matches Instance_Set_Record in cull_instances.hlsl: an Instanced_Mesh_Renderer's set this frame.
@@ -671,6 +673,9 @@ Gpu_Scene :: struct {
 	// The patch surfaces' selected patches and each surface's count, and the passes that select and cull them.
 	patches:               gpu.Buffer,
 	patch_counts:          gpu.Buffer,
+	// The virtual shadow map's levels' own patches, and each surface's count (see surface_shadow_constants).
+	shadow_patches:        gpu.Buffer,
+	shadow_patch_counts:   gpu.Buffer,
 	select_pipeline:       Shader_Pipeline,
 	cull_patches_pipeline: Shader_Pipeline,
 	// What select meshlets picks each frame, and the pass (see meshlet_select.odin).
@@ -800,6 +805,11 @@ Scene_Frame :: struct {
 	counts:             Buffer,
 	patches:            Buffer,
 	patch_counts:       Buffer,
+	// The virtual shadow map's walk of the patches, which its levels cull: its buffers, 0 when the levels take the
+	// camera's patches, and its constants.
+	shadow_patches:     Buffer,
+	shadow_counts:      Buffer,
+	shadow_select:      gpu.Upload,
 	meshlet_select:     Meshlet_Select_Frame,
 	// The skinned entities' jobs this frame.
 	skin:               Skin_Frame,
@@ -836,6 +846,18 @@ scene_init :: proc(s: ^Gpu_Scene, platform: ^core.Platform_API) {
 		{size = MAX_SURFACES * 4, usage = {.Storage}, label = "surface patch counts"},
 		nil,
 	)
+	s.shadow_patches = platform.gpu_create_buffer(
+		{
+			size = MAX_SURFACES * MAX_SURFACE_PATCHES * 4,
+			usage = {.Storage},
+			label = "shadow surface patches",
+		},
+		nil,
+	)
+	s.shadow_patch_counts = platform.gpu_create_buffer(
+		{size = MAX_SURFACES * 4, usage = {.Storage}, label = "shadow surface patch counts"},
+		nil,
+	)
 	s.cull_pipeline = shader_pipeline(CULL_SHADER)
 	s.scatter_pipeline = shader_pipeline(SCATTER_INSTANCES_SHADER)
 	s.select_pipeline = shader_pipeline(SELECT_PATCHES_SHADER)
@@ -853,7 +875,7 @@ scene_destroy :: proc(s: ^Gpu_Scene, platform: ^core.Platform_API) {
 	delete(s.free)
 	delete(s.cell_free)
 	delete(s.casters.changes)
-	for b in ([]gpu.Buffer{s.instances, s.arguments, s.mesh_arguments, s.draws, s.counts, s.patches, s.patch_counts, s.instance_bits, s.instance_counters, s.visible_instances}) {
+	for b in ([]gpu.Buffer{s.instances, s.arguments, s.mesh_arguments, s.draws, s.counts, s.patches, s.patch_counts, s.shadow_patches, s.shadow_patch_counts, s.instance_bits, s.instance_counters, s.visible_instances}) {
 		platform.gpu_destroy_buffer(b)
 	}
 	destroy_shader_pipeline(&s.cull_pipeline, platform)
@@ -1199,15 +1221,28 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32, skins: []Skin_Pose)
 			}
 		}
 		// The slots' shadows, before the items are sorted into bins, while each one's bin is its pipeline.
+		mesh_generations := make([]u32, len(meshes), r.platform.frame_allocator)
+		for mesh, index in mesh_indices {
+			mesh_generations[index] = mesh.generation
+		}
 		bounds := caster_bounds(
 			s.records[:s.high],
 			items[:],
 			r.materials.pipelines[:],
 			set_bounds[:],
+			mesh_generations,
 			s.high,
 			r.platform.frame_allocator,
 		)
 		track_casters(&s.casters, bounds, s.origin, s.frame)
+		add_cell_changes(
+			&s.casters,
+			residency_changed_cells(&r.residency),
+			sets[:],
+			set_bounds[:],
+			s.records[:s.high],
+			s.origin,
+		)
 	}
 	// The view draws its dynamic casters within its distance live, over its shadow caches.
 	sf.dynamic_distance = SHADOW_PARAMS[f.shadow_settings.level].dynamic_distance
@@ -1899,6 +1934,7 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 	if shadows.virtual.count > 0 && has_items {
 		levels := cull
 		levels.view_first, levels.view_skip = FIRST_SHADOW_VIEW, 0
+		surface_shadow_constants(f, cull, &levels)
 		if sf.meshlet_select.shadow {
 			levels.selections = gpu.read_index(s.meshlet_select.shadow_selections)
 		}
@@ -2307,7 +2343,7 @@ add_instanced_items :: proc(
 		pixels := instanced_pixels(
 			&table.look,
 			r.scene.records[slot].rows,
-			{set.center, set.radius, set.max_scale},
+			{center = set.center, radius = set.radius, max_scale = set.max_scale},
 			covered.radius,
 		)
 		use := use_material(r, table, material, pixels) or_continue
@@ -2398,7 +2434,7 @@ add_instanced_items :: proc(
 			levels = mesh.levels,
 		},
 	)
-	append(set_bounds, Set_Bounds{set.center, set.radius, set.max_scale})
+	append(set_bounds, Set_Bounds{renderer.instances, set.center, set.radius, set.max_scale})
 	for _ in 0 ..< set.cell_count {
 		append(jobs, index)
 	}

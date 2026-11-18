@@ -102,7 +102,7 @@ Each viewport has a toolbar at its top left, with a menu for each part of what i
   | Group | Debug views |
   |---|---|
   | Lighting | `Lighting_Only`, `Direct_Light`, `Indirect_Light`, `Light_Complexity`, `Luminance`, `Emission` |
-  | Shadows | `Shadow_Cascades`, `Shadow_Mask`, `Shadow_Virtual` |
+  | Shadows | `Shadow_Cascades`, `Shadow_Mask`, `Shadow_Virtual`, `Shadow_Virtual_Invalidated` |
   | Indirect Light | `Ambient_Occlusion`, `Gi_Diffuse`, `Gi_Specular`, `Gi_Probes`, `Reflection_Probes`, `Reflections` |
   | Surfaces | `Albedo`, `Roughness`, `Normals` |
   | Geometry | `Depth`, `Velocity`, `Entity_Ids`, `Meshlets`, `Lod_Depth` |

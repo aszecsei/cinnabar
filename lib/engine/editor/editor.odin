@@ -457,6 +457,8 @@ poll :: proc(
 			streamed := render.virtual_stream_stats(e.renderer)
 			stats.virtual_pages_streamed, stats.virtual_pages_waiting =
 				streamed.dropped, streamed.waiting
+			stats.virtual_pages_invalidated = vs.invalidated
+			stats.virtual_levels_invalidated = render.virtual_drop_stats(e.renderer).levels
 			ac := render.atlas_cache_stats(e.renderer)
 			stats.atlas_cache_lights, stats.atlas_cache_copied = ac.lights, ac.copied
 			stats.atlas_cache_drawn, stats.atlas_cache_refreshed = ac.drawn, ac.refreshed

@@ -46,6 +46,9 @@ static const uint SCRATCH_QUOTA = 6;
 static const uint SCRATCH_TAKEN = 7;
 static const uint SCRATCH_AVAILABLE = 8;
 static const uint SCRATCH_EVICTED = 9;
+static const uint SCRATCH_REDRAWN = 10;
+static const uint SCRATCH_INVALIDATED = 11;
+static const uint SCRATCH_DRAWN = 12;
 static const uint VIRTUAL_AGE_BINS = 1024;
 static const uint SCRATCH_HISTOGRAM = 16;
 static const uint SCRATCH_LIST = SCRATCH_HISTOGRAM + VIRTUAL_AGE_BINS;
@@ -118,7 +121,9 @@ void fit_pool() {
 // retire goes over a physical page. It leaves when its level is one that the frame drops, is past the frame's levels, or
 // no longer holds its page since the level's origin moved. A page that stays takes its entry again without VIRTUAL_DRAW.
 // A page that the frame asks for is a hit: the frame keeps it and does not ask for it again, and its age starts over.
-// Every other page's age goes into the histogram. Matches virtual_retire in virtual_shadows.odin.
+// Every other page's age goes into the histogram. A page under a caster that changed, whose bit dropped has, is invalid:
+// if the frame asks for it, it keeps its physical page and draws again there, at the tail of the list that the pool
+// clear reads, and otherwise it leaves. Matches virtual_retire in virtual_shadows.odin.
 void retire(uint p) {
 	RWByteAddressBuffer pages = cn_rw_buffer(push.pages);
 	RWByteAddressBuffer table = cn_rw_buffer(push.table);
@@ -133,23 +138,37 @@ void retire(uint p) {
 		local = page.page - virtual_view(page.level).page_origin;
 		keep = all(local >= 0) && all(local < int(VIRTUAL_PAGES));
 	}
-	if (keep && push.drops != 0) {
-		uint at = page.level * VIRTUAL_LEVEL_PAGES + uint(local.y) * VIRTUAL_PAGES + uint(local.x);
-		keep = (cn_buffer(push.dropped).Load(push.dropped_offset + (at >> 5) * 4) & (1u << (at & 31))) == 0;
+	uint index = page.level * VIRTUAL_LEVEL_PAGES + uint(local.y) * VIRTUAL_PAGES + uint(local.x);
+	bool invalid = keep && push.drops != 0 &&
+		(cn_buffer(push.dropped).Load(push.dropped_offset + (index >> 5) * 4) & (1u << (index & 31))) != 0;
+	// Only this thread clears this page's bit, so the plain load sees it.
+	RWByteAddressBuffer requests = cn_rw_buffer(push.requests);
+	uint word = (index >> 5) * 4;
+	uint bit = 1u << (index & 31);
+	bool asked = keep && (requests.Load(word) & bit) != 0;
+	if (invalid) {
+		scratch_add(SCRATCH_INVALIDATED, 1);
+		keep = asked;
 	}
 	if (!keep) {
 		table.Store(slot, VIRTUAL_NO_PAGE);
 		pages.Store(p * PAGE_SIZE, VIRTUAL_FREE);
 		return;
 	}
-	table.Store(slot, p);
 	scratch_add(SCRATCH_VALID, 1);
-	// Only this thread clears this page's bit, so the plain load sees it.
-	RWByteAddressBuffer requests = cn_rw_buffer(push.requests);
-	uint index = page.level * VIRTUAL_LEVEL_PAGES + uint(local.y) * VIRTUAL_PAGES + uint(local.x);
-	uint word = (index >> 5) * 4;
-	uint bit = 1u << (index & 31);
-	if ((requests.Load(word) & bit) != 0) {
+	if (invalid) {
+		uint previous;
+		requests.InterlockedAnd(word, ~bit, previous);
+		pages.Store(p * PAGE_SIZE + 12, push.now);
+		table.Store(slot, p | VIRTUAL_DRAW | VIRTUAL_DROPPED);
+		table.InterlockedAdd((VIRTUAL_TABLE_COUNTS + page.level) * 4, 1, previous);
+		uint at;
+		cn_rw_buffer(push.scratch).InterlockedAdd(SCRATCH_REDRAWN * 4, 1, at);
+		cn_rw_buffer(push.scratch).Store((SCRATCH_LIST + frame.virtual_pool_pages - 1 - at) * 4, p);
+		return;
+	}
+	table.Store(slot, p);
+	if (asked) {
 		uint previous;
 		requests.InterlockedAnd(word, ~bit, previous);
 		pages.Store(p * PAGE_SIZE + 12, push.now);
@@ -164,7 +183,7 @@ void retire(uint p) {
 // the quota of those in the threshold's. With no page to leave, the threshold is past the last bin. Matches
 // virtual_select in virtual_shadows.odin.
 void select_evictions() {
-	uint fresh = scratch_load(SCRATCH_TOTAL) - scratch_load(SCRATCH_HITS);
+	uint fresh = scratch_load(SCRATCH_TOTAL) - scratch_load(SCRATCH_HITS) - scratch_load(SCRATCH_REDRAWN);
 	uint free = frame.virtual_pool_pages - scratch_load(SCRATCH_VALID);
 	uint need = fresh > free ? fresh - free : 0;
 	uint threshold = VIRTUAL_AGE_BINS;
@@ -210,9 +229,9 @@ void collect(uint p) {
 }
 
 // assign gives each page that the frame asks for and the pool does not hold the next page of the list, coarsest level
-// first, so the finest go without when the list runs out, and marks it to draw. It counts each level's pages that draw
-// in the table, stores the stats, and the pool clear's arguments: a group of 64 texels of a row, 128 rows, for each page
-// that draws. Matches virtual_assign in virtual_shadows.odin.
+// first, so the finest go without when the list runs out, and marks it to draw. It adds each level's pages that draw to
+// the table's counts, after those that retire drew again, stores the stats, and the pool clear's arguments: a group of
+// 64 texels of a row, 128 rows, for each page that draws, new or again. Matches virtual_assign in virtual_shadows.odin.
 void assign() {
 	RWByteAddressBuffer requests = cn_rw_buffer(push.requests);
 	RWByteAddressBuffer table = cn_rw_buffer(push.table);
@@ -248,15 +267,19 @@ void assign() {
 				}
 			}
 		}
-		table.Store((VIRTUAL_TABLE_COUNTS + level) * 4, count);
+		uint at = (VIRTUAL_TABLE_COUNTS + level) * 4;
+		table.Store(at, table.Load(at) + count);
 	}
 	uint hits = scratch_load(SCRATCH_HITS);
+	uint redrawn = scratch_load(SCRATCH_REDRAWN);
 	uint evicted = scratch_load(SCRATCH_EVICTED);
 	uint resident = scratch_load(SCRATCH_VALID) - evicted + drawn;
 	RWByteAddressBuffer stats = cn_rw_buffer(push.stats);
-	stats.Store4(0, uint4(scratch_load(SCRATCH_REQUESTED), hits + drawn, missed, frame.virtual_pool_pages));
-	stats.Store4(16, uint4(hits, drawn, evicted, resident));
-	cn_rw_buffer(push.arguments).Store3(0, uint3(VIRTUAL_PAGE_TEXELS / 64, VIRTUAL_PAGE_TEXELS, drawn));
+	stats.Store4(0, uint4(scratch_load(SCRATCH_REQUESTED), hits + redrawn + drawn, missed, frame.virtual_pool_pages));
+	stats.Store4(16, uint4(hits, redrawn + drawn, evicted, resident));
+	stats.Store(32, scratch_load(SCRATCH_INVALIDATED));
+	cn_rw_buffer(push.scratch).Store(SCRATCH_DRAWN * 4, drawn);
+	cn_rw_buffer(push.arguments).Store3(0, uint3(VIRTUAL_PAGE_TEXELS / 64, VIRTUAL_PAGE_TEXELS, drawn + redrawn));
 }
 
 [numthreads(64, 1, 1)]
@@ -307,8 +330,10 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 		}
 		break;
 	case ALLOCATE_CLEAR_POOL: {
-		// A group's z is its page in the list; the clear is depth's far end, which any caster's depth passes.
-		uint page = scratch_load(SCRATCH_LIST + id.z);
+		// A group's z is its page in the list: the new pages from its head, then those that draw again from its tail. The
+		// clear is depth's far end, which any caster's depth passes.
+		uint drawn = scratch_load(SCRATCH_DRAWN);
+		uint page = scratch_load(SCRATCH_LIST + (id.z < drawn ? id.z : frame.virtual_pool_pages - 1 - (id.z - drawn)));
 		RWTexture2D<uint> pool = cn_rw_uint_texture(frame.virtual_pool_storage);
 		pool[virtual_physical(page) + id.xy] = 0;
 		break;

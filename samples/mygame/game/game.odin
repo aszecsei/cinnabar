@@ -70,6 +70,9 @@ GUARD_SCENE_META :: #load("../content/scenes/guard.scene.meta", string)
 // The soft shadows scene, a spot, a point and a quad light and a sun, each with a size (see
 // docs/rendering/lighting-and-shadows.md#soft-shadows).
 SOFT_SHADOWS_SCENE_META :: #load("../content/scenes/soft_shadows.scene.meta", string)
+// The shadow cache scene, a door that swings and a crate that blinks under a sun with the virtual shadow map's cache (see
+// docs/rendering/lighting-and-shadows.md#caching).
+SHADOW_CACHE_SCENE_META :: #load("../content/scenes/shadow_cache.scene.meta", string)
 // The streaming scene, a world of five tiles that load and unload as the camera flies along them (see
 // docs/world/scenes.md#streaming).
 STREAMING_SCENE_META :: #load("../content/scenes/streaming.scene.meta", string)
@@ -880,7 +883,7 @@ update_output :: proc(g: ^game.Game) {
 
 // switch_scene loads the next scene, the glass scene, the surfaces scene, the room scene, the billboards scene, the
 // animation scene, the cube map scene, the audio scene, the 2D scene, the playground, the doorway, the guard, the soft
-// shadows, the streaming scene, then the main scene again, when F7 is pressed. A linked editor owns the scene, so the key
+// shadows, the shadow cache, the streaming scene, then the main scene again, when F7 is pressed. A linked editor owns the scene, so the key
 // does nothing then.
 switch_scene :: proc(g: ^game.Game) {
 	if .F7 not_in g.platform.input().pressed || editor.active(&g.editor) {
@@ -901,6 +904,7 @@ switch_scene :: proc(g: ^game.Game) {
 		DOORWAY_SCENE_META,
 		GUARD_SCENE_META,
 		SOFT_SHADOWS_SCENE_META,
+		SHADOW_CACHE_SCENE_META,
 		STREAMING_SCENE_META,
 	}
 	names := [?]string {
@@ -917,6 +921,7 @@ switch_scene :: proc(g: ^game.Game) {
 		"doorway",
 		"guard",
 		"soft shadows",
+		"shadow cache",
 		"streaming",
 	}
 	s.scene_index = (s.scene_index + 1) % len(metas)

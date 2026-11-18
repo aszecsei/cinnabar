@@ -82,6 +82,9 @@ Material_Pipeline :: struct {
 	meshes:             [format.Material_Pass]gpu.Pipeline,
 	mesh_path:          bool,
 	version:            u32,
+	// How many times the pipelines were made again from a changed blob, which the shadow caches take as a change of what
+	// the material draws (see docs/rendering/gpu-scene.md#caster-tracking).
+	generation:         u32,
 	two_sided:          bool,
 	cast_shadows:       bool,
 	blend:              format.Material_Blend,
@@ -534,6 +537,7 @@ material_pipeline :: proc(
 	}
 	make_pipelines(r, &m.pipelines[index], data, blob, switches)
 	m.pipelines[index].version = ref_version
+	m.pipelines[index].generation += 1
 	return index, true
 }
 

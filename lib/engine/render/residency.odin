@@ -57,6 +57,9 @@ Resident_Mesh :: struct {
 	impostor:          gpu.Buffer,
 	impostor_size:     u32,
 	impostor_error:    f32,
+	// Numbers the swap that made these resources resident, which no other mesh's swap shares: the shadow caches take a
+	// new one as a change of what the mesh draws, whatever its bounds and counts (see casters.odin).
+	generation:        u32,
 	index_format:      gpu.Index_Format,
 	index_count:       u32,
 	vertex_count:      u32,
@@ -103,7 +106,30 @@ Resident_Instance_Set :: struct {
 	center:     [3]f32,
 	radius:     f32,
 	max_scale:  f32,
+	// Each cell's sphere and the hash of its instances, which a newer version is compared with (see
+	// residency_changed_cells). It is in the heap.
+	cells_cpu:  []Set_Cell,
 }
+
+// Set_Cell is an instance set's cell on the CPU: its sphere about its instances' positions, in the set's space, and the
+// largest scale of their axes, and a hash of what its instances draw: their poses, not their index in the instancer.
+Set_Cell :: struct {
+	center:    [3]f32,
+	radius:    f32,
+	max_scale: f32,
+	hash:      u64,
+}
+
+// Changed_Set_Cell is a cell of an instance set that a newer version of it adds, removes or changes (as one removed and
+// one added): the cell's sphere before and after, nil where it was not or is not.
+Changed_Set_Cell :: struct {
+	guid: format.Guid,
+	old:  Maybe(Set_Cell),
+	new:  Maybe(Set_Cell),
+}
+
+// A set whose newer version changes more cells than this changes as a whole, in one Changed_Set_Cell.
+MAX_CHANGED_CELLS :: 32
 
 // Resident_Texture is a texture asset's GPU texture.
 Resident_Texture :: struct {
@@ -129,29 +155,40 @@ Resident_Texture :: struct {
 // Residency gives the GPU resources of the texture and mesh assets that the renderer draws, by GUID (see
 // docs/rendering/assets.md#gpu-residency). It lives in Game_State and holds handles only, so a code reload keeps it.
 Residency :: struct {
-	platform:     ^core.Platform_API,
-	assets:       ^asset.Assets,
-	entries:      [MAX_RESIDENT]Resident_Entry,
-	count:        int,
+	platform:      ^core.Platform_API,
+	assets:        ^asset.Assets,
+	entries:       [MAX_RESIDENT]Resident_Entry,
+	count:         int,
 	// Each entry's index, by its GUID and kind.
-	index:        map[Resident_Key]int,
-	frame:        u64,
+	index:         map[Resident_Key]int,
+	frame:         u64,
 	// Whether meshes get acceleration structures, which the renderer sets the first frame that traces (see
 	// residency_enable_accels).
-	accels:       bool,
+	accels:        bool,
 	// What this asks for is for a thumbnail, not the world, so it can go when the thumbnails are done.
-	baking:       bool,
+	baking:        bool,
 	// The pages of the paged meshes that are resident (see mesh_pages.odin).
-	pool:         Mesh_Pool,
+	pool:          Mesh_Pool,
 	// The pages of the virtual textures that are resident (see texture_pages.odin).
-	texture_pool: Texture_Pool,
+	texture_pool:  Texture_Pool,
 	// When assets that nothing uses go, and how their textures' mips follow their size on the screen.
-	policy:       Residency_Policy,
+	policy:        Residency_Policy,
 	// What is resident, and what the policy did. Only set_bytes writes stats.resident_bytes.
-	stats:        Residency_Stats,
+	stats:         Residency_Stats,
 	// The textures whose finer mips came in this frame, which change the shadows of masked materials (see
 	// residency_refined).
-	refined:      [dynamic]Refined_Texture,
+	refined:       [dynamic]Refined_Texture,
+	// The cells of instance sets that a newer version changed this frame, which change the shadows of the slots that draw
+	// the set (see residency_changed_cells).
+	changed_cells: [dynamic]Changed_Set_Cell,
+	// The count of the meshes that swapped in, which numbers each swap (see Resident_Mesh.generation).
+	swaps:         u32,
+}
+
+// residency_changed_cells are the cells of instance sets whose newer version swapped in this frame, that it added,
+// removed or changed. A set that changes more than MAX_CHANGED_CELLS cells is one cell: the whole set.
+residency_changed_cells :: proc(r: ^Residency) -> []Changed_Set_Cell {
+	return r.changed_cells[:]
 }
 
 // Refined_Texture is a texture that drew at a finer mip from this frame on: its size at mip 0, and the mip that drew
@@ -401,6 +438,7 @@ residency_destroy :: proc(r: ^Residency) {
 	r.count = 0
 	delete(r.index)
 	delete(r.refined)
+	delete(r.changed_cells)
 	mesh_pool_destroy(&r.pool, r.platform)
 	texture_pool_destroy(&r.texture_pool, r.platform)
 }
@@ -474,6 +512,10 @@ residency_update :: proc(r: ^Residency) {
 		r.refined = make([dynamic]Refined_Texture, r.platform.heap_allocator)
 	}
 	clear(&r.refined)
+	if r.changed_cells == nil {
+		r.changed_cells = make([dynamic]Changed_Set_Cell, r.platform.heap_allocator)
+	}
+	clear(&r.changed_cells)
 	// The virtual textures' pages that came in since the last update.
 	for p in texture_pool_refined(&r.texture_pool) {
 		append(&r.refined, p)
@@ -964,6 +1006,13 @@ change :: proc(r: ^Residency, e: ^Resident_Entry, event: Resident_Event) -> (ok:
 				append(&r.refined, Refined_Texture{e.guid, t.size, before})
 			}
 		}
+		if e.kind == .Instance_Set && e.ready {
+			diff_set_cells(&r.changed_cells, e.guid, &e.current.set, &s.pending.set)
+		}
+		if e.kind == .Mesh {
+			r.swaps += 1
+			s.pending.mesh.generation = r.swaps
+		}
 		destroy_resources(r, e.kind, &e.current)
 		if e.kind == .Mesh && r.accels {
 			create_mesh_accel(r, &s.pending.mesh)
@@ -1400,6 +1449,7 @@ stream_instance_set :: proc(r: ^Residency, s: ^Resident_Stream, data: []byte) ->
 	set := &s.pending.set
 	set.count, set.cell_count = blob.count, blob.cell_count
 	set.center, set.radius, set.max_scale = blob.center, blob.radius, blob.max_scale
+	set.cells_cpu = set_cells(data, blob, r.platform.heap_allocator)
 	set.instances = stream_buffer(
 		r,
 		s,
@@ -1415,6 +1465,87 @@ stream_instance_set :: proc(r: ^Residency, s: ^Resident_Stream, data: []byte) ->
 		"instance cells",
 	) or_return
 	return true
+}
+
+// set_cells gives each cell of an instance set blob on the CPU.
+@(private)
+set_cells :: proc(
+	data: []byte,
+	blob: ^format.Instance_Set_Blob,
+	allocator: mem.Allocator,
+) -> []Set_Cell {
+	cells := format.instance_set_cells(data, blob)
+	instances := format.instance_set_instances(data, blob)
+	result := make([]Set_Cell, len(cells), allocator)
+	for c, i in cells {
+		// FNV-1a over each instance's pose. Its point is its index in the instancer, which an added instance shifts.
+		h := u64(0xcbf29ce484222325)
+		mix :: proc(h: u64, v: u64) -> u64 {
+			return (h ~ v) * 0x100000001b3
+		}
+		for k in c.first ..< c.first + c.count {
+			pose := instances[k]
+			h = mix(
+				h,
+				u64(transmute(u32)pose.position.x) | u64(transmute(u32)pose.position.y) << 32,
+			)
+			h = mix(h, u64(transmute(u32)pose.position.z) | u64(u16(pose.rotation.x)) << 32)
+			h = mix(
+				h,
+				u64(u16(pose.rotation.y)) |
+				u64(u16(pose.rotation.z)) << 16 |
+				u64(u16(pose.rotation.w)) << 32,
+			)
+			h = mix(
+				h,
+				u64(transmute(u16)pose.scale.x) |
+				u64(transmute(u16)pose.scale.y) << 16 |
+				u64(transmute(u16)pose.scale.z) << 32,
+			)
+		}
+		result[i] = {c.center, c.radius, c.max_scale, h}
+	}
+	return result
+}
+
+// diff_set_cells appends the cells that a newer version of an instance set adds, removes or changes, matched by what
+// their instances draw, so an added instance that shifts the cells after it changes only its own. A change of more than
+// MAX_CHANGED_CELLS cells is the whole set.
+@(private)
+diff_set_cells :: proc(
+	out: ^[dynamic]Changed_Set_Cell,
+	guid: format.Guid,
+	before, after: ^Resident_Instance_Set,
+) {
+	start := len(out)
+	left := make(map[u64]int, len(before.cells_cpu), context.temp_allocator)
+	for c in before.cells_cpu {
+		left[c.hash] += 1
+	}
+	for c in after.cells_cpu {
+		if left[c.hash] > 0 {
+			left[c.hash] -= 1
+		} else {
+			append(out, Changed_Set_Cell{guid = guid, new = c})
+		}
+	}
+	for c in before.cells_cpu {
+		if left[c.hash] > 0 {
+			left[c.hash] -= 1
+			append(out, Changed_Set_Cell{guid = guid, old = c})
+		}
+	}
+	if len(out) - start > MAX_CHANGED_CELLS {
+		resize(out, start)
+		append(
+			out,
+			Changed_Set_Cell {
+				guid = guid,
+				old = Set_Cell{before.center, before.radius, before.max_scale, 0},
+				new = Set_Cell{after.center, after.radius, after.max_scale, 0},
+			},
+		)
+	}
 }
 
 // mesh_levels finds each submesh's level buckets and each level's errors among the mesh's meshlets, which the cooker
@@ -1666,6 +1797,7 @@ destroy_resources :: proc(r: ^Residency, kind: format.Asset_Kind, resources: ^Re
 	case .Instance_Set:
 		r.platform.gpu_destroy_buffer(resources.set.instances)
 		r.platform.gpu_destroy_buffer(resources.set.cells)
+		delete(resources.set.cells_cpu, r.platform.heap_allocator)
 	}
 	resources^ = {}
 }
