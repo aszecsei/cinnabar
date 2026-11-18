@@ -1320,6 +1320,10 @@ Game_Stats :: struct {
 	virtual_pages_drawn:       u32,
 	virtual_pages_evicted:     u32,
 	virtual_pages_resident:    u32,
+	// The virtual shadow map's pages that streaming dropped in the last frame, and those that wait for their turn (see
+	// docs/rendering/lighting-and-shadows.md#streaming).
+	virtual_pages_streamed:    u32,
+	virtual_pages_waiting:     u32,
 	// The shadow atlas's cache in the last frame: the lights that it held, 0 without it, the slots that the frame copied
 	// from it, those that it drew, and those of them that a dynamic caster's report drew on the budget (see
 	// docs/rendering/lighting-and-shadows.md#cached-shadow-maps).
