@@ -8,6 +8,9 @@ import "core:strings"
 // `sublevel` key (see docs/editor/document-and-scenes.md#sublevels). The cooker reads them with sublevels_parse, and
 // lib/engine/project checks each line with sublevel_check_setting.
 SUBLEVEL_PREFIX :: "sublevel."
+// The cooker splits each sublevel of a scene into a blob of its own: a sub-asset of this kind, `sublevel.<name>`, in the
+// scene's .meta file, whose blob is a scene (see docs/content/kinds/scenes.md#sublevels).
+SUBLEVEL_KIND :: "sublevel"
 SUBLEVEL_MAX_NAME :: 31
 
 // Sublevel is a declared sublevel, and whether it is active when the game starts.

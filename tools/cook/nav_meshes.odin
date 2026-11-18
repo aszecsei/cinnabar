@@ -66,39 +66,36 @@ nav_project :: proc(options: Cook_Options, pass: ^Pass) -> Nav_Project {
 	return pass.nav.?
 }
 
-// scene_nav_meshes gives a scene's navmeshes their GUIDs, which its .meta file keeps, and the list that its blob holds:
-// one for each active Nav_Mesh_Volume on a box Volume and each agent type that it bakes for, by entity and then by the
-// agent types' order. A scene with a volume records the project's settings files as its inputs. It reports the
-// volumes' problems, and fails only when the .meta file cannot be written.
+// Scene_Nav_Wanted is the navmeshes of a scene, as sub-assets that its cook gives GUIDs, and what its blob lists of each.
+Scene_Nav_Wanted :: struct {
+	subassets: []Subasset,
+	navs:      []format.Scene_Nav_Mesh,
+}
+
+// scene_nav_meshes is a scene's navmeshes, without their GUIDs, which the scene's cook gives them with its other
+// sub-assets, and its .meta file keeps: one for each active Nav_Mesh_Volume on a box Volume and each agent type that it
+// bakes for, by entity and then by the agent types' order. A scene with a volume records the project's settings files as
+// its inputs. It reports the volumes' problems.
 scene_nav_meshes :: proc(
 	options: Cook_Options,
 	pass: ^Pass,
 	index: int,
 	flat: format.Scene,
-) -> (
-	navs: []format.Scene_Nav_Mesh,
-	ok: bool,
-) {
+) -> Scene_Nav_Wanted {
 	a := &pass.assets[index]
 	wanted := make([dynamic]Subasset, context.temp_allocator)
-	Reference :: struct {
-		entity: u64,
-		agent:  string,
-	}
-	references := make([dynamic]Reference, context.temp_allocator)
+	navs := make([dynamic]format.Scene_Nav_Mesh, context.temp_allocator)
 	if nav_has_volume(flat) {
 		project := nav_project(options, pass)
 		s := nav_scene_make(flat)
 		for v in nav_volumes(&s, project.agents, a.path, &pass.problems) {
 			for k in v.agents {
+				agent := strings.clone(project.agents[k].name, context.temp_allocator)
 				append(
 					&wanted,
-					Subasset {
-						kind = .Nav_Mesh,
-						name = nav_subasset_name(v.entity, project.agents[k].name),
-					},
+					Subasset{kind = .Nav_Mesh, name = nav_subasset_name(v.entity, agent)},
 				)
-				append(&references, Reference{v.entity, project.agents[k].name})
+				append(&navs, format.Scene_Nav_Mesh{entity = v.entity, agent = agent})
 			}
 		}
 		for f in project.files {
@@ -110,21 +107,7 @@ scene_nav_meshes :: proc(
 			}
 		}
 	}
-	if !assign_subassets(
-		options.roots[a.root].dir,
-		a,
-		wanted[:],
-		pass.force[a.meta.guid],
-		&pass.problems,
-	) {
-		return nil, false
-	}
-	navs = make([]format.Scene_Nav_Mesh, len(references), context.temp_allocator)
-	for r, i in references {
-		guid, _ := nav_mesh_guid(a^, wanted[i].name)
-		navs[i] = {r.entity, strings.clone(r.agent, context.temp_allocator), guid}
-	}
-	return navs, true
+	return {wanted[:], navs[:]}
 }
 
 // nav_mesh_guid is the GUID of a scene's navmesh of a name: the one that the scene's cook in this pass gave it, or

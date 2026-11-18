@@ -180,3 +180,33 @@ a_scene_lists_its_nav_meshes_and_names_them :: proc(t: ^testing.T) {
 	)
 	testing.expect(t, empty_ok && len(empty) == 0)
 }
+
+@(test)
+a_scene_lists_its_sublevels_and_names_them :: proc(t: ^testing.T) {
+	scene, _, parsed := scene_parse("scene 1\nentity 0000000000000001\n", context.temp_allocator)
+	testing.expect(t, parsed)
+	sublevels := []Scene_Sublevel {
+		{name = "night", guid = Guid{0 = 7}},
+		{name = "storm", guid = Guid{0 = 8}},
+	}
+	navs := []Scene_Nav_Mesh{{entity = 1, agent = "Human", guid = Guid{0 = 5}}}
+	data := aligned(
+		scene_write(
+			scene,
+			{},
+			0,
+			nav_meshes = navs,
+			sublevels = sublevels,
+			allocator = context.temp_allocator,
+		),
+	)
+	read, ok := scene_sublevels(data, context.temp_allocator)
+	testing.expect(t, ok && slice.equal(read, sublevels))
+	references, references_ok := blob_references(data, context.temp_allocator)
+	testing.expect(t, references_ok && slice.equal(references, []Guid{{0 = 5}, {0 = 7}, {0 = 8}}))
+	empty, empty_ok := scene_sublevels(
+		aligned(scene_write(scene, {}, 0, allocator = context.temp_allocator)),
+		context.temp_allocator,
+	)
+	testing.expect(t, empty_ok && len(empty) == 0)
+}

@@ -115,7 +115,7 @@ The runtime reads an uncompressed blob from the bundle at its offset, as it read
 - **A streaming chunk** is a scene that a world lists without `persistent`, and that `bundles.global_scenes` does not name. Its bundle is `<scene guid>.cbb`. It holds the scene and what only that chunk uses.
 - **A chunk's level** is the one level that reaches the world that lists the chunk. The world, its persistent scenes, and what more than one chunk of the level uses go in the level's bundle. A chunk's bundle depends on its level's bundle and on `global.cbb`. If no level reaches the world, or more than one level does, the chunk has no level: its bundle depends on `global.cbb` alone, and what its chunks share is global.
 - **What a blob uses** is the assets that it names (`format.blob_references`):
-  - A scene's or prefab's behaviour scripts and asset fields, and a scene's navmeshes.
+  - A scene's or prefab's behaviour scripts and asset fields, and a scene's navmeshes and sublevels.
   - A script's requires.
   - A material's textures, and an instance's material and textures.
   - An effect's materials, meshes and textures.
@@ -123,6 +123,8 @@ The runtime reads an uncompressed blob from the bundle at its offset, as it read
   - A font's or a sprite sheet's atlas.
   - A UI document's fonts and images.
   - A decision's blackboard.
+
+  A sublevel's blob is a scene, but not a level of its own: its scene's blob lists it, so it is in its scene's unit (see [Scenes](kinds/scenes.md#sublevels)).
 
   A walk from a level or a chunk follows these references, but it does not go into another level's or chunk's scene, which belongs to that unit.
 - **The global bundle**, `global.cbb`, holds everything else. Every level's bundle depends on it. It holds:

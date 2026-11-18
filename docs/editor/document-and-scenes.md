@@ -130,4 +130,4 @@ A sublevel is a named set of entities that loads and unloads as one, across ever
 - **Unknown names:** a sublevel that the project does not declare is a warning, from the cooker and from the editor when it opens the scene. The entity stays in it, and the name round-trips. Without a project settings file, no name is checked.
 - **The readers:** `asset_format.scene_parse` takes `Scene_Parse_Options`, whether the file is a prefab and the declared sublevels, and gives each `Scene_Entity` the sublevel that it is in. The editor's `SceneFile.Parse` takes `SceneParseOptions`. `SceneEntity.Sublevel` is the block's own key, which the writer writes, and `Scene.SublevelOf` gives the sublevel that it is in.
 
-Sublevels are not yet cooked or loaded: the blob does not hold them, and every entity loads with its scene.
+The cooker splits each scene into a blob for its base and one for each of its sublevels (see [Content: Scenes](../content/kinds/scenes.md#sublevels)). The runtime does not yet load a sublevel's blob, so a sublevel's entities do not load with their scene.

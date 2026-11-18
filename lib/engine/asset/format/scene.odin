@@ -157,6 +157,14 @@ Scene_Nav_Mesh :: struct {
 	guid:   Guid,
 }
 
+// Scene_Sublevel names a sublevel of a scene and the GUID of its blob, which the cooker splits from the scene (see
+// docs/content/kinds/scenes.md#sublevels). A scene's blob lists them, so a loader finds them without the .meta file and
+// a level's bundle holds them.
+Scene_Sublevel :: struct {
+	name: string,
+	guid: Guid,
+}
+
 // Scene_Blob is the start of a cooked scene. The records use offsets, like every blob.
 Scene_Blob :: struct {
 	header:     Blob_Header,
@@ -164,12 +172,19 @@ Scene_Blob :: struct {
 	entities:   Slice,
 	// Scene_Nav_Mesh_Record records, by entity and then by the agent types' order.
 	nav_meshes: Slice,
+	// Scene_Sublevel_Record records, by name. Only a scene's base lists them.
+	sublevels:  Slice,
 }
 
 Scene_Nav_Mesh_Record :: struct {
 	entity: u64,
 	agent:  Slice,
 	guid:   Guid,
+}
+
+Scene_Sublevel_Record :: struct {
+	name: Slice,
+	guid: Guid,
 }
 
 Scene_Entity_Record :: struct {
@@ -220,13 +235,14 @@ scene_layout :: proc() -> u64 {
 }
 
 // scene_write builds a scene blob of a flat scene, under the kind Scene or Prefab, with the navmeshes that the cooker
-// bakes for it.
+// bakes for it and the sublevels that it splits from it.
 scene_write :: proc(
 	scene: Scene,
 	guid: Guid,
 	key: u64,
 	kind := Asset_Kind.Scene,
 	nav_meshes: []Scene_Nav_Mesh = nil,
+	sublevels: []Scene_Sublevel = nil,
 	allocator := context.allocator,
 ) -> []byte {
 	buffer := make([dynamic]byte, size_of(Scene_Blob), allocator)
@@ -284,6 +300,18 @@ scene_write :: proc(
 		}
 		put_record(&buffer, navs, i, &record)
 	}
+	sublevel_records := reserve_bytes(
+		&buffer,
+		len(sublevels) * size_of(Scene_Sublevel_Record),
+		align_of(Scene_Sublevel_Record),
+	)
+	for l, i in sublevels {
+		record := Scene_Sublevel_Record {
+			name = append_bytes(&buffer, transmute([]byte)l.name),
+			guid = l.guid,
+		}
+		put_record(&buffer, sublevel_records, i, &record)
+	}
 	blob := Scene_Blob {
 		header = {
 			magic = BLOB_MAGIC,
@@ -294,6 +322,7 @@ scene_write :: proc(
 		},
 		entities = entities,
 		nav_meshes = navs,
+		sublevels = sublevel_records,
 	}
 	mem.copy(raw_data(buffer), &blob, size_of(blob))
 	return buffer[:]
@@ -429,6 +458,32 @@ scene_nav_meshes :: proc(
 		}
 	}
 	return nav_meshes, true
+}
+
+// scene_sublevels checks a scene or prefab blob and gives the sublevels that it lists. The names point into the blob.
+scene_sublevels :: proc(
+	data: []byte,
+	allocator := context.allocator,
+) -> (
+	sublevels: []Scene_Sublevel,
+	ok: bool,
+) {
+	header := blob_header(data) or_return
+	if (header.kind != .Scene && header.kind != .Prefab) ||
+	   header.layout != scene_layout() ||
+	   len(data) < size_of(Scene_Blob) {
+		return
+	}
+	blob := (^Scene_Blob)(raw_data(data))
+	sublevel_records := records(data, blob.sublevels, Scene_Sublevel_Record) or_return
+	sublevels = make([]Scene_Sublevel, len(sublevel_records), allocator)
+	for r, i in sublevel_records {
+		sublevels[i] = {
+			name = text(data, r.name) or_return,
+			guid = r.guid,
+		}
+	}
+	return sublevels, true
 }
 
 @(private = "file")

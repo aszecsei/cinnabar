@@ -558,3 +558,48 @@ a_scene_without_a_volume_bakes_nothing :: proc(t: ^testing.T) {
 	)
 	testing.expect(t, !strings.contains(string(meta), "navmesh."))
 }
+
+@(test)
+a_navmesh_is_in_the_blob_of_its_volumes_sublevel :: proc(t: ^testing.T) {
+	volume := strings.concatenate(
+		{
+			"entity 0000000000000100\nsublevel = \"night\"\n",
+			strings.trim_prefix(
+				nav_entity(0x100, {0, 0, 0}, components = NAV_VOLUME),
+				"entity 0000000000000100\n",
+			),
+		},
+		context.temp_allocator,
+	)
+	scene := strings.concatenate(
+		{"scene 4\n\n", volume, nav_entity(0x1, {0, -0.25, 0}, {20, 0.5, 20})},
+		context.temp_allocator,
+	)
+	tree := make_tree(
+		t,
+		{
+			{"project.settings", NAV_AGENTS + "sublevel.night = inactive\n"},
+			{"content/level.scene", scene},
+		},
+	)
+	defer remove_tree(tree)
+
+	pass := cook(tree_options(tree), {.Scene})
+	testing.expectf(t, pass.ok, "problems: %v", pass.problems.list)
+	base := tree_blob(t, tree, tree_guid(t, tree, "level.scene"))
+	base_navs, base_ok := format.scene_nav_meshes(base, context.temp_allocator)
+	testing.expect(t, base_ok && len(base_navs) == 0)
+	sublevels, sublevels_ok := format.scene_sublevels(base, context.temp_allocator)
+	testing.expect(t, sublevels_ok && len(sublevels) == 1)
+	if len(sublevels) != 1 {
+		return
+	}
+	night_navs, night_ok := format.scene_nav_meshes(
+		tree_blob(t, tree, sublevels[0].guid),
+		context.temp_allocator,
+	)
+	testing.expect(t, night_ok && len(night_navs) == 2)
+	for n in night_navs {
+		testing.expect_value(t, n.entity, 0x100)
+	}
+}
