@@ -47,4 +47,20 @@ public sealed class MeshPageTests
         rows = ResourceMonitorView.TexturePageRows(stats).ToDictionary(r => r.Name, r => r.Value);
         Assert.Equal($"{ResourceStats.Bytes(3UL << 30)} / {ResourceStats.Bytes(8UL << 30)}", rows["Video memory"]);
     }
+
+    [Fact]
+    public void TheResourceMonitorShowsTheResidentAssets()
+    {
+        // A game with nothing resident has no rows.
+        var reader = new LinkReader(new byte[1024]);
+        var none = GameStats.Read(ref reader);
+        Assert.Empty(ResourceMonitorView.ResidencyRows(none));
+
+        var stats = none with { AssetsResident = 1200, AssetsUnloaded = 30, TextureMipsStreamed = 45, ResidentBytes = 512UL << 20 };
+        var rows = ResourceMonitorView.ResidencyRows(stats).ToDictionary(r => r.Name, r => r.Value);
+        Assert.Equal("1,200", rows["Resident assets"]);
+        Assert.Equal(ResourceStats.Bytes(512UL << 20), rows["Resident asset memory"]);
+        Assert.Equal("30", rows["Assets unloaded"]);
+        Assert.Equal("45", rows["Texture mips streamed"]);
+    }
 }

@@ -118,6 +118,8 @@ public sealed class ResourceMonitorView : Grid
                 .. MeshPageRows(g),
                 // The pool of virtual texture pages, while a virtual texture is resident, and the video memory against the budget that the OS gives the game.
                 .. TexturePageRows(g),
+                // The assets that are resident, the memory that they take, and what the policy unloaded and streamed finer or coarser.
+                .. ResidencyRows(g),
                 // The scenes that stream in, while one loads: how many, and the entities that the last frame made and gave their components.
                 .. SceneLoadRows(g),
                 // The split cascades' tables: the probes that rays reached of each cascade's slots, and the keys that found no room.
@@ -184,6 +186,18 @@ public sealed class ResourceMonitorView : Grid
         if (g.VideoMemoryBudget > 0)
         {
             yield return ("Video memory", $"{ResourceStats.Bytes(g.VideoMemoryUsed)} / {ResourceStats.Bytes(g.VideoMemoryBudget)}");
+        }
+    }
+
+    // The resident assets' rows, none while nothing is resident (see docs/rendering/assets.md#gpu-residency).
+    internal static IEnumerable<(string Name, string Value)> ResidencyRows(Link.Protocol.GameStats g)
+    {
+        if (g.AssetsResident > 0 || g.AssetsUnloaded > 0)
+        {
+            yield return ("Resident assets", $"{g.AssetsResident:N0}");
+            yield return ("Resident asset memory", ResourceStats.Bytes(g.ResidentBytes));
+            yield return ("Assets unloaded", $"{g.AssetsUnloaded:N0}");
+            yield return ("Texture mips streamed", $"{g.TextureMipsStreamed:N0}");
         }
     }
 

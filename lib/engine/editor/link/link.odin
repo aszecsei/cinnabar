@@ -1345,6 +1345,13 @@ Game_Stats :: struct {
 	texture_pool_bytes:        u64,
 	video_memory_used:         u64,
 	video_memory_budget:       u64,
+	// The assets that are resident: how many, the GPU memory of their buffers and textures, and how many were unloaded
+	// because nothing used them and how many times a texture streamed another mip, since the start (see
+	// docs/rendering/assets.md#gpu-residency).
+	assets_resident:           u32,
+	assets_unloaded:           u32,
+	texture_mips_streamed:     u32,
+	resident_bytes:            u64,
 	// The scenes that the streaming policy is loading, and the entities that the last frame's work made and gave their
 	// components, across all of them (see docs/world/streaming.md#budgets).
 	scenes_loading:            u32,

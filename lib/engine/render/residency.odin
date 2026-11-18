@@ -1,6 +1,7 @@
 package render
 
 import "core:log"
+import "core:math"
 import "core:mem"
 
 import "cinnabar:core"
@@ -16,6 +17,13 @@ MAX_RESIDENT :: 4096
 MAX_SUBMESHES :: 16
 // An asset that cannot be made resident is tried again after this many frames.
 RESIDENT_RETRY_FRAMES :: 60
+// An asset that was used within this many frames is never evicted to meet the byte budget.
+RESIDENT_KEEP_FRAMES :: 30
+// A texture draws at a coarser mip only after it has wanted one for this many frames, so that a camera that turns does
+// not make its textures stream back and forth. A finer mip streams at once.
+MIP_DROP_FRAMES :: 120
+// At most this many textures start to stream another mip in a frame.
+MIP_STREAMS_PER_FRAME :: 8
 
 // Resident_Mesh is a mesh asset's GPU buffers, and what drawing it needs from its blob. Its pointer is valid for the
 // frame that it was given in. A paged mesh has no meshlet buffers: its meshlets are in the pool of pages. It has no
@@ -113,6 +121,9 @@ Resident_Texture :: struct {
 	// (see VIRTUAL_TEXTURE_BIT); 0 for any other texture. Its texture is then the tail's, whose mip 0 is the asset's mip
 	// tail_mip, and size and mip_count are the asset's.
 	virtual:      u32,
+	// The asset's mip that the texture's mip 0 is, for a texture that is not virtual: its coarser mips stream when what
+	// draws it is small on the screen (see resident_texture_want). size and mip_count are the asset's.
+	top_mip:      u32,
 }
 
 // Residency gives the GPU resources of the texture and mesh assets that the renderer draws, by GUID (see
@@ -134,6 +145,33 @@ Residency :: struct {
 	pool:         Mesh_Pool,
 	// The pages of the virtual textures that are resident (see texture_pages.odin).
 	texture_pool: Texture_Pool,
+	// When assets that nothing uses go, and how their textures' mips follow their size on the screen.
+	policy:       Residency_Policy,
+	// What is resident, and what the policy did. Only set_bytes writes stats.resident_bytes.
+	stats:        Residency_Stats,
+}
+
+// Residency_Policy is when the residency lets go of what the frames do not use (see
+// docs/rendering/assets.md#gpu-residency). The renderer sets it from the quality each frame.
+Residency_Policy :: struct {
+	// An asset that has not been asked for in this many frames is unloaded. 0 unloads nothing by idleness.
+	idle_frames:  u64,
+	// While the assets that are resident hold more bytes than this, the one that was used longest ago is unloaded, if it
+	// was not used in the last RESIDENT_KEEP_FRAMES. 0 is no budget.
+	budget_bytes: u64,
+	// How many mips coarser than its size on the screen says a texture streams: a negative number is finer.
+	mip_bias:     i32,
+}
+
+// Residency_Stats is what the residency holds, for the editor's resource monitor.
+Residency_Stats :: struct {
+	// The GPU memory of the buffers and textures of the assets that are resident, not the pools' pages.
+	resident_bytes: u64,
+	// How many assets are resident.
+	entries:        int,
+	// How many assets were unloaded, and how many times a texture streamed another mip, since the start.
+	evicted:        u64,
+	mip_streams:    u64,
 }
 
 @(private)
@@ -162,6 +200,36 @@ Resident_Entry :: struct {
 	// Who has asked for it: a thumbnail, or anything else, which keeps it.
 	baked:                  bool,
 	world:                  bool,
+	// The frame of the last request, which the policy unloads by.
+	used_at:                u64,
+	// The GPU memory of current, which stats.resident_bytes sums.
+	bytes:                  u64,
+	// What asked for a texture that is not virtual by its size on the screen (see Mip_Want).
+	want:                   Mip_Want,
+	// The frame that the texture's wanted mip first was coarser than its top mip, if it is.
+	coarser_since:          Maybe(u64),
+}
+
+// Mip_Want is the last request for the mips of a texture that is not virtual, with the frame that made it, nil if
+// nothing asked. A request is current in its frame and the next. Without a current one nothing draws the texture, so it
+// wants its last mip only (see wanted_mip), and a new version of it streams from the mip that it has (see first_mip).
+@(private)
+Mip_Want :: union {
+	Mip_Full,
+	Mip_Sized,
+}
+
+// Mip_Full is a reader that reads every mip: whatever is not a material.
+@(private)
+Mip_Full :: struct {
+	frame: u64,
+}
+
+// Mip_Sized is the largest size in pixels across that what draws the texture shows at, which is a material's.
+@(private)
+Mip_Sized :: struct {
+	pixels: f32,
+	frame:  u64,
 }
 
 @(private)
@@ -182,6 +250,8 @@ Resident_Source :: union #no_nil {
 	Asset_Source,
 	Live_Source,
 	Released_Source,
+	Evicted_Source,
+	Stale_Source,
 }
 
 // Asset_Source is the asset's blob.
@@ -200,6 +270,17 @@ Live_Source :: struct {
 @(private)
 Released_Source :: struct {}
 
+// Evicted_Source is an asset that was unloaded because nothing used it: it has no resources, and no blob in memory. The
+// next request streams it again, which makes it an Asset_Source.
+@(private)
+Evicted_Source :: struct {}
+
+// Stale_Source is an asset whose newest blob could not be made resident: the resources of an older blob draw. It is
+// not unloaded, as the next request would stream the blob that failed, and it does not stream mips of it. Only a newer
+// blob streams again, which makes it an Asset_Source.
+@(private)
+Stale_Source :: struct {}
+
 // Resident_Stream is new resources that stream in, from the blob of version, which replace current when their
 // transfers are done, so the old version draws until then.
 @(private)
@@ -211,6 +292,8 @@ Resident_Stream :: struct {
 	transfer_count: int,
 	// It streams in over a live mesh that was let go, which must not go on drawing if this does not come in.
 	released:       bool,
+	// The GPU memory of pending.
+	bytes:          u64,
 }
 
 // Resident_Event is what changes an entry's source or stream, which change applies.
@@ -223,6 +306,8 @@ Resident_Event :: union #no_nil {
 	Event_Stream_Superseded,
 	Event_Asset_Streaming,
 	Event_Asset_Failed,
+	Event_Evicted,
+	Event_Mips_Failed,
 }
 
 // The editor sent a live mesh's blob.
@@ -259,6 +344,16 @@ Event_Asset_Streaming :: struct {
 // The asset's blob could not stream.
 @(private = "file")
 Event_Asset_Failed :: struct {
+	reason: string,
+}
+
+// The asset was not used for longer than the policy allows: its resources go, and it streams again when it is asked for.
+@(private = "file")
+Event_Evicted :: struct {}
+
+// The mips of a texture that draws could not be made resident: it goes on drawing the mips that it has.
+@(private = "file")
+Event_Mips_Failed :: struct {
 	reason: string,
 }
 
@@ -309,6 +404,28 @@ residency_set_texture_pool :: proc(r: ^Residency, megabytes: u32) {
 	}
 }
 
+// residency_set_quality sets the policy from a quality: its budget in MiB, and its frames of idleness.
+residency_set_quality :: proc(r: ^Residency, q: Quality) {
+	residency_set_policy(
+		r,
+		{
+			idle_frames = u64(q.residency_idle),
+			budget_bytes = u64(q.residency_budget) * mem.Megabyte,
+			mip_bias = i32(q.texture_mip_bias),
+		},
+	)
+}
+
+// residency_set_policy sets when the residency unloads what nothing uses, and how coarse its textures' mips may be.
+residency_set_policy :: proc(r: ^Residency, policy: Residency_Policy) {
+	r.policy = policy
+}
+
+// residency_stats is what the residency holds, and how often it unloaded and streamed mips.
+residency_stats :: proc(r: ^Residency) -> Residency_Stats {
+	return r.stats
+}
+
 // texture_stream_stats is what the pool of virtual texture pages holds and what it waits for, and the video memory that
 // the process uses of its budget.
 texture_stream_stats :: proc(r: ^Residency) -> Texture_Stream_Stats {
@@ -328,12 +445,16 @@ resident_pin :: proc(r: ^Residency, m: ^Resident_Mesh) {
 	}
 }
 
-// residency_update starts a frame: it swaps in the resources whose transfers are done, and streams a new version of
-// each asset whose blob asset.poll swapped. Call it once a frame, before drawing.
+// residency_update starts a frame: it swaps in the resources whose transfers are done, streams a new version of each
+// asset whose blob asset.poll swapped, and streams the mips that the textures' sizes on the screen want. Then it unloads
+// what the policy lets go of: the one point of the frame where no pointer that a resident_* call gave is alive. Call it
+// once a frame, before drawing.
 residency_update :: proc(r: ^Residency) {
 	r.frame += 1
 	mesh_pool_update(&r.pool, r.platform, r.assets)
 	texture_pool_update(&r.texture_pool, r.platform, r.assets)
+	mip_streams := 0
+	defer residency_evict(r)
 	for &e in r.entries[:r.count] {
 		// A virtual texture's whole texture comes in over some frames, for what asked for it.
 		if e.kind == .Texture && e.ready && e.current.texture.virtual != 0 {
@@ -399,12 +520,65 @@ residency_update :: proc(r: ^Residency) {
 			// The asset's blob streams again, whatever its version. With no asset to load, the buffers go now, not when
 			// something next draws the mesh.
 			start_streaming(r, &e)
-		case Asset_Source:
+		case Asset_Source, Stale_Source:
 			// A failed version keeps its number, so only a newer blob tries again.
 			if e.handle != {} && asset.version(r.assets, e.handle) != e.version {
 				start_streaming(r, &e)
 			}
+		case Evicted_Source:
+		// A newer blob waits until something asks for the asset.
 		}
+		if mip_streams < MIP_STREAMS_PER_FRAME && retarget_mips(r, &e) {
+			mip_streams += 1
+		}
+	}
+}
+
+// residency_evict unloads the assets that the policy lets go of: first each that nothing asked for in policy.idle_frames,
+// then, while the resident bytes are over the budget, the one that was used longest ago, if it was not used in the last
+// RESIDENT_KEEP_FRAMES. Live and released meshes, what streams, and what only thumbnails asked for stay: the last go with
+// residency_release_baked. An asset that is unloaded keeps its entry, so a later request streams it again.
+@(private = "file")
+residency_evict :: proc(r: ^Residency) {
+	for &e in r.entries[:r.count] {
+		if r.policy.idle_frames > 0 &&
+		   evictable(&e) &&
+		   r.frame - e.used_at > r.policy.idle_frames {
+			evict(r, &e)
+		}
+	}
+	for r.policy.budget_bytes > 0 && r.stats.resident_bytes > r.policy.budget_bytes {
+		oldest: ^Resident_Entry
+		for &e in r.entries[:r.count] {
+			if e.bytes == 0 || !evictable(&e) || r.frame - e.used_at <= RESIDENT_KEEP_FRAMES {
+				continue
+			}
+			if oldest == nil || e.used_at < oldest.used_at {
+				oldest = &e
+			}
+		}
+		if oldest == nil {
+			break
+		}
+		evict(r, oldest)
+	}
+	r.stats.entries = 0
+	for &e in r.entries[:r.count] {
+		r.stats.entries += int(e.ready)
+	}
+}
+
+// evictable is whether an entry may be unloaded: it draws from its asset's blob, and nothing streams in to replace it.
+@(private = "file")
+evictable :: proc(e: ^Resident_Entry) -> bool {
+	_, from_asset := e.source.(Asset_Source)
+	return from_asset && e.ready && e.stream == nil && (e.world || !e.baked)
+}
+
+@(private = "file")
+evict :: proc(r: ^Residency, e: ^Resident_Entry) {
+	if change(r, e, Event_Evicted{}) {
+		r.stats.evicted += 1
 	}
 }
 
@@ -466,6 +640,7 @@ residency_release_baked :: proc(r: ^Residency) -> (released: int) {
 			continue
 		}
 		destroy_resources(r, e.kind, &e.current)
+		set_bytes(r, e, 0)
 		if e.handle != {} {
 			asset.unload(r.assets, e.handle)
 		}
@@ -512,7 +687,47 @@ resident_texture :: proc(
 	if e.current.texture.virtual != 0 {
 		return resident_whole(r, e)
 	}
-	return &e.current.texture, e.ready
+	// A reader that is not a material reads every mip, so it waits for the full chain, which its request asked for.
+	return &e.current.texture, e.ready && e.current.texture.top_mip == 0
+}
+
+// resident_texture_want says that a material draws a texture at most this many pixels across on the screen this frame,
+// which decides what mip of it is resident (see texture_mip_for_pixels). Call it before the material's
+// resident_virtual_texture, so the texture streams in at the mip that it wants. Every other reader wants all of the mips.
+resident_texture_want :: proc(r: ^Residency, guid: format.Guid, pixels: f32) {
+	e, ok := find_entry(r, guid, .Texture)
+	if !ok {
+		return
+	}
+	merge_want(r, e, Mip_Sized{max(pixels, 1), r.frame})
+}
+
+// merge_want makes a request for a frame's mips the texture's: it replaces an older one, and joins one of this frame, in
+// which every mip wins, and the largest size of the others.
+@(private = "file")
+merge_want :: proc(r: ^Residency, e: ^Resident_Entry, request: Mip_Want) {
+	if full, is_full := e.want.(Mip_Full); is_full && full.frame == r.frame {
+		return
+	}
+	if sized, is_sized := e.want.(Mip_Sized); is_sized && sized.frame == r.frame {
+		if more, also_sized := request.(Mip_Sized); also_sized {
+			e.want = Mip_Sized{max(sized.pixels, more.pixels), r.frame}
+			return
+		}
+	}
+	e.want = request
+}
+
+// current_want is the size in pixels that the current request wants, max(f32) for every mip, or false if none is.
+@(private = "file")
+current_want :: proc(r: ^Residency, e: ^Resident_Entry) -> (pixels: f32, ok: bool) {
+	switch want in e.want {
+	case Mip_Full:
+		return max(f32), r.frame - want.frame <= 1
+	case Mip_Sized:
+		return want.pixels, r.frame - want.frame <= 1
+	}
+	return 0, false
 }
 
 // resident_virtual_texture gives a texture asset's resources as a material samples it, and whether they are ready: a
@@ -527,7 +742,7 @@ resident_virtual_texture :: proc(
 	texture: ^Resident_Texture,
 	ready: bool,
 ) {
-	e := entry(r, guid, .Texture) or_return
+	e := entry(r, guid, .Texture, material = true) or_return
 	if e.ready && e.current.texture.dimension != .D2 {
 		log_wrong_dimension(e, .D2)
 		return &e.current.texture, false
@@ -554,7 +769,8 @@ resident_texture_of :: proc(
 	if e.current.texture.virtual != 0 {
 		return resident_whole(r, e)
 	}
-	return &e.current.texture, e.ready
+	// A reader that is not a material reads every mip, so it waits for the full chain, which its request asked for.
+	return &e.current.texture, e.ready && e.current.texture.top_mip == 0
 }
 
 @(private = "file")
@@ -571,18 +787,24 @@ log_wrong_dimension :: proc(e: ^Resident_Entry, wanted: format.Texture_Dimension
 	}
 }
 
-// entry finds an asset's entry, or makes one and starts streaming. An asset that cannot load is tried again after
+// entry finds an asset's entry, or makes one and starts streaming, and notes that the frame uses it. A material's
+// texture does not want its whole chain (see resident_texture_want). An asset that cannot load is tried again after
 // RESIDENT_RETRY_FRAMES, and logged once. A live mesh never loads its asset.
 @(private = "file")
 entry :: proc(
 	r: ^Residency,
 	guid: format.Guid,
 	kind: format.Asset_Kind,
+	material := false,
 ) -> (
 	e: ^Resident_Entry,
 	ok: bool,
 ) {
 	e = find_entry(r, guid, kind) or_return
+	e.used_at = r.frame
+	if kind == .Texture && !material {
+		merge_want(r, e, Mip_Full{r.frame})
+	}
 	if r.baking {
 		e.baked = true
 	} else {
@@ -614,13 +836,30 @@ find_entry :: proc(
 	if i, found := r.index[{guid, kind}]; found {
 		return &r.entries[i], true
 	}
+	slot := r.count
 	if r.count == MAX_RESIDENT {
-		log.errorf("render: more than %d resident assets", MAX_RESIDENT)
-		return
+		// The asset that was unloaded longest ago gives its place. It has no resources, and the slot stays where it is, so
+		// no pointer that a caller holds to another entry moves.
+		slot = -1
+		for &old, i in r.entries[:r.count] {
+			// Not one that a caller asked for this frame, whose pointer it may hold.
+			if _, evicted := old.source.(Evicted_Source);
+			   evicted &&
+			   old.used_at != r.frame &&
+			   (slot < 0 || old.used_at < r.entries[slot].used_at) {
+				slot = i
+			}
+		}
+		if slot < 0 {
+			log.errorf("render: more than %d resident assets", MAX_RESIDENT)
+			return
+		}
+		delete_key(&r.index, Resident_Key{r.entries[slot].guid, r.entries[slot].kind})
+	} else {
+		r.count += 1
 	}
-	e = &r.entries[r.count]
-	r.index[{guid, kind}] = r.count
-	r.count += 1
+	e = &r.entries[slot]
+	r.index[{guid, kind}] = slot
 	e^ = {
 		guid = guid,
 		kind = kind,
@@ -697,6 +936,7 @@ change :: proc(r: ^Residency, e: ^Resident_Entry, event: Resident_Event) -> (ok:
 			create_mesh_accel(r, &s.pending.mesh)
 		}
 		e.current, e.version, e.ready = s.pending, s.version, true
+		set_bytes(r, e, s.bytes)
 		e.stream, e.wrong_dimension_logged = nil, false
 		// The newest live step waited for this one.
 		if live, is_live := &e.source.(Live_Source); is_live && live.next != nil {
@@ -714,9 +954,13 @@ change :: proc(r: ^Residency, e: ^Resident_Entry, event: Resident_Event) -> (ok:
 		if s.released {
 			destroy_resources(r, e.kind, &e.current)
 			e.ready = false
+			set_bytes(r, e, 0)
 		}
-		// The version stays, so only a newer blob tries again.
+		// The version stays, so only a newer blob tries again. An older blob that draws goes on, and stays.
 		e.stream, e.version = nil, s.version
+		if _, from_asset := e.source.(Asset_Source); from_asset && e.ready {
+			e.source = Stale_Source{}
+		}
 		fail(r, e, ev.reason)
 	case Event_Stream_Superseded:
 		s := e.stream.? or_return
@@ -746,11 +990,37 @@ change :: proc(r: ^Residency, e: ^Resident_Entry, event: Resident_Event) -> (ok:
 		if _, released := e.source.(Released_Source); released {
 			destroy_resources(r, e.kind, &e.current)
 			e.ready = false
+			set_bytes(r, e, 0)
 		}
-		e.source = Asset_Source{}
+		// An older blob that draws goes on, and stays.
+		e.source = e.ready ? Stale_Source{} : Asset_Source{}
 		fail(r, e, ev.reason)
+	case Event_Mips_Failed:
+		fail(r, e, ev.reason)
+	case Event_Evicted:
+		_ = e.source.(Asset_Source) or_return
+		if e.stream != nil || !e.ready {
+			return false
+		}
+		destroy_resources(r, e.kind, &e.current)
+		set_bytes(r, e, 0)
+		e.ready, e.wrong_dimension_logged = false, false
+		e.want, e.coarser_since = nil, nil
+		// The blob goes too: the next request loads it again.
+		if e.handle != {} {
+			asset.unload(r.assets, e.handle)
+			e.handle = {}
+		}
+		e.source = Evicted_Source{}
 	}
 	return true
+}
+
+// set_bytes sets the GPU memory of an entry's resources, and the sum that stats holds.
+@(private = "file")
+set_bytes :: proc(r: ^Residency, e: ^Resident_Entry, bytes: u64) {
+	r.stats.resident_bytes = r.stats.resident_bytes - e.bytes + bytes
+	e.bytes = bytes
 }
 
 // live_stream streams a live mesh's blob, at the version that draws, as it is not the asset's.
@@ -763,7 +1033,7 @@ live_stream :: proc(
 	s: Resident_Stream,
 	ok: bool,
 ) {
-	s, ok = new_stream(r, .Mesh, blob, e.version, {})
+	s, ok = new_stream(r, .Mesh, blob, e.version, {}, 0)
 	if !ok {
 		buffer: [32]u8
 		log.errorf(
@@ -782,7 +1052,7 @@ free_next :: proc(r: ^Residency, next: ^[]byte) {
 	}
 }
 
-// start_streaming streams the asset's blob, which it loads first if it must.
+// start_streaming streams the asset's blob, which it loads first if it must. A texture streams from the mip that it wants.
 @(private = "file")
 start_streaming :: proc(r: ^Residency, e: ^Resident_Entry) {
 	if e.handle == {} {
@@ -801,6 +1071,7 @@ start_streaming :: proc(r: ^Residency, e: ^Resident_Entry) {
 		data,
 		version,
 		{e.guid, e.handle, asset.modified(r.assets, e.handle)},
+		e.kind == .Texture ? first_mip(r, e, data) : 0,
 	)
 	if !ok {
 		// The version stays, so a broken blob is tried again when the cooker writes a new one.
@@ -809,6 +1080,102 @@ start_streaming :: proc(r: ^Residency, e: ^Resident_Entry) {
 		return
 	}
 	change(r, e, Event_Asset_Streaming{stream})
+}
+
+// texture_mip_for_pixels is the finest mip that a texture needs to look sharp where what draws it shows at most pixels
+// across: the one whose longer side is about pixels, which is 0 when pixels is at least the side, or is max(f32), for
+// every mip. bias coarsens the mip, or refines it if it is negative.
+texture_mip_for_pixels :: proc(size: [2]u32, mip_count: u32, pixels: f32, bias: i32) -> u32 {
+	// Everything that is not sized wants every mip, whatever the bias is.
+	if mip_count <= 1 || pixels >= max(f32) {
+		return 0
+	}
+	ratio := f32(max(size.x, size.y)) / max(pixels, 1)
+	mip := ratio > 1 ? int(math.floor(math.log2(ratio))) : 0
+	return u32(clamp(mip + int(bias), 0, int(mip_count) - 1))
+}
+
+// wanted_mip is the mip that an entry's texture should have its top at: the one that the current request asks for, and
+// the last without one (see Mip_Want).
+@(private = "file")
+wanted_mip :: proc(r: ^Residency, e: ^Resident_Entry, size: [2]u32, mip_count: u32) -> u32 {
+	pixels, current := current_want(r, e)
+	if !current {
+		return max(mip_count, 1) - 1
+	}
+	return texture_mip_for_pixels(size, mip_count, pixels, r.policy.mip_bias)
+}
+
+// first_mip is the mip that a texture's blob streams from: the one that the current request asks for, and without one
+// the mip that draws now, or every mip for a texture that is not resident (see Mip_Want).
+@(private = "file")
+first_mip :: proc(r: ^Residency, e: ^Resident_Entry, data: []byte) -> u32 {
+	blob, ok := format.texture_view(data)
+	if !ok || .Virtual in blob.flags {
+		return 0
+	}
+	if _, current := current_want(r, e); !current {
+		return e.ready ? min(e.current.texture.top_mip, max(blob.mip_count, 1) - 1) : 0
+	}
+	return wanted_mip(r, e, blob.size, blob.mip_count)
+}
+
+// retarget_mips streams a texture that is not virtual again at the mip that it wants, in new textures: the GPU gives a
+// texture one stream, so what streams in is a texture of the mips from the wanted one, which replaces the texture that
+// draws when its transfers are done. It refines at once, and coarsens after MIP_DROP_FRAMES of wanting to. It gives
+// whether it started a stream.
+@(private = "file")
+retarget_mips :: proc(r: ^Residency, e: ^Resident_Entry) -> bool {
+	if e.kind != .Texture ||
+	   !e.ready ||
+	   e.stream != nil ||
+	   e.handle == {} ||
+	   e.current.texture.virtual != 0 {
+		return false
+	}
+	if _, from_asset := e.source.(Asset_Source); !from_asset {
+		return false
+	}
+	t := &e.current.texture
+	target := wanted_mip(r, e, t.size, t.mip_count)
+	if target == t.top_mip {
+		e.coarser_since = nil
+		return false
+	}
+	if target > t.top_mip {
+		since, waiting := e.coarser_since.?
+		if !waiting {
+			since = r.frame
+			e.coarser_since = since
+		}
+		if r.frame - since < MIP_DROP_FRAMES {
+			return false
+		}
+	}
+	// A failure is tried again after a while, as an asset that cannot be made resident is.
+	if e.failed_at != 0 && r.frame - e.failed_at < RESIDENT_RETRY_FRAMES {
+		return false
+	}
+	data, _ := asset.data(r.assets, e.handle)
+	version := asset.version(r.assets, e.handle)
+	if version != e.version {
+		return false
+	}
+	stream, ok := new_stream(
+		r,
+		.Texture,
+		data,
+		version,
+		{e.guid, e.handle, asset.modified(r.assets, e.handle)},
+		target,
+	)
+	e.coarser_since = nil
+	if !ok {
+		change(r, e, Event_Mips_Failed{"has mips that cannot be made resident"})
+		return false
+	}
+	r.stats.mip_streams += 1
+	return change(r, e, Event_Asset_Streaming{stream})
 }
 
 // Stream_Origin is the asset that a blob is the head of, which a paged mesh or a virtual texture reads its pages from: its
@@ -820,7 +1187,8 @@ Stream_Origin :: struct {
 	modified: i64,
 }
 
-// new_stream creates new resources from a blob and streams its data into them.
+// new_stream creates new resources from a blob and streams its data into them. A texture that is not virtual has the
+// blob's mips from top_mip on.
 @(private = "file")
 new_stream :: proc(
 	r: ^Residency,
@@ -828,6 +1196,7 @@ new_stream :: proc(
 	data: []byte,
 	version: u32,
 	origin: Stream_Origin,
+	top_mip: u32,
 ) -> (
 	s: Resident_Stream,
 	ok: bool,
@@ -836,7 +1205,7 @@ new_stream :: proc(
 	case .Mesh:
 		ok = stream_mesh(r, &s, data, version, origin)
 	case .Texture:
-		ok = stream_texture(r, &s, data, version, origin)
+		ok = stream_texture(r, &s, data, version, origin, top_mip)
 	case .Instance_Set:
 		ok = stream_instance_set(r, &s, data)
 	}
@@ -1127,6 +1496,7 @@ stream_buffer :: proc(
 	}
 	s.transfers[s.transfer_count] = transfer
 	s.transfer_count += 1
+	s.bytes += u64(size)
 	return buffer, true
 }
 
@@ -1137,6 +1507,7 @@ stream_texture :: proc(
 	data: []byte,
 	version: u32,
 	origin: Stream_Origin,
+	top_mip: u32,
 ) -> bool {
 	blob, ok := format.texture_view(data)
 	virtual := ok && .Virtual in blob.flags
@@ -1171,11 +1542,20 @@ stream_texture :: proc(
 		desc.size = {max(blob.size.x >> blob.tail_mip, 1), max(blob.size.y >> blob.tail_mip, 1)}
 		desc.mip_count = blob.mip_count - blob.tail_mip
 		mips = format.texture_tail(data, blob)
+	} else if top_mip > 0 && blob.mip_count > 0 {
+		t.top_mip = min(top_mip, blob.mip_count - 1)
+		desc.size = {max(blob.size.x >> t.top_mip, 1), max(blob.size.y >> t.top_mip, 1)}
+		desc.mip_count = blob.mip_count - t.top_mip
+		mips = format.texture_mips_from(data, blob, t.top_mip, r.platform.frame_allocator)
+		if mips == nil {
+			return false
+		}
 	}
 	t.texture = r.platform.gpu_create_texture(desc, nil)
 	if t.texture == {} {
 		return false
 	}
+	s.bytes += u64(gpu.mip_chain_size(desc))
 	transfer := r.platform.gpu_stream_texture(t.texture, mips)
 	if transfer == 0 {
 		return false

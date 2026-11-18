@@ -584,6 +584,7 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	profile.scope_text(&r.platform.profile, "Build frame", .Render)
 	residency_set_mesh_pool(&r.residency, r.quality.mesh_pool)
 	residency_set_texture_pool(&r.residency, r.quality.texture_pool)
+	residency_set_quality(&r.residency, r.quality)
 	texture_samplers_set_cap(r, r.quality.texture_anisotropy)
 	texture_pool_set_anisotropy(&r.residency.texture_pool, r.quality.texture_anisotropy)
 	residency_update(&r.residency)

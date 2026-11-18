@@ -426,6 +426,33 @@ texture_tail :: proc "contextless" (data: []byte, blob: ^Texture_Blob) -> []byte
 	return blob_bytes(data, blob.tail)
 }
 
+// texture_mips_from is a texture's mips from mip on, in the order that the GPU takes a stream in: each layer's chain after
+// the other, mip first. The texture's layer 0 is a slice of the blob's, and the layers of an array or a cube are copied
+// into memory from allocator. It is empty if mip is past the chain or the blob is shorter than its header says.
+texture_mips_from :: proc(
+	data: []byte,
+	blob: ^Texture_Blob,
+	mip: u32,
+	allocator := context.allocator,
+) -> []byte {
+	mips := blob_bytes(data, blob.mips)
+	layers := max(int(blob.layer_count), 1)
+	chain := texture_chain_size(blob.format, blob.size, blob.mip_count)
+	skip := texture_chain_size(blob.format, blob.size, mip)
+	rest := texture_tail_size(blob.format, blob.size, mip, blob.mip_count)
+	if mip >= blob.mip_count || rest == 0 || len(mips) < chain * layers {
+		return nil
+	}
+	if layers == 1 {
+		return mips[skip:][:rest]
+	}
+	from_mip := make([]byte, rest * layers, allocator)
+	for layer in 0 ..< layers {
+		copy(from_mip[layer * rest:], mips[layer * chain + skip:][:rest])
+	}
+	return from_mip
+}
+
 // texture_page_level is the paged mip that a page of the table is in, or false for a page that no level has.
 texture_page_level :: proc "contextless" (
 	levels: []Texture_Level,

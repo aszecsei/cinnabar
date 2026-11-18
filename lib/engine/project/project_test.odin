@@ -633,3 +633,41 @@ the_navigation_keys_are_checked_line_by_line :: proc(t: ^testing.T) {
 		)
 	}
 }
+
+// The residency's budget, its idle frames and the textures' mip bias are quality keys, each with its presets.
+@(test)
+the_residency_settings_are_quality_keys :: proc(t: ^testing.T) {
+	caps := render.Caps{}
+	s: Settings
+	problems := make([dynamic]string, context.temp_allocator)
+	parse(
+		"quality.residency_budget = 512\nquality.residency_idle = 90\nquality.texture_mip_bias = -1\nquality.texture_mip_bias = 9\nquality.residency_idle = soon\n",
+		&s,
+		&problems,
+	)
+	testing.expect_value(t, len(problems), 2)
+	testing.expect_value(
+		t,
+		problems[0],
+		`4: quality.texture_mip_bias takes a whole number from -2 to 4, not "9"`,
+	)
+	testing.expect_value(
+		t,
+		problems[1],
+		`5: quality.residency_idle takes a whole number of frames from 60 to 36000, not "soon"`,
+	)
+	q := quality(s, caps)
+	testing.expect_value(t, q.residency_budget, 512)
+	testing.expect_value(t, q.texture_mip_bias, -1)
+	testing.expect_value(t, render.preset_quality(.Low, caps).residency_budget, 1024)
+	testing.expect_value(
+		t,
+		render.preset_quality(.Ultra, render.Caps{video_memory = 4 << 30}).residency_budget,
+		2048,
+	)
+	testing.expect_value(t, render.clamp_quality({}, caps).residency_idle, 1200)
+	testing.expect_value(t, render.clamp_quality({residency_idle = 1}, caps).residency_idle, 60)
+	values := quality_values(render.preset_quality(.Low, caps), caps)
+	testing.expect_value(t, values[.Residency_Idle], "300")
+	testing.expect_value(t, values[.Texture_Mip_Bias], "1")
+}

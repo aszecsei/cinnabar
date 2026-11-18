@@ -487,6 +487,11 @@ poll :: proc(
 			stats.texture_pool_bytes = textures.pool_bytes
 			stats.video_memory_used, stats.video_memory_budget =
 				textures.video_used, textures.video_budget
+			residency := render.residency_stats(&e.renderer.residency)
+			stats.assets_resident = u32(residency.entries)
+			stats.assets_unloaded = u32(min(residency.evicted, u64(max(u32))))
+			stats.texture_mips_streamed = u32(min(residency.mip_streams, u64(max(u32))))
+			stats.resident_bytes = residency.resident_bytes
 			gi := render.gi_split_stats(e.renderer)
 			cascades := make([]link.Gi_Cascade_Stats, gi.count, frame)
 			for &cascade, k in cascades {

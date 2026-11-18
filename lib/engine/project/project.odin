@@ -105,6 +105,9 @@ Quality_Key :: enum u8 {
 	Mesh_Pool,
 	Texture_Pool,
 	Texture_Anisotropy,
+	Residency_Budget,
+	Residency_Idle,
+	Texture_Mip_Bias,
 	Virtual_Shadows,
 	Reflections,
 	Reflections_Level,
@@ -131,6 +134,9 @@ QUALITY_KEY_NAMES := [Quality_Key]string {
 	.Mesh_Pool            = "quality.mesh_pool",
 	.Texture_Pool         = "quality.texture_pool",
 	.Texture_Anisotropy   = "quality.texture_anisotropy",
+	.Residency_Budget     = "quality.residency_budget",
+	.Residency_Idle       = "quality.residency_idle",
+	.Texture_Mip_Bias     = "quality.texture_mip_bias",
 	.Virtual_Shadows      = "quality.shadows.virtual",
 	.Reflections          = "quality.reflections",
 	.Reflections_Level    = "quality.reflections.level",
@@ -502,6 +508,59 @@ parse :: proc(text: string, settings: ^Settings, problems: ^[dynamic]string = ni
 						value,
 					)
 				}
+			case .Residency_Budget:
+				megabytes: uint
+				megabytes, ok = strconv.parse_uint(value, 10)
+				if ok && megabytes <= render.MAX_RESIDENCY_BUDGET {
+					q.residency_budget = u32(megabytes)
+				} else {
+					ok = false
+					problem(
+						problems,
+						line,
+						"%s takes a whole number of MiB from %v to %v, not %q",
+						key,
+						render.MIN_RESIDENCY_BUDGET,
+						render.MAX_RESIDENCY_BUDGET,
+						value,
+					)
+				}
+			case .Residency_Idle:
+				frames: uint
+				frames, ok = strconv.parse_uint(value, 10)
+				if ok && frames <= render.MAX_RESIDENCY_IDLE {
+					q.residency_idle = u32(frames)
+				} else {
+					ok = false
+					problem(
+						problems,
+						line,
+						"%s takes a whole number of frames from %v to %v, not %q",
+						key,
+						render.MIN_RESIDENCY_IDLE,
+						render.MAX_RESIDENCY_IDLE,
+						value,
+					)
+				}
+			case .Texture_Mip_Bias:
+				bias: int
+				bias, ok = strconv.parse_int(value, 10)
+				if ok &&
+				   bias >= render.MIN_TEXTURE_MIP_BIAS &&
+				   bias <= render.MAX_TEXTURE_MIP_BIAS {
+					q.texture_mip_bias = i8(bias)
+				} else {
+					ok = false
+					problem(
+						problems,
+						line,
+						"%s takes a whole number from %v to %v, not %q",
+						key,
+						render.MIN_TEXTURE_MIP_BIAS,
+						render.MAX_TEXTURE_MIP_BIAS,
+						value,
+					)
+				}
 			case .Virtual_Shadows:
 				switch value {
 				case "true":
@@ -597,6 +656,9 @@ with_keys :: proc(q: render.Quality, settings: Settings, caps: render.Caps) -> r
 	if .Mesh_Pool in given {q.mesh_pool = s.mesh_pool}
 	if .Texture_Pool in given {q.texture_pool = s.texture_pool}
 	if .Texture_Anisotropy in given {q.texture_anisotropy = s.texture_anisotropy}
+	if .Residency_Budget in given {q.residency_budget = s.residency_budget}
+	if .Residency_Idle in given {q.residency_idle = s.residency_idle}
+	if .Texture_Mip_Bias in given {q.texture_mip_bias = s.texture_mip_bias}
 	if .Virtual_Shadows in given {q.shadows.virtual = s.shadows.virtual}
 	if .Reflections in given {q.reflections.technique = s.reflections.technique}
 	if .Reflections_Level in given {q.reflections.level = s.reflections.level}
@@ -627,6 +689,9 @@ quality_values :: proc(q: render.Quality, caps: render.Caps) -> (values: [Qualit
 		.Mesh_Pool            = fmt.tprintf("%v", q.mesh_pool),
 		.Texture_Pool         = fmt.tprintf("%v", q.texture_pool),
 		.Texture_Anisotropy   = fmt.tprintf("%v", q.texture_anisotropy),
+		.Residency_Budget     = fmt.tprintf("%v", q.residency_budget),
+		.Residency_Idle       = fmt.tprintf("%v", q.residency_idle),
+		.Texture_Mip_Bias     = fmt.tprintf("%v", q.texture_mip_bias),
 		.Virtual_Shadows      = q.shadows.virtual ? "true" : "false",
 		.Reflections          = name(q.reflections.technique),
 		.Reflections_Level    = name(q.reflections.level),

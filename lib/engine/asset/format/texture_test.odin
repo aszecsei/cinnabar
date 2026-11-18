@@ -46,3 +46,39 @@ box_chains_of_rgba8_texels :: proc(t: ^testing.T) {
 	testing.expect_value(t, mips[18], u8((255 + 2) / 4))
 	testing.expect_value(t, mips[19], 0)
 }
+
+// The mips of a texture from a mip are what a stream of a smaller texture takes: each layer's chain from that mip, one
+// layer after the other.
+@(test)
+texture_mips_from_cuts_each_layers_chain :: proc(t: ^testing.T) {
+	chain := texture_chain_size(.RGBA8_Unorm, {4, 4}, 3)
+	testing.expect_value(t, chain, 4 * (16 + 4 + 1))
+	mips := make([]byte, chain * 2, context.temp_allocator)
+	for &b, i in mips {
+		b = u8(i / chain + 1)
+	}
+	written := texture_write(
+		{
+			format = .RGBA8_Unorm,
+			usage = .Color,
+			dimension = .D2_Array,
+			layer_count = 2,
+			size = {4, 4},
+			mip_count = 3,
+			mips = mips,
+		},
+		context.temp_allocator,
+	)
+	data, _ := mem.alloc_bytes(len(written), BLOB_ALIGN, context.temp_allocator)
+	copy(data, written)
+	blob, ok := texture_view(data)
+	testing.expect(t, ok)
+
+	whole := texture_mips_from(data, blob, 0, context.temp_allocator)
+	testing.expect_value(t, len(whole), chain * 2)
+	from_one := texture_mips_from(data, blob, 1, context.temp_allocator)
+	testing.expect_value(t, len(from_one), 2 * 4 * (4 + 1))
+	testing.expect_value(t, from_one[0], 1)
+	testing.expect_value(t, from_one[4 * 5], 2)
+	testing.expect_value(t, len(texture_mips_from(data, blob, 3, context.temp_allocator)), 0)
+}

@@ -3,6 +3,7 @@ package render
 import "base:intrinsics"
 import "core:log"
 import "core:math"
+import "core:math/linalg"
 import "core:mem"
 import "core:slice"
 
@@ -972,6 +973,7 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32, skins: []Skin_Pose)
 	table := Material_Table {
 		uses  = make(map[format.Guid]Material_Use, r.platform.frame_allocator),
 		bytes = make([dynamic]byte, r.platform.frame_allocator),
+		look  = material_look(f, ecs.position_sub(f.view.position, s.origin)),
 	}
 	meshes := make([dynamic]Mesh_Record, r.platform.frame_allocator)
 	mesh_indices := make(map[^Resident_Mesh]u32, r.platform.frame_allocator)
@@ -2266,11 +2268,18 @@ add_instanced_items :: proc(
 	submesh_items := make([dynamic]Cull_Item, context.temp_allocator)
 	for submesh, s in mesh.submeshes[:mesh.submesh_count] {
 		material := renderer.materials[s] if s < MAX_MATERIAL_SLOTS else {}
-		use := use_material(r, table, material) or_continue
+		covered := mesh.submesh_bounds[s] if s < MAX_SUBMESHES else mesh.bounds
+		pixels := instanced_pixels(
+			&table.look,
+			r.scene.records[slot].rows,
+			{set.center, set.radius, set.max_scale},
+			covered.radius,
+		)
+		use := use_material(r, table, material, pixels) or_continue
 		// A material that draws patches or ribbons draws no mesh: the default material stands in.
 		if r.materials.pipelines[use.pipeline].patches ||
 		   r.materials.pipelines[use.pipeline].ribbon {
-			use = use_material(r, table, {}) or_continue
+			use = use_material(r, table, {}, pixels) or_continue
 		}
 		pipeline := &r.materials.pipelines[use.pipeline]
 		flags: u32 = ITEM_INSTANCED
@@ -2434,14 +2443,20 @@ add_items :: proc(
 	}
 	for submesh, s in mesh.submeshes[:mesh.submesh_count] {
 		material := renderer.materials[s] if s < MAX_MATERIAL_SLOTS else {}
-		use, ok := use_material(r, table, material)
+		// The view model is held up to the camera, so its textures keep every mip.
+		pixels := max(f32)
+		if !view_model {
+			b := mesh.submesh_bounds[s] if s < MAX_SUBMESHES else mesh.bounds
+			pixels = item_pixels(&table.look, r.scene.records[slot].rows, b.center, b.radius)
+		}
+		use, ok := use_material(r, table, material, pixels)
 		if !ok {
 			continue
 		}
 		// A material that draws patches or ribbons draws no mesh: the default material stands in.
 		if r.materials.pipelines[use.pipeline].patches ||
 		   r.materials.pipelines[use.pipeline].ribbon {
-			use = use_material(r, table, {}) or_continue
+			use = use_material(r, table, {}, pixels) or_continue
 		}
 		// The view model casts no shadows: its pose is not its place in the world.
 		flags: u32 = view_model ? ITEM_VIEW_MODEL : 0
@@ -2592,6 +2607,67 @@ lod_scale :: proc(view: View, height: u32, error_pixels: f32) -> (scale, near: f
 			LOD_FLAT_NEAR
 	}
 	return
+}
+
+// material_look is the frame's view as what a material draws is sized on its screen: camera is the view's place relative
+// to the scene's origin.
+@(private = "file")
+material_look :: proc(f: ^Frame, camera: [3]f32) -> Material_Look {
+	scale, near := lod_scale(f.view, f.size.y, 1)
+	_, flat := f.view.projection.(Orthographic)
+	return {camera = camera, scale = scale, near = near, flat = flat}
+}
+
+// item_pixels is how many pixels across the sphere of a mesh's bounds shows in a view, for the instance at rows, or
+// max(f32) for a table without a view.
+@(private = "file")
+item_pixels :: proc(look: ^Material_Look, rows: [3][4]f32, center: [3]f32, radius: f32) -> f32 {
+	if look.scale <= 0 {
+		return max(f32)
+	}
+	world := [3]f32 {
+		linalg.dot(rows[0].xyz, center) + rows[0][3],
+		linalg.dot(rows[1].xyz, center) + rows[1][3],
+		linalg.dot(rows[2].xyz, center) + rows[2][3],
+	}
+	return sphere_pixels(look, linalg.length(world - look.camera), radius * rows_scale(rows))
+}
+
+// instanced_pixels is how many pixels across an instance of a mesh whose bounds are radius shows, as near as an instance
+// of the set may be, for a set of the bounds at rows.
+@(private = "file")
+instanced_pixels :: proc(
+	look: ^Material_Look,
+	rows: [3][4]f32,
+	set: Set_Bounds,
+	radius: f32,
+) -> f32 {
+	if look.scale <= 0 {
+		return max(f32)
+	}
+	scale := rows_scale(rows)
+	world := [3]f32 {
+		linalg.dot(rows[0].xyz, set.center) + rows[0][3],
+		linalg.dot(rows[1].xyz, set.center) + rows[1][3],
+		linalg.dot(rows[2].xyz, set.center) + rows[2][3],
+	}
+	nearest := linalg.length(world - look.camera) - set.radius * scale
+	return sphere_pixels(look, nearest, radius * set.max_scale * scale)
+}
+
+// sphere_pixels is how many pixels across a sphere of radius shows at a distance from the view.
+@(private = "file")
+sphere_pixels :: proc(look: ^Material_Look, distance, radius: f32) -> f32 {
+	return 2 * radius * look.scale / (look.flat ? look.near : max(distance, look.near))
+}
+
+// rows_scale is the largest scale of a pose's axes.
+@(private = "file")
+rows_scale :: proc(rows: [3][4]f32) -> f32 {
+	x := linalg.length([3]f32{rows[0][0], rows[1][0], rows[2][0]})
+	y := linalg.length([3]f32{rows[0][1], rows[1][1], rows[2][1]})
+	z := linalg.length([3]f32{rows[0][2], rows[1][2], rows[2][2]})
+	return max(x, y, z)
 }
 
 // ensure_draw_buffers grows the frame's draw buffers to hold its draws in every view, and its bins' counts.
