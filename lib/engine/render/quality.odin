@@ -98,8 +98,8 @@ Shadow_Quality :: struct {
 	// docs/rendering/lighting-and-shadows.md#virtual-shadow-maps). Low has none.
 	virtual:       bool,
 	// Whether the virtual shadow map keeps its pages from frame to frame, and draws only those that are new (see
-	// docs/rendering/lighting-and-shadows.md#caching). A caster that moves leaves its old shadow in the pages that the
-	// pool keeps, so no preset has it.
+	// docs/rendering/lighting-and-shadows.md#caching). The pages under a caster that changed draw again, so every preset
+	// with a virtual shadow map has it.
 	virtual_cache: bool,
 	// Whether the atlas keeps each spot, point and area light's static casters from frame to frame in a cache, and draws
 	// only its dynamic casters each frame (see docs/rendering/lighting-and-shadows.md#cached-shadow-maps). Every preset
@@ -298,6 +298,7 @@ preset_quality :: proc(preset: Quality_Preset, caps: Caps) -> Quality {
 			level = level,
 			ray_traced = traced,
 			virtual = level >= .Medium,
+			virtual_cache = level >= .Medium,
 			atlas_cache = true,
 		},
 		ao = {technique = .Gtao, level = level},
