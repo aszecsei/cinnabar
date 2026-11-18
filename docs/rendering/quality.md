@@ -18,7 +18,7 @@ A volume says how far the ambient occlusion reaches; the quality says how many s
 | `shadows.level` | `Low` … `Ultra` | The shadow maps' atlas, cascades and filter (`SHADOW_PARAMS`) |
 | `shadows.ray_traced` | `bool` | Traced shadows for the first `MAX_MASK_LIGHTS` lights (see [Shadows](lighting-and-shadows.md#shadows)). Needs `Ray_Query` |
 | `shadows.virtual` | `bool` | A [virtual shadow map](lighting-and-shadows.md#virtual-shadow-maps) in place of the cascades, for a directional light that is not traced. Low has none |
-| `shadows.virtual_cache` | `bool` | The virtual shadow map keeps its pages from frame to frame and draws only those that are new or under a caster that changed (see [Caching](lighting-and-shadows.md#caching)). Off in every preset, because the shadows of mesh particles, which have no bounds on the CPU, stay in the pages that it keeps, and off without `shadows.virtual` |
+| `shadows.virtual_cache` | `bool` | The virtual shadow map keeps its pages from frame to frame and draws only those that are new or under a caster that changed (see [Caching](lighting-and-shadows.md#caching)). On in every preset with a virtual shadow map, and off without `shadows.virtual` |
 | `shadows.atlas_cache` | `bool` | The atlas keeps each spot, point and area light's static casters in a cache from frame to frame, and draws only its dynamic casters each frame (see [Cached shadow maps](lighting-and-shadows.md#cached-shadow-maps)). On in every preset |
 | `ao.technique` | `Off`, `Gtao`, `Ssao`, `Hbao` | The [ambient occlusion](ambient-occlusion.md#techniques)'s search |
 | `ao.level` | `Low` … `Ultra` | The search's samples and steps (`AO_PARAMS`, a table for each technique) |
@@ -72,6 +72,7 @@ So a room whose volume turns the ambient occlusion off has none at Ultra, and a 
 | Ultra | 13, 32 km | 64 × 64, 256 MB | None |
 
 - **Before levels,** the frame drew High's shadows and GI, Ultra's GTAO, and High's fog.
+- **The virtual shadow map's cap of invalid pages** is `Shadow_Params.drop_pages`, the most pages of a level that the casters that changed drop in a frame before the level drops every page: as many as the pool holds, 1024 at Medium, 2048 at High and 4096 at Ultra (see [Caching](lighting-and-shadows.md#caching)).
 - **The virtual shadow map's streaming budget** is `Shadow_Params.stream_pages`, the most pages that the meshlets and the masked textures that stream drop from its cache each frame: 64 at Medium, 128 at High and 256 at Ultra (see [Streaming](lighting-and-shadows.md#streaming)).
 - **The virtual shadow map's memory** stays at its pool, whatever the view's reach, with about 880 KB for its page table and requests. The atlas stays too, for spot and point lights, and its first cells take slots in place of cascades.
 - **Shadow cascades:** with fewer than four, `cascade_splits` divides the same reach among them, and repeats the last split in the unused places of `Frame_Constants.cascade_splits`, so no depth looks for a cascade past them. The slots for spot and point lights start after the cascades' cells, so a level with fewer cascades has room for more lights' maps.
@@ -112,7 +113,7 @@ The player's choice is in the [project settings](../overview/architecture.md#pro
 | `quality.shadows` | `Low` … `Ultra` |
 | `quality.shadows.ray_traced` | `true`, `false` |
 | `quality.shadows.virtual` | `true`, `false`; a file without it keeps the preset's |
-| `quality.shadows.virtual_cache` | `true`, `false`; a file without it keeps the preset's, which is off |
+| `quality.shadows.virtual_cache` | `true`, `false`; a file without it keeps the preset's, which is on with the virtual shadow map |
 | `quality.shadows.atlas_cache` | `true`, `false`; a file without it keeps the preset's, which is on |
 | `quality.ao` | `Off`, `Gtao`, `Ssao`, `Hbao` |
 | `quality.ao.level` | `Low` … `Ultra` |
