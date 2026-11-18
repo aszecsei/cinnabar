@@ -1779,6 +1779,8 @@ a_particle_slot_has_bounds_and_drops_the_pages_under_them :: proc(t: ^testing.T)
 		testing.expect(t, slot_live(&live, 0))
 		spheres := virtual_drop_spheres(tracking, nil, &live, 1, {}, context.temp_allocator)
 		testing.expect_value(t, len(spheres), unbounded ? 0 : 1)
+		// Without a bound, the levels drop every page instead.
+		testing.expect_value(t, virtual_live_unbounded(tracking, &live, 1), unbounded)
 		dropped := make([]u32, VIRTUAL_MAX_LEVELS * VIRTUAL_LEVEL_WORDS, context.temp_allocator)
 		virtual_drop_pages(views, spheres, dropped)
 		for view, level in views {

@@ -118,8 +118,9 @@ Virtual_Stream_Stats :: struct {
 }
 
 // Virtual_Drop_Stats are what the casters that changed dropped in the last frame that executed: the spheres, and the
-// levels that dropped every page since their drops passed Shadow_Params.drop_pages, or since the spheres passed
-// VIRTUAL_MAX_DROP_SPHERES (see docs/rendering/lighting-and-shadows.md#caching).
+// levels that dropped every page since their drops passed Shadow_Params.drop_pages, since the spheres passed
+// VIRTUAL_MAX_DROP_SPHERES, or since the view draws a slot live that has no bounds (see
+// docs/rendering/lighting-and-shadows.md#caching).
 Virtual_Drop_Stats :: struct {
 	spheres: u32,
 	levels:  u32,
@@ -1134,7 +1135,8 @@ drop_sphere :: proc(drop: Stream_Drop, camera: ecs.World_Position) -> [4]f32 {
 
 // virtual_drop_spheres are the spheres, relative to the camera, whose pages a view's virtual shadow map drops: both
 // places of each change of casters that it takes, and every slot that it draws live, whose shadow changes each frame.
-// The live slots without bounds, mesh particles, drop none.
+// The live slots without bounds, mesh particles whose emitters have none, drop none: they drop every level (see
+// virtual_live_unbounded).
 @(private)
 virtual_drop_spheres :: proc(
 	t: ^Caster_Tracking,
@@ -1163,6 +1165,18 @@ virtual_drop_spheres :: proc(
 		}
 	}
 	return spheres[:]
+}
+
+// virtual_live_unbounded is whether a view draws a slot live that has no bounds: mesh particles whose emitter's modules
+// give none (see particle_sphere). Its shadow may be anywhere, so the view's levels drop every page.
+@(private)
+virtual_live_unbounded :: proc(t: ^Caster_Tracking, live: ^Live_Slots, high: u32) -> bool {
+	for c, slot in t.slots[:high] {
+		if c.unbounded && slot_live(live, u32(slot)) {
+			return true
+		}
+	}
+	return false
 }
 
 // virtual_lookup is the finest level from level on that has the page that holds the point, or -1. A mark that does not fit
@@ -1478,25 +1492,24 @@ add_virtual_levels :: proc(f: ^Frame, sf: ^Shadow_Frame, direction: [3]f32) {
 		f.view.position,
 		platform.frame_allocator,
 	)
+	unbounded := virtual_live_unbounded(&s.casters, scene.live, s.high)
 	waiting := f.state.virtual_shadows.waiting
-	if len(spheres) == 0 && len(scene.stream_drops) == 0 && waiting == nil {
+	if len(spheres) == 0 && !unbounded && len(scene.stream_drops) == 0 && waiting == nil {
 		return
 	}
 	views := sf.views[len(sf.views) - c.selection.levels:]
 	words := VIRTUAL_MAX_LEVELS * VIRTUAL_LEVEL_WORDS
 	dropped := make([]u32, words, platform.frame_allocator)
 	vf.drop.spheres = u32(len(spheres))
-	if len(spheres) > VIRTUAL_MAX_DROP_SPHERES {
+	whole := len(spheres) > VIRTUAL_MAX_DROP_SPHERES || unbounded
+	if whole {
 		vf.invalidate |= (u32(1) << uint(c.selection.levels)) - 1
 	} else {
 		virtual_drop_pages(views, spheres, dropped)
 	}
 	capped := virtual_cap_drops(dropped, c.selection.levels, sf.params.drop_pages, vf.invalidate)
 	vf.invalidate |= capped
-	vf.drop.levels = u32(bits.count_ones(capped))
-	if len(spheres) > VIRTUAL_MAX_DROP_SPHERES {
-		vf.drop.levels = u32(c.selection.levels)
-	}
+	vf.drop.levels = whole ? u32(c.selection.levels) : u32(bits.count_ones(capped))
 	// The pages that streaming drops: those that waited and the frame's, but none of a level that drops every page.
 	wanted := make([]u32, words, platform.frame_allocator)
 	if waiting != nil {
