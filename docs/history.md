@@ -84,6 +84,7 @@ The order in which the daemon was built.
 4. **GPU assets:** shaders, textures and meshes as assets, cooked in parallel, sub-assets, and the GPU residency table (see [Rendering](#rendering), phase 0).
 5. **Bundles:** `cook package`, a bundle for each level and a global one, blobs compressed one by one with LZ4, and the asset runtime's `Bundle` source, which release builds read from (see [Content: Bundles](content/blobs-and-loading.md#bundles)).
 6. **Navmeshes:** Recast in `vendor/recastnavigation` behind a C API of the cooker's, `Nav_Mesh_Volume` on a box `Volume`, the project's agent types, the physics components' defaults in `format` so the cooker reads a scene's static colliders by their fields' names, navmeshes as scenes' sub-assets in their blobs and bundles, and a tiled bake whose tiles have keys of their own and bake on every core ([Content: Navmeshes](content/kinds/nav-meshes.md)).
+7. **Sublevel blobs:** a scene cooks to a blob for its base and one for each sublevel, `sublevel.<name>` sub-assets that the base lists, references across parts as references across scenes, navmeshes in their volume's part, and sublevels in their scene's bundle ([Content: Scenes](content/kinds/scenes.md#sublevels)).
 
 ## Editor
 The order in which the editor was built.
