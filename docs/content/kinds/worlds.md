@@ -60,4 +60,4 @@ In a release, each scene that is not persistent is a streaming chunk with a bund
 
   A world with a problem keeps its old blob, so the running game keeps the last good version.
 - **The cache key** covers the cooker version, the layout, the source path, the source and the GUID.
-- **The editor** opens a world in the script editor. It is among the scenes in the content browser.
+- **The editor** opens a world in the World editor, a table of its scenes, and draws the scenes' bounds in the viewport ([Editor: World view](../../editor/world-view.md#the-world-editor)). It is among the scenes in the content browser.

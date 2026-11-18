@@ -123,6 +123,8 @@ Message :: union {
 	Landscape_Overlay,
 	Live_Instances,
 	Release_Live_Instances,
+	World_View,
+	Streamed_Scenes,
 }
 
 // Editor to host, first: the editor's protocol version and its name.
@@ -1694,6 +1696,47 @@ Nav_Probe :: struct {
 // A point of a Nav_Probe: a World_Position's raw value.
 Nav_Probe_Point :: struct {
 	position: [3]i64,
+}
+
+// Editor to game: the scenes of the world that the editor shows, which the helpers draw (see
+// docs/editor/world-view.md#the-viewport), and the preview's position, none or one. The editor works out each scene's
+// flags, so the game only draws. The editor sends it when the world, its scenes, the active scene, the preview or the
+// game's streamed scenes change, with no scenes when no world shows, and when the link connects.
+World_View :: struct {
+	scenes:  []World_View_Scene,
+	preview: []Nav_Probe_Point,
+}
+
+// A scene of a World_View: its bounds as World_Positions' raw values, and its distances in meters, as the world's
+// World_Scene_Record has them.
+World_View_Scene :: struct {
+	min, max:        [3]i64,
+	load_distance:   f32,
+	unload_distance: f32,
+	// Persistent scenes have no bounds, and draw nothing.
+	persistent:      bool,
+	// The editor's active scene.
+	active:          bool,
+	// The preview loads it.
+	previewed:       bool,
+	// The game streamed it in.
+	loaded:          bool,
+}
+
+// Game to editor: the scenes of its world that the streaming policy has in (see
+// docs/editor/world-view.md#play), in the world's order. The game sends it when they change, and when the link
+// connects, with no world and no scenes when nothing streams.
+Streamed_Scenes :: struct {
+	world:  [16]u8,
+	scenes: []Streamed_Scene,
+}
+
+Streamed_Scene :: struct {
+	guid:   [16]u8,
+	// The game's number for the scene, from scene.FIRST_RUNTIME_SCENE up.
+	number: u32,
+	// The scene is shown; it is loading until then.
+	ready:  bool,
 }
 
 // Editor to host: write the next frame of the capture's source as a PNG, or the history ring as a GIF, to path, an

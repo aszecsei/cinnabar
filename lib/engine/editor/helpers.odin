@@ -87,6 +87,9 @@ draw_helpers :: proc(e: ^Editor, w: ^ecs.World, d: ^debug.Draw) {
 	if !active(e) || !has_scene_view {
 		return
 	}
+	if e.session.view.viewports[index].settings.helpers != .None {
+		draw_world_view(e, d)
+	}
 	if !editing(e) {
 		if e.session.view.viewports[index].settings.helpers == .None {
 			return

@@ -145,7 +145,11 @@ public sealed partial class EditorShell
             v.Session.FrameCopied += (generation, frame) => Host.Send(new ViewportAcknowledged((uint)v.Index, generation, frame));
             if (v.HasCamera)
             {
-                v.Camera.Changed += () => SendCamera(v);
+                v.Camera.Changed += () =>
+                {
+                    SendCamera(v);
+                    OnPreviewCameraMoved(v);
+                };
             }
         }
     }

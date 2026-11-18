@@ -130,3 +130,7 @@ public sealed class DecisionEditorDocument(Shell.DecisionEditor editor, Func<Con
 /// <summary>A blackboard in the blackboard editor (see docs/editor/decision-editor.md#blackboards).</summary>
 public sealed class BlackboardEditorDocument(Shell.BlackboardEditor editor, Func<Control> createView)
     : GraphEditorDocument(editor, $"blackboard.{editor.Guid}", createView);
+
+/// <summary>A world in the World editor (see docs/editor/world-view.md#the-world-editor).</summary>
+public sealed class WorldEditorDocument(Shell.WorldEditor editor, Func<Control> createView)
+    : GraphEditorDocument(editor, $"world.{editor.Guid}", createView);

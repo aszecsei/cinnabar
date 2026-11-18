@@ -102,6 +102,8 @@ Session :: struct {
 	// Set while the world is the editor's document in Edit: from the Load_Scene that made it, until the mode changes
 	// (see behaviours.odin).
 	mirror:         Maybe(Mirror),
+	// The streaming policy's changes when the session last sent Streamed_Scenes (see world_view.odin).
+	streamed_sent:  u64,
 	// The last ticket that the behaviours' edits had, and the messages that wait for poll, in the host's heap.
 	edit_tickets:   u64,
 	outbox:         [dynamic]byte,
@@ -207,6 +209,7 @@ begin_session :: proc(e: ^Editor, connection: u64) {
 			hidden = make([dynamic]ecs.Entity, heap),
 			picks = make([dynamic]link.Pick_Request, heap),
 			nav_probe = make([dynamic]ecs.World_Position, heap),
+			world_scenes = make([dynamic]link.World_View_Scene, heap),
 		},
 	}
 	for &v in e.session.view.viewports {
@@ -236,6 +239,7 @@ end_session :: proc(e: ^Editor) {
 	delete(s.view.hidden)
 	delete(s.view.picks)
 	delete(s.view.nav_probe)
+	delete(s.view.world_scenes)
 	s^ = {}
 }
 
@@ -455,6 +459,7 @@ poll :: proc(
 		send_preview_views(e, out, frame)
 		send_ui_layouts(e, out, frame)
 	}
+	send_streamed_scenes(e, out)
 	if now - s.last_stats >= STATS_INTERVAL {
 		stats_interval := now - s.last_stats
 		s.last_stats = now

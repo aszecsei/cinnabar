@@ -169,6 +169,38 @@ static partial class EditorCommands
         });
     }
 
+    // The streamed world's preview (see docs/editor/world-view.md#the-preview). It shows in Edit only.
+    static void RegisterWorld(EditorShell shell)
+    {
+        var commands = shell.Commands;
+        commands.Register(new Command(WorldPreviewOff, "Preview Off", () => shell.SetPreview(new WorldPreview.Off()))
+        {
+            Description = "Show no preview of what the streamed world would load.",
+            Icon = "hidden",
+            IsCheckedWhen = () => shell.Preview is WorldPreview.Off,
+        });
+        commands.Register(new Command(WorldPreviewCamera, "Preview at Camera", () => shell.SetPreview(new WorldPreview.FollowCamera()))
+        {
+            Description = "Show the scenes that the streamed world would load from the active scene view's camera, as it moves.",
+            Icon = "camera",
+            IsCheckedWhen = () => shell.Preview is WorldPreview.FollowCamera,
+            CanExecuteWhen = () => shell.IsEditing && shell.ActiveViewport.HasCamera,
+        });
+        commands.Register(new Command(WorldPinPreview, "Pin Preview Here", () => shell.PinPreview())
+        {
+            Description = "Show the scenes that the streamed world would load from where the active scene view's camera is now.",
+            Icon = "frame",
+            IsCheckedWhen = () => shell.Preview is WorldPreview.Pinned,
+            CanExecuteWhen = () => shell.IsEditing && shell.ActiveViewport.HasCamera,
+        });
+        commands.Register(new Command(WorldOpenPreviewed, "Open Previewed Scenes", shell.OpenPreviewedScenes)
+        {
+            Description = "Open the scenes that the preview loads beside the open ones, and close the open scenes of the world that it does not.",
+            Icon = "scene",
+            CanExecuteWhen = () => shell.IsEditing && shell.PreviewedScenes.Count > 0,
+        });
+    }
+
     // Selection, visibility, the viewport's tools and the camera (see docs/editor/viewport.md#viewport). The tools have keys of their own, which work while the viewport has focus.
     static void RegisterSceneView(EditorShell shell)
     {

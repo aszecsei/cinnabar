@@ -10,6 +10,10 @@ static partial class EditorCommands
     public const string SaveAll = "file.saveAll";
     public const string AddScene = "file.addScene";
     public const string CloseScene = "file.closeScene";
+    public const string WorldPreviewOff = "world.previewOff";
+    public const string WorldPreviewCamera = "world.previewCamera";
+    public const string WorldPinPreview = "world.pinPreview";
+    public const string WorldOpenPreviewed = "world.openPreviewed";
     public const string Undo = "edit.undo";
     public const string Redo = "edit.redo";
     public const string CreateEntity = "entity.create";
@@ -244,6 +248,7 @@ static partial class EditorCommands
     public static void Register(EditorShell shell)
     {
         RegisterScene(shell);
+        RegisterWorld(shell);
         RegisterMesh(shell);
         RegisterTexture(shell);
         RegisterMeshSelection(shell);

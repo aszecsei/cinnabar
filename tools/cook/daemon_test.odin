@@ -155,6 +155,48 @@ a_preview_of_a_decision_or_a_blackboard_gives_the_problems_of_its_text :: proc(t
 }
 
 
+// A world's preview is the problems of its text, and each GUID that names no scene, at their lines.
+@(test)
+a_preview_of_a_world_gives_the_problems_of_its_text :: proc(t: ^testing.T) {
+	TILE :: "0123456789abcdef0123456789abcdef"
+	WORLD :: "00112233445566778899aabbccddeeff"
+	bounds :: "\tmin = [0, 0, 0]\n\tmax = [40, 10, 40]\n\tload_distance = 25\n"
+	good :: "world 1\nscene $" + TILE + "\n" + bounds
+	tree := make_tree(
+		t,
+		{
+			{"content/scenes/tile.scene", "scene 1\n"},
+			{"content/scenes/tile.scene.meta", "guid = " + TILE + "\n"},
+			{"content/worlds/w.world", good},
+			{"content/worlds/w.world.meta", "guid = " + WORLD + "\n"},
+		},
+	)
+	defer remove_tree(tree)
+	d: Daemon
+	d.options = tree_options(tree)
+	pass := cook(d.options, {.Scene, .World}, log_problems = false)
+	index_build(&d.index, pass, d.options.roots[:])
+	defer index_destroy(&d.index)
+
+	result := preview(&d, {guid = WORLD, text = good})
+	testing.expectf(t, len(result.problems) == 0 && result.error == "", "%v", result)
+	// min above max on line 2's scene, and a GUID that names the world, not a scene, on line 6.
+	bad ::
+		"world 1\nscene $" +
+		TILE +
+		"\n\tmin = [50, 0, 0]\n\tmax = [40, 10, 40]\n\tload_distance = 25\nscene $" +
+		WORLD +
+		"\n\tpersistent = true\n"
+	result = preview(&d, {guid = WORLD, text = bad})
+	lines: [dynamic]u32
+	defer delete(lines)
+	for p in result.problems {
+		append(&lines, p.line)
+	}
+	testing.expectf(t, len(lines) == 2 && lines[1] == 6, "%v", result.problems)
+	testing.expect(t, result.error != "")
+}
+
 // A GOAP decision's preview plans the editor's plan query with the runtime's search: from the query's world state, the
 // blackboard's defaults for the keys that it leaves out, and every action usable. A failed search gives its closest
 // plan, with the keys that it lacks, and a goal or a key that the decision does not have is a problem.
