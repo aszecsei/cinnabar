@@ -648,6 +648,7 @@ Debug_View :: enum u8 {
 	Reflection_Probes,
 	Reflections,
 	Clouds,
+	Shadow_Virtual_Invalidated,
 }
 
 // Which entities the viewport draws the shapes of: lights' ranges and cones, volumes and cameras.
@@ -1284,95 +1285,100 @@ Script_Module_Memory :: struct {
 
 // Game to editor: the world and the scripts.
 Game_Stats :: struct {
-	entities:                  u32,
-	archetypes:                u32,
-	behaviours:                u32,
+	entities:                   u32,
+	archetypes:                 u32,
+	behaviours:                 u32,
 	// Every byte that the script VM holds, and the part that each module's code allocated. The engine's own part is
 	// the rest.
-	script_bytes:              u64,
-	modules:                   []Script_Module_Memory,
+	script_bytes:               u64,
+	modules:                    []Script_Module_Memory,
 	// What the camera drew a frame or two ago (see docs/rendering/gpu-scene.md#occlusion-culling): its items, as
 	// draws, and its instance sets' instances, each drawn early or late, and those that occlusion culling hid.
-	early_items:               u32,
-	late_items:                u32,
-	hidden_items:              u32,
-	early_instances:           u32,
-	late_instances:            u32,
-	hidden_instances:          u32,
+	early_items:                u32,
+	late_items:                 u32,
+	hidden_items:               u32,
+	early_instances:            u32,
+	late_instances:             u32,
+	hidden_instances:           u32,
 	// Of the items whose meshlets have a hierarchy, their meshlets, and those that the walk of the hierarchy gave the
 	// amplification shaders to test (see docs/rendering/gpu-scene.md#mesh-shader-path).
-	hierarchy_meshlets:        u32,
-	selected_meshlets:         u32,
+	hierarchy_meshlets:         u32,
+	selected_meshlets:          u32,
 	// The forward pass's 2x2 quads and their lanes that cover a pixel, with the viewport's shading stats on, a frame or
 	// two ago (see docs/rendering/lighting-and-shadows.md#quad-overdraw).
-	forward_quads:             u32,
-	forward_pixels:            u32,
+	forward_quads:              u32,
+	forward_pixels:             u32,
 	// The virtual shadow map's pages a frame or two ago: those that the frame asked for, those that it got, those that the
 	// pool had no room for, and how many the pool holds, 0 without it (see
 	// docs/rendering/lighting-and-shadows.md#virtual-shadow-maps); of those that it got, those that the pool held and those
 	// that it drew, the pages that left the pool for them, and the pages that the pool holds after the frame (see
 	// docs/rendering/lighting-and-shadows.md#caching).
-	virtual_pages_requested:   u32,
-	virtual_pages_allocated:   u32,
-	virtual_pages_missed:      u32,
-	virtual_pages_capacity:    u32,
-	virtual_pages_cached:      u32,
-	virtual_pages_drawn:       u32,
-	virtual_pages_evicted:     u32,
-	virtual_pages_resident:    u32,
+	virtual_pages_requested:    u32,
+	virtual_pages_allocated:    u32,
+	virtual_pages_missed:       u32,
+	virtual_pages_capacity:     u32,
+	virtual_pages_cached:       u32,
+	virtual_pages_drawn:        u32,
+	virtual_pages_evicted:      u32,
+	virtual_pages_resident:     u32,
 	// The virtual shadow map's pages that streaming dropped in the last frame, and those that wait for their turn (see
 	// docs/rendering/lighting-and-shadows.md#streaming).
-	virtual_pages_streamed:    u32,
-	virtual_pages_waiting:     u32,
+	virtual_pages_streamed:     u32,
+	virtual_pages_waiting:      u32,
+	// The virtual shadow map's pages that the pool held that the casters that changed dropped a frame or two ago, and
+	// the levels that dropped every page in the last frame, since their drops passed the limit (see
+	// docs/rendering/lighting-and-shadows.md#caching).
+	virtual_pages_invalidated:  u32,
+	virtual_levels_invalidated: u32,
 	// The shadow atlas's cache in the last frame: the lights that it held, 0 without it, the slots that the frame copied
 	// from it, those that it drew, and those of them that a dynamic caster's report drew on the budget (see
 	// docs/rendering/lighting-and-shadows.md#cached-shadow-maps).
-	atlas_cache_lights:        u32,
-	atlas_cache_copied:        u32,
-	atlas_cache_drawn:         u32,
-	atlas_cache_refreshed:     u32,
+	atlas_cache_lights:         u32,
+	atlas_cache_copied:         u32,
+	atlas_cache_drawn:          u32,
+	atlas_cache_refreshed:      u32,
 	// The pool of mesh pages: the pages that are resident, the slots that it has, 0 without a paged mesh, the pages that
 	// views want and that are not resident yet, and the bytes a second that the frames since the last stats copied into
 	// it (see docs/rendering/assets.md#mesh-pages).
-	mesh_pages_resident:       u32,
-	mesh_pages_capacity:       u32,
-	mesh_pages_pending:        u32,
-	mesh_pages_streamed_bytes: u32,
+	mesh_pages_resident:        u32,
+	mesh_pages_capacity:        u32,
+	mesh_pages_pending:         u32,
+	mesh_pages_streamed_bytes:  u32,
 	// The pool of virtual texture pages: the pages that are resident, the slots that it has, 0 without a virtual texture,
 	// the pages that views want and that are not resident yet, the bytes a second that the frames since the last stats
 	// copied into it, and the bytes of its atlases. Then the video memory that the process uses and the budget that the OS
 	// gives it, both 0 when the backend does not know (see docs/rendering/assets.md#virtual-textures).
-	texture_pages_resident:    u32,
-	texture_pages_capacity:    u32,
-	texture_pages_pending:     u32,
-	texture_streamed_bytes:    u32,
-	texture_pool_bytes:        u64,
-	video_memory_used:         u64,
-	video_memory_budget:       u64,
+	texture_pages_resident:     u32,
+	texture_pages_capacity:     u32,
+	texture_pages_pending:      u32,
+	texture_streamed_bytes:     u32,
+	texture_pool_bytes:         u64,
+	video_memory_used:          u64,
+	video_memory_budget:        u64,
 	// The assets that are resident: how many, the GPU memory of their buffers and textures, and how many were unloaded
 	// because nothing used them and how many times a texture streamed another mip, since the start (see
 	// docs/rendering/assets.md#gpu-residency).
-	assets_resident:           u32,
-	assets_unloaded:           u32,
-	texture_mips_streamed:     u32,
-	resident_bytes:            u64,
+	assets_resident:            u32,
+	assets_unloaded:            u32,
+	texture_mips_streamed:      u32,
+	resident_bytes:             u64,
 	// The scenes that the streaming policy is loading, and the entities that the last frame's work made and gave their
 	// components, across all of them (see docs/world/streaming.md#budgets).
-	scenes_loading:            u32,
-	scene_entities_spawned:    u32,
-	scene_entities_filled:     u32,
+	scenes_loading:             u32,
+	scene_entities_spawned:     u32,
+	scene_entities_filled:      u32,
 	// The split cascades' tables a frame or two ago, a cascade each, none without them (see
 	// docs/rendering/global-illumination.md#split-cascades).
-	gi_cascades:               []Gi_Cascade_Stats,
+	gi_cascades:                []Gi_Cascade_Stats,
 	// The reflection probes in the last frame, the slots whose probe has a cube, of the level's slots, 0 without the
 	// probes, and the faces that the frame captured (see docs/rendering/lighting-and-shadows.md#reflection-probes).
-	reflection_probes:         u32,
-	reflection_probe_slots:    u32,
-	reflection_probe_capacity: u32,
-	reflection_probe_faces:    u32,
+	reflection_probes:          u32,
+	reflection_probe_slots:     u32,
+	reflection_probe_capacity:  u32,
+	reflection_probe_faces:     u32,
 	// The bytes that the reflections keep between frames: the probes' cubes and the screen-space or traced
 	// reflections' histories (see render.reflection_memory).
-	reflection_memory:         u64,
+	reflection_memory:          u64,
 }
 
 // Gi_Cascade_Stats is a split cascade's table: the probes that rays reached, its slots, and the keys that found no

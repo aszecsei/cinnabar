@@ -39,6 +39,24 @@ public sealed class VirtualShadowTests
         Assert.Equal("1,024 / 2,048 (50% full)", rows["Shadow page pool"]);
         // Nothing streamed.
         Assert.Equal("0", rows["Shadow pages streamed"]);
+        // No caster changed.
+        Assert.Equal("0", rows["Shadow pages invalidated"]);
+    }
+
+    [Fact]
+    public void TheResourceMonitorShowsTheShadowPagesThatChangedCastersInvalidated()
+    {
+        var reader = new LinkReader(new byte[1024]);
+        var stats = GameStats.Read(ref reader) with
+        {
+            VirtualPagesCapacity = 2048,
+            VirtualPagesInvalidated = 36,
+        };
+        var rows = ResourceMonitorView.VirtualShadowRows(stats).ToDictionary(r => r.Name, r => r.Value);
+        Assert.Equal("36", rows["Shadow pages invalidated"]);
+        // Drops past the limit draw their levels whole.
+        rows = ResourceMonitorView.VirtualShadowRows(stats with { VirtualLevelsInvalidated = 2 }).ToDictionary(r => r.Name, r => r.Value);
+        Assert.Equal("36, 2 whole levels", rows["Shadow pages invalidated"]);
     }
 
     [Fact]

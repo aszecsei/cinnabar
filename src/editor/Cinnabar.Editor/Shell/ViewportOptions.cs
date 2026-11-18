@@ -87,7 +87,7 @@ public static class ViewportOptions
     public static IReadOnlyList<(string Label, IReadOnlyList<DebugView> Views)> DebugViewGroups { get; } =
     [
         ("Lighting", [DebugView.LightingOnly, DebugView.DirectLight, DebugView.IndirectLight, DebugView.LightComplexity, DebugView.Luminance, DebugView.Emission]),
-        ("Shadows", [DebugView.ShadowCascades, DebugView.ShadowMask, DebugView.ShadowVirtual]),
+        ("Shadows", [DebugView.ShadowCascades, DebugView.ShadowMask, DebugView.ShadowVirtual, DebugView.ShadowVirtualInvalidated]),
         ("Indirect Light", [DebugView.AmbientOcclusion, DebugView.GiDiffuse, DebugView.GiSpecular, DebugView.GiProbes, DebugView.ReflectionProbes, DebugView.Reflections]),
         ("Surfaces", [DebugView.Albedo, DebugView.Roughness, DebugView.Normals]),
         ("Geometry", [DebugView.Depth, DebugView.Velocity, DebugView.EntityIds, DebugView.Meshlets, DebugView.LodDepth]),
