@@ -274,7 +274,8 @@ destroy :: proc(e: ^Editor) {
 }
 
 // poll handles the editor's messages and appends the game's messages to out. Call it between frames, outside the
-// script phase. user is the game's own data, which its commands get.
+// script phase. user is the game's own data, which its commands get. despawned is whether a scene that the editor
+// closed despawned entities, which the systems that keep data by entity must then forget (see game.forget_despawned).
 poll :: proc(
 	e: ^Editor,
 	w: ^ecs.World,
@@ -283,12 +284,16 @@ poll :: proc(
 	incoming: []core.Editor_Message,
 	out: ^[dynamic]byte,
 	user: rawptr = nil,
+) -> (
+	despawned: bool,
 ) {
 	profile.scope_text(&e.platform.profile, "Editor poll", .Editor)
 	if e.scenes.scripts == nil {
 		e.scenes.scripts = scripts
 	}
 	snapshot := false
+	// A scene that opened or closed beside the others changes only its own entities, which a delta describes now.
+	rescan := false
 	if connection != e.session.connection {
 		end_session(e)
 		begin_session(e, connection)
@@ -337,6 +342,28 @@ poll :: proc(
 			clear(&e.session.view.selection)
 			clear(&e.session.view.hidden)
 			snapshot = true
+		case link.Add_Scene:
+			problems := make([dynamic]link.Edit_Problem, frame)
+			add_editor_scene(e, w, scripts, v.scene, &problems)
+			if scripts != nil {
+				script.settle(scripts)
+			}
+			follow_scene_ticket(e, v.ticket)
+			// The other scenes' problems stay, so these are not a snapshot.
+			if len(problems) > 0 {
+				link.write_message(out, edit_problems(problems[:], false))
+			}
+			rescan = true
+		case link.Remove_Scene:
+			// The game forgets the scene's entities after the poll, and their behaviours end as a game's own unload
+			// ends them, with the callbacks of the mode.
+			if remove_editor_scene(e, w, v.scene) {
+				despawned = true
+				forget_dead(w, &e.session.view.selection)
+				forget_dead(w, &e.session.view.hidden)
+			}
+			follow_scene_ticket(e, v.ticket)
+			rescan = true
 		case link.Apply_Operations:
 			problems := make([dynamic]link.Edit_Problem, frame)
 			apply_operations(e, w, scripts, v.operations, &problems)
@@ -413,7 +440,7 @@ poll :: proc(
 		s.types_sent = true
 	}
 	now := e.platform.time_seconds()
-	if snapshot || now - s.last_scan >= SCAN_INTERVAL {
+	if snapshot || rescan || now - s.last_scan >= SCAN_INTERVAL {
 		s.last_scan = now
 		if message, changed := scan(e, w, snapshot, frame); changed {
 			link.write_message(out, message)
@@ -514,6 +541,7 @@ poll :: proc(
 		}
 		link.write_message(out, stats)
 	}
+	return
 }
 
 @(private)
@@ -568,6 +596,29 @@ unwatch :: proc(e: ^Editor, entity: ecs.Entity) {
 			return
 		}
 	}
+}
+
+// follow_scene_ticket gives the mirror of the edit-mode behaviours the ticket of the editor's world after a scene
+// opened or closed beside the others. Their edits are of the same world still, so what the mirror waits for stays: an
+// answer to a batch with the old ticket is a refusal, and the behaviours try again.
+@(private)
+follow_scene_ticket :: proc(e: ^Editor, ticket: u64) {
+	if m, mirrors := &e.session.mirror.?; mirrors {
+		m.scene = ticket
+	}
+}
+
+// forget_dead drops the entities that are no longer alive from a list, in place, in order.
+@(private)
+forget_dead :: proc(w: ^ecs.World, entities: ^[dynamic]ecs.Entity) {
+	kept := 0
+	for entity in entities {
+		if ecs.is_alive(w, entity) {
+			entities[kept] = entity
+			kept += 1
+		}
+	}
+	resize(entities, kept)
 }
 
 // scan compares the world with what the editor knows. With full, it describes every entity in a snapshot. Otherwise

@@ -5,7 +5,8 @@ namespace Cinnabar.Editor.Document;
 /// <summary>
 /// The open scenes as a <c>Load_Scene</c> message, which replaces the host's world (see
 /// docs/editor/document-and-scenes.md#several-scenes). The editor sends it when the link connects, after a soft restart,
-/// and when it opens or closes a scene. Operations use the same conversions for their parts, and the game's commands
+/// and when Open Scene replaces the open scenes. A scene that opens beside them, or closes, goes as an <c>Add_Scene</c>
+/// or a <c>Remove_Scene</c>. Operations use the same conversions for their parts, and the game's commands
 /// the ones back from the wire.
 /// </summary>
 public static class SceneSnapshot
@@ -20,7 +21,7 @@ public static class SceneSnapshot
     /// <summary>Several scenes as one message, in the order given: the first's GUID is the world's.</summary>
     public static Wire.LoadScene ToMessage(IEnumerable<Wire.LoadedScene> scenes, ulong ticket) => new([.. scenes], ticket);
 
-    /// <summary>A scene of a <c>Load_Scene</c>, with the editor's number for it and the GUID of its file as hex.</summary>
+    /// <summary>A scene of a <c>Load_Scene</c> or an <c>Add_Scene</c>, with the editor's number for it and the GUID of its file as hex.</summary>
     public static Wire.LoadedScene Loaded(uint number, Scene scene, string guid) =>
         new(number, [.. scene.Entities.Select(Entity)], guid.Length == 32 && guid.All(Uri.IsHexDigit) ? Convert.FromHexString(guid) : new byte[16]);
 

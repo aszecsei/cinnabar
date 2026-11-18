@@ -138,4 +138,4 @@ return Portal
 
 - **Scene memory:** at most `core.MAX_SCENE_MEMORY` (64) scenes are loaded at once. `add_scene` refuses one more and logs an error ([Core: Scene memory](../core/jobs-and-memory.md#scene-memory)).
 - **Loads across frames** are only for the scenes that a `World_Streamer` loads, and for Odin code that calls `scene.begin_load`. `add_scene` and `Scene.load` load a scene in one frame, from a blob that `asset.load` reads at once ([World streaming](streaming.md)).
-- **The editor** does not edit or save streamed scenes. Its documents are its own scenes, numbered below `FIRST_RUNTIME_SCENE`. A load of its scenes unloads the level, and every streamed scene with it.
+- **The editor** does not edit or save streamed scenes. Its documents are its own scenes, numbered below `FIRST_RUNTIME_SCENE`. A load of its scenes unloads the level, and every streamed scene with it. A scene that it opens or closes beside the others is added or unloaded alone, with `add_scene` and `unload_scene` ([Editor: Several scenes](../editor/document-and-scenes.md#several-scenes)).

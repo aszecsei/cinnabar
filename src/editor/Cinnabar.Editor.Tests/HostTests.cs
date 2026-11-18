@@ -157,6 +157,33 @@ public abstract class HostTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task AScenePlacedBesideAnotherAndRemovedLeavesItsEntitiesAsTheyAre()
+    {
+        await using var editor = await Connect();
+        editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
+        await editor.Next<EntitySnapshot>();
+        var loaded = await Load(editor, Scene(Entity(1, "North")));
+        var north = Assert.Single(loaded.Entities).Entity;
+
+        // The second scene joins the world, and the first scene's entity keeps its handle.
+        editor.Link.Send(new AddScene(Document.SceneSnapshot.Loaded(2, Scene(Entity(1, "South"), Entity(2, "Hinge")), ""), 2));
+        var added = await editor.Next<EntityDelta>(d => d.Changed.Any(e => e.Name == "South"));
+        Assert.All(added.Changed, e => Assert.Equal(2u, e.Scene));
+        Assert.Equal(2, added.Changed.Length);
+        Assert.Empty(added.Destroyed);
+        var south = added.Changed.Single(e => e.Name == "South").Entity;
+
+        // Only the removed scene's entities leave the world.
+        editor.Link.Send(new RemoveScene(1, 3));
+        var removed = await editor.Next<EntityDelta>(d => d.Destroyed.Length > 0);
+        Assert.Equal([north], removed.Destroyed);
+        editor.Link.Send(new WatchEntity(south));
+        await editor.Next<EntityValues>(v => v.Entity == south);
+        Assert.DoesNotContain(editor.Skipped, m => m is EntitySnapshot s && s.Entities.Any(e => e.Name == "South"));
+        Assert.DoesNotContain(editor.Skipped, m => m is Log { Level: LogLevel.Error });
+    }
+
+    [Fact]
     public async Task TheGameAppliesEditsAndSendsBackWhatItCannot()
     {
         await using var editor = await Connect();

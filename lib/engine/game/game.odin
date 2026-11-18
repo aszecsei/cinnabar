@@ -211,7 +211,9 @@ api :: proc($hooks: proc() -> Hooks) -> core.Game_API {
 		out: ^[dynamic]byte,
 	) {
 		g := (^Game)(state)
-		editor.poll(&g.editor, &g.world, &g.scripts, connection, incoming, out, g)
+		if editor.poll(&g.editor, &g.world, &g.scripts, connection, incoming, out, g) {
+			forget_despawned(g)
+		}
 	}
 	// The engine's bindings and then the project's. A Register_Proc takes only the runtime, so each image makes its own
 	// from its hooks.

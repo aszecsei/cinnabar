@@ -61,6 +61,8 @@ Message :: union {
 	Unwatch_Entity,
 	Entity_Values,
 	Load_Scene,
+	Add_Scene,
+	Remove_Scene,
 	Apply_Operations,
 	Edit_Problems,
 	Editor_Camera,
@@ -349,7 +351,8 @@ Behaviour_Field :: struct {
 
 // Editor to game: the editor's open scene documents (see docs/editor/document-and-scenes.md#several-scenes). The game
 // replaces its world with them, and then sends an Entity_Snapshot and the Edit_Problems of the load. The editor sends
-// it when the link connects, after a soft restart, and when it opens or closes a scene. Values are tagged as the scene
+// it when the link connects, after a soft restart, and when Open Scene replaces the open scenes. A scene that opens
+// beside them, or closes, is an Add_Scene or a Remove_Scene. Values are tagged as the scene
 // file writes them, and the game converts them to its fields' kinds.
 Load_Scene :: struct {
 	scenes: []Loaded_Scene,
@@ -358,7 +361,25 @@ Load_Scene :: struct {
 	ticket: u64,
 }
 
-// One scene of a Load_Scene. Its scene IDs are its own: another scene can have the same, and a parent names an entity
+// Editor to game: a scene that the editor opened beside the open ones (see
+// docs/editor/document-and-scenes.md#several-scenes). The game adds it to its world with its number, and the other
+// scenes' entities stay as they are, with their handles. It then sends an Entity_Snapshot, and Edit_Problems that are
+// not a snapshot when the scene has problems.
+Add_Scene :: struct {
+	scene:  Loaded_Scene,
+	// The editor's number for the world with this scene, as a Load_Scene's ticket.
+	ticket: u64,
+}
+
+// Editor to game: the number of a scene that the editor closed. The game despawns that scene's entities, and what they
+// own, and the other scenes' entities stay as they are. It then sends an Entity_Snapshot.
+Remove_Scene :: struct {
+	scene:  u32,
+	// The editor's number for the world without this scene, as a Load_Scene's ticket.
+	ticket: u64,
+}
+
+// One scene of a Load_Scene or an Add_Scene. Its scene IDs are its own: another scene can have the same, and a parent names an entity
 // of the same scene. A reference names one of the same scene, or by its Scene_Value.scene one of another.
 Loaded_Scene :: struct {
 	// The editor's number for the scene, nonzero and unique among the open scenes, which its entities' Entity_Info and

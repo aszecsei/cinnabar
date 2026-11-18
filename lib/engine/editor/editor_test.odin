@@ -79,14 +79,16 @@ Tuned :: struct {
 
 @(private = "file")
 Fixture :: struct {
-	t:        ^testing.T,
-	platform: core.Platform_API,
-	frame:    virtual.Arena,
-	world:    ecs.World,
-	editor:   Editor,
-	out:      [dynamic]byte,
+	t:         ^testing.T,
+	platform:  core.Platform_API,
+	frame:     virtual.Arena,
+	world:     ecs.World,
+	editor:    Editor,
+	out:       [dynamic]byte,
 	// The renderer that the viewports' view states are made with, or nil (see with_renderer).
-	renderer: ^render.Renderer,
+	renderer:  ^render.Renderer,
+	// Whether the last poll despawned entities that the game's systems must forget.
+	despawned: bool,
 }
 
 // Each poll sees a clock one second later, so every interval has passed.
@@ -159,7 +161,7 @@ step_all :: proc(f: ^Fixture, connection: u64 = 1, incoming: ..link.Message) -> 
 		append(&encoded, core.Editor_Message{kind = header.kind, payload = buf[link.HEADER_SIZE:]})
 	}
 	clear(&f.out)
-	poll(&f.editor, &f.world, nil, connection, encoded[:], &f.out, f)
+	f.despawned = poll(&f.editor, &f.world, nil, connection, encoded[:], &f.out, f)
 	messages := make([dynamic]link.Message, context.temp_allocator)
 	for rest := f.out[:]; len(rest) > 0; {
 		header, _ := link.read_header(rest)
@@ -2606,6 +2608,153 @@ several_scenes_keep_their_own_scene_ids :: proc(t: ^testing.T) {
 		testing.expect_value(t, problems.problems[0].scene, 1)
 		testing.expect_value(t, problems.problems[0].entity, HINGE)
 	}
+}
+
+// A scene that opens beside the others joins the world, and the other scenes' entities keep their handles, their
+// selection and what the editor hides. The editor gets a delta, and no problems that would replace the others'.
+@(test)
+an_added_scene_keeps_the_other_scenes_entities :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	step(f)
+	step(
+		f,
+		1,
+		link.Load_Scene {
+			scenes = {{scene = 1, entities = {{id = DOOR, name = "North", active = true}}}},
+		},
+	)
+	north := scene.find(f.editor.scenes, &f.world, 1, DOOR)
+	testing.expect(t, north != 0)
+	step(
+		f,
+		1,
+		link.Set_Selection{entities = {u64(north)}},
+		link.Set_Hidden{entities = {u64(north)}},
+	)
+
+	messages := step(
+		f,
+		1,
+		link.Add_Scene {
+			scene = {
+				scene = 2,
+				guid = {0 = 0xcd},
+				entities = {
+					{id = DOOR, name = "South", active = true},
+					{id = HINGE, name = "Hinge", active = true},
+				},
+			},
+			ticket = 2,
+		},
+	)
+	testing.expect_value(t, scene.find(f.editor.scenes, &f.world, 1, DOOR), north)
+	testing.expect(t, ecs.is_alive(&f.world, north))
+	south := scene.find(f.editor.scenes, &f.world, 2, DOOR)
+	testing.expect(t, south != 0 && south != north)
+	testing.expect_value(t, ecs.name_of(&f.world, south), "South")
+	testing.expect_value(t, len(ecs.world_scenes(&f.world)), 1)
+	testing.expect(t, !f.despawned)
+	testing.expect_value(t, len(f.editor.session.view.selection), 1)
+	testing.expect_value(t, len(f.editor.session.view.hidden), 1)
+	delta: link.Entity_Delta
+	for m in messages {
+		#partial switch v in m {
+		case link.Entity_Delta:
+			delta = v
+		case link.Entity_Snapshot:
+			testing.fail_now(t, "an added scene sends a delta, not a snapshot")
+		case link.Edit_Problems:
+			testing.fail_now(t, "a scene without problems sends none")
+		}
+	}
+	testing.expect_value(t, len(delta.changed), 2)
+	testing.expect_value(t, len(delta.destroyed), 0)
+	for info in delta.changed {
+		testing.expect_value(t, info.scene, 2)
+	}
+}
+
+// A scene whose number is loaded already adds nothing, and is a problem of that scene, which leaves the others'.
+@(test)
+an_added_scene_with_a_loaded_number_is_a_problem :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	step(f)
+	step(f, 1, link.Load_Scene{scenes = {{scene = 1, entities = {{id = DOOR, active = true}}}}})
+	before := ecs.entity_count(&f.world)
+	messages := step(
+		f,
+		1,
+		link.Add_Scene{scene = {scene = 1, entities = {{id = HINGE, active = true}}}},
+	)
+	testing.expect_value(t, ecs.entity_count(&f.world), before)
+	problems: link.Edit_Problems
+	for m in messages {
+		if p, ok := m.(link.Edit_Problems); ok {
+			problems = p
+		}
+	}
+	testing.expect(t, !problems.snapshot)
+	testing.expect_value(t, len(problems.problems), 1)
+	if len(problems.problems) == 1 {
+		testing.expect_value(t, problems.problems[0].scene, 1)
+	}
+}
+
+// A scene that closes leaves the world with what its entities own, and only it: the other scenes' entities keep their
+// handles, and the game forgets the closed scene's entities in its selection and what it hides.
+@(test)
+a_removed_scene_takes_only_its_entities :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	step(f)
+	step(
+		f,
+		1,
+		link.Load_Scene {
+			scenes = {
+				{
+					scene = 1,
+					entities = {
+						{id = DOOR, name = "North", active = true},
+						{id = HINGE, name = "Hinge", parent = DOOR, active = true},
+					},
+				},
+				{scene = 2, entities = {{id = DOOR, name = "South", active = true}}},
+			},
+		},
+	)
+	north := scene.find(f.editor.scenes, &f.world, 1, DOOR)
+	hinge := scene.find(f.editor.scenes, &f.world, 1, HINGE)
+	south := scene.find(f.editor.scenes, &f.world, 2, DOOR)
+	testing.expect(t, north != 0 && hinge != 0 && south != 0)
+	step(
+		f,
+		1,
+		link.Set_Selection{entities = {u64(north), u64(south)}},
+		link.Set_Hidden{entities = {u64(hinge), u64(south)}},
+	)
+
+	messages := step(f, 1, link.Remove_Scene{scene = 1, ticket = 2})
+	testing.expect(t, f.despawned)
+	testing.expect(t, !ecs.is_alive(&f.world, north))
+	testing.expect(t, !ecs.is_alive(&f.world, hinge))
+	testing.expect(t, ecs.is_alive(&f.world, south))
+	testing.expect_value(t, scene.find(f.editor.scenes, &f.world, 2, DOOR), south)
+	testing.expect(t, !scene.is_loaded(f.editor.scenes, 1))
+	testing.expect_value(t, len(f.editor.session.view.selection), 1)
+	testing.expect_value(t, f.editor.session.view.selection[0], south)
+	testing.expect_value(t, len(f.editor.session.view.hidden), 1)
+	testing.expect_value(t, f.editor.session.view.hidden[0], south)
+	delta: link.Entity_Delta
+	for m in messages {
+		if d, ok := m.(link.Entity_Delta); ok {
+			delta = d
+		}
+	}
+	testing.expect_value(t, len(delta.destroyed), 2)
+	testing.expect_value(t, len(delta.changed), 0)
 }
 
 // The game keeps the Navigation Path tool's last points, at most two, and a new editor's session starts with none.
