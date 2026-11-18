@@ -46,6 +46,9 @@ SCRIPT_QUALITY_FIELDS := [Quality_Key]cstring {
 	.Mesh_Pool            = "mesh_pool",
 	.Texture_Pool         = "texture_pool",
 	.Texture_Anisotropy   = "texture_anisotropy",
+	.Residency_Budget     = "residency_budget",
+	.Residency_Idle       = "residency_idle",
+	.Texture_Mip_Bias     = "texture_mip_bias",
 	.Virtual_Shadows      = "virtual_shadows",
 	.Reflections          = "reflections",
 	.Reflections_Level    = "reflections_level",
@@ -115,6 +118,12 @@ quality_binding :: proc(L: ^luau.State) -> c.int {
 			luau.pushnumber(L, f64(q.texture_pool))
 		case .Texture_Anisotropy:
 			luau.pushnumber(L, f64(q.texture_anisotropy))
+		case .Residency_Budget:
+			luau.pushnumber(L, f64(q.residency_budget))
+		case .Residency_Idle:
+			luau.pushnumber(L, f64(q.residency_idle))
+		case .Texture_Mip_Bias:
+			luau.pushnumber(L, f64(q.texture_mip_bias))
 		case:
 			luau.pushodinstring(L, value)
 		}
