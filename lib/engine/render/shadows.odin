@@ -47,6 +47,8 @@ Shadow_Params :: struct {
 	smrt:             Smrt_Params,
 	dynamic_distance: f32,
 	refresh_slots:    int,
+	// The most pages of the virtual shadow map that streaming drops each frame (see virtual_take_drops).
+	stream_pages:     int,
 }
 
 // Smrt_Params are the virtual shadow map's soft shadows at a level, shadow map ray tracing (see
@@ -92,6 +94,7 @@ SHADOW_PARAMS := [Quality_Level]Shadow_Params {
 		soft = {search = 4, taps = 8, radius = 16},
 		dynamic_distance = 75,
 		refresh_slots = 2,
+		stream_pages = 64,
 	},
 	.High = {
 		atlas = 4096,
@@ -105,6 +108,7 @@ SHADOW_PARAMS := [Quality_Level]Shadow_Params {
 		smrt = {rays = 4, steps = 6, length = SMRT_LENGTH},
 		dynamic_distance = 100,
 		refresh_slots = 4,
+		stream_pages = 128,
 	},
 	.Ultra = {
 		atlas = 8192,
@@ -118,6 +122,7 @@ SHADOW_PARAMS := [Quality_Level]Shadow_Params {
 		smrt = {rays = 8, steps = 8, length = SMRT_LENGTH},
 		dynamic_distance = 150,
 		refresh_slots = 6,
+		stream_pages = 256,
 	},
 }
 // How far the virtual shadow map's rays reach toward the light, in meters. A caster farther than this casts a penumbra

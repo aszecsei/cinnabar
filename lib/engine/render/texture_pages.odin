@@ -175,6 +175,10 @@ Texture_Pool :: struct {
 	// Whether the GPU's table and records are of the atlases as they are now. ensure_texture_pool is its only writer with
 	// commit_stream_texture_pages and texture_pool_not_sent.
 	table_sync:     Table_Sync,
+	// The pages that came in since the last update, and those that came before it, which this frame takes (see
+	// texture_pool_refined), as the textures that they refine.
+	refining:       [dynamic]Refined_Texture,
+	refined:        [dynamic]Refined_Texture,
 }
 
 @(private)
@@ -318,6 +322,10 @@ change_texture_page :: proc(
 		end_read(pool, platform, copying.read)
 		page.state = Page_Resident{copying.slot}
 		page.used_frame = pool.frame
+		// Its mip drew from the page one coarser until now, and the root's from the texture's default.
+		tex, record := page_record(pool, entry)
+		before := .Root in record.flags ? tex.mip_count : u32(record.mip) + 1
+		append(&pool.refining, Refined_Texture{tex.guid, tex.size, before})
 	case Texture_Page_Not_Copied:
 		copying := page.state.(Page_Copying) or_return
 		give_slot(pool, entry, copying.slot)
@@ -430,6 +438,8 @@ make_texture_tables :: proc(pool: ^Texture_Pool, platform: ^core.Platform_API) {
 	pool.dirty_records = make([dynamic]u32, heap)
 	pool.free_ranges = make([dynamic][2]u32, heap)
 	pool.cooling = make([dynamic]Texture_Cooling, heap)
+	pool.refining = make([dynamic]Refined_Texture, heap)
+	pool.refined = make([dynamic]Refined_Texture, heap)
 	append(&pool.free_ranges, [2]u32{0, MAX_TEXTURE_PAGES})
 }
 
@@ -460,6 +470,8 @@ texture_pool_destroy :: proc(pool: ^Texture_Pool, platform: ^core.Platform_API) 
 	delete(pool.dirty_records)
 	delete(pool.free_ranges)
 	delete(pool.cooling)
+	delete(pool.refining)
+	delete(pool.refined)
 	pool^ = {}
 }
 
@@ -969,6 +981,9 @@ texture_pool_update :: proc(
 	assets: ^asset.Assets,
 ) {
 	pool.frame += 1
+	// What came in since the last update is this frame's to draw shadows for.
+	pool.refined, pool.refining = pool.refining, pool.refined
+	clear(&pool.refining)
 	check_texture_budget(pool, platform)
 	if pool.pages == nil {
 		return
@@ -1523,6 +1538,11 @@ stream_texture_pages :: proc(ctx: ^Pass_Context) {
 
 // commit_stream_texture_pages is what a frame that executed leaves: its pages are resident, and the GPU's table and
 // records are the CPU's for the entries and records that it copied.
+// texture_pool_refined are the pages that came in before this frame's update, as the textures that they refine.
+texture_pool_refined :: proc(pool: ^Texture_Pool) -> []Refined_Texture {
+	return pool.refined[:]
+}
+
 @(private)
 commit_stream_texture_pages :: proc(data: rawptr) {
 	sp := (^Stream_Texture_Pages)(data)

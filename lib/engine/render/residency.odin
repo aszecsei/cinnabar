@@ -149,6 +149,22 @@ Residency :: struct {
 	policy:       Residency_Policy,
 	// What is resident, and what the policy did. Only set_bytes writes stats.resident_bytes.
 	stats:        Residency_Stats,
+	// The textures whose finer mips came in this frame, which change the shadows of masked materials (see
+	// residency_refined).
+	refined:      [dynamic]Refined_Texture,
+}
+
+// Refined_Texture is a texture that drew at a finer mip from this frame on: its size at mip 0, and the mip that drew
+// before, at least where the finer one is.
+Refined_Texture :: struct {
+	guid: format.Guid,
+	size: [2]u32,
+	mip:  u32,
+}
+
+// residency_refined are the textures that drew at a finer mip from this frame on.
+residency_refined :: proc(r: ^Residency) -> []Refined_Texture {
+	return r.refined[:]
 }
 
 // Residency_Policy is when the residency lets go of what the frames do not use (see
@@ -384,6 +400,7 @@ residency_destroy :: proc(r: ^Residency) {
 	}
 	r.count = 0
 	delete(r.index)
+	delete(r.refined)
 	mesh_pool_destroy(&r.pool, r.platform)
 	texture_pool_destroy(&r.texture_pool, r.platform)
 }
@@ -453,6 +470,14 @@ residency_update :: proc(r: ^Residency) {
 	r.frame += 1
 	mesh_pool_update(&r.pool, r.platform, r.assets)
 	texture_pool_update(&r.texture_pool, r.platform, r.assets)
+	if r.refined == nil {
+		r.refined = make([dynamic]Refined_Texture, r.platform.heap_allocator)
+	}
+	clear(&r.refined)
+	// The virtual textures' pages that came in since the last update.
+	for p in texture_pool_refined(&r.texture_pool) {
+		append(&r.refined, p)
+	}
 	mip_streams := 0
 	defer residency_evict(r)
 	for &e in r.entries[:r.count] {
@@ -931,6 +956,14 @@ change :: proc(r: ^Residency, e: ^Resident_Entry, event: Resident_Event) -> (ok:
 		e.source = Released_Source{}
 	case Event_Landed:
 		s := e.stream.? or_return
+		// A texture that draws from a finer mip than it did, or at all: it drew its default before, as coarse as its last mip.
+		if e.kind == .Texture && s.pending.texture.virtual == 0 {
+			t := s.pending.texture
+			before := e.ready ? e.current.texture.top_mip : t.mip_count
+			if t.top_mip < before {
+				append(&r.refined, Refined_Texture{e.guid, t.size, before})
+			}
+		}
 		destroy_resources(r, e.kind, &e.current)
 		if e.kind == .Mesh && r.accels {
 			create_mesh_accel(r, &s.pending.mesh)

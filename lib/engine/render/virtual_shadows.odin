@@ -7,6 +7,7 @@ import "core:slice"
 
 import "cinnabar:core"
 import "cinnabar:core/gpu"
+import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/ecs"
 
 // The virtual shadow map (see docs/rendering/lighting-and-shadows.md#virtual-shadow-maps): a directional light's stack of
@@ -77,6 +78,9 @@ VIRTUAL_MARK_GROUP_SIZE :: 8
 VIRTUAL_CULL_PAGES :: 8
 // Matches numthreads in virtual_shadow_allocate.hlsl.
 VIRTUAL_ALLOCATE_GROUP_SIZE :: 64
+// A level's cut of a mesh's meshlets is the coarsest whose error is at most this many of its texels, and streaming drops a
+// level's pages under a group only when the group's error is more (see virtual_error_levels).
+VIRTUAL_LOD_TEXELS :: 1
 
 VIRTUAL_MARK_SHADER :: #load("../content/shaders/virtual_shadow_mark.hlsl.meta", string)
 VIRTUAL_ALLOCATE_SHADER :: #load("../content/shaders/virtual_shadow_allocate.hlsl.meta", string)
@@ -94,6 +98,29 @@ Virtual_Shadow_Stats :: struct {
 	drawn:     u32,
 	evicted:   u32,
 	resident:  u32,
+}
+
+// Virtual_Stream_Stats are the pages that the last frame that executed dropped for streaming, and those that the drops
+// that wait for their turn cover, which the editor shows (see docs/rendering/lighting-and-shadows.md#streaming).
+Virtual_Stream_Stats :: struct {
+	dropped: u32,
+	waiting: u32,
+}
+
+// Virtual_Waiting is the pages that streaming dropped and that a frame's budget left for later, a bit each, at their
+// entries of the toroidal table (see virtual_table_slot), so a page keeps its bit as its level's origin moves. It is on
+// the heap, from the first frame that leaves one.
+Virtual_Waiting :: struct {
+	bits: [VIRTUAL_MAX_LEVELS * VIRTUAL_LEVEL_WORDS]u32,
+}
+
+// Stream_Drop is a change that streaming made to what a caster draws: a group of a mesh's page that came into the pool
+// or left it, or a masked material's texture that came in at a finer mip, over a sphere in the world. It drops the pages
+// under the sphere of the levels before levels, whose texels show the change (see virtual_error_levels).
+Stream_Drop :: struct {
+	center: ecs.World_Position,
+	radius: f32,
+	levels: int,
 }
 
 // Virtual_Shadows is the virtual shadow map's pipelines and the buffers that a view's passes fill and use within its
@@ -149,6 +176,10 @@ Virtual_State :: struct {
 	table:      gpu.Buffer,
 	pages:      gpu.Buffer,
 	cache:      Maybe(Virtual_Cache),
+	// The pages that streaming dropped and that wait for their turn, nil for none, and what the last frame dropped for
+	// streaming. Only a frame's commit changes them, with the cache.
+	waiting:    ^Virtual_Waiting,
+	stream:     Virtual_Stream_Stats,
 }
 
 // Virtual_Frame is one frame's virtual shadow map, in Shadow_Frame. count is its levels, 0 without it, which are the
@@ -164,6 +195,10 @@ Virtual_Frame :: struct {
 	// The pages that the frame drops under the casters that changed and the live ones, in the upload ring, if any.
 	dropped:    gpu.Upload,
 	drops:      bool,
+	// The pages that streaming dropped that wait after this frame, at their entries of the toroidal table, in frame
+	// memory, nil for none, and what it dropped for streaming, which its commit keeps.
+	waiting:    []u32,
+	stream:     Virtual_Stream_Stats,
 	pool:       Texture,
 	requests:   Buffer,
 	table:      Buffer,
@@ -252,6 +287,32 @@ Allocate_Phase :: enum u32 {
 	Collect,
 	Assign,
 	Clear_Pool,
+}
+
+// virtual_lod_scale is a level's level of detail for the mesh shader path, as lod_scale gives a view's: an error's texels
+// of the level over VIRTUAL_LOD_TEXELS, at every distance, as an orthographic view's. A level's cut so does not change as
+// the camera moves, and only streaming changes it (see stream_drops).
+virtual_lod_scale :: proc(level: int) -> (scale, near: f32) {
+	return f32(LOD_FLAT_NEAR / (virtual_level_texel(level) * VIRTUAL_LOD_TEXELS)), LOD_FLAT_NEAR
+}
+
+// virtual_node_texel is the texel by which the virtual shadow map's walk takes a node's error: the finest level's whose
+// drawn pages its sphere, relative to the camera, reaches, from each level's culling planes and page fields, or 0 when it
+// reaches none. A coarser level's cut is coarser, so the finest's holds every level's. Matches node_texel in
+// select_meshlets.hlsl.
+virtual_node_texel :: proc(
+	table: []u32,
+	planes: [][6][4]f32,
+	fields: []u32,
+	center: [3]f32,
+	radius: f32,
+) -> f32 {
+	for level in 0 ..< len(planes) {
+		if virtual_reaches_draws(table, planes[level], fields[level], center, radius) {
+			return f32(virtual_level_texel(level))
+		}
+	}
+	return 0
 }
 
 // virtual_level_extent is a level's extent in meters, and virtual_level_texel a texel's.
@@ -873,38 +934,135 @@ virtual_allocate :: proc(
 // holds VIRTUAL_MAX_LEVELS * VIRTUAL_LEVEL_WORDS words.
 virtual_drop_pages :: proc(views: []Shadow_View, spheres: [][4]f32, dropped: []u32) {
 	for view, level in views {
-		texel_size := f32(virtual_level_texel(level))
 		for s in spheres {
-			texel, _ := virtual_project(view, s.xyz)
-			reach := s.w / texel_size + 1
-			low := [2]i32 {
-				i32(math.floor((texel.x - reach) / VIRTUAL_PAGE_TEXELS)),
-				i32(math.floor((texel.y - reach) / VIRTUAL_PAGE_TEXELS)),
+			virtual_drop_sphere(view, level, s, dropped)
+		}
+	}
+}
+
+// virtual_drop_sphere sets the bits of one level's pages that a sphere relative to the camera covers, with a texel's
+// margin, or with write false only counts them, and gives how many of them were not set.
+virtual_drop_sphere :: proc(
+	view: Shadow_View,
+	level: int,
+	s: [4]f32,
+	dropped: []u32,
+	write := true,
+) -> (
+	fresh: int,
+) {
+	texel_size := f32(virtual_level_texel(level))
+	texel, _ := virtual_project(view, s.xyz)
+	reach := s.w / texel_size + 1
+	low := [2]i32 {
+		i32(math.floor((texel.x - reach) / VIRTUAL_PAGE_TEXELS)),
+		i32(math.floor((texel.y - reach) / VIRTUAL_PAGE_TEXELS)),
+	}
+	high := [2]i32 {
+		i32(math.floor((texel.x + reach) / VIRTUAL_PAGE_TEXELS)),
+		i32(math.floor((texel.y + reach) / VIRTUAL_PAGE_TEXELS)),
+	}
+	if high.x < 0 || high.y < 0 || low.x >= VIRTUAL_PAGES || low.y >= VIRTUAL_PAGES {
+		return 0
+	}
+	low, high = linalg.max(low, 0), linalg.min(high, VIRTUAL_PAGES - 1)
+	for y in low.y ..= high.y {
+		first := page_index(level, {low.x, y})
+		last := page_index(level, {high.x, y})
+		// A word at a time: the run's bits in it.
+		for at := first; at <= last; {
+			bit := at & 31
+			n := min(32 - bit, last - at + 1)
+			mask := n == 32 ? max(u32) : ((u32(1) << uint(n)) - 1) << uint(bit)
+			fresh += int(bits.count_ones(mask & ~dropped[at >> 5]))
+			if write {
+				dropped[at >> 5] |= mask
 			}
-			high := [2]i32 {
-				i32(math.floor((texel.x + reach) / VIRTUAL_PAGE_TEXELS)),
-				i32(math.floor((texel.y + reach) / VIRTUAL_PAGE_TEXELS)),
-			}
-			if high.x < 0 || high.y < 0 || low.x >= VIRTUAL_PAGES || low.y >= VIRTUAL_PAGES {
-				continue
-			}
-			low, high = linalg.max(low, 0), linalg.min(high, VIRTUAL_PAGES - 1)
-			for y in low.y ..= high.y {
-				first := page_index(level, {low.x, y})
-				last := page_index(level, {high.x, y})
-				for at := first; at <= last; {
-					// A word at a time where the run covers it.
-					if at & 31 == 0 && last - at >= 31 {
-						dropped[at >> 5] = max(u32)
-						at += 32
-						continue
-					}
-					dropped[at >> 5] |= u32(1) << uint(at & 31)
-					at += 1
+			at += n
+		}
+	}
+	return
+}
+
+// virtual_error_levels is how many levels from the first show an error in the world, at least as large as
+// VIRTUAL_LOD_TEXELS of their texels, of a stack of levels: the levels whose cut a group of that error is in, or whose
+// texels a texture's texel of that size shows in. The texels double from level to level, so they are the first ones.
+virtual_error_levels :: proc(error: f32, levels: int) -> int {
+	n := 0
+	for n < levels && f64(error) > virtual_level_texel(n) * VIRTUAL_LOD_TEXELS {
+		n += 1
+	}
+	return n
+}
+
+// virtual_add_drops sets in wanted the pages that each drop from streaming covers, in the levels whose cut it changes.
+virtual_add_drops :: proc(
+	views: []Shadow_View,
+	drops: []Stream_Drop,
+	camera: ecs.World_Position,
+	wanted: []u32,
+) {
+	for drop in drops {
+		s := drop_sphere(drop, camera)
+		for level in 0 ..< min(drop.levels, len(views)) {
+			virtual_drop_sphere(views[level], level, s, wanted)
+		}
+	}
+}
+
+// virtual_take_pages moves the pages of wanted into dropped, finest level first, at most budget of them that dropped
+// does not have already. A page that dropped has is no longer wanted. Both are laid out as the requests. It gives how
+// many it moved; what is left in wanted waits.
+virtual_take_pages :: proc(wanted, dropped: []u32, budget: int) -> (taken: int) {
+	for &word, i in wanted {
+		word &~= dropped[i]
+		for word != 0 && taken < budget {
+			bit := word & (~word + 1)
+			dropped[i] |= bit
+			word &~= bit
+			taken += 1
+		}
+	}
+	return
+}
+
+// virtual_waiting_requests and virtual_waiting_table move pages that wait between the requests' layout, of the levels'
+// pages where they are now, and the toroidal table's (see Virtual_Waiting). A bit of a level past views is dropped.
+virtual_waiting_requests :: proc(views: []Shadow_View, table, requests: []u32) {
+	waiting_move(views, table, requests, true)
+}
+
+virtual_waiting_table :: proc(views: []Shadow_View, requests, table: []u32) {
+	waiting_move(views, requests, table, false)
+}
+
+@(private = "file")
+waiting_move :: proc(views: []Shadow_View, from, to: []u32, to_requests: bool) {
+	for view, level in views {
+		words := from[level * VIRTUAL_LEVEL_WORDS:][:VIRTUAL_LEVEL_WORDS]
+		for word, w in words {
+			left := word
+			for left != 0 {
+				at := w * 32 + int(bits.count_trailing_zeros(left))
+				left &= left - 1
+				page := [2]i32{i32(at % VIRTUAL_PAGES), i32(at / VIRTUAL_PAGES)}
+				// A request's page is its level's origin and more; a table's entry is its absolute page, wrapped.
+				moved: int
+				if to_requests {
+					moved = page_index(level, (page - view.page_origin) & (VIRTUAL_PAGES - 1))
+				} else {
+					moved = virtual_table_slot(level, view.page_origin + page)
 				}
+				to[moved >> 5] |= u32(1) << uint(moved & 31)
 			}
 		}
 	}
+}
+
+@(private = "file")
+drop_sphere :: proc(drop: Stream_Drop, camera: ecs.World_Position) -> [4]f32 {
+	c := ecs.position_sub(drop.center, camera)
+	return {c.x, c.y, c.z, drop.radius}
 }
 
 // virtual_drop_spheres are the spheres, relative to the camera, whose pages a view's virtual shadow map drops: both
@@ -968,6 +1126,12 @@ virtual_shadow_stats :: proc(r: ^Renderer) -> Virtual_Shadow_Stats {
 	return stats_state(r).virtual_shadows.last_stats
 }
 
+// virtual_stream_stats is what the frame's own view's virtual shadow map dropped for streaming in its last frame that
+// executed, and what waits.
+virtual_stream_stats :: proc(r: ^Renderer) -> Virtual_Stream_Stats {
+	return stats_state(r).virtual_shadows.stream
+}
+
 @(private)
 virtual_shadows_init :: proc(v: ^Virtual_Shadows) {
 	v.mark_pipeline = shader_pipeline(VIRTUAL_MARK_SHADER)
@@ -992,6 +1156,7 @@ virtual_state_destroy :: proc(v: ^Virtual_State, platform: ^core.Platform_API) {
 	platform.gpu_destroy_texture(v.pool)
 	platform.gpu_destroy_buffer(v.table)
 	platform.gpu_destroy_buffer(v.pages)
+	free(v.waiting, platform.heap_allocator)
 	v^ = {}
 }
 
@@ -1221,7 +1386,8 @@ add_virtual_levels :: proc(f: ^Frame, sf: ^Shadow_Frame, direction: [3]f32) {
 		append(&sf.eyes, [4]f32{direction.x, direction.y, direction.z, 0})
 		append(&sf.viewports, l.scissor)
 	}
-	// The pages under the casters that changed since the cache drew, and under the live ones, draw again.
+	// The pages under the casters that changed since the cache drew, and under the live ones, draw again. A frame that
+	// starts again draws every page, so nothing waits after it.
 	if vf.reset || !tracked {
 		return
 	}
@@ -1240,16 +1406,44 @@ add_virtual_levels :: proc(f: ^Frame, sf: ^Shadow_Frame, direction: [3]f32) {
 		f.view.position,
 		platform.frame_allocator,
 	)
-	if len(spheres) == 0 {
+	waiting := f.state.virtual_shadows.waiting
+	if len(spheres) == 0 && len(scene.stream_drops) == 0 && waiting == nil {
 		return
 	}
-	dropped := make([]u32, VIRTUAL_MAX_LEVELS * VIRTUAL_LEVEL_WORDS, platform.frame_allocator)
-	virtual_drop_pages(sf.views[len(sf.views) - c.selection.levels:], spheres, dropped)
+	views := sf.views[len(sf.views) - c.selection.levels:]
+	words := VIRTUAL_MAX_LEVELS * VIRTUAL_LEVEL_WORDS
+	dropped := make([]u32, words, platform.frame_allocator)
+	virtual_drop_pages(views, spheres, dropped)
+	// The pages that streaming drops: those that waited and the frame's, but none of a level that drops every page.
+	wanted := make([]u32, words, platform.frame_allocator)
+	if waiting != nil {
+		virtual_waiting_requests(views, waiting.bits[:], wanted)
+	}
+	virtual_add_drops(views, scene.stream_drops, f.view.position, wanted)
+	for level in 0 ..< c.selection.levels {
+		if vf.invalidate & (1 << uint(level)) != 0 {
+			slice.zero(wanted[level * VIRTUAL_LEVEL_WORDS:][:VIRTUAL_LEVEL_WORDS])
+		}
+	}
+	taken := virtual_take_pages(wanted, dropped, sf.params.stream_pages)
+	left := 0
+	for word in wanted {
+		left += int(bits.count_ones(word))
+	}
+	vf.stream = {u32(taken), u32(left)}
+	if left > 0 {
+		vf.waiting = make([]u32, words, platform.frame_allocator)
+		virtual_waiting_table(views, wanted, vf.waiting)
+	}
+	if len(spheres) == 0 && taken == 0 {
+		return
+	}
 	ok: bool
 	vf.dropped, ok = upload_bytes(platform, slice.to_bytes(dropped))
 	if !ok {
 		// Without the drops, nothing that the cache holds is known to be right.
 		vf.reset = true
+		vf.waiting, vf.stream = nil, {}
 		return
 	}
 	vf.drops = true
@@ -1367,6 +1561,9 @@ add_virtual_shadow_passes :: proc(f: ^Frame) {
 	read(g, p, vf.table)
 	write(g, p, vf.pool)
 	declare_scene_draws(f, p)
+	if sf := f.scene_frame; sf != nil && sf.meshlet_select.shadow_selected != 0 {
+		read(g, p, sf.meshlet_select.shadow_selected)
+	}
 
 	// The stats' copy, for read_virtual_stats to take once it is back.
 	add_readback_copy(
@@ -1385,7 +1582,18 @@ add_virtual_shadow_passes :: proc(f: ^Frame) {
 @(private = "file")
 commit_virtual_cache :: proc(data: rawptr) {
 	f := (^Frame)(data)
-	f.state.virtual_shadows.cache = f.shadows.virtual.cache
+	v := &f.state.virtual_shadows
+	v.cache = f.shadows.virtual.cache
+	v.stream = f.shadows.virtual.stream
+	if waiting := f.shadows.virtual.waiting; waiting != nil {
+		if v.waiting == nil {
+			v.waiting = new(Virtual_Waiting, f.renderer.platform.heap_allocator)
+		}
+		copy(v.waiting.bits[:], waiting)
+	} else if v.waiting != nil {
+		free(v.waiting, f.renderer.platform.heap_allocator)
+		v.waiting = nil
+	}
 }
 
 // forget_virtual_cache drops the cache of a view whose frame executed without the virtual shadow map: what moved in the
@@ -1396,7 +1604,10 @@ forget_virtual_cache :: proc(f: ^Frame) {
 		return
 	}
 	on_executed(f.graph, proc(data: rawptr) {
-			(^Frame)(data).state.virtual_shadows.cache = nil
+			v := &(^Frame)(data).state.virtual_shadows
+			v.cache, v.stream = nil, {}
+			free(v.waiting, (^Frame)(data).renderer.platform.heap_allocator)
+			v.waiting = nil
 		}, f)
 }
 
@@ -1411,6 +1622,7 @@ add_virtual_culling :: proc(f: ^Frame) {
 	}
 	g := f.graph
 	table := f.shadows.virtual.table
+	add_shadow_meshlet_select_pass(f, table)
 	add_virtual_instance_passes(f, table)
 	p := add_compute_pass(g, "cull virtual shadow draws", proc(ctx: ^Pass_Context) {
 			f := (^Frame)(ctx.data)
@@ -1437,6 +1649,9 @@ add_virtual_culling :: proc(f: ^Frame) {
 	}
 	if sf.meshlet_select.selections != 0 {
 		read(g, p, sf.meshlet_select.selections)
+	}
+	if sf.meshlet_select.shadow_selections != 0 {
+		read(g, p, sf.meshlet_select.shadow_selections)
 	}
 	write(g, p, sf.arguments)
 	write(g, p, sf.mesh_arguments)
@@ -1606,4 +1821,149 @@ draw_virtual_shadow_maps :: proc(ctx: ^Pass_Context) {
 	gpu.cmd_set_viewport(ctx.cb, {0, 0}, {VIRTUAL_SIZE, VIRTUAL_SIZE})
 	gpu.cmd_set_scissor(ctx.cb, {i32(scissor.x), i32(scissor.y)}, {i32(scissor.z), i32(scissor.w)})
 	draw_scene_view(f, ctx.cb, FIRST_SHADOW_VIEW + ctx.piece, .Virtual_Depth)
+}
+
+// stream_drops are the drops of the virtual shadow map's cache that streaming made since the frame before (see
+// docs/rendering/lighting-and-shadows.md#streaming), from the frame's items that cast shadows, before they are sorted
+// into bins: each group of a page that came into the mesh pool or left it, under each slot whose items draw the page's
+// mesh's meshlets, with its error at the slot's scale; and each slot of a masked material whose texture came in at a
+// finer mip, over its caster's sphere, with the texel of the mip that drew before. An instance set's slot takes its
+// set's sphere, at the instances' largest scale.
+@(private)
+stream_drops :: proc(
+	r: ^Renderer,
+	items: []Cull_Item,
+	meshes: []Mesh_Record,
+	sets: []Set_Bounds,
+	masked: map[u32][]format.Material_Texture,
+	levels: int,
+	allocator := context.allocator,
+) -> []Stream_Drop {
+	s := &r.scene
+	pool := &r.residency.pool
+	changes := mesh_pool_changes(pool)
+	refined := residency_refined(&r.residency)
+	if levels == 0 || (len(changes) == 0 && len(refined) == 0) {
+		return nil
+	}
+	drops := make([dynamic]Stream_Drop, allocator)
+	// Each paged mesh's casters, by its first entry of the page table, a slot once each.
+	Paged_Caster :: struct {
+		slot: u32,
+		item: int,
+	}
+	casters := make(map[u32][dynamic]Paged_Caster, context.temp_allocator)
+	if len(changes) > 0 {
+		for item, i in items {
+			if item.flags & ITEM_CASTS_SHADOWS == 0 ||
+			   item.flags & ITEM_VIEW_MODEL != 0 ||
+			   item.flags & ITEM_MESH_PATH == 0 ||
+			   item.instance >= s.high ||
+			   int(item.mesh) >= len(meshes) ||
+			   meshes[item.mesh].flags & MESH_RECORD_PAGED == 0 {
+				continue
+			}
+			first := meshes[item.mesh].pages
+			list := casters[first] or_else make([dynamic]Paged_Caster, context.temp_allocator)
+			if len(list) > 0 && list[len(list) - 1].slot == item.instance {
+				continue
+			}
+			append(&list, Paged_Caster{item.instance, i})
+			casters[first] = list
+		}
+	}
+	for change in changes {
+		first, _ := mesh_pool_range(pool, change.mesh)
+		list := casters[first] or_continue
+		groups := mesh_pool_groups(pool, change)
+		for c in list {
+			item := items[c.item]
+			rows := s.records[c.slot].rows
+			scale := rows_max_scale(rows)
+			if item.flags & ITEM_INSTANCED != 0 && int(item.entry) < len(sets) {
+				// The set's instances, each with the page's groups somewhere among its own: the set's sphere, which holds them.
+				set := sets[item.entry]
+				error: f32
+				for g in groups {
+					error = max(error, g.error)
+				}
+				radius :=
+					set.radius + (linalg.length(item.sphere.xyz) + item.sphere.w) * set.max_scale
+				append(
+					&drops,
+					Stream_Drop {
+						center = ecs.position_offset(s.origin, rows_point(rows, set.center)),
+						radius = radius * scale + item.bound,
+						levels = virtual_error_levels(error * set.max_scale * scale, levels),
+					},
+				)
+				continue
+			}
+			for g in groups {
+				n := virtual_error_levels(g.error * scale, levels)
+				if n == 0 {
+					continue
+				}
+				append(
+					&drops,
+					Stream_Drop {
+						center = ecs.position_offset(s.origin, rows_point(rows, g.center)),
+						radius = g.radius * scale + item.bound,
+						levels = n,
+					},
+				)
+			}
+		}
+	}
+	if len(refined) > 0 && len(masked) > 0 {
+		last := u32(max(u32))
+		for item in items {
+			if item.flags & ITEM_CASTS_SHADOWS == 0 ||
+			   item.flags & ITEM_VIEW_MODEL != 0 ||
+			   item.instance >= s.high ||
+			   item.instance == last {
+				continue
+			}
+			textures := masked[item.material] or_continue
+			caster := s.casters.slots[item.instance]
+			if !caster.casts {
+				continue
+			}
+			for t in refined {
+				uses := false
+				for m in textures {
+					uses ||= m.guid == t.guid
+				}
+				if !uses {
+					continue
+				}
+				// The texel that drew before, as the texture covers the caster once.
+				side := max(max(t.size.x, t.size.y) >> min(t.mip, 31), 1)
+				texel := 2 * caster.sphere.radius / f32(side)
+				if n := virtual_error_levels(texel, levels); n > 0 {
+					append(&drops, Stream_Drop{caster.sphere.center, caster.sphere.radius, n})
+					last = item.instance
+					break
+				}
+			}
+		}
+	}
+	return drops[:]
+}
+
+@(private = "file")
+rows_max_scale :: proc(rows: [3][4]f32) -> f32 {
+	return max(
+		linalg.length([3]f32{rows[0].x, rows[1].x, rows[2].x}),
+		linalg.length([3]f32{rows[0].y, rows[1].y, rows[2].y}),
+		linalg.length([3]f32{rows[0].z, rows[1].z, rows[2].z}),
+	)
+}
+
+@(private = "file")
+rows_point :: proc(rows: [3][4]f32, p: [3]f32) -> (out: [3]f32) {
+	for row, k in rows {
+		out[k] = row.x * p.x + row.y * p.y + row.z * p.z + row.w
+	}
+	return
 }

@@ -191,7 +191,12 @@ Test_Page :: struct {
 // paged_mesh_bytes is a paged mesh blob of one submesh with these pages, the last of which is the root. A page depends
 // on the pages that hold meshlets simplified from it.
 @(private)
-paged_mesh_bytes :: proc(guid: format.Guid, pages: []Test_Page, key: u64 = 0) -> []byte {
+paged_mesh_bytes :: proc(
+	guid: format.Guid,
+	pages: []Test_Page,
+	key: u64 = 0,
+	nodes: []format.Meshlet_Node = nil,
+) -> []byte {
 	stride := int(format.mesh_attribute_stride({}))
 	entries := make([]format.Page_Entry, len(pages), context.temp_allocator)
 	dependencies := make([][dynamic]u32, len(pages), context.temp_allocator)
@@ -278,6 +283,7 @@ paged_mesh_bytes :: proc(guid: format.Guid, pages: []Test_Page, key: u64 = 0) ->
 			meshlet_count = meshlets,
 			submeshes = {{index_count = indices, meshlet_count = meshlets}},
 			pages = entries,
+			meshlet_nodes = nodes,
 		},
 		context.temp_allocator,
 	)
@@ -372,10 +378,11 @@ write_paged :: proc(
 	pages: []Test_Page,
 	modified: time.Time,
 	key: u64 = 0,
+	nodes: []format.Meshlet_Node = nil,
 ) {
 	buffer: [32]u8
 	path := fmt.tprintf("%s/%s.blob", f.dir, format.guid_format(guid, &buffer))
-	blob := paged_mesh_bytes(guid, pages, key)
+	blob := paged_mesh_bytes(guid, pages, key, nodes)
 	_, valid := format.mesh_view(blob)
 	testing.expect(t, valid, "the test's blob is a paged mesh")
 	testing.expect(t, os.write_entire_file(path, blob) == nil)
@@ -709,9 +716,17 @@ the_least_recently_used_pages_leave_a_full_pool :: proc(t: ^testing.T) {
 	for page in 16 ..< u32(19) {
 		append(&last, Want{first + page, 2})
 	}
+	left: [6]int
 	for _ in 0 ..< 6 * MESH_PAGE_KEEP_FRAMES {
 		step(t, f, last[:])
+		for change in mesh_pool_changes(&f.r.pool) {
+			if change.mesh == chain_id {
+				left[change.page] += 1
+			}
+		}
 	}
+	// Each page of the chain that left is a change once, for the frame after it left.
+	testing.expect_value(t, left, [6]int{1, 0, 1, 0, 1, 0})
 	chain_set, chain_total := residents(f, chain_id, 6)
 	testing.expect(t, chain_total == 1 && chain_set[5], "the chain keeps its root alone")
 	set, _ = residents(f, id, COUNT + 1)
@@ -1000,4 +1015,77 @@ a_pinned_mesh_keeps_every_page :: proc(t: ^testing.T) {
 		mesh_pool_ready(&f.r.pool, mesh.pool_mesh) &&
 		mesh_pool_ready(&f.r.pool, star_mesh.pool_mesh),
 	)
+}
+
+// A page that comes into the pool is a change of the frame after, once, with its groups; a frame that does not execute
+// changes nothing, and a mesh that goes takes its changes with it (see docs/rendering/lighting-and-shadows.md#streaming).
+@(test)
+the_pages_that_come_into_the_pool_are_the_next_frames_changes :: proc(t: ^testing.T) {
+	f := page_fixture(t)
+	context.user_ptr = &f.fake
+	defer page_fixture_destroy(t, f)
+	guid := format.guid_parse("00000000000000000000000000000252") or_else {}
+	// A leaf for each page, whose error says which page it is.
+	nodes := make([]format.Meshlet_Node, 6, context.temp_allocator)
+	for &n, p in nodes {
+		n = {
+			center = {f32(p), 0, 0},
+			radius = 0.5,
+			error  = f32(p + 1),
+			count  = 1 | format.MESHLET_NODE_LEAF,
+			page   = u32(p),
+		}
+	}
+	write_paged(t, f, guid, chain_pages(), time.now(), nodes = nodes)
+	// The nodes' buffer streams as a mesh's buffers do, and is in at once.
+	f.fake.done_through = max(u64)
+	resident_mesh(f.r, guid)
+	step(t, f)
+	step(t, f)
+	// The root came in, which its mesh's readiness says to its casters.
+	testing.expect_value(t, len(mesh_pool_changes(&f.r.pool)), 1)
+	step(t, f)
+	mesh, ready := resident_mesh(f.r, guid)
+	id := mesh.pool_mesh
+	testing.expect(t, ready && id != 0)
+	testing.expect_value(t, len(mesh_pool_changes(&f.r.pool)), 0)
+
+	// Pages 4 and 2 come in with page 0; the frame after has them, and the one after that none.
+	step(t, f, {{0, 4}})
+	changes := mesh_pool_changes(&f.r.pool)
+	testing.expect_value(t, len(changes), 0)
+	step(t, f)
+	changes = mesh_pool_changes(&f.r.pool)
+	testing.expect_value(t, len(changes), 3)
+	pages: [6]int
+	for change in changes {
+		testing.expect_value(t, change.mesh, id)
+		pages[change.page] += 1
+		groups := mesh_pool_groups(&f.r.pool, change)
+		if testing.expect_value(t, len(groups), 1) {
+			testing.expect_value(t, groups[0].error, f32(change.page + 1))
+			testing.expect_value(t, groups[0].center, [3]f32{f32(change.page), 0, 0})
+		}
+	}
+	testing.expect_value(t, pages, [6]int{1, 0, 1, 0, 1, 0})
+	step(t, f)
+	testing.expect_value(t, len(mesh_pool_changes(&f.r.pool)), 0)
+
+	// Page 3 does not come in, as its frame does not execute.
+	step(t, f, {{1, 4}}, executes = false)
+	step(t, f)
+	for change in mesh_pool_changes(&f.r.pool) {
+		testing.expectf(
+			t,
+			change.page != 1 && change.page != 3,
+			"page %d did not come in",
+			change.page,
+		)
+	}
+
+	// A mesh that goes stops casting by its casters' changes, and its pages are no changes of their own.
+	step(t, f, {{1, 4}})
+	mesh_pool_remove(&f.r.pool, &f.platform, id)
+	step(t, f)
+	testing.expect_value(t, len(mesh_pool_changes(&f.r.pool)), 0)
 }

@@ -157,6 +157,9 @@ Material_Table :: struct {
 	// Where the frame's view is, which sizes what a material draws on the screen (see item_pixels). Without it, every
 	// material draws at full size.
 	look:    Material_Look,
+	// The textures of each masked block, by its offset, whose finer mips change the shadows of what it draws (see
+	// stream_drops). Only a table that has the map lists them.
+	masked:  map[u32][]format.Material_Texture,
 }
 
 // Material_Look is a view, as what a material draws is sized on its screen.
@@ -271,6 +274,9 @@ make_use :: proc(
 	// The textures want their mips before the block asks for them, so they stream in at the mip that they want.
 	want_textures(r, b.textures, pixels)
 	use.block = add_block(r, table, b)
+	if table.masked != nil && r.materials.pipelines[use.pipeline].blend == .Masked {
+		table.masked[use.block] = b.textures
+	}
 	return use, true
 }
 
