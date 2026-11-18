@@ -192,11 +192,7 @@ tiles_past_an_edge_take_the_wrap_mode :: proc(t: ^testing.T) {
 
 // mip_bytes is the blocks of a mip of a non-virtual blob, in rows of blocks.
 @(private = "file")
-mip_bytes :: proc(
-	data: []byte,
-	blob: ^format.Texture_Blob,
-	mip: u32,
-) -> []byte {
+mip_bytes :: proc(data: []byte, blob: ^format.Texture_Blob, mip: u32) -> []byte {
 	offset: int
 	for m in 0 ..< mip {
 		offset += format.texture_mip_size(

@@ -158,7 +158,10 @@ virtual_texture_views_refuse_inconsistent_tables :: proc(t: ^testing.T) {
 			"first page",
 			proc(data: []byte, blob: ^Texture_Blob) {texture_levels(data, blob)[2].first_page = 15},
 		},
-		{"page mip", proc(data: []byte, blob: ^Texture_Blob) {texture_pages(data, blob)[4].mip = 1}},
+		{
+			"page mip",
+			proc(data: []byte, blob: ^Texture_Blob) {texture_pages(data, blob)[4].mip = 1},
+		},
 		{"page x", proc(data: []byte, blob: ^Texture_Blob) {texture_pages(data, blob)[1].x = 2}},
 		{"page y", proc(data: []byte, blob: ^Texture_Blob) {texture_pages(data, blob)[1].y = 1}},
 		{
@@ -173,30 +176,18 @@ virtual_texture_views_refuse_inconsistent_tables :: proc(t: ^testing.T) {
 			"root flag",
 			proc(data: []byte, blob: ^Texture_Blob) {texture_pages(data, blob)[16].flags = {}},
 		},
-		{
-			"root past the head",
-			proc(data: []byte, blob: ^Texture_Blob) {
+		{"root past the head", proc(data: []byte, blob: ^Texture_Blob) {
 				texture_pages(data, blob)[16].compressed_size += 64
-			},
-		},
-		{
-			"page in the head",
-			proc(data: []byte, blob: ^Texture_Blob) {
+			}},
+		{"page in the head", proc(data: []byte, blob: ^Texture_Blob) {
 				texture_pages(data, blob)[0].offset = blob.head_size - 16
-			},
-		},
-		{
-			"page past the file",
-			proc(data: []byte, blob: ^Texture_Blob) {
+			}},
+		{"page past the file", proc(data: []byte, blob: ^Texture_Blob) {
 				texture_pages(data, blob)[2].offset = blob.file_size
-			},
-		},
-		{
-			"empty page",
-			proc(data: []byte, blob: ^Texture_Blob) {
+			}},
+		{"empty page", proc(data: []byte, blob: ^Texture_Blob) {
 				texture_pages(data, blob)[2].compressed_size = 0
-			},
-		},
+			}},
 		{
 			"page count",
 			proc(data: []byte, blob: ^Texture_Blob) {blob.pages.size -= size_of(Texture_Page)},

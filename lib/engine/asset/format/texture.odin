@@ -385,7 +385,8 @@ texture_page_payload_size :: proc "contextless" (format: Texture_Format) -> int 
 // virtual texture's tail starts. It is mip_count if no mip of the chain is.
 texture_tail_mip :: proc "contextless" (size: [2]u32, mip_count: u32) -> u32 {
 	for mip in 0 ..< mip_count {
-		if max(size.x >> mip, 1) <= TEXTURE_TAIL_SIZE && max(size.y >> mip, 1) <= TEXTURE_TAIL_SIZE {
+		if max(size.x >> mip, 1) <= TEXTURE_TAIL_SIZE &&
+		   max(size.y >> mip, 1) <= TEXTURE_TAIL_SIZE {
 			return mip
 		}
 	}
@@ -607,16 +608,25 @@ texture_view_virtual :: proc(data: []byte, blob: ^Texture_Blob) -> bool {
 		root := i == len(pages) - 1
 		end := p.offset + u64(p.compressed_size)
 		switch {
-		case p.flags - {.Root} != {},
-		     (.Root in p.flags) != root,
-		     u32(p.mip) != mip,
-		     u32(p.x) != in_level % l.grid.x,
-		     u32(p.y) != in_level / l.grid.x,
-		     p.compressed_size == 0,
-		     end > blob.file_size,
+		case p.flags - {.Root} !=
+		     {},
+		     (.Root in p.flags) !=
+		     root,
+		     u32(p.mip) !=
+		     mip,
+		     u32(p.x) !=
+		     in_level % l.grid.x,
+		     u32(p.y) !=
+		     in_level / l.grid.x,
+		     p.compressed_size ==
+		     0,
+		     end >
+		     blob.file_size,
 		     root ? end > blob.head_size : p.offset < blob.head_size,
-		     p.offset % BLOB_ALIGN != 0,
-		     int(p.size) != payload:
+		     p.offset % BLOB_ALIGN !=
+		     0,
+		     int(p.size) !=
+		     payload:
 			return false
 		}
 	}
@@ -695,11 +705,7 @@ texture_write :: proc(contents: Texture_Contents, allocator := context.allocator
 				(level.size.x + TEXTURE_PAGE_SIZE - 1) / TEXTURE_PAGE_SIZE,
 				(level.size.y + TEXTURE_PAGE_SIZE - 1) / TEXTURE_PAGE_SIZE,
 			}
-			mem.copy(
-				&buffer[levels.offset + mip * size_of(Texture_Level)],
-				&level,
-				size_of(level),
-			)
+			mem.copy(&buffer[levels.offset + mip * size_of(Texture_Level)], &level, size_of(level))
 			for i in 0 ..< level.grid.x * level.grid.y {
 				if int(next_page + i) < len(records) {
 					records[next_page + i].mip = u16(mip)
