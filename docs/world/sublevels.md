@@ -56,7 +56,7 @@ A part is wanted when its sublevel is active and its scene is in, and in no othe
 
 ## Activation
 
-`game.set_sublevel(g, name, active)` queues a change with the scene requests. The change applies at the start of the next frame, or of this frame from `begin_frame` ([Scenes: Streaming](scenes.md#streaming)). In Luau, `Game.set_sublevel(name, active)` does the same, and raises an error for a name that the project does not declare.
+`game.set_sublevel(g, name, active)` queues a change with the scene requests. The change applies at the start of the next frame, or of this frame from `begin_frame` ([Scenes: Streaming](scenes.md#streaming)). In Luau, `Sublevel.set_active(name, active)` does the same, and raises an error for a name that the project does not declare ([Scripts](#scripts)).
 
 - **Activating** sets the sublevel to `Loading`. `update_parts` begins its part of every loaded scene in stages, and `advance_loads` moves them on within the frame's budget ([World streaming: Budgets](streaming.md#budgets)).
 - **Deactivating** sets the sublevel to `Inactive`. `update_parts` unloads its parts, with what they own, and the game runs `forget_despawned`.
@@ -81,7 +81,7 @@ A streamed scene loads the parts of its active sublevels with it, and they unloa
 
 - **One load.** The policy counts a scene and its parts that are loading as one load for `MAX_SCENE_LOADS`. A scene whose base is ready but whose parts are not still counts.
 - **Kept scenes.** The parts count toward `MAX_STREAMED_SCENES` with their scene.
-- **`on_scene_ready`** says that the base is shown. `on_sublevel_ready` says that a part is ready.
+- **`on_scene_ready`** says that the base is shown. `on_part_ready` says that a part is ready.
 
 ## Events
 
@@ -96,31 +96,52 @@ A streamed scene loads the parts of its active sublevels with it, and they unloa
 
 `scene.part_events(scenes)` gives each part's events since the game's last `clear_part_events`, once a frame. `streaming.events` adds `Sublevel_Loading`, `Sublevel_Ready` and `Sublevel_Unloaded` for the parts of streamed scenes, with the scene's `number` and `scene` GUID and the `sublevel`'s name.
 
-**In scripts,** the streamer entity's behaviours get the streamed scenes' sublevel events, in the next script phase ([World streaming: Events](streaming.md#events)):
+**In scripts,** every behaviour that has a handler gets the game's sublevel events, on any entity, in the frame's script phase ([Scripts](#scripts)). The streamer entity's behaviours also get the events of the streamed scenes' parts, in the same phase ([World streaming: Events](streaming.md#events)):
 
 | Event | When |
 |---|---|
-| `on_sublevel_loading(number, scene, name)` | A part of the scene's sublevel began to load. |
-| `on_sublevel_ready(number, scene, name)` | The part is ready. |
-| `on_sublevel_unloaded(number, scene, name)` | The part unloaded, or did not load. |
+| `on_part_loading(number, scene, name)` | A part of the scene's sublevel began to load. `number` is the base's. |
+| `on_part_ready(number, scene, name)` | The part is ready. |
+| `on_part_unloaded(number, scene, name)` | The part unloaded, or did not load. |
 
-`Game.sublevel(name)` returns `"inactive"`, `"loading"`, `"active"`, `"failed"`, or nil for a name that the project does not declare.
+## Scripts
+
+The `Sublevel` library activates sublevels and reads their state. A name that the project does not declare is an error, except for `state`.
+
+| Binding | What it does |
+|---|---|
+| `Sublevel.set_active(name, active)` | Queues the change for the start of the next frame, as `Scene.load` does ([Activation](#activation)). |
+| `Sublevel.is_active(name)` | Whether the sublevel was last asked to be active. It is true at once after `set_active(name, true)`, before the parts begin to load. |
+| `Sublevel.state(name)` | `"inactive"`, `"loading"`, `"ready"` (its parts of every loaded scene are ready), `"failed"` (one of its parts did not load), or nil for a name that the project does not declare. |
+
+Each event goes to every behaviour whose class has the handler, with the sublevel's name, once ([Scripting: Behaviours: Events](../scripting/behaviours.md#events)):
+
+| Event | When |
+|---|---|
+| `on_sublevel_loading(name)` | The sublevel's parts began to load: it was activated, or a scene that loaded brought parts of it. |
+| `on_sublevel_ready(name)` | Its parts of every loaded scene are ready. |
+| `on_sublevel_unloaded(name)` | It was deactivated, and its parts unloaded. |
+| `on_sublevel_failed(name)` | One of its parts did not load. |
+
+A part's entity is in the part's scene: `Scene.of(entity)` gives the part's number, `Scene.state(number)` its stage, and `Scene.base(number)` its base ([Scenes: Scripts](scenes.md#scripts)).
 
 ```luau
-local Clock = Behaviour.define("Clock")
+local Dusk = Behaviour.define("Dusk")
 
-function Clock:on_enable()
-	Game.set_sublevel("night", true)
+function Dusk:on_enable()
+	Sublevel.set_active("night", true)
 end
 
-function Clock:update()
-	if Game.sublevel("night") == "active" then
-		-- Every lamp of the night is in the world.
+function Dusk:on_sublevel_ready(name: string)
+	if name == "night" then
+		-- Every lamp of the night is in the world: fade in.
 	end
 end
 
-return Clock
+return Dusk
 ```
+
+The sample's night scene turns its `night` sublevel on and off with N (`samples/mygame/content/scripts/night_toggle.luau`). F7 cycles to it.
 
 ## Scene memory
 
@@ -134,7 +155,6 @@ Each part takes a slot of scene memory ([Core: Scene memory](../core/jobs-and-me
 
 ## Known limits
 
-- **Scripts get the game's sublevel events only through the streamer,** and only for streamed scenes. Other scripts ask `Game.sublevel(name)`.
 - **A change to the settings' sublevels** applies when the next level starts, except that a newly declared sublevel joins the running level, inactive.
 - **The editor's scenes** come from its documents, not from blobs, so they have no parts ([Editor: Sublevels](../editor/document-and-scenes.md#sublevels)).
 - **At most 32 sublevels** for each project, and for each scene.

@@ -120,9 +120,12 @@ A field names an entity of another scene by the scene's GUID and the entity's sc
 |---|---|
 | `Scene.load(scene: Asset) -> number` | Asks for the scene to load beside the others. Returns the number that it will have. The scene loads at the start of the next frame. |
 | `Scene.unload(number)` | Asks for the scene with the number to unload, with what it owns, at the start of the next frame. |
-| `Scene.of(entity) -> number?` | The scene that the entity belongs to, or nil for an entity that the game spawned. |
+| `Scene.of(entity) -> number?` | The scene that the entity belongs to, or nil for an entity that the game spawned. For an entity of a sublevel's part, it is the part's number. |
+| `Scene.base(number) -> number?` | The base of a sublevel's part, the number itself for any other scene, or nil for a number that is not loaded ([Sublevels: Ownership](sublevels.md#ownership)). |
 | `Scene.pending(behaviour, field) -> Asset?` | The scene that a behaviour's entity field waits for, as an `Asset` that `Scene.load` takes. It is nil when the field names no other scene, or when that scene is loaded. |
-| `Scene.state(number) -> string?` | `"loading"` for a scene that is still loading (not yet shown), `"ready"` for one that is shown, and nil for a number that is not loaded. A scene that `Scene.load` asked for is `"ready"` once it loads. |
+| `Scene.state(number) -> string?` | `"loading"` for a scene that is still loading (not yet shown), `"ready"` for one that is shown, and nil for a number that is not loaded. A scene that `Scene.load` asked for is `"ready"` once it loads. A part's number gives the part's own stage. |
+
+The `Sublevel` library activates a scene's sublevels and reads their state ([Sublevels: Scripts](sublevels.md#scripts)).
 
 ```luau
 local Portal = Behaviour.define("Portal", { next = Field.asset() })
