@@ -33,6 +33,9 @@ A volume says how far the ambient occlusion reaches; the quality says how many s
 | `lod_error` | `MIN_LOD_ERROR` (0.25) to `MAX_LOD_ERROR` (8) pixels; 0 gives 1 | The largest error that the mesh shader path's [levels of detail](gpu-scene.md#mesh-shader-path) may show: 2, 1.5, 1 and 0.5 pixels from Low to Ultra (`LOD_ERRORS`) |
 | `mesh_pool` | `MIN_MESH_POOL` (16) to `MAX_MESH_POOL` (3,584) MiB, and at most a quarter of the device's video memory; 0 gives 1,024 | The budget of the pool of [mesh pages](assets.md#mesh-pages): 256, 512, 1,024 and 2,048 MiB from Low to Ultra (`MESH_POOLS`). A change makes the pool again, and every page streams in again |
 | `texture_pool` | `MIN_TEXTURE_POOL` (16) to `MAX_TEXTURE_POOL` (3,584) MiB, and at most a quarter of the device's video memory; 0 gives 1,024 | The budget of the pool of virtual texture pages (see [Virtual textures](assets.md#virtual-textures)): 256, 512, 1,024 and 2,048 MiB from Low to Ultra (`TEXTURE_POOLS`). A change makes the pool again, and every page streams in again. The pool also shrinks while the process is over the video memory that the OS gives it |
+| `residency_budget` | `MIN_RESIDENCY_BUDGET` (64) to `MAX_RESIDENCY_BUDGET` (16,384) MiB, and at most half of the device's video memory; 0 gives 4,096 | The budget of the GPU memory of the assets that are resident, which is not the pools' pages: past it, the assets that were used longest ago are unloaded (see [Unloading](assets.md#unloading)). 1,024, 2,048, 4,096 and 8,192 MiB from Low to Ultra (`RESIDENCY_BUDGETS`) |
+| `residency_idle` | `MIN_RESIDENCY_IDLE` (60) to `MAX_RESIDENCY_IDLE` (36,000) frames; 0 gives 1,200 | How many frames an asset may go without a request before it is unloaded: 300, 600, 1,200 and 2,400 from Low to Ultra (`RESIDENCY_IDLES`) |
+| `texture_mip_bias` | `MIN_TEXTURE_MIP_BIAS` (-2) to `MAX_TEXTURE_MIP_BIAS` (4) | How many mips coarser than its size on the screen says a material's texture streams (see [Mips by size](assets.md#mips-by-size)); a negative number is finer. 1 at Low, 0 above (`TEXTURE_MIP_BIASES`) |
 | `texture_anisotropy` | 1 to `MAX_TEXTURE_ANISOTROPY` (16); 0 gives 8 | The most anisotropy that a texture's sampler takes: it caps each texture's own (see [Textures](../content/kinds/textures.md#textures)). 2, 4, 8 and 16 from Low to Ultra (`TEXTURE_ANISOTROPIES`) |
 
 - **Each enum lists only what exists**, so a menu never offers a choice that draws nothing. A menu offers `Fsr` where `Caps.upscalers` has it: `clamp_quality` gives temporal AA in its place elsewhere. `Reflection_Technique` has `Off`, `Probes`, `Screen` and `Ray_Traced`: each reflection technique adds its own value, with its preset and its clamp. `clamp_quality` gives `Screen` for `Ray_Traced` without `Ray_Query`.
@@ -124,6 +127,9 @@ The player's choice is in the [project settings](../overview/architecture.md#pro
 | `quality.mesh_pool` | A number of MiB from 16 to 3584 |
 | `quality.texture_pool` | A number of MiB from 16 to 3584 |
 | `quality.texture_anisotropy` | A whole number from 1 to 16 |
+| `quality.residency_budget` | A number of MiB from 64 to 16384 |
+| `quality.residency_idle` | A number of frames from 60 to 36000 |
+| `quality.texture_mip_bias` | A whole number from -2 to 4 |
 
 - **Reading:** `project.quality(settings, caps)` starts from the preset, or from `default_quality` without one, and each other key replaces the preset's value for its feature. A fresh machine with no keys gets the defaults for its hardware.
 - **Saving:** `project.save_quality(platform, path, q, caps)` writes every key to the user's file through `Platform_API.file_write`, so the user's file alone gives the quality. It changes each key's line in place and keeps the file's other lines, as the editor's `ProjectSettings.Set` does. The next `project.refresh` reads it back.
