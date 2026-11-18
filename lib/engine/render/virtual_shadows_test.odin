@@ -1707,12 +1707,12 @@ a_mesh_that_becomes_resident_drops_the_pages_under_it :: proc(t: ^testing.T) {
 	records[0].rows = {{1, 0, 0, 0}, {0, 1, 0, -1}, {0, 0, 1, 5}}
 	pipelines := make([]Material_Pipeline, 1, context.temp_allocator)
 	// Not resident yet: no item.
-	bounds := caster_bounds(records, nil, pipelines, nil, 1, context.temp_allocator)
+	bounds := caster_bounds(records, nil, pipelines, nil, nil, 1, context.temp_allocator)
 	track_casters(tracking, bounds, {}, 1)
 	testing.expect_value(t, len(tracking.changes), 0)
 	// Resident: its item casts.
 	items := []Cull_Item{{instance = 0, flags = ITEM_CASTS_SHADOWS, sphere = {0, 0, 0, 0.5}}}
-	bounds = caster_bounds(records, items, pipelines, nil, 1, context.temp_allocator)
+	bounds = caster_bounds(records, items, pipelines, nil, nil, 1, context.temp_allocator)
 	track_casters(tracking, bounds, {}, 2)
 	testing.expect_value(t, len(tracking.changes), 1)
 	live: Live_Slots
@@ -1771,7 +1771,7 @@ a_particle_slot_has_bounds_and_drops_the_pages_under_them :: proc(t: ^testing.T)
 		}
 		sphere := particle_sphere(&slot, em, modules, size, {0, 0, 0, 0.5})
 		items := []Cull_Item{{flags = ITEM_PARTICLES | ITEM_CASTS_SHADOWS, sphere = sphere}}
-		bounds := caster_bounds(records, items, pipelines, nil, 1, context.temp_allocator)
+		bounds := caster_bounds(records, items, pipelines, nil, nil, 1, context.temp_allocator)
 		track_casters(tracking, bounds, {}, 1)
 		testing.expect_value(t, tracking.slots[0].unbounded, unbounded)
 		testing.expect(t, tracking.slots[0].inherent && tracking.slots[0].volatile)

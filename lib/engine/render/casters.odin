@@ -3,6 +3,7 @@ package render
 import "base:intrinsics"
 import "core:math/linalg"
 
+import "cinnabar:engine/asset/format"
 import "cinnabar:engine/ecs"
 
 // Caster tracking (see docs/rendering/gpu-scene.md#caster-tracking): which slots' shadows changed since the frame
@@ -15,6 +16,9 @@ import "cinnabar:engine/ecs"
 // items change their shape by themselves (skinned meshes, billboards, mesh particles, materials whose depth reads the
 // time). Each view draws its dynamic casters within its dynamic shadow distance live every frame, over its caches,
 // and bakes the farther ones into them, which a report every SHADOW_FAR_REFRESH frames refreshes.
+
+// A still caster whose sphere moves or grows by more than this many meters from where the caches took it is a change.
+SHADOW_SPHERE_EPSILON :: 0.001
 
 // A caster that moved within this many frames is dynamic.
 SHADOW_STILL_FRAMES :: 30
@@ -69,16 +73,21 @@ Caster_Bounds :: struct {
 	casts:     bool,
 	inherent:  bool,
 	unbounded: bool,
+	// An instance set's item is among them: a new version of the set changes its cells, not the slot's sphere (see
+	// residency_changed_cells).
+	cells:     bool,
 }
 
 // caster_bounds gathers each slot's items that cast shadows, below high. sets gives each ITEM_INSTANCED item's set's
-// sphere about its instances, and the largest scale of their axes, in the set's space.
+// sphere about its instances, and the largest scale of their axes, in the set's space, with which set it is. The
+// signature holds each item's mesh's generation, from mesh_generations by the item's mesh index, and its pipeline's.
 @(private)
 caster_bounds :: proc(
 	records: []Instance_Record,
 	items: []Cull_Item,
 	pipelines: []Material_Pipeline,
 	sets: []Set_Bounds,
+	mesh_generations: []u32,
 	high: u32,
 	allocator := context.allocator,
 ) -> []Caster_Bounds {
@@ -97,10 +106,13 @@ caster_bounds :: proc(
 			linalg.length([3]f32{rows[0].z, rows[1].z, rows[2].z}),
 		)
 		local, radius := item.sphere.xyz, item.sphere.w
+		set_guid: format.Guid
 		switch {
 		case item.flags & ITEM_INSTANCED != 0 && int(item.entry) < len(sets):
 			// The set's instances, each with the submesh's sphere at its scale.
 			set := sets[item.entry]
+			set_guid = set.guid
+			b.cells = true
 			radius = set.radius + (linalg.length(local) + radius) * set.max_scale
 			local = set.center
 		case item.flags & ITEM_BILLBOARD != 0:
@@ -126,6 +138,15 @@ caster_bounds :: proc(
 		b.inherent ||=
 			item.flags & (ITEM_PARTICLES | ITEM_SKINNED | ITEM_BILLBOARD) != 0 || pipeline.animated
 		// The signature is what the items draw, but not where: their place in the frame's lists changes from frame to frame.
+		generation: u32
+		if item.flags & (ITEM_SURFACE | ITEM_RIBBON) == 0 &&
+		   int(item.mesh) < len(mesh_generations) {
+			generation = mesh_generations[item.mesh]
+		}
+		b.signature = signature_add(b.signature, u64(generation) | u64(pipeline.generation) << 32)
+		guid := transmute([2]u64)set_guid
+		b.signature = signature_add(b.signature, guid[0])
+		b.signature = signature_add(b.signature, guid[1])
 		b.signature = signature_add(b.signature, u64(item.first) | u64(item.count) << 32)
 		b.signature = signature_add(b.signature, u64(item.bin) | u64(item.flags) << 32)
 		b.signature = signature_add(
@@ -145,9 +166,10 @@ caster_bounds :: proc(
 }
 
 // Set_Bounds is an instance set's sphere about its instances' positions and the largest scale of their axes, in the
-// set's space, which caster_bounds takes for its items.
+// set's space, which caster_bounds takes for its items, and which set it is.
 @(private)
 Set_Bounds :: struct {
+	guid:      format.Guid,
 	center:    [3]f32,
 	radius:    f32,
 	max_scale: f32,
@@ -165,7 +187,8 @@ signature_add :: proc(h: u64, value: u64) -> u64 {
 
 // track_casters takes the frame's bounds of each slot below high and gives the frame's changes: a slot that starts or
 // stops casting, or whose items change what they draw; a slot that turns dynamic, whose old place leaves the caches, or
-// static again, whose place joins them; and each dynamic slot's report, every SHADOW_FAR_REFRESH frames, staggered by
+// static again, whose place joins them; a static slot whose sphere moved from where the caches took it, unless it is an
+// instance set's, whose changed cells say where; and each dynamic slot's report, every SHADOW_FAR_REFRESH frames, staggered by
 // its slot. A slot's moved is set before this, when its pose changed this frame.
 @(private)
 track_casters :: proc(
@@ -215,6 +238,11 @@ track_casters :: proc(
 				Caster_Change{slot = slot, old = c.reported, new = sphere, report = true},
 			)
 			c.reported = sphere
+		case !volatile && sphere_changed(sphere, c.reported):
+			if !b.cells {
+				append(&t.changes, Caster_Change{slot = slot, old = c.reported, new = sphere})
+			}
+			c.reported = sphere
 		}
 		if !b.casts {
 			c = {
@@ -225,6 +253,72 @@ track_casters :: proc(
 		c.sphere, c.signature, c.casts = sphere, b.signature, true
 		c.inherent, c.unbounded, c.volatile = b.inherent, b.unbounded, volatile
 	}
+}
+
+// sphere_changed is whether a sphere moved or changed its radius by more than SHADOW_SPHERE_EPSILON.
+@(private = "file")
+sphere_changed :: proc(a, b: Caster_Sphere) -> bool {
+	d := ecs.position_sub_f64(a.center, b.center)
+	return(
+		d.x * d.x + d.y * d.y + d.z * d.z > SHADOW_SPHERE_EPSILON * SHADOW_SPHERE_EPSILON ||
+		abs(a.radius - b.radius) > SHADOW_SPHERE_EPSILON \
+	)
+}
+
+// add_cell_changes adds to the frame's changes, for each slot that draws an instance set whose cells changed, a change
+// at each cell: the cell's sphere in the world at the slot's rows, the sphere of the set's mesh at the cell's largest
+// scale, as caster_bounds takes the set. A slot that does not cast, or started to, has its change already.
+@(private)
+add_cell_changes :: proc(
+	t: ^Caster_Tracking,
+	cells: []Changed_Set_Cell,
+	sets: []Instance_Set_Record,
+	set_bounds: []Set_Bounds,
+	records: []Instance_Record,
+	origin: ecs.World_Position,
+) {
+	for cell in cells {
+		for set, i in sets {
+			if set_bounds[i].guid != cell.guid ||
+			   set.flags & SET_CASTS_SHADOWS == 0 ||
+			   int(set.slot) >= len(t.slots) ||
+			   !t.slots[set.slot].casts {
+				continue
+			}
+			rows := records[set.slot].rows
+			scale := max(
+				linalg.length([3]f32{rows[0].x, rows[1].x, rows[2].x}),
+				linalg.length([3]f32{rows[0].y, rows[1].y, rows[2].y}),
+				linalg.length([3]f32{rows[0].z, rows[1].z, rows[2].z}),
+			)
+			change := Caster_Change {
+				slot = set.slot,
+			}
+			if old, ok := cell.old.?; ok {
+				change.old = cell_sphere(old, set, rows, scale, origin)
+			}
+			if new, ok := cell.new.?; ok {
+				change.new = cell_sphere(new, set, rows, scale, origin)
+			}
+			append(&t.changes, change)
+		}
+	}
+}
+
+@(private = "file")
+cell_sphere :: proc(
+	c: Set_Cell,
+	set: Instance_Set_Record,
+	rows: [3][4]f32,
+	scale: f32,
+	origin: ecs.World_Position,
+) -> Caster_Sphere {
+	radius := c.radius + (linalg.length(set.sphere.xyz) + set.sphere.w) * c.max_scale
+	center: [3]f32
+	for row, k in rows {
+		center[k] = row.x * c.center.x + row.y * c.center.y + row.z * c.center.z + row.w
+	}
+	return {ecs.position_offset(origin, center), radius * scale + set.bound}
 }
 
 // caster_moved records that a slot's pose changed this frame.

@@ -2,6 +2,7 @@ package render
 
 import "core:testing"
 
+import "cinnabar:engine/asset/format"
 import "cinnabar:engine/ecs"
 
 // test_tracking is a tracking with nothing seen yet, on the heap: its slots are large.
@@ -184,6 +185,145 @@ a_view_draws_its_near_dynamic_casters_live :: proc(t: ^testing.T) {
 	}
 	// The near caster turned baked, and the far one live.
 	testing.expect_value(t, flips, 2)
+}
+
+// A still caster whose sphere moves from where the caches took it is a change, from there to where it is. Jitter below
+// the epsilon is not.
+@(test)
+a_still_casters_sphere_change_is_a_change :: proc(t: ^testing.T) {
+	tr := test_tracking()
+	defer free_tracking(tr)
+	track_casters(tr, {box({1, 0, 0})}, {}, 1)
+	track_casters(tr, {box({1.0001, 0, 0})}, {}, 2)
+	testing.expect_value(t, len(tr.changes), 0)
+	track_casters(tr, {box({1, 0, 0}, half = 1.5)}, {}, 3)
+	testing.expect_value(t, len(tr.changes), 1)
+	old, _ := tr.changes[0].old.?
+	new, _ := tr.changes[0].new.?
+	testing.expect(
+		t,
+		new.radius > old.radius && !tr.changes[0].report,
+		"the change did not grow the sphere",
+	)
+	track_casters(tr, {box({1, 0, 0}, half = 1.5)}, {}, 4)
+	testing.expect_value(t, len(tr.changes), 0)
+	// An instance set's slot leaves it to its cells.
+	b := box({5, 0, 0})
+	b.cells = true
+	track_casters(tr, {box({1, 0, 0}, half = 1.5), b}, {}, 5)
+	b.high += 1
+	track_casters(tr, {box({1, 0, 0}, half = 1.5), b}, {}, 6)
+	testing.expect_value(t, len(tr.changes), 0)
+	testing.expect_value(t, tr.slots[1].reported, tr.slots[1].sphere)
+}
+
+// A pipeline that was made again, and a mesh that swapped in, change their items' signature, so their slots are a
+// change, where their bounds and counts are the same.
+@(test)
+a_pipeline_generation_and_a_mesh_generation_are_changes :: proc(t: ^testing.T) {
+	tr := test_tracking()
+	defer free_tracking(tr)
+	records := make([]Instance_Record, 1, context.temp_allocator)
+	records[0].rows = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}}
+	pipelines := make([]Material_Pipeline, 1, context.temp_allocator)
+	items := []Cull_Item{{instance = 0, flags = ITEM_CASTS_SHADOWS, sphere = {0, 0, 0, 0.5}}}
+	generations := []u32{1}
+	frame := u64(1)
+	step :: proc(
+		tr: ^Caster_Tracking,
+		records: []Instance_Record,
+		items: []Cull_Item,
+		pipelines: []Material_Pipeline,
+		generations: []u32,
+		frame: ^u64,
+	) -> int {
+		bounds := caster_bounds(
+			records,
+			items,
+			pipelines,
+			nil,
+			generations,
+			1,
+			context.temp_allocator,
+		)
+		track_casters(tr, bounds, {}, frame^)
+		frame^ += 1
+		return len(tr.changes)
+	}
+	testing.expect_value(t, step(tr, records, items, pipelines, generations, &frame), 1)
+	testing.expect_value(t, step(tr, records, items, pipelines, generations, &frame), 0)
+	pipelines[0].generation += 1
+	testing.expect_value(t, step(tr, records, items, pipelines, generations, &frame), 1)
+	testing.expect_value(t, step(tr, records, items, pipelines, generations, &frame), 0)
+	generations[0] += 1
+	testing.expect_value(t, step(tr, records, items, pipelines, generations, &frame), 1)
+	testing.expect_value(t, step(tr, records, items, pipelines, generations, &frame), 0)
+}
+
+// A newer version of an instance set that changes one cell changes that cell's sphere only, at the rows of each slot
+// that draws the set, and not the slot's own sphere.
+@(test)
+a_new_set_version_changes_only_its_changed_cells :: proc(t: ^testing.T) {
+	make_set :: proc(nudge: bool) -> []byte {
+		instances := make([]format.Instance, format.INSTANCE_CELL_SIZE * 2, context.temp_allocator)
+		for &i, k in instances {
+			i = format.instance_pack(
+				{position = {f32(k), 0, 0}, rotation = 1, scale = {1, 1, 1}},
+				u32(k),
+			)
+		}
+		if nudge {
+			instances[format.INSTANCE_CELL_SIZE + 3].position.y = 4
+		}
+		contents := format.instance_cells(instances, context.temp_allocator)
+		return format.instance_set_write(contents, context.temp_allocator)
+	}
+	before, after := make_set(false), make_set(true)
+	b0, _ := format.instance_set_view(before)
+	b1, _ := format.instance_set_view(after)
+	set0 := Resident_Instance_Set {
+		cells_cpu = set_cells(before, b0, context.temp_allocator),
+	}
+	set1 := Resident_Instance_Set {
+		cells_cpu = set_cells(after, b1, context.temp_allocator),
+	}
+	guid := format.Guid {
+		0 = 1,
+	}
+	changed := make([dynamic]Changed_Set_Cell, context.temp_allocator)
+	diff_set_cells(&changed, guid, &set0, &set1)
+	testing.expect_value(t, len(changed), 2)
+	_, had_old := changed[0].old.?
+	_, had_new := changed[0].new.?
+	testing.expect(t, had_new != had_old, "a changed cell was not an added or a removed one")
+
+	tr := test_tracking()
+	defer free_tracking(tr)
+	records := make([]Instance_Record, 1, context.temp_allocator)
+	records[0].rows = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 10}}
+	tr.slots[0].casts = true
+	sets := []Instance_Set_Record{{slot = 0, flags = SET_CASTS_SHADOWS, sphere = {0, 0, 0, 1}}}
+	bounds := []Set_Bounds{{guid = guid}}
+	add_cell_changes(tr, changed[:], sets, bounds, records, {})
+	testing.expect_value(t, len(tr.changes), 2)
+	for c in tr.changes {
+		sphere, ok := c.old.?
+		if !ok {
+			sphere, ok = c.new.?
+		}
+		testing.expect(t, ok, "a cell's change had no sphere")
+		// Cell 1's spheres only: its instances are past the first cell's.
+		center := ecs.position_sub(sphere.center, {})
+		testing.expect(
+			t,
+			center.x > f32(format.INSTANCE_CELL_SIZE) - 1 && center.z == 10,
+			"a change was not at the changed cell, at the slot's rows",
+		)
+	}
+	// Another set's change draws nothing.
+	clear(&tr.changes)
+	add_cell_changes(tr, changed[:], sets, []Set_Bounds{{guid = {0 = 2}}}, records, {})
+	testing.expect_value(t, len(tr.changes), 0)
 }
 
 @(test)

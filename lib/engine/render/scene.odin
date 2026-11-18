@@ -1199,15 +1199,28 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32, skins: []Skin_Pose)
 			}
 		}
 		// The slots' shadows, before the items are sorted into bins, while each one's bin is its pipeline.
+		mesh_generations := make([]u32, len(meshes), r.platform.frame_allocator)
+		for mesh, index in mesh_indices {
+			mesh_generations[index] = mesh.generation
+		}
 		bounds := caster_bounds(
 			s.records[:s.high],
 			items[:],
 			r.materials.pipelines[:],
 			set_bounds[:],
+			mesh_generations,
 			s.high,
 			r.platform.frame_allocator,
 		)
 		track_casters(&s.casters, bounds, s.origin, s.frame)
+		add_cell_changes(
+			&s.casters,
+			residency_changed_cells(&r.residency),
+			sets[:],
+			set_bounds[:],
+			s.records[:s.high],
+			s.origin,
+		)
 	}
 	// The view draws its dynamic casters within its distance live, over its shadow caches.
 	sf.dynamic_distance = SHADOW_PARAMS[f.shadow_settings.level].dynamic_distance
@@ -2307,7 +2320,7 @@ add_instanced_items :: proc(
 		pixels := instanced_pixels(
 			&table.look,
 			r.scene.records[slot].rows,
-			{set.center, set.radius, set.max_scale},
+			{center = set.center, radius = set.radius, max_scale = set.max_scale},
 			covered.radius,
 		)
 		use := use_material(r, table, material, pixels) or_continue
@@ -2398,7 +2411,7 @@ add_instanced_items :: proc(
 			levels = mesh.levels,
 		},
 	)
-	append(set_bounds, Set_Bounds{set.center, set.radius, set.max_scale})
+	append(set_bounds, Set_Bounds{renderer.instances, set.center, set.radius, set.max_scale})
 	for _ in 0 ..< set.cell_count {
 		append(jobs, index)
 	}
