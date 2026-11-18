@@ -57,8 +57,10 @@ load_asset :: proc(
 		scenes.assets = assets
 		// The blob first, so a scene that does not load leaves the world as it is.
 		h, scene := read_scene_blob(w, assets, guid) or_return
+		data, _ := asset.data(assets, h)
+		sublevels, _ := format.scene_sublevels(data, w.platform.frame_allocator)
 		unload_level(w, scenes)
-		add_scene(w, scripts, scenes, scene, u32(0))
+		add_scene_as(w, scripts, scenes, scene, u32(0), nil, sublevels)
 		keep_blob(scenes, h)
 		return true
 	}

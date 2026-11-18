@@ -263,7 +263,7 @@ follow_reference :: proc(l: ^Loader, slot: Link_Slot, v: format.Scene_Value) -> 
 		state  = Link_Waiting{},
 	}
 	entity: ecs.Entity
-	if target, ready := ready_scene(s, v.scene); ready {
+	if target, ready := ready_scene(s, v.scene, family_of(s, l.number)); ready {
 		entity = find(s, l.world, target, v.entity)
 		if entity == 0 {
 			warn(l, "it refers to %016x, which the scene it names does not have", v.entity)
@@ -283,16 +283,38 @@ follow_reference :: proc(l: ^Loader, slot: Link_Slot, v: format.Scene_Value) -> 
 	return entity
 }
 
-// ready_scene is the number of the first scene with the GUID that is ready, and false if there is none. A scene that
-// is still loading does not hold its entities yet.
+// ready_scene is the scene with the GUID that a field of a scene in the family refers to, if it is ready, and false if
+// there is none. The family is a base and its parts (see base_of). A scene of the holder's own family wins, so the
+// parts of two loaded copies of one scene each refer to their own (see docs/world/sublevels.md#references). With none
+// in the family it is the first ready scene with the GUID, unless the GUID is one of the family's own sublevels: then
+// it waits for the family's part. A scene that is still loading does not hold its entities yet.
 @(private = "file")
-ready_scene :: proc(s: ^Scenes, guid: format.Guid) -> (number: u32, found: bool) {
+ready_scene :: proc(s: ^Scenes, guid: format.Guid, family: u32) -> (number: u32, found: bool) {
+	for row in loaded_scenes(s) {
+		if row.guid == guid && family_of(s, row.number) == family {
+			_, ready := row.stage.(Scene_Ready)
+			return row.number, ready
+		}
+	}
+	if sublevels, known := sublevels_of(s, family); known {
+		for sublevel in sublevels {
+			if sublevel.guid == guid {
+				return 0, false
+			}
+		}
+	}
 	for row in loaded_scenes(s) {
 		if _, ready := row.stage.(Scene_Ready); ready && row.guid == guid {
 			return row.number, true
 		}
 	}
 	return
+}
+
+// family_of is the base of a loaded scene, or the number itself for one that is not loaded.
+@(private = "file")
+family_of :: proc(s: ^Scenes, number: u32) -> u32 {
+	return base_of(s, number) or_else number
 }
 
 // links_scene_ready binds the links that wait for the scene with the number, now that it is ready. A link whose field
@@ -306,9 +328,14 @@ links_scene_ready :: proc(s: ^Scenes, w: ^ecs.World, number: u32) {
 	guid := s.loaded[index].guid
 	for &holder in s.loaded {
 		links := &holder.links
+		// A holder whose own family has a scene with the GUID waits for that one.
+		target, _ := ready_scene(s, guid, family_of(s, holder.number))
 		for i := len(links) - 1; i >= 0; i -= 1 {
 			link := &links[i]
 			if _, waiting := link.state.(Link_Waiting); !waiting || link.target != guid {
+				continue
+			}
+			if target != number {
 				continue
 			}
 			entity := find(s, w, number, link.id)
@@ -332,8 +359,8 @@ links_scene_ready :: proc(s: ^Scenes, w: ^ecs.World, number: u32) {
 // to the entity of another ready scene with the same GUID if there is one, and otherwise to none, waiting.
 @(private)
 links_scene_unloading :: proc(s: ^Scenes, w: ^ecs.World, number: u32, guid: format.Guid) {
-	replacement, has_replacement := ready_scene(s, guid)
 	for &holder in s.loaded {
+		replacement, has_replacement := ready_scene(s, guid, family_of(s, holder.number))
 		links := &holder.links
 		for i := len(links) - 1; i >= 0; i -= 1 {
 			link := &links[i]

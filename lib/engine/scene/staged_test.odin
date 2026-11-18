@@ -5,6 +5,7 @@ import "core:fmt"
 import "core:log"
 import "core:mem/virtual"
 import "core:os"
+import "core:slice"
 import "core:strings"
 import "core:testing"
 
@@ -756,4 +757,254 @@ a_reference_waits_for_a_scene_that_is_loading :: proc(t: ^testing.T) {
 	door := find(&f.scenes, w, number, 0xd1)
 	testing.expect(t, door != 0)
 	testing.expect_value(t, ecs.get(w, holder_entity, Probe).target, door)
+}
+
+// A hall whose probe refers to the lamp of its night sublevel, across the split, as the cooker writes it (see
+// docs/content/kinds/scenes.md#sublevels).
+@(private = "file")
+HALL_GUID :: format.Guid {
+	0  = 0x66,
+	15 = 1,
+}
+
+@(private = "file")
+NIGHT_GUID :: format.Guid {
+	0  = 0x67,
+	15 = 1,
+}
+
+@(private = "file")
+DAY_GUID :: format.Guid {
+	0  = 0x68,
+	15 = 1,
+}
+
+// write_hall writes the hall's base, which lists a night and a day sublevel, and the parts. night_blob false leaves the
+// night part's blob out.
+@(private = "file")
+write_hall :: proc(t: ^testing.T, f: ^Staged_Fixture, night_blob := true) {
+	buffer: [32]u8
+	base_text := fmt.tprintf(
+		"scene 3\nentity 00000000000000b1\nname = \"Hall\"\ncomponent 100 Probe\n\ttarget = @%s/00000000000000c1\n",
+		format.guid_format(NIGHT_GUID, &buffer),
+	)
+	base, problems, ok := format.scene_parse(base_text, context.temp_allocator)
+	testing.expectf(t, ok, "problems: %v", problems)
+	sublevels := []format.Scene_Sublevel{{"day", DAY_GUID}, {"night", NIGHT_GUID}}
+	write_bytes(
+		t,
+		f,
+		HALL_GUID,
+		format.scene_write(
+			base,
+			HALL_GUID,
+			1,
+			.Scene,
+			sublevels = sublevels,
+			allocator = context.temp_allocator,
+		),
+	)
+	if night_blob {
+		write_scene(t, f, NIGHT_GUID, "scene 3\nentity 00000000000000c1\nname = \"Lamp\"\n")
+	}
+	write_scene(t, f, DAY_GUID, "scene 3\nentity 00000000000000e1\nname = \"Sun\"\n")
+}
+
+@(private = "file")
+expect_events :: proc(
+	t: ^testing.T,
+	f: ^Staged_Fixture,
+	want: []Part_Event_Kind,
+	loc := #caller_location,
+) {
+	got := event_kinds(f)
+	testing.expectf(t, slice.equal(got, want), "events %v, not %v", got, want, loc = loc)
+}
+
+@(private = "file")
+event_kinds :: proc(f: ^Staged_Fixture) -> []Part_Event_Kind {
+	kinds := make([dynamic]Part_Event_Kind, context.temp_allocator)
+	for event in part_events(&f.scenes) {
+		append(&kinds, event.kind)
+	}
+	clear_part_events(&f.scenes)
+	return kinds[:]
+}
+
+// A scene loads as its base and the parts of its active sublevels only. A part's entity is in the part, whose base is
+// the hall, and the hall's reference into the part binds. Unloading the base unloads the part with it.
+@(test)
+a_scene_loads_its_base_and_its_active_parts_only :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	w := &f.world
+	write_hall(t, f)
+	base, ok := add_scene_asset(w, nil, &f.scenes, HALL_GUID)
+	testing.expect(t, ok)
+	hall := find(&f.scenes, w, base, 0xb1)
+	testing.expect_value(t, ecs.get(w, hall, Probe).target, 0)
+	_, waiting := pending(&f.scenes, w, hall, PROBE_ID, "target")
+	testing.expect(t, waiting)
+
+	testing.expect_value(t, load_parts(w, nil, &f.scenes, base, {"night"}), 1)
+	night, has_night := part_number(&f.scenes, base, "night")
+	testing.expect(t, has_night)
+	_, has_day := part_number(&f.scenes, base, "day")
+	testing.expect(t, !has_day)
+	testing.expect_value(t, len(loaded_scenes(&f.scenes)), 2)
+
+	lamp := find(&f.scenes, w, night, 0xc1)
+	testing.expect(t, lamp != 0)
+	owner, owned := scene_of(w, lamp)
+	testing.expect(t, owned)
+	testing.expect_value(t, owner, night)
+	of, has_base := base_of(&f.scenes, night)
+	testing.expect(t, has_base)
+	testing.expect_value(t, of, base)
+	of, _ = base_of(&f.scenes, base)
+	testing.expect_value(t, of, base)
+	testing.expect_value(t, ecs.get(w, hall, Probe).target, lamp)
+	testing.expect(t, !loading_with_parts(&f.scenes, base))
+
+	testing.expect_value(t, unload_scene(w, &f.scenes, base), 2)
+	testing.expect_value(t, len(loaded_scenes(&f.scenes)), 0)
+	testing.expect(t, !ecs.is_alive(w, lamp))
+	testing.expect_value(t, open_test_scene_memory(), 0)
+	expect_events(t, f, []Part_Event_Kind{.Loading, .Ready, .Unloaded})
+}
+
+// Activating a sublevel loads its part of every loaded scene, in stages across calls. Each copy of the hall binds its
+// own part. Deactivating it unloads the parts, what they own goes with them, and the references wait again.
+@(test)
+activating_a_sublevel_loads_its_parts_of_every_loaded_scene :: proc(t: ^testing.T) {
+	f := setup(t, with_scripts = true, delay = 2)
+	defer teardown(f)
+	w := &f.world
+	register_scripts(f.scripts)
+	write_hall(t, f)
+	first, _ := add_scene_asset(w, f.scripts, &f.scenes, HALL_GUID)
+	second, _ := add_scene_asset(w, f.scripts, &f.scenes, HALL_GUID)
+
+	testing.expect_value(t, update_parts(w, &f.scenes, {"night"}), 0)
+	testing.expect_value(t, len(loaded_scenes(&f.scenes)), 4)
+	testing.expect(t, loading_with_parts(&f.scenes, first))
+	calls := 0
+	for ; calls < 100 &&
+	    (loading_with_parts(&f.scenes, first) || loading_with_parts(&f.scenes, second));
+	    calls += 1 {
+		step(f)
+	}
+	testing.expect(t, calls > 1)
+	expect_events(t, f, []Part_Event_Kind{.Loading, .Loading, .Ready, .Ready})
+	first_night, _ := part_number(&f.scenes, first, "night")
+	second_night, _ := part_number(&f.scenes, second, "night")
+	first_lamp := find(&f.scenes, w, first_night, 0xc1)
+	second_lamp := find(&f.scenes, w, second_night, 0xc1)
+	testing.expect(t, first_lamp != 0 && second_lamp != 0 && first_lamp != second_lamp)
+	first_hall := find(&f.scenes, w, first, 0xb1)
+	second_hall := find(&f.scenes, w, second, 0xb1)
+	testing.expect_value(t, ecs.get(w, first_hall, Probe).target, first_lamp)
+	testing.expect_value(t, ecs.get(w, second_hall, Probe).target, second_lamp)
+
+	// An entity that a behaviour of the lamp spawns is the part's.
+	spawned := ecs.spawn(w)
+	f.runtime.spawned_hook(&f.runtime, spawned, first_lamp)
+	owner, owned := scene_of(w, spawned)
+	testing.expect(t, owned)
+	testing.expect_value(t, owner, first_night)
+
+	testing.expect_value(t, update_parts(w, &f.scenes, {}), 3)
+	testing.expect_value(t, len(loaded_scenes(&f.scenes)), 2)
+	testing.expect(t, !ecs.is_alive(w, spawned))
+	testing.expect(t, !ecs.is_alive(w, first_lamp))
+	testing.expect_value(t, ecs.get(w, first_hall, Probe).target, 0)
+	_, waiting := pending(&f.scenes, w, first_hall, PROBE_ID, "target")
+	testing.expect(t, waiting)
+	expect_events(t, f, []Part_Event_Kind{.Unloaded, .Unloaded})
+
+	// Activating it again binds the references again.
+	update_parts(w, &f.scenes, {"night"})
+	for calls = 0; calls < 100 && loading_with_parts(&f.scenes, first); calls += 1 {
+		step(f)
+	}
+	first_night, _ = part_number(&f.scenes, first, "night")
+	testing.expect_value(
+		t,
+		ecs.get(w, first_hall, Probe).target,
+		find(&f.scenes, w, first_night, 0xc1),
+	)
+}
+
+// A base that loads in stages learns its sublevels when its blob is read, and the wanted parts begin then, so the base
+// is never ready before they begin. They load with it, and it is not ready as one until they are.
+@(test)
+a_staged_base_begins_its_wanted_parts :: proc(t: ^testing.T) {
+	f := setup(t, delay = 1)
+	defer teardown(f)
+	w := &f.world
+	write_hall(t, f)
+	base, ok := begin_load(w, &f.scenes, HALL_GUID)
+	testing.expect(t, ok)
+	_, known := sublevels_of(&f.scenes, base)
+	testing.expect(t, !known)
+	wanted := []string{"night"}
+	for calls := 0; calls < 100 && loading_with_parts(&f.scenes, base); calls += 1 {
+		if kind, _ := stage_of(&f.scenes, base); kind == .Ready {
+			_, has_part := part_number(&f.scenes, base, "night")
+			testing.expect(t, has_part)
+		}
+		advance_loads(
+			w,
+			nil,
+			&f.scenes,
+			nil,
+			{SCENE_SPAWNS_PER_FRAME, SCENE_FILLS_PER_FRAME},
+			nil,
+			wanted,
+		)
+	}
+	sublevels, has := sublevels_of(&f.scenes, base)
+	testing.expect(t, has)
+	testing.expect_value(t, len(sublevels), 2)
+	night, has_night := part_number(&f.scenes, base, "night")
+	testing.expect(t, has_night)
+	kind, _ := stage_of(&f.scenes, night)
+	testing.expect_value(t, kind, Scene_Stage_Kind.Ready)
+	testing.expect_value(t, part_count(&f.scenes, base), 1)
+}
+
+// A part whose blob is missing fails once, and is not tried again while its sublevel stays active. It is tried again
+// once the sublevel is deactivated and activated.
+@(test)
+a_failed_part_is_not_tried_again_while_it_stays_wanted :: proc(t: ^testing.T) {
+	context.logger = log.nil_logger()
+	f := setup(t)
+	defer teardown(f)
+	w := &f.world
+	write_hall(t, f, night_blob = false)
+	add_scene_asset(w, nil, &f.scenes, HALL_GUID)
+	update_parts(w, &f.scenes, {"night"})
+	step(f)
+	testing.expect_value(t, len(loaded_scenes(&f.scenes)), 1)
+	update_parts(w, &f.scenes, {"night"})
+	step(f)
+	kinds := event_kinds(f)
+	failures := 0
+	for kind in kinds {
+		failures += 1 if kind == .Failed else 0
+	}
+	testing.expect_value(t, failures, 1)
+	testing.expect(t, sublevel_failed(&f.scenes, "night"))
+	testing.expect(t, !sublevel_failed(&f.scenes, "day"))
+
+	retry_sublevel(&f.scenes, "night")
+	testing.expect(t, !sublevel_failed(&f.scenes, "night"))
+	update_parts(w, &f.scenes, {})
+	update_parts(w, &f.scenes, {"night"})
+	step(f)
+	failures = 0
+	for kind in event_kinds(f) {
+		failures += 1 if kind == .Failed else 0
+	}
+	testing.expect_value(t, failures, 1)
 }

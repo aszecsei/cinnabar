@@ -455,6 +455,9 @@ scene_memory_allocator :: proc(m: Scene_Memory) -> runtime.Allocator {
 	return scene_memories_allocator(&platform.scenes, m)
 }
 
+// Each slot of the scenes' memory has a GPU scope, and a scope is a u8.
+#assert(gpu.FIRST_SCENE_SCOPE + MAX_SCENE_MEMORY <= 256)
+
 // scene_memory_scope is Platform_API.scene_memory_scope.
 @(private = "file")
 scene_memory_scope :: proc(m: Scene_Memory) -> gpu.Scope {
