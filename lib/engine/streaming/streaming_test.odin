@@ -584,3 +584,146 @@ loaded_follows_the_scenes_that_are_in :: proc(t: ^testing.T) {
 	_, scenes = loaded(&f.state)
 	testing.expect_value(t, len(scenes), 0)
 }
+
+@(private = "file")
+part_guid :: proc(i: int) -> format.Guid {
+	return {0 = 0xb0, 14 = u8(i), 15 = 1}
+}
+
+// write_parted writes the scenes with the numbers of the indexes, each with a night sublevel of one entity.
+@(private = "file")
+write_parted :: proc(t: ^testing.T, f: ^Fixture, indexes: []int) {
+	s, problems, ok := format.scene_parse(SCENE_TEXT, context.temp_allocator)
+	testing.expectf(t, ok, "problems: %v", problems)
+	part, part_problems, part_ok := format.scene_parse(
+		"scene 3\nentity 00000000000000c1\nname = \"Lamp\"\n",
+		context.temp_allocator,
+	)
+	testing.expectf(t, part_ok, "problems: %v", part_problems)
+	for i in indexes {
+		sublevels := []format.Scene_Sublevel{{"night", part_guid(i)}}
+		write_blob(
+			t,
+			f,
+			scene_guid(i),
+			format.scene_write(
+				s,
+				scene_guid(i),
+				1,
+				.Scene,
+				sublevels = sublevels,
+				allocator = context.temp_allocator,
+			),
+		)
+		write_blob(
+			t,
+			f,
+			part_guid(i),
+			format.scene_write(part, part_guid(i), 1, .Scene, allocator = context.temp_allocator),
+		)
+	}
+}
+
+// tick_wanting is tick with the sublevels that are active.
+@(private = "file")
+tick_wanting :: proc(f: ^Fixture, x: f64, wanted: []string) -> []Stream_Event {
+	scene.clear_part_events(&f.scenes)
+	sources := []ecs.World_Position{meters(x, 5, 5)}
+	update(&f.state, &f.world, nil, &f.scenes, sources, nil, wanted)
+	events := make([]Stream_Event, len(events_of(f)), context.temp_allocator)
+	copy(events, events_of(f))
+	return events
+}
+
+@(private = "file")
+count_kind :: proc(events: []Stream_Event, kind: Stream_Event_Kind) -> int {
+	count := 0
+	for e in events {
+		count += 1 if e.kind == kind else 0
+	}
+	return count
+}
+
+// A streamed scene loads the parts of its active sublevels with it, and they unload with it. The events say so, with
+// the scene's number and GUID and the sublevel's name.
+@(test)
+a_streamed_scenes_parts_load_and_unload_with_it :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	write_parted(t, f, {0})
+	start(t, f, {box(0, 100, 20, 30)})
+
+	all := make([dynamic]Stream_Event, context.temp_allocator)
+	for _ in 0 ..< 8 {
+		append(&all, ..tick_wanting(f, 95, {"night"}))
+	}
+	testing.expect_value(t, count_kind(all[:], .Loading), 1)
+	testing.expect_value(t, count_kind(all[:], .Ready), 1)
+	testing.expect_value(t, count_kind(all[:], .Sublevel_Loading), 1)
+	testing.expect_value(t, count_kind(all[:], .Sublevel_Ready), 1)
+	base := all[0].number
+	for &e in all {
+		if e.kind == .Sublevel_Ready {
+			testing.expect_value(t, e.number, base)
+			testing.expect_value(t, e.scene, scene_guid(0))
+			testing.expect_value(t, format.sublevel_name_text(&e.sublevel), "night")
+		}
+	}
+	part, has_part := scene.part_number(&f.scenes, base, "night")
+	testing.expect(t, has_part)
+	testing.expect(t, scene.find(&f.scenes, &f.world, part, 0xc1) != 0)
+
+	events := tick_wanting(f, 0, {"night"})
+	testing.expect_value(t, count_kind(events, .Unloaded), 1)
+	testing.expect_value(t, count_kind(events, .Sublevel_Unloaded), 1)
+	testing.expect_value(t, len(scene.loaded_scenes(&f.scenes)), 0)
+}
+
+// A scene and its loading parts are one load: a third scene does not begin while the first two, or their parts, are
+// still loading, though both bases are ready.
+@(test)
+a_scene_and_its_loading_parts_are_one_load :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	write_parted(t, f, {0, 1, 2})
+	start(t, f, {box(0, 100, 20, 30), box(1, 100, 20, 30), box(2, 100, 20, 30)})
+	wanted := []string{"night"}
+
+	tick_wanting(f, 95, wanted)
+	tick_wanting(f, 95, wanted)
+	_, slots := loaded(&f.state)
+	testing.expect_value(t, len(slots), 2)
+	for s in slots {
+		kind, _ := scene.stage_of(&f.scenes, s.number)
+		testing.expect_value(t, kind, scene.Scene_Stage_Kind.Ready)
+		testing.expect(t, scene.loading_with_parts(&f.scenes, s.number))
+	}
+	tick_wanting(f, 95, wanted)
+	_, slots = loaded(&f.state)
+	testing.expect_value(t, len(slots), 2)
+
+	for _ in 0 ..< 8 {
+		tick_wanting(f, 95, wanted)
+	}
+	_, slots = loaded(&f.state)
+	testing.expect_value(t, len(slots), 3)
+	testing.expect_value(t, len(scene.loaded_scenes(&f.scenes)), 6)
+}
+
+// Parts of a scene that the game loaded load in stages with no streamer at all.
+@(test)
+parts_load_with_no_streamer :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	write_parted(t, f, {0})
+	base, ok := scene.add_scene_asset(&f.world, nil, &f.scenes, scene_guid(0))
+	testing.expect(t, ok)
+	scene.update_parts(&f.world, &f.scenes, {"night"})
+	for _ in 0 ..< 4 {
+		tick_wanting(f, 0, {"night"})
+	}
+	testing.expect(t, !scene.loading_with_parts(&f.scenes, base))
+	testing.expect_value(t, scene.part_count(&f.scenes, base), 1)
+	// It is not a streamed scene, so the policy says nothing of it.
+	testing.expect_value(t, len(events_of(f)), 0)
+}

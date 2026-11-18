@@ -17,10 +17,11 @@ import "cinnabar:engine/script"
 WORLD_STREAMER_ID :: ecs.Component_Id(144)
 STREAM_SOURCE_ID :: ecs.Component_Id(145)
 
-// MAX_SCENE_LOADS is how many streamed scenes load at once: scenes that are not ready.
+// MAX_SCENE_LOADS is how many streamed scenes load at once: scenes that are not ready. A scene and its sublevels'
+// parts that load are one load (see docs/world/sublevels.md#streaming).
 MAX_SCENE_LOADS :: 2
-// MAX_STREAMED_SCENES is how many scenes the policy keeps loaded, which leaves some of core.MAX_SCENE_MEMORY for the
-// scenes that scripts and the game load.
+// MAX_STREAMED_SCENES is how many scenes the policy keeps loaded, with their sublevels' parts, which leaves some of
+// core.MAX_SCENE_MEMORY for the scenes that scripts and the game load.
 MAX_STREAMED_SCENES :: core.MAX_SCENE_MEMORY - 8
 
 // World_Streamer selects the world that streams, and receives the streaming events as script events. Put it on an entity
@@ -61,20 +62,29 @@ Slot :: union #no_nil {
 	Slot_Failed,
 }
 
-// Stream_Event_Kind is what happened to a scene.
+// Stream_Event_Kind is what happened to a scene, or to the part of one of its sublevels (see
+// docs/world/sublevels.md#events).
 Stream_Event_Kind :: enum u8 {
 	Loading,
 	Ready,
 	Unloaded,
 	Failed,
+	// A sublevel's part of the scene began to load.
+	Sublevel_Loading,
+	// A sublevel's part of the scene is ready.
+	Sublevel_Ready,
+	// A sublevel's part of the scene unloaded, or did not load.
+	Sublevel_Unloaded,
 }
 
 // Stream_Event is something that happened to a scene in the last update. number is the scene's number in the scenes, or
-// 0 for a scene that did not begin to load.
+// 0 for a scene that did not begin to load. sublevel names the sublevel of a Sublevel_ event: number and scene are
+// then its scene's, the base of the part.
 Stream_Event :: struct {
-	kind:   Stream_Event_Kind,
-	number: u32,
-	scene:  format.Guid,
+	kind:     Stream_Event_Kind,
+	number:   u32,
+	scene:    format.Guid,
+	sublevel: format.Sublevel_Name,
 }
 
 // Stats is the work of the last update.
@@ -399,8 +409,11 @@ nearer_first :: proc(a, b: Candidate) -> bool {
 
 // update is one frame of the policy, between frames and outside the script phase. sources are the positions that scenes
 // load around, such as the camera's and the Stream_Source entities'. bodies_pending is physics.loading_scenes of this
-// frame (see scene.advance_loads). It gives whether any scene unloaded, so the caller has the systems that keep data by
-// entity forget the entities that went.
+// frame, and wanted the active sublevels (see scene.advance_loads). It gives whether any scene unloaded, so the caller
+// has the systems that keep data by entity forget the entities that went.
+//
+// It moves every scene that loads in stages on, within one budget for the frame: the streamed scenes first, nearest
+// first, then the others, such as the sublevels' parts of scenes that the game loaded. It does so with no streamer too.
 //
 // With no sources, only the persistent scenes begin to load, nothing unloads, and the scenes that are loading go on
 // loading. A scene unloads when
@@ -415,20 +428,42 @@ update :: proc(
 	scenes: ^scene.Scenes,
 	sources: []ecs.World_Position,
 	bodies_pending: []u32,
+	wanted: []string = nil,
 ) -> (
 	unloaded: bool,
 ) {
 	follow_level(st)
 	clear(&st.events)
 	st.stats = {}
+	records: []format.World_Scene_Record
+	distances: []f64
+	unloaded, records, distances = policy(st, w, scenes, sources)
+	advance(st, w, scripts, scenes, records, distances, bodies_pending, wanted)
+	sublevel_events(st, scenes, records)
+	return
+}
+
+// policy is the part of update that follows the streamer and its world, and unloads and begins scenes. It gives the
+// world's records, and each one's distance, or none when no world streams.
+@(private)
+policy :: proc(
+	st: ^State,
+	w: ^ecs.World,
+	scenes: ^scene.Scenes,
+	sources: []ecs.World_Position,
+) -> (
+	unloaded: bool,
+	records: []format.World_Scene_Record,
+	distances: []f64,
+) {
 	frame := st.platform.frame_allocator
 
 	if st.streamer != 0 && !streamer_valid(st, w) {
-		records: []format.World_Scene_Record
+		old: []format.World_Scene_Record
 		if loaded, ok := st.world.(World_Loaded); ok {
-			records, _ = world_records(st, loaded)
+			old, _ = world_records(st, loaded)
 		}
-		unloaded = unload_all(st, w, scenes, records) || unloaded
+		unloaded = unload_all(st, w, scenes, old) || unloaded
 		release_world(st)
 		st.streamer = 0
 		st.extra_warned = false
@@ -444,8 +479,8 @@ update :: proc(
 		return
 	}
 	if current, has := st.world.(World_Loaded); has && current.guid != wanted {
-		records, _ := world_records(st, current)
-		unloaded = unload_all(st, w, scenes, records) || unloaded
+		old, _ := world_records(st, current)
+		unloaded = unload_all(st, w, scenes, old) || unloaded
 		release_world(st)
 	} else if failed, is_failed := st.world.(World_Failed); is_failed && failed.guid != wanted {
 		st.world = nil
@@ -457,10 +492,10 @@ update :: proc(
 	if !has_world {
 		return
 	}
-	records, valid := world_records(st, loaded)
-	if !valid {
+	valid: bool
+	if records, valid = world_records(st, loaded); !valid {
 		log.error("streaming: the world's blob is not a world of this build")
-		return
+		return unloaded, nil, nil
 	}
 	version := asset.version(st.assets, loaded.handle)
 	if version != loaded.version || len(st.slots) != len(records) {
@@ -481,7 +516,7 @@ update :: proc(
 	}
 
 	// Without a source every scene is infinitely far: only the persistent scenes begin, and nothing unloads.
-	distances := make([]f64, len(records), frame)
+	distances = make([]f64, len(records), frame)
 	if len(sources) > 0 {
 		for record, index in records {
 			distances[index] = scene_distance(record, sources)
@@ -501,7 +536,6 @@ update :: proc(
 		}
 	}
 	begin_loads(st, w, scenes, records, distances)
-	advance(st, w, scripts, scenes, records, distances, bodies_pending)
 	return
 }
 
@@ -548,8 +582,8 @@ begin_loads :: proc(
 	for slot, index in st.slots {
 		switch s in slot {
 		case Slot_In:
-			total += 1
-			if kind, found := scene.stage_of(scenes, s.number); found && kind != .Ready {
+			total += 1 + scene.part_count(scenes, s.number)
+			if scene.loading_with_parts(scenes, s.number) {
 				in_flight += 1
 			}
 		case Slot_Out:
@@ -580,7 +614,8 @@ begin_loads :: proc(
 	}
 }
 
-// advance moves the loading scenes on, nearest first, and emits the scenes that became ready or failed.
+// advance moves the loading scenes on, the streamed ones first and nearest first, and emits the streamed scenes that
+// became ready or failed.
 @(private)
 advance :: proc(
 	st: ^State,
@@ -590,12 +625,13 @@ advance :: proc(
 	records: []format.World_Scene_Record,
 	distances: []f64,
 	bodies_pending: []u32,
+	wanted: []string,
 ) {
 	frame := st.platform.frame_allocator
 	order := make([dynamic]Candidate, frame)
 	numbers := make([dynamic]u32, frame)
 	for slot, index in st.slots {
-		if s, is_in := slot.(Slot_In); is_in {
+		if s, is_in := slot.(Slot_In); is_in && index < len(records) {
 			if kind, found := scene.stage_of(scenes, s.number); found && kind != .Ready {
 				append(&order, Candidate{index, is_persistent(records[index]), distances[index]})
 			}
@@ -612,19 +648,23 @@ advance :: proc(
 		numbers[:],
 		{scene.SCENE_SPAWNS_PER_FRAME, scene.SCENE_FILLS_PER_FRAME},
 		bodies_pending,
+		wanted,
 	)
 	st.stats.entities_spawned = work.spawned
 	st.stats.entities_filled = work.filled
-	version := st.world.(World_Loaded).version
+	version: u32
+	if current, has_world := st.world.(World_Loaded); has_world {
+		version = current.version
+	}
 	for number in ready {
 		if index, found := slot_of(st, number); found {
-			emit(st, .Ready, number, records[index].guid)
+			emit(st, .Ready, number, guid_at(records, index))
 		}
 	}
 	for number in failed {
 		if index, found := slot_of(st, number); found {
 			change_slot(st, index, Slot_Failed{version})
-			emit(st, .Failed, number, records[index].guid)
+			emit(st, .Failed, number, guid_at(records, index))
 		}
 	}
 	for slot in st.slots {
@@ -633,6 +673,54 @@ advance :: proc(
 				st.stats.scenes_loading += 1
 			}
 		}
+	}
+}
+
+// sublevel_events emits the events of the sublevels' parts of the streamed scenes, from scene.part_events: of the scenes
+// that are in, and of those that unloaded in this update.
+@(private)
+sublevel_events :: proc(st: ^State, scenes: ^scene.Scenes, records: []format.World_Scene_Record) {
+	scene_events := len(st.events)
+	for event in scene.part_events(scenes) {
+		guid: format.Guid
+		streamed := false
+		if index, found := slot_of(st, event.base); found {
+			guid, streamed = guid_at(records, index), true
+		} else {
+			for e in st.events[:scene_events] {
+				if e.kind == .Unloaded && e.number == event.base {
+					guid, streamed = e.scene, true
+				}
+			}
+		}
+		if !streamed {
+			continue
+		}
+		kind: Stream_Event_Kind
+		switch event.kind {
+		case .Loading:
+			kind = .Sublevel_Loading
+		case .Ready:
+			kind = .Sublevel_Ready
+		case .Unloaded:
+			kind = .Sublevel_Unloaded
+		case .Failed:
+			// A part that was in the table says Unloaded next. One that never began says it here.
+			if event.part != 0 {
+				continue
+			}
+			kind = .Sublevel_Unloaded
+		}
+		append(
+			&st.events,
+			Stream_Event {
+				kind = kind,
+				number = event.base,
+				scene = guid,
+				sublevel = event.sublevel,
+			},
+		)
+		st.changes += 1
 	}
 }
 
