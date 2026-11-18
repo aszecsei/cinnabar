@@ -1719,6 +1719,7 @@ add_virtual_culling :: proc(f: ^Frame) {
 	g := f.graph
 	table := f.shadows.virtual.table
 	add_shadow_meshlet_select_pass(f, table)
+	add_shadow_select_patches_pass(f, table)
 	add_virtual_instance_passes(f, table)
 	p := add_compute_pass(g, "cull virtual shadow draws", proc(ctx: ^Pass_Context) {
 			f := (^Frame)(ctx.data)
@@ -1756,6 +1757,7 @@ add_virtual_culling :: proc(f: ^Frame) {
 	if sf.stats != 0 {
 		write(g, p, sf.stats)
 	}
+	add_shadow_cull_patches_pass(f)
 }
 
 @(private = "file")

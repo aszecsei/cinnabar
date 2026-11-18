@@ -3,6 +3,7 @@
 // item's bin of that view, as cull_draws.hlsl gives a mesh's item, and writes its indirect draw and its draw record,
 // whose first is the packed patch that material_patch.hlsli builds the vertices from.
 #include "cinnabar.hlsli"
+#include "virtual_pages.hlsli"
 
 // Matches Cull_Constants in lib/engine/render/scene.odin.
 struct Cull_Constants {
@@ -37,7 +38,8 @@ struct Cull_Constants {
 	uint view_first;
 	uint stats;
 	uint selections;
-	uint2 padding;
+	uint view_skip;
+	uint shadow_levels;
 };
 CN_PASS_CONSTANTS(Cull_Constants, cull);
 
@@ -54,8 +56,16 @@ struct Cull_View {
 	float4 offset;
 	uint first_draw;
 	uint flags;
-	uint2 padding;
+	uint virtual_table;
+	uint virtual_page;
 };
+
+// The first view of the virtual shadow map's levels, which the camera's dispatch skips. Matches FIRST_SHADOW_VIEW in
+// lib/engine/render/scene.odin.
+static const uint VIEW_FIRST_SHADOW = 2;
+// A draw of a patch from the virtual shadow map's own walk: its edge bits snap its vertices, in place of the camera's
+// morph (see material_patch.hlsli). Matches DRAW_SNAPPED in material_common.hlsli.
+static const uint DRAW_SNAPPED = 8;
 
 // Matches Cull_Item in lib/engine/render/scene.odin.
 static const uint ITEM_CASTS_SHADOWS = 1;
@@ -122,7 +132,11 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	}
 	Surface_Record s = cn_buffer(cull.surfaces).Load<Surface_Record>(cull.surfaces_offset + id.y * sizeof(Surface_Record));
 	Item item = cn_buffer(cull.items).Load<Item>(cull.items_offset + s.item * sizeof(Item));
-	Cull_View view = cn_buffer(cull.views).Load<Cull_View>(cull.views_offset + id.z * sizeof(Cull_View));
+	uint view_index = cull.view_first + id.z;
+	if (view_index >= VIEW_FIRST_SHADOW) {
+		view_index += cull.view_skip;
+	}
+	Cull_View view = cn_buffer(cull.views).Load<Cull_View>(cull.views_offset + view_index * sizeof(Cull_View));
 	if ((view.flags & VIEW_CASTERS) != 0 && (item.flags & ITEM_CASTS_SHADOWS) == 0) {
 		return;
 	}
@@ -133,7 +147,7 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 		return;
 	}
 	uint node = cn_buffer(cull.patches_read).Load((id.y * MAX_SURFACE_PATCHES + id.x) * 4);
-	uint level = node >> 24;
+	uint level = (node >> 24) & 0xf;
 	uint2 xy = uint2(node & 0xfff, (node >> 12) & 0xfff);
 	float size = s.cell * SURFACE_PATCH_QUADS * float(1u << level);
 	float2 lo = s.root_origin + float2(xy) * size;
@@ -151,14 +165,18 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 			return;
 		}
 	}
+	// A level of the virtual shadow map keeps only the patches that reach a page that it draws.
+	if (view.virtual_table != 0 && !virtual_view_reaches_draws(view.planes, view.virtual_table, view.virtual_page, p, radius)) {
+		return;
+	}
 	uint slot;
-	cn_rw_buffer(cull.counts).InterlockedAdd((id.z * cull.bin_count + item.bin) * 4, 1, slot);
+	cn_rw_buffer(cull.counts).InterlockedAdd((view_index * cull.bin_count + item.bin) * 4, 1, slot);
 	uint index = view.first_draw + cn_buffer(cull.bin_offsets).Load(cull.bin_offsets_offset + item.bin * 4) + slot;
 	// Draw_Indirect_Args: draw ID, vertex count, instance count, first vertex, first instance.
 	cn_rw_buffer(cull.arguments).Store4(index * 20, uint4(index, SURFACE_PATCH_VERTICES, 1, 0));
 	cn_rw_buffer(cull.arguments).Store(index * 20 + 16, 0);
 	// Draw_Record: instance, the surface's record with the submesh above ID_ENTITY_BITS, the patch, material, then
-	// count and the bound.
+	// count, the bound and the flags.
 	cn_rw_buffer(cull.draws).Store4(index * 32, uint4(item.instance, item.mesh | (item.submesh << ID_ENTITY_BITS), node, item.material));
-	cn_rw_buffer(cull.draws).Store4(index * 32 + 16, uint4(SURFACE_PATCH_VERTICES, asuint(item.bound), 0, 0));
+	cn_rw_buffer(cull.draws).Store4(index * 32 + 16, uint4(SURFACE_PATCH_VERTICES, asuint(item.bound), cull.shadow_levels > 0 ? DRAW_SNAPPED : 0, 0));
 }

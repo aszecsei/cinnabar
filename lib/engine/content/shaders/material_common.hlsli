@@ -351,6 +351,8 @@ static const uint ID_ENTITY_MASK = (1u << ID_ENTITY_BITS) - 1;
 static const uint DRAW_PARTICLES = 1;
 static const uint DRAW_INSTANCES = 2;
 static const uint DRAW_SELECTED = 4;
+// A patch from the virtual shadow map's walk, whose edge bits snap its vertices (see material_patch.hlsli).
+static const uint DRAW_SNAPPED = 8;
 struct Draw_Record {
 	uint instance;
 	uint mesh;

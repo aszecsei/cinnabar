@@ -9,6 +9,8 @@
 // Match SURFACE_PATCH_QUADS and SURFACE_MORPH_START in lib/engine/render/surfaces.odin.
 #define SURFACE_PATCH_QUADS 16
 static const float SURFACE_MORPH_START = 0.7;
+// A patch's edge bits are above its level (see select_patches.hlsl).
+#define SURFACE_EDGE_SHIFT 28
 // Matches MESHLET_DEPTH_SHIFT in material_mesh.hlsli: the Meshlets and Lod_Depth debug views color patches by their
 // index and their level.
 static const uint PATCH_LEVEL_SHIFT = 24;
@@ -41,7 +43,8 @@ Material_Vertex load_vertex(uint vertex_id, uint instance_id) {
 	Instance_Record instance = load_instance(d);
 	Surface_Record s = load_surface(d);
 	// The patch: its column, its row and its level, as cull_patches.hlsl wrote them.
-	uint level = d.first >> 24;
+	uint level = (d.first >> 24) & 0xf;
+	uint edges = d.first >> SURFACE_EDGE_SHIFT;
 	uint2 node = uint2(d.first & 0xfff, (d.first >> 12) & 0xfff);
 	float cell = s.cell * float(1u << level);
 	float2 origin = s.root_origin + float2(node) * (cell * SURFACE_PATCH_QUADS);
@@ -51,14 +54,31 @@ Material_Vertex load_vertex(uint vertex_id, uint instance_id) {
 	uint quad = tri >> 1;
 	uint2 ij = uint2(quad & (SURFACE_PATCH_QUADS - 1), quad / SURFACE_PATCH_QUADS);
 	uint2 g = ij + PATCH_CORNERS[tri & 1][corner];
-	float2 p = origin + float2(g) * cell;
-	// The morph: toward the far end of this level's range, the grid's odd vertices slide onto their even neighbours,
-	// which are the next level's grid, so the levels meet without a crack, whatever the displacement does after it,
-	// since the displacement is of the vertex where it lands. Both sides of an edge see the same distance.
-	float range = s.range0 * float(1u << level);
-	float3 nearest = float3(p.x, clamp(s.camera_local.y, s.height_range.x, s.height_range.y), p.y);
-	float morph = saturate((distance(s.camera_local, nearest) - SURFACE_MORPH_START * range) / ((1 - SURFACE_MORPH_START) * range));
-	p -= frac(float2(g) * 0.5) * 2 * cell * morph;
+	float2 p;
+	if ((d.flags & DRAW_SNAPPED) != 0) {
+		// The virtual shadow map's patch has no morph, so it does not depend on the camera. On an edge whose neighbour is
+		// coarser, the odd vertices slide onto the even ones, which are the neighbour's grid, so the levels meet without a
+		// crack.
+		uint2 last = SURFACE_PATCH_QUADS;
+		bool along_x = (g.x == 0 && (edges & 1) != 0) || (g.x == last.x && (edges & 2) != 0);
+		bool along_y = (g.y == 0 && (edges & 4) != 0) || (g.y == last.y && (edges & 8) != 0);
+		if (along_x && (g.y & 1) != 0) {
+			g.y -= 1;
+		}
+		if (along_y && (g.x & 1) != 0) {
+			g.x -= 1;
+		}
+		p = origin + float2(g) * cell;
+	} else {
+		p = origin + float2(g) * cell;
+		// The morph: toward the far end of this level's range, the grid's odd vertices slide onto their even neighbours,
+		// which are the next level's grid, so the levels meet without a crack, whatever the displacement does after it,
+		// since the displacement is of the vertex where it lands. Both sides of an edge see the same distance.
+		float range = s.range0 * float(1u << level);
+		float3 nearest = float3(p.x, clamp(s.camera_local.y, s.height_range.x, s.height_range.y), p.y);
+		float morph = saturate((distance(s.camera_local, nearest) - SURFACE_MORPH_START * range) / ((1 - SURFACE_MORPH_START) * range));
+		p -= frac(float2(g) * 0.5) * 2 * cell * morph;
+	}
 	// The hole: the mask's mip of this level at the quad's middle, so a quad of a coarse level is a hole only where
 	// every finest cell under it is, with a mask of one texel for each finest cell.
 	float2 quad_uv = (origin + (float2(ij) + 0.5) * cell + s.size * 0.5) / s.size;
