@@ -12,7 +12,10 @@ import "cinnabar:core/gpu"
 // the walk stops there, and a leaf whose error shows gives its group's meshlets. Those meshlets are a list in
 // Meshlet_Select.selected, and the item's range of it is in Meshlet_Select.selections. cull_draws.hlsl gives the
 // item's mesh draws that range, with DRAW_SELECTED, so its amplification shaders test those meshlets in place of all
-// of its submesh's. Every view but the view model's takes the camera's level of detail, so one walk serves them all.
+// of its submesh's. The camera's views and the shadow maps' take the camera's level of detail, so one walk serves them
+// all. The virtual shadow map's levels take their own, by their texels (see virtual_lod_scale): a second walk, once the
+// page table is written, picks the groups whose errors show in the finest level whose drawn pages they reach, into a
+// list of its own, from which each level's amplification shaders test their own cut.
 
 // SELECT_MESHLETS_SHADER is the walk (lib/engine/content/shaders/select_meshlets.hlsl), by its .meta file.
 SELECT_MESHLETS_SHADER :: #load("../content/shaders/select_meshlets.hlsl.meta", string)
@@ -26,10 +29,14 @@ MESHLET_SELECT_ROW :: 32768
 // meshlets in its first word, then a (first, count) pair for each item from its eighth byte; a count of
 // SELECTION_NONE is an item that tests all of its meshlets.
 Meshlet_Select :: struct {
-	pipeline:   Shader_Pipeline,
-	selections: gpu.Buffer,
-	capacity:   int,
-	selected:   gpu.Buffer,
+	pipeline:          Shader_Pipeline,
+	selections:        gpu.Buffer,
+	capacity:          int,
+	selected:          gpu.Buffer,
+	// The virtual shadow map's walk's, as selections and selected, made with the first frame that has its levels.
+	shadow_selections: gpu.Buffer,
+	shadow_capacity:   int,
+	shadow_selected:   gpu.Buffer,
 }
 
 // SELECTION_NONE matches SELECTION_NONE in select_meshlets.hlsl and cull_draws.hlsl.
@@ -39,11 +46,16 @@ SELECTION_NONE :: ~u32(0)
 // graph's buffers, 0 when nothing walks.
 @(private)
 Meshlet_Select_Frame :: struct {
-	items:      []u32,
-	upload:     gpu.Upload,
-	constants:  gpu.Upload,
-	selections: Buffer,
-	selected:   Buffer,
+	items:             []u32,
+	upload:            gpu.Upload,
+	constants:         gpu.Upload,
+	selections:        Buffer,
+	selected:          Buffer,
+	// Whether the virtual shadow map's levels take a walk of their own (see meshlet_select_shadow_buffers), and the walk.
+	shadow:            bool,
+	shadow_constants:  gpu.Upload,
+	shadow_selections: Buffer,
+	shadow_selected:   Buffer,
 }
 
 // Meshlet_Select_Constants matches Meshlet_Select_Constants in select_meshlets.hlsl. The items to walk, the draw
@@ -68,10 +80,16 @@ Meshlet_Select_Constants :: struct {
 	// The page table's read index and the feedback's write index, 0 when the frame has no pool of mesh pages.
 	pages:         u32,
 	feedback:      u32,
+	// The virtual shadow map's walk: its count of levels, 0 for the camera's walk, and the culling views, whose levels
+	// are from view_first on.
+	shadow_levels: u32,
+	views:         u32,
+	views_offset:  u32,
+	view_first:    u32,
 	padding:       u32,
 }
 
-#assert(size_of(Meshlet_Select_Constants) == 80)
+#assert(size_of(Meshlet_Select_Constants) == 96)
 
 meshlet_select_init :: proc(m: ^Meshlet_Select, platform: ^core.Platform_API) {
 	m.pipeline = shader_pipeline(SELECT_MESHLETS_SHADER)
@@ -84,6 +102,8 @@ meshlet_select_init :: proc(m: ^Meshlet_Select, platform: ^core.Platform_API) {
 meshlet_select_destroy :: proc(m: ^Meshlet_Select, platform: ^core.Platform_API) {
 	platform.gpu_destroy_buffer(m.selections)
 	platform.gpu_destroy_buffer(m.selected)
+	platform.gpu_destroy_buffer(m.shadow_selections)
+	platform.gpu_destroy_buffer(m.shadow_selected)
 	destroy_shader_pipeline(&m.pipeline, platform)
 }
 
@@ -174,6 +194,125 @@ meshlet_select_constants :: proc(f: ^Frame, cull: Cull_Constants) -> bool {
 	ms.selections = import_buffer(g, m.selections)
 	ms.selected = import_buffer(g, m.selected)
 	return true
+}
+
+// meshlet_select_shadow_buffers makes the virtual shadow map's walk's buffers, for a frame with ITEM_HIERARCHY items
+// and the map's levels, and says whether its levels take that walk. Without them, the levels take the camera's selection
+// and its level of detail.
+@(private)
+meshlet_select_shadow_buffers :: proc(r: ^Renderer, items: []u32, levels: int) -> bool {
+	m := &r.scene.meshlet_select
+	platform := r.platform
+	if len(items) == 0 || levels == 0 {
+		return false
+	}
+	if m.shadow_selected == {} {
+		m.shadow_selected = platform.gpu_create_buffer(
+			{
+				size = MAX_SELECTED_MESHLETS * 4,
+				usage = {.Storage},
+				label = "shadow selected meshlets",
+			},
+			nil,
+		)
+		if m.shadow_selected == {} {
+			return false
+		}
+	}
+	if m.shadow_capacity < m.capacity || m.shadow_selections == {} {
+		platform.gpu_destroy_buffer(m.shadow_selections)
+		m.shadow_capacity = m.capacity
+		m.shadow_selections = platform.gpu_create_buffer(
+			{
+				size = u32(8 + m.shadow_capacity * 8),
+				usage = {.Storage},
+				label = "shadow meshlet selections",
+			},
+			nil,
+		)
+		if m.shadow_selections == {} {
+			m.shadow_capacity = 0
+			return false
+		}
+	}
+	return true
+}
+
+// meshlet_select_shadow_constants uploads the virtual shadow map's walk's constants, for a frame whose levels take it,
+// whose culling views are from view_first in views. It is false only when the upload ring is full.
+@(private)
+meshlet_select_shadow_constants :: proc(
+	f: ^Frame,
+	cull: Cull_Constants,
+	view_first: u32,
+	levels: int,
+) -> bool {
+	sf := f.scene_frame
+	ms := &sf.meshlet_select
+	m := &f.renderer.scene.meshlet_select
+	platform := f.renderer.platform
+	if !ms.shadow || ms.constants.data == nil {
+		return true
+	}
+	constants := (^Meshlet_Select_Constants)(raw_data(ms.constants.data))^
+	constants.selections = gpu.write_index(m.shadow_selections)
+	constants.selected = gpu.write_index(m.shadow_selected)
+	constants.stats = 0
+	constants.shadow_levels = u32(levels)
+	constants.views, constants.views_offset, constants.view_first =
+		cull.views, cull.views_offset, view_first
+	ok: bool
+	ms.shadow_constants, ok = upload_bytes(
+		platform,
+		mem.ptr_to_bytes(&constants),
+		gpu.PASS_CONSTANTS_ALIGN,
+	)
+	if !ok {
+		return false
+	}
+	g := f.graph
+	ms.shadow_selections = import_buffer(g, m.shadow_selections)
+	ms.shadow_selected = import_buffer(g, m.shadow_selected)
+	return true
+}
+
+// add_shadow_meshlet_select_pass adds the virtual shadow map's walk, once the page table is written and before its levels
+// cull. It adds nothing when the levels take the camera's selection.
+@(private)
+add_shadow_meshlet_select_pass :: proc(f: ^Frame, table: Buffer) {
+	sf := f.scene_frame
+	ms := &sf.meshlet_select
+	if ms.shadow_selections == 0 {
+		return
+	}
+	g := f.graph
+	p := add_compute_pass(g, "select shadow meshlets", proc(ctx: ^Pass_Context) {
+			f := (^Frame)(ctx.data)
+			ms := &f.scene_frame.meshlet_select
+			pipeline := f.renderer.scene.meshlet_select.pipeline.pipeline
+			if pipeline == {} {
+				return
+			}
+			count := u32(len(ms.items))
+			gpu.cmd_set_pipeline(ctx.cb, pipeline)
+			gpu.cmd_set_pass_constants(ctx.cb, ms.shadow_constants)
+			gpu.cmd_dispatch(
+				ctx.cb,
+				{
+					min(count, MESHLET_SELECT_ROW),
+					(count + MESHLET_SELECT_ROW - 1) / MESHLET_SELECT_ROW,
+					1,
+				},
+			)
+		}, f)
+	read(g, p, sf.instances)
+	read(g, p, table)
+	write(g, p, ms.shadow_selections)
+	write(g, p, ms.shadow_selected)
+	if f.mesh_pool.pool != 0 {
+		read(g, p, f.mesh_pool.table)
+		write(g, p, f.mesh_pool.feedback)
+	}
 }
 
 // add_meshlet_select_pass adds the walk after the scene's update, which zeroes the list's counter, and before the draw

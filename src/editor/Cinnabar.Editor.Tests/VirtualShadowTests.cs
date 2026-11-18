@@ -37,5 +37,23 @@ public sealed class VirtualShadowTests
         Assert.Equal("4", rows["Shadow pages evicted"]);
         // The pool's fill is the pages that it holds, which the cache keeps whether or not the frame asked for them.
         Assert.Equal("1,024 / 2,048 (50% full)", rows["Shadow page pool"]);
+        // Nothing streamed.
+        Assert.Equal("0", rows["Shadow pages streamed"]);
+    }
+
+    [Fact]
+    public void TheResourceMonitorShowsTheShadowPagesThatStreamingDrewAndThoseThatWait()
+    {
+        var reader = new LinkReader(new byte[1024]);
+        var stats = GameStats.Read(ref reader) with
+        {
+            VirtualPagesCapacity = 2048,
+            VirtualPagesStreamed = 128,
+        };
+        var rows = ResourceMonitorView.VirtualShadowRows(stats).ToDictionary(r => r.Name, r => r.Value);
+        Assert.Equal("128", rows["Shadow pages streamed"]);
+        // While streaming is busy, the frame draws its budget and the rest wait.
+        rows = ResourceMonitorView.VirtualShadowRows(stats with { VirtualPagesWaiting = 1500 }).ToDictionary(r => r.Name, r => r.Value);
+        Assert.Equal("128, 1,500 waiting", rows["Shadow pages streamed"]);
     }
 }

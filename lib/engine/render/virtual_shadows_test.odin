@@ -4,6 +4,7 @@ import "core:math"
 import "core:math/linalg"
 import "core:testing"
 
+import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/ecs"
 
 @(private = "file")
@@ -1452,4 +1453,266 @@ the_levels_anchor_stays_near_the_camera :: proc(t: ^testing.T) {
 			l.view.page_origin,
 		)
 	}
+}
+
+// A change of a group's page drops only the levels whose texels its error shows in: the levels whose cut holds the group
+// or finer. The coarser levels drew the coarser meshlets before and after.
+@(test)
+a_groups_drop_reaches_only_the_levels_whose_cut_it_is_in :: proc(t: ^testing.T) {
+	// Level 0's texel is about a millimeter, and each level's twice the one before.
+	testing.expect_value(t, virtual_error_levels(0, 11), 0)
+	testing.expect_value(t, virtual_error_levels(0.0005, 11), 0)
+	testing.expect_value(t, virtual_error_levels(0.01, 11), 4)
+	testing.expect_value(t, virtual_error_levels(math.F32_MAX, 11), 11)
+	testing.expect_value(t, virtual_error_levels(math.inf_f32(1), 11), 11)
+	c := test_camera()
+	views := test_views(c)
+	wanted := make([]u32, VIRTUAL_MAX_LEVELS * VIRTUAL_LEVEL_WORDS, context.temp_allocator)
+	camera := ecs.World_Position{}
+	center := ecs.position_offset(camera, {0, -1, 5})
+	virtual_add_drops(views, {{center = center, radius = 0.05, levels = 4}}, camera, wanted)
+	for level in 0 ..< len(views) {
+		words := wanted[level * VIRTUAL_LEVEL_WORDS:][:VIRTUAL_LEVEL_WORDS]
+		testing.expectf(
+			t,
+			(count_marked(words) > 0) == (level < 4),
+			"level %d: %d pages",
+			level,
+			count_marked(words),
+		)
+	}
+}
+
+// Streaming drops at most a budget of pages a frame, finest level first, and the rest wait for the frames after. A page
+// that drops anyway, under a caster that changed, takes none of the budget and waits no more.
+@(test)
+streaming_drops_wait_past_the_budget :: proc(t: ^testing.T) {
+	words := VIRTUAL_MAX_LEVELS * VIRTUAL_LEVEL_WORDS
+	wanted := make([]u32, words, context.temp_allocator)
+	dropped := make([]u32, words, context.temp_allocator)
+	// 40 pages of level 0 and 8 of level 1, and 5 of level 0's under a caster that changed.
+	for i in 0 ..< 40 {
+		wanted[i / 32] |= 1 << uint(i % 32)
+	}
+	for i in 0 ..< 8 {
+		wanted[VIRTUAL_LEVEL_WORDS] |= 1 << uint(i)
+	}
+	dropped[0] = 0b11111
+	testing.expect_value(t, virtual_take_pages(wanted, dropped, 16), 16)
+	testing.expect_value(t, count_marked(dropped), 5 + 16)
+	testing.expect_value(t, count_marked(wanted), 35 + 8 - 16)
+	testing.expect_value(t, count_marked(dropped[VIRTUAL_LEVEL_WORDS:]), 0)
+	// The next frames take the rest, a budget at a time.
+	clear := make([]u32, words, context.temp_allocator)
+	testing.expect_value(t, virtual_take_pages(wanted, clear, 16), 16)
+	testing.expect_value(t, virtual_take_pages(wanted, clear, 16), 11)
+	testing.expect_value(t, count_marked(wanted), 0)
+	testing.expect_value(t, virtual_take_pages(wanted, clear, 16), 0)
+}
+
+// The pages that wait keep their place in the world as the camera moves and the levels' origins with it: they wait at
+// their entries of the toroidal table.
+@(test)
+waiting_pages_stay_on_their_pages_as_the_camera_moves :: proc(t: ^testing.T) {
+	before := test_views(test_camera())
+	after := test_views(test_camera(position = {3, 0, -2}))
+	words := VIRTUAL_MAX_LEVELS * VIRTUAL_LEVEL_WORDS
+	requests := make([]u32, words, context.temp_allocator)
+	level, page := 0, [2]i32{70, 64}
+	at := level * VIRTUAL_LEVEL_PAGES + int(page.y) * VIRTUAL_PAGES + int(page.x)
+	requests[at >> 5] |= 1 << uint(at & 31)
+	table := make([]u32, words, context.temp_allocator)
+	virtual_waiting_table(before, requests, table)
+	moved := make([]u32, words, context.temp_allocator)
+	virtual_waiting_requests(after, table, moved)
+	testing.expect_value(t, count_marked(moved), 1)
+	shift := before[level].page_origin - after[level].page_origin
+	testing.expect(t, shift != {}, "the camera moved level 0's origin")
+	testing.expect(t, is_marked(moved, level, page + shift))
+}
+
+// A level's cut takes its texels, at every distance: a group whose error shows in a level by a texel shows in no
+// coarser level by one, and moving the camera changes neither.
+@(test)
+a_levels_cut_follows_its_texels_and_not_the_camera :: proc(t: ^testing.T) {
+	shows :: proc(level: int, error, distance: f32) -> f32 {
+		scale, near := virtual_lod_scale(level)
+		// lod_error in meshlet_lod.hlsli, of a sphere of 1 m at its distance.
+		return error / max(distance - 1, near) * scale
+	}
+	for level in 0 ..< 11 {
+		error := f32(virtual_level_texel(level)) * 1.5
+		for distance in ([]f32{2, 50, 3000}) {
+			testing.expectf(
+				t,
+				shows(level, error, distance) > 1,
+				"level %d at %v m",
+				level,
+				distance,
+			)
+			testing.expect(t, shows(level + 1, error, distance) < 1)
+			testing.expect(t, abs(shows(level, error, distance) - 1.5) < 0.01)
+		}
+	}
+}
+
+// The shadow walk takes a node's error by the texels of the finest level whose drawn pages its sphere reaches, which a
+// coarser level's cut is within.
+@(test)
+the_shadow_walk_takes_the_finest_level_that_a_node_reaches :: proc(t: ^testing.T) {
+	c := test_camera()
+	direction := linalg.normalize(TEST_LIGHT)
+	views := test_views(c)
+	requests, table, pages := test_buffers(len(views), 64)
+	p := c.forward * 5
+	// One page of level 6 draws, and one of level 8, 40 m out.
+	q := c.forward * 40
+	testing.expect_value(t, virtual_mark(requests, views, .Taps_1, p, 6), 6)
+	testing.expect_value(t, virtual_mark(requests, views, .Taps_1, q, 8), 8)
+	virtual_allocate(requests, table, pages, views)
+	planes := make([][6][4]f32, len(views), context.temp_allocator)
+	fields := make([]u32, len(views), context.temp_allocator)
+	for level in 0 ..< len(views) {
+		planes[level] = virtual_level(c, direction, level).planes
+		fields[level] = virtual_page_fields(views[level], level)
+	}
+	testing.expect_value(
+		t,
+		virtual_node_texel(table, planes, fields, p, 0),
+		f32(virtual_level_texel(6)),
+	)
+	testing.expect_value(
+		t,
+		virtual_node_texel(table, planes, fields, q, 0),
+		f32(virtual_level_texel(8)),
+	)
+	right, _ := light_basis(direction)
+	// Far from both, no level draws under it.
+	testing.expect_value(t, virtual_node_texel(table, planes, fields, right * 5000, 1), f32(0))
+}
+
+// A mesh that is not resident has no items, so its slot casts nothing. The frame that first draws it finds the slot
+// casting, which is a change of casters at once, and the pages under its sphere drop in that frame.
+@(test)
+a_mesh_that_becomes_resident_drops_the_pages_under_it :: proc(t: ^testing.T) {
+	tracking := new(Caster_Tracking)
+	defer {
+		delete(tracking.changes)
+		free(tracking)
+	}
+	records := make([]Instance_Record, 1, context.temp_allocator)
+	records[0].rows = {{1, 0, 0, 0}, {0, 1, 0, -1}, {0, 0, 1, 5}}
+	pipelines := make([]Material_Pipeline, 1, context.temp_allocator)
+	// Not resident yet: no item.
+	bounds := caster_bounds(records, nil, pipelines, nil, 1, context.temp_allocator)
+	track_casters(tracking, bounds, {}, 1)
+	testing.expect_value(t, len(tracking.changes), 0)
+	// Resident: its item casts.
+	items := []Cull_Item{{instance = 0, flags = ITEM_CASTS_SHADOWS, sphere = {0, 0, 0, 0.5}}}
+	bounds = caster_bounds(records, items, pipelines, nil, 1, context.temp_allocator)
+	track_casters(tracking, bounds, {}, 2)
+	testing.expect_value(t, len(tracking.changes), 1)
+	live: Live_Slots
+	spheres := virtual_drop_spheres(
+		tracking,
+		tracking.changes[:],
+		&live,
+		1,
+		{},
+		context.temp_allocator,
+	)
+	testing.expect_value(t, len(spheres), 1)
+	c := test_camera()
+	views := test_views(c)
+	dropped := make([]u32, VIRTUAL_MAX_LEVELS * VIRTUAL_LEVEL_WORDS, context.temp_allocator)
+	virtual_drop_pages(views, spheres, dropped)
+	for view, level in views {
+		texel, _ := virtual_project(view, {0, -1, 5})
+		page := [2]i32{i32(texel.x) / VIRTUAL_PAGE_TEXELS, i32(texel.y) / VIRTUAL_PAGE_TEXELS}
+		testing.expectf(
+			t,
+			is_marked(dropped, level, page),
+			"level %d kept the page under the mesh",
+			level,
+		)
+	}
+}
+
+// Streaming's drops: each group of a page that came into the pool or left it, under each slot that draws its mesh, once
+// each, in the levels that its error at the slot's scale shows in; and each slot of a masked material whose texture came
+// in at a finer mip, over its caster.
+@(test)
+streaming_drops_follow_the_groups_and_the_masked_textures_that_changed :: proc(t: ^testing.T) {
+	r := new(Renderer)
+	defer free(r)
+	s := &r.scene
+	pool := &r.residency.pool
+	defer {
+		delete(pool.meshes)
+		delete(pool.changes)
+		delete(r.residency.refined)
+	}
+	// A paged mesh of two pages at the table's entry 8, whose page 1 has two groups of 1 cm and 1 mm.
+	groups := []Page_Group{{{0, 0, 0}, 0.1, 0.01}, {{1, 0, 0}, 0.1, 0.001}}
+	group_first := []u32{0, 0, 2}
+	append(
+		&pool.meshes,
+		Pool_Mesh{live = true, first = 8, count = 2, groups = groups, group_first = group_first},
+	)
+	append(&pool.changes, Page_Change{1, 1})
+	meshes := []Mesh_Record{{flags = MESH_RECORD_PAGED, pages = 8}, {}}
+	// Slot 0 draws the paged mesh at twice its size, 10 m out, with two submeshes; slot 1 draws another mesh; slot 2 draws
+	// a masked material's mesh.
+	s.high = 3
+	s.records[0].rows = {{2, 0, 0, 0}, {0, 2, 0, 0}, {0, 0, 2, 10}}
+	s.records[1].rows = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}}
+	s.records[2].rows = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 20}}
+	casting := u32(ITEM_CASTS_SHADOWS | ITEM_MESH_PATH)
+	items := []Cull_Item {
+		{instance = 0, mesh = 0, flags = casting},
+		{instance = 0, mesh = 0, flags = casting, submesh = 1},
+		{instance = 1, mesh = 1, flags = casting},
+		{instance = 2, mesh = 1, flags = casting, material = 64},
+	}
+	texture := format.Guid {
+		0 = 7,
+	}
+	masked := make(map[u32][]format.Material_Texture, context.temp_allocator)
+	masked[64] = []format.Material_Texture{{guid = texture}}
+	s.casters.slots[2] = {
+		casts  = true,
+		sphere = {ecs.position_offset({}, {0, 0, 20}), 1},
+	}
+	levels := 11
+	drops := stream_drops(r, items, meshes, nil, masked, levels, context.temp_allocator)
+	testing.expect_value(t, len(drops), 2)
+	if len(drops) == 2 {
+		// The 1 cm group at twice its size shows in the levels whose texels are under 2 cm; the 1 mm group in level 0.
+		testing.expect_value(t, drops[0].levels, virtual_error_levels(0.02, levels))
+		testing.expect_value(t, drops[0].center, ecs.position_offset({}, {0, 0, 10}))
+		testing.expect_value(t, drops[0].radius, f32(0.2))
+		testing.expect_value(t, drops[1].levels, virtual_error_levels(0.002, levels))
+		testing.expect_value(t, drops[1].center, ecs.position_offset({}, {2, 0, 10}))
+	}
+
+	// The masked material's texture comes in at mip 2 of 1024, from mip 6: a texel of 2 m / 16 over its caster.
+	clear(&pool.changes)
+	append(&r.residency.refined, Refined_Texture{texture, {1024, 1024}, 6})
+	drops = stream_drops(r, items, meshes, nil, masked, levels, context.temp_allocator)
+	if testing.expect_value(t, len(drops), 1) {
+		testing.expect_value(t, drops[0].center, ecs.position_offset({}, {0, 0, 20}))
+		testing.expect_value(t, drops[0].levels, virtual_error_levels(2.0 / 16, levels))
+	}
+	// Another texture changes nothing, and neither does the cache without its levels.
+	r.residency.refined[0].guid = {}
+	testing.expect_value(
+		t,
+		len(stream_drops(r, items, meshes, nil, masked, levels, context.temp_allocator)),
+		0,
+	)
+	testing.expect_value(
+		t,
+		len(stream_drops(r, items, meshes, nil, masked, 0, context.temp_allocator)),
+		0,
+	)
 }

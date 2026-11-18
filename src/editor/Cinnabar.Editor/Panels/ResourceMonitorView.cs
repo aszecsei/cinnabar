@@ -145,6 +145,8 @@ public sealed class ResourceMonitorView : Grid
             yield return ("Shadow pages cached", $"{g.VirtualPagesCached:N0}");
             yield return ("Shadow pages drawn", $"{g.VirtualPagesDrawn:N0}");
             yield return ("Shadow pages evicted", $"{g.VirtualPagesEvicted:N0}");
+            // The pages that streaming drew again, and those that wait for their turn (see docs/rendering/lighting-and-shadows.md#streaming).
+            yield return ("Shadow pages streamed", g.VirtualPagesWaiting > 0 ? $"{g.VirtualPagesStreamed:N0}, {g.VirtualPagesWaiting:N0} waiting" : $"{g.VirtualPagesStreamed:N0}");
             yield return ("Shadow page pool", $"{g.VirtualPagesResident:N0} / {g.VirtualPagesCapacity:N0} ({g.VirtualPagesResident * 100.0 / g.VirtualPagesCapacity:0}% full)");
         }
     }

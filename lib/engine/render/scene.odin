@@ -806,6 +806,9 @@ Scene_Frame :: struct {
 	// The slots that the view draws live over its shadow caches, and its dynamic shadow distance (see casters.odin).
 	live:               ^Live_Slots,
 	dynamic_distance:   f32,
+	// What streaming changed of the casters since the frame before, which the virtual shadow map's cache drops (see
+	// stream_drops).
+	stream_drops:       []Stream_Drop,
 }
 
 scene_init :: proc(s: ^Gpu_Scene, platform: ^core.Platform_API) {
@@ -971,9 +974,10 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32, skins: []Skin_Pose)
 	)
 
 	table := Material_Table {
-		uses  = make(map[format.Guid]Material_Use, r.platform.frame_allocator),
-		bytes = make([dynamic]byte, r.platform.frame_allocator),
-		look  = material_look(f, ecs.position_sub(f.view.position, s.origin)),
+		uses   = make(map[format.Guid]Material_Use, r.platform.frame_allocator),
+		bytes  = make([dynamic]byte, r.platform.frame_allocator),
+		look   = material_look(f, ecs.position_sub(f.view.position, s.origin)),
+		masked = make(map[u32][]format.Material_Texture, r.platform.frame_allocator),
 	}
 	meshes := make([dynamic]Mesh_Record, r.platform.frame_allocator)
 	mesh_indices := make(map[^Resident_Mesh]u32, r.platform.frame_allocator)
@@ -1220,6 +1224,17 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32, skins: []Skin_Pose)
 		if slot_live(sf.live, set.slot) {
 			set.flags |= SET_LIVE
 		}
+	}
+	if f.shadow_settings.virtual_cache {
+		sf.stream_drops = stream_drops(
+			r,
+			items[:],
+			meshes[:],
+			set_bounds[:],
+			table.masked,
+			SHADOW_PARAMS[f.shadow_settings.level].virtual_levels,
+			r.platform.frame_allocator,
+		)
 	}
 
 	// Each pipeline's opaque or moment-based items are a bin, in one range of each view's draws. Each sorted item is a
@@ -1688,6 +1703,12 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 	}
 	sf.view_constants = make([]gpu.Upload, sf.draw_views, platform.frame_allocator)
 	views := make([]Cull_View, sf.draw_views, platform.frame_allocator)
+	// The virtual shadow map's levels pick their meshlets by their texels, from a walk of their own.
+	sf.meshlet_select.shadow = meshlet_select_shadow_buffers(
+		r,
+		sf.meshlet_select.items,
+		shadows.virtual.count,
+	)
 	for v in 0 ..< sf.view_count {
 		c := constants
 		views[v].first_draw = u32(v * sf.draws_per_view)
@@ -1755,6 +1776,10 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 				c.virtual_level, c.virtual_draw = u32(shadow), 1
 				views[v].virtual_table = gpu.read_index(f.state.virtual_shadows.table) + 1
 				views[v].virtual_page = virtual_page_fields(shadows.views[shadow], shadow)
+				if sf.meshlet_select.shadow {
+					c.lod_scale, c.lod_near = virtual_lod_scale(shadow)
+					c.selected_meshlets = gpu.read_index(s.meshlet_select.shadow_selected)
+				}
 			}
 			views[v].planes = shadows.planes[shadow]
 			views[v].flags = flags
@@ -1867,9 +1892,16 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 		sf.items = nil
 		return
 	}
+	if !meshlet_select_shadow_constants(f, cull, FIRST_SHADOW_VIEW, shadows.virtual.count) {
+		sf.items = nil
+		return
+	}
 	if shadows.virtual.count > 0 && has_items {
 		levels := cull
 		levels.view_first, levels.view_skip = FIRST_SHADOW_VIEW, 0
+		if sf.meshlet_select.shadow {
+			levels.selections = gpu.read_index(s.meshlet_select.shadow_selections)
+		}
 		sf.virtual_cull, ok = platform.gpu_upload(
 			size_of(Cull_Constants),
 			gpu.PASS_CONSTANTS_ALIGN,
@@ -1913,6 +1945,9 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 	}
 	if sf.meshlet_select.selections != 0 {
 		copy_dest(g, p, sf.meshlet_select.selections)
+	}
+	if sf.meshlet_select.shadow_selections != 0 {
+		copy_dest(g, p, sf.meshlet_select.shadow_selections)
 	}
 	add_select_patches_pass(f)
 	add_meshlet_select_pass(f)
@@ -3040,13 +3075,23 @@ update_scene :: proc(ctx: ^Pass_Context) {
 			CULL_STATS_WORDS * 4,
 		)
 	}
-	// The counter of the selected meshlets' list.
+	// The counters of the selected meshlets' lists.
 	if sf.meshlet_select.selections != 0 {
 		gpu.cmd_copy_buffer(
 			ctx.cb,
 			sf.zero_upload.buffer,
 			sf.zero_upload.offset,
 			gpu_buffer(g, sf.meshlet_select.selections),
+			0,
+			4,
+		)
+	}
+	if sf.meshlet_select.shadow_selections != 0 {
+		gpu.cmd_copy_buffer(
+			ctx.cb,
+			sf.zero_upload.buffer,
+			sf.zero_upload.offset,
+			gpu_buffer(g, sf.meshlet_select.shadow_selections),
 			0,
 			4,
 		)

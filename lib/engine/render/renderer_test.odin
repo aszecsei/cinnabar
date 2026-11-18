@@ -4,6 +4,7 @@ import "base:runtime"
 import "core:fmt"
 import "core:log"
 import "core:math"
+import "core:math/bits"
 import "core:math/linalg"
 import "core:mem/virtual"
 import "core:os"
@@ -503,6 +504,31 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 			cached && cache.epoch == 2 && cache.settings.virtual_cache,
 			"the cache did not count on",
 		)
+		// Pages that streaming dropped wait for their turn: a frame drops the level's budget of them and keeps the rest,
+		// a frame that fails keeps them all, and a frame that starts again has none.
+		WAITING :: 300
+		budget := SHADOW_PARAMS[.High].stream_pages
+		v := &r.view.virtual_shadows
+		v.waiting = new(Virtual_Waiting, r.platform.heap_allocator)
+		for i in 0 ..< WAITING {
+			v.waiting.bits[i / 32] |= 1 << uint(i % 32)
+		}
+		testing.expect(t, draw_frame(r, w, desc), "the virtual shadow map's frame did not execute")
+		testing.expect_value(t, v.stream, Virtual_Stream_Stats{u32(budget), u32(WAITING - budget)})
+		testing.expect(t, v.waiting != nil)
+		platform.gpu_submit = fail_submit
+		testing.expect(t, !draw_frame(r, w, desc), "the frame executed with a submit that fails")
+		platform.gpu_submit = null.submit
+		testing.expect_value(t, v.stream, Virtual_Stream_Stats{u32(budget), u32(WAITING - budget)})
+		left := 0
+		for word in v.waiting.bits {
+			left += int(bits.count_ones(word))
+		}
+		testing.expect_value(t, left, WAITING - budget)
+		// The failed frame's changes are not known, so the cache starts again, and nothing waits.
+		testing.expect(t, draw_frame(r, w, desc), "the virtual shadow map's frame did not execute")
+		testing.expect(t, v.waiting == nil && v.stream == {})
+		testing.expect(t, draw_frame(r, w, desc), "the virtual shadow map's frame did not execute")
 		// A level with another pool remakes it, whose pages hold nothing, so the cache starts again.
 		q.shadows.level = .Ultra
 		testing.expect(t, draw_frame(r, w, desc), "the virtual shadow map's frame did not execute")

@@ -96,6 +96,26 @@ Mesh_Pool :: struct {
 	// Whether the GPU's table is of this pool. ensure_pool is its only writer with commit_stream_pages and
 	// mesh_pool_not_sent.
 	table_sync:    Table_Sync,
+	// The pages that came into the pool or left it since the last update, which change_page lists, and those that came
+	// or left before it, which this frame's shadows take (see mesh_pool_changes).
+	changing:      [dynamic]Page_Change,
+	changes:       [dynamic]Page_Change,
+}
+
+// Page_Change is a page of a mesh that came into the pool or left it: what a view's meshlets can draw of the mesh
+// changed under its groups, which the virtual shadow map's cache draws again (see
+// docs/rendering/lighting-and-shadows.md#streaming).
+Page_Change :: struct {
+	mesh: u32,
+	page: u32,
+}
+
+// Page_Group is a group of a paged mesh, in the mesh's space: its sphere and its error, which is the error of the
+// coarser meshlets that draw in its place while its page is absent.
+Page_Group :: struct {
+	center: [3]f32,
+	radius: f32,
+	error:  f32,
 }
 
 // Table_Sync is whether the GPU's page table says where pages are in the pool's buffer as it is now.
@@ -137,6 +157,9 @@ Pool_Mesh :: struct {
 	stride:       u32,
 	records:      []format.Mesh_Page,
 	dependencies: []u32,
+	// The groups of each page: page i's are groups[group_first[i]:group_first[i + 1]].
+	groups:       []Page_Group,
+	group_first:  []u32,
 	// The frame that something last drew the mesh without a selection, which keeps every page of it.
 	pinned_frame: u64,
 	// A page of it was not what its table said, which was logged. It asks for no more.
@@ -284,6 +307,7 @@ change_page :: proc(
 		end_read(pool, platform, copying.read)
 		page.state = Page_Resident{copying.slot}
 		page.used_frame = pool.frame
+		record_change(pool, entry)
 	case Page_Not_Copied:
 		copying := page.state.(Page_Copying) or_return
 		give_slot(pool, entry, copying.slot)
@@ -298,12 +322,20 @@ change_page :: proc(
 			give_slot(pool, entry, s.slot)
 		case Page_Resident:
 			give_slot(pool, entry, s.slot)
+			record_change(pool, entry)
 		case:
 			return false
 		}
 		page.state = nil
 	}
 	return true
+}
+
+// record_change lists a page that came into the pool or left it, by its mesh and its index in the mesh.
+@(private = "file")
+record_change :: proc(pool: ^Mesh_Pool, entry: u32) {
+	id := pool.pages[entry].mesh
+	append(&pool.changing, Page_Change{id, entry - pool.meshes[id - 1].first})
 }
 
 // set_entry sets a table entry's slot, and lists the entry for the GPU.
@@ -361,6 +393,8 @@ make_tables :: proc(pool: ^Mesh_Pool, platform: ^core.Platform_API) {
 	pool.meshes = make([dynamic]Pool_Mesh, heap)
 	pool.free_ranges = make([dynamic][2]u32, heap)
 	pool.cooling = make([dynamic]Cooling_Range, heap)
+	pool.changing = make([dynamic]Page_Change, heap)
+	pool.changes = make([dynamic]Page_Change, heap)
 	append(&pool.free_ranges, [2]u32{0, MAX_MESH_PAGES})
 }
 
@@ -388,6 +422,8 @@ mesh_pool_destroy :: proc(pool: ^Mesh_Pool, platform: ^core.Platform_API) {
 	delete(pool.meshes)
 	delete(pool.free_ranges)
 	delete(pool.cooling)
+	delete(pool.changing)
+	delete(pool.changes)
 	pool^ = {}
 }
 
@@ -413,6 +449,8 @@ ensure_pool :: proc(pool: ^Mesh_Pool, platform: ^core.Platform_API) -> bool {
 			change_page(pool, platform, u32(entry), Page_Left{})
 		}
 	}
+	// No mesh draws until its roots are back, which its casters' changes say, so the pages that left are no changes.
+	clear(&pool.changing)
 	platform.gpu_destroy_buffer(pool.pool)
 	delete(pool.slots, platform.heap_allocator)
 	pool.pool, pool.slots, pool.slot_count = {}, nil, 0
@@ -510,6 +548,7 @@ mesh_pool_add :: proc(
 		records      = slice.clone(records, heap),
 		dependencies = slice.clone(format.mesh_page_dependencies(data, blob), heap),
 	}
+	mesh.groups, mesh.group_first = page_groups(format.mesh_meshlet_nodes(data, blob), count, heap)
 	// A dependency is a page of the mesh in its blob, and an entry of the table here.
 	for &d in mesh.dependencies {
 		d += first
@@ -555,7 +594,64 @@ mesh_pool_remove :: proc(pool: ^Mesh_Pool, platform: ^core.Platform_API, id: u32
 	)
 	delete(mesh.records, platform.heap_allocator)
 	delete(mesh.dependencies, platform.heap_allocator)
+	delete(mesh.groups, platform.heap_allocator)
+	delete(mesh.group_first, platform.heap_allocator)
+	// A mesh that goes stops casting, which its casters' changes say, and its id may be another mesh's next.
+	for i := len(pool.changing) - 1; i >= 0; i -= 1 {
+		if pool.changing[i].mesh == id {
+			unordered_remove(&pool.changing, i)
+		}
+	}
 	mesh^ = {}
+}
+
+// page_groups are a mesh's groups by their pages, from its leaf nodes, and each page's first among them, with one more
+// past the last page.
+@(private = "file")
+page_groups :: proc(
+	nodes: []format.Meshlet_Node,
+	count: u32,
+	allocator := context.allocator,
+) -> (
+	groups: []Page_Group,
+	first: []u32,
+) {
+	first = make([]u32, count + 1, allocator)
+	for n in nodes {
+		if n.count & format.MESHLET_NODE_LEAF != 0 && n.page < count {
+			first[n.page + 1] += 1
+		}
+	}
+	for i in 1 ..= count {
+		first[i] += first[i - 1]
+	}
+	groups = make([]Page_Group, first[count], allocator)
+	next := slice.clone(first[:count], context.temp_allocator)
+	for n in nodes {
+		if n.count & format.MESHLET_NODE_LEAF != 0 && n.page < count {
+			groups[next[n.page]] = {n.center, n.radius, n.error}
+			next[n.page] += 1
+		}
+	}
+	return
+}
+
+// mesh_pool_changes are the pages that came into the pool or left it before this frame's update, and so since the frame
+// before drew: the frame's shadows draw again what their groups cover.
+mesh_pool_changes :: proc(pool: ^Mesh_Pool) -> []Page_Change {
+	return pool.changes[:]
+}
+
+// mesh_pool_groups are the groups of a page of a mesh, none for a mesh that is not in the pool.
+mesh_pool_groups :: proc(pool: ^Mesh_Pool, change: Page_Change) -> []Page_Group {
+	if change.mesh == 0 || int(change.mesh) > len(pool.meshes) {
+		return nil
+	}
+	m := &pool.meshes[change.mesh - 1]
+	if !m.live || change.page >= m.count {
+		return nil
+	}
+	return m.groups[m.group_first[change.page]:m.group_first[change.page + 1]]
 }
 
 @(private = "file")
@@ -625,6 +721,9 @@ mesh_pool_update :: proc(pool: ^Mesh_Pool, platform: ^core.Platform_API, assets:
 		return
 	}
 	pool.frame += 1
+	// What came or left since the last update is this frame's to draw shadows for.
+	pool.changes, pool.changing = pool.changing, pool.changes
+	clear(&pool.changing)
 	pool.level0_budget = LEVEL0_PAGES_PER_FRAME
 	pool.wanted = nil
 	pool.stats.streamed_bytes = 0

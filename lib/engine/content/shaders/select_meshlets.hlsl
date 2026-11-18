@@ -8,9 +8,15 @@
 // the walk lists the meshlets of a group whose page is resident, packed with the page's slot, and marks the page as
 // used in the feedback; it lists none of a group whose page is absent, and raises the page's word of the feedback to
 // the group's projected error, which is how much the page is wanted.
+//
+// The virtual shadow map's levels take a walk of their own, once the page table is written (shadow_levels above 0): a
+// node's error shows by the texels of the finest level whose drawn pages its sphere reaches, and not by the camera's
+// pixels, and an absent page's word is below every word of the camera's walk (see
+// docs/rendering/lighting-and-shadows.md#streaming).
 #include "cinnabar.hlsli"
 #include "meshlet_lod.hlsli"
 #include "mesh_pages.hlsli"
+#include "virtual_pages.hlsli"
 
 // Matches Meshlet_Select_Constants in lib/engine/render/meshlet_select.odin. The items to walk, by their index, the
 // draw items and the mesh records are in the upload ring, at these offsets of its buffer. selections has the list's
@@ -34,6 +40,12 @@ struct Meshlet_Select_Constants {
 	// The page table, and the feedback: a word for each of its entries, 0 when the frame has no pool.
 	uint pages;
 	uint feedback;
+	// The virtual shadow map's walk: its count of levels, 0 for the camera's walk, and the culling views, whose levels are
+	// from view_first on.
+	uint shadow_levels;
+	uint views;
+	uint views_offset;
+	uint view_first;
 	uint padding;
 };
 CN_PASS_CONSTANTS(Meshlet_Select_Constants, walk);
@@ -56,6 +68,20 @@ struct Item {
 	uint list;
 	float4 lod_sphere;
 };
+
+// Matches Cull_View in cull_draws.hlsl.
+struct Cull_View {
+	float4 planes[6];
+	float4 offset;
+	uint first_draw;
+	uint flags;
+	uint virtual_table;
+	uint virtual_page;
+};
+
+// The error in texels that may show in a level's cut. Matches VIRTUAL_LOD_TEXELS in
+// lib/engine/render/virtual_shadows.odin.
+static const float VIRTUAL_LOD_TEXELS = 1.0;
 
 // Matches Instance_Record in lib/engine/render/scene.odin.
 struct Instance_Record {
@@ -107,6 +133,19 @@ float3 transform_point(float4 rows[3], float3 p) {
 	return float3(dot(rows[0], v), dot(rows[1], v), dot(rows[2], v));
 }
 
+// node_texel is the texel of the finest level whose drawn pages a sphere in the world, relative to the render origin,
+// reaches, or 0 when it reaches none. A coarser level's cut is coarser, so the finest's holds every level's. Matches
+// virtual_node_texel in lib/engine/render/virtual_shadows.odin.
+float node_texel(float3 world, float radius) {
+	for (uint level = 0; level < walk.shadow_levels; level++) {
+		Cull_View view = cn_buffer(walk.views).Load<Cull_View>(walk.views_offset + (walk.view_first + level) * sizeof(Cull_View));
+		if (virtual_view_reaches_draws(view.planes, view.virtual_table, view.virtual_page, world - view.offset.xyz, radius)) {
+			return VIRTUAL_FIRST_PAGE * float(1u << level) / VIRTUAL_PAGE_TEXELS;
+		}
+	}
+	return 0;
+}
+
 [numthreads(WALK_GROUP_SIZE, 1, 1)]
 void cs_main(uint3 group : SV_GroupID, uint thread : SV_GroupIndex) {
 	uint walk_index = group.y * MESHLET_SELECT_ROW + group.x;
@@ -146,8 +185,14 @@ void cs_main(uint3 group : SV_GroupID, uint thread : SV_GroupIndex) {
 		uint out_queue = in_queue ^ 1;
 		for (uint i = thread; i < count; i += WALK_GROUP_SIZE) {
 			Meshlet_Node n = cn_buffer(nodes).Load<Meshlet_Node>((item.entry + queue[in_queue][i]) * sizeof(Meshlet_Node));
-			float3 center = transform_point(instance.rows, n.sphere.xyz) - walk.camera.xyz;
-			float shows = lod_error(center, n.sphere.w, n.error, scale, walk.lod_near, walk.lod_scale);
+			float3 world = transform_point(instance.rows, n.sphere.xyz);
+			float shows;
+			if (walk.shadow_levels > 0) {
+				float texel = node_texel(world, n.sphere.w * scale + item.bound);
+				shows = texel > 0 ? n.error * scale / (texel * VIRTUAL_LOD_TEXELS) : 0;
+			} else {
+				shows = lod_error(world - walk.camera.xyz, n.sphere.w, n.error, scale, walk.lod_near, walk.lod_scale);
+			}
 			if (shows <= WALK_THRESHOLD) {
 				continue;
 			}
@@ -161,8 +206,10 @@ void cs_main(uint3 group : SV_GroupID, uint thread : SV_GroupIndex) {
 					uint page_slot = mesh_page_slot(walk.pages, entry);
 					uint previous;
 					if (page_slot == MESH_PAGE_ABSENT) {
-						// Wanted by how much its error shows: a float over 0 orders as its bits do.
-						cn_rw_buffer(walk.feedback).InterlockedMax(entry * 4, asuint(min(shows, 3.0e38)), previous);
+						// Wanted by how much its error shows: a float over 0 orders as its bits do. The shadows' wants are from
+						// 0.25 to 0.5, below the camera's, which show by more than WALK_THRESHOLD.
+						float want = walk.shadow_levels > 0 ? 0.5 * shows / (shows + 1) : min(shows, 3.0e38);
+						cn_rw_buffer(walk.feedback).InterlockedMax(entry * 4, asuint(want), previous);
 						continue;
 					}
 					cn_rw_buffer(walk.feedback).InterlockedMax(entry * 4, 1, previous);
@@ -203,8 +250,11 @@ void cs_main(uint3 group : SV_GroupID, uint thread : SV_GroupIndex) {
 		}
 		base = whole ? SELECTION_NONE : first;
 		cn_rw_buffer(walk.selections).Store2(8 + item_index * 8, uint2(first, whole ? SELECTION_NONE : total));
-		cn_rw_buffer(walk.stats).InterlockedAdd(STATS_HIERARCHY_MESHLETS, item.count);
-		cn_rw_buffer(walk.stats).InterlockedAdd(STATS_SELECTED_MESHLETS, whole ? item.count : total);
+		// The camera's tally only.
+		if (walk.shadow_levels == 0) {
+			cn_rw_buffer(walk.stats).InterlockedAdd(STATS_HIERARCHY_MESHLETS, item.count);
+			cn_rw_buffer(walk.stats).InterlockedAdd(STATS_SELECTED_MESHLETS, whole ? item.count : total);
+		}
 	}
 	GroupMemoryBarrierWithGroupSync();
 	if (base == SELECTION_NONE) {
