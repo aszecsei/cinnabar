@@ -468,3 +468,55 @@ a_chunk_is_under_the_one_level_that_reaches_its_world :: proc(t: ^testing.T) {
 	testing.expect_value(t, blobs[4].unit, 1)
 	testing.expect_value(t, blobs[6].unit, 1)
 }
+
+// sublevel_scene_blob is a scene blob that lists sublevels, as a scene's base does.
+@(private = "file")
+sublevel_scene_blob :: proc(sublevels: []format.Scene_Sublevel) -> []byte {
+	data := format.scene_write(
+		{},
+		{},
+		0,
+		sublevels = sublevels,
+		allocator = context.temp_allocator,
+	)
+	aligned, _ := mem.alloc_bytes(len(data), format.BLOB_ALIGN, context.temp_allocator)
+	copy(aligned, data)
+	return aligned
+}
+
+@(test)
+a_sublevel_is_in_its_scenes_unit :: proc(t: ^testing.T) {
+	hall, yard, vale, north := guid_of(HALL), guid_of(YARD), guid_of(VALE), guid_of(NORTH)
+	hall_night, north_night, moss, fern :=
+		guid_of(STONE), guid_of(SOUTH), guid_of(MOSS), guid_of(FERN)
+	blobs := []Package_Blob {
+		{
+			guid = hall,
+			kind = .Scene,
+			data = sublevel_scene_blob({{"night", hall_night}}),
+			references = {hall_night},
+		},
+		{guid = hall_night, kind = .Scene, references = {moss}},
+		{guid = moss, kind = .Material},
+		{guid = yard, kind = .Scene, references = {vale}},
+		{guid = vale, kind = .World, data = world_blob({north}, {}), references = {north}},
+		{
+			guid = north,
+			kind = .Scene,
+			data = sublevel_scene_blob({{"night", north_night}}),
+			references = {north_night},
+		},
+		{guid = north_night, kind = .Scene, references = {fern}},
+		{guid = fern, kind = .Texture},
+	}
+	units := assign_units(blobs, nil)
+	// Neither sublevel is a level or a chunk: each is in its scene's unit, with what it alone uses.
+	testing.expect(
+		t,
+		slice.equal(units, []Package_Unit{{hall, GLOBAL_UNIT}, {yard, GLOBAL_UNIT}, {north, 1}}),
+	)
+	testing.expect_value(t, blobs[1].unit, 0)
+	testing.expect_value(t, blobs[2].unit, 0)
+	testing.expect_value(t, blobs[6].unit, 2)
+	testing.expect_value(t, blobs[7].unit, 2)
+}

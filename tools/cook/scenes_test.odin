@@ -2,6 +2,7 @@ package cook
 
 import "core:fmt"
 import "core:os"
+import "core:slice"
 import "core:strings"
 import "core:testing"
 
@@ -446,4 +447,143 @@ a_prefab_cannot_refer_to_another_scene :: proc(t: ^testing.T) {
 		testing.expect_value(t, value.entity, 0)
 		testing.expect_value(t, value.scene, format.Guid{})
 	}
+}
+
+// SUBLEVELS is a scene with a base and two sublevels. The base's 1 refers to night's 2 and to its own 4; night's 2 refers
+// to the base's 1 and to its own 5, which is its child; storm's 3 refers to nothing.
+@(private = "file")
+SUBLEVELS :: `scene 4
+entity 0000000000000001
+component 7 Probe
+	other = @0000000000000002
+	near = @0000000000000004
+
+entity 0000000000000002
+sublevel = "night"
+component 7 Probe
+	back = @0000000000000001
+	mate = @0000000000000005
+
+entity 0000000000000003
+sublevel = "storm"
+
+entity 0000000000000004
+
+entity 0000000000000005
+parent = @0000000000000002
+`
+
+@(private = "file")
+SUBLEVEL_SETTINGS :: "sublevel.night = inactive\nsublevel.storm = inactive\n"
+
+@(private = "file")
+part_ids :: proc(scene: format.Scene) -> []u64 {
+	ids := make([]u64, len(scene.entities), context.temp_allocator)
+	for e, i in scene.entities {
+		ids[i] = e.id
+	}
+	return ids
+}
+
+@(test)
+a_scene_cooks_a_blob_for_each_sublevel :: proc(t: ^testing.T) {
+	tree := make_tree(
+		t,
+		{{"project.settings", SUBLEVEL_SETTINGS}, {"content/level.scene", SUBLEVELS}},
+	)
+	defer remove_tree(tree)
+	options := tree_options(tree)
+
+	pass := cook(options, {.Scene})
+	testing.expectf(t, pass.ok, "problems: %v", pass.problems.list)
+	testing.expect_value(t, pass.cooked[.Scene], 3)
+	level := tree_guid(t, tree, "level.scene")
+	meta := read_meta(t, tree, "level.scene")
+	night, night_found := format.meta_subasset(meta, format.SUBLEVEL_KIND, "night")
+	storm, storm_found := format.meta_subasset(meta, format.SUBLEVEL_KIND, "storm")
+	testing.expect(t, night_found && storm_found && night != storm && night != level)
+
+	base_data := tree_blob(t, tree, level)
+	listed, listed_ok := format.scene_sublevels(base_data, context.temp_allocator)
+	testing.expect(
+		t,
+		listed_ok &&
+		slice.equal(listed, []format.Scene_Sublevel{{"night", night}, {"storm", storm}}),
+	)
+	base, base_ok := format.scene_read(base_data, context.temp_allocator)
+	night_scene, night_ok := format.scene_read(tree_blob(t, tree, night), context.temp_allocator)
+	storm_scene, storm_ok := format.scene_read(tree_blob(t, tree, storm), context.temp_allocator)
+	testing.expect(t, base_ok && night_ok && storm_ok)
+	if !base_ok || !night_ok || !storm_ok {
+		return
+	}
+	// Each part has its own entities, with the IDs of the file.
+	testing.expect_value(t, base.guid, level)
+	testing.expect_value(t, night_scene.guid, night)
+	testing.expect(t, slice.equal(part_ids(base), []u64{1, 4}))
+	testing.expect(t, slice.equal(part_ids(night_scene), []u64{2, 5}))
+	testing.expect(t, slice.equal(part_ids(storm_scene), []u64{3}))
+	testing.expect_value(t, night_scene.entities[1].parent, 2)
+	// A reference across parts names the other part's GUID, and one in a part stays local.
+	from_base := base.entities[0].components[0].fields
+	testing.expect_value(t, from_base[0].value.scene, night)
+	testing.expect_value(t, from_base[0].value.entity, 2)
+	testing.expect_value(t, from_base[1].value.scene, format.Guid{})
+	testing.expect_value(t, from_base[1].value.entity, 4)
+	from_night := night_scene.entities[0].components[0].fields
+	testing.expect_value(t, from_night[0].value.scene, level)
+	testing.expect_value(t, from_night[0].value.entity, 1)
+	testing.expect_value(t, from_night[1].value.scene, format.Guid{})
+	testing.expect_value(t, from_night[1].value.entity, 5)
+
+	again := cook(options, {.Scene})
+	testing.expect_value(t, again.cooked[.Scene], 0)
+	testing.expect_value(t, again.current[.Scene], 3)
+
+	// Moving storm's entity into night cooks the scene again; storm's blob goes, and its .meta line stays.
+	moved, _ := strings.replace(
+		SUBLEVELS,
+		`sublevel = "storm"`,
+		`sublevel = "night"`,
+		1,
+		context.temp_allocator,
+	)
+	path := fmt.tprintf("%s/content/level.scene", tree.dir)
+	testing.expect(t, os.write_entire_file(path, transmute([]byte)moved) == nil)
+	changed := cook(options, {.Scene})
+	testing.expectf(t, changed.ok, "problems: %v", changed.problems.list)
+	testing.expect_value(t, changed.cooked[.Scene], 2)
+	_, kept := format.meta_subasset(
+		read_meta(t, tree, "level.scene"),
+		format.SUBLEVEL_KIND,
+		"storm",
+	)
+	testing.expect(t, kept)
+	buffer: [32]u8
+	storm_path := fmt.tprintf("%s/%s.blob", options.cache, format.guid_format(storm, &buffer))
+	testing.expect(t, !os.exists(storm_path))
+	night_after, _ := format.scene_read(tree_blob(t, tree, night), context.temp_allocator)
+	testing.expect(t, slice.equal(part_ids(night_after), []u64{2, 3, 5}))
+}
+
+@(test)
+a_scene_without_sublevels_cooks_one_blob_as_before :: proc(t: ^testing.T) {
+	text := "scene 4\nentity 0000000000000001\ncomponent 7 Probe\n\tnear = @0000000000000002\n\nentity 0000000000000002\n"
+	tree := make_tree(t, {{"content/level.scene", text}})
+	defer remove_tree(tree)
+
+	pass := cook(tree_options(tree), {.Scene})
+	testing.expectf(t, pass.ok, "problems: %v", pass.problems.list)
+	testing.expect_value(t, pass.cooked[.Scene], 1)
+	testing.expect_value(t, len(read_meta(t, tree, "level.scene").subassets), 0)
+	level := tree_guid(t, tree, "level.scene")
+	data := tree_blob(t, tree, level)
+	sublevels, ok := format.scene_sublevels(data, context.temp_allocator)
+	testing.expect(t, ok && len(sublevels) == 0)
+	// The blob is the whole scene, as the scene writes it without parts.
+	scene, _, parsed := format.scene_parse(text, context.temp_allocator)
+	testing.expect(t, parsed)
+	header, _ := format.blob_header(data)
+	expected := format.scene_write(scene, level, header.key, allocator = context.temp_allocator)
+	testing.expect(t, slice.equal(data, expected))
 }

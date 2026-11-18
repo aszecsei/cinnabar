@@ -5,12 +5,13 @@ package cook
 
 import "core:fmt"
 import "core:hash"
+import "core:os"
 import "core:slice"
 
 import format "cinnabar:engine/asset/format"
 
 // Changing how the cooker cooks scenes changes this, which invalidates every cooked scene.
-SCENE_COOK_VERSION :: "scenes 4"
+SCENE_COOK_VERSION :: "scenes 5"
 
 // cook_scenes cooks the prefabs and the scenes among the assets whose keys changed. The cooker cannot lay out native
 // components, because their types exist only in the game DLL, so it checks only what the file itself says: its
@@ -126,32 +127,74 @@ cook_scenes :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass) 
 					}
 				}
 			}
-			// A scene's navmeshes are its sub-assets, which its blob lists (see nav_meshes.odin). A stage's generated
-			// prefab has no .meta file to keep their GUIDs in, and a prefab bakes none.
+			// A scene's navmeshes and sublevels are its sub-assets, which its blob lists (see nav_meshes.odin). A stage's
+			// generated scene has no .meta file to keep their GUIDs in, so it neither splits nor bakes, and a prefab
+			// does neither.
+			owns_subassets := kind == .Scene && s.owner == {}
+			parts := scene_parts(flat, owns_subassets)
 			navs: []format.Scene_Nav_Mesh
-			if kind == .Scene && s.owner == {} {
-				navs_ok: bool
-				if navs, navs_ok = scene_nav_meshes(options, pass, i, flat); !navs_ok {
+			sublevels: []format.Scene_Sublevel
+			if owns_subassets {
+				subassets_ok: bool
+				if navs, sublevels, subassets_ok = scene_subassets(options, pass, i, flat, parts);
+				   !subassets_ok {
 					settle(pass, i, .Failed)
 					ok = false
 					continue
 				}
 			}
-			key := scene_key(options.config, s^, scene, &prefabs, navs)
-			buffer: [32]u8
-			output := fmt.tprintf("%s/%s.blob", out_dir, format.guid_format(s.meta.guid, &buffer))
-			if cooked_key(output, kind, format.scene_layout()) == key && !pass.force[s.meta.guid] {
+			// The base keeps the scene's GUID, and each sublevel's blob has its own.
+			guids := make([]format.Guid, len(parts), context.temp_allocator)
+			guids[0] = s.meta.guid
+			for l, j in sublevels {
+				guids[j + 1] = l.guid
+			}
+			key := scene_key(options.config, s^, scene, &prefabs, navs, sublevels)
+			current := !pass.force[s.meta.guid]
+			for g in guids {
+				current &&=
+					cooked_key(scene_blob_path(out_dir, g), kind, format.scene_layout()) == key
+			}
+			if current {
 				settle(pass, i, .Current)
+				count_subassets(pass, .Scene, .Current, len(sublevels))
 				continue
 			}
-			if !write_blob(
-				output,
-				format.scene_write(flat, s.meta.guid, key, kind, navs, context.temp_allocator),
-			) {
+			split_scene_references(parts, guids)
+			blobs := make([][]byte, len(parts), context.temp_allocator)
+			for p, j in parts {
+				part_navs := make([dynamic]format.Scene_Nav_Mesh, context.temp_allocator)
+				for n in navs {
+					if scene_part_of(parts, n.entity) == j {
+						append(&part_navs, n)
+					}
+				}
+				blobs[j] = format.scene_write(
+					{entities = p.entities[:]},
+					guids[j],
+					key,
+					kind,
+					part_navs[:],
+					sublevels if j == 0 else nil,
+					context.temp_allocator,
+				)
+			}
+			if owns_subassets {
+				remove_unused_sublevels(out_dir, s^, sublevels, problems)
+			}
+			written := true
+			for b, j in blobs {
+				if !write_blob(scene_blob_path(out_dir, guids[j]), b) {
+					written = false
+					break
+				}
+			}
+			if !written {
 				settle(pass, i, .Failed)
 				ok = false
 				continue
 			}
+			count_subassets(pass, .Scene, .Cooked, len(sublevels))
 			settle(pass, i, .Cooked)
 		}
 	}
@@ -188,10 +231,11 @@ scene_prefab :: proc(p: ^Scene_Prefabs, guid: format.Guid) -> (format.Scene, boo
 	return scene, ok
 }
 
-// scene_key covers what the blob depends on: the cooker, the configuration, the path, the source, the GUID, the
-// settings, the navmeshes that it lists, and the source of every prefab that the scene instantiates, through the
-// prefabs inside them, or that it is missing. The sub-asset lines of the .meta file are not in it, because the cooker
-// writes them: the navmeshes' GUIDs are, through the list.
+// scene_key covers what the blobs depend on: the cooker, the configuration, the path, the source, the GUID, the
+// settings, the navmeshes and the sublevels that the base lists, and the source of every prefab that the scene
+// instantiates, through the prefabs inside them, or that it is missing. The source covers which part each entity is in.
+// The sub-asset lines of the .meta file are not in it, because the cooker writes them: the GUIDs of the navmeshes and
+// the sublevels are, through the lists.
 @(private = "file")
 scene_key :: proc(
 	config: Script_Config,
@@ -199,6 +243,7 @@ scene_key :: proc(
 	scene: format.Scene,
 	prefabs: ^Scene_Prefabs,
 	navs: []format.Scene_Nav_Mesh,
+	sublevels: []format.Scene_Sublevel,
 ) -> u64 {
 	key := hash.fnv64a(
 		transmute([]byte)fmt.tprintf(
@@ -221,6 +266,10 @@ scene_key :: proc(
 	for &n in navs {
 		key = hash.fnv64a(transmute([]byte)fmt.tprintf("%x\x00%s\x00", n.entity, n.agent), key)
 		key = hash.fnv64a(n.guid[:], key)
+	}
+	for &l in sublevels {
+		key = hash.fnv64a(transmute([]byte)fmt.tprintf("%s\x00", l.name), key)
+		key = hash.fnv64a(l.guid[:], key)
 	}
 	used := make(map[format.Guid]bool, context.temp_allocator)
 	pending := make([dynamic]format.Scene, context.temp_allocator)
@@ -250,6 +299,184 @@ scene_key :: proc(
 		}
 	}
 	return key
+}
+
+// scene_blob_path is the path of the blob of a scene, or of a sublevel of one, in the configuration's directory.
+@(private = "file")
+scene_blob_path :: proc(out_dir: string, guid: format.Guid) -> string {
+	buffer: [32]u8
+	return fmt.tprintf("%s/%s.blob", out_dir, format.guid_format(guid, &buffer))
+}
+
+// Scene_Part is the entities of a scene that one blob holds: its base, whose name is "", or one of its sublevels.
+Scene_Part :: struct {
+	name:     string,
+	entities: [dynamic]format.Scene_Entity,
+}
+
+// scene_parts splits a flat scene by the sublevels of its entities: the base first, which may be empty, then each
+// sublevel by name. Each part keeps the entities in the scene's order, with their scene IDs. Without split, the scene is
+// one part, its base.
+scene_parts :: proc(flat: format.Scene, split: bool) -> []Scene_Part {
+	names := make([dynamic]string, context.temp_allocator)
+	if split {
+		for e in flat.entities {
+			if e.sublevel != "" && !slice.contains(names[:], e.sublevel) {
+				append(&names, e.sublevel)
+			}
+		}
+		slice.sort(names[:])
+	}
+	parts := make([]Scene_Part, len(names) + 1, context.temp_allocator)
+	for &p, j in parts {
+		p.name = j == 0 ? "" : names[j - 1]
+		p.entities = make([dynamic]format.Scene_Entity, context.temp_allocator)
+	}
+	for e in flat.entities {
+		j := 0
+		if split && e.sublevel != "" {
+			j, _ = slice.linear_search(names[:], e.sublevel)
+			j += 1
+		}
+		append(&parts[j].entities, e)
+	}
+	return parts
+}
+
+// scene_part_of is the part that has the entity of a scene ID, or -1.
+@(private = "file")
+scene_part_of :: proc(parts: []Scene_Part, id: u64) -> int {
+	for p, j in parts {
+		for e in p.entities {
+			if e.id == id {
+				return j
+			}
+		}
+	}
+	return -1
+}
+
+// scene_subassets gives a scene's navmeshes and sublevels their GUIDs, which its .meta file keeps, in one call, so
+// that neither's lines are taken for gone. It returns what the base's blob lists. It fails only when the .meta file
+// cannot be written.
+@(private = "file")
+scene_subassets :: proc(
+	options: Cook_Options,
+	pass: ^Pass,
+	index: int,
+	flat: format.Scene,
+	parts: []Scene_Part,
+) -> (
+	navs: []format.Scene_Nav_Mesh,
+	sublevels: []format.Scene_Sublevel,
+	ok: bool,
+) {
+	a := &pass.assets[index]
+	nav := scene_nav_meshes(options, pass, index, flat)
+	wanted := make(
+		[dynamic]Subasset,
+		0,
+		len(nav.subassets) + len(parts) - 1,
+		context.temp_allocator,
+	)
+	append(&wanted, ..nav.subassets)
+	for p in parts[1:] {
+		append(&wanted, Subasset{kind = .Scene, name = p.name})
+	}
+	if !assign_subassets(
+		options.roots[a.root].dir,
+		a,
+		wanted[:],
+		pass.force[a.meta.guid],
+		&pass.problems,
+	) {
+		return nil, nil, false
+	}
+	navs = nav.navs
+	for &n, j in navs {
+		n.guid, _ = nav_mesh_guid(a^, nav.subassets[j].name)
+	}
+	sublevels = make([]format.Scene_Sublevel, len(parts) - 1, context.temp_allocator)
+	for p, j in parts[1:] {
+		sublevels[j].name = p.name
+		for sub in a.subassets {
+			if sub.kind == .Scene && sub.name == p.name {
+				sublevels[j].guid = sub.guid
+			}
+		}
+	}
+	return navs, sublevels, true
+}
+
+// split_scene_references makes a reference from one part of a scene to an entity of another a reference to that part's
+// GUID, which binds and unbinds as the part loads and unloads, and one to the part's own GUID local. guids are the
+// parts' GUIDs, the scene's own first. A reference to an entity that no part has stays as it is. It changes copies of
+// the entities' components, behaviours and fields, which a prefab's expansion can share.
+split_scene_references :: proc(parts: []Scene_Part, guids: []format.Guid) {
+	part_of := make(map[u64]int, context.temp_allocator)
+	for p, j in parts {
+		for e in p.entities {
+			part_of[e.id] = j
+		}
+	}
+	split :: proc(
+		original: []format.Scene_Field,
+		part: int,
+		part_of: map[u64]int,
+		guids: []format.Guid,
+	) -> []format.Scene_Field {
+		fields := slice.clone(original, context.temp_allocator)
+		for &f in fields {
+			if f.value.kind != .Entity || f.value.entity == 0 {
+				continue
+			}
+			if f.value.scene != {} && !slice.contains(guids, f.value.scene) {
+				continue
+			}
+			if target, found := part_of[f.value.entity]; found {
+				f.value.scene = target == part ? {} : guids[target]
+			}
+		}
+		return fields
+	}
+	for &p, j in parts {
+		for &e in p.entities {
+			e.components = slice.clone(e.components, context.temp_allocator)
+			for &c in e.components {
+				c.fields = split(c.fields, j, part_of, guids)
+			}
+			e.behaviours = slice.clone(e.behaviours, context.temp_allocator)
+			for &b in e.behaviours {
+				b.fields = split(b.fields, j, part_of, guids)
+			}
+		}
+	}
+}
+
+// remove_unused_sublevels deletes the blob of each sublevel that the scene's .meta file names and that the scene no
+// longer has, so that no loader finds it. Its .meta line stays, as a sub-asset's does, so it has the same GUID if it
+// comes back.
+@(private = "file")
+remove_unused_sublevels :: proc(
+	out_dir: string,
+	s: Asset_Source,
+	sublevels: []format.Scene_Sublevel,
+	problems: ^Problems,
+) {
+	outer: for m in s.meta.subassets {
+		if m.kind != format.SUBLEVEL_KIND {
+			continue
+		}
+		for l in sublevels {
+			if l.guid == m.guid {
+				continue outer
+			}
+		}
+		path := scene_blob_path(out_dir, m.guid)
+		if err := os.remove(path); err != nil && err != .Not_Exist {
+			report_warning(problems, path, 0, 0, "cannot delete: %v", err)
+		}
+	}
 }
 
 // scene_flat parses and expands a scene, as its cook does, without reporting its problems again: the scene's cook

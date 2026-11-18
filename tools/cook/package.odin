@@ -243,6 +243,19 @@ assign_units :: proc(blobs: []Package_Blob, global_scenes: []format.Guid) -> []P
 			is_persistent[j] = true
 		}
 	}
+	// A sublevel's blob is a scene, which loads in its scene's unit, so it is not a level of its own: the scene reaches it.
+	is_sublevel := make([]bool, len(blobs), context.temp_allocator)
+	for b in blobs {
+		if b.kind != .Scene {
+			continue
+		}
+		sublevels, _ := format.scene_sublevels(b.data, context.temp_allocator)
+		for l in sublevels {
+			if j, found := index[l.guid]; found {
+				is_sublevel[j] = true
+			}
+		}
+	}
 	units := make([dynamic]Package_Unit, context.temp_allocator)
 	unit_of := make([]int, len(blobs), context.temp_allocator)
 	scene_of := make([dynamic]int, context.temp_allocator)
@@ -251,7 +264,8 @@ assign_units :: proc(blobs: []Package_Blob, global_scenes: []format.Guid) -> []P
 		if b.kind == .Scene &&
 		   !slice.contains(global_scenes, b.guid) &&
 		   !is_chunk[i] &&
-		   !is_persistent[i] {
+		   !is_persistent[i] &&
+		   !is_sublevel[i] {
 			unit_of[i] = len(units)
 			append(&units, Package_Unit{b.guid, GLOBAL_UNIT})
 			append(&scene_of, i)

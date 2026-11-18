@@ -684,6 +684,8 @@ subasset_kind_name :: proc(kind: format.Asset_Kind) -> string {
 		return format.ANIMATION_KIND
 	case .Nav_Mesh:
 		return format.NAV_MESH_KIND
+	case .Scene:
+		return format.SUBLEVEL_KIND
 	}
 	return ""
 }
