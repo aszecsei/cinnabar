@@ -1256,3 +1256,70 @@ a_full_table_reuses_an_unloaded_assets_place :: proc(t: ^testing.T) {
 	i, second_found := r.index[{second, .Mesh}]
 	testing.expect(t, second_found && i == 0)
 }
+
+// An asset whose newest blob is broken goes on drawing the older one: it is not unloaded, which would stream the broken
+// blob, and it streams no mips of it.
+@(test)
+a_broken_newer_blob_leaves_the_older_one_drawing :: proc(t: ^testing.T) {
+	rig := new(Rig)
+	defer free(rig)
+	context.user_ptr = &rig.fake
+	rig_start(t, rig)
+	defer rig_stop(rig)
+	r, fake := &rig.r, &rig.fake
+	start := time.now()
+	guid := test_guid(1)
+	write_texture_blob(t, rig.dir, guid, {64, 64}, 7, start)
+	residency_set_policy(r, {idle_frames = 10})
+	want_virtual(r, guid, 1000)
+	land(rig)
+	_, ready := resident_virtual_texture(r, guid)
+	testing.expect(t, ready)
+
+	buffer: [32]u8
+	path := fmt.tprintf("%s/%s.blob", rig.dir, format.guid_format(guid, &buffer))
+	later := time.time_add(start, time.Second)
+	// A cooked blob whose mips are not the size that its header says.
+	broken := format.texture_write(
+		{
+			guid = guid,
+			format = .BC7_Unorm_Srgb,
+			usage = .Color,
+			layer_count = 1,
+			size = {64, 64},
+			mip_count = 7,
+			mips = make([]byte, 16, context.temp_allocator),
+		},
+		context.temp_allocator,
+	)
+	testing.expect(t, os.write_entire_file(path, broken) == nil)
+	testing.expect(t, os.change_times(path, later, later) == nil)
+	generation := fmt.tprintf("%s/%s", rig.dir, format.GENERATION_FILE)
+	testing.expect(t, os.write_entire_file(generation, transmute([]byte)string("2")) == nil)
+	testing.expect(t, os.change_times(generation, later, later) == nil)
+	testing.expect(t, len(asset.poll(&rig.assets)) > 0)
+	context.logger = testlog.expected_errors()
+	want_virtual(r, guid, 1000)
+	land(rig)
+	_, stale := r.entries[r.index[{guid, .Texture}]].source.(Stale_Source)
+	testing.expect(t, stale)
+
+	// Nothing asks for it for longer than the idle frames and than MIP_DROP_FRAMES.
+	textures := fake.next_texture
+	idle(rig, 2 * MIP_DROP_FRAMES)
+	testing.expect_value(t, fake.next_texture, textures)
+	testing.expect_value(t, fake.live_textures, 1)
+	testing.expect_value(t, residency_stats(r).evicted, 0)
+	texture, still_ready := resident_virtual_texture(r, guid)
+	testing.expect(t, still_ready)
+	testing.expect_value(t, texture.top_mip, 0)
+
+	// A newer good blob streams again.
+	write_texture_blob(t, rig.dir, guid, {64, 64}, 7, time.time_add(start, 2 * time.Second))
+	testing.expect(t, len(asset.poll(&rig.assets)) > 0)
+	want_virtual(r, guid, 1000)
+	land(rig)
+	land(rig)
+	_, plain := r.entries[r.index[{guid, .Texture}]].source.(Asset_Source)
+	testing.expect(t, plain)
+}
