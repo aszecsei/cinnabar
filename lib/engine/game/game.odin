@@ -100,9 +100,12 @@ Game :: struct {
 	// The policy that loads the scenes of a world near the camera and the Stream_Source entities, and unloads the far ones
 	// (see docs/world/streaming.md#world-streamer).
 	streaming:          streaming.State,
-	// The scene loads and unloads that load_scene and unload_scene asked for, which the next frame's start applies. On
-	// the heap.
+	// The scene loads and unloads that load_scene and unload_scene asked for, and the sublevels that set_sublevel
+	// asked for, which the next frame's start applies. On the heap.
 	scene_requests:     [dynamic]Scene_Request,
+	// The level's active set: which sublevels are active, and which of them are still loading (see
+	// docs/world/sublevels.md#the-active-set).
+	sublevels:          Sublevels,
 }
 
 // request_quit asks the game to end after this frame, as Game.quit does. While an editor is linked it does nothing, since

@@ -14,10 +14,12 @@ import "cinnabar:engine/scene"
 import "cinnabar:engine/script"
 import "cinnabar:engine/streaming"
 
-// Scene_Request is a scene to load beside the others with the number that load_scene gave it, or one to unload.
+// Scene_Request is a scene to load beside the others with the number that load_scene gave it, one to unload, or a
+// sublevel to activate or deactivate.
 Scene_Request :: union {
 	Scene_Load,
 	Scene_Unload,
+	Sublevel_Change,
 }
 
 Scene_Load :: struct {
@@ -31,7 +33,8 @@ Scene_Unload :: struct {
 
 // load_scene asks for a cooked scene to load beside the scenes that are loaded, and gives the number that it will have.
 // It loads at the start of the next frame, or of this one from begin_frame, outside the script phase (see
-// docs/world/scenes.md#streaming).
+// docs/world/scenes.md#streaming). It loads with the parts of its active sublevels (see
+// docs/world/sublevels.md#parts-are-scenes).
 load_scene :: proc(g: ^Game, guid: format.Guid) -> u32 {
 	number := scene.reserve_number(&g.scenes)
 	append(&g.scene_requests, Scene_Load{guid, number})
@@ -52,17 +55,32 @@ apply_scene_requests :: proc(g: ^Game) {
 	if len(g.scene_requests) == 0 {
 		return
 	}
-	unloaded := false
+	unloaded, sublevels_changed := false, false
 	for request in g.scene_requests {
 		switch r in request {
 		case Scene_Load:
-			scene.add_scene_asset(&g.world, &g.scripts, &g.scenes, r.guid, r.number)
+			if base, ok := scene.add_scene_asset(
+				&g.world,
+				&g.scripts,
+				&g.scenes,
+				r.guid,
+				r.number,
+			); ok {
+				scene.load_parts(&g.world, &g.scripts, &g.scenes, base, active_sublevels(g))
+			}
 		case Scene_Unload:
 			scene.unload_scene(&g.world, &g.scenes, r.number)
 			unloaded = true
+		case Sublevel_Change:
+			sublevels_changed = apply_sublevel_change(g, r) || sublevels_changed
 		}
 	}
 	clear(&g.scene_requests)
+	if sublevels_changed {
+		if scene.update_parts(&g.world, &g.scenes, active_sublevels(g)) > 0 {
+			unloaded = true
+		}
+	}
 	if unloaded {
 		forget_despawned(g)
 	}
@@ -73,8 +91,10 @@ apply_scene_requests :: proc(g: ^Game) {
 // scenes of the World_Streamer's world load and unload around them (see streaming.update and
 // docs/world/streaming.md#the-policy). The streamer's behaviours get
 // the events (docs/world/streaming.md#events) as on_scene_loading, on_scene_ready, on_scene_unloaded and on_scene_failed, each with the scene's number
-// and its asset. It stands still while the editor edits, as the world does. Call it after apply_scene_requests, outside
-// the script phase.
+// and its asset. They get its sublevels' events as on_sublevel_loading, on_sublevel_ready and on_sublevel_unloaded,
+// with the sublevel's name too (see docs/world/sublevels.md#events). It moves the parts of active sublevels on as well.
+// It stands still while the editor edits, as the world does. Call it after apply_scene_requests, outside the script
+// phase.
 @(private)
 stream_scenes :: proc(g: ^Game) {
 	if editor.editing(&g.editor) {
@@ -93,7 +113,15 @@ stream_scenes :: proc(g: ^Game) {
 		}
 	}
 	pending := physics.loading_scenes(&g.physics, &g.world, frame)
-	if streaming.update(&g.streaming, &g.world, &g.scripts, &g.scenes, sources[:], pending) {
+	if streaming.update(
+		&g.streaming,
+		&g.world,
+		&g.scripts,
+		&g.scenes,
+		sources[:],
+		pending,
+		active_sublevels(g),
+	) {
 		forget_despawned(g)
 	}
 	events := streaming.events(&g.streaming)
@@ -112,6 +140,24 @@ stream_scenes :: proc(g: ^Game) {
 			name = "scene_unloaded"
 		case .Failed:
 			name = "scene_failed"
+		case .Sublevel_Loading:
+			name = "sublevel_loading"
+		case .Sublevel_Ready:
+			name = "sublevel_ready"
+		case .Sublevel_Unloaded:
+			name = "sublevel_unloaded"
+		}
+		if event.kind >= .Sublevel_Loading {
+			sublevel := event.sublevel
+			script.send(
+				&g.scripts,
+				streamer,
+				name,
+				f64(event.number),
+				event.scene,
+				format.sublevel_name_text(&sublevel),
+			)
+			continue
 		}
 		script.send(&g.scripts, streamer, name, f64(event.number), event.scene)
 	}
@@ -139,7 +185,8 @@ check_scene_number :: proc(L: ^luau.State) -> u32 {
 	return u32(number)
 }
 
-// define_scene_bindings defines Scene.load, Scene.unload, Scene.of, Scene.state and Scene.pending.
+// define_scene_bindings defines Scene.load, Scene.unload, Scene.of, Scene.base, Scene.state and Scene.pending, and
+// Game.set_sublevel and Game.sublevel.
 @(private)
 define_scene_bindings :: proc(r: ^script.Runtime) {
 	script.define(r, "Scene.load", proc(L: ^luau.State) -> c.int {
@@ -165,6 +212,40 @@ define_scene_bindings :: proc(r: ^script.Runtime) {
 			}
 			return 1
 		}, "(entity: Entity) -> number?")
+	script.define(r, "Scene.base", proc(L: ^luau.State) -> c.int {
+			g := game_of(L)
+			base, ok := scene.base_of(&g.scenes, check_scene_number(L))
+			if !ok {
+				luau.pushnil(L)
+			} else {
+				luau.pushnumber(L, f64(base))
+			}
+			return 1
+		}, "(scene: number) -> number?")
+	script.define(r, "Game.set_sublevel", proc(L: ^luau.State) -> c.int {
+			name := string(luau.L_checkstring(L, 1))
+			luau.L_checktype(L, 2, .BOOLEAN)
+			if !set_sublevel(game_of(L), name, bool(luau.toboolean(L, 2))) {
+				script.raise(L, "the project declares no such sublevel")
+			}
+			return 0
+		}, "(name: string, active: boolean) -> ()")
+	script.define(r, "Game.sublevel", proc(L: ^luau.State) -> c.int {
+			state, known := sublevel_state(game_of(L), string(luau.L_checkstring(L, 1)))
+			switch {
+			case !known:
+				luau.pushnil(L)
+			case state == .Inactive:
+				luau.pushodinstring(L, "inactive")
+			case state == .Loading:
+				luau.pushodinstring(L, "loading")
+			case state == .Failed:
+				luau.pushodinstring(L, "failed")
+			case:
+				luau.pushodinstring(L, "active")
+			}
+			return 1
+		}, "(name: string) -> string?")
 	script.define(r, "Scene.state", proc(L: ^luau.State) -> c.int {
 			g := game_of(L)
 			kind, loaded := scene.stage_of(&g.scenes, check_scene_number(L))
