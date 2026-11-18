@@ -95,10 +95,10 @@ The work of a frame is limited, so a big scene does not stall the frame.
 | `SCENE_SPAWNS_PER_FRAME` | 1024 | Entities that `advance_loads` spawns in a frame, for all the scenes that load. |
 | `SCENE_FILLS_PER_FRAME` | 128 | Entities that `advance_loads` fills in a frame, for all the scenes that load. |
 | `LOADING_BODIES_PER_SYNC` | 32 | Physics bodies that one sync makes for hidden entities of loading scenes. |
-| `MAX_SCENE_LOADS` | 2 | Streamed scenes that are not ready at once. |
-| `MAX_STREAMED_SCENES` | 56 | Scenes that the policy keeps in at once (`core.MAX_SCENE_MEMORY` - 8). |
+| `MAX_SCENE_LOADS` | 2 | Streamed scenes that are not ready at once. A scene and its loading sublevels' parts are one load ([Sublevels: Streaming](sublevels.md#streaming)). |
+| `MAX_STREAMED_SCENES` | 120 | Scenes that the policy keeps in at once, with their sublevels' parts (`core.MAX_SCENE_MEMORY` - 8). |
 
-- **The budgets are shared.** The scenes that load share one `Load_Budget` for a frame, in priority order: the first scene uses what it needs, and the rest get what is left.
+- **The budgets are shared.** The scenes that load share one `Load_Budget` for a frame, in priority order: the first scene uses what it needs, and the rest get what is left. `streaming.update` spends it on every staged load, the streamed scenes first, then the others, such as the parts of a sublevel that became active. It does so with no streamer too ([Sublevels: Activation](sublevels.md#activation)).
 - **A scene waits for its bodies.** `physics.loading_scenes` lists the scenes that have a hidden entity with a collider or a rigid body and no body yet. A scene stays in `Settling` while its number is in that list. It is empty without a physics world or a backend that makes bodies, so a scene never waits for bodies that cannot come.
 - **The Resource Monitor** shows the last frame's work while a scene loads ([Editor: Resource Monitor](../editor/shell-and-panels.md#resource-monitor)): `Scenes loading`, `Scene entities spawned` and `Scene entities filled`. They come from `streaming.stats` through `Game_Stats`.
 
@@ -106,7 +106,7 @@ The work of a frame is limited, so a big scene does not stall the frame.
 
 The policy records what happened to each scene in a frame. `game.stream_scenes` sends them in order.
 
-**In Odin,** `streaming.events` gives the last update's `Stream_Event`s: a `kind` (`Loading`, `Ready`, `Unloaded` or `Failed`), the scene's `number` and its `scene` GUID. They are valid until the next update. For a scene that did not begin to load, `number` is 0.
+**In Odin,** `streaming.events` gives the last update's `Stream_Event`s: a `kind` (`Loading`, `Ready`, `Unloaded` or `Failed`), the scene's `number` and its `scene` GUID. They are valid until the next update. For a scene that did not begin to load, `number` is 0. The `Sublevel_Loading`, `Sublevel_Ready` and `Sublevel_Unloaded` kinds are for the parts of a scene's sublevels, with the sublevel's name in `sublevel` ([Sublevels: Events](sublevels.md#events)).
 
 **In scripts,** the streamer entity's behaviours get each event as a script event, in the next script phase:
 
@@ -116,6 +116,7 @@ The policy records what happened to each scene in a frame. `game.stream_scenes` 
 | `on_scene_ready(number, scene)` | The scene is shown. |
 | `on_scene_unloaded(number, scene)` | The scene unloaded: by distance, with its streamer, or because something else unloaded it. |
 | `on_scene_failed(number, scene)` | The scene did not load. `number` is 0 when the load did not begin. |
+| `on_sublevel_loading(number, scene, name)`, `on_sublevel_ready`, `on_sublevel_unloaded` | A part of the scene's sublevel began to load, is ready, or unloaded ([Sublevels: Events](sublevels.md#events)). |
 
 `number` is the scene's number and `scene` is an `Asset`. `Scene.state(number)` returns `"loading"`, `"ready"`, or nil for a number that is not loaded ([Scenes: Scripts](scenes.md#scripts)).
 

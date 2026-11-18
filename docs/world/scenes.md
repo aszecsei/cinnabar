@@ -89,6 +89,8 @@ A request that `begin_frame` makes applies in the same frame. A request that a s
 
 A `World_Streamer` loads and unloads the scenes of a world by itself ([World streaming](streaming.md)). Its scenes load in stages.
 
+`game.set_sublevel(g, name, active)` queues a change of a sublevel with these requests. A scene loads with the parts of its active sublevels, each a scene of its own ([Sublevels](sublevels.md)).
+
 ## Loading in stages
 
 `scene.begin_load(w, scenes, guid, number?)` adds a scene that loads across frames, and `scene.advance_loads` moves it on within a budget. The scene goes through `Reading`, `Spawning`, `Filling` and `Settling` to `Ready`. Its entities have `ecs.Loading`, so they stay hidden until it is `Ready`, and its behaviours attach then. `scene.stage_of(scenes, number)` gives the stage. `scene.loaded_scenes` lists the scenes that are loading with the others. Call both procedures between frames, outside the script phase. The stages, the budgets and the events are in [World streaming](streaming.md#loading-in-stages).
@@ -136,6 +138,6 @@ return Portal
 
 ## Limits
 
-- **Scene memory:** at most `core.MAX_SCENE_MEMORY` (64) scenes are loaded at once. `add_scene` refuses one more and logs an error ([Core: Scene memory](../core/jobs-and-memory.md#scene-memory)).
-- **Loads across frames** are only for the scenes that a `World_Streamer` loads, and for Odin code that calls `scene.begin_load`. `add_scene` and `Scene.load` load a scene in one frame, from a blob that `asset.load` reads at once ([World streaming](streaming.md)).
+- **Scene memory:** at most `core.MAX_SCENE_MEMORY` (128) scenes are loaded at once. Each part of a sublevel counts as a scene ([Sublevels: Scene memory](sublevels.md#scene-memory)). `add_scene` refuses one more and logs an error ([Core: Scene memory](../core/jobs-and-memory.md#scene-memory)).
+- **Loads across frames** are only for the scenes that a `World_Streamer` loads, the parts of sublevels that become active, and Odin code that calls `scene.begin_load`. `add_scene` and `Scene.load` load a scene in one frame, from a blob that `asset.load` reads at once ([World streaming](streaming.md)).
 - **The editor** does not edit or save streamed scenes. Its documents are its own scenes, numbered below `FIRST_RUNTIME_SCENE`. A load of its scenes unloads the level, and every streamed scene with it. A scene that it opens or closes beside the others is added or unloaded alone, with `add_scene` and `unload_scene` ([Editor: Several scenes](../editor/document-and-scenes.md#several-scenes)).

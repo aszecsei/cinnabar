@@ -15,6 +15,7 @@ Read them in this order the first time.
 | [Volumes](volumes.md) | Settings that depend on where a point is. |
 | [Scenes](scenes.md) | Loading scenes into the world and unloading them one at a time, what a scene owns, and scene IDs. |
 | [World streaming](streaming.md) | A world's scenes that load and unload around the camera: the streamer, the policy, loading in stages, budgets and events. |
+| [Sublevels](sublevels.md) | The active set, and the parts of a scene's sublevels that load and unload as a sublevel is activated and deactivated. |
 | [The game package](game-package.md) | The standard game, which runs every package on the world in order, and the hooks that a project's Odin adds to it. |
 
 Animation runs on the world as physics does, in `Fixed` systems with presentation between ticks: see [Animation](../animation/design.md#the-ecs).

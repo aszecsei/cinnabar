@@ -8,7 +8,7 @@ A scene's navigation volumes make navmeshes, its sub-assets, one for each volume
 
 ## Sublevels
 
-The runtime loads and unloads whole blobs, so the cooker splits a scene into one blob for each part: its base, and each sublevel that its entities are in (see [Editor: Sublevels](../../editor/document-and-scenes.md#sublevels)). The runtime sees each part as a scene.
+The runtime loads and unloads whole blobs, so the cooker splits a scene into one blob for each part: its base, and each sublevel that its entities are in (see [Editor: Sublevels](../../editor/document-and-scenes.md#sublevels)). The runtime sees each part as a scene ([World: Sublevels](../../world/sublevels.md#parts-are-scenes)).
 
 - **Sub-assets:** each sublevel of a scene is a sub-asset, `sublevel.<name>` in the scene's `.meta` file, with its own GUID and blob (see [Sub-assets](../identity-and-cooking.md#identity)). Its blob is a scene blob, whose header has the sublevel's GUID. The base keeps the scene's GUID, so a scene without sublevels cooks to one blob, as before, and every reference to it still holds.
 - **The list:** the base's blob lists the scene's sublevels by name, each with its GUID (`asset_format.scene_sublevels`), so a loader finds them without the `.meta` file. A sublevel's blob lists none.
