@@ -8,6 +8,8 @@ import "core:time"
 
 import "cinnabar:core"
 import script_host "cinnabar:core/script"
+import "cinnabar:core/testlog"
+import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/ecs"
 import "cinnabar:engine/script"
 
@@ -126,6 +128,10 @@ the_standard_games_scripts_have_every_engine_binding :: proc(t: ^testing.T) {
 	expect(t, text, "	state: (scene: number) -> string?,")
 	// And the scene that a field waits for, as an asset that Scene.load takes.
 	expect(t, text, "	pending: (behaviour: any, field: string) -> Asset?,")
+	// The sublevels: a scene's base, and a sublevel to activate and its state.
+	expect(t, text, "	base: (scene: number) -> number?,")
+	expect(t, text, "	set_sublevel: (name: string, active: boolean) -> (),")
+	expect(t, text, "	sublevel: (name: string) -> string?,")
 	// And the project's.
 	expect(t, text, "declare TestComponent:")
 }
@@ -193,5 +199,126 @@ the_pointer_audit_names_the_projects_field :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(findings), 1)
 	if len(findings) == 1 {
 		testing.expect_value(t, findings[0].path, "Callback_State.on_hit")
+	}
+}
+
+@(private = "file", thread_local)
+sublevel_level: u64
+
+// sublevel_game is a Game whose project declares a night sublevel that starts active and a day one that does not.
+@(private = "file")
+sublevel_game :: proc(arena: ^virtual.Arena) -> ^Game {
+	g := new(Game)
+	g.platform = new(core.Platform_API)
+	g.platform.frame_allocator = virtual.arena_allocator(arena)
+	g.platform.level_generation = proc() -> u64 {return sublevel_level}
+	g.scenes.platform = g.platform
+	sublevel_level = 1
+	format.sublevel_default(&g.project.settings.sublevels, "night", true)
+	format.sublevel_default(&g.project.settings.sublevels, "day", false)
+	return g
+}
+
+@(private = "file")
+free_sublevel_game :: proc(g: ^Game) {
+	delete(g.scene_requests)
+	delete(g.sublevels.events)
+	free(g.platform)
+	free(g)
+}
+
+// Each level starts with the project's sublevels: those that start active are loading until their parts are ready. A
+// new level starts from the settings again, whatever the last one changed.
+@(test)
+a_level_starts_with_the_projects_sublevels :: proc(t: ^testing.T) {
+	arena: virtual.Arena
+	testing.expect(t, virtual.arena_init_growing(&arena) == nil)
+	defer virtual.arena_destroy(&arena)
+	g := sublevel_game(&arena)
+	defer free_sublevel_game(g)
+
+	night, known := sublevel_state(g, "night")
+	testing.expect(t, known)
+	testing.expect_value(t, night, Sublevel_State.Loading)
+	day, _ := sublevel_state(g, "day")
+	testing.expect_value(t, day, Sublevel_State.Inactive)
+	active := active_sublevels(g)
+	testing.expect_value(t, len(active), 1)
+	testing.expect_value(t, active[0], "night")
+
+	apply_sublevel_change(g, {format.sublevel_name("day"), true})
+	apply_sublevel_change(g, {format.sublevel_name("night"), false})
+	testing.expect_value(t, len(active_sublevels(g)), 1)
+	sublevel_level += 1
+	night, _ = sublevel_state(g, "night")
+	day, _ = sublevel_state(g, "day")
+	testing.expect_value(t, night, Sublevel_State.Loading)
+	testing.expect_value(t, day, Sublevel_State.Inactive)
+}
+
+// set_sublevel queues a change, which applies with the scene requests, and refuses a sublevel that the project does not
+// declare. A change to the state that a sublevel has does nothing.
+@(test)
+set_sublevel_queues_a_change :: proc(t: ^testing.T) {
+	context.logger = testlog.expected_errors()
+	arena: virtual.Arena
+	testing.expect(t, virtual.arena_init_growing(&arena) == nil)
+	defer virtual.arena_destroy(&arena)
+	g := sublevel_game(&arena)
+	defer free_sublevel_game(g)
+
+	testing.expect(t, set_sublevel(g, "day", true))
+	testing.expect(t, !set_sublevel(g, "dusk", true))
+	// The level began with night active, and said so.
+	testing.expect_value(t, len(sublevel_events(g)), 1)
+	clear(&g.sublevels.events)
+	testing.expect_value(t, len(g.scene_requests), 1)
+	day, _ := sublevel_state(g, "day")
+	testing.expect_value(t, day, Sublevel_State.Inactive)
+
+	change, is_change := g.scene_requests[0].(Sublevel_Change)
+	testing.expect(t, is_change)
+	testing.expect(t, apply_sublevel_change(g, change))
+	day, _ = sublevel_state(g, "day")
+	testing.expect_value(t, day, Sublevel_State.Loading)
+	testing.expect(t, !apply_sublevel_change(g, change))
+	events := sublevel_events(g)
+	testing.expect_value(t, len(events), 1)
+	testing.expect_value(t, events[0].kind, Sublevel_Event_Kind.Loading)
+	testing.expect_value(t, format.sublevel_name_text(&events[0].sublevel), "day")
+}
+
+// A sublevel goes from inactive to loading, between loading, active and failed, and from any of them to inactive, and
+// no other way.
+@(test)
+a_sublevel_changes_only_as_its_lifecycle_allows :: proc(t: ^testing.T) {
+	context.logger = testlog.expected_errors()
+	s: Sublevels
+	defer delete(s.events)
+	s.count = 1
+	s.names[0] = format.sublevel_name("night")
+	testing.expect(t, !change_sublevel(&s, 0, .Active))
+	testing.expect(t, change_sublevel(&s, 0, .Loading))
+	testing.expect(t, !change_sublevel(&s, 0, .Loading))
+	testing.expect(t, change_sublevel(&s, 0, .Active))
+	testing.expect(t, change_sublevel(&s, 0, .Loading))
+	testing.expect(t, change_sublevel(&s, 0, .Inactive))
+	testing.expect(t, !change_sublevel(&s, 0, .Inactive))
+	testing.expect(t, !change_sublevel(&s, 0, .Failed))
+	testing.expect(t, change_sublevel(&s, 0, .Loading))
+	testing.expect(t, change_sublevel(&s, 0, .Failed))
+	testing.expect(t, change_sublevel(&s, 0, .Inactive))
+	kinds := [?]Sublevel_Event_Kind {
+		.Loading,
+		.Ready,
+		.Loading,
+		.Unloaded,
+		.Loading,
+		.Failed,
+		.Unloaded,
+	}
+	testing.expect_value(t, len(s.events), len(kinds))
+	for kind, i in kinds {
+		testing.expect_value(t, s.events[i].kind, kind)
 	}
 }

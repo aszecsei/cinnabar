@@ -78,6 +78,8 @@ Settings :: struct {
 	ui_scale:              f32,
 	// The scene that the game starts with, or zero for none.
 	main_scene:            format.Guid,
+	// The declared sublevels, and which of them each level starts with (see docs/world/sublevels.md#the-active-set).
+	sublevels:             format.Sublevel_Defaults,
 	// How the window is shown, and the paper white of HDR output (see docs/gpu/presentation.md#window-modes).
 	display:               Display_Settings,
 }
@@ -281,11 +283,13 @@ parse :: proc(text: string, settings: ^Settings, problems: ^[dynamic]string = ni
 			append(&ignores, Ignore{line, value})
 			continue
 		}
-		// The cooker and the editor read the sublevels (see docs/overview/architecture.md#project-settings); the game only
-		// checks each line.
+		// The game starts each level with the sublevels that are active here (see docs/world/sublevels.md#the-active-set).
 		if format.sublevel_is_setting(key) {
-			if p := format.sublevel_check_setting(key, value); p != "" {
+			name, active, p := format.sublevel_parse_setting(key, value)
+			if p != "" {
 				problem(problems, line, "%s", p)
+			} else if !format.sublevel_default(&settings.sublevels, name, active) {
+				problem(problems, line, "%s: past %d sublevels", key, format.MAX_SUBLEVELS)
 			}
 			continue
 		}

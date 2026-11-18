@@ -111,3 +111,70 @@ sublevel_parse_line :: proc(key, value: string) -> (name: string, active: bool, 
 	}
 	return
 }
+
+// The most sublevels that a project declares, which the game keeps in fixed tables (see
+// docs/world/sublevels.md#the-active-set).
+MAX_SUBLEVELS :: 32
+
+// Sublevel_Name is a sublevel's name in a fixed array, so state that a code reload keeps can hold it.
+Sublevel_Name :: struct {
+	len:   u8,
+	bytes: [SUBLEVEL_MAX_NAME]u8,
+}
+
+// sublevel_name makes a Sublevel_Name. A name longer than SUBLEVEL_MAX_NAME is cut; sublevel_name_valid refuses it
+// first.
+sublevel_name :: proc(name: string) -> Sublevel_Name {
+	n: Sublevel_Name
+	n.len = u8(copy(n.bytes[:], name))
+	return n
+}
+
+// sublevel_name_text is the text of a Sublevel_Name, which points into it.
+sublevel_name_text :: proc(n: ^Sublevel_Name) -> string {
+	return string(n.bytes[:n.len])
+}
+
+// Sublevel_Defaults are the sublevels that a project's settings declare, in the order that their names first appear,
+// and which of them start active.
+Sublevel_Defaults :: struct {
+	count:  int,
+	names:  [MAX_SUBLEVELS]Sublevel_Name,
+	active: bit_set[0 ..< MAX_SUBLEVELS],
+}
+
+// sublevel_default sets whether a declared sublevel starts active. A later call for a name replaces an earlier one. It
+// returns false past MAX_SUBLEVELS.
+sublevel_default :: proc(d: ^Sublevel_Defaults, name: string, active: bool) -> bool {
+	i := 0
+	for ; i < d.count; i += 1 {
+		if sublevel_name_text(&d.names[i]) == name {
+			break
+		}
+	}
+	if i == d.count {
+		if d.count >= MAX_SUBLEVELS {
+			return false
+		}
+		d.names[i] = sublevel_name(name)
+		d.count += 1
+	}
+	if active {
+		d.active += {i}
+	} else {
+		d.active -= {i}
+	}
+	return true
+}
+
+// sublevel_parse_setting reads a line `sublevel.<name> = active|inactive`. name points into key, and problem is "" for
+// a line that fits, and otherwise in the temp allocator.
+sublevel_parse_setting :: proc(
+	key, value: string,
+) -> (
+	name: string,
+	active: bool,
+	problem: string,
+) {
+	return sublevel_parse_line(key, value)
+}

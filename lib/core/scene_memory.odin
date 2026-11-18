@@ -5,8 +5,10 @@ import "core:log"
 import "core:mem"
 import "core:mem/virtual"
 
-// The most scenes that have memory at once. scene_memories_open refuses one more.
-MAX_SCENE_MEMORY :: 64
+// The most scenes that have memory at once. scene_memories_open refuses one more. Each sublevel's part of a scene takes
+// a slot of its own (see docs/world/sublevels.md#scene-memory). A slot costs little until it opens: then it reserves
+// SCENE_RESERVE of address space, and commits only the pages that it uses.
+MAX_SCENE_MEMORY :: 128
 
 // The address range that each scene's memory reserves. Only the pages that it uses are committed.
 SCENE_RESERVE :: 256 * mem.Megabyte

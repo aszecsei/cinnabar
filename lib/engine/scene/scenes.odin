@@ -46,6 +46,9 @@ Loaded_Scene :: struct {
 	stage:    Scene_Stage,
 	// The fields of this scene's entities that name entities of other scenes, in the scene's memory (see links.odin).
 	links:    [dynamic]Scene_Link,
+	// Whether the scene is a base, with its sublevels, or a sublevel's part of a base (see parts.odin). Change it only
+	// with set_part.
+	part:     Scene_Part,
 }
 
 // Scene_Map is the map from scene ID to entity of one scene, and the memory that it is in: its scene's, or the level's
@@ -62,16 +65,18 @@ Scene_Map :: struct {
 // the Level arena. level is the level generation that they were made in (see maps). It lives beside the world, in
 // Game_State.
 Scenes :: struct {
-	platform: ^core.Platform_API,
+	platform:    ^core.Platform_API,
 	// The blobs of add_scene_asset, or nil.
-	assets:   ^asset.Assets,
+	assets:      ^asset.Assets,
 	// What a behaviour's field is set through, or nil (see links.odin).
-	scripts:  ^script.Runtime,
-	loaded:   [dynamic]Loaded_Scene,
-	by_scene: map[u32]Scene_Map,
-	level:    u64,
+	scripts:     ^script.Runtime,
+	loaded:      [dynamic]Loaded_Scene,
+	by_scene:    map[u32]Scene_Map,
+	level:       u64,
 	// The number that add_scene gives the next scene without one.
-	next:     u32,
+	next:        u32,
+	// What happened to the sublevels' parts since clear_part_events (see parts.odin).
+	part_events: [dynamic]Part_Event,
 }
 
 // init_scenes makes an empty table. assets can be nil, and then add_scene_asset loads nothing. scripts can be nil, and
@@ -83,13 +88,14 @@ init_scenes :: proc(
 	scripts: ^script.Runtime = nil,
 ) {
 	s^ = {
-		platform = platform,
-		assets   = assets,
-		scripts  = scripts,
-		loaded   = make([dynamic]Loaded_Scene, platform.heap_allocator),
-		by_scene = make(map[u32]Scene_Map, platform.heap_allocator),
-		level    = platform.level_generation(),
-		next     = FIRST_RUNTIME_SCENE,
+		platform    = platform,
+		assets      = assets,
+		scripts     = scripts,
+		loaded      = make([dynamic]Loaded_Scene, platform.heap_allocator),
+		by_scene    = make(map[u32]Scene_Map, platform.heap_allocator),
+		level       = platform.level_generation(),
+		next        = FIRST_RUNTIME_SCENE,
+		part_events = make([dynamic]Part_Event, platform.heap_allocator),
 	}
 }
 
@@ -104,6 +110,7 @@ destroy_scenes :: proc(s: ^Scenes) {
 	release_scenes(s)
 	delete(s.loaded)
 	delete(s.by_scene)
+	delete(s.part_events)
 	s^ = {}
 }
 
@@ -145,7 +152,31 @@ add_scene :: proc(
 	added: u32,
 	ok: bool,
 ) {
-	added = append_scene(s, scene.guid, number, Scene_Ready{}) or_return
+	return add_scene_as(w, scripts, s, scene, number, nil, nil, problems)
+}
+
+// add_scene_as adds a scene as add_scene does: a sublevel's part of a base when of is given, and otherwise a base with
+// the sublevels.
+@(private)
+add_scene_as :: proc(
+	w: ^ecs.World,
+	scripts: ^script.Runtime,
+	s: ^Scenes,
+	scene: format.Scene,
+	number: Maybe(u32),
+	of: Maybe(Part_Of),
+	sublevels: []format.Scene_Sublevel,
+	problems: ^[dynamic]Problem = nil,
+) -> (
+	added: u32,
+	ok: bool,
+) {
+	if part, is_part := of.?; is_part {
+		added = append_scene(s, scene.guid, number, Scene_Ready{}, {}, part) or_return
+	} else {
+		added = append_scene(s, scene.guid, number, Scene_Ready{}) or_return
+		set_base(s, added, sublevels)
+	}
 	ecs.add_world_scene(w, scene.guid)
 	spawned := add_entities(w, scripts, scene.entities, handles_of(s, added), problems, added, s)
 	links_scene_ready(s, w, added)
@@ -162,6 +193,7 @@ append_scene :: proc(
 	number: Maybe(u32),
 	stage: Scene_Stage,
 	bundle: asset.Bundle_Hold = {},
+	part: Scene_Part = nil,
 ) -> (
 	added: u32,
 	ok: bool,
@@ -189,6 +221,9 @@ append_scene :: proc(
 		bundle = bundle,
 	}
 	change_stage(&row, stage)
+	if part != nil {
+		set_part(&row, part)
+	}
 	append(&s.loaded, row)
 	return added, true
 }
@@ -204,12 +239,34 @@ add_scene_asset :: proc(
 	added: u32,
 	ok: bool,
 ) {
+	return add_scene_asset_as(w, scripts, s, guid, number, nil)
+}
+
+// add_scene_asset_as adds a cooked scene as add_scene_asset does: a sublevel's part of a base when of is given, and
+// otherwise a base with the sublevels that its blob lists.
+@(private)
+add_scene_asset_as :: proc(
+	w: ^ecs.World,
+	scripts: ^script.Runtime,
+	s: ^Scenes,
+	guid: format.Guid,
+	number: Maybe(u32),
+	of: Maybe(Part_Of),
+) -> (
+	added: u32,
+	ok: bool,
+) {
 	if s.assets == nil {
 		log.error("scene: there are no assets to load a scene from")
 		return 0, false
 	}
 	h, scene := read_scene_blob(w, s.assets, guid) or_return
-	if added, ok = add_scene(w, scripts, s, scene, number); !ok {
+	sublevels: []format.Scene_Sublevel
+	if of == nil {
+		data, _ := asset.data(s.assets, h)
+		sublevels, _ = format.scene_sublevels(data, w.platform.frame_allocator)
+	}
+	if added, ok = add_scene_as(w, scripts, s, scene, number, of, sublevels); !ok {
 		asset.unload(s.assets, h)
 		return
 	}
@@ -225,13 +282,18 @@ add_scene_asset :: proc(
 // once (see docs/world/scenes.md#the-systems).
 unload_scene :: proc(w: ^ecs.World, s: ^Scenes, number: u32) -> int {
 	follow_level(s)
-	index, found := find_loaded(s, number)
-	if !found {
+	if !is_loaded(s, number) {
 		log.warnf("scene: the scene %d is not loaded, so it is not unloaded", number)
 		return 0
 	}
+	// A base's parts go first, since they name it (see docs/world/sublevels.md#parts-are-scenes).
+	parts_despawned := unload_parts_of(w, s, number)
+	index, _ := find_loaded(s, number)
 	gone := s.loaded[index]
 	ordered_remove(&s.loaded, index)
+	if part, is_part := gone.part.(Part_Of); is_part {
+		part_event(s, .Unloaded, part, number)
+	}
 	links_scene_unloading(s, w, number, gone.guid)
 	end_read(s, &gone)
 	if gone.has_blob && s.assets != nil {
@@ -255,7 +317,7 @@ unload_scene :: proc(w: ^ecs.World, s: ^Scenes, number: u32) -> int {
 	ecs.update_activity(w)
 	despawned -= ecs.entity_count(w)
 	log.infof("scene: unloaded the scene %d, %d entities", number, despawned)
-	return int(despawned)
+	return int(despawned) + parts_despawned
 }
 
 // scene_of is the scene that an entity belongs to: its scene's for a scene's entity, its owner's for one that a
@@ -385,6 +447,7 @@ forget_level :: proc(s: ^Scenes) {
 	release_scenes(s)
 	clear(&s.loaded)
 	clear(&s.by_scene)
+	clear(&s.part_events)
 	s.next = FIRST_RUNTIME_SCENE
 }
 

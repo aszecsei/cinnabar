@@ -146,6 +146,22 @@ begin_load :: proc(
 	added: u32,
 	ok: bool,
 ) {
+	return begin_load_as(w, s, guid, number, nil)
+}
+
+// begin_load_as begins a load as begin_load does: a sublevel's part of a base when of is given, and otherwise a base,
+// whose sublevels its blob lists.
+@(private)
+begin_load_as :: proc(
+	w: ^ecs.World,
+	s: ^Scenes,
+	guid: format.Guid,
+	number: Maybe(u32),
+	of: Maybe(Part_Of),
+) -> (
+	added: u32,
+	ok: bool,
+) {
 	follow_level(s)
 	if s.assets == nil {
 		log.error("scene: there are no assets to load a scene from")
@@ -158,8 +174,12 @@ begin_load :: proc(
 		)
 		return 0, false
 	}
-	// A streaming chunk's bundle in a release, which stays open until the scene unloads.
-	bundle := asset.hold_bundle(s.assets, guid)
+	// A streaming chunk's bundle in a release, which stays open until the scene unloads. A sublevel's part has no bundle
+	// of its own: it is in its base's, which the base holds.
+	bundle: asset.Bundle_Hold
+	if of == nil {
+		bundle = asset.hold_bundle(s.assets, guid)
+	}
 	read := asset.blob_read_begin(s.assets, guid)
 	if _, failed := read.(asset.Blob_Read_Failed); failed {
 		buffer: [32]u8
@@ -167,7 +187,11 @@ begin_load :: proc(
 		asset.release_bundle(s.assets, &bundle)
 		return 0, false
 	}
-	if added, ok = append_scene(s, guid, number, Scene_Reading{read = read}, bundle); !ok {
+	part: Scene_Part
+	if p, is_part := of.?; is_part {
+		part = p
+	}
+	if added, ok = append_scene(s, guid, number, Scene_Reading{read = read}, bundle, part); !ok {
 		asset.blob_read_end(s.assets, &read)
 		asset.release_bundle(s.assets, &bundle)
 		return 0, false
@@ -193,6 +217,9 @@ Load_Step :: enum u8 {
 // bodies to make (see physics.loading_scenes). That is checked a call later at the soonest, so that the bodies' scenes
 // are known. Then it takes Loading from its entities, settles them and attaches their behaviours. Call it between
 // frames, outside the script phase.
+//
+// A base learns its sublevels when its blob is read, and the parts of the sublevels in wanted begin to load then, so a
+// base is never ready before its wanted parts begin (see docs/world/sublevels.md#parts-are-scenes).
 advance_loads :: proc(
 	w: ^ecs.World,
 	scripts: ^script.Runtime,
@@ -200,6 +227,7 @@ advance_loads :: proc(
 	order: []u32,
 	budget: Load_Budget,
 	bodies_pending: []u32,
+	wanted: []string = nil,
 ) -> (
 	ready: []u32,
 	failed: []u32,
@@ -234,6 +262,7 @@ advance_loads :: proc(
 			append(&failed_list, number)
 		}
 	}
+	begin_parts(w, s, wanted)
 	return ready_list[:], failed_list[:], work
 }
 
@@ -241,6 +270,7 @@ advance_loads :: proc(
 @(private = "file")
 fail_load :: proc(w: ^ecs.World, s: ^Scenes, number: u32, why: string) -> Load_Step {
 	log.errorf("scene: the scene %d does not load: %s", number, why)
+	note_part_failed(s, number)
 	unload_scene(w, s, number)
 	return .Failed
 }
@@ -286,6 +316,10 @@ advance_scene :: proc(
 			}
 			spawned := make([]ecs.Entity, len(view.entities), allocator_of(s, number))
 			change_stage(row, Scene_Spawning{blob = data, spawned = spawned})
+			if row.part == nil {
+				sublevels, _ := format.scene_sublevels(data, frame)
+				set_base(s, number, sublevels)
+			}
 		case Scene_Spawning:
 			view, _ := format.scene_view(stage.blob)
 			count := min(len(view.entities) - stage.next, remaining.spawns)
@@ -343,6 +377,9 @@ advance_scene :: proc(
 			}
 			reveal(w, scripts, s, number, stage)
 			change_stage(row, Scene_Ready{})
+			if part, is_part := row.part.(Part_Of); is_part {
+				part_event(s, .Ready, part, number)
+			}
 			links_scene_ready(s, w, number)
 			log.infof("scene: the scene %d is ready", number)
 			return .Ready

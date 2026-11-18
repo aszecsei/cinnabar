@@ -1,6 +1,7 @@
 package project
 
 import "base:runtime"
+import "core:fmt"
 import "core:mem/virtual"
 import "core:strings"
 import "core:testing"
@@ -643,6 +644,9 @@ the_sublevel_keys_are_checked_line_by_line :: proc(t: ^testing.T) {
 	problems := make([dynamic]string, context.temp_allocator)
 	parse("sublevel.night = inactive\nsublevel.day = active\n", &s, &problems)
 	testing.expect_value(t, len(problems), 0)
+	testing.expect_value(t, s.sublevels.count, 2)
+	testing.expect_value(t, format.sublevel_name_text(&s.sublevels.names[0]), "night")
+	testing.expect_value(t, s.sublevels.active, bit_set[0 ..< format.MAX_SUBLEVELS]{1})
 
 	clear(&problems)
 	parse("sublevel.night = on\nsublevel.no-way = active\n", &s, &problems)
@@ -655,6 +659,28 @@ the_sublevel_keys_are_checked_line_by_line :: proc(t: ^testing.T) {
 		)
 		testing.expect(t, strings.has_prefix(problems[1], "2: sublevel.no-way: a sublevel's name"))
 	}
+}
+
+// A later line for a sublevel wins, as the user file's lines win over the project's, and a project declares at most
+// MAX_SUBLEVELS.
+@(test)
+a_later_sublevel_line_wins_and_the_table_has_a_limit :: proc(t: ^testing.T) {
+	s: Settings
+	problems := make([dynamic]string, context.temp_allocator)
+	parse("sublevel.night = inactive\nsublevel.night = active\n", &s, &problems)
+	testing.expect_value(t, len(problems), 0)
+	testing.expect_value(t, s.sublevels.count, 1)
+	testing.expect_value(t, s.sublevels.active, bit_set[0 ..< format.MAX_SUBLEVELS]{0})
+
+	text := strings.builder_make(context.temp_allocator)
+	for i in 0 ..= format.MAX_SUBLEVELS {
+		fmt.sbprintf(&text, "sublevel.s%d = active\n", i)
+	}
+	s = {}
+	clear(&problems)
+	parse(strings.to_string(text), &s, &problems)
+	testing.expect_value(t, s.sublevels.count, format.MAX_SUBLEVELS)
+	testing.expect_value(t, len(problems), 1)
 }
 
 // The residency's budget, its idle frames and the textures' mip bias are quality keys, each with its presets.
