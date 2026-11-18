@@ -4,6 +4,7 @@ import "core:log"
 
 import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/scene"
+import "cinnabar:engine/script"
 
 // Sublevel_State is where a sublevel is (see docs/world/sublevels.md#the-active-set). An inactive sublevel's parts are
 // not loaded. A sublevel that is loading is active, and some of its parts are not ready yet. An active one has all of
@@ -68,6 +69,23 @@ set_sublevel :: proc(g: ^Game, name: string, active: bool) -> bool {
 sublevel_state :: proc(g: ^Game, name: string) -> (state: Sublevel_State, ok: bool) {
 	index := sublevel_index(g, name) or_return
 	return g.sublevels.states[index], true
+}
+
+// sublevel_requested is whether a sublevel was last asked to be active: by the last change that set_sublevel queued
+// for it, or else by its state. It is true at once after set_sublevel activates it. It gives false for a sublevel that
+// the project does not declare.
+sublevel_requested :: proc(g: ^Game, name: string) -> (active: bool, ok: bool) {
+	state := sublevel_state(g, name) or_return
+	active = state != .Inactive
+	for request in g.scene_requests {
+		if change, is_change := request.(Sublevel_Change); is_change {
+			sublevel := change.sublevel
+			if format.sublevel_name_text(&sublevel) == name {
+				active = change.active
+			}
+		}
+	}
+	return active, true
 }
 
 // sublevel_events is what happened to the sublevels in this frame, in order. They are valid until the next frame.
@@ -234,5 +252,26 @@ update_sublevels :: proc(g: ^Game) {
 		if s.states[i] != to {
 			change_sublevel(s, i, to)
 		}
+	}
+}
+
+// send_sublevel_events sends the frame's sublevel events to every behaviour that has their handlers:
+// on_sublevel_loading, on_sublevel_ready, on_sublevel_unloaded and on_sublevel_failed, with the sublevel's name (see
+// docs/world/sublevels.md#events). Call it after update_sublevels, before the script phase.
+@(private)
+send_sublevel_events :: proc(g: ^Game) {
+	for &event in sublevel_events(g) {
+		name: string
+		switch event.kind {
+		case .Loading:
+			name = "sublevel_loading"
+		case .Ready:
+			name = "sublevel_ready"
+		case .Unloaded:
+			name = "sublevel_unloaded"
+		case .Failed:
+			name = "sublevel_failed"
+		}
+		script.broadcast(&g.scripts, name, format.sublevel_name_text(&event.sublevel))
 	}
 }
