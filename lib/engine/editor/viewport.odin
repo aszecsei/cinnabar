@@ -47,16 +47,19 @@ OVERLAY_SHADER :: #load("../content/shaders/overlay.hlsl.meta", string)
 
 // View is the editor's viewports, its selection, and the picks that wait for the GPU. It is part of the session.
 View :: struct {
-	viewports: [MAX_VIEWPORTS]Viewport,
-	selection: [dynamic]ecs.Entity,
+	viewports:     [MAX_VIEWPORTS]Viewport,
+	selection:     [dynamic]ecs.Entity,
 	// The entities that the editor hides, with their descendants. The game does not draw them.
-	hidden:    [dynamic]ecs.Entity,
+	hidden:        [dynamic]ecs.Entity,
 	// The picks of every viewport, in the order that they came. One runs at a time, in a frame of its viewport.
-	picks:     [dynamic]link.Pick_Request,
+	picks:         [dynamic]link.Pick_Request,
 	// picks[0] was rendered with Viewport_Tools.ticket, and its results come back through the readback buffer.
-	picking:   bool,
+	picking:       bool,
 	// The Navigation Path tool's points, from Nav_Probe: none, a start, or a start and a goal.
-	nav_probe: [dynamic]ecs.World_Position,
+	nav_probe:     [dynamic]ecs.World_Position,
+	// The scenes of the world that the editor shows, and the preview's position, from World_View (see world_view.odin).
+	world_scenes:  [dynamic]link.World_View_Scene,
+	world_preview: Maybe(ecs.World_Position),
 }
 
 // Viewport is one of the editor's viewports: its camera, its gizmo and how it draws, which the editor sends whether the
@@ -841,6 +844,8 @@ handle_viewport_message :: proc(e: ^Editor, message: link.Message) -> bool {
 		for point in m.points[:min(len(m.points), 2)] {
 			append(&v.nav_probe, ecs.World_Position{raw = point.position})
 		}
+	case link.World_View:
+		handle_world_view(v, m)
 	case link.Box_Handles:
 		if p := viewport(v, m.viewport); p != nil {
 			clear(&p.handles)

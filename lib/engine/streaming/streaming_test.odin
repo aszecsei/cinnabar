@@ -549,3 +549,38 @@ the_level_unloading_forgets_everything :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(f.state.slots), 0)
 	testing.expect_value(t, f.state.streamer, ecs.Entity(0))
 }
+
+// loaded lists the scenes that are in, loading or ready, with the world, and changes counts each change to them, but
+// not an update that changes nothing.
+@(test)
+loaded_follows_the_scenes_that_are_in :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	write_scenes(t, f, {0})
+	start(t, f, {box(0, 100, 20, 30)})
+
+	_, _ = tick(f, 65)
+	world, scenes := loaded(&f.state)
+	testing.expect(t, world != {})
+	testing.expect_value(t, len(scenes), 0)
+	before := changes(&f.state)
+	_, _ = tick(f, 65)
+	testing.expect_value(t, changes(&f.state), before)
+
+	events, _ := tick(f, 85)
+	expect_kinds(t, events, {.Loading})
+	testing.expect(t, changes(&f.state) != before)
+	_, scenes = loaded(&f.state)
+	testing.expect_value(t, len(scenes), 1)
+	testing.expect_value(t, scenes[0].guid, scene_guid(0))
+	testing.expect_value(t, scenes[0].number, events[0].number)
+
+	loading := changes(&f.state)
+	events, _ = tick(f, 85)
+	expect_kinds(t, events, {.Ready})
+	testing.expect(t, changes(&f.state) != loading)
+
+	_, _ = tick(f, 40)
+	_, scenes = loaded(&f.state)
+	testing.expect_value(t, len(scenes), 0)
+}

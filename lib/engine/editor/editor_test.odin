@@ -22,6 +22,7 @@ import "cinnabar:engine/editor/link"
 import "cinnabar:engine/render"
 import "cinnabar:engine/scene"
 import "cinnabar:engine/script"
+import "cinnabar:engine/streaming"
 
 // LIVE_BOX is a 1 m box as a mesh file: the cooker's template, with every edge sharp.
 @(private = "file")
@@ -2959,4 +2960,54 @@ live_instances_take_their_assets_place :: proc(t: ^testing.T) {
 	testing.expect_value(t, asset.version(&assets, h), version)
 	step(f, 1, link.Release_Live_Instances{guid = ([16]u8)(guid)})
 	testing.expect(t, !asset.is_live(&assets, guid))
+}
+
+// The game keeps the world view's last scenes and preview, and a new editor's session starts with none.
+@(test)
+the_world_view_is_the_sessions :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	step(
+		f,
+		1,
+		link.World_View {
+			scenes = {{min = {1, 2, 3}, max = {4, 5, 6}, load_distance = 25}, {persistent = true}},
+			preview = {{position = {7, 8, 9}}},
+		},
+	)
+	testing.expect_value(t, len(f.editor.session.view.world_scenes), 2)
+	testing.expect_value(
+		t,
+		f.editor.session.view.world_preview,
+		Maybe(ecs.World_Position)(ecs.World_Position{raw = {7, 8, 9}}),
+	)
+	step(f, 1, link.World_View{})
+	testing.expect_value(t, len(f.editor.session.view.world_scenes), 0)
+	testing.expect(t, f.editor.session.view.world_preview == nil)
+	step(f, 1, link.World_View{scenes = {{persistent = true}}})
+	step(f, 2)
+	testing.expect_value(t, len(f.editor.session.view.world_scenes), 0)
+}
+
+// The game sends its streamed scenes when the streaming policy changes them, once for each change, and again to a new
+// editor.
+@(test)
+streamed_scenes_go_out_when_they_change :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	state: streaming.State
+	f.editor.streaming = &state
+	count :: proc(messages: []link.Message) -> (n: int) {
+		for m in messages {
+			if _, ok := m.(link.Streamed_Scenes); ok {
+				n += 1
+			}
+		}
+		return
+	}
+	testing.expect_value(t, count(step(f, 1)), 0)
+	state.changes += 1
+	testing.expect_value(t, count(step(f, 1)), 1)
+	testing.expect_value(t, count(step(f, 1)), 0)
+	testing.expect_value(t, count(step(f, 2)), 1)
 }

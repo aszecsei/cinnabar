@@ -115,6 +115,8 @@ State :: struct {
 	slots:        [dynamic]Slot,
 	events:       [dynamic]Stream_Event,
 	stats:        Stats,
+	// Counts the changes to the world and to the scenes that are in, so a reader sees that loaded changed.
+	changes:      u64,
 }
 
 // init makes an empty state.
@@ -151,6 +153,38 @@ stats :: proc(st: ^State) -> Stats {
 	return st.stats
 }
 
+// Loaded_Scene is a scene of the world that is in: its GUID and its number in the scenes.
+Loaded_Scene :: struct {
+	guid:   format.Guid,
+	number: u32,
+}
+
+// changes counts the changes to the world and to its scenes that are in. A reader that saw the same count sees the
+// same loaded.
+changes :: proc(st: ^State) -> u64 {
+	return st.changes
+}
+
+// loaded is the GUID of the world that streams, or zero for none, and the scenes that are in, loading or ready, in the
+// world's order, in the frame allocator.
+loaded :: proc(st: ^State) -> (world: format.Guid, scenes: []Loaded_Scene) {
+	current, ok := st.world.(World_Loaded)
+	if !ok {
+		return
+	}
+	records, valid := world_records(st, current)
+	if !valid {
+		return current.guid, nil
+	}
+	list := make([dynamic]Loaded_Scene, st.platform.frame_allocator)
+	for slot, index in st.slots {
+		if in_, is_in := slot.(Slot_In); is_in && index < len(records) {
+			append(&list, Loaded_Scene{guid = records[index].guid, number = in_.number})
+		}
+	}
+	return current.guid, list[:]
+}
+
 // change_slot is the one writer of a slot. A scene goes out to in or failed, in to out or failed, and failed to out
 // when the world's blob changes. It gives false, and changes nothing, for any other change.
 @(private)
@@ -177,6 +211,7 @@ change_slot :: proc(st: ^State, index: int, to: Slot) -> bool {
 		return false
 	}
 	st.slots[index] = to
+	st.changes += 1
 	return true
 }
 
@@ -199,6 +234,9 @@ release_world :: proc(st: ^State) {
 	if loaded, ok := st.world.(World_Loaded); ok {
 		asset.unload(st.assets, loaded.handle)
 	}
+	if st.world != nil || len(st.slots) > 0 {
+		st.changes += 1
+	}
 	st.world = nil
 	clear(&st.slots)
 }
@@ -206,6 +244,7 @@ release_world :: proc(st: ^State) {
 @(private)
 emit :: proc(st: ^State, kind: Stream_Event_Kind, number: u32, guid: format.Guid) {
 	append(&st.events, Stream_Event{kind = kind, number = number, scene = guid})
+	st.changes += 1
 }
 
 @(private)
@@ -338,6 +377,7 @@ load_world :: proc(st: ^State, guid: format.Guid) {
 		handle  = handle,
 		version = asset.version(st.assets, handle),
 	}
+	st.changes += 1
 }
 
 // Candidate is a scene that may begin to load.

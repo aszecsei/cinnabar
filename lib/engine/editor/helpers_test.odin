@@ -516,3 +516,42 @@ a_playing_nav_agent_draws_its_corners_neighbors_and_velocities :: proc(t: ^testi
 	f.editor.session.view.viewports[0].settings.helpers = .None
 	testing.expect_value(t, line_count(f), 0)
 }
+
+// The world view draws each scene that is not persistent as its bounds and a box at its load distance, the active scene
+// in its own color, in Edit and in Play, and the preview as a sphere. With no helpers, it draws nothing.
+@(test)
+the_world_view_draws_the_bounds_of_its_scenes :: proc(t: ^testing.T) {
+	when !debug.DEBUG_DRAW {
+		return
+	}
+	f := helper_setup(t)
+	defer helper_teardown(f)
+	f.editor.session.view.viewports[0].settings.helpers = .Selected
+	far := ecs.position_from_meters({1.5e11, 0, 0})
+	near := ecs.position_offset(far, {40, 10, 20})
+	scenes := []link.World_View_Scene {
+		{min = far.raw, max = near.raw, load_distance = 25, active = true},
+		{min = far.raw, max = near.raw},
+		{persistent = true},
+	}
+	handle_world_view(&f.editor.session.view, {scenes = scenes})
+	testing.expect_value(t, line_count(f), 3 * 12)
+	lines := debug.frame_lines(&f.lines)
+	// The bounds: from the minimum corner to the maximum, exact far from the origin.
+	testing.expect_value(t, ecs.position_sub(near, far), [3]f32{40, 10, 20})
+	testing.expect(t, lines[0].color != lines[24].color)
+	testing.expect(t, lines[12].color.a < lines[0].color.a)
+
+	f.editor.session.mode = .Play
+	testing.expect_value(t, line_count(f), 3 * 12)
+
+	preview := []link.Nav_Probe_Point{{position = far.raw}}
+	handle_world_view(&f.editor.session.view, {scenes = scenes, preview = preview})
+	testing.expect_value(t, line_count(f), 3 * 12 + 3 * debug.CIRCLE_SEGMENTS)
+
+	f.editor.session.view.viewports[0].settings.helpers = .None
+	testing.expect_value(t, line_count(f), 0)
+	handle_world_view(&f.editor.session.view, {})
+	f.editor.session.view.viewports[0].settings.helpers = .All
+	testing.expect_value(t, line_count(f), 0)
+}
