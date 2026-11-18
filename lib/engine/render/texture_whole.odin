@@ -3,12 +3,10 @@
 // docs/rendering/assets.md#virtual-textures.
 package render
 
-import "core:hash"
 import "core:log"
 
 import "cinnabar:core"
 import "cinnabar:core/gpu"
-import "cinnabar:core/lz4"
 import "cinnabar:engine/asset"
 import format "cinnabar:engine/asset/format"
 
@@ -271,26 +269,26 @@ assemble_whole :: proc(r: ^Residency, e: ^Resident_Entry, s: ^Whole_Assembling) 
 			}
 			block = data[record.offset - s.read_offset:][:record.compressed_size]
 		}
-		if hash.fnv32a(block) != record.checksum {
-			fail_whole(r, e, "has a page that is not the one that its table names")
-			return
-		}
 		payload := make([]byte, record.size, platform.frame_allocator)
-		if !lz4.decompress(block, payload) {
-			fail_whole(r, e, "has a page that does not decompress")
-			return
-		}
 		mip := u32(record.mip)
 		size := [2]u32{max(tex.size.x >> mip, 1), max(tex.size.y >> mip, 1)}
 		offset := whole_mip_offset(tex.blob_format, tex.size, mip)
-		format.texture_page_strip(
+		switch asset.texture_page_place(
 			tex.blob_format,
-			payload,
+			record,
 			tex.levels[mip],
-			u32(record.x),
-			u32(record.y),
+			block,
+			payload,
 			s.mips[offset:][:format.texture_mip_size(tex.blob_format, size.x, size.y)],
-		)
+		) {
+		case .None:
+		case .Checksum:
+			fail_whole(r, e, "has a page that is not the one that its table names")
+			return
+		case .Decompress:
+			fail_whole(r, e, "has a page that does not decompress")
+			return
+		}
 		s.next_page += 1
 		pool.whole_budget -= 1
 		if s.read != 0 && s.next_page >= s.read_end {
