@@ -151,6 +151,16 @@ Quality :: struct {
 	// The most anisotropy that a texture's sampler takes, from 1 to MAX_TEXTURE_ANISOTROPY, 0 giving
 	// DEFAULT_TEXTURE_ANISOTROPY: it caps each texture's own (see docs/content/kinds/textures.md#textures).
 	texture_anisotropy: u8,
+	// The budget of the GPU memory of the assets that are resident, in MiB, from MIN_RESIDENCY_BUDGET to
+	// MAX_RESIDENCY_BUDGET and at most half of the device's video memory, 0 giving DEFAULT_RESIDENCY_BUDGET: past it, the
+	// assets that were used longest ago are unloaded (see docs/rendering/assets.md#gpu-residency).
+	residency_budget:   u32,
+	// How many frames an asset may go without being asked for before it is unloaded, from MIN_RESIDENCY_IDLE to
+	// MAX_RESIDENCY_IDLE, 0 giving DEFAULT_RESIDENCY_IDLE.
+	residency_idle:     u32,
+	// How many mips coarser than their size on the screen says the textures of materials stream, from MIN_TEXTURE_MIP_BIAS
+	// to MAX_TEXTURE_MIP_BIAS: a negative number is finer.
+	texture_mip_bias:   i8,
 }
 
 // Caps are what the device can do that quality depends on, from Platform_API.gpu_features and gpu_adapter.
@@ -214,6 +224,41 @@ TEXTURE_ANISOTROPIES := [Quality_Level]u8 {
 }
 DEFAULT_TEXTURE_ANISOTROPY :: 8
 
+// The budget of the assets that are resident at each level, in MiB.
+@(rodata)
+RESIDENCY_BUDGETS := [Quality_Level]u32 {
+	.Low    = 1024,
+	.Medium = 2048,
+	.High   = 4096,
+	.Ultra  = 8192,
+}
+MIN_RESIDENCY_BUDGET :: 64
+MAX_RESIDENCY_BUDGET :: 16384
+DEFAULT_RESIDENCY_BUDGET :: 4096
+
+// How many frames an asset may go unused at each level before it is unloaded.
+@(rodata)
+RESIDENCY_IDLES := [Quality_Level]u32 {
+	.Low    = 300,
+	.Medium = 600,
+	.High   = 1200,
+	.Ultra  = 2400,
+}
+MIN_RESIDENCY_IDLE :: 60
+MAX_RESIDENCY_IDLE :: 36000
+DEFAULT_RESIDENCY_IDLE :: 1200
+
+// How many mips coarser than a texture's size on the screen each level streams it.
+@(rodata)
+TEXTURE_MIP_BIASES := [Quality_Level]i8 {
+	.Low    = 1,
+	.Medium = 0,
+	.High   = 0,
+	.Ultra  = 0,
+}
+MIN_TEXTURE_MIP_BIAS :: -2
+MAX_TEXTURE_MIP_BIAS :: 4
+
 // The video memory below which default_quality picks each preset. Unknown memory picks High.
 QUALITY_LOW_MEMORY :: 4 << 30
 QUALITY_MEDIUM_MEMORY :: 6 << 30
@@ -266,7 +311,21 @@ preset_quality :: proc(preset: Quality_Preset, caps: Caps) -> Quality {
 		mesh_pool = min(MESH_POOLS[level], max_mesh_pool(caps)),
 		texture_pool = min(TEXTURE_POOLS[level], max_texture_pool(caps)),
 		texture_anisotropy = TEXTURE_ANISOTROPIES[level],
+		residency_budget = min(RESIDENCY_BUDGETS[level], max_residency_budget(caps)),
+		residency_idle = RESIDENCY_IDLES[level],
+		texture_mip_bias = TEXTURE_MIP_BIASES[level],
 	}
+}
+
+// max_residency_budget is the most that the budget of the resident assets may be, in MiB: half of a device's video
+// memory, and all of MAX_RESIDENCY_BUDGET when that is unknown.
+max_residency_budget :: proc(caps: Caps) -> u32 {
+	if caps.video_memory == 0 {
+		return MAX_RESIDENCY_BUDGET
+	}
+	return u32(
+		clamp(caps.video_memory / 2 / mem.Megabyte, MIN_RESIDENCY_BUDGET, MAX_RESIDENCY_BUDGET),
+	)
 }
 
 // max_mesh_pool is the most that a device's pool of mesh pages may be, in MiB: a quarter of its video memory, and all
@@ -357,6 +416,17 @@ clamp_quality :: proc(q: Quality, caps: Caps) -> Quality {
 	)
 	q.texture_anisotropy =
 		q.texture_anisotropy > 0 ? clamp(q.texture_anisotropy, 1, format.MAX_TEXTURE_ANISOTROPY) : DEFAULT_TEXTURE_ANISOTROPY
+	q.residency_budget = clamp(
+		q.residency_budget > 0 ? q.residency_budget : DEFAULT_RESIDENCY_BUDGET,
+		MIN_RESIDENCY_BUDGET,
+		max_residency_budget(caps),
+	)
+	q.residency_idle = clamp(
+		q.residency_idle > 0 ? q.residency_idle : DEFAULT_RESIDENCY_IDLE,
+		MIN_RESIDENCY_IDLE,
+		MAX_RESIDENCY_IDLE,
+	)
+	q.texture_mip_bias = clamp(q.texture_mip_bias, MIN_TEXTURE_MIP_BIAS, MAX_TEXTURE_MIP_BIAS)
 	return q
 }
 

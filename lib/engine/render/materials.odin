@@ -154,12 +154,28 @@ Material_Table :: struct {
 	bytes:   [dynamic]byte,
 	// A texture of a block is not resident yet, so it samples its default.
 	waiting: bool,
+	// Where the frame's view is, which sizes what a material draws on the screen (see item_pixels). Without it, every
+	// material draws at full size.
+	look:    Material_Look,
 }
 
-// Material_Use is a material or instance as the frame draws it: its pipeline, and its block's offset in the table.
+// Material_Look is a view, as what a material draws is sized on its screen.
+Material_Look :: struct {
+	// Where the view is, relative to the scene's origin.
+	camera: [3]f32,
+	// A world unit's pixels at a distance of 1 (see lod_scale), 0 for no view, and the least distance that counts.
+	scale:  f32,
+	near:   f32,
+	// An orthographic view's pixels do not shrink with distance.
+	flat:   bool,
+}
+
+// Material_Use is a material or instance as the frame draws it: its pipeline, and its block's offset in the table, and the
+// largest size in pixels that it was asked for, which its textures' mips follow (see resident_texture_want).
 Material_Use :: struct {
 	pipeline: int,
 	block:    u32,
+	pixels:   f32,
 }
 
 materials_init :: proc(m: ^Materials, platform: ^core.Platform_API) {
@@ -204,22 +220,33 @@ materials_reload :: proc(m: ^Materials) {
 
 // use_material gives a material or instance as this frame draws it, and adds its block to the table the first time.
 // A GUID of zero is the default material, and so is one that cannot draw. It fails only when the default material
-// cannot draw either.
+// cannot draw either. pixels is how large the draw shows on the screen, across, which its textures' mips follow; the
+// default is as large as a texture, which keeps every mip.
 use_material :: proc(
 	r: ^Renderer,
 	table: ^Material_Table,
 	guid: format.Guid,
+	pixels := max(f32),
 ) -> (
 	use: Material_Use,
 	ok: bool,
 ) {
 	wanted := guid if guid != {} else r.materials.default_guid
-	if found, seen := table.uses[wanted]; seen {
-		return found, true
+	if found, seen := &table.uses[wanted]; seen {
+		// A larger draw of a material that the frame has drawn wants its textures at a finer mip.
+		if pixels > found.pixels {
+			found.pixels = pixels
+			if data, has_data := material_data(r, wanted); has_data {
+				if b, is_block := material_block(data, wanted); is_block {
+					want_textures(r, b.textures, pixels)
+				}
+			}
+		}
+		return found^, true
 	}
-	use, ok = make_use(r, table, wanted)
+	use, ok = make_use(r, table, wanted, pixels)
 	if !ok && wanted != r.materials.default_guid {
-		use, ok = use_material(r, table, {})
+		use, ok = use_material(r, table, {}, pixels)
 	}
 	if ok {
 		table.uses[wanted] = use
@@ -232,6 +259,7 @@ make_use :: proc(
 	r: ^Renderer,
 	table: ^Material_Table,
 	guid: format.Guid,
+	pixels: f32,
 ) -> (
 	use: Material_Use,
 	ok: bool,
@@ -239,8 +267,21 @@ make_use :: proc(
 	data := material_data(r, guid) or_return
 	b := material_block(data, guid) or_return
 	use.pipeline = material_pipeline(r, b.material, b.switches) or_return
+	use.pixels = pixels
+	// The textures want their mips before the block asks for them, so they stream in at the mip that they want.
+	want_textures(r, b.textures, pixels)
 	use.block = add_block(r, table, b)
 	return use, true
+}
+
+// want_textures says that a draw of a material shows pixels across, to the residency of each texture that it has.
+@(private = "file")
+want_textures :: proc(r: ^Renderer, textures: []format.Material_Texture, pixels: f32) {
+	for t in textures {
+		if t.guid != {} {
+			resident_texture_want(&r.residency, t.guid, pixels)
+		}
+	}
 }
 
 // bin_draws gives the pipeline that each bin draws with this frame: its own, or while its own compiles, its blend

@@ -11,6 +11,7 @@ import "core:slice"
 import "core:strings"
 import "core:sync"
 import "core:testing"
+import "core:time"
 
 import "cinnabar:core"
 import "cinnabar:core/gpu"
@@ -3807,6 +3808,57 @@ a_frame_streams_a_virtual_textures_pages :: proc(t: ^testing.T) {
 	testing.expect(t, !table.waiting)
 
 	testing.expect_value(t, fake.reads_open, 0)
+	testing.expectf(t, len(rig.record.problems) == 0, "the frames logged %v", rig.record.problems)
+}
+
+// A material's slot for a texture that the residency unloaded has the default's index and sampler, and the texture's own
+// once it streams in again.
+@(test)
+a_material_samples_its_default_for_an_unloaded_texture :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	rig := new(Rig)
+	defer free(rig)
+	rig_start(t, rig)
+	defer rig_stop(rig)
+	context.logger = {record_problems, &rig.record, .Debug, {}}
+	r, platform := rig.r, &rig.platform
+	platform.gpu_stream_texture, platform.gpu_stream_buffer, platform.gpu_transfer_done =
+		null.stream_texture, null.stream_buffer, null.transfer_done
+	guid := test_guid(7)
+	write_texture_blob(t, rig.dir, guid, {16, 16}, 5, time.now())
+	residency_set_policy(&r.residency, {idle_frames = 5})
+
+	slot_of :: proc(r: ^Renderer, guid: format.Guid) -> (index: u32, waiting: bool) {
+		table: Material_Table
+		table.bytes = make([dynamic]byte, r.platform.frame_allocator)
+		offset := add_block(
+			r,
+			&table,
+			{block = make([]byte, 16, context.temp_allocator), textures = {{guid = guid}}},
+		)
+		return (^[2]u32)(&table.bytes[offset])[0], table.waiting
+	}
+	default := gpu.read_index(r.materials.defaults[.White])
+	index, waiting := slot_of(r, guid)
+	testing.expect(t, waiting)
+	testing.expect_value(t, index, default)
+	residency_update(&r.residency)
+	index, waiting = slot_of(r, guid)
+	testing.expect(t, !waiting)
+	testing.expect(t, index != default)
+
+	// Nothing asks for it for longer than the policy allows.
+	for _ in 0 ..< 8 {
+		residency_update(&r.residency)
+	}
+	testing.expect_value(t, residency_stats(&r.residency).evicted, 1)
+	index, waiting = slot_of(r, guid)
+	testing.expect(t, waiting)
+	testing.expect_value(t, index, default)
+	residency_update(&r.residency)
+	index, waiting = slot_of(r, guid)
+	testing.expect(t, !waiting)
+	testing.expect(t, index != default)
 	testing.expectf(t, len(rig.record.problems) == 0, "the frames logged %v", rig.record.problems)
 }
 

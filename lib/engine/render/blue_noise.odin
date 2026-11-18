@@ -14,7 +14,8 @@ BLUE_NOISE_SLICES :: 32
 // Blue_Noise is the noise texture, in the Renderer.
 Blue_Noise :: struct {
 	guid:    format.Guid,
-	// The texture once it is resident, which the tests set.
+	// A texture that the tests set in place of the asset's. The asset's is not kept across frames, as the residency may
+	// unload it when nothing asks for it.
 	texture: gpu.Texture,
 }
 
@@ -27,10 +28,13 @@ blue_noise_init :: proc(n: ^Blue_Noise) {
 @(private)
 blue_noise :: proc(r: ^Renderer) -> gpu.Texture {
 	n := &r.blue_noise
+	if n.texture != {} {
+		return n.texture
+	}
 	if t, ready := resident_texture(&r.residency, n.guid, .D2_Array); ready {
 		if t.size == {BLUE_NOISE_SIZE, BLUE_NOISE_SIZE} && t.layer_count == BLUE_NOISE_SLICES {
-			n.texture = t.texture
+			return t.texture
 		}
 	}
-	return n.texture
+	return {}
 }
