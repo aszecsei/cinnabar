@@ -3,17 +3,20 @@ package physics
 import "base:runtime"
 import "core:c"
 import "core:fmt"
+import "core:hash"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
 import "core:mem/virtual"
 import "core:os"
+import "core:slice"
 import "core:sync"
 import "core:testing"
 
 import "cinnabar:core"
 import "cinnabar:core/jobs"
 import "cinnabar:core/luau"
+import "cinnabar:core/lz4"
 import core_physics "cinnabar:core/physics"
 import physics_host "cinnabar:core/physics/host"
 import physics_jolt "cinnabar:core/physics/jolt"
@@ -77,6 +80,7 @@ setup :: proc(t: ^testing.T, null := false, quiet := false, scripts := false) ->
 		asset_allocator = runtime.heap_allocator(),
 		file_read = core.file_read,
 		file_modified = core.file_modified,
+		file_read_range = core.file_read_range,
 		time_seconds = proc() -> f64 {return 0},
 		script_open = script_host.open,
 		script_close = script_host.close,
@@ -1499,6 +1503,246 @@ height_field_colliders :: proc(t: ^testing.T) {
 		ecs.get(&f.world, terrain, Physics_Body).body != body,
 		"a change makes the body again",
 	)
+}
+
+// virtual_mask_block is the value that a 4 by 4 block of the virtual test mask's mip 0 holds, where x and y count blocks:
+// 0, a hole, in the blocks over texels 64 to 127 along both axes, and from 1 to 200 elsewhere.
+@(private = "file")
+virtual_mask_block :: proc(x, y: int) -> u8 {
+	if x >= 16 && x < 32 && y >= 16 && y < 32 {
+		return 0
+	}
+	return u8(1 + (x * 7 + y * 13) % 200)
+}
+
+@(private = "file")
+VIRTUAL_MASK_SIZE :: 256
+
+// virtual_mask_mip0 is the virtual test mask's whole mip 0 as BC4 blocks, whose texels each hold their block's value.
+@(private = "file")
+virtual_mask_mip0 :: proc() -> []byte {
+	blocks := VIRTUAL_MASK_SIZE / 4
+	mip := make([]byte, blocks * blocks * 8, context.temp_allocator)
+	for y in 0 ..< blocks {
+		for x in 0 ..< blocks {
+			v := virtual_mask_block(x, y)
+			mip[(y * blocks + x) * 8], mip[(y * blocks + x) * 8 + 1] = v, v
+		}
+	}
+	return mip
+}
+
+// virtual_mask_page is one page of a BC4 mask, LZ4 compressed: its tile of blocks, from the block of the mip
+// at (first_x, first_y) on, which hold value(x, y), clamped to the mip's blocks.
+@(private = "file")
+virtual_mask_page :: proc(
+	first_x, first_y, blocks: int,
+	value: proc(x, y: int) -> u8,
+) -> format.Texture_Page_Contents {
+	tile := format.TEXTURE_PAGE_TEXELS / 4
+	payload := make([]byte, tile * tile * 8, context.temp_allocator)
+	for by in 0 ..< tile {
+		for bx in 0 ..< tile {
+			v := value(clamp(first_x + bx, 0, blocks - 1), clamp(first_y + by, 0, blocks - 1))
+			payload[(by * tile + bx) * 8], payload[(by * tile + bx) * 8 + 1] = v, v
+		}
+	}
+	scratch := make([]byte, lz4.bound(len(payload)), context.temp_allocator)
+	block := slice.clone(lz4.compress(payload, scratch), context.temp_allocator)
+	return {record = {size = u32(len(payload)), checksum = hash.fnv32a(block)}, compressed = block}
+}
+
+// write_virtual_mask writes the virtual test mask, a 256 by 256 BC4 mask of mip 0 as 4 pages and mip 1 as the root
+// page, and returns its blob.
+@(private = "file")
+write_virtual_mask :: proc(t: ^testing.T, f: ^Fixture, guid: format.Guid) -> []byte {
+	pages := make([]format.Texture_Page_Contents, 5, context.temp_allocator)
+	for y in 0 ..< 2 {
+		for x in 0 ..< 2 {
+			pages[y * 2 + x] = virtual_mask_page(
+				x * format.TEXTURE_PAGE_SIZE / 4 - 1,
+				y * format.TEXTURE_PAGE_SIZE / 4 - 1,
+				VIRTUAL_MASK_SIZE / 4,
+				virtual_mask_block,
+			)
+		}
+	}
+	pages[4] = virtual_mask_page(-1, -1, VIRTUAL_MASK_SIZE / 8, proc(x, y: int) -> u8 {return 9})
+	pages[4].record.flags = {.Root}
+	size := [2]u32{VIRTUAL_MASK_SIZE, VIRTUAL_MASK_SIZE}
+	mip_count := u32(9)
+	tail_mip := format.texture_tail_mip(size, mip_count)
+	testing.expect_value(t, tail_mip, 2)
+	data := format.texture_write(
+		{
+			guid = guid,
+			format = .BC4_Unorm,
+			usage = .Mask,
+			size = size,
+			mip_count = mip_count,
+			sampler = {wrap = .Clamp},
+			mips = make(
+				[]byte,
+				format.texture_tail_size(.BC4_Unorm, size, tail_mip, mip_count),
+				context.temp_allocator,
+			),
+			flags = {.Virtual},
+			pages = pages,
+		},
+		context.temp_allocator,
+	)
+	write_blob(t, f, guid, data)
+	return data
+}
+
+@(private = "file")
+write_blob :: proc(t: ^testing.T, f: ^Fixture, guid: format.Guid, data: []byte) {
+	buffer: [32]u8
+	path := fmt.tprintf("%s/%s.blob", f.cache, format.guid_format(guid, &buffer))
+	testing.expect(t, os.write_entire_file(path, data) == nil)
+}
+
+// A virtual mask's mip 0 is in pages that are not in its head: texture_texels reads them, and the texels are the
+// source's, so the field has the mask's holes.
+@(test)
+virtual_masks_are_read_from_their_pages :: proc(t: ^testing.T) {
+	f := setup(t, quiet = true)
+	defer teardown(t, f)
+	MASK :: format.Guid {
+		1  = 5,
+		15 = 7,
+	}
+	write_virtual_mask(t, f, MASK)
+
+	mask, ok := texture_texels(&f.physics, MASK)
+	testing.expect(t, ok, "the mask is read")
+	testing.expect_value(t, mask.size, [2]u32{VIRTUAL_MASK_SIZE, VIRTUAL_MASK_SIZE})
+	expected, _ := format.texture_channel(
+		.BC4_Unorm,
+		mask.size,
+		virtual_mask_mip0(),
+		context.temp_allocator,
+	)
+	testing.expect_value(t, len(mask.values), len(expected))
+	same := len(mask.values) == len(expected)
+	for v, i in mask.values {
+		same &&= i < len(expected) && v == expected[i]
+	}
+	testing.expect(t, same, "its mip 0 is the source's")
+
+	// A 16 by 16 grid of 16 m cells: the cells 4 to 7 along both axes are holes, so the samples with a hole at each of
+	// their four cells, 5 to 7, are.
+	sr := Surface_Renderer {
+		size = {256, 256},
+		cell = 16,
+	}
+	height := Texels{{1, 1}, []f32{0.5}}
+	field := height_field(sr, height, mask, 1, context.temp_allocator)
+	testing.expect_value(t, field.count, [2]u32{17, 17})
+	hole := core_physics.HEIGHT_FIELD_HOLE
+	for j in 0 ..< 17 {
+		for i in 0 ..< 17 {
+			inside := i >= 5 && i <= 7 && j >= 5 && j <= 7
+			testing.expectf(
+				t,
+				(field.heights[j * 17 + i] == hole) == inside,
+				"sample %d, %d: hole is %v",
+				i,
+				j,
+				inside,
+			)
+		}
+	}
+}
+
+// A virtual mask makes a height field's holes in a body: a ray over its hole passes, and one over the rest hits.
+@(test)
+virtual_mask_height_field_collides :: proc(t: ^testing.T) {
+	f := setup(t, quiet = true)
+	defer teardown(t, f)
+	ecs.register_component(
+		&f.world.registry,
+		Surface_Renderer,
+		ecs.Component_Id(format.SCENE_SURFACE_RENDERER_ID),
+	)
+	HEIGHT :: format.Guid {
+		1  = 6,
+		15 = 7,
+	}
+	MASK :: format.Guid {
+		1  = 5,
+		15 = 7,
+	}
+	heights := make([]byte, 16 * 16 * 2, context.temp_allocator)
+	for i in 0 ..< 16 * 16 {
+		heights[2 * i], heights[2 * i + 1] = 0xff, 0x7f
+	}
+	write_texture(t, f, HEIGHT, .R16_Unorm, {16, 16}, heights)
+	write_virtual_mask(t, f, MASK)
+
+	terrain := spawn_at(f, {0, 0, 0})
+	ecs.add(
+		&f.world,
+		terrain,
+		Surface_Renderer {
+			size = {256, 256},
+			cell = 16,
+			height_range = {0, 4},
+			height_map = HEIGHT,
+			hole_mask = MASK,
+		},
+	)
+	c := DEFAULT_COLLIDER
+	c.shape = .Height_Field
+	ecs.add(&f.world, terrain, c)
+	ticks(f, 1)
+	testing.expect(
+		t,
+		ecs.get(&f.world, terrain, Physics_Body).body.generation != 0,
+		"the terrain has a body",
+	)
+	// The hole is the texels 64 to 127, which are 192 m to 128 m from the surface's far corner, -64 to 0 m from its middle.
+	_, ok := raycast(
+		&f.physics,
+		&f.world,
+		ecs.position_from_meters({-32, 10, -32}),
+		{0, -1, 0},
+		20,
+	)
+	testing.expect(t, !ok, "a ray over the hole passes through")
+	hit: Hit
+	hit, ok = raycast(&f.physics, &f.world, ecs.position_from_meters({64, 10, 64}), {0, -1, 0}, 20)
+	testing.expect(t, ok && hit.entity == terrain, "a ray over the rest hits the terrain")
+}
+
+// A virtual mask whose blob is cut short, or whose page is not the table's, is not read, and nothing panics.
+@(test)
+virtual_masks_that_are_corrupt_fail_cleanly :: proc(t: ^testing.T) {
+	f := setup(t, quiet = true)
+	defer teardown(t, f)
+	CUT :: format.Guid {
+		1  = 8,
+		15 = 7,
+	}
+	CORRUPT :: format.Guid {
+		1  = 9,
+		15 = 7,
+	}
+	context.logger = testlog.expected_errors()
+	data := write_virtual_mask(t, f, CUT)
+	size, is_virtual := format.texture_head_size(data)
+	testing.expect(t, is_virtual)
+	// The head and a piece of the first page's block: the pages are not all there.
+	cut := slice.clone(data[:size + 10], context.temp_allocator)
+	write_blob(t, f, CUT, cut)
+	_, ok := texture_texels(&f.physics, CUT)
+	testing.expect(t, !ok, "a blob that is cut short is not read")
+
+	corrupt := slice.clone(data, context.temp_allocator)
+	corrupt[len(corrupt) - 1] ~= 0xff
+	write_blob(t, f, CORRUPT, corrupt)
+	_, ok = texture_texels(&f.physics, CORRUPT)
+	testing.expect(t, !ok, "a page that is not the table's is not read")
 }
 
 @(private = "file")

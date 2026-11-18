@@ -172,7 +172,9 @@ sample_nearest :: proc(t: Texels, uv: [2]f32) -> f32 {
 }
 
 // texture_texels is a 2D texture asset's mip 0, its first channel, which it loads if it is not loaded: R16_Unorm,
-// RGBA8_Unorm's red or BC4_Unorm, a height or a mask texture. It fails for another format.
+// RGBA8_Unorm's red or BC4_Unorm, a height or a mask texture. A virtual texture, whose mip 0 is in pages that are not in
+// its head, has them read and assembled at once (see asset.texture_mip0). It fails, with a log line, for another format
+// or a blob that does not hold its mip 0.
 @(private)
 texture_texels :: proc(s: ^State, guid: format.Guid) -> (t: Texels, ok: bool) {
 	if s.assets == nil || guid == {} {
@@ -184,7 +186,21 @@ texture_texels :: proc(s: ^State, guid: format.Guid) -> (t: Texels, ok: bool) {
 	if blob.dimension != .D2 {
 		return
 	}
-	mip := data[blob.mips.offset:][:format.texture_mip_size(blob.format, blob.size.x, blob.size.y)]
+	mip: []byte
+	if .Virtual in blob.flags {
+		mip = asset.texture_mip0(s.assets, guid, data, blob, allocator_of(s)) or_return
+	} else {
+		size := format.texture_mip_size(blob.format, blob.size.x, blob.size.y)
+		if u64(blob.mips.offset) + u64(size) > u64(len(data)) {
+			buffer: [32]u8
+			log.errorf(
+				"physics: texture %s has a mip 0 that its blob does not hold",
+				format.guid_format(guid, &buffer),
+			)
+			return
+		}
+		mip = data[blob.mips.offset:][:size]
+	}
 	values := format.texture_channel(blob.format, blob.size, mip, allocator_of(s)) or_return
 	return {blob.size, values}, true
 }
