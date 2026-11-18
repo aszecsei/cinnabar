@@ -393,10 +393,10 @@ handle_taken :: proc(d: ^Daemon, taken: serve.Taken) {
 }
 
 // preview cooks a material, an animation graph or a UI document that the editor has not saved into the cache's preview
-// area (see cook_preview, animation_graph_check and ui_check), and checks a decision or a blackboard, which have no
-// preview, and writes nothing (see decision_check and blackboard_check). A GOAP decision that checks out also plans the
-// request's plan query (see plan_preview). Its problems go to the editor in the answer, and not to
-// the log: the asset's editor shows them on its nodes or elements.
+// area (see cook_preview, animation_graph_check and ui_check), and checks a decision, a blackboard or a world, which
+// have no preview, and writes nothing (see decision_check, blackboard_check and world_check). A GOAP decision that
+// checks out also plans the request's plan query (see plan_preview). Its problems go to the editor in the answer, and
+// not to the log: the asset's editor shows them on its nodes or elements.
 @(private)
 preview :: proc(d: ^Daemon, msg: cook_link.Cook_Preview) -> cook_link.Preview_Result {
 	guid, guid_ok := format.guid_parse(msg.guid)
@@ -436,6 +436,10 @@ preview :: proc(d: ^Daemon, msg: cook_link.Cook_Preview) -> cook_link.Preview_Re
 		problems = blackboard_check(path, msg.text)
 		ok = len(problems.list) == 0
 		failed = "the blackboard did not cook"
+	case known && a.kind == .World:
+		problems = world_check(&d.index, path, msg.text)
+		ok = len(problems.list) == 0
+		failed = "the world did not cook"
 	case:
 		problems, ok = cook_preview(d.options, guid, msg.text)
 	}

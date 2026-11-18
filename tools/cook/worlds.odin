@@ -378,3 +378,24 @@ position_in_range :: proc(meters: [3]f64) -> bool {
 	}
 	return true
 }
+
+// world_check checks a world's text as the editor has it, unsaved (see docs/editor/world-view.md#the-world-editor): the
+// problems of world_parse, and each GUID that names no asset of the index, or an asset that is not a scene. It writes
+// nothing.
+world_check :: proc(index: ^Index, path, text: string) -> (problems: Problems) {
+	scenes, found := world_parse(text, context.temp_allocator)
+	for p in found {
+		report_error(&problems, path, p.line, 0, "%s", p.message)
+	}
+	for s in scenes {
+		guid := guid_text(s.record.guid)
+		a, known := index.assets[guid]
+		switch {
+		case !known:
+			report_error(&problems, path, s.line, 0, "no asset has the GUID %s", guid)
+		case a.kind != .Scene:
+			report_error(&problems, path, s.line, 0, "%s/%s is not a scene", a.root, a.path)
+		}
+	}
+	return
+}
