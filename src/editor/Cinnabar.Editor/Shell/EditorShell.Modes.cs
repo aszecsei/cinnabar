@@ -76,6 +76,8 @@ public sealed partial class EditorShell
         {
             return;
         }
+        // The world goes back to the editor's scenes, so what the game had streamed in is not news to the world view.
+        SetStreamed(null);
         SetModeTo(EditorMode.Edit);
         SendScene();
         Console.Add(LogLevel.Info, "editor: stopped, so the game has the scene again.");

@@ -122,6 +122,10 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
             }
         };
         Host.GameMessage += OnGameMessage;
+        // The game draws the shown world, which these change (see SendWorldView).
+        SceneChanged += SendWorldView;
+        ModeChanged += SendWorldView;
+        ActiveViewportChanged += SendWorldView;
         Host.StateChanged += OnHostStateChanged;
         // The editor watches the selected entities, so the properties panel has their values, and the game outlines them.
         Selection.Changed += (old, entities) =>
@@ -197,6 +201,7 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
         Content.AssetCreated += OnAssetCreated;
         Assets.Changed += ExpandArrivedPrefabs;
         Assets.Changed += ReloadChangedPrefabs;
+        Assets.Changed += SendWorldView;
     }
 
     public void RequestPalette() => PaletteRequested?.Invoke();
@@ -264,6 +269,7 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
         SendViewportTools();
         Mesh.SendLiveMeshes();
         Landscape.SendLiveMaps();
+        ResetWorldView();
         // The old state's preview targets are gone. The new state's arrive as Preview_Targets.
         _previewSlots.DisconnectAll();
         _previewSlots.SendAll();

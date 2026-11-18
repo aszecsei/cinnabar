@@ -64,7 +64,7 @@ public sealed partial class EditorShell
     public IReadOnlyList<MaterialEditor> Materials => _materials;
 
     /// <summary>The open graphs of every kind.</summary>
-    public IEnumerable<IGraphEditor> GraphEditors => _materials.Concat<IGraphEditor>(_animationGraphs).Concat(_uiDocuments).Concat(_decisions).Concat(_blackboards);
+    public IEnumerable<IGraphEditor> GraphEditors => _materials.Concat<IGraphEditor>(_animationGraphs).Concat(_uiDocuments).Concat(_decisions).Concat(_blackboards).Concat(_worlds);
 
     /// <summary>The graph editor whose document is active, or null when the viewport is.</summary>
     public IGraphEditor? ActiveGraphEditor { get; private set; }
@@ -211,6 +211,10 @@ public sealed partial class EditorShell
         {
             _blackboards.Remove(blackboard);
         }
+        if (editor is WorldEditor world)
+        {
+            _worlds.Remove(world);
+        }
         _discarding.Remove(editor);
         editor.Dispose();
         if (ActiveGraphEditor == editor)
@@ -219,6 +223,7 @@ public sealed partial class EditorShell
         }
         Commands.InvalidateAll();
         GraphEditorsChanged?.Invoke();
+        SendWorldView();
     }
 
     /// <summary>Closes a graph editor. With <paramref name="discard"/>, its unsaved changes are lost; without it, it saves first.</summary>

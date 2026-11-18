@@ -139,11 +139,14 @@ public sealed partial class EditorShell
 
     public void RequestAddScene() => AddSceneRequested?.Invoke();
 
-    public void RequestCloseScene()
+    public void RequestCloseScene() => RequestCloseScene(Scene);
+
+    /// <summary>Asks to close an open scene, as <see cref="RequestCloseScene()"/> does for the active one.</summary>
+    public void RequestCloseScene(SceneDocument? document)
     {
-        if (Scene != null && _scenes.Count > 1)
+        if (document != null && _scenes.Count > 1)
         {
-            CloseSceneRequested?.Invoke(Scene);
+            CloseSceneRequested?.Invoke(document);
         }
     }
 
@@ -882,6 +885,9 @@ public sealed partial class EditorShell
                 return;
             case Link.Protocol.UiPreviewLayout layout:
                 OnUiLayout(layout);
+                return;
+            case Link.Protocol.StreamedScenes streamed:
+                OnStreamedScenes(streamed);
                 return;
         }
         if (message is not EditProblems problems)
