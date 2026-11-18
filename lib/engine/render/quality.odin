@@ -144,6 +144,10 @@ Quality :: struct {
 	// device's video memory, 0 giving DEFAULT_MESH_POOL: the meshlets and vertices of paged meshes that are resident at
 	// once (see docs/rendering/assets.md#mesh-pages).
 	mesh_pool:          u32,
+	// The budget of the pool of virtual texture pages in MiB, from MIN_TEXTURE_POOL to MAX_TEXTURE_POOL and at most a
+	// quarter of the device's video memory, 0 giving DEFAULT_TEXTURE_POOL: the pages of virtual textures that are resident
+	// at once (see docs/rendering/assets.md#virtual-textures).
+	texture_pool:       u32,
 	// The most anisotropy that a texture's sampler takes, from 1 to MAX_TEXTURE_ANISOTROPY, 0 giving
 	// DEFAULT_TEXTURE_ANISOTROPY: it caps each texture's own (see docs/content/kinds/textures.md#textures).
 	texture_anisotropy: u8,
@@ -187,6 +191,18 @@ MESH_POOLS := [Quality_Level]u32 {
 MIN_MESH_POOL :: 16
 MAX_MESH_POOL :: 3584
 DEFAULT_MESH_POOL :: 1024
+
+// The pool of virtual texture pages' budget at each level, in MiB.
+@(rodata)
+TEXTURE_POOLS := [Quality_Level]u32 {
+	.Low    = 256,
+	.Medium = 512,
+	.High   = 1024,
+	.Ultra  = 2048,
+}
+MIN_TEXTURE_POOL :: 16
+MAX_TEXTURE_POOL :: 3584
+DEFAULT_TEXTURE_POOL :: 1024
 
 // The most anisotropy that a texture's sampler takes at each level.
 @(rodata)
@@ -248,6 +264,7 @@ preset_quality :: proc(preset: Quality_Preset, caps: Caps) -> Quality {
 		render_scale = 1,
 		lod_error = LOD_ERRORS[level],
 		mesh_pool = min(MESH_POOLS[level], max_mesh_pool(caps)),
+		texture_pool = min(TEXTURE_POOLS[level], max_texture_pool(caps)),
 		texture_anisotropy = TEXTURE_ANISOTROPIES[level],
 	}
 }
@@ -259,6 +276,15 @@ max_mesh_pool :: proc(caps: Caps) -> u32 {
 		return MAX_MESH_POOL
 	}
 	return u32(clamp(caps.video_memory / 4 / mem.Megabyte, MIN_MESH_POOL, MAX_MESH_POOL))
+}
+
+// max_texture_pool is the most that a device's pool of virtual texture pages may be, in MiB: a quarter of its video
+// memory, and all of MAX_TEXTURE_POOL when that is unknown.
+max_texture_pool :: proc(caps: Caps) -> u32 {
+	if caps.video_memory == 0 {
+		return MAX_TEXTURE_POOL
+	}
+	return u32(clamp(caps.video_memory / 4 / mem.Megabyte, MIN_TEXTURE_POOL, MAX_TEXTURE_POOL))
 }
 
 // quality_preset is the preset that a quality is, or Custom.
@@ -323,6 +349,11 @@ clamp_quality :: proc(q: Quality, caps: Caps) -> Quality {
 		q.mesh_pool > 0 ? q.mesh_pool : DEFAULT_MESH_POOL,
 		MIN_MESH_POOL,
 		max_mesh_pool(caps),
+	)
+	q.texture_pool = clamp(
+		q.texture_pool > 0 ? q.texture_pool : DEFAULT_TEXTURE_POOL,
+		MIN_TEXTURE_POOL,
+		max_texture_pool(caps),
 	)
 	q.texture_anisotropy =
 		q.texture_anisotropy > 0 ? clamp(q.texture_anisotropy, 1, format.MAX_TEXTURE_ANISOTROPY) : DEFAULT_TEXTURE_ANISOTROPY

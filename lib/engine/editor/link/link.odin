@@ -1334,6 +1334,17 @@ Game_Stats :: struct {
 	mesh_pages_capacity:       u32,
 	mesh_pages_pending:        u32,
 	mesh_pages_streamed_bytes: u32,
+	// The pool of virtual texture pages: the pages that are resident, the slots that it has, 0 without a virtual texture,
+	// the pages that views want and that are not resident yet, the bytes a second that the frames since the last stats
+	// copied into it, and the bytes of its atlases. Then the video memory that the process uses and the budget that the OS
+	// gives it, both 0 when the backend does not know (see docs/rendering/assets.md#virtual-textures).
+	texture_pages_resident:    u32,
+	texture_pages_capacity:    u32,
+	texture_pages_pending:     u32,
+	texture_streamed_bytes:    u32,
+	texture_pool_bytes:        u64,
+	video_memory_used:         u64,
+	video_memory_budget:       u64,
 	// The scenes that the streaming policy is loading, and the entities that the last frame's work made and gave their
 	// components, across all of them (see docs/world/streaming.md#budgets).
 	scenes_loading:            u32,

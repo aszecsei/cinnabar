@@ -54,7 +54,7 @@ page_fake :: proc() -> ^Page_Fake {
 	return (^Page_Fake)(context.user_ptr)
 }
 
-@(private = "file")
+@(private)
 finish_read :: proc(read: ^Fake_Read) {
 	read.ok = core.file_read_range(read.path, read.offset, read.data) == len(read.data)
 	read.pending = false
@@ -70,7 +70,7 @@ page_file_reads :: proc(platform: ^core.Platform_API) {
 		fake.file_read_begin, fake.file_read_result, fake.file_read_end
 }
 
-@(private = "file")
+@(private)
 page_platform :: proc(frame: ^virtual.Arena) -> core.Platform_API {
 	return {
 		frame_allocator = frame != nil ? virtual.arena_allocator(frame) : {},

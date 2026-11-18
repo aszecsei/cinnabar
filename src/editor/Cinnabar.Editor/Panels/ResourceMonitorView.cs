@@ -116,6 +116,8 @@ public sealed class ResourceMonitorView : Grid
                 .. AtlasCacheRows(g),
                 // The pool of mesh pages, while a paged mesh is resident: the pages in it of its slots, those that views wait for, and what the frames copy in a second.
                 .. MeshPageRows(g),
+                // The pool of virtual texture pages, while a virtual texture is resident, and the video memory against the budget that the OS gives the game.
+                .. TexturePageRows(g),
                 // The scenes that stream in, while one loads: how many, and the entities that the last frame made and gave their components.
                 .. SceneLoadRows(g),
                 // The split cascades' tables: the probes that rays reached of each cascade's slots, and the keys that found no room.
@@ -166,6 +168,22 @@ public sealed class ResourceMonitorView : Grid
             yield return ("Mesh page pool", $"{ResourceStats.Bytes(g.MeshPagesResident * PageBytes)} / {ResourceStats.Bytes(g.MeshPagesCapacity * PageBytes)}");
             yield return ("Mesh pages pending", $"{g.MeshPagesPending:N0}");
             yield return ("Mesh pages streamed", $"{ResourceStats.Bytes(g.MeshPagesStreamedBytes)} / s");
+        }
+    }
+
+    // The pool of virtual texture pages' rows, none without a virtual texture (see docs/rendering/assets.md#virtual-textures), and the video memory that the game uses of its budget, when the device says.
+    internal static IEnumerable<(string Name, string Value)> TexturePageRows(Link.Protocol.GameStats g)
+    {
+        if (g.TexturePagesCapacity > 0)
+        {
+            yield return ("Texture pages resident", $"{g.TexturePagesResident:N0} / {g.TexturePagesCapacity:N0} ({g.TexturePagesResident * 100.0 / g.TexturePagesCapacity:0}% full)");
+            yield return ("Texture page pool", ResourceStats.Bytes(g.TexturePoolBytes));
+            yield return ("Texture pages pending", $"{g.TexturePagesPending:N0}");
+            yield return ("Texture pages streamed", $"{ResourceStats.Bytes(g.TextureStreamedBytes)} / s");
+        }
+        if (g.VideoMemoryBudget > 0)
+        {
+            yield return ("Video memory", $"{ResourceStats.Bytes(g.VideoMemoryUsed)} / {ResourceStats.Bytes(g.VideoMemoryBudget)}");
         }
     }
 

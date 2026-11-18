@@ -191,6 +191,12 @@ struct Frame_Constants {
 	// mesh_pages.hlsli).
 	uint mesh_pool;
 	uint mesh_pages;
+	// The pool of virtual texture pages (see texture_pages.hlsli): the records' and the page table's read indices, the
+	// feedback's write index, and a word of padding.
+	uint texture_records;
+	uint texture_pages;
+	uint texture_feedback;
+	uint texture_padding;
 	// Whether the push constants have the aerial perspective volume, and its clamping sampler (see fog_at.hlsli).
 	uint aerial;
 	uint aerial_sampler;

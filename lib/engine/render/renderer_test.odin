@@ -3682,6 +3682,88 @@ a_frame_streams_a_paged_meshs_pages :: proc(t: ^testing.T) {
 	testing.expectf(t, len(rig.record.problems) == 0, "the frames logged %v", rig.record.problems)
 }
 
+// A frame brings the pool of virtual texture pages up to date in its own view, whether or not anything samples it yet:
+// the root comes in with a copy into the atlas, which the null backend checks, and a material's slot names the
+// texture's record.
+@(test)
+a_frame_streams_a_virtual_textures_pages :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	rig := new(Rig)
+	defer free(rig)
+	rig_start(t, rig)
+	defer rig_stop(rig)
+	context.logger = {record_problems, &rig.record, .Debug, {}}
+	fake: Page_Fake
+	context.user_ptr = &fake
+	r, platform := rig.r, &rig.platform
+	platform.time_seconds = proc() -> f64 {return 0.1}
+	platform.gpu_stream_texture, platform.gpu_stream_buffer, platform.gpu_transfer_done =
+		null.stream_texture, null.stream_buffer, null.transfer_done
+	page_file_reads(platform)
+	enable_frame_pipelines(r)
+	defer platform.gpu_destroy_texture(r.blue_noise.texture)
+
+	guid := format.Guid {
+		0  = 0x53,
+		15 = 2,
+	}
+	buffer: [32]u8
+	testing.expect(
+		t,
+		os.write_entire_file(
+			fmt.tprintf("%s/%s.blob", rig.dir, format.guid_format(guid, &buffer)),
+			test_texture(guid, {1024, 1024}).blob,
+		) ==
+		nil,
+	)
+	_, ready := resident_virtual_texture(&r.residency, guid)
+	testing.expect(t, !ready)
+
+	passes := make(map[string]int)
+	defer delete(passes)
+	desc := Frame_Desc {
+		view = {rotation = 1, projection = Perspective{1, 0.1}},
+		size = {64, 32},
+		hooks = {ui = proc(f: ^Frame) {
+				passes := (^map[string]int)(f.data)
+				clear(passes)
+				for pass in f.graph.passes {
+					passes[pass.name] += 1
+				}
+			}},
+	}
+	desc.hooks.data = &passes
+	// The first frame copies the root into the atlas, and the second finds it in.
+	testing.expect(t, draw_frame(r, rig.w, desc))
+	testing.expect_value(t, passes["stream texture pages"], 1)
+	testing.expect_value(t, passes["copy texture page feedback"], 1)
+	testing.expect(t, draw_frame(r, rig.w, desc))
+	testing.expect_value(t, texture_stream_stats(&r.residency).resident_pages, 1)
+	for _ in 0 ..< 3 {
+		testing.expect(t, draw_frame(r, rig.w, desc))
+	}
+	texture, now_ready := resident_virtual_texture(&r.residency, guid)
+	testing.expect(t, now_ready && texture.virtual == 1)
+
+	// A material's slot has the texture's record, the bit that says so, and a sampler that clamps.
+	table: Material_Table
+	table.bytes = make([dynamic]byte, r.platform.frame_allocator)
+	offset := add_block(
+		r,
+		&table,
+		{block = make([]byte, 16, context.temp_allocator), textures = {{guid = guid}}},
+	)
+	slot := (^[2]u32)(&table.bytes[offset])^
+	testing.expect_value(t, slot[0], VIRTUAL_TEXTURE_BIT | 0)
+	clamped := texture.sampler
+	clamped.wrap = .Clamp
+	testing.expect_value(t, slot[1], texture_sampler(r, clamped))
+	testing.expect(t, !table.waiting)
+
+	testing.expect_value(t, fake.reads_open, 0)
+	testing.expectf(t, len(rig.record.problems) == 0, "the frames logged %v", rig.record.problems)
+}
+
 // What a frame's transient textures take at 1080p at each preset, once the reflection probe's capture is done, and in a
 // frame at Ultra that captures all six of its faces: every frame executes, the null backend checks its barriers and
 // waits, and the textures that they share are fewer than they are. The numbers are logged at the Info level.

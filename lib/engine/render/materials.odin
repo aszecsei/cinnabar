@@ -370,7 +370,9 @@ material_block :: proc(data: []byte, guid: format.Guid) -> (b: Material_Block, o
 }
 
 // add_block adds a parameter block to the table, with its textures' bindless indices and their samplers', and gives its
-// offset. A texture that is not resident yet samples its default with a default sampler.
+// offset. A texture that is not resident yet samples its default with a default sampler. A virtual texture's slot has the
+// texture's record and VIRTUAL_TEXTURE_BIT in its first word, and a sampler that clamps in its second: the shader applies
+// the texture's wrap itself, as it looks up the page.
 @(private)
 add_block :: proc(r: ^Renderer, table: ^Material_Table, b: Material_Block) -> u32 {
 	// Blocks start at 16 bytes, so the Params struct loads aligned.
@@ -383,8 +385,11 @@ add_block :: proc(r: ^Renderer, table: ^Material_Table, b: Material_Block) -> u3
 		index := gpu.read_index(r.materials.defaults[t.default])
 		sampler: format.Texture_Sampler
 		if t.guid != {} {
-			if texture, ready := resident_texture(&r.residency, t.guid); ready {
+			if texture, ready := resident_virtual_texture(&r.residency, t.guid); ready {
 				index, sampler = gpu.read_index(texture.texture), texture.sampler
+				if texture.virtual != 0 {
+					index, sampler.wrap = VIRTUAL_TEXTURE_BIT | (texture.virtual - 1), .Clamp
+				}
 			} else {
 				table.waiting = true
 			}

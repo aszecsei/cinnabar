@@ -26,4 +26,25 @@ public sealed class MeshPageTests
         Assert.Equal("37", rows["Mesh pages pending"]);
         Assert.Equal($"{ResourceStats.Bytes(3 << 19)} / s", rows["Mesh pages streamed"]);
     }
+
+    [Fact]
+    public void TheResourceMonitorShowsThePoolOfTexturePagesAndTheVideoMemory()
+    {
+        // A game without a virtual texture has no pool, and a device that does not tell has no video memory row.
+        var reader = new LinkReader(new byte[1024]);
+        var none = GameStats.Read(ref reader);
+        Assert.Empty(ResourceMonitorView.TexturePageRows(none));
+
+        var stats = none with { TexturePagesResident = 512, TexturePagesCapacity = 2048, TexturePagesPending = 9, TextureStreamedBytes = 3 << 19, TexturePoolBytes = 100UL << 20 };
+        var rows = ResourceMonitorView.TexturePageRows(stats).ToDictionary(r => r.Name, r => r.Value);
+        Assert.Equal("512 / 2,048 (25% full)", rows["Texture pages resident"]);
+        Assert.Equal(ResourceStats.Bytes(100UL << 20), rows["Texture page pool"]);
+        Assert.Equal("9", rows["Texture pages pending"]);
+        Assert.Equal($"{ResourceStats.Bytes(3 << 19)} / s", rows["Texture pages streamed"]);
+        Assert.DoesNotContain("Video memory", rows.Keys);
+
+        stats = stats with { VideoMemoryUsed = 3UL << 30, VideoMemoryBudget = 8UL << 30 };
+        rows = ResourceMonitorView.TexturePageRows(stats).ToDictionary(r => r.Name, r => r.Value);
+        Assert.Equal($"{ResourceStats.Bytes(3UL << 30)} / {ResourceStats.Bytes(8UL << 30)}", rows["Video memory"]);
+    }
 }
