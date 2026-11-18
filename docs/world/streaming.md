@@ -54,7 +54,7 @@ Two components in `lib/engine/streaming` (the `streaming` package) control the p
 
 **Special cases.**
 
-- **Edit mode:** `stream_scenes` does nothing while the editor edits, as the world stands still then.
+- **Edit mode:** `stream_scenes` does nothing while the editor edits, as the world stands still then. The editor's preview shows which scenes would load from a position, and opens them ([Editor: World view](../editor/world-view.md#the-preview)).
 - **No sources:** only the persistent scenes begin to load, and nothing unloads. Scenes that are loading go on loading. This happens when there is no camera and no `Stream_Source`.
 - **No streamer or no world:** the policy does nothing.
 
@@ -148,5 +148,5 @@ A scene fails when `begin_load` refuses it, its blob cannot be read, it is not a
 - **Settle, behaviour attach and the removal of `Loading`** at the reveal are not budgeted. They run in one frame for the whole scene.
 - **Characters and joints** have no loading budget. Only rigid bodies and colliders are made a few at a time.
 - **Scene memory:** at most `core.MAX_SCENE_MEMORY` (64) scenes are loaded at once, and the policy keeps `MAX_STREAMED_SCENES` (56) of them.
-- **Streaming stands still in Edit mode.** The editor does not edit or save streamed scenes.
+- **Streaming stands still in Edit mode.** The editor does not edit or save streamed scenes. In Play, the World editor shows the scenes that the game has in ([Editor: World view](../editor/world-view.md#play)).
 - **One streamer** selects one world. A second `World_Streamer` is ignored.
