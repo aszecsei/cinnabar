@@ -176,6 +176,8 @@ subasset_kind_of :: proc(kind: string) -> Asset_Kind {
 		return .Animation
 	case NAV_MESH_KIND:
 		return .Nav_Mesh
+	case SUBLEVEL_KIND:
+		return .Scene
 	}
 	return .None
 }

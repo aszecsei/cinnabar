@@ -3,7 +3,7 @@ package asset_format
 import "core:mem/virtual"
 
 // blob_references is the assets that a blob names, which the runtime loads when it uses the blob: a script's requires,
-// a scene's or prefab's behaviours, asset fields and navmeshes, a material's textures, an instance's material and textures, an
+// a scene's or prefab's behaviours, asset fields, navmeshes and sublevels, a material's textures, an instance's material and textures, an
 // effect's materials, meshes and textures, an animation's skin, an animation graph's clips, a font's or sprite sheet's
 // atlas, a UI document's fonts and images, a decision's blackboard, and a world's scenes. A GUID appears once, and the zero GUID never. ok is false for a blob
 // that does not check.
@@ -63,6 +63,10 @@ blob_references :: proc(
 		navs := scene_nav_meshes(data, virtual.arena_allocator(&arena)) or_return
 		for n in navs {
 			add(&list, n.guid)
+		}
+		sublevels := scene_sublevels(data, virtual.arena_allocator(&arena)) or_return
+		for l in sublevels {
+			add(&list, l.guid)
 		}
 	case .Material:
 		blob := material_view(data) or_return
