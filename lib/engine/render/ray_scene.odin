@@ -537,6 +537,7 @@ add_hit_shading :: proc(
 	indirect_buffer(g, p, data.arguments)
 	read(g, p, sf.instances)
 	declare_skinned_reads(f, p)
+	declare_texture_pool_reads(g, p, f.texture_pool)
 	write(g, p, batch.surfaces)
 	return shaded
 }

@@ -35,6 +35,11 @@ TEXTURE_PAGE_ABSENT :: max(u32)
 // A material's slot of a virtual texture has this bit set in its first word, with the texture's record below it. Matches
 // VIRTUAL_TEXTURE_BIT in texture_pages.hlsli.
 VIRTUAL_TEXTURE_BIT :: 1 << 31
+// The bits of Virtual_Texture_Record.sampler. Match VIRTUAL_SAMPLER_WRAP_MASK, VIRTUAL_SAMPLER_MIP_NEAREST and
+// VIRTUAL_SAMPLER_ANISOTROPY_SHIFT in material_virtual.hlsli.
+VIRTUAL_SAMPLER_WRAP_MASK :: 3
+VIRTUAL_SAMPLER_MIP_NEAREST :: 1 << 2
+VIRTUAL_SAMPLER_ANISOTROPY_SHIFT :: 8
 // The most reads of pages that are open at once.
 TEXTURE_PAGE_READS :: 32
 // The most pages that a frame decompresses and copies into the atlases: about 400 KiB of the frame's uploads.
@@ -63,8 +68,8 @@ TEXTURE_WHOLE_READ_SIZE :: 8 << 20
 // table + level_first[i] + p. The mips from levels on are the tail texture's own, whose mip 0 is the texture's mip
 // levels. An entry is the page's slot in the atlas, or TEXTURE_PAGE_ABSENT: slot / 256 is the layer, and slot % 256 the
 // tile in it, at texel ((slot % 16) * 136, (slot / 16 % 16) * 136) of the layer, whose first 4 texels on each side are
-// the border. The page covers the 128 texels from 4 in. The sampler is the atlas's own, with clamping, so the shader
-// applies wrap itself.
+// the border. The page covers the 128 texels from 4 in. The material's sampler for the texture is its own with clamping,
+// so the shader applies the texture's wrap itself, and it takes the rest of how the texture samples from `sampler`.
 Virtual_Texture_Record :: struct {
 	// The texture's mip 0, in texels.
 	size:        [2]u32,
@@ -76,8 +81,11 @@ Virtual_Texture_Record :: struct {
 	// The read indices of the atlas that has the pages, a Texture2DArray, and of the tail texture, a Texture2D.
 	atlas:       u32,
 	tail:        u32,
-	// The texture's wrap, as the format's Texture_Wrap.
-	wrap:        u32,
+	// How the texture samples, which the shader cannot ask of its clamping sampler: its wrap, as the format's Texture_Wrap, in
+	// the bits of VIRTUAL_SAMPLER_WRAP_MASK, VIRTUAL_SAMPLER_MIP_NEAREST for a nearest mip filter, and from
+	// VIRTUAL_SAMPLER_ANISOTROPY_SHIFT the anisotropy that its sampler takes under the quality's cap (see
+	// sampler_anisotropy), which the shader picks levels by.
+	sampler:     u32,
 	// Each paged level's first page, from the record's first entry. Levels past the paged ones are 0.
 	level_first: [MAX_VIRTUAL_LEVELS]u32,
 }
@@ -126,45 +134,47 @@ Texture_Victim :: struct {
 
 // Texture_Pool is the pool's state, in Residency.
 Texture_Pool :: struct {
-	atlases:       [MAX_TEXTURE_ATLASES]Texture_Atlas,
-	atlas_count:   int,
+	atlases:        [MAX_TEXTURE_ATLASES]Texture_Atlas,
+	atlas_count:    int,
 	// The records, the table and the feedback: a word for each table entry, which shaders set to 1 for a resident page that
 	// they sample and raise to the priority of a page that they want, as a float's bits, which is larger for a page that
 	// shows more.
-	records:       gpu.Buffer,
-	table:         gpu.Buffer,
-	feedback:      gpu.Buffer,
-	ring:          Readback_Ring,
+	records:        gpu.Buffer,
+	table:          gpu.Buffer,
+	feedback:       gpu.Buffer,
+	ring:           Readback_Ring,
 	// What the renderer asked the atlases to be, in bytes, the most that the video memory budget lets them be, 0 for no
 	// limit, and what they were made for. The atlases are made again when what they should be differs from built_bytes.
-	quality_bytes: u64,
-	limit_bytes:   u64,
-	built_bytes:   u64,
+	quality_bytes:  u64,
+	limit_bytes:    u64,
+	built_bytes:    u64,
 	// Each table entry's page, the table as the GPU should have it, and the entries that it does not have yet.
-	pages:         []Texture_Pool_Page,
-	entries:       []u32,
-	dirty:         [dynamic]u32,
+	pages:          []Texture_Pool_Page,
+	entries:        []u32,
+	dirty:          [dynamic]u32,
+	// The most anisotropy that a texture's sampler takes, which the records carry (see texture_pool_set_anisotropy).
+	anisotropy_cap: u8,
 	// The virtual textures, by their id less 1, which is their record's index, the unused ids, the free ranges of the table
 	// as (first, count), and the ranges and ids that wait. The records that the GPU should have are the textures' own.
-	textures:      []Pool_Texture,
-	free_ids:      [dynamic]u32,
-	free_ranges:   [dynamic][2]u32,
-	cooling:       [dynamic]Texture_Cooling,
-	dirty_records: [dynamic]u32,
+	textures:       []Pool_Texture,
+	free_ids:       [dynamic]u32,
+	free_ranges:    [dynamic][2]u32,
+	cooling:        [dynamic]Texture_Cooling,
+	dirty_records:  [dynamic]u32,
 	// One past the highest id and the highest table entry that a texture has had, which the records are searched and the
 	// feedback is zeroed and read back up to.
-	texture_high:  u32,
-	high:          u32,
-	frame:         u64,
-	open_reads:    int,
+	texture_high:   u32,
+	high:           u32,
+	frame:          u64,
+	open_reads:     int,
 	// The pages that the last update found wanted and not resident, by priority, most wanted first, in frame memory.
-	wanted:        []Wanted_Page,
-	stats:         Texture_Stream_Stats,
+	wanted:         []Wanted_Page,
+	stats:          Texture_Stream_Stats,
 	// Pages that this frame may still decompress for whole textures.
-	whole_budget:  int,
+	whole_budget:   int,
 	// Whether the GPU's table and records are of the atlases as they are now. ensure_texture_pool is its only writer with
 	// commit_stream_texture_pages and texture_pool_not_sent.
-	table_sync:    Table_Sync,
+	table_sync:     Table_Sync,
 }
 
 @(private)
@@ -189,6 +199,7 @@ Pool_Texture :: struct {
 	// Its atlas, by its place in the pool's.
 	atlas:       u32,
 	blob_format: format.Texture_Format,
+	sampler:     format.Texture_Sampler,
 	size:        [2]u32,
 	mip_count:   u32,
 	levels:      []format.Texture_Level,
@@ -700,6 +711,36 @@ ensure_texture_pool :: proc(pool: ^Texture_Pool, platform: ^core.Platform_API) -
 	return true
 }
 
+// virtual_sampler_bits is a record's `sampler` word for a texture's sampler under a cap on anisotropy.
+@(private = "file")
+virtual_sampler_bits :: proc(s: format.Texture_Sampler, cap: u8) -> u32 {
+	anisotropy, _ := sampler_anisotropy(s, cap)
+	bits := u32(s.wrap) & VIRTUAL_SAMPLER_WRAP_MASK
+	if s.mip_filter == .Nearest {
+		bits |= VIRTUAL_SAMPLER_MIP_NEAREST
+	}
+	return bits | u32(anisotropy) << VIRTUAL_SAMPLER_ANISOTROPY_SHIFT
+}
+
+// texture_pool_set_anisotropy sets the most anisotropy that the textures' samplers take (see texture_samplers_set_cap),
+// which the records carry: a cap that changes rewrites the records that it changes.
+texture_pool_set_anisotropy :: proc(pool: ^Texture_Pool, cap: u8) {
+	if pool.anisotropy_cap == cap {
+		return
+	}
+	pool.anisotropy_cap = cap
+	for &tex, i in pool.textures[:pool.texture_high] {
+		if !tex.live {
+			continue
+		}
+		sampler := virtual_sampler_bits(tex.sampler, cap)
+		if tex.record.sampler != sampler {
+			tex.record.sampler = sampler
+			mark_record_dirty(pool, u32(i + 1))
+		}
+	}
+}
+
 // texture_pool_bytes is the bytes that a budget in MiB is.
 texture_pool_bytes :: proc(megabytes: u32) -> u64 {
 	return u64(megabytes) * mem.Megabyte
@@ -786,6 +827,7 @@ texture_pool_add :: proc(
 		count = count,
 		atlas = u32(index),
 		blob_format = blob.format,
+		sampler = blob.sampler,
 		size = blob.size,
 		mip_count = blob.mip_count,
 		levels = slice.clone(levels, heap),
@@ -797,7 +839,7 @@ texture_pool_add :: proc(
 			levels = u32(len(levels)),
 			atlas = gpu.read_index(atlas.texture),
 			tail = gpu.read_index(tail),
-			wrap = u32(blob.sampler.wrap),
+			sampler = virtual_sampler_bits(blob.sampler, pool.anisotropy_cap),
 		},
 	}
 	for l, i in levels {
@@ -1392,6 +1434,16 @@ declare_texture_pool_reads :: proc(g: ^Graph, p: Pass, frame: Texture_Pool_Frame
 		if atlas != 0 {
 			read(g, p, atlas)
 		}
+	}
+}
+
+// declare_texture_feedback declares that a pass whose pixel shaders sample virtual textures writes the pool's feedback:
+// the world pass and the transparent ones, which draw the camera's views (see cn_feedback_begin in
+// material_virtual.hlsli). A view whose constants have no feedback (Frame_Constants.texture_feedback) writes none.
+@(private)
+declare_texture_feedback :: proc(g: ^Graph, p: Pass, frame: Texture_Pool_Frame) {
+	if frame.feedback != 0 {
+		write(g, p, frame.feedback)
 	}
 }
 

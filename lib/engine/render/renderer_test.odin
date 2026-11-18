@@ -3719,20 +3719,51 @@ a_frame_streams_a_virtual_textures_pages :: proc(t: ^testing.T) {
 	_, ready := resident_virtual_texture(&r.residency, guid)
 	testing.expect(t, !ready)
 
-	passes := make(map[string]int)
-	defer delete(passes)
+	// Fog makes the camera's constants without a mesh to draw.
+	mist := ecs.spawn(rig.w)
+	ecs.add(rig.w, mist, ecs.TRANSFORM_IDENTITY)
+	ecs.add(rig.w, mist, volume.Volume{shape = .Global})
+	ecs.add(rig.w, mist, Fog{density = {true, 0.05}, height_falloff = {true, 0.5}})
+
+	// What the frame's graph and its camera's constants have when the hook runs, after the passes are added.
+	Seen :: struct {
+		passes:         map[string]int,
+		constants:      Frame_Constants,
+		has_constants:  bool,
+		world_feedback: bool,
+	}
+	seen: Seen
+	defer delete(seen.passes)
 	desc := Frame_Desc {
 		view = {rotation = 1, projection = Perspective{1, 0.1}},
 		size = {64, 32},
 		hooks = {ui = proc(f: ^Frame) {
-				passes := (^map[string]int)(f.data)
-				clear(passes)
+				seen := (^Seen)(f.data)
+				clear(&seen.passes)
+				seen.world_feedback = false
 				for pass in f.graph.passes {
-					passes[pass.name] += 1
+					seen.passes[pass.name] += 1
+					if pass.name != "world" || f.texture_pool.feedback == 0 {
+						continue
+					}
+					for use in pass.uses {
+						seen.world_feedback ||=
+							use.buffer &&
+							use.writes &&
+							use.index == u32(f.texture_pool.feedback) - 1
+					}
+				}
+				sf := f.scene_frame
+				if sf != nil && len(sf.view_constants) > VIEW_CAMERA {
+					seen.constants = (^Frame_Constants)(
+						raw_data(sf.view_constants[VIEW_CAMERA].data),
+					)^
+					seen.has_constants = true
 				}
 			}},
 	}
-	desc.hooks.data = &passes
+	desc.hooks.data = &seen
+	passes := &seen.passes
 	// The first frame copies the root into the atlas, and the second finds it in.
 	testing.expect(t, draw_frame(r, rig.w, desc))
 	testing.expect_value(t, passes["stream texture pages"], 1)
@@ -3744,6 +3775,21 @@ a_frame_streams_a_virtual_textures_pages :: proc(t: ^testing.T) {
 	}
 	texture, now_ready := resident_virtual_texture(&r.residency, guid)
 	testing.expect(t, now_ready && texture.virtual == 1)
+
+	// The world pass declares the feedback written, and the camera's constants have the pool's indices: the records', the
+	// table's and the feedback's write index plus 1, and the frame that picks the pixels that write it.
+	pool := &r.residency.texture_pool
+	testing.expect(t, seen.world_feedback, "the world pass writes the feedback")
+	if testing.expect(t, seen.has_constants) {
+		testing.expect_value(t, seen.constants.texture_records, gpu.read_index(pool.records))
+		testing.expect_value(t, seen.constants.texture_pages, gpu.read_index(pool.table))
+		testing.expect_value(
+			t,
+			seen.constants.texture_feedback,
+			gpu.write_index(pool.feedback) + 1,
+		)
+		testing.expect_value(t, seen.constants.texture_frame, u32(pool.frame))
+	}
 
 	// A material's slot has the texture's record, the bit that says so, and a sampler that clamps.
 	table: Material_Table

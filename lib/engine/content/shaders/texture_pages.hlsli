@@ -27,8 +27,8 @@ static const uint TEXTURE_PAGE_ENTRY_SIZE = 4;
 // to `levels`: level i is the size shifted right by i, at least a texel, over TEXTURE_PAGE_SIZE and rounded up on each axis
 // pages, row by row. Its page p is the table entry `table + level_first[i] + p`, read from the ByteAddressBuffer at
 // Frame_Constants.texture_pages. The mips from `levels` on are the `tail` texture's, a Texture2D whose mip 0 is the
-// texture's mip `levels`. `atlas` is a Texture2DArray. The shader applies `wrap` (the format's Texture_Wrap: Repeat,
-// Clamp, Mirror) to the texture's UV, as the material's sampler clamps.
+// texture's mip `levels`. `atlas` is a Texture2DArray. `sampler` has the texture's wrap, which the shader applies to its UV
+// as the material's sampler clamps, its mip filter and its anisotropy (see material_virtual.hlsli).
 struct Virtual_Texture_Record {
 	uint2 size;
 	uint table;
@@ -36,7 +36,7 @@ struct Virtual_Texture_Record {
 	uint levels;
 	uint atlas;
 	uint tail;
-	uint wrap;
+	uint sampler;
 	uint level_first[MAX_VIRTUAL_LEVELS];
 };
 

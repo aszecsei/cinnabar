@@ -18,21 +18,26 @@ Texture_Samplers :: struct {
 	cap:      u8,
 }
 
-// texture_sampler is the bindless index of the sampler that a texture asks for, under the cap. Nearest filtering takes
-// no anisotropy, which needs linear filtering.
-texture_sampler :: proc(r: ^Renderer, s: format.Texture_Sampler) -> u32 {
-	ts := &r.texture_samplers
-	anisotropy := max(s.anisotropy, 1)
-	if ts.cap > 0 {
-		anisotropy = min(anisotropy, ts.cap)
+// sampler_anisotropy is the anisotropy that a texture's sampler takes under a cap, a power of 2 from 1 to 16, and its
+// step in ANISOTROPY_STEPS. Nearest filtering takes no anisotropy, which needs linear filtering.
+sampler_anisotropy :: proc(s: format.Texture_Sampler, cap: u8) -> (anisotropy: u8, step: int) {
+	anisotropy = max(s.anisotropy, 1)
+	if cap > 0 {
+		anisotropy = min(anisotropy, cap)
 	}
 	if s.filter == .Nearest {
 		anisotropy = 1
 	}
-	step := 0
 	for step < ANISOTROPY_STEPS - 1 && 2 << uint(step) <= int(anisotropy) {
 		step += 1
 	}
+	return u8(1 << uint(step)), step
+}
+
+// texture_sampler is the bindless index of the sampler that a texture asks for, under the cap.
+texture_sampler :: proc(r: ^Renderer, s: format.Texture_Sampler) -> u32 {
+	ts := &r.texture_samplers
+	_, step := sampler_anisotropy(s, ts.cap)
 	slot := &ts.samplers[s.wrap][s.filter][s.mip_filter][step]
 	if slot^ == {} {
 		FILTER := [format.Texture_Filter]gpu.Filter {

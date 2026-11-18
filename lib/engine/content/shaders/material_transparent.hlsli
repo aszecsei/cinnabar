@@ -43,6 +43,7 @@ Moment_Targets ps_moments(Varyings i, bool front : SV_IsFrontFace) {
 }
 
 float4 ps_transparent(Varyings i, bool front : SV_IsFrontFace) : SV_Target0 {
+	cn_feedback_begin(i.position);
 	Material_Inputs inputs = material_inputs(i, front);
 	Surface s = evaluate(inputs);
 	float alpha = saturate(shade_opacity(s));

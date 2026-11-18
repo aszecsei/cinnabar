@@ -473,7 +473,11 @@ a_virtual_texture_is_ready_when_its_root_and_its_tail_are_in :: proc(t: ^testing
 				record.tail,
 				gpu.read_index(transmute(gpu.Texture)[2]u32{1, 1}),
 			)
-			testing.expect_value(t, record.wrap, u32(format.Texture_Wrap.Mirror))
+			testing.expect_value(
+				t,
+				record.sampler,
+				u32(format.Texture_Wrap.Mirror) | 4 << VIRTUAL_SAMPLER_ANISOTROPY_SHIFT,
+			)
 			testing.expect_value(t, record.level_first[0], 0)
 			testing.expect_value(t, record.level_first[1], 12)
 			testing.expect_value(t, record.level_first[2], 16)
@@ -496,6 +500,15 @@ a_virtual_texture_is_ready_when_its_root_and_its_tail_are_in :: proc(t: ^testing
 	testing.expect_value(t, texture.size, [2]u32{512, 384})
 	testing.expect_value(t, texture.mip_count, 10)
 	testing.expect_value(t, texture.sampler.wrap, format.Texture_Wrap.Mirror)
+	// A cap on the samplers' anisotropy changes the record's, which the next frame sends.
+	texture_pool_set_anisotropy(&f.r.texture_pool, 2)
+	pooled := &f.r.texture_pool.textures[0]
+	testing.expect_value(
+		t,
+		pooled.record.sampler,
+		u32(format.Texture_Wrap.Mirror) | 2 << VIRTUAL_SAMPLER_ANISOTROPY_SHIFT,
+	)
+	testing.expect_value(t, pooled.record_sync, Entry_Sync.Dirty)
 	stats := texture_stream_stats(f.r)
 	testing.expect_value(t, stats.resident_pages, 1)
 	testing.expect_value(t, stats.capacity_pages, 256)

@@ -585,6 +585,7 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	residency_set_mesh_pool(&r.residency, r.quality.mesh_pool)
 	residency_set_texture_pool(&r.residency, r.quality.texture_pool)
 	texture_samplers_set_cap(r, r.quality.texture_anisotropy)
+	texture_pool_set_anisotropy(&r.residency.texture_pool, r.quality.texture_anisotropy)
 	residency_update(&r.residency)
 	output :=
 		r.platform.gpu_output != nil ? r.platform.gpu_output() : gpu.Output{format = gpu.FRAME_TARGET_FORMAT}
@@ -880,6 +881,7 @@ draw_view :: proc(
 		desc.debug_view == .Depth
 	depth(&g, p, f.depth, .Load, store = keep_depth ? .Store : .Discard)
 	declare_scene_draws(f, p)
+	declare_texture_feedback(&g, p, f.texture_pool)
 	declare_lighting(f, p, opaque = true)
 	declare_shading(f, p)
 	if desc.hooks.world_uses != nil {
