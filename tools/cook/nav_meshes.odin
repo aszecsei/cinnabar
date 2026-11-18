@@ -11,7 +11,6 @@ import "core:math/linalg"
 import "core:mem"
 import "core:mem/virtual"
 import "core:os"
-import "core:path/filepath"
 import "core:reflect"
 import "core:slice"
 import "core:strings"
@@ -20,10 +19,6 @@ import format "cinnabar:engine/asset/format"
 
 // Changing how the cooker bakes navmeshes changes this, which bakes every tile again.
 NAV_COOK_VERSION :: "navmeshes 1"
-
-// The project's settings, beside its content root, the root named game (see docs/overview/architecture.md#project-settings).
-PROJECT_SETTINGS_FILE :: "project.settings"
-PROJECT_USER_SETTINGS_FILE :: "project.user.settings"
 
 // A World_Position unit is 2^-24 m, as lib/engine/ecs gives it.
 @(private = "file")
@@ -59,48 +54,15 @@ Nav_Project :: struct {
 	files:  []string,
 }
 
-// nav_project reads the project's agent types, once in a pass. The project is the folder above the root named game; a
-// cook without one has the default agent type.
+// nav_project reads the project's agent types, once in a pass. A cook without a project has the default agent type.
 nav_project :: proc(options: Cook_Options, pass: ^Pass) -> Nav_Project {
 	if project, read := pass.nav.?; read {
 		return project
 	}
-	dir := ""
-	for r in options.roots {
-		if r.name == "game" {
-			dir = filepath.dir(r.dir)
-		}
-	}
-	text := strings.builder_make(context.temp_allocator)
-	files := make([dynamic]string, context.temp_allocator)
-	// The line of the text that each file starts after.
-	starts := make([dynamic]int, context.temp_allocator)
-	lines := 0
-	if dir != "" {
-		for name in ([]string{PROJECT_SETTINGS_FILE, PROJECT_USER_SETTINGS_FILE}) {
-			path := fmt.tprintf("%s/%s", dir, name)
-			data, err := os.read_entire_file(path, context.temp_allocator)
-			if err != nil {
-				continue
-			}
-			append(&files, path)
-			append(&starts, lines)
-			strings.write_string(&text, string(data))
-			strings.write_byte(&text, '\n')
-			lines += strings.count(string(data), "\n") + 1
-		}
-	}
-	agents, problems := format.nav_agents_parse(strings.to_string(text), context.temp_allocator)
-	for p in problems {
-		file := 0
-		for start, i in starts {
-			if p.line > start {
-				file = i
-			}
-		}
-		report_warning(&pass.problems, files[file], p.line - starts[file], 0, "%s", p.text)
-	}
-	pass.nav = Nav_Project{agents, files[:]}
+	settings := project_settings(options, pass)
+	agents, problems := format.nav_agents_parse(settings.text, context.temp_allocator)
+	report_settings_problems(pass, settings, problems)
+	pass.nav = Nav_Project{agents, settings.files}
 	return pass.nav.?
 }
 

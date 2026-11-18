@@ -93,6 +93,49 @@ public static class ProjectSettings
         File.WriteAllText(path, string.Join("\n", lines) + "\n");
     }
 
+    /// <summary>The prefix of the keys that declare sublevels, <c>sublevel.&lt;name&gt; = active</c> or <c>= inactive</c>.</summary>
+    public const string SublevelPrefix = "sublevel.";
+
+    /// <summary>
+    /// The sublevels that a project file and its user file declare, in the order that their names first appear, and
+    /// whether each one starts active: the last line for a name wins. A line with a name or a value that does not fit is
+    /// skipped, as the game warns about it.
+    /// </summary>
+    public static IReadOnlyList<(string Name, bool Active)> Sublevels(string path)
+    {
+        var sublevels = new List<(string Name, bool Active)>();
+        foreach (var file in new[] { path, UserPath(path) })
+        {
+            if (!File.Exists(file))
+            {
+                continue;
+            }
+            foreach (var line in File.ReadAllLines(file))
+            {
+                if (Parse(line) is not { } entry || !entry.Key.StartsWith(SublevelPrefix, StringComparison.Ordinal)
+                    || entry.Value is not ("active" or "inactive"))
+                {
+                    continue;
+                }
+                var name = entry.Key[SublevelPrefix.Length..];
+                if (!SceneFile.IsSublevelName(name))
+                {
+                    continue;
+                }
+                var at = sublevels.FindIndex(s => s.Name == name);
+                if (at < 0)
+                {
+                    sublevels.Add((name, entry.Value == "active"));
+                }
+                else
+                {
+                    sublevels[at] = (name, entry.Value == "active");
+                }
+            }
+        }
+        return sublevels;
+    }
+
     static (string Key, string Value)? Parse(string line)
     {
         var trimmed = line.Trim();

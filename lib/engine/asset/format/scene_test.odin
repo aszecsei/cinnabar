@@ -155,7 +155,7 @@ scene_errors_name_their_line :: proc(t: ^testing.T) {
 		text, fragment: string,
 		line:           int,
 	} {
-		{"entity 0000000000000001\n", "starts with `scene 3`", 1},
+		{"entity 0000000000000001\n", "starts with `scene 4`", 1},
 		{"scene 1\nentity 12\n", "16 hex digits", 2},
 		{"scene 1\ncomponent 1 Transform\n", "needs an entity", 2},
 		{"scene 1\nentity 0000000000000001\n\tx = 1\n", "no component or behaviour is open", 3},

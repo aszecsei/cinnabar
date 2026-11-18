@@ -34,11 +34,7 @@ DEFAULT_NAV_AGENT :: Nav_Agent {
 	max_slope   = 45,
 }
 
-Nav_Settings_Problem :: struct {
-	// The line of the settings' text, from 1.
-	line: int,
-	text: string,
-}
+Nav_Settings_Problem :: Settings_Problem
 
 // nav_is_setting says whether a settings key is one of the navigation's.
 nav_is_setting :: proc(key: string) -> bool {
@@ -247,14 +243,4 @@ nav_name_index :: proc(names: []string, name: string) -> int {
 		}
 	}
 	return -1
-}
-
-@(private = "file")
-settings_line :: proc(raw: string) -> (key, value: string, ok: bool) {
-	s := strings.trim_space(raw)
-	if s == "" || s[0] == '#' {
-		return
-	}
-	k, _, v := strings.partition(s, "=")
-	return strings.trim_space(k), strings.trim_space(v), true
 }

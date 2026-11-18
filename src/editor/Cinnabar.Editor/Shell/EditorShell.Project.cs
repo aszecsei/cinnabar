@@ -38,6 +38,17 @@ public sealed partial class EditorShell
 
     public string ProjectPath => _options.ProjectPath;
 
+    /// <summary>
+    /// What a scene file at a path parses with: a prefab's options, or a scene's with the sublevels that the project
+    /// declares, so a name that it does not declare warns. Without a project file, no name is checked, as the cooker does.
+    /// </summary>
+    SceneParseOptions ParseOptionsFor(string path) =>
+        path.EndsWith(SceneFile.PrefabExtension, StringComparison.OrdinalIgnoreCase)
+            ? new SceneParseOptions(IsPrefab: true)
+            : new SceneParseOptions(Sublevels: File.Exists(ProjectPath) || File.Exists(ProjectSettings.UserPath(ProjectPath))
+                ? ProjectSettings.Sublevels(ProjectPath).Select(s => s.Name).ToHashSet()
+                : null);
+
     /// <summary>The project's output mode, as the ribbon shows it.</summary>
     public string ProjectOutput
     {

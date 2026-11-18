@@ -637,6 +637,26 @@ the_navigation_keys_are_checked_line_by_line :: proc(t: ^testing.T) {
 	}
 }
 
+@(test)
+the_sublevel_keys_are_checked_line_by_line :: proc(t: ^testing.T) {
+	s: Settings
+	problems := make([dynamic]string, context.temp_allocator)
+	parse("sublevel.night = inactive\nsublevel.day = active\n", &s, &problems)
+	testing.expect_value(t, len(problems), 0)
+
+	clear(&problems)
+	parse("sublevel.night = on\nsublevel.no-way = active\n", &s, &problems)
+	testing.expect_value(t, len(problems), 2)
+	if len(problems) == 2 {
+		testing.expect_value(
+			t,
+			problems[0],
+			`1: sublevel.night takes active or inactive, not "on"`,
+		)
+		testing.expect(t, strings.has_prefix(problems[1], "2: sublevel.no-way: a sublevel's name"))
+	}
+}
+
 // The residency's budget, its idle frames and the textures' mip bias are quality keys, each with its presets.
 @(test)
 the_residency_settings_are_quality_keys :: proc(t: ^testing.T) {

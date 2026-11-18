@@ -6,12 +6,14 @@ namespace Cinnabar.Editor.Document;
 /// <summary>The reader of <see cref="SceneFile"/>.</summary>
 public static partial class SceneFile
 {
-    sealed class Parser
+    sealed class Parser(SceneParseOptions options)
     {
         public Scene Scene { get; } = new();
         public List<SceneProblem> Problems { get; } = [];
 
         int _line;
+        // The line of each block's sublevel key.
+        readonly Dictionary<SceneEntity, int> _sublevelLines = [];
         SceneEntity? _entity;
         List<SceneField>? _block;
         // The entity's node, which it takes once it is done, when it is an instance block.
@@ -36,7 +38,7 @@ public static partial class SceneFile
                 if (!header)
                 {
                     header = true;
-                    if (trimmed is not ("scene 1" or "scene 2") && trimmed != $"scene {Version}")
+                    if (trimmed is not ("scene 1" or "scene 2" or "scene 3") && trimmed != $"scene {Version}")
                     {
                         Error($"a scene file starts with `scene {Version}`");
                         return;
@@ -76,6 +78,49 @@ public static partial class SceneFile
             {
                 _line = 0;
                 Error($"two entities have the scene ID {group.Key:x16}");
+            }
+            CheckSublevels();
+        }
+
+        // A block's sublevel key that differs from its owner's sublevel is an error, so a parent and its children always
+        // load together. An owner that the file does not have is not checked.
+        void CheckSublevels()
+        {
+            var byId = new Dictionary<ulong, SceneEntity>();
+            foreach (var e in Scene.Entities)
+            {
+                byId[e.Id] = e;
+            }
+            var resolved = new Dictionary<SceneEntity, string>();
+            string Resolve(SceneEntity e)
+            {
+                if (resolved.TryGetValue(e, out var known))
+                {
+                    return known;
+                }
+                // While its owners resolve, a cycle of parents finds the entity's own key.
+                resolved[e] = e.Sublevel ?? "";
+                var owner = e.OwnerId;
+                var sublevel = e.Sublevel ?? "";
+                if (owner != 0 && owner != e.Id && byId.TryGetValue(owner, out var o))
+                {
+                    var inherited = Resolve(o);
+                    if (e.Sublevel == null)
+                    {
+                        sublevel = inherited;
+                    }
+                    else if (e.Sublevel != inherited)
+                    {
+                        _line = _sublevelLines[e];
+                        Error("an entity cannot be in a sublevel other than its parent's");
+                    }
+                }
+                resolved[e] = sublevel;
+                return sublevel;
+            }
+            foreach (var e in Scene.Entities)
+            {
+                Resolve(e);
             }
         }
 
@@ -300,6 +345,20 @@ public static partial class SceneFile
                     break;
                 case "node":
                     _node = value.Entity;
+                    break;
+                case "sublevel" when value.Kind != SceneValueKind.String || !IsSublevelName(value.Text):
+                    Error($"sublevel takes a quoted name of letters, digits and _ of at most {MaxSublevelName} characters, such as \"night\"");
+                    break;
+                case "sublevel" when options.IsPrefab:
+                    Warning("an instance of a prefab is in the sublevel of its root, so the prefab's sublevel is ignored");
+                    break;
+                case "sublevel":
+                    _entity.Sublevel = value.Text;
+                    _sublevelLines[_entity] = _line;
+                    if (options.Sublevels is { } declared && !declared.Contains(value.Text))
+                    {
+                        Warning($"the project does not declare the sublevel {value.Text}, so nothing activates it");
+                    }
                     break;
                 case "removed" when value.Kind != SceneValueKind.Bool:
                     Error("removed takes true or false");

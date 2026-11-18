@@ -319,7 +319,7 @@ public sealed partial class EditorShell
         }
         try
         {
-            return SceneFile.Parse(File.ReadAllText(path).ReplaceLineEndings("\n")).Scene;
+            return SceneFile.Parse(File.ReadAllText(path).ReplaceLineEndings("\n"), new SceneParseOptions(IsPrefab: true)).Scene;
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {

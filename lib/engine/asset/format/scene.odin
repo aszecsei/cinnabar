@@ -33,6 +33,10 @@ Scene_Entity :: struct {
 	// The parent's scene ID, or 0.
 	parent:             u64,
 	active:             bool,
+	// The sublevel that the entity is in, or "" for the scene's base (see docs/editor/document-and-scenes.md#sublevels).
+	// A parsed file gives every block the sublevel of its parent or its instance, unless its own key gives it, and
+	// expansion gives an instance's entities the instance's.
+	sublevel:           string,
 	// Sorted by ID.
 	components:         []Scene_Component,
 	// In the order that they are attached.

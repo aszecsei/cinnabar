@@ -16,6 +16,27 @@ public sealed class Scene
 
     public SceneEntity? Find(ulong id) => Entities.Find(e => e.Id == id);
 
+    /// <summary>
+    /// The sublevel that an entity is in (see docs/editor/document-and-scenes.md#sublevels), or "" for the scene's base:
+    /// its own <see cref="SceneEntity.Sublevel"/>, or else its owner's. The owner is an override block's instance, the
+    /// instance of a parent inside one, or else the parent. An owner that the scene does not have gives the base.
+    /// </summary>
+    public string SublevelOf(SceneEntity entity)
+    {
+        var seen = new HashSet<SceneEntity>();
+        for (var e = entity; e != null && seen.Add(e); e = OwnerOf(e))
+        {
+            if (e.Sublevel is { } sublevel)
+            {
+                return sublevel;
+            }
+        }
+        return "";
+    }
+
+    /// <summary>The block whose sublevel an entity takes when it has none of its own, or null.</summary>
+    public SceneEntity? OwnerOf(SceneEntity entity) => entity.OwnerId is var owner && owner != 0 && owner != entity.Id ? Find(owner) : null;
+
     /// <summary>A copy that shares nothing that can change with this one.</summary>
     public Scene Clone()
     {
@@ -101,6 +122,16 @@ public sealed class SceneEntity(ulong id)
     /// <summary>The parent's path when it is inside an instance, which the file writes while its ID is <see cref="Parent"/>.</summary>
     public IReadOnlyList<ulong>? ParentPath { get; set; }
     public bool Active { get; set; } = true;
+    /// <summary>
+    /// The block's own sublevel key, or null when it has none and is in its owner's (see <see cref="Scene.SublevelOf"/>).
+    /// </summary>
+    public string? Sublevel { get; set; }
+
+    /// <summary>
+    /// The scene ID of the block whose sublevel this one takes when it has none of its own: an override block's
+    /// instance, the instance of a parent inside one, or else the parent, which is 0 for none.
+    /// </summary>
+    public ulong OwnerId => Path is { } path ? path[0] : ParentPath is { Count: > 1 } parentPath ? parentPath[0] : Parent;
     /// <summary>Kept sorted by ID.</summary>
     public List<SceneComponent> Components { get; } = [];
     /// <summary>In the order that they are attached.</summary>
@@ -120,6 +151,7 @@ public sealed class SceneEntity(ulong id)
         copy.Parent = Parent;
         copy.ParentPath = ParentPath;
         copy.Active = Active;
+        copy.Sublevel = Sublevel;
         copy.Prefab = Prefab;
         copy.Node = Node;
         copy.Keys = Keys;

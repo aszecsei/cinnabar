@@ -92,6 +92,32 @@ a_scene_that_names_a_missing_asset_warns :: proc(t: ^testing.T) {
 }
 
 @(test)
+a_sublevel_that_the_project_does_not_declare_warns :: proc(t: ^testing.T) {
+	scene := "scene 4\nentity 0000000000000001\nsublevel = \"night\"\n\nentity 0000000000000002\nsublevel = \"dusk\"\n"
+	prefab := "scene 4\nentity 0000000000000001\nsublevel = \"night\"\n"
+	tree := make_tree(
+		t,
+		{
+			{"project.settings", "sublevel.night = inactive\nsublevel.day = sometimes\n"},
+			{"content/level.scene", scene},
+			{"content/lamp.prefab", prefab},
+		},
+	)
+	defer remove_tree(tree)
+
+	pass := cook(tree_options(tree), {.Scene, .Prefab})
+	testing.expectf(t, pass.ok, "problems: %v", pass.problems.list)
+	found := [3]bool{}
+	for p in pass.problems.list {
+		found[0] ||= strings.contains(p.text, "does not declare the sublevel dusk")
+		found[1] ||= strings.contains(p.text, "the prefab's sublevel is ignored")
+		found[2] ||= strings.contains(p.text, "sublevel.day takes active or inactive")
+		testing.expectf(t, !strings.contains(p.text, "sublevel night"), "%s", p.text)
+	}
+	testing.expectf(t, found == {true, true, true}, "problems: %v", pass.problems.list)
+}
+
+@(test)
 a_broken_scene_names_its_line :: proc(t: ^testing.T) {
 	tree := make_tree(
 		t,

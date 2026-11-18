@@ -95,7 +95,7 @@ public sealed class SceneDocument
     public event Action? Changed;
 
     /// <summary>Reads and parses a scene file. The document is null when the file cannot be read or has an error.</summary>
-    public static (SceneDocument? Document, IReadOnlyList<SceneProblem> Problems) Open(string path, Func<string, PrefabDocument?>? openPrefab = null, string prefabGuid = "")
+    public static (SceneDocument? Document, IReadOnlyList<SceneProblem> Problems) Open(string path, Func<string, PrefabDocument?>? openPrefab = null, string prefabGuid = "", SceneParseOptions? options = null)
     {
         var full = System.IO.Path.GetFullPath(path);
         string text;
@@ -107,7 +107,7 @@ public sealed class SceneDocument
         {
             return (null, [new SceneProblem(0, e.Message, true)]);
         }
-        var (scene, problems) = SceneFile.Parse(text);
+        var (scene, problems) = SceneFile.Parse(text, options);
         return (scene == null ? null : new SceneDocument(full, scene, openPrefab) { PrefabGuid = prefabGuid }, problems);
     }
 
