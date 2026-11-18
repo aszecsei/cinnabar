@@ -2,6 +2,8 @@ package render
 
 import "base:runtime"
 import "core:log"
+import "core:math"
+import "core:math/linalg"
 import "core:mem"
 import "core:mem/virtual"
 import "core:os"
@@ -14,6 +16,7 @@ import null "cinnabar:core/gpu/null"
 import "cinnabar:core/jobs"
 import "cinnabar:engine/asset"
 import format "cinnabar:engine/asset/format"
+import "cinnabar:engine/ecs"
 
 @(test)
 the_particle_pool_gives_and_takes_back_ranges :: proc(t: ^testing.T) {
@@ -601,4 +604,186 @@ mesh_particles_have_bins_of_their_own :: proc(t: ^testing.T) {
 	testing.expect_value(t, particles[1], true)
 	testing.expect_value(t, items[2].flags & ITEM_PARTICLES, ITEM_PARTICLES)
 	testing.expect_value(t, items[2].bin, 1)
+}
+
+// reach_random steps a test generator, and gives a number in [0, 1).
+@(private = "file")
+reach_random :: proc(state: ^u32) -> f32 {
+	state^ = state^ * 1664525 + 1013904223
+	return f32(state^ >> 8) / f32(1 << 24)
+}
+
+// A mesh emitter's sphere holds every particle of a system that moves while it spawns them, which a CPU copy of the
+// update's steps moves with gravity, drag and noise (see particle_update.hlsl).
+@(test)
+a_mesh_particles_sphere_holds_the_particles_that_move :: proc(t: ^testing.T) {
+	shapes := [?]format.Effect_Shape{.Point, .Sphere, .Box, .Cone}
+	for shape in shapes {
+		em := format.Effect_Emitter {
+			lifetime   = {1, 2},
+			speed      = {-1, 4},
+			shape      = shape,
+			shape_size = {0.5, 0.25, 0.75},
+		}
+		modules := []format.Effect_Module {
+			{kind = .Gravity, values = {0, -9.8, 2, 0}},
+			{kind = .Drag, values = {0.5, 0, 0, 0}},
+			{kind = .Noise, values = {6, 1.5, 0, 0}},
+		}
+		size: format.Effect_Curve_Row
+		for &sample in size {
+			sample = {1.5, 0, 0, 0}
+		}
+		mesh := [4]f32{0.25, 0, 0, 0.5}
+		slot := Particle_Slot {
+			started    = true,
+			reach_span = 2.0 / PARTICLE_REACH_SPANS,
+		}
+		Particle :: struct {
+			position, velocity: [3]f32,
+			age, lifetime:      f32,
+			seed:               u32,
+		}
+		particles: [dynamic]Particle
+		defer delete(particles)
+		state := u32(7)
+		dt: f32 = 1.0 / 60
+		worst: f32
+		for frame in 0 ..< 600 {
+			// The system moves along x, then turns back, and grows.
+			pose := ecs.Transform {
+				position = ecs.position_offset(
+					{},
+					{f32(frame) * 0.05 if frame < 300 else 30 - f32(frame - 300) * 0.1, 0, 0},
+				),
+				rotation = 1,
+				scale    = {1 + f32(frame) * 0.002, 1, 1},
+			}
+			particle_reach_sample(&slot, pose)
+			sphere := particle_sphere(&slot, em, modules, size, mesh)
+			testing.expect(t, sphere.w >= 0)
+			// The update: the particles that live step, and new ones start in the shape.
+			for i := len(particles) - 1; i >= 0; i -= 1 {
+				p := &particles[i]
+				p.age += dt
+				if p.age >= p.lifetime {
+					unordered_remove(&particles, i)
+					continue
+				}
+				p.velocity += [3]f32{0, -9.8, 2} * dt
+				p.velocity *= math.exp(-0.5 * dt)
+				q := p.position * 1.5 + f32(p.seed & 255) * 0.01
+				field := [3]f32 {
+					math.sin(q.y) + math.cos(q.z),
+					math.sin(q.z) + math.cos(q.x),
+					math.sin(q.x) + math.cos(q.y),
+				}
+				p.velocity += field * 6 * dt
+				p.position += p.velocity * dt
+			}
+			for _ in 0 ..< 4 {
+				z := reach_random(&state) * 2 - 1
+				phi := reach_random(&state) * math.TAU
+				r := math.sqrt(1 - z * z)
+				direction := [3]f32{r * math.cos(phi), z, r * math.sin(phi)}
+				local: [3]f32
+				switch shape {
+				case .Point:
+				case .Sphere:
+					local = direction * 0.5 * math.pow(reach_random(&state), 1.0 / 3.0)
+				case .Box:
+					local =
+						([3]f32{reach_random(&state), reach_random(&state), reach_random(&state)} *
+								2 -
+							1) *
+						[3]f32{0.5, 0.25, 0.75}
+				case .Cone:
+					local = {0.5, 0, 0} * math.sqrt(reach_random(&state))
+					direction = {0, 1, 0}
+				}
+				// The pose's offset from the anchor, which scales the shape along x.
+				offset := ecs.position_sub(pose.position, slot.anchor)
+				p := Particle {
+					position = offset + local * pose.scale,
+					velocity = direction * (-1 + 5 * reach_random(&state)),
+					lifetime = 1 + reach_random(&state),
+					seed     = u32(frame),
+				}
+				p.age = reach_random(&state) * dt
+				p.position += p.velocity * p.age
+				append(&particles, p)
+			}
+			for p in particles {
+				// The mesh's sphere turns about the particle's position, scaled by the size curve.
+				far := linalg.length(p.position) + (linalg.length(mesh.xyz) + mesh.w) * 1.5
+				worst = max(worst, far)
+				testing.expectf(
+					t,
+					far <= sphere.w + linalg.length(mesh.xyz),
+					"%v: a particle at %v reaches %v, past the sphere's %v",
+					shape,
+					p.position,
+					far,
+					sphere.w,
+				)
+			}
+			slot.age += dt
+		}
+		testing.expectf(t, worst > 5, "%v: the particles did not move far (%v)", shape, worst)
+	}
+}
+
+// An emitter whose modules do not bound its particles, a collision or a drag that speeds them up, gives a sphere with no
+// radius.
+@(test)
+a_mesh_particles_sphere_is_unbounded_without_a_bound :: proc(t: ^testing.T) {
+	slot := Particle_Slot {
+		started    = true,
+		reach_span = 0.25,
+	}
+	em := format.Effect_Emitter {
+		lifetime = {1, 2},
+		speed    = {1, 2},
+	}
+	size: format.Effect_Curve_Row
+	for kind in ([]format.Effect_Module_Kind{.Collide, .Drag}) {
+		modules := []format.Effect_Module{{kind = kind, values = {-1, 0.5, 0, 0}}}
+		sphere := particle_sphere(&slot, em, modules, size, {1, 2, 3, 1})
+		testing.expect(t, sphere.w < 0, "the sphere has a radius")
+		testing.expect_value(t, sphere.xyz, [3]f32{1, 2, 3})
+	}
+	// A drag that slows them down bounds them.
+	modules := []format.Effect_Module{{kind = .Drag, values = {1, 0, 0, 0}}}
+	testing.expect(t, particle_sphere(&slot, em, modules, size, {1, 2, 3, 1}).w >= 0)
+}
+
+// A system's reach keeps the spans of its time that its particles live in, and drops the ones before them.
+@(test)
+a_systems_reach_forgets_the_spans_before_its_particles :: proc(t: ^testing.T) {
+	slot := Particle_Slot {
+		started    = true,
+		reach_span = 1,
+	}
+	far := ecs.Transform {
+		position = ecs.position_offset({}, {10, 0, 0}),
+		rotation = 1,
+		scale    = 1,
+	}
+	near := ecs.Transform {
+		rotation = 1,
+		scale    = 1,
+	}
+	particle_reach_sample(&slot, far)
+	em := format.Effect_Emitter {
+		lifetime = {1, 1},
+	}
+	size: format.Effect_Curve_Row
+	held := particle_sphere(&slot, em, nil, size, {})
+	testing.expect_value(t, held.w, f32(10))
+	slot.age = PARTICLE_REACH_SPANS - 1
+	particle_reach_sample(&slot, near)
+	testing.expect_value(t, particle_sphere(&slot, em, nil, size, {}).w, f32(10))
+	slot.age = PARTICLE_REACH_SPANS + 1
+	particle_reach_sample(&slot, near)
+	testing.expect_value(t, particle_sphere(&slot, em, nil, size, {}).w, f32(0))
 }

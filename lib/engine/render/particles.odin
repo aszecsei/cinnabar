@@ -2,6 +2,7 @@ package render
 
 import "core:log"
 import "core:math"
+import "core:math/linalg"
 import "core:slice"
 
 import "cinnabar:core"
@@ -64,6 +65,9 @@ Particle_System :: struct {
 	rate_scale: f32 `editor:"range=0,10"`,
 }
 
+// The spans of an effect's longest lifetime that a system keeps its pose's reach for.
+PARTICLE_REACH_SPANS :: 8
+
 // Particle_Range is a range of the pool, in particles.
 @(private)
 Particle_Range :: struct {
@@ -94,6 +98,12 @@ Particle_Slot :: struct {
 	// Where each ribbon's emitter spawns next in its range, so its particles stay in the order that they spawned.
 	head:       [format.MAX_EFFECT_EMITTERS]u32,
 	seen:       u64,
+	// How far the system's pose has been from its anchor, and its largest scale, in each of the last spans of the
+	// system's time, and the number of the newest span. A span is an eighth of the effect's longest lifetime, so every
+	// particle alive spawned in one of them (see particle_sphere).
+	reach:      [PARTICLE_REACH_SPANS + 1][2]f32,
+	reach_span: f32,
+	reach_last: u64,
 }
 
 // Particles is the particles' state between frames, in the Renderer.
@@ -463,6 +473,7 @@ begin_particles :: proc(
 			if dt == 0 && slice_has(playing, e) {
 				system_dt = p.wall_delta
 			}
+			particle_reach_sample(slot, pose)
 			scale := system.rate_scale > 0 ? system.rate_scale : 1
 			anchor := ecs.position_sub(slot.anchor, f.view.position)
 			previous_anchor := ecs.position_sub(slot.anchor, p.previous_position)
@@ -1055,7 +1066,7 @@ add_mesh_particle_items :: proc(
 	instances := 0
 	it := ecs.query_iter(w, p.systems.query)
 	for view in ecs.query_next(&it) {
-		for e in ecs.entities(view) {
+		for e, i in ecs.entities(view) {
 			slot := find_particle_slot(p, e)
 			if slot == nil || !slot.started || is_hidden(hidden, e) {
 				continue
@@ -1065,7 +1076,11 @@ add_mesh_particle_items :: proc(
 			if !loaded || !ok {
 				continue
 			}
+			// The particles that this frame's step spawns start from this pose, which begin_particles samples after.
+			pose, _ := light_pose(w, view, i, hidden, e)
+			particle_reach_sample(slot, pose)
 			emitters := format.effect_emitters(data, blob)
+			curves := format.effect_curves(data, blob)
 			for em, k in emitters[:min(len(emitters), format.MAX_EFFECT_EMITTERS)] {
 				if em.render != .Mesh || slot.ranges[k].count == 0 {
 					continue
@@ -1094,6 +1109,13 @@ add_mesh_particle_items :: proc(
 						flags |= ITEM_CASTS_SHADOWS
 					}
 					b := mesh.submesh_bounds[sub] if sub < MAX_SUBMESHES else mesh.bounds
+					sphere := particle_sphere(
+						slot,
+						em,
+						format.effect_modules(data, em),
+						curves[em.curves + u32(format.Effect_Curve.Size)],
+						{b.center.x, b.center.y, b.center.z, b.radius},
+					)
 					append(
 						items,
 						Cull_Item {
@@ -1105,7 +1127,7 @@ add_mesh_particle_items :: proc(
 							bin = u32(use.pipeline),
 							flags = flags,
 							submesh = u32(min(sub, ID_MAX_SUBMESH)),
-							sphere = {b.center.x, b.center.y, b.center.z, b.radius},
+							sphere = sphere,
 							bound = pipeline.displacement_bound,
 							entry = u32(len(entries)),
 						},
@@ -1136,6 +1158,89 @@ add_mesh_particle_items :: proc(
 		)
 	}
 	return entries[:]
+}
+
+// particle_reach_sample notes how far the system's pose is from its anchor, and how large it is, in the span of its time
+// that it is in. The particles that it spawns start from there, so a system that moves leaves a trail of them. A span
+// that the time has left behind by more than the ring holds is dropped, as is the whole ring when the time wraps.
+@(private)
+particle_reach_sample :: proc(slot: ^Particle_Slot, pose: ecs.Transform) {
+	if !slot.started {
+		return
+	}
+	span := u64(slot.age / slot.reach_span)
+	if span < slot.reach_last || span - slot.reach_last > PARTICLE_REACH_SPANS {
+		slot.reach = {}
+	} else {
+		for s in slot.reach_last + 1 ..= span {
+			slot.reach[s % (PARTICLE_REACH_SPANS + 1)] = {}
+		}
+	}
+	slot.reach_last = span
+	at := &slot.reach[span % (PARTICLE_REACH_SPANS + 1)]
+	at^ = {
+		max(at[0], linalg.length(ecs.position_sub(pose.position, slot.anchor))),
+		max(at[1], linalg.length(pose.scale)),
+	}
+}
+
+// particle_sphere is a sphere in the anchor's space that holds every point of a mesh emitter's particles while they
+// live, or has a radius of -1 when the emitter's modules do not bound them. It has the submesh's center, so that the
+// draws sort as they did, and a radius that reaches from the anchor.
+//
+// A particle starts in the emitter's shape, at the system's pose when it spawned, goes along the shape's direction at
+// the emitter's greatest speed, and its lifetime out. Gravity and noise add each at most their strength in meters per
+// second squared, so the particle is at most ½·a·t² further, and a step of dt more, as it moves with the velocity that
+// it has after the step. A drag of 0 or more only slows it, which the bound leaves out. A negative drag speeds the
+// particle up and a collision puts it out of the depth by its own steps, and neither has a bound. Its mesh turns about
+// the instance's origin, scaled by at most the size curve's greatest sample.
+@(private)
+particle_sphere :: proc(
+	slot: ^Particle_Slot,
+	em: format.Effect_Emitter,
+	modules: []format.Effect_Module,
+	size: format.Effect_Curve_Row,
+	mesh: [4]f32,
+) -> [4]f32 {
+	// A field's components each have a sine and a cosine, so its length is at most 2·sqrt(3).
+	NOISE_FIELD :: 3.4641017
+	accel: f32
+	for m in modules {
+		switch m.kind {
+		case .Gravity:
+			accel += linalg.length(m.values.xyz)
+		case .Drag:
+			if m.values.x < 0 {
+				return {mesh.x, mesh.y, mesh.z, -1}
+			}
+		case .Noise:
+			accel += abs(m.values.x) * NOISE_FIELD
+		case .Collide:
+			return {mesh.x, mesh.y, mesh.z, -1}
+		}
+	}
+	extent: f32
+	switch em.shape {
+	case .Point:
+	case .Sphere, .Cone:
+		extent = abs(em.shape_size.x)
+	case .Box:
+		extent = linalg.length(em.shape_size)
+	}
+	pose_reach, pose_scale: f32
+	for r in slot.reach {
+		pose_reach, pose_scale = max(pose_reach, r[0]), max(pose_scale, r[1])
+	}
+	life := max(em.lifetime[0], em.lifetime[1])
+	speed := max(abs(em.speed[0]), abs(em.speed[1]))
+	travel := speed * life + 0.5 * accel * life * (life + MAX_PARTICLE_DELTA)
+	scale: f32
+	for sample in size {
+		scale = max(scale, abs(sample.x))
+	}
+	center := linalg.length(mesh.xyz)
+	reach := pose_reach + pose_scale * extent + travel + (center + mesh.w) * scale
+	return {mesh.x, mesh.y, mesh.z, center + reach}
 }
 
 // find_particle_slot is a system's slot, or nil before its first frame.
@@ -1345,6 +1450,12 @@ start_slot :: proc(p: ^Particles, slot: ^Particle_Slot, data: []byte, version: u
 	emitters := format.effect_emitters(data, blob)
 	free_slot_ranges(p, slot)
 	slot.started, slot.version, slot.reset, slot.age = true, version, true, 0
+	longest: f32
+	for em in emitters[:min(len(emitters), format.MAX_EFFECT_EMITTERS)] {
+		longest = max(longest, em.lifetime[0], em.lifetime[1])
+	}
+	slot.reach, slot.reach_last = {}, 0
+	slot.reach_span = max(longest / PARTICLE_REACH_SPANS, 1e-3)
 	for em, k in emitters[:min(len(emitters), format.MAX_EFFECT_EMITTERS)] {
 		slot.carry[k] = 0
 		slot.next_burst[k] = 0

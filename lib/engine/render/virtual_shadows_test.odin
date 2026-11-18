@@ -1741,6 +1741,65 @@ a_mesh_that_becomes_resident_drops_the_pages_under_it :: proc(t: ^testing.T) {
 	}
 }
 
+// A mesh particle system's slot has bounds: it is live, and every frame the pages under its sphere drop. An emitter whose
+// modules leave it no bound leaves its slot without, which drops none.
+@(test)
+a_particle_slot_has_bounds_and_drops_the_pages_under_them :: proc(t: ^testing.T) {
+	tracking := new(Caster_Tracking)
+	defer {
+		delete(tracking.changes)
+		free(tracking)
+	}
+	records := make([]Instance_Record, 1, context.temp_allocator)
+	records[0].rows = {{1, 0, 0, 0}, {0, 1, 0, -1}, {0, 0, 1, 5}}
+	pipelines := make([]Material_Pipeline, 1, context.temp_allocator)
+	slot := Particle_Slot {
+		started    = true,
+		reach_span = 0.25,
+	}
+	em := format.Effect_Emitter {
+		lifetime = {1, 2},
+		speed    = {0.5, 1},
+	}
+	size: format.Effect_Curve_Row
+	c := test_camera()
+	views := test_views(c)
+	for unbounded in ([]bool{false, true}) {
+		modules := []format.Effect_Module{}
+		if unbounded {
+			modules = {{kind = .Collide, values = {0.5, 0.5, 0, 0}}}
+		}
+		sphere := particle_sphere(&slot, em, modules, size, {0, 0, 0, 0.5})
+		items := []Cull_Item{{flags = ITEM_PARTICLES | ITEM_CASTS_SHADOWS, sphere = sphere}}
+		bounds := caster_bounds(records, items, pipelines, nil, 1, context.temp_allocator)
+		track_casters(tracking, bounds, {}, 1)
+		testing.expect_value(t, tracking.slots[0].unbounded, unbounded)
+		testing.expect(t, tracking.slots[0].inherent && tracking.slots[0].volatile)
+		live := live_slots(tracking, 1, {}, 100)
+		testing.expect(t, slot_live(&live, 0))
+		spheres := virtual_drop_spheres(tracking, nil, &live, 1, {}, context.temp_allocator)
+		testing.expect_value(t, len(spheres), unbounded ? 0 : 1)
+		dropped := make([]u32, VIRTUAL_MAX_LEVELS * VIRTUAL_LEVEL_WORDS, context.temp_allocator)
+		virtual_drop_pages(views, spheres, dropped)
+		for view, level in views {
+			texel, _ := virtual_project(view, {0, -1, 5})
+			page := [2]i32{i32(texel.x) / VIRTUAL_PAGE_TEXELS, i32(texel.y) / VIRTUAL_PAGE_TEXELS}
+			testing.expectf(
+				t,
+				is_marked(dropped, level, page) != unbounded,
+				"level %d: the page under the particles %s",
+				level,
+				unbounded ? "dropped" : "stayed",
+			)
+		}
+		// The frames after, nothing changes, and the live slot still drops.
+		track_casters(tracking, bounds, {}, 2)
+		live = live_slots(tracking, 1, {}, 100)
+		spheres = virtual_drop_spheres(tracking, nil, &live, 1, {}, context.temp_allocator)
+		testing.expect_value(t, len(spheres), unbounded ? 0 : 1)
+	}
+}
+
 // Streaming's drops: each group of a page that came into the pool or left it, under each slot that draws its mesh, once
 // each, in the levels that its error at the slot's scale shows in; and each slot of a masked material whose texture came
 // in at a finer mip, over its caster.

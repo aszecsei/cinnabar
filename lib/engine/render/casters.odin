@@ -29,7 +29,7 @@ Caster_Sphere :: struct {
 
 // Caster_Slot is a slot's shadow, as the tracking last saw it. reported is where the caches took it last: at its last
 // change or report. inherent is whether its items change their shape by themselves, and unbounded whether they have no
-// bounds on the CPU (mesh particles), so it is live in every view. volatile is whether it is a dynamic caster. moved is
+// bounds on the CPU (mesh particles with an unbounded emitter), so it is live in every view. volatile is whether it is a dynamic caster. moved is
 // the last frame that its pose changed.
 Caster_Slot :: struct {
 	sphere:    Caster_Sphere,
@@ -112,9 +112,10 @@ caster_bounds :: proc(
 		for row, k in rows {
 			center[k] = row.x * local.x + row.y * local.y + row.z * local.z + row.w
 		}
-		reach := radius * scale + item.bound
+		reach := max(radius, 0) * scale + item.bound
 		pipeline := &pipelines[item.bin]
-		unbounded := item.flags & ITEM_PARTICLES != 0
+		// A mesh particles' item has a sphere (see particle_sphere), unless its emitter's modules leave it none.
+		unbounded := item.flags & ITEM_PARTICLES != 0 && radius < 0
 		if !b.casts {
 			b.low, b.high = center - reach, center + reach
 		} else {
@@ -123,7 +124,7 @@ caster_bounds :: proc(
 		b.casts = true
 		b.unbounded ||= unbounded
 		b.inherent ||=
-			unbounded || item.flags & (ITEM_SKINNED | ITEM_BILLBOARD) != 0 || pipeline.animated
+			item.flags & (ITEM_PARTICLES | ITEM_SKINNED | ITEM_BILLBOARD) != 0 || pipeline.animated
 		// The signature is what the items draw, but not where: their place in the frame's lists changes from frame to frame.
 		b.signature = signature_add(b.signature, u64(item.first) | u64(item.count) << 32)
 		b.signature = signature_add(b.signature, u64(item.bin) | u64(item.flags) << 32)
