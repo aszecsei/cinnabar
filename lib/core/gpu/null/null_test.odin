@@ -920,3 +920,110 @@ a_request_keeps_the_source_that_it_was_made_with :: proc(t: ^testing.T) {
 	testing.expect_value(t, capture.viewport, nil)
 	testing.expect_value(t, capture.size, [2]u32{16, 8})
 }
+
+// A texture array that is partly resident: tiles of 136x136 BC7 texels are copied from the upload ring into some slots
+// of a two-layer atlas, with the barriers around the copies.
+@(test)
+partial_residency_copies_tiles_into_an_atlas :: proc(t: ^testing.T) {
+	arena: virtual.Arena
+	testing.expect(t, virtual.arena_init_growing(&arena) == nil)
+	defer virtual.arena_destroy(&arena)
+
+	sync.guard(&backend_lock)
+	testing.expect(t, init(nil, {1280, 720}))
+	defer shutdown()
+
+	atlas := create_texture(
+		{size = {272, 272}, layers = 2, format = .BC7_Unorm, usage = {.Sampled}},
+		nil,
+	)
+	testing.expect(t, atlas != {})
+
+	// 34 rows of 34 blocks of 16 bytes, at the pitch that copies need.
+	TILE_PITCH :: 768
+	TILE_BYTES :: TILE_PITCH * 33 + 544
+	tiles: [3]gpu.Upload
+	for &tile in tiles {
+		ok: bool
+		tile, ok = upload(TILE_BYTES, gpu.TEXTURE_COPY_OFFSET_ALIGN)
+		testing.expect(t, ok)
+		testing.expect_value(t, tile.offset % gpu.TEXTURE_COPY_OFFSET_ALIGN, 0)
+	}
+
+	cb := gpu.command_buffer(virtual.arena_allocator(&arena))
+	gpu.cmd_barriers(
+		&cb,
+		nil,
+		{
+			{
+				texture = atlas,
+				sync_before = {.Pixel_Shading},
+				access_before = {.Shader_Resource},
+				sync_after = {.Copy},
+				access_after = {.Copy_Dest},
+				layout_before = .Shader_Resource,
+				layout_after = .Copy_Dest,
+			},
+		},
+	)
+	slots := [3]struct {
+		layer:  u32,
+		origin: [2]u32,
+	}{{0, {0, 0}}, {0, {136, 136}}, {1, {136, 0}}}
+	for slot, i in slots {
+		gpu.cmd_copy_buffer_to_texture(
+			&cb,
+			tiles[i].buffer,
+			tiles[i].offset,
+			TILE_PITCH,
+			atlas,
+			0,
+			slot.layer,
+			slot.origin,
+			{136, 136},
+		)
+	}
+	gpu.cmd_barriers(
+		&cb,
+		nil,
+		{
+			{
+				texture = atlas,
+				sync_before = {.Copy},
+				access_before = {.Copy_Dest},
+				sync_after = {.Pixel_Shading},
+				access_after = {.Shader_Resource},
+				layout_before = .Copy_Dest,
+				layout_after = .Shader_Resource,
+			},
+		},
+	)
+	testing.expect(t, submit({cb}))
+
+	// The next frame copies into the atlas without the barrier into Copy_Dest, which the backend rejects.
+	begin_frame({1280, 720})
+	tile, ok := upload(TILE_BYTES, gpu.TEXTURE_COPY_OFFSET_ALIGN)
+	testing.expect(t, ok)
+	bare := gpu.command_buffer(virtual.arena_allocator(&arena))
+	gpu.cmd_copy_buffer_to_texture(
+		&bare,
+		tile.buffer,
+		tile.offset,
+		TILE_PITCH,
+		atlas,
+		0,
+		0,
+		{0, 0},
+		{136, 136},
+	)
+	context.logger = testlog.expected_errors()
+	testing.expect(t, !submit({bare}))
+	destroy_texture(atlas)
+}
+
+@(test)
+video_memory_is_unknown :: proc(t: ^testing.T) {
+	used, budget := video_memory()
+	testing.expect_value(t, used, 0)
+	testing.expect_value(t, budget, 0)
+}

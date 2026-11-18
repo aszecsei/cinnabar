@@ -227,6 +227,7 @@ init :: proc(
 		) == "1",
 		gpu_features                    = gpu_features,
 		gpu_adapter                     = backend.adapter,
+		gpu_video_memory                = backend.video_memory,
 		gpu_frame_target                = backend.frame_target,
 		gpu_output                      = backend.output,
 		gpu_request_output              = gpu_request_output,

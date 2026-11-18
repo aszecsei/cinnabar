@@ -133,6 +133,9 @@ Platform_API :: struct {
 	gpu_features:                    proc() -> gpu.Features,
 	// The device that the backend chose (see docs/gpu/interface.md#adapter).
 	gpu_adapter:                     proc() -> gpu.Adapter,
+	// gpu_video_memory is the adapter's local video memory in use and the budget that the OS gives this process, in bytes. It is 0, 0
+	// when the backend does not know. It resets nothing, and the main thread can call it at any time.
+	gpu_video_memory:                proc() -> (used, budget: u64),
 	// The frame target is in the render target layout when the frame starts, and the game must leave it there.
 	// Its contents are undefined at the start of each frame.
 	gpu_frame_target:                proc() -> gpu.Texture,

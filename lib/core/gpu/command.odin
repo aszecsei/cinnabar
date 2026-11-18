@@ -46,6 +46,7 @@ Packet_Kind :: enum u16 {
 	Upscale,
 	Write_Accel_Size,
 	Compact_Accel,
+	Copy_Buffer_To_Texture,
 }
 
 // size includes the header and the padding after the payload.
@@ -231,6 +232,24 @@ Copy_Buffer :: struct {
 	size:          u32,
 }
 
+// Copy_Buffer_To_Texture copies rows from a buffer into a region of one mip and layer of a texture, outside a render
+// pass. The rows are rows of texels, or rows of 4x4 blocks for a block-compressed format, row_pitch bytes apart from
+// the first row at offset. The offset is a multiple of TEXTURE_COPY_OFFSET_ALIGN, and the row pitch a multiple of
+// TEXTURE_COPY_PITCH_ALIGN that is at least a row's bytes. The region is in texels. For a block-compressed format its
+// origin is a multiple of 4, and so is its size unless the region ends at the mip's edge. The source can be the upload
+// ring, but not a Readback buffer. The texture is not Streamed, not a depth texture and not 3D, and is in the Copy_Dest
+// layout (see docs/gpu/queues-streaming-readback.md#streaming).
+Copy_Buffer_To_Texture :: struct {
+	source:    Buffer,
+	offset:    u32,
+	row_pitch: u32,
+	texture:   Texture,
+	mip:       u32,
+	layer:     u32,
+	origin:    [2]u32,
+	size:      [2]u32,
+}
+
 // Write_Accel_Size writes a built structure's compacted size, a u64 in bytes, at offset in a Storage buffer, outside a
 // render pass. The structure has Allow_Compaction, and the offset is a multiple of 8.
 Write_Accel_Size :: struct {
@@ -355,6 +374,7 @@ Packet_Format :: struct {
 	build_accel:        Build_Accel,
 	dispatch_rays:      Dispatch_Rays,
 	copy_buffer:        Copy_Buffer,
+	copy_to_texture:    Copy_Buffer_To_Texture,
 	upscale:            Upscale,
 	write_accel_size:   Write_Accel_Size,
 	compact_accel:      Compact_Accel,
@@ -602,6 +622,23 @@ cmd_copy_buffer :: proc(
 	size: u32,
 ) {
 	push(cb, .Copy_Buffer, Copy_Buffer{source, source_offset, dest, dest_offset, size})
+}
+
+// cmd_copy_buffer_to_texture copies rows from a buffer into a region of a texture's mip and layer. See
+// Copy_Buffer_To_Texture.
+cmd_copy_buffer_to_texture :: proc(
+	cb: ^Command_Buffer,
+	source: Buffer,
+	offset, row_pitch: u32,
+	texture: Texture,
+	mip, layer: u32,
+	origin, size: [2]u32,
+) {
+	push(
+		cb,
+		.Copy_Buffer_To_Texture,
+		Copy_Buffer_To_Texture{source, offset, row_pitch, texture, mip, layer, origin, size},
+	)
 }
 
 // cmd_dispatch_rays needs a ray tracing pipeline, outside a render pass.

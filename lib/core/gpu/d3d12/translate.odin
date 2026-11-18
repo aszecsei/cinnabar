@@ -199,6 +199,8 @@ translate :: proc(
 			if dest.mapped != nil {
 				mark_readback(c.dest, dest)
 			}
+		case .Copy_Buffer_To_Texture:
+			copy_buffer_to_texture(list, gpu.payload(p, gpu.Copy_Buffer_To_Texture))
 		case .Dispatch_Rays:
 			if !pipeline_ready {
 				continue
@@ -467,6 +469,7 @@ LAYOUT := [gpu.Texture_Layout]d3d.BARRIER_LAYOUT {
 	.Depth_Stencil_Write = .DEPTH_STENCIL_WRITE,
 	.Shader_Resource     = .SHADER_RESOURCE,
 	.Unordered_Access    = .UNORDERED_ACCESS,
+	.Copy_Dest           = .COPY_DEST,
 }
 
 @(private = "file")
@@ -481,4 +484,37 @@ buffer_entry :: proc(buffer: gpu.Buffer) -> ^Buffer_Entry {
 	entry := gpu.pool_get(&dev.buffers, buffer)
 	assert(entry != nil, "gpu: invalid buffer handle")
 	return entry
+}
+
+// copy_buffer_to_texture records a copy from a buffer's rows into a region of one mip and layer. Validation has checked
+// the packet.
+@(private = "file")
+copy_buffer_to_texture :: proc(list: ^d3d.IGraphicsCommandList7, c: ^gpu.Copy_Buffer_To_Texture) {
+	source, dest := buffer_entry(c.source), texture_entry(c.texture)
+	mips := max(dest.desc.mip_count, 1)
+	// A block-compressed footprint is whole blocks, also at a mip's edge.
+	size := c.size
+	if gpu.is_block_format(dest.desc.format) {
+		size = {(size.x + 3) &~ 3, (size.y + 3) &~ 3}
+	}
+	dst := d3d.TEXTURE_COPY_LOCATION {
+		pResource = dest.resource,
+		Type      = .SUBRESOURCE_INDEX,
+	}
+	dst.SubresourceIndex = c.mip + c.layer * mips
+	src := d3d.TEXTURE_COPY_LOCATION {
+		pResource = source.resource,
+		Type      = .PLACED_FOOTPRINT,
+	}
+	src.PlacedFootprint = {
+		Offset = u64(c.offset),
+		Footprint = {
+			Format = view_format(dest.desc.format),
+			Width = size.x,
+			Height = size.y,
+			Depth = 1,
+			RowPitch = c.row_pitch,
+		},
+	}
+	list->CopyTextureRegion(&dst, c.origin.x, c.origin.y, 0, &src, nil)
 }

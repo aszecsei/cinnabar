@@ -39,7 +39,7 @@ To test a fallback path on hardware that has the capability, set `CINNABAR_DISAB
 | `video_memory` | The adapter's own memory in bytes, or 0 when it is unknown or shared with the CPU |
 | `name` | The adapter's name, UTF-8 with zeros after it; `adapter_name` gives it as a string |
 
-- **D3D12** fills it from `DXGI_ADAPTER_DESC1` when it creates the device. The memory is `DedicatedVideoMemory`. How much of it the process may use now is `gpu.Stats.video_memory_budget`, which only the host reads.
+- **D3D12** fills it from `DXGI_ADAPTER_DESC1` when it creates the device. The memory is `DedicatedVideoMemory`. How much of it the process may use now is `gpu.Stats.video_memory_budget`, which only the host reads, and `Platform_API.gpu_video_memory` gives it to the engine (see [Video memory](queues-streaming-readback.md#video-memory)).
 - **The null backend** gives an adapter named `null` with no memory of its own.
 
 ## Packages

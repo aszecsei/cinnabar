@@ -33,6 +33,29 @@ STORAGE :: Texture {
 	index      = 5,
 	generation = 1,
 }
+// ATLAS is a two-layer BC7 array of 272x272 texels with three mips.
+@(private = "file")
+ATLAS :: Texture {
+	index      = 6,
+	generation = 1,
+}
+@(private = "file")
+STREAMED :: Texture {
+	index      = 7,
+	generation = 1,
+}
+// EDGE has mips whose sides are not multiples of 4: 36, 18 and 9.
+@(private = "file")
+EDGE :: Texture {
+	index      = 8,
+	generation = 1,
+}
+// UPLOAD holds 64 KiB.
+@(private = "file")
+UPLOAD :: Buffer {
+	index      = 4,
+	generation = 1,
+}
 @(private = "file")
 INDICES :: Buffer {
 	index      = 0,
@@ -136,6 +159,19 @@ RESOURCES :: Resources {
 				true
 		case STORAGE:
 			return {size = {64, 64}, format = .RGBA16_Float, usage = {.Sampled, .Storage}}, true
+		case ATLAS:
+			return {
+					size = {272, 272},
+					layers = 2,
+					mip_count = 3,
+					format = .BC7_Unorm,
+					usage = {.Sampled},
+				},
+				true
+		case STREAMED:
+			return {size = {64, 64}, format = .BC7_Unorm, usage = {.Sampled, .Streamed}}, true
+		case EDGE:
+			return {size = {36, 36}, mip_count = 3, format = .BC7_Unorm, usage = {.Sampled}}, true
 		}
 		return {}, false
 	},
@@ -149,6 +185,8 @@ RESOURCES :: Resources {
 			return {size = 96, usage = {.Storage, .Indirect}}, true
 		case READBACK:
 			return {size = 64, usage = {.Readback}}, true
+		case UPLOAD:
+			return {size = 65536}, true
 		}
 		return {}, false
 	},
@@ -1721,6 +1759,21 @@ validate_copies_and_streams :: proc(t: ^testing.T) {
 	bad.mip_count = 2
 	testing.expect_value(t, validate_texture_desc(bad, nil), Desc_Error.Bad_Mip_Count)
 
+	// An atlas is a layered texture that only copies fill.
+	atlas := Texture_Desc {
+		size      = {272, 272},
+		layers    = 2,
+		mip_count = 3,
+		format    = .BC7_Unorm,
+		usage     = {.Sampled},
+	}
+	testing.expect_value(t, validate_texture_desc(atlas, nil), Desc_Error.None)
+	testing.expect_value(
+		t,
+		validate_texture_desc(atlas, make([]byte, 272 * 272, allocator)),
+		Desc_Error.Bad_Usage,
+	)
+
 	// An array's and a cube's stream has every layer's chain. They are only streamed in and sampled.
 	array := streamed
 	array.layers = 3
@@ -1740,7 +1793,7 @@ validate_copies_and_streams :: proc(t: ^testing.T) {
 		t,
 		validate_texture_desc(
 			{size = {16, 8}, layers = 2, format = .RGBA8_Unorm, usage = {.Sampled}},
-			nil,
+			make([]byte, 16 * 8 * 4, allocator),
 		),
 		Desc_Error.Bad_Usage,
 	)
@@ -1909,4 +1962,137 @@ output_modes_follow_the_request_and_the_display :: proc(t: ^testing.T) {
 	testing.expect_value(t, output_format(.Sdr), FRAME_TARGET_FORMAT)
 	testing.expect_value(t, output_format(.Hdr10), Format.RGB10A2_Unorm)
 	testing.expect_value(t, output_format(.Scrgb), Format.RGBA16_Float)
+}
+
+// TILE_PITCH is the row pitch of a 136x136 BC7 tile: 34 blocks of 16 bytes, aligned to 256.
+@(private = "file")
+TILE_PITCH :: 768
+
+@(private = "file")
+to_copy_dest :: proc(cb: ^Command_Buffer, texture: Texture) {
+	cmd_barriers(
+		cb,
+		nil,
+		{
+			{
+				texture = texture,
+				sync_after = {.Copy},
+				access_after = {.Copy_Dest},
+				layout_after = .Copy_Dest,
+			},
+		},
+	)
+}
+
+@(private = "file")
+record_copy :: proc(
+	cb: ^Command_Buffer,
+	offset, row_pitch: u32,
+	texture: Texture,
+	mip, layer: u32,
+	origin, size: [2]u32,
+) {
+	cmd_copy_buffer_to_texture(cb, UPLOAD, offset, row_pitch, texture, mip, layer, origin, size)
+}
+
+@(test)
+validate_texture_copies :: proc(t: ^testing.T) {
+	arena: virtual.Arena
+	testing.expect(t, virtual.arena_init_growing(&arena) == nil)
+	defer virtual.arena_destroy(&arena)
+	allocator := virtual.arena_allocator(&arena)
+
+	Case :: struct {
+		name:      string,
+		offset:    u32,
+		row_pitch: u32,
+		texture:   Texture,
+		mip:       u32,
+		layer:     u32,
+		origin:    [2]u32,
+		size:      [2]u32,
+		err:       Validation_Error,
+	}
+	cases := []Case {
+		{"tile", 0, TILE_PITCH, ATLAS, 0, 0, {136, 0}, {136, 136}, .None},
+		{"tile in layer 1", 1024, TILE_PITCH, ATLAS, 0, 1, {0, 136}, {136, 136}, .None},
+		{"whole mip 1", 0, TILE_PITCH, ATLAS, 1, 1, {0, 0}, {136, 136}, .None},
+		{"whole mip 2", 0, 512, ATLAS, 2, 0, {0, 0}, {68, 68}, .None},
+		{"edge: whole mip", 0, 256, EDGE, 1, 0, {0, 0}, {18, 18}, .None},
+		{"edge: last block", 0, 256, EDGE, 1, 0, {16, 16}, {2, 2}, .None},
+		{"edge: short of the edge", 0, 256, EDGE, 1, 0, {0, 0}, {10, 18}, .Bad_Copy},
+		{"edge: past the edge", 0, 256, EDGE, 1, 0, {16, 0}, {4, 4}, .Bad_Copy},
+		{"misaligned offset", 256, TILE_PITCH, ATLAS, 0, 0, {0, 0}, {136, 136}, .Bad_Copy},
+		{"misaligned pitch", 0, 800, ATLAS, 0, 0, {0, 0}, {136, 136}, .Bad_Copy},
+		{"pitch below row", 0, 512, ATLAS, 0, 0, {0, 0}, {136, 136}, .Bad_Copy},
+		{"BC origin", 0, TILE_PITCH, ATLAS, 0, 0, {2, 0}, {136, 136}, .Bad_Copy},
+		{"BC size", 0, TILE_PITCH, ATLAS, 0, 0, {0, 0}, {134, 136}, .Bad_Copy},
+		{"out of mip", 0, TILE_PITCH, ATLAS, 0, 0, {140, 0}, {136, 136}, .Bad_Copy},
+		{"out of mip 1", 0, TILE_PITCH, ATLAS, 1, 0, {4, 0}, {136, 136}, .Bad_Copy},
+		{"empty", 0, TILE_PITCH, ATLAS, 0, 0, {0, 0}, {0, 136}, .Bad_Copy},
+		{"bad layer", 0, TILE_PITCH, ATLAS, 0, 2, {0, 0}, {136, 136}, .Bad_Copy},
+		{"bad mip", 0, TILE_PITCH, ATLAS, 3, 0, {0, 0}, {4, 4}, .Bad_Copy},
+		{"past the buffer", 65536 - 512, TILE_PITCH, ATLAS, 0, 0, {0, 0}, {136, 136}, .Bad_Copy},
+		{"streamed", 0, TILE_PITCH, STREAMED, 0, 0, {0, 0}, {64, 64}, .Bad_Copy},
+		{"depth", 0, 256, DEPTH, 0, 0, {0, 0}, {16, 16}, .Bad_Copy},
+		{"texels", 0, 512, SAMPLED, 0, 0, {3, 5}, {16, 4}, .None},
+		{"texels past the mip", 0, 512, SAMPLED, 0, 0, {3, 5}, {64, 4}, .Bad_Copy},
+	}
+	for c in cases {
+		layouts: Layout_Tracker
+		layout_tracker_init(&layouts, allocator)
+		track_layout(&layouts, c.texture, .Shader_Resource)
+		cb := command_buffer(allocator)
+		to_copy_dest(&cb, c.texture)
+		record_copy(&cb, c.offset, c.row_pitch, c.texture, c.mip, c.layer, c.origin, c.size)
+		err, _ := validate(cb, RESOURCES, &layouts)
+		testing.expectf(t, err == c.err, "%s: got %v, want %v", c.name, err, c.err)
+	}
+
+	// A copy is outside render passes and on the graphics queue, and names valid handles.
+	in_pass := command_buffer(allocator)
+	cmd_begin_pass(&in_pass, {{texture = TARGET}})
+	record_copy(&in_pass, 0, TILE_PITCH, ATLAS, 0, 0, {0, 0}, {136, 136})
+	err, _ := validate(in_pass, RESOURCES)
+	testing.expect_value(t, err, Validation_Error.Copy_Inside_Pass)
+	on_compute := command_buffer(allocator)
+	record_copy(&on_compute, 0, TILE_PITCH, ATLAS, 0, 0, {0, 0}, {136, 136})
+	err, _ = validate(on_compute, RESOURCES, queue = .Compute)
+	testing.expect_value(t, err, Validation_Error.Wrong_Queue)
+	missing := command_buffer(allocator)
+	record_copy(&missing, 0, TILE_PITCH, {index = 9, generation = 1}, 0, 0, {0, 0}, {4, 4})
+	err, _ = validate(missing, RESOURCES)
+	testing.expect_value(t, err, Validation_Error.Invalid_Texture)
+
+	// The texture must be in Copy_Dest, which a barrier does, and back to sampling after the copies.
+	layouts: Layout_Tracker
+	layout_tracker_init(&layouts, allocator)
+	track_layout(&layouts, ATLAS, .Shader_Resource)
+	bare := command_buffer(allocator)
+	record_copy(&bare, 0, TILE_PITCH, ATLAS, 0, 0, {0, 0}, {136, 136})
+	err, _ = validate(bare, RESOURCES, &layouts)
+	testing.expect_value(t, err, Validation_Error.Layout_Mismatch)
+
+	round_trip := command_buffer(allocator)
+	to_copy_dest(&round_trip, ATLAS)
+	record_copy(&round_trip, 0, TILE_PITCH, ATLAS, 0, 0, {0, 0}, {136, 136})
+	cmd_barriers(
+		&round_trip,
+		nil,
+		{
+			{
+				texture = ATLAS,
+				sync_before = {.Copy},
+				access_before = {.Copy_Dest},
+				sync_after = {.Pixel_Shading},
+				access_after = {.Shader_Resource},
+				layout_before = .Copy_Dest,
+				layout_after = .Shader_Resource,
+			},
+		},
+	)
+	err, _ = validate(round_trip, RESOURCES, &layouts)
+	testing.expect_value(t, err, Validation_Error.None)
+	layout, _ := tracked_layout(&layouts, ATLAS)
+	testing.expect_value(t, layout, Texture_Layout.Shader_Resource)
 }

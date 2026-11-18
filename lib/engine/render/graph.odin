@@ -25,6 +25,8 @@ Texture_Use :: enum u8 {
 	Color,
 	// The depth attachment of a render pass.
 	Depth,
+	// The destination of cmd_copy_buffer_to_texture.
+	Copy_Dest,
 }
 
 Buffer_Use :: enum u8 {
@@ -501,8 +503,22 @@ copy_source :: proc(g: ^Graph, pass: Pass, buffer: Buffer) {
 	use_buffer(g, pass, buffer, .Copy_Source)
 }
 
-copy_dest :: proc(g: ^Graph, pass: Pass, buffer: Buffer) {
+copy_dest :: proc {
+	copy_dest_buffer,
+	copy_dest_texture,
+}
+
+copy_dest_buffer :: proc(g: ^Graph, pass: Pass, buffer: Buffer) {
 	use_buffer(g, pass, buffer, .Copy_Dest)
+}
+
+// copy_dest_texture declares that the pass copies into a texture with cmd_copy_buffer_to_texture, outside a render
+// pass and on the graphics queue. The copy writes a region, so the rest of the texture keeps its contents, and the
+// pass reads what earlier passes left.
+copy_dest_texture :: proc(g: ^Graph, pass: Pass, texture: Texture) {
+	p := &g.passes[pass - 1]
+	assert(p.kind != .Render, "render: copies occur outside render passes")
+	use_texture(g, pass, texture, .Copy_Dest, reads = true)
 }
 
 // accel_size_source declares that the pass writes an acceleration structure's compacted size with
@@ -1014,6 +1030,8 @@ texture_state :: proc(use: Texture_Use, kind: Pass_Kind) -> State {
 		return {{.Render_Target}, {.Render_Target}, .Render_Target}
 	case .Depth:
 		return {{.Depth_Stencil}, {.Depth_Stencil_Write}, .Depth_Stencil_Write}
+	case .Copy_Dest:
+		return {{.Copy}, {.Copy_Dest}, .Copy_Dest}
 	}
 	return {}
 }

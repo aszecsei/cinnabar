@@ -432,6 +432,11 @@ Texture_Usage :: enum u8 {
 
 Texture_Usages :: bit_set[Texture_Usage;u8]
 
+// The alignments of cmd_copy_buffer_to_texture's buffer offset and row pitch, D3D12's
+// D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT and D3D12_TEXTURE_DATA_PITCH_ALIGNMENT.
+TEXTURE_COPY_OFFSET_ALIGN :: 512
+TEXTURE_COPY_PITCH_ALIGN :: 256
+
 // MAX_TEXTURE_LAYERS is the most layers that a texture array has, which is what D3D12 allows.
 MAX_TEXTURE_LAYERS :: 2048
 
@@ -443,9 +448,9 @@ Texture_Desc :: struct {
 	// and written in shaders.
 	depth:     u32,
 	// An array's layers, at most MAX_TEXTURE_LAYERS. 0 means a texture with no array view, and 1 an array of one layer. An
-	// array's or a cube's usage is Sampled and Streamed, or Sampled and Storage with no data. Shaders read it with
-	// cn_texture_array, cn_texture_cube or cn_texture_cube_array, and write it with cn_rw_texture_array, every layer of
-	// one mip.
+	// array's or a cube's usage is Sampled and Streamed, or Sampled and Storage with no data, or Sampled alone with no data, which
+	// cmd_copy_buffer_to_texture fills. Shaders read it with cn_texture_array, cn_texture_cube or cn_texture_cube_array,
+	// and write it with cn_rw_texture_array, every layer of one mip.
 	layers:    u32,
 	// A cube map: six square layers, in the order +x, -x, +y, -y, +z, -z. With more than six layers, a whole number of
 	// cubes, it is a cube array, each cube six layers after the one before, which shaders read with cn_texture_cube_array.
@@ -572,6 +577,8 @@ Texture_Layout :: enum u8 {
 	Depth_Stencil_Write,
 	Shader_Resource,
 	Unordered_Access,
+	// The destination of cmd_copy_buffer_to_texture.
+	Copy_Dest,
 }
 
 // layout_accesses are the accesses that a texture allows in a layout.
@@ -587,6 +594,8 @@ layout_accesses :: proc(layout: Texture_Layout) -> Accesses {
 		return {.Shader_Resource}
 	case .Unordered_Access:
 		return {.Unordered_Access}
+	case .Copy_Dest:
+		return {.Copy_Dest}
 	}
 	return {}
 }
@@ -604,6 +613,8 @@ layout_usage :: proc(layout: Texture_Layout) -> (usage: Texture_Usage, needed: b
 		return .Sampled, true
 	case .Unordered_Access:
 		return .Storage, true
+	case .Copy_Dest:
+		return {}, false
 	}
 	return {}, false
 }

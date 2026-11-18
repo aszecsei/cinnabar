@@ -41,6 +41,7 @@ A large render pass can be recorded in parallel as pieces, in consecutive comman
 - Barriers use the Enhanced Barriers model: sync stages (`Syncs`), access flags (`Accesses`) and texture layouts (`Texture_Layout`). This model maps one-to-one to Vulkan `synchronization2`. On Metal, most barriers become nothing or fences.
 - `cmd_barriers` records buffer, texture and acceleration structure barriers. Barriers occur only outside a render pass. A barrier covers the whole resource. Acceleration structures have only the `Accel_Read` and `Accel_Write` accesses.
 - An empty `Syncs` means no synchronization, and an empty `Accesses` means no access. A side with no synchronization has no access.
+- The layouts are `Undefined`, `Render_Target`, `Depth_Stencil_Write`, `Shader_Resource`, `Unordered_Access` and `Copy_Dest`. `Copy_Dest` allows the `Copy_Dest` access, for [copies into textures](queues-streaming-readback.md#streaming), and a compute queue's barriers do not use it.
 - `Undefined` as the layout before discards the contents, whatever the texture's layout is.
 - The backend does not track resource states to translate barriers. State tracking would serialize parallel recording.
 - Validation in debug builds and in the null backend tracks texture layouts. It rejects a barrier whose layout before is wrong, and a render pass whose attachments are not in the render target or depth write layout.
