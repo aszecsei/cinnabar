@@ -28,6 +28,10 @@ mesh.texel_density = 256
 # sample is a level.
 # bundles.global_scenes = <guid>, <guid>
 
+# The sublevels, each with whether a level starts with it active (see docs/world/sublevels.md#the-active-set). The night
+# scene's night sublevel is its lights and props after dark, which N turns on and off (see scripts/night_toggle.luau).
+sublevel.night = inactive
+
 # The agent types that the cooker bakes navmeshes for, each with its radius, height and step height in meters and the
 # steepest slope that it walks up, in degrees (see docs/content/kinds/nav-meshes.md#agent-types). The main scene's
 # Navigation volume bakes one navmesh for each.
