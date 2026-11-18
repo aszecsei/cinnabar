@@ -49,6 +49,7 @@ cook_scenes :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass) 
 	for i in assets_of(assets, .Prefab) {
 		prefabs.index[assets[i].meta.guid] = i
 	}
+	sublevels := project_sublevels(options, pass)
 	// The prefabs that the pass looks at parse with their problems.
 	parsed := make(map[int]format.Scene, context.temp_allocator)
 	for i in checked {
@@ -57,7 +58,7 @@ cook_scenes :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass) 
 			continue
 		}
 		asset_source(pass, i)
-		scene, ok := parse_scene(s^, problems)
+		scene, ok := parse_scene(s^, problems, sublevels)
 		if ok {
 			drop_scene_references(scene, s, problems)
 		}
@@ -88,7 +89,7 @@ cook_scenes :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass) 
 			scene, scene_ok := parsed[i]
 			if kind == .Scene {
 				asset_source(pass, i)
-				scene, scene_ok = parse_scene(s^, problems)
+				scene, scene_ok = parse_scene(s^, problems, sublevels)
 			}
 			flat: format.Scene
 			if scene_ok {
@@ -271,6 +272,7 @@ scene_flat :: proc(pass: ^Pass, index: int) -> (flat: format.Scene, ok: bool) {
 	scene, _, parsed := format.scene_parse(
 		string(asset_source(pass, index)),
 		context.temp_allocator,
+		{prefab = pass.assets[index].kind == .Prefab},
 	)
 	if !parsed {
 		return
@@ -279,10 +281,22 @@ scene_flat :: proc(pass: ^Pass, index: int) -> (flat: format.Scene, ok: bool) {
 	return
 }
 
-// parse_scene parses a scene or a prefab and reports the problems of its text.
-parse_scene :: proc(s: Asset_Source, problems: ^Problems) -> (scene: format.Scene, ok: bool) {
+// parse_scene parses a scene or a prefab and reports the problems of its text. A scene's sublevels that the project does
+// not declare are warnings, unless sublevels is nil.
+parse_scene :: proc(
+	s: Asset_Source,
+	problems: ^Problems,
+	sublevels: Maybe([]format.Sublevel) = nil,
+) -> (
+	scene: format.Scene,
+	ok: bool,
+) {
 	parsed: []format.Scene_Problem
-	scene, parsed, ok = format.scene_parse(string(source_of(s)), context.temp_allocator)
+	scene, parsed, ok = format.scene_parse(
+		string(source_of(s)),
+		context.temp_allocator,
+		{prefab = s.kind == .Prefab, sublevels = sublevels},
+	)
 	for p in parsed {
 		if p.error {
 			report_error(problems, s.path, p.line, 0, "%s", p.message)

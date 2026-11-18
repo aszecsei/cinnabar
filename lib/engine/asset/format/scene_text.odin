@@ -6,13 +6,21 @@ import "core:slice"
 import "core:strconv"
 import "core:strings"
 
-// The version on a scene file's first line, `scene 3`. A change that old loaders cannot read changes it. Version 2
-// adds prefab instances and their overrides. Version 3 adds references to entities of other scenes, `@<guid>/<id>`. A
-// reader takes versions 1 and 2 too.
-SCENE_TEXT_VERSION :: 3
+// The version on a scene file's first line, `scene 4`. A change that old loaders cannot read changes it. Version 2
+// adds prefab instances and their overrides. Version 3 adds references to entities of other scenes, `@<guid>/<id>`.
+// Version 4 adds the sublevel key. A reader takes versions 1 to 3 too.
+SCENE_TEXT_VERSION :: 4
 
 // The most IDs in a path: an instance at each of SCENE_EXPAND_DEPTH levels, and the entity.
 SCENE_PATH_MAX :: SCENE_EXPAND_DEPTH + 1
+
+// Scene_Parse_Options say what a scene file is for, which the text alone does not.
+Scene_Parse_Options :: struct {
+	// The file is a prefab's: a sublevel key is a warning and is ignored, because an instance can be in any sublevel.
+	prefab:    bool,
+	// The sublevels that the project declares, so a name that is not among them is a warning; nil checks no names.
+	sublevels: Maybe([]Sublevel),
+}
 
 // Scene_Problem is an error or a warning in a scene file, at a line from 1.
 Scene_Problem :: struct {
@@ -24,10 +32,12 @@ Scene_Problem :: struct {
 // scene_parse reads a scene file (see docs/editor/document-and-scenes.md#scenes). The scene and the messages are in allocator, and the
 // strings without escapes point into text. ok is false when any problem is an error. An entity key that the parser
 // does not know is a warning, so a file from a newer editor still cooks. A path, in an entity line or an @ reference,
-// reads as its scene ID, scene_path_id_of the path (see docs/editor/prefabs.md#instances-in-a-scene).
+// reads as its scene ID, scene_path_id_of the path (see docs/editor/prefabs.md#instances-in-a-scene). Each entity's
+// sublevel is its own key's, or else its parent's or its instance's (see docs/editor/document-and-scenes.md#sublevels).
 scene_parse :: proc(
 	text: string,
 	allocator := context.allocator,
+	options := Scene_Parse_Options{},
 ) -> (
 	scene: Scene,
 	problems: []Scene_Problem,
@@ -35,8 +45,10 @@ scene_parse :: proc(
 ) {
 	p := Parser {
 		allocator = allocator,
+		options   = options,
 		problems  = make([dynamic]Scene_Problem, allocator),
 		entities  = make([dynamic]Scene_Entity, allocator),
+		sublevels = make([dynamic]Block_Sublevel, context.temp_allocator),
 	}
 	rest := text
 	header := false
@@ -51,6 +63,7 @@ scene_parse :: proc(
 			header = true
 			if trimmed != "scene 1" &&
 			   trimmed != "scene 2" &&
+			   trimmed != "scene 3" &&
 			   trimmed != fmt.tprintf("scene %d", SCENE_TEXT_VERSION) {
 				problem(&p, true, "a scene file starts with `scene %d`", SCENE_TEXT_VERSION)
 				break
@@ -84,6 +97,7 @@ scene_parse :: proc(
 			}
 		}
 	}
+	resolve_sublevels(&p)
 	ok = true
 	for problem in p.problems {
 		ok &&= !problem.error
@@ -94,12 +108,16 @@ scene_parse :: proc(
 @(private = "file")
 Parser :: struct {
 	allocator:          mem.Allocator,
+	options:            Scene_Parse_Options,
 	line:               int,
 	problems:           [dynamic]Scene_Problem,
 	entities:           [dynamic]Scene_Entity,
+	// What each entity's sublevel comes from, by its index in entities.
+	sublevels:          [dynamic]Block_Sublevel,
 	// The entity that is open, and its blocks.
 	open:               bool,
 	entity:             Scene_Entity,
+	entity_sublevel:    Block_Sublevel,
 	components:         [dynamic]Scene_Component,
 	behaviours:         [dynamic]Scene_Behaviour,
 	removed_components: [dynamic]u64,
@@ -112,6 +130,15 @@ Parser :: struct {
 		Component,
 		Behaviour,
 	},
+}
+
+// Block_Sublevel is what an entity's sublevel comes from: its own key, at a line, and the instance of a parent that
+// is a path, since its ID alone does not name it.
+@(private = "file")
+Block_Sublevel :: struct {
+	explicit:        bool,
+	line:            int,
+	parent_instance: u64,
 }
 
 @(private = "file")
@@ -139,6 +166,7 @@ parse_entity :: proc(p: ^Parser, argument: string) {
 		)
 	}
 	p.open = true
+	p.entity_sublevel = {}
 	p.entity = {
 		id     = scene_path_id_of(path),
 		active = true,
@@ -303,6 +331,7 @@ finish_entity :: proc(p: ^Parser) {
 		problem(p, true, "entity %016x: only an instance block takes node", p.entity.id)
 	}
 	append(&p.entities, p.entity)
+	append(&p.sublevels, p.entity_sublevel)
 	p.open = false
 }
 
@@ -357,6 +386,10 @@ parse_line :: proc(p: ^Parser, line: string, indented: bool) {
 		}
 		p.entity.parent = value.entity
 		p.entity.keys += {.Parent}
+		p.entity_sublevel.parent_instance = 0
+		if hash := strings.index_byte(value_text, '#'); hash > 1 {
+			p.entity_sublevel.parent_instance, _ = parse_hex(value_text[1:hash])
+		}
 	case "active":
 		if value.kind != .Bool {
 			problem(p, true, "active takes true or false")
@@ -381,6 +414,35 @@ parse_line :: proc(p: ^Parser, line: string, indented: bool) {
 			problem(p, true, "node takes an entity of the prefab, not of another scene")
 		}
 		p.entity.node = value.entity
+	case "sublevel":
+		switch {
+		case value.kind != .String || !sublevel_name_valid(value.text):
+			problem(
+				p,
+				true,
+				"sublevel takes a quoted name of letters, digits and _ of at most %d characters, such as \"night\"",
+				SUBLEVEL_MAX_NAME,
+			)
+		case p.options.prefab:
+			problem(
+				p,
+				false,
+				"an instance of a prefab is in the sublevel of its root, so the prefab's sublevel is ignored",
+			)
+		case:
+			p.entity.sublevel = value.text
+			p.entity_sublevel.explicit = true
+			p.entity_sublevel.line = p.line
+			if declared, checked := p.options.sublevels.?;
+			   checked && !sublevel_known(declared, value.text) {
+				problem(
+					p,
+					false,
+					"the project does not declare the sublevel %s, so nothing activates it",
+					value.text,
+				)
+			}
+		}
 	case "removed":
 		if value.kind != .Bool {
 			problem(p, true, "removed takes true or false")
@@ -390,6 +452,47 @@ parse_line :: proc(p: ^Parser, line: string, indented: bool) {
 		p.entity.removed = value.ints[0] != 0
 	case:
 		problem(p, false, "the entity key %s is unknown, so it is ignored", key)
+	}
+}
+
+// resolve_sublevels gives every entity without its own sublevel key the sublevel of its owner, the instance of an
+// override block or of a parent on a path, or else its parent. A key that differs from the owner's is an error, so a
+// parent and its children always load together. An owner that the file does not have is not checked.
+@(private = "file")
+resolve_sublevels :: proc(p: ^Parser) {
+	index := make(map[u64]int, len(p.entities), context.temp_allocator)
+	for e, i in p.entities {
+		index[e.id] = i
+	}
+	// 0 for not yet, 1 while its owners resolve, so a cycle of parents ends, and 2 for done.
+	state := make([]u8, len(p.entities), context.temp_allocator)
+	resolve :: proc(p: ^Parser, index: map[u64]int, state: []u8, i: int) -> string {
+		e := &p.entities[i]
+		if state[i] != 0 {
+			return e.sublevel
+		}
+		state[i] = 1
+		info := p.sublevels[i]
+		owner := e.parent
+		if e.path != nil {
+			owner = e.path[0]
+		} else if info.parent_instance != 0 {
+			owner = info.parent_instance
+		}
+		if j, found := index[owner]; found && owner != 0 && j != i {
+			inherited := resolve(p, index, state, j)
+			if !info.explicit {
+				e.sublevel = inherited
+			} else if e.sublevel != inherited {
+				p.line = info.line
+				problem(p, true, "an entity cannot be in a sublevel other than its parent's")
+			}
+		}
+		state[i] = 2
+		return e.sublevel
+	}
+	for i in 0 ..< len(p.entities) {
+		resolve(p, index, state, i)
 	}
 }
 

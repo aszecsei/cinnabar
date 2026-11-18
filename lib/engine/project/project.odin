@@ -281,6 +281,14 @@ parse :: proc(text: string, settings: ^Settings, problems: ^[dynamic]string = ni
 			append(&ignores, Ignore{line, value})
 			continue
 		}
+		// The cooker and the editor read the sublevels (see docs/overview/architecture.md#project-settings); the game only
+		// checks each line.
+		if format.sublevel_is_setting(key) {
+			if p := format.sublevel_check_setting(key, value); p != "" {
+				problem(problems, line, "%s", p)
+			}
+			continue
+		}
 		// The cooker reads them (see docs/content/kinds/nav-meshes.md#agent-types); the game only checks each line.
 		if format.nav_is_setting(key) {
 			if p := format.nav_check_setting(key, value); p != "" {

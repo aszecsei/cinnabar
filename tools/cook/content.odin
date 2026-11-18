@@ -69,6 +69,10 @@ Pass :: struct {
 	// found up to date (see nav_meshes.odin).
 	nav:        Maybe(Nav_Project),
 	nav_tiles:  [Asset_Result]int,
+	// The project's settings files and its declared sublevels, which project_settings and project_sublevels read once
+	// in a pass.
+	settings:   Maybe(Project_Settings),
+	sublevels:  Maybe(Project_Sublevels),
 }
 
 // parse_cook_args reads `--cache <dir> --config dev|release [--definitions <file>] [--dxc <dxc.exe>] [--include <dir>]...

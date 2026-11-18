@@ -198,6 +198,8 @@ place_instance :: proc(
 		}
 	}
 	for &e in out[start:] {
+		// An instance is in its root's sublevel, which the prefab cannot give.
+		e.sublevel = block.sublevel
 		e.id = remap(e.id, root, block.id)
 		if e.parent != 0 && ids[e.parent] {
 			e.parent = remap(e.parent, root, block.id)

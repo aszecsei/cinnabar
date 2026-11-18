@@ -469,7 +469,7 @@ parent = @5f3a9c01e2b47d10#a90b3e7f15c4d2e8
 			"scene 2\nentity 0000000000000001\ncomponent 1 T\n\tx = @0000000000000001#\n",
 			"joined by #",
 		},
-		{"scene 4\n", "starts with `scene 3`"},
+		{"scene 5\n", "starts with `scene 4`"},
 	}
 	for c in cases {
 		_, problems, ok = scene_parse(c.text, context.temp_allocator)
