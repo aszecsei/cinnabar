@@ -65,6 +65,10 @@ Debug_View :: enum u8 {
 	// The clouds' history over black: their light at the cloud buffer's texels, exposed as the scene is (see
 	// docs/rendering/clouds.md#passes).
 	Clouds,
+	// The virtual shadow map's pages that drew this frame over its levels' colors, dimmed: red where a caster that changed
+	// dropped the page and it drew again, yellow where it is new to the pool, and grey without a virtual shadow map (see
+	// docs/rendering/lighting-and-shadows.md#caching).
+	Shadow_Virtual_Invalidated,
 }
 
 // Feature is a part of the frame that the editor's viewport can turn off.
@@ -118,7 +122,8 @@ debug_view_from_textures :: proc(view: Debug_View) -> bool {
 	     .Lod_Depth,
 	     .Emission,
 	     .Shadow_Virtual,
-	     .Reflection_Probes:
+	     .Reflection_Probes,
+	     .Shadow_Virtual_Invalidated:
 		return false
 	}
 	return true

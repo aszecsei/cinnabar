@@ -253,6 +253,9 @@ static const uint DEBUG_REFLECTION_PROBES = 25;
 static const uint DEBUG_REFLECTIONS = 26;
 // The clouds' history, which debug_view.hlsl draws from their texture.
 static const uint DEBUG_CLOUDS = 27;
+// The virtual shadow map's pages that drew this frame, and which of them a caster that changed dropped (see
+// virtual_invalidated_debug_color).
+static const uint DEBUG_SHADOW_VIRTUAL_INVALIDATED = 28;
 
 // Match Shading_Stats in lib/engine/render/shading.odin: the words of the forward pass's tally, in bytes.
 static const uint SHADING_STATS_FORWARD_QUADS = 0;

@@ -2,6 +2,7 @@ package render
 
 import "core:math"
 import "core:math/linalg"
+import "core:slice"
 import "core:testing"
 
 import format "cinnabar:engine/asset/format"
@@ -1238,6 +1239,108 @@ a_changed_caster_draws_only_the_pages_under_it_again :: proc(t: ^testing.T) {
 }
 
 // A sphere off a level's grid drops none of its pages.
+@(test)
+an_invalid_page_that_the_frame_asks_for_draws_again_in_its_own_physical_page :: proc(
+	t: ^testing.T,
+) {
+	c := test_camera()
+	views := test_views(c)
+	requests, table, pages := test_buffers(len(views))
+	mark_view(requests, views, c)
+	virtual_allocate(requests, table, pages, views, now = 1)
+	before := slice.clone(table, context.temp_allocator)
+	dropped := make([]u32, VIRTUAL_MAX_LEVELS * VIRTUAL_LEVEL_WORDS, context.temp_allocator)
+	virtual_drop_pages(views, {[4]f32{0, -1, 5, 0.5}}, dropped)
+	mark_view(requests, views, c)
+	stats := virtual_allocate(requests, table, pages, views, now = 2, dropped = dropped)
+	testing.expect(t, stats.drawn > 0, "nothing drew again")
+	testing.expect_value(t, stats.evicted, 0)
+	testing.expect_value(t, stats.invalidated, stats.drawn)
+	again: u32
+	for entry, slot in table[:VIRTUAL_TABLE_COUNTS] {
+		if !virtual_entry_draws(entry) {
+			continue
+		}
+		again += 1
+		testing.expect(
+			t,
+			entry & VIRTUAL_DROPPED != 0,
+			"a page drew again without VIRTUAL_DROPPED",
+		)
+		testing.expect_value(t, virtual_entry_page(entry), virtual_entry_page(before[slot]))
+	}
+	testing.expect_value(t, again, stats.drawn)
+	counted: u32
+	for count in table[VIRTUAL_TABLE_COUNTS:] {
+		counted += count
+	}
+	testing.expect_value(t, counted, stats.drawn)
+}
+
+@(test)
+an_invalid_page_that_the_frame_does_not_ask_for_leaves_the_pool :: proc(t: ^testing.T) {
+	c := test_camera()
+	views := test_views(c)
+	requests, table, pages := test_buffers(len(views))
+	mark_view(requests, views, c)
+	first := virtual_allocate(requests, table, pages, views, now = 1)
+	dropped := make([]u32, VIRTUAL_MAX_LEVELS * VIRTUAL_LEVEL_WORDS, context.temp_allocator)
+	virtual_drop_pages(views, {[4]f32{0, -1, 5, 0.5}}, dropped)
+	// The frame asks for nothing, so the pages under the sphere leave and the others stay.
+	slice.zero(requests)
+	stats := virtual_allocate(requests, table, pages, views, now = 2, dropped = dropped)
+	testing.expect(t, stats.invalidated > 0, "no page was under the sphere")
+	testing.expect_value(t, stats.drawn, 0)
+	testing.expect_value(t, stats.resident, first.resident - stats.invalidated)
+}
+
+@(test)
+drops_past_the_limit_drop_the_whole_level :: proc(t: ^testing.T) {
+	c := test_camera()
+	views := test_views(c)
+	dropped := make([]u32, VIRTUAL_MAX_LEVELS * VIRTUAL_LEVEL_WORDS, context.temp_allocator)
+	// A sphere of 20 m covers most of level 0's 16 m, and a few pages of the coarse levels.
+	virtual_drop_pages(views, {[4]f32{0, -1, 5, 20}}, dropped)
+	limit := 64
+	capped := virtual_cap_drops(dropped, len(views), limit, 1 << 3)
+	testing.expect(t, capped & 1 != 0, "level 0 did not drop whole")
+	testing.expect(t, capped & (1 << uint(len(views) - 1)) == 0, "the last level dropped whole")
+	testing.expect(t, capped & (1 << 3) == 0, "an invalidated level counts as capped")
+	for level in 0 ..< len(views) {
+		words := dropped[level * VIRTUAL_LEVEL_WORDS:][:VIRTUAL_LEVEL_WORDS]
+		whole := capped & (1 << uint(level)) != 0 || level == 3
+		if whole {
+			testing.expectf(t, virtual_no_drops(words), "level %d kept its drops", level)
+		} else {
+			testing.expectf(
+				t,
+				count_marked(words) <= limit,
+				"level %d has more drops than the limit",
+				level,
+			)
+		}
+	}
+	// An invalidated level draws every page that it holds again.
+	requests, table, pages := test_buffers(len(views))
+	mark_view(requests, views, c)
+	first := virtual_allocate(requests, table, pages, views, now = 1)
+	mark_view(requests, views, c)
+	stats := virtual_allocate(
+		requests,
+		table,
+		pages,
+		views,
+		now = 2,
+		invalidate = capped,
+		dropped = dropped,
+	)
+	testing.expect(
+		t,
+		stats.drawn > 0 && stats.drawn < first.allocated,
+		"the capped level did not draw again alone",
+	)
+}
+
 @(test)
 a_sphere_off_the_levels_drops_nothing :: proc(t: ^testing.T) {
 	c := test_camera()

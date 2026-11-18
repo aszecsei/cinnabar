@@ -14,6 +14,10 @@ static const uint VIRTUAL_NO_PAGE = ~0u;
 // An entry of a page that the frame draws, which only the depth pass and its culling look for; the lookups take its
 // physical page without the bit (see virtual_entry_page).
 static const uint VIRTUAL_DRAW = 1u << 31;
+// An entry of a page that draws again in the physical page that it had, since a caster that changed dropped it, which
+// only the Shadow_Virtual_Invalidated debug view looks for. It goes with VIRTUAL_DRAW. Matches VIRTUAL_DROPPED in
+// lib/engine/render/virtual_shadows.odin.
+static const uint VIRTUAL_DROPPED = 1u << 30;
 // A level's request words, and the page table's entries.
 static const uint VIRTUAL_LEVEL_PAGES = VIRTUAL_PAGES * VIRTUAL_PAGES;
 static const uint VIRTUAL_LEVEL_WORDS = VIRTUAL_LEVEL_PAGES / 32;
@@ -42,7 +46,7 @@ uint virtual_table_entry(uint level, int2 origin, int2 page) {
 
 // virtual_entry_page is a table entry's physical page, or VIRTUAL_NO_PAGE.
 uint virtual_entry_page(uint entry) {
-	return entry == VIRTUAL_NO_PAGE ? VIRTUAL_NO_PAGE : entry & ~VIRTUAL_DRAW;
+	return entry == VIRTUAL_NO_PAGE ? VIRTUAL_NO_PAGE : entry & ~(VIRTUAL_DRAW | VIRTUAL_DROPPED);
 }
 
 // virtual_entry_draws is whether a table entry's page draws this frame.
