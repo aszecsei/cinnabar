@@ -13,7 +13,8 @@ public static partial class SceneFile
         {
             sb.Append(comment).Append('\n');
         }
-        sb.Append(CultureInfo.InvariantCulture, $"scene {Version}\n");
+        var version = scene.Entities.Any(e => e.Sublevel != null) ? Version : VersionWithoutSublevels;
+        sb.Append(CultureInfo.InvariantCulture, $"scene {version}\n");
         foreach (var e in scene.Entities.OrderBy(e => e.Path ?? [e.Id], PathOrder.Instance))
         {
             sb.Append("\nentity ").Append(e.Path != null ? ScenePath.Format(e.Path) : e.Id.ToString("x16", CultureInfo.InvariantCulture)).Append('\n');
@@ -27,6 +28,10 @@ public static partial class SceneFile
             {
                 var parent = e.ParentPath is { } path && ScenePath.Id(path) == e.Parent ? SceneValue.EntityRef(path) : SceneValue.EntityRef(e.Parent);
                 sb.Append("parent = ").Append(FormatValue(parent)).Append('\n');
+            }
+            if (e.Sublevel != null)
+            {
+                sb.Append("sublevel = ").Append(TextQuote.Quote(e.Sublevel)).Append('\n');
             }
             if (e.Kind == BlockKind.Instance)
             {

@@ -27,7 +27,7 @@ public sealed class PrefabDocument(string path, string guid, Scene scene, string
         try
         {
             var text = File.ReadAllText(Path);
-            if (SceneFile.Parse(text).Scene is not { } scene || SceneFile.Write(scene) == SavedText)
+            if (SceneFile.Parse(text, Options).Scene is not { } scene || SceneFile.Write(scene) == SavedText)
             {
                 return null;
             }
@@ -50,6 +50,9 @@ public sealed class PrefabDocument(string path, string guid, Scene scene, string
 
     public bool IsDirty => SavedText != SceneFile.Write(Scene);
 
+    // A prefab's sublevel key is a warning and is dropped, since an instance can be in any sublevel.
+    static readonly SceneParseOptions Options = new(IsPrefab: true);
+
     /// <summary>Reads and parses a prefab file. The document is null when the file cannot be read or has an error.</summary>
     public static (PrefabDocument? Document, IReadOnlyList<SceneProblem> Problems) Open(string path, string guid)
     {
@@ -62,7 +65,7 @@ public sealed class PrefabDocument(string path, string guid, Scene scene, string
         {
             return (null, [new SceneProblem(0, e.Message, true)]);
         }
-        var (scene, problems) = SceneFile.Parse(text);
+        var (scene, problems) = SceneFile.Parse(text, Options);
         return (scene == null ? null : new PrefabDocument(path, guid, scene, SceneFile.Write(scene)), problems);
     }
 

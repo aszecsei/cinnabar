@@ -165,7 +165,7 @@ public sealed partial class EditorShell
     /// </summary>
     public bool OpenScene(string path)
     {
-        var (document, problems) = SceneDocument.Open(path, OpenPrefab, PrefabGuidOf(path));
+        var (document, problems) = SceneDocument.Open(path, OpenPrefab, PrefabGuidOf(path), ParseOptionsFor(path));
         Report(path, problems);
         if (document == null)
         {
@@ -200,7 +200,7 @@ public sealed partial class EditorShell
             Console.Add(LogLevel.Warning, $"scene: cannot open {path} beside {Scene.Title}: a prefab opens alone, as the document. Open it with Open Scene.");
             return false;
         }
-        var (document, problems) = SceneDocument.Open(path, OpenPrefab);
+        var (document, problems) = SceneDocument.Open(path, OpenPrefab, options: ParseOptionsFor(path));
         Report(path, problems);
         if (document == null)
         {
@@ -290,7 +290,7 @@ public sealed partial class EditorShell
             return false;
         }
         _restore = null;
-        var (scene, problems) = SceneFile.Parse(File.ReadAllText(autosave));
+        var (scene, problems) = SceneFile.Parse(File.ReadAllText(autosave), ParseOptionsFor(old.Path));
         Report(autosave, problems);
         if (scene == null)
         {

@@ -168,7 +168,7 @@ public class SceneFileTests
     }
 
     [Theory]
-    [InlineData("entity 0000000000000001\n", 1, "starts with `scene 3`")]
+    [InlineData("entity 0000000000000001\n", 1, "starts with `scene 4`")]
     [InlineData("scene 1\nentity 12\n", 2, "16 hex digits")]
     [InlineData("scene 1\ncomponent 1 Transform\n", 2, "needs an entity")]
     [InlineData("scene 1\nentity 0000000000000001\n\tx = 1\n", 3, "no component or behaviour is open")]
@@ -333,7 +333,7 @@ public class SceneFileTests
     [InlineData("scene 2\nentity 0000000000000001\nprefab = $0\n", "prefab takes")]
     [InlineData("scene 2\nentity 0000000000000001\nprefab = $9db8150cc7215ffc2708d20d77cf60bf\nremove widget 3\n", "remove takes")]
     [InlineData("scene 2\nentity 0000000000000001\ncomponent 1 T\n\tx = @0000000000000001#\n", "joined by #")]
-    [InlineData("scene 4\n", "starts with `scene 3`")]
+    [InlineData("scene 5\n", "starts with `scene 4`")]
     [InlineData("scene 3\nentity 0000000000000001\ncomponent 1 T\n\tx = @00000000000000000000000000000000/0000000000000002\n", "nonzero GUID")]
     [InlineData("scene 3\nentity 0000000000000001\ncomponent 1 T\n\tx = @0123456789abcdef0123456789abcdef/0\n", "nonzero scene ID")]
     [InlineData("scene 3\nentity 0000000000000001\nparent = @0123456789abcdef0123456789abcdef/0000000000000002\n", "cannot be a child of another scene's entity")]

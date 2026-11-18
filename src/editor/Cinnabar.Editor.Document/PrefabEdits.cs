@@ -269,7 +269,8 @@ public static partial class PrefabEdits
 
     static bool IsEmptyOverride(SceneEntity block) =>
         block.Kind == BlockKind.Override && block.Keys == SceneKeys.None && !block.Removed && block.Components.Count == 0 && block.Behaviours.Count == 0
-        && block.RemovedComponents.Count == 0 && block.RemovedBehaviours.Count == 0 && block.UnknownKeys.Count == 0;
+        && block.RemovedComponents.Count == 0 && block.RemovedBehaviours.Count == 0 && block.UnknownKeys.Count == 0
+        && block.Sublevel == null;
 
     /// <summary>
     /// The entity as its prefab gives it, without what its own block overrides: what Reset returns a field to. For
