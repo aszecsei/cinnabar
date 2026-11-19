@@ -35,6 +35,7 @@ The world is one `ecs.World` in `Game_State`. Its storage is virtual memory that
 | `commands.odin` | `Command_Buffer`: deferred structural changes |
 | `activity.odin` | `Disabled` and `Inactive`, `set_active`, `update_activity` |
 | `transform.odin` | `Transform`, `Local_Transform`, `Parent`, `Previous_Transform`, propagation, `presented` |
+| `children.odin` | The child lists and the orphan list, `children_iter` |
 | `position.odin` | `World_Position` and its two operations |
 | `name.odin` | The `Name` component |
 
