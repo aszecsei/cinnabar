@@ -2,7 +2,7 @@
 
 Buffers, textures, samplers and acceleration structures as generational handles with lifetime scopes, and pipelines that compile on background jobs and update in place.
 
-**In this document:** [Resources](#resources) · [Pipelines](#pipelines)
+**In this document:** [Resources](#resources) · [Memory](#memory) · [Pipelines](#pipelines)
 
 ## Resources
 
@@ -17,8 +17,21 @@ Buffers, textures, samplers and acceleration structures as generational handles 
 - **Initial layout:** a texture starts in the layout of its first usage in this order: render target, depth stencil, storage, sampled. A texture created with data starts in the sampled layout, and so does a `Streamed` texture once its transfer is done. `gpu.initial_layout` gives the layout. The [render graph](render-graph.md#render-graph) takes over from there.
 - **Deferred destruction:** `destroy` invalidates the handle at once. The backend releases the resource, and reuses the pool slot and its descriptors, when the GPU finishes the frame that destroyed it. Two frames are in flight.
 - **Lifetime scopes:** each description has a `scope`: `Game` (the default), `Level`, `Asset` or `Permanent`. On a soft restart (see [Hot reload](../overview/hot-reload.md#reload-sequence)), `core` destroys every `Game` resource that the old game left, and keeps the others. `core` destroys the `Level` scope with the Level arena, at `level_unload` and at a soft restart (see [Core](../core/jobs-and-memory.md#level-memory)). Each loaded scene also has a scope, which `scene_memory_scope` gives (`gpu.scene_scope` of its slot). `core` destroys it with the scene's memory, when the scene or the level unloads (see [Core](../core/jobs-and-memory.md#scene-memory)). `gpu_destroy_scope` destroys the `Asset` scope. `Permanent` resources belong to `core` and the backend, for example the frame target and the upload rings.
-- **Memory:** every resource is a committed resource.
+- **Memory:** buffers, acceleration structures and textures that the GPU does not write are placed in large heaps. The others are committed resources (see [Memory](#memory)).
 - **Upload ring:** `upload(size, align)` allocates CPU-written memory that is valid until the end of the frame. Each frame in flight has a 16 MB ring. An `Upload` holds the bytes, a buffer handle and an offset. Shaders read it through `read_index(upload.buffer)` at the offset, or as pass constants. Pass constants need `PASS_CONSTANTS_ALIGN` (256).
+
+## Memory
+
+The D3D12 backend places most resources in large heaps. It does not make each one a committed resource with a heap of its own. A placed resource is quicker to create and to release, and resources share heaps.
+
+- **What is placed:** buffers, acceleration structures, and textures that the GPU does not write, with no `Storage`, `Render_Target` or `Depth_Stencil` usage. Such a texture gets every texel from its initial data, a [stream](queues-streaming-readback.md#streaming) or a copy.
+- **What stays committed:** textures that the GPU writes, because a committed resource starts zeroed and a placed render target or depth texture needs a clear or a discard before its first use. `Readback` buffers, resources over 64 MB and the backend's own resources stay committed too: the upload rings, staging, captures, timestamps, shader tables, the acceleration structures' scratch memory and the shared targets.
+- **Heaps:** each heap is 256 MB. Buffers and textures go in heaps of their own kind, which every resource heap tier allows. A heap is created when no heap of its kind has room. It is released when its last resource is, unless it is the last heap of its kind.
+- **The allocator:** `gpu.Range_Allocator` gives each heap's regions. It keeps the free ranges sorted by offset and takes the smallest one that fits the aligned size. A freed region merges with its free neighbours. Buffers align to 64 KB. A texture whose mip 0 fits in 16 tiles of 4 KB takes a 4 KB alignment where the device allows it.
+- **Zeroing:** a placed region can hold an earlier resource's contents. A buffer must start zeroed, as a committed one does, so the bytes after its initial data are zeroed by copies in the upload batch that runs before the frame. The copy queue waits for that batch before the frame's streams, so a stream into a new buffer lands after its zeros.
+- **Freeing:** a resource's region goes into the deferred release with the resource. It returns to the allocator when the GPU finishes the frame that destroyed the resource (see [Resources](#resources)). Handles and descriptions do not change.
+- **Stats:** `stats` gives `heap_memory`, the heaps' memory, and `resource_memory`, the part of it that placed resources take. The editor's [resource monitor](../editor/shell-and-panels.md#resource-monitor) shows them as `Resource heaps`. The null backend has no heaps and gives 0.
+- **Benchmark:** `just gpu-bench` creates and destroys 4096 buffers and 2048 textures on the device, and logs the times. It needs a GPU, so `just test` leaves it out. On an RTX 5090, a buffer takes about 12 µs placed and 240 µs committed, and a destruction 15 µs and 126 µs.
 
 ## Pipelines
 
