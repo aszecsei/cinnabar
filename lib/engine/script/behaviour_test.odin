@@ -438,7 +438,8 @@ quiet_changes_run_no_callbacks :: proc(t: ^testing.T) {
 	thread, ok := spawn_source(
 		&f.runtime,
 		"=door",
-		DOOR + `
+		DOOR +
+		`
 World.spawn():add(Door)
 local b = World.spawn()
 b:add(Door)
