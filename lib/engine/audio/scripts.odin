@@ -3,6 +3,7 @@ package audio
 import "core:c"
 import "core:fmt"
 
+import boundary "cinnabar:core/audio"
 import "cinnabar:core/luau"
 import "cinnabar:engine/ecs"
 import "cinnabar:engine/script"
@@ -23,13 +24,19 @@ register_scripts :: proc(r: ^script.Runtime, s: ^State) {
 		r,
 		"Audio.play",
 		play_binding,
-		"(sound: Asset, position: WorldPosition?, gain: number?, bus: string?, pitch: number?) -> ()",
+		"(sound: Asset, position: WorldPosition?, gain: number?, bus: string?, pitch: number?, start: number?) -> ()",
 	)
 	script.define(
 		r,
 		"Audio.set_bus_gain",
 		set_bus_gain_binding,
 		"(bus: string, gain: number) -> ()",
+	)
+	script.define(
+		r,
+		"Audio.duck",
+		duck_binding,
+		"(bus: string, target: string, gain: number, attack: number?, release: number?, threshold: number?) -> ()",
 	)
 }
 
@@ -69,7 +76,35 @@ play_binding :: proc(L: ^luau.State) -> c.int {
 		bus = check_bus(L, s, 4)
 	}
 	pitch := f32(luau.L_optnumber(L, 5, 1))
-	play(s, sound, position, gain, bus, pitch)
+	start := f64(luau.L_optnumber(L, 6, 0))
+	play(s, sound, position, gain, bus, pitch, start)
+	return 0
+}
+
+// The duck's times and threshold when a script leaves them out: 50 ms to fall, 300 ms to come back, and any sound above
+// about -50 dB.
+@(private = "file")
+DUCK_ATTACK :: 0.05
+@(private = "file")
+DUCK_RELEASE :: 0.3
+@(private = "file")
+DUCK_THRESHOLD :: 0.003
+
+@(private = "file")
+duck_binding :: proc(L: ^luau.State) -> c.int {
+	s := state_of(L)
+	from := check_bus(L, s, 1)
+	to := check_bus(L, s, 2)
+	duck := boundary.Duck {
+		gain      = f32(luau.L_checknumber(L, 3)),
+		attack    = f32(luau.L_optnumber(L, 4, DUCK_ATTACK)),
+		release   = f32(luau.L_optnumber(L, 5, DUCK_RELEASE)),
+		threshold = f32(luau.L_optnumber(L, 6, DUCK_THRESHOLD)),
+	}
+	if from == to {
+		script.raise(L, "Audio.duck takes two different buses")
+	}
+	s.platform.audio.bus_set_duck(bus_handle(s, from), bus_handle(s, to), &duck)
 	return 0
 }
 

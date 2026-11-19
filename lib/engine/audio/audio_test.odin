@@ -3,6 +3,7 @@ package audio
 import "base:runtime"
 import "core:c"
 import "core:fmt"
+import "core:log"
 import "core:math"
 import "core:math/linalg"
 import "core:mem/virtual"
@@ -49,6 +50,19 @@ Record :: struct {
 	// Voices that have ended, as the null backend's never do.
 	ended:     bool,
 	bus_gains: [dynamic]f32,
+	// The seek tables that sounds came with, copied.
+	tables:    [dynamic][]boundary.Seek_Point,
+	seeks:     [dynamic]Recorded_Seek,
+	ducks:     [dynamic]boundary.Duck,
+	// What the backend says of its clock and of every voice's place.
+	clock:     u64,
+	place:     Maybe(boundary.Voice_Position),
+}
+
+@(private = "file")
+Recorded_Seek :: struct {
+	voice:        boundary.Voice,
+	frame, clock: u64,
 }
 
 @(private = "file")
@@ -62,7 +76,25 @@ recording_table :: proc(null: ^boundary.Audio_API) -> boundary.Audio_API {
 		context = runtime.default_context()
 		append(&record.sounds, desc^)
 		append(&record.paths, fmt.aprintf("%s", desc.path) if desc.path != nil else "")
+		append(&record.tables, slice.clone(desc.seek[:desc.seek_count]))
 		return record.null.sound_create(desc)
+	}
+	api.voice_seek = proc "c" (voice: boundary.Voice, frame: u64, clock: u64) {
+		context = runtime.default_context()
+		append(&record.seeks, Recorded_Seek{voice, frame, clock})
+	}
+	api.voice_position = proc "c" (voice: boundary.Voice, out: ^boundary.Voice_Position) -> b32 {
+		place, ok := record.place.?
+		out^ = place
+		return b32(ok)
+	}
+	api.bus_set_duck = proc "c" (bus: boundary.Bus, target: boundary.Bus, duck: ^boundary.Duck) {
+		context = runtime.default_context()
+		append(&record.ducks, duck^)
+		record.null.bus_set_duck(bus, target, duck)
+	}
+	api.clock = proc "c" () -> u64 {
+		return record.clock
 	}
 	api.voice_play = proc "c" (desc: ^boundary.Voice_Desc) -> boundary.Voice {
 		context = runtime.default_context()
@@ -240,6 +272,12 @@ teardown :: proc(t: ^testing.T, f: ^Fixture) {
 	delete(record.paths)
 	delete(record.plays)
 	delete(record.bus_gains)
+	for table in record.tables {
+		delete(table, runtime.default_allocator())
+	}
+	delete(record.tables)
+	delete(record.seeks)
+	delete(record.ducks)
 	record = {}
 	testing.expect(t, jobs.drain_frame())
 	jobs.shutdown()
@@ -903,4 +941,170 @@ each_limit_warns_once :: proc(t: ^testing.T) {
 		play(&f.audio, SOUND)
 	}
 	testing.expect_value(t, f.audio.warned, bit_set[Warning]{.Sources, .One_Shots})
+}
+
+// A source and a sound from play start where they say, with a short fade in, and play keeps a time on the clock.
+@(test)
+sounds_start_at_an_offset_and_a_time :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(t, f)
+	write_sound(t, f, SOUND, SAMPLES[:])
+	listener(f)
+	e := source(f, {1, 0, 0})
+	ecs.get_write(&f.world, e, Audio_Source).start = 0.5
+	testing.expect(t, play(&f.audio, SOUND, start = 1.25, clock = 777))
+	testing.expect(t, play(&f.audio, SOUND, start = math.nan_f64()))
+	frame(f)
+	testing.expect_value(t, len(record.plays), 3)
+	testing.expect_value(t, record.plays[0].start, 24000)
+	testing.expect_value(t, record.plays[0].fade, OFFSET_FADE)
+	testing.expect_value(t, record.plays[1].start, 60000)
+	testing.expect_value(t, record.plays[1].clock, 777)
+	testing.expect_value(t, record.plays[2].start, 0)
+	testing.expect_value(t, record.plays[2].fade, 0)
+}
+
+// A sound that streams brings its blob's seek table to the backend.
+@(test)
+a_streamed_sound_brings_its_seek_table :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(t, f)
+	table := [?]boundary.Seek_Point{{100, 4800}, {200, 9600}}
+	data := [?]byte{1, 2, 3, 4}
+	buffer: [32]u8
+	blob := format.audio_write(
+		{
+			guid = LONG,
+			frames = 20000,
+			channels = 1,
+			stream = true,
+			format = .Opus,
+			data = data[:],
+			seek = table[:],
+			source_path = "game/audio/test.wav",
+		},
+		context.temp_allocator,
+	)
+	testing.expect(
+		t,
+		os.write_entire_file(
+			fmt.tprintf("%s/%s.blob", f.cache, format.guid_format(LONG, &buffer)),
+			blob,
+		) ==
+		nil,
+	)
+	view, ok := format.audio_view(blob)
+	testing.expect(t, ok)
+	testing.expect(t, slice.equal(format.audio_seek(blob, view), table[:]))
+	listener(f)
+	source(f, {1, 0, 0}, LONG)
+	frame(f)
+	testing.expect_value(t, len(record.tables), 1)
+	testing.expect(t, slice.equal(record.tables[0], table[:]))
+}
+
+// A voice that its caller owns starts at a place and a time, seeks, and keeps to the clock: it is sought back when it
+// drifts past the limit, to where it should be a little ahead of the clock, and left alone within it.
+@(test)
+a_voice_keeps_to_the_clock :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(t, f)
+	write_sound(t, f, SOUND, SAMPLES[:])
+	record.clock = 48000
+	voice := start_voice(
+		&f.audio,
+		{sound = SOUND, gain = 1, pitch = 1, start = 0.5, clock = 50000, unpaused = true},
+	)
+	testing.expect(t, voice != {})
+	desc := record.plays[0]
+	testing.expect_value(t, desc.start, 24000)
+	testing.expect_value(t, desc.clock, 50000)
+	testing.expect_value(t, desc.flags, boundary.Voice_Flags{.Unpaused})
+	testing.expect_value(t, desc.fade, OFFSET_FADE)
+
+	_, _, placed := voice_place(&f.audio, voice)
+	testing.expect(t, !placed)
+	// At clock 98000 it should be at 0.5 + 1 s, and it is 1 ms behind.
+	record.place = boundary.Voice_Position {
+		frame = 1.499 * 48000,
+		clock = 98000,
+	}
+	drift, sought := keep_to_clock(&f.audio, voice, 0.5, 50000, 0.005)
+	testing.expect(t, !sought)
+	testing.expect(t, abs(drift + 0.001) < 1e-6)
+	// 20 ms behind is too far.
+	record.place = boundary.Voice_Position {
+		frame = 1.48 * 48000,
+		clock = 98000,
+	}
+	record.clock = 98000
+	drift, sought = keep_to_clock(&f.audio, voice, 0.5, 50000, 0.005)
+	testing.expect(t, sought)
+	testing.expect(t, abs(drift + 0.02) < 1e-6)
+	testing.expect_value(t, len(record.seeks), 1)
+	seek := record.seeks[0]
+	testing.expect_value(t, seek.clock, 98000 + SEEK_LEAD)
+	testing.expect_value(t, seek.frame, 24000 + 48000 + SEEK_LEAD)
+
+	// A loop is compared within its sound.
+	record.place = boundary.Voice_Position {
+		frame = 0.01 * 48000,
+		clock = 98000,
+	}
+	drift, sought = keep_to_clock(&f.audio, voice, 0.5, 50000, 0.005, length = 1.49)
+	testing.expect(t, !sought)
+	testing.expect(t, abs(drift) < 1e-6)
+}
+
+// A scrub plays short grains that play while the world does not run, and a grain past SCRUB_GRAINS stops the oldest.
+@(test)
+a_scrub_plays_grains :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(t, f)
+	write_sound(t, f, SOUND, SAMPLES[:])
+	frame(f, run = false)
+	for i in 0 ..= SCRUB_GRAINS {
+		testing.expect(t, scrub(&f.audio, SOUND, f64(i) * 0.01))
+	}
+	testing.expect_value(t, len(record.plays), SCRUB_GRAINS + 1)
+	grain := record.plays[1]
+	testing.expect_value(t, grain.start, 480)
+	testing.expect_value(t, grain.flags, boundary.Voice_Flags{.Unpaused})
+	testing.expect_value(t, grain.length, u64(SCRUB_GRAIN * boundary.SAMPLE_RATE))
+	testing.expect_value(t, grain.fade, SCRUB_FADE)
+	testing.expect_value(t, record.stops, 1)
+	// A sound that is not cooked logs once, and plays nothing.
+	context.logger = log.nil_logger()
+	testing.expect(t, !scrub(&f.audio, OTHER, 0))
+}
+
+// A script plays a sound from an offset and ducks one bus by another, by their names.
+@(test)
+a_script_ducks_a_bus :: proc(t: ^testing.T) {
+	f := setup(t, scripts = true)
+	defer teardown(t, f)
+	context.user_ptr = f
+	names: Bus_Names
+	testing.expect(t, add_bus_name(&names, "Music"))
+	testing.expect(t, add_bus_name(&names, "Dialogue"))
+	set_buses(&f.audio, names)
+	_, ok := script.spawn_source(
+		&f.runtime,
+		"=duck",
+		`
+Audio.play(Test.sound(), nil, 1, nil, 1, 2.5)
+Test.report(pcall(Audio.duck, "Dialogue", "Music", 0.3, 0.1) and 1 or 0)
+Test.report(pcall(Audio.duck, "Dialogue", "Nope", 0.3) and 1 or 0)
+Test.report(pcall(Audio.duck, "Music", "Music", 0.3) and 1 or 0)
+`,
+	)
+	testing.expect(t, ok)
+	testing.expectf(t, slice.equal(f.reports[:], []f64{1, 0, 0}), "reports %v", f.reports[:])
+	testing.expect_value(t, len(record.ducks), 1)
+	testing.expect_value(t, record.ducks[0].gain, 0.3)
+	testing.expect_value(t, record.ducks[0].attack, 0.1)
+	testing.expect_value(t, record.ducks[0].release, 0.3)
+	testing.expect_value(t, f.audio.one_shots[0].start, 120000)
+	testing.expect(t, set_bus_duck(&f.audio, "Music", "Dialogue", {gain = 0.5}))
+	testing.expect(t, !set_bus_duck(&f.audio, "Nope", "Dialogue", {gain = 0.5}))
 }

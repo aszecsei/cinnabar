@@ -22,6 +22,8 @@ Audio_Source :: struct {
 	occluded:     bool,
 	gain:         f32 `editor:"range=0,4"`,
 	pitch:        f32 `editor:"range=0.1,4"`,
+	// Where the sound starts each time it plays, in seconds.
+	start:        f32 `editor:"range=0,600"`,
 	// Full volume at min_distance and nearer, and silence at max_distance and farther, in meters.
 	min_distance: f32 `editor:"range=0,100"`,
 	max_distance: f32 `editor:"range=0,1000"`,
