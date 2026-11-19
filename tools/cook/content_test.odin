@@ -39,7 +39,7 @@ a_broken_script_fails_with_its_dependents_alone :: proc(t: ^testing.T) {
 	pass := cook(tree_options(tree), {.Script})
 	testing.expect(t, !pass.ok)
 	testing.expect_value(t, pass.cooked[.Script], 2)
-	expect_error(t, &errors, `broken.luau:1: cannot require "./nothing"`)
+	expect_error(t, &errors, `broken.luau:1:16: cannot require "./nothing"`)
 	expect_error(t, &errors, "user.luau: not cooked, because it requires game/broken.luau")
 	expect_error(t, &errors, "indirect.luau: not cooked, because it requires game/user.luau")
 	expect_error(t, &errors, "require cycle")

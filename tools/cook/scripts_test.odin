@@ -200,9 +200,9 @@ return function() return require("./inner") end`,
 	testing.expect(t, find_requires(&s, &problems))
 	testing.expect_value(t, len(s.requires), 3)
 	if len(s.requires) == 3 {
-		testing.expect_value(t, s.requires[0], Found_Require{"./a", 2})
-		testing.expect_value(t, s.requires[1], Found_Require{"@game/b", 4})
-		testing.expect_value(t, s.requires[2], Found_Require{"./inner", 6})
+		testing.expect_value(t, s.requires[0], Found_Require{"./a", 2, 19, 44, 49})
+		testing.expect_value(t, s.requires[1], Found_Require{"@game/b", 4, 19, 104, 113})
+		testing.expect_value(t, s.requires[2], Found_Require{"./inner", 6, 34, 180, 189})
 	}
 
 	errors: Errors
@@ -222,6 +222,31 @@ return function() return require("./inner") end`,
 	}
 	testing.expect(t, !find_requires(&broken, &problems))
 	expect_error(t, &errors, "broken.luau:1:")
+}
+
+// A require's start and end are the literal's bytes, with its quotes or brackets, which a move rewrites (see
+// require_rewrite.odin).
+@(test)
+a_require_knows_where_its_literal_is :: proc(t: ^testing.T) {
+	text := "local a = require \"./a\"\nlocal b = require('./b')\n\tlocal c = require([==[./c]==])\nlocal d = require(`./d`)"
+	s := Script_Source {
+		path     = "spans.luau",
+		source   = transmute([]byte)text,
+		requires = make([dynamic]Found_Require, context.temp_allocator),
+	}
+	problems: Problems
+	testing.expect(t, find_requires(&s, &problems))
+	expected := [?]string{`"./a"`, `'./b'`, `[==[./c]==]`, "`./d`"}
+	testing.expect_value(t, len(s.requires), len(expected))
+	for r, i in s.requires {
+		if i < len(expected) {
+			testing.expect_value(t, text[r.start:r.end], expected[i])
+			testing.expect_value(t, r.line, i + 1)
+		}
+	}
+	if len(s.requires) == len(expected) {
+		testing.expect_value(t, s.requires[2].column, 20)
+	}
 }
 
 @(test)
@@ -337,7 +362,7 @@ missing_modules_are_errors :: proc(t: ^testing.T) {
 	context.logger = capture_errors(&errors)
 	defer release_errors(&errors)
 	testing.expect(t, !cook(tree_options(tree), {.Script}).ok)
-	expect_error(t, &errors, `a.luau:1: cannot require "./nothing": no module at`)
+	expect_error(t, &errors, `a.luau:1:16: cannot require "./nothing": no module at`)
 }
 
 @(test)

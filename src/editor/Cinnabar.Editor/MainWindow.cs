@@ -14,6 +14,8 @@ using Cinnabar.Editor.Ribbon;
 using Cinnabar.Editor.Shell;
 using Dock.Avalonia.Controls;
 using DockSide = Avalonia.Controls.Dock;
+using CookAsset = Cinnabar.Editor.Link.Cook.Asset;
+using OperationResult = Cinnabar.Editor.Link.Cook.OperationResult;
 
 namespace Cinnabar.Editor;
 
@@ -78,6 +80,8 @@ public sealed class MainWindow : Window
         shell.MakeVariantRequested += name => _ = AskMakeVariant(name);
         shell.Content.RenameRequested += item => _ = AskRename(item);
         shell.Content.DeleteRequested += items => _ = ConfirmDelete(items);
+        shell.Content.AskRewriteRequires = AskRewriteRequires;
+        shell.Content.RequiresRewritten += result => _ = ShowRewrittenRequires(result);
         shell.Content.OperationFailed += error => _ = Dialogs.Ask(this, "The content did not change", error, "OK");
         shell.Content.DraftLeft += () => _ = AskDraft();
         shell.Content.TagRenameRequested += tag => _ = AskRenameTag(tag);
@@ -434,6 +438,44 @@ public sealed class MainWindow : Window
         }
     }
 
+    // Shows a list of lines, at most Shown of them.
+    static string ListOf(IReadOnlyList<string> lines)
+    {
+        const int Shown = 8;
+        var list = string.Join("\n", lines.Take(Shown).Select(l => $"    {l}"));
+        return lines.Count > Shown ? $"{list}\n    and {lines.Count - Shown} more" : list;
+    }
+
+    async Task<bool?> AskRewriteRequires(IReadOnlyList<CookAsset> scripts)
+    {
+        var message = "This move breaks requires that name a moved script by its path, in these scripts:\n"
+            + ListOf([.. scripts.Select(s => $"{s.Root}/{s.Path}")])
+            + "\n\nThe cook daemon can rewrite each require's string, in the form that it has. Nothing else in the files changes.";
+        return await Dialogs.Ask(this, "Update Requires", message, "Update Requires", "Move Only", "Cancel") switch
+        {
+            "Update Requires" => true,
+            "Move Only" => false,
+            _ => null,
+        };
+    }
+
+    async Task ShowRewrittenRequires(OperationResult result)
+    {
+        var message = "";
+        if (result.Rewritten.Length > 0)
+        {
+            message = "The move rewrote these requires:\n"
+                + ListOf([.. result.Rewritten.Select(r => $"{r.Path}:{r.Line}: \"{r.Old}\" to \"{r.New}\"")]);
+        }
+        if (result.NotRewritten.Length > 0)
+        {
+            message += (message == "" ? "" : "\n\n") + "These scripts do not parse, so their requires did not change:\n"
+                + ListOf(result.NotRewritten);
+        }
+        message += "\n\nThe console lists every one.";
+        await Dialogs.Ask(this, "Requires Rewritten", message, "OK");
+    }
+
     async Task ConfirmDelete(IReadOnlyList<ContentItem> items)
     {
         var (deleted, users) = _shell.Content.DeleteEffects(items);
@@ -448,13 +490,7 @@ public sealed class MainWindow : Window
         message += deleted.Count > 0 && items.Any(i => i.Folder != null) ? $", with the {deleted.Count} {(deleted.Count == 1 ? "asset" : "assets")} in it?" : "?";
         if (users.Count > 0)
         {
-            const int Shown = 8;
-            var list = string.Join("\n", users.Take(Shown).Select(u => $"    {u.Root}/{u.Path}"));
-            if (users.Count > Shown)
-            {
-                list += $"\n    and {users.Count - Shown} more";
-            }
-            message += $"\n\nThese use it, and will fail to cook until they no longer do:\n{list}";
+            message += $"\n\nThese use it, and will fail to cook until they no longer do:\n{ListOf([.. users.Select(u => $"{u.Root}/{u.Path}")])}";
         }
         if (await Dialogs.Ask(this, "Delete", message, "Delete", "Cancel") == "Delete")
         {

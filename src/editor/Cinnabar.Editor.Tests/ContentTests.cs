@@ -65,6 +65,37 @@ public sealed class ContentTests : IDisposable
     }
 
     [Fact]
+    public void AMoveFindsTheScriptsWhoseRequiresItBreaks()
+    {
+        using var shell = NewShell();
+
+        // The script that requires a moved module, and a moved script that requires one that stays.
+        Assert.Equal([DoorScript], shell.Content.RequireEffects([UtilScript]).Select(a => a.Guid));
+        Assert.Equal([DoorScript], shell.Content.RequireEffects([DoorScript]).Select(a => a.Guid));
+        // Scripts that move together keep their requires to each other.
+        Assert.Empty(shell.Content.RequireEffects([DoorScript, UtilScript]));
+    }
+
+    [Fact]
+    public async Task AMoveAsksBeforeItRewritesRequires()
+    {
+        using var shell = NewShell();
+        IReadOnlyList<Asset>? asked = null;
+        shell.Content.AskRewriteRequires = scripts =>
+        {
+            asked = scripts;
+            return Task.FromResult<bool?>(null);
+        };
+
+        // Cancelled, the move sends nothing, so it does not fail for want of a daemon.
+        var failed = false;
+        shell.Content.OperationFailed += _ => failed = true;
+        Assert.False(await shell.Content.MoveAssets([UtilScript], new ContentFolder("game", "")));
+        Assert.Equal([DoorScript], asked?.Select(a => a.Guid));
+        Assert.False(failed);
+    }
+
+    [Fact]
     public void ADeleteShowsTheAssetsThatUseWhatItTakes()
     {
         using var shell = NewShell();

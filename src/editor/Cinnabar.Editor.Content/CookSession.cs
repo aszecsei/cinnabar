@@ -255,7 +255,7 @@ public sealed class CookSession : IPreviewCooker, IDisposable
     {
         if (State is not CookState.Linked linked)
         {
-            return Task.FromResult(new OperationResult("The cook daemon is not running, so the content cannot change.", []));
+            return Task.FromResult(new OperationResult("The cook daemon is not running, so the content cannot change.", [], [], []));
         }
         var answer = new TaskCompletionSource<OperationResult>(TaskCreationOptions.RunContinuationsAsynchronously);
         var request = _requests.Add(answer);
@@ -493,7 +493,7 @@ public sealed class CookSession : IPreviewCooker, IDisposable
     // The daemon may have done an operation that it could not answer. Its next snapshot has the content as it is.
     void FailRequests()
     {
-        _requests.FailAll(answer => answer.TrySetResult(new OperationResult("The cook link closed before the cook daemon answered.", [])));
+        _requests.FailAll(answer => answer.TrySetResult(new OperationResult("The cook link closed before the cook daemon answered.", [], [], [])));
         _previews.FailAll(answer => answer.TrySetResult(new PreviewResult("The cook link closed before the cook daemon answered.", [], [])));
     }
 

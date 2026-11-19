@@ -321,24 +321,28 @@ Create_Folder :: struct {
 	path: string,
 }
 
-// Moves assets, each with its .meta file, into a folder, of the same root or another.
+// Moves assets, each with its .meta file, into a folder, of the same root or another. With rewrite_requires, the
+// daemon also rewrites the requires that the move breaks (see docs/content/daemon-and-operations.md#moved-modules).
 Move_Assets :: struct {
-	guids:  []string,
-	root:   string,
-	folder: string,
+	guids:            []string,
+	root:             string,
+	folder:           string,
+	rewrite_requires: bool,
 }
 
-// Renames an asset in its folder. It keeps its extension.
+// Renames an asset in its folder. It keeps its extension. rewrite_requires is as for Move_Assets.
 Rename_Asset :: struct {
-	guid: string,
-	name: string,
+	guid:             string,
+	name:             string,
+	rewrite_requires: bool,
 }
 
-// Renames a folder in its parent, with everything in it.
+// Renames a folder in its parent, with everything in it. rewrite_requires is as for Move_Assets.
 Rename_Folder :: struct {
-	root: string,
-	path: string,
-	name: string,
+	root:             string,
+	path:             string,
+	name:             string,
+	rewrite_requires: bool,
 }
 
 // Copies assets in their folders, each with a new .meta file that has its import settings. The result has the copies'
@@ -370,12 +374,24 @@ Reimport :: struct {
 	guids: []string,
 }
 
+// A require that a move rewrote: its script, after the move, as the root's name and the path in the root, its line, and
+// its string before and after.
+Rewritten_Require :: struct {
+	path:     string,
+	line:     u32,
+	old, new: string,
+}
+
 // Daemon to editor: the answer to an operation, with its request's ID.
 Operation_Result :: struct {
 	// Why the operation failed, or "" when it succeeded.
-	error: string,
+	error:         string,
 	// The GUIDs of the assets that it made, if any.
-	guids: []string,
+	guids:         []string,
+	// The requires that a move rewrote, in script and line order.
+	rewritten:     []Rewritten_Require,
+	// The scripts whose requires a move could not read, as they do not parse, so it did not rewrite them.
+	not_rewritten: []string,
 }
 
 // Material graphs (see docs/content/kinds/materials.md#material-graphs). The daemon gives the editor the kinds of node and

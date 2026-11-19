@@ -4,16 +4,31 @@
 
 #include <string.h>
 
-// A require call with a string literal argument. line is 1-based.
-typedef void (*cn_luau_require_fn)(void* ud, const char* path, size_t size, int line);
+// A require call with a string literal argument. line and column are 1-based, and the column counts bytes. start and
+// end are the byte offsets in the source of the literal, with its quotes or brackets.
+typedef void (*cn_luau_require_fn)(void* ud, const char* path, size_t size, int line, int column, size_t start, size_t end);
 // A parse error, or a require call whose argument is not a string literal. line is 1-based.
 typedef void (*cn_luau_error_fn)(void* ud, const char* message, size_t size, int line);
 
 namespace
 {
 
+// offsetOf turns a parser position, whose column counts bytes, into a byte offset in the source.
+size_t offsetOf(const char* source, size_t size, Luau::Position position)
+{
+    size_t offset = 0;
+    for (unsigned line = 0; line < position.line && offset < size; offset++)
+    {
+        if (source[offset] == '\n')
+            line++;
+    }
+    return offset + position.column < size ? offset + position.column : size;
+}
+
 struct RequireVisitor : Luau::AstVisitor
 {
+    const char* source;
+    size_t size;
     void* ud;
     cn_luau_require_fn onRequire;
     cn_luau_error_fn onError;
@@ -37,7 +52,11 @@ struct RequireVisitor : Luau::AstVisitor
             Luau::AstExprConstantString* path = call->args.size == 1 ? call->args.data[0]->as<Luau::AstExprConstantString>() : nullptr;
             if (path)
             {
-                onRequire(ud, path->value.data, path->value.size, line);
+                Luau::Location at = path->location;
+                onRequire(
+                    ud, path->value.data, path->value.size, int(at.begin.line) + 1, int(at.begin.column) + 1, offsetOf(source, size, at.begin),
+                    offsetOf(source, size, at.end)
+                );
             }
             else
             {
@@ -72,6 +91,8 @@ CN_LUAU_API bool cn_luau_find_requires(
         return false;
 
     RequireVisitor visitor;
+    visitor.source = source;
+    visitor.size = size;
     visitor.ud = ud;
     visitor.onRequire = onRequire;
     visitor.onError = onError;

@@ -102,8 +102,8 @@ public sealed class CookLinkTests : IDisposable
         Assert.True(File.Exists(Path.Combine(_content, "scripts", "gate.luau.meta")));
 
         Assert.Equal("", (await session.Request(new CreateFolder("game", "scripts/doors"))).Error);
-        Assert.Equal("", (await session.Request(new MoveAssets([gate], "game", "scripts/doors"))).Error);
-        Assert.Equal("", (await session.Request(new RenameAsset(gate, "portcullis"))).Error);
+        Assert.Equal("", (await session.Request(new MoveAssets([gate], "game", "scripts/doors", false))).Error);
+        Assert.Equal("", (await session.Request(new RenameAsset(gate, "portcullis", false))).Error);
         Assert.Equal("scripts/doors/portcullis.luau", index.Find(gate)?.Path);
 
         var copy = Assert.Single((await session.Request(new DuplicateAssets([gate]))).Guids);
@@ -115,10 +115,29 @@ public sealed class CookLinkTests : IDisposable
         Assert.Equal([new CookedCount(AssetKind.Script, 1)], session.LastCook!.Cooked);
 
         // A refused operation changes nothing, and says why.
-        var refused = await session.Request(new RenameAsset(copy, "portcullis"));
+        var refused = await session.Request(new RenameAsset(copy, "portcullis", false));
         Assert.Contains("already exists", refused.Error);
         Assert.Equal("scripts/doors/portcullis_copy.luau", index.Find(copy)?.Path);
         Assert.Contains("root", (await session.Request(new DeleteAssets([], [new Folder("game", "")]))).Error);
+    }
+
+    [Fact]
+    public async Task AMoveRewritesTheRequiresThatItBreaks()
+    {
+        var index = new AssetIndex();
+        using var session = Start(index);
+        var output = new List<string>();
+        session.Output += line => { lock (output) { output.Add(line); } };
+        await Until(() => session.Linked && index.Assets.Count == 4, session, output);
+        var util = index.Assets.Values.Single(a => a.Path == "scripts/util.luau");
+        var door = index.Assets.Values.Single(a => a.Path == "scripts/door.luau");
+
+        Assert.Equal("", (await session.Request(new CreateFolder("game", "scripts/lib"))).Error);
+        var moved = await session.Request(new MoveAssets([util.Guid], "game", "scripts/lib", true));
+        Assert.Equal("", moved.Error);
+        Assert.Equal([new RewrittenRequire("game/scripts/door.luau", 1, "./util", "./lib/util")], moved.Rewritten);
+        Assert.StartsWith("local util = require('./lib/util')\n", File.ReadAllText(Path.Combine(_content, "scripts", "door.luau")));
+        await Until(() => index.Find(door.Guid)?.Status == AssetStatus.Current, session, output);
     }
 
     [Fact]

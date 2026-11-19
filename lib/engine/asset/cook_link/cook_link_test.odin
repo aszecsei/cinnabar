@@ -62,14 +62,18 @@ every_message_round_trips :: proc(t: ^testing.T) {
 		},
 		Create_Asset{template = .Behaviour, root = "game", folder = "scripts", name = "door"},
 		Create_Folder{root = "game", path = "scripts/ui"},
-		Move_Assets{guids = {"01", "02"}, root = "game", folder = "a"},
-		Rename_Asset{guid = "01", name = "gate"},
-		Rename_Folder{root = "game", path = "a", name = "b"},
+		Move_Assets{guids = {"01", "02"}, root = "game", folder = "a", rewrite_requires = true},
+		Rename_Asset{guid = "01", name = "gate", rewrite_requires = true},
+		Rename_Folder{root = "game", path = "a", name = "b", rewrite_requires = true},
 		Duplicate_Assets{guids = {"01"}},
 		Delete_Assets{guids = {"01"}, folders = {{"game", "old"}}},
 		Set_Import_Settings{assets = {{guid = "01", settings = {{"native", "true"}}}}},
 		Reimport{guids = {"01"}},
 		Operation_Result{error = "exists", guids = {"03"}},
+		Operation_Result {
+			rewritten = {{path = "game/door.luau", line = 2, old = "./util", new = "./lib/util"}},
+			not_rewritten = {"game/broken.luau"},
+		},
 		Cook_Progress{kind = .Stage, name = "game/stages/sponza.usdz", done = 412, total = 1088},
 	}
 	for message in messages {
