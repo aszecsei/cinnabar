@@ -28,6 +28,8 @@ A project's scripts reach every engine binding in both cases: the standard game 
 
 `game_update` returns false once the game is quitting, and the host's loop or the release's ends after that frame. `Game.run` is a `Run_State`, `Running` or `Quitting`, which starts as `Running`, and `request_quit` is its only writer: a script's `Game.quit` calls it (see [Scripting: Game.quit](../scripting/api.md#gamequit)). While an editor is linked, `request_quit` logs and does nothing, because the editor owns the game's life.
 
+Between frames, the host passes the editor's messages to `editor_poll`. When the editor's scene replaced the world, it resets the game's views there, before the new world's behaviours start (see [Cameras](cameras.md#views-and-layouts)).
+
 `game_init` builds the editor package, the world, physics, audio, the asset runtime, the renderer, the UI and the script runtime in that order, reads the settings, and loads the main scene. `game_reload` makes the same registrations again, so that each points at the new code.
 
 ## Hooks
