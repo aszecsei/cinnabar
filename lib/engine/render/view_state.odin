@@ -72,6 +72,18 @@ view_state_destroy :: proc(v: ^View_State, r: ^Renderer) {
 	v^ = {}
 }
 
+// view_state_cut makes a view start again in this cache frame, as after a camera cut or a change of its rect: its temporal
+// passes read no history from before, its velocities no last camera, its exposure takes its target at once, and its
+// upscaler starts its history again. The occlusion culling keeps its visibility, whose late pass draws what the cut
+// shows in the first frame. The rest of the state is the world's, and stays.
+@(private)
+view_state_cut :: proc(v: ^View_State, frame: u64) {
+	v.histories.cut = frame
+	v.previous = {}
+	v.post.adapted = false
+	v.post.upscaler.active = false
+}
+
 // stats_state is the state that the stats getters read: the last frame's own view's.
 @(private)
 stats_state :: proc(r: ^Renderer) -> ^View_State {

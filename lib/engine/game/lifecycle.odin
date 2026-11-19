@@ -16,6 +16,7 @@ import "cinnabar:engine/ai/utility"
 import "cinnabar:engine/anim"
 import "cinnabar:engine/asset"
 import "cinnabar:engine/audio"
+import "cinnabar:engine/camera"
 import "cinnabar:engine/ecs"
 import "cinnabar:engine/editor"
 import "cinnabar:engine/nav"
@@ -205,7 +206,6 @@ game_update :: proc(g: ^Game, dt: time.Duration, h: Hooks) -> (keep_running: boo
 		}
 	}
 
-	find_camera(g)
 	// The device takes one writer, and the test tone is that writer when it asks to be.
 	if g.platform.audio_test_tone {
 		audio.tone_update(&g.tone, g.platform, h.tone_pan(g) if h.tone_pan != nil else 0)
@@ -216,12 +216,18 @@ game_update :: proc(g: ^Game, dt: time.Duration, h: Hooks) -> (keep_running: boo
 	if h.update != nil {
 		h.update(g, run)
 	}
+	// The views choose their cameras after every push of the frame, the project's too, and their blends step by the
+	// world's time or the host's.
+	shown := camera.advance(&g.views, &g.world, {g.frame_step, f32(time.duration_seconds(dt))})
+	send_camera_events(g)
 	// A minimized window has no size, and nothing is rendered.
 	size := g.platform.window_size()
 	if size.x <= 0 || size.y <= 0 {
 		return g.run != .Quitting
 	}
-	render_frame(g, {u32(size.x), u32(size.y)}, h)
+	render_frame(g, {u32(size.x), u32(size.y)}, shown, h)
+	// The frame carried the views' cuts. A frame that is not drawn leaves them for the next.
+	camera.drawn(&g.views)
 	return g.run != .Quitting
 }
 
@@ -237,46 +243,116 @@ end_frame :: proc(g: ^Game) {
 	editor.send_behaviour_edits(&g.editor, &g.world, &g.scripts)
 }
 
-// find_camera finds the scene's camera, after a scene load replaced the one that the game knew.
-find_camera :: proc(g: ^Game) {
-	if ecs.is_alive(&g.world, g.camera) {
-		return
-	}
-	cameras := make([dynamic]ecs.Entity, g.platform.frame_allocator)
-	ecs.collect(&g.world, {render.CAMERA_ID}, &cameras)
-	g.camera = cameras[0] if len(cameras) > 0 else 0
-}
-
-// camera_view is the scene's camera, which the game draws from: the editor's Game view draws from it, and so does the
-// game without an editor. The editor's scene views draw from the editor's cameras.
-camera_view :: proc(g: ^Game) -> render.View {
-	if view, ok := render.camera_view(&g.world, g.camera); ok {
-		return view
-	}
-	return {
-		rotation = 1,
-		projection = render.Perspective{render.DEFAULT_VERTICAL_FOV, render.DEFAULT_NEAR},
-	}
-}
-
-// render_frame describes the frame as the game draws it, with or without an editor, and gives it to the editor package
-// to draw (see editor.draw_frame), which draws it in the views it shows: the scene's camera, the window's size, the
-// skinned poses, the UI's documents in the UI layer, and the project's hooks.
+// send_camera_events tells each pusher whose camera's entry went this frame, for it, why: on_camera_removed, with the
+// token's number and the reason (see docs/world/cameras.md#tokens).
 @(private)
-render_frame :: proc(g: ^Game, window: [2]u32, h: Hooks) {
-	desc := render.Frame_Desc {
-		view = camera_view(g),
-		size = window,
+send_camera_events :: proc(g: ^Game) {
+	for e in camera.ended(&g.views) {
+		if e.owner == 0 || !ecs.is_alive(&g.world, e.owner) {
+			continue
+		}
+		reason: string
+		switch e.reason {
+		case .Despawned:
+			reason = "despawned"
+		}
+		script.send(&g.scripts, e.owner, "camera_removed", camera.token_number(e.token), reason)
+	}
+}
+
+// camera_view is what a game view shows now, from its camera stack: by default the first view's, which the editor's
+// Game view draws as the own view, and so does the game without an editor. The editor's scene views draw from the
+// editor's cameras.
+camera_view :: proc(g: ^Game, index := 0) -> render.View {
+	return camera.view_of(&g.views, &g.world, index)
+}
+
+// render_frame lays the UI out in the window and the views' rects, describes the frame as the game draws it (see
+// describe_frame), and gives it to the editor package to draw (see editor.draw_frame), which draws it in the views it
+// shows.
+@(private)
+render_frame :: proc(g: ^Game, window: [2]u32, shown: camera.Frame_Views, h: Hooks) {
+	shown := shown
+	rects: [camera.MAX_VIEWS][4]f32
+	for v, i in shown.views[:shown.count] {
+		origin, extent := camera.pixel_rect(v.rect, window)
+		rects[i] = {f32(origin.x), f32(origin.y), f32(extent.x), f32(extent.y)}
+	}
+	// While a claim shows, no player's view does, and neither do the documents of the players' views.
+	ui.layout(
+		&g.ui,
+		{f32(window.x), f32(window.y)},
+		rects[:0] if shown.claimed else rects[:shown.count],
+	)
+	// The skinned entities' poses, between the last two ticks.
+	skins := anim.present(&g.animation, &g.world, g.platform.frame_allocator)
+	desc := describe_frame(g, window, shown, skins, h)
+	editor.draw_frame(&g.editor, &g.renderer, &g.world, desc)
+}
+
+// describe_frame is the game's frame: the first game view as the own view, the skinned poses given, the UI's documents in the
+// UI layer, and the project's hooks, then each other game view as an extra view in its rect of the window, with the
+// project's hooks and settings, before the project's own extra views. One full view draws as a game with one camera
+// always did, with no rect (see docs/rendering/frame.md#views-in-rects).
+@(private)
+describe_frame :: proc(
+	g: ^Game,
+	window: [2]u32,
+	shown: camera.Frame_Views,
+	skins: []render.Skin_Pose,
+	h: Hooks,
+) -> (
+	desc: render.Frame_Desc,
+) {
+	shown := shown
+	first := shown.views[0]
+	origin, extent := camera.pixel_rect(first.rect, window)
+	desc = {
+		view = first.view,
+		size = extent,
+		cut = first.cut,
 		// The particles step by the time that the world stepped, so they stand still in the editor's Edit and Paused.
 		delta = g.frame_step,
-		// The skinned entities' poses, between the last two ticks.
-		skins = anim.present(&g.animation, &g.world, g.platform.frame_allocator),
+		skins = skins,
 		hooks = {data = g, ui = draw_ui_layer},
+	}
+	if shown.count > 1 || extent != window {
+		desc.rect = render.Target_Rect {
+			target_size = window,
+			origin      = origin,
+		}
 	}
 	if h.frame != nil {
 		h.frame(g, &desc)
 	}
-	editor.draw_frame(&g.editor, &g.renderer, &g.world, desc)
+	if shown.count <= 1 {
+		return
+	}
+	extras := make([dynamic]render.Extra_View, g.platform.frame_allocator)
+	for v in shown.views[1:shown.count] {
+		view_origin, view_extent := camera.pixel_rect(v.rect, window)
+		append(
+			&extras,
+			render.Extra_View {
+				view = v.view,
+				size = view_extent,
+				state = camera.view_state(&g.views, &g.renderer, v.index),
+				quality = desc.quality,
+				settings = desc.settings,
+				keep_ids = desc.keep_ids,
+				no_debug = desc.no_debug,
+				debug_view = desc.debug_view,
+				disable = desc.disable,
+				exposure_offset = desc.exposure_offset,
+				hooks = desc.hooks,
+				rect = render.Target_Rect{target_size = window, origin = view_origin},
+				cut = v.cut,
+			},
+		)
+	}
+	append(&extras, ..desc.extra_views)
+	desc.extra_views = extras[:]
+	return
 }
 
 // draw_ui_layer draws the UI's documents into the UI layer.
@@ -323,6 +399,8 @@ game_shutdown :: proc(g: ^Game, h: Hooks) {
 	delete(g.scene_requests)
 	delete(g.sublevels.events)
 	ui.destroy(&g.ui)
+	// The game views' states are the renderer's objects.
+	camera.destroy(&g.views, &g.renderer)
 	render.renderer_destroy(&g.renderer)
 	// The sprites give their sheets back to the assets.
 	sprite.destroy(&g.sprites)

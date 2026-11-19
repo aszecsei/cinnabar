@@ -28,6 +28,8 @@ Two components in `lib/engine/streaming` (the `streaming` package) control the p
 
 `streaming.update` runs once a frame. It decides which scenes load and unload. `scene.begin_load` and `scene.advance_loads` do the loads ([Loading in stages](#loading-in-stages)).
 
+**Sources.** The game gives the policy the camera of every game view, shown or not, the camera of a full-screen claim, and each `Stream_Source` entity. In a split screen, scenes load around every player's camera. A claim's release finds its views' scenes still loaded (see [Cameras](cameras.md#the-frame)).
+
 **Distance.** The distance of a scene is the distance in meters from a source to the scene's bounds, and 0 inside them. With several sources, a scene uses the smallest distance (`scene_distance`).
 
 **Load and unload.**

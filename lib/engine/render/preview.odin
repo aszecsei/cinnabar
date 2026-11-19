@@ -875,7 +875,7 @@ draw_preview_output :: proc(ctx: ^Pass_Context) {
 		return
 	}
 	push := output_push(pf.frame, gpu_texture(g, pf.scene), .Sdr)
-	push.size = pf.desc.size
+	push.size, push.origin = pf.desc.size, {}
 	if pf.ui != 0 {
 		push.ui, push.has_ui = gpu.read_index(gpu_texture(g, pf.ui)), 1
 	}

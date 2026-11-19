@@ -24,8 +24,10 @@ Varyings vs_main(uint vertex_id : SV_VertexID) {
 }
 
 float4 ps_main(Varyings i) : SV_Target {
-	int3 pixel = int3(i.position.xy, 0);
-	float2 uv = i.position.xy / float2(push.size);
+	// The view's own pixel, which its rect of the target begins at push.origin.
+	float2 position = i.position.xy - float2(push.origin);
+	int3 pixel = int3(position, 0);
+	float2 uv = position / float2(push.size);
 	SamplerState linear_clamp = cn_sampler(push.sampler_index);
 	float3 color = push.tone_mapped != 0 ? cn_texture(push.scene).SampleLevel(linear_clamp, uv, 0).rgb : tone_map(uv);
 	// The UI is premultiplied and sRGB-encoded already, as designers' tools blend.

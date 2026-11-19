@@ -32,6 +32,9 @@ struct Push {
 	// render scale below 1, is stretched to it bilinearly.
 	uint output;
 	uint2 size;
+	// Where the output pass's view begins in its target, which it draws into a rect of (see
+	// docs/rendering/frame.md#views-in-rects). 0 for the tone map pass.
+	uint2 origin;
 };
 CN_PUSH_CONSTANTS(Push, push);
 

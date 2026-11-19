@@ -1,11 +1,15 @@
 --!strict
 -- Walks its character with W, A, S and D or the first gamepad's left stick, along the ground as its camera sees it, and
--- jumps with Space or the gamepad's A while it is on the ground. The character's controller does the rest: it climbs
+-- jumps with Space or the gamepad's A while it is on the ground. Its player field picks who drives it: 0 is the keyboard's
+-- W, A, S, D and Space with the first gamepad, 1 is the same keys with gamepad 1, and 2 is the arrow keys and right
+-- Control or Enter to jump, with gamepad 2, for the split screen (see scripts/split_screen.luau). The character's controller does the rest: it climbs
 -- steps, stops at walls and slides along them, stands on what moves, and pushes what is light enough (see
 -- docs/physics/design.md#characters). The controller adds gravity, so this asks only for the walk and the jump.
 local Player = Behaviour.define("Player", {
 	-- The camera whose view the walk follows. Without one, W walks along +z.
 	camera = Field.entity(),
+	-- Which input drives it: 0 for the keyboard and the first gamepad, 1 or 2 for a player of the split screen.
+	player = Field.number(0),
 	-- Meters a second.
 	speed = Field.number(4),
 	-- Meters a second upward at the start of a jump.
@@ -38,10 +42,23 @@ function Player:fixed_update(dt: number)
 	local ahead, aside = 0, 0
 	local jump = false
 	if not Ui.wants_input() then
-		ahead = (Input.is_down(Key.W) and 1 or 0) - (Input.is_down(Key.S) and 1 or 0)
-		aside = (Input.is_down(Key.D) and 1 or 0) - (Input.is_down(Key.A) and 1 or 0)
-		jump = Input.was_pressed(Key.Space)
-		local pad = first_gamepad()
+		local player = self.player
+		local pad: number? = nil
+		if player == 2 then
+			ahead = (Input.is_down(Key.Up) and 1 or 0) - (Input.is_down(Key.Down) and 1 or 0)
+			aside = (Input.is_down(Key.Right) and 1 or 0) - (Input.is_down(Key.Left) and 1 or 0)
+			jump = Input.was_pressed(Key.RightControl) or Input.was_pressed(Key.Enter)
+			pad = Input.gamepad_connected(2) and 2 or nil
+		else
+			ahead = (Input.is_down(Key.W) and 1 or 0) - (Input.is_down(Key.S) and 1 or 0)
+			aside = (Input.is_down(Key.D) and 1 or 0) - (Input.is_down(Key.A) and 1 or 0)
+			jump = Input.was_pressed(Key.Space)
+			if player == 1 then
+				pad = Input.gamepad_connected(1) and 1 or nil
+			else
+				pad = first_gamepad()
+			end
+		end
 		if pad then
 			ahead += Input.gamepad_axis(pad, GamepadAxis.LeftY)
 			aside += Input.gamepad_axis(pad, GamepadAxis.LeftX)

@@ -5,16 +5,31 @@ import "core:math"
 import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/render"
 
-// layout lays out every document that shows, at the UI layer's size, which sets the UI scale (see
-// docs/ui/design.md#layout). It runs each frame after scripts, so what they set shows in the same frame.
-layout :: proc(s: ^State, size: [2]f32) {
+// layout lays out every document that shows, a window document at the window's size and a document of view n in
+// views[n-1], which are rectangles as x, y, width and height in window pixels. Each document's scale comes from the
+// height of its rectangle (see docs/ui/design.md#scale). A document of a view that is not in views is hidden. It runs
+// each frame after scripts, so what they set shows in the same frame.
+layout :: proc(s: ^State, window: [2]f32, views: [][4]f32) {
 	// Temporary memory here is the frame's, which the platform frees each frame.
 	context.temp_allocator = s.platform.frame_allocator
-	s.size = size
-	s.scale = max(size.y / REFERENCE_HEIGHT, MIN_SCALE) * s.scale_factor
 	tf := begin_text(s)
 	for &d, i in s.documents {
-		if d.used && d.built && len(d.nodes) > 0 {
+		if !d.used {
+			continue
+		}
+		d.screen = {}
+		if int(d.view) > len(views) {
+			if d.built && len(d.nodes) > 0 {
+				d.nodes[0].shown = false
+			}
+			continue
+		}
+		rect := d.view == 0 ? [4]f32{0, 0, window.x, window.y} : views[d.view - 1]
+		d.screen = {
+			rect  = rect,
+			scale = max(rect[3] / REFERENCE_HEIGHT, MIN_SCALE) * s.scale_factor,
+		}
+		if d.built && len(d.nodes) > 0 {
 			layout_document(s, tf, &d, i)
 		}
 	}
@@ -34,12 +49,13 @@ layout_document :: proc(s: ^State, tf: Text_Frame, d: ^Document, index: int) {
 	measure_tree(s, tf, d, 0)
 	fit_tree(s, d, 0, 0)
 	root := &d.nodes[0]
-	root.size = s.size
+	root.size = {d.screen.rect[2], d.screen.rect[3]}
 	resolve_tree(s, d, 0, 0)
 	wrap_tree(s, d, 0)
 	fit_tree(s, d, 0, 1)
 	resolve_tree(s, d, 0, 1)
-	everything := [4]f32{0, 0, s.size.x, s.size.y}
+	at := d.screen.rect
+	everything := [4]f32{at[0], at[1], at[0] + at[2], at[1] + at[3]}
 	root.clip = everything
 	place_tree(s, d, 0, everything)
 	// A node that the focus has just moved to is scrolled into view, in the frame that it moved in.
@@ -65,9 +81,11 @@ follow_caret :: proc(s: ^State, d: ^Document, index: int) {
 	}
 	x := caret_x(d, node.text, edit.caret)
 	width :=
-		node.rect[2] - node.rect[0] - (node.style.padding[1] + node.style.padding[3]) * s.scale
-	if x - edit.scroll > width - CARET_WIDTH * s.scale {
-		edit.scroll = x - width + CARET_WIDTH * s.scale
+		node.rect[2] -
+		node.rect[0] -
+		(node.style.padding[1] + node.style.padding[3]) * d.screen.scale
+	if x - edit.scroll > width - CARET_WIDTH * d.screen.scale {
+		edit.scroll = x - width + CARET_WIDTH * d.screen.scale
 	} else if x < edit.scroll {
 		edit.scroll = x
 	}
@@ -110,7 +128,7 @@ wrap_tree :: proc(s: ^State, d: ^Document, n: u32) {
 		return
 	}
 	if node.text.ok {
-		width := node.size.x - (node.style.padding[1] + node.style.padding[3]) * s.scale
+		width := node.size.x - (node.style.padding[1] + node.style.padding[3]) * d.screen.scale
 		wrap(d, &node.text, width, node.style.wrap)
 	}
 	for c := node.first_child; c != NONE; c = d.nodes[c].next_sibling {
@@ -132,8 +150,8 @@ main_axis :: proc(st: ^Style) -> int {
 }
 
 @(private)
-padding_of :: proc(s: ^State, st: ^Style, axis: int) -> f32 {
-	return (axis == 0 ? st.padding[1] + st.padding[3] : st.padding[0] + st.padding[2]) * s.scale
+padding_of :: proc(scale: f32, st: ^Style, axis: int) -> f32 {
+	return (axis == 0 ? st.padding[1] + st.padding[3] : st.padding[0] + st.padding[2]) * scale
 }
 
 @(private)
@@ -146,10 +164,10 @@ length_on :: proc(st: ^Style, axis: int) -> (size, low, high: format.Ui_Length) 
 
 // resolve_length is a length in pixels in a parent's content of a size, or ok false for fit and fill.
 @(private)
-resolve_length :: proc(s: ^State, l: format.Ui_Length, content: f32) -> (px: f32, ok: bool) {
+resolve_length :: proc(scale: f32, l: format.Ui_Length, content: f32) -> (px: f32, ok: bool) {
 	#partial switch l.unit {
 	case .Px:
-		return l.value >= MAX_SIZE ? MAX_SIZE : l.value * s.scale, true
+		return l.value >= MAX_SIZE ? MAX_SIZE : l.value * scale, true
 	case .Percent:
 		return l.value * 0.01 * max(content, 0), true
 	}
@@ -157,16 +175,16 @@ resolve_length :: proc(s: ^State, l: format.Ui_Length, content: f32) -> (px: f32
 }
 
 @(private)
-clamp_size :: proc(s: ^State, st: ^Style, axis: int, size, content: f32) -> f32 {
+clamp_size :: proc(scale: f32, st: ^Style, axis: int, size, content: f32) -> f32 {
 	_, low, high := length_on(st, axis)
-	lo := resolve_length(s, low, content) or_else 0
-	hi := resolve_length(s, high, content) or_else MAX_SIZE
+	lo := resolve_length(scale, low, content) or_else 0
+	hi := resolve_length(scale, high, content) or_else MAX_SIZE
 	return max(min(size, hi), lo)
 }
 
 // natural_image_size is the size of a node's image at the UI scale, once it is resident.
 @(private)
-natural_image_size :: proc(s: ^State, st: ^Style) -> (size: [2]f32, ok: bool) {
+natural_image_size :: proc(s: ^State, scale: f32, st: ^Style) -> (size: [2]f32, ok: bool) {
 	if st.image == {} || s.residency == nil {
 		return
 	}
@@ -174,7 +192,7 @@ natural_image_size :: proc(s: ^State, st: ^Style) -> (size: [2]f32, ok: bool) {
 	if !ready {
 		return
 	}
-	return {f32(t.size.x), f32(t.size.y)} * s.scale, true
+	return {f32(t.size.x), f32(t.size.y)} * scale, true
 }
 
 // fit_tree works out, after its children, the size that each node's content needs along an axis: its fit.
@@ -188,7 +206,7 @@ fit_tree :: proc(s: ^State, d: ^Document, n: u32, axis: int) {
 	content: f32
 	children := 0
 	along := main_axis(st) == axis
-	gap := st.gap * s.scale
+	gap := st.gap * d.screen.scale
 	for c := node.first_child; c != NONE; c = d.nodes[c].next_sibling {
 		fit_tree(s, d, c, axis)
 		child := &d.nodes[c]
@@ -198,7 +216,7 @@ fit_tree :: proc(s: ^State, d: ^Document, n: u32, axis: int) {
 		size, _, _ := length_on(&child.style, axis)
 		part := child.fit[axis]
 		if size.unit == .Px {
-			part = clamp_size(s, &child.style, axis, size.value * s.scale, 0)
+			part = clamp_size(d.screen.scale, &child.style, axis, size.value * d.screen.scale, 0)
 		} else if size.unit == .Percent {
 			part = 0
 		}
@@ -217,15 +235,24 @@ fit_tree :: proc(s: ^State, d: ^Document, n: u32, axis: int) {
 			content = max(content, f32(lines) * node.text.line)
 		}
 	}
-	if natural, ok := natural_image_size(s, st); ok && node.element == .Image {
+	if natural, ok := natural_image_size(s, d.screen.scale, st); ok && node.element == .Image {
 		if axis == 0 || natural.x <= 0 {
 			content = max(content, natural[axis])
 		} else {
 			// An image keeps its shape at the width that it resolved to.
-			content = max(content, natural.y * (node.size.x - padding_of(s, st, 0)) / natural.x)
+			content = max(
+				content,
+				natural.y * (node.size.x - padding_of(d.screen.scale, st, 0)) / natural.x,
+			)
 		}
 	}
-	node.fit[axis] = clamp_size(s, st, axis, content + padding_of(s, st, axis), 0)
+	node.fit[axis] = clamp_size(
+		d.screen.scale,
+		st,
+		axis,
+		content + padding_of(d.screen.scale, st, axis),
+		0,
+	)
 }
 
 // resolve_tree gives each child of a node its size along an axis, from the node's, which is resolved.
@@ -236,7 +263,7 @@ resolve_tree :: proc(s: ^State, d: ^Document, n: u32, axis: int) {
 		return
 	}
 	st := &node.style
-	content := max(node.size[axis] - padding_of(s, st, axis), 0)
+	content := max(node.size[axis] - padding_of(d.screen.scale, st, axis), 0)
 	if main_axis(st) == axis {
 		// A scroll box's children share the larger of its content and what they need, which it scrolls through.
 		room :=
@@ -249,7 +276,7 @@ resolve_tree :: proc(s: ^State, d: ^Document, n: u32, axis: int) {
 				continue
 			}
 			size, _, _ := length_on(&child.style, axis)
-			px, fixed := resolve_length(s, size, content)
+			px, fixed := resolve_length(d.screen.scale, size, content)
 			if !fixed {
 				stretch := size.unit == .Fill
 				if size.unit == .Fit {
@@ -258,7 +285,7 @@ resolve_tree :: proc(s: ^State, d: ^Document, n: u32, axis: int) {
 				}
 				px = stretch ? content : child.fit[axis]
 			}
-			child.size[axis] = clamp_size(s, &child.style, axis, px, content)
+			child.size[axis] = clamp_size(d.screen.scale, &child.style, axis, px, content)
 		}
 	}
 	for c := node.first_child; c != NONE; c = d.nodes[c].next_sibling {
@@ -270,7 +297,7 @@ resolve_tree :: proc(s: ^State, d: ^Document, n: u32, axis: int) {
 // at that of the content, and any other at its fit, and the gaps between them.
 @(private)
 children_fit :: proc(s: ^State, d: ^Document, node: ^Node, axis: int, content: f32) -> f32 {
-	gap := node.style.gap * s.scale
+	gap := node.style.gap * d.screen.scale
 	total: f32
 	count := 0
 	for c := node.first_child; c != NONE; c = d.nodes[c].next_sibling {
@@ -279,9 +306,9 @@ children_fit :: proc(s: ^State, d: ^Document, node: ^Node, axis: int, content: f
 			continue
 		}
 		size, _, _ := length_on(&child.style, axis)
-		px, fixed := resolve_length(s, size, content)
+		px, fixed := resolve_length(d.screen.scale, size, content)
 		total +=
-			clamp_size(s, &child.style, axis, fixed ? px : child.fit[axis], content) +
+			clamp_size(d.screen.scale, &child.style, axis, fixed ? px : child.fit[axis], content) +
 			(count > 0 ? gap : 0)
 		count += 1
 	}
@@ -293,7 +320,7 @@ children_fit :: proc(s: ^State, d: ^Document, node: ^Node, axis: int, content: f
 // again. Percents are of the content; the room is more in a scroll box.
 @(private)
 resolve_main :: proc(s: ^State, d: ^Document, node: ^Node, axis: int, content, room: f32) {
-	gap := node.style.gap * s.scale
+	gap := node.style.gap * d.screen.scale
 	free := room
 	weight: f32
 	count := 0
@@ -312,11 +339,11 @@ resolve_main :: proc(s: ^State, d: ^Document, node: ^Node, axis: int, content, r
 			child.size[axis] = -1
 			continue
 		}
-		px, fixed := resolve_length(s, size, content)
+		px, fixed := resolve_length(d.screen.scale, size, content)
 		if !fixed {
 			px = child.fit[axis]
 		}
-		child.size[axis] = clamp_size(s, &child.style, axis, px, content)
+		child.size[axis] = clamp_size(d.screen.scale, &child.style, axis, px, content)
 		free -= child.size[axis]
 	}
 	// Each pass freezes the fills that their limits stop, until the shares fit them all.
@@ -330,7 +357,7 @@ resolve_main :: proc(s: ^State, d: ^Document, node: ^Node, axis: int, content, r
 			}
 			size, _, _ := length_on(&child.style, axis)
 			want := share * size.value
-			got := clamp_size(s, &child.style, axis, want, content)
+			got := clamp_size(d.screen.scale, &child.style, axis, want, content)
 			if got != want {
 				child.size[axis] = got
 				free -= got
@@ -376,10 +403,10 @@ place_tree :: proc(s: ^State, d: ^Document, n: u32, rect: [4]f32) {
 	node.scroll_max = 0
 	node.child_clip = (st.clip || scrolling) ? intersect(node.clip, node.rect) : node.clip
 	content := [4]f32 {
-		rect[0] + st.padding[3] * s.scale,
-		rect[1] + st.padding[0] * s.scale,
-		rect[2] - st.padding[1] * s.scale,
-		rect[3] - st.padding[2] * s.scale,
+		rect[0] + st.padding[3] * d.screen.scale,
+		rect[1] + st.padding[0] * d.screen.scale,
+		rect[2] - st.padding[1] * d.screen.scale,
+		rect[3] - st.padding[2] * d.screen.scale,
 	}
 	if axis < 0 {
 		for c := node.first_child; c != NONE; c = d.nodes[c].next_sibling {
@@ -387,13 +414,15 @@ place_tree :: proc(s: ^State, d: ^Document, n: u32, rect: [4]f32) {
 			if !child.shown {
 				continue
 			}
-			at := anchored(child.style.anchor, content, child.size) + child.style.offset * s.scale
+			at :=
+				anchored(child.style.anchor, content, child.size) +
+				child.style.offset * d.screen.scale
 			place_tree(s, d, c, {at.x, at.y, at.x + child.size.x, at.y + child.size.y})
 		}
 		return
 	}
 	cross := 1 - axis
-	gap := st.gap * s.scale
+	gap := st.gap * d.screen.scale
 	total: f32
 	count := 0
 	for c := node.first_child; c != NONE; c = d.nodes[c].next_sibling {
@@ -438,7 +467,7 @@ place_tree :: proc(s: ^State, d: ^Document, n: u32, rect: [4]f32) {
 		case .End:
 			at[cross] += room - child.size[cross]
 		}
-		at += child.style.offset * s.scale
+		at += child.style.offset * d.screen.scale
 		place_tree(s, d, c, {at.x, at.y, at.x + child.size.x, at.y + child.size.y})
 		cursor += child.size[axis] + gap
 	}

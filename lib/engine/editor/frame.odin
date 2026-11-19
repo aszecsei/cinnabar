@@ -51,7 +51,10 @@ Tools :: struct {
 //   - The editor's previews and thumbnail join the game's, and draw in the own view, as the particle systems that the
 //     editor plays join the game's.
 //   - The own view's shading_stats is the game's or its viewport's.
-// The game's extra views follow the viewports'. Without an editor, desc is returned as it is.
+// A game that draws several views in rects of its window (see docs/rendering/frame.md#views-in-rects) shows them all in
+// the Game view when it is the own view: its own view at its rect, scaled to the viewport, then its views in rects, before
+// the scene views. Without a Game view first, they are dropped, and the own view fills its viewport. The game's extra
+// views with targets of their own follow the viewports'. Without an editor, desc is returned as it is.
 @(private)
 plan_frame :: proc(
 	e: ^Editor,
@@ -77,16 +80,96 @@ plan_frame :: proc(
 	extras := make([dynamic]render.Extra_View, e.platform.frame_allocator)
 	for v, i in views {
 		view := plan_view(e, w, desc, v, base, caps)
-		if i == 0 {
-			render.use_view(&out, view)
-			out.shading_stats = desc.shading_stats || render_overrides(e, v.viewport).shading_stats
-		} else {
+		if i > 0 {
 			append(&extras, view)
+			continue
+		}
+		// The Game view shows the game's whole layout: the game's own view in its rect, and the game's views in rects
+		// first among the extra views, so that a scene view, not one of them, is what the views' limit leaves out.
+		game_rect, in_rect := desc.rect.?
+		if v.kind == .Game {
+			view.cut = desc.cut
+			if in_rect {
+				view.rect, view.size = scale_rect(game_rect, desc.size, v.size)
+			}
+		}
+		render.use_view(&out, view)
+		out.shading_stats = desc.shading_stats || render_overrides(e, v.viewport).shading_stats
+		if v.kind != .Game || !in_rect {
+			continue
+		}
+		for ev in desc.extra_views {
+			if ev.rect != nil {
+				append(
+					&extras,
+					plan_game_extra(e, ev, game_rect.target_size, v, base, caps, desc.quality),
+				)
+			}
 		}
 	}
-	append(&extras, ..desc.extra_views)
+	// The game's views in rects of its own view's target draw in the Game view alone: without it, they have no target.
+	for ev in desc.extra_views {
+		if ev.rect == nil {
+			append(&extras, ev)
+		}
+	}
 	out.extra_views = extras[:]
 	return
+}
+
+// scale_rect gives a view's rect, and its size, in a viewport of size, for a game whose rect is of a target of the game's
+// size. The game's window is the Game view's size (see docs/editor/viewport.md#views), so this is the same rect
+// but for a frame in which the two differ. Each edge scales, so the game's views that share an edge still share it.
+@(private = "file")
+scale_rect :: proc(
+	rect: render.Target_Rect,
+	size, viewport: [2]u32,
+) -> (
+	scaled: render.Target_Rect,
+	scaled_size: [2]u32,
+) {
+	target := [2]u64{u64(max(rect.target_size.x, 1)), u64(max(rect.target_size.y, 1))}
+	edge :: proc(at: u32, target: u64, viewport: u32) -> u32 {
+		return u32(u64(at) * u64(viewport) / target)
+	}
+	near := [2]u32 {
+		edge(rect.origin.x, target.x, viewport.x),
+		edge(rect.origin.y, target.y, viewport.y),
+	}
+	far := rect.origin + size
+	far = {edge(far.x, target.x, viewport.x), edge(far.y, target.y, viewport.y)}
+	return {target_size = viewport, origin = near}, far - near
+}
+
+// plan_game_extra describes one of the game's views in a rect for the Game view: in the Game view's target, at its rect
+// scaled to the viewport, with the viewport's debug view, features, exposure and quality over the view's own, as the Game
+// view itself takes them.
+@(private = "file")
+plan_game_extra :: proc(
+	e: ^Editor,
+	ev: render.Extra_View,
+	game_size: [2]u32,
+	v: Frame_Viewport,
+	base: render.Quality,
+	caps: render.Caps,
+	game_quality: ^render.Quality,
+) -> render.Extra_View {
+	overrides := render_overrides(e, v.viewport)
+	view := ev
+	view.target = {}
+	game_rect := ev.rect.? or_else {}
+	game_rect.target_size = game_size
+	view.rect, view.size = scale_rect(game_rect, ev.size, v.size)
+	view.no_debug = true
+	if overrides.debug_view != .Lit {
+		view.debug_view = overrides.debug_view
+	}
+	view.disable += overrides.disable
+	view.exposure_offset += overrides.exposure_offset
+	from := ev.quality != nil ? ev.quality^ : (game_quality != nil ? game_quality^ : base)
+	quality, _ := viewport_quality(e, from, caps, v.viewport)
+	view.quality = new_clone(quality, e.platform.frame_allocator)
+	return view
 }
 
 // plan_view describes a viewport's view of the game's frame.

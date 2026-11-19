@@ -152,12 +152,76 @@ the_scale_follows_the_output_height_and_the_project_setting :: proc(t: ^testing.
 	testing.expect_value(t, node_rect(t, f, e, "b"), [4]f32{0, 0, 200, 20})
 	set_scale_factor(&f.ui, 2)
 	step(f, size = {3840, 2160})
-	testing.expect_value(t, f.ui.scale, 4)
+	testing.expect_value(t, document_of(&f.ui, e).screen.scale, 4)
 	testing.expect_value(t, node_rect(t, f, e, "b"), [4]f32{0, 0, 1200, 120})
 	// A small window keeps its scale at MIN_SCALE.
 	set_scale_factor(&f.ui, 1)
 	step(f, size = {320, 200})
-	testing.expect_value(t, f.ui.scale, f32(MIN_SCALE))
+	testing.expect_value(t, document_of(&f.ui, e).screen.scale, f32(MIN_SCALE))
+}
+
+@(test)
+a_view_document_lays_out_in_its_views_rect_at_its_scale :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(t, f)
+	e := show(
+		t,
+		f,
+		DOC,
+		"ui 1\n<ui><box id=\"b\" width=\"300\" height=\"30\" padding=\"6\"/></ui>",
+	)
+	ecs.get(&f.world, e, Ui_Document).view = 2
+	views := [][4]f32{{0, 0, 960, 1080}, {960, 40, 640, 1620}}
+	step(f, size = {1920, 1080}, views = views)
+	d := document_of(&f.ui, e)
+	testing.expect(t, d.nodes[0].shown)
+	testing.expect_value(t, d.screen.rect, views[1])
+	testing.expect_value(t, d.screen.scale, f32(1.5))
+	// The node is in window coordinates, at the scale of the view's height: 1620 / 1080.
+	testing.expect_value(t, node_rect(t, f, e, "b"), [4]f32{960, 40, 1410, 85})
+	testing.expect_value(t, d.nodes[0].clip, [4]f32{960, 40, 1600, 1660})
+}
+
+@(test)
+a_window_document_lays_out_at_the_windows_size :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(t, f)
+	e := show(t, f, DOC, "ui 1\n<ui><box id=\"b\" width=\"100%\" height=\"100%\"/></ui>")
+	views := [][4]f32{{0, 0, 640, 360}, {640, 0, 640, 360}}
+	step(f, size = {1280, 720}, views = views)
+	d := document_of(&f.ui, e)
+	testing.expect(t, d.nodes[0].shown)
+	testing.expect_value(t, d.screen.rect, [4]f32{0, 0, 1280, 720})
+	testing.expect_value(t, d.screen.scale, f32(720.0 / 1080))
+	testing.expect_value(t, node_rect(t, f, e, "b"), [4]f32{0, 0, 1280, 720})
+}
+
+@(test)
+a_document_of_a_view_not_shown_is_hidden :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(t, f)
+	e := show(
+		t,
+		f,
+		DOC,
+		"ui 1\n<ui><button id=\"b\" width=\"100%\" height=\"100%\" focusable=\"true\"/></ui>",
+	)
+	ecs.get(&f.world, e, Ui_Document).view = 3
+	views := [][4]f32{{0, 0, 960, 1080}, {960, 0, 960, 1080}}
+	step(f, views = views)
+	d := document_of(&f.ui, e)
+	testing.expect_value(t, d.screen, Screen{})
+	testing.expect(t, !d.nodes[0].shown)
+	b := build_batch(&f.ui, 0, f.platform.frame_allocator)
+	testing.expect_value(t, len(b.instances), 0)
+	testing.expect_value(t, len(scope(&f.ui)), 0)
+	// The view appears, and the document with it.
+	views = [][4]f32{{0, 0, 640, 1080}, {640, 0, 640, 1080}, {1280, 0, 640, 1080}}
+	step(f, views = views)
+	testing.expect(t, d.nodes[0].shown)
+	testing.expect(t, d.nodes[0].shown)
+	testing.expect_value(t, node_rect(t, f, e, "b"), [4]f32{1280, 0, 1920, 1080})
+	testing.expect_value(t, len(scope(&f.ui)), 1)
 }
 
 @(test)

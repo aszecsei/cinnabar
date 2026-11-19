@@ -493,7 +493,8 @@ handle_input :: proc(s: ^State, input: core.Input, now: f64) {
 				s.input.reveal = NO_NODE
 				if d.nodes[n].element == .Field {
 					// The press is against the text as it showed: scrolled if the field is being edited, else not.
-					x := mouse.x - d.nodes[n].rect[0] - d.nodes[n].style.padding[3] * s.scale
+					x :=
+						mouse.x - d.nodes[n].rect[0] - d.nodes[n].style.padding[3] * d.screen.scale
 					if edit, is_edited := editing(s, d, n); is_edited {
 						edit.caret = caret_at(d, d.nodes[n].text, x + edit.scroll)
 						edit.anchor = edit.caret

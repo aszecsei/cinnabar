@@ -14,6 +14,8 @@ Ui_Document :: struct {
 	// Documents of a higher order draw over those of a lower one, and take input first.
 	order:    i32 `editor:"range=-100,100"`,
 	visible:  bool,
+	// 0 puts the document on the window; n puts it in the game's nth view, laid out and scaled by that view's rectangle.
+	view:     u8 `editor:"range=0,5"`,
 }
 
 DEFAULT_UI_DOCUMENT :: Ui_Document {

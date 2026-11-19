@@ -27,6 +27,9 @@ Texture_Cache :: struct {
 // in a frame has no valid history in the next.
 History_Set :: struct {
 	entries: [MAX_HISTORY_TEXTURES]History_Entry,
+	// The first cache frame whose histories are valid: what a frame before it wrote is not, after a cut (see
+	// view_state_cut).
+	cut:     u64,
 }
 
 @(private)
@@ -191,7 +194,7 @@ cache_history :: proc(
 			"render: a history texture is used twice in a frame",
 		)
 		if entry.desc == key {
-			valid = entry.written == cache.frame - 1
+			valid = entry.written == cache.frame - 1 && entry.written >= set.cut
 			entry.current = 1 - entry.current
 			entry.last_used = cache.frame
 			return entry.textures[entry.current], entry.textures[1 - entry.current], valid, true

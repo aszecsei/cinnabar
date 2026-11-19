@@ -29,7 +29,7 @@ frame :: proc(f: ^Fixture, input: core.Input = {}) {
 	handle_input(&f.ui, input, test_now)
 	flush_events(&f.ui, &f.runtime)
 	script.run_phase(&f.runtime, time.Millisecond * 16, input)
-	layout(&f.ui, {1920, 1080})
+	layout(&f.ui, {1920, 1080}, nil)
 }
 
 @(test)

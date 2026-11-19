@@ -16,6 +16,13 @@ mode :: proc(e: ^Editor) -> link.Editor_Mode {
 	return e.session.mode if active(e) else .Play
 }
 
+// world_loads counts the times that the editor replaced the game's world with its scene, at Play, at Stop and when it
+// opens a scene. What the game keeps for one world, such as its views, starts again when it changes: the old world's
+// behaviours end without their callbacks then, so they cannot undo what they set.
+world_loads :: proc(e: ^Editor) -> u64 {
+	return e.loads
+}
+
 // editing is true while a linked editor is in Edit: the editor's outline, gizmo, icons and helpers draw only then.
 editing :: proc(e: ^Editor) -> bool {
 	return active(e) && e.session.mode == .Edit

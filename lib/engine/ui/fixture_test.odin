@@ -228,13 +228,18 @@ show :: proc(
 }
 
 // step runs the UI's part of a frame: the documents, then the input against the last layout, then the layout at a
-// size, which sets the scale.
+// size and views, which sets each document's scale.
 @(private)
-step :: proc(f: ^Fixture, input: core.Input = {}, size := [2]f32{1920, 1080}) {
+step :: proc(
+	f: ^Fixture,
+	input: core.Input = {},
+	size := [2]f32{1920, 1080},
+	views: [][4]f32 = nil,
+) {
 	free_all(f.platform.frame_allocator)
 	sync(&f.ui, &f.world)
 	handle_input(&f.ui, input, test_now)
-	layout(&f.ui, size)
+	layout(&f.ui, size, views)
 }
 
 // node_rect is the rectangle of a document's element by its id.

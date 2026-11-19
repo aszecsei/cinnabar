@@ -34,7 +34,9 @@ A game plays the [test tone](../core/audio.md#test-tone) or calls `update`, not 
 | `gain`, `pitch` | The level, and the playback rate: 1 is the sound's own. |
 | `min_distance`, `max_distance` | Full volume at `min_distance` and nearer, and silence at `max_distance` and farther. |
 
-**`Audio_Listener`** (97) marks where the world is heard from: its entity's presented pose. The first one in the world counts. Without one, a spatial source plays centred at full gain, with one warning.
+**`Audio_Listener`** (97) marks where the world is heard from: its entity's presented pose. A world can have several, one for each view of a split screen. Each source is heard at its nearest listener, by world distance, up to `MAX_LISTENERS` (8). The source's position, its pan and its occlusion ray all come from that listener. A listener past the limit is not heard from, and logs one warning. Without any, a spatial source plays centred at full gain, with one warning.
+
+**A full-screen claim does not change this.** During a cutscene, one view fills the screen, but the players' listeners are still in the world. Sounds are still heard at them.
 
 **Spatial sound comes from presented poses.** `update` runs where render extraction reads the world, and uses `ecs.presented`, so a source sounds where it is drawn, between ticks. An entity that moves in `Fixed` systems needs a `Previous_Transform` for this, as it does to be drawn smoothly.
 

@@ -76,6 +76,9 @@ SHADOW_CACHE_SCENE_META :: #load("../content/scenes/shadow_cache.scene.meta", st
 // The streaming scene, a world of five tiles that load and unload as the camera flies along them (see
 // docs/world/scenes.md#streaming).
 STREAMING_SCENE_META :: #load("../content/scenes/streaming.scene.meta", string)
+// The split screen scene, two players in two views side by side on the streaming world, with a full-screen claim of an
+// overview camera on C or a gamepad's Y (see docs/rendering/frame.md).
+SPLIT_SCENE_META :: #load("../content/scenes/split.scene.meta", string)
 // The night scene, a yard whose night sublevel N turns on and off: its lights and props, and the lantern that the base
 // refers to (see docs/world/sublevels.md).
 NIGHT_SCENE_META :: #load("../content/scenes/night.scene.meta", string)
@@ -886,8 +889,8 @@ update_output :: proc(g: ^game.Game) {
 
 // switch_scene loads the next scene, the glass scene, the surfaces scene, the room scene, the billboards scene, the
 // animation scene, the cube map scene, the audio scene, the 2D scene, the playground, the doorway, the guard, the soft
-// shadows, the shadow cache, the streaming scene, the night scene, then the main scene again, when F7 is pressed. Each
-// loads with the parts of the active sublevels, as the main scene does. A linked editor owns the scene, so the key
+// shadows, the shadow cache, the streaming scene, the split screen scene, the night scene, then the main scene again,
+// when F7 is pressed. Each loads with the parts of the active sublevels, as the main scene does. A linked editor owns the scene, so the key
 // does nothing then.
 switch_scene :: proc(g: ^game.Game) {
 	if .F7 not_in g.platform.input().pressed || editor.active(&g.editor) {
@@ -910,6 +913,7 @@ switch_scene :: proc(g: ^game.Game) {
 		SOFT_SHADOWS_SCENE_META,
 		SHADOW_CACHE_SCENE_META,
 		STREAMING_SCENE_META,
+		SPLIT_SCENE_META,
 		NIGHT_SCENE_META,
 	}
 	names := [?]string {
@@ -928,6 +932,7 @@ switch_scene :: proc(g: ^game.Game) {
 		"soft shadows",
 		"shadow cache",
 		"streaming",
+		"split screen",
 		"night",
 	}
 	s.scene_index = (s.scene_index + 1) % len(metas)

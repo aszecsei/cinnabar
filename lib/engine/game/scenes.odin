@@ -5,11 +5,11 @@ import "core:c"
 import "cinnabar:core/luau"
 import "cinnabar:engine/ai"
 import format "cinnabar:engine/asset/format"
+import "cinnabar:engine/camera"
 import "cinnabar:engine/ecs"
 import "cinnabar:engine/editor"
 import "cinnabar:engine/nav"
 import "cinnabar:engine/physics"
-import "cinnabar:engine/render"
 import "cinnabar:engine/scene"
 import "cinnabar:engine/script"
 import "cinnabar:engine/streaming"
@@ -86,10 +86,9 @@ apply_scene_requests :: proc(g: ^Game) {
 	if unloaded {
 		forget_despawned(g)
 	}
-	find_camera(g)
 }
 
-// stream_scenes is a frame of the streaming policy: the camera and the Stream_Source entities are the sources, and the
+// stream_scenes is a frame of the streaming policy: the game views' cameras and the Stream_Source entities are the sources, and the
 // scenes of the World_Streamer's world load and unload around them (see streaming.update and
 // docs/world/streaming.md#the-policy). The streamer's behaviours get
 // the events (docs/world/streaming.md#events) as on_scene_loading, on_scene_ready, on_scene_unloaded and on_scene_failed, each with the scene's number
@@ -104,9 +103,8 @@ stream_scenes :: proc(g: ^Game) {
 	}
 	frame := g.platform.frame_allocator
 	sources := make([dynamic]ecs.World_Position, frame)
-	if view, ok := render.camera_view(&g.world, g.camera); ok {
-		append(&sources, view.position)
-	}
+	// Every game view's camera, shown or not, and the claim's: a release then finds its views' scenes loaded.
+	camera.append_positions(&g.views, &g.world, &sources)
 	found := make([dynamic]ecs.Entity, frame)
 	ecs.collect(&g.world, {streaming.STREAM_SOURCE_ID}, &found)
 	for entity in found {
@@ -162,9 +160,6 @@ stream_scenes :: proc(g: ^Game) {
 			continue
 		}
 		script.send(&g.scripts, streamer, name, f64(event.number), event.scene)
-	}
-	if len(events) > 0 {
-		find_camera(g)
 	}
 }
 

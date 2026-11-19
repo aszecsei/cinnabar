@@ -58,6 +58,9 @@ Editor :: struct {
 	ai:          ^ai.State,
 	// The game's scene streaming, in Game_State, whose work the stats report, or nil without one.
 	streaming:   ^streaming.State,
+	// How many times the editor replaced the game's world with its scene (Load_Scene), in every session: the game
+	// starts what it keeps for a world again when this changes (see world_loads).
+	loads:       u64,
 }
 
 // Session is the state of one editor connection: what the editor has sent the game, and what the game has sent the
@@ -325,6 +328,7 @@ poll :: proc(
 		case link.Load_Scene:
 			problems := make([dynamic]link.Edit_Problem, frame)
 			load_scenes(e, w, scripts, v, &problems)
+			e.loads += 1
 			// The old world's behaviours end without callbacks, as the editor's scene replaces it, and in Edit, the world
 			// is the editor's document, which the edit-mode behaviours edit from now on.
 			if scripts != nil {

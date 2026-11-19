@@ -127,6 +127,15 @@ Binding :: struct {
 	name, value: string,
 }
 
+// Screen is the part of the window that a document lays out in, and the scale of its lengths, as layout set them this
+// frame: zero for a document of a view that is not shown, whose root node is hidden, so it takes no input and does not
+// draw.
+Screen :: struct {
+	// The rectangle as x, y, width and height, in window pixels.
+	rect:  [4]f32,
+	scale: f32,
+}
+
 // Document is a Ui_Document's document, in a slot of the state, while its entity has one.
 Document :: struct {
 	used:        bool,
@@ -141,6 +150,10 @@ Document :: struct {
 	retry_at:    f64,
 	order:       i32,
 	visible:     bool,
+	// The game view that the document lays out in: 0 is the window (see Ui_Document).
+	view:        u8,
+	// Where the document is this frame, which layout sets.
+	screen:      Screen,
 	// Whether the entity had its Ui_Document this frame.
 	seen:        bool,
 	// The document's blob, copied, which props' strings point into: the asset runtime frees its own when it swaps it.
@@ -196,9 +209,6 @@ State :: struct {
 	fonts:        [MAX_FONTS]Font_Slot,
 	// project.settings' ui.scale, which multiplies the scale that the output's height gives.
 	scale_factor: f32,
-	// This frame's scale and the UI layer's size.
-	scale:        f32,
-	size:         [2]f32,
 	pipeline:     render.Shader_Pipeline,
 	sampler:      gpu.Sampler,
 	input:        Input_State,
@@ -218,7 +228,6 @@ init :: proc(
 		assets       = assets,
 		residency    = residency,
 		scale_factor = 1,
-		scale        = 1,
 		pipeline     = render.shader_pipeline(UI_SHADER),
 	}
 	init_input(s)
@@ -396,6 +405,7 @@ sync :: proc(s: ^State, w: ^ecs.World) {
 		d.seen = true
 		d.order = c.order
 		d.visible = c.visible && ecs.active_in_hierarchy(w, e)
+		d.view = c.view
 		load_document(s, d)
 	}
 	for &d in s.documents {
