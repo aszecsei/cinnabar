@@ -400,7 +400,7 @@ a_claim_shows_one_full_view_and_its_release_gives_the_layout_back :: proc(t: ^te
 	testing.expect_value(t, frame.views[0].rect, FULL)
 	testing.expect(t, near(x_of(frame.views[0].view), 3))
 	testing.expect(t, frame.views[0].cut)
-	testing.expect(t, claimed(&f.views))
+	testing.expect(t, frame.claimed && claimed(&f.views))
 	expect_x(t, f, 0, 3)
 	testing.expect_value(t, chosen_camera(&f.views, 0), c)
 	testing.expect_value(t, chosen_camera(&f.views, 1), b)

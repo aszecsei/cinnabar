@@ -171,8 +171,11 @@ Shown_View :: struct {
 }
 
 Frame_Views :: struct {
-	views: [MAX_VIEWS]Shown_View,
-	count: int,
+	views:   [MAX_VIEWS]Shown_View,
+	count:   int,
+	// The one view is a claim's, not a player's: the players' views and what belongs to them, such as their HUDs, do
+	// not show.
+	claimed: bool,
 }
 
 // push puts a camera on a view's stack. blend is how the view moves to it when it becomes the choice, and blend_out how
@@ -429,7 +432,9 @@ advance :: proc(v: ^Views, w: ^ecs.World, steps: Steps) -> Frame_Views {
 	}
 	v.presented = now
 
-	frame: Frame_Views
+	frame := Frame_Views {
+		claimed = now.claimed,
+	}
 	if now.claimed {
 		frame.count = 1
 		frame.views[0] = {0, FULL, v.claims.shown, cut[CLAIMS] || relaid}

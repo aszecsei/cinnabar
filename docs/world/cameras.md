@@ -87,6 +87,6 @@ What else follows each view:
 
 - **Audio:** each source is heard at its nearest `Audio_Listener`. A split-screen game puts one on each player's camera (see [Audio: Sources and the listener](../audio/design.md#sources-and-the-listener)).
 - **Streaming:** each view's camera is a source (see [World streaming: The policy](streaming.md#the-policy)).
-- **The UI:** a `Ui_Document` with a `view` lays out in that view's rect, at its scale. One with view 0 uses the window (see [UI: Scale](../ui/design.md#scale)).
+- **The UI:** a `Ui_Document` with a `view` lays out in that view's rect, at its scale. One with view 0 uses the window (see [UI: Scale](../ui/design.md#scale)). While a claim shows, no player's view does, so the documents of the views, such as the players' HUDs, are hidden, and the window's documents, such as subtitles, still show.
 - **Rendering:** each view culls and chooses its level of detail from its own camera, and keeps its own histories and exposure (see [Rendering: Views in rects](../rendering/frame.md#views-in-rects)).
 - **The editor's Game view** shows the whole layout (see [Editor: Views](../editor/viewport.md#views)).
