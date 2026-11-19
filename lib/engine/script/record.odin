@@ -115,7 +115,7 @@ drop_edits :: proc(r: ^Runtime) {
 }
 
 // writing is true while an edit-mode behaviour's code runs in Edit mode, so its writes to the document are recorded.
-@(private)
+// A binding outside this package that cannot record its work refuses it then.
 writing :: proc(r: ^Runtime) -> bool {
 	return r.callbacks == .Edit_Mode && instance_at(r, r.writer) != nil
 }

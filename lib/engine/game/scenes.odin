@@ -175,6 +175,7 @@ forget_despawned :: proc(g: ^Game) {
 	nav.forget_despawned(&g.nav, &g.world)
 	ai.forget_despawned(&g.ai, &g.world)
 	script.forget_despawned(&g.scripts)
+	scene.forget_despawned_pools(&g.scenes, &g.world)
 }
 
 // check_scene_number is the number of a scene that argument 1 of a binding names, or an error for any other value.

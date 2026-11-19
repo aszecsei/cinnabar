@@ -150,7 +150,9 @@ add_entities :: proc(
 
 // add_entities_to adds entities as add_entities does, and gives the entity of each, or 0 for one that it skipped.
 // Without scene_ids they get no Scene_Entity, as a game's entities have none. With pending, the behaviours are not
-// attached but collected there, for a caller that attaches them itself.
+// attached but collected there, for a caller that attaches them itself. With reuse, the entities of a pooled instance
+// of the same blob, one for each entity or 0 where its first spawn skipped one, take the values in place of new
+// entities (see reuse_entity).
 @(private = "file")
 add_entities_to :: proc(
 	w: ^ecs.World,
@@ -162,6 +164,7 @@ add_entities_to :: proc(
 	pending: ^[dynamic]script.Pending_Behaviour = nil,
 	number: u32 = 0,
 	scenes: ^Scenes = nil,
+	reuse: []ecs.Entity = nil,
 ) -> (
 	count: int,
 	spawned: []ecs.Entity,
@@ -170,7 +173,11 @@ add_entities_to :: proc(
 	// Every entity exists before any field is set, so a field can refer to an entity later in the scene.
 	spawned = make([]ecs.Entity, len(entities), w.platform.frame_allocator)
 	for e, i in entities {
-		spawned[i] = spawn_entity(&l, e, scene_ids, number)
+		if reuse != nil {
+			spawned[i] = reuse_entity(&l, reuse[i], e)
+		} else {
+			spawned[i] = spawn_entity(&l, e, scene_ids, number)
+		}
 		if spawned[i] != 0 {
 			count += 1
 		}
@@ -219,6 +226,59 @@ spawn_entity :: proc(
 	}
 	if e.name != "" {
 		ecs.add(l.world, entity, ecs.intern(l.world, e.name))
+	}
+	return entity
+}
+
+// reuse_entity takes a pooled instance's entity for a prefab's entity, as spawn_entity makes one, and records it in the
+// loader's handles. It removes what a fresh entity would not have: the components that the game added and the prefab's
+// entity does not have, except the ones that the engine keeps (NO_CATEGORY, such as a physics body's handle) and the
+// poses, which the prefab, the spawn's pose and propagation set again; a Parent on the root, and a Disabled where the
+// prefab's entity is active. It sets the prefab's name. fill_entity then writes the prefab's components over the
+// entity's, in place. A pooled entity of 0 is one that the first spawn skipped, and stays skipped.
+@(private = "file")
+reuse_entity :: proc(l: ^Loader, entity: ecs.Entity, e: format.Scene_Entity) -> ecs.Entity {
+	if entity == 0 {
+		return 0
+	}
+	l.entity = e.id
+	l.handles[e.id] = entity
+	w := l.world
+	// The list is the archetype's, which a removal changes, so it is copied first.
+	components := ecs.entity_components(w, entity)
+	doomed := make([dynamic]ecs.Component_Id, 0, len(components), w.platform.frame_allocator)
+	outer: for id in components {
+		switch id {
+		case ecs.TRANSFORM_ID, ecs.PREVIOUS_TRANSFORM_ID:
+			continue outer
+		case ecs.PARENT_ID:
+			if e.parent == 0 {
+				append(&doomed, id)
+			}
+			continue outer
+		case ecs.DISABLED_ID:
+			if e.active {
+				append(&doomed, id)
+			}
+			continue outer
+		}
+		for c in e.components {
+			if ecs.Component_Id(c.id) == id {
+				continue outer
+			}
+		}
+		if info := ecs.registry_find(&w.registry, id);
+		   info != nil && info.category != ecs.NO_CATEGORY {
+			append(&doomed, id)
+		}
+	}
+	for id in doomed {
+		ecs.remove_raw(w, entity, id)
+	}
+	if e.name != "" {
+		ecs.add(w, entity, ecs.intern(w, e.name))
+	} else if ecs.has(w, entity, ecs.Name) {
+		ecs.remove(w, entity, ecs.Name)
 	}
 	return entity
 }
@@ -280,7 +340,8 @@ attach_behaviours :: proc(
 // prefab's references inside it resolve to its own new entities. The children keep their Local_Transform, and
 // propagation places them. With an owner, the root is that scene's (see Scene_Owned) and goes when it unloads. The
 // behaviours wake in the next script phase; from a script, World.spawn wakes them before it returns, and the root is
-// its spawner's scene's. Call it between frames or in a serial phase.
+// its spawner's scene's. Call it between frames or in a serial phase. pool_spawn spawns one that pool_release keeps
+// for the next (see pool.odin).
 spawn_prefab :: proc(
 	w: ^ecs.World,
 	scripts: ^script.Runtime,
@@ -292,16 +353,29 @@ spawn_prefab :: proc(
 	root: ecs.Entity,
 	ok: bool,
 ) {
-	root, _, ok = spawn_prefab_entities(w, scripts, assets, guid, pose, nil)
+	spawned: Spawned_Prefab
+	spawned, _, ok = spawn_prefab_entities(w, scripts, assets, guid, pose, nil)
+	root = spawned.root
 	if ok && owner != 0 {
 		ecs.add(w, root, Scene_Owned{owner})
 	}
 	return
 }
 
+// Spawned_Prefab is an instance that spawn_prefab_entities made or filled again: its root, each of the prefab's
+// entities in the blob's order, or 0 for one that it skipped, in frame memory, and the version of the blob.
+@(private)
+Spawned_Prefab :: struct {
+	root:     ecs.Entity,
+	entities: []ecs.Entity,
+	version:  u32,
+}
+
 // spawn_prefab_entities spawns as spawn_prefab does, and with pending, collects the behaviours there instead of
-// attaching them. message says why it could not.
-@(private = "file")
+// attaching them. With reuse, a pooled instance of the prefab, it fills that instance's entities again in place of new
+// ones, when they are all alive and were spawned from the blob that the prefab has now; otherwise it despawns what is
+// left of them and spawns a new instance. message says why it could not.
+@(private)
 spawn_prefab_entities :: proc(
 	w: ^ecs.World,
 	scripts: ^script.Runtime,
@@ -309,15 +383,16 @@ spawn_prefab_entities :: proc(
 	guid: format.Guid,
 	pose: ecs.Transform,
 	pending: ^[dynamic]script.Pending_Behaviour,
+	reuse: ^Pooled_Instance = nil,
 ) -> (
-	root: ecs.Entity,
+	spawned: Spawned_Prefab,
 	message: string,
 	ok: bool,
 ) {
 	buffer: [32]u8
 	name := format.guid_format(guid, &buffer)
 	if assets == nil {
-		return 0, "there are no assets to spawn a prefab from", false
+		return {}, "there are no assets to spawn a prefab from", false
 	}
 	h, loaded := asset.load(assets, guid)
 	data, has_data := asset.data(assets, h)
@@ -329,7 +404,7 @@ spawn_prefab_entities :: proc(
 			allocator = w.platform.frame_allocator,
 		)
 		log.errorf("scene: %s", message)
-		return 0, message, false
+		return {}, message, false
 	}
 	s, read := format.scene_read(data, w.platform.frame_allocator)
 	if !read {
@@ -339,12 +414,33 @@ spawn_prefab_entities :: proc(
 			allocator = w.platform.frame_allocator,
 		)
 		log.errorf("scene: %s", message)
-		return 0, message, false
+		return {}, message, false
+	}
+	spawned.version = asset.version(assets, h)
+	entities: []ecs.Entity
+	if reuse != nil {
+		if fits(w, reuse, spawned.version, len(s.entities)) {
+			entities = reuse.entities
+		} else {
+			// What the game left of it goes, with what it added under it.
+			survivors := make(
+				[dynamic]ecs.Entity,
+				0,
+				len(reuse.entities),
+				w.platform.frame_allocator,
+			)
+			for e in reuse.entities {
+				if e != 0 && ecs.is_alive(w, e) {
+					append(&survivors, e)
+				}
+			}
+			ecs.despawn_many(w, survivors[:])
+		}
 	}
 	// The prefab's own map, so its IDs never meet the scene's.
 	handles := make(map[u64]ecs.Entity, len(s.entities), w.platform.frame_allocator)
 	problems := make([dynamic]Problem, w.platform.frame_allocator)
-	_, spawned := add_entities_to(
+	_, spawned.entities = add_entities_to(
 		w,
 		scripts,
 		s.entities,
@@ -352,33 +448,53 @@ spawn_prefab_entities :: proc(
 		&problems,
 		scene_ids = false,
 		pending = pending,
+		reuse = entities,
 	)
 	for p in problems {
 		log.warnf("scene: prefab %s: entity %016x: %s", name, p.entity, p.message)
 	}
 	for e, i in s.entities {
-		if e.parent == 0 && spawned[i] != 0 {
-			root = spawned[i]
+		if e.parent == 0 && spawned.entities[i] != 0 {
+			spawned.root = spawned.entities[i]
 			break
 		}
 	}
-	if root == 0 {
+	if spawned.root == 0 {
 		message = fmt.aprintf(
 			"the prefab %s has no root",
 			name,
 			allocator = w.platform.frame_allocator,
 		)
-		return 0, message, false
+		return {}, message, false
 	}
-	ecs.add(w, root, pose)
-	settle(w, root)
-	return root, "", true
+	ecs.add(w, spawned.root, pose)
+	settle(w, spawned.root)
+	return spawned, "", true
+}
+
+// fits is true when a pooled instance can take a prefab's values again: its blob is the one that the prefab has now,
+// and every entity that its first spawn made is alive.
+@(private = "file")
+fits :: proc(w: ^ecs.World, p: ^Pooled_Instance, version: u32, count: int) -> bool {
+	if p.version != version || len(p.entities) != count {
+		return false
+	}
+	for e in p.entities {
+		if e != 0 && !ecs.is_alive(w, e) {
+			return false
+		}
+	}
+	return true
 }
 
 // register_scripts gives the script runtime what World.spawn(prefab) calls, what gives a spawn its spawner's scene (see
-// Scene_Owned), and the component of a scene's entities, whose writes an edit-mode behaviour records in Edit mode. Call it in the game's Register_Proc, so a reload sets it
-// again.
-register_scripts :: proc(r: ^script.Runtime) {
+// Scene_Owned), and the component of a scene's entities, whose writes an edit-mode behaviour records in Edit mode.
+// With scenes, it defines the Pool library, whose instances are theirs (see pool.odin). Call it in the game's
+// Register_Proc, so a reload sets it again.
+register_scripts :: proc(r: ^script.Runtime, scenes: ^Scenes = nil) {
+	if scenes != nil {
+		register_pool_scripts(r, scenes)
+	}
 	script.set_document_component(r, SCENE_ENTITY_ID)
 	script.set_prefab_spawner(
 		r,
@@ -393,8 +509,16 @@ register_scripts :: proc(r: ^script.Runtime) {
 			ok: bool,
 		) {
 			pending := make([dynamic]script.Pending_Behaviour, r.world.platform.frame_allocator)
-			root, message, ok = spawn_prefab_entities(r.world, r, r.assets, guid, pose, &pending)
-			return root, pending[:], message, ok
+			spawned: Spawned_Prefab
+			spawned, message, ok = spawn_prefab_entities(
+				r.world,
+				r,
+				r.assets,
+				guid,
+				pose,
+				&pending,
+			)
+			return spawned.root, pending[:], message, ok
 		},
 	)
 	script.set_spawned_hook(r, proc(r: ^script.Runtime, root, spawner: ecs.Entity) {
