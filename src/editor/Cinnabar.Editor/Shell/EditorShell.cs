@@ -172,6 +172,8 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
         Selection.Changed += (_, _) => Commands.InvalidateAll();
 
         EditorCommands.Register(this);
+        LoadSublevelChoice();
+        SyncSublevelCommands();
         Ribbon = DefaultRibbon.Create(Layout.Panels);
         foreach (var error in Ribbon.Validate(Commands))
         {
@@ -219,6 +221,7 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
         yield return new PanelTool("outliner", "Outliner", "outliner", EditorLayout.LeftDock, () => new OutlinerView(this));
         yield return new PanelTool("properties", "Properties", "properties", EditorLayout.RightDock, () => new PropertiesView(this));
         yield return new PanelTool("faceEditor", "Face", "mesh", EditorLayout.RightDock, () => new FaceEditorView(this));
+        yield return new PanelTool("sublevels", "Sublevels", "stage", EditorLayout.RightDock, () => new SublevelsView(this));
         yield return new PanelTool("undoHistory", "Undo History", "history", EditorLayout.RightDock, () => new UndoHistoryView(this));
         yield return new PanelTool("atmosphere", "Atmosphere", "sky", EditorLayout.RightDock, () => new AtmosphereView(this));
         yield return new PanelTool("weather", "Weather Map", "cloud", EditorLayout.RightDock, () => new WeatherMapView(this));

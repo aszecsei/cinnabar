@@ -138,7 +138,7 @@ public static class WorkspacePresets
             Column("dock.center", 0.63,
                 Views(0.70),
                 Tools(EditorLayout.BottomDock, "Bottom", 0.30, "contentBrowser", "console")),
-            Tools(EditorLayout.RightDock, "Right", 0.20, "properties", "faceEditor", "undoHistory")))),
+            Tools(EditorLayout.RightDock, "Right", 0.20, "properties", "faceEditor", "sublevels", "undoHistory")))),
         new("environment", "Environment Art", "A tall content browser under the scene, and the face sheet beside the properties, for dressing a level.", "environment", File(Row("dock.main",
             Tools(EditorLayout.LeftDock, "Left", 0.15, "outliner"),
             Column("dock.center", 0.65,

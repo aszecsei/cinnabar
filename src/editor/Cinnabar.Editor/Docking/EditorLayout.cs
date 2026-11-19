@@ -205,7 +205,7 @@ public sealed class EditorLayout
                 new ProportionalDockSplitter(),
                 center,
                 new ProportionalDockSplitter(),
-                Tools(RightDock, Alignment.Right, 0.20, "properties", "faceEditor", "undoHistory", "atmosphere", "weather")),
+                Tools(RightDock, Alignment.Right, 0.20, "properties", "faceEditor", "sublevels", "undoHistory", "atmosphere", "weather")),
         };
         return NewRoot(main);
     }

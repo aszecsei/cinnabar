@@ -201,7 +201,7 @@ public sealed class SeveralScenesTests : IDisposable
         editor.Override();
 
         Assert.Equal(elsewhere, north.Scene.Find(1)!.Components.Single(c => c.Id == 1001).Fields.Single(f => f.Name == "target").Value);
-        Assert.Equal(("Missing scene", "@0123456789abcdef0123456789abcdef/0000000000000009"), editor.NotOpen);
+        Assert.Equal(("Missing scene", "@0123456789abcdef0123456789abcdef/0000000000000009"), editor.Unavailable);
     }
 
     [Fact]

@@ -34,6 +34,8 @@ public sealed class OutlinerView : DockPanel
     readonly Selection _selection;
     readonly TextBox _filter = new() { PlaceholderText = "Filter by name, entity or component", Classes = { "outliner-filter" } };
     readonly ListBox _list = new() { Classes = { "outliner" }, SelectionMode = SelectionMode.Multiple };
+    readonly ComboBox _sublevel = new() { MinWidth = 70, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4, 0, 0, 0) };
+    bool _syncingSublevels;
     readonly TextBlock _empty;
     bool _syncing;
     // The modifiers of the press or the key that last reached the list: with neither Ctrl nor Shift, a click or an
@@ -62,6 +64,19 @@ public sealed class OutlinerView : DockPanel
         var top = new DockPanel();
         SetDock(add, DockSide.Right);
         top.Children.Add(add);
+        // The sublevel that the rows show (see docs/editor/shell-and-panels.md#outliner).
+        ToolTip.SetTip(_sublevel, "Show the entities of one sublevel, or of the base, with their ancestors");
+        Avalonia.Automation.AutomationProperties.SetName(_sublevel, "Sublevel");
+        _sublevel.SelectionChanged += (_, _) =>
+        {
+            if (!_syncingSublevels)
+            {
+                _shell.Outliner.Sublevel = _sublevel.SelectedItem is SublevelChoice choice ? choice.Sublevel : null;
+                Rebuild();
+            }
+        };
+        SetDock(_sublevel, DockSide.Right);
+        top.Children.Add(_sublevel);
         top.Children.Add(_filter);
         SetDock(top, DockSide.Top);
         Children.Add(top);
@@ -95,6 +110,7 @@ public sealed class OutlinerView : DockPanel
         {
             OutlinerRow row => RowView(row),
             OutlinerHeading heading => HeadingView(heading),
+            OutlinerDocumentRow unloaded => UnloadedView(unloaded),
             _ => new Control(),
         });
         _list.AddHandler(PointerPressedEvent, (_, e) => _modifiers = e.KeyModifiers, Avalonia.Interactivity.RoutingStrategies.Tunnel, handledEventsToo: true);
@@ -126,6 +142,17 @@ public sealed class OutlinerView : DockPanel
                 }
                 return;
             }
+            // An entity of a sublevel that is not loaded has no handle to select.
+            if (e.AddedItems.OfType<OutlinerDocumentRow>().Any())
+            {
+                _syncing = true;
+                foreach (var u in _list.SelectedItems?.OfType<OutlinerDocumentRow>().ToList() ?? [])
+                {
+                    _list.SelectedItems!.Remove(u);
+                }
+                _syncing = false;
+                return;
+            }
             var removed = e.RemovedItems.OfType<OutlinerRow>().Select(r => r.Node.Handle).ToList();
             var added = e.AddedItems.OfType<OutlinerRow>().Select(r => r.Node.Handle).ToList();
             if ((_modifiers & (KeyModifiers.Control | KeyModifiers.Shift)) == 0)
@@ -144,7 +171,8 @@ public sealed class OutlinerView : DockPanel
             .Add(() => _selection.Changed += OnSelectionChanged, () => _selection.Changed -= OnSelectionChanged)
             .Add(() => _shell.ProblemsChanged += Rebuild, () => _shell.ProblemsChanged -= Rebuild)
             .Add(() => _shell.VisibilityChanged += Rebuild, () => _shell.VisibilityChanged -= Rebuild)
-            .Add(() => _shell.SceneChanged += OnScenesChanged, () => _shell.SceneChanged -= OnScenesChanged);
+            .Add(() => _shell.SceneChanged += OnScenesChanged, () => _shell.SceneChanged -= OnScenesChanged)
+            .Add(() => _shell.SublevelsChanged += Rebuild, () => _shell.SublevelsChanged -= Rebuild);
     }
 
     // The headings show which scene is active and which are dirty, which edits change without a change of the world.
@@ -152,7 +180,7 @@ public sealed class OutlinerView : DockPanel
 
     void OnScenesChanged()
     {
-        var shown = string.Join("|", _shell.Scenes.Select(s => $"{s.Number}:{s.Title}:{s.IsDirty}:{s == _shell.Scene}"));
+        var shown = ScenesShown();
         if (shown != _scenesShown)
         {
             Rebuild();
@@ -165,7 +193,9 @@ public sealed class OutlinerView : DockPanel
         var filter = _filter.Text?.Trim() ?? "";
         var rows = new List<object>();
         var scenes = _shell.Scenes;
-        _scenesShown = string.Join("|", scenes.Select(s => $"{s.Number}:{s.Title}:{s.IsDirty}:{s == _shell.Scene}"));
+        _scenesShown = ScenesShown();
+        SyncSublevelChoices();
+        var sublevel = _shell.Outliner.Sublevel;
         if (scenes.Count > 1)
         {
             // Each open scene's entities under its heading, then what no open scene made, as the game's own.
@@ -179,19 +209,24 @@ public sealed class OutlinerView : DockPanel
                 }
                 foreach (var root in _world.Roots.Where(r => r.SceneId != 0 && r.Scene == scene.Number))
                 {
-                    Add(rows, root, 0, filter);
+                    Add(rows, root, 0, filter, sublevel);
                 }
+                AddUnloaded(rows, scene, filter, sublevel);
             }
             foreach (var root in _world.Roots.Where(r => r.SceneId == 0 || _shell.SceneOf(r) == null))
             {
-                Add(rows, root, 0, filter);
+                Add(rows, root, 0, filter, sublevel);
             }
         }
         else
         {
             foreach (var root in _world.Roots)
             {
-                Add(rows, root, 0, filter);
+                Add(rows, root, 0, filter, sublevel);
+            }
+            if (scenes.Count == 1)
+            {
+                AddUnloaded(rows, scenes[0], filter, sublevel);
             }
         }
         _syncing = true;
@@ -227,29 +262,91 @@ public sealed class OutlinerView : DockPanel
         }
     }
 
-    // Adds a node and its visible descendants, and returns whether the node or one of them matches the filter. With a
-    // filter, a match shows with its ancestors, expanded or not.
-    bool Add(List<object> rows, EntityNode node, int depth, string filter)
+    // What the scenes' headings and the dimmed rows show, which edits change without a change of the world: an
+    // assignment to a sublevel that is not loaded takes an entity out of the world and adds a dimmed row.
+    string ScenesShown() => string.Join("|", _shell.Scenes.Select(s => $"{s.Number}:{s.Title}:{s.IsDirty}:{s == _shell.Scene}:{s.Position}"));
+
+    // The sublevel box's choices: every sublevel, the base, and each sublevel that the project declares or the open
+    // scenes use. A chosen sublevel that is gone goes back to every sublevel.
+    void SyncSublevelChoices()
+    {
+        var choices = new List<SublevelChoice> { new("All sublevels", null), new("Base", "") };
+        choices.AddRange(_shell.KnownSublevels().Select(name => new SublevelChoice(name, name)));
+        if (choices.All(c => c.Sublevel != _shell.Outliner.Sublevel))
+        {
+            _shell.Outliner.Sublevel = null;
+        }
+        _syncingSublevels = true;
+        if (_sublevel.ItemsSource is not List<SublevelChoice> shown || !shown.SequenceEqual(choices))
+        {
+            _sublevel.ItemsSource = choices;
+        }
+        _sublevel.SelectedItem = ((List<SublevelChoice>)_sublevel.ItemsSource!).First(c => c.Sublevel == _shell.Outliner.Sublevel);
+        _syncingSublevels = false;
+    }
+
+    // Adds the entities of a scene that are in a sublevel that the game's world does not have, dimmed, after the
+    // scene's other rows. They have no handle, so they are not selected and the viewport does not pick them.
+    void AddUnloaded(List<object> rows, SceneDocument scene, string filter, string? sublevel)
+    {
+        var flat = scene.Expanded.Flat;
+        var children = flat.Entities.Where(e => e.Parent != 0).ToLookup(e => e.Parent);
+        foreach (var root in flat.Entities.Where(e => e.Parent == 0 && !_shell.IsSublevelLoaded(flat.SublevelOf(e))))
+        {
+            AddUnloaded(rows, scene, children, root, flat.SublevelOf(root), 0, filter, sublevel);
+        }
+    }
+
+    bool AddUnloaded(List<object> rows, SceneDocument scene, ILookup<ulong, SceneEntity> children, SceneEntity entity, string inSublevel, int depth, string filter, string? sublevel)
+    {
+        var label = entity.Name.Length > 0 ? entity.Name : $"{entity.Id:x16}";
+        var summary = string.Join(", ", entity.Components.Select(c => c.Name).Where(n => !Structural.Contains(n)).Select(FieldValues.Humanize));
+        var hasChildren = children[entity.Id].Any();
+        var row = new OutlinerDocumentRow(scene, entity, depth, label, summary, inSublevel, hasChildren, !_shell.Outliner.IsCollapsed(scene.Number, entity.Id));
+        var at = rows.Count;
+        rows.Add(row);
+        var filtering = filter.Length > 0 || sublevel != null;
+        var matches = (sublevel == null || sublevel == inSublevel)
+            && (filter.Length == 0 || label.Contains(filter, StringComparison.OrdinalIgnoreCase) || summary.Contains(filter, StringComparison.OrdinalIgnoreCase));
+        var childMatches = false;
+        if (row.Expanded || filtering)
+        {
+            foreach (var child in children[entity.Id])
+            {
+                childMatches |= AddUnloaded(rows, scene, children, child, inSublevel, depth + 1, filter, sublevel);
+            }
+        }
+        if (filtering && !matches && !childMatches)
+        {
+            rows.RemoveAt(at);
+        }
+        return matches || childMatches;
+    }
+
+    // Adds a node and its visible descendants, and returns whether the node or one of them matches the filter and the
+    // sublevel. With either, a match shows with its ancestors, expanded or not.
+    bool Add(List<object> rows, EntityNode node, int depth, string filter, string? sublevel)
     {
         var summary = string.Join(", ", node.Components.Select(_world.TypeName).Where(n => !Structural.Contains(n)).Select(FieldValues.Humanize));
         var label = node.Label;
         var row = new OutlinerRow(node, depth, label, summary, node.Children.Count > 0, !_shell.Outliner.IsCollapsed(node));
         var at = rows.Count;
         rows.Add(row);
-        var matches = filter.Length == 0
+        var filtering = filter.Length > 0 || sublevel != null;
+        var matches = (sublevel == null || _shell.SublevelOf(node) == sublevel) && (filter.Length == 0
             || label.Contains(filter, StringComparison.OrdinalIgnoreCase)
             || node.ToString().Contains(filter, StringComparison.OrdinalIgnoreCase)
             || summary.Contains(filter, StringComparison.OrdinalIgnoreCase)
-            || _shell.InstanceOf(node) is { Prefab: not "" } instance && _shell.PrefabName(instance.Prefab).Contains(filter, StringComparison.OrdinalIgnoreCase);
+            || _shell.InstanceOf(node) is { Prefab: not "" } instance && _shell.PrefabName(instance.Prefab).Contains(filter, StringComparison.OrdinalIgnoreCase));
         var childMatches = false;
-        if (row.Expanded || filter.Length > 0)
+        if (row.Expanded || filtering)
         {
             foreach (var child in node.Children)
             {
-                childMatches |= Add(rows, child, depth + 1, filter);
+                childMatches |= Add(rows, child, depth + 1, filter, sublevel);
             }
         }
-        if (filter.Length > 0 && !matches && !childMatches)
+        if (filtering && !matches && !childMatches)
         {
             rows.RemoveAt(at);
         }
@@ -480,6 +577,70 @@ public sealed class OutlinerView : DockPanel
             var name = content.Children.OfType<TextBlock>().First(t => t.Text != "" && !t.Classes.Contains("dim"));
             content.Children.Insert(content.Children.IndexOf(name) + 1, mark);
         }
+        if (SublevelTag(scene.Expanded.Flat, id) is { } tag)
+        {
+            content.Children.Insert(content.Children.Count - 1, tag);
+        }
+    }
+
+    // A root in a sublevel has the sublevel's name as a tag. Its descendants are in it too, so they have none.
+    static Border? SublevelTag(Scene flat, ulong id)
+    {
+        if (flat.Find(id) is not { } entity || flat.SublevelOf(entity) is not { Length: > 0 } sublevel
+            || entity.Parent != 0 && flat.Find(entity.Parent) is { } parent && flat.SublevelOf(parent) == sublevel)
+        {
+            return null;
+        }
+        var tag = new Border { Classes = { "badge", "tag" }, VerticalAlignment = VerticalAlignment.Center, Child = new TextBlock { Text = sublevel, FontSize = 10 } };
+        ToolTip.SetTip(tag, $"In the {sublevel} sublevel, with its descendants");
+        return tag;
+    }
+
+    // An entity of a sublevel that the game's world does not have: dimmed, with no toggles, and a menu that loads it.
+    Control UnloadedView(OutlinerDocumentRow row)
+    {
+        var expander = new TextBlock
+        {
+            Text = row.HasChildren ? (row.Expanded ? "▾" : "▸") : "",
+            Width = 14,
+            Classes = { "dim" },
+            Cursor = row.HasChildren ? new Cursor(StandardCursorType.Hand) : Cursor.Default,
+        };
+        if (row.HasChildren)
+        {
+            expander.PointerPressed += (_, e) =>
+            {
+                _shell.Outliner.Toggle(row.Scene.Number, row.Entity.Id);
+                e.Handled = true;
+                Rebuild();
+            };
+        }
+        var content = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Margin = new Thickness(row.Depth * Indent, 0, 0, 0),
+            Spacing = 6,
+            Opacity = 0.45,
+            ClipToBounds = true,
+            Background = Brushes.Transparent,
+            Children = { expander, new Control { Width = 13 }, new TextBlock { Text = row.Label }, new TextBlock { Text = row.Summary, Classes = { "dim" } } },
+        };
+        if (SublevelTag(row.Scene.Expanded.Flat, row.Entity.Id) is { } tag)
+        {
+            content.Children.Insert(3, tag);
+        }
+        ToolTip.SetTip(content, _shell.IsEditing
+            ? $"In {row.Sublevel}, which Edit does not load. Load it to select or edit this entity."
+            : $"In {row.Sublevel}, which the project's active set does not have, so Play has not loaded it.");
+        var menu = new ContextMenu();
+        menu.Items.Add(new MenuItem
+        {
+            Header = $"Load {row.Sublevel}",
+            IsEnabled = _shell.IsEditing,
+            Command = new RelayCommand(() => _shell.SetSublevelLoaded(row.Sublevel, true)),
+        });
+        content.ContextMenu = menu;
+        return content;
     }
 
     // A row's menu, which fills as it opens: a list realizes many rows, and few of their menus ever show.
@@ -542,6 +703,24 @@ public sealed class OutlinerView : DockPanel
                 }),
             });
         }
+        // The sublevels that the selection can go to, with the row's own checked (see docs/editor/shell-and-panels.md#sublevels).
+        var current = _shell.SublevelOf(row.Node);
+        var sublevels = new MenuItem { Header = "Sublevel", IsEnabled = _shell.IsEditing };
+        foreach (var name in _shell.KnownSublevels().Prepend(""))
+        {
+            sublevels.Items.Add(new MenuItem
+            {
+                Header = name == "" ? "Base" : name,
+                ToggleType = MenuItemToggleType.Radio,
+                IsChecked = name == current,
+                Command = new RelayCommand(() =>
+                {
+                    SelectRow();
+                    _shell.AssignSublevel(name);
+                }),
+            });
+        }
+        menu.Items.Add(sublevels);
         menu.Items.Add(new Separator());
         if (_shell.InstanceOf(row.Node) is { } instance)
         {
@@ -639,6 +818,18 @@ public sealed class OutlinerView : DockPanel
 }
 
 public sealed record OutlinerRow(EntityNode Node, int Depth, string Label, string Summary, bool HasChildren, bool Expanded);
+
+/// <summary>
+/// An entity of an open scene in a sublevel that the game's world does not have, from the document, as the outliner
+/// shows it dimmed: it has no handle.
+/// </summary>
+public sealed record OutlinerDocumentRow(SceneDocument Scene, SceneEntity Entity, int Depth, string Label, string Summary, string Sublevel, bool HasChildren, bool Expanded);
+
+/// <summary>A choice of the outliner's sublevel box: null shows every sublevel, and "" the base.</summary>
+public sealed record SublevelChoice(string Label, string? Sublevel)
+{
+    public override string ToString() => Label;
+}
 
 /// <summary>An open scene's heading in the outliner, with several scenes open.</summary>
 public sealed record OutlinerHeading(SceneDocument Scene, bool Active, bool Expanded);

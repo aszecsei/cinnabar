@@ -42,6 +42,9 @@ public sealed partial class EditorShell
             // The open edit ends through its owner: a scrub as it is, while a gizmo drag, a distance tool, or a material
             // or an instance that a drag only shows, is put back.
             InterruptEdit();
+            // The game starts with the project's active set of sublevels, as a cooked game does (see
+            // docs/editor/document-and-scenes.md#parts).
+            LoadActiveSet();
             Console.Add(LogLevel.Info, "editor: playing. Edits wait until Stop.");
         }
         SetModeTo(EditorMode.Play);
@@ -100,6 +103,8 @@ public sealed partial class EditorShell
         SendGizmo();
         Commands.InvalidateAll();
         ModeChanged?.Invoke();
+        // Which sublevels the world has follows the mode: the editor's choice in Edit, and the active set outside it.
+        SublevelsChanged?.Invoke();
     }
 
     // A new link, a restart or a soft restart has a game in Edit.
