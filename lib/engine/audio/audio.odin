@@ -33,6 +33,8 @@ OCCLUSION_RAYS :: 8
 OCCLUSION_SMOOTHING :: 0.1
 // The fade of a source that stops or goes away, in seconds, so that it does not click.
 STOP_FADE :: 0.03
+// The most listeners that a frame hears from: one for each view of a split screen. A listener past it is not heard from.
+MAX_LISTENERS :: 8
 // The distances of a sound from Audio.play, in meters.
 ONE_SHOT_MIN_DISTANCE :: 1
 ONE_SHOT_MAX_DISTANCE :: 50
@@ -102,6 +104,7 @@ State :: struct {
 @(private)
 Warning :: enum {
 	No_Listener,
+	Listeners,
 	Sounds,
 	Sources,
 	One_Shots,
@@ -294,12 +297,19 @@ clamp_pitch :: proc(pitch: f32) -> f32 {
 	return clamp(pitch, MIN_PITCH, MAX_PITCH)
 }
 
-// The listener's pose this frame, once update has found it.
+// A listener's pose this frame, once update has found it.
 @(private)
 Listener :: struct {
 	entity: ecs.Entity,
 	pose:   ecs.Transform,
-	found:  bool,
+}
+
+// The listeners of this frame, the first count of list. A split screen has one for each view, and a source is heard at
+// the nearest of them.
+@(private)
+Listeners :: struct {
+	list:  [MAX_LISTENERS]Listener,
+	count: int,
 }
 
 // update does a frame's work: it follows the world's sources and listener, and starts what scripts asked for. Call it
@@ -314,18 +324,55 @@ update :: proc(s: ^State, w: ^ecs.World, ph: ^physics.State, run: bool, dt: time
 		api.set_paused(b32(!run))
 	}
 	check_blobs(s)
-	listener := find_listener(s, w)
-	update_sources(s, w, ph, listener, run, f32(time.duration_seconds(dt)))
-	update_one_shots(s, w, ph, listener, run)
+	listeners := find_listeners(s, w)
+	update_sources(s, w, ph, listeners, run, f32(time.duration_seconds(dt)))
+	update_one_shots(s, w, ph, listeners, run)
 }
 
+// find_listeners gathers the world's listeners that have a presented pose, up to MAX_LISTENERS. It warns once about more.
 @(private)
-find_listener :: proc(s: ^State, w: ^ecs.World) -> (listener: Listener) {
+find_listeners :: proc(s: ^State, w: ^ecs.World) -> (listeners: Listeners) {
 	entities := make([dynamic]ecs.Entity, s.platform.frame_allocator)
 	ecs.collect(w, {AUDIO_LISTENER_ID}, &entities)
 	for e in entities {
-		if pose, ok := ecs.presented(w, e); ok {
-			return {e, pose, true}
+		pose, ok := ecs.presented(w, e)
+		if !ok {
+			continue
+		}
+		if listeners.count >= MAX_LISTENERS {
+			if .Listeners not_in s.warned {
+				s.warned += {.Listeners}
+				log.warnf(
+					"audio: more than %d Audio_Listeners at once, so the extra ones are not heard from",
+					MAX_LISTENERS,
+				)
+			}
+			break
+		}
+		listeners.list[listeners.count] = {e, pose}
+		listeners.count += 1
+	}
+	return
+}
+
+// nearest_listener is the listener that is nearest a position in the world, which is where a sound there is heard. It
+// returns false when there is none. Of two at the same distance, the first one wins.
+@(private)
+nearest_listener :: proc(
+	ls: Listeners,
+	position: ecs.World_Position,
+) -> (
+	nearest: Listener,
+	found: bool,
+) {
+	ls := ls
+	best: f32
+	for listener in ls.list[:ls.count] {
+		distance := linalg.length2(ecs.position_sub(position, listener.pose.position))
+		if !found || distance < best {
+			nearest = listener
+			best = distance
+			found = true
 		}
 	}
 	return
@@ -350,7 +397,7 @@ is_blocked :: proc(
 	entity: ecs.Entity,
 	position: ecs.World_Position,
 ) -> bool {
-	if ph == nil || !listener.found {
+	if ph == nil {
 		return false
 	}
 	delta := ecs.position_sub(position, listener.pose.position)
@@ -370,7 +417,7 @@ update_sources :: proc(
 	s: ^State,
 	w: ^ecs.World,
 	ph: ^physics.State,
-	listener: Listener,
+	listeners: Listeners,
 	run: bool,
 	dt: f32,
 ) {
@@ -401,7 +448,7 @@ update_sources :: proc(
 			}
 		}
 		slot := &s.sources[index]
-		ended := follow_source(s, w, ph, listener, slot, e, source^, run)
+		ended := follow_source(s, w, ph, listeners, slot, e, source^, run)
 		// A slot with no voice whose source does not play, or whose sound just ended, is free for another source.
 		if ended || (slot.voice == {} && !source.playing) {
 			slot^ = {}
@@ -418,7 +465,7 @@ update_sources :: proc(
 			slot = {}
 		}
 	}
-	update_occlusion(s, w, ph, listener, dt)
+	update_occlusion(s, w, ph, listeners, dt)
 }
 
 @(private)
@@ -448,7 +495,7 @@ follow_source :: proc(
 	s: ^State,
 	w: ^ecs.World,
 	ph: ^physics.State,
-	listener: Listener,
+	listeners: Listeners,
 	slot: ^Source_Slot,
 	e: ecs.Entity,
 	source: Audio_Source,
@@ -481,8 +528,9 @@ follow_source :: proc(
 	if !has_pose {
 		return
 	}
-	spatial := source.spatial && listener.found
-	if source.spatial && !listener.found && .No_Listener not_in s.warned {
+	listener, found := nearest_listener(listeners, pose.position)
+	spatial := source.spatial && found
+	if source.spatial && !found && .No_Listener not_in s.warned {
 		s.warned += {.No_Listener}
 		log.warn(
 			"audio: a spatial Audio_Source plays with no Audio_Listener in the world, so it plays centred at full gain",
@@ -530,7 +578,7 @@ update_occlusion :: proc(
 	s: ^State,
 	w: ^ecs.World,
 	ph: ^physics.State,
-	listener: Listener,
+	listeners: Listeners,
 	dt: f32,
 ) {
 	rays := 0
@@ -549,7 +597,8 @@ update_occlusion :: proc(
 			continue
 		}
 		if pose, ok := ecs.presented(w, slot.entity); ok {
-			slot.blocked = is_blocked(w, ph, listener, slot.entity, pose.position)
+			listener, found := nearest_listener(listeners, pose.position)
+			slot.blocked = found && is_blocked(w, ph, listener, slot.entity, pose.position)
 			rays += 1
 		}
 	}
@@ -562,26 +611,31 @@ update_occlusion :: proc(
 	}
 }
 
-// update_one_shots starts what play queued, and moves what plays as the listener moves. Finished ones go, keeping the
+// update_one_shots starts what play queued, and moves what plays as the listeners move. Finished ones go, keeping the
 // others in order.
 @(private)
 update_one_shots :: proc(
 	s: ^State,
 	w: ^ecs.World,
 	ph: ^physics.State,
-	listener: Listener,
+	listeners: Listeners,
 	run: bool,
 ) {
 	api := &s.platform.audio
 	kept := 0
 	for i in 0 ..< s.one_shot_count {
 		shot := s.one_shots[i]
+		listener: Listener
+		found: bool
+		if shot.spatial {
+			listener, found = nearest_listener(listeners, shot.position)
+		}
 		params := boundary.Voice_Params {
 			gain         = shot.gain,
 			pitch        = shot.pitch,
 			min_distance = ONE_SHOT_MIN_DISTANCE,
 			max_distance = ONE_SHOT_MAX_DISTANCE,
-			spatial      = b32(shot.spatial && listener.found),
+			spatial      = b32(found),
 		}
 		if params.spatial {
 			params.position = listener_space(listener, shot.position)

@@ -343,6 +343,40 @@ a_source_plays_in_the_listeners_axes :: proc(t: ^testing.T) {
 	)
 }
 
+// With several listeners, as in a split screen, a source is heard at the nearest one.
+@(test)
+a_source_is_heard_at_its_nearest_listener :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(t, f)
+	write_sound(t, f, SOUND, SAMPLES[:])
+	listener(f, {0, 0, 0})
+	listener(f, {100, 0, 0})
+	source(f, {97, 0, 0})
+	frame(f)
+	testing.expect_value(t, len(record.plays), 1)
+	testing.expect(t, bool(record.last.spatial))
+	testing.expectf(
+		t,
+		close_to(record.last.position, {-3, 0, 0}),
+		"position %v",
+		record.last.position,
+	)
+}
+
+// Listeners past MAX_LISTENERS are not heard from, and warn once.
+@(test)
+listeners_past_the_limit_are_left_out :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(t, f)
+	for i in 0 ..< MAX_LISTENERS + 1 {
+		listener(f, {f64(i), 0, 0})
+	}
+	listeners := find_listeners(&f.audio, &f.world)
+	free_all(f.platform.frame_allocator)
+	testing.expect_value(t, listeners.count, MAX_LISTENERS)
+	testing.expect(t, .Listeners in f.audio.warned)
+}
+
 // A source that moves in ticks is heard between them, as it is drawn.
 @(test)
 a_source_follows_the_presented_pose :: proc(t: ^testing.T) {

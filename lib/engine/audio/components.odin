@@ -37,7 +37,7 @@ DEFAULT_AUDIO_SOURCE :: Audio_Source {
 	max_distance = 50,
 }
 
-// Audio_Listener is where the world is heard from: its entity's presented pose. The first one in the world counts.
+// Audio_Listener is where the world is heard from: its entity's presented pose. With several, as in a split screen, each source is heard at the nearest one.
 Audio_Listener :: struct {}
 
 // register_components registers the components that this package reads. Call it from the game's component registration
