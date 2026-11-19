@@ -374,7 +374,11 @@ full_scan :: proc(f: ^Fixture) -> map[u64]link.Entity_Info {
 	scanned := make(map[u64]link.Entity_Info, context.temp_allocator)
 	for rest := out[:]; len(rest) > 0; {
 		header, _ := link.read_header(rest)
-		m, ok := link.decode_message(header.kind, rest[link.HEADER_SIZE:][:header.length], context.temp_allocator)
+		m, ok := link.decode_message(
+			header.kind,
+			rest[link.HEADER_SIZE:][:header.length],
+			context.temp_allocator,
+		)
 		if ok {
 			apply(&scanned, {m})
 		}
@@ -384,9 +388,21 @@ full_scan :: proc(f: ^Fixture) -> map[u64]link.Entity_Info {
 }
 
 @(private = "file")
-expect_mirror :: proc(t: ^testing.T, f: ^Fixture, mirror: map[u64]link.Entity_Info, round: string) {
+expect_mirror :: proc(
+	t: ^testing.T,
+	f: ^Fixture,
+	mirror: map[u64]link.Entity_Info,
+	round: string,
+) {
 	scanned := full_scan(f)
-	testing.expectf(t, len(mirror) == len(scanned), "%s: %d entities, a full scan has %d", round, len(mirror), len(scanned))
+	testing.expectf(
+		t,
+		len(mirror) == len(scanned),
+		"%s: %d entities, a full scan has %d",
+		round,
+		len(mirror),
+		len(scanned),
+	)
 	for entity, want in scanned {
 		got, found := mirror[entity]
 		if !found {
