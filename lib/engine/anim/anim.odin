@@ -39,8 +39,44 @@ Animator :: struct {
 	// The Animator's graph in prepare's table of the frame.
 	slot:     u16 `editor:"-" script:"-"`,
 	instance: anim_graph.Instance `editor:"-" script:"-"`,
+	// The clips that a driver poses the Animator with over its graph, while one holds it. Only begin_drive, drive and
+	// end_drive write it, and scenes do not save it.
+	driven:   Maybe(Driven) `editor:"-" script:"-"`,
 }
 #assert(size_of(Animator) <= ecs.MAX_COMPONENT_SIZE)
+
+// An Animator blends at most this many driven clips over its graph's pose, so a driver can fade from one to another.
+MAX_DRIVEN :: 2
+
+// Driven_Sample is a clip that a system outside the graph, such as a cutscene, poses an Animator with: at a time that
+// the driver gives, by a weight over the graph's pose (see docs/animation/design.md#driving-an-animator).
+Driven_Sample :: struct {
+	clip:        format.Guid,
+	// Seconds into the clip, held to its length. It does not tick, and the clip raises no events.
+	time:        f32,
+	// From 0, the graph's pose, to 1, the clip's. Weights that add up to more than 1 are scaled to add up to 1.
+	weight:      f32,
+	// Whether the clip's root motion is reported in Root_Motion, as the graph's is, rather than taken out of the pose
+	// so that the clip plays in place.
+	root_motion: bool,
+}
+
+// Driven is an Animator while a driver holds it: the generation that the driver's token must match, and its samples.
+Driven :: struct {
+	generation: u32,
+	// Whether the graph's time stops, keeping its triggers, as playing = false stops it.
+	hold:       bool,
+	samples:    [MAX_DRIVEN]Driven_Sample,
+	// The samples at the last tick, which the next tick's root motion is measured from.
+	ticked:     [MAX_DRIVEN]Driven_Sample,
+}
+
+// Drive_Token is a driver's hold on an Animator, which begin_drive gives. Through a stale token, drive and end_drive
+// do nothing.
+Drive_Token :: struct {
+	entity:     ecs.Entity,
+	generation: u32,
+}
 
 DEFAULT_ANIMATOR :: Animator {
 	speed   = 1,
@@ -92,6 +128,13 @@ Resolved :: struct {
 	skin:       ^format.Skin_Blob,
 }
 
+// Driven_Clip is a driven clip's blob, loaded, which a frame's ticks read.
+@(private)
+Driven_Clip :: struct {
+	guid: format.Guid,
+	clip: anim_graph.Clip,
+}
+
 // Job_Event is a tick's event as a job records it, which flush_job_events turns into an Event.
 @(private)
 Job_Event :: struct {
@@ -111,6 +154,10 @@ State :: struct {
 	// blob, which asset.poll can free, so nothing reads the table after the frame ends: an Animator's slot then finds no
 	// graph until the next prepare.
 	graphs:       []Resolved,
+	// The frame's driven clips, which prepare loads, and which go when the graphs go.
+	driven_clips: []Driven_Clip,
+	// The last driver's generation, which begin_drive counts up, so a token never matches a later driver's.
+	next_drive:   u32,
 	// The events of the tick numbered tick, and of every tick since begin_frame. Their strings are on the heap.
 	tick_events:  [dynamic]Event,
 	tick:         u64,
@@ -126,7 +173,7 @@ register_components :: proc(r: ^ecs.Registry) {
 // are registered, in init and in on_reload.
 register :: proc(s: ^State, w: ^ecs.World, assets: ^asset.Assets) {
 	s.assets, s.world = assets, w
-	s.graphs = nil
+	s.graphs, s.driven_clips = nil, nil
 	terms := []ecs.Term{ecs.write(w, Animator), ecs.optional(ecs.write(w, Root_Motion))}
 	s.animators = ecs.query(w, terms)
 	s.job_events = ecs.register_job_buffer(
@@ -152,6 +199,7 @@ destroy :: proc(s: ^State) {
 // starts each Root_Motion's frame from nothing. Call it in the frame code before the ticks.
 prepare :: proc(s: ^State, w: ^ecs.World) {
 	table := make([dynamic]Resolved, w.platform.frame_allocator)
+	driven_clips := make([dynamic]Driven_Clip, w.platform.frame_allocator)
 	it := ecs.query_iter(w, s.animators)
 	for view in ecs.query_next(&it) {
 		motions := ecs.column(view, 1, Root_Motion)
@@ -166,19 +214,41 @@ prepare :: proc(s: ^State, w: ^ecs.World) {
 				a.state, a.time = a.instance.state, current_time(&a.instance)
 				warn_graph(r)
 			}
+			if d, driven := a.driven.?; driven {
+				for sample in d.samples {
+					load_driven_clip(s, &driven_clips, sample.clip)
+				}
+			}
 			if motions != nil {
 				motions[i].frame_translation, motions[i].frame_yaw = {}, 0
 			}
 		}
 	}
 	s.graphs = table[:]
+	s.driven_clips = driven_clips[:]
+}
+
+// load_driven_clip adds a driven clip's blob to a table, if it loads and the table does not have it.
+@(private)
+load_driven_clip :: proc(s: ^State, table: ^[dynamic]Driven_Clip, guid: format.Guid) {
+	if guid == {} {
+		return
+	}
+	for c in table {
+		if c.guid == guid {
+			return
+		}
+	}
+	if data, blob, ok := clip_data(s, guid); ok {
+		append(table, Driven_Clip{guid, {data, blob}})
+	}
 }
 
 // end_frame lets the frame's graphs go, which prepare made, before asset.poll can free their blobs. Until the next
 // prepare, an Animator has no graph: Animation calls from scripts that run between frames, such as a main script that a
 // reload starts or an editor's scene load, find none. Call it at the end of the frame code, before asset.poll.
 end_frame :: proc(s: ^State) {
-	s.graphs = nil
+	s.graphs, s.driven_clips = nil, nil
 }
 
 // begin_frame clears the frame's events. Call it in the frame code before the ticks, with physics.begin_frame.
@@ -195,17 +265,28 @@ animate :: proc(ctx: ^ecs.System_Context) {
 		entities := ecs.entities(view)
 		motions := ecs.column(view, 1, Root_Motion)
 		for &a, i in ecs.column(view, 0, Animator) {
-			r := ready_graph(s, &a) or_continue
+			d, driven := &a.driven.?
+			r, ready := ready_graph(s, &a)
+			if !ready {
+				if driven {
+					d.ticked = d.samples
+				}
+				continue
+			}
 			out: anim_graph.Tick_Output
-			if a.playing {
+			if a.playing && !(driven && d.hold) {
 				anim_graph.advance(&r.graph, &a.instance, ctx.dt * max(a.speed, 0), &out)
 			}
 			a.state, a.time = a.instance.state, current_time(&a.instance)
+			translation, yaw := out.translation, out.yaw
+			if driven {
+				translation, yaw = driven_root_motion(s, r, d, translation, yaw)
+			}
 			if motions != nil {
 				m := &motions[i]
-				m.translation, m.yaw = out.translation, out.yaw
-				m.frame_translation += rotate_y(out.translation, m.frame_yaw)
-				m.frame_yaw += out.yaw
+				m.translation, m.yaw = translation, yaw
+				m.frame_translation += rotate_y(translation, m.frame_yaw)
+				m.frame_yaw += yaw
 			}
 			if out.event_count == 0 {
 				continue
@@ -224,6 +305,153 @@ animate :: proc(ctx: ^ecs.System_Context) {
 			}
 		}
 	}
+}
+
+// driven_root_motion is a tick's root motion while a driver holds an Animator: the graph's, by what the driven weights
+// leave of it, and each reported sample's move since the last tick, by its weight. A sample whose clip changed, or
+// whose time did not move forward, moves nothing. It keeps the samples for the next tick.
+@(private)
+driven_root_motion :: proc(
+	s: ^State,
+	r: ^Resolved,
+	d: ^Driven,
+	translation: [3]f32,
+	yaw: f32,
+) -> (
+	[3]f32,
+	f32,
+) {
+	weights, total := driven_weights(d.samples)
+	t, y := translation * (1 - total), yaw * (1 - total)
+	for sample, i in d.samples {
+		before := d.ticked[i]
+		if weights[i] <= 0 ||
+		   !sample.root_motion ||
+		   sample.clip != before.clip ||
+		   sample.time <= before.time {
+			continue
+		}
+		c := find_driven_clip(s, sample.clip) or_continue
+		if !fits_skin(
+			c.blob,
+			r.graph.clips[0].blob.skin,
+			len(format.skin_joints(r.skin_data, r.skin)),
+		) {
+			continue
+		}
+		duration := c.blob.duration
+		delta, turn := anim_graph.clip_root_motion(
+			&r.graph,
+			c,
+			clamp(before.time, 0, duration),
+			clamp(sample.time, 0, duration),
+		)
+		t += delta * weights[i]
+		y += turn * weights[i]
+	}
+	d.ticked = d.samples
+	return t, y
+}
+
+// driven_weights is each driven sample's weight, from 0 to 1, scaled so that they add up to 1 at most, and their sum.
+@(private)
+driven_weights :: proc(
+	samples: [MAX_DRIVEN]Driven_Sample,
+) -> (
+	weights: [MAX_DRIVEN]f32,
+	total: f32,
+) {
+	for sample, i in samples {
+		weights[i] = clamp(sample.weight, 0, 1) if sample.clip != {} else 0
+		total += weights[i]
+	}
+	if total > 1 {
+		for &w in weights {
+			w /= total
+		}
+		total = 1
+	}
+	return
+}
+
+@(private)
+find_driven_clip :: proc(s: ^State, guid: format.Guid) -> (anim_graph.Clip, bool) {
+	for c in s.driven_clips {
+		if c.guid == guid {
+			return c.clip, true
+		}
+	}
+	return {}, false
+}
+
+// fits_skin reports whether a clip is of a skin, with the skin's joints.
+@(private)
+fits_skin :: proc(clip: ^format.Animation_Blob, skin: format.Guid, joint_count: int) -> bool {
+	return clip != nil && clip.skin == skin && int(clip.joint_count) == joint_count
+}
+
+// begin_drive starts a driver's hold on an Animator, whose driven samples it then writes with drive, and gives its
+// token. With hold, the graph's time stops while it is driven. A driver that held the Animator before loses it: its
+// token goes stale, and its drive calls return false (see docs/animation/design.md#driving-an-animator).
+begin_drive :: proc(
+	s: ^State,
+	w: ^ecs.World,
+	e: ecs.Entity,
+	hold := false,
+) -> (
+	token: Drive_Token,
+	ok: bool,
+) {
+	a := ecs.get(w, e, Animator)
+	if a == nil {
+		return
+	}
+	s.next_drive += 1
+	if s.next_drive == 0 {
+		s.next_drive = 1
+	}
+	a.driven = Driven {
+		generation = s.next_drive,
+		hold       = hold,
+	}
+	return {e, s.next_drive}, true
+}
+
+// drive sets the driven samples of the Animator that a token holds, up to MAX_DRIVEN; the rest weigh nothing. The next
+// presented frame poses them, in every mode, and the next tick reports their root motion. It returns false, and
+// writes nothing, for a stale token, whose driver has lost the Animator.
+drive :: proc(w: ^ecs.World, token: Drive_Token, samples: []Driven_Sample) -> bool {
+	d := driven_of(w, token) or_return
+	d.samples = {}
+	copy(d.samples[:], samples)
+	return true
+}
+
+// end_drive ends a driver's hold, and the graph's pose shows again. Through a stale token, it does nothing.
+end_drive :: proc(w: ^ecs.World, token: Drive_Token) {
+	if _, ok := driven_of(w, token); ok {
+		ecs.get(w, token.entity, Animator).driven = nil
+	}
+}
+
+// is_driving reports whether a token still holds its Animator.
+is_driving :: proc(w: ^ecs.World, token: Drive_Token) -> bool {
+	_, ok := driven_of(w, token)
+	return ok
+}
+
+// driven_of is the driven state that a token holds, if the token is not stale.
+@(private)
+driven_of :: proc(w: ^ecs.World, token: Drive_Token) -> (^Driven, bool) {
+	a := ecs.get(w, token.entity, Animator)
+	if a == nil || token.generation == 0 {
+		return nil, false
+	}
+	d, driven := &a.driven.?
+	if !driven || d.generation != token.generation {
+		return nil, false
+	}
+	return d, true
 }
 
 // ready_graph is an Animator's graph in the frame's table, if prepare made it ready and started the Animator's
@@ -391,19 +619,47 @@ present :: proc(s: ^State, w: ^ecs.World, allocator: mem.Allocator) -> []render.
 		for &a, i in ecs.column(view, 0, Animator) {
 			slot := resolve(s, &table, &a, allocator)
 			r := &table[slot]
-			if !r.ready || a.instance.key != r.key {
+			ready := r.ready && a.instance.key == r.key
+			d, driven := a.driven.?
+			// The skin that the pose is of: the graph's, or without a ready graph, the first driven clip's that loads.
+			skin_guid: format.Guid
+			skin_bytes: []byte
+			skin: ^format.Skin_Blob
+			if ready {
+				skin_guid, skin_bytes, skin = r.graph.clips[0].blob.skin, r.skin_data, r.skin
+			} else if driven {
+				skin_guid, skin_bytes, skin = driven_skin(s, d)
+			}
+			if skin == nil {
 				continue
 			}
-			joints := format.skin_joints(r.skin_data, r.skin)
+			joints := format.skin_joints(skin_bytes, skin)
 			rest := make([]anim_graph.Joint_Pose, len(joints), allocator)
 			scratch := make([]anim_graph.Joint_Pose, len(joints), allocator)
 			locals := make([]anim_graph.Joint_Pose, len(joints), allocator)
 			models := make([]matrix[4, 4]f32, len(joints), allocator)
 			palette := make([][3][4]f32, len(joints), allocator)
 			anim_graph.rest_pose(joints, rest)
-			anim_graph.present(&r.graph, &a.instance, w.clock.alpha, rest, scratch, locals)
-			if motions != nil {
-				anim_graph.remove_root_motion(&r.graph, locals)
+			if ready {
+				anim_graph.present(&r.graph, &a.instance, w.clock.alpha, rest, scratch, locals)
+				if motions != nil {
+					anim_graph.remove_root_motion(&r.graph, locals)
+				}
+			} else {
+				copy(locals, rest)
+			}
+			if driven {
+				blend_driven(
+					s,
+					&r.graph,
+					d,
+					skin_guid,
+					motions != nil,
+					rest,
+					scratch,
+					locals,
+					allocator,
+				)
 			}
 			sphere := anim_graph.compose(joints, locals, models, palette)
 			append(
@@ -413,6 +669,75 @@ present :: proc(s: ^State, w: ^ecs.World, allocator: mem.Allocator) -> []render.
 		}
 	}
 	return poses[:]
+}
+
+// driven_skin is the skin of the first driven clip that weighs anything and loads, which an Animator without a ready
+// graph is posed in.
+@(private)
+driven_skin :: proc(
+	s: ^State,
+	d: Driven,
+) -> (
+	guid: format.Guid,
+	data: []byte,
+	blob: ^format.Skin_Blob,
+) {
+	weights, _ := driven_weights(d.samples)
+	for sample, i in d.samples {
+		if weights[i] <= 0 {
+			continue
+		}
+		_, clip := clip_data(s, sample.clip) or_continue
+		bytes, skin := skin_data(s, clip.skin) or_continue
+		return clip.skin, bytes, skin
+	}
+	return
+}
+
+// blend_driven blends an Animator's driven clips over its pose, each at its own time, which is given rather than
+// stepped, so it takes no alpha. The pose keeps what the weights leave of it. A clip is posed in place unless it
+// reports its root motion, and then also when the entity has a Root_Motion, as the graph's pose is. A clip that has
+// not loaded, or is of another skin, is left out.
+@(private)
+blend_driven :: proc(
+	s: ^State,
+	g: ^anim_graph.Graph,
+	d: Driven,
+	skin: format.Guid,
+	has_root_motion: bool,
+	rest, scratch, locals: []anim_graph.Joint_Pose,
+	allocator: mem.Allocator,
+) {
+	weights, total := driven_weights(d.samples)
+	if total <= 0 {
+		return
+	}
+	sum := make([]anim_graph.Joint_Pose, len(locals), allocator)
+	anim_graph.accumulate(sum, locals, 1 - total)
+	used := 1 - total
+	blended := false
+	for sample, i in d.samples {
+		if weights[i] <= 0 {
+			continue
+		}
+		data, clip := clip_data(s, sample.clip) or_continue
+		if !fits_skin(clip, skin, len(locals)) {
+			continue
+		}
+		copy(scratch, rest)
+		anim_graph.sample(data, clip, clamp(sample.time, 0, clip.duration), scratch)
+		if !sample.root_motion || has_root_motion {
+			anim_graph.remove_root_motion(g, scratch)
+		}
+		anim_graph.accumulate(sum, scratch, weights[i])
+		used += weights[i]
+		blended = true
+	}
+	if !blended {
+		return
+	}
+	anim_graph.resolve(sum, used, rest)
+	copy(locals, sum)
 }
 
 // preview_pose moves a graph that plays apart from any entity, as the editor's preview plays one, by dt seconds, and

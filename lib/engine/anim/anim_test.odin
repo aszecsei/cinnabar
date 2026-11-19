@@ -532,3 +532,186 @@ an_animator_has_no_graph_between_frames :: proc(t: ^testing.T) {
 	_, _, found = parameter(&f.animation, animator, "speed")
 	testing.expect(t, found)
 }
+
+// edit_frame runs a frame as the frame code does in the editor's Edit: prepare, and no ticks.
+@(private = "file")
+edit_frame :: proc(f: ^Fixture) {
+	free_all(f.platform.frame_allocator)
+	prepare(&f.animation, &f.world)
+}
+
+// root_z is where an entity's presented pose puts Root along z, or a NaN when it presents no pose.
+@(private = "file")
+root_z :: proc(f: ^Fixture, e: ecs.Entity) -> f32 {
+	for p in present(&f.animation, &f.world, f.platform.frame_allocator) {
+		if p.entity == e {
+			return p.palette[0][2][3]
+		}
+	}
+	return math.nan_f32()
+}
+
+@(test)
+a_driven_clip_poses_at_any_time_in_any_order :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(t, f)
+	a := DEFAULT_ANIMATOR
+	a.clip = guid(IDLE)
+	e := spawn(f, a)
+	token, ok := begin_drive(&f.animation, &f.world, e)
+	testing.expect(t, ok)
+	for time in ([]f32{0.75, 0.25, 0.5}) {
+		testing.expect(t, drive(&f.world, token, {{clip = guid(WALK), time = time, weight = 1}}))
+		edit_frame(f)
+		// The walk moves Root 2 m a second, so the clip played to the time puts it there.
+		z := root_z(f, e)
+		testing.expectf(
+			t,
+			near(z, 2 * time),
+			"at %.2f s, Root at %.3f, not %.3f",
+			time,
+			z,
+			2 * time,
+		)
+	}
+}
+
+@(test)
+a_driven_clip_blends_over_the_graph_by_its_weight :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(t, f)
+	a := DEFAULT_ANIMATOR
+	a.graph = guid(GRAPH)
+	e := spawn(f, a)
+	edit_frame(f)
+	token, _ := begin_drive(&f.animation, &f.world, e)
+	// The graph stands in idle, with Root at 0; the walk at 0.5 s puts it at 1.
+	for weight in ([]f32{0, 0.5, 1}) {
+		drive(
+			&f.world,
+			token,
+			{{clip = guid(WALK), time = 0.5, weight = weight, root_motion = true}},
+		)
+		edit_frame(f)
+		z := root_z(f, e)
+		testing.expectf(t, near(z, weight), "at weight %.1f, Root at %.3f", weight, z)
+	}
+	// In place, the graph's root joint keeps its rest place.
+	drive(&f.world, token, {{clip = guid(WALK), time = 0.5, weight = 1}})
+	edit_frame(f)
+	testing.expect(t, near(root_z(f, e), 0), "an in-place clip moved Root")
+
+	end_drive(&f.world, token)
+	testing.expect(t, ecs.get(&f.world, e, Animator).driven == nil)
+	edit_frame(f)
+	testing.expect(t, near(root_z(f, e), 0), "the graph's pose shows once the drive ends")
+}
+
+@(test)
+a_stale_drive_token_does_nothing :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(t, f)
+	a := DEFAULT_ANIMATOR
+	a.clip = guid(IDLE)
+	e := spawn(f, a)
+	walk := []Driven_Sample{{clip = guid(WALK), time = 0.5, weight = 1}}
+
+	token, _ := begin_drive(&f.animation, &f.world, e)
+	end_drive(&f.world, token)
+	testing.expect(t, !drive(&f.world, token, walk), "drove through an ended token")
+	testing.expect(t, ecs.get(&f.world, e, Animator).driven == nil)
+
+	// A second driver takes the Animator, and the first learns that it lost it.
+	first, _ := begin_drive(&f.animation, &f.world, e)
+	second, _ := begin_drive(&f.animation, &f.world, e)
+	testing.expect(t, !is_driving(&f.world, first))
+	testing.expect(t, !drive(&f.world, first, walk))
+	end_drive(&f.world, first)
+	testing.expect(t, is_driving(&f.world, second), "a stale end ended the new driver")
+	testing.expect(t, drive(&f.world, second, walk))
+
+	// A despawned entity's token is stale.
+	ecs.despawn(&f.world, e)
+	testing.expect(t, !drive(&f.world, second, walk))
+	_, ok := begin_drive(&f.animation, &f.world, e)
+	testing.expect(t, !ok)
+}
+
+// The editor's Edit runs no ticks, and scrubbing poses the driven clip all the same, here on an Animator with neither
+// a graph nor a clip of its own.
+@(test)
+a_driven_animator_poses_in_edit_without_ticks :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(t, f)
+	e := spawn(f, DEFAULT_ANIMATOR)
+	edit_frame(f)
+	testing.expect(
+		t,
+		math.is_nan(root_z(f, e)),
+		"an Animator with nothing to play presented a pose",
+	)
+	token, _ := begin_drive(&f.animation, &f.world, e)
+	for time in ([]f32{0.25, 0.75, 0.1}) {
+		drive(&f.world, token, {{clip = guid(WALK), time = time, weight = 1}})
+		edit_frame(f)
+		testing.expect(t, near(root_z(f, e), 2 * time))
+	}
+	testing.expect_value(t, f.world.clock.tick, 0)
+}
+
+@(test)
+holding_a_driven_graph_stops_its_time :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(t, f)
+	a := DEFAULT_ANIMATOR
+	a.graph = guid(GRAPH)
+	e := spawn(f, a)
+	frame(f, 1)
+	animator := ecs.get(&f.world, e, Animator)
+
+	held, _ := begin_drive(&f.animation, &f.world, e, hold = true)
+	before := animator.time
+	frame(f, 3)
+	testing.expect(t, near(animator.time, before), "a held graph's time moved")
+	end_drive(&f.world, held)
+
+	begin_drive(&f.animation, &f.world, e)
+	frame(f, 3)
+	testing.expect(
+		t,
+		near(animator.time, before + 3 * tick_seconds(f)),
+		"the graph stopped under a driver",
+	)
+}
+
+@(test)
+driven_root_motion_is_reported_or_removed :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(t, f)
+	a := DEFAULT_ANIMATOR
+	a.graph = guid(GRAPH)
+	e := spawn(f, a, root_motion = true)
+	frame(f, 1)
+	token, _ := begin_drive(&f.animation, &f.world, e)
+	m := ecs.get(&f.world, e, Root_Motion)
+
+	drive(&f.world, token, {{clip = guid(WALK), time = 0, weight = 0.5, root_motion = true}})
+	frame(f, 1)
+	testing.expect(t, near(m.translation.z, 0), "a clip's first tick moved the root")
+	drive(&f.world, token, {{clip = guid(WALK), time = 0.5, weight = 0.5, root_motion = true}})
+	frame(f, 1)
+	// Half a second of the walk is 1 m, by its weight; the graph stands.
+	testing.expectf(t, near(m.translation.z, 0.5), "reported %.3f", m.translation.z)
+	// The pose leaves the reported motion out, as the graph's does.
+	testing.expect(t, near(root_z(f, e), 0))
+
+	// Back in time, nothing is reported.
+	drive(&f.world, token, {{clip = guid(WALK), time = 0.25, weight = 0.5, root_motion = true}})
+	frame(f, 1)
+	testing.expect(t, near(m.translation.z, 0), "a scrub back moved the root")
+
+	// In place, nothing is reported.
+	drive(&f.world, token, {{clip = guid(WALK), time = 0.75, weight = 0.5}})
+	frame(f, 1)
+	testing.expect(t, near(m.translation.z, 0), "an in-place clip reported its root motion")
+}

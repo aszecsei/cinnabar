@@ -49,6 +49,19 @@ root_motion :: proc(g: ^Graph, inst: ^Instance, out: ^Tick_Output) {
 	out.translation.y = 0
 }
 
+// clip_root_motion is the root joint's move from one time of a clip to a later one, along x and z, in the model's space
+// turned to the root's heading at the first, and its turn about y, in radians. The clip need not be one of the graph's:
+// an Animator's driven clips are not (see docs/animation/design.md#driving-an-animator). It is nothing without a root
+// joint.
+clip_root_motion :: proc(g: ^Graph, c: Clip, from, to: f32) -> (delta: [3]f32, turn: f32) {
+	if g.root < 0 || c.blob == nil {
+		return
+	}
+	delta, turn = root_segment(g, c, from, to)
+	delta.y = 0
+	return
+}
+
 // root_segment is the root's move from one time of a clip to a later one, turned to its heading at the first, and
 // its turn about y.
 @(private = "file")
