@@ -186,11 +186,11 @@ public sealed class AssetIndex
     public string? FullPath(Asset asset) =>
         FindRoot(asset.Root) is { } root ? Path.GetFullPath(Path.Combine(root.Dir, asset.Path)) : null;
 
-    /// <summary>The asset whose source file is at a path, if any.</summary>
+    /// <summary>The asset whose source file is at a path, if any: the file's own, not one of its sub-assets.</summary>
     public Asset? FindByPath(string path)
     {
         var full = Path.GetFullPath(path);
-        return _assets.Values.FirstOrDefault(a => string.Equals(FullPath(a), full, StringComparison.OrdinalIgnoreCase));
+        return _assets.Values.FirstOrDefault(a => a.Parent == "" && string.Equals(FullPath(a), full, StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>The folders directly in a folder of a root, by name. The root itself is the folder <c>""</c>.</summary>

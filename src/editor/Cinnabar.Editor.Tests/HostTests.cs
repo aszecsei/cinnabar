@@ -183,6 +183,59 @@ public abstract class HostTests : IAsyncDisposable
         Assert.DoesNotContain(editor.Skipped, m => m is Log { Level: LogLevel.Error });
     }
 
+    // A scene with two sublevels is three scenes in the game's world. Set Sublevel moves an entity, with its child, to
+    // another part with their handles, and the inverse puts them back, in a part with a new number (see
+    // docs/editor/document-and-scenes.md#parts).
+    [Fact]
+    public async Task ASceneWithTwoSublevelsIsThreeScenesAndSetSublevelKeepsHandles()
+    {
+        await using var editor = await Connect();
+        editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
+        await editor.Next<EntitySnapshot>();
+        var bulb = Entity(3, "Bulb");
+        bulb.Parent = 2;
+        LoadedScene Part(uint number, uint base_, string sublevel, params Document.SceneEntity[] entities) =>
+            Document.SceneSnapshot.Loaded(number, Scene(entities), "") with { Base = base_, Sublevel = sublevel };
+        editor.Link.Send(new LoadScene(
+        [
+            Part(1, 0, "", Entity(1, "Crate")),
+            Part(2, 1, "night", Entity(2, "Lamp"), bulb),
+            Part(3, 1, "dusk", Entity(4, "Moth")),
+        ], 1));
+        var loaded = await editor.Next<EntitySnapshot>(s => s.Entities.Length == 4);
+        Assert.Equal([1u, 2u, 2u, 3u], loaded.Entities.OrderBy(e => e.SceneId).Select(e => e.Scene));
+        var lamp = loaded.Entities.Single(e => e.Name == "Lamp").Entity;
+        var bulbHandle = loaded.Entities.Single(e => e.Name == "Bulb").Entity;
+
+        static Link.Protocol.Operation Op(OperationKind kind, uint scene, ulong entity, string name = "", uint target = 0, string sublevel = "") =>
+            new(kind, scene, entity, [], name, 0, false, 0, [], new byte[16], [], new byte[16], target, sublevel, new byte[16]);
+
+        editor.Link.Send(new ApplyOperations(
+        [
+            Op(OperationKind.SetSublevel, 2, 2, target: 1),
+            Op(OperationKind.Rename, 1, 2, "Day Lamp"),
+            Op(OperationKind.Rename, 1, 3, "Day Bulb"),
+        ]));
+        var moved = await editor.Next<EntityDelta>(d => d.Changed.Any(e => e.Name == "Day Bulb"));
+        Assert.Equal(lamp, moved.Changed.Single(e => e.Name == "Day Lamp").Entity);
+        Assert.Equal(bulbHandle, moved.Changed.Single(e => e.Name == "Day Bulb").Entity);
+        Assert.All(moved.Changed, e => Assert.Equal(1u, e.Scene));
+        Assert.Empty(moved.Destroyed);
+
+        // Undo: back to the night, whose part loads again with the lamp, with a new number.
+        editor.Link.Send(new ApplyOperations(
+        [
+            Op(OperationKind.SetSublevel, 1, 2, target: 4, sublevel: "night"),
+            Op(OperationKind.Rename, 4, 2, "Lamp"),
+        ]));
+        var back = await editor.Next<EntityDelta>(d => d.Changed.Any(e => e.Name == "Lamp"));
+        var info = back.Changed.Single(e => e.Name == "Lamp");
+        Assert.Equal((lamp, 4u), (info.Entity, info.Scene));
+        Assert.Empty(back.Destroyed);
+        Assert.DoesNotContain(editor.Skipped, m => m is EditProblems { Problems.Length: > 0 });
+        Assert.DoesNotContain(editor.Skipped, m => m is Log { Level: LogLevel.Error });
+    }
+
     [Fact]
     public async Task TheGameAppliesEditsAndSendsBackWhatItCannot()
     {

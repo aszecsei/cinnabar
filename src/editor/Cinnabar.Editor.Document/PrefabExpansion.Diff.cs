@@ -110,5 +110,5 @@ public static partial class PrefabExpansion
         ulong parent = 0, bool active = false, ulong component = 0, Wire.SceneComponent[]? components = null, string? script = null,
         Wire.SceneField[]? fields = null) =>
         new(kind, 0, entity, created ?? [], name, parent, active, component, components ?? [],
-            script == null ? new byte[16] : Convert.FromHexString(script), fields ?? [], new byte[16]);
+            script == null ? new byte[16] : Convert.FromHexString(script), fields ?? [], new byte[16], 0, "", new byte[16]);
 }

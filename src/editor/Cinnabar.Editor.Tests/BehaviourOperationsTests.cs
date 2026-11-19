@@ -175,7 +175,7 @@ public sealed class BehaviourOperationsTests : IDisposable
             TestAssets.Make("11111111111111111111111111111111", AssetKind.Prefab, "lamp.prefab"),
         ], []));
         var pose = new SceneComponent(SceneEdits.TransformId, "Transform", SceneEdits.TransformFields(Pose.Identity));
-        var wire = new Wire.Operation(OperationKind.CreateInstance, 0, 0x77, [], "", 0, false, 0, [SceneSnapshot.Component(pose)], new byte[16], [], Convert.FromHexString(Door));
+        var wire = new Wire.Operation(OperationKind.CreateInstance, 0, 0x77, [], "", 0, false, 0, [SceneSnapshot.Component(pose)], new byte[16], [], Convert.FromHexString(Door), 0, "", new byte[16]);
 
         shell.OnGameMessage(new BehaviourOperations(1, SceneTicket, "Scatter", [wire]));
 

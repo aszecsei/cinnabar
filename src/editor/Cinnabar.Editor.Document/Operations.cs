@@ -59,7 +59,60 @@ public abstract record Operation(ulong Entity)
         ulong parent = 0, bool active = false, ulong component = 0, Wire.SceneComponent[]? components = null, string? script = null,
         Wire.SceneField[]? fields = null) =>
         new(kind, 0, entity, created ?? [], name, parent, active, component, components ?? [],
-            script == null ? new byte[16] : Convert.FromHexString(script), fields ?? [], new byte[16]);
+            script == null ? new byte[16] : Convert.FromHexString(script), fields ?? [], new byte[16], 0, "", new byte[16]);
+}
+
+/// <summary>
+/// Puts an entity in a sublevel, or with null in its owner's: the scene's base for a root (see
+/// docs/editor/document-and-scenes.md#parts). Its descendants go with it, so their own keys go, and the inverse puts
+/// them back. A key that differs from the sublevel of the entity's parent does not fit: a child is in its parent's
+/// sublevel. The host moves the entity and its descendants to the part of their new sublevel, with their handles; the
+/// shell gives the wire operation its parts.
+/// </summary>
+public sealed record SetSublevel(ulong Id, string? Sublevel, IReadOnlyDictionary<ulong, string>? Descendants = null) : Operation(Id)
+{
+    public override Operation Apply(Scene scene)
+    {
+        var entity = Find(scene, Id);
+        if (Sublevel is { } sublevel && scene.OwnerOf(entity) is { } owner && scene.SublevelOf(owner) != sublevel)
+        {
+            throw new InvalidOperationException("an entity cannot be in a sublevel other than its parent's");
+        }
+        var cleared = new Dictionary<ulong, string>();
+        foreach (var e in scene.Entities)
+        {
+            if (e != entity && e.Sublevel is { } key && Descends(scene, e, entity))
+            {
+                cleared[e.Id] = key;
+                e.Sublevel = null;
+            }
+        }
+        foreach (var (id, key) in Descendants ?? new Dictionary<ulong, string>())
+        {
+            if (scene.Find(id) is { } descendant)
+            {
+                descendant.Sublevel = key;
+            }
+        }
+        var old = entity.Sublevel;
+        entity.Sublevel = Sublevel;
+        return new SetSublevel(Id, old, cleared);
+    }
+
+    public override Wire.Operation ToWire() => Wire(Link.Protocol.OperationKind.SetSublevel, Entity) with { Sublevel = Sublevel ?? "" };
+
+    static bool Descends(Scene scene, SceneEntity e, SceneEntity ancestor)
+    {
+        var seen = new HashSet<SceneEntity>();
+        for (var at = scene.OwnerOf(e); at != null && seen.Add(at); at = scene.OwnerOf(at))
+        {
+            if (at == ancestor)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
 }
 
 /// <summary>Adds an entity, with its components and behaviours. Its parent, if any, must be in the scene.</summary>

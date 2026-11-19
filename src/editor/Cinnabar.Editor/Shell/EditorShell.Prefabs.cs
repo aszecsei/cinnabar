@@ -86,7 +86,7 @@ public sealed partial class EditorShell
         }
         if (IsEditing && Host.Linked && PrefabExpansion.Diff(before, scene.Expanded.Flat.Entities) is { Count: > 0 } wire)
         {
-            Host.Send(new Link.Protocol.ApplyOperations([.. wire.Select(w => w with { Scene = scene.Number })]));
+            SendRouted(scene, wire);
         }
         ReportExpansion(scene);
         SceneChanged?.Invoke();
