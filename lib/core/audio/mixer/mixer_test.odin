@@ -1443,6 +1443,61 @@ a_start_keeps_to_its_clock :: proc(t: ^testing.T) {
 	testing.expect_value(t, out[0].x, f32(1 + 10 + 50) / 32768)
 }
 
+// A streamed voice that starts late throws away the frames of its ring that it is late by, so it keeps to its clock.
+@(test)
+a_late_stream_keeps_to_its_clock :: proc(t: ^testing.T) {
+	f: Fixture
+	setup(&f)
+	defer teardown(&f)
+	samples := make([]i16, 96000, context.temp_allocator)
+	for &sample, i in samples {
+		sample = i16(i % 30000 + 1)
+	}
+	file := write_stream_file(t, samples)
+	defer os.remove_all(file.dir)
+	sound := stream_sound(f.m, file, len(samples))
+	out: [BLOCK_FRAMES]audio.Device_Frame
+	render(f.m, out[:])
+	at := clock(f.m)
+	voice_play(f.m, &audio.Voice_Desc{sound = sound, params = plain(), start = 1000, clock = at})
+	// The stream thread reads two blocks late.
+	render(f.m, out[:])
+	render(f.m, out[:])
+	testing.expect_value(t, out[0], audio.Device_Frame{})
+	stream_step(f.m)
+	render(f.m, out[:])
+	// It starts in the block at the clock's 3 blocks, two after its time.
+	late := 2 * BLOCK_FRAMES
+	testing.expect_value(t, out[0].x, f32(samples[1000 + late]) / 32768)
+	testing.expect_value(
+		t,
+		out[BLOCK_FRAMES - 1].x,
+		f32(samples[1000 + late + BLOCK_FRAMES - 1]) / 32768,
+	)
+}
+
+// A voice that waits for its stream when a pause comes makes no sound until the pause ends.
+@(test)
+a_waiting_voice_keeps_quiet_through_a_pause :: proc(t: ^testing.T) {
+	f: Fixture
+	setup(&f)
+	defer teardown(&f)
+	samples := [?]i16{16384, 16384, 16384, 16384}
+	file := write_stream_file(t, samples[:])
+	defer os.remove_all(file.dir)
+	voice := play(f.m, stream_sound(f.m, file, len(samples)), plain(), loop = true)
+	set_paused(f.m, true)
+	out: [BLOCK_FRAMES]audio.Device_Frame
+	render(f.m, out[:])
+	stream_step(f.m)
+	render(f.m, out[:])
+	testing.expect_value(t, out[BLOCK_FRAMES - 1].x, 0)
+	set_paused(f.m, false)
+	render(f.m, out[:])
+	testing.expect_value(t, out[BLOCK_FRAMES - 1].x, 0.5)
+	testing.expect(t, bool(voice_playing(f.m, voice)))
+}
+
 // A voice reports where it is in its sound, at a time on the clock.
 @(test)
 a_voice_reports_its_place :: proc(t: ^testing.T) {

@@ -46,7 +46,7 @@ A Vorbis or Opus sound with a `path` may come with a seek table, `seek_count` `S
 - `length` is how many frames it plays after each start; 0 plays to the end. It then fades out over `fade` seconds, which is also how long it fades in.
 - `flags` holds `Unpaused`: the voice plays while `set_paused` holds the others.
 
-**Places.** `voice_seek(voice, frame, clock)` moves a voice to another frame, with fades so that it does not click; with a clock, the frame plays then. `voice_position` gives where the voice was at the end of the last mix: the frame with its fraction, and the clock there. It is false for a stale handle, or a voice that has not started. `clock` is the frames that the backend has mixed, at 48 kHz. It runs while paused.
+**Places.** `voice_seek(voice, frame, clock)` moves a voice to another frame, with fades so that it does not click; with a clock, the frame plays then. `voice_position` gives where the voice was at the end of the last mix: the frame with its fraction, and the clock there. It is false for a stale handle, a voice that has not started, and a voice from a `voice_seek` until it starts at its new place, so a place is never from before the last seek. `clock` is the frames that the backend has mixed, at 48 kHz. It runs while paused.
 
 **`Voice_Params`.**
 

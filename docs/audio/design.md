@@ -86,7 +86,7 @@ A voice's handle goes stale as soon as it stops, while its slot stays busy until
 
 A fade is a level from 0 to 1 that moves by a step each frame. The voice is scaled by a smooth step of it, `3l² - 2l³`, which leaves and reaches its ends with no slope, so a fade has no corner to hear.
 
-**A pause holds each voice, not the output.** While paused, each voice that is not `Unpaused` fades out over a block, then holds its place; it fades in over a block when the pause ends. The buses run on, so an effect's tail rings out, and the clock runs.
+**A pause holds each voice, not the output.** While paused, each voice that is not `Unpaused` fades out over a block, then holds its place, and one that has not started waits; it fades in over a block when the pause ends. The buses run on, so an effect's tail rings out, and the clock runs.
 
 **Limits.** `MAX_VOICES` (128) and `MAX_STREAMS` (16). Past them a voice is refused, with one warning, and `stats` counts it. There are no virtual voices and no priorities yet.
 
@@ -98,7 +98,7 @@ A cutscene starts dialogue and music at any time in its clip, seeks when the pla
 - **A start offset.** `Voice_Desc.start` is the frame of the sound where the voice starts. A memory sound starts there at once, and a stream reads from there first ([Streaming](#streaming)). `Audio_Source.start`, `Audio.play`'s `start` and `start_voice`'s are in seconds.
 - **A scheduled start.** `Voice_Desc.clock` is when `start` plays. The mixer starts the voice at that frame of its block, so a start is exact to the frame, and not late by up to a frame of the game, as a start at `update` is. A voice whose time has passed starts as far into its sound as it is late, at its pitch, so it keeps to the clock. A late stream throws away the frames from its ring. `play` takes a clock too.
 - **A seek.** `voice_seek` fades the voice out over `SEEK_FADE_FRAMES` (5 ms), moves it, waits for its place and its clock, and fades it in over 5 ms. A seek has no step larger than the sound's own, as `a_seek_has_no_step` measures: 9 against 10 elsewhere on the slow pad in Vorbis, and 11 against 11 in Opus.
-- **Where a voice is.** `voice_position` gives the frame of the sound, with its fraction, at the end of the last block, and the clock there. The mix thread writes them under a count that is odd while it writes, so the game's thread never reads a frame and a clock of different blocks. A voice that waits, or has stopped, has no place.
+- **Where a voice is.** `voice_position` gives the frame of the sound, with its fraction, at the end of the last block, and the clock there. The mix thread writes them under a count that is odd while it writes, so the game's thread never reads a frame and a clock of different blocks. A voice that waits, or has stopped, has no place, and neither does one from a seek until it starts at its new place, so a place is never from before the last seek.
 - **Keeping to the clock.** `keep_to_clock(s, voice, seconds, at, limit)` reads where a voice is, compares it with where it should be (`seconds` at `at`, moving at its pitch), and seeks it when it is further than `limit`. The seek lands `SEEK_LEAD` (50 ms) ahead of the clock, past the blocks that the mixer has queued, so it is not late. A loop is compared within its sound.
 - **A length.** `Voice_Desc.length` is how many frames a voice plays after each start. It then fades out over `fade` seconds, which is also how long it fades in.
 - **Unpaused.** A voice with the `Unpaused` flag plays while the backend is paused, as in the editor's edit mode.
@@ -137,7 +137,7 @@ Setting new parameters on a slot of the same kind keeps its memory, so a delay's
 
 - A bus ducks from the block after its peak passes the threshold, 5 ms late, so the order in which the buses mix does not matter.
 - A target that several buses duck takes the lowest gain, at its duck's attack, and comes back at the release of the duck that held it last.
-- A bus ducks up to `MAX_BUS_DUCKS` (4) others. The duck multiplies the bus's own gain, which `set_bus_gain` still sets.
+- A bus ducks up to `MAX_BUS_DUCKS` (4) others. The mix thread refuses one past them, and `update` logs how many. The duck multiplies the bus's own gain, which `set_bus_gain` still sets.
 - `a_bus_ducks_another` holds a music bus's gain to its attack and its release within 1e-5.
 
 **Nothing may feed back more than it takes.** The reverb's damping filter must take all of what leaves its matrix: on only part of it, high frequencies return at up to twice their level, the tail grows without end, and the limiter holds it at full scale. `effects_stay_bounded` drives every effect with loud noise at its worst parameters.

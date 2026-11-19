@@ -615,7 +615,7 @@ voice_position :: proc "contextless" (
 	out: ^audio.Voice_Position,
 ) -> b32 {
 	slot := find_voice(m, voice)
-	if slot == nil || out == nil {
+	if slot == nil || slot.stopped || out == nil {
 		return false
 	}
 	for {
