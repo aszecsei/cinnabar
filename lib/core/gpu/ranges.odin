@@ -76,7 +76,10 @@ range_free :: proc(a: ^Range_Allocator, offset, size: u64) {
 	for i < len(a.free) && a.free[i].offset < offset {
 		i += 1
 	}
-	assert(i == len(a.free) || offset + size <= a.free[i].offset, "gpu: a freed range overlaps a free one")
+	assert(
+		i == len(a.free) || offset + size <= a.free[i].offset,
+		"gpu: a freed range overlaps a free one",
+	)
 	assert(
 		i == 0 || a.free[i - 1].offset + a.free[i - 1].size <= offset,
 		"gpu: a freed range overlaps a free one",

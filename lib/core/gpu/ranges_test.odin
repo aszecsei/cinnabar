@@ -12,7 +12,11 @@ check_ranges :: proc(t: ^testing.T, a: ^Range_Allocator) {
 		if i > 0 {
 			before := a.free[i - 1]
 			// Touching ranges would have merged.
-			testing.expect(t, before.offset + before.size < r.offset, "free ranges touch or overlap")
+			testing.expect(
+				t,
+				before.offset + before.size < r.offset,
+				"free ranges touch or overlap",
+			)
 		}
 		free += r.size
 	}
