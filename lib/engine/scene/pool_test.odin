@@ -50,12 +50,31 @@ component 100 Probe
 	ratio = 0.5
 `
 
+// The night sublevel's part of the court, whose base is YARD.
+@(private = "file")
+NIGHT :: `scene 2
+entity 00000000000000c1
+name = "Lamp"
+`
+
 // A scene for the turrets to belong to.
 @(private = "file")
 YARD :: `scene 2
 entity 00000000000000d1
 name = "Yard"
 `
+
+@(private = "file")
+COURT_GUID :: format.Guid {
+	0  = 0x70,
+	15 = 5,
+}
+
+@(private = "file")
+NIGHT_GUID :: format.Guid {
+	0  = 0x70,
+	15 = 6,
+}
 
 @(private = "file")
 TURRET_GUID :: format.Guid {
@@ -190,6 +209,7 @@ setup :: proc(t: ^testing.T, with_scripts := false) -> ^Pool_Fixture {
 	init_scenes(&f.scenes, &f.platform, &f.assets)
 	write_scene(t, f, TURRET_GUID, TURRET, .Prefab)
 	write_scene(t, f, YARD_GUID, YARD, .Scene)
+	write_court(t, f)
 	write_script(t, f, LIFECYCLE_GUID, LIFECYCLE)
 	write_script(t, f, SPAWNER_GUID, SPAWNER)
 	if with_scripts {
@@ -257,6 +277,27 @@ write_scene :: proc(
 		guid,
 		format.scene_write(s, guid, 1, kind, allocator = context.temp_allocator),
 	)
+}
+
+// write_court writes a scene whose base lists a night sublevel, and the night's part, which has a lamp.
+@(private = "file")
+write_court :: proc(t: ^testing.T, f: ^Pool_Fixture) {
+	base, problems, ok := format.scene_parse(YARD, context.temp_allocator)
+	testing.expectf(t, ok, "problems: %v", problems)
+	write_file(
+		t,
+		f,
+		COURT_GUID,
+		format.scene_write(
+			base,
+			COURT_GUID,
+			1,
+			.Scene,
+			sublevels = []format.Scene_Sublevel{{"night", NIGHT_GUID}},
+			allocator = context.temp_allocator,
+		),
+	)
+	write_scene(t, f, NIGHT_GUID, NIGHT, .Scene)
 }
 
 @(private = "file")
@@ -385,9 +426,10 @@ a_broken_pooled_instance_is_replaced :: proc(t: ^testing.T) {
 	testing.expect_value(t, ecs.get(w, barrel, Probe).target, again)
 }
 
-// A scene's pooled instances go with it, waiting or not, and an unload of the level forgets the pools.
+// An instance in use goes with its scene. A waiting one belongs to no scene, so it outlives the scene that released it
+// and the next spawn takes it, with that spawn's owner. An unload of the level forgets the pools.
 @(test)
-pooled_instances_go_with_their_scene :: proc(t: ^testing.T) {
+a_waiting_instance_outlives_its_scene :: proc(t: ^testing.T) {
 	f := setup(t)
 	defer teardown(f)
 	w := &f.world
@@ -396,26 +438,72 @@ pooled_instances_go_with_their_scene :: proc(t: ^testing.T) {
 	waiting, _ := pool_spawn(&f.scenes, w, TURRET_GUID, meters(0), number)
 	out, _ := pool_spawn(&f.scenes, w, TURRET_GUID, meters(0), number)
 	testing.expect(t, pool_release(&f.scenes, w, waiting))
+	_, waiting_owned := scene_of(w, waiting)
+	testing.expect(t, !waiting_owned)
 
 	unload_scene(w, &f.scenes, number)
-	testing.expect(t, !ecs.is_alive(w, waiting))
+	testing.expect(t, ecs.is_alive(w, waiting))
 	testing.expect(t, !ecs.is_alive(w, out))
-	testing.expect_value(t, ecs.entity_count(w), 0)
 	forget_despawned_pools(&f.scenes, w)
 	testing.expect_value(t, len(f.scenes.pools.live), 0)
+	testing.expect_value(t, pool_count(&f.scenes, TURRET_GUID), 1)
 
-	// The waiting one is gone, so the next spawn makes a new one, which the game owns.
-	fresh, ok := pool_spawn(&f.scenes, w, TURRET_GUID, meters(0))
+	again, loaded_again := add_scene_asset(w, nil, &f.scenes, YARD_GUID)
+	testing.expect(t, loaded_again)
+	reused, ok := pool_spawn(&f.scenes, w, TURRET_GUID, meters(0), again)
 	testing.expect(t, ok)
-	_, owned := scene_of(w, fresh)
-	testing.expect(t, !owned)
-	testing.expect_value(t, pool_count(&f.scenes, TURRET_GUID), 0)
+	testing.expect_value(t, reused, waiting)
+	owner, owned := scene_of(w, reused)
+	testing.expect(t, owned)
+	testing.expect_value(t, owner, again)
 
 	testing.expect_value(t, pool_reserve(&f.scenes, w, TURRET_GUID, 3), 3)
 	testing.expect_value(t, pool_count(&f.scenes, TURRET_GUID), 3)
 	unload_level(w, &f.scenes)
 	testing.expect_value(t, pool_count(&f.scenes, TURRET_GUID), 0)
 	testing.expect_value(t, len(f.scenes.pools.live), 0)
+}
+
+// A sublevel's part is a scene, so a deactivated sublevel takes the instances that its behaviours have in use, and
+// leaves the waiting ones in the pool, which the part takes again when the sublevel comes back.
+@(test)
+a_sublevel_leaves_its_waiting_instances_in_the_pool :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	w := &f.world
+	base, loaded := add_scene_asset(w, nil, &f.scenes, COURT_GUID)
+	testing.expect(t, loaded)
+	testing.expect_value(t, load_parts(w, nil, &f.scenes, base, {"night"}), 1)
+	night, has_night := part_number(&f.scenes, base, "night")
+	testing.expect(t, has_night)
+
+	waiting, _ := pool_spawn(&f.scenes, w, TURRET_GUID, meters(0), night)
+	out, _ := pool_spawn(&f.scenes, w, TURRET_GUID, meters(0), night)
+	testing.expect(t, pool_release(&f.scenes, w, waiting))
+	count := ecs.entity_count(w)
+
+	// Deactivating the sublevel unloads its part: its lamp and the turret in use, with its barrel.
+	testing.expect_value(t, update_parts(w, &f.scenes, {}), 3)
+	_, still := part_number(&f.scenes, base, "night")
+	testing.expect(t, !still)
+	testing.expect(t, !ecs.is_alive(w, out))
+	testing.expect(t, ecs.is_alive(w, waiting))
+	testing.expect_value(t, ecs.entity_count(w), count - 3)
+	forget_despawned_pools(&f.scenes, w)
+	testing.expect_value(t, len(f.scenes.pools.live), 0)
+	testing.expect_value(t, pool_count(&f.scenes, TURRET_GUID), 1)
+
+	// It comes back as a new part, whose first spawn takes the waiting turret, with the prefab's values.
+	testing.expect_value(t, load_parts(w, nil, &f.scenes, base, {"night"}), 1)
+	night, _ = part_number(&f.scenes, base, "night")
+	reused, ok := pool_spawn(&f.scenes, w, TURRET_GUID, meters(2), night)
+	testing.expect(t, ok)
+	testing.expect_value(t, reused, waiting)
+	owner, _ := scene_of(w, reused)
+	testing.expect_value(t, owner, night)
+	testing.expect(t, !ecs.has(w, reused, ecs.Inactive))
+	testing.expect_value(t, ecs.get(w, barrel_of(w, reused), Probe).target, reused)
+	testing.expect_value(t, pool_count(&f.scenes, TURRET_GUID), 0)
 }
 
 // A reused instance's behaviours end when it goes back, and start again as new ones when it comes out.

@@ -152,9 +152,11 @@ pool_spawn_pending :: proc(
 
 // pool_release takes an instance that pool_spawn gave out of the world and keeps it for the prefab's next pool_spawn,
 // in place of despawning it. Its behaviours end, with on_disable and on_destroy before it returns, and its root becomes
-// inactive, so systems and queries skip it. It stays its scene's, and goes when the scene unloads. Entities that the
-// game put under it stay under it. It returns false, and does nothing, for an entity that is not the root of an
-// instance that pool_spawn gave and that is in the world. Call it between frames or in a serial phase.
+// inactive, so systems and queries skip it. It belongs to no scene while it waits, so a scene or a sublevel that
+// unloads does not take it, and the pool keeps it for the next spawn, which gives it that spawn's owner; only a level
+// unload despawns it. Entities that the game put under it stay under it. It returns false, and does nothing, for an
+// entity that is not the root of an instance that pool_spawn gave and that is in the world. Call it between frames or
+// in a serial phase.
 pool_release :: proc(s: ^Scenes, w: ^ecs.World, root: ecs.Entity) -> bool {
 	follow_level(s)
 	instance, found := s.pools.live[root]
@@ -172,6 +174,9 @@ pool_release :: proc(s: ^Scenes, w: ^ecs.World, root: ecs.Entity) -> bool {
 		}
 	}
 	ecs.set_active(w, root, false)
+	if ecs.has(w, root, Scene_Owned) {
+		ecs.remove(w, root, Scene_Owned)
+	}
 	if s.scripts != nil {
 		script.forget_despawned(s.scripts)
 	}
