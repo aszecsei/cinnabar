@@ -163,6 +163,8 @@ send_stats :: proc(l: ^Link) {
 			video_memory_budget = gpu.video_memory_budget,
 			bottom_accel_memory = gpu.bottom_accel_memory,
 			bottom_accel_memory_uncompacted = gpu.bottom_accel_memory_uncompacted,
+			heap_memory = gpu.heap_memory,
+			resource_memory = gpu.resource_memory,
 		},
 	)
 	s^ = {

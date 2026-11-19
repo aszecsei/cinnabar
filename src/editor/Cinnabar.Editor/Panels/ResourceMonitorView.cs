@@ -93,6 +93,8 @@ public sealed class ResourceMonitorView : Grid
                 ("Acceleration structures", $"{h.Accels:N0}"),
                 // The bottom-level structures' memory, and before their compaction.
                 .. AccelMemoryRows(h),
+                // The resources' part of the heaps that the backend places them in.
+                .. HeapMemoryRows(h),
             ]);
         }
         if (_stats.Game is { } g)
@@ -251,6 +253,16 @@ public sealed class ResourceMonitorView : Grid
         {
             var before = h.BottomAccelMemoryUncompacted > h.BottomAccelMemory ? $" ({ResourceStats.Bytes(h.BottomAccelMemoryUncompacted)} before compaction)" : "";
             yield return ("Bottom-level structures", ResourceStats.Bytes(h.BottomAccelMemory) + before);
+        }
+    }
+
+    // The part of the GPU backend's resource heaps that the resources placed in them take, out of the heaps' memory, none
+    // without a heap (see docs/gpu/resources-and-pipelines.md#memory).
+    internal static IEnumerable<(string Name, string Value)> HeapMemoryRows(Link.Protocol.HostStats h)
+    {
+        if (h.HeapMemory > 0)
+        {
+            yield return ("Resource heaps", $"{ResourceStats.Bytes(h.ResourceMemory)} / {ResourceStats.Bytes(h.HeapMemory)}");
         }
     }
 

@@ -962,6 +962,10 @@ Stats :: struct {
 	// the structure it was compacted from.
 	bottom_accel_memory:             u64,
 	bottom_accel_memory_uncompacted: u64,
+	// The memory of the heaps that the backend places resources in, and the part of it that the live resources take,
+	// or 0 for a backend without heaps (see docs/gpu/resources-and-pipelines.md#memory).
+	heap_memory:                     u64,
+	resource_memory:                 u64,
 }
 
 // Transfer identifies a streaming copy (see docs/gpu/queues-streaming-readback.md#streaming). gpu_transfer_done reports when the resource can

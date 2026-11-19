@@ -305,6 +305,7 @@ stats :: proc() -> gpu.Stats {
 	dev.upload_peak = 0
 	s.bottom_accel_memory, s.bottom_accel_memory_uncompacted = accel_memory()
 	s.video_memory_used, s.video_memory_budget = video_memory()
+	s.heap_memory, s.resource_memory = memory_stats()
 	return s
 }
 
