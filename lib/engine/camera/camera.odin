@@ -661,13 +661,14 @@ refresh_live :: proc(w: ^ecs.World, stack: ^Stack) {
 stack_view :: proc(v: ^Views, w: ^ecs.World, stack: ^Stack) -> render.View {
 	target := default_view()
 	camera := stack_camera(v, stack)
-	if _, chosen := stack.choice.(Chosen); !chosen && stack == &v.claims {
+	_, chosen := stack.choice.(Chosen)
+	if !chosen && stack == &v.claims {
 		// The first view's stack chose and stepped before the claims' in this advance, so this is what it shows now,
 		// with its own blend.
 		target = v.views[0].stack.shown
 	} else if view, ok := render.camera_view(w, camera); ok {
 		target = view
-	} else if _, chosen := stack.choice.(Chosen); chosen {
+	} else if chosen {
 		// A camera without a pose shows what the stack showed before, not the default.
 		target = stack.shown
 	}
