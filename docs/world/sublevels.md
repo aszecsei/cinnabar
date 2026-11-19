@@ -47,6 +47,8 @@ A part is wanted when its sublevel is active and its scene is in, and in no othe
 | `scene.load_parts(w, scripts, scenes, base, wanted)` | Loads a base's wanted parts at once, as `add_scene_asset` does. |
 | `scene.update_parts(w, scenes, wanted)` | Unloads the parts that are not wanted, and begins to load in stages the wanted ones that are missing. It gives how many entities went. |
 | `scene.loading_with_parts(scenes, base)` | Whether the base or any of its parts is not ready. |
+| `scene.add_scene(..., of = Part_Of{base, name})` | Adds a part from memory, as the editor sends it. A base that is not loaded refuses it. |
+| `scene.move_entities(w, scenes, root, from, to)` | Moves an entity and its descendants to another part, with their handles, their maps and their links ([Editor: Parts](../editor/document-and-scenes.md#parts)). |
 
 - **A scene that loads at once arrives whole.** The main scene and `Scene.load` load the base, then `load_parts` loads its active parts in the same frame.
 - **A scene that loads in stages begins its parts when its blob is read.** `advance_loads` takes the active sublevels, and begins their parts as soon as the base knows its list. The base stays in `Settling` for at least one call, so it is never ready before its parts begin.
@@ -156,5 +158,5 @@ Each part takes a slot of scene memory ([Core: Scene memory](../core/jobs-and-me
 ## Known limits
 
 - **A change to the settings' sublevels** applies when the next level starts, except that a newly declared sublevel joins the running level, inactive.
-- **The editor's scenes** come from its documents, not from blobs, so they have no parts ([Editor: Sublevels](../editor/document-and-scenes.md#sublevels)).
+- **The editor's scenes** come from its documents, not from blobs. The editor sends each document's parts itself, as rows that name their base. In Edit, the world has the editor's choice of sublevels, not the active set: a change of the active set in Edit unloads no part ([Editor: Parts](../editor/document-and-scenes.md#parts)). A base from the editor lists no sublevels, so activating a sublevel in Play loads no part of it.
 - **At most 32 sublevels** for each project, and for each scene.

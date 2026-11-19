@@ -381,3 +381,53 @@ kind_of_is_the_index_in_the_union :: proc(t: ^testing.T) {
 	testing.expect_value(t, kind_of(Game_Size), u16(6))
 	testing.expect_value(t, kind_of(Entity_Values), u16(12))
 }
+
+// A part names its base and its sublevel, and Set_Sublevel names the part that its entity moves to.
+@(test)
+a_scenes_parts_and_set_sublevel_round_trip :: proc(t: ^testing.T) {
+	buf: [dynamic]byte
+	defer delete(buf)
+	write_message(
+		&buf,
+		Add_Scene{scene = {scene = 4, guid = {1 = 9}, base = 2, sublevel = "night"}, ticket = 3},
+	)
+	decoded, added_ok := decode_message(
+		kind_of(Add_Scene),
+		buf[HEADER_SIZE:],
+		context.temp_allocator,
+	)
+	testing.expect(t, added_ok)
+	added := decoded.(Add_Scene)
+	testing.expect_value(t, added.scene.base, u32(2))
+	testing.expect_value(t, added.scene.sublevel, "night")
+	testing.expect_value(t, added.scene.guid[1], u8(9))
+
+	clear(&buf)
+	write_message(
+		&buf,
+		Apply_Operations {
+			operations = {
+				{
+					kind = .Set_Sublevel,
+					scene = 2,
+					entity = 7,
+					target = 4,
+					sublevel = "night",
+					guid = {15 = 1},
+				},
+			},
+		},
+	)
+	message, ok := decode_message(
+		kind_of(Apply_Operations),
+		buf[HEADER_SIZE:],
+		context.temp_allocator,
+	)
+	testing.expect(t, ok)
+	op := message.(Apply_Operations).operations[0]
+	testing.expect_value(t, op.kind, Operation_Kind.Set_Sublevel)
+	testing.expect_value(t, op.scene, u32(2))
+	testing.expect_value(t, op.target, u32(4))
+	testing.expect_value(t, op.sublevel, "night")
+	testing.expect_value(t, op.guid[15], u8(1))
+}

@@ -132,7 +132,19 @@ public static class SceneEdits
     public static Operation[] Reparent(Scene scene, ulong id, ulong parent)
     {
         var entity = scene.Find(id) ?? throw new InvalidOperationException($"the scene has no entity {id:x16}");
-        var ops = new List<Operation> { new SetParent(id, parent) };
+        var ops = new List<Operation>();
+        // A child is in its parent's sublevel, so a new parent in another takes the entity and its descendants there, and
+        // a new root stays in the sublevel that it was in (see docs/editor/document-and-scenes.md#parts).
+        var sublevel = scene.SublevelOf(entity);
+        if (parent == 0 && entity.Sublevel == null && sublevel != "")
+        {
+            ops.Add(new SetSublevel(id, sublevel));
+        }
+        else if (parent != 0 && scene.Find(parent) is { } target && scene.SublevelOf(target) != sublevel)
+        {
+            ops.Add(new SetSublevel(id, null));
+        }
+        ops.Add(new SetParent(id, parent));
         if (WorldPose(scene, entity) is not { } world)
         {
             return [.. ops];

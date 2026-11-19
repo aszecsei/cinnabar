@@ -44,6 +44,33 @@ public sealed partial class EditorShell
         return null;
     }
 
+    /// <summary>
+    /// The GUID of a file's sub-asset by its name, such as <c>sublevel.night</c>, from the index or from the file's .meta
+    /// file, or null when it has none yet (see docs/content/identity-and-cooking.md#identity).
+    /// </summary>
+    string? SubassetGuidOf(string path, string name)
+    {
+        if (AssetGuidOf(path) is { } parent && Assets.SubassetsOf(parent).FirstOrDefault(a => a.Subasset == name) is { } asset)
+        {
+            return asset.Guid;
+        }
+        try
+        {
+            foreach (var line in File.ReadAllLines(path + ".meta"))
+            {
+                var parts = line.Split('=', 2);
+                if (parts.Length == 2 && parts[0].Trim() == name)
+                {
+                    return parts[1].Trim().ToLowerInvariant();
+                }
+            }
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+        }
+        return null;
+    }
+
     // An operation that may move the open scene's file, which the document then follows, with its autosave.
     async Task<bool> MovingScene(Func<Task<OperationResult?>> operation)
     {

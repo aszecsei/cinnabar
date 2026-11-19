@@ -76,7 +76,9 @@ apply_scene_requests :: proc(g: ^Game) {
 		}
 	}
 	clear(&g.scene_requests)
-	if sublevels_changed {
+	// While the editor edits, the world has the editor's choice of sublevels, not the active set, which takes effect
+	// at Play (see docs/editor/document-and-scenes.md#parts).
+	if sublevels_changed && !editor.editing(&g.editor) {
 		if scene.update_parts(&g.world, &g.scenes, active_sublevels(g)) > 0 {
 			unloaded = true
 		}

@@ -76,6 +76,11 @@ public static partial class PrefabEdits
         {
             return RemoveInstance(document, op.Entity);
         }
+        // An instance's sublevel is its block's own key, and its entities are in it.
+        if (op is SetSublevel && info.IsInstanceRoot)
+        {
+            return op;
+        }
         var existing = document.Scene.Find(op.Entity);
         var block = existing?.Clone() ?? new SceneEntity(info.Path);
         var flat = expansion.Flat.Find(op.Entity) ?? throw new InvalidOperationException($"the scene has no entity {op.Entity:x16}");
@@ -161,6 +166,8 @@ public static partial class PrefabEdits
             case DestroyEntity:
                 block.Removed = true;
                 break;
+            case SetSublevel:
+                throw new InvalidOperationException($"{Label(flat)} is in its instance's sublevel: put the instance in a sublevel instead");
             default:
                 throw new InvalidOperationException($"{op.GetType().Name} cannot edit {Label(flat)}, which is inside an instance");
         }

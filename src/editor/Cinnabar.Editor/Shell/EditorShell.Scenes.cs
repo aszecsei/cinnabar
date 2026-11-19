@@ -716,6 +716,7 @@ public sealed partial class EditorShell
             foreach (var old in _scenes)
             {
                 Unsubscribe(old);
+                ForgetParts(old);
             }
             _scenes.Clear();
             Mesh.CloseMeshes();
@@ -780,12 +781,8 @@ public sealed partial class EditorShell
     void SendOperations(SceneDocument document, IReadOnlyList<Operation> operations)
     {
         // A mesh operation has nothing here: the mesh set's change sends the live mesh.
-        // An edit of an instance has the difference that it made to the expansion.
-        var wire = operations.SelectMany(o => o.ToWires()).Select(w => w with { Scene = document.Number }).ToArray();
-        if (wire.Length > 0)
-        {
-            Host.Send(new ApplyOperations(wire));
-        }
+        // An edit of an instance has the difference that it made to the expansion. Each names its entity's part.
+        SendRouted(document, operations.SelectMany(o => o.ToWires()));
         // The gizmo sits on the primary entity, which an edit can move.
         SendGizmo();
     }
@@ -810,7 +807,8 @@ public sealed partial class EditorShell
     {
         if (_scenes.Count > 0 && Host.Linked)
         {
-            Host.Send(SceneSnapshot.ToMessage(_scenes.Select(s => SceneSnapshot.Loaded(s.Number, s.Expanded.Flat, AssetGuidOf(s.Path) ?? "")), ++_sceneTicket));
+            // Each scene is its base and the parts of its loaded sublevels (see docs/editor/document-and-scenes.md#parts).
+            Host.Send(SceneSnapshot.ToMessage(_scenes.SelectMany(PartsToLoad), ++_sceneTicket));
         }
     }
 
@@ -818,15 +816,20 @@ public sealed partial class EditorShell
     // shows the result.
     void SendAddedScene(SceneDocument document)
     {
-        if (Host.Linked)
+        // Its base comes first, and then each part, which names it.
+        foreach (var part in PartsToLoad(document))
         {
-            Host.Send(new Wire.AddScene(SceneSnapshot.Loaded(document.Number, document.Expanded.Flat, AssetGuidOf(document.Path) ?? ""), ++_sceneTicket));
+            if (Host.Linked)
+            {
+                Host.Send(new Wire.AddScene(part, ++_sceneTicket));
+            }
         }
     }
 
-    // The host despawns the entities of a scene that closed, and the others' stay as they are.
+    // The host despawns the entities of a scene that closed, with its parts, and the others' stay as they are.
     void SendRemovedScene(SceneDocument document)
     {
+        ForgetParts(document);
         if (Host.Linked)
         {
             Host.Send(new Wire.RemoveScene(document.Number, ++_sceneTicket));
@@ -835,6 +838,7 @@ public sealed partial class EditorShell
 
     internal void OnGameMessage(Link.ILinkMessage message)
     {
+        message = FromParts(message);
         switch (message)
         {
             case PickResult picked:

@@ -11,7 +11,8 @@ import "cinnabar:engine/scene"
 import "cinnabar:engine/script"
 
 // apply_operations applies the editor's edits to the world, in order, and adds what it cannot apply to problems.
-// The editor's document already has them, so nothing is sent back but the problems.
+// The editor's document already has them, so nothing is sent back but the problems. It gives whether a part that
+// Set_Sublevel emptied unloaded, which the systems that keep data by entity must then hear of, as for Remove_Scene.
 @(private)
 apply_operations :: proc(
 	e: ^Editor,
@@ -19,6 +20,8 @@ apply_operations :: proc(
 	scripts: ^script.Runtime,
 	operations: []link.Operation,
 	reported: ^[dynamic]link.Edit_Problem,
+) -> (
+	unloaded: bool,
 ) {
 	allocator := e.platform.frame_allocator
 	if !scene.has_maps(e.scenes) {
@@ -72,6 +75,10 @@ apply_operations :: proc(
 		guid := format.Guid(op.script)
 		switch op.kind {
 		case .Create_Entity, .Create_Instance:
+		case .Set_Sublevel:
+			if set_sublevel(e, w, scripts, op, entity, problems) {
+				unloaded = true
+			}
 		case .Destroy_Entity:
 			scene.release_slots(e.scenes, w, entity)
 			ecs.despawn(w, entity)
@@ -191,6 +198,67 @@ apply_operations :: proc(
 		}
 	}
 	ecs.update_activity(w)
+	return
+}
+
+// set_sublevel moves an entity of a part, with its descendants, to another part of the same scene's base, and keeps
+// their handles (see docs/editor/document-and-scenes.md#parts). The part that it moves to loads, empty, if it is not
+// loaded, and the part that it leaves unloads if it has no entity left. It gives whether that part unloaded.
+@(private = "file")
+set_sublevel :: proc(
+	e: ^Editor,
+	w: ^ecs.World,
+	scripts: ^script.Runtime,
+	op: link.Operation,
+	entity: ecs.Entity,
+	problems: ^[dynamic]scene.Problem,
+) -> (
+	unloaded: bool,
+) {
+	base, has_base := scene.base_of(e.scenes, op.scene)
+	if !has_base {
+		append(problems, scene.Problem{op.entity, "its scene is not in the game's world"})
+		return
+	}
+	if !scene.is_loaded(e.scenes, op.target) {
+		if op.sublevel == "" {
+			append(
+				problems,
+				scene.Problem{op.entity, "the base that it moves to is not in the game's world"},
+			)
+			return
+		}
+		of := scene.Part_Of{base, format.sublevel_name(op.sublevel)}
+		if _, ok := scene.add_scene(
+			w,
+			scripts,
+			e.scenes,
+			format.Scene{guid = format.Guid(op.guid)},
+			op.target,
+			nil,
+			of,
+		); !ok {
+			append(
+				problems,
+				scene.Problem{op.entity, "the game cannot add the part of its new sublevel"},
+			)
+			return
+		}
+	}
+	if target_base, _ := scene.base_of(e.scenes, op.target); target_base != base {
+		append(problems, scene.Problem{op.entity, "the part that it moves to is another scene's"})
+		return
+	}
+	if _, ok := scene.move_entities(w, e.scenes, entity, op.scene, op.target); !ok {
+		append(problems, scene.Problem{op.entity, "the game cannot move it to its new part"})
+		return
+	}
+	if _, is_part := scene.sublevel_of(e.scenes, op.scene);
+	   is_part && scene.scene_size(e.scenes, op.scene) == 0 {
+		scene.unload_scene(w, e.scenes, op.scene)
+		unloaded = true
+	}
+	return
 }
 
 // load_scenes unloads the level and replaces every entity in the world with the editor's scenes, each with its own
@@ -228,6 +296,11 @@ add_editor_scene :: proc(
 		entities[j] = scene_entity_of(entity, allocator)
 	}
 	found := make([dynamic]scene.Problem, allocator)
+	// A part names its base, which the editor sends before it (see docs/editor/document-and-scenes.md#parts).
+	of: Maybe(scene.Part_Of)
+	if s.base != 0 {
+		of = scene.Part_Of{s.base, format.sublevel_name(s.sublevel)}
+	}
 	_, ok := scene.add_scene(
 		w,
 		scripts,
@@ -235,6 +308,7 @@ add_editor_scene :: proc(
 		format.Scene{entities = entities, guid = format.Guid(s.guid)},
 		s.scene,
 		&found,
+		of,
 	)
 	for p in found {
 		append(
@@ -248,7 +322,7 @@ add_editor_scene :: proc(
 			link.Edit_Problem {
 				scene = s.scene,
 				message = fmt.aprintf(
-					"the game cannot add the scene %d: a scene with its number is loaded, or as many scenes as it holds",
+					"the game cannot add the scene %d: a scene with its number is loaded, its base is not, or as many scenes are loaded as it holds",
 					s.scene,
 					allocator = allocator,
 				),
