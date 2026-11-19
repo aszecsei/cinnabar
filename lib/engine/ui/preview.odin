@@ -81,7 +81,6 @@ layout_one :: proc(s: ^State, index: int, size: [2]f32, scale: f32) {
 	d.screen = {
 		rect  = {0, 0, size.x, size.y},
 		scale = scale,
-		shown = true,
 	}
 	if d.used && d.built && len(d.nodes) > 0 {
 		layout_document(s, begin_text(s), d, index)

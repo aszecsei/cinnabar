@@ -218,6 +218,8 @@ game_update :: proc(g: ^Game, dt: time.Duration, h: Hooks) -> (keep_running: boo
 	}
 	// The views choose their cameras after every push of the frame, the project's too, and their blends step by the
 	// world's time or the host's.
+	// A world that the editor's scene replaced starts with fresh views: its old behaviours could not set them back.
+	camera.follow_world(&g.views, &g.renderer, editor.world_loads(&g.editor))
 	shown := camera.advance(&g.views, &g.world, {g.frame_step, f32(time.duration_seconds(dt))})
 	send_camera_events(g)
 	// A minimized window has no size, and nothing is rendered.
@@ -226,6 +228,8 @@ game_update :: proc(g: ^Game, dt: time.Duration, h: Hooks) -> (keep_running: boo
 		return g.run != .Quitting
 	}
 	render_frame(g, {u32(size.x), u32(size.y)}, shown, h)
+	// The frame carried the views' cuts. A frame that is not drawn leaves them for the next.
+	camera.drawn(&g.views)
 	return g.run != .Quitting
 }
 

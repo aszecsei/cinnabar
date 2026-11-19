@@ -87,9 +87,11 @@ plan_frame :: proc(
 		// The Game view shows the game's whole layout: the game's own view in its rect, and the game's views in rects
 		// first among the extra views, so that a scene view, not one of them, is what the views' limit leaves out.
 		game_rect, in_rect := desc.rect.?
-		if v.kind == .Game && in_rect {
-			view.rect, view.size = scale_rect(game_rect, desc.size, v.size)
+		if v.kind == .Game {
 			view.cut = desc.cut
+			if in_rect {
+				view.rect, view.size = scale_rect(game_rect, desc.size, v.size)
+			}
 		}
 		render.use_view(&out, view)
 		out.shading_stats = desc.shading_stats || render_overrides(e, v.viewport).shading_stats

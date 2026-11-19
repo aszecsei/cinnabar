@@ -134,7 +134,10 @@ expect_x :: proc(t: ^testing.T, f: ^Fixture, index: int, want: f32, loc := #call
 
 @(private = "file")
 step :: proc(f: ^Fixture, game: f32 = 0, real: f32 = 0) -> Frame_Views {
-	return advance(&f.views, &f.world, {game, real})
+	frame := advance(&f.views, &f.world, {game, real})
+	// The game draws each frame that advance gives.
+	drawn(&f.views)
+	return frame
 }
 
 @(test)
@@ -668,4 +671,51 @@ a_claim_blends_in_from_the_first_view_and_its_release_blends_back :: proc(t: ^te
 	testing.expect(t, frame.views[0].cut && frame.views[1].cut)
 	testing.expect(t, near(x_of(frame.views[0].view), 10))
 	testing.expect(t, near(x_of(frame.views[1].view), 20))
+}
+
+// A cut stays pending until a frame that carries it is drawn: a frame that is not drawn, as with a minimized window,
+// passes it on to the next.
+@(test)
+a_cut_waits_for_a_drawn_frame :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	a, b := spawn_camera(f, 1), spawn_camera(f, 2)
+	push(&f.views, &f.world, 0, a, 1)
+	step(f)
+	push(&f.views, &f.world, 0, b, 2)
+	// Not drawn.
+	frame := advance(&f.views, &f.world, {})
+	testing.expect(t, frame.views[0].cut)
+	frame = advance(&f.views, &f.world, {})
+	testing.expect(t, frame.views[0].cut)
+	drawn(&f.views)
+	frame = step(f)
+	testing.expect(t, !frame.views[0].cut)
+}
+
+// A new world, as the editor's scene replaces the game's, starts the views again: one view, no pushes or claims, the
+// old tokens stale, and a cut in the first frame. The same count of replacements changes nothing.
+@(test)
+a_new_world_starts_the_views_again :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	a, b, c := spawn_camera(f, 1), spawn_camera(f, 2), spawn_camera(f, 3)
+	set_layout(&f.views, nil, Preset.Side_By_Side)
+	pushed, _ := push(&f.views, &f.world, 0, b, 1)
+	claimed_token, _ := claim(&f.views, &f.world, c, 0, {duration = 5}, {duration = 5})
+	step(f, 1)
+	follow_world(&f.views, nil, 0)
+	testing.expect(t, claimed(&f.views))
+	follow_world(&f.views, nil, 1)
+	testing.expect(t, !claimed(&f.views) && !is_pushed(&f.views, pushed) && !is_claimed(&f.views, claimed_token))
+	testing.expect_value(t, view_count(&f.views), 1)
+	frame := step(f)
+	testing.expect_value(t, frame.count, 1)
+	testing.expect(t, frame.views[0].cut)
+	testing.expect(t, near(x_of(frame.views[0].view), x_of(view_of(&f.views, &f.world, 0))))
+	testing.expect_value(t, chosen_camera(&f.views, 0), a)
+	frame = step(f)
+	testing.expect(t, !frame.views[0].cut)
+	follow_world(&f.views, nil, 1)
+	testing.expect(t, !step(f).views[0].cut)
 }

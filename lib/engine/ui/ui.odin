@@ -128,12 +128,12 @@ Binding :: struct {
 }
 
 // Screen is the part of the window that a document lays out in, and the scale of its lengths, as layout set them this
-// frame. A document that is not shown takes no input and does not draw.
+// frame: zero for a document of a view that is not shown, whose root node is hidden, so it takes no input and does not
+// draw.
 Screen :: struct {
 	// The rectangle as x, y, width and height, in window pixels.
 	rect:  [4]f32,
 	scale: f32,
-	shown: bool,
 }
 
 // Document is a Ui_Document's document, in a slot of the state, while its entity has one.

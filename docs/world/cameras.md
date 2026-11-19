@@ -15,6 +15,7 @@ The game's views, their layout, and the camera stack of each view. Systems push 
   - `Custom`: up to `MAX_VIEWS` rects that the game sets itself.
 - **`set_layout`** is the only writer of the layout. It frees the renderer's `View_State` of each view that goes.
 - **The layout stays when a level changes.** It is like the number of players, not part of a level. A script that sets a layout sets `single` again when it goes, as the sample's `split_screen.luau` does in `on_destroy`.
+- **A new world from the editor starts the views again.** When the editor's scene replaces the game's world, at Play, at Stop and when a scene opens, the old world's behaviours end without their callbacks, so they cannot set the layout back. `camera.follow_world` sees that `editor.world_loads` changed and calls `camera.reset`: one full-screen view, no pushes or claims, and a cut in the first frame. The old tokens stay stale, and their owners hear nothing.
 - **`pixel_rect`** gives a rect in a window's pixels. It rounds each edge, so views that share an edge in the layout share it in pixels, and the presets cover the window with no gap.
 - **View 0 is the own view.** It does the work that the renderer does once a frame: the render origin, the view model, the particles' step and collision, the sky's cubemap and the lookup table's bake (see [Rendering: Views in rects](../rendering/frame.md#views-in-rects)). Views 1 and up are extra views. `camera.view_state` makes each one's `View_State` when it first draws, and `camera.destroy` frees them at shutdown.
 
@@ -42,7 +43,7 @@ This follows [State with a lifecycle](../overview/conventions.md#state-with-a-li
 - **A moving camera** blends from where it is: a blend reads the old camera's presented pose each frame. If the old camera goes during the blend, the blend keeps its last pose.
 - **A blend that starts during another blend** starts from the current blended pose, not from the old camera.
 - **The clock** is the pusher's choice. `Game` is the world's step, which is 0 while the game is paused and in the editor's Edit. `Real` is the host's frame time, for cameras that ignore pause.
-- **A cut** has no interpolation across it. The view's `cut` flag goes to the renderer, which drops the view's histories, last camera and adapted exposure in that frame (see [Rendering: Views](../rendering/frame.md#views)).
+- **A cut** has no interpolation across it. The view's `cut` flag goes to the renderer, which drops the view's histories, last camera and adapted exposure in that frame (see [Rendering: Views](../rendering/frame.md#views)). A cut stays pending until a frame that carries it is drawn: the game calls `camera.drawn` after it draws, so a frame that is not drawn, as with a minimized window, passes the cut on to the next.
 
 ## Claims
 

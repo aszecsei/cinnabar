@@ -174,7 +174,7 @@ a_view_document_lays_out_in_its_views_rect_at_its_scale :: proc(t: ^testing.T) {
 	views := [][4]f32{{0, 0, 960, 1080}, {960, 40, 640, 1620}}
 	step(f, size = {1920, 1080}, views = views)
 	d := document_of(&f.ui, e)
-	testing.expect(t, d.screen.shown)
+	testing.expect(t, d.nodes[0].shown)
 	testing.expect_value(t, d.screen.rect, views[1])
 	testing.expect_value(t, d.screen.scale, f32(1.5))
 	// The node is in window coordinates, at the scale of the view's height: 1620 / 1080.
@@ -195,7 +195,7 @@ a_window_document_lays_out_at_the_windows_size :: proc(t: ^testing.T) {
 	views := [][4]f32{{0, 0, 640, 360}, {640, 0, 640, 360}}
 	step(f, size = {1280, 720}, views = views)
 	d := document_of(&f.ui, e)
-	testing.expect(t, d.screen.shown)
+	testing.expect(t, d.nodes[0].shown)
 	testing.expect_value(t, d.screen.rect, [4]f32{0, 0, 1280, 720})
 	testing.expect_value(t, d.screen.scale, f32(720.0 / 1080))
 	testing.expect_value(t, node_rect(t, f, e, "b"), [4]f32{0, 0, 1280, 720})
@@ -215,7 +215,7 @@ a_document_of_a_view_not_shown_is_hidden :: proc(t: ^testing.T) {
 	views := [][4]f32{{0, 0, 960, 1080}, {960, 0, 960, 1080}}
 	step(f, views = views)
 	d := document_of(&f.ui, e)
-	testing.expect(t, !d.screen.shown)
+	testing.expect_value(t, d.screen, Screen{})
 	testing.expect(t, !d.nodes[0].shown)
 	b := build_batch(&f.ui, 0, f.platform.frame_allocator)
 	testing.expect_value(t, len(b.instances), 0)
@@ -223,7 +223,7 @@ a_document_of_a_view_not_shown_is_hidden :: proc(t: ^testing.T) {
 	// The view appears, and the document with it.
 	views = [][4]f32{{0, 0, 640, 1080}, {640, 0, 640, 1080}, {1280, 0, 640, 1080}}
 	step(f, views = views)
-	testing.expect(t, d.screen.shown)
+	testing.expect(t, d.nodes[0].shown)
 	testing.expect(t, d.nodes[0].shown)
 	testing.expect_value(t, node_rect(t, f, e, "b"), [4]f32{1280, 0, 1920, 1080})
 	testing.expect_value(t, len(scope(&f.ui)), 1)

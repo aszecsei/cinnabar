@@ -148,6 +148,12 @@ Views :: struct {
 	ended_count: int,
 	// Whether the pool's being full is warned of already, so that a system that pushes each frame logs once.
 	full_warned: bool,
+	// The renderer views whose cut no drawn frame has carried yet, by their index in Frame_Views. advance sets them, and
+	// drawn clears them once the frame is drawn, so a frame that is not drawn, as with a minimized window, passes its
+	// cuts on to the next.
+	pending_cuts: [MAX_VIEWS]bool,
+	// The count of the world's replacements that follow_world last saw.
+	world:        u64,
 }
 
 // Steps are the time that a frame advances the blends by, on each clock. The game's is 0 while paused.
@@ -300,6 +306,43 @@ destroy :: proc(v: ^Views, r: ^render.Renderer) {
 	}
 }
 
+// drawn tells the views that the frame that the last advance gave was drawn, with its cuts.
+drawn :: proc(v: ^Views) {
+	v.pending_cuts = {}
+}
+
+// reset starts the views again for a new world, as the editor's scene replaces the game's: one full-screen view, no
+// pushes or claims, and nothing chosen or blending. The old entries' tokens stay stale, and their owners learn nothing,
+// as the old world's behaviours end without callbacks. The first frame after it cuts every view, so no history of the
+// old world shows.
+reset :: proc(v: ^Views, r: ^render.Renderer) {
+	set_layout(v, r, Preset.Single)
+	for &entry in v.entries {
+		entry.state = nil
+	}
+	for &view in v.views {
+		view.stack = {}
+	}
+	v.claims = {}
+	v.fallback = 0
+	v.presented = nil
+	v.ended_count = 0
+	v.full_warned = false
+	for &pending in v.pending_cuts {
+		pending = true
+	}
+}
+
+// follow_world resets the views when the world that they show was replaced: world counts the replacements, as
+// editor.world_loads does, and a count that changed since the last call resets them.
+follow_world :: proc(v: ^Views, r: ^render.Renderer, world: u64) {
+	if v.world == world {
+		return
+	}
+	v.world = world
+	reset(v, r)
+}
+
 // ended is what advance removed for its owners in the frame, which the next advance clears.
 ended :: proc(v: ^Views) -> []Ended {
 	return v.ended[:v.ended_count]
@@ -390,12 +433,16 @@ advance :: proc(v: ^Views, w: ^ecs.World, steps: Steps) -> Frame_Views {
 	if now.claimed {
 		frame.count = 1
 		frame.views[0] = {0, FULL, v.claims.shown, cut[CLAIMS] || relaid}
-		return frame
+	} else {
+		rects, count := layout_rects(now.layout)
+		frame.count = count
+		for i in 0 ..< count {
+			frame.views[i] = {i, rects[i], v.views[i].stack.shown, cut[i] || relaid}
+		}
 	}
-	rects, count := layout_rects(now.layout)
-	frame.count = count
-	for i in 0 ..< count {
-		frame.views[i] = {i, rects[i], v.views[i].stack.shown, cut[i] || relaid}
+	for &view, i in frame.views[:frame.count] {
+		view.cut ||= v.pending_cuts[i]
+		v.pending_cuts[i] = view.cut
 	}
 	return frame
 }

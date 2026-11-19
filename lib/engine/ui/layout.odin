@@ -28,7 +28,6 @@ layout :: proc(s: ^State, window: [2]f32, views: [][4]f32) {
 		d.screen = {
 			rect  = rect,
 			scale = max(rect[3] / REFERENCE_HEIGHT, MIN_SCALE) * s.scale_factor,
-			shown = true,
 		}
 		if d.built && len(d.nodes) > 0 {
 			layout_document(s, tf, &d, i)
