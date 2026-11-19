@@ -705,7 +705,9 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 		view_quality := ev.quality != nil ? clamp_quality(ev.quality^, r.caps) : quality
 		// A view in a rect draws into the own view's target, in its output. A target of its own is always SDR, whatever
 		// the frame's output is.
-		view_output, view_target := gpu.Output{format = gpu.FRAME_TARGET_FORMAT}, ev.target
+		view_output, view_target := gpu.Output {
+				format = gpu.FRAME_TARGET_FORMAT,
+			}, ev.target
 		if ev.rect != nil {
 			view_output, view_target = output, frame_target
 		}
@@ -1264,8 +1266,16 @@ draw_output :: proc(ctx: ^Pass_Context) {
 	}
 	// A view in a rect writes only its rect of the target.
 	if f.origin != {} || f.output_size != f.target_size {
-		gpu.cmd_set_viewport(ctx.cb, {f32(f.origin.x), f32(f.origin.y)}, {f32(f.output_size.x), f32(f.output_size.y)})
-		gpu.cmd_set_scissor(ctx.cb, [2]i32{i32(f.origin.x), i32(f.origin.y)}, [2]i32{i32(f.output_size.x), i32(f.output_size.y)})
+		gpu.cmd_set_viewport(
+			ctx.cb,
+			{f32(f.origin.x), f32(f.origin.y)},
+			{f32(f.output_size.x), f32(f.output_size.y)},
+		)
+		gpu.cmd_set_scissor(
+			ctx.cb,
+			[2]i32{i32(f.origin.x), i32(f.origin.y)},
+			[2]i32{i32(f.output_size.x), i32(f.output_size.y)},
+		)
 	}
 	gpu.cmd_set_pipeline(ctx.cb, pipeline)
 	gpu.cmd_push_constants(ctx.cb, &push)

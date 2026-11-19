@@ -100,7 +100,10 @@ plan_frame :: proc(
 		}
 		for ev in desc.extra_views {
 			if ev.rect != nil {
-				append(&extras, plan_game_extra(e, ev, game_rect.target_size, v, base, caps, desc.quality))
+				append(
+					&extras,
+					plan_game_extra(e, ev, game_rect.target_size, v, base, caps, desc.quality),
+				)
 			}
 		}
 	}
@@ -129,7 +132,10 @@ scale_rect :: proc(
 	edge :: proc(at: u32, target: u64, viewport: u32) -> u32 {
 		return u32(u64(at) * u64(viewport) / target)
 	}
-	near := [2]u32{edge(rect.origin.x, target.x, viewport.x), edge(rect.origin.y, target.y, viewport.y)}
+	near := [2]u32 {
+		edge(rect.origin.x, target.x, viewport.x),
+		edge(rect.origin.y, target.y, viewport.y),
+	}
 	far := rect.origin + size
 	far = {edge(far.x, target.x, viewport.x), edge(far.y, target.y, viewport.y)}
 	return {target_size = viewport, origin = near}, far - near

@@ -108,7 +108,8 @@ bar_of :: proc(s: ^State, d: ^Document, n: u32) -> (bar: Bar, ok: bool) {
 	r := node.rect
 	cross := 1 - axis
 	thickness := f32(DEFAULT_TRACK_WIDTH) * d.screen.scale
-	if px, fixed := resolve_length(d.screen.scale, bar.track_style.width, r[cross + 2] - r[cross]); fixed {
+	if px, fixed := resolve_length(d.screen.scale, bar.track_style.width, r[cross + 2] - r[cross]);
+	   fixed {
 		thickness = px
 	}
 	pad := bar.track_style.padding * d.screen.scale
@@ -245,7 +246,11 @@ press_bar :: proc(s: ^State, d: ^Document, n: u32, part: Bar_Part, mouse: [2]f32
 		s.input.drag_grab = mouse[axis] - bar.thumb[axis]
 	case .Track:
 		page := mouse[axis] < bar.thumb[axis] ? f32(-1) : 1
-		node.scroll = clamp(node.scroll + page * view_length(d.screen.scale, node, axis), 0, node.scroll_max)
+		node.scroll = clamp(
+			node.scroll + page * view_length(d.screen.scale, node, axis),
+			0,
+			node.scroll_max,
+		)
 	}
 }
 

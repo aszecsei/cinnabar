@@ -45,7 +45,11 @@ teardown_views :: proc(f: ^Views_Fixture) {
 @(private = "file")
 spawn_camera :: proc(g: ^Game, x: f32) -> ecs.Entity {
 	e := ecs.spawn(&g.world)
-	ecs.add(&g.world, e, ecs.Transform{position = ecs.position_offset({}, {x, 0, 0}), rotation = 1, scale = 1})
+	ecs.add(
+		&g.world,
+		e,
+		ecs.Transform{position = ecs.position_offset({}, {x, 0, 0}), rotation = 1, scale = 1},
+	)
 	ecs.add(&g.world, e, render.Camera{})
 	return e
 }

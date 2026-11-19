@@ -279,7 +279,11 @@ render_frame :: proc(g: ^Game, window: [2]u32, shown: camera.Frame_Views, h: Hoo
 		rects[i] = {f32(origin.x), f32(origin.y), f32(extent.x), f32(extent.y)}
 	}
 	// While a claim shows, no player's view does, and neither do the documents of the players' views.
-	ui.layout(&g.ui, {f32(window.x), f32(window.y)}, rects[:0] if shown.claimed else rects[:shown.count])
+	ui.layout(
+		&g.ui,
+		{f32(window.x), f32(window.y)},
+		rects[:0] if shown.claimed else rects[:shown.count],
+	)
 	// The skinned entities' poses, between the last two ticks.
 	skins := anim.present(&g.animation, &g.world, g.platform.frame_allocator)
 	desc := describe_frame(g, window, shown, skins, h)

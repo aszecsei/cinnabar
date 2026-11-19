@@ -243,7 +243,9 @@ a_blend_that_starts_during_a_blend_starts_from_the_blended_pose :: proc(t: ^test
 }
 
 @(test)
-a_blend_out_runs_when_the_chosen_entry_goes_and_a_blend_in_when_it_is_outranked :: proc(t: ^testing.T) {
+a_blend_out_runs_when_the_chosen_entry_goes_and_a_blend_in_when_it_is_outranked :: proc(
+	t: ^testing.T,
+) {
 	f := setup(t)
 	defer teardown(f)
 	a, b := spawn_camera(f, 0), spawn_camera(f, 10)
@@ -517,7 +519,12 @@ blend_views_blends_the_lens_with_the_pose :: proc(t: ^testing.T) {
 	}
 	b := render.View {
 		position        = ecs.position_from_meters({10, 0, 0}),
-		rotation        = quaternion(w = math.cos(f32(math.PI) / 4), x = 0, y = math.sin(f32(math.PI) / 4), z = 0),
+		rotation        = quaternion(
+			w = math.cos(f32(math.PI) / 4),
+			x = 0,
+			y = math.sin(f32(math.PI) / 4),
+			z = 0,
+		),
 		projection      = render.Perspective{2, 0.3},
 		view_model_fov  = 0.9,
 		view_model_near = 0,
@@ -651,11 +658,19 @@ a_claim_blends_in_from_the_first_view_and_its_release_blends_back :: proc(t: ^te
 	push(&f.views, &f.world, 1, b, 1)
 	step(f)
 
-	blend := Blend{duration = 1, clock = .Real}
+	blend := Blend {
+		duration = 1,
+		clock    = .Real,
+	}
 	token, _ := claim(&f.views, &f.world, c, 0, blend, blend)
 	frame := step(f, 0, 0.5)
 	testing.expect_value(t, frame.count, 1)
-	testing.expectf(t, near(x_of(frame.views[0].view), 20), "halfway in is at x %v", x_of(frame.views[0].view))
+	testing.expectf(
+		t,
+		near(x_of(frame.views[0].view), 20),
+		"halfway in is at x %v",
+		x_of(frame.views[0].view),
+	)
 	frame = step(f, 0, 0.5)
 	testing.expect(t, near(x_of(frame.views[0].view), 30))
 
@@ -664,7 +679,12 @@ a_claim_blends_in_from_the_first_view_and_its_release_blends_back :: proc(t: ^te
 	// Still one full view, halfway back to the first view's camera.
 	testing.expect_value(t, frame.count, 1)
 	testing.expect(t, !frame.views[0].cut)
-	testing.expectf(t, near(x_of(frame.views[0].view), 20), "halfway out is at x %v", x_of(frame.views[0].view))
+	testing.expectf(
+		t,
+		near(x_of(frame.views[0].view), 20),
+		"halfway out is at x %v",
+		x_of(frame.views[0].view),
+	)
 	frame = step(f, 0, 0.5)
 	// The blend ended: the layout is back, with a cut for the change of rects.
 	testing.expect_value(t, frame.count, 2)
@@ -707,7 +727,10 @@ a_new_world_starts_the_views_again :: proc(t: ^testing.T) {
 	follow_world(&f.views, nil, 0)
 	testing.expect(t, claimed(&f.views))
 	follow_world(&f.views, nil, 1)
-	testing.expect(t, !claimed(&f.views) && !is_pushed(&f.views, pushed) && !is_claimed(&f.views, claimed_token))
+	testing.expect(
+		t,
+		!claimed(&f.views) && !is_pushed(&f.views, pushed) && !is_claimed(&f.views, claimed_token),
+	)
 	testing.expect_value(t, view_count(&f.views), 1)
 	frame := step(f)
 	testing.expect_value(t, frame.count, 1)

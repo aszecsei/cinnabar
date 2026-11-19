@@ -186,12 +186,7 @@ a_view_document_lays_out_in_its_views_rect_at_its_scale :: proc(t: ^testing.T) {
 a_window_document_lays_out_at_the_windows_size :: proc(t: ^testing.T) {
 	f := setup(t)
 	defer teardown(t, f)
-	e := show(
-		t,
-		f,
-		DOC,
-		"ui 1\n<ui><box id=\"b\" width=\"100%\" height=\"100%\"/></ui>",
-	)
+	e := show(t, f, DOC, "ui 1\n<ui><box id=\"b\" width=\"100%\" height=\"100%\"/></ui>")
 	views := [][4]f32{{0, 0, 640, 360}, {640, 0, 640, 360}}
 	step(f, size = {1280, 720}, views = views)
 	d := document_of(&f.ui, e)

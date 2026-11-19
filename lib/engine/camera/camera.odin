@@ -135,19 +135,19 @@ Ended :: struct {
 // choose and show; push, pop, claim and release only change the pool. It holds values only, so it lives in Game_State
 // across a code reload.
 Views :: struct {
-	views:       [MAX_VIEWS]Game_View,
-	claims:      Stack,
-	layout:      Layout,
-	entries:     [MAX_ENTRIES]Entry,
-	next_order:  u64,
+	views:        [MAX_VIEWS]Game_View,
+	claims:       Stack,
+	layout:       Layout,
+	entries:      [MAX_ENTRIES]Entry,
+	next_order:   u64,
 	// The camera that a stack with no entries shows, and that fallback blends start from.
-	fallback:    ecs.Entity,
+	fallback:     ecs.Entity,
 	// nil until the first advance, which is never a cut.
-	presented:   Maybe(Presentation),
-	ended:       [MAX_ENTRIES]Ended,
-	ended_count: int,
+	presented:    Maybe(Presentation),
+	ended:        [MAX_ENTRIES]Ended,
+	ended_count:  int,
 	// Whether the pool's being full is warned of already, so that a system that pushes each frame logs once.
-	full_warned: bool,
+	full_warned:  bool,
 	// The renderer views whose cut no drawn frame has carried yet, by their index in Frame_Views. advance sets them, and
 	// drawn clears them once the frame is drawn, so a frame that is not drawn, as with a minimized window, passes its
 	// cuts on to the next.
@@ -479,7 +479,10 @@ add_entry :: proc(
 	if slot < 0 {
 		if !v.full_warned {
 			v.full_warned = true
-			log.warnf("camera: all %d entries of the camera stacks are held; the push is refused", MAX_ENTRIES)
+			log.warnf(
+				"camera: all %d entries of the camera stacks are held; the push is refused",
+				MAX_ENTRIES,
+			)
 		}
 		return
 	}

@@ -3113,7 +3113,11 @@ use_view_takes_every_field_of_an_extra_view :: proc(t: ^testing.T) {
 		delta = 0.5,
 	}
 	use_view(&desc, v)
-	testing.expect_value(t, desc.rect, Maybe(Target_Rect)(Target_Rect{target_size = {16, 4}, origin = {8, 0}}))
+	testing.expect_value(
+		t,
+		desc.rect,
+		Maybe(Target_Rect)(Target_Rect{target_size = {16, 4}, origin = {8, 0}}),
+	)
 	testing.expect(t, desc.cut)
 	testing.expect_value(t, desc.view, v.view)
 	testing.expect_value(t, desc.size, [2]u32{8, 4})
@@ -4083,8 +4087,13 @@ an_extra_view_in_a_rect_needs_an_own_view_in_one :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(rig.record.problems), 1)
 	// A rect of the same target that the view does not fit in.
 	desc.size = {32, 32}
-	desc.rect = Target_Rect{target_size = {64, 32}}
-	extras[0].rect = Target_Rect{target_size = {64, 32}, origin = {40, 0}}
+	desc.rect = Target_Rect {
+		target_size = {64, 32},
+	}
+	extras[0].rect = Target_Rect {
+		target_size = {64, 32},
+		origin      = {40, 0},
+	}
 	testing.expect(t, draw_frame(r, rig.w, desc), "the frame did not execute")
 	testing.expect_value(t, extra_record.before_world, 0)
 	testing.expect_value(t, len(rig.record.problems), 2)

@@ -36,7 +36,9 @@ register_scripts :: proc(r: ^script.Runtime, v: ^Views, renderer: ^render.Render
 		r,
 		"Views.push",
 		push_binding,
-		"(view: number, camera: Entity, priority: number, blend: " + BLEND + "?, owner: Entity?) -> number",
+		"(view: number, camera: Entity, priority: number, blend: " +
+		BLEND +
+		"?, owner: Entity?) -> number",
 	)
 	script.define(r, "Views.pop", pop_binding, "(token: number) -> ()")
 	script.define(r, "Views.is_pushed", is_pushed_binding, "(token: number) -> boolean")
@@ -126,7 +128,10 @@ check_blend :: proc(L: ^luau.State, idx: c.int) -> (blend, out: Blend) {
 		case:
 			script.raise(
 				L,
-				fmt.tprintf("a curve is \"linear\", \"smooth\", \"ease_in\" or \"ease_out\", not %q", name),
+				fmt.tprintf(
+					"a curve is \"linear\", \"smooth\", \"ease_in\" or \"ease_out\", not %q",
+					name,
+				),
 			)
 		}
 	}
@@ -167,7 +172,13 @@ push_binding :: proc(L: ^luau.State) -> c.int {
 	blend, out := check_blend(L, 4)
 	token, ok := push(v, w, view, camera, priority, blend, out, check_owner(L, 5))
 	if !ok {
-		script.raise(L, fmt.tprintf("Views.push: %v is not a live Camera, or the camera stacks are full", camera))
+		script.raise(
+			L,
+			fmt.tprintf(
+				"Views.push: %v is not a live Camera, or the camera stacks are full",
+				camera,
+			),
+		)
 	}
 	luau.pushnumber(L, token_number(token))
 	return 1
@@ -193,7 +204,13 @@ claim_binding :: proc(L: ^luau.State) -> c.int {
 	blend, out := check_blend(L, 3)
 	token, ok := claim(v, w, camera, priority, blend, out, check_owner(L, 4))
 	if !ok {
-		script.raise(L, fmt.tprintf("Views.claim: %v is not a live Camera, or the camera stacks are full", camera))
+		script.raise(
+			L,
+			fmt.tprintf(
+				"Views.claim: %v is not a live Camera, or the camera stacks are full",
+				camera,
+			),
+		)
 	}
 	luau.pushnumber(L, token_number(Camera_Token(token)))
 	return 1
@@ -226,7 +243,10 @@ set_layout_binding :: proc(L: ^luau.State) -> c.int {
 	case:
 		script.raise(
 			L,
-			fmt.tprintf("a layout is \"single\", \"side_by_side\", \"over_under\" or \"grid_4\", not %q", name),
+			fmt.tprintf(
+				"a layout is \"single\", \"side_by_side\", \"over_under\" or \"grid_4\", not %q",
+				name,
+			),
 		)
 	}
 	set_layout(views_of(L), renderer_of(L), layout)

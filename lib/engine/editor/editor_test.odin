@@ -3380,7 +3380,9 @@ the_game_view_draws_the_games_views_in_rects_before_the_scene_views :: proc(t: ^
 	state: render.View_State
 	desc := game_desc(&g)
 	desc.size = {640, 720}
-	desc.rect = render.Target_Rect{target_size = {1280, 720}}
+	desc.rect = render.Target_Rect {
+		target_size = {1280, 720},
+	}
 	desc.cut = true
 	g.extra[0] = {
 		view = {position = ecs.position_offset({}, {9, 0, 0}), rotation = 1},
@@ -3444,7 +3446,9 @@ without_a_game_view_the_games_views_in_rects_are_dropped :: proc(t: ^testing.T) 
 	state: render.View_State
 	desc := game_desc(&g)
 	desc.size = {640, 720}
-	desc.rect = render.Target_Rect{target_size = {1280, 720}}
+	desc.rect = render.Target_Rect {
+		target_size = {1280, 720},
+	}
 	g.extra[0] = {
 		size = {640, 720},
 		state = &state,

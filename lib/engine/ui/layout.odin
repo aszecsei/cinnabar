@@ -81,7 +81,9 @@ follow_caret :: proc(s: ^State, d: ^Document, index: int) {
 	}
 	x := caret_x(d, node.text, edit.caret)
 	width :=
-		node.rect[2] - node.rect[0] - (node.style.padding[1] + node.style.padding[3]) * d.screen.scale
+		node.rect[2] -
+		node.rect[0] -
+		(node.style.padding[1] + node.style.padding[3]) * d.screen.scale
 	if x - edit.scroll > width - CARET_WIDTH * d.screen.scale {
 		edit.scroll = x - width + CARET_WIDTH * d.screen.scale
 	} else if x < edit.scroll {
@@ -238,10 +240,19 @@ fit_tree :: proc(s: ^State, d: ^Document, n: u32, axis: int) {
 			content = max(content, natural[axis])
 		} else {
 			// An image keeps its shape at the width that it resolved to.
-			content = max(content, natural.y * (node.size.x - padding_of(d.screen.scale, st, 0)) / natural.x)
+			content = max(
+				content,
+				natural.y * (node.size.x - padding_of(d.screen.scale, st, 0)) / natural.x,
+			)
 		}
 	}
-	node.fit[axis] = clamp_size(d.screen.scale, st, axis, content + padding_of(d.screen.scale, st, axis), 0)
+	node.fit[axis] = clamp_size(
+		d.screen.scale,
+		st,
+		axis,
+		content + padding_of(d.screen.scale, st, axis),
+		0,
+	)
 }
 
 // resolve_tree gives each child of a node its size along an axis, from the node's, which is resolved.
@@ -403,7 +414,9 @@ place_tree :: proc(s: ^State, d: ^Document, n: u32, rect: [4]f32) {
 			if !child.shown {
 				continue
 			}
-			at := anchored(child.style.anchor, content, child.size) + child.style.offset * d.screen.scale
+			at :=
+				anchored(child.style.anchor, content, child.size) +
+				child.style.offset * d.screen.scale
 			place_tree(s, d, c, {at.x, at.y, at.x + child.size.x, at.y + child.size.y})
 		}
 		return
