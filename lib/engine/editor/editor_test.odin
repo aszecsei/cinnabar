@@ -280,10 +280,11 @@ a_scan_skips_chunks_that_did_not_change :: proc(t: ^testing.T) {
 	f := setup(t)
 	defer teardown(f)
 	e := spawn(f, {})
-	ecs.add(&f.world, e, ecs.make_name("door"))
+	ecs.add(&f.world, e, ecs.intern(&f.world, "door"))
 	step(f)
 
-	ecs.get(&f.world, e, ecs.Name)^ = ecs.make_name("gate")
+	// A write through get is not stamped (and is not in the name index, which this test does not use).
+	ecs.get(&f.world, e, ecs.Name)^ = ecs.intern(&f.world, "gate")
 	testing.expect_value(t, len(step(f)), 0)
 
 	ecs.mark_changed(&f.world, e, ecs.NAME_ID)
@@ -302,7 +303,7 @@ deltas_see_names_and_parents_written_in_place :: proc(t: ^testing.T) {
 	wall := spawn(f, {})
 	hinge := spawn(f, {})
 	ecs.add(&f.world, hinge, ecs.Parent{door})
-	ecs.add(&f.world, hinge, ecs.make_name("hinge"))
+	ecs.add(&f.world, hinge, ecs.intern(&f.world, "hinge"))
 	step(f)
 
 	// Components that the delta does not carry stay out of it.
@@ -314,7 +315,7 @@ deltas_see_names_and_parents_written_in_place :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(delta.changed), 1)
 	testing.expect_value(t, delta.changed[0].parent, u64(wall))
 
-	ecs.add(&f.world, hinge, ecs.make_name("latch"))
+	ecs.add(&f.world, hinge, ecs.intern(&f.world, "latch"))
 	delta = step(f)[0].(link.Entity_Delta)
 	testing.expect_value(t, len(delta.changed), 1)
 	testing.expect_value(t, delta.changed[0].name, "latch")
@@ -1131,7 +1132,7 @@ recorded_edits_become_operations_that_apply_to_the_world :: proc(t: ^testing.T) 
 	ecs.add(w, draft, ecs.Parent{door})
 	ecs.add(w, draft, ecs.LOCAL_TRANSFORM_IDENTITY)
 	ecs.add(w, draft, Tuned{inner = {amount = 7}})
-	ecs.add(w, draft, ecs.make_name("Spoke"))
+	ecs.add(w, draft, ecs.intern(w, "Spoke"))
 
 	edits: script.Edits
 	edits.components = make([dynamic]script.Edited_Component, context.temp_allocator)

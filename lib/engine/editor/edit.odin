@@ -84,10 +84,10 @@ apply_operations :: proc(
 			ecs.despawn(w, entity)
 			delete_key(handles, op.entity)
 		case .Rename:
-			if op.name == "" {
+			if name := ecs.intern(w, op.name); name == ecs.NAME_NONE {
 				ecs.remove(w, entity, ecs.Name)
 			} else {
-				ecs.add(w, entity, ecs.make_name(op.name))
+				ecs.add(w, entity, name)
 			}
 		case .Set_Parent:
 			if op.parent == 0 {

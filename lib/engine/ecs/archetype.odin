@@ -150,6 +150,9 @@ add_raw :: proc(w: ^World, e: Entity, id: Component_Id, data: []byte) -> bool {
 	}
 	a := archetype(w, record.archetype)
 	column, found := slice.binary_search(archetype_components(a), id)
+	if id == NAME_ID {
+		unlink_name(w, e)
+	}
 	if !found {
 		n := int(a.component_count)
 		if n == MAX_ARCHETYPE_COMPONENTS {
@@ -179,6 +182,10 @@ add_raw :: proc(w: ^World, e: Entity, id: Component_Id, data: []byte) -> bool {
 		assert(len(data) == size, "ecs: component data has the wrong size")
 		mem.copy(ptr, raw_data(data), size)
 	}
+	if id == NAME_ID {
+		check_name(w, (^Name)(ptr))
+		link_name(w, e, (^Name)(ptr)^)
+	}
 	return true
 }
 
@@ -201,6 +208,9 @@ remove_raw :: proc(w: ^World, e: Entity, id: Component_Id) -> bool {
 		w.activity_dirty = true
 	}
 	log_removal(w, e, record.archetype, u32(column))
+	if id == NAME_ID {
+		unlink_name(w, e)
+	}
 	ids: [MAX_ARCHETYPE_COMPONENTS]Component_Id
 	copy(ids[:], a.ids[:column])
 	copy(ids[column:], a.ids[column + 1:a.component_count])

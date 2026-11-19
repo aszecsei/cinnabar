@@ -57,6 +57,8 @@ World :: struct {
 	// the navmeshes of each (see docs/ai/navigation.md#loading).
 	scenes:           [core.MAX_SCENE_MEMORY]format.Guid,
 	scene_count:      int,
+	// The interned names and the index from Name to entities. See name.odin.
+	names:            Names,
 }
 
 // world_scenes is the GUIDs of the cooked scenes that the world holds, in the order that they loaded.
@@ -116,7 +118,8 @@ init :: proc(w: ^World, platform: ^core.Platform_API) -> bool {
 		region_init(&w.queries, platform, MAX_QUERIES * size_of(Query_State)) &&
 		region_init(&w.matches, platform, MAX_QUERIES * MAX_ARCHETYPES * size_of(Query_Match)) &&
 		region_init(&w.hierarchy, platform, MAX_ENTITIES * size_of(Entity)) &&
-		region_init(&w.log, platform, MAX_LOG * size_of(Log_Entry))
+		region_init(&w.log, platform, MAX_LOG * size_of(Log_Entry)) &&
+		names_init(w)
 	w.chunks.free_head = NO_CHUNK
 	if !ok || find_or_create_archetype(w, {}) != EMPTY_ARCHETYPE {
 		log.error("ecs: cannot reserve storage")
@@ -131,16 +134,21 @@ destroy :: proc(w: ^World) {
 	for r in ([]^Region{&w.entities.records, &w.entities.free, &w.archetypes, &w.archetype_table, &w.directory, &w.chunks.memory, &w.chunks.versions, &w.queries, &w.matches, &w.hierarchy, &w.log}) {
 		region_release(r, w.platform)
 	}
+	for r in names_regions(w) {
+		region_release(r, w.platform)
+	}
 	w^ = {}
 }
 
 // reload starts a new registry after a code reload, and clears the queries and systems. Register every component,
-// query and system again before the world is used.
+// query and system again before the world is used. Interned names keep their ids; reload checks the default names
+// and interns new ones (see Default_Name).
 reload :: proc(w: ^World, platform: ^core.Platform_API) {
 	w.platform = platform
 	w.registry = {}
 	w.query_count = 0
 	reset_schedule(w)
+	intern_default_names(w)
 }
 
 // Region is a range of reserved virtual memory with a committed prefix.

@@ -320,10 +320,9 @@ draft_operation :: proc(
 		)
 	}
 	created := make([]link.Scene_Entity, 1, allocator)
-	name := ecs.get(w, d.entity, ecs.Name)
 	created[0] = {
 		id         = id,
-		name       = ecs.name_text(name) if name != nil else "",
+		name       = ecs.name_of(w, d.entity, allocator),
 		parent     = parent,
 		active     = active,
 		components = components[:],
