@@ -1131,6 +1131,7 @@ recorded_edits_become_operations_that_apply_to_the_world :: proc(t: ^testing.T) 
 	ecs.add(w, draft, ecs.Parent{door})
 	ecs.add(w, draft, ecs.LOCAL_TRANSFORM_IDENTITY)
 	ecs.add(w, draft, Tuned{inner = {amount = 7}})
+	ecs.add(w, draft, ecs.make_name("Spoke"))
 
 	edits: script.Edits
 	edits.components = make([dynamic]script.Edited_Component, context.temp_allocator)
@@ -1155,19 +1156,25 @@ recorded_edits_become_operations_that_apply_to_the_world :: proc(t: ^testing.T) 
 		script.Edit_Component{0},
 		script.Edit_Component{1},
 		script.Edit_Active{door, false},
+		script.Edit_Rename{door, "Gate"},
 		script.Edit_Spawn{entity = draft},
 	)
 	ops := operations_of(w, edits, context.temp_allocator)
-	// The draft first, then the pose's field, nothing for the write that changed nothing, and the active state.
-	testing.expect_value(t, len(ops), 3)
-	if len(ops) != 3 {
+	// The draft first, then the pose's field, nothing for the write that changed nothing, the active state and the
+	// name.
+	testing.expect_value(t, len(ops), 4)
+	if len(ops) != 4 {
 		return
 	}
 	testing.expect_value(t, ops[0].kind, link.Operation_Kind.Create_Entity)
 	testing.expect_value(t, ops[0].created[0].parent, 0x10)
+	testing.expect_value(t, ops[0].created[0].name, "Spoke")
 	testing.expect_value(t, ops[1].kind, link.Operation_Kind.Set_Field)
 	testing.expect_value(t, ops[1].fields[0].name, "position")
 	testing.expect_value(t, ops[2].kind, link.Operation_Kind.Set_Active)
+	testing.expect_value(t, ops[3].kind, link.Operation_Kind.Rename)
+	testing.expect_value(t, ops[3].entity, 0x10)
+	testing.expect_value(t, ops[3].name, "Gate")
 
 	// As the editor sends them back, they apply to the world.
 	ecs.despawn(w, draft)
@@ -1176,10 +1183,12 @@ recorded_edits_become_operations_that_apply_to_the_world :: proc(t: ^testing.T) 
 	testing.expectf(t, len(problems) == 0, "problems: %v", problems[:])
 	testing.expect(t, ecs.get(w, door, ecs.Transform).position == moved.position)
 	testing.expect(t, ecs.has(w, door, ecs.Disabled))
+	testing.expect_value(t, ecs.name_of(w, door), "Gate")
 	made := scene.find(f.editor.scenes, w, 0, ops[0].entity)
 	testing.expect(t, made != 0)
 	if made != 0 {
 		testing.expect_value(t, ecs.get(w, made, Tuned).inner.amount, 7)
+		testing.expect_value(t, ecs.name_of(w, made), "Spoke")
 		testing.expect_value(t, ecs.get(w, made, ecs.Parent).entity, door)
 	}
 }

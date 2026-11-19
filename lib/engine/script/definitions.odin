@@ -102,6 +102,7 @@ ENTITY_DEFINITION :: `
 declare extern type Entity with
 	transform: TransformRef?
 	parent: Entity?
+	name: string
 	active_self: boolean
 	active_in_hierarchy: boolean
 	get: %s
@@ -115,6 +116,7 @@ declare extern type Entity with
 	function move(self, offset: vector): ()
 	function set_parent(self, parent: Entity?): ()
 	function set_active(self, active: boolean): ()
+	function set_name(self, name: string): ()
 	function send(self, name: string, ...: any): ()
 end
 `

@@ -18,6 +18,8 @@ definitions_cover_components_and_game_bindings :: proc(t: ^testing.T) {
 		)
 	}
 	expect(t, text, "declare extern type WorldPosition with")
+	expect(t, text, "\tname: string\n")
+	expect(t, text, "\tfunction set_name(self, name: string): ()\n")
 	expect(t, text, "declare Health: HealthType")
 	// Field types come from the Odin fields, enums as a union of their names. Hidden fields are left out.
 	expect(t, text, "declare extern type HealthRef extends ComponentRef with\n\tvalue: number\n")

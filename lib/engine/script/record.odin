@@ -29,6 +29,7 @@ Edit :: union {
 	Edit_Destroy,
 	Edit_Parent,
 	Edit_Active,
+	Edit_Rename,
 	Edit_Attach,
 	Edit_Detach,
 	// A new entity: a draft in the world until the game takes the edits.
@@ -58,6 +59,12 @@ Edit_Parent :: struct {
 Edit_Active :: struct {
 	entity: ecs.Entity,
 	active: bool,
+}
+
+// Edit_Rename gives the entity a name, or takes its name away (""). The name is cut as ecs.make_name cuts it.
+Edit_Rename :: struct {
+	entity: ecs.Entity,
+	name:   string,
 }
 
 Edit_Attach :: struct {
@@ -188,6 +195,17 @@ record_edit :: proc(r: ^Runtime, edit: Edit) {
 	case r.edits.class != class:
 		r.edits.several = true
 	}
+}
+
+// renamed is the name that the last recorded rename of the entity gives it, so a script reads back what it wrote.
+@(private)
+renamed :: proc(r: ^Runtime, e: ecs.Entity) -> (name: string, ok: bool) {
+	#reverse for edit in r.edits.list {
+		if v, is_rename := edit.(Edit_Rename); is_rename && v.entity == e {
+			return v.name, true
+		}
+	}
+	return "", false
 }
 
 // is_stand_in is true for a prefab's stand-in, which only carries a pose.
