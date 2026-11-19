@@ -673,7 +673,7 @@ scan :: proc(
 			parent = p.entity
 		}
 		_, inactive := find(components, ecs.INACTIVE_ID)
-		name := ecs.name_of(w, entity)
+		name := ecs.name_of(w, entity, allocator)
 		now := Known{entity, archetype, parent, !inactive, hash.fnv64a(transmute([]byte)name)}
 		k := &e.session.known[index]
 		if full ||

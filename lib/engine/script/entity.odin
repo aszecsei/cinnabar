@@ -27,6 +27,7 @@ register_world :: proc(r: ^Runtime) {
 
 	define(r, "World.spawn", world_spawn)
 	define(r, "World.query", world_query)
+	define(r, "World.find", world_find)
 	define(r, "World.version", world_version)
 	define(r, "World.changed", world_changed)
 	define(r, "World.editing", world_editing)
@@ -90,7 +91,7 @@ light_index :: proc(L: ^luau.State) -> c.int {
 			return 1
 		case "name":
 			name, ok := renamed(r, e)
-			luau.pushodinstring(L, name if ok else ecs.name_of(r.world, e))
+			luau.pushodinstring(L, name if ok else ecs.name_of(r.world, e, frame(r)))
 			return 1
 		case "active_self":
 			luau.pushboolean(L, b32(ecs.active_self(r.world, e)))
@@ -311,24 +312,25 @@ entity_set_active :: proc(L: ^luau.State) -> c.int {
 	return 0
 }
 
-// entity_set_name gives the entity a name, for the outliner and logs. "" takes its name away, and a longer name than
-// ecs.MAX_NAME is cut.
+// entity_set_name gives the entity a name, for the outliner, logs and World.find. "" takes its name away, and a longer
+// name than ecs.MAX_NAME_LENGTH is cut at a character boundary.
 @(private = "file")
 entity_set_name :: proc(L: ^luau.State) -> c.int {
 	r, w := world_of(L)
 	e := alive_entity(L, 1)
-	name := ecs.make_name(checkodinstring(L, 2))
+	text := checkodinstring(L, 2)
 	if is_stand_in(r, e) {
 		raise(
 			L,
 			"a prefab that a behaviour spawns in Edit mode takes only a pose, a parent and its active state",
 		)
 	}
+	// A name is interned, and interned text is never freed, so an edit that the editor applies does not intern here.
 	if records_writes_to(r, e) {
-		record_edit(r, Edit_Rename{e, strings.clone(ecs.name_text(&name), frame(r))})
+		record_edit(r, Edit_Rename{e, strings.clone(ecs.cut_name(text), frame(r))})
 		return 0
 	}
-	if name.length == 0 {
+	if name := ecs.intern(w, text); name == ecs.NAME_NONE {
 		ecs.remove(w, e, ecs.Name)
 	} else {
 		ecs.add(w, e, name)
@@ -486,6 +488,16 @@ world_query :: proc(L: ^luau.State) -> c.int {
 	found := make([dynamic]ecs.Entity, frame(r))
 	ecs.collect(w, ids, &found)
 	push_entities(L, found[:])
+	return 1
+}
+
+// world_find gives the active entity that was named name first, or nil, like Unity's GameObject.Find. It looks the
+// name up in the world's index, so it does not scan. In Edit, a rename that a behaviour recorded is the editor's to
+// apply, so find does not see it until then.
+@(private = "file")
+world_find :: proc(L: ^luau.State) -> c.int {
+	_, w := world_of(L)
+	push_entity(L, ecs.find(w, checkodinstring(L, 1)))
 	return 1
 }
 

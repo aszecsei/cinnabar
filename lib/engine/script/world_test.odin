@@ -245,7 +245,7 @@ Test.report(door.name == "" and 1 or 0)
 door:set_name("Front Door")
 Test.report(door.name == "Front Door" and 1 or 0)
 local long = World.spawn()
-long:set_name(string.rep("a", 62) .. "é")
+long:set_name(string.rep("a", 254) .. "é")
 Test.report(#long.name)
 -- "" takes the name away.
 local gone = World.spawn()
@@ -255,12 +255,43 @@ Test.report(gone.name == "" and 1 or 0)
 `,
 		),
 	)
-	// A cut never splits a character: the two bytes of é do not fit after 62.
-	expect_reports(t, f, {1, 1, 62, 1})
+	// A cut never splits a character: the two bytes of é do not fit after 254.
+	expect_reports(t, f, {1, 1, 254, 1})
 	named := make([dynamic]ecs.Entity, context.temp_allocator)
 	ecs.collect(&f.world, {ecs.NAME_ID}, &named)
 	testing.expect_value(t, len(named), 2)
 	testing.expect_value(t, ecs.name_of(&f.world, named[0]), "Front Door")
+}
+
+@(test)
+scripts_find_an_entity_by_name :: proc(t: ^testing.T) {
+	f := setup_world(t)
+	defer teardown_world(f)
+	context.user_ptr = f
+	testing.expect(
+		t,
+		run(
+			t,
+			f,
+			`
+local door = World.spawn()
+door:set_name("Door")
+local crate = World.spawn()
+crate:set_name("Crate_12")
+Test.report(World.find("Door") == door and 1 or 0)
+Test.report(World.find("Crate_12") == crate and 1 or 0)
+Test.report(World.find("Crate_1") == nil and 1 or 0)
+Test.report(World.find("Window") == nil and 1 or 0)
+-- A rename moves it, and a destroyed entity is gone.
+door:set_name("Gate")
+Test.report(World.find("Door") == nil and 1 or 0)
+Test.report(World.find("Gate") == door and 1 or 0)
+crate:destroy()
+`,
+		),
+	)
+	expect_reports(t, f, {1, 1, 1, 1, 1, 1})
+	testing.expect_value(t, ecs.find(&f.world, "Crate_12"), ecs.Entity(0))
 }
 
 @(test)

@@ -218,7 +218,7 @@ spawn_entity :: proc(
 		ecs.add(l.world, entity, Scene_Entity{e.id, number})
 	}
 	if e.name != "" {
-		ecs.add(l.world, entity, ecs.make_name(e.name))
+		ecs.add(l.world, entity, ecs.intern(l.world, e.name))
 	}
 	return entity
 }

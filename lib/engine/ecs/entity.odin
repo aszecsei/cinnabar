@@ -154,6 +154,7 @@ despawn_one :: proc(w: ^World, e: Entity) -> bool {
 		w.hierarchy_dirty = true
 	}
 	log_despawn(w, e, record)
+	unlink_name(w, e)
 	remove_row(w, record.archetype, record.row)
 	w.despawned += 1
 	record.archetype = NO_ARCHETYPE

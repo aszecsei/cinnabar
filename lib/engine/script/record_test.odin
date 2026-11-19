@@ -166,7 +166,7 @@ a_rename_in_edit_is_recorded_and_reads_back :: proc(t: ^testing.T) {
 	defer teardown_world(f)
 	context.user_ptr = f
 	e := document_entity(f)
-	ecs.add(&f.world, e, ecs.make_name("Door"))
+	ecs.add(&f.world, e, ecs.intern(&f.world, "Door"))
 	tool(
 		t,
 		f,

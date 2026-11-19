@@ -105,7 +105,7 @@ A scene is a source asset with a GUID and a `.meta` file, like every other asset
 - **Positions** are raw `i64` values (see [World](../world/positions-and-transforms.md#where-positions-go)), so a scene round-trips exactly. The editor shows meters.
 - **Unknown data round-trips.** A component ID or a field that the current DLL does not know is kept, written back unchanged, and reported as a warning. A broken build therefore never deletes scene data.
 - **Behaviours** are written by script GUID, with their field values by name.
-- **Names:** the engine's `Name` component holds up to 63 bytes in the component itself, because component storage holds no pointers. A longer name is cut at a character boundary. The outliner and the properties panel show names, and `Entity_Info` carries them.
+- **Names:** the engine's `Name` component holds an interned id and a number suffix, because component storage holds no pointers ([ECS: Names](../world/ecs.md#names)). A name longer than 255 bytes is cut at a character boundary. The outliner and the properties panel show names, and `Entity_Info` carries them.
 - **Prefab paths:** an entity in a prefab instance is identified by a path: the instance's scene ID, then `#` and the entity's scene ID in the prefab, such as `5f3a9c01e2b47d10#a90b3e7f15c4d2e8`. A prefab in a prefab adds a level for each nesting. The prefab's asset GUID is not in the path, because every instance of a prefab has the same one. The path stays the same when the prefab changes, so overrides in the scene still find their entities. A reference to such an entity is `@` and the path, and its scene ID once the instance is expanded is the path's hash, `scene_path_id` ([Prefabs](prefabs.md#expansion)).
 
 A sketch of the format:

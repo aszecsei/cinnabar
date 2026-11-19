@@ -61,7 +61,7 @@ Edit_Active :: struct {
 	active: bool,
 }
 
-// Edit_Rename gives the entity a name, or takes its name away (""). The name is cut as ecs.make_name cuts it.
+// Edit_Rename gives the entity a name, or takes its name away ("" or "None"). The name is cut as ecs.cut_name cuts it.
 Edit_Rename :: struct {
 	entity: ecs.Entity,
 	name:   string,
