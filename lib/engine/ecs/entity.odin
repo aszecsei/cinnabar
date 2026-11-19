@@ -71,10 +71,8 @@ spawn :: proc(w: ^World) -> Entity {
 }
 
 // despawn destroys an entity, its components and its descendants. It returns false if the entity is not alive.
-// To keep a child, remove its Parent first.
-//
-// Finding the descendants scans every child in the world, so despawn many entities with commands instead: apply
-// scans once for all of them.
+// To keep a child, remove its Parent first. It walks the descendants' child lists, so it costs the subtree, not the
+// world.
 despawn :: proc(w: ^World, e: Entity) -> bool {
 	flush_reserved(w)
 	if !despawn_one(w, e) {
@@ -84,8 +82,8 @@ despawn :: proc(w: ^World, e: Entity) -> bool {
 	return true
 }
 
-// despawn_many despawns the entities and their descendants, as despawn does for each, but scans for the descendants
-// once. It skips the entities that are not alive, and returns how many of the given ones it despawned.
+// despawn_many despawns the entities and their descendants, as despawn does for each. It skips the entities that are
+// not alive, and returns how many of the given ones it despawned.
 despawn_many :: proc(w: ^World, entities: []Entity) -> (count: int) {
 	flush_reserved(w)
 	for e in entities {
@@ -105,8 +103,8 @@ despawn_all :: proc(w: ^World) {
 			despawn_one(w, make_entity(index, record.generation))
 		}
 	}
-	// Every entity is gone, so no child is left for despawn_orphans to find.
-	w.orphans_pending = false
+	// Every entity is gone, and each despawn took itself out of the orphans.
+	assert(w.orphans == 0, "ecs: despawn_all left orphans")
 	// reserve takes slots from the end of the free list.
 	es := &w.entities
 	slice.sort_by(free_list(w)[:es.free_count], proc(a, b: u32) -> bool {return a > b})
@@ -148,13 +146,13 @@ despawn_one :: proc(w: ^World, e: Entity) -> bool {
 	if record == nil {
 		return false
 	}
-	// Any entity may be a parent.
-	w.orphans_pending = true
 	if _, child := column_index(archetype(w, record.archetype), PARENT_ID); child {
 		w.hierarchy_dirty = true
 	}
 	log_despawn(w, e, record)
 	unlink_name(w, e)
+	unlink_child(w, e)
+	orphan_children(w, e)
 	remove_row(w, record.archetype, record.row)
 	w.despawned += 1
 	record.archetype = NO_ARCHETYPE
@@ -173,30 +171,14 @@ despawn_one :: proc(w: ^World, e: Entity) -> bool {
 	return true
 }
 
-// despawn_orphans despawns every child whose parent is not alive, until none is left. Each pass removes at least
-// one level of a despawned subtree.
+// despawn_orphans despawns every child whose parent is not alive. Each despawn makes its own children orphans, so
+// it ends when the subtrees are gone.
 @(private)
 despawn_orphans :: proc(w: ^World) {
-	if !w.orphans_pending {
-		return
+	for w.orphans != 0 {
+		index := w.orphans - 1
+		despawn_one(w, make_entity(index, records(w)[index].generation))
 	}
-	for despawned := true; despawned; {
-		despawned = false
-		for index in 0 ..< w.archetype_count {
-			a := archetype(w, index)
-			column := column_index(a, PARENT_ID) or_continue
-			// Backward, because despawning a row moves the last row into it, and that row was already checked.
-			for row := int(a.count) - 1; row >= 0; row -= 1 {
-				parent := (^Parent)(component_at(w, index, column, u32(row)))
-				if !is_alive(w, parent.entity) {
-					despawn_one(w, entity_at(w, index, u32(row))^)
-					despawned = true
-				}
-			}
-		}
-	}
-	// despawn_one set it again for the orphans, whose children the passes above already handled.
-	w.orphans_pending = false
 }
 
 @(private)

@@ -153,6 +153,9 @@ add_raw :: proc(w: ^World, e: Entity, id: Component_Id, data: []byte) -> bool {
 	if id == NAME_ID {
 		unlink_name(w, e)
 	}
+	if id == PARENT_ID {
+		unlink_child(w, e)
+	}
 	if !found {
 		n := int(a.component_count)
 		if n == MAX_ARCHETYPE_COMPONENTS {
@@ -186,6 +189,9 @@ add_raw :: proc(w: ^World, e: Entity, id: Component_Id, data: []byte) -> bool {
 		check_name(w, (^Name)(ptr))
 		link_name(w, e, (^Name)(ptr)^)
 	}
+	if id == PARENT_ID {
+		link_child(w, e, (^Parent)(ptr).entity)
+	}
 	return true
 }
 
@@ -210,6 +216,9 @@ remove_raw :: proc(w: ^World, e: Entity, id: Component_Id) -> bool {
 	log_removal(w, e, record.archetype, u32(column))
 	if id == NAME_ID {
 		unlink_name(w, e)
+	}
+	if id == PARENT_ID {
+		unlink_child(w, e)
 	}
 	ids: [MAX_ARCHETYPE_COMPONENTS]Component_Id
 	copy(ids[:], a.ids[:column])

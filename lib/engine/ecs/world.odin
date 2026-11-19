@@ -41,8 +41,10 @@ World :: struct {
 	levels:           [MAX_HIERARCHY_DEPTH + 1]u32,
 	// Set when a Parent is added or removed, or a child is despawned.
 	hierarchy_dirty:  bool,
-	// Set when an entity is despawned, so its children may need to be despawned too.
-	orphans_pending:  bool,
+	// One Child_Link for each entity slot. See children.odin.
+	child_links:      Region,
+	// The first child whose parent is not alive, plus one, or 0. despawn_orphans despawns them.
+	orphans:          u32,
 	// Set when a Disabled or a Parent is added or removed, so Inactive may need to change. See update_activity.
 	activity_dirty:   bool,
 	// The changes that the script runtime reacts to (see watch and take_log).
@@ -119,6 +121,7 @@ init :: proc(w: ^World, platform: ^core.Platform_API) -> bool {
 		region_init(&w.matches, platform, MAX_QUERIES * MAX_ARCHETYPES * size_of(Query_Match)) &&
 		region_init(&w.hierarchy, platform, MAX_ENTITIES * size_of(Entity)) &&
 		region_init(&w.log, platform, MAX_LOG * size_of(Log_Entry)) &&
+		region_init(&w.child_links, platform, MAX_ENTITIES * size_of(Child_Link)) &&
 		names_init(w)
 	w.chunks.free_head = NO_CHUNK
 	if !ok || find_or_create_archetype(w, {}) != EMPTY_ARCHETYPE {
@@ -131,7 +134,7 @@ init :: proc(w: ^World, platform: ^core.Platform_API) -> bool {
 
 // destroy releases the world's storage. Every handle becomes invalid.
 destroy :: proc(w: ^World) {
-	for r in ([]^Region{&w.entities.records, &w.entities.free, &w.archetypes, &w.archetype_table, &w.directory, &w.chunks.memory, &w.chunks.versions, &w.queries, &w.matches, &w.hierarchy, &w.log}) {
+	for r in ([]^Region{&w.entities.records, &w.entities.free, &w.archetypes, &w.archetype_table, &w.directory, &w.chunks.memory, &w.chunks.versions, &w.queries, &w.matches, &w.hierarchy, &w.log, &w.child_links}) {
 		region_release(r, w.platform)
 	}
 	for r in names_regions(w) {

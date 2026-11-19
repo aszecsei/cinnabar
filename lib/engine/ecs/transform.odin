@@ -32,10 +32,11 @@ Local_Transform :: struct {
 	scale:    [3]f32,
 }
 
-// Parent makes an entity a child. Change it only with add or command_add, so the world sees the new hierarchy.
-// Despawning a parent despawns its children (see despawn).
+// Parent makes an entity a child. Change it only with add, remove or their commands, so the world keeps its child
+// lists (see children_iter) and sees the new hierarchy. A write through get_write does neither, so scripts can only
+// read it. Despawning a parent despawns its children (see despawn).
 Parent :: struct {
-	entity: Entity,
+	entity: Entity `script:"read"`,
 }
 
 // Previous_Transform is the Transform at the start of the current tick. Give it to every entity that moves in
