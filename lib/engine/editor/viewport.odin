@@ -669,35 +669,28 @@ with_descendants :: proc(w: ^ecs.World, selection: []ecs.Entity, bits: []u32) {
 			bits[index / 32] |= 1 << (index % 32)
 		}
 	}
-	for entity in selection {
-		if ecs.is_alive(w, entity) {
-			mark(bits, entity)
-		}
+	marked :: proc(bits: []u32, entity: ecs.Entity) -> bool {
+		index := ecs.entity_index(entity)
+		return int(index / 32) < len(bits) && bits[index / 32] & (1 << (index % 32)) != 0
 	}
-	children := make([dynamic]ecs.Entity, w.platform.frame_allocator)
-	ecs.collect(w, {ecs.PARENT_ID}, &children)
-	// A child is outlined when any ancestor is selected. The walk stops at a depth that no real hierarchy reaches, in
-	// case of a cycle.
-	outer: for child in children {
-		parent := parent_of(w, child)
-		for depth := 0; parent != 0 && depth < 64; depth += 1 {
-			for entity in selection {
-				if entity == parent {
+	// A walk down the child lists from each selected entity. A marked entity is not walked again, so a subtree under
+	// two selected entities is walked once, and a cycle ends.
+	stack := make([dynamic]ecs.Entity, w.platform.frame_allocator)
+	for entity in selection {
+		if ecs.is_alive(w, entity) && !marked(bits, entity) {
+			mark(bits, entity)
+			append(&stack, entity)
+		}
+		for len(stack) > 0 {
+			it := ecs.children_iter(w, pop(&stack))
+			for child in ecs.children_next(&it) {
+				if !marked(bits, child) {
 					mark(bits, child)
-					continue outer
+					append(&stack, child)
 				}
 			}
-			parent = parent_of(w, parent)
 		}
 	}
-}
-
-@(private)
-parent_of :: proc(w: ^ecs.World, entity: ecs.Entity) -> ecs.Entity {
-	if p := (^ecs.Parent)(ecs.get_raw(w, entity, ecs.PARENT_ID)); p != nil {
-		return p.entity
-	}
-	return 0
 }
 
 // create_viewport_gpu makes the tools' pipelines and buffers once. It reports false if they cannot be made.
