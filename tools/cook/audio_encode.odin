@@ -5,6 +5,7 @@ import "core:c"
 
 import audio "cinnabar:core/audio"
 import "cinnabar:core/audio/adpcm"
+import "cinnabar:core/audio/codec"
 import "cinnabar:core/audio/opus"
 
 // tools/cook/vorbis, which `just vorbis` builds. Only the cooker links it: the runtime decodes with vendor:stb/vorbis.
@@ -20,6 +21,8 @@ VORBIS_VERSION :: #config(VORBIS_VERSION, "unknown")
 AUDIO_ROLL_FRAMES :: 4096
 // libvorbis's quality 5, in its scale from -0.1 to 1. About 160 kbps for stereo music.
 AUDIO_VORBIS_QUALITY :: 0.5
+// How often a Vorbis page ends, at least, so that a seek table has a page within each of its intervals.
+AUDIO_VORBIS_PAGE_FRAMES :: codec.SEEK_INTERVAL / 2
 // For each channel.
 AUDIO_OPUS_BITRATE :: 64000
 // 20 ms, the longest single frame of Opus's music mode.
@@ -32,7 +35,7 @@ Vorbis_Write :: #type proc "c" (user: rawptr, data: [^]byte, size: c.long)
 
 @(default_calling_convention = "c")
 foreign cn_vorbis {
-	cn_vorbis_encode :: proc(samples: [^]i16, frames: u64, channels: c.int, quality: f32, write: Vorbis_Write, user: rawptr) -> c.int ---
+	cn_vorbis_encode :: proc(samples: [^]i16, frames: u64, channels: c.int, quality: f32, page_frames: u64, write: Vorbis_Write, user: rawptr) -> c.int ---
 }
 
 // audio_encode codes a sound's interleaved samples in a compressed format. skip is what a pass throws away before the
@@ -93,6 +96,7 @@ encode_vorbis :: proc(samples: []i16, channels: int) -> (data: []byte, skip: u32
 		   u64(len(input) / channels),
 		   c.int(channels),
 		   AUDIO_VORBIS_QUALITY,
+		   AUDIO_VORBIS_PAGE_FRAMES,
 		   write,
 		   &target,
 	   ) !=

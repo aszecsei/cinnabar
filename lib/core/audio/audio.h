@@ -9,9 +9,11 @@
 extern "C" {
 #endif
 
-#define CN_AUDIO_API_VERSION 2
+#define CN_AUDIO_API_VERSION 3
 #define CN_AUDIO_SAMPLE_RATE 48000
 #define CN_AUDIO_MAX_BUS_EFFECTS 4
+#define CN_AUDIO_MAX_BUS_DUCKS 4
+#define CN_AUDIO_SEEK_PREROLL_OPUS 3840
 
 typedef struct cn_audio_handle { uint32_t index, generation; } cn_audio_handle;
 typedef cn_audio_handle cn_sound;
@@ -26,6 +28,12 @@ enum cn_audio_feature {
     CN_AUDIO_FEATURE_STREAM_ADPCM = 1u << 4,
     CN_AUDIO_FEATURE_STREAM_VORBIS = 1u << 5,
     CN_AUDIO_FEATURE_STREAM_OPUS = 1u << 6,
+    CN_AUDIO_FEATURE_SEEK = 1u << 7,
+    CN_AUDIO_FEATURE_DUCKING = 1u << 8,
+};
+
+enum cn_voice_flag {
+    CN_VOICE_UNPAUSED = 1u << 0,
 };
 
 enum cn_sound_format {
@@ -44,6 +52,11 @@ typedef struct cn_audio_backend_info {
     const char* version;
 } cn_audio_backend_info;
 
+typedef struct cn_seek_point {
+    uint64_t offset;
+    uint64_t frame;
+} cn_seek_point;
+
 typedef struct cn_sound_desc {
     uint64_t frames;
     const int16_t* samples;
@@ -53,7 +66,8 @@ typedef struct cn_sound_desc {
     uint32_t channels;
     uint32_t format;
     uint32_t skip;
-    uint32_t _pad;
+    uint32_t seek_count;
+    const cn_seek_point* seek;
 } cn_sound_desc;
 
 typedef struct cn_voice_params {
@@ -72,8 +86,25 @@ typedef struct cn_voice_desc {
     cn_bus bus;
     cn_voice_params params;
     int32_t loop;
+    uint32_t flags;
+    uint64_t start;
+    uint64_t clock;
+    uint64_t length;
+    float fade;
     uint32_t _pad;
 } cn_voice_desc;
+
+typedef struct cn_voice_position {
+    double frame;
+    uint64_t clock;
+} cn_voice_position;
+
+typedef struct cn_duck {
+    float gain;
+    float attack;
+    float release;
+    float threshold;
+} cn_duck;
 
 enum cn_effect_kind {
     CN_EFFECT_NONE,
@@ -114,10 +145,14 @@ typedef struct cn_audio_api {
     void (*voice_set)(cn_voice voice, const cn_voice_params* params);
     void (*voice_stop)(cn_voice voice, float fade);
     int32_t (*voice_playing)(cn_voice voice);
+    void (*voice_seek)(cn_voice voice, uint64_t frame, uint64_t clock);
+    int32_t (*voice_position)(cn_voice voice, cn_voice_position* out);
     cn_bus (*bus_create)(const char* name, cn_bus parent);
     void (*bus_set_gain)(cn_bus bus, float gain);
     void (*bus_set_effect)(cn_bus bus, uint32_t slot, const cn_effect* effect);
+    void (*bus_set_duck)(cn_bus bus, cn_bus target, const cn_duck* duck);
     void (*set_paused)(int32_t paused);
+    uint64_t (*clock)(void);
     void (*stats)(cn_audio_stats* out);
     int32_t (*reset)(void);
     void (*shutdown)(void);
@@ -149,6 +184,9 @@ static inline uint32_t cn_audio_layout(void) {
         sizeof(cn_sound_desc),
         sizeof(cn_voice_params),
         sizeof(cn_voice_desc),
+        sizeof(cn_seek_point),
+        sizeof(cn_voice_position),
+        sizeof(cn_duck),
         sizeof(cn_effect),
         sizeof(cn_audio_stats),
         sizeof(cn_device_status),
@@ -172,12 +210,15 @@ static inline uint32_t cn_audio_layout(void) {
 
 static_assert(sizeof(cn_audio_handle) == 8);
 static_assert(sizeof(cn_audio_backend_info) == 32);
-static_assert(sizeof(cn_sound_desc) == 56);
+static_assert(sizeof(cn_seek_point) == 16);
+static_assert(sizeof(cn_sound_desc) == 64);
 static_assert(sizeof(cn_voice_params) == 40);
-static_assert(sizeof(cn_voice_desc) == 64);
+static_assert(sizeof(cn_voice_desc) == 96);
+static_assert(sizeof(cn_voice_position) == 16);
+static_assert(sizeof(cn_duck) == 16);
 static_assert(sizeof(cn_effect) == 16);
 static_assert(sizeof(cn_audio_stats) == 32);
 static_assert(sizeof(cn_device_status) == 32);
-static_assert(sizeof(cn_audio_api) == 15 * sizeof(void*));
+static_assert(sizeof(cn_audio_api) == 19 * sizeof(void*));
 static_assert(sizeof(cn_audio_host) == 9 * sizeof(void*));
 #endif

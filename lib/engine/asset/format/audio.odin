@@ -11,7 +11,8 @@ AUDIO_SAMPLE_RATE :: 48000
 
 // Audio_Blob is the start of an audio blob: a sound at AUDIO_SAMPLE_RATE, with interleaved channels, as 16-bit PCM or
 // compressed. stream asks the runtime to read it as it plays, and not to load it (see docs/audio/design.md#streaming). Each
-// pass over compressed data throws away skip frames, keeps frames frames and ignores the rest.
+// pass over compressed data throws away skip frames, keeps frames frames and ignores the rest. A Vorbis or Opus sound that
+// streams may have a seek table, Seek_Points in order of their frames (see docs/audio/design.md#streaming).
 Audio_Blob :: struct {
 	header:      Blob_Header,
 	frames:      u64,
@@ -22,6 +23,7 @@ Audio_Blob :: struct {
 	source_path: Slice,
 	format:      audio.Sound_Format,
 	skip:        u32,
+	seek:        Slice,
 }
 
 audio_layout :: proc() -> u64 {
@@ -65,7 +67,10 @@ audio_view :: proc(data: []byte) -> (blob: ^Audio_Blob, ok: bool) {
 	inside :: proc(data: []byte, s: Slice, align: int) -> bool {
 		return u64(s.offset) + u64(s.size) <= u64(len(data)) && int(s.offset) % align == 0
 	}
-	if !inside(data, blob.data, align_of(i16)) || !inside(data, blob.source_path, 1) {
+	if !inside(data, blob.data, align_of(i16)) ||
+	   !inside(data, blob.source_path, 1) ||
+	   !inside(data, blob.seek, align_of(audio.Seek_Point)) ||
+	   blob.seek.size % size_of(audio.Seek_Point) != 0 {
 		return nil, false
 	}
 	return blob, true
@@ -74,6 +79,11 @@ audio_view :: proc(data: []byte) -> (blob: ^Audio_Blob, ok: bool) {
 // audio_data is a viewed blob's data, in its format.
 audio_data :: proc(data: []byte, blob: ^Audio_Blob) -> []byte {
 	return blob_bytes(data, blob.data)
+}
+
+// audio_seek is a viewed blob's seek table.
+audio_seek :: proc(data: []byte, blob: ^Audio_Blob) -> []audio.Seek_Point {
+	return mem.slice_data_cast([]audio.Seek_Point, blob_bytes(data, blob.seek))
 }
 
 // audio_samples is a viewed PCM blob's samples, interleaved.
@@ -91,12 +101,16 @@ Audio_Contents :: struct {
 	skip:        u32,
 	data:        []byte,
 	source_path: string,
+	seek:        []audio.Seek_Point,
 }
 
 // audio_write builds an audio blob.
 audio_write :: proc(contents: Audio_Contents, allocator := context.allocator) -> []byte {
 	buffer := make([dynamic]byte, size_of(Audio_Blob), allocator)
 	source_path := append_bytes(&buffer, transmute([]byte)contents.source_path)
+	seek_bytes := mem.slice_to_bytes(contents.seek)
+	seek := reserve_bytes(&buffer, len(seek_bytes), align_of(audio.Seek_Point))
+	copy(buffer[seek.offset:], seek_bytes)
 	data := reserve_bytes(&buffer, len(contents.data), BLOB_ALIGN)
 	if len(contents.data) > 0 {
 		mem.copy(&buffer[data.offset], raw_data(contents.data), int(data.size))
@@ -116,6 +130,7 @@ audio_write :: proc(contents: Audio_Contents, allocator := context.allocator) ->
 		source_path = source_path,
 		format = contents.format,
 		skip = contents.skip,
+		seek = seek,
 	}
 	mem.copy(raw_data(buffer), &blob, size_of(blob))
 	return buffer[:]

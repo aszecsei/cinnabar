@@ -303,14 +303,22 @@ a_stop_fades :: proc(t: ^testing.T) {
 	samples := [?]i16{16384}
 	sound := memory_sound(f.m, samples[:])
 	voice := play(f.m, sound, plain(), loop = true)
+	out: [4800 + BLOCK_FRAMES]audio.Device_Frame
+	render(f.m, out[:BLOCK_FRAMES])
 	voice_stop(f.m, voice, 0.1)
 	testing.expect(t, !bool(voice_playing(f.m, voice)))
-	out: [4800 + BLOCK_FRAMES]audio.Device_Frame
 	render(f.m, out[:])
 	testing.expect(t, out[0].x > 0.49)
 	testing.expect(t, close_to(out[2400].x, 0.25, 0.01))
 	testing.expect_value(t, out[len(out) - 1].x, 0)
-	testing.expect(t, !f.m.voices[voice.index].active)
+	testing.expect(t, f.m.voices[voice.index].phase == nil)
+
+	// A voice that stops before it starts ends without a sound.
+	early := play(f.m, sound, plain(), loop = true)
+	voice_stop(f.m, early, 0.1)
+	render(f.m, out[:BLOCK_FRAMES])
+	testing.expect_value(t, out[0].x, 0)
+	testing.expect(t, f.m.voices[early.index].phase == nil)
 }
 
 // A destroyed sound outlives its voices, and update frees it after them.
@@ -493,8 +501,8 @@ effects_stay_bounded :: proc(t: ^testing.T) {
 		for _ in 0 ..< SECONDS * audio.SAMPLE_RATE / BLOCK_FRAMES {
 			drain_commands(f.m)
 			for &v, i in f.m.voices {
-				if v.active {
-					mix_voice(f.m, &v, i, BLOCK_FRAMES)
+				if v.phase != nil {
+					mix_voice(f.m, &v, i, BLOCK_FRAMES, 0)
 				}
 			}
 			frames := f.m.buses[bus.index].buffer[:]
@@ -1315,4 +1323,336 @@ a_compressed_stream_decodes_off_the_mix_thread :: proc(t: ^testing.T) {
 thread_recording_write :: proc "c" (frames: [^]audio.Device_Frame, count: i32) -> i32 {
 	sync.atomic_store(&mix_thread_id, sync.current_thread_id())
 	return recording_write(frames, count)
+}
+
+// A compressed sound's desc with its seek table, as the cooker writes it.
+@(private = "file")
+coded_desc_with_table :: proc(coded: Coded, file: Stream_File) -> audio.Sound_Desc {
+	desc := coded_desc(coded, file)
+	table, ok := codec.seek_table(
+		coded.format,
+		int(coded.channels),
+		coded.file[16:],
+		context.temp_allocator,
+	)
+	assert(ok)
+	desc.seek = raw_data(table)
+	desc.seek_count = u32(len(table))
+	return desc
+}
+
+// Renders count frames a block at a time, with a pass of the stream thread before each.
+@(private = "file")
+render_steps :: proc(m: ^Mixer, out: []audio.Device_Frame) {
+	for start := 0; start < len(out); start += BLOCK_FRAMES {
+		stream_step(m)
+		render(m, out[start:min(start + BLOCK_FRAMES, len(out))])
+	}
+}
+
+// A voice that starts at an offset gives, from its first block, what the sound gives there from the start: PCM from
+// memory and streamed, and streamed ADPCM, Vorbis and Opus, each through its seek table. Opus starts its decoder afresh
+// before the place, so it differs by its coding noise.
+@(test)
+a_voice_starts_at_an_offset :: proc(t: ^testing.T) {
+	OFFSET :: 50_001
+	samples := sine(96000, 7)
+	pcm_file := write_stream_file(t, samples)
+	defer os.remove_all(pcm_file.dir)
+	for streaming in ([?]bool{false, true}) {
+		f: Fixture
+		setup(&f)
+		defer teardown(&f)
+		sound :=
+			stream_sound(f.m, pcm_file, len(samples)) if streaming else memory_sound(f.m, samples)
+		voice_play(f.m, &audio.Voice_Desc{sound = sound, params = plain(), start = OFFSET})
+		out: [BLOCK_FRAMES]audio.Device_Frame
+		render_steps(f.m, out[:])
+		same := true
+		for frame, i in out {
+			same &&= frame.x == f32(samples[OFFSET + i]) / 32768
+		}
+		testing.expect(t, same)
+	}
+
+	coded := long_coded()
+	for c in ([?]Coded{coded[1], coded[2], coded[4], coded[5]}) {
+		g: Fixture
+		setup(&g)
+		defer teardown(&g)
+		file := write_coded_file(t, c)
+		defer os.remove_all(file.dir)
+		expected, _ := decoded_passes(t, c)
+		desc := coded_desc_with_table(c, file)
+		sound := sound_create(g.m, &desc)
+		voice_play(g.m, &audio.Voice_Desc{sound = sound, params = plain(), start = OFFSET})
+		out: [BLOCK_FRAMES]audio.Device_Frame
+		render_steps(g.m, out[:])
+		largest: f32
+		for frame, i in out {
+			want := expected[OFFSET + i]
+			largest = max(largest, abs(frame.x - want.x), abs(frame.y - want.y))
+		}
+		bound: f32 = 32.0 / 32768 if c.format == .Opus else 0
+		testing.expectf(
+			t,
+			largest <= bound,
+			"%v with %d channels: off by %v",
+			c.format,
+			c.channels,
+			largest * 32768,
+		)
+		testing.expect(t, out[0] != {})
+	}
+}
+
+// A start at a time on the clock plays its first frame at that time, though the time is in the middle of a block. A
+// start that comes late starts as far into the sound as it is late.
+@(test)
+a_start_keeps_to_its_clock :: proc(t: ^testing.T) {
+	f: Fixture
+	setup(&f)
+	defer teardown(&f)
+	samples := make([]i16, 4000, context.temp_allocator)
+	for &sample, i in samples {
+		sample = i16(i + 1)
+	}
+	sound := memory_sound(f.m, samples)
+	out: [3 * BLOCK_FRAMES]audio.Device_Frame
+	render(f.m, out[:BLOCK_FRAMES])
+	testing.expect_value(t, clock(f.m), BLOCK_FRAMES)
+
+	at := clock(f.m) + BLOCK_FRAMES + 100
+	first_voice := voice_play(f.m, &audio.Voice_Desc{sound = sound, params = plain(), clock = at})
+	render(f.m, out[:])
+	first := -1
+	for frame, i in out {
+		if frame.x != 0 {
+			first = i
+			break
+		}
+	}
+	testing.expect_value(t, first, BLOCK_FRAMES + 100)
+	testing.expect_value(t, out[BLOCK_FRAMES + 100].x, f32(1) / 32768)
+
+	voice_stop(f.m, first_voice, 0)
+	render(f.m, out[:BLOCK_FRAMES])
+	late := clock(f.m) - 50
+	voice_play(f.m, &audio.Voice_Desc{sound = sound, params = plain(), clock = late, start = 10})
+	render(f.m, out[:BLOCK_FRAMES])
+	testing.expect_value(t, out[0].x, f32(1 + 10 + 50) / 32768)
+}
+
+// A voice reports where it is in its sound, at a time on the clock.
+@(test)
+a_voice_reports_its_place :: proc(t: ^testing.T) {
+	f: Fixture
+	setup(&f)
+	defer teardown(&f)
+	sound := memory_sound(f.m, sine(48000, 10))
+	voice := voice_play(
+		f.m,
+		&audio.Voice_Desc{sound = sound, params = {gain = 1, pitch = 1.5}, start = 1000},
+	)
+	where_: audio.Voice_Position
+	testing.expect(t, !bool(voice_position(f.m, voice, &where_)))
+	out: [4 * BLOCK_FRAMES]audio.Device_Frame
+	render(f.m, out[:])
+	testing.expect(t, bool(voice_position(f.m, voice, &where_)))
+	testing.expect_value(t, where_.clock, 4 * BLOCK_FRAMES)
+	testing.expect(t, close_to(f32(where_.frame), 1000 + 1.5 * 4 * BLOCK_FRAMES))
+
+	// A voice that the clock drives can find how far it drifted, and seek back to where it should be.
+	expected := 1000 + 4 * BLOCK_FRAMES
+	drift := where_.frame - f64(expected)
+	testing.expect(t, drift > 100)
+	voice_set(f.m, voice, &audio.Voice_Params{gain = 1, pitch = 1})
+	voice_seek(f.m, voice, u64(expected) + 2 * BLOCK_FRAMES, clock(f.m) + 2 * BLOCK_FRAMES)
+	// A place from before the seek is not given, until the voice starts at its new place.
+	testing.expect(t, !bool(voice_position(f.m, voice, &where_)))
+	render(f.m, out[:BLOCK_FRAMES])
+	testing.expect(t, !bool(voice_position(f.m, voice, &where_)))
+	render(f.m, out[:])
+	testing.expect(t, bool(voice_position(f.m, voice, &where_)))
+	testing.expect_value(t, where_.clock, 9 * BLOCK_FRAMES)
+	testing.expect(t, close_to(f32(where_.frame), f32(expected + 5 * BLOCK_FRAMES)))
+	voice_stop(f.m, voice, 0)
+	testing.expect(t, !bool(voice_position(f.m, voice, &where_)))
+}
+
+// The second difference of a run of frames, where a step shows up, and its largest away from a place.
+@(private = "file")
+second_difference :: proc(frames: []audio.Device_Frame, i: int) -> f32 {
+	return abs(frames[i].x - 2 * frames[i - 1].x + frames[i - 2].x)
+}
+
+// A seek on a playing voice fades out and back in, so it has no step larger than the sound's own, as
+// a_loop_has_no_step_at_its_seam measures a loop's. Afterwards the voice plays from the new place.
+@(test)
+a_seek_has_no_step :: proc(t: ^testing.T) {
+	pads := [?]Coded {
+		coded_of(.Vorbis, #load("../codec/testdata/pad_mono.vorbis")),
+		coded_of(.Opus, #load("../codec/testdata/pad_mono.opus")),
+	}
+	for c in pads {
+		f: Fixture
+		setup(&f)
+		defer teardown(&f)
+		file := write_coded_file(t, c)
+		defer os.remove_all(file.dir)
+		expected, _ := decoded_passes(t, c)
+		desc := coded_desc_with_table(c, file)
+		sound := sound_create(f.m, &desc)
+		voice := voice_play(f.m, &audio.Voice_Desc{sound = sound, params = plain(), loop = true})
+		before := make([]audio.Device_Frame, 24000, context.temp_allocator)
+		render_steps(f.m, before)
+		voice_seek(f.m, voice, 70_000, 0)
+		after := make([]audio.Device_Frame, 24000, context.temp_allocator)
+		render_steps(f.m, after)
+		joined := make([]audio.Device_Frame, len(before) + len(after), context.temp_allocator)
+		copy(joined, before)
+		copy(joined[len(before):], after)
+		elsewhere: f32
+		for i in 2 ..< len(expected) {
+			elsewhere = max(elsewhere, second_difference(expected, i))
+		}
+		largest: f32
+		for i in 2 ..< len(joined) {
+			largest = max(largest, second_difference(joined, i))
+		}
+		testing.expectf(
+			t,
+			largest <= elsewhere * 1.5,
+			"%v: a step of %v, and %v elsewhere",
+			c.format,
+			largest * 32768,
+			elsewhere * 32768,
+		)
+		where_: audio.Voice_Position
+		testing.expect(t, bool(voice_position(f.m, voice, &where_)))
+		frame := int(where_.frame)
+		testing.expect(t, frame > 70_000 && frame < 70_000 + 24000)
+		testing.expect(t, close_to(after[len(after) - 1].x, expected[frame - 1].x, 32.0 / 32768))
+	}
+}
+
+// A voice with a length plays that long and fades out, and one that is unpaused plays on through a pause, as the editor's
+// scrub does, while the others hold.
+@(test)
+a_grain_plays_through_a_pause :: proc(t: ^testing.T) {
+	f: Fixture
+	setup(&f)
+	defer teardown(&f)
+	samples := [?]i16{16384}
+	sound := memory_sound(f.m, samples[:])
+	held := play(f.m, sound, plain(), loop = true)
+	set_paused(f.m, true)
+	out: [2 * BLOCK_FRAMES]audio.Device_Frame
+	render(f.m, out[:])
+	testing.expect_value(t, out[len(out) - 1].x, 0)
+	grain := voice_play(
+		f.m,
+		&audio.Voice_Desc {
+			sound = sound,
+			params = plain(),
+			loop = true,
+			flags = {.Unpaused},
+			length = 1920,
+			fade = 0.005,
+		},
+	)
+	grain_out: [1920 + 2 * BLOCK_FRAMES]audio.Device_Frame
+	render(f.m, grain_out[:])
+	testing.expect(t, grain_out[0].x < 0.01)
+	testing.expect_value(t, grain_out[BLOCK_FRAMES].x, 0.5)
+	testing.expect_value(t, grain_out[1919].x, 0.5)
+	testing.expect(t, grain_out[1920 + BLOCK_FRAMES / 2].x < 0.5)
+	testing.expect_value(t, grain_out[len(grain_out) - 1].x, 0)
+	testing.expect(t, !bool(voice_playing(f.m, grain)))
+	testing.expect(t, bool(voice_playing(f.m, held)))
+	testing.expect(t, clock(f.m) == u64(len(out) + len(grain_out)))
+}
+
+// A dialogue bus ducks a music bus while it plays: the music's gain falls to the duck's gain over the attack, and comes
+// back over the release once the dialogue stops.
+@(test)
+a_bus_ducks_another :: proc(t: ^testing.T) {
+	f: Fixture
+	setup(&f)
+	defer teardown(&f)
+	music := bus_create(f.m, {})
+	dialogue := bus_create(f.m, {})
+	bus_set_duck(
+		f.m,
+		dialogue,
+		music,
+		&audio.Duck{gain = 0.25, attack = 0.05, release = 0.2, threshold = 0.01},
+	)
+	level_of := [?]i16{16384}
+	sound := memory_sound(f.m, level_of[:])
+	play(f.m, sound, plain(), loop = true, bus = music)
+	out := make([]audio.Device_Frame, 48000, context.temp_allocator)
+	render(f.m, out[:4800])
+	testing.expect_value(t, out[4799].x, 0.5)
+
+	// The dialogue is silent on the left, so the left is the music alone.
+	right := [?]i16{0, 8192}
+	talk := voice_play(
+		f.m,
+		&audio.Voice_Desc {
+			sound = memory_sound(f.m, right[:], 2),
+			bus = dialogue,
+			params = plain(),
+			loop = true,
+		},
+	)
+	render(f.m, out[:9600])
+	// A block passes before the music hears the dialogue, then it falls 0.75 over 2400 frames.
+	expected := proc(i: int) -> f32 {
+		falling := clamp(f32(i - BLOCK_FRAMES + 1) / 2400, 0, 1)
+		return 0.5 * (1 - 0.75 * falling)
+	}
+	largest: f32
+	for frame, i in out[:9600] {
+		largest = max(largest, abs(frame.x - expected(i)))
+	}
+	testing.expectf(t, largest < 0.002, "off by %v while it falls", largest)
+	testing.expect_value(t, out[9599].x, 0.125)
+
+	voice_stop(f.m, talk, 0)
+	render(f.m, out[:])
+	// It stops over a block, then the music comes back over 9600 frames.
+	for i in ([?]int{4 * BLOCK_FRAMES, 4800, 9600}) {
+		testing.expect(t, out[i].x > 0.125 && out[i].x < 0.5)
+	}
+	rising := out[4800].x - out[2400].x
+	testing.expectf(t, close_to(rising, 0.375 * 2400 / 9600, 0.003), "rose %v", rising)
+	testing.expect_value(t, out[len(out) - 1].x, 0.5)
+
+	// A gain of 1 ends the duck.
+	bus_set_duck(f.m, dialogue, music, &audio.Duck{gain = 1})
+	testing.expect_value(t, f.m.buses[dialogue.index].duck_count, 0)
+}
+
+// A seek near the end of a sound that does not loop moves the voice, though the sound ends before its fade does.
+@(test)
+a_seek_at_the_end_still_moves :: proc(t: ^testing.T) {
+	f: Fixture
+	setup(&f)
+	defer teardown(&f)
+	samples := make([]i16, 1000, context.temp_allocator)
+	for &sample, i in samples {
+		sample = i16(i + 1)
+	}
+	sound := memory_sound(f.m, samples)
+	voice := voice_play(f.m, &audio.Voice_Desc{sound = sound, params = plain(), start = 700})
+	out: [3 * BLOCK_FRAMES]audio.Device_Frame
+	render(f.m, out[:BLOCK_FRAMES])
+	voice_seek(f.m, voice, 100, 0)
+	render(f.m, out[:])
+	testing.expect(t, bool(voice_playing(f.m, voice)))
+	where_: audio.Voice_Position
+	testing.expect(t, bool(voice_position(f.m, voice, &where_)))
+	testing.expect_value(t, where_.frame, f64(100 + 2 * BLOCK_FRAMES))
+	testing.expect_value(t, out[len(out) - 1].x, f32(100 + 2 * BLOCK_FRAMES) / 32768)
 }

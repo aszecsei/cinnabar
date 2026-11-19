@@ -10,7 +10,7 @@ package audio_boundary
 import "cinnabar:core/layout"
 
 // The version of Audio_API. The host refuses a backend whose info reports another one.
-API_VERSION :: 2
+API_VERSION :: 3
 
 // The rate of every sound and of the device, in frames per second. The cooker converts to it.
 SAMPLE_RATE :: 48000
@@ -30,6 +30,8 @@ MASTER_BUS :: Bus{0, 1}
 
 // The most effects on one bus.
 MAX_BUS_EFFECTS :: 4
+// The most buses that one bus ducks.
+MAX_BUS_DUCKS :: 4
 
 Feature :: enum u8 {
 	// voice_set's position, distances and occlusion change what the voice sounds like.
@@ -45,6 +47,10 @@ Feature :: enum u8 {
 	Stream_ADPCM,
 	Stream_Vorbis,
 	Stream_Opus,
+	// voice_play's start, clock, length and fade, voice_seek and voice_position take effect.
+	Seek,
+	// bus_set_duck takes effect.
+	Ducking,
 }
 
 Features :: bit_set[Feature;u32]
@@ -73,6 +79,18 @@ Sound_Format :: enum u32 {
 	Opus,
 }
 
+// Seek_Point is a place in a compressed sound's data where a decoder can start afresh: a decoder that starts at offset in
+// the data gives frame first, counting the frames that a pass skips. An Opus decoder's first SEEK_PREROLL_OPUS frames from
+// there are not yet the sound, so a seek decodes them and throws them away. See docs/audio/design.md#streaming.
+Seek_Point :: struct {
+	offset: u64,
+	frame:  u64,
+}
+
+// How much an Opus decoder decodes after a reset before its frames are the sound: 80 ms, as the Opus specification
+// recommends.
+SEEK_PREROLL_OPUS :: 3840
+
 // Sound_Desc is a sound at SAMPLE_RATE, with interleaved channels. A sound with samples is in memory, as 16-bit PCM, and
 // the backend copies them before sound_create returns. A sound with a path instead has its data in that file, size bytes
 // from offset, in format, and the backend reads them as it plays. The path is copied. The cooker can replace the file
@@ -80,17 +98,21 @@ Sound_Format :: enum u32 {
 //
 // Each pass over a compressed sound starts its decoder at the start of the data, throws away skip frames, keeps frames
 // frames and ignores the rest. So a loop is the coded data of a sound that continues into itself.
+//
+// A Vorbis or Opus sound may have a seek table, seek_count points in order of their frames, which the backend copies. Without
+// one, a start or a seek after the sound's first frame decodes from the start.
 Sound_Desc :: struct {
-	frames:   u64,
-	samples:  [^]i16,
-	path:     cstring,
-	offset:   u64,
-	size:     u64,
+	frames:     u64,
+	samples:    [^]i16,
+	path:       cstring,
+	offset:     u64,
+	size:       u64,
 	// 1 or 2.
-	channels: u32,
-	format:   Sound_Format,
-	skip:     u32,
-	_:        u32,
+	channels:   u32,
+	format:     Sound_Format,
+	skip:       u32,
+	seek_count: u32,
+	seek:       [^]Seek_Point,
 }
 
 // Voice_Params is what a playing voice can change. The backend moves to new values without a click. position is the
@@ -110,12 +132,43 @@ Voice_Params :: struct {
 	_:            u32,
 }
 
+Voice_Flag :: enum u32 {
+	// Plays while set_paused holds the other voices, as the editor's scrub does.
+	Unpaused,
+}
+
+Voice_Flags :: bit_set[Voice_Flag;u32]
+
+// Voice_Desc starts a voice at start, a frame of its sound. With a clock, a time on the backend's clock, start plays at
+// that time: a voice that starts late starts further in, by as much as it is late, so it keeps to the clock. With length,
+// the voice plays that many frames of its sound and then fades out over fade. fade is also how long it fades in, in
+// seconds.
 Voice_Desc :: struct {
 	sound:  Sound,
 	bus:    Bus,
 	params: Voice_Params,
 	loop:   b32,
+	flags:  Voice_Flags,
+	start:  u64,
+	clock:  u64,
+	length: u64,
+	fade:   f32,
 	_:      u32,
+}
+
+// Voice_Position is where a voice is: the frame of its sound, with a fraction, at a time on the backend's clock.
+Voice_Position :: struct {
+	frame: f64,
+	clock: u64,
+}
+
+// Duck is how one bus ducks another: while the first's level is above threshold, the other's gain falls to gain over attack
+// seconds, and when it is not, it comes back over release seconds. A gain of 1 does nothing.
+Duck :: struct {
+	gain:      f32,
+	attack:    f32,
+	release:   f32,
+	threshold: f32,
 }
 
 Effect_Kind :: enum u32 {
@@ -169,14 +222,23 @@ Audio_API :: struct {
 	voice_stop:     proc "c" (voice: Voice, fade: f32),
 	// False once the voice has ended, or its handle is stale.
 	voice_playing:  proc "c" (voice: Voice) -> b32,
+	// Moves a voice to a frame of its sound, with a short fade out and back in so that it does not click. With a clock,
+	// the frame plays at that time, as in Voice_Desc.
+	voice_seek:     proc "c" (voice: Voice, frame: u64, clock: u64),
+	// Where the voice was at the end of the last mix. False for a stale handle, or a voice that has not started.
+	voice_position: proc "c" (voice: Voice, out: ^Voice_Position) -> b32,
 	// Makes a bus that mixes into parent. Returns the nil bus when it cannot.
 	bus_create:     proc "c" (name: cstring, parent: Bus) -> Bus,
 	bus_set_gain:   proc "c" (bus: Bus, gain: f32),
 	// Puts an effect in one of a bus's slots, below MAX_BUS_EFFECTS, in the order that the sound passes them. A slot of
 	// kind None holds no effect.
 	bus_set_effect: proc "c" (bus: Bus, slot: u32, effect: ^Effect),
+	// Makes bus duck target, or changes how, up to MAX_BUS_DUCKS targets. A gain of 1 ends it.
+	bus_set_duck:   proc "c" (bus: Bus, target: Bus, duck: ^Duck),
 	// While paused, no voice advances and the output is silent.
 	set_paused:     proc "c" (paused: b32),
+	// The backend's clock: the frames that it has mixed, at SAMPLE_RATE. It runs while paused, and the next mix starts at it.
+	clock:          proc "c" () -> u64,
 	stats:          proc "c" (out: ^Stats),
 	// Stops every voice without a fade, destroys every sound and every bus but Master, and returns how many voices it
 	// stopped, for a soft restart. The next game starts clean, and the device stays open.
@@ -227,15 +289,18 @@ Host :: struct {
 // Format lists every type that crosses the boundary, for format_hash.
 @(private)
 Format :: struct {
-	sound_desc:    Sound_Desc,
-	voice_params:  Voice_Params,
-	voice_desc:    Voice_Desc,
-	effect:        Effect,
-	stats:         Stats,
-	info:          Backend_Info,
-	device_status: Device_Status,
-	api:           Audio_API,
-	host:          Host,
+	seek_point:     Seek_Point,
+	sound_desc:     Sound_Desc,
+	voice_params:   Voice_Params,
+	voice_desc:     Voice_Desc,
+	voice_position: Voice_Position,
+	duck:           Duck,
+	effect:         Effect,
+	stats:          Stats,
+	info:           Backend_Info,
+	device_status:  Device_Status,
+	api:            Audio_API,
+	host:           Host,
 }
 
 // layout_signature is an FNV-1a hash of the sizes of every type that crosses the boundary, in this order, which
@@ -248,6 +313,9 @@ layout_signature :: proc "contextless" () -> u32 {
 		u32(size_of(Sound_Desc)),
 		u32(size_of(Voice_Params)),
 		u32(size_of(Voice_Desc)),
+		u32(size_of(Seek_Point)),
+		u32(size_of(Voice_Position)),
+		u32(size_of(Duck)),
 		u32(size_of(Effect)),
 		u32(size_of(Stats)),
 		u32(size_of(Device_Status)),
@@ -271,11 +339,14 @@ format_hash :: proc() -> u64 {
 // audio.h asserts the same sizes.
 #assert(size_of(Handle) == 8)
 #assert(size_of(Backend_Info) == 32)
-#assert(size_of(Sound_Desc) == 56)
+#assert(size_of(Seek_Point) == 16)
+#assert(size_of(Sound_Desc) == 64)
 #assert(size_of(Voice_Params) == 40)
-#assert(size_of(Voice_Desc) == 64)
+#assert(size_of(Voice_Desc) == 96)
+#assert(size_of(Voice_Position) == 16)
+#assert(size_of(Duck) == 16)
 #assert(size_of(Effect) == 16)
 #assert(size_of(Stats) == 32)
 #assert(size_of(Device_Status) == 32)
-#assert(size_of(Audio_API) == 15 * size_of(rawptr))
+#assert(size_of(Audio_API) == 19 * size_of(rawptr))
 #assert(size_of(Host) == 9 * size_of(rawptr))

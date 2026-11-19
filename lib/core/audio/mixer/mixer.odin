@@ -37,10 +37,12 @@ WAIT_LIMIT_MS :: 2000
 Command_Kind :: enum u32 {
 	Play,
 	Set,
+	Seek,
 	Stop,
 	Bus_Create,
 	Bus_Gain,
 	Bus_Effect,
+	Bus_Duck,
 	Paused,
 	Reset,
 }
@@ -56,28 +58,38 @@ Command :: struct {
 	slot:       u32,
 	value:      f32,
 	flag:       b32,
+	unpaused:   b32,
+	// A Play's first stream ticket, or a Seek's count on its voice.
+	ticket:     u32,
+	frame:      u64,
+	clock:      u64,
+	length:     u64,
 	params:     audio.Voice_Params,
 	sound:      ^Sound_Data,
 	stream:     ^Stream,
 	effect:     ^Effect_State,
 	settings:   audio.Effect,
+	duck:       audio.Duck,
 }
 
 // Sound_Data is a sound's memory, or where its file is. users counts its handle and its voices: whichever goes last, the
 // game's thread frees it in update.
 @(private)
 Sound_Data :: struct {
-	frames:   u64,
-	samples:  [^]i16,
-	path:     cstring,
-	offset:   u64,
-	size:     u64,
-	channels: u32,
-	format:   audio.Sound_Format,
-	skip:     u32,
-	users:    i32,
+	frames:     u64,
+	samples:    [^]i16,
+	path:       cstring,
+	offset:     u64,
+	size:       u64,
+	channels:   u32,
+	format:     audio.Sound_Format,
+	skip:       u32,
+	users:      i32,
+	// A compressed stream's seek table, copied.
+	seek:       [^]audio.Seek_Point,
+	seek_count: u32,
 	// In the list of sounds to free.
-	next:     ^Sound_Data,
+	next:       ^Sound_Data,
 }
 
 @(private)
@@ -90,11 +102,20 @@ Sound_Slot :: struct {
 // stopped while the voice fades.
 @(private)
 Voice_Slot :: struct {
-	generation: u32,
-	busy:       bool,
-	stopped:    bool,
+	generation:     u32,
+	busy:           bool,
+	stopped:        bool,
 	// The mix thread's, once the voice has ended.
-	finished:   b32,
+	finished:       b32,
+	// The game thread's: how many seeks it asked of the voice. A place from before the last of them is not given.
+	seeks_asked:    u32,
+	// The mix thread's, through publish_place: where the voice was at the end of a block, whether it has a place, and
+	// how many seeks it had applied there.
+	place_seeks:    u32,
+	place_sequence: u32,
+	placed:         b32,
+	place_frame:    u64,
+	place_clock:    u64,
 }
 
 @(private)
@@ -125,6 +146,7 @@ Mixer :: struct {
 	pool_warned:    bool,
 	failed_seen:    u32,
 	faults_seen:    u32,
+	ducks_seen:     u32,
 	voices_refused: u32,
 	mix_thread:     ^thread.Thread,
 	stream_thread:  ^thread.Thread,
@@ -136,17 +158,19 @@ Mixer :: struct {
 	closing:        b32,
 	reset_done:     u32,
 	retired:        ^Effect_State,
+	// The clock: the mix thread writes it after each block.
 	frames_mixed:   u64,
 	stream_starved: u64,
 	stream_failed:  u32,
 	faults:         u32,
+	// Ducks that the mix thread refused, as a bus already ducked MAX_BUS_DUCKS others.
+	ducks_refused:  u32,
 	streams:        [MAX_STREAMS]Stream,
 
 	// The mix thread's.
 	voices:         [MAX_VOICES]Mix_Voice,
 	buses:          [MAX_BUSES]Mix_Bus,
 	paused:         bool,
-	pause_gain:     f32,
 	reset_count:    u32,
 }
 
@@ -176,8 +200,8 @@ init :: proc(m: ^Mixer, host: ^audio.Host) {
 		active      = true,
 		gain        = 1,
 		gain_target = 1,
+		duck_gain   = 1,
 	}
-	m.pause_gain = 1
 }
 
 @(private)
@@ -193,6 +217,8 @@ api := audio.Audio_API {
 				.Stream_ADPCM,
 				.Stream_Vorbis,
 				.Stream_Opus,
+				.Seek,
+				.Ducking,
 			},
 			layout = audio.layout_signature(),
 			name = "mixer",
@@ -226,6 +252,13 @@ api := audio.Audio_API {
 	voice_playing = proc "c" (voice: audio.Voice) -> b32 {
 		return voice_playing(&state, voice)
 	},
+	voice_seek = proc "c" (voice: audio.Voice, frame: u64, clock: u64) {
+		context = runtime.default_context()
+		voice_seek(&state, voice, frame, clock)
+	},
+	voice_position = proc "c" (voice: audio.Voice, out: ^audio.Voice_Position) -> b32 {
+		return voice_position(&state, voice, out)
+	},
 	bus_create = proc "c" (name: cstring, parent: audio.Bus) -> audio.Bus {
 		context = runtime.default_context()
 		return bus_create(&state, parent)
@@ -238,9 +271,16 @@ api := audio.Audio_API {
 		context = runtime.default_context()
 		bus_set_effect(&state, bus, slot, effect)
 	},
+	bus_set_duck = proc "c" (bus: audio.Bus, target: audio.Bus, duck: ^audio.Duck) {
+		context = runtime.default_context()
+		bus_set_duck(&state, bus, target, duck)
+	},
 	set_paused = proc "c" (paused: b32) {
 		context = runtime.default_context()
 		set_paused(&state, paused)
+	},
+	clock = proc "c" () -> u64 {
+		return clock(&state)
 	},
 	stats = proc "c" (out: ^audio.Stats) {
 		stats(&state, out)
@@ -321,6 +361,17 @@ update :: proc(m: ^Mixer) {
 		)
 		m.failed_seen = failed
 	}
+	refused := sync.atomic_load_explicit(&m.ducks_refused, .Relaxed)
+	if refused != m.ducks_seen {
+		report(
+			m,
+			.Error,
+			"audio: mixer: %d ducks were refused, as a bus ducks %d buses at most",
+			refused - m.ducks_seen,
+			audio.MAX_BUS_DUCKS,
+		)
+		m.ducks_seen = refused
+	}
 	faults := sync.atomic_load_explicit(&m.faults, .Relaxed)
 	if faults != m.faults_seen {
 		report(
@@ -341,6 +392,9 @@ free_sound :: proc(m: ^Mixer, data: ^Sound_Data) {
 	if data.path != nil {
 		m.host.free(rawptr(data.path))
 	}
+	if data.seek != nil {
+		m.host.free(data.seek)
+	}
 	m.host.free(data)
 }
 
@@ -350,7 +404,8 @@ sound_create :: proc(m: ^Mixer, desc: ^audio.Sound_Desc) -> audio.Sound {
 	   desc.frames == 0 ||
 	   (desc.samples == nil && desc.path == nil) ||
 	   desc.format > .Opus ||
-	   (desc.format != .PCM && (desc.samples != nil || desc.size == 0)) {
+	   (desc.format != .PCM && (desc.samples != nil || desc.size == 0)) ||
+	   (desc.seek_count > 0 && desc.seek == nil) {
 		report(m, .Error, "audio: mixer: sound_create: invalid description")
 		return {}
 	}
@@ -395,6 +450,18 @@ sound_create :: proc(m: ^Mixer, desc: ^audio.Sound_Desc) -> audio.Sound {
 		}
 		runtime.mem_copy_non_overlapping(path, rawptr(desc.path), size)
 		data.path = cstring(path)
+		if desc.seek_count > 0 && (desc.format == .Vorbis || desc.format == .Opus) {
+			bytes := int(desc.seek_count) * size_of(audio.Seek_Point)
+			data.seek = ([^]audio.Seek_Point)(
+				m.host.allocate(uint(bytes), align_of(audio.Seek_Point)),
+			)
+			if data.seek == nil {
+				free_sound(m, data)
+				return {}
+			}
+			runtime.mem_copy_non_overlapping(data.seek, desc.seek, bytes)
+			data.seek_count = desc.seek_count
+		}
 	}
 	slot := &m.sounds[index]
 	slot.generation += 1
@@ -458,8 +525,9 @@ voice_play :: proc(m: ^Mixer, desc: ^audio.Voice_Desc) -> audio.Voice {
 		}
 	}
 	stream: ^Stream
+	ticket: u32
 	if index >= 0 && sound.data.samples == nil {
-		stream = stream_take(m, sound.data, bool(desc.loop))
+		stream, ticket = stream_take(m, sound.data, bool(desc.loop), desc.start)
 	}
 	if index < 0 || (sound.data.samples == nil && stream == nil) {
 		m.voices_refused += 1
@@ -483,6 +551,8 @@ voice_play :: proc(m: ^Mixer, desc: ^audio.Voice_Desc) -> audio.Voice {
 	slot.busy = true
 	slot.stopped = false
 	sync.atomic_store_explicit(&slot.finished, false, .Relaxed)
+	sync.atomic_store_explicit(&slot.placed, false, .Relaxed)
+	slot.seeks_asked = 0
 	sync.atomic_add_explicit(&sound.data.users, 1, .Relaxed)
 	bus := desc.bus if desc.bus != {} else audio.MASTER_BUS
 	push_wait(
@@ -493,6 +563,12 @@ voice_play :: proc(m: ^Mixer, desc: ^audio.Voice_Desc) -> audio.Voice {
 			generation = slot.generation,
 			bus = bus.index,
 			flag = desc.loop,
+			unpaused = b32(.Unpaused in desc.flags),
+			ticket = ticket,
+			frame = desc.start,
+			clock = desc.clock,
+			length = desc.length,
+			value = desc.fade,
 			params = desc.params,
 			sound = sound.data,
 			stream = stream,
@@ -508,6 +584,63 @@ voice_set :: proc(m: ^Mixer, voice: audio.Voice, params: ^audio.Voice_Params) {
 	}
 	// The next frame sends newer values, so a full queue can drop this.
 	push(m, {kind = .Set, voice = voice.index, generation = voice.generation, params = params^})
+}
+
+// voice_seek moves a voice that has not stopped to a frame of its sound: it fades out, waits for its new place and its
+// clock, and fades in.
+voice_seek :: proc(m: ^Mixer, voice: audio.Voice, frame: u64, clock: u64) {
+	slot := find_voice(m, voice)
+	if slot == nil || slot.stopped {
+		return
+	}
+	slot.seeks_asked += 1
+	push_wait(
+		m,
+		{
+			kind = .Seek,
+			voice = voice.index,
+			generation = voice.generation,
+			ticket = slot.seeks_asked,
+			frame = frame,
+			clock = clock,
+		},
+	)
+}
+
+// voice_position reads where a voice was at the end of the last block that played it. It reads again while the mix thread
+// writes, which takes it no time.
+voice_position :: proc "contextless" (
+	m: ^Mixer,
+	voice: audio.Voice,
+	out: ^audio.Voice_Position,
+) -> b32 {
+	slot := find_voice(m, voice)
+	if slot == nil || out == nil {
+		return false
+	}
+	for {
+		before := sync.atomic_load_explicit(&slot.place_sequence, .Acquire)
+		if before % 2 != 0 {
+			sync.cpu_relax()
+			continue
+		}
+		placed := sync.atomic_load_explicit(&slot.placed, .Relaxed)
+		seeks := sync.atomic_load_explicit(&slot.place_seeks, .Relaxed)
+		frame := sync.atomic_load_explicit(&slot.place_frame, .Relaxed)
+		clock := sync.atomic_load_explicit(&slot.place_clock, .Relaxed)
+		sync.atomic_thread_fence(.Acquire)
+		if sync.atomic_load_explicit(&slot.place_sequence, .Relaxed) != before {
+			continue
+		}
+		// A place from before the last seek would only say how far the voice was before it moved.
+		if !placed ||
+		   seeks != slot.seeks_asked ||
+		   sync.atomic_load_explicit(&slot.finished, .Acquire) {
+			return false
+		}
+		out^ = {transmute(f64)frame, clock}
+		return true
+	}
 }
 
 voice_stop :: proc(m: ^Mixer, voice: audio.Voice, fade: f32) {
@@ -578,8 +711,27 @@ bus_set_effect :: proc(m: ^Mixer, bus: audio.Bus, slot: u32, effect: ^audio.Effe
 	push_wait(m, command)
 }
 
+// bus_set_duck makes bus duck target, up to MAX_BUS_DUCKS targets, or ends it at a gain of 1. A bus does not duck itself.
+bus_set_duck :: proc(m: ^Mixer, bus: audio.Bus, target: audio.Bus, duck: ^audio.Duck) {
+	found := find_bus(m, bus)
+	if found == nil || find_bus(m, target) == nil || duck == nil {
+		return
+	}
+	bus := bus if bus != {} else audio.MASTER_BUS
+	target := target if target != {} else audio.MASTER_BUS
+	if bus == target {
+		return
+	}
+	push_wait(m, {kind = .Bus_Duck, bus = bus.index, parent = target.index, duck = duck^})
+}
+
 set_paused :: proc(m: ^Mixer, paused: b32) {
 	push_wait(m, {kind = .Paused, flag = paused})
+}
+
+// clock is the frames that the mix thread has mixed, where the next block starts.
+clock :: proc "contextless" (m: ^Mixer) -> u64 {
+	return sync.atomic_load_explicit(&m.frames_mixed, .Relaxed)
 }
 
 stats :: proc "contextless" (m: ^Mixer, out: ^audio.Stats) {

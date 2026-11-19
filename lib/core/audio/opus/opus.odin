@@ -30,4 +30,5 @@ foreign lib {
 	decoder_init :: proc(st: ^Decoder, rate: i32, channels: c.int) -> c.int ---
 	decode :: proc(st: ^Decoder, data: [^]byte, length: i32, pcm: [^]i16, frame_size: c.int, decode_fec: c.int) -> c.int ---
 	decoder_ctl :: proc(st: ^Decoder, request: c.int, #c_vararg args: ..any) -> c.int ---
+	packet_get_nb_samples :: proc(data: [^]byte, length: i32, rate: i32) -> c.int ---
 }

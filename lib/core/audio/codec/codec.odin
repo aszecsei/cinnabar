@@ -3,6 +3,7 @@
 package audio_codec
 
 import "core:c"
+import "core:encoding/endian"
 import "core:mem"
 
 import stb "vendor:stb/vorbis"
@@ -26,6 +27,9 @@ INPUT_BYTES :: 1 << 17
 VORBIS_STATE_BYTES :: 1 << 19
 // The alignment of a decoder's memory.
 MEMORY_ALIGN :: 16
+// The most frames that a seek decodes and throws away, 0.5 s: seek_table keeps its points this close, counting an Opus
+// decoder's preroll.
+SEEK_INTERVAL :: 24000
 
 // Read reads bytes of the sound's data into buffer, and returns how many, or a negative number on failure.
 Read :: #type proc(user: rawptr, offset: u64, buffer: rawptr, size: u64) -> i64
@@ -61,6 +65,8 @@ Decoder :: struct {
 	// How far the next pass has crossed over, and how far it goes.
 	crossed:     int,
 	crossing:    int,
+	// Every frame that the decoder has decoded, kept or not, for its tests.
+	decoded:     u64,
 }
 
 @(private)
@@ -151,6 +157,7 @@ decoder_next :: proc(
 		if !ok {
 			return nil, 0, .Failed
 		}
+		d.decoded += u64(decoded)
 		skipped := int(min(u64(decoded), d.left_skip))
 		d.left_skip -= u64(skipped)
 		kept := int(min(u64(decoded - skipped), d.frames - d.given))
@@ -168,9 +175,217 @@ decoder_next :: proc(
 		if !ok {
 			break
 		}
+		d.decoded += u64(decoded)
 		seam_keep(d, d.output, decoded)
 	}
 	return nil, 0, .End
+}
+
+// seek_preroll is how many frames a decoder of this format decodes after it starts at a seek point before its frames are
+// the sound.
+seek_preroll :: proc "contextless" (format: audio.Sound_Format) -> u64 {
+	return audio.SEEK_PREROLL_OPUS if format == .Opus else 0
+}
+
+// seek_point_before is the last point of a table whose frames are the sound by target, a frame of the coded data.
+@(private)
+seek_point_before :: proc(
+	format: audio.Sound_Format,
+	table: []audio.Seek_Point,
+	target: u64,
+) -> (
+	point: audio.Seek_Point,
+	found: bool,
+) {
+	preroll := seek_preroll(format)
+	low, high := 0, len(table)
+	for low < high {
+		middle := (low + high) / 2
+		if table[middle].frame + preroll <= target {
+			low = middle + 1
+		} else {
+			high = middle
+		}
+	}
+	if low == 0 {
+		return {}, false
+	}
+	return table[low - 1], true
+}
+
+// decoder_seek moves a decoder to a frame of its pass, below frames, so that decoder_next gives the pass from there. It
+// starts at the last point of the table that is the sound by then, or at the start of the data without one, and the next
+// decoder_next throws away what comes before the frame. ADPCM needs no table, as each block starts on an exact sample. A
+// seek ends any crossing from the last pass. It returns false when the Vorbis headers do not read.
+decoder_seek :: proc(
+	d: ^Decoder,
+	frame: u64,
+	table: []audio.Seek_Point,
+	read: Read,
+	user: rawptr,
+) -> bool {
+	place := min(frame, d.frames)
+	target := d.skip + place
+	point, found := seek_point_before(d.format, table, target)
+	if d.format == .ADPCM {
+		block := target / adpcm.BLOCK_FRAMES
+		point = {block * u64(adpcm.block_bytes(d.channels)), block * adpcm.BLOCK_FRAMES}
+		found = block > 0
+	}
+	decoder_restart(d)
+	d.crossing = 0
+	d.given = place
+	d.left_skip = target
+	if !found {
+		return true
+	}
+	if d.format == .Vorbis {
+		// The headers are at the start of the data. stb_vorbis then looks for a page, which it reads past, and decodes from
+		// the page after it: seek_table measured the frame that this gives.
+		if !vorbis_open(d, read, user) {
+			return false
+		}
+		stb.flush_pushdata(d.vorbis)
+		d.input_start = 0
+		d.input_end = 0
+	}
+	d.next_read = point.offset
+	d.left_skip = target - point.frame
+	return true
+}
+
+// seek_table finds the places in a Vorbis or Opus sound's data where a decoder can start afresh, and keeps the fewest of
+// them that leave no seek more than SEEK_INTERVAL frames to decode and throw away. A Vorbis point is a page, which
+// stb_vorbis reads past, and its frame is what this decoder measures there, so the table is the runtime's own. Points
+// come no closer than the data's pages or packets, which the cooker ends at least every SEEK_INTERVAL / 2. It returns nil
+// for the other formats, and fails on data that does not decode.
+seek_table :: proc(
+	format: audio.Sound_Format,
+	channels: int,
+	data: []byte,
+	allocator := context.allocator,
+) -> (
+	table: []audio.Seek_Point,
+	ok: bool,
+) {
+	candidates := make([dynamic]audio.Seek_Point, context.temp_allocator)
+	#partial switch format {
+	case .Opus:
+		frame: u64
+		for offset := 0; offset + 2 <= len(data); {
+			size := int(data[offset]) | int(data[offset + 1]) << 8
+			if size == 0 || offset + 2 + size > len(data) {
+				return nil, false
+			}
+			frames := opus.packet_get_nb_samples(&data[offset + 2], i32(size), audio.SAMPLE_RATE)
+			if frames <= 0 {
+				return nil, false
+			}
+			if offset > 0 {
+				append(&candidates, audio.Seek_Point{u64(offset), frame})
+			}
+			frame += u64(frames)
+			offset += 2 + size
+		}
+	case .Vorbis:
+		vorbis_pages(&candidates, channels, data) or_return
+	case:
+		return nil, true
+	}
+	return thin_seek_points(candidates[:], seek_preroll(format), allocator), true
+}
+
+// The bytes before an Ogg page's segment table.
+@(private)
+OGG_HEADER :: 27
+
+// vorbis_pages measures each page of Vorbis data that a seek can start at: the frame that this decoder gives first when it
+// starts there, which stb_vorbis reports through its place after those frames.
+@(private)
+vorbis_pages :: proc(candidates: ^[dynamic]audio.Seek_Point, channels: int, data: []byte) -> bool {
+	memory, err := mem.make_aligned(
+		[]byte,
+		memory_bytes(.Vorbis, channels),
+		MEMORY_ALIGN,
+		context.temp_allocator,
+	)
+	if err != nil {
+		return false
+	}
+	d: Decoder
+	if !decoder_init(&d, .Vorbis, channels, 1, 0, u64(len(data)), memory) {
+		return false
+	}
+	reader := Memory_Reader{data}
+	if !vorbis_open(&d, read_memory, &reader) {
+		return false
+	}
+	for offset := 0; offset + OGG_HEADER <= len(data); {
+		segments := int(data[offset + 26])
+		if string(data[offset:][:4]) != "OggS" || offset + OGG_HEADER + segments > len(data) {
+			return false
+		}
+		size := OGG_HEADER + segments
+		for s in 0 ..< segments {
+			size += int(data[offset + OGG_HEADER + s])
+		}
+		granule := i64(endian.unchecked_get_u64le(data[offset + 6:]))
+		// A page of headers has granule 0, and one that no packet ends on has -1.
+		if granule > 0 {
+			stb.flush_pushdata(d.vorbis)
+			d.input_start = 0
+			d.input_end = 0
+			d.next_read = u64(offset)
+			for _ in 0 ..< 8 {
+				frames, decoded := decode_vorbis(&d, read_memory, &reader)
+				if !decoded {
+					break
+				}
+				if frames > 0 {
+					place := int(stb.get_sample_offset(d.vorbis))
+					if place >= frames {
+						append(candidates, audio.Seek_Point{u64(offset), u64(place - frames)})
+					}
+					break
+				}
+			}
+		}
+		offset += size
+	}
+	return true
+}
+
+// thin_seek_points keeps, from the start, the farthest candidate that leaves no more than SEEK_INTERVAL frames to decode
+// before any frame up to the next. Where two candidates are farther apart than that, it keeps both.
+@(private)
+thin_seek_points :: proc(
+	candidates: []audio.Seek_Point,
+	preroll: u64,
+	allocator := context.allocator,
+) -> []audio.Seek_Point {
+	points := make([dynamic]audio.Seek_Point, allocator)
+	last: u64
+	i := 0
+	for i < len(candidates) {
+		limit := last + SEEK_INTERVAL - preroll
+		best := -1
+		for i < len(candidates) && candidates[i].frame <= limit {
+			if candidates[i].frame > last {
+				best = i
+			}
+			i += 1
+		}
+		if best < 0 {
+			if i >= len(candidates) {
+				break
+			}
+			best = i
+			i += 1
+		}
+		append(&points, candidates[best])
+		last = candidates[best].frame
+	}
+	return points[:]
 }
 
 // seam_keep keeps frames from past the end of the pass, for the next pass to cross over from. An ADPCM sound has none: its

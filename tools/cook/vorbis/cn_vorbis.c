@@ -11,9 +11,11 @@ static void write_page(const ogg_page* page, cn_vorbis_write write, void* user) 
 }
 
 // Encodes interleaved samples at 48 kHz to an Ogg Vorbis stream, which it hands to write in pieces. quality is libvorbis's,
-// from -0.1 to 1. Returns 0, or a negative number when it cannot. The serial number is fixed, so a sound's bytes do not
-// change from one cook to the next.
-int cn_vorbis_encode(const int16_t* samples, uint64_t frames, int channels, float quality, cn_vorbis_write write, void* user) {
+// from -0.1 to 1. A page ends once it holds page_frames of sound, or sooner where libvorbis ends it, so a seek table
+// has a page to start from at least that often; 0 leaves the pages to libvorbis. Returns 0, or a negative number when it
+// cannot. The serial number is fixed, so a sound's bytes do not change from one cook to the next.
+int cn_vorbis_encode(const int16_t* samples, uint64_t frames, int channels, float quality, uint64_t page_frames,
+                     cn_vorbis_write write, void* user) {
     enum { RATE = 48000, CHUNK_FRAMES = 4096, SERIAL = 0x636e };
     vorbis_info info;
     vorbis_comment comment;
@@ -43,6 +45,7 @@ int cn_vorbis_encode(const int16_t* samples, uint64_t frames, int channels, floa
     }
 
     uint64_t next = 0;
+    ogg_int64_t page_start = 0;
     int ended = 0;
     while (!ended) {
         if (next < frames) {
@@ -64,9 +67,11 @@ int cn_vorbis_encode(const int16_t* samples, uint64_t frames, int channels, floa
             vorbis_bitrate_addblock(&block);
             while (vorbis_bitrate_flushpacket(&dsp, &packet) != 0) {
                 ogg_stream_packetin(&stream, &packet);
-                while (ogg_stream_pageout(&stream, &page) != 0) {
+                int full = page_frames > 0 && packet.granulepos - page_start >= (ogg_int64_t)page_frames;
+                while ((full ? ogg_stream_flush(&stream, &page) : ogg_stream_pageout(&stream, &page)) != 0) {
                     write_page(&page, write, user);
                     ended = ogg_page_eos(&page);
+                    page_start = ogg_page_granulepos(&page);
                 }
             }
         }
