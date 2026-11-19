@@ -1,0 +1,214 @@
+# The split screen scene, which F7 in mygame cycles to (see docs/rendering/frame.md and docs/world/scenes.md#streaming): two
+# players on a streaming world of five tiles, in two views side by side, each with its own follow camera, HUD and audio
+# listener. Player 1 walks with W, A, S and D and Space, player 2 with the arrow keys and right Control or Enter, or each
+# with the gamepad of its number. C or a gamepad's Y claims the overview camera for a few seconds, which shows one full-screen
+# view and then gives the split back (see scripts/split_screen.luau). A hidden floor under every tile keeps the players
+# up while a tile streams in. Positions are raw World_Position values in units of 2^-24 m, so 2516582400000000000 is
+# 1.5e11 m. The editor writes this file; see docs/editor/document-and-scenes.md#scenes.
+scene 3
+
+entity b1d0000000000001
+name = "Sun"
+component 1 Transform
+	position = [2516582400000000000, 167772160, 0]
+	rotation = [0.403058, 0.272532, -0.127084, 0.864361]
+	scale = [1, 1, 1]
+component 34 Directional_Light
+	color = [1, 0.95, 0.85]
+	intensity = 3
+	cast_shadows = true
+
+entity b1d0000000000002
+name = "Global Volume"
+component 1 Transform
+	position = [2516582400000000000, 0, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 42 Volume
+	shape = Global
+component 49 Environment
+	mode = Atmosphere
+	sun = @b1d0000000000001
+
+entity b1d0000000000003
+name = "Streamer"
+component 1 Transform
+	position = [2516582400000000000, 0, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 144 World_Streamer
+	world = $657c4ae84f03a162643509ebee656dcd
+behaviour 7e6b3df18d9834766d8dcc8201ca5ec9
+
+entity b1d0000000000004
+name = "Hidden Floor"
+component 1 Transform
+	position = [2516582401342177280, -8388608, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [200, 1, 40]
+component 65 Collider
+
+entity b1d0000000000011
+name = "Player 1"
+component 1 Transform
+	position = [2516582399916113920, 0, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 75 Character
+behaviour 51ea1de1cfb466a772d7bf450af51d74
+	camera = @b1d0000000000021
+	player = 1
+
+entity b1d000000000001a
+name = "Player 1 Body"
+parent = @b1d0000000000011
+component 1 Transform
+	position = [2516582399916113920, 15099494, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [0.6, 1.8, 0.6]
+component 2 Local_Transform
+	offset = [0, 0.9, 0]
+	scale = [0.6, 1.8, 0.6]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $7c3e5a91ad4f6b829c3e5a7b9d1e3f40
+	cast_shadows = true
+
+entity b1d000000000001b
+name = "Player 1 Visor"
+parent = @b1d0000000000011
+component 1 Transform
+	position = [2516582399916113920, 25165824, 5033165]
+	rotation = [0, 0, 0, 1]
+	scale = [0.4, 0.15, 0.1]
+component 2 Local_Transform
+	offset = [0, 1.5, 0.3]
+	scale = [0.4, 0.15, 0.1]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $5a1c3e7f9b2d4f608a1c3e5f7a9b0c2d
+	cast_shadows = true
+
+entity b1d0000000000012
+name = "Player 2"
+component 1 Transform
+	position = [2516582400251658240, 0, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 75 Character
+behaviour 51ea1de1cfb466a772d7bf450af51d74
+	camera = @b1d0000000000022
+	player = 2
+
+entity b1d000000000002a
+name = "Player 2 Body"
+parent = @b1d0000000000012
+component 1 Transform
+	position = [2516582400251658240, 15099494, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [0.6, 1.8, 0.6]
+component 2 Local_Transform
+	offset = [0, 0.9, 0]
+	scale = [0.6, 1.8, 0.6]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $8d4f6ba2be507c93ad4f6b8cae2f4051
+	cast_shadows = true
+
+entity b1d000000000002b
+name = "Player 2 Visor"
+parent = @b1d0000000000012
+component 1 Transform
+	position = [2516582400251658240, 25165824, 5033165]
+	rotation = [0, 0, 0, 1]
+	scale = [0.4, 0.15, 0.1]
+component 2 Local_Transform
+	offset = [0, 1.5, 0.3]
+	scale = [0.4, 0.15, 0.1]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $5a1c3e7f9b2d4f608a1c3e5f7a9b0c2d
+	cast_shadows = true
+
+entity b1d0000000000021
+name = "Camera 1"
+component 1 Transform
+	position = [2516582399916113920, 50331648, -100663296]
+	rotation = [0.1305262, 0, 0, 0.9914449]
+	scale = [1, 1, 1]
+component 32 Camera
+component 97 Audio_Listener
+behaviour 0d2b9ccc8bdbaaf687f50afcc7b47500
+	target = @b1d0000000000011
+	player = 1
+
+entity b1d0000000000022
+name = "Camera 2"
+component 1 Transform
+	position = [2516582400251658240, 50331648, -100663296]
+	rotation = [0.1305262, 0, 0, 0.9914449]
+	scale = [1, 1, 1]
+component 32 Camera
+component 97 Audio_Listener
+behaviour 0d2b9ccc8bdbaaf687f50afcc7b47500
+	target = @b1d0000000000012
+	player = 2
+
+entity b1d0000000000023
+name = "Overview"
+component 1 Transform
+	position = [2516582401006632960, 1509949440, 0]
+	rotation = [0.6427876, 0, 0, 0.7660444]
+	scale = [1, 1, 1]
+component 32 Camera
+
+entity b1d0000000000005
+name = "Far Hum"
+component 1 Transform
+	position = [2516582402348810240, 16777216, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 96 Audio_Source
+	sound = $58c65b3b72c5880124b3e610fbcf7cb2
+	bus = 2
+	loop = true
+	min_distance = 2
+	max_distance = 40
+
+entity b1d0000000000031
+name = "HUD 1"
+component 112 Ui_Document
+	document = $c8ca60c76d7c077c5c109c789a5953fb
+	order = 0
+	visible = true
+	view = 1
+behaviour 4d49b6862d10ae2dff61de3cbef45509
+	player = @b1d0000000000011
+	label = 1
+
+entity b1d0000000000032
+name = "HUD 2"
+component 112 Ui_Document
+	document = $c8ca60c76d7c077c5c109c789a5953fb
+	order = 0
+	visible = true
+	view = 2
+behaviour 4d49b6862d10ae2dff61de3cbef45509
+	player = @b1d0000000000012
+	label = 2
+
+entity b1d0000000000033
+name = "Help"
+component 112 Ui_Document
+	document = $2698a612d6ed8430ef750e805f6ff20f
+	order = 5
+	visible = true
+	view = 0
+
+entity b1d0000000000006
+name = "Split"
+behaviour 73f6786201299281e283876ec2b0ea3e
+	left = @b1d0000000000021
+	right = @b1d0000000000022
+	overview = @b1d0000000000023
+	seconds = 3

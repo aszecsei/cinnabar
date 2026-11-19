@@ -1,9 +1,12 @@
 --!strict
 -- Follows its target from behind and above, looking at it. The mouse turns it while its right button is down, and so
--- does the first gamepad's right stick. It eases towards where it should be, which hides the target's moves in fixed
+-- does the first gamepad's right stick. Its player field is 0 for that, or 1 or 2 for a player of the split screen, whose
+-- camera turns with the right stick of that gamepad; the mouse turns the cameras of players 0 and 1 only. It eases towards where it should be, which hides the target's moves in fixed
 -- ticks between frames.
 local FollowCamera = Behaviour.define("FollowCamera", {
 	target = Field.entity(),
+	-- 0 for the mouse and the first gamepad, 1 or 2 for the split screen's players and their gamepads.
+	player = Field.number(0),
 	-- Meters from the point it looks at.
 	distance = Field.number(6),
 	-- Meters above the target's position that it looks at.
@@ -46,12 +49,18 @@ function FollowCamera:update(dt: number)
 	end
 
 	if not Ui.wants_input() then
-		if Input.is_down(Key.MouseRight) then
+		local player = self.player
+		if player ~= 2 and Input.is_down(Key.MouseRight) then
 			local delta = Input.mouse_delta
 			self.yaw += delta.x * self.mouse_rate
 			self.pitch += delta.y * self.mouse_rate
 		end
-		local pad = first_gamepad()
+		local pad: number?
+		if player == 0 then
+			pad = first_gamepad()
+		elseif Input.gamepad_connected(player) then
+			pad = player
+		end
 		if pad then
 			self.yaw += Input.gamepad_axis(pad, GamepadAxis.RightX) * self.turn_rate * dt
 			self.pitch -= Input.gamepad_axis(pad, GamepadAxis.RightY) * self.turn_rate * dt

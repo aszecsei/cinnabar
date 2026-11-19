@@ -1,0 +1,12 @@
+ui 1
+<!-- The split screen's help line, on the window: it is in no view, so it shows the same while the views are split or one
+     covers the window. Its colors are as a designer picks them, sRGB-encoded. -->
+<ui font=$5b845a4341f6a3b772ec017211470fab size="13" color="#ffffffa0">
+	<stack anchor="bottom" offset="0 -12" width="180" height="28" fill="#14171fb8" radius="8">
+		<row anchor="fill" padding="0 12" cross="center">
+			<box width="fill"/>
+			<text>C / Y: overview</text>
+			<box width="fill"/>
+		</row>
+	</stack>
+</ui>

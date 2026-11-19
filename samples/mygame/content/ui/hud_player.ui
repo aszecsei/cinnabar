@@ -1,0 +1,17 @@
+ui 1
+<!-- The HUD of one player of the split screen: a panel in the top left of the player's view, with an accent stripe on its
+     left, which shows the player's number and the meters walked along +x. player_hud.luau binds them. Its colors are as
+     a designer picks them, sRGB-encoded. -->
+<ui font=$5b845a4341f6a3b772ec017211470fab size="16" color="#ffffffe0">
+	<style name="label" size="13" color="#ffffff90"/>
+
+	<stack id="hud" anchor="top_left" offset="16 16" width="200" height="44" fill="#14171fb8" radius="8">
+		<box id="accent" anchor="left" width="6" height="100%" fill="#e34233" radius="8 0 0 8"/>
+		<row anchor="fill" padding="0 14 0 20" gap="8" cross="center">
+			<text>Player {player}</text>
+			<box width="fill"/>
+			<text>{distance}</text>
+			<text style="label">m</text>
+		</row>
+	</stack>
+</ui>
