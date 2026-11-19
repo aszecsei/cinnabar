@@ -277,7 +277,7 @@ put_free :: proc(s: ^Scenes, instance: Pooled_Instance) {
 @(private = "file")
 POOL_REGISTRY_KEY :: "cinnabar.scene.pools"
 
-// register_pool_scripts defines the Pool library, which reaches s (see docs/scripting/api.md#pool). register_scripts
+// register_pool_scripts defines the Pool library, which reaches s (see docs/editor/prefabs.md#pooling). register_scripts
 // calls it.
 @(private)
 register_pool_scripts :: proc(r: ^script.Runtime, s: ^Scenes) {
