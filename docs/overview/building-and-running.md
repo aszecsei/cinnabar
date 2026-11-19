@@ -17,6 +17,7 @@ The recipes that matter most:
 | `just sdk` | `engine`, then writes the engine's package, `build/sdk/cinnabar-<version>/` and its zip (see [Releases of the engine](#releases-of-the-engine)). |
 | `just engine-runtime` | Builds the standard game alone: `build/dev/standard.dll` and the release executable `build/runtime/runtime.exe`, which a project without Odin runs. |
 | `just test` | Runs every Odin package's tests, the script tests with direct field access on and off, and the editor's .NET tests. It builds `null-host.exe` first, the host on the null GPU backend, on which the editor's host tests run without a GPU (see [Editor: Host tests](../editor/processes-and-projects.md#host-tests)). |
+| `just gpu-bench` | Times the creation and destruction of thousands of resources on the D3D12 device. It needs a GPU, so `just test` leaves it out (see [GPU: Memory](../gpu/resources-and-pipelines.md#memory)). |
 | `just check`, `vet`, `lint`, `fmt` | Type checks and lints every package, and formats the source. |
 | `just script-types`, `link-schema`, `ltc-fit`, `stbn` | Regenerate derived files: the Luau definition file, the links' JSON schemas, the area lights' tables, and the blue noise of the ambient occlusion and the screen-space reflections. |
 | `just screenshot`, `just gif` | With the editor open, write a screenshot or a GIF of its viewport, with a JSON sidecar, into `build/captures` and print the files; `just screenshot --view depth` adds a debug view (see [Editor: Capture](../editor/capture.md#automation)). |

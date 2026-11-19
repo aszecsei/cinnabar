@@ -1159,6 +1159,9 @@ Host_Stats :: struct {
 	// The bottom-level acceleration structures' memory, and what it would be without their compaction.
 	bottom_accel_memory:             u64,
 	bottom_accel_memory_uncompacted: u64,
+	// The memory of the GPU backend's resource heaps, and the part of it that the live resources take.
+	heap_memory:                     u64,
+	resource_memory:                 u64,
 }
 
 // The profiler (see docs/editor/link.md#profile). The host handles every profile message: the zones are its own.

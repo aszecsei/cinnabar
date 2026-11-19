@@ -127,7 +127,7 @@ public sealed class GameCommandTests : IDisposable
         var stats = new ResourceStats();
         for (var i = 0; i < ResourceStats.HistoryLength + 10; i++)
         {
-            stats.Apply(new HostStats(0.25f, 15, i, i, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0));
+            stats.Apply(new HostStats(0.25f, 15, i, i, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0));
         }
         Assert.Equal(ResourceStats.HistoryLength, stats.History.Count);
         Assert.Equal(10, stats.History.First().AverageMs);

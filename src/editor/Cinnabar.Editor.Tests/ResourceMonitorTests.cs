@@ -23,4 +23,18 @@ public class ResourceMonitorTests
         var uncompacted = none with { BottomAccelMemory = 8 << 20, BottomAccelMemoryUncompacted = 8 << 20 };
         Assert.Equal(ResourceStats.Bytes(8 << 20), Assert.Single(ResourceMonitorView.AccelMemoryRows(uncompacted)).Value);
     }
+
+    [Fact]
+    public void TheResourceMonitorShowsTheResourcesShareOfTheHeaps()
+    {
+        var reader = new LinkReader(new byte[1024]);
+        var none = HostStats.Read(ref reader);
+        // A backend without heaps, the null one, has no row.
+        Assert.Empty(ResourceMonitorView.HeapMemoryRows(none));
+
+        var heaps = none with { HeapMemory = 512UL << 20, ResourceMemory = 300UL << 20 };
+        var row = Assert.Single(ResourceMonitorView.HeapMemoryRows(heaps));
+        Assert.Equal("Resource heaps", row.Name);
+        Assert.Equal($"{ResourceStats.Bytes(300UL << 20)} / {ResourceStats.Bytes(512UL << 20)}", row.Value);
+    }
 }

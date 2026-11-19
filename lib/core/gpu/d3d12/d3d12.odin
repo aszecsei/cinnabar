@@ -121,6 +121,7 @@ dev: struct {
 	// The host's frame captures (see capture.odin).
 	captures:            Captures,
 	using resources:     Resources,
+	using heaps:         Heaps,
 	using pipelines:     Pipelines,
 	using uploads:       Uploads,
 	using streaming:     Streaming,
@@ -304,6 +305,7 @@ stats :: proc() -> gpu.Stats {
 	dev.upload_peak = 0
 	s.bottom_accel_memory, s.bottom_accel_memory_uncompacted = accel_memory()
 	s.video_memory_used, s.video_memory_budget = video_memory()
+	s.heap_memory, s.resource_memory = memory_stats()
 	return s
 }
 
@@ -516,8 +518,7 @@ LIST_TYPE := [gpu.Queue]d3d.COMMAND_LIST_TYPE {
 // end_frame executes the frame's uploads and submissions, then presents with vsync.
 end_frame :: proc() {
 	profile.zone_text("Execute", .Render)
-	flush_uploads()
-	flush_streams()
+	flush_streams(flush_uploads())
 	if !dev.recording {
 		// Resources destroyed this frame were last used by work that has already been signaled.
 		stamp_releases(dev.fence_value)
