@@ -69,7 +69,7 @@ After the scenes advance, `update_sublevels` moves each active sublevel to `Fail
 
 ## Ownership
 
-An entity of a part has the part's number. So `Scene.of(entity)` gives the part's number, and `Scene.base(number)` gives its base. An entity that a behaviour on a part's entity spawns is owned by the part (`Scene_Owned`), so it goes when the sublevel deactivates ([Scenes: Ownership](scenes.md#ownership)).
+An entity of a part has the part's number. So `Scene.of(entity)` gives the part's number, and `Scene.base(number)` gives its base. An entity that a behaviour on a part's entity spawns is owned by the part (`Scene_Owned`), so it goes when the sublevel deactivates ([Scenes: Ownership](scenes.md#ownership)). A pooled prefab instance that the part has in use goes with it too. One that the part released waits in the pool with no owner, so it outlives the deactivation, and the part's spawns take it when the sublevel is active again ([Editor: Prefabs: Pooling](../editor/prefabs.md#pooling)).
 
 ## References
 
