@@ -370,7 +370,13 @@ poll :: proc(
 			rescan = true
 		case link.Apply_Operations:
 			problems := make([dynamic]link.Edit_Problem, frame)
-			apply_operations(e, w, scripts, v.operations, &problems)
+			if apply_operations(e, w, scripts, v.operations, &problems) {
+				// A part that Set_Sublevel emptied unloaded, with what its entities owned.
+				despawned = true
+				forget_dead(w, &e.session.view.selection)
+				forget_dead(w, &e.session.view.hidden)
+				rescan = true
+			}
 			// The editor edited, so behaviours whose edits it refused may try again.
 			if m, mirrors := &e.session.mirror.?; mirrors {
 				if _, refused := m.batch.(Batch_Refused); refused {

@@ -389,8 +389,13 @@ Loaded_Scene :: struct {
 	scene:    u32,
 	entities: []Scene_Entity,
 	// The scene's GUID, so the game finds what its cooked blob lists, such as its navmeshes, or zero for a scene that
-	// has none yet.
+	// has none yet. A part has its sublevel's sub-asset GUID, or zero before the scene's first cook.
 	guid:     [16]u8,
+	// For a part of a scene's sublevel, the number of the scene's base, which comes before it; 0 for a base (see
+	// docs/editor/document-and-scenes.md#parts).
+	base:     u32,
+	// For a part, its sublevel's name; empty for a base.
+	sublevel: string,
 }
 
 Scene_Entity :: struct {
@@ -479,6 +484,10 @@ Operation_Kind :: enum u8 {
 	// components, and active. Only an edit-mode behaviour's edits have it: the editor makes the instance, and sends its
 	// entities (see Behaviour_Operations).
 	Create_Instance,
+	// The entity and its descendants move from the part scene to the part target of the same scene's base, whose
+	// sublevel is sublevel (empty for the base) and whose GUID is guid. They keep their handles. A part that gets its
+	// first entity loads, and a part that has none left unloads (see docs/editor/document-and-scenes.md#parts).
+	Set_Sublevel,
 }
 
 // An edit of a scene, by the scene's number and the entity's scene ID. Only the members for its kind are set. A
@@ -497,6 +506,9 @@ Operation :: struct {
 	script:     [16]u8,
 	fields:     []Scene_Field,
 	prefab:     [16]u8,
+	target:     u32,
+	sublevel:   string,
+	guid:       [16]u8,
 }
 
 // Editor to game: edits, in order. The editor has already applied them to its document, and does not wait for an

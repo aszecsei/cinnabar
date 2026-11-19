@@ -140,7 +140,9 @@ reserve_number :: proc(s: ^Scenes) -> u32 {
 // the next of the game's own (see FIRST_RUNTIME_SCENE). The scene gets memory of its own, which goes when it unloads.
 // It refuses a number that is loaded, or a scene when core.MAX_SCENE_MEMORY scenes are loaded, and gives false. The
 // scene's IDs resolve only in the scene. Its GUID joins the world's scenes, whose navmeshes load.
-// Call it between frames, outside the script phase. problems, if given, gets each warning, in frame memory.
+// Call it between frames, outside the script phase. problems, if given, gets each warning, in frame memory. With of,
+// the scene is a sublevel's part of a loaded base, as the editor sends a scene's parts (see
+// docs/editor/document-and-scenes.md#parts); a base that is not loaded refuses it.
 add_scene :: proc(
 	w: ^ecs.World,
 	scripts: ^script.Runtime,
@@ -148,11 +150,21 @@ add_scene :: proc(
 	scene: format.Scene,
 	number: Maybe(u32) = nil,
 	problems: ^[dynamic]Problem = nil,
+	of: Maybe(Part_Of) = nil,
 ) -> (
 	added: u32,
 	ok: bool,
 ) {
-	return add_scene_as(w, scripts, s, scene, number, nil, nil, problems)
+	if part, is_part := of.?; is_part {
+		if base, loaded := base_of(s, part.base); !loaded || base != part.base {
+			log.warnf(
+				"scene: the base %d of a part is not loaded, so the part is not loaded",
+				part.base,
+			)
+			return 0, false
+		}
+	}
+	return add_scene_as(w, scripts, s, scene, number, of, nil, problems)
 }
 
 // add_scene_as adds a scene as add_scene does: a sublevel's part of a base when of is given, and otherwise a base with

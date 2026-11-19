@@ -3011,3 +3011,160 @@ streamed_scenes_go_out_when_they_change :: proc(t: ^testing.T) {
 	testing.expect_value(t, count(step(f, 1)), 0)
 	testing.expect_value(t, count(step(f, 2)), 1)
 }
+
+// A scene with two sublevels is three scenes in the game's world: its base, and a part of each sublevel that names the
+// base. An edit that names a part reaches its entity there (see docs/editor/document-and-scenes.md#parts).
+@(test)
+a_scenes_sublevels_are_parts_of_its_base :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	step(f)
+	messages := step(
+		f,
+		1,
+		link.Load_Scene {
+			scenes = {
+				{
+					scene = 1,
+					guid = {0 = 0xba},
+					entities = {{id = DOOR, name = "Door", active = true}},
+				},
+				{
+					scene = 2,
+					guid = {0 = 0x11},
+					base = 1,
+					sublevel = "night",
+					entities = {{id = HINGE, name = "Lamp", active = true}},
+				},
+				{
+					scene = 3,
+					guid = {0 = 0x22},
+					base = 1,
+					sublevel = "dusk",
+					entities = {{id = 0xc3, name = "Glow", active = true}},
+				},
+			},
+		},
+	)
+	testing.expect_value(t, len(scene.loaded_scenes(f.editor.scenes)), 3)
+	testing.expect_value(t, scene.base_of(f.editor.scenes, 2) or_else 0, 1)
+	testing.expect_value(t, scene.base_of(f.editor.scenes, 3) or_else 0, 1)
+	testing.expect_value(t, scene.part_number(f.editor.scenes, 1, "night") or_else 0, 2)
+	for m in messages {
+		if p, ok := m.(link.Edit_Problems); ok {
+			testing.expect_value(t, len(p.problems), 0)
+		}
+	}
+
+	step(
+		f,
+		1,
+		link.Apply_Operations {
+			operations = {{kind = .Rename, scene = 2, entity = HINGE, name = "Night Lamp"}},
+		},
+	)
+	lamp := scene.find(f.editor.scenes, &f.world, 2, HINGE)
+	testing.expect_value(t, ecs.name_of(&f.world, lamp), "Night Lamp")
+	testing.expect_value(t, scene.find(f.editor.scenes, &f.world, 1, HINGE), 0)
+
+	// A part whose base is not loaded is a problem of the part.
+	messages = step(
+		f,
+		1,
+		link.Add_Scene{scene = {scene = 9, base = 8, sublevel = "night"}, ticket = 2},
+	)
+	problems: link.Edit_Problems
+	for m in messages {
+		if p, ok := m.(link.Edit_Problems); ok {
+			problems = p
+		}
+	}
+	testing.expect_value(t, len(problems.problems), 1)
+	testing.expect(t, !scene.is_loaded(f.editor.scenes, 9))
+
+	// Closing the scene takes its parts.
+	step(f, 1, link.Remove_Scene{scene = 1, ticket = 3})
+	testing.expect_value(t, len(scene.loaded_scenes(f.editor.scenes)), 0)
+}
+
+// Set_Sublevel moves an entity and its children to another part and keeps their handles. The part that it leaves
+// unloads once it is empty, and moving back loads a part with a new number, as undo does.
+@(test)
+set_sublevel_keeps_the_handle_and_its_inverse_puts_it_back :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	step(f)
+	step(
+		f,
+		1,
+		link.Load_Scene {
+			scenes = {
+				{
+					scene = 1,
+					guid = {0 = 0xba},
+					entities = {{id = DOOR, name = "Door", active = true}},
+				},
+				{
+					scene = 2,
+					guid = {0 = 0x11},
+					base = 1,
+					sublevel = "night",
+					entities = {
+						{id = HINGE, name = "Lamp", active = true},
+						{id = 0xc3, name = "Bulb", parent = HINGE, active = true},
+					},
+				},
+			},
+		},
+	)
+	lamp := scene.find(f.editor.scenes, &f.world, 2, HINGE)
+	bulb := scene.find(f.editor.scenes, &f.world, 2, 0xc3)
+	testing.expect(t, lamp != 0 && bulb != 0)
+
+	messages := step(
+		f,
+		1,
+		link.Apply_Operations {
+			operations = {
+				{kind = .Set_Sublevel, scene = 2, entity = HINGE, target = 1, guid = {0 = 0xba}},
+			},
+		},
+	)
+	testing.expect_value(t, scene.find(f.editor.scenes, &f.world, 1, HINGE), lamp)
+	testing.expect_value(t, scene.find(f.editor.scenes, &f.world, 1, 0xc3), bulb)
+	testing.expect(t, !scene.is_loaded(f.editor.scenes, 2))
+	testing.expect(t, f.despawned)
+	for m in messages {
+		#partial switch v in m {
+		case link.Edit_Problems:
+			testing.expectf(t, len(v.problems) == 0, "problems: %v", v.problems)
+		case link.Entity_Delta:
+			testing.expect_value(t, len(v.destroyed), 0)
+		}
+	}
+
+	// The inverse: back to the night, in a part with a new number, which loads with the lamp's first move.
+	step(
+		f,
+		1,
+		link.Apply_Operations {
+			operations = {
+				{
+					kind = .Set_Sublevel,
+					scene = 1,
+					entity = HINGE,
+					target = 4,
+					sublevel = "night",
+					guid = {0 = 0x11},
+				},
+			},
+		},
+	)
+	testing.expect_value(t, scene.find(f.editor.scenes, &f.world, 4, HINGE), lamp)
+	testing.expect_value(t, scene.find(f.editor.scenes, &f.world, 4, 0xc3), bulb)
+	testing.expect_value(t, scene.base_of(f.editor.scenes, 4) or_else 0, 1)
+	testing.expect(t, ecs.is_alive(&f.world, lamp))
+	// The base keeps its door, so it stays.
+	testing.expect(t, scene.is_loaded(f.editor.scenes, 1))
+	testing.expect(t, !f.despawned)
+}
