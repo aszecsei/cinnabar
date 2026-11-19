@@ -43,8 +43,6 @@ Uploads :: struct {
 	upload_peak:    int,
 	// Zeros, which a committed buffer starts with, for placed buffers to copy.
 	zero_buffer:    ^d3d.IResource,
-	// The graphics fence value of the last executed batch, which streams wait for. Read and write it atomically.
-	upload_value:   u64,
 }
 
 @(private)
@@ -224,19 +222,20 @@ open_upload_list :: proc() -> ^d3d.IGraphicsCommandList7 {
 	return dev.upload_list
 }
 
-// flush_uploads executes the current batch, before the frame's command list.
+// flush_uploads executes the current batch, before the frame's command list. It returns the graphics fence value that
+// the batch signals, or 0 when there was none.
 @(private)
-flush_uploads :: proc() {
+flush_uploads :: proc() -> (fence_value: u64) {
 	sync.guard(&dev.upload_mutex)
 	if !dev.upload_open {
-		return
+		return 0
 	}
 	check(dev.upload_list->Close(), "ICommandList.Close")
 	lists := [?]^d3d.ICommandList{dev.upload_list}
 	dev.queue->ExecuteCommandLists(len(lists), &lists[0])
 	signal()
 	dev.upload_batches[dev.upload_batch].fence_value = dev.fence_value
-	sync.atomic_store(&dev.upload_value, dev.fence_value)
 	dev.upload_batch = (dev.upload_batch + 1) % UPLOAD_BATCHES
 	dev.upload_open = false
+	return dev.fence_value
 }

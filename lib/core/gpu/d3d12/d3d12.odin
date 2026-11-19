@@ -518,8 +518,7 @@ LIST_TYPE := [gpu.Queue]d3d.COMMAND_LIST_TYPE {
 // end_frame executes the frame's uploads and submissions, then presents with vsync.
 end_frame :: proc() {
 	profile.zone_text("Execute", .Render)
-	flush_uploads()
-	flush_streams()
+	flush_streams(flush_uploads())
 	if !dev.recording {
 		// Resources destroyed this frame were last used by work that has already been signaled.
 		stamp_releases(dev.fence_value)

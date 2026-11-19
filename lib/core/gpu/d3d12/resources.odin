@@ -134,14 +134,7 @@ init_resources :: proc() -> bool {
 @(private)
 shutdown_resources :: proc() {
 	for &r in dev.releases {
-		if r.object != nil {
-			r.object->Release()
-		}
-		free_placement(&r.placement)
-		if r.ffx_context != nil {
-			destroy_ffx_context(r.ffx_context)
-		}
-		free(r.memory, dev.allocator)
+		release_now(&r)
 	}
 	delete(dev.releases)
 	delete(dev.readbacks)
@@ -801,14 +794,7 @@ collect_releases :: proc() {
 			i += 1
 			continue
 		}
-		if r.object != nil {
-			r.object->Release()
-		}
-		free_placement(&r.placement)
-		if r.ffx_context != nil {
-			destroy_ffx_context(r.ffx_context)
-		}
-		free(r.memory, dev.allocator)
+		release_now(r)
 		switch r.pool {
 		case .None:
 		case .Buffer:
@@ -826,6 +812,19 @@ collect_releases :: proc() {
 		}
 		unordered_remove(&dev.releases, i)
 	}
+}
+
+// release_now frees everything that a release holds. Its pool slot is the caller's.
+@(private = "file")
+release_now :: proc(r: ^Release) {
+	if r.object != nil {
+		r.object->Release()
+	}
+	free_placement(&r.placement)
+	if r.ffx_context != nil {
+		destroy_ffx_context(r.ffx_context)
+	}
+	free(r.memory, dev.allocator)
 }
 
 @(private)

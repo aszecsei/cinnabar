@@ -197,16 +197,17 @@ transfer_done :: proc(transfer: gpu.Transfer) -> bool {
 	return u64(transfer) <= sync.atomic_load(&dev.copy_done)
 }
 
-// flush_streams executes the open batch on the copy queue. end_frame calls it after flush_uploads.
+// flush_streams executes the open batch on the copy queue after the graphics fence value of the upload batch that
+// flush_uploads executed, if any. end_frame calls it.
 @(private)
-flush_streams :: proc() {
+flush_streams :: proc(uploads: u64) {
 	sync.guard(&dev.stream_mutex)
 	if !dev.copy_open {
 		return
 	}
 	check(dev.copy_list->Close(), "ICommandList.Close")
 	// A stream can write a buffer that the upload batches zero or fill on the graphics queue, so the copies go after them.
-	if uploads := sync.atomic_load(&dev.upload_value); uploads > dev.fence->GetCompletedValue() {
+	if uploads > dev.fence->GetCompletedValue() {
 		check(dev.copy_queue->Wait(dev.fence, uploads), "ICommandQueue.Wait(copy)")
 	}
 	lists := [?]^d3d.ICommandList{(^d3d.ICommandList)(dev.copy_list)}
