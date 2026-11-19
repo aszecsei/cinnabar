@@ -30,6 +30,8 @@ Accel_Entry :: struct {
 	update_scratch:   u64,
 	size:             u64,
 	uncompacted_size: u64,
+	// The structure's region of a heap, or nil when it is committed (see heaps.odin).
+	placement:        Maybe(Placement),
 }
 
 // Scratch_Pool is a frame's build scratch memory. Each build gets its own region, so builds in a frame never share
@@ -156,13 +158,19 @@ create_accel :: proc(desc: gpu.Accel_Struct_Desc) -> gpu.Accel_Struct {
 		entry.update_scratch = sizes.UpdateScratchDataSizeInBytes
 	}
 
-	entry.resource =
-		create_raw_buffer(
-			entry.size,
-			{.ALLOW_UNORDERED_ACCESS, .RAYTRACING_ACCELERATION_STRUCTURE},
-			desc.label,
-		) or_else nil
-	if entry.resource == nil {
+	resource_desc := raw_buffer_desc(
+		entry.size,
+		{.ALLOW_UNORDERED_ACCESS, .RAYTRACING_ACCELERATION_STRUCTURE},
+	)
+	ok: bool
+	entry.resource, entry.placement, ok = create_resource(
+		&resource_desc,
+		.UNDEFINED,
+		.Buffers,
+		"acceleration structure",
+		desc.label,
+	)
+	if !ok {
 		return {}
 	}
 	entry.address = entry.resource->GetGPUVirtualAddress()
@@ -174,7 +182,7 @@ create_accel :: proc(desc: gpu.Accel_Struct_Desc) -> gpu.Accel_Struct {
 			desc.label,
 			gpu.MAX_ACCEL_STRUCTS,
 		)
-		release(&entry.resource)
+		release_resource(&entry.resource, &entry.placement)
 		return {}
 	}
 	if desc.kind == .Top {
@@ -194,7 +202,7 @@ create_accel :: proc(desc: gpu.Accel_Struct_Desc) -> gpu.Accel_Struct {
 
 destroy_accel :: proc(accel: gpu.Accel_Struct) {
 	if entry, ok := gpu.pool_remove(&dev.accels, accel); ok {
-		defer_release(entry.resource, .Accel, accel.index)
+		defer_release(entry.resource, .Accel, accel.index, entry.placement)
 	}
 }
 
@@ -355,16 +363,7 @@ create_raw_buffer :: proc(
 	heap_props := d3d.HEAP_PROPERTIES {
 		Type = .DEFAULT,
 	}
-	desc := d3d.RESOURCE_DESC1 {
-		Dimension = .BUFFER,
-		Width = size,
-		Height = 1,
-		DepthOrArraySize = 1,
-		MipLevels = 1,
-		SampleDesc = {Count = 1},
-		Layout = .ROW_MAJOR,
-		Flags = flags,
-	}
+	desc := raw_buffer_desc(size, flags)
 	hr := dev.device->CreateCommittedResource3(
 		&heap_props,
 		{},
@@ -380,4 +379,18 @@ create_raw_buffer :: proc(
 	check(hr, "CreateCommittedResource3(acceleration structure)") or_return
 	set_name(resource, label)
 	return resource, true
+}
+
+@(private = "file")
+raw_buffer_desc :: proc(size: u64, flags: d3d.RESOURCE_FLAGS) -> d3d.RESOURCE_DESC1 {
+	return d3d.RESOURCE_DESC1 {
+		Dimension = .BUFFER,
+		Width = size,
+		Height = 1,
+		DepthOrArraySize = 1,
+		MipLevels = 1,
+		SampleDesc = {Count = 1},
+		Layout = .ROW_MAJOR,
+		Flags = flags,
+	}
 }

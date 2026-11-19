@@ -17,6 +17,8 @@ Buffer_Entry :: struct {
 	// which is READBACK_IN_FLIGHT from a copy into it until end_frame stamps the frame's fence value.
 	mapped:      [^]byte,
 	ready_value: u64,
+	// The buffer's region of a heap, or nil for a committed buffer (see heaps.odin).
+	placement:   Maybe(Placement),
 }
 
 // A Readback buffer's ready_value while a copy into it waits for end_frame.
@@ -25,14 +27,17 @@ READBACK_IN_FLIGHT :: max(u64)
 
 @(private)
 Texture_Entry :: struct {
-	desc:     gpu.Texture_Desc,
-	resource: ^d3d.IResource,
+	desc:      gpu.Texture_Desc,
+	resource:  ^d3d.IResource,
 	// A Streamed texture is streamed once.
-	streamed: bool,
+	streamed:  bool,
 	// A view of another texture's resource, which it holds a reference to (see gpu.Texture_View_Desc).
-	view:     bool,
-	rtv:      d3d.CPU_DESCRIPTOR_HANDLE,
-	dsv:      d3d.CPU_DESCRIPTOR_HANDLE,
+	view:      bool,
+	rtv:       d3d.CPU_DESCRIPTOR_HANDLE,
+	dsv:       d3d.CPU_DESCRIPTOR_HANDLE,
+	// The texture's region of a heap, or nil for a committed texture. Only a texture that the GPU does not write is
+	// placed, so a view, which is of a Storage texture, never shares a region.
+	placement: Maybe(Placement),
 }
 
 @(private)
@@ -51,6 +56,8 @@ Release_Pool :: enum u8 {
 @(private)
 Release :: struct {
 	object:      ^d3d.IUnknown,
+	// The object's region of a heap, which returns to the heap with the object.
+	placement:   Maybe(Placement),
 	// Backend memory, from dev.allocator, that the GPU work may still use.
 	memory:      rawptr,
 	// An upscaler's FidelityFX context, which the GPU work may still use.
@@ -97,6 +104,7 @@ init_resources :: proc() -> bool {
 	dev.releases = make([dynamic]Release, dev.allocator)
 	dev.readbacks = make([dynamic]gpu.Buffer, dev.allocator)
 	gpu.layout_tracker_init(&dev.layouts, dev.allocator)
+	init_heaps()
 
 	dev.resource_heap = create_descriptor_heap(
 		.CBV_SRV_UAV,
@@ -125,10 +133,11 @@ init_resources :: proc() -> bool {
 // shutdown_resources releases every object. The GPU must be idle.
 @(private)
 shutdown_resources :: proc() {
-	for r in dev.releases {
+	for &r in dev.releases {
 		if r.object != nil {
 			r.object->Release()
 		}
+		free_placement(&r.placement)
 		if r.ffx_context != nil {
 			destroy_ffx_context(r.ffx_context)
 		}
@@ -140,9 +149,18 @@ shutdown_resources :: proc() {
 	if target := gpu.pool_get(&dev.textures, dev.frame_target); target != nil {
 		target.resource = nil
 	}
-	gpu.pool_each(&dev.buffers, proc(entry: ^Buffer_Entry) {release(&entry.resource)})
-	gpu.pool_each(&dev.textures, proc(entry: ^Texture_Entry) {release(&entry.resource)})
-	gpu.pool_each(&dev.accels, proc(entry: ^Accel_Entry) {release(&entry.resource)})
+	gpu.pool_each(
+		&dev.buffers,
+		proc(entry: ^Buffer_Entry) {release_resource(&entry.resource, &entry.placement)},
+	)
+	gpu.pool_each(
+		&dev.textures,
+		proc(entry: ^Texture_Entry) {release_resource(&entry.resource, &entry.placement)},
+	)
+	gpu.pool_each(
+		&dev.accels,
+		proc(entry: ^Accel_Entry) {release_resource(&entry.resource, &entry.placement)},
+	)
 	gpu.pool_destroy(&dev.accels)
 	gpu.pool_destroy(&dev.buffers)
 	gpu.pool_destroy(&dev.textures)
@@ -152,6 +170,7 @@ shutdown_resources :: proc() {
 	release(&dev.sampler_heap)
 	release(&dev.rtv_heap)
 	release(&dev.dsv_heap)
+	shutdown_heaps()
 }
 
 create_buffer :: proc(desc: gpu.Buffer_Desc, data: []byte) -> gpu.Buffer {
@@ -160,11 +179,25 @@ create_buffer :: proc(desc: gpu.Buffer_Desc, data: []byte) -> gpu.Buffer {
 		return {}
 	}
 	readback := .Readback in desc.usage
-	resource, ok := create_buffer_resource(desc, .READBACK if readback else .DEFAULT)
+	resource: ^d3d.IResource
+	placement: Maybe(Placement)
+	ok: bool
+	if readback {
+		resource, ok = create_buffer_resource(desc, .READBACK)
+	} else {
+		resource_desc := buffer_resource_desc(desc)
+		resource, placement, ok = create_resource(
+			&resource_desc,
+			.UNDEFINED,
+			.Buffers,
+			"buffer",
+			desc.label,
+		)
+	}
 	if !ok {
 		return {}
 	}
-	buffer := add_buffer(desc, resource)
+	buffer := add_buffer(desc, resource, placement)
 	if buffer == {} {
 		return {}
 	}
@@ -175,15 +208,25 @@ create_buffer :: proc(desc: gpu.Buffer_Desc, data: []byte) -> gpu.Buffer {
 			return {}
 		}
 	}
-	if data != nil {
-		upload_buffer(resource, data)
+	// A committed buffer starts zeroed. A placed one's region can hold an earlier resource's contents, so what the data
+	// does not cover is zeroed.
+	zero_size: u64
+	if placement != nil {
+		zero_size = u64(int(desc.size) - len(data))
+	}
+	if data != nil || zero_size > 0 {
+		upload_buffer(resource, data, zero_size)
 	}
 	return buffer
 }
 
-// add_buffer stores a buffer resource and writes its views. It takes ownership of the resource.
+// add_buffer stores a buffer resource and writes its views. It takes ownership of the resource and its placement.
 @(private)
-add_buffer :: proc(desc: gpu.Buffer_Desc, resource: ^d3d.IResource) -> gpu.Buffer {
+add_buffer :: proc(
+	desc: gpu.Buffer_Desc,
+	resource: ^d3d.IResource,
+	placement: Maybe(Placement) = nil,
+) -> gpu.Buffer {
 	stored := desc
 	stored.label = ""
 	buffer := gpu.pool_add(
@@ -192,11 +235,13 @@ add_buffer :: proc(desc: gpu.Buffer_Desc, resource: ^d3d.IResource) -> gpu.Buffe
 			desc = stored,
 			resource = resource,
 			address = resource->GetGPUVirtualAddress(),
+			placement = placement,
 		},
 	)
 	if buffer == {} {
 		log.errorf("gpu: buffer %q: more than %d buffers", desc.label, gpu.MAX_BUFFERS)
-		resource->Release()
+		resource, placement := resource, placement
+		release_resource(&resource, &placement)
 		return {}
 	}
 	// The GPU only copies into a readback buffer, so it has no views.
@@ -248,18 +293,7 @@ create_buffer_resource :: proc(
 	heap_props := d3d.HEAP_PROPERTIES {
 		Type = heap,
 	}
-	resource_desc := d3d.RESOURCE_DESC1 {
-		Dimension = .BUFFER,
-		Width = u64(desc.size),
-		Height = 1,
-		DepthOrArraySize = 1,
-		MipLevels = 1,
-		SampleDesc = {Count = 1},
-		Layout = .ROW_MAJOR,
-	}
-	if .Storage in desc.usage {
-		resource_desc.Flags += {.ALLOW_UNORDERED_ACCESS}
-	}
+	resource_desc := buffer_resource_desc(desc)
 	// Buffers have no layout, so they start UNDEFINED.
 	hr := dev.device->CreateCommittedResource3(
 		&heap_props,
@@ -280,6 +314,23 @@ create_buffer_resource :: proc(
 	return resource, true
 }
 
+@(private = "file")
+buffer_resource_desc :: proc(desc: gpu.Buffer_Desc) -> d3d.RESOURCE_DESC1 {
+	resource_desc := d3d.RESOURCE_DESC1 {
+		Dimension = .BUFFER,
+		Width = u64(desc.size),
+		Height = 1,
+		DepthOrArraySize = 1,
+		MipLevels = 1,
+		SampleDesc = {Count = 1},
+		Layout = .ROW_MAJOR,
+	}
+	if .Storage in desc.usage {
+		resource_desc.Flags += {.ALLOW_UNORDERED_ACCESS}
+	}
+	return resource_desc
+}
+
 create_texture :: proc(desc: gpu.Texture_Desc, data: []byte) -> gpu.Texture {
 	if err := gpu.validate_texture_desc(desc, data); err != .None {
 		log.errorf("gpu: texture %q: %v", desc.label, err)
@@ -289,9 +340,6 @@ create_texture :: proc(desc: gpu.Texture_Desc, data: []byte) -> gpu.Texture {
 	stored.label = ""
 	stored.mip_count = max(desc.mip_count, 1)
 
-	heap_props := d3d.HEAP_PROPERTIES {
-		Type = .DEFAULT,
-	}
 	resource_desc := d3d.RESOURCE_DESC1 {
 		Dimension = desc.depth > 0 ? .TEXTURE3D : .TEXTURE2D,
 		Width = u64(desc.size.x),
@@ -324,27 +372,51 @@ create_texture :: proc(desc: gpu.Texture_Desc, data: []byte) -> gpu.Texture {
 		layout = .COMMON
 	}
 	resource: ^d3d.IResource
-	hr := dev.device->CreateCommittedResource3(
-		&heap_props,
-		{},
-		&resource_desc,
-		layout,
-		nil,
-		nil,
-		0,
-		nil,
-		d3d.IResource_UUID,
-		(^rawptr)(&resource),
-	)
-	if !check(hr, "CreateCommittedResource3(texture)") {
+	placement: Maybe(Placement)
+	ok: bool
+	// A texture that the GPU writes stays committed: it starts zeroed, and a render target or depth texture needs no
+	// clear before its first use. The others get every texel from their data, a stream or a copy.
+	if desc.usage & {.Storage, .Render_Target, .Depth_Stencil} == {} {
+		resource, placement, ok = create_resource(
+			&resource_desc,
+			layout,
+			.Textures,
+			"texture",
+			desc.label,
+			fits_small_alignment(desc),
+		)
+	} else {
+		heap_props := d3d.HEAP_PROPERTIES {
+			Type = .DEFAULT,
+		}
+		hr := dev.device->CreateCommittedResource3(
+			&heap_props,
+			{},
+			&resource_desc,
+			layout,
+			nil,
+			nil,
+			0,
+			nil,
+			d3d.IResource_UUID,
+			(^rawptr)(&resource),
+		)
+		ok = check(hr, "CreateCommittedResource3(texture)")
+		if ok {
+			set_name(resource, desc.label)
+		}
+	}
+	if !ok {
 		return {}
 	}
-	set_name(resource, desc.label)
 
-	texture := gpu.pool_add(&dev.textures, Texture_Entry{desc = stored, resource = resource})
+	texture := gpu.pool_add(
+		&dev.textures,
+		Texture_Entry{desc = stored, resource = resource, placement = placement},
+	)
 	if texture == {} {
 		log.errorf("gpu: texture %q: more than %d textures", desc.label, gpu.MAX_TEXTURES)
-		resource->Release()
+		release_resource(&resource, &placement)
 		return {}
 	}
 	entry := gpu.pool_get(&dev.textures, texture)
@@ -591,14 +663,14 @@ stamp_readbacks :: proc(fence_value: u64) {
 
 destroy_buffer :: proc(buffer: gpu.Buffer) {
 	if entry, ok := gpu.pool_remove(&dev.buffers, buffer); ok {
-		defer_release(entry.resource, .Buffer, buffer.index)
+		defer_release(entry.resource, .Buffer, buffer.index, entry.placement)
 	}
 }
 
 destroy_texture :: proc(texture: gpu.Texture) {
 	assert(texture != dev.frame_target, "gpu: the frame target cannot be destroyed")
 	if entry, ok := gpu.pool_remove(&dev.textures, texture); ok {
-		defer_release(entry.resource, .Texture, texture.index)
+		defer_release(entry.resource, .Texture, texture.index, entry.placement)
 		when ODIN_DEBUG {
 			gpu.untrack_layout(&dev.layouts, texture)
 		}
@@ -657,14 +729,21 @@ destroy_scope :: proc(scope: gpu.Scope) -> (count: int) {
 	return
 }
 
-// defer_release releases the object and frees the pool slot after the GPU finishes the current frame.
+// defer_release releases the object, returns its region to its heap and frees the pool slot after the GPU finishes the
+// current frame.
 @(private)
-defer_release :: proc(object: ^d3d.IUnknown, pool: Release_Pool, index: u32) {
+defer_release :: proc(
+	object: ^d3d.IUnknown,
+	pool: Release_Pool,
+	index: u32,
+	placement: Maybe(Placement) = nil,
+) {
 	sync.guard(&dev.releases_mutex)
 	append(
 		&dev.releases,
 		Release {
 			object = object,
+			placement = placement,
 			pool = pool,
 			index = index,
 			copy_value = sync.atomic_load(&dev.copy_horizon),
@@ -715,7 +794,7 @@ collect_releases :: proc() {
 	completed := dev.fence->GetCompletedValue()
 	copies := copy_completed()
 	for i := 0; i < len(dev.releases); {
-		r := dev.releases[i]
+		r := &dev.releases[i]
 		// A pipeline slot waits for its compile job too, which writes the slot when it finishes.
 		waiting := r.fence_value == 0 || r.fence_value > completed || r.copy_value > copies
 		if waiting || (r.pool == .Pipeline && pipeline_compiling(r.index)) {
@@ -725,6 +804,7 @@ collect_releases :: proc() {
 		if r.object != nil {
 			r.object->Release()
 		}
+		free_placement(&r.placement)
 		if r.ffx_context != nil {
 			destroy_ffx_context(r.ffx_context)
 		}

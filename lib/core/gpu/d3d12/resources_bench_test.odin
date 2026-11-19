@@ -48,12 +48,18 @@ resource_creation :: proc(t: ^testing.T) {
 				usage += {.Render_Target}
 			}
 			tex = create_texture(
-				{size = {side, side}, format = .RGBA8_Unorm, mip_count = 1 if i % 4 == 0 else 6, usage = usage},
+				{
+					size = {side, side},
+					format = .RGBA8_Unorm,
+					mip_count = 1 if i % 4 == 0 else 6,
+					usage = usage,
+				},
 				nil,
 			)
 			testing.expect(t, tex != {})
 		}
 		texture_time := time.tick_since(start)
+		heap_memory, resource_memory := memory_stats()
 
 		start = time.tick_now()
 		for b in buffers {
@@ -62,7 +68,7 @@ resource_creation :: proc(t: ^testing.T) {
 		for tex in textures {
 			destroy_texture(tex)
 		}
-		// A frame would submit the uploads, before its releases.
+		// A frame would submit the uploads, the placed buffers' zeroing among them, before its releases.
 		flush_uploads()
 		wait_idle()
 		stamp_releases(dev.fence_value)
@@ -70,11 +76,13 @@ resource_creation :: proc(t: ^testing.T) {
 		destroy_time := time.tick_since(start)
 
 		log.infof(
-			"gpu-bench: round %d: %.1f us a buffer, %.1f us a texture, %.1f us a destruction",
+			"gpu-bench: round %d: %.1f us a buffer, %.1f us a texture, %.1f us a destruction; %d MB placed in %d MB of heaps",
 			round,
 			time.duration_microseconds(buffer_time) / BENCH_BUFFERS,
 			time.duration_microseconds(texture_time) / BENCH_TEXTURES,
 			time.duration_microseconds(destroy_time) / (BENCH_BUFFERS + BENCH_TEXTURES),
+			resource_memory >> 20,
+			heap_memory >> 20,
 		)
 	}
 }

@@ -121,6 +121,7 @@ dev: struct {
 	// The host's frame captures (see capture.odin).
 	captures:            Captures,
 	using resources:     Resources,
+	using heaps:         Heaps,
 	using pipelines:     Pipelines,
 	using uploads:       Uploads,
 	using streaming:     Streaming,

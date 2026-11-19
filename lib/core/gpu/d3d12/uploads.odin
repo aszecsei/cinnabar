@@ -13,6 +13,10 @@ UPLOAD_RING_SIZE :: 16 * mem.Megabyte
 // command list, so a resource is ready for any command buffer submitted in the frame that created it.
 UPLOAD_BATCHES :: 3
 
+// A placed buffer is zeroed with copies from a committed buffer of zeros this large.
+@(private = "file")
+ZERO_BUFFER_SIZE :: 4 * mem.Megabyte
+
 // Upload_Ring is a frame's linear allocator in an upload-heap buffer. It resets when the frame's fence passes.
 @(private)
 Upload_Ring :: struct {
@@ -37,6 +41,10 @@ Uploads :: struct {
 	upload_mutex:   sync.Mutex,
 	// The most that a frame's ring used since stats last read it.
 	upload_peak:    int,
+	// Zeros, which a committed buffer starts with, for placed buffers to copy.
+	zero_buffer:    ^d3d.IResource,
+	// The graphics fence value of the last executed batch, which streams wait for. Read and write it atomically.
+	upload_value:   u64,
 }
 
 @(private)
@@ -52,6 +60,10 @@ init_uploads :: proc() -> bool {
 		) or_return
 	}
 	dev.upload_list = create_command_list(dev.upload_batches[0].allocator) or_return
+	dev.zero_buffer = create_buffer_resource(
+		{size = ZERO_BUFFER_SIZE, label = "zeros"},
+		.DEFAULT,
+	) or_return
 	return true
 }
 
@@ -65,6 +77,7 @@ shutdown_uploads :: proc() {
 	for &batch in dev.upload_batches {
 		release(&batch.allocator)
 	}
+	release(&dev.zero_buffer)
 }
 
 @(private)
@@ -103,18 +116,29 @@ upload :: proc(size, align: int) -> (gpu.Upload, bool) {
 	}
 }
 
-// upload_buffer copies data into a new buffer through a staging buffer.
+// upload_buffer copies data into a new buffer through a staging buffer, and zeroes zero_size bytes after it.
 @(private)
-upload_buffer :: proc(resource: ^d3d.IResource, data: []byte) {
-	staging, mapped, ok := create_staging(len(data))
-	if !ok {
-		return
+upload_buffer :: proc(resource: ^d3d.IResource, data: []byte, zero_size: u64 = 0) {
+	staging: ^d3d.IResource
+	if len(data) > 0 {
+		mapped: []byte
+		ok: bool
+		staging, mapped, ok = create_staging(len(data))
+		if !ok {
+			return
+		}
+		copy(mapped, data)
 	}
-	copy(mapped, data)
 
 	sync.guard(&dev.upload_mutex)
 	list := open_upload_list()
-	list->CopyBufferRegion(resource, 0, staging, 0, u64(len(data)))
+	if staging != nil {
+		list->CopyBufferRegion(resource, 0, staging, 0, u64(len(data)))
+	}
+	for offset := u64(0); offset < zero_size; offset += ZERO_BUFFER_SIZE {
+		size := min(zero_size - offset, ZERO_BUFFER_SIZE)
+		list->CopyBufferRegion(resource, u64(len(data)) + offset, dev.zero_buffer, 0, size)
+	}
 	barrier := d3d.BUFFER_BARRIER {
 		SyncBefore   = {.COPY},
 		SyncAfter    = {.ALL},
@@ -212,6 +236,7 @@ flush_uploads :: proc() {
 	dev.queue->ExecuteCommandLists(len(lists), &lists[0])
 	signal()
 	dev.upload_batches[dev.upload_batch].fence_value = dev.fence_value
+	sync.atomic_store(&dev.upload_value, dev.fence_value)
 	dev.upload_batch = (dev.upload_batch + 1) % UPLOAD_BATCHES
 	dev.upload_open = false
 }
