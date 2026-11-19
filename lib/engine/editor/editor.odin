@@ -647,6 +647,7 @@ scan :: proc(
 	message: link.Message,
 	changed: bool,
 ) {
+	profile.scope_text(&e.platform.profile, full ? "Editor snapshot" : "Editor delta", .Editor)
 	since := full ? 0 : e.session.scan_version
 	e.session.scan_version = ecs.take_version(w)
 	infos := make([dynamic]link.Entity_Info, allocator)

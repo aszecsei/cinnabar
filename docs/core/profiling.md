@@ -30,7 +30,7 @@ What the engine zones:
 | ECS | `ECS Fixed`, `ECS Update`, `ECS Late`, `Apply commands`, `Propagate transforms`, and each system's batches by the system's name |
 | Scripts | `Script phase`, or `Edit phase` in the editor's edit mode, with `Awake`, `Start`, `Events`, `Update` and `Coroutines`, and each callback by its class's name, with the callback as the detail |
 | Rendering | `Build frame`, `Compile graph`, `Record passes`, `Submit`, and each pass's recording by the pass's name |
-| Others | `Assets poll`, `Editor poll` |
+| Others | `Assets poll`, `Editor poll` with `Editor snapshot` or `Editor delta` in it (see [Editor link: Deltas](../editor/link.md#world)) |
 
 **Wait zones** are time that the main thread waits for the GPU or the display: `Wait for GPU` (the frame slot's fence), `Wait for swapchain`, `Shared frame pacing`, `Minimized` and `Present`. They are not CPU work, so the frame's CPU time leaves them out.
 

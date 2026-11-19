@@ -1,6 +1,7 @@
 package editor
 
 import "base:runtime"
+import "core:fmt"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
@@ -337,6 +338,193 @@ a_reused_slot_is_a_death_and_a_birth :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(delta.changed), 1)
 	testing.expect_value(t, delta.changed[0].entity, u64(b))
 	testing.expect_value(t, len(step(f)), 0)
+}
+
+// apply brings a mirror of the world up to date with a message, as the editor does: a snapshot replaces it, and a delta
+// removes the destroyed entities before it adds the changed ones, as a reused slot is in both.
+@(private = "file")
+apply :: proc(mirror: ^map[u64]link.Entity_Info, messages: []link.Message) {
+	for m in messages {
+		#partial switch v in m {
+		case link.Entity_Snapshot:
+			clear(mirror)
+			for info in v.entities {
+				mirror[info.entity] = info
+			}
+		case link.Entity_Delta:
+			for entity in v.destroyed {
+				delete_key(mirror, entity)
+			}
+			for info in v.changed {
+				mirror[info.entity] = info
+			}
+		}
+	}
+}
+
+// full_scan is what a new editor gets: the snapshot of a second editor, which scans every entity.
+@(private = "file")
+full_scan :: proc(f: ^Fixture) -> map[u64]link.Entity_Info {
+	other: Editor
+	init(&other, &f.platform, nil)
+	defer destroy(&other)
+	out: [dynamic]byte
+	defer delete(out)
+	poll(&other, &f.world, nil, 1, nil, &out, f)
+	scanned := make(map[u64]link.Entity_Info, context.temp_allocator)
+	for rest := out[:]; len(rest) > 0; {
+		header, _ := link.read_header(rest)
+		m, ok := link.decode_message(
+			header.kind,
+			rest[link.HEADER_SIZE:][:header.length],
+			context.temp_allocator,
+		)
+		if ok {
+			apply(&scanned, {m})
+		}
+		rest = rest[link.HEADER_SIZE + int(header.length):]
+	}
+	return scanned
+}
+
+@(private = "file")
+expect_mirror :: proc(
+	t: ^testing.T,
+	f: ^Fixture,
+	mirror: map[u64]link.Entity_Info,
+	round: string,
+) {
+	scanned := full_scan(f)
+	testing.expectf(
+		t,
+		len(mirror) == len(scanned),
+		"%s: %d entities, a full scan has %d",
+		round,
+		len(mirror),
+		len(scanned),
+	)
+	for entity, want in scanned {
+		got, found := mirror[entity]
+		if !found {
+			testing.expectf(t, false, "%s: %v is not in the mirror", round, entity)
+			continue
+		}
+		testing.expectf(
+			t,
+			got.name == want.name &&
+			got.scene_id == want.scene_id &&
+			got.scene == want.scene &&
+			got.parent == want.parent &&
+			got.active == want.active &&
+			slice.equal(got.components, want.components),
+			"%s: %v is %v, a full scan has %v",
+			round,
+			entity,
+			got,
+			want,
+		)
+	}
+}
+
+// The mirror that the deltas keep is the world that a full scan sees, after changes in place, moves to other archetypes,
+// deaths and births in reused slots, over many chunks.
+@(test)
+a_mirror_from_deltas_matches_a_full_scan :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	w := &f.world
+	ROOTS :: 8
+	alive := make([dynamic]ecs.Entity, context.temp_allocator)
+	for _ in 0 ..< ROOTS {
+		append(&alive, spawn(f, {}))
+	}
+	for i in ROOTS ..< 2000 {
+		e: ecs.Entity
+		switch i % 4 {
+		case 0:
+			e = spawn(f, {})
+		case 1:
+			e = spawn(f, {})
+			ecs.add(w, e, ecs.intern(w, fmt.tprintf("e%d", i)))
+		case 2:
+			e = ecs.spawn(w)
+			ecs.add(w, e, ecs.TRANSFORM_IDENTITY)
+			ecs.add(w, e, ecs.Parent{alive[i % ROOTS]})
+		case 3:
+			e = ecs.spawn(w)
+		}
+		append(&alive, e)
+	}
+	mirror := make(map[u64]link.Entity_Info, context.temp_allocator)
+	apply(&mirror, step(f))
+	expect_mirror(t, f, mirror, "snapshot")
+
+	// The roots are parents, and stay, so that a death takes no children.
+	for i := ROOTS; i < len(alive); i += 37 {
+		if ecs.has(w, alive[i], Tuned) {
+			ecs.remove(w, alive[i], Tuned)
+		} else {
+			ecs.add(w, alive[i], Tuned{})
+		}
+	}
+	apply(&mirror, step(f))
+	expect_mirror(t, f, mirror, "moves")
+
+	// Alone, so that no move marks their chunks.
+	for i := ROOTS + 1; i < len(alive); i += 43 {
+		if name := ecs.get_write(w, alive[i], ecs.Name); name != nil {
+			name^ = ecs.intern(w, fmt.tprintf("renamed %d", i))
+		}
+	}
+	apply(&mirror, step(f))
+	expect_mirror(t, f, mirror, "names in place")
+
+	for i := ROOTS; i < len(alive); i += 41 {
+		ecs.add(w, alive[i], ecs.Parent{alive[(i / 41) % ROOTS]})
+	}
+	for i := ROOTS + 2; i < len(alive); i += 47 {
+		if !ecs.has(w, alive[i], ecs.Name) {
+			ecs.add(w, alive[i], ecs.intern(w, fmt.tprintf("named %d", i)))
+		}
+	}
+	apply(&mirror, step(f))
+	expect_mirror(t, f, mirror, "parents and names")
+
+	for i := ROOTS; i < len(alive); i += 29 {
+		ecs.add(w, alive[i], ecs.Disabled{})
+	}
+	ecs.update_activity(w)
+	apply(&mirror, step(f))
+	expect_mirror(t, f, mirror, "activity")
+
+	births := 0
+	for i := len(alive) - 1; i >= ROOTS; i -= 31 {
+		ecs.despawn(w, alive[i])
+		unordered_remove(&alive, i)
+		births += 1
+	}
+	for _ in 0 ..< births {
+		append(&alive, spawn(f, {}))
+	}
+	apply(&mirror, step(f))
+	expect_mirror(t, f, mirror, "deaths and births")
+
+	// Components that the delta does not carry change nothing in it.
+	for e in alive {
+		if tuned := ecs.get_write(w, e, Tuned); tuned != nil {
+			tuned.inner.amount += 1
+		}
+	}
+	testing.expect_value(t, len(step(f)), 0)
+	expect_mirror(t, f, mirror, "values")
+
+	for e in alive {
+		ecs.remove(w, e, ecs.Disabled)
+		ecs.remove(w, e, ecs.Parent)
+	}
+	ecs.update_activity(w)
+	apply(&mirror, step(f))
+	expect_mirror(t, f, mirror, "undone")
 }
 
 @(test)
