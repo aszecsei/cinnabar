@@ -77,6 +77,8 @@ Scenes :: struct {
 	next:        u32,
 	// What happened to the sublevels' parts since clear_part_events (see parts.odin).
 	part_events: [dynamic]Part_Event,
+	// The prefab instances that pool_spawn made (see pool.odin).
+	pools:       Prefab_Pools,
 }
 
 // init_scenes makes an empty table. assets can be nil, and then add_scene_asset loads nothing. scripts can be nil, and
@@ -97,6 +99,7 @@ init_scenes :: proc(
 		next        = FIRST_RUNTIME_SCENE,
 		part_events = make([dynamic]Part_Event, platform.heap_allocator),
 	}
+	init_pools(s)
 }
 
 // reload_scenes takes the new DLL's platform after a code reload.
@@ -111,6 +114,7 @@ destroy_scenes :: proc(s: ^Scenes) {
 	delete(s.loaded)
 	delete(s.by_scene)
 	delete(s.part_events)
+	destroy_pools(s)
 	s^ = {}
 }
 
@@ -460,6 +464,7 @@ forget_level :: proc(s: ^Scenes) {
 	clear(&s.loaded)
 	clear(&s.by_scene)
 	clear(&s.part_events)
+	clear_pools(s)
 	s.next = FIRST_RUNTIME_SCENE
 }
 

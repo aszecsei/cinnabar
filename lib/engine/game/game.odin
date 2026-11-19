@@ -292,10 +292,10 @@ register_components :: proc(r: ^ecs.Registry, h: Hooks) {
 
 // register_scripts defines the engine's script bindings. The project's follow them, in api's register.
 register_scripts :: proc(r: ^script.Runtime) {
-	scene.register_scripts(r)
 	// The bindings read the Game only when a script calls them, which the runtime of script_types, outside any Game,
 	// never does.
 	g := container_of(r, Game, "scripts")
+	scene.register_scripts(r, &g.scenes)
 	project.define_quality_bindings(r, &g.script_quality)
 	save.register_scripts(r)
 	project.define_display_bindings(r)

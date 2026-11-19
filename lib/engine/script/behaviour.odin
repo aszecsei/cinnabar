@@ -748,11 +748,23 @@ spawn_prefab_now :: proc(r: ^Runtime, L: ^luau.State, guid: format.Guid, pose: e
 	if !ok {
 		raise(L, message)
 	}
+	wake_spawned(r, L, root, behaviours)
+	push_entity(L, root)
+}
+
+// wake_spawned finishes a prefab's spawn from a binding on the thread L, as World.spawn(prefab) does: the spawned hook
+// gets the root, and the behaviours attach at once, in order, so awake and on_enable run before the binding returns.
+// lib/engine/scene's Pool.spawn calls it.
+wake_spawned :: proc(
+	r: ^Runtime,
+	L: ^luau.State,
+	root: ecs.Entity,
+	behaviours: []Pending_Behaviour,
+) {
 	spawned(r, root)
 	for b in behaviours {
 		attach_fields(r, L, b.entity, b.script, b.fields, immediate = true)
 	}
-	push_entity(L, root)
 }
 
 // attach_fields attaches the behaviour of a script asset to an entity with field values, on the thread L. A field
