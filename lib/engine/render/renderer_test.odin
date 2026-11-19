@@ -1413,6 +1413,9 @@ View_Record :: struct {
 	position:                                            ecs.World_Position,
 	size:                                                [2]u32,
 	output_size:                                         [2]u32,
+	// Where the view's output begins in its target, and that target's size.
+	origin:                                              [2]u32,
+	target_size:                                         [2]u32,
 	extra:                                               bool,
 	// The debug hook's layer, the lines it was given, the first of them, and the temporal AA's history.
 	layer:                                               bool,
@@ -1439,6 +1442,7 @@ RECORD_HOOKS :: Frame_Hooks {
 		rec.before_world += 1
 		rec.position, rec.size, rec.output_size, rec.extra =
 			f.view.position, f.size, f.output_size, f.extra
+		rec.origin, rec.target_size = f.origin, f.target_size
 		rec.collides = f.particles != nil && !f.particles.draw_only && f.particles.history.valid
 	},
 	after_prepass = proc(f: ^Frame) {
@@ -3102,11 +3106,15 @@ use_view_takes_every_field_of_an_extra_view :: proc(t: ^testing.T) {
 		disable = {.Fog},
 		exposure_offset = -1,
 		hooks = {debug = hook},
+		rect = Target_Rect{target_size = {16, 4}, origin = {8, 0}},
+		cut = true,
 	}
 	desc := Frame_Desc {
 		delta = 0.5,
 	}
 	use_view(&desc, v)
+	testing.expect_value(t, desc.rect, Maybe(Target_Rect)(Target_Rect{target_size = {16, 4}, origin = {8, 0}}))
+	testing.expect(t, desc.cut)
 	testing.expect_value(t, desc.view, v.view)
 	testing.expect_value(t, desc.size, [2]u32{8, 4})
 	testing.expect_value(t, desc.target, gpu.Texture{index = 3, generation = 1})
@@ -3967,4 +3975,174 @@ transient_textures_share_at_each_preset :: proc(t: ^testing.T) {
 	testing.expect(t, capture_reflection_probe(r, probe))
 	measure(t, r, rig.w, "Ultra, capturing six faces", &q, 6, runner)
 	testing.expectf(t, len(rig.record.problems) == 0, "the frames logged %v", rig.record.problems)
+}
+
+// Two views side by side draw into one target: the own view into its left half, and an extra view into its right half,
+// after it. Each one's hooks see its own size, where it begins in the target, and the target's size.
+@(test)
+views_in_rects_draw_into_one_target :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	rig := new(Rig)
+	defer free(rig)
+	rig_start(t, rig)
+	defer rig_stop(rig)
+	context.logger = {record_problems, &rig.record, .Debug, {}}
+	r, platform := rig.r, &rig.platform
+	enable_output_pipelines(r)
+	target := extra_target(platform, {64, 32})
+	defer platform.gpu_destroy_texture(target)
+	state_b: View_State
+	view_state_init(&state_b, r)
+	defer view_state_destroy(&state_b, r)
+	platform.gpu_submit = logging_submit
+	defer platform.gpu_submit = null.submit
+	defer {
+		delete(draw_log.drawn)
+		draw_log = {}
+	}
+
+	own_record, extra_record: View_Record
+	extras := [1]Extra_View {
+		{
+			view = {
+				position = ecs.position_offset({}, {50, 0, 0}),
+				rotation = 1,
+				projection = Perspective{1, 0.05},
+			},
+			size = {32, 32},
+			state = &state_b,
+			hooks = RECORD_HOOKS,
+			rect = Target_Rect{target_size = {64, 32}, origin = {32, 0}},
+		},
+	}
+	extras[0].hooks.data = &extra_record
+	desc := Frame_Desc {
+		view = {rotation = 1, projection = Perspective{1, 0.05}},
+		size = {32, 32},
+		target = target,
+		hooks = RECORD_HOOKS,
+		extra_views = extras[:],
+		rect = Target_Rect{target_size = {64, 32}},
+	}
+	desc.hooks.data = &own_record
+	testing.expect(t, draw_frame(r, rig.w, desc), "the frame did not execute")
+	testing.expect_value(t, own_record.before_world, 1)
+	testing.expect_value(t, extra_record.before_world, 1)
+	testing.expect(t, !own_record.extra && extra_record.extra)
+	testing.expect_value(t, own_record.output_size, [2]u32{32, 32})
+	testing.expect_value(t, own_record.origin, [2]u32{0, 0})
+	testing.expect_value(t, own_record.target_size, [2]u32{64, 32})
+	testing.expect_value(t, extra_record.output_size, [2]u32{32, 32})
+	testing.expect_value(t, extra_record.origin, [2]u32{32, 0})
+	testing.expect_value(t, extra_record.target_size, [2]u32{64, 32})
+	// Both views' output passes draw into the one target, the own view's first.
+	count, first := draws_into(target)
+	testing.expectf(t, count >= 2, "%d draws into the target", count)
+	testing.expect(t, first >= 0)
+	testing.expectf(t, len(rig.record.problems) == 0, "problems: %v", rig.record.problems)
+}
+
+// An extra view in a rect needs the own view in a rect of the same target, and to fit in it. One that does not is not
+// drawn, and says why.
+@(test)
+an_extra_view_in_a_rect_needs_an_own_view_in_one :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	rig := new(Rig)
+	defer free(rig)
+	rig_start(t, rig)
+	defer rig_stop(rig)
+	context.logger = {record_problems, &rig.record, .Debug, {}}
+	r := rig.r
+	enable_output_pipelines(r)
+	state_b: View_State
+	view_state_init(&state_b, r)
+	defer view_state_destroy(&state_b, r)
+
+	own_record, extra_record: View_Record
+	extras := [1]Extra_View {
+		{
+			view = {rotation = 1, projection = Perspective{1, 0.05}},
+			size = {32, 32},
+			state = &state_b,
+			hooks = RECORD_HOOKS,
+			rect = Target_Rect{target_size = {64, 32}, origin = {32, 0}},
+		},
+	}
+	extras[0].hooks.data = &extra_record
+	desc := Frame_Desc {
+		view = {rotation = 1, projection = Perspective{1, 0.05}},
+		size = {64, 32},
+		hooks = RECORD_HOOKS,
+		extra_views = extras[:],
+	}
+	desc.hooks.data = &own_record
+	// No rect for the own view.
+	testing.expect(t, draw_frame(r, rig.w, desc), "the frame did not execute")
+	testing.expect_value(t, own_record.before_world, 1)
+	testing.expect_value(t, extra_record.before_world, 0)
+	testing.expect_value(t, len(rig.record.problems), 1)
+	// A rect of the same target that the view does not fit in.
+	desc.size = {32, 32}
+	desc.rect = Target_Rect{target_size = {64, 32}}
+	extras[0].rect = Target_Rect{target_size = {64, 32}, origin = {40, 0}}
+	testing.expect(t, draw_frame(r, rig.w, desc), "the frame did not execute")
+	testing.expect_value(t, extra_record.before_world, 0)
+	testing.expect_value(t, len(rig.record.problems), 2)
+	for problem in rig.record.problems {
+		delete(problem)
+	}
+	clear(&rig.record.problems)
+}
+
+// A cut makes a view start again: in the frame of the cut its temporal AA reads no history, and from the next it does.
+@(test)
+a_cut_starts_a_views_history_again :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	rig := new(Rig)
+	defer free(rig)
+	rig_start(t, rig)
+	defer rig_stop(rig)
+	context.logger = {record_problems, &rig.record, .Debug, {}}
+	r := rig.r
+	fill_world(rig.w)
+	enable_frame_pipelines(r)
+	defer rig.platform.gpu_destroy_texture(r.blue_noise.texture)
+
+	record: View_Record
+	desc := Frame_Desc {
+		view = {rotation = 1, projection = Perspective{1, 0.05}},
+		size = {64, 32},
+		hooks = RECORD_HOOKS,
+	}
+	desc.hooks.data = &record
+	cuts := [?]bool{false, false, true, false}
+	valid := [?]bool{false, true, false, true}
+	for cut, i in cuts {
+		desc.cut = cut
+		testing.expectf(t, draw_frame(r, rig.w, desc), "frame %d did not execute", i)
+		testing.expectf(
+			t,
+			record.history_valid == valid[i],
+			"frame %d: the history is valid %v, want %v",
+			i,
+			record.history_valid,
+			valid[i],
+		)
+	}
+	testing.expectf(t, len(rig.record.problems) == 0, "problems: %v", rig.record.problems)
+}
+
+// view_state_cut drops what a view kept of the frames before: the histories from before this frame, the last camera,
+// the adapted exposure and the upscaler's history.
+@(test)
+view_state_cut_drops_what_the_view_kept :: proc(t: ^testing.T) {
+	v: View_State
+	v.previous.valid = true
+	v.post.adapted = true
+	v.post.upscaler.active = true
+	v.frames = 7
+	view_state_cut(&v, 12)
+	testing.expect_value(t, v.histories.cut, u64(12))
+	testing.expect(t, !v.previous.valid && !v.post.adapted && !v.post.upscaler.active)
+	testing.expect_value(t, v.frames, u64(7))
 }

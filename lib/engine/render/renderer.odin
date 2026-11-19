@@ -192,9 +192,23 @@ Frame_Desc :: struct {
 	// The pose of each skinned entity this frame, by entity (see Skin_Pose and docs/rendering/gpu-scene.md#skinned-meshes).
 	// A Mesh_Renderer with no pose here, or whose mesh has no skin stream, draws at rest.
 	skins:           []Skin_Pose,
-	// Other views of the same world that the frame also draws, each into a target of its own, after its own view (see
-	// docs/rendering/frame.md#views). At most MAX_EXTRA_VIEWS draw.
+	// Other views of the same world that the frame also draws, each into a target of its own or a rect of this view's,
+	// after its own view (see docs/rendering/frame.md#views). At most MAX_EXTRA_VIEWS draw.
 	extra_views:     []Extra_View,
+	// The own view draws into a rect of its target, not the whole of it: size at rect.origin of a target of
+	// rect.target_size. Its output pass clears the rest of the target to black, and the extra views with a rect draw into
+	// the rest (see docs/rendering/frame.md#views-in-rects). nil fills the target, as size.
+	rect:            Maybe(Target_Rect),
+	// The view starts again this frame, as after a camera cut: it reads no history, no last camera and no adapted
+	// exposure, so nothing smears across the cut (see view_state_cut).
+	cut:             bool,
+}
+
+// Target_Rect is where a view draws in a target larger than it: a target of target_size, with the view's size from
+// origin (see docs/rendering/frame.md#views-in-rects).
+Target_Rect :: struct {
+	target_size: [2]u32,
+	origin:      [2]u32,
 }
 
 // The most extra views that a frame draws. The texture cache holds the transient textures of this many and the frame's own.
@@ -224,6 +238,11 @@ Extra_View :: struct {
 	exposure_offset: f32,
 	hooks:           Frame_Hooks,
 	overlay:         Frame_Overlay,
+	// The view draws into a rect of the own view's target, which must have a rect of the same target_size, after it,
+	// in the frame's output mode: target is 0 then (see docs/rendering/frame.md#views-in-rects).
+	rect:            Maybe(Target_Rect),
+	// As Frame_Desc.cut, for this view.
+	cut:             bool,
 }
 
 // use_view makes an Extra_View the frame's own view: its camera, size, target, state, quality, settings, debug view, hooks,
@@ -236,7 +255,7 @@ use_view :: proc(desc: ^Frame_Desc, v: Extra_View) {
 		v.quality, v.settings, v.keep_ids, v.no_debug
 	desc.debug_view, desc.disable, desc.exposure_offset, desc.hooks =
 		v.debug_view, v.disable, v.exposure_offset, v.hooks
-	desc.overlay = v.overlay
+	desc.overlay, desc.rect, desc.cut = v.overlay, v.rect, v.cut
 }
 
 // Frame_Overlay is a second hook beside Frame_Hooks, with a data pointer of its own: it runs in every view after the
@@ -301,8 +320,12 @@ Frame :: struct {
 	// The scene's size, which the world's targets, the debug layer and every pass before temporal AA have: the frame's
 	// size at the quality's render scale (see docs/rendering/anti-aliasing.md#upscaling).
 	size:                     [2]u32,
-	// The frame's size, which the frame target and the UI have.
+	// The frame's size, which the UI has, and the part of the target that the output pass writes.
 	output_size:              [2]u32,
+	// Where output_size begins in the output pass's target, and that target's size: 0 and output_size, unless the view
+	// draws into a rect of a larger target (see Target_Rect).
+	origin:                   [2]u32,
+	target_size:              [2]u32,
 	// The size of Frame.scene: size, until temporal AA upscales it to output_size. The post passes after temporal AA,
 	// and a game's post effects there, take it.
 	scene_size:               [2]u32,
@@ -447,6 +470,9 @@ Output_Push :: struct {
 	// to when theirs is smaller.
 	output:        u32,
 	size:          [2]u32,
+	// Where the output pass's view begins in its target, which it draws into a rect of (see Target_Rect). 0 for the tone
+	// map pass.
+	origin:        [2]u32,
 }
 
 // World_Frame is what the views of a frame share while it is drawn, in the memory of draw_frame: where each view looks
@@ -598,7 +624,11 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	}
 	own := desc.state != nil ? desc.state : &r.view
 	r.transients = {}
-	sync_frame_pipelines(r, output.mode, len(desc.previews) > 0 || len(desc.extra_views) > 0)
+	own_target := false
+	for ev in desc.extra_views {
+		own_target ||= ev.rect == nil
+	}
+	sync_frame_pipelines(r, output.mode, len(desc.previews) > 0 || own_target)
 	quality := desc.quality != nil ? clamp_quality(desc.quality^, r.caps) : r.quality
 
 	// The extra views that draw, and where every view looks from.
@@ -614,7 +644,19 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	cameras: [1 + MAX_EXTRA_VIEWS]ecs.World_Position
 	cameras[0] = desc.view.position
 	for ev in desc.extra_views[:min(len(desc.extra_views), MAX_EXTRA_VIEWS)] {
-		if ev.target == {} || ev.size.x == 0 || ev.size.y == 0 {
+		if ev.size.x == 0 || ev.size.y == 0 {
+			continue
+		}
+		if rect, in_rect := ev.rect.?; in_rect {
+			if !rect_fits(desc, ev, rect) {
+				log.errorf(
+					"render: an extra view in a rect at %v of %v needs an own view in a rect of the same target, and to fit in it",
+					rect.origin,
+					rect.target_size,
+				)
+				continue
+			}
+		} else if ev.target == {} {
 			continue
 		}
 		assert(
@@ -657,26 +699,43 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 			ev.view, ev.size, ev.keep_ids, ev.no_debug, ev.debug_view
 		view.disable, view.hooks, view.exposure_offset, view.settings =
 			ev.disable, ev.hooks, ev.exposure_offset, ev.settings
-		view.overlay = ev.overlay
+		view.overlay, view.rect, view.cut = ev.overlay, ev.rect, ev.cut
 		view.extra_views, view.previews, view.playing, view.delta, view.shading_stats =
 			nil, nil, nil, 0, false
 		view_quality := ev.quality != nil ? clamp_quality(ev.quality^, r.caps) : quality
-		// The target is always SDR, whatever the frame's output is.
+		// A view in a rect draws into the own view's target, in its output. A target of its own is always SDR, whatever
+		// the frame's output is.
+		view_output, view_target := gpu.Output{format = gpu.FRAME_TARGET_FORMAT}, ev.target
+		if ev.rect != nil {
+			view_output, view_target = output, frame_target
+		}
 		draw_view(
 			r,
 			w,
 			view,
 			world,
 			ev.state,
-			{format = gpu.FRAME_TARGET_FORMAT},
+			view_output,
 			limit_quality(view.view, view_quality),
-			ev.target,
+			view_target,
 			true,
 		)
 	}
 	// After the last view, so the lines of this frame reach them all.
 	debug.end_frame(&r.debug)
 	return ok
+}
+
+// rect_fits reports whether an extra view's rect is in the own view's target: the own view has a rect of the same target,
+// and the extra view's size fits in it from its origin.
+@(private = "file")
+rect_fits :: proc(desc: Frame_Desc, ev: Extra_View, rect: Target_Rect) -> bool {
+	own, has := desc.rect.?
+	if !has || own.target_size != rect.target_size {
+		return false
+	}
+	far := rect.origin + ev.size
+	return far.x <= rect.target_size.x && far.y <= rect.target_size.y
 }
 
 // draw_view draws one view of the frame in a graph of its own: the frame's own view, or an extra view, which keeps its own
@@ -700,6 +759,13 @@ draw_view :: proc(
 	state.frames += 1
 	g :=
 		extra ? begin_extra(r.platform, &r.textures, &state.histories) : begin(r.platform, &r.textures, &state.histories)
+	if desc.cut {
+		view_state_cut(state, r.textures.frame)
+	}
+	origin, target_size := [2]u32{}, desc.size
+	if rect, in_rect := desc.rect.?; in_rect {
+		origin, target_size = rect.origin, rect.target_size
+	}
 	size := render_size(desc.size, quality.render_scale)
 	aspect := f32(size.x) / f32(max(size.y, 1))
 	f := new(Frame, r.platform.frame_allocator)
@@ -710,6 +776,8 @@ draw_view :: proc(
 		view                  = desc.view,
 		size                  = size,
 		output_size           = desc.size,
+		origin                = origin,
+		target_size           = target_size,
 		scene_size            = size,
 		output                = output,
 		view_projection       = view_projection(desc.view, aspect),
@@ -948,7 +1016,16 @@ draw_view :: proc(
 	if f.debug != 0 {
 		read(&g, p, f.debug)
 	}
-	color(&g, p, target, .Discard)
+	// A view that fills its target overwrites all of it. The own view in a rect clears the rest of its target, which the
+	// extra views in rects draw into after it, keeping what the views before them wrote.
+	switch {
+	case desc.rect == nil:
+		color(&g, p, target, .Discard)
+	case extra:
+		color(&g, p, target, .Load)
+	case:
+		color(&g, p, target, .Clear, {0, 0, 0, 1})
+	}
 
 	for &preview in desc.previews {
 		add_preview_passes(f, &preview)
@@ -1185,6 +1262,11 @@ draw_output :: proc(ctx: ^Pass_Context) {
 	if f.debug != 0 {
 		push.debug, push.has_debug = gpu.read_index(gpu_texture(g, f.debug)), 1
 	}
+	// A view in a rect writes only its rect of the target.
+	if f.origin != {} || f.output_size != f.target_size {
+		gpu.cmd_set_viewport(ctx.cb, {f32(f.origin.x), f32(f.origin.y)}, {f32(f.output_size.x), f32(f.output_size.y)})
+		gpu.cmd_set_scissor(ctx.cb, [2]i32{i32(f.origin.x), i32(f.origin.y)}, [2]i32{i32(f.output_size.x), i32(f.output_size.y)})
+	}
 	gpu.cmd_set_pipeline(ctx.cb, pipeline)
 	gpu.cmd_push_constants(ctx.cb, &push)
 	gpu.cmd_draw(ctx.cb, 3)
@@ -1213,6 +1295,7 @@ output_push :: proc(f: ^Frame, scene: gpu.Texture, mode: gpu.Output_Mode) -> Out
 	bake, has_lut := f.post.lut.?
 	return {
 		size          = f.output_size,
+		origin        = f.origin,
 		scene         = gpu.read_index(scene),
 		lut           = gpu.read_index(r.post.lut),
 		has_lut       = u32(has_lut),
