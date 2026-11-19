@@ -842,6 +842,11 @@ test: luau jolt opus lz4 vorbis audio-plugin compressonator meshoptimizer lightu
     for p in lib/core/profile lib/core/jobs; do odin test "$p" {{collections}} -define:PROFILE=false || exit 1; done
     dotnet test src/editor
 
+# Time the creation of thousands of resources on the D3D12 device (see docs/gpu/resources-and-pipelines.md#memory). It needs
+# a GPU, so just test leaves it out. The Agility SDK sits beside the executable, as beside the host.
+gpu-bench: (agility-runtime obj_dir + "/gpu-bench" "false") (fidelityfx-runtime obj_dir + "/gpu-bench")
+    odin test lib/core/gpu/d3d12 {{collections}} -o:speed -define:ODIN_TEST_THREADS=1 -define:ODIN_TEST_NAMES=gpu_d3d12.resource_creation -out:"{{obj_dir}}/gpu-bench/gpu-bench.exe"
+
 # =================================
 # Cleanup
 # =================================
