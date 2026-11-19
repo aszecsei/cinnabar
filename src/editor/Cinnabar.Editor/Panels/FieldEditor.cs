@@ -149,19 +149,31 @@ sealed class FieldEditor : IFieldEditor
         _kind == EditKind.Entity && _shell.IsEditing && _stored?.Invoke(_entities[index]) is { } stored ? stored : _currents[index];
 
     /// <summary>
-    /// For an entity field of the primary entity that refers to a scene that is not open, how the field shows and its
-    /// tooltip, or null.
+    /// For an entity field of the primary entity whose target the game's world does not have, because it is in a scene
+    /// that is not open or in a sublevel that is not loaded, how the field shows and its tooltip, or null.
     /// </summary>
-    public (string Text, string Tooltip)? NotOpen
+    public (string Text, string Tooltip)? Unavailable
     {
         get
         {
-            if (CurrentOf(_entities.Length - 1) is not { IsLocalEntity: false, Scene: not "" } v || _shell.SceneOfGuid(v.Scene) != null)
+            if (CurrentOf(_entities.Length - 1) is not { Kind: Document.SceneValueKind.Entity } v || v.Entity == 0 && v.Path == null)
             {
                 return null;
             }
-            var text = _shell.Assets.Find(v.Scene) is { } asset ? $"Not open: {Path.GetFileName(asset.Path)}" : "Missing scene";
-            return (text, v.Path is { } path ? $"@{v.Scene}/{string.Join('#', path.Select(p => p.ToString("x16")))}" : $"@{v.Scene}/{v.Entity:x16}");
+            var id = v.Path is { } path ? string.Join('#', path.Select(p => p.ToString("x16"))) : v.Entity.ToString("x16");
+            var reference = v.Scene == "" ? $"@{id}" : $"@{v.Scene}/{id}";
+            var target = v.IsLocalEntity ? _shell.Scene : _shell.SceneOfGuid(v.Scene);
+            if (target == null)
+            {
+                return v.IsLocalEntity || v.Scene == ""
+                    ? null
+                    : (_shell.Assets.Find(v.Scene) is { } asset ? $"Not open: {Path.GetFileName(asset.Path)}" : "Missing scene", reference);
+            }
+            // An entity of a sublevel that the game's world does not have (see docs/editor/document-and-scenes.md#parts).
+            var flat = target.Expanded.Flat;
+            return flat.Find(v.Entity) is { } entity && flat.SublevelOf(entity) is var sublevel && !_shell.IsSublevelLoaded(sublevel)
+                ? ($"Sublevel not loaded: {sublevel}", reference)
+                : null;
         }
     }
 

@@ -26,8 +26,8 @@ interface IFieldEditor
     {
     }
 
-    /// <summary>For an entity field that refers to a scene that is not open: how it shows, and its tooltip.</summary>
-    (string Text, string Tooltip)? NotOpen => null;
+    /// <summary>For an entity field whose target is in a scene that is not open or a sublevel that is not loaded: how it shows, and its tooltip.</summary>
+    (string Text, string Tooltip)? Unavailable => null;
 
     /// <summary>An asset reference, by GUID, or "" for none.</summary>
     void SetAsset(string guid)
@@ -687,7 +687,7 @@ sealed class EntityView : ReferenceView
     public override void Show(FieldDisplay value)
     {
         _entity = value.Entity;
-        if (_entity == 0 && _editor?.NotOpen is var (text, tooltip))
+        if (_entity == 0 && _editor?.Unavailable is var (text, tooltip))
         {
             Text.Text = text;
             SetTooltip(Text, tooltip);

@@ -30,12 +30,23 @@ public sealed partial class EditorShell
         public readonly Dictionary<string, string> Guids = new(StringComparer.Ordinal);
     }
 
+    /// <summary>
+    /// Whether the game's world has a sublevel's parts of the open scenes: in Edit, the editor's choice
+    /// (<see cref="IsSublevelChosen"/>), and outside Edit the project's active set, as the game starts a level with it.
+    /// </summary>
+    public bool IsSublevelLoaded(string sublevel) => IsEditing ? IsSublevelChosen(sublevel) : sublevel == "" || _playedSublevels.Contains(sublevel);
+
+    // The active set that Play started with, which the game's world has until Stop. A change of the settings in Play
+    // applies at the next Play, as the game's does at the next level.
+    IReadOnlySet<string> _playedSublevels = new HashSet<string>();
+
     /// <summary>Whether Edit loads a sublevel's parts of the open scenes. Every sublevel loads until <see cref="SetSublevelLoaded"/> says otherwise.</summary>
-    public bool IsSublevelLoaded(string sublevel) => sublevel == "" || !_unloadedSublevels.Contains(sublevel);
+    public bool IsSublevelChosen(string sublevel) => sublevel == "" || !_unloadedSublevels.Contains(sublevel);
 
     /// <summary>
-    /// Loads or unloads a sublevel's parts of every open scene in the game's world. Each part goes alone, as an
-    /// <c>Add_Scene</c> or a <c>Remove_Scene</c>, and the other parts' entities keep their handles.
+    /// Loads or unloads a sublevel's parts of every open scene in Edit, and keeps the choice for the project in the
+    /// editor's settings. Each part goes alone, as an <c>Add_Scene</c> or a <c>Remove_Scene</c>, and the other parts'
+    /// entities keep their handles.
     /// </summary>
     public void SetSublevelLoaded(string sublevel, bool loaded)
     {
@@ -43,11 +54,18 @@ public sealed partial class EditorShell
         {
             return;
         }
+        SaveSublevelChoice();
         // Outside Edit the world is the game's: Stop sends the scenes again, with the choice.
-        if (!IsEditing)
+        if (IsEditing)
         {
-            return;
+            SendSublevelParts(sublevel, loaded);
         }
+        OnSublevelsChanged();
+    }
+
+    // Sends the game's world a sublevel's part of every open scene that has entities in it, or takes them away.
+    void SendSublevelParts(string sublevel, bool loaded)
+    {
         foreach (var document in _scenes)
         {
             var parts = PartsOf(document);
@@ -59,6 +77,10 @@ public sealed partial class EditorShell
                 }
                 continue;
             }
+            if (parts.Numbers.ContainsKey(sublevel))
+            {
+                continue;
+            }
             var entities = document.Expanded.Flat.Entities.Where(e => parts.SublevelOf.GetValueOrDefault(e.Id) == sublevel).ToList();
             if (entities.Count > 0)
             {
@@ -68,6 +90,17 @@ public sealed partial class EditorShell
                     Host.Send(new Wire.AddScene(Part(document, parts, number, sublevel, entities), ++_sceneTicket));
                 }
             }
+        }
+    }
+
+    // Play starts with the project's active set, as the game does, not the editor's choice: the parts of each sublevel
+    // whose two differ load or unload, and every other entity keeps its handle. Stop sends the scenes again.
+    void LoadActiveSet()
+    {
+        _playedSublevels = DeclaredSublevels.Where(s => s.Active).Select(s => s.Name).ToHashSet(StringComparer.Ordinal);
+        foreach (var sublevel in KnownSublevels().Where(s => IsSublevelChosen(s) != _playedSublevels.Contains(s)))
+        {
+            SendSublevelParts(sublevel, _playedSublevels.Contains(sublevel));
         }
     }
 
