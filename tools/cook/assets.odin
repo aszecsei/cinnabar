@@ -1,6 +1,7 @@
 package cook
 
 import "core:fmt"
+import "core:hash"
 import "core:log"
 import "core:os"
 import "core:slice"
@@ -202,6 +203,9 @@ Asset_Source :: struct {
 	meta:         format.Meta,
 	// nil until it is read: a pass reads a carried asset's source only when another asset needs it (see asset_source).
 	source:       Maybe([]byte),
+	// The FNV-1a hash of its source as the scan read it, or 0 for a source that a stage generates. The daemon pairs a
+	// .meta file left behind by a move with the source that has its asset's hash (see pair_orphans).
+	hash:         u64,
 	// What the pass did with it. Only settle changes it.
 	result:       Asset_Result,
 	// Set while the pass carries it: nothing that it depends on changed, so what the last pass learnt of it stands
@@ -577,6 +581,7 @@ read_asset :: proc(root_dir: string, a: ^Asset_Source, problems: ^Problems) -> R
 		return .Failed
 	}
 	a.source = source
+	a.hash = hash.fnv64a(source)
 	meta_path := fmt.tprintf("%s%s", a.path, format.META_EXTENSION)
 	meta_bytes, meta_err := os.read_entire_file(meta_path, context.temp_allocator)
 	if meta_err == .Not_Exist {
