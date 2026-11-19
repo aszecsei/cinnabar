@@ -244,6 +244,39 @@ World.spawn():add(Catcher)
 	expect_reports(t, f, {3, 1})
 }
 
+// A broadcast reaches each behaviour whose class has the handler, on any entity, once, with its arguments. A class
+// without the handler, and a disabled behaviour, get nothing.
+@(test)
+a_broadcast_reaches_every_behaviour_with_its_handler :: proc(t: ^testing.T) {
+	f := setup_world(t)
+	defer teardown_world(f)
+	context.user_ptr = f
+	_, ok := spawn_source(
+		&f.runtime,
+		"=broadcast",
+		`
+local Listener = Behaviour.define("Listener", { tag = Field.number(0) })
+function Listener:on_shout(n, text)
+	Test.report(self.tag + n)
+	Test.report(if text == "hey" then 1 else 0)
+end
+local Deaf = Behaviour.define("Deaf")
+World.spawn():add(Listener, {tag = 10})
+World.spawn():add(Deaf)
+World.spawn():add(Listener, {tag = 20})
+World.spawn():add(Listener, {tag = 30, enabled = false})
+`,
+	)
+	testing.expect(t, ok)
+	phase(f)
+	broadcast(&f.runtime, "shout", f64(1), "hey")
+	phase(f)
+	expect_reports(t, f, {11, 1, 21, 1})
+	// It is delivered once.
+	phase(f)
+	expect_reports(t, f, {})
+}
+
 @(test)
 deactivation_stops_coroutines :: proc(t: ^testing.T) {
 	f := setup_world(t)

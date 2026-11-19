@@ -116,7 +116,7 @@ The policy records what happened to each scene in a frame. `game.stream_scenes` 
 | `on_scene_ready(number, scene)` | The scene is shown. |
 | `on_scene_unloaded(number, scene)` | The scene unloaded: by distance, with its streamer, or because something else unloaded it. |
 | `on_scene_failed(number, scene)` | The scene did not load. `number` is 0 when the load did not begin. |
-| `on_sublevel_loading(number, scene, name)`, `on_sublevel_ready`, `on_sublevel_unloaded` | A part of the scene's sublevel began to load, is ready, or unloaded ([Sublevels: Events](sublevels.md#events)). |
+| `on_part_loading(number, scene, name)`, `on_part_ready`, `on_part_unloaded` | A part of the scene's sublevel began to load, is ready, or unloaded ([Sublevels: Events](sublevels.md#events)). |
 
 `number` is the scene's number and `scene` is an `Asset`. `Scene.state(number)` returns `"loading"`, `"ready"`, or nil for a number that is not loaded ([Scenes: Scripts](scenes.md#scripts)).
 
@@ -134,7 +134,7 @@ end
 return Streamer
 ```
 
-The events go to the streamer's behaviours only, as the streamer is the entity that has `World_Streamer`.
+The events go to the streamer's behaviours only, as the streamer is the entity that has `World_Streamer`. A sublevel's own events, such as `on_sublevel_ready(name)`, go to every behaviour ([Sublevels: Scripts](sublevels.md#scripts)).
 
 ## Failures
 

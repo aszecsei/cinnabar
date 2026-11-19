@@ -76,6 +76,9 @@ SHADOW_CACHE_SCENE_META :: #load("../content/scenes/shadow_cache.scene.meta", st
 // The streaming scene, a world of five tiles that load and unload as the camera flies along them (see
 // docs/world/scenes.md#streaming).
 STREAMING_SCENE_META :: #load("../content/scenes/streaming.scene.meta", string)
+// The night scene, a yard whose night sublevel N turns on and off: its lights and props, and the lantern that the base
+// refers to (see docs/world/sublevels.md).
+NIGHT_SCENE_META :: #load("../content/scenes/night.scene.meta", string)
 // The array that tints the large triangles, a layer for each (see docs/content/kinds/textures.md#cube-maps-and-arrays).
 TRIANGLE_TINTS_META :: #load("../content/textures/cube/tints.texture_set.meta", string)
 
@@ -883,7 +886,8 @@ update_output :: proc(g: ^game.Game) {
 
 // switch_scene loads the next scene, the glass scene, the surfaces scene, the room scene, the billboards scene, the
 // animation scene, the cube map scene, the audio scene, the 2D scene, the playground, the doorway, the guard, the soft
-// shadows, the shadow cache, the streaming scene, then the main scene again, when F7 is pressed. A linked editor owns the scene, so the key
+// shadows, the shadow cache, the streaming scene, the night scene, then the main scene again, when F7 is pressed. Each
+// loads with the parts of the active sublevels, as the main scene does. A linked editor owns the scene, so the key
 // does nothing then.
 switch_scene :: proc(g: ^game.Game) {
 	if .F7 not_in g.platform.input().pressed || editor.active(&g.editor) {
@@ -906,6 +910,7 @@ switch_scene :: proc(g: ^game.Game) {
 		SOFT_SHADOWS_SCENE_META,
 		SHADOW_CACHE_SCENE_META,
 		STREAMING_SCENE_META,
+		NIGHT_SCENE_META,
 	}
 	names := [?]string {
 		"main",
@@ -923,10 +928,13 @@ switch_scene :: proc(g: ^game.Game) {
 		"soft shadows",
 		"shadow cache",
 		"streaming",
+		"night",
 	}
 	s.scene_index = (s.scene_index + 1) % len(metas)
 	if guid, ok := format.meta_guid(metas[s.scene_index]); ok {
-		scene.load_asset(&g.world, &g.scripts, &g.assets, guid, &g.scenes)
+		if scene.load_asset(&g.world, &g.scripts, &g.assets, guid, &g.scenes) {
+			scene.load_parts(&g.world, &g.scripts, &g.scenes, 0, game.active_sublevels(g))
+		}
 		log.infof("mygame: the %s scene (F7 cycles them)", names[s.scene_index])
 	}
 }

@@ -91,7 +91,7 @@ apply_scene_requests :: proc(g: ^Game) {
 // scenes of the World_Streamer's world load and unload around them (see streaming.update and
 // docs/world/streaming.md#the-policy). The streamer's behaviours get
 // the events (docs/world/streaming.md#events) as on_scene_loading, on_scene_ready, on_scene_unloaded and on_scene_failed, each with the scene's number
-// and its asset. They get its sublevels' events as on_sublevel_loading, on_sublevel_ready and on_sublevel_unloaded,
+// and its asset. They get the events of its sublevels' parts as on_part_loading, on_part_ready and on_part_unloaded,
 // with the sublevel's name too (see docs/world/sublevels.md#events). It moves the parts of active sublevels on as well.
 // It stands still while the editor edits, as the world does. Call it after apply_scene_requests, outside the script
 // phase.
@@ -141,11 +141,11 @@ stream_scenes :: proc(g: ^Game) {
 		case .Failed:
 			name = "scene_failed"
 		case .Sublevel_Loading:
-			name = "sublevel_loading"
+			name = "part_loading"
 		case .Sublevel_Ready:
-			name = "sublevel_ready"
+			name = "part_ready"
 		case .Sublevel_Unloaded:
-			name = "sublevel_unloaded"
+			name = "part_unloaded"
 		}
 		if event.kind >= .Sublevel_Loading {
 			sublevel := event.sublevel
@@ -186,7 +186,7 @@ check_scene_number :: proc(L: ^luau.State) -> u32 {
 }
 
 // define_scene_bindings defines Scene.load, Scene.unload, Scene.of, Scene.base, Scene.state and Scene.pending, and
-// Game.set_sublevel and Game.sublevel.
+// Sublevel.set_active, Sublevel.state and Sublevel.is_active.
 @(private)
 define_scene_bindings :: proc(r: ^script.Runtime) {
 	script.define(r, "Scene.load", proc(L: ^luau.State) -> c.int {
@@ -222,7 +222,7 @@ define_scene_bindings :: proc(r: ^script.Runtime) {
 			}
 			return 1
 		}, "(scene: number) -> number?")
-	script.define(r, "Game.set_sublevel", proc(L: ^luau.State) -> c.int {
+	script.define(r, "Sublevel.set_active", proc(L: ^luau.State) -> c.int {
 			name := string(luau.L_checkstring(L, 1))
 			luau.L_checktype(L, 2, .BOOLEAN)
 			if !set_sublevel(game_of(L), name, bool(luau.toboolean(L, 2))) {
@@ -230,7 +230,7 @@ define_scene_bindings :: proc(r: ^script.Runtime) {
 			}
 			return 0
 		}, "(name: string, active: boolean) -> ()")
-	script.define(r, "Game.sublevel", proc(L: ^luau.State) -> c.int {
+	script.define(r, "Sublevel.state", proc(L: ^luau.State) -> c.int {
 			state, known := sublevel_state(game_of(L), string(luau.L_checkstring(L, 1)))
 			switch {
 			case !known:
@@ -242,10 +242,18 @@ define_scene_bindings :: proc(r: ^script.Runtime) {
 			case state == .Failed:
 				luau.pushodinstring(L, "failed")
 			case:
-				luau.pushodinstring(L, "active")
+				luau.pushodinstring(L, "ready")
 			}
 			return 1
 		}, "(name: string) -> string?")
+	script.define(r, "Sublevel.is_active", proc(L: ^luau.State) -> c.int {
+			active, known := sublevel_requested(game_of(L), string(luau.L_checkstring(L, 1)))
+			if !known {
+				script.raise(L, "the project declares no such sublevel")
+			}
+			luau.pushboolean(L, b32(active))
+			return 1
+		}, "(name: string) -> boolean")
 	script.define(r, "Scene.state", proc(L: ^luau.State) -> c.int {
 			g := game_of(L)
 			kind, loaded := scene.stage_of(&g.scenes, check_scene_number(L))

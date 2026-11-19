@@ -143,6 +143,7 @@ game_update :: proc(g: ^Game, dt: time.Duration, h: Hooks) -> (keep_running: boo
 	// of the active sublevels.
 	stream_scenes(g)
 	update_sublevels(g)
+	send_sublevel_events(g)
 	// In the editor's edit mode, and while it pauses, the world stands still and only its transforms propagate, so
 	// edits show. No script code runs then but the edit phase's, for the behaviours that run in edit mode, whose writes
 	// go to the editor's document (see docs/editor/document-and-scenes.md#modes).

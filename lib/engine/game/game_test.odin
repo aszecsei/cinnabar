@@ -128,10 +128,17 @@ the_standard_games_scripts_have_every_engine_binding :: proc(t: ^testing.T) {
 	expect(t, text, "	state: (scene: number) -> string?,")
 	// And the scene that a field waits for, as an asset that Scene.load takes.
 	expect(t, text, "	pending: (behaviour: any, field: string) -> Asset?,")
-	// The sublevels: a scene's base, and a sublevel to activate and its state.
+	// The sublevels: a scene's base, and a sublevel to activate, whether it is asked to be active, and its state.
 	expect(t, text, "	base: (scene: number) -> number?,")
-	expect(t, text, "	set_sublevel: (name: string, active: boolean) -> (),")
-	expect(t, text, "	sublevel: (name: string) -> string?,")
+	expect(t, text, "declare Sublevel:")
+	expect(t, text, "	set_active: (name: string, active: boolean) -> (),")
+	expect(t, text, "	is_active: (name: string) -> boolean,")
+	expect(t, text, "	state: (name: string) -> string?,")
+	testing.expect(
+		t,
+		!strings.contains(text, "set_sublevel"),
+		"Sublevel replaces Game.set_sublevel",
+	)
 	// And the project's.
 	expect(t, text, "declare TestComponent:")
 }
@@ -202,11 +209,11 @@ the_pointer_audit_names_the_projects_field :: proc(t: ^testing.T) {
 	}
 }
 
-@(private = "file", thread_local)
+@(private, thread_local)
 sublevel_level: u64
 
 // sublevel_game is a Game whose project declares a night sublevel that starts active and a day one that does not.
-@(private = "file")
+@(private)
 sublevel_game :: proc(arena: ^virtual.Arena) -> ^Game {
 	g := new(Game)
 	g.platform = new(core.Platform_API)
@@ -219,7 +226,7 @@ sublevel_game :: proc(arena: ^virtual.Arena) -> ^Game {
 	return g
 }
 
-@(private = "file")
+@(private)
 free_sublevel_game :: proc(g: ^Game) {
 	delete(g.scene_requests)
 	delete(g.sublevels.events)

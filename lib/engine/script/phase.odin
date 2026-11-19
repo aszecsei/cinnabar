@@ -199,6 +199,27 @@ send :: proc(r: ^Runtime, e: ecs.Entity, name: string, args: ..Event_Arg) {
 	L := r.L
 	base := luau.gettop(L)
 	push_entity(L, e)
+	push_event(r, L, name, args)
+	queue_event(r, L, base + 1, luau.gettop(L) - base)
+	luau.settop(L, base)
+}
+
+// broadcast queues an event for every behaviour whose class has its handler, on_<name>, as the game's own events
+// are (see docs/scripting/behaviours.md#events). Call it from the frame code, not from jobs. No coroutine waits
+// for it, since wait_event waits for an entity's events.
+broadcast :: proc(r: ^Runtime, name: string, args: ..Event_Arg) {
+	L := r.L
+	base := luau.gettop(L)
+	// false in the entity's place marks the event for every behaviour.
+	luau.pushboolean(L, false)
+	push_event(r, L, name, args)
+	queue_event(r, L, base + 1, luau.gettop(L) - base)
+	luau.settop(L, base)
+}
+
+// push_event pushes an event's name and its arguments.
+@(private = "file")
+push_event :: proc(r: ^Runtime, L: ^luau.State, name: string, args: []Event_Arg) {
 	luau.pushodinstring(L, name)
 	for arg in args {
 		switch v in arg {
@@ -218,8 +239,6 @@ send :: proc(r: ^Runtime, e: ecs.Entity, name: string, args: ..Event_Arg) {
 			push_asset(r, L, v)
 		}
 	}
-	queue_event(r, L, base + 1, luau.gettop(L) - base)
-	luau.settop(L, base)
 }
 
 // send_binding is entity:send(name, ...), like Unity's SendMessage.
@@ -283,7 +302,11 @@ deliver_events :: proc(r: ^Runtime) {
 
 @(private = "file")
 deliver_one :: proc(r: ^Runtime, L: ^luau.State, event: c.int) {
-	luau.rawgeti(L, event, 1)
+	if luau.rawgeti(L, event, 1) == .BOOLEAN {
+		luau.pop(L, 1)
+		deliver_broadcast(r, L, event)
+		return
+	}
 	e := to_entity(L, -1)
 	luau.rawgeti(L, event, 2)
 	handler := fmt.caprintf("on_%s", luau.toodinstring(L, -1), allocator = frame(r))
@@ -324,4 +347,24 @@ deliver_one :: proc(r: ^Runtime, L: ^luau.State, event: c.int) {
 		run_waiter(r, index, argc)
 	}
 	luau.pop(L, 2)
+}
+
+// deliver_broadcast calls on_<name> on each effective instance that gets callbacks, in slot order. An instance that a
+// handler adds gets the event too, if its slot comes later. call_method skips the classes that have no handler.
+@(private = "file")
+deliver_broadcast :: proc(r: ^Runtime, L: ^luau.State, event: c.int) {
+	luau.rawgeti(L, event, 2)
+	handler := fmt.caprintf("on_%s", luau.toodinstring(L, -1), allocator = frame(r))
+	luau.pop(L, 1)
+	argc := luau.objlen(L, event) - 2
+	for index := 0; index < r.instance_used; index += 1 {
+		i := &r.instances[index]
+		if !effective(i) || silent(r, i) {
+			continue
+		}
+		for k in 1 ..= argc {
+			luau.rawgeti(L, event, k + 2)
+		}
+		call_method(r, {u32(index), i.generation}, handler, argc)
+	}
 }

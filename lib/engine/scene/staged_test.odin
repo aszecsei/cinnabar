@@ -901,6 +901,17 @@ activating_a_sublevel_loads_its_parts_of_every_loaded_scene :: proc(t: ^testing.
 	first_lamp := find(&f.scenes, w, first_night, 0xc1)
 	second_lamp := find(&f.scenes, w, second_night, 0xc1)
 	testing.expect(t, first_lamp != 0 && second_lamp != 0 && first_lamp != second_lamp)
+	// A part's entity is its part's, by its own number, which has a stage of its own and a base: Scene.of,
+	// Scene.state and Scene.base read these.
+	lamp_scene, in_scene := scene_of(w, first_lamp)
+	testing.expect(t, in_scene)
+	testing.expect_value(t, lamp_scene, first_night)
+	part_stage, part_loaded := stage_of(&f.scenes, first_night)
+	testing.expect(t, part_loaded)
+	testing.expect_value(t, part_stage, Scene_Stage_Kind.Ready)
+	part_base, has_base := base_of(&f.scenes, first_night)
+	testing.expect(t, has_base)
+	testing.expect_value(t, part_base, first)
 	first_hall := find(&f.scenes, w, first, 0xb1)
 	second_hall := find(&f.scenes, w, second, 0xb1)
 	testing.expect_value(t, ecs.get(w, first_hall, Probe).target, first_lamp)
