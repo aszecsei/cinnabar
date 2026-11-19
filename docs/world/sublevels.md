@@ -158,5 +158,5 @@ Each part takes a slot of scene memory ([Core: Scene memory](../core/jobs-and-me
 ## Known limits
 
 - **A change to the settings' sublevels** applies when the next level starts, except that a newly declared sublevel joins the running level, inactive.
-- **The editor's scenes** come from its documents, not from blobs. The editor sends each document's parts itself, as rows that name their base. In Edit, the world has the editor's choice of sublevels, not the active set: a change of the active set in Edit unloads no part ([Editor: Parts](../editor/document-and-scenes.md#parts)). A base from the editor lists no sublevels, so activating a sublevel in Play loads no part of it.
+- **The editor's scenes** come from its documents, not from blobs. The editor sends each document's parts itself, as rows that name their base. In Edit, the world has the editor's choice of sublevels, not the active set: a change of the active set in Edit unloads no part ([Editor: Parts](../editor/document-and-scenes.md#parts)). Play starts with the project's active set, as a level does. A base from the editor lists no sublevels, so activating a sublevel in Play loads no part of it, and deactivating one unloads its parts.
 - **At most 32 sublevels** for each project, and for each scene.
