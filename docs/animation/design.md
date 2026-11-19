@@ -9,7 +9,7 @@ The animation graph poses a skeleton from clips. It takes at most one transition
 
 Read [World: Time](../world/time.md#fixed-and-variable-rate) and [Content: Animation graphs](../content/kinds/animation-graphs.md#animation-graphs) first.
 
-**In this document:** [Design](#design) · [The instance](#the-instance) · [Ticks and presentation](#ticks-and-presentation) · [Transitions and fades](#transitions-and-fades) · [Blends](#blends) · [Events](#events) · [Root motion](#root-motion) · [The ECS](#the-ecs) · [Events in the world](#events-in-the-world) · [Scripts](#scripts) · [The sample](#the-sample)
+**In this document:** [Design](#design) · [The instance](#the-instance) · [Ticks and presentation](#ticks-and-presentation) · [Transitions and fades](#transitions-and-fades) · [Blends](#blends) · [Events](#events) · [Root motion](#root-motion) · [The ECS](#the-ecs) · [Driving an Animator](#driving-an-animator) · [Events in the world](#events-in-the-world) · [Scripts](#scripts) · [The sample](#the-sample)
 
 ## Design
 
@@ -64,6 +64,12 @@ A sample is named from tick to tick by its state and its point in the state's mo
 
 It samples the clip over the rest pose and adds the pose by its weight. A rotation joins the sum on the sum's side, so a rotation and its negation do not cancel. The sum divides by its total weight, with its rotations normalized. With no weight, the rest pose holds. A pose is up to one tick late, as every presented pose is.
 
+**Driven samples.** A driver outside the graph, such as a cutscene, can give an `Animator` up to `MAX_DRIVEN` (2) driven samples. Each sample is a clip, a time and a weight (see [Driving an Animator](#driving-an-animator)). The driven layer works as follows:
+- **The time is absolute.** It is in seconds into the clip and is held to the clip's length. It does not tick and raises no events, so seek, scrub and skip all pose the same way.
+- **The blend.** `present` blends the driven samples over the graph's presented pose: the pose by `1 - W`, and each clip by its weight, where `W` is the sum of the weights. When the weights add up to more than 1, they are scaled to add up to 1.
+- **No interpolation.** A driven clip is sampled at its time with no interpolation between ticks, because the driver gives the time and the tick does not step it.
+- **The graph keeps its ticks** under the driven samples, so its state is right when the driver lets go. With `hold`, its time stops and it keeps its triggers, as `playing = false` does.
+
 ## Transitions and fades
 
 - **Order.** A tick tries the current state's own transitions in their order, then those from any state, and takes the first whose conditions all hold. A transition from any state to the current state is skipped.
@@ -106,6 +112,8 @@ With a root joint, which the graph's `root_motion` names, each tick reports:
 
 Each sample that moved adds its clip's root motion over its step by its share of the weight. Across a wrap, the end of the move and then its start count, turned by the first part's turn, so the root never jumps back. Frozen samples and samples that are gone move nothing.
 
+A driven sample's root motion is reported in the same way, or is taken out of the pose (see [Driving an Animator](#driving-an-animator)).
+
 `remove_root_motion` takes the motion out of a pose before it is composed. The root keeps its rest place along x and z in the model's space, and its rest heading, but keeps its height and tilt. The entity moves instead, if gameplay moves it, so the mesh does not walk away from its entity.
 
 ## The ECS
@@ -114,19 +122,19 @@ Each sample that moved adds its clip's root motion over its step by its share of
 
 | Component | ID | Fields |
 |---|---|---|
-| `Animator` | 80 | `graph`, an animation graph; `clip`, a clip that plays without a graph; `speed`, which scales each tick; `loop`, for the clip without a graph; `playing`. The editor shows `state` and `time`, the current state's index and its clip's time. The instance is a field that scenes do not save and the inspector does not show. |
+| `Animator` | 80 | `graph`, an animation graph; `clip`, a clip that plays without a graph; `speed`, which scales each tick; `loop`, for the clip without a graph; `playing`. The editor shows `state` and `time`, the current state's index and its clip's time. The instance is a field that scenes do not save and the inspector does not show. So is `driven`, the samples of a driver that holds it. |
 | `Root_Motion` | 81 | Written only by `animate`. `translation` and `yaw` are the last tick's; `frame_translation` and `frame_yaw` are the frame's ticks one after another. An entity with it has the root motion taken out of its pose; one without it keeps the motion in the pose. |
 
 The frame code calls the package around the ticks:
 
 | Call | When | What it does |
 |---|---|---|
-| `prepare` | Before the ticks | Loads each Animator's graph, its clips and their skin into a table in frame memory, so the system's jobs read no assets. An Animator whose graph's key differs from its instance's starts again in the entry state, with `keep_parameters`, and the warnings the cooker could not give: a root motion joint the skin does not have, and markers past their clips' ends. It starts each `Root_Motion`'s frame from nothing. |
+| `prepare` | Before the ticks | Loads each Animator's graph, its clips, their skin and its driven clips into tables in frame memory, so the system's jobs read no assets. An Animator whose graph's key differs from its instance's starts again in the entry state, with `keep_parameters`, and the warnings the cooker could not give: a root motion joint the skin does not have, and markers past their clips' ends. It starts each `Root_Motion`'s frame from nothing. |
 | `begin_frame` | Before the ticks | Clears the frame's events. |
-| `animate` | The `Fixed` system | Moves each playing Animator whose graph is ready by `dt` times `speed`, writes its `Root_Motion`, and records its events in its job's buffer. A stopped Animator holds its pose and keeps its triggers. An Animator spawned during the ticks waits for the next `prepare`. |
+| `animate` | The `Fixed` system | Moves each playing Animator whose graph is ready by `dt` times `speed`, writes its `Root_Motion`, and records its events in its job's buffer. A stopped Animator, and a driven one with `hold`, holds its pose and keeps its triggers. An Animator spawned during the ticks waits for the next `prepare`. |
 | `end_frame` | At the end of the frame code, before `asset.poll` | Lets the frame's table go, since `poll` can free the blobs that it points into. Until the next `prepare`, an Animator has no graph, so a script that runs between frames, such as a main script that a reload starts or an editor's scene load, finds none. |
 | `send_events` | After each tick's physics events | Sends the tick's events to behaviours (see [Events in the world](#events-in-the-world)). |
-| `present` | At render, after `asset.poll` | Loads the blobs again, since `poll` may have changed them. It poses each Animator whose instance fits its graph's key into a `render.Skin_Pose` for `Frame_Desc.skins`. |
+| `present` | At render, after `asset.poll` | Loads the blobs again, since `poll` may have changed them. It poses each Animator whose instance fits its graph's key, and blends its driven samples over the pose, into a `render.Skin_Pose` for `Frame_Desc.skins`. It runs in every mode, so a driven pose shows in the editor's Edit, where no ticks run. |
 
 **Gameplay sets parameters, and reads outputs.**
 - A `Fixed` system finds a parameter with `parameter(s, animator, name)` and sets it with `set_parameter` or `fire`. It writes `Animator`, so it does not run beside `animate`, and its registration order or `after` says which tick reads the value. The two systems never run at once.
@@ -134,6 +142,25 @@ The frame code calls the package around the ticks:
 - `root_motion_world(w, e)` turns an entity's last tick of root motion into the world, by the entity's `Transform`. Applying it is gameplay's: move a kinematic body, or a character, by it.
 
 **Hot reload.** The instance is plain data in the component, and the table is remade each frame, so a code reload keeps every Animator's state. A graph's new blob has a new key, so its Animators start again with the parameters that it still has. The system and the job buffer are registrations, made again by `register` in `on_reload`; the system finds the package's state through its `data` (see [World: ECS](../world/ecs.md#systems)).
+
+## Driving an Animator
+
+A system outside the graph can pose an `Animator` with up to two driven clips, at the times that it chooses. A cutscene does this to keep a character in sync with its timeline (see [Ticks and presentation](#ticks-and-presentation)). The driven state is one value, `Animator.driven: Maybe(Driven)`. Only three calls write it, and a driver holds it through a token (see [State with a lifecycle](../overview/conventions.md#state-with-a-lifecycle)):
+
+| Call | What it does |
+|---|---|
+| `begin_drive(s, w, entity, hold)` | Starts a hold on the entity's `Animator` and gives a `Drive_Token`, with a generation that `State` counts up. A driver that held the `Animator` before loses it: its token goes stale. With `hold`, the graph's time stops. |
+| `drive(w, token, samples)` | Sets the driven samples, up to `MAX_DRIVEN`. The samples that it does not give weigh nothing. It returns false, and writes nothing, through a stale token, so a driver learns that it lost the `Animator`. |
+| `end_drive(w, token)` | Ends the hold: the weights go to 0, and the graph's pose shows again. Through a stale token, it does nothing. |
+| `is_driving(w, token)` | Whether the token still holds its `Animator`. |
+
+- **A `Driven_Sample`** is a clip, a time in seconds, a weight from 0 to 1, and `root_motion`. The clip must be of the skin that the graph's clips are of. A clip of another skin, or one that has not loaded, is left out.
+- **Without a graph.** An `Animator` with no ready graph, or no graph or clip at all, is posed from its skin's rest pose, with the driven clips over it.
+- **Root motion.** The graph's root joint names the joint that root motion uses.
+  - With `root_motion`, each tick reports the clip's move since the last tick in `Root_Motion`, by its weight, beside the graph's move by `1 - W`. The pose then leaves the move out, as the graph's pose does when the entity has a `Root_Motion`. A tick whose clip changed, or whose time did not move forward, reports nothing from that sample. So a scrub back or a new clip does not move the entity.
+  - Without `root_motion`, the clip plays in place. This is what a cutscene usually wants, when a transform track moves the entity.
+  - An `Animator` that plays only a clip has no root joint, so its driven clips keep their motion in the pose.
+- **Edit and saving.** `present` poses driven samples in every mode, so the editor can scrub in Edit with no `Update` systems running. `driven` is hidden from the field walker, so scenes do not save it and the editor does not send it as a document edit. Writes to it do not mark the component as changed.
 
 ## Events in the world
 
