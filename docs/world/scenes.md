@@ -55,6 +55,7 @@ A scene owns its own entities, their children, and the entities that its entitie
 - **Children** go with their parent through `Parent`, as with every despawn.
 - **Spawns:** `scene.Scene_Owned{scene}` (component 9) marks an entity that belongs to a scene but is not in the scene's file. When a behaviour calls `World.spawn` or `World.spawn(prefab)`, the new root gets `Scene_Owned` with the scene of the behaviour's entity. This is the entity's `Scene_Entity.scene`, or its own `Scene_Owned.scene`, so a spawn of a spawn belongs to the same scene. The script runtime calls this hook through `script.set_spawned_hook`, which `scene.register_scripts` sets, with `script.calling_entity`, the entity whose callback or coroutine runs.
 - **From Odin**, `scene.spawn_prefab(..., owner = number)` gives the root `Scene_Owned`.
+- **Pooled instances** keep their owner while they wait in a pool, so an unload takes them with the scene's other entities ([Editor: Prefabs: Pooling](../editor/prefabs.md#pooling)).
 - **Global spawns:** an entity that the main script, a script action or frame code spawns has no owner. It stays until something despawns it.
 
 `scene.scene_of(w, entity)` returns the scene that an entity belongs to. `Scene_Owned` is derived like `Scene_Entity`: a scene file cannot set it, and the editor shows it read-only.
