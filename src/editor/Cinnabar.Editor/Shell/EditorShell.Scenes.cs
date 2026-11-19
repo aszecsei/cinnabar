@@ -716,6 +716,7 @@ public sealed partial class EditorShell
             foreach (var old in _scenes)
             {
                 Unsubscribe(old);
+                ForgetParts(old);
             }
             _scenes.Clear();
             Mesh.CloseMeshes();

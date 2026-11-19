@@ -43,6 +43,11 @@ public sealed partial class EditorShell
         {
             return;
         }
+        // Outside Edit the world is the game's: Stop sends the scenes again, with the choice.
+        if (!IsEditing)
+        {
+            return;
+        }
         foreach (var document in _scenes)
         {
             var parts = PartsOf(document);
@@ -139,8 +144,15 @@ public sealed partial class EditorShell
             sublevel == "" ? 0 : document.Number,
             sublevel);
 
-    // Forgets what the game's world had of a scene that closed.
-    void ForgetParts(SceneDocument document) => _parts.Remove(document.Number);
+    // Forgets what the game's world had of a scene that closed, and its parts' numbers.
+    void ForgetParts(SceneDocument document)
+    {
+        _parts.Remove(document.Number);
+        foreach (var part in _baseOfPart.Where(p => p.Value == document.Number).Select(p => p.Key).ToList())
+        {
+            _baseOfPart.Remove(part);
+        }
+    }
 
     SceneParts PartsOf(SceneDocument document)
     {
