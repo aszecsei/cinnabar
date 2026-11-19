@@ -230,6 +230,40 @@ Test.report(Health.name == "Health" and 1 or 0)
 }
 
 @(test)
+scripts_read_and_write_an_entitys_name :: proc(t: ^testing.T) {
+	f := setup_world(t)
+	defer teardown_world(f)
+	context.user_ptr = f
+	testing.expect(
+		t,
+		run(
+			t,
+			f,
+			`
+local door = World.spawn()
+Test.report(door.name == "" and 1 or 0)
+door:set_name("Front Door")
+Test.report(door.name == "Front Door" and 1 or 0)
+local long = World.spawn()
+long:set_name(string.rep("a", 62) .. "é")
+Test.report(#long.name)
+-- "" takes the name away.
+local gone = World.spawn()
+gone:set_name("Gone")
+gone:set_name("")
+Test.report(gone.name == "" and 1 or 0)
+`,
+		),
+	)
+	// A cut never splits a character: the two bytes of é do not fit after 62.
+	expect_reports(t, f, {1, 1, 62, 1})
+	named := make([dynamic]ecs.Entity, context.temp_allocator)
+	ecs.collect(&f.world, {ecs.NAME_ID}, &named)
+	testing.expect_value(t, len(named), 2)
+	testing.expect_value(t, ecs.name_of(&f.world, named[0]), "Front Door")
+}
+
+@(test)
 component_fields_read_and_write_storage :: proc(t: ^testing.T) {
 	f := setup_world(t)
 	defer teardown_world(f)

@@ -174,6 +174,11 @@ operations_of :: proc(
 					active = v.active,
 				},
 			)
+		case script.Edit_Rename:
+			append(
+				&ops,
+				link.Operation{kind = .Rename, entity = id_of(w, v.entity, ids), name = v.name},
+			)
 		case script.Edit_Attach:
 			fields := make([dynamic]link.Scene_Field, allocator)
 			for f in v.fields {
@@ -461,6 +466,8 @@ edited_entity :: proc(edit: script.Edit, edits: script.Edits) -> ecs.Entity {
 	case script.Edit_Parent:
 		return v.entity
 	case script.Edit_Active:
+		return v.entity
+	case script.Edit_Rename:
 		return v.entity
 	case script.Edit_Attach:
 		return v.entity

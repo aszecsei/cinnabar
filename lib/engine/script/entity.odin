@@ -2,6 +2,7 @@ package script
 
 import "core:c"
 import "core:fmt"
+import "core:strings"
 
 import "cinnabar:core/luau"
 import format "cinnabar:engine/asset/format"
@@ -21,6 +22,7 @@ register_world :: proc(r: ^Runtime) {
 	light_method(r, .Entity, "move", entity_move)
 	light_method(r, .Entity, "set_parent", entity_set_parent)
 	light_method(r, .Entity, "set_active", entity_set_active)
+	light_method(r, .Entity, "set_name", entity_set_name)
 	light_method(r, .Entity, "send", send_binding)
 
 	define(r, "World.spawn", world_spawn)
@@ -85,6 +87,10 @@ light_index :: proc(L: ^luau.State) -> c.int {
 		case "parent":
 			parent := ecs.get(r.world, e, ecs.Parent)
 			push_entity(L, parent.entity if parent != nil else 0)
+			return 1
+		case "name":
+			name, ok := renamed(r, e)
+			luau.pushodinstring(L, name if ok else ecs.name_of(r.world, e))
 			return 1
 		case "active_self":
 			luau.pushboolean(L, b32(ecs.active_self(r.world, e)))
@@ -302,6 +308,31 @@ entity_set_active :: proc(L: ^luau.State) -> c.int {
 	}
 	ecs.set_active(w, e, active)
 	drain_log(r)
+	return 0
+}
+
+// entity_set_name gives the entity a name, for the outliner and logs. "" takes its name away, and a longer name than
+// ecs.MAX_NAME is cut.
+@(private = "file")
+entity_set_name :: proc(L: ^luau.State) -> c.int {
+	r, w := world_of(L)
+	e := alive_entity(L, 1)
+	name := ecs.make_name(checkodinstring(L, 2))
+	if is_stand_in(r, e) {
+		raise(
+			L,
+			"a prefab that a behaviour spawns in Edit mode takes only a pose, a parent and its active state",
+		)
+	}
+	if records_writes_to(r, e) {
+		record_edit(r, Edit_Rename{e, strings.clone(ecs.name_text(&name), frame(r))})
+		return 0
+	}
+	if name.length == 0 {
+		ecs.remove(w, e, ecs.Name)
+	} else {
+		ecs.add(w, e, name)
+	}
 	return 0
 }
 

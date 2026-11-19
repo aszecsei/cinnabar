@@ -161,6 +161,65 @@ structural_changes_in_edit_are_recorded :: proc(t: ^testing.T) {
 }
 
 @(test)
+a_rename_in_edit_is_recorded_and_reads_back :: proc(t: ^testing.T) {
+	f := setup_document(t)
+	defer teardown_world(f)
+	context.user_ptr = f
+	e := document_entity(f)
+	ecs.add(&f.world, e, ecs.make_name("Door"))
+	tool(
+		t,
+		f,
+		`
+	Test.report(doc.name == "Door" and 1 or 0)
+	doc:set_name("Gate")
+	Test.report(doc.name == "Gate" and 1 or 0)
+	doc:set_name("")
+	Test.report(doc.name == "" and 1 or 0)
+`,
+	)
+	run_edit_phase(&f.runtime, FRAME)
+	expect_reports(t, f, {1, 1, 1})
+	// The world keeps its name until the editor's edit comes back.
+	testing.expect_value(t, ecs.name_of(&f.world, e), "Door")
+
+	edits := take_edits(&f.runtime)
+	testing.expect_value(t, len(edits.list), 2)
+	if len(edits.list) == 2 {
+		testing.expect_value(t, edits.list[0].(Edit_Rename).name, "Gate")
+		testing.expect_value(t, edits.list[1].(Edit_Rename).name, "")
+		testing.expect_value(t, edits.list[1].(Edit_Rename).entity, e)
+	}
+}
+
+@(test)
+a_drafts_name_is_its_own :: proc(t: ^testing.T) {
+	f := setup_document(t)
+	defer teardown_world(f)
+	context.user_ptr = f
+	tool(
+		t,
+		f,
+		`
+	if Time.frame > 2 then return end
+	local draft = World.spawn()
+	draft:set_name("Spoke")
+	Test.report(draft.name == "Spoke" and 1 or 0)
+`,
+	)
+	document_entity(f)
+	run_edit_phase(&f.runtime, FRAME)
+	expect_reports(t, f, {1})
+	edits := take_edits(&f.runtime)
+	// The draft's name is in the world, for the game to read, and is no edit of its own.
+	testing.expect_value(t, len(edits.list), 1)
+	if len(edits.list) == 1 {
+		spawn := edits.list[0].(Edit_Spawn)
+		testing.expect_value(t, ecs.name_of(&f.world, spawn.entity), "Spoke")
+	}
+}
+
+@(test)
 a_spawn_in_edit_is_a_draft :: proc(t: ^testing.T) {
 	f := setup_document(t)
 	defer teardown_world(f)
