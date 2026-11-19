@@ -59,7 +59,7 @@ run_operation :: proc(
 	case cook_link.Rename_Asset:
 		result = rename_asset(roots, index, op)
 	case cook_link.Rename_Folder:
-		result = rename_folder(roots, op)
+		result = rename_folder(roots, index, op)
 	case cook_link.Duplicate_Assets:
 		result = duplicate_assets(roots, index, op)
 	case cook_link.Delete_Assets:
@@ -157,12 +157,6 @@ create_folder :: proc(roots: []Root, op: cook_link.Create_Folder) -> cook_link.O
 	return {}
 }
 
-// A move of a source and its .meta file, for undoing what a failed operation already did.
-@(private = "file")
-Move :: struct {
-	from, to: string,
-}
-
 @(private = "file")
 move_assets :: proc(
 	roots: []Root,
@@ -173,7 +167,7 @@ move_assets :: proc(
 	if error != "" {
 		return failed("%s", error)
 	}
-	moves := make([dynamic]Move, context.temp_allocator)
+	moves := make([dynamic]Path_Move, context.temp_allocator)
 	for guid in op.guids {
 		from, found := asset_path(roots, index, guid)
 		if !found {
@@ -191,9 +185,9 @@ move_assets :: proc(
 		if os.exists(to) || os.exists(meta_of(to)) {
 			return failed("%s already exists", display(roots, to))
 		}
-		append(&moves, Move{from, to})
+		append(&moves, Path_Move{from, to})
 	}
-	return do_moves(roots, moves[:])
+	return do_moves(roots, index, moves[:], op.rewrite_requires)
 }
 
 @(private = "file")
@@ -219,12 +213,25 @@ rename_asset :: proc(
 	if !strings.equal_fold(to, from) && (os.exists(to) || os.exists(meta_of(to))) {
 		return failed("%s already exists", display(roots, to))
 	}
-	return do_moves(roots, {{from, to}})
+	return do_moves(roots, index, {{from, to}}, op.rewrite_requires)
 }
 
-// do_moves moves each source with its .meta file. If one fails, it moves back what it moved, and fails.
+// do_moves moves each source with its .meta file, and with rewrite_requires, rewrites the requires that the moves break.
+// It works out the rewrites first. If a move or a write fails, it puts back what it did, and fails.
 @(private = "file")
-do_moves :: proc(roots: []Root, moves: []Move) -> cook_link.Operation_Result {
+do_moves :: proc(
+	roots: []Root,
+	index: ^Index,
+	moves: []Path_Move,
+	rewrite_requires: bool,
+) -> cook_link.Operation_Result {
+	rewrites: Require_Rewrites
+	if rewrite_requires {
+		error: string
+		if rewrites, error = plan_rewrites(roots, index, moves); error != "" {
+			return failed("%s", error)
+		}
+	}
 	for m, i in moves {
 		error := move_file(meta_of(m.from), meta_of(m.to))
 		if error == "" {
@@ -234,10 +241,7 @@ do_moves :: proc(roots: []Root, moves: []Move) -> cook_link.Operation_Result {
 			}
 		}
 		if error != "" {
-			#reverse for done in moves[:i] {
-				move_file(done.to, done.from)
-				move_file(meta_of(done.to), meta_of(done.from))
-			}
+			undo_moves(moves[:i])
 			return failed(
 				"cannot move %s to %s: %s",
 				display(roots, m.from),
@@ -246,14 +250,65 @@ do_moves :: proc(roots: []Root, moves: []Move) -> cook_link.Operation_Result {
 			)
 		}
 	}
+	if error := write_rewrites(roots, rewrites); error != "" {
+		undo_moves(moves)
+		return failed("%s", error)
+	}
 	for m in moves {
 		log.infof("cook: moved %s to %s", display(roots, m.from), display(roots, m.to))
 	}
-	return {}
+	log_rewrites(rewrites)
+	return {rewritten = rewrites.rewritten, not_rewritten = rewrites.not_rewritten}
 }
 
 @(private = "file")
-rename_folder :: proc(roots: []Root, op: cook_link.Rename_Folder) -> cook_link.Operation_Result {
+undo_moves :: proc(moves: []Path_Move) {
+	#reverse for done in moves {
+		move_file(done.to, done.from)
+		move_file(meta_of(done.to), meta_of(done.from))
+	}
+}
+
+// write_rewrites writes the scripts whose requires a move rewrote. If a write fails, it puts back what it wrote, and
+// returns why. The reason also names each script that it could not put back, which keeps its new requires.
+@(private = "file")
+write_rewrites :: proc(roots: []Root, rewrites: Require_Rewrites) -> string {
+	for e, n in rewrites.edits {
+		if write_blob(e.path, e.new) {
+			continue
+		}
+		b := strings.builder_make(context.temp_allocator)
+		fmt.sbprintf(&b, "cannot write %s", display(roots, e.path))
+		for done in rewrites.edits[:n] {
+			if !write_blob(done.path, done.old) {
+				fmt.sbprintf(
+					&b,
+					", and cannot put back %s, which keeps its new requires",
+					display(roots, done.path),
+				)
+			}
+		}
+		return strings.to_string(b)
+	}
+	return ""
+}
+
+@(private = "file")
+log_rewrites :: proc(rewrites: Require_Rewrites) {
+	for r in rewrites.rewritten {
+		log.infof("cook: rewrote the require %q at %s:%d as %q", r.old, r.path, r.line, r.new)
+	}
+	for path in rewrites.not_rewritten {
+		log.warnf("cook: %s does not parse, so its requires were not rewritten", path)
+	}
+}
+
+@(private = "file")
+rename_folder :: proc(
+	roots: []Root,
+	index: ^Index,
+	op: cook_link.Rename_Folder,
+) -> cook_link.Operation_Result {
 	if op.path == "" {
 		return failed("a root cannot be renamed")
 	}
@@ -272,11 +327,23 @@ rename_folder :: proc(roots: []Root, op: cook_link.Rename_Folder) -> cook_link.O
 	if !strings.equal_fold(to, from) && os.exists(to) {
 		return failed("%s already exists", display(roots, to))
 	}
+	rewrites: Require_Rewrites
+	if op.rewrite_requires {
+		plan_error: string
+		if rewrites, plan_error = plan_rewrites(roots, index, {{from, to}}); plan_error != "" {
+			return failed("%s", plan_error)
+		}
+	}
 	if move_error := move_file(from, to); move_error != "" {
 		return failed("cannot rename %s: %s", display(roots, from), move_error)
 	}
+	if write_error := write_rewrites(roots, rewrites); write_error != "" {
+		move_file(to, from)
+		return failed("%s", write_error)
+	}
 	log.infof("cook: renamed the folder %s to %s", display(roots, from), display(roots, to))
-	return {}
+	log_rewrites(rewrites)
+	return {rewritten = rewrites.rewritten, not_rewritten = rewrites.not_rewritten}
 }
 
 @(private = "file")

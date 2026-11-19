@@ -128,6 +128,16 @@ public sealed class ContentBrowser
     /// <summary>The cook daemon refused an operation, with its reason. The window shows it.</summary>
     public event Action<string>? OperationFailed;
 
+    /// <summary>A move rewrote requires, or could not read some scripts' requires. The window shows which.</summary>
+    public event Action<OperationResult>? RequiresRewritten;
+
+    /// <summary>
+    /// Asks whether a move also rewrites the requires that it breaks, given the scripts that it may change: true to
+    /// rewrite them, false to only move, or null to cancel the move. Without it, a move rewrites nothing (see
+    /// docs/content/daemon-and-operations.md#moved-modules).
+    /// </summary>
+    public Func<IReadOnlyList<Asset>, Task<bool?>>? AskRewriteRequires { get; set; }
+
     /// <summary>Shows an asset in the content browser, selected in its folder.</summary>
     public void RevealAsset(string guid) => Reveal(new ContentItem(guid, null));
 
@@ -244,7 +254,11 @@ public sealed class ContentBrowser
     {
         if (item.Guid is { } guid)
         {
-            var moved = await movingScene(() => Operate(new RenameAsset(guid, name)));
+            if (await RewriteRequires([guid]) is not { } rewriteAsset)
+            {
+                return false;
+            }
+            var moved = await Move(new RenameAsset(guid, name, rewriteAsset));
             if (moved)
             {
                 Reveal(item);
@@ -255,7 +269,8 @@ public sealed class ContentBrowser
         {
             return false;
         }
-        if (!await movingScene(() => Operate(new RenameFolder(folder.Root, folder.Path, name))))
+        if (await RewriteRequires([.. assets.AssetsUnder(folder.Root, folder.Path).Select(a => a.Guid)]) is not { } rewrite
+            || !await Move(new RenameFolder(folder.Root, folder.Path, name, rewrite)))
         {
             return false;
         }
@@ -266,11 +281,61 @@ public sealed class ContentBrowser
     /// <summary>Moves assets, each with its .meta file, into a folder.</summary>
     public async Task<bool> MoveAssets(IReadOnlyList<string> guids, ContentFolder to)
     {
-        if (guids.Count == 0 || !await movingScene(() => Operate(new MoveAssets([.. guids], to.Root, to.Path))))
+        if (guids.Count == 0 || await RewriteRequires(guids) is not { } rewrite
+            || !await Move(new MoveAssets([.. guids], to.Root, to.Path, rewrite)))
         {
             return false;
         }
         Reveal(new ContentItem(guids[0], null));
+        return true;
+    }
+
+    /// <summary>
+    /// The scripts whose requires a move of assets may break: those that stay and require a moved script, and the moved
+    /// scripts that require one that stays. Each comes once, by root and path.
+    /// </summary>
+    public IReadOnlyList<Asset> RequireEffects(IReadOnlyCollection<string> moved)
+    {
+        var movedSet = moved.ToHashSet();
+        var scripts = moved.Select(assets.Find).OfType<Asset>().Where(a => a.Kind == AssetKind.Script).ToList();
+        if (scripts.Count == 0)
+        {
+            return [];
+        }
+        return [.. assets.DependentsOutside([.. scripts.Select(s => s.Guid)])
+            .Where(a => a.Kind == AssetKind.Script && !movedSet.Contains(a.Guid))
+            .Concat(scripts.Where(s => s.Dependencies.Any(d => !movedSet.Contains(d))))
+            .DistinctBy(a => a.Guid)
+            .OrderBy(a => a.Root, StringComparer.Ordinal).ThenBy(a => a.Path, StringComparer.OrdinalIgnoreCase)];
+    }
+
+    // Whether a move rewrites requires: false when it breaks none or nothing asks, and null when the user cancelled.
+    async Task<bool?> RewriteRequires(IReadOnlyCollection<string> moved)
+    {
+        var scripts = RequireEffects(moved);
+        return scripts.Count == 0 || AskRewriteRequires is not { } ask ? false : await ask(scripts);
+    }
+
+    // A move, rename or folder rename, which may move the open scene, and reports the requires that it rewrote.
+    async Task<bool> Move(ILinkMessage operation)
+    {
+        OperationResult? answer = null;
+        if (!await movingScene(async () => answer = await Operate(operation)) || answer == null)
+        {
+            return false;
+        }
+        foreach (var r in answer.Rewritten)
+        {
+            console.Add(LogLevel.Info, $"content: rewrote the require \"{r.Old}\" at {r.Path}:{r.Line} as \"{r.New}\"");
+        }
+        foreach (var path in answer.NotRewritten)
+        {
+            console.Add(LogLevel.Warning, $"content: {path} does not parse, so its requires were not rewritten");
+        }
+        if (answer.Rewritten.Length > 0 || answer.NotRewritten.Length > 0)
+        {
+            RequiresRewritten?.Invoke(answer);
+        }
         return true;
     }
 

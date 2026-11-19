@@ -2,7 +2,7 @@
 
 The daemon keeps the cache current while sources change, owns every `.meta` file, does the editor's asset operations, and serves the cook link.
 
-**In this document:** [Cook daemon](#cook-daemon) · [Saved index](#saved-index) · [Thumbnails](#thumbnails)
+**In this document:** [Cook daemon](#cook-daemon) · [Saved index](#saved-index) · [Moved modules](#moved-modules) · [Thumbnails](#thumbnails)
 
 ## Cook daemon
 
@@ -53,11 +53,22 @@ The daemon is the only program that writes `.meta` files, and it moves every ass
 - **Import settings:** `Set_Import_Settings` takes the new settings of any number of assets, all of them or none. The daemon checks every asset's settings with its importer before it writes anything, writes each `.meta` file through a temporary file, puts back the ones that it wrote when a write fails, and cooks the assets again in one pass, because the settings are part of their keys. A `.meta` file keeps its comments. A setting that the importer does not know stays as the file has it, but the editor cannot add one. **Re-import** cooks assets again with the same settings, also when their keys say that they are up to date.
 - **Saving a scene** is the editor's. Save As writes the scene's text where the user picks, and a new scene in a root gets its `.meta` file at the daemon's next pass, as any new file does. A new mesh's and a new weather map's `.meta` files are the editor's to write, with the GUID that the scene names, and the weather map's with `usage = data` and `[mip_map] enabled = false`, so the reference resolves at the next pass (see [Editor](../editor/shell-and-panels.md#weather-map)); the daemon owns them from then on.
 - **No undo:** asset operations change the project, not the scene, so they are not on the editor's undo stack. The Recycle Bin recovers a deleted asset.
-- **Moved modules:** a `require` names a path, so moving or renaming a script breaks the requires of the scripts that require it. The next pass reports each broken require as a problem of the script that has it, with its line.
+- **Moved modules:** a `require` names a path, so a move or a rename of a script can break requires. The daemon can rewrite them in the same operation (see [Moved modules](#moved-modules)).
 - **Moves outside the editor:** when Explorer or git moves a source without its `.meta` file, the `.meta` file that stays behind is an orphan. Before a daemon's pass reads the assets, it pairs each orphan with the moved source: a new file without a `.meta` file, of the same kind and with the same hash of its contents as the orphan's asset had in the saved index (see [Saved index](#saved-index)). The daemon moves the orphan next to that source, under the locks of both roots, and logs the pairing. The asset keeps its GUID and its import settings, so the scenes and materials that name it still find it. The code is `pair_orphans` in `tools/cook/scan.odin`.
   - **Only one match:** an orphan pairs only when one new file matches it and no other orphan has the same kind and hash. When several match, as when a file is moved and also copied, nothing pairs: each new file gets a new GUID, and the orphan's warning names the files that match. The user then moves the `.meta` file to the correct file by hand.
   - **What does not pair:** a source that changed before or after its move, as its hash then differs, and a move that a batch cook scans first, as a batch cook keeps no saved index. The new source then gets a new GUID, and the scan reports the orphan as a warning.
 - **Directory handles:** the scan reads each directory with `os.read_all_directory_by_path`. Odin's `os.walker` leaves the last directory that it reads open, which would stop the daemon from renaming or deleting that folder.
+
+### Moved modules
+
+A `require` names a path, so a move breaks the requires of the scripts that require a moved script, and the relative requires of a moved script itself. `Move_Assets`, `Rename_Asset` and `Rename_Folder` take `rewrite_requires`. When it is set, the daemon rewrites these requires in the same operation, as an IDE rewrites imports. Without it, the next pass reports each broken require as a problem of the script that has it, with its line and column. The code is `tools/cook/require_rewrite.odin`.
+
+- **The editor asks first.** Before a move, the editor finds in its index the scripts that the move may change: the scripts that stay and require a moved script, and the moved scripts that require one that stays. If there are any, it lists them and asks: Update Requires, Move Only or Cancel.
+- **Which requires:** the daemon finds, in the index, each script that moves or that depends on a script that moves, and parses its source again. It resolves each require with the paths before the move. A require changes when its script or its module moves and its string after the move is different. A require that is broken already stays as it is.
+- **The same form:** the new string has the form of the old one, by Luau's rules (see [Scripting](../scripting/tooling-and-hot-reload.md#modules-and-require)). A relative string stays relative. `@self/` and an alias stay, with the alias's name spelled as the source spelled it, while the module is still under the folder that they name. When it is not, the new string is relative.
+- **Only the literal:** the parser gives each require's literal with its byte span. The daemon replaces only those bytes, and keeps the quote character or the long brackets. Everything else in the file stays the same.
+- **All or nothing:** the daemon works out every new string first, and checks that each one finds its module after the move. Then it moves the files, and writes each changed script through a temporary file and a rename. If a write fails, it puts back the scripts that it wrote and moves the files back.
+- **The result** lists each rewritten require: its script after the move, its line, and its string before and after. It also lists the scripts that do not parse, whose requires the daemon could not read and did not rewrite. The editor shows these in a dialog and logs every line to the console.
 
 ### Cook link
 
@@ -81,7 +92,7 @@ The editor talks to the daemon through the cook link. It has the editor link's t
 | Index | `Asset_Snapshot` with every asset and folder, then `Asset_Delta` with the changed and removed assets and the folders that came and went, and `Shading_Models` |
 | Cooking | `Cook_Progress` with a step's kind, a stage's name, and the jobs done and in all, `Asset_Problems` with each problem's file, line, column and text, and `Cook_Finished` with the generation, the counts and the time |
 | Previews | `Cook_Preview`, a request answered with a `Preview_Result` of the same request ID; a GOAP decision's `Plan_Query`, answered with a `Plan_Answer` |
-| Operations | `Create_Asset`, `Create_Folder`, `Move_Assets`, `Rename_Asset`, `Rename_Folder`, `Duplicate_Assets`, `Delete_Assets`, `Set_Import_Settings`, `Reimport`, each a request answered with an `Operation_Result` of the same request ID: the reason that it failed, or the GUIDs of the assets that it made |
+| Operations | `Create_Asset`, `Create_Folder`, `Move_Assets`, `Rename_Asset`, `Rename_Folder`, `Duplicate_Assets`, `Delete_Assets`, `Set_Import_Settings`, `Reimport`, each a request answered with an `Operation_Result` of the same request ID: the reason that it failed, or the GUIDs of the assets that it made, and the requires that a move rewrote |
 
 ### Thumbnails
 

@@ -6,8 +6,18 @@ import "core:c"
 // configuration library are only the cooker's.
 foreign import luau_tools {"../../build/obj/luau/static/out/luau_tools.lib", "../../build/obj/luau/static/out/Luau.Analysis.lib", "../../build/obj/luau/static/out/Luau.Config.lib"}
 
-// Luau_Report receives a require path, or an error message. line is 1-based.
+// Luau_Report receives an error message. line is 1-based.
 Luau_Report :: #type proc "c" (ud: rawptr, text: [^]u8, size: c.size_t, line: c.int)
+
+// Luau_Require_Report receives a require path. line and column are 1-based, and the column counts bytes. start and end
+// are the byte offsets in the source of the string literal, with its quotes or brackets.
+Luau_Require_Report :: #type proc "c" (
+	ud: rawptr,
+	text: [^]u8,
+	size: c.size_t,
+	line, column: c.int,
+	start, end: c.size_t,
+)
 
 @(default_calling_convention = "c")
 foreign luau_tools {
@@ -15,7 +25,7 @@ foreign luau_tools {
 	// error, or a require whose argument is not a string literal, goes to on_error. It returns false if the source
 	// does not parse. defines_class is set if the source calls Behaviour.define or Action.define, and native if it starts
 	// with a --!native comment.
-	cn_luau_find_requires :: proc(source: [^]u8, size: c.size_t, ud: rawptr, on_require, on_error: Luau_Report, defines_class, native: ^bool) -> bool ---
+	cn_luau_find_requires :: proc(source: [^]u8, size: c.size_t, ud: rawptr, on_require: Luau_Require_Report, on_error: Luau_Report, defines_class, native: ^bool) -> bool ---
 
 	cn_luau_checker_create :: proc() -> ^Luau_Checker ---
 	cn_luau_checker_destroy :: proc(checker: ^Luau_Checker) ---

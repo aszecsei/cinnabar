@@ -165,6 +165,265 @@ moves_and_renames_keep_the_guid :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(o.pass.problems.list), 0)
 }
 
+// A module, a script that requires it by a relative path, one that requires it by an alias, and a folder module that
+// requires its part by @self. The alias is in a .luaurc above the root, as luau-lsp reads it.
+@(private = "file")
+open_modules :: proc(t: ^testing.T) -> Ops {
+	return ops_open(
+		t,
+		{
+			{".luaurc", `{"aliases": {"Lib": "./content/lib"}}`},
+			{"content/lib/helper.luau", "return 2"},
+			{"content/lib/util.luau", "local helper = require(\"./helper\")\nreturn {x = helper}"},
+			{
+				"content/door.luau",
+				"-- The door.\nlocal util = require(\"./lib/util\")\nreturn util.x",
+			},
+			{"content/gate.luau", "local util = require('@Lib/util') -- by alias\nreturn util.x"},
+			{"content/thing/init.luau", "return {part = require(\"@self/part\")}"},
+			{"content/thing/part.luau", "return 3"},
+		},
+	)
+}
+
+@(private = "file")
+read_content :: proc(o: ^Ops, path: string) -> string {
+	data, _ := os.read_entire_file(
+		fmt.tprintf("%s/content/%s", o.tree.dir, path),
+		context.temp_allocator,
+	)
+	return string(data)
+}
+
+@(private = "file")
+expect_cooks :: proc(t: ^testing.T, o: ^Ops, location := #caller_location) {
+	testing.expect(t, o.pass.ok, loc = location)
+	for p in o.pass.problems.list {
+		testing.expectf(t, false, "%s", problem_text(p), loc = location)
+	}
+}
+
+@(test)
+moving_a_module_rewrites_its_requires :: proc(t: ^testing.T) {
+	o := open_modules(t)
+	defer ops_close(&o)
+	expect_cooks(t, &o)
+	util := guid_at(&o, "lib/util.luau")
+
+	testing.expect_value(
+		t,
+		operate(&o, cook_link.Create_Folder{root = "game", path = "lib/core"}).error,
+		"",
+	)
+	result := operate(
+		&o,
+		cook_link.Move_Assets {
+			guids = {util},
+			root = "game",
+			folder = "lib/core",
+			rewrite_requires = true,
+		},
+	)
+	testing.expect_value(t, result.error, "")
+	// Only the literals change, each in the form that it had: the dependents' relative path and alias, and the moved
+	// module's own relative require.
+	testing.expect_value(
+		t,
+		read_content(&o, "door.luau"),
+		"-- The door.\nlocal util = require(\"./lib/core/util\")\nreturn util.x",
+	)
+	testing.expect_value(
+		t,
+		read_content(&o, "gate.luau"),
+		"local util = require('@Lib/core/util') -- by alias\nreturn util.x",
+	)
+	testing.expect_value(
+		t,
+		read_content(&o, "lib/core/util.luau"),
+		"local helper = require(\"../helper\")\nreturn {x = helper}",
+	)
+	expected := []cook_link.Rewritten_Require {
+		{path = "game/door.luau", line = 2, old = "./lib/util", new = "./lib/core/util"},
+		{path = "game/gate.luau", line = 1, old = "@Lib/util", new = "@Lib/core/util"},
+		{path = "game/lib/core/util.luau", line = 1, old = "./helper", new = "../helper"},
+	}
+	testing.expect_value(t, len(result.rewritten), len(expected))
+	for r, i in result.rewritten {
+		if i < len(expected) {
+			testing.expect_value(t, r, expected[i])
+		}
+	}
+	testing.expect_value(t, len(result.not_rewritten), 0)
+	expect_cooks(t, &o)
+
+	// A rename is a move too.
+	renamed := operate(
+		&o,
+		cook_link.Rename_Asset{guid = util, name = "tools", rewrite_requires = true},
+	)
+	testing.expect_value(t, renamed.error, "")
+	testing.expect_value(t, len(renamed.rewritten), 2)
+	testing.expect(
+		t,
+		strings.contains(read_content(&o, "door.luau"), `require("./lib/core/tools")`),
+	)
+	testing.expect(
+		t,
+		strings.contains(read_content(&o, "gate.luau"), `require('@Lib/core/tools')`),
+	)
+	expect_cooks(t, &o)
+
+	// A part of a folder module keeps its @self require.
+	testing.expect_value(
+		t,
+		operate(&o, cook_link.Create_Folder{root = "game", path = "thing/inner"}).error,
+		"",
+	)
+	part := operate(
+		&o,
+		cook_link.Move_Assets {
+			guids = {guid_at(&o, "thing/part.luau")},
+			root = "game",
+			folder = "thing/inner",
+			rewrite_requires = true,
+		},
+	)
+	testing.expect_value(t, part.error, "")
+	testing.expect_value(
+		t,
+		read_content(&o, "thing/init.luau"),
+		"return {part = require(\"@self/inner/part\")}",
+	)
+	expect_cooks(t, &o)
+}
+
+@(test)
+renaming_a_folder_rewrites_requires :: proc(t: ^testing.T) {
+	o := open_modules(t)
+	defer ops_close(&o)
+
+	result := operate(
+		&o,
+		cook_link.Rename_Folder {
+			root = "game",
+			path = "lib",
+			name = "shared",
+			rewrite_requires = true,
+		},
+	)
+	testing.expect_value(t, result.error, "")
+	testing.expect(t, strings.contains(read_content(&o, "door.luau"), `require("./shared/util")`))
+	// The alias names the old folder, so the require becomes relative.
+	testing.expect(t, strings.contains(read_content(&o, "gate.luau"), `require('./shared/util')`))
+	// The module and its helper moved together, so its require stays.
+	testing.expect(
+		t,
+		strings.contains(read_content(&o, "shared/util.luau"), `require("./helper")`),
+	)
+	testing.expect_value(t, len(result.rewritten), 2)
+	expect_cooks(t, &o)
+}
+
+@(test)
+a_move_without_rewrite_requires_leaves_them :: proc(t: ^testing.T) {
+	o := open_modules(t)
+	defer ops_close(&o)
+	before := read_content(&o, "door.luau")
+
+	operate(&o, cook_link.Create_Folder{root = "game", path = "lib/core"})
+	result := operate(
+		&o,
+		cook_link.Move_Assets {
+			guids = {guid_at(&o, "lib/util.luau")},
+			root = "game",
+			folder = "lib/core",
+		},
+	)
+	testing.expect_value(t, result.error, "")
+	testing.expect_value(t, len(result.rewritten), 0)
+	testing.expect_value(t, read_content(&o, "door.luau"), before)
+	// The next pass reports the broken requires.
+	testing.expect(t, !o.pass.ok)
+}
+
+@(test)
+a_failed_rewrite_moves_back :: proc(t: ^testing.T) {
+	o := open_modules(t)
+	defer ops_close(&o)
+	util := guid_at(&o, "lib/util.luau")
+	door_before, gate_before := read_content(&o, "door.luau"), read_content(&o, "gate.luau")
+	operate(&o, cook_link.Create_Folder{root = "game", path = "lib/core"})
+
+	// A read-only file cannot be replaced, so the write of gate.luau fails after door.luau's.
+	gate := fmt.tprintf("%s/content/gate.luau", o.tree.dir)
+	wide := win.utf8_to_wstring(gate, context.temp_allocator)
+	testing.expect(t, bool(win.SetFileAttributesW(wide, win.FILE_ATTRIBUTE_READONLY)))
+	defer win.SetFileAttributesW(wide, win.FILE_ATTRIBUTE_NORMAL)
+
+	result: cook_link.Operation_Result
+	{
+		context.logger = log.nil_logger()
+		result = operate(
+			&o,
+			cook_link.Move_Assets {
+				guids = {util},
+				root = "game",
+				folder = "lib/core",
+				rewrite_requires = true,
+			},
+		)
+	}
+	testing.expect(t, strings.contains(result.error, "gate.luau"))
+	testing.expect_value(t, guid_at(&o, "lib/util.luau"), util)
+	testing.expect(t, !exists(&o, "lib/core/util.luau") && exists(&o, "lib/util.luau.meta"))
+	testing.expect_value(t, read_content(&o, "door.luau"), door_before)
+	testing.expect_value(t, read_content(&o, "gate.luau"), gate_before)
+	testing.expect_value(
+		t,
+		read_content(&o, "lib/util.luau"),
+		"local helper = require(\"./helper\")\nreturn {x = helper}",
+	)
+	expect_cooks(t, &o)
+}
+
+@(test)
+new_require_paths_keep_their_form :: proc(t: ^testing.T) {
+	Case :: struct {
+		old, requirer, target, expected: string,
+	}
+	for c in ([]Case {
+			{"./util", "/c/door.luau", "/c/lib/util.luau", "./lib/util"},
+			{"../util", "/c/a/door.luau", "/c/a/b/util.luau", "./b/util"},
+			{"./util", "/c/a/b/door.luau", "/c/util.luau", "../../util"},
+			// A folder module is named by its folder.
+			{"./thing", "/c/door.luau", "/c/x/thing/init.luau", "./x/thing"},
+			// init.luau's parent is its folder's parent.
+			{"./util", "/c/a/init.luau", "/c/a/util.luau", "./a/util"},
+			{"@self/part", "/c/a/init.luau", "/c/a/b/part.luau", "@self/b/part"},
+			// The part left the module, so the require becomes relative.
+			{"@SELF/part", "/c/a/init.luau", "/c/part.luau", "./part"},
+			// The module is the requirer's own folder.
+			{"./a", "/c/a/b.luau", "/c/a/init.luau", "../a"},
+		}) {
+		testing.expectf(
+			t,
+			new_require_path(c.old, c.requirer, c.target) == c.expected,
+			"%v gave %q",
+			c,
+			new_require_path(c.old, c.requirer, c.target),
+		)
+	}
+	literal :: proc(old, text: string) -> string {
+		s, _ := literal_with(old, text)
+		return s
+	}
+	testing.expect_value(t, literal(`"./a"`, "./b"), `"./b"`)
+	testing.expect_value(t, literal(`'./a'`, "./it's"), `'./it\'s'`)
+	testing.expect_value(t, literal(`[==[./a]==]`, "./b"), `[==[./b]==]`)
+	_, ok := literal_with(`[[./a]]`, "./]]")
+	testing.expect(t, !ok)
+}
+
 @(private = "file")
 slice_has_folder :: proc(folders: []cook_link.Folder, f: cook_link.Folder) -> bool {
 	for g in folders {

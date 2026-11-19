@@ -65,8 +65,11 @@ Resolved_Require :: struct {
 }
 
 Found_Require :: struct {
-	path: string,
-	line: int,
+	path:         string,
+	// 1-based. The column counts bytes.
+	line, column: int,
+	// The byte offsets in the source of the string literal, with its quotes or brackets.
+	start, end:   int,
 }
 
 // cook_scripts cooks the scripts among the assets whose keys changed. A script that fails keeps its old blob, so the
@@ -300,12 +303,24 @@ Find_Context :: struct {
 
 // find_requires lists the script's require calls. A parse error or a require without a string literal is an error.
 find_requires :: proc(s: ^Script_Source, problems: ^Problems) -> bool {
-	on_require :: proc "c" (ud: rawptr, text: [^]u8, size: c.size_t, line: c.int) {
+	on_require :: proc "c" (
+		ud: rawptr,
+		text: [^]u8,
+		size: c.size_t,
+		line, column: c.int,
+		start, end: c.size_t,
+	) {
 		f := (^Find_Context)(ud)
 		context = f.ctx
 		append(
 			&f.script.requires,
-			Found_Require{strings.clone(string(text[:size]), context.temp_allocator), int(line)},
+			Found_Require {
+				path = strings.clone(string(text[:size]), context.temp_allocator),
+				line = int(line),
+				column = int(column),
+				start = int(start),
+				end = int(end),
+			},
 		)
 	}
 	on_error :: proc "c" (ud: rawptr, text: [^]u8, size: c.size_t, line: c.int) {
@@ -343,7 +358,15 @@ resolve_requires :: proc(
 	for r in s.requires {
 		target, message := resolve_require(by_path, s.path, r.path)
 		if message != "" {
-			report_error(problems, s.path, r.line, 0, "cannot require %q: %s", r.path, message)
+			report_error(
+				problems,
+				s.path,
+				r.line,
+				r.column,
+				"cannot require %q: %s",
+				r.path,
+				message,
+			)
 			ok = false
 			continue
 		}
