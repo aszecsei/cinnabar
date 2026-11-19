@@ -148,8 +148,8 @@ Parts :: struct {
 }
 
 // collect_parts finds the parts of every body: each Collider without a Rigid_Body that has an ancestor with one, the
-// nearest. The world keeps no child lists, so this is a walk up from each such Collider, in query order. A collider of
-// a scene that is loading is a part too, though it is hidden, so it makes no body of its own.
+// nearest. A body's parts can be at any depth below it, so this is a walk up from each such Collider, in query order,
+// not a walk down each body's child lists. A collider of a scene that is loading is a part too, though it is hidden, so it makes no body of its own.
 @(private)
 collect_parts :: proc(s: ^State, w: ^ecs.World) -> (parts: Parts) {
 	allocator := allocator_of(s)
