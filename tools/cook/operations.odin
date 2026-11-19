@@ -646,7 +646,6 @@ not_found :: proc(index: ^Index, guid: string) -> cook_link.Operation_Result {
 }
 
 // display is a path as the log shows it: the root's name and the path in the root, such as game/scripts/door.luau.
-@(private = "file")
 display :: proc(roots: []Root, path: string) -> string {
 	for root in roots {
 		if !strings.has_prefix(path, root.dir) {

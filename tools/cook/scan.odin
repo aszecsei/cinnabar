@@ -4,6 +4,8 @@
 package cook
 
 import "core:fmt"
+import "core:hash"
+import "core:log"
 import "core:os"
 import "core:slice"
 import "core:strings"
@@ -39,7 +41,8 @@ Scan :: struct {
 
 // scan reads every asset in the roots, with its .meta file, in path order, and lists the folders. An asset without a
 // .meta file gets a new GUID, and the cooker writes its .meta file. A .meta file without its asset, as when Explorer
-// or git moves a source without it, is a warning. Files and directories whose names start with a dot are skipped.
+// or git moves a source without it, is a warning: a daemon's pass first pairs it with the moved source, when it can
+// (see pair_orphans). Files and directories whose names start with a dot are skipped.
 scan :: proc(
 	roots: []Root,
 	problems: ^Problems,
@@ -123,6 +126,7 @@ scan_pass :: proc(
 			}
 		}
 	}
+	ambiguous := pair_orphans(roots, saved, &records, &s.changed)
 	files := make([]File_Record, len(records), context.temp_allocator)
 	i := 0
 	for _, r in records {
@@ -149,13 +153,24 @@ scan_pass :: proc(
 		name := relative[strings.last_index_byte(relative, '/') + 1:]
 		if strings.has_suffix(name, format.META_EXTENSION) {
 			if strings.trim_suffix(r.path, format.META_EXTENSION) not_in records {
-				report_warning(
-					problems,
-					r.path,
-					0,
-					0,
-					"has no asset next to it. Move it to its asset, which then keeps its GUID, or delete it.",
-				)
+				if candidates, several := ambiguous[r.path]; several {
+					report_warning(
+						problems,
+						r.path,
+						0,
+						0,
+						"has no asset next to it, and its asset's contents match several new files: %s. Move it to the one that is its asset, which then keeps its GUID, or delete it.",
+						strings.join(candidates, ", ", context.temp_allocator),
+					)
+				} else {
+					report_warning(
+						problems,
+						r.path,
+						0,
+						0,
+						"has no asset next to it. Move it to its asset, which then keeps its GUID, or delete it.",
+					)
+				}
 			}
 			continue
 		}
@@ -206,6 +221,146 @@ scan_pass :: proc(
 	return
 }
 
+// Orphan is a .meta file without its asset, with what the saved index has of the asset that it belonged to.
+@(private = "file")
+Orphan :: struct {
+	meta: string,
+	kind: format.Asset_Kind,
+	hash: u64,
+	size: i64,
+}
+
+// pair_orphans moves each .meta file that lost its asset, as when Explorer or git moves a source without it, next to
+// the new source that has the same contents, so the asset keeps its GUID, its import settings and every reference to
+// it. An orphan pairs when the saved index has its asset's hash, and exactly one new source without a .meta file has
+// the asset's kind and hash, which no other orphan's asset has. It gives the orphans whose asset's contents match
+// several new sources, with those sources' paths, which stay unpaired. Without a saved index, nothing pairs.
+@(private = "file")
+pair_orphans :: proc(
+	roots: []Root,
+	saved: ^Index,
+	records: ^map[string]File_Record,
+	changed: ^map[string]bool,
+) -> (
+	ambiguous: map[string][]string,
+) {
+	ambiguous = make(map[string][]string, context.temp_allocator)
+	orphans := make([dynamic]Orphan, context.temp_allocator)
+	sizes := make(map[i64]bool, context.temp_allocator)
+	for path, r in records {
+		if r.directory || !strings.has_suffix(path, format.META_EXTENSION) {
+			continue
+		}
+		root, in_root := root_of(roots, path)
+		source := strings.trim_suffix(path, format.META_EXTENSION)
+		if !in_root || hidden(roots[root], path) || source in records {
+			continue
+		}
+		old, has_old := saved_source(saved, source)
+		old_file, has_file := saved_file(saved, source)
+		if !has_old || !has_file || old.hash == 0 || old.owner != {} {
+			continue
+		}
+		append(&orphans, Orphan{path, old.kind, old.hash, old_file.size})
+		sizes[old_file.size] = true
+	}
+	if len(orphans) == 0 {
+		return
+	}
+	// Only a new source of an orphan's asset's size can have its contents, so only those are read.
+	Match :: struct {
+		kind: format.Asset_Kind,
+		hash: u64,
+	}
+	sources := make(map[Match][dynamic]string, context.temp_allocator)
+	for path, r in records {
+		if r.directory || !sizes[r.size] {
+			continue
+		}
+		root, in_root := root_of(roots, path)
+		kind := kind_of(path[strings.last_index_byte(path, '/') + 1:])
+		if !in_root || hidden(roots[root], path) || kind == .None {
+			continue
+		}
+		if fmt.tprintf("%s%s", path, format.META_EXTENSION) in records {
+			continue
+		}
+		data, err := os.read_entire_file(path, context.temp_allocator)
+		if err != nil {
+			continue
+		}
+		key := Match{kind, hash.fnv64a(data)}
+		list := sources[key] or_else make([dynamic]string, context.temp_allocator)
+		append(&list, path)
+		sources[key] = list
+	}
+	of_match := make(map[Match]int, context.temp_allocator)
+	for o in orphans {
+		of_match[Match{o.kind, o.hash}] += 1
+	}
+	for o in orphans {
+		key := Match{o.kind, o.hash}
+		candidates := sources[key][:]
+		switch {
+		case len(candidates) == 0:
+		case len(candidates) == 1 && of_match[key] == 1:
+			pair_orphan(roots, o.meta, candidates[0], records, changed)
+		case:
+			slice.sort(candidates)
+			ambiguous[o.meta] = candidates
+		}
+	}
+	return
+}
+
+// pair_orphan moves an orphan .meta file next to its asset's moved source, under the locks of both roots, after it
+// looks again that the orphan is there and the source still has no .meta file. When it cannot, the orphan stays, and
+// the source gets a new GUID.
+@(private = "file")
+pair_orphan :: proc(
+	roots: []Root,
+	orphan, source: string,
+	records: ^map[string]File_Record,
+	changed: ^map[string]bool,
+) {
+	from, _ := root_of(roots, orphan)
+	to, _ := root_of(roots, source)
+	// In the roots' order, as lock_roots takes them.
+	locks := make([dynamic]Lock, context.temp_allocator)
+	defer unlock_all(locks[:])
+	for i in min(from, to) ..= max(from, to) {
+		if i != from && i != to {
+			continue
+		}
+		lock, locked := lock_root(roots[i].dir)
+		if !locked {
+			log.errorf(
+				"cook: cannot take the lock of %s to move %s to its asset",
+				roots[i].name,
+				orphan,
+			)
+			return
+		}
+		append(&locks, lock)
+	}
+	meta := fmt.tprintf("%s%s", source, format.META_EXTENSION)
+	if !os.exists(orphan) || !os.exists(source) || os.exists(meta) {
+		return
+	}
+	if error := move_file(orphan, meta); error != "" {
+		log.errorf("cook: cannot move %s to %s: %s", orphan, meta, error)
+		return
+	}
+	delete_key(records, orphan)
+	changed[orphan] = true
+	restat(meta, records, changed)
+	log.infof(
+		"cook: %s keeps the GUID of %s, which moved without its .meta file",
+		display(roots, source),
+		display(roots, strings.trim_suffix(orphan, format.META_EXTENSION)),
+	)
+}
+
 // carry_source fills in an asset that the scan does not read from what the saved index has of it.
 @(private = "file")
 carry_source :: proc(a: ^Asset_Source, saved: Saved_Source) -> bool {
@@ -215,6 +370,7 @@ carry_source :: proc(a: ^Asset_Source, saved: Saved_Source) -> bool {
 	}
 	a.meta_text = saved.meta_text
 	a.meta = meta
+	a.hash = saved.hash
 	append(&a.dependencies, ..saved.dependencies)
 	append(&a.subassets, ..saved.subassets)
 	append(&a.visual, ..saved.visual)

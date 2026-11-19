@@ -480,3 +480,68 @@ the_shading_models_stay_when_the_materials_are_carried :: proc(t: ^testing.T) {
 		fmt.tprint(checked_paths(tree, pass)),
 	)
 }
+
+// Explorer moves the door without its .meta file (#33). The pass pairs the .meta file that stayed with the source of
+// the same contents, so the door keeps its GUID, and the hall that instantiates it still finds it.
+@(test)
+an_asset_moved_without_its_meta_file_keeps_its_guid :: proc(t: ^testing.T) {
+	tree := saved_tree(t)
+	defer remove_tree(tree)
+	d := Daemon {
+		options = tree_options(tree),
+	}
+	defer index_destroy(&d.index)
+	first := daemon_pass(&d, Changed_Everything{})
+	testing.expect(t, first.ok)
+	hall_problems := problems_of(&d.index, tree, "levels/hall.scene")
+	door := tree_guid(t, tree, "door.prefab")
+
+	from, to := content_path(tree, "door.prefab"), content_path(tree, "levels/door.prefab")
+	testing.expect(t, os.rename(from, to) == nil)
+	pass := daemon_pass(&d, Changed_Paths{{from, to}})
+	testing.expect(t, pass.ok)
+	testing.expect(t, !os.exists(content_path(tree, "door.prefab.meta")))
+	testing.expect_value(t, tree_guid(t, tree, "levels/door.prefab"), door)
+	testing.expect_value(t, len(problems_of(&d.index, tree, "door.prefab.meta")), 0)
+	testing.expect(t, slice.equal(problems_of(&d.index, tree, "levels/hall.scene"), hall_problems))
+	entry := d.index.assets[guid_text(door)]
+	testing.expect_value(t, entry.path, "levels/door.prefab")
+	testing.expect_value(t, entry.status, .Current)
+}
+
+// A script moves, and a copy of it appears: the .meta file that stayed matches both, so it pairs with neither, and its
+// warning names them.
+@(test)
+an_orphan_that_matches_several_new_files_stays_unpaired :: proc(t: ^testing.T) {
+	tree := saved_tree(t)
+	defer remove_tree(tree)
+	d := Daemon {
+		options = tree_options(tree),
+	}
+	defer index_destroy(&d.index)
+	daemon_pass(&d, Changed_Everything{})
+	script := tree_guid(t, tree, "a.luau")
+
+	a, b, c :=
+		content_path(tree, "a.luau"), content_path(tree, "b.luau"), content_path(tree, "c.luau")
+	testing.expect(t, os.rename(a, b) == nil)
+	testing.expect(t, os.write_entire_file(c, transmute([]byte)string("return 1")) == nil)
+	daemon_pass(&d, Changed_Paths{{a, b, c}})
+	testing.expect(t, os.exists(content_path(tree, "a.luau.meta")))
+	testing.expect(t, tree_guid(t, tree, "b.luau") != script)
+	testing.expect(t, tree_guid(t, tree, "c.luau") != script)
+	testing.expect(
+		t,
+		slice.equal(
+			problems_of(&d.index, tree, "a.luau.meta"),
+			[]string {
+				fmt.tprintf(
+					"has no asset next to it, and its asset's contents match several new files: %s, %s. Move it to the one that is its asset, which then keeps its GUID, or delete it.",
+					b,
+					c,
+				),
+			},
+		),
+		fmt.tprint(problems_of(&d.index, tree, "a.luau.meta")),
+	)
+}

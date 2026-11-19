@@ -16,7 +16,7 @@ import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/wire"
 
 // Change it to drop every saved index, when what a pass learns of an asset changes.
-SAVED_INDEX_VERSION :: 1
+SAVED_INDEX_VERSION :: 2
 SAVED_INDEX_FILE :: ".index"
 
 // Saved_Source is what a pass learnt of one source, a file of the content or a stage's generated text, which the next
@@ -29,6 +29,8 @@ Saved_Source :: struct {
 	name:         string,
 	guid:         format.Guid,
 	meta_text:    string,
+	// The FNV-1a hash of its source, or 0 for a source that a stage generates.
+	hash:         u64,
 	owner:        format.Guid,
 	result:       Asset_Result,
 	dependencies: []format.Guid,
@@ -116,6 +118,7 @@ index_keep_sources :: proc(index: ^Index, pass: Pass) {
 			name         = strings.clone(a.name, allocator),
 			guid         = a.meta.guid,
 			meta_text    = strings.clone(a.meta_text, allocator),
+			hash         = a.hash,
 			owner        = a.owner,
 			result       = a.result,
 			dependencies = clone_guids(a.dependencies[:], allocator),
