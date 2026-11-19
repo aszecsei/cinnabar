@@ -6,7 +6,7 @@ Sounds are `.wav`, `.ogg`, `.flac` and `.mp3` files in the content roots, which 
 
 **A rate conversion keeps a loop whole.** The cooker converts with its own windowed sinc, which reads around the sound's ends and has no latency, so a frame of the result reads the source at a place in proportion, and the last frame continues into the first at any rate. miniaudio's resampler, which starts and stops on the sound alone, ended a seamless 24 kHz source at -2483 where the next frame was 0, a step of about 8% of full scale at each loop.
 
-**The blob.** `Audio_Blob` holds the frames, the channels, whether it streams, its format, how many frames a pass skips, and its data. A sound's data fits in 4 GiB, past which the cook fails, with about 6 hours of stereo PCM.
+**The blob.** `Audio_Blob` holds the frames, the channels, whether it streams, its format, how many frames a pass skips, its seek table, and its data. A sound's data fits in 4 GiB, past which the cook fails, with about 6 hours of stereo PCM.
 
 **Formats.** `format` chooses for each sound. The cooker encodes all of them from the 48 kHz PCM, so any source can be any format, and a compressed source is not passed through.
 
@@ -23,6 +23,8 @@ These are for music. A smooth sound does better: the sample's `ambience.wav`, mo
 
 **A compressed sound is coded as a loop.** A Vorbis or Opus blob holds `AUDIO_ROLL_FRAMES` (4096, about 85 ms) of the sound's end before it, and as much of its start after it, wrapping as often as a short sound needs. `skip` says how much to throw away at the start of a pass, which includes Opus's encoder delay. So the decoder is settled on continuous sound at both ends of a pass, and a pass gives exactly `frames`. ADPCM needs none of this: its blocks are a fixed size, and each starts on an exact sample.
 
+**A Vorbis or Opus sound that streams has a seek table**, so a voice can start or seek anywhere in it and decode at most `SEEK_INTERVAL` (0.5 s) to get there ([Audio: Streaming](../../audio/design.md#streaming)). `codec.seek_table` makes it from the coded data, with the runtime's own decoder. libvorbis ends a page every 4 KB, which a quiet sound fills in more than a second, so the cooker ends a page at least every `AUDIO_VORBIS_PAGE_FRAMES` (0.25 s), which costs about 30 bytes a page. A sound that does not stream is decoded when it loads, so it needs no table.
+
 **Import settings**, in the sound's `.meta` file:
 
 | Setting | Values | Default | Meaning |
@@ -30,6 +32,7 @@ These are for music. A smooth sound does better: the sample's `ambience.wav`, mo
 | `stream` | `auto`, `true`, `false` | `auto` | Read the sound from its blob as it plays, rather than load it. `auto` streams a sound longer than `AUDIO_STREAM_SECONDS` (10). |
 | `channels` | `auto`, `mono`, `stereo` | `auto` | The channels of the cooked sound. `auto` keeps the source's, and more than two become stereo. A sound placed in the world plays as mono either way, so `mono` takes half the space. |
 | `format` | `pcm`, `adpcm`, `vorbis`, `opus` | `pcm` | How the blob stores the sound. |
+| `seek` | `true`, `false` | `true` | Write a seek table for a `vorbis` or `opus` sound that streams. Without one, a start or a seek after the first frame decodes from the start, which costs little for a short sound. |
 
 **The cache key** covers the cooker version, the miniaudio, Opus and Vorbis versions, the layout, the source path, the source, the `.meta` file and the GUID. A sound that fails to decode keeps its old blob, so the running game keeps the last good version.
 

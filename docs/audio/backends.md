@@ -33,9 +33,20 @@ The host reads the key itself, from the user's file first, before the game start
 
 **Sounds.** A `Sound_Desc` is at `SAMPLE_RATE` (48 kHz), mono or stereo, interleaved. A sound with `samples` is in memory, always as 16-bit PCM, and the backend copies them before `sound_create` returns. A sound with `path` has its data in that file, `size` bytes from `offset`, in `format`, and the backend reads them as it plays. The engine gives a compressed format only to a backend that advertises its feature. Each pass over a compressed sound starts its decoder at the start of the data, throws away `skip` frames, keeps `frames` frames and ignores the rest. The rest continues the sound from its start, so a backend can fade across a loop's seam ([Streaming](design.md#streaming)). A Vorbis sound's data is a plain Ogg Vorbis stream, which a backend such as FMOD can read from `offset` itself. The cooker can replace the file while it plays, so the backend must not hold it open between reads ([Streaming](design.md#streaming)): `Host.file_open`, `file_read_at`, `file_modified` and `file_close` are for this, and a voice ends when its file changes. A backend without `Streaming` gets every sound with `samples`.
 
+A Vorbis or Opus sound with a `path` may come with a seek table, `seek_count` `Seek_Point`s in order, which the backend copies. A point is a byte `offset` in the data where a decoder can start afresh, and the `frame` that it gives first there, counting `skip`. An Opus decoder's first `SEEK_PREROLL_OPUS` (3840) frames from a point are not yet the sound. A backend that reads its own files, such as FMOD, may ignore the table ([Streaming](design.md#streaming)).
+
 `sound_destroy` makes the handle stale at once, and the sound's voices go on until they end.
 
 **Voices.** `voice_play` starts one, or returns the nil voice when it cannot, such as with a full pool, which it logs once and counts in `stats`. `voice_set` gives it new values, which it moves to without a click. `voice_stop` fades it over `fade` seconds, and makes the handle stale at once. `voice_playing` is false once it has ended or its handle is stale.
+
+**`Voice_Desc`** also says where and when a voice starts ([Places and the clock](design.md#places-and-the-clock)):
+
+- `start` is the frame of the sound where it starts.
+- `clock` is a time on the backend's `clock` at which `start` plays; 0 is at once. A voice that starts late starts as far into its sound as it is late.
+- `length` is how many frames it plays after each start; 0 plays to the end. It then fades out over `fade` seconds, which is also how long it fades in.
+- `flags` holds `Unpaused`: the voice plays while `set_paused` holds the others.
+
+**Places.** `voice_seek(voice, frame, clock)` moves a voice to another frame, with fades so that it does not click; with a clock, the frame plays then. `voice_position` gives where the voice was at the end of the last mix: the frame with its fraction, and the clock there. It is false for a stale handle, or a voice that has not started. `clock` is the frames that the backend has mixed, at 48 kHz. It runs while paused.
 
 **`Voice_Params`.**
 
@@ -46,7 +57,9 @@ The host reads the key itself, from the user's file first, before the game start
 
 **`update`** runs once a frame, on the game's thread. It is the place for FMOD's `System::update` or Wwise's `RenderAudio`, and for freeing what the backend's threads have finished with.
 
-**`set_paused`.** While paused, no voice advances and the output is silent.
+**`bus_set_duck(bus, target, duck)`** makes `bus` duck `target` while its level is above `duck.threshold`: the target's gain falls to `duck.gain` over `duck.attack` seconds, and comes back over `duck.release`. A gain of 1 ends it. A bus ducks up to `MAX_BUS_DUCKS` (4) others.
+
+**`set_paused`.** While paused, no voice advances but those that are `Unpaused`, and the others are silent.
 
 **`reset`** stops every voice without a fade, destroys every sound and every bus but Master, and returns how many voices it stopped. The device stays open and the backend stays usable, as the next game starts at once. It belongs to the host, and so does `shutdown`: the game never calls them.
 
@@ -61,10 +74,12 @@ The host reads the key itself, from the user's file first, before the game start
 | `Spatial` | The backend may ignore positions, distances and occlusion. |
 | `Buses` | `bus_create` may return the nil bus, whose voices go to Master. |
 | `Effects` | `bus_set_effect` may do nothing. |
+| `Seek` | `voice_play` may ignore `start`, `clock`, `length` and `fade`; `voice_seek` may do nothing; and `voice_position` may be false. |
+| `Ducking` | `bus_set_duck` may do nothing. |
 
 ## The null backend
 
-`lib/core/audio/null` makes no sound and starts no thread. It checks every handle as a real backend does, and reports every feature, so the engine's tests of the boundary run on it headless. A voice plays until it is stopped, as nothing ever ends it. `audio.backend = none` makes it the game's backend, and `lib/engine/audio/audio_test.odin` runs on it with a table that records what the game side asks.
+`lib/core/audio/null` makes no sound and starts no thread. It checks every handle as a real backend does, and reports every feature, so the engine's tests of the boundary run on it headless. A voice plays until it is stopped, as nothing ever ends it. Its voices have no place, and its clock stays at 0. `audio.backend = none` makes it the game's backend, and `lib/engine/audio/audio_test.odin` runs on it with a table that records what the game side asks.
 
 ## Writing a backend
 
@@ -75,4 +90,4 @@ The host reads the key itself, from the user's file first, before the game start
 
 ## Conformance
 
-`lib/core/audio/conformance` is the suite that every backend passes, driven through `Audio_API` with no engine world: `info`, a looping voice until it stops, stale handles, a sound that outlives its handle, nested buses and effect slots, `reset`, and a full pool. `conformance.run` runs them all, and a backend's tests call it with its table, as `lib/core/audio/null/null_test.odin` and `lib/core/audio/mixer/mixer_test.odin` do. `lib/core/audio/plugin/plugin_test.odin` runs it through the DLL as the host loads it.
+`lib/core/audio/conformance` is the suite that every backend passes, driven through `Audio_API` with no engine world: `info`, a looping voice until it stops, stale handles, a sound that outlives its handle, nested buses and effect slots, `reset`, a full pool, and a voice's start, seek and place with a bus's duck. `conformance.run` runs them all, and a backend's tests call it with its table, as `lib/core/audio/null/null_test.odin` and `lib/core/audio/mixer/mixer_test.odin` do. `lib/core/audio/plugin/plugin_test.odin` runs it through the DLL as the host loads it.

@@ -2,7 +2,7 @@
 
 How sound gets from a component or a script to the speakers. Read [Hot reload](../overview/hot-reload.md#rules) first for why a thread must be host code, [Core: Audio](../core/audio.md#audio) for the device, and [World: Render extraction](../world/render-extraction.md#render-extraction) for presented poses.
 
-**In this document:** [The game side](#the-game-side) · [Sources and the listener](#sources-and-the-listener) · [Occlusion](#occlusion) · [The mixer](#the-mixer) · [Buses and effects](#buses-and-effects) · [Streaming](#streaming) · [Lifetimes](#lifetimes) · [Scripts](#scripts) · [The sample](#the-sample)
+**In this document:** [The game side](#the-game-side) · [Sources and the listener](#sources-and-the-listener) · [Occlusion](#occlusion) · [The mixer](#the-mixer) · [Places and the clock](#places-and-the-clock) · [Buses and effects](#buses-and-effects) · [Streaming](#streaming) · [Lifetimes](#lifetimes) · [Scripts](#scripts) · [The sample](#the-sample)
 
 ## The game side
 
@@ -15,7 +15,7 @@ How sound gets from a component or a script to the speakers. Read [Hot reload](.
 | `update` | Once per frame, after the world's `Late` stage, whether the world runs or not. |
 | `reload`, `destroy` | At a code reload, which only takes the new `Platform_API`, and at shutdown. |
 
-`update` takes `run`, whether the world runs this frame. While it does not, as in the editor's edit mode or while paused, the backend is paused: voices hold their place, and no new one starts.
+`update` takes `run`, whether the world runs this frame. While it does not, as in the editor's edit mode or while paused, the backend is paused: voices hold their place, and no new one starts. A voice that starts `Unpaused`, such as a scrub's grain, plays on ([Places and the clock](#places-and-the-clock)).
 
 A game plays the [test tone](../core/audio.md#test-tone) or calls `update`, not both, because the device takes one writer. The device enforces it: the writer that writes first keeps it, and the other's frames are dropped with one error. The standard game chooses with `audio_test_tone` (see [The game package](../world/game-package.md#the-frame)).
 
@@ -32,6 +32,7 @@ A game plays the [test tone](../core/audio.md#test-tone) or calls `update`, not 
 | `spatial` | Placed in the world and heard from the listener. Otherwise it plays as it is. |
 | `occluded` | [Occlusion](#occlusion) applies. |
 | `gain`, `pitch` | The level, and the playback rate: 1 is the sound's own. |
+| `start` | Where the sound starts each time it plays, in seconds. A start after the first frame fades in over `OFFSET_FADE` (5 ms), so it does not click. |
 | `min_distance`, `max_distance` | Full volume at `min_distance` and nearer, and silence at `max_distance` and farther. |
 
 **`Audio_Listener`** (97) marks where the world is heard from: its entity's presented pose. A world can have several, one for each view of a split screen. Each source is heard at its nearest listener, by world distance, up to `MAX_LISTENERS` (8). The source's position, its pan and its occlusion ray all come from that listener. A listener past the limit is not heard from, and logs one warning. Without any, a spatial source plays centred at full gain, with one warning.
@@ -72,9 +73,39 @@ A voice's handle goes stale as soon as it stops, while its slot stays busy until
 
 **`render` is a plain procedure**: it takes commands, mixes frames, and needs no thread or device. The tests call it, and read the samples.
 
-**A voice's path,** in `mix_voice`: read its PCM, from memory or a stream's ring, through a two-frame window, interpolated by `pitch`; apply the occlusion's low-pass; apply its gains, moved from last block's across this block, so a change never clicks; and add it to its bus.
+**A voice's path,** in `mix_voice`: read its PCM, from memory or a stream's ring, through a two-frame window, interpolated by `pitch`; apply the occlusion's low-pass; apply its gains, moved from last block's across this block, so a change never clicks; apply its fade; and add it to its bus.
+
+**A voice's life is one value,** its `Voice_Phase`, which only `set_phase` changes. A nil phase is a free slot.
+
+| Phase | What it does |
+|---|---|
+| `Voice_Waiting` | Waits for its clock, and for its stream to answer its read. It neither plays nor advances. A stop ends it at once, as it has made no sound. |
+| `Voice_Playing` | Plays, and counts its frames for its `length`. It fades in as it starts. |
+| `Voice_Moving` | Fades out for a seek, then waits at its new place. |
+| `Voice_Ending` | Fades out for a stop or at its `length`, then ends. |
+
+A fade is a level from 0 to 1 that moves by a step each frame. The voice is scaled by a smooth step of it, `3l² - 2l³`, which leaves and reaches its ends with no slope, so a fade has no corner to hear.
+
+**A pause holds each voice, not the output.** While paused, each voice that is not `Unpaused` fades out over a block, then holds its place; it fades in over a block when the pause ends. The buses run on, so an effect's tail rings out, and the clock runs.
 
 **Limits.** `MAX_VOICES` (128) and `MAX_STREAMS` (16). Past them a voice is refused, with one warning, and `stats` counts it. There are no virtual voices and no priorities yet.
+
+## Places and the clock
+
+A cutscene starts dialogue and music at any time in its clip, seeks when the player skips or the editor scrubs, and stays in step with its picture. The mixer gives it a place in each sound and a clock to keep it to.
+
+- **The clock** is the frames that the mixer has mixed, `clock()`, at 48 kHz. The next block starts at it. It runs while paused. `audio.clock(s)` reads it.
+- **A start offset.** `Voice_Desc.start` is the frame of the sound where the voice starts. A memory sound starts there at once, and a stream reads from there first ([Streaming](#streaming)). `Audio_Source.start`, `Audio.play`'s `start` and `start_voice`'s are in seconds.
+- **A scheduled start.** `Voice_Desc.clock` is when `start` plays. The mixer starts the voice at that frame of its block, so a start is exact to the frame, and not late by up to a frame of the game, as a start at `update` is. A voice whose time has passed starts as far into its sound as it is late, at its pitch, so it keeps to the clock. A late stream throws away the frames from its ring. `play` takes a clock too.
+- **A seek.** `voice_seek` fades the voice out over `SEEK_FADE_FRAMES` (5 ms), moves it, waits for its place and its clock, and fades it in over 5 ms. A seek has no step larger than the sound's own, as `a_seek_has_no_step` measures: 9 against 10 elsewhere on the slow pad in Vorbis, and 11 against 11 in Opus.
+- **Where a voice is.** `voice_position` gives the frame of the sound, with its fraction, at the end of the last block, and the clock there. The mix thread writes them under a count that is odd while it writes, so the game's thread never reads a frame and a clock of different blocks. A voice that waits, or has stopped, has no place.
+- **Keeping to the clock.** `keep_to_clock(s, voice, seconds, at, limit)` reads where a voice is, compares it with where it should be (`seconds` at `at`, moving at its pitch), and seeks it when it is further than `limit`. The seek lands `SEEK_LEAD` (50 ms) ahead of the clock, past the blocks that the mixer has queued, so it is not late. A loop is compared within its sound.
+- **A length.** `Voice_Desc.length` is how many frames a voice plays after each start. It then fades out over `fade` seconds, which is also how long it fades in.
+- **Unpaused.** A voice with the `Unpaused` flag plays while the backend is paused, as in the editor's edit mode.
+
+**Voices that their caller owns.** `start_voice(s, Voice_Start{...})` starts a voice that is not placed in the world: its sound, bus, gain, pitch, start, clock, loop, length, fade, and whether it is unpaused. The caller seeks it with `seek_voice`, reads it with `voice_place`, keeps it to its time with `keep_to_clock`, and stops it with `stop_voice`. Nothing else stops it but its sound's end and a soft restart. The cutscene's audio track is built on these.
+
+**Scrub.** `audio.scrub(s, sound, seconds)` plays a grain of `SCRUB_GRAIN` (40 ms) at a place, with fades of `SCRUB_FADE` (5 ms), unpaused, so it is heard in edit mode. Up to `SCRUB_GRAINS` (3) play at once, and another fades the oldest out. A timeline calls it each time its playhead moves under a drag. No editor panel calls it yet.
 
 ## Buses and effects
 
@@ -96,6 +127,19 @@ Each bus has `MAX_BUS_EFFECTS` (4) slots, which the sound passes in order:
 
 Setting new parameters on a slot of the same kind keeps its memory, so a delay's tail goes on.
 
+**A bus can duck others,** so dialogue lowers the music and the effects while it plays. `bus_set_duck(bus, target, duck)`, `audio.set_bus_duck(s, "Dialogue", "Music", duck)` and `Audio.duck` set it:
+
+| `Duck` field | Meaning |
+|---|---|
+| `gain` | The target's gain while it is ducked. 1 ends the duck. |
+| `attack`, `release` | The seconds that the target's gain takes to fall to `gain`, and to come back to 1. It moves in a straight line. |
+| `threshold` | The level of the bus, its peak in a block after its gain, above which it ducks. |
+
+- A bus ducks from the block after its peak passes the threshold, 5 ms late, so the order in which the buses mix does not matter.
+- A target that several buses duck takes the lowest gain, at its duck's attack, and comes back at the release of the duck that held it last.
+- A bus ducks up to `MAX_BUS_DUCKS` (4) others. The duck multiplies the bus's own gain, which `set_bus_gain` still sets.
+- `a_bus_ducks_another` holds a music bus's gain to its attack and its release within 1e-5.
+
 **Nothing may feed back more than it takes.** The reverb's damping filter must take all of what leaves its matrix: on only part of it, high frequencies return at up to twice their level, the tail grows without end, and the limiter holds it at full scale. `effects_stay_bounded` drives every effect with loud noise at its worst parameters.
 
 **Master protects the output.** A soft limiter passes samples below `LIMITER_THRESHOLD` (0.9) unchanged, and bends the rest toward 1. A mix past `FAULT_LEVEL` (1024), or one that is not a number, is a fault and not a loud sound, which the limiter would play at full scale: the block goes silent instead, every effect's memory is cleared, and `update` logs an error.
@@ -107,13 +151,24 @@ A sound whose blob says `stream` is not loaded. `sound_create` takes its blob's 
 - **Each playing voice has a stream**: a ring of `STREAM_RING_FRAMES` (about 1.4 s), and a place in the file. The stream thread tops the ring up when a `STREAM_CHUNK_FRAMES` (about 0.7 s) of it is free, so a slow disk has a long time to catch up.
 - **A voice waits for its first read,** so it does not start with a gap.
 - **A reader that falls behind** plays silence, and `stats` counts it in `stream_starved`, which `destroy` logs.
-- **A blob's data is in a format** that its `.meta` file chose ([Content: Audio](../content/kinds/audio.md#audio)). A place in PCM or ADPCM is one multiplication. A place in Vorbis or Opus is not, and nothing asks for one but the start, so there is no seek table: a later seek needs one, or a decode from the start.
+- **A blob's data is in a format** that its `.meta` file chose ([Content: Audio](../content/kinds/audio.md#audio)). A place in PCM or ADPCM is one multiplication. A place in Vorbis or Opus is found through a seek table.
 
 **Decoding is the stream thread's, never the mix thread's.** The mix thread reads only the ring, which holds PCM whatever the format, so it takes no lock, allocates nothing and reads no file, as before. `lib/core/audio/codec` is the decoder:
 
 - **Each playing voice has its own decoder state,** as each has its own place in the file. Its memory is allocated once for the stream, on the game's thread, as the ring is: about 660 KB for Vorbis, which is the most, 160 KB for Opus, and 10 KB for ADPCM. stb_vorbis takes all of its memory from this, and libopus's state is in it.
 - **A block that does not fit in the ring waits** for the next fill, since a block is the codec's size and not the ring's.
 - **It costs little.** On the sample's 20-second sound, a pass decodes in 3 ms for ADPCM, 7 ms for Vorbis and 18 ms for Opus. This is on one thread for 16 streams at most, so the decoder is not what a reader falls behind on.
+
+**A seek is a read from another place.** A stream's first read and each seek are a request from the mix thread with a ticket: `seek_frame`, then a new `seek_asked`. The stream thread answers with the same ticket in `seek_answered` once it has emptied the ring, moved its place, and read from there, or once the stream ended or failed. The voice waits for its own ticket and does not read the ring before, so the ring has one reader and one writer at all times. `stream_fill` reads a seek's first chunk at once, even when the ring was full.
+
+**A seek table puts a seek within half a second.** `codec.decoder_seek` starts a decoder afresh at the last point of the table that is before the place, and throws away what it decodes up to the place. `codec.seek_table` makes the table in the cooker, from the decoder's own runs:
+
+- **ADPCM** needs no table: each block starts on an exact sample.
+- **An Opus point** is a packet. libopus needs `SEEK_PREROLL_OPUS` (3840 frames, 80 ms) after a reset before its frames are the sound, so a point is that far before the place, and what a seek gives differs from a decode from the start by its coding noise, 6 at most in the tests.
+- **A Vorbis point** is a page. After `stb_vorbis_flush_pushdata`, stb_vorbis reads past the first page that it finds and decodes from the next one, so the frame where its output starts is measured, not worked out from the granule: `seek_table` decodes from each page, and stb_vorbis's place after the first frames gives it. A seek then gives exactly what a decode from the start gives. The headers are read again at each seek, which takes about 0.2 ms.
+- **Points are as few as the interval allows.** `seek_table` keeps the farthest point that leaves no seek more than `SEEK_INTERVAL` (24000 frames, 0.5 s) to throw away, counting Opus's preroll. libvorbis ends a page every 4 KB, which a quiet sound fills in more than a second, so the cooker ends one at least every `AUDIO_VORBIS_PAGE_FRAMES` (0.25 s). `a_seek_decodes_at_most_one_interval` seeks 100 times at random: Vorbis throws away 12080 frames at most, and Opus 23743.
+- **Without a table,** a seek decodes from the start, which costs little for a short sound.
+- **A seek ends a loop's crossing**: the pass that it starts begins at its place, not at the seam.
 
 **A loop's seam is crossed, not cut.** A pass of a Vorbis or Opus sound ends with `frames` given, and the cook has coded the sound's start again after its end. So the decoder goes on for `SEAM_FRAMES` (512, about 11 ms) past the end, and the next pass fades from these into its own start. Both are the same sound with different coding noise, so their levels add to the sound's. Without this, the two sides meet with a step the size of that noise: on the sample's slow pad, a second difference of about 40 for Vorbis and 86 for Opus, against about 22 anywhere else in the sound, and with it about 1. `a_loop_has_no_step_at_its_seam` holds this to account. ADPCM has no such step to hide: its noise is as large as a step everywhere.
 
@@ -152,10 +207,11 @@ end
 
 | Binding | What it does |
 |---|---|
-| `Audio.play(sound, position?, gain?, bus?, pitch?)` | Plays a sound once, to its end. With a position, it is placed in the world, between `ONE_SHOT_MIN_DISTANCE` (1 m) and `ONE_SHOT_MAX_DISTANCE` (50 m). `bus` is a bus's name. `pitch` is 1 unless given, and is kept between 0.1 and 4, as `Audio_Source.pitch` is, so a game can raise a pickup's pitch or vary it at random. The pitch is fixed when the sound starts. |
+| `Audio.play(sound, position?, gain?, bus?, pitch?, start?)` | Plays a sound once, to its end. With a position, it is placed in the world, between `ONE_SHOT_MIN_DISTANCE` (1 m) and `ONE_SHOT_MAX_DISTANCE` (50 m). `bus` is a bus's name. `pitch` is 1 unless given, and is kept between 0.1 and 4, as `Audio_Source.pitch` is, so a game can raise a pickup's pitch or vary it at random. The pitch is fixed when the sound starts. `start` is the seconds into the sound where it starts. |
 | `Audio.set_bus_gain(bus, gain)` | Sets a bus's gain by name. |
+| `Audio.duck(bus, target, gain, attack?, release?, threshold?)` | Makes `bus` duck `target` to `gain` while it plays ([Buses and effects](#buses-and-effects)): 50 ms to fall, 300 ms to come back, above about -50 dB, unless given. A gain of 1 ends it. Two names that are the same raise an error. |
 
-A value that is not a sound, or a name that is not a bus, raises an error in the script. Sounds start at `update`, after the frame's scripts, so they are heard from the frame's listener.
+A value that is not a sound, or a name that is not a bus, raises an error in the script. Sounds start at `update`, after the frame's scripts, so they are heard from the frame's listener. Frame code that needs a start at an exact time gives `play` a time on the clock ([Places and the clock](#places-and-the-clock)).
 
 `Audio.play` loads a sound the first time, on the frame's thread, so the first play of a long memory sound can take a moment. Up to `MAX_ONE_SHOTS` (64) play at once.
 
