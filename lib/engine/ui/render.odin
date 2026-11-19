@@ -51,11 +51,12 @@ sync_pipelines :: proc(s: ^State, force := false) {
 	}
 }
 
-// add_passes lays out the documents at the frame's size and adds the pass that draws them into the UI layer, in one
-// draw. The game calls it from its ui hook, which it may add its own passes to before or after.
+// add_passes adds the pass that draws the documents that layout laid out into the UI layer, in one draw. The documents
+// are in window pixels, and the layer starts at the frame's origin in the window, so a document draws its part in each
+// view, and what is outside the layer is clipped. The game calls it from its ui hook, which it may add its own passes to
+// before or after.
 add_passes :: proc(s: ^State, f: ^render.Frame) {
-	layout(s, {f32(f.output_size.x), f32(f.output_size.y)})
-	add_batch_pass(s, f, -1, {scale = 1})
+	add_batch_pass(s, f, -1, {scale = 1, offset = -{f32(f.origin.x), f32(f.origin.y)}})
 }
 
 // View is where a document's pixels draw in a target: pixel p at p * scale + offset. The game's UI draws at a scale of

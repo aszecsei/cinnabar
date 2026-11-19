@@ -13,8 +13,11 @@ How the UI works: from a document on an entity to the pixels of the UI layer and
 | `document` | The UI document asset. |
 | `order` | Documents of a higher order draw over those of a lower one, and take input first. |
 | `visible` | Whether the document shows. A script turns a menu on and off with it. |
+| `view` | Where the document lays out. 0 is the window. n is the game's nth view (1 to 5), a rectangle of the window. |
 
 `ui.State` is in `Game_State`. It has a slot for each document that shows, at most `MAX_DOCUMENTS` (32). `ui.sync` matches the slots to the world's `Ui_Document`s each frame, loads each document's blob, and builds its nodes.
+
+**Views.** A game with split screen has 1 to 5 views, each a rectangle of the window. A document of view n lays out in that rectangle, so a player's HUD scales by its view. A document of view 0 lays out at the window's size, and is for what is not a player's: menus and subtitles. A document of a view that the game does not show is hidden: it is not laid out, does not draw and takes no input.
 
 **Building** copies the blob, which the asset runtime frees when it swaps it, and makes a node for each element that is not in a template. Each attribute's value is parsed then, with `format.ui_parse_value`, once. Then the scripts' changes to the tree are replayed: each copy of a template that `Ui.add` made, and each element that `Ui.remove` took out. The focus stays on the element of the same id.
 
@@ -37,7 +40,7 @@ An element's own attribute holds in every state, so an attribute that changes wi
 
 ## Layout
 
-`ui.layout` lays out every document that shows each frame, after the scripts, so what they set shows in the same frame. It works in the UI layer's pixels, and the root is the whole layer: a stack, whose children are placed by their anchors.
+`ui.layout(s, window, views)` lays out every document that shows each frame, after the scripts, so what they set shows in the same frame. `window` is the window's size, and `views` is the rectangle of each view, as x, y, width and height in window pixels. A document works in window pixels, and its root is its screen: the window, or its view's rectangle. The root is a stack, whose children are placed by their anchors. Layout is the only writer of a document's screen (its rectangle and scale).
 
 1. **The cascade** (above), and which nodes show: a node that is not `visible`, or whose parent does not show, is out of the layout and draws nothing.
 2. **Text** is shaped (see [Text](#text)), which gives each text's width on one line.
@@ -52,7 +55,7 @@ There is no shrinking: children that need more than their parent has overflow it
 
 ### Scale
 
-Every length in a document is in pixels at a UI scale of 1: sizes, padding, gaps, radii, borders, offsets, text sizes and nine-slice margins. The scale is `max(height / REFERENCE_HEIGHT, MIN_SCALE) × ui.scale`, from the UI layer's height (`REFERENCE_HEIGHT` is 1080 and `MIN_SCALE` 0.5) and the project's `ui.scale` (1), which `set_scale_factor` takes. So a document laid out for 1080p fills the same part of the screen at 720p and at 4K, with its text drawn at that size from its distance field, sharp either way.
+Every length in a document is in pixels at a UI scale of 1: sizes, padding, gaps, radii, borders, offsets, text sizes and nine-slice margins. The scale is `max(height / REFERENCE_HEIGHT, MIN_SCALE) × ui.scale`, from the height of the document's screen (`REFERENCE_HEIGHT` is 1080 and `MIN_SCALE` 0.5) and the project's `ui.scale` (1), which `set_scale_factor` takes. A document of the window takes the window's height. A document of a view takes its view's height, so each player's HUD has its own scale. So a document laid out for 1080p fills the same part of the screen at 720p and at 4K, with its text drawn at that size from its distance field, sharp either way.
 
 ## Text
 
@@ -66,7 +69,7 @@ Every length in a document is in pixels at a UI scale of 1: sizes, padding, gaps
 
 ## Drawing
 
-`ui.add_passes`, which the game calls from its `ui` hook (see [Rendering: Layers and output](../rendering/layers-and-output.md#ui)), lays the documents out at the frame's output size and draws them all in one draw call.
+`ui.add_passes`, which the game calls from its `ui` hook (see [Rendering: Layers and output](../rendering/layers-and-output.md#ui)), draws the documents that `ui.layout` laid out, all in one draw call. It does not lay them out. A document is in window pixels, and the layer starts at the frame's `origin` in the window, so the pass draws each document offset by `-origin`. The layer clips what is outside its view. A full-screen document (view 0) thus draws its part in each view. A custom layout that leaves a gap between views shows no full-screen UI in the gap, as no view's layer covers it.
 
 **The batch.** Each `Instance` (96 bytes) is a rectangle in the layer's pixels, its clip, its corners' radii, its UVs, its colors, its kind and its texture. The documents draw from the lowest order up, and each tree draws each node before its children: its box, its image, its text, and in a field its selection, its composition and its caret. A box that scrolls draws its bar after its children (see [Scrolling](#scrolling)). A box draws if it has a fill or a border. An image draws once its texture is resident, as one instance or, with `slice`, nine, whose corners keep their size. A glyph draws once its font's atlas is resident. Instances of no size, or outside their clip, are left out, and a frame has at most `MAX_UI_INSTANCES` (16384). The instances go into the frame's upload ring, and the pass draws six vertices for each.
 
@@ -158,6 +161,7 @@ A game calls the UI at these points of its frame (the standard game's are in `li
 | `init` | `ui.init(&s.ui, platform, &s.assets, &s.renderer.residency)`, and `ui.register_components` with the others |
 | Its `Register_Proc` | `ui.register_scripts(r, &s.ui)` |
 | Each frame, before the script phase | `ui.sync`, then `ui.handle_input` with the frame's input and the real time, then `ui.flush_events` |
+| Each frame, after the script phase | `ui.layout(&s.ui, window, views)`, with the window's size and the rectangle of each shown view |
 | With its pipelines | `ui.sync_pipelines` |
 | Its `ui` hook | `ui.add_passes(&s.ui, f)` |
 | `on_reload` | `ui.on_reload`, and `ui.sync_pipelines(force = true)` |

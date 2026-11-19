@@ -310,7 +310,7 @@ measure_text :: proc(s: ^State, tf: Text_Frame, d: ^Document, n: u32) {
 	if !ok {
 		return
 	}
-	px := st.size * s.scale
+	px := st.size * d.screen.scale
 	expanded :=
 		node.element == .Field && !placeholder ? text : expand(d, text, s.platform.frame_allocator)
 	glyphs, width := shape_text(tf, d, font, expanded, px)

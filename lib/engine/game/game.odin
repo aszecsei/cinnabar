@@ -18,6 +18,7 @@ import "cinnabar:engine/ai"
 import "cinnabar:engine/anim"
 import "cinnabar:engine/asset"
 import "cinnabar:engine/audio"
+import "cinnabar:engine/camera"
 import "cinnabar:engine/ecs"
 import "cinnabar:engine/editor"
 import "cinnabar:engine/nav"
@@ -87,8 +88,8 @@ Game :: struct {
 	sprites:            sprite.State,
 	// The UI's documents (see docs/ui/design.md#the-frame).
 	ui:                 ui.State,
-	// The scene's render.Camera entity. A new scene replaces it, so find_camera looks for it again.
-	camera:             ecs.Entity,
+	// The game's views: their layout, each one's camera stack, and the full-screen claims (see docs/world/cameras.md).
+	views:              camera.Views,
 	// The built-in renderer, which draws the frame (see docs/rendering/frame.md#frame).
 	renderer:           render.Renderer,
 	assets:             asset.Assets,
@@ -307,6 +308,7 @@ register_scripts :: proc(r: ^script.Runtime) {
 	sprite.register_scripts(r, &g.sprites)
 	script.expose(r, render.Tint, render.DEFAULT_TINT)
 	ui.register_scripts(r, &g.ui)
+	camera.register_scripts(r, &g.views, &g.renderer)
 	define_scene_bindings(r)
 	script.define(r, "Game.set_paused", proc(L: ^luau.State) -> c.int {
 			luau.L_checktype(L, 1, .BOOLEAN)

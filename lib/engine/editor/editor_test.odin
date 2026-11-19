@@ -3366,3 +3366,101 @@ set_sublevel_keeps_the_handle_and_its_inverse_puts_it_back :: proc(t: ^testing.T
 	testing.expect(t, scene.is_loaded(f.editor.scenes, 1))
 	testing.expect(t, !f.despawned)
 }
+
+// A game in two views side by side: the Game view shows both, its own view in the left half of the viewport and the
+// game's second view in the right half, scaled from the game's window to the viewport, before the scene view. The game's
+// view in a rect takes the Game view's settings over its own.
+@(test)
+the_game_view_draws_the_games_views_in_rects_before_the_scene_views :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	with_targets(f)
+	with_renderer(f)
+	g: Game_Frame
+	state: render.View_State
+	desc := game_desc(&g)
+	desc.size = {640, 720}
+	desc.rect = render.Target_Rect{target_size = {1280, 720}}
+	desc.cut = true
+	g.extra[0] = {
+		view = {position = ecs.position_offset({}, {9, 0, 0}), rotation = 1},
+		size = {640, 720},
+		state = &state,
+		hooks = desc.hooks,
+		rect = render.Target_Rect{target_size = {1280, 720}, origin = {640, 0}},
+	}
+	desc.extra_views = g.extra[:]
+	step(
+		f,
+		1,
+		viewport_camera(1, 3 << 24),
+		open_viewport(1, .Scene, 16, 8),
+		open_viewport(2, .Game, 32, 18),
+		link.Set_Viewport_Settings{viewport = 2, settings = {exposure_offset = 2}},
+	)
+	out := plan_frame(
+		&f.editor,
+		&f.world,
+		desc,
+		frame_viewports(&f.editor),
+		f.renderer.quality,
+		f.renderer.caps,
+	)
+	testing.expect_value(t, out.size, [2]u32{16, 18})
+	testing.expect_value(
+		t,
+		out.rect,
+		Maybe(render.Target_Rect)(render.Target_Rect{target_size = {32, 18}}),
+	)
+	testing.expect(t, out.cut)
+	if !testing.expect_value(t, len(out.extra_views), 2) {
+		return
+	}
+	second := out.extra_views[0]
+	testing.expect_value(t, second.view, g.extra[0].view)
+	testing.expect_value(t, second.size, [2]u32{16, 18})
+	testing.expect_value(
+		t,
+		second.rect,
+		Maybe(render.Target_Rect)(render.Target_Rect{target_size = {32, 18}, origin = {16, 0}}),
+	)
+	testing.expect_value(t, second.target, gpu.Texture{})
+	testing.expect(t, second.state == &state && second.no_debug)
+	testing.expect_value(t, second.exposure_offset, 2)
+	testing.expect(t, second.quality != nil)
+	// The scene view comes after the game's views.
+	testing.expect_value(t, out.extra_views[1].view.position.raw.x, 3 << 24)
+}
+
+// Without a Game view to draw into, the game's views in rects have no target: they are dropped, and the own view fills
+// its viewport.
+@(test)
+without_a_game_view_the_games_views_in_rects_are_dropped :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	with_targets(f)
+	with_renderer(f)
+	g: Game_Frame
+	state: render.View_State
+	desc := game_desc(&g)
+	desc.size = {640, 720}
+	desc.rect = render.Target_Rect{target_size = {1280, 720}}
+	g.extra[0] = {
+		size = {640, 720},
+		state = &state,
+		rect = render.Target_Rect{target_size = {1280, 720}, origin = {640, 0}},
+	}
+	desc.extra_views = g.extra[:]
+	step(f, 1, viewport_camera(1, 3 << 24), open_viewport(1, .Scene, 16, 8))
+	out := plan_frame(
+		&f.editor,
+		&f.world,
+		desc,
+		frame_viewports(&f.editor),
+		f.renderer.quality,
+		f.renderer.caps,
+	)
+	testing.expect_value(t, out.size, [2]u32{16, 8})
+	testing.expect_value(t, out.rect, Maybe(render.Target_Rect)(nil))
+	testing.expect_value(t, len(out.extra_views), 0)
+}

@@ -14,7 +14,8 @@ Read them in this order the first time.
 | [Render extraction](render-extraction.md) | How rendering reads the world. |
 | [Volumes](volumes.md) | Settings that depend on where a point is. |
 | [Scenes](scenes.md) | Loading scenes into the world and unloading them one at a time, what a scene owns, and scene IDs. |
-| [World streaming](streaming.md) | A world's scenes that load and unload around the camera: the streamer, the policy, loading in stages, budgets and events. |
+| [Cameras](cameras.md) | The game's views and layouts, each view's camera stack with priorities, cuts and blends, and full-screen claims. |
+| [World streaming](streaming.md) | A world's scenes that load and unload around the cameras: the streamer, the policy, loading in stages, budgets and events. |
 | [Sublevels](sublevels.md) | The active set, and the parts of a scene's sublevels that load and unload as a sublevel is activated and deactivated. |
 | [The game package](game-package.md) | The standard game, which runs every package on the world in order, and the hooks that a project's Odin adds to it. |
 
@@ -22,7 +23,7 @@ Animation runs on the world as physics does, in `Fixed` systems with presentatio
 
 ## Overview
 
-The world is one `ecs.World` in `Game_State`. Its storage is virtual memory that the game reserves itself, so it holds no allocators and no pointers into code, and a code reload keeps it whole.
+The world is one `ecs.World` in `Game_State`. The game draws it in 1 to 5 game views, each a rect of the window with a camera stack of its own: systems push cameras with a priority, the highest one shows, and a change cuts or blends. A full-screen claim takes every view for a cutscene, and its release gives the layout back (see [Cameras](cameras.md#cameras)). Its storage is virtual memory that the game reserves itself, so it holds no allocators and no pointers into code, and a code reload keeps it whole.
 
 | File in `lib/engine/ecs` | What it holds |
 |---|---|

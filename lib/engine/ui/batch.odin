@@ -116,8 +116,8 @@ batch_node :: proc(s: ^State, b: ^Batch, d: ^Document, index: int, n: u32, now: 
 	}
 	st := &node.style
 	alpha := node.alpha
-	batch_box(s, b, node.rect, node.clip, st, alpha)
-	batch_image(s, b, node, alpha)
+	batch_box(s, b, d.screen.scale, node.rect, node.clip, st, alpha)
+	batch_image(s, b, d.screen.scale, node, alpha)
 	if node.text.ok {
 		batch_text(s, b, d, index, n, now)
 	} else if (node.element == .Text || node.element == .Field) && st.font != {} {
@@ -131,6 +131,7 @@ batch_node :: proc(s: ^State, b: ^Batch, d: ^Document, index: int, n: u32, now: 
 		batch_box(
 			s,
 			b,
+			d.screen.scale,
 			snap(bar.track),
 			node.clip,
 			&bar.track_style,
@@ -139,6 +140,7 @@ batch_node :: proc(s: ^State, b: ^Batch, d: ^Document, index: int, n: u32, now: 
 		batch_box(
 			s,
 			b,
+			d.screen.scale,
 			snap(bar.thumb),
 			node.clip,
 			&bar.thumb_style,
@@ -149,7 +151,7 @@ batch_node :: proc(s: ^State, b: ^Batch, d: ^Document, index: int, n: u32, now: 
 
 // batch_box draws a box of a style, with its border, which a fill or a border shows.
 @(private)
-batch_box :: proc(s: ^State, b: ^Batch, rect, clip: [4]f32, st: ^Style, alpha: f32) {
+batch_box :: proc(s: ^State, b: ^Batch, scale: f32, rect, clip: [4]f32, st: ^Style, alpha: f32) {
 	if !(st.fill.colors[0].a > 0 ||
 		   st.fill.colors[1].a > 0 ||
 		   (st.border.width > 0 && st.border.color.a > 0)) {
@@ -158,12 +160,12 @@ batch_box :: proc(s: ^State, b: ^Batch, rect, clip: [4]f32, st: ^Style, alpha: f
 	i := Instance {
 		rect     = rect,
 		clip     = clip,
-		radii    = st.radius * s.scale,
+		radii    = st.radius * scale,
 		fill     = pack(st.fill.colors[0], alpha),
 		fill_end = pack(st.fill.colors[1], alpha),
 		border   = pack(st.border.color, alpha),
 		kind     = INSTANCE_RECT,
-		width    = st.border.width * s.scale,
+		width    = st.border.width * scale,
 	}
 	if st.fill.gradient {
 		i.kind |= INSTANCE_GRADIENT
@@ -183,7 +185,7 @@ gradient_of :: proc(rect: [4]f32, angle: f32) -> [2]f32 {
 
 // batch_image draws a node's image: one instance, or nine for a nine-slice, whose corners keep their size.
 @(private)
-batch_image :: proc(s: ^State, b: ^Batch, node: ^Node, alpha: f32) {
+batch_image :: proc(s: ^State, b: ^Batch, scale: f32, node: ^Node, alpha: f32) {
 	st := &node.style
 	if st.image == {} || s.residency == nil {
 		return
@@ -202,12 +204,12 @@ batch_image :: proc(s: ^State, b: ^Batch, node: ^Node, alpha: f32) {
 	if st.slice == {} {
 		i := base
 		i.rect = node.rect
-		i.radii = st.radius * s.scale
+		i.radii = st.radius * scale
 		i.uv = {0, 0, 1, 1}
 		push(b, i)
 		return
 	}
-	for cell in nine_slice(node.rect, st.slice, s.scale, {f32(t.size.x), f32(t.size.y)}) {
+	for cell in nine_slice(node.rect, st.slice, scale, {f32(t.size.x), f32(t.size.y)}) {
 		i := base
 		i.rect, i.uv = cell.rect, cell.uv
 		push(b, i)
@@ -262,10 +264,10 @@ batch_text :: proc(s: ^State, b: ^Batch, d: ^Document, index: int, n: u32, now: 
 	}
 	alpha := node.alpha * (text.placeholder ? PLACEHOLDER_ALPHA : 1)
 	content := [4]f32 {
-		node.rect[0] + st.padding[3] * s.scale,
-		node.rect[1] + st.padding[0] * s.scale,
-		node.rect[2] - st.padding[1] * s.scale,
-		node.rect[3] - st.padding[2] * s.scale,
+		node.rect[0] + st.padding[3] * d.screen.scale,
+		node.rect[1] + st.padding[0] * d.screen.scale,
+		node.rect[2] - st.padding[1] * d.screen.scale,
+		node.rect[3] - st.padding[2] * d.screen.scale,
 	}
 	clip := node.clip
 	scroll: f32
@@ -422,7 +424,7 @@ batch_caret :: proc(
 			}
 			resize(&d.glyphs, first)
 		}
-		underline := math.round(top + text.line - s.scale)
+		underline := math.round(top + text.line - d.screen.scale)
 		push(
 			b,
 			{
@@ -430,7 +432,7 @@ batch_caret :: proc(
 					x0 + x,
 					underline,
 					x0 + x + width,
-					underline + max(math.round(s.scale), 1),
+					underline + max(math.round(d.screen.scale), 1),
 				},
 				clip = clip,
 				fill = pack(color, alpha),
@@ -447,7 +449,7 @@ batch_caret :: proc(
 	push(
 		b,
 		{
-			rect = {caret, top, caret + max(CARET_WIDTH * s.scale, 1), top + text.line},
+			rect = {caret, top, caret + max(CARET_WIDTH * d.screen.scale, 1), top + text.line},
 			clip = clip,
 			fill = pack(color, alpha),
 			fill_end = pack(color, alpha),

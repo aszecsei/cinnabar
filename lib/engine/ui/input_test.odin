@@ -374,7 +374,7 @@ a_click_in_a_field_places_the_caret_by_that_fields_own_scroll :: proc(t: ^testin
 	// A press in b at its fourth character, as b shows unscrolled, puts the caret there.
 	d := document_of(&f.ui, e)
 	n, _ := find_node(d, "b")
-	x := b[0] + d.nodes[n].style.padding[3] * f.ui.scale + caret_x(d, d.nodes[n].text, 3) + 1
+	x := b[0] + d.nodes[n].style.padding[3] * d.screen.scale + caret_x(d, d.nodes[n].text, 3) + 1
 	step(
 		f,
 		{mouse_position = {x, (b[1] + b[3]) * 0.5}, down = {.Mouse_Left}, pressed = {.Mouse_Left}},

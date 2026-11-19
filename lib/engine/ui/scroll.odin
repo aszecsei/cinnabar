@@ -40,8 +40,8 @@ scroll_axis :: proc(st: ^Style) -> int {
 
 // view_length is how much of a scroll box's content shows along its axis: its rectangle inside its padding.
 @(private)
-view_length :: proc(s: ^State, node: ^Node, axis: int) -> f32 {
-	return max(node.rect[axis + 2] - node.rect[axis] - padding_of(s, &node.style, axis), 0)
+view_length :: proc(scale: f32, node: ^Node, axis: int) -> f32 {
+	return max(node.rect[axis + 2] - node.rect[axis] - padding_of(scale, &node.style, axis), 0)
 }
 
 // Bar is a scroll box's bar as it shows this frame: its track and thumb with their styles, and where the thumb can go:
@@ -107,21 +107,21 @@ bar_of :: proc(s: ^State, d: ^Document, n: u32) -> (bar: Bar, ok: bool) {
 	bar.thumb_style = bar_style(s, d, n, .Thumb)
 	r := node.rect
 	cross := 1 - axis
-	thickness := f32(DEFAULT_TRACK_WIDTH) * s.scale
-	if px, fixed := resolve_length(s, bar.track_style.width, r[cross + 2] - r[cross]); fixed {
+	thickness := f32(DEFAULT_TRACK_WIDTH) * d.screen.scale
+	if px, fixed := resolve_length(d.screen.scale, bar.track_style.width, r[cross + 2] - r[cross]); fixed {
 		thickness = px
 	}
-	pad := bar.track_style.padding * s.scale
+	pad := bar.track_style.padding * d.screen.scale
 	if axis == 1 {
 		bar.track = {r[2] - pad[1] - thickness, r[1] + pad[0], r[2] - pad[1], r[3] - pad[2]}
 	} else {
 		bar.track = {r[0] + pad[3], r[3] - pad[2] - thickness, r[2] - pad[1], r[3] - pad[2]}
 	}
-	t, inset := bar.track, bar.thumb_style.padding * s.scale
+	t, inset := bar.track, bar.thumb_style.padding * d.screen.scale
 	inner := [4]f32{t[0] + inset[3], t[1] + inset[0], t[2] - inset[1], t[3] - inset[2]}
 	length := max(inner[axis + 2] - inner[axis], 0)
-	view := view_length(s, node, axis)
-	thumb := min(max(length * view / (view + node.scroll_max), MIN_THUMB * s.scale), length)
+	view := view_length(d.screen.scale, node, axis)
+	thumb := min(max(length * view / (view + node.scroll_max), MIN_THUMB * d.screen.scale), length)
 	bar.start = inner[axis]
 	bar.travel = length - thumb
 	bar.thumb = inner
@@ -152,8 +152,8 @@ reveal :: proc(s: ^State, d: ^Document, index: int) -> bool {
 			continue
 		}
 		st := &box.style
-		low := box.rect[axis] + (axis == 0 ? st.padding[3] : st.padding[0]) * s.scale
-		high := box.rect[axis + 2] - (axis == 0 ? st.padding[1] : st.padding[2]) * s.scale
+		low := box.rect[axis] + (axis == 0 ? st.padding[3] : st.padding[0]) * d.screen.scale
+		high := box.rect[axis + 2] - (axis == 0 ? st.padding[1] : st.padding[2]) * d.screen.scale
 		delta: f32
 		if target[axis] < low || target[axis + 2] - target[axis] > high - low {
 			delta = target[axis] - low
@@ -217,7 +217,7 @@ scroll_by :: proc(s: ^State, d: ^Document, chain: []u32, delta: [2]f32, pages: f
 			continue
 		}
 		to := clamp(
-			node.scroll + delta[axis] + pages * view_length(s, node, axis),
+			node.scroll + delta[axis] + pages * view_length(d.screen.scale, node, axis),
 			0,
 			node.scroll_max,
 		)
@@ -245,7 +245,7 @@ press_bar :: proc(s: ^State, d: ^Document, n: u32, part: Bar_Part, mouse: [2]f32
 		s.input.drag_grab = mouse[axis] - bar.thumb[axis]
 	case .Track:
 		page := mouse[axis] < bar.thumb[axis] ? f32(-1) : 1
-		node.scroll = clamp(node.scroll + page * view_length(s, node, axis), 0, node.scroll_max)
+		node.scroll = clamp(node.scroll + page * view_length(d.screen.scale, node, axis), 0, node.scroll_max)
 	}
 }
 
@@ -282,7 +282,7 @@ scroll_input :: proc(s: ^State, input: core.Input, pointer: i32, dt: f32) {
 			s.input.scroll_hovered = ref(s, d, under[len(under) - 1])
 		}
 		if input.scroll != 0 {
-			step := -input.scroll * WHEEL_STEP * s.scale
+			step := -input.scroll * WHEEL_STEP * d.screen.scale
 			scroll_by(s, d, under[:], {step, step})
 		}
 	}
@@ -311,16 +311,17 @@ scroll_input :: proc(s: ^State, input: core.Input, pointer: i32, dt: f32) {
 		return
 	}
 	// The stick's up is positive, and scrolls a column back to its start.
-	delta := [2]f32{stick.x, -stick.y} * STICK_SCROLL * s.scale * dt
+	delta := [2]f32{stick.x, -stick.y} * STICK_SCROLL * dt
 	if d, n, ok := resolve(s, s.input.focus); ok && d.nodes[n].shown {
 		chain := make([dynamic]u32, context.temp_allocator)
 		ancestor_chain(d, n, &chain)
 		if len(chain) > 0 {
-			scroll_by(s, d, chain[:], delta, pages)
+			scroll_by(s, d, chain[:], delta * d.screen.scale, pages)
 			return
 		}
 	}
 	if pointer >= 0 {
-		scroll_by(s, &s.documents[pointer], under[:], delta, pages)
+		d := &s.documents[pointer]
+		scroll_by(s, d, under[:], delta * d.screen.scale, pages)
 	}
 }
