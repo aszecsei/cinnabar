@@ -468,7 +468,10 @@ due_agents :: proc(s: ^State, w: ^ecs.World) -> []u32 {
 	due := make([dynamic]Due, w.platform.frame_allocator)
 	for &slot, index in s.agents.slots {
 		ready, ok := &slot.phase.(Agent_Ready)
-		if !ok || ready.next_think > now || ecs.has(w, slot.entity, ecs.Inactive) {
+		if !ok ||
+		   ready.next_think > now ||
+		   ecs.has(w, slot.entity, ecs.Inactive) ||
+		   ecs.suspended(w, slot.entity, .AI) {
 			continue
 		}
 		agent := ecs.get(w, slot.entity, Agent)

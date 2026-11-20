@@ -69,6 +69,9 @@ Every time in the text and in the blob is a whole number of **ticks**, `i32`, at
 | `rate` | The display frame rate: 24, 25, 30, 48, 50 or 60. It changes no time in the blob. | 30 |
 | `clock` | `game`, which the game's time scale and pause change, or `real` | `game` |
 | `range` | `[<start>, <end>]` in ticks: the part that plays. 0 ≤ start < end ≤ length. | `[0, <length>]` |
+| `suspend` | What each binding suspends on its entity when it does not say: a list of `behaviours`, `ai`, `navigation` and `physics`, each at most once. `[]` is none. See [Cinematics: Possession](../../cinematics/possession.md#the-settings). | `[behaviours, ai, navigation, physics]` |
+| `input_context` | The quoted name of the input context that the cutscene pushes while it plays, at most 24 bytes. `""` is none. | `"cutscene"` |
+| `hide_ui` | `[$<guid>, ...]`: the UI documents that the cutscene hides while it plays, such as the HUD | `[]` |
 
 ### Bindings
 
@@ -83,6 +86,8 @@ A binding has `possess` or `spawn`, and not both.
 | `position` | Spawned | `[x, y, z]` in meters, from the parent when it has one. The cooker converts it to `World_Position` units (2^-24 m), as a world does. | `[0, 0, 0]` |
 | `rotation` | Spawned | `[x, y, z, w]`, a quaternion of length 1 (within 1e-3), which the cooker normalizes | `[0, 0, 0, 1]` |
 | `scale` | Spawned | `[x, y, z]`, none of them 0 | `[1, 1, 1]` |
+| `suspend` | Both | What the binding suspends on its entity, as the cutscene's `suspend` | The cutscene's |
+| `keep_velocity` | Both | `true`: a body that physics suspension made kinematic keeps its last velocity at the end. `false`: it is at rest. | `false` |
 
 A parent must come before its child, so parents cannot form a cycle. [Cinematics: Bindings](../../cinematics/bindings.md) describes how the game resolves both kinds.
 
@@ -129,10 +134,11 @@ The kind of a track decides whether it takes a binding, and what each of its sec
 
 ## The blob
 
-A `Cutscene_Blob` (`lib/engine/asset/format/cutscene.odin`) holds the length, the rate, the clock and the range. It then holds five flat tables:
+A `Cutscene_Blob` (`lib/engine/asset/format/cutscene.odin`) holds the length, the rate, the clock, the range, the name of its input context and the GUIDs of the documents that it hides (`cutscene_hide_ui`). It then holds five flat tables:
 
 - **`Cutscene_Binding`:**
   - its ID, kind, name and the name's hash (`animation_graph_hash`), and its policy;
+  - what it suspends, with the cutscene's default applied, and its flags (`.Keep_Velocity`);
   - the scene's GUID and the entity's scene ID (a path folds to one with `scene_path_id_of`), or the prefab's GUID;
   - its parent's index or `CUTSCENE_NONE`;
   - its position as `[3]i64` `World_Position` units, its rotation and its scale.
@@ -144,15 +150,15 @@ A `Cutscene_Blob` (`lib/engine/asset/format/cutscene.odin`) holds the length, th
 Each track's sections follow those of the track before it. The same is true of each section's channels and each channel's keys. `cutscene_track_sections`, `cutscene_section_channels` and `cutscene_channel_keys` give one record's part of the next table.
 
 `cutscene_view` checks the kind, the layout and that every slice is inside the blob. It also checks every record, so a reader can index the tables without checks of its own:
-- the length, rate, clock and range;
-- that each binding's parent is a spawned binding before it;
+- the length, rate, clock and range, and that the hidden documents are whole GUIDs;
+- that each binding's parent is a spawned binding before it, and that it suspends and flags only known things;
 - that each track's binding suits its kind;
 - that the tables split exactly, with no gaps and no overlaps;
 - each section's times, eases, rolls, weight and asset against its kind;
 - that every channel has keys;
 - that each key is inside its section, comes after the key before it, has a known interpolation and has finite numbers.
 
-`blob_references` gives the prefabs of the spawned bindings and the sections' clips, sounds and sub-sequences, so a bundle carries them. A possessed binding's scene is not a reference: the cutscene plays in a level that has the scene loaded, and its bundle does not pull in the level.
+`blob_references` gives the prefabs of the spawned bindings and the sections' clips, sounds and sub-sequences, so a bundle carries them. A possessed binding's scene is not a reference: the cutscene plays in a level that has the scene loaded, and its bundle does not pull in the level. A hidden document is not a reference either: the HUD that a cutscene hides is the level's or the game's.
 
 - **Problems** have their line. They include:
   - a first line that is not `cutscene 1`, or a cutscene without a `length`;
@@ -162,6 +168,7 @@ Each track's sections follow those of the track before it. The same is true of e
   - a binding's name that is empty or taken;
   - a time that is not a whole number of ticks, a range outside the length, or a section that does not start before it ends inside the length;
   - a binding with neither `possess` nor `spawn`, or both, or a setting for the other kind of binding;
+  - a `suspend` that is not a list of known systems, each at most once, a `keep_velocity` that is not `true` or `false`, an `input_context` that is not a quoted name of at most 24 bytes, or a `hide_ui` that is not a list of GUIDs;
   - a parent that is not a spawned binding before this one;
   - a position outside the bounds of a `World_Position`, a rotation that is not of length 1, or a scale of 0;
   - a track's kind that is unknown, a track without the binding that its kind needs, a binding that its kind does not take, or a binding ID that no binding has;
@@ -169,7 +176,7 @@ Each track's sections follow those of the track before it. The same is true of e
   - a section without the asset that its kind needs, or with one that its kind does not take;
   - a channel's name that is not a name or is taken, or a channel without keys;
   - a key's time outside its section or not after the key before it, a value that is not finite, an unknown interpolation, or tangents that are missing or not wanted;
-  - a GUID that names no asset, or an asset of the wrong kind: a possessed scene that is not a scene, a spawned prefab that is not a prefab, a clip that is not an animation, a sound that is not a sound, or a sub-sequence that is not a cutscene;
+  - a GUID that names no asset, or an asset of the wrong kind: a possessed scene that is not a scene, a spawned prefab that is not a prefab, a clip that is not an animation, a sound that is not a sound, a sub-sequence that is not a cutscene, or a hidden document that is not a UI document;
   - a cycle of sub-sequences, which each cutscene in it reports at the line that names the next, with the path, such as `sub-sequence cycle: game/a.cutscene -> game/b.cutscene -> game/a.cutscene`;
   - sub-sequences that nest deeper than `CUTSCENE_MAX_DEPTH` (8), at the line of the first one on the deepest path, with the path;
   - more than `MAX_CUTSCENE_BINDINGS` (1024) bindings, `MAX_CUTSCENE_TRACKS` (1024) tracks, `MAX_CUTSCENE_SECTIONS` (8192) sections, `MAX_CUTSCENE_CHANNELS` (65536) channels or `MAX_CUTSCENE_KEYS` (2^20) keys.

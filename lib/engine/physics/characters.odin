@@ -181,7 +181,7 @@ create_character :: proc(
 		entity = e,
 		kind   = .Character,
 	}
-	if ecs.has(w, e, ecs.Inactive) {
+	if ecs.has(w, e, ecs.Inactive) || character_suspended(w, e, .Character) {
 		core_physics.cmd_set_enabled(list, handle, false)
 		s.records[handle.index].disabled = true
 	}

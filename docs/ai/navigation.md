@@ -105,6 +105,8 @@ An agent of the crowd goes where it is sent: along its path, around the other ag
 
 A new agent's `Nav_Agent_State` is added at the end of its first tick, with that tick's status.
 
+A suspended agent (`ecs.suspended(w, e, .Navigation)`), such as one that a cutscene possesses, is left out of the snapshot, so no other agent avoids it. Its move stops, and its character's walk velocity is set to zero once. A move that is sent while it is suspended stops in the same tick ([Cinematics: Possession](../cinematics/possession.md#navigation)).
+
 ### Following
 
 - **The corridor** is the polygons of the agent's path, from the one that it stands on to its path's end, as DetourCrowd's `dtPathCorridor`.

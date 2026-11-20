@@ -76,6 +76,8 @@ Player_Live :: struct {
 	overrides:  [dynamic]Binding_Override,
 	// A hash of the blob's bindings when they resolved. A reload that changes them resolves them again.
 	bindings:   u64,
+	// The input context and the UI documents that the player holds from its first Playing or Skipping.
+	hold:       Player_Hold,
 }
 
 // Player_Ready is a loaded player that has not begun: everything is loaded and resolved, the spawned entities are hidden,
@@ -446,7 +448,9 @@ change_cutscene :: proc(
 	}
 	p.state = to
 	if from == .Ready && (next == .Playing || next == .Skipping) {
-		reveal_bindings(&live_of(&p.state).evaluation.bindings, w)
+		live := live_of(&p.state)
+		reveal_bindings(&live.evaluation.bindings, w)
+		take_hold(s, w, live)
 	}
 	append(&s.events, Player_Event{{u16(slot), p.generation}, next})
 	return true, despawned
@@ -739,6 +743,7 @@ give_back :: proc(s: ^State, w: ^ecs.World, live: ^Player_Live) -> (despawned: i
 	} else {
 		restore_all(s, e, w)
 	}
+	release_hold(s, w, &live.hold)
 	despawned = destroy_evaluation(e, w)
 	asset.unload(s.assets, e.cutscene)
 	for h in live.references {

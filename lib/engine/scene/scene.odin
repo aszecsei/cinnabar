@@ -772,6 +772,7 @@ is_derived :: proc(id: ecs.Component_Id) -> bool {
 	     SCENE_OWNED_ID,
 	     ecs.INACTIVE_ID,
 	     ecs.LOADING_ID,
+	     ecs.SUSPENDED_ID,
 	     ecs.PARENT_ID,
 	     ecs.NAME_ID:
 		return true

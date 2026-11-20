@@ -460,3 +460,26 @@ focus_on_an_element_without_the_attribute_sends_nothing :: proc(t: ^testing.T) {
 	testing.expect_value(t, focused(f), "c")
 	testing.expect_value(t, events(f), "")
 }
+
+// A suspended document is hidden, as for a cutscene that hides the HUD (see
+// docs/cinematics/possession.md#the-whole-cutscene), while its visible stays true: it takes no input, and shows again
+// when the last of two holders resumes it.
+@(test)
+a_suspended_document_is_hidden_until_every_holder_resumes_it :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(t, f)
+	menu := show(t, f, MENU, GRID)
+	step(f)
+	testing.expect(t, document_of(&f.ui, menu).visible)
+	ecs.suspend(&f.world, menu, {.Ui})
+	ecs.suspend(&f.world, menu, {.Ui})
+	step(f)
+	testing.expect(t, !document_of(&f.ui, menu).visible)
+	testing.expect(t, ecs.get(&f.world, menu, Ui_Document).visible)
+	ecs.resume(&f.world, menu, {.Ui})
+	step(f)
+	testing.expect(t, !document_of(&f.ui, menu).visible)
+	ecs.resume(&f.world, menu, {.Ui})
+	step(f)
+	testing.expect(t, document_of(&f.ui, menu).visible)
+}

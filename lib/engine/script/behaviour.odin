@@ -50,6 +50,9 @@ Instance_Flag :: enum u8 {
 	Told_Enabled,
 	// The class runs in the editor's edit mode too (see docs/scripting/behaviours.md#edit-mode).
 	Edit_Mode,
+	// A holder, such as a cutscene, suspends the entity's behaviours (ecs.suspend), which stops the instance as
+	// enabled = false does, without a change to enabled. Only attach and set_entity_suspended write it.
+	Suspended,
 }
 
 @(private)
@@ -76,10 +79,10 @@ Instance_Handle :: struct {
 	generation: u32,
 }
 
-// effective is true when the instance gets update and events: enabled, active and awake.
+// effective is true when the instance gets update and events: enabled, active, awake and not suspended.
 @(private)
 effective :: proc(i: ^Instance) -> bool {
-	return i.flags >= {.Live, .Awake, .Enabled, .Active}
+	return i.flags >= {.Live, .Awake, .Enabled, .Active} && .Suspended not_in i.flags
 }
 
 // run_prelude runs the prelude once, and sets Behaviour, Field, Action and Param, and keeps the registry of action
@@ -336,6 +339,9 @@ attach :: proc(
 	if ecs.active_in_hierarchy(r.world, e) {
 		i.flags += {.Active}
 	}
+	if ecs.suspended(r.world, e, .Behaviours) {
+		i.flags += {.Suspended}
+	}
 	if luau.rawgetfield(L, class, "update") == .FUNCTION {
 		i.flags += {.Updates}
 	}
@@ -519,6 +525,26 @@ set_entity_active :: proc(r: ^Runtime, e: ecs.Entity, active: bool) {
 			stop_owned(r, h)
 			sync_enabled(r, h)
 		}
+	}
+}
+
+// set_entity_suspended updates the instances of an entity whose behaviours a holder suspended or resumed, from what
+// the world says now: a suspended instance gets on_disable, and on_enable when the last holder resumes it, as for
+// enabled. Its coroutines keep running, as for enabled = false.
+@(private)
+set_entity_suspended :: proc(r: ^Runtime, e: ecs.Entity) {
+	suspended := ecs.suspended(r.world, e, .Behaviours)
+	for h in entity_instances(r, e) {
+		i := instance_at(r, h)
+		if i == nil || (.Suspended in i.flags) == suspended {
+			continue
+		}
+		if suspended {
+			i.flags += {.Suspended}
+		} else {
+			i.flags -= {.Suspended}
+		}
+		sync_enabled(r, h)
 	}
 }
 

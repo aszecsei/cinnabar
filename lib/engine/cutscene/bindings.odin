@@ -7,6 +7,7 @@ import "core:log"
 import "cinnabar:engine/asset"
 import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/ecs"
+import "cinnabar:engine/physics"
 import "cinnabar:engine/scene"
 import "cinnabar:engine/script"
 
@@ -22,14 +23,27 @@ Binding_State :: union {
 	Binding_Missing,
 }
 
-// Binding_Possessed is an entity that the cutscene does not own: a scene's entity, or an override's.
+// Binding_Possessed is an entity that the cutscene does not own: a scene's entity, or an override's. The binding
+// suspends hold's systems on it.
 Binding_Possessed :: struct {
 	entity: ecs.Entity,
+	hold:   Binding_Hold,
 }
 
-// Binding_Spawned is the root of a prefab instance that the cutscene spawned and owns. release_bindings despawns it.
+// Binding_Spawned is the root of a prefab instance that the cutscene spawned and owns. release_bindings despawns it. The
+// binding suspends hold's systems on it from the moment that it spawns.
 Binding_Spawned :: struct {
 	entity: ecs.Entity,
+	hold:   Binding_Hold,
+}
+
+// Binding_Hold is what a binding suspends on its entity while it is in its state (see
+// docs/cinematics/possession.md): set_binding suspends the systems when the binding enters the state, and resumes them
+// when it leaves.
+Binding_Hold :: struct {
+	systems:       ecs.Suspend_Set,
+	// A body that the suspension made kinematic keeps its last velocity when it is dynamic again, instead of none.
+	keep_velocity: bool,
 }
 
 // Binding_Missing is an optional binding whose entity was not found. Its tracks do nothing.
@@ -133,9 +147,10 @@ resolve_bindings :: proc(
 	}
 
 	for binding, index in bindings {
+		hold := hold_of(binding)
 		if entity := given[index]; entity != 0 {
 			if ecs.is_alive(w, entity) {
-				set_binding(b, index, Binding_Possessed{entity})
+				set_binding(b, w, index, Binding_Possessed{entity, hold})
 				continue
 			}
 			log.warnf(
@@ -147,14 +162,14 @@ resolve_bindings :: proc(
 		switch binding.kind {
 		case .Possessed:
 			if entity := find_possessed(r, binding); entity != 0 {
-				set_binding(b, index, Binding_Possessed{entity})
+				set_binding(b, w, index, Binding_Possessed{entity, hold})
 			} else if binding.policy == .Optional {
 				log.warnf(
 					"cutscene: %s: the optional binding %q is missing, so its tracks do nothing",
 					source_of(r),
 					name_of(r, index),
 				)
-				set_binding(b, index, Binding_Missing{})
+				set_binding(b, w, index, Binding_Missing{})
 			} else {
 				return fail(b, r, {index, .Missing})
 			}
@@ -163,7 +178,7 @@ resolve_bindings :: proc(
 			if !ok {
 				return fail(b, r, {index, .Spawn_Failed})
 			}
-			set_binding(b, index, Binding_Spawned{root})
+			set_binding(b, w, index, Binding_Spawned{root, hold})
 		}
 	}
 	ecs.update_activity(w)
@@ -216,9 +231,9 @@ reveal_bindings :: proc(b: ^Bindings, w: ^ecs.World) {
 	}
 }
 
-// release_bindings despawns the spawned bindings' entities, with their children, and forgets every binding. Possessed
-// entities stay. It gives how many roots it despawned. Call the systems' forget_despawned after it, as after
-// scene.unload_scene.
+// release_bindings forgets every binding, which resumes what each suspended, and then despawns the spawned bindings'
+// entities, with their children. Possessed entities stay. It gives how many roots it despawned. Call the systems'
+// forget_despawned after it, as after scene.unload_scene.
 release_bindings :: proc(b: ^Bindings, w: ^ecs.World) -> int {
 	roots := make([dynamic]ecs.Entity, 0, len(b.states), w.platform.frame_allocator)
 	for state in b.states {
@@ -226,11 +241,10 @@ release_bindings :: proc(b: ^Bindings, w: ^ecs.World) -> int {
 			append(&roots, s.entity)
 		}
 	}
-	despawned := ecs.despawn_many(w, roots[:])
 	for i in 0 ..< len(b.states) {
-		set_binding(b, i, nil)
+		set_binding(b, w, i, nil)
 	}
-	return despawned
+	return ecs.despawn_many(w, roots[:])
 }
 
 // destroy_bindings releases the bindings, so no spawned entity outlives them, and frees the states.
@@ -240,10 +254,63 @@ destroy_bindings :: proc(b: ^Bindings, w: ^ecs.World) {
 	b.states = nil
 }
 
-// set_binding is the one writer of a binding's state.
+// set_binding is the one writer of a binding's state. It resumes what the old state suspended on its entity, while the
+// entity is alive, and suspends what the new state holds.
 @(private = "file")
-set_binding :: proc(b: ^Bindings, index: int, to: Binding_State) {
+set_binding :: proc(b: ^Bindings, w: ^ecs.World, index: int, to: Binding_State) {
+	entity, hold := held_by(b.states[index])
+	resume_hold(w, entity, hold)
 	b.states[index] = to
+	entity, hold = held_by(to)
+	ecs.suspend(w, entity, hold.systems, hold.keep_velocity)
+}
+
+// held_by is the entity of a binding's state and what the state suspends on it.
+@(private = "file")
+held_by :: proc(state: Binding_State) -> (ecs.Entity, Binding_Hold) {
+	switch s in state {
+	case Binding_Possessed:
+		return s.entity, s.hold
+	case Binding_Spawned:
+		return s.entity, s.hold
+	case Binding_Missing:
+	}
+	return 0, {}
+}
+
+// resume_hold gives back what a binding suspended on its entity. A dynamic body that the suspension made kinematic is
+// dynamic again at rest when the last holder resumes it, unless any of its holders asked to keep its velocity.
+@(private = "file")
+resume_hold :: proc(w: ^ecs.World, entity: ecs.Entity, hold: Binding_Hold) {
+	ended, keep := ecs.resume(w, entity, hold.systems)
+	if .Physics not_in ended || keep {
+		return
+	}
+	if rb := ecs.get(w, entity, physics.Rigid_Body); rb == nil || rb.motion != .Dynamic {
+		return
+	}
+	if pb := ecs.get_write(w, entity, physics.Physics_Body); pb != nil {
+		pb.linear_velocity, pb.angular_velocity = 0, 0
+	}
+}
+
+// SUSPEND_OF is the world's system for each system that a cutscene's binding names.
+@(private = "file")
+SUSPEND_OF := [format.Cutscene_Suspend]ecs.Suspend {
+	.Behaviours = .Behaviours,
+	.AI         = .AI,
+	.Navigation = .Navigation,
+	.Physics    = .Physics,
+}
+
+// hold_of is what a binding of the blob suspends on its entity.
+@(private = "file")
+hold_of :: proc(binding: format.Cutscene_Binding) -> (hold: Binding_Hold) {
+	for system in binding.suspend {
+		hold.systems += {SUSPEND_OF[system]}
+	}
+	hold.keep_velocity = .Keep_Velocity in binding.flags
+	return
 }
 
 // fail undoes what resolve_bindings did, logs the failure, and gives it.

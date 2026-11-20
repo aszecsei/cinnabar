@@ -1260,3 +1260,33 @@ agent_plan_reads_the_modules_plan :: proc(t: ^testing.T) {
 	expected := []f64{1, 3, 1, 3, thinks, 2, 4, 1, 1, 6, 7, 2, 9, 0}
 	testing.expectf(t, slice.equal(f.reports[:], expected), "%v, expected %v", f.reports, expected)
 }
+
+// A suspended agent neither thinks nor acts, as for a cutscene that possesses it (see
+// docs/cinematics/possession.md#ai). It keeps its blackboard and the action that its last think chose, and both go on
+// when the last holder resumes it.
+@(test)
+a_suspended_agent_holds_its_blackboard_until_it_is_resumed :: proc(t: ^testing.T) {
+	f := setup(t, serial = true)
+	defer teardown(t, f)
+	e := spawn_agent(f, interval = 10)
+	frame(f, 2)
+	testing.expect_value(t, current_action(&f.ai, e), "walk")
+	thinks := thinks_of(f, e)
+	ecs.suspend(&f.world, e, {.AI})
+	ecs.suspend(&f.world, e, {.AI})
+	ready_agent(f, e).next_think = f.world.clock.tick
+	frame(f, 5)
+	testing.expect_value(t, thinks_of(f, e), thinks)
+	testing.expect(t, !has_event(f, fmt.tprintf("walk start %v 3", e)), "it does not act")
+	testing.expect_value(t, current_action(&f.ai, e), "walk")
+	alarmed, _ := get_key(&f.ai, e, "alarmed")
+	testing.expect_value(t, alarmed.(bool), true)
+
+	ecs.resume(&f.world, e, {.AI})
+	frame(f, 2)
+	testing.expect_value(t, thinks_of(f, e), thinks)
+	ecs.resume(&f.world, e, {.AI})
+	frame(f)
+	testing.expect(t, has_event(f, fmt.tprintf("walk start %v 3", e)), "it acts once resumed")
+	testing.expect(t, thinks_of(f, e) > thinks, "and thinks")
+}

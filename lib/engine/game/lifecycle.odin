@@ -67,7 +67,7 @@ game_init :: proc(
 	audio.init(&g.audio, platform, &g.assets)
 	nav.init(&g.nav, platform, &g.assets, &g.physics)
 	ai.init(&g.ai, platform, &g.assets, &g.scripts, &g.physics)
-	cutscene.init(&g.cutscenes, &g.world, &g.assets)
+	cutscene.init(&g.cutscenes, &g.world, &g.assets, &g.scripts.input_actions.contexts)
 	register_world(g, h)
 	asset.init(&g.assets, platform, asset.content_source(platform.content_dir))
 	render.renderer_init(&g.renderer, platform, &g.assets, &g.world)

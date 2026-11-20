@@ -178,6 +178,8 @@ drain_log :: proc(r: ^Runtime) {
 			set_entity_active(r, entry.entity, true)
 		case .Deactivated:
 			set_entity_active(r, entry.entity, false)
+		case .Suspended, .Resumed:
+			set_entity_suspended(r, entry.entity)
 		}
 	}
 }

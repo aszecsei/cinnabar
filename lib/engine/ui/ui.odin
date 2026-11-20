@@ -404,7 +404,7 @@ sync :: proc(s: ^State, w: ^ecs.World) {
 		}
 		d.seen = true
 		d.order = c.order
-		d.visible = c.visible && ecs.active_in_hierarchy(w, e)
+		d.visible = c.visible && ecs.active_in_hierarchy(w, e) && !ecs.suspended(w, e, .Ui)
 		d.view = c.view
 		load_document(s, d)
 	}

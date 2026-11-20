@@ -363,10 +363,18 @@ crowd_system :: proc(ctx: ^ecs.System_Context) {
 	apply_crowd_requests(s, w)
 	adopt_paths(s, w)
 
+	effects: Maybe(physics.Effects)
+	if s.physics != nil {
+		effects = physics.job_effects(s.physics, ctx)
+	}
 	frame := w.platform.frame_allocator
 	snapshots := make([dynamic]Snapshot, 0, len(s.crowd.slots), frame)
 	for &slot, i in s.crowd.slots {
 		if slot.phase == nil || ecs.has(w, slot.entity, ecs.Inactive) {
+			continue
+		}
+		if ecs.suspended(w, slot.entity, .Navigation) {
+			suspend_agent(s, w, &slot, effects)
 			continue
 		}
 		agent := ecs.get(w, slot.entity, Nav_Agent)
@@ -429,10 +437,6 @@ crowd_system :: proc(ctx: ^ecs.System_Context) {
 		w.platform.jobs_wait(&counter)
 	}
 
-	effects: Maybe(physics.Effects)
-	if s.physics != nil {
-		effects = physics.job_effects(s.physics, ctx)
-	}
 	for sn, i in snapshots {
 		r := results[i]
 		slot := &s.crowd.slots[sn.slot]
@@ -466,6 +470,34 @@ crowd_system :: proc(ctx: ^ecs.System_Context) {
 			desired  = slot.desired,
 		}
 		ecs.command_add(ctx.commands, w, slot.entity, state)
+	}
+}
+
+// stop_slot ends an agent's move: it forgets the target and the path that it waits for, and is Idle.
+@(private)
+stop_slot :: proc(s: ^State, w: ^ecs.World, slot: ^Crowd_Slot) {
+	slot.target, slot.asking = nil, nil
+	set_crowd_phase(s, w, slot, Crowd_Idle{})
+}
+
+// suspend_agent holds a suspended agent out of the crowd (see docs/cinematics/possession.md): it leaves the others'
+// snapshot, so none avoids it, its move stops, and its character stops walking. A move asked for while it is
+// suspended stops in the same tick, so the action that asked for it sees Idle.
+@(private)
+suspend_agent :: proc(
+	s: ^State,
+	w: ^ecs.World,
+	slot: ^Crowd_Slot,
+	effects: Maybe(physics.Effects),
+) {
+	if _, idle := slot.phase.(Crowd_Idle); !idle {
+		stop_slot(s, w, slot)
+	}
+	if slot.velocity != 0 || slot.desired != 0 {
+		slot.velocity, slot.desired = 0, 0
+		if e, ok := effects.?; ok {
+			physics.character_move(e, w, slot.entity, 0, gravity = true)
+		}
 	}
 }
 
@@ -546,8 +578,7 @@ apply_crowd_requests :: proc(s: ^State, w: ^ecs.World) {
 			if r.ticket != 0 && r.ticket != slot.move {
 				continue
 			}
-			slot.target, slot.asking = nil, nil
-			set_crowd_phase(s, w, slot, Crowd_Idle{})
+			stop_slot(s, w, slot)
 		}
 	}
 	clear(&s.crowd_pending)

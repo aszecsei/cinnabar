@@ -43,19 +43,20 @@ A player's state is one union, `Player_State`. The data of each state is in its 
 | `Player_Paused` | `Player_Live` | The time stands still. Both phases still evaluate at the time, so the cutscene holds the world, and fires no events. |
 | `Player_Skipping` | `Player_Live` | The next `update` evaluates the end, and the player goes to `Finishing`. [#538](https://github.com/aszecsei/cinnabar/issues/538) adds the skip policy, the fades and the events that fire when skipped. |
 | `Player_Finishing` | `Player_Live` | The last evaluation is done. The fades out ([#546](https://github.com/aszecsei/cinnabar/issues/546)) will run here. Until then, the same `update` gives the world back. |
-| `Player_Restored` | | The world is given back: the fields are restored, the spawned entities are gone and the assets are unloaded. The handle can be dropped. |
+| `Player_Restored` | | The world is given back: the fields are restored, the input and the HUD are back, nothing is suspended, the spawned entities are gone and the assets are unloaded. The handle can be dropped. |
 | `Player_Failed` | A `Failure` | The player could not go on. What it had changed is given back, as for `Restored`. |
 
 `Player_Live` is the data from `Ready` to `Finishing`:
 - the [evaluation](evaluation.md#the-evaluation), which holds the time and the time of each phase's last evaluation;
 - the assets that the cutscene references, which the player holds loaded;
 - the overrides, by binding ID;
-- a hash of the blob's bindings ([Hot reload](#hot-reload)).
+- a hash of the blob's bindings ([Hot reload](#hot-reload));
+- the hold: the token of its input context's push and the documents that it hides, empty until the player first plays or skips ([Possession: The whole cutscene](possession.md#the-whole-cutscene)).
 
 **One writer.** `change_cutscene(state, world, slot, to)` is the only procedure that sets a player's state. `game.Sublevel_State` and `change_sublevel` are the model.
 - It refuses a change that the diagram does not allow, and logs it.
-- It frees the data of the state that the player leaves. A loading player's overrides are freed. A live player that goes to `Restored` or `Failed` gives the world back: its tracks' fields are restored, its spawned entities are despawned and its assets are unloaded.
-- A `Ready` player that goes to `Playing` or `Skipping` shows its spawned entities (`reveal_bindings`).
+- It frees the data of the state that the player leaves. A loading player's overrides are freed. A live player that goes to `Restored` or `Failed` gives the world back (`give_back`): its tracks' fields are restored, its input context and documents come back, its bindings resume what they suspended, its spawned entities are despawned and its assets are unloaded ([Possession: Giving it back](possession.md#giving-it-back)).
+- A `Ready` player that goes to `Playing` or `Skipping` shows its spawned entities (`reveal_bindings`), pushes its input context and hides its documents (`take_hold`, [Possession: The whole cutscene](possession.md#the-whole-cutscene)).
 - It records each change as a `Player_Event`. `player_events` gives the frame's events, and `end_frame` clears them.
 
 A change from one live state to another carries the live data. `moved(player, to)` makes the new variant from the data that the player holds at the moment of the change, so the change carries what the last evaluation saved.
