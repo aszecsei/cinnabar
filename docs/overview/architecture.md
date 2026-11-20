@@ -30,7 +30,7 @@ Details: [Core](../core/README.md).
 One frame runs these phases in order:
 
 1. Poll platform events and input.
-2. Advance the cutscenes on the real clock, and write their `Fixed` tracks. Then run the fixed ticks that are due (zero or more). Each tick runs the `Fixed` systems (parallel jobs) and applies their structural changes, runs the scripts' fixed step (serial: `fixed_update`, then the tick's events and `wait_fixed` coroutines), and propagates transforms.
+2. Move the cutscenes' players on: load, finish and give the world back ([Cinematics: Player](../cinematics/player.md#the-frame)). Advance the cutscenes on the real clock, and write their `Fixed` tracks. Then run the fixed ticks that are due (zero or more). Each tick runs the `Fixed` systems (parallel jobs) and applies their structural changes, runs the scripts' fixed step (serial: `fixed_update`, then the tick's events and `wait_fixed` coroutines), and propagates transforms.
 3. Run the `Update` systems (parallel jobs).
 4. Apply queued structural changes to the world.
 5. Run the script phase (serial): behaviour lifecycle callbacks, events, opt-in `update` calls and due coroutines. In the editor's edit mode, the edit phase runs in its place, for the behaviours that run in edit mode ([Scripting](../scripting/behaviours.md#edit-mode)).

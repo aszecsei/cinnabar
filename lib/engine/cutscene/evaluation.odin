@@ -2,6 +2,7 @@ package cutscene
 
 import "core:log"
 import "core:mem"
+import "core:slice"
 import "core:time"
 
 import "cinnabar:engine/asset"
@@ -32,14 +33,20 @@ Track_Kind :: struct {
 	data:     rawptr,
 }
 
-// State is the cutscenes' part of the game: the kinds of track, and the evaluations that the systems advance. The kinds
-// hold procedures from the DLL image, so register clears them, and the kinds are registered again after it.
+// State is the cutscenes' part of the game: the kinds of track, and the players, whose evaluations the systems advance.
+// The kinds hold procedures from the DLL image, so register clears them, and the kinds are registered again after it.
 State :: struct {
-	assets:      ^asset.Assets,
-	kinds:       [format.Cutscene_Track_Kind]Track_Kind,
-	// The evaluations that the systems advance and evaluate, in the order that they were added. Their owners add them
-	// and remove them. Heap memory.
-	evaluations: [dynamic]^Evaluation,
+	assets:  ^asset.Assets,
+	kinds:   [format.Cutscene_Track_Kind]Track_Kind,
+	// The players, in fixed slots, so an evaluation does not move while it is evaluated (see
+	// docs/cinematics/player.md#handles).
+	players: [MAX_PLAYERS]Player,
+	// The start order that the next player gets.
+	started: u64,
+	// The level generation that the players were made in. A new level resets them.
+	level:   u64,
+	// What happened to the players in this frame, in order. end_frame clears them. Heap memory.
+	events:  [dynamic]Player_Event,
 }
 
 // Evaluation is what one cutscene needs to be evaluated: its blob, its bindings, its time and the snapshot of the
@@ -94,6 +101,8 @@ Snapshot :: struct {
 // Track_Context is what a kind's evaluate procedure gets for one track.
 Track_Context :: struct {
 	world:      ^ecs.World,
+	// The state of the cutscenes, whose other players can hold a field's own value (see field_base).
+	cutscenes:  ^State,
 	evaluation: ^Evaluation,
 	data:       []byte,
 	blob:       ^format.Cutscene_Blob,
@@ -108,16 +117,20 @@ Track_Context :: struct {
 	user:       rawptr,
 }
 
-// init sets the state's assets and its list. Call register after it.
+// init sets the state's assets and the level that its players begin in. Call register after it.
 init :: proc(s: ^State, w: ^ecs.World, assets: ^asset.Assets) {
 	s.assets = assets
-	s.evaluations = make([dynamic]^Evaluation, w.platform.heap_allocator)
+	s.events = make([dynamic]Player_Event, w.platform.heap_allocator)
+	s.level = level_of(w)
 }
 
-// destroy frees the list. The evaluations belong to their owners, who destroy them.
-destroy :: proc(s: ^State) {
-	delete(s.evaluations)
-	s.evaluations = nil
+// destroy restores and frees every player, as reset does, and frees the events. Call it while the world and the
+// assets are alive. It gives how many spawned roots it despawned.
+destroy :: proc(s: ^State, w: ^ecs.World) -> (despawned: int) {
+	despawned = reset(s, w)
+	delete(s.events)
+	s.events = nil
+	return
 }
 
 // register clears the kinds and makes the two systems. Call it with the world's registrations, before every other
@@ -151,25 +164,6 @@ register_kind :: proc(s: ^State, kind: format.Cutscene_Track_Kind, desc: Track_K
 	s.kinds[kind] = desc
 }
 
-// add_evaluation makes the systems advance and evaluate an evaluation, until remove_evaluation.
-add_evaluation :: proc(s: ^State, e: ^Evaluation) {
-	for other in s.evaluations {
-		if other == e {
-			return
-		}
-	}
-	append(&s.evaluations, e)
-}
-
-remove_evaluation :: proc(s: ^State, e: ^Evaluation) {
-	for other, i in s.evaluations {
-		if other == e {
-			ordered_remove(&s.evaluations, i)
-			return
-		}
-	}
-}
-
 // init_evaluation starts an evaluation of a cutscene at its range's start. Resolve its bindings with resolve_bindings.
 init_evaluation :: proc(
 	e: ^Evaluation,
@@ -189,15 +183,16 @@ init_evaluation :: proc(
 	}
 }
 
-// destroy_evaluation takes the evaluation off the systems' list, destroys the bindings, which despawns what they
-// spawned, and frees the snapshot. It restores nothing: call restore first for that.
-destroy_evaluation :: proc(s: ^State, e: ^Evaluation, w: ^ecs.World) {
-	remove_evaluation(s, e)
+// destroy_evaluation destroys the bindings, which despawns what they spawned, and frees the snapshot. It gives how
+// many spawned roots it despawned. It restores nothing: call restore first for that.
+destroy_evaluation :: proc(e: ^Evaluation, w: ^ecs.World) -> (despawned: int) {
+	despawned = release_bindings(&e.bindings, w)
 	destroy_bindings(&e.bindings, w)
 	delete(e.snapshot.saved)
 	delete(e.snapshot.index)
 	delete(e.snapshot.writers)
 	e.snapshot = {}
+	return
 }
 
 // cutscene_data is the blob of an evaluation's cutscene, checked, or false when it is not loaded or not valid.
@@ -232,8 +227,15 @@ advance :: proc(e: ^Evaluation, blob: ^format.Cutscene_Blob, dt: time.Duration) 
 
 // seek sets the time, within the range, for a debugger, a scrub or the editor. No event between the old time and the
 // new one fires, in either phase.
-seek :: proc(e: ^Evaluation, w: ^ecs.World, data: []byte, blob: ^format.Cutscene_Blob, t: i32) {
-	follow_blob(e, w, data, blob)
+seek :: proc(
+	s: ^State,
+	e: ^Evaluation,
+	w: ^ecs.World,
+	data: []byte,
+	blob: ^format.Cutscene_Blob,
+	t: i32,
+) {
+	follow_blob(s, e, w, data, blob)
 	e.time = clamp(t, blob.range_start, blob.range_end)
 	e.carry = 0
 	for &last in e.last {
@@ -252,7 +254,7 @@ evaluate :: proc(
 	blob: ^format.Cutscene_Blob,
 	phase: Phase,
 ) {
-	follow_blob(e, w, data, blob)
+	follow_blob(s, e, w, data, blob)
 	now := e.time
 	from := i64(blob.range_start) - 1
 	if last, ok := e.last[phase].?; ok {
@@ -260,6 +262,7 @@ evaluate :: proc(
 	}
 	ctx := Track_Context {
 		world      = w,
+		cutscenes  = s,
 		evaluation = e,
 		data       = data,
 		blob       = blob,
@@ -280,10 +283,18 @@ evaluate :: proc(
 }
 
 // restore ends what the tracks did to the world: each saved field that a track set to restore wrote goes back to its
-// value before the cutscene, and those that only tracks set to keep wrote stay. The snapshot is then empty. A field
-// whose entity is gone, or no longer has the component, is skipped.
-restore :: proc(e: ^Evaluation, w: ^ecs.World, data: []byte, blob: ^format.Cutscene_Blob) {
-	follow_blob(e, w, data, blob)
+// value before the cutscene, and those that only tracks set to keep wrote stay. A field that another player's snapshot
+// also holds stays as it is: that player writes it while it plays, and gives it back when it ends (see
+// docs/cinematics/player.md#conflicts). The snapshot is then empty. A field whose entity is gone, or no longer has the
+// component, is skipped.
+restore :: proc(
+	s: ^State,
+	e: ^Evaluation,
+	w: ^ecs.World,
+	data: []byte,
+	blob: ^format.Cutscene_Blob,
+) {
+	follow_blob(s, e, w, data, blob)
 	tracks := format.cutscene_tracks(data, blob)
 	restores := make([]bool, len(e.snapshot.saved), w.platform.frame_allocator)
 	for writer in e.snapshot.writers {
@@ -296,8 +307,17 @@ restore :: proc(e: ^Evaluation, w: ^ecs.World, data: []byte, blob: ^format.Cutsc
 	// Last saved first, so where two saved fields overlap, the one saved first, before any write, is what stays.
 	#reverse for &saved, i in e.snapshot.saved {
 		if restores[i] {
-			put_back(w, &saved)
+			put_back(s, e, w, &saved)
 		}
+	}
+	forget(&e.snapshot)
+}
+
+// restore_all puts back every saved field, as restore does, for an evaluation whose blob is gone, so the tracks'
+// settings are not known.
+restore_all :: proc(s: ^State, e: ^Evaluation, w: ^ecs.World) {
+	#reverse for &saved in e.snapshot.saved {
+		put_back(s, e, w, &saved)
 	}
 	forget(&e.snapshot)
 }
@@ -384,9 +404,9 @@ blend_value :: proc(b: Blend($T), base: T) -> T {
 	return base * (1 - b.weight) + b.sum
 }
 
-// field_base reads a field's own value: as it was before the cutscene first wrote it, or as it is when no track has
-// written it. A track blends over it, so the value at a time does not depend on what the track wrote before. False
-// when the entity is not alive or has no such component.
+// field_base reads a field's own value: as it was before any cutscene first wrote it, or as it is when no track has
+// written it. A track blends over it, so the value at a time does not depend on what the track, or another player,
+// wrote before. False when the entity is not alive or has no such component.
 field_base :: proc(ctx: ^Track_Context, field: Field, out: []byte) -> bool {
 	if int(field.size) != len(out) || field.size > MAX_FIELD_SIZE {
 		return false
@@ -395,14 +415,19 @@ field_base :: proc(ctx: ^Track_Context, field: Field, out: []byte) -> bool {
 		copy(out, ctx.evaluation.snapshot.saved[i].bytes[:field.size])
 		return true
 	}
+	if other, held := held_elsewhere(ctx.cutscenes, ctx.evaluation, field); held {
+		copy(out, other.bytes[:field.size])
+		return true
+	}
 	p := field_pointer(ctx.world, field) or_return
 	mem.copy(raw_data(out), p, int(field.size))
 	return true
 }
 
 // write_field writes a field for the track. The first write of the field by any track saves it, and each track that
-// writes it is remembered, so restore knows whether to put it back. The component counts as changed. False when the
-// entity is not alive, has no such component, or the field is larger than MAX_FIELD_SIZE.
+// writes it is remembered, so restore knows whether to put it back. When another player already holds the field, the
+// value saved is that player's: the value before any cutscene wrote it. The component counts as changed. False when
+// the entity is not alive, has no such component, or the field is larger than MAX_FIELD_SIZE.
 write_field :: proc(ctx: ^Track_Context, field: Field, value: []byte) -> bool {
 	if int(field.size) != len(value) {
 		return false
@@ -418,7 +443,11 @@ write_field :: proc(ctx: ^Track_Context, field: Field, value: []byte) -> bool {
 		entry := Saved {
 			field = field,
 		}
-		mem.copy(&entry.bytes, p, int(field.size))
+		if other, held := held_elsewhere(ctx.cutscenes, ctx.evaluation, field); held {
+			entry.bytes = other.bytes
+		} else {
+			mem.copy(&entry.bytes, p, int(field.size))
+		}
 		index = len(snapshot.saved)
 		append(&snapshot.saved, entry)
 		snapshot.index[field] = index
@@ -456,12 +485,14 @@ base :: proc(
 	return
 }
 
-// advance_real advances the cutscenes on the real clock by the frame's real duration, and evaluates their Fixed
-// tracks, so the ticks that follow see them even while the game is paused. Call it in the frame code before the ticks.
+// advance_real advances the playing cutscenes on the real clock by the frame's real duration, and evaluates their
+// Fixed tracks, so the ticks that follow see them even while the game is paused. Call it in the frame code before the
+// ticks.
 advance_real :: proc(s: ^State, w: ^ecs.World, dt: time.Duration) {
-	for e in s.evaluations {
+	for p in in_order(s, w) {
+		e := &live_of(&p.state).evaluation
 		data, blob, ok := cutscene_data(s, e)
-		if !ok || blob.clock != .Real {
+		if !ok || blob.clock != .Real || status_of(p.state) != .Playing {
 			continue
 		}
 		advance(e, blob, dt)
@@ -469,28 +500,34 @@ advance_real :: proc(s: ^State, w: ^ecs.World, dt: time.Duration) {
 	}
 }
 
-// fixed_system advances the cutscenes on the game's clock by the tick, and evaluates their Fixed tracks. The tick's
-// length is exact, from the world's clock, so the game's time scale and pause reach the cutscene through the ticks.
+// fixed_system advances the playing cutscenes on the game's clock by the tick, and evaluates the Fixed tracks of every
+// cutscene that plays or is paused, in the players' order, so the player that wins a field writes it last. The tick's
+// length is exact, from the world's clock, so the game's time scale and pause reach the cutscene through the ticks. A
+// cutscene on the real clock moved in advance_real, so it evaluates again at the same time, and fires nothing.
 @(private)
 fixed_system :: proc(ctx: ^ecs.System_Context) {
 	s := (^State)(ctx.data)
 	w := ctx.world
 	step := ecs.tick_time(w) - ecs.tick_start(&w.clock, w.clock.tick)
-	for e in s.evaluations {
+	for p in in_order(s, w) {
+		e := &live_of(&p.state).evaluation
 		data, blob, ok := cutscene_data(s, e)
-		if !ok || blob.clock != .Game {
+		if !ok {
 			continue
 		}
-		advance(e, blob, step)
+		if blob.clock == .Game && status_of(p.state) == .Playing {
+			advance(e, blob, step)
+		}
 		evaluate(s, e, w, data, blob, .Fixed)
 	}
 }
 
-// late_system evaluates every cutscene's Late tracks.
+// late_system evaluates the Late tracks of every cutscene that plays or is paused, in the players' order.
 @(private)
 late_system :: proc(ctx: ^ecs.System_Context) {
 	s := (^State)(ctx.data)
-	for e in s.evaluations {
+	for p in in_order(s, ctx.world) {
+		e := &live_of(&p.state).evaluation
 		data, blob, ok := cutscene_data(s, e)
 		if !ok {
 			continue
@@ -499,12 +536,56 @@ late_system :: proc(ctx: ^ecs.System_Context) {
 	}
 }
 
+// in_order is the players that play or are paused, in frame memory, by priority and then by start order, so the later
+// of two players that write one field writes it last and wins (see docs/cinematics/player.md#conflicts).
+@(private)
+in_order :: proc(s: ^State, w: ^ecs.World) -> []^Player {
+	found := make([dynamic]^Player, 0, MAX_PLAYERS, w.platform.frame_allocator)
+	for &p in s.players {
+		if status := status_of(p.state); status == .Playing || status == .Paused {
+			append(&found, &p)
+		}
+	}
+	slice.sort_by(found[:], proc(a, b: ^Player) -> bool {
+		if a.priority != b.priority {
+			return a.priority < b.priority
+		}
+		return a.order < b.order
+	})
+	return found[:]
+}
+
+// held_elsewhere is another player's saved value of a field: the value before any cutscene wrote it, as the first
+// player that wrote it saved it.
+@(private)
+held_elsewhere :: proc(s: ^State, e: ^Evaluation, field: Field) -> (^Saved, bool) {
+	if s == nil {
+		return nil, false
+	}
+	for &p in s.players {
+		live := live_of(&p.state)
+		if live == nil || &live.evaluation == e {
+			continue
+		}
+		if i, saved := live.evaluation.snapshot.index[field]; saved {
+			return &live.evaluation.snapshot.saved[i], true
+		}
+	}
+	return nil, false
+}
+
 // follow_blob notices a new blob, by its key, and reloads. Every procedure that takes the evaluation's blob calls it
 // first, so none of them acts on a blob that the evaluation has not followed.
 @(private)
-follow_blob :: proc(e: ^Evaluation, w: ^ecs.World, data: []byte, blob: ^format.Cutscene_Blob) {
+follow_blob :: proc(
+	s: ^State,
+	e: ^Evaluation,
+	w: ^ecs.World,
+	data: []byte,
+	blob: ^format.Cutscene_Blob,
+) {
 	if key, seen := e.key.?; seen && key != blob.header.key {
-		reload(e, w, data, blob)
+		reload(s, e, w, data, blob)
 	}
 	e.key = blob.header.key
 }
@@ -512,7 +593,13 @@ follow_blob :: proc(e: ^Evaluation, w: ^ecs.World, data: []byte, blob: ^format.C
 // reload follows a new blob: the time stays, within the new range, the fields that only removed tracks wrote are
 // restored, and the next evaluation of each phase fires no events.
 @(private)
-reload :: proc(e: ^Evaluation, w: ^ecs.World, data: []byte, blob: ^format.Cutscene_Blob) {
+reload :: proc(
+	s: ^State,
+	e: ^Evaluation,
+	w: ^ecs.World,
+	data: []byte,
+	blob: ^format.Cutscene_Blob,
+) {
 	tracks := format.cutscene_tracks(data, blob)
 	kept := make([]bool, len(e.snapshot.saved), w.platform.frame_allocator)
 	gone := make([dynamic]Writer, w.platform.frame_allocator)
@@ -538,7 +625,7 @@ reload :: proc(e: ^Evaluation, w: ^ecs.World, data: []byte, blob: ^format.Cutsce
 	moved := make([]int, len(e.snapshot.saved), w.platform.frame_allocator)
 	#reverse for &saved, i in e.snapshot.saved {
 		if !kept[i] {
-			put_back(w, &saved)
+			put_back(s, e, w, &saved)
 		}
 	}
 	for saved, i in e.snapshot.saved {
@@ -565,9 +652,13 @@ reload :: proc(e: ^Evaluation, w: ^ecs.World, data: []byte, blob: ^format.Cutsce
 	}
 }
 
-// put_back writes a saved field's value back, when its entity is alive and still has the component.
+// put_back writes a saved field's value back, when its entity is alive and still has the component, and no other
+// player holds the field.
 @(private)
-put_back :: proc(w: ^ecs.World, saved: ^Saved) {
+put_back :: proc(s: ^State, e: ^Evaluation, w: ^ecs.World, saved: ^Saved) {
+	if _, held := held_elsewhere(s, e, saved.field); held {
+		return
+	}
 	p, ok := field_pointer(w, saved.field)
 	if !ok {
 		return

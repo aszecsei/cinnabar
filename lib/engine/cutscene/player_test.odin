@@ -1,0 +1,842 @@
+package cutscene
+
+import "base:runtime"
+import "core:fmt"
+import "core:mem/virtual"
+import "core:os"
+import "core:testing"
+import "core:time"
+
+import "cinnabar:core"
+import "cinnabar:core/jobs"
+import "cinnabar:core/testlog"
+import "cinnabar:engine/asset"
+import format "cinnabar:engine/asset/format"
+import "cinnabar:engine/ecs"
+import "cinnabar:engine/scene"
+import "cinnabar:engine/script"
+
+// Dial is a component that the test's property track writes.
+@(private = "file")
+Dial :: struct {
+	value: f32,
+}
+
+@(private = "file")
+DIAL_ID :: ecs.Component_Id(9102)
+
+@(private = "file")
+INTRO_GUID :: format.Guid {
+	0  = 0x74,
+	15 = 1,
+}
+
+@(private = "file")
+OUTRO_GUID :: format.Guid {
+	0  = 0x74,
+	15 = 2,
+}
+
+@(private = "file")
+PROP_GUID :: format.Guid {
+	0  = 0x74,
+	15 = 3,
+}
+
+// A clip that no blob holds.
+@(private = "file")
+CLIP_GUID :: format.Guid {
+	0  = 0x74,
+	15 = 4,
+}
+
+// The scene that the possessed bindings name. The overrides give their entities, so no scene loads.
+@(private = "file")
+LEVEL_GUID :: format.Guid {
+	0  = 0x74,
+	15 = 5,
+}
+
+@(private = "file")
+PROP :: `scene 2
+entity 1000000000000001
+name = "Prop"
+component 1 Transform
+	position = [0, 0, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+`
+
+@(private = "file")
+SECOND :: format.CUTSCENE_TICKS_PER_SECOND
+
+// Each test thread has its own count of level unloads, which level_generation gives.
+@(private = "file", thread_local)
+levels: u64
+
+@(private = "file")
+Player_Fixture :: struct {
+	frame:     virtual.Arena,
+	platform:  core.Platform_API,
+	world:     ecs.World,
+	assets:    asset.Assets,
+	cutscenes: State,
+	dir:       string,
+	// Two characters that the cutscenes possess, with their dials at 1 and 2.
+	hero:      ecs.Entity,
+	rival:     ecs.Entity,
+	// The values of the event keys that fired, in order: the Late phase's, and the Fixed phase's.
+	fired:     [dynamic]f32,
+	fixed:     [dynamic]f32,
+}
+
+@(private = "file")
+player_setup :: proc(t: ^testing.T) -> ^Player_Fixture {
+	f := new(Player_Fixture)
+	levels = 0
+	f.fired = make([dynamic]f32)
+	f.fixed = make([dynamic]f32)
+	testing.expect(t, virtual.arena_init_growing(&f.frame) == nil)
+	f.platform = {
+		frame_allocator = virtual.arena_allocator(&f.frame),
+		// The test runner's tracking allocator, so what a player leaves on the heap fails the test.
+		heap_allocator = context.allocator,
+		asset_allocator = runtime.heap_allocator(),
+		file_read = core.file_read,
+		file_modified = core.file_modified,
+		file_size = core.file_size,
+		time_seconds = proc() -> f64 {return 0},
+		jobs_run = proc(list: []jobs.Job, counter: ^jobs.Counter) {
+			for job in list {
+				job.procedure(job.data)
+			}
+		},
+		jobs_wait = proc(counter: ^jobs.Counter) {},
+		level_generation = proc() -> u64 {return levels},
+		memory_reserve = proc(size: int) -> rawptr {
+			data, err := virtual.reserve(uint(size))
+			return err == nil ? raw_data(data) : nil
+		},
+		memory_commit = proc(ptr: rawptr, size: int) -> bool {
+			return virtual.commit(ptr, uint(size)) == nil
+		},
+		memory_release = proc(ptr: rawptr, size: int) {
+			virtual.release(ptr, uint(size))
+		},
+	}
+	testing.expect(t, ecs.init(&f.world, &f.platform))
+	ecs.register_engine_components(&f.world.registry)
+	scene.register_components(&f.world.registry)
+	script.register_components(&f.world.registry)
+	ecs.register_component(&f.world.registry, Dial, DIAL_ID)
+	temp, err := os.make_directory_temp("", "cutscene_player_test_*", context.allocator)
+	testing.expect(t, err == nil)
+	f.dir = temp
+	asset.init(&f.assets, &f.platform, asset.loose_cache(f.dir))
+	prop, problems, parsed := format.scene_parse(PROP, context.temp_allocator)
+	testing.expectf(t, parsed, "problems: %v", problems)
+	buffer: [32]u8
+	path := fmt.tprintf("%s/%s.blob", f.dir, format.guid_format(PROP_GUID, &buffer))
+	blob := format.scene_write(prop, PROP_GUID, 1, .Prefab, allocator = context.temp_allocator)
+	testing.expect(t, os.write_entire_file(path, blob) == nil)
+	init(&f.cutscenes, &f.world, &f.assets)
+	register(&f.cutscenes, &f.world)
+	register_kind(&f.cutscenes, .Property, {phase = .Fixed, evaluate = dial_track})
+	register_kind(&f.cutscenes, .Event, {phase = .Late, evaluate = event_track, data = &f.fired})
+	register_kind(
+		&f.cutscenes,
+		.Presentation,
+		{phase = .Fixed, evaluate = event_track, data = &f.fixed},
+	)
+	f.hero = ecs.spawn(&f.world)
+	ecs.add(&f.world, f.hero, Dial{1})
+	f.rival = ecs.spawn(&f.world)
+	ecs.add(&f.world, f.rival, Dial{2})
+	return f
+}
+
+@(private = "file")
+player_teardown :: proc(f: ^Player_Fixture) {
+	destroy(&f.cutscenes, &f.world)
+	asset.destroy(&f.assets)
+	ecs.destroy(&f.world)
+	virtual.arena_destroy(&f.frame)
+	os.remove_all(f.dir)
+	delete(f.dir)
+	delete(f.fired)
+	delete(f.fixed)
+	free(f)
+}
+
+// dial_track is the test's property kind: the binding's dial, from each covering section's first key, blended by the
+// sections' weights over the dial's own value.
+@(private = "file")
+dial_track :: proc(ctx: ^Track_Context) {
+	entity, bound := track_entity(ctx)
+	if !bound {
+		return
+	}
+	b: Blend(f32)
+	for section in format.cutscene_track_sections(ctx.data, ctx.blob, ctx.track) {
+		at, covers := section_at(ctx.blob, section, ctx.time)
+		if !covers {
+			continue
+		}
+		channel := format.cutscene_section_channels(ctx.data, ctx.blob, section)[0]
+		blend_add(
+			&b,
+			format.cutscene_channel_keys(ctx.data, ctx.blob, channel)[0].value,
+			at.weight,
+		)
+	}
+	if own, ok := base(ctx, entity, DIAL_ID, offset_of(Dial, value), f32); ok {
+		write(ctx, entity, DIAL_ID, offset_of(Dial, value), blend_value(b, own))
+	}
+}
+
+// event_track is the test's event kind, in either phase: each key is an event at its section's start plus its time,
+// which records the key's value in the kind's list when it fires.
+@(private = "file")
+event_track :: proc(ctx: ^Track_Context) {
+	fired := (^[dynamic]f32)(ctx.user)
+	for section in format.cutscene_track_sections(ctx.data, ctx.blob, ctx.track) {
+		for channel in format.cutscene_section_channels(ctx.data, ctx.blob, section) {
+			for key in format.cutscene_channel_keys(ctx.data, ctx.blob, channel) {
+				if fires(ctx, section.start + key.time) {
+					append(fired, key.value)
+				}
+			}
+		}
+	}
+}
+
+@(private = "file")
+possessed :: proc(id: u32, name: string) -> format.Cutscene_Binding_Contents {
+	return {
+		id = id,
+		kind = .Possessed,
+		name = name,
+		parent = format.CUTSCENE_NONE,
+		asset = LEVEL_GUID,
+		entity = u64(id),
+		rotation = {0, 0, 0, 1},
+		scale = {1, 1, 1},
+	}
+}
+
+@(private = "file")
+key :: proc(value: f32, at: i32 = 0) -> []format.Cutscene_Channel_Contents {
+	keys := make([]format.Cutscene_Key, 1, context.temp_allocator)
+	keys[0] = {
+		time  = at,
+		value = value,
+	}
+	channels := make([]format.Cutscene_Channel_Contents, 1, context.temp_allocator)
+	channels[0] = {
+		name = "value",
+		keys = keys,
+	}
+	return channels
+}
+
+// Cutscene is what the test's cutscenes vary: the dial track's binding and value, an event at the end in each phase,
+// a spawned prop, and a clip.
+@(private = "file")
+Cutscene :: struct {
+	guid:    format.Guid,
+	key:     u64,
+	length:  i32,
+	clock:   format.Cutscene_Clock,
+	// The dial track's binding, 0 for the hero and 1 for the rival, and the value that it writes.
+	binding: u32,
+	value:   f32,
+	finish:  format.Cutscene_Finish,
+	// An event at the end, with the value 9, on the Late and the Fixed phases.
+	events:  bool,
+	prop:    bool,
+	// Where the prop spawns, in meters along x.
+	prop_x:  f64,
+	clip:    format.Guid,
+}
+
+@(private = "file")
+write_cutscene :: proc(t: ^testing.T, f: ^Player_Fixture, c: Cutscene) {
+	c := c
+	if c.length == 0 {
+		c.length = SECOND
+	}
+	if c.key == 0 {
+		c.key = 1
+	}
+	bindings := make([dynamic]format.Cutscene_Binding_Contents, context.temp_allocator)
+	append(&bindings, possessed(1, "Hero"), possessed(2, "Rival"))
+	if c.prop {
+		append(
+			&bindings,
+			format.Cutscene_Binding_Contents {
+				id = 3,
+				kind = .Spawned,
+				name = "Prop",
+				parent = format.CUTSCENE_NONE,
+				asset = PROP_GUID,
+				position = ecs.position_from_meters({c.prop_x, 0, 0}).raw,
+				rotation = {0, 0, 0, 1},
+				scale = {1, 1, 1},
+			},
+		)
+	}
+	tracks := make([dynamic]format.Cutscene_Track_Contents, context.temp_allocator)
+	dial := make([]format.Cutscene_Section_Contents, 1, context.temp_allocator)
+	dial[0] = {
+		id       = 1,
+		start    = 0,
+		end      = c.length,
+		weight   = 1,
+		channels = key(c.value),
+	}
+	append(
+		&tracks,
+		format.Cutscene_Track_Contents {
+			id = 1,
+			kind = .Property,
+			name = "Dial",
+			binding = c.binding,
+			finish = c.finish,
+			sections = dial,
+		},
+	)
+	if c.events {
+		events := make([]format.Cutscene_Section_Contents, 1, context.temp_allocator)
+		events[0] = {
+			id       = 2,
+			start    = 0,
+			end      = c.length,
+			weight   = 1,
+			channels = key(9, c.length),
+		}
+		append(
+			&tracks,
+			format.Cutscene_Track_Contents {
+				id = 2,
+				kind = .Event,
+				name = "Late events",
+				binding = format.CUTSCENE_NONE,
+				sections = events,
+			},
+			format.Cutscene_Track_Contents {
+				id = 3,
+				kind = .Presentation,
+				name = "Fixed events",
+				binding = format.CUTSCENE_NONE,
+				sections = events,
+			},
+		)
+	}
+	if c.clip != {} {
+		clip := make([]format.Cutscene_Section_Contents, 1, context.temp_allocator)
+		clip[0] = {
+			id     = 4,
+			start  = 0,
+			end    = c.length,
+			weight = 1,
+			asset  = c.clip,
+		}
+		append(
+			&tracks,
+			format.Cutscene_Track_Contents {
+				id = 4,
+				kind = .Animation,
+				name = "Clip",
+				binding = 0,
+				sections = clip,
+			},
+		)
+	}
+	blob := format.cutscene_write(
+		{
+			guid = c.guid,
+			key = c.key,
+			length = c.length,
+			rate = 30,
+			clock = c.clock,
+			range_end = c.length,
+			bindings = bindings[:],
+			tracks = tracks[:],
+			source_path = "game/cutscenes/player.cutscene",
+		},
+		context.temp_allocator,
+	)
+	testing.expect(t, asset.set_live(&f.assets, c.guid, blob))
+}
+
+// cast_of is the overrides that give the possessed bindings the hero and the rival.
+@(private = "file")
+cast_of :: proc(f: ^Player_Fixture) -> []Binding_Override {
+	overrides := make([]Binding_Override, 2, context.temp_allocator)
+	overrides[0] = {Binding_Id(1), f.hero}
+	overrides[1] = {"Rival", f.rival}
+	return overrides
+}
+
+@(private = "file")
+context_of :: proc(f: ^Player_Fixture) -> Player_Context {
+	return {world = &f.world}
+}
+
+// frame runs a frame as game_update does: the players' update, then the ticks of a 60th of a second and the Late
+// stage.
+@(private = "file")
+frame :: proc(f: ^Player_Fixture) {
+	update(&f.cutscenes, context_of(f))
+	clock := &f.world.clock
+	it := ecs.begin_ticks(&f.world, ecs.tick_start(clock, clock.tick + 1) - clock.time)
+	for ecs.next_tick(&it) {
+		ecs.run_tick_systems(&it, f)
+		ecs.update_transforms(&f.world)
+	}
+	ecs.run_stage(&f.world, .Late, ecs.tick_length(&f.world), f)
+	end_frame(&f.cutscenes)
+	free_all(f.platform.frame_allocator)
+}
+
+@(private = "file")
+dial :: proc(f: ^Player_Fixture, e: ecs.Entity) -> f32 {
+	return ecs.get(&f.world, e, Dial).value
+}
+
+// prop_of is the spawned prop's root, while its player is live.
+@(private = "file")
+prop_of :: proc(f: ^Player_Fixture, h: Player_Handle) -> ecs.Entity {
+	e, live := player_evaluation(&f.cutscenes, h)
+	if !live {
+		return 0
+	}
+	root, _ := binding_entity(&e.bindings, &f.world, 2)
+	return root
+}
+
+// prefab_users is how many users hold the prop's prefab loaded.
+@(private = "file")
+prefab_users :: proc(f: ^Player_Fixture) -> u32 {
+	h, loaded := asset.find(&f.assets, PROP_GUID)
+	if !loaded {
+		return 0
+	}
+	return f.assets.records[h.index].users
+}
+
+@(private = "file")
+expect_status :: proc(
+	t: ^testing.T,
+	f: ^Player_Fixture,
+	h: Player_Handle,
+	want: Player_Status,
+	loc := #caller_location,
+) {
+	testing.expect_value(t, status(&f.cutscenes, h), want, loc = loc)
+}
+
+// The diagram allows exactly these changes, and the commands and update walk each of them.
+@(test)
+each_allowed_change_is_walked_and_the_writer_refuses_the_rest :: proc(t: ^testing.T) {
+	context.logger = testlog.expected_errors()
+	f := player_setup(t)
+	defer player_teardown(f)
+	walk :: [?][2]Player_Status {
+		{.Gone, .Loading},
+		{.Loading, .Ready},
+		{.Loading, .Restored},
+		{.Loading, .Failed},
+		{.Ready, .Playing},
+		{.Ready, .Skipping},
+		{.Ready, .Finishing},
+		{.Ready, .Failed},
+		{.Playing, .Paused},
+		{.Playing, .Skipping},
+		{.Playing, .Finishing},
+		{.Playing, .Failed},
+		{.Paused, .Playing},
+		{.Paused, .Skipping},
+		{.Paused, .Finishing},
+		{.Paused, .Failed},
+		{.Skipping, .Playing},
+		{.Skipping, .Finishing},
+		{.Skipping, .Failed},
+		{.Finishing, .Restored},
+		{.Finishing, .Failed},
+		{.Restored, .Gone},
+		{.Failed, .Gone},
+	}
+	for from in Player_Status {
+		for to in Player_Status {
+			listed := false
+			for change in walk {
+				listed = listed || change == {from, to}
+			}
+			testing.expectf(t, allowed(from, to) == listed, "%v to %v", from, to)
+		}
+	}
+
+	write_cutscene(t, f, {guid = INTRO_GUID, value = 7})
+	seen := make(map[[2]Player_Status]bool, context.temp_allocator)
+	last := make(map[Player_Handle]Player_Status, context.temp_allocator)
+	record :: proc(
+		f: ^Player_Fixture,
+		seen: ^map[[2]Player_Status]bool,
+		last: ^map[Player_Handle]Player_Status,
+	) {
+		for event in player_events(&f.cutscenes) {
+			seen[{last[event.player], event.status}] = true
+			last[event.player] = event.status
+		}
+		end_frame(&f.cutscenes)
+	}
+	w := &f.world
+	s := &f.cutscenes
+	desc := Play_Desc {
+		cutscene  = INTRO_GUID,
+		overrides = cast_of(f),
+	}
+	// Gone, Loading, Ready, Playing, Paused, Playing, Skipping, Finishing, Restored, Gone.
+	h, _ := load(s, w, desc)
+	update(s, context_of(f))
+	testing.expect_value(t, start(s, w, h), Command_Result.Done)
+	testing.expect_value(t, pause(s, w, h), Command_Result.Done)
+	testing.expect_value(t, resume(s, w, h), Command_Result.Done)
+	testing.expect_value(t, skip(s, w, h), Command_Result.Done)
+	update(s, context_of(f))
+	testing.expect_value(t, release(s, w, h), Command_Result.Done)
+	record(f, &seen, &last)
+	// Loading, Restored; and Loading, Failed.
+	h, _ = load(s, w, desc)
+	testing.expect_value(t, stop(s, w, h), Command_Result.Done)
+	missing, _ := play(s, w, {cutscene = OUTRO_GUID})
+	update(s, context_of(f))
+	expect_status(t, f, missing, .Failed)
+	record(f, &seen, &last)
+	// Ready, Skipping; Ready, Finishing; Playing, Finishing; Paused, Skipping; Paused, Finishing.
+	for path in ([?][]proc(_: ^State, _: ^ecs.World, _: Player_Handle) -> Command_Result{{skip}, {stop}, {start, stop}, {start, pause, skip}, {start, pause, stop}}) {
+		h, _ = load(s, w, desc)
+		update(s, context_of(f))
+		for command in path {
+			testing.expect_value(t, command(s, w, h), Command_Result.Done)
+		}
+		update(s, context_of(f))
+		expect_status(t, f, h, .Restored)
+		record(f, &seen, &last)
+	}
+	// Skipping goes back to Playing after a skip of a range (#538), and each live state can fail: change_cutscene
+	// walks these.
+	for from in ([?]Player_Status{.Ready, .Playing, .Paused, .Skipping, .Finishing}) {
+		h, _ = load(s, w, desc)
+		update(s, context_of(f))
+		p := &s.players[h.slot]
+		slot := int(h.slot)
+		switch from {
+		case .Playing:
+			change_cutscene(s, w, slot, moved(p, .Playing))
+		case .Paused:
+			change_cutscene(s, w, slot, moved(p, .Playing))
+			change_cutscene(s, w, slot, moved(p, .Paused))
+		case .Skipping:
+			change_cutscene(s, w, slot, moved(p, .Skipping))
+			change_cutscene(s, w, slot, moved(p, .Playing))
+			change_cutscene(s, w, slot, moved(p, .Skipping))
+		case .Finishing:
+			change_cutscene(s, w, slot, moved(p, .Finishing))
+		case .Gone, .Loading, .Ready, .Restored, .Failed:
+		}
+		changed, _ := change_cutscene(
+			s,
+			w,
+			int(h.slot),
+			Player_Failed{Asset_Failure{INTRO_GUID, .Missing}},
+		)
+		testing.expect(t, changed)
+		testing.expect_value(t, release(s, w, h), Command_Result.Done)
+		record(f, &seen, &last)
+	}
+	for change in walk {
+		testing.expectf(
+			t,
+			seen[change],
+			"the change from %v to %v was not walked",
+			change[0],
+			change[1],
+		)
+	}
+	testing.expect_value(t, dial(f, f.hero), 1)
+
+	// The writer refuses what the diagram does not allow, and the player stays as it was.
+	h, _ = load(s, w, desc)
+	testing.expect_value(t, pause(s, w, h), Command_Result.Refused)
+	update(s, context_of(f))
+	testing.expect_value(t, resume(s, w, h), Command_Result.Refused)
+	testing.expect_value(t, release(s, w, h), Command_Result.Refused)
+	changed, _ := change_cutscene(s, w, int(h.slot), Player_Loading{})
+	testing.expect(t, !changed)
+	changed, _ = change_cutscene(s, w, int(h.slot), Player_Restored{})
+	testing.expect(t, !changed)
+	changed, _ = change_cutscene(s, w, int(h.slot), nil)
+	testing.expect(t, !changed)
+	expect_status(t, f, h, .Ready)
+	stop(s, w, h)
+	update(s, context_of(f))
+	expect_status(t, f, h, .Restored)
+	testing.expect_value(t, start(s, w, h), Command_Result.Gone)
+}
+
+// A cutscene with two possessed characters and a spawned prop plays to its end, and is Restored: the dials are as
+// they were, the prop is gone, the cutscene's assets are unloaded, and the events at the end fired once in each phase.
+@(test)
+a_cutscene_played_to_the_end_is_restored_and_the_world_is_as_it_was :: proc(t: ^testing.T) {
+	f := player_setup(t)
+	defer player_teardown(f)
+	write_cutscene(t, f, {guid = INTRO_GUID, value = 7, events = true, prop = true})
+	h, ok := play(&f.cutscenes, &f.world, {cutscene = INTRO_GUID, overrides = cast_of(f)})
+	testing.expect(t, ok)
+	expect_status(t, f, h, .Loading)
+	frame(f)
+	expect_status(t, f, h, .Playing)
+	prop := prop_of(f, h)
+	testing.expect(t, prop != 0)
+	testing.expect(
+		t,
+		!ecs.has(&f.world, prop, ecs.Loading),
+		"the prop shows while the cutscene plays",
+	)
+	// The player holds the prefab, and so does the instance that spawn_prefab made.
+	testing.expect_value(t, prefab_users(f), 2)
+	testing.expect_value(t, dial(f, f.hero), 7)
+	testing.expect_value(t, dial(f, f.rival), 2)
+
+	for _ in 0 ..< 70 {
+		if status(&f.cutscenes, h) != .Playing {
+			break
+		}
+		frame(f)
+	}
+	expect_status(t, f, h, .Restored)
+	testing.expect_value(t, dial(f, f.hero), 1)
+	testing.expect_value(t, dial(f, f.rival), 2)
+	testing.expect(t, !ecs.is_alive(&f.world, prop), "the prop is gone")
+	testing.expect_value(t, prefab_users(f), 1)
+	testing.expect_value(t, len(f.fired), 1)
+	testing.expect_value(t, len(f.fixed), 1)
+}
+
+// On the real clock, a cutscene can reach its end with no Late stage, as while the game is paused. Its last update
+// fires the events at the end that no phase has fired, once.
+@(test)
+the_events_at_the_end_fire_once_when_no_stage_reaches_the_end :: proc(t: ^testing.T) {
+	f := player_setup(t)
+	defer player_teardown(f)
+	write_cutscene(t, f, {guid = INTRO_GUID, clock = .Real, value = 7, events = true})
+	h, _ := play(&f.cutscenes, &f.world, {cutscene = INTRO_GUID, overrides = cast_of(f)})
+	update(&f.cutscenes, context_of(f))
+	advance_real(&f.cutscenes, &f.world, 2 * time.Second)
+	t_now, _ := player_time(&f.cutscenes, h)
+	testing.expect_value(t, t_now, SECOND)
+	testing.expect_value(t, len(f.fixed), 1)
+	testing.expect_value(t, len(f.fired), 0)
+	update(&f.cutscenes, context_of(f))
+	expect_status(t, f, h, .Restored)
+	testing.expect_value(t, len(f.fixed), 1)
+	testing.expect_value(t, len(f.fired), 1)
+	testing.expect_value(t, dial(f, f.hero), 1)
+}
+
+// A cutscene whose clip does not load fails in Loading with the clip as the reason, and leaves nothing: no spawned
+// prop, no dial changed, and its assets unloaded.
+@(test)
+a_missing_clip_fails_in_loading_and_leaves_nothing :: proc(t: ^testing.T) {
+	context.logger = testlog.expected_errors()
+	f := player_setup(t)
+	defer player_teardown(f)
+	write_cutscene(t, f, {guid = INTRO_GUID, value = 7, prop = true, clip = CLIP_GUID})
+	h, _ := play(&f.cutscenes, &f.world, {cutscene = INTRO_GUID, overrides = cast_of(f)})
+	frame(f)
+	expect_status(t, f, h, .Failed)
+	failure, failed := player_failure(&f.cutscenes, h)
+	testing.expect(t, failed)
+	testing.expect_value(t, failure.(Asset_Failure), Asset_Failure{CLIP_GUID, .Reference_Missing})
+	testing.expect_value(t, dial(f, f.hero), 1)
+	_, prefab_loaded := asset.find(&f.assets, PROP_GUID)
+	testing.expect(t, !prefab_loaded, "the prefab is unloaded")
+	props := make([dynamic]ecs.Entity, context.temp_allocator)
+	ecs.collect(&f.world, {ecs.TRANSFORM_ID}, &props)
+	testing.expect_value(t, len(props), 0)
+
+	// A required binding that resolves to nothing fails too, with the binding as the reason.
+	write_cutscene(t, f, {guid = OUTRO_GUID, value = 7, prop = true})
+	unbound, _ := play(&f.cutscenes, &f.world, {cutscene = OUTRO_GUID, overrides = cast_of(f)[:1]})
+	scenes: scene.Scenes
+	scene.init_scenes(&scenes, &f.platform, &f.assets)
+	defer scene.destroy_scenes(&scenes)
+	update(&f.cutscenes, {world = &f.world, scenes = &scenes})
+	failure, failed = player_failure(&f.cutscenes, unbound)
+	testing.expect(t, failed)
+	testing.expect_value(t, failure.(Binding_Failure), Binding_Failure{1, .Missing})
+	ecs.collect(&f.world, {ecs.TRANSFORM_ID}, &props)
+	testing.expect_value(t, len(props), 0)
+}
+
+// After Restored, every command through the handle does nothing and reports that the cutscene is gone. Once the
+// handle is released, its slot goes to another player, which the old handle does not reach.
+@(test)
+a_call_through_a_stale_handle_does_nothing :: proc(t: ^testing.T) {
+	f := player_setup(t)
+	defer player_teardown(f)
+	write_cutscene(t, f, {guid = INTRO_GUID, value = 7})
+	w := &f.world
+	s := &f.cutscenes
+	old, _ := play(s, w, {cutscene = INTRO_GUID, overrides = cast_of(f)})
+	frame(f)
+	stop(s, w, old)
+	frame(f)
+	expect_status(t, f, old, .Restored)
+	testing.expect_value(t, start(s, w, old), Command_Result.Gone)
+	testing.expect_value(t, pause(s, w, old), Command_Result.Gone)
+	testing.expect_value(t, resume(s, w, old), Command_Result.Gone)
+	testing.expect_value(t, stop(s, w, old), Command_Result.Gone)
+	testing.expect_value(t, skip(s, w, old), Command_Result.Gone)
+	testing.expect_value(t, set_time(s, w, old, SECOND / 2), Command_Result.Gone)
+	expect_status(t, f, old, .Restored)
+	testing.expect_value(t, release(s, w, old), Command_Result.Done)
+	expect_status(t, f, old, .Gone)
+	testing.expect_value(t, release(s, w, old), Command_Result.Gone)
+
+	fresh, _ := play(s, w, {cutscene = INTRO_GUID, overrides = cast_of(f)})
+	testing.expect_value(t, fresh.slot, old.slot)
+	testing.expect(t, fresh.generation != old.generation)
+	frame(f)
+	testing.expect_value(t, stop(s, w, old), Command_Result.Gone)
+	testing.expect_value(t, pause(s, w, old), Command_Result.Gone)
+	expect_status(t, f, fresh, .Playing)
+	testing.expect_value(t, status(s, {}), Player_Status.Gone)
+	testing.expect_value(t, dial(f, f.hero), 7)
+}
+
+// Two players that write one dial: the later start wins at one priority, and the higher priority wins over a later
+// start. Whichever ends first, the other writes the dial on, and the dial returns to its first value at the end.
+@(test)
+two_players_that_write_one_field_follow_priority_and_give_it_back :: proc(t: ^testing.T) {
+	f := player_setup(t)
+	defer player_teardown(f)
+	write_cutscene(t, f, {guid = INTRO_GUID, length = 4 * SECOND, value = 10})
+	write_cutscene(t, f, {guid = OUTRO_GUID, length = 4 * SECOND, value = 20})
+	w := &f.world
+	s := &f.cutscenes
+	for first_ends in ([?]bool{true, false}) {
+		a, _ := play(s, w, {cutscene = INTRO_GUID, overrides = cast_of(f)})
+		b, _ := play(s, w, {cutscene = OUTRO_GUID, overrides = cast_of(f)})
+		frame(f)
+		testing.expect_value(t, dial(f, f.hero), 20)
+		ending, staying, left := a, b, f32(20)
+		if !first_ends {
+			ending, staying, left = b, a, 10
+		}
+		stop(s, w, ending)
+		frame(f)
+		expect_status(t, f, ending, .Restored)
+		testing.expect_value(t, dial(f, f.hero), left)
+		stop(s, w, staying)
+		frame(f)
+		testing.expect_value(t, dial(f, f.hero), 1)
+		release(s, w, a)
+		release(s, w, b)
+	}
+
+	high, _ := play(s, w, {cutscene = INTRO_GUID, priority = 1, overrides = cast_of(f)})
+	low, _ := play(s, w, {cutscene = OUTRO_GUID, overrides = cast_of(f)})
+	frame(f)
+	testing.expect_value(t, dial(f, f.hero), 10)
+	stop(s, w, high)
+	frame(f)
+	testing.expect_value(t, dial(f, f.hero), 20)
+	stop(s, w, low)
+	frame(f)
+	testing.expect_value(t, dial(f, f.hero), 1)
+}
+
+// A soft restart during Playing, and a new level, restore and free every player: the dials are back, the prop and
+// the cutscene's assets are gone, and every handle is stale.
+@(test)
+a_reset_during_play_leaks_nothing :: proc(t: ^testing.T) {
+	f := player_setup(t)
+	defer player_teardown(f)
+	write_cutscene(t, f, {guid = INTRO_GUID, length = 4 * SECOND, value = 7, prop = true})
+	write_cutscene(t, f, {guid = OUTRO_GUID, length = 4 * SECOND, binding = 1, value = 8})
+	w := &f.world
+	s := &f.cutscenes
+	for by_level in ([?]bool{false, true}) {
+		a, _ := play(s, w, {cutscene = INTRO_GUID, overrides = cast_of(f)})
+		b, _ := play(s, w, {cutscene = OUTRO_GUID, overrides = cast_of(f)})
+		loading, _ := load(s, w, {cutscene = INTRO_GUID, overrides = cast_of(f)})
+		for _ in 0 ..< 5 {
+			frame(f)
+		}
+		_ = loading
+		prop := prop_of(f, a)
+		testing.expect(t, ecs.is_alive(w, prop))
+		users := prefab_users(f)
+		testing.expect_value(t, dial(f, f.rival), 8)
+		despawned: int
+		if by_level {
+			levels += 1
+			despawned = update(s, context_of(f))
+		} else {
+			// What game_shutdown does before a soft restart.
+			despawned = reset(s, w)
+		}
+		testing.expect_value(t, despawned, 2)
+		testing.expect_value(t, dial(f, f.hero), 1)
+		testing.expect_value(t, dial(f, f.rival), 2)
+		testing.expect(t, !ecs.is_alive(w, prop))
+		testing.expect_value(t, prefab_users(f), users - 2)
+		for &p in s.players {
+			testing.expect(t, p.state == nil)
+		}
+		expect_status(t, f, a, .Gone)
+		expect_status(t, f, b, .Gone)
+		end_frame(s)
+	}
+}
+
+// A reload that moves the spawned prop resolves the bindings again: the prop spawns again where the new blob says, and
+// shows, and the player plays on.
+@(test)
+a_reload_that_changes_the_bindings_resolves_them_again :: proc(t: ^testing.T) {
+	f := player_setup(t)
+	defer player_teardown(f)
+	write_cutscene(t, f, {guid = INTRO_GUID, length = 4 * SECOND, value = 7, prop = true})
+	h, _ := play(&f.cutscenes, &f.world, {cutscene = INTRO_GUID, overrides = cast_of(f)})
+	frame(f)
+	before := prop_of(f, h)
+	testing.expect(t, before != 0)
+
+	write_cutscene(
+		t,
+		f,
+		{guid = INTRO_GUID, key = 2, length = 4 * SECOND, value = 7, prop = true, prop_x = 3},
+	)
+	frame(f)
+	expect_status(t, f, h, .Playing)
+	after := prop_of(f, h)
+	testing.expect(t, !ecs.is_alive(&f.world, before), "the old prop is gone")
+	testing.expect(t, after != 0 && after != before)
+	testing.expect(t, !ecs.has(&f.world, after, ecs.Loading), "the new prop shows")
+	x := ecs.position_to_meters(ecs.get(&f.world, after, ecs.Transform).position).x
+	testing.expectf(t, abs(x - 3) < 1e-6, "the new prop is at %v", x)
+	testing.expect_value(t, dial(f, f.hero), 7)
+
+	// A reload that only changes a track keeps the prop.
+	write_cutscene(
+		t,
+		f,
+		{guid = INTRO_GUID, key = 3, length = 4 * SECOND, value = 8, prop = true, prop_x = 3},
+	)
+	frame(f)
+	testing.expect_value(t, prop_of(f, h), after)
+	testing.expect_value(t, dial(f, f.hero), 8)
+}

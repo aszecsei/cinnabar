@@ -63,6 +63,8 @@ Eval_Fixture :: struct {
 	lamp:      ecs.Entity,
 	// The values of the event keys that fired, in order.
 	fired:     [dynamic]f32,
+	// The players of the evaluations that begin_evaluation added.
+	players:   map[^Evaluation]Player_Handle,
 }
 
 // eval_setup makes a world with a Lamp, the cutscenes' systems and the test's kinds of track. serial runs every job on
@@ -122,11 +124,12 @@ eval_setup :: proc(t: ^testing.T, serial := true, workers := 0) -> ^Eval_Fixture
 
 @(private = "file")
 eval_teardown :: proc(t: ^testing.T, f: ^Eval_Fixture) {
-	destroy(&f.cutscenes)
+	destroy(&f.cutscenes, &f.world)
 	asset.destroy(&f.assets)
 	ecs.destroy(&f.world)
 	virtual.arena_destroy(&f.frame)
 	delete(f.fired)
+	delete(f.players)
 	serial := f.serial
 	free(f)
 	if !serial {
@@ -292,10 +295,11 @@ cutscene_blob :: proc(
 	)
 }
 
-// start loads a blob as a live asset, starts an evaluation of it with the lamp as its binding, and adds it to the
-// systems when added is true.
+// begin_evaluation loads a blob as a live asset, and evaluates it with the lamp as its binding. When added is true, a
+// player plays it, so the systems advance and evaluate it. Otherwise it is an evaluation of its own, which the test
+// evaluates.
 @(private = "file")
-start :: proc(
+begin_evaluation :: proc(
 	t: ^testing.T,
 	f: ^Eval_Fixture,
 	blob: []byte,
@@ -303,28 +307,44 @@ start :: proc(
 	guid := CUTSCENE_GUID,
 ) -> ^Evaluation {
 	testing.expect(t, asset.set_live(&f.assets, guid, blob))
+	overrides := []Binding_Override{{binding = Binding_Id(1), entity = f.lamp}}
+	if added {
+		player, ok := play(&f.cutscenes, &f.world, {cutscene = guid, overrides = overrides})
+		testing.expect(t, ok)
+		update(&f.cutscenes, {world = &f.world})
+		testing.expect_value(t, status(&f.cutscenes, player), Player_Status.Playing)
+		e, playing := player_evaluation(&f.cutscenes, player)
+		testing.expect(t, playing)
+		f.players[e] = player
+		return e
+	}
 	h, loaded := asset.find(&f.assets, guid)
 	testing.expect(t, loaded)
 	e := new(Evaluation)
 	data, view, ok := blob_of(f, h)
 	testing.expect(t, ok)
 	init_evaluation(e, &f.world, h, data, view)
-	overrides := []Binding_Override{{binding = Binding_Id(1), entity = f.lamp}}
 	failure := resolve_bindings(
 		&e.bindings,
 		{world = &f.world, assets = &f.assets, data = data, blob = view},
 		overrides,
 	)
 	testing.expect(t, failure == nil)
-	if added {
-		add_evaluation(&f.cutscenes, e)
-	}
 	return e
 }
 
+// end_evaluation stops the player of an evaluation that begin_evaluation added and frees it, or destroys an evaluation
+// of its own.
 @(private = "file")
-stop :: proc(f: ^Eval_Fixture, e: ^Evaluation) {
-	destroy_evaluation(&f.cutscenes, e, &f.world)
+end_evaluation :: proc(f: ^Eval_Fixture, e: ^Evaluation) {
+	if player, added := f.players[e]; added {
+		stop(&f.cutscenes, &f.world, player)
+		update(&f.cutscenes, {world = &f.world})
+		release(&f.cutscenes, &f.world, player)
+		delete_key(&f.players, e)
+		return
+	}
+	destroy_evaluation(e, &f.world)
 	free(e)
 }
 
@@ -346,7 +366,7 @@ blob_of :: proc(
 @(private = "file")
 at :: proc(f: ^Eval_Fixture, e: ^Evaluation, time: i32) {
 	data, blob, _ := blob_of(f, e.cutscene)
-	seek(e, &f.world, data, blob, time)
+	seek(&f.cutscenes, e, &f.world, data, blob, time)
 	evaluate(&f.cutscenes, e, &f.world, data, blob, .Fixed)
 	evaluate(&f.cutscenes, e, &f.world, data, blob, .Late)
 }
@@ -433,13 +453,13 @@ evaluating_a_time_gives_the_same_world_whatever_came_before :: proc(t: ^testing.
 	// Each time once, from a fresh evaluation.
 	once := make(map[i32]f32, context.temp_allocator)
 	for time in times {
-		e := start(t, f, blob, added = false)
+		e := begin_evaluation(t, f, blob, added = false)
 		at(f, e, time)
 		once[time] = brightness(f)
 		data, view, _ := blob_of(f, e.cutscene)
-		restore(e, &f.world, data, view)
+		restore(&f.cutscenes, e, &f.world, data, view)
 		testing.expect_value(t, brightness(f), 5)
-		stop(f, e)
+		end_evaluation(f, e)
 	}
 
 	// Every time, in a shuffled order, from one evaluation.
@@ -447,8 +467,8 @@ evaluating_a_time_gives_the_same_world_whatever_came_before :: proc(t: ^testing.
 		j := int(next(&seed) % u64(i + 1))
 		times[i], times[j] = times[j], times[i]
 	}
-	e := start(t, f, blob, added = false)
-	defer stop(f, e)
+	e := begin_evaluation(t, f, blob, added = false)
+	defer end_evaluation(f, e)
 	for time in times {
 		at(f, e, time)
 		testing.expectf(
@@ -493,16 +513,16 @@ a_scrub_skips_an_event_and_playing_through_fires_it_once :: proc(t: ^testing.T) 
 	}
 	blob := cutscene_blob(tracks, length = SECOND)
 
-	scrubbed := start(t, f, blob, added = false)
+	scrubbed := begin_evaluation(t, f, blob, added = false)
 	at(f, scrubbed, SECOND / 4)
 	at(f, scrubbed, 3 * SECOND / 4)
 	at(f, scrubbed, SECOND / 4)
 	at(f, scrubbed, SECOND)
 	testing.expectf(t, len(f.fired) == 0, "a scrub fires %v", f.fired[:])
-	stop(f, scrubbed)
+	end_evaluation(f, scrubbed)
 
-	played := start(t, f, blob)
-	defer stop(f, played)
+	played := begin_evaluation(t, f, blob)
+	defer end_evaluation(f, played)
 	for _ in 0 ..< 90 {
 		tick(f)
 	}
@@ -543,8 +563,8 @@ sections_blend_on_the_ease_curve :: proc(t: ^testing.T) {
 	tracks := []format.Cutscene_Track_Contents {
 		{id = 1, kind = .Property, name = "Brightness", binding = 0, sections = sections},
 	}
-	e := start(t, f, cutscene_blob(tracks), added = false)
-	defer stop(f, e)
+	e := begin_evaluation(t, f, cutscene_blob(tracks), added = false)
+	defer end_evaluation(f, e)
 	for step in 0 ..= 30 {
 		time := i32(step) * SECOND / 10
 		at(f, e, time)
@@ -593,8 +613,8 @@ rolls_hold_a_sections_first_and_last_values :: proc(t: ^testing.T) {
 	tracks := []format.Cutscene_Track_Contents {
 		{id = 1, kind = .Property, name = "Brightness", binding = 0, sections = sections},
 	}
-	e := start(t, f, cutscene_blob(tracks), added = false)
-	defer stop(f, e)
+	e := begin_evaluation(t, f, cutscene_blob(tracks), added = false)
+	defer end_evaluation(f, e)
 	cases := [?][2]f32 {
 		{0.25, 5},
 		{0.5, 10},
@@ -622,8 +642,8 @@ a_section_that_ends_with_the_cutscene_covers_its_end :: proc(t: ^testing.T) {
 	tracks := []format.Cutscene_Track_Contents {
 		{id = 1, kind = .Property, name = "Brightness", binding = 0, sections = sections},
 	}
-	e := start(t, f, cutscene_blob(tracks, length = SECOND), added = false)
-	defer stop(f, e)
+	e := begin_evaluation(t, f, cutscene_blob(tracks, length = SECOND), added = false)
+	defer end_evaluation(f, e)
 	at(f, e, SECOND)
 	testing.expect_value(t, brightness(f), 9)
 }
@@ -654,8 +674,8 @@ restore_puts_back_what_restore_tracks_wrote_and_leaves_what_keep_tracks_wrote ::
 		{id = 2, kind = .Transform, name = "Move", binding = 0, finish = .Keep, sections = moves},
 	}
 	ecs.get_write(&f.world, f.lamp, Lamp).color = {1, 2, 3}
-	e := start(t, f, cutscene_blob(tracks, length = SECOND))
-	defer stop(f, e)
+	e := begin_evaluation(t, f, cutscene_blob(tracks, length = SECOND))
+	defer end_evaluation(f, e)
 	for _ in 0 ..< 70 {
 		tick(f)
 	}
@@ -664,7 +684,7 @@ restore_puts_back_what_restore_tracks_wrote_and_leaves_what_keep_tracks_wrote ::
 	testing.expect_value(t, x, 7)
 
 	data, blob, _ := blob_of(f, e.cutscene)
-	restore(e, &f.world, data, blob)
+	restore(&f.cutscenes, e, &f.world, data, blob)
 	testing.expect_value(t, brightness(f), 5)
 	x = ecs.position_to_meters(ecs.get(&f.world, f.lamp, ecs.Transform).position).x
 	testing.expect_value(t, x, 7)
@@ -683,8 +703,8 @@ a_write_saves_the_field_once_and_marks_the_component_changed :: proc(t: ^testing
 	tracks := []format.Cutscene_Track_Contents {
 		{id = 1, kind = .Property, name = "Brightness", binding = 0, sections = sections},
 	}
-	e := start(t, f, cutscene_blob(tracks, length = SECOND), added = false)
-	defer stop(f, e)
+	e := begin_evaluation(t, f, cutscene_blob(tracks, length = SECOND), added = false)
+	defer end_evaluation(f, e)
 	q := ecs.query(&f.world, {ecs.changed(ecs.read(&f.world, Lamp))})
 	since := ecs.take_version(&f.world)
 	at(f, e, SECOND / 2)
@@ -702,15 +722,15 @@ a_write_saves_the_field_once_and_marks_the_component_changed :: proc(t: ^testing
 the_clocks_convert_to_ticks_without_drift :: proc(t: ^testing.T) {
 	f := eval_setup(t)
 	defer eval_teardown(t, f)
-	e := start(t, f, cutscene_blob(nil, length = 3600 * SECOND), added = false)
-	defer stop(f, e)
+	e := begin_evaluation(t, f, cutscene_blob(nil, length = 3600 * SECOND), added = false)
+	defer end_evaluation(f, e)
 	data, blob, _ := blob_of(f, e.cutscene)
 	// 7 ms is 420 ticks. 1/144 s is not a whole number of nanoseconds or of ticks.
 	for _ in 0 ..< 1000 {
 		advance(e, blob, 7 * time.Millisecond)
 	}
 	testing.expect_value(t, e.time, 420000)
-	seek(e, &f.world, data, blob, 0)
+	seek(&f.cutscenes, e, &f.world, data, blob, 0)
 	clock := ecs.Clock {
 		tick_rate = 144,
 	}
@@ -745,8 +765,8 @@ a_reload_keeps_the_time_and_restores_what_removed_tracks_wrote :: proc(t: ^testi
 		{id = 1, kind = .Property, name = "Brightness", binding = 0, sections = sections},
 		{id = 2, kind = .Transform, name = "Move", binding = 0, sections = moves},
 	}
-	e := start(t, f, cutscene_blob(both, length = 2 * SECOND))
-	defer stop(f, e)
+	e := begin_evaluation(t, f, cutscene_blob(both, length = 2 * SECOND))
+	defer end_evaluation(f, e)
 	for _ in 0 ..< 30 {
 		tick(f)
 	}
@@ -798,8 +818,8 @@ a_written_transform_is_seen_in_the_same_tick :: proc(t: ^testing.T) {
 	tracks := []format.Cutscene_Track_Contents {
 		{id = 1, kind = .Transform, name = "Move", binding = 0, sections = moves},
 	}
-	e := start(t, f, cutscene_blob(tracks, length = SECOND))
-	defer stop(f, e)
+	e := begin_evaluation(t, f, cutscene_blob(tracks, length = SECOND))
+	defer end_evaluation(f, e)
 	tick(f)
 	after_one := e.time
 	tick(f)
@@ -837,8 +857,8 @@ evaluation_is_the_same_on_one_job_and_many :: proc(t: ^testing.T) {
 	run :: proc(t: ^testing.T, serial: bool) -> [60]f32 {
 		f := eval_setup(t, serial = serial, workers = 0 if serial else 8)
 		defer eval_teardown(t, f)
-		e := start(t, f, cutscene_blob(blended_tracks()))
-		defer stop(f, e)
+		e := begin_evaluation(t, f, cutscene_blob(blended_tracks()))
+		defer end_evaluation(f, e)
 		values: [60]f32
 		for &v in values {
 			for _ in 0 ..< 4 {
@@ -883,8 +903,8 @@ the_same_ticks_physics_sees_a_written_transform :: proc(t: ^testing.T) {
 	tracks := []format.Cutscene_Track_Contents {
 		{id = 1, kind = .Transform, name = "Move", binding = 0, sections = moves},
 	}
-	e := start(t, f, cutscene_blob(tracks, length = SECOND))
-	defer stop(f, e)
+	e := begin_evaluation(t, f, cutscene_blob(tracks, length = SECOND))
+	defer end_evaluation(f, e)
 
 	// One tick as the frame code runs it: the Fixed systems, the propagation, then the physics step.
 	clock := &f.world.clock
@@ -929,8 +949,8 @@ a_restore_of_overlapping_fields_gives_back_the_first_value :: proc(t: ^testing.T
 		{id = 2, kind = .Property, name = "Part", binding = 0},
 	}
 	ecs.get_write(&f.world, f.lamp, Lamp).color = {1, 2, 3}
-	e := start(t, f, cutscene_blob(tracks), added = false)
-	defer stop(f, e)
+	e := begin_evaluation(t, f, cutscene_blob(tracks), added = false)
+	defer end_evaluation(f, e)
 	data, blob, _ := blob_of(f, e.cutscene)
 	tracks_of := format.cutscene_tracks(data, blob)
 	ctx := Track_Context {
@@ -944,7 +964,7 @@ a_restore_of_overlapping_fields_gives_back_the_first_value :: proc(t: ^testing.T
 	ctx.track = tracks_of[1]
 	testing.expect(t, write(&ctx, f.lamp, LAMP_ID, offset_of(Lamp, color), f32(4)))
 	testing.expect_value(t, ecs.get(&f.world, f.lamp, Lamp).color, [3]f32{4, 8, 9})
-	restore(e, &f.world, data, blob)
+	restore(&f.cutscenes, e, &f.world, data, blob)
 	testing.expect_value(t, ecs.get(&f.world, f.lamp, Lamp).color, [3]f32{1, 2, 3})
 }
 
@@ -967,12 +987,12 @@ a_restore_follows_a_reload_that_no_evaluation_saw :: proc(t: ^testing.T) {
 			sections = sections,
 		},
 	}
-	e := start(t, f, cutscene_blob(brightness_only), added = false)
-	defer stop(f, e)
+	e := begin_evaluation(t, f, cutscene_blob(brightness_only), added = false)
+	defer end_evaluation(f, e)
 	at(f, e, SECOND / 2)
 	testing.expect_value(t, brightness(f), 40)
 	testing.expect(t, asset.set_live(&f.assets, CUTSCENE_GUID, cutscene_blob(nil, key = 2)))
 	data, blob, _ := blob_of(f, e.cutscene)
-	restore(e, &f.world, data, blob)
+	restore(&f.cutscenes, e, &f.world, data, blob)
 	testing.expect_value(t, brightness(f), 5)
 }
