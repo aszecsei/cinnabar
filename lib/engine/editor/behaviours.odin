@@ -27,7 +27,7 @@ send_behaviour_edits :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime
 		return
 	}
 	// The behaviours edited the document, so they ran with the overrides off the world (see overrides.odin).
-	if e.session.overrides.layer != .Lifted {
+	if e.session.overrides.layer != .Lifted && len(e.session.overrides.live) > 0 {
 		log.errorf(
 			"editor: behaviours edited while the overrides were on the world, so their edits are not sent",
 		)

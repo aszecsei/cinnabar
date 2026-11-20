@@ -154,8 +154,9 @@ public sealed class WorldModel
                 {
                     Update(info);
                 }
-                // The game sends the overridden entities after a snapshot only when it has some.
-                ClearOverridden();
+                // The game sends the overridden entities after a snapshot only when it has some. EntitiesChanged follows, so
+                // the outliner rebuilds once.
+                _overridden.Clear();
                 HasWorld = true;
                 RebuildHierarchy();
                 Reset?.Invoke();

@@ -502,6 +502,34 @@ play_ends_the_overrides :: proc(t: ^testing.T) {
 	// A frame for it now is late, and is dropped.
 	step(f, 1, link.Override_Frame{override = 1, fields = {brightness(f, 9)}})
 	testing.expect_value(t, lamp_of(f), 1)
+	// Stop sets Edit and sends the scene again, whose world is the document's.
+	step(f, 1, link.Set_Mode{mode = .Edit})
+	step(
+		f,
+		1,
+		link.Load_Scene {
+			scenes = {
+				{
+					entities = {
+						{
+							id = PROP,
+							active = true,
+							components = {
+								{
+									id = f.lamp,
+									name = "Lamp",
+									fields = {{name = "brightness", value = value(1)}},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	)
+	prop := scene.find(f.editor.scenes, &f.world, 0, PROP)
+	testing.expect_value(t, ecs.get(&f.world, prop, Lamp).brightness, 1)
+	testing.expect_value(t, len(f.editor.session.overrides.live), 0)
 }
 
 // An override begins only in Edit, with the editor's scene, and a late begin or frame is dropped.

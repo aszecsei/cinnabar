@@ -343,6 +343,55 @@ public abstract class HostTests : IAsyncDisposable
         Assert.DoesNotContain(editor.Skipped, m => m is Log { Level: LogLevel.Error });
     }
 
+    [Fact]
+    public async Task AnOverrideStaysOutOfTheEditModeBehavioursEdits()
+    {
+        await using var editor = await Connect();
+        editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
+        await editor.Next<EntitySnapshot>();
+        // The sample's Ring sets its children's offsets on a circle in each edit phase, so it would undo an override that
+        // it saw.
+        var ring = Entity(1, "Ring");
+        ring.Behaviours.Add(new Document.SceneBehaviour(RingScript, [Field("radius", Document.SceneValue.Of(Number(3.0)))]));
+        var child = Entity(2, "Child");
+        child.Parent = 1;
+        child.Components.Add(new Document.SceneComponent(2, "Local_Transform",
+        [
+            Field("offset", Document.SceneValue.Of(Number(0.0), Number(0.0), Number(0.0))),
+            Field("rotation", Document.SceneValue.Of(Number(0.0), Number(0.0), Number(0.0), Number(1.0))),
+            Field("scale", Document.SceneValue.Of(Number(1.0), Number(1.0), Number(1.0))),
+        ]));
+        editor.Link.Send(Document.SceneSnapshot.ToMessage(Scene(ring, child), "", 7));
+        var handle = (await editor.Next<EntitySnapshot>(s => s.Entities.Any(e => e.SceneId == 2))).Entities.Single(e => e.SceneId == 2).Entity;
+        var batch = await editor.Next<BehaviourOperations>();
+        editor.Link.Send(new ApplyOperations(batch.Operations));
+        editor.Link.Send(new BehaviourOperationsAnswer(batch.Ticket, true));
+        var number = batch.Operations[0].Scene;
+        await Task.Delay(300, TestContext.Current.CancellationToken);
+        Drained(editor);
+
+        // The override moves the child off its circle for many frames, and the ring does not see it.
+        editor.Link.Send(new WatchEntity(handle));
+        editor.Link.Send(new BeginOverride(1));
+        editor.Link.Send(new OverrideFrame(1, [], [],
+            [new OverrideTransform(new OverrideTarget(OverrideTargetKind.SceneEntity, number, 2), [16777216 * 9, 0, 0], [0, 0, 0, 1], [1, 1, 1])], [], []));
+        var offset = Document.Fnv.Hash64("offset"u8.ToArray());
+        var held = await editor.Next<EntityValues>(v => v.Entity == handle && v.Held.Any(h => h.Component == 2 && h.Field == offset));
+        var local = held.Components.Single(c => c.Id == 2).Data;
+        // The values have the document's offset, which the ring set: 3 m from it, not the override's 9 m.
+        Assert.InRange(MathF.Abs(BitConverter.ToSingle(local, 0)) + MathF.Abs(BitConverter.ToSingle(local, 8)), 2.9f, 4.3f);
+        await Task.Delay(500, TestContext.Current.CancellationToken);
+        var during = Drained(editor);
+        Assert.DoesNotContain(editor.Skipped.Concat(during), m => m is BehaviourOperations);
+        Assert.DoesNotContain(during, m => m is OverrideEnded);
+
+        editor.Link.Send(new ReleaseOverride(1));
+        await editor.Next<EntityValues>(v => v.Entity == handle && v.Held.Length == 0);
+        await Task.Delay(300, TestContext.Current.CancellationToken);
+        Assert.DoesNotContain(Drained(editor), m => m is BehaviourOperations);
+        Assert.DoesNotContain(editor.Skipped, m => m is Log { Level: LogLevel.Error });
+    }
+
     // The messages that have come, which it drops.
     static List<ILinkMessage> Drained(Editor editor)
     {
