@@ -238,3 +238,36 @@ memory_counts_toward_the_module_that_allocated_it :: proc(t: ^testing.T) {
 	testing.expect(t, bytes["game/main.luau"] > 0 && bytes["game/main.luau"] < 100000)
 	testing.expect(t, total > bytes["game/big.luau"] + bytes["game/main.luau"])
 }
+
+// A main script's pushes last while it runs: a stop, or its end, pops them.
+@(test)
+a_main_script_pops_its_input_contexts_when_it_ends :: proc(t: ^testing.T) {
+	f := setup_modules(t)
+	defer teardown_modules(f)
+	context.user_ptr = f.base
+	contexts := &f.runtime.input_actions.contexts
+	waits := add_script(
+		t,
+		&f,
+		"game/title.luau",
+		`
+Input.define_action("jump", { "key:Space" })
+Input.define_context("title", {})
+local title = Input.push_context("title")
+coroutine.yield()
+`,
+	)
+	script, ok := spawn_script(&f.runtime, waits)
+	testing.expect(t, ok)
+	testing.expect_value(t, contexts.push_count, 1)
+	if contexts.push_count == 1 {
+		testing.expect_value(t, core.input_context_pusher(&contexts.pushes[0]), "script")
+	}
+	stop(&f.runtime, script)
+	testing.expect_value(t, contexts.push_count, 0)
+
+	ends := add_script(t, &f, "game/brief.luau", `Input.push_context("title")`)
+	_, ok = spawn_script(&f.runtime, ends)
+	testing.expect(t, ok)
+	testing.expect_value(t, contexts.push_count, 0)
+}

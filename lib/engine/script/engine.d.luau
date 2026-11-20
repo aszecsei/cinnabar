@@ -59,6 +59,12 @@ declare extern type Asset with
 	guid: string
 end
 
+-- A push of an input context, from Input.push_context. A pop through a handle whose push is gone does nothing.
+declare extern type InputContext with
+	function pop(self): ()
+	function is_pushed(self): boolean
+end
+
 declare World: {
 	spawn: ((position: WorldPosition?, rotation: Quaternion?) -> Entity) & ((prefab: Asset, position: WorldPosition?, rotation: Quaternion?) -> Entity),
 	query: (...ComponentType) -> { Entity },
@@ -125,6 +131,15 @@ declare Input: {
 	action_released: (name: string, pad: number?) -> boolean,
 	action_value: (name: string, pad: number?) -> number,
 	bindings: (name: string) -> { string },
+	-- Input contexts: named sets of the actions that a push lets through (see docs/core/input.md#contexts). A context
+	-- allows the actions that it names, or "all". With pass_through, the context below it decides for the actions that
+	-- it does not name; without it, it blocks them. "default", under every stack, allows every action. The actions must
+	-- be defined first.
+	define_context: (name: string, actions: { string } | "all", pass_through: boolean?) -> (),
+	-- Pushes a context on the stack of a pad of 1 to 4, or of every pad for nil. The keys read the stack of pad 1. The
+	-- pushes of a behaviour, a script action or a main script are popped when it ends. A blocked action reads as up with a value of 0, and one that a
+	-- pop allows again is not pressed or released until its bindings have been quiet for a frame.
+	push_context: (name: string, pad: number?) -> InputContext,
 	-- Raises on a binding that does not parse, or more than 8.
 	set_bindings: (name: string, bindings: { string }) -> (),
 	reset_bindings: (name: string?) -> (),

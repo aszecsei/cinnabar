@@ -31,10 +31,12 @@ Input_Action :: struct {
 	current_count: u8,
 }
 
-// Input_Actions is the game's actions, which the scripts define and the player remaps.
+// Input_Actions is the game's actions, which the scripts define and the player remaps, and the contexts that decide
+// which of them each player's reads let through.
 Input_Actions :: struct {
-	items: [MAX_INPUT_ACTIONS]Input_Action,
-	count: int,
+	items:    [MAX_INPUT_ACTIONS]Input_Action,
+	count:    int,
+	contexts: Input_Contexts,
 }
 
 Input_Device :: enum u8 {
@@ -225,34 +227,22 @@ input_actions_reset :: proc "contextless" (actions: ^Input_Actions, index: int) 
 	a.current_count = a.default_count
 }
 
-// pads_read is the slots that a query reads: the one slot of a pad, or all of them. A slot that is not connected
-// has nothing down.
-@(private = "file")
-pads_read :: proc "contextless" (input: ^Input, pad: Maybe(int)) -> []Gamepad {
-	if slot, ok := pad.?; ok {
-		if slot < 0 || slot >= MAX_GAMEPADS {
-			return nil
-		}
-		return input.gamepads[slot:slot + 1]
-	}
-	return input.gamepads[:]
-}
-
-@(private = "file")
+@(private)
 Binding_State :: enum u8 {
 	Down,
 	Pressed,
 	Released,
 }
 
-// binding_state reads one binding. With a pad, only that pad's slot is read, and keys are not. Without one, keys and
-// every pad are.
-@(private = "file")
-binding_state :: proc "contextless" (
+// player_binding_state reads one binding on one player's inputs: the pad in the player's slot, and the keys too when
+// keys is set. A slot that is not connected has nothing down.
+@(private)
+player_binding_state :: proc "contextless" (
 	input: ^Input,
 	b: Binding,
 	state: Binding_State,
-	pad: Maybe(int),
+	player: int,
+	keys: bool,
 ) -> bool {
 	if !binding_valid(b) {
 		return false
@@ -260,50 +250,67 @@ binding_state :: proc "contextless" (
 	switch b.kind {
 	case .None:
 	case .Key:
-		if pad != nil {
+		if !keys {
 			return false
 		}
-		keys := input.down
+		set := input.down
 		switch state {
 		case .Down:
 		case .Pressed:
-			keys = input.pressed
+			set = input.pressed
 		case .Released:
-			keys = input.released
+			set = input.released
 		}
-		return Key(b.code) in keys
+		return Key(b.code) in set
 	case .Button:
-		for &p in pads_read(input, pad) {
-			buttons := p.down
-			switch state {
-			case .Down:
-			case .Pressed:
-				buttons = p.pressed
-			case .Released:
-				buttons = p.released
-			}
-			if Gamepad_Button(b.code) in buttons {
-				return true
-			}
+		p := &input.gamepads[player]
+		buttons := p.down
+		switch state {
+		case .Down:
+		case .Pressed:
+			buttons = p.pressed
+		case .Released:
+			buttons = p.released
 		}
+		return Gamepad_Button(b.code) in buttons
 	case .Direction:
-		for &p in pads_read(input, pad) {
-			directions := p.direction_down
-			switch state {
-			case .Down:
-			case .Pressed:
-				directions = p.direction_pressed
-			case .Released:
-				directions = p.direction_released
-			}
-			if Gamepad_Direction(b.code) in directions {
-				return true
-			}
+		p := &input.gamepads[player]
+		directions := p.direction_down
+		switch state {
+		case .Down:
+		case .Pressed:
+			directions = p.direction_pressed
+		case .Released:
+			directions = p.direction_released
 		}
+		return Gamepad_Direction(b.code) in directions
 	}
 	return false
 }
 
+// Read_Players is the players that a query reads, and whether it reads the keys, which are the first player's.
+@(private = "file")
+Read_Players :: struct {
+	players: Input_Players,
+	keys:    bool,
+}
+
+// read_players is what a query with a pad reads: that pad's player, without the keys. Without a pad, every player and
+// the keys. A pad out of range reads nothing.
+@(private = "file")
+read_players :: proc "contextless" (pad: Maybe(int)) -> Read_Players {
+	slot, ok := pad.?
+	if !ok {
+		return {EVERY_PLAYER, true}
+	}
+	if slot < 0 || slot >= MAX_GAMEPADS {
+		return {}
+	}
+	return {{slot}, false}
+}
+
+// action_state reads an action on each player that the query reads and whose stack allows it. An action that a player
+// holds after a change of the stack is neither pressed nor released for that player.
 @(private = "file")
 action_state :: proc "contextless" (
 	actions: ^Input_Actions,
@@ -313,16 +320,26 @@ action_state :: proc "contextless" (
 	pad: Maybe(int),
 ) -> bool {
 	a := &actions.items[index]
-	for b in a.current[:a.current_count] {
-		if binding_state(input, b, state, pad) {
-			return true
+	read := read_players(pad)
+	for player in read.players {
+		if !input_contexts_allows(&actions.contexts, player, index) {
+			continue
+		}
+		if state != .Down && index in actions.contexts.held[player] {
+			continue
+		}
+		for b in a.current[:a.current_count] {
+			if player_binding_state(input, b, state, player, read.keys && player == 0) {
+				return true
+			}
 		}
 	}
 	return false
 }
 
 // action_down is whether any binding of an action is held. With a pad (a slot from 0), only that pad is read: its
-// buttons and directions, not keys. Without one, the keys and every pad are.
+// buttons and directions, not keys. Without one, the keys and every pad are. A player whose context stack blocks the
+// action reads it as up (see docs/core/input.md#contexts).
 action_down :: proc "contextless" (
 	actions: ^Input_Actions,
 	input: ^Input,
@@ -332,7 +349,8 @@ action_down :: proc "contextless" (
 	return action_state(actions, input, index, .Down, pad)
 }
 
-// action_pressed is whether any binding of an action went down since the previous frame.
+// action_pressed is whether any binding of an action went down since the previous frame. An action that a change of
+// the context stack allowed again is not pressed until its bindings are quiet for a frame.
 action_pressed :: proc "contextless" (
 	actions: ^Input_Actions,
 	input: ^Input,
@@ -342,7 +360,8 @@ action_pressed :: proc "contextless" (
 	return action_state(actions, input, index, .Pressed, pad)
 }
 
-// action_released is whether any binding of an action went up since the previous frame.
+// action_released is whether any binding of an action went up since the previous frame. As for action_pressed, an
+// action that the context stack allowed again is not released until its bindings are quiet for a frame.
 action_released :: proc "contextless" (
 	actions: ^Input_Actions,
 	input: ^Input,
@@ -353,7 +372,7 @@ action_released :: proc "contextless" (
 }
 
 // action_value is 1 while a key or a button of the action is held, and otherwise the largest push of its stick
-// directions and triggers, from 0 to 1.
+// directions and triggers, from 0 to 1. A blocked action's value is 0.
 action_value :: proc "contextless" (
 	actions: ^Input_Actions,
 	input: ^Input,
@@ -361,14 +380,21 @@ action_value :: proc "contextless" (
 	pad: Maybe(int) = nil,
 ) -> f32 {
 	a := &actions.items[index]
+	read := read_players(pad)
 	value: f32
-	for b in a.current[:a.current_count] {
-		if b.kind == .Direction && binding_valid(b) {
-			for &p in pads_read(input, pad) {
-				value = max(value, gamepad_direction_value(&p, Gamepad_Direction(b.code)))
+	for player in read.players {
+		if !input_contexts_allows(&actions.contexts, player, index) {
+			continue
+		}
+		for b in a.current[:a.current_count] {
+			if b.kind == .Direction && binding_valid(b) {
+				value = max(
+					value,
+					gamepad_direction_value(&input.gamepads[player], Gamepad_Direction(b.code)),
+				)
+			} else if player_binding_state(input, b, .Down, player, read.keys && player == 0) {
+				value = 1
 			}
-		} else if binding_state(input, b, .Down, pad) {
-			value = 1
 		}
 	}
 	return value

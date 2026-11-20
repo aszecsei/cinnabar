@@ -581,6 +581,17 @@ game_stats :: proc(
 			}
 		}
 		stats.modules = list
+		contexts := &scripts.input_actions.contexts
+		pushes := make([]link.Input_Context_Stats, contexts.push_count, allocator)
+		for i in 0 ..< contexts.push_count {
+			p := &contexts.pushes[contexts.push_count - 1 - i]
+			pushes[i] = {
+				name    = core.input_context_name(contexts, int(p.ctx)),
+				players = transmute(u8)p.players,
+				pusher  = core.input_context_pusher(p),
+			}
+		}
+		stats.input_contexts = pushes
 	}
 	return stats
 }

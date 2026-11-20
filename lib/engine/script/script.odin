@@ -69,8 +69,8 @@ Runtime :: struct {
 	pending_text:               core.Input_Text,
 	pending_direction_pressed:  [core.MAX_GAMEPADS]core.Gamepad_Directions,
 	pending_direction_released: [core.MAX_GAMEPADS]core.Gamepad_Directions,
-	// The game's named input actions and their bindings. They hold no strings or pointers, so they stay across a
-	// reload, and the scripts that define them run again.
+	// The game's named input actions and their bindings, and the input contexts and their stacks. They hold no
+	// strings or pointers, so they stay across a reload, and the scripts that define them run again.
 	input_actions:              core.Input_Actions,
 	// The script step that runs, and its structural changes, in frame memory, which its end applies. The buffer is
 	// empty while no step runs: entity:destroy applies at once then. Only enter_phase and leave_phase change them.
@@ -87,6 +87,9 @@ Runtime :: struct {
 	// document in Edit mode (see record.odin). A registration, which reload clears: the component of the document's
 	// entities.
 	writer:                     Instance_Handle,
+	// The script action whose start, tick or stop runs, or the zero handle. A behaviour's callback and a coroutine
+	// clear it while they run, so the code that runs is the writer's, this action's or the current waiter's.
+	running_action:             Action_Handle,
 	edits:                      Edits,
 	document_component:         ecs.Component_Id,
 	// The GUIDs that scripts hold references to, by the payload of their light userdata. They stay across reloads,
@@ -173,6 +176,8 @@ init :: proc(
 	r.module_count = 0
 	r.instance_used = 0
 	r.waiter_used = 0
+	// The behaviours and scripts of an old VM pushed these, and none of them is left to pop them.
+	core.input_contexts_clear(&r.input_actions.contexts)
 	r.current_waiter = -1
 	r.phase = .None
 	r.commands = {}
@@ -426,6 +431,7 @@ create_metatables :: proc(r: ^Runtime) {
 	luau.setlightuserdataname(L, c.int(Light_Tag.Entity), "Entity")
 	luau.setlightuserdataname(L, c.int(Light_Tag.Component_Type), "ComponentType")
 	luau.setlightuserdataname(L, c.int(Light_Tag.Asset), "Asset")
+	luau.setlightuserdataname(L, c.int(Light_Tag.Input_Context), "InputContext")
 
 	for tag in Userdata_Tag {
 		if tag == .None {
