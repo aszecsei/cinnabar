@@ -144,7 +144,10 @@ void gather(uint2 id) {
 	float center_weight = highlight(center.rgb);
 	float3 sum = center.rgb * center_weight;
 	float total = center_weight;
+	// The spread is a share of every tap, those that do not reach the pixel too, so a pixel at the edge of a blurred
+	// surface in front takes half of it, as the surface's blur covers half of its disk, not all of it.
 	float spread = 0;
+	float every = center_weight;
 	for (uint i = 0; i < constants.taps; i++) {
 		float2 offset = tap_offset(i) * radius;
 		int2 pixel = clamp(int2(floor(float2(id) + offset + 0.5)), 0, int2(constants.half_size) - 1);
@@ -155,14 +158,16 @@ void gather(uint2 id) {
 		if (behind) {
 			reach = min(reach, center_coc);
 		}
-		float w = saturate(reach - length(offset) + 1) * highlight(tap.rgb);
+		float weight = highlight(tap.rgb);
+		float w = saturate(reach - length(offset) + 1) * weight;
 		sum += tap.rgb * w;
 		total += w;
+		every += weight;
 		if (!behind && reach > center_coc + 1) {
 			spread += w;
 		}
 	}
-	cn_rw_texture(constants.blur)[id] = float4(sum / total, spread / total);
+	cn_rw_texture(constants.blur)[id] = float4(sum / total, spread / every);
 }
 
 // composite blends a scene pixel toward the blur, read with a 3x3 tent of bilinear taps, by its own circle and by the
