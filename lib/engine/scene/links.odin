@@ -303,6 +303,13 @@ ready_scene :: proc(s: ^Scenes, guid: format.Guid, family: u32) -> (number: u32,
 			}
 		}
 	}
+	return ready_number(s, guid)
+}
+
+// ready_number is the first ready scene with the GUID, which a reference from outside any family binds to, such as a
+// cutscene's possessed binding (see docs/cinematics/bindings.md#possessed-bindings). A scene that is still loading does
+// not count.
+ready_number :: proc(s: ^Scenes, guid: format.Guid) -> (number: u32, found: bool) {
 	for row in loaded_scenes(s) {
 		if _, ready := row.stage.(Scene_Ready); ready && row.guid == guid {
 			return row.number, true
