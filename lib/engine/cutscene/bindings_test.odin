@@ -411,7 +411,7 @@ a_possessed_binding_finds_a_scene_entity_and_one_inside_a_prefab_instance :: pro
 	f := setup(t)
 	defer teardown(f)
 	b: Bindings
-	defer destroy_bindings(&b)
+	defer destroy_bindings(&b, &f.world)
 	r := resolve_of(
 		t,
 		f,
@@ -443,7 +443,7 @@ a_spawned_binding_is_hidden_until_revealed_and_leaves_nothing_after_release :: p
 	w := &f.world
 	before := ecs.entity_count(w)
 	b: Bindings
-	defer destroy_bindings(&b)
+	defer destroy_bindings(&b, &f.world)
 	r := resolve_of(
 		t,
 		f,
@@ -507,7 +507,7 @@ an_override_wins_over_the_assets_reference :: proc(t: ^testing.T) {
 	stand_in := stand(w)
 	before := ecs.entity_count(w)
 	b: Bindings
-	defer destroy_bindings(&b)
+	defer destroy_bindings(&b, &f.world)
 	r := resolve_of(t, f, {possess(4, "Door", DOOR_ID), spawn_binding(9, "Extra")})
 	failure := resolve_bindings(
 		&b,
@@ -537,7 +537,7 @@ an_override_that_is_not_alive_counts_as_missing :: proc(t: ^testing.T) {
 	gone := stand(w)
 	ecs.despawn(w, gone)
 	b: Bindings
-	defer destroy_bindings(&b)
+	defer destroy_bindings(&b, &f.world)
 	r := resolve_of(t, f, {possess(1, "Door", DOOR_ID), spawn_binding(2, "Extra")})
 	failure := resolve_bindings(&b, r, {{Binding_Id(1), gone}, {Binding_Id(2), gone}})
 	testing.expect_value(t, failure, nil)
@@ -557,7 +557,7 @@ a_missing_required_binding_fails_with_its_name_and_leaves_nothing :: proc(t: ^te
 	w := &f.world
 	before := ecs.entity_count(w)
 	b: Bindings
-	defer destroy_bindings(&b)
+	defer destroy_bindings(&b, &f.world)
 	r := resolve_of(
 		t,
 		f,
@@ -581,7 +581,7 @@ a_missing_optional_binding_resolves_and_gives_no_entity :: proc(t: ^testing.T) {
 	f := setup(t)
 	defer teardown(f)
 	b: Bindings
-	defer destroy_bindings(&b)
+	defer destroy_bindings(&b, &f.world)
 	r := resolve_of(
 		t,
 		f,
@@ -607,7 +607,7 @@ a_possessed_entity_that_goes_during_play_gives_no_entity :: proc(t: ^testing.T) 
 	defer teardown(f)
 	w := &f.world
 	b: Bindings
-	defer destroy_bindings(&b)
+	defer destroy_bindings(&b, &f.world)
 	r := resolve_of(
 		t,
 		f,
@@ -639,7 +639,7 @@ a_possessed_binding_in_a_scene_that_is_still_loading_is_missing :: proc(t: ^test
 	_, began := scene.begin_load(&f.world, &f.scenes, LEVEL_GUID)
 	testing.expect(t, began)
 	b: Bindings
-	defer destroy_bindings(&b)
+	defer destroy_bindings(&b, &f.world)
 	r := resolve_of(t, f, {possess(1, "Door", DOOR_ID)})
 	failure, failed := resolve_bindings(&b, r).?
 	testing.expect(t, failed)
@@ -652,4 +652,22 @@ stand :: proc(w: ^ecs.World) -> ecs.Entity {
 	e := ecs.spawn(w)
 	ecs.add(w, e, ecs.TRANSFORM_IDENTITY)
 	return e
+}
+
+@(test)
+destroying_bindings_despawns_what_they_spawned :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	w := &f.world
+	before := ecs.entity_count(w)
+	b: Bindings
+	testing.expect_value(
+		t,
+		resolve_bindings(&b, resolve_of(t, f, {spawn_binding(1, "Extra")})),
+		nil,
+	)
+	extra, _ := binding_entity(&b, w, 0)
+	destroy_bindings(&b, w)
+	testing.expect(t, !ecs.is_alive(w, extra))
+	testing.expect_value(t, ecs.entity_count(w), before)
 }

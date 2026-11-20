@@ -233,8 +233,9 @@ release_bindings :: proc(b: ^Bindings, w: ^ecs.World) -> int {
 	return despawned
 }
 
-// destroy_bindings frees the states. Release them first.
-destroy_bindings :: proc(b: ^Bindings) {
+// destroy_bindings releases the bindings, so no spawned entity outlives them, and frees the states.
+destroy_bindings :: proc(b: ^Bindings, w: ^ecs.World) {
+	release_bindings(b, w)
 	delete(b.states)
 	b.states = nil
 }

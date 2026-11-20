@@ -89,4 +89,4 @@ A binding resolves once. Tracks read it only through `binding_entity`, which giv
 | `binding_index(data, blob, key) -> (index, ok)` | Gives the index of the binding with an ID or a name. |
 | `reveal_bindings(b, w)` | Shows the spawned entities. |
 | `release_bindings(b, w) -> int` | Despawns the spawned roots, and forgets every binding. After it, call the systems' `forget_despawned`, as after `scene.unload_scene`. |
-| `destroy_bindings(b)` | Frees the states. |
+| `destroy_bindings(b, w)` | Releases the bindings, so no spawned entity outlives them, and frees the states. |
