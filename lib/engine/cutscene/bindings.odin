@@ -1,5 +1,5 @@
-// Package cutscene plays cutscenes: the entities that a cutscene acts on, and, in later parts, its player, its
-// evaluation and its tracks (see docs/cinematics/README.md).
+// Package cutscene plays cutscenes: the entities that a cutscene acts on, its player, its evaluation and its tracks
+// (see docs/cinematics/README.md).
 package cutscene
 
 import "core:log"

@@ -23,7 +23,7 @@ The states hold no strings and no pointers, so they survive a code reload. A fai
 
 ## Resolving
 
-`resolve_bindings` resolves every binding once, before the cutscene plays. The player calls it in `Loading`. It goes through the bindings in the blob's order, so a spawned binding's parent resolves before its child.
+`resolve_bindings` resolves every binding once, before the cutscene plays. The [player](player.md#loading-and-failures) calls it in `Loading`. It goes through the bindings in the blob's order, so a spawned binding's parent resolves before its child.
 
 1. If an override for the binding has an entity that is alive, the override wins ([Overrides](#overrides)).
 2. If not, a possessed binding finds its entity, and a spawned binding spawns its prefab.
@@ -49,8 +49,8 @@ A spawned binding names a prefab, a parent binding or none, and a start transfor
 - **Ownership.** The binding spawns with `scene.spawn_prefab` and **no owner**. So it has no `Scene_Entity` or `Scene_Owned`, and a scene's unload does not take it. The cutscene owns it.
 - **A parent.** If the parent has a live entity, the binding spawns under that entity. Its position, rotation and scale become its `Local_Transform`. If the parent has no live entity (for example, an override that is gone), the binding gives a warning. It then spawns with no parent, at its position in the world.
 - **Hidden until it plays.** Every entity of the instance gets `ecs.Loading{LOADING_SCENE}`. A scene that loads in stages tags each of its entities in the same way ([World: Scenes: Loading in stages](../world/scenes.md#loading-in-stages)). So the entities are inactive, and their behaviours do not wake. Physics can still build their bodies early. No scene has the number `LOADING_SCENE`, so a cutscene's entities never hold back a scene's load.
-- **Reveal.** `reveal_bindings` removes the tag. It settles each entity's pose, so the entities show without interpolating from where they spawned. Their behaviours get `awake`, `on_enable` and `start` in the next script phase. The player calls it when the cutscene starts to play.
-- **Release.** `release_bindings` despawns each spawned root with its children, including the spawned bindings under it. The player calls it in `Restored`.
+- **Reveal.** `reveal_bindings` removes the tag. It settles each entity's pose, so the entities show without interpolating from where they spawned. Their behaviours get `awake`, `on_enable` and `start` in the next script phase. The player calls it when the cutscene starts to play or skips.
+- **Release.** `release_bindings` despawns each spawned root with its children, including the spawned bindings under it. The player calls it when it gives the world back, in `Restored` or `Failed`.
 - **Gameplay code** gets a spawned entity from the player while the cutscene runs.
 
 ## Overrides

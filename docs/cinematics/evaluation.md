@@ -17,7 +17,7 @@ An `Evaluation` is what one cutscene needs to be evaluated:
 
 It holds no procedures, `typeid`s or string literals, so it survives a code reload. `init_evaluation` starts it at the range's start, and `destroy_evaluation` frees it.
 
-`State`, in `Game.cutscenes`, holds the kinds of track and the list of evaluations that the systems advance. `add_evaluation` puts an evaluation on the list, and `remove_evaluation` takes it off. The owner of an evaluation adds it while the cutscene plays. The player (#535) will own the evaluations, and keep the time in its `Playing` and `Paused` states.
+`State`, in `Game.cutscenes`, holds the kinds of track and the [players](player.md). Each player from `Ready` to `Finishing` holds its evaluation, so the evaluation's time is the player's time. The systems advance and evaluate the evaluations of the players that are `Playing` or `Paused`. An evaluation can also stand alone, outside a player, as the tests' scrubs do.
 
 ## The clock
 
@@ -30,7 +30,7 @@ The blob's `clock` says which time the cutscene follows:
 
 - **No drift.** `advance` converts a duration to ticks with integer arithmetic. It keeps the part of a tick that is left over in `carry`, in nanoseconds × 60000, and adds it to the next duration. So 1000 steps of 7 ms are exactly 420000 ticks, and 8640 ticks at 144 Hz are exactly 60 s.
 - **The game's clock moves by whole world ticks.** A frame that runs no tick does not move it, so it can be up to one world tick behind the frames.
-- **The end.** The time stops at the range's end. The player decides what happens then.
+- **The end.** The time stops at the range's end. The player then finishes ([Player: The frame](player.md#the-frame)).
 - **Seeks.** `seek` sets the time, inside the range, for a debugger, a scrub or the editor. It sets each phase's last time to the new time, so no event that it jumps over fires.
 - **The editor's Edit mode** runs no ticks and no frame code for the world, so nothing advances a cutscene there. The editor will scrub through `seek` and its own overrides ([#548](https://github.com/aszecsei/cinnabar/issues/548)).
 
@@ -68,7 +68,7 @@ A kind:
 - gets its binding's entity with `track_entity`;
 - samples its sections with `section_at` and blends them with `Blend`;
 - reads a field's own value with `base`;
-- writes the world **only** with `write` or `write_field`;
+- writes the world **only** with `write` or `write_field`, and writes every field that it holds in each evaluation, at the field's own value where no section covers the time ([Player: Conflicts](player.md#conflicts));
 - tests a key against the event range with `fires`.
 
 ## Sections and blending
@@ -112,7 +112,9 @@ Each phase keeps the time of its last evaluation. An evaluation's event range is
 - A field whose entity is gone, or no longer has the component, is skipped.
 - The fields go back in the reverse of the order in which they were saved. Where a track wrote a whole field and another wrote a part of it, the value from before the first write is what stays.
 
-The snapshot is then empty. The player calls `restore` in `Restored` (#535).
+The snapshot is then empty. The player calls `restore` when it goes to `Restored` or `Failed`.
+
+**Several players.** When two players write one field, the later one saves the value that the first one saved, and a player does not put back a field that another live player holds ([Player: Conflicts](player.md#conflicts)). `field_base` gives that value too, so neither player blends over what the other wrote.
 
 A write fails, and saves nothing, when the entity is not alive, has no such component, or the field is outside the component.
 
@@ -124,13 +126,13 @@ A blob with a new key is a hot reload. The next `evaluate`, `seek` or `restore` 
 3. Keeps the time, clamped into the new range, and sets each phase's last time to it, so the reload fires no events.
 4. Evaluates the new blob at the time.
 
-The bindings stay as they resolved. A reload that adds, removes or moves bindings needs the player to resolve them again (#535).
+The bindings are the player's: when a reload changes them, the player resolves them again ([Player: Hot reload](player.md#hot-reload)).
 
 ## Determinism
 
 The same *t* gives the same values on one job or many:
 - Each evaluation runs in one job of an exclusive system.
-- The evaluations run in the order that they were added.
+- The evaluations run in the players' order: by priority, and then by start order ([Player: Conflicts](player.md#conflicts)).
 - Each evaluation's tracks run in the blob's order.
 
 A test compares a play with one job and with eight workers.
@@ -139,15 +141,14 @@ A test compares a play with one job and with eight workers.
 
 | Procedure | What it does |
 |---|---|
-| `init(state, world, assets)`, `register(state, world)`, `destroy(state)` | Set up the state, register the two systems and clear the kinds, and free the list |
+| `init(state, world, assets)`, `register(state, world)`, `destroy(state, world)` | Set up the state, register the two systems and clear the kinds, and reset and free the players |
 | `register_kind(state, kind, desc)` | Sets a kind's phase and evaluate procedure |
-| `add_evaluation(state, e)`, `remove_evaluation(state, e)` | Put an evaluation on the systems' list, or take it off |
-| `init_evaluation(e, world, handle, data, blob)`, `destroy_evaluation(state, e, world)` | Start an evaluation at the range's start. Take it off the list, destroy its bindings and free its snapshot, without restoring. |
+| `init_evaluation(e, world, handle, data, blob)`, `destroy_evaluation(e, world)` | Start an evaluation at the range's start. Destroy its bindings and free its snapshot, without restoring. |
 | `advance(e, blob, dt)` | Moves the time by a duration, without drift, up to the range's end |
-| `seek(e, world, data, blob, t)` | Sets the time, so no event between fires |
+| `seek(state, e, world, data, blob, t)` | Sets the time, so no event between fires |
 | `evaluate(state, e, world, data, blob, phase)` | Evaluates one phase's tracks at the time, and follows a reload |
 | `advance_real(state, world, dt)` | Advances the real-clock cutscenes and evaluates their `Fixed` tracks |
-| `restore(e, world, data, blob)` | Puts back the fields of `restore` tracks, and empties the snapshot |
+| `restore(state, e, world, data, blob)`, `restore_all(state, e, world)` | Put back the fields of `restore` tracks, or every field when the blob is gone, and empty the snapshot |
 | `section_at(blob, section, t)`, `ease(x)` | A section's local time and weight at a time, and the ease's shape |
 | `blend_add`, `blend_value` | Blend sections' values over the base |
 | `track_entity(ctx)`, `fires(ctx, t)` | A track's bound entity, and whether an event fires |

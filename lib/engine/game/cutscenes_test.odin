@@ -29,8 +29,8 @@ Clocks_Fixture :: struct {
 	frame:    virtual.Arena,
 	platform: core.Platform_API,
 	g:        ^Game,
-	on_game:  cutscene.Evaluation,
-	on_real:  cutscene.Evaluation,
+	on_game:  cutscene.Player_Handle,
+	on_real:  cutscene.Player_Handle,
 }
 
 @(private = "file")
@@ -72,10 +72,9 @@ setup_clocks :: proc(t: ^testing.T) -> ^Clocks_Fixture {
 	start :: proc(
 		t: ^testing.T,
 		g: ^Game,
-		e: ^cutscene.Evaluation,
 		guid: format.Guid,
 		clock: format.Cutscene_Clock,
-	) {
+	) -> cutscene.Player_Handle {
 		blob := format.cutscene_write(
 			{
 				guid = guid,
@@ -89,29 +88,41 @@ setup_clocks :: proc(t: ^testing.T) -> ^Clocks_Fixture {
 			context.temp_allocator,
 		)
 		testing.expect(t, asset.set_live(&g.assets, guid, blob))
-		h, _ := asset.find(&g.assets, guid)
-		data, _ := asset.data(&g.assets, h)
-		view, ok := format.cutscene_view(data)
+		h, ok := cutscene.play(&g.cutscenes, &g.world, {cutscene = guid})
 		testing.expect(t, ok)
-		cutscene.init_evaluation(e, &g.world, h, data, view)
-		cutscene.add_evaluation(&g.cutscenes, e)
+		return h
 	}
-	start(t, g, &f.on_game, GAME_CLOCK_GUID, .Game)
-	start(t, g, &f.on_real, REAL_CLOCK_GUID, .Real)
+	f.on_game = start(t, g, GAME_CLOCK_GUID, .Game)
+	f.on_real = start(t, g, REAL_CLOCK_GUID, .Real)
+	cutscene.update(&g.cutscenes, {world = &g.world})
+	testing.expect_value(
+		t,
+		cutscene.status(&g.cutscenes, f.on_game),
+		cutscene.Player_Status.Playing,
+	)
+	testing.expect_value(
+		t,
+		cutscene.status(&g.cutscenes, f.on_real),
+		cutscene.Player_Status.Playing,
+	)
 	return f
 }
 
 @(private = "file")
 teardown_clocks :: proc(f: ^Clocks_Fixture) {
 	g := f.g
-	cutscene.destroy_evaluation(&g.cutscenes, &f.on_game, &g.world)
-	cutscene.destroy_evaluation(&g.cutscenes, &f.on_real, &g.world)
-	cutscene.destroy(&g.cutscenes)
+	cutscene.destroy(&g.cutscenes, &g.world)
 	asset.destroy(&g.assets)
 	ecs.destroy(&g.world)
 	free(g)
 	virtual.arena_destroy(&f.frame)
 	free(f)
+}
+
+@(private = "file")
+time_of :: proc(f: ^Clocks_Fixture, h: cutscene.Player_Handle) -> i32 {
+	t, _ := cutscene.player_time(&f.g.cutscenes, h)
+	return t
 }
 
 // frames runs n frames of a 60th of a second as game_update steps the cutscenes: the real clock by the frame's
@@ -161,23 +172,29 @@ cutscene_clocks_follow_the_games_scale_and_pause :: proc(t: ^testing.T) {
 	}
 
 	frames(f, 60)
-	near(t, f.on_game.time, SECOND, "a second at a scale of 1, on the game's clock", TICK + 2)
-	near(t, f.on_real.time, SECOND, "and on the real clock")
+	near(
+		t,
+		time_of(f, f.on_game),
+		SECOND,
+		"a second at a scale of 1, on the game's clock",
+		TICK + 2,
+	)
+	near(t, time_of(f, f.on_real), SECOND, "and on the real clock")
 
 	set_time_scale(f.g, 0.5)
 	frames(f, 60)
-	near(t, f.on_game.time, 3 * SECOND / 2, "half a second at a scale of 0.5", TICK + 2)
-	near(t, f.on_real.time, 2 * SECOND, "a whole second on the real clock")
+	near(t, time_of(f, f.on_game), 3 * SECOND / 2, "half a second at a scale of 0.5", TICK + 2)
+	near(t, time_of(f, f.on_real), 2 * SECOND, "a whole second on the real clock")
 
-	before := f.on_game.time
+	before := time_of(f, f.on_game)
 	f.g.paused = true
 	frames(f, 60)
-	testing.expect_value(t, f.on_game.time, before)
-	near(t, f.on_real.time, 3 * SECOND, "a whole second on the real clock")
+	testing.expect_value(t, time_of(f, f.on_game), before)
+	near(t, time_of(f, f.on_real), 3 * SECOND, "a whole second on the real clock")
 
 	f.g.paused = false
 	set_time_scale(f.g, 2)
 	frames(f, 60)
-	near(t, f.on_game.time, 7 * SECOND / 2, "two seconds at a scale of 2", TICK + 2)
-	near(t, f.on_real.time, 4 * SECOND, "a whole second on the real clock")
+	near(t, time_of(f, f.on_game), 7 * SECOND / 2, "two seconds at a scale of 2", TICK + 2)
+	near(t, time_of(f, f.on_real), 4 * SECOND, "a whole second on the real clock")
 }

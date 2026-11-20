@@ -152,6 +152,11 @@ game_update :: proc(g: ^Game, dt: time.Duration, h: Hooks) -> (keep_running: boo
 	stream_scenes(g)
 	update_sublevels(g)
 	send_sublevel_events(g)
+	// The players load, resolve their bindings and give the world back here, outside the systems and the script phase,
+	// once the frame's scenes are in place (see docs/cinematics/player.md#the-frame).
+	if cutscene.update(&g.cutscenes, {&g.world, &g.scenes, &g.scripts}) > 0 {
+		forget_despawned(g)
+	}
 	// In the editor's edit mode, and while it pauses, the world stands still and only its transforms propagate, so
 	// edits show. No script code runs then but the edit phase's, for the behaviours that run in edit mode, whose writes
 	// go to the editor's document (see docs/editor/document-and-scenes.md#modes).
@@ -255,6 +260,7 @@ end_frame :: proc(g: ^Game) {
 	anim.end_frame(&g.animation)
 	nav.end_frame(&g.nav)
 	ai.end_frame(&g.ai)
+	cutscene.end_frame(&g.cutscenes)
 	// An edit-mode behaviour's on_reload can edit the editor's document, which it sees without the editor's overrides.
 	editor.lift_overrides(&g.editor, &g.world)
 	script.reload_changed(&g.scripts, asset.poll(&g.assets))
@@ -410,6 +416,8 @@ game_shutdown :: proc(g: ^Game, h: Hooks) {
 	if h.shutdown != nil {
 		h.shutdown(g)
 	}
+	// The players give the world back, and their assets, while the world, the scripts and the assets are alive.
+	cutscene.destroy(&g.cutscenes, &g.world)
 	editor.destroy(&g.editor)
 	script.destroy(&g.scripts)
 	// Before the assets, to which the streaming and the scenes give their blobs back.
@@ -429,7 +437,6 @@ game_shutdown :: proc(g: ^Game, h: Hooks) {
 	audio.destroy(&g.audio)
 	physics.destroy(&g.physics)
 	anim.destroy(&g.animation)
-	cutscene.destroy(&g.cutscenes)
 	ecs.destroy(&g.world)
 	log.info("game: shutdown")
 }
