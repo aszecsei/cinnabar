@@ -1034,3 +1034,24 @@ a_suspended_agent_stops_and_walks_again_after :: proc(t: ^testing.T) {
 		where_is(f, e),
 	)
 }
+
+// An agent whose AI and navigation are suspended mid-walk, as a cutscene that possesses it does, keeps its move_to
+// running while it is held. Once resumed, the action sees the stopped move and fails, so the agent's next think
+// chooses again (see docs/cinematics/possession.md#ai).
+@(test)
+a_move_to_that_a_suspension_stopped_fails_once_resumed :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(t, f)
+	level(t, f, 8, 8, l_blocked())
+	action_blobs(t, f, "move_to", at(7, 0, 6))
+	e := thinking_agent(f, 0.75, 1)
+	frame(f, 30)
+	testing.expect_value(t, status(f, e), Move_Status.Moving)
+	ecs.suspend(&f.world, e, {.AI, .Navigation})
+	frame(f, 30)
+	testing.expect_value(t, status(f, e), Move_Status.Idle)
+	testing.expect_value(t, seen_action.status, ai.Action_Status.Running)
+	ecs.resume(&f.world, e, {.AI, .Navigation})
+	frame(f, 10)
+	testing.expect_value(t, seen_action.status, ai.Action_Status.Failed)
+}

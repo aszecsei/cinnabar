@@ -18,7 +18,7 @@ A system is suspended on an entity while a holder holds it. The world keeps the 
 | `Physics` | A dynamic body is kinematic. A character leaves the simulation. |
 | `Ui` | The `Ui_Document` is hidden. |
 
-- **Counts.** `ecs.suspend(w, e, systems)` adds one holder to each system, and `ecs.resume(w, e, systems)` takes one away. They give the systems that started or ended. A system acts on the entity again only when no holder suspends it. So two cutscenes that suspend one entity both release it before it runs again.
+- **Counts.** `ecs.suspend(w, e, systems, keep_velocity)` adds one holder to each system, and `ecs.resume(w, e, systems)` takes one away. They give the systems that started or ended. When `Physics` ends, `resume` also gives whether any of its holders asked to keep the body's velocity. A system acts on the entity again only when no holder suspends it. So two cutscenes that suspend one entity both release it before it runs again.
 - **The one writer.** `suspend` and `resume` are the only procedures that change `Suspended`. The entity loses the component when every count is 0.
 - **Not saved.** `Suspended` is in no category, and `scene.is_derived` names it, so a scene's text cannot set it and the editor does not show it. A despawned entity takes its counts with it.
 - **Systems read it.** Each system asks `ecs.suspended(w, e, system)`. No system writes an authored field, such as `enabled`, `Rigid_Body.motion` or `Ui_Document.visible`. So a script or the editor that changes one of these fields during the cutscene keeps its change, and a restore never undoes it.
@@ -61,6 +61,7 @@ A suspended `Nav_Agent` leaves its crowd ([AI: Navigation: The crowd system](../
 - **A dynamic body** becomes kinematic. The cutscene moves the entity through its `Transform`, so the body moves there in the tick and pushes the bodies in its way. Gravity does not move it. Its `Rigid_Body` stays dynamic, so the sync makes the body again, with the same shapes, when the suspension starts and when it ends ([Physics: The physics tick](../physics/design.md#the-physics-tick)).
 - **At the end,** the body is dynamic again at rest. A binding with `keep_velocity = true` keeps the velocity that the body last moved at, so a body that flies out of the cutscene keeps flying. `Suspended` remembers that a holder asked for it until the last holder of `Physics` resumes the body, so with two cutscenes the body keeps its velocity if either asked, whichever ends first.
 - **A static or kinematic body** does not change.
+- **Joints** follow the body that the sync makes again, as for any change of a body.
 - **A character** leaves the simulation, as an inactive entity's character does. A write of its `Transform` places it. When it is resumed, it is in the simulation again, at the place where the cutscene left it.
 
 ## The whole cutscene
@@ -91,7 +92,7 @@ A binding resumes only an entity that is still alive. A failure in `Loading` rel
 
 | Procedure | What it does |
 |---|---|
-| `ecs.suspend(w, e, systems) -> started` | Adds a holder of each system, and gives the systems that it suspended. |
-| `ecs.resume(w, e, systems) -> ended` | Takes a holder of each system away, and gives the systems that no holder suspends now. |
+| `ecs.suspend(w, e, systems, keep_velocity = false) -> started` | Adds a holder of each system, and gives the systems that it suspended. |
+| `ecs.resume(w, e, systems) -> (ended, keep_velocity)` | Takes a holder of each system away, and gives the systems that no holder suspends now, and whether a body keeps its velocity. |
 | `ecs.suspended(w, e, system) -> bool` | Whether a holder suspends a system on an entity. |
 | `take_hold(s, w, live)`, `release_hold(s, w, hold)` | Push and pop the cutscene's input context, and hide and show its documents. |
