@@ -4,8 +4,8 @@ import "cinnabar:core/gpu"
 
 // The depth of field (see docs/rendering/post-processing.md#depth-of-field): the blur of a physical lens, from the
 // view's Lens, in front of temporal AA at the scene's size. A setup pass finds each pixel's circle of confusion and
-// halves the scene, a pass finds the largest near circle in each tile, a gather blurs the half-size scene, and a
-// composite blends the blur into the scene by each pixel's own circle and by the near blur that spreads over it.
+// halves the scene, a pass finds the largest near circle in each tile, a gather blurs the half-size scene into a near
+// layer and a background, a 3x3 median filters both, and a composite blends them into the scene.
 
 DOF_SHADER :: #load("../content/shaders/depth_of_field.hlsl.meta", string)
 
@@ -25,6 +25,8 @@ DOF_TILES :: 1
 DOF_GATHER :: 2
 @(private)
 DOF_COMPOSITE :: 3
+@(private)
+DOF_POSTFILTER :: 4
 
 // Dof_Params are a technique's gather: its taps, on a disk or, with blades, on the aperture's polygon; the largest
 // circle of confusion's radius, as a share of the scene's height, which the taps cover without gaps between them; and
@@ -84,13 +86,14 @@ Dof_Frame :: struct {
 	tile:       u32,
 	tiles_size: [2]u32,
 	// The scene that the setup and the composite read, the half-size scene and its circles, its view-space depth, the
-	// tiles, the background's blur and the near layer, and the composite's result.
+	// tiles, the background's blur and the near layer, the two after the median, and the composite's result.
 	scene:      Texture,
 	half:       Texture,
 	half_depth: Texture,
 	tiles:      Texture,
 	blur:       Texture,
 	near:       Texture,
+	filtered:   [2]Texture,
 	output:     Texture,
 }
 
@@ -119,9 +122,12 @@ Dof_Constants :: struct {
 	highlights:    f32,
 	tile:          u32,
 	near_layer:    u32,
+	// The median's results: the background, then the near layer.
+	filtered:      [2]u32,
+	padding:       [2]u32,
 }
 
-#assert(size_of(Dof_Constants) == 112)
+#assert(size_of(Dof_Constants) == 128)
 
 // Dof_Step is one pass of the depth of field.
 @(private = "file")
@@ -180,6 +186,12 @@ add_dof_passes :: proc(f: ^Frame) {
 		g,
 		{size = df.half_size, format = DOF_HALF_FORMAT, label = "dof near"},
 	)
+	for &t in df.filtered {
+		t = create_texture(
+			g,
+			{size = df.half_size, format = DOF_HALF_FORMAT, label = "dof median"},
+		)
+	}
 	df.output = create_texture(g, {size = f.size, format = SCENE_FORMAT, label = "dof scene"})
 
 	pass := add_compute_pass(g, "dof setup", run_dof, new_clone(Dof_Step{f, DOF_SETUP}, allocator))
@@ -209,6 +221,18 @@ add_dof_passes :: proc(f: ^Frame) {
 	write(g, pass, df.blur)
 	write(g, pass, df.near)
 
+	// The median keeps a lone tap's color, which the gather's taps leave between them, out of the blur.
+	pass = add_compute_pass(
+		g,
+		"dof median",
+		run_dof,
+		new_clone(Dof_Step{f, DOF_POSTFILTER}, allocator),
+	)
+	read(g, pass, df.blur)
+	read(g, pass, df.near)
+	write(g, pass, df.filtered[0])
+	write(g, pass, df.filtered[1])
+
 	pass = add_compute_pass(
 		g,
 		"dof composite",
@@ -217,8 +241,8 @@ add_dof_passes :: proc(f: ^Frame) {
 	)
 	read(g, pass, df.scene)
 	read(g, pass, f.depth)
-	read(g, pass, df.blur)
-	read(g, pass, df.near)
+	read(g, pass, df.filtered[0])
+	read(g, pass, df.filtered[1])
 	write(g, pass, df.output)
 	f.scene = df.output
 }
@@ -268,10 +292,17 @@ run_dof :: proc(ctx: ^Pass_Context) {
 		c.scene = gpu.read_index(gpu_texture(g, df.scene))
 		c.depth = gpu.read_index(depth)
 		c.stencil = gpu.stencil_index(depth)
-		c.blur = gpu.read_index(gpu_texture(g, df.blur))
-		c.near_layer = gpu.read_index(gpu_texture(g, df.near))
+		c.blur = gpu.read_index(gpu_texture(g, df.filtered[0]))
+		c.near_layer = gpu.read_index(gpu_texture(g, df.filtered[1]))
 		c.output = gpu.write_index(gpu_texture(g, df.output))
 		size = f.size
+	case DOF_POSTFILTER:
+		c.blur = gpu.read_index(gpu_texture(g, df.blur))
+		c.near_layer = gpu.read_index(gpu_texture(g, df.near))
+		c.filtered = {
+			gpu.write_index(gpu_texture(g, df.filtered[0])),
+			gpu.write_index(gpu_texture(g, df.filtered[1])),
+		}
 	}
 	upload, ok := f.renderer.platform.gpu_upload(size_of(Dof_Constants), gpu.PASS_CONSTANTS_ALIGN)
 	if !ok {

@@ -4190,7 +4190,13 @@ the_depth_of_field_runs_with_a_technique_and_a_lens :: proc(t: ^testing.T) {
 			testing.expect(t, draw_frame(r, rig.w, desc))
 		}
 	}
-	dof_passes := []string{"dof setup", "dof near tiles", "dof gather", "dof composite"}
+	dof_passes := []string {
+		"dof setup",
+		"dof near tiles",
+		"dof gather",
+		"dof median",
+		"dof composite",
+	}
 	for preset in Quality_Preset.Low ..= Quality_Preset.Ultra {
 		q := preset_quality(preset, r.caps)
 		desc.quality = &q

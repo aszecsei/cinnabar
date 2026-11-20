@@ -1,6 +1,7 @@
-// The depth of field (see docs/rendering/post-processing.md#depth-of-field), in four modes: the setup halves the scene
+// The depth of field (see docs/rendering/post-processing.md#depth-of-field), in five modes: the setup halves the scene
 // with each pixel's circle of confusion, the tiles take the largest near circle in each tile, the gather blurs the
-// half-size scene into a near layer and a background, and the composite blends them into the scene.
+// half-size scene into a near layer and a background, the median filters both, and the composite blends them into the
+// scene.
 //
 // A background tap counts where its own circle reaches the pixel, so a sharp surface in front of a blurred background
 // does not spread over it, and a tap behind the pixel reaches no further than the pixel's own circle, so a blurred
@@ -35,6 +36,9 @@ struct Constants {
 	float highlights;
 	uint tile;
 	uint near_layer;
+	// The median's results: the background, then the near layer.
+	uint2 filtered;
+	uint2 padding;
 };
 CN_PASS_CONSTANTS(Constants, constants);
 
@@ -42,6 +46,7 @@ static const uint DOF_SETUP = 0;
 static const uint DOF_TILES = 1;
 static const uint DOF_GATHER = 2;
 static const uint DOF_COMPOSITE = 3;
+static const uint DOF_POSTFILTER = 4;
 
 // Matches VIEW_MODEL_STENCIL in lib/engine/render/renderer.odin.
 static const uint VIEW_MODEL_STENCIL = 1;
@@ -191,6 +196,42 @@ void gather(uint2 id) {
 	cn_rw_texture(constants.near_layer)[id] = float4(near_total > 0 ? near_sum / near_total : 0, alpha);
 }
 
+// The median of nine values in 20 compare-swaps (McGuire, "A fast, small-radius GPU median filter", ShaderX6), each
+// channel on its own.
+#define S2(a, b) { float4 t_ = a; a = min(t_, b); b = max(t_, b); }
+#define MN3(a, b, c) S2(a, b); S2(a, c);
+#define MX3(a, b, c) S2(b, c); S2(a, c);
+#define MNMX3(a, b, c) MX3(a, b, c); S2(a, b);
+#define MNMX4(a, b, c, d) S2(a, b); S2(c, d); S2(a, c); S2(b, d);
+#define MNMX5(a, b, c, d, e) S2(a, b); S2(c, d); MN3(a, c, e); MX3(b, d, e);
+#define MNMX6(a, b, c, d, e, f) S2(a, d); S2(b, e); S2(c, f); MN3(a, b, c); MX3(d, e, f);
+
+// median3x3 is the median of a half-size pixel's 3x3 block, which takes out a lone tap's color that the gather's taps
+// leave between them, and keeps edges where a blur lowpass would soften them.
+float4 median3x3(Texture2D<float4> source, int2 id) {
+	int2 last = int2(constants.half_size) - 1;
+	float4 v0 = source.Load(int3(clamp(id + int2(-1, -1), 0, last), 0));
+	float4 v1 = source.Load(int3(clamp(id + int2(0, -1), 0, last), 0));
+	float4 v2 = source.Load(int3(clamp(id + int2(1, -1), 0, last), 0));
+	float4 v3 = source.Load(int3(clamp(id + int2(-1, 0), 0, last), 0));
+	float4 v4 = source.Load(int3(id, 0));
+	float4 v5 = source.Load(int3(clamp(id + int2(1, 0), 0, last), 0));
+	float4 v6 = source.Load(int3(clamp(id + int2(-1, 1), 0, last), 0));
+	float4 v7 = source.Load(int3(clamp(id + int2(0, 1), 0, last), 0));
+	float4 v8 = source.Load(int3(clamp(id + int2(1, 1), 0, last), 0));
+	MNMX6(v0, v1, v2, v3, v4, v5);
+	MNMX5(v1, v2, v3, v4, v6);
+	MNMX4(v2, v3, v4, v7);
+	MNMX3(v3, v4, v8);
+	return v4;
+}
+
+// postfilter writes the median of the background and of the near layer.
+void postfilter(uint2 id) {
+	cn_rw_texture(constants.filtered.x)[id] = median3x3(cn_texture(constants.blur), int2(id));
+	cn_rw_texture(constants.filtered.y)[id] = median3x3(cn_texture(constants.near_layer), int2(id));
+}
+
 // tent reads a half-size texture at a scene pixel with a 3x3 tent of bilinear taps.
 float4 tent(Texture2D<float4> source, SamplerState s, float2 uv) {
 	float2 t = 0.5 / float2(constants.half_size);
@@ -234,6 +275,11 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	case DOF_GATHER:
 		if (all(id.xy < constants.half_size)) {
 			gather(id.xy);
+		}
+		break;
+	case DOF_POSTFILTER:
+		if (all(id.xy < constants.half_size)) {
+			postfilter(id.xy);
 		}
 		break;
 	default:
