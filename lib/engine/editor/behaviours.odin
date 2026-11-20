@@ -491,7 +491,7 @@ parent_of :: proc(w: ^ecs.World, entity: ecs.Entity) -> ecs.Entity {
 }
 
 // is_child is true for an entity whose pose is its Local_Transform.
-@(private = "file")
+@(private)
 is_child :: proc(w: ^ecs.World, entity: ecs.Entity) -> bool {
 	return ecs.has(w, entity, ecs.Parent) && ecs.has(w, entity, ecs.Local_Transform)
 }

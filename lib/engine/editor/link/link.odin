@@ -125,6 +125,11 @@ Message :: union {
 	Release_Live_Instances,
 	World_View,
 	Streamed_Scenes,
+	Begin_Override,
+	Override_Frame,
+	Release_Override,
+	Override_Ended,
+	Overridden_Entities,
 }
 
 // Editor to host, first: the editor's protocol version and its name.
@@ -308,6 +313,9 @@ Entity_Values :: struct {
 	entity:     u64,
 	components: []Component_Value,
 	behaviours: []Behaviour_Value,
+	// The fields that overrides hold (see Override_Frame). components has the document's values of them, not the
+	// overrides'.
+	held:       []Held_Field,
 }
 
 // A component's bytes, as they are in memory. The editor reads the fields with the Field_Info offsets.
@@ -1950,4 +1958,129 @@ Mesh_Overlay :: struct {
 	grid_size:   f32,
 	grid_origin: [3]i64,
 	grid_axis:   u8,
+}
+
+// Overrides (see docs/editor/link.md#overrides). In Edit, an owner in the editor, such as the cutscene editor's scrub,
+// writes values over the world that mirrors the document, without the document: no operation, no undo entry, and
+// no change to what the editor saves. The editor picks each override's number, which only goes up in a session, so a
+// late message for an override that ended is dropped.
+
+// Editor to game: start the override with this number. The game answers only when it cannot start it, with
+// Override_Ended.
+Begin_Override :: struct {
+	override: u64,
+}
+
+Override_Target_Kind :: enum u8 {
+	// An entity of the editor's document, by its scene's number and its scene ID.
+	Scene_Entity,
+	// An entity that the override spawned, by the key of its Override_Spawn.
+	Spawned,
+}
+
+// An entity that an override writes. scene is the number of the scene whose IDs entity (for a Scene_Entity) and the
+// references in values name.
+Override_Target :: struct {
+	kind:   Override_Target_Kind,
+	scene:  u32,
+	entity: u64,
+}
+
+// An instance of prefab, which lives while the override has it in its frames. key names it, and only the first
+// frame that has the key spawns it, at pose.
+Override_Spawn :: struct {
+	key:      u64,
+	prefab:   [16]u8,
+	// A World_Position's raw value.
+	position: [3]i64,
+	rotation: [4]f32,
+	scale:    [3]f32,
+}
+
+// A component's field, by its component ID and the hash of its name (asset_format.scene_field_hash), as the scene
+// format names it.
+Override_Field :: struct {
+	target:    Override_Target,
+	component: u64,
+	field:     u64,
+	value:     Scene_Value,
+}
+
+// An entity's pose, in its own space: for a root, the world's, and position is a World_Position's raw value; for a
+// child, its parent's, and position is in the same units, 2^-24 m. The entity moves without interpolation.
+Override_Transform :: struct {
+	target:   Override_Target,
+	position: [3]i64,
+	rotation: [4]f32,
+	scale:    [3]f32,
+}
+
+// A clip that poses an Animator over its graph's pose, as anim.Driven_Sample is.
+Override_Sample :: struct {
+	clip:        [16]u8,
+	time:        f32,
+	weight:      f32,
+	root_motion: bool,
+}
+
+// An Animator's driven samples (see docs/animation/design.md#driving-an-animator). With hold, its graph's time stops.
+Override_Animator :: struct {
+	target:  Override_Target,
+	hold:    bool,
+	samples: [2]Override_Sample,
+}
+
+// A camera on the stack of a game view (see docs/world/cameras.md#stacks).
+Override_Camera :: struct {
+	view:     u8,
+	target:   Override_Target,
+	priority: i32,
+}
+
+// Editor to game: everything that the override writes, for one frame. What an earlier frame wrote and this one does
+// not goes back to the document's value, and a spawned entity whose key is not in spawns goes.
+Override_Frame :: struct {
+	override:   u64,
+	spawns:     []Override_Spawn,
+	fields:     []Override_Field,
+	transforms: []Override_Transform,
+	animators:  []Override_Animator,
+	cameras:    []Override_Camera,
+}
+
+// Editor to game: end the override. The world shows the document's values again, and its spawned entities go, in
+// the same frame.
+Release_Override :: struct {
+	override: u64,
+}
+
+Override_End_Reason :: enum u8 {
+	// The game is not in Edit with the editor's scene, so the override did not start.
+	Not_Editing,
+	// The game has as many overrides as it holds, so the override did not start.
+	Full,
+	// The mode changed from Edit.
+	Mode,
+	// The editor's scene replaced the world.
+	Scene_Loaded,
+	// The game's code reloaded.
+	Code_Reloaded,
+}
+
+// Game to editor: the game ended an override that the editor did not release, or did not start it.
+Override_Ended :: struct {
+	override: u64,
+	reason:   Override_End_Reason,
+}
+
+// A field of a watched entity that an override holds, as Override_Field names it. A transform holds each field of the
+// entity's Transform, or of its Local_Transform for a child.
+Held_Field :: struct {
+	component: u64,
+	field:     u64,
+}
+
+// Game to editor: the entities that overrides write or spawned, when they change.
+Overridden_Entities :: struct {
+	entities: []u64,
 }

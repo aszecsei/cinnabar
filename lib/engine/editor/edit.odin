@@ -389,21 +389,10 @@ fields_of :: proc(
 ) -> []format.Scene_Field {
 	result := make([]format.Scene_Field, len(fields), allocator)
 	for f, i in fields {
-		v := f.value
 		result[i] = {
-			name = f.name,
-			hash = format.scene_field_hash(f.name),
-			value = {
-				kind = format.Scene_Value_Kind(v.kind),
-				count = v.count,
-				integer = v.integer,
-				ints = v.ints,
-				floats = v.floats,
-				text = v.text,
-				entity = v.entity,
-				scene = format.Guid(v.scene),
-				asset = format.Guid(v.asset),
-			},
+			name  = f.name,
+			hash  = format.scene_field_hash(f.name),
+			value = scene_value_of(f.value),
 		}
 	}
 	return result

@@ -428,7 +428,12 @@ handle_message :: proc(l: ^Link, message: link.Message, connection: u64) {
 	     link.World_View,
 	     link.Streamed_Scenes,
 	     link.Behaviour_Operations,
-	     link.Behaviour_Operations_Answer:
+	     link.Behaviour_Operations_Answer,
+	     link.Begin_Override,
+	     link.Override_Frame,
+	     link.Release_Override,
+	     link.Override_Ended,
+	     link.Overridden_Entities:
 	// is_host_message sends these to the game.
 	}
 }
