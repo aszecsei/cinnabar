@@ -949,7 +949,8 @@ draw_view :: proc(
 		has_sprites(f) ||
 		has_sheet_sprites(f) ||
 		reads_depth(f) ||
-		desc.debug_view == .Depth
+		desc.debug_view == .Depth ||
+		desc.debug_view == .Circle_Of_Confusion
 	depth(&g, p, f.depth, .Load, store = keep_depth ? .Store : .Discard)
 	declare_scene_draws(f, p)
 	declare_texture_feedback(&g, p, f.texture_pool)

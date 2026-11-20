@@ -2,6 +2,7 @@
 // new scene color, before post-processing. The shaded views are pre-exposed, as the scene is, and the others are
 // colors as they are, which the output pass only encodes.
 #include "cinnabar.hlsli"
+#include "dof.hlsli"
 
 // Matches Debug_View_Push in lib/engine/render/debug_views.odin.
 struct Push {
@@ -17,6 +18,10 @@ struct Push {
 	uint divisor;
 	// The far plane of an orthographic view, and 0 otherwise.
 	float far;
+	// The circle of confusion's lens, coc_scale 0 without one, and the radius at its brightest, in pixels.
+	float coc_scale;
+	float focus;
+	float coc_high;
 };
 CN_PUSH_CONSTANTS(Push, push);
 
@@ -36,6 +41,7 @@ static const uint DEBUG_QUAD_OVERDRAW = 22;
 static const uint DEBUG_ROUGHNESS = 24;
 static const uint DEBUG_REFLECTIONS = 26;
 static const uint DEBUG_CLOUDS = 27;
+static const uint DEBUG_CIRCLE_OF_CONFUSION = 29;
 
 // The prepass clears the velocity to render.VELOCITY_NONE where it draws nothing; anything this large is that.
 static const float VELOCITY_NONE = 1000;
@@ -116,6 +122,20 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 		// The split cascades' gather drew the colors.
 		color = cn_texture(push.source).Load(pixel).rgb;
 		break;
+	case DEBUG_CIRCLE_OF_CONFUSION: {
+		// Blue in front of the focus and orange behind it, brighter as the circle grows to coc_high, and green on the
+		// focus plane, within half a pixel of it. Grey without a lens, which an orthographic view has.
+		if (push.coc_scale == 0) {
+			color = 0.25;
+			break;
+		}
+		float depth = cn_texture(push.source).Load(pixel).r;
+		float z = push.near / max(depth, 1e-7);
+		float c = coc(push.coc_scale, push.focus, z);
+		float t = sqrt(saturate(abs(c) / max(push.coc_high, 1)));
+		color = abs(c) < 0.5 ? float3(0.1, 1, 0.1) : lerp(0.04, c < 0 ? float3(0.15, 0.4, 1) : float3(1, 0.45, 0.1), t);
+		break;
+	}
 	case DEBUG_CLOUDS:
 		// The clouds' history, a texel for each block of divisor pixels: their light, not pre-exposed, over black.
 		color = cn_texture(push.source).Load(int3(id.xy / max(push.divisor, 1), 0)).rgb * exposure;

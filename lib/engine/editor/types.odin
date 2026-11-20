@@ -71,3 +71,6 @@ component_types :: proc(w: ^ecs.World, allocator: runtime.Allocator) -> link.Com
 	int(render.Debug_View.Shadow_Virtual_Invalidated) ==
 	int(link.Debug_View.Shadow_Virtual_Invalidated),
 )
+#assert(
+	int(render.Debug_View.Circle_Of_Confusion) == int(link.Debug_View.Circle_Of_Confusion),
+)
