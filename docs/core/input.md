@@ -42,6 +42,24 @@ Games let the player remap controls, so scripts can name what they read. `Input_
 
 UI navigation does not use actions (see [UI](../ui/design.md#input-and-focus)).
 
+### Contexts
+
+A cutscene must stop the player from moving and attacking, but still let the player skip, pause and open menus. An input context is a named set of actions that it lets through. Each player has a stack of contexts. `Input_Contexts` in `input_contexts.odin` holds them inside `Input_Actions`, so the queries above read through them. Its zero value has no pushes, and then every action reads as it would without contexts.
+
+- **Contexts.** `input_contexts_define` makes a context with a mode and a set of actions:
+  - `Only` allows the actions that it names and blocks the others;
+  - `Pass` allows the actions that it names, and lets the context below it decide for the others;
+  - `All` allows every action.
+
+  `gameplay` is under every stack and allows every action. The game cannot define it. A game has at most `MAX_INPUT_CONTEXTS` (16) other contexts. Scripts define contexts as they define actions (`Input.define_context`), and a context can name only actions that are defined. A new definition of a context that is on a stack changes the stack at once.
+- **Stacks.** A player is a gamepad slot, and the keys are the first player's. `input_contexts_push` puts a context on the stacks of a set of players and gives an `Input_Context_Token`. `input_contexts_pop` takes that push off, wherever it is in the stacks. So a cutscene that ends early gives back the input, even if a menu pushed after it. A token is never given twice, so a pop through a stale token does nothing. The stacks share one array of at most `MAX_INPUT_CONTEXT_PUSHES` (32) pushes, in push order. A push keeps who pushed it, for the editor, and the behaviour that owns it. One proc, `change_stack`, changes the pushes and the definitions.
+- **Reads.** The top push on a player's stack decides for that player. `Only` and `All` decide alone. `Pass` decides for the actions that it names and passes the others down. A blocked action is up, not pressed and not released, with a value of 0. A query with a pad reads through that pad's stack. A query without a pad reads each player through its own stack: the keys and pad 1 through the first player's, and each other pad through its own.
+- **Held actions.** When a change of the stacks allows an action again, the action is held for each player that it was blocked for (`Input_Contexts.held`). A held action is down while its bindings are down, but it is not pressed or released. `input_contexts_settle` lets it go at the first input where its bindings are quiet: none down, pressed or released. So a key that is down when a cutscene ends does not fire. A tap during the cutscene does not fire either, when a later fixed tick gets its edges (see [Time](../world/time.md#fixed-and-variable-rate)). The script runtime settles each time that it sets its input: in the script phase and in each fixed tick.
+- **Owners.** A behaviour's pushes are popped when it is destroyed. Each script phase also pops the pushes of behaviours that are gone, so a lost handle cannot lock the input. A new script VM starts with empty stacks.
+- **The editor** shows the pushes in the Resource Monitor, the top first, with each pusher and its pads (see [Editor](../editor/shell-and-panels.md#resource-monitor)).
+
+Contexts do not change UI navigation. A modal document takes the UI's input, not actions, and scripts still ask `Ui.wants_input()`.
+
 ## Text and IME
 
 `Input.text` is the characters typed since the previous frame, in UTF-8. It comes from the window's `WM_CHAR` messages, so it follows the keyboard layout, dead keys and Shift, and it has what an IME commits. Control characters are not text: Backspace, Enter and the like are keys in `core.Key`.

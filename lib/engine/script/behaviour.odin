@@ -5,6 +5,7 @@ import "core:fmt"
 import "core:log"
 import "core:strings"
 
+import "cinnabar:core"
 import "cinnabar:core/luau"
 import "cinnabar:core/profile"
 import format "cinnabar:engine/asset/format"
@@ -567,6 +568,7 @@ destroy_instance :: proc(r: ^Runtime, h: Instance_Handle) {
 		return
 	}
 	stop_owned(r, h)
+	core.input_contexts_pop_owned(&r.input_actions.contexts, context_owner(h))
 	luau.unref(r.L, i.table)
 	i.flags = {}
 	i.generation += 1

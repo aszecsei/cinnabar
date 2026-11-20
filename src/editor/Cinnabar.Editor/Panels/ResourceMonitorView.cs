@@ -21,6 +21,7 @@ public sealed class ResourceMonitorView : Grid
     readonly Grid _host = Table();
     readonly Grid _game = Table();
     readonly Grid _modules = Table();
+    readonly Grid _contexts = Table();
     readonly TextBlock _empty = new()
     {
         Text = "Frame times, memory and GPU resources appear here while the host is linked.",
@@ -34,15 +35,16 @@ public sealed class ResourceMonitorView : Grid
         _stats = stats;
         _graph = new FrameGraph(stats, capture) { Height = 110, MinWidth = 240 };
         // The tables take what their rows need, and the graph the rest.
-        ColumnDefinitions = new ColumnDefinitions("*,Auto,Auto,Auto");
+        ColumnDefinitions = new ColumnDefinitions("*,Auto,Auto,Auto,Auto");
         Margin = new Thickness(8);
         var frames = new StackPanel { Spacing = 4, Children = { Heading("Frame times"), _graph, _frames } };
         AddColumn(frames, 0);
         AddColumn(new ScrollViewer { Content = new StackPanel { Spacing = 4, Children = { Heading("Host"), _host } } }, 1);
         AddColumn(new ScrollViewer { Content = new StackPanel { Spacing = 4, Children = { Heading("World"), _game } } }, 2);
         AddColumn(new ScrollViewer { Content = new StackPanel { Spacing = 4, Children = { Heading("Script memory by module"), _modules } } }, 3);
+        AddColumn(new ScrollViewer { Content = new StackPanel { Spacing = 4, Children = { Heading("Input contexts"), _contexts } } }, 4);
         Children.Add(_empty);
-        SetColumnSpan(_empty, 4);
+        SetColumnSpan(_empty, 5);
         new ViewSubscriptions(this, attached: Show)
             .Add(() => _stats.Changed += Show, () => _stats.Changed -= Show);
     }
@@ -72,6 +74,7 @@ public sealed class ResourceMonitorView : Grid
         {
             Rows(_game, []);
             Rows(_modules, []);
+            Rows(_contexts, []);
         }
         if (_stats.Host is { } h)
         {
@@ -133,8 +136,26 @@ public sealed class ResourceMonitorView : Grid
                 ("Engine's part", ResourceStats.Bytes(g.ScriptBytes - Math.Min(modules, g.ScriptBytes))),
             ]);
             Rows(_modules, [.. g.Modules.OrderByDescending(m => m.Bytes).Select(m => (m.Name, ResourceStats.Bytes(m.Bytes)))]);
+            Rows(_contexts, [.. InputContextRows(g)]);
         }
     }
+
+    // The input contexts' pushes, the top first, and gameplay under them (see docs/core/input.md#contexts).
+    internal static IEnumerable<(string Name, string Value)> InputContextRows(Link.Protocol.GameStats g)
+    {
+        foreach (var c in g.InputContexts)
+        {
+            yield return (c.Name, $"{c.Pusher}, {Pads(c.Players)}");
+        }
+        yield return ("gameplay", "every action");
+    }
+
+    // The pads whose stacks a push is on, from a bit each from pad 1's.
+    internal static string Pads(byte players) => players == 0b1111
+        ? "every pad"
+        : (players & (players - 1)) == 0
+            ? $"pad {System.Numerics.BitOperations.TrailingZeroCount(players) + 1}"
+            : "pads " + string.Join(", ", Enumerable.Range(0, 4).Where(i => (players & (1 << i)) != 0).Select(i => i + 1));
 
     // The virtual shadow map's rows, none without one (see docs/rendering/lighting-and-shadows.md#virtual-shadow-maps).
     internal static IEnumerable<(string Name, string Value)> VirtualShadowRows(Link.Protocol.GameStats g)

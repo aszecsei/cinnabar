@@ -314,3 +314,35 @@ World.spawn():add(Clock)
 	scaled_frame(f, 20 * time.Millisecond, 0)
 	expect_reports(t, f, {0, 0.02, 0, 0.01})
 }
+
+// A tap while a context blocks the action, then the pop in the same frame: the next tick gets the tap's edges, and
+// they are not a press.
+@(test)
+a_tap_before_a_pop_does_not_reach_the_next_tick :: proc(t: ^testing.T) {
+	f := setup_world(t)
+	defer teardown_world(f)
+	context.user_ptr = f
+	_, ok := spawn_source(
+		&f.runtime,
+		"=gate",
+		`
+Input.define_action("jump", { "key:Space" })
+Input.define_context("cutscene", {})
+local held = Input.push_context("cutscene")
+local Gate = Behaviour.define("Gate")
+function Gate:fixed_update() Test.report(Input.action_pressed("jump") and 1 or 0) end
+function Gate:update() if held then held:pop(); held = nil end end
+World.spawn():add(Gate)
+`,
+	)
+	testing.expect(t, ok)
+	tap: core.Input
+	tap.pressed = {.Space}
+	tap.released = {.Space}
+	testing.expect_value(t, game_frame(f, NO_TICK, tap), 0)
+	testing.expect_value(t, game_frame(f, 17 * time.Millisecond), 1)
+	expect_reports(t, f, {0})
+	// A tap after that is a press, in the first tick that has it.
+	testing.expect_value(t, game_frame(f, 17 * time.Millisecond, tap), 1)
+	expect_reports(t, f, {1})
+}

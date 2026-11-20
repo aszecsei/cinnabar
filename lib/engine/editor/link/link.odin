@@ -1321,6 +1321,15 @@ Script_Module_Memory :: struct {
 	bytes: u64,
 }
 
+// One push of an input context, for the resource monitor (see docs/core/input.md#contexts).
+Input_Context_Stats :: struct {
+	name:    string,
+	// The pads whose stacks have it, a bit each from pad 1's. The keys read pad 1's stack.
+	players: u8,
+	// Who pushed it: a behaviour's class, "script", or what native code names itself.
+	pusher:  string,
+}
+
 // Game to editor: the world and the scripts.
 Game_Stats :: struct {
 	entities:                   u32,
@@ -1417,6 +1426,8 @@ Game_Stats :: struct {
 	// The bytes that the reflections keep between frames: the probes' cubes and the screen-space or traced
 	// reflections' histories (see render.reflection_memory).
 	reflection_memory:          u64,
+	// The input contexts' pushes, the top first, none while every stack is gameplay alone.
+	input_contexts:             []Input_Context_Stats,
 }
 
 // Gi_Cascade_Stats is a split cascade's table: the probes that rays reached, its slots, and the keys that found no

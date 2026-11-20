@@ -26,6 +26,8 @@ Light_Tag :: enum c.int {
 	Asset,
 	// The key under which a script action's instance table holds its native handle (see actions.odin).
 	Action_Key,
+	// A push of an input context. The payload is its core.Input_Context_Token (see input_actions.odin).
+	Input_Context,
 }
 
 // The most assets that scripts can refer to at once. A GUID keeps its place for the runtime's life.

@@ -148,3 +148,90 @@ Test.report(pcall(Input.define_action, "a name that is far too long", {}) and 1 
 	testing.expect(t, ok)
 	expect_reports(t, f, {1, 1, 1, 1, 1, 1, 1, 0, 0, 0})
 }
+
+@(test)
+scripts_push_and_pop_input_contexts :: proc(t: ^testing.T) {
+	f := setup_world(t)
+	defer teardown_world(f)
+	context.user_ptr = f
+	input: core.Input
+	input.down = {.Space, .Escape}
+	input.pressed = {.Space, .Escape}
+	input.gamepads[1] = {
+		connected = true,
+		down      = {.A},
+		pressed   = {.A},
+	}
+	begin_phase(&f.runtime, 16 * time.Millisecond, input)
+	thread, ok := spawn_source(
+		&f.runtime,
+		"=contexts",
+		`
+Input.define_action("jump", { "key:Space", "pad:A" })
+Input.define_action("skip", { "key:Escape" })
+Input.define_context("cutscene", { "skip" })
+Input.define_context("menu", "all")
+local function report(b) Test.report(b and 1 or 0) end
+local cutscene = Input.push_context("cutscene")
+report(Input.action_down("jump"))
+report(Input.action_down("skip"))
+report(cutscene:is_pushed())
+report(tostring(cutscene) == "InputContext(cutscene)")
+cutscene:pop()
+cutscene:pop()
+report(cutscene:is_pushed())
+report(tostring(cutscene) == "InputContext(popped)")
+-- Allowed again with its key down: down, but not pressed.
+report(Input.action_down("jump"))
+report(Input.action_pressed("jump"))
+-- A push for pad 2 blocks only pad 2.
+local second = Input.push_context("cutscene", 2)
+report(Input.action_down("jump", 2))
+report(Input.action_down("jump"))
+second:pop()
+report(not pcall(Input.define_context, "gameplay", {}))
+report(not pcall(Input.define_context, "broken", { "nope" }))
+report(not pcall(Input.push_context, "nope"))
+report(not pcall(Input.push_context, "cutscene", 5))
+`,
+	)
+	testing.expect(t, ok)
+	end_phase(&f.runtime)
+	expect_reports(t, f, {0, 1, 1, 1, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1})
+	testing.expect_value(t, f.runtime.input_actions.contexts.push_count, 0)
+	release(&f.runtime, thread)
+}
+
+@(test)
+a_destroyed_behaviour_pops_its_input_contexts :: proc(t: ^testing.T) {
+	f := setup_world(t)
+	defer teardown_world(f)
+	context.user_ptr = f
+	thread, ok := spawn_source(
+		&f.runtime,
+		"=cutscene",
+		`
+Input.define_action("jump", { "key:Space" })
+Input.define_context("cutscene", {})
+local Cutscene = Behaviour.define("Cutscene")
+function Cutscene:awake() self.context = Input.push_context("cutscene") end
+local e = World.spawn()
+e:add(Cutscene)
+-- The handle is lost with the behaviour.
+coroutine.yield()
+e:destroy()
+`,
+	)
+	testing.expect(t, ok)
+	contexts := &f.runtime.input_actions.contexts
+	testing.expect_value(t, contexts.push_count, 1)
+	if contexts.push_count == 1 {
+		testing.expect_value(t, core.input_context_pusher(&contexts.pushes[0]), "Cutscene")
+		testing.expect(t, contexts.pushes[0].owner != 0)
+	}
+	begin_phase(&f.runtime, 16 * time.Millisecond, {})
+	testing.expect_value(t, resume(&f.runtime, thread), Resume_Result.Finished)
+	end_phase(&f.runtime)
+	testing.expect_value(t, contexts.push_count, 0)
+	release(&f.runtime, thread)
+}

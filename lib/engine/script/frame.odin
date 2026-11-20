@@ -31,6 +31,7 @@ begin_phase :: proc(r: ^Runtime, dt: time.Duration, input: core.Input) {
 	r.fixed_ran = false
 	world_time := time.duration_seconds(r.world.clock.time) if r.world != nil else 0
 	set_time(r, time.duration_seconds(dt), world_time, false)
+	pop_orphaned_contexts(r)
 	set_input(r, input)
 }
 
@@ -67,6 +68,7 @@ set_time :: proc(r: ^Runtime, delta, world_time: f64, in_fixed: bool) {
 @(private)
 set_input :: proc(r: ^Runtime, input: core.Input) {
 	r.input = input
+	core.input_contexts_settle(&r.input_actions, &r.input)
 	L := r.L
 	luau.getref(L, r.input_table)
 	luau.setreadonly(L, -1, false)
