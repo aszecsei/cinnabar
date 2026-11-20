@@ -19,6 +19,7 @@ import "cinnabar:engine/anim"
 import "cinnabar:engine/asset"
 import "cinnabar:engine/audio"
 import "cinnabar:engine/camera"
+import "cinnabar:engine/cutscene"
 import "cinnabar:engine/ecs"
 import "cinnabar:engine/editor"
 import "cinnabar:engine/nav"
@@ -80,6 +81,8 @@ Game :: struct {
 	audio:              audio.State,
 	// The Animators' queries, which the fixed ticks advance (see docs/content/kinds/skins-and-animations.md#playback).
 	animation:          anim.State,
+	// The kinds of cutscene track and the cutscenes that the ticks evaluate (see docs/cinematics/evaluation.md).
+	cutscenes:          cutscene.State,
 	// The scene's navmeshes and the path requests (see docs/ai/navigation.md).
 	nav:                nav.State,
 	// The agents, their blackboards and their actions (see docs/ai/agents.md).

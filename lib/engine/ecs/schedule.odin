@@ -84,6 +84,9 @@ System_Desc :: struct {
 	// What the system's jobs get as ctx.data, such as an engine package's state in Game_State, which the package's
 	// systems cannot otherwise find, as user is the game's.
 	data:         rawptr,
+	// The system runs alone in its stage: it waits for every system before it, and every system after it waits for it,
+	// whatever their access. For a system that writes components that it cannot name, such as a cutscene's tracks.
+	exclusive:    bool,
 }
 
 // Clock schedules the fixed ticks. Its arithmetic is integer, so it never drifts. The state after tick n is the
@@ -132,6 +135,7 @@ System :: struct {
 	write_count:  int,
 	after:        [MAX_SYSTEM_AFTER]string,
 	after_count:  int,
+	exclusive:    bool,
 }
 
 // register_system adds a system. Systems are registrations: reload clears them, and the game registers them again.
@@ -155,6 +159,7 @@ register_system :: proc(w: ^World, desc: System_Desc) -> bool {
 		batch_chunks = desc.batch_chunks > 0 ? desc.batch_chunks : DEFAULT_BATCH_CHUNKS,
 		after_count  = len(desc.after),
 		data         = desc.data,
+		exclusive    = desc.exclusive,
 	}
 	copy(sys.after[:], desc.after)
 	for term in desc.terms {
@@ -512,7 +517,7 @@ run_batch :: proc(data: rawptr) {
 
 // build_schedule orders each stage and finds what each system waits for. A system runs after the systems that it
 // names in after. Otherwise registration order is kept. A system waits for every earlier system whose access
-// conflicts with its own, and for the systems in its after.
+// conflicts with its own, and for the systems in its after. An exclusive system conflicts with every system.
 @(private = "file")
 build_schedule :: proc(w: ^World) -> bool {
 	s := &w.schedule
@@ -591,6 +596,9 @@ build_schedule :: proc(w: ^World) -> bool {
 
 @(private = "file")
 conflicts :: proc(a, b: ^System) -> bool {
+	if a.exclusive || b.exclusive {
+		return true
+	}
 	a_reads, a_writes := a.reads[:a.read_count], a.writes[:a.write_count]
 	b_reads, b_writes := b.reads[:b.read_count], b.writes[:b.write_count]
 	return(

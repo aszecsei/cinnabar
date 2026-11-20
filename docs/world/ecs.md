@@ -71,6 +71,7 @@ To ask for chunks:
 
 - A system runs after the systems that it names in `after`. Otherwise registration order is kept. A system waits for every earlier system in its stage whose access conflicts with its own. Other systems run at the same time. A cycle of `after` names is an error, and the schedule then does not run.
 - Access is the read and write terms of the system's query, and the extra `reads` and `writes` that it declares. A resource in `Game_State` is named with `component_id`, like a component.
+- An **exclusive** system (`System_Desc.exclusive`) runs alone in its stage. It waits for every system before it, and every system after it waits for it, whatever their access. Use it for a system that writes components that it cannot name before it runs, such as the cutscenes' tracks ([Cinematics: Evaluation](../cinematics/evaluation.md#the-order-in-the-frame)).
 - A system's jobs get the `Game_State` as `ctx.user` and the system's `data` as `ctx.data`. An engine package's system finds the package's state in `Game_State` by `data`, as `anim`'s `animate` does.
 - A system divides its chunks into batches (4 chunks by default) and starts one job per batch. A system without terms runs as one job.
 - Each system gets a driver job. The driver waits for the systems before it, then starts the batches. All drivers start in run order, so a driver can wait for the counter of an earlier driver at once.

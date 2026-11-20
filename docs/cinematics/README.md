@@ -1,25 +1,26 @@
 # Cinematics
 
-Cutscenes at run time, in `lib/engine/cutscene`. A cutscene asset holds bindings and tracks on one time axis (see [Content: Cutscenes](../content/kinds/cutscenes.md)). This layer describes how the game plays a cutscene: the entities that it acts on and, in later parts, its player, its evaluation and its tracks. Read [World: Scenes](../world/scenes.md) and [Editor: Prefabs](../editor/prefabs.md) first.
+Cutscenes at run time, in `lib/engine/cutscene`. A cutscene asset holds bindings and tracks on one time axis (see [Content: Cutscenes](../content/kinds/cutscenes.md)). This layer describes how the game plays a cutscene: the entities that it acts on, how its tracks evaluate at a time, and, in later parts, its player and its tracks. Read [World: Scenes](../world/scenes.md) and [Editor: Prefabs](../editor/prefabs.md) first.
 
 ## Documents
 
 | Document | What it covers |
 |---|---|
 | [Bindings](bindings.md) | Possessed and spawned bindings, how they resolve, overrides, the policy for a missing binding, and what happens when a bound entity goes. |
+| [Evaluation](evaluation.md) | The clock, the order in the frame, the kinds of track, sections and blending, events, the restore snapshot and hot reload. |
 
 ## Overview
 
 | Package | Side | Responsibility |
 |---|---|---|
-| `lib/engine/cutscene` | Game | The bindings of a cutscene: how they resolve, their states, and how spawned entities are shown and released. |
+| `lib/engine/cutscene` | Game | The bindings of a cutscene: how they resolve, their states, and how spawned entities are shown and released. The evaluation of its tracks at a time: the clock, the two systems, blending and the restore snapshot. |
 
 The data flow:
 1. A player resolves a cutscene's bindings before the cutscene plays. A possessed binding finds an entity of a loaded scene. A spawned binding spawns a prefab, which stays hidden until the cutscene plays.
-2. At each evaluation, tracks ask for a binding's entity. They get it only while it is alive.
-3. When the cutscene ends, the spawned entities are despawned.
+2. Each tick, the cutscene's time advances on its clock, and its tracks evaluate at the time. Tracks ask for a binding's entity, and get it only while it is alive. Before a track first writes a field, the snapshot saves the field ([Evaluation](evaluation.md)).
+3. When the cutscene ends, the tracks set to restore put their fields back, and the spawned entities are despawned.
 
-**Not built yet:** the player and its lifecycle, evaluation, the tracks, skipping, the scripts' `Cutscene` library and the cutscene editor. Each one is a sub-issue of [#526](https://github.com/aszecsei/cinnabar/issues/526).
+**Not built yet:** the player and its lifecycle, the tracks of each kind, skipping, the scripts' `Cutscene` library and the cutscene editor. Each one is a sub-issue of [#526](https://github.com/aszecsei/cinnabar/issues/526).
 
 ## References
 

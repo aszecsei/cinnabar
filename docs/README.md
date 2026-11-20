@@ -20,7 +20,7 @@ Read the layers in this order the first time. Each one assumes the ones before i
 | 10 | [UI](ui/README.md) | `lib/engine/ui` | Menus and HUDs: documents on entities, the cascade of styles, layout and the UI scale, MSDF text, the one batch, focus and gamepad navigation, and the `Ui` library. |
 | 11 | [Content pipeline](content/README.md) | `tools/cook`, `lib/engine/asset` | Identity and cooking, each asset kind, the cook daemon and its operations, blobs and loading. |
 | 12 | [AI](ai/README.md) | `lib/engine/ai`, `lib/engine/ai/behavior_tree`, `lib/engine/ai/utility`, `lib/engine/ai/goap`, `lib/engine/ai/goap/search`, `lib/engine/ai/htn`, `lib/engine/nav`, `lib/engine/random` | Agents: blackboards, decisions run on jobs within a budget, behavior trees, utility scores, GOAP and HTN plans, native and script actions, and sight and hearing that fill the blackboard. Navigation: a scene's navmeshes loaded with it, queries for points and paths on them, path requests solved on jobs within a budget, and crowds that follow their paths and avoid each other. |
-| 13 | [Cinematics](cinematics/README.md) | `lib/engine/cutscene` | Cutscenes at run time: the bindings that a cutscene possesses or spawns, and, as they are built, its player, its evaluation and its tracks. |
+| 13 | [Cinematics](cinematics/README.md) | `lib/engine/cutscene` | Cutscenes at run time: the bindings that a cutscene possesses or spawns, the evaluation of its tracks at a time, and, as they are built, its player and its tracks. |
 | 14 | [Editor](editor/README.md) | `src/editor`, `lib/engine/editor` | Processes and projects, the document model and scenes, the editor link, the viewport, the shell and panels, and the material editor. |
 
 [History](history.md) keeps the implementation phases of each layer, in the order they were built.
@@ -35,7 +35,7 @@ Not everyone needs every layer.
 | Making agents find their way | [Content: Navmeshes](content/kinds/nav-meshes.md), [AI: Navigation](ai/navigation.md) |
 | Making agents decide and act | [Content: Blackboards](content/kinds/blackboards.md), [Content: Decisions](content/kinds/decisions.md), [AI: Agents](ai/agents.md), [Editor: Decision editor](editor/decision-editor.md) |
 | Making agents see and hear | [Content: Perceptions](content/kinds/perceptions.md), [AI: Perception](ai/perception.md) |
-| Making a cutscene | [Content: Cutscenes](content/kinds/cutscenes.md), [Cinematics: Bindings](cinematics/bindings.md) |
+| Making a cutscene | [Content: Cutscenes](content/kinds/cutscenes.md), [Cinematics: Bindings](cinematics/bindings.md), [Cinematics: Evaluation](cinematics/evaluation.md) |
 | Making menus and HUDs | [Content: UI documents](content/kinds/ui-documents.md), [Content: Fonts](content/kinds/fonts.md), [UI: Design](ui/design.md) |
 | Making content: materials, textures, meshes, scenes | [Content: kinds](content/README.md#documents), [Rendering: Materials](rendering/materials.md), [Editor: Material editor](editor/material-editor.md), [Editor: Shell and panels](editor/shell-and-panels.md) |
 | Writing native game code | Everything in order; [Overview: Conventions](overview/conventions.md) and [Hot reload](overview/hot-reload.md) first |

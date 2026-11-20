@@ -159,7 +159,8 @@ Cutscene_Track :: struct {
 }
 #assert(size_of(Cutscene_Track) == 40)
 
-// Cutscene_Section is a span of a track, in ticks on the cutscene's time, with its eases, its weight, the asset that
+// Cutscene_Section is a span of a track, in ticks on the cutscene's time, with its eases, its weight, its pre-roll and
+// post-roll (the ticks before its start and after its end that it holds its first and last values for), the asset that
 // its track's kind names (zero for a kind that names none), and its channels.
 Cutscene_Section :: struct {
 	id:            u32,
@@ -168,11 +169,13 @@ Cutscene_Section :: struct {
 	ease_in:       i32,
 	ease_out:      i32,
 	weight:        f32,
+	pre_roll:      i32,
+	post_roll:     i32,
 	asset:         Guid,
 	first_channel: u32,
 	channel_count: u32,
 }
-#assert(size_of(Cutscene_Section) == 48)
+#assert(size_of(Cutscene_Section) == 56)
 
 // Cutscene_Channel is a named curve of a section, whose meaning its track's kind gives.
 Cutscene_Channel :: struct {
@@ -322,6 +325,8 @@ cutscene_view :: proc(data: []byte) -> (blob: ^Cutscene_Blob, ok: bool) {
 			   s.ease_in < 0 ||
 			   s.ease_out < 0 ||
 			   i64(s.ease_in) + i64(s.ease_out) > i64(s.end) - i64(s.start) ||
+			   s.pre_roll < 0 ||
+			   s.post_roll < 0 ||
 			   !(s.weight >= 0 && s.weight <= 1) ||
 			   (s.asset != {}) != wants_asset {
 				return nil, false
@@ -458,14 +463,16 @@ Cutscene_Channel_Contents :: struct {
 }
 
 Cutscene_Section_Contents :: struct {
-	id:       u32,
-	start:    i32,
-	end:      i32,
-	ease_in:  i32,
-	ease_out: i32,
-	weight:   f32,
-	asset:    Guid,
-	channels: []Cutscene_Channel_Contents,
+	id:        u32,
+	start:     i32,
+	end:       i32,
+	ease_in:   i32,
+	ease_out:  i32,
+	weight:    f32,
+	pre_roll:  i32,
+	post_roll: i32,
+	asset:     Guid,
+	channels:  []Cutscene_Channel_Contents,
 }
 
 // Cutscene_Track_Contents is a track as cutscene_write takes it. binding is a binding's index or CUTSCENE_NONE.
@@ -571,6 +578,8 @@ cutscene_write :: proc(contents: Cutscene_Contents, allocator := context.allocat
 				ease_in       = s.ease_in,
 				ease_out      = s.ease_out,
 				weight        = s.weight,
+				pre_roll      = s.pre_roll,
+				post_roll     = s.post_roll,
 				asset         = s.asset,
 				first_channel = u32(channel_index),
 				channel_count = u32(len(s.channels)),

@@ -1,0 +1,155 @@
+# Evaluation
+
+A cutscene's world is a function of its time. `evaluate` at a time *t* gives the same world for the same *t*, whatever came before. Play, seek, scrub, skip and render-out therefore use one path. Only events depend on the time before: they fire for the range `(last, now]`.
+
+This document describes `lib/engine/cutscene/evaluation.odin`: the clock, the order in the frame, how sections blend, events, the restore snapshot and hot reload. The tracks of each kind are separate parts of [#526](https://github.com/aszecsei/cinnabar/issues/526). Read [Bindings](bindings.md), [World: Time](../world/time.md#fixed-and-variable-rate) and [World: ECS: Systems](../world/ecs.md#systems) first.
+
+**In this document:** [The evaluation](#the-evaluation) · [The clock](#the-clock) · [The order in the frame](#the-order-in-the-frame) · [Kinds of track](#kinds-of-track) · [Sections and blending](#sections-and-blending) · [Events](#events) · [The restore snapshot](#the-restore-snapshot) · [Hot reload](#hot-reload) · [Determinism](#determinism) · [Procedures](#procedures)
+
+## The evaluation
+
+An `Evaluation` is what one cutscene needs to be evaluated:
+- its blob, as an asset handle;
+- its [bindings](bindings.md);
+- its time in ticks, from the range's start to the range's end;
+- the time of each phase's last evaluation;
+- the [snapshot](#the-restore-snapshot) of the fields that its tracks wrote.
+
+It holds no procedures, `typeid`s or string literals, so it survives a code reload. `init_evaluation` starts it at the range's start, and `destroy_evaluation` frees it.
+
+`State`, in `Game.cutscenes`, holds the kinds of track and the list of evaluations that the systems advance. `add_evaluation` puts an evaluation on the list, and `remove_evaluation` takes it off. The owner of an evaluation adds it while the cutscene plays. The player (#535) will own the evaluations, and keep the time in its `Playing` and `Paused` states.
+
+## The clock
+
+The blob's `clock` says which time the cutscene follows:
+
+| Clock | Advances by | Pause and time scale |
+|---|---|---|
+| `game` (the default) | Each fixed tick's exact length, in the `cutscene fixed` system | The game's pause stops it. `Game.set_time_scale` scales it. Both act through the world's ticks. |
+| `real` | The frame's real duration, in frame code before the ticks (`advance_real`) | Neither changes it. It plays on while the game is paused. |
+
+- **No drift.** `advance` converts a duration to ticks with integer arithmetic. It keeps the part of a tick that is left over in `carry`, in nanoseconds × 60000, and adds it to the next duration. So 1000 steps of 7 ms are exactly 420000 ticks, and 8640 ticks at 144 Hz are exactly 60 s.
+- **The game's clock moves by whole world ticks.** A frame that runs no tick does not move it, so it can be up to one world tick behind the frames.
+- **The end.** The time stops at the range's end. The player decides what happens then.
+- **Seeks.** `seek` sets the time, inside the range, for a debugger, a scrub or the editor. It sets each phase's last time to the new time, so no event that it jumps over fires.
+- **The editor's Edit mode** runs no ticks and no frame code for the world, so nothing advances a cutscene there. The editor will scrub through `seek` and its own overrides ([#548](https://github.com/aszecsei/cinnabar/issues/548)).
+
+## The order in the frame
+
+Each kind of track has a **phase**:
+
+| Phase | Where | For |
+|---|---|---|
+| `Fixed` | The `cutscene fixed` system, the first `Fixed` system of each tick. On the real clock, also `advance_real`, before the ticks. | Transforms, poses and property writes |
+| `Late` | The `cutscene late` system, the first `Late` system, after the script phase | Cameras and presentation |
+
+- **Same tick.** The `Fixed` phase writes before the animator, physics and the tick's propagation read. The animator, physics and propagation therefore see the cutscene's values in the same tick, and nothing lags by a frame.
+- **Interpolation.** The tick's `Previous_Transform` copy runs before the systems. So presentation interpolates from the last tick's pose to the cutscene's pose, as for any entity that moves in `Fixed`.
+- **Late phase.** The `Late` phase runs after scripts and before `camera.advance`, so the frame shows what it wrote.
+- **Exclusive.** Both systems are **exclusive** ([World: ECS: Systems](../world/ecs.md#systems)). A property track can write any component, so the systems cannot name their writes before they run. An exclusive system waits for every system before it, and every later system waits for it. `register` is the first registration in `register_world`, so in each stage the cutscene runs first and alone.
+- **Real clock.** `advance_real` runs in `game_update` before the ticks, and only while the world runs. Its `Fixed` writes are therefore in place before the first tick. The game's pause does not stop them.
+- **Real clock in a pause.** While the game is paused, no tick runs. So `Previous_Transform` is not copied, and the clock's `alpha` does not change. Presentation then shows only a part of a move that a real-clock track writes to `Transform`. A kind that moves an interpolated entity on the real clock must therefore teleport it (`ecs.teleport`). This is a rule for the transform track ([#539](https://github.com/aszecsei/cinnabar/issues/539)).
+
+[Architecture: Frame](../overview/architecture.md#frame) has the whole frame.
+
+## Kinds of track
+
+`register_kind(state, kind, Track_Kind{phase, evaluate, data})` sets what a kind of track does.
+- `register` clears the kinds, because their procedures are in the DLL image. Call `register_kind` after `register`, in `register_world`, so a code reload makes the kinds again.
+- A kind without a procedure does nothing. A muted track does nothing.
+
+`evaluate` evaluates the tracks of one phase in the blob's order. For each track, it calls its kind's procedure with a `Track_Context`, which holds:
+- the world, the evaluation, the blob and the track;
+- the time;
+- the event range;
+- the kind's `data`.
+
+A kind:
+- gets its binding's entity with `track_entity`;
+- samples its sections with `section_at` and blends them with `Blend`;
+- reads a field's own value with `base`;
+- writes the world **only** with `write` or `write_field`;
+- tests a key against the event range with `fires`.
+
+## Sections and blending
+
+`section_at(blob, section, t)` gives a section's local time (from its start) and its weight at *t*. It gives false when the section does not cover *t*.
+
+- **Span.** A section covers `[start, end)`. A section whose span ends at the range's end also covers the end, so the last evaluation of a cutscene sees it.
+- **Pre-roll and post-roll.** `pre_roll` and `post_roll` widen the span by their ticks. In the pre-roll, the section holds its value and weight at its start. In the post-roll, it holds them at its end.
+- **Weight.** The weight is `weight × ease_in × ease_out`. The ease in rises over the first `ease_in` ticks, and the ease out falls over the last `ease_out` ticks.
+- **The ease's shape** is smoothstep, 3x² − 2x³. It has no slope at either end, so a take-over and a give-back start and stop smoothly. Two sections that cross with equal eases have weights that sum to 1.
+
+A track blends its sections with `Blend`: `blend_add(&b, value, weight)` for each section that covers *t*, then `blend_value(b, base)`:
+
+| Sum of weights *W* | Value |
+|---|---|
+| *W* ≥ 1 | The weighted mean of the sections' values |
+| *W* < 1 | `base × (1 − W)` + the weighted sum |
+
+**The base** is the field's own value: its value before the cutscene first wrote it, from the snapshot, or its current value if no track has written it. It is never the value that the track wrote last. So the value at *t* does not depend on what came before *t*, and a cutscene takes a field over and gives it back as its weights rise and fall. When no section covers *t*, the track writes the base, so the field is its own value again.
+
+## Events
+
+Each phase keeps the time of its last evaluation. An evaluation's event range is `(last, now]`, and `fires(ctx, t)` is whether an event at *t* is in it.
+
+- **The first evaluation** of a phase starts its range just before the range's start, so an event at the range's start fires.
+- **Several ticks in a frame.** The `Fixed` phase evaluates once per tick, and the `Late` phase once per frame. The `Late` phase's range covers every tick since its last evaluation, so it loses no event.
+- **Seeks.** A seek, a scrub or a reload moves the last time to the new time, so the events that it jumps over do not fire. The events that a skip fires are [#538](https://github.com/aszecsei/cinnabar/issues/538)'s.
+- **Backwards.** A time before the last time gives an empty range.
+
+## The restore snapshot
+
+`write_field(ctx, field, bytes)` and its typed form `write(ctx, entity, component, offset, value)` are the only way that a track writes. A `Field` is an entity, a component ID, and an offset and a size in the component, of at most `MAX_FIELD_SIZE` (64) bytes.
+
+1. **Save.** Before the first write of a field by any track, the snapshot saves the field's bytes. It saves only the fields that tracks write, once each.
+2. **Writers.** The snapshot also keeps each track, by its ID, that wrote the field.
+3. **Write.** The write marks the component changed (`ecs.mark_changed`), so change versions and queries see it.
+
+**Restore.** `restore` ends what the tracks did to the world:
+- A field that a track set to `restore` wrote goes back to its saved value.
+- A field that only tracks set to `keep` wrote stays as the cutscene left it.
+- A field whose entity is gone, or no longer has the component, is skipped.
+- The fields go back in the reverse of the order in which they were saved. Where a track wrote a whole field and another wrote a part of it, the value from before the first write is what stays.
+
+The snapshot is then empty. The player calls `restore` in `Restored` (#535).
+
+A write fails, and saves nothing, when the entity is not alive, has no such component, or the field is outside the component.
+
+## Hot reload
+
+A blob with a new key is a hot reload. The next `evaluate`, `seek` or `restore` notices it and:
+1. Takes each removed track, by its ID, off the writers of its fields.
+2. Restores each field that no remaining track wrote, and removes it from the snapshot. A track that the reload removes therefore restores its fields.
+3. Keeps the time, clamped into the new range, and sets each phase's last time to it, so the reload fires no events.
+4. Evaluates the new blob at the time.
+
+The bindings stay as they resolved. A reload that adds, removes or moves bindings needs the player to resolve them again (#535).
+
+## Determinism
+
+The same *t* gives the same values on one job or many:
+- Each evaluation runs in one job of an exclusive system.
+- The evaluations run in the order that they were added.
+- Each evaluation's tracks run in the blob's order.
+
+A test compares a play with one job and with eight workers.
+
+## Procedures
+
+| Procedure | What it does |
+|---|---|
+| `init(state, world, assets)`, `register(state, world)`, `destroy(state)` | Set up the state, register the two systems and clear the kinds, and free the list |
+| `register_kind(state, kind, desc)` | Sets a kind's phase and evaluate procedure |
+| `add_evaluation(state, e)`, `remove_evaluation(state, e)` | Put an evaluation on the systems' list, or take it off |
+| `init_evaluation(e, world, handle, data, blob)`, `destroy_evaluation(state, e, world)` | Start an evaluation at the range's start. Take it off the list, destroy its bindings and free its snapshot, without restoring. |
+| `advance(e, blob, dt)` | Moves the time by a duration, without drift, up to the range's end |
+| `seek(e, world, data, blob, t)` | Sets the time, so no event between fires |
+| `evaluate(state, e, world, data, blob, phase)` | Evaluates one phase's tracks at the time, and follows a reload |
+| `advance_real(state, world, dt)` | Advances the real-clock cutscenes and evaluates their `Fixed` tracks |
+| `restore(e, world, data, blob)` | Puts back the fields of `restore` tracks, and empties the snapshot |
+| `section_at(blob, section, t)`, `ease(x)` | A section's local time and weight at a time, and the ease's shape |
+| `blend_add`, `blend_value` | Blend sections' values over the base |
+| `track_entity(ctx)`, `fires(ctx, t)` | A track's bound entity, and whether an event fires |
+| `write`, `write_field`, `base`, `field_base` | Write a field through the snapshot, and read its own value |
+

@@ -17,6 +17,7 @@ import "cinnabar:engine/anim"
 import "cinnabar:engine/asset"
 import "cinnabar:engine/audio"
 import "cinnabar:engine/camera"
+import "cinnabar:engine/cutscene"
 import "cinnabar:engine/ecs"
 import "cinnabar:engine/editor"
 import "cinnabar:engine/nav"
@@ -66,6 +67,7 @@ game_init :: proc(
 	audio.init(&g.audio, platform, &g.assets)
 	nav.init(&g.nav, platform, &g.assets, &g.physics)
 	ai.init(&g.ai, platform, &g.assets, &g.scripts, &g.physics)
+	cutscene.init(&g.cutscenes, &g.world, &g.assets)
 	register_world(g, h)
 	asset.init(&g.assets, platform, asset.content_source(platform.content_dir))
 	render.renderer_init(&g.renderer, platform, &g.assets, &g.world)
@@ -113,6 +115,9 @@ load_main_scene :: proc(g: ^Game) {
 register_world :: proc(g: ^Game, h: Hooks) {
 	w := &g.world
 	register_components(&w.registry, h)
+	// The cutscenes' systems come first in their stages, and run alone: their tracks write any component, so every
+	// other system of the tick, the animator's and physics' among them, sees what they wrote.
+	cutscene.register(&g.cutscenes, w)
 	physics.register(&g.physics, w)
 	anim.register(&g.animation, w, &g.assets)
 	sprite.register(&g.sprites, w, &g.assets)
@@ -169,6 +174,9 @@ game_update :: proc(g: ^Game, dt: time.Duration, h: Hooks) -> (keep_running: boo
 		g.elapsed += step
 		g.frame_step = f32(time.duration_seconds(step))
 		input := g.platform.input()
+		// The cutscenes on the real clock move by the frame's real time, which the pause and the time scale do not change,
+		// and write their Fixed tracks before the ticks (see docs/cinematics/evaluation.md#the-clock).
+		cutscene.advance_real(&g.cutscenes, &g.world, dt)
 		// Each fixed tick runs the Fixed systems, the scripts' fixed step, the physics tick and the tick's events (see
 		// docs/physics/design.md#scripts-in-fixed-ticks).
 		ticks := ecs.begin_ticks(&g.world, step)
@@ -421,6 +429,7 @@ game_shutdown :: proc(g: ^Game, h: Hooks) {
 	audio.destroy(&g.audio)
 	physics.destroy(&g.physics)
 	anim.destroy(&g.animation)
+	cutscene.destroy(&g.cutscenes)
 	ecs.destroy(&g.world)
 	log.info("game: shutdown")
 }

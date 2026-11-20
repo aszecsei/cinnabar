@@ -61,6 +61,8 @@ track 1 transform "Fox walk"
 	section 1 0 600000
 		ease_in = 6000
 		ease_out = 3000
+		pre_roll = 1500
+		post_roll = 2500
 		channel position_x
 			key 0 0 linear
 			key 300000 2 cubic 0.5 -0.25
@@ -136,6 +138,8 @@ cutscenes_parse_their_header_bindings_tracks_sections_and_keys :: proc(t: ^testi
 	section := walk.sections[0]
 	testing.expect_value(t, section.ease_in, 6000)
 	testing.expect_value(t, section.ease_out, 3000)
+	testing.expect_value(t, section.pre_roll, 1500)
+	testing.expect_value(t, section.post_roll, 2500)
 	testing.expect_value(t, section.weight, 1)
 	testing.expect_value(t, len(section.channels), 2)
 	keys := section.channels[0].keys
@@ -357,6 +361,11 @@ each_mistake_in_a_cutscene_is_reported_at_its_line :: proc(t: ^testing.T) {
 			"cutscene 1\nlength = 10\ntrack 1 event \"A\"\n\tsection 1 0 10\n\t\tease_in = -1\n",
 			5,
 			"ease_in is a whole number",
+		},
+		{
+			"cutscene 1\nlength = 10\ntrack 1 event \"A\"\n\tsection 1 0 10\n\t\tpost_roll = 1.5\n",
+			5,
+			"post_roll is a whole number",
 		},
 		{
 			"cutscene 1\nlength = 10\ntrack 1 event \"A\"\n\tsection 1 0 10\n\t\tweight = 2\n",

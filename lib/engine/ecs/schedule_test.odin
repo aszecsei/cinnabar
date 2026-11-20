@@ -136,6 +136,37 @@ after_orders_systems_and_commands_apply :: proc(t: ^testing.T) {
 	testing.expect_value(t, query_entity_count(w, q), 1)
 }
 
+// An exclusive system waits for every system before it, and every system after it waits for it, though none of them
+// shares an access with it. Two systems without a conflict between them still run together.
+@(test)
+an_exclusive_system_runs_alone_in_its_stage :: proc(t: ^testing.T) {
+	sync.guard(&scheduler_lock)
+	testing.expect(t, jobs.init())
+	defer jobs.shutdown()
+	f := setup(t)
+	defer teardown(f)
+	w := &f.world
+
+	r: Resources
+	health := registry_find_type(&w.registry, Health).id
+	velocity := registry_find_type(&w.registry, Velocity).id
+	register_system(w, {name = "first", stage = .Late, procedure = first, writes = {health}})
+	register_system(w, {name = "alone", stage = .Late, procedure = second, exclusive = true})
+	register_system(w, {name = "after", stage = .Late, procedure = first, writes = {velocity}})
+	register_system(w, {name = "beside", stage = .Late, procedure = first, reads = {velocity}})
+	run_stage(w, .Late, time.Millisecond, &r)
+
+	waits :: proc(w: ^World, system, on: int) -> bool {
+		return w.schedule.waits[system][on / 64] & (1 << uint(on % 64)) != 0
+	}
+	testing.expect(t, waits(w, 1, 0), "the exclusive system waits for the one before it")
+	testing.expect(t, waits(w, 2, 1), "the one after it waits for the exclusive system")
+	testing.expect(t, waits(w, 3, 1), "so does every later one")
+	testing.expect(t, !waits(w, 2, 0), "the systems around it keep their own conflicts")
+	testing.expect_value(t, r.count, 4)
+	testing.expect_value(t, r.log[1], "second")
+}
+
 @(private = "file")
 count_tick :: proc(ctx: ^System_Context) {
 	r := (^Resources)(ctx.user)
