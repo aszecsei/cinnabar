@@ -121,3 +121,45 @@ a_focus_entity_sets_the_focus_by_its_distance_along_the_axis :: proc(t: ^testing
 	view, _ = camera_view(w, e)
 	testing.expect_value(t, view.lens.focus_distance, 7)
 }
+
+// The circle of confusion is 0 on the focus plane, grows with the distance from it, negative in front and positive
+// behind, toward the lens's opening at infinity, and grows with the opening and the focal length.
+@(test)
+the_circle_of_confusion_grows_with_the_distance_from_the_focus :: proc(t: ^testing.T) {
+	view := perspective_view(1, 2 * math.atan(f32(24) / (2 * 50)), 0.05)
+	view.lens = {sensor_height = 24, aperture = 2, focus_distance = 5}
+	lens, ok := dof_lens(view, 1080, 1)
+	testing.expect(t, ok)
+	testing.expect_value(t, circle_of_confusion(lens, 5), 0)
+	near_1, near_2 := circle_of_confusion(lens, 4), circle_of_confusion(lens, 2)
+	far_1, far_2 := circle_of_confusion(lens, 7), circle_of_confusion(lens, 50)
+	testing.expect(t, near_2 < near_1 && near_1 < 0)
+	testing.expect(t, far_2 > far_1 && far_1 > 0)
+	// At infinity the circle is the opening's image on the sensor: A × f / (s - f) of 24 mm, over 1080 pixels.
+	f := f32(0.05)
+	want := f / 2 * f / (5 - f) / 0.024 * 1080
+	testing.expect(t, abs(circle_of_confusion(lens, 1e9) - want) < 1e-2)
+
+	// A wider opening and a scale blur more.
+	view.lens.aperture = 1
+	wide, _ := dof_lens(view, 1080, 1)
+	testing.expect(t, abs(circle_of_confusion(wide, 50) - 2 * far_2) < 1e-3)
+	scaled, _ := dof_lens(view, 1080, 0.5)
+	testing.expect(t, abs(circle_of_confusion(scaled, 50) - far_2) < 1e-3)
+
+	// A focus at the lens, or behind the camera, stays in front of the lens, so the circle stays finite.
+	for focus in ([]f32{0.05, -3}) {
+		view.lens.focus_distance = focus
+		clamped, _ := dof_lens(view, 1080, 1)
+		testing.expect(t, clamped.focus >= 2 * f)
+		c := circle_of_confusion(clamped, 10)
+		testing.expectf(t, c > 0 && c < 1e6, "focus %v gives %v", focus, c)
+	}
+
+	// No aperture, or an orthographic view, has none.
+	view.lens.aperture = 0
+	_, ok = dof_lens(view, 1080, 1)
+	testing.expect(t, !ok)
+	_, ok = dof_lens(orthographic_view(1, 10, 0.1, 100), 1080, 1)
+	testing.expect(t, !ok)
+}

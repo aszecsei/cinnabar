@@ -17,6 +17,7 @@ BLOOM_SHADER :: #load("../content/shaders/bloom.hlsl.meta", string)
 HISTOGRAM_SHADER :: #load("../content/shaders/exposure_histogram.hlsl.meta", string)
 EXPOSURE_SHADER :: #load("../content/shaders/exposure_adapt.hlsl.meta", string)
 TONE_LUT_SHADER :: #load("../content/shaders/tone_lut.hlsl.meta", string)
+// The depth of field's is DOF_SHADER (see depth_of_field.odin).
 
 // The thread groups of the passes over pixels, and of the histogram.
 POST_GROUP_SIZE :: 8
@@ -142,6 +143,7 @@ Post :: struct {
 	histogram:      Shader_Pipeline,
 	adapt:          Shader_Pipeline,
 	tone_lut:       Shader_Pipeline,
+	dof:            Shader_Pipeline,
 	spatial:        Spatial_Aa,
 	upscalers:      Upscalers,
 	// Bilinear and clamped: the history, bloom's chain and the lookup table read with it.
@@ -193,6 +195,8 @@ Lut_Bake :: struct {
 @(private)
 Post_Frame :: struct {
 	settings:         Post_Settings,
+	// The depth of field, or nil (see begin_dof).
+	dof:              ^Dof_Frame,
 	temporal:         bool,
 	// The upscaler that upscales in temporal AA's place, or nil, and whether its history starts again, with the
 	// motion and the transparent surfaces' mask that it reads, the mask zero without them, and its result.
@@ -365,6 +369,7 @@ post_init :: proc(p: ^Post, platform: ^core.Platform_API) {
 	p.histogram = shader_pipeline(HISTOGRAM_SHADER)
 	p.adapt = shader_pipeline(EXPOSURE_SHADER)
 	p.tone_lut = shader_pipeline(TONE_LUT_SHADER)
+	p.dof = shader_pipeline(DOF_SHADER)
 	p.sampler = platform.gpu_create_sampler(
 		{filter = .Linear, mip_filter = .Linear, address = .Clamp, label = "post sampler"},
 	)
@@ -409,7 +414,7 @@ post_state_destroy :: proc(s: ^Post_State, platform: ^core.Platform_API) {
 }
 
 post_destroy :: proc(p: ^Post, platform: ^core.Platform_API) {
-	for pipeline in ([]^Shader_Pipeline{&p.temporal_aa, &p.bloom, &p.histogram, &p.adapt, &p.tone_lut}) {
+	for pipeline in ([]^Shader_Pipeline{&p.temporal_aa, &p.bloom, &p.histogram, &p.adapt, &p.tone_lut, &p.dof}) {
 		destroy_shader_pipeline(pipeline, platform)
 	}
 	platform.gpu_destroy_sampler(p.sampler)
@@ -431,6 +436,7 @@ sync_post_pipelines :: proc(r: ^Renderer, force: bool) {
 	sync_compute_pipeline(&p.histogram, r.platform, assets, {label = "exposure histogram"}, force)
 	sync_compute_pipeline(&p.adapt, r.platform, assets, {label = "exposure"}, force)
 	sync_compute_pipeline(&p.tone_lut, r.platform, assets, {label = "tone mapping lut"}, force)
+	sync_compute_pipeline(&p.dof, r.platform, assets, {label = "depth of field"}, force)
 	sync_spatial_aa_pipelines(r, force)
 	sync_upscaler_pipelines(r, force)
 }
@@ -513,6 +519,7 @@ begin_post :: proc(f: ^Frame, settings: Post_Settings) {
 	u := &s.upscaler
 	pf.upscale_reset = !u.active || u.render_size != f.size
 	u.active, u.render_size = pf.upscaler != {}, f.size
+	pf.dof = begin_dof(f, settings)
 	pf.exposure = pipeline_ready(platform, &p.adapt)
 	pf.exposure_auto =
 		pf.exposure && settings.exposure_mode == .Auto && pipeline_ready(platform, &p.histogram)
@@ -550,7 +557,7 @@ commit_post :: proc(data: rawptr) {
 	}
 }
 
-// add_post_passes adds the post passes after the world and the before_post hook: temporal AA, whose history becomes
+// add_post_passes adds the post passes after the world and the before_post hook: the depth of field, temporal AA, whose history becomes
 // Frame.scene, at the frame's size if the scene is smaller, the exposure for the next frame, bloom into Frame.bloom, the lookup table's bake when the settings or
 // its shader changed, and FXAA or SMAA into Frame.display.
 @(private)
@@ -564,6 +571,7 @@ add_post_passes :: proc(f: ^Frame) {
 	on_executed(g, commit_post, f)
 
 	add_post_effects(f, .Before_Temporal_Aa)
+	add_dof_passes(f)
 	if pf.temporal {
 		pf.history = history_texture(
 			g,
@@ -846,5 +854,5 @@ run_tone_lut :: proc(ctx: ^Pass_Context) {
 // reads_depth is whether a post pass reads the scene's depth after the world pass.
 @(private)
 reads_depth :: proc(f: ^Frame) -> bool {
-	return f.post.temporal || f.post.upscaler != {} || f.post.exposure_auto
+	return f.post.temporal || f.post.upscaler != {} || f.post.exposure_auto || f.post.dof != nil
 }
