@@ -22,13 +22,23 @@ Suspend_Set :: bit_set[Suspend;u8]
 // before it acts on the entity again. suspend and resume are its only writers, and the entity loses it when every count
 // is 0. Nothing saves it, and a scene's text cannot name it.
 Suspended :: struct {
-	counts: [Suspend]u16 `editor:"-" script:"-"`,
+	counts:        [Suspend]u16 `editor:"-" script:"-"`,
+	// A holder of Physics asked that a dynamic body keep its velocity when it is resumed. It holds until no holder
+	// suspends Physics, so the answer does not depend on which holder resumes last.
+	keep_velocity: bool `editor:"-" script:"-"`,
 }
 
 // suspend counts one more holder of each system in a set on an entity, and gives the systems that it suspended: those
 // that no holder suspended before. The script runtime learns of suspended behaviours from the log, and its next drain
-// runs their on_disable.
-suspend :: proc(w: ^World, e: Entity, systems: Suspend_Set) -> (started: Suspend_Set) {
+// runs their on_disable. A holder of Physics with keep_velocity asks that the body keep its velocity when resumed.
+suspend :: proc(
+	w: ^World,
+	e: Entity,
+	systems: Suspend_Set,
+	keep_velocity := false,
+) -> (
+	started: Suspend_Set,
+) {
 	if systems == {} || !is_alive(w, e) {
 		return
 	}
@@ -45,6 +55,9 @@ suspend :: proc(w: ^World, e: Entity, systems: Suspend_Set) -> (started: Suspend
 		}
 		s.counts[system] += 1
 	}
+	if .Physics in systems && keep_velocity {
+		s.keep_velocity = true
+	}
 	if .Behaviours in started && w.log_activity {
 		log_append(w, {entity = e, kind = .Suspended})
 	}
@@ -53,8 +66,15 @@ suspend :: proc(w: ^World, e: Entity, systems: Suspend_Set) -> (started: Suspend
 
 // resume counts one less holder of each system in a set on an entity, and gives the systems that it resumed: those
 // that no holder suspends now. A system that no holder suspends stays as it is. The entity loses Suspended when no
-// holder suspends anything.
-resume :: proc(w: ^World, e: Entity, systems: Suspend_Set) -> (ended: Suspend_Set) {
+// holder suspends anything. When Physics ends, keep_velocity is whether any of its holders asked to keep the velocity.
+resume :: proc(
+	w: ^World,
+	e: Entity,
+	systems: Suspend_Set,
+) -> (
+	ended: Suspend_Set,
+	keep_velocity: bool,
+) {
 	if systems == {} || !is_alive(w, e) || get_raw(w, e, SUSPENDED_ID) == nil {
 		return
 	}
@@ -67,6 +87,10 @@ resume :: proc(w: ^World, e: Entity, systems: Suspend_Set) -> (ended: Suspend_Se
 		if s.counts[system] == 0 {
 			ended += {system}
 		}
+	}
+	if .Physics in ended {
+		keep_velocity = s.keep_velocity
+		s.keep_velocity = false
 	}
 	if s.counts == {} {
 		remove(w, e, Suspended)

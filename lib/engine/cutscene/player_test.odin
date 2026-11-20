@@ -1074,6 +1074,24 @@ a_resumed_body_is_at_rest_unless_its_binding_keeps_its_velocity :: proc(t: ^test
 		ecs.get(&f.world, f.rival, physics.Physics_Body).linear_velocity,
 		[3]f32{3, 0, 0},
 	)
+
+	// With a player that keeps and one that does not on one body, the body keeps its velocity whichever ends first.
+	for keeper_first in ([?]bool{true, false}) {
+		ecs.get(&f.world, f.hero, physics.Physics_Body).linear_velocity = {3, 0, 0}
+		at_rest, _ := play(&f.cutscenes, &f.world, {cutscene = INTRO_GUID, overrides = cast_of(f)})
+		keeper, _ := play(&f.cutscenes, &f.world, {cutscene = OUTRO_GUID, overrides = cast_of(f)})
+		frame(f)
+		stop(&f.cutscenes, &f.world, keeper if keeper_first else at_rest)
+		frame(f)
+		stop(&f.cutscenes, &f.world, at_rest if keeper_first else keeper)
+		frame(f)
+		testing.expect(t, !ecs.suspended(&f.world, f.hero, .Physics))
+		testing.expect_value(
+			t,
+			ecs.get(&f.world, f.hero, physics.Physics_Body).linear_velocity,
+			[3]f32{3, 0, 0},
+		)
+	}
 }
 
 // The input context and the hidden documents belong to a playing cutscene, not a Ready one. start pushes the context,

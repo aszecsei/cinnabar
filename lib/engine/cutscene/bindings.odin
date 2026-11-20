@@ -262,7 +262,7 @@ set_binding :: proc(b: ^Bindings, w: ^ecs.World, index: int, to: Binding_State) 
 	resume(w, entity, hold)
 	b.states[index] = to
 	entity, hold = held_by(to)
-	ecs.suspend(w, entity, hold.systems)
+	ecs.suspend(w, entity, hold.systems, hold.keep_velocity)
 }
 
 // held_by is the entity of a binding's state and what the state suspends on it.
@@ -279,11 +279,11 @@ held_by :: proc(state: Binding_State) -> (ecs.Entity, Binding_Hold) {
 }
 
 // resume gives back what a binding suspended on its entity. A dynamic body that the suspension made kinematic is
-// dynamic again at rest, unless the binding keeps its velocity.
+// dynamic again at rest when the last holder resumes it, unless any of its holders asked to keep its velocity.
 @(private = "file")
 resume :: proc(w: ^ecs.World, entity: ecs.Entity, hold: Binding_Hold) {
-	ended := ecs.resume(w, entity, hold.systems)
-	if .Physics not_in ended || hold.keep_velocity {
+	ended, keep := ecs.resume(w, entity, hold.systems)
+	if .Physics not_in ended || keep {
 		return
 	}
 	if rb := ecs.get(w, entity, physics.Rigid_Body); rb == nil || rb.motion != .Dynamic {

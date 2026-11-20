@@ -473,6 +473,13 @@ crowd_system :: proc(ctx: ^ecs.System_Context) {
 	}
 }
 
+// stop_slot ends an agent's move: it forgets the target and the path that it waits for, and is Idle.
+@(private)
+stop_slot :: proc(s: ^State, w: ^ecs.World, slot: ^Crowd_Slot) {
+	slot.target, slot.asking = nil, nil
+	set_crowd_phase(s, w, slot, Crowd_Idle{})
+}
+
 // suspend_agent holds a suspended agent out of the crowd (see docs/cinematics/possession.md): it leaves the others'
 // snapshot, so none avoids it, its move stops, and its character stops walking. A move asked for while it is
 // suspended stops in the same tick, so the action that asked for it sees Idle.
@@ -484,8 +491,7 @@ suspend_agent :: proc(
 	effects: Maybe(physics.Effects),
 ) {
 	if _, idle := slot.phase.(Crowd_Idle); !idle {
-		slot.target, slot.asking = nil, nil
-		set_crowd_phase(s, w, slot, Crowd_Idle{})
+		stop_slot(s, w, slot)
 	}
 	if slot.velocity != 0 || slot.desired != 0 {
 		slot.velocity, slot.desired = 0, 0
@@ -572,8 +578,7 @@ apply_crowd_requests :: proc(s: ^State, w: ^ecs.World) {
 			if r.ticket != 0 && r.ticket != slot.move {
 				continue
 			}
-			slot.target, slot.asking = nil, nil
-			set_crowd_phase(s, w, slot, Crowd_Idle{})
+			stop_slot(s, w, slot)
 		}
 	}
 	clear(&s.crowd_pending)

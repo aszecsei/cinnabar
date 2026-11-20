@@ -51,7 +51,7 @@ Instance_Flag :: enum u8 {
 	// The class runs in the editor's edit mode too (see docs/scripting/behaviours.md#edit-mode).
 	Edit_Mode,
 	// A holder, such as a cutscene, suspends the entity's behaviours (ecs.suspend), which stops the instance as
-	// enabled = false does, without a change to enabled. Only add_instance and set_entity_suspended write it.
+	// enabled = false does, without a change to enabled. Only attach and set_entity_suspended write it.
 	Suspended,
 }
 
