@@ -376,6 +376,14 @@
     <Style Selector="TextBlock.prefab">
         <Setter Property="Foreground" Value="#EC6A5E" />
     </Style>
+    <Style Selector="TextBlock.held">
+        <Setter Property="Foreground" Value="{DynamicResource SystemAccentColorLight2}" />
+        <Setter Property="Margin" Value="4,0,0,0" />
+    </Style>
+    <Style Selector="TextBlock.field-name.held">
+        <Setter Property="FontStyle" Value="Italic" />
+        <Setter Property="Margin" Value="0" />
+    </Style>
     <Style Selector="TextBlock.warning">
         <Setter Property="Foreground" Value="#E8B04A" />
     </Style>

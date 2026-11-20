@@ -56,6 +56,7 @@ public sealed class WorldModel
     readonly Dictionary<ulong, AnimatorView> _animators = [];
     readonly Dictionary<ulong, AgentView> _agents = [];
     readonly Dictionary<ulong, (ReflectionProbeView View, DateTime Received)> _probes = [];
+    readonly HashSet<ulong> _overridden = [];
 
     public IReadOnlyDictionary<ulong, ComponentType> Types => _types;
 
@@ -91,6 +92,19 @@ public sealed class WorldModel
 
     /// <summary>A watched entity's reflection probe's state changed, or it has gone.</summary>
     public event Action<ulong>? ProbeChanged;
+
+    /// <summary>The entities that the editor's overrides write or spawned changed (see docs/editor/link.md#overrides).</summary>
+    public event Action? OverriddenChanged;
+
+    /// <summary>Whether the editor's overrides write the entity, or spawned it.</summary>
+    public bool IsOverridden(ulong handle) => _overridden.Contains(handle);
+
+    /// <summary>
+    /// Whether an override holds a field of a watched entity's component, by the hash of the field's name. The values show
+    /// the document's value of it, not the one that the world shows.
+    /// </summary>
+    public bool IsHeld(ulong handle, ulong component, ulong field) =>
+        _values.TryGetValue(handle, out var values) && values.Held.Any(h => h.Component == component && h.Field == field);
 
     public EntityNode? Find(ulong handle) => _entities.GetValueOrDefault(handle);
 
@@ -140,6 +154,8 @@ public sealed class WorldModel
                 {
                     Update(info);
                 }
+                // The game sends the overridden entities after a snapshot only when it has some.
+                ClearOverridden();
                 HasWorld = true;
                 RebuildHierarchy();
                 Reset?.Invoke();
@@ -207,6 +223,11 @@ public sealed class WorldModel
                     AgentChanged?.Invoke(view.Entity);
                 }
                 return true;
+            case OverriddenEntities overridden:
+                _overridden.Clear();
+                _overridden.UnionWith(overridden.Entities);
+                OverriddenChanged?.Invoke();
+                return true;
             case AgentActions actions:
                 NativeActions = actions.Actions;
                 ActionsChanged?.Invoke();
@@ -242,11 +263,21 @@ public sealed class WorldModel
         _animators.Clear();
         _agents.Clear();
         _probes.Clear();
+        ClearOverridden();
         NativeActions = [];
         HasWorld = false;
         TypesChanged?.Invoke();
         Reset?.Invoke();
         EntitiesChanged?.Invoke();
+    }
+
+    void ClearOverridden()
+    {
+        if (_overridden.Count > 0)
+        {
+            _overridden.Clear();
+            OverriddenChanged?.Invoke();
+        }
     }
 
     void Update(EntityInfo info)

@@ -82,8 +82,8 @@ public class WorldModelTests
     public void ValuesOfAnUnknownEntityAreIgnoredAndDestroyedOnesForgotten()
     {
         var world = Snapshot(Info(Handle(1)));
-        world.Apply(new EntityValues(Handle(1), [], []));
-        world.Apply(new EntityValues(Handle(7), [], []));
+        world.Apply(new EntityValues(Handle(1), [], [], []));
+        world.Apply(new EntityValues(Handle(7), [], [], []));
 
         Assert.NotNull(world.Values(Handle(1)));
         Assert.Null(world.Values(Handle(7)));

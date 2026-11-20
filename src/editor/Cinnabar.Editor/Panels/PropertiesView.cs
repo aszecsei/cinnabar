@@ -1,3 +1,4 @@
+using System.Text;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
@@ -272,6 +273,8 @@ public sealed class PropertiesView : ScrollViewer
             if (_world.Type(component.Id) is { } type)
             {
                 _grid.ShowComponent(component.Id.ToString("x16"), type, component.Data, ReferenceOf);
+                var entity = _selection.Entity;
+                _grid.ShowHeld(component.Id.ToString("x16"), type, field => _world.IsHeld(entity, component.Id, Fnv.Hash64(Encoding.UTF8.GetBytes(field.Name))));
             }
         }
         foreach (var behaviour in values.Behaviours)

@@ -893,6 +893,9 @@ public sealed partial class EditorShell
             case Link.Protocol.StreamedScenes streamed:
                 OnStreamedScenes(streamed);
                 return;
+            case Link.Protocol.OverrideEnded ended:
+                Overrides.OnEnded(ended);
+                return;
         }
         if (message is not EditProblems problems)
         {

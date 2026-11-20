@@ -55,6 +55,8 @@ sealed class FieldGrid(EditorShell shell)
     readonly List<(Control Button, Func<bool> IsSet)> _resets = [];
     // Each field name of an instance's entity, with whether its block overrides the field, which shows it in bold.
     readonly List<(TextBlock Name, Func<bool> IsOverridden)> _bold = [];
+    // Each field name, with its tooltip, which a mark for an override's hold adds to.
+    readonly Dictionary<(string Owner, string Field), (TextBlock Name, string Tip)> _names = [];
 
     /// <summary>The view and the editor of each row, by its owner, such as a component's ID, and its field's name.</summary>
     public Dictionary<(string Owner, string Field), FieldView> Views { get; } = [];
@@ -68,6 +70,7 @@ sealed class FieldGrid(EditorShell shell)
         _resets.Clear();
         _bold.Clear();
         _overrides.Clear();
+        _names.Clear();
     }
 
     /// <summary>Shows again what the document sets: each reset button, and each name that an instance overrides.</summary>
@@ -98,7 +101,9 @@ sealed class FieldGrid(EditorShell shell)
                 TextTrimming = TextTrimming.CharacterEllipsis,
                 VerticalAlignment = VerticalAlignment.Center,
             };
-            ToolTip.SetTip(name, field.Editor != null && field.Kind == DisplayKind.Number ? $"{field.Field}. Drag to change it." : field.Field);
+            var tip = field.Editor != null && field.Kind == DisplayKind.Number ? $"{field.Field}. Drag to change it." : field.Field;
+            ToolTip.SetTip(name, tip);
+            _names[(field.Owner, field.Field)] = (name, tip);
             if (field.Editor != null && field.Kind == DisplayKind.Number)
             {
                 FieldView.Scrubbable(name, field.Editor, 0);
@@ -135,6 +140,23 @@ sealed class FieldGrid(EditorShell shell)
             }
         }
         return rows.Grid;
+    }
+
+    /// <summary>
+    /// Marks the fields of an owner that an override holds in the game's world (see docs/editor/link.md#overrides). Their
+    /// rows show the document's value, and the world shows another.
+    /// </summary>
+    public void ShowHeld(string owner, Link.Protocol.ComponentType type, Func<Link.Protocol.FieldInfo, bool> isHeld)
+    {
+        foreach (var field in type.Fields)
+        {
+            if (_names.TryGetValue((owner, field.Name), out var name))
+            {
+                var held = isHeld(field);
+                name.Name.Classes.Set("held", held);
+                ToolTip.SetTip(name.Name, held ? $"{name.Tip}\nA preview holds this field in the world, which shows another value. This is the scene's." : name.Tip);
+            }
+        }
     }
 
     /// <summary>Shows a component's values from the host in the rows of an owner, and gives their editors the values.</summary>

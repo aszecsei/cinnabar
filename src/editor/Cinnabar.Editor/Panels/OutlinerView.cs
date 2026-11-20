@@ -172,7 +172,8 @@ public sealed class OutlinerView : DockPanel
             .Add(() => _shell.ProblemsChanged += Rebuild, () => _shell.ProblemsChanged -= Rebuild)
             .Add(() => _shell.VisibilityChanged += Rebuild, () => _shell.VisibilityChanged -= Rebuild)
             .Add(() => _shell.SceneChanged += OnScenesChanged, () => _shell.SceneChanged -= OnScenesChanged)
-            .Add(() => _shell.SublevelsChanged += Rebuild, () => _shell.SublevelsChanged -= Rebuild);
+            .Add(() => _shell.SublevelsChanged += Rebuild, () => _shell.SublevelsChanged -= Rebuild)
+            .Add(() => _world.OverriddenChanged += Rebuild, () => _world.OverriddenChanged -= Rebuild);
     }
 
     // The headings show which scene is active and which are dirty, which edits change without a change of the world.
@@ -414,6 +415,10 @@ public sealed class OutlinerView : DockPanel
         }
         view.Children.Add(content);
         Mark(content, row.Node);
+        if (OverrideMark(row.Node) is { } held)
+        {
+            content.Children.Add(held);
+        }
         if (_shell.ProblemsOf(row.Node) is { Count: > 0 } problems)
         {
             var warning = new TextBlock { Text = "⚠", Classes = { "warning" } };
@@ -543,6 +548,18 @@ public sealed class OutlinerView : DockPanel
         {
             _shell.Console.Add(LogLevel.Warning, $"edit: {reason}");
         }
+    }
+
+    // An entity that an override writes, or spawned, has a mark after its name (see docs/editor/link.md#overrides).
+    internal TextBlock? OverrideMark(EntityNode node)
+    {
+        if (!_world.IsOverridden(node.Handle))
+        {
+            return null;
+        }
+        var mark = new TextBlock { Text = "◆", Classes = { "held" } };
+        ToolTip.SetTip(mark, node.SceneId == 0 ? "A preview spawned this entity in the world" : "A preview writes over this entity in the world, which shows other values than the scene's");
+        return mark;
     }
 
     // An instance's root has the prefab's icon before its name; an entity of an instance with overrides a dot after

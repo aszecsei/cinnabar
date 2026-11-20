@@ -28,6 +28,8 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
     public ConsoleLog Console { get; } = new();
     public HostSession Host { get; }
     public WorldModel World { get; } = new();
+    /// <summary>What owners such as a scrub write over the game's world in Edit, outside the document (see docs/editor/link.md#overrides).</summary>
+    public WorldOverrides Overrides { get; }
     public ResourceStats Stats { get; } = new();
     public Selection Selection { get; } = new();
     public OutlinerState Outliner { get; } = new();
@@ -85,6 +87,7 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
         Landscape = new LandscapeSession(this);
         _gizmo = new GizmoController(label => TryBeginEdit(label, "the gizmo"), SendGizmo);
         Host = new HostSession(options);
+        Overrides = new WorldOverrides(this);
         Watches = new EntityWatches(Selection, Host);
         Visibility = new SceneVisibility(World, Selection, Host, settings, Console, () => [.. _scenes.Select(s => (s.Number, s.Path))], WriteSetting, Commands.InvalidateAll);
         Cook = new CookSession(options.Cook, Assets);
@@ -267,6 +270,8 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
     /// </summary>
     void OnNewGameState()
     {
+        // The new state has no overrides, so their owners hear that they ended, and nothing is sent again.
+        Overrides.EndAll(OverrideEnd.NewGameState);
         ResetMode();
         SendScene();
         SendViewportTools();
