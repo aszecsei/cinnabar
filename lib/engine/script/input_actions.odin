@@ -156,12 +156,7 @@ register_input_actions :: proc(r: ^Runtime) {
 		if !luau.isnoneornil(L, 2) {
 			players = {check_pad(L, 2)}
 		}
-		owner: core.Input_Context_Owner
-		pusher := "script"
-		if i := instance_at(r, r.writer); r.writer != {} && i != nil {
-			owner = context_owner(r.writer)
-			pusher = instance_class(r, L, i)
-		}
+		owner, pusher := running_owner(r, L)
 		token := core.input_contexts_push(contexts, index, players, pusher, owner)
 		if token == 0 {
 			luau.L_errorL(
@@ -209,22 +204,90 @@ input_context_text :: proc(r: ^Runtime, token: core.Input_Context_Token) -> stri
 	)
 }
 
+// The kinds of Input_Context_Owner that the script runtime gives.
+@(private = "file")
+Owner_Kind :: enum u8 {
+	None,
+	Behaviour,
+	// One run of a main script: its waiter's index and sequence number, so a restart is a new owner.
+	Main_Script,
+	Action,
+}
+
 // context_owner is a behaviour as the owner of the contexts that it pushes.
 @(private)
 context_owner :: proc(h: Instance_Handle) -> core.Input_Context_Owner {
-	return core.Input_Context_Owner(u64(h.generation) << 32 | u64(h.index))
+	return {u8(Owner_Kind.Behaviour), h.index, u64(h.generation)}
 }
 
-// pop_orphaned_contexts takes off the pushes of behaviours that are gone, however they went, so a lost handle cannot
-// lock the input.
+// main_context_owner is a run of a main script, by the waiter that runs it, as an owner.
+@(private)
+main_context_owner :: proc(id: Waiter_Id) -> core.Input_Context_Owner {
+	return {u8(Owner_Kind.Main_Script), u32(id.index), id.seq}
+}
+
+// action_context_owner is a script action as an owner.
+@(private)
+action_context_owner :: proc(h: Action_Handle) -> core.Input_Context_Owner {
+	return {u8(Owner_Kind.Action), h.index, u64(h.generation)}
+}
+
+// running_owner is the owner of the code that runs, and its name for the editor: the behaviour whose callback or
+// coroutine runs, the script action whose callback runs, the coroutine of an action, or the run of a main script. Code
+// that none of them runs, such as a predicate, owns nothing, and pops its own pushes.
+@(private = "file")
+running_owner :: proc(r: ^Runtime, L: ^luau.State) -> (core.Input_Context_Owner, string) {
+	if i := instance_at(r, r.writer); r.writer != {} && i != nil {
+		return context_owner(r.writer), instance_class(r, L, i, "__behaviour")
+	}
+	if a := action_at(r, r.running_action); a != nil {
+		return action_context_owner(r.running_action), table_class(r, L, a.table, "__action")
+	}
+	if r.current_waiter >= 0 {
+		w := &r.waiters[r.current_waiter]
+		switch owner in w.owner {
+		case Main_Script:
+			return main_context_owner({r.current_waiter, w.seq}), "script"
+		case Action_Handle:
+			if a := action_at(r, owner); a != nil {
+				return action_context_owner(owner), table_class(r, L, a.table, "__action")
+			}
+		case Instance_Handle:
+		}
+	}
+	return {}, "script"
+}
+
+// owner_live is whether an owner has not ended.
+@(private = "file")
+owner_live :: proc(r: ^Runtime, owner: core.Input_Context_Owner) -> bool {
+	switch Owner_Kind(owner.kind) {
+	case .None:
+		return true
+	case .Behaviour:
+		return instance_at(r, {owner.index, u32(owner.generation)}) != nil
+	case .Main_Script:
+		if int(owner.index) >= r.waiter_used {
+			return false
+		}
+		w := &r.waiters[owner.index]
+		return w.status != .Free && w.seq == owner.generation
+	case .Action:
+		return action_at(r, {owner.index, u32(owner.generation)}) != nil
+	}
+	return false
+}
+
+// pop_orphaned_contexts takes off the pushes of the behaviours, main scripts and script actions that are gone, however
+// they went, so a lost handle cannot lock the input.
 @(private)
 pop_orphaned_contexts :: proc(r: ^Runtime) {
 	contexts := &r.input_actions.contexts
 	for i := 0; i < contexts.push_count; {
-		owner := u64(contexts.pushes[i].owner)
-		if owner != 0 && instance_at(r, {u32(owner), u32(owner >> 32)}) == nil {
+		owner := contexts.pushes[i].owner
+		if !owner_live(r, owner) {
 			// Every push of the owner goes, and none of them is before i, so i is the next one now.
-			core.input_contexts_pop_owned(contexts, core.Input_Context_Owner(owner))
+			core.input_contexts_pop_owned(contexts, owner)
 			continue
 		}
 		i += 1
@@ -233,14 +296,25 @@ pop_orphaned_contexts :: proc(r: ^Runtime) {
 
 // instance_class is the class name of a behaviour, in frame memory.
 @(private = "file")
-instance_class :: proc(r: ^Runtime, L: ^luau.State, i: ^Instance) -> string {
-	luau.getref(L, i.table)
+instance_class :: proc(r: ^Runtime, L: ^luau.State, i: ^Instance, field: cstring) -> string {
+	return table_class(r, L, i.table, field)
+}
+
+// table_class is the name in a field of the class of an instance table, in frame memory, or "script".
+@(private = "file")
+table_class :: proc(r: ^Runtime, L: ^luau.State, table: c.int, field: cstring) -> string {
+	luau.getref(L, table)
 	defer luau.pop(L, 1)
 	if !luau.getmetatable(L, -1) {
-		return "behaviour"
+		return "script"
 	}
 	defer luau.pop(L, 1)
-	return class_name(r, L, -1)
+	luau.rawgetfield(L, -1, field)
+	defer luau.pop(L, 1)
+	if luau.type(L, -1) != .STRING {
+		return "script"
+	}
+	return fmt.aprintf("%s", luau.toodinstring(L, -1), allocator = frame(r))
 }
 
 // check_action_name is the string argument at idx, for an action name.

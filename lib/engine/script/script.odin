@@ -87,6 +87,9 @@ Runtime :: struct {
 	// document in Edit mode (see record.odin). A registration, which reload clears: the component of the document's
 	// entities.
 	writer:                     Instance_Handle,
+	// The script action whose start, tick or stop runs, or the zero handle. A behaviour's callback and a coroutine
+	// clear it while they run, so the code that runs is the writer's, this action's or the current waiter's.
+	running_action:             Action_Handle,
 	edits:                      Edits,
 	document_component:         ecs.Component_Id,
 	// The GUIDs that scripts hold references to, by the payload of their light userdata. They stay across reloads,

@@ -40,9 +40,14 @@ Input_Context :: struct {
 // through a stale one does nothing.
 Input_Context_Token :: distinct u32
 
-// Input_Context_Owner is the script behaviour that pushed, packed, which the script runtime pops when the behaviour
-// ends. 0 is a push that its pusher pops itself.
-Input_Context_Owner :: distinct u64
+// Input_Context_Owner is what pushed, which pops its pushes when it ends: the script runtime's behaviours, main
+// scripts and script actions, each by its kind, index and generation. The zero value is a push that its pusher pops
+// itself.
+Input_Context_Owner :: struct {
+	kind:       u8,
+	index:      u32,
+	generation: u64,
+}
 
 // Input_Context_Push is one push: on the stack of each of its players, at the same place in push order.
 Input_Context_Push :: struct {
@@ -141,7 +146,7 @@ input_contexts_push :: proc "contextless" (
 	index: int,
 	players: Input_Players = EVERY_PLAYER,
 	pusher: string = "",
-	owner: Input_Context_Owner = 0,
+	owner: Input_Context_Owner = {},
 ) -> Input_Context_Token {
 	if index < 0 || index > contexts.defined_count || players == {} {
 		return 0
@@ -182,7 +187,7 @@ input_contexts_pop_owned :: proc "contextless" (
 	contexts: ^Input_Contexts,
 	owner: Input_Context_Owner,
 ) {
-	if owner != 0 {
+	if owner != {} {
 		change_stack(contexts, Context_Pop{owner = owner})
 	}
 }
@@ -292,7 +297,7 @@ change_stack :: proc "contextless" (contexts: ^Input_Contexts, change: Context_C
 		for p in contexts.pushes[:contexts.push_count] {
 			if !(c.every ||
 				   (c.token != 0 && p.token == c.token) ||
-				   (c.owner != 0 && p.owner == c.owner)) {
+				   (c.owner != {} && p.owner == c.owner)) {
 				contexts.pushes[kept] = p
 				kept += 1
 			}

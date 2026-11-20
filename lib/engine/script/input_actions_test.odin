@@ -227,7 +227,7 @@ e:destroy()
 	testing.expect_value(t, contexts.push_count, 1)
 	if contexts.push_count == 1 {
 		testing.expect_value(t, core.input_context_pusher(&contexts.pushes[0]), "Cutscene")
-		testing.expect(t, contexts.pushes[0].owner != 0)
+		testing.expect(t, contexts.pushes[0].owner != {})
 	}
 	begin_phase(&f.runtime, 16 * time.Millisecond, {})
 	testing.expect_value(t, resume(&f.runtime, thread), Resume_Result.Finished)

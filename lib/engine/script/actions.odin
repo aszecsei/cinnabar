@@ -4,6 +4,7 @@ import "core:c"
 import "core:fmt"
 import "core:log"
 
+import "cinnabar:core"
 import "cinnabar:core/luau"
 import "cinnabar:core/profile"
 import "cinnabar:engine/ecs"
@@ -291,9 +292,12 @@ call_action :: proc(
 		luau.pushnumber(L, delta)
 		nargs = 2
 	}
+	writer, action := r.writer, r.running_action
+	r.writer, r.running_action = {}, h
 	zone := begin_callback(r, a.profile_class, .Event)
 	called := protected_call(r, L, nargs, 1)
 	end_callback(r, zone)
+	r.writer, r.running_action = writer, action
 	if !called {
 		return false, .Failed
 	}
@@ -347,6 +351,7 @@ end_action :: proc(r: ^Runtime, h: Action_Handle) {
 		return
 	}
 	stop_owned(r, h)
+	core.input_contexts_pop_owned(&r.input_actions.contexts, action_context_owner(h))
 	luau.unref(r.L, a.table)
 	a.live = false
 	a.table = 0

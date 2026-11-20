@@ -3,6 +3,7 @@ package script
 import "core:testing"
 import "core:time"
 
+import "cinnabar:core"
 import "cinnabar:core/testlog"
 import "cinnabar:engine/ecs"
 
@@ -152,4 +153,55 @@ a_script_action_with_wrong_arguments_fails :: proc(t: ^testing.T) {
 	}
 	testing.expect_value(t, hook, [3]Action_Status{.Failed, .Failed, .Failed})
 	expect_reports(t, f, {})
+}
+
+// A script action's pushes, from its callbacks, are popped when it stops.
+@(test)
+a_script_action_pops_its_input_contexts_when_it_stops :: proc(t: ^testing.T) {
+	f := setup_world(t)
+	defer teardown_world(f)
+	context.user_ptr = f
+	testing.expect(
+		t,
+		run(
+			t,
+			f,
+			`
+		Input.define_action("jump", { "key:Space" })
+		Input.define_context("cutscene", {})
+		local Lock = Action.define("lock")
+		function Lock:start() self.context = Input.push_context("cutscene") end
+		function Lock:tick(dt) return "running" end
+	`,
+		),
+	)
+	hook := Action_Hook {
+		entity = ecs.spawn(&f.world),
+	}
+	set_fixed_hook(&f.runtime, {proc(r: ^Runtime, data: rawptr) {
+			h := (^Action_Hook)(data)
+			switch h.step {
+			case 0:
+				h.handle, h.status[0] = start_action(r, "lock", h.entity, nil)
+			case 1:
+				stop_action(r, h.handle)
+			}
+			h.step += 1
+		}, &hook})
+	contexts := &f.runtime.input_actions.contexts
+	it := ecs.begin_ticks(&f.world, 17 * time.Millisecond)
+	for ecs.next_tick(&it) {
+		fixed_update(&f.runtime, &it, {})
+		fixed_events(&f.runtime)
+	}
+	testing.expect_value(t, contexts.push_count, 1)
+	if contexts.push_count == 1 {
+		testing.expect_value(t, core.input_context_pusher(&contexts.pushes[0]), "lock")
+	}
+	it = ecs.begin_ticks(&f.world, 17 * time.Millisecond)
+	for ecs.next_tick(&it) {
+		fixed_update(&f.runtime, &it, {})
+		fixed_events(&f.runtime)
+	}
+	testing.expect_value(t, contexts.push_count, 0)
 }

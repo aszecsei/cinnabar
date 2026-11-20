@@ -5,6 +5,7 @@ import "core:log"
 import "core:slice"
 import "core:time"
 
+import "cinnabar:core"
 import "cinnabar:core/luau"
 import script_host "cinnabar:core/script"
 import "cinnabar:engine/ecs"
@@ -206,13 +207,13 @@ run_waiter :: proc(r: ^Runtime, index: int, nargs: c.int = 0) -> luau.Status {
 	w := &r.waiters[index]
 	saved_current, saved_pending := r.current_waiter, r.pending_wait
 	r.current_waiter, r.pending_wait = index, nil
-	writer := r.writer
-	r.writer = waiter_writer(w)
+	writer, action := r.writer, r.running_action
+	r.writer, r.running_action = waiter_writer(w), {}
 	become(w, .Running)
 	zone := begin_callback(r, waiter_class(r, w), .Coroutine)
 	status := resume_state(r, w.state, nargs)
 	end_callback(r, zone)
-	r.writer = writer
+	r.writer, r.running_action = writer, action
 	pending := r.pending_wait
 	r.current_waiter, r.pending_wait = saved_current, saved_pending
 
@@ -255,6 +256,10 @@ free_waiter :: proc(r: ^Runtime, index: int) {
 	// A main script ends with its thread, however the thread ends.
 	if script, is_main := w.owner.(Main_Script); is_main {
 		end_main(r, script, {index, w.seq})
+		core.input_contexts_pop_owned(
+			&r.input_actions.contexts,
+			main_context_owner({index, w.seq}),
+		)
 	}
 	release_wait(r, w.wait)
 	luau.unref(r.L, w.thread)
