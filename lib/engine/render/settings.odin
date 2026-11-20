@@ -18,11 +18,20 @@ GLOBAL_ILLUMINATION_ID :: ecs.Component_Id(48)
 ENVIRONMENT_ID :: ecs.Component_Id(49)
 SHADOWS_ID :: ecs.Component_Id(50)
 CLOUDS_ID :: ecs.Component_Id(55)
+DEPTH_OF_FIELD_ID :: ecs.Component_Id(58)
 
 // Anti_Aliasing is the anti-aliasing, of the technique that the quality chooses (see
 // docs/rendering/anti-aliasing.md#anti-aliasing): off turns it off.
 Anti_Aliasing :: struct {
 	off: volume.Value(bool),
+}
+
+// Depth_Of_Field is the camera's lens's blur, of the technique that the quality chooses (see
+// docs/rendering/post-processing.md#depth-of-field): off turns it off, as a game may in its gameplay, and scale
+// multiplies the circle of confusion.
+Depth_Of_Field :: struct {
+	off:   volume.Value(bool),
+	scale: volume.Value(f32) `editor:"range=0,4"`,
 }
 
 // Exposure is how bright the scene shows: adapted to the scene's average luminance, or manual.
@@ -236,6 +245,9 @@ DEFAULT_BLOOM :: Bloom {
 	intensity = {value = DEFAULT_BLOOM_INTENSITY},
 	radius = {value = DEFAULT_BLOOM_RADIUS},
 }
+DEFAULT_DEPTH_OF_FIELD :: Depth_Of_Field {
+	scale = {value = 1},
+}
 DEFAULT_AMBIENT_OCCLUSION :: Ambient_Occlusion {
 	radius = {value = DEFAULT_AO_RADIUS},
 	power = {value = DEFAULT_AO_POWER},
@@ -375,6 +387,13 @@ register_settings_components :: proc(r: ^ecs.Registry) {
 	ecs.register_component(r, Fog, FOG_ID, DEFAULT_FOG, category = "Volumes/Settings")
 	ecs.register_component(r, Shadows, SHADOWS_ID, DEFAULT_SHADOWS, category = "Volumes/Settings")
 	ecs.register_component(r, Clouds, CLOUDS_ID, DEFAULT_CLOUDS, category = "Volumes/Settings")
+	ecs.register_component(
+		r,
+		Depth_Of_Field,
+		DEPTH_OF_FIELD_ID,
+		DEFAULT_DEPTH_OF_FIELD,
+		category = "Volumes/Settings",
+	)
 }
 
 // resolve_settings takes the frame's settings from the volumes at a position, usually the camera's, leaving out the
@@ -396,6 +415,7 @@ resolve_settings :: proc(
 	fog, _ := volume.blend(w, &inf, Fog)
 	shadows, _ := volume.blend(w, &inf, Shadows)
 	clouds, _ := volume.blend(w, &inf, Clouds)
+	dof, _ := volume.blend(w, &inf, Depth_Of_Field)
 	return {
 		post = {
 			no_aa = aa.off.value,
@@ -413,6 +433,8 @@ resolve_settings :: proc(
 			tint = tone.tint.value,
 			paper_white = tone.paper_white.value,
 			peak = tone.peak.value,
+			no_dof = dof.off.value,
+			dof_scale = dof.scale.value,
 		},
 		ambient_occlusion = {off = ao.off.value, radius = ao.radius.value, power = ao.power.value},
 		gi = {off = gi.off.value},

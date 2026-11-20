@@ -720,3 +720,42 @@ the_residency_settings_are_quality_keys :: proc(t: ^testing.T) {
 	testing.expect_value(t, values[.Residency_Idle], "300")
 	testing.expect_value(t, values[.Texture_Mip_Bias], "1")
 }
+
+@(test)
+the_depth_of_field_key_reads_writes_and_may_be_missing :: proc(t: ^testing.T) {
+	caps := render.Caps{}
+	// A file from before the depth of field keeps the preset's technique: none at Low, the gather at Medium.
+	s: Settings
+	problems := make([dynamic]string, context.temp_allocator)
+	parse("quality.preset = Medium\n", &s, &problems)
+	testing.expect_value(t, len(problems), 0)
+	testing.expect(t, .Depth_Of_Field not_in s.quality_given)
+	testing.expect_value(t, quality(s, caps).depth_of_field, render.Dof_Technique.Gather)
+
+	s = {}
+	parse(
+		"quality.preset = Low\nquality.depth_of_field = Bokeh\nquality.depth_of_field = Tilt\n",
+		&s,
+		&problems,
+	)
+	testing.expect_value(t, len(problems), 1)
+	testing.expect_value(
+		t,
+		problems[0],
+		`3: quality.depth_of_field takes Off, Gather, Bokeh, not "Tilt"`,
+	)
+	q := quality(s, caps)
+	testing.expect_value(t, q.depth_of_field, render.Dof_Technique.Bokeh)
+	testing.expect_value(t, render.quality_preset(q, caps), render.Quality_Preset.Custom)
+
+	values := quality_values(q, caps)
+	testing.expect_value(t, values[.Depth_Of_Field], "Bokeh")
+	written: Settings
+	text := ""
+	for value, k in values {
+		text = set_value(text, QUALITY_KEY_NAMES[k], value)
+	}
+	parse(text, &written)
+	testing.expect_value(t, quality(written, caps), q)
+	free_all(context.temp_allocator)
+}

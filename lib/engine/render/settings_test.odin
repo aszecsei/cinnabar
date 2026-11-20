@@ -49,6 +49,8 @@ the_frame_takes_its_settings_from_the_volumes_at_the_camera :: proc(t: ^testing.
 	testing.expect_value(t, s.sky.ambient_intensity, 1)
 	testing.expect_value(t, s.fog.density, 0)
 	testing.expect_value(t, s.post.paper_white, 0)
+	testing.expect(t, !s.post.no_dof)
+	testing.expect_value(t, s.post.dof_scale, 1)
 	testing.expect_value(
 		t,
 		s.shadows,
@@ -66,6 +68,7 @@ the_frame_takes_its_settings_from_the_volumes_at_the_camera :: proc(t: ^testing.
 	ecs.add(w, base, Fog{density = {true, 0.1}, base_height = {true, 2}})
 	ecs.add(w, base, Shadows{distance = {true, 30}})
 	ecs.add(w, base, Bloom{radius = {true, 0.3}})
+	ecs.add(w, base, Depth_Of_Field{scale = {true, 2}})
 	ecs.add(w, base, Clouds{density = {true, 1}, coverage = {true, 0.8}, weather = {true, .Map}})
 	// A box over part of the world turns bloom off, fogs less and clears the sky, and leaves the rest to the global
 	// volume.
@@ -77,6 +80,7 @@ the_frame_takes_its_settings_from_the_volumes_at_the_camera :: proc(t: ^testing.
 	)
 	ecs.add(w, local, volume.Volume{shape = .Box, extents = {1, 1, 1}})
 	ecs.add(w, local, Bloom{off = {true, true}})
+	ecs.add(w, local, Depth_Of_Field{off = {true, true}})
 	ecs.add(w, local, Fog{density = {true, 0.02}})
 	ecs.add(w, local, Clouds{coverage = {true, 0.2}})
 
@@ -90,6 +94,8 @@ the_frame_takes_its_settings_from_the_volumes_at_the_camera :: proc(t: ^testing.
 	)
 	testing.expect(t, !s.post.no_bloom)
 	testing.expect_value(t, s.post.bloom_radius, 0.3)
+	testing.expect(t, !s.post.no_dof)
+	testing.expect_value(t, s.post.dof_scale, 2)
 	testing.expect_value(t, s.post.bloom_intensity, DEFAULT_BLOOM_INTENSITY)
 	testing.expect_value(t, s.clouds.density, 1)
 	testing.expect_value(t, s.clouds.coverage, 0.8)
@@ -97,6 +103,9 @@ the_frame_takes_its_settings_from_the_volumes_at_the_camera :: proc(t: ^testing.
 
 	s = resolve_settings(r, w, ecs.position_offset({}, {10, 0, 0}))
 	testing.expect(t, s.post.no_bloom)
+	// A box turns the depth of field off, as a game's gameplay may, and keeps the global volume's scale.
+	testing.expect(t, s.post.no_dof)
+	testing.expect_value(t, s.post.dof_scale, 2)
 	testing.expect_value(t, s.fog.density, 0.02)
 	testing.expect_value(t, s.fog.base_height, 2)
 	testing.expect_value(t, s.fog.albedo, [3]f32{1, 1, 1})

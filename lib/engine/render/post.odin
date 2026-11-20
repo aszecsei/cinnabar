@@ -98,7 +98,8 @@ Exposure_Mode :: enum u8 {
 	Manual,
 }
 
-// Post_Settings are a frame's post-processing, in Frame_Settings, from the Anti_Aliasing, Exposure, Tone_Mapping and Bloom settings. Where 0 would mean nothing, it gives the default.
+// Post_Settings are a frame's post-processing, in Frame_Settings, from the Anti_Aliasing, Exposure, Tone_Mapping, Bloom
+// and Depth_Of_Field settings. Where 0 would mean nothing, it gives the default.
 Post_Settings :: struct {
 	// The anti-aliasing's technique, from the quality, and no_aa when a volume or the editor turns it off.
 	aa:                    Aa_Technique,
@@ -127,6 +128,11 @@ Post_Settings :: struct {
 	// the brightest color, 0 giving the display's peak. Paper white is at most the peak.
 	paper_white:           f32,
 	peak:                  f32,
+	// The depth of field's technique, from the quality, and no_dof when a volume or a debug view turns it off. The
+	// circle of confusion is times dof_scale, 0 giving 1.
+	dof:                   Dof_Technique,
+	no_dof:                bool,
+	dof_scale:             f32,
 }
 
 // Post is the post-processing's state between frames, in the Renderer.

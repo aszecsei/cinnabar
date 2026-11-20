@@ -55,6 +55,7 @@ SCRIPT_QUALITY_FIELDS := [Quality_Key]cstring {
 	.Clouds               = "clouds",
 	.Virtual_Shadow_Cache = "virtual_shadow_cache",
 	.Atlas_Shadow_Cache   = "atlas_shadow_cache",
+	.Depth_Of_Field       = "depth_of_field",
 }
 
 // script_quality is the Script_Quality of a renderer and a project settings file.
