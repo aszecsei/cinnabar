@@ -82,6 +82,9 @@ SPLIT_SCENE_META :: #load("../content/scenes/split.scene.meta", string)
 // The night scene, a yard whose night sublevel N turns on and off: its lights and props, and the lantern that the base
 // refers to (see docs/world/sublevels.md).
 NIGHT_SCENE_META :: #load("../content/scenes/night.scene.meta", string)
+// The focus scene, a camera's lens pulling its focus between two balls (see
+// docs/rendering/post-processing.md#depth-of-field).
+FOCUS_SCENE_META :: #load("../content/scenes/focus.scene.meta", string)
 // The array that tints the large triangles, a layer for each (see docs/content/kinds/textures.md#cube-maps-and-arrays).
 TRIANGLE_TINTS_META :: #load("../content/textures/cube/tints.texture_set.meta", string)
 
@@ -889,9 +892,9 @@ update_output :: proc(g: ^game.Game) {
 
 // switch_scene loads the next scene, the glass scene, the surfaces scene, the room scene, the billboards scene, the
 // animation scene, the cube map scene, the audio scene, the 2D scene, the playground, the doorway, the guard, the soft
-// shadows, the shadow cache, the streaming scene, the split screen scene, the night scene, then the main scene again,
-// when F7 is pressed. Each loads with the parts of the active sublevels, as the main scene does. A linked editor owns the scene, so the key
-// does nothing then.
+// shadows, the shadow cache, the streaming scene, the split screen scene, the night scene, the focus scene, then the main
+// scene again, when F7 is pressed. Each loads with the parts of the active sublevels, as the main scene does. A linked
+// editor owns the scene, so the key does nothing then.
 switch_scene :: proc(g: ^game.Game) {
 	if .F7 not_in g.platform.input().pressed || editor.active(&g.editor) {
 		return
@@ -915,6 +918,7 @@ switch_scene :: proc(g: ^game.Game) {
 		STREAMING_SCENE_META,
 		SPLIT_SCENE_META,
 		NIGHT_SCENE_META,
+		FOCUS_SCENE_META,
 	}
 	names := [?]string {
 		"main",
@@ -934,6 +938,7 @@ switch_scene :: proc(g: ^game.Game) {
 		"streaming",
 		"split screen",
 		"night",
+		"focus",
 	}
 	s.scene_index = (s.scene_index + 1) % len(metas)
 	if guid, ok := format.meta_guid(metas[s.scene_index]); ok {

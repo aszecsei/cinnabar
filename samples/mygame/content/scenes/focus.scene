@@ -1,0 +1,129 @@
+# The focus scene, which F7 in mygame cycles to (see docs/rendering/post-processing.md#depth-of-field): a camera
+# with a 50 mm lens at f/1.4 pulls its focus between a red ball 2.5 m away and a gold one 8 m away (focus_pull.luau),
+# over a row of bright balls 30 m away whose blur opens into the aperture's shape. Positions are raw World_Position
+# values in units of 2^-24 m. The editor writes this file; see docs/editor/document-and-scenes.md#scenes.
+scene 3
+
+entity f0c5000000000001
+name = "Camera"
+component 1 Transform
+	position = [2516582400000000000, 25165824, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 32 Camera
+	focal_length = 50
+	aperture = 1.4
+	focus_distance = 2.5
+behaviour 568465dc198c4c74b7210ccfa8b9f3f3
+	near = @f0c5000000000005
+	far = @f0c5000000000006
+
+entity f0c5000000000002
+name = "Sun"
+component 1 Transform
+	position = [2516582400000000000, 167772160, 0]
+	rotation = [0.403058, 0.272532, -0.127084, 0.864361]
+	scale = [1, 1, 1]
+component 34 Directional_Light
+	color = [1, 0.95, 0.85]
+	intensity = 3
+	cast_shadows = true
+
+entity f0c5000000000003
+name = "Global Volume"
+component 1 Transform
+	position = [2516582400000000000, 0, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 42 Volume
+	shape = Global
+component 49 Environment
+	background = [0.32, 0.5, 0.78]
+
+entity f0c5000000000004
+name = "Ground"
+component 1 Transform
+	position = [2516582400000000000, -8388608, 6710886400]
+	rotation = [0, 0, 0, 1]
+	scale = [200, 1, 900]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $f7eadea8bd278c0ae71b61b681352a82
+	cast_shadows = true
+
+entity f0c5000000000005
+name = "Near"
+component 1 Transform
+	position = [2516582399994127975, 23488102, 41943040]
+	rotation = [0, 0, 0, 1]
+	scale = [0.5, 0.5, 0.5]
+component 33 Mesh_Renderer
+	mesh = $9486d4ef423a1cec3dcc39a1250a78f8
+	materials.0 = $cbeb3ff7d07840a7a816ea35868ee5b0
+	cast_shadows = true
+
+entity f0c5000000000006
+name = "Far"
+component 1 Transform
+	position = [2516582400015099494, 21810380, 134217728]
+	rotation = [0, 0, 0, 1]
+	scale = [1.2, 1.2, 1.2]
+component 33 Mesh_Renderer
+	mesh = $9486d4ef423a1cec3dcc39a1250a78f8
+	materials.0 = $f6d3de3190e2dfb97d6834ed5101c4c0
+	cast_shadows = true
+
+entity f0c5000000000007
+name = "Light 1"
+component 1 Transform
+	position = [2516582399932891136, 33554432, 503316480]
+	rotation = [0, 0, 0, 1]
+	scale = [0.3, 0.3, 0.3]
+component 33 Mesh_Renderer
+	mesh = $9486d4ef423a1cec3dcc39a1250a78f8
+	materials.0 = $b0de249d5bae464988ec7b909fbcac41
+	cast_shadows = true
+
+entity f0c5000000000008
+name = "Light 2"
+component 1 Transform
+	position = [2516582399966445568, 41943040, 503316480]
+	rotation = [0, 0, 0, 1]
+	scale = [0.3, 0.3, 0.3]
+component 33 Mesh_Renderer
+	mesh = $9486d4ef423a1cec3dcc39a1250a78f8
+	materials.0 = $b0de249d5bae464988ec7b909fbcac41
+	cast_shadows = true
+
+entity f0c5000000000009
+name = "Light 3"
+component 1 Transform
+	position = [2516582400000000000, 33554432, 503316480]
+	rotation = [0, 0, 0, 1]
+	scale = [0.3, 0.3, 0.3]
+component 33 Mesh_Renderer
+	mesh = $9486d4ef423a1cec3dcc39a1250a78f8
+	materials.0 = $b0de249d5bae464988ec7b909fbcac41
+	cast_shadows = true
+
+entity f0c500000000000a
+name = "Light 4"
+component 1 Transform
+	position = [2516582400033554432, 41943040, 503316480]
+	rotation = [0, 0, 0, 1]
+	scale = [0.3, 0.3, 0.3]
+component 33 Mesh_Renderer
+	mesh = $9486d4ef423a1cec3dcc39a1250a78f8
+	materials.0 = $b0de249d5bae464988ec7b909fbcac41
+	cast_shadows = true
+
+entity f0c500000000000b
+name = "Light 5"
+component 1 Transform
+	position = [2516582400067108864, 33554432, 503316480]
+	rotation = [0, 0, 0, 1]
+	scale = [0.3, 0.3, 0.3]
+component 33 Mesh_Renderer
+	mesh = $9486d4ef423a1cec3dcc39a1250a78f8
+	materials.0 = $b0de249d5bae464988ec7b909fbcac41
+	cast_shadows = true
