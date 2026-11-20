@@ -49,9 +49,8 @@ ease :: proc(curve: Curve, t: f32) -> f32 {
 
 // blend_views is the view a fraction t of the way from a to b. The position goes straight, and the rotation takes the
 // shortest arc. A perspective lens blends its field of view and its near plane, and an orthographic lens its height and
-// its planes. Views of different kinds cannot blend their lenses, so the lens snaps to b's.
-//
-// The lens fields that #532 adds to a view are blended here, in the same way.
+// its planes. Views of different kinds cannot blend their lenses, so the lens snaps to b's. Two perspective views blend
+// their physical lens too (see blend_physical_lens).
 blend_views :: proc(a, b: render.View, t: f32) -> render.View {
 	if t <= 0 {
 		return a
@@ -83,6 +82,7 @@ blend_views :: proc(a, b: render.View, t: f32) -> render.View {
 				to.near,
 				t,
 			)
+			view.lens = blend_physical_lens(a.lens, b.lens, t)
 		}
 	case render.Orthographic:
 		if to, same := b.projection.(render.Orthographic); same {
@@ -104,4 +104,35 @@ blend_lens :: proc(a, a_own, b, b_own, t: f32) -> f32 {
 		return 0
 	}
 	return linalg.lerp(a if a > 0 else a_own, b if b > 0 else b_own, t)
+}
+
+// blend_physical_lens blends the lenses that give the depth of field (see docs/rendering/post-processing.md#depth-of-field).
+// The aperture blends as 1 / f-number, which is 0 without depth of field, so the blur eases in and out as the lens's
+// opening does rather than through f/0.1. A side without depth of field takes the other's sensor and focus, so only
+// the opening changes.
+@(private)
+blend_physical_lens :: proc(a, b: render.Lens, t: f32) -> render.Lens {
+	if a.aperture <= 0 && b.aperture <= 0 {
+		return {}
+	}
+	from, to := a, b
+	if from.aperture <= 0 {
+		from = {sensor_height = to.sensor_height, focus_distance = to.focus_distance}
+	}
+	if to.aperture <= 0 {
+		to = {sensor_height = from.sensor_height, focus_distance = from.focus_distance}
+	}
+	opening := linalg.lerp(
+		from.aperture > 0 ? 1 / from.aperture : 0,
+		to.aperture > 0 ? 1 / to.aperture : 0,
+		t,
+	)
+	if opening <= 0 {
+		return {}
+	}
+	return {
+		sensor_height = linalg.lerp(from.sensor_height, to.sensor_height, t),
+		aperture = 1 / opening,
+		focus_distance = linalg.lerp(from.focus_distance, to.focus_distance, t),
+	}
 }
