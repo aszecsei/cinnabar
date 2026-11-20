@@ -1,6 +1,6 @@
 cutscene 1
 # A shot of 5 s that the intro plays as a sub-sequence (see docs/content/kinds/cutscenes.md). Times are ticks, 60000 a
-# second. It has no bindings of its own yet: sub-sequences pass their parent's bindings down (#545).
+# second. It has no bindings of its own.
 length = 300000
 rate = 30
 

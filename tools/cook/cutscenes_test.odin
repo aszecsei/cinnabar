@@ -733,6 +733,60 @@ a_cycle_of_sub_sequences_fails_every_cutscene_in_it_at_its_line :: proc(t: ^test
 }
 
 @(test)
+every_cutscene_of_a_cycle_fails_whatever_the_order_of_the_search :: proc(t: ^testing.T) {
+	// u names w and then v, v names w, and w names u: a search from u that meets w first still fails v.
+	u, v, w := sequence_guid(1), sequence_guid(2), sequence_guid(3)
+	two := fmt.tprintf(
+		`cutscene 1
+length = 60000
+track 1 sub_sequence "S"
+	section 1 0 60000
+		asset = $%s
+track 2 sub_sequence "T"
+	section 2 0 60000
+		asset = $%s
+`,
+		w,
+		v,
+	)
+	tree := make_tree(
+		t,
+		{
+			{"content/u.cutscene", two},
+			{"content/u.cutscene.meta", fmt.tprintf("guid = %s\n", u)},
+			{"content/v.cutscene", sub_sequence_text(w)},
+			{"content/v.cutscene.meta", fmt.tprintf("guid = %s\n", v)},
+			{"content/w.cutscene", sub_sequence_text(u)},
+			{"content/w.cutscene.meta", fmt.tprintf("guid = %s\n", w)},
+		},
+	)
+	defer remove_tree(tree)
+	pass := cook(tree_options(tree), {.Cutscene}, log_problems = false)
+	testing.expect(t, !pass.ok)
+	testing.expect_value(t, pass.cooked[.Cutscene], 0)
+	for name in ([?]string{"u", "v", "w"}) {
+		found := false
+		for p in pass.problems.list {
+			found ||=
+				strings.has_suffix(p.file, fmt.tprintf("/%s.cutscene", name)) &&
+				strings.contains(p.text, "sub-sequence cycle: ")
+		}
+		testing.expectf(t, found, "%s: %v", name, pass.problems.list)
+	}
+	found := false
+	for p in pass.problems.list {
+		found ||=
+			strings.has_suffix(p.file, "/v.cutscene") &&
+			p.line == 5 &&
+			strings.contains(
+				p.text,
+				"game/v.cutscene -> game/w.cutscene -> game/u.cutscene -> game/v.cutscene",
+			)
+	}
+	testing.expectf(t, found, "v's cycle and its line: %v", pass.problems.list)
+}
+
+@(test)
 sub_sequences_nest_at_most_eight_deep :: proc(t: ^testing.T) {
 	for count in ([?]int{format.CUTSCENE_MAX_DEPTH + 1, format.CUTSCENE_MAX_DEPTH + 2}) {
 		files := make([dynamic]struct {

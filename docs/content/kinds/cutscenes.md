@@ -8,7 +8,7 @@ Cutscenes are `.cutscene` text files in the content roots. A cutscene has bindin
 
 `just cutscenes` runs `cook cutscenes --cache build/<target>/content --config dev|release --root game=<content root> --root engine=lib/engine/content`. The daemon cooks cutscenes like any other kind (`tools/cook/cutscenes.odin`).
 
-No system plays cutscenes yet. The player and its lifecycle come with #535 and #536 of the cutscenes issue (#526).
+No system plays cutscenes yet: this page describes the asset, which the player, its tracks and the cutscene editor will read.
 
 ```
 cutscene 1
@@ -59,14 +59,14 @@ Every time in the text and in the blob is a whole number of **ticks**, `i32`, at
 - **IDs** are whole numbers from 1 to 2147483647. The editor and the runtime address bindings, tracks and sections by their IDs, not by their order, so a reorder or an insert does not break a reference.
   - Two bindings cannot have the same ID, and two tracks cannot have the same ID.
   - Each section's ID is unique in the whole cutscene.
-- **Names** are quoted. Each binding has a name that no other binding has, because a script gives a binding by its name (#547). A track's name can be empty.
+- **Names** are quoted. Each binding has a name that no other binding has, so that a binding can be named in place of its ID. A track's name can be empty.
 
 ### The cutscene
 
 | Setting | Value | Default |
 |---|---|---|
 | `length` | Ticks, from 1 | Needed |
-| `rate` | The display frame rate: 24, 25, 30, 48, 50 or 60. The editor shows timecode or frames at this rate, and snaps to frames. | 30 |
+| `rate` | The display frame rate: 24, 25, 30, 48, 50 or 60. It changes no time in the blob. | 30 |
 | `clock` | `game`, which the game's time scale and pause change, or `real` | `game` |
 | `range` | `[<start>, <end>]` in ticks: the part that plays. 0 ≤ start < end ≤ length. | `[0, <length>]` |
 
@@ -94,18 +94,18 @@ A parent must come before its child, so parents cannot form a cycle.
 | `muted` | `true` or `false`. A muted track does nothing. | `false` |
 | `when_finished` | `restore`: the player puts back the fields that the track wrote. `keep`: they stay as the cutscene left them. | `restore` |
 
-The kind of a track decides whether it takes a binding, and what each of its sections names with `asset`. The issues of the cutscenes epic each give one kind its own data and its evaluation:
+The kind of a track decides whether it takes a binding, and what each of its sections names with `asset`. The kinds have no data of their own yet, besides their channels and assets:
 
-| Kind | Binding | Section's asset | Issue |
-|---|---|---|---|
-| `transform` | Needed | None | #539 |
-| `property` | Needed | None | #540 |
-| `animation` | Needed | An animation clip, a sub-asset of a glTF model | #541 |
-| `camera_cut` | None | None | #542 |
-| `audio` | Optional | A sound | #543 |
-| `event` | Optional | None | #544 |
-| `sub_sequence` | None | A cutscene | #545 |
-| `presentation` | None | None | #546 |
+| Kind | Binding | Section's asset |
+|---|---|---|
+| `transform` | Needed | None |
+| `property` | Needed | None |
+| `animation` | Needed | An animation clip, a sub-asset of a glTF model |
+| `camera_cut` | None | None |
+| `audio` | Optional | A sound |
+| `event` | Optional | None |
+| `sub_sequence` | None | A cutscene |
+| `presentation` | None | None |
 
 ### Sections
 
@@ -119,7 +119,7 @@ The kind of a track decides whether it takes a binding, and what each of its sec
 
 ### Channels and keys
 
-`channel <name>` starts a curve of the section. Its name is letters, digits and `_`, and no other channel of the section has it. Its track's kind gives the names their meaning. A channel has at least one key.
+`channel <name>` starts a curve of the section. Its name is letters, digits and `_`, and no other channel of the section has it. Its track's kind will give the names their meaning; for now, any name is good. A channel has at least one key.
 
 `key <time> <value> <interp> [<in> <out>]`:
 - **The time** is in ticks from the section's start, from 0 to the section's duration. So a section moves without a change to its keys. Each key comes after the one before it.
@@ -174,8 +174,8 @@ Each track's sections follow those of the track before it. The same is true of e
   - more than `MAX_CUTSCENE_BINDINGS` (1024) bindings, `MAX_CUTSCENE_TRACKS` (1024) tracks, `MAX_CUTSCENE_SECTIONS` (8192) sections, `MAX_CUTSCENE_CHANNELS` (65536) channels or `MAX_CUTSCENE_KEYS` (2^20) keys.
 - **A cutscene with a problem** keeps its old blob, so the running game keeps the last good version.
 - **Sub-sequences.** The cooker reads each sub-sequence's source, not its blob, so the order of the passes does not matter. A pass that cooks one cutscene checks every cutscene, because a cycle or a depth is a property of all the cutscenes that it reaches.
-- **The cooker does not check** that a possessed entity is in its scene, because that needs the scene's prefabs expanded. The player applies the binding's policy when the entity is missing (#534).
+- **The cooker does not check** that a possessed entity is in its scene, because that needs the scene's prefabs expanded. The binding's policy says what to do when the entity is missing at run time.
 - **Dependencies.** The cooker adds each GUID that the cutscene names to its dependencies, the possessed scenes included. So a fix to one of these assets cooks the cutscene again.
 - **The cache key** covers the cooker version, the layout, the source path, the source and the GUID.
-- **Hot reload:** a cooked cutscene reaches the game as any blob does (see [Blobs and loading: Loading](../blobs-and-loading.md#loading)). A player that runs a cutscene whose blob changes evaluates the new blob at its current time (#536).
-- **The editor** shows cutscenes among the animation in the content browser, with a clapperboard icon, and opens them as text in the script editor until the cutscene editor (#548) comes. **New Cutscene**, in the content browser's menu and in the Gameplay tab's New Asset group, makes a cutscene of 10 s at 30 frames a second.
+- **Hot reload:** a cooked cutscene reaches the game as any blob does (see [Blobs and loading: Loading](../blobs-and-loading.md#loading)). Nothing plays a cutscene yet, so nothing reacts to a new blob.
+- **The editor** shows cutscenes among the animation in the content browser, with a clapperboard icon, and opens them as text in the script editor until a cutscene editor exists. **New Cutscene**, in the content browser's menu and in the Gameplay tab's New Asset group, makes a cutscene of 10 s at 30 frames a second.

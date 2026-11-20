@@ -130,69 +130,70 @@ Cutscene_Graph :: struct {
 	nodes:   []Cutscene_Node,
 }
 
-// cutscene_cycles finds each cycle of sub-sequences, and gives each of its cutscenes a problem at the line that names
-// the next one, with the cycle's path.
+// cutscene_cycles gives each cutscene that reaches itself through its sub-sequences a problem at the line that names the
+// next cutscene on its shortest cycle, with the cycle's path. Every cutscene of a cycle reaches itself, so each one fails,
+// whatever order the scan found them in.
 @(private = "file")
 cutscene_cycles :: proc(graph: ^Cutscene_Graph, assets: []Asset_Source) {
-	State :: enum u8 {
-		New,
-		Visiting,
-		Done,
-	}
-	states := make([]State, len(graph.nodes), context.temp_allocator)
-	// Each node on the path, and the line by which it names the next.
-	Step :: struct {
-		node, line: int,
-	}
-	stack := make([dynamic]Step, context.temp_allocator)
-	visit :: proc(
-		graph: ^Cutscene_Graph,
-		assets: []Asset_Source,
-		states: []State,
-		stack: ^[dynamic]Step,
-		n: int,
-	) {
-		states[n] = .Visiting
-		append(stack, Step{n, 0})
+	// A breadth-first search from each cutscene's children, which notes how it reached each cutscene, so the path back
+	// to the start is the shortest.
+	from := make([]int, len(graph.nodes), context.temp_allocator)
+	queue := make([dynamic]int, context.temp_allocator)
+	for n in 0 ..< len(graph.nodes) {
+		slice.fill(from, -2)
+		clear(&queue)
 		for c in graph.nodes[n].children {
-			stack[len(stack) - 1].line = c.line
-			switch states[c.node] {
-			case .New:
-				visit(graph, assets, states, stack, c.node)
-			case .Visiting:
-				start := 0
-				for s, i in stack {
-					if s.node == c.node {
-						start = i
-						break
-					}
-				}
-				builder := strings.builder_make(context.temp_allocator)
-				for s in stack[start:] {
-					fmt.sbprintf(&builder, "%s -> ", assets[graph.nodes[s.node].asset].name)
-				}
-				strings.write_string(&builder, assets[graph.nodes[c.node].asset].name)
-				for s in stack[start:] {
-					node := &graph.nodes[s.node]
-					node.in_cycle = true
-					append(
-						&node.graph_problems,
-						Cutscene_Problem {
-							s.line,
-							fmt.tprintf("sub-sequence cycle: %s", strings.to_string(builder)),
-						},
-					)
-				}
-			case .Done:
+			if from[c.node] == -2 {
+				from[c.node] = -1
+				append(&queue, c.node)
 			}
 		}
-		pop(stack)
-		states[n] = .Done
-	}
-	for n in 0 ..< len(graph.nodes) {
-		if states[n] == .New {
-			visit(graph, assets, states, &stack, n)
+		for head := 0; head < len(queue) && from[n] == -2; head += 1 {
+			at := queue[head]
+			for c in graph.nodes[at].children {
+				if from[c.node] == -2 {
+					from[c.node] = at
+					append(&queue, c.node)
+				}
+			}
 		}
+		if from[n] == -2 {
+			continue
+		}
+		// The path from n back to n, walked backwards from n.
+		path := make([dynamic]int, context.temp_allocator)
+		for at := n; true; {
+			append(&path, at)
+			at = from[at]
+			if at == -1 {
+				break
+			}
+		}
+		append(&path, n)
+		slice.reverse(path[:])
+		builder := strings.builder_make(context.temp_allocator)
+		for at, i in path {
+			if i > 0 {
+				strings.write_string(&builder, " -> ")
+			}
+			strings.write_string(&builder, assets[graph.nodes[at].asset].name)
+		}
+		node := &graph.nodes[n]
+		line := 0
+		for c in node.children {
+			if c.node == path[1] {
+				line = c.line
+				break
+			}
+		}
+		node.in_cycle = true
+		append(
+			&node.graph_problems,
+			Cutscene_Problem {
+				line,
+				fmt.tprintf("sub-sequence cycle: %s", strings.to_string(builder)),
+			},
+		)
 	}
 }
 

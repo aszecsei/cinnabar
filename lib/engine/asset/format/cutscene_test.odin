@@ -371,6 +371,37 @@ cutscene_blobs_with_bad_records_are_refused :: proc(t: ^testing.T) {
 }
 
 @(test)
+cutscene_blobs_past_a_table_limit_are_refused :: proc(t: ^testing.T) {
+	bindings := make(
+		[]Cutscene_Binding_Contents,
+		MAX_CUTSCENE_BINDINGS + 1,
+		context.temp_allocator,
+	)
+	for &b, i in bindings {
+		b = {
+			id       = u32(i + 1),
+			kind     = .Spawned,
+			name     = "B",
+			parent   = CUTSCENE_NONE,
+			asset    = PREFAB,
+			rotation = {0, 0, 0, 1},
+			scale    = {1, 1, 1},
+		}
+	}
+	contents := Cutscene_Contents {
+		length    = 60000,
+		rate      = 30,
+		range_end = 60000,
+		bindings  = bindings,
+	}
+	_, ok := cutscene_view(aligned(cutscene_write(contents, context.temp_allocator)))
+	testing.expect(t, !ok, "more bindings than MAX_CUTSCENE_BINDINGS")
+	contents.bindings = bindings[:MAX_CUTSCENE_BINDINGS]
+	_, ok = cutscene_view(aligned(cutscene_write(contents, context.temp_allocator)))
+	testing.expect(t, ok, "MAX_CUTSCENE_BINDINGS bindings")
+}
+
+@(test)
 cutscene_blob_references_name_prefabs_clips_sounds_and_sub_sequences :: proc(t: ^testing.T) {
 	references, ok := blob_references(test_cutscene(), context.temp_allocator)
 	testing.expect(t, ok)
