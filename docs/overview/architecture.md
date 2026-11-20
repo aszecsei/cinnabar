@@ -30,7 +30,7 @@ Details: [Core](../core/README.md).
 One frame runs these phases in order:
 
 1. Poll platform events and input.
-2. Run the fixed ticks that are due (zero or more). Each tick runs the `Fixed` systems (parallel jobs) and applies their structural changes, runs the scripts' fixed step (serial: `fixed_update`, then the tick's events and `wait_fixed` coroutines), and propagates transforms.
+2. Advance the cutscenes on the real clock, and write their `Fixed` tracks. Then run the fixed ticks that are due (zero or more). Each tick runs the `Fixed` systems (parallel jobs) and applies their structural changes, runs the scripts' fixed step (serial: `fixed_update`, then the tick's events and `wait_fixed` coroutines), and propagates transforms.
 3. Run the `Update` systems (parallel jobs).
 4. Apply queued structural changes to the world.
 5. Run the script phase (serial): behaviour lifecycle callbacks, events, opt-in `update` calls and due coroutines. In the editor's edit mode, the edit phase runs in its place, for the behaviours that run in edit mode ([Scripting](../scripting/behaviours.md#edit-mode)).
@@ -39,7 +39,7 @@ One frame runs these phases in order:
 8. Record render command lists. Render extraction interpolates between the last two ticks.
 9. Drain the job system. This is the hot-reload point.
 
-Phases 2 to 7 are the world's ([World](../world/ecs.md#systems) has the stages, and [Scripting](../scripting/behaviours.md#frame) the script phase's steps). Phase 8 is the renderer's ([Rendering](../rendering/frame.md#frame)). Between phases 9 and 1 of the next frame, while no job runs, the host reloads the DLL if a new build exists, and hands the editor's messages to the game ([Editor](../editor/link.md#editor-link)).
+Phases 2 to 7 are the world's ([World](../world/ecs.md#systems) has the stages, and [Scripting](../scripting/behaviours.md#frame) the script phase's steps). The cutscenes' `cutscene fixed` and `cutscene late` systems run first and alone in the `Fixed` and `Late` stages, so the rest of the tick and the frame see what their tracks wrote ([Cinematics: Evaluation](../cinematics/evaluation.md#the-order-in-the-frame)). Phase 8 is the renderer's ([Rendering](../rendering/frame.md#frame)). Between phases 9 and 1 of the next frame, while no job runs, the host reloads the DLL if a new build exists, and hands the editor's messages to the game ([Editor](../editor/link.md#editor-link)).
 
 ## World model
 

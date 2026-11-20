@@ -8,7 +8,7 @@ Cutscenes are `.cutscene` text files in the content roots. A cutscene has bindin
 
 `just cutscenes` runs `cook cutscenes --cache build/<target>/content --config dev|release --root game=<content root> --root engine=lib/engine/content`. The daemon cooks cutscenes like any other kind (`tools/cook/cutscenes.odin`).
 
-This page describes the asset. [Cinematics](../../cinematics/README.md) describes how the game resolves its bindings. The player, its tracks and the cutscene editor are not built yet.
+This page describes the asset. [Cinematics](../../cinematics/README.md) describes how the game resolves its bindings and evaluates its tracks. The player, the tracks of each kind and the cutscene editor are not built yet.
 
 ```
 cutscene 1
@@ -115,6 +115,7 @@ The kind of a track decides whether it takes a binding, and what each of its sec
 |---|---|---|
 | `ease_in`, `ease_out` | Ticks. Together they are at most the section's duration. | 0 |
 | `weight` | A number from 0 to 1 | 1 |
+| `pre_roll`, `post_roll` | Ticks before the start and after the end in which the section holds its first and last values ([Cinematics: Sections and blending](../../cinematics/evaluation.md#sections-and-blending)) | 0 |
 | `asset` | `$<guid>`. Needed for a kind that names an asset, and a problem for the others. | — |
 
 ### Channels and keys
@@ -136,7 +137,7 @@ A `Cutscene_Blob` (`lib/engine/asset/format/cutscene.odin`) holds the length, th
   - its parent's index or `CUTSCENE_NONE`;
   - its position as `[3]i64` `World_Position` units, its rotation and its scale.
 - **`Cutscene_Track`:** its ID, kind, name, binding's index or `CUTSCENE_NONE`, flags (`.Muted`), when-finished, and its first section and count.
-- **`Cutscene_Section`:** its ID, start, end, eases, weight, asset GUID (zero for a kind that names none), and its first channel and count.
+- **`Cutscene_Section`:** its ID, start, end, eases, weight, pre-roll and post-roll, asset GUID (zero for a kind that names none), and its first channel and count.
 - **`Cutscene_Channel`:** its name and the name's hash, and its first key and count.
 - **`Cutscene_Key`:** its time from the section's start, its value, its interpolation and its two tangents.
 
@@ -147,7 +148,7 @@ Each track's sections follow those of the track before it. The same is true of e
 - that each binding's parent is a spawned binding before it;
 - that each track's binding suits its kind;
 - that the tables split exactly, with no gaps and no overlaps;
-- each section's times, eases, weight and asset against its kind;
+- each section's times, eases, rolls, weight and asset against its kind;
 - that every channel has keys;
 - that each key is inside its section, comes after the key before it, has a known interpolation and has finite numbers.
 
@@ -164,7 +165,7 @@ Each track's sections follow those of the track before it. The same is true of e
   - a parent that is not a spawned binding before this one;
   - a position outside the bounds of a `World_Position`, a rotation that is not of length 1, or a scale of 0;
   - a track's kind that is unknown, a track without the binding that its kind needs, a binding that its kind does not take, or a binding ID that no binding has;
-  - eases longer than the section, or a weight outside 0 to 1;
+  - eases longer than the section, a pre-roll or post-roll that is not a whole number of ticks, or a weight outside 0 to 1;
   - a section without the asset that its kind needs, or with one that its kind does not take;
   - a channel's name that is not a name or is taken, or a channel without keys;
   - a key's time outside its section or not after the key before it, a value that is not finite, an unknown interpolation, or tangents that are missing or not wanted;
@@ -177,5 +178,5 @@ Each track's sections follow those of the track before it. The same is true of e
 - **The cooker does not check** that a possessed entity is in its scene, because that needs the scene's prefabs expanded. The binding's policy says what to do when the entity is missing at run time ([Cinematics: A missing binding](../../cinematics/bindings.md#a-missing-binding)).
 - **Dependencies.** The cooker adds each GUID that the cutscene names to its dependencies, the possessed scenes included. So a fix to one of these assets cooks the cutscene again.
 - **The cache key** covers the cooker version, the layout, the source path, the source and the GUID.
-- **Hot reload:** a cooked cutscene reaches the game as any blob does (see [Blobs and loading: Loading](../blobs-and-loading.md#loading)). Nothing plays a cutscene yet, so nothing reacts to a new blob.
+- **Hot reload:** a cooked cutscene reaches the game as any blob does (see [Blobs and loading: Loading](../blobs-and-loading.md#loading)). A cutscene that plays evaluates the new blob at its current time, and the fields of the tracks that the new blob removed go back ([Cinematics: Hot reload](../../cinematics/evaluation.md#hot-reload)).
 - **The editor** shows cutscenes among the animation in the content browser, with a clapperboard icon, and opens them as text in the script editor until a cutscene editor exists. **New Cutscene**, in the content browser's menu and in the Gameplay tab's New Asset group, makes a cutscene of 10 s at 30 frames a second.
