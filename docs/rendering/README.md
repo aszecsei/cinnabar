@@ -70,6 +70,7 @@ Read them in this order the first time.
 | `post.odin` | Temporal AA, exposure, bloom, the tone mapping lookup table ([Post-processing](post-processing.md#post-processing)) |
 | `spatial_aa.odin` | The tone map pass, FXAA and SMAA 1x ([Anti-aliasing](anti-aliasing.md#anti-aliasing)) |
 | `upscalers.odin` | FSR's upscaler and its motion pass ([Anti-aliasing](anti-aliasing.md#fsr)) |
+| `depth_of_field.odin` | The depth of field from the camera's lens ([Depth of field](post-processing.md#depth-of-field)) |
 | `post_effects.odin` | A game's own post passes at fixed points ([Post effects](post-processing.md#post-effects)) |
 | `debug_views.odin` | The editor's debug views and feature toggles ([Debug views](post-processing.md#debug-views)) |
 | `preview.odin` | Material previews into their own shared targets ([Material previews](materials.md#material-previews)) |

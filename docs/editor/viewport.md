@@ -107,6 +107,7 @@ Each viewport has a toolbar at its top left, with a menu for each part of what i
   | Surfaces | `Albedo`, `Roughness`, `Normals` |
   | Geometry | `Depth`, `Velocity`, `Entity_Ids`, `Meshlets`, `Lod_Depth` |
   | Atmosphere | `Fog`, `Clouds` |
+  | Camera | `Circle_Of_Confusion` |
   | Cost | `Transparent_Overdraw`, `Quad_Overdraw` |
 
 - **Show's features** are Temporal AA, Bloom, Tone Mapping, Fog, Clouds, Ambient Occlusion, Global Illumination, Shadows, Post Effects, Occlusion Culling and Meshlet Hierarchy, each on until turned off. Shapes is None, Selected or All. Exposure shows the viewport's offset in stops when it is not 0. Frame Statistics shows the frame rates and the adapter over the viewport.

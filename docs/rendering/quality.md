@@ -28,6 +28,7 @@ A volume says how far the ambient occlusion reaches; the quality says how many s
 | `reflections.level` | `Low` … `Ultra` | The technique's parameters (`REFLECTION_PARAMS`, a table for each technique, in `reflections.odin`). `Off`'s are empty. `Probes`' are the faces' size, the slots, the faces a frame and the roughness fade over the GI, which `Screen` keeps for its probes. `Screen`'s are the block of pixels that one pixel's rays start from, the rays a pixel, the march's steps and the roughness cutoff. `Ray_Traced`'s are the block, the steps of the march on the screen before a ray traces, the roughness cutoff and the distance past which a hit has no weight, and it keeps the probes' too. At every technique, `Off` too, the sky's [cubemap](sky.md#specular-light)'s faces, format and samples (`SKY_CUBE_PARAMS`) |
 | `fog` | `Low` … `Ultra` | The fog volume's tile (`FOG_LEVEL_TILE`, 16 pixels at every level; see [Fog: Tile size](fog.md#tile-size)) and depth slices (`FOG_LEVEL_SLICES`) |
 | `clouds` | `Low` … `Ultra` | The [clouds](clouds.md#levels)' buffer's share of the frame, the march's steps and light steps, the shadow map's size and steps, and the history's frames (`CLOUD_PARAMS`) |
+| `depth_of_field` | `Off`, `Gather`, `Bokeh` | The [depth of field](post-processing.md#depth-of-field)'s gather: none, a cheap one on a disk, or one with more taps on the aperture's polygon. Low gives `Off`, so the pass is not in the frame's graph, Medium `Gather`, and High and Ultra `Bokeh` |
 | `aa` | `Off`, `Taa`, `Fxaa`, `Smaa`, `Fsr` | The [anti-aliasing](anti-aliasing.md#anti-aliasing). `Fsr` needs the device to run it |
 | `render_scale` | `MIN_RENDER_SCALE` (0.5) to 1; 0 gives 1 | The scene's share of the frame's width and height, which temporal AA and FSR [upscale](anti-aliasing.md#upscaling) and the output pass otherwise stretches |
 | `lod_error` | `MIN_LOD_ERROR` (0.25) to `MAX_LOD_ERROR` (8) pixels; 0 gives 1 | The largest error that the mesh shader path's [levels of detail](gpu-scene.md#mesh-shader-path) may show: 2, 1.5, 1 and 0.5 pixels from Low to Ultra (`LOD_ERRORS`) |
@@ -82,6 +83,7 @@ So a room whose volume turns the ambient occlusion off has none at Ultra, and a 
 - **The world probes' levels** (`GI_PROBE_PARAMS`): Low has 2 levels from 2 m with 32 rays and 1024 probes a frame; Medium 3 levels from 1 m with 64 rays and 2048; High 4096; Ultra 4 levels and 8192. At High, the probes trace 262 144 rays a frame and every probe updates within 12 frames. Every level clamps a ray's pre-exposed luminance to 16 before the update (`radiance_max`, see [World probes](global-illumination.md#world-probes)), and so does every level of the traced reflections (`REFLECTION_PARAMS[.Ray_Traced]`).
 - **GI's levels** trade probes for cascades: each cascade's interval is four times as long as the one before, from a length that scales with the spacing, so sparser probes need fewer cascades to reach as far. Sparser probes are noisier, so their histories average over more frames. The spacing and the steps are in `Gi_Constants`.
 - **Fog's slices** reach the injection in `Fog_Push.grid.z` and the forward pass in `Frame_Constants.fog_slices`, and its tile reaches the injection and the integration in `Fog_Push.tile` and `Integrate_Push.tile`.
+- **The depth of field's levels** (`DOF_PARAMS`, see [Depth of field](post-processing.md#depth-of-field)) are its technique's: `Off` at Low, `Gather` at Medium, 24 taps on a disk up to a radius of 1.5% of the height, and `Bokeh` at High and Ultra, 64 taps on a hexagon up to 3%, whose highlights weigh more.
 - **The clouds' levels** (`CLOUD_PARAMS`, see [Clouds](clouds.md#levels)) are the cloud buffer's share of the frame on each side, the march's steps and its light steps, the shadow map's size and its steps, and the history's frames, 8 at Low to 16 at High and Ultra.
 
 ## Hardware caps
@@ -123,6 +125,7 @@ The player's choice is in the [project settings](../overview/architecture.md#pro
 | `quality.reflections.level` | `Low` … `Ultra`; a file without it keeps the preset's |
 | `quality.fog` | `Low` … `Ultra` |
 | `quality.clouds` | `Low` … `Ultra`; a file without it keeps the preset's |
+| `quality.depth_of_field` | `Off`, `Gather`, `Bokeh`; a file without it keeps the preset's |
 | `quality.aa` | `Off`, `Taa`, `Fxaa`, `Smaa`, `Fsr` |
 | `quality.render_scale` | A number from 0.5 to 1 |
 | `quality.lod_error` | A number of pixels from 0.25 to 8 |
