@@ -137,8 +137,8 @@ register_input_actions :: proc(r: ^Runtime) {
 				"a context name of 1 to %d bytes expected",
 				c.int(core.INPUT_ACTION_NAME_CAPACITY),
 			)
-		case .Gameplay:
-			luau.L_errorL(L, "the gameplay context allows every action and cannot be defined")
+		case .Default:
+			luau.L_errorL(L, "the default context allows every action and cannot be defined")
 		case .Full:
 			luau.L_errorL(L, "no room for more than %d contexts", c.int(core.MAX_INPUT_CONTEXTS))
 		}

@@ -10,11 +10,11 @@ namespace Cinnabar.Editor.Tests;
 public sealed class InputContextTests
 {
     [Fact]
-    public void TheResourceMonitorShowsEachPushOverGameplay()
+    public void TheResourceMonitorShowsEachPushOverTheDefault()
     {
         var reader = new LinkReader(new byte[1024]);
         var none = GameStats.Read(ref reader);
-        Assert.Equal([("gameplay", "every action")], ResourceMonitorView.InputContextRows(none));
+        Assert.Equal([("default", "every action")], ResourceMonitorView.InputContextRows(none));
 
         var stats = none with
         {
@@ -30,7 +30,7 @@ public sealed class InputContextTests
                 ("menu", "PauseMenu, pad 2"),
                 ("cutscene", "Cutscene, every pad"),
                 ("dialog", "script, pads 1, 3"),
-                ("gameplay", "every action"),
+                ("default", "every action"),
             ],
             ResourceMonitorView.InputContextRows(stats));
     }

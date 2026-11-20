@@ -140,14 +140,14 @@ public sealed class ResourceMonitorView : Grid
         }
     }
 
-    // The input contexts' pushes, the top first, and gameplay under them (see docs/core/input.md#contexts).
+    // The input contexts' pushes, the top first, and the default under them (see docs/core/input.md#contexts).
     internal static IEnumerable<(string Name, string Value)> InputContextRows(Link.Protocol.GameStats g)
     {
         foreach (var c in g.InputContexts)
         {
             yield return (c.Name, $"{c.Pusher}, {Pads(c.Players)}");
         }
-        yield return ("gameplay", "every action");
+        yield return ("default", "every action");
     }
 
     // The pads whose stacks a push is on, from a bit each from pad 1's.

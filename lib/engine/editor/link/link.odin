@@ -1426,7 +1426,7 @@ Game_Stats :: struct {
 	// The bytes that the reflections keep between frames: the probes' cubes and the screen-space or traced
 	// reflections' histories (see render.reflection_memory).
 	reflection_memory:          u64,
-	// The input contexts' pushes, the top first, none while every stack is gameplay alone.
+	// The input contexts' pushes, the top first, none while every stack is the default alone.
 	input_contexts:             []Input_Context_Stats,
 }
 

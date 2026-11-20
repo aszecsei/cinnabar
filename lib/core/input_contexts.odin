@@ -1,13 +1,13 @@
 package core
 
-// The contexts that the game can define besides gameplay.
+// The contexts that the game can define besides the default.
 MAX_INPUT_CONTEXTS :: 16
 // The pushes that the stacks hold at once, across every player.
 MAX_INPUT_CONTEXT_PUSHES :: 32
 INPUT_CONTEXT_PUSHER_CAPACITY :: 32
 
-// GAMEPLAY_CONTEXT is the context under every stack. It allows every action, and the game cannot define it again.
-GAMEPLAY_CONTEXT :: "gameplay"
+// DEFAULT_CONTEXT is the context under every stack. It allows every action, and the game cannot define it again.
+DEFAULT_CONTEXT :: "default"
 
 // Input_Action_Set is a set of actions by their index in Input_Actions.
 Input_Action_Set :: bit_set[0 ..< MAX_INPUT_ACTIONS;u32]
@@ -52,7 +52,7 @@ Input_Context_Owner :: struct {
 // Input_Context_Push is one push: on the stack of each of its players, at the same place in push order.
 Input_Context_Push :: struct {
 	token:         Input_Context_Token,
-	// 0 is gameplay, and n is defined[n - 1].
+	// 0 is the default, and n is defined[n - 1].
 	ctx:           u8,
 	players:       Input_Players,
 	owner:         Input_Context_Owner,
@@ -75,9 +75,9 @@ Input_Contexts :: struct {
 	held:          [MAX_GAMEPADS]Input_Action_Set,
 }
 
-// input_contexts_find is the index of the context with a name, 0 for gameplay, or -1.
+// input_contexts_find is the index of the context with a name, 0 for the default, or -1.
 input_contexts_find :: proc "contextless" (contexts: ^Input_Contexts, name: string) -> int {
-	if name == GAMEPLAY_CONTEXT {
+	if name == DEFAULT_CONTEXT {
 		return 0
 	}
 	for &d, i in contexts.defined[:contexts.defined_count] {
@@ -91,7 +91,7 @@ input_contexts_find :: proc "contextless" (contexts: ^Input_Contexts, name: stri
 // input_context_name is the name of the context at an index that input_contexts_find gave.
 input_context_name :: proc "contextless" (contexts: ^Input_Contexts, index: int) -> string {
 	if index == 0 {
-		return GAMEPLAY_CONTEXT
+		return DEFAULT_CONTEXT
 	}
 	d := &contexts.defined[index - 1]
 	return string(d.name[:d.name_length])
@@ -100,13 +100,13 @@ input_context_name :: proc "contextless" (contexts: ^Input_Contexts, index: int)
 Input_Context_Error :: enum u8 {
 	None,
 	Name,
-	Gameplay,
+	Default,
 	Full,
 }
 
 // input_contexts_define makes a context, or gives one that exists its new mode and actions. A context that is on a
 // stack changes there at once, and an action that the change allows again is held as a pop's would be. It fails for
-// an empty or too long name, for gameplay, and for a full table.
+// an empty or too long name, for the default, and for a full table.
 input_contexts_define :: proc "contextless" (
 	contexts: ^Input_Contexts,
 	name: string,
@@ -119,8 +119,8 @@ input_contexts_define :: proc "contextless" (
 	if len(name) == 0 || len(name) > INPUT_ACTION_NAME_CAPACITY {
 		return -1, .Name
 	}
-	if name == GAMEPLAY_CONTEXT {
-		return -1, .Gameplay
+	if name == DEFAULT_CONTEXT {
+		return -1, .Default
 	}
 	index = input_contexts_find(contexts, name)
 	if index < 0 {
@@ -219,7 +219,7 @@ input_context_pusher :: proc "contextless" (push: ^Input_Context_Push) -> string
 }
 
 // input_contexts_allows is whether a player's stack lets an action through: the top push that names the player and
-// does not pass the action down decides, and gameplay, under every stack, allows it.
+// does not pass the action down decides, and the default, under every stack, allows it.
 input_contexts_allows :: proc "contextless" (
 	contexts: ^Input_Contexts,
 	player: int,

@@ -165,7 +165,7 @@ a_context_can_pass_what_it_does_not_name_to_the_one_below :: proc(t: ^testing.T)
 	testing.expect(t, action_down(&actions, &input, confirm))
 	testing.expect(t, action_down(&actions, &input, skip))
 	testing.expect(t, !action_down(&actions, &input, jump))
-	// Over gameplay alone, a pass blocks nothing.
+	// Over the default alone, a pass blocks nothing.
 	actions.contexts.push_count = 0
 	input_contexts_push(&actions.contexts, dialog)
 	testing.expect(t, action_down(&actions, &input, jump))
@@ -211,17 +211,17 @@ an_owner_pops_its_pushes :: proc(t: ^testing.T) {
 }
 
 @(test)
-gameplay_is_under_every_stack :: proc(t: ^testing.T) {
+the_default_is_under_every_stack :: proc(t: ^testing.T) {
 	actions: Input_Actions
 	jump := define_action(&actions, "jump", "key:Space")
 	cutscene := define_context(&actions, "cutscene", .Only, {})
 	input: Input
 	input_key_down(&input, .Space)
-	testing.expect_value(t, input_contexts_find(&actions.contexts, "gameplay"), 0)
-	_, err := input_contexts_define(&actions.contexts, "gameplay", .Only, {})
-	testing.expect_value(t, err, Input_Context_Error.Gameplay)
+	testing.expect_value(t, input_contexts_find(&actions.contexts, "default"), 0)
+	_, err := input_contexts_define(&actions.contexts, "default", .Only, {})
+	testing.expect_value(t, err, Input_Context_Error.Default)
 	input_contexts_push(&actions.contexts, cutscene)
-	// Gameplay pushed over a cutscene, as a menu might, allows every action again.
+	// The default pushed over a cutscene, as a menu might, allows every action again.
 	input_contexts_push(&actions.contexts, 0)
 	testing.expect(t, action_down(&actions, &input, jump))
 	testing.expect(t, input_contexts_push(&actions.contexts, 5) == 0)

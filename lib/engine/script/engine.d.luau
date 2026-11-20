@@ -133,7 +133,7 @@ declare Input: {
 	bindings: (name: string) -> { string },
 	-- Input contexts: named sets of the actions that a push lets through (see docs/core/input.md#contexts). A context
 	-- allows the actions that it names, or "all". With pass_through, the context below it decides for the actions that
-	-- it does not name; without it, it blocks them. "gameplay", under every stack, allows every action. The actions must
+	-- it does not name; without it, it blocks them. "default", under every stack, allows every action. The actions must
 	-- be defined first.
 	define_context: (name: string, actions: { string } | "all", pass_through: boolean?) -> (),
 	-- Pushes a context on the stack of a pad of 1 to 4, or of every pad for nil. The keys read the stack of pad 1. The
