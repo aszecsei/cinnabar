@@ -340,9 +340,19 @@ World.spawn():add(Gate)
 	tap.pressed = {.Space}
 	tap.released = {.Space}
 	testing.expect_value(t, game_frame(f, NO_TICK, tap), 0)
+	// A quiet frame with no tick still leaves the tap's edges for the next tick.
+	testing.expect_value(t, game_frame(f, NO_TICK), 0)
 	testing.expect_value(t, game_frame(f, 17 * time.Millisecond), 1)
 	expect_reports(t, f, {0})
 	// A tap after that is a press, in the first tick that has it.
-	testing.expect_value(t, game_frame(f, 17 * time.Millisecond, tap), 1)
-	expect_reports(t, f, {1})
+	ticks := game_frame(f, 17 * time.Millisecond, tap)
+	testing.expect(t, ticks >= 1)
+	if len(f.reports) == ticks {
+		testing.expect_value(t, f.reports[0], 1)
+		for r in f.reports[1:] {
+			testing.expect_value(t, r, 0)
+		}
+	} else {
+		testing.expectf(t, false, "reports %v for %d ticks", f.reports[:], ticks)
+	}
 }

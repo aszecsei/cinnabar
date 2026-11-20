@@ -111,4 +111,5 @@ begin_fixed :: proc(r: ^Runtime) {
 end_fixed :: proc(r: ^Runtime) {
 	leave_phase(r, .Fixed)
 	drain_log(r)
+	settle_contexts(r)
 }

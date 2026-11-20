@@ -235,3 +235,29 @@ e:destroy()
 	testing.expect_value(t, contexts.push_count, 0)
 	release(&f.runtime, thread)
 }
+
+// A pop on quiet input holds nothing past its frame, so a press in the next frame is a press.
+@(test)
+a_press_in_the_frame_after_a_pop_is_pressed :: proc(t: ^testing.T) {
+	f := setup_world(t)
+	defer teardown_world(f)
+	context.user_ptr = f
+	begin_phase(&f.runtime, 16 * time.Millisecond, {})
+	_, ok := spawn_source(
+		&f.runtime,
+		"=after",
+		`
+Input.define_action("jump", { "key:Space" })
+Input.define_context("cutscene", {})
+Input.push_context("cutscene"):pop()
+`,
+	)
+	testing.expect(t, ok)
+	end_phase(&f.runtime)
+	press: core.Input
+	press.down = {.Space}
+	press.pressed = {.Space}
+	begin_phase(&f.runtime, 16 * time.Millisecond, press)
+	testing.expect(t, core.action_pressed(&f.runtime.input_actions, &f.runtime.input, 0))
+	end_phase(&f.runtime)
+}

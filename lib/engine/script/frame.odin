@@ -68,7 +68,7 @@ set_time :: proc(r: ^Runtime, delta, world_time: f64, in_fixed: bool) {
 @(private)
 set_input :: proc(r: ^Runtime, input: core.Input) {
 	r.input = input
-	core.input_contexts_settle(&r.input_actions, &r.input)
+	settle_contexts(r)
 	L := r.L
 	luau.getref(L, r.input_table)
 	luau.setreadonly(L, -1, false)
@@ -92,6 +92,7 @@ set_input :: proc(r: ^Runtime, input: core.Input) {
 end_phase :: proc(r: ^Runtime) {
 	leave_phase(r, .Variable)
 	drain_log(r)
+	settle_contexts(r)
 	step(r)
 }
 

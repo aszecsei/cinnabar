@@ -181,6 +181,24 @@ register_input_actions :: proc(r: ^Runtime) {
 	})
 }
 
+// settle_contexts lets go of the held actions whose bindings are quiet: in the input that the scripts read, and in the
+// edges that wait for the next fixed tick, so a tap that a tick has not had yet stays held. The script runtime settles
+// when it sets its input, and again when a phase or a tick ends, so a pop on quiet input holds nothing into the next
+// frame.
+@(private)
+settle_contexts :: proc(r: ^Runtime) {
+	input := r.input
+	input.pressed += r.pending_pressed
+	input.released += r.pending_released
+	for &pad, i in input.gamepads {
+		pad.pressed += r.pending_gamepad_pressed[i]
+		pad.released += r.pending_gamepad_released[i]
+		pad.direction_pressed += r.pending_direction_pressed[i]
+		pad.direction_released += r.pending_direction_released[i]
+	}
+	core.input_contexts_settle(&r.input_actions, &input)
+}
+
 // to_input_context is the token of the context push at idx.
 @(private)
 to_input_context :: proc(L: ^luau.State, idx: c.int) -> core.Input_Context_Token {
