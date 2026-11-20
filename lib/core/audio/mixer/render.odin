@@ -533,8 +533,8 @@ start_voice :: proc(
 mix_voice :: proc(m: ^Mixer, v: ^Mix_Voice, index: int, count: int, clock: u64) {
 	pause_target: f32 = 0 if m.paused && !v.unpaused else 1
 	// A voice that a pause holds, or that has not started, makes no sound until the pause ends.
-	_, waiting := v.phase.(Voice_Waiting)
-	if pause_target == 0 && (v.pause_gain <= 0 || waiting) {
+	_, held := v.phase.(Voice_Waiting)
+	if pause_target == 0 && (v.pause_gain <= 0 || held) {
 		return
 	}
 	begin := 0
