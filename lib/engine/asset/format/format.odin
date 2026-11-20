@@ -353,6 +353,8 @@ Asset_Kind :: enum u32 {
 	Perception,
 	// The scenes of a streamed world: each one's bounds and load and unload distances, or that it is always loaded.
 	World,
+	// The bindings and tracks of a cinematic on one time axis, which a cutscene player plays.
+	Cutscene,
 }
 
 // Slice is a range of a blob, in bytes from the blob's start.

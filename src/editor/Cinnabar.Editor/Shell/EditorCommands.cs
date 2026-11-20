@@ -48,6 +48,7 @@ static partial class EditorCommands
     public const string NewUiDocument = "content.newUiDocument";
     public const string NewSpriteSheet = "content.newSpriteSheet";
     public const string NewBlackboard = "content.newBlackboard";
+    public const string NewCutscene = "content.newCutscene";
     public const string NewDecision = "content.newDecision";
     public const string NewUtilityDecision = "content.newUtilityDecision";
     public const string NewGoapDecision = "content.newGoapDecision";

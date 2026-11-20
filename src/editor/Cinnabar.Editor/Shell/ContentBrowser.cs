@@ -190,6 +190,7 @@ public sealed class ContentBrowser
             AssetTemplate.Ui => "new_ui",
             AssetTemplate.SpriteSheet => "new_sprite_sheet",
             AssetTemplate.Blackboard => "new_blackboard",
+            AssetTemplate.Cutscene => "new_cutscene",
             AssetTemplate.DecisionBehaviorTree or AssetTemplate.DecisionUtility or AssetTemplate.DecisionGoap or AssetTemplate.DecisionHtn => "new_decision",
             _ => "new_folder",
         };
@@ -209,6 +210,7 @@ public sealed class ContentBrowser
             AssetTemplate.Ui => assets.ExtensionOf(AssetKind.Ui),
             AssetTemplate.SpriteSheet => assets.ExtensionOf(AssetKind.SpriteSheet),
             AssetTemplate.Blackboard => assets.ExtensionOf(AssetKind.Blackboard),
+            AssetTemplate.Cutscene => assets.ExtensionOf(AssetKind.Cutscene),
             AssetTemplate.DecisionBehaviorTree or AssetTemplate.DecisionUtility or AssetTemplate.DecisionGoap or AssetTemplate.DecisionHtn => assets.ExtensionOf(AssetKind.Decision),
             null => "",
             _ => assets.ExtensionOf(AssetKind.Script),

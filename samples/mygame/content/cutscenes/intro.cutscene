@@ -1,0 +1,42 @@
+cutscene 1
+# The sample's intro (see docs/content/kinds/cutscenes.md): the animation scene's walking fox walks 4 m, past a guard
+# that the cutscene spawns, to a bark, after the fox_walk shot. Times are ticks, 60000 a second. The channels' names
+# stand until the transform and presentation tracks give theirs.
+length = 600000
+rate = 30
+clock = game
+
+binding 1 "Walking Fox"
+	possess = @f496b929575035d9c2626ed56d3165ba/79cea6d7586e3f48
+	policy = required
+binding 2 "Extra Guard"
+	spawn = $0d9b84a2116a5529c2cd33741edd33a4
+	position = [150000000002, 0, 1.5]
+	rotation = [0, 0.7071068, 0, 0.7071068]
+
+track 1 transform "Fox walks"
+	binding = 1
+	when_finished = keep
+	section 1 0 600000
+		ease_in = 15000
+		channel position_x
+			key 0 0 linear
+			key 600000 4 linear
+track 2 animation "Fox walk clip"
+	binding = 1
+	section 2 0 600000
+		ease_in = 15000
+		ease_out = 15000
+		asset = $dea303d3f0374a9e56b0bb58f4a85315
+track 3 audio "Bark"
+	binding = 2
+	section 3 360000 420000
+		asset = $7ce894b4b95e68b918869459e5cd9c93
+		channel gain
+			key 0 1 constant
+track 4 sub_sequence "Opening shot"
+	section 4 0 300000
+		asset = $497bcb7bb533b902877cd8d56fbf97cd
+track 5 camera_cut "Cuts"
+	muted = true
+	section 5 0 600000

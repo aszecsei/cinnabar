@@ -34,6 +34,7 @@ Not everyone needs every layer.
 | Making agents find their way | [Content: Navmeshes](content/kinds/nav-meshes.md), [AI: Navigation](ai/navigation.md) |
 | Making agents decide and act | [Content: Blackboards](content/kinds/blackboards.md), [Content: Decisions](content/kinds/decisions.md), [AI: Agents](ai/agents.md), [Editor: Decision editor](editor/decision-editor.md) |
 | Making agents see and hear | [Content: Perceptions](content/kinds/perceptions.md), [AI: Perception](ai/perception.md) |
+| Making a cutscene | [Content: Cutscenes](content/kinds/cutscenes.md) |
 | Making menus and HUDs | [Content: UI documents](content/kinds/ui-documents.md), [Content: Fonts](content/kinds/fonts.md), [UI: Design](ui/design.md) |
 | Making content: materials, textures, meshes, scenes | [Content: kinds](content/README.md#documents), [Rendering: Materials](rendering/materials.md), [Editor: Material editor](editor/material-editor.md), [Editor: Shell and panels](editor/shell-and-panels.md) |
 | Writing native game code | Everything in order; [Overview: Conventions](overview/conventions.md) and [Hot reload](overview/hot-reload.md) first |

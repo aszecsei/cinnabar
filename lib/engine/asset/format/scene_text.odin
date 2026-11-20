@@ -580,52 +580,45 @@ parse_value :: proc(p: ^Parser, text: string) -> (value: Scene_Value, ok: bool) 
 // scene. The ID in another scene is nonzero.
 @(private = "file")
 parse_reference :: proc(p: ^Parser, text: string) -> (value: Scene_Value, ok: bool) {
+	scene, entity, message := entity_reference_parse(text)
+	if message != "" {
+		problem(p, true, "%s", message)
+		return {}, false
+	}
+	return {kind = .Entity, scene = scene, entity = entity}, true
+}
+
+// entity_reference_parse reads an entity reference as a scene file writes it: @<id>, @<path>, or either one after
+// <guid>/ for an entity of another scene, whose ID is nonzero. A path reads as scene_path_id_of the path. scene is zero
+// for a reference in the same scene. message, in the temporary allocator, is "" for a good reference.
+entity_reference_parse :: proc(text: string) -> (scene: Guid, entity: u64, message: string) {
+	if !strings.has_prefix(text, "@") {
+		return {}, 0, fmt.tprintf("an entity reference starts with @, not %q", text)
+	}
 	rest := text[1:]
-	value.kind = .Entity
 	if slash := strings.index_byte(rest, '/'); slash >= 0 {
-		scene, scene_ok := guid_parse(rest[:slash])
-		if !scene_ok || scene == {} {
-			problem(
-				p,
-				true,
-				"a reference to another scene starts with its nonzero GUID of 32 hex digits and a slash after @, not %q",
-				text,
-			)
-			return {}, false
+		parsed, scene_ok := guid_parse(rest[:slash])
+		if !scene_ok || parsed == {} {
+			return {}, 0, fmt.tprintf("a reference to another scene starts with its nonzero GUID of 32 hex digits and a slash after @, not %q", text)
 		}
-		value.scene = scene
+		scene = parsed
 		rest = rest[slash + 1:]
 	}
 	if strings.index_byte(rest, '#') >= 0 {
 		path, path_ok := parse_path(rest, context.temp_allocator)
 		if !path_ok {
-			problem(
-				p,
-				true,
-				"a path is scene IDs of 16 hex digits joined by # after @, not %q",
-				text,
-			)
-			return {}, false
+			return {}, 0, fmt.tprintf("a path is scene IDs of 16 hex digits joined by # after @, not %q", text)
 		}
-		value.entity = scene_path_id_of(path)
-		return value, true
+		return scene, scene_path_id_of(path), ""
 	}
 	id, id_ok := parse_hex(rest)
 	if !id_ok {
-		problem(p, true, "a scene ID is up to 16 hex digits after @, not %q", text)
-		return {}, false
+		return {}, 0, fmt.tprintf("a scene ID is up to 16 hex digits after @, not %q", text)
 	}
-	if value.scene != {} && id == 0 {
-		problem(
-			p,
-			true,
-			"a reference to another scene names an entity with a nonzero scene ID, not %q",
-			text,
-		)
-		return {}, false
+	if scene != {} && id == 0 {
+		return {}, 0, fmt.tprintf("a reference to another scene names an entity with a nonzero scene ID, not %q", text)
 	}
-	value.entity = id
-	return value, true
+	return scene, id, ""
 }
 
 @(private = "file")

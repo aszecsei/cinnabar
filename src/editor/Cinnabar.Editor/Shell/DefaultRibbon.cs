@@ -142,6 +142,7 @@ static class DefaultRibbon
                     [
                         new SmallStack([EditorCommands.NewSceneAsset, EditorCommands.NewPrefab]),
                         new SmallStack([EditorCommands.NewUiDocument, EditorCommands.NewAnimationGraph]),
+                        new SmallStack([EditorCommands.NewCutscene]),
                     ]),
                 ]) { Category = Design },
                 // The gameplay programmer's: scripts, the build, and where a frame's time goes.
