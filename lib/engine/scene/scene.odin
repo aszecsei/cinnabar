@@ -629,6 +629,83 @@ set_field :: proc(
 	return true
 }
 
+// MAX_FIELD_SIZE is the size of the largest field that component_fields gives, a World_Position.
+MAX_FIELD_SIZE :: 24
+
+// Field_Place is where a field is in its component's data.
+Field_Place :: struct {
+	offset: int,
+	size:   int,
+}
+
+// field_place finds the field of a component whose name has the hash, or the volume setting whose override flag it is,
+// a byte, as set_field finds it.
+field_place :: proc(
+	w: ^ecs.World,
+	component: ecs.Component_Id,
+	name_hash: u64,
+) -> (
+	place: Field_Place,
+	ok: bool,
+) {
+	info := ecs.registry_find(&w.registry, component)
+	if info == nil {
+		return
+	}
+	l := loader(w, nil, nil)
+	field, is_flag := find_field(&l, info, name_hash)
+	switch {
+	case field == nil:
+		return
+	case is_flag:
+		return {int(field.override_offset), 1}, true
+	}
+	return {int(field.offset), field_size(field^)}, true
+}
+
+// field_bytes gives the bytes that set_field would write into a field of a component, and where they go, without
+// writing the world. A reference names an entity of handles, a scene's; one to another scene's entity is none, because
+// no link follows it. It returns false, with a problem for the entity with scene ID id, when the component has no such
+// field or the value does not fit.
+field_bytes :: proc(
+	w: ^ecs.World,
+	id: u64,
+	component: ecs.Component_Id,
+	f: format.Scene_Field,
+	handles: ^map[u64]ecs.Entity,
+	problems: ^[dynamic]Problem = nil,
+) -> (
+	place: Field_Place,
+	bytes: [MAX_FIELD_SIZE]u8,
+	ok: bool,
+) {
+	l := loader(w, handles, problems)
+	l.entity = id
+	info := ecs.registry_find(&w.registry, component)
+	if info == nil {
+		warn(&l, "the game has no component %d, so its field %s is not set", component, f.name)
+		return
+	}
+	field, is_flag := find_field(&l, info, f.hash)
+	switch {
+	case field == nil:
+		warn(&l, "%s has no field %s, so it is not set", info.name, f.name)
+		return
+	case is_flag:
+		if f.value.kind != .Bool {
+			warn(&l, "%s.%s takes true or false, so it is not set", info.name, f.name)
+			return
+		}
+		bytes[0] = u8(f.value.ints[0] != 0)
+		return {int(field.override_offset), 1}, bytes, true
+	}
+	if expected := write_field(&l, &bytes, field^, f.value); expected != "" {
+		warn(&l, "%s.%s takes %s, so it is not set", info.name, f.name, expected)
+		return
+	}
+	return {int(field.offset), field_size(field^)}, bytes, true
+}
+
 // behaviour_field converts a behaviour's value to a script value, for the entity with scene ID id. The script
 // runtime checks it against the class. With scenes, the entity and the GUID of the script that it is a behaviour of, a
 // reference to an entity of another scene is linked (see links.odin); the caller sets the field to the result.
