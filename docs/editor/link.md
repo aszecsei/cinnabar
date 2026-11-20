@@ -46,6 +46,7 @@ To add a message: add a struct to the `Message` union in `lib/engine/editor/link
 | UI previews | `Ui_Preview_Settings`, how a preview shows a UI document, and `Ui_Preview_Layout`, where its elements went (see [UI editor](ui-editor.md#the-games-side)) |
 | World view | `World_View`, the shown world's scenes with their bounds, distances and flags, and the preview's position, and `Streamed_Scenes`, the scenes that the game's streaming policy has in, when they change (see [World view](world-view.md#the-viewport)) |
 | Reflection probes | `Capture_Reflection_Probes`, the probes to capture now, none for all, and `Reflection_Probe_View`, a watched probe's slot and last capture, when it changes (see [Viewport](viewport.md#reflection-probes)) |
+| Overrides | `Begin_Override`, `Override_Frame` and `Release_Override` to the game, and `Override_Ended` and `Overridden_Entities` from it: values that the editor writes over the world in Edit, outside the document (see [Overrides](#overrides)) |
 
 ### Profile
 
@@ -64,13 +65,37 @@ The game's side of the link is `lib/engine/editor`. The game keeps an `editor.Ed
 - **Deltas:** at most ten times a second, the game scans the world with `ecs.world_iter_changed` and compares each entity slot with what it last told the editor: the handle, the archetype (which stands for the set of components), the parent, the active state and the name. It sends an `Entity_Delta` with the changed entities and the destroyed ones. The scan visits only the chunks where a row arrived, or where `Parent` or `Name` was written, since the last scan (see [ECS: Change versions](../world/ecs.md#change-versions)): a change of archetype or of active state moves the row. If any entity was despawned since the last scan, a sweep over what the game told the editor finds the ones that are not alive. A slot that a new generation took therefore counts as a destroyed entity and a new one. The profiler shows the scan's cost in its own zone, `Editor delta`, or `Editor snapshot` for a full scan, inside `Editor poll` (see [Profiling](../core/profiling.md)).
 - **Watching:** the outliner needs every entity, but only a few entities need their field values. The editor sends `Watch_Entity` and `Unwatch_Entity` for the selection, and the game sends `Entity_Values` for each watched entity at most twenty times a second, and only when the encoded values changed. A watched entity that dies stops being watched. At most 64 entities are watched.
 - **Values are bytes.** A component's value is its memory, and the editor reads each field at its offset with `FieldValues`, so the game does no per-field work. A behaviour's fields come from `script.inspect`, which reads the instance's table for each field that `Behaviour.define` declared, without calling any script code. A behaviour's value also names the script asset whose module returned its class, which is how the document finds it.
+- **Values are the document's.** An override can hold a field of a watched entity (see [Overrides](#overrides)). `Entity_Values` then has the document's value of the field, not the world's, and `held` names the field. The properties panel shows the document's value, and it marks the field's name.
 - After a code reload, the game sends the types again, and the panels rebuild.
+
+### Overrides
+
+An override is a set of values that an owner in the editor, such as the cutscene editor's scrub, writes over the game's world in Edit. It is not a part of the document. It sends no operation, makes no undo entry and does not make the scene dirty. Save works while an override is on, and the file holds the document's values. Other previews, such as an animation's pose or a light's flicker, can use overrides too.
+
+- **Tokens.** An owner calls `EditorShell.Overrides.Begin` and gets an `OverrideToken`. The editor gives each override a number, and the number only goes up, so the game drops a late message for an override that ended. `Begin` gives no token while the host is not linked or the editor is not in Edit. A token that ended does nothing, and its `Ended` event tells the owner once why it ended (`OverrideEnd`). `WorldOverrides.End` is the one place where a token ends.
+- **One message for each frame.** `OverrideToken.Write` sends one `Override_Frame` with all the override's writes for the frame. The frame is the override's whole state. What an earlier frame wrote and this frame does not goes back to the document's value. A frame writes:
+  - a component's field, by the component's ID and the hash of the field's name (`format.scene_field_hash`), as a scene names it;
+  - an entity's pose, in its own space, without interpolation: a root's `Transform` through `ecs.teleport`, or a child's `Local_Transform`;
+  - an Animator's driven samples (see [Animation: Driving an Animator](../animation/design.md#driving-an-animator));
+  - a camera on the stack of a game view (see [Cameras](../world/cameras.md#stacks));
+  - instances of prefabs that live while the override has their keys in its frames.
+  
+  An entity is a document entity, by its scene's number and its scene ID, as operations name it, or a spawned entity, by its key. The game turns each field's value into bytes once, when the frame comes. It logs a write that it cannot apply, and applies the frame's other writes.
+- **Lift and lay.** The game keeps each override's last frame in the `Session` (`editor/overrides.odin`). `lay_overrides` writes the frames over the world, in the order that the overrides began, and saves each value before it writes over it. `lift_overrides` writes the saved values back, the last first. The game lifts the overrides while anything reads or edits the document in the world: for all of `poll`, for the edit phase, and for a script reload. So the editor's operations, the edit-mode behaviours' edits and what the game sends the editor all see the document. An edit of a field that an override holds goes to the document's value, and the override stays on top. When the override ends, the newest document value shows. Camera pushes, drives and spawned entities are not lifted. They stay from frame to frame, so a view does not cut again and a drive does not start again.
+- **Two overrides of one field.** The later one shows. When one of them ends, the other one's value shows, or the document's when none is left.
+- **The end.** `Release_Override` ends an override. The world goes back to the document's values, the cameras pop, the drives end and the spawned entities despawn, all in the same poll. The game also ends every override, and tells each owner with `Override_Ended`, at these times:
+  - a mode other than Edit (`Mode`);
+  - a `Load_Scene` (`Scene_Loaded`);
+  - a code reload, after the new DLL has registered its components (`Code_Reloaded`).
+  
+  A `Begin_Override` outside Edit, or before the editor's scene is the world, gets `Not_Editing`. A `Begin_Override` when 16 overrides are on gets `Full`. When the editor's link closes, the game ends the overrides and the world shows the document. `Add_Scene` and `Remove_Scene` do not end overrides: a write to an entity that is gone is skipped.
+- **Marks.** `Overridden_Entities` names the entities that overrides write or spawned, when that set changes. The outliner marks them with ◆. `Entity_Values.held` names the held fields of a watched entity, and the properties panel shows their names in italics. Gizmos read the document, so they show the document's pose.
 
 ### A new game state
 
 A new link, from a start, a restart or a crash, and a soft restart both give the editor a game state that knows nothing that the editor sent. A code reload keeps the game state, so it is not one.
 
-- **The game's side.** What one connection has sent the game, and what the game has sent it, is the `Session` in `editor.Editor`: the entities that the editor knows and watches, the selection, the hidden entities, the picks, the Navigation Path tool's points, and each viewport's kind, camera, gizmo, settings and target (`View`), the mode, the previews and the thumbnail, the live meshes and the mesh overlay, and when the game last sent each kind of update. `begin_session` starts one and `end_session` frees it, closes its previews and its viewports, and zeroes it, at `init`, at `destroy` and for each new connection. State that a new editor must not inherit goes in `Session`, so `end_session` frees it. The viewport tools' GPU objects, the commands, the UI state and `by_scene_id` stay outside it. A pick that the GPU still runs comes back with an old ticket, which the next session ignores.
+- **The game's side.** What one connection has sent the game, and what the game has sent it, is the `Session` in `editor.Editor`: the entities that the editor knows and watches, the selection, the hidden entities, the picks, the Navigation Path tool's points, and each viewport's kind, camera, gizmo, settings and target (`View`), the mode, the previews and the thumbnail, the live meshes and the mesh overlay, the overrides (see [Overrides](#overrides)), and when the game last sent each kind of update. `begin_session` starts one and `end_session` frees it, closes its previews and its viewports, and zeroes it, at `init`, at `destroy` and for each new connection. State that a new editor must not inherit goes in `Session`, so `end_session` frees it. The viewport tools' GPU objects, the commands, the UI state and `by_scene_id` stay outside it. A pick that the GPU still runs comes back with an old ticket, which the next session ignores.
 - **The editor's side.** `EditorShell.OnNewGameState` is the one handler. A new link and a `Game_Reloaded` of kind `Soft_Restart` both call it. It clears every cache of what the game was sent, drops every request that waits for the game, and sends again:
 
   | What | Message |
@@ -88,7 +113,7 @@ A new link, from a start, a restart or a crash, and a soft restart both give the
   | The live meshes | `Live_Mesh` |
   | Each open preview, with what it shows | `Open_Preview`, `Preview_Settings` |
 
-  It drops the picks and the `Sky_Sun_Request` in flight, disconnects the previews from the old targets until the new `Preview_Target`s come, and restarts the thumbnail queue, whose bake the old state lost. A preview's `unsaved` flag follows the cook daemon's cache, not the game, so `Open_Preview` sends it again as it is. A new feature that keeps a copy of game state, or waits for an answer from the game, resets it in `OnNewGameState`, and nowhere else.
+  It ends every override token with `NewGameState`, and sends no override again: the new state has none, and each owner begins again if it needs to. It drops the picks and the `Sky_Sun_Request` in flight, disconnects the previews from the old targets until the new `Preview_Target`s come, and restarts the thumbnail queue, whose bake the old state lost. A preview's `unsaved` flag follows the cook daemon's cache, not the game, so `Open_Preview` sends it again as it is. A new feature that keeps a copy of game state, or waits for an answer from the game, resets it in `OnNewGameState`, and nowhere else.
 
 ### Types
 
