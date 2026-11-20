@@ -997,3 +997,40 @@ an_agent_whose_next_scene_unloads_stops_at_the_seam :: proc(t: ^testing.T) {
 		where_is(f, e),
 	)
 }
+
+// A suspended agent leaves the crowd, as for a cutscene that possesses it (see
+// docs/cinematics/possession.md#navigation): its move stops, its character stops walking, and a move sent while it is
+// suspended stops too. Resumed, it walks where it is sent.
+@(test)
+a_suspended_agent_stops_and_walks_again_after :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(t, f)
+	level(t, f, 12, 4)
+	e := spawn_agent(f, 1, 2)
+	send(f, e, 10, 2)
+	frame(f, 30)
+	testing.expect_value(t, status(f, e), Move_Status.Moving)
+	ecs.suspend(&f.world, e, {.Navigation})
+	frame(f, 3)
+	testing.expect_value(t, status(f, e), Move_Status.Idle)
+	held := where_is(f, e)
+	send(f, e, 10, 2)
+	frame(f, 60)
+	testing.expect_value(t, status(f, e), Move_Status.Idle)
+	testing.expectf(
+		t,
+		distance_xz(where_is(f, e), held) < 0.01,
+		"it held still at %v, and is at %v",
+		held,
+		where_is(f, e),
+	)
+	ecs.resume(&f.world, e, {.Navigation})
+	send(f, e, 10, 2)
+	testing.expect(t, run(f, 900, e) < 900, "it arrives once resumed")
+	testing.expectf(
+		t,
+		distance_xz(where_is(f, e), {10, 0, 2}) <= 0.3,
+		"it stopped at %v",
+		where_is(f, e),
+	)
+}

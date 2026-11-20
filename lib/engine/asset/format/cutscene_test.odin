@@ -29,13 +29,13 @@ test_cutscene :: proc() -> []byte {
 		{time = 6000, value = 0.5, interp = .Linear},
 	}
 	contents := Cutscene_Contents {
-		key         = 9,
-		length      = 120000,
-		rate        = 24,
-		clock       = .Real,
-		range_start = 6000,
-		range_end   = 114000,
-		bindings    = {
+		key           = 9,
+		length        = 120000,
+		rate          = 24,
+		clock         = .Real,
+		range_start   = 6000,
+		range_end     = 114000,
+		bindings      = {
 			{
 				id = 7,
 				kind = .Possessed,
@@ -44,6 +44,8 @@ test_cutscene :: proc() -> []byte {
 				parent = CUTSCENE_NONE,
 				asset = SCENE,
 				entity = 0x79cea6d7586e3f48,
+				suspend = {.AI, .Physics},
+				flags = {.Keep_Velocity},
 			},
 			{
 				id = 3,
@@ -65,7 +67,7 @@ test_cutscene :: proc() -> []byte {
 				scale = {1, 1, 1},
 			},
 		},
-		tracks      = {
+		tracks        = {
 			{
 				id = 1,
 				kind = .Transform,
@@ -131,7 +133,9 @@ test_cutscene :: proc() -> []byte {
 				sections = {{id = 15, start = 0, end = 120000, weight = 1}},
 			},
 		},
-		source_path = "game/cutscenes/intro.cutscene",
+		source_path   = "game/cutscenes/intro.cutscene",
+		input_context = "cinematic",
+		hide_ui       = {SCENE, PREFAB},
 	}
 	return aligned(cutscene_write(contents, context.temp_allocator))
 }
@@ -161,6 +165,13 @@ cutscene_blobs_round_trip :: proc(t: ^testing.T) {
 	testing.expect_value(t, bindings[0].policy, Cutscene_Policy.Optional)
 	testing.expect_value(t, bindings[0].asset, SCENE)
 	testing.expect_value(t, bindings[0].entity, 0x79cea6d7586e3f48)
+	testing.expect_value(t, bindings[0].suspend, Cutscene_Suspend_Set{.AI, .Physics})
+	testing.expect_value(t, bindings[0].flags, Cutscene_Binding_Flags{.Keep_Velocity})
+	testing.expect_value(t, bindings[1].suspend, Cutscene_Suspend_Set{})
+	testing.expect_value(t, blob_string(data, blob.input_context), "cinematic")
+	hidden := cutscene_hide_ui(data, blob)
+	testing.expect_value(t, len(hidden), 2)
+	testing.expect_value(t, hidden[1], PREFAB)
 	testing.expect_value(t, bindings[1].asset, PREFAB)
 	testing.expect_value(t, bindings[1].position, [3]i64{1 << 24, 0, -(1 << 23)})
 	testing.expect_value(t, bindings[1].scale, [3]f32{1, 2, 1})
@@ -238,6 +249,9 @@ cutscene_blobs_with_bad_records_are_refused :: proc(t: ^testing.T) {
 	blob.source_path.size += u32(len(data))
 	refused(t, data, "a path past the end")
 	blob.source_path.size -= u32(len(data))
+	blob.hide_ui.size += 1
+	refused(t, data, "hidden documents that are not whole GUIDs")
+	blob.hide_ui.size -= 1
 
 	blob.length = 0
 	refused(t, data, "a length of 0")
@@ -263,6 +277,12 @@ cutscene_blobs_with_bad_records_are_refused :: proc(t: ^testing.T) {
 	bindings[0].policy = Cutscene_Policy(2)
 	refused(t, data, "an unknown policy")
 	bindings[0].policy = .Optional
+	bindings[0].suspend = transmute(Cutscene_Suspend_Set)u8(1 << 5)
+	refused(t, data, "an unknown system to suspend")
+	bindings[0].suspend = {.AI, .Physics}
+	bindings[0].flags = transmute(Cutscene_Binding_Flags)u8(1 << 3)
+	refused(t, data, "an unknown binding flag")
+	bindings[0].flags = {.Keep_Velocity}
 	bindings[0].name.size += u32(len(data))
 	refused(t, data, "a binding's name past the end")
 	bindings[0].name.size -= u32(len(data))

@@ -1819,3 +1819,84 @@ a_backend_without_bodies_lists_no_loading_scene :: proc(t: ^testing.T) {
 	var_state: State
 	testing.expect_value(t, len(loading_scenes(&var_state, &f.world, context.temp_allocator)), 0)
 }
+
+// A suspended dynamic body is kinematic, as for a cutscene that possesses it (see
+// docs/cinematics/possession.md#physics): its Transform moves it, gravity does not, and it pushes a dynamic box. Its
+// Rigid_Body stays dynamic. Two holders both resume it before it is dynamic again, with the velocity that it last moved
+// at.
+@(test)
+a_suspended_body_is_kinematic_until_every_holder_resumes_it :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(t, f)
+	ground(f)
+	mover := box(f, {0, 0.5, 0})
+	pushed := box(f, {2, 0.5, 0})
+	ticks(f, 30)
+	ecs.suspend(&f.world, mover, {.Physics})
+	ecs.suspend(&f.world, mover, {.Physics})
+	ticks(f, 1)
+	testing.expect_value(t, ecs.get(&f.world, mover, Physics_Body).motion, Motion.Kinematic)
+	testing.expect_value(t, ecs.get(&f.world, mover, Rigid_Body).motion, Motion.Dynamic)
+
+	// The holder lifts it off the ground and walks it into the box: gravity leaves it, and it pushes the box.
+	for i in 1 ..= 60 {
+		pose := ecs.get_write(&f.world, mover, ecs.Transform)
+		pose.position = ecs.position_from_meters({f64(i) * 0.05, 0.75, 0})
+		ticks(f, 1)
+	}
+	testing.expectf(
+		t,
+		abs(height(f, mover) - 0.75) < 1e-4,
+		"gravity does not move it: %v",
+		height(f, mover),
+	)
+	box_x := ecs.position_to_meters(ecs.get(&f.world, pushed, ecs.Transform).position).x
+	testing.expectf(t, box_x > 2.5, "it pushed the box: %v", box_x)
+
+	ecs.resume(&f.world, mover, {.Physics})
+	ticks(f, 1)
+	testing.expect_value(t, ecs.get(&f.world, mover, Physics_Body).motion, Motion.Kinematic)
+	ecs.get_write(&f.world, mover, ecs.Transform).position = ecs.position_from_meters(
+		{3.1, 0.75, 0},
+	)
+	ticks(f, 1)
+	ecs.resume(&f.world, mover, {.Physics})
+	ticks(f, 1)
+	pb := ecs.get(&f.world, mover, Physics_Body)
+	testing.expect_value(t, pb.motion, Motion.Dynamic)
+	testing.expectf(
+		t,
+		pb.linear_velocity.x > 1,
+		"it keeps the velocity it moved at: %v",
+		pb.linear_velocity,
+	)
+	ticks(f, 60)
+	testing.expectf(t, height(f, mover) < 0.6, "it falls again: %v", height(f, mover))
+}
+
+// A suspended character leaves the simulation, as an inactive one does, so a Transform write places it and its
+// velocity does not move it. Resumed, it moves again.
+@(test)
+a_suspended_character_leaves_the_simulation :: proc(t: ^testing.T) {
+	f := setup(t, null = true)
+	defer teardown(t, f)
+	e := character(f, {0, 5, 0})
+	ticks(f, 1)
+	character_move(effects(&f.physics), &f.world, e, {1, 0, 0})
+	ticks(f, 1)
+	ecs.suspend(&f.world, e, {.Physics})
+	ticks(f, 1)
+	record := f.physics.records[ecs.get(&f.world, e, Physics_Character).body.index]
+	testing.expect(t, record.disabled)
+	ecs.get_write(&f.world, e, ecs.Transform).position = ecs.position_from_meters({10, 5, 0})
+	ticks(f, 30)
+	testing.expectf(
+		t,
+		abs(position(f, e).x - 10) < 1e-3,
+		"it stays where the holder put it: %v",
+		position(f, e),
+	)
+	ecs.resume(&f.world, e, {.Physics})
+	ticks(f, 60)
+	testing.expectf(t, position(f, e).x > 10.5, "it moves again: %v", position(f, e))
+}

@@ -74,6 +74,42 @@ Cutscene_Interp :: enum u32 {
 	Cubic,
 }
 
+// Cutscene_Suspend is a system that stops acting on a binding's entities while a cutscene holds it (see
+// docs/cinematics/possession.md).
+Cutscene_Suspend :: enum u8 {
+	// The behaviours stop, as if their enabled were false: on_disable runs, and on_enable when the cutscene ends.
+	Behaviours,
+	// The Agent stops thinking and acting, and keeps its blackboard.
+	AI,
+	// The Nav_Agent leaves its crowd and stops its move.
+	Navigation,
+	// A dynamic body is kinematic, and a character leaves the simulation.
+	Physics,
+}
+Cutscene_Suspend_Set :: bit_set[Cutscene_Suspend;u8]
+
+// CUTSCENE_SUSPEND_ALL is what a binding suspends when neither it nor the cutscene says.
+CUTSCENE_SUSPEND_ALL :: Cutscene_Suspend_Set{.Behaviours, .AI, .Navigation, .Physics}
+
+// CUTSCENE_SUSPEND_NAMES are the names of the systems in the text.
+CUTSCENE_SUSPEND_NAMES := [Cutscene_Suspend]string {
+	.Behaviours = "behaviours",
+	.AI         = "ai",
+	.Navigation = "navigation",
+	.Physics    = "physics",
+}
+
+Cutscene_Binding_Flag :: enum u8 {
+	// A body that physics suspension made kinematic keeps its last velocity when it is dynamic again.
+	Keep_Velocity,
+}
+Cutscene_Binding_Flags :: bit_set[Cutscene_Binding_Flag;u8]
+
+// CUTSCENE_INPUT_CONTEXT is the input context that a cutscene pushes when its text does not name one.
+CUTSCENE_INPUT_CONTEXT :: "cutscene"
+// The longest name of an input context, as core.INPUT_ACTION_NAME_CAPACITY.
+CUTSCENE_INPUT_CONTEXT_CAPACITY :: 24
+
 Cutscene_Track_Flag :: enum u32 {
 	// The track does nothing.
 	Muted,
@@ -126,7 +162,8 @@ cutscene_rate_valid :: proc "contextless" (rate: u32) -> bool {
 // Cutscene_Binding is an entity that tracks act on. A possessed binding has its scene's GUID in asset and the scene ID
 // of its entity, folded from a path for an entity in a prefab instance (scene_path_id_of). A spawned binding has its
 // prefab's GUID in asset, its parent binding's index or CUTSCENE_NONE, and its start transform: position in
-// World_Position units (2^-24 m), from the parent when it has one.
+// World_Position units (2^-24 m), from the parent when it has one. suspend is what stops acting on its entities while
+// the cutscene holds it, the cutscene's default already applied.
 Cutscene_Binding :: struct {
 	id:        u32,
 	kind:      Cutscene_Binding_Kind,
@@ -134,7 +171,9 @@ Cutscene_Binding :: struct {
 	name_hash: u32,
 	policy:    Cutscene_Policy,
 	parent:    u32,
-	reserved:  u32,
+	suspend:   Cutscene_Suspend_Set,
+	flags:     Cutscene_Binding_Flags,
+	reserved:  u16,
 	asset:     Guid,
 	entity:    u64,
 	position:  [3]i64,
@@ -200,21 +239,25 @@ Cutscene_Key :: struct {
 
 // Cutscene_Blob is the start of a cutscene blob (see docs/content/blobs-and-loading.md#blob-format). The tables are
 // flat: each track's sections, each section's channels and each channel's keys follow those before them.
+// input_context is the name of the input context that the cutscene pushes while it plays, empty for none, and
+// hide_ui the GUIDs of the UI documents that it hides.
 Cutscene_Blob :: struct {
-	header:      Blob_Header,
-	length:      i32,
-	rate:        u32,
-	clock:       Cutscene_Clock,
-	range_start: i32,
-	range_end:   i32,
-	reserved:    u32,
-	bindings:    Slice,
-	tracks:      Slice,
-	sections:    Slice,
-	channels:    Slice,
-	keys:        Slice,
+	header:        Blob_Header,
+	length:        i32,
+	rate:          u32,
+	clock:         Cutscene_Clock,
+	range_start:   i32,
+	range_end:     i32,
+	reserved:      u32,
+	bindings:      Slice,
+	tracks:        Slice,
+	sections:      Slice,
+	channels:      Slice,
+	keys:          Slice,
 	// The path relative to the content root, prefixed with the root's name, such as "game/cutscenes/intro.cutscene".
-	source_path: Slice,
+	source_path:   Slice,
+	input_context: Slice,
+	hide_ui:       Slice,
 }
 #assert(size_of(Cutscene_Blob) % align_of(Cutscene_Binding) == 0)
 
@@ -250,7 +293,9 @@ cutscene_view :: proc(data: []byte) -> (blob: ^Cutscene_Blob, ok: bool) {
 	   !inside(data, blob.sections, size_of(Cutscene_Section), align_of(Cutscene_Section)) ||
 	   !inside(data, blob.channels, size_of(Cutscene_Channel), align_of(Cutscene_Channel)) ||
 	   !inside(data, blob.keys, size_of(Cutscene_Key), align_of(Cutscene_Key)) ||
-	   !inside(data, blob.source_path, 1, 1) {
+	   !inside(data, blob.source_path, 1, 1) ||
+	   !inside(data, blob.input_context, 1, 1) ||
+	   !inside(data, blob.hide_ui, size_of(Guid), 1) {
 		return nil, false
 	}
 	bindings := cutscene_bindings(data, blob)
@@ -276,6 +321,8 @@ cutscene_view :: proc(data: []byte) -> (blob: ^Cutscene_Blob, ok: bool) {
 	for b, i in bindings {
 		if b.kind > .Spawned ||
 		   b.policy > .Optional ||
+		   transmute(u8)b.suspend & ~transmute(u8)CUTSCENE_SUSPEND_ALL != 0 ||
+		   b.flags - {.Keep_Velocity} != {} ||
 		   !inside(data, b.name, 1, 1) ||
 		   b.asset == {} {
 			return nil, false
@@ -416,6 +463,12 @@ cutscene_keys :: proc "contextless" (data: []byte, blob: ^Cutscene_Blob) -> []Cu
 	return ([^]Cutscene_Key)(raw_data(bytes))[:len(bytes) / size_of(Cutscene_Key)]
 }
 
+// cutscene_hide_ui is the GUIDs of the UI documents that a cutscene hides while it plays.
+cutscene_hide_ui :: proc "contextless" (data: []byte, blob: ^Cutscene_Blob) -> []Guid {
+	bytes := blob_bytes(data, blob.hide_ui)
+	return ([^]Guid)(raw_data(bytes))[:len(bytes) / size_of(Guid)]
+}
+
 // cutscene_track_sections is a track's sections, in a blob that cutscene_view checked.
 cutscene_track_sections :: proc "contextless" (
 	data: []byte,
@@ -455,6 +508,8 @@ Cutscene_Binding_Contents :: struct {
 	position: [3]i64,
 	rotation: [4]f32,
 	scale:    [3]f32,
+	suspend:  Cutscene_Suspend_Set,
+	flags:    Cutscene_Binding_Flags,
 }
 
 Cutscene_Channel_Contents :: struct {
@@ -487,16 +542,18 @@ Cutscene_Track_Contents :: struct {
 }
 
 Cutscene_Contents :: struct {
-	guid:        Guid,
-	key:         u64,
-	length:      i32,
-	rate:        u32,
-	clock:       Cutscene_Clock,
-	range_start: i32,
-	range_end:   i32,
-	bindings:    []Cutscene_Binding_Contents,
-	tracks:      []Cutscene_Track_Contents,
-	source_path: string,
+	guid:          Guid,
+	key:           u64,
+	length:        i32,
+	rate:          u32,
+	clock:         Cutscene_Clock,
+	range_start:   i32,
+	range_end:     i32,
+	bindings:      []Cutscene_Binding_Contents,
+	tracks:        []Cutscene_Track_Contents,
+	source_path:   string,
+	input_context: string,
+	hide_ui:       []Guid,
 }
 
 // cutscene_write builds a cutscene blob, flattening its tracks' sections, channels and keys.
@@ -546,6 +603,8 @@ cutscene_write :: proc(contents: Cutscene_Contents, allocator := context.allocat
 			position  = b.position,
 			rotation  = b.rotation,
 			scale     = b.scale,
+			suspend   = b.suspend,
+			flags     = b.flags,
 		}
 		mem.copy(
 			&buffer[int(bindings.offset) + i * size_of(Cutscene_Binding)],
@@ -615,6 +674,8 @@ cutscene_write :: proc(contents: Cutscene_Contents, allocator := context.allocat
 		}
 	}
 	source_path := append_bytes(&buffer, transmute([]byte)contents.source_path)
+	input_context := append_bytes(&buffer, transmute([]byte)contents.input_context)
+	hide_ui := append_bytes(&buffer, mem.slice_to_bytes(contents.hide_ui))
 	blob := Cutscene_Blob {
 		header = {
 			magic = BLOB_MAGIC,
@@ -634,6 +695,8 @@ cutscene_write :: proc(contents: Cutscene_Contents, allocator := context.allocat
 		channels = channels,
 		keys = keys,
 		source_path = source_path,
+		input_context = input_context,
+		hide_ui = hide_ui,
 	}
 	mem.copy(raw_data(buffer), &blob, size_of(blob))
 	return buffer[:]

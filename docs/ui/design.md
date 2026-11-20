@@ -12,7 +12,7 @@ How the UI works: from a document on an entity to the pixels of the UI layer and
 |---|---|
 | `document` | The UI document asset. |
 | `order` | Documents of a higher order draw over those of a lower one, and take input first. |
-| `visible` | Whether the document shows. A script turns a menu on and off with it. |
+| `visible` | Whether the document shows. A script turns a menu on and off with it. A document whose entity is suspended for UI, as a cutscene suspends the HUD, does not show either, whatever its `visible` ([Cinematics: Possession](../cinematics/possession.md#the-whole-cutscene)). |
 | `view` | Where the document lays out. 0 is the window. n is the game's nth view (1 to 5), a rectangle of the window. |
 
 `ui.State` is in `Game_State`. It has a slot for each document that shows, at most `MAX_DOCUMENTS` (32). `ui.sync` matches the slots to the world's `Ui_Document`s each frame, loads each document's blob, and builds its nodes.

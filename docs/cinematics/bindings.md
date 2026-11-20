@@ -15,9 +15,11 @@ This document describes how bindings resolve and how tracks read them, in `lib/e
 | State | Meaning |
 |---|---|
 | `nil` | Not resolved yet. |
-| `Binding_Possessed{entity}` | An entity that the cutscene does not own: an entity of a scene, or an override. |
-| `Binding_Spawned{entity}` | The root of a prefab instance that the cutscene spawned. The cutscene owns it. |
+| `Binding_Possessed{entity, hold}` | An entity that the cutscene does not own: an entity of a scene, or an override. |
+| `Binding_Spawned{entity, hold}` | The root of a prefab instance that the cutscene spawned. The cutscene owns it. |
 | `Binding_Missing` | An optional binding whose entity was not found. Its tracks do nothing. |
+
+`hold` is what the binding suspends on its entity, from the cutscene's settings: its systems, and whether a body keeps its velocity. `set_binding` suspends them when the binding enters the state and resumes them when it leaves, so a binding holds its entity exactly while it is resolved ([Possession](possession.md#the-settings)).
 
 The states hold no strings and no pointers, so they survive a code reload. A failure is a `Binding_Failure`, which holds the binding's index and a reason: `Missing` or `Spawn_Failed`.
 
@@ -49,8 +51,8 @@ A spawned binding names a prefab, a parent binding or none, and a start transfor
 - **Ownership.** The binding spawns with `scene.spawn_prefab` and **no owner**. So it has no `Scene_Entity` or `Scene_Owned`, and a scene's unload does not take it. The cutscene owns it.
 - **A parent.** If the parent has a live entity, the binding spawns under that entity. Its position, rotation and scale become its `Local_Transform`. If the parent has no live entity (for example, an override that is gone), the binding gives a warning. It then spawns with no parent, at its position in the world.
 - **Hidden until it plays.** Every entity of the instance gets `ecs.Loading{LOADING_SCENE}`. A scene that loads in stages tags each of its entities in the same way ([World: Scenes: Loading in stages](../world/scenes.md#loading-in-stages)). So the entities are inactive, and their behaviours do not wake. Physics can still build their bodies early. No scene has the number `LOADING_SCENE`, so a cutscene's entities never hold back a scene's load.
-- **Reveal.** `reveal_bindings` removes the tag. It settles each entity's pose, so the entities show without interpolating from where they spawned. Their behaviours get `awake`, `on_enable` and `start` in the next script phase. The player calls it when the cutscene starts to play or skips.
-- **Release.** `release_bindings` despawns each spawned root with its children, including the spawned bindings under it. The player calls it when it gives the world back, in `Restored` or `Failed`.
+- **Reveal.** `reveal_bindings` removes the tag. It settles each entity's pose, so the entities show without interpolating from where they spawned. Their behaviours get `awake`, `on_enable` and `start` in the next script phase, unless the binding suspends them ([Possession: Behaviours](possession.md#behaviours)). The player calls it when the cutscene starts to play or skips.
+- **Release.** `release_bindings` forgets every binding, which resumes what each suspended, and then despawns each spawned root with its children, including the spawned bindings under it. The player calls it when it gives the world back, in `Restored` or `Failed`.
 - **Gameplay code** gets a spawned entity from the player while the cutscene runs.
 
 ## Overrides
@@ -88,5 +90,5 @@ A binding resolves once. Tracks read it only through `binding_entity`, which giv
 | `binding_entity(b, w, index) -> (entity, ok)` | Gives the binding's entity while it is alive. |
 | `binding_index(data, blob, key) -> (index, ok)` | Gives the index of the binding with an ID or a name. |
 | `reveal_bindings(b, w)` | Shows the spawned entities. |
-| `release_bindings(b, w) -> int` | Despawns the spawned roots, and forgets every binding. After it, call the systems' `forget_despawned`, as after `scene.unload_scene`. |
+| `release_bindings(b, w) -> int` | Forgets every binding, which resumes what each suspended, and despawns the spawned roots. After it, call the systems' `forget_despawned`, as after `scene.unload_scene`. |
 | `destroy_bindings(b, w)` | Releases the bindings, so no spawned entity outlives them, and frees the states. |

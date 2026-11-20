@@ -195,6 +195,32 @@ each_mistake_in_a_cutscene_is_reported_at_its_line :: proc(t: ^testing.T) {
 		{"cutscene 1\nlength = 10\nrange = [5, 11]\n", 3, "inside the length"},
 		{"cutscene 1\nlength = 10\nrange = [5, 5]\n", 3, "inside the length"},
 		{"cutscene 1\nlength = 10\nspeed = 2\n", 3, "not a setting of the cutscene"},
+		{"cutscene 1\nlength = 10\nsuspend = [ai, sleep]\n", 3, "suspend is a list"},
+		{"cutscene 1\nlength = 10\nsuspend = [ai, ai]\n", 3, "suspend is a list"},
+		{"cutscene 1\nlength = 10\nsuspend = ai\n", 3, "suspend is a list"},
+		{"cutscene 1\nlength = 10\nsuspend = [ai,]\n", 3, "suspend is a list"},
+		{"cutscene 1\nlength = 10\ninput_context = cutscene\n", 3, "input_context is the quoted"},
+		{
+			"cutscene 1\nlength = 10\ninput_context = \"a_context_name_of_25_byte\"\n",
+			3,
+			"at most 24 bytes",
+		},
+		{"cutscene 1\nlength = 10\nhide_ui = [" + P + ", 3]\n", 3, "hide_ui is a list"},
+		{"cutscene 1\nlength = 10\nhide_ui = " + P + "\n", 3, "hide_ui is a list"},
+		{
+			"cutscene 1\nlength = 10\nbinding 1 \"A\"\n\tpossess = " +
+			S +
+			"\n\tsuspend = [walls]\n",
+			5,
+			"suspend is a list",
+		},
+		{
+			"cutscene 1\nlength = 10\nbinding 1 \"A\"\n\tpossess = " +
+			S +
+			"\n\tkeep_velocity = yes\n",
+			5,
+			"keep_velocity is true or false",
+		},
 		{"cutscene 1\nlength = 10\nwhat\n", 3, "a line is binding"},
 		{"cutscene 1\nlength = 10\nbinding 0 \"A\"\n\tpossess = " + S + "\n", 3, "a binding is"},
 		{"cutscene 1\nlength = 10\nbinding 1 A\n\tpossess = " + S + "\n", 3, "a binding is"},
@@ -482,6 +508,74 @@ each_mistake_in_a_cutscene_is_reported_at_its_line :: proc(t: ^testing.T) {
 			problems,
 		)
 	}
+}
+
+@(test)
+bindings_take_the_cutscenes_suspension_unless_they_name_their_own :: proc(t: ^testing.T) {
+	S :: "@" + SCENE_GUID + "/0000000000000001"
+	UI_GUID :: "77777777777777777777777777777777"
+	text :=
+		"cutscene 1\nlength = 10\nsuspend = [behaviours, navigation]\ninput_context = \"cinematic\"\nhide_ui = [$" +
+		UI_GUID +
+		", $" +
+		PREFAB_GUID +
+		"]\nbinding 1 \"A\"\n\tpossess = " +
+		S +
+		"\nbinding 2 \"B\"\n\tpossess = " +
+		S +
+		"\n\tsuspend = [physics, ai]\n\tkeep_velocity = true\nbinding 3 \"C\"\n\tpossess = " +
+		S +
+		"\n\tsuspend = []\n"
+	parsed, problems := cutscene_parse(text, context.temp_allocator)
+	testing.expectf(t, len(problems) == 0, "problems: %v", problems)
+	c := parsed.contents
+	if len(c.bindings) != 3 {
+		testing.expectf(t, false, "%d bindings", len(c.bindings))
+		return
+	}
+	testing.expect_value(
+		t,
+		c.bindings[0].suspend,
+		format.Cutscene_Suspend_Set{.Behaviours, .Navigation},
+	)
+	testing.expect_value(t, c.bindings[0].flags, format.Cutscene_Binding_Flags{})
+	testing.expect_value(t, c.bindings[1].suspend, format.Cutscene_Suspend_Set{.AI, .Physics})
+	testing.expect_value(t, c.bindings[1].flags, format.Cutscene_Binding_Flags{.Keep_Velocity})
+	testing.expect_value(t, c.bindings[2].suspend, format.Cutscene_Suspend_Set{})
+	testing.expect_value(t, c.input_context, "cinematic")
+	ui, _ := format.guid_parse(UI_GUID)
+	prefab, _ := format.guid_parse(PREFAB_GUID)
+	testing.expect_value(t, len(c.hide_ui), 2)
+	if len(c.hide_ui) == 2 {
+		testing.expect_value(t, c.hide_ui[0], ui)
+		testing.expect_value(t, c.hide_ui[1], prefab)
+	}
+	// Each hidden document is a reference that must be a UI document.
+	uis := 0
+	for r in parsed.references {
+		if r.want == .Ui {
+			uis += 1
+			testing.expect_value(t, r.line, 5)
+		}
+	}
+	testing.expect_value(t, uis, 2)
+
+	// Without settings: every system, the default context, and nothing hidden.
+	plain, plain_problems := cutscene_parse(
+		"cutscene 1\nlength = 10\nbinding 1 \"A\"\n\tpossess = " + S + "\n",
+		context.temp_allocator,
+	)
+	testing.expectf(t, len(plain_problems) == 0, "problems: %v", plain_problems)
+	testing.expect_value(t, plain.contents.bindings[0].suspend, format.CUTSCENE_SUSPEND_ALL)
+	testing.expect_value(t, plain.contents.input_context, format.CUTSCENE_INPUT_CONTEXT)
+	testing.expect_value(t, len(plain.contents.hide_ui), 0)
+
+	none, none_problems := cutscene_parse(
+		"cutscene 1\nlength = 10\ninput_context = \"\"\n",
+		context.temp_allocator,
+	)
+	testing.expectf(t, len(none_problems) == 0, "problems: %v", none_problems)
+	testing.expect_value(t, none.contents.input_context, "")
 }
 
 @(test)

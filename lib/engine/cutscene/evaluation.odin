@@ -5,6 +5,7 @@ import "core:mem"
 import "core:slice"
 import "core:time"
 
+import "cinnabar:core"
 import "cinnabar:engine/asset"
 import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/ecs"
@@ -37,6 +38,8 @@ Track_Kind :: struct {
 // The kinds hold procedures from the DLL image, so register clears them, and the kinds are registered again after it.
 State :: struct {
 	assets:  ^asset.Assets,
+	// The input contexts that a playing cutscene pushes its own on (see docs/cinematics/possession.md), or nil.
+	input:   ^core.Input_Contexts,
 	kinds:   [format.Cutscene_Track_Kind]Track_Kind,
 	// The players, in fixed slots, so an evaluation does not move while it is evaluated (see
 	// docs/cinematics/player.md#handles).
@@ -121,8 +124,9 @@ Track_Context :: struct {
 }
 
 // init sets the state's assets and the level that its players begin in. Call register after it.
-init :: proc(s: ^State, w: ^ecs.World, assets: ^asset.Assets) {
+init :: proc(s: ^State, w: ^ecs.World, assets: ^asset.Assets, input: ^core.Input_Contexts = nil) {
 	s.assets = assets
+	s.input = input
 	s.events = make([dynamic]Player_Event, w.platform.heap_allocator)
 	s.level = level_of(w)
 }

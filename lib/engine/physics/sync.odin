@@ -277,10 +277,10 @@ check_bodies :: proc(
 				continue
 			}
 		}
-		inactive := ecs.has(w, e, ecs.Inactive)
-		if inactive != record.disabled {
-			core_physics.cmd_set_enabled(list, handle, !inactive)
-			record.disabled = inactive
+		off := ecs.has(w, e, ecs.Inactive) || character_suspended(w, e, record.kind)
+		if off != record.disabled {
+			core_physics.cmd_set_enabled(list, handle, !off)
+			record.disabled = off
 		}
 	}
 }
@@ -537,7 +537,13 @@ create_body :: proc(
 		return
 	}
 
+	// The shapes follow the authored motion, so a body that suspension makes kinematic keeps its convex hulls.
 	dynamic_body := body.motion == .Dynamic
+	if dynamic_body && ecs.suspended(w, e, .Physics) {
+		// The holder moves it through its Transform, so it pushes the bodies in its way (see
+		// docs/cinematics/possession.md#physics).
+		body.motion = .Kinematic
+	}
 	children := make([dynamic]core_physics.Shape, allocator_of(s))
 	if own != nil {
 		if child, ok := child_shape(
@@ -817,6 +823,13 @@ collider_size :: proc(c: Collider, pose_scale: [3]f32) -> (core_physics.Shape_Ki
 	return .Box, 1
 }
 
+// character_suspended is whether a record is a character whose physics a holder suspends, which leaves the simulation
+// as an inactive entity's does, so the holder's Transform moves it (see docs/cinematics/possession.md#physics).
+@(private)
+character_suspended :: proc(w: ^ecs.World, e: ecs.Entity, kind: Body_Kind) -> bool {
+	return kind == .Character && ecs.suspended(w, e, .Physics)
+}
+
 // source_hash is what a body is made from: the Rigid_Body, the Collider, the entity's scale, and each part's
 // Collider and pose in the body, with the version of each mesh that a collider names, and a height field's
 // Surface_Renderer and the versions of its textures.
@@ -828,6 +841,10 @@ source_hash :: proc(s: ^State, w: ^ecs.World, e: ecs.Entity, parts: []Part) -> u
 	h := hash.fnv64a({})
 	if rb := ecs.get(w, e, Rigid_Body); rb != nil {
 		h = hash.fnv64a(bytes(rb), h)
+		// A suspended dynamic body is made kinematic, and dynamic again when it is resumed.
+		if rb.motion == .Dynamic && ecs.suspended(w, e, .Physics) {
+			h = hash.fnv64a({2}, h)
+		}
 	} else {
 		h = hash.fnv64a({0}, h)
 	}

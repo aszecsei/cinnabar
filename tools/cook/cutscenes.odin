@@ -13,7 +13,7 @@ import format "cinnabar:engine/asset/format"
 // in ticks, each with sections of keyed channels, a clip, a sound or a sub-sequence (see
 // docs/content/kinds/cutscenes.md). The cook checks the assets that a cutscene names and its sub-sequences' nesting, which
 // it reads from the other cutscenes' sources, so the order of the passes does not matter.
-CUTSCENE_COOK_VERSION :: "cutscenes 2"
+CUTSCENE_COOK_VERSION :: "cutscenes 3"
 
 // CUTSCENE_TEMPLATE is the text of a new cutscene: 10 seconds at 30 frames a second, with no bindings or tracks.
 CUTSCENE_TEMPLATE :: `cutscene 1
@@ -339,6 +339,8 @@ cutscene_kind_noun :: proc(kind: format.Asset_Kind) -> string {
 		return "a sound"
 	case .Cutscene:
 		return "a cutscene"
+	case .Ui:
+		return "a UI document"
 	}
 	return kind_noun(kind)
 }
@@ -380,6 +382,8 @@ Pending_Binding :: struct {
 	spawn_only:  int,
 	spawn_name:  string,
 	parent_line: int,
+	// The line of suspend, or 0 when the binding takes the cutscene's.
+	suspend:     int,
 }
 
 @(private = "file")
@@ -440,8 +444,12 @@ cutscene_parse :: proc(
 	tracks := make([dynamic]Pending_Track)
 	header_seen := make([dynamic]string)
 	contents := format.Cutscene_Contents {
-		rate = 30,
+		rate          = 30,
+		input_context = format.CUTSCENE_INPUT_CONTEXT,
 	}
+	// What a binding without its own suspend suspends.
+	default_suspend := format.CUTSCENE_SUSPEND_ALL
+	hide_ui := make([dynamic]format.Guid)
 	header_line, length_seen, range_line := 0, false, 0
 	block := Cutscene_Block.Header
 	section_ids := make(map[u32]bool, 16, context.temp_allocator)
@@ -736,11 +744,44 @@ cutscene_parse :: proc(
 					continue
 				}
 				contents.range_start, contents.range_end, range_line = start, end, line
+			case "suspend":
+				set, ok := cutscene_suspend(value_text)
+				if !ok {
+					problem(&found, line, "%s", CUTSCENE_SUSPEND_MESSAGE)
+					continue
+				}
+				default_suspend = set
+			case "input_context":
+				context_name, ok := cutscene_name(value_text)
+				if !ok || len(context_name) > format.CUTSCENE_INPUT_CONTEXT_CAPACITY {
+					problem(
+						&found,
+						line,
+						"input_context is the quoted name of an input context, at most %d bytes, or \"\" for none",
+						format.CUTSCENE_INPUT_CONTEXT_CAPACITY,
+					)
+					continue
+				}
+				contents.input_context = strings.clone(context_name)
+			case "hide_ui":
+				items, ok := cutscene_list(value_text)
+				for item in items {
+					value, message := parse_graph_value(item)
+					if message != "" || value.kind != .Asset || value.guid == {} {
+						ok = false
+						break
+					}
+					append(&hide_ui, value.guid)
+					append(&references, Cutscene_Reference{value.guid, .Ui, line})
+				}
+				if !ok {
+					problem(&found, line, "hide_ui is a list of UI documents, [$<guid>, ...]")
+				}
 			case:
 				problem(
 					&found,
 					line,
-					"%q is not a setting of the cutscene: length, rate, clock or range",
+					"%q is not a setting of the cutscene: length, rate, clock, range, suspend, input_context or hide_ui",
 					name,
 				)
 			}
@@ -894,6 +935,9 @@ cutscene_parse :: proc(
 				problem(&found, b.policy, "policy is for a possessed binding")
 			}
 		}
+		if b.suspend == 0 {
+			b.contents.suspend = default_suspend
+		}
 		result_bindings[i] = b.contents
 	}
 	for b in bindings {
@@ -982,6 +1026,7 @@ cutscene_parse :: proc(
 		result_tracks[i] = result
 	}
 	contents.bindings, contents.tracks = result_bindings, result_tracks
+	contents.hide_ui = hide_ui[:]
 	slice.stable_sort_by(found[:], proc(a, b: Cutscene_Problem) -> bool {return a.line < b.line})
 	slice.stable_sort_by(references[:], proc(a, b: Cutscene_Reference) -> bool {
 		return a.line < b.line
@@ -1039,6 +1084,22 @@ cutscene_binding_setting :: proc(
 			append(references, Cutscene_Reference{value.guid, .Prefab, line})
 		}
 		b.spawn = line
+	case "suspend":
+		b.suspend = line
+		set, ok := cutscene_suspend(value_text)
+		if !ok {
+			problem(found, line, "%s", CUTSCENE_SUSPEND_MESSAGE)
+			return
+		}
+		b.contents.suspend = set
+	case "keep_velocity":
+		switch value_text {
+		case "true":
+			b.contents.flags += {.Keep_Velocity}
+		case "false":
+		case:
+			problem(found, line, "keep_velocity is true or false")
+		}
 	case "parent":
 		spawn_only(b, name, line)
 		b.parent_line = line
@@ -1101,7 +1162,7 @@ cutscene_binding_setting :: proc(
 		problem(
 			found,
 			line,
-			"%q is not a setting of a binding: possess, policy, spawn, parent, position, rotation or scale",
+			"%q is not a setting of a binding: possess, policy, spawn, parent, position, rotation, scale, suspend or keep_velocity",
 			name,
 		)
 	}
@@ -1159,6 +1220,44 @@ cutscene_key :: proc(text: string, duration: i32) -> (key: format.Cutscene_Key, 
 		return {}, fmt.tprintf("a %s key has no tangents", fields[2])
 	}
 	return key, ""
+}
+
+CUTSCENE_SUSPEND_MESSAGE :: "suspend is a list of behaviours, ai, navigation and physics, such as [behaviours, ai], or []"
+
+// cutscene_suspend reads a list of the systems that a binding suspends, such as [behaviours, ai], each at most once.
+@(private = "file")
+cutscene_suspend :: proc(text: string) -> (set: format.Cutscene_Suspend_Set, ok: bool) {
+	items := cutscene_list(text) or_return
+	next: for item in items {
+		for name, system in format.CUTSCENE_SUSPEND_NAMES {
+			if item == name && system not_in set {
+				set += {system}
+				continue next
+			}
+		}
+		return {}, false
+	}
+	return set, true
+}
+
+// cutscene_list reads `[a, b, c]` into its items, trimmed, in the temporary allocator. `[]` has none.
+@(private = "file")
+cutscene_list :: proc(text: string) -> (items: []string, ok: bool) {
+	if !strings.has_prefix(text, "[") || !strings.has_suffix(text, "]") {
+		return
+	}
+	inner := strings.trim_space(text[1:len(text) - 1])
+	if inner == "" {
+		return {}, true
+	}
+	parts := strings.split(inner, ",", context.temp_allocator)
+	for &part in parts {
+		part = strings.trim_space(part)
+		if part == "" {
+			return
+		}
+	}
+	return parts, true
 }
 
 // cutscene_name reads a quoted name.

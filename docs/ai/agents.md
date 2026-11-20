@@ -130,6 +130,8 @@ return Bark
 6. The scripts' fixed step: the behaviours' `fixed_update`, then the script actions.
 7. Physics, then the tick's events: perception's `on_perceive` and `on_forget` among them.
 
+A holder, such as a cutscene that possesses the agent's entity, can suspend its AI with `ecs.suspend`. A suspended agent does not think, and its actions do not start, tick or stop. It keeps its blackboard and its action, and goes on when the last holder resumes it. Its perception goes on ([Cinematics: Possession](../cinematics/possession.md#ai)).
+
 ## Determinism
 
 An agent's thinks, actions and blackboard are the same on every run, on one job or many, and with any number of workers:

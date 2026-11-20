@@ -672,3 +672,36 @@ World.spawn():add(Chain)
 	)
 	clear(&f.reports)
 }
+
+// A holder that suspends an entity's behaviours, as a cutscene that possesses it does (see
+// docs/cinematics/possession.md#behaviours), stops them as enabled = false does: on_disable runs and update stops,
+// while enabled stays true. They go on, with on_enable, only when the last of two holders resumes them.
+@(test)
+suspended_behaviours_stop_until_every_holder_resumes_them :: proc(t: ^testing.T) {
+	f := setup_world(t)
+	defer teardown_world(f)
+	context.user_ptr = f
+	_, ok := spawn_source(&f.runtime, "=door", DOOR + "World.spawn():add(Door)")
+	testing.expect(t, ok)
+	expect_reports(t, f, {1, 2})
+	phase(f)
+	expect_reports(t, f, {3, 4})
+	e := door_entity(t, f)
+	ecs.suspend(f.runtime.world, e, {.Behaviours})
+	ecs.suspend(f.runtime.world, e, {.Behaviours})
+	phase(f)
+	expect_reports(t, f, {5})
+	phase(f)
+	expect_reports(t, f, {})
+	testing.expect(
+		t,
+		.Enabled in f.runtime.instances[0].flags,
+		"enabled stays as the script set it",
+	)
+	ecs.resume(f.runtime.world, e, {.Behaviours})
+	phase(f)
+	expect_reports(t, f, {})
+	ecs.resume(f.runtime.world, e, {.Behaviours})
+	phase(f)
+	expect_reports(t, f, {2, 4})
+}

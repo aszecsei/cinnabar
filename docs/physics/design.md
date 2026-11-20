@@ -152,6 +152,7 @@ for ecs.next_tick(&ticks) {
 - A sleeping body is not in the results, so the write-back costs what moves. The comparisons of step 5 visit every body each tick, a few hundred kilobytes of reads for ten thousand bodies.
 - `Previous_Transform` interpolation needs nothing new: physics writes `Transform` in the tick, and presentation blends the last two ([Time](../world/time.md#fixed-and-variable-rate)).
 - The propagation before the physics tick lets it see the tick's poses of kinematic and static children. It costs a propagation of the whole world per tick.
+- **Suspension.** A holder, such as a cutscene that possesses the entity, can suspend its physics with `ecs.suspend`. A suspended dynamic body is made again as a kinematic body with the same shapes, as the suspension is part of the body's hash, so a `Transform` write moves it and it pushes what is in its way. When the last holder resumes it, it is made again as a dynamic body with the velocity in its `Physics_Body`. A suspended character leaves the simulation, as an inactive one does ([Cinematics: Possession](../cinematics/possession.md#physics)).
 
 ## Layers
 

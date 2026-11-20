@@ -13,8 +13,10 @@ import "cinnabar:core/testlog"
 import "cinnabar:engine/asset"
 import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/ecs"
+import "cinnabar:engine/physics"
 import "cinnabar:engine/scene"
 import "cinnabar:engine/script"
+import "cinnabar:engine/ui"
 
 // Dial is a component that the test's property track writes.
 @(private = "file")
@@ -82,6 +84,8 @@ Player_Fixture :: struct {
 	assets:    asset.Assets,
 	cutscenes: State,
 	dir:       string,
+	// The input contexts that the players push theirs on.
+	input:     core.Input_Contexts,
 	// Two characters that the cutscenes possess, with their dials at 1 and 2.
 	hero:      ecs.Entity,
 	rival:     ecs.Entity,
@@ -128,6 +132,8 @@ player_setup :: proc(t: ^testing.T) -> ^Player_Fixture {
 	ecs.register_engine_components(&f.world.registry)
 	scene.register_components(&f.world.registry)
 	script.register_components(&f.world.registry)
+	physics.register_components(&f.world.registry)
+	ui.register_components(&f.world.registry)
 	ecs.register_component(&f.world.registry, Dial, DIAL_ID)
 	temp, err := os.make_directory_temp("", "cutscene_player_test_*", context.allocator)
 	testing.expect(t, err == nil)
@@ -139,7 +145,7 @@ player_setup :: proc(t: ^testing.T) -> ^Player_Fixture {
 	path := fmt.tprintf("%s/%s.blob", f.dir, format.guid_format(PROP_GUID, &buffer))
 	blob := format.scene_write(prop, PROP_GUID, 1, .Prefab, allocator = context.temp_allocator)
 	testing.expect(t, os.write_entire_file(path, blob) == nil)
-	init(&f.cutscenes, &f.world, &f.assets)
+	init(&f.cutscenes, &f.world, &f.assets, &f.input)
 	register(&f.cutscenes, &f.world)
 	register_kind(&f.cutscenes, .Property, {phase = .Fixed, evaluate = dial_track})
 	register_kind(&f.cutscenes, .Event, {phase = .Late, evaluate = event_track, data = &f.fired})
@@ -257,6 +263,12 @@ Cutscene :: struct {
 	// Where the prop spawns, in meters along x.
 	prop_x:  f64,
 	clip:    format.Guid,
+	// What every binding suspends, and whether it keeps a body's velocity.
+	suspend: format.Cutscene_Suspend_Set,
+	keep:    bool,
+	// The input context that the cutscene pushes, and the UI documents that it hides.
+	input:   string,
+	hide_ui: []format.Guid,
 }
 
 @(private = "file")
@@ -284,6 +296,12 @@ write_cutscene :: proc(t: ^testing.T, f: ^Player_Fixture, c: Cutscene) {
 				scale = {1, 1, 1},
 			},
 		)
+	}
+	for &b in bindings {
+		b.suspend = c.suspend
+		if c.keep {
+			b.flags += {.Keep_Velocity}
+		}
 	}
 	tracks := make([dynamic]format.Cutscene_Track_Contents, context.temp_allocator)
 	dial := make([]format.Cutscene_Section_Contents, 1, context.temp_allocator)
@@ -363,6 +381,8 @@ write_cutscene :: proc(t: ^testing.T, f: ^Player_Fixture, c: Cutscene) {
 			bindings = bindings[:],
 			tracks = tracks[:],
 			source_path = "game/cutscenes/player.cutscene",
+			input_context = c.input,
+			hide_ui = c.hide_ui,
 		},
 		context.temp_allocator,
 	)
@@ -923,4 +943,205 @@ start_shows_the_spawned_entities_of_a_ready_player :: proc(t: ^testing.T) {
 		!ecs.has(&f.world, prop, ecs.Loading),
 		"the prop shows once the player starts",
 	)
+}
+
+// suspended_count is how many holders suspend a system on an entity.
+@(private = "file")
+suspended_count :: proc(f: ^Player_Fixture, e: ecs.Entity, system: ecs.Suspend) -> u16 {
+	s := ecs.get(&f.world, e, ecs.Suspended)
+	return s.counts[system] if s != nil else 0
+}
+
+// A binding suspends what the cutscene says on its entity from the moment that it resolves, in Loading. Two players
+// that possess one entity both hold it, and it is free only when both have ended.
+@(test)
+two_players_both_release_an_entity_before_it_runs_again :: proc(t: ^testing.T) {
+	f := player_setup(t)
+	defer player_teardown(f)
+	write_cutscene(t, f, {guid = INTRO_GUID, value = 7, suspend = {.Behaviours, .AI}})
+	write_cutscene(t, f, {guid = OUTRO_GUID, value = 8, suspend = {.AI, .Navigation}})
+	first, _ := load(&f.cutscenes, &f.world, {cutscene = INTRO_GUID, overrides = cast_of(f)})
+	frame(f)
+	expect_status(t, f, first, .Ready)
+	testing.expect_value(t, suspended_count(f, f.hero, .Behaviours), 1)
+	testing.expect_value(t, suspended_count(f, f.hero, .AI), 1)
+	testing.expect_value(t, suspended_count(f, f.rival, .AI), 1)
+	testing.expect_value(t, suspended_count(f, f.hero, .Physics), 0)
+
+	second, _ := play(&f.cutscenes, &f.world, {cutscene = OUTRO_GUID, overrides = cast_of(f)})
+	frame(f)
+	expect_status(t, f, second, .Playing)
+	testing.expect_value(t, suspended_count(f, f.hero, .AI), 2)
+	testing.expect_value(t, suspended_count(f, f.hero, .Navigation), 1)
+
+	stop(&f.cutscenes, &f.world, first)
+	frame(f)
+	expect_status(t, f, first, .Restored)
+	testing.expect_value(t, suspended_count(f, f.hero, .Behaviours), 0)
+	testing.expect(
+		t,
+		ecs.suspended(&f.world, f.hero, .AI),
+		"the second player still holds the hero",
+	)
+	stop(&f.cutscenes, &f.world, second)
+	frame(f)
+	expect_status(t, f, second, .Restored)
+	testing.expect(t, !ecs.has(&f.world, f.hero, ecs.Suspended), "the hero is free")
+	testing.expect(t, !ecs.has(&f.world, f.rival, ecs.Suspended), "the rival is free")
+}
+
+// A player that fails in Loading, at its second binding after its first suspended the hero, resumes the hero. A reset,
+// as a soft restart or a new level does, resumes what a live player held.
+@(test)
+a_failed_player_resumes_what_it_suspended :: proc(t: ^testing.T) {
+	context.logger = testlog.expected_errors()
+	f := player_setup(t)
+	defer player_teardown(f)
+	scenes: scene.Scenes
+	scene.init_scenes(&scenes, &f.platform, &f.assets)
+	defer scene.destroy_scenes(&scenes)
+	every := format.CUTSCENE_SUSPEND_ALL
+	write_cutscene(t, f, {guid = INTRO_GUID, value = 7, suspend = every})
+	// Only the hero is given, so the rival, the second binding, is missing.
+	h, _ := play(&f.cutscenes, &f.world, {cutscene = INTRO_GUID, overrides = cast_of(f)[:1]})
+	update(&f.cutscenes, {world = &f.world, scenes = &scenes})
+	expect_status(t, f, h, .Failed)
+	failure, _ := player_failure(&f.cutscenes, h)
+	testing.expect_value(t, failure.(Binding_Failure), Binding_Failure{1, .Missing})
+	testing.expect(t, !ecs.has(&f.world, f.hero, ecs.Suspended), "the hero is free")
+
+	write_cutscene(t, f, {guid = OUTRO_GUID, value = 7, suspend = every})
+	live, _ := play(&f.cutscenes, &f.world, {cutscene = OUTRO_GUID, overrides = cast_of(f)})
+	update(&f.cutscenes, {world = &f.world, scenes = &scenes})
+	expect_status(t, f, live, .Playing)
+	testing.expect(t, ecs.suspended(&f.world, f.hero, .Behaviours))
+	reset(&f.cutscenes, &f.world)
+	testing.expect(t, !ecs.has(&f.world, f.hero, ecs.Suspended), "a reset frees the hero")
+	testing.expect(t, !ecs.has(&f.world, f.rival, ecs.Suspended), "and the rival")
+}
+
+// A spawned binding starts suspended, while it is hidden in Ready, so its behaviours do not start when it shows. It
+// goes with the player.
+@(test)
+a_spawned_binding_starts_suspended :: proc(t: ^testing.T) {
+	f := player_setup(t)
+	defer player_teardown(f)
+	write_cutscene(t, f, {guid = INTRO_GUID, value = 7, prop = true, suspend = {.Behaviours}})
+	h, _ := load(&f.cutscenes, &f.world, {cutscene = INTRO_GUID, overrides = cast_of(f)})
+	frame(f)
+	prop := prop_of(f, h)
+	testing.expect(t, ecs.has(&f.world, prop, ecs.Loading), "the prop is hidden in Ready")
+	testing.expect(t, ecs.suspended(&f.world, prop, .Behaviours))
+	start(&f.cutscenes, &f.world, h)
+	testing.expect(t, !ecs.has(&f.world, prop, ecs.Loading))
+	testing.expect(t, ecs.suspended(&f.world, prop, .Behaviours), "it shows suspended")
+	stop(&f.cutscenes, &f.world, h)
+	frame(f)
+	testing.expect(t, !ecs.is_alive(&f.world, prop))
+}
+
+// A dynamic body that a binding suspended is at rest when the player ends, unless the binding keeps its velocity.
+@(test)
+a_resumed_body_is_at_rest_unless_its_binding_keeps_its_velocity :: proc(t: ^testing.T) {
+	f := player_setup(t)
+	defer player_teardown(f)
+	for e in ([?]ecs.Entity{f.hero, f.rival}) {
+		ecs.add(&f.world, e, physics.Rigid_Body{motion = .Dynamic})
+		ecs.add(
+			&f.world,
+			e,
+			physics.Physics_Body{linear_velocity = {3, 0, 0}, angular_velocity = {0, 1, 0}},
+		)
+	}
+	write_cutscene(t, f, {guid = INTRO_GUID, value = 7, suspend = {.Physics}})
+	h, _ := play(&f.cutscenes, &f.world, {cutscene = INTRO_GUID, overrides = cast_of(f)})
+	frame(f)
+	testing.expect(t, ecs.suspended(&f.world, f.hero, .Physics))
+	stop(&f.cutscenes, &f.world, h)
+	frame(f)
+	pb := ecs.get(&f.world, f.hero, physics.Physics_Body)
+	testing.expect_value(t, pb.linear_velocity, [3]f32{})
+	testing.expect_value(t, pb.angular_velocity, [3]f32{})
+
+	ecs.get(&f.world, f.rival, physics.Physics_Body).linear_velocity = {3, 0, 0}
+	write_cutscene(t, f, {guid = OUTRO_GUID, value = 7, suspend = {.Physics}, keep = true})
+	kept, _ := play(&f.cutscenes, &f.world, {cutscene = OUTRO_GUID, overrides = cast_of(f)})
+	frame(f)
+	stop(&f.cutscenes, &f.world, kept)
+	frame(f)
+	testing.expect_value(
+		t,
+		ecs.get(&f.world, f.rival, physics.Physics_Body).linear_velocity,
+		[3]f32{3, 0, 0},
+	)
+}
+
+// The input context and the hidden documents belong to a playing cutscene, not a Ready one. start pushes the context,
+// which blocks the gameplay action for every player and lets the skip action through, and hides the HUD, active or
+// not. The end gives both back. Each of two cutscenes gives back only its own.
+@(test)
+a_playing_cutscene_blocks_gameplay_input_and_hides_the_hud :: proc(t: ^testing.T) {
+	f := player_setup(t)
+	defer player_teardown(f)
+	MOVE, SKIP :: 0, 1
+	_, err := core.input_contexts_define(&f.input, "cutscene", .Only, {SKIP})
+	testing.expect_value(t, err, core.Input_Context_Error.None)
+	HUD :: format.Guid {
+		0  = 0x74,
+		15 = 9,
+	}
+	MENU :: format.Guid {
+		0  = 0x74,
+		15 = 10,
+	}
+	hud := ecs.spawn(&f.world)
+	ecs.add(&f.world, hud, ui.Ui_Document{document = HUD, visible = true})
+	menu := ecs.spawn(&f.world)
+	ecs.add(&f.world, menu, ui.Ui_Document{document = MENU, visible = true})
+	second_hud := ecs.spawn(&f.world)
+	ecs.add(&f.world, second_hud, ui.Ui_Document{document = HUD, visible = true})
+	ecs.set_active(&f.world, second_hud, false)
+	hidden := []format.Guid{HUD}
+	write_cutscene(t, f, {guid = INTRO_GUID, value = 7, input = "cutscene", hide_ui = hidden})
+	h, _ := load(&f.cutscenes, &f.world, {cutscene = INTRO_GUID, overrides = cast_of(f)})
+	frame(f)
+	expect_status(t, f, h, .Ready)
+	testing.expect(
+		t,
+		core.input_contexts_allows(&f.input, 0, MOVE),
+		"a Ready cutscene blocks nothing",
+	)
+	testing.expect(t, !ecs.suspended(&f.world, hud, .Ui))
+
+	start(&f.cutscenes, &f.world, h)
+	testing.expect(t, !core.input_contexts_allows(&f.input, 0, MOVE), "gameplay reads nothing")
+	testing.expect(t, !core.input_contexts_allows(&f.input, 3, MOVE), "for every player")
+	testing.expect(t, core.input_contexts_allows(&f.input, 0, SKIP), "the skip still reads")
+	testing.expect(t, ecs.suspended(&f.world, hud, .Ui))
+	testing.expect(t, ecs.suspended(&f.world, second_hud, .Ui), "an inactive HUD is hidden too")
+	testing.expect(t, !ecs.suspended(&f.world, menu, .Ui))
+
+	write_cutscene(t, f, {guid = OUTRO_GUID, value = 7, input = "cutscene", hide_ui = hidden})
+	other, _ := play(&f.cutscenes, &f.world, {cutscene = OUTRO_GUID, overrides = cast_of(f)})
+	frame(f)
+	testing.expect_value(t, f.input.push_count, 2)
+	testing.expect_value(t, suspended_count(f, hud, .Ui), 2)
+	stop(&f.cutscenes, &f.world, h)
+	frame(f)
+	testing.expect_value(t, f.input.push_count, 1)
+	testing.expect(t, !core.input_contexts_allows(&f.input, 0, MOVE), "the second still blocks")
+	testing.expect_value(t, suspended_count(f, hud, .Ui), 1)
+	stop(&f.cutscenes, &f.world, other)
+	frame(f)
+	testing.expect_value(t, f.input.push_count, 0)
+	testing.expect(t, core.input_contexts_allows(&f.input, 0, MOVE))
+	testing.expect(t, !ecs.has(&f.world, hud, ecs.Suspended))
+	testing.expect(t, !ecs.has(&f.world, second_hud, ecs.Suspended))
+
+	// A context that the game did not define is not pushed, with a warning.
+	write_cutscene(t, f, {guid = INTRO_GUID, key = 2, value = 7, input = "cinematic"})
+	missing, _ := play(&f.cutscenes, &f.world, {cutscene = INTRO_GUID, overrides = cast_of(f)})
+	frame(f)
+	expect_status(t, f, missing, .Playing)
+	testing.expect_value(t, f.input.push_count, 0)
 }

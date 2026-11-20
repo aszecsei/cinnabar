@@ -301,7 +301,8 @@ actions_system :: proc(ctx: ^ecs.System_Context) {
 		entities := ecs.entities(view)
 		for state, row in ecs.column(view, 0, Agent_State) {
 			slot := slot_of(s, state.agent)
-			if slot == nil || slot.entity != entities[row] {
+			// A suspended agent's action holds where it is, and goes on when the agent is resumed.
+			if slot == nil || slot.entity != entities[row] || ecs.suspended(w, slot.entity, .AI) {
 				continue
 			}
 			if ready, ok := &slot.phase.(Agent_Ready); ok {
@@ -417,7 +418,8 @@ run_script_actions :: proc(r: ^script.Runtime, data: rawptr) {
 		ready, ok := &slot.phase.(Agent_Ready)
 		if !ok ||
 		   !ecs.is_alive(s.world, slot.entity) ||
-		   ecs.has(s.world, slot.entity, ecs.Inactive) {
+		   ecs.has(s.world, slot.entity, ecs.Inactive) ||
+		   ecs.suspended(s.world, slot.entity, .AI) {
 			continue
 		}
 		#partial switch p in ready.action {

@@ -30,6 +30,9 @@ Log_Kind :: enum u8 {
 	// The entity became active in the hierarchy, or inactive.
 	Activated,
 	Deactivated,
+	// A holder suspended the entity's behaviours, or the last holder resumed them (see suspend).
+	Suspended,
+	Resumed,
 }
 
 // Log_Entry is a change that the script runtime reacts to. It drains the log with take_log.

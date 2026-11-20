@@ -77,6 +77,7 @@ register_engine_components :: proc(r: ^Registry) {
 	register_component(r, Inactive, INACTIVE_ID, category = NO_CATEGORY)
 	register_component(r, Loading, LOADING_ID, category = NO_CATEGORY)
 	register_component(r, Name, NAME_ID, category = NO_CATEGORY)
+	register_component(r, Suspended, SUSPENDED_ID, category = NO_CATEGORY)
 }
 
 // compose gives a child's world-space pose. A non-uniform parent scale is applied before the child's rotation, so

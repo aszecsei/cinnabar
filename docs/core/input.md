@@ -44,7 +44,7 @@ UI navigation does not use actions (see [UI](../ui/design.md#input-and-focus)).
 
 ### Contexts
 
-A cutscene must stop the player from moving and attacking, but still let the player skip, pause and open menus. An input context is a named set of actions that it lets through. Each player has a stack of contexts. `Input_Contexts` in `input_contexts.odin` holds them inside `Input_Actions`, so the queries above read through them. Its zero value has no pushes, and then every action reads as it would without contexts.
+A cutscene must stop the player from moving and attacking, but still let the player skip, pause and open menus. An input context is a named set of actions that it lets through. A cutscene pushes its context while it plays, `cutscene` unless it names another ([Cinematics: Possession](../cinematics/possession.md#the-whole-cutscene)). Each player has a stack of contexts. `Input_Contexts` in `input_contexts.odin` holds them inside `Input_Actions`, so the queries above read through them. Its zero value has no pushes, and then every action reads as it would without contexts.
 
 - **Contexts.** `input_contexts_define` makes a context with a mode and a set of actions:
   - `Only` allows the actions that it names and blocks the others;
