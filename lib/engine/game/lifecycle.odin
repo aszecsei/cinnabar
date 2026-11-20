@@ -248,15 +248,10 @@ end_frame :: proc(g: ^Game) {
 	nav.end_frame(&g.nav)
 	ai.end_frame(&g.ai)
 	// An edit-mode behaviour's on_reload can edit the editor's document, which it sees without the editor's overrides.
-	changed := asset.poll(&g.assets)
-	if len(changed) > 0 {
-		editor.lift_overrides(&g.editor, &g.world)
-	}
-	script.reload_changed(&g.scripts, changed)
+	editor.lift_overrides(&g.editor, &g.world)
+	script.reload_changed(&g.scripts, asset.poll(&g.assets))
 	editor.send_behaviour_edits(&g.editor, &g.world, &g.scripts)
-	if len(changed) > 0 {
-		editor.lay_overrides(&g.editor, &g.world)
-	}
+	editor.lay_overrides(&g.editor, &g.world)
 }
 
 // send_camera_events tells each pusher whose camera's entry went this frame, for it, why: on_camera_removed, with the
@@ -456,12 +451,13 @@ game_reload :: proc(
 	if h.register != nil {
 		h.register(g)
 	}
-	if h.on_reload != nil {
-		h.on_reload(g)
-	}
-	// The editor's overrides end with the world as the document has it, now that every component is registered again.
+	// The editor's overrides end with the world as the document has it, now that every component is registered again,
+	// and before the project's on_reload sees the world.
 	if editor.end_overrides(&g.editor, &g.world, .Code_Reloaded) {
 		forget_despawned(g)
+	}
+	if h.on_reload != nil {
+		h.on_reload(g)
 	}
 	log.infof("game: reloaded at frame %d", g.frame_count)
 }

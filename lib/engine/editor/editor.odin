@@ -415,8 +415,8 @@ poll :: proc(
 			}
 		case link.Set_Mode:
 			started := e.session.mode == .Edit && v.mode == .Play
-			// Play and Pause start from the document's world.
-			if v.mode != .Edit && end_overrides(e, w, link.Override_End_Reason.Mode) {
+			// Play and Pause start from the document's world, and Edit waits for the editor's scene, which ends them too.
+			if end_overrides(e, w, link.Override_End_Reason.Mode) {
 				despawned = true
 				forget_dead(w, &e.session.view.selection)
 				forget_dead(w, &e.session.view.hidden)
@@ -497,6 +497,10 @@ poll :: proc(
 		s.types_sent = true
 	}
 	now := e.platform.time_seconds()
+	// A snapshot makes the editor forget which entities overrides write, so it hears them again.
+	if snapshot {
+		s.overrides.entities_sent = 0
+	}
 	if snapshot || rescan || now - s.last_scan >= SCAN_INTERVAL {
 		s.last_scan = now
 		if message, changed := scan(e, w, snapshot, frame); changed {

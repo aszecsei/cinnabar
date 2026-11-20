@@ -34,6 +34,9 @@ public enum OverrideEnd
 
     /// <summary>The game has a new state, from a new link or a soft restart, which has no overrides.</summary>
     NewGameState,
+
+    /// <summary>The link to the game closed, and the game ended its overrides.</summary>
+    LinkClosed,
 }
 
 /// <summary>

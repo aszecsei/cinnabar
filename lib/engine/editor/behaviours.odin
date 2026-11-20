@@ -26,6 +26,13 @@ send_behaviour_edits :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime
 	if len(edits.list) == 0 {
 		return
 	}
+	// The behaviours edited the document, so they ran with the overrides off the world (see overrides.odin).
+	if e.session.overrides.layer != .Lifted {
+		log.errorf(
+			"editor: behaviours edited while the overrides were on the world, so their edits are not sent",
+		)
+		return
+	}
 	defer for edit in edits.list {
 		if spawn, is_spawn := edit.(script.Edit_Spawn); is_spawn && ecs.is_alive(w, spawn.entity) {
 			ecs.despawn(w, spawn.entity)

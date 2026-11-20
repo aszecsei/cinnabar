@@ -245,6 +245,8 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
         {
             CloseViewportsInGame();
             _previewSlots.DisconnectAll();
+            // The game ends the overrides of an editor that goes, so a token that wrote nothing would only seem live.
+            Overrides.EndAll(OverrideEnd.LinkClosed);
             if (Stats.Host != null || Stats.Game != null)
             {
                 Stats.Clear();

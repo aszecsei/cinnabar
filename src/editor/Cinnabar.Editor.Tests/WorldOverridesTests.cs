@@ -149,6 +149,21 @@ public sealed class WorldOverridesTests : IDisposable
     }
 
     [Fact]
+    public void TheLinkClosingEndsTheOverrides()
+    {
+        using var shell = NewShell();
+        var token = shell.Overrides.Begin("the test")!;
+        var ended = new List<OverrideEnd>();
+        token.Ended += ended.Add;
+
+        shell.Host.Stop();
+
+        Assert.False(shell.Host.Linked);
+        Assert.Equal([OverrideEnd.LinkClosed], ended);
+        Assert.False(token.Write(Moved(1)));
+    }
+
+    [Fact]
     public void WithoutALinkNoOverrideBegins()
     {
         using var shell = TestShell.Open(_temp, "door.scene", Text);
