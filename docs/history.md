@@ -181,3 +181,4 @@ The order in which a world's scenes came to load around the camera (see [World s
 The order in which cutscenes came to be authored and played (see [Content: Cutscenes](content/kinds/cutscenes.md)).
 
 1. **The cutscene kind:** the `.cutscene` text, with bindings, tracks, sections and keys in ticks of 1/60000 s, its blob, the cooker's checks of the assets that it names and of its sub-sequences' cycles and depth, New Cutscene, and cutscenes among the animation in the content browser ([Content: Cutscenes](content/kinds/cutscenes.md)).
+2. **Bindings:** `lib/engine/cutscene`, a binding's state as one union, possessed entities found in a ready scene by their scene IDs, prefab instances' entities included, spawned prefabs with no owner and hidden by `Loading` until they are revealed, overrides by name or ID, the `required` and `optional` policies, entities that go during play, and `scene.ready_number` ([Cinematics: Bindings](cinematics/bindings.md)).

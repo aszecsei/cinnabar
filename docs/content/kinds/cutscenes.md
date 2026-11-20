@@ -8,7 +8,7 @@ Cutscenes are `.cutscene` text files in the content roots. A cutscene has bindin
 
 `just cutscenes` runs `cook cutscenes --cache build/<target>/content --config dev|release --root game=<content root> --root engine=lib/engine/content`. The daemon cooks cutscenes like any other kind (`tools/cook/cutscenes.odin`).
 
-No system plays cutscenes yet: this page describes the asset, which the player, its tracks and the cutscene editor will read.
+This page describes the asset. [Cinematics](../../cinematics/README.md) describes how the game resolves its bindings. The player, its tracks and the cutscene editor are not built yet.
 
 ```
 cutscene 1
@@ -77,14 +77,14 @@ A binding has `possess` or `spawn`, and not both.
 | Setting | For | Value | Default |
 |---|---|---|---|
 | `possess` | Possessed | `@<scene guid>/<id>` or `@<scene guid>/<path>`, as a reference to another scene's entity in a scene file (see [World: References across scenes](../../world/scenes.md#references-across-scenes)). A path, `<instance>#<entity>`, names an entity inside a prefab instance. | — |
-| `policy` | Possessed | `required`: the cutscene fails when the entity is missing. `optional`: the binding's tracks do nothing. | `required` |
+| `policy` | Possessed | `required`: the cutscene fails when the entity is missing. `optional`: the binding's tracks do nothing. See [Cinematics: A missing binding](../../cinematics/bindings.md#a-missing-binding). | `required` |
 | `spawn` | Spawned | `$<guid>` of a prefab | — |
 | `parent` | Spawned | The ID of a spawned binding before this one | None |
 | `position` | Spawned | `[x, y, z]` in meters, from the parent when it has one. The cooker converts it to `World_Position` units (2^-24 m), as a world does. | `[0, 0, 0]` |
 | `rotation` | Spawned | `[x, y, z, w]`, a quaternion of length 1 (within 1e-3), which the cooker normalizes | `[0, 0, 0, 1]` |
 | `scale` | Spawned | `[x, y, z]`, none of them 0 | `[1, 1, 1]` |
 
-A parent must come before its child, so parents cannot form a cycle.
+A parent must come before its child, so parents cannot form a cycle. [Cinematics: Bindings](../../cinematics/bindings.md) describes how the game resolves both kinds.
 
 ### Tracks
 
@@ -174,7 +174,7 @@ Each track's sections follow those of the track before it. The same is true of e
   - more than `MAX_CUTSCENE_BINDINGS` (1024) bindings, `MAX_CUTSCENE_TRACKS` (1024) tracks, `MAX_CUTSCENE_SECTIONS` (8192) sections, `MAX_CUTSCENE_CHANNELS` (65536) channels or `MAX_CUTSCENE_KEYS` (2^20) keys.
 - **A cutscene with a problem** keeps its old blob, so the running game keeps the last good version.
 - **Sub-sequences.** The cooker reads each sub-sequence's source, not its blob, so the order of the passes does not matter. A pass that cooks one cutscene checks every cutscene, because a cycle or a depth is a property of all the cutscenes that it reaches.
-- **The cooker does not check** that a possessed entity is in its scene, because that needs the scene's prefabs expanded. The binding's policy says what to do when the entity is missing at run time.
+- **The cooker does not check** that a possessed entity is in its scene, because that needs the scene's prefabs expanded. The binding's policy says what to do when the entity is missing at run time ([Cinematics: A missing binding](../../cinematics/bindings.md#a-missing-binding)).
 - **Dependencies.** The cooker adds each GUID that the cutscene names to its dependencies, the possessed scenes included. So a fix to one of these assets cooks the cutscene again.
 - **The cache key** covers the cooker version, the layout, the source path, the source and the GUID.
 - **Hot reload:** a cooked cutscene reaches the game as any blob does (see [Blobs and loading: Loading](../blobs-and-loading.md#loading)). Nothing plays a cutscene yet, so nothing reacts to a new blob.

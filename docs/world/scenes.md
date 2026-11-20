@@ -105,6 +105,7 @@ A field names an entity of another scene by the scene's GUID and the entity's sc
 - **When a scene becomes ready,** `add_scene` and the staged load (after the scene is revealed) bind the links that wait for its GUID. A link whose entity is not in the scene logs a warning and ends.
 - **When a scene unloads,** each link that is bound to it binds again to the same ID in another `Ready` scene with the same GUID. If there is none, the field is 0 and the link waits.
 - **A write is conditional.** A link writes its field only while the field holds what the link wrote before. A script or an edit that has written the field since keeps its value, and the link ends. The links of a component end when the component is replaced or removed, and the links of a behaviour end when the behaviour or its entity goes.
+- **From outside a scene:** `scene.ready_number(s, guid)` gives the first ready scene with the GUID, the scene that a reference from outside any family binds to. A cutscene's possessed bindings resolve through it and `find` ([Cinematics: Bindings](../cinematics/bindings.md#possessed-bindings)).
 - **Pending:** `scene.pending(s, w, entity, component, field)` and `scene.pending_behaviour(s, w, entity, script, field)` return the target's GUID and true while the link waits, and false otherwise. A field that has no link gives false.
 - **Parents** stay in one scene. The text parsers refuse a parent in another scene, and the editor's link drops an `Edit_Parent` to another scene with a warning.
 
