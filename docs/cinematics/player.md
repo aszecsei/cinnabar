@@ -91,7 +91,7 @@ Each command takes a handle and returns a `Command_Result`:
 
 ## The frame
 
-`update(state, Player_Context{world, scenes, scripts})` moves the players on. `game_update` calls it once a frame, after the scene requests and the streaming, and before the ticks. So it runs outside the systems and outside the script phase, when the frame's scenes are in place. Scripts call the commands in the script phase, and only `update` loads, spawns, despawns and restores. In each slot, in order:
+`update(state, Player_Context{world, scenes, scripts})` moves the players on. `game_update` calls it once a frame, after the scene requests and the streaming, and before the ticks. So it runs outside the systems and outside the script phase, when the frame's scenes are in place. Scripts call the commands in the script phase, and only `update` loads, spawns, despawns and restores. The one change to the world that a command makes is to show the spawned entities, when `start` or `skip` takes a `Ready` player on. In each slot, in order:
 
 1. A loading player loads ([Loading and failures](#loading-and-failures)). It is then `Ready`, `Playing` or `Skipping`, or `Failed`.
 2. A live player whose bindings changed in a reload resolves them again ([Hot reload](#hot-reload)).
@@ -127,7 +127,7 @@ So the winner shows while it plays, and the other player's value shows again whe
 
 `reset(state, world)` restores and frees every player, whatever its state. Every handle is then stale.
 - **A soft restart.** `game_shutdown` calls `destroy`, which resets the players, while the world, the scripts and the assets are alive.
-- **A new level.** `update` follows `level_generation`. When a scene load or the editor's `Load_Scene` unloaded the level, it resets the players first. Their entities are gone with the level, and the restore skips their fields.
+- **A new level.** `update`, and `load` and `play`, follow `level_generation`. When a scene load or the editor's `Load_Scene` unloaded the level, they reset the old level's players first, so a player made after the unload belongs to the new level. The old players' entities are gone with the level. The restore skips their fields, as their handles name no live entity, and the release despawns nothing.
 
 ## Hot reload
 

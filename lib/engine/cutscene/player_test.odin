@@ -759,8 +759,8 @@ two_players_that_write_one_field_follow_priority_and_give_it_back :: proc(t: ^te
 	testing.expect_value(t, dial(f, f.hero), 1)
 }
 
-// A soft restart during Playing, and a new level, restore and free every player: the dials are back, the prop and
-// the cutscene's assets are gone, and every handle is stale.
+// A soft restart during Playing restores and frees every player: the dials are back, the prop and the cutscene's
+// assets are gone, and every handle is stale.
 @(test)
 a_reset_during_play_leaks_nothing :: proc(t: ^testing.T) {
 	f := player_setup(t)
@@ -769,7 +769,7 @@ a_reset_during_play_leaks_nothing :: proc(t: ^testing.T) {
 	write_cutscene(t, f, {guid = OUTRO_GUID, length = 4 * SECOND, binding = 1, value = 8})
 	w := &f.world
 	s := &f.cutscenes
-	for by_level in ([?]bool{false, true}) {
+	for _ in 0 ..< 2 {
 		a, _ := play(s, w, {cutscene = INTRO_GUID, overrides = cast_of(f)})
 		b, _ := play(s, w, {cutscene = OUTRO_GUID, overrides = cast_of(f)})
 		loading, _ := load(s, w, {cutscene = INTRO_GUID, overrides = cast_of(f)})
@@ -781,14 +781,8 @@ a_reset_during_play_leaks_nothing :: proc(t: ^testing.T) {
 		testing.expect(t, ecs.is_alive(w, prop))
 		users := prefab_users(f)
 		testing.expect_value(t, dial(f, f.rival), 8)
-		despawned: int
-		if by_level {
-			levels += 1
-			despawned = update(s, context_of(f))
-		} else {
-			// What game_shutdown does before a soft restart.
-			despawned = reset(s, w)
-		}
+		// What game_shutdown does before a soft restart.
+		despawned := reset(s, w)
 		testing.expect_value(t, despawned, 2)
 		testing.expect_value(t, dial(f, f.hero), 1)
 		testing.expect_value(t, dial(f, f.rival), 2)
@@ -874,4 +868,59 @@ a_restore_track_wins_over_a_keep_track_in_either_order :: proc(t: ^testing.T) {
 		release(s, w, keep)
 		release(s, w, restore)
 	}
+}
+
+// A scene load unloads the level: every entity is gone, and new ones take their places. The next update frees every
+// player. The restore writes nothing to the new entities, and the release of the gone prop does nothing. A player
+// made after the unload, before that update, belongs to the new level and plays on.
+@(test)
+a_new_level_frees_the_players_of_the_old_one :: proc(t: ^testing.T) {
+	f := player_setup(t)
+	defer player_teardown(f)
+	write_cutscene(t, f, {guid = INTRO_GUID, length = 4 * SECOND, value = 7, prop = true})
+	w := &f.world
+	s := &f.cutscenes
+	old, _ := play(s, w, {cutscene = INTRO_GUID, overrides = cast_of(f)})
+	for _ in 0 ..< 3 {
+		frame(f)
+	}
+	prop := prop_of(f, old)
+	users := prefab_users(f)
+
+	ecs.despawn_all(w)
+	levels += 1
+	f.hero = ecs.spawn(w)
+	ecs.add(w, f.hero, Dial{4})
+	f.rival = ecs.spawn(w)
+	ecs.add(w, f.rival, Dial{5})
+	fresh, _ := play(s, w, {cutscene = INTRO_GUID, overrides = cast_of(f)})
+	expect_status(t, f, old, .Gone)
+	testing.expect_value(t, prefab_users(f), users - 1)
+	testing.expect_value(t, update(s, context_of(f)), 0)
+	expect_status(t, f, fresh, .Playing)
+	testing.expect(t, !ecs.is_alive(w, prop))
+	testing.expect_value(t, dial(f, f.rival), 5)
+	stop(s, w, fresh)
+	frame(f)
+	testing.expect_value(t, dial(f, f.hero), 4)
+}
+
+// A loaded player keeps its spawned prop hidden in Ready, and start shows it at once.
+@(test)
+start_shows_the_spawned_entities_of_a_ready_player :: proc(t: ^testing.T) {
+	f := player_setup(t)
+	defer player_teardown(f)
+	write_cutscene(t, f, {guid = INTRO_GUID, value = 7, prop = true})
+	h, _ := load(&f.cutscenes, &f.world, {cutscene = INTRO_GUID, overrides = cast_of(f)})
+	update(&f.cutscenes, context_of(f))
+	expect_status(t, f, h, .Ready)
+	prop := prop_of(f, h)
+	testing.expect(t, ecs.has(&f.world, prop, ecs.Loading), "the prop is hidden in Ready")
+	testing.expect_value(t, dial(f, f.hero), 1)
+	testing.expect_value(t, start(&f.cutscenes, &f.world, h), Command_Result.Done)
+	testing.expect(
+		t,
+		!ecs.has(&f.world, prop, ecs.Loading),
+		"the prop shows once the player starts",
+	)
 }

@@ -2,7 +2,7 @@ package cutscene
 
 import "core:hash"
 import "core:log"
-import "core:slice"
+import "core:mem"
 import "core:strings"
 
 import "cinnabar:engine/asset"
@@ -340,10 +340,7 @@ player_events :: proc(s: ^State) -> []Player_Event {
 // despawned, so the caller can have its systems forget them.
 update :: proc(s: ^State, c: Player_Context) -> (despawned: int) {
 	w := c.world
-	if level := level_of(w); level != s.level {
-		despawned += reset(s, w)
-		s.level = level
-	}
+	despawned += follow_level(s, w)
 	for slot in 0 ..< MAX_PLAYERS {
 		p := &s.players[slot]
 		if _, loading := p.state.(Player_Loading); loading {
@@ -356,7 +353,13 @@ update :: proc(s: ^State, c: Player_Context) -> (despawned: int) {
 			e := &live.evaluation
 			data, blob, ok := cutscene_data(s, e)
 			if !ok {
-				fail(s, w, slot, Asset_Failure{asset.guid(s.assets, e.cutscene), .Missing})
+				_, gave_back := fail(
+					s,
+					w,
+					slot,
+					Asset_Failure{asset.guid(s.assets, e.cutscene), .Missing},
+				)
+				despawned += gave_back
 				continue
 			}
 			#partial switch status_of(p.state) {
@@ -544,6 +547,9 @@ begin :: proc(
 	h: Player_Handle,
 	ok: bool,
 ) {
+	// A player made after a level unloaded, before the next update, belongs to the new level: the old level's players
+	// are reset first. Their entities went with the level, so nothing is left for the systems to forget.
+	follow_level(s, w)
 	slot := -1
 	for p, i in s.players {
 		if p.state == nil {
@@ -811,9 +817,28 @@ resolve_of :: proc(
 	}
 }
 
+// bindings_hash is a hash of what the bindings resolve from. A binding's name is left out, as its place in the blob's
+// strings moves when another string changes; its name hash is kept.
 @(private = "file")
 bindings_hash :: proc(data: []byte, blob: ^format.Cutscene_Blob) -> u64 {
-	return hash.fnv64a(slice.to_bytes(format.cutscene_bindings(data, blob)))
+	h := hash.fnv64a(nil)
+	for b in format.cutscene_bindings(data, blob) {
+		b := b
+		b.name = {}
+		h = hash.fnv64a(mem.ptr_to_bytes(&b), h)
+	}
+	return h
+}
+
+// follow_level resets the players when a new level began since they were made. It gives how many spawned roots it
+// despawned.
+@(private = "file")
+follow_level :: proc(s: ^State, w: ^ecs.World) -> (despawned: int) {
+	if level := level_of(w); level != s.level {
+		despawned = reset(s, w)
+		s.level = level
+	}
+	return
 }
 
 // level_of is the platform's level generation, or 0 for a platform without levels.
