@@ -118,9 +118,10 @@ On a failure, the player unloads what it loaded, despawns what it spawned, and g
 Two players can write the same field of the same entity.
 - **Order.** The systems evaluate the players by priority, low first, and then by start order. So the player with the higher priority writes last and wins. Between two players with one priority, the later start wins.
 - **The field's own value.** The first player that writes a field saves the field's value in its snapshot. A later player that writes the field saves the same value: it copies it from the first player's snapshot, not from the world. A track blends over this value ([Evaluation: Sections and blending](evaluation.md#sections-and-blending)), so neither player blends over what the other wrote.
-- **Giving back.** A player that ends while another live player holds a field does not put the field back. The other player writes it on in its next evaluation. The last player that holds the field puts back the first value.
+- **Giving back.** A player that ends while another live player holds a field does not put the field back. It hands the put-back to the other player (`Saved.handed`), which writes the field on in its next evaluation, and puts the first value back when it ends, even if only its tracks set to keep wrote the field.
+- **A rule for kinds of track.** A kind writes every field that it holds in each evaluation, at the field's own value when no section covers the time. Otherwise a field that a player handed over keeps the value of the player that ended, until the next write.
 
-So the winner shows while it plays, the other player's value shows again when the winner ends, and the field returns to its first value when both have ended, in either order.
+So the winner shows while it plays, and the other player's value shows again when the winner ends. When both have ended, in either order, the field has its first value if any track that wrote it is set to restore. A field that only tracks set to keep wrote keeps the last value written. While the game is paused, no system runs, so a handed field shows the next player's value when the game resumes.
 
 ## Reset
 

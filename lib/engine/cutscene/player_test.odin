@@ -840,3 +840,38 @@ a_reload_that_changes_the_bindings_resolves_them_again :: proc(t: ^testing.T) {
 	testing.expect_value(t, prop_of(f, h), after)
 	testing.expect_value(t, dial(f, f.hero), 8)
 }
+
+// A player with a track set to keep and one with a track set to restore write one dial. Whichever ends first, the dial
+// has its first value when both have ended, as one track that wrote it is set to restore.
+@(test)
+a_restore_track_wins_over_a_keep_track_in_either_order :: proc(t: ^testing.T) {
+	f := player_setup(t)
+	defer player_teardown(f)
+	write_cutscene(t, f, {guid = INTRO_GUID, length = 4 * SECOND, value = 10, finish = .Keep})
+	write_cutscene(t, f, {guid = OUTRO_GUID, length = 4 * SECOND, value = 20})
+	w := &f.world
+	s := &f.cutscenes
+	for keep_ends_first in ([?]bool{true, false}) {
+		keep, _ := play(s, w, {cutscene = INTRO_GUID, overrides = cast_of(f)})
+		restore, _ := play(s, w, {cutscene = OUTRO_GUID, overrides = cast_of(f)})
+		frame(f)
+		testing.expect_value(t, dial(f, f.hero), 20)
+		first, second := restore, keep
+		if keep_ends_first {
+			first, second = keep, restore
+		}
+		stop(s, w, first)
+		frame(f)
+		stop(s, w, second)
+		frame(f)
+		testing.expectf(
+			t,
+			dial(f, f.hero) == 1,
+			"keep ends first: %v: the dial is %v",
+			keep_ends_first,
+			dial(f, f.hero),
+		)
+		release(s, w, keep)
+		release(s, w, restore)
+	}
+}

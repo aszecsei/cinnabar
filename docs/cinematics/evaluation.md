@@ -68,7 +68,7 @@ A kind:
 - gets its binding's entity with `track_entity`;
 - samples its sections with `section_at` and blends them with `Blend`;
 - reads a field's own value with `base`;
-- writes the world **only** with `write` or `write_field`;
+- writes the world **only** with `write` or `write_field`, and writes every field that it holds in each evaluation, at the field's own value where no section covers the time ([Player: Conflicts](player.md#conflicts));
 - tests a key against the event range with `fires`.
 
 ## Sections and blending

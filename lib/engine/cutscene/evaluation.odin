@@ -79,8 +79,11 @@ Field :: struct {
 // Saved is a field's value before the first track wrote it.
 @(private)
 Saved :: struct {
-	field: Field,
-	bytes: [MAX_FIELD_SIZE]byte,
+	field:  Field,
+	bytes:  [MAX_FIELD_SIZE]byte,
+	// Another player that held the field ended and wanted it put back, so this player puts it back when it ends, even
+	// if only its tracks set to keep wrote it (see docs/cinematics/player.md#conflicts).
+	handed: bool,
 }
 
 // Writer is a track, by its ID, that wrote a saved field.
@@ -306,7 +309,7 @@ restore :: proc(
 	}
 	// Last saved first, so where two saved fields overlap, the one saved first, before any write, is what stays.
 	#reverse for &saved, i in e.snapshot.saved {
-		if restores[i] {
+		if restores[i] || saved.handed {
 			put_back(s, e, w, &saved)
 		}
 	}
@@ -652,11 +655,12 @@ reload :: proc(
 	}
 }
 
-// put_back writes a saved field's value back, when its entity is alive and still has the component, and no other
-// player holds the field.
+// put_back writes a saved field's value back, when its entity is alive and still has the component. When another
+// player holds the field, it hands the put-back to that player, which writes the field on until it ends.
 @(private)
 put_back :: proc(s: ^State, e: ^Evaluation, w: ^ecs.World, saved: ^Saved) {
-	if _, held := held_elsewhere(s, e, saved.field); held {
+	if other, held := held_elsewhere(s, e, saved.field); held {
+		other.handed = true
 		return
 	}
 	p, ok := field_pointer(w, saved.field)
