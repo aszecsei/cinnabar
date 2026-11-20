@@ -1,11 +1,11 @@
 // The depth of field (see docs/rendering/post-processing.md#depth-of-field), in four modes: the setup halves the scene
 // with each pixel's circle of confusion, the tiles take the largest near circle in each tile, the gather blurs the
-// half-size scene by its taps' circles, and the composite blends the blur into the scene.
+// half-size scene into a near layer and a background, and the composite blends them into the scene.
 //
-// A tap counts where its own circle reaches the pixel, so a sharp surface in front of a blurred background does not
-// spread over it, and a tap behind the pixel reaches no further than the pixel's own circle, so a blurred background
-// does not spread over a sharp surface in front of it: neither leaves a halo. A blurred surface in front spreads over
-// what is behind it, which the near tiles let the gather reach.
+// A background tap counts where its own circle reaches the pixel, so a sharp surface in front of a blurred background
+// does not spread over it, and a tap behind the pixel reaches no further than the pixel's own circle, so a blurred
+// background does not spread over a sharp surface in front of it: neither leaves a halo. A blurred surface in front is
+// a layer of its own, over its circle on both sides of its edge, which the near tiles let the gather reach.
 #include "cinnabar.hlsli"
 #include "view_projection.hlsli"
 #include "dof.hlsli"
@@ -34,7 +34,7 @@ struct Constants {
 	uint blades;
 	float highlights;
 	uint tile;
-	uint padding;
+	uint near_layer;
 };
 CN_PASS_CONSTANTS(Constants, constants);
 
@@ -47,6 +47,12 @@ static const uint DOF_COMPOSITE = 3;
 static const uint VIEW_MODEL_STENCIL = 1;
 static const float PI = 3.14159265;
 static const float GOLDEN_ANGLE = 2.39996323;
+// A half-size pixel whose circle is this many pixels in front of the focus is in the near layer.
+static const float NEAR_MIN = 0.5;
+
+float sqr(float x) {
+	return x * x;
+}
 
 float luma(float3 c) {
 	return dot(c, float3(0.2126, 0.7152, 0.0722));
@@ -119,8 +125,12 @@ void tiles(uint2 id) {
 	cn_rw_texture(constants.tiles)[id] = largest;
 }
 
-// gather blurs a half-size pixel: rgb is the blur, and a the share of it that a blurrier surface in front spreads over
-// the pixel, which the composite takes whatever the pixel's own circle.
+// gather blurs a half-size pixel into two layers. The near layer is the blur of the surfaces in front of the focus,
+// with its coverage: each tap stands for its share of the disk, and a near tap spreads its color over its own circle's
+// area, so a blurred surface's coverage is a half at its edge, and goes to 1 inside it and to 0 outside it over its
+// circle. The background is the blur of the rest, without the near taps: of a far pixel, the taps whose circle reaches
+// it, and behind it no further than its own circle; of a near pixel, which hides what is behind it, the background
+// that shows around it. blur's a is 1 where the background has a tap, and near's a is the coverage.
 void gather(uint2 id) {
 	Texture2D<float4> half_scene = cn_texture(constants.half_scene);
 	Texture2D<float4> half_depth = cn_texture(constants.half_depth);
@@ -128,6 +138,7 @@ void gather(uint2 id) {
 	float4 center = half_scene.Load(int3(id, 0));
 	float center_coc = abs(center.a);
 	float center_z = half_depth.Load(int3(id, 0)).r;
+	bool center_near = center.a < -NEAR_MIN;
 	int2 tile = int2(id / constants.tile);
 	float near = 0;
 	for (int ty = -1; ty <= 1; ty++) {
@@ -138,58 +149,73 @@ void gather(uint2 id) {
 	}
 	float radius = min(max(center_coc, near), constants.max_radius * 0.5);
 	if (radius < 0.5) {
-		cn_rw_texture(constants.blur)[id] = float4(center.rgb, 0);
+		cn_rw_texture(constants.blur)[id] = float4(center.rgb, 1);
+		cn_rw_texture(constants.near_layer)[id] = 0;
 		return;
 	}
-	float center_weight = highlight(center.rgb);
-	float3 sum = center.rgb * center_weight;
-	float total = center_weight;
-	// The spread is a share of every tap, those that do not reach the pixel too, so a pixel at the edge of a blurred
-	// surface in front takes half of it, as the surface's blur covers half of its disk, not all of it.
-	float spread = 0;
-	float every = center_weight;
-	for (uint i = 0; i < constants.taps; i++) {
-		float2 offset = tap_offset(i) * radius;
+	float3 far_sum = 0;
+	float far_total = 0;
+	float3 near_sum = 0;
+	float near_total = 0;
+	float coverage = 0;
+	// The center is a tap at no offset, which reaches it whatever its circle.
+	for (uint i = 0; i <= constants.taps; i++) {
+		float2 offset = i < constants.taps ? tap_offset(i) * radius : 0;
+		float distance = length(offset);
 		int2 pixel = clamp(int2(floor(float2(id) + offset + 0.5)), 0, int2(constants.half_size) - 1);
-		float4 tap = half_scene.Load(int3(pixel, 0));
-		float tap_z = half_depth.Load(int3(pixel, 0)).r;
+		float4 tap = i < constants.taps ? half_scene.Load(int3(pixel, 0)) : center;
+		float tap_z = i < constants.taps ? half_depth.Load(int3(pixel, 0)).r : center_z;
 		float reach = abs(tap.a);
-		bool behind = tap_z > center_z;
-		if (behind) {
-			reach = min(reach, center_coc);
-		}
 		float weight = highlight(tap.rgb);
-		float w = saturate(reach - length(offset) + 1) * weight;
-		sum += tap.rgb * w;
-		total += w;
-		every += weight;
-		if (!behind && reach > center_coc + 1) {
-			spread += w;
+		if (tap.a < -NEAR_MIN) {
+			// A near tap's light is spread over its circle, which the taps cover radius² / reach² times.
+			float share = saturate(max(reach, 1) - distance + 1) * min(sqr(radius / max(reach, 1)), float(constants.taps + 1));
+			near_sum += tap.rgb * share * weight;
+			near_total += share * weight;
+			coverage += share;
+			continue;
 		}
+		float w = weight;
+		if (!center_near) {
+			if (tap_z > center_z) {
+				reach = min(reach, center_coc);
+			}
+			w *= saturate(reach - distance + 1);
+		}
+		far_sum += tap.rgb * w;
+		far_total += w;
 	}
-	cn_rw_texture(constants.blur)[id] = float4(sum / total, spread / every);
+	bool background = far_total > 0;
+	cn_rw_texture(constants.blur)[id] = float4(background ? far_sum / far_total : center.rgb, background ? 1 : 0);
+	float alpha = saturate(coverage / float(constants.taps + 1));
+	cn_rw_texture(constants.near_layer)[id] = float4(near_total > 0 ? near_sum / near_total : 0, alpha);
 }
 
-// composite blends a scene pixel toward the blur, read with a 3x3 tent of bilinear taps, by its own circle and by the
-// near blur that spreads over it.
-void composite(uint2 id) {
-	float3 color = cn_texture(constants.scene).Load(int3(id, 0)).rgb;
-	float z;
-	float c = abs(pixel_coc(int2(id), z));
-	Texture2D<float4> blur = cn_texture(constants.blur);
-	SamplerState s = cn_sampler(constants.sampler_index);
-	float2 uv = (float2(id) + 0.5) / float2(constants.size);
+// tent reads a half-size texture at a scene pixel with a 3x3 tent of bilinear taps.
+float4 tent(Texture2D<float4> source, SamplerState s, float2 uv) {
 	float2 t = 0.5 / float2(constants.half_size);
-	float4 blurred = 0;
+	float4 sum = 0;
 	for (int y = -1; y <= 1; y++) {
 		for (int x = -1; x <= 1; x++) {
 			float w = (x == 0 ? 2 : 1) * (y == 0 ? 2 : 1);
-			blurred += blur.SampleLevel(s, uv + t * float2(x, y), 0) * w;
+			sum += source.SampleLevel(s, uv + t * float2(x, y), 0) * w;
 		}
 	}
-	blurred /= 16;
-	float amount = max(smoothstep(1, 3, c), saturate(blurred.a));
-	cn_rw_texture(constants.output)[id] = float4(lerp(color, blurred.rgb, amount), 1);
+	return sum / 16;
+}
+
+// composite blends a scene pixel toward the background's blur by its own circle behind the focus, or takes the
+// background that shows around a pixel in front of it, then puts the near layer over that by its coverage.
+void composite(uint2 id) {
+	float3 color = cn_texture(constants.scene).Load(int3(id, 0)).rgb;
+	float z;
+	float c = pixel_coc(int2(id), z);
+	SamplerState s = cn_sampler(constants.sampler_index);
+	float2 uv = (float2(id) + 0.5) / float2(constants.size);
+	float4 background = tent(cn_texture(constants.blur), s, uv);
+	float4 near_layer = tent(cn_texture(constants.near_layer), s, uv);
+	float3 base = c < -2 * NEAR_MIN ? lerp(color, background.rgb, background.a) : lerp(color, background.rgb, smoothstep(1, 3, c));
+	cn_rw_texture(constants.output)[id] = float4(lerp(base, near_layer.rgb, saturate(near_layer.a)), 1);
 }
 
 [numthreads(8, 8, 1)]

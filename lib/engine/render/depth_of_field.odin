@@ -84,12 +84,13 @@ Dof_Frame :: struct {
 	tile:       u32,
 	tiles_size: [2]u32,
 	// The scene that the setup and the composite read, the half-size scene and its circles, its view-space depth, the
-	// tiles, the blur, and the composite's result.
+	// tiles, the background's blur and the near layer, and the composite's result.
 	scene:      Texture,
 	half:       Texture,
 	half_depth: Texture,
 	tiles:      Texture,
 	blur:       Texture,
+	near:       Texture,
 	output:     Texture,
 }
 
@@ -117,7 +118,7 @@ Dof_Constants :: struct {
 	blades:        u32,
 	highlights:    f32,
 	tile:          u32,
-	padding:       u32,
+	near_layer:    u32,
 }
 
 #assert(size_of(Dof_Constants) == 112)
@@ -175,6 +176,10 @@ add_dof_passes :: proc(f: ^Frame) {
 		g,
 		{size = df.half_size, format = DOF_HALF_FORMAT, label = "dof blur"},
 	)
+	df.near = create_texture(
+		g,
+		{size = df.half_size, format = DOF_HALF_FORMAT, label = "dof near"},
+	)
 	df.output = create_texture(g, {size = f.size, format = SCENE_FORMAT, label = "dof scene"})
 
 	pass := add_compute_pass(g, "dof setup", run_dof, new_clone(Dof_Step{f, DOF_SETUP}, allocator))
@@ -202,6 +207,7 @@ add_dof_passes :: proc(f: ^Frame) {
 	read(g, pass, df.half_depth)
 	read(g, pass, df.tiles)
 	write(g, pass, df.blur)
+	write(g, pass, df.near)
 
 	pass = add_compute_pass(
 		g,
@@ -212,6 +218,7 @@ add_dof_passes :: proc(f: ^Frame) {
 	read(g, pass, df.scene)
 	read(g, pass, f.depth)
 	read(g, pass, df.blur)
+	read(g, pass, df.near)
 	write(g, pass, df.output)
 	f.scene = df.output
 }
@@ -255,12 +262,14 @@ run_dof :: proc(ctx: ^Pass_Context) {
 		c.half_depth = gpu.read_index(gpu_texture(g, df.half_depth))
 		c.tiles = gpu.read_index(gpu_texture(g, df.tiles))
 		c.blur = gpu.write_index(gpu_texture(g, df.blur))
+		c.near_layer = gpu.write_index(gpu_texture(g, df.near))
 	case DOF_COMPOSITE:
 		depth := gpu_texture(g, f.depth)
 		c.scene = gpu.read_index(gpu_texture(g, df.scene))
 		c.depth = gpu.read_index(depth)
 		c.stencil = gpu.stencil_index(depth)
 		c.blur = gpu.read_index(gpu_texture(g, df.blur))
+		c.near_layer = gpu.read_index(gpu_texture(g, df.near))
 		c.output = gpu.write_index(gpu_texture(g, df.output))
 		size = f.size
 	}
