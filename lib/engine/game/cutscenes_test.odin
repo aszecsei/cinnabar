@@ -104,8 +104,8 @@ setup_clocks :: proc(t: ^testing.T) -> ^Clocks_Fixture {
 @(private = "file")
 teardown_clocks :: proc(f: ^Clocks_Fixture) {
 	g := f.g
-	cutscene.destroy_evaluation(&f.on_game, &g.world)
-	cutscene.destroy_evaluation(&f.on_real, &g.world)
+	cutscene.destroy_evaluation(&g.cutscenes, &f.on_game, &g.world)
+	cutscene.destroy_evaluation(&g.cutscenes, &f.on_real, &g.world)
 	cutscene.destroy(&g.cutscenes)
 	asset.destroy(&g.assets)
 	ecs.destroy(&g.world)

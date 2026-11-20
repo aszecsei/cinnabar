@@ -189,9 +189,10 @@ init_evaluation :: proc(
 	}
 }
 
-// destroy_evaluation destroys the bindings, which despawns what they spawned, and frees the snapshot. It restores
-// nothing: call restore first for that.
-destroy_evaluation :: proc(e: ^Evaluation, w: ^ecs.World) {
+// destroy_evaluation takes the evaluation off the systems' list, destroys the bindings, which despawns what they
+// spawned, and frees the snapshot. It restores nothing: call restore first for that.
+destroy_evaluation :: proc(s: ^State, e: ^Evaluation, w: ^ecs.World) {
+	remove_evaluation(s, e)
 	destroy_bindings(&e.bindings, w)
 	delete(e.snapshot.saved)
 	delete(e.snapshot.index)
@@ -231,7 +232,8 @@ advance :: proc(e: ^Evaluation, blob: ^format.Cutscene_Blob, dt: time.Duration) 
 
 // seek sets the time, within the range, for a debugger, a scrub or the editor. No event between the old time and the
 // new one fires, in either phase.
-seek :: proc(e: ^Evaluation, blob: ^format.Cutscene_Blob, t: i32) {
+seek :: proc(e: ^Evaluation, w: ^ecs.World, data: []byte, blob: ^format.Cutscene_Blob, t: i32) {
+	follow_blob(e, w, data, blob)
 	e.time = clamp(t, blob.range_start, blob.range_end)
 	e.carry = 0
 	for &last in e.last {
@@ -250,10 +252,7 @@ evaluate :: proc(
 	blob: ^format.Cutscene_Blob,
 	phase: Phase,
 ) {
-	if key, seen := e.key.?; seen && key != blob.header.key {
-		reload(e, w, data, blob)
-	}
-	e.key = blob.header.key
+	follow_blob(e, w, data, blob)
 	now := e.time
 	from := i64(blob.range_start) - 1
 	if last, ok := e.last[phase].?; ok {
@@ -284,6 +283,7 @@ evaluate :: proc(
 // value before the cutscene, and those that only tracks set to keep wrote stay. The snapshot is then empty. A field
 // whose entity is gone, or no longer has the component, is skipped.
 restore :: proc(e: ^Evaluation, w: ^ecs.World, data: []byte, blob: ^format.Cutscene_Blob) {
+	follow_blob(e, w, data, blob)
 	tracks := format.cutscene_tracks(data, blob)
 	restores := make([]bool, len(e.snapshot.saved), w.platform.frame_allocator)
 	for writer in e.snapshot.writers {
@@ -293,7 +293,8 @@ restore :: proc(e: ^Evaluation, w: ^ecs.World, data: []byte, blob: ^format.Cutsc
 			}
 		}
 	}
-	for &saved, i in e.snapshot.saved {
+	// Last saved first, so where two saved fields overlap, the one saved first, before any write, is what stays.
+	#reverse for &saved, i in e.snapshot.saved {
 		if restores[i] {
 			put_back(w, &saved)
 		}
@@ -498,6 +499,16 @@ late_system :: proc(ctx: ^ecs.System_Context) {
 	}
 }
 
+// follow_blob notices a new blob, by its key, and reloads. Every procedure that takes the evaluation's blob calls it
+// first, so none of them acts on a blob that the evaluation has not followed.
+@(private)
+follow_blob :: proc(e: ^Evaluation, w: ^ecs.World, data: []byte, blob: ^format.Cutscene_Blob) {
+	if key, seen := e.key.?; seen && key != blob.header.key {
+		reload(e, w, data, blob)
+	}
+	e.key = blob.header.key
+}
+
 // reload follows a new blob: the time stays, within the new range, the fields that only removed tracks wrote are
 // restored, and the next evaluation of each phase fires no events.
 @(private)
@@ -525,12 +536,15 @@ reload :: proc(e: ^Evaluation, w: ^ecs.World, data: []byte, blob: ^format.Cutsce
 	// The fields that no remaining track wrote go back, and leave the snapshot. The others keep their places.
 	kept_saved := make([dynamic]Saved, 0, len(e.snapshot.saved), w.platform.heap_allocator)
 	moved := make([]int, len(e.snapshot.saved), w.platform.frame_allocator)
-	for &saved, i in e.snapshot.saved {
+	#reverse for &saved, i in e.snapshot.saved {
+		if !kept[i] {
+			put_back(w, &saved)
+		}
+	}
+	for saved, i in e.snapshot.saved {
 		if kept[i] {
 			moved[i] = len(kept_saved)
 			append(&kept_saved, saved)
-		} else {
-			put_back(w, &saved)
 		}
 	}
 	writers := make(map[Writer]struct{}, w.platform.heap_allocator)

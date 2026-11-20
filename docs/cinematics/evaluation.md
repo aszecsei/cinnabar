@@ -48,6 +48,7 @@ Each kind of track has a **phase**:
 - **Late phase.** The `Late` phase runs after scripts and before `camera.advance`, so the frame shows what it wrote.
 - **Exclusive.** Both systems are **exclusive** ([World: ECS: Systems](../world/ecs.md#systems)). A property track can write any component, so the systems cannot name their writes before they run. An exclusive system waits for every system before it, and every later system waits for it. `register` is the first registration in `register_world`, so in each stage the cutscene runs first and alone.
 - **Real clock.** `advance_real` runs in `game_update` before the ticks, and only while the world runs. Its `Fixed` writes are therefore in place before the first tick. The game's pause does not stop them.
+- **Real clock in a pause.** While the game is paused, no tick runs. So `Previous_Transform` is not copied, and the clock's `alpha` does not change. Presentation then shows only a part of a move that a real-clock track writes to `Transform`. A kind that moves an interpolated entity on the real clock must therefore teleport it (`ecs.teleport`). This is a rule for the transform track ([#539](https://github.com/aszecsei/cinnabar/issues/539)).
 
 [Architecture: Frame](../overview/architecture.md#frame) has the whole frame.
 
@@ -109,6 +110,7 @@ Each phase keeps the time of its last evaluation. An evaluation's event range is
 - A field that a track set to `restore` wrote goes back to its saved value.
 - A field that only tracks set to `keep` wrote stays as the cutscene left it.
 - A field whose entity is gone, or no longer has the component, is skipped.
+- The fields go back in the reverse of the order in which they were saved. Where a track wrote a whole field and another wrote a part of it, the value from before the first write is what stays.
 
 The snapshot is then empty. The player calls `restore` in `Restored` (#535).
 
@@ -116,7 +118,7 @@ A write fails, and saves nothing, when the entity is not alive, has no such comp
 
 ## Hot reload
 
-A blob with a new key is a hot reload. The next `evaluate` notices it and:
+A blob with a new key is a hot reload. The next `evaluate`, `seek` or `restore` notices it and:
 1. Takes each removed track, by its ID, off the writers of its fields.
 2. Restores each field that no remaining track wrote, and removes it from the snapshot. A track that the reload removes therefore restores its fields.
 3. Keeps the time, clamped into the new range, and sets each phase's last time to it, so the reload fires no events.
@@ -140,9 +142,9 @@ A test compares a play with one job and with eight workers.
 | `init(state, world, assets)`, `register(state, world)`, `destroy(state)` | Set up the state, register the two systems and clear the kinds, and free the list |
 | `register_kind(state, kind, desc)` | Sets a kind's phase and evaluate procedure |
 | `add_evaluation(state, e)`, `remove_evaluation(state, e)` | Put an evaluation on the systems' list, or take it off |
-| `init_evaluation(e, world, handle, data, blob)`, `destroy_evaluation(e, world)` | Start an evaluation at the range's start. Destroy its bindings and free its snapshot, without restoring. |
+| `init_evaluation(e, world, handle, data, blob)`, `destroy_evaluation(state, e, world)` | Start an evaluation at the range's start. Take it off the list, destroy its bindings and free its snapshot, without restoring. |
 | `advance(e, blob, dt)` | Moves the time by a duration, without drift, up to the range's end |
-| `seek(e, blob, t)` | Sets the time, so no event between fires |
+| `seek(e, world, data, blob, t)` | Sets the time, so no event between fires |
 | `evaluate(state, e, world, data, blob, phase)` | Evaluates one phase's tracks at the time, and follows a reload |
 | `advance_real(state, world, dt)` | Advances the real-clock cutscenes and evaluates their `Fixed` tracks |
 | `restore(e, world, data, blob)` | Puts back the fields of `restore` tracks, and empties the snapshot |

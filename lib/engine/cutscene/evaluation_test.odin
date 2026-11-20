@@ -324,8 +324,7 @@ start :: proc(
 
 @(private = "file")
 stop :: proc(f: ^Eval_Fixture, e: ^Evaluation) {
-	remove_evaluation(&f.cutscenes, e)
-	destroy_evaluation(e, &f.world)
+	destroy_evaluation(&f.cutscenes, e, &f.world)
 	free(e)
 }
 
@@ -347,7 +346,7 @@ blob_of :: proc(
 @(private = "file")
 at :: proc(f: ^Eval_Fixture, e: ^Evaluation, time: i32) {
 	data, blob, _ := blob_of(f, e.cutscene)
-	seek(e, blob, time)
+	seek(e, &f.world, data, blob, time)
 	evaluate(&f.cutscenes, e, &f.world, data, blob, .Fixed)
 	evaluate(&f.cutscenes, e, &f.world, data, blob, .Late)
 }
@@ -705,13 +704,13 @@ the_clocks_convert_to_ticks_without_drift :: proc(t: ^testing.T) {
 	defer eval_teardown(t, f)
 	e := start(t, f, cutscene_blob(nil, length = 3600 * SECOND), added = false)
 	defer stop(f, e)
-	_, blob, _ := blob_of(f, e.cutscene)
+	data, blob, _ := blob_of(f, e.cutscene)
 	// 7 ms is 420 ticks. 1/144 s is not a whole number of nanoseconds or of ticks.
 	for _ in 0 ..< 1000 {
 		advance(e, blob, 7 * time.Millisecond)
 	}
 	testing.expect_value(t, e.time, 420000)
-	seek(e, blob, 0)
+	seek(e, &f.world, data, blob, 0)
 	clock := ecs.Clock {
 		tick_rate = 144,
 	}
@@ -917,4 +916,63 @@ the_same_ticks_physics_sees_a_written_transform :: proc(t: ^testing.T) {
 	x := ecs.position_to_meters(ecs.get(&f.world, f.lamp, ecs.Transform).position).x
 	testing.expect_value(t, x, 3)
 	free_all(f.platform.frame_allocator)
+}
+
+// Where a track writes a whole field and another writes a part of it, the restore gives back the value from before the
+// first write, whichever was saved last.
+@(test)
+a_restore_of_overlapping_fields_gives_back_the_first_value :: proc(t: ^testing.T) {
+	f := eval_setup(t)
+	defer eval_teardown(t, f)
+	tracks := []format.Cutscene_Track_Contents {
+		{id = 1, kind = .Property, name = "Whole", binding = 0},
+		{id = 2, kind = .Property, name = "Part", binding = 0},
+	}
+	ecs.get_write(&f.world, f.lamp, Lamp).color = {1, 2, 3}
+	e := start(t, f, cutscene_blob(tracks), added = false)
+	defer stop(f, e)
+	data, blob, _ := blob_of(f, e.cutscene)
+	tracks_of := format.cutscene_tracks(data, blob)
+	ctx := Track_Context {
+		world      = &f.world,
+		evaluation = e,
+		data       = data,
+		blob       = blob,
+		track      = tracks_of[0],
+	}
+	testing.expect(t, write(&ctx, f.lamp, LAMP_ID, offset_of(Lamp, color), [3]f32{7, 8, 9}))
+	ctx.track = tracks_of[1]
+	testing.expect(t, write(&ctx, f.lamp, LAMP_ID, offset_of(Lamp, color), f32(4)))
+	testing.expect_value(t, ecs.get(&f.world, f.lamp, Lamp).color, [3]f32{4, 8, 9})
+	restore(e, &f.world, data, blob)
+	testing.expect_value(t, ecs.get(&f.world, f.lamp, Lamp).color, [3]f32{1, 2, 3})
+}
+
+// A reload that lands while nothing evaluates still counts: a restore with the new blob puts back what the removed
+// track wrote, as an evaluation of it would have.
+@(test)
+a_restore_follows_a_reload_that_no_evaluation_saw :: proc(t: ^testing.T) {
+	f := eval_setup(t)
+	defer eval_teardown(t, f)
+	sections := []format.Cutscene_Section_Contents {
+		{id = 1, start = 0, end = SECOND, weight = 1, channels = channel(flat(40))},
+	}
+	brightness_only := []format.Cutscene_Track_Contents {
+		{
+			id = 1,
+			kind = .Property,
+			name = "Brightness",
+			binding = 0,
+			finish = .Keep,
+			sections = sections,
+		},
+	}
+	e := start(t, f, cutscene_blob(brightness_only), added = false)
+	defer stop(f, e)
+	at(f, e, SECOND / 2)
+	testing.expect_value(t, brightness(f), 40)
+	testing.expect(t, asset.set_live(&f.assets, CUTSCENE_GUID, cutscene_blob(nil, key = 2)))
+	data, blob, _ := blob_of(f, e.cutscene)
+	restore(e, &f.world, data, blob)
+	testing.expect_value(t, brightness(f), 5)
 }
