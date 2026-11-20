@@ -49,10 +49,14 @@ api := audio.Audio_API {
 	voice_set      = voice_set,
 	voice_stop     = voice_stop,
 	voice_playing  = voice_playing,
+	voice_seek     = voice_seek,
+	voice_position = voice_position,
 	bus_create     = bus_create,
 	bus_set_gain   = bus_set_gain,
 	bus_set_effect = bus_set_effect,
+	bus_set_duck   = bus_set_duck,
 	set_paused     = set_paused,
+	clock          = clock,
 	stats          = stats,
 	reset          = reset,
 	shutdown       = shutdown,
@@ -76,6 +80,8 @@ info :: proc "c" () -> audio.Backend_Info {
 			.Stream_ADPCM,
 			.Stream_Vorbis,
 			.Stream_Opus,
+			.Seek,
+			.Ducking,
 		},
 		layout = audio.layout_signature(),
 		name = "null",
@@ -184,6 +190,20 @@ voice_playing :: proc "c" (voice: audio.Voice) -> b32 {
 	return find(state.voices[:], audio.Handle(voice)) != nil
 }
 
+// A voice of the null backend makes no sound, so it is never anywhere.
+@(private)
+voice_seek :: proc "c" (voice: audio.Voice, frame: u64, clock: u64) {
+	context = runtime.default_context()
+	if find(state.voices[:], audio.Handle(voice)) == nil {
+		report(.Warning, "audio: null: voice_seek: stale voice %v", voice)
+	}
+}
+
+@(private)
+voice_position :: proc "c" (voice: audio.Voice, out: ^audio.Voice_Position) -> b32 {
+	return false
+}
+
 @(private)
 bus_create :: proc "c" (name: cstring, parent: audio.Bus) -> audio.Bus {
 	context = runtime.default_context()
@@ -219,7 +239,25 @@ bus_set_effect :: proc "c" (bus: audio.Bus, slot: u32, effect: ^audio.Effect) {
 }
 
 @(private)
+bus_set_duck :: proc "c" (bus: audio.Bus, target: audio.Bus, duck: ^audio.Duck) {
+	context = runtime.default_context()
+	bus := bus if bus != {} else audio.MASTER_BUS
+	target := target if target != {} else audio.MASTER_BUS
+	if find(state.buses[:], audio.Handle(bus)) == nil ||
+	   find(state.buses[:], audio.Handle(target)) == nil ||
+	   duck == nil {
+		report(.Warning, "audio: null: bus_set_duck: invalid bus %v or %v", bus, target)
+	}
+}
+
+@(private)
 set_paused :: proc "c" (paused: b32) {}
+
+// The null backend mixes nothing, so its clock stays at 0.
+@(private)
+clock :: proc "c" () -> u64 {
+	return 0
+}
 
 @(private)
 count_alive :: proc "contextless" (slots: []Slot) -> (count: u32) {

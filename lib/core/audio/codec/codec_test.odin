@@ -3,6 +3,7 @@ package audio_codec
 import "core:c"
 import "core:encoding/endian"
 import "core:math"
+import "core:math/rand"
 import "core:mem"
 import "core:testing"
 
@@ -258,4 +259,154 @@ bad_data_fails :: proc(t: ^testing.T) {
 	block[2] = 200
 	testing.expect(t, !decode_all(.ADPCM, block[:], 1, 16, 0, out[:]))
 	testing.expect(t, !decode_all(.ADPCM, block[:10], 1, 16, 0, out[:]))
+}
+
+// A decoder over a coded file, as a stream has one.
+@(private = "file")
+open_coded :: proc(
+	t: ^testing.T,
+	coded: Coded,
+) -> (
+	d: ^Decoder,
+	reader: ^Memory_Reader,
+	h: Header,
+) {
+	h = header_of(coded.file)
+	memory, _ := mem.make_aligned(
+		[]byte,
+		memory_bytes(coded.format, h.channels),
+		MEMORY_ALIGN,
+		context.temp_allocator,
+	)
+	d = new(Decoder, context.temp_allocator)
+	testing.expect(
+		t,
+		decoder_init(d, coded.format, h.channels, h.frames, h.skip, u64(len(h.data)), memory),
+	)
+	reader = new_clone(Memory_Reader{h.data}, context.temp_allocator)
+	return
+}
+
+// The frames that a decoder gives from its place, up to count, and how many it decoded and threw away first.
+@(private = "file")
+frames_from :: proc(
+	t: ^testing.T,
+	d: ^Decoder,
+	reader: ^Memory_Reader,
+	count: int,
+) -> (
+	out: []i16,
+	thrown: u64,
+) {
+	samples := make([dynamic]i16, context.temp_allocator)
+	for len(samples) < count * d.channels {
+		before := d.decoded
+		frames, kept, status := decoder_next(d, read_memory, reader)
+		if status != .Frames {
+			testing.expect(t, status == .End)
+			break
+		}
+		if len(samples) == 0 {
+			thrown = d.decoded - before - u64(kept)
+		}
+		append(&samples, ..frames[:kept * d.channels])
+	}
+	return samples[:min(len(samples), count * d.channels)], thrown
+}
+
+// The largest difference between two runs of samples.
+@(private = "file")
+largest_difference :: proc(a, b: []i16) -> i32 {
+	largest: i32
+	for sample, i in a {
+		largest = max(largest, abs(i32(sample) - i32(b[i])))
+	}
+	return largest
+}
+
+// A seek to any frame gives what a decode from the start gives there. Vorbis and ADPCM give the same samples, and Opus,
+// which starts its decoder afresh before the place, differs by no more than its coding noise.
+@(test)
+a_seek_gives_what_a_decode_from_the_start_gives :: proc(t: ^testing.T) {
+	adpcm_source := tone(20000, 2)
+	adpcm_file := make([]byte, 16, context.temp_allocator)
+	endian.put_u64(adpcm_file[0:], .Little, 20000)
+	endian.put_u32(adpcm_file[8:], .Little, 2)
+	files := make([dynamic]Coded, context.temp_allocator)
+	append(&files, ..coded_files())
+	append(&files, Coded{.Vorbis, #load("testdata/pad_mono.vorbis")})
+	append(&files, Coded{.Opus, #load("testdata/pad_mono.opus")})
+	{
+		data := adpcm.encode(adpcm_source, 2, context.temp_allocator)
+		file := make([]byte, 16 + len(data), context.temp_allocator)
+		copy(file, adpcm_file)
+		copy(file[16:], data)
+		append(&files, Coded{.ADPCM, file})
+	}
+	for coded in files {
+		first, _ := two_passes(t, coded)
+		h := header_of(coded.file)
+		table, ok := seek_table(coded.format, h.channels, h.data, context.temp_allocator)
+		testing.expect(t, ok)
+		d, reader, _ := open_coded(t, coded)
+		places := [?]u64{0, 1, 777, h.frames / 3, h.frames / 2 + 5, h.frames - 300, h.frames - 1}
+		for place in places {
+			if place >= h.frames {
+				continue
+			}
+			testing.expect(t, decoder_seek(d, place, table, read_memory, reader))
+			count := min(1024, int(h.frames - place))
+			out, _ := frames_from(t, d, reader, count)
+			testing.expect_value(t, len(out), count * h.channels)
+			expected := first[int(place) * h.channels:][:len(out)]
+			largest := largest_difference(out, expected)
+			bound: i32 = 32 if coded.format == .Opus else 0
+			testing.expectf(
+				t,
+				largest <= bound,
+				"%v with %d frames, at %d: a difference of %d",
+				coded.format,
+				h.frames,
+				place,
+				largest,
+			)
+		}
+	}
+}
+
+// A seek table keeps each seek within one interval, and a pass after a seek goes on to its end.
+@(test)
+a_seek_decodes_at_most_one_interval :: proc(t: ^testing.T) {
+	files := [?]Coded {
+		{.Vorbis, #load("testdata/tone_stereo.vorbis")},
+		{.Vorbis, #load("testdata/pad_mono.vorbis")},
+		{.Opus, #load("testdata/tone_stereo.opus")},
+	}
+	for coded in files {
+		h := header_of(coded.file)
+		table, ok := seek_table(coded.format, h.channels, h.data, context.temp_allocator)
+		testing.expect(t, ok)
+		testing.expectf(t, len(table) >= 3, "%v has %d points", coded.format, len(table))
+		d, reader, _ := open_coded(t, coded)
+		generator := rand.create(529)
+		largest: u64
+		for _ in 0 ..< 100 {
+			place := rand.uint64_range(0, h.frames, rand.default_random_generator(&generator))
+			testing.expect(t, decoder_seek(d, place, table, read_memory, reader))
+			out, thrown := frames_from(t, d, reader, 64)
+			testing.expect(t, len(out) > 0)
+			largest = max(largest, thrown)
+		}
+		testing.expectf(
+			t,
+			largest <= SEEK_INTERVAL,
+			"%v: a seek threw away %d frames",
+			coded.format,
+			largest,
+		)
+		// Without a table, a seek decodes from the start.
+		testing.expect(t, decoder_seek(d, h.frames - 10, nil, read_memory, reader))
+		_, thrown := frames_from(t, d, reader, 10)
+		testing.expect(t, thrown >= h.frames - 10)
+	}
 }

@@ -38,6 +38,12 @@ MAX_LISTENERS :: 8
 // The distances of a sound from Audio.play, in meters.
 ONE_SHOT_MIN_DISTANCE :: 1
 ONE_SHOT_MAX_DISTANCE :: 50
+// How long a sound that starts after its first frame fades in, in seconds, so that it does not start with a click.
+OFFSET_FADE :: 0.005
+// A scrub's grains: each plays this long at the playhead, with fades this long, and this many play at once at most.
+SCRUB_GRAIN :: 0.04
+SCRUB_FADE :: 0.005
+SCRUB_GRAINS :: 3
 
 @(private)
 Sound_Slot :: struct {
@@ -74,6 +80,9 @@ One_Shot :: struct {
 	gain:     f32,
 	pitch:    f32,
 	bus:      int,
+	// Where it starts in the sound, in frames, and when on the backend's clock, 0 for at once.
+	start:    u64,
+	clock:    u64,
 	voice:    boundary.Voice,
 	// Fixed at the start: a short sound does not earn a ray each frame.
 	occluded: f32,
@@ -95,6 +104,9 @@ State :: struct {
 	one_shot_count:   int,
 	buses:            [MAX_BUSES]boundary.Bus,
 	bus_names:        Bus_Names,
+	// The scrub's grains, oldest first from scrub_next.
+	scrub_grains:     [SCRUB_GRAINS]boundary.Voice,
+	scrub_next:       int,
 	paused:           bool,
 	// The warnings given, each once.
 	warned:           bit_set[Warning],
@@ -172,6 +184,11 @@ destroy :: proc(s: ^State) {
 			api.voice_stop(shot.voice, STOP_FADE)
 		}
 	}
+	for grain in s.scrub_grains {
+		if grain != {} {
+			api.voice_stop(grain, STOP_FADE)
+		}
+	}
 	for &sound in s.sounds[:s.sound_count] {
 		if sound.handle != {} {
 			api.sound_destroy(sound.handle)
@@ -242,6 +259,17 @@ set_bus_gain :: proc(s: ^State, name: string, gain: f32) -> bool {
 	return true
 }
 
+// set_bus_duck makes a bus duck another, both by name: while the first's level is above duck.threshold, the other's gain
+// falls to duck.gain over duck.attack seconds, and it comes back over duck.release. A gain of 1 ends it. It returns false
+// for a name that the project does not give.
+set_bus_duck :: proc(s: ^State, bus: string, target: string, duck: boundary.Duck) -> bool {
+	from := bus_index(s, bus) or_return
+	to := bus_index(s, target) or_return
+	duck := duck
+	s.platform.audio.bus_set_duck(bus_handle(s, from), bus_handle(s, to), &duck)
+	return true
+}
+
 // set_bus_effect puts an effect in a slot of a bus by name. It returns false for a name that the project does not give.
 set_bus_effect :: proc(s: ^State, name: string, slot: int, effect: boundary.Effect) -> bool {
 	index := bus_index(s, name) or_return
@@ -252,7 +280,8 @@ set_bus_effect :: proc(s: ^State, name: string, slot: int, effect: boundary.Effe
 
 // play queues a sound for this frame's update, at a position if it has one, and returns false if the frame has queued
 // too many. The sound plays once, to its end, at a pitch that is clamped to what Audio_Source.pitch allows, 0.1 to 4
-// (not a number plays at 1). Call it from the frame's code or its scripts.
+// (not a number plays at 1). It starts start seconds into the sound. With a clock, a time on the backend's clock (see
+// clock), it starts then, though update runs after the frame's scripts. Call it from the frame's code or its scripts.
 play :: proc(
 	s: ^State,
 	sound: format.Guid,
@@ -260,6 +289,8 @@ play :: proc(
 	gain: f32 = 1,
 	bus := 0,
 	pitch: f32 = 1,
+	start: f64 = 0,
+	clock: u64 = 0,
 ) -> bool {
 	if s.one_shot_count >= MAX_ONE_SHOTS {
 		if .One_Shots not_in s.warned {
@@ -279,8 +310,167 @@ play :: proc(
 		gain     = gain,
 		pitch    = clamp_pitch(pitch),
 		bus      = bus,
+		start    = frames_of(start),
+		clock    = clock,
 	}
 	s.one_shot_count += 1
+	return true
+}
+
+// frames_of is a time in a sound in frames. A time that is not a number, or before the start, is the start.
+frames_of :: proc(seconds: f64) -> u64 {
+	if !(seconds > 0) {
+		return 0
+	}
+	return u64(seconds * boundary.SAMPLE_RATE)
+}
+
+// clock is the backend's clock: the frames that it has mixed, at boundary.SAMPLE_RATE. A time on it is when a sound that
+// play, start_voice or seek_voice starts plays. It runs while the world does not, so a caller that keeps a sound to
+// its own time, as a cutscene does, finds the clock's time for its own when it starts or goes on.
+clock :: proc(s: ^State) -> u64 {
+	return s.platform.audio.clock()
+}
+
+// Voice_Start is a voice that start_voice starts and its caller owns.
+Voice_Start :: struct {
+	sound:    format.Guid,
+	// 0 is Master, and n is the nth of the project's audio.buses.
+	bus:      int,
+	gain:     f32,
+	pitch:    f32,
+	// Where it starts in the sound, in seconds.
+	start:    f64,
+	// When start plays on the clock; 0 is at once. A voice that starts late starts as far in as it is late.
+	clock:    u64,
+	loop:     bool,
+	// Plays while the world does not run, which holds every other voice, as in the editor's edit mode.
+	unpaused: bool,
+	// How long it plays before it fades out over fade, in seconds; 0 plays to the end. fade is how long it fades in, too.
+	length:   f64,
+	fade:     f32,
+}
+
+// start_voice starts a voice that is not placed in the world, which its caller seeks, follows and stops, as a cutscene's
+// audio does. The caller owns it: nothing stops it but the caller, its sound's end, and a soft restart. The handle goes
+// stale when it stops, and is the nil voice when the sound is not loaded or the backend refuses it.
+start_voice :: proc(s: ^State, desc: Voice_Start) -> boundary.Voice {
+	sound := find_sound(s, desc.sound)
+	if sound == nil || sound.handle == {} {
+		return {}
+	}
+	flags: boundary.Voice_Flags
+	if desc.unpaused {
+		flags += {.Unpaused}
+	}
+	start := frames_of(desc.start)
+	fade := desc.fade if desc.fade > 0 || start == 0 else OFFSET_FADE
+	return s.platform.audio.voice_play(
+		&boundary.Voice_Desc {
+			sound = sound.handle,
+			bus = bus_handle(s, desc.bus),
+			params = {gain = desc.gain, pitch = clamp_pitch(desc.pitch)},
+			loop = b32(desc.loop),
+			flags = flags,
+			start = start,
+			clock = desc.clock,
+			length = frames_of(desc.length),
+			fade = fade,
+		},
+	)
+}
+
+// seek_voice moves a voice to seconds into its sound, with a short fade out and in. With a clock, the place plays then.
+seek_voice :: proc(s: ^State, voice: boundary.Voice, seconds: f64, clock: u64 = 0) {
+	s.platform.audio.voice_seek(voice, frames_of(seconds), clock)
+}
+
+// voice_place is where a voice is in its sound, in seconds, at a time on the clock. ok is false for a voice that has
+// stopped, or has not started yet.
+voice_place :: proc(s: ^State, voice: boundary.Voice) -> (seconds: f64, at: u64, ok: bool) {
+	place: boundary.Voice_Position
+	if !s.platform.audio.voice_position(voice, &place) {
+		return
+	}
+	return place.frame / boundary.SAMPLE_RATE, place.clock, true
+}
+
+// keep_to_clock checks a voice that should be at seconds into its sound at a time on the clock, and move at its pitch,
+// and seeks it back when it is further from there than limit seconds. It returns how far it was, and whether it sought.
+// A voice whose sound loops is compared within the sound, so give length, the sound's length in seconds, for one.
+keep_to_clock :: proc(
+	s: ^State,
+	voice: boundary.Voice,
+	seconds: f64,
+	at: u64,
+	limit: f64,
+	pitch: f64 = 1,
+	length: f64 = 0,
+) -> (
+	drift: f64,
+	sought: bool,
+) {
+	place, place_at, ok := voice_place(s, voice)
+	if !ok {
+		return
+	}
+	expected := seconds + (f64(place_at) - f64(at)) / boundary.SAMPLE_RATE * pitch
+	if length > 0 {
+		expected = expected - length * f64(i64(expected / length))
+	}
+	drift = place - expected
+	if length > 0 && abs(drift) > length / 2 {
+		drift -= length if drift > 0 else -length
+	}
+	if abs(drift) <= limit {
+		return
+	}
+	// The seek takes effect in a later block, so it lands at a time ahead of now, where the voice should be then.
+	ahead := clock(s) + SEEK_LEAD
+	target := seconds + (f64(ahead) - f64(at)) / boundary.SAMPLE_RATE * pitch
+	seek_voice(s, voice, target, ahead)
+	return drift, true
+}
+
+// How far ahead of the clock keep_to_clock places a seek: the queue that the mixer keeps, so the seek is not late.
+SEEK_LEAD :: 2400
+
+// stop_voice stops a voice over fade seconds. Its handle goes stale at once.
+stop_voice :: proc(s: ^State, voice: boundary.Voice, fade: f32 = STOP_FADE) {
+	s.platform.audio.voice_stop(voice, fade)
+}
+
+// voice_playing is whether a voice still plays: false once it ended or stopped.
+voice_playing :: proc(s: ^State, voice: boundary.Voice) -> bool {
+	return bool(s.platform.audio.voice_playing(voice))
+}
+
+// scrub plays a short grain of a sound at seconds into it, as the editor does at a playhead that is dragged, so the
+// sound can be heard where it is. A grain plays while the world does not run. Up to SCRUB_GRAINS play at once, and a
+// grain past them fades out the oldest. It returns false when the sound is not loaded.
+scrub :: proc(s: ^State, sound: format.Guid, seconds: f64, bus := 0, gain: f32 = 1) -> bool {
+	grain := start_voice(
+		s,
+		{
+			sound = sound,
+			bus = bus,
+			gain = gain,
+			pitch = 1,
+			start = seconds,
+			unpaused = true,
+			length = SCRUB_GRAIN,
+			fade = SCRUB_FADE,
+		},
+	)
+	if grain == {} {
+		return false
+	}
+	oldest := &s.scrub_grains[s.scrub_next]
+	if oldest^ != {} {
+		s.platform.audio.voice_stop(oldest^, SCRUB_FADE)
+	}
+	oldest^ = grain
+	s.scrub_next = (s.scrub_next + 1) % SCRUB_GRAINS
 	return true
 }
 
@@ -560,12 +750,15 @@ follow_source :: proc(
 	params.occlusion = slot.occlusion
 	slot.guid = source.sound
 	slot.version = sound.version
+	start := frames_of(f64(source.start))
 	slot.voice = api.voice_play(
 		&boundary.Voice_Desc {
 			sound = sound.handle,
 			bus = bus_handle(s, int(source.bus)),
 			params = params,
 			loop = b32(source.loop),
+			start = start,
+			fade = OFFSET_FADE if start > 0 else 0,
 		},
 	)
 	return
@@ -659,6 +852,9 @@ update_one_shots :: proc(
 					sound = sound.handle,
 					bus = bus_handle(s, shot.bus),
 					params = params,
+					start = shot.start,
+					clock = shot.clock,
+					fade = OFFSET_FADE if shot.start > 0 else 0,
 				},
 			)
 			if shot.voice == {} {
@@ -759,6 +955,24 @@ load_sound :: proc(s: ^State, sound: ^Sound_Slot) {
 				size     = u64(blob.data.size),
 				format   = blob.format,
 				skip     = blob.skip,
+			}
+			if blob.seek.size > 0 {
+				table := make(
+					[]boundary.Seek_Point,
+					int(blob.seek.size) / size_of(boundary.Seek_Point),
+					s.platform.frame_allocator,
+				)
+				read := s.platform.file_read_range(
+					path,
+					location.offset + i64(blob.seek.offset),
+					mem.slice_to_bytes(table),
+				)
+				if read != int(blob.seek.size) {
+					log.errorf("audio: cannot read the seek table of %s. Cook the content.", path)
+					return
+				}
+				desc.seek = raw_data(table)
+				desc.seek_count = u32(len(table))
 			}
 			sound.handle = api.sound_create(&desc)
 			return

@@ -10,6 +10,7 @@ import "core:testing"
 import ma "vendor:miniaudio"
 
 import audio "cinnabar:core/audio"
+import "cinnabar:core/audio/codec"
 import "cinnabar:core/audio/opus"
 import format "cinnabar:engine/asset/format"
 
@@ -438,6 +439,63 @@ a_very_short_sound_compresses :: proc(t: ^testing.T) {
 		if blob != nil {
 			testing.expect_value(t, blob.frames, 1000)
 		}
+	}
+}
+
+// A Vorbis or Opus sound that streams has a seek table, with a point at least every SEEK_INTERVAL, and the seek setting
+// turns it off. A sound that does not stream, or of another format, has none.
+@(test)
+the_seek_setting_writes_a_table :: proc(t: ^testing.T) {
+	FRAMES :: 5 * format.AUDIO_SAMPLE_RATE
+	tree := make_tree(t, {{"content/audio/tone.wav", wav(loop_tone(FRAMES, 2), 2, 48000)}})
+	defer remove_tree(tree)
+	options := tree_options(tree)
+	testing.expect(t, cook(options, {.Audio}, log_problems = false).ok)
+	for name in ([]string{"vorbis", "opus"}) {
+		set_settings(t, tree, "audio/tone.wav", {{"format", name}, {"stream", "true"}})
+		testing.expect(t, cook(options, {.Audio}, log_problems = false).ok)
+		data, blob := cooked(t, tree, "audio/tone.wav")
+		if blob == nil {
+			continue
+		}
+		table := format.audio_seek(data, blob)
+		testing.expectf(
+			t,
+			len(table) >= FRAMES / codec.SEEK_INTERVAL,
+			"%s has %d points",
+			name,
+			len(table),
+		)
+		last: u64
+		for point in table {
+			testing.expect(t, point.frame > last && point.frame - last <= codec.SEEK_INTERVAL)
+			testing.expect(t, point.offset < u64(blob.data.size))
+			last = point.frame
+		}
+
+		set_settings(
+			t,
+			tree,
+			"audio/tone.wav",
+			{{"format", name}, {"stream", "true"}, {"seek", "false"}},
+		)
+		testing.expect(t, cook(options, {.Audio}, log_problems = false).ok)
+		_, off := cooked(t, tree, "audio/tone.wav")
+		if off != nil {
+			testing.expect_value(t, off.seek.size, 0)
+		}
+		set_settings(t, tree, "audio/tone.wav", {{"format", name}, {"stream", "false"}})
+		testing.expect(t, cook(options, {.Audio}, log_problems = false).ok)
+		_, loaded := cooked(t, tree, "audio/tone.wav")
+		if loaded != nil {
+			testing.expect_value(t, loaded.seek.size, 0)
+		}
+	}
+	set_settings(t, tree, "audio/tone.wav", {{"format", "adpcm"}, {"stream", "true"}})
+	testing.expect(t, cook(options, {.Audio}, log_problems = false).ok)
+	_, adpcm_blob := cooked(t, tree, "audio/tone.wav")
+	if adpcm_blob != nil {
+		testing.expect_value(t, adpcm_blob.seek.size, 0)
 	}
 }
 

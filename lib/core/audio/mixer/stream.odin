@@ -43,12 +43,25 @@ Stream :: struct {
 	write:          Index,
 	// Set after the last write: no more frames come.
 	ended:          b32,
+	// A read from another frame: the mix thread asks with a new ticket, and the stream thread answers with it once the
+	// ring holds the sound from seek_frame, or once the stream ended. Until then, the mix thread does not read the ring.
+	seek_frame:     u64,
+	seek_asked:     u32,
+	seek_answered:  u32,
 }
 
-// stream_take gives a playing voice a free stream, or nil. The ring and the decoder's memory are allocated here, on the
-// game's thread, so the stream thread decodes without allocating.
+// stream_take gives a playing voice a free stream, which first reads from start, or nil. The ring and the decoder's memory
+// are allocated here, on the game's thread, so the stream thread decodes without allocating.
 @(private)
-stream_take :: proc(m: ^Mixer, sound: ^Sound_Data, loop: bool) -> ^Stream {
+stream_take :: proc(
+	m: ^Mixer,
+	sound: ^Sound_Data,
+	loop: bool,
+	start: u64,
+) -> (
+	taken: ^Stream,
+	ticket: u32,
+) {
 	for &stream in m.streams {
 		if sync.atomic_load_explicit(&stream.state, .Acquire) != .Free {
 			continue
@@ -58,11 +71,11 @@ stream_take :: proc(m: ^Mixer, sound: ^Sound_Data, loop: bool) -> ^Stream {
 				m.host.allocate(STREAM_RING_FRAMES * 2 * size_of(i16), align_of(i16)),
 			)
 			if stream.ring == nil {
-				return nil
+				return nil, 0
 			}
 		}
 		if sound.format != .PCM && !stream_decoder_init(m, &stream, sound) {
-			return nil
+			return nil, 0
 		}
 		stream.pending_frames = 0
 		stream.sound = sound
@@ -72,11 +85,15 @@ stream_take :: proc(m: ^Mixer, sound: ^Sound_Data, loop: bool) -> ^Stream {
 		stream.read.value = 0
 		stream.write.value = 0
 		stream.ended = false
+		// The first read is the first ticket, which the voice waits for. The stream answered every earlier one.
+		stream.seek_frame = start
+		stream.seek_answered = stream.seek_asked
+		stream.seek_asked += 1
 		// A stream's voice holds its sound through the stream.
 		sync.atomic_store_explicit(&stream.state, .Active, .Release)
-		return &stream
+		return &stream, stream.seek_asked
 	}
-	return nil
+	return nil, 0
 }
 
 @(private)
@@ -114,9 +131,21 @@ streams_busy :: proc(m: ^Mixer) -> bool {
 	return false
 }
 
-// stream_ready is whether a voice can start: its first read is done, so it does not start with a gap.
+// stream_ask asks the stream thread to read from another frame, on the mix thread, and gives the ticket that it answers.
 @(private)
-stream_ready :: proc(stream: ^Stream) -> bool {
+stream_ask :: proc(stream: ^Stream, frame: u64) -> u32 {
+	stream.seek_frame = frame
+	ticket := stream.seek_asked + 1
+	sync.atomic_store_explicit(&stream.seek_asked, ticket, .Release)
+	return ticket
+}
+
+// stream_ready is whether a voice can start: the stream answered its ticket and has read, so it does not start with a gap.
+@(private)
+stream_ready :: proc(stream: ^Stream, ticket: u32) -> bool {
+	if sync.atomic_load_explicit(&stream.seek_answered, .Acquire) != ticket {
+		return false
+	}
 	ended := sync.atomic_load_explicit(&stream.ended, .Acquire)
 	return(
 		bool(ended) ||
@@ -151,12 +180,26 @@ stream_read :: proc(m: ^Mixer, stream: ^Stream) -> (frame: [2]f32, ok: bool) {
 
 // stream_fill reads frames to fill the ring's free space. It opens and closes the file each time, because Windows
 // refuses the cooker's rename over a file that is open (see docs/audio/design.md#streaming).
+//
+// A seek empties the ring, which the mix thread does not read while it waits for the answer. The answer comes after the
+// first read from the new place, or once the stream ended or failed.
 @(private)
 stream_fill :: proc(m: ^Mixer, stream: ^Stream) {
-	if sync.atomic_load_explicit(&stream.ended, .Relaxed) {
+	asked := sync.atomic_load_explicit(&stream.seek_asked, .Acquire)
+	seeking := asked != stream.seek_answered
+	if !seeking && sync.atomic_load_explicit(&stream.ended, .Relaxed) {
 		return
 	}
+	defer if seeking {
+		sync.atomic_store_explicit(&stream.seek_answered, asked, .Release)
+	}
 	write := sync.atomic_load_explicit(&stream.write.value, .Relaxed)
+	if seeking {
+		write = sync.atomic_load_explicit(&stream.read.value, .Acquire)
+		sync.atomic_store_explicit(&stream.write.value, write, .Release)
+		sync.atomic_store_explicit(&stream.ended, false, .Release)
+		stream.pending_frames = 0
+	}
 	free :=
 		STREAM_RING_FRAMES - int(write - sync.atomic_load_explicit(&stream.read.value, .Acquire))
 	if free < STREAM_CHUNK_FRAMES {
@@ -177,6 +220,9 @@ stream_fill :: proc(m: ^Mixer, stream: ^Stream) {
 	}
 	stream.opened = true
 	stream.modified = modified
+	if seeking && !stream_seek(m, stream, file) {
+		return
+	}
 	if sound.format != .PCM {
 		stream_fill_decoded(m, stream, file, write, free)
 		return
@@ -210,6 +256,36 @@ stream_fill :: proc(m: ^Mixer, stream: ^Stream) {
 		free -= frames
 		sync.atomic_store_explicit(&stream.write.value, write, .Release)
 	}
+}
+
+// stream_seek moves a stream's place in its file to seek_frame. A loop wraps a frame past its end, and a frame past the end
+// of a sound that does not loop ends the stream.
+@(private)
+stream_seek :: proc(m: ^Mixer, stream: ^Stream, file: rawptr) -> bool {
+	sound := stream.sound
+	frame := stream.seek_frame
+	if stream.loop {
+		frame %= sound.frames
+	} else if frame >= sound.frames {
+		sync.atomic_store_explicit(&stream.ended, true, .Release)
+		return false
+	}
+	if sound.format == .PCM {
+		stream.next_frame = frame
+		return true
+	}
+	reader := Stream_Reader{m, file, sound.offset}
+	if !codec.decoder_seek(
+		&stream.decoder,
+		frame,
+		sound.seek[:sound.seek_count],
+		stream_read_file,
+		&reader,
+	) {
+		stream_fail(m, stream)
+		return false
+	}
+	return true
 }
 
 @(private)

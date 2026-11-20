@@ -156,6 +156,49 @@ a_full_pool_refuses :: proc(t: ^testing.T, api: ^audio.Audio_API) {
 	api.reset()
 }
 
+// seeks_and_ducks_take_their_arguments: a voice starts at a place and a time, seeks, and reports where it is; a bus
+// ducks another; the clock never goes back. Stale handles do nothing.
+seeks_and_ducks_take_their_arguments :: proc(t: ^testing.T, api: ^audio.Audio_API) {
+	s := sound(api)
+	start := api.clock()
+	voice := api.voice_play(
+		&audio.Voice_Desc {
+			sound = s,
+			params = params(),
+			loop = true,
+			flags = {.Unpaused},
+			start = 3,
+			clock = start + 100,
+			length = 1000,
+			fade = 0.01,
+		},
+	)
+	testing.expect(t, bool(api.voice_playing(voice)))
+	api.voice_seek(voice, 5, 0)
+	api.update()
+	place: audio.Voice_Position
+	if api.voice_position(voice, &place) {
+		testing.expect(t, place.frame >= 0 && place.frame < f64(len(SAMPLES)))
+	}
+	testing.expect(t, api.clock() >= start)
+	api.voice_stop(voice, 0)
+	api.voice_seek(voice, 1, 0)
+	testing.expect(t, !bool(api.voice_position(voice, &place)))
+	testing.expect(t, !bool(api.voice_position({}, &place)))
+
+	dialogue := api.bus_create("dialogue", {})
+	music := api.bus_create("music", {})
+	api.bus_set_duck(
+		dialogue,
+		music,
+		&audio.Duck{gain = 0.3, attack = 0.1, release = 0.5, threshold = 0.01},
+	)
+	api.bus_set_duck(dialogue, music, &audio.Duck{gain = 1})
+	api.bus_set_duck({30, 99}, music, &audio.Duck{gain = 0.5})
+	api.bus_set_duck(dialogue, {30, 99}, &audio.Duck{gain = 0.5})
+	api.reset()
+}
+
 // run runs the whole suite.
 run :: proc(t: ^testing.T, api: ^audio.Audio_API) {
 	info(t, api)
@@ -165,5 +208,6 @@ run :: proc(t: ^testing.T, api: ^audio.Audio_API) {
 	buses_nest(t, api)
 	reset_leaves_nothing(t, api)
 	a_full_pool_refuses(t, api)
+	seeks_and_ducks_take_their_arguments(t, api)
 	api.reset()
 }

@@ -8,10 +8,11 @@ import "core:slice"
 import ma "vendor:miniaudio"
 
 import audio "cinnabar:core/audio"
+import "cinnabar:core/audio/codec"
 import format "cinnabar:engine/asset/format"
 
 // Changing how the cooker cooks sounds changes this, which invalidates every cooked sound.
-AUDIO_COOK_VERSION :: "audio 2"
+AUDIO_COOK_VERSION :: "audio 3"
 // The sounds that the cooker decodes.
 AUDIO_EXTENSIONS :: []string{".wav", ".ogg", ".flac", ".mp3"}
 // A sound longer than this streams, unless its .meta file says otherwise: loading it would take more than a moment.
@@ -42,6 +43,12 @@ AUDIO_SETTINGS := []Setting_Info {
 		values = {"pcm", "adpcm", "vorbis", "opus"},
 		default = "pcm",
 		description = "How the blob stores the sound. Pcm is exact and largest. Adpcm is about 4 times smaller, for short sounds that play often. Vorbis and opus are about 10 times smaller, for music and other long sounds. A sound that does not stream is decoded when it loads, so its format saves disk and not memory.",
+	},
+	{
+		key = "seek",
+		values = {"true", "false"},
+		default = "true",
+		description = "Write a seek table for a vorbis or opus sound that streams, so that a voice can start or seek anywhere in it by decoding at most half a second. Without one, such a seek decodes from the start, which costs little for a short sound.",
 	},
 }
 
@@ -133,6 +140,27 @@ cook_sound :: proc(a: ^Asset_Source, out_dir: string, pass: ^Pass) -> Asset_Resu
 			return .Failed
 		}
 	}
+	seek: []audio.Seek_Point
+	if stream && audio_setting(a^, "seek") == "true" {
+		table, measured := codec.seek_table(
+			sound_format,
+			int(channels),
+			data,
+			context.temp_allocator,
+		)
+		if !measured {
+			report_error(
+				problems,
+				a.path,
+				0,
+				0,
+				"cannot find the seek points of its %v data",
+				sound_format,
+			)
+			return .Failed
+		}
+		seek = table
+	}
 	if len(data) > AUDIO_MAX_BYTES {
 		report_error(problems, a.path, 0, 0, "is too long: its data takes more than 4 GiB")
 		return .Failed
@@ -147,6 +175,7 @@ cook_sound :: proc(a: ^Asset_Source, out_dir: string, pass: ^Pass) -> Asset_Resu
 			format = sound_format,
 			skip = skip,
 			data = data,
+			seek = seek,
 			source_path = a.name,
 		},
 		context.temp_allocator,
