@@ -5,6 +5,7 @@ import "core:fmt"
 import "core:mem/virtual"
 import "core:strings"
 import "core:testing"
+import "core:time"
 
 import "cinnabar:core"
 import "cinnabar:core/gpu"
@@ -575,6 +576,26 @@ the_ui_scale_is_a_number_from_a_quarter_to_four :: proc(t: ^testing.T) {
 	parse("ui.scale = 9\nui.scale = big\n", &s, &problems)
 	testing.expect_value(t, s.ui_scale, 1.5)
 	testing.expect_value(t, len(problems), 2)
+}
+
+@(test)
+the_cutscene_skip_is_an_action_and_a_hold_in_seconds :: proc(t: ^testing.T) {
+	s: Settings
+	problems := make([dynamic]string, context.temp_allocator)
+	_, given := s.skip_hold.?
+	testing.expect(t, !given, "no file gives the cutscenes' own hold")
+	parse("cutscene.skip_action = cancel\ncutscene.skip_hold = 0.5\n", &s, &problems)
+	testing.expect_value(t, len(problems), 0)
+	testing.expect_value(t, string(s.skip_action[:s.skip_action_length]), "cancel")
+	testing.expect_value(t, s.skip_hold.? or_else 0, 500 * time.Millisecond)
+	parse(
+		"cutscene.skip_hold = 11\ncutscene.skip_hold = -1\ncutscene.skip_action = an_action_name_of_25_byte\n",
+		&s,
+		&problems,
+	)
+	testing.expect_value(t, len(problems), 3)
+	testing.expect_value(t, s.skip_hold.? or_else 0, 500 * time.Millisecond)
+	testing.expect_value(t, string(s.skip_action[:s.skip_action_length]), "cancel")
 }
 
 @(test)

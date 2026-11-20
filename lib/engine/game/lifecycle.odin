@@ -67,7 +67,7 @@ game_init :: proc(
 	audio.init(&g.audio, platform, &g.assets)
 	nav.init(&g.nav, platform, &g.assets, &g.physics)
 	ai.init(&g.ai, platform, &g.assets, &g.scripts, &g.physics)
-	cutscene.init(&g.cutscenes, &g.world, &g.assets, &g.scripts.input_actions.contexts)
+	cutscene.init(&g.cutscenes, &g.world, &g.assets, &g.scripts.input_actions)
 	register_world(g, h)
 	asset.init(&g.assets, platform, asset.content_source(platform.content_dir))
 	render.renderer_init(&g.renderer, platform, &g.assets, &g.world)
@@ -152,9 +152,13 @@ game_update :: proc(g: ^Game, dt: time.Duration, h: Hooks) -> (keep_running: boo
 	stream_scenes(g)
 	update_sublevels(g)
 	send_sublevel_events(g)
+	// A hold of the skip action skips before the players move on, so its skip fades from this frame (see
+	// docs/cinematics/skipping.md#input).
+	frame_input := g.platform.input()
+	cutscene.update_skip(&g.cutscenes, &g.world, &frame_input, dt)
 	// The players load, resolve their bindings and give the world back here, outside the systems and the script phase,
 	// once the frame's scenes are in place (see docs/cinematics/player.md#the-frame).
-	if cutscene.update(&g.cutscenes, {&g.world, &g.scenes, &g.scripts}) > 0 {
+	if cutscene.update(&g.cutscenes, {&g.world, &g.scenes, &g.scripts, dt}) > 0 {
 		forget_despawned(g)
 	}
 	// In the editor's edit mode, and while it pauses, the world stands still and only its transforms propagate, so
@@ -178,7 +182,7 @@ game_update :: proc(g: ^Game, dt: time.Duration, h: Hooks) -> (keep_running: boo
 	if run {
 		g.elapsed += step
 		g.frame_step = f32(time.duration_seconds(step))
-		input := g.platform.input()
+		input := frame_input
 		// The cutscenes on the real clock move by the frame's real time, which the pause and the time scale do not change,
 		// and write their Fixed tracks before the ticks (see docs/cinematics/evaluation.md#the-clock).
 		cutscene.advance_real(&g.cutscenes, &g.world, dt)
@@ -405,6 +409,11 @@ update_project :: proc(g: ^Game, h: Hooks) {
 	audio.set_buses(&g.audio, settings.audio_buses)
 	ai.set_tags(&g.ai, settings.perception_tags)
 	ui.set_scale_factor(&g.ui, settings.ui_scale)
+	cutscene.set_skip_input(
+		&g.cutscenes,
+		string(settings.skip_action[:settings.skip_action_length]),
+		settings.skip_hold,
+	)
 	project.apply_display_settings(&g.display_applied, g.platform, &g.renderer, settings)
 	if h.settings_changed != nil {
 		h.settings_changed(g)

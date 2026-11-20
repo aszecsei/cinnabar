@@ -38,8 +38,12 @@ Track_Kind :: struct {
 // The kinds hold procedures from the DLL image, so register clears them, and the kinds are registered again after it.
 State :: struct {
 	assets:  ^asset.Assets,
-	// The input contexts that a playing cutscene pushes its own on (see docs/cinematics/possession.md), or nil.
-	input:   ^core.Input_Contexts,
+	// The input actions: their contexts, which a playing cutscene pushes its own on (see
+	// docs/cinematics/possession.md), and the skip action, which the skip hold reads (see
+	// docs/cinematics/skipping.md#input). Or nil.
+	actions: ^core.Input_Actions,
+	// The skip action's name and hold time, and the hold in progress.
+	skip:    Skip_Input,
 	kinds:   [format.Cutscene_Track_Kind]Track_Kind,
 	// The players, in fixed slots, so an evaluation does not move while it is evaluated (see
 	// docs/cinematics/player.md#handles).
@@ -119,14 +123,18 @@ Track_Context :: struct {
 	// time. from is i64, so the first range can start before 0.
 	from:       i64,
 	to:         i64,
+	// The evaluation is a skip's jump over (from, to] (see docs/cinematics/skipping.md#events): a kind fires only the
+	// events that it marks to fire when skipped, and starts nothing that the jump passes, such as a sound.
+	skipped:    bool,
 	// The kind's data, from its Track_Kind.
 	user:       rawptr,
 }
 
-// init sets the state's assets and the level that its players begin in. Call register after it.
-init :: proc(s: ^State, w: ^ecs.World, assets: ^asset.Assets, input: ^core.Input_Contexts = nil) {
+// init sets the state's assets, its input actions and the level that its players begin in. Call register after it.
+init :: proc(s: ^State, w: ^ecs.World, assets: ^asset.Assets, actions: ^core.Input_Actions = nil) {
 	s.assets = assets
-	s.input = input
+	s.actions = actions
+	set_skip_input(s, "", nil)
 	s.events = make([dynamic]Player_Event, w.platform.heap_allocator)
 	s.level = level_of(w)
 }
@@ -261,11 +269,57 @@ evaluate :: proc(
 	blob: ^format.Cutscene_Blob,
 	phase: Phase,
 ) {
+	run_phase(s, e, w, data, blob, phase, .Fire)
+}
+
+// skip_to jumps to a later time for a skip (see docs/cinematics/skipping.md#the-state): each phase evaluates once at the
+// target, over the range from its last time, as skipped, so its kinds fire only the events marked to fire when
+// skipped. The target is clamped into the range, and not before the time.
+skip_to :: proc(
+	s: ^State,
+	e: ^Evaluation,
+	w: ^ecs.World,
+	data: []byte,
+	blob: ^format.Cutscene_Blob,
+	target: i32,
+) {
+	follow_blob(s, e, w, data, blob)
+	e.time = clamp(target, e.time, blob.range_end)
+	e.carry = 0
+	for phase in Phase {
+		run_phase(s, e, w, data, blob, phase, .Skip)
+	}
+}
+
+// Events is what an evaluation does with the events since its phase's last time.
+@(private)
+Events :: enum u8 {
+	// They fire, and the phase's last time moves to now.
+	Fire,
+	// They are skipped over: the kinds fire only those marked to fire when skipped, and the last time moves to now.
+	Skip,
+	// None fire, and the last time stays, for a skipping player that holds the world before its jump.
+	Hold,
+}
+
+@(private)
+run_phase :: proc(
+	s: ^State,
+	e: ^Evaluation,
+	w: ^ecs.World,
+	data: []byte,
+	blob: ^format.Cutscene_Blob,
+	phase: Phase,
+	events: Events,
+) {
 	follow_blob(s, e, w, data, blob)
 	now := e.time
 	from := i64(blob.range_start) - 1
 	if last, ok := e.last[phase].?; ok {
 		from = i64(last)
+	}
+	if events == .Hold {
+		from = i64(now)
 	}
 	ctx := Track_Context {
 		world      = w,
@@ -276,6 +330,7 @@ evaluate :: proc(
 		time       = now,
 		from       = from,
 		to         = max(i64(now), from),
+		skipped    = events == .Skip,
 	}
 	for track in format.cutscene_tracks(data, blob) {
 		kind := s.kinds[track.kind]
@@ -286,7 +341,9 @@ evaluate :: proc(
 		ctx.user = kind.data
 		kind.evaluate(&ctx)
 	}
-	e.last[phase] = now
+	if events != .Hold {
+		e.last[phase] = now
+	}
 }
 
 // restore ends what the tracks did to the world: each saved field that a track set to restore wrote goes back to its
@@ -508,9 +565,9 @@ advance_real :: proc(s: ^State, w: ^ecs.World, dt: time.Duration) {
 }
 
 // fixed_system advances the playing cutscenes on the game's clock by the tick, and evaluates the Fixed tracks of every
-// cutscene that plays or is paused, in the players' order, so the player that wins a field writes it last. The tick's
-// length is exact, from the world's clock, so the game's time scale and pause reach the cutscene through the ticks. A
-// cutscene on the real clock moved in advance_real, so it evaluates again at the same time, and fires nothing.
+// cutscene that plays, is paused or skips, in the players' order, so the player that wins a field writes it last. The
+// tick's length is exact, from the world's clock, so the game's time scale and pause reach the cutscene through the
+// ticks. A cutscene on the real clock moved in advance_real, so it evaluates again at the same time, and fires nothing.
 @(private)
 fixed_system :: proc(ctx: ^ecs.System_Context) {
 	s := (^State)(ctx.data)
@@ -525,11 +582,11 @@ fixed_system :: proc(ctx: ^ecs.System_Context) {
 		if blob.clock == .Game && status_of(p.state) == .Playing {
 			advance(e, blob, step)
 		}
-		evaluate(s, e, w, data, blob, .Fixed)
+		run_phase(s, e, w, data, blob, .Fixed, events_of(p))
 	}
 }
 
-// late_system evaluates the Late tracks of every cutscene that plays or is paused, in the players' order.
+// late_system evaluates the Late tracks of every cutscene that plays, is paused or skips, in the players' order.
 @(private)
 late_system :: proc(ctx: ^ecs.System_Context) {
 	s := (^State)(ctx.data)
@@ -539,17 +596,25 @@ late_system :: proc(ctx: ^ecs.System_Context) {
 		if !ok {
 			continue
 		}
-		evaluate(s, e, ctx.world, data, blob, .Late)
+		run_phase(s, e, ctx.world, data, blob, .Late, events_of(p))
 	}
 }
 
-// in_order is the players that play or are paused, in frame memory, by priority and then by start order, so the later
-// of two players that write one field writes it last and wins (see docs/cinematics/player.md#conflicts).
+// events_of is what the systems' evaluation of a player does with its events: a skipping player holds the world at its
+// time and fires none, so its jump fires the range that it skips, as skipped.
+@(private)
+events_of :: proc(p: ^Player) -> Events {
+	return .Hold if status_of(p.state) == .Skipping else .Fire
+}
+
+// in_order is the players that play, are paused or skip, in frame memory, by priority and then by start order, so the
+// later of two players that write one field writes it last and wins (see docs/cinematics/player.md#conflicts).
 @(private)
 in_order :: proc(s: ^State, w: ^ecs.World) -> []^Player {
 	found := make([dynamic]^Player, 0, MAX_PLAYERS, w.platform.frame_allocator)
 	for &p in s.players {
-		if status := status_of(p.state); status == .Playing || status == .Paused {
+		if status := status_of(p.state);
+		   status == .Playing || status == .Paused || status == .Skipping {
 			append(&found, &p)
 		}
 	}

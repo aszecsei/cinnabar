@@ -4,6 +4,7 @@ import "core:hash"
 import "core:log"
 import "core:mem"
 import "core:strings"
+import "core:time"
 
 import "cinnabar:engine/asset"
 import format "cinnabar:engine/asset/format"
@@ -47,14 +48,12 @@ Player_State :: union {
 	Player_Failed,
 }
 
-// When_Ready is what a loading player does once it is ready.
+// When_Ready is what a loading player does once it is ready, when it does not skip.
 When_Ready :: enum u8 {
 	// It waits in Ready for start.
 	Hold,
 	// It plays.
 	Play,
-	// It skips to the end.
-	Skip,
 }
 
 // Player_Loading is a player whose cutscene, the assets that the cutscene references, and its bindings are not loaded
@@ -62,6 +61,9 @@ When_Ready :: enum u8 {
 Player_Loading :: struct {
 	cutscene:   format.Guid,
 	when_ready: When_Ready,
+	// A skip came while it loaded: once ready, it skips from its start if the cutscene lets it, and does as when_ready
+	// says if not.
+	skip:       bool,
 	// The caller's overrides. A binding named by its name has its own copy of the name on the heap.
 	overrides:  [dynamic]Binding_Override,
 }
@@ -96,10 +98,24 @@ Player_Paused :: struct {
 	using live: Player_Live,
 }
 
-// Player_Skipping is a player that jumps to the end. update evaluates the end, and the player goes to Finishing. #538
-// adds the skip's policy, its fades and its events.
+// Skip_Fade is the part of a skip that runs (see docs/cinematics/skipping.md#the-state).
+Skip_Fade :: enum u8 {
+	// The fade out. At its end, the player jumps to the target.
+	Out,
+	// The jump is done, and play goes on after the fade in.
+	In,
+}
+
+// Player_Skipping is a player that skips to a later time behind a fade: it fades out, evaluates the target with the
+// events that fire when skipped, and then goes to Finishing at the end, or fades in and plays on. Its time stands still,
+// as a paused player's does, and its tracks hold the world at it.
 Player_Skipping :: struct {
 	using live: Player_Live,
+	// Where the skip goes: the end of the range, or the end of a skip range.
+	target:     i32,
+	fade:       Skip_Fade,
+	// How long the fade has run, in real time.
+	elapsed:    time.Duration,
 }
 
 // Player_Finishing is a player whose cutscene is over: its last evaluation is done, and the world is given back next.
@@ -160,20 +176,23 @@ Play_Desc :: struct {
 	overrides: []Binding_Override,
 }
 
-// Player_Context is what update needs to load cutscenes and resolve bindings: the world, its scenes, and the scripts
-// that a spawned prefab's behaviours attach to (or nil).
+// Player_Context is what update needs to load cutscenes and resolve bindings: the world, its scenes, the scripts that
+// a spawned prefab's behaviours attach to (or nil), and the frame's real duration, which a skip's fades run on.
 Player_Context :: struct {
 	world:   ^ecs.World,
 	scenes:  ^scene.Scenes,
 	scripts: ^script.Runtime,
+	dt:      time.Duration,
 }
 
 // Command_Result is what a command did. Gone is a stale handle, or a player that is Restored or Failed: nothing
-// happens. Refused is a command that the player's state does not take, which change_cutscene logs.
+// happens. Refused is a command that the player's state does not take, which change_cutscene logs. Not_Skippable is a
+// skip at a time that the cutscene's skip policy does not let a player skip: nothing happens, and nothing is logged.
 Command_Result :: enum u8 {
 	Done,
 	Gone,
 	Refused,
+	Not_Skippable,
 }
 
 // load makes a player of a cutscene that waits in Ready once it has loaded, for start. It loads in the next update. It
@@ -249,22 +268,60 @@ stop :: proc(s: ^State, w: ^ecs.World, h: Player_Handle) -> Command_Result {
 	return refuse(s, slot, .Finishing)
 }
 
-// skip has a player jump to its end: the next update evaluates the end and gives the world back. A loading player
-// skips once it is ready. A second skip does nothing.
+// skip has a player skip from its time, as its cutscene's skip policy says: to the end, or to the end of the skip range
+// that holds the time (see docs/cinematics/skipping.md). The next updates fade out, evaluate the target, and give the
+// world back or play on. A loading player skips from its start once it is ready. A skip at a time that cannot be
+// skipped is Not_Skippable. A second skip does nothing.
 skip :: proc(s: ^State, w: ^ecs.World, h: Player_Handle) -> Command_Result {
 	slot := command_slot(s, h) or_return
 	p := &s.players[slot]
 	switch &state in p.state {
 	case Player_Loading:
-		state.when_ready = .Skip
+		state.skip = true
 		return .Done
 	case Player_Ready, Player_Playing, Player_Paused:
-		return change_or_refuse(s, w, slot, moved(p, .Skipping))
+		target, ok := skip_target(s, &live_of(&p.state).evaluation)
+		if !ok {
+			return .Not_Skippable
+		}
+		return change_or_refuse(s, w, slot, skipping(p, target))
 	case Player_Skipping, Player_Finishing:
 		return .Done
 	case Player_Restored, Player_Failed:
 	}
 	return refuse(s, slot, .Skipping)
+}
+
+// can_skip is whether a skip of the player would skip now: whether it is Ready, Playing or Paused at a time that its
+// cutscene lets a player skip.
+can_skip :: proc(s: ^State, h: Player_Handle) -> bool {
+	slot := slot_of(s, h) or_return
+	p := &s.players[slot]
+	#partial switch status_of(p.state) {
+	case .Ready, .Playing, .Paused:
+		_, ok := skip_target(s, &live_of(&p.state).evaluation)
+		return ok
+	}
+	return false
+}
+
+// skip_fade is how much a skipping player's fade covers the frame, from 0 to 1, and 0 for any other player. The
+// presentation track (#546) draws it.
+skip_fade :: proc(s: ^State, h: Player_Handle) -> f32 {
+	slot, found := slot_of(s, h)
+	if !found {
+		return 0
+	}
+	state, is_skipping := s.players[slot].state.(Player_Skipping)
+	if !is_skipping {
+		return 0
+	}
+	length := skip_fade_length(s, &state.evaluation)
+	if length <= 0 {
+		return 1 if state.fade == .Out else 0
+	}
+	progress := f32(clamp(f64(state.elapsed) / f64(length), 0, 1))
+	return progress if state.fade == .Out else 1 - progress
 }
 
 // set_time seeks a Ready, playing or paused player to a time on its cutscene's time, for a debugger and for the editor.
@@ -337,7 +394,8 @@ player_events :: proc(s: ^State) -> []Player_Event {
 // update moves the players on in the frame code, outside the systems and the script phase (see
 // docs/cinematics/player.md#the-frame). A new level resets every player first. A loading player loads its cutscene and
 // what it references, and resolves its bindings: it is Ready, or Failed with the reason. A live player whose blob's
-// bindings changed in a reload resolves them again. A skipping player evaluates its end. A playing player at its end
+// bindings changed in a reload resolves them again. A skipping player runs its fade, and jumps to its target at the end
+// of the fade out (see docs/cinematics/skipping.md#the-state). A playing player at its end
 // has its last evaluation. A finishing player gives the world back and is Restored. It gives how many spawned roots it
 // despawned, so the caller can have its systems forget them.
 update :: proc(s: ^State, c: Player_Context) -> (despawned: int) {
@@ -366,10 +424,7 @@ update :: proc(s: ^State, c: Player_Context) -> (despawned: int) {
 			}
 			#partial switch status_of(p.state) {
 			case .Skipping:
-				seek(s, e, w, data, blob, blob.range_end)
-				evaluate(s, e, w, data, blob, .Fixed)
-				evaluate(s, e, w, data, blob, .Late)
-				change_cutscene(s, w, slot, moved(p, .Finishing))
+				run_skip(s, w, slot, c.dt, data, blob)
 			case .Playing:
 				if e.time == blob.range_end {
 					// The events of the last range fire here when no tick or Late stage has reached the end yet.
@@ -388,9 +443,10 @@ update :: proc(s: ^State, c: Player_Context) -> (despawned: int) {
 	return
 }
 
-// reset restores and frees every player, whatever its state, so every handle is stale. A soft restart and a new level
-// both go through it. It gives how many spawned roots it despawned.
+// reset restores and frees every player, whatever its state, so every handle is stale, and ends a hold of the skip
+// action. A soft restart and a new level both go through it. It gives how many spawned roots it despawned.
 reset :: proc(s: ^State, w: ^ecs.World) -> (despawned: int) {
+	s.skip.state = nil
 	for slot in 0 ..< MAX_PLAYERS {
 		p := &s.players[slot]
 		switch status_of(p.state) {
@@ -498,7 +554,8 @@ live_of :: proc(state: ^Player_State) -> ^Player_Live {
 }
 
 // moved is a live state with the live data that a live player holds now, for a change from one live state to another.
-// Build the change with it at the moment of the change, so the change carries what the last evaluation saved.
+// Build the change with it at the moment of the change, so the change carries what the last evaluation saved. A skip
+// has data of its own: build it with skipping.
 moved :: proc(p: ^Player, to: Player_Status) -> Player_State {
 	live := live_of(&p.state)
 	assert(live != nil, "cutscene: only a live player moves its data")
@@ -509,12 +566,18 @@ moved :: proc(p: ^Player, to: Player_Status) -> Player_State {
 		return Player_Playing{live^}
 	case .Paused:
 		return Player_Paused{live^}
-	case .Skipping:
-		return Player_Skipping{live^}
 	case .Finishing:
 		return Player_Finishing{live^}
 	}
-	panic("cutscene: moved takes a live state")
+	panic("cutscene: moved takes a live state other than Skipping")
+}
+
+// skipping is the Skipping state of a live player that skips to a target, at the start of its fade out, as moved builds
+// the other live states.
+skipping :: proc(p: ^Player, target: i32) -> Player_State {
+	live := live_of(&p.state)
+	assert(live != nil, "cutscene: only a live player skips")
+	return Player_Skipping{live = live^, target = target}
 }
 
 // allowed is whether the state diagram has a change (see docs/cinematics/player.md#the-states). Gone is a free slot.
@@ -592,7 +655,12 @@ begin :: proc(
 		}
 		append(&overrides, o)
 	}
-	change_cutscene(s, w, slot, Player_Loading{desc.cutscene, when_ready, overrides})
+	change_cutscene(
+		s,
+		w,
+		slot,
+		Player_Loading{cutscene = desc.cutscene, when_ready = when_ready, overrides = overrides},
+	)
 	return {u16(slot), p.generation}, true
 }
 
@@ -661,15 +729,74 @@ load_player :: proc(s: ^State, c: Player_Context, slot: int) {
 		fail(s, w, slot, failure)
 		return
 	}
-	when_ready := loading.when_ready
+	when_ready, skips := loading.when_ready, loading.skip
 	change_cutscene(s, w, slot, Player_Ready{live})
+	if skips {
+		if target, ok := skip_target(s, &live_of(&p.state).evaluation); ok {
+			change_cutscene(s, w, slot, skipping(p, target))
+			return
+		}
+		log.infof(
+			"cutscene: %s: a skip came while it loaded, but its start cannot be skipped",
+			format.blob_string(data, blob.source_path),
+		)
+	}
 	switch when_ready {
 	case .Hold:
 	case .Play:
 		change_cutscene(s, w, slot, moved(p, .Playing))
-	case .Skip:
-		change_cutscene(s, w, slot, moved(p, .Skipping))
 	}
+}
+
+// run_skip moves a skipping player's fade on by the frame's real duration. At the end of the fade out, the player jumps
+// to its target (skip_to), and goes to Finishing at the range's end or fades in. At the end of the fade in, it plays
+// on. A fade of 0 ticks does all of it in one update.
+@(private = "file")
+run_skip :: proc(
+	s: ^State,
+	w: ^ecs.World,
+	slot: int,
+	dt: time.Duration,
+	data: []byte,
+	blob: ^format.Cutscene_Blob,
+) {
+	p := &s.players[slot]
+	state := &p.state.(Player_Skipping)
+	length := skip_fade_length(s, &state.evaluation)
+	state.elapsed += max(dt, 0)
+	if state.fade == .Out {
+		if state.elapsed < length {
+			return
+		}
+		skip_to(s, &state.evaluation, w, data, blob, state.target)
+		if state.evaluation.time >= blob.range_end {
+			change_cutscene(s, w, slot, moved(p, .Finishing))
+			return
+		}
+		state.fade = .In
+		state.elapsed = 0
+	}
+	if state.elapsed >= length {
+		change_cutscene(s, w, slot, moved(p, .Playing))
+	}
+}
+
+// skip_target is where a skip of a live player goes from its time, and false when its cutscene does not let the time be
+// skipped, or its blob is gone.
+@(private = "file")
+skip_target :: proc(s: ^State, e: ^Evaluation) -> (target: i32, ok: bool) {
+	data, blob := cutscene_data(s, e) or_return
+	return format.cutscene_skip_target(data, blob, e.time)
+}
+
+// skip_fade_length is the length of a skip's fade out, and of its fade in, from the blob's ticks.
+@(private = "file")
+skip_fade_length :: proc(s: ^State, e: ^Evaluation) -> time.Duration {
+	_, blob, ok := cutscene_data(s, e)
+	if !ok {
+		return 0
+	}
+	return time.Duration(i64(blob.skip_fade) * i64(time.Second) / format.CUTSCENE_TICKS_PER_SECOND)
 }
 
 // follow_bindings resolves a live player's bindings again when a reload changed them. The spawned entities spawn

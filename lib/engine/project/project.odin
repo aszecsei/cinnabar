@@ -8,6 +8,7 @@ import "core:log"
 import "core:reflect"
 import "core:strconv"
 import "core:strings"
+import "core:time"
 
 import "cinnabar:core"
 import "cinnabar:core/gpu"
@@ -39,6 +40,12 @@ AUDIO_BUSES_KEY :: "audio.buses"
 PERCEPTION_TAGS_KEY :: "perception.tags"
 // What multiplies the UI's scale, which the output's height gives (see docs/ui/design.md#scale).
 UI_SCALE_KEY :: "ui.scale"
+// The action that a player holds to skip a cutscene, and how long, in seconds (see
+// docs/cinematics/skipping.md#input).
+CUTSCENE_SKIP_ACTION_KEY :: "cutscene.skip_action"
+CUTSCENE_SKIP_HOLD_KEY :: "cutscene.skip_hold"
+// The longest hold that cutscene.skip_hold takes, in seconds.
+MAX_CUTSCENE_SKIP_HOLD :: 10
 // The game's name, which a release's executable and window take, and its icon, a .ico file relative to the settings
 // file, which the export writes into the executable. The game only knows the keys.
 NAME_KEY :: "game.name"
@@ -82,6 +89,11 @@ Settings :: struct {
 	sublevels:             format.Sublevel_Defaults,
 	// How the window is shown, and the paper white of HDR output (see docs/gpu/presentation.md#window-modes).
 	display:               Display_Settings,
+	// The name of the action that skips a cutscene, or empty for the cutscenes' own default, and how long it is held,
+	// or nil for theirs (see docs/cinematics/skipping.md#input).
+	skip_action:           [core.INPUT_ACTION_NAME_CAPACITY]u8,
+	skip_action_length:    u8,
+	skip_hold:             Maybe(time.Duration),
 }
 
 // physics_layers gives the layers that settings name, or the default ones.
@@ -379,6 +391,37 @@ parse :: proc(text: string, settings: ^Settings, problems: ^[dynamic]string = ni
 				settings.ui_scale = scale
 			} else {
 				problem(problems, line, "%s takes a number from 0.25 to 4, not %q", key, value)
+			}
+			continue
+		}
+		if key == CUTSCENE_SKIP_ACTION_KEY {
+			if value != "" && len(value) <= core.INPUT_ACTION_NAME_CAPACITY {
+				settings.skip_action_length = u8(copy(settings.skip_action[:], value))
+			} else {
+				problem(
+					problems,
+					line,
+					"%s takes the name of an action, at most %d bytes, not %q",
+					key,
+					core.INPUT_ACTION_NAME_CAPACITY,
+					value,
+				)
+			}
+			continue
+		}
+		if key == CUTSCENE_SKIP_HOLD_KEY {
+			if seconds, ok := strconv.parse_f64(value);
+			   ok && seconds >= 0 && seconds <= MAX_CUTSCENE_SKIP_HOLD {
+				settings.skip_hold = time.Duration(seconds * f64(time.Second))
+			} else {
+				problem(
+					problems,
+					line,
+					"%s takes a number of seconds from 0 to %d, not %q",
+					key,
+					MAX_CUTSCENE_SKIP_HOLD,
+					value,
+				)
 			}
 			continue
 		}

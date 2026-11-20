@@ -26,12 +26,30 @@ MAX_CUTSCENE_TRACKS :: 1024
 MAX_CUTSCENE_SECTIONS :: 8192
 MAX_CUTSCENE_CHANNELS :: 65536
 MAX_CUTSCENE_KEYS :: 1 << 20
+MAX_CUTSCENE_SKIP_RANGES :: 256
 
 // Cutscene_Clock is the clock that a cutscene's time follows: the game's, which its time scale and pause change, or
 // real time.
 Cutscene_Clock :: enum u32 {
 	Game,
 	Real,
+}
+
+// Cutscene_Skip is which parts of a cutscene a player can skip (see docs/cinematics/skipping.md#the-policy).
+Cutscene_Skip :: enum u32 {
+	// Any time: a skip goes to the end.
+	Anywhere,
+	// No time.
+	None,
+	// The times in the skip ranges: a skip goes to the end of the range that holds the time.
+	Ranges,
+}
+
+// Cutscene_Skip_Range is a part of a cutscene that a player can skip, [start, end) on the cutscene's time. A skip in it
+// goes to its end.
+Cutscene_Skip_Range :: struct {
+	start: i32,
+	end:   i32,
 }
 
 Cutscene_Binding_Kind :: enum u32 {
@@ -240,7 +258,8 @@ Cutscene_Key :: struct {
 // Cutscene_Blob is the start of a cutscene blob (see docs/content/blobs-and-loading.md#blob-format). The tables are
 // flat: each track's sections, each section's channels and each channel's keys follow those before them.
 // input_context is the name of the input context that the cutscene pushes while it plays, empty for none, and
-// hide_ui the GUIDs of the UI documents that it hides.
+// hide_ui the GUIDs of the UI documents that it hides. skip is the skip policy, skip_ranges its ranges in time order
+// when it is Ranges, and skip_fade the length in ticks of a skip's fade out and of its fade in.
 Cutscene_Blob :: struct {
 	header:        Blob_Header,
 	length:        i32,
@@ -248,7 +267,7 @@ Cutscene_Blob :: struct {
 	clock:         Cutscene_Clock,
 	range_start:   i32,
 	range_end:     i32,
-	reserved:      u32,
+	skip:          Cutscene_Skip,
 	bindings:      Slice,
 	tracks:        Slice,
 	sections:      Slice,
@@ -258,6 +277,9 @@ Cutscene_Blob :: struct {
 	source_path:   Slice,
 	input_context: Slice,
 	hide_ui:       Slice,
+	skip_ranges:   Slice,
+	skip_fade:     i32,
+	reserved:      u32,
 }
 #assert(size_of(Cutscene_Blob) % align_of(Cutscene_Binding) == 0)
 
@@ -268,6 +290,7 @@ cutscene_layout :: proc() -> u64 {
 	h ~= layout.hash(Cutscene_Section) * 29791
 	h ~= layout.hash(Cutscene_Channel) * 923521
 	h ~= layout.hash(Cutscene_Key) * 28629151
+	h ~= layout.hash(Cutscene_Skip_Range) * 887503681
 	return h
 }
 
@@ -295,7 +318,13 @@ cutscene_view :: proc(data: []byte) -> (blob: ^Cutscene_Blob, ok: bool) {
 	   !inside(data, blob.keys, size_of(Cutscene_Key), align_of(Cutscene_Key)) ||
 	   !inside(data, blob.source_path, 1, 1) ||
 	   !inside(data, blob.input_context, 1, 1) ||
-	   !inside(data, blob.hide_ui, size_of(Guid), 1) {
+	   !inside(data, blob.hide_ui, size_of(Guid), 1) ||
+	   !inside(
+			   data,
+			   blob.skip_ranges,
+			   size_of(Cutscene_Skip_Range),
+			   align_of(Cutscene_Skip_Range),
+		   ) {
 		return nil, false
 	}
 	bindings := cutscene_bindings(data, blob)
@@ -315,8 +344,23 @@ cutscene_view :: proc(data: []byte) -> (blob: ^Cutscene_Blob, ok: bool) {
 	   blob.clock > .Real ||
 	   blob.range_start < 0 ||
 	   blob.range_start >= blob.range_end ||
-	   blob.range_end > blob.length {
+	   blob.range_end > blob.length ||
+	   blob.skip > .Ranges ||
+	   blob.skip_fade < 0 {
 		return nil, false
+	}
+	skip_ranges := cutscene_skip_ranges(data, blob)
+	if len(skip_ranges) > MAX_CUTSCENE_SKIP_RANGES ||
+	   (blob.skip != .Ranges && len(skip_ranges) > 0) {
+		return nil, false
+	}
+	for r, i in skip_ranges {
+		if r.start < 0 ||
+		   r.start >= r.end ||
+		   r.end > blob.length ||
+		   (i > 0 && r.start < skip_ranges[i - 1].end) {
+			return nil, false
+		}
 	}
 	for b, i in bindings {
 		if b.kind > .Spawned ||
@@ -469,6 +513,47 @@ cutscene_hide_ui :: proc "contextless" (data: []byte, blob: ^Cutscene_Blob) -> [
 	return ([^]Guid)(raw_data(bytes))[:len(bytes) / size_of(Guid)]
 }
 
+// cutscene_skip_ranges is the parts of a cutscene that a player can skip, in time order, when its skip is Ranges.
+cutscene_skip_ranges :: proc "contextless" (
+	data: []byte,
+	blob: ^Cutscene_Blob,
+) -> []Cutscene_Skip_Range {
+	bytes := blob_bytes(data, blob.skip_ranges)
+	return ([^]Cutscene_Skip_Range)(raw_data(bytes))[:len(bytes) / size_of(Cutscene_Skip_Range)]
+}
+
+// cutscene_skip_target is where a skip at a time goes: the end of the cutscene's range when it skips anywhere, the end
+// of the skip range that holds the time when it skips in ranges, within the cutscene's range. False when the time
+// cannot be skipped, or a skip would not move it.
+cutscene_skip_target :: proc "contextless" (
+	data: []byte,
+	blob: ^Cutscene_Blob,
+	t: i32,
+) -> (
+	target: i32,
+	ok: bool,
+) {
+	switch blob.skip {
+	case .Anywhere:
+		target = blob.range_end
+	case .None:
+		return
+	case .Ranges:
+		found := false
+		for r in cutscene_skip_ranges(data, blob) {
+			if t >= r.start && t < r.end {
+				target, found = r.end, true
+				break
+			}
+		}
+		if !found {
+			return
+		}
+	}
+	target = min(target, blob.range_end)
+	return target, target > t
+}
+
 // cutscene_track_sections is a track's sections, in a blob that cutscene_view checked.
 cutscene_track_sections :: proc "contextless" (
 	data: []byte,
@@ -554,6 +639,9 @@ Cutscene_Contents :: struct {
 	source_path:   string,
 	input_context: string,
 	hide_ui:       []Guid,
+	skip:          Cutscene_Skip,
+	skip_ranges:   []Cutscene_Skip_Range,
+	skip_fade:     i32,
 }
 
 // cutscene_write builds a cutscene blob, flattening its tracks' sections, channels and keys.
@@ -676,6 +764,18 @@ cutscene_write :: proc(contents: Cutscene_Contents, allocator := context.allocat
 	source_path := append_bytes(&buffer, transmute([]byte)contents.source_path)
 	input_context := append_bytes(&buffer, transmute([]byte)contents.input_context)
 	hide_ui := append_bytes(&buffer, mem.slice_to_bytes(contents.hide_ui))
+	skip_ranges := reserve_bytes(
+		&buffer,
+		len(contents.skip_ranges) * size_of(Cutscene_Skip_Range),
+		align_of(Cutscene_Skip_Range),
+	)
+	if len(contents.skip_ranges) > 0 {
+		mem.copy(
+			&buffer[skip_ranges.offset],
+			raw_data(contents.skip_ranges),
+			len(contents.skip_ranges) * size_of(Cutscene_Skip_Range),
+		)
+	}
 	blob := Cutscene_Blob {
 		header = {
 			magic = BLOB_MAGIC,
@@ -697,6 +797,9 @@ cutscene_write :: proc(contents: Cutscene_Contents, allocator := context.allocat
 		source_path = source_path,
 		input_context = input_context,
 		hide_ui = hide_ui,
+		skip = contents.skip,
+		skip_ranges = skip_ranges,
+		skip_fade = contents.skip_fade,
 	}
 	mem.copy(raw_data(buffer), &blob, size_of(blob))
 	return buffer[:]

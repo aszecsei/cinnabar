@@ -28,9 +28,9 @@ take_hold :: proc(s: ^State, w: ^ecs.World, live: ^Player_Live) {
 		return
 	}
 	hold := &live.hold
-	if name := format.blob_string(data, blob.input_context); name != "" && s.input != nil {
-		if index := core.input_contexts_find(s.input, name); index > 0 {
-			hold.input = core.input_contexts_push(s.input, index, pusher = "cutscene")
+	if name := format.blob_string(data, blob.input_context); name != "" && s.actions != nil {
+		if index := core.input_contexts_find(&s.actions.contexts, name); index > 0 {
+			hold.input = core.input_contexts_push(&s.actions.contexts, index, pusher = "cutscene")
 			if hold.input == 0 {
 				log.errorf(
 					"cutscene: the input context %q was not pushed: the stacks are full",
@@ -70,8 +70,8 @@ take_hold :: proc(s: ^State, w: ^ecs.World, live: ^Player_Live) {
 // release_hold pops the player's input context and shows the documents that it hid, while their entities are alive.
 @(private)
 release_hold :: proc(s: ^State, w: ^ecs.World, hold: ^Player_Hold) {
-	if hold.input != 0 && s.input != nil {
-		core.input_contexts_pop(s.input, hold.input)
+	if hold.input != 0 && s.actions != nil {
+		core.input_contexts_pop(&s.actions.contexts, hold.input)
 	}
 	for e in hold.hidden {
 		ecs.resume(w, e, {.Ui})
