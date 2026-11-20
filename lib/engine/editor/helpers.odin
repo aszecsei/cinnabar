@@ -396,7 +396,7 @@ draw_entity_helpers :: proc(
 	}
 	if c := ecs.get(w, entity, render.Camera); c != nil {
 		color := selected ? CAMERA_COLOR : UNSELECTED
-		fov := c.vertical_fov > 0 ? c.vertical_fov : render.DEFAULT_VERTICAL_FOV
+		fov := render.camera_vertical_fov(c^)
 		half_y := math.tan(fov / 2) * FRUSTUM_LENGTH
 		// An orthographic camera shows a box: as wide at the camera as ahead of it.
 		orthographic := c.projection == .Orthographic
