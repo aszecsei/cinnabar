@@ -176,3 +176,8 @@ The order in which a world's scenes came to load around the camera (see [World s
 9. **The world view:** the World editor for `.world` assets, the bounds and load distances of the world's scenes in the viewport, a preview of what loads from a position that opens those scenes, `World_View` and `Streamed_Scenes`, and the game's streamed scenes in the World editor in Play ([Editor: World view](editor/world-view.md)).
 10. **Sublevels at runtime:** the active set from the project's settings, `game.set_sublevel`, each sublevel's part a scene of its own that names its base, the parts of active sublevels that load with their scene and in stages when a sublevel is activated, references that prefer their own copy of a scene, a scene and its parts as one streamed load, the sublevels' events, and 128 slots of scene memory ([World: Sublevels](world/sublevels.md)).
 11. **Sublevels in scripts:** the `Sublevel` library (`set_active`, `is_active`, `state`), `script.broadcast`, the sublevels' events to every behaviour that has their handlers, the streamer's part events as `on_part_*`, and the sample's night scene ([World: Sublevels: Scripts](world/sublevels.md#scripts)).
+
+## Cinematics
+The order in which cutscenes came to be authored and played (see [Content: Cutscenes](content/kinds/cutscenes.md)).
+
+1. **The cutscene kind:** the `.cutscene` text, with bindings, tracks, sections and keys in ticks of 1/60000 s, its blob, the cooker's checks of the assets that it names and of its sub-sequences' cycles and depth, New Cutscene, and cutscenes among the animation in the content browser ([Content: Cutscenes](content/kinds/cutscenes.md)).

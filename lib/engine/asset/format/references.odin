@@ -5,7 +5,8 @@ import "core:mem/virtual"
 // blob_references is the assets that a blob names, which the runtime loads when it uses the blob: a script's requires,
 // a scene's or prefab's behaviours, asset fields, navmeshes and sublevels, a material's textures, an instance's material and textures, an
 // effect's materials, meshes and textures, an animation's skin, an animation graph's clips, a font's or sprite sheet's
-// atlas, a UI document's fonts and images, a decision's blackboard, and a world's scenes. A GUID appears once, and the zero GUID never. ok is false for a blob
+// atlas, a UI document's fonts and images, a decision's blackboard, a world's scenes, and a cutscene's
+// prefabs, clips, sounds and sub-sequences. A GUID appears once, and the zero GUID never. ok is false for a blob
 // that does not check.
 blob_references :: proc(
 	data: []byte,
@@ -107,6 +108,17 @@ blob_references :: proc(
 		blob := world_view(data) or_return
 		for s in world_scenes(data, blob) {
 			add(&list, s.guid)
+		}
+	case .Cutscene:
+		// A possessed binding's scene is not a reference: the cutscene plays in a level that has it loaded.
+		blob := cutscene_view(data) or_return
+		for b in cutscene_bindings(data, blob) {
+			if b.kind == .Spawned {
+				add(&list, b.asset)
+			}
+		}
+		for s in cutscene_sections(data, blob) {
+			add(&list, s.asset)
 		}
 	case .Ui:
 		blob := ui_view(data) or_return

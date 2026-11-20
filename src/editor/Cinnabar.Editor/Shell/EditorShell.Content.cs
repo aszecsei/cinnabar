@@ -87,7 +87,7 @@ public sealed partial class EditorShell
                 OpenWorld(asset);
                 break;
             case AssetKind.Script or AssetKind.Shader or AssetKind.ShadingModel or AssetKind.Material or AssetKind.MaterialInstance
-                or AssetKind.Perception:
+                or AssetKind.Perception or AssetKind.Cutscene:
                 OpenScript(path);
                 break;
         }
@@ -109,7 +109,7 @@ public sealed partial class EditorShell
     public static bool CanOpen(Link.Cook.Asset asset) =>
         asset.Kind is AssetKind.Scene or AssetKind.Prefab or AssetKind.Script or AssetKind.Shader or AssetKind.ShadingModel or AssetKind.Material or AssetKind.MaterialInstance
             or AssetKind.MaterialFunction or AssetKind.Effect or AssetKind.AnimationGraph or AssetKind.Ui or AssetKind.Blackboard or AssetKind.Decision
-            or AssetKind.Perception or AssetKind.World;
+            or AssetKind.Perception or AssetKind.World or AssetKind.Cutscene;
 
     /// <summary>What opening an asset is called in its menu.</summary>
     public string OpenLabel(Link.Cook.Asset asset) => asset.Kind switch

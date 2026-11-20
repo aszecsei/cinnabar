@@ -27,6 +27,7 @@ Read them in this order the first time.
 | [Blackboards](kinds/blackboards.md) | The `.blackboard` format: an agent's typed keys, their slots, offsets and defaults, and the blob. |
 | [Perceptions](kinds/perceptions.md) | The `.perception` format: the tags that a perceiver notices, the rows that fill its blackboard, and the blob. |
 | [Worlds](kinds/worlds.md) | The `.world` format: the scenes that stream, their bounds and distances in meters, and the blob. |
+| [Cutscenes](kinds/cutscenes.md) | The `.cutscene` format: bindings, tracks, sections and keys in ticks, the cooker's checks of the assets and sub-sequences that it names, and the blob. |
 | [Decisions](kinds/decisions.md) | The `.decision` format: the technique, the shared conditions, action references and blackboard writes, the techniques' readers, behavior trees, utility, GOAP, HTN, and the blob. |
 | [Sprite sheets](kinds/sprite-sheets.md) | The `.sprite_sheet` format: packed images, a texture's grid and rectangles, Aseprite's and TexturePacker's JSON, animations, and the blob. |
 | [Cook daemon](daemon-and-operations.md) | The daemon, asset operations and the cook link. |
@@ -61,7 +62,7 @@ The code is in three places:
 
 | Package | Files | What they hold |
 |---|---|---|
-| `tools/cook` | `main.odin` | The commands: `scripts`, `scenes`, `shaders`, `textures`, `models`, `meshes`, `stages`, `materials`, `effects`, `animation_graphs`, `audio`, `fonts`, `ui`, `sprite_sheets`, `navmeshes`, `instance-sets`, `blackboards`, `decisions`, `perceptions`, `worlds`, `daemon`, `stage-report`, `package`, `--emit-link-schema` |
+| `tools/cook` | `main.odin` | The commands: `scripts`, `scenes`, `shaders`, `textures`, `models`, `meshes`, `stages`, `materials`, `effects`, `animation_graphs`, `audio`, `fonts`, `ui`, `sprite_sheets`, `navmeshes`, `instance-sets`, `blackboards`, `decisions`, `perceptions`, `worlds`, `cutscenes`, `daemon`, `stage-report`, `package`, `--emit-link-schema` |
 | | `content.odin`, `assets.odin` | The one pass that every command shares: the scan of the roots, `.meta` files for new assets, and each kind's cook. `IMPORTERS`: each kind's extensions and import settings. |
 | | `scripts.odin`, `typecheck.odin`, `schema.odin`, `luau_tools.odin` | Scripts: requires, type checking against the definition file, behaviour fields and action parameters read with the prelude, and the bindings to the Luau compiler and analyzer |
 | | `scenes.odin` | Scenes: the syntax check and the blob |
@@ -80,13 +81,14 @@ The code is in three places:
 | | `instance_sets.odin` | Instance sets: the `.instances` files, packed and put in cells by `format` |
 | | `perceptions.odin` | Perceptions: the tags that they notice and their rows |
 | | `worlds.odin` | Worlds: the scenes that they name, their bounds in meters as `World_Position` units, and their distances |
+| | `cutscenes.odin` | Cutscenes: the text's parse, the kinds of the assets that they name, and their sub-sequences' cycles and depth |
 | | `sprite_sheets.odin`, `pack.odin` | Sprite sheets: the text's parse, the atlas that packs a sheet's images, a texture's grid and rectangles, and the JSON import; `pack_rects`, which the fonts pack with too |
 | | `daemon.odin`, `watch_windows.odin`, `index.odin`, `serve.odin` | The daemon: the watcher, the passes, the index of the content, and the cook link's server |
 | | `operations.odin`, `files_windows.odin`, `lock_windows.odin` | The asset operations, the file moves they need, and the cache lock |
 | | `problems.odin` | `Problem`: an error or warning with its file, line and column |
 | | `package.odin` | `cook package`: the release cache's blobs packed into a bundle for each load unit |
 | `lib/engine/asset` | `asset.odin` | The runtime: `load`, `poll`, handles, and the `Source` union, whose arms are `Loose_Cache` and `Bundle` |
-| `lib/engine/asset/format` | `format.odin`, `bundle.odin`, `references.odin`, `scene.odin`, `scene_text.odin`, `shader.odin`, `texture.odin`, `mesh.odin`, `mesh_text.odin`, `mesh_bake.odin`, `skin.odin`, `animation.odin`, `material.odin`, `font.odin`, `ui.odin`, `ui_text.odin`, `nav_mesh.odin`, `nav_settings.odin`, `blackboard.odin`, `decision.odin`, `perception.odin`, `world.odin`, `components.odin` | What the cooker writes and the runtime reads: GUIDs, `.meta` files, the blob header, each kind's layout, the assets that each blob names, and the bundle format. Shared by `tools/cook` and the runtime; imports nothing from `lib/core`. |
+| `lib/engine/asset/format` | `format.odin`, `bundle.odin`, `references.odin`, `scene.odin`, `scene_text.odin`, `shader.odin`, `texture.odin`, `mesh.odin`, `mesh_text.odin`, `mesh_bake.odin`, `skin.odin`, `animation.odin`, `material.odin`, `font.odin`, `ui.odin`, `ui_text.odin`, `nav_mesh.odin`, `nav_settings.odin`, `blackboard.odin`, `decision.odin`, `perception.odin`, `world.odin`, `cutscene.odin`, `components.odin` | What the cooker writes and the runtime reads: GUIDs, `.meta` files, the blob header, each kind's layout, the assets that each blob names, and the bundle format. Shared by `tools/cook` and the runtime; imports nothing from `lib/core`. |
 | `lib/engine/asset/cook_link` | `cook_link.odin` | The cook link's messages, over the transport in `lib/engine/wire` |
 
 The sections below follow the same order: how an asset is identified, how each kind is cooked, how the daemon keeps the cache current and serves the editor, what a blob looks like, and how the runtime loads it.

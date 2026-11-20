@@ -250,6 +250,10 @@ cook :: proc(
 	if .World in kinds {
 		pass.ok = cook_worlds(options, pass.assets, &pass) && pass.ok
 	}
+	// A cutscene reads its sub-sequences' sources, not their blobs, so it can cook in any order.
+	if .Cutscene in kinds {
+		pass.ok = cook_cutscenes(options, pass.assets, &pass) && pass.ok
+	}
 	if .Audio in kinds {
 		pass.ok = cook_audio(options, pass.assets, &pass) && pass.ok
 	}

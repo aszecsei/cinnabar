@@ -664,6 +664,25 @@ the_blackboard_and_decision_templates_make_assets_that_cook_once_a_blackboard_is
 }
 
 @(test)
+the_cutscene_template_makes_an_asset_that_cooks :: proc(t: ^testing.T) {
+	o := ops_open(t, {{"content/keep.luau", "return 1"}})
+	defer ops_close(&o)
+	result := operate(
+		&o,
+		cook_link.Create_Asset{template = .Cutscene, root = "game", name = "intro"},
+	)
+	testing.expectf(t, result.error == "" && len(result.guids) == 1, "%v", result)
+	if len(result.guids) != 1 {
+		return
+	}
+	testing.expect(t, o.pass.ok)
+	cutscene := o.index.assets[result.guids[0]]
+	testing.expect_value(t, cutscene.kind, cook_link.Asset_Kind.Cutscene)
+	testing.expect_value(t, cutscene.path, "intro.cutscene")
+	testing.expect_value(t, cutscene.status, cook_link.Asset_Status.Current)
+}
+
+@(test)
 the_decision_templates_are_good_once_they_name_a_blackboard :: proc(t: ^testing.T) {
 	board, board_problems := blackboard_parse("blackboard 1\nbool done\n", context.temp_allocator)
 	testing.expect_value(t, len(board_problems), 0)

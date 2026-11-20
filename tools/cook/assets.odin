@@ -43,6 +43,7 @@ IMPORTERS :: [format.Asset_Kind][]string {
 	.Decision          = {format.DECISION_EXTENSION},
 	.Perception        = {format.PERCEPTION_EXTENSION},
 	.World             = {format.WORLD_EXTENSION},
+	.Cutscene          = {format.CUTSCENE_EXTENSION},
 }
 
 // Setting_Info is an import setting that an importer knows: the values that it takes, and the value of an asset that
@@ -188,6 +189,7 @@ ALL_KINDS :: Asset_Kinds {
 	.Decision,
 	.Perception,
 	.World,
+	.Cutscene,
 }
 
 // Asset_Source is a source asset with its .meta file. A cook fills in what it learns of the asset, for the daemon's
@@ -550,8 +552,16 @@ link_kind :: proc(kind: format.Asset_Kind) -> cook_link.Asset_Kind {
 		return .Perception
 	case .World:
 		return .World
+	case .Cutscene:
+		return .Cutscene
 	}
 	return .Script
+}
+
+// kind_noun is what a kind of asset is called in a message.
+kind_noun :: proc(kind: format.Asset_Kind) -> string {
+	spaced, _ := strings.replace_all(fmt.tprint(kind), "_", " ", context.temp_allocator)
+	return strings.to_lower(spaced, context.temp_allocator)
 }
 
 // assets_of is the indices of the assets of one kind, in the scan's order.

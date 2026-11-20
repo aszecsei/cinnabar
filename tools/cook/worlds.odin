@@ -126,13 +126,6 @@ cook_world :: proc(
 	return .Cooked
 }
 
-// kind_noun is what a kind of asset is called in a message.
-@(private = "file")
-kind_noun :: proc(kind: format.Asset_Kind) -> string {
-	spaced, _ := strings.replace_all(fmt.tprint(kind), "_", " ", context.temp_allocator)
-	return strings.to_lower(spaced, context.temp_allocator)
-}
-
 // World_Seen is a setting that a scene has set.
 @(private = "file")
 World_Seen :: enum {

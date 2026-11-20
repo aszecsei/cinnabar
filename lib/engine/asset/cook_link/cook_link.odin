@@ -130,6 +130,7 @@ Asset_Kind :: enum u8 {
 	Decision,
 	Perception,
 	World,
+	Cutscene,
 }
 
 Asset_Status :: enum u8 {
@@ -304,6 +305,8 @@ Asset_Template :: enum u8 {
 	Decision_Goap,
 	// An HTN decision of one task, one method and one action, which names no blackboard yet.
 	Decision_Htn,
+	// A cutscene of 10 s at 30 frames a second, with no bindings or tracks.
+	Cutscene,
 }
 
 // Makes an asset from a template in a folder, with a new .meta file. The result has its GUID.

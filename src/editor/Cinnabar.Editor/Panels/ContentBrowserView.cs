@@ -439,6 +439,7 @@ public sealed class ContentBrowserView : DockPanel
         AssetKind.Decision => "decision",
         AssetKind.Perception => "perception",
         AssetKind.World => "world",
+        AssetKind.Cutscene => "cutscene",
         _ => "script",
     };
 
@@ -540,7 +541,7 @@ public sealed class ContentBrowserView : DockPanel
                     ("New Material", AssetTemplate.Material), ("New Material Function", AssetTemplate.MaterialFunction), ("New Mesh", AssetTemplate.Mesh),
                     ("New Prefab", AssetTemplate.Prefab), ("New Effect", AssetTemplate.Effect),
                     ("New Animation Graph", AssetTemplate.AnimationGraph), ("New UI Document", AssetTemplate.Ui),
-                    ("New Sprite Sheet", AssetTemplate.SpriteSheet), ("New Blackboard", AssetTemplate.Blackboard),
+                    ("New Sprite Sheet", AssetTemplate.SpriteSheet), ("New Blackboard", AssetTemplate.Blackboard), ("New Cutscene", AssetTemplate.Cutscene),
                     ("New Folder", null),
                 })
             {
