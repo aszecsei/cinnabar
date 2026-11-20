@@ -11,8 +11,10 @@ import "core:strings"
 import "cinnabar:core"
 import "cinnabar:core/profile"
 import "cinnabar:engine/ai"
+import "cinnabar:engine/anim"
 import "cinnabar:engine/asset"
 import format "cinnabar:engine/asset/format"
+import "cinnabar:engine/camera"
 import "cinnabar:engine/ecs"
 import "cinnabar:engine/editor/link"
 import "cinnabar:engine/nav"
@@ -58,6 +60,10 @@ Editor :: struct {
 	ai:          ^ai.State,
 	// The game's scene streaming, in Game_State, whose work the stats report, or nil without one.
 	streaming:   ^streaming.State,
+	// The game's camera stacks and animation, in Game_State, which overrides push cameras on and drive Animators
+	// through, or nil without them (see overrides.odin).
+	views:       ^camera.Views,
+	animation:   ^anim.State,
 	// How many times the editor replaced the game's world with its scene (Load_Scene), in every session: the game
 	// starts what it keeps for a world again when this changes (see world_loads).
 	loads:       u64,
@@ -110,6 +116,8 @@ Session :: struct {
 	// The last ticket that the behaviours' edits had, and the messages that wait for poll, in the host's heap.
 	edit_tickets:   u64,
 	outbox:         [dynamic]byte,
+	// What the editor's owners write over the world in Edit (see overrides.odin).
+	overrides:      Overrides,
 }
 
 // Mirror is the world as a copy of the editor's document: the ticket of the Load_Scene that made it, and the
@@ -173,6 +181,8 @@ init :: proc(
 	agents: ^ai.State = nil,
 	scenes: ^scene.Scenes = nil,
 	streaming_state: ^streaming.State = nil,
+	views: ^camera.Views = nil,
+	animation: ^anim.State = nil,
 ) {
 	e^ = {
 		platform  = platform,
@@ -183,6 +193,8 @@ init :: proc(
 		ai        = agents,
 		scenes    = scenes,
 		streaming = streaming_state,
+		views     = views,
+		animation = animation,
 		commands  = make([dynamic]Command, platform.heap_allocator),
 	}
 	if e.scenes == nil {
@@ -207,6 +219,7 @@ begin_session :: proc(e: ^Editor, connection: u64) {
 		live_meshes = make(map[format.Guid]Live_Mesh, heap),
 		live_textures = make(map[format.Guid]Live_Texture, heap),
 		outbox = make([dynamic]byte, heap),
+		overrides = {live = make([dynamic]Override, heap)},
 		view = {
 			selection = make([dynamic]ecs.Entity, heap),
 			hidden = make([dynamic]ecs.Entity, heap),
@@ -229,6 +242,7 @@ end_session :: proc(e: ^Editor) {
 	release_live_meshes(e)
 	release_live_textures(e)
 	close_previews(e)
+	free_overrides(&s.overrides)
 	delete(s.live_meshes)
 	delete(s.live_textures)
 	delete(s.outbox)
@@ -302,6 +316,10 @@ poll :: proc(
 	// A scene that opened or closed beside the others changes only its own entities, which a delta describes now.
 	rescan := false
 	if connection != e.session.connection {
+		// The world outlives the editor that went, and shows the document as the editor left it.
+		if end_overrides(e, w, nil) {
+			despawned = true
+		}
 		end_session(e)
 		begin_session(e, connection)
 		// A new editor is in Edit, so its first scene replaces the world without the old behaviours' callbacks.
@@ -313,6 +331,10 @@ poll :: proc(
 	if connection == 0 {
 		return
 	}
+	// The editor's messages edit the document, and what goes back describes it, so the overrides are off the world
+	// until the poll ends (see overrides.odin). The frame propagates their transforms after the poll.
+	lift_overrides(e, w)
+	defer lay_overrides(e, w)
 	frame := e.platform.frame_allocator
 	for m in incoming {
 		message, ok := link.decode_message(m.kind, m.payload, frame)
@@ -326,6 +348,7 @@ poll :: proc(
 		case link.Unwatch_Entity:
 			unwatch(e, ecs.Entity(v.entity))
 		case link.Load_Scene:
+			end_overrides(e, w, link.Override_End_Reason.Scene_Loaded)
 			problems := make([dynamic]link.Edit_Problem, frame)
 			load_scenes(e, w, scripts, v, &problems)
 			e.loads += 1
@@ -392,6 +415,12 @@ poll :: proc(
 			}
 		case link.Set_Mode:
 			started := e.session.mode == .Edit && v.mode == .Play
+			// Play and Pause start from the document's world, and Edit waits for the editor's scene, which ends them too.
+			if end_overrides(e, w, link.Override_End_Reason.Mode) {
+				despawned = true
+				forget_dead(w, &e.session.view.selection)
+				forget_dead(w, &e.session.view.hidden)
+			}
 			e.session.mode = v.mode
 			if v.mode != .Paused {
 				e.session.steps = 0
@@ -428,6 +457,20 @@ poll :: proc(
 			if e.session.mode == .Paused {
 				e.session.steps += 1
 			}
+		case link.Begin_Override:
+			begin_override(e, v.override)
+		case link.Override_Frame:
+			if write_override(e, w, scripts, v) {
+				despawned = true
+				forget_dead(w, &e.session.view.selection)
+				forget_dead(w, &e.session.view.hidden)
+			}
+		case link.Release_Override:
+			if release_override(e, w, v.override) {
+				despawned = true
+				forget_dead(w, &e.session.view.selection)
+				forget_dead(w, &e.session.view.hidden)
+			}
 		case:
 			if !handle_thumbnail_message(e, message) &&
 			   !handle_preview_message(e, message) &&
@@ -454,6 +497,10 @@ poll :: proc(
 		s.types_sent = true
 	}
 	now := e.platform.time_seconds()
+	// A snapshot makes the editor forget which entities overrides write, so it hears them again.
+	if snapshot {
+		s.overrides.entities_sent = 0
+	}
 	if snapshot || rescan || now - s.last_scan >= SCAN_INTERVAL {
 		s.last_scan = now
 		if message, changed := scan(e, w, snapshot, frame); changed {
@@ -469,6 +516,7 @@ poll :: proc(
 		send_preview_views(e, out, frame)
 		send_ui_layouts(e, out, frame)
 	}
+	send_overridden_entities(e, out, frame)
 	send_streamed_scenes(e, out)
 	if now - s.last_stats >= STATS_INTERVAL {
 		stats_interval := now - s.last_stats
@@ -756,6 +804,7 @@ send_values :: proc(
 			entity     = u64(watched.entity),
 			components = values,
 			behaviours = behaviour_values(scripts, watched.entity, allocator),
+			held       = held_fields(e, w, watched.entity, allocator),
 		}
 		encoded := make([dynamic]byte, allocator)
 		link.write_message(&encoded, message)

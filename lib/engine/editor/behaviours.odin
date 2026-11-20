@@ -26,6 +26,13 @@ send_behaviour_edits :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime
 	if len(edits.list) == 0 {
 		return
 	}
+	// The behaviours edited the document, so they ran with the overrides off the world (see overrides.odin).
+	if e.session.overrides.layer != .Lifted && len(e.session.overrides.live) > 0 {
+		log.errorf(
+			"editor: behaviours edited while the overrides were on the world, so their edits are not sent",
+		)
+		return
+	}
 	defer for edit in edits.list {
 		if spawn, is_spawn := edit.(script.Edit_Spawn); is_spawn && ecs.is_alive(w, spawn.entity) {
 			ecs.despawn(w, spawn.entity)
@@ -491,7 +498,7 @@ parent_of :: proc(w: ^ecs.World, entity: ecs.Entity) -> ecs.Entity {
 }
 
 // is_child is true for an entity whose pose is its Local_Transform.
-@(private = "file")
+@(private)
 is_child :: proc(w: ^ecs.World, entity: ecs.Entity) -> bool {
 	return ecs.has(w, entity, ecs.Parent) && ecs.has(w, entity, ecs.Local_Transform)
 }

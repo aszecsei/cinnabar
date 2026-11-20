@@ -42,6 +42,8 @@ public sealed partial class EditorShell
             // The open edit ends through its owner: a scrub as it is, while a gizmo drag, a distance tool, or a material
             // or an instance that a drag only shows, is put back.
             InterruptEdit();
+            // The game plays the document's world, so it ends the overrides of it.
+            Overrides.EndAll(OverrideEnd.Mode);
             // The game starts with the project's active set of sublevels, as a cooked game does (see
             // docs/editor/document-and-scenes.md#parts).
             LoadActiveSet();
