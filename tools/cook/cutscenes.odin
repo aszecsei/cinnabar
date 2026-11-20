@@ -13,7 +13,7 @@ import format "cinnabar:engine/asset/format"
 // in ticks, each with sections of keyed channels, a clip, a sound or a sub-sequence (see
 // docs/content/kinds/cutscenes.md). The cook checks the assets that a cutscene names and its sub-sequences' nesting, which
 // it reads from the other cutscenes' sources, so the order of the passes does not matter.
-CUTSCENE_COOK_VERSION :: "cutscenes 1"
+CUTSCENE_COOK_VERSION :: "cutscenes 2"
 
 // CUTSCENE_TEMPLATE is the text of a new cutscene: 10 seconds at 30 frames a second, with no bindings or tracks.
 CUTSCENE_TEMPLATE :: `cutscene 1
@@ -801,16 +801,21 @@ cutscene_parse :: proc(
 			}
 			append(&s.seen, name)
 			switch name {
-			case "ease_in", "ease_out":
+			case "ease_in", "ease_out", "pre_roll", "post_roll":
 				ticks, ok := cutscene_ticks_text(value_text)
 				if !ok {
 					problem(&found, line, "%s is a whole number of ticks", name)
 					continue
 				}
-				if name == "ease_in" {
+				switch name {
+				case "ease_in":
 					s.contents.ease_in = ticks
-				} else {
+				case "ease_out":
 					s.contents.ease_out = ticks
+				case "pre_roll":
+					s.contents.pre_roll = ticks
+				case "post_roll":
+					s.contents.post_roll = ticks
 				}
 			case "weight":
 				value, message := parse_graph_value(value_text)
@@ -835,13 +840,13 @@ cutscene_parse :: proc(
 				problem(
 					&found,
 					line,
-					"%q is not a setting of a section: ease_in, ease_out, weight or asset",
+					"%q is not a setting of a section: ease_in, ease_out, weight, pre_roll, post_roll or asset",
 					name,
 				)
 			}
 		case .Channel:
 			switch name {
-			case "ease_in", "ease_out", "weight", "asset":
+			case "ease_in", "ease_out", "weight", "pre_roll", "post_roll", "asset":
 				problem(&found, line, "%s comes before the section's channels", name)
 			case:
 				problem(&found, line, "a channel has keys, not settings")

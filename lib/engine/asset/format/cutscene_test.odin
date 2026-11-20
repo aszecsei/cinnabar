@@ -80,6 +80,8 @@ test_cutscene :: proc() -> []byte {
 						ease_in = 6000,
 						ease_out = 3000,
 						weight = 1,
+						pre_roll = 1500,
+						post_roll = 2500,
 						channels = {
 							{name = "position_x", keys = walk},
 							{name = "rotation_y", keys = turn},
@@ -182,6 +184,8 @@ cutscene_blobs_round_trip :: proc(t: ^testing.T) {
 	walk := cutscene_track_sections(data, blob, tracks[0])[0]
 	testing.expect_value(t, walk.ease_in, 6000)
 	testing.expect_value(t, walk.ease_out, 3000)
+	testing.expect_value(t, walk.pre_roll, 1500)
+	testing.expect_value(t, walk.post_roll, 2500)
 	channels := cutscene_section_channels(data, blob, walk)
 	testing.expect_value(t, len(channels), 2)
 	testing.expect_value(t, blob_string(data, channels[1].name), "rotation_y")
@@ -318,6 +322,12 @@ cutscene_blobs_with_bad_records_are_refused :: proc(t: ^testing.T) {
 	sections[0].ease_in = 58000
 	refused(t, data, "eases longer than the section")
 	sections[0].ease_in = 6000
+	sections[0].pre_roll = -1
+	refused(t, data, "a negative pre-roll")
+	sections[0].pre_roll = 1500
+	sections[0].post_roll = -1
+	refused(t, data, "a negative post-roll")
+	sections[0].post_roll = 2500
 	sections[1].weight = 1.5
 	refused(t, data, "a weight above 1")
 	sections[1].weight = math.nan_f32()
