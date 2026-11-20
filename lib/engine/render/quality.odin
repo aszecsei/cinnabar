@@ -89,6 +89,19 @@ Aa_Technique :: enum u8 {
 	Fsr,
 }
 
+// The depth of field's techniques (see docs/rendering/post-processing.md#depth-of-field), in the order that they were
+// added, so a code reload keeps a quality's choice.
+Dof_Technique :: enum u8 {
+	Off,
+	// A gather at half resolution on a round disk, with few taps.
+	Gather,
+	// A gather at half resolution with more taps on the aperture's polygon, whose bright taps weigh more, so highlights
+	// open into the blades' shape.
+	Bokeh,
+}
+
+#assert(int(Dof_Technique.Gather) == 1 && int(Dof_Technique.Bokeh) == 2)
+
 Shadow_Quality :: struct {
 	level:         Quality_Level,
 	// Traced shadows for the first MAX_MASK_LIGHTS lights, which needs Ray_Query. The shadow maps still take the rest,
@@ -133,6 +146,8 @@ Quality :: struct {
 	// The clouds' march, shadow map and history (CLOUD_PARAMS, see clouds.odin).
 	clouds:             Quality_Level,
 	aa:                 Aa_Technique,
+	// The depth of field's gather (DOF_PARAMS, see depth_of_field.odin). Low has none.
+	depth_of_field:     Dof_Technique,
 	// The share of the frame's width and height that the scene renders at, from MIN_RENDER_SCALE to 1, 0 giving 1.
 	// Temporal AA upscales the scene to the frame's size (see docs/rendering/anti-aliasing.md#upscaling); with the
 	// other techniques, the output pass stretches it.
@@ -287,6 +302,7 @@ preset_quality :: proc(preset: Quality_Preset, caps: Caps) -> Quality {
 	level := preset == .Custom ? Quality_Level.High : Quality_Level(u8(preset))
 	traced := caps.ray_query && level >= .High
 	reflections := Reflection_Technique.Screen
+	dof := level >= .High ? Dof_Technique.Bokeh : level == .Medium ? .Gather : .Off
 	switch {
 	case level == .Low:
 		reflections = .Probes
@@ -307,6 +323,7 @@ preset_quality :: proc(preset: Quality_Preset, caps: Caps) -> Quality {
 		fog = level,
 		clouds = level,
 		aa = .Taa,
+		depth_of_field = dof,
 		render_scale = 1,
 		lod_error = LOD_ERRORS[level],
 		mesh_pool = min(MESH_POOLS[level], max_mesh_pool(caps)),
@@ -399,6 +416,7 @@ clamp_quality :: proc(q: Quality, caps: Caps) -> Quality {
 	q.fog = clamp_enum(q.fog, .High)
 	q.clouds = clamp_enum(q.clouds, .High)
 	q.aa = clamp_enum(q.aa, .Off)
+	q.depth_of_field = clamp_enum(q.depth_of_field, .Off)
 	if kind, upscales := upscaler_kind(q.aa); upscales && kind not_in caps.upscalers {
 		q.aa = .Taa
 	}
@@ -465,4 +483,6 @@ apply_quality :: proc(settings: ^Frame_Settings, q: Quality) {
 	settings.clouds.level = q.clouds
 	settings.post.aa = q.aa
 	settings.post.no_aa ||= q.aa == .Off
+	settings.post.dof = q.depth_of_field
+	settings.post.no_dof ||= q.depth_of_field == .Off
 }

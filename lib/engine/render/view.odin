@@ -40,6 +40,30 @@ View :: struct {
 	// 0 in either means the view's own. An orthographic view draws its view model with its own projection.
 	view_model_fov:  f32,
 	view_model_near: f32,
+	// The lens that gives the depth of field (see docs/rendering/post-processing.md#depth-of-field). The zero lens has
+	// none, as every view that camera_view does not make.
+	lens:            Lens,
+}
+
+// Lens is a perspective view's physical lens, with its defaults resolved. Its focal length is the view's field of
+// view's on its sensor (see lens_focal_length), so a blend of the field of view keeps the two together.
+Lens :: struct {
+	// In millimeters.
+	sensor_height:  f32,
+	// The f-number, 0 for no depth of field.
+	aperture:       f32,
+	// In meters, along the view's axis.
+	focus_distance: f32,
+}
+
+// lens_focal_length is a perspective view's focal length in millimeters, from its field of view and its lens's sensor,
+// or 0 without an aperture or a perspective projection.
+lens_focal_length :: proc(view: View) -> f32 {
+	p, perspective := view.projection.(Perspective)
+	if !perspective || view.lens.aperture <= 0 || view.lens.sensor_height <= 0 {
+		return 0
+	}
+	return view.lens.sensor_height / (2 * math.tan(p.vertical_fov * 0.5))
 }
 
 // perspective_view is a view with a perspective projection, at the origin.

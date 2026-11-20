@@ -50,6 +50,8 @@ public sealed class PropertiesView : ScrollViewer
     // probe's entity.
     TextBlock? _probeStatus;
     Button? _probeCapture;
+    // The selected camera's lens, which the values update.
+    TextBlock? _lens;
     ulong _probeEntity;
 
     /// <summary>What the panel listens to while it shows. Internal to the tests, which attach it without a window.</summary>
@@ -147,7 +149,7 @@ public sealed class PropertiesView : ScrollViewer
     {
         _content.Children.Clear();
         _grid.Clear();
-        (_probeStatus, _probeCapture) = (null, null);
+        (_probeStatus, _probeCapture, _lens) = (null, null, null);
         var node = _world.Find(_selection.Entity);
         _structure = Structure();
         if (node != null && _selection.Count > 1)
@@ -194,7 +196,12 @@ public sealed class PropertiesView : ScrollViewer
             });
             var note = id == SceneEdits.TransformId && node.Parent != 0 ? "Propagation writes a child's Transform from its Local Transform." : null;
             var added = prefabBase != null && prefabBase.Components.All(c => c.Id != id);
-            var footer = id == SceneEdits.ReflectionProbeId ? ProbeFooter(node.Handle) : null;
+            var footer = id switch
+            {
+                SceneEdits.ReflectionProbeId => ProbeFooter(node.Handle),
+                CameraLensText.CameraId => _lens = new TextBlock { Classes = { "dim" }, TextWrapping = TextWrapping.Wrap },
+                _ => null,
+            };
             _content.Children.Add(Group(title, fields, badge: added ? "Added" : null,
                 remove: removable ? () => _shell.Edit($"Remove {title}", new RemoveComponent(document!.Id, id)) : null, note: note, footer: footer));
         }
@@ -273,6 +280,10 @@ public sealed class PropertiesView : ScrollViewer
             if (_world.Type(component.Id) is { } type)
             {
                 _grid.ShowComponent(component.Id.ToString("x16"), type, component.Data, ReferenceOf);
+                if (component.Id == CameraLensText.CameraId && _lens != null)
+                {
+                    _lens.Text = CameraLensText.Describe(type.Fields, component.Data);
+                }
                 var entity = _selection.Entity;
                 _grid.ShowHeld(component.Id.ToString("x16"), type, field => _world.IsHeld(entity, component.Id, Fnv.Hash64(Encoding.UTF8.GetBytes(field.Name))));
             }

@@ -550,6 +550,39 @@ blend_views_blends_the_lens_with_the_pose :: proc(t: ^testing.T) {
 	testing.expect(t, near(mid.view_model_fov, 0.95))
 }
 
+// The physical lens blends with the view: the focus and the sensor straight, and the aperture as its opening, 1 /
+// f-number, so a blend from a view without depth of field eases the blur in.
+@(test)
+blend_views_blends_the_physical_lens :: proc(t: ^testing.T) {
+	a := render.perspective_view(1, 1, 0.1)
+	b := a
+	a.lens = {
+		sensor_height  = 24,
+		aperture       = 2,
+		focus_distance = 2,
+	}
+	b.lens = {
+		sensor_height  = 36,
+		aperture       = 8,
+		focus_distance = 10,
+	}
+	mid := blend_views(a, b, 0.5)
+	testing.expect(t, near(mid.lens.sensor_height, 30))
+	testing.expect(t, near(mid.lens.focus_distance, 6))
+	// (1/2 + 1/8) / 2 = 5/16.
+	testing.expect(t, near(mid.lens.aperture, 16.0 / 5))
+
+	// From no depth of field, the opening grows from 0 at b's focus.
+	a.lens = {}
+	mid = blend_views(a, b, 0.5)
+	testing.expect(t, near(mid.lens.aperture, 16))
+	testing.expect(t, near(mid.lens.focus_distance, 10))
+	testing.expect(t, near(mid.lens.sensor_height, 36))
+	quarter := blend_views(a, b, 0.25)
+	testing.expect(t, quarter.lens.aperture > mid.lens.aperture)
+	testing.expect_value(t, blend_views(a, a, 0.5).lens, render.Lens{})
+}
+
 @(test)
 blend_views_takes_the_second_projection_when_the_kinds_differ :: proc(t: ^testing.T) {
 	a := render.perspective_view(1, 1, 0.1)

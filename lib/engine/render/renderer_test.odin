@@ -135,6 +135,7 @@ enable_pipelines :: proc(r: ^Renderer) {
 		&r.post.histogram,
 		&r.post.adapt,
 		&r.post.tone_lut,
+		&r.post.dof,
 		&r.ao.depth,
 		&r.ao.searches[.Gtao],
 		&r.ao.searches[.Ssao],
@@ -4154,4 +4155,93 @@ view_state_cut_drops_what_the_view_kept :: proc(t: ^testing.T) {
 	testing.expect_value(t, v.histories.cut, u64(12))
 	testing.expect(t, !v.previous.valid && !v.post.adapted && !v.post.upscaler.active)
 	testing.expect_value(t, v.frames, u64(7))
+}
+
+// The depth of field runs where the quality has a technique and the view a lens: not at Low, without an aperture, with
+// a volume's off, or in an orthographic view, and at Medium and up otherwise (see
+// docs/rendering/post-processing.md#depth-of-field).
+@(test)
+the_depth_of_field_runs_with_a_technique_and_a_lens :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	rig := new(Rig)
+	defer free(rig)
+	rig_start(t, rig)
+	defer rig_stop(rig)
+	context.logger = {record_problems, &rig.record, .Debug, {}}
+	r, platform := rig.r, &rig.platform
+	fill_world(rig.w)
+	enable_frame_pipelines(r)
+	defer platform.gpu_destroy_texture(r.blue_noise.texture)
+
+	record: View_Record
+	desc := Frame_Desc {
+		view = {
+			position = ecs.position_offset({}, {0, 1, -4}),
+			rotation = 1,
+			projection = Perspective{1, 0.05},
+			lens = {sensor_height = 24, aperture = 2, focus_distance = 4},
+		},
+		size = {64, 32},
+		hooks = RECORD_HOOKS,
+	}
+	desc.hooks.data = &record
+	draw :: proc(t: ^testing.T, r: ^Renderer, rig: ^Rig, desc: Frame_Desc) {
+		for _ in 0 ..< 4 {
+			testing.expect(t, draw_frame(r, rig.w, desc))
+		}
+	}
+	dof_passes := []string {
+		"dof setup",
+		"dof near tiles",
+		"dof gather",
+		"dof median",
+		"dof composite",
+	}
+	for preset in Quality_Preset.Low ..= Quality_Preset.Ultra {
+		q := preset_quality(preset, r.caps)
+		desc.quality = &q
+		draw(t, r, rig, desc)
+		for name in dof_passes {
+			if preset == .Low {
+				testing.expectf(t, name not_in record.passes, "%v has the pass %q", preset, name)
+			} else {
+				testing.expectf(
+					t,
+					record.passes[name] == 1,
+					"%v lacks the pass %q: %v",
+					preset,
+					name,
+					record.passes,
+				)
+			}
+		}
+	}
+	q := preset_quality(.Ultra, r.caps)
+	desc.quality = &q
+
+	// No aperture, no depth of field.
+	lens := desc.view.lens
+	desc.view.lens.aperture = 0
+	draw(t, r, rig, desc)
+	testing.expectf(t, "dof gather" not_in record.passes, "no aperture: %v", record.passes)
+	desc.view.lens = lens
+
+	// A volume turns it off.
+	settings := resolve_settings(r, rig.w, desc.view.position)
+	settings.post.no_dof = true
+	desc.settings = &settings
+	draw(t, r, rig, desc)
+	testing.expectf(t, "dof gather" not_in record.passes, "a volume's off: %v", record.passes)
+	desc.settings = nil
+
+	// An orthographic view has no lens.
+	desc.view.projection = Orthographic{10, 0.1, 100}
+	draw(t, r, rig, desc)
+	testing.expectf(
+		t,
+		"dof gather" not_in record.passes,
+		"an orthographic view: %v",
+		record.passes,
+	)
+	testing.expectf(t, len(rig.record.problems) == 0, "problems: %v", rig.record.problems)
 }

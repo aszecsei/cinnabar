@@ -692,6 +692,7 @@ Debug_View :: enum u8 {
 	Reflections,
 	Clouds,
 	Shadow_Virtual_Invalidated,
+	Circle_Of_Confusion,
 }
 
 // Which entities the viewport draws the shapes of: lights' ranges and cones, volumes and cameras.

@@ -92,6 +92,7 @@ public static class ViewportOptions
         ("Surfaces", [DebugView.Albedo, DebugView.Roughness, DebugView.Normals]),
         ("Geometry", [DebugView.Depth, DebugView.Velocity, DebugView.EntityIds, DebugView.Meshlets, DebugView.LodDepth]),
         ("Atmosphere", [DebugView.Fog, DebugView.Clouds]),
+        ("Camera", [DebugView.CircleOfConfusion]),
         ("Cost", [DebugView.TransparentOverdraw, DebugView.QuadOverdraw]),
     ];
 

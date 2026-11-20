@@ -116,6 +116,7 @@ Quality_Key :: enum u8 {
 	Clouds,
 	Virtual_Shadow_Cache,
 	Atlas_Shadow_Cache,
+	Depth_Of_Field,
 }
 
 Quality_Keys :: bit_set[Quality_Key]
@@ -145,6 +146,7 @@ QUALITY_KEY_NAMES := [Quality_Key]string {
 	.Clouds               = "quality.clouds",
 	.Virtual_Shadow_Cache = "quality.shadows.virtual_cache",
 	.Atlas_Shadow_Cache   = "quality.shadows.atlas_cache",
+	.Depth_Of_Field       = "quality.depth_of_field",
 }
 
 // Watch is a project's settings and when their files last changed. It is plain data, so a code reload keeps it.
@@ -606,6 +608,8 @@ parse :: proc(text: string, settings: ^Settings, problems: ^[dynamic]string = ni
 				ok = enum_value(problems, line, key, value, &q.reflections.level)
 			case .Clouds:
 				ok = enum_value(problems, line, key, value, &q.clouds)
+			case .Depth_Of_Field:
+				ok = enum_value(problems, line, key, value, &q.depth_of_field)
 			}
 			if ok {
 				settings.quality_given += {k}
@@ -677,6 +681,7 @@ with_keys :: proc(q: render.Quality, settings: Settings, caps: render.Caps) -> r
 	if .Clouds in given {q.clouds = s.clouds}
 	if .Virtual_Shadow_Cache in given {q.shadows.virtual_cache = s.shadows.virtual_cache}
 	if .Atlas_Shadow_Cache in given {q.shadows.atlas_cache = s.shadows.atlas_cache}
+	if .Depth_Of_Field in given {q.depth_of_field = s.depth_of_field}
 	return render.clamp_quality(q, caps)
 }
 
@@ -710,6 +715,7 @@ quality_values :: proc(q: render.Quality, caps: render.Caps) -> (values: [Qualit
 		.Clouds               = name(q.clouds),
 		.Virtual_Shadow_Cache = q.shadows.virtual_cache ? "true" : "false",
 		.Atlas_Shadow_Cache   = q.shadows.atlas_cache ? "true" : "false",
+		.Depth_Of_Field       = name(q.depth_of_field),
 	}
 	return
 }

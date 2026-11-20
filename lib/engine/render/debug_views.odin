@@ -69,6 +69,10 @@ Debug_View :: enum u8 {
 	// dropped the page and it drew again, yellow where it is new to the pool, and grey without a virtual shadow map (see
 	// docs/rendering/lighting-and-shadows.md#caching).
 	Shadow_Virtual_Invalidated,
+	// The depth of field's circle of confusion at each pixel, from the view's lens (see
+	// docs/rendering/post-processing.md#depth-of-field): blue in front of the focus and orange behind it, brighter as it
+	// grows, the focus plane in green, and grey without a lens.
+	Circle_Of_Confusion,
 }
 
 // Feature is a part of the frame that the editor's viewport can turn off.
@@ -142,6 +146,7 @@ apply_debug :: proc(
 	shaded := debug_view_shaded(view)
 	s.post.no_aa ||= .Temporal_Aa in disable || !shaded
 	s.post.no_bloom ||= .Bloom in disable || view != .Lit
+	s.post.no_dof ||= view != .Lit
 	s.post.exposure_compensation += exposure_offset
 	if .Fog in disable || (!shaded && view != .Fog) {
 		s.fog.density = 0
@@ -167,6 +172,10 @@ Debug_View_Push :: struct {
 	divisor:       u32,
 	// The far plane of an orthographic view, and 0 otherwise.
 	far:           f32,
+	// The circle of confusion's lens (see dof_lens), 0 without one, and the radius at its brightest, in pixels.
+	coc_scale:     f32,
+	focus:         f32,
+	coc_high:      f32,
 }
 
 // Debug_View_Frame is the pass of a view from the frame's textures, in frame memory.
@@ -220,6 +229,8 @@ add_debug_view_pass :: proc(f: ^Frame) {
 		source = f.shading != nil ? f.shading.quad_counts : 0
 	case .Clouds:
 		source = f.clouds != nil ? f.clouds.history.current : 0
+	case .Circle_Of_Confusion:
+		source = f.depth
 	}
 	g := f.graph
 	dv := new(Debug_View_Frame, r.platform.frame_allocator)
@@ -257,6 +268,12 @@ run_debug_view :: proc(ctx: ^Pass_Context) {
 	}
 	if f.debug_view == .Clouds && f.clouds != nil {
 		push.divisor = f.clouds.params.divisor
+	}
+	if f.debug_view == .Circle_Of_Confusion {
+		if lens, ok := dof_lens(f.view, f.size.y, f.post.settings.dof_scale); ok {
+			push.coc_scale, push.focus = lens.scale, lens.focus
+		}
+		push.coc_high = DOF_PARAMS[.Bokeh].max_radius * f32(f.size.y)
 	}
 	if dv.source != 0 {
 		push.source = gpu.read_index(gpu_texture(g, dv.source))

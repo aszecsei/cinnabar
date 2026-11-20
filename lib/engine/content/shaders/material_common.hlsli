@@ -256,6 +256,8 @@ static const uint DEBUG_CLOUDS = 27;
 // The virtual shadow map's pages that drew this frame, and which of them a caster that changed dropped (see
 // virtual_invalidated_debug_color).
 static const uint DEBUG_SHADOW_VIRTUAL_INVALIDATED = 28;
+// From the frame's textures, in debug_view.hlsl.
+static const uint DEBUG_CIRCLE_OF_CONFUSION = 29;
 
 // Match Shading_Stats in lib/engine/render/shading.odin: the words of the forward pass's tally, in bytes.
 static const uint SHADING_STATS_FORWARD_QUADS = 0;
