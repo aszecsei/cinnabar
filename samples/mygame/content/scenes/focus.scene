@@ -1,6 +1,6 @@
 # The focus scene, which F7 in mygame cycles to (see docs/rendering/post-processing.md#depth-of-field): a camera
 # with a 50 mm lens at f/1.4 pulls its focus between a red ball 2.5 m away and a gold one 8 m away (focus_pull.luau),
-# over a row of bright balls 30 m away whose blur opens into the aperture's shape. Positions are raw World_Position
+# under a row of bright balls 30 m away whose blur opens into the aperture's shape. Positions are raw World_Position
 # values in units of 2^-24 m. The editor writes this file; see docs/editor/document-and-scenes.md#scenes.
 scene 3
 
@@ -76,9 +76,9 @@ component 33 Mesh_Renderer
 entity f0c5000000000007
 name = "Light 1"
 component 1 Transform
-	position = [2516582399932891136, 33554432, 503316480]
+	position = [2516582399849005056, 75497472, 503316480]
 	rotation = [0, 0, 0, 1]
-	scale = [0.3, 0.3, 0.3]
+	scale = [0.4, 0.4, 0.4]
 component 33 Mesh_Renderer
 	mesh = $9486d4ef423a1cec3dcc39a1250a78f8
 	materials.0 = $b0de249d5bae464988ec7b909fbcac41
@@ -87,9 +87,9 @@ component 33 Mesh_Renderer
 entity f0c5000000000008
 name = "Light 2"
 component 1 Transform
-	position = [2516582399966445568, 41943040, 503316480]
+	position = [2516582399899336704, 85563801, 503316480]
 	rotation = [0, 0, 0, 1]
-	scale = [0.3, 0.3, 0.3]
+	scale = [0.4, 0.4, 0.4]
 component 33 Mesh_Renderer
 	mesh = $9486d4ef423a1cec3dcc39a1250a78f8
 	materials.0 = $b0de249d5bae464988ec7b909fbcac41
@@ -98,9 +98,9 @@ component 33 Mesh_Renderer
 entity f0c5000000000009
 name = "Light 3"
 component 1 Transform
-	position = [2516582400000000000, 33554432, 503316480]
+	position = [2516582399949668352, 75497472, 503316480]
 	rotation = [0, 0, 0, 1]
-	scale = [0.3, 0.3, 0.3]
+	scale = [0.4, 0.4, 0.4]
 component 33 Mesh_Renderer
 	mesh = $9486d4ef423a1cec3dcc39a1250a78f8
 	materials.0 = $b0de249d5bae464988ec7b909fbcac41
@@ -109,9 +109,9 @@ component 33 Mesh_Renderer
 entity f0c500000000000a
 name = "Light 4"
 component 1 Transform
-	position = [2516582400033554432, 41943040, 503316480]
+	position = [2516582400000000000, 85563801, 503316480]
 	rotation = [0, 0, 0, 1]
-	scale = [0.3, 0.3, 0.3]
+	scale = [0.4, 0.4, 0.4]
 component 33 Mesh_Renderer
 	mesh = $9486d4ef423a1cec3dcc39a1250a78f8
 	materials.0 = $b0de249d5bae464988ec7b909fbcac41
@@ -120,9 +120,31 @@ component 33 Mesh_Renderer
 entity f0c500000000000b
 name = "Light 5"
 component 1 Transform
-	position = [2516582400067108864, 33554432, 503316480]
+	position = [2516582400050331648, 75497472, 503316480]
 	rotation = [0, 0, 0, 1]
-	scale = [0.3, 0.3, 0.3]
+	scale = [0.4, 0.4, 0.4]
+component 33 Mesh_Renderer
+	mesh = $9486d4ef423a1cec3dcc39a1250a78f8
+	materials.0 = $b0de249d5bae464988ec7b909fbcac41
+	cast_shadows = true
+
+entity f0c500000000000c
+name = "Light 6"
+component 1 Transform
+	position = [2516582400100663296, 85563801, 503316480]
+	rotation = [0, 0, 0, 1]
+	scale = [0.4, 0.4, 0.4]
+component 33 Mesh_Renderer
+	mesh = $9486d4ef423a1cec3dcc39a1250a78f8
+	materials.0 = $b0de249d5bae464988ec7b909fbcac41
+	cast_shadows = true
+
+entity f0c500000000000d
+name = "Light 7"
+component 1 Transform
+	position = [2516582400150994944, 75497472, 503316480]
+	rotation = [0, 0, 0, 1]
+	scale = [0.4, 0.4, 0.4]
 component 33 Mesh_Renderer
 	mesh = $9486d4ef423a1cec3dcc39a1250a78f8
 	materials.0 = $b0de249d5bae464988ec7b909fbcac41
