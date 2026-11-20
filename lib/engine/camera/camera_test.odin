@@ -556,8 +556,16 @@ blend_views_blends_the_lens_with_the_pose :: proc(t: ^testing.T) {
 blend_views_blends_the_physical_lens :: proc(t: ^testing.T) {
 	a := render.perspective_view(1, 1, 0.1)
 	b := a
-	a.lens = {sensor_height = 24, aperture = 2, focus_distance = 2}
-	b.lens = {sensor_height = 36, aperture = 8, focus_distance = 10}
+	a.lens = {
+		sensor_height  = 24,
+		aperture       = 2,
+		focus_distance = 2,
+	}
+	b.lens = {
+		sensor_height  = 36,
+		aperture       = 8,
+		focus_distance = 10,
+	}
 	mid := blend_views(a, b, 0.5)
 	testing.expect(t, near(mid.lens.sensor_height, 30))
 	testing.expect(t, near(mid.lens.focus_distance, 6))

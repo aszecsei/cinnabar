@@ -159,7 +159,10 @@ add_dof_passes :: proc(f: ^Frame) {
 	g := f.graph
 	allocator := f.renderer.platform.frame_allocator
 	df.scene = f.scene
-	df.half = create_texture(g, {size = df.half_size, format = DOF_HALF_FORMAT, label = "dof half"})
+	df.half = create_texture(
+		g,
+		{size = df.half_size, format = DOF_HALF_FORMAT, label = "dof half"},
+	)
 	df.half_depth = create_texture(
 		g,
 		{size = df.half_size, format = DOF_DEPTH_FORMAT, label = "dof half depth"},
@@ -168,7 +171,10 @@ add_dof_passes :: proc(f: ^Frame) {
 		g,
 		{size = df.tiles_size, format = DOF_TILE_FORMAT, label = "dof near tiles"},
 	)
-	df.blur = create_texture(g, {size = df.half_size, format = DOF_HALF_FORMAT, label = "dof blur"})
+	df.blur = create_texture(
+		g,
+		{size = df.half_size, format = DOF_HALF_FORMAT, label = "dof blur"},
+	)
 	df.output = create_texture(g, {size = f.size, format = SCENE_FORMAT, label = "dof scene"})
 
 	pass := add_compute_pass(g, "dof setup", run_dof, new_clone(Dof_Step{f, DOF_SETUP}, allocator))
@@ -177,11 +183,21 @@ add_dof_passes :: proc(f: ^Frame) {
 	write(g, pass, df.half)
 	write(g, pass, df.half_depth)
 
-	pass = add_compute_pass(g, "dof near tiles", run_dof, new_clone(Dof_Step{f, DOF_TILES}, allocator))
+	pass = add_compute_pass(
+		g,
+		"dof near tiles",
+		run_dof,
+		new_clone(Dof_Step{f, DOF_TILES}, allocator),
+	)
 	read(g, pass, df.half)
 	write(g, pass, df.tiles)
 
-	pass = add_compute_pass(g, "dof gather", run_dof, new_clone(Dof_Step{f, DOF_GATHER}, allocator))
+	pass = add_compute_pass(
+		g,
+		"dof gather",
+		run_dof,
+		new_clone(Dof_Step{f, DOF_GATHER}, allocator),
+	)
 	read(g, pass, df.half)
 	read(g, pass, df.half_depth)
 	read(g, pass, df.tiles)

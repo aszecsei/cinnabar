@@ -117,10 +117,16 @@ blend_physical_lens :: proc(a, b: render.Lens, t: f32) -> render.Lens {
 	}
 	from, to := a, b
 	if from.aperture <= 0 {
-		from = {sensor_height = to.sensor_height, focus_distance = to.focus_distance}
+		from = {
+			sensor_height  = to.sensor_height,
+			focus_distance = to.focus_distance,
+		}
 	}
 	if to.aperture <= 0 {
-		to = {sensor_height = from.sensor_height, focus_distance = from.focus_distance}
+		to = {
+			sensor_height  = from.sensor_height,
+			focus_distance = from.focus_distance,
+		}
 	}
 	opening := linalg.lerp(
 		from.aperture > 0 ? 1 / from.aperture : 0,

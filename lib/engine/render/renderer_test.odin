@@ -4199,7 +4199,14 @@ the_depth_of_field_runs_with_a_technique_and_a_lens :: proc(t: ^testing.T) {
 			if preset == .Low {
 				testing.expectf(t, name not_in record.passes, "%v has the pass %q", preset, name)
 			} else {
-				testing.expectf(t, record.passes[name] == 1, "%v lacks the pass %q: %v", preset, name, record.passes)
+				testing.expectf(
+					t,
+					record.passes[name] == 1,
+					"%v lacks the pass %q: %v",
+					preset,
+					name,
+					record.passes,
+				)
 			}
 		}
 	}
@@ -4224,6 +4231,11 @@ the_depth_of_field_runs_with_a_technique_and_a_lens :: proc(t: ^testing.T) {
 	// An orthographic view has no lens.
 	desc.view.projection = Orthographic{10, 0.1, 100}
 	draw(t, r, rig, desc)
-	testing.expectf(t, "dof gather" not_in record.passes, "an orthographic view: %v", record.passes)
+	testing.expectf(
+		t,
+		"dof gather" not_in record.passes,
+		"an orthographic view: %v",
+		record.passes,
+	)
 	testing.expectf(t, len(rig.record.problems) == 0, "problems: %v", rig.record.problems)
 }

@@ -396,5 +396,9 @@ low_has_no_depth_of_field_medium_the_gather_and_high_the_bokeh :: proc(t: ^testi
 	apply_quality(&settings, preset_quality(.Ultra, {}))
 	testing.expect(t, settings.post.no_dof)
 	testing.expect_value(t, Quality{}.depth_of_field, Dof_Technique.Off)
-	testing.expect_value(t, clamp_quality({depth_of_field = Dof_Technique(9)}, {}).depth_of_field, Dof_Technique.Off)
+	testing.expect_value(
+		t,
+		clamp_quality({depth_of_field = Dof_Technique(9)}, {}).depth_of_field,
+		Dof_Technique.Off,
+	)
 }
