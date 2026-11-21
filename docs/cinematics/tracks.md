@@ -380,7 +380,7 @@ track 7 audio "Music"
   - `restore` and `keep` do not apply to sounds.
 - **Hot reload.** A reload stops every voice. The next `Late` evaluation starts each section under the time at its place.
 
-**Scrub.** An evaluation's `audition` says how its audio tracks sound. A player's evaluation is `.Play`. The editor sets the others:
+**Scrub.** An evaluation's `audition` says how its audio tracks sound. A player's evaluation is `.Play`. The editor sets the others with `set_audition`, which stops the voices that the tracks hold when the audition changes:
 
 | `audition` | The sections |
 |---|---|
@@ -410,6 +410,7 @@ track 7 audio "Music"
 | `audio_track(ctx)` | The audio kind's evaluate procedure |
 | `curve_integral(keys, t)` | A curve's integral from 0 to a time in ticks, in value × seconds |
 | `sound_place(data, blob, section, t, length)` | Where an audio section's sound is at a time, in seconds, and whether that is inside the sound |
+| `set_audition(evaluation, audition)` | Sets how an evaluation's audio tracks sound, and stops their voices when it changes |
 | `set_rate(state, rate)` | Sets the game clock's rate against real time. The game sets it each frame. |
 | `set_audio_drift(state, seconds)` | Sets the drift limit, from the project's `cutscene.audio_drift` |
 | `end_cut(evaluation)` | Releases the cut track's claim on the views, with the blend that its shot leaves with. `restore`, `restore_all`, a reload and `destroy_evaluation` call it, through the one `end_holds`. |
