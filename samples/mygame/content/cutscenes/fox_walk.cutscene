@@ -10,7 +10,10 @@ binding 1 "Walker"
 	policy = optional
 
 track 1 presentation "Fade in"
+	# From black, over the first second.
 	section 1 0 60000
+		kind = fade
+		color = "#000000"
 		channel opacity
 			key 0 1 linear
 			key 60000 0 linear

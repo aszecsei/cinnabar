@@ -6,12 +6,16 @@ cutscene 1
 # wide shot that blends in from gameplay, a close shot that racks its focus, and a tracking shot that blends back out.
 # Music swells under it and plays on into gameplay, a line of dialogue plays over the wide shot, and the guard's bark is
 # heard where the guard stands. A story track tells every behaviour when the guard barks, and that the intro was seen,
-# also when it is skipped.
+# also when it is skipped. The shot fades the intro in from black, letterbox bars slide in and out again as gameplay
+# comes back, and a subtitle shows the line of dialogue.
 length = 720000
 # The range ends at 10 s. The music runs 2 s past it, into gameplay.
 range = [0, 600000]
 rate = 30
 clock = game
+# A skip fades to black over a quarter of a second, and back from it over gameplay.
+skip_fade = 15000
+skip_color = "#000000"
 
 binding 1 "Walking Fox"
 	possess = @f496b929575035d9c2626ed56d3165ba/79cea6d7586e3f48
@@ -116,3 +120,19 @@ track 9 event "Story"
 	trigger 1 600000 intro_seen
 		fire_when_skipped = true
 		value = entity 1
+track 10 presentation "Presentation"
+	# Bars at 2.39 slide in over half a second, and out over the last second, as the tracking shot blends back to
+	# gameplay.
+	section 12 0 600000
+		kind = letterbox
+		ease_in = 30000
+		ease_out = 60000
+		channel aspect
+			key 0 2.39 constant
+	# The line of dialogue, which moves with its sound.
+	section 13 30000 174000
+		kind = subtitle
+		speaker = "Narrator"
+		text = "The fox walks this path every evening."
+		key = "intro.narrator.path"
+		audio = 10
