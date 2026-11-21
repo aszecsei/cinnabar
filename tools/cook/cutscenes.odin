@@ -13,7 +13,7 @@ import format "cinnabar:engine/asset/format"
 // in ticks, each with sections of keyed channels, a clip, a sound or a sub-sequence (see
 // docs/content/kinds/cutscenes.md). The cook checks the assets that a cutscene names and its sub-sequences' nesting, which
 // it reads from the other cutscenes' sources, so the order of the passes does not matter.
-CUTSCENE_COOK_VERSION :: "cutscenes 5"
+CUTSCENE_COOK_VERSION :: "cutscenes 6"
 
 // CUTSCENE_TEMPLATE is the text of a new cutscene: 10 seconds at 30 frames a second, with no bindings or tracks.
 CUTSCENE_TEMPLATE :: `cutscene 1
@@ -389,11 +389,13 @@ Pending_Binding :: struct {
 
 @(private = "file")
 Pending_Channel :: struct {
-	name:  string,
-	line:  int,
-	keys:  [dynamic]format.Cutscene_Key,
+	name:     string,
+	line:     int,
+	keys:     [dynamic]format.Cutscene_Key,
 	// How many of its keys name an asset.
-	guids: int,
+	guids:    int,
+	// The line of its first key that teleports, or 0.
+	teleport: int,
 }
 
 @(private = "file")
@@ -416,6 +418,10 @@ Pending_Track :: struct {
 	// The lines of component and field, which only a property track takes.
 	component_line: int,
 	field_line:     int,
+	// The lines of space and origin, which only a transform track takes, and the ID of the binding that space names.
+	space_line:     int,
+	origin_line:    int,
+	relative_id:    u32,
 	sections:       [dynamic]Pending_Section,
 }
 
@@ -689,6 +695,9 @@ cutscene_parse :: proc(
 				problem(&found, line, "keys are in order of time, each after the one before")
 				continue
 			}
+			if .Teleport in key.flags && c.teleport == 0 {
+				c.teleport = line
+			}
 			if guid != {} {
 				slot, known := guid_index[guid]
 				if !known {
@@ -900,11 +909,54 @@ cutscene_parse :: proc(
 					continue
 				}
 				tr.contents.field, tr.field_line = strings.clone(field), line
+			case "space":
+				words := strings.fields(value_text, context.temp_allocator)
+				id: u32
+				space: format.Cutscene_Space
+				ok := true
+				switch {
+				case len(words) == 1 && words[0] == "absolute":
+					space = .Absolute
+				case len(words) == 1 && words[0] == "relative":
+					space = .Relative
+				case len(words) == 2 && words[0] == "relative":
+					space = .Relative_To
+					id, ok = cutscene_id(words[1])
+				case:
+					ok = false
+				}
+				if !ok {
+					problem(
+						&found,
+						line,
+						"space is absolute, relative, or relative <binding id> for another binding",
+					)
+					continue
+				}
+				tr.contents.space, tr.relative_id, tr.space_line = space, id, line
+			case "origin":
+				value, message := parse_graph_value(value_text)
+				ok := message == "" && value.kind == .Numbers && value.count == 3
+				origin: [3]i64
+				for axis in 0 ..< 3 {
+					raw, in_range := format.world_raw_from_meters(value.numbers[axis])
+					ok &&= in_range
+					origin[axis] = raw
+				}
+				if !ok {
+					problem(
+						&found,
+						line,
+						"origin is three numbers in meters, [x, y, z], inside the bounds of a World_Position",
+					)
+					continue
+				}
+				tr.contents.origin, tr.origin_line = origin, line
 			case:
 				problem(
 					&found,
 					line,
-					"%q is not a setting of a track: binding, muted, when_finished, component or field",
+					"%q is not a setting of a track: binding, muted, when_finished, component, field, space or origin",
 					name,
 				)
 			}
@@ -961,7 +1013,7 @@ cutscene_parse :: proc(
 					continue
 				}
 				s.blend_line = line
-			case "binding", "muted", "when_finished", "component", "field":
+			case "binding", "muted", "when_finished", "component", "field", "space", "origin":
 				problem(&found, line, "%s comes before the track's sections", name)
 			case:
 				problem(
@@ -1102,6 +1154,43 @@ cutscene_parse :: proc(
 				}
 			}
 		}
+		if kind == .Transform {
+			if tr.origin_line != 0 && result.space != .Absolute {
+				problem(&found, tr.origin_line, "origin is for space = absolute")
+			}
+			if result.space == .Relative_To {
+				result.relative = format.CUTSCENE_NONE
+				for b, j in bindings {
+					if b.contents.id == tr.relative_id {
+						result.relative = u32(j)
+					}
+				}
+				switch {
+				case result.relative == format.CUTSCENE_NONE:
+					problem(
+						&found,
+						tr.space_line,
+						"space = relative <id> names a binding of the cutscene by its ID",
+					)
+				case result.relative == result.binding:
+					problem(
+						&found,
+						tr.space_line,
+						"a track relative to its own binding has space = relative",
+					)
+				}
+			}
+		} else {
+			for setting_line in ([2]int{tr.space_line, tr.origin_line}) {
+				if setting_line != 0 {
+					problem(
+						&found,
+						setting_line,
+						"only a transform track has a space and an origin",
+					)
+				}
+			}
+		}
 		want := format.cutscene_track_asset(kind)
 		sections := make([]format.Cutscene_Section_Contents, len(tr.sections))
 		for s, j in tr.sections {
@@ -1142,6 +1231,9 @@ cutscene_parse :: proc(
 			if kind == .Property {
 				cutscene_property_channels(&found, s)
 			}
+			if kind == .Transform {
+				cutscene_transform_channels(&found, s)
+			}
 			channels := make([]format.Cutscene_Channel_Contents, len(s.channels))
 			for ch, k in s.channels {
 				if len(ch.keys) == 0 {
@@ -1151,6 +1243,9 @@ cutscene_parse :: proc(
 					problem(&found, ch.line, "a channel's keys are all assets or all numbers")
 				} else if ch.guids > 0 && kind != .Property {
 					problem(&found, ch.line, "only a property track keys assets")
+				}
+				if ch.teleport != 0 && kind != .Transform {
+					problem(&found, ch.teleport, "only a transform track's keys teleport")
 				}
 				channels[k] = {
 					name  = ch.name,
@@ -1165,6 +1260,7 @@ cutscene_parse :: proc(
 		result_tracks[i] = result
 	}
 	contents.bindings, contents.tracks = result_bindings, result_tracks
+	cutscene_relative_cycles(&found, tracks[:], result_tracks, result_bindings)
 	contents.hide_ui = hide_ui[:]
 	contents.guids = guids[:]
 	if len(guids) > format.MAX_CUTSCENE_GUIDS {
@@ -1329,8 +1425,12 @@ cutscene_key :: proc(
 	guid: format.Guid,
 	message: string,
 ) {
-	USAGE :: "a key is `key <time> <value> constant|linear|auto` or `key <time> <value> bezier <slope>|<in> <out> [weights <in> <out>]`"
+	USAGE :: "a key is `key <time> <value> constant|linear|auto [teleport]` or `key <time> <value> bezier <slope>|<in> <out> [weights <in> <out>] [teleport]`"
 	fields := strings.fields(text, context.temp_allocator)
+	if len(fields) > 3 && fields[len(fields) - 1] == "teleport" {
+		key.flags += {.Teleport}
+		fields = fields[:len(fields) - 1]
+	}
 	if len(fields) < 3 {
 		return {}, {}, USAGE
 	}
@@ -1468,6 +1568,107 @@ cutscene_property_channels :: proc(found: ^[dynamic]Cutscene_Problem, s: Pending
 			)
 			return
 		}
+	}
+}
+
+// CUTSCENE_TRANSFORM_CHANNELS are the channels of a transform track: position in meters, rotation as Euler angles in
+// degrees, and scale.
+CUTSCENE_TRANSFORM_CHANNELS :: [9]string {
+	"position_x",
+	"position_y",
+	"position_z",
+	"rotation_x",
+	"rotation_y",
+	"rotation_z",
+	"scale_x",
+	"scale_y",
+	"scale_z",
+}
+
+// cutscene_transform_channels checks that a transform section's channels are among the nine of a pose.
+@(private = "file")
+cutscene_transform_channels :: proc(found: ^[dynamic]Cutscene_Problem, s: Pending_Section) {
+	names := CUTSCENE_TRANSFORM_CHANNELS
+	for c in s.channels {
+		if !slice.contains(names[:], c.name) {
+			append(
+				found,
+				Cutscene_Problem {
+					c.line,
+					"a transform track's channel is position_x, position_y, position_z, rotation_x, rotation_y, rotation_z, scale_x, scale_y or scale_z",
+				},
+			)
+		}
+	}
+}
+
+// cutscene_relative_cycles reports each transform track whose binding is, through the tracks relative to other
+// bindings, relative to itself, at its space line, with the path, such as `relative bindings form a cycle: Fox -> Ship
+// -> Fox`. A track relative to its own binding is reported where its space is read.
+@(private = "file")
+cutscene_relative_cycles :: proc(
+	found: ^[dynamic]Cutscene_Problem,
+	pending: []Pending_Track,
+	tracks: []format.Cutscene_Track_Contents,
+	bindings: []format.Cutscene_Binding_Contents,
+) {
+	n := len(bindings)
+	relative :: proc(tr: format.Cutscene_Track_Contents, n: int) -> bool {
+		return(
+			tr.kind == .Transform &&
+			tr.space == .Relative_To &&
+			int(tr.binding) < n &&
+			int(tr.relative) < n &&
+			tr.binding != tr.relative \
+		)
+	}
+	// from[b] is the binding that the search reached b from, or -1.
+	from := make([]int, n, context.temp_allocator)
+	queue := make([dynamic]int, context.temp_allocator)
+	for tr, i in tracks {
+		if !relative(tr, n) {
+			continue
+		}
+		slice.fill(from, -1)
+		clear(&queue)
+		start, target := int(tr.relative), int(tr.binding)
+		from[start] = target
+		append(&queue, start)
+		reached := false
+		for head := 0; head < len(queue) && !reached; head += 1 {
+			b := queue[head]
+			for other in tracks {
+				if !relative(other, n) || int(other.binding) != b || from[other.relative] >= 0 {
+					continue
+				}
+				from[other.relative] = b
+				if int(other.relative) == target {
+					reached = true
+					break
+				}
+				append(&queue, int(other.relative))
+			}
+		}
+		if !reached {
+			continue
+		}
+		path := make([dynamic]string, context.temp_allocator)
+		append(&path, bindings[target].name)
+		for b := from[target]; b != target; b = from[b] {
+			append(&path, bindings[b].name)
+		}
+		append(&path, bindings[target].name)
+		slice.reverse(path[:])
+		append(
+			found,
+			Cutscene_Problem {
+				pending[i].space_line,
+				fmt.aprintf(
+					"relative bindings form a cycle: %s",
+					strings.join(path[:], " -> ", context.temp_allocator),
+				),
+			},
+		)
 	}
 }
 

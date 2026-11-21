@@ -76,6 +76,10 @@ Evaluation :: struct {
 	// The fields of the property tracks, by track ID, resolved once for the blob (see
 	// docs/cinematics/tracks.md#property-tracks). A reload of the blob forgets them.
 	targets:  map[u32]Property_Target,
+	// What each transform track relative to another binding found at its first evaluation, by track ID: a cycle, or
+	// where its binding starts in the other's space (see docs/cinematics/tracks.md#transform-tracks). A reload of the
+	// blob keeps only the starts of the tracks that still join the same two bindings.
+	spaces:   map[u32]Relative_Space,
 }
 
 // Field is a field of a component of an entity: its component, and its offset and size in the component.
@@ -155,6 +159,10 @@ destroy :: proc(s: ^State, w: ^ecs.World) -> (despawned: int) {
 // registrations, before every other system's. A game can set a kind of its own with register_kind after it.
 register :: proc(s: ^State, w: ^ecs.World) {
 	s.kinds = {}
+	s.kinds[.Transform] = {
+		phase    = .Fixed,
+		evaluate = transform_track,
+	}
 	s.kinds[.Property] = {
 		phase    = .Fixed,
 		evaluate = property_track,
@@ -203,6 +211,7 @@ init_evaluation :: proc(
 			writers = make(map[Writer]struct{}, w.platform.heap_allocator),
 		},
 		targets = make(map[u32]Property_Target, w.platform.heap_allocator),
+		spaces = make(map[u32]Relative_Space, w.platform.heap_allocator),
 	}
 }
 
@@ -217,6 +226,8 @@ destroy_evaluation :: proc(e: ^Evaluation, w: ^ecs.World) -> (despawned: int) {
 	e.snapshot = {}
 	delete(e.targets)
 	e.targets = nil
+	delete(e.spaces)
+	e.spaces = nil
 	return
 }
 
@@ -729,6 +740,7 @@ reload :: proc(
 		e.snapshot.index[saved.field] = i
 	}
 	clear(&e.targets)
+	keep_spaces(e, w, data, blob)
 	e.time = clamp(e.time, blob.range_start, blob.range_end)
 	for &last in e.last {
 		last = e.time
@@ -749,6 +761,11 @@ put_back :: proc(s: ^State, e: ^Evaluation, w: ^ecs.World, saved: ^Saved) {
 	}
 	ecs.mark_changed(w, saved.field.entity, saved.field.component)
 	mem.copy(p, &saved.bytes, int(saved.field.size))
+	// A pose that goes back moves at once, with what is under it, so presentation does not interpolate to it.
+	if saved.field.component == ecs.TRANSFORM_ID ||
+	   saved.field.component == ecs.LOCAL_TRANSFORM_ID {
+		settle_pose(w, saved.field.entity, true)
+	}
 }
 
 @(private)

@@ -1,7 +1,7 @@
 cutscene 1
 # The sample's intro (see docs/content/kinds/cutscenes.md): the animation scene's walking fox walks 4 m, past a guard
-# that the cutscene spawns, to a bark, after the fox_walk shot. Times are ticks, 60000 a second. The channels' names
-# stand until the transform and presentation tracks give theirs.
+# that the cutscene spawns, to a bark, after the fox_walk shot. Times are ticks, 60000 a second. The fox's track is
+# relative, so it walks from where it stands. The audio track's channel name stands until that track gives its own.
 length = 600000
 rate = 30
 clock = game

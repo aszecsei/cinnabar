@@ -2,7 +2,7 @@
 
 A track acts on the world at the cutscene's time. Its kind says what it writes: a field, a pose, a camera, a sound. This document describes the kinds that the engine has, in `lib/engine/cutscene`, and the curve that every keyed track shares. Read [Evaluation](evaluation.md) first, for sections, blending and the restore snapshot.
 
-**In this document:** [Curves](#curves) · [Property tracks](#property-tracks) · [Not built yet](#not-built-yet) · [Procedures](#procedures)
+**In this document:** [Curves](#curves) · [Property tracks](#property-tracks) · [Transform tracks](#transform-tracks) · [Not built yet](#not-built-yet) · [Procedures](#procedures)
 
 ## Curves
 
@@ -96,9 +96,84 @@ A section keys any of a vector's numbers. A number that no section keys keeps it
 
 `register` sets the property kind. A game can replace it with `register_kind` after `register`.
 
+## Transform tracks
+
+A transform track keys where its binding is, how it faces and its scale: a character that walks to a mark, a door that swings, a ship that flies past.
+
+```
+track 1 transform "Fox walks"
+	binding = 1
+	when_finished = keep
+	section 1 0 120000
+		ease_in = 15000
+		channel position_z
+			key 0 0 linear
+			key 120000 4 linear
+		channel rotation_y
+			key 0 0 auto
+			key 60000 90 auto teleport
+```
+
+**Channels.** A section keys any of nine channels, each a curve:
+
+| Channels | Value |
+|---|---|
+| `position_x`, `position_y`, `position_z` | Meters from the track's space (see below), as `f32` |
+| `rotation_x`, `rotation_y`, `rotation_z` | Euler angles in degrees, in the scripts' order: z, then x, then y (`script.quaternion_euler`). A key can spin past 180°. The track turns them into a `quaternion128` after it evaluates them. |
+| `scale_x`, `scale_y`, `scale_z` | The scale of the field that the track writes |
+
+- **Parts.** Position, rotation and scale are each one field of the pose. The track writes a part at every time when any of its sections keys one of the part's channels. It never writes the other parts, so the snapshot saves and restores only what the track moves.
+- **A channel without keys** leaves its number of the pose: the binding's own value, in the track's space. So a section that keys only `rotation_y` takes x and z from the binding's own rotation.
+
+**Spaces.** The track's `space` says what the position and the rotation are from:
+
+| Space | From | For |
+|---|---|---|
+| `relative` (the default) | The binding's own pose, as it was before the cutscene first wrote it, which the [snapshot](evaluation.md#the-restore-snapshot) holds. Its rotation turns the keyed offsets. | A cutscene that plays wherever the player triggers it |
+| `absolute` | The track's `origin`, a `World_Position`, with no rotation. The editor sets the origin where the designer first keys, so the keys stay small numbers far from the world's origin. | Marks in a level |
+| `relative <binding>` | Another binding's `Transform` at each evaluation | An entity that rides a moving ship |
+
+- **Precision.** The keys are `f32` offsets from the origin. The track adds them to the origin once, with `ecs.position_offset`, so 2^30 m from the world's origin a position is as exact as its offset. In an absolute space, an axis that no section covers keeps its own value to the unit.
+- **Relative to another binding.** The channels without keys hold the binding's own pose in the other binding's space. The track's first evaluation takes it from both bindings' own poses, and `Evaluation.spaces` keeps it. A hot reload keeps it while the track still joins the same two bindings, by their IDs, because the snapshot still holds the own poses that it came from. So an entity that keys only its height rides the ship where it stood on it.
+- **Order.** Before a track relative to another binding evaluates, it evaluates the transform tracks of that binding. So it sees the other binding's pose at this time, whatever the order of the tracks. A track that runs twice writes the same values.
+- **The other binding's pose** is its `Transform`, not its presented pose: in the `Fixed` phase, `Transform` is the pose at this tick, so the two entities interpolate together.
+- **Cycles.** A binding that is relative to itself, through the tracks relative to other bindings, is a problem. The cooker reports it with the path, such as `relative bindings form a cycle: Fox -> Ship -> Fox`. Two bindings that resolve to one entity can make a cycle that the cooker cannot see. The track's first evaluation finds it: the track does nothing, and the player logs it once for the blob.
+
+**Roots and children.**
+- For a root, the track writes `Transform`.
+- For a child (an entity with a `Parent` and a `Local_Transform`), it writes `Local_Transform`, and propagation turns it into `Transform`.
+  - In a relative space, the keys are in the parent's space, from the child's own `Local_Transform`.
+  - In an absolute space, or relative to another binding, the track computes the pose in the world. It then turns the pose into the parent's space with the parent's `Transform`, the inverse of `ecs.compose`.
+- After it writes a child, the track composes the child's `Transform` at once, so a track relative to the child sees it in the same tick.
+
+**Blending.** Sections blend each channel by their weights over the binding's own pose in the track's space ([Sections and blending](evaluation.md#sections-and-blending)).
+- **Positions and scales** blend linearly, each number on its own.
+- **Rotations** blend as animation's poses do. Each section's rotation joins a sum, on the sum's side, by its weight. Below a weight of 1, the own rotation takes what the weights leave. The sum is then normalized.
+- **Additive sections** then add their offsets and their rotations, by their weights, so a shake or a sway layers over a path. An additive scale multiplies, by `1 + (value − 1) × weight`.
+- **Into and out of the cutscene.** The own pose is the base, so the first section's ease in blends from the pose before the cutscene, and the last section's ease out blends back to it.
+- **Where no section covers the time,** the track writes the binding's own value of each part that it holds.
+- Two transform tracks of one binding that key the same part both write it, and the later one in the cutscene wins. Layer motion with additive sections in one track.
+
+**Interpolation and teleports.** Presentation interpolates from `Previous_Transform` to `Transform` by the clock's `alpha`, so continuous motion stays smooth at any frame rate. A **teleport** moves the entity at once: the track sets `Previous_Transform` to the new pose, for the entity and every entity under it, whose `Transform`s it composes. The track teleports when:
+- the evaluation crosses a key marked `teleport`, of any channel of the track;
+- the evaluation does not move forward from the phase's last one: a seek, a backwards scrub and a hot reload, and also a pause or a skip's fade, where it changes nothing;
+- it is the phase's first evaluation, as the cutscene starts;
+- it is a skip's jump;
+- the cutscene is on the real clock ([The order in the frame](evaluation.md#the-order-in-the-frame)).
+
+A camera cut will mark its frame as a cut, and transform tracks will teleport on it too ([#542](https://github.com/aszecsei/cinnabar/issues/542)).
+
+**Seek, skip and finish.**
+- **Seek and scrub backwards.** The pose is a function of the time, and the track teleports to it.
+- **Skip.** The track teleports to the pose at the skip's target.
+- **When finished.** `restore` (the default) teleports the binding back to its pose before the cutscene: a pose that the snapshot puts back moves at once, with what is under it. `keep` leaves it where the cutscene put it, which a character who walks into the next room needs.
+- **Physics.** A possessed entity with a rigid body is kinematic while the cutscene holds it ([Possession](possession.md)). The track does not change bodies.
+
+`register` sets the transform kind.
+
 ## Not built yet
 
-The other kinds of track are parts of [#526](https://github.com/aszecsei/cinnabar/issues/526): transform ([#539](https://github.com/aszecsei/cinnabar/issues/539)), animation ([#541](https://github.com/aszecsei/cinnabar/issues/541)), camera cuts ([#542](https://github.com/aszecsei/cinnabar/issues/542)), audio ([#543](https://github.com/aszecsei/cinnabar/issues/543)), events ([#544](https://github.com/aszecsei/cinnabar/issues/544)), sub-sequences ([#545](https://github.com/aszecsei/cinnabar/issues/545)) and presentation ([#546](https://github.com/aszecsei/cinnabar/issues/546)). Until they are built, a track of one of these kinds does nothing.
+The other kinds of track are parts of [#526](https://github.com/aszecsei/cinnabar/issues/526): animation ([#541](https://github.com/aszecsei/cinnabar/issues/541)), camera cuts ([#542](https://github.com/aszecsei/cinnabar/issues/542)), audio ([#543](https://github.com/aszecsei/cinnabar/issues/543)), events ([#544](https://github.com/aszecsei/cinnabar/issues/544)), sub-sequences ([#545](https://github.com/aszecsei/cinnabar/issues/545)) and presentation ([#546](https://github.com/aszecsei/cinnabar/issues/546)). Until they are built, a track of one of these kinds does nothing.
 
 ## Procedures
 
@@ -107,3 +182,6 @@ The other kinds of track are parts of [#526](https://github.com/aszecsei/cinnaba
 | `curve_value(keys, t, hint)` | A curve's value at a time in ticks from its section's start |
 | `curve_step(keys, t, hint)` | A curve's value as if every key were constant |
 | `property_track(ctx)` | The property kind's evaluate procedure |
+| `transform_track(ctx)` | The transform kind's evaluate procedure |
+| `settle_pose(world, entity, teleport)` | Composes a child's `Transform` from what a track or a restore wrote. With `teleport`, also sets the `Previous_Transform` of the entity and of every entity under it. |
+| `pose_channel(name)` | A transform channel's place in the pose |
