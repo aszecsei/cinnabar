@@ -1,0 +1,37 @@
+ui 1
+<!-- The cutscene overlay (see docs/cinematics/tracks.md#presentation-tracks): the letterbox bars, a fade over the
+     frame and up to three subtitles, which the cutscene player shows over gameplay and under menus. It takes no input.
+     The player sets the bars' sizes and color, the fade's color and opacity, each subtitle's visible, its text's size
+     and its back's opacity, and binds {speaker_n} and {line_n}. A project restyles it with a document of its own that
+     has elements of the same ids, named by its cutscene.overlay setting. Allo is under the SIL Open Font License, in
+     content/fonts beside it. -->
+<ui font=$c1d288c227d747c3b7098d9397a48ac8 size="30" color="#ffffff">
+	<box id="bar_top" anchor="top" width="100%" height="0" fill="#000"/>
+	<box id="bar_bottom" anchor="bottom" width="100%" height="0" fill="#000"/>
+	<box id="bar_left" anchor="left" width="0" height="100%" fill="#000"/>
+	<box id="bar_right" anchor="right" width="0" height="100%" fill="#000"/>
+	<box id="fade" anchor="fill" fill="#000" opacity="0"/>
+	<column id="subtitles" anchor="bottom" offset="0 -56" width="80%" gap="8" cross="center">
+		<stack id="subtitle_1" visible="false">
+			<box id="subtitle_back_1" anchor="fill" fill="#000" radius="6" opacity="0.5"/>
+			<column padding="8 18" gap="2" cross="center">
+				<text id="speaker_1" size="22" color="#ffd98a">{speaker_1}</text>
+				<text id="line_1" size="30" text_align="center">{line_1}</text>
+			</column>
+		</stack>
+		<stack id="subtitle_2" visible="false">
+			<box id="subtitle_back_2" anchor="fill" fill="#000" radius="6" opacity="0.5"/>
+			<column padding="8 18" gap="2" cross="center">
+				<text id="speaker_2" size="22" color="#ffd98a">{speaker_2}</text>
+				<text id="line_2" size="30" text_align="center">{line_2}</text>
+			</column>
+		</stack>
+		<stack id="subtitle_3" visible="false">
+			<box id="subtitle_back_3" anchor="fill" fill="#000" radius="6" opacity="0.5"/>
+			<column padding="8 18" gap="2" cross="center">
+				<text id="speaker_3" size="22" color="#ffd98a">{speaker_3}</text>
+				<text id="line_3" size="30" text_align="center">{line_3}</text>
+			</column>
+		</stack>
+	</column>
+</ui>
