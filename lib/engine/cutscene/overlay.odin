@@ -56,8 +56,8 @@ Overlay :: struct {
 }
 
 Overlay_Document :: struct {
-	index: int,
-	guid:  format.Guid,
+	handle: ui.Owned_Handle,
+	guid:   format.Guid,
 }
 
 // Overlay_Held is what the overlay shows with no player to drive it. nil is nothing: the overlay hides.
@@ -153,11 +153,11 @@ update_overlay :: proc(s: ^State, dt: time.Duration) {
 		guid := overlay_document(s)
 		if opened, open := s.overlay.opened.?; !open || opened.guid != guid {
 			if open {
-				ui.close_owned(s.ui, opened.index)
+				ui.close_owned(s.ui, opened.handle)
 				s.overlay.opened = nil
 			}
-			if index := ui.open_owned(s.ui, guid, OVERLAY_ORDER); index >= 0 {
-				s.overlay.opened = Overlay_Document{index, guid}
+			if handle, ok := ui.open_owned(s.ui, guid, OVERLAY_ORDER); ok {
+				s.overlay.opened = Overlay_Document{handle, guid}
 			}
 		}
 	}
@@ -177,7 +177,7 @@ update_overlay :: proc(s: ^State, dt: time.Duration) {
 @(private)
 close_overlay :: proc(s: ^State) {
 	if opened, open := s.overlay.opened.?; open && s.ui != nil {
-		ui.close_owned(s.ui, opened.index)
+		ui.close_owned(s.ui, opened.handle)
 	}
 	s.overlay.opened = nil
 	change_overlay(s, nil)
@@ -348,7 +348,7 @@ present :: proc(s: ^State, w: ^ecs.World, window: [2]f32) {
 	if !open {
 		return
 	}
-	d := ui.owned_document(s.ui, opened.index)
+	d := ui.owned_document(s.ui, opened.handle)
 	if d == nil || !d.built {
 		return
 	}

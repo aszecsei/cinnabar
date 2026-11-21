@@ -29,9 +29,9 @@ A document that code owns has no entity. The engine shows such a document itself
 
 | Procedure | What it does |
 |---|---|
-| `ui.open_owned(s, guid, order, view = 0)` | Puts the document in a free slot, hidden, and gives its index, or -1 when every slot is used |
-| `ui.owned_document(s, index)` | The document of an index, or nil when the index holds no owned document |
-| `ui.close_owned(s, index)` | Frees the slot |
+| `ui.open_owned(s, guid, order, view = 0)` | Puts the document in a free slot, hidden, and gives an `Owned_Handle`: the slot and a serial. It gives false when every slot is used. |
+| `ui.owned_document(s, handle)` | The document that a handle names, or nil for a stale handle: a slot that holds no document, or one that another `open_owned` opened since |
+| `ui.close_owned(s, handle)` | Frees the slot. A stale handle does nothing. |
 
 - **Loading.** `sync` loads and builds the document as it does the others. It never matches the document to an entity, and never frees it. It stays until `close_owned`, whatever the world's entities do.
 - **The owner** sets `order`, `view` and `visible` on the `Document`. The document starts hidden.

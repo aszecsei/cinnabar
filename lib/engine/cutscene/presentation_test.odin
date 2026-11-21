@@ -141,7 +141,7 @@ overlay :: proc(f: ^Present_Fixture) -> ^ui.Document {
 	if !open {
 		return nil
 	}
-	return ui.owned_document(&f.ui, opened.index)
+	return ui.owned_document(&f.ui, opened.handle)
 }
 
 // shown is whether the overlay's document shows.
