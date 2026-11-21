@@ -78,7 +78,7 @@ Evaluation :: struct {
 	targets:  map[u32]Property_Target,
 	// What each transform track relative to another binding found at its first evaluation, by track ID: a cycle, or
 	// where its binding starts in the other's space (see docs/cinematics/tracks.md#transform-tracks). A reload of the
-	// blob forgets them.
+	// blob keeps only the starts of the tracks that still join the same two bindings.
 	spaces:   map[u32]Relative_Space,
 }
 
@@ -740,7 +740,7 @@ reload :: proc(
 		e.snapshot.index[saved.field] = i
 	}
 	clear(&e.targets)
-	clear(&e.spaces)
+	keep_spaces(e, w, data, blob)
 	e.time = clamp(e.time, blob.range_start, blob.range_end)
 	for &last in e.last {
 		last = e.time

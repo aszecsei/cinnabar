@@ -169,6 +169,7 @@ move_blob :: proc(
 	f: ^Move_Fixture,
 	tracks: []format.Cutscene_Track_Contents,
 	length: i32 = SECOND,
+	key: u64 = 1,
 ) -> []byte {
 	names := [?]string{"A", "B", "C", "D"}
 	bindings := make([]format.Cutscene_Binding_Contents, len(f.entities), context.temp_allocator)
@@ -187,7 +188,7 @@ move_blob :: proc(
 	return format.cutscene_write(
 		{
 			guid = MOVE_GUID,
-			key = 1,
+			key = key,
 			length = length,
 			rate = 30,
 			range_end = length,
@@ -709,4 +710,51 @@ a_track_relative_to_itself_through_its_bindings_does_nothing :: proc(t: ^testing
 	context.logger = logger
 	testing.expect_value(t, heard.errors, 1)
 	testing.expect(t, near(meters_of(f, e), {7, 0, 0}), "the entity stays")
+}
+
+// A hot reload while a rider rides a ship that the game moves keeps the rider where it stood on the ship: the start
+// in the ship's space stays, because the snapshot still holds the rider's own pose that it came from.
+@(test)
+a_reload_keeps_where_a_rider_stands_on_a_moving_binding :: proc(t: ^testing.T) {
+	f := move_setup(t)
+	defer move_teardown(f)
+	ship := thing(f, {0, 0, 0})
+	rider := thing(f, {2, 0, 0})
+	tracks_of :: proc(height: f32) -> []format.Cutscene_Track_Contents {
+		tracks := make([]format.Cutscene_Track_Contents, 1, context.temp_allocator)
+		tracks[0] = {
+			id       = 1,
+			kind     = .Transform,
+			name     = "Rides",
+			binding  = 1,
+			space    = .Relative_To,
+			relative = 0,
+			sections = section(1, keyed("position_y", key(0, height))),
+		}
+		return tracks
+	}
+	play_blob(t, f, move_blob(f, tracks_of(1), 4 * SECOND))
+	move_ship :: proc(f: ^Move_Fixture, ship: ecs.Entity) {
+		pose := ecs.get_write(&f.world, ship, ecs.Transform)
+		pose.position = ecs.position_offset(pose.position, {1, 0, 0})
+	}
+	for _ in 0 ..< 5 {
+		tick(f)
+		move_ship(f, ship)
+	}
+	testing.expect(
+		t,
+		asset.set_live(&f.assets, MOVE_GUID, move_blob(f, tracks_of(3), 4 * SECOND, key = 2)),
+	)
+	for _ in 0 ..< 3 {
+		tick(f)
+		testing.expectf(
+			t,
+			near(meters_of(f, rider), meters_of(f, ship) + {2, 3, 0}),
+			"the rider is at %v, the ship at %v",
+			meters_of(f, rider),
+			meters_of(f, ship),
+		)
+		move_ship(f, ship)
+	}
 }

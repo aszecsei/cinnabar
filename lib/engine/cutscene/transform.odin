@@ -69,8 +69,11 @@ Relative_Space :: union {
 Relative_Cycle :: struct {}
 
 // Relative_Start is the binding's pose in the other binding's space before the cutscene moved either of them: what a
-// channel that the track does not key holds, so the entity rides the other binding.
+// channel that the track does not key holds, so the entity rides the other binding. It names the two bindings by their
+// IDs, so a reload keeps it while the track still joins them.
 Relative_Start :: struct {
+	binding:  u32,
+	relative: u32,
 	position: [3]f32,
 	rotation: quaternion128,
 }
@@ -101,8 +104,11 @@ transform_track :: proc(ctx: ^Track_Context) {
 	if held == {} || !ok {
 		return
 	}
+	start: Relative_Start
 	if ctx.track.space == .Relative_To {
-		if relative_cycle(ctx) {
+		placed: bool
+		start, placed = relative_space(ctx, target).(Relative_Start)
+		if !placed {
 			return
 		}
 		follow_relative(ctx)
@@ -126,10 +132,6 @@ transform_track :: proc(ctx: ^Track_Context) {
 		in_space.position = ecs.position_sub(world_own.position, frame.origin)
 		in_space.rotation = world_own.rotation
 	case .Relative_To:
-		start, placed := relative_start(ctx, world_own)
-		if !placed {
-			return
-		}
 		in_space.position, in_space.rotation = start.position, start.rotation
 	}
 	blended, touched := blend_pose(ctx, in_space)
@@ -539,49 +541,46 @@ teleports :: proc(ctx: ^Track_Context) -> bool {
 	return false
 }
 
-// relative_cycle is whether the track relative to another binding does nothing because its binding is relative to
-// itself through other bindings. The first evaluation for the blob checks, and logs such a track once.
+// relative_space is what the track relative to another binding found at its first evaluation for the blob: a cycle,
+// which it logs once, or where its binding starts in the other binding's space. The start comes from both bindings' own
+// poses: as they were before the cutscene first wrote them, or as they are now. nil while the other binding is
+// missing, which the next evaluation tries again.
 @(private)
-relative_cycle :: proc(ctx: ^Track_Context) -> bool {
+relative_space :: proc(ctx: ^Track_Context, target: Pose_Target) -> Relative_Space {
 	e := ctx.evaluation
 	if space, seen := e.spaces[ctx.track.id]; seen {
-		_, cycle := space.(Relative_Cycle)
-		return cycle
+		return space
 	}
-	if !reaches_self(ctx) {
-		return false
+	if reaches_self(ctx) {
+		log.errorf(
+			"cutscene %s: the transform track %d %q does nothing: its binding is relative to itself through other bindings",
+			format.blob_string(ctx.data, ctx.blob.source_path),
+			ctx.track.id,
+			format.blob_string(ctx.data, ctx.track.name),
+		)
+		e.spaces[ctx.track.id] = Relative_Cycle{}
+		return Relative_Cycle{}
 	}
-	log.errorf(
-		"cutscene %s: the transform track %d %q does nothing: its binding is relative to itself through other bindings",
-		format.blob_string(ctx.data, ctx.blob.source_path),
-		ctx.track.id,
-		format.blob_string(ctx.data, ctx.track.name),
-	)
-	e.spaces[ctx.track.id] = Relative_Cycle{}
-	return true
-}
-
-// relative_start is the binding's pose in the other binding's space, from both their own poses: as they were before
-// the cutscene first wrote them, or as they were at the track's first evaluation for the blob, which keeps it. False
-// when the other binding is missing or has no Transform.
-@(private)
-relative_start :: proc(
-	ctx: ^Track_Context,
-	world_own: World_Pose,
-) -> (
-	start: Relative_Start,
-	ok: bool,
-) {
-	e := ctx.evaluation
-	if space, seen := e.spaces[ctx.track.id]; seen {
-		return space.(Relative_Start)
+	own, has_own := own_pose(ctx, target)
+	other, found := binding_entity(&e.bindings, ctx.world, int(ctx.track.relative))
+	if !has_own || !found {
+		return nil
 	}
-	other := binding_entity(&e.bindings, ctx.world, int(ctx.track.relative)) or_return
-	target := pose_target(ctx.world, other) or_return
-	other_own := own_pose(ctx, target) or_return
-	from := own_world(ctx.world, target, other_own)
+	other_target, has_target := pose_target(ctx.world, other)
+	if !has_target {
+		return nil
+	}
+	other_own, has_other := own_pose(ctx, other_target)
+	if !has_other {
+		return nil
+	}
+	world_own := own_world(ctx.world, target, own)
+	from := own_world(ctx.world, other_target, other_own)
 	inverse := linalg.quaternion_inverse(from.rotation)
-	start = {
+	bindings := format.cutscene_bindings(ctx.data, ctx.blob)
+	start := Relative_Start {
+		binding  = bindings[ctx.track.binding].id,
+		relative = bindings[ctx.track.relative].id,
 		position = linalg.quaternion_mul_vector3(
 			inverse,
 			ecs.position_sub(world_own.position, from.position),
@@ -589,7 +588,35 @@ relative_start :: proc(
 		rotation = linalg.normalize(inverse * world_own.rotation),
 	}
 	e.spaces[ctx.track.id] = start
-	return start, true
+	return start
+}
+
+// keep_spaces follows a reload: it keeps the start of each track that is still relative to the same two bindings, by
+// their IDs, because the snapshot keeps the own poses that it came from, and forgets the rest, which the next
+// evaluation finds again.
+@(private)
+keep_spaces :: proc(e: ^Evaluation, w: ^ecs.World, data: []byte, blob: ^format.Cutscene_Blob) {
+	bindings := format.cutscene_bindings(data, blob)
+	gone := make([dynamic]u32, w.platform.frame_allocator)
+	for id, space in e.spaces {
+		kept := false
+		if start, placed := space.(Relative_Start); placed {
+			for track in format.cutscene_tracks(data, blob) {
+				kept ||=
+					track.id == id &&
+					track.kind == .Transform &&
+					track.space == .Relative_To &&
+					bindings[track.binding].id == start.binding &&
+					bindings[track.relative].id == start.relative
+			}
+		}
+		if !kept {
+			append(&gone, id)
+		}
+	}
+	for id in gone {
+		delete_key(&e.spaces, id)
+	}
 }
 
 // reaches_self is whether the track's own entity is reached from the entity that it is relative to, through the

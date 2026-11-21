@@ -127,7 +127,7 @@ A write fails, and saves nothing, when the entity is not alive, has no such comp
 
 A blob with a new key is a hot reload. The next `evaluate`, `seek` or `restore` notices it and:
 1. Takes each removed track, by its ID, off the writers of its fields.
-2. Restores each field that no remaining track wrote, and removes it from the snapshot. A track that the reload removes therefore restores its fields. It also forgets the property tracks' resolved fields and the transform tracks' spaces, so the next evaluation finds them again.
+2. Restores each field that no remaining track wrote, and removes it from the snapshot. A track that the reload removes therefore restores its fields. It also forgets the property tracks' resolved fields, so the next evaluation resolves them again. It keeps the start of each transform track that is still relative to the same two bindings, and forgets the other spaces ([Tracks: Transform tracks](tracks.md#transform-tracks)).
 3. Keeps the time, clamped into the new range, and sets each phase's last time to it, so the reload fires no events.
 4. Evaluates the new blob at the time.
 

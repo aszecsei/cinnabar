@@ -912,15 +912,16 @@ cutscene_parse :: proc(
 			case "space":
 				words := strings.fields(value_text, context.temp_allocator)
 				id: u32
-				ok := len(words) > 0
+				space: format.Cutscene_Space
+				ok := true
 				switch {
 				case len(words) == 1 && words[0] == "absolute":
-					tr.contents.space = .Absolute
+					space = .Absolute
 				case len(words) == 1 && words[0] == "relative":
-					tr.contents.space = .Relative
+					space = .Relative
 				case len(words) == 2 && words[0] == "relative":
+					space = .Relative_To
 					id, ok = cutscene_id(words[1])
-					tr.contents.space, tr.relative_id = .Relative_To, id
 				case:
 					ok = false
 				}
@@ -932,14 +933,15 @@ cutscene_parse :: proc(
 					)
 					continue
 				}
-				tr.space_line = line
+				tr.contents.space, tr.relative_id, tr.space_line = space, id, line
 			case "origin":
 				value, message := parse_graph_value(value_text)
 				ok := message == "" && value.kind == .Numbers && value.count == 3
+				origin: [3]i64
 				for axis in 0 ..< 3 {
 					raw, in_range := format.world_raw_from_meters(value.numbers[axis])
 					ok &&= in_range
-					tr.contents.origin[axis] = raw
+					origin[axis] = raw
 				}
 				if !ok {
 					problem(
@@ -949,7 +951,7 @@ cutscene_parse :: proc(
 					)
 					continue
 				}
-				tr.origin_line = line
+				tr.contents.origin, tr.origin_line = origin, line
 			case:
 				problem(
 					&found,
