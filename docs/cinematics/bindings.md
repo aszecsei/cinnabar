@@ -18,15 +18,17 @@ This document describes how bindings resolve and how tracks read them, in `lib/e
 | `Binding_Possessed{entity, hold}` | An entity that the cutscene does not own: an entity of a scene, or an override. |
 | `Binding_Spawned{entity, hold}` | The root of a prefab instance that the cutscene spawned. The cutscene owns it. |
 | `Binding_Missing` | An optional binding whose entity was not found. Its tracks do nothing. |
+| `Binding_Mapped` | A sub-sequence's binding that its section maps to a binding of the parent, by the parent's index. Its tracks act on the parent's binding's entity, which `tree_binding` finds. It suspends nothing: the parent's binding holds the entity ([Tracks: Sub-sequence tracks](tracks.md#sub-sequence-tracks)). |
 
 `hold` is what the binding suspends on its entity, from the cutscene's settings: its systems, and whether a body keeps its velocity. `set_binding` suspends them when the binding enters the state and resumes them when it leaves, so a binding holds its entity exactly while it is resolved ([Possession](possession.md#the-settings)).
 
-The states hold no strings and no pointers, so they survive a code reload. A failure is a `Binding_Failure`, which holds the binding's index and a reason: `Missing` or `Spawn_Failed`.
+The states hold no strings and no pointers, so they survive a code reload. A failure is a `Binding_Failure`, which holds the binding's index and a reason: `Missing` or `Spawn_Failed`, and for a sub-sequence's binding, the sub-sequence's GUID.
 
 ## Resolving
 
 `resolve_bindings` resolves every binding once, before the cutscene plays. The [player](player.md#loading-and-failures) calls it in `Loading`. It goes through the bindings in the blob's order, so a spawned binding's parent resolves before its child.
 
+1. A sub-sequence's binding that its section maps (`Resolve.mapped`) is `Binding_Mapped`. A spawned binding under it spawns under the parent's entity.
 1. If an override for the binding has an entity that is alive, the override wins ([Overrides](#overrides)).
 2. If not, a possessed binding finds its entity, and a spawned binding spawns its prefab.
 3. The resolution fails if a required binding is missing or a prefab does not spawn. On a failure it:

@@ -11,6 +11,7 @@ This document describes `lib/engine/cutscene/evaluation.odin`: the clock, the or
 An `Evaluation` is what one cutscene needs to be evaluated:
 - its blob, as an asset handle;
 - its [bindings](bindings.md);
+- its children: the cutscenes that its sub-sequence sections play, each with its blob, the assets that it references and its bindings, which the player loads ([Tracks: Sub-sequence tracks](tracks.md#sub-sequence-tracks));
 - its time in ticks, from the range's start to the range's end;
 - the time of each phase's last evaluation;
 - the [snapshot](#the-restore-snapshot) of the fields that its tracks wrote;
@@ -50,7 +51,8 @@ Each kind of track has a **phase**:
 - **Same tick.** The `Fixed` phase writes before the animator, physics and the tick's propagation read. The animator, physics and propagation therefore see the cutscene's values in the same tick, and nothing lags by a frame.
 - **Interpolation.** The tick's `Previous_Transform` copy runs before the systems. So presentation interpolates from the last tick's pose to the cutscene's pose, as for any entity that moves in `Fixed`.
 - **Late phase.** The `Late` phase runs after scripts and before `camera.advance`, so the frame shows what it wrote.
-- **Camera constraints.** After the `Fixed` phase's tracks, `run_phase` applies the camera constraints of the cut track, so they see every track's pose at the tick, whatever the tracks' order ([Tracks: Camera cut tracks](tracks.md#camera-cut-tracks)).
+- **Camera constraints.** After the `Fixed` phase's tracks, `run_phase` drives the `Animator`s with the clips of every animation track, and applies the camera constraints of the cut tracks, so they see every track's pose at the tick, whatever the tracks' order ([Tracks: Camera cut tracks](tracks.md#camera-cut-tracks)).
+- **The camera cut** evaluates once for the tree in the `Late` phase, after the other tracks: it shows the parent's shot or a child's ([Tracks: Sub-sequence tracks](tracks.md#sub-sequence-tracks)).
 - **Exclusive.** Both systems are **exclusive** ([World: ECS: Systems](../world/ecs.md#systems)). A property track can write any component, so the systems cannot name their writes before they run. An exclusive system waits for every system before it, and every later system waits for it. `register` is the first registration in `register_world`, so in each stage the cutscene runs first and alone.
 - **Real clock.** `advance_real` runs in `game_update` before the ticks, and only while the world runs. Its `Fixed` writes are therefore in place before the first tick. The game's pause does not stop them.
 - **Real clock in a pause.** While the game is paused, no tick runs. So `Previous_Transform` is not copied, and the clock's `alpha` does not change. Presentation then shows only a part of a move that a real-clock track writes to `Transform`. A kind that moves an interpolated entity on the real clock must therefore teleport it. The transform track does ([Tracks: Transform tracks](tracks.md#transform-tracks)).
@@ -64,15 +66,16 @@ Each kind of track has a **phase**:
 - The engine's kinds are in [Tracks](tracks.md). Their keyed channels are curves ([Tracks: Curves](tracks.md#curves)).
 - A kind without a procedure does nothing. A muted track does nothing.
 
-`evaluate` evaluates the tracks of one phase in the blob's order. For each track, it calls its kind's procedure with a `Track_Context`, which holds:
-- the world, the evaluation, the blob and the track;
-- the time;
-- the event range, whether it is a skip's (`skipped`), and a forward seek since the phase's last evaluation (`seek`);
+`evaluate` evaluates the tracks of one phase in the blob's order, with each child's tracks in its sub-sequence track's place. The children whose sections do not cover the time go first, so they write their fields' own values before the tracks that play win them ([Tracks: Sub-sequence tracks](tracks.md#sub-sequence-tracks)). For each track, it calls its kind's procedure with a `Track_Context`, which holds:
+- the world, the evaluation, the blob and the track, and for a child's track, the child's blob;
+- the time, on the track's cutscene's time;
+- the event range, whether it is a skip's (`skipped`), and a forward seek since the phase's last evaluation (`seek`), on that time too;
+- the track's scope, and what the sub-sequence sections above it give: their weight, whether they cover the time, and their scale;
 - the kind's `data`.
 
 A kind:
-- gets its binding's entity with `track_entity`;
-- samples its sections with `section_at` and blends them with `Blend`;
+- gets its binding's entity with `track_entity`, and another binding's with `ctx_binding`;
+- samples its sections with `sample_section` and blends them with `Blend`;
 - reads a field's own value with `base`;
 - writes the world **only** with `write` or `write_field`, and writes every field that it holds in each evaluation, at the field's own value where no section covers the time ([Player: Conflicts](player.md#conflicts)). There are three exceptions, outside the snapshot. The first is what follows from those fields each tick: `settle_pose` writes a child's `Transform` and a teleport's `Previous_Transform`. The second is an `Animator`'s driven clips, which only the animation's driver writes, through a token: an animation track holds the token in `Evaluation.drives`, and `restore` ends it. The third is the camera cut track's claim on the game's views, which it holds in `Evaluation.cut`, and which `restore` releases;
 - tests a key against the event range with `fires`, and in a skip's range fires only the keys that it marks to fire when skipped ([Skipping: Events](skipping.md#events)).
@@ -129,8 +132,8 @@ A write fails, and saves nothing, when the entity is not alive, has no such comp
 
 ## Hot reload
 
-A blob with a new key is a hot reload. The next `evaluate`, `seek` or `restore` notices it and:
-1. Takes each removed track, by its ID, off the writers of its fields.
+A blob with a new key is a hot reload, the blob of a child included: the evaluation keeps a key of all the blobs of its tree. The next `evaluate`, `seek` or `restore` notices it and:
+1. Takes each removed track, by its scope and its ID, off the writers of its fields.
 2. Restores each field that no remaining track wrote, and removes it from the snapshot. A track that the reload removes therefore restores its fields. It also forgets the property tracks' resolved fields, so the next evaluation resolves them again. It keeps the start of each transform track that is still relative to the same two bindings, and forgets the other spaces ([Tracks: Transform tracks](tracks.md#transform-tracks)). It ends the hold of every driven `Animator`, and the animation tracks of the new blob take theirs again as they evaluate. It releases the camera cut track's claim on the views too, and the track of the new blob claims them again with a cut. One `end_holds` ends both kinds of hold, for a reload, `restore`, `restore_all` and `destroy_evaluation`.
 3. Keeps the time, clamped into the new range, and sets each phase's last time to it, so the reload fires no events. It forgets the event tracks' open ranges whose IDs are no longer ranges ([Tracks: Event tracks](tracks.md#event-tracks)).
 4. Evaluates the new blob at the time.
@@ -159,8 +162,10 @@ A test compares a play with one job and with eight workers.
 | `evaluate(state, e, world, data, blob, phase)` | Evaluates one phase's tracks at the time, and follows a reload |
 | `advance_real(state, world, dt)` | Advances the real-clock cutscenes and evaluates their `Fixed` tracks |
 | `restore(state, e, world, data, blob)`, `restore_all(state, e, world)` | Put back the fields of `restore` tracks, or every field when the blob is gone, empty the snapshot, give back the driven `Animator`s, and release the camera cut track's claim |
-| `section_at(blob, section, t)`, `ease(x)` | A section's local time and weight at a time, and the ease's shape |
+| `section_at(blob, section, t)`, `ease(x)` | A section's local time and weight at a time in a blob alone, and the ease's shape |
+| `sample_section(ctx, section, t)` | A section's local time and weight at a time on its track's cutscene's time, through the sub-sequence sections above it |
 | `blend_add`, `blend_value` | Blend sections' values over the base |
-| `track_entity(ctx)`, `fires(ctx, t)` | A track's bound entity, and whether an event fires |
+| `track_entity(ctx)`, `ctx_binding(ctx, index)`, `fires(ctx, t)` | A track's bound entity, another binding's entity through a sub-sequence's maps, and whether an event fires |
+
 | `write`, `write_field`, `base`, `field_base` | Write a field through the snapshot, and read its own value |
 
