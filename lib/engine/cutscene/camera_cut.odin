@@ -27,17 +27,19 @@ Cut_Shown :: union {
 // Cut_Gameplay is a time that no section covers: the track claims nothing, so the view is gameplay's.
 Cut_Gameplay :: struct {}
 
-// Cut_Shot is a section that shows: its ID and its camera, the claim that the track holds on the views for it, and how
-// the claim leaves if the player ends now.
+// Cut_Shot is a section that shows: its ID and its camera, the claim that the track holds on the views for it, the views
+// that hold it, in Game_State, and how the claim leaves if the player ends now.
 Cut_Shot :: struct {
 	section: u32,
 	entity:  ecs.Entity,
+	views:   ^camera.Views,
 	token:   camera.Claim_Token,
 	leave:   camera.Blend,
 }
 
 // Cut_Refused is a section whose camera binding is missing or not a live Camera. The track logs it once, and claims
-// nothing until another section shows.
+// nothing until another section shows or the binding changes. A claim that fails because the views' entries are all
+// taken is not a refusal: the track shows gameplay and claims again at its next evaluation.
 Cut_Refused :: struct {
 	section: u32,
 	entity:  ecs.Entity,
@@ -69,7 +71,7 @@ camera_cut_track :: proc(ctx: ^Track_Context) {
 	}
 
 	if !showing {
-		change_cut(s, e, Cut_Gameplay{}, leaving_blend(ctx, sections, jumped))
+		change_cut(e, Cut_Gameplay{}, leaving_blend(ctx, sections, jumped))
 		return
 	}
 	section := sections[index]
@@ -81,7 +83,9 @@ camera_cut_track :: proc(ctx: ^Track_Context) {
 		   shown.section == section.id &&
 		   shown.entity == entity &&
 		   camera.is_claimed(s.views, shown.token) {
-			e.cut.shown = Cut_Shot{shown.section, shown.entity, shown.token, leave}
+			next := shown
+			next.leave = leave
+			change_cut(e, next, camera.CUT)
 			return
 		}
 	case Cut_Refused:
@@ -96,48 +100,62 @@ camera_cut_track :: proc(ctx: ^Track_Context) {
 		blend_in = cut_blend(ctx.blob, section.blend_in, section.blend_curves[0])
 	}
 	leaving := leaving_blend(ctx, sections, jumped)
-	token: camera.Claim_Token
-	claimed := false
-	if bound {
-		token, claimed = camera.claim(
-			s.views,
-			ctx.world,
-			entity,
-			player_priority(s, e),
-			blend_in,
-			leave,
-		)
-	}
-	if !claimed {
+	if !bound || ecs.get_raw(ctx.world, entity, render.CAMERA_ID) == nil {
 		log.errorf(
 			"cutscene %s: the camera cut section %d shows nothing: its camera binding is missing, or is not a Camera",
 			format.blob_string(ctx.data, ctx.blob.source_path),
 			section.id,
 		)
-		change_cut(s, e, Cut_Refused{section.id, entity}, leaving)
+		change_cut(e, Cut_Refused{section.id, entity}, leaving)
 		return
 	}
-	change_cut(s, e, Cut_Shot{section.id, entity, token, leave}, leaving)
+	token, claimed := camera.claim(
+		s.views,
+		ctx.world,
+		entity,
+		player_priority(s, e),
+		blend_in,
+		leave,
+	)
+	if !claimed {
+		// The views' entries are all taken, which camera.claim warns of: gameplay shows until a claim succeeds.
+		change_cut(e, Cut_Gameplay{}, leaving)
+		return
+	}
+	change_cut(e, Cut_Shot{section.id, entity, s.views, token, leave}, leaving)
 }
 
-// end_cut gives the views back: it releases the track's claim, with the blend that the shot leaves with. restore and
-// restore_all call it, so the player hands the view back when it ends.
-end_cut :: proc(s: ^State, e: ^Evaluation) {
+// end_cut gives the views back: it releases the track's claim, with the blend that the shot leaves with. end_holds
+// calls it, so the player hands the view back when it ends.
+end_cut :: proc(e: ^Evaluation) {
 	shot, held := e.cut.shown.(Cut_Shot)
-	change_cut(s, e, nil, shot.leave if held else camera.CUT)
+	change_cut(e, nil, shot.leave if held else camera.CUT)
 }
 
 // change_cut is the one writer of what the cut track shows. It releases the old shot's claim, leaving with a blend, when
 // the next state does not hold the same claim.
 @(private)
-change_cut :: proc(s: ^State, e: ^Evaluation, next: Cut_Shown, leaving: camera.Blend) {
+change_cut :: proc(e: ^Evaluation, next: Cut_Shown, leaving: camera.Blend) {
 	if old, held := e.cut.shown.(Cut_Shot); held {
 		new, keeps := next.(Cut_Shot)
-		if (!keeps || new.token != old.token) && s.views != nil {
-			camera.release(s.views, old.token, leaving)
+		if !keeps || new.token != old.token {
+			camera.release(old.views, old.token, leaving)
 		}
 	}
 	e.cut.shown = next
+}
+
+// live_cut_track is the cutscene's camera cut track while it is not muted.
+@(private)
+live_cut_track :: proc(
+	data: []byte,
+	blob: ^format.Cutscene_Blob,
+) -> (
+	track: format.Cutscene_Track,
+	ok: bool,
+) {
+	track = format.cutscene_cut_track(data, blob) or_return
+	return track, .Muted not_in track.flags
 }
 
 // shown_section is the cut section that covers a time: [start, end), and its end too at the range's end.
@@ -183,7 +201,7 @@ leaving_blend :: proc(
 	}
 	if ctx.skipped && ctx.time == ctx.blob.range_end {
 		last := sections[len(sections) - 1]
-		if .Blend_On_Skip in last.flags && last.id == shot.section {
+		if .Blend_On_Skip in last.flags {
 			return cut_blend(ctx.blob, last.blend_out, last.blend_curves[1])
 		}
 		return camera.CUT
@@ -229,8 +247,8 @@ player_priority :: proc(s: ^State, e: ^Evaluation) -> i32 {
 // teleport on it, so nothing interpolates across the cut. It reads only the blob, so it is the same in either phase.
 @(private)
 cut_fires :: proc(ctx: ^Track_Context) -> bool {
-	cut, has_cut := format.cutscene_cut_track(ctx.data, ctx.blob)
-	if !has_cut || .Muted in cut.flags {
+	cut, live := live_cut_track(ctx.data, ctx.blob)
+	if !live {
 		return false
 	}
 	sections := format.cutscene_track_sections(ctx.data, ctx.blob, cut)
@@ -257,9 +275,9 @@ cut_fires :: proc(ctx: ^Track_Context) -> bool {
 // It writes as the cut track, whose when_finished restores or keeps the parts.
 @(private)
 constrain :: proc(ctx: ^Track_Context) {
-	cut, has_cut := format.cutscene_cut_track(ctx.data, ctx.blob)
+	cut, live := live_cut_track(ctx.data, ctx.blob)
 	constraints := format.cutscene_constraints(ctx.data, ctx.blob)
-	if !has_cut || .Muted in cut.flags || len(constraints) == 0 {
+	if !live || len(constraints) == 0 {
 		return
 	}
 	ctx.track = cut

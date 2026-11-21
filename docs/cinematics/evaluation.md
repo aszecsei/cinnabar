@@ -130,7 +130,7 @@ A write fails, and saves nothing, when the entity is not alive, has no such comp
 
 A blob with a new key is a hot reload. The next `evaluate`, `seek` or `restore` notices it and:
 1. Takes each removed track, by its ID, off the writers of its fields.
-2. Restores each field that no remaining track wrote, and removes it from the snapshot. A track that the reload removes therefore restores its fields. It also forgets the property tracks' resolved fields, so the next evaluation resolves them again. It keeps the start of each transform track that is still relative to the same two bindings, and forgets the other spaces ([Tracks: Transform tracks](tracks.md#transform-tracks)). It ends the hold of every driven `Animator`, and the animation tracks of the new blob take theirs again as they evaluate.
+2. Restores each field that no remaining track wrote, and removes it from the snapshot. A track that the reload removes therefore restores its fields. It also forgets the property tracks' resolved fields, so the next evaluation resolves them again. It keeps the start of each transform track that is still relative to the same two bindings, and forgets the other spaces ([Tracks: Transform tracks](tracks.md#transform-tracks)). It ends the hold of every driven `Animator`, and the animation tracks of the new blob take theirs again as they evaluate. It releases the camera cut track's claim on the views too, and the track of the new blob claims them again with a cut. One `end_holds` ends both kinds of hold, for a reload, `restore`, `restore_all` and `destroy_evaluation`.
 3. Keeps the time, clamped into the new range, and sets each phase's last time to it, so the reload fires no events.
 4. Evaluates the new blob at the time.
 

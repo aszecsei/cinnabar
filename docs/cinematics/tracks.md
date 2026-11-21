@@ -280,6 +280,7 @@ track 5 camera_cut "Cuts"
 - **A cut** is a frame where the stack does not blend. Its view carries the cut to the renderer, which starts its temporal histories again: temporal AA, the upscaler, motion vectors, exposure and every pass that reprojects a history ([Rendering: Views](../rendering/frame.md#views)). Transform tracks and applied root motion teleport on the tick that crosses a cut ([Transform tracks](#transform-tracks)), so nothing interpolates across it.
 - **Gameplay.** Where no section covers the time, the track holds no claim.
 - **A camera that is not there.** A section whose binding is missing, or is not a live `Camera`, shows nothing. The player logs it once for the section.
+- **No room.** When the views' `MAX_ENTRIES` entries are all taken, the claim fails, and the camera package warns once. The track shows gameplay and claims again at its next evaluation.
 - **Several players.** The higher priority's claim shows. At the same priority, the later claim does.
 - **Without views.** `init` takes the game's views. Without them, the track claims nothing.
 
@@ -300,8 +301,8 @@ track 5 camera_cut "Cuts"
 **Seek, skip and finish.**
 - **Seek and scrub backwards.** The section at the new time decides the camera, and the frame is a cut. A seek inside the same section cuts too.
 - **Pause.** Nothing changes, and no frame cuts. A blend that runs goes on with the stack's clock.
-- **Skip.** A skip to a later time cuts to the section there. A skip that ends the cutscene cuts back to gameplay, or blends out with the last section's `blend_out` when it has `blend_on_skip = true`. The last shot is never shown: the skip and the end happen in one update.
-- **Hot reload.** The shot stays while the section with the same ID shows the same camera. A change cuts.
+- **Skip.** A skip to a later time cuts to the section there. A skip that ends the cutscene cuts back to gameplay, or, when the last section has `blend_on_skip = true`, blends out with that section's `blend_out` from whichever shot shows. The last shot is never shown: the skip and the end happen in one update.
+- **Hot reload.** A reload releases the claim with a cut, as it ends every hold of the evaluation. The next `Late` evaluation claims the section at the time again, in the same frame, so the frame cuts. A reload that removes or mutes the cut track leaves the view to gameplay.
 - **When finished.** The player releases its claim when it ends, so the stack hands the view back: with the last section's blend out when the cutscene ends in it, and with a cut when the player stops or fails. `restore` and `keep` do not apply to the view. The lens fields follow their property tracks' setting.
 - **Spawned cameras.** A spawned camera goes as the player ends. A blend out then starts from the view that it showed last.
 
@@ -323,6 +324,6 @@ track 5 camera_cut "Cuts"
 | `transform_track(ctx)` | The transform kind's evaluate procedure |
 | `animation_track(ctx)` | The animation kind's evaluate procedure |
 | `camera_cut_track(ctx)` | The camera cut kind's evaluate procedure |
-| `end_cut(state, evaluation)` | Releases the cut track's claim on the views, with the blend that its shot leaves with. `restore` and `restore_all` call it. |
+| `end_cut(evaluation)` | Releases the cut track's claim on the views, with the blend that its shot leaves with. `restore`, `restore_all`, a reload and `destroy_evaluation` call it, through the one `end_holds`. |
 | `settle_pose(world, entity, teleport)` | Composes a child's `Transform` from what a track or a restore wrote. With `teleport`, also sets the `Previous_Transform` of the entity and of every entity under it. |
 | `pose_channel(name)` | A transform channel's place in the pose |

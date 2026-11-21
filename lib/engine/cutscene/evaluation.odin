@@ -253,7 +253,7 @@ init_evaluation :: proc(
 // destroy_evaluation ends the drives of the Animators, destroys the bindings, which despawns what they spawned, and
 // frees the snapshot. It gives how many spawned roots it despawned. It restores no field: call restore first for that.
 destroy_evaluation :: proc(e: ^Evaluation, w: ^ecs.World) -> (despawned: int) {
-	end_drives(e, w)
+	end_holds(e, w)
 	delete(e.drives)
 	e.drives = nil
 	despawned = release_bindings(&e.bindings, w)
@@ -440,8 +440,7 @@ restore :: proc(
 		}
 	}
 	forget(&e.snapshot)
-	end_drives(e, w)
-	end_cut(s, e)
+	end_holds(e, w)
 }
 
 // restore_all puts back every saved field, and gives back every driven Animator, as restore does, for an evaluation
@@ -451,8 +450,16 @@ restore_all :: proc(s: ^State, e: ^Evaluation, w: ^ecs.World) {
 		put_back(s, e, w, &saved)
 	}
 	forget(&e.snapshot)
+	end_holds(e, w)
+}
+
+// end_holds ends what the evaluation holds outside the snapshot: the drives of the Animators that its animation tracks
+// drive, and the camera cut track's claim on the views. It is the one end of them, for restore, restore_all, a reload
+// and destroy_evaluation, and it does nothing when the evaluation holds nothing.
+@(private)
+end_holds :: proc(e: ^Evaluation, w: ^ecs.World) {
 	end_drives(e, w)
-	end_cut(s, e)
+	end_cut(e)
 }
 
 // track_entity is the entity of the track's binding while it is alive, and false for a track without a binding, or
@@ -789,8 +796,9 @@ reload :: proc(
 	}
 	clear(&e.targets)
 	keep_spaces(e, w, data, blob)
-	// The tracks take their Animators again as they evaluate the new blob, so a removed track gives its back.
-	end_drives(e, w)
+	// The tracks of the new blob take their Animators and claim the views again as they evaluate, so a track that the
+	// reload removed or muted gives its back.
+	end_holds(e, w)
 	e.time = clamp(e.time, blob.range_start, blob.range_end)
 	for &last in e.last {
 		last = e.time

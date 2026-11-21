@@ -145,7 +145,7 @@ A camera cut section has settings of its own ([Cinematics: Camera cut tracks](..
 |---|---|---|
 | `camera` | The ID of the binding whose camera the section shows. Needed. | — |
 | `blend_in`, `blend_out` | `<ticks> [curve]`: a blend from gameplay into a section that is first or follows a gap, or from a section that is last or comes before a gap back to gameplay. The curve is `linear`, `smooth`, `ease_in` or `ease_out`. A blend in is at most the section's duration. | 0, a cut |
-| `blend_on_skip` | `true`: a skip that ends the cutscene in this section blends out with its `blend_out`. `false`: it cuts. | `false` |
+| `blend_on_skip` | `true`: a skip that ends the cutscene blends out with this section's `blend_out`, whichever shot shows. `false`: it cuts. Only the last section's setting counts. | `false` |
 | `look_at`, `follow`, `focus` | The ID of a binding that the camera looks at, follows or focuses on. Not the camera itself. | None |
 | `look_at_offset`, `follow_offset` | `[x, y, z]` in meters in the target's space | `[0, 0, 0]` |
 | `look_at_damping`, `follow_damping` | Ticks over which the constraint takes hold from the section's start | 0 |

@@ -476,7 +476,7 @@ a_seek_cuts_a_pause_holds_and_a_skip_or_stop_gives_the_view_back :: proc(t: ^tes
 	}
 	resume(&f.cutscenes, &f.world, h)
 
-	// The same blob again, a reload: the shot stays.
+	// The same blob again, a reload: the track claims the same shot again, with a cut.
 	testing.expect(
 		t,
 		asset.set_live(
@@ -486,7 +486,8 @@ a_seek_cuts_a_pause_holds_and_a_skip_or_stop_gives_the_view_back :: proc(t: ^tes
 		),
 	)
 	shown = tick(f)
-	testing.expect(t, !shown.views[0].cut)
+	testing.expect(t, shown.views[0].cut)
+	testing.expect(t, abs(x_of(shown.views[0].view) - 1) < 1e-4)
 
 	// A stop cuts back to gameplay from a shot that would blend out at its end.
 	set_time(&f.cutscenes, &f.world, h, 40 * TICK)
@@ -497,8 +498,16 @@ a_seek_cuts_a_pause_holds_and_a_skip_or_stop_gives_the_view_back :: proc(t: ^tes
 	testing.expect(t, shown.views[0].cut)
 	testing.expect(t, abs(x_of(shown.views[0].view)) < 1e-4)
 
-	// A skip to the end cuts back, and one with the last section marked to blend out on a skip blends.
-	for marked in ([2]bool{false, true}) {
+	// A skip to the end cuts back, and one with the last section marked to blend out on a skip blends, from whichever
+	// shot shows.
+	Skip_Case :: struct {
+		marked: bool,
+		frames: int,
+		// The x of the camera that shows at the skip.
+		from:   f32,
+	}
+	for c, i in ([]Skip_Case{{false, 40, 2}, {true, 40, 2}, {true, 10, 1}}) {
+		marked := c.marked
 		marked_last := last
 		if marked {
 			marked_last.flags = {.Blend_On_Skip}
@@ -506,14 +515,9 @@ a_seek_cuts_a_pause_holds_and_a_skip_or_stop_gives_the_view_back :: proc(t: ^tes
 		p := play_blob(
 			t,
 			f,
-			shots_blob(
-				f,
-				{cuts(shot(1, 0, 30 * TICK, 0), marked_last)},
-				length,
-				key = 3 if marked else 4,
-			),
+			shots_blob(f, {cuts(shot(1, 0, 30 * TICK, 0), marked_last)}, length, key = u64(3 + i)),
 		)
-		for _ in 1 ..= 40 {
+		for _ in 1 ..= c.frames {
 			tick(f)
 		}
 		testing.expect_value(t, skip(&f.cutscenes, &f.world, p), Command_Result.Done)
@@ -527,7 +531,7 @@ a_seek_cuts_a_pause_holds_and_a_skip_or_stop_gives_the_view_back :: proc(t: ^tes
 			marked,
 			shown.views[0].cut,
 		)
-		want: f32 = 2 * (1 - 1.0 / 60) if marked else 0
+		want: f32 = c.from * (1 - 1.0 / 60) if marked else 0
 		testing.expectf(
 			t,
 			abs(x_of(shown.views[0].view) - want) < 1e-3,
@@ -540,6 +544,82 @@ a_seek_cuts_a_pause_holds_and_a_skip_or_stop_gives_the_view_back :: proc(t: ^tes
 		}
 		release(&f.cutscenes, &f.world, p)
 	}
+}
+
+// A reload that mutes the cut track gives the views back at once, though the track no longer evaluates.
+@(test)
+a_reload_that_mutes_the_cut_track_gives_the_view_back :: proc(t: ^testing.T) {
+	f := cut_setup(t)
+	defer cut_teardown(f)
+	shot_camera(f, {1, 0, 0})
+	length := i32(60 * TICK)
+	play_blob(t, f, shots_blob(f, {cuts(shot(1, 0, length, 0))}, length))
+	shown := tick(f)
+	testing.expect(t, abs(x_of(shown.views[0].view) - 1) < 1e-4)
+	muted := cuts(shot(1, 0, length, 0))
+	muted.flags = {.Muted}
+	testing.expect(
+		t,
+		asset.set_live(&f.assets, SHOTS_GUID, shots_blob(f, {muted}, length, key = 2)),
+	)
+	shown = tick(f)
+	testing.expect(t, !camera.claimed(&f.views))
+	testing.expect(t, shown.views[0].cut)
+	testing.expect(t, abs(x_of(shown.views[0].view)) < 1e-4)
+}
+
+// A property track on the Cinematic_Camera racks its focus, and the view's lens follows it.
+@(test)
+a_rack_focus_reaches_the_views_lens :: proc(t: ^testing.T) {
+	f := cut_setup(t)
+	defer cut_teardown(f)
+	k := shot_camera(f, {0, 0, 0})
+	ecs.add(&f.world, k, render.Cinematic_Camera{aperture = 2, focus_distance = 6})
+	length := i32(60 * TICK)
+	keys := make([]format.Cutscene_Key, 2, context.temp_allocator)
+	keys[0] = {
+		time   = 0,
+		value  = 6,
+		interp = .Linear,
+	}
+	keys[1] = {
+		time   = length,
+		value  = 1.5,
+		interp = .Linear,
+	}
+	channels := make([]format.Cutscene_Channel_Contents, 1, context.temp_allocator)
+	channels[0] = {
+		name = "value",
+		keys = keys,
+	}
+	sections := make([]format.Cutscene_Section_Contents, 1, context.temp_allocator)
+	sections[0] = {
+		id       = 70,
+		start    = 0,
+		end      = length,
+		weight   = 1,
+		channels = channels,
+	}
+	rack := format.Cutscene_Track_Contents {
+		id        = 7,
+		kind      = .Property,
+		name      = "Rack focus",
+		binding   = 0,
+		component = u64(render.CINEMATIC_CAMERA_ID),
+		field     = "focus_distance",
+		sections  = sections,
+	}
+	play_blob(t, f, shots_blob(f, {rack, cuts(shot(1, 0, length, 0))}, length))
+	shown: camera.Frame_Views
+	for _ in 1 ..= 30 {
+		shown = tick(f)
+	}
+	testing.expectf(
+		t,
+		abs(shown.views[0].view.lens.focus_distance - 3.75) < 1e-3,
+		"the focus is at %v",
+		shown.views[0].view.lens.focus_distance,
+	)
 }
 
 // Of two players' cut tracks, the higher priority's shows.
