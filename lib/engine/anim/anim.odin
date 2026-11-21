@@ -168,9 +168,9 @@ State :: struct {
 	driven_clips: []Driven_Clip,
 	// The last driver's generation, which begin_drive counts up, so a token never matches a later driver's.
 	next_drive:   u32,
-	// The markers that drivers raised since the last flush (see raise_marker), which the flush puts before the tick's
-	// own events. Heap memory.
-	raised:       [dynamic]Job_Event,
+	// The markers that drivers raised since the last flush (see raise_marker), as events that own their strings, so
+	// they read no frame's graph table. The flush moves them before the tick's own events. At most MAX_RAISED.
+	raised:       [dynamic]Event,
 	// The events of the tick numbered tick, and of every tick since begin_frame. Their strings are on the heap.
 	tick_events:  [dynamic]Event,
 	tick:         u64,
@@ -203,6 +203,7 @@ register :: proc(s: ^State, w: ^ecs.World, assets: ^asset.Assets) {
 destroy :: proc(s: ^State) {
 	clear_events(s, &s.tick_events)
 	clear_events(s, &s.frame_events)
+	clear_events(s, &s.raised)
 	delete(s.tick_events)
 	delete(s.frame_events)
 	delete(s.raised)
@@ -542,10 +543,15 @@ clip_markers :: proc(
 	return nil
 }
 
+// MAX_RAISED is the most markers that drivers can raise before a flush. Frames without a tick, such as those of a
+// cutscene on the real clock while the game is paused, raise markers that wait for the next tick.
+MAX_RAISED :: 256
+
 // raise_marker raises a marker of clip_markers for an entity, as its graph raises one in a tick, from its current
-// state. The tick's flush puts it before the graph's own events, in the order of the calls, so it reaches the entity's
-// behaviours as on_animation_event. A driver raises the markers that its clips pass, since driven clips raise none of
-// their own. False outside a frame, or when the entity's graph is not ready.
+// state. It makes the event at once, from the graph of this frame, and the next tick's flush puts it before the graph's
+// own events, in the order of the calls, so it reaches the entity's behaviours as on_animation_event. A driver raises
+// the markers that its clips pass, since driven clips raise none of their own. False outside a frame, when the
+// entity's graph is not ready, and past MAX_RAISED markers waiting for a flush.
 raise_marker :: proc(
 	s: ^State,
 	w: ^ecs.World,
@@ -556,20 +562,23 @@ raise_marker :: proc(
 	if a == nil {
 		return false
 	}
-	if _, ready := ready_graph(s, a); !ready {
+	r, ready := ready_graph(s, a)
+	if !ready || r.graph.blob == nil {
+		return false
+	}
+	if len(s.raised) >= MAX_RAISED {
+		log.warnf("anim: drivers raised more than %d markers before a tick", MAX_RAISED)
 		return false
 	}
 	if s.raised == nil {
-		s.raised = make([dynamic]Job_Event, w.platform.heap_allocator)
+		s.raised = make([dynamic]Event, w.platform.heap_allocator)
 	}
-	append(
-		&s.raised,
-		Job_Event {
-			entity,
-			a.slot,
-			{kind = .Marker, state = a.instance.state, event = marker.event},
-		},
-	)
+	fired := Job_Event {
+		entity,
+		a.slot,
+		{kind = .Marker, state = a.instance.state, event = marker.event},
+	}
+	append(&s.raised, make_event(s, r, fired))
 	return true
 }
 
@@ -648,12 +657,10 @@ flush_job_events :: proc(user: rawptr, buffers: []rawptr) {
 	s := (^State)(user)
 	clear_events(s, &s.tick_events)
 	s.tick = s.world.clock.tick
+	// The raised events move to the tick's list, which owns their strings from now on.
 	for e in s.raised {
-		if int(e.slot) < len(s.graphs) {
-			event := make_event(s, &s.graphs[e.slot], e)
-			append(&s.tick_events, event)
-			append(&s.frame_events, copy_event(s, event))
-		}
+		append(&s.tick_events, e)
+		append(&s.frame_events, copy_event(s, e))
 	}
 	clear(&s.raised)
 	for b in buffers {

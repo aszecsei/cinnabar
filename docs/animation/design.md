@@ -175,7 +175,7 @@ A driver also reads the clips that it drives, without a token:
 ## Events in the world
 
 - **Recording.** A job of `animate` records its Animators' events in a job buffer. After the tick's `Fixed` systems, the flush takes the buffers in system order, then job order. Within a job, entities are in chunk order. So events never depend on the jobs' timing, and are never ordered by entity handle.
-- **A driver's markers.** `raise_marker` queues a marker for the next flush, which puts the queued markers before the jobs' events, in the order of the calls. The flush runs only when a job asked for a buffer, so `animate` asks for one while markers wait.
+- **A driver's markers.** `raise_marker` makes the marker's `Event` at once, from the graph of its frame, and queues it for the next flush. The flush puts the queued events before the jobs' events, in the order of the calls. A frame without a tick, such as one of a real-clock cutscene while the game is paused, leaves them for the next tick, up to `MAX_RAISED` (256). The flush runs only when a job asked for a buffer, so `animate` asks for one while markers wait.
 - **Lists.** The flush turns each event into an `Event`: the entity, the kind, the event's name, the state that raised it, and its arguments. Each `Event` owns its strings, which outlive `asset.poll`.
   - `tick_events` are the last tick's, which the next tick's `Fixed` systems see.
   - `frame_events` are every tick's since `begin_frame`, which `Update` and `Late` systems see.

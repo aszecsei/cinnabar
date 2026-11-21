@@ -152,10 +152,12 @@ unwrapped_time :: proc(section: format.Cutscene_Section, local: i64) -> f64 {
 @(private)
 apply_root_motion :: proc(ctx: ^Track_Context, animation: ^anim.State, entity: ecs.Entity) {
 	sections := format.cutscene_track_sections(ctx.data, ctx.blob, ctx.track)
-	first := i64(max(i32))
+	// The motion is summed from the first applying section's start to its last one's end: after that it moves no more.
+	first, last := i64(max(i32)), i64(0)
 	for section in sections {
 		if section.root_motion == .Apply {
 			first = min(first, i64(section.start))
+			last = max(last, i64(section.end))
 		}
 	}
 	if first == i64(max(i32)) {
@@ -185,8 +187,9 @@ apply_root_motion :: proc(ctx: ^Track_Context, animation: ^anim.State, entity: e
 	}
 	moved: [3]f32
 	yaw: f32
-	for a := first; a < i64(ctx.time); {
-		b := min((a / ROOT_MOTION_STEP + 1) * ROOT_MOTION_STEP, i64(ctx.time))
+	until := min(i64(ctx.time), last)
+	for a := first; a < until; {
+		b := min((a / ROOT_MOTION_STEP + 1) * ROOT_MOTION_STEP, until)
 		middle := i32(a + (b - a) / 2)
 		weight: f32
 		step: [3]f32

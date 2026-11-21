@@ -218,7 +218,7 @@ track 2 animation "Fox acts"
 | `apply` | The clip plays in place. | The track moves it by the clip's root motion, from the section's start. |
 | `in_place` | The clip plays in place. | The clip does not move it. A transform track can move it, as the sample's walking fox does. |
 
-- **Apply** sums the root motion of every `apply` section, from the start of the first one to *t*. It sums steps of `ROOT_MOTION_STEP` (1/60 s) on a grid from the cutscene's 0. The sections' weights at the middle of a step weight that step's motion. So a seek gives the same place as playback, and an ease out slows the walk to a stop.
+- **Apply** sums the root motion of every `apply` section, from the start of the first one to *t*, or to the end of the last one. It sums steps of `ROOT_MOTION_STEP` (1/60 s) on a grid from the cutscene's 0. The sections' weights at the middle of a step weight that step's motion. So a seek gives the same place as playback, and an ease out slows the walk to a stop.
 - **The pose that it writes** is the binding's own pose, moved by the sum and turned about y by the sum of the turns. The own rotation turns the sum, and the own scale scales it, as gameplay applies `Root_Motion`. The track writes the position and the rotation of a root's `Transform` or a child's `Local_Transform` in every evaluation. It teleports as a transform track does ([Transform tracks](#transform-tracks)).
 - **After the section**, the entity stays where the walk ended, because the sum keeps the section's whole motion. `restore` puts the entity back. `keep` leaves it there.
 - **The root joint** is the graph's root motion joint. Without a graph, or without a root motion joint, `apply` moves nothing.

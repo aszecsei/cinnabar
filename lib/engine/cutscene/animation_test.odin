@@ -135,37 +135,38 @@ clip_setup :: proc(t: ^testing.T) -> ^Clip_Fixture {
 	live(t, f, WALK_GUID, root_clip(WALK_GUID, 2, {0, 0, 2}))
 	live(t, f, WAVE_GUID, root_clip(WAVE_GUID, 3, {0, 1, 0}))
 	live(t, f, IDLE_GUID, root_clip(IDLE_GUID, 4, {}))
-	live(
-		t,
-		f,
-		GRAPH_GUID,
-		format.animation_graph_write(
-			{
-				guid = GRAPH_GUID,
-				key = 5,
-				root_motion = "Root",
-				clips = {
-					{name = "idle", clip = IDLE_GUID},
-					{name = "walk", clip = WALK_GUID, markers = {{time = 0.5, event = 0}}},
-				},
-				events = {{name = "footstep"}},
-				states = {
-					{
-						name = "idle",
-						motion = .Clip,
-						parameter = format.ANIMATION_GRAPH_NONE,
-						points = {{clip = 0}},
-						speed = 1,
-						loop = true,
-						enter_event = format.ANIMATION_GRAPH_NONE,
-						exit_event = format.ANIMATION_GRAPH_NONE,
-					},
+	live(t, f, GRAPH_GUID, graph_blob(5, "footstep"))
+	return f
+}
+
+// graph_blob is the graph: the idle, which it plays, and the walk, whose marker at 0.5 s raises an event of a name.
+@(private = "file")
+graph_blob :: proc(key: u64, event: string) -> []byte {
+	return format.animation_graph_write(
+		{
+			guid = GRAPH_GUID,
+			key = key,
+			root_motion = "Root",
+			clips = {
+				{name = "idle", clip = IDLE_GUID},
+				{name = "walk", clip = WALK_GUID, markers = {{time = 0.5, event = 0}}},
+			},
+			events = {{name = event}},
+			states = {
+				{
+					name = "idle",
+					motion = .Clip,
+					parameter = format.ANIMATION_GRAPH_NONE,
+					points = {{clip = 0}},
+					speed = 1,
+					loop = true,
+					enter_event = format.ANIMATION_GRAPH_NONE,
+					exit_event = format.ANIMATION_GRAPH_NONE,
 				},
 			},
-			context.temp_allocator,
-		),
+		},
+		context.temp_allocator,
 	)
-	return f
 }
 
 // root_clip is a clip of a second that moves Root from the origin to an end, linearly.
@@ -249,6 +250,7 @@ clips_blob :: proc(
 	finish := format.Cutscene_Finish.Restore,
 	key: u64 = 1,
 	tracks := true,
+	clock := format.Cutscene_Clock.Game,
 ) -> []byte {
 	names := [?]string{"A", "B", "C", "D"}
 	bindings := make([]format.Cutscene_Binding_Contents, len(f.entities), context.temp_allocator)
@@ -296,6 +298,7 @@ clips_blob :: proc(
 			key = key,
 			length = length,
 			rate = 30,
+			clock = clock,
 			range_end = length,
 			bindings = bindings,
 			tracks = track if tracks else nil,
@@ -773,4 +776,35 @@ a_track_takes_its_animator_back_and_a_reload_gives_it_up :: proc(t: ^testing.T) 
 	scrub_to(f, scrub, SECOND / 2)
 	testing.expect(t, ecs.get(&f.world, actor, anim.Animator).driven == nil)
 	testing.expect_value(t, len(scrub.drives), 0)
+}
+
+// A cutscene on the real clock raises a marker in a frame that runs no tick. The graph changes before the next tick,
+// so its event 0 has another name: the marker still reaches the tick's events as the graph of its own frame named it.
+@(test)
+a_marker_raised_in_a_frame_without_a_tick_keeps_its_name :: proc(t: ^testing.T) {
+	f := clip_setup(t)
+	defer clip_teardown(f)
+	actor := character(f)
+	clips := []Clip {
+		{
+			id = 1,
+			start = 0,
+			end = SECOND * 2,
+			clip = WALK_GUID,
+			speed = 1,
+			weight = 1,
+			flags = {.Loop},
+		},
+	}
+	play_blob(t, f, clips_blob(f, clips, SECOND * 2, clock = .Real))
+	free_all(f.platform.frame_allocator)
+	anim.prepare(&f.animation, &f.world)
+	advance_real(&f.cutscenes, &f.world, 600 * time.Millisecond)
+	anim.end_frame(&f.animation)
+	testing.expect(t, asset.set_live(&f.assets, GRAPH_GUID, graph_blob(6, "bark")))
+	tick(f)
+	testing.expect_value(t, footsteps(f, actor), 1)
+	for event in anim.frame_events(&f.animation) {
+		testing.expectf(t, event.name != "bark", "the marker took the new graph's name")
+	}
 }
