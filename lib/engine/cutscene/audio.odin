@@ -445,11 +445,13 @@ player_of :: proc(s: ^State, e: ^Evaluation) -> (^Player, bool) {
 	return nil, false
 }
 
-// set_audition is the one writer of how an evaluation's audio tracks sound. A change ends the voices that the tracks
-// hold, so no voice of one audition plays on under another; the next evaluation starts them as the new one says.
+// set_audition is the one writer of how an evaluation's audio tracks sound, and whether its event tracks send events. A
+// change ends the voices that the tracks hold, so no voice of one audition plays on under another; the next evaluation
+// starts them as the new one says. It forgets the open ranges of the event tracks without sending their ends.
 set_audition :: proc(e: ^Evaluation, w: ^ecs.World, audition: Audition) {
 	if e.audition != audition {
 		end_sounds(e, w)
+		forget_ranges(e, w)
 		e.audition = audition
 	}
 }

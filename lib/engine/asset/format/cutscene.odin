@@ -29,6 +29,9 @@ MAX_CUTSCENE_KEYS :: 1 << 20
 MAX_CUTSCENE_SKIP_RANGES :: 256
 MAX_CUTSCENE_GUIDS :: 65536
 MAX_CUTSCENE_CONSTRAINTS :: 8192
+MAX_CUTSCENE_EVENTS :: 8192
+// The most values that an event carries.
+MAX_CUTSCENE_EVENT_VALUES :: 4
 
 // CUTSCENE_TANGENT_WEIGHT is the weight of a tangent of a key that is not weighted: a third of the segment, which makes
 // a Bezier segment a cubic Hermite curve, whose time is linear in its parameter.
@@ -156,6 +159,31 @@ Cutscene_Channel_Flag :: enum u32 {
 	Guids,
 }
 Cutscene_Channel_Flags :: bit_set[Cutscene_Channel_Flag;u32]
+
+Cutscene_Event_Flag :: enum u32 {
+	// The event spans [start, end): it sends on_<name>_begin at its start and on_<name>_end at its end. Without it, the
+	// event is a trigger at start, which sends on_<name>.
+	Range,
+	// A forward seek that crosses the event sends it, so a script can catch up on state.
+	Fire_On_Seek,
+	// A skip that crosses the event sends it.
+	Fire_When_Skipped,
+}
+Cutscene_Event_Flags :: bit_set[Cutscene_Event_Flag;u32]
+
+// Cutscene_Value_Kind is the kind of an event's value, one of the kinds that script events carry.
+Cutscene_Value_Kind :: enum u32 {
+	Number,
+	Bool,
+	String,
+	Vector,
+	// A binding's entity.
+	Entity,
+	// A World_Position.
+	Position,
+	// An asset's GUID.
+	Asset,
+}
 
 // Cutscene_Suspend is a system that stops acting on a binding's entities while a cutscene holds it (see
 // docs/cinematics/possession.md).
@@ -331,6 +359,8 @@ Cutscene_Binding :: struct {
 // Absolute, its origin in World_Position units (2^-24 m), and for Relative_To, the index of the binding that it is
 // relative to. The other kinds, and the other spaces, have Relative, a zero origin and CUTSCENE_NONE there.
 // An audio track has its own gain, from 0, and what its sounds do under a time scale. The other kinds have 0 and Follow.
+// An event track has events and no sections, and the other kinds have no events. An event track's events follow those
+// of the event tracks before it.
 Cutscene_Track :: struct {
 	id:            u32,
 	kind:          Cutscene_Track_Kind,
@@ -345,12 +375,14 @@ Cutscene_Track :: struct {
 	field_hash:    u64,
 	field:         Slice,
 	relative:      u32,
-	reserved:      u32,
+	first_event:   u32,
 	gain:          f32,
 	time_scale:    Cutscene_Audio_Scale,
+	event_count:   u32,
+	reserved:      u32,
 	origin:        [3]i64,
 }
-#assert(size_of(Cutscene_Track) == 104)
+#assert(size_of(Cutscene_Track) == 112)
 
 // Cutscene_Section is a span of a track, in ticks on the cutscene's time, with its eases, its weight, its pre-roll and
 // post-roll (the ticks before its start and after its end that it holds its first and last values for), the asset that
@@ -415,6 +447,34 @@ Cutscene_Key :: struct {
 }
 #assert(size_of(Cutscene_Key) == 28)
 
+// Cutscene_Event is an event of an event track (see docs/cinematics/tracks.md#event-tracks): a trigger at start, or a
+// range [start, end), in ticks on the cutscene's time, with its name and its values, which follow those of the events
+// before it. A trigger's end is its start.
+Cutscene_Event :: struct {
+	id:          u32,
+	start:       i32,
+	end:         i32,
+	flags:       Cutscene_Event_Flags,
+	name:        Slice,
+	first_value: u32,
+	value_count: u32,
+}
+#assert(size_of(Cutscene_Event) == 32)
+
+// Cutscene_Event_Value is a value that an event carries. Its kind says which field holds it: index for a Bool (0 or 1),
+// an Entity (a binding's index) and an Asset (an index into the blob's GUIDs), text for a String, number, vector, and
+// position in World_Position units for a Position. The other fields are zero.
+Cutscene_Event_Value :: struct {
+	kind:     Cutscene_Value_Kind,
+	index:    u32,
+	text:     Slice,
+	number:   f64,
+	vector:   [3]f32,
+	reserved: u32,
+	position: [3]i64,
+}
+#assert(size_of(Cutscene_Event_Value) == 64)
+
 // Cutscene_Blob is the start of a cutscene blob (see docs/content/blobs-and-loading.md#blob-format). The tables are
 // flat: each track's sections, each section's channels and each channel's keys follow those before them.
 // input_context is the name of the input context that the cutscene pushes while it plays, empty for none, and
@@ -440,10 +500,12 @@ Cutscene_Blob :: struct {
 	skip_ranges:   Slice,
 	skip_fade:     i32,
 	reserved:      u32,
-	// The assets that the keys of channels with the Guids flag name, by index.
+	// The assets that the keys of channels with the Guids flag and the events' Asset values name, by index.
 	guids:         Slice,
 	// The camera constraints, those of sections and of bindings.
 	constraints:   Slice,
+	events:        Slice,
+	event_values:  Slice,
 }
 #assert(size_of(Cutscene_Blob) % align_of(Cutscene_Binding) == 0)
 
@@ -456,6 +518,8 @@ cutscene_layout :: proc() -> u64 {
 	h ~= layout.hash(Cutscene_Key) * 28629151
 	h ~= layout.hash(Cutscene_Skip_Range) * 887503681
 	h ~= layout.hash(Cutscene_Constraint) * 27512614111
+	h ~= layout.hash(Cutscene_Event) * 852891037441
+	h ~= layout.hash(Cutscene_Event_Value) * 26439622160671
 	return h
 }
 
@@ -496,6 +560,13 @@ cutscene_view :: proc(data: []byte) -> (blob: ^Cutscene_Blob, ok: bool) {
 			   blob.skip_ranges,
 			   size_of(Cutscene_Skip_Range),
 			   align_of(Cutscene_Skip_Range),
+		   ) ||
+	   !inside(data, blob.events, size_of(Cutscene_Event), align_of(Cutscene_Event)) ||
+	   !inside(
+			   data,
+			   blob.event_values,
+			   size_of(Cutscene_Event_Value),
+			   align_of(Cutscene_Event_Value),
 		   ) {
 		return nil, false
 	}
@@ -510,7 +581,9 @@ cutscene_view :: proc(data: []byte) -> (blob: ^Cutscene_Blob, ok: bool) {
 	   len(channels) > MAX_CUTSCENE_CHANNELS ||
 	   len(keys) > MAX_CUTSCENE_KEYS ||
 	   len(cutscene_constraints(data, blob)) > MAX_CUTSCENE_CONSTRAINTS ||
-	   len(cutscene_guids(data, blob)) > MAX_CUTSCENE_GUIDS {
+	   len(cutscene_guids(data, blob)) > MAX_CUTSCENE_GUIDS ||
+	   len(cutscene_events(data, blob)) > MAX_CUTSCENE_EVENTS ||
+	   len(cutscene_event_values(data, blob)) > MAX_CUTSCENE_EVENTS * MAX_CUTSCENE_EVENT_VALUES {
 		return nil, false
 	}
 	if blob.length <= 0 ||
@@ -579,6 +652,8 @@ cutscene_view :: proc(data: []byte) -> (blob: ^Cutscene_Blob, ok: bool) {
 		   tr.space > .Relative_To ||
 		   tr.reserved != 0 ||
 		   tr.time_scale > .Free ||
+		   (tr.kind == .Event && (tr.section_count != 0 || tr.finish != .Restore)) ||
+		   (tr.kind != .Event && (tr.first_event != 0 || tr.event_count != 0)) ||
 		   (tr.kind == .Audio && !(tr.gain >= 0 && tr.gain <= max(f32))) ||
 		   (tr.kind != .Audio && (tr.gain != 0 || tr.time_scale != .Follow)) ||
 		   (tr.kind != .Transform && tr.space != .Relative) ||
@@ -752,7 +827,106 @@ cutscene_view :: proc(data: []byte) -> (blob: ^Cutscene_Blob, ok: bool) {
 	if next_key != u32(len(keys)) {
 		return nil, false
 	}
+	if !cutscene_events_valid(data, blob, tracks, len(bindings), guid_count) {
+		return nil, false
+	}
 	return blob, true
+}
+
+// cutscene_events_valid checks the event tracks' events and their values: each track's events in start order, within
+// the cutscene, a range's end after its start and a trigger's at it, a name, at most MAX_CUTSCENE_EVENT_VALUES values,
+// and each value as its kind says.
+@(private = "file")
+cutscene_events_valid :: proc(
+	data: []byte,
+	blob: ^Cutscene_Blob,
+	tracks: []Cutscene_Track,
+	binding_count, guid_count: int,
+) -> bool {
+	events := cutscene_events(data, blob)
+	values := cutscene_event_values(data, blob)
+	next_event, next_value := u32(0), u32(0)
+	for tr in tracks {
+		if tr.kind != .Event {
+			continue
+		}
+		if tr.first_event != next_event ||
+		   u64(tr.first_event) + u64(tr.event_count) > u64(len(events)) {
+			return false
+		}
+		next_event += tr.event_count
+		track_events := events[tr.first_event:][:tr.event_count]
+		for ev, j in track_events {
+			if ev.flags - {.Range, .Fire_On_Seek, .Fire_When_Skipped} != {} ||
+			   ev.start < 0 ||
+			   ev.end > blob.length ||
+			   (.Range in ev.flags) != (ev.end > ev.start) ||
+			   ev.end < ev.start ||
+			   (j > 0 && ev.start < track_events[j - 1].start) ||
+			   ev.name.size == 0 ||
+			   u64(ev.name.offset) + u64(ev.name.size) > u64(len(data)) ||
+			   ev.value_count > MAX_CUTSCENE_EVENT_VALUES ||
+			   ev.first_value != next_value ||
+			   u64(ev.first_value) + u64(ev.value_count) > u64(len(values)) {
+				return false
+			}
+			next_value += ev.value_count
+			for v in values[ev.first_value:][:ev.value_count] {
+				if !cutscene_event_value_valid(data, v, binding_count, guid_count) {
+					return false
+				}
+			}
+		}
+	}
+	return next_event == u32(len(events)) && next_value == u32(len(values))
+}
+
+// cutscene_event_value_valid checks a value: a known kind, the field that its kind holds, and zeros in the others.
+@(private = "file")
+cutscene_event_value_valid :: proc "contextless" (
+	data: []byte,
+	v: Cutscene_Event_Value,
+	binding_count, guid_count: int,
+) -> bool {
+	finite :: proc "contextless" (x: f64) -> bool {
+		return !math.is_nan(x) && !math.is_inf(x)
+	}
+	if v.kind > .Asset || v.reserved != 0 {
+		return false
+	}
+	holds_index := v.kind == .Bool || v.kind == .Entity || v.kind == .Asset
+	if (!holds_index && v.index != 0) ||
+	   (v.kind != .String && v.text != {}) ||
+	   (v.kind != .Number && v.number != 0) ||
+	   (v.kind != .Vector && v.vector != {}) ||
+	   (v.kind != .Position && v.position != {}) {
+		return false
+	}
+	switch v.kind {
+	case .Number:
+		return finite(v.number)
+	case .Bool:
+		return v.index <= 1
+	case .String:
+		return u64(v.text.offset) + u64(v.text.size) <= u64(len(data))
+	case .Vector:
+		for axis in v.vector {
+			if !finite(f64(axis)) {
+				return false
+			}
+		}
+	case .Entity:
+		return v.index < u32(binding_count)
+	case .Position:
+		for axis in v.position {
+			if abs(axis) > WORLD_POSITION_LIMIT {
+				return false
+			}
+		}
+	case .Asset:
+		return v.index < u32(guid_count)
+	}
+	return true
 }
 
 // cutscene_key_valid checks a key on its own: a time from 0, a known interpolation and flags, finite numbers, weights
@@ -887,6 +1061,39 @@ cutscene_constraints :: proc "contextless" (
 	return ([^]Cutscene_Constraint)(raw_data(bytes))[:len(bytes) / size_of(Cutscene_Constraint)]
 }
 
+// cutscene_events is the event tracks' events, each track's after those of the event tracks before it.
+cutscene_events :: proc "contextless" (data: []byte, blob: ^Cutscene_Blob) -> []Cutscene_Event {
+	bytes := blob_bytes(data, blob.events)
+	return ([^]Cutscene_Event)(raw_data(bytes))[:len(bytes) / size_of(Cutscene_Event)]
+}
+
+// cutscene_event_values is the events' values, each event's after those of the events before it.
+cutscene_event_values :: proc "contextless" (
+	data: []byte,
+	blob: ^Cutscene_Blob,
+) -> []Cutscene_Event_Value {
+	bytes := blob_bytes(data, blob.event_values)
+	return ([^]Cutscene_Event_Value)(raw_data(bytes))[:len(bytes) / size_of(Cutscene_Event_Value)]
+}
+
+// cutscene_track_events is an event track's events, in a blob that cutscene_view checked.
+cutscene_track_events :: proc "contextless" (
+	data: []byte,
+	blob: ^Cutscene_Blob,
+	track: Cutscene_Track,
+) -> []Cutscene_Event {
+	return cutscene_events(data, blob)[track.first_event:][:track.event_count]
+}
+
+// cutscene_values_of is an event's values, in a blob that cutscene_view checked.
+cutscene_values_of :: proc "contextless" (
+	data: []byte,
+	blob: ^Cutscene_Blob,
+	event: Cutscene_Event,
+) -> []Cutscene_Event_Value {
+	return cutscene_event_values(data, blob)[event.first_value:][:event.value_count]
+}
+
 // cutscene_cut_track is a cutscene's camera cut track, of which it has at most one, in a blob that cutscene_view
 // checked.
 cutscene_cut_track :: proc "contextless" (
@@ -1005,6 +1212,27 @@ Cutscene_Constraint_Contents :: struct {
 	damping: i32,
 }
 
+// Cutscene_Event_Value_Contents is an event's value as cutscene_write takes it: kind says which field holds it, as in
+// Cutscene_Event_Value.
+Cutscene_Event_Value_Contents :: struct {
+	kind:     Cutscene_Value_Kind,
+	index:    u32,
+	text:     string,
+	number:   f64,
+	vector:   [3]f32,
+	position: [3]i64,
+}
+
+// Cutscene_Event_Contents is an event as cutscene_write takes it. A trigger's end is its start.
+Cutscene_Event_Contents :: struct {
+	id:     u32,
+	start:  i32,
+	end:    i32,
+	flags:  Cutscene_Event_Flags,
+	name:   string,
+	values: []Cutscene_Event_Value_Contents,
+}
+
 Cutscene_Channel_Contents :: struct {
 	name:  string,
 	flags: Cutscene_Channel_Flags,
@@ -1060,6 +1288,8 @@ Cutscene_Track_Contents :: struct {
 	gain:       f32,
 	time_scale: Cutscene_Audio_Scale,
 	sections:   []Cutscene_Section_Contents,
+	// An event track's events, in start order.
+	events:     []Cutscene_Event_Contents,
 }
 
 Cutscene_Contents :: struct {
@@ -1084,10 +1314,15 @@ Cutscene_Contents :: struct {
 // cutscene_write builds a cutscene blob, flattening its tracks' sections, channels and keys.
 cutscene_write :: proc(contents: Cutscene_Contents, allocator := context.allocator) -> []byte {
 	section_count, channel_count, key_count, constraint_count := 0, 0, 0, 0
+	event_count, value_count := 0, 0
 	for b in contents.bindings {
 		constraint_count += len(b.constraints)
 	}
 	for tr in contents.tracks {
+		event_count += len(tr.events)
+		for ev in tr.events {
+			value_count += len(ev.values)
+		}
 		section_count += len(tr.sections)
 		for s in tr.sections {
 			channel_count += len(s.channels)
@@ -1123,6 +1358,16 @@ cutscene_write :: proc(contents: Cutscene_Contents, allocator := context.allocat
 		&buffer,
 		constraint_count * size_of(Cutscene_Constraint),
 		align_of(Cutscene_Constraint),
+	)
+	events := reserve_bytes(
+		&buffer,
+		event_count * size_of(Cutscene_Event),
+		align_of(Cutscene_Event),
+	)
+	event_values := reserve_bytes(
+		&buffer,
+		value_count * size_of(Cutscene_Event_Value),
+		align_of(Cutscene_Event_Value),
 	)
 	constraint_index := 0
 	add_constraint :: proc(
@@ -1173,6 +1418,7 @@ cutscene_write :: proc(contents: Cutscene_Contents, allocator := context.allocat
 		}
 	}
 	section_index, channel_index, key_index := 0, 0, 0
+	event_index, value_index := 0, 0
 	for tr, i in contents.tracks {
 		record := Cutscene_Track {
 			id            = tr.id,
@@ -1191,12 +1437,49 @@ cutscene_write :: proc(contents: Cutscene_Contents, allocator := context.allocat
 			origin        = tr.origin,
 			gain          = tr.gain,
 			time_scale    = tr.time_scale,
+			first_event   = u32(event_index) if tr.kind == .Event else 0,
+			event_count   = u32(len(tr.events)),
 		}
 		mem.copy(
 			&buffer[int(tracks.offset) + i * size_of(Cutscene_Track)],
 			&record,
 			size_of(record),
 		)
+		for ev in tr.events {
+			event := Cutscene_Event {
+				id          = ev.id,
+				start       = ev.start,
+				end         = ev.end,
+				flags       = ev.flags,
+				name        = append_bytes(&buffer, transmute([]byte)ev.name),
+				first_value = u32(value_index),
+				value_count = u32(len(ev.values)),
+			}
+			mem.copy(
+				&buffer[int(events.offset) + event_index * size_of(Cutscene_Event)],
+				&event,
+				size_of(event),
+			)
+			event_index += 1
+			for v in ev.values {
+				value := Cutscene_Event_Value {
+					kind     = v.kind,
+					index    = v.index,
+					number   = v.number,
+					vector   = v.vector,
+					position = v.position,
+				}
+				if v.kind == .String {
+					value.text = append_bytes(&buffer, transmute([]byte)v.text)
+				}
+				mem.copy(
+					&buffer[int(event_values.offset) + value_index * size_of(Cutscene_Event_Value)],
+					&value,
+					size_of(value),
+				)
+				value_index += 1
+			}
+		}
 		for s in tr.sections {
 			section := Cutscene_Section {
 				id            = s.id,
@@ -1305,6 +1588,8 @@ cutscene_write :: proc(contents: Cutscene_Contents, allocator := context.allocat
 		skip_fade = contents.skip_fade,
 		guids = guids,
 		constraints = constraints,
+		events = events,
+		event_values = event_values,
 	}
 	mem.copy(raw_data(buffer), &blob, size_of(blob))
 	return buffer[:]

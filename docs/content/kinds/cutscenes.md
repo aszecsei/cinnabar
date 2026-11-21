@@ -54,11 +54,13 @@ Every time in the text and in the blob is a whole number of **ticks**, `i32`, at
   - `track <id> <kind> "<name>"`
   - `section <id> <start> <end>`, which belongs to the track before it
   - `channel <name>`, which belongs to the section before it
+  - `trigger <id> <time> <name>` and `range <id> <start> <end> <name>`, which belong to the event track before them
 - **Keys.** A `key <time> <value> <interp> [<in> <out>]` line belongs to the channel before it.
 - **Settings.** A `<name> = <value>` line is a setting of the innermost block. Before the first binding or track, it is a setting of the cutscene. A block's settings come before its child blocks, so a track's setting after its first section is a problem. A setting comes once in each block.
 - **IDs** are whole numbers from 1 to 2147483647. The editor and the runtime address bindings, tracks and sections by their IDs, not by their order, so a reorder or an insert does not break a reference.
   - Two bindings cannot have the same ID, and two tracks cannot have the same ID.
   - Each section's ID is unique in the whole cutscene.
+  - Each trigger's and range's ID is unique among the cutscene's triggers and ranges.
 - **Names** are quoted. Each binding has a name that no other binding has, so that a binding can be named in place of its ID. A track's name can be empty.
 
 ### The cutscene
@@ -110,7 +112,7 @@ A parent must come before its child, so parents cannot form a cycle. [Cinematics
 
 The cooker cannot see a property track's field, because native components exist only in the game's code. The game checks that the field can animate when it loads the cutscene ([Cinematics: Property tracks](../../cinematics/tracks.md#property-tracks)).
 
-The kind of a track decides whether it takes a binding, and what each of its sections names with `asset`. Besides their channels and assets, only property, transform and audio tracks, and animation, camera cut and audio sections, have data of their own yet. A binding has at most one animation track, and a cutscene has at most one camera cut track, muted or not:
+The kind of a track decides whether it takes a binding, and what each of its sections names with `asset`. Besides their channels and assets, only property, transform, audio and event tracks, and animation, camera cut and audio sections, have data of their own yet. A binding has at most one animation track, and a cutscene has at most one camera cut track, muted or not:
 
 | Kind | Binding | Section's asset |
 |---|---|---|
@@ -119,7 +121,7 @@ The kind of a track decides whether it takes a binding, and what each of its sec
 | `animation` | Needed | An animation clip, a sub-asset of a glTF model |
 | `camera_cut` | None | None; each section names a camera binding |
 | `audio` | Optional | A sound |
-| `event` | Optional | None |
+| `event` | Optional | None; it has triggers and ranges, not sections |
 | `sub_sequence` | None | A cutscene |
 | `presentation` | None | None |
 
@@ -162,6 +164,19 @@ A camera cut section has settings of its own ([Cinematics: Camera cut tracks](..
 
 A camera cut section cuts: it has no `ease_in`, `ease_out`, `weight`, `pre_roll`, `post_roll`, `blend` or channels, and it starts at or after the end of the section before it. Each of the camera cut settings on a section of another kind is a problem.
 
+### Triggers and ranges
+
+An event track has no sections and no `when_finished`. It has `trigger <id> <time> <name>` and `range <id> <start> <end> <name>` blocks ([Cinematics: Event tracks](../../cinematics/tracks.md#event-tracks)):
+- **The name** is letters, digits and `_`. A trigger sends `on_<name>`, and a range sends `on_<name>_begin` and `on_<name>_end`.
+- **The times** are inside the length, and a range starts before it ends. The cooker sorts a track's triggers and ranges by their start.
+- **The binding.** An event track's binding must not suspend `behaviours`, so its behaviours get its events.
+
+| Setting | Value | Default |
+|---|---|---|
+| `value` | `<kind> <value>`: `number <n>`, `bool true` or `bool false`, `string "<text>"`, `vector [x, y, z]`, `entity <binding id>`, `position [x, y, z]` in meters, or `asset $<guid>`. A trigger or a range has at most 4, in order. This setting can come more than once. | None |
+| `fire_on_seek` | `true`: a forward seek that crosses it sends it | `false` |
+| `fire_when_skipped` | `true`: a skip that crosses it sends it | `false` |
+
 ### Channels and keys
 
 `channel <name>` starts a curve of the section. Its name is letters, digits and `_`, and no other channel of the section has it. A channel has at least one key. Its track's kind gives the names their meaning:
@@ -169,6 +184,7 @@ A camera cut section cuts: it has no `ease_in`, `ease_out`, `weight`, `pre_roll`
 - **Transform tracks:** `position_x`, `position_y` and `position_z` in meters, `rotation_x`, `rotation_y` and `rotation_z` in degrees, and `scale_x`, `scale_y` and `scale_z`.
 - **Camera cut tracks:** none.
 - **Audio tracks:** `gain`, from 0, and `pitch`, from 0.1 to 4.
+- **Event tracks:** no channels: they have triggers and ranges.
 - **The other kinds** take any name for now.
 
 `key <time> <value> <interp> [<slope> | <in> <out>] [weights <in> <out>] [teleport]`:
@@ -189,7 +205,7 @@ key 60000 $0d9b84a2116a5529c2cd33741edd33a4 constant
 
 ## The blob
 
-A `Cutscene_Blob` (`lib/engine/asset/format/cutscene.odin`) holds the length, the rate, the clock, the range, the name of its input context, the GUIDs of the documents that it hides (`cutscene_hide_ui`), and its skip policy, skip ranges (`cutscene_skip_ranges`, at most `MAX_CUTSCENE_SKIP_RANGES`, 256) and skip fade. It then holds six flat tables:
+A `Cutscene_Blob` (`lib/engine/asset/format/cutscene.odin`) holds the length, the rate, the clock, the range, the name of its input context, the GUIDs of the documents that it hides (`cutscene_hide_ui`), and its skip policy, skip ranges (`cutscene_skip_ranges`, at most `MAX_CUTSCENE_SKIP_RANGES`, 256) and skip fade. It then holds eight flat tables:
 
 - **`Cutscene_Binding`:**
   - its ID, kind, name and the name's hash (`animation_graph_hash`), and its policy;
@@ -197,15 +213,17 @@ A `Cutscene_Blob` (`lib/engine/asset/format/cutscene.odin`) holds the length, th
   - the scene's GUID and the entity's scene ID (a path folds to one with `scene_path_id_of`), or the prefab's GUID;
   - its parent's index or `CUTSCENE_NONE`;
   - its position as `[3]i64` `World_Position` units, its rotation and its scale.
-- **`Cutscene_Track`:** its ID, kind, name, binding's index or `CUTSCENE_NONE`, flags (`.Muted`), when-finished, its first section and count, for a property track its component's stable ID and its field's name and `scene_field_hash`, and for a transform track its space (`Cutscene_Space`), its origin as `[3]i64` `World_Position` units, and the index of the binding that it is relative to, or `CUTSCENE_NONE`. An audio track has its gain and its `time_scale` (`Cutscene_Audio_Scale`: `Follow` or `Free`). The other kinds have 0 and `Follow` there.
+- **`Cutscene_Track`:** its ID, kind, name, binding's index or `CUTSCENE_NONE`, flags (`.Muted`), when-finished, its first section and count, for a property track its component's stable ID and its field's name and `scene_field_hash`, and for a transform track its space (`Cutscene_Space`), its origin as `[3]i64` `World_Position` units, and the index of the binding that it is relative to, or `CUTSCENE_NONE`. An audio track has its gain and its `time_scale` (`Cutscene_Audio_Scale`: `Follow` or `Free`). The other kinds have 0 and `Follow` there. An event track has its first event and count, and no sections. The other kinds have no events.
 - **`Cutscene_Section`:** its ID, start, end, eases, weight, pre-roll and post-roll, asset GUID (zero for a kind that names none), its first channel and count, and its flags (`.Additive`, `.Loop`, `.Blend_On_Skip`, `.Plays_Through_Skip`). A section of a kind that plays its asset's time (`cutscene_track_plays`: animation and audio) also has its offset into the asset in ticks, its speed, which is 1 for an audio section, and its root motion (`Cutscene_Root_Motion`: `Bake`, `Apply` or `In_Place`). The other kinds have zeros there. A camera cut section has its camera's binding index, and its blends in and out in ticks with their curves (`Cutscene_Blend_Curve`). The other kinds have `CUTSCENE_NONE` and zeros there. An audio section has its bus and its `min_distance` and `max_distance`. The other kinds have zeros there.
 - **`Cutscene_Constraint`:** its kind (`Look_At`, `Follow` or `Focus`), the index of the camera cut section or of the binding that holds it (the other is `CUTSCENE_NONE`), its target binding's index, its offset and its damping in ticks. `cutscene_constraints` gives them, at most `MAX_CUTSCENE_CONSTRAINTS` (8192): the bindings' first, then the sections'.
 - **`Cutscene_Channel`:** its name and the name's hash, its first key and count, and its flags (`.Guids`, when its keys' values are indexes into the GUIDs).
 - **`Cutscene_Key`:** its time from the section's start, its value, its interpolation, its flags (`.Broken`, `.Weighted`, `.Teleport`), and its in and out slopes and weights.
+- **`Cutscene_Event`:** a trigger or a range of an event track: its ID, its start and end on the cutscene's time (a trigger's end is its start), its flags (`.Range`, `.Fire_On_Seek`, `.Fire_When_Skipped`), its name, and its first value and count. At most `MAX_CUTSCENE_EVENTS` (8192).
+- **`Cutscene_Event_Value`:** its kind (`Cutscene_Value_Kind`: `Number`, `Bool`, `String`, `Vector`, `Entity`, `Position` or `Asset`), and the field that the kind holds: `index` for a bool (0 or 1), a binding's index or an index into the GUIDs, `text`, `number`, `vector`, or `position` in `World_Position` units. The other fields are zero.
 
-The blob also holds `cutscene_guids`: the assets that keys name, each once, at most `MAX_CUTSCENE_GUIDS` (65536).
+The blob also holds `cutscene_guids`: the assets that keys and asset values name, each once, at most `MAX_CUTSCENE_GUIDS` (65536).
 
-Each track's sections follow those of the track before it. The same is true of each section's channels and each channel's keys. `cutscene_track_sections`, `cutscene_section_channels` and `cutscene_channel_keys` give one record's part of the next table.
+Each track's sections follow those of the track before it. The same is true of each section's channels, each channel's keys, each event track's events and each event's values. `cutscene_track_sections`, `cutscene_section_channels`, `cutscene_channel_keys`, `cutscene_track_events` and `cutscene_values_of` give one record's part of the next table.
 
 `cutscene_view` checks the kind, the layout and that every slice is inside the blob. It also checks every record, so a reader can index the tables without checks of its own:
 - the length, rate, clock and range, and that the hidden documents are whole GUIDs;
@@ -221,9 +239,10 @@ Each track's sections follow those of the track before it. The same is true of e
 - that each constraint is on one cut section or one binding, of a known kind, with a target that is a binding and not its camera, a finite offset and a damping of 0 or more, and that a focus has neither;
 - that only a transform track has a space other than `Relative`, that only an absolute track has an origin, inside the bounds of a `World_Position`, and that only a track relative to another binding names one, which is not its own;
 - that every channel has keys;
+- that only an event track has events, that it has no sections and does not keep, that each event is inside the length, in start order on its track, with a name, a range's end after its start and a trigger's at it, known flags and at most 4 values, and that each value has a known kind, holds only its kind's field, and names a binding or a GUID that the blob has;
 - that each key is inside its section, comes after the key before it, has a known interpolation and flags and has finite numbers, that a key that is not a Bezier key has no tangents, that only a weighted key has weights, from 0 to 1, that only a transform track's keys teleport, and that a key that names an asset is constant and names one of the GUIDs.
 
-`blob_references` gives the prefabs of the spawned bindings, the sections' clips, sounds and sub-sequences, and the assets that keys name, so a bundle carries them. A possessed binding's scene is not a reference: the cutscene plays in a level that has the scene loaded, and its bundle does not pull in the level. A hidden document is not a reference either: the HUD that a cutscene hides is the level's or the game's.
+`blob_references` gives the prefabs of the spawned bindings, the sections' clips, sounds and sub-sequences, and the assets that keys and asset values name, so a bundle carries them. A possessed binding's scene is not a reference: the cutscene plays in a level that has the scene loaded, and its bundle does not pull in the level. A hidden document is not a reference either: the HUD that a cutscene hides is the level's or the game's.
 
 - **Problems** have their line. They include:
   - a first line that is not `cutscene 1`, or a cutscene without a `length`;
@@ -245,6 +264,8 @@ Each track's sections follow those of the track before it. The same is true of e
   - an `offset` that is not a whole number of ticks, a `speed` that is not a number above 0, a `loop` that is not `true` or `false`, a `root_motion` that is not `bake`, `apply` or `in_place`, an `offset` or a `loop` on a section that is not an animation or audio section, or a `speed` or a `root_motion` on one that is not an animation section;
   - a `gain` that is not a number from 0, or a `time_scale` that is not `follow` or `free`, or either one on a track that is not an audio track;
   - a `bus` that is not a whole number from 0 to 16, a distance that is not a number from 0, a `max_distance` not past the `min_distance`, a `plays_through_skip` that is not `true` or `false`, or any of them on a section that is not an audio section; a `pre_roll` or `post_roll` on an audio section; and an audio channel that is not `gain` or `pitch`, a gain key below 0, or a pitch key outside 0.1 to 4;
+  - a `trigger` or a `range` that is not `trigger <id> <time> <name>` or `range <id> <start> <end> <name>`, a range that does not start before it ends, either one outside the length or before any track, or on a track that is not an event track; a `section` or a `when_finished` on an event track; an event track's binding that suspends `behaviours`;
+  - a `value` that is not one of its kinds' forms, an `entity` value that names no binding, more than 4 values, or a `fire_on_seek` or `fire_when_skipped` that is not `true` or `false`;
   - a second animation track on one binding, at its `track` line, with the line of the first;
   - a second camera cut track, at its `track` line, with the line of the first;
   - a camera cut section without `camera`, or one that names no binding, with a setting that blends sections or a channel, that overlaps the section before it, that blends in or out where it meets another section, with a blend in longer than itself, or with `blend_on_skip` but no `blend_out`;
@@ -261,7 +282,7 @@ Each track's sections follow those of the track before it. The same is true of e
   - a GUID that names no asset, or an asset of the wrong kind: a possessed scene that is not a scene, a spawned prefab that is not a prefab, a clip that is not an animation, a sound that is not a sound, a sub-sequence that is not a cutscene, or a hidden document that is not a UI document. A key's asset can be of any kind: nothing checks it against the field's kind yet;
   - a cycle of sub-sequences, which each cutscene in it reports at the line that names the next, with the path, such as `sub-sequence cycle: game/a.cutscene -> game/b.cutscene -> game/a.cutscene`;
   - sub-sequences that nest deeper than `CUTSCENE_MAX_DEPTH` (8), at the line of the first one on the deepest path, with the path;
-  - more than `MAX_CUTSCENE_BINDINGS` (1024) bindings, `MAX_CUTSCENE_TRACKS` (1024) tracks, `MAX_CUTSCENE_SECTIONS` (8192) sections, `MAX_CUTSCENE_CHANNELS` (65536) channels, `MAX_CUTSCENE_KEYS` (2^20) keys or `MAX_CUTSCENE_GUIDS` (65536) keyed assets.
+  - more than `MAX_CUTSCENE_BINDINGS` (1024) bindings, `MAX_CUTSCENE_TRACKS` (1024) tracks, `MAX_CUTSCENE_SECTIONS` (8192) sections, `MAX_CUTSCENE_CHANNELS` (65536) channels, `MAX_CUTSCENE_KEYS` (2^20) keys, `MAX_CUTSCENE_EVENTS` (8192) triggers and ranges or `MAX_CUTSCENE_GUIDS` (65536) keyed assets.
 - **A cutscene with a problem** keeps its old blob, so the running game keeps the last good version.
 - **Sub-sequences.** The cooker reads each sub-sequence's source, not its blob, so the order of the passes does not matter. A pass that cooks one cutscene checks every cutscene, because a cycle or a depth is a property of all the cutscenes that it reaches.
 - **The cooker does not check** that a possessed entity is in its scene, because that needs the scene's prefabs expanded. The binding's policy says what to do when the entity is missing at run time ([Cinematics: A missing binding](../../cinematics/bindings.md#a-missing-binding)).

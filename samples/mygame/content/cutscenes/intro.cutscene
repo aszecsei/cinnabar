@@ -4,7 +4,8 @@ cutscene 1
 # relative, so it walks from where it stands, and its walk clip loops in place while that track moves it. Three spawned
 # shot cameras cut the scene: a wide shot that blends in from gameplay, a close shot that racks its focus, and a
 # tracking shot that blends back out. Music swells under it and plays on into gameplay, a line of dialogue plays over
-# the wide shot, and the guard's bark is heard where the guard stands.
+# the wide shot, and the guard's bark is heard where the guard stands. A story track tells every behaviour when the guard
+# barks, and that the intro was seen, also when it is skipped.
 length = 720000
 # The range ends at 10 s. The music runs 2 s past it, into gameplay.
 range = [0, 600000]
@@ -105,3 +106,10 @@ track 8 audio "Dialogue"
 	# A line over the wide shot, on Master.
 	section 10 30000 174000
 		asset = $cde14b9399a74a289146a8362e6a9a9e
+track 9 event "Story"
+	# Every behaviour with on_guard_bark_begin and on_guard_bark_end hears the bark start and end.
+	range 2 360000 420000 guard_bark
+	# On the last frame, or at a skip: a script can open the gate that the intro leads to.
+	trigger 1 600000 intro_seen
+		fire_when_skipped = true
+		value = entity 1

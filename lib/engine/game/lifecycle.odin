@@ -75,6 +75,7 @@ game_init :: proc(
 		&g.animation,
 		&g.views,
 		&g.audio,
+		&g.scripts,
 	)
 	register_world(g, h)
 	asset.init(&g.assets, platform, asset.content_source(platform.content_dir))
@@ -209,6 +210,7 @@ game_update :: proc(g: ^Game, dt: time.Duration, h: Hooks) -> (keep_running: boo
 			physics.tick(&g.physics, &g.world)
 			physics.send_events(&g.physics, &g.world, &g.scripts)
 			anim.send_events(&g.animation, &g.world, &g.scripts)
+			cutscene.send_events(&g.cutscenes)
 			ai.send_events(&g.ai, &g.world, &g.scripts)
 			script.fixed_events(&g.scripts)
 			ecs.update_transforms(&g.world)

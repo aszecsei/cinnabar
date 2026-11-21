@@ -13,7 +13,7 @@ import format "cinnabar:engine/asset/format"
 // in ticks, each with sections of keyed channels, a clip, a sound or a sub-sequence (see
 // docs/content/kinds/cutscenes.md). The cook checks the assets that a cutscene names and its sub-sequences' nesting, which
 // it reads from the other cutscenes' sources, so the order of the passes does not matter.
-CUTSCENE_COOK_VERSION :: "cutscenes 9"
+CUTSCENE_COOK_VERSION :: "cutscenes 10"
 
 // CUTSCENE_TEMPLATE is the text of a new cutscene: 10 seconds at 30 frames a second, with no bindings or tracks.
 CUTSCENE_TEMPLATE :: `cutscene 1
@@ -463,7 +463,26 @@ Pending_Track :: struct {
 	relative_id:    u32,
 	// The lines of gain and time_scale, which only an audio track takes.
 	audio_lines:    [2]int,
+	// The line of when_finished, which an event track does not take.
+	finish_line:    int,
 	sections:       [dynamic]Pending_Section,
+	events:         [dynamic]Pending_Event,
+}
+
+// Pending_Event is a trigger or a range of an event track, with its values. An Entity value's index is still its
+// binding's ID.
+@(private = "file")
+Pending_Event :: struct {
+	contents: format.Cutscene_Event_Contents,
+	line:     int,
+	seen:     [dynamic]string,
+	values:   [dynamic]Pending_Value,
+}
+
+@(private = "file")
+Pending_Value :: struct {
+	contents: format.Cutscene_Event_Value_Contents,
+	line:     int,
 }
 
 // Cutscene_Block is the innermost block that a line is in.
@@ -474,11 +493,13 @@ Cutscene_Block :: enum {
 	Track,
 	Section,
 	Channel,
+	Event,
 }
 
 // cutscene_parse parses a cutscene's text: the first line `cutscene 1`, the header's settings, then `binding <id>
 // "<name>"` and `track <id> <kind> "<name>"` blocks, a track's `section <id> <start> <end>` blocks, a section's `channel
-// <name>` blocks and a channel's `key <time> <value> <interp> [<in> <out>]` lines. A `<name> = <value>` line sets a
+// <name>` blocks and a channel's `key <time> <value> <interp> [<in> <out>]` lines, and an event track's `trigger <id>
+// <time> <name>` and `range <id> <start> <end> <name>` blocks. A `<name> = <value>` line sets a
 // setting of the innermost block. It checks everything but the assets that the text names, and gives every problem that
 // it finds; the cutscene is good only without any.
 cutscene_parse :: proc(
@@ -508,6 +529,8 @@ cutscene_parse :: proc(
 	skip_ranges := make([dynamic]format.Cutscene_Skip_Range)
 	block := Cutscene_Block.Header
 	section_ids := make(map[u32]bool, 16, context.temp_allocator)
+	event_ids := make(map[u32]bool, 16, context.temp_allocator)
+	event_count := 0
 	// The assets that keys name, in the blob's order, and each one's index.
 	guids := make([dynamic]format.Guid)
 	guid_index := make(map[format.Guid]int, 16, context.temp_allocator)
@@ -588,6 +611,7 @@ cutscene_parse :: proc(
 				line = line,
 				seen = make([dynamic]string),
 				sections = make([dynamic]Pending_Section),
+				events = make([dynamic]Pending_Event),
 				contents = {binding = format.CUTSCENE_NONE},
 			}
 			id_text, _, after_id := strings.partition(rest, " ")
@@ -633,7 +657,7 @@ cutscene_parse :: proc(
 			continue
 		}
 		if is_block && word == "section" {
-			if block != .Track && block != .Section && block != .Channel {
+			if block != .Track && block != .Section && block != .Channel && block != .Event {
 				problem(&found, line, "a section comes after a track line")
 				continue
 			}
@@ -678,6 +702,74 @@ cutscene_parse :: proc(
 				)
 			}
 			append(&tr.sections, s)
+			continue
+		}
+		if is_block && (word == "trigger" || word == "range") {
+			if block == .Header || block == .Binding {
+				problem(&found, line, "a %s comes after a track line", word)
+				continue
+			}
+			block = .Event
+			tr := &tracks[len(tracks) - 1]
+			ev := Pending_Event {
+				line   = line,
+				seen   = make([dynamic]string),
+				values = make([dynamic]Pending_Value),
+			}
+			is_range := word == "range"
+			fields := strings.fields(rest, context.temp_allocator)
+			ok := len(fields) == (4 if is_range else 3)
+			id: u32
+			if ok {
+				id_ok, start_ok, end_ok: bool
+				id, id_ok = cutscene_id(fields[0])
+				ev.contents.start, start_ok = cutscene_ticks_text(fields[1])
+				ev.contents.end, end_ok = ev.contents.start, true
+				if is_range {
+					ev.contents.end, end_ok = cutscene_ticks_text(fields[2])
+				}
+				ev.contents.name = fields[len(fields) - 1]
+				ok = id_ok && start_ok && end_ok && is_identifier(ev.contents.name)
+			}
+			switch {
+			case !ok && is_range:
+				problem(
+					&found,
+					line,
+					"a range is `range <id> <start> <end> <name>`, with an ID from 1 to 2147483647, times in whole ticks and a name of letters, digits and _",
+				)
+			case !ok:
+				problem(
+					&found,
+					line,
+					"a trigger is `trigger <id> <time> <name>`, with an ID from 1 to 2147483647, a time in whole ticks and a name of letters, digits and _",
+				)
+			case event_ids[id]:
+				problem(
+					&found,
+					line,
+					"the cutscene has a trigger or a range with the ID %d already",
+					id,
+				)
+			case is_range && ev.contents.start >= ev.contents.end:
+				problem(&found, line, "a range starts before it ends")
+			}
+			event_ids[id] = true
+			ev.contents.id = id
+			ev.contents.name = strings.clone(ev.contents.name) if ok else ""
+			if is_range {
+				ev.contents.flags += {.Range}
+			}
+			event_count += 1
+			if event_count == format.MAX_CUTSCENE_EVENTS + 1 {
+				problem(
+					&found,
+					line,
+					"a cutscene has at most %d triggers and ranges",
+					format.MAX_CUTSCENE_EVENTS,
+				)
+			}
+			append(&tr.events, ev)
 			continue
 		}
 		if is_block && word == "channel" {
@@ -763,7 +855,7 @@ cutscene_parse :: proc(
 			problem(
 				&found,
 				line,
-				"a line is binding, track, section, channel, key or `<name> = <value>`",
+				"a line is binding, track, section, channel, key, trigger, range or `<name> = <value>`",
 			)
 			continue
 		}
@@ -928,6 +1020,7 @@ cutscene_parse :: proc(
 				case:
 					problem(&found, line, "when_finished is restore or keep")
 				}
+				tr.finish_line = line
 			case "component":
 				id, ok := strconv.parse_u64_of_base(value_text, 10)
 				if !ok || id == 0 {
@@ -1015,11 +1108,79 @@ cutscene_parse :: proc(
 					continue
 				}
 				tr.contents.origin, tr.origin_line = origin, line
+			case "fire_on_seek", "fire_when_skipped", "value":
+				problem(&found, line, "%s is a setting of a trigger or a range", name)
 			case:
 				problem(
 					&found,
 					line,
 					"%q is not a setting of a track: binding, muted, when_finished, component, field, space, origin, gain or time_scale",
+					name,
+				)
+			}
+		case .Event:
+			tr := &tracks[len(tracks) - 1]
+			ev := &tr.events[len(tr.events) - 1]
+			if name != "value" {
+				if slice.contains(ev.seen[:], name) {
+					problem(&found, line, "%s is set twice", name)
+					continue
+				}
+				append(&ev.seen, name)
+			}
+			switch name {
+			case "fire_on_seek", "fire_when_skipped":
+				flag: format.Cutscene_Event_Flag =
+					.Fire_On_Seek if name == "fire_on_seek" else .Fire_When_Skipped
+				switch value_text {
+				case "true":
+					ev.contents.flags += {flag}
+				case "false":
+					ev.contents.flags -= {flag}
+				case:
+					problem(&found, line, "%s is true or false", name)
+				}
+			case "value":
+				if len(ev.values) == format.MAX_CUTSCENE_EVENT_VALUES {
+					problem(
+						&found,
+						line,
+						"a trigger or a range has at most %d values",
+						format.MAX_CUTSCENE_EVENT_VALUES,
+					)
+					continue
+				}
+				v, message := cutscene_event_value(value_text)
+				if message != "" {
+					problem(&found, line, "%s", message)
+					continue
+				}
+				if v.kind == .Asset {
+					slot, known := guid_index[v.guid]
+					if !known {
+						slot = len(guids)
+						guid_index[v.guid] = slot
+						append(&guids, v.guid)
+						append(&references, Cutscene_Reference{v.guid, .None, line})
+					}
+					v.contents.index = u32(slot)
+				}
+				append(&ev.values, Pending_Value{contents = v.contents, line = line})
+			case "binding",
+			     "muted",
+			     "when_finished",
+			     "component",
+			     "field",
+			     "space",
+			     "origin",
+			     "gain",
+			     "time_scale":
+				problem(&found, line, "%s comes before the track's triggers and ranges", name)
+			case:
+				problem(
+					&found,
+					line,
+					"%q is not a setting of a trigger or a range: value, fire_on_seek or fire_when_skipped",
 					name,
 				)
 			}
@@ -1454,6 +1615,20 @@ cutscene_parse :: proc(
 				cut_line = tr.line
 			}
 		}
+		if kind == .Event {
+			result.events = cutscene_event_track(
+				&found,
+				tr,
+				bindings[:],
+				result_bindings,
+				result.binding,
+				contents.length if length_seen else max(i32),
+			)
+		} else {
+			for ev in tr.events {
+				problem(&found, ev.line, "only an event track has triggers and ranges")
+			}
+		}
 		if kind == .Audio {
 			if tr.audio_lines[0] == 0 {
 				result.gain = 1
@@ -1648,6 +1823,173 @@ cutscene_parse :: proc(
 		return a.line < b.line
 	})
 	return {contents = contents, references = references[:]}, found[:]
+}
+
+// cutscene_event_track checks what an event track has (see docs/cinematics/tracks.md#event-tracks): no sections, no
+// when_finished, and a binding, if it has one, that does not suspend its behaviours, which would get none of its events.
+// It gives the track's events in start order, each within the length, with its Entity values' bindings by index.
+@(private = "file")
+cutscene_event_track :: proc(
+	found: ^[dynamic]Cutscene_Problem,
+	tr: Pending_Track,
+	bindings: []Pending_Binding,
+	result_bindings: []format.Cutscene_Binding_Contents,
+	binding: u32,
+	length: i32,
+) -> []format.Cutscene_Event_Contents {
+	for s in tr.sections {
+		append(
+			found,
+			Cutscene_Problem {
+				s.line,
+				"an event track has no sections: it has trigger and range lines",
+			},
+		)
+	}
+	if tr.finish_line != 0 {
+		append(
+			found,
+			Cutscene_Problem {
+				tr.finish_line,
+				"an event track has no when_finished: its events change state through scripts, which own it",
+			},
+		)
+	}
+	if binding != format.CUTSCENE_NONE && .Behaviours in result_bindings[binding].suspend {
+		append(
+			found,
+			Cutscene_Problem {
+				tr.binding_line,
+				"the binding suspends its behaviours, so they would get none of the track's events: give it a suspend without behaviours, or leave the track's binding out to send its events to every behaviour",
+			},
+		)
+	}
+	events := make([]format.Cutscene_Event_Contents, len(tr.events))
+	for ev, i in tr.events {
+		c := ev.contents
+		if c.end > length {
+			append(
+				found,
+				Cutscene_Problem {
+					ev.line,
+					fmt.aprintf("a trigger or a range is inside the length (%d)", length),
+				},
+			)
+		}
+		values := make([]format.Cutscene_Event_Value_Contents, len(ev.values))
+		for v, j in ev.values {
+			values[j] = v.contents
+			if v.contents.kind != .Entity {
+				continue
+			}
+			values[j].index = format.CUTSCENE_NONE
+			for b, k in bindings {
+				if b.contents.id == v.contents.index {
+					values[j].index = u32(k)
+				}
+			}
+			if values[j].index == format.CUTSCENE_NONE {
+				append(
+					found,
+					Cutscene_Problem {
+						v.line,
+						"an entity value is the ID of a binding of the cutscene",
+					},
+				)
+				values[j].index = 0
+			}
+		}
+		c.values = values
+		events[i] = c
+	}
+	slice.stable_sort_by(events, proc(a, b: format.Cutscene_Event_Contents) -> bool {
+		return a.start < b.start
+	})
+	return events
+}
+
+// Cutscene_Value_Text is an event's value as cutscene_event_value reads it: an Entity's index is its binding's ID, and
+// an Asset's GUID is beside it, for the caller to give an index.
+@(private = "file")
+Cutscene_Value_Text :: struct {
+	using contents: format.Cutscene_Event_Value_Contents,
+	guid:           format.Guid,
+}
+
+// cutscene_event_value reads an event's value, `<kind> <value>`: number <n>, bool true|false, string "<text>", vector
+// [x, y, z], entity <binding id>, position [x, y, z] in meters, or asset $<guid>.
+@(private = "file")
+cutscene_event_value :: proc(text: string) -> (v: Cutscene_Value_Text, message: string) {
+	kind_text, _, value_text := strings.partition(text, " ")
+	value_text = strings.trim_space(value_text)
+	value, value_message := parse_graph_value(value_text)
+	switch kind_text {
+	case "number":
+		v.kind = .Number
+		if value_message != "" ||
+		   value.kind != .Numbers ||
+		   value.count != 1 ||
+		   strings.has_prefix(value_text, "[") ||
+		   !(abs(value.numbers[0]) <= max(f64)) {
+			return v, "a number value is `number <n>`, a finite number"
+		}
+		v.number = value.numbers[0]
+	case "bool":
+		v.kind = .Bool
+		switch value_text {
+		case "true":
+			v.index = 1
+		case "false":
+		case:
+			return v, "a bool value is `bool true` or `bool false`"
+		}
+	case "string":
+		v.kind = .String
+		if value_message != "" || value.kind != .Text {
+			return v, "a string value is `string \"<text>\"`"
+		}
+		v.text = strings.clone(value.text)
+	case "vector":
+		v.kind = .Vector
+		ok := value_message == "" && value.kind == .Numbers && value.count == 3
+		for axis in 0 ..< 3 {
+			ok &&= abs(value.numbers[axis]) <= f64(max(f32))
+			v.vector[axis] = f32(value.numbers[axis])
+		}
+		if !ok {
+			return v, "a vector value is `vector [x, y, z]`, three finite numbers"
+		}
+	case "entity":
+		v.kind = .Entity
+		id, ok := cutscene_id(value_text)
+		if !ok {
+			return v,
+				"an entity value is `entity <binding id>`, the ID of a binding of the cutscene"
+		}
+		v.index = id
+	case "position":
+		v.kind = .Position
+		ok := value_message == "" && value.kind == .Numbers && value.count == 3
+		for axis in 0 ..< 3 {
+			raw, in_range := format.world_raw_from_meters(value.numbers[axis])
+			ok &&= in_range
+			v.position[axis] = raw
+		}
+		if !ok {
+			return v,
+				"a position value is `position [x, y, z]`, in meters, inside the bounds of a World_Position"
+		}
+	case "asset":
+		v.kind = .Asset
+		if value_message != "" || value.kind != .Asset || value.guid == {} {
+			return v, "an asset value is `asset $<guid>`, with 32 hex digits"
+		}
+		v.guid = value.guid
+	case:
+		return v,
+			"a value is `<kind> <value>`, of the kinds number, bool, string, vector, entity, position and asset"
+	}
+	return v, ""
 }
 
 // cutscene_binding_setting reads a setting of a binding.

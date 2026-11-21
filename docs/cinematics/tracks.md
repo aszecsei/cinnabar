@@ -1,8 +1,8 @@
 # Tracks
 
-A track acts on the world at the cutscene's time. Its kind says what it writes: a field, a pose, a camera, a sound. This document describes the kinds that the engine has, in `lib/engine/cutscene`, and the curve that every keyed track shares. Read [Evaluation](evaluation.md) first, for sections, blending and the restore snapshot.
+A track acts on the world at the cutscene's time. Its kind says what it writes: a field, a pose, a camera, a sound, or an event to the scripts. This document describes the kinds that the engine has, in `lib/engine/cutscene`, and the curve that every keyed track shares. Read [Evaluation](evaluation.md) first, for sections, blending and the restore snapshot.
 
-**In this document:** [Curves](#curves) · [Property tracks](#property-tracks) · [Transform tracks](#transform-tracks) · [Animation tracks](#animation-tracks) · [Camera cut tracks](#camera-cut-tracks) · [Audio tracks](#audio-tracks) · [Not built yet](#not-built-yet) · [Procedures](#procedures)
+**In this document:** [Curves](#curves) · [Property tracks](#property-tracks) · [Transform tracks](#transform-tracks) · [Animation tracks](#animation-tracks) · [Camera cut tracks](#camera-cut-tracks) · [Audio tracks](#audio-tracks) · [Event tracks](#event-tracks) · [Not built yet](#not-built-yet) · [Procedures](#procedures)
 
 ## Curves
 
@@ -391,11 +391,70 @@ track 7 audio "Music"
 
 `register` sets the audio kind. The game gives the cutscenes its audio in `init`. Without it, audio tracks play nothing.
 
+## Event tracks
+
+An event track tells gameplay what happens in the cutscene: a gate opens, a quest starts, the player gets an item. It keys events on the cutscene's time. Each event has a name and up to four values. It goes to scripts as `script.send` and `script.broadcast` send their events ([Scripting: Events](../scripting/behaviours.md#events)). The track writes nothing to the world itself.
+
+```
+track 9 event "Story"
+	range 2 360000 420000 guard_bark
+	trigger 1 600000 intro_seen
+		fire_when_skipped = true
+		value = entity 1
+```
+
+**Triggers and ranges.**
+- A **trigger** is `trigger <id> <time> <name>`. It sends `on_<name>` at its time.
+- A **range** is `range <id> <start> <end> <name>`. It sends `on_<name>_begin` at its start and `on_<name>_end` at its end. It is open from its start to just before its end.
+- **IDs** are unique among the cutscene's triggers and ranges. The evaluation keeps its open ranges by ID, so a range keeps its state across a reload.
+- **Values.** A trigger or a range has up to `MAX_CUTSCENE_EVENT_VALUES` (4) `value` lines. Each value is one of the kinds that script events carry:
+
+| Text | The handler gets |
+|---|---|
+| `value = number 2.5` | A number |
+| `value = bool true` | A boolean |
+| `value = string "red"` | A string |
+| `value = vector [0, 1, 0]` | A vector |
+| `value = entity 1` | The entity of the binding with that ID, or nil when the binding is missing |
+| `value = position [1, 2, 3]` | A `WorldPosition`, from meters |
+| `value = asset $<guid>` | An asset. The cutscene references it, so the player loads it. |
+
+**The target.**
+- A track **with a binding** sends its events to that binding's behaviours, as `script.send` does. The binding must not suspend `behaviours`. A suspended behaviour gets no events, so the cooker refuses this ([Possession: Behaviours](possession.md#behaviours)).
+- A track **without a binding** sends its events to every behaviour with the handler, as `script.broadcast` does.
+- **Native handlers.** `register_event_handler(state, name, procedure, data)` registers a procedure for one event name, such as `door_open` or `alarm_begin`. The procedure gets the player's handle, the name and the values, in frame memory, beside the behaviours. Call it in `register_world`, after `register`. `register` clears the handlers, so a code reload registers them again.
+- The cutscene's own script handlers, with the cutscene's handle as their first value, come with the scripting library ([#547](https://github.com/aszecsei/cinnabar/issues/547)).
+
+**When events fire.** The track evaluates in the `Fixed` phase. Each evaluation sends what the move from the phase's last time crosses. The tracks record their events, and at the end of the phase `run_phase` queues them on the state:
+- In time order.
+- At one time, in the tracks' order.
+- On one track at one time, an end first, then a trigger, then a begin.
+
+The cutscene fixed system can run in a job, so it calls no script and no handler. `send_events` delivers the queue from the frame code: at the end of `update` and of `advance_real`, in `end_frame`, and in the game after each tick, so `script.fixed_events` delivers the events in the same tick.
+
+
+| The move | Triggers | Ranges |
+|---|---|---|
+| **Playback** over (last, now] | Each trigger in the range, once. A frame that crosses many triggers sends them all, so a hitch drops none. | A range that the move enters sends its begin, and a range that it leaves sends its end. A range that it crosses whole sends both. |
+| **Seek backwards**, or no move | None | None. The open ranges stay open. The next forward move sends the ends and begins that the seek passed. |
+| **Seek forward** | Only the triggers marked `fire_on_seek`, so a script can catch up on state | The ranges that the seek leaves send their ends, and the range that it lands in sends its begin. A range that it crosses whole sends both only when it is marked `fire_on_seek`. |
+| **Skip** ([Skipping](skipping.md#events)) | Only the triggers marked `fire_when_skipped`, such as one that gives the player a key | The range that is open at the skip sends its end, and a range that the skip lands in sends its begin. A range that it crosses whole sends both only when it is marked `fire_when_skipped`. |
+
+- **Several seeks** before one evaluation are one move: from the time that the events had fired up to, to the last seek's time.
+- **Pairs.** A range sends its end only after it sent its begin. A range opens and closes as its begin and end are queued, and one procedure, `change_range`, changes the open ranges.
+- **A handler that ends its player.** A native handler can `stop` its own player. The events queued after it are still delivered, and the ends of the open ranges follow them.
+- **Finish.** When the cutscene finishes, each range that is still open sends its end. A cutscene finishes at its end, at a skip to its end, or at a `stop`. A spawned binding is despawned in the same update, before the scripts get the events. So its behaviours get none of the events of that last update, that end included. `restore` and `keep` do not apply: events change state through scripts, which own that state.
+- **Failure.** A cutscene that fails sends no more events. Its open ranges do not send their ends.
+- **Hot reload.** A reload forgets the open ranges whose IDs are no longer ranges, and sends nothing. The next playback sends the begins and ends that the new blob makes necessary, such as the end of a range that moved away from the time.
+- **The editor.** Only an evaluation whose `audition` is `.Play` sends events. A scrub and the editor's preview send none, so a preview never runs gameplay. `set_audition` forgets the open ranges and does not send their ends.
+
+`register` sets the event kind. The game gives the cutscenes its scripts in `init`. Without the scripts, only the native handlers get events.
+
 ## Not built yet
 
-- The other kinds of track are parts of [#526](https://github.com/aszecsei/cinnabar/issues/526): events ([#544](https://github.com/aszecsei/cinnabar/issues/544)), sub-sequences ([#545](https://github.com/aszecsei/cinnabar/issues/545)) and presentation ([#546](https://github.com/aszecsei/cinnabar/issues/546)). Until they are built, a track of one of these kinds does nothing.
-- A sub-sequence's own camera cut and audio tracks wait for [#545](https://github.com/aszecsei/cinnabar/issues/545).
-- No editor sets an evaluation's `audition` yet. The cutscene editor's scrub and playback ([#548](https://github.com/aszecsei/cinnabar/issues/548)) will, and its waveforms are [#556](https://github.com/aszecsei/cinnabar/issues/556).
+- The other kinds of track are parts of [#526](https://github.com/aszecsei/cinnabar/issues/526): sub-sequences ([#545](https://github.com/aszecsei/cinnabar/issues/545)) and presentation ([#546](https://github.com/aszecsei/cinnabar/issues/546)). Until they are built, a track of one of these kinds does nothing.
+- A sub-sequence's own camera cut, audio and event tracks wait for [#545](https://github.com/aszecsei/cinnabar/issues/545). A sub-sequence will map the parent's move into its own time. A loop's wrap will send the loop's end and then its start, as animation markers do.
+- No editor sets an evaluation's `audition` yet. The cutscene editor's scrub and playback ([#548](https://github.com/aszecsei/cinnabar/issues/548)) will, and its waveforms are [#556](https://github.com/aszecsei/cinnabar/issues/556). The transport's option to send events to edit-mode behaviours waits for the editor too.
 - In the editor, only the Game view follows the cut track. A viewport that pilots a camera waits for [#555](https://github.com/aszecsei/cinnabar/issues/555).
 
 ## Procedures
@@ -409,9 +468,11 @@ track 7 audio "Music"
 | `animation_track(ctx)` | The animation kind's evaluate procedure |
 | `camera_cut_track(ctx)` | The camera cut kind's evaluate procedure |
 | `audio_track(ctx)` | The audio kind's evaluate procedure |
+| `register_event_handler(state, name, procedure, data)` | Registers a native handler of the events of one name, from every cutscene |
+| `send_events(state)` | Delivers the queued events of the event tracks to the scripts and the native handlers. Call it from the frame code. |
 | `curve_integral(keys, t)` | A curve's integral from 0 to a time in ticks, in value × seconds |
 | `sound_place(data, blob, section, t, length)` | Where an audio section's sound is at a time, in seconds, and whether that is inside the sound |
-| `set_audition(evaluation, audition)` | Sets how an evaluation's audio tracks sound, and stops their voices when it changes |
+| `set_audition(evaluation, audition)` | Sets how an evaluation's audio tracks sound, and whether its event tracks send events. A change stops the voices and forgets the open ranges. |
 | `set_rate(state, rate)` | Sets the game clock's rate against real time. The game sets it each frame. |
 | `set_audio_drift(state, seconds)` | Sets the drift limit, from the project's `cutscene.audio_drift` |
 | `end_cut(evaluation)` | Releases the cut track's claim on the views, with the blend that its shot leaves with. `restore`, `restore_all`, a reload and `destroy_evaluation` call it, through the one `end_holds`. |
