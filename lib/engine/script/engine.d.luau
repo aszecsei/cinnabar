@@ -346,6 +346,22 @@ type DisplayChange = {
 	paper_white: number?,
 }
 
+-- The player's subtitle settings, which a game defines Subtitles.get and Subtitles.set with (see
+-- docs/scripting/api.md#subtitles): whether subtitles show, a scale of their size from 0.5 to 2, and the opacity of
+-- their backs from 0 to 1.
+type SubtitleSettings = {
+	enabled: boolean,
+	size: number,
+	background: number,
+}
+
+-- What Subtitles.set changes: the fields that it gives.
+type SubtitleChange = {
+	enabled: boolean?,
+	size: number?,
+	background: number?,
+}
+
 -- What the device can do that the quality depends on. aa lists the anti-aliasing techniques that it runs, gi the
 -- global illumination's, and reflections the reflections'.
 type RenderCaps = {

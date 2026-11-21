@@ -54,6 +54,9 @@ Game :: struct {
 	// The display keys that the files gave when the game last applied them, so a change to other keys leaves what the
 	// player set since (see project.apply_display_settings).
 	display_applied:    Maybe(project.Display_File),
+	// The subtitle settings that the settings files gave when the cutscenes last took them, so a refresh that does not
+	// change them keeps what Subtitles.set chose.
+	subtitles_applied:  Maybe(project.Subtitle_Keys),
 	// The project's settings, read again when their files change.
 	project:            project.Watch,
 	next_project_check: f64,
@@ -306,6 +309,7 @@ register_scripts :: proc(r: ^script.Runtime) {
 	project.define_quality_bindings(r, &g.script_quality)
 	save.register_scripts(r)
 	project.define_display_bindings(r)
+	define_subtitle_bindings(r)
 	physics.register_scripts(r, &g.physics)
 	audio.register_scripts(r, &g.audio)
 	anim.register_scripts(r, &g.animation)

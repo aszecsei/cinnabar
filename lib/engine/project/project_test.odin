@@ -794,3 +794,39 @@ the_cutscene_audio_drift_is_in_seconds :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(problems), 2)
 	testing.expect_value(t, s.audio_drift.? or_else 0, 0.01)
 }
+
+@(test)
+the_cutscene_overlay_and_subtitles_parse_and_round_trip :: proc(t: ^testing.T) {
+	s: Settings
+	problems := make([dynamic]string, context.temp_allocator)
+	_, given := s.subtitles.enabled.?
+	testing.expect(t, !given, "no file gives the cutscenes' own subtitles")
+	parse(
+		"cutscene.overlay = $0b7c86066d9c4959af9913051f7ce296\ncutscene.letterbox_color = #102030\n",
+		&s,
+		&problems,
+	)
+	testing.expect_value(t, len(problems), 0)
+	testing.expect_value(t, s.cutscene_overlay, format.guid_parse("0b7c86066d9c4959af9913051f7ce296") or_else {})
+	testing.expect_value(t, s.letterbox_color, [3]u8{0x10, 0x20, 0x30})
+	parse(
+		"cutscene.overlay = 12\ncutscene.letterbox_color = #10203040\nsubtitles.enabled = yes\nsubtitles.size = 3\nsubtitles.background = -1\n",
+		&s,
+		&problems,
+	)
+	testing.expect_value(t, len(problems), 5)
+	testing.expect_value(t, s.letterbox_color, [3]u8{0x10, 0x20, 0x30})
+
+	// The player's choice goes to the user file, and keeps its other lines.
+	before := "# Mine.\nquality.preset = High\nsubtitles.size = 1.5\n"
+	text := with_subtitles(before, {enabled = false, size = 1.25, background = 0.75})
+	testing.expect(t, strings.has_prefix(text, "# Mine.\nquality.preset = High\n"))
+	testing.expect_value(t, strings.count(text, "subtitles.size"), 1)
+	chosen: Settings
+	clear(&problems)
+	parse(text, &chosen, &problems)
+	testing.expect_value(t, len(problems), 0)
+	testing.expect_value(t, chosen.subtitles.enabled.? or_else true, false)
+	testing.expect_value(t, chosen.subtitles.size.? or_else 0, 1.25)
+	testing.expect_value(t, chosen.subtitles.background.? or_else 0, 0.75)
+}
