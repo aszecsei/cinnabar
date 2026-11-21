@@ -438,7 +438,8 @@ track 9 event "Story"
 | **Skip** ([Skipping](skipping.md#events)) | Only the triggers marked `fire_when_skipped`, such as one that gives the player a key | The range that is open at the skip sends its end, and a range that the skip lands in sends its begin. A range that it crosses whole sends both only when it is marked `fire_when_skipped`. |
 
 - **Several seeks** before one evaluation are one move: from the time that the events had fired up to, to the last seek's time.
-- **Pairs.** A range sends its end only after it sent its begin. One procedure, `change_range`, changes the open ranges.
+- **Pairs.** A range sends its end only after it sent its begin. A range opens and closes as its begin and end are sent, and one procedure, `change_range`, changes the open ranges.
+- **A handler that ends its player.** A native handler can `stop` its own player. The ranges whose begins were sent then send their ends at once. The triggers and begins that came after the handler are dropped.
 - **Finish.** When the cutscene finishes, each range that is still open sends its end. A cutscene finishes at its end, at a skip to its end, or at a `stop`. A spawned binding is despawned before the next script phase, so its behaviours do not get that end. `restore` and `keep` do not apply: events change state through scripts, which own that state.
 - **Failure.** A cutscene that fails sends no more events. Its open ranges do not send their ends.
 - **Hot reload.** A reload forgets the open ranges whose IDs are no longer ranges, and sends nothing. The next playback sends the begins and ends that the new blob makes necessary, such as the end of a range that moved away from the time.
