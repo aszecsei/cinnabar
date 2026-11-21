@@ -13,20 +13,37 @@ CLIP :: Guid{3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3}
 SOUND :: Guid{4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4}
 @(private = "file")
 SHOT :: Guid{5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5}
+@(private = "file")
+MATERIAL :: Guid{6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6}
 
 // test_cutscene possesses one entity and spawns two, the second a child of the first, and has a track of each kind
-// that names an asset, a transform track with two channels, and a camera cut track.
+// that names an asset, a transform track with two channels, a camera cut track, and a property track with an additive
+// section and a section that keys GUIDs.
 @(private = "file")
 test_cutscene :: proc() -> []byte {
 	walk := []Cutscene_Key {
 		{time = 0, value = 0, interp = .Linear},
-		{time = 30000, value = 2, interp = .Cubic, in_tangent = 0.5, out_tangent = 0.25},
+		{
+			time = 30000,
+			value = 2,
+			interp = .Bezier,
+			flags = {.Broken, .Weighted},
+			in_slope = 0.5,
+			in_weight = 0.25,
+			out_slope = 0.25,
+			out_weight = 0.75,
+		},
 		{time = 60000, value = 4, interp = .Constant},
 	}
 	turn := []Cutscene_Key{{time = 0, value = 90, interp = .Constant}}
 	gain := []Cutscene_Key {
 		{time = 0, value = 1, interp = .Linear},
 		{time = 6000, value = 0.5, interp = .Linear},
+	}
+	sway := []Cutscene_Key{{time = 0, value = 0.5, interp = .Auto}}
+	swap := []Cutscene_Key {
+		{time = 0, value = 1, interp = .Constant},
+		{time = 1000, value = 0, interp = .Constant},
 	}
 	contents := Cutscene_Contents {
 		key           = 9,
@@ -132,6 +149,31 @@ test_cutscene :: proc() -> []byte {
 				binding = CUTSCENE_NONE,
 				sections = {{id = 15, start = 0, end = 120000, weight = 1}},
 			},
+			{
+				id = 6,
+				kind = .Property,
+				name = "Lamp",
+				binding = 0,
+				component = 9101,
+				field = "light.material",
+				sections = {
+					{
+						id = 16,
+						start = 0,
+						end = 60000,
+						weight = 1,
+						flags = {.Additive},
+						channels = {{name = "value", keys = sway}},
+					},
+					{
+						id = 17,
+						start = 60000,
+						end = 120000,
+						weight = 1,
+						channels = {{name = "value", flags = {.Guids}, keys = swap}},
+					},
+				},
+			},
 		},
 		source_path   = "game/cutscenes/intro.cutscene",
 		input_context = "cinematic",
@@ -139,6 +181,7 @@ test_cutscene :: proc() -> []byte {
 		skip          = .Ranges,
 		skip_ranges   = {{6000, 30000}, {60000, 120000}},
 		skip_fade     = 15000,
+		guids         = {SOUND, MATERIAL},
 	}
 	return aligned(cutscene_write(contents, context.temp_allocator))
 }
@@ -186,7 +229,7 @@ cutscene_blobs_round_trip :: proc(t: ^testing.T) {
 	testing.expect_value(t, bindings[2].parent, 1)
 
 	tracks := cutscene_tracks(data, blob)
-	testing.expect_value(t, len(tracks), 5)
+	testing.expect_value(t, len(tracks), 6)
 	testing.expect_value(t, blob_string(data, tracks[0].name), "Fox walk")
 	testing.expect_value(t, tracks[0].finish, Cutscene_Finish.Keep)
 	testing.expect_value(t, tracks[0].binding, 0)
@@ -194,7 +237,7 @@ cutscene_blobs_round_trip :: proc(t: ^testing.T) {
 	testing.expect_value(t, tracks[2].binding, CUTSCENE_NONE)
 	testing.expect_value(t, blob_string(data, tracks[4].name), "")
 
-	testing.expect_value(t, len(cutscene_sections(data, blob)), 6)
+	testing.expect_value(t, len(cutscene_sections(data, blob)), 8)
 	clips := cutscene_track_sections(data, blob, tracks[1])
 	testing.expect_value(t, len(clips), 2)
 	testing.expect_value(t, clips[1].id, 12)
@@ -212,15 +255,33 @@ cutscene_blobs_round_trip :: proc(t: ^testing.T) {
 	keys := cutscene_channel_keys(data, blob, channels[0])
 	testing.expect_value(t, len(keys), 3)
 	testing.expect_value(t, keys[1].time, 30000)
-	testing.expect_value(t, keys[1].interp, Cutscene_Interp.Cubic)
-	testing.expect_value(t, keys[1].in_tangent, 0.5)
-	testing.expect_value(t, keys[1].out_tangent, 0.25)
+	testing.expect_value(t, keys[1].interp, Cutscene_Interp.Bezier)
+	testing.expect_value(t, keys[1].flags, Cutscene_Key_Flags{.Broken, .Weighted})
+	testing.expect_value(t, keys[1].in_slope, 0.5)
+	testing.expect_value(t, keys[1].in_weight, 0.25)
+	testing.expect_value(t, keys[1].out_slope, 0.25)
+	testing.expect_value(t, keys[1].out_weight, 0.75)
 	testing.expect_value(t, cutscene_channel_keys(data, blob, channels[1])[0].value, 90)
 	bark := cutscene_track_sections(data, blob, tracks[2])[0]
 	gain := cutscene_section_channels(data, blob, bark)
 	testing.expect_value(t, blob_string(data, gain[0].name), "gain")
 	testing.expect_value(t, cutscene_channel_keys(data, blob, gain[0])[1].value, 0.5)
-	testing.expect_value(t, len(cutscene_keys(data, blob)), 6)
+	testing.expect_value(t, len(cutscene_keys(data, blob)), 9)
+
+	lamp := tracks[5]
+	testing.expect_value(t, lamp.component, 9101)
+	testing.expect_value(t, blob_string(data, lamp.field), "light.material")
+	testing.expect_value(t, lamp.field_hash, scene_field_hash("light.material"))
+	testing.expect_value(t, tracks[0].component, 0)
+	testing.expect_value(t, tracks[0].field_hash, 0)
+	lamp_sections := cutscene_track_sections(data, blob, lamp)
+	testing.expect_value(t, lamp_sections[0].flags, Cutscene_Section_Flags{.Additive})
+	testing.expect_value(t, lamp_sections[1].flags, Cutscene_Section_Flags{})
+	swap := cutscene_section_channels(data, blob, lamp_sections[1])[0]
+	testing.expect_value(t, swap.flags, Cutscene_Channel_Flags{.Guids})
+	guids := cutscene_guids(data, blob)
+	testing.expect_value(t, len(guids), 2)
+	testing.expect_value(t, guids[int(cutscene_channel_keys(data, blob, swap)[0].value)], MATERIAL)
 }
 
 @(test)
@@ -358,6 +419,18 @@ cutscene_blobs_with_bad_records_are_refused :: proc(t: ^testing.T) {
 	tracks[4].section_count = 0
 	refused(t, data, "sections that no track has")
 	tracks[4].section_count = 1
+	tracks[5].component = 0
+	refused(t, data, "a property track without a component")
+	tracks[5].component = 9101
+	tracks[5].field_hash = 0
+	refused(t, data, "a property track without a field's hash")
+	tracks[5].field_hash = scene_field_hash("light.material")
+	tracks[0].component = 9101
+	refused(t, data, "a transform track with a component")
+	tracks[0].component = 0
+	tracks[0].field_hash = 1
+	refused(t, data, "a transform track with a field")
+	tracks[0].field_hash = 0
 
 	sections[1].end = 0
 	refused(t, data, "a section that ends at its start")
@@ -392,6 +465,15 @@ cutscene_blobs_with_bad_records_are_refused :: proc(t: ^testing.T) {
 	sections[0].channel_count = 1
 	refused(t, data, "channels that no section has")
 	sections[0].channel_count = 2
+	sections[0].flags = transmute(Cutscene_Section_Flags)u32(2)
+	refused(t, data, "an unknown section flag")
+	sections[1].flags = {.Additive}
+	refused(t, data, "an additive animation section")
+	sections[1].flags = {}
+	sections[0].flags = {.Additive}
+	_, ok = cutscene_view(data)
+	testing.expect(t, ok, "an additive transform section")
+	sections[0].flags = {}
 
 	channels[0].name.size += u32(len(data))
 	refused(t, data, "a channel's name past the end")
@@ -402,16 +484,48 @@ cutscene_blobs_with_bad_records_are_refused :: proc(t: ^testing.T) {
 	channels[2].key_count = 1
 	refused(t, data, "keys that no channel has")
 	channels[2].key_count = 2
+	channels[2].flags = {.Guids}
+	refused(t, data, "GUID keys on an audio track")
+	channels[2].flags = transmute(Cutscene_Channel_Flags)u32(2)
+	refused(t, data, "an unknown channel flag")
+	channels[2].flags = {}
 
-	keys[0].interp = Cutscene_Interp(3)
+	keys[0].interp = Cutscene_Interp(4)
 	refused(t, data, "an unknown interpolation")
 	keys[0].interp = .Linear
 	keys[0].value = math.inf_f32(1)
 	refused(t, data, "a value that is not finite")
 	keys[0].value = 0
-	keys[1].out_tangent = math.nan_f32()
-	refused(t, data, "a tangent that is NaN")
-	keys[1].out_tangent = 0.25
+	keys[0].out_slope = 1
+	refused(t, data, "a linear key with a slope")
+	keys[0].out_slope = 0
+	keys[0].flags = {.Weighted}
+	refused(t, data, "a linear key with weights")
+	keys[0].flags = {}
+	keys[1].out_slope = math.nan_f32()
+	refused(t, data, "a slope that is NaN")
+	keys[1].out_slope = 0.25
+	keys[1].out_weight = 1.5
+	refused(t, data, "a weight above 1")
+	keys[1].out_weight = 0.75
+	keys[1].flags = {.Weighted}
+	refused(t, data, "a key whose tangents are one but whose slopes differ")
+	keys[1].flags = {.Broken}
+	refused(t, data, "weights on a key that is not weighted")
+	keys[1].flags = {.Broken, .Weighted}
+	keys[1].flags += transmute(Cutscene_Key_Flags)u8(4)
+	refused(t, data, "an unknown key flag")
+	keys[1].flags = {.Broken, .Weighted}
+	// The GUID keys are the last two.
+	guid_key := &keys[len(keys) - 1]
+	guid_key.value = 2
+	refused(t, data, "a GUID key past the GUIDs")
+	guid_key.value = 0.5
+	refused(t, data, "a GUID key that is not a whole index")
+	guid_key.value = 0
+	guid_key.interp = .Linear
+	refused(t, data, "a GUID key that is not constant")
+	guid_key.interp = .Constant
 	keys[2].time = 60001
 	refused(t, data, "a key past its section")
 	keys[2].time = 30000
@@ -459,15 +573,18 @@ cutscene_blobs_past_a_table_limit_are_refused :: proc(t: ^testing.T) {
 }
 
 @(test)
-cutscene_blob_references_name_prefabs_clips_sounds_and_sub_sequences :: proc(t: ^testing.T) {
+cutscene_blob_references_name_prefabs_clips_sounds_sub_sequences_and_keyed_assets :: proc(
+	t: ^testing.T,
+) {
 	references, ok := blob_references(test_cutscene(), context.temp_allocator)
 	testing.expect(t, ok)
-	testing.expect_value(t, len(references), 4)
-	if len(references) == 4 {
+	testing.expect_value(t, len(references), 5)
+	if len(references) == 5 {
 		testing.expect_value(t, references[0], PREFAB)
 		testing.expect_value(t, references[1], CLIP)
 		testing.expect_value(t, references[2], SOUND)
 		testing.expect_value(t, references[3], SHOT)
+		testing.expect_value(t, references[4], MATERIAL)
 	}
 }
 

@@ -73,6 +73,9 @@ Evaluation :: struct {
 	// the events at range_start.
 	last:     [Phase]Maybe(i32),
 	snapshot: Snapshot,
+	// The fields of the property tracks, by track ID, resolved once for the blob (see
+	// docs/cinematics/tracks.md#property-tracks). A reload of the blob forgets them.
+	targets:  map[u32]Property_Target,
 }
 
 // Field is a field of a component of an entity: its component, and its offset and size in the component.
@@ -148,10 +151,14 @@ destroy :: proc(s: ^State, w: ^ecs.World) -> (despawned: int) {
 	return
 }
 
-// register clears the kinds and makes the two systems. Call it with the world's registrations, before every other
-// system's, and register the kinds after it.
+// register sets the engine's kinds of track, clearing any other, and makes the two systems. Call it with the world's
+// registrations, before every other system's. A game can set a kind of its own with register_kind after it.
 register :: proc(s: ^State, w: ^ecs.World) {
 	s.kinds = {}
+	s.kinds[.Property] = {
+		phase    = .Fixed,
+		evaluate = property_track,
+	}
 	ecs.register_system(
 		w,
 		{
@@ -195,6 +202,7 @@ init_evaluation :: proc(
 			index = make(map[Field]int, w.platform.heap_allocator),
 			writers = make(map[Writer]struct{}, w.platform.heap_allocator),
 		},
+		targets = make(map[u32]Property_Target, w.platform.heap_allocator),
 	}
 }
 
@@ -207,6 +215,8 @@ destroy_evaluation :: proc(e: ^Evaluation, w: ^ecs.World) -> (despawned: int) {
 	delete(e.snapshot.index)
 	delete(e.snapshot.writers)
 	e.snapshot = {}
+	delete(e.targets)
+	e.targets = nil
 	return
 }
 
@@ -718,6 +728,7 @@ reload :: proc(
 	for saved, i in e.snapshot.saved {
 		e.snapshot.index[saved.field] = i
 	}
+	clear(&e.targets)
 	e.time = clamp(e.time, blob.range_start, blob.range_end)
 	for &last in e.last {
 		last = e.time

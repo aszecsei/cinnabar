@@ -321,6 +321,8 @@ write_cutscene :: proc(t: ^testing.T, f: ^Player_Fixture, c: Cutscene) {
 		format.Cutscene_Track_Contents {
 			id = 1,
 			kind = .Property,
+			component = u64(DIAL_ID),
+			field = "value",
 			name = "Dial",
 			binding = c.binding,
 			finish = c.finish,
@@ -1253,12 +1255,14 @@ write_skippable :: proc(
 	}
 	tracks := make([]format.Cutscene_Track_Contents, 2, context.temp_allocator)
 	tracks[0] = {
-		id       = 1,
-		kind     = .Property,
-		name     = "Dial",
-		binding  = 0,
-		finish   = .Keep,
-		sections = dial,
+		id        = 1,
+		kind      = .Property,
+		component = u64(DIAL_ID),
+		field     = "value",
+		name      = "Dial",
+		binding   = 0,
+		finish    = .Keep,
+		sections  = dial,
 	}
 	tracks[1] = {
 		id       = 2,

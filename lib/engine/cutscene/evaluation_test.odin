@@ -20,11 +20,31 @@ import "cinnabar:engine/physics"
 @(private = "file")
 scheduler_lock: sync.Mutex
 
-// Lamp is a component that the test's property track writes.
+@(private = "file")
+Lamp_Mode :: enum u8 {
+	Off     = 0,
+	Steady  = 2,
+	Flicker = 5,
+}
+
+// Lamp is a component that the tests' property tracks write: a field of every kind that a property track animates, a
+// volume's setting, and fields that cannot animate.
 @(private = "file")
 Lamp :: struct {
 	brightness: f32,
-	color:      [3]f32,
+	color:      [3]f32 `editor:"color"`,
+	on:         bool,
+	mode:       Lamp_Mode,
+	count:      i16,
+	size:       [2]f32,
+	bulb:       format.Guid,
+	glow:       struct {
+		override: bool,
+		value:    f32,
+	},
+	serial:     u32 `editor:"read"`,
+	owner:      ecs.Entity,
+	turn:       quaternion128,
 }
 
 @(private = "file")
@@ -416,12 +436,14 @@ blended_tracks :: proc(
 	}
 	tracks := make([]format.Cutscene_Track_Contents, 1, context.temp_allocator)
 	tracks[0] = {
-		id       = 1,
-		kind     = .Property,
-		name     = "Brightness",
-		binding  = 0,
-		finish   = finish,
-		sections = sections,
+		id        = 1,
+		kind      = .Property,
+		component = u64(LAMP_ID),
+		field     = "brightness",
+		name      = "Brightness",
+		binding   = 0,
+		finish    = finish,
+		sections  = sections,
 	}
 	return tracks
 }
@@ -561,7 +583,15 @@ sections_blend_on_the_ease_curve :: proc(t: ^testing.T) {
 		},
 	}
 	tracks := []format.Cutscene_Track_Contents {
-		{id = 1, kind = .Property, name = "Brightness", binding = 0, sections = sections},
+		{
+			id = 1,
+			kind = .Property,
+			name = "Brightness",
+			binding = 0,
+			component = u64(LAMP_ID),
+			field = "brightness",
+			sections = sections,
+		},
 	}
 	e := begin_evaluation(t, f, cutscene_blob(tracks), added = false)
 	defer end_evaluation(f, e)
@@ -611,7 +641,15 @@ rolls_hold_a_sections_first_and_last_values :: proc(t: ^testing.T) {
 		},
 	}
 	tracks := []format.Cutscene_Track_Contents {
-		{id = 1, kind = .Property, name = "Brightness", binding = 0, sections = sections},
+		{
+			id = 1,
+			kind = .Property,
+			name = "Brightness",
+			binding = 0,
+			component = u64(LAMP_ID),
+			field = "brightness",
+			sections = sections,
+		},
 	}
 	e := begin_evaluation(t, f, cutscene_blob(tracks), added = false)
 	defer end_evaluation(f, e)
@@ -640,7 +678,15 @@ a_section_that_ends_with_the_cutscene_covers_its_end :: proc(t: ^testing.T) {
 		{id = 1, start = 0, end = SECOND, weight = 1, channels = channel(ramp(0, 9, SECOND))},
 	}
 	tracks := []format.Cutscene_Track_Contents {
-		{id = 1, kind = .Property, name = "Brightness", binding = 0, sections = sections},
+		{
+			id = 1,
+			kind = .Property,
+			name = "Brightness",
+			binding = 0,
+			component = u64(LAMP_ID),
+			field = "brightness",
+			sections = sections,
+		},
 	}
 	e := begin_evaluation(t, f, cutscene_blob(tracks, length = SECOND), added = false)
 	defer end_evaluation(f, e)
@@ -666,6 +712,8 @@ restore_puts_back_what_restore_tracks_wrote_and_leaves_what_keep_tracks_wrote ::
 		{
 			id = 1,
 			kind = .Property,
+			component = u64(LAMP_ID),
+			field = "brightness",
 			name = "Brightness",
 			binding = 0,
 			finish = .Restore,
@@ -701,7 +749,15 @@ a_write_saves_the_field_once_and_marks_the_component_changed :: proc(t: ^testing
 		{id = 1, start = 0, end = SECOND, weight = 1, channels = channel(ramp(10, 20, SECOND))},
 	}
 	tracks := []format.Cutscene_Track_Contents {
-		{id = 1, kind = .Property, name = "Brightness", binding = 0, sections = sections},
+		{
+			id = 1,
+			kind = .Property,
+			name = "Brightness",
+			binding = 0,
+			component = u64(LAMP_ID),
+			field = "brightness",
+			sections = sections,
+		},
 	}
 	e := begin_evaluation(t, f, cutscene_blob(tracks, length = SECOND), added = false)
 	defer end_evaluation(f, e)
@@ -762,7 +818,15 @@ a_reload_keeps_the_time_and_restores_what_removed_tracks_wrote :: proc(t: ^testi
 		{id = 3, start = 0, end = 2 * SECOND, weight = 1, channels = channel(event_keys)},
 	}
 	both := []format.Cutscene_Track_Contents {
-		{id = 1, kind = .Property, name = "Brightness", binding = 0, sections = sections},
+		{
+			id = 1,
+			kind = .Property,
+			name = "Brightness",
+			binding = 0,
+			component = u64(LAMP_ID),
+			field = "brightness",
+			sections = sections,
+		},
 		{id = 2, kind = .Transform, name = "Move", binding = 0, sections = moves},
 	}
 	e := begin_evaluation(t, f, cutscene_blob(both, length = 2 * SECOND))
@@ -945,8 +1009,22 @@ a_restore_of_overlapping_fields_gives_back_the_first_value :: proc(t: ^testing.T
 	f := eval_setup(t)
 	defer eval_teardown(t, f)
 	tracks := []format.Cutscene_Track_Contents {
-		{id = 1, kind = .Property, name = "Whole", binding = 0},
-		{id = 2, kind = .Property, name = "Part", binding = 0},
+		{
+			id = 1,
+			kind = .Property,
+			name = "Whole",
+			binding = 0,
+			component = u64(LAMP_ID),
+			field = "brightness",
+		},
+		{
+			id = 2,
+			kind = .Property,
+			name = "Part",
+			binding = 0,
+			component = u64(LAMP_ID),
+			field = "brightness",
+		},
 	}
 	ecs.get_write(&f.world, f.lamp, Lamp).color = {1, 2, 3}
 	e := begin_evaluation(t, f, cutscene_blob(tracks), added = false)
@@ -981,6 +1059,8 @@ a_restore_follows_a_reload_that_no_evaluation_saw :: proc(t: ^testing.T) {
 		{
 			id = 1,
 			kind = .Property,
+			component = u64(LAMP_ID),
+			field = "brightness",
 			name = "Brightness",
 			binding = 0,
 			finish = .Keep,
@@ -995,4 +1075,497 @@ a_restore_follows_a_reload_that_no_evaluation_saw :: proc(t: ^testing.T) {
 	data, blob, _ := blob_of(f, e.cutscene)
 	restore(&f.cutscenes, e, &f.world, data, blob)
 	testing.expect_value(t, brightness(f), 5)
+}
+
+// property_setup is eval_setup with the engine's property kind in place of the test's.
+@(private = "file")
+property_setup :: proc(t: ^testing.T) -> ^Eval_Fixture {
+	f := eval_setup(t)
+	register_kind(&f.cutscenes, .Property, {phase = .Fixed, evaluate = property_track})
+	return f
+}
+
+// property is a property track of the lamp's field, with its sections.
+@(private = "file")
+property :: proc(
+	id: u32,
+	field: string,
+	sections: []format.Cutscene_Section_Contents,
+	finish := format.Cutscene_Finish.Restore,
+	component := LAMP_ID,
+) -> format.Cutscene_Track_Contents {
+	return {
+		id = id,
+		kind = .Property,
+		name = field,
+		binding = 0,
+		component = u64(component),
+		field = field,
+		finish = finish,
+		sections = sections,
+	}
+}
+
+@(private = "file")
+named :: proc(name: string, keys: []format.Cutscene_Key) -> format.Cutscene_Channel_Contents {
+	return {name = name, keys = keys}
+}
+
+@(private = "file")
+lamp :: proc(f: ^Eval_Fixture) -> Lamp {
+	return ecs.get(&f.world, f.lamp, Lamp)^
+}
+
+// A property track keys the lamp's brightness on a curve and its on bool in steps. A seek back and forth gives the
+// exact value at each time, whatever came before.
+@(test)
+a_property_track_seeks_to_the_exact_values :: proc(t: ^testing.T) {
+	f := property_setup(t)
+	defer eval_teardown(t, f)
+	brightness_keys := []format.Cutscene_Key {
+		{time = 0, value = 0, interp = .Linear},
+		{time = 2 * SECOND, value = 10, interp = .Auto},
+		{time = 3 * SECOND, value = 4, interp = .Auto},
+	}
+	on_keys := []format.Cutscene_Key {
+		{time = 0, value = 0, interp = .Constant},
+		{time = SECOND, value = 1, interp = .Linear},
+		{time = 3 * SECOND, value = 0, interp = .Constant},
+	}
+	tracks := []format.Cutscene_Track_Contents {
+		property(
+			1,
+			"brightness",
+			{
+				{
+					id = 1,
+					start = 0,
+					end = 4 * SECOND,
+					weight = 1,
+					channels = {named("value", brightness_keys)},
+				},
+			},
+		),
+		property(
+			2,
+			"on",
+			{
+				{
+					id = 2,
+					start = 0,
+					end = 4 * SECOND,
+					weight = 1,
+					channels = {named("value", on_keys)},
+				},
+			},
+		),
+	}
+	e := begin_evaluation(t, f, cutscene_blob(tracks), added = false)
+	defer end_evaluation(f, e)
+	times := []i32{SECOND, 3 * SECOND, SECOND / 2, 2 * SECOND + SECOND / 3, 0, 4 * SECOND, SECOND}
+	for time in times {
+		at(f, e, time)
+		testing.expectf(
+			t,
+			lamp(f).brightness == curve_value(brightness_keys, time),
+			"the brightness at %d: %v",
+			time,
+			lamp(f).brightness,
+		)
+		testing.expectf(t, lamp(f).on == (time >= SECOND && time < 3 * SECOND), "on at %d", time)
+	}
+	at(f, e, SECOND)
+	testing.expect_value(t, lamp(f).brightness, 5)
+	at(f, e, 2 * SECOND)
+	testing.expect_value(t, lamp(f).brightness, 10)
+}
+
+// When the cutscene finishes, a track set to restore puts its field back, and a track set to keep leaves the last
+// value.
+@(test)
+a_property_track_restores_or_keeps_its_field_when_the_cutscene_finishes :: proc(t: ^testing.T) {
+	f := property_setup(t)
+	defer eval_teardown(t, f)
+	ecs.get_write(&f.world, f.lamp, Lamp).count = 3
+	tracks := []format.Cutscene_Track_Contents {
+		property(
+			1,
+			"brightness",
+			{{id = 1, start = 0, end = SECOND, weight = 1, channels = {named("value", flat(40))}}},
+			finish = .Restore,
+		),
+		property(
+			2,
+			"count",
+			{{id = 2, start = 0, end = SECOND, weight = 1, channels = {named("value", flat(9))}}},
+			finish = .Keep,
+		),
+	}
+	testing.expect(
+		t,
+		asset.set_live(&f.assets, CUTSCENE_GUID, cutscene_blob(tracks, length = SECOND)),
+	)
+	overrides := []Binding_Override{{binding = Binding_Id(1), entity = f.lamp}}
+	player, ok := play(&f.cutscenes, &f.world, {cutscene = CUTSCENE_GUID, overrides = overrides})
+	testing.expect(t, ok)
+	defer release(&f.cutscenes, &f.world, player)
+	update(&f.cutscenes, {world = &f.world})
+	tick(f)
+	testing.expect_value(t, lamp(f).brightness, 40)
+	testing.expect_value(t, lamp(f).count, 9)
+	for _ in 0 ..< 70 {
+		tick(f)
+	}
+	update(&f.cutscenes, {world = &f.world})
+	testing.expect_value(t, status(&f.cutscenes, player), Player_Status.Restored)
+	testing.expect_value(t, lamp(f).brightness, 5)
+	testing.expect_value(t, lamp(f).count, 9)
+}
+
+// Each channel keys one of a vector's numbers. Absolute sections blend over the field's own value, and an additive
+// section adds to the result. A number that no channel keys keeps its own value.
+@(test)
+a_vector_blends_by_channel_and_additive_sections_add :: proc(t: ^testing.T) {
+	f := property_setup(t)
+	defer eval_teardown(t, f)
+	ecs.get_write(&f.world, f.lamp, Lamp).color = {0.25, 0.5, 0.75}
+	ecs.get_write(&f.world, f.lamp, Lamp).size = {1, 1}
+	tracks := []format.Cutscene_Track_Contents {
+		property(
+			1,
+			"color",
+			{
+				{
+					id = 1,
+					start = 0,
+					end = 2 * SECOND,
+					weight = 0.5,
+					channels = {named("r", flat(1))},
+				},
+				{
+					id = 2,
+					start = SECOND,
+					end = 2 * SECOND,
+					weight = 1,
+					flags = {.Additive},
+					channels = {named("g", flat(0.25))},
+				},
+			},
+		),
+		property(
+			2,
+			"size",
+			{{id = 3, start = 0, end = 2 * SECOND, weight = 1, channels = {named("y", flat(3))}}},
+		),
+	}
+	e := begin_evaluation(t, f, cutscene_blob(tracks), added = false)
+	defer end_evaluation(f, e)
+	at(f, e, SECOND / 2)
+	testing.expect_value(t, lamp(f).color, [3]f32{0.625, 0.5, 0.75})
+	testing.expect_value(t, lamp(f).size, [2]f32{1, 3})
+	at(f, e, SECOND)
+	testing.expect_value(t, lamp(f).color, [3]f32{0.625, 0.75, 0.75})
+	// Past the sections, the field is its own value again.
+	at(f, e, 3 * SECOND)
+	testing.expect_value(t, lamp(f).color, [3]f32{0.25, 0.5, 0.75})
+	testing.expect_value(t, lamp(f).size, [2]f32{1, 1})
+}
+
+// Stepped fields take the value of the section with the most weight, or keep their own while the sections' weights
+// leave it more. An asset field takes the GUID that its key names.
+@(test)
+stepped_fields_take_the_heaviest_value :: proc(t: ^testing.T) {
+	f := property_setup(t)
+	defer eval_teardown(t, f)
+	ecs.get_write(&f.world, f.lamp, Lamp).mode = .Steady
+	bulb_a := format.Guid {
+		0  = 0xb1,
+		15 = 1,
+	}
+	bulb_b := format.Guid {
+		0  = 0xb1,
+		15 = 2,
+	}
+	steady := []format.Cutscene_Key{{time = 0, value = 0, interp = .Constant}}
+	flicker := []format.Cutscene_Key{{time = 0, value = 5, interp = .Constant}}
+	swap := []format.Cutscene_Key {
+		{time = 0, value = 1, interp = .Constant},
+		{time = SECOND, value = 0, interp = .Constant},
+	}
+	tracks := []format.Cutscene_Track_Contents {
+		// The first section eases out over [1, 3) s as the second eases in over [1, 3) s.
+		property(
+			1,
+			"mode",
+			{
+				{
+					id = 1,
+					start = 0,
+					end = 3 * SECOND,
+					ease_out = 2 * SECOND,
+					weight = 1,
+					channels = {named("value", steady)},
+				},
+				{
+					id = 2,
+					start = SECOND,
+					end = 4 * SECOND,
+					ease_in = 2 * SECOND,
+					weight = 1,
+					channels = {named("value", flicker)},
+				},
+			},
+		),
+		property(
+			2,
+			"count",
+			{
+				{
+					id = 3,
+					start = 0,
+					end = 4 * SECOND,
+					weight = 1,
+					channels = {named("value", flat(2))},
+				},
+				{
+					id = 4,
+					start = 0,
+					end = 4 * SECOND,
+					weight = 1,
+					flags = {.Additive},
+					channels = {named("value", flat(5))},
+				},
+			},
+		),
+		property(
+			4,
+			"on",
+			{
+				{
+					id = 6,
+					start = 0,
+					end = 4 * SECOND,
+					ease_in = 2 * SECOND,
+					weight = 1,
+					channels = {named("value", flat(1))},
+				},
+			},
+		),
+		property(
+			3,
+			"bulb",
+			{
+				{
+					id = 5,
+					start = 0,
+					end = 2 * SECOND,
+					weight = 1,
+					channels = {{name = "value", flags = {.Guids}, keys = swap}},
+				},
+			},
+		),
+	}
+	blob := format.cutscene_write(
+		{
+			guid = CUTSCENE_GUID,
+			key = 1,
+			length = 4 * SECOND,
+			rate = 30,
+			range_end = 4 * SECOND,
+			bindings = {LAMP_BINDING},
+			tracks = tracks,
+			source_path = "game/cutscenes/test.cutscene",
+			guids = {bulb_a, bulb_b},
+		},
+		context.temp_allocator,
+	)
+	e := begin_evaluation(t, f, blob, added = false)
+	defer end_evaluation(f, e)
+	at(f, e, SECOND / 2)
+	testing.expect_value(t, lamp(f).mode, Lamp_Mode.Off)
+	testing.expect_value(t, lamp(f).count, 7)
+	testing.expect_value(t, lamp(f).bulb, bulb_b)
+	at(f, e, SECOND + SECOND / 2)
+	testing.expect_value(t, lamp(f).mode, Lamp_Mode.Off)
+	testing.expect_value(t, lamp(f).bulb, bulb_a)
+	// At 2 s the two eases are halfway, and the later section wins the tie.
+	at(f, e, 2 * SECOND)
+	testing.expect_value(t, lamp(f).mode, Lamp_Mode.Flicker)
+	at(f, e, 2 * SECOND + SECOND / 2)
+	testing.expect_value(t, lamp(f).mode, Lamp_Mode.Flicker)
+	testing.expect_value(t, lamp(f).bulb, format.Guid{})
+	// Early in the cross, the first section still has the most weight.
+	at(f, e, SECOND + SECOND / 4)
+	testing.expect_value(t, lamp(f).mode, Lamp_Mode.Off)
+	// Alone and easing in, a section wins once its weight passes what it leaves to the field's own value.
+	at(f, e, SECOND / 2)
+	testing.expect(t, !lamp(f).on)
+	at(f, e, SECOND + SECOND / 2)
+	testing.expect(t, lamp(f).on)
+}
+
+// A volume's setting takes its override while a section covers the time, and its own flag otherwise.
+@(test)
+a_property_track_overrides_a_volume_setting_while_it_plays :: proc(t: ^testing.T) {
+	f := property_setup(t)
+	defer eval_teardown(t, f)
+	tracks := []format.Cutscene_Track_Contents {
+		property(
+			1,
+			"glow",
+			{{id = 1, start = 0, end = SECOND, weight = 1, channels = {named("value", flat(2))}}},
+		),
+	}
+	e := begin_evaluation(t, f, cutscene_blob(tracks), added = false)
+	defer end_evaluation(f, e)
+	at(f, e, SECOND / 2)
+	testing.expect_value(t, lamp(f).glow.value, 2)
+	testing.expect(t, lamp(f).glow.override)
+	at(f, e, 2 * SECOND)
+	testing.expect_value(t, lamp(f).glow.value, 0)
+	testing.expect(t, !lamp(f).glow.override)
+}
+
+@(private = "file")
+Error_Count :: struct {
+	errors: int,
+}
+
+// count_errors is a logger that counts the errors that the code under test logs.
+@(private = "file")
+count_errors :: proc(heard: ^Error_Count) -> runtime.Logger {
+	return {
+		procedure = proc(
+			data: rawptr,
+			level: runtime.Logger_Level,
+			text: string,
+			options: runtime.Logger_Options,
+			location := #caller_location,
+		) {
+			if level >= .Error {
+				(^Error_Count)(data).errors += 1
+			}
+		},
+		data = heard,
+		lowest_level = .Debug,
+	}
+}
+
+// A track whose field cannot animate, or whose channels or keys do not suit its field, does nothing. The player logs
+// each once, however many times it evaluates.
+@(test)
+a_property_track_that_cannot_animate_its_field_logs_once_and_does_nothing :: proc(t: ^testing.T) {
+	f := property_setup(t)
+	defer eval_teardown(t, f)
+	value := []format.Cutscene_Section_Contents {
+		{id = 1, start = 0, end = SECOND, weight = 1, channels = {named("value", flat(1))}},
+	}
+	tracks := []format.Cutscene_Track_Contents {
+		property(1, "serial", value),
+		property(2, "owner", value),
+		property(3, "turn", value),
+		property(4, "nothing", value),
+		property(5, "brightness", value, component = ecs.Component_Id(424242)),
+		property(
+			6,
+			"color",
+			{{id = 2, start = 0, end = SECOND, weight = 1, channels = {named("w", flat(1))}}},
+		),
+		property(
+			7,
+			"on",
+			{
+				{
+					id = 3,
+					start = 0,
+					end = SECOND,
+					weight = 1,
+					channels = {named("value", flat(0.5))},
+				},
+			},
+		),
+		property(
+			8,
+			"mode",
+			{{id = 4, start = 0, end = SECOND, weight = 1, channels = {named("value", flat(1))}}},
+		),
+		property(
+			9,
+			"on",
+			{
+				{
+					id = 5,
+					start = 0,
+					end = SECOND,
+					weight = 1,
+					flags = {.Additive},
+					channels = {named("value", flat(1))},
+				},
+			},
+		),
+		property(
+			10,
+			"count",
+			{
+				{
+					id = 6,
+					start = 0,
+					end = SECOND,
+					weight = 1,
+					channels = {named("value", flat(1.5))},
+				},
+			},
+		),
+		property(11, "bulb", value),
+	}
+	ecs.get_write(&f.world, f.lamp, Lamp).serial = 77
+	before := lamp(f)
+	e := begin_evaluation(t, f, cutscene_blob(tracks), added = false)
+	defer end_evaluation(f, e)
+	heard: Error_Count
+	{
+		context.logger = count_errors(&heard)
+		at(f, e, SECOND / 2)
+		at(f, e, SECOND / 4)
+		at(f, e, 0)
+	}
+	testing.expect_value(t, heard.errors, len(tracks))
+	testing.expect_value(t, lamp(f), before)
+	testing.expect_value(t, len(e.snapshot.saved), 0)
+	for track in tracks {
+		target, resolved := e.targets[track.id]
+		testing.expectf(t, resolved, "the track %d is resolved", track.id)
+		_, has_field := target.field.?
+		testing.expectf(t, !has_field, "the track %d has no field", track.id)
+	}
+}
+
+// A hot reload resolves the tracks again, so a track that now names another field writes that one.
+@(test)
+a_reload_resolves_a_property_track_again :: proc(t: ^testing.T) {
+	f := property_setup(t)
+	defer eval_teardown(t, f)
+	sections := []format.Cutscene_Section_Contents {
+		{id = 1, start = 0, end = SECOND, weight = 1, channels = {named("value", flat(40))}},
+	}
+	e := begin_evaluation(
+		t,
+		f,
+		cutscene_blob({property(1, "brightness", sections, finish = .Keep)}),
+		added = false,
+	)
+	defer end_evaluation(f, e)
+	at(f, e, SECOND / 2)
+	testing.expect_value(t, lamp(f).brightness, 40)
+	testing.expect(
+		t,
+		asset.set_live(
+			&f.assets,
+			CUTSCENE_GUID,
+			cutscene_blob({property(1, "count", sections, finish = .Keep)}, key = 2),
+		),
+	)
+	at(f, e, SECOND / 2)
+	testing.expect_value(t, lamp(f).count, 40)
+	testing.expect_value(t, lamp(f).brightness, 40)
 }
