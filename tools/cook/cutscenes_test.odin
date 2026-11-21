@@ -211,6 +211,13 @@ each_mistake_in_a_cutscene_is_reported_at_its_line :: proc(t: ^testing.T) {
 		"cutscene 1\nlength = 10\ntrack 1 audio \"A\"\n\tsection 1 0 10\n\t\tasset = $" +
 		SOUND_GUID +
 		"\n"
+	// A binding that suspends nothing and a global event track, on lines 3 to 6.
+	EVENTS ::
+		"cutscene 1\nlength = 10\nbinding 1 \"A\"\n\tpossess = " +
+		S +
+		"\n\tsuspend = []\ntrack 1 event \"E\"\n"
+	// The same with a trigger, on lines 3 to 7.
+	TRIGGER :: EVENTS + "\ttrigger 1 5 a\n"
 	cases := [?]struct {
 		text:     string,
 		line:     int,
@@ -950,6 +957,53 @@ each_mistake_in_a_cutscene_is_reported_at_its_line :: proc(t: ^testing.T) {
 			11,
 			"comes before the section's channels",
 		},
+		{EVENTS + "\ttrigger 1 5\n", 7, "a trigger is `trigger <id> <time> <name>`"},
+		{EVENTS + "\ttrigger 1 5 a-b\n", 7, "a trigger is `trigger <id> <time> <name>`"},
+		{EVENTS + "\trange 1 5 r\n", 7, "a range is `range <id> <start> <end> <name>`"},
+		{EVENTS + "\trange 1 5 3 r\n", 7, "a range starts before it ends"},
+		{TRIGGER + "\ttrigger 1 6 b\n", 8, "a trigger or a range with the ID 1 already"},
+		{EVENTS + "\ttrigger 1 11 a\n", 7, "inside the length (10)"},
+		{EVENTS + "\trange 1 5 11 a\n", 7, "inside the length (10)"},
+		{EVENTS + "\tsection 1 0 10\n", 7, "an event track has no sections"},
+		{EVENTS + "\twhen_finished = keep\n", 7, "an event track has no when_finished"},
+		{TRIGGER + "\t\tvalue = number x\n", 8, "a number value is"},
+		{TRIGGER + "\t\tvalue = number [1, 2]\n", 8, "a number value is"},
+		{TRIGGER + "\t\tvalue = bool yes\n", 8, "a bool value is"},
+		{TRIGGER + "\t\tvalue = string red\n", 8, "a string value is"},
+		{TRIGGER + "\t\tvalue = vector [1, 2]\n", 8, "a vector value is"},
+		{TRIGGER + "\t\tvalue = entity 9\n", 8, "an entity value is the ID of a binding"},
+		{TRIGGER + "\t\tvalue = entity x\n", 8, "an entity value is"},
+		{TRIGGER + "\t\tvalue = position [1, 2]\n", 8, "a position value is"},
+		{TRIGGER + "\t\tvalue = asset $12\n", 8, "an asset value is"},
+		{TRIGGER + "\t\tvalue = color 1\n", 8, "a value is `<kind> <value>`"},
+		{
+			TRIGGER +
+			"\t\tvalue = number 1\n\t\tvalue = number 2\n\t\tvalue = number 3\n\t\tvalue = number 4\n\t\tvalue = number 5\n",
+			12,
+			"at most 4 values",
+		},
+		{TRIGGER + "\t\tfire_on_seek = yes\n", 8, "fire_on_seek is true or false"},
+		{
+			TRIGGER + "\t\tfire_when_skipped = true\n\t\tfire_when_skipped = false\n",
+			9,
+			"fire_when_skipped is set twice",
+		},
+		{TRIGGER + "\t\tbinding = 1\n", 8, "comes before the track's triggers and ranges"},
+		{TRIGGER + "\t\tspeed = 1\n", 8, "is not a setting of a trigger or a range"},
+		{EVENTS + "\tvalue = number 1\n", 7, "value is a setting of a trigger or a range"},
+		{
+			"cutscene 1\nlength = 10\n" + MOVE + "\ttrigger 1 5 a\n",
+			9,
+			"only an event track has triggers and ranges",
+		},
+		{"cutscene 1\nlength = 10\ntrigger 1 5 a\n", 3, "a trigger comes after a track line"},
+		{
+			"cutscene 1\nlength = 10\nbinding 1 \"A\"\n\tpossess = " +
+			S +
+			"\ntrack 1 event \"E\"\n\tbinding = 1\n",
+			6,
+			"the binding suspends its behaviours",
+		},
 	}
 	for c in cases {
 		_, problems := cutscene_parse(c.text, context.temp_allocator)
@@ -1117,6 +1171,81 @@ audio_sections_play_their_sound_from_an_offset_on_a_bus :: proc(t: ^testing.T) {
 }
 
 @(test)
+event_tracks_have_triggers_and_ranges_with_values :: proc(t: ^testing.T) {
+	text :=
+		"cutscene 1\nlength = 600000\nbinding 1 \"Gate\"\n\tpossess = @" +
+		SCENE_GUID +
+		"/1\n\tsuspend = [ai]\n" +
+		"track 1 event \"Gate\"\n\tbinding = 1\n" +
+		"\trange 2 200000 300000 alarm\n\t\tfire_on_seek = true\n\t\tvalue = string \"red\"\n" +
+		"\ttrigger 1 150000 door_open\n\t\tfire_when_skipped = true\n" +
+		"\t\tvalue = number 3.5\n\t\tvalue = bool true\n\t\tvalue = vector [0, 1, 0]\n\t\tvalue = entity 1\n" +
+		"track 2 event \"Story\"\n" +
+		"\ttrigger 3 600000 the_end\n\t\tvalue = position [1, 2, 3]\n\t\tvalue = asset $" +
+		SOUND_GUID +
+		"\n"
+	parsed, problems := cutscene_parse(text, context.temp_allocator)
+	testing.expectf(t, len(problems) == 0, "problems: %v", problems)
+	if len(parsed.contents.tracks) != 2 {
+		return
+	}
+	gate := parsed.contents.tracks[0]
+	testing.expect_value(t, gate.binding, 0)
+	// The track's events are in start order, whatever the text's order.
+	if !testing.expect_value(t, len(gate.events), 2) {
+		return
+	}
+	door, alarm := gate.events[0], gate.events[1]
+	testing.expect_value(t, door.id, 1)
+	testing.expect_value(t, door.name, "door_open")
+	testing.expect_value(t, door.start, 150000)
+	testing.expect_value(t, door.end, 150000)
+	testing.expect_value(t, door.flags, format.Cutscene_Event_Flags{.Fire_When_Skipped})
+	if testing.expect_value(t, len(door.values), 4) {
+		testing.expect_value(t, door.values[0].kind, format.Cutscene_Value_Kind.Number)
+		testing.expect_value(t, door.values[0].number, 3.5)
+		testing.expect_value(t, door.values[1].kind, format.Cutscene_Value_Kind.Bool)
+		testing.expect_value(t, door.values[1].index, 1)
+		testing.expect_value(t, door.values[2].vector, [3]f32{0, 1, 0})
+		testing.expect_value(t, door.values[3].kind, format.Cutscene_Value_Kind.Entity)
+		testing.expect_value(t, door.values[3].index, 0)
+	}
+	testing.expect_value(t, alarm.flags, format.Cutscene_Event_Flags{.Range, .Fire_On_Seek})
+	testing.expect_value(t, alarm.end, 300000)
+	if testing.expect_value(t, len(alarm.values), 1) {
+		testing.expect_value(t, alarm.values[0].text, "red")
+	}
+	story := parsed.contents.tracks[1]
+	testing.expect_value(t, story.binding, format.CUTSCENE_NONE)
+	if testing.expect_value(t, len(story.events), 1) &&
+	   testing.expect_value(t, len(story.events[0].values), 2) {
+		end := story.events[0]
+		raw, _ := format.world_raw_from_meters(2)
+		testing.expect_value(t, end.values[0].position.y, raw)
+		testing.expect_value(t, end.values[1].kind, format.Cutscene_Value_Kind.Asset)
+		testing.expect_value(t, parsed.contents.guids[end.values[1].index], guid_of(SOUND_GUID))
+	}
+	found := false
+	for r in parsed.references {
+		found ||= r.guid == guid_of(SOUND_GUID)
+	}
+	testing.expect(t, found, "an asset value is a reference of the cutscene")
+	// The blob checks.
+	blob := format.cutscene_write(parsed.contents, context.temp_allocator)
+	aligned := make([]byte, len(blob) + 16, context.temp_allocator)
+	start := int(-uintptr(raw_data(aligned)) & 15)
+	copy(aligned[start:], blob)
+	_, ok := format.cutscene_view(aligned[start:][:len(blob)])
+	testing.expect(t, ok, "the blob checks")
+}
+
+@(private = "file")
+guid_of :: proc(text: string) -> format.Guid {
+	guid, _ := format.guid_parse(text)
+	return guid
+}
+
+@(test)
 each_kind_of_track_suits_its_binding :: proc(t: ^testing.T) {
 	kinds := [?]struct {
 		name:    string,
@@ -1129,19 +1258,20 @@ each_kind_of_track_suits_its_binding :: proc(t: ^testing.T) {
 		{"animation", .Required, "", "\t\tasset = $" + CLIP_GUID + "\n"},
 		{"camera_cut", .None, "", "\t\tcamera = 1\n"},
 		{"audio", .Optional, "", "\t\tasset = $" + SOUND_GUID + "\n"},
-		{"event", .Optional, "", ""},
+		{"event", .Optional, "", "trigger"},
 		{"sub_sequence", .None, "", "\t\tasset = $" + SHOT_GUID + "\n"},
 		{"presentation", .None, "", ""},
 	}
 	for k in kinds {
 		for bound in ([?]bool{false, true}) {
+			// An event track has triggers, not sections, and sends to a binding that does not suspend its behaviours.
 			text := fmt.tprintf(
-				"cutscene 1\nlength = 10\nbinding 1 \"A\"\n\tpossess = @%s/1\ntrack 1 %s \"T\"\n%s%s\tsection 1 0 10\n%s",
+				"cutscene 1\nlength = 10\nbinding 1 \"A\"\n\tpossess = @%s/1\n\tsuspend = []\ntrack 1 %s \"T\"\n%s%s%s",
 				SCENE_GUID,
 				k.name,
 				"\tbinding = 1\n" if bound else "",
 				k.track,
-				k.section,
+				"\ttrigger 1 0 t\n" if k.section == "trigger" else fmt.tprintf("\tsection 1 0 10\n%s", k.section),
 			)
 			_, problems := cutscene_parse(text, context.temp_allocator)
 			good := k.use == .Optional || (k.use == .Required) == bound

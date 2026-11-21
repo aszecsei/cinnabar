@@ -935,3 +935,211 @@ a_skip_target_follows_the_policy :: proc(t: ^testing.T) {
 	_, none := cutscene_skip_target(data, blob, 30000)
 	testing.expect(t, !none)
 }
+
+// event_cutscene has a binding, a global event track with a trigger and a range, and an event track of the binding with
+// a trigger that carries a value of each kind.
+@(private = "file")
+event_cutscene :: proc() -> []byte {
+	contents := Cutscene_Contents {
+		length = 120000,
+		rate = 30,
+		range_end = 120000,
+		bindings = {
+			{
+				id = 1,
+				kind = .Possessed,
+				name = "Gate",
+				parent = CUTSCENE_NONE,
+				asset = SCENE,
+				entity = 1,
+				rotation = {0, 0, 0, 1},
+				scale = {1, 1, 1},
+			},
+		},
+		tracks = {
+			{
+				id = 1,
+				kind = .Transform,
+				name = "Walk",
+				binding = 0,
+				sections = {{id = 1, start = 0, end = 60000, weight = 1}},
+			},
+			{
+				id = 2,
+				kind = .Event,
+				name = "Story",
+				binding = CUTSCENE_NONE,
+				events = {
+					{id = 1, start = 0, end = 0, name = "begun", flags = {.Fire_When_Skipped}},
+					{
+						id = 2,
+						start = 30000,
+						end = 90000,
+						name = "alarm",
+						flags = {.Range, .Fire_On_Seek},
+						values = {{kind = .String, text = "red"}},
+					},
+				},
+			},
+			{
+				id = 3,
+				kind = .Event,
+				name = "Gate",
+				binding = 0,
+				events = {
+					{
+						id = 3,
+						start = 60000,
+						end = 60000,
+						name = "door_open",
+						values = {
+							{kind = .Number, number = 2.5},
+							{kind = .Bool, index = 1},
+							{kind = .Vector, vector = {0, 1, 0}},
+							{kind = .Entity, index = 0},
+						},
+					},
+					{
+						id = 4,
+						start = 120000,
+						end = 120000,
+						name = "the_end",
+						values = {{kind = .Position, position = {1, -2, 3}}, {kind = .Asset, index = 0}},
+					},
+				},
+			},
+		},
+		guids = {SOUND},
+	}
+	return aligned(cutscene_write(contents, context.temp_allocator))
+}
+
+@(test)
+event_tracks_round_trip :: proc(t: ^testing.T) {
+	data := event_cutscene()
+	blob, ok := cutscene_view(data)
+	if !testing.expect(t, ok) {
+		return
+	}
+	tracks := cutscene_tracks(data, blob)
+	testing.expect_value(t, tracks[0].event_count, 0)
+	testing.expect_value(t, tracks[1].first_event, 0)
+	testing.expect_value(t, tracks[1].event_count, 2)
+	testing.expect_value(t, tracks[2].first_event, 2)
+	story := cutscene_track_events(data, blob, tracks[1])
+	testing.expect_value(t, blob_string(data, story[0].name), "begun")
+	testing.expect_value(t, story[0].flags, Cutscene_Event_Flags{.Fire_When_Skipped})
+	testing.expect_value(t, story[1].end, 90000)
+	alarm := cutscene_values_of(data, blob, story[1])
+	testing.expect_value(t, blob_string(data, alarm[0].text), "red")
+	gate := cutscene_track_events(data, blob, tracks[2])
+	door := cutscene_values_of(data, blob, gate[0])
+	testing.expect_value(t, len(door), 4)
+	testing.expect_value(t, door[0].number, 2.5)
+	testing.expect_value(t, door[1].index, 1)
+	testing.expect_value(t, door[2].vector, [3]f32{0, 1, 0})
+	testing.expect_value(t, door[3].kind, Cutscene_Value_Kind.Entity)
+	end := cutscene_values_of(data, blob, gate[1])
+	testing.expect_value(t, end[0].position, [3]i64{1, -2, 3})
+	testing.expect_value(t, end[1].kind, Cutscene_Value_Kind.Asset)
+	references, references_ok := blob_references(data, context.temp_allocator)
+	testing.expect(t, references_ok)
+	found := false
+	for r in references {
+		found ||= r == SOUND
+	}
+	testing.expect(t, found, "an asset value is a reference")
+}
+
+@(test)
+event_tracks_with_bad_events_are_refused :: proc(t: ^testing.T) {
+	data := event_cutscene()
+	blob, ok := cutscene_view(data)
+	if !testing.expect(t, ok) {
+		return
+	}
+	refused :: proc(t: ^testing.T, data: []byte, what: string) {
+		_, ok := cutscene_view(data)
+		testing.expect(t, !ok, what)
+	}
+	tracks := cutscene_tracks(data, blob)
+	events := cutscene_events(data, blob)
+	values := cutscene_event_values(data, blob)
+
+	tracks[0].event_count = 1
+	refused(t, data, "a transform track with events")
+	tracks[0].event_count = 0
+	tracks[1].finish = .Keep
+	refused(t, data, "an event track that keeps")
+	tracks[1].finish = .Restore
+	tracks[1].first_event = 1
+	refused(t, data, "an event track whose events do not follow the track before it")
+	tracks[1].first_event = 0
+	tracks[2].event_count = 3
+	refused(t, data, "an event track whose events are past the table")
+	tracks[2].event_count = 2
+	tracks[0].kind = .Event
+	refused(t, data, "an event track with sections")
+	tracks[0].kind = .Transform
+
+	events[0].end = 10
+	refused(t, data, "a trigger whose end is not its start")
+	events[0].end = 0
+	events[1].end = events[1].start
+	refused(t, data, "a range that ends at its start")
+	events[1].end = 90000
+	events[1].flags -= {.Range}
+	refused(t, data, "a range without the Range flag")
+	events[1].flags += {.Range}
+	events[3].end = 120001
+	events[3].start = 120001
+	refused(t, data, "a trigger past the length")
+	events[3].start = 120000
+	events[3].end = 120000
+	events[0].start = 40000
+	events[0].end = 40000
+	refused(t, data, "a track's events out of start order")
+	events[0].start = 0
+	events[0].end = 0
+	events[0].flags = transmute(Cutscene_Event_Flags)u32(1 << 5 | 1 << 2)
+	refused(t, data, "an unknown event flag")
+	events[0].flags = {.Fire_When_Skipped}
+	events[0].name.size = 0
+	refused(t, data, "an event without a name")
+	events[0].name.size = 5
+	events[2].value_count = MAX_CUTSCENE_EVENT_VALUES + 1
+	refused(t, data, "an event with too many values")
+	events[2].value_count = 4
+
+	// The values: alarm's string, then door_open's number, bool, vector and entity, then the_end's position and asset.
+	values[1].number = math.inf_f64(1)
+	refused(t, data, "a number that is not finite")
+	values[1].number = 2.5
+	values[2].index = 2
+	refused(t, data, "a bool that is not 0 or 1")
+	values[2].index = 1
+	values[4].index = 1
+	refused(t, data, "an entity past the bindings")
+	values[4].index = 0
+	values[6].index = 1
+	refused(t, data, "an asset past the GUIDs")
+	values[6].index = 0
+	values[5].position.x = WORLD_POSITION_LIMIT + 1
+	refused(t, data, "a position past the limit")
+	values[5].position.x = 1
+	values[3].number = 1
+	refused(t, data, "a vector with a number")
+	values[3].number = 0
+	values[0].text.size = u32(len(data))
+	refused(t, data, "a string past the end")
+	values[0].text.size = 3
+	values[0].kind = Cutscene_Value_Kind(7)
+	refused(t, data, "an unknown kind of value")
+	values[0].kind = .String
+	values[0].reserved = 1
+	refused(t, data, "a value's reserved word that is not 0")
+	values[0].reserved = 0
+
+	_, ok = cutscene_view(data)
+	testing.expect(t, ok, "the blob as it was")
+}
