@@ -74,7 +74,7 @@ property_target :: proc(ctx: ^Track_Context) -> (Property_Field, bool) {
 	e := ctx.evaluation
 	info := ecs.registry_find(&ctx.world.registry, ecs.Component_Id(ctx.track.component))
 	layout := info.layout if info != nil else 0
-	if found, seen := e.targets[ctx.track.id]; seen && found.layout == layout {
+	if found, seen := e.targets[{ctx.scope, ctx.track.id}]; seen && found.layout == layout {
 		return found.field.?
 	}
 	field, problem := resolve_property(ctx, info)
@@ -92,7 +92,7 @@ property_target :: proc(ctx: ^Track_Context) -> (Property_Field, bool) {
 			problem,
 		)
 	}
-	e.targets[ctx.track.id] = target
+	e.targets[{ctx.scope, ctx.track.id}] = target
 	return target.field.?
 }
 
@@ -203,7 +203,7 @@ blend_continuous :: proc(
 	blends: [3]Blend(f32)
 	added: [3]f32
 	for section in format.cutscene_track_sections(ctx.data, ctx.blob, ctx.track) {
-		at := section_at(ctx.blob, section, ctx.time) or_continue
+		at := sample(ctx, section, ctx.time) or_continue
 		covered = true
 		for channel in format.cutscene_section_channels(ctx.data, ctx.blob, section) {
 			c, _ := channel_component(target.kind, format.blob_string(ctx.data, channel.name))
@@ -238,7 +238,7 @@ blend_stepped :: proc(
 	picked: Maybe(f32)
 	added: f64
 	for section in format.cutscene_track_sections(ctx.data, ctx.blob, ctx.track) {
-		at := section_at(ctx.blob, section, ctx.time) or_continue
+		at := sample(ctx, section, ctx.time) or_continue
 		covered = true
 		for channel in format.cutscene_section_channels(ctx.data, ctx.blob, section) {
 			v := curve_step(format.cutscene_channel_keys(ctx.data, ctx.blob, channel), at.local)

@@ -21,6 +21,7 @@ Binding_State :: union {
 	Binding_Possessed,
 	Binding_Spawned,
 	Binding_Missing,
+	Binding_Mapped,
 }
 
 // Binding_Possessed is an entity that the cutscene does not own: a scene's entity, or an override's. The binding
@@ -48,6 +49,13 @@ Binding_Hold :: struct {
 
 // Binding_Missing is an optional binding whose entity was not found. Its tracks do nothing.
 Binding_Missing :: struct {}
+
+// Binding_Mapped is a binding of a sub-sequence that its section gives to a binding of the parent, by the parent's index
+// (see docs/cinematics/tracks.md#sub-sequence-tracks). Its entity is the parent binding's, which tree_binding finds, and
+// it suspends nothing: the parent's binding holds the entity.
+Binding_Mapped :: struct {
+	parent: u32,
+}
 
 // Bindings is the state of each binding of one cutscene, in the order of the blob's bindings. It uses the heap.
 Bindings :: struct {
@@ -85,7 +93,8 @@ Binding_Failure :: struct {
 }
 
 // Resolve is what resolve_bindings needs: the world, its scenes, the scripts that a prefab's behaviours attach to (or
-// nil), the assets that prefabs load from, and the cutscene's blob.
+// nil), the assets that prefabs load from, and the cutscene's blob. For a sub-sequence, mapped has, for each binding,
+// the parent's binding that its section maps it to, or nil.
 Resolve :: struct {
 	world:   ^ecs.World,
 	scenes:  ^scene.Scenes,
@@ -93,6 +102,15 @@ Resolve :: struct {
 	assets:  ^asset.Assets,
 	data:    []byte,
 	blob:    ^format.Cutscene_Blob,
+	mapped:  []Maybe(Mapping),
+}
+
+// Mapping is a parent's binding that a sub-sequence's binding is mapped to: its index in the parent's blob, and its
+// entity when the sub-sequence resolves, which a spawned binding under the mapped one spawns under. 0 for a parent's
+// binding that is missing.
+Mapping :: struct {
+	parent: u32,
+	entity: ecs.Entity,
 }
 
 // binding_index is the index of the binding with an ID or a name, and false when the cutscene has none.
@@ -120,7 +138,8 @@ binding_index :: proc(data: []byte, blob: ^format.Cutscene_Blob, key: Binding_Ke
 // docs/cinematics/bindings.md#resolving). An override wins over the asset's reference. A possessed binding finds its
 // entity in the first ready scene with its GUID. A spawned one spawns its prefab hidden by Loading until
 // reveal_bindings, and the cutscene owns it. A missing optional binding warns and does nothing. A missing required
-// binding, or a prefab that does not spawn, fails: what was spawned is despawned, and the failure names the binding.
+// binding, or a prefab that does not spawn, fails: what was spawned is despawned, and the failure names the binding. A
+// binding that r.mapped maps is Binding_Mapped, and an override of it does nothing.
 resolve_bindings :: proc(
 	b: ^Bindings,
 	r: Resolve,
@@ -147,6 +166,12 @@ resolve_bindings :: proc(
 	}
 
 	for binding, index in bindings {
+		if index < len(r.mapped) {
+			if m, is_mapped := r.mapped[index].?; is_mapped {
+				set_binding(b, w, index, Binding_Mapped{m.parent})
+				continue
+			}
+		}
 		hold := hold_of(binding)
 		if entity := given[index]; entity != 0 {
 			if ecs.is_alive(w, entity) {
@@ -197,7 +222,7 @@ binding_entity :: proc(b: ^Bindings, w: ^ecs.World, index: int) -> (ecs.Entity, 
 		entity = s.entity
 	case Binding_Spawned:
 		entity = s.entity
-	case Binding_Missing:
+	case Binding_Missing, Binding_Mapped:
 		return 0, false
 	}
 	if entity == 0 || !ecs.is_alive(w, entity) {
@@ -273,7 +298,7 @@ held_by :: proc(state: Binding_State) -> (ecs.Entity, Binding_Hold) {
 		return s.entity, s.hold
 	case Binding_Spawned:
 		return s.entity, s.hold
-	case Binding_Missing:
+	case Binding_Missing, Binding_Mapped:
 	}
 	return 0, {}
 }
@@ -361,6 +386,11 @@ spawn :: proc(
 	parent: ecs.Entity
 	if binding.parent != format.CUTSCENE_NONE {
 		parent, _ = binding_entity(b, w, int(binding.parent))
+		if int(binding.parent) < len(r.mapped) {
+			if m, is_mapped := r.mapped[binding.parent].?; is_mapped && ecs.is_alive(w, m.entity) {
+				parent = m.entity
+			}
+		}
 		if parent != 0 && !ecs.has(w, parent, ecs.Transform) {
 			parent = 0
 		}

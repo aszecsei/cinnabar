@@ -30,7 +30,7 @@ Cut_Gameplay :: struct {}
 // Cut_Shot is a section that shows: its ID and its camera, the claim that the track holds on the views for it, the views
 // that hold it, in Game_State, and how the claim leaves if the player ends now.
 Cut_Shot :: struct {
-	section: u32,
+	section: Scoped,
 	entity:  ecs.Entity,
 	views:   ^camera.Views,
 	token:   camera.Claim_Token,
@@ -41,7 +41,7 @@ Cut_Shot :: struct {
 // nothing until another section shows or the binding changes. A claim that fails because the views' entries are all
 // taken is not a refusal: the track shows gameplay and claims again at its next evaluation.
 Cut_Refused :: struct {
-	section: u32,
+	section: Scoped,
 	entity:  ecs.Entity,
 }
 
@@ -64,8 +64,8 @@ camera_cut_track :: proc(ctx: ^Track_Context) {
 	jumped := ctx.skipped || e.cut.jumps != e.jumps
 	e.cut.jumps = e.jumps
 	sections := format.cutscene_track_sections(ctx.data, ctx.blob, ctx.track)
-	index, showing := shown_section(ctx.blob, sections, ctx.time)
-	if ctx.skipped && ctx.time == ctx.blob.range_end {
+	index, showing := shown_section(ctx, sections, ctx.time)
+	if ctx.skipped && ctx.time == ctx.range_end {
 		// The player finishes in this update, before the views choose again: the last shot is never chosen.
 		showing = false
 	}
@@ -75,12 +75,12 @@ camera_cut_track :: proc(ctx: ^Track_Context) {
 		return
 	}
 	section := sections[index]
-	entity, bound := binding_entity(&e.bindings, ctx.world, int(section.camera))
+	entity, bound := ctx_binding(ctx, section.camera)
 	leave := shot_leave(ctx, section)
 	switch shown in e.cut.shown {
 	case Cut_Shot:
 		if !jumped &&
-		   shown.section == section.id &&
+		   shown.section == (Scoped{ctx.scope, section.id}) &&
 		   shown.entity == entity &&
 		   camera.is_claimed(s.views, shown.token) {
 			next := shown
@@ -89,7 +89,7 @@ camera_cut_track :: proc(ctx: ^Track_Context) {
 			return
 		}
 	case Cut_Refused:
-		if shown.section == section.id && shown.entity == entity {
+		if shown.section == (Scoped{ctx.scope, section.id}) && shown.entity == entity {
 			return
 		}
 	case Cut_Gameplay:
@@ -97,7 +97,7 @@ camera_cut_track :: proc(ctx: ^Track_Context) {
 
 	blend_in := camera.CUT
 	if !jumped && fires(ctx, section.start) && section.blend_in > 0 {
-		blend_in = cut_blend(ctx.blob, section.blend_in, section.blend_curves[0])
+		blend_in = cut_blend(ctx, section.blend_in, section.blend_curves[0])
 	}
 	leaving := leaving_blend(ctx, sections, jumped)
 	if !bound || ecs.get_raw(ctx.world, entity, render.CAMERA_ID) == nil {
@@ -106,7 +106,7 @@ camera_cut_track :: proc(ctx: ^Track_Context) {
 			format.blob_string(ctx.data, ctx.blob.source_path),
 			section.id,
 		)
-		change_cut(e, Cut_Refused{section.id, entity}, leaving)
+		change_cut(e, Cut_Refused{{ctx.scope, section.id}, entity}, leaving)
 		return
 	}
 	token, claimed := camera.claim(
@@ -122,7 +122,7 @@ camera_cut_track :: proc(ctx: ^Track_Context) {
 		change_cut(e, Cut_Gameplay{}, leaving)
 		return
 	}
-	change_cut(e, Cut_Shot{section.id, entity, s.views, token, leave}, leaving)
+	change_cut(e, Cut_Shot{{ctx.scope, section.id}, entity, s.views, token, leave}, leaving)
 }
 
 // end_cut gives the views back: it releases the track's claim, with the blend that the shot leaves with. end_holds
@@ -158,10 +158,11 @@ live_cut_track :: proc(
 	return track, .Muted not_in track.flags
 }
 
-// shown_section is the cut section that covers a time: [start, end), and its end too at the range's end.
+// shown_section is the cut section that covers a time on the scope's time: [start, end), and its end too at the range's
+// end, and none while a sub-sequence section above it does not cover the time.
 @(private)
 shown_section :: proc(
-	blob: ^format.Cutscene_Blob,
+	ctx: ^Track_Context,
 	sections: []format.Cutscene_Section,
 	t: i32,
 ) -> (
@@ -169,7 +170,7 @@ shown_section :: proc(
 	ok: bool,
 ) {
 	for section, i in sections {
-		if _, covers := section_at(blob, section, t); covers {
+		if _, covers := sample(ctx, section, t); covers {
 			return i, true
 		}
 	}
@@ -181,7 +182,7 @@ shown_section :: proc(
 @(private)
 shot_leave :: proc(ctx: ^Track_Context, section: format.Cutscene_Section) -> camera.Blend {
 	if ctx.time >= section.end && section.blend_out > 0 {
-		return cut_blend(ctx.blob, section.blend_out, section.blend_curves[1])
+		return cut_blend(ctx, section.blend_out, section.blend_curves[1])
 	}
 	return camera.CUT
 }
@@ -199,10 +200,10 @@ leaving_blend :: proc(
 	if !held || len(sections) == 0 {
 		return camera.CUT
 	}
-	if ctx.skipped && ctx.time == ctx.blob.range_end {
+	if ctx.skipped && ctx.time == ctx.range_end {
 		last := sections[len(sections) - 1]
 		if .Blend_On_Skip in last.flags {
-			return cut_blend(ctx.blob, last.blend_out, last.blend_curves[1])
+			return cut_blend(ctx, last.blend_out, last.blend_curves[1])
 		}
 		return camera.CUT
 	}
@@ -210,24 +211,28 @@ leaving_blend :: proc(
 		return camera.CUT
 	}
 	for section in sections {
-		if section.id == shot.section && section.blend_out > 0 && fires(ctx, section.end) {
-			return cut_blend(ctx.blob, section.blend_out, section.blend_curves[1])
+		if shot.section == (Scoped{ctx.scope, section.id}) &&
+		   section.blend_out > 0 &&
+		   fires(ctx, section.end) {
+			return cut_blend(ctx, section.blend_out, section.blend_curves[1])
 		}
 	}
 	return camera.CUT
 }
 
-// cut_blend is a camera blend of a number of ticks, on the stack's clock that is the cutscene's.
+// cut_blend is a camera blend of a number of ticks on the scope's time, on the stack's clock that is the cutscene's. In a
+// sub-sequence that plays at a scale, the blend takes the root's time that the ticks take.
 @(private)
 cut_blend :: proc(
-	blob: ^format.Cutscene_Blob,
+	ctx: ^Track_Context,
 	ticks: i32,
 	curve: format.Cutscene_Blend_Curve,
 ) -> camera.Blend {
+	rate := ctx.rate if ctx.rate > 0 else 1
 	return {
-		duration = f32(f64(ticks) / format.CUTSCENE_TICKS_PER_SECOND),
+		duration = f32(f64(ticks) / format.CUTSCENE_TICKS_PER_SECOND / rate),
 		curve = camera.Curve(curve),
-		clock = .Real if blob.clock == .Real else .Game,
+		clock = .Real if ctx.clock == .Real else .Game,
 	}
 }
 
@@ -258,7 +263,7 @@ cut_fires :: proc(ctx: ^Track_Context) -> bool {
 		if fires(ctx, section.start) && !(after_gap && section.blend_in > 0) {
 			return true
 		}
-		if section.end != ctx.blob.range_end &&
+		if section.end != ctx.range_end &&
 		   before_gap &&
 		   section.blend_out == 0 &&
 		   fires(ctx, section.end) {
@@ -286,7 +291,7 @@ constrain :: proc(ctx: ^Track_Context) {
 	cut_sections := format.cutscene_track_sections(ctx.data, ctx.blob, cut)
 	shown: Maybe(format.Cutscene_Section)
 	shown_index := format.CUTSCENE_NONE
-	if i, ok := shown_section(ctx.blob, cut_sections, ctx.time); ok {
+	if i, ok := shown_section(ctx, cut_sections, ctx.time); ok {
 		shown = cut_sections[i]
 		shown_index = cut.first_section + u32(i)
 	}
@@ -323,7 +328,7 @@ constrain_camera :: proc(
 	shown: Maybe(format.Cutscene_Section),
 	shown_index: u32,
 ) {
-	entity, bound := binding_entity(&ctx.evaluation.bindings, ctx.world, int(camera_binding))
+	entity, bound := ctx_binding(ctx, camera_binding)
 	if !bound {
 		return
 	}
@@ -361,11 +366,7 @@ constrain_camera :: proc(
 		focus, has_focus := active[.Focus].?
 		target: ecs.Entity
 		if has_focus {
-			target, _ = binding_entity(
-				&ctx.evaluation.bindings,
-				ctx.world,
-				int(focus.constraint.target),
-			)
+			target, _ = ctx_binding(ctx, focus.constraint.target)
 		} else {
 			target, _ = base(
 				ctx,
@@ -484,7 +485,7 @@ written_elsewhere :: proc(ctx: ^Track_Context, target: Pose_Target, part: Pose_P
 		return false
 	}
 	for writer in snapshot.writers {
-		if writer.saved == index && writer.track != ctx.track.id {
+		if writer.saved == index && writer.track != (Scoped{ctx.scope, ctx.track.id}) {
 			return true
 		}
 	}
@@ -501,7 +502,7 @@ constraint_anchor :: proc(
 	anchor: ecs.World_Position,
 	ok: bool,
 ) {
-	target := binding_entity(&ctx.evaluation.bindings, ctx.world, int(c.target)) or_return
+	target := ctx_binding(ctx, c.target) or_return
 	pose := (^ecs.Transform)(ecs.get_raw(ctx.world, target, ecs.TRANSFORM_ID))
 	if pose == nil {
 		return
