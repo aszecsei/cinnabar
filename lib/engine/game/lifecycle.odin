@@ -75,6 +75,7 @@ game_init :: proc(
 		&g.animation,
 		&g.views,
 		&g.audio,
+		&g.scripts,
 	)
 	register_world(g, h)
 	asset.init(&g.assets, platform, asset.content_source(platform.content_dir))

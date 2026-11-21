@@ -503,6 +503,14 @@ change_cutscene :: proc(
 	case Player_Restored, Player_Failed:
 	}
 	p.state = to
+	// A cutscene that finishes, at its end, at a skip to it or at a stop, sends the end of each range that is open. One
+	// that fails sends nothing.
+	if next == .Finishing {
+		e := &live_of(&p.state).evaluation
+		if data, blob, ok := cutscene_data(s, e); ok {
+			end_ranges(s, e, w, data, blob)
+		}
+	}
 	if from == .Ready && (next == .Playing || next == .Skipping) {
 		live := live_of(&p.state)
 		reveal_bindings(&live.evaluation.bindings, w)
@@ -695,6 +703,7 @@ load_player :: proc(s: ^State, c: Player_Context, slot: int) {
 		bindings   = bindings_hash(data, blob),
 	}
 	init_evaluation(&live.evaluation, w, handle, data, blob)
+	live.evaluation.player = {u16(slot), p.generation}
 	for guid in references {
 		reference, ok := asset.load(s.assets, guid)
 		if !ok {

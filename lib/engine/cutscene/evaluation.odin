@@ -12,6 +12,7 @@ import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/audio"
 import "cinnabar:engine/camera"
 import "cinnabar:engine/ecs"
+import "cinnabar:engine/script"
 
 // MAX_FIELD_SIZE is the most bytes of one field that a track writes, and so that the snapshot saves.
 MAX_FIELD_SIZE :: 64
@@ -40,77 +41,113 @@ Track_Kind :: struct {
 // State is the cutscenes' part of the game: the kinds of track, and the players, whose evaluations the systems advance.
 // The kinds hold procedures from the DLL image, so register clears them, and the kinds are registered again after it.
 State :: struct {
-	assets:      ^asset.Assets,
+	assets:        ^asset.Assets,
 	// The input actions: their contexts, which a playing cutscene pushes its own on (see
 	// docs/cinematics/possession.md), and the skip action, which the skip hold reads (see
 	// docs/cinematics/skipping.md#input). Or nil.
-	actions:     ^core.Input_Actions,
+	actions:       ^core.Input_Actions,
 	// The skip action's name and hold time, and the hold in progress.
-	skip:        Skip_Input,
+	skip:          Skip_Input,
 	// The animation's state, which animation tracks drive Animators through (see
 	// docs/cinematics/tracks.md#animation-tracks). Or nil, and animation tracks do nothing.
-	animation:   ^anim.State,
+	animation:     ^anim.State,
 	// The game's views, which camera cut tracks claim (see docs/cinematics/tracks.md#camera-cut-tracks). Or nil, and
 	// camera cut tracks claim nothing.
-	views:       ^camera.Views,
+	views:         ^camera.Views,
 	// The game's audio, which audio tracks play their sounds through (see docs/cinematics/tracks.md#audio-tracks). Or
 	// nil, and audio tracks play nothing.
-	audio:       ^audio.State,
+	audio:         ^audio.State,
 	// The game clock's rate against real time: its time scale, and 0 while the game is paused. set_rate sets it.
-	rate:        f32,
+	rate:          f32,
 	// How far an audio track's voice can drift from the cutscene's time before the track seeks it, in seconds.
-	audio_drift: f64,
-	kinds:       [format.Cutscene_Track_Kind]Track_Kind,
+	audio_drift:   f64,
+	// The scripts that event tracks send their events to (see docs/cinematics/tracks.md#event-tracks). Or nil, and only
+	// the native handlers get them.
+	scripts:       ^script.Runtime,
+	kinds:         [format.Cutscene_Track_Kind]Track_Kind,
+	// The native handlers of events, by name, which register clears with the kinds.
+	handlers:      [MAX_EVENT_HANDLERS]Event_Handler,
+	handler_count: int,
 	// The players, in fixed slots, so an evaluation does not move while it is evaluated (see
 	// docs/cinematics/player.md#handles).
-	players:     [MAX_PLAYERS]Player,
+	players:       [MAX_PLAYERS]Player,
 	// The start order that the next player gets.
-	started:     u64,
+	started:       u64,
 	// The level generation that the players were made in. A new level resets them.
-	level:       u64,
+	level:         u64,
 	// What happened to the players in this frame, in order. end_frame clears them. Heap memory.
-	events:      [dynamic]Player_Event,
+	events:        [dynamic]Player_Event,
 }
 
 // Evaluation is what one cutscene needs to be evaluated: its blob, its bindings, its time and the snapshot of the
 // fields that its tracks wrote. It holds no procedures, typeids or string literals, so it survives a code reload.
 // Make it with init_evaluation, and free it with destroy_evaluation.
 Evaluation :: struct {
-	cutscene: asset.Handle,
-	bindings: Bindings,
+	cutscene:    asset.Handle,
+	bindings:    Bindings,
 	// The key of the blob that was last evaluated. A new key is a hot reload. nil before the first evaluation.
-	key:      Maybe(u64),
+	key:         Maybe(u64),
 	// The time, in ticks, from range_start to range_end.
-	time:     i32,
+	time:        i32,
 	// What the clock gave that is less than one tick, in nanoseconds × CUTSCENE_TICKS_PER_SECOND, so the conversion
 	// never drifts.
-	carry:    i64,
-	// The time of each phase's last evaluation. Its events have fired up to it. nil before the first, so the first fires
-	// the events at range_start.
-	last:     [Phase]Maybe(i32),
-	snapshot: Snapshot,
+	carry:       i64,
+	// Where each phase's events have fired up to: its last evaluation's time, or a seek since it. nil before the first
+	// evaluation, so the first fires the events at range_start.
+	last:        [Phase]Phase_Mark,
+	snapshot:    Snapshot,
 	// The fields of the property tracks, by track ID, resolved once for the blob (see
 	// docs/cinematics/tracks.md#property-tracks). A reload of the blob forgets them.
-	targets:  map[u32]Property_Target,
+	targets:     map[u32]Property_Target,
 	// What each transform track relative to another binding found at its first evaluation, by track ID: a cycle, or
 	// where its binding starts in the other's space (see docs/cinematics/tracks.md#transform-tracks). A reload of the
 	// blob keeps only the starts of the tracks that still join the same two bindings.
-	spaces:   map[u32]Relative_Space,
+	spaces:      map[u32]Relative_Space,
 	// The Animators that animation tracks drive, by entity, each through its driver's token (see
 	// docs/cinematics/tracks.md#animation-tracks). restore, a reload and destroy_evaluation end them.
-	drives:   map[ecs.Entity]anim.Drive_Token,
+	drives:      map[ecs.Entity]anim.Drive_Token,
 	// What the camera cut track shows, and the claim that it holds on the views for it. restore ends it.
-	cut:      Cut,
+	cut:         Cut,
 	// Counts the seeks and the skips' jumps, so the camera cut track cuts after one, which an evaluation's range alone
 	// cannot tell from a pause.
-	jumps:    u32,
+	jumps:       u32,
 	// The voices of the audio tracks' sections, by section ID (see docs/cinematics/tracks.md#audio-tracks). end_holds
 	// stops them.
-	sounds:   map[u32]Sound_Voice,
+	sounds:      map[u32]Sound_Voice,
 	// What each audio track scrubbed last, by track ID, for an evaluation that scrubs.
-	scrubs:   map[u32]Audio_Scrub,
-	// How the audio tracks sound: a player's evaluation plays, and the editor sets the others' with set_audition.
-	audition: Audition,
+	scrubs:      map[u32]Audio_Scrub,
+	// How the audio tracks sound: a player's evaluation plays, and the editor sets the others' with set_audition. Only
+	// an evaluation that plays sends events.
+	audition:    Audition,
+	// The player whose evaluation this is, which native event handlers get. The zero handle for an evaluation of no
+	// player.
+	player:      Player_Handle,
+	// The event tracks' ranges that sent their begin and not yet their end, by event ID (see
+	// docs/cinematics/tracks.md#event-tracks). change_range is its one writer.
+	open_ranges: map[u32]struct{},
+	// The events that the event tracks recorded in this phase, which flush_events sends at its end.
+	fired:       [dynamic]Fired,
+}
+
+// Phase_Mark is where a phase's events have fired up to.
+Phase_Mark :: union {
+	Evaluated,
+	Sought,
+}
+
+// Evaluated is the time of a phase's last evaluation: its events have fired up to it.
+Evaluated :: distinct i32
+
+// Sought is a seek since a phase's last evaluation: its events fired up to origin, and the phase goes on from at.
+// Several seeks before one evaluation are one move, from the first one's origin to the last one's time.
+Sought :: struct {
+	origin: i64,
+	at:     i32,
+}
+
+// Seek_Range is a forward seek over (from, to] that a phase's evaluation follows.
+Seek_Range :: struct {
+	from, to: i64,
 }
 
 // Field is a field of a component of an entity: its component, and its offset and size in the component.
@@ -148,24 +185,29 @@ Snapshot :: struct {
 
 // Track_Context is what a kind's evaluate procedure gets for one track.
 Track_Context :: struct {
-	world:      ^ecs.World,
+	world:       ^ecs.World,
 	// The state of the cutscenes, whose other players can hold a field's own value (see field_base).
-	cutscenes:  ^State,
-	evaluation: ^Evaluation,
-	data:       []byte,
-	blob:       ^format.Cutscene_Blob,
-	track:      format.Cutscene_Track,
+	cutscenes:   ^State,
+	evaluation:  ^Evaluation,
+	data:        []byte,
+	blob:        ^format.Cutscene_Blob,
+	track:       format.Cutscene_Track,
+	// The track's index in the blob, its order.
+	track_index: u32,
 	// The time to evaluate at, in ticks.
-	time:       i32,
+	time:        i32,
 	// The events in (from, to] fire. The range is empty after a seek, a reload or the phase's last evaluation at the same
 	// time. from is i64, so the first range can start before 0.
-	from:       i64,
-	to:         i64,
+	from:        i64,
+	to:          i64,
 	// The evaluation is a skip's jump over (from, to] (see docs/cinematics/skipping.md#events): a kind fires only the
 	// events that it marks to fire when skipped, and starts nothing that the jump passes, such as a sound.
-	skipped:    bool,
+	skipped:     bool,
+	// A forward seek since the phase's last evaluation, before (from, to], which an event track follows: from is the
+	// time that the phase's events had fired up to, and to is where the seek went.
+	seek:        Maybe(Seek_Range),
 	// The kind's data, from its Track_Kind.
-	user:       rawptr,
+	user:        rawptr,
 }
 
 // init sets the state's assets, its input actions, the animation's state and the level that its players begin in. Call
@@ -178,9 +220,11 @@ init :: proc(
 	animation: ^anim.State = nil,
 	views: ^camera.Views = nil,
 	sounds: ^audio.State = nil,
+	scripts: ^script.Runtime = nil,
 ) {
 	s.assets = assets
 	s.audio = sounds
+	s.scripts = scripts
 	s.rate = 1
 	s.audio_drift = AUDIO_DRIFT
 	s.actions = actions
@@ -204,6 +248,8 @@ destroy :: proc(s: ^State, w: ^ecs.World) -> (despawned: int) {
 // registrations, before every other system's. A game can set a kind of its own with register_kind after it.
 register :: proc(s: ^State, w: ^ecs.World) {
 	s.kinds = {}
+	s.handlers = {}
+	s.handler_count = 0
 	s.kinds[.Transform] = {
 		phase    = .Fixed,
 		evaluate = transform_track,
@@ -223,6 +269,11 @@ register :: proc(s: ^State, w: ^ecs.World) {
 	s.kinds[.Audio] = {
 		phase    = .Late,
 		evaluate = audio_track,
+	}
+	// In the Fixed phase, so script.fixed_events delivers the events in the same tick, as animation markers are.
+	s.kinds[.Event] = {
+		phase    = .Fixed,
+		evaluate = event_track,
 	}
 	ecs.register_system(
 		w,
@@ -272,6 +323,8 @@ init_evaluation :: proc(
 		drives = make(map[ecs.Entity]anim.Drive_Token, w.platform.heap_allocator),
 		sounds = make(map[u32]Sound_Voice, w.platform.heap_allocator),
 		scrubs = make(map[u32]Audio_Scrub, w.platform.heap_allocator),
+		open_ranges = make(map[u32]struct{}, w.platform.heap_allocator),
+		fired = make([dynamic]Fired, w.platform.heap_allocator),
 	}
 }
 
@@ -285,6 +338,10 @@ destroy_evaluation :: proc(e: ^Evaluation, w: ^ecs.World) -> (despawned: int) {
 	e.sounds = nil
 	delete(e.scrubs)
 	e.scrubs = nil
+	delete(e.open_ranges)
+	e.open_ranges = nil
+	delete(e.fired)
+	e.fired = nil
 	despawned = release_bindings(&e.bindings, w)
 	destroy_bindings(&e.bindings, w)
 	delete(e.snapshot.saved)
@@ -329,7 +386,8 @@ advance :: proc(e: ^Evaluation, blob: ^format.Cutscene_Blob, dt: time.Duration) 
 }
 
 // seek sets the time, within the range, for a debugger, a scrub or the editor. No event between the old time and the
-// new one fires, in either phase.
+// new one fires, in either phase, but those that an event track marks to fire on seek, when the seek goes forward (see
+// docs/cinematics/tracks.md#event-tracks).
 seek :: proc(
 	s: ^State,
 	e: ^Evaluation,
@@ -342,8 +400,15 @@ seek :: proc(
 	e.time = clamp(t, blob.range_start, blob.range_end)
 	e.carry = 0
 	e.jumps += 1
-	for &last in e.last {
-		last = e.time
+	for &mark in e.last {
+		origin := i64(blob.range_start) - 1
+		switch m in mark {
+		case Evaluated:
+			origin = i64(m)
+		case Sought:
+			origin = m.origin
+		}
+		mark = Sought{origin, e.time}
 	}
 }
 
@@ -405,11 +470,19 @@ run_phase :: proc(
 	follow_blob(s, e, w, data, blob)
 	now := e.time
 	from := i64(blob.range_start) - 1
-	if last, ok := e.last[phase].?; ok {
-		from = i64(last)
+	seek: Maybe(Seek_Range)
+	switch m in e.last[phase] {
+	case Evaluated:
+		from = i64(m)
+	case Sought:
+		from = i64(m.at)
+		if i64(m.at) > m.origin {
+			seek = Seek_Range{m.origin, i64(m.at)}
+		}
 	}
 	if events == .Hold {
 		from = i64(now)
+		seek = nil
 	}
 	ctx := Track_Context {
 		world      = w,
@@ -421,13 +494,15 @@ run_phase :: proc(
 		from       = from,
 		to         = max(i64(now), from),
 		skipped    = events == .Skip,
+		seek       = seek,
 	}
-	for track in format.cutscene_tracks(data, blob) {
+	for track, i in format.cutscene_tracks(data, blob) {
 		kind := s.kinds[track.kind]
 		if .Muted in track.flags || kind.evaluate == nil || kind.phase != phase {
 			continue
 		}
 		ctx.track = track
+		ctx.track_index = u32(i)
 		ctx.user = kind.data
 		kind.evaluate(&ctx)
 	}
@@ -435,8 +510,9 @@ run_phase :: proc(
 		constrain(&ctx)
 	}
 	if events != .Hold {
-		e.last[phase] = now
+		e.last[phase] = Evaluated(now)
 	}
+	flush_events(s, e, w, data, blob)
 }
 
 // restore ends what the tracks did to the world: each saved field that a track set to restore wrote goes back to its
@@ -831,9 +907,10 @@ reload :: proc(
 	// The tracks of the new blob take their Animators and claim the views again as they evaluate, so a track that the
 	// reload removed or muted gives its back.
 	end_holds(e, w)
+	keep_ranges(e, w, data, blob)
 	e.time = clamp(e.time, blob.range_start, blob.range_end)
-	for &last in e.last {
-		last = e.time
+	for &mark in e.last {
+		mark = Evaluated(e.time)
 	}
 }
 

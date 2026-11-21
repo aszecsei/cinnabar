@@ -4,6 +4,7 @@ import "base:runtime"
 import "core:fmt"
 import "core:mem/virtual"
 import "core:os"
+import "core:slice"
 import "core:testing"
 import "core:time"
 
@@ -148,11 +149,19 @@ player_setup :: proc(t: ^testing.T) -> ^Player_Fixture {
 	init(&f.cutscenes, &f.world, &f.assets, &f.actions)
 	register(&f.cutscenes, &f.world)
 	register_kind(&f.cutscenes, .Property, {phase = .Fixed, evaluate = dial_track})
-	register_kind(&f.cutscenes, .Event, {phase = .Late, evaluate = event_track, data = &f.fired})
 	register_kind(
 		&f.cutscenes,
 		.Presentation,
-		{phase = .Fixed, evaluate = event_track, data = &f.fixed},
+		{phase = .Late, evaluate = event_track, data = &f.fired},
+	)
+	// The event tracks, in the Fixed phase, record the number of each probe event.
+	register_event_handler(
+		&f.cutscenes,
+		"probe",
+		proc(data: rawptr, _: Player_Handle, _: string, args: []script.Event_Arg) {
+			append((^[dynamic]f32)(data), f32(args[0].(f64)))
+		},
+		&f.fixed,
 	)
 	f.hero = ecs.spawn(&f.world)
 	ecs.add(&f.world, f.hero, Dial{1})
@@ -200,7 +209,7 @@ dial_track :: proc(ctx: ^Track_Context) {
 	}
 }
 
-// event_track is the test's event kind, in either phase: each key is an event at its section's start plus its time,
+// event_track is the test's Late events, on presentation tracks: each key is an event at its section's start plus its time,
 // which records the key's value in the kind's list when it fires. The keys of a channel named "skipped" are marked to
 // fire when skipped; a skip passes the others.
 @(private = "file")
@@ -338,21 +347,32 @@ write_cutscene :: proc(t: ^testing.T, f: ^Player_Fixture, c: Cutscene) {
 			weight   = 1,
 			channels = key(9, c.length),
 		}
+		probe := make([]format.Cutscene_Event_Contents, 1, context.temp_allocator)
+		probe[0] = {
+			id     = 1,
+			start  = c.length,
+			end    = c.length,
+			name   = "probe",
+			values = slice.clone(
+				[]format.Cutscene_Event_Value_Contents{{kind = .Number, number = 9}},
+				context.temp_allocator,
+			),
+		}
 		append(
 			&tracks,
 			format.Cutscene_Track_Contents {
 				id = 2,
-				kind = .Event,
+				kind = .Presentation,
 				name = "Late events",
 				binding = format.CUTSCENE_NONE,
 				sections = events,
 			},
 			format.Cutscene_Track_Contents {
 				id = 3,
-				kind = .Presentation,
+				kind = .Event,
 				name = "Fixed events",
 				binding = format.CUTSCENE_NONE,
-				sections = events,
+				events = probe,
 			},
 		)
 	}
@@ -1267,7 +1287,7 @@ write_skippable :: proc(
 	}
 	tracks[1] = {
 		id       = 2,
-		kind     = .Event,
+		kind     = .Presentation,
 		name     = "Events",
 		binding  = format.CUTSCENE_NONE,
 		sections = events,

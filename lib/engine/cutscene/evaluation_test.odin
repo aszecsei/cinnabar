@@ -133,7 +133,7 @@ eval_setup :: proc(t: ^testing.T, serial := true, workers := 0) -> ^Eval_Fixture
 	init(&f.cutscenes, &f.world, &f.assets)
 	register(&f.cutscenes, &f.world)
 	register_kind(&f.cutscenes, .Property, {phase = .Fixed, evaluate = brightness_track})
-	register_kind(&f.cutscenes, .Event, {phase = .Late, evaluate = event_track, data = f})
+	register_kind(&f.cutscenes, .Presentation, {phase = .Late, evaluate = event_track, data = f})
 	register_kind(&f.cutscenes, .Transform, {phase = .Fixed, evaluate = position_track})
 	f.lamp = ecs.spawn(&f.world)
 	ecs.add(&f.world, f.lamp, Lamp{brightness = 5})
@@ -527,7 +527,7 @@ a_scrub_skips_an_event_and_playing_through_fires_it_once :: proc(t: ^testing.T) 
 	tracks := []format.Cutscene_Track_Contents {
 		{
 			id = 1,
-			kind = .Event,
+			kind = .Presentation,
 			name = "Events",
 			binding = format.CUTSCENE_NONE,
 			sections = sections,
@@ -842,7 +842,7 @@ a_reload_keeps_the_time_and_restores_what_removed_tracks_wrote :: proc(t: ^testi
 		{id = 2, kind = .Transform, name = "Move", binding = 0, sections = moves},
 		{
 			id = 3,
-			kind = .Event,
+			kind = .Presentation,
 			name = "Events",
 			binding = format.CUTSCENE_NONE,
 			sections = events,
