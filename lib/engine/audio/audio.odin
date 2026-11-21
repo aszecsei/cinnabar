@@ -54,6 +54,8 @@ Sound_Slot :: struct {
 	modified: i64,
 	// Grows with each new version of the blob. A source that started an older one starts again.
 	version:  u32,
+	// The sound's length in frames, at boundary.SAMPLE_RATE, once it loaded.
+	frames:   u64,
 }
 
 // Source_Slot is a playing Audio_Source's voice. update_sources claims a slot for a source that starts to play, and frees
@@ -107,6 +109,11 @@ State :: struct {
 	// The scrub's grains, oldest first from scrub_next.
 	scrub_grains:     [SCRUB_GRAINS]boundary.Voice,
 	scrub_next:       int,
+	// The voices that start_voice started and that the audio still follows for their callers: placed at an entity, or
+	// stopped at a time on the clock (see voices.odin). A slot with the nil voice is free.
+	owned:            [MAX_OWNED_VOICES]Owned_Voice,
+	// The listeners that the last update found, which a voice that starts at an entity is placed from.
+	listeners:        Listeners,
 	paused:           bool,
 	// The warnings given, each once.
 	warned:           bit_set[Warning],
@@ -120,6 +127,7 @@ Warning :: enum {
 	Sounds,
 	Sources,
 	One_Shots,
+	Owned,
 }
 
 // The most buses that a project names, besides Master.
@@ -187,6 +195,12 @@ destroy :: proc(s: ^State) {
 	for grain in s.scrub_grains {
 		if grain != {} {
 			api.voice_stop(grain, STOP_FADE)
+		}
+	}
+	for &owned in s.owned {
+		if owned.voice != {} {
+			api.voice_stop(owned.voice, STOP_FADE)
+			owned = {}
 		}
 	}
 	for &sound in s.sounds[:s.sound_count] {
@@ -349,12 +363,18 @@ Voice_Start :: struct {
 	// How long it plays before it fades out over fade, in seconds; 0 plays to the end. fade is how long it fades in, too.
 	length:   f64,
 	fade:     f32,
+	// The entity that it plays at, heard from the nearest listener with these distances, as a spatial Audio_Source is,
+	// and moved with the entity's presented pose each update. 0 plays it flat.
+	entity:   ecs.Entity,
+	min_distance: f32,
+	max_distance: f32,
 }
 
-// start_voice starts a voice that is not placed in the world, which its caller seeks, follows and stops, as a cutscene's
-// audio does. The caller owns it: nothing stops it but the caller, its sound's end, and a soft restart. The handle goes
-// stale when it stops, and is the nil voice when the sound is not loaded or the backend refuses it.
-start_voice :: proc(s: ^State, desc: Voice_Start) -> boundary.Voice {
+// start_voice starts a voice that its caller seeks, follows and stops, as a cutscene's audio does: flat, or at an
+// entity, which needs the world. The caller owns it: nothing stops it but the caller, its sound's end, and a soft
+// restart. The handle goes stale when it stops, and is the nil voice when the sound is not loaded or the backend
+// refuses it.
+start_voice :: proc(s: ^State, desc: Voice_Start, w: ^ecs.World = nil) -> boundary.Voice {
 	sound := find_sound(s, desc.sound)
 	if sound == nil || sound.handle == {} {
 		return {}
@@ -365,11 +385,25 @@ start_voice :: proc(s: ^State, desc: Voice_Start) -> boundary.Voice {
 	}
 	start := frames_of(desc.start)
 	fade := desc.fade if desc.fade > 0 || start == 0 else OFFSET_FADE
-	return s.platform.audio.voice_play(
+	owned := Owned_Voice {
+		entity       = desc.entity,
+		min_distance = desc.min_distance,
+		max_distance = desc.max_distance,
+		gain         = desc.gain,
+		pitch        = clamp_pitch(desc.pitch),
+	}
+	params := boundary.Voice_Params {
+		gain  = owned.gain,
+		pitch = owned.pitch,
+	}
+	if desc.entity != 0 && w != nil {
+		params = placed_params(s, w, owned)
+	}
+	voice := s.platform.audio.voice_play(
 		&boundary.Voice_Desc {
 			sound = sound.handle,
 			bus = bus_handle(s, desc.bus),
-			params = {gain = desc.gain, pitch = clamp_pitch(desc.pitch)},
+			params = params,
 			loop = b32(desc.loop),
 			flags = flags,
 			start = start,
@@ -378,6 +412,27 @@ start_voice :: proc(s: ^State, desc: Voice_Start) -> boundary.Voice {
 			fade = fade,
 		},
 	)
+	if voice != {} && desc.entity != 0 && w != nil {
+		owned.voice = voice
+		own_voice(s, owned)
+	}
+	return voice
+}
+
+// sound_length is a sound's length in seconds, loading it the first time, and false when it does not load.
+sound_length :: proc(s: ^State, sound: format.Guid) -> (seconds: f64, ok: bool) {
+	slot := find_sound(s, sound)
+	if slot == nil || slot.handle == {} {
+		return
+	}
+	return f64(slot.frames) / boundary.SAMPLE_RATE, true
+}
+
+// prepare_sound loads a sound before it plays, as a cutscene does while it loads, so the frame that starts it does not
+// read or decode it. A sound that does not load logs once, and plays nothing. It gives whether it loaded.
+prepare_sound :: proc(s: ^State, sound: format.Guid) -> bool {
+	slot := find_sound(s, sound)
+	return slot != nil && slot.handle != {}
 }
 
 // seek_voice moves a voice to seconds into its sound, with a short fade out and in. With a clock, the place plays then.
@@ -437,6 +492,7 @@ SEEK_LEAD :: 2400
 
 // stop_voice stops a voice over fade seconds. Its handle goes stale at once.
 stop_voice :: proc(s: ^State, voice: boundary.Voice, fade: f32 = STOP_FADE) {
+	disown_voice(s, voice)
 	s.platform.audio.voice_stop(voice, fade)
 }
 
@@ -517,6 +573,8 @@ update :: proc(s: ^State, w: ^ecs.World, ph: ^physics.State, run: bool, dt: time
 	listeners := find_listeners(s, w)
 	update_sources(s, w, ph, listeners, run, f32(time.duration_seconds(dt)))
 	update_one_shots(s, w, ph, listeners, run)
+	s.listeners = listeners
+	update_owned(s, w)
 }
 
 // find_listeners gathers the world's listeners that have a presented pose, up to MAX_LISTENERS. It warns once about more.
@@ -975,6 +1033,7 @@ load_sound :: proc(s: ^State, sound: ^Sound_Slot) {
 				desc.seek_count = u32(len(table))
 			}
 			sound.handle = api.sound_create(&desc)
+			sound.frames = blob.frames
 			return
 		}
 	}
@@ -996,6 +1055,7 @@ load_sound :: proc(s: ^State, sound: ^Sound_Slot) {
 	if view.format == .PCM {
 		desc.samples = raw_data(format.audio_samples(data, view))
 		sound.handle = api.sound_create(&desc)
+		sound.frames = view.frames
 		return
 	}
 	samples := make([]i16, view.frames * u64(view.channels), s.platform.asset_allocator)
@@ -1014,6 +1074,7 @@ load_sound :: proc(s: ^State, sound: ^Sound_Slot) {
 	}
 	desc.samples = raw_data(samples)
 	sound.handle = api.sound_create(&desc)
+	sound.frames = view.frames
 }
 
 // check_blobs looks at one sound's blob each frame, in turn, and makes a new sound of one that the cooker wrote again.
