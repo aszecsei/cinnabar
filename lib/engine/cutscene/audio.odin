@@ -114,12 +114,12 @@ audio_track :: proc(ctx: ^Track_Context) {
 		}
 		if status == .Skipping {
 			if has_voice {
-				change_sound(
-					e,
-					section.id,
-					Sound_Released{},
-					skip_leave(s, p, ctx.blob, playing, e.time),
-				)
+				// Only a section that plays through the skip is let go. The others start again when play goes on.
+				next: Maybe(Sound_Voice)
+				if playing.through {
+					next = Sound_Released{}
+				}
+				change_sound(e, section.id, next, skip_leave(s, p, ctx.blob, playing, e.time))
 			}
 			continue
 		}

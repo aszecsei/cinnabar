@@ -340,6 +340,7 @@ sounds_blob :: proc(
 	length: i32,
 	skip_fade: i32 = 0,
 	range_end: i32 = 0,
+	skip_ranges: []format.Cutscene_Skip_Range = nil,
 ) -> []byte {
 	bindings := make([]format.Cutscene_Binding_Contents, len(f.entities), context.temp_allocator)
 	for &b, i in bindings {
@@ -364,6 +365,8 @@ sounds_blob :: proc(
 			bindings = bindings,
 			tracks = tracks,
 			skip_fade = skip_fade,
+			skip = .Ranges if len(skip_ranges) > 0 else .Anywhere,
+			skip_ranges = skip_ranges,
 			source_path = "game/cutscenes/sounds.cutscene",
 		},
 		context.temp_allocator,
@@ -801,4 +804,29 @@ a_curves_integral_is_the_sum_of_its_values :: proc(t: ^testing.T) {
 		got := curve_integral(keys, end)
 		testing.expectf(t, abs(got - sum) < 2e-4, "to %v: %v, and the sum %v", end, got, sum)
 	}
+}
+
+// After a skip to the end of a skip range, a section under the time that does not play through the skip starts again at
+// its place when play goes on.
+@(test)
+a_section_under_a_skip_ranges_end_plays_on_from_there :: proc(t: ^testing.T) {
+	f := sound_setup(t)
+	defer sound_teardown(f)
+	tracks := [?]format.Cutscene_Track_Contents{sound_track(1, sound_section(1, 0, 4 * SECOND))}
+	ranges := [?]format.Cutscene_Skip_Range{{0, 2 * SECOND}}
+	h := play_sounds(t, f, sounds_blob(f, tracks[:], 4 * SECOND, skip_ranges = ranges[:]))
+	for _ in 0 ..< 30 {
+		sound_frame(f)
+	}
+	first, _, _ := voice_of(LINE)
+	testing.expect_value(t, skip(&f.cutscenes, &f.world, h), Command_Result.Done)
+	sound_frame(f, ticks = 0)
+	testing.expect(t, !fake.voices[first].playing)
+	sound_frame(f)
+	testing.expect_value(t, status(&f.cutscenes, h), Player_Status.Playing)
+	sound_frame(f)
+	index, v, playing := voice_of(LINE)
+	testing.expect(t, playing && index != first)
+	expected := shown(f, h) / SECOND * boundary.SAMPLE_RATE
+	testing.expectf(t, abs(v.frame - expected) < 1, "plays on from %v, not %v", v.frame, expected)
 }
