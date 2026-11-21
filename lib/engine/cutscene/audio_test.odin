@@ -100,67 +100,91 @@ fake_place :: proc "contextless" (v: Fake_Voice, clock: u64) -> f64 {
 
 @(private = "file")
 fake_table :: proc() -> boundary.Audio_API {
-	return {info = proc "c" () -> boundary.Backend_Info {
-			return {features = {.Seek, .Buses}}
-		}, update = proc "c" (
-		) {}, sound_create = proc "c" (desc: ^boundary.Sound_Desc) -> boundary.Sound {
-			context = runtime.default_context()
-			append(&fake.sounds, desc.frames)
-			return {u32(len(fake.sounds)), 1}
-		}, sound_destroy = proc "c" (
-			sound: boundary.Sound,
-		) {}, voice_play = proc "c" (desc: ^boundary.Voice_Desc) -> boundary.Voice {
-			context = runtime.default_context()
-			at := desc.clock if desc.clock != 0 else fake.clock
-			append(
-				&fake.voices,
-				Fake_Voice {
-					sound = desc.sound,
-					frame = f64(desc.start),
-					at = at,
-					params = desc.params,
-					flags = desc.flags,
-					length = desc.length,
-					playing = true,
-				},
-			)
-			return {u32(len(fake.voices)), 1}
-		}, voice_set = proc "c" (voice: boundary.Voice, params: ^boundary.Voice_Params) {
-			if i, ok := fake_index(voice); ok {
-				v := &fake.voices[i]
-				v.frame = fake_place(v^, fake.clock)
-				v.at = max(v.at, fake.clock)
-				v.params = params^
-			}
-		}, voice_stop = proc "c" (voice: boundary.Voice, fade: f32) {
-			if i, ok := fake_index(voice); ok {
-				fake.voices[i].playing = false
-				fake.voices[i].fade = fade
-			}
-		}, voice_playing = proc "c" (voice: boundary.Voice) -> b32 {
-			i, ok := fake_index(voice)
-			return b32(ok && fake.voices[i].playing)
-		}, voice_seek = proc "c" (voice: boundary.Voice, frame: u64, clock: u64) {
-			context = runtime.default_context()
-			if i, ok := fake_index(voice); ok {
-				append(&fake.seeks, Fake_Seek{i, frame, clock})
-				fake.voices[i].frame = f64(frame)
-				fake.voices[i].at = clock if clock != 0 else fake.clock
-			}
-		}, voice_position = proc "c" (
-			voice: boundary.Voice,
-			out: ^boundary.Voice_Position,
-		) -> b32 {
-			i, ok := fake_index(voice)
-			if !ok || !fake.voices[i].playing {
-				return false
-			}
-			out^ = {fake_place(fake.voices[i], fake.clock), fake.clock}
-			return true
-		}, bus_create = proc "c" (
-			name: cstring,
-			parent: boundary.Bus,
-		) -> boundary.Bus,\ {return {}}, bus_set_gain = proc "c" (bus: boundary.Bus, gain: f32) {}, bus_set_effect = proc "c" (bus: boundary.Bus, slot: u32, effect: ^boundary.Effect) {}, bus_set_duck = proc "c" (bus: boundary.Bus, target: boundary.Bus, duck: ^boundary.Duck) {}, set_paused = proc "c" (paused: b32) {}, clock = proc "c" () -> u64 {return fake.clock}, stats = proc "c" (out: ^boundary.Stats) {out^ = {}}, reset = proc "c" () -> i32 {return 0}, shutdown = proc "c" () {}}
+	api: boundary.Audio_API
+	api.info = proc "c" () -> boundary.Backend_Info {
+		return {features = {.Seek, .Buses}}
+	}
+	api.update = proc "c" () {
+	}
+	api.sound_create = proc "c" (desc: ^boundary.Sound_Desc) -> boundary.Sound {
+		context = runtime.default_context()
+		append(&fake.sounds, desc.frames)
+		return {u32(len(fake.sounds)), 1}
+	}
+	api.sound_destroy = proc "c" (sound: boundary.Sound) {
+	}
+	api.voice_play = proc "c" (desc: ^boundary.Voice_Desc) -> boundary.Voice {
+		context = runtime.default_context()
+		at := desc.clock if desc.clock != 0 else fake.clock
+		voice := Fake_Voice {
+			sound   = desc.sound,
+			frame   = f64(desc.start),
+			at      = at,
+			params  = desc.params,
+			flags   = desc.flags,
+			length  = desc.length,
+			playing = true,
+		}
+		append(&fake.voices, voice)
+		return {u32(len(fake.voices)), 1}
+	}
+	api.voice_set = proc "c" (voice: boundary.Voice, params: ^boundary.Voice_Params) {
+		if i, ok := fake_index(voice); ok {
+			v := &fake.voices[i]
+			v.frame = fake_place(v^, fake.clock)
+			v.at = max(v.at, fake.clock)
+			v.params = params^
+		}
+	}
+	api.voice_stop = proc "c" (voice: boundary.Voice, fade: f32) {
+		if i, ok := fake_index(voice); ok {
+			fake.voices[i].playing = false
+			fake.voices[i].fade = fade
+		}
+	}
+	api.voice_playing = proc "c" (voice: boundary.Voice) -> b32 {
+		i, ok := fake_index(voice)
+		return b32(ok && fake.voices[i].playing)
+	}
+	api.voice_seek = proc "c" (voice: boundary.Voice, frame: u64, clock: u64) {
+		context = runtime.default_context()
+		if i, ok := fake_index(voice); ok {
+			append(&fake.seeks, Fake_Seek{i, frame, clock})
+			fake.voices[i].frame = f64(frame)
+			fake.voices[i].at = clock if clock != 0 else fake.clock
+		}
+	}
+	api.voice_position = proc "c" (voice: boundary.Voice, out: ^boundary.Voice_Position) -> b32 {
+		i, ok := fake_index(voice)
+		if !ok || !fake.voices[i].playing {
+			return false
+		}
+		out^ = {fake_place(fake.voices[i], fake.clock), fake.clock}
+		return true
+	}
+	api.bus_create = proc "c" (name: cstring, parent: boundary.Bus) -> boundary.Bus {
+		return {}
+	}
+	api.bus_set_gain = proc "c" (bus: boundary.Bus, gain: f32) {
+	}
+	api.bus_set_effect = proc "c" (bus: boundary.Bus, slot: u32, effect: ^boundary.Effect) {
+	}
+	api.bus_set_duck = proc "c" (bus: boundary.Bus, target: boundary.Bus, duck: ^boundary.Duck) {
+	}
+	api.set_paused = proc "c" (paused: b32) {
+	}
+	api.clock = proc "c" () -> u64 {
+		return fake.clock
+	}
+	api.stats = proc "c" (out: ^boundary.Stats) {
+		out^ = {}
+	}
+	api.reset = proc "c" () -> i32 {
+		return 0
+	}
+	api.shutdown = proc "c" () {
+	}
+	return api
 }
 
 @(private = "file")
