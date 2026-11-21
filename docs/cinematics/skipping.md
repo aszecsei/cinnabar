@@ -60,7 +60,7 @@ A jump is one evaluation of each phase at the target, over the range `(last, tar
 - While the fade runs, the evaluations do not move each phase's last time. The jump's range therefore covers what the fade held. For a skip from `Ready`, that includes the keys at the range's start.
 - A skip of a range then plays on from the target. The events after it fire as they play.
 
-The skip fires the marked keys in time order within a track. The event track ([#544](https://github.com/aszecsei/cinnabar/issues/544)) puts the keys of all its tracks in one order.
+The event track sends the marked keys of all its tracks in one order: by time, then by the tracks' order. The range that is open at the skip sends its end, and a range that the skip lands in sends its begin ([Tracks: Event tracks](tracks.md#event-tracks)).
 
 ## Input
 
@@ -87,11 +87,12 @@ The player skips by holding a button, so that a tap does not skip by mistake.
 
 The skip exposes what later tracks need, but the tracks are not built yet:
 - **The fade** is not drawn. `skip_fade(state, handle)` gives how much it covers the frame, from 0 to 1, and the presentation track ([#546](https://github.com/aszecsei/cinnabar/issues/546)) will draw it in its color. #546 also asks for a fade back from the end. This document follows #538: the fade in runs only when play goes on.
-- **Events marked to fire when skipped** are the event track's ([#544](https://github.com/aszecsei/cinnabar/issues/544)). The tests mark them with a channel's name.
 - **Sub-sequences** skip with their parent, through the same jump, in the sub-sequence track ([#545](https://github.com/aszecsei/cinnabar/issues/545)).
 - **Scripts** skip through the `Cutscene` library ([#547](https://github.com/aszecsei/cinnabar/issues/547)).
 
 The camera cut track is built: a skip to a later time cuts to the section there, and a skip that ends the cutscene cuts back to gameplay, or blends out when the last section has `blend_on_skip = true` ([Tracks: Camera cut tracks](tracks.md#camera-cut-tracks)).
+
+The event track is built: the jump sends the triggers marked `fire_when_skipped`, and the ranges crossed whole that are marked, and ends the ranges that it leaves ([Tracks: Event tracks](tracks.md#event-tracks)).
 
 The audio track is built too: as the skip begins, its voices fade out over what is left of the fade out, and a section marked `plays_through_skip` plays on to its end at its own rate. The jump starts none of the sounds that it passes ([Tracks: Audio tracks](tracks.md#audio-tracks)).
 

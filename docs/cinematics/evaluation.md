@@ -44,7 +44,7 @@ Each kind of track has a **phase**:
 
 | Phase | Where | For |
 |---|---|---|
-| `Fixed` | The `cutscene fixed` system, the first `Fixed` system of each tick. On the real clock, also `advance_real`, before the ticks. | Transforms, poses and property writes |
+| `Fixed` | The `cutscene fixed` system, the first `Fixed` system of each tick. On the real clock, also `advance_real`, before the ticks. | Transforms, poses, property writes and events |
 | `Late` | The `cutscene late` system, the first `Late` system, after the script phase | Camera cuts, sounds and presentation |
 
 - **Same tick.** The `Fixed` phase writes before the animator, physics and the tick's propagation read. The animator, physics and propagation therefore see the cutscene's values in the same tick, and nothing lags by a frame.
@@ -67,7 +67,7 @@ Each kind of track has a **phase**:
 `evaluate` evaluates the tracks of one phase in the blob's order. For each track, it calls its kind's procedure with a `Track_Context`, which holds:
 - the world, the evaluation, the blob and the track;
 - the time;
-- the event range, and whether it is a skip's (`skipped`);
+- the event range, whether it is a skip's (`skipped`), and a forward seek since the phase's last evaluation (`seek`);
 - the kind's `data`.
 
 A kind:
@@ -97,11 +97,12 @@ A track blends its sections with `Blend`: `blend_add(&b, value, weight)` for eac
 
 ## Events
 
-Each phase keeps the time of its last evaluation. An evaluation's event range is `(last, now]`, and `fires(ctx, t)` is whether an event at *t* is in it.
+Each phase keeps a mark of where its events have fired up to: the time of its last evaluation (`Evaluated`), or a seek since it (`Sought`). An evaluation's event range is `(last, now]`, and `fires(ctx, t)` is whether an event at *t* is in it. The event track sends what each kind of move crosses ([Tracks: Event tracks](tracks.md#event-tracks)).
 
 - **The first evaluation** of a phase starts its range just before the range's start, so an event at the range's start fires.
 - **Several ticks in a frame.** The `Fixed` phase evaluates once per tick, and the `Late` phase once per frame. The `Late` phase's range covers every tick since its last evaluation, so it loses no event.
-- **Seeks.** A seek, a scrub or a reload moves the last time to the new time, so the events that it jumps over do not fire.
+- **Seeks.** A seek or a scrub marks the phase `Sought`, from the time that its events had fired up to, to the new time, and the range starts at the new time. So the events that it jumps over do not fire. A forward seek is in `Track_Context.seek` at the next evaluation, so an event track can send the keys marked to fire on seek. Several seeks before one evaluation are one seek, from the first one's origin.
+- **Reloads.** A reload marks each phase `Evaluated` at the time. It is not a seek, and fires nothing.
 - **Skips.** `skip_to` moves the time to a skip's target and evaluates each phase once over `(last, target]`, with `Track_Context.skipped` set, so a kind fires only the keys marked to fire when skipped ([Skipping: Events](skipping.md#events)). While a skipping player's fade runs, the systems evaluate it with an empty range and leave each phase's last time, so the jump covers what the fade held.
 - **Backwards.** A time before the last time gives an empty range.
 
@@ -131,7 +132,7 @@ A write fails, and saves nothing, when the entity is not alive, has no such comp
 A blob with a new key is a hot reload. The next `evaluate`, `seek` or `restore` notices it and:
 1. Takes each removed track, by its ID, off the writers of its fields.
 2. Restores each field that no remaining track wrote, and removes it from the snapshot. A track that the reload removes therefore restores its fields. It also forgets the property tracks' resolved fields, so the next evaluation resolves them again. It keeps the start of each transform track that is still relative to the same two bindings, and forgets the other spaces ([Tracks: Transform tracks](tracks.md#transform-tracks)). It ends the hold of every driven `Animator`, and the animation tracks of the new blob take theirs again as they evaluate. It releases the camera cut track's claim on the views too, and the track of the new blob claims them again with a cut. One `end_holds` ends both kinds of hold, for a reload, `restore`, `restore_all` and `destroy_evaluation`.
-3. Keeps the time, clamped into the new range, and sets each phase's last time to it, so the reload fires no events.
+3. Keeps the time, clamped into the new range, and sets each phase's last time to it, so the reload fires no events. It forgets the event tracks' open ranges whose IDs are no longer ranges ([Tracks: Event tracks](tracks.md#event-tracks)).
 4. Evaluates the new blob at the time.
 
 The bindings are the player's: when a reload changes them, the player resolves them again ([Player: Hot reload](player.md#hot-reload)).
