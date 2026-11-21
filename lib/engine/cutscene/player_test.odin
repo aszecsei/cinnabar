@@ -727,7 +727,7 @@ a_missing_clip_fails_in_loading_and_leaves_nothing :: proc(t: ^testing.T) {
 	update(&f.cutscenes, {world = &f.world, scenes = &scenes})
 	failure, failed = player_failure(&f.cutscenes, unbound)
 	testing.expect(t, failed)
-	testing.expect_value(t, failure.(Binding_Failure), Binding_Failure{1, .Missing})
+	testing.expect_value(t, failure.(Binding_Failure), Binding_Failure{index = 1, reason = .Missing})
 	ecs.collect(&f.world, {ecs.TRANSFORM_ID}, &props)
 	testing.expect_value(t, len(props), 0)
 }
@@ -1038,7 +1038,7 @@ a_failed_player_resumes_what_it_suspended :: proc(t: ^testing.T) {
 	update(&f.cutscenes, {world = &f.world, scenes = &scenes})
 	expect_status(t, f, h, .Failed)
 	failure, _ := player_failure(&f.cutscenes, h)
-	testing.expect_value(t, failure.(Binding_Failure), Binding_Failure{1, .Missing})
+	testing.expect_value(t, failure.(Binding_Failure), Binding_Failure{index = 1, reason = .Missing})
 	testing.expect(t, !ecs.has(&f.world, f.hero, ecs.Suspended), "the hero is free")
 
 	write_cutscene(t, f, {guid = OUTRO_GUID, value = 7, suspend = every})

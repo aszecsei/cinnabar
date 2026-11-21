@@ -37,7 +37,7 @@ animation_track :: proc(ctx: ^Track_Context) {
 		return
 	}
 	clips := clip_sections(ctx, animation)
-	drive_clips(ctx, animation, entity, clips)
+	drive_clips(ctx, entity, clips)
 	apply_root_motion(ctx, animation, entity)
 	if ctx.skipped {
 		return
@@ -112,42 +112,84 @@ clip_sections :: proc(ctx: ^Track_Context, animation: ^anim.State) -> []Clip_Sec
 	return found[:]
 }
 
-// drive_clips hands the heaviest clips to the driver. The track takes the Animator when a section first covers the
-// time, and holds it until the cutscene ends: with hold for restore, so the graph resumes where it was, and without
-// for keep, so the graph plays on under the clips. A driver that took the Animator from the track loses it again at
-// the track's next evaluation, so the later of two players wins it, as it wins a field.
+// Driven is what the animation tracks of a phase give one entity's Animator, which drive_animators hands to the driver
+// at the phase's end: its clips, from every track of the tree that drives it, and whether any of those tracks restores.
 @(private)
-drive_clips :: proc(
-	ctx: ^Track_Context,
-	animation: ^anim.State,
+Driven :: struct {
+	entity:  ecs.Entity,
+	restore: bool,
+}
+
+// Driven_Clip is a clip that an animation track gives an entity in a phase.
+@(private)
+Driven_Clip :: struct {
 	entity: ecs.Entity,
-	clips: []Clip_Section,
-) {
-	samples: [anim.MAX_DRIVEN]anim.Driven_Sample
-	count := min(len(clips), anim.MAX_DRIVEN)
-	for c, i in clips[:count] {
-		samples[i] = c.sample
-	}
-	drives := &ctx.evaluation.drives
-	token, held := drives[entity]
-	if !held || !anim.is_driving(ctx.world, token) {
-		if count == 0 {
-			delete_key(drives, entity)
-			return
+	sample: anim.Driven_Sample,
+}
+
+// drive_clips records the clips that the track gives its binding's Animator in this phase. drive_animators drives
+// each Animator once at the phase's end, with the clips of every track that drives it, so two sub-sequences that cover
+// one time cross-fade their poses by their weights (see docs/cinematics/tracks.md#sub-sequence-tracks).
+@(private)
+drive_clips :: proc(ctx: ^Track_Context, entity: ecs.Entity, clips: []Clip_Section) {
+	e := ctx.evaluation
+	restore := ctx.track.finish == .Restore
+	found := false
+	for &d in e.driven {
+		if d.entity == entity {
+			d.restore ||= restore
+			found = true
 		}
-		begun: bool
-		token, begun = anim.begin_drive(
-			animation,
-			ctx.world,
-			entity,
-			hold = ctx.track.finish == .Restore,
-		)
-		if !begun {
-			return
-		}
-		drives[entity] = token
 	}
-	anim.drive(ctx.world, token, samples[:count])
+	if !found {
+		append(&e.driven, Driven{entity, restore})
+	}
+	for c in clips {
+		append(&e.driven_clips, Driven_Clip{entity, c.sample})
+	}
+}
+
+// drive_animators hands each Animator that the phase's animation tracks drive the heaviest MAX_DRIVEN of their clips,
+// the earlier in the tree's order among equals. The evaluation takes the Animator when a clip first drives it, and holds
+// it until the cutscene ends: with hold when a track that drives it restores, so the graph resumes where it was, and
+// without for keep, so the graph plays on under the clips. A driver that took the Animator loses it again at the next
+// phase, so the later of two players wins it, as it wins a field.
+@(private)
+drive_animators :: proc(s: ^State, e: ^Evaluation, w: ^ecs.World) {
+	defer {
+		clear(&e.driven)
+		clear(&e.driven_clips)
+	}
+	animation := s.animation if s != nil else nil
+	if animation == nil {
+		return
+	}
+	for d in e.driven {
+		clips := make([dynamic]anim.Driven_Sample, w.platform.frame_allocator)
+		for c in e.driven_clips {
+			if c.entity == d.entity {
+				append(&clips, c.sample)
+			}
+		}
+		slice.stable_sort_by(clips[:], proc(a, b: anim.Driven_Sample) -> bool {
+			return a.weight > b.weight
+		})
+		count := min(len(clips), anim.MAX_DRIVEN)
+		token, held := e.drives[d.entity]
+		if !held || !anim.is_driving(w, token) {
+			if count == 0 {
+				delete_key(&e.drives, d.entity)
+				continue
+			}
+			begun: bool
+			token, begun = anim.begin_drive(animation, w, d.entity, hold = d.restore)
+			if !begun {
+				continue
+			}
+			e.drives[d.entity] = token
+		}
+		anim.drive(w, token, clips[:count])
+	}
 }
 
 // end_drives gives back every Animator that the evaluation's animation tracks hold, so their graphs' poses show again.

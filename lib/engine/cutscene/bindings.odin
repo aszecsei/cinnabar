@@ -85,11 +85,13 @@ Binding_Failure_Reason :: enum u8 {
 	Spawn_Failed,
 }
 
-// Binding_Failure is why resolve_bindings failed: the binding, by its index in the blob, and the reason. It holds no
-// strings, so a player can keep it across a code reload.
+// Binding_Failure is why resolve_bindings failed: the binding, by its index in the blob, and the reason, and for a
+// binding of a sub-sequence, its cutscene, which is zero for the player's own. It holds no strings, so a player can keep
+// it across a code reload.
 Binding_Failure :: struct {
-	index:  int,
-	reason: Binding_Failure_Reason,
+	index:    int,
+	reason:   Binding_Failure_Reason,
+	cutscene: format.Guid,
 }
 
 // Resolve is what resolve_bindings needs: the world, its scenes, the scripts that a prefab's behaviours attach to (or
@@ -196,12 +198,12 @@ resolve_bindings :: proc(
 				)
 				set_binding(b, w, index, Binding_Missing{})
 			} else {
-				return fail(b, r, {index, .Missing})
+				return fail(b, r, {index = index, reason = .Missing})
 			}
 		case .Spawned:
 			root, ok := spawn(b, r, binding, index)
 			if !ok {
-				return fail(b, r, {index, .Spawn_Failed})
+				return fail(b, r, {index = index, reason = .Spawn_Failed})
 			}
 			set_binding(b, w, index, Binding_Spawned{root, hold})
 		}
@@ -254,6 +256,21 @@ reveal_bindings :: proc(b: ^Bindings, w: ^ecs.World) {
 			}
 		}
 	}
+}
+
+// conceal_bindings hides the spawned bindings' entities again with Loading, as they spawned, for a sub-sequence whose
+// section no longer covers the time. Their behaviours sleep until reveal_bindings.
+conceal_bindings :: proc(b: ^Bindings, w: ^ecs.World) {
+	for state in b.states {
+		if s, spawned := state.(Binding_Spawned); spawned {
+			for e in instance_of(w, s.entity) {
+				if !ecs.has(w, e, ecs.Loading) {
+					ecs.add(w, e, ecs.Loading{LOADING_SCENE})
+				}
+			}
+		}
+	}
+	ecs.update_activity(w)
 }
 
 // release_bindings forgets every binding, which resumes what each suspended, and then despawns the spawned bindings'

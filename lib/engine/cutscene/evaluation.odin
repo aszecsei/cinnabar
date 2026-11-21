@@ -134,6 +134,10 @@ Evaluation :: struct {
 	open_ranges: map[Scoped]struct{},
 	// The events that the event tracks recorded in this phase, which flush_events sends at its end.
 	fired:       [dynamic]Fired,
+	// The Animators that the animation tracks drive in this phase, and their clips, which drive_animators hands to the
+	// driver at its end.
+	driven:       [dynamic]Driven,
+	driven_clips: [dynamic]Driven_Clip,
 }
 
 // Phase_Mark is where a phase's events have fired up to.
@@ -222,6 +226,12 @@ Track_Context :: struct {
 	rate:        f64,
 	// A loop of a sub-sequence above the track wrapped in (from, to], so the scope's time jumped back, as after a seek.
 	wrapped:     bool,
+	// The time on the root's time at which the scope's time is time, so root_time maps the scope's times back.
+	anchor:      f64,
+	// The evaluation crosses a cut of the camera cut tracks of the tree (see tree_cut_fires), on which transform tracks
+	// teleport.
+	cut:         bool,
+
 	// The time to evaluate at, in ticks.
 	time:        i32,
 	// The events in (from, to] fire. The range is empty after a seek, a reload or the phase's last evaluation at the same
@@ -356,6 +366,8 @@ init_evaluation :: proc(
 		scrubs = make(map[Scoped]Audio_Scrub, w.platform.heap_allocator),
 		open_ranges = make(map[Scoped]struct{}, w.platform.heap_allocator),
 		fired = make([dynamic]Fired, w.platform.heap_allocator),
+		driven = make([dynamic]Driven, w.platform.heap_allocator),
+		driven_clips = make([dynamic]Driven_Clip, w.platform.heap_allocator),
 		children = make([dynamic]Child, w.platform.heap_allocator),
 	}
 }
@@ -374,6 +386,11 @@ destroy_evaluation :: proc(e: ^Evaluation, w: ^ecs.World) -> (despawned: int) {
 	e.open_ranges = nil
 	delete(e.fired)
 	e.fired = nil
+	delete(e.driven)
+	e.driven = nil
+	delete(e.driven_clips)
+	e.driven_clips = nil
+
 	despawned = release_bindings(&e.bindings, w)
 	destroy_bindings(&e.bindings, w)
 	for &c in e.children {
@@ -540,20 +557,30 @@ run_phase :: proc(
 		to          = max(i64(now), from),
 		skipped     = events == .Skip,
 		seek        = seek,
+		anchor      = f64(now),
 	}
-	for track, i in format.cutscene_tracks(data, blob) {
-		kind := s.kinds[track.kind]
-		if .Muted in track.flags || kind.evaluate == nil || kind.phase != phase {
-			continue
-		}
-		ctx.track = track
-		ctx.track_index = u32(i)
-		ctx.order = u32(i)
+	ctx.cut = tree_cut_fires(s, &ctx)
+	// The children whose sections do not cover the time write their fields' own values first, so the root and the
+	// children that cover the time win a field that both write (see docs/cinematics/tracks.md#sub-sequence-tracks).
+	if len(e.children) > 0 {
+		walk_scope(s, &ctx, phase, .Uncovered, 0)
+	}
+	walk_scope(s, &ctx, phase, .Covered, 0)
+	if kind := s.kinds[.Camera_Cut]; kind.evaluate != nil && kind.phase == phase && tree_has_cuts(s, &ctx) {
+		cut, _ := live_cut_track(data, blob)
+		ctx.track = cut
+		ctx.track_index, ctx.order = 0, 0
 		ctx.user = kind.data
 		kind.evaluate(&ctx)
 	}
 	if phase == .Fixed {
+		drive_animators(s, e, w)
 		constrain(&ctx)
+		for i in 1 ..= len(e.children) {
+			if inner, ok := scope_context(s, &ctx, i); ok && inner.covered {
+				constrain(&inner)
+			}
+		}
 	}
 	if events != .Hold {
 		e.last[phase] = Evaluated(now)
@@ -651,9 +678,9 @@ sample :: proc(
 // loop now.
 root_time :: proc(ctx: ^Track_Context, t: f64) -> f64 {
 	if ctx.rate <= 0 {
-		return f64(ctx.evaluation.time)
+		return ctx.anchor
 	}
-	return f64(ctx.evaluation.time) + (t - f64(ctx.time)) / ctx.rate
+	return ctx.anchor + (t - f64(ctx.time)) / ctx.rate
 }
 
 // fires is whether an event at a time on the cutscene's time fires in this evaluation: whether it is in (from, to].
