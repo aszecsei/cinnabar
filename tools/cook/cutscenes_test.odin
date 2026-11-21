@@ -184,6 +184,13 @@ each_mistake_in_a_cutscene_is_reported_at_its_line :: proc(t: ^testing.T) {
 		"binding 1 \"A\"\n\tpossess = " +
 		S +
 		"\ntrack 1 property \"L\"\n\tbinding = 1\n\tcomponent = 9101\n\tfield = \"intensity\"\n"
+	// Two bindings and a transform track of the first, on lines 3 to 8.
+	MOVE ::
+		"binding 1 \"A\"\n\tpossess = " +
+		S +
+		"\nbinding 2 \"B\"\n\tpossess = " +
+		S +
+		"\ntrack 1 transform \"M\"\n\tbinding = 1\n"
 	cases := [?]struct {
 		text:     string,
 		line:     int,
@@ -629,6 +636,70 @@ each_mistake_in_a_cutscene_is_reported_at_its_line :: proc(t: ^testing.T) {
 			"a linear key has no tangents",
 		},
 		{
+			"cutscene 1\nlength = 10\n" + MOVE + "\tspace = sideways\n",
+			9,
+			"space is absolute, relative",
+		},
+		{
+			"cutscene 1\nlength = 10\n" + MOVE + "\tspace = relative B\n",
+			9,
+			"space is absolute, relative",
+		},
+		{
+			"cutscene 1\nlength = 10\n" + MOVE + "\tspace = relative 9\n",
+			9,
+			"names a binding of the cutscene",
+		},
+		{"cutscene 1\nlength = 10\n" + MOVE + "\tspace = relative 1\n", 9, "has space = relative"},
+		{"cutscene 1\nlength = 10\n" + MOVE + "\torigin = [1, 2]\n", 9, "origin is three numbers"},
+		{"cutscene 1\nlength = 10\n" + MOVE + "\torigin = [1, 2, 1e30]\n", 9, "inside the bounds"},
+		{
+			"cutscene 1\nlength = 10\n" + MOVE + "\torigin = [1, 2, 3]\n",
+			9,
+			"origin is for space = absolute",
+		},
+		{
+			"cutscene 1\nlength = 10\n" + MOVE + "\tsection 1 0 10\n\t\tspace = absolute\n",
+			10,
+			"comes before the track's sections",
+		},
+		{
+			"cutscene 1\nlength = 10\n" +
+			MOVE +
+			"\tsection 1 0 10\n\t\tchannel x\n\t\t\tkey 0 0 linear\n",
+			10,
+			"a transform track's channel is position_x",
+		},
+		{
+			"cutscene 1\nlength = 10\ntrack 1 event \"A\"\n\tspace = absolute\n",
+			4,
+			"only a transform track",
+		},
+		{
+			"cutscene 1\nlength = 10\ntrack 1 event \"A\"\n\torigin = [0, 0, 0]\n",
+			4,
+			"only a transform track",
+		},
+		{
+			"cutscene 1\nlength = 10\ntrack 1 event \"A\"\n\tsection 1 0 10\n\t\tchannel x\n\t\t\tkey 0 0 linear\n\t\t\tkey 5 1 linear teleport\n",
+			7,
+			"only a transform track's keys teleport",
+		},
+		{
+			"cutscene 1\nlength = 10\n" +
+			MOVE +
+			"\tspace = relative 2\ntrack 2 transform \"N\"\n\tbinding = 2\n\tspace = relative 1\n",
+			9,
+			"relative bindings form a cycle: A -> B -> A",
+		},
+		{
+			"cutscene 1\nlength = 10\n" +
+			MOVE +
+			"\tspace = relative 2\ntrack 2 transform \"N\"\n\tbinding = 2\n\tspace = relative 1\n",
+			12,
+			"relative bindings form a cycle: B -> A -> B",
+		},
+		{
 			"cutscene 1\nlength = 10\ntrack 1 event \"A\"\n\tsection 1 0 10\n\t\tchannel x\n\t\t\tkey 5 0 linear\n\t\t\tkey 5 1 linear\n",
 			7,
 			"keys are in order of time",
@@ -955,6 +1026,77 @@ track 2 audio "D"
 
 // A property track names its field by its component's stable ID and its dotted name. Its sections can be additive, and
 // its keys can name assets of any kind, which the blob lists once each and the bundle carries.
+@(test)
+transform_tracks_have_a_space_an_origin_and_keys_that_teleport :: proc(t: ^testing.T) {
+	text :=
+		`cutscene 1
+length = 60000
+binding 1 "Fox"
+	possess = @` +
+		SCENE_GUID +
+		`/1
+binding 2 "Ship"
+	possess = @` +
+		SCENE_GUID +
+		`/2
+track 1 transform "Ship flies"
+	binding = 2
+	space = absolute
+	origin = [1073741824, 0, -0.5]
+	section 1 0 60000
+		channel position_z
+			key 0 0 linear
+			key 30000 10 linear teleport
+			key 60000 12 bezier 1 2 weights 0.5 0.5 teleport
+track 2 transform "Fox rides"
+	binding = 1
+	space = relative 2
+	section 2 0 60000
+		blend = additive
+		channel rotation_y
+			key 0 0 auto
+track 3 transform "Fox stands"
+	binding = 1
+	section 3 0 60000
+		channel scale_x
+			key 0 1 constant
+`
+	parsed, problems := cutscene_parse(text, context.temp_allocator)
+	testing.expectf(t, len(problems) == 0, "problems: %v", problems)
+	c := parsed.contents
+	if len(c.tracks) != 3 {
+		return
+	}
+	ship := c.tracks[0]
+	testing.expect_value(t, ship.space, format.Cutscene_Space.Absolute)
+	testing.expect_value(t, ship.origin, [3]i64{1 << 54, 0, -(1 << 23)})
+	keys := ship.sections[0].channels[0].keys
+	testing.expect_value(t, keys[0].flags, format.Cutscene_Key_Flags{})
+	testing.expect_value(t, keys[1].flags, format.Cutscene_Key_Flags{.Teleport})
+	testing.expect_value(
+		t,
+		keys[2].flags,
+		format.Cutscene_Key_Flags{.Broken, .Weighted, .Teleport},
+	)
+	testing.expect_value(t, keys[2].out_slope, 2)
+	testing.expect_value(t, c.tracks[1].space, format.Cutscene_Space.Relative_To)
+	testing.expect_value(t, c.tracks[1].relative, 1)
+	testing.expect_value(t, c.tracks[2].space, format.Cutscene_Space.Relative)
+
+	// The blob keeps them.
+	data := format.cutscene_write(c, context.temp_allocator)
+	blob, ok := format.cutscene_view(data)
+	testing.expect(t, ok)
+	if !ok {
+		return
+	}
+	tracks := format.cutscene_tracks(data, blob)
+	testing.expect_value(t, tracks[0].origin, [3]i64{1 << 54, 0, -(1 << 23)})
+	testing.expect_value(t, tracks[0].relative, format.CUTSCENE_NONE)
+	testing.expect_value(t, tracks[1].relative, 1)
+	testing.expect_value(t, tracks[2].relative, format.CUTSCENE_NONE)
+}
+
 @(test)
 property_tracks_name_their_field_and_key_numbers_or_assets :: proc(t: ^testing.T) {
 	text :=

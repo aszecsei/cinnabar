@@ -89,6 +89,17 @@ Cutscene_Finish :: enum u32 {
 	Keep,
 }
 
+// Cutscene_Space is what a transform track's keyed position and rotation are from (see
+// docs/cinematics/tracks.md#transform-tracks).
+Cutscene_Space :: enum u32 {
+	// The binding's own pose before the cutscene first wrote it.
+	Relative,
+	// The track's origin, a World_Position, with no rotation.
+	Absolute,
+	// Another binding's pose at each evaluation, so the entity rides it.
+	Relative_To,
+}
+
 // Cutscene_Interp is how a key's value goes to the next key's (see docs/cinematics/tracks.md#curves).
 Cutscene_Interp :: enum u8 {
 	// The key's value holds until the next key.
@@ -105,6 +116,9 @@ Cutscene_Key_Flag :: enum u8 {
 	Broken,
 	// The tangents have their own weights. Without it both are CUTSCENE_TANGENT_WEIGHT.
 	Weighted,
+	// An evaluation that crosses the key moves the entity at once, with no interpolation from its last pose. Only a
+	// transform track's keys teleport.
+	Teleport,
 }
 Cutscene_Key_Flags :: bit_set[Cutscene_Key_Flag;u8]
 
@@ -232,7 +246,9 @@ Cutscene_Binding :: struct {
 
 // Cutscene_Track is a track: its kind, its binding's index or CUTSCENE_NONE, and its sections, which follow those of
 // the tracks before it. A property track names the field that it animates: its component's stable ID, and the field's
-// dotted name and the name's scene_field_hash. The other kinds have zeros there.
+// dotted name and the name's scene_field_hash. The other kinds have zeros there. A transform track has its space: for
+// Absolute, its origin in World_Position units (2^-24 m), and for Relative_To, the index of the binding that it is
+// relative to. The other kinds, and the other spaces, have Relative, a zero origin and CUTSCENE_NONE there.
 Cutscene_Track :: struct {
 	id:            u32,
 	kind:          Cutscene_Track_Kind,
@@ -242,12 +258,15 @@ Cutscene_Track :: struct {
 	finish:        Cutscene_Finish,
 	first_section: u32,
 	section_count: u32,
-	reserved:      u32,
+	space:         Cutscene_Space,
 	component:     u64,
 	field_hash:    u64,
 	field:         Slice,
+	relative:      u32,
+	reserved:      u32,
+	origin:        [3]i64,
 }
-#assert(size_of(Cutscene_Track) == 64)
+#assert(size_of(Cutscene_Track) == 96)
 
 // Cutscene_Section is a span of a track, in ticks on the cutscene's time, with its eases, its weight, its pre-roll and
 // post-roll (the ticks before its start and after its end that it holds its first and last values for), the asset that
@@ -438,8 +457,20 @@ cutscene_view :: proc(data: []byte) -> (blob: ^Cutscene_Blob, ok: bool) {
 			   (tr.component != 0 && tr.field.size > 0 && tr.field_hash != 0) ||
 		   (tr.kind != .Property && (tr.component != 0 || tr.field_hash != 0)) ||
 		   tr.first_section != next_section ||
-		   u64(tr.first_section) + u64(tr.section_count) > u64(len(sections)) {
+		   u64(tr.first_section) + u64(tr.section_count) > u64(len(sections)) ||
+		   tr.space > .Relative_To ||
+		   tr.reserved != 0 ||
+		   (tr.kind != .Transform && tr.space != .Relative) ||
+		   (tr.space != .Absolute && tr.origin != {}) ||
+		   (tr.space == .Relative_To) != (tr.relative != CUTSCENE_NONE) ||
+		   (tr.space == .Relative_To &&
+				   (tr.relative >= u32(len(bindings)) || tr.relative == tr.binding)) {
 			return nil, false
+		}
+		for axis in tr.origin {
+			if abs(axis) > WORLD_POSITION_LIMIT {
+				return nil, false
+			}
 		}
 		switch cutscene_track_binding(tr.kind) {
 		case .Required:
@@ -500,26 +531,30 @@ cutscene_view :: proc(data: []byte) -> (blob: ^Cutscene_Blob, ok: bool) {
 	}
 	next_key := u32(0)
 	guid_count := len(cutscene_guids(data, blob))
-	for s in sections {
-		duration := s.end - s.start
-		for c in channels[s.first_channel:][:s.channel_count] {
-			if c.first_key != next_key || u64(c.first_key) + u64(c.key_count) > u64(len(keys)) {
-				return nil, false
-			}
-			next_key += c.key_count
-			for k, j in keys[c.first_key:][:c.key_count] {
-				if !cutscene_key_valid(k) ||
-				   k.time > duration ||
-				   (j > 0 && k.time <= keys[int(c.first_key) + j - 1].time) {
+	for tr in tracks {
+		for s in sections[tr.first_section:][:tr.section_count] {
+			duration := s.end - s.start
+			for c in channels[s.first_channel:][:s.channel_count] {
+				if c.first_key != next_key ||
+				   u64(c.first_key) + u64(c.key_count) > u64(len(keys)) {
 					return nil, false
 				}
-				// A GUID key holds its value, a whole index into the GUIDs.
-				if .Guids in c.flags &&
-				   (k.interp != .Constant ||
-						   k.value < 0 ||
-						   k.value != math.floor(k.value) ||
-						   int(k.value) >= guid_count) {
-					return nil, false
+				next_key += c.key_count
+				for k, j in keys[c.first_key:][:c.key_count] {
+					if !cutscene_key_valid(k) ||
+					   k.time > duration ||
+					   (j > 0 && k.time <= keys[int(c.first_key) + j - 1].time) ||
+					   (.Teleport in k.flags && tr.kind != .Transform) {
+						return nil, false
+					}
+					// A GUID key holds its value, a whole index into the GUIDs.
+					if .Guids in c.flags &&
+					   (k.interp != .Constant ||
+							   k.value < 0 ||
+							   k.value != math.floor(k.value) ||
+							   int(k.value) >= guid_count) {
+						return nil, false
+					}
 				}
 			}
 		}
@@ -532,14 +567,14 @@ cutscene_view :: proc(data: []byte) -> (blob: ^Cutscene_Blob, ok: bool) {
 
 // cutscene_key_valid checks a key on its own: a time from 0, a known interpolation and flags, finite numbers, weights
 // from 0 to 1 for a weighted key and 0 for the others, one slope for a key whose tangents are not broken, and no
-// tangents for a key that is not a Bezier key.
+// tangents for a key that is not a Bezier key. Any key can teleport.
 cutscene_key_valid :: proc "contextless" (k: Cutscene_Key) -> bool {
 	finite :: proc "contextless" (x: f32) -> bool {
 		return !math.is_nan(x) && !math.is_inf(x)
 	}
 	if k.time < 0 ||
 	   k.interp > .Auto ||
-	   k.flags - {.Broken, .Weighted} != {} ||
+	   k.flags - {.Broken, .Weighted, .Teleport} != {} ||
 	   k.reserved != 0 ||
 	   !finite(k.value) ||
 	   !finite(k.in_slope) ||
@@ -548,7 +583,8 @@ cutscene_key_valid :: proc "contextless" (k: Cutscene_Key) -> bool {
 	   !(k.out_weight >= 0 && k.out_weight <= 1) {
 		return false
 	}
-	if k.interp != .Bezier && (k.flags != {} || k.in_slope != 0 || k.out_slope != 0) {
+	if k.interp != .Bezier &&
+	   (k.flags - {.Teleport} != {} || k.in_slope != 0 || k.out_slope != 0) {
 		return false
 	}
 	if .Broken not_in k.flags && k.in_slope != k.out_slope {
@@ -726,6 +762,11 @@ Cutscene_Track_Contents :: struct {
 	// A property track's component and the dotted name of its field. The blob holds the name's hash too.
 	component: u64,
 	field:     string,
+	// A transform track's space, its origin in World_Position units for Absolute, and the index of the binding that it
+	// is relative to for Relative_To. The blob has CUTSCENE_NONE there for the other spaces.
+	space:     Cutscene_Space,
+	origin:    [3]i64,
+	relative:  u32,
 	sections:  []Cutscene_Section_Contents,
 }
 
@@ -818,6 +859,9 @@ cutscene_write :: proc(contents: Cutscene_Contents, allocator := context.allocat
 			component     = tr.component,
 			field         = append_bytes(&buffer, transmute([]byte)tr.field),
 			field_hash    = scene_field_hash(tr.field) if tr.field != "" else 0,
+			space         = tr.space,
+			relative      = tr.relative if tr.space == .Relative_To else CUTSCENE_NONE,
+			origin        = tr.origin,
 		}
 		mem.copy(
 			&buffer[int(tracks.offset) + i * size_of(Cutscene_Track)],

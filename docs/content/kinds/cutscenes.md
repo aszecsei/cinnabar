@@ -102,10 +102,12 @@ A parent must come before its child, so parents cannot form a cycle. [Cinematics
 | `when_finished` | `restore`: the player puts back the fields that the track wrote. `keep`: they stay as the cutscene left them. | `restore` |
 | `component` | A property track's component, by its stable ID in decimal, as a scene names it. Needed for a property track, and a problem for the others. | — |
 | `field` | A property track's field, by its quoted name, with dots between the names of nested fields, such as `"light.intensity"`. Needed for a property track, and a problem for the others. | — |
+| `space` | A transform track's space: `relative`, from its binding's own pose; `absolute`, from its `origin`; or `relative <id>`, from the binding with that ID, which is not the track's own. A problem for the other kinds. See [Cinematics: Transform tracks](../../cinematics/tracks.md#transform-tracks). | `relative` |
+| `origin` | `[x, y, z]` in meters: an absolute transform track's origin. The cooker converts it to `World_Position` units (2^-24 m). A problem for the other spaces and kinds. | `[0, 0, 0]` |
 
 The cooker cannot see a property track's field, because native components exist only in the game's code. The game checks that the field can animate when it loads the cutscene ([Cinematics: Property tracks](../../cinematics/tracks.md#property-tracks)).
 
-The kind of a track decides whether it takes a binding, and what each of its sections names with `asset`. Besides their channels and assets, only property tracks have data of their own yet:
+The kind of a track decides whether it takes a binding, and what each of its sections names with `asset`. Besides their channels and assets, only property and transform tracks have data of their own yet:
 
 | Kind | Binding | Section's asset |
 |---|---|---|
@@ -134,19 +136,22 @@ The kind of a track decides whether it takes a binding, and what each of its sec
 
 `channel <name>` starts a curve of the section. Its name is letters, digits and `_`, and no other channel of the section has it. A channel has at least one key. Its track's kind gives the names their meaning:
 - **Property tracks:** `value`, for a number and for a field that steps, or a vector's numbers as `x`, `y` and `z`, or `r`, `g` and `b`. A section keys `value` alone or one vector's names, and not both sets.
+- **Transform tracks:** `position_x`, `position_y` and `position_z` in meters, `rotation_x`, `rotation_y` and `rotation_z` in degrees, and `scale_x`, `scale_y` and `scale_z`.
 - **The other kinds** take any name for now.
 
-`key <time> <value> <interp> [<slope> | <in> <out>] [weights <in> <out>]`:
+`key <time> <value> <interp> [<slope> | <in> <out>] [weights <in> <out>] [teleport]`:
 - **The time** is in ticks from the section's start, from 0 to the section's duration. So a section moves without a change to its keys. Each key comes after the one before it.
 - **The value** is a finite number. A whole number with more than 24 bits, which an `f32` does not hold exactly, is a problem.
 - **An asset's value** is `$<guid>`, for a property track that animates an asset field. The key is `constant`, and every key of its channel is an asset.
 - **The interpolation** goes from this key to the next: `constant`, `linear`, `bezier` or `auto` ([Cinematics: Curves](../../cinematics/tracks.md#curves)).
 - **A Bezier key** has one slope, for unified tangents, or an in and an out slope apart, for broken ones, in value per second. `weights <in> <out>`, each from 0 to 1, weights its tangents. The other keys have no tangents.
+- **`teleport`**, last, marks a transform track's key: an evaluation that crosses it moves the entity at once ([Cinematics: Transform tracks](../../cinematics/tracks.md#transform-tracks)).
 
 ```
 key 0 0 auto
 key 30000 2 bezier 0.5
 key 45000 1 bezier 2 -1 weights 0.25 0.75
+key 50000 3 linear teleport
 key 60000 $0d9b84a2116a5529c2cd33741edd33a4 constant
 ```
 
@@ -160,10 +165,10 @@ A `Cutscene_Blob` (`lib/engine/asset/format/cutscene.odin`) holds the length, th
   - the scene's GUID and the entity's scene ID (a path folds to one with `scene_path_id_of`), or the prefab's GUID;
   - its parent's index or `CUTSCENE_NONE`;
   - its position as `[3]i64` `World_Position` units, its rotation and its scale.
-- **`Cutscene_Track`:** its ID, kind, name, binding's index or `CUTSCENE_NONE`, flags (`.Muted`), when-finished, its first section and count, and for a property track its component's stable ID and its field's name and `scene_field_hash`.
+- **`Cutscene_Track`:** its ID, kind, name, binding's index or `CUTSCENE_NONE`, flags (`.Muted`), when-finished, its first section and count, for a property track its component's stable ID and its field's name and `scene_field_hash`, and for a transform track its space (`Cutscene_Space`), its origin as `[3]i64` `World_Position` units, and the index of the binding that it is relative to, or `CUTSCENE_NONE`.
 - **`Cutscene_Section`:** its ID, start, end, eases, weight, pre-roll and post-roll, asset GUID (zero for a kind that names none), its first channel and count, and its flags (`.Additive`).
 - **`Cutscene_Channel`:** its name and the name's hash, its first key and count, and its flags (`.Guids`, when its keys' values are indexes into the GUIDs).
-- **`Cutscene_Key`:** its time from the section's start, its value, its interpolation, its flags (`.Broken`, `.Weighted`), and its in and out slopes and weights.
+- **`Cutscene_Key`:** its time from the section's start, its value, its interpolation, its flags (`.Broken`, `.Weighted`, `.Teleport`), and its in and out slopes and weights.
 
 The blob also holds `cutscene_guids`: the assets that keys name, each once, at most `MAX_CUTSCENE_GUIDS` (65536).
 
@@ -177,8 +182,9 @@ Each track's sections follow those of the track before it. The same is true of e
 - that the tables split exactly, with no gaps and no overlaps;
 - each section's times, eases, rolls, weight and asset against its kind;
 - that only property tracks name a field and key assets, and that only transform and property sections are additive;
+- that only a transform track has a space other than `Relative`, that only an absolute track has an origin, inside the bounds of a `World_Position`, and that only a track relative to another binding names one, which is not its own;
 - that every channel has keys;
-- that each key is inside its section, comes after the key before it, has a known interpolation and flags and has finite numbers, that a key that is not a Bezier key has no tangents, that only a weighted key has weights, from 0 to 1, and that a key that names an asset is constant and names one of the GUIDs.
+- that each key is inside its section, comes after the key before it, has a known interpolation and flags and has finite numbers, that a key that is not a Bezier key has no tangents, that only a weighted key has weights, from 0 to 1, that only a transform track's keys teleport, and that a key that names an asset is constant and names one of the GUIDs.
 
 `blob_references` gives the prefabs of the spawned bindings, the sections' clips, sounds and sub-sequences, and the assets that keys name, so a bundle carries them. A possessed binding's scene is not a reference: the cutscene plays in a level that has the scene loaded, and its bundle does not pull in the level. A hidden document is not a reference either: the HUD that a cutscene hides is the level's or the game's.
 
@@ -196,11 +202,15 @@ Each track's sections follow those of the track before it. The same is true of e
   - a position outside the bounds of a `World_Position`, a rotation that is not of length 1, or a scale of 0;
   - a track's kind that is unknown, a track without the binding that its kind needs, a binding that its kind does not take, or a binding ID that no binding has;
   - a property track without `component` and `field`, a `component` that is not a stable ID in decimal, a `field` that is not a quoted dotted name, or either one on a track of another kind;
+  - a `space` that is not `absolute`, `relative` or `relative <id>`, a `relative <id>` that names no binding or the track's own, an `origin` that is not three numbers inside the bounds of a `World_Position` or that is not for `space = absolute`, or either one on a track that is not a transform track;
+  - a cycle of transform tracks relative to other bindings, which each track in it reports at its `space` line, with the path, such as `relative bindings form a cycle: Fox -> Ship -> Fox`;
   - a `blend` that is not `absolute` or `additive`, or an additive section of a kind other than transform or property;
   - eases longer than the section, a pre-roll or post-roll that is not a whole number of ticks, or a weight outside 0 to 1;
   - a section without the asset that its kind needs, or with one that its kind does not take;
   - a channel's name that is not a name or is taken, or a channel without keys;
   - a property track's channel that is not `value`, `x`, `y`, `z`, `r`, `g` or `b`, or a section that keys more than one set of them;
+  - a transform track's channel that is not one of its nine;
+  - a key marked `teleport` on a track that is not a transform track;
   - a key's time outside its section or not after the key before it, a value that is not finite or not exact as an `f32`, an unknown interpolation, slopes that are missing, not finite or not wanted, or weights that are not from 0 to 1;
   - a key of an asset that is not constant, a channel whose keys are not all assets or all numbers, or a key of an asset on a track that is not a property track;
   - a GUID that names no asset, or an asset of the wrong kind: a possessed scene that is not a scene, a spawned prefab that is not a prefab, a clip that is not an animation, a sound that is not a sound, a sub-sequence that is not a cutscene, or a hidden document that is not a UI document. A key's asset can be of any kind: nothing checks it against the field's kind yet;

@@ -14,7 +14,8 @@ An `Evaluation` is what one cutscene needs to be evaluated:
 - its time in ticks, from the range's start to the range's end;
 - the time of each phase's last evaluation;
 - the [snapshot](#the-restore-snapshot) of the fields that its tracks wrote;
-- the fields of its property tracks, resolved once for the blob ([Tracks: Property tracks](tracks.md#property-tracks)).
+- the fields of its property tracks, resolved once for the blob ([Tracks: Property tracks](tracks.md#property-tracks));
+- for each transform track relative to another binding, a cycle or where its binding starts in the other's space, found once for the blob ([Tracks: Transform tracks](tracks.md#transform-tracks)).
 
 It holds no procedures, `typeid`s or string literals, so it survives a code reload. `init_evaluation` starts it at the range's start, and `destroy_evaluation` frees it.
 
@@ -49,7 +50,7 @@ Each kind of track has a **phase**:
 - **Late phase.** The `Late` phase runs after scripts and before `camera.advance`, so the frame shows what it wrote.
 - **Exclusive.** Both systems are **exclusive** ([World: ECS: Systems](../world/ecs.md#systems)). A property track can write any component, so the systems cannot name their writes before they run. An exclusive system waits for every system before it, and every later system waits for it. `register` is the first registration in `register_world`, so in each stage the cutscene runs first and alone.
 - **Real clock.** `advance_real` runs in `game_update` before the ticks, and only while the world runs. Its `Fixed` writes are therefore in place before the first tick. The game's pause does not stop them.
-- **Real clock in a pause.** While the game is paused, no tick runs. So `Previous_Transform` is not copied, and the clock's `alpha` does not change. Presentation then shows only a part of a move that a real-clock track writes to `Transform`. A kind that moves an interpolated entity on the real clock must therefore teleport it (`ecs.teleport`). This is a rule for the transform track ([#539](https://github.com/aszecsei/cinnabar/issues/539)).
+- **Real clock in a pause.** While the game is paused, no tick runs. So `Previous_Transform` is not copied, and the clock's `alpha` does not change. Presentation then shows only a part of a move that a real-clock track writes to `Transform`. A kind that moves an interpolated entity on the real clock must therefore teleport it. The transform track does ([Tracks: Transform tracks](tracks.md#transform-tracks)).
 
 [Architecture: Frame](../overview/architecture.md#frame) has the whole frame.
 
@@ -70,7 +71,7 @@ A kind:
 - gets its binding's entity with `track_entity`;
 - samples its sections with `section_at` and blends them with `Blend`;
 - reads a field's own value with `base`;
-- writes the world **only** with `write` or `write_field`, and writes every field that it holds in each evaluation, at the field's own value where no section covers the time ([Player: Conflicts](player.md#conflicts));
+- writes the world **only** with `write` or `write_field`, and writes every field that it holds in each evaluation, at the field's own value where no section covers the time ([Player: Conflicts](player.md#conflicts)). The one exception is what follows from those fields each tick: `settle_pose` writes a child's `Transform` and a teleport's `Previous_Transform`, outside the snapshot;
 - tests a key against the event range with `fires`, and in a skip's range fires only the keys that it marks to fire when skipped ([Skipping: Events](skipping.md#events)).
 
 ## Sections and blending
@@ -114,6 +115,7 @@ Each phase keeps the time of its last evaluation. An evaluation's event range is
 - A field that only tracks set to `keep` wrote stays as the cutscene left it.
 - A field whose entity is gone, or no longer has the component, is skipped.
 - The fields go back in the reverse of the order in which they were saved. Where a track wrote a whole field and another wrote a part of it, the value from before the first write is what stays.
+- A field of a `Transform` or a `Local_Transform` that goes back teleports its entity, with what is under it (`settle_pose`), so presentation does not interpolate to it.
 
 The snapshot is then empty. The player calls `restore` when it goes to `Restored` or `Failed`.
 
@@ -125,7 +127,7 @@ A write fails, and saves nothing, when the entity is not alive, has no such comp
 
 A blob with a new key is a hot reload. The next `evaluate`, `seek` or `restore` notices it and:
 1. Takes each removed track, by its ID, off the writers of its fields.
-2. Restores each field that no remaining track wrote, and removes it from the snapshot. A track that the reload removes therefore restores its fields. It also forgets the property tracks' resolved fields, so the next evaluation resolves them again.
+2. Restores each field that no remaining track wrote, and removes it from the snapshot. A track that the reload removes therefore restores its fields. It also forgets the property tracks' resolved fields and the transform tracks' spaces, so the next evaluation finds them again.
 3. Keeps the time, clamped into the new range, and sets each phase's last time to it, so the reload fires no events.
 4. Evaluates the new blob at the time.
 

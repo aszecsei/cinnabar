@@ -22,7 +22,7 @@ MATERIAL :: Guid{6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6}
 @(private = "file")
 test_cutscene :: proc() -> []byte {
 	walk := []Cutscene_Key {
-		{time = 0, value = 0, interp = .Linear},
+		{time = 0, value = 0, interp = .Linear, flags = {.Teleport}},
 		{
 			time = 30000,
 			value = 2,
@@ -91,6 +91,8 @@ test_cutscene :: proc() -> []byte {
 				name = "Fox walk",
 				binding = 0,
 				finish = .Keep,
+				space = .Absolute,
+				origin = {1 << 54, 0, -5},
 				sections = {
 					{
 						id = 10,
@@ -236,6 +238,12 @@ cutscene_blobs_round_trip :: proc(t: ^testing.T) {
 	testing.expect_value(t, tracks[2].flags, Cutscene_Track_Flags{.Muted})
 	testing.expect_value(t, tracks[2].binding, CUTSCENE_NONE)
 	testing.expect_value(t, blob_string(data, tracks[4].name), "")
+	testing.expect_value(t, tracks[0].space, Cutscene_Space.Absolute)
+	testing.expect_value(t, tracks[0].origin, [3]i64{1 << 54, 0, -5})
+	testing.expect_value(t, tracks[0].relative, CUTSCENE_NONE)
+	testing.expect_value(t, tracks[1].space, Cutscene_Space.Relative)
+	testing.expect_value(t, tracks[1].origin, [3]i64{})
+	testing.expect_value(t, tracks[1].relative, CUTSCENE_NONE)
 
 	testing.expect_value(t, len(cutscene_sections(data, blob)), 8)
 	clips := cutscene_track_sections(data, blob, tracks[1])
@@ -254,6 +262,7 @@ cutscene_blobs_round_trip :: proc(t: ^testing.T) {
 	testing.expect_value(t, channels[1].name_hash, animation_graph_hash("rotation_y"))
 	keys := cutscene_channel_keys(data, blob, channels[0])
 	testing.expect_value(t, len(keys), 3)
+	testing.expect_value(t, keys[0].flags, Cutscene_Key_Flags{.Teleport})
 	testing.expect_value(t, keys[1].time, 30000)
 	testing.expect_value(t, keys[1].interp, Cutscene_Interp.Bezier)
 	testing.expect_value(t, keys[1].flags, Cutscene_Key_Flags{.Broken, .Weighted})
@@ -431,6 +440,34 @@ cutscene_blobs_with_bad_records_are_refused :: proc(t: ^testing.T) {
 	tracks[0].field_hash = 1
 	refused(t, data, "a transform track with a field")
 	tracks[0].field_hash = 0
+	tracks[0].space = Cutscene_Space(3)
+	refused(t, data, "an unknown space")
+	tracks[0].space = .Relative
+	refused(t, data, "an origin for a space that is not absolute")
+	tracks[0].space = .Absolute
+	tracks[0].origin.x = WORLD_POSITION_LIMIT + 1
+	refused(t, data, "an origin outside the bounds of a World_Position")
+	tracks[0].origin.x = 1 << 54
+	tracks[0].reserved = 1
+	refused(t, data, "a track's reserved word that is not 0")
+	tracks[0].reserved = 0
+	tracks[1].space = .Absolute
+	refused(t, data, "an animation track with a space")
+	tracks[1].space = .Relative
+	tracks[0].origin = {}
+	tracks[0].space = .Relative_To
+	refused(t, data, "a track relative to another binding that names none")
+	tracks[0].relative = 0
+	refused(t, data, "a track relative to its own binding")
+	tracks[0].relative = 3
+	refused(t, data, "a track relative to a binding past the table")
+	tracks[0].relative = 1
+	_, ok = cutscene_view(data)
+	testing.expect(t, ok, "a track relative to another binding")
+	tracks[0].space = .Absolute
+	refused(t, data, "an absolute track that names a binding")
+	tracks[0].relative = CUTSCENE_NONE
+	tracks[0].origin = {1 << 54, 0, -5}
 
 	sections[1].end = 0
 	refused(t, data, "a section that ends at its start")
@@ -513,9 +550,13 @@ cutscene_blobs_with_bad_records_are_refused :: proc(t: ^testing.T) {
 	keys[1].flags = {.Broken}
 	refused(t, data, "weights on a key that is not weighted")
 	keys[1].flags = {.Broken, .Weighted}
-	keys[1].flags += transmute(Cutscene_Key_Flags)u8(4)
+	keys[1].flags += transmute(Cutscene_Key_Flags)u8(8)
 	refused(t, data, "an unknown key flag")
 	keys[1].flags = {.Broken, .Weighted}
+	// The audio track's keys come after the transform track's four.
+	keys[4].flags = {.Teleport}
+	refused(t, data, "a key of an audio track that teleports")
+	keys[4].flags = {}
 	// The GUID keys are the last two.
 	guid_key := &keys[len(keys) - 1]
 	guid_key.value = 2
