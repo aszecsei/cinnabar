@@ -225,7 +225,7 @@ track 2 animation "Fox acts"
 - A transform track that keys the position or the rotation of the same binding also writes them. The later track in the cutscene wins.
 
 **Markers.** A clip's markers are those that the `Animator`'s graph puts on the clip: the markers of the first of the graph's clips that plays it. A clip that the graph does not play has no markers.
-- Only the heaviest section at the time raises markers, as the graph raises only its heaviest clip's.
+- Only one section raises markers, as the graph raises only its heaviest clip's: of the sections whose span meets the event range, the heaviest at the range's end, or at its own end when it ends first. So the tick that passes a section's end, and the tick at its start where its ease in weighs nothing, still raise its markers.
 - A marker is raised when the evaluation's event range `(last, now]`, in the clip's time, holds it. When the section starts in the range, a marker at its offset is raised too. A looping clip raises its markers in each loop that the range passes, up to `MAX_MARKER_LOOPS` (16).
 - `anim.raise_marker` puts each one before the tick's own events. It reaches the binding's behaviours as `on_animation_event`, in the same tick.
 - A seek, a backwards scrub and a reload raise none, because their range is empty. A skip raises none ([Skipping: Events](skipping.md#events)). Outside a frame, as in the editor's Edit mode, the graph is not ready, and no marker is raised.

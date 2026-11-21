@@ -722,4 +722,11 @@ driven_root_motion_is_reported_or_removed :: proc(t: ^testing.T) {
 	drive(&f.world, token, {{clip = guid(WALK), time = 0.75, weight = 0.5}})
 	frame(f, 1)
 	testing.expect(t, near(m.translation.z, 0), "an in-place clip reported its root motion")
+	testing.expect(t, near(root_z(f, e), 0))
+
+	// In the pose, the root moves in the mesh though the entity has a Root_Motion, and nothing is reported.
+	drive(&f.world, token, {{clip = guid(WALK), time = 1, weight = 1, root_motion = .In_Pose}})
+	frame(f, 1)
+	testing.expect(t, near(m.translation.z, 0), "a clip in the pose reported its root motion")
+	testing.expectf(t, near(root_z(f, e), 2), "the root is at %.3f in the mesh", root_z(f, e))
 }

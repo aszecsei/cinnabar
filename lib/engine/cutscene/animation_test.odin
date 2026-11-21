@@ -808,3 +808,45 @@ a_marker_raised_in_a_frame_without_a_tick_keeps_its_name :: proc(t: ^testing.T) 
 		testing.expectf(t, event.name != "bark", "the marker took the new graph's name")
 	}
 }
+
+// A marker in a section's last tick, where the tick's end is past the section, and a marker at the offset of a section
+// whose ease in weighs nothing at its start, each fire once in playback.
+@(test)
+markers_at_a_sections_edges_fire :: proc(t: ^testing.T) {
+	cases := [?]Clip {
+		// The marker at 0.5 s of the clip is at 29500 of the section, the last tick's (29000, 30000].
+		{
+			id = 1,
+			start = 0,
+			end = SECOND / 2,
+			clip = WALK_GUID,
+			offset = 500,
+			speed = 1,
+			weight = 1,
+		},
+		// The marker is at the offset, at the section's start, where its ease in weighs 0.
+		{
+			id = 1,
+			start = SECOND / 6,
+			end = SECOND * 2 / 3,
+			clip = WALK_GUID,
+			offset = SECOND / 2,
+			speed = 1,
+			ease_in = SECOND / 6,
+			weight = 1,
+		},
+	}
+	for c in cases {
+		f := clip_setup(t)
+		actor := character(f)
+		clips := []Clip{c}
+		h := play_blob(t, f, clips_blob(f, clips, SECOND))
+		heard := 0
+		for status(&f.cutscenes, h) == .Playing {
+			tick(f)
+			heard += footsteps(f, actor)
+		}
+		testing.expectf(t, heard == 1, "a section from %d heard %d footsteps", c.start, heard)
+		clip_teardown(f)
+	}
+}

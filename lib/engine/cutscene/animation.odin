@@ -39,9 +39,47 @@ animation_track :: proc(ctx: ^Track_Context) {
 	clips := clip_sections(ctx, animation)
 	drive_clips(ctx, animation, entity, clips)
 	apply_root_motion(ctx, animation, entity)
-	if !ctx.skipped && len(clips) > 0 {
-		raise_markers(ctx, animation, entity, clips[0].section)
+	if ctx.skipped {
+		return
 	}
+	if section, found := marker_section(ctx, animation); found {
+		raise_markers(ctx, animation, entity, section)
+	}
+}
+
+// marker_section is the section whose clip raises the markers of the evaluation's event range: of those whose span meets
+// (from, to] with a loaded clip, the heaviest at the range's end, or at its own end when it ends first, the earlier in
+// the track among equals. So the tick that passes a section's end, and the tick at its start where its ease in weighs
+// nothing, still raise its markers.
+@(private)
+marker_section :: proc(
+	ctx: ^Track_Context,
+	animation: ^anim.State,
+) -> (
+	found: format.Cutscene_Section,
+	ok: bool,
+) {
+	heaviest: f32 = -1
+	for section in format.cutscene_track_sections(ctx.data, ctx.blob, ctx.track) {
+		if i64(section.end) <= ctx.from || i64(section.start) > ctx.to {
+			continue
+		}
+		if _, loaded := anim.clip_length(animation, section.asset); !loaded {
+			continue
+		}
+		local := i32(min(ctx.to, i64(section.end))) - section.start
+		weight := section.weight
+		if section.ease_in > 0 {
+			weight *= ease(f64(local) / f64(section.ease_in))
+		}
+		if section.ease_out > 0 {
+			weight *= ease(f64(section.end - section.start - local) / f64(section.ease_out))
+		}
+		if weight > heaviest {
+			found, heaviest, ok = section, weight, true
+		}
+	}
+	return
 }
 
 // clip_sections is the sections that cover the time with a weight and a loaded clip, heaviest first, the earlier in the
