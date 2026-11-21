@@ -2,7 +2,7 @@
 
 What scripts see: the value types, entities and component references, the engine's global libraries, and the mapping from Unity's names. Behaviours have [their own document](behaviours.md).
 
-**In this document:** [Values](#values) · [The entity and component view](#the-entity-and-component-view) · [Engine libraries](#engine-libraries) · [Save](#save) · [Game.quit](#gamequit) · [Display](#display) · [Random](#random) · [Unity mapping](#unity-mapping)
+**In this document:** [Values](#values) · [The entity and component view](#the-entity-and-component-view) · [Engine libraries](#engine-libraries) · [Save](#save) · [Game.quit](#gamequit) · [Display](#display) · [Subtitles](#subtitles) · [Random](#random) · [Unity mapping](#unity-mapping)
 
 ## Values
 
@@ -170,6 +170,27 @@ The display's bindings, for the Display section of an options menu in Luau (`lib
 local largest = Display.resolutions()[1]
 Display.set({ mode = "Fullscreen", width = largest.width, height = largest.height, hdr = true })
 Display.save()
+```
+
+## Subtitles
+
+The subtitles' bindings, for the Subtitles section of an options menu in Luau (`lib/engine/game/subtitle_scripts.odin`). `game.register_scripts` defines them. They read and change the player's subtitle settings of the cutscenes' overlay ([Cinematics: Presentation tracks](../cinematics/tracks.md#presentation-tracks)).
+
+| Binding | What it does |
+|---|---|
+| `Subtitles.get()` | A `SubtitleSettings`: `enabled`, `size` and `background` |
+| `Subtitles.set(change)` | Gives the settings the fields of a `SubtitleChange` that it has, any of `enabled`, `size` and `background`. It applies from the next frame |
+| `Subtitles.save()` | Writes `subtitles.enabled`, `subtitles.size` and `subtitles.background` to the user settings file; false if it could not |
+
+- **`set` raises an error**, which changes nothing, for a field that does not exist, an `enabled` that is not a boolean, a `size` that is not a number from 0.5 to 2, and a `background` that is not a number from 0 to 1.
+- **`size`** scales the text of the subtitles. **`background`** is the opacity of the box behind each line.
+- **Types:** `SubtitleSettings` and `SubtitleChange`, every field of the change optional, are in `engine.d.luau`.
+- The game takes the settings from the files only when the files change them, so a `set` holds until then.
+
+```lua
+-- Larger subtitles on a solid back, saved as the player's choice.
+Subtitles.set({ enabled = true, size = 1.5, background = 1 })
+Subtitles.save()
 ```
 
 ## Profile

@@ -6,7 +6,7 @@ Menus and HUDs: documents of boxes, text and images that the UI lays out each fr
 
 | Document | What it covers |
 |---|---|
-| [Design](design.md) | Documents on entities, the cascade, layout and the scale, text, the batch and its shader, input and focus, scrolling, scripts, and hot reload. |
+| [Design](design.md) | Documents on entities, documents that code owns, the cascade, layout and the scale, text, the batch and its shader, input and focus, scrolling, scripts, and hot reload. |
 
 ## Overview
 
@@ -30,14 +30,14 @@ The package is `lib/engine/ui`, on the game side:
 
 | File | What it holds |
 |---|---|
-| `ui.odin` | `State`, documents and their nodes, building a document from its blob, templates' copies, fonts |
+| `ui.odin` | `State`, documents and their nodes, owned documents (see [Design: Owned documents](design.md#owned-documents)), building a document from its blob, templates' copies, fonts |
 | `components.odin` | `Ui_Document` |
 | `style.odin` | `Style`, an element's defaults, and the cascade |
 | `layout.odin` | The layout: sizes along each axis, fills, placing, clipping, the scale |
 | `text.odin` | Fonts placed for kb_text_shape, shaping, line breaks, bindings, carets |
 | `input.odin` | Hover, clicks, focus, navigation, modal documents, fields, events |
 | `scroll.odin` | Scroll boxes: their bars, the wheel, the right stick, Page Up and Page Down, and scrolling the focus into view |
-| `edit.odin` | What scripts do to a document: attributes, bindings, copies, removals |
+| `edit.odin` | What scripts and code do to a document: attributes, bindings, copies, removals, and `set_value`, `override_of` and `own_attribute` for code |
 | `batch.odin`, `render.odin` | The instances of a frame, and the pass that draws them |
 | `scripts.odin` | The `Ui` library |
 

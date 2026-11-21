@@ -2,7 +2,7 @@
 
 How the UI works: from a document on an entity to the pixels of the UI layer and back to the scripts. Read the [overview](README.md#overview) first, and [Content: UI documents](../content/kinds/ui-documents.md#ui-documents) for the format.
 
-**In this document:** [Documents](#documents) · [The cascade](#the-cascade) · [Layout](#layout) · [Text](#text) · [Drawing](#drawing) · [Input and focus](#input-and-focus) · [Scrolling](#scrolling) · [Scripts](#scripts) · [Hot reload](#hot-reload) · [The frame](#the-frame) · [The sample](#the-sample)
+**In this document:** [Documents](#documents) · [Owned documents](#owned-documents) · [The cascade](#the-cascade) · [Layout](#layout) · [Text](#text) · [Drawing](#drawing) · [Input and focus](#input-and-focus) · [Scrolling](#scrolling) · [Scripts](#scripts) · [Hot reload](#hot-reload) · [The frame](#the-frame) · [The sample](#the-sample)
 
 ## Documents
 
@@ -22,6 +22,22 @@ How the UI works: from a document on an entity to the pixels of the UI layer and
 **Building** copies the blob, which the asset runtime frees when it swaps it, and makes a node for each element that is not in a template. Each attribute's value is parsed then, with `format.ui_parse_value`, once. Then the scripts' changes to the tree are replayed: each copy of a template that `Ui.add` made, and each element that `Ui.remove` took out. The focus stays on the element of the same id.
 
 **A node** has its element, its links to its parent, children and next sibling, its id, its attributes and styles, and what each frame works out: its style, its size and rectangle, its clip, its text. Nodes are referred to by index, and an index is good until the document is built again, which bumps its generation.
+
+### Owned documents
+
+A document that code owns has no entity. The engine shows such a document itself: the cutscene overlay is the one user ([Cinematics: Presentation tracks](../cinematics/tracks.md#presentation-tracks)).
+
+| Procedure | What it does |
+|---|---|
+| `ui.open_owned(s, guid, order, view = 0)` | Puts the document in a free slot, hidden, and gives its index, or -1 when every slot is used |
+| `ui.owned_document(s, index)` | The document of an index, or nil when the index holds no owned document |
+| `ui.close_owned(s, index)` | Frees the slot |
+
+- **Loading.** `sync` loads and builds the document as it does the others. It never matches the document to an entity, and never frees it. It stays until `close_owned`, whatever the world's entities do.
+- **The owner** sets `order`, `view` and `visible` on the `Document`. The document starts hidden.
+- **No input.** The input scope skips an owned document, so it takes no hover, focus or click.
+- **No entity.** `document_of` does not find an owned document, so scripts cannot reach it with the `Ui` library.
+- **Values from code.** `ui.set_value(s, d, id, attr, value)` sets an attribute of the element with an id, as `set_override` does, with a value that code has already parsed. `ui.override_of(d, id, attr)` reads back what code set. `ui.own_attribute(d, id, attr)` reads the value that the document itself gives the element, not through its styles or what code set over it.
 
 ## The cascade
 
@@ -161,7 +177,7 @@ A game calls the UI at these points of its frame (the standard game's are in `li
 | `init` | `ui.init(&s.ui, platform, &s.assets, &s.renderer.residency)`, and `ui.register_components` with the others |
 | Its `Register_Proc` | `ui.register_scripts(r, &s.ui)` |
 | Each frame, before the script phase | `ui.sync`, then `ui.handle_input` with the frame's input and the real time, then `ui.flush_events` |
-| Each frame, after the script phase | `ui.layout(&s.ui, window, views)`, with the window's size and the rectangle of each shown view |
+| Each frame, after the script phase | `cutscene.present(&s.cutscenes, &s.world, window)`, which writes the overlay's values, then `ui.layout(&s.ui, window, views)`, with the window's size and the rectangle of each shown view |
 | With its pipelines | `ui.sync_pipelines` |
 | Its `ui` hook | `ui.add_passes(&s.ui, f)` |
 | `on_reload` | `ui.on_reload`, and `ui.sync_pipelines(force = true)` |
@@ -174,4 +190,5 @@ A game calls the UI at these points of its frame (the standard game's are in `li
 - **The HUD** (`content/ui/hud.ui`, `hud.luau`) is a panel in the top left with an accent stripe, which shows the frame rate that its behaviour binds, smoothed over real time.
 - **The pause menu** (`content/ui/pause.ui`, `pause_menu.luau`) is modal, with order 10, and hidden until Escape or a gamepad's Start shows it. It pauses the world through the sample's `Game.set_paused`, which makes the world take no time while the script phase and the UI run on. Resume, B or Escape hides it. Quality takes the next render preset and saves it, as F9 does. Quit calls `Game.quit`, which does nothing under the editor. The name field greets whoever types into it, through a binding, and keeps it in the save `pause`: the behaviour reads it when it starts, and writes it when the name is submitted. Saves is a list of 50 copies of the `slot` template, which the behaviour adds when it starts. It scrolls with the wheel, the right stick, Page Up and Page Down, and its bar, and keeps the focused slot in view.
 - `fly_camera.luau` and `hello.luau` leave the gamepad and Space and Tab alone while `Ui.wants_input()`.
+- **The cutscene overlay** (`lib/engine/content/ui/cutscene_overlay.ui`, in the engine content root) is an owned document of order 8: over the HUD and under the pause menu. It has letterbox bars, a fade and three subtitles, in Allo ([Content: Fonts](../content/kinds/fonts.md#the-engines-font)).
 - `ui.scale` in the project's settings multiplies the UI scale.

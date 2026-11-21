@@ -18,7 +18,8 @@ An `Evaluation` is what one cutscene needs to be evaluated:
 - the fields of its property tracks, resolved once for the blob ([Tracks: Property tracks](tracks.md#property-tracks));
 - for each transform track relative to another binding, a cycle or where its binding starts in the other's space, found once for the blob ([Tracks: Transform tracks](tracks.md#transform-tracks));
 - the `Animator`s that its animation tracks drive, by entity, each with its driver's token ([Tracks: Animation tracks](tracks.md#animation-tracks));
-- what its camera cut track shows, with its claim on the game's views, and a count of its seeks and skips, so the track cuts after one ([Tracks: Camera cut tracks](tracks.md#camera-cut-tracks)).
+- what its camera cut track shows, with its claim on the game's views, and a count of its seeks and skips, so the track cuts after one ([Tracks: Camera cut tracks](tracks.md#camera-cut-tracks));
+- `presented`: what its presentation tracks gave at the last `Late` phase, which the overlay shows ([Tracks: Presentation tracks](tracks.md#presentation-tracks)).
 
 It holds no procedures, `typeid`s or string literals, so it survives a code reload. `init_evaluation` starts it at the range's start, and `destroy_evaluation` frees it.
 
@@ -52,6 +53,7 @@ Each kind of track has a **phase**:
 - **Interpolation.** The tick's `Previous_Transform` copy runs before the systems. So presentation interpolates from the last tick's pose to the cutscene's pose, as for any entity that moves in `Fixed`.
 - **Late phase.** The `Late` phase runs after scripts and before `camera.advance`, so the frame shows what it wrote.
 - **Camera constraints.** After the `Fixed` phase's tracks, `run_phase` drives the `Animator`s with the clips of every animation track, and applies the camera constraints of the cut tracks, so they see every track's pose at the tick, whatever the tracks' order ([Tracks: Camera cut tracks](tracks.md#camera-cut-tracks)).
+- **The presentation.** `run_phase` clears `Evaluation.presented` before the `Late` phase's tracks, and each presentation track adds its sections to it. So the presentation is a value of the time alone ([Tracks: Presentation tracks](tracks.md#presentation-tracks)).
 - **The camera cut** evaluates once for the tree in the `Late` phase, after the other tracks: it shows the parent's shot or a child's ([Tracks: Sub-sequence tracks](tracks.md#sub-sequence-tracks)).
 - **Exclusive.** Both systems are **exclusive** ([World: ECS: Systems](../world/ecs.md#systems)). A property track can write any component, so the systems cannot name their writes before they run. An exclusive system waits for every system before it, and every later system waits for it. `register` is the first registration in `register_world`, so in each stage the cutscene runs first and alone.
 - **Real clock.** `advance_real` runs in `game_update` before the ticks, and only while the world runs. Its `Fixed` writes are therefore in place before the first tick. The game's pause does not stop them.
