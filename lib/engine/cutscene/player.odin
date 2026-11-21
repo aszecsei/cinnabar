@@ -708,6 +708,8 @@ load_player :: proc(s: ^State, c: Player_Context, slot: int) {
 		}
 		append(&live.references, reference)
 	}
+	// The sounds load now, outside the frames that start them (see docs/cinematics/tracks.md#audio-tracks).
+	prepare_sounds(s, data, blob)
 	bindings := format.cutscene_bindings(data, blob)
 	for o in loading.overrides {
 		if index, found := binding_index(data, blob, o.binding); found {

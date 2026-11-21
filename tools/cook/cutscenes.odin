@@ -1461,7 +1461,11 @@ cutscene_parse :: proc(
 		} else {
 			for setting_line in tr.audio_lines {
 				if setting_line != 0 {
-					problem(&found, setting_line, "only an audio track has a gain and a time_scale")
+					problem(
+						&found,
+						setting_line,
+						"only an audio track has a gain and a time_scale",
+					)
 				}
 			}
 			result.gain, result.time_scale = 0, .Follow
@@ -2208,7 +2212,8 @@ cutscene_audio_section :: proc(
 			}
 		case format.CUTSCENE_AUDIO_PITCH:
 			for k in ch.keys {
-				if !(k.value >= format.CUTSCENE_MIN_PITCH && k.value <= format.CUTSCENE_MAX_PITCH) {
+				if !(k.value >= format.CUTSCENE_MIN_PITCH &&
+					   k.value <= format.CUTSCENE_MAX_PITCH) {
 					append(
 						found,
 						Cutscene_Problem {

@@ -9,6 +9,7 @@ import "cinnabar:core"
 import "cinnabar:engine/anim"
 import "cinnabar:engine/asset"
 import format "cinnabar:engine/asset/format"
+import "cinnabar:engine/audio"
 import "cinnabar:engine/camera"
 import "cinnabar:engine/ecs"
 
@@ -39,29 +40,36 @@ Track_Kind :: struct {
 // State is the cutscenes' part of the game: the kinds of track, and the players, whose evaluations the systems advance.
 // The kinds hold procedures from the DLL image, so register clears them, and the kinds are registered again after it.
 State :: struct {
-	assets:    ^asset.Assets,
+	assets:      ^asset.Assets,
 	// The input actions: their contexts, which a playing cutscene pushes its own on (see
 	// docs/cinematics/possession.md), and the skip action, which the skip hold reads (see
 	// docs/cinematics/skipping.md#input). Or nil.
-	actions:   ^core.Input_Actions,
+	actions:     ^core.Input_Actions,
 	// The skip action's name and hold time, and the hold in progress.
-	skip:      Skip_Input,
+	skip:        Skip_Input,
 	// The animation's state, which animation tracks drive Animators through (see
 	// docs/cinematics/tracks.md#animation-tracks). Or nil, and animation tracks do nothing.
-	animation: ^anim.State,
+	animation:   ^anim.State,
 	// The game's views, which camera cut tracks claim (see docs/cinematics/tracks.md#camera-cut-tracks). Or nil, and
 	// camera cut tracks claim nothing.
-	views:     ^camera.Views,
-	kinds:     [format.Cutscene_Track_Kind]Track_Kind,
+	views:       ^camera.Views,
+	// The game's audio, which audio tracks play their sounds through (see docs/cinematics/tracks.md#audio-tracks). Or
+	// nil, and audio tracks play nothing.
+	audio:       ^audio.State,
+	// The game clock's rate against real time: its time scale, and 0 while the game is paused. set_rate sets it.
+	rate:        f32,
+	// How far an audio track's voice can drift from the cutscene's time before the track seeks it, in seconds.
+	audio_drift: f64,
+	kinds:       [format.Cutscene_Track_Kind]Track_Kind,
 	// The players, in fixed slots, so an evaluation does not move while it is evaluated (see
 	// docs/cinematics/player.md#handles).
-	players:   [MAX_PLAYERS]Player,
+	players:     [MAX_PLAYERS]Player,
 	// The start order that the next player gets.
-	started:   u64,
+	started:     u64,
 	// The level generation that the players were made in. A new level resets them.
-	level:     u64,
+	level:       u64,
 	// What happened to the players in this frame, in order. end_frame clears them. Heap memory.
-	events:    [dynamic]Player_Event,
+	events:      [dynamic]Player_Event,
 }
 
 // Evaluation is what one cutscene needs to be evaluated: its blob, its bindings, its time and the snapshot of the
@@ -96,6 +104,13 @@ Evaluation :: struct {
 	// Counts the seeks and the skips' jumps, so the camera cut track cuts after one, which an evaluation's range alone
 	// cannot tell from a pause.
 	jumps:    u32,
+	// The voices of the audio tracks' sections, by section ID (see docs/cinematics/tracks.md#audio-tracks). end_holds
+	// stops them.
+	sounds:   map[u32]Sound_Voice,
+	// What each audio track scrubbed last, by track ID, for an evaluation that scrubs.
+	scrubs:   map[u32]Audio_Scrub,
+	// How the audio tracks sound: a player's evaluation plays, and the editor sets the others'.
+	audition: Audition,
 }
 
 // Field is a field of a component of an entity: its component, and its offset and size in the component.
@@ -162,8 +177,12 @@ init :: proc(
 	actions: ^core.Input_Actions = nil,
 	animation: ^anim.State = nil,
 	views: ^camera.Views = nil,
+	sounds: ^audio.State = nil,
 ) {
 	s.assets = assets
+	s.audio = sounds
+	s.rate = 1
+	s.audio_drift = AUDIO_DRIFT
 	s.actions = actions
 	s.animation = animation
 	s.views = views
@@ -200,6 +219,10 @@ register :: proc(s: ^State, w: ^ecs.World) {
 	s.kinds[.Camera_Cut] = {
 		phase    = .Late,
 		evaluate = camera_cut_track,
+	}
+	s.kinds[.Audio] = {
+		phase    = .Late,
+		evaluate = audio_track,
 	}
 	ecs.register_system(
 		w,
@@ -247,6 +270,8 @@ init_evaluation :: proc(
 		targets = make(map[u32]Property_Target, w.platform.heap_allocator),
 		spaces = make(map[u32]Relative_Space, w.platform.heap_allocator),
 		drives = make(map[ecs.Entity]anim.Drive_Token, w.platform.heap_allocator),
+		sounds = make(map[u32]Sound_Voice, w.platform.heap_allocator),
+		scrubs = make(map[u32]Audio_Scrub, w.platform.heap_allocator),
 	}
 }
 
@@ -256,6 +281,10 @@ destroy_evaluation :: proc(e: ^Evaluation, w: ^ecs.World) -> (despawned: int) {
 	end_holds(e, w)
 	delete(e.drives)
 	e.drives = nil
+	delete(e.sounds)
+	e.sounds = nil
+	delete(e.scrubs)
+	e.scrubs = nil
 	despawned = release_bindings(&e.bindings, w)
 	destroy_bindings(&e.bindings, w)
 	delete(e.snapshot.saved)
@@ -440,6 +469,8 @@ restore :: proc(
 		}
 	}
 	forget(&e.snapshot)
+	// The sounds that play through a skip, and past the end, go on; end_holds stops the others.
+	release_sounds(e)
 	end_holds(e, w)
 }
 
@@ -454,12 +485,13 @@ restore_all :: proc(s: ^State, e: ^Evaluation, w: ^ecs.World) {
 }
 
 // end_holds ends what the evaluation holds outside the snapshot: the drives of the Animators that its animation tracks
-// drive, and the camera cut track's claim on the views. It is the one end of them, for restore, restore_all, a reload
-// and destroy_evaluation, and it does nothing when the evaluation holds nothing.
+// drive, the camera cut track's claim on the views, and the audio tracks' voices. It is the one end of them, for
+// restore, restore_all, a reload and destroy_evaluation, and it does nothing when the evaluation holds nothing.
 @(private)
 end_holds :: proc(e: ^Evaluation, w: ^ecs.World) {
 	end_drives(e, w)
 	end_cut(e)
+	end_sounds(e)
 }
 
 // track_entity is the entity of the track's binding while it is alive, and false for a track without a binding, or

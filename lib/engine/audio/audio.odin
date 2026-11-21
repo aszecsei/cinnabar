@@ -348,24 +348,24 @@ clock :: proc(s: ^State) -> u64 {
 
 // Voice_Start is a voice that start_voice starts and its caller owns.
 Voice_Start :: struct {
-	sound:    format.Guid,
+	sound:        format.Guid,
 	// 0 is Master, and n is the nth of the project's audio.buses.
-	bus:      int,
-	gain:     f32,
-	pitch:    f32,
+	bus:          int,
+	gain:         f32,
+	pitch:        f32,
 	// Where it starts in the sound, in seconds.
-	start:    f64,
+	start:        f64,
 	// When start plays on the clock; 0 is at once. A voice that starts late starts as far in as it is late.
-	clock:    u64,
-	loop:     bool,
+	clock:        u64,
+	loop:         bool,
 	// Plays while the world does not run, which holds every other voice, as in the editor's edit mode.
-	unpaused: bool,
+	unpaused:     bool,
 	// How long it plays before it fades out over fade, in seconds; 0 plays to the end. fade is how long it fades in, too.
-	length:   f64,
-	fade:     f32,
+	length:       f64,
+	fade:         f32,
 	// The entity that it plays at, heard from the nearest listener with these distances, as a spatial Audio_Source is,
 	// and moved with the entity's presented pose each update. 0 plays it flat.
-	entity:   ecs.Entity,
+	entity:       ecs.Entity,
 	min_distance: f32,
 	max_distance: f32,
 }

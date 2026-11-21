@@ -74,6 +74,7 @@ game_init :: proc(
 		&g.scripts.input_actions,
 		&g.animation,
 		&g.views,
+		&g.audio,
 	)
 	register_world(g, h)
 	asset.init(&g.assets, platform, asset.content_source(platform.content_dir))
@@ -177,6 +178,8 @@ game_update :: proc(g: ^Game, dt: time.Duration, h: Hooks) -> (keep_running: boo
 	// The editor's own steps, a tick at a time while it pauses, take no scale.
 	step = world_step(g, step, editor.mode(&g.editor) == .Play)
 	script.set_frame_time(&g.scripts, dt, time_scale_of(g))
+	// The audio tracks that follow the time scale play at the game clock's rate, and stop while the game is paused.
+	cutscene.set_rate(&g.cutscenes, 0 if g.paused else time_scale_of(g))
 	script.set_callbacks(&g.scripts, editor.script_callbacks(&g.editor, what))
 	// The documents follow the world in every mode, so the editor's viewport shows them as they are.
 	ui.sync(&g.ui, &g.world)
@@ -422,6 +425,7 @@ update_project :: proc(g: ^Game, h: Hooks) {
 		string(settings.skip_action[:settings.skip_action_length]),
 		settings.skip_hold,
 	)
+	cutscene.set_audio_drift(&g.cutscenes, settings.audio_drift.? or_else 0)
 	project.apply_display_settings(&g.display_applied, g.platform, &g.renderer, settings)
 	if h.settings_changed != nil {
 		h.settings_changed(g)

@@ -46,6 +46,11 @@ CUTSCENE_SKIP_ACTION_KEY :: "cutscene.skip_action"
 CUTSCENE_SKIP_HOLD_KEY :: "cutscene.skip_hold"
 // The longest hold that cutscene.skip_hold takes, in seconds.
 MAX_CUTSCENE_SKIP_HOLD :: 10
+// How far a cutscene's sound can drift from the cutscene's time before its audio track seeks it, in seconds (see
+// docs/cinematics/tracks.md#audio-tracks), and the range that it takes.
+CUTSCENE_AUDIO_DRIFT_KEY :: "cutscene.audio_drift"
+MIN_CUTSCENE_AUDIO_DRIFT :: 0.001
+MAX_CUTSCENE_AUDIO_DRIFT :: 0.5
 // The game's name, which a release's executable and window take, and its icon, a .ico file relative to the settings
 // file, which the export writes into the executable. The game only knows the keys.
 NAME_KEY :: "game.name"
@@ -94,6 +99,8 @@ Settings :: struct {
 	skip_action:           [core.INPUT_ACTION_NAME_CAPACITY]u8,
 	skip_action_length:    u8,
 	skip_hold:             Maybe(time.Duration),
+	// How far a cutscene's sound drifts before its track seeks it, in seconds, or nil for the cutscenes' own default.
+	audio_drift:           Maybe(f64),
 }
 
 // physics_layers gives the layers that settings name, or the default ones.
@@ -420,6 +427,23 @@ parse :: proc(text: string, settings: ^Settings, problems: ^[dynamic]string = ni
 					"%s takes a number of seconds from 0 to %d, not %q",
 					key,
 					MAX_CUTSCENE_SKIP_HOLD,
+					value,
+				)
+			}
+			continue
+		}
+		if key == CUTSCENE_AUDIO_DRIFT_KEY {
+			if seconds, ok := strconv.parse_f64(value);
+			   ok && seconds >= MIN_CUTSCENE_AUDIO_DRIFT && seconds <= MAX_CUTSCENE_AUDIO_DRIFT {
+				settings.audio_drift = seconds
+			} else {
+				problem(
+					problems,
+					line,
+					"%s takes a number of seconds from %v to %v, not %q",
+					key,
+					MIN_CUTSCENE_AUDIO_DRIFT,
+					MAX_CUTSCENE_AUDIO_DRIFT,
 					value,
 				)
 			}

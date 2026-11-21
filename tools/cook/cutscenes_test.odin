@@ -901,24 +901,26 @@ each_mistake_in_a_cutscene_is_reported_at_its_line :: proc(t: ^testing.T) {
 			8,
 			"comes before the section's channels",
 		},
-		{"cutscene 1\nlength = 10\ntrack 1 audio \"A\"\n\tgain = -1\n", 4, "gain is a number from 0"},
+		{
+			"cutscene 1\nlength = 10\ntrack 1 audio \"A\"\n\tgain = -1\n",
+			4,
+			"gain is a number from 0",
+		},
 		{
 			"cutscene 1\nlength = 10\ntrack 1 audio \"A\"\n\ttime_scale = slow\n",
 			4,
 			"time_scale is follow or free",
 		},
-		{
-			"cutscene 1\nlength = 10\n" + MOVE + "\tgain = 1\n",
-			9,
-			"only an audio track has a gain",
-		},
+		{"cutscene 1\nlength = 10\n" + MOVE + "\tgain = 1\n", 9, "only an audio track has a gain"},
 		{
 			"cutscene 1\nlength = 10\n" + MOVE + "\tsection 1 0 10\n\t\tbus = 1\n",
 			10,
 			"only an audio section has a bus",
 		},
 		{
-			"cutscene 1\nlength = 10\n" + MOVE + "\tsection 1 0 10\n\t\tplays_through_skip = true\n",
+			"cutscene 1\nlength = 10\n" +
+			MOVE +
+			"\tsection 1 0 10\n\t\tplays_through_skip = true\n",
 			10,
 			"only an audio section has a bus",
 		},
@@ -927,7 +929,11 @@ each_mistake_in_a_cutscene_is_reported_at_its_line :: proc(t: ^testing.T) {
 			10,
 			"only an animation or an audio section has an offset and a loop",
 		},
-		{SOUNDS + "\tsection 2 0 10\n\t\tasset = $" + SOUND_GUID + "\n\t\tgain = 1\n", 8, "comes before the track's sections"},
+		{
+			SOUNDS + "\tsection 2 0 10\n\t\tasset = $" + SOUND_GUID + "\n\t\tgain = 1\n",
+			8,
+			"comes before the track's sections",
+		},
 		{
 			"cutscene 1\nlength = 10\n" +
 			ACTS +

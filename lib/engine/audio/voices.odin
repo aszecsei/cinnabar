@@ -138,7 +138,9 @@ placed_params :: proc(s: ^State, w: ^ecs.World, owned: Owned_Voice) -> boundary.
 	if !found {
 		if .No_Listener not_in s.warned {
 			s.warned += {.No_Listener}
-			log.warn("audio: a voice at an entity plays with no Audio_Listener in the world, so it plays flat")
+			log.warn(
+				"audio: a voice at an entity plays with no Audio_Listener in the world, so it plays flat",
+			)
 		}
 		return params
 	}

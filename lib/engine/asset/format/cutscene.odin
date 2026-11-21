@@ -1042,24 +1042,24 @@ Cutscene_Section_Contents :: struct {
 
 // Cutscene_Track_Contents is a track as cutscene_write takes it. binding is a binding's index or CUTSCENE_NONE.
 Cutscene_Track_Contents :: struct {
-	id:        u32,
-	kind:      Cutscene_Track_Kind,
-	name:      string,
-	binding:   u32,
-	flags:     Cutscene_Track_Flags,
-	finish:    Cutscene_Finish,
+	id:         u32,
+	kind:       Cutscene_Track_Kind,
+	name:       string,
+	binding:    u32,
+	flags:      Cutscene_Track_Flags,
+	finish:     Cutscene_Finish,
 	// A property track's component and the dotted name of its field. The blob holds the name's hash too.
-	component: u64,
-	field:     string,
+	component:  u64,
+	field:      string,
 	// A transform track's space, its origin in World_Position units for Absolute, and the index of the binding that it
 	// is relative to for Relative_To. The blob has CUTSCENE_NONE there for the other spaces.
-	space:     Cutscene_Space,
-	origin:    [3]i64,
-	relative:  u32,
+	space:      Cutscene_Space,
+	origin:     [3]i64,
+	relative:   u32,
 	// An audio track's gain, and what its sounds do under a time scale.
-	gain:      f32,
+	gain:       f32,
 	time_scale: Cutscene_Audio_Scale,
-	sections:  []Cutscene_Section_Contents,
+	sections:   []Cutscene_Section_Contents,
 }
 
 Cutscene_Contents :: struct {

@@ -1135,7 +1135,12 @@ a_voice_at_an_entity_follows_it_and_a_voice_stops_at_its_time :: proc(t: ^testin
 	ecs.get_write(&f.world, e, ecs.Transform).position = ecs.position_from_meters({3, 0, 0})
 	set_voice(&f.audio, voice, 0.25, 9)
 	frame(f)
-	testing.expectf(t, close_to(record.last.position, {3, 0, 0}), "position %v", record.last.position)
+	testing.expectf(
+		t,
+		close_to(record.last.position, {3, 0, 0}),
+		"position %v",
+		record.last.position,
+	)
 	testing.expect_value(t, record.last.gain, 0.25)
 	testing.expect_value(t, record.last.pitch, MAX_PITCH)
 
