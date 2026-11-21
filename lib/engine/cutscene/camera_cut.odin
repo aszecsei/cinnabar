@@ -30,7 +30,7 @@ Cut_Gameplay :: struct {}
 // Cut_Shot is a section that shows: its ID and its camera, the claim that the track holds on the views for it, the views
 // that hold it, in Game_State, and how the claim leaves if the player ends now.
 Cut_Shot :: struct {
-	section: u32,
+	section: Scoped,
 	entity:  ecs.Entity,
 	views:   ^camera.Views,
 	token:   camera.Claim_Token,
@@ -41,7 +41,7 @@ Cut_Shot :: struct {
 // nothing until another section shows or the binding changes. A claim that fails because the views' entries are all
 // taken is not a refusal: the track shows gameplay and claims again at its next evaluation.
 Cut_Refused :: struct {
-	section: u32,
+	section: Scoped,
 	entity:  ecs.Entity,
 }
 
@@ -54,7 +54,9 @@ Cut_Refused :: struct {
 // decides what the views show: its camera, through a claim at the player's priority, or gameplay where no section
 // covers it. A change of section is a new claim, so the stack cuts, even to the same camera. A section blends in from
 // gameplay when playback crosses its start, and out to it when playback crosses its end; a seek, a skip and a reload
-// cut. A skip that ends the cutscene cuts back to gameplay, or blends out when the last section is marked to.
+// cut. A skip that ends the cutscene cuts back to gameplay, or blends out when the last section is marked to. It runs
+// once for the tree, with the root's context, after the phase's tracks: the shot that shows is the root's where its
+// track has a section over the time, and else a child's (see shown_shot).
 camera_cut_track :: proc(ctx: ^Track_Context) {
 	s := ctx.cutscenes
 	if s == nil || s.views == nil {
@@ -63,24 +65,27 @@ camera_cut_track :: proc(ctx: ^Track_Context) {
 	e := ctx.evaluation
 	jumped := ctx.skipped || e.cut.jumps != e.jumps
 	e.cut.jumps = e.jumps
-	sections := format.cutscene_track_sections(ctx.data, ctx.blob, ctx.track)
-	index, showing := shown_section(ctx.blob, sections, ctx.time)
-	if ctx.skipped && ctx.time == ctx.blob.range_end {
+	shot, showing := shown_shot(s, ctx)
+	if ctx.skipped && ctx.time == ctx.range_end {
 		// The player finishes in this update, before the views choose again: the last shot is never chosen.
 		showing = false
 	}
 
 	if !showing {
-		change_cut(e, Cut_Gameplay{}, leaving_blend(ctx, sections, jumped))
+		change_cut(e, Cut_Gameplay{}, leaving_blend(s, ctx, jumped))
 		return
 	}
-	section := sections[index]
-	entity, bound := binding_entity(&e.bindings, ctx.world, int(section.camera))
-	leave := shot_leave(ctx, section)
+	// A loop of a sub-sequence that wrapped is a jump of the shot's time.
+	jumped ||= shot.ctx.wrapped
+	at := &shot.ctx
+	section := shot.sections[shot.index]
+	key := Scoped{at.scope, section.id}
+	entity, bound := ctx_binding(at, section.camera)
+	leave := shot_leave(at, section)
 	switch shown in e.cut.shown {
 	case Cut_Shot:
 		if !jumped &&
-		   shown.section == section.id &&
+		   shown.section == key &&
 		   shown.entity == entity &&
 		   camera.is_claimed(s.views, shown.token) {
 			next := shown
@@ -89,24 +94,24 @@ camera_cut_track :: proc(ctx: ^Track_Context) {
 			return
 		}
 	case Cut_Refused:
-		if shown.section == section.id && shown.entity == entity {
+		if shown.section == key && shown.entity == entity {
 			return
 		}
 	case Cut_Gameplay:
 	}
 
 	blend_in := camera.CUT
-	if !jumped && fires(ctx, section.start) && section.blend_in > 0 {
-		blend_in = cut_blend(ctx.blob, section.blend_in, section.blend_curves[0])
+	if !jumped && fires(at, section.start) && section.blend_in > 0 {
+		blend_in = cut_blend(at, section.blend_in, section.blend_curves[0])
 	}
-	leaving := leaving_blend(ctx, sections, jumped)
+	leaving := leaving_blend(s, ctx, jumped)
 	if !bound || ecs.get_raw(ctx.world, entity, render.CAMERA_ID) == nil {
 		log.errorf(
 			"cutscene %s: the camera cut section %d shows nothing: its camera binding is missing, or is not a Camera",
-			format.blob_string(ctx.data, ctx.blob.source_path),
+			format.blob_string(at.data, at.blob.source_path),
 			section.id,
 		)
-		change_cut(e, Cut_Refused{section.id, entity}, leaving)
+		change_cut(e, Cut_Refused{key, entity}, leaving)
 		return
 	}
 	token, claimed := camera.claim(
@@ -122,7 +127,84 @@ camera_cut_track :: proc(ctx: ^Track_Context) {
 		change_cut(e, Cut_Gameplay{}, leaving)
 		return
 	}
-	change_cut(e, Cut_Shot{section.id, entity, s.views, token, leave}, leaving)
+	change_cut(e, Cut_Shot{key, entity, s.views, token, leave}, leaving)
+}
+
+// Shot is a camera cut section that shows: the context of the cutscene of the tree whose cut track holds it, the
+// track's sections, and its index in them.
+@(private)
+Shot :: struct {
+	ctx:      Track_Context,
+	sections: []format.Cutscene_Section,
+	index:    int,
+}
+
+// shown_shot is the camera cut section that shows at a context's time: its own cut track's section over the time, and
+// where it has none, the shot of the last of its children, in the tree's order, whose section covers the time and that
+// shows one, found the same way. So a parent's cut track wins over its children's where it has a section, and a master
+// that has no cut track shows each shot's own cuts (see docs/cinematics/tracks.md#sub-sequence-tracks).
+@(private)
+shown_shot :: proc(s: ^State, ctx: ^Track_Context) -> (shot: Shot, ok: bool) {
+	if cut, live := live_cut_track(ctx.data, ctx.blob); live {
+		sections := format.cutscene_track_sections(ctx.data, ctx.blob, cut)
+		if i, showing := shown_section(ctx, sections, ctx.time); showing {
+			return {ctx^, sections, i}, true
+		}
+	}
+	for c, k in ctx.evaluation.children {
+		if c.parent != ctx.child {
+			continue
+		}
+		inner, _, loaded := child_context(s, ctx, k + 1)
+		if !loaded || !inner.covered {
+			continue
+		}
+		if found, showing := shown_shot(s, &inner); showing {
+			shot, ok = found, true
+		}
+	}
+	return
+}
+
+// last_shot is the last section of the cut track that shows at the end of a context's range: its own cut track's, or
+// else that of the last child whose section covers the end, found the same way.
+@(private)
+last_shot :: proc(s: ^State, ctx: ^Track_Context) -> (shot: Shot, ok: bool) {
+	if cut, live := live_cut_track(ctx.data, ctx.blob); live {
+		sections := format.cutscene_track_sections(ctx.data, ctx.blob, cut)
+		if len(sections) > 0 {
+			return {ctx^, sections, len(sections) - 1}, true
+		}
+	}
+	for c, k in ctx.evaluation.children {
+		if c.parent != ctx.child {
+			continue
+		}
+		inner, _, loaded := child_context(s, ctx, k + 1)
+		if !loaded || !inner.covered {
+			continue
+		}
+		if found, showing := last_shot(s, &inner); showing {
+			shot, ok = found, true
+		}
+	}
+	return
+}
+
+// tree_has_cuts is whether the root or a loaded child has a camera cut track that is not muted.
+@(private)
+tree_has_cuts :: proc(s: ^State, ctx: ^Track_Context) -> bool {
+	if _, live := live_cut_track(ctx.data, ctx.blob); live {
+		return true
+	}
+	for i in 1 ..= len(ctx.evaluation.children) {
+		if data, blob, ok := child_blob(s, ctx.evaluation, i); ok {
+			if _, live := live_cut_track(data, blob); live {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // end_cut gives the views back: it releases the track's claim, with the blend that the shot leaves with. end_holds
@@ -158,10 +240,11 @@ live_cut_track :: proc(
 	return track, .Muted not_in track.flags
 }
 
-// shown_section is the cut section that covers a time: [start, end), and its end too at the range's end.
+// shown_section is the cut section that covers a time on the scope's time: [start, end), and its end too at the range's
+// end, and none while a sub-sequence section above it does not cover the time.
 @(private)
 shown_section :: proc(
-	blob: ^format.Cutscene_Blob,
+	ctx: ^Track_Context,
 	sections: []format.Cutscene_Section,
 	t: i32,
 ) -> (
@@ -169,7 +252,7 @@ shown_section :: proc(
 	ok: bool,
 ) {
 	for section, i in sections {
-		if _, covers := section_at(blob, section, t); covers {
+		if _, covers := sample_section(ctx, section, t); covers {
 			return i, true
 		}
 	}
@@ -181,53 +264,68 @@ shown_section :: proc(
 @(private)
 shot_leave :: proc(ctx: ^Track_Context, section: format.Cutscene_Section) -> camera.Blend {
 	if ctx.time >= section.end && section.blend_out > 0 {
-		return cut_blend(ctx.blob, section.blend_out, section.blend_curves[1])
+		return cut_blend(ctx, section.blend_out, section.blend_curves[1])
 	}
 	return camera.CUT
 }
 
 // leaving_blend is how the shot that shows leaves now that another section, or gameplay, takes its place: with its blend
-// out when playback passed its end, or when a skip ended the cutscene and the last section is marked to blend on a skip,
-// and with a cut otherwise.
+// out when playback passed its end, on its own cutscene's time, or when a skip ended the cutscene and the last section
+// is marked to blend on a skip, and with a cut otherwise. ctx is the root's.
 @(private)
-leaving_blend :: proc(
-	ctx: ^Track_Context,
-	sections: []format.Cutscene_Section,
-	jumped: bool,
-) -> camera.Blend {
+leaving_blend :: proc(s: ^State, ctx: ^Track_Context, jumped: bool) -> camera.Blend {
 	shot, held := ctx.evaluation.cut.shown.(Cut_Shot)
-	if !held || len(sections) == 0 {
+	if !held {
 		return camera.CUT
 	}
-	if ctx.skipped && ctx.time == ctx.blob.range_end {
-		last := sections[len(sections) - 1]
-		if .Blend_On_Skip in last.flags {
-			return cut_blend(ctx.blob, last.blend_out, last.blend_curves[1])
+	if ctx.skipped && ctx.time == ctx.range_end {
+		last, found := last_shot(s, ctx)
+		if !found {
+			return camera.CUT
+		}
+		section := last.sections[last.index]
+		if .Blend_On_Skip in section.flags {
+			return cut_blend(&last.ctx, section.blend_out, section.blend_curves[1])
 		}
 		return camera.CUT
 	}
 	if jumped {
 		return camera.CUT
 	}
-	for section in sections {
-		if section.id == shot.section && section.blend_out > 0 && fires(ctx, section.end) {
-			return cut_blend(ctx.blob, section.blend_out, section.blend_curves[1])
+	for i in 0 ..= len(ctx.evaluation.children) {
+		if i > 0 && ctx.evaluation.children[i - 1].scope != shot.section.scope {
+			continue
+		}
+		if i == 0 && shot.section.scope != 0 {
+			continue
+		}
+		at, found := scope_context(s, ctx, i)
+		cut, live := live_cut_track(at.data, at.blob)
+		if !found || !live {
+			continue
+		}
+		for section in format.cutscene_track_sections(at.data, at.blob, cut) {
+			if shot.section.id == section.id && section.blend_out > 0 && fires(&at, section.end) {
+				return cut_blend(&at, section.blend_out, section.blend_curves[1])
+			}
 		}
 	}
 	return camera.CUT
 }
 
-// cut_blend is a camera blend of a number of ticks, on the stack's clock that is the cutscene's.
+// cut_blend is a camera blend of a number of ticks on the scope's time, on the stack's clock that is the cutscene's. In a
+// sub-sequence that plays at a scale, the blend takes the root's time that the ticks take.
 @(private)
 cut_blend :: proc(
-	blob: ^format.Cutscene_Blob,
+	ctx: ^Track_Context,
 	ticks: i32,
 	curve: format.Cutscene_Blend_Curve,
 ) -> camera.Blend {
+	rate := ctx.rate if ctx.rate > 0 else 1
 	return {
-		duration = f32(f64(ticks) / format.CUTSCENE_TICKS_PER_SECOND),
+		duration = f32(f64(ticks) / format.CUTSCENE_TICKS_PER_SECOND / rate),
 		curve = camera.Curve(curve),
-		clock = .Real if blob.clock == .Real else .Game,
+		clock = .Real if ctx.clock == .Real else .Game,
 	}
 }
 
@@ -242,12 +340,49 @@ player_priority :: proc(s: ^State, e: ^Evaluation) -> i32 {
 	return 0
 }
 
-// cut_fires is whether this evaluation crosses a cut of the cutscene's camera cut track: a section's start that does
-// not blend in from gameplay, or a section's end that cuts back to gameplay, before the range's end. Transform tracks
-// teleport on it, so nothing interpolates across the cut. It reads only the blob, so it is the same in either phase.
+// cut_fires is whether this evaluation crosses a cut of the camera cut tracks of the tree, which run_phase finds once
+// (see tree_cut_fires). Transform tracks teleport on it, so nothing interpolates across the cut.
 @(private)
 cut_fires :: proc(ctx: ^Track_Context) -> bool {
+	return ctx.cut
+}
+
+// tree_cut_fires is whether the root's event range crosses a cut of the tree: of the root's cut track or a child's (see
+// scope_cut_fires), or the start or the end, before the parent's range's end, of a sub-sequence section whose child has
+// a cut track. It reads only the blobs, so it is the same in either phase.
+@(private)
+tree_cut_fires :: proc(s: ^State, ctx: ^Track_Context) -> bool {
+	if scope_cut_fires(ctx) {
+		return true
+	}
+	e := ctx.evaluation
+	for c, k in e.children {
+		inner, ok := scope_context(s, ctx, k + 1)
+		if !ok {
+			continue
+		}
+		if scope_cut_fires(&inner) {
+			return true
+		}
+		if _, live := live_cut_track(inner.data, inner.blob); !live {
+			continue
+		}
+		parent := scope_context(s, ctx, c.parent) or_continue
+		section := child_section(parent.data, parent.blob, c) or_continue
+		if fires(&parent, section.start) ||
+		   (section.end != parent.range_end && fires(&parent, section.end)) {
+			return true
+		}
+	}
+	return false
+}
+
+// scope_cut_fires is whether a context's event range crosses a cut of its own cutscene's camera cut track: a section's
+// start that does not blend in from gameplay, or a section's end that cuts back to gameplay, before the range's end.
+@(private)
+scope_cut_fires :: proc(ctx: ^Track_Context) -> bool {
 	cut, live := live_cut_track(ctx.data, ctx.blob)
+
 	if !live {
 		return false
 	}
@@ -258,7 +393,7 @@ cut_fires :: proc(ctx: ^Track_Context) -> bool {
 		if fires(ctx, section.start) && !(after_gap && section.blend_in > 0) {
 			return true
 		}
-		if section.end != ctx.blob.range_end &&
+		if section.end != ctx.range_end &&
 		   before_gap &&
 		   section.blend_out == 0 &&
 		   fires(ctx, section.end) {
@@ -286,7 +421,7 @@ constrain :: proc(ctx: ^Track_Context) {
 	cut_sections := format.cutscene_track_sections(ctx.data, ctx.blob, cut)
 	shown: Maybe(format.Cutscene_Section)
 	shown_index := format.CUTSCENE_NONE
-	if i, ok := shown_section(ctx.blob, cut_sections, ctx.time); ok {
+	if i, ok := shown_section(ctx, cut_sections, ctx.time); ok {
 		shown = cut_sections[i]
 		shown_index = cut.first_section + u32(i)
 	}
@@ -323,7 +458,7 @@ constrain_camera :: proc(
 	shown: Maybe(format.Cutscene_Section),
 	shown_index: u32,
 ) {
-	entity, bound := binding_entity(&ctx.evaluation.bindings, ctx.world, int(camera_binding))
+	entity, bound := ctx_binding(ctx, camera_binding)
 	if !bound {
 		return
 	}
@@ -361,11 +496,7 @@ constrain_camera :: proc(
 		focus, has_focus := active[.Focus].?
 		target: ecs.Entity
 		if has_focus {
-			target, _ = binding_entity(
-				&ctx.evaluation.bindings,
-				ctx.world,
-				int(focus.constraint.target),
-			)
+			target, _ = ctx_binding(ctx, focus.constraint.target)
 		} else {
 			target, _ = base(
 				ctx,
@@ -484,7 +615,7 @@ written_elsewhere :: proc(ctx: ^Track_Context, target: Pose_Target, part: Pose_P
 		return false
 	}
 	for writer in snapshot.writers {
-		if writer.saved == index && writer.track != ctx.track.id {
+		if writer.saved == index && writer.track != (Scoped{ctx.scope, ctx.track.id}) {
 			return true
 		}
 	}
@@ -501,7 +632,7 @@ constraint_anchor :: proc(
 	anchor: ecs.World_Position,
 	ok: bool,
 ) {
-	target := binding_entity(&ctx.evaluation.bindings, ctx.world, int(c.target)) or_return
+	target := ctx_binding(ctx, c.target) or_return
 	pose := (^ecs.Transform)(ecs.get_raw(ctx.world, target, ecs.TRANSFORM_ID))
 	if pose == nil {
 		return

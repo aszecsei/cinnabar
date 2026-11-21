@@ -13,7 +13,7 @@ import format "cinnabar:engine/asset/format"
 // in ticks, each with sections of keyed channels, a clip, a sound or a sub-sequence (see
 // docs/content/kinds/cutscenes.md). The cook checks the assets that a cutscene names and its sub-sequences' nesting, which
 // it reads from the other cutscenes' sources, so the order of the passes does not matter.
-CUTSCENE_COOK_VERSION :: "cutscenes 10"
+CUTSCENE_COOK_VERSION :: "cutscenes 11"
 
 // CUTSCENE_TEMPLATE is the text of a new cutscene: 10 seconds at 30 frames a second, with no bindings or tracks.
 CUTSCENE_TEMPLATE :: `cutscene 1
@@ -37,10 +37,23 @@ Cutscene_Reference :: struct {
 }
 
 // Cutscene_Parsed is a cutscene's text as cutscene_parse reads it: the contents of its blob, without its GUID, key or
-// path, and the assets that it names. The references are there even when the text has problems.
+// path, the assets that it names, and the lines of its sub-sequence sections' maps of their children's bindings, which
+// the cook checks against the children. The references are there even when the text has problems.
 Cutscene_Parsed :: struct {
 	contents:   format.Cutscene_Contents,
 	references: []Cutscene_Reference,
+	maps:       []Cutscene_Map_Line,
+}
+
+// Cutscene_Map_Line is a sub-sequence section's map of a child's binding, by its ID in the child, to a binding of the
+// cutscene, by its index, at a line, or a sub-sequence section's trim at its line with child 0 and parent
+// CUTSCENE_NONE. track and section are indexes into the contents.
+Cutscene_Map_Line :: struct {
+	track:   int,
+	section: int,
+	child:   u32,
+	parent:  u32,
+	line:    int,
 }
 
 cook_cutscenes :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass) -> bool {
@@ -92,6 +105,7 @@ cook_cutscenes :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pas
 	}
 	cutscene_cycles(&graph, assets)
 	cutscene_depths(&graph, assets)
+	cutscene_sub_sequences(&graph, assets)
 	ok := true
 	step_begin(pass, .Cutscene, "", len(cutscenes))
 	for i, n in cutscenes {
@@ -198,7 +212,107 @@ cutscene_cycles :: proc(graph: ^Cutscene_Graph, assets: []Asset_Source) {
 	}
 }
 
+// cutscene_sub_sequences checks each sub-sequence section against the cutscene that it plays, from that cutscene's text:
+// its trim within the child's range, and each bind to a binding that the child has, of a kind that fits. The cook sees
+// a binding's kind in its own cutscene: a camera when its camera cut track shows it, and an entity with an Animator when
+// an animation track drives it. A bind of a camera to an animated entity that is not a camera, either way, is a problem.
+@(private = "file")
+cutscene_sub_sequences :: proc(graph: ^Cutscene_Graph, assets: []Asset_Source) {
+	Kinds :: struct {
+		cameras:  map[u32]bool,
+		animated: map[u32]bool,
+	}
+	kinds_of :: proc(contents: format.Cutscene_Contents) -> (k: Kinds) {
+		k.cameras = make(map[u32]bool, context.temp_allocator)
+		k.animated = make(map[u32]bool, context.temp_allocator)
+		for tr in contents.tracks {
+			#partial switch tr.kind {
+			case .Camera_Cut:
+				for s in tr.sections {
+					k.cameras[s.camera] = true
+				}
+			case .Animation:
+				k.animated[tr.binding] = true
+			}
+		}
+		return
+	}
+	misfit :: proc(a: Kinds, ia: u32, b: Kinds, ib: u32) -> bool {
+		return a.cameras[ia] && b.animated[ib] && !b.cameras[ib]
+	}
+	for &node in graph.nodes {
+		contents := node.parsed.contents
+		own := kinds_of(contents)
+		for m in node.parsed.maps {
+			if m.track >= len(contents.tracks) ||
+			   m.section >= len(contents.tracks[m.track].sections) {
+				continue
+			}
+			section := contents.tracks[m.track].sections[m.section]
+			n, found := graph.by_guid[section.asset]
+			if !found {
+				continue
+			}
+			child := graph.nodes[n].parsed.contents
+			name := assets[graph.nodes[n].asset].name
+			if m.parent == format.CUTSCENE_NONE {
+				if child.range_end > child.range_start &&
+				   (section.offset < child.range_start ||
+						   section.offset >= child.range_end ||
+						   section.trim_end > child.range_end) {
+					append(
+						&node.graph_problems,
+						Cutscene_Problem {
+							m.line,
+							fmt.tprintf(
+								"the trim is within %s's range, [%d, %d]",
+								name,
+								child.range_start,
+								child.range_end,
+							),
+						},
+					)
+				}
+				continue
+			}
+			index := -1
+			for b, k in child.bindings {
+				if b.id == m.child {
+					index = k
+				}
+			}
+			if index < 0 {
+				append(
+					&node.graph_problems,
+					Cutscene_Problem {
+						m.line,
+						fmt.tprintf("%s has no binding with the ID %d", name, m.child),
+					},
+				)
+				continue
+			}
+			theirs := kinds_of(child)
+			if misfit(theirs, u32(index), own, m.parent) ||
+			   misfit(own, m.parent, theirs, u32(index)) {
+				append(
+					&node.graph_problems,
+					Cutscene_Problem {
+						m.line,
+						fmt.tprintf(
+							"the binding %d of %s and the binding %d here are not of one kind: one is a camera, and the other an animated entity",
+							m.child,
+							name,
+							contents.bindings[m.parent].id,
+						),
+					},
+				)
+			}
+		}
+	}
+}
+
 // cutscene_depths gives each cutscene the depth of its sub-sequences, and a problem to each that nests deeper than
+
 // CUTSCENE_MAX_DEPTH, at the line of the first sub-sequence on its deepest path. Cycles have their own problem, so a
 // path into one counts it as no depth.
 @(private = "file")
@@ -443,8 +557,19 @@ Pending_Section :: struct {
 	// plays_through_skip. And the line of the first of pre_roll and post_roll, which an audio section does not take.
 	audio_lines: [4]int,
 	roll_line:   int,
+	// The settings that only a sub-sequence section takes: the lines of trim and scale, and its binds.
+	sub_lines:   [2]int,
+	binds:       [dynamic]Pending_Bind,
 	constraints: Pending_Constraints,
 	channels:    [dynamic]Pending_Channel,
+}
+
+// Pending_Bind is a sub-sequence section's `bind <child binding id> = <binding id>` line.
+@(private = "file")
+Pending_Bind :: struct {
+	child:  u32,
+	parent: u32,
+	line:   int,
 }
 
 @(private = "file")
@@ -534,6 +659,8 @@ cutscene_parse :: proc(
 	// The assets that keys name, in the blob's order, and each one's index.
 	guids := make([dynamic]format.Guid)
 	guid_index := make(map[format.Guid]int, 16, context.temp_allocator)
+	// The sub-sequence sections' binds, as maps with their lines.
+	maps := make([dynamic]Cutscene_Map_Line)
 	section_count, channel_count, key_count := 0, 0, 0
 	for raw, index in strings.split_lines(text) {
 		line := index + 1
@@ -809,6 +936,36 @@ cutscene_parse :: proc(
 					keys = make([dynamic]format.Cutscene_Key),
 				},
 			)
+			continue
+		}
+		if is_block && word == "bind" {
+			if block != .Section {
+				problem(
+					&found,
+					line,
+					"a bind comes after a section line, before the section's channels",
+				)
+				continue
+			}
+			tr := &tracks[len(tracks) - 1]
+			s := &tr.sections[len(tr.sections) - 1]
+			child_text, has_parent, parent_text := strings.partition(rest, "=")
+			child, child_ok := cutscene_id(strings.trim_space(child_text))
+			parent, parent_ok := cutscene_id(strings.trim_space(parent_text))
+			if has_parent == "" || !child_ok || !parent_ok {
+				problem(
+					&found,
+					line,
+					"a bind is `bind <id of the sub-sequence's binding> = <id of a binding of this cutscene>`",
+				)
+				continue
+			}
+			for other in s.binds {
+				if other.child == child {
+					problem(&found, line, "the section binds the binding %d already", child)
+				}
+			}
+			append(&s.binds, Pending_Bind{child, parent, line})
 			continue
 		}
 		if is_block && word == "key" {
@@ -1249,6 +1406,37 @@ cutscene_parse :: proc(
 					continue
 				}
 				s.blend_line = line
+			case "trim":
+				start_text, _, end_text := strings.partition(value_text, " ")
+				start, start_ok := cutscene_ticks_text(start_text)
+				end, end_ok := i32(0), true
+				if end_text = strings.trim_space(end_text); end_text != "" {
+					end, end_ok = cutscene_ticks_text(end_text)
+				}
+				if !start_ok || !end_ok || (end != 0 && end <= start) {
+					problem(
+						&found,
+						line,
+						"trim is the sub-sequence's start and, if not its end, its end, in ticks on its time: <start> [<end>]",
+					)
+					continue
+				}
+				s.contents.offset, s.contents.trim_end, s.sub_lines[0] = start, end, line
+			case "scale":
+				value, message := parse_graph_value(value_text)
+				if message != "" ||
+				   value.kind != .Numbers ||
+				   value.count != 1 ||
+				   !(value.numbers[0] > 0) ||
+				   f32(value.numbers[0]) > max(f32) {
+					problem(
+						&found,
+						line,
+						"scale is a number above 0: the sub-sequence's time per the cutscene's",
+					)
+					continue
+				}
+				s.contents.speed, s.sub_lines[1] = f32(value.numbers[0]), line
 			case "offset":
 				ticks, ok := cutscene_ticks_text(value_text)
 				if !ok {
@@ -1389,7 +1577,7 @@ cutscene_parse :: proc(
 				problem(
 					&found,
 					line,
-					"%q is not a setting of a section: ease_in, ease_out, weight, pre_roll, post_roll, asset, blend, offset, speed, loop, root_motion, camera, blend_in, blend_out, blend_on_skip, look_at, look_at_offset, look_at_damping, follow, follow_offset, follow_damping, focus, bus, min_distance, max_distance or plays_through_skip",
+					"%q is not a setting of a section: ease_in, ease_out, weight, pre_roll, post_roll, asset, blend, offset, speed, loop, trim, scale, root_motion, camera, blend_in, blend_out, blend_on_skip, look_at, look_at_offset, look_at_damping, follow, follow_offset, follow_damping, focus, bus, min_distance, max_distance or plays_through_skip",
 					name,
 				)
 			}
@@ -1405,6 +1593,8 @@ cutscene_parse :: proc(
 			     "offset",
 			     "speed",
 			     "loop",
+			     "trim",
+			     "scale",
 			     "root_motion",
 			     "camera",
 			     "blend_in",
@@ -1687,12 +1877,26 @@ cutscene_parse :: proc(
 						problem(
 							&found,
 							setting_line,
-							"only an animation or an audio section has an offset and a loop, and only an animation section a speed and a root motion",
+							"only an animation or an audio section has an offset, only those and a sub_sequence section a loop, and only an animation section a speed and a root motion",
 						)
 					}
 				}
 				c.offset, c.speed, c.root_motion = 0, 0, .Bake
 				c.flags -= {.Loop}
+			} else if kind == .Sub_Sequence {
+				for setting_line in ([3]int{s.play_lines[0], s.play_lines[1], s.play_lines[3]}) {
+					if setting_line != 0 {
+						problem(
+							&found,
+							setting_line,
+							"a sub_sequence section has a trim and a scale, not an offset, a speed or a root motion",
+						)
+					}
+				}
+				if s.sub_lines[1] == 0 {
+					c.speed = 1
+				}
+				c.root_motion = .Bake
 			} else if kind == .Audio {
 				for setting_line in ([2]int{s.play_lines[1], s.play_lines[3]}) {
 					if setting_line != 0 {
@@ -1706,6 +1910,33 @@ cutscene_parse :: proc(
 				c.speed, c.root_motion = 1, .Bake
 			} else if s.play_lines[1] == 0 {
 				c.speed = 1
+			}
+			if kind == .Sub_Sequence {
+				c.bindings = cutscene_sub_sequence_section(
+					&found,
+					tr.sections[:],
+					j,
+					bindings[:],
+					&maps,
+					i,
+				)
+			} else {
+				for setting_line in s.sub_lines {
+					if setting_line != 0 {
+						problem(
+							&found,
+							setting_line,
+							"only a sub_sequence section has a trim and a scale",
+						)
+					}
+				}
+				if len(s.binds) > 0 {
+					problem(&found, s.binds[0].line, "only a sub_sequence section binds bindings")
+				}
+				c.trim_end = 0
+				if !plays {
+					c.offset = 0
+				}
 			}
 			if kind == .Audio {
 				cutscene_audio_section(&found, s, &c)
@@ -1822,8 +2053,61 @@ cutscene_parse :: proc(
 	slice.stable_sort_by(references[:], proc(a, b: Cutscene_Reference) -> bool {
 		return a.line < b.line
 	})
-	return {contents = contents, references = references[:]}, found[:]
+	return {contents = contents, references = references[:], maps = maps[:]}, found[:]
 }
+
+// cutscene_sub_sequence_section checks what a sub-sequence section has (see
+// docs/cinematics/tracks.md#sub-sequence-tracks): no channels, a start at or after the end of the section before it,
+// and binds to bindings of the cutscene, each child's binding once. It gives the binds as maps to the bindings' indexes,
+// and records their lines in maps, which the cook checks against the child.
+@(private = "file")
+cutscene_sub_sequence_section :: proc(
+	found: ^[dynamic]Cutscene_Problem,
+	sections: []Pending_Section,
+	index: int,
+	bindings: []Pending_Binding,
+	maps: ^[dynamic]Cutscene_Map_Line,
+	track: int,
+) -> []format.Cutscene_Binding_Map_Contents {
+	problem :: proc(found: ^[dynamic]Cutscene_Problem, line: int, f: string, args: ..any) {
+		append(found, Cutscene_Problem{line, fmt.aprintf(f, ..args)})
+	}
+	s := sections[index]
+	if len(s.channels) > 0 {
+		problem(
+			found,
+			s.channels[0].line,
+			"a sub_sequence section has no channels: its sub-sequence's tracks do",
+		)
+	}
+	if index > 0 && s.contents.start < sections[index - 1].contents.end {
+		problem(
+			found,
+			s.line,
+			"a sub_sequence track's sections are in time order and do not overlap: this one starts before %d",
+			sections[index - 1].contents.end,
+		)
+	}
+	trim_line := s.sub_lines[0] if s.sub_lines[0] != 0 else s.line
+	append(maps, Cutscene_Map_Line{track, index, 0, format.CUTSCENE_NONE, trim_line})
+	result := make([dynamic]format.Cutscene_Binding_Map_Contents, 0, len(s.binds))
+	for bind in s.binds {
+		parent := -1
+		for b, k in bindings {
+			if b.contents.id == bind.parent {
+				parent = k
+			}
+		}
+		if parent < 0 {
+			problem(found, bind.line, "the cutscene has no binding with the ID %d", bind.parent)
+			continue
+		}
+		append(&result, format.Cutscene_Binding_Map_Contents{bind.child, u32(parent)})
+		append(maps, Cutscene_Map_Line{track, index, bind.child, u32(parent), bind.line})
+	}
+	return result[:]
+}
+
 
 // cutscene_event_track checks what an event track has (see docs/cinematics/tracks.md#event-tracks): no sections, no
 // when_finished, and a binding, if it has one, that does not suspend its behaviours, which would get none of its events.

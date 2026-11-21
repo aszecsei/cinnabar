@@ -11,7 +11,7 @@ Cutscenes at run time, in `lib/engine/cutscene`. A cutscene asset holds bindings
 | [Player](player.md) | The player's states and its one writer, handles, commands, loading and failures, conflicts between players, and reset. |
 | [Possession](possession.md) | What a cutscene suspends on the entities that it holds: behaviours, AI, navigation and physics. The input context and the hidden HUD, and how the end gives them back. |
 | [Skipping](skipping.md) | The skip policy, the `Skipping` state and its fades, the events that fire when skipped, and the skip action that a player holds. |
-| [Tracks](tracks.md) | The curve that every keyed track shares, and the kinds of track: property, transform, animation, camera cut, audio and event tracks so far, with the cinematic camera and its constraints. |
+| [Tracks](tracks.md) | The curve that every keyed track shares, and the kinds of track: property, transform, animation, camera cut, audio, event and sub-sequence tracks so far, with the cinematic camera and its constraints. |
 
 ## Overview
 
@@ -25,7 +25,8 @@ The data flow:
 3. A player who holds the skip action, or a script, skips the cutscene: behind a fade, the player evaluates the end, or the end of a skip range, once, and fires only the events marked to fire when skipped ([Skipping](skipping.md)).
 4. When the cutscene ends, the player gives the world back: the tracks set to restore put their fields back, the input and the HUD come back, the bindings resume what they suspended, the spawned entities are despawned and the assets are unloaded.
 
-**Not built yet:** the kinds of track other than property, transform, animation, camera cut, audio and event tracks ([Tracks: Not built yet](tracks.md#not-built-yet)), the scripts' `Cutscene` library and the cutscene editor. Each one is a sub-issue of [#526](https://github.com/aszecsei/cinnabar/issues/526).
+**Not built yet:** the presentation track ([Tracks: Not built yet](tracks.md#not-built-yet)), the scripts' `Cutscene` library and the cutscene editor.
+ Each one is a sub-issue of [#526](https://github.com/aszecsei/cinnabar/issues/526).
 
 ## References
 

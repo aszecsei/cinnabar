@@ -78,6 +78,10 @@ Player_Live :: struct {
 	overrides:  [dynamic]Binding_Override,
 	// A hash of the blob's bindings when they resolved. A reload that changes them resolves them again.
 	bindings:   u64,
+	// The key of the tree's blobs, and a hash of what its children loaded and resolved from, when they did. A reload
+	// that changes the hash loads the children again (see follow_children).
+	tree:       u64,
+	shape:      u64,
 	// The input context and the UI documents that the player holds from its first Playing or Skipping.
 	hold:       Player_Hold,
 }
@@ -145,6 +149,9 @@ Asset_Failure_Reason :: enum u8 {
 	Not_A_Cutscene,
 	// An asset that the cutscene references, such as a clip, a sound or a prefab, did not load.
 	Reference_Missing,
+	// Its sub-sequences reach a cutscene that plays them, or nest deeper than CUTSCENE_MAX_DEPTH, which the cook
+	// refuses: the asset is the sub-sequence that does.
+	Bad_Nesting,
 }
 
 // Asset_Failure is an asset that did not load: the cutscene, or one that it references.
@@ -411,6 +418,9 @@ update :: proc(s: ^State, c: Player_Context) -> (despawned: int) {
 			despawned += follow_bindings(s, c, slot)
 		}
 		if live := live_of(&p.state); live != nil {
+			despawned += follow_children(s, c, slot)
+		}
+		if live := live_of(&p.state); live != nil {
 			e := &live.evaluation
 			data, blob, ok := cutscene_data(s, e)
 			if !ok {
@@ -439,6 +449,9 @@ update :: proc(s: ^State, c: Player_Context) -> (despawned: int) {
 		if _, finishing := p.state.(Player_Finishing); finishing {
 			_, gave_back := change_cutscene(s, w, slot, Player_Restored{})
 			despawned += gave_back
+		}
+		if live := live_of(&p.state); live != nil && status_of(p.state) != .Ready {
+			show_children(s, w, &live.evaluation)
 		}
 	}
 	send_events(s)
@@ -517,6 +530,8 @@ change_cutscene :: proc(
 	if from == .Ready && (next == .Playing || next == .Skipping) {
 		live := live_of(&p.state)
 		reveal_bindings(&live.evaluation.bindings, w)
+		show_children(s, w, &live.evaluation)
+
 		take_hold(s, w, live)
 	}
 	append(&s.events, Player_Event{{u16(slot), p.generation}, next})
@@ -743,6 +758,14 @@ load_player :: proc(s: ^State, c: Player_Context, slot: int) {
 		fail(s, w, slot, failure)
 		return
 	}
+	// The sub-sequences load before Ready, with their bindings (see docs/cinematics/tracks.md#sub-sequence-tracks).
+	if failure, failed := open_children(s, c, &live.evaluation, data, blob).?; failed {
+		give_back(s, w, &live)
+		fail(s, w, slot, failure)
+		return
+	}
+	live.tree = tree_key(s, &live.evaluation, blob)
+	live.shape = children_shape(s, &live.evaluation, data, blob)
 	when_ready, skips := loading.when_ready, loading.skip
 	change_cutscene(s, w, slot, Player_Ready{live})
 	if skips {
@@ -849,7 +872,41 @@ follow_bindings :: proc(s: ^State, c: Player_Context, slot: int) -> (despawned: 
 	return
 }
 
+// follow_children loads a live player's sub-sequences again when a reload of a blob of the tree changed what they load
+// and resolve from: a section, a cutscene that a section plays, a map, or a child's bindings or assets. Their spawned
+// entities spawn again. A reload that changes only tracks keeps them, and the evaluation follows it. A child that no
+// longer loads fails the player. It gives how many spawned roots it despawned.
+@(private = "file")
+follow_children :: proc(s: ^State, c: Player_Context, slot: int) -> (despawned: int) {
+	w := c.world
+	p := &s.players[slot]
+	live := live_of(&p.state)
+	e := &live.evaluation
+	data, blob, ok := cutscene_data(s, e)
+	if !ok {
+		return
+	}
+	key := tree_key(s, e, blob)
+	if key == live.tree {
+		return
+	}
+	live.tree = key
+	shape := children_shape(s, e, data, blob)
+	if shape == live.shape {
+		return
+	}
+	despawned = close_children(s, w, e)
+	if failure, failed := open_children(s, c, e, data, blob).?; failed {
+		_, gave_back := fail(s, w, slot, failure)
+		return despawned + gave_back
+	}
+	live.tree = tree_key(s, e, blob)
+	live.shape = children_shape(s, e, data, blob)
+	return
+}
+
 // fail logs why a player failed, and changes it to Failed, which gives back what it changed.
+
 @(private = "file")
 fail :: proc(
 	s: ^State,
@@ -869,7 +926,16 @@ fail :: proc(
 			f.reason,
 		)
 	case Binding_Failure:
-		log.errorf("cutscene: a player failed: the binding at %d: %v", f.index, f.reason)
+		if f.cutscene != {} {
+			log.errorf(
+				"cutscene: a player failed: the binding at %d of the sub-sequence %s: %v",
+				f.index,
+				format.guid_format(f.cutscene, &buffer),
+				f.reason,
+			)
+		} else {
+			log.errorf("cutscene: a player failed: the binding at %d: %v", f.index, f.reason)
+		}
 	}
 	return change_cutscene(s, w, slot, Player_Failed{failure})
 }
@@ -885,7 +951,8 @@ give_back :: proc(s: ^State, w: ^ecs.World, live: ^Player_Live) -> (despawned: i
 		restore_all(s, e, w)
 	}
 	release_hold(s, w, &live.hold)
-	despawned = destroy_evaluation(e, w)
+	despawned = close_children(s, w, e)
+	despawned += destroy_evaluation(e, w)
 	asset.unload(s.assets, e.cutscene)
 	for h in live.references {
 		asset.unload(s.assets, h)

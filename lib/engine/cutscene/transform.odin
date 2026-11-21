@@ -319,11 +319,7 @@ track_frame :: proc(ctx: ^Track_Context, world_own: World_Pose) -> (frame: Frame
 	case .Absolute:
 		return {{ctx.track.origin}, 1}, true
 	case .Relative_To:
-		other := binding_entity(
-			&ctx.evaluation.bindings,
-			ctx.world,
-			int(ctx.track.relative),
-		) or_return
+		other := ctx_binding(ctx, ctx.track.relative) or_return
 		pose := (^ecs.Transform)(ecs.get_raw(ctx.world, other, ecs.TRANSFORM_ID))
 		if pose == nil {
 			return {}, false
@@ -351,7 +347,7 @@ held_parts :: proc(ctx: ^Track_Context) -> (held: bit_set[Pose_Part]) {
 @(private)
 touched_axis :: proc(ctx: ^Track_Context, want: Pose_Channel) -> bool {
 	for section in format.cutscene_track_sections(ctx.data, ctx.blob, ctx.track) {
-		if _, covers := section_at(ctx.blob, section, ctx.time); !covers {
+		if _, covers := sample_section(ctx, section, ctx.time); !covers {
 			continue
 		}
 		for channel in format.cutscene_section_channels(ctx.data, ctx.blob, section) {
@@ -382,7 +378,7 @@ blend_pose :: proc(
 	rotation: quaternion128
 	rotation_weight: f32
 	for section in format.cutscene_track_sections(ctx.data, ctx.blob, ctx.track) {
-		at := section_at(ctx.blob, section, ctx.time) or_continue
+		at := sample_section(ctx, section, ctx.time) or_continue
 		additive := .Additive in section.flags
 		euler := [3]f32{} if additive else own_euler
 		rotated := false
@@ -543,9 +539,10 @@ teleports :: proc(ctx: ^Track_Context) -> bool {
 jumps :: proc(ctx: ^Track_Context) -> bool {
 	return(
 		ctx.skipped ||
-		ctx.blob.clock == .Real ||
+		ctx.wrapped ||
+		ctx.clock == .Real ||
 		ctx.from >= i64(ctx.time) ||
-		ctx.from < i64(ctx.blob.range_start) \
+		ctx.from < i64(ctx.range_start) \
 	)
 }
 
@@ -556,7 +553,7 @@ jumps :: proc(ctx: ^Track_Context) -> bool {
 @(private)
 relative_space :: proc(ctx: ^Track_Context, target: Pose_Target) -> Relative_Space {
 	e := ctx.evaluation
-	if space, seen := e.spaces[ctx.track.id]; seen {
+	if space, seen := e.spaces[{ctx.scope, ctx.track.id}]; seen {
 		return space
 	}
 	if reaches_self(ctx) {
@@ -566,11 +563,11 @@ relative_space :: proc(ctx: ^Track_Context, target: Pose_Target) -> Relative_Spa
 			ctx.track.id,
 			format.blob_string(ctx.data, ctx.track.name),
 		)
-		e.spaces[ctx.track.id] = Relative_Cycle{}
+		e.spaces[{ctx.scope, ctx.track.id}] = Relative_Cycle{}
 		return Relative_Cycle{}
 	}
 	own, has_own := own_pose(ctx, target)
-	other, found := binding_entity(&e.bindings, ctx.world, int(ctx.track.relative))
+	other, found := ctx_binding(ctx, ctx.track.relative)
 	if !has_own || !found {
 		return nil
 	}
@@ -595,7 +592,7 @@ relative_space :: proc(ctx: ^Track_Context, target: Pose_Target) -> Relative_Spa
 		),
 		rotation = linalg.normalize(inverse * world_own.rotation),
 	}
-	e.spaces[ctx.track.id] = start
+	e.spaces[{ctx.scope, ctx.track.id}] = start
 	return start
 }
 
@@ -603,19 +600,24 @@ relative_space :: proc(ctx: ^Track_Context, target: Pose_Target) -> Relative_Spa
 // their IDs, because the snapshot keeps the own poses that it came from, and forgets the rest, which the next
 // evaluation finds again.
 @(private)
-keep_spaces :: proc(e: ^Evaluation, w: ^ecs.World, data: []byte, blob: ^format.Cutscene_Blob) {
-	bindings := format.cutscene_bindings(data, blob)
-	gone := make([dynamic]u32, w.platform.frame_allocator)
+keep_spaces :: proc(e: ^Evaluation, w: ^ecs.World, views: []Scope_View) {
+	gone := make([dynamic]Scoped, w.platform.frame_allocator)
 	for id, space in e.spaces {
 		kept := false
 		if start, placed := space.(Relative_Start); placed {
-			for track in format.cutscene_tracks(data, blob) {
-				kept ||=
-					track.id == id &&
-					track.kind == .Transform &&
-					track.space == .Relative_To &&
-					bindings[track.binding].id == start.binding &&
-					bindings[track.relative].id == start.relative
+			for view in views {
+				if view.scope != id.scope {
+					continue
+				}
+				bindings := format.cutscene_bindings(view.data, view.blob)
+				for track in format.cutscene_tracks(view.data, view.blob) {
+					kept ||=
+						track.id == id.id &&
+						track.kind == .Transform &&
+						track.space == .Relative_To &&
+						bindings[track.binding].id == start.binding &&
+						bindings[track.relative].id == start.relative
+				}
 			}
 		}
 		if !kept {
@@ -635,8 +637,7 @@ reaches_self :: proc(ctx: ^Track_Context) -> bool {
 	if !bound {
 		return false
 	}
-	bindings := &ctx.evaluation.bindings
-	start, found := binding_entity(bindings, ctx.world, int(ctx.track.relative))
+	start, found := ctx_binding(ctx, ctx.track.relative)
 	if !found {
 		return false
 	}
@@ -654,8 +655,8 @@ reaches_self :: proc(ctx: ^Track_Context) -> bool {
 			if tr.kind != .Transform || tr.space != .Relative_To || .Muted in tr.flags {
 				continue
 			}
-			from, from_ok := binding_entity(bindings, ctx.world, int(tr.binding))
-			to, to_ok := binding_entity(bindings, ctx.world, int(tr.relative))
+			from, from_ok := ctx_binding(ctx, tr.binding)
+			to, to_ok := ctx_binding(ctx, tr.relative)
 			if !from_ok || !to_ok || from != at {
 				continue
 			}
@@ -672,7 +673,7 @@ reaches_self :: proc(ctx: ^Track_Context) -> bool {
 // that binding's pose at this time whatever the tracks' order. Evaluating a track twice writes the same values.
 @(private)
 follow_relative :: proc(ctx: ^Track_Context) {
-	other, found := binding_entity(&ctx.evaluation.bindings, ctx.world, int(ctx.track.relative))
+	other, found := ctx_binding(ctx, ctx.track.relative)
 	if !found {
 		return
 	}
@@ -680,7 +681,7 @@ follow_relative :: proc(ctx: ^Track_Context) {
 		if tr.kind != .Transform || .Muted in tr.flags || tr.id == ctx.track.id {
 			continue
 		}
-		entity, bound := binding_entity(&ctx.evaluation.bindings, ctx.world, int(tr.binding))
+		entity, bound := ctx_binding(ctx, tr.binding)
 		if !bound || entity != other {
 			continue
 		}

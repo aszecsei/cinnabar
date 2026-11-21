@@ -186,7 +186,7 @@ brightness_track :: proc(ctx: ^Track_Context) {
 	}
 	b: Blend(f32)
 	for section in format.cutscene_track_sections(ctx.data, ctx.blob, ctx.track) {
-		at, covers := section_at(ctx.blob, section, ctx.time)
+		at, covers := sample_section(ctx, section, ctx.time)
 		if !covers {
 			continue
 		}
@@ -224,7 +224,7 @@ position_track :: proc(ctx: ^Track_Context) {
 		return
 	}
 	for section in format.cutscene_track_sections(ctx.data, ctx.blob, ctx.track) {
-		at, covers := section_at(ctx.blob, section, ctx.time)
+		at, covers := sample_section(ctx, section, ctx.time)
 		if !covers {
 			continue
 		}
@@ -1533,7 +1533,7 @@ a_property_track_that_cannot_animate_its_field_logs_once_and_does_nothing :: pro
 	testing.expect_value(t, lamp(f), before)
 	testing.expect_value(t, len(e.snapshot.saved), 0)
 	for track in tracks {
-		target, resolved := e.targets[track.id]
+		target, resolved := e.targets[{0, track.id}]
 		testing.expectf(t, resolved, "the track %d is resolved", track.id)
 		_, has_field := target.field.?
 		testing.expectf(t, !has_field, "the track %d has no field", track.id)

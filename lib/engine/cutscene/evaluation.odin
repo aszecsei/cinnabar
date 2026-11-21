@@ -86,50 +86,58 @@ State :: struct {
 // fields that its tracks wrote. It holds no procedures, typeids or string literals, so it survives a code reload.
 // Make it with init_evaluation, and free it with destroy_evaluation.
 Evaluation :: struct {
-	cutscene:    asset.Handle,
-	bindings:    Bindings,
-	// The key of the blob that was last evaluated. A new key is a hot reload. nil before the first evaluation.
-	key:         Maybe(u64),
+	cutscene:     asset.Handle,
+	bindings:     Bindings,
+	// The cutscenes that its sub-sequence sections play, and theirs, in depth-first order (see
+	// docs/cinematics/tracks.md#sub-sequence-tracks). The player loads them. Heap memory.
+	children:     [dynamic]Child,
+	// The key of the blobs of the tree that were last evaluated, the root's and its children's (see tree_key). A new key
+	// is a hot reload. nil before the first evaluation.
+	key:          Maybe(u64),
 	// The time, in ticks, from range_start to range_end.
-	time:        i32,
+	time:         i32,
 	// What the clock gave that is less than one tick, in nanoseconds × CUTSCENE_TICKS_PER_SECOND, so the conversion
 	// never drifts.
-	carry:       i64,
+	carry:        i64,
 	// Where each phase's events have fired up to: its last evaluation's time, or a seek since it. nil before the first
 	// evaluation, so the first fires the events at range_start.
-	last:        [Phase]Phase_Mark,
-	snapshot:    Snapshot,
+	last:         [Phase]Phase_Mark,
+	snapshot:     Snapshot,
 	// The fields of the property tracks, by track ID, resolved once for the blob (see
 	// docs/cinematics/tracks.md#property-tracks). A reload of the blob forgets them.
-	targets:     map[u32]Property_Target,
+	targets:      map[Scoped]Property_Target,
 	// What each transform track relative to another binding found at its first evaluation, by track ID: a cycle, or
 	// where its binding starts in the other's space (see docs/cinematics/tracks.md#transform-tracks). A reload of the
 	// blob keeps only the starts of the tracks that still join the same two bindings.
-	spaces:      map[u32]Relative_Space,
+	spaces:       map[Scoped]Relative_Space,
 	// The Animators that animation tracks drive, by entity, each through its driver's token (see
 	// docs/cinematics/tracks.md#animation-tracks). restore, a reload and destroy_evaluation end them.
-	drives:      map[ecs.Entity]anim.Drive_Token,
+	drives:       map[ecs.Entity]anim.Drive_Token,
 	// What the camera cut track shows, and the claim that it holds on the views for it. restore ends it.
-	cut:         Cut,
+	cut:          Cut,
 	// Counts the seeks and the skips' jumps, so the camera cut track cuts after one, which an evaluation's range alone
 	// cannot tell from a pause.
-	jumps:       u32,
+	jumps:        u32,
 	// The voices of the audio tracks' sections, by section ID (see docs/cinematics/tracks.md#audio-tracks). end_holds
 	// stops them.
-	sounds:      map[u32]Sound_Voice,
+	sounds:       map[Scoped]Sound_Voice,
 	// What each audio track scrubbed last, by track ID, for an evaluation that scrubs.
-	scrubs:      map[u32]Audio_Scrub,
+	scrubs:       map[Scoped]Audio_Scrub,
 	// How the audio tracks sound: a player's evaluation plays, and the editor sets the others' with set_audition. Only
 	// an evaluation that plays sends events.
-	audition:    Audition,
+	audition:     Audition,
 	// The player whose evaluation this is, which native event handlers get. The zero handle for an evaluation of no
 	// player.
-	player:      Player_Handle,
+	player:       Player_Handle,
 	// The event tracks' ranges that sent their begin and not yet their end, by event ID (see
 	// docs/cinematics/tracks.md#event-tracks). change_range is its one writer.
-	open_ranges: map[u32]struct{},
+	open_ranges:  map[Scoped]struct{},
 	// The events that the event tracks recorded in this phase, which flush_events sends at its end.
-	fired:       [dynamic]Fired,
+	fired:        [dynamic]Fired,
+	// The Animators that the animation tracks drive in this phase, and their clips, which drive_animators hands to the
+	// driver at its end.
+	driven:       [dynamic]Driven,
+	driven_clips: [dynamic]Driven_Clip,
 }
 
 // Phase_Mark is where a phase's events have fired up to.
@@ -171,11 +179,11 @@ Saved :: struct {
 	handed: bool,
 }
 
-// Writer is a track, by its ID, that wrote a saved field.
+// Writer is a track, by its scope and its ID, that wrote a saved field.
 @(private)
 Writer :: struct {
 	saved: int,
-	track: u32,
+	track: Scoped,
 }
 
 // Snapshot holds each field that tracks wrote, as it was before the first write, and the tracks that wrote it (see
@@ -195,8 +203,35 @@ Track_Context :: struct {
 	data:        []byte,
 	blob:        ^format.Cutscene_Blob,
 	track:       format.Cutscene_Track,
-	// The track's index in the blob, its order.
+	// The track's index in its blob.
 	track_index: u32,
+	// The cutscene of the tree that the track is in, and which: 0 for the root, and n for the evaluation's children[n - 1]
+	// (see docs/cinematics/tracks.md#sub-sequence-tracks). data and blob are that cutscene's, and its bindings are found
+	// through ctx_binding.
+	scope:       Scope_Id,
+	child:       int,
+	// The track's place in the tree's order: the blob's order, with each child's tracks in its sub-sequence track's
+	// place. Events at one time go in it.
+	order:       u32,
+	// The root's blob and clock, and the scope's range on its own time: the root's range, or a child's trim.
+	root:        ^format.Cutscene_Blob,
+	clock:       format.Cutscene_Clock,
+	range_start: i32,
+	range_end:   i32,
+	// What the sub-sequence sections above the track give it: the product of their weights, which scales its sections'
+	// weights, whether all of them cover the time, without which no section of the track covers it, and the scope's time
+	// per the root's time.
+	weight:      f32,
+	covered:     bool,
+	rate:        f64,
+	// A loop of a sub-sequence above the track wrapped in (from, to], so the scope's time jumped back, as after a seek.
+	wrapped:     bool,
+	// The time on the root's time at which the scope's time is time, so root_time maps the scope's times back.
+	anchor:      f64,
+	// The evaluation crosses a cut of the camera cut tracks of the tree (see tree_cut_fires), on which transform tracks
+	// teleport.
+	cut:         bool,
+
 	// The time to evaluate at, in ticks.
 	time:        i32,
 	// The events in (from, to] fire. The range is empty after a seek, a reload or the phase's last evaluation at the same
@@ -324,13 +359,16 @@ init_evaluation :: proc(
 			index = make(map[Field]int, w.platform.heap_allocator),
 			writers = make(map[Writer]struct{}, w.platform.heap_allocator),
 		},
-		targets = make(map[u32]Property_Target, w.platform.heap_allocator),
-		spaces = make(map[u32]Relative_Space, w.platform.heap_allocator),
+		targets = make(map[Scoped]Property_Target, w.platform.heap_allocator),
+		spaces = make(map[Scoped]Relative_Space, w.platform.heap_allocator),
 		drives = make(map[ecs.Entity]anim.Drive_Token, w.platform.heap_allocator),
-		sounds = make(map[u32]Sound_Voice, w.platform.heap_allocator),
-		scrubs = make(map[u32]Audio_Scrub, w.platform.heap_allocator),
-		open_ranges = make(map[u32]struct{}, w.platform.heap_allocator),
+		sounds = make(map[Scoped]Sound_Voice, w.platform.heap_allocator),
+		scrubs = make(map[Scoped]Audio_Scrub, w.platform.heap_allocator),
+		open_ranges = make(map[Scoped]struct{}, w.platform.heap_allocator),
 		fired = make([dynamic]Fired, w.platform.heap_allocator),
+		driven = make([dynamic]Driven, w.platform.heap_allocator),
+		driven_clips = make([dynamic]Driven_Clip, w.platform.heap_allocator),
+		children = make([dynamic]Child, w.platform.heap_allocator),
 	}
 }
 
@@ -348,8 +386,18 @@ destroy_evaluation :: proc(e: ^Evaluation, w: ^ecs.World) -> (despawned: int) {
 	e.open_ranges = nil
 	delete(e.fired)
 	e.fired = nil
+	delete(e.driven)
+	e.driven = nil
+	delete(e.driven_clips)
+	e.driven_clips = nil
+
 	despawned = release_bindings(&e.bindings, w)
 	destroy_bindings(&e.bindings, w)
+	// The player loads the children, and close_children, their one teardown, unloads them before this.
+	assert(len(e.children) == 0, "cutscene: close_children before destroy_evaluation")
+	delete(e.children)
+
+	e.children = nil
 	delete(e.snapshot.saved)
 	delete(e.snapshot.index)
 	delete(e.snapshot.writers)
@@ -491,29 +539,48 @@ run_phase :: proc(
 		seek = nil
 	}
 	ctx := Track_Context {
-		world      = w,
-		cutscenes  = s,
-		evaluation = e,
-		data       = data,
-		blob       = blob,
-		time       = now,
-		from       = from,
-		to         = max(i64(now), from),
-		skipped    = events == .Skip,
-		seek       = seek,
+		world       = w,
+		cutscenes   = s,
+		evaluation  = e,
+		data        = data,
+		blob        = blob,
+		root        = blob,
+		clock       = blob.clock,
+		range_start = blob.range_start,
+		range_end   = blob.range_end,
+		weight      = 1,
+		covered     = true,
+		rate        = 1,
+		time        = now,
+		from        = from,
+		to          = max(i64(now), from),
+		skipped     = events == .Skip,
+		seek        = seek,
+		anchor      = f64(now),
 	}
-	for track, i in format.cutscene_tracks(data, blob) {
-		kind := s.kinds[track.kind]
-		if .Muted in track.flags || kind.evaluate == nil || kind.phase != phase {
-			continue
-		}
-		ctx.track = track
-		ctx.track_index = u32(i)
+	ctx.cut = tree_cut_fires(s, &ctx)
+	// The children whose sections do not cover the time write their fields' own values first, so the root and the
+	// children that cover the time win a field that both write (see docs/cinematics/tracks.md#sub-sequence-tracks).
+	if len(e.children) > 0 {
+		walk_scope(s, &ctx, phase, .Uncovered, 0)
+	}
+	walk_scope(s, &ctx, phase, .Covered, 0)
+	if kind := s.kinds[.Camera_Cut];
+	   kind.evaluate != nil && kind.phase == phase && tree_has_cuts(s, &ctx) {
+		cut, _ := live_cut_track(data, blob)
+		ctx.track = cut
+		ctx.track_index, ctx.order = 0, 0
 		ctx.user = kind.data
 		kind.evaluate(&ctx)
 	}
 	if phase == .Fixed {
+		drive_animators(s, e, w)
 		constrain(&ctx)
+		for i in 1 ..= len(e.children) {
+			if inner, ok := scope_context(s, &ctx, i); ok && inner.covered {
+				constrain(&inner)
+			}
+		}
 	}
 	if events != .Hold {
 		e.last[phase] = Evaluated(now)
@@ -535,13 +602,11 @@ restore :: proc(
 	blob: ^format.Cutscene_Blob,
 ) {
 	follow_blob(s, e, w, data, blob)
-	tracks := format.cutscene_tracks(data, blob)
+	views := tree_views(s, e, w, data, blob)
 	restores := make([]bool, len(e.snapshot.saved), w.platform.frame_allocator)
 	for writer in e.snapshot.writers {
-		for track in tracks {
-			if track.id == writer.track && track.finish == .Restore {
-				restores[writer.saved] = true
-			}
+		if finish, found := writer_finish(views, writer.track); !found || finish == .Restore {
+			restores[writer.saved] = true
 		}
 	}
 	// Last saved first, so where two saved fields overlap, the one saved first, before any write, is what stays.
@@ -582,7 +647,40 @@ track_entity :: proc(ctx: ^Track_Context) -> (ecs.Entity, bool) {
 	if ctx.track.binding == format.CUTSCENE_NONE {
 		return 0, false
 	}
-	return binding_entity(&ctx.evaluation.bindings, ctx.world, int(ctx.track.binding))
+	return ctx_binding(ctx, ctx.track.binding)
+}
+
+// ctx_binding is the entity of a binding of the track's cutscene, by its index in the blob, while it is alive: in a
+// child, a binding that its section maps is the parent's binding (see tree_binding).
+ctx_binding :: proc(ctx: ^Track_Context, index: u32) -> (ecs.Entity, bool) {
+	return tree_binding(ctx.evaluation, ctx.world, ctx.child, index)
+}
+
+// sample_section is section_at for a section of the track, at a time on the scope's time: in a child, no section covers the
+// time while a sub-sequence section above it does not, and each weight is scaled by theirs.
+sample_section :: proc(
+	ctx: ^Track_Context,
+	section: format.Cutscene_Section,
+	t: i32,
+) -> (
+	at: Section_Sample,
+	covers: bool,
+) {
+	if !ctx.covered {
+		return {}, false
+	}
+	at = section_in(ctx.range_end, section, t) or_return
+	at.weight *= ctx.weight
+	return at, true
+}
+
+// root_time is a time on the scope's time as a time on the root's, through the sub-sequence sections above it at their
+// loop now.
+root_time :: proc(ctx: ^Track_Context, t: f64) -> f64 {
+	if ctx.rate <= 0 {
+		return ctx.anchor
+	}
+	return ctx.anchor + (t - f64(ctx.time)) / ctx.rate
 }
 
 // fires is whether an event at a time on the cutscene's time fires in this evaluation: whether it is in (from, to].
@@ -609,10 +707,23 @@ section_at :: proc(
 	sample: Section_Sample,
 	covers: bool,
 ) {
+	return section_in(blob.range_end, section, t)
+}
+
+// section_in is section_at in a range that ends at range_end.
+@(private)
+section_in :: proc(
+	range_end: i32,
+	section: format.Cutscene_Section,
+	t: i32,
+) -> (
+	sample: Section_Sample,
+	covers: bool,
+) {
 	lo := i64(section.start) - i64(section.pre_roll)
 	hi := i64(section.end) + i64(section.post_roll)
 	at := i64(t)
-	if at < lo || at > hi || (at == hi && hi != i64(blob.range_end)) {
+	if at < lo || at > hi || (at == hi && hi != i64(range_end)) {
 		return {}, false
 	}
 	duration := section.end - section.start
@@ -706,7 +817,7 @@ write_field :: proc(ctx: ^Track_Context, field: Field, value: []byte) -> bool {
 		append(&snapshot.saved, entry)
 		snapshot.index[field] = index
 	}
-	snapshot.writers[{index, ctx.track.id}] = {}
+	snapshot.writers[{index, {ctx.scope, ctx.track.id}}] = {}
 	ecs.mark_changed(ctx.world, field.entity, field.component)
 	mem.copy(p, raw_data(value), int(field.size))
 	return true
@@ -847,10 +958,11 @@ follow_blob :: proc(
 	data: []byte,
 	blob: ^format.Cutscene_Blob,
 ) {
-	if key, seen := e.key.?; seen && key != blob.header.key {
+	key := tree_key(s, e, blob)
+	if seen, known := e.key.?; known && seen != key {
 		reload(s, e, w, data, blob)
 	}
-	e.key = blob.header.key
+	e.key = key
 }
 
 // reload follows a new blob: the time stays, within the new range, the fields that only removed tracks wrote are
@@ -863,18 +975,11 @@ reload :: proc(
 	data: []byte,
 	blob: ^format.Cutscene_Blob,
 ) {
-	tracks := format.cutscene_tracks(data, blob)
+	views := tree_views(s, e, w, data, blob)
 	kept := make([]bool, len(e.snapshot.saved), w.platform.frame_allocator)
 	gone := make([dynamic]Writer, w.platform.frame_allocator)
 	for writer in e.snapshot.writers {
-		found := false
-		for track in tracks {
-			if track.id == writer.track {
-				found = true
-				break
-			}
-		}
-		if found {
+		if _, found := writer_finish(views, writer.track); found {
 			kept[writer.saved] = true
 		} else {
 			append(&gone, writer)
@@ -910,11 +1015,11 @@ reload :: proc(
 		e.snapshot.index[saved.field] = i
 	}
 	clear(&e.targets)
-	keep_spaces(e, w, data, blob)
+	keep_spaces(e, w, views)
 	// The tracks of the new blob take their Animators and claim the views again as they evaluate, so a track that the
 	// reload removed or muted gives its back.
 	end_holds(e, w)
-	keep_ranges(e, w, data, blob)
+	keep_ranges(e, w, views)
 	e.time = clamp(e.time, blob.range_start, blob.range_end)
 	for &mark in e.last {
 		mark = Evaluated(e.time)

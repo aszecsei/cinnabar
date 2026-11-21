@@ -162,7 +162,20 @@ test_cutscene :: proc() -> []byte {
 				kind = .Sub_Sequence,
 				name = "Opening shot",
 				binding = CUTSCENE_NONE,
-				sections = {{id = 14, start = 0, end = 30000, weight = 1, asset = SHOT}},
+				sections = {
+					{
+						id = 14,
+						start = 0,
+						end = 30000,
+						weight = 1,
+						asset = SHOT,
+						offset = 6000,
+						trim_end = 24000,
+						speed = 2,
+						flags = {.Loop},
+						bindings = {{child = 3, parent = 0}, {child = 5, parent = 2}},
+					},
+				},
 			},
 			{
 				id = 5,
@@ -292,6 +305,15 @@ cutscene_blobs_round_trip :: proc(t: ^testing.T) {
 	testing.expect_value(t, clips[1].speed, 0.5)
 	testing.expect_value(t, clips[1].flags, Cutscene_Section_Flags{.Loop})
 	testing.expect_value(t, clips[1].root_motion, Cutscene_Root_Motion.Apply)
+	sub := cutscene_track_sections(data, blob, tracks[3])[0]
+	testing.expect_value(t, sub.offset, 6000)
+	testing.expect_value(t, sub.trim_end, 24000)
+	testing.expect_value(t, sub.speed, 2)
+	testing.expect_value(t, sub.flags, Cutscene_Section_Flags{.Loop})
+	shot_maps := cutscene_section_maps(data, blob, tracks[3].first_section)
+	testing.expect_value(t, len(shot_maps), 2)
+	testing.expect_value(t, shot_maps[1], Cutscene_Binding_Map{tracks[3].first_section, 5, 2})
+	testing.expect_value(t, len(cutscene_section_maps(data, blob, 0)), 0)
 	walk := cutscene_track_sections(data, blob, tracks[0])[0]
 	testing.expect_value(t, walk.ease_in, 6000)
 	testing.expect_value(t, walk.ease_out, 3000)
@@ -669,6 +691,35 @@ cutscene_blobs_with_bad_records_are_refused :: proc(t: ^testing.T) {
 	tracks[3].kind = .Sub_Sequence
 	sections[4].asset = SHOT
 	sections[4].camera = CUTSCENE_NONE
+
+	// Sub-sequence sections and the maps of their children's bindings.
+	sections[4].trim_end = 6000
+	refused(t, data, "a trim that ends at its start")
+	sections[4].trim_end = -1
+	refused(t, data, "a trim's end below 0")
+	sections[4].trim_end = 24000
+	sections[4].speed = 0
+	refused(t, data, "a sub-sequence with a scale of 0")
+	sections[4].speed = 2
+	sections[0].trim_end = 1
+	refused(t, data, "a trim's end on a section that is not a sub-sequence's")
+	sections[0].trim_end = 0
+	maps := cutscene_binding_maps(data, blob)
+	maps[1].parent = 3
+	refused(t, data, "a map to a binding that the cutscene does not have")
+	maps[1].parent = 2
+	maps[1].child = 3
+	refused(t, data, "a child's binding that a section maps twice")
+	maps[1].child = 5
+	maps[0].section = 0
+	refused(t, data, "a map on a section that is not a sub-sequence's")
+	maps[0].section = 99
+	refused(t, data, "a map on a section that the cutscene does not have")
+	maps[0].section = 4
+	blob.reserved2 = 1
+	refused(t, data, "a blob's reserved word that is not 0")
+	blob.reserved2 = 0
+
 
 	// Audio tracks and sections.
 	tracks[2].gain = -1

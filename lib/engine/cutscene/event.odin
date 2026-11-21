@@ -42,12 +42,15 @@ Fired_Kind :: enum u8 {
 }
 
 // Fired is an event that an event track sends at the end of the phase, when flush_events sorts the phase's events by
-// time, then the track's order, then the kind, then the event's order.
+// time on the root's time, then the track's order in the tree, then the kind, then the event's order. child is the
+// cutscene of the tree that the track is in, 0 for the root, and track and event are indexes into its blob.
 @(private)
 Fired :: struct {
 	time:  i64,
-	track: u32,
+	order: u32,
 	kind:  Fired_Kind,
+	child: int,
+	track: u32,
 	event: u32,
 }
 
@@ -116,6 +119,10 @@ event_track :: proc(ctx: ^Track_Context) {
 move_events :: proc(ctx: ^Track_Context, from, to: i64, move: Move) {
 	e := ctx.evaluation
 	track := ctx.track
+	fired :: proc(ctx: ^Track_Context, t: i64, kind: Fired_Kind, index: u32) -> Fired {
+		at := t if ctx.child == 0 else i64(root_time(ctx, f64(t)))
+		return {at, ctx.order, kind, ctx.child, ctx.track_index, index}
+	}
 	for ev, j in format.cutscene_track_events(ctx.data, ctx.blob, track) {
 		index := track.first_event + u32(j)
 		sends: bool
@@ -130,20 +137,20 @@ move_events :: proc(ctx: ^Track_Context, from, to: i64, move: Move) {
 		start, end := i64(ev.start), i64(ev.end)
 		if .Range not_in ev.flags {
 			if sends && start > from && start <= to {
-				append(&e.fired, Fired{start, ctx.track_index, .Trigger, index})
+				append(&e.fired, fired(ctx, start, .Trigger, index))
 			}
 			continue
 		}
-		was_open := will_be_open(e, ev.id, index)
+		was_open := will_be_open(e, ctx.child, {ctx.scope, ev.id}, index)
 		is_open := start <= to && to < end
 		switch {
 		case was_open && !is_open:
-			append(&e.fired, Fired{clamp(end, from + 1, to), ctx.track_index, .End, index})
+			append(&e.fired, fired(ctx, clamp(end, from + 1, to), .End, index))
 		case !was_open && is_open:
-			append(&e.fired, Fired{clamp(start, from + 1, to), ctx.track_index, .Begin, index})
+			append(&e.fired, fired(ctx, clamp(start, from + 1, to), .Begin, index))
 		case !was_open && !is_open && sends && start > from && end <= to:
-			append(&e.fired, Fired{start, ctx.track_index, .Begin, index})
-			append(&e.fired, Fired{end, ctx.track_index, .End, index})
+			append(&e.fired, fired(ctx, start, .Begin, index))
+			append(&e.fired, fired(ctx, end, .End, index))
 		}
 	}
 }
@@ -151,9 +158,9 @@ move_events :: proc(ctx: ^Track_Context, from, to: i64, move: Move) {
 // will_be_open is whether a range is open once the phase's recorded events are queued: its last recorded begin or end, or
 // whether it is open now. A seek and the playback after it, in one evaluation, both record against it.
 @(private = "file")
-will_be_open :: proc(e: ^Evaluation, id: u32, index: u32) -> bool {
+will_be_open :: proc(e: ^Evaluation, child: int, id: Scoped, index: u32) -> bool {
 	#reverse for f in e.fired {
-		if f.event == index && f.kind != .Trigger {
+		if f.child == child && f.event == index && f.kind != .Trigger {
 			return f.kind == .Begin
 		}
 	}
@@ -164,7 +171,7 @@ will_be_open :: proc(e: ^Evaluation, id: u32, index: u32) -> bool {
 // begin is queued to the moment that its end is. flush_events changes it as it queues them, so an end is queued only for
 // a range whose begin was. A change of audition and a reload drop ranges through it without sending their ends.
 @(private = "file")
-change_range :: proc(e: ^Evaluation, id: u32, open: bool) {
+change_range :: proc(e: ^Evaluation, id: Scoped, open: bool) {
 	if open {
 		e.open_ranges[id] = {}
 	} else {
@@ -185,13 +192,26 @@ end_ranges :: proc(
 	if len(e.open_ranges) == 0 {
 		return
 	}
-	for track, i in format.cutscene_tracks(data, blob) {
-		if track.kind != .Event {
-			continue
-		}
-		for ev, j in format.cutscene_track_events(data, blob, track) {
-			if .Range in ev.flags && ev.id in e.open_ranges {
-				append(&e.fired, Fired{i64(e.time), u32(i), .End, track.first_event + u32(j)})
+	for view in tree_views(s, e, w, data, blob) {
+		orders := tree_orders(s, e, w, data, blob, view.child)
+		for track, i in format.cutscene_tracks(view.data, view.blob) {
+			if track.kind != .Event {
+				continue
+			}
+			for ev, j in format.cutscene_track_events(view.data, view.blob, track) {
+				if .Range in ev.flags && (Scoped{view.scope, ev.id}) in e.open_ranges {
+					append(
+						&e.fired,
+						Fired {
+							time = i64(e.time),
+							order = orders[i],
+							kind = .End,
+							child = view.child,
+							track = u32(i),
+							event = track.first_event + u32(j),
+						},
+					)
+				}
 			}
 		}
 	}
@@ -202,7 +222,7 @@ end_ranges :: proc(
 // not play sent no begins.
 @(private)
 forget_ranges :: proc(e: ^Evaluation, w: ^ecs.World) {
-	ids := make([dynamic]u32, 0, len(e.open_ranges), w.platform.frame_allocator)
+	ids := make([dynamic]Scoped, 0, len(e.open_ranges), w.platform.frame_allocator)
 	for id in e.open_ranges {
 		append(&ids, id)
 	}
@@ -211,19 +231,24 @@ forget_ranges :: proc(e: ^Evaluation, w: ^ecs.World) {
 	}
 }
 
-// keep_ranges forgets, after a reload, the open ranges that are no longer ranges of the blob's event tracks, without
-// sending their ends. The next evaluation sends the begins and ends that the new blob's ranges imply.
+// keep_ranges forgets, after a reload, the open ranges that are no longer ranges of the event tracks of the tree's
+// blobs, without sending their ends. The next evaluation sends the begins and ends that the new blobs' ranges imply.
 @(private)
-keep_ranges :: proc(e: ^Evaluation, w: ^ecs.World, data: []byte, blob: ^format.Cutscene_Blob) {
-	gone := make([dynamic]u32, w.platform.frame_allocator)
+keep_ranges :: proc(e: ^Evaluation, w: ^ecs.World, views: []Scope_View) {
+	gone := make([dynamic]Scoped, w.platform.frame_allocator)
 	for id in e.open_ranges {
 		found := false
-		for track in format.cutscene_tracks(data, blob) {
-			if track.kind != .Event {
+		for view in views {
+			if view.scope != id.scope {
 				continue
 			}
-			for ev in format.cutscene_track_events(data, blob, track) {
-				found ||= ev.id == id && .Range in ev.flags
+			for track in format.cutscene_tracks(view.data, view.blob) {
+				if track.kind != .Event {
+					continue
+				}
+				for ev in format.cutscene_track_events(view.data, view.blob, track) {
+					found ||= ev.id == id.id && .Range in ev.flags
+				}
 			}
 		}
 		if !found {
@@ -255,8 +280,8 @@ flush_events :: proc(
 	s: ^State,
 	e: ^Evaluation,
 	w: ^ecs.World,
-	data: []byte,
-	blob: ^format.Cutscene_Blob,
+	root_data: []byte,
+	root: ^format.Cutscene_Blob,
 ) {
 	if len(e.fired) == 0 {
 		return
@@ -265,8 +290,8 @@ flush_events :: proc(
 		if a.time != b.time {
 			return a.time < b.time
 		}
-		if a.track != b.track {
-			return a.track < b.track
+		if a.order != b.order {
+			return a.order < b.order
 		}
 		if a.kind != b.kind {
 			return a.kind < b.kind
@@ -274,10 +299,24 @@ flush_events :: proc(
 		return a.event < b.event
 	})
 	allocator := w.platform.frame_allocator
-	tracks := format.cutscene_tracks(data, blob)
-	events := format.cutscene_events(data, blob)
-	guids := format.cutscene_guids(data, blob)
+	views := tree_views(s, e, w, root_data, root)
 	for f in e.fired {
+		view: Scope_View
+		for v in views {
+			if v.child == f.child {
+				view = v
+			}
+		}
+		if view.blob == nil {
+			continue
+		}
+		data, blob := view.data, view.blob
+		tracks := format.cutscene_tracks(data, blob)
+		events := format.cutscene_events(data, blob)
+		guids := format.cutscene_guids(data, blob)
+		if int(f.track) >= len(tracks) || int(f.event) >= len(events) {
+			continue
+		}
 		ev := events[f.event]
 		track := tracks[f.track]
 		name := format.blob_string(data, ev.name)
@@ -285,10 +324,10 @@ flush_events :: proc(
 		case .Trigger:
 			name = strings.clone(name, allocator)
 		case .Begin:
-			change_range(e, ev.id, true)
+			change_range(e, {view.scope, ev.id}, true)
 			name = fmt.aprintf("%s_begin", name, allocator = allocator)
 		case .End:
-			change_range(e, ev.id, false)
+			change_range(e, {view.scope, ev.id}, false)
 			name = fmt.aprintf("%s_end", name, allocator = allocator)
 		}
 		values := format.cutscene_values_of(data, blob, ev)
@@ -304,7 +343,7 @@ flush_events :: proc(
 			case .Vector:
 				args[j] = v.vector
 			case .Entity:
-				entity, _ := binding_entity(&e.bindings, w, int(v.index))
+				entity, _ := tree_binding(e, w, f.child, v.index)
 				args[j] = entity
 			case .Position:
 				args[j] = ecs.World_Position{v.position}
@@ -318,7 +357,8 @@ flush_events :: proc(
 			args   = args,
 		}
 		if track.binding != format.CUTSCENE_NONE {
-			entity, alive := binding_entity(&e.bindings, w, int(track.binding))
+			entity, alive := tree_binding(e, w, f.child, track.binding)
+
 			sent.entity = entity if alive else ecs.Entity(0)
 		}
 		append(&s.outbox, sent)

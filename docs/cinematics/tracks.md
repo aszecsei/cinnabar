@@ -1,8 +1,8 @@
 # Tracks
 
-A track acts on the world at the cutscene's time. Its kind says what it writes: a field, a pose, a camera, a sound, or an event to the scripts. This document describes the kinds that the engine has, in `lib/engine/cutscene`, and the curve that every keyed track shares. Read [Evaluation](evaluation.md) first, for sections, blending and the restore snapshot.
+A track acts on the world at the cutscene's time. Its kind says what it writes: a field, a pose, a camera, a sound, an event to the scripts, or the tracks of another cutscene. This document describes the kinds that the engine has, in `lib/engine/cutscene`, and the curve that every keyed track shares. Read [Evaluation](evaluation.md) first, for sections, blending and the restore snapshot.
 
-**In this document:** [Curves](#curves) · [Property tracks](#property-tracks) · [Transform tracks](#transform-tracks) · [Animation tracks](#animation-tracks) · [Camera cut tracks](#camera-cut-tracks) · [Audio tracks](#audio-tracks) · [Event tracks](#event-tracks) · [Not built yet](#not-built-yet) · [Procedures](#procedures)
+**In this document:** [Curves](#curves) · [Property tracks](#property-tracks) · [Transform tracks](#transform-tracks) · [Animation tracks](#animation-tracks) · [Camera cut tracks](#camera-cut-tracks) · [Audio tracks](#audio-tracks) · [Event tracks](#event-tracks) · [Sub-sequence tracks](#sub-sequence-tracks) · [Not built yet](#not-built-yet) · [Procedures](#procedures)
 
 ## Curves
 
@@ -450,10 +450,75 @@ The cutscene fixed system can run in a job, so it calls no script and no handler
 
 `register` sets the event kind. The game gives the cutscenes its scripts in `init`. Without the scripts, only the native handlers get events.
 
+## Sub-sequence tracks
+
+A sub-sequence track plays other cutscenes inside this one. Long cinematics are made of shots that different people own: a master cutscene holds one sub-sequence section for each shot, and each shot is an asset of its own. A designer trims, slips and orders the shots in the master without opening them, and one shot plays again with other actors.
+
+```
+track 4 sub_sequence "Shots"
+	section 4 0 300000
+		asset = $497bcb7bb533b902877cd8d56fbf97cd
+		bind 1 = 1
+	section 5 300000 420000
+		asset = $5a1c0f3e2b7d4c6a9e8f1d2c3b4a5968
+		trim = 60000 180000
+		scale = 1.5
+		loop = true
+		ease_in = 15000
+		bind 1 = 2
+```
+
+**Sections.** Each section plays one cutscene, its **child**, over its span of the parent's time. The track takes no binding. Its sections do not overlap, but several sub-sequence tracks can.
+- **The trim** is the span of the child's time that the section plays: `[start, end)`, on the child's time. Without it, the section plays the child's whole range. A trim is clamped into the child's range, so a child that a reload shortened still plays.
+- **The scale** is the child's time per the parent's time.
+- **Loop or hold.** Past the trim's end, the child's time starts the trim again when the section loops. Otherwise it holds at the trim's end.
+- **The mapping** is `child_t = trim.start + (t − section.start) × scale`, in whole ticks, wrapped into the trim or held at its end. A time before the section maps to its start, and one after it to its end. `child_time` is the one place that maps a parent's time to a child's: every track of the child evaluates at its time.
+- **Weight.** The section's weight, eases and rolls scale the weights of the child's sections, as `sample_section` gives them to every kind. So two shots that overlap on two tracks cross-fade.
+
+**The child's tracks are the parent's.** A child has no lifecycle of its own. The parent's player loads it, and its tracks evaluate with the parent's, at the mapped time:
+- **The order.** A child's tracks evaluate in its sub-sequence track's place in the parent's order. A later track wins a field that an earlier one also writes, as in one cutscene.
+- **A child whose section does not cover the time** writes the own values of the fields that its tracks hold, as a track writes where no section covers the time. These children evaluate first, before the root's tracks and the children that cover the time, so a shot that plays wins a field over a shot that does not. An actor whose shot is over is at its own place again, until another shot or the parent moves it.
+- **A kind** reads its sections with `sample_section(ctx, section, t)`, which gives no section while a sub-sequence section above the track does not cover the time, and scales the weights. It finds a binding's entity with `track_entity` or `ctx_binding`, which follow the child's maps. `section_at` reads a blob alone, without the tree.
+- **Scopes.** Each child is a **scope**, named by a hash of the IDs of the sections on its path from the root. The state that an evaluation keeps for a track, a section or an event is keyed by its scope and its ID, so one shot that plays twice is two scopes, and a reload keeps a child's state while its path's IDs stay.
+- **Nesting.** A child can play sub-sequences of its own, at most `CUTSCENE_MAX_DEPTH` (8) deep. The times and the weights compose down the path.
+
+**Bindings.** Each section maps the child's bindings to the parent's with `bind <child id> = <parent id>`:
+- **A mapped binding** is the parent's binding: its tracks act on the parent's entity, or on nothing when the parent's binding is missing. It suspends nothing of its own: the parent's binding holds the entity.
+- **A binding that no line maps** resolves on its own, as at the top level: a possessed entity of a ready scene, or a spawned prefab.
+- **Spawned entities** of a child spawn when the parent's player loads, hidden, as the parent's do. They show while the child's section covers the time, and are hidden again outside it, so a shot's prop is there only in its shot. A loop does not spawn them again. They go when the player ends.
+- **Kinds.** The cooker refuses a map of a camera to an animated entity, or of an animated entity to a camera, where it can see both in the cutscenes' text ([Content: Cutscenes](../content/kinds/cutscenes.md#sections)).
+
+**Camera cuts.**
+- **Which shot shows.** At a time, the parent's camera cut section over the time shows. Where the parent has none, the shot of the last child, in the tree's order, whose section covers the time shows, found the same way in that child. A master without a cut track therefore shows each shot's own cuts, and a master's own section wins over its shots'.
+- **Cuts.** A change of shot is a new claim on the views, so the frame cuts where one shot gives way to the next, unless the new section blends in from gameplay. A loop's wrap cuts.
+- **Blends** take the parent's time that their ticks take at the scale.
+- **Teleports.** Transform tracks teleport on the tick that crosses a cut of any cutscene of the tree, and on the start or end of a section whose child has a cut track.
+- **Constraints** of a child apply while its section covers the time, after every track of the tree.
+- **A skip to the end** blends out when the last section of the cut track that shows at the end is marked `blend_on_skip`.
+
+**Events.** A child's event tracks send what the parent's move crosses, mapped to the child's time:
+- **Order.** The events of the whole tree are sent in time order on the root's time, then in the tree's order.
+- **Entering.** A move that enters a section starts just before the trim's start, so an event at the trim's start fires.
+- **Loops.** A move that wraps a loop sends each loop's events: the end of one loop, then the start of the next. At most `MAX_WRAPS` (16) loops in one move do. Only the event tracks evaluate the loops before the last: the other tracks evaluate once, at the time.
+- **Seek and skip.** A seek's and a skip's moves map the same way. The children's keys marked `fire_on_seek` or `fire_when_skipped` fire as the parent's do, and the open ranges of every child end when the cutscene finishes.
+
+**Other tracks.**
+- **Animation.** The animation tracks of the whole tree give each `Animator` their clips, and the evaluation drives it once at the end of the `Fixed` phase, with the heaviest `anim.MAX_DRIVEN` clips. So two shots that drive one actor cross-fade its pose by their sections' weights. The driver holds the graph when any of these tracks restores.
+- **Audio.** A child's sounds play at the child's time. The pitch of a `follow` track follows the scale too, and a wrap seeks the voice.
+
+**Loading, reload and the end.**
+- **Loading.** The player loads every child, with the assets that it references, and resolves its bindings, before `Ready`. A child that does not load fails the player: `Asset_Failure` names it, and a child's `Binding_Failure` names its cutscene. A cycle, or a nesting past the limit, which the cooker refuses, fails as `Bad_Nesting`.
+- **Hot reload.** A child's blob is a reference, not a copy. When a shot is cooked again, every master that plays it evaluates the new shot at its next tick, at the same time ([Evaluation: Hot reload](evaluation.md#hot-reload)). A reload that changes what the children load from, such as a section, a map, or a child's bindings or assets, loads the children again, and their spawned entities spawn again. A map of a binding that the child no longer has is left out, with a warning.
+- **Skip.** The parent's skip covers its children: they evaluate at the target through the same jump.
+- **When finished.** Each child track keeps its own `restore` or `keep`, and the player restores the fields of the whole tree when it ends.
+- **A muted sub-sequence track** plays nothing, and the player does not load its children.
+
+`register` does not set a kind for sub-sequence tracks: `run_phase` walks them.
+
 ## Not built yet
 
-- The other kinds of track are parts of [#526](https://github.com/aszecsei/cinnabar/issues/526): sub-sequences ([#545](https://github.com/aszecsei/cinnabar/issues/545)) and presentation ([#546](https://github.com/aszecsei/cinnabar/issues/546)). Until they are built, a track of one of these kinds does nothing.
-- A sub-sequence's own camera cut, audio and event tracks wait for [#545](https://github.com/aszecsei/cinnabar/issues/545). A sub-sequence will map the parent's move into its own time. A loop's wrap will send the loop's end and then its start, as animation markers do.
+- The presentation track is part of [#526](https://github.com/aszecsei/cinnabar/issues/526) ([#546](https://github.com/aszecsei/cinnabar/issues/546)). Until it is built, a presentation track does nothing.
+- Fields blend track by track: each track blends its sections over the field's own value, and the later track wins. So two shots that overlap cross-fade an `Animator`'s pose, but a transform or a property that both write takes the later shot's value at its weight over the own value, not over the other shot's.
 - No editor sets an evaluation's `audition` yet. The cutscene editor's scrub and playback ([#548](https://github.com/aszecsei/cinnabar/issues/548)) will, and its waveforms are [#556](https://github.com/aszecsei/cinnabar/issues/556). The transport's option to send events to edit-mode behaviours waits for the editor too.
 - In the editor, only the Game view follows the cut track. A viewport that pilots a camera waits for [#555](https://github.com/aszecsei/cinnabar/issues/555).
 
@@ -461,7 +526,13 @@ The cutscene fixed system can run in a job, so it calls no script and no handler
 
 | Procedure | What it does |
 |---|---|
+| `sample_section(ctx, section, t)` | A section's local time and weight at a time on its track's cutscene's time, or false: none while a sub-sequence section above it does not cover the time, and each weight scaled by theirs |
+| `ctx_binding(ctx, index)` | The entity of a binding of the track's cutscene, through a sub-sequence's maps |
+| `child_time(section, trim, t)` | A parent's time on the child's time of a sub-sequence section, and how many loops it wrapped |
+| `trim_of(section, child)` | A sub-sequence section's trim, clamped into its child's range |
+| `child_range(section, trim, from, to)` | A parent's event range on a child's time, a segment for each loop |
 | `curve_value(keys, t, hint)` | A curve's value at a time in ticks from its section's start |
+
 | `curve_step(keys, t, hint)` | A curve's value as if every key were constant |
 | `property_track(ctx)` | The property kind's evaluate procedure |
 | `transform_track(ctx)` | The transform kind's evaluate procedure |

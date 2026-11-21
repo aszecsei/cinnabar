@@ -36,7 +36,8 @@ Sound_Voice :: union {
 
 // Sound_Playing is a section whose voice the track holds and keeps to the cutscene's time: the voice, the audio that
 // plays it, in Game_State, the track's ID, and the evaluation's jumps when the track last placed it, so a seek since
-// then seeks it. The section's end, its ease out and whether it plays through a skip let the voice go without the blob.
+// then seeks it. The section's end on the root's time, its ease out and whether it plays through a skip let the voice go
+// without the blob.
 Sound_Playing :: struct {
 	voice:    boundary.Voice,
 	audio:    ^audio.State,
@@ -99,22 +100,22 @@ audio_track :: proc(ctx: ^Track_Context) {
 	attached := ctx.track.binding != format.CUTSCENE_NONE
 	p, in_player := player_of(s, e)
 	status := status_of(p.state) if in_player else Player_Status.Playing
-	rate := f64(1) if ctx.blob.clock == .Real else f64(s.rate)
+	rate := (f64(1) if ctx.clock == .Real else f64(s.rate)) * ctx.rate
 	now := shown_time(ctx, status)
 	// How far ahead of the frame, in the cutscene's ticks, a section that is about to start starts its voice on the
 	// audio's clock, so the sound starts at its exact place and nothing of its attack is cut.
 	lead := f64(audio.SEEK_LEAD) / boundary.SAMPLE_RATE * format.CUTSCENE_TICKS_PER_SECOND * rate
 	for section in sections {
-		entry, held := e.sounds[section.id]
+		entry, held := e.sounds[{ctx.scope, section.id}]
 		early :=
 			status == .Playing &&
 			rate > 0 &&
 			!ctx.skipped &&
 			now < f64(section.start) &&
 			f64(section.start) - now <= lead
-		if !(covers_time(ctx.blob, section, now) || early) || (attached && !bound) {
+		if !(covers_time(ctx, section, now) || early) || (attached && !bound) {
 			if held {
-				change_sound(e, section.id, nil, Sound_Stop{audio.STOP_FADE})
+				change_sound(e, {ctx.scope, section.id}, nil, Sound_Stop{audio.STOP_FADE})
 			}
 			continue
 		}
@@ -129,14 +130,19 @@ audio_track :: proc(ctx: ^Track_Context) {
 				if playing.through {
 					next = Sound_Released{}
 				}
-				change_sound(e, section.id, next, skip_leave(s, p, ctx.blob, playing, e.time))
+				change_sound(
+					e,
+					{ctx.scope, section.id},
+					next,
+					skip_leave(s, p, ctx.root, playing, e.time),
+				)
 			}
 			continue
 		}
 		if early && has_voice {
 			// It waits for its start on the audio's clock. A seek since it was scheduled starts it again.
 			if playing.jumps != e.jumps {
-				change_sound(e, section.id, nil, Sound_Stop{audio.STOP_FADE})
+				change_sound(e, {ctx.scope, section.id}, nil, Sound_Stop{audio.STOP_FADE})
 			}
 			continue
 		}
@@ -146,12 +152,12 @@ audio_track :: proc(ctx: ^Track_Context) {
 		place, inside := sound_place(ctx.data, ctx.blob, section, at, length)
 		if status != .Playing || rate <= 0 || !loaded || !inside {
 			if has_voice {
-				change_sound(e, section.id, nil, Sound_Stop{audio.STOP_FADE})
+				change_sound(e, {ctx.scope, section.id}, nil, Sound_Stop{audio.STOP_FADE})
 			}
 			continue
 		}
 		local := i32(at) - section.start
-		sample, _ := section_at(ctx.blob, section, i32(at))
+		sample, _ := sample_section(ctx, section, i32(at))
 		gain := f64(sample.weight) * f64(ctx.track.gain)
 		pitch := f64(1)
 		for channel in format.cutscene_section_channels(ctx.data, ctx.blob, section) {
@@ -171,7 +177,7 @@ audio_track :: proc(ctx: ^Track_Context) {
 		if has_voice && audio.voice_playing(s.audio, playing.voice) {
 			audio.set_voice(s.audio, playing.voice, f32(gain), f32(pitch))
 			heard := clamp(pitch, audio.MIN_PITCH, audio.MAX_PITCH)
-			if playing.jumps != e.jumps || ctx.skipped {
+			if playing.jumps != e.jumps || ctx.skipped || ctx.wrapped {
 				ahead := audio.clock(s.audio) + audio.SEEK_LEAD
 				target := place + f64(audio.SEEK_LEAD) / boundary.SAMPLE_RATE * heard
 				if loop_length > 0 {
@@ -180,7 +186,7 @@ audio_track :: proc(ctx: ^Track_Context) {
 				audio.seek_voice(s.audio, playing.voice, target, ahead)
 				next := playing
 				next.jumps = e.jumps
-				change_sound(e, section.id, next, nil)
+				change_sound(e, {ctx.scope, section.id}, next, nil)
 			} else if follows || rate == 1 {
 				audio.keep_to_clock(
 					s.audio,
@@ -226,19 +232,19 @@ audio_track :: proc(ctx: ^Track_Context) {
 		)
 		if voice == {} {
 			if has_voice {
-				change_sound(e, section.id, nil, Sound_Stop{audio.STOP_FADE})
+				change_sound(e, {ctx.scope, section.id}, nil, Sound_Stop{audio.STOP_FADE})
 			}
 			continue
 		}
 		change_sound(
 			e,
-			section.id,
+			{ctx.scope, section.id},
 			Sound_Playing {
 				voice = voice,
 				audio = s.audio,
 				track = ctx.track.id,
 				jumps = e.jumps,
-				end = section.end,
+				end = i32(math.ceil(root_time(ctx, f64(section.end)))),
 				ease_out = section.ease_out,
 				through = .Plays_Through_Skip in section.flags,
 			},
@@ -253,15 +259,15 @@ audio_track :: proc(ctx: ^Track_Context) {
 scrub_track :: proc(ctx: ^Track_Context, sections: []format.Cutscene_Section) {
 	s := ctx.cutscenes
 	e := ctx.evaluation
-	last, seen := e.scrubs[ctx.track.id]
+	last, seen := e.scrubs[{ctx.scope, ctx.track.id}]
 	now := audio.clock(s.audio)
 	if seen && (last.jumps == e.jumps || now - last.at < SCRUB_INTERVAL) {
 		return
 	}
-	e.scrubs[ctx.track.id] = {e.jumps, now}
+	e.scrubs[{ctx.scope, ctx.track.id}] = {e.jumps, now}
 	t := f64(ctx.time)
 	for section in sections {
-		if !covers_time(ctx.blob, section, t) {
+		if !covers_time(ctx, section, t) {
 			continue
 		}
 		length, loaded := audio.sound_length(s.audio, section.asset)
@@ -269,7 +275,7 @@ scrub_track :: proc(ctx: ^Track_Context, sections: []format.Cutscene_Section) {
 		if !loaded || !inside {
 			continue
 		}
-		sample, _ := section_at(ctx.blob, section, ctx.time)
+		sample, _ := sample_section(ctx, section, ctx.time)
 		gain := sample.weight * ctx.track.gain
 		for channel in format.cutscene_section_channels(ctx.data, ctx.blob, section) {
 			if format.blob_string(ctx.data, channel.name) == format.CUTSCENE_AUDIO_GAIN {
@@ -286,7 +292,12 @@ scrub_track :: proc(ctx: ^Track_Context, sections: []format.Cutscene_Section) {
 // change_sound is the one writer of a section's voice. It stops the old voice, or lets it go, as leave says, when the
 // next state does not hold the same voice. nil forgets the section.
 @(private)
-change_sound :: proc(e: ^Evaluation, section: u32, next: Maybe(Sound_Voice), leave: Sound_Leave) {
+change_sound :: proc(
+	e: ^Evaluation,
+	section: Scoped,
+	next: Maybe(Sound_Voice),
+	leave: Sound_Leave,
+) {
 	if old, held := e.sounds[section].(Sound_Playing); held {
 		keeps := false
 		if state, some := next.?; some {
@@ -352,7 +363,7 @@ release_sounds :: proc(e: ^Evaluation, w: ^ecs.World, blob: ^format.Cutscene_Blo
 	if e.time < blob.range_end {
 		return
 	}
-	ids := make([dynamic]u32, 0, len(e.sounds), w.platform.frame_allocator)
+	ids := make([dynamic]Scoped, 0, len(e.sounds), w.platform.frame_allocator)
 	for id in e.sounds {
 		append(&ids, id)
 	}
@@ -368,7 +379,7 @@ release_sounds :: proc(e: ^Evaluation, w: ^ecs.World, blob: ^format.Cutscene_Blo
 // end_holds calls it.
 @(private)
 end_sounds :: proc(e: ^Evaluation, w: ^ecs.World) {
-	ids := make([dynamic]u32, 0, len(e.sounds), w.platform.frame_allocator)
+	ids := make([dynamic]Scoped, 0, len(e.sounds), w.platform.frame_allocator)
 	for id in e.sounds {
 		append(&ids, id)
 	}
@@ -378,17 +389,15 @@ end_sounds :: proc(e: ^Evaluation, w: ^ecs.World) {
 	clear(&e.scrubs)
 }
 
-// covers_time is whether an audio section is under a time in ticks, which can fall between two: [start, end), and its end
-// too at the range's end.
+// covers_time is whether an audio section is under a time in ticks on its scope's time, which can fall between two:
+// [start, end), and its end too at the range's end. In a sub-sequence, no section is under the time while a
+// sub-sequence section above it is not.
 @(private)
-covers_time :: proc(
-	blob: ^format.Cutscene_Blob,
-	section: format.Cutscene_Section,
-	t: f64,
-) -> bool {
+covers_time :: proc(ctx: ^Track_Context, section: format.Cutscene_Section, t: f64) -> bool {
 	return(
+		ctx.covered &&
 		t >= f64(section.start) &&
-		(t < f64(section.end) || (t == f64(section.end) && section.end == blob.range_end)) \
+		(t < f64(section.end) || (t == f64(section.end) && section.end == ctx.range_end)) \
 	)
 }
 
@@ -398,12 +407,12 @@ covers_time :: proc(
 @(private)
 shown_time :: proc(ctx: ^Track_Context, status: Player_Status) -> f64 {
 	t := f64(ctx.time)
-	if ctx.blob.clock != .Game || status != .Playing || ctx.world.clock.tick_rate == 0 {
+	if ctx.clock != .Game || status != .Playing || ctx.world.clock.tick_rate == 0 {
 		return t
 	}
 	clock := &ctx.world.clock
 	behind := f64(1 - clock.alpha) * format.CUTSCENE_TICKS_PER_SECOND / f64(clock.tick_rate)
-	return t - behind
+	return t - behind * ctx.rate
 }
 
 // sound_place is where an audio section's sound is at a time in ticks: its offset, and the integral of its pitch from

@@ -114,6 +114,7 @@ In `Loading`, `update`:
 2. Loads every asset that the blob references (`format.blob_references`): the spawned bindings' prefabs, and the sections' clips, sounds and sub-sequences. An asset that does not load is `Asset_Failure{its guid, .Reference_Missing}`.
 3. Resolves each override's binding, by ID or by name, to the binding's ID.
 4. Resolves the bindings ([Bindings: Resolving](bindings.md#resolving)). A failure is the `Binding_Failure`.
+5. Loads the cutscenes that its sub-sequence sections play, depth first, each with the assets that it references and its bindings ([Tracks: Sub-sequence tracks](tracks.md#sub-sequence-tracks)). A child that does not load is an `Asset_Failure` that names it, and one whose bindings do not resolve is a `Binding_Failure` whose `cutscene` names it. A cycle, or a nesting deeper than `CUTSCENE_MAX_DEPTH`, which the cooker refuses, is `.Bad_Nesting`.
 
 On a failure, the player unloads what it loaded, despawns what it spawned, and goes to `Failed`. Nothing is left changed. `player_failure` gives the reason, and the log names it.
 
@@ -139,6 +140,8 @@ The evaluation follows a new blob for its tracks ([Evaluation: Hot reload](evalu
 - Each live player keeps a hash of the blob's bindings. When a reload changes them, `update` resolves them again with the player's overrides.
 - The spawned entities spawn again. They show at once, unless the player is `Ready`.
 - A binding that no longer resolves fails the player.
+- **Sub-sequences.** Each live player keeps a key of its tree's blobs, and a hash of what its children load and resolve from: each blob's bindings and the assets that it plays, and each sub-sequence section, with its cutscene and its maps. When a reload of any blob of the tree changes the hash, `update` loads the children again (`follow_children`), and their spawned entities spawn again. A reload that changes only tracks keeps them. A child that no longer loads fails the player.
+- **A child's spawned entities** show while its section covers the time, and are hidden again outside it. `update` shows and hides them.
 
 ## Procedures
 

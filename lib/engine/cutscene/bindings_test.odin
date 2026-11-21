@@ -565,7 +565,7 @@ a_missing_required_binding_fails_with_its_name_and_leaves_nothing :: proc(t: ^te
 	)
 	failure, failed := resolve_bindings(&b, r).?
 	testing.expect(t, failed)
-	testing.expect_value(t, failure, Binding_Failure{1, .Missing})
+	testing.expect_value(t, failure, Binding_Failure{index = 1, reason = .Missing})
 	bindings := format.cutscene_bindings(r.data, r.blob)
 	testing.expect_value(t, format.blob_string(r.data, bindings[failure.index].name), "Ghost")
 	// The extra that spawned before it is gone again.
@@ -643,7 +643,7 @@ a_possessed_binding_in_a_scene_that_is_still_loading_is_missing :: proc(t: ^test
 	r := resolve_of(t, f, {possess(1, "Door", DOOR_ID)})
 	failure, failed := resolve_bindings(&b, r).?
 	testing.expect(t, failed)
-	testing.expect_value(t, failure, Binding_Failure{0, .Missing})
+	testing.expect_value(t, failure, Binding_Failure{index = 0, reason = .Missing})
 }
 
 // stand spawns an entity with a Transform, for the game's own entities.
