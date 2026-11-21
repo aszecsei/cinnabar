@@ -78,7 +78,7 @@ The cooker cannot see these, because native components exist only in the game's 
 | Integers | `value` | Steps. A value outside the integer's range is clamped. |
 | `bool` | `value`, keys 0 or 1 | Steps |
 | Enums | `value`, keys of the enum's values as numbers | Steps |
-| Asset GUIDs | `value`, keys of `$<guid>` | Steps |
+| Asset GUIDs | `value`, keys of `$<guid>` | Steps. Nothing checks the asset's kind against the field's `asset:` tag yet. |
 
 A section keys any of a vector's numbers. A number that no section keys keeps its own value. Keys are `f32`, so integers are exact up to 2^24.
 
