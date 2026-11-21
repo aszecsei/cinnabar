@@ -45,7 +45,7 @@ Each kind of track has a **phase**:
 | Phase | Where | For |
 |---|---|---|
 | `Fixed` | The `cutscene fixed` system, the first `Fixed` system of each tick. On the real clock, also `advance_real`, before the ticks. | Transforms, poses and property writes |
-| `Late` | The `cutscene late` system, the first `Late` system, after the script phase | Camera cuts and presentation |
+| `Late` | The `cutscene late` system, the first `Late` system, after the script phase | Camera cuts, sounds and presentation |
 
 - **Same tick.** The `Fixed` phase writes before the animator, physics and the tick's propagation read. The animator, physics and propagation therefore see the cutscene's values in the same tick, and nothing lags by a frame.
 - **Interpolation.** The tick's `Previous_Transform` copy runs before the systems. So presentation interpolates from the last tick's pose to the cutscene's pose, as for any entity that moves in `Fixed`.

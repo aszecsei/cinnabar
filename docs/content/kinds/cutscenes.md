@@ -105,10 +105,12 @@ A parent must come before its child, so parents cannot form a cycle. [Cinematics
 | `field` | A property track's field, by its quoted name, with dots between the names of nested fields, such as `"light.intensity"`. Needed for a property track, and a problem for the others. | — |
 | `space` | A transform track's space: `relative`, from its binding's own pose; `absolute`, from its `origin`; or `relative <id>`, from the binding with that ID, which is not the track's own. A problem for the other kinds. See [Cinematics: Transform tracks](../../cinematics/tracks.md#transform-tracks). | `relative` |
 | `origin` | `[x, y, z]` in meters: an absolute transform track's origin. The cooker converts it to `World_Position` units (2^-24 m). A problem for the other spaces and kinds. | `[0, 0, 0]` |
+| `gain` | An audio track's gain, a number from 0, which multiplies its sections' gains. A problem for the other kinds. | 1 |
+| `time_scale` | What an audio track's sounds do under a time scale other than 1: `follow`, the pitch follows the scale; `free`, they play at their own rate and come back to the cutscene's time when the scale is 1 again ([Cinematics: Audio tracks](../../cinematics/tracks.md#audio-tracks)). A problem for the other kinds. | `follow` |
 
 The cooker cannot see a property track's field, because native components exist only in the game's code. The game checks that the field can animate when it loads the cutscene ([Cinematics: Property tracks](../../cinematics/tracks.md#property-tracks)).
 
-The kind of a track decides whether it takes a binding, and what each of its sections names with `asset`. Besides their channels and assets, only property and transform tracks, and animation and camera cut sections, have data of their own yet. A binding has at most one animation track, and a cutscene has at most one camera cut track, muted or not:
+The kind of a track decides whether it takes a binding, and what each of its sections names with `asset`. Besides their channels and assets, only property, transform and audio tracks, and animation, camera cut and audio sections, have data of their own yet. A binding has at most one animation track, and a cutscene has at most one camera cut track, muted or not:
 
 | Kind | Binding | Section's asset |
 |---|---|---|
@@ -132,12 +134,20 @@ The kind of a track decides whether it takes a binding, and what each of its sec
 | `pre_roll`, `post_roll` | Ticks before the start and after the end in which the section holds its first and last values ([Cinematics: Sections and blending](../../cinematics/evaluation.md#sections-and-blending)) | 0 |
 | `asset` | `$<guid>`. Needed for a kind that names an asset, and a problem for the others. | — |
 | `blend` | `absolute`: the section blends over the sections below it. `additive`: it adds its value to theirs. Only transform and property sections can be additive. | `absolute` |
-| `offset` | An animation section's ticks into its clip, where the section starts | 0 |
+| `offset` | An animation or audio section's ticks into its clip or sound, where the section starts | 0 |
 | `speed` | An animation section's clip time per the cutscene's time: a number above 0 | 1 |
-| `loop` | `true`: past its clip's end, an animation section starts the clip again. `false`: it holds the clip's last pose. | `false` |
+| `loop` | `true`: past its clip's or sound's end, an animation or audio section starts it again. `false`: an animation section holds the clip's last pose, and an audio section is silent. | `false` |
 | `root_motion` | What an animation section does with its clip's root motion: `bake`, the root moves in the mesh; `apply`, the track moves the binding by it; `in_place`, the clip plays in place. See [Cinematics: Animation tracks](../../cinematics/tracks.md#animation-tracks). | `bake` |
 
-`offset`, `speed`, `loop` and `root_motion` are for animation sections only. On a section of another kind, each one is a problem.
+`offset` and `loop` are for animation and audio sections, and `speed` and `root_motion` for animation sections only. On a section of another kind, each one is a problem.
+
+An audio section has settings of its own ([Cinematics: Audio tracks](../../cinematics/tracks.md#audio-tracks)). It has no `pre_roll` or `post_roll`, and each of these settings on a section of another kind is a problem:
+
+| Setting | Value | Default |
+|---|---|---|
+| `bus` | A whole number from 0, Master, to 16: n is the nth of the project's `audio.buses`, as `Audio_Source.bus` | 0 |
+| `min_distance`, `max_distance` | Meters from 0, the max farther than the min: full gain at `min_distance` and nearer, silent at `max_distance` and farther, when the track has a binding | 1, 50 |
+| `plays_through_skip` | `true`: the sound plays on to the section's end through a skip, and past the cutscene's end, at its own rate. `false`: a skip fades it out, and the end stops it. | `false` |
 
 A camera cut section has settings of its own ([Cinematics: Camera cut tracks](../../cinematics/tracks.md#camera-cut-tracks)):
 
@@ -158,6 +168,7 @@ A camera cut section cuts: it has no `ease_in`, `ease_out`, `weight`, `pre_roll`
 - **Property tracks:** `value`, for a number and for a field that steps, or a vector's numbers as `x`, `y` and `z`, or `r`, `g` and `b`. A section keys `value` alone or one vector's names, and not both sets.
 - **Transform tracks:** `position_x`, `position_y` and `position_z` in meters, `rotation_x`, `rotation_y` and `rotation_z` in degrees, and `scale_x`, `scale_y` and `scale_z`.
 - **Camera cut tracks:** none.
+- **Audio tracks:** `gain`, from 0, and `pitch`, from 0.1 to 4.
 - **The other kinds** take any name for now.
 
 `key <time> <value> <interp> [<slope> | <in> <out>] [weights <in> <out>] [teleport]`:

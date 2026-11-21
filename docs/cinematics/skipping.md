@@ -88,11 +88,12 @@ The player skips by holding a button, so that a tap does not skip by mistake.
 The skip exposes what later tracks need, but the tracks are not built yet:
 - **The fade** is not drawn. `skip_fade(state, handle)` gives how much it covers the frame, from 0 to 1, and the presentation track ([#546](https://github.com/aszecsei/cinnabar/issues/546)) will draw it in its color. #546 also asks for a fade back from the end. This document follows #538: the fade in runs only when play goes on.
 - **Events marked to fire when skipped** are the event track's ([#544](https://github.com/aszecsei/cinnabar/issues/544)). The tests mark them with a channel's name.
-- **Sounds** fade out over the fade, and the jump starts none of the sounds that it passes, in the audio track ([#543](https://github.com/aszecsei/cinnabar/issues/543)).
 - **Sub-sequences** skip with their parent, through the same jump, in the sub-sequence track ([#545](https://github.com/aszecsei/cinnabar/issues/545)).
 - **Scripts** skip through the `Cutscene` library ([#547](https://github.com/aszecsei/cinnabar/issues/547)).
 
 The camera cut track is built: a skip to a later time cuts to the section there, and a skip that ends the cutscene cuts back to gameplay, or blends out when the last section has `blend_on_skip = true` ([Tracks: Camera cut tracks](tracks.md#camera-cut-tracks)).
+
+The audio track is built too: as the skip begins, its voices fade out over what is left of the fade out, and a section marked `plays_through_skip` plays on to its end at its own rate. The jump starts none of the sounds that it passes ([Tracks: Audio tracks](tracks.md#audio-tracks)).
 
 ## Procedures
 

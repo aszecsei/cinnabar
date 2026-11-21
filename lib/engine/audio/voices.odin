@@ -6,7 +6,7 @@ import boundary "cinnabar:core/audio"
 import "cinnabar:engine/ecs"
 
 // The most voices that the audio follows for their callers at once: placed at an entity, or stopped at a time on the
-// clock (see docs/audio/design.md#voices-that-a-caller-owns).
+// clock (see docs/audio/design.md#places-and-the-clock).
 MAX_OWNED_VOICES :: 64
 
 // Owned_Voice is a voice that start_voice started for a caller, which the audio follows: at an entity, whose presented

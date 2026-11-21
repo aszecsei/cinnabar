@@ -120,6 +120,7 @@ A project's settings are a text file beside the game, such as `samples/mygame/pr
 | `audio.buses` | Bus names, separated by commas | None, only `Master` | The buses that sounds mix into (see [Audio](../audio/design.md#buses-and-effects)). |
 | `perception.tags` | Tag names, separated by commas | None | The tags that a `Perceivable`'s `tag` indexes and that perceptions and noises name (see [AI: Perception: Tags](../ai/perception.md#tags)). |
 | `cutscene.skip_action`, `cutscene.skip_hold` | An action's name, at most 24 bytes; seconds, from 0 to 10 | `skip`; 1 | The action that a player holds to skip a cutscene, and how long (see [Cinematics: Skipping](../cinematics/skipping.md#input)). |
+| `cutscene.audio_drift` | Seconds, from 0.001 to 0.5 | 0.0075 | How far a cutscene's sound can drift from the cutscene's time before its audio track seeks it (see [Cinematics: Audio tracks](../cinematics/tracks.md#audio-tracks)). |
 | `audio.backend` | `mixer`, `none`, or another backend's name | `mixer` | The audio backend, which the host loads before the game starts; `--audio` on its command line replaces it (see [Audio](../audio/backends.md#choosing)). |
 | `physics.backend` | `jolt`, `none`, or another backend's name | `jolt` | The physics backend, which the host loads before the game starts; `--physics` on its command line replaces it (see [Physics: Backends](../physics/backends.md#choosing)). |
 | `game.main_scene` | A scene's GUID | None | The scene that the standard game loads when it starts (see [The game package](../world/game-package.md#settings)). |
