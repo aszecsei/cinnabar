@@ -28,6 +28,18 @@ SHOT :: `cutscene 1
 length = 60000
 `
 
+// BOUND_SHOT is a shot with a binding of its own, which the intro's sub-sequence binds to the fox.
+@(private = "file")
+BOUND_SHOT ::
+	`cutscene 1
+length = 60000
+binding 7 "Actor"
+	possess = @` +
+	SCENE_GUID +
+	`/0000000000000001
+	policy = optional
+`
+
 @(private = "file")
 INTRO ::
 	`cutscene 1
@@ -89,6 +101,10 @@ track 4 sub_sequence "Opening shot"
 		asset = $` +
 	SHOT_GUID +
 	`
+		trim = 6000 30000
+		scale = 2
+		loop = true
+		bind 7 = 1
 track 5 camera_cut ""
 	section 5 0 600000
 		camera = 2
@@ -159,6 +175,13 @@ cutscenes_parse_their_header_bindings_tracks_sections_and_keys :: proc(t: ^testi
 	testing.expect_value(t, c.tracks[2].binding, format.CUTSCENE_NONE)
 	testing.expect_value(t, c.tracks[2].sections[0].start, 120000)
 	testing.expect_value(t, c.tracks[4].name, "")
+	shot := c.tracks[3].sections[0]
+	testing.expect_value(t, shot.offset, 6000)
+	testing.expect_value(t, shot.trim_end, 30000)
+	testing.expect_value(t, shot.speed, 2)
+	testing.expect_value(t, shot.flags, format.Cutscene_Section_Flags{.Loop})
+	testing.expect_value(t, len(shot.bindings), 1)
+	testing.expect_value(t, shot.bindings[0], format.Cutscene_Binding_Map_Contents{7, 0})
 
 	testing.expect_value(t, len(parsed.references), 6)
 	wants := [?]format.Asset_Kind{.Scene, .Prefab, .Prefab, .Animation, .Audio, .Cutscene}
@@ -218,6 +241,13 @@ each_mistake_in_a_cutscene_is_reported_at_its_line :: proc(t: ^testing.T) {
 		"\n\tsuspend = []\ntrack 1 event \"E\"\n"
 	// The same with a trigger, on lines 3 to 7.
 	TRIGGER :: EVENTS + "\ttrigger 1 5 a\n"
+	// A binding and a sub-sequence track with a section of a shot, on lines 3 to 7.
+	SUB ::
+		"cutscene 1\nlength = 10\nbinding 1 \"A\"\n\tpossess = " +
+		S +
+		"\ntrack 1 sub_sequence \"S\"\n\tsection 1 0 10\n\t\tasset = $" +
+		SHOT_GUID +
+		"\n"
 	cases := [?]struct {
 		text:     string,
 		line:     int,
@@ -934,7 +964,7 @@ each_mistake_in_a_cutscene_is_reported_at_its_line :: proc(t: ^testing.T) {
 		{
 			"cutscene 1\nlength = 10\n" + MOVE + "\tsection 1 0 10\n\t\tloop = true\n",
 			10,
-			"only an animation or an audio section has an offset and a loop",
+			"only an animation or an audio section has an offset",
 		},
 		{
 			SOUNDS + "\tsection 2 0 10\n\t\tasset = $" + SOUND_GUID + "\n\t\tgain = 1\n",
@@ -1004,6 +1034,26 @@ each_mistake_in_a_cutscene_is_reported_at_its_line :: proc(t: ^testing.T) {
 			6,
 			"the binding suspends its behaviours",
 		},
+		{SUB + "\t\toffset = 5\n", 8, "a sub_sequence section has a trim and a scale"},
+		{SUB + "\t\tspeed = 2\n", 8, "a sub_sequence section has a trim and a scale"},
+		{SUB + "\t\troot_motion = apply\n", 8, "a sub_sequence section has a trim and a scale"},
+		{SUB + "\t\ttrim = 5 5\n", 8, "trim is the sub-sequence's start"},
+		{SUB + "\t\ttrim = 5 4\n", 8, "trim is the sub-sequence's start"},
+		{SUB + "\t\ttrim = -1\n", 8, "trim is the sub-sequence's start"},
+		{SUB + "\t\ttrim = 1.5\n", 8, "trim is the sub-sequence's start"},
+		{SUB + "\t\tscale = 0\n", 8, "scale is a number above 0"},
+		{SUB + "\t\tscale = fast\n", 8, "scale is a number above 0"},
+		{SUB + "\t\tbind 7\n", 8, "a bind is"},
+		{SUB + "\t\tbind 7 = x\n", 8, "a bind is"},
+		{SUB + "\t\tbind 7 = 2\n", 8, "has no binding with the ID 2"},
+		{SUB + "\t\tbind 7 = 1\n\t\tbind 7 = 1\n", 9, "binds the binding 7 already"},
+		{SUB + "\t\tchannel x\n\t\t\tkey 0 0 linear\n", 8, "has no channels"},
+		{SUB + "\t\tchannel x\n\t\t\tkey 0 0 linear\n\t\tbind 7 = 1\n", 10, "a bind comes after"},
+		{SUB + "\tsection 2 5 10\n\t\tasset = $" + SHOT_GUID + "\n", 8, "do not overlap"},
+		{"cutscene 1\nlength = 10\n" + ACTS + "\t\ttrim = 0\n", 9, "only a sub_sequence section has a trim"},
+		{"cutscene 1\nlength = 10\n" + ACTS + "\t\tscale = 2\n", 9, "only a sub_sequence section has a trim"},
+		{"cutscene 1\nlength = 10\n" + ACTS + "\t\tbind 1 = 1\n", 9, "only a sub_sequence section binds"},
+		{"cutscene 1\nlength = 10\nbind 1 = 1\n", 3, "a bind comes after a section line"},
 	}
 	for c in cases {
 		_, problems := cutscene_parse(c.text, context.temp_allocator)
@@ -1330,7 +1380,8 @@ cutscene_tree :: proc(t: ^testing.T, intro := INTRO, extra: []struct {
 		path, text: string,
 	}{"content/bark.wav.meta", "guid = " + SOUND_GUID + "\n"}, struct {
 		path, text: string,
-	}{"content/shot.cutscene", SHOT}, struct {
+	}{"content/shot.cutscene", BOUND_SHOT}, struct {
+
 		path, text: string,
 	}{"content/shot.cutscene.meta", "guid = " + SHOT_GUID + "\n"}, struct {
 		path, text: string,
@@ -1363,6 +1414,7 @@ cutscenes_cook_into_blobs :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(format.cutscene_sections(data, blob)), 5)
 	testing.expect_value(t, len(format.cutscene_channels(data, blob)), 3)
 	testing.expect_value(t, len(format.cutscene_keys(data, blob)), 5)
+	testing.expect_value(t, len(format.cutscene_section_maps(data, blob, 3)), 1)
 	refs, refs_ok := format.blob_references(data, context.temp_allocator)
 	testing.expect(t, refs_ok)
 	testing.expect_value(t, len(refs), 4)
@@ -1978,4 +2030,70 @@ a_cycle_that_an_edit_makes_keeps_the_old_blobs :: proc(t: ^testing.T) {
 	testing.expect(t, !pass.ok)
 	testing.expect_value(t, pass.cooked[.Cutscene], 0)
 	testing.expect(t, slice.equal(tree_blob(t, tree, b_guid), before), "b keeps its old blob")
+}
+
+// A sub-sequence section's binds name bindings that its child has, of a kind that fits, and its trim is within the
+// child's range: the cook checks them against the child's text, at the lines that set them.
+@(test)
+a_sub_sequence_binds_what_its_child_has_and_trims_within_its_range :: proc(t: ^testing.T) {
+	S :: "@" + SCENE_GUID + "/0000000000000001"
+	child := `cutscene 1
+length = 60000
+range = [0, 30000]
+binding 7 "Camera"
+	possess = ` + S + `
+binding 8 "Walker"
+	possess = ` + S + `
+track 1 camera_cut "Cuts"
+	section 1 0 30000
+		camera = 7
+track 2 animation "Walk"
+	binding = 8
+	section 2 0 30000
+		asset = $` + CLIP_GUID + `
+`
+	parent := `cutscene 1
+length = 60000
+binding 1 "Fox"
+	possess = ` + S + `
+binding 2 "Wide"
+	possess = ` + S + `
+track 1 animation "Fox walk"
+	binding = 1
+	section 1 0 60000
+		asset = $` + CLIP_GUID + `
+track 2 camera_cut "Cuts"
+	section 2 30000 60000
+		camera = 2
+track 3 sub_sequence "Shot"
+	section 3 0 30000
+		asset = $` + SHOT_GUID + `
+		trim = 0 40000
+		bind 7 = 1
+		bind 8 = 2
+		bind 9 = 1
+`
+	tree := cutscene_tree(t, parent, {{"content/shot.cutscene", child}})
+	defer remove_tree(tree)
+	pass := cook(tree_options(tree), {.Cutscene}, log_problems = false)
+	testing.expect(t, !pass.ok)
+	cases := [?]struct {
+		line:     int,
+		fragment: string,
+	} {
+		{17, "the trim is within game/shot.cutscene's range, [0, 30000]"},
+		{18, "the binding 7 of game/shot.cutscene and the binding 1 here are not of one kind"},
+		{19, "the binding 8 of game/shot.cutscene and the binding 2 here are not of one kind"},
+		{20, "game/shot.cutscene has no binding with the ID 9"},
+	}
+	for c in cases {
+		found := false
+		for p in pass.problems.list {
+			found ||=
+				strings.has_suffix(p.file, "/intro.cutscene") &&
+				p.line == c.line &&
+				strings.contains(p.text, c.fragment)
+		}
+		testing.expectf(t, found, "line %d: %q: %v", c.line, c.fragment, pass.problems.list)
+	}
 }

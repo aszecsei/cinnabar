@@ -30,6 +30,7 @@ MAX_CUTSCENE_SKIP_RANGES :: 256
 MAX_CUTSCENE_GUIDS :: 65536
 MAX_CUTSCENE_CONSTRAINTS :: 8192
 MAX_CUTSCENE_EVENTS :: 8192
+MAX_CUTSCENE_BINDING_MAPS :: 65536
 // The most values that an event carries.
 MAX_CUTSCENE_EVENT_VALUES :: 4
 
@@ -130,8 +131,9 @@ Cutscene_Section_Flag :: enum u32 {
 	// The section adds its value to the value of the sections below it, or to the field's own value, and does not blend
 	// over it.
 	Additive,
-	// Past the end of the asset that the section plays, its time starts again from the start. Without it, the time
-	// holds at the end. Only a kind that plays an asset's time takes it (cutscene_track_plays).
+	// Past the end of the asset that the section plays, or of a sub-sequence's trim, its time starts again from the
+	// start. Without it, the time holds at the end. Only a kind that plays an asset's time takes it
+	// (cutscene_track_plays).
 	Loop,
 	// A camera cut section that blends out to gameplay blends out at a skip that ends in it too. Without it, the skip
 	// cuts back to gameplay.
@@ -315,10 +317,20 @@ cutscene_track_asset :: proc "contextless" (kind: Cutscene_Track_Kind) -> Asset_
 }
 
 // cutscene_track_plays is whether the sections of a kind of track play their asset's time, from an offset in it, at a
-// speed, looping or holding past its end.
+// speed, looping or holding past its end. A sub-sequence's offset and speed are its trim's start and its scale.
 cutscene_track_plays :: proc "contextless" (kind: Cutscene_Track_Kind) -> bool {
-	return kind == .Animation || kind == .Audio
+	return kind == .Animation || kind == .Audio || kind == .Sub_Sequence
 }
+
+// Cutscene_Binding_Map gives a binding of the cutscene that a sub-sequence section plays, by its ID in that cutscene,
+// to a binding of this one, by its index (see docs/cinematics/tracks.md#sub-sequence-tracks). section is the index of
+// the sub-sequence section. The maps are in section order, and a section maps each child binding once.
+Cutscene_Binding_Map :: struct {
+	section: u32,
+	child:   u32,
+	parent:  u32,
+}
+#assert(size_of(Cutscene_Binding_Map) == 12)
 
 cutscene_rate_valid :: proc "contextless" (rate: u32) -> bool {
 	for r in CUTSCENE_RATES {
@@ -392,7 +404,8 @@ Cutscene_Track :: struct {
 // zeros there. A camera cut section has its camera's binding index, and its blends from and to gameplay in ticks with
 // their curves; the other kinds have CUTSCENE_NONE and zeros there. An audio section has its bus, and the distances that
 // it is heard at when its track has a binding: full at min_distance and nearer, silent at max_distance and farther, in
-// meters. The other kinds have zeros there.
+// meters. The other kinds have zeros there. A sub-sequence section has, past its offset, the trim's end on the child's
+// time, or 0 for the child's range's end; the other kinds have 0 there.
 Cutscene_Section :: struct {
 	id:            u32,
 	start:         i32,
@@ -417,8 +430,9 @@ Cutscene_Section :: struct {
 	bus:           u32,
 	min_distance:  f32,
 	max_distance:  f32,
+	trim_end:      i32,
 }
-#assert(size_of(Cutscene_Section) == 100)
+#assert(size_of(Cutscene_Section) == 104)
 
 // Cutscene_Channel is a named curve of a section, whose meaning its track's kind gives.
 Cutscene_Channel :: struct {
@@ -506,6 +520,9 @@ Cutscene_Blob :: struct {
 	constraints:   Slice,
 	events:        Slice,
 	event_values:  Slice,
+	// The sub-sequence sections' maps of their children's bindings, in section order.
+	binding_maps:  Slice,
+	reserved2:     u32,
 }
 #assert(size_of(Cutscene_Blob) % align_of(Cutscene_Binding) == 0)
 
@@ -520,6 +537,7 @@ cutscene_layout :: proc() -> u64 {
 	h ~= layout.hash(Cutscene_Constraint) * 27512614111
 	h ~= layout.hash(Cutscene_Event) * 852891037441
 	h ~= layout.hash(Cutscene_Event_Value) * 26439622160671
+	h ~= layout.hash(Cutscene_Binding_Map) * 819628286980801
 	return h
 }
 
@@ -567,7 +585,14 @@ cutscene_view :: proc(data: []byte) -> (blob: ^Cutscene_Blob, ok: bool) {
 			   blob.event_values,
 			   size_of(Cutscene_Event_Value),
 			   align_of(Cutscene_Event_Value),
-		   ) {
+		   ) ||
+	   !inside(
+			   data,
+			   blob.binding_maps,
+			   size_of(Cutscene_Binding_Map),
+			   align_of(Cutscene_Binding_Map),
+		   ) ||
+	   blob.reserved2 != 0 {
 		return nil, false
 	}
 	bindings := cutscene_bindings(data, blob)
@@ -583,7 +608,8 @@ cutscene_view :: proc(data: []byte) -> (blob: ^Cutscene_Blob, ok: bool) {
 	   len(cutscene_constraints(data, blob)) > MAX_CUTSCENE_CONSTRAINTS ||
 	   len(cutscene_guids(data, blob)) > MAX_CUTSCENE_GUIDS ||
 	   len(cutscene_events(data, blob)) > MAX_CUTSCENE_EVENTS ||
-	   len(cutscene_event_values(data, blob)) > MAX_CUTSCENE_EVENTS * MAX_CUTSCENE_EVENT_VALUES {
+	   len(cutscene_event_values(data, blob)) > MAX_CUTSCENE_EVENTS * MAX_CUTSCENE_EVENT_VALUES ||
+	   len(cutscene_binding_maps(data, blob)) > MAX_CUTSCENE_BINDING_MAPS {
 		return nil, false
 	}
 	if blob.length <= 0 ||
@@ -687,6 +713,17 @@ cutscene_view :: proc(data: []byte) -> (blob: ^Cutscene_Blob, ok: bool) {
 		track_sections := sections[tr.first_section:][:tr.section_count]
 		for s, j in track_sections {
 			if !cutscene_cut_valid(tr.kind, track_sections, j, len(bindings)) {
+				return nil, false
+			}
+			// A sub-sequence track's sections do not overlap, and hold no channels: its children's tracks do the work.
+			if tr.kind == .Sub_Sequence {
+				if (j > 0 && s.start < track_sections[j - 1].end) ||
+				   s.channel_count != 0 ||
+				   s.trim_end < 0 ||
+				   (s.trim_end != 0 && s.trim_end <= s.offset) {
+					return nil, false
+				}
+			} else if s.trim_end != 0 {
 				return nil, false
 			}
 			if s.start < 0 ||
@@ -830,7 +867,41 @@ cutscene_view :: proc(data: []byte) -> (blob: ^Cutscene_Blob, ok: bool) {
 	if !cutscene_events_valid(data, blob, tracks, len(bindings), guid_count) {
 		return nil, false
 	}
+	maps := cutscene_binding_maps(data, blob)
+	for m, i in maps {
+		if m.section >= u32(len(sections)) ||
+		   m.parent >= u32(len(bindings)) ||
+		   cutscene_section_track(tracks, m.section).kind != .Sub_Sequence {
+			return nil, false
+		}
+		if i > 0 {
+			before := maps[i - 1]
+			if m.section < before.section {
+				return nil, false
+			}
+		}
+		for other in maps[:i] {
+			if other.section == m.section && other.child == m.child {
+				return nil, false
+			}
+		}
+	}
 	return blob, true
+}
+
+// cutscene_section_track is the track that holds a section, by the section's index, in a blob whose tracks' sections
+// check.
+@(private = "file")
+cutscene_section_track :: proc "contextless" (
+	tracks: []Cutscene_Track,
+	section: u32,
+) -> Cutscene_Track {
+	for tr in tracks {
+		if section >= tr.first_section && section - tr.first_section < tr.section_count {
+			return tr
+		}
+	}
+	return {}
 }
 
 // cutscene_events_valid checks the event tracks' events and their values: each track's events in start order, within
@@ -1061,6 +1132,37 @@ cutscene_constraints :: proc "contextless" (
 	return ([^]Cutscene_Constraint)(raw_data(bytes))[:len(bytes) / size_of(Cutscene_Constraint)]
 }
 
+// cutscene_binding_maps is the sub-sequence sections' maps of their children's bindings, in section order.
+cutscene_binding_maps :: proc "contextless" (
+	data: []byte,
+	blob: ^Cutscene_Blob,
+) -> []Cutscene_Binding_Map {
+	bytes := blob_bytes(data, blob.binding_maps)
+	return ([^]Cutscene_Binding_Map)(raw_data(bytes))[:len(bytes) / size_of(Cutscene_Binding_Map)]
+}
+
+// cutscene_section_maps is the maps of one sub-sequence section's child's bindings, by the section's index, in a blob
+// that cutscene_view checked.
+cutscene_section_maps :: proc "contextless" (
+	data: []byte,
+	blob: ^Cutscene_Blob,
+	section: u32,
+) -> []Cutscene_Binding_Map {
+	maps := cutscene_binding_maps(data, blob)
+	first := len(maps)
+	for m, i in maps {
+		if m.section == section {
+			first = i
+			break
+		}
+	}
+	last := first
+	for last < len(maps) && maps[last].section == section {
+		last += 1
+	}
+	return maps[first:last]
+}
+
 // cutscene_events is the event tracks' events, each track's after those of the event tracks before it.
 cutscene_events :: proc "contextless" (data: []byte, blob: ^Cutscene_Blob) -> []Cutscene_Event {
 	bytes := blob_bytes(data, blob.events)
@@ -1264,8 +1366,19 @@ Cutscene_Section_Contents :: struct {
 	bus:          u32,
 	min_distance: f32,
 	max_distance: f32,
+	// For a sub-sequence: the trim's end on the child's time, 0 for the child's range's end, and the maps of the child's
+	// bindings to this cutscene's.
+	trim_end:     i32,
+	bindings:     []Cutscene_Binding_Map_Contents,
 	constraints:  []Cutscene_Constraint_Contents,
 	channels:     []Cutscene_Channel_Contents,
+}
+
+// Cutscene_Binding_Map_Contents gives a sub-sequence's binding, by its ID in the child, to a binding of the parent, by
+// its index.
+Cutscene_Binding_Map_Contents :: struct {
+	child:  u32,
+	parent: u32,
 }
 
 // Cutscene_Track_Contents is a track as cutscene_write takes it. binding is a binding's index or CUTSCENE_NONE.
@@ -1314,7 +1427,7 @@ Cutscene_Contents :: struct {
 // cutscene_write builds a cutscene blob, flattening its tracks' sections, channels and keys.
 cutscene_write :: proc(contents: Cutscene_Contents, allocator := context.allocator) -> []byte {
 	section_count, channel_count, key_count, constraint_count := 0, 0, 0, 0
-	event_count, value_count := 0, 0
+	event_count, value_count, map_count := 0, 0, 0
 	for b in contents.bindings {
 		constraint_count += len(b.constraints)
 	}
@@ -1325,6 +1438,7 @@ cutscene_write :: proc(contents: Cutscene_Contents, allocator := context.allocat
 		}
 		section_count += len(tr.sections)
 		for s in tr.sections {
+			map_count += len(s.bindings)
 			channel_count += len(s.channels)
 			constraint_count += len(s.constraints)
 			for c in s.channels {
@@ -1369,6 +1483,12 @@ cutscene_write :: proc(contents: Cutscene_Contents, allocator := context.allocat
 		value_count * size_of(Cutscene_Event_Value),
 		align_of(Cutscene_Event_Value),
 	)
+	binding_maps := reserve_bytes(
+		&buffer,
+		map_count * size_of(Cutscene_Binding_Map),
+		align_of(Cutscene_Binding_Map),
+	)
+	map_index := 0
 	constraint_index := 0
 	add_constraint :: proc(
 		buffer: ^[dynamic]byte,
@@ -1504,6 +1624,16 @@ cutscene_write :: proc(contents: Cutscene_Contents, allocator := context.allocat
 				bus           = s.bus,
 				min_distance  = s.min_distance,
 				max_distance  = s.max_distance,
+				trim_end      = s.trim_end,
+			}
+			for m in s.bindings {
+				record := Cutscene_Binding_Map{u32(section_index), m.child, m.parent}
+				mem.copy(
+					&buffer[int(binding_maps.offset) + map_index * size_of(Cutscene_Binding_Map)],
+					&record,
+					size_of(record),
+				)
+				map_index += 1
 			}
 			for c in s.constraints {
 				add_constraint(
@@ -1590,7 +1720,9 @@ cutscene_write :: proc(contents: Cutscene_Contents, allocator := context.allocat
 		constraints = constraints,
 		events = events,
 		event_values = event_values,
+		binding_maps = binding_maps,
 	}
 	mem.copy(raw_data(buffer), &blob, size_of(blob))
+
 	return buffer[:]
 }
