@@ -73,7 +73,7 @@ Two settings of the cutscene act on the game and not on a binding ([Content: Cut
 | `input_context` | Pushes this input context for every player ([Core: Input: Contexts](../core/input.md#contexts)). The default is `"cutscene"`. `""` pushes none. |
 | `hide_ui` | Hides each `Ui_Document` whose document is in the list, active or not, such as the HUD. |
 
-- **The game defines the context.** Define a context named `cutscene` with the `Only` mode, and let it allow the skip action and the pause menu's action. Every cutscene then blocks gameplay input with no setting. A context that the game did not define is not pushed. A cutscene that names another context logs a warning about it.
+- **The game defines the context.** Define a context named `cutscene` with the `Only` mode, and let it allow the skip action ([Skipping: Input](skipping.md#input)) and the pause menu's action. Every cutscene then blocks gameplay input with no setting. A context that the game did not define is not pushed. A cutscene that names another context logs a warning about it.
 - **When.** The player takes the hold (`take_hold`) when it leaves `Ready` for `Playing` or `Skipping`, at the same time as it shows its spawned entities. A player that waits in `Ready` holds no input and hides nothing.
 - **Hiding** is the `Ui` suspension, so two cutscenes that hide the HUD both end before it shows again, and `visible` keeps the value that a script gave it.
 - The player keeps what it took in `Player_Live.hold`: the push's token and the entities that it hid. A document that appears after the cutscene starts is not hidden.

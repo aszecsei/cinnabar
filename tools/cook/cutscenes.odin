@@ -13,7 +13,7 @@ import format "cinnabar:engine/asset/format"
 // in ticks, each with sections of keyed channels, a clip, a sound or a sub-sequence (see
 // docs/content/kinds/cutscenes.md). The cook checks the assets that a cutscene names and its sub-sequences' nesting, which
 // it reads from the other cutscenes' sources, so the order of the passes does not matter.
-CUTSCENE_COOK_VERSION :: "cutscenes 3"
+CUTSCENE_COOK_VERSION :: "cutscenes 4"
 
 // CUTSCENE_TEMPLATE is the text of a new cutscene: 10 seconds at 30 frames a second, with no bindings or tracks.
 CUTSCENE_TEMPLATE :: `cutscene 1
@@ -450,7 +450,8 @@ cutscene_parse :: proc(
 	// What a binding without its own suspend suspends.
 	default_suspend := format.CUTSCENE_SUSPEND_ALL
 	hide_ui := make([dynamic]format.Guid)
-	header_line, length_seen, range_line := 0, false, 0
+	header_line, length_seen, range_line, skip_line := 0, false, 0, 0
+	skip_ranges := make([dynamic]format.Cutscene_Skip_Range)
 	block := Cutscene_Block.Header
 	section_ids := make(map[u32]bool, 16, context.temp_allocator)
 	section_count, channel_count, key_count := 0, 0, 0
@@ -777,11 +778,42 @@ cutscene_parse :: proc(
 				if !ok {
 					problem(&found, line, "hide_ui is a list of UI documents, [$<guid>, ...]")
 				}
+			case "skip":
+				switch value_text {
+				case "anywhere":
+					contents.skip = .Anywhere
+				case "none":
+					contents.skip = .None
+				case:
+					ranges, ok := cutscene_skip_ranges(value_text)
+					if !ok {
+						problem(
+							&found,
+							line,
+							"skip is anywhere, none, or a list of ranges in ticks, [[<start>, <end>], ...]",
+						)
+						continue
+					}
+					contents.skip = .Ranges
+					append(&skip_ranges, ..ranges)
+					skip_line = line
+				}
+			case "skip_fade":
+				ticks, ok := cutscene_ticks_text(value_text)
+				if !ok {
+					problem(
+						&found,
+						line,
+						"skip_fade is a whole number of ticks from 0 to 2147483647",
+					)
+					continue
+				}
+				contents.skip_fade = ticks
 			case:
 				problem(
 					&found,
 					line,
-					"%q is not a setting of the cutscene: length, rate, clock, range, suspend, input_context or hide_ui",
+					"%q is not a setting of the cutscene: length, rate, clock, range, suspend, input_context, hide_ui, skip or skip_fade",
 					name,
 				)
 			}
@@ -912,6 +944,32 @@ cutscene_parse :: proc(
 			contents.length,
 		)
 	}
+	if skip_line != 0 && length_seen {
+		for r, i in skip_ranges {
+			if r.start >= r.end || r.end > contents.length {
+				problem(
+					&found,
+					skip_line,
+					"a skip range starts before it ends, inside the length (%d)",
+					contents.length,
+				)
+				break
+			}
+			if i > 0 && r.start < skip_ranges[i - 1].end {
+				problem(&found, skip_line, "the skip ranges are in time order and do not overlap")
+				break
+			}
+		}
+	}
+	if len(skip_ranges) > format.MAX_CUTSCENE_SKIP_RANGES {
+		problem(
+			&found,
+			skip_line,
+			"a cutscene has at most %d skip ranges",
+			format.MAX_CUTSCENE_SKIP_RANGES,
+		)
+	}
+	contents.skip_ranges = skip_ranges[:]
 	// Bindings: what kind each is, and that its settings suit it.
 	result_bindings := make([]format.Cutscene_Binding_Contents, len(bindings))
 	for &b, i in bindings {
@@ -1258,6 +1316,41 @@ cutscene_list :: proc(text: string) -> (items: []string, ok: bool) {
 		}
 	}
 	return parts, true
+}
+
+// cutscene_skip_ranges reads `[[a, b], [c, d]]` into ranges of ticks, in the temporary allocator. A list without
+// ranges is not one: a cutscene that cannot be skipped says none.
+@(private = "file")
+cutscene_skip_ranges :: proc(text: string) -> (ranges: []format.Cutscene_Skip_Range, ok: bool) {
+	if !strings.has_prefix(text, "[") || !strings.has_suffix(text, "]") {
+		return
+	}
+	rest := strings.trim_space(text[1:len(text) - 1])
+	found := make([dynamic]format.Cutscene_Skip_Range, context.temp_allocator)
+	for rest != "" {
+		if len(found) > 0 {
+			if !strings.has_prefix(rest, ",") {
+				return
+			}
+			rest = strings.trim_space(rest[1:])
+		}
+		close := strings.index_byte(rest, ']')
+		if !strings.has_prefix(rest, "[") || close < 0 {
+			return
+		}
+		value, message := parse_graph_value(rest[:close + 1])
+		if message != "" || value.kind != .Numbers || value.count != 2 {
+			return
+		}
+		start := cutscene_ticks_number(value.numbers[0]) or_return
+		end := cutscene_ticks_number(value.numbers[1]) or_return
+		append(&found, format.Cutscene_Skip_Range{start, end})
+		rest = strings.trim_space(rest[close + 1:])
+	}
+	if len(found) == 0 {
+		return
+	}
+	return found[:], true
 }
 
 // cutscene_name reads a quoted name.

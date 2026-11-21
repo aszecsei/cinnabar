@@ -84,8 +84,8 @@ Player_Fixture :: struct {
 	assets:    asset.Assets,
 	cutscenes: State,
 	dir:       string,
-	// The input contexts that the players push theirs on.
-	input:     core.Input_Contexts,
+	// The input actions, whose contexts the players push theirs on.
+	actions:   core.Input_Actions,
 	// Two characters that the cutscenes possess, with their dials at 1 and 2.
 	hero:      ecs.Entity,
 	rival:     ecs.Entity,
@@ -145,7 +145,7 @@ player_setup :: proc(t: ^testing.T) -> ^Player_Fixture {
 	path := fmt.tprintf("%s/%s.blob", f.dir, format.guid_format(PROP_GUID, &buffer))
 	blob := format.scene_write(prop, PROP_GUID, 1, .Prefab, allocator = context.temp_allocator)
 	testing.expect(t, os.write_entire_file(path, blob) == nil)
-	init(&f.cutscenes, &f.world, &f.assets, &f.input)
+	init(&f.cutscenes, &f.world, &f.assets, &f.actions)
 	register(&f.cutscenes, &f.world)
 	register_kind(&f.cutscenes, .Property, {phase = .Fixed, evaluate = dial_track})
 	register_kind(&f.cutscenes, .Event, {phase = .Late, evaluate = event_track, data = &f.fired})
@@ -201,12 +201,16 @@ dial_track :: proc(ctx: ^Track_Context) {
 }
 
 // event_track is the test's event kind, in either phase: each key is an event at its section's start plus its time,
-// which records the key's value in the kind's list when it fires.
+// which records the key's value in the kind's list when it fires. The keys of a channel named "skipped" are marked to
+// fire when skipped; a skip passes the others.
 @(private = "file")
 event_track :: proc(ctx: ^Track_Context) {
 	fired := (^[dynamic]f32)(ctx.user)
 	for section in format.cutscene_track_sections(ctx.data, ctx.blob, ctx.track) {
 		for channel in format.cutscene_section_channels(ctx.data, ctx.blob, section) {
+			if ctx.skipped && format.blob_string(ctx.data, channel.name) != "skipped" {
+				continue
+			}
 			for key in format.cutscene_channel_keys(ctx.data, ctx.blob, channel) {
 				if fires(ctx, section.start + key.time) {
 					append(fired, key.value)
@@ -400,8 +404,12 @@ cast_of :: proc(f: ^Player_Fixture) -> []Binding_Override {
 
 @(private = "file")
 context_of :: proc(f: ^Player_Fixture) -> Player_Context {
-	return {world = &f.world}
+	return {world = &f.world, dt = FRAME}
 }
+
+// FRAME is the real duration of a test frame.
+@(private = "file")
+FRAME :: time.Second / 60
 
 // frame runs a frame as game_update does: the players' update, then the ticks of a 60th of a second and the Late
 // stage.
@@ -545,7 +553,7 @@ each_allowed_change_is_walked_and_the_writer_refuses_the_rest :: proc(t: ^testin
 		expect_status(t, f, h, .Restored)
 		record(f, &seen, &last)
 	}
-	// Skipping goes back to Playing after a skip of a range (#538), and each live state can fail: change_cutscene
+	// Skipping goes back to Playing after a skip of a range, and each live state can fail: change_cutscene
 	// walks these.
 	for from in ([?]Player_Status{.Ready, .Playing, .Paused, .Skipping, .Finishing}) {
 		h, _ = load(s, w, desc)
@@ -559,9 +567,9 @@ each_allowed_change_is_walked_and_the_writer_refuses_the_rest :: proc(t: ^testin
 			change_cutscene(s, w, slot, moved(p, .Playing))
 			change_cutscene(s, w, slot, moved(p, .Paused))
 		case .Skipping:
-			change_cutscene(s, w, slot, moved(p, .Skipping))
+			change_cutscene(s, w, slot, skipping(p, SECOND))
 			change_cutscene(s, w, slot, moved(p, .Playing))
-			change_cutscene(s, w, slot, moved(p, .Skipping))
+			change_cutscene(s, w, slot, skipping(p, SECOND))
 		case .Finishing:
 			change_cutscene(s, w, slot, moved(p, .Finishing))
 		case .Gone, .Loading, .Ready, .Restored, .Failed:
@@ -1102,7 +1110,7 @@ a_playing_cutscene_blocks_gameplay_input_and_hides_the_hud :: proc(t: ^testing.T
 	f := player_setup(t)
 	defer player_teardown(f)
 	MOVE, SKIP :: 0, 1
-	_, err := core.input_contexts_define(&f.input, "cutscene", .Only, {SKIP})
+	_, err := core.input_contexts_define(&f.actions.contexts, "cutscene", .Only, {SKIP})
 	testing.expect_value(t, err, core.Input_Context_Error.None)
 	HUD :: format.Guid {
 		0  = 0x74,
@@ -1126,15 +1134,27 @@ a_playing_cutscene_blocks_gameplay_input_and_hides_the_hud :: proc(t: ^testing.T
 	expect_status(t, f, h, .Ready)
 	testing.expect(
 		t,
-		core.input_contexts_allows(&f.input, 0, MOVE),
+		core.input_contexts_allows(&f.actions.contexts, 0, MOVE),
 		"a Ready cutscene blocks nothing",
 	)
 	testing.expect(t, !ecs.suspended(&f.world, hud, .Ui))
 
 	start(&f.cutscenes, &f.world, h)
-	testing.expect(t, !core.input_contexts_allows(&f.input, 0, MOVE), "gameplay reads nothing")
-	testing.expect(t, !core.input_contexts_allows(&f.input, 3, MOVE), "for every player")
-	testing.expect(t, core.input_contexts_allows(&f.input, 0, SKIP), "the skip still reads")
+	testing.expect(
+		t,
+		!core.input_contexts_allows(&f.actions.contexts, 0, MOVE),
+		"gameplay reads nothing",
+	)
+	testing.expect(
+		t,
+		!core.input_contexts_allows(&f.actions.contexts, 3, MOVE),
+		"for every player",
+	)
+	testing.expect(
+		t,
+		core.input_contexts_allows(&f.actions.contexts, 0, SKIP),
+		"the skip still reads",
+	)
 	testing.expect(t, ecs.suspended(&f.world, hud, .Ui))
 	testing.expect(t, ecs.suspended(&f.world, second_hud, .Ui), "an inactive HUD is hidden too")
 	testing.expect(t, !ecs.suspended(&f.world, menu, .Ui))
@@ -1142,17 +1162,21 @@ a_playing_cutscene_blocks_gameplay_input_and_hides_the_hud :: proc(t: ^testing.T
 	write_cutscene(t, f, {guid = OUTRO_GUID, value = 7, input = "cutscene", hide_ui = hidden})
 	other, _ := play(&f.cutscenes, &f.world, {cutscene = OUTRO_GUID, overrides = cast_of(f)})
 	frame(f)
-	testing.expect_value(t, f.input.push_count, 2)
+	testing.expect_value(t, f.actions.contexts.push_count, 2)
 	testing.expect_value(t, suspended_count(f, hud, .Ui), 2)
 	stop(&f.cutscenes, &f.world, h)
 	frame(f)
-	testing.expect_value(t, f.input.push_count, 1)
-	testing.expect(t, !core.input_contexts_allows(&f.input, 0, MOVE), "the second still blocks")
+	testing.expect_value(t, f.actions.contexts.push_count, 1)
+	testing.expect(
+		t,
+		!core.input_contexts_allows(&f.actions.contexts, 0, MOVE),
+		"the second still blocks",
+	)
 	testing.expect_value(t, suspended_count(f, hud, .Ui), 1)
 	stop(&f.cutscenes, &f.world, other)
 	frame(f)
-	testing.expect_value(t, f.input.push_count, 0)
-	testing.expect(t, core.input_contexts_allows(&f.input, 0, MOVE))
+	testing.expect_value(t, f.actions.contexts.push_count, 0)
+	testing.expect(t, core.input_contexts_allows(&f.actions.contexts, 0, MOVE))
 	testing.expect(t, !ecs.has(&f.world, hud, ecs.Suspended))
 	testing.expect(t, !ecs.has(&f.world, second_hud, ecs.Suspended))
 
@@ -1161,5 +1185,349 @@ a_playing_cutscene_blocks_gameplay_input_and_hides_the_hud :: proc(t: ^testing.T
 	missing, _ := play(&f.cutscenes, &f.world, {cutscene = INTRO_GUID, overrides = cast_of(f)})
 	frame(f)
 	expect_status(t, f, missing, .Playing)
-	testing.expect_value(t, f.input.push_count, 0)
+	testing.expect_value(t, f.actions.contexts.push_count, 0)
+}
+
+// write_skippable writes a cutscene of 2 s for the skip's tests: the hero's dial at 3 in its first second and at 7 in
+// its second, kept at the end; Late events at 0.25 s (1), 0.5 s (2), 1.5 s (3) and the end (9), of which 2 and 9 fire
+// when skipped; and its skip policy and fade.
+@(private = "file")
+write_skippable :: proc(
+	t: ^testing.T,
+	f: ^Player_Fixture,
+	guid: format.Guid,
+	policy: format.Cutscene_Skip,
+	ranges: []format.Cutscene_Skip_Range = nil,
+	fade: i32 = 0,
+) {
+	length := i32(2 * SECOND)
+	dial := make([]format.Cutscene_Section_Contents, 2, context.temp_allocator)
+	dial[0] = {
+		id       = 1,
+		start    = 0,
+		end      = SECOND,
+		weight   = 1,
+		channels = key(3),
+	}
+	dial[1] = {
+		id       = 2,
+		start    = SECOND,
+		end      = length,
+		weight   = 1,
+		channels = key(7),
+	}
+	plain := make([]format.Cutscene_Key, 2, context.temp_allocator)
+	plain[0] = {
+		time  = SECOND / 4,
+		value = 1,
+	}
+	plain[1] = {
+		time  = 3 * SECOND / 2,
+		value = 3,
+	}
+	marked := make([]format.Cutscene_Key, 2, context.temp_allocator)
+	marked[0] = {
+		time  = SECOND / 2,
+		value = 2,
+	}
+	marked[1] = {
+		time  = length,
+		value = 9,
+	}
+	channels := make([]format.Cutscene_Channel_Contents, 2, context.temp_allocator)
+	channels[0] = {
+		name = "value",
+		keys = plain,
+	}
+	channels[1] = {
+		name = "skipped",
+		keys = marked,
+	}
+	events := make([]format.Cutscene_Section_Contents, 1, context.temp_allocator)
+	events[0] = {
+		id       = 3,
+		start    = 0,
+		end      = length,
+		weight   = 1,
+		channels = channels,
+	}
+	tracks := make([]format.Cutscene_Track_Contents, 2, context.temp_allocator)
+	tracks[0] = {
+		id       = 1,
+		kind     = .Property,
+		name     = "Dial",
+		binding  = 0,
+		finish   = .Keep,
+		sections = dial,
+	}
+	tracks[1] = {
+		id       = 2,
+		kind     = .Event,
+		name     = "Events",
+		binding  = format.CUTSCENE_NONE,
+		sections = events,
+	}
+	bindings := make([]format.Cutscene_Binding_Contents, 1, context.temp_allocator)
+	bindings[0] = possessed(1, "Hero")
+	blob := format.cutscene_write(
+		{
+			guid = guid,
+			key = 1,
+			length = length,
+			rate = 30,
+			range_end = length,
+			bindings = bindings,
+			tracks = tracks,
+			source_path = "game/cutscenes/skippable.cutscene",
+			skip = policy,
+			skip_ranges = ranges,
+			skip_fade = fade,
+		},
+		context.temp_allocator,
+	)
+	testing.expect(t, asset.set_live(&f.assets, guid, blob))
+}
+
+// hero_of is the override that gives the skip tests' one binding the hero.
+@(private = "file")
+hero_of :: proc(f: ^Player_Fixture) -> []Binding_Override {
+	overrides := make([]Binding_Override, 1, context.temp_allocator)
+	overrides[0] = {Binding_Id(1), f.hero}
+	return overrides
+}
+
+// frames_while runs frames while the player is in a state, at most n of them.
+@(private = "file")
+frames_while :: proc(f: ^Player_Fixture, h: Player_Handle, state: Player_Status, n := 400) {
+	for _ in 0 ..< n {
+		if status(&f.cutscenes, h) != state {
+			return
+		}
+		frame(f)
+	}
+}
+
+// A skip leaves the world as playing to the end does: the dial that a keep track wrote has its last value, and the
+// events are those of the whole cutscene but for the ones that are not marked to fire when skipped. The fade out holds
+// the world while it covers more of the frame, and a second skip does nothing.
+@(test)
+a_skipped_cutscene_leaves_the_world_as_playing_it_to_the_end :: proc(t: ^testing.T) {
+	f := player_setup(t)
+	defer player_teardown(f)
+	s := &f.cutscenes
+	w := &f.world
+	write_skippable(t, f, INTRO_GUID, .Anywhere, fade = SECOND / 10)
+	played, _ := play(s, w, {cutscene = INTRO_GUID, overrides = hero_of(f)})
+	frames_while(f, played, .Loading)
+	frames_while(f, played, .Playing)
+	expect_status(t, f, played, .Restored)
+	testing.expect_value(t, dial(f, f.hero), 7)
+	testing.expect_value(t, len(f.fired), 4)
+	if len(f.fired) == 4 {
+		testing.expect_value(t, f.fired[0], 1)
+		testing.expect_value(t, f.fired[1], 2)
+		testing.expect_value(t, f.fired[2], 3)
+		testing.expect_value(t, f.fired[3], 9)
+	}
+
+	clear(&f.fired)
+	ecs.get(w, f.hero, Dial).value = 1
+	skipped, _ := play(s, w, {cutscene = INTRO_GUID, overrides = hero_of(f)})
+	frame(f)
+	expect_status(t, f, skipped, .Playing)
+	testing.expect(t, can_skip(s, skipped))
+	testing.expect_value(t, skip(s, w, skipped), Command_Result.Done)
+	testing.expect_value(t, skip(s, w, skipped), Command_Result.Done)
+	expect_status(t, f, skipped, .Skipping)
+	testing.expect_value(t, skip_fade(s, skipped), 0)
+	fade: f32
+	for _ in 0 ..< 20 {
+		frame(f)
+		if status(s, skipped) != .Skipping {
+			break
+		}
+		now := skip_fade(s, skipped)
+		testing.expectf(t, now > fade, "the fade out grows: %v after %v", now, fade)
+		fade = now
+		testing.expect_value(t, dial(f, f.hero), 3)
+		testing.expect_value(t, len(f.fired), 0)
+	}
+	testing.expect(t, fade > 0.5, "the fade ran over several frames")
+	expect_status(t, f, skipped, .Restored)
+	testing.expect_value(t, dial(f, f.hero), 7)
+	testing.expect_value(t, len(f.fired), 2)
+	if len(f.fired) == 2 {
+		testing.expect_value(t, f.fired[0], 2)
+		testing.expect_value(t, f.fired[1], 9)
+	}
+}
+
+// A skip in a skip range goes to the range's end, fades in there, and plays on: the events after the range fire as
+// they play. A time after the range cannot be skipped.
+@(test)
+a_skip_of_a_range_plays_on_after_it :: proc(t: ^testing.T) {
+	f := player_setup(t)
+	defer player_teardown(f)
+	s := &f.cutscenes
+	w := &f.world
+	ranges := []format.Cutscene_Skip_Range{{0, SECOND}}
+	write_skippable(t, f, INTRO_GUID, .Ranges, ranges, fade = SECOND / 20)
+	h, _ := play(s, w, {cutscene = INTRO_GUID, overrides = hero_of(f)})
+	frame(f)
+	testing.expect_value(t, skip(s, w, h), Command_Result.Done)
+	// The fade in starts covered at the range's end, and uncovers the frame a frame at a time.
+	fade_in := make([dynamic]f32, context.temp_allocator)
+	for _ in 0 ..< 20 {
+		frame(f)
+		if status(s, h) != .Skipping {
+			break
+		}
+		if now, _ := player_time(s, h); now == SECOND {
+			testing.expect_value(t, dial(f, f.hero), 7)
+			append(&fade_in, skip_fade(s, h))
+		}
+	}
+	testing.expectf(t, len(fade_in) >= 2, "the player fades in at the range's end: %v", fade_in)
+	if len(fade_in) >= 2 {
+		testing.expect_value(t, fade_in[0], 1)
+		testing.expect(t, fade_in[len(fade_in) - 1] < fade_in[0], "the fade in uncovers the frame")
+	}
+	expect_status(t, f, h, .Playing)
+	now, _ := player_time(s, h)
+	testing.expect(t, now > SECOND && now < 2 * SECOND, "play goes on after the range")
+	testing.expect_value(t, len(f.fired), 1)
+	if len(f.fired) == 1 {
+		testing.expect_value(t, f.fired[0], 2)
+	}
+	testing.expect(t, !can_skip(s, h))
+	testing.expect_value(t, skip(s, w, h), Command_Result.Not_Skippable)
+	expect_status(t, f, h, .Playing)
+
+	frames_while(f, h, .Playing)
+	expect_status(t, f, h, .Restored)
+	testing.expect_value(t, len(f.fired), 3)
+	if len(f.fired) == 3 {
+		testing.expect_value(t, f.fired[1], 3)
+		testing.expect_value(t, f.fired[2], 9)
+	}
+}
+
+// A cutscene that cannot be skipped, and a time outside every skip range, take no skip: the player plays on. A skip
+// while such a cutscene loads leaves it to do what it was asked.
+@(test)
+a_part_that_cannot_be_skipped_is_not_skipped :: proc(t: ^testing.T) {
+	f := player_setup(t)
+	defer player_teardown(f)
+	s := &f.cutscenes
+	w := &f.world
+	write_skippable(t, f, INTRO_GUID, .None)
+	h, _ := play(s, w, {cutscene = INTRO_GUID, overrides = hero_of(f)})
+	frame(f)
+	testing.expect(t, !can_skip(s, h))
+	testing.expect_value(t, skip(s, w, h), Command_Result.Not_Skippable)
+	before, _ := player_time(s, h)
+	frame(f)
+	expect_status(t, f, h, .Playing)
+	after, _ := player_time(s, h)
+	testing.expect(t, after > before, "it plays on")
+	stop(s, w, h)
+	frame(f)
+
+	ranges := []format.Cutscene_Skip_Range{{SECOND, 2 * SECOND}}
+	write_skippable(t, f, OUTRO_GUID, .Ranges, ranges)
+	ranged, _ := play(s, w, {cutscene = OUTRO_GUID, overrides = hero_of(f)})
+	frame(f)
+	testing.expect_value(t, skip(s, w, ranged), Command_Result.Not_Skippable)
+	frame(f)
+	expect_status(t, f, ranged, .Playing)
+	testing.expect_value(t, dial(f, f.hero), 3)
+	stop(s, w, ranged)
+	frame(f)
+
+	loading, _ := play(s, w, {cutscene = INTRO_GUID, overrides = hero_of(f)})
+	testing.expect_value(t, skip(s, w, loading), Command_Result.Done)
+	frame(f)
+	expect_status(t, f, loading, .Playing)
+	testing.expect_value(t, len(f.fired), 0)
+}
+
+// The skip action skips only when it is held for the hold time from a press. A shorter hold skips nothing, a key that
+// was already down begins no hold, and one hold skips once.
+@(test)
+holding_the_skip_action_for_less_than_the_hold_time_skips_nothing :: proc(t: ^testing.T) {
+	f := player_setup(t)
+	defer player_teardown(f)
+	s := &f.cutscenes
+	w := &f.world
+	_, defined := core.input_actions_define(&f.actions, "skip", {{.Key, u8(core.Key.Escape)}})
+	testing.expect(t, defined)
+	set_skip_input(s, "", 100 * time.Millisecond)
+	write_skippable(t, f, INTRO_GUID, .Anywhere)
+	h, _ := play(s, w, {cutscene = INTRO_GUID, overrides = hero_of(f)})
+	frame(f)
+	input: core.Input
+	input.down, input.pressed = {.Escape}, {.Escape}
+	for _ in 0 ..< 5 {
+		update_skip(s, w, &input, FRAME)
+		input.pressed = {}
+		frame(f)
+	}
+	progress := skip_progress(s)
+	testing.expectf(t, progress > 0.7 && progress < 1, "the hold is most of the way: %v", progress)
+	expect_status(t, f, h, .Playing)
+	input.down, input.released = {}, {.Escape}
+	update_skip(s, w, &input, FRAME)
+	testing.expect_value(t, skip_progress(s), 0)
+	frame(f)
+	expect_status(t, f, h, .Playing)
+
+	// A key that is down with no press begins no hold.
+	input.down, input.released = {.Escape}, {}
+	for _ in 0 ..< 10 {
+		update_skip(s, w, &input, FRAME)
+	}
+	testing.expect_value(t, skip_progress(s), 0)
+	expect_status(t, f, h, .Playing)
+
+	input.down = {}
+	update_skip(s, w, &input, FRAME)
+	input.down, input.pressed = {.Escape}, {.Escape}
+	for _ in 0 ..< 10 {
+		update_skip(s, w, &input, FRAME)
+		input.pressed = {}
+		if status(s, h) == .Skipping {
+			break
+		}
+	}
+	expect_status(t, f, h, .Skipping)
+	testing.expect_value(t, skip_progress(s), 1)
+	frame(f)
+	expect_status(t, f, h, .Restored)
+	testing.expect_value(t, dial(f, f.hero), 7)
+}
+
+// A skip while the cutscene loads ends it once it is loaded: in the same update, it goes from Ready to Skipping and on
+// to Restored, and never plays. The events marked to fire when skipped fire.
+@(test)
+a_skip_while_loading_ends_the_cutscene_once_loaded_without_playing :: proc(t: ^testing.T) {
+	f := player_setup(t)
+	defer player_teardown(f)
+	s := &f.cutscenes
+	w := &f.world
+	write_skippable(t, f, INTRO_GUID, .Anywhere)
+	h, _ := play(s, w, {cutscene = INTRO_GUID, overrides = hero_of(f)})
+	testing.expect_value(t, skip(s, w, h), Command_Result.Done)
+	expect_status(t, f, h, .Loading)
+	update(s, context_of(f))
+	expect_status(t, f, h, .Restored)
+	want := []Player_Status{.Loading, .Ready, .Skipping, .Finishing, .Restored}
+	events := player_events(s)
+	testing.expect_value(t, len(events), len(want))
+	for e, i in events {
+		if i < len(want) {
+			testing.expect_value(t, e.status, want[i])
+		}
+	}
+	testing.expect_value(t, dial(f, f.hero), 7)
+	testing.expect_value(t, len(f.fired), 2)
 }

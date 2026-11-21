@@ -136,6 +136,9 @@ test_cutscene :: proc() -> []byte {
 		source_path   = "game/cutscenes/intro.cutscene",
 		input_context = "cinematic",
 		hide_ui       = {SCENE, PREFAB},
+		skip          = .Ranges,
+		skip_ranges   = {{6000, 30000}, {60000, 120000}},
+		skip_fade     = 15000,
 	}
 	return aligned(cutscene_write(contents, context.temp_allocator))
 }
@@ -172,6 +175,11 @@ cutscene_blobs_round_trip :: proc(t: ^testing.T) {
 	hidden := cutscene_hide_ui(data, blob)
 	testing.expect_value(t, len(hidden), 2)
 	testing.expect_value(t, hidden[1], PREFAB)
+	testing.expect_value(t, blob.skip, Cutscene_Skip.Ranges)
+	testing.expect_value(t, blob.skip_fade, 15000)
+	skip_ranges := cutscene_skip_ranges(data, blob)
+	testing.expect_value(t, len(skip_ranges), 2)
+	testing.expect_value(t, skip_ranges[1], Cutscene_Skip_Range{60000, 120000})
 	testing.expect_value(t, bindings[1].asset, PREFAB)
 	testing.expect_value(t, bindings[1].position, [3]i64{1 << 24, 0, -(1 << 23)})
 	testing.expect_value(t, bindings[1].scale, [3]f32{1, 2, 1})
@@ -270,6 +278,25 @@ cutscene_blobs_with_bad_records_are_refused :: proc(t: ^testing.T) {
 	blob.range_start = -1
 	refused(t, data, "a range that starts before 0")
 	blob.range_start = 6000
+	blob.skip = Cutscene_Skip(3)
+	refused(t, data, "an unknown skip policy")
+	blob.skip = .Anywhere
+	refused(t, data, "skip ranges for a policy that has none")
+	blob.skip = .Ranges
+	blob.skip_fade = -1
+	refused(t, data, "a fade of less than 0")
+	blob.skip_fade = 15000
+	skip_ranges := cutscene_skip_ranges(data, blob)
+	skip_ranges[1].start = 20000
+	refused(t, data, "skip ranges that overlap")
+	skip_ranges[1].start = 120000
+	refused(t, data, "a skip range that ends at its start")
+	skip_ranges[1] = {60000, 120001}
+	refused(t, data, "a skip range past the length")
+	skip_ranges[1] = {60000, 120000}
+	blob.skip_ranges.size += 4
+	refused(t, data, "skip ranges that are not whole records")
+	blob.skip_ranges.size -= 4
 
 	bindings[0].kind = Cutscene_Binding_Kind(2)
 	refused(t, data, "an unknown binding kind")
@@ -469,4 +496,38 @@ entity_references_read_as_scene_files_write_them :: proc(t: ^testing.T) {
 	testing.expect(t, message != "", "a path of short IDs")
 	_, _, message = entity_reference_parse("12")
 	testing.expect(t, message != "", "a reference without @")
+}
+
+// A skip goes to the end of the range anywhere, nowhere for none, and to the end of the range that holds the time for
+// ranges, never past the end of the cutscene's range and never to the time itself.
+@(test)
+a_skip_target_follows_the_policy :: proc(t: ^testing.T) {
+	data := test_cutscene()
+	blob, ok := cutscene_view(data)
+	testing.expect(t, ok)
+	if !ok {
+		return
+	}
+	Case :: struct {
+		time:   i32,
+		target: i32,
+		ok:     bool,
+	}
+	for c in ([?]Case{{6000, 30000, true}, {29999, 30000, true}, {30000, 0, false}, {70000, 114000, true}}) {
+		target, skips := cutscene_skip_target(data, blob, c.time)
+		testing.expect_value(t, skips, c.ok)
+		if c.ok {
+			testing.expect_value(t, target, c.target)
+		}
+	}
+	_, past := cutscene_skip_target(data, blob, 114000)
+	testing.expect(t, !past, "the end of the range cannot be skipped")
+	blob.skip = .Anywhere
+	blob.skip_ranges = {}
+	target, anywhere := cutscene_skip_target(data, blob, 30000)
+	testing.expect(t, anywhere)
+	testing.expect_value(t, target, 114000)
+	blob.skip = .None
+	_, none := cutscene_skip_target(data, blob, 30000)
+	testing.expect(t, !none)
 }

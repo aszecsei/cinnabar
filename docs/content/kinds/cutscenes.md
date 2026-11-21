@@ -72,6 +72,8 @@ Every time in the text and in the blob is a whole number of **ticks**, `i32`, at
 | `suspend` | What each binding suspends on its entity when it does not say: a list of `behaviours`, `ai`, `navigation` and `physics`, each at most once. `[]` is none. See [Cinematics: Possession](../../cinematics/possession.md#the-settings). | `[behaviours, ai, navigation, physics]` |
 | `input_context` | The quoted name of the input context that the cutscene pushes while it plays, at most 24 bytes. `""` is none. | `"cutscene"` |
 | `hide_ui` | `[$<guid>, ...]`: the UI documents that the cutscene hides while it plays, such as the HUD | `[]` |
+| `skip` | What a player can skip: `anywhere`, to the end of the range; `none`; or `[[<start>, <end>], ...]`, ranges in ticks, in time order and not overlapping, inside the length, each of which a skip in it goes to the end of. See [Cinematics: Skipping](../../cinematics/skipping.md#the-policy). | `anywhere` |
+| `skip_fade` | Ticks: the length of a skip's fade out, and of its fade in when play goes on. 0 jumps at once. | 0 |
 
 ### Bindings
 
@@ -134,7 +136,7 @@ The kind of a track decides whether it takes a binding, and what each of its sec
 
 ## The blob
 
-A `Cutscene_Blob` (`lib/engine/asset/format/cutscene.odin`) holds the length, the rate, the clock, the range, the name of its input context and the GUIDs of the documents that it hides (`cutscene_hide_ui`). It then holds five flat tables:
+A `Cutscene_Blob` (`lib/engine/asset/format/cutscene.odin`) holds the length, the rate, the clock, the range, the name of its input context, the GUIDs of the documents that it hides (`cutscene_hide_ui`), and its skip policy, skip ranges (`cutscene_skip_ranges`, at most `MAX_CUTSCENE_SKIP_RANGES`, 256) and skip fade. It then holds five flat tables:
 
 - **`Cutscene_Binding`:**
   - its ID, kind, name and the name's hash (`animation_graph_hash`), and its policy;
@@ -151,6 +153,7 @@ Each track's sections follow those of the track before it. The same is true of e
 
 `cutscene_view` checks the kind, the layout and that every slice is inside the blob. It also checks every record, so a reader can index the tables without checks of its own:
 - the length, rate, clock and range, and that the hidden documents are whole GUIDs;
+- the skip policy, a fade of 0 or more, and skip ranges only for the `Ranges` policy, each inside the length and after the one before it;
 - that each binding's parent is a spawned binding before it, and that it suspends and flags only known things;
 - that each track's binding suits its kind;
 - that the tables split exactly, with no gaps and no overlaps;
@@ -168,6 +171,7 @@ Each track's sections follow those of the track before it. The same is true of e
   - a binding's name that is empty or taken;
   - a time that is not a whole number of ticks, a range outside the length, or a section that does not start before it ends inside the length;
   - a binding with neither `possess` nor `spawn`, or both, or a setting for the other kind of binding;
+  - a `skip` that is not `anywhere`, `none` or a list of ranges, a skip range outside the length or that does not start before it ends, skip ranges out of order or that overlap, or a `skip_fade` that is not a whole number of ticks;
   - a `suspend` that is not a list of known systems, each at most once, a `keep_velocity` that is not `true` or `false`, an `input_context` that is not a quoted name of at most 24 bytes, or a `hide_ui` that is not a list of GUIDs;
   - a parent that is not a spawned binding before this one;
   - a position outside the bounds of a `World_Position`, a rotation that is not of length 1, or a scale of 0;

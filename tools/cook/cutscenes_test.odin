@@ -207,6 +207,19 @@ each_mistake_in_a_cutscene_is_reported_at_its_line :: proc(t: ^testing.T) {
 		},
 		{"cutscene 1\nlength = 10\nhide_ui = [" + P + ", 3]\n", 3, "hide_ui is a list"},
 		{"cutscene 1\nlength = 10\nhide_ui = " + P + "\n", 3, "hide_ui is a list"},
+		{"cutscene 1\nlength = 10\nskip = always\n", 3, "skip is anywhere, none, or a list"},
+		{"cutscene 1\nlength = 10\nskip = []\n", 3, "skip is anywhere, none, or a list"},
+		{"cutscene 1\nlength = 10\nskip = [0, 5]\n", 3, "skip is anywhere, none, or a list"},
+		{
+			"cutscene 1\nlength = 10\nskip = [[0, 5] [6, 7]]\n",
+			3,
+			"skip is anywhere, none, or a list",
+		},
+		{"cutscene 1\nlength = 10\nskip = [[0, 1.5]]\n", 3, "skip is anywhere, none, or a list"},
+		{"cutscene 1\nlength = 10\nskip = [[0, 11]]\n", 3, "inside the length"},
+		{"cutscene 1\nlength = 10\nskip = [[5, 5]]\n", 3, "inside the length"},
+		{"cutscene 1\nlength = 10\nskip = [[0, 5], [4, 8]]\n", 3, "do not overlap"},
+		{"cutscene 1\nlength = 10\nskip_fade = -1\n", 3, "skip_fade is a whole number"},
 		{
 			"cutscene 1\nlength = 10\nbinding 1 \"A\"\n\tpossess = " +
 			S +
@@ -576,6 +589,36 @@ bindings_take_the_cutscenes_suspension_unless_they_name_their_own :: proc(t: ^te
 	)
 	testing.expectf(t, len(none_problems) == 0, "problems: %v", none_problems)
 	testing.expect_value(t, none.contents.input_context, "")
+}
+
+// The skip policy is anywhere by default, with no fade, and a list of ranges in time order makes it ranges.
+@(test)
+the_skip_policy_is_anywhere_none_or_ranges :: proc(t: ^testing.T) {
+	plain, plain_problems := cutscene_parse("cutscene 1\nlength = 10\n", context.temp_allocator)
+	testing.expectf(t, len(plain_problems) == 0, "problems: %v", plain_problems)
+	testing.expect_value(t, plain.contents.skip, format.Cutscene_Skip.Anywhere)
+	testing.expect_value(t, plain.contents.skip_fade, 0)
+	testing.expect_value(t, len(plain.contents.skip_ranges), 0)
+
+	none, none_problems := cutscene_parse(
+		"cutscene 1\nlength = 10\nskip = none\nskip_fade = 3\n",
+		context.temp_allocator,
+	)
+	testing.expectf(t, len(none_problems) == 0, "problems: %v", none_problems)
+	testing.expect_value(t, none.contents.skip, format.Cutscene_Skip.None)
+	testing.expect_value(t, none.contents.skip_fade, 3)
+
+	ranged, ranged_problems := cutscene_parse(
+		"cutscene 1\nlength = 10\nskip = [[0, 4], [ 4 , 10 ]]\n",
+		context.temp_allocator,
+	)
+	testing.expectf(t, len(ranged_problems) == 0, "problems: %v", ranged_problems)
+	testing.expect_value(t, ranged.contents.skip, format.Cutscene_Skip.Ranges)
+	testing.expect_value(t, len(ranged.contents.skip_ranges), 2)
+	if len(ranged.contents.skip_ranges) == 2 {
+		testing.expect_value(t, ranged.contents.skip_ranges[0], format.Cutscene_Skip_Range{0, 4})
+		testing.expect_value(t, ranged.contents.skip_ranges[1], format.Cutscene_Skip_Range{4, 10})
+	}
 }
 
 @(test)
