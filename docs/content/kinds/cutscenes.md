@@ -107,7 +107,7 @@ A parent must come before its child, so parents cannot form a cycle. [Cinematics
 
 The cooker cannot see a property track's field, because native components exist only in the game's code. The game checks that the field can animate when it loads the cutscene ([Cinematics: Property tracks](../../cinematics/tracks.md#property-tracks)).
 
-The kind of a track decides whether it takes a binding, and what each of its sections names with `asset`. Besides their channels and assets, only property and transform tracks have data of their own yet:
+The kind of a track decides whether it takes a binding, and what each of its sections names with `asset`. Besides their channels and assets, only property and transform tracks, and animation sections, have data of their own yet. A binding has at most one animation track:
 
 | Kind | Binding | Section's asset |
 |---|---|---|
@@ -131,6 +131,12 @@ The kind of a track decides whether it takes a binding, and what each of its sec
 | `pre_roll`, `post_roll` | Ticks before the start and after the end in which the section holds its first and last values ([Cinematics: Sections and blending](../../cinematics/evaluation.md#sections-and-blending)) | 0 |
 | `asset` | `$<guid>`. Needed for a kind that names an asset, and a problem for the others. | — |
 | `blend` | `absolute`: the section blends over the sections below it. `additive`: it adds its value to theirs. Only transform and property sections can be additive. | `absolute` |
+| `offset` | An animation section's ticks into its clip, where the section starts | 0 |
+| `speed` | An animation section's clip time per the cutscene's time: a number above 0 | 1 |
+| `loop` | `true`: past its clip's end, an animation section starts the clip again. `false`: it holds the clip's last pose. | `false` |
+| `root_motion` | What an animation section does with its clip's root motion: `bake`, the root moves in the mesh; `apply`, the track moves the binding by it; `in_place`, the clip plays in place. See [Cinematics: Animation tracks](../../cinematics/tracks.md#animation-tracks). | `bake` |
+
+`offset`, `speed`, `loop` and `root_motion` are for animation sections only. On a section of another kind, each one is a problem.
 
 ### Channels and keys
 
@@ -166,7 +172,7 @@ A `Cutscene_Blob` (`lib/engine/asset/format/cutscene.odin`) holds the length, th
   - its parent's index or `CUTSCENE_NONE`;
   - its position as `[3]i64` `World_Position` units, its rotation and its scale.
 - **`Cutscene_Track`:** its ID, kind, name, binding's index or `CUTSCENE_NONE`, flags (`.Muted`), when-finished, its first section and count, for a property track its component's stable ID and its field's name and `scene_field_hash`, and for a transform track its space (`Cutscene_Space`), its origin as `[3]i64` `World_Position` units, and the index of the binding that it is relative to, or `CUTSCENE_NONE`.
-- **`Cutscene_Section`:** its ID, start, end, eases, weight, pre-roll and post-roll, asset GUID (zero for a kind that names none), its first channel and count, and its flags (`.Additive`).
+- **`Cutscene_Section`:** its ID, start, end, eases, weight, pre-roll and post-roll, asset GUID (zero for a kind that names none), its first channel and count, and its flags (`.Additive`, `.Loop`). A section of a kind that plays its asset's time (`cutscene_track_plays`, only animation yet) also has its offset into the asset in ticks, its speed, and its root motion (`Cutscene_Root_Motion`: `Bake`, `Apply` or `In_Place`). The other kinds have zeros there.
 - **`Cutscene_Channel`:** its name and the name's hash, its first key and count, and its flags (`.Guids`, when its keys' values are indexes into the GUIDs).
 - **`Cutscene_Key`:** its time from the section's start, its value, its interpolation, its flags (`.Broken`, `.Weighted`, `.Teleport`), and its in and out slopes and weights.
 
@@ -181,6 +187,7 @@ Each track's sections follow those of the track before it. The same is true of e
 - that each track's binding suits its kind;
 - that the tables split exactly, with no gaps and no overlaps;
 - each section's times, eases, rolls, weight and asset against its kind;
+- that a section of a kind that plays its asset has an offset from 0 and a finite speed above 0, that only an animation section has a root motion other than `Bake`, and that the other kinds have no offset, speed or `.Loop`;
 - that only property tracks name a field and key assets, and that only transform and property sections are additive;
 - that only a transform track has a space other than `Relative`, that only an absolute track has an origin, inside the bounds of a `World_Position`, and that only a track relative to another binding names one, which is not its own;
 - that every channel has keys;
@@ -205,6 +212,8 @@ Each track's sections follow those of the track before it. The same is true of e
   - a `space` that is not `absolute`, `relative` or `relative <id>`, a `relative <id>` that names no binding or the track's own, an `origin` that is not three numbers inside the bounds of a `World_Position` or that is not for `space = absolute`, or either one on a track that is not a transform track;
   - a cycle of transform tracks relative to other bindings, which each track in it reports at its `space` line, with the path, such as `relative bindings form a cycle: Fox -> Ship -> Fox`;
   - a `blend` that is not `absolute` or `additive`, or an additive section of a kind other than transform or property;
+  - an `offset` that is not a whole number of ticks, a `speed` that is not a number above 0, a `loop` that is not `true` or `false`, a `root_motion` that is not `bake`, `apply` or `in_place`, or any of them on a section that is not an animation section;
+  - a second animation track on one binding, at its `track` line, with the line of the first;
   - eases longer than the section, a pre-roll or post-roll that is not a whole number of ticks, or a weight outside 0 to 1;
   - a section without the asset that its kind needs, or with one that its kind does not take;
   - a channel's name that is not a name or is taken, or a channel without keys;

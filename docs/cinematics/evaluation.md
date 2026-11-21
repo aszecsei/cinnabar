@@ -15,7 +15,8 @@ An `Evaluation` is what one cutscene needs to be evaluated:
 - the time of each phase's last evaluation;
 - the [snapshot](#the-restore-snapshot) of the fields that its tracks wrote;
 - the fields of its property tracks, resolved once for the blob ([Tracks: Property tracks](tracks.md#property-tracks));
-- for each transform track relative to another binding, a cycle or where its binding starts in the other's space, found once for the blob ([Tracks: Transform tracks](tracks.md#transform-tracks)).
+- for each transform track relative to another binding, a cycle or where its binding starts in the other's space, found once for the blob ([Tracks: Transform tracks](tracks.md#transform-tracks));
+- the `Animator`s that its animation tracks drive, by entity, each with its driver's token ([Tracks: Animation tracks](tracks.md#animation-tracks)).
 
 It holds no procedures, `typeid`s or string literals, so it survives a code reload. `init_evaluation` starts it at the range's start, and `destroy_evaluation` frees it.
 
@@ -71,7 +72,7 @@ A kind:
 - gets its binding's entity with `track_entity`;
 - samples its sections with `section_at` and blends them with `Blend`;
 - reads a field's own value with `base`;
-- writes the world **only** with `write` or `write_field`, and writes every field that it holds in each evaluation, at the field's own value where no section covers the time ([Player: Conflicts](player.md#conflicts)). The one exception is what follows from those fields each tick: `settle_pose` writes a child's `Transform` and a teleport's `Previous_Transform`, outside the snapshot;
+- writes the world **only** with `write` or `write_field`, and writes every field that it holds in each evaluation, at the field's own value where no section covers the time ([Player: Conflicts](player.md#conflicts)). There are two exceptions, outside the snapshot. The first is what follows from those fields each tick: `settle_pose` writes a child's `Transform` and a teleport's `Previous_Transform`. The second is an `Animator`'s driven clips, which only the animation's driver writes, through a token: an animation track holds the token in `Evaluation.drives`, and `restore` ends it;
 - tests a key against the event range with `fires`, and in a skip's range fires only the keys that it marks to fire when skipped ([Skipping: Events](skipping.md#events)).
 
 ## Sections and blending
@@ -117,7 +118,7 @@ Each phase keeps the time of its last evaluation. An evaluation's event range is
 - The fields go back in the reverse of the order in which they were saved. Where a track wrote a whole field and another wrote a part of it, the value from before the first write is what stays.
 - A field of a `Transform` or a `Local_Transform` that goes back teleports its entity, with what is under it (`settle_pose`), so presentation does not interpolate to it.
 
-The snapshot is then empty. The player calls `restore` when it goes to `Restored` or `Failed`.
+The snapshot is then empty. `restore` also ends the hold of every `Animator` that an animation track drives, so its graph's pose shows again ([Tracks: Animation tracks](tracks.md#animation-tracks)). The player calls `restore` when it goes to `Restored` or `Failed`.
 
 **Several players.** When two players write one field, the later one saves the value that the first one saved, and a player does not put back a field that another live player holds ([Player: Conflicts](player.md#conflicts)). `field_base` gives that value too, so neither player blends over what the other wrote.
 
@@ -127,7 +128,7 @@ A write fails, and saves nothing, when the entity is not alive, has no such comp
 
 A blob with a new key is a hot reload. The next `evaluate`, `seek` or `restore` notices it and:
 1. Takes each removed track, by its ID, off the writers of its fields.
-2. Restores each field that no remaining track wrote, and removes it from the snapshot. A track that the reload removes therefore restores its fields. It also forgets the property tracks' resolved fields, so the next evaluation resolves them again. It keeps the start of each transform track that is still relative to the same two bindings, and forgets the other spaces ([Tracks: Transform tracks](tracks.md#transform-tracks)).
+2. Restores each field that no remaining track wrote, and removes it from the snapshot. A track that the reload removes therefore restores its fields. It also forgets the property tracks' resolved fields, so the next evaluation resolves them again. It keeps the start of each transform track that is still relative to the same two bindings, and forgets the other spaces ([Tracks: Transform tracks](tracks.md#transform-tracks)). It ends the hold of every driven `Animator`, and the animation tracks of the new blob take theirs again as they evaluate.
 3. Keeps the time, clamped into the new range, and sets each phase's last time to it, so the reload fires no events.
 4. Evaluates the new blob at the time.
 
@@ -154,7 +155,7 @@ A test compares a play with one job and with eight workers.
 | `skip_to(state, e, world, data, blob, target)` | Moves the time to a later target and evaluates each phase there as a skip |
 | `evaluate(state, e, world, data, blob, phase)` | Evaluates one phase's tracks at the time, and follows a reload |
 | `advance_real(state, world, dt)` | Advances the real-clock cutscenes and evaluates their `Fixed` tracks |
-| `restore(state, e, world, data, blob)`, `restore_all(state, e, world)` | Put back the fields of `restore` tracks, or every field when the blob is gone, and empty the snapshot |
+| `restore(state, e, world, data, blob)`, `restore_all(state, e, world)` | Put back the fields of `restore` tracks, or every field when the blob is gone, empty the snapshot, and give back the driven `Animator`s |
 | `section_at(blob, section, t)`, `ease(x)` | A section's local time and weight at a time, and the ease's shape |
 | `blend_add`, `blend_value` | Blend sections' values over the base |
 | `track_entity(ctx)`, `fires(ctx, t)` | A track's bound entity, and whether an event fires |

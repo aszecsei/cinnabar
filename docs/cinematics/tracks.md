@@ -2,7 +2,7 @@
 
 A track acts on the world at the cutscene's time. Its kind says what it writes: a field, a pose, a camera, a sound. This document describes the kinds that the engine has, in `lib/engine/cutscene`, and the curve that every keyed track shares. Read [Evaluation](evaluation.md) first, for sections, blending and the restore snapshot.
 
-**In this document:** [Curves](#curves) · [Property tracks](#property-tracks) · [Transform tracks](#transform-tracks) · [Not built yet](#not-built-yet) · [Procedures](#procedures)
+**In this document:** [Curves](#curves) · [Property tracks](#property-tracks) · [Transform tracks](#transform-tracks) · [Animation tracks](#animation-tracks) · [Not built yet](#not-built-yet) · [Procedures](#procedures)
 
 ## Curves
 
@@ -171,9 +171,75 @@ A camera cut will mark its frame as a cut, and transform tracks will teleport on
 
 `register` sets the transform kind.
 
+## Animation tracks
+
+An animation track plays clips on its binding's `Animator`: a sit, a gesture, a line of dialogue's body language. It drives the `Animator` through its driver ([Animation: Driving an Animator](../animation/design.md#driving-an-animator)). So the clip's time comes from the cutscene's time, not from the `Animator`'s ticks, and scrubs, seeks and skips show the right pose at once.
+
+```
+track 2 animation "Fox acts"
+	binding = 1
+	section 1 0 120000
+		asset = $dea303d3f0374a9e56b0bb58f4a85315
+		ease_in = 15000
+		ease_out = 15000
+		loop = true
+		root_motion = in_place
+	section 2 90000 180000
+		asset = $c51ce410c124a10e0db5e4b97fc2af39
+		offset = 30000
+		speed = 0.5
+		ease_in = 30000
+```
+
+**Sections.** A section names a clip with `asset`. The clip's skin must be the skin of the `Animator`'s graph. The driver leaves out a clip of another skin.
+- **Time in the clip.** At a time *t*, the clip's time is `offset + (t − start) × speed`, in seconds. `offset` is the ticks into the clip where the section starts. `speed` is the clip's time per the cutscene's time.
+- **Past the clip's end.** A section with `loop = true` starts the clip again from its start. Otherwise it holds the clip's last pose.
+- **Weight.** The section's weight, ease in and ease out set the clip's weight ([Sections and blending](evaluation.md#sections-and-blending)). Animation sections cannot be additive.
+- **One track for each binding.** The cooker reports a second animation track on one binding. Put the clips of one binding in the sections of one track.
+
+**What it writes.** The track writes only the driver's input: up to `MAX_DRIVEN` (2) clips, each with its time and its weight. It never writes joints. The driver presents the pose.
+- **Overlaps.** Where sections overlap, the clips blend by their weights. Past two, the lightest clips drop. Among equals, the later section in the track drops.
+- **Over the graph.** The clips' weights blend their pose over the pose of the `Animator`'s graph. Where no section covers the time, the weight is 0. So the first section's ease in blends from the gameplay animation, and the last section's ease out blends back to it.
+- **A function of the time.** The pose at *t* depends only on *t*. Nothing depends on how the `Animator` ticked before.
+- **Not loaded.** The track leaves out a clip that is not loaded. A player loads every clip that the cutscene names before it plays.
+
+**The driver's hold.** The track takes the `Animator` with `begin_drive` when one of its sections first covers the time. It keeps the token in `Evaluation.drives`, by entity, until the cutscene ends.
+- **`restore`** (the default) takes it with `hold`. The graph's time stops while the cutscene holds the `Animator`, so after the cutscene the graph resumes where it was. Before the first section, the graph plays, so an idle does not freeze before the track uses it.
+- **`keep`** takes it without `hold`. The graph plays on under the clips, and the cutscene leaves the graph's state as it is.
+- The graph keeps its parameters and triggers while the driver overrides it.
+- **Another driver.** When another driver takes the `Animator`, such as a player that started later, the track takes it back at its next evaluation. So the later of two players wins it, as it wins a field ([Player: Conflicts](player.md#conflicts)).
+- **The end.** `restore` and `restore_all` end every hold with `end_drive`, and the graph's pose shows again. A hot reload ends them too. The tracks of the new blob then take their `Animator`s again as they evaluate.
+
+**Root motion.** Each section's `root_motion` says what it does with its clip's root motion:
+
+| `root_motion` | The pose | The entity |
+|---|---|---|
+| `bake` (the default) | The root moves in the mesh. | A transform track places it. |
+| `apply` | The clip plays in place. | The track moves it by the clip's root motion, from the section's start. |
+| `in_place` | The clip plays in place. | The clip does not move it. A transform track can move it, as the sample's walking fox does. |
+
+- **Apply** sums the root motion of every `apply` section, from the start of the first one to *t*, or to the end of the last one. It sums steps of `ROOT_MOTION_STEP` (1/60 s) on a grid from the cutscene's 0. The sections' weights at the middle of a step weight that step's motion. So a seek gives the same place as playback, and an ease out slows the walk to a stop.
+- **The pose that it writes** is the binding's own pose, moved by the sum and turned about y by the sum of the turns. The own rotation turns the sum, and the own scale scales it, as gameplay applies `Root_Motion`. The track writes the position and the rotation of a root's `Transform` or a child's `Local_Transform` in every evaluation. It teleports as a transform track does ([Transform tracks](#transform-tracks)).
+- **After the section**, the entity stays where the walk ended, because the sum keeps the section's whole motion. `restore` puts the entity back. `keep` leaves it there.
+- **The root joint** is the graph's root motion joint. Without a graph, or without a root motion joint, `apply` moves nothing.
+- A transform track that keys the position or the rotation of the same binding also writes them. The later track in the cutscene wins.
+
+**Markers.** A clip's markers are those that the `Animator`'s graph puts on the clip: the markers of the first of the graph's clips that plays it. A clip that the graph does not play has no markers.
+- Only one section raises markers, as the graph raises only its heaviest clip's: of the sections whose span meets the event range, the heaviest at the range's end, or at its own end when it ends first. So the tick that passes a section's end, and the tick at its start where its ease in weighs nothing, still raise its markers.
+- A marker is raised when the evaluation's event range `(last, now]`, in the clip's time, holds it. When the section starts in the range, a marker at its offset is raised too. A looping clip raises its markers in each loop that the range passes, up to `MAX_MARKER_LOOPS` (16).
+- `anim.raise_marker` puts each one before the tick's own events. It reaches the binding's behaviours as `on_animation_event`, in the same tick.
+- A seek, a backwards scrub and a reload raise none, because their range is empty. A skip raises none ([Skipping: Events](skipping.md#events)). Outside a frame, as in the editor's Edit mode, the graph is not ready, and no marker is raised.
+
+**Seek, skip and finish.**
+- **Seek and scrub backwards.** The driver shows the pose at the new time at once.
+- **Skip.** The pose at the skip's target.
+- **When finished.** The driver gives the `Animator` back. With `restore`, the graph resumes where it was. With `keep`, the graph's state stays as it is. Neither holds the last pose after the cutscene. To hand the pose back without a pop, ease the last section out before the end.
+
+`register` sets the animation kind. The game gives the cutscenes the animation's state in `init`. Without it, animation tracks do nothing.
+
 ## Not built yet
 
-The other kinds of track are parts of [#526](https://github.com/aszecsei/cinnabar/issues/526): animation ([#541](https://github.com/aszecsei/cinnabar/issues/541)), camera cuts ([#542](https://github.com/aszecsei/cinnabar/issues/542)), audio ([#543](https://github.com/aszecsei/cinnabar/issues/543)), events ([#544](https://github.com/aszecsei/cinnabar/issues/544)), sub-sequences ([#545](https://github.com/aszecsei/cinnabar/issues/545)) and presentation ([#546](https://github.com/aszecsei/cinnabar/issues/546)). Until they are built, a track of one of these kinds does nothing.
+The other kinds of track are parts of [#526](https://github.com/aszecsei/cinnabar/issues/526): camera cuts ([#542](https://github.com/aszecsei/cinnabar/issues/542)), audio ([#543](https://github.com/aszecsei/cinnabar/issues/543)), events ([#544](https://github.com/aszecsei/cinnabar/issues/544)), sub-sequences ([#545](https://github.com/aszecsei/cinnabar/issues/545)) and presentation ([#546](https://github.com/aszecsei/cinnabar/issues/546)). Until they are built, a track of one of these kinds does nothing.
 
 ## Procedures
 
@@ -183,5 +249,6 @@ The other kinds of track are parts of [#526](https://github.com/aszecsei/cinnaba
 | `curve_step(keys, t, hint)` | A curve's value as if every key were constant |
 | `property_track(ctx)` | The property kind's evaluate procedure |
 | `transform_track(ctx)` | The transform kind's evaluate procedure |
+| `animation_track(ctx)` | The animation kind's evaluate procedure |
 | `settle_pose(world, entity, teleport)` | Composes a child's `Transform` from what a track or a restore wrote. With `teleport`, also sets the `Previous_Transform` of the entity and of every entity under it. |
 | `pose_channel(name)` | A transform channel's place in the pose |

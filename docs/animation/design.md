@@ -145,7 +145,7 @@ The frame code calls the package around the ticks:
 
 ## Driving an Animator
 
-A system outside the graph can pose an `Animator` with up to two driven clips, at the times that it chooses. A cutscene does this to keep a character in sync with its timeline (see [Ticks and presentation](#ticks-and-presentation)). The driven state is one value, `Animator.driven: Maybe(Driven)`. Only three calls write it, and a driver holds it through a token (see [State with a lifecycle](../overview/conventions.md#state-with-a-lifecycle)):
+A system outside the graph can pose an `Animator` with up to two driven clips, at the times that it chooses. A cutscene's animation track does this to keep a character in sync with its timeline (see [Ticks and presentation](#ticks-and-presentation) and [Cinematics: Animation tracks](../cinematics/tracks.md#animation-tracks)). The driven state is one value, `Animator.driven: Maybe(Driven)`. Only three calls write it, and a driver holds it through a token (see [State with a lifecycle](../overview/conventions.md#state-with-a-lifecycle)):
 
 | Call | What it does |
 |---|---|
@@ -154,17 +154,28 @@ A system outside the graph can pose an `Animator` with up to two driven clips, a
 | `end_drive(w, token)` | Ends the hold: the weights go to 0, and the graph's pose shows again. Through a stale token, it does nothing. |
 | `is_driving(w, token)` | Whether the token still holds its `Animator`. |
 
-- **A `Driven_Sample`** is a clip, a time in seconds, a weight from 0 to 1, and `root_motion`. The clip must be of the skin that the graph's clips are of. A clip of another skin, or one that has not loaded, is left out.
+A driver also reads the clips that it drives, without a token:
+
+| Call | What it does |
+|---|---|
+| `clip_length(s, clip)` | A loaded clip's duration in seconds. It loads nothing. |
+| `clip_motion_of(s, w, entity, clip, allocator)` and `clip_motion(m, from, to)` | A clip's root motion between two of its times, measured with the root joint of the entity's graph, as a tick reports it: in the model's space turned to the root's heading at the first time, and its turn about y. False without a root joint, or for a clip of another skin. |
+| `clip_markers(s, w, entity, clip)` | The markers that the entity's graph puts on a clip: those of the first of its clips that plays it. Empty outside a frame. |
+| `raise_marker(s, w, entity, marker)` | Raises a marker as the graph raises one, from its current state, for the driven clips, which raise none of their own. The tick's flush puts it before the graph's own events ([Events in the world](#events-in-the-world)). |
+
+- **A `Driven_Sample`** is a clip, a time in seconds, a weight from 0 to 1, and `root_motion`, a `Driven_Root_Motion`. The clip must be of the skin that the graph's clips are of. A clip of another skin, or one that has not loaded, is left out.
 - **Without a graph.** An `Animator` with no ready graph, or no graph or clip at all, is posed from its skin's rest pose, with the driven clips over it.
 - **Root motion.** The graph's root joint names the joint that root motion uses.
-  - With `root_motion`, each tick reports the clip's move since the last tick in `Root_Motion`, by its weight, beside the graph's move by `1 - W`. The pose then leaves the move out, as the graph's pose does when the entity has a `Root_Motion`. A tick whose clip changed, or whose time did not move forward, reports nothing from that sample. So a scrub back or a new clip does not move the entity.
-  - Without `root_motion`, the clip plays in place. This is what a cutscene usually wants, when a transform track moves the entity.
+  - `Reported`: each tick reports the clip's move since the last tick in `Root_Motion`, by its weight, beside the graph's move by `1 - W`. The pose then leaves the move out, as the graph's pose does when the entity has a `Root_Motion`. A tick whose clip changed, or whose time did not move forward, reports nothing from that sample. So a scrub back or a new clip does not move the entity.
+  - `In_Place` (the zero value): the clip plays in place, and the ticks report nothing from it. A cutscene uses this when a transform track moves the entity, or when it moves the entity by the clip's motion itself.
+  - `In_Pose`: the pose keeps the move, whether or not the entity has a `Root_Motion`, and the ticks report nothing from it. A cutscene's baked root motion uses this, so the root moves in the mesh.
   - An `Animator` that plays only a clip has no root joint, so its driven clips keep their motion in the pose.
 - **Edit and saving.** `present` poses driven samples in every mode, so the editor can scrub in Edit with no `Update` systems running. `driven` is hidden from the field walker, so scenes do not save it and the editor does not send it as a document edit. Writes to it do not mark the component as changed.
 
 ## Events in the world
 
 - **Recording.** A job of `animate` records its Animators' events in a job buffer. After the tick's `Fixed` systems, the flush takes the buffers in system order, then job order. Within a job, entities are in chunk order. So events never depend on the jobs' timing, and are never ordered by entity handle.
+- **A driver's markers.** `raise_marker` makes the marker's `Event` at once, from the graph of its frame, and queues it for the next flush. The flush puts the queued events before the jobs' events, in the order of the calls. A frame without a tick, such as one of a real-clock cutscene while the game is paused, leaves them for the next tick, up to `MAX_RAISED` (256). The flush runs only when a job asked for a buffer, so `animate` asks for one while markers wait.
 - **Lists.** The flush turns each event into an `Event`: the entity, the kind, the event's name, the state that raised it, and its arguments. Each `Event` owns its strings, which outlive `asset.poll`.
   - `tick_events` are the last tick's, which the next tick's `Fixed` systems see.
   - `frame_events` are every tick's since `begin_frame`, which `Update` and `Late` systems see.

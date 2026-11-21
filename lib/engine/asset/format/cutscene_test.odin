@@ -116,8 +116,18 @@ test_cutscene :: proc() -> []byte {
 				name = "Fox clip",
 				binding = 0,
 				sections = {
-					{id = 11, start = 0, end = 60000, weight = 0.5, asset = CLIP},
-					{id = 12, start = 60000, end = 120000, weight = 1, asset = CLIP},
+					{id = 11, start = 0, end = 60000, weight = 0.5, asset = CLIP, speed = 1},
+					{
+						id = 12,
+						start = 60000,
+						end = 120000,
+						weight = 1,
+						asset = CLIP,
+						offset = 15000,
+						speed = 0.5,
+						flags = {.Loop},
+						root_motion = .Apply,
+					},
 				},
 			},
 			{
@@ -251,6 +261,11 @@ cutscene_blobs_round_trip :: proc(t: ^testing.T) {
 	testing.expect_value(t, clips[1].id, 12)
 	testing.expect_value(t, clips[0].weight, 0.5)
 	testing.expect_value(t, clips[0].asset, CLIP)
+	testing.expect_value(t, clips[0].speed, 1)
+	testing.expect_value(t, clips[1].offset, 15000)
+	testing.expect_value(t, clips[1].speed, 0.5)
+	testing.expect_value(t, clips[1].flags, Cutscene_Section_Flags{.Loop})
+	testing.expect_value(t, clips[1].root_motion, Cutscene_Root_Motion.Apply)
 	walk := cutscene_track_sections(data, blob, tracks[0])[0]
 	testing.expect_value(t, walk.ease_in, 6000)
 	testing.expect_value(t, walk.ease_out, 3000)
@@ -507,6 +522,31 @@ cutscene_blobs_with_bad_records_are_refused :: proc(t: ^testing.T) {
 	sections[1].flags = {.Additive}
 	refused(t, data, "an additive animation section")
 	sections[1].flags = {}
+	sections[1].speed = 0
+	refused(t, data, "an animation section that does not play its clip")
+	sections[1].speed = math.inf_f32(1)
+	refused(t, data, "an animation section at an infinite speed")
+	sections[1].speed = math.nan_f32()
+	refused(t, data, "an animation section at a speed that is NaN")
+	sections[1].speed = 1
+	sections[1].offset = -1
+	refused(t, data, "an animation section before its clip's start")
+	sections[1].offset = 0
+	sections[0].speed = 1
+	refused(t, data, "a transform section with a speed")
+	sections[0].speed = 0
+	sections[0].offset = 5
+	refused(t, data, "a transform section with an offset")
+	sections[0].offset = 0
+	sections[0].flags = {.Loop}
+	refused(t, data, "a transform section that loops")
+	sections[0].flags = {}
+	sections[0].root_motion = .In_Place
+	refused(t, data, "a transform section with a root motion")
+	sections[0].root_motion = .Bake
+	sections[1].root_motion = Cutscene_Root_Motion(3)
+	refused(t, data, "an unknown root motion")
+	sections[1].root_motion = .Bake
 	sections[0].flags = {.Additive}
 	_, ok = cutscene_view(data)
 	testing.expect(t, ok, "an additive transform section")

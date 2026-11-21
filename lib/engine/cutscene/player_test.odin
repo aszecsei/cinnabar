@@ -364,6 +364,7 @@ write_cutscene :: proc(t: ^testing.T, f: ^Player_Fixture, c: Cutscene) {
 			end    = c.length,
 			weight = 1,
 			asset  = c.clip,
+			speed  = 1,
 		}
 		append(
 			&tracks,
