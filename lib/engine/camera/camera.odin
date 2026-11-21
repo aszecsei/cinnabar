@@ -56,7 +56,8 @@ Pushed :: struct {
 // Fallback is a stack with no entries: it shows the world's first camera.
 Fallback :: struct {}
 
-// Chosen is the entry that a stack shows. It keeps the entry's blend out, which the entry's removal then cannot take.
+// Chosen is the entry that a stack shows. It keeps the entry's blend out, which the entry's removal then cannot take;
+// only a release that gives a blend replaces it.
 Chosen :: struct {
 	token:     Camera_Token,
 	camera:    ecs.Entity,
@@ -110,10 +111,13 @@ Game_View :: struct {
 	state: Maybe(render.View_State),
 }
 
-// Presentation is how the views were laid out in the last advance, to find the frame where the layout changes.
+// Presentation is how the views were laid out in the last advance, to find the frame where their rects change: a view
+// whose rect changes is a cut. A claim over one full view, as in the Single layout, changes no rect, so a blend into or
+// out of it is not a cut.
 Presentation :: struct {
 	claimed: bool,
-	layout:  Layout,
+	rects:   [MAX_VIEWS]Rect,
+	count:   int,
 }
 
 // Ended_Reason is why an entry was removed for its pusher.
@@ -232,12 +236,23 @@ claim :: proc(
 	return Claim_Token(pushed), ok
 }
 
-// release ends a claim, and the layout shows again. Through a stale token, or a push's, it does nothing.
-release :: proc(v: ^Views, token: Claim_Token) {
+// release ends a claim, and the layout shows again. Through a stale token, or a push's, it does nothing. A blend_out
+// replaces the one that the claim was made with, for a claim that shows: a cutscene that is skipped or sought cuts away
+// from a shot that would have blended out at its end. It is the one write to a stack's choice outside advance, and it
+// changes only how the choice leaves, which advance reads only once the entry is gone.
+release :: proc(v: ^Views, token: Claim_Token, blend_out: Maybe(Blend) = nil) {
 	camera_token := Camera_Token(token)
-	if p := pushed_of(v, camera_token); p != nil && p.stack == CLAIMS {
-		v.entries[camera_token.slot].state = nil
+	p := pushed_of(v, camera_token)
+	if p == nil || p.stack != CLAIMS {
+		return
 	}
+	if blend, given := blend_out.?; given {
+		p.blend_out = blend
+		if chosen, showing := &v.claims.choice.(Chosen); showing && chosen.token == camera_token {
+			chosen.blend_out = blend
+		}
+	}
+	v.entries[camera_token.slot].state = nil
 }
 
 // is_claimed reports whether a claim is held.
@@ -425,24 +440,36 @@ advance :: proc(v: ^Views, w: ^ecs.World, steps: Steps) -> Frame_Views {
 		stack.shown = stack_view(v, w, stack)
 	}
 
-	now := Presentation{showing_claim(v), v.layout}
-	relaid := false
-	if before, was := v.presented.?; was {
-		relaid = before != now
+	now := Presentation {
+		claimed = showing_claim(v),
 	}
+	if now.claimed {
+		now.rects[0], now.count = FULL, 1
+	} else {
+		now.rects, now.count = layout_rects(v.layout)
+	}
+	before, was := v.presented.?
 	v.presented = now
+	relaid := was && (before.count != now.count || before.rects != now.rects)
+	// The first view that changes between the claims' stack and its own carries a cut of the claims' stack: a claim
+	// that cuts in, and a release that cuts back.
+	switched := was && before.claimed != now.claimed
 
 	frame := Frame_Views {
 		claimed = now.claimed,
+		count   = now.count,
 	}
 	if now.claimed {
-		frame.count = 1
 		frame.views[0] = {0, FULL, v.claims.shown, cut[CLAIMS] || relaid}
 	} else {
-		rects, count := layout_rects(now.layout)
-		frame.count = count
-		for i in 0 ..< count {
-			frame.views[i] = {i, rects[i], v.views[i].stack.shown, cut[i] || relaid}
+		for i in 0 ..< now.count {
+			cut_back := switched && i == 0 && cut[CLAIMS]
+			frame.views[i] = {
+				i,
+				now.rects[i],
+				v.views[i].stack.shown,
+				cut[i] || relaid || cut_back,
+			}
 		}
 	}
 	for &view, i in frame.views[:frame.count] {

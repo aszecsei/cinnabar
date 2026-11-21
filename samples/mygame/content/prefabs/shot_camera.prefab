@@ -1,0 +1,17 @@
+# A cutscene's shot camera (see docs/cinematics/tracks.md#camera-cut-tracks): a Camera with a 35 mm lens on a Super 35
+# sensor at f/2.8, focused at 4 m. The intro cutscene spawns three and cuts between them.
+scene 3
+
+entity 1000000000000001
+name = "Shot Camera"
+component 1 Transform
+	position = [0, 0, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 32 Camera
+component 160 Cinematic_Camera
+	focal_length = 35
+	sensor_width = 24.89
+	sensor_height = 18.66
+	focus_distance = 4
+	aperture = 2.8

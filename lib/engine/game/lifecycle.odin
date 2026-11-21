@@ -67,7 +67,14 @@ game_init :: proc(
 	audio.init(&g.audio, platform, &g.assets)
 	nav.init(&g.nav, platform, &g.assets, &g.physics)
 	ai.init(&g.ai, platform, &g.assets, &g.scripts, &g.physics)
-	cutscene.init(&g.cutscenes, &g.world, &g.assets, &g.scripts.input_actions, &g.animation)
+	cutscene.init(
+		&g.cutscenes,
+		&g.world,
+		&g.assets,
+		&g.scripts.input_actions,
+		&g.animation,
+		&g.views,
+	)
 	register_world(g, h)
 	asset.init(&g.assets, platform, asset.content_source(platform.content_dir))
 	render.renderer_init(&g.renderer, platform, &g.assets, &g.world)
@@ -118,6 +125,7 @@ register_world :: proc(g: ^Game, h: Hooks) {
 	// The cutscenes' systems come first in their stages, and run alone: their tracks write any component, so every
 	// other system of the tick, the animator's and physics' among them, sees what they wrote.
 	cutscene.register(&g.cutscenes, w)
+	camera.register(w)
 	physics.register(&g.physics, w)
 	anim.register(&g.animation, w, &g.assets)
 	sprite.register(&g.sprites, w, &g.assets)

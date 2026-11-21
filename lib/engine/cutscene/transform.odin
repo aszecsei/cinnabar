@@ -517,16 +517,11 @@ teleport_tree :: proc(w: ^ecs.World, entity: ecs.Entity, depth: int) {
 	}
 }
 
-// teleports is whether this evaluation moves the entity at once: when it does not move forward from the phase's last
-// evaluation (a seek, a backwards scrub, a reload, a pause or a skip's hold), at the first evaluation, in a skip's jump,
-// on the real clock (see docs/cinematics/evaluation.md#the-order-in-the-frame), or when it crosses a key marked
-// teleport.
+// teleports is whether this evaluation moves the entity at once: when it jumps (see jumps), when it crosses a cut of
+// the camera cut track (see cut_fires), or when it crosses a key marked teleport.
 @(private)
 teleports :: proc(ctx: ^Track_Context) -> bool {
-	if ctx.skipped ||
-	   ctx.blob.clock == .Real ||
-	   ctx.from >= i64(ctx.time) ||
-	   ctx.from < i64(ctx.blob.range_start) {
+	if jumps(ctx) || cut_fires(ctx) {
 		return true
 	}
 	for section in format.cutscene_track_sections(ctx.data, ctx.blob, ctx.track) {
@@ -539,6 +534,19 @@ teleports :: proc(ctx: ^Track_Context) -> bool {
 		}
 	}
 	return false
+}
+
+// jumps is whether this evaluation does not move on smoothly from the phase's last one: when it does not move forward
+// (a seek, a backwards scrub, a reload, a pause or a skip's hold), at the first evaluation, in a skip's jump, and on the
+// real clock (see docs/cinematics/evaluation.md#the-order-in-the-frame).
+@(private)
+jumps :: proc(ctx: ^Track_Context) -> bool {
+	return(
+		ctx.skipped ||
+		ctx.blob.clock == .Real ||
+		ctx.from >= i64(ctx.time) ||
+		ctx.from < i64(ctx.blob.range_start) \
+	)
 }
 
 // relative_space is what the track relative to another binding found at its first evaluation for the blob: a cycle,

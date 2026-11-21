@@ -2,7 +2,7 @@
 
 A track acts on the world at the cutscene's time. Its kind says what it writes: a field, a pose, a camera, a sound. This document describes the kinds that the engine has, in `lib/engine/cutscene`, and the curve that every keyed track shares. Read [Evaluation](evaluation.md) first, for sections, blending and the restore snapshot.
 
-**In this document:** [Curves](#curves) · [Property tracks](#property-tracks) · [Transform tracks](#transform-tracks) · [Animation tracks](#animation-tracks) · [Not built yet](#not-built-yet) · [Procedures](#procedures)
+**In this document:** [Curves](#curves) · [Property tracks](#property-tracks) · [Transform tracks](#transform-tracks) · [Animation tracks](#animation-tracks) · [Camera cut tracks](#camera-cut-tracks) · [Not built yet](#not-built-yet) · [Procedures](#procedures)
 
 ## Curves
 
@@ -161,7 +161,7 @@ track 1 transform "Fox walks"
 - it is a skip's jump;
 - the cutscene is on the real clock ([The order in the frame](evaluation.md#the-order-in-the-frame)).
 
-A camera cut will mark its frame as a cut, and transform tracks will teleport on it too ([#542](https://github.com/aszecsei/cinnabar/issues/542)).
+- the evaluation crosses a cut of the cutscene's camera cut track ([Camera cut tracks](#camera-cut-tracks)): a section's start that does not blend in from gameplay, or a section's end that cuts back to gameplay. A muted cut track cuts nothing.
 
 **Seek, skip and finish.**
 - **Seek and scrub backwards.** The pose is a function of the time, and the track teleports to it.
@@ -237,9 +237,82 @@ track 2 animation "Fox acts"
 
 `register` sets the animation kind. The game gives the cutscenes the animation's state in `init`. Without it, animation tracks do nothing.
 
+## Camera cut tracks
+
+A camera cut track says which camera the frame is drawn from over each range of time. It cuts between cameras on exact frames, as a film editor does, and it can blend from the gameplay camera into the first shot and back out of the last one. Constraints keep a camera aimed at a binding, or following it, without a key on each frame.
+
+```
+binding 3 "Wide Shot"
+	spawn = $7fb86acbe194450180b90ee9fb0ecf42
+	position = [149999999998, 1.6, -5]
+	look_at = 1
+track 5 camera_cut "Cuts"
+	section 5 0 200000
+		camera = 3
+		blend_in = 30000 smooth
+		focus = 1
+	section 6 200000 400000
+		camera = 4
+		look_at = 1
+		look_at_offset = [0, 0.5, 0]
+		look_at_damping = 12000
+	section 7 400000 600000
+		camera = 5
+		follow = 1
+		follow_offset = [1.5, 1.2, -3]
+		blend_out = 60000 smooth
+		blend_on_skip = true
+```
+
+**The cinematic camera.** A camera binding is an entity with a `Camera` ([Rendering: Components](../rendering/assets.md#components)). A `Cinematic_Camera` beside it gives it a lens in a camera's terms: a focal length, a sensor's width and height, a focus distance and an aperture.
+- **The field of view** is `2 × atan(sensor_height / (2 × focal_length))`. While a `Cinematic_Camera` is there, the `cinematic lens` system is the one writer of `Camera.vertical_fov`. It runs in the `Late` stage, after the cutscene's systems and the scripts, so a property track or a script that sets the lens sets the frame's field of view. The views read the lens directly too, so the editor's Edit mode, which runs no systems, shows the same field of view.
+- **The depth of field** takes the aperture and the focus ([Post-processing: Depth of field](../rendering/post-processing.md#depth-of-field)). A focus entity sets the focus to its distance along the camera's axis, each frame.
+- **Each field** animates with a property track on component 160, as the sample's rack focus does.
+- **The sensor's aspect** is the shot's aspect. The editor draws the camera's frustum with it. The presentation track's bars will letterbox a frame of another aspect ([#546](https://github.com/aszecsei/cinnabar/issues/546)).
+
+**Sections.** A cutscene has one camera cut track, and the track takes no binding. Each section shows the camera binding that `camera` names.
+- **Order.** Sections are in time order and do not overlap. A gap between two sections has no cutscene camera: the view goes back to gameplay.
+- **No blending between sections.** A section has a weight of 1, and no eases, rolls, channels or additive blend. Where two sections meet, the frame cuts.
+- **Blends with gameplay.** `blend_in = <ticks> [curve]` blends from gameplay into a section that starts the track or follows a gap. `blend_out` blends from a section that ends the track or comes before a gap back to gameplay. The curve is `linear` (the default), `smooth`, `ease_in` or `ease_out`. The camera stack blends the poses and the lens ([World: Cameras](../world/cameras.md)). Without a blend, the frame cuts.
+
+**What it does.** The track evaluates in the `Late` phase. It writes no field. It holds a claim on the game's views ([World: Cameras](../world/cameras.md)) for the section that covers the time:
+- **A claim for each section.** When a section starts to show, the track claims the views for its camera, at the player's priority, and releases the claim of the section before. A new claim is a new entry, so the stack cuts, even when two sections show the same camera.
+- **A cut** is a frame where the stack does not blend. Its view carries the cut to the renderer, which starts its temporal histories again: temporal AA, the upscaler, motion vectors, exposure and every pass that reprojects a history ([Rendering: Views](../rendering/frame.md#views)). Transform tracks and applied root motion teleport on the tick that crosses a cut ([Transform tracks](#transform-tracks)), so nothing interpolates across it.
+- **Gameplay.** Where no section covers the time, the track holds no claim.
+- **A camera that is not there.** A section whose binding is missing, or is not a live `Camera`, shows nothing. The player logs it once for the section.
+- **No room.** When the views' `MAX_ENTRIES` entries are all taken, the claim fails, and the camera package warns once. The track shows gameplay and claims again at its next evaluation.
+- **Several players.** The higher priority's claim shows. At the same priority, the later claim does.
+- **Without views.** `init` takes the game's views. Without them, the track claims nothing.
+
+**Constraints.** A section or a camera binding can constrain a camera:
+
+| Setting | What it does |
+|---|---|
+| `look_at = <binding>`, `look_at_offset = [x, y, z]`, `look_at_damping = <ticks>` | The camera turns so its forward, +z, points at the offset in the target's space. Up stays +y. |
+| `follow = <binding>`, `follow_offset = [x, y, z]`, `follow_damping = <ticks>` | The camera keeps the offset in the target's space. |
+| `focus = <binding>` | The camera's `Cinematic_Camera` focuses on the target. |
+
+- **Which applies.** A section's constraint applies to its camera while it shows. A binding's constraint applies to the binding as a camera, except where the section that shows it has one of the same kind.
+- **Stateless.** Constraints read the time and the bindings' poses only. The damping weight is `1 − e^(−τ / damping)`, where τ is the time since the start of the section that shows the camera. It blends the camera's own pose into the constrained one, so the constraint takes hold over the damping time after a cut. While no section shows the camera, a binding's constraint applies in full. So a seek and playback give the same pose at the same time.
+- **Order.** The constraints are a pass at the end of the `Fixed` phase, after every track. They see this tick's poses of their targets, from the targets' `Transform`s, so the camera and its target interpolate together. Follow moves the camera first, and look at aims from there. A look at overrides the rotation of a transform track of the camera, and a follow overrides its position; the other parts stay as the track keys them.
+- **Every evaluation.** For each camera that a constraint of the blob names, the pass writes every part that a constraint can write: the constrained value while one applies, and the value that the camera's tracks wrote this tick, or its own value, otherwise. So a camera that a constraint aimed in one shot is at its own pose in a later shot that has no constraint.
+- **The snapshot.** The pass writes as the cut track, so the track's `when_finished` restores or keeps the constrained parts.
+
+**Seek, skip and finish.**
+- **Seek and scrub backwards.** The section at the new time decides the camera, and the frame is a cut. A seek inside the same section cuts too.
+- **Pause.** Nothing changes, and no frame cuts. A blend that runs goes on with the stack's clock.
+- **Skip.** A skip to a later time cuts to the section there. A skip that ends the cutscene cuts back to gameplay, or, when the last section has `blend_on_skip = true`, blends out with that section's `blend_out` from whichever shot shows. The last shot is never shown: the skip and the end happen in one update.
+- **Hot reload.** A reload releases the claim with a cut, as it ends every hold of the evaluation. The next `Late` evaluation claims the section at the time again, in the same frame, so the frame cuts. A reload that removes or mutes the cut track leaves the view to gameplay.
+- **When finished.** The player releases its claim when it ends, so the stack hands the view back: with the last section's blend out when the cutscene ends in it, and with a cut when the player stops or fails. `restore` and `keep` do not apply to the view. The lens fields follow their property tracks' setting.
+- **Spawned cameras.** A spawned camera goes as the player ends. A blend out then starts from the view that it showed last.
+
+`register` sets the camera cut kind.
+
 ## Not built yet
 
-The other kinds of track are parts of [#526](https://github.com/aszecsei/cinnabar/issues/526): camera cuts ([#542](https://github.com/aszecsei/cinnabar/issues/542)), audio ([#543](https://github.com/aszecsei/cinnabar/issues/543)), events ([#544](https://github.com/aszecsei/cinnabar/issues/544)), sub-sequences ([#545](https://github.com/aszecsei/cinnabar/issues/545)) and presentation ([#546](https://github.com/aszecsei/cinnabar/issues/546)). Until they are built, a track of one of these kinds does nothing.
+- The other kinds of track are parts of [#526](https://github.com/aszecsei/cinnabar/issues/526): audio ([#543](https://github.com/aszecsei/cinnabar/issues/543)), events ([#544](https://github.com/aszecsei/cinnabar/issues/544)), sub-sequences ([#545](https://github.com/aszecsei/cinnabar/issues/545)) and presentation ([#546](https://github.com/aszecsei/cinnabar/issues/546)). Until they are built, a track of one of these kinds does nothing.
+- A sub-sequence's own camera cut track waits for [#545](https://github.com/aszecsei/cinnabar/issues/545).
+- In the editor, only the Game view follows the cut track. A viewport that pilots a camera waits for [#555](https://github.com/aszecsei/cinnabar/issues/555).
 
 ## Procedures
 
@@ -250,5 +323,7 @@ The other kinds of track are parts of [#526](https://github.com/aszecsei/cinnaba
 | `property_track(ctx)` | The property kind's evaluate procedure |
 | `transform_track(ctx)` | The transform kind's evaluate procedure |
 | `animation_track(ctx)` | The animation kind's evaluate procedure |
+| `camera_cut_track(ctx)` | The camera cut kind's evaluate procedure |
+| `end_cut(evaluation)` | Releases the cut track's claim on the views, with the blend that its shot leaves with. `restore`, `restore_all`, a reload and `destroy_evaluation` call it, through the one `end_holds`. |
 | `settle_pose(world, entity, teleport)` | Composes a child's `Transform` from what a track or a restore wrote. With `teleport`, also sets the `Previous_Transform` of the entity and of every entity under it. |
 | `pose_channel(name)` | A transform channel's place in the pose |

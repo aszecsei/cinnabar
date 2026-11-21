@@ -55,41 +55,60 @@ spawn_at :: proc(w: ^ecs.World, position: [3]f32) -> ecs.Entity {
 	return e
 }
 
+// A lens gives the field of view 2 × atan(sensor_height / (2 × focal_length)), in the view, through camera_vertical_fov
+// and in Camera.vertical_fov, which the "cinematic lens" system writes.
 @(test)
-a_focal_length_and_a_sensor_give_the_field_of_view :: proc(t: ^testing.T) {
+the_vertical_fov_is_twice_the_atan_of_half_the_sensor_over_the_focal_length :: proc(
+	t: ^testing.T,
+) {
 	f: Lens_Fixture
 	w := lens_setup(t, &f)
 	defer lens_teardown(&f)
 	e := spawn_at(w, {})
-	ecs.add(w, e, Camera{vertical_fov = 1, focal_length = 35, sensor_height = 15.6})
-	view, ok := camera_view(w, e)
-	testing.expect(t, ok)
-	want := 2 * math.atan(f32(15.6) / (2 * 35))
-	testing.expect_value(t, view.projection.(Perspective).vertical_fov, want)
-
-	// A focal length alone is on a full-frame sensor, and without one vertical_fov stands.
-	ecs.get(w, e, Camera)^ = {
-		vertical_fov = 1,
-		focal_length = 50,
+	ecs.add(w, e, Camera{vertical_fov = 1})
+	ecs.add(w, e, Cinematic_Camera{})
+	Lens_Case :: struct {
+		focal, sensor: f32,
 	}
-	view, _ = camera_view(w, e)
+	for c in ([]Lens_Case{{18, 24}, {35, 24}, {50, 18.66}, {85, 24}, {200, 13.365}}) {
+		ecs.get(w, e, Cinematic_Camera)^ = {
+			focal_length  = c.focal,
+			sensor_height = c.sensor,
+		}
+		want := 2 * math.atan(c.sensor / (2 * c.focal))
+		testing.expectf(
+			t,
+			abs(cinematic_vertical_fov(ecs.get(w, e, Cinematic_Camera)^) - want) < 1e-6,
+			"%v",
+			c,
+		)
+		testing.expectf(t, abs(camera_vertical_fov(w, e) - want) < 1e-6, "%v", c)
+		view, ok := camera_view(w, e)
+		testing.expect(t, ok)
+		testing.expectf(t, abs(view.projection.(Perspective).vertical_fov - want) < 1e-6, "%v", c)
+		set_cinematic_fov(w)
+		testing.expectf(t, abs(ecs.get(w, e, Camera).vertical_fov - want) < 1e-6, "%v", c)
+	}
+
+	// Zeros take a 35 mm lens on a full-frame sensor.
+	ecs.get(w, e, Cinematic_Camera)^ = {}
 	testing.expect_value(
 		t,
-		view.projection.(Perspective).vertical_fov,
-		2 * math.atan(f32(DEFAULT_SENSOR_HEIGHT) / (2 * 50)),
+		camera_vertical_fov(w, e),
+		2 * math.atan(f32(DEFAULT_SENSOR_HEIGHT) / (2 * DEFAULT_FOCAL_LENGTH)),
 	)
-	ecs.get(w, e, Camera)^ = {
-		vertical_fov = 1,
-	}
-	view, _ = camera_view(w, e)
+
+	// Without a Cinematic_Camera, the Camera's own field of view stands, and the system leaves it.
+	ecs.remove(w, e, Cinematic_Camera)
+	ecs.get(w, e, Camera).vertical_fov = 1
+	set_cinematic_fov(w)
+	testing.expect_value(t, ecs.get(w, e, Camera).vertical_fov, 1)
+	view, _ := camera_view(w, e)
 	testing.expect_value(t, view.projection.(Perspective).vertical_fov, 1)
+	testing.expect_value(t, view.lens, Lens{})
 
 	// The lens's focal length is the field of view's on the sensor again.
-	ecs.get(w, e, Camera)^ = {
-		focal_length  = 85,
-		sensor_height = 24,
-		aperture      = 2,
-	}
+	ecs.add(w, e, Cinematic_Camera{focal_length = 85, sensor_height = 24, aperture = 2})
 	view, _ = camera_view(w, e)
 	testing.expect(t, abs(lens_focal_length(view) - 85) < 1e-3)
 }
@@ -100,21 +119,27 @@ a_camera_without_an_aperture_has_no_lens :: proc(t: ^testing.T) {
 	w := lens_setup(t, &f)
 	defer lens_teardown(&f)
 	e := spawn_at(w, {})
-	ecs.add(w, e, Camera{focal_length = 50, focus_distance = 3})
+	ecs.add(w, e, Camera{})
+	ecs.add(w, e, Cinematic_Camera{focal_length = 50, focus_distance = 3})
 	view, _ := camera_view(w, e)
 	testing.expect_value(t, view.lens, Lens{})
 	testing.expect_value(t, lens_focal_length(view), 0)
 
-	ecs.get(w, e, Camera).aperture = 2.8
+	ecs.get(w, e, Cinematic_Camera).aperture = 2.8
 	view, _ = camera_view(w, e)
 	testing.expect_value(
 		t,
 		view.lens,
 		Lens{sensor_height = DEFAULT_SENSOR_HEIGHT, aperture = 2.8, focus_distance = 3},
 	)
-	ecs.get(w, e, Camera).focus_distance = 0
+	ecs.get(w, e, Cinematic_Camera).focus_distance = 0
 	view, _ = camera_view(w, e)
 	testing.expect_value(t, view.lens.focus_distance, DEFAULT_FOCUS_DISTANCE)
+
+	// An orthographic camera has no lens.
+	ecs.get(w, e, Camera).projection = .Orthographic
+	view, _ = camera_view(w, e)
+	testing.expect_value(t, view.lens, Lens{})
 }
 
 @(test)
@@ -124,7 +149,8 @@ a_focus_entity_sets_the_focus_by_its_distance_along_the_axis :: proc(t: ^testing
 	defer lens_teardown(&f)
 	e := spawn_at(w, {0, 0, 1})
 	target := spawn_at(w, {3, 0, 5})
-	ecs.add(w, e, Camera{aperture = 2, focus_distance = 7, focus = target})
+	ecs.add(w, e, Camera{})
+	ecs.add(w, e, Cinematic_Camera{aperture = 2, focus_distance = 7, focus = target})
 	view, _ := camera_view(w, e)
 	// The camera looks down +z: 4 m ahead, whatever the target's x.
 	testing.expect_value(t, view.lens.focus_distance, 4)
