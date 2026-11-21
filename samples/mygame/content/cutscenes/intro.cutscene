@@ -1,11 +1,12 @@
 cutscene 1
 # The sample's intro (see docs/content/kinds/cutscenes.md): the animation scene's walking fox walks 4 m, past a guard
 # that the cutscene spawns, to a bark, after the fox_walk shot. Times are ticks, 60000 a second. The fox's track is
-# relative, so it walks from where it stands, and its walk clip loops in place while that track moves it. Three spawned
-# shot cameras cut the scene: a wide shot that blends in from gameplay, a close shot that racks its focus, and a
-# tracking shot that blends back out. Music swells under it and plays on into gameplay, a line of dialogue plays over
-# the wide shot, and the guard's bark is heard where the guard stands. A story track tells every behaviour when the guard
-# barks, and that the intro was seen, also when it is skipped.
+# relative, so it walks from where it stands, and its walk clip loops in place while that track moves it. The shot, which
+# the intro binds to the fox, turns the fox to its path as the intro begins. Three spawned shot cameras cut the scene: a
+# wide shot that blends in from gameplay, a close shot that racks its focus, and a tracking shot that blends back out.
+# Music swells under it and plays on into gameplay, a line of dialogue plays over the wide shot, and the guard's bark is
+# heard where the guard stands. A story track tells every behaviour when the guard barks, and that the intro was seen,
+# also when it is skipped.
 length = 720000
 # The range ends at 10 s. The music runs 2 s past it, into gameplay.
 range = [0, 600000]
@@ -55,8 +56,10 @@ track 3 audio "Bark"
 		min_distance = 2
 		max_distance = 30
 track 4 sub_sequence "Opening shot"
+	# The shot's walker is the fox.
 	section 4 0 300000
 		asset = $497bcb7bb533b902877cd8d56fbf97cd
+		bind 1 = 1
 track 5 camera_cut "Cuts"
 	# A wide shot blends in from gameplay and looks at the fox, focused on it.
 	section 5 0 200000

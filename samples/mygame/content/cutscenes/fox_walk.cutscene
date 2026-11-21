@@ -1,11 +1,22 @@
 cutscene 1
-# A shot of 5 s that the intro plays as a sub-sequence (see docs/content/kinds/cutscenes.md). Times are ticks, 60000 a
-# second. It has no bindings of its own.
+# A shot of 5 s that the intro plays as a sub-sequence (see docs/cinematics/tracks.md#sub-sequence-tracks). Times are
+# ticks, 60000 a second. Its walker turns from the camera to its path over the first second, as the frame fades in. The
+# intro binds the walker to its fox; on its own, the shot possesses the fox itself.
 length = 300000
 rate = 30
+
+binding 1 "Walker"
+	possess = @f496b929575035d9c2626ed56d3165ba/79cea6d7586e3f48
+	policy = optional
 
 track 1 presentation "Fade in"
 	section 1 0 60000
 		channel opacity
 			key 0 1 linear
 			key 60000 0 linear
+track 2 transform "Turn to the path"
+	binding = 1
+	section 2 0 60000
+		channel rotation_y
+			key 0 -90 auto
+			key 60000 0 auto
