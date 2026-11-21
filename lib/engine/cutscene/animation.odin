@@ -88,7 +88,7 @@ marker_section :: proc(
 clip_sections :: proc(ctx: ^Track_Context, animation: ^anim.State) -> []Clip_Section {
 	found := make([dynamic]Clip_Section, ctx.world.platform.frame_allocator)
 	for section in format.cutscene_track_sections(ctx.data, ctx.blob, ctx.track) {
-		at := sample(ctx, section, ctx.time) or_continue
+		at := sample_section(ctx, section, ctx.time) or_continue
 		if at.weight <= 0 {
 			continue
 		}
@@ -279,7 +279,7 @@ apply_root_motion :: proc(ctx: ^Track_Context, animation: ^anim.State, entity: e
 			if !has_motion {
 				continue
 			}
-			at := sample(ctx, section, middle) or_continue
+			at := sample_section(ctx, section, middle) or_continue
 			if at.weight <= 0 {
 				continue
 			}

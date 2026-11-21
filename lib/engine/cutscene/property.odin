@@ -203,7 +203,7 @@ blend_continuous :: proc(
 	blends: [3]Blend(f32)
 	added: [3]f32
 	for section in format.cutscene_track_sections(ctx.data, ctx.blob, ctx.track) {
-		at := sample(ctx, section, ctx.time) or_continue
+		at := sample_section(ctx, section, ctx.time) or_continue
 		covered = true
 		for channel in format.cutscene_section_channels(ctx.data, ctx.blob, section) {
 			c, _ := channel_component(target.kind, format.blob_string(ctx.data, channel.name))
@@ -238,7 +238,7 @@ blend_stepped :: proc(
 	picked: Maybe(f32)
 	added: f64
 	for section in format.cutscene_track_sections(ctx.data, ctx.blob, ctx.track) {
-		at := sample(ctx, section, ctx.time) or_continue
+		at := sample_section(ctx, section, ctx.time) or_continue
 		covered = true
 		for channel in format.cutscene_section_channels(ctx.data, ctx.blob, section) {
 			v := curve_step(format.cutscene_channel_keys(ctx.data, ctx.blob, channel), at.local)

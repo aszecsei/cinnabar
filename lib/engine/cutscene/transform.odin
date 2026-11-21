@@ -347,7 +347,7 @@ held_parts :: proc(ctx: ^Track_Context) -> (held: bit_set[Pose_Part]) {
 @(private)
 touched_axis :: proc(ctx: ^Track_Context, want: Pose_Channel) -> bool {
 	for section in format.cutscene_track_sections(ctx.data, ctx.blob, ctx.track) {
-		if _, covers := sample(ctx, section, ctx.time); !covers {
+		if _, covers := sample_section(ctx, section, ctx.time); !covers {
 			continue
 		}
 		for channel in format.cutscene_section_channels(ctx.data, ctx.blob, section) {
@@ -378,7 +378,7 @@ blend_pose :: proc(
 	rotation: quaternion128
 	rotation_weight: f32
 	for section in format.cutscene_track_sections(ctx.data, ctx.blob, ctx.track) {
-		at := sample(ctx, section, ctx.time) or_continue
+		at := sample_section(ctx, section, ctx.time) or_continue
 		additive := .Additive in section.flags
 		euler := [3]f32{} if additive else own_euler
 		rotated := false

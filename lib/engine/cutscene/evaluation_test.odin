@@ -186,7 +186,7 @@ brightness_track :: proc(ctx: ^Track_Context) {
 	}
 	b: Blend(f32)
 	for section in format.cutscene_track_sections(ctx.data, ctx.blob, ctx.track) {
-		at, covers := section_at(ctx.blob, section, ctx.time)
+		at, covers := sample_section(ctx, section, ctx.time)
 		if !covers {
 			continue
 		}
@@ -224,7 +224,7 @@ position_track :: proc(ctx: ^Track_Context) {
 		return
 	}
 	for section in format.cutscene_track_sections(ctx.data, ctx.blob, ctx.track) {
-		at, covers := section_at(ctx.blob, section, ctx.time)
+		at, covers := sample_section(ctx, section, ctx.time)
 		if !covers {
 			continue
 		}

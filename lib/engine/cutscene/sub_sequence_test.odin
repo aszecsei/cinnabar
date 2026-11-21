@@ -255,7 +255,12 @@ shows :: proc(id: u32, length: i32) -> format.Cutscene_Track_Contents {
 
 // trigger is an event track of one trigger at a time, which fires when skipped when asked.
 @(private = "file")
-trigger :: proc(id: u32, at: i32, name: string, when_skipped := false) -> format.Cutscene_Track_Contents {
+trigger :: proc(
+	id: u32,
+	at: i32,
+	name: string,
+	when_skipped := false,
+) -> format.Cutscene_Track_Contents {
 	events := make([]format.Cutscene_Event_Contents, 1, context.temp_allocator)
 	events[0] = {
 		id    = 700 + id,
@@ -264,7 +269,13 @@ trigger :: proc(id: u32, at: i32, name: string, when_skipped := false) -> format
 		name  = name,
 		flags = {.Fire_When_Skipped} if when_skipped else {},
 	}
-	return {id = id, kind = .Event, name = "Events", binding = format.CUTSCENE_NONE, events = events}
+	return {
+		id = id,
+		kind = .Event,
+		name = "Events",
+		binding = format.CUTSCENE_NONE,
+		events = events,
+	}
 }
 
 // Play is a sub-sequence section: the shot that it plays over a time of the master, and what it maps of the shot's
@@ -289,7 +300,10 @@ sub_sequence :: proc(id: u32, plays: ..Play) -> format.Cutscene_Track_Contents {
 		maps: []format.Cutscene_Binding_Map_Contents
 		if parent, mapped := p.binding.?; mapped {
 			maps = make([]format.Cutscene_Binding_Map_Contents, 1, context.temp_allocator)
-			maps[0] = {child = 1, parent = parent}
+			maps[0] = {
+				child  = 1,
+				parent = parent,
+			}
 		}
 		sections[i] = {
 			id       = 100 * id + u32(i),
@@ -402,13 +416,27 @@ a_parents_time_maps_to_its_childs_through_the_offset_trim_scale_and_loop :: proc
 	}
 	for c in looped {
 		child, loops := child_time(section, trim, c.t)
-		testing.expectf(t, child == c.child && loops == c.loops, "%d: %d after %d loops", c.t, child, loops)
+		testing.expectf(
+			t,
+			child == c.child && loops == c.loops,
+			"%d: %d after %d loops",
+			c.t,
+			child,
+			loops,
+		)
 	}
 	section.flags = {}
 	held := [?]Case{{SECOND + 6000, 18000, 0}, {SECOND + 12000, 30000, 0}, {2 * SECOND, 30000, 0}}
 	for c in held {
 		child, loops := child_time(section, trim, c.t)
-		testing.expectf(t, child == c.child && loops == c.loops, "held %d: %d after %d loops", c.t, child, loops)
+		testing.expectf(
+			t,
+			child == c.child && loops == c.loops,
+			"held %d: %d after %d loops",
+			c.t,
+			child,
+			loops,
+		)
 	}
 
 	section.flags = {.Loop}
@@ -428,7 +456,11 @@ a_parents_time_maps_to_its_childs_through_the_offset_trim_scale_and_loop :: proc
 		range_start = 3000,
 		range_end   = 20000,
 	}
-	testing.expect_value(t, trim_of({offset = 1000, trim_end = 50000}, &child_blob), Trim{3000, 20000})
+	testing.expect_value(
+		t,
+		trim_of({offset = 1000, trim_end = 50000}, &child_blob),
+		Trim{3000, 20000},
+	)
 	testing.expect_value(t, trim_of({offset = 6000}, &child_blob), Trim{6000, 20000})
 }
 
@@ -467,7 +499,13 @@ a_master_of_three_shots_cuts_to_each_shots_camera :: proc(t: ^testing.T) {
 		shown := tick(f)
 		want: f64 = 1 if k < 30 else 2 if k < 60 else 3
 		cut := k == 1 || k == 30 || k == 60
-		testing.expectf(t, abs(view_x(shown) - want) < 1e-4, "frame %d shows x %v", k, view_x(shown))
+		testing.expectf(
+			t,
+			abs(view_x(shown) - want) < 1e-4,
+			"frame %d shows x %v",
+			k,
+			view_x(shown),
+		)
 		testing.expectf(t, shown.views[0].cut == cut, "frame %d: cut %v", k, shown.views[0].cut)
 	}
 	tick(f)
@@ -492,7 +530,9 @@ a_master_of_three_shots_cuts_to_each_shots_camera :: proc(t: ^testing.T) {
 				kind = .Camera_Cut,
 				name = "Master cuts",
 				binding = format.CUTSCENE_NONE,
-				sections = {{id = 20, start = shot_length, end = 2 * shot_length, weight = 1, camera = 3}},
+				sections = {
+					{id = 20, start = shot_length, end = 2 * shot_length, weight = 1, camera = 3},
+				},
 			},
 		},
 		key = 2,
@@ -502,7 +542,13 @@ a_master_of_three_shots_cuts_to_each_shots_camera :: proc(t: ^testing.T) {
 	for k in 1 ..= 89 {
 		shown := tick(f)
 		want: f64 = 1 if k < 30 else 4 if k < 60 else 3
-		testing.expectf(t, abs(view_x(shown) - want) < 1e-4, "own cut: frame %d shows x %v", k, view_x(shown))
+		testing.expectf(
+			t,
+			abs(view_x(shown) - want) < 1e-4,
+			"own cut: frame %d shows x %v",
+			k,
+			view_x(shown),
+		)
 	}
 }
 
@@ -531,7 +577,11 @@ one_shot_plays_twice_with_other_bindings :: proc(t: ^testing.T) {
 	live := player_evaluation(&f.cutscenes, h) or_else nil
 	testing.expect(t, live != nil && len(live.children) == 2, "a child for each section")
 	if live != nil && len(live.children) == 2 {
-		testing.expect(t, live.children[0].scope != live.children[1].scope, "each section is a scope")
+		testing.expect(
+			t,
+			live.children[0].scope != live.children[1].scope,
+			"each section is a scope",
+		)
 	}
 	for _ in 1 ..= 15 {
 		tick(f)
@@ -563,7 +613,10 @@ a_looping_shot_fires_its_events_in_each_loop :: proc(t: ^testing.T) {
 		SECOND,
 		0,
 		{
-			sub_sequence(1, {shot = shot_guid(1), start = 0, end = SECOND, scale = 2, loop = true}),
+			sub_sequence(
+				1,
+				{shot = shot_guid(1), start = 0, end = SECOND, scale = 2, loop = true},
+			),
 			trigger(2, SECOND / 2, "half"),
 		},
 	)
@@ -596,7 +649,12 @@ a_skip_sends_the_shots_events_that_fire_when_skipped_in_order :: proc(t: ^testin
 		0,
 		{trigger(1, half / 2, "first", when_skipped = true), trigger(2, half / 4, "quiet")},
 	)
-	second := cutscene_blob(shot_guid(2), half, 0, {trigger(1, half / 2, "second", when_skipped = true)})
+	second := cutscene_blob(
+		shot_guid(2),
+		half,
+		0,
+		{trigger(1, half / 2, "second", when_skipped = true)},
+	)
 	master := cutscene_blob(
 		MASTER_GUID,
 		SECOND,
@@ -651,8 +709,17 @@ a_shot_cooked_again_while_the_master_plays_shows_at_once :: proc(t: ^testing.T) 
 	testing.expect(t, asset.set_live(&f.assets, shot_guid(1), edited))
 	tick(f)
 	testing.expect_value(t, status(&f.cutscenes, h), Player_Status.Playing)
-	testing.expectf(t, abs(x_of(f, a) - 4.2) < 1e-3, "the new shot walks A twice as far: %v", x_of(f, a))
-	testing.expect_value(t, len((player_evaluation(&f.cutscenes, h) or_else nil).children), children)
+	testing.expectf(
+		t,
+		abs(x_of(f, a) - 4.2) < 1e-3,
+		"the new shot walks A twice as far: %v",
+		x_of(f, a),
+	)
+	testing.expect_value(
+		t,
+		len((player_evaluation(&f.cutscenes, h) or_else nil).children),
+		children,
+	)
 }
 
 // Blobs whose sub-sequences reach each other, which the cook refuses, fail the player as it loads, and change nothing.
@@ -667,7 +734,12 @@ sub_sequences_that_reach_each_other_fail_the_player :: proc(t: ^testing.T) {
 		1,
 		{walk(1, 3, SECOND), sub_sequence(2, {shot = shot_guid(2), start = 0, end = SECOND})},
 	)
-	two := cutscene_blob(shot_guid(2), SECOND, 0, {sub_sequence(1, {shot = shot_guid(1), start = 0, end = SECOND})})
+	two := cutscene_blob(
+		shot_guid(2),
+		SECOND,
+		0,
+		{sub_sequence(1, {shot = shot_guid(1), start = 0, end = SECOND})},
+	)
 	master := cutscene_blob(
 		MASTER_GUID,
 		SECOND,

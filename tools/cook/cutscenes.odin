@@ -244,7 +244,8 @@ cutscene_sub_sequences :: proc(graph: ^Cutscene_Graph, assets: []Asset_Source) {
 		contents := node.parsed.contents
 		own := kinds_of(contents)
 		for m in node.parsed.maps {
-			if m.track >= len(contents.tracks) || m.section >= len(contents.tracks[m.track].sections) {
+			if m.track >= len(contents.tracks) ||
+			   m.section >= len(contents.tracks[m.track].sections) {
 				continue
 			}
 			section := contents.tracks[m.track].sections[m.section]
@@ -291,7 +292,8 @@ cutscene_sub_sequences :: proc(graph: ^Cutscene_Graph, assets: []Asset_Source) {
 				continue
 			}
 			theirs := kinds_of(child)
-			if misfit(theirs, u32(index), own, m.parent) || misfit(own, m.parent, theirs, u32(index)) {
+			if misfit(theirs, u32(index), own, m.parent) ||
+			   misfit(own, m.parent, theirs, u32(index)) {
 				append(
 					&node.graph_problems,
 					Cutscene_Problem {
@@ -1576,7 +1578,6 @@ cutscene_parse :: proc(
 					&found,
 					line,
 					"%q is not a setting of a section: ease_in, ease_out, weight, pre_roll, post_roll, asset, blend, offset, speed, loop, trim, scale, root_motion, camera, blend_in, blend_out, blend_on_skip, look_at, look_at_offset, look_at_damping, follow, follow_offset, follow_damping, focus, bus, min_distance, max_distance or plays_through_skip",
-
 					name,
 				)
 			}
@@ -1922,7 +1923,11 @@ cutscene_parse :: proc(
 			} else {
 				for setting_line in s.sub_lines {
 					if setting_line != 0 {
-						problem(&found, setting_line, "only a sub_sequence section has a trim and a scale")
+						problem(
+							&found,
+							setting_line,
+							"only a sub_sequence section has a trim and a scale",
+						)
 					}
 				}
 				if len(s.binds) > 0 {
@@ -2069,7 +2074,11 @@ cutscene_sub_sequence_section :: proc(
 	}
 	s := sections[index]
 	if len(s.channels) > 0 {
-		problem(found, s.channels[0].line, "a sub_sequence section has no channels: its sub-sequence's tracks do")
+		problem(
+			found,
+			s.channels[0].line,
+			"a sub_sequence section has no channels: its sub-sequence's tracks do",
+		)
 	}
 	if index > 0 && s.contents.start < sections[index - 1].contents.end {
 		problem(

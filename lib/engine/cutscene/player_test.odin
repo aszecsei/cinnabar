@@ -193,7 +193,7 @@ dial_track :: proc(ctx: ^Track_Context) {
 	}
 	b: Blend(f32)
 	for section in format.cutscene_track_sections(ctx.data, ctx.blob, ctx.track) {
-		at, covers := section_at(ctx.blob, section, ctx.time)
+		at, covers := sample_section(ctx, section, ctx.time)
 		if !covers {
 			continue
 		}
@@ -727,7 +727,11 @@ a_missing_clip_fails_in_loading_and_leaves_nothing :: proc(t: ^testing.T) {
 	update(&f.cutscenes, {world = &f.world, scenes = &scenes})
 	failure, failed = player_failure(&f.cutscenes, unbound)
 	testing.expect(t, failed)
-	testing.expect_value(t, failure.(Binding_Failure), Binding_Failure{index = 1, reason = .Missing})
+	testing.expect_value(
+		t,
+		failure.(Binding_Failure),
+		Binding_Failure{index = 1, reason = .Missing},
+	)
 	ecs.collect(&f.world, {ecs.TRANSFORM_ID}, &props)
 	testing.expect_value(t, len(props), 0)
 }
@@ -1038,7 +1042,11 @@ a_failed_player_resumes_what_it_suspended :: proc(t: ^testing.T) {
 	update(&f.cutscenes, {world = &f.world, scenes = &scenes})
 	expect_status(t, f, h, .Failed)
 	failure, _ := player_failure(&f.cutscenes, h)
-	testing.expect_value(t, failure.(Binding_Failure), Binding_Failure{index = 1, reason = .Missing})
+	testing.expect_value(
+		t,
+		failure.(Binding_Failure),
+		Binding_Failure{index = 1, reason = .Missing},
+	)
 	testing.expect(t, !ecs.has(&f.world, f.hero, ecs.Suspended), "the hero is free")
 
 	write_cutscene(t, f, {guid = OUTRO_GUID, value = 7, suspend = every})
@@ -1555,4 +1563,76 @@ a_skip_while_loading_ends_the_cutscene_once_loaded_without_playing :: proc(t: ^t
 	}
 	testing.expect_value(t, dial(f, f.hero), 7)
 	testing.expect_value(t, len(f.fired), 2)
+}
+
+// A shot that spawns the prop plays in the second half of a master, which maps the shot's hero and rival to its own.
+// The prop spawns as the master loads, hidden, shows from the frame after its section begins, and goes with the master.
+// The shot's dial track writes the hero only while its section covers the time.
+@(test)
+a_shots_spawned_entity_shows_while_its_section_covers_the_time :: proc(t: ^testing.T) {
+	f := player_setup(t)
+	defer player_teardown(f)
+	write_cutscene(t, f, {guid = OUTRO_GUID, length = SECOND / 2, value = 7, prop = true})
+	master := format.cutscene_write(
+		{
+			guid = INTRO_GUID,
+			key = 1,
+			length = SECOND,
+			rate = 30,
+			range_end = SECOND,
+			bindings = {possessed(1, "Hero"), possessed(2, "Rival")},
+			tracks = {
+				{
+					id = 1,
+					kind = .Sub_Sequence,
+					name = "Prop shot",
+					binding = format.CUTSCENE_NONE,
+					sections = {
+						{
+							id = 1,
+							start = SECOND / 2,
+							end = SECOND,
+							weight = 1,
+							asset = OUTRO_GUID,
+							speed = 1,
+							bindings = {{child = 1, parent = 0}, {child = 2, parent = 1}},
+						},
+					},
+				},
+			},
+			source_path = "game/cutscenes/master.cutscene",
+		},
+		context.temp_allocator,
+	)
+	testing.expect(t, asset.set_live(&f.assets, INTRO_GUID, master))
+	before := dial(f, f.hero)
+	h, _ := play(&f.cutscenes, &f.world, {cutscene = INTRO_GUID, overrides = cast_of(f)})
+	frame(f)
+	e, live := player_evaluation(&f.cutscenes, h)
+	testing.expect(t, live && len(e.children) == 1)
+	if !live || len(e.children) != 1 {
+		return
+	}
+	prop, spawned := binding_entity(&e.children[0].bindings, &f.world, 2)
+	testing.expect(t, spawned, "the shot's prop spawns as the master loads")
+	for {
+		at, _ := player_time(&f.cutscenes, h)
+		if at >= SECOND / 2 {
+			break
+		}
+		testing.expectf(t, ecs.has(&f.world, prop, ecs.Loading), "the prop is hidden at %d", at)
+		testing.expect_value(t, dial(f, f.hero), before)
+		frame(f)
+	}
+	frame(f)
+	testing.expect(t, !ecs.has(&f.world, prop, ecs.Loading), "the prop shows in its section")
+	testing.expect_value(t, dial(f, f.hero), 7)
+	testing.expect_value(t, dial(f, f.rival), 2)
+	for status(&f.cutscenes, h) == .Playing {
+		frame(f)
+	}
+	frame(f)
+	testing.expect_value(t, status(&f.cutscenes, h), Player_Status.Restored)
+	testing.expect(t, !ecs.is_alive(&f.world, prop), "the prop goes with the master")
+	testing.expect_value(t, dial(f, f.hero), before)
 }

@@ -130,7 +130,12 @@ audio_track :: proc(ctx: ^Track_Context) {
 				if playing.through {
 					next = Sound_Released{}
 				}
-				change_sound(e, {ctx.scope, section.id}, next, skip_leave(s, p, ctx.root, playing, e.time))
+				change_sound(
+					e,
+					{ctx.scope, section.id},
+					next,
+					skip_leave(s, p, ctx.root, playing, e.time),
+				)
 			}
 			continue
 		}
@@ -152,7 +157,7 @@ audio_track :: proc(ctx: ^Track_Context) {
 			continue
 		}
 		local := i32(at) - section.start
-		sample, _ := sample(ctx, section, i32(at))
+		sample, _ := sample_section(ctx, section, i32(at))
 		gain := f64(sample.weight) * f64(ctx.track.gain)
 		pitch := f64(1)
 		for channel in format.cutscene_section_channels(ctx.data, ctx.blob, section) {
@@ -270,7 +275,7 @@ scrub_track :: proc(ctx: ^Track_Context, sections: []format.Cutscene_Section) {
 		if !loaded || !inside {
 			continue
 		}
-		sample, _ := sample(ctx, section, ctx.time)
+		sample, _ := sample_section(ctx, section, ctx.time)
 		gain := sample.weight * ctx.track.gain
 		for channel in format.cutscene_section_channels(ctx.data, ctx.blob, section) {
 			if format.blob_string(ctx.data, channel.name) == format.CUTSCENE_AUDIO_GAIN {

@@ -252,7 +252,7 @@ shown_section :: proc(
 	ok: bool,
 ) {
 	for section, i in sections {
-		if _, covers := sample(ctx, section, t); covers {
+		if _, covers := sample_section(ctx, section, t); covers {
 			return i, true
 		}
 	}

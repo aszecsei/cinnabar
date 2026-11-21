@@ -850,3 +850,155 @@ markers_at_a_sections_edges_fire :: proc(t: ^testing.T) {
 		clip_teardown(f)
 	}
 }
+
+// Two shots that overlap in a master, each an animation track of one clip on its own binding, which the master maps to
+// one character: where the first eases out as the second eases in, the character's pose is the driver's blend of both
+// clips at the shots' times, by the sections' weights, as overlapping sections of one cutscene give.
+@(test)
+two_shots_that_overlap_cross_fade_their_poses :: proc(t: ^testing.T) {
+	f := clip_setup(t)
+	defer clip_teardown(f)
+	actor := character(f)
+	reference := character(f)
+	shot_of :: proc(guid, clip: format.Guid) -> []byte {
+		return format.cutscene_write(
+			{
+				guid = guid,
+				key = 1,
+				length = SECOND,
+				rate = 30,
+				range_end = SECOND,
+				bindings = {
+					{
+						id = 1,
+						kind = .Possessed,
+						name = "Actor",
+						parent = format.CUTSCENE_NONE,
+						asset = SCENE_GUID,
+						entity = 9,
+						rotation = {0, 0, 0, 1},
+						scale = {1, 1, 1},
+					},
+				},
+				tracks = {
+					{
+						id = 1,
+						kind = .Animation,
+						name = "Acts",
+						binding = 0,
+						sections = {
+							{id = 1, start = 0, end = SECOND, weight = 1, asset = clip, speed = 1},
+						},
+					},
+				},
+				source_path = "game/cutscenes/shot.cutscene",
+			},
+			context.temp_allocator,
+		)
+	}
+	walk_shot := format.Guid {
+		0  = 0x74,
+		15 = 20,
+	}
+	wave_shot := format.Guid {
+		0  = 0x74,
+		15 = 21,
+	}
+	testing.expect(t, asset.set_live(&f.assets, walk_shot, shot_of(walk_shot, WALK_GUID)))
+	testing.expect(t, asset.set_live(&f.assets, wave_shot, shot_of(wave_shot, WAVE_GUID)))
+	bindings := []format.Cutscene_Binding_Contents {
+		{
+			id = 1,
+			kind = .Possessed,
+			name = "A",
+			parent = format.CUTSCENE_NONE,
+			asset = SCENE_GUID,
+			entity = 1,
+			rotation = {0, 0, 0, 1},
+			scale = {1, 1, 1},
+		},
+		{
+			id = 2,
+			kind = .Possessed,
+			name = "B",
+			parent = format.CUTSCENE_NONE,
+			asset = SCENE_GUID,
+			entity = 2,
+			rotation = {0, 0, 0, 1},
+			scale = {1, 1, 1},
+		},
+	}
+	master := format.cutscene_write(
+		{
+			guid = CLIPS_GUID,
+			key = 1,
+			length = SECOND * 3 / 2,
+			rate = 30,
+			range_end = SECOND * 3 / 2,
+			bindings = bindings,
+			tracks = {
+				{
+					id = 1,
+					kind = .Sub_Sequence,
+					name = "Walk shot",
+					binding = format.CUTSCENE_NONE,
+					sections = {
+						{
+							id = 1,
+							start = 0,
+							end = SECOND,
+							ease_out = SECOND / 2,
+							weight = 1,
+							asset = walk_shot,
+							speed = 1,
+							bindings = {{child = 1, parent = 0}},
+						},
+					},
+				},
+				{
+					id = 2,
+					kind = .Sub_Sequence,
+					name = "Wave shot",
+					binding = format.CUTSCENE_NONE,
+					sections = {
+						{
+							id = 2,
+							start = SECOND / 2,
+							end = SECOND * 3 / 2,
+							ease_in = SECOND / 2,
+							weight = 1,
+							asset = wave_shot,
+							speed = 1,
+							bindings = {{child = 1, parent = 0}},
+						},
+					},
+				},
+			},
+			source_path = "game/cutscenes/master.cutscene",
+		},
+		context.temp_allocator,
+	)
+	h := play_blob(t, f, master)
+	for _ in 1 ..= 45 {
+		tick(f)
+	}
+	at, _ := player_time(&f.cutscenes, h)
+	testing.expect_value(t, at, SECOND * 3 / 4)
+	token, ok := anim.begin_drive(&f.animation, &f.world, reference, hold = true)
+	testing.expect(t, ok)
+	half := ease(0.5)
+	samples := [anim.MAX_DRIVEN]anim.Driven_Sample {
+		{clip = WALK_GUID, time = 0.75, weight = half, root_motion = .In_Pose},
+		{clip = WAVE_GUID, time = 0.25, weight = half, root_motion = .In_Pose},
+	}
+	anim.drive(&f.world, token, samples[:])
+	got, has_got := root_of(f, actor)
+	want, has_want := root_of(f, reference)
+	testing.expect(t, has_got && has_want)
+	testing.expectf(t, same_root(got, want), "posed %v, the driver's blend %v", got, want)
+	walk_only := samples
+	walk_only[1] = {}
+	anim.drive(&f.world, token, walk_only[:1])
+	alone, _ := root_of(f, reference)
+	testing.expect(t, !same_root(got, alone), "the wave counts")
+}

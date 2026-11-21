@@ -382,7 +382,12 @@ close_children :: proc(s: ^State, w: ^ecs.World, e: ^Evaluation) -> (despawned: 
 // assets that it plays, and each sub-sequence section that plays a child, with its cutscene and its maps. A reload that
 // changes it loads the children again. A reload that changes only tracks keeps them.
 @(private)
-children_shape :: proc(s: ^State, e: ^Evaluation, data: []byte, blob: ^format.Cutscene_Blob) -> u64 {
+children_shape :: proc(
+	s: ^State,
+	e: ^Evaluation,
+	data: []byte,
+	blob: ^format.Cutscene_Blob,
+) -> u64 {
 	Walk :: struct {
 		s: ^State,
 		e: ^Evaluation,
@@ -459,7 +464,14 @@ trim_of :: proc(section: format.Cutscene_Section, child: ^format.Cutscene_Blob) 
 // wrapped into the trim when the section loops, and held at the trim's end when it does not. A time before the section
 // maps to its start, and one after it to its end. loops is how many times the trim wrapped before the time. It is the
 // one place that maps a parent's time to a child's: every track of the child evaluates at it.
-child_time :: proc(section: format.Cutscene_Section, trim: Trim, t: i64) -> (child: i64, loops: i64) {
+child_time :: proc(
+	section: format.Cutscene_Section,
+	trim: Trim,
+	t: i64,
+) -> (
+	child: i64,
+	loops: i64,
+) {
 	local := clamp(t, i64(section.start), i64(section.end)) - i64(section.start)
 	span := i64(math.floor(f64(local) * f64(section.speed)))
 	length := i64(trim.end) - i64(trim.start)
@@ -489,7 +501,13 @@ Child_Range :: struct {
 // [start, end] maps to none. One that enters the section starts just before the trim's start, so an event there fires.
 // A loop's wrap ends a segment at the trim's end and starts the next just before the trim's start, as a clip's markers
 // do. Past MAX_WRAPS wraps, the loops between are left out.
-child_range :: proc(section: format.Cutscene_Section, trim: Trim, from, to: i64) -> (r: Child_Range) {
+child_range :: proc(
+	section: format.Cutscene_Section,
+	trim: Trim,
+	from, to: i64,
+) -> (
+	r: Child_Range,
+) {
 	if to <= from || to < i64(section.start) || from >= i64(section.end) {
 		return
 	}
@@ -533,7 +551,7 @@ child_context :: proc(
 	section := format.cutscene_sections(parent.data, parent.blob)[c.section]
 	trim := trim_of(section, blob)
 	t, _ := child_time(section, trim, i64(parent.time))
-	at, covers := sample(parent, section, parent.time)
+	at, covers := sample_section(parent, section, parent.time)
 	segments = child_range(section, trim, parent.from, parent.to)
 	ctx = parent^
 	ctx.data, ctx.blob = data, blob
@@ -563,7 +581,14 @@ child_context :: proc(
 
 // scope_context is the context of one cutscene of the tree under the root's context, mapped through each sub-sequence
 // section on the path to it. False when a blob on the path is not loaded.
-scope_context :: proc(s: ^State, root: ^Track_Context, child: int) -> (ctx: Track_Context, ok: bool) {
+scope_context :: proc(
+	s: ^State,
+	root: ^Track_Context,
+	child: int,
+) -> (
+	ctx: Track_Context,
+	ok: bool,
+) {
 	if child == 0 {
 		return root^, true
 	}
@@ -591,7 +616,13 @@ Walk_Pass :: enum u8 {
 // in its sub-sequence track's place, and gives the order that the next track takes. A pass evaluates only its tracks,
 // but every pass counts every track, so a track's order is the same in each.
 @(private)
-walk_scope :: proc(s: ^State, ctx: ^Track_Context, phase: Phase, pass: Walk_Pass, order: u32) -> u32 {
+walk_scope :: proc(
+	s: ^State,
+	ctx: ^Track_Context,
+	phase: Phase,
+	pass: Walk_Pass,
+	order: u32,
+) -> u32 {
 	e := ctx.evaluation
 	next := order
 	for track, i in format.cutscene_tracks(ctx.data, ctx.blob) {
