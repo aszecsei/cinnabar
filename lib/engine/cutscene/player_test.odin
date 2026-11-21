@@ -1636,3 +1636,98 @@ a_shots_spawned_entity_shows_while_its_section_covers_the_time :: proc(t: ^testi
 	testing.expect(t, !ecs.is_alive(&f.world, prop), "the prop goes with the master")
 	testing.expect_value(t, dial(f, f.hero), before)
 }
+
+// A shot's prop spawns under the shot's binding that the master maps to its own spawned prop. The master's prop shows
+// as the master plays, and the shot's prop, under it, stays hidden until the shot's section begins.
+@(test)
+a_shots_entity_under_a_mapped_spawned_binding_shows_only_in_its_section :: proc(t: ^testing.T) {
+	f := player_setup(t)
+	defer player_teardown(f)
+	prop :: proc(id: u32, parent: u32) -> format.Cutscene_Binding_Contents {
+		return {
+			id = id,
+			kind = .Spawned,
+			name = "Prop" if id == 3 else "Lantern",
+			parent = parent,
+			asset = PROP_GUID,
+			rotation = {0, 0, 0, 1},
+			scale = {1, 1, 1},
+		}
+	}
+	shot := format.cutscene_write(
+		{
+			guid = OUTRO_GUID,
+			key = 1,
+			length = SECOND / 2,
+			rate = 30,
+			range_end = SECOND / 2,
+			bindings = {prop(3, format.CUTSCENE_NONE), prop(4, 0)},
+			source_path = "game/cutscenes/shot.cutscene",
+		},
+		context.temp_allocator,
+	)
+	testing.expect(t, asset.set_live(&f.assets, OUTRO_GUID, shot))
+	master := format.cutscene_write(
+		{
+			guid = INTRO_GUID,
+			key = 1,
+			length = SECOND,
+			rate = 30,
+			range_end = SECOND,
+			bindings = {
+				possessed(1, "Hero"),
+				possessed(2, "Rival"),
+				prop(3, format.CUTSCENE_NONE),
+			},
+			tracks = {
+				{
+					id = 1,
+					kind = .Sub_Sequence,
+					name = "Lantern shot",
+					binding = format.CUTSCENE_NONE,
+					sections = {
+						{
+							id = 1,
+							start = SECOND / 2,
+							end = SECOND,
+							weight = 1,
+							asset = OUTRO_GUID,
+							speed = 1,
+							bindings = {{child = 3, parent = 2}},
+						},
+					},
+				},
+			},
+			source_path = "game/cutscenes/master.cutscene",
+		},
+		context.temp_allocator,
+	)
+	testing.expect(t, asset.set_live(&f.assets, INTRO_GUID, master))
+	h, _ := play(&f.cutscenes, &f.world, {cutscene = INTRO_GUID, overrides = cast_of(f)})
+	frame(f)
+	e, live := player_evaluation(&f.cutscenes, h)
+	testing.expect(t, live && len(e.children) == 1)
+	if !live || len(e.children) != 1 {
+		return
+	}
+	own := prop_of(f, h)
+	lantern, spawned := binding_entity(&e.children[0].bindings, &f.world, 1)
+	testing.expect(t, own != 0 && spawned)
+	testing.expect_value(t, ecs.get(&f.world, lantern, ecs.Parent).entity, own)
+	frame(f)
+	testing.expect(t, !ecs.has(&f.world, own, ecs.Loading), "the master's prop shows")
+	testing.expect(
+		t,
+		ecs.has(&f.world, lantern, ecs.Loading),
+		"the shot's lantern waits for its section",
+	)
+	for {
+		at, _ := player_time(&f.cutscenes, h)
+		if at > SECOND / 2 {
+			break
+		}
+		frame(f)
+	}
+	frame(f)
+	testing.expect(t, !ecs.has(&f.world, lantern, ecs.Loading), "the lantern shows in its section")
+}

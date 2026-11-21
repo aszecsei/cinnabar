@@ -393,11 +393,10 @@ destroy_evaluation :: proc(e: ^Evaluation, w: ^ecs.World) -> (despawned: int) {
 
 	despawned = release_bindings(&e.bindings, w)
 	destroy_bindings(&e.bindings, w)
-	for &c in e.children {
-		despawned += release_bindings(&c.bindings, w)
-		destroy_bindings(&c.bindings, w)
-	}
+	// The player loads the children, and close_children, their one teardown, unloads them before this.
+	assert(len(e.children) == 0, "cutscene: close_children before destroy_evaluation")
 	delete(e.children)
+
 	e.children = nil
 	delete(e.snapshot.saved)
 	delete(e.snapshot.index)

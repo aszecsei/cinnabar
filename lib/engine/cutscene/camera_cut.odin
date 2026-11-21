@@ -368,7 +368,7 @@ tree_cut_fires :: proc(s: ^State, ctx: ^Track_Context) -> bool {
 			continue
 		}
 		parent := scope_context(s, ctx, c.parent) or_continue
-		section := format.cutscene_sections(parent.data, parent.blob)[c.section]
+		section := child_section(parent.data, parent.blob, c) or_continue
 		if fires(&parent, section.start) ||
 		   (section.end != parent.range_end && fires(&parent, section.end)) {
 			return true

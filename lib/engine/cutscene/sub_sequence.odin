@@ -30,16 +30,56 @@ Child :: struct {
 	scope:      Scope_Id,
 	// Its parent: 0 for the root, and n for children[n - 1].
 	parent:     int,
-	// The sub-sequence track and section that play it, by their indexes in the parent's blob.
-	track:      u32,
+	// The ID of the sub-sequence section that plays it, in the parent's blob. A reload that moves the section in the
+	// blob keeps it, and child_section finds the section where it is now.
 	section:    u32,
 	cutscene:   asset.Handle,
 	// The assets that its blob references, loaded for it.
 	references: [dynamic]asset.Handle,
 	// Its bindings. One that its section maps to a binding of the parent is Binding_Mapped.
 	bindings:   Bindings,
-	// Whether its spawned bindings show: while its section covers the time.
-	shown:      bool,
+}
+
+// child_section is the sub-sequence section of a parent's blob that plays a child, by the section's ID, and false when
+// the blob has no such section on a sub-sequence track that is not muted.
+@(private)
+child_section :: proc(
+	data: []byte,
+	blob: ^format.Cutscene_Blob,
+	c: Child,
+) -> (
+	section: format.Cutscene_Section,
+	ok: bool,
+) {
+	for track in format.cutscene_tracks(data, blob) {
+		if plays_child(data, blob, track, c) {
+			for s in format.cutscene_track_sections(data, blob, track) {
+				if s.id == c.section {
+					return s, true
+				}
+			}
+		}
+	}
+	return
+}
+
+// plays_child is whether a track of a parent's blob is the sub-sequence track, not muted, that holds a child's section.
+@(private)
+plays_child :: proc(
+	data: []byte,
+	blob: ^format.Cutscene_Blob,
+	track: format.Cutscene_Track,
+	c: Child,
+) -> bool {
+	if track.kind != .Sub_Sequence || .Muted in track.flags {
+		return false
+	}
+	for s in format.cutscene_track_sections(data, blob, track) {
+		if s.id == c.section {
+			return true
+		}
+	}
+	return false
 }
 
 // tree_binding is the entity of a binding of one cutscene of the tree, by its index in that cutscene's blob, while it
@@ -195,7 +235,7 @@ tree_orders :: proc(
 				continue
 			}
 			for c, j in walk.e.children {
-				if c.parent != at || c.track != u32(i) {
+				if c.parent != at || !plays_child(data, blob, track, c) {
 					continue
 				}
 				if d, b, ok := child_blob(walk.s, walk.e, j + 1); ok {
@@ -246,7 +286,7 @@ open_level :: proc(
 ) -> Maybe(Failure) {
 	w := c.world
 	sections := format.cutscene_sections(data, blob)
-	for track, i in format.cutscene_tracks(data, blob) {
+	for track in format.cutscene_tracks(data, blob) {
 		if track.kind != .Sub_Sequence || .Muted in track.flags {
 			continue
 		}
@@ -271,8 +311,7 @@ open_level :: proc(
 				Child {
 					scope = scope_of(parent_scope, section.id),
 					parent = parent,
-					track = u32(i),
-					section = index,
+					section = section.id,
 					cutscene = handle,
 					references = make([dynamic]asset.Handle, w.platform.heap_allocator),
 				},
@@ -404,7 +443,7 @@ children_shape :: proc(
 		}
 		fold(walk, format.blob_bytes(data, blob.guids))
 		sections := format.cutscene_sections(data, blob)
-		for track, i in format.cutscene_tracks(data, blob) {
+		for track in format.cutscene_tracks(data, blob) {
 			if format.cutscene_track_asset(track.kind) != .None {
 				for section in sections[track.first_section:][:track.section_count] {
 					guid := section.asset
@@ -422,7 +461,7 @@ children_shape :: proc(
 				fold(walk, mem.ptr_to_bytes(&id))
 				fold(walk, mem.slice_to_bytes(format.cutscene_section_maps(data, blob, index)))
 				for c, k in walk.e.children {
-					if c.parent == at && c.track == u32(i) && c.section == index {
+					if c.parent == at && c.section == id && plays_child(data, blob, track, c) {
 						if d, b, ok := child_blob(walk.s, walk.e, k + 1); ok {
 							visit(walk, k + 1, d, b, depth + 1)
 						}
@@ -548,7 +587,7 @@ child_context :: proc(
 	e := parent.evaluation
 	c := e.children[child - 1]
 	data, blob := child_blob(s, e, child) or_return
-	section := format.cutscene_sections(parent.data, parent.blob)[c.section]
+	section := child_section(parent.data, parent.blob, c) or_return
 	trim := trim_of(section, blob)
 	t, _ := child_time(section, trim, i64(parent.time))
 	at, covers := sample_section(parent, section, parent.time)
@@ -632,7 +671,7 @@ walk_scope :: proc(
 		next += 1
 		if track.kind == .Sub_Sequence {
 			for c, k in e.children {
-				if c.parent != ctx.child || c.track != u32(i) {
+				if c.parent != ctx.child || !plays_child(ctx.data, ctx.blob, track, c) {
 					continue
 				}
 				inner, segments, ok := child_context(s, ctx, k + 1)
@@ -680,7 +719,9 @@ walk_scope :: proc(
 // show_children shows the spawned entities of each child whose sub-sequence section covers the evaluation's time, and
 // hides those of the others, so a shot's spawned entities are there while its section is, and not between. They spawn
 // once, when the player loads, and stay through the loops of a section. The player calls it in its update, outside the
-// systems, and as it begins to play.
+// systems, and as it begins to play. It reads whether they show from their Loading, and keeps no copy: a reveal of a
+// parent's spawned entity also reveals what a child spawned under it, and the parents go first, so each child's
+// entities end as their own section says.
 @(private)
 show_children :: proc(s: ^State, w: ^ecs.World, e: ^Evaluation) {
 	if len(e.children) == 0 {
@@ -694,16 +735,28 @@ show_children :: proc(s: ^State, w: ^ecs.World, e: ^Evaluation) {
 	for &c, k in e.children {
 		inner, found := scope_context(s, &root, k + 1)
 		shown := found && inner.covered
-		if shown == c.shown {
-			continue
-		}
-		if shown {
+		hidden, visible := spawned_shows(&c.bindings, w)
+		if shown && hidden {
 			reveal_bindings(&c.bindings, w)
-		} else {
+		} else if !shown && visible {
 			conceal_bindings(&c.bindings, w)
 		}
-		c.shown = shown
 	}
+}
+
+// spawned_shows is whether any of the bindings' spawned roots is hidden by Loading, and whether any shows.
+@(private = "file")
+spawned_shows :: proc(b: ^Bindings, w: ^ecs.World) -> (hidden, visible: bool) {
+	for state in b.states {
+		if s, spawned := state.(Binding_Spawned); spawned && ecs.is_alive(w, s.entity) {
+			if ecs.has(w, s.entity, ecs.Loading) {
+				hidden = true
+			} else {
+				visible = true
+			}
+		}
+	}
+	return
 }
 
 // root_context is a context of the root at the evaluation's time with an empty event range, for what reads the tree at
