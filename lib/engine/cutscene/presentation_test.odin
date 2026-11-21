@@ -560,3 +560,96 @@ bars_follow_the_camera_that_shows_and_stale_rows_are_not_read :: proc(t: ^testin
 	frame(f, 0)
 	testing.expect_value(t, presentation_values(&f.cutscenes, &f.world, e).line_count, 3)
 }
+
+@(test)
+a_shots_presentation_track_shows_under_its_sub_sequence_section :: proc(t: ^testing.T) {
+	f := present_setup(t)
+	defer present_teardown(f)
+	SHOT_GUID :: format.Guid {
+		0  = 0x75,
+		15 = 2,
+	}
+	// The shot fades in from blue over its first second, and shows a line.
+	shot_sections := make([]format.Cutscene_Section_Contents, 2, context.temp_allocator)
+	shot_sections[0] = {
+		id           = 1,
+		start        = 0,
+		end          = SECOND,
+		weight       = 1,
+		presentation = {kind = .Fade, color = {0, 0, 255}},
+		channels     = channel_of(format.CUTSCENE_FADE_OPACITY, linear_keys(1, 0, SECOND)),
+	}
+	shot_sections[1] = subtitle(2, 0, 2 * SECOND, "In the shot")
+	shot_tracks := make([]format.Cutscene_Track_Contents, 1, context.temp_allocator)
+	shot_tracks[0] = {
+		id       = 1,
+		kind     = .Presentation,
+		name     = "Shot",
+		binding  = format.CUTSCENE_NONE,
+		sections = shot_sections,
+	}
+	testing.expect(
+		t,
+		asset.set_live(
+			&f.assets,
+			SHOT_GUID,
+			format.cutscene_write(
+				{
+					guid = SHOT_GUID,
+					key = 1,
+					length = 2 * SECOND,
+					rate = 30,
+					range_end = 2 * SECOND,
+					tracks = shot_tracks,
+					source_path = "game/cutscenes/shot.cutscene",
+				},
+				context.temp_allocator,
+			),
+		),
+	)
+	// The master plays the shot from its second second, and has no presentation track of its own.
+	sub := make([]format.Cutscene_Section_Contents, 1, context.temp_allocator)
+	sub[0] = {
+		id     = 1,
+		start  = SECOND,
+		end    = 3 * SECOND,
+		weight = 1,
+		asset  = SHOT_GUID,
+		speed  = 1,
+	}
+	tracks := make([]format.Cutscene_Track_Contents, 1, context.temp_allocator)
+	tracks[0] = {
+		id       = 1,
+		kind     = .Sub_Sequence,
+		name     = "Shots",
+		binding  = format.CUTSCENE_NONE,
+		sections = sub,
+	}
+	testing.expect(
+		t,
+		asset.set_live(
+			&f.assets,
+			SHOW_GUID,
+			format.cutscene_write(
+				{
+					guid = SHOW_GUID,
+					key = 1,
+					length = 4 * SECOND,
+					rate = 30,
+					range_end = 4 * SECOND,
+					tracks = tracks,
+					source_path = "game/cutscenes/master.cutscene",
+				},
+				context.temp_allocator,
+			),
+		),
+	)
+	h := start(t, f)
+	look(f, h, SECOND / 2)
+	near(t, opacity(f), 0, "no fade before the shot")
+	testing.expect(t, !set_on(f, "subtitle_1", .Visible, bool))
+	look(f, h, 3 * SECOND / 2)
+	near(t, opacity(f), 0.5, "the shot's fade, on its own time")
+	testing.expect_value(t, fade_color(f), format.Ui_Color{0, 0, 255, 255})
+	testing.expect_value(t, text(f, "line_1"), "In the shot")
+}
