@@ -412,6 +412,15 @@ player_of :: proc(s: ^State, e: ^Evaluation) -> (^Player, bool) {
 	return nil, false
 }
 
+// set_audition is the one writer of how an evaluation's audio tracks sound. A change ends the voices that the tracks
+// hold, so no voice of one audition plays on under another; the next evaluation starts them as the new one says.
+set_audition :: proc(e: ^Evaluation, audition: Audition) {
+	if e.audition != audition {
+		end_sounds(e)
+		e.audition = audition
+	}
+}
+
 // set_rate sets the rate of the game's clock against real time: its time scale, and 0 while the game is paused. An audio
 // track that follows the scale plays at it, and a rate of 0 stops the voices of the cutscenes on the game's clock.
 set_rate :: proc(s: ^State, rate: f32) {

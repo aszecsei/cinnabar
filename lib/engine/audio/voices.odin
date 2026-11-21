@@ -73,6 +73,24 @@ own_voice :: proc(s: ^State, owned: Owned_Voice) -> ^Owned_Voice {
 	return nil
 }
 
+// has_free_owned is whether a slot is free for a voice to follow. When none is, it warns once, as own_voice does.
+@(private)
+has_free_owned :: proc(s: ^State) -> bool {
+	for slot in s.owned {
+		if slot.voice == {} {
+			return true
+		}
+	}
+	if .Owned not_in s.warned {
+		s.warned += {.Owned}
+		log.warnf(
+			"audio: more than %d voices placed at entities or stopped later, so a voice plays flat or stops at once",
+			MAX_OWNED_VOICES,
+		)
+	}
+	return false
+}
+
 @(private)
 find_owned :: proc(s: ^State, voice: boundary.Voice) -> ^Owned_Voice {
 	if voice == {} {

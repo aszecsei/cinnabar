@@ -396,7 +396,12 @@ start_voice :: proc(s: ^State, desc: Voice_Start, w: ^ecs.World = nil) -> bounda
 		gain  = owned.gain,
 		pitch = owned.pitch,
 	}
-	if desc.entity != 0 && w != nil {
+	// A voice at an entity needs a slot that follows it. Without one, it plays flat, as its caller's set_voice then
+	// treats it, so the two agree.
+	if desc.entity != 0 && (w == nil || !has_free_owned(s)) {
+		owned.entity = 0
+	}
+	if owned.entity != 0 {
 		params = placed_params(s, w, owned)
 	}
 	voice := s.platform.audio.voice_play(
@@ -412,7 +417,7 @@ start_voice :: proc(s: ^State, desc: Voice_Start, w: ^ecs.World = nil) -> bounda
 			fade = fade,
 		},
 	)
-	if voice != {} && desc.entity != 0 && w != nil {
+	if voice != {} && owned.entity != 0 {
 		owned.voice = voice
 		own_voice(s, owned)
 	}

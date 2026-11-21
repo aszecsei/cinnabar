@@ -746,7 +746,7 @@ a_scrub_plays_a_grain_of_each_section_under_the_playhead :: proc(t: ^testing.T) 
 	e: Evaluation
 	init_evaluation(&e, &f.world, {}, data, blob)
 	defer destroy_evaluation(&e, &f.world)
-	e.audition = .Scrub
+	set_audition(&e, .Scrub)
 	seek(&f.cutscenes, &e, &f.world, data, blob, 2 * SECOND)
 	evaluate(&f.cutscenes, &e, &f.world, data, blob, .Late)
 	testing.expect_value(t, len(fake.voices), 2)

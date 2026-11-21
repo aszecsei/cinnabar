@@ -109,7 +109,7 @@ Evaluation :: struct {
 	sounds:   map[u32]Sound_Voice,
 	// What each audio track scrubbed last, by track ID, for an evaluation that scrubs.
 	scrubs:   map[u32]Audio_Scrub,
-	// How the audio tracks sound: a player's evaluation plays, and the editor sets the others'.
+	// How the audio tracks sound: a player's evaluation plays, and the editor sets the others' with set_audition.
 	audition: Audition,
 }
 

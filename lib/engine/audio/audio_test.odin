@@ -1174,3 +1174,34 @@ a_voice_at_an_entity_follows_it_and_a_voice_stops_at_its_time :: proc(t: ^testin
 	context.logger = log.nil_logger()
 	testing.expect(t, !prepare_sound(&f.audio, OTHER))
 }
+
+// With every slot that follows a voice taken, a voice at an entity plays flat, and set_voice treats it as flat.
+@(test)
+a_voice_at_an_entity_with_no_slot_plays_flat :: proc(t: ^testing.T) {
+	f := sound_setup_for_slots(t)
+	defer teardown(t, f)
+	for &slot, i in f.audio.owned {
+		slot.voice = {u32(1000 + i), 1}
+	}
+	e := spawn_at(f, {0, 0, -4})
+	context.logger = log.nil_logger()
+	voice := start_voice(
+		&f.audio,
+		{sound = SOUND, gain = 1, pitch = 1, entity = e, max_distance = 10},
+		&f.world,
+	)
+	testing.expect(t, voice != {})
+	testing.expect(t, !bool(record.plays[len(record.plays) - 1].params.spatial))
+	testing.expect(t, find_owned(&f.audio, voice) == nil)
+	testing.expect(t, .Owned in f.audio.warned)
+	f.audio.owned = {}
+}
+
+@(private = "file")
+sound_setup_for_slots :: proc(t: ^testing.T) -> ^Fixture {
+	f := setup(t)
+	write_sound(t, f, SOUND, SAMPLES[:])
+	listener(f)
+	frame(f)
+	return f
+}
