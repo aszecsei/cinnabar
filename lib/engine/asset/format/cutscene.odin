@@ -133,6 +133,9 @@ Cutscene_Section_Flag :: enum u32 {
 	// A camera cut section that blends out to gameplay blends out at a skip that ends in it too. Without it, the skip
 	// cuts back to gameplay.
 	Blend_On_Skip,
+	// An audio section's sound plays on to the section's end through a skip, and past the end of the cutscene, at its own
+	// rate, as music that runs into gameplay does. Without it, a skip fades it out, and the end stops it.
+	Plays_Through_Skip,
 }
 Cutscene_Section_Flags :: bit_set[Cutscene_Section_Flag;u32]
 
@@ -195,6 +198,26 @@ Cutscene_Track_Flag :: enum u32 {
 	Muted,
 }
 Cutscene_Track_Flags :: bit_set[Cutscene_Track_Flag;u32]
+
+// Cutscene_Audio_Scale is what an audio track's sounds do under a time scale other than 1 (see
+// docs/cinematics/tracks.md#audio-tracks).
+Cutscene_Audio_Scale :: enum u32 {
+	// The pitch follows the scale, so the sounds stay on the cutscene's time.
+	Follow,
+	// The sounds play at their own rate, and come back to the cutscene's time when the scale is 1 again, or at their next
+	// section.
+	Free,
+}
+
+// The highest bus that an audio section names: 0 is Master, and n is the nth of the project's audio.buses.
+MAX_CUTSCENE_BUS :: 16
+
+// The channels of an audio section: its gain, from 0, which the section's weight and eases and the track's gain scale,
+// and its pitch, the sound's rate, from CUTSCENE_MIN_PITCH to CUTSCENE_MAX_PITCH, as Audio_Source.pitch's.
+CUTSCENE_AUDIO_GAIN :: "gain"
+CUTSCENE_AUDIO_PITCH :: "pitch"
+CUTSCENE_MIN_PITCH :: 0.1
+CUTSCENE_MAX_PITCH :: 4
 
 // Cutscene_Blend_Curve is the shape of a camera cut section's blend from and to gameplay. It is camera.Curve's.
 Cutscene_Blend_Curve :: enum u8 {
@@ -266,7 +289,7 @@ cutscene_track_asset :: proc "contextless" (kind: Cutscene_Track_Kind) -> Asset_
 // cutscene_track_plays is whether the sections of a kind of track play their asset's time, from an offset in it, at a
 // speed, looping or holding past its end.
 cutscene_track_plays :: proc "contextless" (kind: Cutscene_Track_Kind) -> bool {
-	return kind == .Animation
+	return kind == .Animation || kind == .Audio
 }
 
 cutscene_rate_valid :: proc "contextless" (rate: u32) -> bool {
@@ -307,6 +330,7 @@ Cutscene_Binding :: struct {
 // dotted name and the name's scene_field_hash. The other kinds have zeros there. A transform track has its space: for
 // Absolute, its origin in World_Position units (2^-24 m), and for Relative_To, the index of the binding that it is
 // relative to. The other kinds, and the other spaces, have Relative, a zero origin and CUTSCENE_NONE there.
+// An audio track has its own gain, from 0, and what its sounds do under a time scale. The other kinds have 0 and Follow.
 Cutscene_Track :: struct {
 	id:            u32,
 	kind:          Cutscene_Track_Kind,
@@ -322,17 +346,21 @@ Cutscene_Track :: struct {
 	field:         Slice,
 	relative:      u32,
 	reserved:      u32,
+	gain:          f32,
+	time_scale:    Cutscene_Audio_Scale,
 	origin:        [3]i64,
 }
-#assert(size_of(Cutscene_Track) == 96)
+#assert(size_of(Cutscene_Track) == 104)
 
 // Cutscene_Section is a span of a track, in ticks on the cutscene's time, with its eases, its weight, its pre-roll and
 // post-roll (the ticks before its start and after its end that it holds its first and last values for), the asset that
 // its track's kind names (zero for a kind that names none), and its channels. A section of a kind that plays its
 // asset's time (cutscene_track_plays) has the ticks into the asset that it starts at, and the asset's time per the
-// cutscene's time, above 0. An animation section has what it does with its clip's root motion. The other kinds have
+// cutscene's time, above 0, which is 1 for an audio section, whose pitch channel sets its rate. An animation section has what it does with its clip's root motion. The other kinds have
 // zeros there. A camera cut section has its camera's binding index, and its blends from and to gameplay in ticks with
-// their curves; the other kinds have CUTSCENE_NONE and zeros there.
+// their curves; the other kinds have CUTSCENE_NONE and zeros there. An audio section has its bus, and the distances that
+// it is heard at when its track has a binding: full at min_distance and nearer, silent at max_distance and farther, in
+// meters. The other kinds have zeros there.
 Cutscene_Section :: struct {
 	id:            u32,
 	start:         i32,
@@ -354,8 +382,11 @@ Cutscene_Section :: struct {
 	blend_out:     i32,
 	blend_curves:  [2]Cutscene_Blend_Curve,
 	reserved:      u16,
+	bus:           u32,
+	min_distance:  f32,
+	max_distance:  f32,
 }
-#assert(size_of(Cutscene_Section) == 88)
+#assert(size_of(Cutscene_Section) == 100)
 
 // Cutscene_Channel is a named curve of a section, whose meaning its track's kind gives.
 Cutscene_Channel :: struct {
@@ -547,6 +578,9 @@ cutscene_view :: proc(data: []byte) -> (blob: ^Cutscene_Blob, ok: bool) {
 		   u64(tr.first_section) + u64(tr.section_count) > u64(len(sections)) ||
 		   tr.space > .Relative_To ||
 		   tr.reserved != 0 ||
+		   tr.time_scale > .Free ||
+		   (tr.kind == .Audio && !(tr.gain >= 0 && tr.gain <= max(f32))) ||
+		   (tr.kind != .Audio && (tr.gain != 0 || tr.time_scale != .Follow)) ||
 		   (tr.kind != .Transform && tr.space != .Relative) ||
 		   (tr.space != .Absolute && tr.origin != {}) ||
 		   (tr.space == .Relative_To) != (tr.relative != CUTSCENE_NONE) ||
@@ -590,7 +624,7 @@ cutscene_view :: proc(data: []byte) -> (blob: ^Cutscene_Blob, ok: bool) {
 			   s.post_roll < 0 ||
 			   !(s.weight >= 0 && s.weight <= 1) ||
 			   (s.asset != {}) != wants_asset ||
-			   s.flags - {.Additive, .Loop, .Blend_On_Skip} != {} ||
+			   s.flags - {.Additive, .Loop, .Blend_On_Skip, .Plays_Through_Skip} != {} ||
 			   (.Additive in s.flags && !cutscene_track_additive(tr.kind)) ||
 			   s.root_motion > .In_Place ||
 			   (s.root_motion != .Bake && tr.kind != .Animation) {
@@ -601,6 +635,22 @@ cutscene_view :: proc(data: []byte) -> (blob: ^Cutscene_Blob, ok: bool) {
 					return nil, false
 				}
 			} else if s.offset != 0 || s.speed != 0 || .Loop in s.flags {
+				return nil, false
+			}
+			if tr.kind == .Audio {
+				if s.speed != 1 ||
+				   s.pre_roll != 0 ||
+				   s.post_roll != 0 ||
+				   s.bus > MAX_CUTSCENE_BUS ||
+				   !(s.min_distance >= 0) ||
+				   !(s.max_distance > s.min_distance) ||
+				   math.is_inf(s.max_distance) {
+					return nil, false
+				}
+			} else if s.bus != 0 ||
+			   s.min_distance != 0 ||
+			   s.max_distance != 0 ||
+			   .Plays_Through_Skip in s.flags {
 				return nil, false
 			}
 		}
@@ -650,6 +700,12 @@ cutscene_view :: proc(data: []byte) -> (blob: ^Cutscene_Blob, ok: bool) {
 				   (.Guids in c.flags && tr.kind != .Property) {
 					return nil, false
 				}
+				if tr.kind == .Audio {
+					if name := blob_string(data, c.name);
+					   name != CUTSCENE_AUDIO_GAIN && name != CUTSCENE_AUDIO_PITCH {
+						return nil, false
+					}
+				}
 			}
 		}
 	}
@@ -667,7 +723,14 @@ cutscene_view :: proc(data: []byte) -> (blob: ^Cutscene_Blob, ok: bool) {
 					return nil, false
 				}
 				next_key += c.key_count
+				audio_channel := blob_string(data, c.name) if tr.kind == .Audio else ""
 				for k, j in keys[c.first_key:][:c.key_count] {
+					// An audio section's gain is from 0, and its pitch in the range of a voice's.
+					if (audio_channel == CUTSCENE_AUDIO_GAIN && !(k.value >= 0)) ||
+					   (audio_channel == CUTSCENE_AUDIO_PITCH &&
+							   !(k.value >= CUTSCENE_MIN_PITCH && k.value <= CUTSCENE_MAX_PITCH)) {
+						return nil, false
+					}
 					if !cutscene_key_valid(k) ||
 					   k.time > duration ||
 					   (j > 0 && k.time <= keys[int(c.first_key) + j - 1].time) ||
@@ -969,27 +1032,34 @@ Cutscene_Section_Contents :: struct {
 	blend_in:     i32,
 	blend_out:    i32,
 	blend_curves: [2]Cutscene_Blend_Curve,
+	// For an audio section: its bus, and the distances that it is heard at.
+	bus:          u32,
+	min_distance: f32,
+	max_distance: f32,
 	constraints:  []Cutscene_Constraint_Contents,
 	channels:     []Cutscene_Channel_Contents,
 }
 
 // Cutscene_Track_Contents is a track as cutscene_write takes it. binding is a binding's index or CUTSCENE_NONE.
 Cutscene_Track_Contents :: struct {
-	id:        u32,
-	kind:      Cutscene_Track_Kind,
-	name:      string,
-	binding:   u32,
-	flags:     Cutscene_Track_Flags,
-	finish:    Cutscene_Finish,
+	id:         u32,
+	kind:       Cutscene_Track_Kind,
+	name:       string,
+	binding:    u32,
+	flags:      Cutscene_Track_Flags,
+	finish:     Cutscene_Finish,
 	// A property track's component and the dotted name of its field. The blob holds the name's hash too.
-	component: u64,
-	field:     string,
+	component:  u64,
+	field:      string,
 	// A transform track's space, its origin in World_Position units for Absolute, and the index of the binding that it
 	// is relative to for Relative_To. The blob has CUTSCENE_NONE there for the other spaces.
-	space:     Cutscene_Space,
-	origin:    [3]i64,
-	relative:  u32,
-	sections:  []Cutscene_Section_Contents,
+	space:      Cutscene_Space,
+	origin:     [3]i64,
+	relative:   u32,
+	// An audio track's gain, and what its sounds do under a time scale.
+	gain:       f32,
+	time_scale: Cutscene_Audio_Scale,
+	sections:   []Cutscene_Section_Contents,
 }
 
 Cutscene_Contents :: struct {
@@ -1119,6 +1189,8 @@ cutscene_write :: proc(contents: Cutscene_Contents, allocator := context.allocat
 			space         = tr.space,
 			relative      = tr.relative if tr.space == .Relative_To else CUTSCENE_NONE,
 			origin        = tr.origin,
+			gain          = tr.gain,
+			time_scale    = tr.time_scale,
 		}
 		mem.copy(
 			&buffer[int(tracks.offset) + i * size_of(Cutscene_Track)],
@@ -1146,6 +1218,9 @@ cutscene_write :: proc(contents: Cutscene_Contents, allocator := context.allocat
 				blend_in      = s.blend_in,
 				blend_out     = s.blend_out,
 				blend_curves  = s.blend_curves,
+				bus           = s.bus,
+				min_distance  = s.min_distance,
+				max_distance  = s.max_distance,
 			}
 			for c in s.constraints {
 				add_constraint(

@@ -40,6 +40,7 @@ test_cutscene :: proc() -> []byte {
 		{time = 0, value = 1, interp = .Linear},
 		{time = 6000, value = 0.5, interp = .Linear},
 	}
+	pitch := []Cutscene_Key{{time = 0, value = 0.5, interp = .Linear}}
 	sway := []Cutscene_Key{{time = 0, value = 0.5, interp = .Auto}}
 	swap := []Cutscene_Key {
 		{time = 0, value = 1, interp = .Constant},
@@ -137,6 +138,8 @@ test_cutscene :: proc() -> []byte {
 				name = "Bark",
 				binding = CUTSCENE_NONE,
 				flags = {.Muted},
+				gain = 0.75,
+				time_scale = .Free,
 				sections = {
 					{
 						id = 13,
@@ -144,7 +147,13 @@ test_cutscene :: proc() -> []byte {
 						end = 18000,
 						weight = 1,
 						asset = SOUND,
-						channels = {{name = "gain", keys = gain}},
+						offset = 3000,
+						speed = 1,
+						flags = {.Loop, .Plays_Through_Skip},
+						bus = 2,
+						min_distance = 1,
+						max_distance = 30,
+						channels = {{name = "gain", keys = gain}, {name = "pitch", keys = pitch}},
 					},
 				},
 			},
@@ -307,7 +316,19 @@ cutscene_blobs_round_trip :: proc(t: ^testing.T) {
 	gain := cutscene_section_channels(data, blob, bark)
 	testing.expect_value(t, blob_string(data, gain[0].name), "gain")
 	testing.expect_value(t, cutscene_channel_keys(data, blob, gain[0])[1].value, 0.5)
-	testing.expect_value(t, len(cutscene_keys(data, blob)), 9)
+	testing.expect_value(t, blob_string(data, gain[1].name), "pitch")
+	testing.expect_value(t, len(cutscene_keys(data, blob)), 10)
+	testing.expect_value(t, tracks[2].gain, 0.75)
+	testing.expect_value(t, tracks[2].time_scale, Cutscene_Audio_Scale.Free)
+	testing.expect_value(t, tracks[0].gain, 0)
+	testing.expect_value(t, bark.offset, 3000)
+	testing.expect_value(t, bark.speed, 1)
+	testing.expect_value(t, bark.flags, Cutscene_Section_Flags{.Loop, .Plays_Through_Skip})
+	testing.expect_value(t, bark.bus, 2)
+	testing.expect_value(t, bark.min_distance, 1)
+	testing.expect_value(t, bark.max_distance, 30)
+	testing.expect_value(t, clips[0].bus, 0)
+	testing.expect_value(t, clips[0].max_distance, 0)
 
 	lamp := tracks[5]
 	testing.expect_value(t, lamp.component, 9101)
@@ -648,6 +669,61 @@ cutscene_blobs_with_bad_records_are_refused :: proc(t: ^testing.T) {
 	tracks[3].kind = .Sub_Sequence
 	sections[4].asset = SHOT
 	sections[4].camera = CUTSCENE_NONE
+
+	// Audio tracks and sections.
+	tracks[2].gain = -1
+	refused(t, data, "an audio track with a gain below 0")
+	tracks[2].gain = math.inf_f32(1)
+	refused(t, data, "an audio track with a gain that is not finite")
+	tracks[2].gain = 0.75
+	tracks[2].time_scale = Cutscene_Audio_Scale(2)
+	refused(t, data, "an unknown time scale policy")
+	tracks[2].time_scale = .Free
+	tracks[0].gain = 1
+	refused(t, data, "a transform track with a gain")
+	tracks[0].gain = 0
+	tracks[0].time_scale = .Free
+	refused(t, data, "a transform track with a time scale policy")
+	tracks[0].time_scale = .Follow
+	sections[3].speed = 2
+	refused(t, data, "an audio section with a speed")
+	sections[3].speed = 1
+	sections[3].pre_roll = 10
+	refused(t, data, "an audio section with a pre-roll")
+	sections[3].pre_roll = 0
+	sections[3].bus = MAX_CUTSCENE_BUS + 1
+	refused(t, data, "an audio section's bus past the buses")
+	sections[3].bus = 2
+	sections[3].max_distance = 1
+	refused(t, data, "an audio section's max distance at its min distance")
+	sections[3].max_distance = 30
+	sections[3].min_distance = -1
+	refused(t, data, "an audio section's min distance below 0")
+	sections[3].min_distance = 1
+	sections[0].bus = 1
+	refused(t, data, "a transform section with a bus")
+	sections[0].bus = 0
+	sections[0].max_distance = 10
+	refused(t, data, "a transform section with distances")
+	sections[0].max_distance = 0
+	sections[0].flags = {.Plays_Through_Skip}
+	refused(t, data, "a transform section that plays through a skip")
+	sections[0].flags = {}
+	// The audio section's channels are gain and pitch, the third and the fourth.
+	pitch_name := channels[3].name
+	channels[3].name = channels[0].name
+	refused(t, data, "an audio channel that is not gain or pitch")
+	channels[3].name = pitch_name
+	keys[5].value = -0.5
+	refused(t, data, "a gain key below 0")
+	keys[5].value = 0.5
+	keys[6].value = 0.05
+	refused(t, data, "a pitch key below the lowest pitch")
+	keys[6].value = 4.5
+	refused(t, data, "a pitch key above the highest pitch")
+	keys[6].value = 0.5
+	_, ok = cutscene_view(data)
+	testing.expect(t, ok, "the audio track again")
 
 	// Constraints.
 	constraints := cutscene_constraints(data, blob)

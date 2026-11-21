@@ -182,3 +182,119 @@ curve_auto_slope :: proc "contextless" (keys: []format.Cutscene_Key, i: int) -> 
 	limit := 3 * min(abs(before), abs(after))
 	return clamp(slope, -limit, limit)
 }
+
+// curve_integral is the integral of a curve from 0 to a time in ticks, which can fall between two, in value × seconds:
+// an audio section's place in its sound from its pitch (see docs/cinematics/tracks.md#audio-tracks). Before the first
+// key and after the last, the curve holds. A segment integrates by three-point Gauss-Legendre over its parameter, which
+// is exact for its polynomial: of degree 3 without weights, and of degree 5, y(u) × x'(u), with them. A pitch is what a
+// voice plays, CUTSCENE_MIN_PITCH to CUTSCENE_MAX_PITCH, so a Bezier segment whose handles leave that range integrates
+// the clamped curve in CURVE_CLAMPED_PIECES pieces instead, which is close but not exact. An empty curve is 0.
+curve_integral :: proc "contextless" (keys: []format.Cutscene_Key, t: f64) -> f64 {
+	TICKS :: f64(format.CUTSCENE_TICKS_PER_SECOND)
+	n := len(keys)
+	if n == 0 || t <= 0 {
+		return 0
+	}
+	first := f64(keys[0].time)
+	if t <= first {
+		return f64(keys[0].value) * t / TICKS
+	}
+	total := f64(keys[0].value) * first / TICKS
+	for i in 0 ..< n - 1 {
+		k0, k1 := keys[i], keys[i + 1]
+		if t <= f64(k0.time) {
+			break
+		}
+		span := f64(k1.time - k0.time)
+		s := min((t - f64(k0.time)) / span, 1)
+		total += curve_segment_integral(keys, i, s) * span / TICKS
+	}
+	last := f64(keys[n - 1].time)
+	if t > last {
+		total += f64(keys[n - 1].value) * (t - last) / TICKS
+	}
+	return total
+}
+
+// CURVE_CLAMPED_PIECES is how many pieces curve_integral cuts a segment that leaves the pitch's range into.
+CURVE_CLAMPED_PIECES :: 16
+
+// The three-point Gauss-Legendre rule on [0, 1]: its nodes and weights.
+@(private)
+GAUSS_NODES := [3]f64{0.11270166537925831, 0.5, 0.8872983346207417}
+@(private)
+GAUSS_WEIGHTS := [3]f64{5.0 / 18.0, 8.0 / 18.0, 5.0 / 18.0}
+
+// curve_segment_integral is the integral of the segment from keys[i] to keys[i + 1] over [0, s] of its duration, as a
+// part of the duration: so a segment of value 1 gives s.
+@(private)
+curve_segment_integral :: proc "contextless" (keys: []format.Cutscene_Key, i: int, s: f64) -> f64 {
+	k0, k1 := keys[i], keys[i + 1]
+	v0, v1 := f64(k0.value), f64(k1.value)
+	switch k0.interp {
+	case .Constant:
+		return v0 * s
+	case .Linear:
+		return v0 * s + (v1 - v0) * s * s / 2
+	case .Bezier, .Auto:
+	}
+	duration := f64(k1.time - k0.time) / format.CUTSCENE_TICKS_PER_SECOND
+	m0 := curve_out_slope(keys, i) * duration
+	m1 := curve_in_slope(keys, i + 1) * duration
+	w0, w1 := f64(format.CUTSCENE_TANGENT_WEIGHT), f64(format.CUTSCENE_TANGENT_WEIGHT)
+	weighted := false
+	if k0.interp == .Bezier && .Weighted in k0.flags {
+		w0, weighted = f64(k0.out_weight), true
+	}
+	if k1.interp == .Bezier && .Weighted in k1.flags {
+		w1, weighted = f64(k1.in_weight), true
+	}
+	y1, y2 := v0 + m0 * w0, v1 - m1 * w1
+	in_range :: proc "contextless" (y: f64) -> bool {
+		return y >= format.CUTSCENE_MIN_PITCH && y <= format.CUTSCENE_MAX_PITCH
+	}
+	if !(in_range(y1) && in_range(y2)) {
+		// The handles leave the range, so the curve can: integrate the clamped value piece by piece over the time.
+		total := 0.0
+		piece := s / CURVE_CLAMPED_PIECES
+		for p in 0 ..< CURVE_CLAMPED_PIECES {
+			for node, j in GAUSS_NODES {
+				v := clamp(
+					curve_bezier(keys, i, (f64(p) + node) * piece),
+					format.CUTSCENE_MIN_PITCH,
+					format.CUTSCENE_MAX_PITCH,
+				)
+				total += GAUSS_WEIGHTS[j] * v * piece
+			}
+		}
+		return total
+	}
+	if !weighted {
+		total := 0.0
+		for node, j in GAUSS_NODES {
+			total += GAUSS_WEIGHTS[j] * curve_bezier(keys, i, node * s) * s
+		}
+		return total
+	}
+	// With weights, x(u) and y(u) are Bezier curves of the parameter: integrate y(u) x'(u) over [0, u(s)], which solves u
+	// as curve_bezier does.
+	x1, x2 := w0, 1 - w1
+	lo, hi := 0.0, 1.0
+	for _ in 0 ..< CURVE_SOLVE_STEPS {
+		mid := (lo + hi) / 2
+		if curve_cubic(0, x1, x2, 1, mid) < s {
+			lo = mid
+		} else {
+			hi = mid
+		}
+	}
+	u := (lo + hi) / 2 if s < 1 else 1
+	total := 0.0
+	for node, j in GAUSS_NODES {
+		at := node * u
+		r := 1 - at
+		dx := 3 * (r * r * x1 + 2 * r * at * (x2 - x1) + at * at * (1 - x2))
+		total += GAUSS_WEIGHTS[j] * curve_cubic(v0, y1, y2, v1, at) * dx * u
+	}
+	return total
+}

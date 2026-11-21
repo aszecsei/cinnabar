@@ -45,7 +45,7 @@ Each kind of track has a **phase**:
 | Phase | Where | For |
 |---|---|---|
 | `Fixed` | The `cutscene fixed` system, the first `Fixed` system of each tick. On the real clock, also `advance_real`, before the ticks. | Transforms, poses and property writes |
-| `Late` | The `cutscene late` system, the first `Late` system, after the script phase | Camera cuts and presentation |
+| `Late` | The `cutscene late` system, the first `Late` system, after the script phase | Camera cuts, sounds and presentation |
 
 - **Same tick.** The `Fixed` phase writes before the animator, physics and the tick's propagation read. The animator, physics and propagation therefore see the cutscene's values in the same tick, and nothing lags by a frame.
 - **Interpolation.** The tick's `Previous_Transform` copy runs before the systems. So presentation interpolates from the last tick's pose to the cutscene's pose, as for any entity that moves in `Fixed`.
@@ -149,7 +149,7 @@ A test compares a play with one job and with eight workers.
 
 | Procedure | What it does |
 |---|---|
-| `init(state, world, assets)`, `register(state, world)`, `destroy(state, world)` | Set up the state, register the two systems and clear the kinds, and reset and free the players |
+| `init(state, world, assets, actions, animation, views, sounds)`, `register(state, world)`, `destroy(state, world)` | Set up the state, register the two systems and clear the kinds, and reset and free the players |
 | `register_kind(state, kind, desc)` | Sets a kind's phase and evaluate procedure |
 | `init_evaluation(e, world, handle, data, blob)`, `destroy_evaluation(e, world)` | Start an evaluation at the range's start. Destroy its bindings and free its snapshot, without restoring. |
 | `advance(e, blob, dt)` | Moves the time by a duration, without drift, up to the range's end |

@@ -1108,3 +1108,100 @@ Test.report(pcall(Audio.duck, "Music", "Music", 0.3) and 1 or 0)
 	testing.expect(t, set_bus_duck(&f.audio, "Music", "Dialogue", {gain = 0.5}))
 	testing.expect(t, !set_bus_duck(&f.audio, "Nope", "Dialogue", {gain = 0.5}))
 }
+
+// A voice that its caller starts at an entity is heard there, from the nearest listener, with its distances, and moves
+// with the entity. Its gain and pitch are the caller's. A voice whose caller lets it go plays on until its stop time.
+@(test)
+a_voice_at_an_entity_follows_it_and_a_voice_stops_at_its_time :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(t, f)
+	write_sound(t, f, SOUND, SAMPLES[:])
+	listener(f)
+	frame(f)
+	e := spawn_at(f, {0, 0, -4})
+	voice := start_voice(
+		&f.audio,
+		{sound = SOUND, gain = 0.5, pitch = 1, entity = e, min_distance = 2, max_distance = 20},
+		&f.world,
+	)
+	testing.expect(t, voice != {})
+	placed := record.plays[0].params
+	testing.expect(t, bool(placed.spatial))
+	testing.expectf(t, close_to(placed.position, {0, 0, -4}), "position %v", placed.position)
+	testing.expect_value(t, placed.min_distance, 2)
+	testing.expect_value(t, placed.max_distance, 20)
+	testing.expect_value(t, placed.gain, 0.5)
+
+	ecs.get_write(&f.world, e, ecs.Transform).position = ecs.position_from_meters({3, 0, 0})
+	set_voice(&f.audio, voice, 0.25, 9)
+	frame(f)
+	testing.expectf(
+		t,
+		close_to(record.last.position, {3, 0, 0}),
+		"position %v",
+		record.last.position,
+	)
+	testing.expect_value(t, record.last.gain, 0.25)
+	testing.expect_value(t, record.last.pitch, MAX_PITCH)
+
+	// A flat voice takes its gain and pitch at once, and the audio does not follow it.
+	flat := start_voice(&f.audio, {sound = SOUND, gain = 1, pitch = 1})
+	set_voice(&f.audio, flat, 0.75, 0.5)
+	testing.expect_value(t, record.last.gain, 0.75)
+	testing.expect(t, !bool(record.last.spatial))
+	testing.expect(t, find_owned(&f.audio, flat) == nil)
+
+	// Let go, each plays until the clock reaches its stop time.
+	record.clock = 1000
+	stop_voice_at(&f.audio, flat, 48000, 0.5)
+	stop_voice_at(&f.audio, voice, 96000, 0.5)
+	stops := record.stops
+	frame(f)
+	testing.expect_value(t, record.stops, stops)
+	record.clock = 48000
+	frame(f)
+	testing.expect_value(t, record.stops, stops + 1)
+	testing.expect(t, find_owned(&f.audio, flat) == nil)
+	testing.expect(t, find_owned(&f.audio, voice) != nil)
+	// A voice that its caller stops is not followed any more.
+	stop_voice(&f.audio, voice)
+	testing.expect(t, find_owned(&f.audio, voice) == nil)
+
+	length, loaded := sound_length(&f.audio, SOUND)
+	testing.expect(t, loaded)
+	testing.expect_value(t, length, f64(len(SAMPLES)) / boundary.SAMPLE_RATE)
+	testing.expect(t, prepare_sound(&f.audio, SOUND))
+	context.logger = log.nil_logger()
+	testing.expect(t, !prepare_sound(&f.audio, OTHER))
+}
+
+// With every slot that follows a voice taken, a voice at an entity plays flat, and set_voice treats it as flat.
+@(test)
+a_voice_at_an_entity_with_no_slot_plays_flat :: proc(t: ^testing.T) {
+	f := sound_setup_for_slots(t)
+	defer teardown(t, f)
+	for &slot, i in f.audio.owned {
+		slot.voice = {u32(1000 + i), 1}
+	}
+	e := spawn_at(f, {0, 0, -4})
+	context.logger = log.nil_logger()
+	voice := start_voice(
+		&f.audio,
+		{sound = SOUND, gain = 1, pitch = 1, entity = e, max_distance = 10},
+		&f.world,
+	)
+	testing.expect(t, voice != {})
+	testing.expect(t, !bool(record.plays[len(record.plays) - 1].params.spatial))
+	testing.expect(t, find_owned(&f.audio, voice) == nil)
+	testing.expect(t, .Owned in f.audio.warned)
+	f.audio.owned = {}
+}
+
+@(private = "file")
+sound_setup_for_slots :: proc(t: ^testing.T) -> ^Fixture {
+	f := setup(t)
+	write_sound(t, f, SOUND, SAMPLES[:])
+	listener(f)
+	frame(f)
+	return f
+}

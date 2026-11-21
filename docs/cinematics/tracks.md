@@ -2,7 +2,7 @@
 
 A track acts on the world at the cutscene's time. Its kind says what it writes: a field, a pose, a camera, a sound. This document describes the kinds that the engine has, in `lib/engine/cutscene`, and the curve that every keyed track shares. Read [Evaluation](evaluation.md) first, for sections, blending and the restore snapshot.
 
-**In this document:** [Curves](#curves) · [Property tracks](#property-tracks) · [Transform tracks](#transform-tracks) · [Animation tracks](#animation-tracks) · [Camera cut tracks](#camera-cut-tracks) · [Not built yet](#not-built-yet) · [Procedures](#procedures)
+**In this document:** [Curves](#curves) · [Property tracks](#property-tracks) · [Transform tracks](#transform-tracks) · [Animation tracks](#animation-tracks) · [Camera cut tracks](#camera-cut-tracks) · [Audio tracks](#audio-tracks) · [Not built yet](#not-built-yet) · [Procedures](#procedures)
 
 ## Curves
 
@@ -308,10 +308,94 @@ track 5 camera_cut "Cuts"
 
 `register` sets the camera cut kind.
 
+## Audio tracks
+
+An audio track plays sounds on the cutscene's time: dialogue, music and effects that must stay on the frame that the picture is on. Each section plays one sound from a place in it. The track starts the sound at that place, keeps it there as the cutscene plays, and seeks it when the cutscene seeks. It is built on the voices that a caller owns ([Audio: Places and the clock](../audio/design.md#places-and-the-clock)).
+
+```
+track 3 audio "Bark"
+	binding = 2
+	section 3 360000 420000
+		asset = $7ce894b4b95e68b918869459e5cd9c93
+		bus = 2
+		min_distance = 2
+		max_distance = 30
+track 7 audio "Music"
+	section 9 0 720000
+		asset = $ac87e25625175689bc0e47ad70107ebe
+		bus = 1
+		loop = true
+		plays_through_skip = true
+		ease_out = 120000
+		channel gain
+			key 0 0.6 auto
+			key 200000 1 auto
+```
+
+**Sections.** A section names a sound with `asset`. It has a start and an end on the cutscene's time, and an `offset`: the ticks into the sound where the section starts.
+- **The place in the sound** at a time *t* is `offset + ∫ pitch`, in seconds, from the section's start to *t*. Without a pitch channel, it is `offset + (t − start)`.
+- **Past the sound's end,** a section with `loop = true` starts the sound again from its start. Otherwise the voice ends, and the section is silent to its end.
+- **Gain** is the section's weight and its eases ([Sections and blending](evaluation.md#sections-and-blending)), times its `gain` curve, times the track's `gain`.
+  - The sections of a track play together where they overlap.
+  - Their gains add in the mix. They cross-fade only as their eases say.
+- **Pitch** is a curve from `CUTSCENE_MIN_PITCH` (0.1) to `CUTSCENE_MAX_PITCH` (4), the range of `Audio_Source.pitch`. It is the sound's rate, so an audio section has no `speed`.
+- **The bus.** `bus` is 0 for Master, and n for the nth of the project's `audio.buses`, as `Audio_Source.bus` is. The player's volume settings for the bus apply.
+- **Flat or attached.** A track without a binding plays its sections flat.
+  - A track with a binding plays them at the binding's presented pose, heard from the nearest listener.
+  - Each section has its own `min_distance` and `max_distance`. They are 1 m and 50 m when the section does not set them.
+  - An attached voice is not occluded.
+  - A track whose binding is missing plays nothing.
+- **Loading.** The player loads every section's sound while it loads, so no frame that starts a sound reads it. A sound that does not load logs once, and its sections play nothing.
+
+**The integral of the pitch.** `curve_integral` integrates the pitch curve exactly, so a seek lands where playback has the voice:
+- A constant or a linear segment integrates in closed form.
+- A Bezier or an automatic segment integrates by three-point Gauss–Legendre over its parameter. That rule is exact for the segment's polynomial: of degree 3 without weights, and of degree 5, `y(u) × x'(u)`, with them.
+- A part of a weighted segment integrates over `[0, u(t)]`, with `u(t)` solved as `curve_value` solves it.
+- A Bezier segment whose handles leave the pitch's range can leave the range too. The voice plays the clamped pitch, so the integral clamps too, in `CURVE_CLAMPED_PIECES` (16) pieces. That is close, but not exact.
+
+**The clock and sync.** The track evaluates in the `Late` phase, once a frame, at the time that the frame shows. On the game's clock, that time is the cutscene's time less the part of a tick that presentation is behind it (`1 − alpha` of a tick). So the sounds keep to the picture between ticks.
+- **Starts on the frame.** A section that starts within `SEEK_LEAD` (50 ms of audio) of the frame's time starts its voice ahead, at its sound's `offset`, at the time on the audio's clock when the cutscene reaches the section's start. So nothing of the sound's attack is cut, whatever the frame rate. A seek before that time starts it again.
+- **The drift check.** Each frame, the track sets each voice's gain and pitch. It then compares where the voice is with where the time puts it (`keep_to_clock`).
+  - Past the project's `cutscene.audio_drift`, the track seeks the voice. The limit is 7.5 ms by default: one and a half of the mixer's blocks of 240 frames.
+  - Below the limit, the track does nothing, so the normal jitter of a frame does not click.
+- **A time scale.** The game gives the cutscenes the rate of its clock each frame: its time scale, or 0 while it is paused. A cutscene on the real clock has a rate of 1. The track's `time_scale` says what its sounds do under a rate other than 1:
+
+| `time_scale` | The voice's rate | The drift check |
+|---|---|---|
+| `follow` (the default) | The pitch times the rate, so the sound stays on the cutscene's time. A rate under 1 lowers the sound, and a rate over 1 raises it. | Each frame |
+| `free` | The pitch. The sound plays at its own rate, and drifts from the cutscene's time. | Not while the rate is not 1. The first frame at a rate of 1 again seeks the voice back, and the next section starts at its place. |
+
+- **A voice that stops** before its section ends, as when the mixer drops it, starts again at its place in the next frame.
+- **A rate of 0,** as while the game is paused, stops the voices of a cutscene on the game's clock. When the rate comes back, they start again at their places. A cutscene on the real clock plays on.
+- **A pitch that the rate takes out of the range,** such as 0.15 at a rate of 0.5, plays at the clamped pitch. The voice is then faster than the cutscene, and the drift check seeks it often.
+
+**Seek, pause, skip and finish.**
+- **Seek and scrub backwards.** A section under the new time seeks its voice there, or starts it there. A section that is not under the new time stops.
+- **Pause.** A paused player stops its voices over `STOP_FADE` (30 ms). When it resumes, each section under the time starts again from where it should be.
+- **Skip.** As the skip begins, each voice fades out over what is left of the skip's fade out (`skip_fade`), and over at least `STOP_FADE`.
+  - A section marked `plays_through_skip`, such as music that runs into gameplay, plays on to its end at its own rate. The track lets its voice go, so the gain and pitch curves no longer apply.
+  - The jump starts no section that it passes.
+  - After a jump to the end of a skip range, the sections under the time start when play goes on. A section that the track let go does not start again while the time is under it.
+- **When finished.** The player stops its voices as it ends.
+  - When the cutscene reaches its end, by playback or a skip, a section marked `plays_through_skip` whose end is after the end plays on to its own end. It fades out over its ease out, before that end. So music that runs past the cutscene's `range` plays into gameplay. A stop, a failure or a reset before the end stops it with the others.
+  - `restore` and `keep` do not apply to sounds.
+- **Hot reload.** A reload stops every voice. The next `Late` evaluation starts each section under the time at its place.
+
+**Scrub.** An evaluation's `audition` says how its audio tracks sound. A player's evaluation is `.Play`. The editor sets the others with `set_audition`, which stops the voices that the tracks hold when the audition changes:
+
+| `audition` | The sections |
+|---|---|
+| `.Play` | Play voices, which pause with the world, as in the game. |
+| `.Preview` | Play voices that play while the world does not run, for the editor's playback in its edit mode. |
+| `.Scrub` | Play no voices. After a seek, each section under the time plays a grain through `audio.scrub`: `SCRUB_GRAIN` (40 ms) with fades of `SCRUB_FADE` (5 ms). Each track scrubs at most once in `SCRUB_INTERVAL` (2400 frames, 50 ms). |
+
+`register` sets the audio kind. The game gives the cutscenes its audio in `init`. Without it, audio tracks play nothing.
+
 ## Not built yet
 
-- The other kinds of track are parts of [#526](https://github.com/aszecsei/cinnabar/issues/526): audio ([#543](https://github.com/aszecsei/cinnabar/issues/543)), events ([#544](https://github.com/aszecsei/cinnabar/issues/544)), sub-sequences ([#545](https://github.com/aszecsei/cinnabar/issues/545)) and presentation ([#546](https://github.com/aszecsei/cinnabar/issues/546)). Until they are built, a track of one of these kinds does nothing.
-- A sub-sequence's own camera cut track waits for [#545](https://github.com/aszecsei/cinnabar/issues/545).
+- The other kinds of track are parts of [#526](https://github.com/aszecsei/cinnabar/issues/526): events ([#544](https://github.com/aszecsei/cinnabar/issues/544)), sub-sequences ([#545](https://github.com/aszecsei/cinnabar/issues/545)) and presentation ([#546](https://github.com/aszecsei/cinnabar/issues/546)). Until they are built, a track of one of these kinds does nothing.
+- A sub-sequence's own camera cut and audio tracks wait for [#545](https://github.com/aszecsei/cinnabar/issues/545).
+- No editor sets an evaluation's `audition` yet. The cutscene editor's scrub and playback ([#548](https://github.com/aszecsei/cinnabar/issues/548)) will, and its waveforms are [#556](https://github.com/aszecsei/cinnabar/issues/556).
 - In the editor, only the Game view follows the cut track. A viewport that pilots a camera waits for [#555](https://github.com/aszecsei/cinnabar/issues/555).
 
 ## Procedures
@@ -324,6 +408,12 @@ track 5 camera_cut "Cuts"
 | `transform_track(ctx)` | The transform kind's evaluate procedure |
 | `animation_track(ctx)` | The animation kind's evaluate procedure |
 | `camera_cut_track(ctx)` | The camera cut kind's evaluate procedure |
+| `audio_track(ctx)` | The audio kind's evaluate procedure |
+| `curve_integral(keys, t)` | A curve's integral from 0 to a time in ticks, in value × seconds |
+| `sound_place(data, blob, section, t, length)` | Where an audio section's sound is at a time, in seconds, and whether that is inside the sound |
+| `set_audition(evaluation, audition)` | Sets how an evaluation's audio tracks sound, and stops their voices when it changes |
+| `set_rate(state, rate)` | Sets the game clock's rate against real time. The game sets it each frame. |
+| `set_audio_drift(state, seconds)` | Sets the drift limit, from the project's `cutscene.audio_drift` |
 | `end_cut(evaluation)` | Releases the cut track's claim on the views, with the blend that its shot leaves with. `restore`, `restore_all`, a reload and `destroy_evaluation` call it, through the one `end_holds`. |
 | `settle_pose(world, entity, teleport)` | Composes a child's `Transform` from what a track or a restore wrote. With `teleport`, also sets the `Previous_Transform` of the entity and of every entity under it. |
 | `pose_channel(name)` | A transform channel's place in the pose |

@@ -780,3 +780,17 @@ the_depth_of_field_key_reads_writes_and_may_be_missing :: proc(t: ^testing.T) {
 	testing.expect_value(t, quality(written, caps), q)
 	free_all(context.temp_allocator)
 }
+
+@(test)
+the_cutscene_audio_drift_is_in_seconds :: proc(t: ^testing.T) {
+	s: Settings
+	problems := make([dynamic]string, context.temp_allocator)
+	_, given := s.audio_drift.?
+	testing.expect(t, !given, "no file gives the cutscenes' own drift")
+	parse("cutscene.audio_drift = 0.01\n", &s, &problems)
+	testing.expect_value(t, len(problems), 0)
+	testing.expect_value(t, s.audio_drift.? or_else 0, 0.01)
+	parse("cutscene.audio_drift = 0\ncutscene.audio_drift = 2\n", &s, &problems)
+	testing.expect_value(t, len(problems), 2)
+	testing.expect_value(t, s.audio_drift.? or_else 0, 0.01)
+}
