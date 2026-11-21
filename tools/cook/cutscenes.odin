@@ -13,7 +13,7 @@ import format "cinnabar:engine/asset/format"
 // in ticks, each with sections of keyed channels, a clip, a sound or a sub-sequence (see
 // docs/content/kinds/cutscenes.md). The cook checks the assets that a cutscene names and its sub-sequences' nesting, which
 // it reads from the other cutscenes' sources, so the order of the passes does not matter.
-CUTSCENE_COOK_VERSION :: "cutscenes 8"
+CUTSCENE_COOK_VERSION :: "cutscenes 9"
 
 // CUTSCENE_TEMPLATE is the text of a new cutscene: 10 seconds at 30 frames a second, with no bindings or tracks.
 CUTSCENE_TEMPLATE :: `cutscene 1
@@ -439,6 +439,10 @@ Pending_Section :: struct {
 	// blend_in, blend_out and blend_on_skip.
 	camera_id:   u32,
 	cut_lines:   [4]int,
+	// The lines of the settings that only an audio section takes: bus, min_distance, max_distance and
+	// plays_through_skip. And the line of the first of pre_roll and post_roll, which an audio section does not take.
+	audio_lines: [4]int,
+	roll_line:   int,
 	constraints: Pending_Constraints,
 	channels:    [dynamic]Pending_Channel,
 }
@@ -457,6 +461,8 @@ Pending_Track :: struct {
 	space_line:     int,
 	origin_line:    int,
 	relative_id:    u32,
+	// The lines of gain and time_scale, which only an audio track takes.
+	audio_lines:    [2]int,
 	sections:       [dynamic]Pending_Section,
 }
 
@@ -969,6 +975,28 @@ cutscene_parse :: proc(
 					continue
 				}
 				tr.contents.space, tr.relative_id, tr.space_line = space, id, line
+			case "gain":
+				value, message := parse_graph_value(value_text)
+				if message != "" ||
+				   value.kind != .Numbers ||
+				   value.count != 1 ||
+				   !(value.numbers[0] >= 0) ||
+				   f32(value.numbers[0]) > max(f32) {
+					problem(&found, line, "gain is a number from 0")
+					continue
+				}
+				tr.contents.gain, tr.audio_lines[0] = f32(value.numbers[0]), line
+			case "time_scale":
+				switch value_text {
+				case "follow":
+					tr.contents.time_scale = .Follow
+				case "free":
+					tr.contents.time_scale = .Free
+				case:
+					problem(&found, line, "time_scale is follow or free")
+					continue
+				}
+				tr.audio_lines[1] = line
 			case "origin":
 				value, message := parse_graph_value(value_text)
 				ok := message == "" && value.kind == .Numbers && value.count == 3
@@ -991,7 +1019,7 @@ cutscene_parse :: proc(
 				problem(
 					&found,
 					line,
-					"%q is not a setting of a track: binding, muted, when_finished, component, field, space or origin",
+					"%q is not a setting of a track: binding, muted, when_finished, component, field, space, origin, gain or time_scale",
 					name,
 				)
 			}
@@ -1028,6 +1056,9 @@ cutscene_parse :: proc(
 					s.contents.pre_roll = ticks
 				case "post_roll":
 					s.contents.post_roll = ticks
+				}
+				if (name == "pre_roll" || name == "post_roll") && s.roll_line == 0 {
+					s.roll_line = line
 				}
 			case "weight":
 				value, message := parse_graph_value(value_text)
@@ -1141,13 +1172,63 @@ cutscene_parse :: proc(
 					continue
 				}
 				s.cut_lines[3] = line
-			case "binding", "muted", "when_finished", "component", "field", "space", "origin":
+			case "bus":
+				value, message := parse_graph_value(value_text)
+				if message != "" ||
+				   value.kind != .Numbers ||
+				   value.count != 1 ||
+				   !(value.numbers[0] >= 0 && value.numbers[0] <= format.MAX_CUTSCENE_BUS) ||
+				   value.numbers[0] != math.floor(value.numbers[0]) {
+					problem(
+						&found,
+						line,
+						"bus is a whole number from 0, Master, to %d: n is the nth of the project's audio.buses",
+						format.MAX_CUTSCENE_BUS,
+					)
+					continue
+				}
+				s.contents.bus, s.audio_lines[0] = u32(value.numbers[0]), line
+			case "min_distance", "max_distance":
+				value, message := parse_graph_value(value_text)
+				if message != "" ||
+				   value.kind != .Numbers ||
+				   value.count != 1 ||
+				   !(value.numbers[0] >= 0) ||
+				   f32(value.numbers[0]) > max(f32) {
+					problem(&found, line, "%s is a number of meters from 0", name)
+					continue
+				}
+				if name == "min_distance" {
+					s.contents.min_distance, s.audio_lines[1] = f32(value.numbers[0]), line
+				} else {
+					s.contents.max_distance, s.audio_lines[2] = f32(value.numbers[0]), line
+				}
+			case "plays_through_skip":
+				switch value_text {
+				case "true":
+					s.contents.flags += {.Plays_Through_Skip}
+				case "false":
+					s.contents.flags -= {.Plays_Through_Skip}
+				case:
+					problem(&found, line, "plays_through_skip is true or false")
+					continue
+				}
+				s.audio_lines[3] = line
+			case "binding",
+			     "muted",
+			     "when_finished",
+			     "component",
+			     "field",
+			     "space",
+			     "origin",
+			     "gain",
+			     "time_scale":
 				problem(&found, line, "%s comes before the track's sections", name)
 			case:
 				problem(
 					&found,
 					line,
-					"%q is not a setting of a section: ease_in, ease_out, weight, pre_roll, post_roll, asset, blend, offset, speed, loop, root_motion, camera, blend_in, blend_out, blend_on_skip, look_at, look_at_offset, look_at_damping, follow, follow_offset, follow_damping or focus",
+					"%q is not a setting of a section: ease_in, ease_out, weight, pre_roll, post_roll, asset, blend, offset, speed, loop, root_motion, camera, blend_in, blend_out, blend_on_skip, look_at, look_at_offset, look_at_damping, follow, follow_offset, follow_damping, focus, bus, min_distance, max_distance or plays_through_skip",
 					name,
 				)
 			}
@@ -1174,7 +1255,11 @@ cutscene_parse :: proc(
 			     "follow",
 			     "follow_offset",
 			     "follow_damping",
-			     "focus":
+			     "focus",
+			     "bus",
+			     "min_distance",
+			     "max_distance",
+			     "plays_through_skip":
 				problem(&found, line, "%s comes before the section's channels", name)
 			case:
 				problem(&found, line, "a channel has keys, not settings")
@@ -1369,6 +1454,18 @@ cutscene_parse :: proc(
 				cut_line = tr.line
 			}
 		}
+		if kind == .Audio {
+			if tr.audio_lines[0] == 0 {
+				result.gain = 1
+			}
+		} else {
+			for setting_line in tr.audio_lines {
+				if setting_line != 0 {
+					problem(&found, setting_line, "only an audio track has a gain and a time_scale")
+				}
+			}
+			result.gain, result.time_scale = 0, .Follow
+		}
 		want := format.cutscene_track_asset(kind)
 		plays := format.cutscene_track_plays(kind)
 		sections := make([]format.Cutscene_Section_Contents, len(tr.sections))
@@ -1411,14 +1508,40 @@ cutscene_parse :: proc(
 						problem(
 							&found,
 							setting_line,
-							"only an animation section has an offset, a speed, a loop and a root motion",
+							"only an animation or an audio section has an offset and a loop, and only an animation section a speed and a root motion",
 						)
 					}
 				}
 				c.offset, c.speed, c.root_motion = 0, 0, .Bake
 				c.flags -= {.Loop}
+			} else if kind == .Audio {
+				for setting_line in ([2]int{s.play_lines[1], s.play_lines[3]}) {
+					if setting_line != 0 {
+						problem(
+							&found,
+							setting_line,
+							"an audio section has no speed or root motion: its pitch channel sets its rate",
+						)
+					}
+				}
+				c.speed, c.root_motion = 1, .Bake
 			} else if s.play_lines[1] == 0 {
 				c.speed = 1
+			}
+			if kind == .Audio {
+				cutscene_audio_section(&found, s, &c)
+			} else {
+				for setting_line in s.audio_lines {
+					if setting_line != 0 {
+						problem(
+							&found,
+							setting_line,
+							"only an audio section has a bus, distances and plays_through_skip",
+						)
+					}
+				}
+				c.bus, c.min_distance, c.max_distance = 0, 0, 0
+				c.flags -= {.Plays_Through_Skip}
 			}
 			if length_seen && c.end > contents.length {
 				problem(
@@ -2033,6 +2156,75 @@ cutscene_property_channels :: proc(found: ^[dynamic]Cutscene_Problem, s: Pending
 				},
 			)
 			return
+		}
+	}
+}
+
+// The distances that an audio section is heard at when it sets none, as Audio_Source's.
+CUTSCENE_AUDIO_MIN_DISTANCE :: 1
+CUTSCENE_AUDIO_MAX_DISTANCE :: 50
+
+// cutscene_audio_section checks what an audio section has (see docs/cinematics/tracks.md#audio-tracks): no pre_roll or
+// post_roll, distances whose max is above their min, and channels of gain from 0 and pitch from CUTSCENE_MIN_PITCH to
+// CUTSCENE_MAX_PITCH. It sets the distances that the section does not.
+@(private = "file")
+cutscene_audio_section :: proc(
+	found: ^[dynamic]Cutscene_Problem,
+	s: Pending_Section,
+	c: ^format.Cutscene_Section_Contents,
+) {
+	if s.roll_line != 0 {
+		append(
+			found,
+			Cutscene_Problem {
+				s.roll_line,
+				"an audio section has no pre_roll or post_roll: its sound plays only over the section",
+			},
+		)
+	}
+	if s.audio_lines[1] == 0 {
+		c.min_distance = CUTSCENE_AUDIO_MIN_DISTANCE
+	}
+	if s.audio_lines[2] == 0 {
+		c.max_distance = CUTSCENE_AUDIO_MAX_DISTANCE
+	}
+	if c.max_distance <= c.min_distance {
+		append(
+			found,
+			Cutscene_Problem {
+				max(s.audio_lines[1], s.audio_lines[2]),
+				"max_distance is farther than min_distance",
+			},
+		)
+	}
+	for ch in s.channels {
+		switch ch.name {
+		case format.CUTSCENE_AUDIO_GAIN:
+			for k in ch.keys {
+				if k.value < 0 {
+					append(found, Cutscene_Problem{ch.line, "a gain key is a number from 0"})
+					break
+				}
+			}
+		case format.CUTSCENE_AUDIO_PITCH:
+			for k in ch.keys {
+				if !(k.value >= format.CUTSCENE_MIN_PITCH && k.value <= format.CUTSCENE_MAX_PITCH) {
+					append(
+						found,
+						Cutscene_Problem {
+							ch.line,
+							fmt.aprintf(
+								"a pitch key is a number from %v to %v",
+								format.CUTSCENE_MIN_PITCH,
+								format.CUTSCENE_MAX_PITCH,
+							),
+						},
+					)
+					break
+				}
+			}
+		case:
+			append(found, Cutscene_Problem{ch.line, "an audio track's channel is gain or pitch"})
 		}
 	}
 }

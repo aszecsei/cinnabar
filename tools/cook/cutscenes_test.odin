@@ -206,6 +206,11 @@ each_mistake_in_a_cutscene_is_reported_at_its_line :: proc(t: ^testing.T) {
 		"\ntrack 1 animation \"N\"\n\tbinding = 1\n\tsection 1 0 10\n\t\tasset = $" +
 		CLIP_GUID +
 		"\n"
+	// An audio track with a section of a sound, on lines 3 to 5.
+	SOUNDS ::
+		"cutscene 1\nlength = 10\ntrack 1 audio \"A\"\n\tsection 1 0 10\n\t\tasset = $" +
+		SOUND_GUID +
+		"\n"
 	cases := [?]struct {
 		text:     string,
 		line:     int,
@@ -874,13 +879,55 @@ each_mistake_in_a_cutscene_is_reported_at_its_line :: proc(t: ^testing.T) {
 			10,
 			"only an animation section",
 		},
+		{SOUNDS + "\t\tspeed = 2\n", 6, "an audio section has no speed or root motion"},
+		{SOUNDS + "\t\troot_motion = apply\n", 6, "an audio section has no speed or root motion"},
+		{SOUNDS + "\t\tpre_roll = 10\n", 6, "an audio section has no pre_roll or post_roll"},
+		{SOUNDS + "\t\tbus = 17\n", 6, "bus is a whole number from 0"},
+		{SOUNDS + "\t\tbus = 1.5\n", 6, "bus is a whole number from 0"},
+		{SOUNDS + "\t\tmin_distance = -1\n", 6, "min_distance is a number of meters"},
 		{
-			"cutscene 1\nlength = 10\ntrack 1 audio \"A\"\n\tsection 1 0 10\n\t\tasset = $" +
-			SOUND_GUID +
-			"\n\t\tloop = true\n",
-			6,
-			"only an animation section",
+			SOUNDS + "\t\tmin_distance = 5\n\t\tmax_distance = 5\n",
+			7,
+			"max_distance is farther than min_distance",
 		},
+		{SOUNDS + "\t\tmin_distance = 60\n", 6, "max_distance is farther than min_distance"},
+		{SOUNDS + "\t\tplays_through_skip = yes\n", 6, "plays_through_skip is true or false"},
+		{SOUNDS + "\t\tchannel volume\n\t\t\tkey 0 1 linear\n", 6, "channel is gain or pitch"},
+		{SOUNDS + "\t\tchannel gain\n\t\t\tkey 0 -1 linear\n", 6, "a gain key is a number from 0"},
+		{SOUNDS + "\t\tchannel pitch\n\t\t\tkey 0 5 linear\n", 6, "a pitch key is a number from"},
+		{SOUNDS + "\t\tchannel pitch\n\t\t\tkey 0 0 linear\n", 6, "a pitch key is a number from"},
+		{
+			SOUNDS + "\t\tchannel gain\n\t\t\tkey 0 1 linear\n\t\t\tbus = 1\n",
+			8,
+			"comes before the section's channels",
+		},
+		{"cutscene 1\nlength = 10\ntrack 1 audio \"A\"\n\tgain = -1\n", 4, "gain is a number from 0"},
+		{
+			"cutscene 1\nlength = 10\ntrack 1 audio \"A\"\n\ttime_scale = slow\n",
+			4,
+			"time_scale is follow or free",
+		},
+		{
+			"cutscene 1\nlength = 10\n" + MOVE + "\tgain = 1\n",
+			9,
+			"only an audio track has a gain",
+		},
+		{
+			"cutscene 1\nlength = 10\n" + MOVE + "\tsection 1 0 10\n\t\tbus = 1\n",
+			10,
+			"only an audio section has a bus",
+		},
+		{
+			"cutscene 1\nlength = 10\n" + MOVE + "\tsection 1 0 10\n\t\tplays_through_skip = true\n",
+			10,
+			"only an audio section has a bus",
+		},
+		{
+			"cutscene 1\nlength = 10\n" + MOVE + "\tsection 1 0 10\n\t\tloop = true\n",
+			10,
+			"only an animation or an audio section has an offset and a loop",
+		},
+		{SOUNDS + "\tsection 2 0 10\n\t\tasset = $" + SOUND_GUID + "\n\t\tgain = 1\n", 8, "comes before the track's sections"},
 		{
 			"cutscene 1\nlength = 10\n" +
 			ACTS +
@@ -1012,6 +1059,55 @@ the_skip_policy_is_anywhere_none_or_ranges :: proc(t: ^testing.T) {
 		testing.expect_value(t, ranged.contents.skip_ranges[0], format.Cutscene_Skip_Range{0, 4})
 		testing.expect_value(t, ranged.contents.skip_ranges[1], format.Cutscene_Skip_Range{4, 10})
 	}
+}
+
+@(test)
+audio_sections_play_their_sound_from_an_offset_on_a_bus :: proc(t: ^testing.T) {
+	text :=
+		"cutscene 1\nlength = 600000\nbinding 1 \"A\"\n\tpossess = @" +
+		SCENE_GUID +
+		"/1\ntrack 1 audio \"Music\"\n\tgain = 0.5\n\ttime_scale = free\n\tsection 1 0 300000\n\t\tasset = $" +
+		SOUND_GUID +
+		"\n\t\toffset = 6000\n\t\tloop = true\n\t\tbus = 1\n\t\tplays_through_skip = true\n\t\tease_out = 30000\n" +
+		"\t\tchannel gain\n\t\t\tkey 0 1 linear\n\t\t\tkey 60000 0.5 linear\n\t\tchannel pitch\n\t\t\tkey 0 1 auto\n" +
+		"track 2 audio \"Bark\"\n\tbinding = 1\n\tsection 2 60000 120000\n\t\tasset = $" +
+		SOUND_GUID +
+		"\n\t\tmin_distance = 2\n\t\tmax_distance = 20\n" +
+		"track 3 audio \"Line\"\n\tsection 3 0 60000\n\t\tasset = $" +
+		SOUND_GUID +
+		"\n"
+	parsed, problems := cutscene_parse(text, context.temp_allocator)
+	testing.expectf(t, len(problems) == 0, "problems: %v", problems)
+	if len(parsed.contents.tracks) != 3 {
+		return
+	}
+	music := parsed.contents.tracks[0]
+	testing.expect_value(t, music.gain, 0.5)
+	testing.expect_value(t, music.time_scale, format.Cutscene_Audio_Scale.Free)
+	s := music.sections[0]
+	testing.expect_value(t, s.offset, 6000)
+	testing.expect_value(t, s.speed, 1)
+	testing.expect_value(t, s.flags, format.Cutscene_Section_Flags{.Loop, .Plays_Through_Skip})
+	testing.expect_value(t, s.bus, 1)
+	testing.expect_value(t, len(s.channels), 2)
+	bark := parsed.contents.tracks[1]
+	testing.expect_value(t, bark.binding, 0)
+	testing.expect_value(t, bark.sections[0].min_distance, 2)
+	testing.expect_value(t, bark.sections[0].max_distance, 20)
+	// Without settings, a gain of 1, the distances of an Audio_Source, Master and Follow.
+	line := parsed.contents.tracks[2]
+	testing.expect_value(t, line.gain, 1)
+	testing.expect_value(t, line.time_scale, format.Cutscene_Audio_Scale.Follow)
+	testing.expect_value(t, line.sections[0].min_distance, 1)
+	testing.expect_value(t, line.sections[0].max_distance, 50)
+	testing.expect_value(t, line.sections[0].bus, 0)
+	// The blob checks.
+	blob := format.cutscene_write(parsed.contents, context.temp_allocator)
+	aligned := make([]byte, len(blob) + 16, context.temp_allocator)
+	start := int(-uintptr(raw_data(aligned)) & 15)
+	copy(aligned[start:], blob)
+	_, ok := format.cutscene_view(aligned[start:][:len(blob)])
+	testing.expect(t, ok, "the blob checks")
 }
 
 @(test)
