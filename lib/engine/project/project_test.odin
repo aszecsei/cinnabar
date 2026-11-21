@@ -807,7 +807,11 @@ the_cutscene_overlay_and_subtitles_parse_and_round_trip :: proc(t: ^testing.T) {
 		&problems,
 	)
 	testing.expect_value(t, len(problems), 0)
-	testing.expect_value(t, s.cutscene_overlay, format.guid_parse("0b7c86066d9c4959af9913051f7ce296") or_else {})
+	testing.expect_value(
+		t,
+		s.cutscene_overlay,
+		format.guid_parse("0b7c86066d9c4959af9913051f7ce296") or_else {},
+	)
 	testing.expect_value(t, s.letterbox_color, [3]u8{0x10, 0x20, 0x30})
 	parse(
 		"cutscene.overlay = 12\ncutscene.letterbox_color = #10203040\nsubtitles.enabled = yes\nsubtitles.size = 3\nsubtitles.background = -1\n",

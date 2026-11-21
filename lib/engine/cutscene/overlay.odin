@@ -206,7 +206,8 @@ overlay_driver :: proc(s: ^State) -> (slot: int, found: bool) {
 		}
 		if found {
 			best := &s.players[slot]
-			if p.priority < best.priority || (p.priority == best.priority && p.order < best.order) {
+			if p.priority < best.priority ||
+			   (p.priority == best.priority && p.order < best.order) {
 				continue
 			}
 		}
@@ -301,7 +302,12 @@ overlay_frame :: proc(s: ^State, w: ^ecs.World) -> (f: Overlay_Frame) {
 			cover = state.cover
 		}
 		if cover > 0 {
-			f.fade_color, f.fade_opacity = over(f.fade_color, f.fade_opacity, skip_color(s, e), cover)
+			f.fade_color, f.fade_opacity = over(
+				f.fade_color,
+				f.fade_opacity,
+				skip_color(s, e),
+				cover,
+			)
 		} else if s.overlay.subtitles.enabled {
 			f.lines, f.line_count = v.lines, v.line_count
 		}
@@ -386,8 +392,20 @@ present :: proc(s: ^State, w: ^ecs.World, window: [2]f32) {
 		ui.set_binding(s.ui, d, speaker_id, line.speaker)
 		ui.set_binding(s.ui, d, line_id, line.text)
 		ui.set_value(s.ui, d, speaker_id, .Visible, line.speaker != "")
-		ui.set_value(s.ui, d, speaker_id, .Size, own_size(d, speaker_id, DEFAULT_SPEAKER_SIZE) * settings.size)
-		ui.set_value(s.ui, d, line_id, .Size, own_size(d, line_id, DEFAULT_LINE_SIZE) * settings.size)
+		ui.set_value(
+			s.ui,
+			d,
+			speaker_id,
+			.Size,
+			own_size(d, speaker_id, DEFAULT_SPEAKER_SIZE) * settings.size,
+		)
+		ui.set_value(
+			s.ui,
+			d,
+			line_id,
+			.Size,
+			own_size(d, line_id, DEFAULT_LINE_SIZE) * settings.size,
+		)
 		ui.set_value(s.ui, d, fmt.tprintf("subtitle_back_%d", n), .Opacity, settings.background)
 	}
 }

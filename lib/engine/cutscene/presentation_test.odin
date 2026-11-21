@@ -188,7 +188,13 @@ text :: proc(f: ^Present_Fixture, id: string) -> string {
 }
 
 @(private = "file")
-near :: proc(t: ^testing.T, got, want: f32, what: string, tolerance: f32 = 0.002, loc := #caller_location) {
+near :: proc(
+	t: ^testing.T,
+	got, want: f32,
+	what: string,
+	tolerance: f32 = 0.002,
+	loc := #caller_location,
+) {
 	testing.expectf(t, abs(got - want) <= tolerance, "%s: %v, not %v", what, got, want, loc = loc)
 }
 
@@ -209,7 +215,10 @@ linear_keys :: proc(from, to: f32, duration: i32) -> []format.Cutscene_Key {
 }
 
 @(private = "file")
-channel_of :: proc(name: string, keys: []format.Cutscene_Key) -> []format.Cutscene_Channel_Contents {
+channel_of :: proc(
+	name: string,
+	keys: []format.Cutscene_Key,
+) -> []format.Cutscene_Channel_Contents {
 	channels := make([]format.Cutscene_Channel_Contents, 1, context.temp_allocator)
 	channels[0] = {
 		name = name,
@@ -312,12 +321,12 @@ fade_in :: proc() -> []format.Cutscene_Section_Contents {
 fade_out :: proc(color: [3]u8 = {}) -> []format.Cutscene_Section_Contents {
 	sections := make([]format.Cutscene_Section_Contents, 1, context.temp_allocator)
 	sections[0] = {
-		id           = 2,
-		start        = 3 * SECOND,
-		end          = 4 * SECOND,
-		weight       = 1,
+		id = 2,
+		start = 3 * SECOND,
+		end = 4 * SECOND,
+		weight = 1,
 		presentation = {kind = .Fade, color = color},
-		channels     = channel_of(format.CUTSCENE_FADE_OPACITY, linear_keys(0, 1, SECOND)),
+		channels = channel_of(format.CUTSCENE_FADE_OPACITY, linear_keys(0, 1, SECOND)),
 	}
 	return sections
 }
@@ -572,12 +581,12 @@ a_shots_presentation_track_shows_under_its_sub_sequence_section :: proc(t: ^test
 	// The shot fades in from blue over its first second, and shows a line.
 	shot_sections := make([]format.Cutscene_Section_Contents, 2, context.temp_allocator)
 	shot_sections[0] = {
-		id           = 1,
-		start        = 0,
-		end          = SECOND,
-		weight       = 1,
+		id = 1,
+		start = 0,
+		end = SECOND,
+		weight = 1,
 		presentation = {kind = .Fade, color = {0, 0, 255}},
-		channels     = channel_of(format.CUTSCENE_FADE_OPACITY, linear_keys(1, 0, SECOND)),
+		channels = channel_of(format.CUTSCENE_FADE_OPACITY, linear_keys(1, 0, SECOND)),
 	}
 	shot_sections[1] = subtitle(2, 0, 2 * SECOND, "In the shot")
 	shot_tracks := make([]format.Cutscene_Track_Contents, 1, context.temp_allocator)

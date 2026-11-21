@@ -538,34 +538,34 @@ Pending_Channel :: struct {
 
 @(private = "file")
 Pending_Section :: struct {
-	contents:    format.Cutscene_Section_Contents,
-	line:        int,
-	seen:        [dynamic]string,
-	asset_line:  int,
-	blend_line:  int,
+	contents:           format.Cutscene_Section_Contents,
+	line:               int,
+	seen:               [dynamic]string,
+	asset_line:         int,
+	blend_line:         int,
 	// The lines of the settings that only a section that plays its clip takes: offset, speed, loop and root_motion.
-	play_lines:  [4]int,
+	play_lines:         [4]int,
 	// The line of the first of ease_in, ease_out, weight, pre_roll and post_roll, which a camera cut section does
 	// not take, and its name.
-	shape_line:  int,
-	shape_name:  string,
+	shape_line:         int,
+	shape_name:         string,
 	// The settings that only a camera cut section takes: the ID of its camera's binding, and the lines of camera,
 	// blend_in, blend_out and blend_on_skip.
-	camera_id:   u32,
-	cut_lines:   [4]int,
+	camera_id:          u32,
+	cut_lines:          [4]int,
 	// The lines of the settings that only an audio section takes: bus, min_distance, max_distance and
 	// plays_through_skip. And the line of the first of pre_roll and post_roll, which an audio section does not take.
-	audio_lines: [4]int,
-	roll_line:   int,
+	audio_lines:        [4]int,
+	roll_line:          int,
 	// The settings that only a sub-sequence section takes: the lines of trim and scale, and its binds.
-	sub_lines:   [2]int,
-	binds:       [dynamic]Pending_Bind,
+	sub_lines:          [2]int,
+	binds:              [dynamic]Pending_Bind,
 	// The lines of the settings that only a presentation section takes: kind, color, speaker, text, key and audio,
 	// and the ID of the audio section that audio names.
 	presentation_lines: [6]int,
-	audio_id:    u32,
-	constraints: Pending_Constraints,
-	channels:    [dynamic]Pending_Channel,
+	audio_id:           u32,
+	constraints:        Pending_Constraints,
+	channels:           [dynamic]Pending_Channel,
 }
 
 // Pending_Bind is a sub-sequence section's `bind <child binding id> = <binding id>` line.
@@ -1609,7 +1609,7 @@ cutscene_parse :: proc(
 				}
 				s.contents.presentation.color, s.presentation_lines[1] = color, line
 			case "speaker", "text", "key":
-				text, ok := cutscene_name(value_text)
+				quoted, ok := cutscene_name(value_text)
 				if !ok {
 					problem(&found, line, "%s is quoted text", name)
 					continue
@@ -1617,11 +1617,13 @@ cutscene_parse :: proc(
 				switch name {
 				case "speaker":
 					s.contents.presentation.speaker, s.presentation_lines[2] =
-						strings.clone(text), line
+						strings.clone(quoted), line
 				case "text":
-					s.contents.presentation.text, s.presentation_lines[3] = strings.clone(text), line
+					s.contents.presentation.text, s.presentation_lines[3] =
+						strings.clone(quoted), line
 				case "key":
-					s.contents.presentation.key, s.presentation_lines[4] = strings.clone(text), line
+					s.contents.presentation.key, s.presentation_lines[4] =
+						strings.clone(quoted), line
 				}
 			case "audio":
 				id, ok := cutscene_id(value_text)

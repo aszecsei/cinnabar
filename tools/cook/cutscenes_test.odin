@@ -1103,12 +1103,14 @@ each_mistake_in_a_cutscene_is_reported_at_its_line :: proc(t: ^testing.T) {
 			"a letterbox's channels are aspect and amount",
 		},
 		{
-			PRESENT + "\t\tkind = subtitle\n\t\ttext = \"Hi\"\n\t\tchannel amount\n\t\t\tkey 0 1 linear\n",
+			PRESENT +
+			"\t\tkind = subtitle\n\t\ttext = \"Hi\"\n\t\tchannel amount\n\t\t\tkey 0 1 linear\n",
 			7,
 			"a subtitle has no channels",
 		},
 		{
-			PRESENT + "\t\tkind = fade\n\t\tchannel opacity\n\t\t\tkey 0 1 linear\n\t\t\tcolor = \"#fff\"\n",
+			PRESENT +
+			"\t\tkind = fade\n\t\tchannel opacity\n\t\t\tkey 0 1 linear\n\t\t\tcolor = \"#fff\"\n",
 			8,
 			"color comes before the section's channels",
 		},

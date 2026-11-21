@@ -72,7 +72,11 @@ presentation_track :: proc(ctx: ^Track_Context) {
 		row := format.cutscene_presentation_of(ctx.data, ctx.blob, index) or_continue
 		switch row.kind {
 		case .Fade:
-			opacity := clamp(channel_at(ctx, section, format.CUTSCENE_FADE_OPACITY, at.local, 1), 0, 1)
+			opacity := clamp(
+				channel_at(ctx, section, format.CUTSCENE_FADE_OPACITY, at.local, 1),
+				0,
+				1,
+			)
 			blend_add(&p.fade, opacity, at.weight)
 			blend_add(&p.fade_color, linear_of(row.color.rgb), at.weight * opacity)
 			if ctx.track.finish == .Keep && at.weight * opacity > 0 {
@@ -204,13 +208,13 @@ srgb_of :: proc(c: [3]f32) -> [3]f32 {
 }
 
 // to_linear is an sRGB-encoded channel, from 0 to 1, in linear light.
-to_linear :: proc(v: f32) -> f32 {
-	v := clamp(v, 0, 1)
+to_linear :: proc(encoded: f32) -> f32 {
+	v := clamp(encoded, 0, 1)
 	return v / 12.92 if v <= 0.04045 else math.pow((v + 0.055) / 1.055, 2.4)
 }
 
 // to_srgb is a channel in linear light, sRGB-encoded, from 0 to 1.
-to_srgb :: proc(v: f32) -> f32 {
-	v := clamp(v, 0, 1)
+to_srgb :: proc(linear: f32) -> f32 {
+	v := clamp(linear, 0, 1)
 	return v * 12.92 if v <= 0.0031308 else 1.055 * math.pow(v, 1 / 2.4) - 0.055
 }

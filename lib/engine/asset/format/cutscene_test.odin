@@ -1202,7 +1202,10 @@ event_tracks_with_bad_events_are_refused :: proc(t: ^testing.T) {
 // of that line.
 @(private = "file")
 presentation_cutscene :: proc() -> []byte {
-	opacity := []Cutscene_Key{{time = 0, value = 1, interp = .Linear}, {time = 30000, value = 0, interp = .Linear}}
+	opacity := []Cutscene_Key {
+		{time = 0, value = 1, interp = .Linear},
+		{time = 30000, value = 0, interp = .Linear},
+	}
 	aspect := []Cutscene_Key{{time = 0, value = 2.39, interp = .Constant}}
 	contents := Cutscene_Contents {
 		length     = 120000,

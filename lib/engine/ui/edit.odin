@@ -221,6 +221,12 @@ override_of :: proc(d: ^Document, id: string, attr: format.Ui_Attr) -> (format.U
 
 // set_value sets an attribute's value on the element of an id, as set_override does, for code that has the value
 // already parsed.
-set_value :: proc(s: ^State, d: ^Document, id: string, attr: format.Ui_Attr, value: format.Ui_Value) {
+set_value :: proc(
+	s: ^State,
+	d: ^Document,
+	id: string,
+	attr: format.Ui_Attr,
+	value: format.Ui_Value,
+) {
 	set_override(s, d, id, hash_id(id), attr, value)
 }

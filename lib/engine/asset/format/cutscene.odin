@@ -1307,7 +1307,10 @@ cutscene_presentations :: proc "contextless" (
 	blob: ^Cutscene_Blob,
 ) -> []Cutscene_Presentation {
 	bytes := blob_bytes(data, blob.presentations)
-	return ([^]Cutscene_Presentation)(raw_data(bytes))[:len(bytes) / size_of(Cutscene_Presentation)]
+	return(
+		([^]Cutscene_Presentation)(raw_data(bytes))[:len(bytes) /
+		size_of(Cutscene_Presentation)] \
+	)
 }
 
 // cutscene_presentation_of is the presentation row of a section of a presentation track, by the section's index, in a

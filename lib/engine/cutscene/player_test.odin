@@ -1736,12 +1736,20 @@ a_shots_entity_under_a_mapped_spawned_binding_shows_only_in_its_section :: proc(
 // stand_in makes sections the stand-in event kind's, which the tests register over the presentation kind: letterbox
 // sections, whose channels the blob takes, with each "value" channel as "aspect" and each "skipped" one as "amount".
 @(private = "file")
-stand_in :: proc(sections: []format.Cutscene_Section_Contents) -> []format.Cutscene_Section_Contents {
+stand_in :: proc(
+	sections: []format.Cutscene_Section_Contents,
+) -> []format.Cutscene_Section_Contents {
 	result := make([]format.Cutscene_Section_Contents, len(sections), context.temp_allocator)
 	for s, i in sections {
 		result[i] = s
-		result[i].presentation = {kind = .Letterbox}
-		channels := make([]format.Cutscene_Channel_Contents, len(s.channels), context.temp_allocator)
+		result[i].presentation = {
+			kind = .Letterbox,
+		}
+		channels := make(
+			[]format.Cutscene_Channel_Contents,
+			len(s.channels),
+			context.temp_allocator,
+		)
 		for c, j in s.channels {
 			channels[j] = c
 			switch c.name {
