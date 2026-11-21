@@ -104,10 +104,50 @@ def ambience(rate=24000, seconds=20):
     return rate, samples
 
 
+# line is a voice that speaks a short line for the intro cutscene's dialogue, with no words: syllables of vowels, each a
+# pitch near 140 Hz that rises and falls as speech does, whose harmonics two formants shape, over a breath of noise, in
+# 2.4 seconds.
+def line(rate=48000, seconds=2.4):
+    frames = int(rate * seconds)
+    noise = random.Random(53)
+    # Each syllable: its start and length in seconds, and its vowel's first two formants in Hz.
+    syllables = [
+        (0.05, 0.22, 700, 1200),
+        (0.30, 0.18, 300, 2300),
+        (0.52, 0.30, 500, 900),
+        (0.95, 0.20, 650, 1700),
+        (1.18, 0.16, 350, 2000),
+        (1.38, 0.42, 600, 1000),
+        (1.90, 0.32, 400, 1900),
+    ]
+    samples = []
+    phase = 0.0
+    for i in range(frames):
+        t = i / rate
+        # The line's pitch rises to its middle and falls at its end.
+        pitch = 140 + 25 * math.sin(t / seconds * math.pi) - 20 * max(t - 1.8, 0)
+        phase += math.tau * pitch / rate
+        value = 0.0
+        for start, length, f1, f2 in syllables:
+            u = t - start
+            if u < 0 or u > length:
+                continue
+            envelope = math.sin(u / length * math.pi) ** 0.6
+            voice = 0.0
+            for k in range(1, 24):
+                hz = k * pitch
+                shape = 1 / (1 + ((hz - f1) / 120) ** 2) + 0.6 / (1 + ((hz - f2) / 180) ** 2)
+                voice += shape / math.sqrt(k) * math.sin(phase * k)
+            breath = (noise.random() * 2 - 1) * 0.04
+            value += envelope * (voice + breath)
+        samples.append(value)
+    return rate, samples
+
+
 def main():
     root = sys.argv[1] if len(sys.argv) > 1 else "."
     folder = os.path.join(root, "samples", "mygame", "content", "audio")
-    for name, make in (("hum", hum), ("thud", thud), ("bark", bark), ("ambience", ambience)):
+    for name, make in (("hum", hum), ("thud", thud), ("bark", bark), ("ambience", ambience), ("line", line)):
         rate, samples = make()
         write_wav(os.path.join(folder, name + ".wav"), rate, samples)
 

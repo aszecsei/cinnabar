@@ -1,10 +1,13 @@
 cutscene 1
 # The sample's intro (see docs/content/kinds/cutscenes.md): the animation scene's walking fox walks 4 m, past a guard
 # that the cutscene spawns, to a bark, after the fox_walk shot. Times are ticks, 60000 a second. The fox's track is
-# relative, so it walks from where it stands, and its walk clip loops in place while that track moves it. The audio
-# track's channel name stands until that track gives its own. Three spawned shot cameras cut the scene: a wide shot
-# that blends in from gameplay, a close shot that racks its focus, and a tracking shot that blends back out.
-length = 600000
+# relative, so it walks from where it stands, and its walk clip loops in place while that track moves it. Three spawned
+# shot cameras cut the scene: a wide shot that blends in from gameplay, a close shot that racks its focus, and a
+# tracking shot that blends back out. Music swells under it and plays on into gameplay, a line of dialogue plays over
+# the wide shot, and the guard's bark is heard where the guard stands.
+length = 720000
+# The range ends at 10 s. The music runs 2 s past it, into gameplay.
+range = [0, 600000]
 rate = 30
 clock = game
 
@@ -43,11 +46,13 @@ track 2 animation "Fox walk clip"
 		loop = true
 		root_motion = in_place
 track 3 audio "Bark"
+	# The bark plays at the guard, on the Sfx bus, heard to 30 m.
 	binding = 2
 	section 3 360000 420000
 		asset = $7ce894b4b95e68b918869459e5cd9c93
-		channel gain
-			key 0 1 constant
+		bus = 2
+		min_distance = 2
+		max_distance = 30
 track 4 sub_sequence "Opening shot"
 	section 4 0 300000
 		asset = $497bcb7bb533b902877cd8d56fbf97cd
@@ -82,3 +87,21 @@ track 6 property "Rack focus"
 		channel value
 			key 0 6 auto
 			key 120000 1.5 auto
+track 7 audio "Music"
+	# The ambience loops on the Music bus, swells as the close shot starts, and plays on into gameplay at a skip and past
+	# the end, where it fades out over its ease out.
+	section 9 0 720000
+		asset = $ac87e25625175689bc0e47ad70107ebe
+		bus = 1
+		loop = true
+		plays_through_skip = true
+		ease_in = 60000
+		ease_out = 120000
+		channel gain
+			key 0 0.6 auto
+			key 200000 1 auto
+			key 400000 0.8 auto
+track 8 audio "Dialogue"
+	# A line over the wide shot, on Master.
+	section 10 30000 174000
+		asset = $cde14b9399a74a289146a8362e6a9a9e
