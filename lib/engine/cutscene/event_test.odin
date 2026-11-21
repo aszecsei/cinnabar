@@ -551,3 +551,44 @@ World.spawn():add(Catcher)
 		f.reports[:],
 	)
 }
+
+// A native handler that stops its own player in the middle of the events: the ranges whose begins were sent send their
+// ends at once, and the triggers and begins after the handler are dropped, so each end still follows its begin.
+@(test)
+a_handler_that_stops_its_player_drops_the_events_after_it :: proc(t: ^testing.T) {
+	f := event_setup(t)
+	defer event_teardown(f)
+	listen(f, "alarm_begin", "alarm_end", "b_begin", "b_end", "c")
+	register_event_handler(
+		&f.cutscenes,
+		"door_open",
+		proc(data: rawptr, player: Player_Handle, name: string, _: []script.Event_Arg) {
+			f := (^Event_Fixture)(data)
+			append(&f.heard, strings.clone(name))
+			stop(&f.cutscenes, &f.world, player)
+		},
+		f,
+	)
+	write_events(
+		t,
+		f,
+		{
+			events_track(
+				1,
+				GLOBAL,
+				span(1, 50 * MS, 900 * MS, "alarm"),
+				trigger(2, 100 * MS, "door_open"),
+				span(3, 150 * MS, 900 * MS, "b"),
+				trigger(4, 200 * MS, "c"),
+			),
+		},
+	)
+	h := play_events(t, f)
+	step(f, 50)
+	expect_heard(t, f, "alarm_begin")
+	step(f, 200)
+	expect_heard(t, f, "door_open", "alarm_end")
+	step(f, 0)
+	testing.expect_value(t, status(&f.cutscenes, h), Player_Status.Restored)
+	expect_heard(t, f)
+}

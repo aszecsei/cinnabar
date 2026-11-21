@@ -451,7 +451,7 @@ player_of :: proc(s: ^State, e: ^Evaluation) -> (^Player, bool) {
 set_audition :: proc(e: ^Evaluation, w: ^ecs.World, audition: Audition) {
 	if e.audition != audition {
 		end_sounds(e, w)
-		forget_ranges(e)
+		forget_ranges(e, w)
 		e.audition = audition
 	}
 }

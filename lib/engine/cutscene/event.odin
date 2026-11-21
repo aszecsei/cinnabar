@@ -134,14 +134,12 @@ move_events :: proc(ctx: ^Track_Context, from, to: i64, move: Move) {
 			}
 			continue
 		}
-		was_open := ev.id in e.open_ranges
+		was_open := will_be_open(e, ev.id, index)
 		is_open := start <= to && to < end
 		switch {
 		case was_open && !is_open:
-			change_range(e, ev.id, false)
 			append(&e.fired, Fired{clamp(end, from + 1, to), ctx.track_index, .End, index})
 		case !was_open && is_open:
-			change_range(e, ev.id, true)
 			append(&e.fired, Fired{clamp(start, from + 1, to), ctx.track_index, .Begin, index})
 		case !was_open && !is_open && sends && start > from && end <= to:
 			append(&e.fired, Fired{start, ctx.track_index, .Begin, index})
@@ -150,8 +148,21 @@ move_events :: proc(ctx: ^Track_Context, from, to: i64, move: Move) {
 	}
 }
 
-// change_range is the one writer of an evaluation's open ranges, by event ID: a range is open from the begin that the
-// track sent to its end. Only an open range sends an end, so each end follows its begin.
+// will_be_open is whether a range is open once the phase's recorded events are sent: its last recorded begin or end, or
+// whether it is open now. A seek and the playback after it, in one evaluation, both record against it.
+@(private = "file")
+will_be_open :: proc(e: ^Evaluation, id: u32, index: u32) -> bool {
+	#reverse for f in e.fired {
+		if f.event == index && f.kind != .Trigger {
+			return f.kind == .Begin
+		}
+	}
+	return id in e.open_ranges
+}
+
+// change_range is the one writer of an evaluation's open ranges, by event ID: a range is open from the moment that its
+// begin is sent to the moment that its end is. flush_events changes it as it sends them, so an end is sent only for a
+// range whose begin was sent. A change of audition and a reload drop ranges through it without sending their ends.
 @(private = "file")
 change_range :: proc(e: ^Evaluation, id: u32, open: bool) {
 	if open {
@@ -180,7 +191,6 @@ end_ranges :: proc(
 		}
 		for ev, j in format.cutscene_track_events(data, blob, track) {
 			if .Range in ev.flags && ev.id in e.open_ranges {
-				change_range(e, ev.id, false)
 				append(&e.fired, Fired{i64(e.time), u32(i), .End, track.first_event + u32(j)})
 			}
 		}
@@ -191,8 +201,14 @@ end_ranges :: proc(
 // forget_ranges forgets the open ranges without sending their ends, for a change of audition: an evaluation that does
 // not play sent no begins.
 @(private)
-forget_ranges :: proc(e: ^Evaluation) {
-	clear(&e.open_ranges)
+forget_ranges :: proc(e: ^Evaluation, w: ^ecs.World) {
+	ids := make([dynamic]u32, 0, len(e.open_ranges), w.platform.frame_allocator)
+	for id in e.open_ranges {
+		append(&ids, id)
+	}
+	for id in ids {
+		change_range(e, id, false)
+	}
 }
 
 // keep_ranges forgets, after a reload, the open ranges that are no longer ranges of the blob's event tracks, without
@@ -215,17 +231,38 @@ keep_ranges :: proc(e: ^Evaluation, w: ^ecs.World, data: []byte, blob: ^format.C
 		}
 	}
 	for id in gone {
-		delete_key(&e.open_ranges, id)
+		change_range(e, id, false)
 	}
 }
 
-// Sent is an event as flush_events sends it, in frame memory, so a handler that ends the player, and unloads its blob,
-// leaves the events after it whole.
+// Sent is an event as flush_events sends it, in frame memory, so a handler that ends the player leaves the events after
+// it whole.
 @(private = "file")
 Sent :: struct {
+	kind:   Fired_Kind,
+	// The range's event ID, for a begin or an end.
+	range:  u32,
 	name:   string,
 	entity: Maybe(ecs.Entity),
 	args:   []script.Event_Arg,
+}
+
+// still_sends is whether the evaluation's player still sends events: whether it is live and has not finished. An
+// evaluation of no player always does.
+@(private = "file")
+still_sends :: proc(s: ^State, e: ^Evaluation) -> bool {
+	if e.player == {} {
+		return true
+	}
+	slot := int(e.player.slot)
+	if slot >= MAX_PLAYERS || s.players[slot].generation != e.player.generation {
+		return false
+	}
+	#partial switch status_of(s.players[slot].state) {
+	case .Ready, .Playing, .Paused, .Skipping:
+		return true
+	}
+	return false
 }
 
 // flush_events sends the events that the evaluation's tracks recorded, sorted by time, then the track's order, then the
@@ -294,8 +331,10 @@ flush_events :: proc(
 			}
 		}
 		sent[i] = {
-			name = name,
-			args = args,
+			kind  = f.kind,
+			range = ev.id,
+			name  = name,
+			args  = args,
 		}
 		if track.binding != format.CUTSCENE_NONE {
 			entity, alive := binding_entity(&e.bindings, w, int(track.binding))
@@ -305,6 +344,24 @@ flush_events :: proc(
 	clear(&e.fired)
 	player := e.player
 	for event in sent {
+		// A handler can stop the player, which sends the ends of the ranges whose begins were sent. After that, the
+		// triggers and begins left are dropped, and so is an end whose begin was not sent.
+		switch event.kind {
+		case .Trigger:
+			if !still_sends(s, e) {
+				continue
+			}
+		case .Begin:
+			if !still_sends(s, e) {
+				continue
+			}
+			change_range(e, event.range, true)
+		case .End:
+			if event.range not_in e.open_ranges {
+				continue
+			}
+			change_range(e, event.range, false)
+		}
 		if s.scripts != nil {
 			switch entity in event.entity {
 			case nil:
