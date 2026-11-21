@@ -13,8 +13,8 @@ import "cinnabar:engine/script"
 MAX_EVENT_HANDLERS :: 64
 
 // Event_Handler_Proc is a native handler of a cutscene's event: the player that sent it, its full name (such as
-// door_open, or alarm_begin and alarm_end for a range), and its values. It runs in the frame code, in the cutscene fixed
-// system or in update. The name and the values are frame memory.
+// door_open, or alarm_begin and alarm_end for a range), and its values. It runs in the frame code, in send_events. The
+// name and the values are frame memory.
 Event_Handler_Proc :: #type proc(
 	data: rawptr,
 	player: Player_Handle,
@@ -148,7 +148,7 @@ move_events :: proc(ctx: ^Track_Context, from, to: i64, move: Move) {
 	}
 }
 
-// will_be_open is whether a range is open once the phase's recorded events are sent: its last recorded begin or end, or
+// will_be_open is whether a range is open once the phase's recorded events are queued: its last recorded begin or end, or
 // whether it is open now. A seek and the playback after it, in one evaluation, both record against it.
 @(private = "file")
 will_be_open :: proc(e: ^Evaluation, id: u32, index: u32) -> bool {
@@ -161,8 +161,8 @@ will_be_open :: proc(e: ^Evaluation, id: u32, index: u32) -> bool {
 }
 
 // change_range is the one writer of an evaluation's open ranges, by event ID: a range is open from the moment that its
-// begin is sent to the moment that its end is. flush_events changes it as it sends them, so an end is sent only for a
-// range whose begin was sent. A change of audition and a reload drop ranges through it without sending their ends.
+// begin is queued to the moment that its end is. flush_events changes it as it queues them, so an end is queued only for
+// a range whose begin was. A change of audition and a reload drop ranges through it without sending their ends.
 @(private = "file")
 change_range :: proc(e: ^Evaluation, id: u32, open: bool) {
 	if open {
@@ -235,40 +235,21 @@ keep_ranges :: proc(e: ^Evaluation, w: ^ecs.World, data: []byte, blob: ^format.C
 	}
 }
 
-// Sent is an event as flush_events sends it, in frame memory, so a handler that ends the player leaves the events after
-// it whole.
-@(private = "file")
+// Sent is an event as send_events delivers it: its full name, its target, its values and its player's handle, in frame
+// memory, so it needs neither the evaluation nor the blob once it is queued.
+@(private)
 Sent :: struct {
-	kind:   Fired_Kind,
-	// The range's event ID, for a begin or an end.
-	range:  u32,
+	player: Player_Handle,
 	name:   string,
+	// The binding's entity, the null entity for a binding that is missing, or nil for every behaviour.
 	entity: Maybe(ecs.Entity),
 	args:   []script.Event_Arg,
 }
 
-// still_sends is whether the evaluation's player still sends events: whether it is live and has not finished. An
-// evaluation of no player always does.
-@(private = "file")
-still_sends :: proc(s: ^State, e: ^Evaluation) -> bool {
-	if e.player == {} {
-		return true
-	}
-	slot := int(e.player.slot)
-	if slot >= MAX_PLAYERS || s.players[slot].generation != e.player.generation {
-		return false
-	}
-	#partial switch status_of(s.players[slot].state) {
-	case .Ready, .Playing, .Paused, .Skipping:
-		return true
-	}
-	return false
-}
-
-// flush_events sends the events that the evaluation's tracks recorded, sorted by time, then the track's order, then the
-// kind and the event's order: each to its track's binding's behaviours with script.send, or to every behaviour with
-// script.broadcast for a track without a binding, and to the native handlers of its name. A track whose binding is
-// missing sends only to the handlers.
+// flush_events queues the events that the evaluation's tracks recorded in the phase for send_events, sorted by time,
+// then the track's order, then the kind and the event's order. A range opens as its begin is queued and closes as its
+// end is, so an end is queued only after its begin. It runs where the phase runs, in a system's job too, so it calls no
+// script and no handler.
 @(private)
 flush_events :: proc(
 	s: ^State,
@@ -296,8 +277,7 @@ flush_events :: proc(
 	tracks := format.cutscene_tracks(data, blob)
 	events := format.cutscene_events(data, blob)
 	guids := format.cutscene_guids(data, blob)
-	sent := make([]Sent, len(e.fired), allocator)
-	for f, i in e.fired {
+	for f in e.fired {
 		ev := events[f.event]
 		track := tracks[f.track]
 		name := format.blob_string(data, ev.name)
@@ -305,8 +285,10 @@ flush_events :: proc(
 		case .Trigger:
 			name = strings.clone(name, allocator)
 		case .Begin:
+			change_range(e, ev.id, true)
 			name = fmt.aprintf("%s_begin", name, allocator = allocator)
 		case .End:
+			change_range(e, ev.id, false)
 			name = fmt.aprintf("%s_end", name, allocator = allocator)
 		}
 		values := format.cutscene_values_of(data, blob, ev)
@@ -330,38 +312,28 @@ flush_events :: proc(
 				args[j] = guids[v.index]
 			}
 		}
-		sent[i] = {
-			kind  = f.kind,
-			range = ev.id,
-			name  = name,
-			args  = args,
+		sent := Sent {
+			player = e.player,
+			name   = name,
+			args   = args,
 		}
 		if track.binding != format.CUTSCENE_NONE {
 			entity, alive := binding_entity(&e.bindings, w, int(track.binding))
-			sent[i].entity = entity if alive else ecs.Entity(0)
+			sent.entity = entity if alive else ecs.Entity(0)
 		}
+		append(&s.outbox, sent)
 	}
 	clear(&e.fired)
-	player := e.player
-	for event in sent {
-		// A handler can stop the player, which sends the ends of the ranges whose begins were sent. After that, the
-		// triggers and begins left are dropped, and so is an end whose begin was not sent.
-		switch event.kind {
-		case .Trigger:
-			if !still_sends(s, e) {
-				continue
-			}
-		case .Begin:
-			if !still_sends(s, e) {
-				continue
-			}
-			change_range(e, event.range, true)
-		case .End:
-			if event.range not_in e.open_ranges {
-				continue
-			}
-			change_range(e, event.range, false)
-		}
+}
+
+// send_events delivers the queued events of every cutscene, in order: each to its track's binding's behaviours with
+// script.send, or to every behaviour with script.broadcast for a track without a binding, and to the native handlers of
+// its name. A track whose binding is missing sends only to the handlers. Call it from the frame code: update and
+// advance_real call it, and the game calls it after each tick, so the tick's script.fixed_events delivers the events in
+// the same tick. A handler that stops its player queues the ends of its open ranges after the events already queued.
+send_events :: proc(s: ^State) {
+	for i := 0; i < len(s.outbox); i += 1 {
+		event := s.outbox[i]
 		if s.scripts != nil {
 			switch entity in event.entity {
 			case nil:
@@ -375,8 +347,9 @@ flush_events :: proc(
 		hash := format.animation_graph_hash(event.name)
 		for h in s.handlers[:s.handler_count] {
 			if h.hash == hash && h.name == event.name {
-				h.procedure(h.data, player, event.name, event.args)
+				h.procedure(h.data, event.player, event.name, event.args)
 			}
 		}
 	}
+	clear(&s.outbox)
 }

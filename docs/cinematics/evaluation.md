@@ -35,7 +35,7 @@ The blob's `clock` says which time the cutscene follows:
 - **No drift.** `advance` converts a duration to ticks with integer arithmetic. It keeps the part of a tick that is left over in `carry`, in nanoseconds × 60000, and adds it to the next duration. So 1000 steps of 7 ms are exactly 420000 ticks, and 8640 ticks at 144 Hz are exactly 60 s.
 - **The game's clock moves by whole world ticks.** A frame that runs no tick does not move it, so it can be up to one world tick behind the frames.
 - **The end.** The time stops at the range's end. The player then finishes ([Player: The frame](player.md#the-frame)).
-- **Seeks.** `seek` sets the time, inside the range, for a debugger, a scrub or the editor. It sets each phase's last time to the new time, so no event that it jumps over fires. It also counts the jump in `Evaluation.jumps`, as `skip_to` does: an empty event range alone does not tell a seek from a pause, and a seek cuts the camera.
+- **Seeks.** `seek` sets the time, inside the range, for a debugger, a scrub or the editor. It marks each phase as sought to the new time, so no event that it jumps over fires, except the keys that an event track marks to fire on seek ([Events](#events)). It also counts the jump in `Evaluation.jumps`, as `skip_to` does: an empty event range alone does not tell a seek from a pause, and a seek cuts the camera.
 - **The editor's Edit mode** runs no ticks and no frame code for the world, so nothing advances a cutscene there. The editor will scrub through `seek` and its own overrides ([#548](https://github.com/aszecsei/cinnabar/issues/548)).
 
 ## The order in the frame
@@ -154,7 +154,7 @@ A test compares a play with one job and with eight workers.
 | `register_kind(state, kind, desc)` | Sets a kind's phase and evaluate procedure |
 | `init_evaluation(e, world, handle, data, blob)`, `destroy_evaluation(e, world)` | Start an evaluation at the range's start. Destroy its bindings and free its snapshot, without restoring. |
 | `advance(e, blob, dt)` | Moves the time by a duration, without drift, up to the range's end |
-| `seek(state, e, world, data, blob, t)` | Sets the time, so no event between fires |
+| `seek(state, e, world, data, blob, t)` | Sets the time, so no event between fires, except the event tracks' keys marked to fire on seek when it goes forward |
 | `skip_to(state, e, world, data, blob, target)` | Moves the time to a later target and evaluates each phase there as a skip |
 | `evaluate(state, e, world, data, blob, phase)` | Evaluates one phase's tracks at the time, and follows a reload |
 | `advance_real(state, world, dt)` | Advances the real-clock cutscenes and evaluates their `Fixed` tracks |

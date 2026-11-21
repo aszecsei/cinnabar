@@ -425,10 +425,13 @@ track 9 event "Story"
 - **Native handlers.** `register_event_handler(state, name, procedure, data)` registers a procedure for one event name, such as `door_open` or `alarm_begin`. The procedure gets the player's handle, the name and the values, in frame memory, beside the behaviours. Call it in `register_world`, after `register`. `register` clears the handlers, so a code reload registers them again.
 - The cutscene's own script handlers, with the cutscene's handle as their first value, come with the scripting library ([#547](https://github.com/aszecsei/cinnabar/issues/547)).
 
-**When events fire.** The track evaluates in the `Fixed` phase, so `script.fixed_events` delivers its events in the same tick. Each evaluation sends what the move from the phase's last time crosses. The tracks record their events, and `run_phase` sends them at the end of the phase:
+**When events fire.** The track evaluates in the `Fixed` phase. Each evaluation sends what the move from the phase's last time crosses. The tracks record their events, and at the end of the phase `run_phase` queues them on the state:
 - In time order.
 - At one time, in the tracks' order.
 - On one track at one time, an end first, then a trigger, then a begin.
+
+The cutscene fixed system can run in a job, so it calls no script and no handler. `send_events` delivers the queue from the frame code: at the end of `update` and of `advance_real`, in `end_frame`, and in the game after each tick, so `script.fixed_events` delivers the events in the same tick.
+
 
 | The move | Triggers | Ranges |
 |---|---|---|
@@ -438,9 +441,9 @@ track 9 event "Story"
 | **Skip** ([Skipping](skipping.md#events)) | Only the triggers marked `fire_when_skipped`, such as one that gives the player a key | The range that is open at the skip sends its end, and a range that the skip lands in sends its begin. A range that it crosses whole sends both only when it is marked `fire_when_skipped`. |
 
 - **Several seeks** before one evaluation are one move: from the time that the events had fired up to, to the last seek's time.
-- **Pairs.** A range sends its end only after it sent its begin. A range opens and closes as its begin and end are sent, and one procedure, `change_range`, changes the open ranges.
-- **A handler that ends its player.** A native handler can `stop` its own player. The ranges whose begins were sent then send their ends at once. The triggers and begins that came after the handler are dropped.
-- **Finish.** When the cutscene finishes, each range that is still open sends its end. A cutscene finishes at its end, at a skip to its end, or at a `stop`. A spawned binding is despawned before the next script phase, so its behaviours do not get that end. `restore` and `keep` do not apply: events change state through scripts, which own that state.
+- **Pairs.** A range sends its end only after it sent its begin. A range opens and closes as its begin and end are queued, and one procedure, `change_range`, changes the open ranges.
+- **A handler that ends its player.** A native handler can `stop` its own player. The events queued after it are still delivered, and the ends of the open ranges follow them.
+- **Finish.** When the cutscene finishes, each range that is still open sends its end. A cutscene finishes at its end, at a skip to its end, or at a `stop`. A spawned binding is despawned in the same update, before the scripts get the events. So its behaviours get none of the events of that last update, that end included. `restore` and `keep` do not apply: events change state through scripts, which own that state.
 - **Failure.** A cutscene that fails sends no more events. Its open ranges do not send their ends.
 - **Hot reload.** A reload forgets the open ranges whose IDs are no longer ranges, and sends nothing. The next playback sends the begins and ends that the new blob makes necessary, such as the end of a range that moved away from the time.
 - **The editor.** Only an evaluation whose `audition` is `.Play` sends events. A scrub and the editor's preview send none, so a preview never runs gameplay. `set_audition` forgets the open ranges and does not send their ends.
@@ -466,6 +469,7 @@ track 9 event "Story"
 | `camera_cut_track(ctx)` | The camera cut kind's evaluate procedure |
 | `audio_track(ctx)` | The audio kind's evaluate procedure |
 | `register_event_handler(state, name, procedure, data)` | Registers a native handler of the events of one name, from every cutscene |
+| `send_events(state)` | Delivers the queued events of the event tracks to the scripts and the native handlers. Call it from the frame code. |
 | `curve_integral(keys, t)` | A curve's integral from 0 to a time in ticks, in value × seconds |
 | `sound_place(data, blob, section, t, length)` | Where an audio section's sound is at a time, in seconds, and whether that is inside the sound |
 | `set_audition(evaluation, audition)` | Sets how an evaluation's audio tracks sound, and whether its event tracks send events. A change stops the voices and forgets the open ranges. |

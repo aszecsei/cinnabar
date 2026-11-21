@@ -65,6 +65,9 @@ State :: struct {
 	// the native handlers get them.
 	scripts:       ^script.Runtime,
 	kinds:         [format.Cutscene_Track_Kind]Track_Kind,
+	// The event tracks' events that flush_events queued and send_events has not delivered yet, in order. Their names and
+	// values are frame memory, so end_frame delivers what is left. Heap memory.
+	outbox:        [dynamic]Sent,
 	// The native handlers of events, by name, which register clears with the kinds.
 	handlers:      [MAX_EVENT_HANDLERS]Event_Handler,
 	handler_count: int,
@@ -232,6 +235,7 @@ init :: proc(
 	s.views = views
 	set_skip_input(s, "", nil)
 	s.events = make([dynamic]Player_Event, w.platform.heap_allocator)
+	s.outbox = make([dynamic]Sent, w.platform.heap_allocator)
 	s.level = level_of(w)
 }
 
@@ -241,6 +245,8 @@ destroy :: proc(s: ^State, w: ^ecs.World) -> (despawned: int) {
 	despawned = reset(s, w)
 	delete(s.events)
 	s.events = nil
+	delete(s.outbox)
+	s.outbox = nil
 	return
 }
 
@@ -746,6 +752,7 @@ advance_real :: proc(s: ^State, w: ^ecs.World, dt: time.Duration) {
 		advance(e, blob, dt)
 		evaluate(s, e, w, data, blob, .Fixed)
 	}
+	send_events(s)
 }
 
 // fixed_system advances the playing cutscenes on the game's clock by the tick, and evaluates the Fixed tracks of every

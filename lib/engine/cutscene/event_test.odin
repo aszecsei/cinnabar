@@ -9,6 +9,7 @@ import "core:testing"
 import "core:time"
 
 import "cinnabar:core"
+import "cinnabar:core/jobs"
 import "cinnabar:core/luau"
 import script_host "cinnabar:core/script"
 import "cinnabar:core/testlog"
@@ -60,6 +61,12 @@ event_setup :: proc(t: ^testing.T) -> ^Event_Fixture {
 		file_modified = core.file_modified,
 		file_size = core.file_size,
 		time_seconds = proc() -> f64 {return 0},
+		jobs_run = proc(list: []jobs.Job, counter: ^jobs.Counter) {
+			for job in list {
+				job.procedure(job.data)
+			}
+		},
+		jobs_wait = proc(counter: ^jobs.Counter) {},
 		script_open = script_host.open,
 		script_close = script_host.close,
 		script_push_binding = script_host.push_binding,
@@ -187,6 +194,8 @@ write_events :: proc(
 	key: u64 = 1,
 	bindings: []format.Cutscene_Binding_Contents = nil,
 	guids: []format.Guid = nil,
+	clock := format.Cutscene_Clock.Real,
+	skip_ranges: []format.Cutscene_Skip_Range = nil,
 ) {
 	blob := format.cutscene_write(
 		{
@@ -194,8 +203,10 @@ write_events :: proc(
 			key = key,
 			length = 1000 * MS,
 			rate = 30,
-			clock = .Real,
+			clock = clock,
 			range_end = range_end,
+			skip = .Ranges if skip_ranges != nil else .Anywhere,
+			skip_ranges = skip_ranges,
 			bindings = bindings,
 			tracks = tracks,
 			source_path = "game/cutscenes/events.cutscene",
@@ -224,6 +235,22 @@ step :: proc(f: ^Event_Fixture, ms: int) {
 	dt := time.Duration(ms) * time.Millisecond
 	update(&f.cutscenes, {world = &f.world, dt = dt})
 	advance_real(&f.cutscenes, &f.world, dt)
+	end_frame(&f.cutscenes)
+	free_all(f.platform.frame_allocator)
+}
+
+// tick_frame runs a frame as the game does for a cutscene on the game's clock: the players' update, then a tick of a
+// 60th of a second, after which the cutscene's events go to the scripts and script.fixed_events delivers them.
+@(private = "file")
+tick_frame :: proc(f: ^Event_Fixture) {
+	update(&f.cutscenes, {world = &f.world, dt = time.Second / 60})
+	clock := &f.world.clock
+	it := ecs.begin_ticks(&f.world, ecs.tick_start(clock, clock.tick + 1) - clock.time)
+	for ecs.next_tick(&it) {
+		ecs.run_tick_systems(&it, f)
+		send_events(&f.cutscenes)
+		script.fixed_events(&f.runtime)
+	}
 	end_frame(&f.cutscenes)
 	free_all(f.platform.frame_allocator)
 }
@@ -352,9 +379,9 @@ ranges_begin_and_end_in_playback_and_end_when_the_cutscene_finishes :: proc(t: ^
 	step(f, 150)
 	expect_heard(t, f, "p_begin")
 	testing.expect_value(t, stop(&f.cutscenes, &f.world, h), Command_Result.Done)
-	expect_heard(t, f, "p_end")
+	// The stop queues the end, and the next update delivers it.
 	step(f, 0)
-	expect_heard(t, f)
+	expect_heard(t, f, "p_end")
 }
 
 // A forward seek sends the keys marked to fire on seek, the begin of the range that it lands in and the end of the one
@@ -552,10 +579,10 @@ World.spawn():add(Catcher)
 	)
 }
 
-// A native handler that stops its own player in the middle of the events: the ranges whose begins were sent send their
-// ends at once, and the triggers and begins after the handler are dropped, so each end still follows its begin.
+// A native handler that stops its own player in the middle of the events: the events queued after it are still
+// delivered, and the ends of the open ranges follow them, so each end still follows its begin.
 @(test)
-a_handler_that_stops_its_player_drops_the_events_after_it :: proc(t: ^testing.T) {
+a_handler_that_stops_its_player_still_ends_each_range_after_its_begin :: proc(t: ^testing.T) {
 	f := event_setup(t)
 	defer event_teardown(f)
 	listen(f, "alarm_begin", "alarm_end", "b_begin", "b_end", "c")
@@ -587,8 +614,81 @@ a_handler_that_stops_its_player_drops_the_events_after_it :: proc(t: ^testing.T)
 	step(f, 50)
 	expect_heard(t, f, "alarm_begin")
 	step(f, 200)
-	expect_heard(t, f, "door_open", "alarm_end")
+	expect_heard(t, f, "door_open", "b_begin", "c", "alarm_end", "b_end")
 	step(f, 0)
 	testing.expect_value(t, status(&f.cutscenes, h), Player_Status.Restored)
 	expect_heard(t, f)
+}
+
+// On the game's clock, the event track evaluates in the cutscene fixed system, and its events reach the behaviours in
+// the same tick, through script.fixed_events, with no script phase.
+@(test)
+on_the_game_clock_events_reach_behaviours_in_their_tick :: proc(t: ^testing.T) {
+	f := event_setup(t)
+	defer event_teardown(f)
+	_, ok := script.spawn_source(
+		&f.runtime,
+		"=listener",
+		`
+local Listener = Behaviour.define("Listener")
+function Listener:on_shout(n)
+	Test.report(n)
+end
+World.spawn():add(Listener)
+`,
+	)
+	testing.expect(t, ok)
+	script.run_phase(&f.runtime, 16 * time.Millisecond, {})
+	write_events(
+		t,
+		f,
+		{
+			events_track(
+				1,
+				GLOBAL,
+				trigger(1, 0, "shout", values = {{kind = .Number, number = 1}}),
+				trigger(2, 50 * MS, "shout", values = {{kind = .Number, number = 2}}),
+			),
+		},
+		clock = .Game,
+	)
+	play_events(t, f)
+	tick_frame(f)
+	testing.expectf(t, slice.equal(f.reports[:], []f64{1}), "reports %v", f.reports[:])
+	for _ in 0 ..< 3 {
+		tick_frame(f)
+	}
+	testing.expectf(t, slice.equal(f.reports[:], []f64{1, 2}), "reports %v", f.reports[:])
+}
+
+// A skip to the end of a skip range that lands in a range sends its begin, marked or not, and play goes on with the
+// range open. A range that the skip crosses whole sends nothing.
+@(test)
+a_skip_that_lands_in_a_range_sends_its_begin :: proc(t: ^testing.T) {
+	f := event_setup(t)
+	defer event_teardown(f)
+	listen(f, "r_begin", "r_end", "q_begin", "q_end")
+	write_events(
+		t,
+		f,
+		{
+			events_track(
+				1,
+				GLOBAL,
+				span(1, 300 * MS, 600 * MS, "r"),
+				span(2, 150 * MS, 250 * MS, "q"),
+			),
+		},
+		skip_ranges = {{0, 400 * MS}},
+	)
+	h := play_events(t, f)
+	step(f, 100)
+	testing.expect_value(t, skip(&f.cutscenes, &f.world, h), Command_Result.Done)
+	step(f, 0)
+	testing.expect_value(t, status(&f.cutscenes, h), Player_Status.Playing)
+	expect_heard(t, f, "r_begin")
+	for _ in 0 ..< 3 {
+		step(f, 100)
+	}
+	expect_heard(t, f, "r_end")
 }

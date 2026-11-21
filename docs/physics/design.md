@@ -126,6 +126,7 @@ for ecs.next_tick(&ticks) {
     physics.tick(&s.physics, &s.world)                    // sync, step, write-back
     physics.send_events(&s.physics, &s.world, &s.scripts) // the tick's contacts and broken joints
     anim.send_events(&s.animation, &s.world, &s.scripts)  // the tick's animation events
+    cutscene.send_events(&s.cutscenes)                    // the tick's cutscene events
     script.fixed_events(&s.scripts)                       // delivers them, then the wait_fixed coroutines
     ecs.update_transforms(&s.world)
 }

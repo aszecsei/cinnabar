@@ -325,7 +325,8 @@ skip_fade :: proc(s: ^State, h: Player_Handle) -> f32 {
 }
 
 // set_time seeks a Ready, playing or paused player to a time on its cutscene's time, for a debugger and for the editor.
-// No event between the old time and the new one fires (see seek).
+// No event between the old time and the new one fires, except the keys that an event track marks to fire on seek (see
+// seek).
 set_time :: proc(s: ^State, w: ^ecs.World, h: Player_Handle, t: i32) -> Command_Result {
 	slot := command_slot(s, h) or_return
 	p := &s.players[slot]
@@ -440,6 +441,7 @@ update :: proc(s: ^State, c: Player_Context) -> (despawned: int) {
 			despawned += gave_back
 		}
 	}
+	send_events(s)
 	return
 }
 
@@ -467,8 +469,9 @@ reset :: proc(s: ^State, w: ^ecs.World) -> (despawned: int) {
 	return
 }
 
-// end_frame forgets the frame's events.
+// end_frame delivers the event tracks' events that are still queued, and forgets the frame's events.
 end_frame :: proc(s: ^State) {
+	send_events(s)
 	clear(&s.events)
 }
 
