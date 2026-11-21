@@ -1,6 +1,6 @@
 --!strict
 -- Pulls its camera's focus from one entity to another and back, as a focus puller would, so the focus scene shows the
--- depth of field follow it (see docs/rendering/post-processing.md#depth-of-field). It eases the Camera's
+-- depth of field follow it (see docs/rendering/post-processing.md#depth-of-field). It eases the Cinematic_Camera's
 -- focus_distance between the two entities' distances along the camera's axis.
 local FocusPull = Behaviour.define("FocusPull", {
 	-- The entities that the focus moves between.
@@ -25,7 +25,7 @@ function FocusPull:distance(target: Entity?): number?
 end
 
 function FocusPull:update(dt: number)
-	local camera = self.entity:get(Camera)
+	local camera = self.entity:get(CinematicCamera)
 	local from = self:distance(if self.to_far then self.near else self.far)
 	local to = self:distance(if self.to_far then self.far else self.near)
 	if not camera or not from or not to then

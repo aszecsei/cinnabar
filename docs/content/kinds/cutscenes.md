@@ -90,6 +90,7 @@ A binding has `possess` or `spawn`, and not both.
 | `scale` | Spawned | `[x, y, z]`, none of them 0 | `[1, 1, 1]` |
 | `suspend` | Both | What the binding suspends on its entity, as the cutscene's `suspend` | The cutscene's |
 | `keep_velocity` | Both | `true`: a body that physics suspension made kinematic keeps its last velocity at the end. `false`: it is at rest. | `false` |
+| `look_at`, `look_at_offset`, `look_at_damping`, `follow`, `follow_offset`, `follow_damping`, `focus` | Both | The binding's constraints as a camera, as a camera cut section's (see [Sections](#sections)). Only a binding that a camera cut section shows takes them. | None |
 
 A parent must come before its child, so parents cannot form a cycle. [Cinematics: Bindings](../../cinematics/bindings.md) describes how the game resolves both kinds.
 
@@ -107,14 +108,14 @@ A parent must come before its child, so parents cannot form a cycle. [Cinematics
 
 The cooker cannot see a property track's field, because native components exist only in the game's code. The game checks that the field can animate when it loads the cutscene ([Cinematics: Property tracks](../../cinematics/tracks.md#property-tracks)).
 
-The kind of a track decides whether it takes a binding, and what each of its sections names with `asset`. Besides their channels and assets, only property and transform tracks, and animation sections, have data of their own yet. A binding has at most one animation track:
+The kind of a track decides whether it takes a binding, and what each of its sections names with `asset`. Besides their channels and assets, only property and transform tracks, and animation and camera cut sections, have data of their own yet. A binding has at most one animation track, and a cutscene has at most one camera cut track, muted or not:
 
 | Kind | Binding | Section's asset |
 |---|---|---|
 | `transform` | Needed | None |
 | `property` | Needed | None |
 | `animation` | Needed | An animation clip, a sub-asset of a glTF model |
-| `camera_cut` | None | None |
+| `camera_cut` | None | None; each section names a camera binding |
 | `audio` | Optional | A sound |
 | `event` | Optional | None |
 | `sub_sequence` | None | A cutscene |
@@ -138,11 +139,25 @@ The kind of a track decides whether it takes a binding, and what each of its sec
 
 `offset`, `speed`, `loop` and `root_motion` are for animation sections only. On a section of another kind, each one is a problem.
 
+A camera cut section has settings of its own ([Cinematics: Camera cut tracks](../../cinematics/tracks.md#camera-cut-tracks)):
+
+| Setting | Value | Default |
+|---|---|---|
+| `camera` | The ID of the binding whose camera the section shows. Needed. | — |
+| `blend_in`, `blend_out` | `<ticks> [curve]`: a blend from gameplay into a section that is first or follows a gap, or from a section that is last or comes before a gap back to gameplay. The curve is `linear`, `smooth`, `ease_in` or `ease_out`. A blend in is at most the section's duration. | 0, a cut |
+| `blend_on_skip` | `true`: a skip that ends the cutscene blends out with this section's `blend_out`, whichever shot shows. `false`: it cuts. Only the last section's setting counts. | `false` |
+| `look_at`, `follow`, `focus` | The ID of a binding that the camera looks at, follows or focuses on. Not the camera itself. | None |
+| `look_at_offset`, `follow_offset` | `[x, y, z]` in meters in the target's space | `[0, 0, 0]` |
+| `look_at_damping`, `follow_damping` | Ticks over which the constraint takes hold from the section's start | 0 |
+
+A camera cut section cuts: it has no `ease_in`, `ease_out`, `weight`, `pre_roll`, `post_roll`, `blend` or channels, and it starts at or after the end of the section before it. Each of the camera cut settings on a section of another kind is a problem.
+
 ### Channels and keys
 
 `channel <name>` starts a curve of the section. Its name is letters, digits and `_`, and no other channel of the section has it. A channel has at least one key. Its track's kind gives the names their meaning:
 - **Property tracks:** `value`, for a number and for a field that steps, or a vector's numbers as `x`, `y` and `z`, or `r`, `g` and `b`. A section keys `value` alone or one vector's names, and not both sets.
 - **Transform tracks:** `position_x`, `position_y` and `position_z` in meters, `rotation_x`, `rotation_y` and `rotation_z` in degrees, and `scale_x`, `scale_y` and `scale_z`.
+- **Camera cut tracks:** none.
 - **The other kinds** take any name for now.
 
 `key <time> <value> <interp> [<slope> | <in> <out>] [weights <in> <out>] [teleport]`:
@@ -163,7 +178,7 @@ key 60000 $0d9b84a2116a5529c2cd33741edd33a4 constant
 
 ## The blob
 
-A `Cutscene_Blob` (`lib/engine/asset/format/cutscene.odin`) holds the length, the rate, the clock, the range, the name of its input context, the GUIDs of the documents that it hides (`cutscene_hide_ui`), and its skip policy, skip ranges (`cutscene_skip_ranges`, at most `MAX_CUTSCENE_SKIP_RANGES`, 256) and skip fade. It then holds five flat tables:
+A `Cutscene_Blob` (`lib/engine/asset/format/cutscene.odin`) holds the length, the rate, the clock, the range, the name of its input context, the GUIDs of the documents that it hides (`cutscene_hide_ui`), and its skip policy, skip ranges (`cutscene_skip_ranges`, at most `MAX_CUTSCENE_SKIP_RANGES`, 256) and skip fade. It then holds six flat tables:
 
 - **`Cutscene_Binding`:**
   - its ID, kind, name and the name's hash (`animation_graph_hash`), and its policy;
@@ -172,7 +187,8 @@ A `Cutscene_Blob` (`lib/engine/asset/format/cutscene.odin`) holds the length, th
   - its parent's index or `CUTSCENE_NONE`;
   - its position as `[3]i64` `World_Position` units, its rotation and its scale.
 - **`Cutscene_Track`:** its ID, kind, name, binding's index or `CUTSCENE_NONE`, flags (`.Muted`), when-finished, its first section and count, for a property track its component's stable ID and its field's name and `scene_field_hash`, and for a transform track its space (`Cutscene_Space`), its origin as `[3]i64` `World_Position` units, and the index of the binding that it is relative to, or `CUTSCENE_NONE`.
-- **`Cutscene_Section`:** its ID, start, end, eases, weight, pre-roll and post-roll, asset GUID (zero for a kind that names none), its first channel and count, and its flags (`.Additive`, `.Loop`). A section of a kind that plays its asset's time (`cutscene_track_plays`, only animation yet) also has its offset into the asset in ticks, its speed, and its root motion (`Cutscene_Root_Motion`: `Bake`, `Apply` or `In_Place`). The other kinds have zeros there.
+- **`Cutscene_Section`:** its ID, start, end, eases, weight, pre-roll and post-roll, asset GUID (zero for a kind that names none), its first channel and count, and its flags (`.Additive`, `.Loop`, `.Blend_On_Skip`). A section of a kind that plays its asset's time (`cutscene_track_plays`, only animation yet) also has its offset into the asset in ticks, its speed, and its root motion (`Cutscene_Root_Motion`: `Bake`, `Apply` or `In_Place`). The other kinds have zeros there. A camera cut section has its camera's binding index, and its blends in and out in ticks with their curves (`Cutscene_Blend_Curve`). The other kinds have `CUTSCENE_NONE` and zeros there.
+- **`Cutscene_Constraint`:** its kind (`Look_At`, `Follow` or `Focus`), the index of the camera cut section or of the binding that holds it (the other is `CUTSCENE_NONE`), its target binding's index, its offset and its damping in ticks. `cutscene_constraints` gives them, at most `MAX_CUTSCENE_CONSTRAINTS` (8192): the bindings' first, then the sections'.
 - **`Cutscene_Channel`:** its name and the name's hash, its first key and count, and its flags (`.Guids`, when its keys' values are indexes into the GUIDs).
 - **`Cutscene_Key`:** its time from the section's start, its value, its interpolation, its flags (`.Broken`, `.Weighted`, `.Teleport`), and its in and out slopes and weights.
 
@@ -189,6 +205,8 @@ Each track's sections follow those of the track before it. The same is true of e
 - each section's times, eases, rolls, weight and asset against its kind;
 - that a section of a kind that plays its asset has an offset from 0 and a finite speed above 0, that only an animation section has a root motion other than `Bake`, and that the other kinds have no offset, speed or `.Loop`;
 - that only property tracks name a field and key assets, and that only transform and property sections are additive;
+- that a cutscene has at most one camera cut track, whose sections name a binding, have a weight of 1 and no eases, rolls, channels or additive blend, follow one another without overlap, blend in only after a gap or first, blend out only before a gap or last, and blend out on a skip only with a blend out, and that the other kinds' sections have no camera, blends or `.Blend_On_Skip`;
+- that each constraint is on one cut section or one binding, of a known kind, with a target that is a binding and not its camera, a finite offset and a damping of 0 or more, and that a focus has neither;
 - that only a transform track has a space other than `Relative`, that only an absolute track has an origin, inside the bounds of a `World_Position`, and that only a track relative to another binding names one, which is not its own;
 - that every channel has keys;
 - that each key is inside its section, comes after the key before it, has a known interpolation and flags and has finite numbers, that a key that is not a Bezier key has no tangents, that only a weighted key has weights, from 0 to 1, that only a transform track's keys teleport, and that a key that names an asset is constant and names one of the GUIDs.
@@ -214,6 +232,10 @@ Each track's sections follow those of the track before it. The same is true of e
   - a `blend` that is not `absolute` or `additive`, or an additive section of a kind other than transform or property;
   - an `offset` that is not a whole number of ticks, a `speed` that is not a number above 0, a `loop` that is not `true` or `false`, a `root_motion` that is not `bake`, `apply` or `in_place`, or any of them on a section that is not an animation section;
   - a second animation track on one binding, at its `track` line, with the line of the first;
+  - a second camera cut track, at its `track` line, with the line of the first;
+  - a camera cut section without `camera`, or one that names no binding, with a setting that blends sections or a channel, that overlaps the section before it, that blends in or out where it meets another section, with a blend in longer than itself, or with `blend_on_skip` but no `blend_out`;
+  - a camera cut setting or a constraint on a section of another kind, or a constraint on a binding that no camera cut section shows;
+  - a constraint's target that names no binding or the camera itself, or an offset or a damping without its constraint;
   - eases longer than the section, a pre-roll or post-roll that is not a whole number of ticks, or a weight outside 0 to 1;
   - a section without the asset that its kind needs, or with one that its kind does not take;
   - a channel's name that is not a name or is taken, or a channel without keys;

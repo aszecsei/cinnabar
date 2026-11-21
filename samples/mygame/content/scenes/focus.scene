@@ -11,9 +11,12 @@ component 1 Transform
 	rotation = [0, 0, 0, 1]
 	scale = [1, 1, 1]
 component 32 Camera
+component 160 Cinematic_Camera
 	focal_length = 50
-	aperture = 1.4
+	sensor_width = 36
+	sensor_height = 24
 	focus_distance = 2.5
+	aperture = 1.4
 behaviour 568465dc198c4c74b7210ccfa8b9f3f3
 	near = @f0c5000000000005
 	far = @f0c5000000000006

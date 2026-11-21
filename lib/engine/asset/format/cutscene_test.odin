@@ -73,6 +73,7 @@ test_cutscene :: proc() -> []byte {
 				position = {1 << 24, 0, -(1 << 23)},
 				rotation = {0, 0, 0, 1},
 				scale = {1, 2, 1},
+				constraints = {{kind = .Focus, target = 0}},
 			},
 			{
 				id = 4,
@@ -159,7 +160,23 @@ test_cutscene :: proc() -> []byte {
 				kind = .Camera_Cut,
 				name = "",
 				binding = CUTSCENE_NONE,
-				sections = {{id = 15, start = 0, end = 120000, weight = 1}},
+				sections = {
+					{
+						id = 15,
+						start = 0,
+						end = 120000,
+						weight = 1,
+						camera = 1,
+						blend_in = 6000,
+						blend_out = 3000,
+						blend_curves = {.Smooth, .Ease_Out},
+						flags = {.Blend_On_Skip},
+						constraints = {
+							{kind = .Look_At, target = 0, offset = {0, 1.5, 0}, damping = 12000},
+							{kind = .Follow, target = 2, offset = {1, 2, -3}},
+						},
+					},
+				},
 			},
 			{
 				id = 6,
@@ -298,6 +315,39 @@ cutscene_blobs_round_trip :: proc(t: ^testing.T) {
 	testing.expect_value(t, lamp.field_hash, scene_field_hash("light.material"))
 	testing.expect_value(t, tracks[0].component, 0)
 	testing.expect_value(t, tracks[0].field_hash, 0)
+
+	cut, has_cut := cutscene_cut_track(data, blob)
+	testing.expect(t, has_cut)
+	testing.expect_value(t, cut.id, 5)
+	shot := cutscene_track_sections(data, blob, cut)[0]
+	testing.expect_value(t, shot.camera, 1)
+	testing.expect_value(t, shot.blend_in, 6000)
+	testing.expect_value(t, shot.blend_out, 3000)
+	testing.expect_value(t, shot.blend_curves, [2]Cutscene_Blend_Curve{.Smooth, .Ease_Out})
+	testing.expect_value(t, shot.flags, Cutscene_Section_Flags{.Blend_On_Skip})
+	testing.expect_value(t, clips[0].camera, CUTSCENE_NONE)
+	constraints := cutscene_constraints(data, blob)
+	testing.expect_value(t, len(constraints), 3)
+	// The bindings' constraints come first, then the sections'.
+	testing.expect_value(
+		t,
+		constraints[0],
+		Cutscene_Constraint{kind = .Focus, section = CUTSCENE_NONE, binding = 1, target = 0},
+	)
+	testing.expect_value(
+		t,
+		constraints[1],
+		Cutscene_Constraint {
+			kind = .Look_At,
+			section = 5,
+			binding = CUTSCENE_NONE,
+			target = 0,
+			offset = {0, 1.5, 0},
+			damping = 12000,
+		},
+	)
+	testing.expect_value(t, constraints[2].kind, Cutscene_Constraint_Kind.Follow)
+	testing.expect_value(t, constraints[2].target, 2)
 	lamp_sections := cutscene_track_sections(data, blob, lamp)
 	testing.expect_value(t, lamp_sections[0].flags, Cutscene_Section_Flags{.Additive})
 	testing.expect_value(t, lamp_sections[1].flags, Cutscene_Section_Flags{})
@@ -551,6 +601,86 @@ cutscene_blobs_with_bad_records_are_refused :: proc(t: ^testing.T) {
 	_, ok = cutscene_view(data)
 	testing.expect(t, ok, "an additive transform section")
 	sections[0].flags = {}
+
+	// Camera cut sections.
+	sections[5].camera = 3
+	refused(t, data, "a cut section whose camera is past the table")
+	sections[5].camera = 1
+	sections[0].camera = 1
+	refused(t, data, "a transform section with a camera")
+	sections[0].camera = CUTSCENE_NONE
+	sections[0].blend_in = 1
+	refused(t, data, "a transform section with a blend")
+	sections[0].blend_in = 0
+	sections[0].flags = {.Blend_On_Skip}
+	refused(t, data, "a transform section that blends on a skip")
+	sections[0].flags = {}
+	sections[5].weight = 0.5
+	refused(t, data, "a cut section with a weight below 1")
+	sections[5].weight = 1
+	sections[5].ease_in = 10
+	refused(t, data, "a cut section with an ease")
+	sections[5].ease_in = 0
+	sections[5].pre_roll = 10
+	refused(t, data, "a cut section with a pre-roll")
+	sections[5].pre_roll = 0
+	sections[5].flags = {.Additive, .Blend_On_Skip}
+	refused(t, data, "an additive cut section")
+	sections[5].flags = {.Blend_On_Skip}
+	sections[5].blend_in = 120001
+	refused(t, data, "a blend in longer than its section")
+	sections[5].blend_in = -1
+	refused(t, data, "a negative blend in")
+	sections[5].blend_in = 6000
+	sections[5].blend_curves[1] = Cutscene_Blend_Curve(4)
+	refused(t, data, "an unknown blend curve")
+	sections[5].blend_curves[1] = .Ease_Out
+	sections[5].blend_out = 0
+	refused(t, data, "a blend on skip without a blend out")
+	sections[5].blend_out = 3000
+	sections[5].reserved = 1
+	refused(t, data, "a section's reserved word that is not 0")
+	sections[5].reserved = 0
+	tracks[3].kind = .Camera_Cut
+	sections[4].asset = {}
+	sections[4].camera = 0
+	refused(t, data, "a second camera cut track")
+	tracks[3].kind = .Sub_Sequence
+	sections[4].asset = SHOT
+	sections[4].camera = CUTSCENE_NONE
+
+	// Constraints.
+	constraints := cutscene_constraints(data, blob)
+	constraints[1].kind = Cutscene_Constraint_Kind(3)
+	refused(t, data, "an unknown constraint kind")
+	constraints[1].kind = .Look_At
+	constraints[1].binding = 1
+	refused(t, data, "a constraint on a section and a binding")
+	constraints[1].section = CUTSCENE_NONE
+	constraints[1].binding = CUTSCENE_NONE
+	refused(t, data, "a constraint on neither")
+	constraints[1].section = 4
+	refused(t, data, "a constraint on a section that is not a cut")
+	constraints[1].section = 5
+	constraints[1].target = 1
+	refused(t, data, "a constraint whose target is its camera")
+	constraints[1].target = 3
+	refused(t, data, "a constraint whose target is past the table")
+	constraints[1].target = 0
+	constraints[1].damping = -1
+	refused(t, data, "a negative damping")
+	constraints[1].damping = 12000
+	constraints[1].offset.y = math.inf_f32(1)
+	refused(t, data, "an offset that is not finite")
+	constraints[1].offset.y = 1.5
+	constraints[0].offset = {1, 0, 0}
+	refused(t, data, "a focus with an offset")
+	constraints[0].offset = {}
+	constraints[0].binding = 3
+	refused(t, data, "a constraint on a binding past the table")
+	constraints[0].binding = 1
+	_, ok = cutscene_view(data)
+	testing.expect(t, ok, "the constraints again")
 
 	channels[0].name.size += u32(len(data))
 	refused(t, data, "a channel's name past the end")

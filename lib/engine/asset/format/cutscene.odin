@@ -28,6 +28,7 @@ MAX_CUTSCENE_CHANNELS :: 65536
 MAX_CUTSCENE_KEYS :: 1 << 20
 MAX_CUTSCENE_SKIP_RANGES :: 256
 MAX_CUTSCENE_GUIDS :: 65536
+MAX_CUTSCENE_CONSTRAINTS :: 8192
 
 // CUTSCENE_TANGENT_WEIGHT is the weight of a tangent of a key that is not weighted: a third of the segment, which makes
 // a Bezier segment a cubic Hermite curve, whose time is linear in its parameter.
@@ -129,6 +130,9 @@ Cutscene_Section_Flag :: enum u32 {
 	// Past the end of the asset that the section plays, its time starts again from the start. Without it, the time
 	// holds at the end. Only a kind that plays an asset's time takes it (cutscene_track_plays).
 	Loop,
+	// A camera cut section that blends out to gameplay blends out at a skip that ends in it too. Without it, the skip
+	// cuts back to gameplay.
+	Blend_On_Skip,
 }
 Cutscene_Section_Flags :: bit_set[Cutscene_Section_Flag;u32]
 
@@ -191,6 +195,39 @@ Cutscene_Track_Flag :: enum u32 {
 	Muted,
 }
 Cutscene_Track_Flags :: bit_set[Cutscene_Track_Flag;u32]
+
+// Cutscene_Blend_Curve is the shape of a camera cut section's blend from and to gameplay. It is camera.Curve's.
+Cutscene_Blend_Curve :: enum u8 {
+	Linear,
+	Smooth,
+	Ease_In,
+	Ease_Out,
+}
+
+// Cutscene_Constraint_Kind is what a camera constraint does (see docs/cinematics/tracks.md#camera-cut-tracks).
+Cutscene_Constraint_Kind :: enum u32 {
+	// The camera turns to face its target, at an offset in the target's space.
+	Look_At,
+	// The camera keeps an offset in its target's space.
+	Follow,
+	// The camera's lens focuses on its target.
+	Focus,
+}
+
+// Cutscene_Constraint is a camera constraint, on a camera cut section, which applies to its camera while it shows, or
+// on a camera binding, which applies while no section's constraint of the same kind does: exactly one of section and
+// binding is an index, and the other is CUTSCENE_NONE. target is a binding's index, offset is in meters in the target's
+// space, and damping is the ticks over which the constraint takes hold from the section's start (0 for at once). A
+// Focus constraint has no offset or damping.
+Cutscene_Constraint :: struct {
+	kind:    Cutscene_Constraint_Kind,
+	section: u32,
+	binding: u32,
+	target:  u32,
+	offset:  [3]f32,
+	damping: i32,
+}
+#assert(size_of(Cutscene_Constraint) == 32)
 
 // Cutscene_Binding_Use is whether a kind of track acts on a binding.
 Cutscene_Binding_Use :: enum u32 {
@@ -294,7 +331,8 @@ Cutscene_Track :: struct {
 // its track's kind names (zero for a kind that names none), and its channels. A section of a kind that plays its
 // asset's time (cutscene_track_plays) has the ticks into the asset that it starts at, and the asset's time per the
 // cutscene's time, above 0. An animation section has what it does with its clip's root motion. The other kinds have
-// zeros there.
+// zeros there. A camera cut section has its camera's binding index, and its blends from and to gameplay in ticks with
+// their curves; the other kinds have CUTSCENE_NONE and zeros there.
 Cutscene_Section :: struct {
 	id:            u32,
 	start:         i32,
@@ -311,8 +349,13 @@ Cutscene_Section :: struct {
 	offset:        i32,
 	speed:         f32,
 	root_motion:   Cutscene_Root_Motion,
+	camera:        u32,
+	blend_in:      i32,
+	blend_out:     i32,
+	blend_curves:  [2]Cutscene_Blend_Curve,
+	reserved:      u16,
 }
-#assert(size_of(Cutscene_Section) == 72)
+#assert(size_of(Cutscene_Section) == 88)
 
 // Cutscene_Channel is a named curve of a section, whose meaning its track's kind gives.
 Cutscene_Channel :: struct {
@@ -368,6 +411,8 @@ Cutscene_Blob :: struct {
 	reserved:      u32,
 	// The assets that the keys of channels with the Guids flag name, by index.
 	guids:         Slice,
+	// The camera constraints, those of sections and of bindings.
+	constraints:   Slice,
 }
 #assert(size_of(Cutscene_Blob) % align_of(Cutscene_Binding) == 0)
 
@@ -379,6 +424,7 @@ cutscene_layout :: proc() -> u64 {
 	h ~= layout.hash(Cutscene_Channel) * 923521
 	h ~= layout.hash(Cutscene_Key) * 28629151
 	h ~= layout.hash(Cutscene_Skip_Range) * 887503681
+	h ~= layout.hash(Cutscene_Constraint) * 27512614111
 	return h
 }
 
@@ -410,6 +456,12 @@ cutscene_view :: proc(data: []byte) -> (blob: ^Cutscene_Blob, ok: bool) {
 	   !inside(data, blob.guids, size_of(Guid), 1) ||
 	   !inside(
 			   data,
+			   blob.constraints,
+			   size_of(Cutscene_Constraint),
+			   align_of(Cutscene_Constraint),
+		   ) ||
+	   !inside(
+			   data,
 			   blob.skip_ranges,
 			   size_of(Cutscene_Skip_Range),
 			   align_of(Cutscene_Skip_Range),
@@ -426,6 +478,7 @@ cutscene_view :: proc(data: []byte) -> (blob: ^Cutscene_Blob, ok: bool) {
 	   len(sections) > MAX_CUTSCENE_SECTIONS ||
 	   len(channels) > MAX_CUTSCENE_CHANNELS ||
 	   len(keys) > MAX_CUTSCENE_KEYS ||
+	   len(cutscene_constraints(data, blob)) > MAX_CUTSCENE_CONSTRAINTS ||
 	   len(cutscene_guids(data, blob)) > MAX_CUTSCENE_GUIDS {
 		return nil, false
 	}
@@ -474,7 +527,14 @@ cutscene_view :: proc(data: []byte) -> (blob: ^Cutscene_Blob, ok: bool) {
 		}
 	}
 	next_section := u32(0)
+	cut_track: Maybe(Cutscene_Track)
 	for tr in tracks {
+		if tr.kind == .Camera_Cut {
+			if _, twice := cut_track.?; twice {
+				return nil, false
+			}
+			cut_track = tr
+		}
 		if tr.kind > .Presentation ||
 		   tr.finish > .Keep ||
 		   tr.flags - {.Muted} != {} ||
@@ -515,7 +575,11 @@ cutscene_view :: proc(data: []byte) -> (blob: ^Cutscene_Blob, ok: bool) {
 		}
 		next_section += tr.section_count
 		wants_asset := cutscene_track_asset(tr.kind) != .None
-		for s in sections[tr.first_section:][:tr.section_count] {
+		track_sections := sections[tr.first_section:][:tr.section_count]
+		for s, j in track_sections {
+			if !cutscene_cut_valid(tr.kind, track_sections, j, len(bindings)) {
+				return nil, false
+			}
 			if s.start < 0 ||
 			   s.start >= s.end ||
 			   s.end > blob.length ||
@@ -526,7 +590,7 @@ cutscene_view :: proc(data: []byte) -> (blob: ^Cutscene_Blob, ok: bool) {
 			   s.post_roll < 0 ||
 			   !(s.weight >= 0 && s.weight <= 1) ||
 			   (s.asset != {}) != wants_asset ||
-			   s.flags - {.Additive, .Loop} != {} ||
+			   s.flags - {.Additive, .Loop, .Blend_On_Skip} != {} ||
 			   (.Additive in s.flags && !cutscene_track_additive(tr.kind)) ||
 			   s.root_motion > .In_Place ||
 			   (s.root_motion != .Bake && tr.kind != .Animation) {
@@ -543,6 +607,33 @@ cutscene_view :: proc(data: []byte) -> (blob: ^Cutscene_Blob, ok: bool) {
 	}
 	if next_section != u32(len(sections)) {
 		return nil, false
+	}
+	for c in cutscene_constraints(data, blob) {
+		on_section, on_binding := c.section != CUTSCENE_NONE, c.binding != CUTSCENE_NONE
+		camera := c.binding
+		if on_section {
+			cut, has_cut := cut_track.?
+			if !has_cut ||
+			   c.section < cut.first_section ||
+			   c.section - cut.first_section >= cut.section_count {
+				return nil, false
+			}
+			camera = sections[c.section].camera
+		}
+		if c.kind > .Focus ||
+		   on_section == on_binding ||
+		   camera >= u32(len(bindings)) ||
+		   c.target >= u32(len(bindings)) ||
+		   c.target == camera ||
+		   c.damping < 0 ||
+		   (c.kind == .Focus && (c.offset != {} || c.damping != 0)) {
+			return nil, false
+		}
+		for axis in c.offset {
+			if math.is_nan(axis) || math.is_inf(axis) {
+				return nil, false
+			}
+		}
 	}
 	next_channel := u32(0)
 	for tr in tracks {
@@ -632,6 +723,53 @@ cutscene_key_valid :: proc "contextless" (k: Cutscene_Key) -> bool {
 	return true
 }
 
+// cutscene_cut_valid checks what a section has for a camera cut. A camera cut section names a camera binding, has a
+// weight of 1 and no eases, rolls, channels or additive flag, starts at or after the section before it ends, and blends
+// in only from gameplay, after a gap or as the first section, and out only to it, before a gap or as the last one; a
+// blend in fits in the section. Blend_On_Skip needs a blend out. The other kinds' sections have none of the camera's
+// fields.
+cutscene_cut_valid :: proc "contextless" (
+	kind: Cutscene_Track_Kind,
+	sections: []Cutscene_Section,
+	index: int,
+	binding_count: int,
+) -> bool {
+	s := sections[index]
+	if s.reserved != 0 {
+		return false
+	}
+	if kind != .Camera_Cut {
+		return(
+			s.camera == CUTSCENE_NONE &&
+			s.blend_in == 0 &&
+			s.blend_out == 0 &&
+			s.blend_curves == {} &&
+			.Blend_On_Skip not_in s.flags \
+		)
+	}
+	after_gap := index == 0 || sections[index - 1].end < s.start
+	before_gap := index == len(sections) - 1 || sections[index + 1].start > s.end
+	return(
+		s.camera < u32(binding_count) &&
+		s.weight == 1 &&
+		s.ease_in == 0 &&
+		s.ease_out == 0 &&
+		s.pre_roll == 0 &&
+		s.post_roll == 0 &&
+		s.channel_count == 0 &&
+		.Additive not_in s.flags &&
+		(index == 0 || s.start >= sections[index - 1].end) &&
+		s.blend_in >= 0 &&
+		s.blend_out >= 0 &&
+		s.blend_in <= s.end - s.start &&
+		(s.blend_in == 0 || after_gap) &&
+		(s.blend_out == 0 || before_gap) &&
+		s.blend_curves[0] <= .Ease_Out &&
+		s.blend_curves[1] <= .Ease_Out &&
+		(.Blend_On_Skip not_in s.flags || s.blend_out > 0) \
+	)
+}
+
 // cutscene_track_additive is whether a kind of track takes additive sections.
 cutscene_track_additive :: proc "contextless" (kind: Cutscene_Track_Kind) -> bool {
 	return kind == .Transform || kind == .Property
@@ -675,6 +813,32 @@ cutscene_keys :: proc "contextless" (data: []byte, blob: ^Cutscene_Blob) -> []Cu
 cutscene_guids :: proc "contextless" (data: []byte, blob: ^Cutscene_Blob) -> []Guid {
 	bytes := blob_bytes(data, blob.guids)
 	return ([^]Guid)(raw_data(bytes))[:len(bytes) / size_of(Guid)]
+}
+
+// cutscene_constraints is the camera constraints of sections and of bindings.
+cutscene_constraints :: proc "contextless" (
+	data: []byte,
+	blob: ^Cutscene_Blob,
+) -> []Cutscene_Constraint {
+	bytes := blob_bytes(data, blob.constraints)
+	return ([^]Cutscene_Constraint)(raw_data(bytes))[:len(bytes) / size_of(Cutscene_Constraint)]
+}
+
+// cutscene_cut_track is a cutscene's camera cut track, of which it has at most one, in a blob that cutscene_view
+// checked.
+cutscene_cut_track :: proc "contextless" (
+	data: []byte,
+	blob: ^Cutscene_Blob,
+) -> (
+	track: Cutscene_Track,
+	ok: bool,
+) {
+	for tr in cutscene_tracks(data, blob) {
+		if tr.kind == .Camera_Cut {
+			return tr, true
+		}
+	}
+	return
 }
 
 // cutscene_hide_ui is the GUIDs of the UI documents that a cutscene hides while it plays.
@@ -753,18 +917,29 @@ cutscene_channel_keys :: proc "contextless" (
 
 // Cutscene_Binding_Contents is a binding as cutscene_write takes it. parent is a binding's index or CUTSCENE_NONE.
 Cutscene_Binding_Contents :: struct {
-	id:       u32,
-	kind:     Cutscene_Binding_Kind,
-	name:     string,
-	policy:   Cutscene_Policy,
-	parent:   u32,
-	asset:    Guid,
-	entity:   u64,
-	position: [3]i64,
-	rotation: [4]f32,
-	scale:    [3]f32,
-	suspend:  Cutscene_Suspend_Set,
-	flags:    Cutscene_Binding_Flags,
+	id:          u32,
+	kind:        Cutscene_Binding_Kind,
+	name:        string,
+	policy:      Cutscene_Policy,
+	parent:      u32,
+	asset:       Guid,
+	entity:      u64,
+	position:    [3]i64,
+	rotation:    [4]f32,
+	scale:       [3]f32,
+	suspend:     Cutscene_Suspend_Set,
+	flags:       Cutscene_Binding_Flags,
+	// The constraints on a camera binding.
+	constraints: []Cutscene_Constraint_Contents,
+}
+
+// Cutscene_Constraint_Contents is a camera constraint as cutscene_write takes it, on the section or the binding that
+// holds it. target is a binding's index.
+Cutscene_Constraint_Contents :: struct {
+	kind:    Cutscene_Constraint_Kind,
+	target:  u32,
+	offset:  [3]f32,
+	damping: i32,
 }
 
 Cutscene_Channel_Contents :: struct {
@@ -774,21 +949,28 @@ Cutscene_Channel_Contents :: struct {
 }
 
 Cutscene_Section_Contents :: struct {
-	id:          u32,
-	start:       i32,
-	end:         i32,
-	ease_in:     i32,
-	ease_out:    i32,
-	weight:      f32,
-	pre_roll:    i32,
-	post_roll:   i32,
-	asset:       Guid,
-	flags:       Cutscene_Section_Flags,
+	id:           u32,
+	start:        i32,
+	end:          i32,
+	ease_in:      i32,
+	ease_out:     i32,
+	weight:       f32,
+	pre_roll:     i32,
+	post_roll:    i32,
+	asset:        Guid,
+	flags:        Cutscene_Section_Flags,
 	// For a kind that plays its asset's time: ticks into the asset, and its time per the cutscene's time.
-	offset:      i32,
-	speed:       f32,
-	root_motion: Cutscene_Root_Motion,
-	channels:    []Cutscene_Channel_Contents,
+	offset:       i32,
+	speed:        f32,
+	root_motion:  Cutscene_Root_Motion,
+	// For a camera cut: the camera's binding index, the blends from and to gameplay in ticks, and their curves, in and
+	// out. The blob has CUTSCENE_NONE as the camera of the other kinds' sections.
+	camera:       u32,
+	blend_in:     i32,
+	blend_out:    i32,
+	blend_curves: [2]Cutscene_Blend_Curve,
+	constraints:  []Cutscene_Constraint_Contents,
+	channels:     []Cutscene_Channel_Contents,
 }
 
 // Cutscene_Track_Contents is a track as cutscene_write takes it. binding is a binding's index or CUTSCENE_NONE.
@@ -831,11 +1013,15 @@ Cutscene_Contents :: struct {
 
 // cutscene_write builds a cutscene blob, flattening its tracks' sections, channels and keys.
 cutscene_write :: proc(contents: Cutscene_Contents, allocator := context.allocator) -> []byte {
-	section_count, channel_count, key_count := 0, 0, 0
+	section_count, channel_count, key_count, constraint_count := 0, 0, 0, 0
+	for b in contents.bindings {
+		constraint_count += len(b.constraints)
+	}
 	for tr in contents.tracks {
 		section_count += len(tr.sections)
 		for s in tr.sections {
 			channel_count += len(s.channels)
+			constraint_count += len(s.constraints)
 			for c in s.channels {
 				key_count += len(c.keys)
 			}
@@ -863,6 +1049,34 @@ cutscene_write :: proc(contents: Cutscene_Contents, allocator := context.allocat
 		align_of(Cutscene_Channel),
 	)
 	keys := reserve_bytes(&buffer, key_count * size_of(Cutscene_Key), align_of(Cutscene_Key))
+	constraints := reserve_bytes(
+		&buffer,
+		constraint_count * size_of(Cutscene_Constraint),
+		align_of(Cutscene_Constraint),
+	)
+	constraint_index := 0
+	add_constraint :: proc(
+		buffer: ^[dynamic]byte,
+		at: Slice,
+		index: ^int,
+		c: Cutscene_Constraint_Contents,
+		section, binding: u32,
+	) {
+		record := Cutscene_Constraint {
+			kind    = c.kind,
+			section = section,
+			binding = binding,
+			target  = c.target,
+			offset  = c.offset,
+			damping = c.damping,
+		}
+		mem.copy(
+			&buffer[int(at.offset) + index^ * size_of(Cutscene_Constraint)],
+			&record,
+			size_of(record),
+		)
+		index^ += 1
+	}
 	for b, i in contents.bindings {
 		record := Cutscene_Binding {
 			id        = b.id,
@@ -884,6 +1098,9 @@ cutscene_write :: proc(contents: Cutscene_Contents, allocator := context.allocat
 			&record,
 			size_of(record),
 		)
+		for c in b.constraints {
+			add_constraint(&buffer, constraints, &constraint_index, c, CUTSCENE_NONE, u32(i))
+		}
 	}
 	section_index, channel_index, key_index := 0, 0, 0
 	for tr, i in contents.tracks {
@@ -925,6 +1142,20 @@ cutscene_write :: proc(contents: Cutscene_Contents, allocator := context.allocat
 				offset        = s.offset,
 				speed         = s.speed,
 				root_motion   = s.root_motion,
+				camera        = s.camera if tr.kind == .Camera_Cut else CUTSCENE_NONE,
+				blend_in      = s.blend_in,
+				blend_out     = s.blend_out,
+				blend_curves  = s.blend_curves,
+			}
+			for c in s.constraints {
+				add_constraint(
+					&buffer,
+					constraints,
+					&constraint_index,
+					c,
+					u32(section_index),
+					CUTSCENE_NONE,
+				)
 			}
 			mem.copy(
 				&buffer[int(sections.offset) + section_index * size_of(Cutscene_Section)],
@@ -998,6 +1229,7 @@ cutscene_write :: proc(contents: Cutscene_Contents, allocator := context.allocat
 		skip_ranges = skip_ranges,
 		skip_fade = contents.skip_fade,
 		guids = guids,
+		constraints = constraints,
 	}
 	mem.copy(raw_data(buffer), &blob, size_of(blob))
 	return buffer[:]

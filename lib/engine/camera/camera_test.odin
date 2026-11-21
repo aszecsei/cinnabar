@@ -726,6 +726,84 @@ a_claim_blends_in_from_the_first_view_and_its_release_blends_back :: proc(t: ^te
 	testing.expect(t, near(x_of(frame.views[1].view), 20))
 }
 
+// Over one full view a claim changes no rect: a blend into it and out of it is not a cut, and only a claim or a release
+// that cuts is.
+@(test)
+a_claim_over_one_view_cuts_only_when_it_cuts :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	spawn_camera(f, 0)
+	shot := spawn_camera(f, 10)
+	step(f)
+	blend := Blend {
+		duration = 1,
+		clock    = .Real,
+	}
+	token, _ := claim(&f.views, &f.world, shot, 0, blend, blend)
+	for _ in 0 ..< 3 {
+		frame := step(f, 0, 0.5)
+		testing.expect(t, !frame.views[0].cut)
+	}
+	release(&f.views, token)
+	for _ in 0 ..< 3 {
+		frame := step(f, 0, 0.5)
+		testing.expect(t, !frame.views[0].cut)
+	}
+	expect_x(t, f, 0, 0)
+
+	token, _ = claim(&f.views, &f.world, shot)
+	frame := step(f)
+	testing.expect(t, frame.views[0].cut)
+	testing.expect(t, near(x_of(frame.views[0].view), 10))
+	release(&f.views, token)
+	frame = step(f)
+	testing.expect(t, frame.views[0].cut)
+	testing.expect(t, near(x_of(frame.views[0].view), 0))
+}
+
+// A release that gives a blend leaves with it in place of the claim's own: a blend out that becomes a cut, and a cut
+// that becomes a blend. A claim made in the same frame, in the slot that the release freed, does not take it.
+@(test)
+a_release_with_a_blend_leaves_with_it :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	spawn_camera(f, 0)
+	a, b := spawn_camera(f, 10), spawn_camera(f, 20)
+	step(f)
+	blend := Blend {
+		duration = 1,
+		clock    = .Real,
+	}
+	token, _ := claim(&f.views, &f.world, a, 0, CUT, blend)
+	step(f)
+	release(&f.views, token, CUT)
+	frame := step(f, 0, 0.5)
+	testing.expect(t, frame.views[0].cut)
+	testing.expect(t, near(x_of(frame.views[0].view), 0))
+
+	token, _ = claim(&f.views, &f.world, a)
+	step(f)
+	release(&f.views, token, blend)
+	frame = step(f, 0, 0.5)
+	testing.expect(t, !frame.views[0].cut)
+	testing.expect(t, near(x_of(frame.views[0].view), 5))
+	step(f, 0, 1)
+
+	// A cut from one claim to the next in one frame: the old one leaves with a cut, though the new one takes its slot.
+	token, _ = claim(&f.views, &f.world, a, 0, CUT, blend)
+	step(f)
+	release(&f.views, token, CUT)
+	next, _ := claim(&f.views, &f.world, b)
+	testing.expect_value(t, Camera_Token(next).slot, Camera_Token(token).slot)
+	frame = step(f, 0, 0.5)
+	testing.expect(t, frame.views[0].cut)
+	testing.expect(t, near(x_of(frame.views[0].view), 20))
+
+	// A stale token changes nothing.
+	release(&f.views, token, blend)
+	testing.expect(t, is_claimed(&f.views, next))
+}
+
 // A cut stays pending until a frame that carries it is drawn: a frame that is not drawn, as with a minimized window,
 // passes it on to the next.
 @(test)
