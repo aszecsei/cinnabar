@@ -331,6 +331,8 @@ register_scripts :: proc(r: ^script.Runtime) {
 		}, "(scale: number) -> ()")
 	// A camera's fields are 0 for their defaults, so it starts from zeros (see render.Camera).
 	script.expose(r, render.Camera)
+	// A lens starts as a 35 mm on a full-frame sensor (see render.Cinematic_Camera).
+	script.expose(r, render.Cinematic_Camera, render.DEFAULT_CINEMATIC_CAMERA)
 }
 
 // MAX_TIME_SCALE is the greatest scale of the world's time. The fixed ticks catch up by at most

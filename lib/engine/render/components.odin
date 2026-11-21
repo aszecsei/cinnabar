@@ -1,7 +1,6 @@
 package render
 
 import "core:math"
-import "core:math/linalg"
 
 import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/ecs"
@@ -26,6 +25,7 @@ REFLECTION_PROBE_ID :: ecs.Component_Id(54)
 // 56 is the Sprite_Renderer (see sheet_sprites.odin).
 TINT_ID :: ecs.Component_Id(57)
 // 58 is the Depth_Of_Field settings component (see settings.odin).
+// 160 is the Cinematic_Camera (see cinematic_camera.odin).
 
 // The view of a Camera that leaves a field at 0, as a component added in the editor does.
 DEFAULT_VERTICAL_FOV :: math.PI / 3
@@ -33,10 +33,6 @@ DEFAULT_NEAR :: 0.05
 // An orthographic camera's defaults: what it shows from bottom to top, and its far plane, in meters.
 DEFAULT_ORTHOGRAPHIC_HEIGHT :: 10
 DEFAULT_ORTHOGRAPHIC_FAR :: 1000
-// A lens's defaults (see docs/rendering/post-processing.md#depth-of-field): a full-frame sensor's height in
-// millimeters, and the focus distance in meters.
-DEFAULT_SENSOR_HEIGHT :: 24
-DEFAULT_FOCUS_DISTANCE :: 10
 
 // Camera_Projection is which projection a Camera has (see Projection).
 Camera_Projection :: enum u8 {
@@ -44,8 +40,9 @@ Camera_Projection :: enum u8 {
 	Orthographic,
 }
 
-// Camera makes its entity a camera: the frame can be drawn from its presented Transform. Game_State holds the active
-// camera's entity (see docs/rendering/assets.md#components). 0 in a field means its default.
+// Camera makes its entity a camera: the frame can be drawn from its presented Transform. The game's camera stacks
+// choose which camera a view shows (see docs/world/cameras.md). 0 in a field means its default. A Cinematic_Camera
+// beside it gives it a lens, which sets vertical_fov in its place.
 Camera :: struct {
 	// In radians.
 	vertical_fov:        f32 `editor:"range=0.1,3"`,
@@ -59,17 +56,6 @@ Camera :: struct {
 	projection:          Camera_Projection,
 	orthographic_height: f32 `editor:"range=0,10000"`,
 	far:                 f32 `editor:"range=0,100000"`,
-	// The lens (see docs/rendering/post-processing.md#depth-of-field), in millimeters. A focal length gives the field
-	// of view in vertical_fov's place: 2 × atan(sensor_height / (2 × focal_length)). 0 in sensor_height means
-	// DEFAULT_SENSOR_HEIGHT.
-	focal_length:        f32 `editor:"range=0,600"`,
-	sensor_height:       f32 `editor:"range=0,100"`,
-	// The f-number. 0 means no depth of field.
-	aperture:            f32 `editor:"range=0,32"`,
-	// In meters, where the lens is sharp. 0 means DEFAULT_FOCUS_DISTANCE. With a live focus entity, its distance
-	// along the camera's axis sets the focus each frame in its place.
-	focus_distance:      f32 `editor:"range=0,1000"`,
-	focus:               ecs.Entity,
 }
 
 // View_Model marks an entity of the first-person view model: it draws with the camera's view model projection, over
@@ -232,6 +218,13 @@ register_components :: proc(r: ^ecs.Registry) {
 	ecs.register_component(r, Camera, CAMERA_ID, category = "Rendering")
 	ecs.register_component(
 		r,
+		Cinematic_Camera,
+		CINEMATIC_CAMERA_ID,
+		DEFAULT_CINEMATIC_CAMERA,
+		category = "Rendering",
+	)
+	ecs.register_component(
+		r,
 		Sprite_Renderer,
 		SPRITE_RENDERER_ID,
 		DEFAULT_SPRITE_RENDERER,
@@ -267,9 +260,14 @@ camera_view :: proc(w: ^ecs.World, entity: ecs.Entity) -> (view: View, ok: bool)
 	}
 	pose := ecs.presented(w, entity) or_return
 	near := camera.near > 0 ? camera.near : DEFAULT_NEAR
+	cinematic := ecs.get(w, entity, Cinematic_Camera)
 	projection: Projection = Perspective {
-		vertical_fov = camera_vertical_fov(camera^),
+		vertical_fov = cinematic != nil ? cinematic_vertical_fov(cinematic^) : own_vertical_fov(camera^),
 		near         = near,
+	}
+	lens: Lens
+	if cinematic != nil && camera.projection == .Perspective {
+		lens = cinematic_lens(w, cinematic^, pose.position, pose.rotation)
 	}
 	if camera.projection == .Orthographic {
 		projection = Orthographic {
@@ -284,44 +282,26 @@ camera_view :: proc(w: ^ecs.World, entity: ecs.Entity) -> (view: View, ok: bool)
 			projection = projection,
 			view_model_fov = camera.view_model_fov,
 			view_model_near = camera.view_model_near,
-			lens = camera_lens(w, camera^, pose.position, pose.rotation),
+			lens = lens,
 		},
 		true
 }
 
-// camera_vertical_fov is a Camera's vertical field of view in radians: its focal length's on its sensor, else
-// vertical_fov, else DEFAULT_VERTICAL_FOV.
-camera_vertical_fov :: proc(camera: Camera) -> f32 {
-	if camera.focal_length > 0 {
-		sensor := camera.sensor_height > 0 ? camera.sensor_height : DEFAULT_SENSOR_HEIGHT
-		return 2 * math.atan(sensor / (2 * camera.focal_length))
+// camera_vertical_fov is a camera entity's vertical field of view in radians: its Cinematic_Camera's lens's when it
+// has one, else its Camera's own. 0 for an entity without a Camera.
+camera_vertical_fov :: proc(w: ^ecs.World, entity: ecs.Entity) -> f32 {
+	camera := ecs.get(w, entity, Camera)
+	if camera == nil {
+		return 0
 	}
-	return camera.vertical_fov > 0 ? camera.vertical_fov : DEFAULT_VERTICAL_FOV
+	if cinematic := ecs.get(w, entity, Cinematic_Camera); cinematic != nil {
+		return cinematic_vertical_fov(cinematic^)
+	}
+	return own_vertical_fov(camera^)
 }
 
-// camera_lens is a Camera's lens with its defaults, at a pose: the focus is its focus entity's distance along the
-// camera's axis while that entity is alive and presented, else focus_distance. A camera without an aperture has the
-// zero lens.
+// own_vertical_fov is a Camera's own vertical field of view: vertical_fov, else DEFAULT_VERTICAL_FOV.
 @(private)
-camera_lens :: proc(
-	w: ^ecs.World,
-	camera: Camera,
-	position: ecs.World_Position,
-	rotation: quaternion128,
-) -> Lens {
-	if camera.aperture <= 0 {
-		return {}
-	}
-	focus := camera.focus_distance > 0 ? camera.focus_distance : DEFAULT_FOCUS_DISTANCE
-	if camera.focus != 0 && ecs.is_alive(w, camera.focus) {
-		if target, ok := ecs.presented(w, camera.focus); ok {
-			forward := linalg.quaternion128_mul_vector3(rotation, [3]f32{0, 0, 1})
-			focus = linalg.dot(ecs.position_sub(target.position, position), forward)
-		}
-	}
-	return {
-		sensor_height = camera.sensor_height > 0 ? camera.sensor_height : DEFAULT_SENSOR_HEIGHT,
-		aperture = camera.aperture,
-		focus_distance = focus,
-	}
+own_vertical_fov :: proc(camera: Camera) -> f32 {
+	return camera.vertical_fov > 0 ? camera.vertical_fov : DEFAULT_VERTICAL_FOV
 }

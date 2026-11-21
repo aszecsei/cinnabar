@@ -13,7 +13,7 @@ import format "cinnabar:engine/asset/format"
 // in ticks, each with sections of keyed channels, a clip, a sound or a sub-sequence (see
 // docs/content/kinds/cutscenes.md). The cook checks the assets that a cutscene names and its sub-sequences' nesting, which
 // it reads from the other cutscenes' sources, so the order of the passes does not matter.
-CUTSCENE_COOK_VERSION :: "cutscenes 7"
+CUTSCENE_COOK_VERSION :: "cutscenes 8"
 
 // CUTSCENE_TEMPLATE is the text of a new cutscene: 10 seconds at 30 frames a second, with no bindings or tracks.
 CUTSCENE_TEMPLATE :: `cutscene 1
@@ -385,6 +385,30 @@ Pending_Binding :: struct {
 	parent_line: int,
 	// The line of suspend, or 0 when the binding takes the cutscene's.
 	suspend:     int,
+	// The constraints on the binding as a camera.
+	constraints: Pending_Constraints,
+}
+
+// Pending_Constraints is the camera constraints that a section or a binding sets: of each kind, the ID of the binding
+// that it targets and the lines of its settings, 0 for a setting that it does not have.
+@(private = "file")
+Pending_Constraints :: struct {
+	targets:       [format.Cutscene_Constraint_Kind]u32,
+	lines:         [format.Cutscene_Constraint_Kind]int,
+	offsets:       [format.Cutscene_Constraint_Kind][3]f32,
+	offset_lines:  [format.Cutscene_Constraint_Kind]int,
+	dampings:      [format.Cutscene_Constraint_Kind]i32,
+	damping_lines: [format.Cutscene_Constraint_Kind]int,
+	// The line of the first constraint setting, to report one on a section or binding that takes none.
+	first:         int,
+}
+
+// The constraint settings' names, by kind. A Focus constraint has no offset or damping.
+@(private = "file")
+CUTSCENE_CONSTRAINT_NAMES := [format.Cutscene_Constraint_Kind]string {
+	.Look_At = "look_at",
+	.Follow  = "follow",
+	.Focus   = "focus",
 }
 
 @(private = "file")
@@ -400,14 +424,23 @@ Pending_Channel :: struct {
 
 @(private = "file")
 Pending_Section :: struct {
-	contents:   format.Cutscene_Section_Contents,
-	line:       int,
-	seen:       [dynamic]string,
-	asset_line: int,
-	blend_line: int,
+	contents:    format.Cutscene_Section_Contents,
+	line:        int,
+	seen:        [dynamic]string,
+	asset_line:  int,
+	blend_line:  int,
 	// The lines of the settings that only a section that plays its clip takes: offset, speed, loop and root_motion.
-	play_lines: [4]int,
-	channels:   [dynamic]Pending_Channel,
+	play_lines:  [4]int,
+	// The line of the first of ease_in, ease_out, weight, pre_roll and post_roll, which a camera cut section does
+	// not take, and its name.
+	shape_line:  int,
+	shape_name:  string,
+	// The settings that only a camera cut section takes: the ID of its camera's binding, and the lines of camera,
+	// blend_in, blend_out and blend_on_skip.
+	camera_id:   u32,
+	cut_lines:   [4]int,
+	constraints: Pending_Constraints,
+	channels:    [dynamic]Pending_Channel,
 }
 
 @(private = "file")
@@ -971,6 +1004,15 @@ cutscene_parse :: proc(
 			}
 			append(&s.seen, name)
 			switch name {
+			case "ease_in", "ease_out", "pre_roll", "post_roll", "weight":
+				if s.shape_line == 0 {
+					s.shape_line, s.shape_name = line, name
+				}
+			}
+			if cutscene_constraint_setting(&found, &s.constraints, name, value_text, line) {
+				continue
+			}
+			switch name {
 			case "ease_in", "ease_out", "pre_roll", "post_roll":
 				ticks, ok := cutscene_ticks_text(value_text)
 				if !ok {
@@ -1061,13 +1103,51 @@ cutscene_parse :: proc(
 					continue
 				}
 				s.play_lines[3] = line
+			case "camera":
+				id, ok := cutscene_id(value_text)
+				if !ok {
+					problem(&found, line, "camera is the ID of a binding of the cutscene")
+					continue
+				}
+				s.camera_id, s.cut_lines[0] = id, line
+			case "blend_in", "blend_out":
+				ticks_text, _, curve_text := strings.partition(value_text, " ")
+				ticks, ticks_ok := cutscene_ticks_text(ticks_text)
+				curve, curve_ok := cutscene_blend_curve(strings.trim_space(curve_text))
+				if !ticks_ok || !curve_ok {
+					problem(
+						&found,
+						line,
+						"%s is a whole number of ticks and a curve: linear (the default), smooth, ease_in or ease_out",
+						name,
+					)
+					continue
+				}
+				if name == "blend_in" {
+					s.contents.blend_in, s.contents.blend_curves[0], s.cut_lines[1] =
+						ticks, curve, line
+				} else {
+					s.contents.blend_out, s.contents.blend_curves[1], s.cut_lines[2] =
+						ticks, curve, line
+				}
+			case "blend_on_skip":
+				switch value_text {
+				case "true":
+					s.contents.flags += {.Blend_On_Skip}
+				case "false":
+					s.contents.flags -= {.Blend_On_Skip}
+				case:
+					problem(&found, line, "blend_on_skip is true or false")
+					continue
+				}
+				s.cut_lines[3] = line
 			case "binding", "muted", "when_finished", "component", "field", "space", "origin":
 				problem(&found, line, "%s comes before the track's sections", name)
 			case:
 				problem(
 					&found,
 					line,
-					"%q is not a setting of a section: ease_in, ease_out, weight, pre_roll, post_roll, asset, blend, offset, speed, loop or root_motion",
+					"%q is not a setting of a section: ease_in, ease_out, weight, pre_roll, post_roll, asset, blend, offset, speed, loop, root_motion, camera, blend_in, blend_out, blend_on_skip, look_at, look_at_offset, look_at_damping, follow, follow_offset, follow_damping or focus",
 					name,
 				)
 			}
@@ -1083,7 +1163,18 @@ cutscene_parse :: proc(
 			     "offset",
 			     "speed",
 			     "loop",
-			     "root_motion":
+			     "root_motion",
+			     "camera",
+			     "blend_in",
+			     "blend_out",
+			     "blend_on_skip",
+			     "look_at",
+			     "look_at_offset",
+			     "look_at_damping",
+			     "follow",
+			     "follow_offset",
+			     "follow_damping",
+			     "focus":
 				problem(&found, line, "%s comes before the section's channels", name)
 			case:
 				problem(&found, line, "a channel has keys, not settings")
@@ -1173,6 +1264,9 @@ cutscene_parse :: proc(
 	result_tracks := make([]format.Cutscene_Track_Contents, len(tracks))
 	// The line of each binding's animation track, by the binding's index: a binding has one.
 	animated := make(map[u32]int, context.temp_allocator)
+	// The line of the camera cut track, of which a cutscene has one, and the cameras that its sections show.
+	cut_line := 0
+	cameras := make(map[u32]bool, context.temp_allocator)
 	for tr, i in tracks {
 		kind := tr.contents.kind
 		// The kind with its article, such as "an audio".
@@ -1263,11 +1357,54 @@ cutscene_parse :: proc(
 				animated[result.binding] = tr.line
 			}
 		}
+		if kind == .Camera_Cut {
+			if cut_line != 0 {
+				problem(
+					&found,
+					tr.line,
+					"the cutscene has a camera_cut track at line %d already: a cutscene has one",
+					cut_line,
+				)
+			} else {
+				cut_line = tr.line
+			}
+		}
 		want := format.cutscene_track_asset(kind)
 		plays := format.cutscene_track_plays(kind)
 		sections := make([]format.Cutscene_Section_Contents, len(tr.sections))
 		for s, j in tr.sections {
 			c := s.contents
+			if kind == .Camera_Cut {
+				c.constraints = cutscene_cut_section(
+					&found,
+					tr.sections[:],
+					j,
+					bindings[:],
+					&c,
+					&cameras,
+				)
+			} else {
+				cut_settings := [4]string{"a camera", "a blend in", "a blend out", "blend_on_skip"}
+				for setting_line, k in s.cut_lines {
+					if setting_line != 0 {
+						problem(
+							&found,
+							setting_line,
+							"only a camera_cut section has %s",
+							cut_settings[k],
+						)
+					}
+				}
+				if s.constraints.first != 0 {
+					problem(
+						&found,
+						s.constraints.first,
+						"only a camera_cut section, or a camera binding, has constraints",
+					)
+				}
+				c.blend_in, c.blend_out, c.blend_curves = 0, 0, {}
+				c.flags -= {.Blend_On_Skip}
+			}
 			if !plays {
 				for setting_line in s.play_lines {
 					if setting_line != 0 {
@@ -1347,6 +1484,26 @@ cutscene_parse :: proc(
 		result.sections = sections
 		result_tracks[i] = result
 	}
+	// A binding's constraints are on it as a camera: one that a camera cut section shows.
+	for b, i in bindings {
+		if b.constraints.first == 0 {
+			continue
+		}
+		if !cameras[u32(i)] {
+			problem(
+				&found,
+				b.constraints.first,
+				"constraints are on a camera binding: one that a camera_cut section shows with camera = <binding id>",
+			)
+			continue
+		}
+		result_bindings[i].constraints = cutscene_constraints(
+			&found,
+			b.constraints,
+			bindings[:],
+			u32(i),
+		)
+	}
 	contents.bindings, contents.tracks = result_bindings, result_tracks
 	cutscene_relative_cycles(&found, tracks[:], result_tracks, result_bindings)
 	contents.hide_ui = hide_ui[:]
@@ -1383,6 +1540,9 @@ cutscene_binding_setting :: proc(
 		if b.spawn_only == 0 {
 			b.spawn_only, b.spawn_name = line, name
 		}
+	}
+	if cutscene_constraint_setting(found, &b.constraints, name, value_text, line) {
+		return
 	}
 	switch name {
 	case "possess":
@@ -1494,10 +1654,228 @@ cutscene_binding_setting :: proc(
 		problem(
 			found,
 			line,
-			"%q is not a setting of a binding: possess, policy, spawn, parent, position, rotation, scale, suspend or keep_velocity",
+			"%q is not a setting of a binding: possess, policy, spawn, parent, position, rotation, scale, suspend, keep_velocity, look_at, look_at_offset, look_at_damping, follow, follow_offset, follow_damping or focus",
 			name,
 		)
 	}
+}
+
+// cutscene_constraint_setting reads a camera constraint's setting of a section or a binding: `look_at`, `follow` or
+// `focus` = <binding id>, and `<kind>_offset` = [x, y, z] in meters and `<kind>_damping` = <ticks> for look_at and
+// follow. It reports false for a name that is not one.
+@(private = "file")
+cutscene_constraint_setting :: proc(
+	found: ^[dynamic]Cutscene_Problem,
+	pc: ^Pending_Constraints,
+	name, value_text: string,
+	line: int,
+) -> bool {
+	problem :: proc(found: ^[dynamic]Cutscene_Problem, line: int, f: string, args: ..any) {
+		append(found, Cutscene_Problem{line, fmt.aprintf(f, ..args)})
+	}
+	for kind_name, kind in CUTSCENE_CONSTRAINT_NAMES {
+		switch {
+		case name == kind_name:
+			id, ok := cutscene_id(value_text)
+			if !ok {
+				problem(found, line, "%s is the ID of a binding of the cutscene", name)
+			} else {
+				pc.targets[kind] = id
+			}
+			pc.lines[kind] = line
+		case kind != .Focus && name == fmt.tprintf("%s_offset", kind_name):
+			value, message := parse_graph_value(value_text)
+			ok := message == "" && value.kind == .Numbers && value.count == 3
+			for axis in 0 ..< 3 {
+				ok &&= abs(value.numbers[axis]) <= f64(max(f32))
+				pc.offsets[kind][axis] = f32(value.numbers[axis])
+			}
+			if !ok {
+				problem(found, line, "%s is three numbers in meters, [x, y, z]", name)
+			}
+			pc.offset_lines[kind] = line
+		case kind != .Focus && name == fmt.tprintf("%s_damping", kind_name):
+			ticks, ok := cutscene_ticks_text(value_text)
+			if !ok {
+				problem(found, line, "%s is a whole number of ticks", name)
+			}
+			pc.dampings[kind], pc.damping_lines[kind] = ticks, line
+		case:
+			continue
+		}
+		if pc.first == 0 {
+			pc.first = line
+		}
+		return true
+	}
+	return false
+}
+
+// cutscene_cut_section checks a camera cut section and gives its constraints: it shows a camera binding, it has none of
+// the settings that blend a section, it follows the section before it without overlap, and it blends in from gameplay
+// and out to it only at an edge with gameplay. The section's camera goes into c, and into cameras.
+@(private = "file")
+cutscene_cut_section :: proc(
+	found: ^[dynamic]Cutscene_Problem,
+	sections: []Pending_Section,
+	index: int,
+	bindings: []Pending_Binding,
+	c: ^format.Cutscene_Section_Contents,
+	cameras: ^map[u32]bool,
+) -> []format.Cutscene_Constraint_Contents {
+	problem :: proc(found: ^[dynamic]Cutscene_Problem, line: int, f: string, args: ..any) {
+		append(found, Cutscene_Problem{line, fmt.aprintf(f, ..args)})
+	}
+	s := sections[index]
+	c.camera = format.CUTSCENE_NONE
+	if s.cut_lines[0] == 0 {
+		problem(
+			found,
+			s.line,
+			"a camera_cut section shows a camera binding with camera = <binding id>",
+		)
+	} else {
+		for b, i in bindings {
+			if b.contents.id == s.camera_id {
+				c.camera = u32(i)
+			}
+		}
+		if c.camera == format.CUTSCENE_NONE {
+			problem(found, s.cut_lines[0], "camera is the ID of a binding of the cutscene")
+		} else {
+			cameras[c.camera] = true
+		}
+	}
+	if s.shape_line != 0 {
+		problem(
+			found,
+			s.shape_line,
+			"a camera_cut section cuts: it has no %s, and blends with gameplay with blend_in and blend_out",
+			s.shape_name,
+		)
+	}
+	if len(s.channels) > 0 {
+		problem(found, s.channels[0].line, "a camera_cut section has no channels")
+	}
+	if index > 0 && s.contents.start < sections[index - 1].contents.end {
+		problem(
+			found,
+			s.line,
+			"camera_cut sections are in time order and do not overlap: the one before ends at %d",
+			sections[index - 1].contents.end,
+		)
+	}
+	after_gap := index == 0 || sections[index - 1].contents.end < s.contents.start
+	before_gap := index == len(sections) - 1 || sections[index + 1].contents.start > s.contents.end
+	if s.cut_lines[1] != 0 && c.blend_in > 0 {
+		switch {
+		case !after_gap:
+			problem(
+				found,
+				s.cut_lines[1],
+				"a camera_cut section blends in only from gameplay: as the first section, or after a gap",
+			)
+		case c.end > c.start && c.blend_in > c.end - c.start:
+			problem(
+				found,
+				s.cut_lines[1],
+				"blend_in is at most the section's duration (%d)",
+				c.end - c.start,
+			)
+		}
+	}
+	if s.cut_lines[2] != 0 && c.blend_out > 0 && !before_gap {
+		problem(
+			found,
+			s.cut_lines[2],
+			"a camera_cut section blends out only to gameplay: as the last section, or before a gap",
+		)
+	}
+	if .Blend_On_Skip in c.flags && c.blend_out == 0 {
+		problem(found, s.cut_lines[3], "blend_on_skip is for a section with a blend_out")
+	}
+	return cutscene_constraints(found, s.constraints, bindings, c.camera)
+}
+
+// cutscene_blend_curve reads a camera cut's blend curve, linear when it is empty.
+@(private = "file")
+cutscene_blend_curve :: proc(text: string) -> (curve: format.Cutscene_Blend_Curve, ok: bool) {
+	switch text {
+	case "", "linear":
+		return .Linear, true
+	case "smooth":
+		return .Smooth, true
+	case "ease_in":
+		return .Ease_In, true
+	case "ease_out":
+		return .Ease_Out, true
+	}
+	return
+}
+
+// cutscene_constraints resolves the constraints that a section or a binding sets on a camera, by the bindings' IDs,
+// and reports their problems: a target that is not a binding or is the camera itself, and an offset or a damping
+// without its constraint. camera is the camera's binding index, or CUTSCENE_NONE when it is not known.
+@(private = "file")
+cutscene_constraints :: proc(
+	found: ^[dynamic]Cutscene_Problem,
+	pc: Pending_Constraints,
+	bindings: []Pending_Binding,
+	camera: u32,
+) -> []format.Cutscene_Constraint_Contents {
+	problem :: proc(found: ^[dynamic]Cutscene_Problem, line: int, f: string, args: ..any) {
+		append(found, Cutscene_Problem{line, fmt.aprintf(f, ..args)})
+	}
+	result := make([dynamic]format.Cutscene_Constraint_Contents)
+	for kind_name, kind in CUTSCENE_CONSTRAINT_NAMES {
+		if pc.lines[kind] == 0 {
+			if pc.offset_lines[kind] != 0 {
+				problem(
+					found,
+					pc.offset_lines[kind],
+					"%s_offset is for %s = <binding id>",
+					kind_name,
+					kind_name,
+				)
+			}
+			if pc.damping_lines[kind] != 0 {
+				problem(
+					found,
+					pc.damping_lines[kind],
+					"%s_damping is for %s = <binding id>",
+					kind_name,
+					kind_name,
+				)
+			}
+			continue
+		}
+		if pc.targets[kind] == 0 {
+			continue
+		}
+		target := format.CUTSCENE_NONE
+		for b, i in bindings {
+			if b.contents.id == pc.targets[kind] {
+				target = u32(i)
+			}
+		}
+		switch {
+		case target == format.CUTSCENE_NONE:
+			problem(found, pc.lines[kind], "%s is the ID of a binding of the cutscene", kind_name)
+		case target == camera:
+			problem(found, pc.lines[kind], "%s names the camera itself", kind_name)
+		case:
+			append(
+				&result,
+				format.Cutscene_Constraint_Contents {
+					kind = kind,
+					target = target,
+					offset = pc.offsets[kind],
+					damping = pc.dampings[kind],
+				},
+			)
+		}
+	}
+	return result[:]
 }
 
 // cutscene_key reads a key's line after `key`: a time in ticks from its section's start, at most its duration, a value,

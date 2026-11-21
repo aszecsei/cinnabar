@@ -52,6 +52,7 @@ public sealed class PropertiesView : ScrollViewer
     Button? _probeCapture;
     // The selected camera's lens, which the values update.
     TextBlock? _lens;
+    ComboBox? _sensor;
     ulong _probeEntity;
 
     /// <summary>What the panel listens to while it shows. Internal to the tests, which attach it without a window.</summary>
@@ -149,7 +150,7 @@ public sealed class PropertiesView : ScrollViewer
     {
         _content.Children.Clear();
         _grid.Clear();
-        (_probeStatus, _probeCapture, _lens) = (null, null, null);
+        (_probeStatus, _probeCapture, _lens, _sensor) = (null, null, null, null);
         var node = _world.Find(_selection.Entity);
         _structure = Structure();
         if (node != null && _selection.Count > 1)
@@ -194,12 +195,14 @@ public sealed class PropertiesView : ScrollViewer
                     Apply = () => _shell.ApplyField(document!.Id, id, null, f.Name),
                 };
             });
-            var note = id == SceneEdits.TransformId && node.Parent != 0 ? "Propagation writes a child's Transform from its Local Transform." : null;
+            var note = id == SceneEdits.TransformId && node.Parent != 0 ? "Propagation writes a child's Transform from its Local Transform."
+                : id == CameraId && node.Components.Contains(CinematicCameraText.CinematicCameraId) ? "The Cinematic Camera's lens sets the vertical FOV."
+                : null;
             var added = prefabBase != null && prefabBase.Components.All(c => c.Id != id);
             var footer = id switch
             {
                 SceneEdits.ReflectionProbeId => ProbeFooter(node.Handle),
-                CameraLensText.CameraId => _lens = new TextBlock { Classes = { "dim" }, TextWrapping = TextWrapping.Wrap },
+                CinematicCameraText.CinematicCameraId => LensFooter(editable ? document!.Id : null, SensorOf(node.Handle, type.Fields)),
                 _ => null,
             };
             _content.Children.Add(Group(title, fields, badge: added ? "Added" : null,
@@ -280,9 +283,9 @@ public sealed class PropertiesView : ScrollViewer
             if (_world.Type(component.Id) is { } type)
             {
                 _grid.ShowComponent(component.Id.ToString("x16"), type, component.Data, ReferenceOf);
-                if (component.Id == CameraLensText.CameraId && _lens != null)
+                if (component.Id == CinematicCameraText.CinematicCameraId && _lens != null)
                 {
-                    _lens.Text = CameraLensText.Describe(type.Fields, component.Data);
+                    _lens.Text = CinematicCameraText.Describe(type.Fields, component.Data);
                 }
                 var entity = _selection.Entity;
                 _grid.ShowHeld(component.Id.ToString("x16"), type, field => _world.IsHeld(entity, component.Id, Fnv.Hash64(Encoding.UTF8.GetBytes(field.Name))));
@@ -609,6 +612,46 @@ public sealed class PropertiesView : ScrollViewer
 
     // A reflection probe's state, from the game, and Capture, which captures it now (see
     // docs/editor/shell-and-panels.md#properties).
+    /// <summary>render.CAMERA_ID.</summary>
+    const ulong CameraId = 32;
+
+    // A Cinematic Camera's lens in words, and a choice of sensor that sets its width and height in one edit, for an
+    // entity of the document.
+    // The choice shows the preset that the sensor was when the panel was built, so that showing values never edits.
+    Control LensFooter(ulong? document, string? sensor)
+    {
+        _lens = new TextBlock { Classes = { "dim" }, TextWrapping = TextWrapping.Wrap };
+        if (document is not { } id)
+        {
+            return _lens;
+        }
+        _sensor = Kit.Choice(CinematicCameraText.SensorPresets.Select(p => p.Name), sensor, name =>
+        {
+            var (_, width, height) = CinematicCameraText.SensorPresets.First(p => p.Name == name);
+            _shell.Edit($"Set Sensor to {name}",
+                new SetField(id, CinematicCameraText.CinematicCameraId, "sensor_width", SceneValue.Of(SceneNumber.Of(width))),
+                new SetField(id, CinematicCameraText.CinematicCameraId, "sensor_height", SceneValue.Of(SceneNumber.Of(height))));
+        });
+        _sensor.PlaceholderText = "Sensor";
+        ToolTip.SetTip(_sensor, "Sets the sensor's width and height to a camera's.");
+        var footer = new StackPanel { Spacing = 6 };
+        footer.Children.Add(_sensor);
+        footer.Children.Add(_lens);
+        return footer;
+    }
+
+    // The name of the sensor preset of an entity's Cinematic Camera in the world, or null.
+    string? SensorOf(ulong entity, IReadOnlyList<Cinnabar.Editor.Link.Protocol.FieldInfo> fields)
+    {
+        var data = _world.Values(entity)?.Components.FirstOrDefault(c => c.Id == CinematicCameraText.CinematicCameraId)?.Data;
+        if (data == null)
+        {
+            return null;
+        }
+        var (width, height) = CinematicCameraText.Sensor(fields, data);
+        return CinematicCameraText.SensorName(width, height);
+    }
+
     Control ProbeFooter(ulong entity)
     {
         _probeEntity = entity;

@@ -49,8 +49,10 @@ This follows [State with a lifecycle](../overview/conventions.md#state-with-a-li
 
 - **A full-screen claim** takes every view, for a cutscene: `claim(views, world, camera, priority, blend, blend_out, owner)`. While a claim is held, the layout shows one full-screen view, which shows the claims' stack. The claims are a stack of their own, so the highest claim shows.
 - **On release**, the layout and each view's stack come back as they were, once the release's blend out ends. The views' stacks keep their entries during the claim.
-- **A claim, a release and a new layout** change the views' rects. Every view cuts in that frame, so no view's histories smear across the change.
-- **A blend into or out of a claim** is in the full-screen view. A claim blends in from what the first view shows, and a release blends back to the first view's camera with the claim's blend out. The layout comes back when that blend ends, with a cut. With one view, as in most games, the release ends where the game's view is, and the cut changes nothing that shows.
+- **A release can change how the claim leaves:** `release(views, token, blend_out)` with a blend replaces the claim's own, as a cutscene that is stopped or skipped cuts away from a shot that would have blended out at its end. It is the one write to a stack's choice outside `advance`, and it changes only the blend that the choice leaves with, which `advance` reads once the claim is gone.
+- **A view whose rect changes cuts.** A claim, a release and a new layout cut every view whose rect they change, so no view's histories smear across the change. With one full-screen view, as in most games, a claim changes no rect: a blend into a claim or out of it does not cut, and a claim or a release cuts only when its blend does.
+- **A blend into or out of a claim** is in the full-screen view. A claim blends in from what the first view shows, and a release blends back to the first view's camera with the claim's blend out. The layout comes back when that blend ends, with a cut when it changes a rect.
+- **Cutscenes** claim the views through their camera cut tracks, one claim for each shot ([Cinematics: Camera cut tracks](../cinematics/tracks.md#camera-cut-tracks)).
 
 ## The frame
 

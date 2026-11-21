@@ -2,7 +2,8 @@ cutscene 1
 # The sample's intro (see docs/content/kinds/cutscenes.md): the animation scene's walking fox walks 4 m, past a guard
 # that the cutscene spawns, to a bark, after the fox_walk shot. Times are ticks, 60000 a second. The fox's track is
 # relative, so it walks from where it stands, and its walk clip loops in place while that track moves it. The audio
-# track's channel name stands until that track gives its own.
+# track's channel name stands until that track gives its own. Three spawned shot cameras cut the scene: a wide shot
+# that blends in from gameplay, a close shot that racks its focus, and a tracking shot that blends back out.
 length = 600000
 rate = 30
 clock = game
@@ -14,6 +15,16 @@ binding 2 "Extra Guard"
 	spawn = $0d9b84a2116a5529c2cd33741edd33a4
 	position = [150000000002, 0, 1.5]
 	rotation = [0, 0.7071068, 0, 0.7071068]
+binding 3 "Wide Shot"
+	spawn = $7fb86acbe194450180b90ee9fb0ecf42
+	position = [149999999998, 1.6, -5]
+binding 4 "Close Shot"
+	spawn = $7fb86acbe194450180b90ee9fb0ecf42
+	position = [150000000003, 1.2, 2.5]
+	rotation = [0, 1, 0, 0]
+binding 5 "Tracking Shot"
+	spawn = $7fb86acbe194450180b90ee9fb0ecf42
+	position = [150000000002, 1.2, -3]
 
 track 1 transform "Fox walks"
 	binding = 1
@@ -41,5 +52,33 @@ track 4 sub_sequence "Opening shot"
 	section 4 0 300000
 		asset = $497bcb7bb533b902877cd8d56fbf97cd
 track 5 camera_cut "Cuts"
-	muted = true
-	section 5 0 600000
+	# A wide shot blends in from gameplay and looks at the fox, focused on it.
+	section 5 0 200000
+		camera = 3
+		blend_in = 30000 smooth
+		look_at = 1
+		look_at_offset = [0, 0.5, 0]
+		focus = 1
+	# A close shot turns to the fox as it passes, while Rack focus pulls the focus in.
+	section 6 200000 400000
+		camera = 4
+		look_at = 1
+		look_at_offset = [0, 0.5, 0]
+		look_at_damping = 12000
+	# A tracking shot follows the fox and blends back to gameplay, at the end or on a skip.
+	section 7 400000 600000
+		camera = 5
+		follow = 1
+		follow_offset = [1.5, 1.2, -3]
+		look_at = 1
+		look_at_offset = [0, 0.5, 0]
+		blend_out = 60000 smooth
+		blend_on_skip = true
+track 6 property "Rack focus"
+	binding = 4
+	component = 160
+	field = "focus_distance"
+	section 8 200000 400000
+		channel value
+			key 0 6 auto
+			key 120000 1.5 auto

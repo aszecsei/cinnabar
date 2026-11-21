@@ -16,7 +16,8 @@ An `Evaluation` is what one cutscene needs to be evaluated:
 - the [snapshot](#the-restore-snapshot) of the fields that its tracks wrote;
 - the fields of its property tracks, resolved once for the blob ([Tracks: Property tracks](tracks.md#property-tracks));
 - for each transform track relative to another binding, a cycle or where its binding starts in the other's space, found once for the blob ([Tracks: Transform tracks](tracks.md#transform-tracks));
-- the `Animator`s that its animation tracks drive, by entity, each with its driver's token ([Tracks: Animation tracks](tracks.md#animation-tracks)).
+- the `Animator`s that its animation tracks drive, by entity, each with its driver's token ([Tracks: Animation tracks](tracks.md#animation-tracks));
+- what its camera cut track shows, with its claim on the game's views, and a count of its seeks and skips, so the track cuts after one ([Tracks: Camera cut tracks](tracks.md#camera-cut-tracks)).
 
 It holds no procedures, `typeid`s or string literals, so it survives a code reload. `init_evaluation` starts it at the range's start, and `destroy_evaluation` frees it.
 
@@ -34,7 +35,7 @@ The blob's `clock` says which time the cutscene follows:
 - **No drift.** `advance` converts a duration to ticks with integer arithmetic. It keeps the part of a tick that is left over in `carry`, in nanoseconds × 60000, and adds it to the next duration. So 1000 steps of 7 ms are exactly 420000 ticks, and 8640 ticks at 144 Hz are exactly 60 s.
 - **The game's clock moves by whole world ticks.** A frame that runs no tick does not move it, so it can be up to one world tick behind the frames.
 - **The end.** The time stops at the range's end. The player then finishes ([Player: The frame](player.md#the-frame)).
-- **Seeks.** `seek` sets the time, inside the range, for a debugger, a scrub or the editor. It sets each phase's last time to the new time, so no event that it jumps over fires.
+- **Seeks.** `seek` sets the time, inside the range, for a debugger, a scrub or the editor. It sets each phase's last time to the new time, so no event that it jumps over fires. It also counts the jump in `Evaluation.jumps`, as `skip_to` does: an empty event range alone does not tell a seek from a pause, and a seek cuts the camera.
 - **The editor's Edit mode** runs no ticks and no frame code for the world, so nothing advances a cutscene there. The editor will scrub through `seek` and its own overrides ([#548](https://github.com/aszecsei/cinnabar/issues/548)).
 
 ## The order in the frame
@@ -44,11 +45,12 @@ Each kind of track has a **phase**:
 | Phase | Where | For |
 |---|---|---|
 | `Fixed` | The `cutscene fixed` system, the first `Fixed` system of each tick. On the real clock, also `advance_real`, before the ticks. | Transforms, poses and property writes |
-| `Late` | The `cutscene late` system, the first `Late` system, after the script phase | Cameras and presentation |
+| `Late` | The `cutscene late` system, the first `Late` system, after the script phase | Camera cuts and presentation |
 
 - **Same tick.** The `Fixed` phase writes before the animator, physics and the tick's propagation read. The animator, physics and propagation therefore see the cutscene's values in the same tick, and nothing lags by a frame.
 - **Interpolation.** The tick's `Previous_Transform` copy runs before the systems. So presentation interpolates from the last tick's pose to the cutscene's pose, as for any entity that moves in `Fixed`.
 - **Late phase.** The `Late` phase runs after scripts and before `camera.advance`, so the frame shows what it wrote.
+- **Camera constraints.** After the `Fixed` phase's tracks, `run_phase` applies the camera constraints of the cut track, so they see every track's pose at the tick, whatever the tracks' order ([Tracks: Camera cut tracks](tracks.md#camera-cut-tracks)).
 - **Exclusive.** Both systems are **exclusive** ([World: ECS: Systems](../world/ecs.md#systems)). A property track can write any component, so the systems cannot name their writes before they run. An exclusive system waits for every system before it, and every later system waits for it. `register` is the first registration in `register_world`, so in each stage the cutscene runs first and alone.
 - **Real clock.** `advance_real` runs in `game_update` before the ticks, and only while the world runs. Its `Fixed` writes are therefore in place before the first tick. The game's pause does not stop them.
 - **Real clock in a pause.** While the game is paused, no tick runs. So `Previous_Transform` is not copied, and the clock's `alpha` does not change. Presentation then shows only a part of a move that a real-clock track writes to `Transform`. A kind that moves an interpolated entity on the real clock must therefore teleport it. The transform track does ([Tracks: Transform tracks](tracks.md#transform-tracks)).
@@ -72,7 +74,7 @@ A kind:
 - gets its binding's entity with `track_entity`;
 - samples its sections with `section_at` and blends them with `Blend`;
 - reads a field's own value with `base`;
-- writes the world **only** with `write` or `write_field`, and writes every field that it holds in each evaluation, at the field's own value where no section covers the time ([Player: Conflicts](player.md#conflicts)). There are two exceptions, outside the snapshot. The first is what follows from those fields each tick: `settle_pose` writes a child's `Transform` and a teleport's `Previous_Transform`. The second is an `Animator`'s driven clips, which only the animation's driver writes, through a token: an animation track holds the token in `Evaluation.drives`, and `restore` ends it;
+- writes the world **only** with `write` or `write_field`, and writes every field that it holds in each evaluation, at the field's own value where no section covers the time ([Player: Conflicts](player.md#conflicts)). There are three exceptions, outside the snapshot. The first is what follows from those fields each tick: `settle_pose` writes a child's `Transform` and a teleport's `Previous_Transform`. The second is an `Animator`'s driven clips, which only the animation's driver writes, through a token: an animation track holds the token in `Evaluation.drives`, and `restore` ends it. The third is the camera cut track's claim on the game's views, which it holds in `Evaluation.cut`, and which `restore` releases;
 - tests a key against the event range with `fires`, and in a skip's range fires only the keys that it marks to fire when skipped ([Skipping: Events](skipping.md#events)).
 
 ## Sections and blending
@@ -118,7 +120,7 @@ Each phase keeps the time of its last evaluation. An evaluation's event range is
 - The fields go back in the reverse of the order in which they were saved. Where a track wrote a whole field and another wrote a part of it, the value from before the first write is what stays.
 - A field of a `Transform` or a `Local_Transform` that goes back teleports its entity, with what is under it (`settle_pose`), so presentation does not interpolate to it.
 
-The snapshot is then empty. `restore` also ends the hold of every `Animator` that an animation track drives, so its graph's pose shows again ([Tracks: Animation tracks](tracks.md#animation-tracks)). The player calls `restore` when it goes to `Restored` or `Failed`.
+The snapshot is then empty. `restore` also ends the hold of every `Animator` that an animation track drives, so its graph's pose shows again ([Tracks: Animation tracks](tracks.md#animation-tracks)), and releases the camera cut track's claim, so the views show gameplay again ([Tracks: Camera cut tracks](tracks.md#camera-cut-tracks)). The player calls `restore` when it goes to `Restored` or `Failed`.
 
 **Several players.** When two players write one field, the later one saves the value that the first one saved, and a player does not put back a field that another live player holds ([Player: Conflicts](player.md#conflicts)). `field_base` gives that value too, so neither player blends over what the other wrote.
 
@@ -155,7 +157,7 @@ A test compares a play with one job and with eight workers.
 | `skip_to(state, e, world, data, blob, target)` | Moves the time to a later target and evaluates each phase there as a skip |
 | `evaluate(state, e, world, data, blob, phase)` | Evaluates one phase's tracks at the time, and follows a reload |
 | `advance_real(state, world, dt)` | Advances the real-clock cutscenes and evaluates their `Fixed` tracks |
-| `restore(state, e, world, data, blob)`, `restore_all(state, e, world)` | Put back the fields of `restore` tracks, or every field when the blob is gone, empty the snapshot, and give back the driven `Animator`s |
+| `restore(state, e, world, data, blob)`, `restore_all(state, e, world)` | Put back the fields of `restore` tracks, or every field when the blob is gone, empty the snapshot, give back the driven `Animator`s, and release the camera cut track's claim |
 | `section_at(blob, section, t)`, `ease(x)` | A section's local time and weight at a time, and the ease's shape |
 | `blend_add`, `blend_value` | Blend sections' values over the base |
 | `track_entity(ctx)`, `fires(ctx, t)` | A track's bound entity, and whether an event fires |

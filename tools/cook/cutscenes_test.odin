@@ -91,6 +91,7 @@ track 4 sub_sequence "Opening shot"
 	`
 track 5 camera_cut ""
 	section 5 0 600000
+		camera = 2
 `
 
 @(test)
@@ -191,6 +192,13 @@ each_mistake_in_a_cutscene_is_reported_at_its_line :: proc(t: ^testing.T) {
 		"\nbinding 2 \"B\"\n\tpossess = " +
 		S +
 		"\ntrack 1 transform \"M\"\n\tbinding = 1\n"
+	// Two bindings and a camera cut track, on lines 3 to 7. The track's sections show binding 1.
+	CUT ::
+		"binding 1 \"A\"\n\tpossess = " +
+		S +
+		"\nbinding 2 \"B\"\n\tpossess = " +
+		S +
+		"\ntrack 1 camera_cut \"C\"\n"
 	// A binding and an animation track of it, with a section of a clip, on lines 3 to 8.
 	ACTS ::
 		"binding 1 \"A\"\n\tpossess = " +
@@ -370,6 +378,137 @@ each_mistake_in_a_cutscene_is_reported_at_its_line :: proc(t: ^testing.T) {
 			"cutscene 1\nlength = 10\ntrack 1 camera_cut \"A\"\n\tbinding = 1\n",
 			4,
 			"a camera_cut track has no binding",
+		},
+		{
+			"cutscene 1\nlength = 10\ntrack 1 camera_cut \"A\"\ntrack 2 camera_cut \"B\"\n",
+			4,
+			"a camera_cut track at line 3 already",
+		},
+		{"cutscene 1\nlength = 10\n" + CUT + "\tsection 1 0 10\n", 8, "camera = <binding id>"},
+		{
+			"cutscene 1\nlength = 10\n" + CUT + "\tsection 1 0 10\n\t\tcamera = 3\n",
+			9,
+			"camera is the ID of a binding",
+		},
+		{
+			"cutscene 1\nlength = 10\n" +
+			CUT +
+			"\tsection 1 0 10\n\t\tcamera = 1\n\t\tease_in = 2\n",
+			10,
+			"it has no ease_in",
+		},
+		{
+			"cutscene 1\nlength = 10\n" +
+			CUT +
+			"\tsection 1 0 10\n\t\tcamera = 1\n\t\tweight = 0.5\n",
+			10,
+			"it has no weight",
+		},
+		{
+			"cutscene 1\nlength = 10\n" +
+			CUT +
+			"\tsection 1 0 10\n\t\tcamera = 1\n\t\tblend = additive\n",
+			10,
+			"cannot be additive",
+		},
+		{
+			"cutscene 1\nlength = 10\n" +
+			CUT +
+			"\tsection 1 0 10\n\t\tcamera = 1\n\t\tchannel x\n\t\t\tkey 0 0 linear\n",
+			10,
+			"has no channels",
+		},
+		{
+			"cutscene 1\nlength = 10\n" +
+			CUT +
+			"\tsection 1 0 6\n\t\tcamera = 1\n\tsection 2 5 10\n\t\tcamera = 1\n",
+			10,
+			"do not overlap",
+		},
+		{
+			"cutscene 1\nlength = 10\n" +
+			CUT +
+			"\tsection 1 0 5\n\t\tcamera = 1\n\tsection 2 5 10\n\t\tcamera = 1\n\t\tblend_in = 2\n",
+			12,
+			"blends in only from gameplay",
+		},
+		{
+			"cutscene 1\nlength = 10\n" +
+			CUT +
+			"\tsection 1 0 5\n\t\tcamera = 1\n\t\tblend_out = 2\n\tsection 2 5 10\n\t\tcamera = 1\n",
+			10,
+			"blends out only to gameplay",
+		},
+		{
+			"cutscene 1\nlength = 10\n" +
+			CUT +
+			"\tsection 1 0 5\n\t\tcamera = 1\n\t\tblend_in = 6\n",
+			10,
+			"at most the section's duration (5)",
+		},
+		{
+			"cutscene 1\nlength = 10\n" +
+			CUT +
+			"\tsection 1 0 5\n\t\tcamera = 1\n\t\tblend_in = 2 bouncy\n",
+			10,
+			"linear (the default), smooth",
+		},
+		{
+			"cutscene 1\nlength = 10\n" +
+			CUT +
+			"\tsection 1 0 5\n\t\tcamera = 1\n\t\tblend_on_skip = true\n",
+			10,
+			"blend_on_skip is for a section with a blend_out",
+		},
+		{
+			"cutscene 1\nlength = 10\n" +
+			CUT +
+			"\tsection 1 0 5\n\t\tcamera = 1\n\t\tlook_at = 1\n",
+			10,
+			"look_at names the camera itself",
+		},
+		{
+			"cutscene 1\nlength = 10\n" +
+			CUT +
+			"\tsection 1 0 5\n\t\tcamera = 1\n\t\tfollow = 9\n",
+			10,
+			"follow is the ID of a binding",
+		},
+		{
+			"cutscene 1\nlength = 10\n" +
+			CUT +
+			"\tsection 1 0 5\n\t\tcamera = 1\n\t\tlook_at_damping = 3\n",
+			10,
+			"look_at_damping is for look_at = <binding id>",
+		},
+		{
+			"cutscene 1\nlength = 10\n" +
+			CUT +
+			"\tsection 1 0 5\n\t\tcamera = 1\n\t\tfocus_offset = [0, 0, 0]\n",
+			10,
+			"is not a setting of a section",
+		},
+		{
+			"cutscene 1\nlength = 10\n" +
+			CUT +
+			"\tsection 1 0 5\n\t\tcamera = 1\n\t\tchannel x\n\t\t\tkey 0 0 linear\n\t\tcamera = 1\n",
+			12,
+			"camera comes before the section's channels",
+		},
+		{
+			"cutscene 1\nlength = 10\n" + MOVE + "\tsection 1 0 5\n\t\tcamera = 2\n",
+			10,
+			"only a camera_cut section has a camera",
+		},
+		{
+			"cutscene 1\nlength = 10\n" + MOVE + "\tsection 1 0 5\n\t\tfocus = 2\n",
+			10,
+			"only a camera_cut section, or a camera binding, has constraints",
+		},
+		{
+			"cutscene 1\nlength = 10\nbinding 1 \"A\"\n\tpossess = " + S + "\n\tlook_at = 1\n",
+			5,
+			"constraints are on a camera binding",
 		},
 		{
 			"cutscene 1\nlength = 10\ntrack 1 event \"A\"\n\tbinding = 4\n",
@@ -886,7 +1025,7 @@ each_kind_of_track_suits_its_binding :: proc(t: ^testing.T) {
 		{"transform", .Required, "", ""},
 		{"property", .Required, "\tcomponent = 1\n\tfield = \"f\"\n", ""},
 		{"animation", .Required, "", "\t\tasset = $" + CLIP_GUID + "\n"},
-		{"camera_cut", .None, "", ""},
+		{"camera_cut", .None, "", "\t\tcamera = 1\n"},
 		{"audio", .Optional, "", "\t\tasset = $" + SOUND_GUID + "\n"},
 		{"event", .Optional, "", ""},
 		{"sub_sequence", .None, "", "\t\tasset = $" + SHOT_GUID + "\n"},
@@ -1218,6 +1357,97 @@ track 2 transform "Fox walks"
 	testing.expect_value(t, sections[2].root_motion, format.Cutscene_Root_Motion.In_Place)
 	testing.expect_value(t, sections[3].root_motion, format.Cutscene_Root_Motion.Bake)
 	testing.expect_value(t, sections[3].speed, 0)
+}
+
+@(test)
+camera_cut_sections_show_a_camera_blend_with_gameplay_and_carry_constraints :: proc(
+	t: ^testing.T,
+) {
+	text :=
+		`cutscene 1
+length = 120000
+binding 1 "Fox"
+	possess = @` +
+		SCENE_GUID +
+		`/1
+binding 2 "Wide"
+	spawn = $` +
+		PREFAB_GUID +
+		`
+	look_at = 1
+	look_at_offset = [0, 0.5, 0]
+binding 3 "Close"
+	spawn = $` +
+		PREFAB_GUID +
+		`
+track 1 camera_cut "Cuts"
+	section 1 0 40000
+		camera = 2
+		blend_in = 30000 smooth
+		focus = 1
+	section 2 40000 80000
+		camera = 3
+		look_at = 1
+		look_at_damping = 12000
+	section 3 90000 120000
+		camera = 2
+		follow = 1
+		follow_offset = [1.5, 1.2, -3]
+		follow_damping = 6000
+		blend_out = 60000 ease_out
+		blend_on_skip = true
+`
+	parsed, problems := cutscene_parse(text, context.temp_allocator)
+	testing.expectf(t, len(problems) == 0, "problems: %v", problems)
+	c := parsed.contents
+	if len(c.tracks) != 1 || len(c.tracks[0].sections) != 3 {
+		return
+	}
+	shots := c.tracks[0].sections
+	testing.expect_value(t, shots[0].camera, 1)
+	testing.expect_value(t, shots[0].blend_in, 30000)
+	testing.expect_value(t, shots[0].blend_curves[0], format.Cutscene_Blend_Curve.Smooth)
+	testing.expect_value(t, len(shots[0].constraints), 1)
+	testing.expect_value(
+		t,
+		shots[0].constraints[0],
+		format.Cutscene_Constraint_Contents{kind = .Focus, target = 0},
+	)
+	testing.expect_value(t, shots[1].camera, 2)
+	testing.expect_value(
+		t,
+		shots[1].constraints[0],
+		format.Cutscene_Constraint_Contents{kind = .Look_At, target = 0, damping = 12000},
+	)
+	testing.expect_value(t, shots[2].blend_out, 60000)
+	testing.expect_value(t, shots[2].blend_curves[1], format.Cutscene_Blend_Curve.Ease_Out)
+	testing.expect_value(t, shots[2].flags, format.Cutscene_Section_Flags{.Blend_On_Skip})
+	testing.expect_value(
+		t,
+		shots[2].constraints[0],
+		format.Cutscene_Constraint_Contents {
+			kind = .Follow,
+			target = 0,
+			offset = {1.5, 1.2, -3},
+			damping = 6000,
+		},
+	)
+	testing.expect_value(t, len(c.bindings[1].constraints), 1)
+	testing.expect_value(
+		t,
+		c.bindings[1].constraints[0],
+		format.Cutscene_Constraint_Contents{kind = .Look_At, target = 0, offset = {0, 0.5, 0}},
+	)
+
+	// The blob keeps them.
+	data := format.cutscene_write(c, context.temp_allocator)
+	blob, ok := format.cutscene_view(data)
+	testing.expect(t, ok)
+	if !ok {
+		return
+	}
+	testing.expect_value(t, len(format.cutscene_constraints(data, blob)), 4)
+	testing.expect_value(t, format.cutscene_sections(data, blob)[2].camera, 1)
 }
 
 @(test)

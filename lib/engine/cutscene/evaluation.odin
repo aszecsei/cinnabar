@@ -9,6 +9,7 @@ import "cinnabar:core"
 import "cinnabar:engine/anim"
 import "cinnabar:engine/asset"
 import format "cinnabar:engine/asset/format"
+import "cinnabar:engine/camera"
 import "cinnabar:engine/ecs"
 
 // MAX_FIELD_SIZE is the most bytes of one field that a track writes, and so that the snapshot saves.
@@ -48,6 +49,9 @@ State :: struct {
 	// The animation's state, which animation tracks drive Animators through (see
 	// docs/cinematics/tracks.md#animation-tracks). Or nil, and animation tracks do nothing.
 	animation: ^anim.State,
+	// The game's views, which camera cut tracks claim (see docs/cinematics/tracks.md#camera-cut-tracks). Or nil, and
+	// camera cut tracks claim nothing.
+	views:     ^camera.Views,
 	kinds:     [format.Cutscene_Track_Kind]Track_Kind,
 	// The players, in fixed slots, so an evaluation does not move while it is evaluated (see
 	// docs/cinematics/player.md#handles).
@@ -87,6 +91,11 @@ Evaluation :: struct {
 	// The Animators that animation tracks drive, by entity, each through its driver's token (see
 	// docs/cinematics/tracks.md#animation-tracks). restore, a reload and destroy_evaluation end them.
 	drives:   map[ecs.Entity]anim.Drive_Token,
+	// What the camera cut track shows, and the claim that it holds on the views for it. restore ends it.
+	cut:      Cut,
+	// Counts the seeks and the skips' jumps, so the camera cut track cuts after one, which an evaluation's range alone
+	// cannot tell from a pause.
+	jumps:    u32,
 }
 
 // Field is a field of a component of an entity: its component, and its offset and size in the component.
@@ -152,10 +161,12 @@ init :: proc(
 	assets: ^asset.Assets,
 	actions: ^core.Input_Actions = nil,
 	animation: ^anim.State = nil,
+	views: ^camera.Views = nil,
 ) {
 	s.assets = assets
 	s.actions = actions
 	s.animation = animation
+	s.views = views
 	set_skip_input(s, "", nil)
 	s.events = make([dynamic]Player_Event, w.platform.heap_allocator)
 	s.level = level_of(w)
@@ -185,6 +196,10 @@ register :: proc(s: ^State, w: ^ecs.World) {
 	s.kinds[.Animation] = {
 		phase    = .Fixed,
 		evaluate = animation_track,
+	}
+	s.kinds[.Camera_Cut] = {
+		phase    = .Late,
+		evaluate = camera_cut_track,
 	}
 	ecs.register_system(
 		w,
@@ -297,6 +312,7 @@ seek :: proc(
 	follow_blob(s, e, w, data, blob)
 	e.time = clamp(t, blob.range_start, blob.range_end)
 	e.carry = 0
+	e.jumps += 1
 	for &last in e.last {
 		last = e.time
 	}
@@ -330,6 +346,7 @@ skip_to :: proc(
 	follow_blob(s, e, w, data, blob)
 	e.time = clamp(target, e.time, blob.range_end)
 	e.carry = 0
+	e.jumps += 1
 	for phase in Phase {
 		run_phase(s, e, w, data, blob, phase, .Skip)
 	}
@@ -385,6 +402,9 @@ run_phase :: proc(
 		ctx.user = kind.data
 		kind.evaluate(&ctx)
 	}
+	if phase == .Fixed {
+		constrain(&ctx)
+	}
 	if events != .Hold {
 		e.last[phase] = now
 	}
@@ -392,7 +412,7 @@ run_phase :: proc(
 
 // restore ends what the tracks did to the world: each saved field that a track set to restore wrote goes back to its
 // value before the cutscene, and those that only tracks set to keep wrote stay. Every Animator that an animation track
-// drives goes back to its graph. A field that another player's snapshot
+// drives goes back to its graph, and the camera cut track gives the views back. A field that another player's snapshot
 // also holds stays as it is: that player writes it while it plays, and gives it back when it ends (see
 // docs/cinematics/player.md#conflicts). The snapshot is then empty. A field whose entity is gone, or no longer has the
 // component, is skipped.
@@ -421,6 +441,7 @@ restore :: proc(
 	}
 	forget(&e.snapshot)
 	end_drives(e, w)
+	end_cut(s, e)
 }
 
 // restore_all puts back every saved field, and gives back every driven Animator, as restore does, for an evaluation
@@ -431,6 +452,7 @@ restore_all :: proc(s: ^State, e: ^Evaluation, w: ^ecs.World) {
 	}
 	forget(&e.snapshot)
 	end_drives(e, w)
+	end_cut(s, e)
 }
 
 // track_entity is the entity of the track's binding while it is alive, and false for a track without a binding, or

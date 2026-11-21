@@ -92,6 +92,8 @@ The skip exposes what later tracks need, but the tracks are not built yet:
 - **Sub-sequences** skip with their parent, through the same jump, in the sub-sequence track ([#545](https://github.com/aszecsei/cinnabar/issues/545)).
 - **Scripts** skip through the `Cutscene` library ([#547](https://github.com/aszecsei/cinnabar/issues/547)).
 
+The camera cut track is built: a skip to a later time cuts to the section there, and a skip that ends the cutscene cuts back to gameplay, or blends out when the last section has `blend_on_skip = true` ([Tracks: Camera cut tracks](tracks.md#camera-cut-tracks)).
+
 ## Procedures
 
 | Procedure | What it does |
