@@ -941,10 +941,10 @@ a_skip_target_follows_the_policy :: proc(t: ^testing.T) {
 @(private = "file")
 event_cutscene :: proc() -> []byte {
 	contents := Cutscene_Contents {
-		length = 120000,
-		rate = 30,
+		length    = 120000,
+		rate      = 30,
 		range_end = 120000,
-		bindings = {
+		bindings  = {
 			{
 				id = 1,
 				kind = .Possessed,
@@ -956,7 +956,7 @@ event_cutscene :: proc() -> []byte {
 				scale = {1, 1, 1},
 			},
 		},
-		tracks = {
+		tracks    = {
 			{
 				id = 1,
 				kind = .Transform,
@@ -1004,12 +1004,15 @@ event_cutscene :: proc() -> []byte {
 						start = 120000,
 						end = 120000,
 						name = "the_end",
-						values = {{kind = .Position, position = {1, -2, 3}}, {kind = .Asset, index = 0}},
+						values = {
+							{kind = .Position, position = {1, -2, 3}},
+							{kind = .Asset, index = 0},
+						},
 					},
 				},
 			},
 		},
-		guids = {SOUND},
+		guids     = {SOUND},
 	}
 	return aligned(cutscene_write(contents, context.temp_allocator))
 }

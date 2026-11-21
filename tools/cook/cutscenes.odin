@@ -745,7 +745,12 @@ cutscene_parse :: proc(
 					"a trigger is `trigger <id> <time> <name>`, with an ID from 1 to 2147483647, a time in whole ticks and a name of letters, digits and _",
 				)
 			case event_ids[id]:
-				problem(&found, line, "the cutscene has a trigger or a range with the ID %d already", id)
+				problem(
+					&found,
+					line,
+					"the cutscene has a trigger or a range with the ID %d already",
+					id,
+				)
 			case is_range && ev.contents.start >= ev.contents.end:
 				problem(&found, line, "a range starts before it ends")
 			}
@@ -1125,7 +1130,8 @@ cutscene_parse :: proc(
 			}
 			switch name {
 			case "fire_on_seek", "fire_when_skipped":
-				flag: format.Cutscene_Event_Flag = .Fire_On_Seek if name == "fire_on_seek" else .Fire_When_Skipped
+				flag: format.Cutscene_Event_Flag =
+					.Fire_On_Seek if name == "fire_on_seek" else .Fire_When_Skipped
 				switch value_text {
 				case "true":
 					ev.contents.flags += {flag}
@@ -1885,7 +1891,10 @@ cutscene_event_track :: proc(
 			if values[j].index == format.CUTSCENE_NONE {
 				append(
 					found,
-					Cutscene_Problem{v.line, "an entity value is the ID of a binding of the cutscene"},
+					Cutscene_Problem {
+						v.line,
+						"an entity value is the ID of a binding of the cutscene",
+					},
 				)
 				values[j].index = 0
 			}
@@ -1954,7 +1963,8 @@ cutscene_event_value :: proc(text: string) -> (v: Cutscene_Value_Text, message: 
 		v.kind = .Entity
 		id, ok := cutscene_id(value_text)
 		if !ok {
-			return v, "an entity value is `entity <binding id>`, the ID of a binding of the cutscene"
+			return v,
+				"an entity value is `entity <binding id>`, the ID of a binding of the cutscene"
 		}
 		v.index = id
 	case "position":
@@ -1966,7 +1976,8 @@ cutscene_event_value :: proc(text: string) -> (v: Cutscene_Value_Text, message: 
 			v.position[axis] = raw
 		}
 		if !ok {
-			return v, "a position value is `position [x, y, z]`, in meters, inside the bounds of a World_Position"
+			return v,
+				"a position value is `position [x, y, z]`, in meters, inside the bounds of a World_Position"
 		}
 	case "asset":
 		v.kind = .Asset
@@ -1975,7 +1986,8 @@ cutscene_event_value :: proc(text: string) -> (v: Cutscene_Value_Text, message: 
 		}
 		v.guid = value.guid
 	case:
-		return v, "a value is `<kind> <value>`, of the kinds number, bool, string, vector, entity, position and asset"
+		return v,
+			"a value is `<kind> <value>`, of the kinds number, bool, string, vector, entity, position and asset"
 	}
 	return v, ""
 }
