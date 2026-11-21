@@ -25,7 +25,7 @@ function FocusPull:distance(target: Entity?): number?
 end
 
 function FocusPull:update(dt: number)
-	local camera = self.entity:get(Cinematic_Camera)
+	local camera = self.entity:get(CinematicCamera)
 	local from = self:distance(if self.to_far then self.near else self.far)
 	local to = self:distance(if self.to_far then self.far else self.near)
 	if not camera or not from or not to then
