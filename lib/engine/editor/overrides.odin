@@ -540,7 +540,7 @@ write_animators :: proc(
 				clip        = format.Guid(sample.clip),
 				time        = sample.time,
 				weight      = sample.weight,
-				root_motion = sample.root_motion,
+				root_motion = .Reported if sample.root_motion else .In_Place,
 			}
 		}
 		for &old in o.animators {

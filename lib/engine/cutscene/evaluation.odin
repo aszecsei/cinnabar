@@ -6,6 +6,7 @@ import "core:slice"
 import "core:time"
 
 import "cinnabar:core"
+import "cinnabar:engine/anim"
 import "cinnabar:engine/asset"
 import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/ecs"
@@ -37,23 +38,26 @@ Track_Kind :: struct {
 // State is the cutscenes' part of the game: the kinds of track, and the players, whose evaluations the systems advance.
 // The kinds hold procedures from the DLL image, so register clears them, and the kinds are registered again after it.
 State :: struct {
-	assets:  ^asset.Assets,
+	assets:    ^asset.Assets,
 	// The input actions: their contexts, which a playing cutscene pushes its own on (see
 	// docs/cinematics/possession.md), and the skip action, which the skip hold reads (see
 	// docs/cinematics/skipping.md#input). Or nil.
-	actions: ^core.Input_Actions,
+	actions:   ^core.Input_Actions,
 	// The skip action's name and hold time, and the hold in progress.
-	skip:    Skip_Input,
-	kinds:   [format.Cutscene_Track_Kind]Track_Kind,
+	skip:      Skip_Input,
+	// The animation's state, which animation tracks drive Animators through (see
+	// docs/cinematics/tracks.md#animation-tracks). Or nil, and animation tracks do nothing.
+	animation: ^anim.State,
+	kinds:     [format.Cutscene_Track_Kind]Track_Kind,
 	// The players, in fixed slots, so an evaluation does not move while it is evaluated (see
 	// docs/cinematics/player.md#handles).
-	players: [MAX_PLAYERS]Player,
+	players:   [MAX_PLAYERS]Player,
 	// The start order that the next player gets.
-	started: u64,
+	started:   u64,
 	// The level generation that the players were made in. A new level resets them.
-	level:   u64,
+	level:     u64,
 	// What happened to the players in this frame, in order. end_frame clears them. Heap memory.
-	events:  [dynamic]Player_Event,
+	events:    [dynamic]Player_Event,
 }
 
 // Evaluation is what one cutscene needs to be evaluated: its blob, its bindings, its time and the snapshot of the
@@ -80,6 +84,9 @@ Evaluation :: struct {
 	// where its binding starts in the other's space (see docs/cinematics/tracks.md#transform-tracks). A reload of the
 	// blob keeps only the starts of the tracks that still join the same two bindings.
 	spaces:   map[u32]Relative_Space,
+	// The Animators that animation tracks drive, by entity, each through its driver's token (see
+	// docs/cinematics/tracks.md#animation-tracks). restore, a reload and destroy_evaluation end them.
+	drives:   map[ecs.Entity]anim.Drive_Token,
 }
 
 // Field is a field of a component of an entity: its component, and its offset and size in the component.
@@ -137,10 +144,18 @@ Track_Context :: struct {
 	user:       rawptr,
 }
 
-// init sets the state's assets, its input actions and the level that its players begin in. Call register after it.
-init :: proc(s: ^State, w: ^ecs.World, assets: ^asset.Assets, actions: ^core.Input_Actions = nil) {
+// init sets the state's assets, its input actions, the animation's state and the level that its players begin in. Call
+// register after it.
+init :: proc(
+	s: ^State,
+	w: ^ecs.World,
+	assets: ^asset.Assets,
+	actions: ^core.Input_Actions = nil,
+	animation: ^anim.State = nil,
+) {
 	s.assets = assets
 	s.actions = actions
+	s.animation = animation
 	set_skip_input(s, "", nil)
 	s.events = make([dynamic]Player_Event, w.platform.heap_allocator)
 	s.level = level_of(w)
@@ -166,6 +181,10 @@ register :: proc(s: ^State, w: ^ecs.World) {
 	s.kinds[.Property] = {
 		phase    = .Fixed,
 		evaluate = property_track,
+	}
+	s.kinds[.Animation] = {
+		phase    = .Fixed,
+		evaluate = animation_track,
 	}
 	ecs.register_system(
 		w,
@@ -212,12 +231,16 @@ init_evaluation :: proc(
 		},
 		targets = make(map[u32]Property_Target, w.platform.heap_allocator),
 		spaces = make(map[u32]Relative_Space, w.platform.heap_allocator),
+		drives = make(map[ecs.Entity]anim.Drive_Token, w.platform.heap_allocator),
 	}
 }
 
-// destroy_evaluation destroys the bindings, which despawns what they spawned, and frees the snapshot. It gives how
-// many spawned roots it despawned. It restores nothing: call restore first for that.
+// destroy_evaluation ends the drives of the Animators, destroys the bindings, which despawns what they spawned, and
+// frees the snapshot. It gives how many spawned roots it despawned. It restores no field: call restore first for that.
 destroy_evaluation :: proc(e: ^Evaluation, w: ^ecs.World) -> (despawned: int) {
+	end_drives(e, w)
+	delete(e.drives)
+	e.drives = nil
 	despawned = release_bindings(&e.bindings, w)
 	destroy_bindings(&e.bindings, w)
 	delete(e.snapshot.saved)
@@ -368,7 +391,8 @@ run_phase :: proc(
 }
 
 // restore ends what the tracks did to the world: each saved field that a track set to restore wrote goes back to its
-// value before the cutscene, and those that only tracks set to keep wrote stay. A field that another player's snapshot
+// value before the cutscene, and those that only tracks set to keep wrote stay. Every Animator that an animation track
+// drives goes back to its graph. A field that another player's snapshot
 // also holds stays as it is: that player writes it while it plays, and gives it back when it ends (see
 // docs/cinematics/player.md#conflicts). The snapshot is then empty. A field whose entity is gone, or no longer has the
 // component, is skipped.
@@ -396,15 +420,17 @@ restore :: proc(
 		}
 	}
 	forget(&e.snapshot)
+	end_drives(e, w)
 }
 
-// restore_all puts back every saved field, as restore does, for an evaluation whose blob is gone, so the tracks'
-// settings are not known.
+// restore_all puts back every saved field, and gives back every driven Animator, as restore does, for an evaluation
+// whose blob is gone, so the tracks' settings are not known.
 restore_all :: proc(s: ^State, e: ^Evaluation, w: ^ecs.World) {
 	#reverse for &saved in e.snapshot.saved {
 		put_back(s, e, w, &saved)
 	}
 	forget(&e.snapshot)
+	end_drives(e, w)
 }
 
 // track_entity is the entity of the track's binding while it is alive, and false for a track without a binding, or
@@ -684,7 +710,7 @@ follow_blob :: proc(
 }
 
 // reload follows a new blob: the time stays, within the new range, the fields that only removed tracks wrote are
-// restored, and the next evaluation of each phase fires no events.
+// restored, the driven Animators are given back, and the next evaluation of each phase fires no events.
 @(private)
 reload :: proc(
 	s: ^State,
@@ -741,6 +767,8 @@ reload :: proc(
 	}
 	clear(&e.targets)
 	keep_spaces(e, w, data, blob)
+	// The tracks take their Animators again as they evaluate the new blob, so a removed track gives its back.
+	end_drives(e, w)
 	e.time = clamp(e.time, blob.range_start, blob.range_end)
 	for &last in e.last {
 		last = e.time

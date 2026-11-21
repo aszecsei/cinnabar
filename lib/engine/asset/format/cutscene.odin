@@ -126,8 +126,23 @@ Cutscene_Section_Flag :: enum u32 {
 	// The section adds its value to the value of the sections below it, or to the field's own value, and does not blend
 	// over it.
 	Additive,
+	// Past the end of the asset that the section plays, its time starts again from the start. Without it, the time
+	// holds at the end. Only a kind that plays an asset's time takes it (cutscene_track_plays).
+	Loop,
 }
 Cutscene_Section_Flags :: bit_set[Cutscene_Section_Flag;u32]
+
+// Cutscene_Root_Motion is what an animation section does with its clip's root motion (see
+// docs/cinematics/tracks.md#animation-tracks).
+Cutscene_Root_Motion :: enum u32 {
+	// The root moves in the mesh, and a transform track places the entity.
+	Bake,
+	// The track moves the entity by it, as a transform track would, and the clip plays in place.
+	Apply,
+	// The clip plays in place, and the entity does not move by it, for a clip beside a transform track that moves the
+	// entity.
+	In_Place,
+}
 
 Cutscene_Channel_Flag :: enum u32 {
 	// The keys' values are indexes into the blob's GUIDs, for a property track that keys an asset field.
@@ -211,6 +226,12 @@ cutscene_track_asset :: proc "contextless" (kind: Cutscene_Track_Kind) -> Asset_
 	return .None
 }
 
+// cutscene_track_plays is whether the sections of a kind of track play their asset's time, from an offset in it, at a
+// speed, looping or holding past its end.
+cutscene_track_plays :: proc "contextless" (kind: Cutscene_Track_Kind) -> bool {
+	return kind == .Animation
+}
+
 cutscene_rate_valid :: proc "contextless" (rate: u32) -> bool {
 	for r in CUTSCENE_RATES {
 		if r == rate {
@@ -270,7 +291,10 @@ Cutscene_Track :: struct {
 
 // Cutscene_Section is a span of a track, in ticks on the cutscene's time, with its eases, its weight, its pre-roll and
 // post-roll (the ticks before its start and after its end that it holds its first and last values for), the asset that
-// its track's kind names (zero for a kind that names none), and its channels.
+// its track's kind names (zero for a kind that names none), and its channels. A section of a kind that plays its
+// asset's time (cutscene_track_plays) has the ticks into the asset that it starts at, and the asset's time per the
+// cutscene's time, above 0. An animation section has what it does with its clip's root motion. The other kinds have
+// zeros there.
 Cutscene_Section :: struct {
 	id:            u32,
 	start:         i32,
@@ -284,8 +308,11 @@ Cutscene_Section :: struct {
 	first_channel: u32,
 	channel_count: u32,
 	flags:         Cutscene_Section_Flags,
+	offset:        i32,
+	speed:         f32,
+	root_motion:   Cutscene_Root_Motion,
 }
-#assert(size_of(Cutscene_Section) == 60)
+#assert(size_of(Cutscene_Section) == 72)
 
 // Cutscene_Channel is a named curve of a section, whose meaning its track's kind gives.
 Cutscene_Channel :: struct {
@@ -499,8 +526,17 @@ cutscene_view :: proc(data: []byte) -> (blob: ^Cutscene_Blob, ok: bool) {
 			   s.post_roll < 0 ||
 			   !(s.weight >= 0 && s.weight <= 1) ||
 			   (s.asset != {}) != wants_asset ||
-			   s.flags - {.Additive} != {} ||
-			   (.Additive in s.flags && !cutscene_track_additive(tr.kind)) {
+			   s.flags - {.Additive, .Loop} != {} ||
+			   (.Additive in s.flags && !cutscene_track_additive(tr.kind)) ||
+			   s.root_motion > .In_Place ||
+			   (s.root_motion != .Bake && tr.kind != .Animation) {
+				return nil, false
+			}
+			if cutscene_track_plays(tr.kind) {
+				if s.offset < 0 || !(s.speed > 0) || math.is_inf(s.speed) {
+					return nil, false
+				}
+			} else if s.offset != 0 || s.speed != 0 || .Loop in s.flags {
 				return nil, false
 			}
 		}
@@ -738,17 +774,21 @@ Cutscene_Channel_Contents :: struct {
 }
 
 Cutscene_Section_Contents :: struct {
-	id:        u32,
-	start:     i32,
-	end:       i32,
-	ease_in:   i32,
-	ease_out:  i32,
-	weight:    f32,
-	pre_roll:  i32,
-	post_roll: i32,
-	asset:     Guid,
-	flags:     Cutscene_Section_Flags,
-	channels:  []Cutscene_Channel_Contents,
+	id:          u32,
+	start:       i32,
+	end:         i32,
+	ease_in:     i32,
+	ease_out:    i32,
+	weight:      f32,
+	pre_roll:    i32,
+	post_roll:   i32,
+	asset:       Guid,
+	flags:       Cutscene_Section_Flags,
+	// For a kind that plays its asset's time: ticks into the asset, and its time per the cutscene's time.
+	offset:      i32,
+	speed:       f32,
+	root_motion: Cutscene_Root_Motion,
+	channels:    []Cutscene_Channel_Contents,
 }
 
 // Cutscene_Track_Contents is a track as cutscene_write takes it. binding is a binding's index or CUTSCENE_NONE.
@@ -882,6 +922,9 @@ cutscene_write :: proc(contents: Cutscene_Contents, allocator := context.allocat
 				first_channel = u32(channel_index),
 				channel_count = u32(len(s.channels)),
 				flags         = s.flags,
+				offset        = s.offset,
+				speed         = s.speed,
+				root_motion   = s.root_motion,
 			}
 			mem.copy(
 				&buffer[int(sections.offset) + section_index * size_of(Cutscene_Section)],

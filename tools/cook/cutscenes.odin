@@ -13,7 +13,7 @@ import format "cinnabar:engine/asset/format"
 // in ticks, each with sections of keyed channels, a clip, a sound or a sub-sequence (see
 // docs/content/kinds/cutscenes.md). The cook checks the assets that a cutscene names and its sub-sequences' nesting, which
 // it reads from the other cutscenes' sources, so the order of the passes does not matter.
-CUTSCENE_COOK_VERSION :: "cutscenes 6"
+CUTSCENE_COOK_VERSION :: "cutscenes 7"
 
 // CUTSCENE_TEMPLATE is the text of a new cutscene: 10 seconds at 30 frames a second, with no bindings or tracks.
 CUTSCENE_TEMPLATE :: `cutscene 1
@@ -405,6 +405,8 @@ Pending_Section :: struct {
 	seen:       [dynamic]string,
 	asset_line: int,
 	blend_line: int,
+	// The lines of the settings that only a section that plays its clip takes: offset, speed, loop and root_motion.
+	play_lines: [4]int,
 	channels:   [dynamic]Pending_Channel,
 }
 
@@ -1013,19 +1015,75 @@ cutscene_parse :: proc(
 					continue
 				}
 				s.blend_line = line
+			case "offset":
+				ticks, ok := cutscene_ticks_text(value_text)
+				if !ok {
+					problem(&found, line, "offset is a whole number of ticks into the clip")
+					continue
+				}
+				s.contents.offset, s.play_lines[0] = ticks, line
+			case "speed":
+				value, message := parse_graph_value(value_text)
+				if message != "" ||
+				   value.kind != .Numbers ||
+				   value.count != 1 ||
+				   !(value.numbers[0] > 0) ||
+				   f32(value.numbers[0]) > max(f32) {
+					problem(
+						&found,
+						line,
+						"speed is a number above 0: the clip's time per the cutscene's",
+					)
+					continue
+				}
+				s.contents.speed, s.play_lines[1] = f32(value.numbers[0]), line
+			case "loop":
+				switch value_text {
+				case "true":
+					s.contents.flags += {.Loop}
+				case "false":
+					s.contents.flags -= {.Loop}
+				case:
+					problem(&found, line, "loop is true or false")
+					continue
+				}
+				s.play_lines[2] = line
+			case "root_motion":
+				switch value_text {
+				case "bake":
+					s.contents.root_motion = .Bake
+				case "apply":
+					s.contents.root_motion = .Apply
+				case "in_place":
+					s.contents.root_motion = .In_Place
+				case:
+					problem(&found, line, "root_motion is bake, apply or in_place")
+					continue
+				}
+				s.play_lines[3] = line
 			case "binding", "muted", "when_finished", "component", "field", "space", "origin":
 				problem(&found, line, "%s comes before the track's sections", name)
 			case:
 				problem(
 					&found,
 					line,
-					"%q is not a setting of a section: ease_in, ease_out, weight, pre_roll, post_roll, asset or blend",
+					"%q is not a setting of a section: ease_in, ease_out, weight, pre_roll, post_roll, asset, blend, offset, speed, loop or root_motion",
 					name,
 				)
 			}
 		case .Channel:
 			switch name {
-			case "ease_in", "ease_out", "weight", "pre_roll", "post_roll", "asset", "blend":
+			case "ease_in",
+			     "ease_out",
+			     "weight",
+			     "pre_roll",
+			     "post_roll",
+			     "asset",
+			     "blend",
+			     "offset",
+			     "speed",
+			     "loop",
+			     "root_motion":
 				problem(&found, line, "%s comes before the section's channels", name)
 			case:
 				problem(&found, line, "a channel has keys, not settings")
@@ -1113,6 +1171,8 @@ cutscene_parse :: proc(
 	}
 	// Tracks: their bindings, and their sections in the length.
 	result_tracks := make([]format.Cutscene_Track_Contents, len(tracks))
+	// The line of each binding's animation track, by the binding's index: a binding has one.
+	animated := make(map[u32]int, context.temp_allocator)
 	for tr, i in tracks {
 		kind := tr.contents.kind
 		// The kind with its article, such as "an audio".
@@ -1191,10 +1251,38 @@ cutscene_parse :: proc(
 				}
 			}
 		}
+		if kind == .Animation && result.binding != format.CUTSCENE_NONE {
+			if other, taken := animated[result.binding]; taken {
+				problem(
+					&found,
+					tr.line,
+					"the binding has an animation track at line %d already: put its clips in that track's sections",
+					other,
+				)
+			} else {
+				animated[result.binding] = tr.line
+			}
+		}
 		want := format.cutscene_track_asset(kind)
+		plays := format.cutscene_track_plays(kind)
 		sections := make([]format.Cutscene_Section_Contents, len(tr.sections))
 		for s, j in tr.sections {
 			c := s.contents
+			if !plays {
+				for setting_line in s.play_lines {
+					if setting_line != 0 {
+						problem(
+							&found,
+							setting_line,
+							"only an animation section has an offset, a speed, a loop and a root motion",
+						)
+					}
+				}
+				c.offset, c.speed, c.root_motion = 0, 0, .Bake
+				c.flags -= {.Loop}
+			} else if s.play_lines[1] == 0 {
+				c.speed = 1
+			}
 			if length_seen && c.end > contents.length {
 				problem(
 					&found,

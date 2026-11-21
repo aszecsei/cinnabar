@@ -191,6 +191,13 @@ each_mistake_in_a_cutscene_is_reported_at_its_line :: proc(t: ^testing.T) {
 		"\nbinding 2 \"B\"\n\tpossess = " +
 		S +
 		"\ntrack 1 transform \"M\"\n\tbinding = 1\n"
+	// A binding and an animation track of it, with a section of a clip, on lines 3 to 8.
+	ACTS ::
+		"binding 1 \"A\"\n\tpossess = " +
+		S +
+		"\ntrack 1 animation \"N\"\n\tbinding = 1\n\tsection 1 0 10\n\t\tasset = $" +
+		CLIP_GUID +
+		"\n"
 	cases := [?]struct {
 		text:     string,
 		line:     int,
@@ -440,7 +447,7 @@ each_mistake_in_a_cutscene_is_reported_at_its_line :: proc(t: ^testing.T) {
 			"asset is $<guid>",
 		},
 		{
-			"cutscene 1\nlength = 10\ntrack 1 event \"A\"\n\tsection 1 0 10\n\t\tspeed = 1\n",
+			"cutscene 1\nlength = 10\ntrack 1 event \"A\"\n\tsection 1 0 10\n\t\tvolume = 1\n",
 			5,
 			"not a setting of a section",
 		},
@@ -707,6 +714,48 @@ each_mistake_in_a_cutscene_is_reported_at_its_line :: proc(t: ^testing.T) {
 		{
 			"cutscene 1\nlength = 10\ntrack 1 event \"A\"\n\tsection 1 0 10\n\t\tchannel x\n\t\t\tkey 0 0 linear\n\t\t\tease_in = 1\n",
 			7,
+			"comes before the section's channels",
+		},
+		{"cutscene 1\nlength = 10\n" + ACTS + "\t\tspeed = 0\n", 9, "speed is a number above 0"},
+		{"cutscene 1\nlength = 10\n" + ACTS + "\t\tspeed = -2\n", 9, "speed is a number above 0"},
+		{
+			"cutscene 1\nlength = 10\n" + ACTS + "\t\tspeed = 1e39\n",
+			9,
+			"speed is a number above 0",
+		},
+		{"cutscene 1\nlength = 10\n" + ACTS + "\t\toffset = 1.5\n", 9, "offset is a whole number"},
+		{"cutscene 1\nlength = 10\n" + ACTS + "\t\tloop = yes\n", 9, "loop is true or false"},
+		{
+			"cutscene 1\nlength = 10\n" + ACTS + "\t\troot_motion = walk\n",
+			9,
+			"root_motion is bake, apply or in_place",
+		},
+		{
+			"cutscene 1\nlength = 10\n" + MOVE + "\tsection 1 0 10\n\t\troot_motion = apply\n",
+			10,
+			"only an animation section",
+		},
+		{
+			"cutscene 1\nlength = 10\ntrack 1 audio \"A\"\n\tsection 1 0 10\n\t\tasset = $" +
+			SOUND_GUID +
+			"\n\t\tloop = true\n",
+			6,
+			"only an animation section",
+		},
+		{
+			"cutscene 1\nlength = 10\n" +
+			ACTS +
+			"track 2 animation \"O\"\n\tbinding = 1\n\tsection 2 0 10\n\t\tasset = $" +
+			CLIP_GUID +
+			"\n",
+			9,
+			"has an animation track at line 5 already",
+		},
+		{
+			"cutscene 1\nlength = 10\n" +
+			ACTS +
+			"\t\tchannel x\n\t\t\tkey 0 0 linear\n\t\t\tspeed = 2\n",
+			11,
 			"comes before the section's channels",
 		},
 	}
@@ -1095,6 +1144,80 @@ track 3 transform "Fox stands"
 	testing.expect_value(t, tracks[0].relative, format.CUTSCENE_NONE)
 	testing.expect_value(t, tracks[1].relative, 1)
 	testing.expect_value(t, tracks[2].relative, format.CUTSCENE_NONE)
+}
+
+@(test)
+animation_sections_play_their_clip_from_an_offset_at_a_speed :: proc(t: ^testing.T) {
+	text :=
+		`cutscene 1
+length = 120000
+binding 1 "Fox"
+	possess = @` +
+		SCENE_GUID +
+		`/1
+track 1 animation "Fox acts"
+	binding = 1
+	section 1 0 60000
+		asset = $` +
+		CLIP_GUID +
+		`
+	section 2 30000 120000
+		asset = $` +
+		CLIP_GUID +
+		`
+		offset = 15000
+		speed = 0.5
+		loop = true
+		root_motion = apply
+	section 4 60000 120000
+		asset = $` +
+		CLIP_GUID +
+		`
+		root_motion = in_place
+track 2 transform "Fox walks"
+	binding = 1
+	section 3 0 60000
+		channel position_x
+			key 0 0 linear
+`
+	parsed, problems := cutscene_parse(text, context.temp_allocator)
+	testing.expectf(t, len(problems) == 0, "problems: %v", problems)
+	c := parsed.contents
+	if len(c.tracks) != 2 {
+		return
+	}
+	held := c.tracks[0].sections[0]
+	testing.expect_value(t, held.offset, 0)
+	testing.expect_value(t, held.speed, 1)
+	testing.expect_value(t, held.flags, format.Cutscene_Section_Flags{})
+	looped := c.tracks[0].sections[1]
+	testing.expect_value(t, looped.offset, 15000)
+	testing.expect_value(t, looped.speed, 0.5)
+	testing.expect_value(t, looped.flags, format.Cutscene_Section_Flags{.Loop})
+	testing.expect_value(t, looped.root_motion, format.Cutscene_Root_Motion.Apply)
+	testing.expect_value(
+		t,
+		c.tracks[0].sections[2].root_motion,
+		format.Cutscene_Root_Motion.In_Place,
+	)
+	testing.expect_value(t, c.tracks[1].sections[0].speed, 0)
+	testing.expect_value(t, c.tracks[1].sections[0].root_motion, format.Cutscene_Root_Motion.Bake)
+
+	// The blob keeps them.
+	data := format.cutscene_write(c, context.temp_allocator)
+	blob, ok := format.cutscene_view(data)
+	testing.expect(t, ok)
+	if !ok {
+		return
+	}
+	sections := format.cutscene_sections(data, blob)
+	testing.expect_value(t, sections[1].offset, 15000)
+	testing.expect_value(t, sections[1].speed, 0.5)
+	testing.expect_value(t, sections[1].flags, format.Cutscene_Section_Flags{.Loop})
+	testing.expect_value(t, sections[1].root_motion, format.Cutscene_Root_Motion.Apply)
+	testing.expect_value(t, sections[2].root_motion, format.Cutscene_Root_Motion.In_Place)
+	testing.expect_value(t, sections[3].root_motion, format.Cutscene_Root_Motion.Bake)
+	testing.expect_value(t, sections[3].speed, 0)
 }
 
 @(test)

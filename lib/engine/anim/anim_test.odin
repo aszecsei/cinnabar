@@ -590,7 +590,7 @@ a_driven_clip_blends_over_the_graph_by_its_weight :: proc(t: ^testing.T) {
 		drive(
 			&f.world,
 			token,
-			{{clip = guid(WALK), time = 0.5, weight = weight, root_motion = true}},
+			{{clip = guid(WALK), time = 0.5, weight = weight, root_motion = .Reported}},
 		)
 		edit_frame(f)
 		z := root_z(f, e)
@@ -695,10 +695,14 @@ driven_root_motion_is_reported_or_removed :: proc(t: ^testing.T) {
 	token, _ := begin_drive(&f.animation, &f.world, e)
 	m := ecs.get(&f.world, e, Root_Motion)
 
-	drive(&f.world, token, {{clip = guid(WALK), time = 0, weight = 0.5, root_motion = true}})
+	drive(&f.world, token, {{clip = guid(WALK), time = 0, weight = 0.5, root_motion = .Reported}})
 	frame(f, 1)
 	testing.expect(t, near(m.translation.z, 0), "a clip's first tick moved the root")
-	drive(&f.world, token, {{clip = guid(WALK), time = 0.5, weight = 0.5, root_motion = true}})
+	drive(
+		&f.world,
+		token,
+		{{clip = guid(WALK), time = 0.5, weight = 0.5, root_motion = .Reported}},
+	)
 	frame(f, 1)
 	// Half a second of the walk is 1 m, by its weight; the graph stands.
 	testing.expectf(t, near(m.translation.z, 0.5), "reported %.3f", m.translation.z)
@@ -706,7 +710,11 @@ driven_root_motion_is_reported_or_removed :: proc(t: ^testing.T) {
 	testing.expect(t, near(root_z(f, e), 0))
 
 	// Back in time, nothing is reported.
-	drive(&f.world, token, {{clip = guid(WALK), time = 0.25, weight = 0.5, root_motion = true}})
+	drive(
+		&f.world,
+		token,
+		{{clip = guid(WALK), time = 0.25, weight = 0.5, root_motion = .Reported}},
+	)
 	frame(f, 1)
 	testing.expect(t, near(m.translation.z, 0), "a scrub back moved the root")
 

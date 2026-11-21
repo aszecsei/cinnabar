@@ -56,9 +56,19 @@ Driven_Sample :: struct {
 	time:        f32,
 	// From 0, the graph's pose, to 1, the clip's. Weights that add up to more than 1 are scaled to add up to 1.
 	weight:      f32,
-	// Whether the clip's root motion is reported in Root_Motion, as the graph's is, rather than taken out of the pose
-	// so that the clip plays in place.
-	root_motion: bool,
+	root_motion: Driven_Root_Motion,
+}
+
+// Driven_Root_Motion is what a driven clip does with its root joint's motion.
+Driven_Root_Motion :: enum u8 {
+	// The pose leaves it out, so the clip plays in place, and the ticks report none of it.
+	In_Place,
+	// The ticks report it in Root_Motion, as the graph's is. The pose leaves it out when the entity has a Root_Motion,
+	// and keeps it otherwise.
+	Reported,
+	// The pose keeps it, whether or not the entity has a Root_Motion, so the root moves in the mesh, and the ticks
+	// report none of it.
+	In_Pose,
 }
 
 // Driven is an Animator while a driver holds it: the generation that the driver's token must match, and its samples.
@@ -158,6 +168,9 @@ State :: struct {
 	driven_clips: []Driven_Clip,
 	// The last driver's generation, which begin_drive counts up, so a token never matches a later driver's.
 	next_drive:   u32,
+	// The markers that drivers raised since the last flush (see raise_marker), which the flush puts before the tick's
+	// own events. Heap memory.
+	raised:       [dynamic]Job_Event,
 	// The events of the tick numbered tick, and of every tick since begin_frame. Their strings are on the heap.
 	tick_events:  [dynamic]Event,
 	tick:         u64,
@@ -192,6 +205,8 @@ destroy :: proc(s: ^State) {
 	clear_events(s, &s.frame_events)
 	delete(s.tick_events)
 	delete(s.frame_events)
+	delete(s.raised)
+	s.raised = nil
 }
 
 // prepare loads each Animator's graph and clips into the frame's table, so the animate system's jobs read no assets,
@@ -260,6 +275,11 @@ begin_frame :: proc(s: ^State) {
 animate :: proc(ctx: ^ecs.System_Context) {
 	s := (^State)(ctx.data)
 	events: ^[dynamic]Job_Event
+	// The flush runs only for a stage whose jobs asked for a buffer, and it is what moves the drivers' markers to the
+	// tick's events.
+	if len(s.raised) > 0 {
+		events = (^[dynamic]Job_Event)(ecs.job_buffer(ctx, s.job_events))
+	}
 	it := ecs.query_iter(ctx.world, ctx.query, ctx.first_chunk, ctx.chunk_count)
 	for view in ecs.query_next(&it) {
 		entities := ecs.entities(view)
@@ -326,7 +346,7 @@ driven_root_motion :: proc(
 	for sample, i in d.samples {
 		before := d.ticked[i]
 		if weights[i] <= 0 ||
-		   !sample.root_motion ||
+		   sample.root_motion != .Reported ||
 		   sample.clip != before.clip ||
 		   sample.time <= before.time {
 			continue
@@ -440,6 +460,138 @@ is_driving :: proc(w: ^ecs.World, token: Drive_Token) -> bool {
 	return ok
 }
 
+// clip_length is a loaded clip's duration in seconds, and false when the clip is not loaded. It loads nothing.
+clip_length :: proc(s: ^State, clip: format.Guid) -> (seconds: f32, ok: bool) {
+	_, blob := loaded_clip(s, clip) or_return
+	return blob.duration, true
+}
+
+// Clip_Motion is a clip and the root joint of an entity's graph, which clip_motion measures the clip's root motion by.
+Clip_Motion :: struct {
+	graph: anim_graph.Graph,
+	clip:  anim_graph.Clip,
+}
+
+// clip_motion_of is what a driver measures a clip's root motion on an entity with (see
+// docs/animation/design.md#driving-an-animator). False when the entity has no Animator, its graph is not ready or has
+// no root joint, or the clip is not loaded or is of another skin. In a frame it takes the graph from prepare's table.
+// Outside one, it loads the graph into allocator, as present does.
+clip_motion_of :: proc(
+	s: ^State,
+	w: ^ecs.World,
+	entity: ecs.Entity,
+	clip: format.Guid,
+	allocator: mem.Allocator,
+) -> (
+	motion: Clip_Motion,
+	ok: bool,
+) {
+	a := ecs.get(w, entity, Animator)
+	if a == nil {
+		return
+	}
+	r: Resolved
+	if ready, in_frame := ready_graph(s, a); in_frame {
+		r = ready^
+	} else {
+		r = load_graph(s, a, allocator)
+		if !r.ready {
+			return
+		}
+	}
+	if r.graph.root < 0 {
+		return
+	}
+	data, blob := loaded_clip(s, clip) or_return
+	if !fits_skin(blob, r.graph.clips[0].blob.skin, len(format.skin_joints(r.skin_data, r.skin))) {
+		return
+	}
+	return {r.graph, {data, blob}}, true
+}
+
+// clip_motion is the root joint's move from one time of a clip to a later one, in seconds held to the clip's length:
+// along x and z, in the model's space turned to the root's heading at the first time, and its turn about y in radians.
+clip_motion :: proc(m: ^Clip_Motion, from, to: f32) -> (delta: [3]f32, turn: f32) {
+	d := m.clip.blob.duration
+	return anim_graph.clip_root_motion(&m.graph, m.clip, clamp(from, 0, d), clamp(to, 0, d))
+}
+
+// clip_markers is the markers that an entity's graph puts on a clip, in the order of their times: those of the first of
+// the graph's clips that plays it. They are empty outside a frame, when the entity's graph is not ready, and when the
+// graph does not play the clip.
+clip_markers :: proc(
+	s: ^State,
+	w: ^ecs.World,
+	entity: ecs.Entity,
+	clip: format.Guid,
+) -> []format.Animation_Graph_Marker {
+	a := ecs.get(w, entity, Animator)
+	if a == nil {
+		return nil
+	}
+	r, ready := ready_graph(s, a)
+	if !ready || r.graph.blob == nil {
+		return nil
+	}
+	g := &r.graph
+	for c in format.animation_graph_clips(g.data, g.blob) {
+		if c.clip == clip {
+			return format.animation_graph_markers(g.data, g.blob)[c.first_marker:][:c.marker_count]
+		}
+	}
+	return nil
+}
+
+// raise_marker raises a marker of clip_markers for an entity, as its graph raises one in a tick, from its current
+// state. The tick's flush puts it before the graph's own events, in the order of the calls, so it reaches the entity's
+// behaviours as on_animation_event. A driver raises the markers that its clips pass, since driven clips raise none of
+// their own. False outside a frame, or when the entity's graph is not ready.
+raise_marker :: proc(
+	s: ^State,
+	w: ^ecs.World,
+	entity: ecs.Entity,
+	marker: format.Animation_Graph_Marker,
+) -> bool {
+	a := ecs.get(w, entity, Animator)
+	if a == nil {
+		return false
+	}
+	if _, ready := ready_graph(s, a); !ready {
+		return false
+	}
+	if s.raised == nil {
+		s.raised = make([dynamic]Job_Event, w.platform.heap_allocator)
+	}
+	append(
+		&s.raised,
+		Job_Event {
+			entity,
+			a.slot,
+			{kind = .Marker, state = a.instance.state, event = marker.event},
+		},
+	)
+	return true
+}
+
+// loaded_clip is a clip's blob, if the clip is loaded. It adds no user.
+@(private)
+loaded_clip :: proc(
+	s: ^State,
+	guid: format.Guid,
+) -> (
+	data: []byte,
+	blob: ^format.Animation_Blob,
+	ok: bool,
+) {
+	if s.assets == nil || guid == {} {
+		return
+	}
+	h := asset.find(s.assets, guid) or_return
+	data = asset.data(s.assets, h) or_return
+	blob = format.animation_view(data) or_return
+	return data, blob, true
+}
+
 // driven_of is the driven state that a token holds, if the token is not stale.
 @(private)
 driven_of :: proc(w: ^ecs.World, token: Drive_Token) -> (^Driven, bool) {
@@ -496,6 +648,14 @@ flush_job_events :: proc(user: rawptr, buffers: []rawptr) {
 	s := (^State)(user)
 	clear_events(s, &s.tick_events)
 	s.tick = s.world.clock.tick
+	for e in s.raised {
+		if int(e.slot) < len(s.graphs) {
+			event := make_event(s, &s.graphs[e.slot], e)
+			append(&s.tick_events, event)
+			append(&s.frame_events, copy_event(s, event))
+		}
+	}
+	clear(&s.raised)
 	for b in buffers {
 		for e in (^[dynamic]Job_Event)(b) {
 			if int(e.slot) >= len(s.graphs) {
@@ -695,9 +855,8 @@ driven_skin :: proc(
 }
 
 // blend_driven blends an Animator's driven clips over its pose, each at its own time, which is given rather than
-// stepped, so it takes no alpha. The pose keeps what the weights leave of it. A clip is posed in place unless it
-// reports its root motion, and then also when the entity has a Root_Motion, as the graph's pose is. A clip that has
-// not loaded, or is of another skin, is left out.
+// stepped, so it takes no alpha. The pose keeps what the weights leave of it. A clip's root motion stays in the pose,
+// or leaves it, as its Driven_Root_Motion says. A clip that has not loaded, or is of another skin, is left out.
 @(private)
 blend_driven :: proc(
 	s: ^State,
@@ -726,8 +885,14 @@ blend_driven :: proc(
 		}
 		copy(scratch, rest)
 		anim_graph.sample(data, clip, clamp(sample.time, 0, clip.duration), scratch)
-		if !sample.root_motion || has_root_motion {
+		switch sample.root_motion {
+		case .In_Place:
 			anim_graph.remove_root_motion(g, scratch)
+		case .Reported:
+			if has_root_motion {
+				anim_graph.remove_root_motion(g, scratch)
+			}
+		case .In_Pose:
 		}
 		anim_graph.accumulate(sum, scratch, weights[i])
 		used += weights[i]
