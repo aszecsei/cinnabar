@@ -295,9 +295,10 @@ overlay_frame :: proc(s: ^State, w: ^ecs.World) -> (f: Overlay_Frame) {
 			amount       = v.amount,
 		}
 		cover: f32
+		skipping := false
 		#partial switch state in p.state {
 		case Player_Skipping:
-			cover = skip_cover(s, state)
+			cover, skipping = skip_cover(s, state), true
 		case Player_Finishing:
 			cover = state.cover
 		}
@@ -308,7 +309,9 @@ overlay_frame :: proc(s: ^State, w: ^ecs.World) -> (f: Overlay_Frame) {
 				skip_color(s, e),
 				cover,
 			)
-		} else if s.overlay.subtitles.enabled {
+		}
+		// Subtitles hide for the whole skip, its fade in included, and behind a skip's fade as the player finishes.
+		if !skipping && cover <= 0 && s.overlay.subtitles.enabled {
 			f.lines, f.line_count = v.lines, v.line_count
 		}
 		return
@@ -349,6 +352,8 @@ present :: proc(s: ^State, w: ^ecs.World, window: [2]f32) {
 	if d == nil || !d.built {
 		return
 	}
+	// Temporary memory here is the frame's, which the platform frees each frame.
+	context.temp_allocator = w.platform.frame_allocator
 	f := overlay_frame(s, w)
 	d.visible = f.shown
 	if !f.shown {
