@@ -139,6 +139,9 @@ Screen :: struct {
 // Document is a Ui_Document's document, in a slot of the state, while its entity has one.
 Document :: struct {
 	used:        bool,
+	// Whether code owns the document, with no entity (see open_owned): sync loads it, but neither matches it to an
+	// entity nor frees it, and it takes no input.
+	owned:       bool,
 	entity:      ecs.Entity,
 	guid:        format.Guid,
 	handle:      asset.Handle,
@@ -299,7 +302,7 @@ find_node :: proc(d: ^Document, id: string) -> (n: u32, ok: bool) {
 // document_of is the document on an entity, if it has one in a slot.
 document_of :: proc(s: ^State, e: ecs.Entity) -> ^Document {
 	for &d in s.documents {
-		if d.used && d.entity == e {
+		if d.used && !d.owned && d.entity == e {
 			return &d
 		}
 	}
@@ -367,7 +370,10 @@ sync :: proc(s: ^State, w: ^ecs.World) {
 	// Temporary memory here is the frame's, which the platform frees each frame.
 	context.temp_allocator = s.platform.frame_allocator
 	for &d in s.documents {
-		d.seen = false
+		d.seen = d.owned
+		if d.used && d.owned {
+			load_document(s, &d)
+		}
 	}
 	entities := make([dynamic]ecs.Entity, s.platform.frame_allocator)
 	ecs.collect(w, {UI_DOCUMENT_ID}, &entities)
@@ -412,6 +418,50 @@ sync :: proc(s: ^State, w: ^ecs.World) {
 		if d.used && !d.seen {
 			free_document(s, &d)
 		}
+	}
+}
+
+// open_owned puts a document that code owns, with no entity, in a free slot: a document that the engine shows itself,
+// such as the cutscene overlay (see docs/ui/design.md#owned-documents). It starts hidden. sync loads and builds it as
+// it does the others, and keeps it until close_owned, whatever the world's entities do. It takes no input. It gives
+// -1 when every slot is used.
+open_owned :: proc(s: ^State, guid: format.Guid, order: i32, view: u8 = 0) -> int {
+	for &d, i in s.documents {
+		if d.used {
+			continue
+		}
+		d = {
+			used        = true,
+			owned       = true,
+			guid        = guid,
+			order       = order,
+			view        = view,
+			seen        = true,
+			forced_node = NONE,
+		}
+		init_document(s, &d)
+		return i
+	}
+	if !s.warned_full {
+		log.warnf("ui: more than %d documents show at once", MAX_DOCUMENTS)
+		s.warned_full = true
+	}
+	return -1
+}
+
+// owned_document is an owned document by its index from open_owned, or nil when the index holds none.
+owned_document :: proc(s: ^State, index: int) -> ^Document {
+	if index < 0 || index >= MAX_DOCUMENTS {
+		return nil
+	}
+	d := &s.documents[index]
+	return d if d.used && d.owned else nil
+}
+
+// close_owned frees an owned document's slot.
+close_owned :: proc(s: ^State, index: int) {
+	if d := owned_document(s, index); d != nil {
+		free_document(s, d)
 	}
 }
 
