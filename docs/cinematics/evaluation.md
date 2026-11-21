@@ -149,7 +149,7 @@ A test compares a play with one job and with eight workers.
 
 | Procedure | What it does |
 |---|---|
-| `init(state, world, assets)`, `register(state, world)`, `destroy(state, world)` | Set up the state, register the two systems and clear the kinds, and reset and free the players |
+| `init(state, world, assets, actions, animation, views, sounds)`, `register(state, world)`, `destroy(state, world)` | Set up the state, register the two systems and clear the kinds, and reset and free the players |
 | `register_kind(state, kind, desc)` | Sets a kind's phase and evaluate procedure |
 | `init_evaluation(e, world, handle, data, blob)`, `destroy_evaluation(e, world)` | Start an evaluation at the range's start. Destroy its bindings and free its snapshot, without restoring. |
 | `advance(e, blob, dt)` | Moves the time by a duration, without drift, up to the range's end |

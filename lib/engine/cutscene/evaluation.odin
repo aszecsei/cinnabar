@@ -469,8 +469,8 @@ restore :: proc(
 		}
 	}
 	forget(&e.snapshot)
-	// The sounds that play through a skip, and past the end, go on; end_holds stops the others.
-	release_sounds(e)
+	// At the end, the sounds that play through a skip, and past the end, go on; end_holds stops the others.
+	release_sounds(e, w, blob)
 	end_holds(e, w)
 }
 
@@ -491,7 +491,7 @@ restore_all :: proc(s: ^State, e: ^Evaluation, w: ^ecs.World) {
 end_holds :: proc(e: ^Evaluation, w: ^ecs.World) {
 	end_drives(e, w)
 	end_cut(e)
-	end_sounds(e)
+	end_sounds(e, w)
 }
 
 // track_entity is the entity of the track's binding while it is alive, and false for a track without a binding, or

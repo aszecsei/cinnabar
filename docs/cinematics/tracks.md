@@ -354,6 +354,7 @@ track 7 audio "Music"
 - A Bezier segment whose handles leave the pitch's range can leave the range too. The voice plays the clamped pitch, so the integral clamps too, in `CURVE_CLAMPED_PIECES` (16) pieces. That is close, but not exact.
 
 **The clock and sync.** The track evaluates in the `Late` phase, once a frame, at the time that the frame shows. On the game's clock, that time is the cutscene's time less the part of a tick that presentation is behind it (`1 − alpha` of a tick). So the sounds keep to the picture between ticks.
+- **Starts on the frame.** A section that starts within `SEEK_LEAD` (50 ms of audio) of the frame's time starts its voice ahead, at its sound's `offset`, at the time on the audio's clock when the cutscene reaches the section's start. So nothing of the sound's attack is cut, whatever the frame rate. A seek before that time starts it again.
 - **The drift check.** Each frame, the track sets each voice's gain and pitch. It then compares where the voice is with where the time puts it (`keep_to_clock`).
   - Past the project's `cutscene.audio_drift`, the track seeks the voice. The limit is 7.5 ms by default: one and a half of the mixer's blocks of 240 frames.
   - Below the limit, the track does nothing, so the normal jitter of a frame does not click.
@@ -376,7 +377,7 @@ track 7 audio "Music"
   - The jump starts no section that it passes.
   - After a jump to the end of a skip range, the sections under the time start when play goes on. A section that the track let go does not start again while the time is under it.
 - **When finished.** The player stops its voices as it ends.
-  - A section marked `plays_through_skip` whose end is after the cutscene's time plays on to that end. It fades out over its ease out, before the end. So music that runs past the cutscene's `range` plays into gameplay.
+  - When the cutscene reaches its end, by playback or a skip, a section marked `plays_through_skip` whose end is after the end plays on to its own end. It fades out over its ease out, before that end. So music that runs past the cutscene's `range` plays into gameplay. A stop, a failure or a reset before the end stops it with the others.
   - `restore` and `keep` do not apply to sounds.
 - **Hot reload.** A reload stops every voice. The next `Late` evaluation starts each section under the time at its place.
 

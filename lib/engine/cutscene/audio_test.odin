@@ -59,6 +59,9 @@ Fake_Voice :: struct {
 	at:      u64,
 	params:  boundary.Voice_Params,
 	flags:   boundary.Voice_Flags,
+	// Where it started in its sound, and when on the clock.
+	start:   u64,
+	started: u64,
 	length:  u64,
 	playing: bool,
 	// The fade that stopped it.
@@ -122,6 +125,8 @@ fake_table :: proc() -> boundary.Audio_API {
 			at      = at,
 			params  = desc.params,
 			flags   = desc.flags,
+			start   = desc.start,
+			started = at,
 			length  = desc.length,
 			playing = true,
 		}
@@ -746,7 +751,7 @@ a_scrub_plays_a_grain_of_each_section_under_the_playhead :: proc(t: ^testing.T) 
 	e: Evaluation
 	init_evaluation(&e, &f.world, {}, data, blob)
 	defer destroy_evaluation(&e, &f.world)
-	set_audition(&e, .Scrub)
+	set_audition(&e, &f.world, .Scrub)
 	seek(&f.cutscenes, &e, &f.world, data, blob, 2 * SECOND)
 	evaluate(&f.cutscenes, &e, &f.world, data, blob, .Late)
 	testing.expect_value(t, len(fake.voices), 2)
@@ -829,4 +834,120 @@ a_section_under_a_skip_ranges_end_plays_on_from_there :: proc(t: ^testing.T) {
 	testing.expect(t, playing && index != first)
 	expected := shown(f, h) / SECOND * boundary.SAMPLE_RATE
 	testing.expectf(t, abs(v.frame - expected) < 1, "plays on from %v, not %v", v.frame, expected)
+}
+
+// sound_step runs a frame that moves the world by a step, which can be less than a tick, as at a frame rate above the
+// tick rate, and the audio's clock by the same real time.
+@(private = "file")
+sound_step :: proc(f: ^Sound_Fixture, step: time.Duration) {
+	it := ecs.begin_ticks(&f.world, step)
+	for ecs.next_tick(&it) {
+		ecs.run_tick_systems(&it, f)
+		ecs.update_transforms(&f.world)
+	}
+	ecs.run_stage(&f.world, .Late, step, f)
+	update(&f.cutscenes, {world = &f.world, dt = step})
+	audio.update(&f.audio, &f.world, nil, true, step)
+	free_all(f.platform.frame_allocator)
+	fake.clock += u64(time.duration_seconds(step) * boundary.SAMPLE_RATE)
+}
+
+// At three frames to a tick, the sounds keep to the frames that presentation shows between ticks, with no seek. A
+// section starts its voice ahead, on the audio's clock, at the exact start of its sound, so nothing of its attack is cut,
+// at the cutscene's start and later.
+@(test)
+sounds_start_on_their_frame_and_keep_to_frames_between_ticks :: proc(t: ^testing.T) {
+	f := sound_setup(t)
+	defer sound_teardown(f)
+	tracks := [?]format.Cutscene_Track_Contents {
+		sound_track(1, sound_section(1, 0, 4 * SECOND, sound = LINE)),
+		sound_track(2, sound_section(2, SECOND, 4 * SECOND, sound = MUSIC)),
+	}
+	h := play_sounds(t, f, sounds_blob(f, tracks[:], 4 * SECOND))
+	// 200 frames a second: more than three to a tick at 60 Hz, and 240 frames of audio each, so the audio's clock is exact.
+	STEP :: time.Second / 200
+	for _ in 0 ..< 400 {
+		sound_step(f, STEP)
+	}
+	testing.expect_value(t, len(fake.seeks), 0)
+	_, line, line_playing := voice_of(LINE)
+	_, music, music_playing := voice_of(MUSIC)
+	testing.expect(t, line_playing && music_playing)
+	testing.expect_value(t, line.start, 0)
+	testing.expect_value(t, music.start, 0)
+	// The music started 1 s after the line, on the audio's clock.
+	testing.expectf(
+		t,
+		abs(f64(music.started) - f64(line.started) - boundary.SAMPLE_RATE) < 2,
+		"the music started %v frames after the line",
+		i64(music.started) - i64(line.started),
+	)
+	// Each frame places the voices where the frame's time puts them.
+	now := fake.clock - u64(boundary.SAMPLE_RATE / 200)
+	expected := shown(f, h) / SECOND * boundary.SAMPLE_RATE
+	limit := AUDIO_DRIFT * boundary.SAMPLE_RATE
+	testing.expectf(
+		t,
+		abs(fake_place(line, now) - expected) < limit,
+		"the line at %v, not %v",
+		fake_place(line, now),
+		expected,
+	)
+	testing.expectf(
+		t,
+		abs(fake_place(music, now) - (expected - boundary.SAMPLE_RATE)) < limit,
+		"the music at %v, not %v",
+		fake_place(music, now),
+		expected - boundary.SAMPLE_RATE,
+	)
+}
+
+// When a cutscene plays to its end, a section that plays through a skip and runs past the end plays on, and stops at its
+// end on the audio's clock after its ease out; a section that does not stops. A stop before the end lets none play on.
+@(test)
+a_section_that_runs_past_the_end_plays_on_only_when_marked :: proc(t: ^testing.T) {
+	f := sound_setup(t)
+	defer sound_teardown(f)
+	music := sound_section(2, 0, 5 * SECOND, sound = MUSIC, flags = {.Plays_Through_Skip})
+	music.ease_out = SECOND / 2
+	tracks := [?]format.Cutscene_Track_Contents {
+		sound_track(1, sound_section(1, 0, 5 * SECOND, sound = LINE)),
+		sound_track(2, music),
+	}
+	blob := sounds_blob(f, tracks[:], 6 * SECOND, range_end = 4 * SECOND)
+	h := play_sounds(t, f, blob)
+	sound_frame(f)
+	line_index, _, _ := voice_of(LINE)
+	music_index, _, _ := voice_of(MUSIC)
+	for status(&f.cutscenes, h) == .Playing {
+		sound_frame(f)
+	}
+	testing.expect_value(t, status(&f.cutscenes, h), Player_Status.Restored)
+	testing.expect(t, !fake.voices[line_index].playing)
+	testing.expect(t, fake.voices[music_index].playing)
+	// It stops at 5 s less its ease out of 0.5 s, over 0.5 s: 0.5 s after the end.
+	fake.clock += boundary.SAMPLE_RATE / 2 - 2 * FRAME
+	audio.update(&f.audio, &f.world, nil, true, 0)
+	testing.expect(t, fake.voices[music_index].playing)
+	fake.clock += 2 * FRAME
+	audio.update(&f.audio, &f.world, nil, true, 0)
+	testing.expect(t, !fake.voices[music_index].playing)
+	testing.expectf(
+		t,
+		abs(fake.voices[music_index].fade - 0.5) < 1e-6,
+		"fades over %v",
+		fake.voices[music_index].fade,
+	)
+
+	// A stop before the end stops both.
+	h = play_sounds(t, f, blob)
+	for _ in 0 ..< 30 {
+		sound_frame(f)
+	}
+	line_index, _, _ = voice_of(LINE)
+	music_index, _, _ = voice_of(MUSIC)
+	testing.expect_value(t, stop(&f.cutscenes, &f.world, h), Command_Result.Done)
+	sound_frame(f)
+	testing.expect(t, !fake.voices[line_index].playing)
+	testing.expect(t, !fake.voices[music_index].playing)
 }

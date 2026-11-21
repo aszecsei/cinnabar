@@ -5,6 +5,7 @@ import "core:math"
 import boundary "cinnabar:core/audio"
 import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/audio"
+import "cinnabar:engine/ecs"
 
 // AUDIO_DRIFT is how far, in seconds, a voice of an audio track can be from where the cutscene's time puts it before the
 // track seeks it: one and a half of the mixer's blocks of 240 frames (see docs/cinematics/tracks.md#audio-tracks). The
@@ -100,9 +101,18 @@ audio_track :: proc(ctx: ^Track_Context) {
 	status := status_of(p.state) if in_player else Player_Status.Playing
 	rate := f64(1) if ctx.blob.clock == .Real else f64(s.rate)
 	now := shown_time(ctx, status)
+	// How far ahead of the frame, in the cutscene's ticks, a section that is about to start starts its voice on the
+	// audio's clock, so the sound starts at its exact place and nothing of its attack is cut.
+	lead := f64(audio.SEEK_LEAD) / boundary.SAMPLE_RATE * format.CUTSCENE_TICKS_PER_SECOND * rate
 	for section in sections {
 		entry, held := e.sounds[section.id]
-		if !covers_time(ctx.blob, section, now) || (attached && !bound) {
+		early :=
+			status == .Playing &&
+			rate > 0 &&
+			!ctx.skipped &&
+			now < f64(section.start) &&
+			f64(section.start) - now <= lead
+		if !(covers_time(ctx.blob, section, now) || early) || (attached && !bound) {
 			if held {
 				change_sound(e, section.id, nil, Sound_Stop{audio.STOP_FADE})
 			}
@@ -123,16 +133,25 @@ audio_track :: proc(ctx: ^Track_Context) {
 			}
 			continue
 		}
+		if early && has_voice {
+			// It waits for its start on the audio's clock. A seek since it was scheduled starts it again.
+			if playing.jumps != e.jumps {
+				change_sound(e, section.id, nil, Sound_Stop{audio.STOP_FADE})
+			}
+			continue
+		}
+		// An early section is placed at its start, and starts there when the audio's clock reaches it.
+		at := f64(section.start) if early else now
 		length, loaded := audio.sound_length(s.audio, section.asset)
-		place, inside := sound_place(ctx.data, ctx.blob, section, now, length)
+		place, inside := sound_place(ctx.data, ctx.blob, section, at, length)
 		if status != .Playing || rate <= 0 || !loaded || !inside {
 			if has_voice {
 				change_sound(e, section.id, nil, Sound_Stop{audio.STOP_FADE})
 			}
 			continue
 		}
-		local := i32(now) - section.start
-		sample, _ := section_at(ctx.blob, section, i32(now))
+		local := i32(at) - section.start
+		sample, _ := section_at(ctx.blob, section, i32(at))
 		gain := f64(sample.weight) * f64(ctx.track.gain)
 		pitch := f64(1)
 		for channel in format.cutscene_section_channels(ctx.data, ctx.blob, section) {
@@ -179,6 +198,15 @@ audio_track :: proc(ctx: ^Track_Context) {
 			// A jump starts nothing that it passes, and the section starts when play goes on.
 			continue
 		}
+		start_clock := audio.clock(s.audio)
+		if early {
+			start_clock += u64(
+				(f64(section.start) - now) /
+				format.CUTSCENE_TICKS_PER_SECOND /
+				rate *
+				boundary.SAMPLE_RATE,
+			)
+		}
 		voice := audio.start_voice(
 			s.audio,
 			{
@@ -187,7 +215,7 @@ audio_track :: proc(ctx: ^Track_Context) {
 				gain = f32(gain),
 				pitch = f32(pitch),
 				start = place,
-				clock = audio.clock(s.audio),
+				clock = start_clock,
 				loop = .Loop in section.flags,
 				unpaused = e.audition == .Preview,
 				entity = entity if attached else 0,
@@ -317,10 +345,14 @@ hand_off :: proc(playing: Sound_Playing, time: i32) -> Sound_Hand_Off {
 }
 
 // release_sounds lets go of the voices of the sections that play through a skip and whose ends are after the time, as the
-// cutscene ends: they play on to their ends. restore calls it before end_holds stops the others.
+// cutscene reaches its end, by playback or a skip: they play on to their ends. restore calls it before end_holds stops
+// the others. A cutscene that ends before its end, as a stop, a failure or a reset ends it, lets none go.
 @(private)
-release_sounds :: proc(e: ^Evaluation) {
-	ids := make([dynamic]u32, 0, len(e.sounds), context.temp_allocator)
+release_sounds :: proc(e: ^Evaluation, w: ^ecs.World, blob: ^format.Cutscene_Blob) {
+	if e.time < blob.range_end {
+		return
+	}
+	ids := make([dynamic]u32, 0, len(e.sounds), w.platform.frame_allocator)
 	for id in e.sounds {
 		append(&ids, id)
 	}
@@ -335,8 +367,8 @@ release_sounds :: proc(e: ^Evaluation) {
 // end_sounds stops every voice that the evaluation's audio tracks hold, and forgets the sections and the scrubs.
 // end_holds calls it.
 @(private)
-end_sounds :: proc(e: ^Evaluation) {
-	ids := make([dynamic]u32, 0, len(e.sounds), context.temp_allocator)
+end_sounds :: proc(e: ^Evaluation, w: ^ecs.World) {
+	ids := make([dynamic]u32, 0, len(e.sounds), w.platform.frame_allocator)
 	for id in e.sounds {
 		append(&ids, id)
 	}
@@ -361,7 +393,8 @@ covers_time :: proc(
 }
 
 // shown_time is the time, in ticks, that the frame shows: on the game's clock, a playing cutscene's time at its last tick
-// less the part of a tick that presentation is behind it, so the sounds keep to the picture between ticks.
+// less the part of a tick that presentation is behind it, so the sounds keep to the picture between ticks. It can be
+// before the range's start, in the frames before the first tick reaches it.
 @(private)
 shown_time :: proc(ctx: ^Track_Context, status: Player_Status) -> f64 {
 	t := f64(ctx.time)
@@ -370,7 +403,7 @@ shown_time :: proc(ctx: ^Track_Context, status: Player_Status) -> f64 {
 	}
 	clock := &ctx.world.clock
 	behind := f64(1 - clock.alpha) * format.CUTSCENE_TICKS_PER_SECOND / f64(clock.tick_rate)
-	return max(t - behind, f64(ctx.blob.range_start))
+	return t - behind
 }
 
 // sound_place is where an audio section's sound is at a time in ticks: its offset, and the integral of its pitch from
@@ -414,9 +447,9 @@ player_of :: proc(s: ^State, e: ^Evaluation) -> (^Player, bool) {
 
 // set_audition is the one writer of how an evaluation's audio tracks sound. A change ends the voices that the tracks
 // hold, so no voice of one audition plays on under another; the next evaluation starts them as the new one says.
-set_audition :: proc(e: ^Evaluation, audition: Audition) {
+set_audition :: proc(e: ^Evaluation, w: ^ecs.World, audition: Audition) {
 	if e.audition != audition {
-		end_sounds(e)
+		end_sounds(e, w)
 		e.audition = audition
 	}
 }
