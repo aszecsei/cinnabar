@@ -13,7 +13,7 @@ import format "cinnabar:engine/asset/format"
 // in ticks, each with sections of keyed channels, a clip, a sound or a sub-sequence (see
 // docs/content/kinds/cutscenes.md). The cook checks the assets that a cutscene names and its sub-sequences' nesting, which
 // it reads from the other cutscenes' sources, so the order of the passes does not matter.
-CUTSCENE_COOK_VERSION :: "cutscenes 4"
+CUTSCENE_COOK_VERSION :: "cutscenes 5"
 
 // CUTSCENE_TEMPLATE is the text of a new cutscene: 10 seconds at 30 frames a second, with no bindings or tracks.
 CUTSCENE_TEMPLATE :: `cutscene 1
@@ -28,7 +28,8 @@ Cutscene_Problem :: struct {
 	message: string,
 }
 
-// Cutscene_Reference is an asset that a cutscene names, the kind that it must be, and the line that names it.
+// Cutscene_Reference is an asset that a cutscene names, the kind that it must be, or .None for any kind, and the line
+// that names it.
 Cutscene_Reference :: struct {
 	guid: format.Guid,
 	want: format.Asset_Kind,
@@ -279,7 +280,7 @@ cook_cutscene :: proc(
 					fmt.tprintf("no asset has the GUID %s", guid_text(r.guid)),
 				},
 			)
-		case kind != r.want:
+		case r.want != .None && kind != r.want:
 			append(
 				&found,
 				Cutscene_Problem {
@@ -388,9 +389,11 @@ Pending_Binding :: struct {
 
 @(private = "file")
 Pending_Channel :: struct {
-	name: string,
-	line: int,
-	keys: [dynamic]format.Cutscene_Key,
+	name:  string,
+	line:  int,
+	keys:  [dynamic]format.Cutscene_Key,
+	// How many of its keys name an asset.
+	guids: int,
 }
 
 @(private = "file")
@@ -399,17 +402,21 @@ Pending_Section :: struct {
 	line:       int,
 	seen:       [dynamic]string,
 	asset_line: int,
+	blend_line: int,
 	channels:   [dynamic]Pending_Channel,
 }
 
 @(private = "file")
 Pending_Track :: struct {
-	contents:     format.Cutscene_Track_Contents,
-	line:         int,
-	seen:         [dynamic]string,
-	binding_id:   u32,
-	binding_line: int,
-	sections:     [dynamic]Pending_Section,
+	contents:       format.Cutscene_Track_Contents,
+	line:           int,
+	seen:           [dynamic]string,
+	binding_id:     u32,
+	binding_line:   int,
+	// The lines of component and field, which only a property track takes.
+	component_line: int,
+	field_line:     int,
+	sections:       [dynamic]Pending_Section,
 }
 
 // Cutscene_Block is the innermost block that a line is in.
@@ -454,6 +461,9 @@ cutscene_parse :: proc(
 	skip_ranges := make([dynamic]format.Cutscene_Skip_Range)
 	block := Cutscene_Block.Header
 	section_ids := make(map[u32]bool, 16, context.temp_allocator)
+	// The assets that keys name, in the blob's order, and each one's index.
+	guids := make([dynamic]format.Guid)
+	guid_index := make(map[format.Guid]int, 16, context.temp_allocator)
 	section_count, channel_count, key_count := 0, 0, 0
 	for raw, index in strings.split_lines(text) {
 		line := index + 1
@@ -670,7 +680,7 @@ cutscene_parse :: proc(
 			tr := &tracks[len(tracks) - 1]
 			s := &tr.sections[len(tr.sections) - 1]
 			c := &s.channels[len(s.channels) - 1]
-			key, message := cutscene_key(rest, s.contents.end - s.contents.start)
+			key, guid, message := cutscene_key(rest, s.contents.end - s.contents.start)
 			if message != "" {
 				problem(&found, line, "%s", message)
 				continue
@@ -678,6 +688,17 @@ cutscene_parse :: proc(
 			if len(c.keys) > 0 && key.time <= c.keys[len(c.keys) - 1].time {
 				problem(&found, line, "keys are in order of time, each after the one before")
 				continue
+			}
+			if guid != {} {
+				slot, known := guid_index[guid]
+				if !known {
+					slot = len(guids)
+					guid_index[guid] = slot
+					append(&guids, guid)
+					append(&references, Cutscene_Reference{guid, .None, line})
+				}
+				key.value = f32(slot)
+				c.guids += 1
 			}
 			key_count += 1
 			if key_count == format.MAX_CUTSCENE_KEYS + 1 {
@@ -857,11 +878,33 @@ cutscene_parse :: proc(
 				case:
 					problem(&found, line, "when_finished is restore or keep")
 				}
+			case "component":
+				id, ok := strconv.parse_u64_of_base(value_text, 10)
+				if !ok || id == 0 {
+					problem(
+						&found,
+						line,
+						"component is a component's stable ID in decimal, as a scene names it",
+					)
+					continue
+				}
+				tr.contents.component, tr.component_line = id, line
+			case "field":
+				field, ok := cutscene_name(value_text)
+				if !ok || !cutscene_field_name(field) {
+					problem(
+						&found,
+						line,
+						"field is the quoted name of a field, with dots between the names of nested fields, such as \"light.intensity\"",
+					)
+					continue
+				}
+				tr.contents.field, tr.field_line = strings.clone(field), line
 			case:
 				problem(
 					&found,
 					line,
-					"%q is not a setting of a track: binding, muted or when_finished",
+					"%q is not a setting of a track: binding, muted, when_finished, component or field",
 					name,
 				)
 			}
@@ -907,19 +950,30 @@ cutscene_parse :: proc(
 					continue
 				}
 				s.contents.asset, s.asset_line = value.guid, line
-			case "binding", "muted", "when_finished":
+			case "blend":
+				switch value_text {
+				case "absolute":
+					s.contents.flags -= {.Additive}
+				case "additive":
+					s.contents.flags += {.Additive}
+				case:
+					problem(&found, line, "blend is absolute or additive")
+					continue
+				}
+				s.blend_line = line
+			case "binding", "muted", "when_finished", "component", "field":
 				problem(&found, line, "%s comes before the track's sections", name)
 			case:
 				problem(
 					&found,
 					line,
-					"%q is not a setting of a section: ease_in, ease_out, weight, pre_roll, post_roll or asset",
+					"%q is not a setting of a section: ease_in, ease_out, weight, pre_roll, post_roll, asset or blend",
 					name,
 				)
 			}
 		case .Channel:
 			switch name {
-			case "ease_in", "ease_out", "weight", "pre_roll", "post_roll", "asset":
+			case "ease_in", "ease_out", "weight", "pre_roll", "post_roll", "asset", "blend":
 				problem(&found, line, "%s comes before the section's channels", name)
 			case:
 				problem(&found, line, "a channel has keys, not settings")
@@ -1033,6 +1087,21 @@ cutscene_parse :: proc(
 		case tr.binding_line == 0 && use == .Required:
 			problem(&found, tr.line, "%s track needs a binding", kind_name)
 		}
+		if kind == .Property {
+			if tr.component_line == 0 || tr.field_line == 0 {
+				problem(
+					&found,
+					tr.line,
+					"a property track names its field with component = <stable ID> and field = \"<name>\"",
+				)
+			}
+		} else {
+			for setting_line in ([2]int{tr.component_line, tr.field_line}) {
+				if setting_line != 0 {
+					problem(&found, setting_line, "only a property track names a field")
+				}
+			}
+		}
 		want := format.cutscene_track_asset(kind)
 		sections := make([]format.Cutscene_Section_Contents, len(tr.sections))
 		for s, j in tr.sections {
@@ -1067,14 +1136,26 @@ cutscene_parse :: proc(
 			case want != .None:
 				append(&references, Cutscene_Reference{c.asset, want, s.asset_line})
 			}
+			if .Additive in c.flags && !format.cutscene_track_additive(kind) {
+				problem(&found, s.blend_line, "%s section cannot be additive", kind_name)
+			}
+			if kind == .Property {
+				cutscene_property_channels(&found, s)
+			}
 			channels := make([]format.Cutscene_Channel_Contents, len(s.channels))
 			for ch, k in s.channels {
 				if len(ch.keys) == 0 {
 					problem(&found, ch.line, "the channel has no keys")
 				}
+				if ch.guids > 0 && ch.guids < len(ch.keys) {
+					problem(&found, ch.line, "a channel's keys are all assets or all numbers")
+				} else if ch.guids > 0 && kind != .Property {
+					problem(&found, ch.line, "only a property track keys assets")
+				}
 				channels[k] = {
-					name = ch.name,
-					keys = ch.keys[:],
+					name  = ch.name,
+					flags = {.Guids} if ch.guids > 0 else {},
+					keys  = ch.keys[:],
 				}
 			}
 			c.channels = channels
@@ -1085,6 +1166,15 @@ cutscene_parse :: proc(
 	}
 	contents.bindings, contents.tracks = result_bindings, result_tracks
 	contents.hide_ui = hide_ui[:]
+	contents.guids = guids[:]
+	if len(guids) > format.MAX_CUTSCENE_GUIDS {
+		problem(
+			&found,
+			header_line,
+			"a cutscene keys at most %d assets",
+			format.MAX_CUTSCENE_GUIDS,
+		)
+	}
 	slice.stable_sort_by(found[:], proc(a, b: Cutscene_Problem) -> bool {return a.line < b.line})
 	slice.stable_sort_by(references[:], proc(a, b: Cutscene_Reference) -> bool {
 		return a.line < b.line
@@ -1226,18 +1316,27 @@ cutscene_binding_setting :: proc(
 	}
 }
 
-// cutscene_key reads a key's line after `key`: a time in ticks from its section's start, at most its duration, a
-// value, an interpolation, and for a cubic key its in and out tangents.
+// cutscene_key reads a key's line after `key`: a time in ticks from its section's start, at most its duration, a value,
+// an interpolation, and for a Bezier key its tangents: one slope, or an in and an out slope apart, in value per second,
+// and then `weights <in> <out>` for weighted tangents. The value is a number, or `$<guid>` for a constant key of an
+// asset field, which guid gives. A whole number of more than 2^24 that an f32 cannot hold exactly is a problem.
 @(private = "file")
-cutscene_key :: proc(text: string, duration: i32) -> (key: format.Cutscene_Key, message: string) {
-	USAGE :: "a key is `key <time> <value> constant|linear|cubic [<in> <out>]`"
+cutscene_key :: proc(
+	text: string,
+	duration: i32,
+) -> (
+	key: format.Cutscene_Key,
+	guid: format.Guid,
+	message: string,
+) {
+	USAGE :: "a key is `key <time> <value> constant|linear|auto` or `key <time> <value> bezier <slope>|<in> <out> [weights <in> <out>]`"
 	fields := strings.fields(text, context.temp_allocator)
-	if len(fields) != 3 && len(fields) != 5 {
-		return {}, USAGE
+	if len(fields) < 3 {
+		return {}, {}, USAGE
 	}
 	time, time_ok := cutscene_ticks_text(fields[0])
 	if !time_ok || (duration > 0 && time > duration) {
-		return {}, fmt.tprintf("a key's time is a whole number of ticks from 0 to the section's duration (%d)", duration)
+		return {}, {}, fmt.tprintf("a key's time is a whole number of ticks from 0 to the section's duration (%d)", duration)
 	}
 	finite :: proc(text: string) -> (f32, bool) {
 		v, ok := strconv.parse_f64(text)
@@ -1246,38 +1345,130 @@ cutscene_key :: proc(text: string, duration: i32) -> (key: format.Cutscene_Key, 
 		}
 		return f32(v), true
 	}
-	value, value_ok := finite(fields[1])
-	if !value_ok {
-		return {}, "a key's value is a finite number"
-	}
-	key = {
-		time  = time,
-		value = value,
+	key.time = time
+	if strings.has_prefix(fields[1], "$") {
+		value, value_message := parse_graph_value(fields[1])
+		if value_message != "" || value.kind != .Asset || value.guid == {} {
+			return {}, {}, "a key's asset is $<guid>, with 32 hex digits"
+		}
+		guid = value.guid
+	} else {
+		value, value_ok := finite(fields[1])
+		if !value_ok {
+			return {}, {}, "a key's value is a finite number, or an asset, $<guid>"
+		}
+		if whole, is_whole := strconv.parse_i64_of_base(fields[1], 10);
+		   is_whole && i64(value) != whole {
+			return {}, {}, fmt.tprintf("%s is not exact as a key's value: whole numbers are exact up to 16777216", fields[1])
+		}
+		key.value = value
 	}
 	switch fields[2] {
 	case "constant":
 		key.interp = .Constant
 	case "linear":
 		key.interp = .Linear
-	case "cubic":
-		key.interp = .Cubic
+	case "bezier":
+		key.interp = .Bezier
+	case "auto":
+		key.interp = .Auto
 	case:
-		return {}, fmt.tprintf("%q is not an interpolation: constant, linear or cubic", fields[2])
+		return {}, {}, fmt.tprintf("%q is not an interpolation: constant, linear, bezier or auto", fields[2])
 	}
-	if key.interp == .Cubic {
-		if len(fields) != 5 {
-			return {}, "a cubic key has an in and an out tangent"
-		}
-		in_ok, out_ok: bool
-		key.in_tangent, in_ok = finite(fields[3])
-		key.out_tangent, out_ok = finite(fields[4])
-		if !in_ok || !out_ok {
-			return {}, "a key's tangents are finite numbers"
-		}
-	} else if len(fields) == 5 {
-		return {}, fmt.tprintf("a %s key has no tangents", fields[2])
+	if guid != {} && key.interp != .Constant {
+		return {}, {}, "a key of an asset is constant"
 	}
-	return key, ""
+	rest := fields[3:]
+	if key.interp != .Bezier {
+		if len(rest) > 0 {
+			return {}, {}, fmt.tprintf("%s %s key has no tangents", "an" if key.interp == .Auto else "a", fields[2])
+		}
+		return key, guid, ""
+	}
+	slopes := rest
+	weights: []string
+	for word, i in rest {
+		if word == "weights" {
+			slopes, weights = rest[:i], rest[i + 1:]
+			if len(weights) != 2 {
+				return {}, {}, "weights is followed by an in and an out weight, each from 0 to 1"
+			}
+			break
+		}
+	}
+	in_ok, out_ok := true, true
+	switch len(slopes) {
+	case 1:
+		key.in_slope, in_ok = finite(slopes[0])
+		key.out_slope = key.in_slope
+	case 2:
+		key.in_slope, in_ok = finite(slopes[0])
+		key.out_slope, out_ok = finite(slopes[1])
+		key.flags += {.Broken}
+	case:
+		return {}, {}, "a bezier key has one slope, or an in and an out slope, in value per second"
+	}
+	if !in_ok || !out_ok {
+		return {}, {}, "a key's slopes are finite numbers"
+	}
+	if weights != nil {
+		w_in, w_in_ok := finite(weights[0])
+		w_out, w_out_ok := finite(weights[1])
+		if !w_in_ok || !w_out_ok || !(w_in >= 0 && w_in <= 1) || !(w_out >= 0 && w_out <= 1) {
+			return {}, {}, "a key's weights are numbers from 0 to 1"
+		}
+		key.flags += {.Weighted}
+		key.in_weight, key.out_weight = w_in, w_out
+	}
+	return key, guid, ""
+}
+
+// cutscene_field_name is whether a field's name is names of letters, digits and _, with dots between them.
+@(private = "file")
+cutscene_field_name :: proc(name: string) -> bool {
+	if name == "" {
+		return false
+	}
+	rest := name
+	for part in strings.split_iterator(&rest, ".") {
+		if !is_identifier(part) {
+			return false
+		}
+	}
+	return true
+}
+
+// cutscene_property_channels checks a property section's channels against what any field takes: value alone, for a
+// number or a field that steps, or a vector's numbers, as x, y and z, or r, g and b, not both. The cooker cannot see the
+// field's kind, because native components exist only in the game's code, so the game checks the rest when it loads the
+// cutscene (see docs/cinematics/tracks.md#property-tracks).
+@(private = "file")
+cutscene_property_channels :: proc(found: ^[dynamic]Cutscene_Problem, s: Pending_Section) {
+	MESSAGE :: "a property track's channel is value, or x, y and z, or r, g and b"
+	value, xyz, rgb := false, false, false
+	for c in s.channels {
+		switch c.name {
+		case "value":
+			value = true
+		case "x", "y", "z":
+			xyz = true
+		case "r", "g", "b":
+			rgb = true
+		case:
+			append(found, Cutscene_Problem{c.line, MESSAGE})
+			continue
+		}
+		if int(value) + int(xyz) + int(rgb) > 1 {
+			append(
+				found,
+				Cutscene_Problem {
+					c.line,
+					"a property section keys value alone, or a vector's x, y and z, or its r, g and b",
+				},
+			)
+			return
+		}
+	}
 }
 
 CUTSCENE_SUSPEND_MESSAGE :: "suspend is a list of behaviours, ai, navigation and physics, such as [behaviours, ai], or []"

@@ -13,7 +13,8 @@ An `Evaluation` is what one cutscene needs to be evaluated:
 - its [bindings](bindings.md);
 - its time in ticks, from the range's start to the range's end;
 - the time of each phase's last evaluation;
-- the [snapshot](#the-restore-snapshot) of the fields that its tracks wrote.
+- the [snapshot](#the-restore-snapshot) of the fields that its tracks wrote;
+- the fields of its property tracks, resolved once for the blob ([Tracks: Property tracks](tracks.md#property-tracks)).
 
 It holds no procedures, `typeid`s or string literals, so it survives a code reload. `init_evaluation` starts it at the range's start, and `destroy_evaluation` frees it.
 
@@ -55,7 +56,8 @@ Each kind of track has a **phase**:
 ## Kinds of track
 
 `register_kind(state, kind, Track_Kind{phase, evaluate, data})` sets what a kind of track does.
-- `register` clears the kinds, because their procedures are in the DLL image. Call `register_kind` after `register`, in `register_world`, so a code reload makes the kinds again.
+- `register` sets the engine's kinds and clears the others, because their procedures are in the DLL image. A code reload therefore makes the kinds again. A game that sets a kind of its own calls `register_kind` after `register`, in `register_world`.
+- The engine's kinds are in [Tracks](tracks.md). Their keyed channels are curves ([Tracks: Curves](tracks.md#curves)).
 - A kind without a procedure does nothing. A muted track does nothing.
 
 `evaluate` evaluates the tracks of one phase in the blob's order. For each track, it calls its kind's procedure with a `Track_Context`, which holds:
@@ -123,7 +125,7 @@ A write fails, and saves nothing, when the entity is not alive, has no such comp
 
 A blob with a new key is a hot reload. The next `evaluate`, `seek` or `restore` notices it and:
 1. Takes each removed track, by its ID, off the writers of its fields.
-2. Restores each field that no remaining track wrote, and removes it from the snapshot. A track that the reload removes therefore restores its fields.
+2. Restores each field that no remaining track wrote, and removes it from the snapshot. A track that the reload removes therefore restores its fields. It also forgets the property tracks' resolved fields, so the next evaluation resolves them again.
 3. Keeps the time, clamped into the new range, and sets each phase's last time to it, so the reload fires no events.
 4. Evaluates the new blob at the time.
 

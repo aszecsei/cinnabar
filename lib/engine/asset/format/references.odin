@@ -6,7 +6,7 @@ import "core:mem/virtual"
 // a scene's or prefab's behaviours, asset fields, navmeshes and sublevels, a material's textures, an instance's material and textures, an
 // effect's materials, meshes and textures, an animation's skin, an animation graph's clips, a font's or sprite sheet's
 // atlas, a UI document's fonts and images, a decision's blackboard, a world's scenes, and a cutscene's
-// prefabs, clips, sounds and sub-sequences. A GUID appears once, and the zero GUID never. ok is false for a blob
+// prefabs, clips, sounds, sub-sequences and the assets that its property tracks key. A GUID appears once, and the zero GUID never. ok is false for a blob
 // that does not check.
 blob_references :: proc(
 	data: []byte,
@@ -119,6 +119,9 @@ blob_references :: proc(
 		}
 		for s in cutscene_sections(data, blob) {
 			add(&list, s.asset)
+		}
+		for g in cutscene_guids(data, blob) {
+			add(&list, g)
 		}
 	case .Ui:
 		blob := ui_view(data) or_return

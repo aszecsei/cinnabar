@@ -65,7 +65,7 @@ track 1 transform "Fox walk"
 		post_roll = 2500
 		channel position_x
 			key 0 0 linear
-			key 300000 2 cubic 0.5 -0.25
+			key 300000 2 bezier 0.5 -0.25 weights 0.25 0.5
 			key 600000 4 constant
 		channel rotation_y
 			key 0 90 constant
@@ -145,9 +145,12 @@ cutscenes_parse_their_header_bindings_tracks_sections_and_keys :: proc(t: ^testi
 	keys := section.channels[0].keys
 	testing.expect_value(t, len(keys), 3)
 	testing.expect_value(t, keys[1].time, 300000)
-	testing.expect_value(t, keys[1].interp, format.Cutscene_Interp.Cubic)
-	testing.expect_value(t, keys[1].in_tangent, 0.5)
-	testing.expect_value(t, keys[1].out_tangent, -0.25)
+	testing.expect_value(t, keys[1].interp, format.Cutscene_Interp.Bezier)
+	testing.expect_value(t, keys[1].flags, format.Cutscene_Key_Flags{.Broken, .Weighted})
+	testing.expect_value(t, keys[1].in_slope, 0.5)
+	testing.expect_value(t, keys[1].out_slope, -0.25)
+	testing.expect_value(t, keys[1].in_weight, 0.25)
+	testing.expect_value(t, keys[1].out_weight, 0.5)
 	testing.expect_value(t, keys[2].interp, format.Cutscene_Interp.Constant)
 	testing.expect_value(t, c.tracks[1].sections[0].weight, 0.5)
 	testing.expect_value(t, c.tracks[1].finish, format.Cutscene_Finish.Restore)
@@ -176,6 +179,11 @@ cutscenes_parse_their_header_bindings_tracks_sections_and_keys :: proc(t: ^testi
 each_mistake_in_a_cutscene_is_reported_at_its_line :: proc(t: ^testing.T) {
 	S :: "@" + SCENE_GUID + "/0000000000000001"
 	P :: "$" + PREFAB_GUID
+	// A binding and a property track of it, which names its field, on lines 3 to 8.
+	LAMP ::
+		"binding 1 \"A\"\n\tpossess = " +
+		S +
+		"\ntrack 1 property \"L\"\n\tbinding = 1\n\tcomponent = 9101\n\tfield = \"intensity\"\n"
 	cases := [?]struct {
 		text:     string,
 		line:     int,
@@ -487,7 +495,133 @@ each_mistake_in_a_cutscene_is_reported_at_its_line :: proc(t: ^testing.T) {
 		{
 			"cutscene 1\nlength = 10\ntrack 1 event \"A\"\n\tsection 1 0 10\n\t\tchannel x\n\t\t\tkey 0 0 cubic\n",
 			6,
-			"an in and an out tangent",
+			"not an interpolation",
+		},
+		{
+			"cutscene 1\nlength = 10\ntrack 1 event \"A\"\n\tsection 1 0 10\n\t\tchannel x\n\t\t\tkey 0 0 bezier\n",
+			6,
+			"one slope, or an in and an out slope",
+		},
+		{
+			"cutscene 1\nlength = 10\ntrack 1 event \"A\"\n\tsection 1 0 10\n\t\tchannel x\n\t\t\tkey 0 0 bezier 1 2 3\n",
+			6,
+			"one slope, or an in and an out slope",
+		},
+		{
+			"cutscene 1\nlength = 10\ntrack 1 event \"A\"\n\tsection 1 0 10\n\t\tchannel x\n\t\t\tkey 0 0 bezier 1 nan\n",
+			6,
+			"slopes are finite numbers",
+		},
+		{
+			"cutscene 1\nlength = 10\ntrack 1 event \"A\"\n\tsection 1 0 10\n\t\tchannel x\n\t\t\tkey 0 0 bezier 1 weights 0.5\n",
+			6,
+			"weights is followed by an in and an out weight",
+		},
+		{
+			"cutscene 1\nlength = 10\ntrack 1 event \"A\"\n\tsection 1 0 10\n\t\tchannel x\n\t\t\tkey 0 0 bezier 1 weights 0.5 1.5\n",
+			6,
+			"weights are numbers from 0 to 1",
+		},
+		{
+			"cutscene 1\nlength = 10\ntrack 1 event \"A\"\n\tsection 1 0 10\n\t\tchannel x\n\t\t\tkey 0 0 auto 1\n",
+			6,
+			"an auto key has no tangents",
+		},
+		{
+			"cutscene 1\nlength = 10\ntrack 1 event \"A\"\n\tsection 1 0 10\n\t\tchannel x\n\t\t\tkey 0 16777217 constant\n",
+			6,
+			"not exact as a key's value",
+		},
+		{
+			"cutscene 1\nlength = 10\ntrack 1 event \"A\"\n\tsection 1 0 10\n\t\tchannel x\n\t\t\tkey 0 $12 constant\n",
+			6,
+			"a key's asset is $<guid>",
+		},
+		{
+			"cutscene 1\nlength = 10\ntrack 1 event \"A\"\n\tsection 1 0 10\n\t\tchannel x\n\t\t\tkey 0 " +
+			P +
+			" linear\n",
+			6,
+			"a key of an asset is constant",
+		},
+		{
+			"cutscene 1\nlength = 10\ntrack 1 event \"A\"\n\tsection 1 0 10\n\t\tchannel x\n\t\t\tkey 0 " +
+			P +
+			" constant\n",
+			5,
+			"only a property track keys assets",
+		},
+		{
+			"cutscene 1\nlength = 10\n" +
+			LAMP +
+			"\tsection 1 0 10\n\t\tchannel value\n\t\t\tkey 0 " +
+			P +
+			" constant\n\t\t\tkey 5 1 constant\n",
+			10,
+			"all assets or all numbers",
+		},
+		{
+			"cutscene 1\nlength = 10\nbinding 1 \"A\"\n\tpossess = " +
+			S +
+			"\ntrack 1 property \"L\"\n\tbinding = 1\n\tfield = \"intensity\"\n",
+			5,
+			"names its field with component",
+		},
+		{
+			"cutscene 1\nlength = 10\ntrack 1 event \"A\"\n\tcomponent = 5\n",
+			4,
+			"only a property track names a field",
+		},
+		{
+			"cutscene 1\nlength = 10\ntrack 1 event \"A\"\n\tfield = \"x\"\n",
+			4,
+			"only a property track names a field",
+		},
+		{
+			"cutscene 1\nlength = 10\ntrack 1 property \"A\"\n\tcomponent = light\n",
+			4,
+			"component is a component's stable ID",
+		},
+		{
+			"cutscene 1\nlength = 10\ntrack 1 property \"A\"\n\tfield = \"light..intensity\"\n",
+			4,
+			"field is the quoted name of a field",
+		},
+		{
+			"cutscene 1\nlength = 10\ntrack 1 event \"A\"\n\tsection 1 0 10\n\tcomponent = 5\n",
+			5,
+			"comes before the track's sections",
+		},
+		{
+			"cutscene 1\nlength = 10\ntrack 1 event \"A\"\n\tsection 1 0 10\n\t\tblend = over\n",
+			5,
+			"blend is absolute or additive",
+		},
+		{
+			"cutscene 1\nlength = 10\ntrack 1 event \"A\"\n\tsection 1 0 10\n\t\tblend = additive\n",
+			5,
+			"an event section cannot be additive",
+		},
+		{
+			"cutscene 1\nlength = 10\n" +
+			LAMP +
+			"\tsection 1 0 10\n\t\tchannel w\n\t\t\tkey 0 0 linear\n",
+			10,
+			"a property track's channel is value",
+		},
+		{
+			"cutscene 1\nlength = 10\n" +
+			LAMP +
+			"\tsection 1 0 10\n\t\tchannel value\n\t\t\tkey 0 0 linear\n\t\tchannel x\n\t\t\tkey 0 0 linear\n",
+			12,
+			"keys value alone",
+		},
+		{
+			"cutscene 1\nlength = 10\n" +
+			LAMP +
+			"\tsection 1 0 10\n\t\tchannel r\n\t\t\tkey 0 0 linear\n\t\tchannel y\n\t\t\tkey 0 0 linear\n",
+			12,
+			"keys value alone",
 		},
 		{
 			"cutscene 1\nlength = 10\ntrack 1 event \"A\"\n\tsection 1 0 10\n\t\tchannel x\n\t\t\tkey 0 0 linear 1 1\n",
@@ -626,24 +760,26 @@ each_kind_of_track_suits_its_binding :: proc(t: ^testing.T) {
 	kinds := [?]struct {
 		name:    string,
 		use:     format.Cutscene_Binding_Use,
+		track:   string,
 		section: string,
 	} {
-		{"transform", .Required, ""},
-		{"property", .Required, ""},
-		{"animation", .Required, "\t\tasset = $" + CLIP_GUID + "\n"},
-		{"camera_cut", .None, ""},
-		{"audio", .Optional, "\t\tasset = $" + SOUND_GUID + "\n"},
-		{"event", .Optional, ""},
-		{"sub_sequence", .None, "\t\tasset = $" + SHOT_GUID + "\n"},
-		{"presentation", .None, ""},
+		{"transform", .Required, "", ""},
+		{"property", .Required, "\tcomponent = 1\n\tfield = \"f\"\n", ""},
+		{"animation", .Required, "", "\t\tasset = $" + CLIP_GUID + "\n"},
+		{"camera_cut", .None, "", ""},
+		{"audio", .Optional, "", "\t\tasset = $" + SOUND_GUID + "\n"},
+		{"event", .Optional, "", ""},
+		{"sub_sequence", .None, "", "\t\tasset = $" + SHOT_GUID + "\n"},
+		{"presentation", .None, "", ""},
 	}
 	for k in kinds {
 		for bound in ([?]bool{false, true}) {
 			text := fmt.tprintf(
-				"cutscene 1\nlength = 10\nbinding 1 \"A\"\n\tpossess = @%s/1\ntrack 1 %s \"T\"\n%s\tsection 1 0 10\n%s",
+				"cutscene 1\nlength = 10\nbinding 1 \"A\"\n\tpossess = @%s/1\ntrack 1 %s \"T\"\n%s%s\tsection 1 0 10\n%s",
 				SCENE_GUID,
 				k.name,
 				"\tbinding = 1\n" if bound else "",
+				k.track,
 				k.section,
 			)
 			_, problems := cutscene_parse(text, context.temp_allocator)
@@ -815,6 +951,122 @@ track 2 audio "D"
 		}
 		testing.expectf(t, found, "%d %q: %v", e.line, e.fragment, pass.problems.list)
 	}
+}
+
+// A property track names its field by its component's stable ID and its dotted name. Its sections can be additive, and
+// its keys can name assets of any kind, which the blob lists once each and the bundle carries.
+@(test)
+property_tracks_name_their_field_and_key_numbers_or_assets :: proc(t: ^testing.T) {
+	text :=
+		`cutscene 1
+length = 60000
+binding 1 "Lamp"
+	possess = @` +
+		SCENE_GUID +
+		`/1
+track 1 property "Glow"
+	binding = 1
+	component = 9101
+	field = "light.intensity"
+	section 1 0 60000
+		blend = additive
+		channel value
+			key 0 0 auto
+			key 30000 2.5 bezier 1
+track 2 property "Bulb"
+	binding = 1
+	component = 18446744073709551615
+	field = "bulb"
+	section 2 0 30000
+		channel value
+			key 0 $` +
+		SOUND_GUID +
+		` constant
+			key 15000 $` +
+		CLIP_GUID +
+		` constant
+			key 20000 $` +
+		SOUND_GUID +
+		` constant
+	section 3 30000 60000
+		blend = absolute
+		channel value
+			key 0 $` +
+		CLIP_GUID +
+		` constant
+`
+	parsed, problems := cutscene_parse(text, context.temp_allocator)
+	testing.expectf(t, len(problems) == 0, "problems: %v", problems)
+	c := parsed.contents
+	if len(c.tracks) != 2 {
+		testing.expectf(t, false, "%d tracks", len(c.tracks))
+		return
+	}
+	sound, _ := format.guid_parse(SOUND_GUID)
+	clip, _ := format.guid_parse(CLIP_GUID)
+	glow := c.tracks[0]
+	testing.expect_value(t, glow.component, 9101)
+	testing.expect_value(t, glow.field, "light.intensity")
+	testing.expect_value(t, glow.sections[0].flags, format.Cutscene_Section_Flags{.Additive})
+	testing.expect_value(t, glow.sections[0].channels[0].flags, format.Cutscene_Channel_Flags{})
+	keys := glow.sections[0].channels[0].keys
+	testing.expect_value(t, keys[0].interp, format.Cutscene_Interp.Auto)
+	testing.expect_value(t, keys[1].flags, format.Cutscene_Key_Flags{})
+	testing.expect_value(t, keys[1].in_slope, 1)
+	testing.expect_value(t, keys[1].out_slope, 1)
+	bulb := c.tracks[1]
+	testing.expect_value(t, bulb.component, max(u64))
+	testing.expect_value(t, bulb.sections[1].flags, format.Cutscene_Section_Flags{})
+	swap := bulb.sections[0].channels[0]
+	testing.expect_value(t, swap.flags, format.Cutscene_Channel_Flags{.Guids})
+	testing.expect_value(t, len(c.guids), 2)
+	testing.expect_value(t, c.guids[0], sound)
+	testing.expect_value(t, c.guids[1], clip)
+	testing.expect_value(t, swap.keys[0].value, 0)
+	testing.expect_value(t, swap.keys[1].value, 1)
+	testing.expect_value(t, swap.keys[2].value, 0)
+	testing.expect_value(t, bulb.sections[1].channels[0].keys[0].value, 1)
+	keyed := 0
+	for r in parsed.references {
+		if r.want == .None {
+			keyed += 1
+		}
+	}
+	testing.expect_value(t, keyed, 2)
+
+	tree := cutscene_tree(t, text)
+	defer remove_tree(tree)
+	pass := cook(tree_options(tree), {.Cutscene}, log_problems = false)
+	testing.expectf(t, pass.ok, "%v", pass.problems.list)
+	intro, _ := format.guid_parse(INTRO_GUID)
+	data := tree_blob(t, tree, intro)
+	blob, ok := format.cutscene_view(data)
+	testing.expect(t, ok)
+	if !ok {
+		return
+	}
+	tracks := format.cutscene_tracks(data, blob)
+	testing.expect_value(t, tracks[0].component, 9101)
+	testing.expect_value(t, tracks[0].field_hash, format.scene_field_hash("light.intensity"))
+	testing.expect_value(t, format.blob_string(data, tracks[0].field), "light.intensity")
+	refs, refs_ok := format.blob_references(data, context.temp_allocator)
+	testing.expect(t, refs_ok)
+	testing.expect(t, slice.contains(refs, sound) && slice.contains(refs, clip))
+
+	// A key that names no asset is a problem at its line.
+	missing := strings.concatenate(
+		{text, "\t\t\tkey 5000 $77777777777777777777777777777777 constant\n"},
+		context.temp_allocator,
+	)
+	missing_tree := cutscene_tree(t, missing)
+	defer remove_tree(missing_tree)
+	pass = cook(tree_options(missing_tree), {.Cutscene}, log_problems = false)
+	testing.expect(t, !pass.ok)
+	found := false
+	for p in pass.problems.list {
+		found ||= p.line == 27 && strings.contains(p.text, "no asset has the GUID 7777")
+	}
+	testing.expectf(t, found, "%v", pass.problems.list)
 }
 
 // sub_sequence_text is a cutscene whose one sub-sequence section names another, or none.
