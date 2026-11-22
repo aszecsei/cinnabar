@@ -16,8 +16,8 @@ public sealed partial class EditorShell
     public CutsceneEditor? ActiveCutscene => ActiveGraphEditor as CutsceneEditor;
 
     /// <summary>
-    /// What the timeline's last copy or cut holds, which a paste in any cutscene's tab puts at its playhead (see
-    /// docs/editor/cutscene-editor.md#copy-and-paste). The editor keeps it, not the system's clipboard.
+    /// What the timeline's last copy or cut holds, which a paste in the tab of the cutscene that it came from puts at its
+    /// playhead (see docs/editor/cutscene-editor.md#copy-and-paste). The editor keeps it, not the system's clipboard.
     /// </summary>
     public CutsceneClip? CutsceneClipboard { get; internal set; }
 

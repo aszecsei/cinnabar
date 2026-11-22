@@ -418,7 +418,7 @@ public sealed class CutsceneEditor : IGraphEditor
     {
         if (CutsceneEdits.Copy(File, _selection) is { } clip)
         {
-            _shell.CutsceneClipboard = clip;
+            _shell.CutsceneClipboard = clip with { Source = Guid };
             _shell.Commands.InvalidateAll();
         }
     }
@@ -438,8 +438,11 @@ public sealed class CutsceneEditor : IGraphEditor
         _shell.Commands.InvalidateAll();
     }
 
-    /// <summary>Whether the clipboard holds something to paste.</summary>
-    public bool CanPaste => !Document.InTransaction && _shell.CutsceneClipboard != null;
+    /// <summary>
+    /// Whether the clipboard holds something to paste here: a copy from this cutscene, since copied blocks name its
+    /// bindings by ID.
+    /// </summary>
+    public bool CanPaste => !Document.InTransaction && _shell.CutsceneClipboard?.Source == Guid;
 
     /// <summary>
     /// The tracks that a paste needs and the cutscene lacks, by kind: the editor asks whether to add them before it

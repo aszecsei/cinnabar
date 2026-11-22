@@ -26,6 +26,7 @@ static partial class EditorCommands
     public const string CutsceneCut = "cutscene.cut";
     public const string CutscenePaste = "cutscene.paste";
     public const string CutsceneFind = "cutscene.find";
+    public const string CutsceneKeysUnderSelection = "cutscene.keysUnderSelection";
 
     /// <summary>The timeline's commands, which act on the active cutscene while its timeline has the keyboard.</summary>
     public static readonly string[] CutsceneTimelineCommands =
@@ -33,6 +34,7 @@ static partial class EditorCommands
         CutsceneFrame, CutsceneGoToStart, CutsceneGoToEnd, CutscenePreviousEdge, CutsceneNextEdge, CutsceneSplit, CutsceneRippleDelete,
         CutsceneNudgeEarlier, CutsceneNudgeLater, CutsceneNudgeEarlier10, CutsceneNudgeLater10, CutsceneSnap, CutsceneShowFrames, CutsceneLockTrack,
         CutsceneMuteTrack, CutsceneSoloTrack, CutsceneAddMarker, CutsceneCopy, CutsceneCut, CutscenePaste, CutsceneFind,
+        CutsceneKeysUnderSelection,
     ];
 
     // The cutscene editor's timeline (see docs/editor/cutscene-editor.md#the-timeline). Its keys are bare letters, which
@@ -128,6 +130,19 @@ static partial class EditorCommands
             e => e.Paste(), e => e.CanPaste);
         Register(CutsceneFind, "Find Track", "search", "Put the keyboard in the timeline's search box, which filters the tracks by binding or track name.", "Ctrl+F",
             e => e.RequestFind());
+        commands.Register(new Command(CutsceneKeysUnderSelection, "Keys Under Selection", () =>
+        {
+            if (Timeline() is { } editor)
+            {
+                editor.SetKeysUnderSelection(!editor.KeysUnderSelection);
+            }
+        })
+        {
+            Description = "Show only the tracks with keys in the span of the selection, as it is when this is turned on, or show them all again.",
+            Icon = "search",
+            CanExecuteWhen = () => Timeline() != null,
+            IsCheckedWhen = () => shell.ActiveCutscene?.KeysUnderSelection == true,
+        });
     }
 
     static List<int> Edges(CutsceneEditor editor) => editor.Layout().Edges();

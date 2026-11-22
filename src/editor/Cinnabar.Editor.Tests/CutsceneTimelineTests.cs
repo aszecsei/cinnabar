@@ -400,12 +400,27 @@ public sealed class CutsceneTimelineTests : IDisposable
         Assert.Equal(CutsceneEdits.TrackOf(editor.Selected!), added);
         shell.Commands.Get("edit.undo").Execute();
         Assert.Equal(text, editor.Document.Text);
+
+        // A camera cut takes no binding: onto a binding, it goes onto the cutscene's camera cut track, and adds none.
+        editor.Select(["section:5"], SelectMode.Replace);
+        editor.Copy();
+        editor.Select(["binding:1"], SelectMode.Replace);
+        asked = null;
+        editor.SetPlayhead(600000);
+        var id = editor.File.NextId(Cinnabar.Editor.Document.CutsceneBlockKind.Section);
+        editor.Paste();
+        Assert.Null(asked);
+        Assert.Equal("track:5", Cinnabar.Editor.Document.CutsceneFile.PathOf(CutsceneEdits.TrackOf(editor.File.Find($"section:{id}")!)!));
+
+        // A copy from another cutscene does not paste here, as its blocks name that cutscene's bindings.
+        shell.CutsceneClipboard = shell.CutsceneClipboard! with { Source = "ffffffffffffffffffffffffffffffff" };
+        Assert.False(editor.CanPaste);
     }
 
     [Fact]
     public void TheFilterHidesTracksAndTakesTheirBlocksOutOfTheSelection()
     {
-        var (_, editor, input, _) = Intro();
+        var (shell, editor, input, _) = Intro();
         editor.Select(["section:3", "marker:9"], SelectMode.Replace);
         editor.SetFilterText(" FOX ");
         Assert.Equal("FOX", editor.FilterText);
@@ -426,7 +441,10 @@ public sealed class CutsceneTimelineTests : IDisposable
         Assert.Contains(input.Layout.Rows, r => r.Label == "Music");
         editor.Select([], SelectMode.Replace);
         Assert.Equal((200000, 400000), editor.RowFilter.KeysIn);
-        editor.SetKeysUnderSelection(false);
+        // The command turns it off, as the strip's toggle does.
+        editor.TimelineFocused = true;
+        Assert.True(shell.Commands.Get(EditorCommands.CutsceneKeysUnderSelection).IsChecked);
+        shell.Commands.Get(EditorCommands.CutsceneKeysUnderSelection).Execute();
         Assert.True(editor.RowFilter.IsNone);
     }
 

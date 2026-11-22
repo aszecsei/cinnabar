@@ -373,16 +373,9 @@ public sealed class CutsceneEditsTests
         var clip = CutsceneEdits.Copy(file, ["section:3/channel:position_x/key:1", "marker:1"])!;
         // The key is at 180000 and the marker at 0, so the key lands 180000 after the playhead.
         var pasted = CutsceneEdits.Paste(file, clip, 0, file.Find("track:2"), addTracks: false);
-        // The pasted key goes after the key that has its time.
-        Assert.Equal(["marker:2", "section:3/channel:position_x/key:2"], pasted.Order());
-        Assert.Equal(With(("rate = 30\n\nbinding 1", "rate = 30\nmarker 1 0 \"Top\"\nmarker 2 0 \"Top\"\n\nbinding 1"), ("""
-            			key 0 0 linear
-            			key 120000 4 linear
-            """, """
-            			key 0 0 linear
-            			key 120000 4 linear
-            			key 120000 4 linear
-            """)), file.Text);
+        // The pasted key takes the place of the key at its time.
+        Assert.Equal(["marker:2", "section:3/channel:position_x/key:1"], pasted.Order());
+        Assert.Equal(With(("rate = 30\n\nbinding 1", "rate = 30\nmarker 1 0 \"Top\"\nmarker 2 0 \"Top\"\n\nbinding 1")), file.Text);
         // A key with no section under its time is left out.
         Assert.Equal(["marker:3"], CutsceneEdits.Paste(file, clip, 500000, file.Find("track:2"), addTracks: false));
     }

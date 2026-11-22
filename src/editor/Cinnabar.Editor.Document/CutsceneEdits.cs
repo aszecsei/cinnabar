@@ -646,18 +646,33 @@ public static class CutsceneEdits
     public static int? BindingOf(CutsceneBlock? track) =>
         track?.Get("binding") is { } text && CutsceneFile.TryParseTicks(text.Trim(), out var id) ? id : null;
 
+    // The kinds of track that the cooker wants with a binding, and those that it wants without one. The others, audio
+    // and event tracks, may have one or not.
+    static readonly HashSet<string> BoundKinds = ["transform", "property", "animation"];
+    static readonly HashSet<string> UnboundKinds = ["camera_cut", "sub_sequence", "presentation"];
+
+    // The binding that a copied track's blocks go to on a paste onto a target: none for a kind that takes none, the
+    // target's binding, or the copied track's own for a kind that needs one when the target has none.
+    static int? BindingFor(string kind, int? targetBinding, int? sourceBinding) =>
+        UnboundKinds.Contains(kind) ? null
+        : BoundKinds.Contains(kind) ? targetBinding ?? sourceBinding
+        : targetBinding;
+
+    static int? TargetBinding(CutsceneBlock? target) => target?.Kind switch
+    {
+        CutsceneBlockKind.Binding => target.Id,
+        CutsceneBlockKind.Track => BindingOf(target),
+        _ => null,
+    };
+
     // The track that each of a clip's tracks pastes onto: with a target, the target track when the clip has one track of
-    // its kind, else the track of the clip's track's kind on the target's binding; without one, the track with the
-    // clip's track's ID and kind, else one of its kind on its binding. Null when there is none, which a paste can add.
+    // its kind, else the track of the clip's track's kind on the binding that BindingFor gives; without one, the track
+    // with the clip's track's ID and kind, else one of its kind on its binding. Null when there is none, which a paste
+    // can add.
     static Dictionary<(int? Id, string Kind, int? Binding), CutsceneBlock?> Targets(CutsceneFile file, CutsceneClip clip, CutsceneBlock? target)
     {
         var groups = clip.Items.Where(i => i.TrackKind != null).Select(i => (i.TrackId, i.TrackKind!, i.BindingId)).Distinct().ToList();
-        int? targetBinding = target?.Kind switch
-        {
-            CutsceneBlockKind.Binding => target.Id,
-            CutsceneBlockKind.Track => BindingOf(target),
-            _ => null,
-        };
+        var targetBinding = TargetBinding(target);
         var result = new Dictionary<(int?, string, int?), CutsceneBlock?>();
         foreach (var group in groups)
         {
@@ -665,10 +680,11 @@ public static class CutsceneEdits
             CutsceneBlock? onto;
             if (target is { Kind: CutsceneBlockKind.Track or CutsceneBlockKind.Binding })
             {
+                var to = BindingFor(kind, targetBinding, binding);
                 onto = target.Kind == CutsceneBlockKind.Track && target.TrackKind == kind && groups.Count(g => g.Item2 == kind) == 1
                     ? target
-                    : file.Tracks.FirstOrDefault(t => t.TrackKind == kind && BindingOf(t) == targetBinding && t.Id == id)
-                        ?? file.Tracks.FirstOrDefault(t => t.TrackKind == kind && BindingOf(t) == targetBinding);
+                    : file.Tracks.FirstOrDefault(t => t.TrackKind == kind && BindingOf(t) == to && t.Id == id)
+                        ?? file.Tracks.FirstOrDefault(t => t.TrackKind == kind && BindingOf(t) == to);
             }
             else
             {
@@ -693,20 +709,16 @@ public static class CutsceneEdits
     /// tracks that <see cref="MissingTracks"/> describes. A track that the cutscene lacks is added, like the copied
     /// one, when addTracks says so, and its blocks are left out when not. Pasted sections, triggers, ranges and markers
     /// take new IDs. A subtitle's <c>audio</c> names its pasted sound's new ID, or goes when its sound was not pasted.
-    /// A key goes into the section of its track that holds its time, in the channel of its name, and is left out
-    /// without one. Locked tracks take nothing. The length grows to hold what is pasted. Returns the pasted blocks'
+    /// A key goes into the section of its track that holds its time, in the channel of its name, in place of a key at
+    /// that time, and is left out without one. A kind of track that the cooker wants without a binding goes onto the
+    /// cutscene's own track of that kind, and one that needs a binding keeps its own when the target has none. Locked tracks take nothing. The length grows to hold what is pasted. Returns the pasted blocks'
     /// paths.
     /// </summary>
     public static IReadOnlyList<string> Paste(CutsceneFile file, CutsceneClip clip, int at, CutsceneBlock? target, bool addTracks, IReadOnlySet<int>? locked = null)
     {
         var shift = Math.Max(at, 0) - clip.Anchor;
         var targets = Targets(file, clip, target);
-        int? targetBinding = target?.Kind switch
-        {
-            CutsceneBlockKind.Binding => target.Id,
-            CutsceneBlockKind.Track => BindingOf(target),
-            _ => null,
-        };
+        var targetBinding = TargetBinding(target);
         var pasted = new List<CutsceneBlock>();
         var audioIds = new Dictionary<string, string>();
         var parents = new HashSet<CutsceneBlock>();
@@ -736,7 +748,9 @@ public static class CutsceneEdits
                 {
                     continue;
                 }
-                var binding = target is { Kind: CutsceneBlockKind.Track or CutsceneBlockKind.Binding } ? targetBinding : item.BindingId;
+                var binding = target is { Kind: CutsceneBlockKind.Track or CutsceneBlockKind.Binding }
+                    ? BindingFor(item.TrackKind!, targetBinding, item.BindingId)
+                    : item.BindingId;
                 track = AddTrack(file, item.TrackModel, binding);
                 targets[group] = track;
             }
@@ -753,6 +767,11 @@ public static class CutsceneEdits
                     if (channel == null)
                     {
                         continue;
+                    }
+                    // A pasted key takes the place of a key at its time, as each key comes after the one before it.
+                    if (channel.Children.FirstOrDefault(k => k.Kind == CutsceneBlockKind.Key && k.Start == start - section!.Start!.Value) is { } there)
+                    {
+                        file.Remove(there);
                     }
                     file.Insert(channel, channel.Children.Count, block);
                     block.SetTime(start - section!.Start!.Value);
@@ -855,7 +874,14 @@ public static class CutsceneEdits
 /// What a copy of a cutscene's timeline holds (see docs/editor/cutscene-editor.md#copy-and-paste): copies of the copied
 /// blocks with their times on the cutscene's time, the earliest start, and the span from it to the latest end.
 /// </summary>
-public sealed record CutsceneClip(IReadOnlyList<CutsceneClipItem> Items, int Anchor, int Span);
+public sealed record CutsceneClip(IReadOnlyList<CutsceneClipItem> Items, int Anchor, int Span)
+{
+    /// <summary>
+    /// The GUID of the cutscene that the copy came from. Its blocks name that cutscene's bindings by ID, as a camera
+    /// cut's camera does, so it pastes only there.
+    /// </summary>
+    public string? Source { get; init; }
+}
 
 /// <summary>
 /// A copied block, detached, with its start and end on the cutscene's time, and the track that it was on: its ID, kind,
