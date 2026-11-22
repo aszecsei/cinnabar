@@ -62,10 +62,17 @@ public sealed class CutsceneEditor : IGraphEditor
         }
     }
 
-    /// <summary>Selects a block, or with null, none.</summary>
+    /// <summary>
+    /// Selects a block, or with null, none. A block whose path another block has too, as two sections with one ID have,
+    /// cannot be selected, since an edit could land on the other: the cooker reports the ID.
+    /// </summary>
     public void Select(CutsceneBlock? block)
     {
         var path = block == null ? null : CutsceneFile.PathOf(block);
+        if (block != null && File.Find(path!) != block)
+        {
+            path = null;
+        }
         if (path == Selection)
         {
             return;

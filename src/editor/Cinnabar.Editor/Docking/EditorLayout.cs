@@ -307,6 +307,8 @@ public sealed class EditorLayout
                 Factory.AddDockable(host, document);
             }
             Factory.SetActiveDockable(open[^1]);
+            // The shell's active editor is the tab in front, so Undo and Save go to what the user sees.
+            ActiveDocumentChanged?.Invoke(open[^1]);
         }
         foreach (var id in file.Floating.Select(CurrentId).Where(id => _panels.ContainsKey(id) && !used.Contains(id)))
         {

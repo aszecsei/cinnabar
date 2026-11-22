@@ -490,8 +490,16 @@ public sealed class CutsceneFile
         _ => $"{block.Kind.ToString().ToLowerInvariant()}:{block.Id}",
     };
 
-    /// <summary>The block with a path, or null when the file has none.</summary>
-    public CutsceneBlock? Find(string path) => path == "" ? Root : Blocks.FirstOrDefault(b => b != Root && PathOf(b) == path);
+    /// <summary>The block with a path, or null when the file has none, or more than one, as two sections with one ID do.</summary>
+    public CutsceneBlock? Find(string path)
+    {
+        if (path == "")
+        {
+            return Root;
+        }
+        var found = Blocks.Where(b => b != Root && PathOf(b) == path).Take(2).ToList();
+        return found.Count == 1 ? found[0] : null;
+    }
 
     /// <summary>The ID after the highest of a kind's blocks. Sections' IDs are the cutscene's, so they count across tracks.</summary>
     public int NextId(CutsceneBlockKind kind) => Blocks.Where(b => b.Kind == kind).Select(b => b.Id ?? 0).DefaultIfEmpty(0).Max() + 1;

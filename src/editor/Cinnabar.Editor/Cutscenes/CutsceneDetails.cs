@@ -54,7 +54,7 @@ sealed class CutsceneDetails : ScrollViewer
         _content.Children.Clear();
         if (block == null)
         {
-            _content.Children.Add(Dim("Select the cutscene, a binding, a track or a section to see its details."));
+            _content.Children.Add(Dim("Select a row of the outline to see its details."));
             return;
         }
         var rate = _editor.File.Rate;
@@ -147,7 +147,11 @@ sealed class CutsceneDetails : ScrollViewer
             VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
             Margin = new Thickness(6, 0, 0, 0),
         });
-        FieldView.Scrubbable(row.Children[0], new TicksScrub(_editor, label, read, write, CutsceneTime.FrameTicks(rate)), 0);
+        // The name takes the keyboard's focus when a scrub begins, so Esc reaches the view and cancels the scrub.
+        var handle = row.Children[0];
+        handle.Focusable = true;
+        handle.PointerPressed += (_, _) => handle.Focus();
+        FieldView.Scrubbable(handle, new TicksScrub(_editor, label, read, write, CutsceneTime.FrameTicks(rate)), 0);
         return row;
     }
 

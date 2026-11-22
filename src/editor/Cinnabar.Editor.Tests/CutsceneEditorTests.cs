@@ -200,6 +200,31 @@ public sealed class CutsceneEditorTests : IDisposable
     }
 
     [Fact]
+    public void AKeyIsSelectedByItsPathAndABlockThatSharesItsPathIsNot()
+    {
+        var (shell, editor, text) = Intro();
+        using var _ = shell;
+        var key = editor.File.Find("section:9/channel:gain/key:2")!;
+        editor.Select(key);
+        Assert.Equal("section:9/channel:gain/key:2", editor.Selection);
+        editor.EditSelected("Set Key Value", b => b.SetKeyValue("0.9"));
+        Assert.Equal(text.Replace("key 400000 0.8 auto", "key 400000 0.9 auto"), editor.Document.Text);
+
+        shell.CloseGraph(editor, discard: true);
+
+        // Two sections with one ID, which the cooker reports: neither can be selected, so no edit lands on the other.
+        File.WriteAllText(FilePath, text.Replace("section 13 30000 174000", "section 12 30000 174000"));
+        var clash = shell.OpenCutscene(shell.Assets.Find(Guid)!)!;
+        var sections = clash.File.Blocks.Where(b => b.Kind == CutsceneBlockKind.Section && b.Id == 12).ToList();
+        Assert.Equal(2, sections.Count);
+        Assert.Null(clash.File.Find("section:12"));
+        clash.Select(sections[1]);
+        Assert.Null(clash.Selection);
+        clash.EditSelected("Set kind", b => b.Set("kind", "fade"));
+        Assert.False(clash.Document.IsDirty);
+    }
+
+    [Fact]
     public void ClosingADirtyTabAsksAndTheShellDropsTheEditorOnceItCloses()
     {
         var (shell, editor, text) = Intro();
@@ -250,7 +275,11 @@ public sealed class CutsceneEditorTests : IDisposable
         var (shell, editor, _) = Intro();
         using var _ = shell;
         var cinematics = shell.Workspaces.Find("cinematics")!;
+        // The scene view is in front when the switch comes, and after it the tab that the switch shows is the active editor.
+        shell.Layout.ShowViewport(ViewportDocument.SceneId);
+        Assert.Null(shell.ActiveGraphEditor);
         Assert.True(shell.Workspaces.Switch(cinematics));
+        Assert.Same(editor, shell.ActiveGraphEditor);
         // The tab that was open moves to the editors' dock, apart from the viewports.
         var document = FindDocument(shell, editor)!;
         Assert.Equal(EditorLayout.EditorDocumentsDock, document.Owner?.Id);

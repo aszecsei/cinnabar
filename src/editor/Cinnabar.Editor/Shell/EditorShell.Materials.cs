@@ -22,8 +22,8 @@ public sealed partial class EditorShell
     readonly Dictionary<string, (DateTime Modified, MaterialGraph? Graph)> _functions = [];
     // Editors that closed with their changes discarded, so their documents close without asking again.
     readonly HashSet<IGraphEditor> _discarding = [];
-    // The command line's materials, effects, animation graphs, UI documents, decisions and blackboards, which open once the
-    // index has them.
+    // The command line's materials, effects, animation graphs, UI documents, decisions, blackboards and cutscenes, which
+    // open once the index has them.
     readonly List<string> _pendingMaterials = [];
 
     void OpenPendingMaterials()
@@ -52,6 +52,10 @@ public sealed partial class EditorShell
                 else if (asset.Kind == AssetKind.Blackboard)
                 {
                     OpenBlackboard(asset);
+                }
+                else if (asset.Kind == AssetKind.Cutscene)
+                {
+                    OpenCutscene(asset);
                 }
                 else
                 {

@@ -30,11 +30,11 @@ The editor is built in steps under [#548](https://github.com/aszecsei/cinnabar/i
   - for a channel, its section's path and its name;
   - for a key, its channel's path and its place in the channel.
 
-  The selection is a path, and so it stays across an undo.
+  The selection is a path, and so it stays across an undo. A block whose path another block has too, as two sections with one ID have, cannot be selected, so an edit cannot land on the other. The cooker reports the ID.
 - **Undo:** each editor has its own undo stack of the text (`GraphDocument`), and a drag is one entry. Undo, Redo and Save act on the cutscene editor whose tab is active. Esc during a drag cancels it, and nothing goes on the stack. Save is disabled during a drag. A document is dirty when its position in its history is not the one that its file has, and its tab marks it with a dot.
 - **Saving** writes the text through a temporary file, and the cook daemon then cooks it. A save that would replace what another program wrote asks first.
 - **Closing** a tab with unsaved changes asks to save them, and so does closing the editor. An open cutscene follows its file when the content browser moves or renames it.
-- **New Cutscene,** in the content browser's menu and in the Gameplay tab's New Asset group, makes a cutscene of 10 s at 30 frames a second, with an empty camera cut track. It opens in its tab when the index has it.
+- **New Cutscene,** in the content browser's menu and in the Gameplay tab's New Asset group, makes a cutscene of 10 s at 30 frames a second, with an empty camera cut track. It opens in its tab when the index has it. `--cutscene <file>` on the editor's command line opens one when the editor starts.
 
 ## The tab
 
@@ -42,7 +42,7 @@ The editor is built in steps under [#548](https://github.com/aszecsei/cinnabar/i
   - Save, and Open in Script Editor;
   - the cutscene's length as timecode (`mm:ss:ff`) and as frames at its display rate;
   - the check's state: waiting for the cook daemon, cooks, or the count of errors, with the first error as its tooltip, and "not saved".
-- **Outline:** a row for the cutscene, each binding and each track, with each track's sections, triggers and ranges under it. A section's row shows its span as timecode. A row whose lines have problems has a mark, with the problems as its tooltip. A problem on a channel or a key shows on its section's row. The selected row lists its problems under it. A click selects a row's block. The timeline ([#550](https://github.com/aszecsei/cinnabar/issues/550)) takes the outline's place.
+- **Outline:** a row for every block: the cutscene, each binding, and each track with its sections, triggers and ranges, the sections' channels and the channels' keys under it. A section's row shows its span as timecode, and a key's its time from the section's start. A row whose lines have problems has a mark, with the problems as its tooltip. The selected row lists its problems under it. A click selects a row's block. The timeline ([#550](https://github.com/aszecsei/cinnabar/issues/550)) takes the outline's place.
 - **Details:** the selected block's fields, under the outline:
   - its ID;
   - a binding's or a track's name;

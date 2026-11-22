@@ -12,8 +12,9 @@ using static Cinnabar.Editor.Panels.Kit;
 namespace Cinnabar.Editor.Cutscenes;
 
 /// <summary>
-/// The outline of a cutscene (see docs/editor/cutscene-editor.md#the-tab): a row for the cutscene, each binding and each
-/// track, with a track's sections, triggers and ranges under it, and a mark on a row whose lines have problems.
+/// The outline of a cutscene (see docs/editor/cutscene-editor.md#the-tab): a row for every block, the cutscene, its
+/// bindings, its tracks with their sections, triggers and ranges, and the sections' channels with their keys, and a mark
+/// on a row whose lines have problems.
 /// Clicking a row selects its block. The timeline (#550) takes its place.
 /// </summary>
 sealed class CutsceneOutline : ScrollViewer
@@ -46,10 +47,14 @@ sealed class CutsceneOutline : ScrollViewer
         }
         foreach (var track in file.Tracks)
         {
-            yield return (track, 1);
-            foreach (var child in track.Children)
+            foreach (var block in track.Descendants())
             {
-                yield return (child, 2);
+                var depth = 0;
+                for (var at = block; at.Parent != null; at = at.Parent)
+                {
+                    depth++;
+                }
+                yield return (block, depth);
             }
         }
     }
@@ -81,8 +86,7 @@ sealed class CutsceneOutline : ScrollViewer
 
     Control Row(CutsceneBlock block, int depth)
     {
-        // A problem on a section's channel or key shows on the section's row, which is the deepest that has one.
-        var problems = block.Descendants().Where(b => b == block || !HasRow(b)).SelectMany(_editor.ProblemsOf).ToList();
+        var problems = _editor.ProblemsOf(block).ToList();
         var selected = _editor.Selection == CutsceneFile.PathOf(block);
         var line = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Margin = new Thickness(depth * 16, 0, 0, 0) };
         line.Children.Add(new TextBlock { Text = Label(block), VerticalAlignment = VerticalAlignment.Center, FontSize = 12 });
@@ -130,8 +134,6 @@ sealed class CutsceneOutline : ScrollViewer
         return column;
     }
 
-    static bool HasRow(CutsceneBlock block) => block.Kind is not (CutsceneBlockKind.Channel or CutsceneBlockKind.Key);
-
     static string Label(CutsceneBlock block) => block.Kind switch
     {
         CutsceneBlockKind.Cutscene => "Cutscene",
@@ -140,6 +142,8 @@ sealed class CutsceneOutline : ScrollViewer
         CutsceneBlockKind.Section => $"Section {block.Id}",
         CutsceneBlockKind.Trigger => $"Trigger {block.Id}  {block.Name}",
         CutsceneBlockKind.Range => $"Range {block.Id}  {block.Name}",
+        CutsceneBlockKind.Channel => $"Channel  {block.Name}",
+        CutsceneBlockKind.Key => $"Key  {block.KeyValue} {block.KeyInterpolation}",
         _ => block.Kind.ToString(),
     };
 
@@ -151,6 +155,8 @@ sealed class CutsceneOutline : ScrollViewer
             CutsceneBlockKind.Section or CutsceneBlockKind.Range when block.Start is { } start && block.End is { } end =>
                 $"{CutsceneTime.Timecode(start, rate)} – {CutsceneTime.Timecode(end, rate)}",
             CutsceneBlockKind.Trigger when block.Start is { } time => CutsceneTime.Timecode(time, rate),
+            // A key's time is from its section's start.
+            CutsceneBlockKind.Key when block.Start is { } time => $"+{CutsceneTime.Timecode(time, rate)}",
             _ => null,
         };
     }
