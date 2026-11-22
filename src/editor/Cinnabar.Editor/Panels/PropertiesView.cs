@@ -296,6 +296,8 @@ public sealed class PropertiesView : ScrollViewer
             ShowManyValues();
             return;
         }
+        // A key button shows its state before the game's first values, which it waits for.
+        _grid.ShowKeys();
         var values = _world.Values(_selection.Entity);
         if (values == null)
         {

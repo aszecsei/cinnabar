@@ -37,9 +37,12 @@ public sealed partial class EditorShell
     /// The file time, in nanoseconds since the Unix epoch as the game reads it, of an asset's blob in the cache's
     /// preview area, or 0 when it has none.
     /// </summary>
-    internal long PreviewBlobTime(string guid)
+    internal long PreviewBlobTime(string guid) => PreviewBlobTime(_options.Cook.CachePath, guid);
+
+    /// <summary>An asset's blob's file time in a cache's preview area, as the game's <c>file_modified</c> reads it, or 0 for none.</summary>
+    public static long PreviewBlobTime(string cache, string guid)
     {
-        var path = Path.Combine(_options.Cook.CachePath, "preview", guid + ".blob");
+        var path = Path.Combine(cache, "preview", guid + ".blob");
         return File.Exists(path) ? (File.GetLastWriteTimeUtc(path) - DateTime.UnixEpoch).Ticks * 100 : 0;
     }
 

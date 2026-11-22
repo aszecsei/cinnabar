@@ -389,7 +389,9 @@ public sealed class Keying
         {
             return "Pause the preview to key.";
         }
-        if (_shell.World.ShownPreviewOf(handle) is not { } shown || shown.Ticket != open.Ticket || shown.Tick != open.Editor.Playhead)
+        // The game keeps the preview's time within the cutscene's range, so past its end the world holds the end's pose.
+        var playhead = Math.Clamp(open.Editor.Playhead, open.RangeStart, Math.Max(open.RangeStart, open.RangeEnd));
+        if (_shell.World.ShownPreviewOf(handle) is not { } shown || shown.Ticket != open.Ticket || shown.Tick != playhead)
         {
             return "Waiting for the preview to show the playhead.";
         }

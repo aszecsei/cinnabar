@@ -311,7 +311,7 @@ A key holds what the world shows. The game lays the preview and the overrides ov
 
 The world's values come at most twenty times a second, and they are taken before a poll, so they come a little after the playhead moves. So a held field keys only with values that are fresh:
 - the preview is this cutscene's, and it is paused: "Pause the preview to key" while it plays;
-- the values' ticket is the session's, and their time is the playhead: "Waiting for the preview to show the playhead" until they come;
+- the values' ticket is the session's, and their time is the playhead, or past the cutscene's range, its end, where the game holds the time: "Waiting for the preview to show the playhead" until they come;
 - the world shows the tab's text: in a session that plays the unsaved text, the values name the blob that the daemon wrote for the text as it is now (`CutsceneEditor.CleanBlob`, the blob's file time in the preview area), and in a session that plays the saved file, the text is not changed. Otherwise "Waiting for the preview to show the cutscene's last edit", so a key never takes back an edit that the preview does not show yet.
 
 A refused key disables the button, and its tooltip says why. The warning state needs fresh values too. Without them, a key at the playhead shows as keyed.
@@ -348,6 +348,6 @@ So Ctrl+K and then Ctrl+Z in the viewport takes the key back, and a second Ctrl+
 
 ### Limits
 
-- An inspector edit of a held field goes to the scene, under the preview, as before. So on a field with a track, a key holds the curve's value: the value shows amber only inside an ease, under a section's weight below 1, or over an additive section, where the world's value is the blend.
+- An inspector edit of a held field goes to the scene, under the preview, as before. So on a field with a track, a key holds the curve's value: the value shows amber only inside an ease, under a section's weight below 1, over an additive section, or where another track or a sub-sequence writes the same field, where the world's value is not the track's alone.
 - After a key's value changes, the warning can show until the daemon cooks the text and the preview follows it.
 - Buttons show for one selected entity, not for several.

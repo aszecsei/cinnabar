@@ -48,7 +48,7 @@ public sealed class KeyingTests : IDisposable
     public void Dispose() => _temp.Dispose();
 
     // A linked shell in Edit with the door scene and a cutscene that binds the door, whose preview is open at tick 0.
-    (EditorShell Shell, CutsceneEditor Editor, ulong Ticket) NewShell(string cutscene = Cutscene, ComponentType? transform = null)
+    (EditorShell Shell, CutsceneEditor Editor, ulong Ticket) NewShell(string cutscene = Cutscene, ComponentType? transform = null, int rangeEnd = 600000)
     {
         Directory.CreateDirectory(_temp.Path);
         File.WriteAllText(_temp.Combine("door.scene"), SceneText);
@@ -66,7 +66,7 @@ public sealed class KeyingTests : IDisposable
         shell.OnGameMessage(new EntitySnapshot([new EntityInfo(Door, "Door", 1, 1, 0, true, [SceneEdits.TransformId, LightId])]));
         var editor = shell.OpenCutscene(shell.Assets.Find(CutsceneGuid)!)!;
         var ticket = _sent.OfType<CutscenePreviewOpen>().Last().Ticket;
-        shell.OnGameMessage(new CutscenePreviewOpened(ticket, 0, 0, 600000));
+        shell.OnGameMessage(new CutscenePreviewOpened(ticket, 0, 0, rangeEnd));
         Values(shell, Pose([0, 0, 0], Quat.Identity), 2);
         _sent.Clear();
         return (shell, editor, ticket);
@@ -363,6 +363,53 @@ public sealed class KeyingTests : IDisposable
         editor.Document.Edit("Unbind", f => f.Find("binding:1")!.Set("possess", $"@{SceneGuid}/0000000000000002"));
         Assert.DoesNotContain(content.GetLogicalDescendants().OfType<Button>(), b => b.ContextMenu != null && b.ContextMenu == Name().ContextMenu);
     });
+
+    [Fact]
+    public void PastTheRangeTheWorldHoldsItsEndAndAKeyTakesIt()
+    {
+        var (shell, editor, ticket) = NewShell(rangeEnd: 300000);
+        using var _ = shell;
+        editor.SetPlayhead(400000);
+        Values(shell, Pose([0, 0, 0], Quat.Identity), 2, (null, 3, new ShownPreview(ticket, 300000, 0)));
+
+        Assert.Null(shell.Keying.StateOf(Door, LightId, Brightness)!.Refusal);
+        shell.Keying.Key(Door, LightId, Brightness);
+
+        Assert.Equal([3.0], CutsceneKeying.KeysAt(editor.File, new KeyTarget.Property(1, LightId, "brightness", PropertyShape.Number), 400000));
+    }
+
+    [Fact]
+    public void AnAbsoluteTracksFirstKeySetsItsOriginInWholeMetersNearTheEntity()
+    {
+        var (shell, editor, _) = NewShell(Cutscene + "track 1 transform \"Path\"\n\tbinding = 1\n\tspace = absolute\n");
+        using var __ = shell;
+        shell.Selection.Select(Door);
+        Values(shell, Pose([1_000_002.25, 1, -2.6], Yaw(45)), 2);
+
+        shell.Commands.Get(EditorCommands.CutsceneKeyTransform).Execute();
+
+        var file = editor.File;
+        Assert.Equal("[1000002, 1, -3]", file.Find("track:1")!.Get("origin"));
+        Assert.Equal([0.25, 0, 0.4], CutsceneKeying.KeysAt(file, new KeyTarget.Pose(1, PosePart.Position), 0).Select(v => Math.Round(v!.Value, 4)));
+        Assert.Equal([0.0, 45, 0], CutsceneKeying.KeysAt(file, new KeyTarget.Pose(1, PosePart.Rotation), 0).Select(v => Math.Round(v!.Value, 3)));
+    }
+
+    [Fact]
+    public void PoseKeysTurnTheShortWayAndCompareRotationsAsRotations()
+    {
+        // 190° is -170°, which turns the short way from a key at 170°; a channel with no key keeps its angle.
+        Assert.Equal([190.0, -10, 5], PoseKeys.Unwrap([-170, 350, 5], [170, 0, null]));
+        Assert.True(PoseKeys.SameRotation([0, 360, 0], [0, 0, 0]));
+        Assert.True(PoseKeys.SameRotation([10, null, 0], [10, 99, 360]));
+        Assert.False(PoseKeys.SameRotation([0, 30, 0], [0, 31, 0]));
+        Assert.Equal([1.5, 0, -2], PoseKeys.AbsolutePosition([(long)(11.5 * (1 << 24)), 0, -(2L << 24)], [10L << 24, 0, 0]));
+        var (meters, units) = PoseKeys.OriginNear([(long)(2.6 * (1 << 24)), -(long)(1.4 * (1 << 24)), 100]);
+        Assert.Equal([3L, -1, 0], meters);
+        Assert.Equal([3L << 24, -(1L << 24), 0], units);
+        // In a relative track, a step along the own turned x is a step along the key's x.
+        Assert.Equal([2.0, 0, 0], PoseKeys.RelativePosition(Yaw(90).Rotate(new Vec3(2, 0, 0)), Yaw(90)).Select(v => Math.Round(v, 6)));
+        Assert.Equal([0.0, 30, 0], PoseKeys.RelativeRotation(Yaw(90), Yaw(90) * Yaw(30)).Select(v => Math.Round(v, 4)));
+    }
 
     [Fact]
     public void TheKeyCommandsHaveTheirOwnKeys()

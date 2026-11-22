@@ -513,6 +513,28 @@ public abstract class HostTests : IAsyncDisposable
 
         editor.Link.Send(new CutscenePreviewClose(1));
         await editor.Next<EntityValues>(v => v.Entity == fox && v.Held.Length == 0 && v.Shown.Length == 0);
+
+        // An unsaved session's values name the blob in the preview area by the file time that the editor reads. The
+        // intro's own blob stands in for one that the cook daemon cooked there.
+        var cache = Path.Combine(EditorOptions.RepositoryRoot(), "build", "dev", "content");
+        var unsaved = Path.Combine(cache, "preview", IntroCutscene + ".blob");
+        Directory.CreateDirectory(Path.GetDirectoryName(unsaved)!);
+        File.Copy(Path.Combine(cache, IntroCutscene + ".blob"), unsaved, overwrite: true);
+        try
+        {
+            editor.Link.Send(new CutscenePreviewOpen(2, Convert.FromHexString(IntroCutscene), true, 300000));
+            editor.Link.Send(new CutscenePreviewSettings(2, false, false, [4]));
+            await editor.Next<CutscenePreviewOpened>(o => o.Ticket == 2);
+            var stamped = await editor.Next<EntityValues>(v => v.Entity == fox && v.ShownPreview.Ticket == 2);
+            Assert.NotEqual(0, stamped.ShownPreview.Blob);
+            Assert.Equal(Shell.EditorShell.PreviewBlobTime(cache, IntroCutscene), stamped.ShownPreview.Blob);
+            editor.Link.Send(new CutscenePreviewClose(2));
+            await editor.Next<EntityValues>(v => v.Entity == fox && v.Shown.Length == 0);
+        }
+        finally
+        {
+            File.Delete(unsaved);
+        }
         Assert.DoesNotContain(editor.Skipped, m => m is Log { Level: LogLevel.Error });
     }
 
