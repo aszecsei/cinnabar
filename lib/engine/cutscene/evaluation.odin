@@ -129,8 +129,8 @@ Evaluation :: struct {
 	sounds:         map[Scoped]Sound_Voice,
 	// What each audio track scrubbed last, by track ID, for an evaluation that scrubs.
 	scrubs:         map[Scoped]Audio_Scrub,
-	// How the audio tracks sound: a player's evaluation plays, and the editor sets the others' with set_audition. Only
-	// an evaluation that plays sends events.
+	// How the audio tracks sound: a player's evaluation plays, and the editor sets the others' with set_audition. An
+	// evaluation that plays sends events, and one under Preview does when the editor's mix says so (see set_mix).
 	audition:       Audition,
 	// The player whose evaluation this is, which native event handlers get. The zero handle for an evaluation of no
 	// player.

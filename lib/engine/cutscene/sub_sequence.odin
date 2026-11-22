@@ -251,7 +251,10 @@ tree_orders :: proc(
 				walk.orders[i] = walk.next
 			}
 			walk.next += 1
-			if track.kind != .Sub_Sequence || depth >= format.CUTSCENE_MAX_DEPTH {
+			// A silenced sub-sequence track counts no child, as walk_scope counts none.
+			if track.kind != .Sub_Sequence ||
+			   depth >= format.CUTSCENE_MAX_DEPTH ||
+			   track_silent(walk.e, at, track) {
 				continue
 			}
 			for c, j in walk.e.children {
