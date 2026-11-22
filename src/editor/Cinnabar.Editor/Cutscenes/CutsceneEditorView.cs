@@ -14,8 +14,8 @@ using DockSide = Avalonia.Controls.Dock;
 namespace Cinnabar.Editor.Cutscenes;
 
 /// <summary>
-/// The cutscene editor (see docs/editor/cutscene-editor.md#the-tab): a toolbar with the cutscene's length, the outline of
-/// its bindings, tracks and sections, and the selected block's details under it. Docking can rebuild the view at any
+/// The cutscene editor (see docs/editor/cutscene-editor.md#the-tab): a toolbar with the cutscene's length, the timeline of
+/// its bindings, tracks, sections and keys, and the selected block's details under it. Docking can rebuild the view at any
 /// time, so its state is in its <see cref="CutsceneEditor"/>.
 /// </summary>
 public sealed class CutsceneEditorView : DockPanel
@@ -48,7 +48,8 @@ public sealed class CutsceneEditorView : DockPanel
         Children.Add(top);
 
         var grid = new Grid { RowDefinitions = new RowDefinitions("*,4,220") };
-        grid.Children.Add(new CutsceneOutline(editor));
+        var timeline = new CutsceneTimeline(editor);
+        grid.Children.Add(timeline);
         var split = new GridSplitter { ResizeDirection = GridResizeDirection.Rows };
         Grid.SetRow(split, 1);
         grid.Children.Add(split);
@@ -57,10 +58,15 @@ public sealed class CutsceneEditorView : DockPanel
         grid.Children.Add(details);
         Children.Add(grid);
 
-        // Esc cancels a drag of a field, as it does every other drag, before the field sees the key.
+        // Esc cancels a drag on the timeline or of a field, as it does every other drag, before the field sees the key.
         AddHandler(KeyDownEvent, (_, e) =>
         {
-            if (e.Key == Key.Escape && _editor.Document.InTransaction)
+            if (e.Key == Key.Escape && timeline.Input.Dragging)
+            {
+                timeline.Input.Escape();
+                e.Handled = true;
+            }
+            else if (e.Key == Key.Escape && _editor.Document.InTransaction)
             {
                 _editor.EndField(cancel: true);
                 e.Handled = true;

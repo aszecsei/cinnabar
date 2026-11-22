@@ -8,7 +8,8 @@ namespace Cinnabar.Editor.Shell;
 /// names: <c>layout.json</c> and <c>workspaces.json</c>, which the editor writes when it closes,
 /// <c>keybindings.json</c>, an object from command ID to key gesture that the user writes,
 /// <c>settings.json</c>, the user's other settings, <c>viewport.json</c>, how the viewport draws, and
-/// <c>content-view.json</c>, how the content browser shows its assets.
+/// <c>content-view.json</c>, how the content browser shows its assets, and <c>cutscene-timeline.json</c>, how the
+/// cutscene editor's timeline shows each cutscene.
 /// </summary>
 public sealed class EditorSettings(string directory)
 {
@@ -19,6 +20,8 @@ public sealed class EditorSettings(string directory)
     public const string ViewportFileName = "viewport.json";
     /// <summary>How the content browser shows its assets, which the editor writes when it changes.</summary>
     public const string ContentViewFileName = "content-view.json";
+    /// <summary>How the cutscene editor's timeline shows each cutscene, which the editor writes when it changes.</summary>
+    public const string CutsceneTimelineFileName = "cutscene-timeline.json";
 
     /// <summary>VS Code, at the file's line.</summary>
     public static readonly string[] DefaultScriptEditor = ["code", "-g", "{file}:{line}"];
