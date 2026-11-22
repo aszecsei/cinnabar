@@ -1,5 +1,6 @@
 using System.Collections.Specialized;
 using Avalonia;
+using Avalonia.Threading;
 using Avalonia.Controls;
 using Avalonia.Controls.Templates;
 using Avalonia.Layout;
@@ -15,6 +16,8 @@ public sealed class ConsoleView : DockPanel
 {
     readonly ConsoleLog _log;
     readonly ListBox _list;
+    // A scroll to the end is posted, for the lines that came since the last layout.
+    bool _scrollPosted;
 
     public ConsoleView(ConsoleLog log)
     {
@@ -41,11 +44,18 @@ public sealed class ConsoleView : DockPanel
             .Add(() => _log.Lines.CollectionChanged += OnLinesChanged, () => _log.Lines.CollectionChanged -= OnLinesChanged);
     }
 
+    // A scroll into view lays the list out, so lines that come together scroll once, after them, and not once a line.
+    // Whether the list was at the end is from the layout before them.
     void OnLinesChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
-        if (e.Action == NotifyCollectionChangedAction.Add && IsAtEnd())
+        if (e.Action is NotifyCollectionChangedAction.Add or NotifyCollectionChangedAction.Reset && !_scrollPosted && IsAtEnd())
         {
-            ScrollToEnd();
+            _scrollPosted = true;
+            Dispatcher.UIThread.Post(() =>
+            {
+                _scrollPosted = false;
+                ScrollToEnd();
+            }, DispatcherPriority.Background);
         }
     }
 

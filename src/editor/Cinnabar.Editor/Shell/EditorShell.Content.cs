@@ -194,7 +194,8 @@ public sealed partial class EditorShell
     void WireCook()
     {
         Cook.Output += Console.Add;
-        Cook.LogReceived += log => Console.Add(ConsoleLog.Level(log.Level), ConsoleLog.Format(log));
+        Cook.LogsReceived += (logs, dropped) =>
+            Console.AddRange([.. logs.Select(log => new LogLine(ConsoleLog.Level(log.Level), ConsoleLog.Format(log)))], dropped, "cook daemon");
         Cook.StateChanged += Commands.InvalidateAll;
         // A new cook link has cooked no previews.
         Cook.StateChanged += () =>

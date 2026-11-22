@@ -115,7 +115,8 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
         RestoreLayout();
 
         Host.Output += Console.Add;
-        Host.LogReceived += log => Console.Add(ConsoleLog.Level(log.Level), ConsoleLog.Format(log));
+        Host.LogsReceived += (logs, dropped) =>
+            Console.AddRange([.. logs.Select(log => new LogLine(ConsoleLog.Level(log.Level), ConsoleLog.Format(log)))], dropped, "game");
         // A soft restart makes a fresh Game_State. A code reload keeps it.
         Host.GameReloaded += kind =>
         {
