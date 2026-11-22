@@ -96,7 +96,8 @@ public sealed class CutsceneEditorView : DockPanel
 
         var grid = new Grid { RowDefinitions = new RowDefinitions("*,4,220") };
         var timeline = new CutsceneTimeline(editor);
-        void EndGoToTime(bool jump)
+        // Enter and Esc give the keyboard back to the timeline. A click elsewhere leaves it where it went.
+        void EndGoToTime(bool jump, bool refocus)
         {
             if (!_timeBox.IsVisible)
             {
@@ -108,17 +109,20 @@ public sealed class CutsceneEditorView : DockPanel
             }
             _timeBox.IsVisible = false;
             _playheadButton.IsVisible = true;
-            timeline.Focus();
+            if (refocus)
+            {
+                timeline.Focus();
+            }
         }
         _timeBox.KeyDown += (_, e) =>
         {
             if (e.Key is Key.Enter or Key.Escape)
             {
-                EndGoToTime(e.Key == Key.Enter);
+                EndGoToTime(e.Key == Key.Enter, refocus: true);
                 e.Handled = true;
             }
         };
-        _timeBox.LostFocus += (_, _) => EndGoToTime(jump: false);
+        _timeBox.LostFocus += (_, _) => EndGoToTime(jump: false, refocus: false);
         // The strip over the timeline: the search box, which filters the tracks by binding or track name as it is
         // typed, and Esc in it clears it and gives the keyboard back to the timeline; and the keys-under-selection toggle.
         _search.Text = editor.FilterText;

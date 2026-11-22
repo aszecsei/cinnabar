@@ -627,12 +627,14 @@ public sealed class CutsceneTimelineLayout
 
     /// <summary>
     /// The shot at a time, as the Game view's frame counter names it: the camera of the cutscene's own camera cut section
-    /// over the time, from its start up to its end, or null when none is. A muted cut track names none.
+    /// over the time, from its start up to its end, or null when none is. A cut track that the asset mutes, or whose ID
+    /// is in <paramref name="silent"/>, names none, as the game shows none.
     /// </summary>
-    public static string? ShotAt(CutsceneFile file, int tick)
+    public static string? ShotAt(CutsceneFile file, int tick, IEnumerable<int>? silent = null)
     {
+        var quiet = silent?.ToHashSet() ?? [];
         var cuts = file.Tracks
-            .Where(t => t.TrackKind == "camera_cut" && t.Get("muted")?.Trim() != "true")
+            .Where(t => t.TrackKind == "camera_cut" && t.Get("muted")?.Trim() != "true" && !(t.Id is { } id && quiet.Contains(id)))
             .Select(t => t.Id).OfType<int>().ToHashSet();
         if (cuts.Count == 0)
         {

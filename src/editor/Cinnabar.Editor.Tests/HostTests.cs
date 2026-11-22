@@ -447,13 +447,16 @@ public abstract class HostTests : IAsyncDisposable
         await using var editor = await Connect();
         editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
         await editor.Next<EntitySnapshot>();
-        await Load(editor, Scene(Entity(Fox, "Fox")), guid: AnimationScene);
+        var snapshot = await Load(editor, Scene(Entity(Fox, "Fox")), guid: AnimationScene);
+        var fox = snapshot.Entities.Single(e => e.SceneId == Fox).Entity;
         await Task.Delay(300, TestContext.Current.CancellationToken);
         Drained(editor);
+        editor.Link.Send(new WatchEntity(fox));
+        var position = Document.Fnv.Hash64("position"u8.ToArray());
 
-        // The mix right after the Open, as the editor sends it: no grains, events, and the walk and the music silent.
+        // The mix right after the Open, as the editor sends it: no grains, events, and the walk, the sub-sequence that walks the fox too, and the music silent.
         editor.Link.Send(new CutscenePreviewOpen(1, Convert.FromHexString(IntroCutscene), false, 300000));
-        editor.Link.Send(new CutscenePreviewSettings(1, false, true, [1, 7]));
+        editor.Link.Send(new CutscenePreviewSettings(1, false, true, [1, 4, 7]));
         await editor.Next<CutscenePreviewOpened>(o => o.Ticket == 1);
         // Backward in a loop over [120000, 240000): its ticks stay in the loop.
         editor.Link.Send(new CutscenePreviewPlay(1, 200000, -2, true, 120000, 240000));
@@ -464,6 +467,8 @@ public abstract class HostTests : IAsyncDisposable
         }
         Assert.All(ticks, t => Assert.InRange(t, 120000, 240000));
         Assert.Contains(ticks.Zip(ticks.Skip(1)), p => p.Second < p.First);
+        // The walk is silent, so the fox's position is never the preview's.
+        Assert.DoesNotContain(editor.Skipped.Concat(Drained(editor)), m => m is EntityValues v && v.Entity == fox && v.Held.Any(f => f.Component == 1 && f.Field == position));
         // Settings with another ticket are dropped, and nothing logs an error.
         editor.Link.Send(new CutscenePreviewSettings(9, true, false, []));
         editor.Link.Send(new CutscenePreviewClose(1));

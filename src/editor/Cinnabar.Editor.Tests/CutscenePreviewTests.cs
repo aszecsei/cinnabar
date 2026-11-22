@@ -764,5 +764,9 @@ public sealed class CutscenePreviewTests : IDisposable
         Assert.Equal("00:04:05  ·  frame 125  ·  Close Shot", shell.CutscenePreview.FrameCounter());
         editor.SetPlayhead(650000);
         Assert.EndsWith("gameplay", shell.CutscenePreview.FrameCounter());
+        // A muted cut track shows no shot in the game, and none here.
+        editor.SetPlayhead(250000);
+        editor.SetMuted(5, true);
+        Assert.EndsWith("gameplay", shell.CutscenePreview.FrameCounter());
     }
 }

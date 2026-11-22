@@ -456,7 +456,7 @@ public sealed class CutscenePreview(EditorShell shell)
         }
         var editor = open.Editor;
         var rate = editor.File.Rate;
-        var shot = CutsceneTimelineLayout.ShotAt(editor.File, editor.Playhead) ?? "gameplay";
+        var shot = CutsceneTimelineLayout.ShotAt(editor.File, editor.Playhead, editor.SilentTracks()) ?? "gameplay";
         return $"{CutsceneTime.Timecode(editor.Playhead, rate)}  ·  frame {CutsceneTime.Frames(editor.Playhead, rate)}  ·  {shot}";
     }
 
