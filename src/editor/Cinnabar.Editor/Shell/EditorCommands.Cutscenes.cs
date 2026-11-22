@@ -32,6 +32,18 @@ static partial class EditorCommands
     public const string CutsceneStepForward = "cutscene.stepForward";
     public const string CutsceneStepBack10 = "cutscene.stepBack10";
     public const string CutsceneStepForward10 = "cutscene.stepForward10";
+    public const string CutsceneShuttleBack = "cutscene.shuttleBack";
+    public const string CutsceneShuttlePause = "cutscene.shuttlePause";
+    public const string CutsceneShuttleForward = "cutscene.shuttleForward";
+    public const string CutsceneSetIn = "cutscene.setIn";
+    public const string CutsceneSetOut = "cutscene.setOut";
+    public const string CutsceneClearInOut = "cutscene.clearInOut";
+    public const string CutsceneLoop = "cutscene.loop";
+    public const string CutscenePreviousKey = "cutscene.previousKey";
+    public const string CutsceneNextKey = "cutscene.nextKey";
+    public const string CutsceneGoToTime = "cutscene.goToTime";
+    public const string CutsceneScrubSound = "cutscene.scrubSound";
+    public const string CutscenePreviewEvents = "cutscene.previewEvents";
 
     /// <summary>The timeline's commands, which act on the active cutscene while its timeline has the keyboard.</summary>
     public static readonly string[] CutsceneTimelineCommands =
@@ -40,6 +52,8 @@ static partial class EditorCommands
         CutsceneNudgeEarlier, CutsceneNudgeLater, CutsceneNudgeEarlier10, CutsceneNudgeLater10, CutsceneSnap, CutsceneShowFrames, CutsceneLockTrack,
         CutsceneMuteTrack, CutsceneSoloTrack, CutsceneAddMarker, CutsceneCopy, CutsceneCut, CutscenePaste, CutsceneFind,
         CutsceneKeysUnderSelection, CutscenePlayPause, CutsceneStepBack, CutsceneStepForward, CutsceneStepBack10, CutsceneStepForward10,
+        CutsceneShuttleBack, CutsceneShuttlePause, CutsceneShuttleForward, CutsceneSetIn, CutsceneSetOut, CutsceneClearInOut, CutsceneLoop,
+        CutscenePreviousKey, CutsceneNextKey, CutsceneGoToTime, CutsceneScrubSound, CutscenePreviewEvents,
     ];
 
     // The cutscene editor's timeline (see docs/editor/cutscene-editor.md#the-timeline). Its keys are bare letters, which
@@ -66,6 +80,21 @@ static partial class EditorCommands
                 CanExecuteWhen = () => Timeline() is { } editor && (can == null || can(editor)),
             });
         }
+        void Toggle(string id, string label, string description, string shortcut, Func<CutsceneEditor, bool> get, Action<CutsceneEditor, bool> set) =>
+            commands.Register(new Command(id, label, () =>
+            {
+                if (Timeline() is { } editor)
+                {
+                    set(editor, !get(editor));
+                }
+            })
+            {
+                Description = description,
+                Icon = "cutscene",
+                Shortcut = shortcut,
+                CanExecuteWhen = () => Timeline() != null,
+                IsCheckedWhen = () => shell.ActiveCutscene is { } editor && get(editor),
+            });
         commands.Register(new Command(CutscenePlayPause, "Play/Pause", () =>
         {
             if (Timeline() is { } editor && shell.CutscenePreview.CanPlay(editor))
@@ -84,6 +113,36 @@ static partial class EditorCommands
         Register(CutsceneStepForward, "Step Forward", "cutscene", "Move the playhead a frame later, and pause the preview.", "Right", e => e.Step(1));
         Register(CutsceneStepBack10, "Step Back 10 Frames", "cutscene", "Move the playhead 10 frames earlier, and pause the preview.", "Shift+Left", e => e.Step(-10));
         Register(CutsceneStepForward10, "Step Forward 10 Frames", "cutscene", "Move the playhead 10 frames later, and pause the preview.", "Shift+Right", e => e.Step(10));
+        Register(CutsceneShuttleBack, "Shuttle Back", "cutscene",
+            "Play the cutscene backward in the game; each press doubles the rate, up to 8×. With Shuttle Pause held, step a frame back.", "J",
+            e => Shuttle(e, -1));
+        Register(CutsceneShuttleForward, "Shuttle Forward", "cutscene",
+            "Play the cutscene forward in the game; each press doubles the rate, up to 8×. With Shuttle Pause held, step a frame on.", "L",
+            e => Shuttle(e, 1));
+        Register(CutsceneShuttlePause, "Shuttle Pause", "cutscene",
+            "Pause the preview. While its key is held, Shuttle Back and Shuttle Forward step a frame.", "K",
+            e =>
+            {
+                e.ShuttleHeld = true;
+                shell.CutscenePreview.Pause();
+            });
+        Register(CutsceneSetIn, "Set In", "cutscene", "Set the loop's in point at the playhead.", "I", e => e.SetIn(e.Playhead));
+        Register(CutsceneSetOut, "Set Out", "cutscene", "Set the loop's out point at the playhead.", "O", e => e.SetOut(e.Playhead));
+        Register(CutsceneClearInOut, "Clear In and Out", "cutscene", "Clear the in and the out point, so the loop is the whole cutscene.", "Alt+X",
+            e => e.ClearInOut(),
+            e => e.InPoint != null || e.OutPoint != null);
+        Toggle(CutsceneLoop, "Loop", "Play between the in and the out point, or the whole cutscene without them, and go back to the start at the end.", "Ctrl+L",
+            e => e.Loop, (e, on) => e.Loop = on);
+        Register(CutscenePreviousKey, "Previous Key", "cutscene", "Move the playhead back to the key or the edge before it on the selected tracks, or on every track with none selected.", "Up",
+            e => e.SetPlayhead(e.KeyEdges().LastOrDefault(t => t < e.Playhead)));
+        Register(CutsceneNextKey, "Next Key", "cutscene", "Move the playhead on to the key or the edge after it on the selected tracks, or on every track with none selected.", "Down",
+            e => e.SetPlayhead(e.KeyEdges().FirstOrDefault(t => t > e.Playhead, e.Playhead)));
+        Register(CutsceneGoToTime, "Go to Time", "cutscene", "Type a time, as timecode or as frames, and move the playhead there.", "Ctrl+G",
+            e => e.RequestGoToTime());
+        Toggle(CutsceneScrubSound, "Scrub Sound", "Play short grains of the sound under the playhead while it is dragged. Each user's.", "Alt+S",
+            e => e.ScrubSound, (e, on) => e.ScrubSound = on);
+        Toggle(CutscenePreviewEvents, "Events in Preview", "Send the event tracks' events to the scripts while the preview plays, never while it is scrubbed. Each user's.", "Alt+E",
+            e => e.PreviewEvents, (e, on) => e.PreviewEvents = on);
         Register(CutsceneFrame, "Frame Selection", "frame", "Fit the selected sections, events and keys in the timeline, or the whole cutscene when none is selected.", "F",
             e => e.RequestFrame());
         Register(CutsceneGoToStart, "Go to Start", "cutscene", "Move the playhead to the cutscene's start.", "Home", e => e.SetPlayhead(0));
@@ -169,4 +228,17 @@ static partial class EditorCommands
     }
 
     static List<int> Edges(CutsceneEditor editor) => editor.Layout().Edges();
+
+    // J and L play, or step a frame while K is held.
+    static void Shuttle(CutsceneEditor editor, int direction)
+    {
+        if (editor.ShuttleHeld)
+        {
+            editor.Step(direction);
+        }
+        else
+        {
+            editor.Shuttle(direction);
+        }
+    }
 }

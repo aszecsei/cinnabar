@@ -441,6 +441,37 @@ public abstract class HostTests : IAsyncDisposable
         Assert.DoesNotContain(editor.Skipped, m => m is Log { Level: LogLevel.Error });
     }
 
+    [Fact]
+    public async Task ACutscenePreviewTakesItsMixAndPlaysBackwardInALoop()
+    {
+        await using var editor = await Connect();
+        editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
+        await editor.Next<EntitySnapshot>();
+        await Load(editor, Scene(Entity(Fox, "Fox")), guid: AnimationScene);
+        await Task.Delay(300, TestContext.Current.CancellationToken);
+        Drained(editor);
+
+        // The mix right after the Open, as the editor sends it: no grains, events, and the walk and the music silent.
+        editor.Link.Send(new CutscenePreviewOpen(1, Convert.FromHexString(IntroCutscene), false, 300000));
+        editor.Link.Send(new CutscenePreviewSettings(1, false, true, [1, 7]));
+        await editor.Next<CutscenePreviewOpened>(o => o.Ticket == 1);
+        // Backward in a loop over [120000, 240000): its ticks stay in the loop.
+        editor.Link.Send(new CutscenePreviewPlay(1, 200000, -2, true, 120000, 240000));
+        var ticks = new List<int>();
+        for (var i = 0; i < 20; i++)
+        {
+            ticks.Add((await editor.Next<CutscenePreviewTick>(t => t.Ticket == 1 && t.Playing)).Tick);
+        }
+        Assert.All(ticks, t => Assert.InRange(t, 120000, 240000));
+        Assert.Contains(ticks.Zip(ticks.Skip(1)), p => p.Second < p.First);
+        // Settings with another ticket are dropped, and nothing logs an error.
+        editor.Link.Send(new CutscenePreviewSettings(9, true, false, []));
+        editor.Link.Send(new CutscenePreviewClose(1));
+        await Task.Delay(300, TestContext.Current.CancellationToken);
+        Drained(editor);
+        Assert.DoesNotContain(editor.Skipped, m => m is Log { Level: LogLevel.Error });
+    }
+
     // The sample's intro, and the scene and the entity that its fox binding possesses.
     const string IntroCutscene = "9d549a4b7235fb289389db323a19fd8f";
     const string AnimationScene = "f496b929575035d9c2626ed56d3165ba";
