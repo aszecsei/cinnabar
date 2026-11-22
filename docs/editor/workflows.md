@@ -16,6 +16,7 @@ A team that makes a game has people with different work, and each of them uses a
 | Technical artist | Writes materials and effects, and finds what makes a frame slow | The material editor, the views that show cost, a viewport's quality, the profiler and the resource monitor |
 | Sound designer | Places the sounds of a level and the point that they are heard from | The audio components, the content browser, Play |
 | Gameplay designer | Makes agents, their decisions and their navigation, and the menus and the HUD | The gameplay entities, the decision editor, the UI editor, the Navigation Path tool, Play |
+| Cinematic designer | Builds cutscenes: binds the characters and props, keys them, cuts between cameras, and times sound and subtitles | The cutscene editor, the scene and the game side by side, the properties |
 | Gameplay programmer | Writes behaviours and native components, adds the game's own commands, and builds and reloads the game | Scripts, the behaviours of an entity, the console, the build, the profiler |
 | Project owner | Runs the game in its own window, sets the project's output and quality, and exports a release | The project's settings, the export, the host and the cook daemon |
 
@@ -48,6 +49,7 @@ The ribbon has a tab for each kind of work, under the band of its discipline: Ar
 | Technical artist | Scripting (Design), for the profiler | Performance | A viewport's Shading menu's Cost group and its Quality menu; the [material editor](material-editor.md#material-editor) |
 | Sound designer | Audio (Audio) | Level Design | The Add Component picker's Audio folder; the content browser's Audio filter |
 | Gameplay designer | Gameplay (Design) | Level Design | The [decision editor](decision-editor.md#decision-editor) and the [UI editor](ui-editor.md#ui-editor); the Navigation Path tool in the tool strip |
+| Cinematic designer | Gameplay (Design) | Cinematics | The [cutscene editor](cutscene-editor.md#cutscene-editor) |
 | Gameplay programmer | Scripting (Design), and the game's own tabs | Scripting | The Add Component picker's Behaviours folder; the console |
 | Project owner | Project | General | The status bar's host and cook states |
 

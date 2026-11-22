@@ -27,7 +27,7 @@ The data flow:
 4. When the cutscene ends, the player gives the world back: the tracks set to restore put their fields back, the input and the HUD come back, the bindings resume what they suspended, the spawned entities are despawned and the assets are unloaded.
 5. Each frame, the presentation tracks give a fade, letterbox bars and subtitles, and the overlay, a UI document that the cutscene state owns, shows them over gameplay ([Tracks: Presentation tracks](tracks.md#presentation-tracks)). The overlay outlives the player, so it fades back from a skip's fade after the world is given back.
 
-**Not built yet:** the cutscene editor ([#548](https://github.com/aszecsei/cinnabar/issues/548)), a sub-issue of [#526](https://github.com/aszecsei/cinnabar/issues/526).
+**Built in steps:** the [cutscene editor](../editor/cutscene-editor.md) ([#548](https://github.com/aszecsei/cinnabar/issues/548)), a sub-issue of [#526](https://github.com/aszecsei/cinnabar/issues/526). Its tab, document and check of unsaved text are built. Its timeline, scrubbing and playing in Edit, keys and curves are not yet.
 
 ## References
 

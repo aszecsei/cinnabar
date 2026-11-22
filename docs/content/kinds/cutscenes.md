@@ -8,7 +8,7 @@ Cutscenes are `.cutscene` text files in the content roots. A cutscene has bindin
 
 `just cutscenes` runs `cook cutscenes --cache build/<target>/content --config dev|release --root game=<content root> --root engine=lib/engine/content`. The daemon cooks cutscenes like any other kind (`tools/cook/cutscenes.odin`).
 
-This page describes the asset. [Cinematics](../../cinematics/README.md) describes how the game resolves its bindings, evaluates its tracks and plays it, and [Cinematics: Tracks](../../cinematics/tracks.md) the curve and the kinds of track that are built. The cutscene editor is not built yet.
+This page describes the asset. [Cinematics](../../cinematics/README.md) describes how the game resolves its bindings, evaluates its tracks and plays it, and [Cinematics: Tracks](../../cinematics/tracks.md) the curve and the kinds of track that are built. The [cutscene editor](../../editor/cutscene-editor.md) opens it in a tab, which is built in steps.
 
 ```
 cutscene 1
@@ -345,4 +345,4 @@ Each track's sections follow those of the track before it. The same is true of e
 - **The cache key** covers the cooker version (`cutscenes 12`), the layout, the source path, the source and the GUID.
 - **Hot reload:** a cooked cutscene reaches the game as any blob does (see [Blobs and loading: Loading](../blobs-and-loading.md#loading)). A cutscene that plays evaluates the new blob at its current time, and the fields of the tracks that the new blob removed go back ([Cinematics: Hot reload](../../cinematics/evaluation.md#hot-reload)). So does a cutscene that plays a reloaded sub-sequence.
 
-- **The editor** shows cutscenes among the animation in the content browser, with a clapperboard icon, and opens them as text in the script editor until a cutscene editor exists. **New Cutscene**, in the content browser's menu and in the Gameplay tab's New Asset group, makes a cutscene of 10 s at 30 frames a second.
+- **The editor** shows cutscenes among the animation in the content browser, with a clapperboard icon, and opens them in the [cutscene editor](../../editor/cutscene-editor.md). **New Cutscene**, in the content browser's menu and in the Gameplay tab's New Asset group, makes a cutscene of 10 s at 30 frames a second with an empty camera cut track, `CUTSCENE_TEMPLATE`, and opens it.
