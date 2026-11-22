@@ -123,10 +123,15 @@ scripted_teardown :: proc(f: ^Script_Fixture) {
 }
 
 // write_scripted sets the cutscene live: one second long on the real clock, with a required possessed binding, Hero,
-// whose behaviours it does not suspend. A transform track moves Hero from x = 0 to x = 10 m over the second, and an
-// event track sends it on_wave at 500 ms. A skip fades for 100 ms.
+// which suspends what suspend says, nothing by default. A transform track moves Hero from x = 0 to x = 10 m over the
+// second, and an event track sends it on_wave at 500 ms and on_seen at 900 ms, which fires when skipped too. A skip
+// fades for 100 ms.
 @(private = "file")
-write_scripted :: proc(t: ^testing.T, f: ^Script_Fixture) {
+write_scripted :: proc(
+	t: ^testing.T,
+	f: ^Script_Fixture,
+	suspend: format.Cutscene_Suspend_Set = {},
+) {
 	hero := format.Cutscene_Binding_Contents {
 		id       = 1,
 		kind     = .Possessed,
@@ -136,6 +141,7 @@ write_scripted :: proc(t: ^testing.T, f: ^Script_Fixture) {
 		entity   = 1,
 		rotation = {0, 0, 0, 1},
 		scale    = {1, 1, 1},
+		suspend  = suspend,
 	}
 	xs := make([]format.Cutscene_Key, 2, context.temp_allocator)
 	xs[0] = {
@@ -161,12 +167,19 @@ write_scripted :: proc(t: ^testing.T, f: ^Script_Fixture) {
 		weight   = 1,
 		channels = channels,
 	}
-	events := make([]format.Cutscene_Event_Contents, 1, context.temp_allocator)
+	events := make([]format.Cutscene_Event_Contents, 2, context.temp_allocator)
 	events[0] = {
 		id    = 1,
 		start = 500 * MS,
 		end   = 500 * MS,
 		name  = "wave",
+	}
+	events[1] = {
+		id    = 2,
+		start = 900 * MS,
+		end   = 900 * MS,
+		name  = "seen",
+		flags = {.Fire_When_Skipped},
 	}
 	tracks := make([]format.Cutscene_Track_Contents, 2, context.temp_allocator)
 	tracks[0] = {
@@ -218,6 +231,7 @@ end
 
 local Hero = Behaviour.define("Hero")
 function Hero:on_wave() Test.report(400) end
+function Hero:on_seen() Test.report(450) end
 function Hero:on_cutscene_started(c) Test.report(301) end
 function Hero:on_cutscene_finished(c, skipped) Test.report(if skipped then 313 else 312) end
 function Hero:on_cutscene_failed(c, reason) Test.report(322) end
@@ -291,11 +305,13 @@ frame :: proc(f: ^Script_Fixture, ms: int) {
 	free_all(f.platform.frame_allocator)
 }
 
-// tell sends the Director an event, and runs a script phase that delivers it.
+// tell sends the Director an event, and runs a script phase that delivers it, and the end of the frame, which sends
+// the events that its commands queued, for the next script phase.
 @(private = "file")
 tell :: proc(f: ^Script_Fixture, name: string) {
 	script.send(&f.runtime, f.director, name)
 	script.run_phase(&f.runtime, 16 * time.Millisecond, {})
+	end_frame(&f.cutscenes)
 	free_all(f.platform.frame_allocator)
 }
 
@@ -361,10 +377,11 @@ a_script_plays_a_cutscene_reads_each_state_and_waits_for_its_skip :: proc(t: ^te
 	tell(f, "bound")
 	expect_reports(t, f, {1})
 
+	// The start's events go out at the end of the frame, so the next script phase delivers them.
 	tell(f, "play")
-	expect_reports(t, f, {300, 301}, sorted = true)
+	expect_reports(t, f, {})
 	tell(f, "check")
-	expect_reports(t, f, {3})
+	expect_reports(t, f, {3, 300, 301}, sorted = true)
 
 	frame(f, 300)
 	tell(f, "pause")
@@ -382,9 +399,24 @@ a_script_plays_a_cutscene_reads_each_state_and_waits_for_its_skip :: proc(t: ^te
 	tell(f, "skip")
 	tell(f, "check")
 	expect_reports(t, f, {1, 5})
-	// The fade out ends, the player jumps to the end and gives the world back, and the wait ends.
+	// The fade out ends, the player jumps to the end and gives the world back, and the wait ends. The key that fires
+	// when skipped comes before the end of the cutscene.
 	frame(f, 100)
-	expect_reports(t, f, {101, 311, 313}, sorted = true)
+	seen, finished := -1, -1
+	for report, i in f.reports {
+		if report == 450 {
+			seen = i
+		} else if report == 313 {
+			finished = i
+		}
+	}
+	testing.expectf(
+		t,
+		seen >= 0 && seen < finished,
+		"on_seen comes before on_cutscene_finished: %v",
+		f.reports[:],
+	)
+	expect_reports(t, f, {101, 311, 313, 450}, sorted = true)
 	tell(f, "check")
 	expect_reports(t, f, {7})
 }
@@ -436,6 +468,7 @@ a_stale_handle_does_nothing_and_its_wait_ends :: proc(t: ^testing.T) {
 	expect_reports(t, f, {1, 300, 301}, sorted = true)
 
 	reset(&f.cutscenes, &f.world)
+	send_events(&f.cutscenes)
 	script.run_phase(&f.runtime, 16 * time.Millisecond, {})
 	expect_reports(t, f, {100, 310, 312}, sorted = true)
 	tell(f, "stale")
@@ -480,4 +513,21 @@ World.spawn():add(Starter)
 	tell(f, "time")
 	expect_reports(t, f, {250, 1, 1})
 	testing.expect_value(t, f.cutscenes.players[find_player(f).slot].priority, 2)
+}
+
+// A binding that suspends its entity's behaviours holds them from Loading, so they miss on_cutscene_started. The player
+// resumes them as it gives the world back, before the script phase that delivers on_cutscene_finished, so they get it.
+@(test)
+suspended_behaviours_miss_the_start_and_get_the_end :: proc(t: ^testing.T) {
+	f := scripted_setup(t)
+	defer scripted_teardown(f)
+	write_scripted(t, f, {.Behaviours})
+	direct(t, f, `World.spawn():add(Director)`)
+	expect_reports(t, f, {1})
+	frame(f, 100)
+	expect_reports(t, f, {300})
+	tell(f, "stop")
+	expect_reports(t, f, {6})
+	frame(f, 0)
+	expect_reports(t, f, {100, 310, 312}, sorted = true)
 }

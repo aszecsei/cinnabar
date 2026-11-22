@@ -85,7 +85,7 @@ register_scripts :: proc(r: ^script.Runtime, s: ^State) {
 		s, h := check_cutscene(L)
 		if e, live := player_evaluation(s, h); live {
 			if _, blob, ok := cutscene_data(s, e); ok {
-				luau.pushnumber(L, f64(blob.length) / format.CUTSCENE_TICKS_PER_SECOND)
+				luau.pushnumber(L, f64(blob.range_end) / format.CUTSCENE_TICKS_PER_SECOND)
 				return 1
 			}
 		}
@@ -277,12 +277,13 @@ read_bindings :: proc(L: ^luau.State, overrides: ^[dynamic]Binding_Override) -> 
 		}
 		entity := script.to_entity(L, -1)
 		if entity == 0 {
-			luau.pop(L, 1)
-			return fmt.aprintf(
+			problem := fmt.aprintf(
 				"the binding %s takes an entity",
 				luau.toodinstring(L, -2),
 				allocator = script.runtime_of(L).platform.frame_allocator,
 			)
+			luau.pop(L, 1)
+			return problem
 		}
 		append(overrides, Binding_Override{luau.toodinstring(L, -2), entity})
 	}
@@ -314,21 +315,49 @@ poll_cutscene :: proc(L: ^luau.State, payload: u64) -> (done: bool, results: c.i
 	return false, 0
 }
 
+// Lifecycle_Event is the script event that a change of a player's state sends, if any (see
+// docs/cinematics/scripts.md#events).
+@(private)
+Lifecycle_Event :: enum u8 {
+	None,
+	// From Ready to Playing or Skipping.
+	Started,
+	// To Restored.
+	Finished,
+	// To Failed.
+	Failed,
+}
+
+// lifecycle_of is the script event of a change from one status to another.
+@(private)
+lifecycle_of :: proc(from, next: Player_Status) -> Lifecycle_Event {
+	#partial switch next {
+	case .Playing, .Skipping:
+		if from == .Ready {
+			return .Started
+		}
+	case .Restored:
+		return .Finished
+	case .Failed:
+		return .Failed
+	}
+	return .None
+}
+
 // lifecycle_recipients is who gets the script event of a player's change, in the frame allocator: the entities of its
 // bindings, and its caller, each once. A start goes to every bound entity. An end goes to the possessed ones, since the
-// spawned ones are despawned with the player. Other changes have no event, and nobody gets them.
+// spawned ones are despawned with the player. A change with no event has no recipients.
 @(private)
 lifecycle_recipients :: proc(
 	s: ^State,
 	w: ^ecs.World,
 	slot: int,
-	from, next: Player_Status,
+	event: Lifecycle_Event,
 ) -> []ecs.Entity {
-	started := from == .Ready && (next == .Playing || next == .Skipping)
-	ended := next == .Restored || next == .Failed
-	if s.scripts == nil || !(started || ended) {
+	if s.scripts == nil || event == .None {
 		return nil
 	}
+	started := event == .Started
 	p := &s.players[slot]
 	recipients := make([dynamic]ecs.Entity, w.platform.frame_allocator)
 	add :: proc(recipients: ^[dynamic]ecs.Entity, e: ecs.Entity) {
@@ -364,22 +393,44 @@ lifecycle_recipients :: proc(
 
 // send_lifecycle queues the script event of a player's change for its recipients: on_cutscene_started(cutscene) when it
 // starts, on_cutscene_finished(cutscene, skipped) when it is Restored, and on_cutscene_failed(cutscene, reason) when it
-// fails (see docs/cinematics/scripts.md#events).
+// fails (see docs/cinematics/scripts.md#events). They go in the outbox after the events that the player's tracks queued
+// and the ends of its open ranges, and send_events delivers them in that order. It touches no script itself.
 @(private)
-send_lifecycle :: proc(s: ^State, slot: int, next: Player_Status, recipients: []ecs.Entity) {
+send_lifecycle :: proc(
+	s: ^State,
+	w: ^ecs.World,
+	slot: int,
+	event: Lifecycle_Event,
+	recipients: []ecs.Entity,
+) {
 	if s.scripts == nil || len(recipients) == 0 {
 		return
 	}
 	p := &s.players[slot]
-	cutscene := handle_value({u16(slot), p.generation})
+	h := Player_Handle{u16(slot), p.generation}
+	cutscene := handle_value(h)
+	allocator := w.platform.frame_allocator
+	name: string
+	args: []script.Event_Arg
+	switch event {
+	case .None:
+		return
+	case .Started:
+		name = "cutscene_started"
+		args = make([]script.Event_Arg, 1, allocator)
+		args[0] = cutscene
+	case .Finished:
+		skipped, _ := player_skipped(s, h)
+		name = "cutscene_finished"
+		args = make([]script.Event_Arg, 2, allocator)
+		args[0], args[1] = cutscene, skipped
+	case .Failed:
+		failure, _ := player_failure(s, h)
+		name = "cutscene_failed"
+		args = make([]script.Event_Arg, 2, allocator)
+		args[0], args[1] = cutscene, failure_text(failure)
+	}
 	for e in recipients {
-		#partial switch state in p.state {
-		case Player_Restored:
-			script.send(s.scripts, e, "cutscene_finished", cutscene, state.skipped)
-		case Player_Failed:
-			script.send(s.scripts, e, "cutscene_failed", cutscene, failure_text(state.failure))
-		case:
-			script.send(s.scripts, e, "cutscene_started", cutscene)
-		}
+		append(&s.outbox, Sent{player = h, name = name, entity = e, args = args, lifecycle = true})
 	}
 }

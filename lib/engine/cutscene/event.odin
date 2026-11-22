@@ -264,11 +264,13 @@ keep_ranges :: proc(e: ^Evaluation, w: ^ecs.World, views: []Scope_View) {
 // memory, so it needs neither the evaluation nor the blob once it is queued.
 @(private)
 Sent :: struct {
-	player: Player_Handle,
-	name:   string,
+	player:    Player_Handle,
+	name:      string,
 	// The binding's entity, the null entity for a binding that is missing, or nil for every behaviour.
-	entity: Maybe(ecs.Entity),
-	args:   []script.Event_Arg,
+	entity:    Maybe(ecs.Entity),
+	args:      []script.Event_Arg,
+	// A player's own lifecycle event, which goes to the scripts only, not to the native handlers.
+	lifecycle: bool,
 }
 
 // flush_events queues the events that the evaluation's tracks recorded in the phase for send_events, sorted by time,
@@ -368,7 +370,7 @@ flush_events :: proc(
 
 // send_events delivers the queued events of every cutscene, in order: each to its track's binding's behaviours with
 // script.send, or to every behaviour with script.broadcast for a track without a binding, and to the native handlers of
-// its name. A track whose binding is missing sends only to the handlers. Call it from the frame code: update and
+// its name. A player's lifecycle events go to their entities' behaviours only. A track whose binding is missing sends only to the handlers. Call it from the frame code: update and
 // advance_real call it, and the game calls it after each tick, so the tick's script.fixed_events delivers the events in
 // the same tick. A handler that stops its player queues the ends of its open ranges after the events already queued.
 send_events :: proc(s: ^State) {
@@ -383,6 +385,9 @@ send_events :: proc(s: ^State) {
 					script.send(s.scripts, entity, event.name, ..event.args)
 				}
 			}
+		}
+		if event.lifecycle {
+			continue
 		}
 		hash := format.animation_graph_hash(event.name)
 		for h in s.handlers[:s.handler_count] {

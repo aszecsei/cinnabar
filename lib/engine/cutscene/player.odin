@@ -544,7 +544,8 @@ change_cutscene :: proc(
 	cover: f32
 	skipped: bool
 	// Who gets the change's script event: the bindings are read before give_back ends them.
-	recipients := lifecycle_recipients(s, w, slot, from, next)
+	lifecycle := lifecycle_of(from, next)
+	recipients := lifecycle_recipients(s, w, slot, lifecycle)
 	switch &state in p.state {
 	case Player_Loading:
 		free_overrides(&state.overrides)
@@ -584,7 +585,7 @@ change_cutscene :: proc(
 		take_hold(s, w, live)
 	}
 	append(&s.events, Player_Event{{u16(slot), p.generation}, next})
-	send_lifecycle(s, slot, next, recipients)
+	send_lifecycle(s, w, slot, lifecycle, recipients)
 	return true, despawned
 }
 
