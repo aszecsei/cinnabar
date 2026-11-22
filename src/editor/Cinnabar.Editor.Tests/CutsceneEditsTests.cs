@@ -167,6 +167,64 @@ public sealed class CutsceneEditsTests
     }
 
     [Fact]
+    public void ARippleCarriesSubtitlesAndASubSequenceWithNoTrimStartsAtItsChildsRange()
+    {
+        var file = CutsceneFile.Parse("""
+            cutscene 1
+            length = 600000
+            track 1 audio "Lines"
+            	section 1 0 60000
+            		asset = $bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+            	section 2 90000 150000
+            		asset = $bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+            track 2 presentation "Subs"
+            	section 3 90000 150000
+            		kind = subtitle
+            		text = "Hi"
+            		audio = 2
+            track 3 sub_sequence "Shot"
+            	section 4 0 300000
+            		asset = $cccccccccccccccccccccccccccccccc
+
+            """.ReplaceLineEndings("\n")).File!;
+        CutsceneEdits.Trim(file, "section:1", CutsceneEdge.End, 30000, ripple: true);
+        Assert.Equal((120000, 180000), (file.Find("section:2")!.Start, file.Find("section:2")!.End));
+        Assert.Equal((120000, 180000), (file.Find("section:3")!.Start, file.Find("section:3")!.End));
+        CutsceneEdits.Delete(file, ["section:1"], ripple: true);
+        Assert.Equal((30000, 90000), (file.Find("section:3")!.Start, file.Find("section:3")!.End));
+        // Without its sound, a subtitle stays, and names no section.
+        CutsceneEdits.Delete(file, ["section:2"], ripple: false);
+        Assert.Null(file.Find("section:3")!.Get("audio"));
+        Assert.Equal("\"Hi\"", file.Find("section:3")!.Get("text"));
+
+        // The child's range starts at 24000, so the second half plays from 24000 and on by the cut.
+        var asked = new List<string>();
+        CutsceneEdits.Split(file, ["section:4"], 100000, childStart: guid =>
+        {
+            asked.Add(guid);
+            return 24000;
+        });
+        Assert.Equal(["cccccccccccccccccccccccccccccccc"], asked);
+        Assert.Null(file.Find("section:4")!.Get("trim"));
+        Assert.Equal("124000", file.Find("section:5")!.Get("trim"));
+    }
+
+    [Fact]
+    public void ARemovedBlockCanGoInAgainAndItsPathsFollow()
+    {
+        var file = Parse();
+        var key = file.Find("section:3/channel:position_x/key:0")!;
+        var channel = key.Parent!;
+        file.Remove(key);
+        Assert.Null(key.Parent);
+        Assert.Equal(120000, file.Find("section:3/channel:position_x/key:0")!.Start);
+        file.Insert(channel, 1, key);
+        CutsceneFile.SortChildren(channel);
+        Assert.Equal(Text.ReplaceLineEndings("\n"), file.Text);
+        Assert.Same(key, file.Find("section:3/channel:position_x/key:0"));
+    }
+
+    [Fact]
     public void ASlipMovesOnlyTheSource()
     {
         var file = Parse();

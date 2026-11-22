@@ -45,8 +45,10 @@ public abstract class GraphDocument<TGraph> : IGraphDocument
     readonly List<(string Label, string Text)> _states;
     string? _transaction;
     string _transactionStart = "";
-    // The merge key of the current entry while edits with that key still merge into it, as a held key's nudges do.
-    string? _merge;
+    // The merge key and the entry that edits with that key change, as a held key's nudges do. The entry must still be
+    // the last and the current one, and not the saved one, so an undo, a redo, a save or another entry ends the merge
+    // whatever clears it.
+    (string Key, int Entry)? _merge;
 
     /// <param name="path">The file's full path.</param>
     /// <param name="guid">The asset's GUID.</param>
@@ -109,9 +111,9 @@ public abstract class GraphDocument<TGraph> : IGraphDocument
 
     /// <summary>
     /// Changes the graph as one undo entry, which later edits with the same merge key change too, until
-    /// <see cref="EndMerge"/> or any other entry, undo, redo or save, so the entry is never the saved one. A held key's repeats are one entry this way, without an
-    /// entry left open, so Save and Undo still run between them. An edit that brings the graph back to the entry's
-    /// start drops the entry.
+    /// <see cref="EndMerge"/>, or until the entry is not the last and current one, or it is the saved one. A held key's
+    /// repeats are one entry this way, without an entry left open, so Save and Undo still run between them. An edit that
+    /// brings the graph back to the entry's start drops the entry.
     /// </summary>
     public void EditMerged(string label, string mergeKey, Action<TGraph> edit)
     {
@@ -120,12 +122,13 @@ public abstract class GraphDocument<TGraph> : IGraphDocument
             Edit(label, edit);
             return;
         }
-        if (_merge != mergeKey || Position == 0 || Position != _states.Count - 1)
+        if (_merge is not { } merge || merge.Key != mergeKey || merge.Entry != Position
+            || Position == 0 || Position != _states.Count - 1 || Position == SavedPosition)
         {
             edit(Graph);
             if (Push(label))
             {
-                _merge = mergeKey;
+                _merge = (mergeKey, Position);
             }
             return;
         }

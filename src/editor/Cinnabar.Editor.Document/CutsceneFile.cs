@@ -237,7 +237,54 @@ public sealed class CutsceneBlock
         SetHead($"key {words[0]} {words[1]} {interpolation.Trim()}");
     }
 
-    void SetHead(string code) => Head!.SetCode(code);
+    void SetHead(string code)
+    {
+        Head!.SetCode(code);
+        Touch();
+    }
+
+    // The paths of the file's blocks, which the cutscene's block keeps, by path, and null for a path that two blocks
+    // share. A change of a keyword line or of the tree drops it.
+    Dictionary<string, CutsceneBlock?>? _index;
+
+    // Drops the file's index of paths, as a block's ID, name or place changed.
+    internal void Touch()
+    {
+        var root = this;
+        while (root.Parent != null)
+        {
+            root = root.Parent;
+        }
+        root._index = null;
+    }
+
+    // The file's blocks by path, from the cutscene's block, built once for each change of the tree.
+    internal Dictionary<string, CutsceneBlock?> Index()
+    {
+        if (_index != null)
+        {
+            return _index;
+        }
+        var index = new Dictionary<string, CutsceneBlock?>();
+        void Add(string path, CutsceneBlock block) => index[path] = index.ContainsKey(path) ? null : block;
+        void Walk(CutsceneBlock block, string path)
+        {
+            var keys = 0;
+            foreach (var child in block.ChildList)
+            {
+                var childPath = child.Kind switch
+                {
+                    CutsceneBlockKind.Channel => $"{path}/channel:{child.Name}",
+                    CutsceneBlockKind.Key => $"{path}/key:{keys++}",
+                    _ => CutsceneFile.PathOf(child),
+                };
+                Add(childPath, child);
+                Walk(child, childPath);
+            }
+        }
+        Walk(this, "");
+        return _index = index;
+    }
 
     static string Format(int ticks) => ticks.ToString(CultureInfo.InvariantCulture);
 
@@ -245,13 +292,18 @@ public sealed class CutsceneBlock
     {
         child.Parent = this;
         ChildList.Add(child);
+        Touch();
     }
+
+    // Takes this block out of its parent, which has already let it go, so it can go in again.
+    internal void Detach() => Parent = null;
 
     // Puts this block under a parent at an index.
     internal void Adopt(CutsceneBlock parent, int index)
     {
         Parent = parent;
         parent.ChildList.Insert(index, this);
+        Touch();
     }
 
     /// <summary>
@@ -322,6 +374,7 @@ public sealed class CutsceneBlock
         }
         ChildList.Clear();
         ChildList.AddRange(sorted);
+        Touch();
         return true;
     }
 
@@ -575,8 +628,7 @@ public sealed class CutsceneFile
         {
             return Root;
         }
-        var found = Blocks.Where(b => b != Root && PathOf(b) == path).Take(2).ToList();
-        return found.Count == 1 ? found[0] : null;
+        return Root.Index().GetValueOrDefault(path);
     }
 
     /// <summary>The ID after the highest of a kind's blocks. Sections' IDs are the cutscene's, so they count across tracks.</summary>
@@ -606,6 +658,8 @@ public sealed class CutsceneFile
             throw new InvalidOperationException("the cutscene's block stays");
         }
         parent.ChildList.Remove(block);
+        parent.Touch();
+        block.Detach();
     }
 }
 
