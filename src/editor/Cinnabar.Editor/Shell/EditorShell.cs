@@ -30,6 +30,8 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
     public WorldModel World { get; } = new();
     /// <summary>What owners such as a scrub write over the game's world in Edit, outside the document (see docs/editor/link.md#overrides).</summary>
     public WorldOverrides Overrides { get; }
+    /// <summary>The cutscene editor's preview in the game, for one tab at a time (see docs/editor/cutscene-editor.md#preview).</summary>
+    public CutscenePreview CutscenePreview { get; }
     public ResourceStats Stats { get; } = new();
     public Selection Selection { get; } = new();
     public OutlinerState Outliner { get; } = new();
@@ -88,6 +90,7 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
         _gizmo = new GizmoController(label => TryBeginEdit(label, "the gizmo"), SendGizmo);
         Host = new HostSession(options);
         Overrides = new WorldOverrides(this);
+        CutscenePreview = new CutscenePreview(this);
         Watches = new EntityWatches(Selection, Host);
         Visibility = new SceneVisibility(World, Selection, Host, settings, Console, () => [.. _scenes.Select(s => (s.Number, s.Path))], WriteSetting, Commands.InvalidateAll);
         Cook = new CookSession(options.Cook, Assets);
@@ -249,6 +252,7 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
             _previewSlots.DisconnectAll();
             // The game ends the overrides of an editor that goes, so a token that wrote nothing would only seem live.
             Overrides.EndAll(OverrideEnd.LinkClosed);
+            CutscenePreview.OnLinkLost();
             if (Stats.Host != null || Stats.Game != null)
             {
                 Stats.Clear();
@@ -286,6 +290,8 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
         _previewSlots.DisconnectAll();
         _previewSlots.SendAll();
         Thumbnails.Restart(DateTime.UtcNow);
+        // The new state has no preview session either: the owner's opens again, after the scene that it previews against.
+        CutscenePreview.OnNewGameState();
     }
 
     // The layout file has the arrangement that the editor closed with, which is the active workspace's, and the

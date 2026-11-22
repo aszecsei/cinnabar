@@ -896,6 +896,15 @@ public sealed partial class EditorShell
             case Link.Protocol.OverrideEnded ended:
                 Overrides.OnEnded(ended);
                 return;
+            case Link.Protocol.CutscenePreviewOpened opened:
+                CutscenePreview.OnOpened(opened);
+                return;
+            case Link.Protocol.CutscenePreviewEnded ended:
+                CutscenePreview.OnEnded(ended);
+                return;
+            case Link.Protocol.CutscenePreviewTick tick:
+                CutscenePreview.OnTick(tick);
+                return;
         }
         if (message is not EditProblems problems)
         {

@@ -6,6 +6,7 @@ using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Cinnabar.Editor.Document;
+using Cinnabar.Editor.Host;
 using Cinnabar.Editor.Panels;
 using Cinnabar.Editor.Ribbon;
 using Cinnabar.Editor.Shell;
@@ -23,6 +24,10 @@ public sealed class CutsceneEditorView : DockPanel
 {
     readonly EditorShell _shell;
     readonly CutsceneEditor _editor;
+    readonly TextBlock _playhead = new() { FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0), FontFamily = new FontFamily("Consolas, monospace") };
+    readonly Button _play = new() { Classes = { "viewport-tool" }, Focusable = false, Margin = new Thickness(8, 0, 0, 0) };
+    readonly Button _here;
+    bool _flushQueued;
     readonly TextBlock _time = new() { FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0) };
     readonly TextBlock _status = new() { FontSize = 12, VerticalAlignment = VerticalAlignment.Center };
     readonly TextBox _search = new() { PlaceholderText = "Filter tracks (Ctrl+F)", Classes = { "value-edit" }, MinWidth = 200, FontSize = 12 };
@@ -41,8 +46,18 @@ public sealed class CutsceneEditorView : DockPanel
         var text = SmallButton("Open in Script Editor", "Edit the cutscene's text. Save first: this editor does not read the file again.", () => shell.OpenScript(editor.Document.Path));
         DockPanel.SetDock(text, DockSide.Left);
         toolbar.Children.Add(text);
+        ToolTip.SetTip(_play, "Play or pause the preview in the game (Space)");
+        _play.Click += (_, _) => shell.CutscenePreview.PlayPause();
+        DockPanel.SetDock(_play, DockSide.Left);
+        toolbar.Children.Add(_play);
+        DockPanel.SetDock(_playhead, DockSide.Left);
+        toolbar.Children.Add(_playhead);
         DockPanel.SetDock(_time, DockSide.Left);
         toolbar.Children.Add(_time);
+        _here = SmallButton("Preview here", "Show this cutscene in the game, in place of the one that it shows now.", () => shell.CutscenePreview.Take(editor));
+        _here.Margin = new Thickness(8, 0, 0, 0);
+        DockPanel.SetDock(_here, DockSide.Right);
+        toolbar.Children.Add(_here);
         DockPanel.SetDock(_status, DockSide.Right);
         toolbar.Children.Add(_status);
         toolbar.Children.Add(new Panel());
@@ -109,7 +124,10 @@ public sealed class CutsceneEditorView : DockPanel
             .Add(() => _editor.FindRequested += Find, () => _editor.FindRequested -= Find)
             .Add(() => _editor.PasteTracksRequested += AskTracks, () => _editor.PasteTracksRequested -= AskTracks)
             .Add(() => _editor.ProblemsChanged += Show, () => _editor.ProblemsChanged -= Show)
-            .Add(() => _shell.Cook.StateChanged += Show, () => _shell.Cook.StateChanged -= Show);
+            .Add(() => _shell.Cook.StateChanged += Show, () => _shell.Cook.StateChanged -= Show)
+            .Add(() => _shell.CutscenePreview.Changed += Show, () => _shell.CutscenePreview.Changed -= Show)
+            .Add(() => _editor.PlayheadChanged += OnPlayhead, () => _editor.PlayheadChanged -= OnPlayhead)
+            .Add(() => _shell.Host.StateChanged += OnHostState, () => _shell.Host.StateChanged -= OnHostState);
     }
 
     // A paste needs tracks that the cutscene lacks: Add pastes with them, Cancel pastes nothing.
@@ -129,8 +147,44 @@ public sealed class CutsceneEditorView : DockPanel
         }
     }
 
+    void OnHostState(HostState _) => Show();
+
+    void OnPlayhead()
+    {
+        ShowPlayhead();
+        ScheduleFlush();
+    }
+
+    void ShowPlayhead()
+    {
+        var file = _editor.File;
+        var at = _editor.Playhead;
+        _playhead.Text = $"{CutsceneTime.Timecode(at, file.Rate)}  ·  frame {CutsceneTime.Frames(at, file.Rate)}";
+    }
+
+    // A scrub sends its tick once a frame, at the next one, however many times the pointer moved before it.
+    void ScheduleFlush()
+    {
+        if (_flushQueued || !_shell.CutscenePreview.Pending || TopLevel.GetTopLevel(this) is not { } top)
+        {
+            return;
+        }
+        _flushQueued = true;
+        top.RequestAnimationFrame(_ =>
+        {
+            _flushQueued = false;
+            _shell.CutscenePreview.Flush();
+        });
+    }
+
     void Show()
     {
+        ShowPlayhead();
+        ScheduleFlush();
+        var preview = _shell.CutscenePreview;
+        _play.Content = CommandViews.Icon(preview.IsPlayingIn(_editor) ? "pause" : "play", 16);
+        _play.IsEnabled = preview.CanPlay(_editor);
+        _here.IsVisible = preview.CanTake(_editor);
         if (_keysUnder.IsChecked != _editor.KeysUnderSelection)
         {
             _keysUnder.IsChecked = _editor.KeysUnderSelection;
@@ -157,6 +211,7 @@ public sealed class CutsceneEditorView : DockPanel
         {
             parts.Add("not saved");
         }
+        parts.Add(preview.Describe(_editor));
         _status.Text = string.Join("  ·  ", parts);
         _status.Classes.Set("warning", _editor.CookError != null);
         ToolTip.SetTip(_status, _editor.CookError);

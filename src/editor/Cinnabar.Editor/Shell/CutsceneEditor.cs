@@ -199,17 +199,36 @@ public sealed class CutsceneEditor : IGraphEditor
 
     public void RequestFind() => FindRequested?.Invoke();
 
-    /// <summary>Moves the playhead, inside the length.</summary>
+    /// <summary>Moves the playhead, inside the length. The preview shows it, and a playing preview pauses.</summary>
     public void SetPlayhead(int ticks)
+    {
+        if (MovePlayhead(ticks))
+        {
+            _shell.CutscenePreview.OnScrub(this);
+        }
+    }
+
+    /// <summary>Moves the playhead to the tick that the game reported, which the preview does not send back.</summary>
+    public void SetPlayheadFromGame(int ticks) => MovePlayhead(ticks);
+
+    bool MovePlayhead(int ticks)
     {
         var at = Math.Clamp(ticks, 0, File.Length ?? 0);
         if (at == _playhead)
         {
-            return;
+            return false;
         }
         _playhead = at;
         PlayheadChanged?.Invoke();
         _shell.Commands.InvalidateAll();
+        return true;
+    }
+
+    /// <summary>Moves the playhead by frames, and pauses a playing preview where it is, even at the end of the cutscene.</summary>
+    public void Step(int frames)
+    {
+        _shell.CutscenePreview.Pause();
+        SetPlayhead(_playhead + frames * FrameTicks);
     }
 
     /// <summary>Whether drags and nudges snap (see <see cref="TimelineSnap"/>). On at first; N turns it off and on.</summary>
@@ -702,7 +721,15 @@ public sealed class CutsceneEditor : IGraphEditor
         }
         CookError = result.Error == "" ? null : result.Error;
         ProblemsChanged?.Invoke();
+        if (CookError == null && !CookedClean)
+        {
+            CookedClean = true;
+            _shell.CutscenePreview.OnCooked(this);
+        }
     }
+
+    /// <summary>Whether the daemon cooked this tab's text clean, so its unsaved text is in the preview area.</summary>
+    public bool CookedClean { get; private set; }
 
     /// <summary>The last check's error, or null when the text cooked.</summary>
     public string? CookError { get; private set; }
