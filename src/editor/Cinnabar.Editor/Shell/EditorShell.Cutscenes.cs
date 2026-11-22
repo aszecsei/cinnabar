@@ -1,5 +1,7 @@
+using System.Text.Json;
 using Cinnabar.Editor.Docking;
 using Cinnabar.Editor.Document;
+using Cinnabar.Editor.Model;
 
 namespace Cinnabar.Editor.Shell;
 
@@ -42,4 +44,48 @@ public sealed partial class EditorShell
         GraphEditorsChanged?.Invoke();
         return editor;
     }
+
+    // How each user's timeline shows each cutscene, by GUID, read when the first cutscene opens.
+    Dictionary<string, CutsceneTimelineView>? _cutsceneViews;
+
+    internal CutsceneTimelineView CutsceneTimelineSettingsOf(string guid)
+    {
+        if (_cutsceneViews == null)
+        {
+            _cutsceneViews = [];
+            try
+            {
+                if (Settings.Read(EditorSettings.CutsceneTimelineFileName) is { } text
+                    && JsonSerializer.Deserialize<Dictionary<string, CutsceneTimelineView>>(text) is { } saved)
+                {
+                    _cutsceneViews = saved;
+                }
+            }
+            catch (JsonException e)
+            {
+                Console.Add(LogLevel.Warning, $"cutscene: cannot read {EditorSettings.CutsceneTimelineFileName}: {e.Message}");
+            }
+        }
+        return _cutsceneViews.GetValueOrDefault(guid) ?? CutsceneTimelineView.Default;
+    }
+
+    internal void SaveCutsceneTimelineSettings(string guid, CutsceneTimelineView view)
+    {
+        CutsceneTimelineSettingsOf(guid);
+        if (view == CutsceneTimelineView.Default || (!view.ShowFrames && view.Locked.Length == 0))
+        {
+            _cutsceneViews!.Remove(guid);
+        }
+        else
+        {
+            _cutsceneViews![guid] = view;
+        }
+        WriteSetting("cutscene", EditorSettings.CutsceneTimelineFileName, JsonSerializer.Serialize(_cutsceneViews));
+    }
+}
+
+/// <summary>How a user's timeline shows a cutscene: frames or timecode on the ruler, and the IDs of the locked tracks.</summary>
+public sealed record CutsceneTimelineView(bool ShowFrames, int[] Locked)
+{
+    public static readonly CutsceneTimelineView Default = new(false, []);
 }

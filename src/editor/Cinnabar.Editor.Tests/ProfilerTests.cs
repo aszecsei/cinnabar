@@ -141,14 +141,14 @@ public sealed class ProfilerTests
     [Fact]
     public void TheTimelineZoomsAroundThePointer()
     {
-        var view = TimelineView.Fit(0, 16_000_000, 1000);
+        var view = TimelineView.Fit(0, 16_000_000, 1000, TimelineZoom.Nanoseconds);
         Assert.True(view.Start < 0 && view.End(1000) > 16_000_000);
-        var at = view.Ns(250);
+        var at = view.At(250);
         var zoomed = view.ZoomAbout(250, 0.5);
-        Assert.Equal(at, zoomed.Ns(250), 3);
-        Assert.Equal(view.NsPerPixel / 2, zoomed.NsPerPixel, 6);
-        Assert.Equal(TimelineView.MinNsPerPixel, view.ZoomAbout(0, 1e-9).NsPerPixel);
-        Assert.Equal(view.Start - 10 * view.NsPerPixel, view.Pan(10).Start, 3);
+        Assert.Equal(at, zoomed.At(250), 3);
+        Assert.Equal(view.PerPixel / 2, zoomed.PerPixel, 6);
+        Assert.Equal(TimelineZoom.Nanoseconds.Min, view.ZoomAbout(0, 1e-9).PerPixel);
+        Assert.Equal(view.Start - 10 * view.PerPixel, view.Pan(10).Start, 3);
     }
 
     [Fact]

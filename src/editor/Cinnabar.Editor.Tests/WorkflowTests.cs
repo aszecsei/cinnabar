@@ -73,10 +73,14 @@ public sealed class WorkflowTests : IDisposable
             .. shell.Commands.All.Select(c => c.Id).Where(id => id.StartsWith("mesh.", StringComparison.Ordinal) || id.StartsWith("texture.", StringComparison.Ordinal)),
         ];
 
+        // A cutscene's timeline's own, which act while it has the keyboard (see docs/editor/cutscene-editor.md#the-timeline).
+        string[] timeline = EditorCommands.CutsceneTimelineCommands;
+
         Assert.All(viewport, id => Assert.DoesNotContain(id, ribbon));
         Assert.All(scene, id => Assert.DoesNotContain(id, ribbon));
+        Assert.All(timeline, id => Assert.DoesNotContain(id, ribbon));
         // They are commands all the same, for the command palette and the key bindings.
-        Assert.All(viewport.Concat(scene), id => Assert.NotNull(shell.Commands.Find(id)));
+        Assert.All(viewport.Concat(scene).Concat(timeline), id => Assert.NotNull(shell.Commands.Find(id)));
     }
 
     [Fact]

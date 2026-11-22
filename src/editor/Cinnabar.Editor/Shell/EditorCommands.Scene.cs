@@ -160,12 +160,26 @@ static partial class EditorCommands
             Icon = "prefab",
             CanExecuteWhen = () => shell.SelectedSceneEntity is { } e && shell.InstanceOf(e.Id) != null,
         });
-        commands.Register(new Command(DeleteEntity, "Delete", shell.DeleteSelected)
+        // While a cutscene's timeline has the keyboard, Delete deletes what it selects (see
+        // docs/editor/cutscene-editor.md#the-timeline).
+        commands.Register(new Command(DeleteEntity, "Delete", () =>
         {
-            Description = "Delete the selected entities and their children, or in mesh mode the selected vertices, edges or faces.",
+            if (shell.ActiveCutscene is { TimelineFocused: true } cutscene)
+            {
+                cutscene.DeleteSelected(ripple: false);
+            }
+            else
+            {
+                shell.DeleteSelected();
+            }
+        })
+        {
+            Description = "Delete the selected entities and their children, or in mesh mode the selected vertices, edges or faces, or on a cutscene's timeline, the selected sections, events and keys.",
             Icon = "delete",
             Shortcut = "Delete",
-            CanExecuteWhen = () => shell.Mesh.InMeshMode ? !shell.Mesh.MeshSelection.IsEmpty : shell.SelectedSceneEntities.Count > 0,
+            CanExecuteWhen = () => shell.ActiveCutscene is { TimelineFocused: true } cutscene
+                ? cutscene.CanEditSelection
+                : shell.Mesh.InMeshMode ? !shell.Mesh.MeshSelection.IsEmpty : shell.SelectedSceneEntities.Count > 0,
         });
     }
 

@@ -237,7 +237,54 @@ public sealed class CutsceneBlock
         SetHead($"key {words[0]} {words[1]} {interpolation.Trim()}");
     }
 
-    void SetHead(string code) => Head!.SetCode(code);
+    void SetHead(string code)
+    {
+        Head!.SetCode(code);
+        Touch();
+    }
+
+    // The paths of the file's blocks, which the cutscene's block keeps, by path, and null for a path that two blocks
+    // share. A change of a keyword line or of the tree drops it.
+    Dictionary<string, CutsceneBlock?>? _index;
+
+    // Drops the file's index of paths, as a block's ID, name or place changed.
+    internal void Touch()
+    {
+        var root = this;
+        while (root.Parent != null)
+        {
+            root = root.Parent;
+        }
+        root._index = null;
+    }
+
+    // The file's blocks by path, from the cutscene's block, built once for each change of the tree.
+    internal Dictionary<string, CutsceneBlock?> Index()
+    {
+        if (_index != null)
+        {
+            return _index;
+        }
+        var index = new Dictionary<string, CutsceneBlock?>();
+        void Add(string path, CutsceneBlock block) => index[path] = index.ContainsKey(path) ? null : block;
+        void Walk(CutsceneBlock block, string path)
+        {
+            var keys = 0;
+            foreach (var child in block.ChildList)
+            {
+                var childPath = child.Kind switch
+                {
+                    CutsceneBlockKind.Channel => $"{path}/channel:{child.Name}",
+                    CutsceneBlockKind.Key => $"{path}/key:{keys++}",
+                    _ => CutsceneFile.PathOf(child),
+                };
+                Add(childPath, child);
+                Walk(child, childPath);
+            }
+        }
+        Walk(this, "");
+        return _index = index;
+    }
 
     static string Format(int ticks) => ticks.ToString(CultureInfo.InvariantCulture);
 
@@ -245,6 +292,90 @@ public sealed class CutsceneBlock
     {
         child.Parent = this;
         ChildList.Add(child);
+        Touch();
+    }
+
+    // Takes this block out of its parent, which has already let it go, so it can go in again.
+    internal void Detach() => Parent = null;
+
+    // Puts this block under a parent at an index.
+    internal void Adopt(CutsceneBlock parent, int index)
+    {
+        Parent = parent;
+        parent.ChildList.Insert(index, this);
+        Touch();
+    }
+
+    /// <summary>
+    /// Sets a section's ID, keeping its span. A section that another one's copy becomes, as a split makes, takes a new ID.
+    /// </summary>
+    public void SetSectionId(int id)
+    {
+        var words = Words;
+        if (Kind != CutsceneBlockKind.Section || words.Length < 3)
+        {
+            throw new InvalidOperationException($"a {Kind} has no section ID to set");
+        }
+        SetHead($"section {Format(id)} {words[1]} {words[2]}");
+    }
+
+    /// <summary>
+    /// A copy of the block and the blocks under it, with no parent, for <see cref="CutsceneFile.Insert"/>. The comments
+    /// above it are the original's, so the copy leaves them out, and keeps the blank lines.
+    /// </summary>
+    public CutsceneBlock Copy()
+    {
+        var copy = new CutsceneBlock(Kind, null);
+        var head = Head;
+        var before = true;
+        foreach (var line in Lines)
+        {
+            if (line == head)
+            {
+                before = false;
+            }
+            if (before && line.Text.Trim().Length > 0)
+            {
+                continue;
+            }
+            copy.Lines.Add(new TextLine(line.Text, line.Ending));
+        }
+        foreach (var child in ChildList)
+        {
+            copy.Adopt(child.Copy());
+        }
+        return copy;
+    }
+
+    /// <summary>A new key of a channel at a time, written as a key line indented as this key's is.</summary>
+    public CutsceneBlock KeyLike(int time, string value, string interpolation)
+    {
+        if (Kind != CutsceneBlockKind.Key || Head is not { } head)
+        {
+            throw new InvalidOperationException($"a {Kind} is not a key");
+        }
+        var key = new CutsceneBlock(CutsceneBlockKind.Key, null);
+        key.Lines.Add(new TextLine($"{Indent(head)}key {Format(time)} {value} {interpolation}", ""));
+        return key;
+    }
+
+    // The blocks under this one in start order, keeping the order of blocks with one start. A block with no start
+    // leaves the order as it is, since the cooker reports it.
+    internal bool SortChildren()
+    {
+        if (ChildList.Count < 2 || ChildList.Any(c => c.Start == null))
+        {
+            return false;
+        }
+        var sorted = ChildList.OrderBy(c => c.Start!.Value).ToList();
+        if (sorted.SequenceEqual(ChildList))
+        {
+            return false;
+        }
+        ChildList.Clear();
+        ChildList.AddRange(sorted);
+        Touch();
+        return true;
     }
 
     /// <summary>The block and every block under it, in the file's order.</summary>
@@ -497,12 +628,27 @@ public sealed class CutsceneFile
         {
             return Root;
         }
-        var found = Blocks.Where(b => b != Root && PathOf(b) == path).Take(2).ToList();
-        return found.Count == 1 ? found[0] : null;
+        return Root.Index().GetValueOrDefault(path);
     }
 
     /// <summary>The ID after the highest of a kind's blocks. Sections' IDs are the cutscene's, so they count across tracks.</summary>
     public int NextId(CutsceneBlockKind kind) => Blocks.Where(b => b.Kind == kind).Select(b => b.Id ?? 0).DefaultIfEmpty(0).Max() + 1;
+
+    /// <summary>Puts a block, as <see cref="CutsceneBlock.Copy"/> or <see cref="CutsceneBlock.KeyLike"/> makes it, under a parent at an index.</summary>
+    public void Insert(CutsceneBlock parent, int index, CutsceneBlock block)
+    {
+        if (block.Parent != null)
+        {
+            throw new InvalidOperationException("the block is in a file already");
+        }
+        block.Adopt(parent, index);
+    }
+
+    /// <summary>
+    /// Puts a block's children in start order, as the cooker wants a track's sections and a channel's keys, each with the
+    /// comments above it. Children with one start keep their order. Returns whether the order changed.
+    /// </summary>
+    public static bool SortChildren(CutsceneBlock block) => block.SortChildren();
 
     /// <summary>Removes a block and the blocks under it, with the comments and blank lines above it.</summary>
     public void Remove(CutsceneBlock block)
@@ -512,6 +658,8 @@ public sealed class CutsceneFile
             throw new InvalidOperationException("the cutscene's block stays");
         }
         parent.ChildList.Remove(block);
+        parent.Touch();
+        block.Detach();
     }
 }
 
