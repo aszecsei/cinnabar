@@ -86,7 +86,6 @@ public sealed partial class EditorShell
         SetStreamed(null);
         SetModeTo(EditorMode.Edit);
         SendScene();
-        CutscenePreview.OnStop();
         Console.Add(LogLevel.Info, "editor: stopped, so the game has the scene again.");
     }
 

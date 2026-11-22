@@ -294,6 +294,66 @@ public sealed class CutscenePreviewTests : IDisposable
     }
 
     [Fact]
+    public void ALinkLostDuringPlaybackPlaysAgainOnTheNextLink()
+    {
+        var (shell, editor) = NewShell();
+        using var _ = shell;
+        var ticket = Opened(shell);
+        shell.CutscenePreview.PlayPause();
+        shell.OnGameMessage(new CutscenePreviewTick(ticket, 42000, true));
+
+        shell.Host.Stop();
+        Assert.Equal(new CutscenePreviewState.Closed(null, Resume: true), shell.CutscenePreview.State);
+        shell.Host.LinkForTests(_sent.Add);
+
+        var open = Assert.Single(_sent.OfType<CutscenePreviewOpen>());
+        Assert.Equal(42000, open.Tick);
+        _sent.Clear();
+        Answer(shell, open.Ticket);
+        Assert.Equal(42000, Assert.IsType<CutscenePreviewPlay>(Assert.Single(_sent)).Tick);
+    }
+
+    [Fact]
+    public void APreviewThatTheGameRefusedWithoutASceneOpensWhenTheSceneIsSent()
+    {
+        var (shell, editor) = NewShell();
+        using var _ = shell;
+        var ticket = LastOpen.Ticket;
+        shell.OnGameMessage(new CutscenePreviewEnded(ticket, CutscenePreviewEndReason.NotEditing));
+        Assert.Equal(new CutscenePreviewState.Closed(CutscenePreviewEndReason.NotEditing), shell.CutscenePreview.State);
+        _sent.Clear();
+
+        // The scene that opens goes to the game, and the session opens again after it.
+        File.WriteAllText(_temp.Combine("other.scene"), "scene 1\n");
+        shell.OpenScene(_temp.Combine("other.scene"));
+
+        Assert.IsType<LoadScene>(_sent.First(m => m is LoadScene or CutscenePreviewOpen));
+        Assert.True(Assert.Single(_sent.OfType<CutscenePreviewOpen>()).Ticket > ticket);
+    }
+
+    [Fact]
+    public void AScrubOrAStepWhileASessionOpensAgainKeepsItPaused()
+    {
+        var (shell, editor) = NewShell();
+        using var _ = shell;
+        var ticket = Opened(shell);
+        shell.CutscenePreview.PlayPause();
+        shell.Host.Receive(new GameReloaded(ReloadKind.SoftRestart));
+        Assert.IsType<CutscenePreviewState.Opening>(shell.CutscenePreview.State);
+        var open = LastOpen;
+        Assert.True(open.Ticket > ticket);
+
+        editor.SetPlayhead(18000);
+        _sent.Clear();
+        Answer(shell, open.Ticket);
+        shell.CutscenePreview.Flush();
+
+        Assert.Empty(_sent.OfType<CutscenePreviewPlay>());
+        Assert.Equal(18000, Assert.Single(_sent.OfType<CutscenePreviewTime>()).Tick);
+        Assert.False(shell.CutscenePreview.IsPlayingIn(editor));
+    }
+
+    [Fact]
     public void ASoftRestartOpensTheSessionAgainAtTheSameTick()
     {
         var (shell, editor) = NewShell();

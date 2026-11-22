@@ -19,8 +19,11 @@ public abstract record CutscenePreviewState
     {
     }
 
-    /// <summary>No session. The reason is why the game ended the last one, or null when the editor did or there was none.</summary>
-    public sealed record Closed(CutscenePreviewEndReason? Reason = null) : CutscenePreviewState;
+    /// <summary>
+    /// No session. The reason is why the game ended the last one, or null when the editor did or there was none. With
+    /// <paramref name="Resume"/>, the last one played when the link or the game state went, so the next one plays.
+    /// </summary>
+    public sealed record Closed(CutscenePreviewEndReason? Reason = null, bool Resume = false) : CutscenePreviewState;
 
     /// <summary>A session, which the game has not yet answered.</summary>
     public abstract record Live(ulong Ticket, CutsceneEditor Editor, bool Unsaved) : CutscenePreviewState;
@@ -69,6 +72,7 @@ public sealed class CutscenePreview(EditorShell shell)
     static bool Allowed(CutscenePreviewState from, CutscenePreviewState to) => (from, to) switch
     {
         (CutscenePreviewState.Closed, CutscenePreviewState.Opening) => true,
+        (CutscenePreviewState.Opening o, CutscenePreviewState.Opening n) => o.Ticket == n.Ticket,
         (CutscenePreviewState.Opening o, CutscenePreviewState.Open n) => o.Ticket == n.Ticket,
         (CutscenePreviewState.Open o, CutscenePreviewState.Open n) => o.Ticket == n.Ticket,
         (CutscenePreviewState.Live, CutscenePreviewState.Closed) => true,
@@ -83,9 +87,9 @@ public sealed class CutscenePreview(EditorShell shell)
             throw new InvalidOperationException($"the cutscene preview cannot go from {previous.GetType().Name} to {next.GetType().Name}");
         }
         State = next;
-        if (next is CutscenePreviewState.Closed or CutscenePreviewState.Opening)
+        if (next is CutscenePreviewState.Closed || (next is CutscenePreviewState.Opening && previous is not CutscenePreviewState.Opening))
         {
-            // An Open names the playhead, and a closed session has no game to send to.
+            // A new Open names the playhead, and a closed session has no game to send to.
             _pending = null;
         }
         Changed?.Invoke();
@@ -114,7 +118,7 @@ public sealed class CutscenePreview(EditorShell shell)
         shell.Host.Send(new CutscenePreviewOpen(ticket, Convert.FromHexString(editor.Guid), unsaved, editor.Playhead));
     }
 
-    void Shut(bool send, CutscenePreviewEndReason? reason)
+    void Shut(bool send, CutscenePreviewEndReason? reason, bool resume = false)
     {
         if (State is not CutscenePreviewState.Live live)
         {
@@ -124,7 +128,7 @@ public sealed class CutscenePreview(EditorShell shell)
         {
             shell.Host.Send(new CutscenePreviewClose(live.Ticket));
         }
-        Become(new CutscenePreviewState.Closed(reason));
+        Become(new CutscenePreviewState.Closed(reason, resume));
     }
 
     // A session for the owner, or for the active cutscene tab when there is no owner. The game's state has none.
@@ -137,7 +141,8 @@ public sealed class CutscenePreview(EditorShell shell)
         }
     }
 
-    static bool IsPlaying(CutscenePreviewState state) => state is CutscenePreviewState.Open { Playing: true } or CutscenePreviewState.Opening { Resume: true };
+    static bool IsPlaying(CutscenePreviewState state) =>
+        state is CutscenePreviewState.Open { Playing: true } or CutscenePreviewState.Opening { Resume: true } or CutscenePreviewState.Closed { Resume: true };
 
     /// <summary>A cutscene tab became the active one. It takes the preview when no session is live.</summary>
     internal void OnActivated(CutsceneEditor? editor)
@@ -163,21 +168,32 @@ public sealed class CutscenePreview(EditorShell shell)
     /// <summary>Play began. The game ends its session when the mode changes.</summary>
     internal void OnPlay() => Shut(send: false, null);
 
-    /// <summary>The editor is back in Edit after Play.</summary>
-    internal void OnStop() => Reopen(resume: false);
-
-    /// <summary>The link closed, and the game ended its session.</summary>
-    internal void OnLinkLost() => Shut(send: false, null);
+    /// <summary>The link closed, and the game ended its session. One that played plays again in the next.</summary>
+    internal void OnLinkLost() => Shut(send: false, null, IsPlaying(State));
 
     /// <summary>
-    /// The game has a new state, which has no session. A session that played opens again at the tab's playhead, which
-    /// is the game's last reported tick, and plays again when the game answers Opened.
+    /// The game has a new state, which has no session. The scene's send opens one again (see <see cref="OnSceneSent"/>):
+    /// a session that played opens at the tab's playhead, which is the game's last reported tick, and plays again when
+    /// the game answers Opened.
     /// </summary>
     internal void OnNewGameState()
     {
-        var resume = IsPlaying(State);
-        Shut(send: false, null);
-        Reopen(resume);
+        if (State is CutscenePreviewState.Live live)
+        {
+            Shut(send: false, null, IsPlaying(live));
+        }
+    }
+
+    /// <summary>
+    /// The editor sent its scene, which the game mirrors in Edit: after Stop, in a new game state, or when a scene opens.
+    /// A closed session opens again for the owner, so one that the game could not open without a scene opens now.
+    /// </summary>
+    internal void OnSceneSent()
+    {
+        if (State is CutscenePreviewState.Closed closed && shell.IsEditing)
+        {
+            Reopen(closed.Resume);
+        }
     }
 
     /// <summary>A tab's text cooked clean for the first time, so the game follows the preview area and not the saved file.</summary>
@@ -197,13 +213,17 @@ public sealed class CutscenePreview(EditorShell shell)
             return;
         }
         _pending = editor.Playhead;
-        if (live is CutscenePreviewState.Open { Playing: true } open)
+        switch (live)
         {
-            Become(open with { Playing = false });
-        }
-        else
-        {
-            Changed?.Invoke();
+            case CutscenePreviewState.Open { Playing: true } open:
+                Become(open with { Playing = false });
+                break;
+            case CutscenePreviewState.Opening { Resume: true } opening:
+                Become(opening with { Resume = false });
+                break;
+            default:
+                Changed?.Invoke();
+                break;
         }
     }
 
@@ -244,11 +264,17 @@ public sealed class CutscenePreview(EditorShell shell)
     /// <summary>Pauses the game's clock at the playhead, which is the last tick that the game reported.</summary>
     internal void Pause()
     {
-        if (State is CutscenePreviewState.Open { Playing: true } open)
+        switch (State)
         {
-            _pending = null;
-            shell.Host.Send(new CutscenePreviewTime(open.Ticket, open.Editor.Playhead));
-            Become(open with { Playing = false });
+            case CutscenePreviewState.Open { Playing: true } open:
+                _pending = null;
+                shell.Host.Send(new CutscenePreviewTime(open.Ticket, open.Editor.Playhead));
+                Become(open with { Playing = false });
+                break;
+            case CutscenePreviewState.Opening { Resume: true } opening:
+                // The session that replaces a playing one opens paused.
+                Become(opening with { Resume = false });
+                break;
         }
     }
 

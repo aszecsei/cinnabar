@@ -809,6 +809,7 @@ public sealed partial class EditorShell
         {
             // Each scene is its base and the parts of its loaded sublevels (see docs/editor/document-and-scenes.md#parts).
             Host.Send(SceneSnapshot.ToMessage(_scenes.SelectMany(PartsToLoad), ++_sceneTicket));
+            CutscenePreview.OnSceneSent();
         }
     }
 

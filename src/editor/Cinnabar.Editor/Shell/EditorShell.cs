@@ -28,7 +28,7 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
     public ConsoleLog Console { get; } = new();
     public HostSession Host { get; }
     public WorldModel World { get; } = new();
-    /// <summary>What owners such as a scrub write over the game's world in Edit, outside the document (see docs/editor/link.md#overrides).</summary>
+    /// <summary>What owners such as a pose preview write over the game's world in Edit, outside the document (see docs/editor/link.md#overrides).</summary>
     public WorldOverrides Overrides { get; }
     /// <summary>The cutscene editor's preview in the game, for one tab at a time (see docs/editor/cutscene-editor.md#preview).</summary>
     public CutscenePreview CutscenePreview { get; }
@@ -280,6 +280,8 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
     {
         // The new state has no overrides, so their owners hear that they ended, and nothing is sent again.
         Overrides.EndAll(OverrideEnd.NewGameState);
+        // The new state has no cutscene preview either. The scene's send opens the owner's again, after the scene.
+        CutscenePreview.OnNewGameState();
         ResetMode();
         SendScene();
         SendViewportTools();
@@ -290,8 +292,6 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
         _previewSlots.DisconnectAll();
         _previewSlots.SendAll();
         Thumbnails.Restart(DateTime.UtcNow);
-        // The new state has no preview session either: the owner's opens again, after the scene that it previews against.
-        CutscenePreview.OnNewGameState();
     }
 
     // The layout file has the arrangement that the editor closed with, which is the active workspace's, and the
