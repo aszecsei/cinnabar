@@ -47,7 +47,7 @@ To add a message: add a struct to the `Message` union in `lib/engine/editor/link
 | World view | `World_View`, the shown world's scenes with their bounds, distances and flags, and the preview's position, and `Streamed_Scenes`, the scenes that the game's streaming policy has in, when they change (see [World view](world-view.md#the-viewport)) |
 | Reflection probes | `Capture_Reflection_Probes`, the probes to capture now, none for all, and `Reflection_Probe_View`, a watched probe's slot and last capture, when it changes (see [Viewport](viewport.md#reflection-probes)) |
 | Overrides | `Begin_Override`, `Override_Frame` and `Release_Override` to the game, and `Override_Ended` and `Overridden_Entities` from it: values that the editor writes over the world in Edit, outside the document (see [Overrides](#overrides)) |
-| Cutscene preview | `Cutscene_Preview_Open`, `Cutscene_Preview_Time`, `Cutscene_Preview_Play` and `Cutscene_Preview_Close` to the game, and `Cutscene_Preview_Opened`, `Cutscene_Preview_Ended` and `Cutscene_Preview_Tick` from it (see [Cutscene editor: Preview](cutscene-editor.md#preview)) |
+| Cutscene preview | `Cutscene_Preview_Open`, `Cutscene_Preview_Time`, `Cutscene_Preview_Play`, `Cutscene_Preview_Settings` and `Cutscene_Preview_Close` to the game, and `Cutscene_Preview_Opened`, `Cutscene_Preview_Ended` and `Cutscene_Preview_Tick` from it (see [Cutscene editor: Preview](cutscene-editor.md#preview)) |
 
 ### Profile
 
@@ -113,7 +113,7 @@ A new link, from a start, a restart or a crash, and a soft restart both give the
   | The Navigation Path tool's points | `Nav_Probe` |
   | The live meshes | `Live_Mesh` |
   | Each open preview, with what it shows | `Open_Preview`, `Preview_Settings` |
-  | The cutscene preview's tab, at its playhead, with a new ticket, after the scene | `Cutscene_Preview_Open`, then `Cutscene_Preview_Play` if it played |
+  | The cutscene preview's tab, at its playhead, with a new ticket, after the scene | `Cutscene_Preview_Open` and `Cutscene_Preview_Settings`, then `Cutscene_Preview_Play` at its rate if it played |
 
   It ends every override token with `NewGameState`, and sends no override again: the new state has none, and each owner begins again if it needs to. It drops the picks and the `Sky_Sun_Request` in flight, disconnects the previews from the old targets until the new `Preview_Target`s come, and restarts the thumbnail queue, whose bake the old state lost. A preview's `unsaved` flag follows the cook daemon's cache, not the game, so `Open_Preview` sends it again as it is. A new feature that keeps a copy of game state, or waits for an answer from the game, resets it in `OnNewGameState`, and nowhere else.
 
