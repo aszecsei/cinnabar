@@ -254,11 +254,14 @@ audio_track :: proc(ctx: ^Track_Context) {
 }
 
 // scrub_track plays a short grain of each section under the time after a seek, at most once in SCRUB_INTERVAL, for an
-// evaluation that scrubs. A scrub plays no voices of its own.
+// evaluation that scrubs. A scrub plays no voices of its own, and no grains when the editor's mix turns them off.
 @(private)
 scrub_track :: proc(ctx: ^Track_Context, sections: []format.Cutscene_Section) {
 	s := ctx.cutscenes
 	e := ctx.evaluation
+	if e.no_grains {
+		return
+	}
 	last, seen := e.scrubs[{ctx.scope, ctx.track.id}]
 	now := audio.clock(s.audio)
 	if seen && (last.jumps == e.jumps || now - last.at < SCRUB_INTERVAL) {

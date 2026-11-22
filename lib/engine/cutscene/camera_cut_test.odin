@@ -546,6 +546,34 @@ a_seek_cuts_a_pause_holds_and_a_skip_or_stop_gives_the_view_back :: proc(t: ^tes
 	}
 }
 
+// The editor's mix that silences the cut track gives the views back at once, as a muted track would, and the walk plays
+// on. Without the silence, the track claims them again.
+@(test)
+a_mix_that_silences_the_cut_track_gives_the_view_back :: proc(t: ^testing.T) {
+	f := cut_setup(t)
+	defer cut_teardown(f)
+	shot_camera(f, {1, 0, 0})
+	mover := bound(f, {0, 0, 5})
+	length := i32(60 * TICK)
+	h := play_blob(
+		t,
+		f,
+		shots_blob(f, {walk(1, 1, 6, length), cuts(shot(1, 0, length, 0))}, length),
+	)
+	shown := tick(f)
+	testing.expect(t, abs(x_of(shown.views[0].view) - 1) < 1e-4)
+	ev := &live_of(&f.cutscenes.players[h.slot].state).evaluation
+	set_mix(ev, &f.world, {90}, true, false)
+	before := ecs.get(&f.world, mover, ecs.Transform).position
+	shown = tick(f)
+	testing.expect(t, !camera.claimed(&f.views))
+	testing.expect(t, abs(x_of(shown.views[0].view)) < 1e-4)
+	testing.expect(t, ecs.get(&f.world, mover, ecs.Transform).position != before)
+	set_mix(ev, &f.world, {}, true, false)
+	shown = tick(f)
+	testing.expect(t, camera.claimed(&f.views))
+}
+
 // A reload that mutes the cut track gives the views back at once, though the track no longer evaluates.
 @(test)
 a_reload_that_mutes_the_cut_track_gives_the_view_back :: proc(t: ^testing.T) {

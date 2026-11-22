@@ -652,7 +652,9 @@ reaches_self :: proc(ctx: ^Track_Context) -> bool {
 			return true
 		}
 		for tr in tracks {
-			if tr.kind != .Transform || tr.space != .Relative_To || .Muted in tr.flags {
+			if tr.kind != .Transform ||
+			   tr.space != .Relative_To ||
+			   track_silent(ctx.evaluation, ctx.child, tr) {
 				continue
 			}
 			from, from_ok := ctx_binding(ctx, tr.binding)
@@ -678,7 +680,9 @@ follow_relative :: proc(ctx: ^Track_Context) {
 		return
 	}
 	for tr in format.cutscene_tracks(ctx.data, ctx.blob) {
-		if tr.kind != .Transform || .Muted in tr.flags || tr.id == ctx.track.id {
+		if tr.kind != .Transform ||
+		   track_silent(ctx.evaluation, ctx.child, tr) ||
+		   tr.id == ctx.track.id {
 			continue
 		}
 		entity, bound := ctx_binding(ctx, tr.binding)

@@ -95,11 +95,12 @@ register_event_handler :: proc(
 
 // event_track sends the events that the move to the context's time crosses (see docs/cinematics/tracks.md#event-tracks).
 // It writes nothing to the world: it records the events, and run_phase sends the phase's events in order at its end.
-// Only an evaluation that plays sends events, so the editor's preview and scrub send none.
+// Only an evaluation that plays sends events, and the editor's preview while it plays when its mix says so. A scrub
+// sends none.
 @(private)
 event_track :: proc(ctx: ^Track_Context) {
 	e := ctx.evaluation
-	if e.audition != .Play {
+	if e.audition != .Play && !(e.audition == .Preview && e.preview_events) {
 		return
 	}
 	if seek, sought := ctx.seek.?; sought {

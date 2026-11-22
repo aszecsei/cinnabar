@@ -92,60 +92,66 @@ State :: struct {
 // fields that its tracks wrote. It holds no procedures, typeids or string literals, so it survives a code reload.
 // Make it with init_evaluation, and free it with destroy_evaluation.
 Evaluation :: struct {
-	cutscene:     asset.Handle,
-	bindings:     Bindings,
+	cutscene:       asset.Handle,
+	bindings:       Bindings,
 	// The cutscenes that its sub-sequence sections play, and theirs, in depth-first order (see
 	// docs/cinematics/tracks.md#sub-sequence-tracks). The player loads them. Heap memory.
-	children:     [dynamic]Child,
+	children:       [dynamic]Child,
 	// The key of the blobs of the tree that were last evaluated, the root's and its children's (see tree_key). A new key
 	// is a hot reload. nil before the first evaluation.
-	key:          Maybe(u64),
+	key:            Maybe(u64),
 	// The time, in ticks, from range_start to range_end.
-	time:         i32,
+	time:           i32,
 	// What the clock gave that is less than one tick, in nanoseconds × CUTSCENE_TICKS_PER_SECOND, so the conversion
 	// never drifts.
-	carry:        i64,
+	carry:          i64,
 	// Where each phase's events have fired up to: its last evaluation's time, or a seek since it. nil before the first
 	// evaluation, so the first fires the events at range_start.
-	last:         [Phase]Phase_Mark,
-	snapshot:     Snapshot,
+	last:           [Phase]Phase_Mark,
+	snapshot:       Snapshot,
 	// The fields of the property tracks, by track ID, resolved once for the blob (see
 	// docs/cinematics/tracks.md#property-tracks). A reload of the blob forgets them.
-	targets:      map[Scoped]Property_Target,
+	targets:        map[Scoped]Property_Target,
 	// What each transform track relative to another binding found at its first evaluation, by track ID: a cycle, or
 	// where its binding starts in the other's space (see docs/cinematics/tracks.md#transform-tracks). A reload of the
 	// blob keeps only the starts of the tracks that still join the same two bindings.
-	spaces:       map[Scoped]Relative_Space,
+	spaces:         map[Scoped]Relative_Space,
 	// The Animators that animation tracks drive, by entity, each through its driver's token (see
 	// docs/cinematics/tracks.md#animation-tracks). restore, a reload and destroy_evaluation end them.
-	drives:       map[ecs.Entity]anim.Drive_Token,
+	drives:         map[ecs.Entity]anim.Drive_Token,
 	// What the camera cut track shows, and the claim that it holds on the views for it. restore ends it.
-	cut:          Cut,
+	cut:            Cut,
 	// Counts the seeks and the skips' jumps, so the camera cut track cuts after one, which an evaluation's range alone
 	// cannot tell from a pause.
-	jumps:        u32,
+	jumps:          u32,
 	// The voices of the audio tracks' sections, by section ID (see docs/cinematics/tracks.md#audio-tracks). end_holds
 	// stops them.
-	sounds:       map[Scoped]Sound_Voice,
+	sounds:         map[Scoped]Sound_Voice,
 	// What each audio track scrubbed last, by track ID, for an evaluation that scrubs.
-	scrubs:       map[Scoped]Audio_Scrub,
+	scrubs:         map[Scoped]Audio_Scrub,
 	// How the audio tracks sound: a player's evaluation plays, and the editor sets the others' with set_audition. Only
 	// an evaluation that plays sends events.
-	audition:     Audition,
+	audition:       Audition,
 	// The player whose evaluation this is, which native event handlers get. The zero handle for an evaluation of no
 	// player.
-	player:       Player_Handle,
+	player:         Player_Handle,
 	// The event tracks' ranges that sent their begin and not yet their end, by event ID (see
 	// docs/cinematics/tracks.md#event-tracks). change_range is its one writer.
-	open_ranges:  map[Scoped]struct{},
+	open_ranges:    map[Scoped]struct{},
 	// The events that the event tracks recorded in this phase, which flush_events sends at its end.
-	fired:        [dynamic]Fired,
+	fired:          [dynamic]Fired,
 	// The Animators that the animation tracks drive in this phase, and their clips, which drive_animators hands to the
 	// driver at its end.
-	driven:       [dynamic]Driven,
-	driven_clips: [dynamic]Driven_Clip,
+	driven:         [dynamic]Driven,
+	driven_clips:   [dynamic]Driven_Clip,
 	// What the presentation tracks gave at the last Late phase, which the overlay shows (see present).
-	presented:    Presentation,
+	presented:      Presentation,
+	// The editor's preview's mix, which set_mix is the one writer of, and which a player's evaluation leaves at its zero
+	// value (see docs/cinematics/evaluation.md#the-editors-mix): the IDs of the root's tracks that evaluate as muted
+	// tracks do, whether a scrub plays no grains, and whether the event tracks send events under the Preview audition.
+	silent:         [dynamic]u32,
+	no_grains:      bool,
+	preview_events: bool,
 }
 
 // Phase_Mark is where a phase's events have fired up to.
@@ -387,6 +393,7 @@ init_evaluation :: proc(
 		driven = make([dynamic]Driven, w.platform.heap_allocator),
 		driven_clips = make([dynamic]Driven_Clip, w.platform.heap_allocator),
 		children = make([dynamic]Child, w.platform.heap_allocator),
+		silent = make([dynamic]u32, w.platform.heap_allocator),
 	}
 }
 
@@ -424,7 +431,39 @@ destroy_evaluation :: proc(e: ^Evaluation, w: ^ecs.World) -> (despawned: int) {
 	e.targets = nil
 	delete(e.spaces)
 	e.spaces = nil
+	delete(e.silent)
+	e.silent = nil
 	return
+}
+
+// set_mix is the one writer of the editor's mix of an evaluation: the root's tracks whose IDs are in silent evaluate as
+// muted tracks do, grains says whether a scrub plays grains, and events whether the event tracks send events while the
+// Preview audition plays. A change of the silent tracks ends what the evaluation holds outside the snapshot, as a
+// reload does, so a silenced track's voices, drives and cut end, and the next evaluation starts them again for the
+// tracks that still play. A change of events forgets the open ranges without sending their ends.
+set_mix :: proc(e: ^Evaluation, w: ^ecs.World, silent: []u32, grains, events: bool) {
+	same := len(silent) == len(e.silent)
+	for id in silent {
+		same = same && slice.contains(e.silent[:], id)
+	}
+	if !same {
+		end_holds(e, w)
+		forget_ranges(e, w)
+		clear(&e.silent)
+		append(&e.silent, ..silent)
+	}
+	if e.preview_events != events {
+		forget_ranges(e, w)
+		e.preview_events = events
+	}
+	e.no_grains = !grains
+}
+
+// track_silent is whether a track of one cutscene of the tree evaluates as a muted track does: its blob mutes it, or, in
+// the root, the editor's mix silences it (see set_mix).
+@(private)
+track_silent :: proc(e: ^Evaluation, child: int, track: format.Cutscene_Track) -> bool {
+	return .Muted in track.flags || (child == 0 && slice.contains(e.silent[:], track.id))
 }
 
 // cutscene_data is the blob of an evaluation's cutscene, checked, or false when it is not loaded or not valid.
@@ -591,7 +630,7 @@ run_phase :: proc(
 	walk_scope(s, &ctx, phase, .Covered, 0)
 	if kind := s.kinds[.Camera_Cut];
 	   kind.evaluate != nil && kind.phase == phase && tree_has_cuts(s, &ctx) {
-		cut, _ := live_cut_track(data, blob)
+		cut, _ := live_cut_track(e, 0, data, blob)
 		ctx.track = cut
 		ctx.track_index, ctx.order = 0, 0
 		ctx.user = kind.data
