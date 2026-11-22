@@ -80,7 +80,7 @@ On the left is a header for each row, and on the right is the time area. Both sc
 
 ### The ruler
 
-The ruler shows timecode (`mm:ss:ff`), or frames at the display rate with **Show Frames**. Its ticks use `TimelineGeometry.TickSpacing`. Once a frame is 4 pixels wide, they are rounded to whole frames (`FrameSpacing`).
+The ruler shows timecode (`mm:ss:ff`), or frames at the display rate with **Show Frames**. Its ticks use `TimelineGeometry.TickSpacing` in whole seconds where a second fits, and in whole frames below that (`FrameSpacing`). So every tick is on a frame, and a label is a round timecode.
 - **The playhead.** A click or a drag on the ruler moves the playhead to a frame. The playhead belongs to the editor, so it is in no undo entry. In this step it only marks where Split, Home and End act. Scrubbing and playing in Edit come with [#551](https://github.com/aszecsei/cinnabar/issues/551).
 - **The range bar,** at the bottom of the ruler, is the part that plays: the cutscene's `range`. A drag of either end sets it. When the range is all of the length, the editor removes the setting.
 - **The length.** The handle at the top of the ruler is the length. A drag sets `length`, but not to less than the end of a section, range or trigger. Time past the length is shaded.
@@ -100,6 +100,7 @@ The selection uses the gestures of the node graphs.
 - **A box:** a drag in empty space selects what the box covers.
 - **To clear:** click in empty space, or press Esc.
 - **The primary item** is the last one selected. The details show it.
+- **Keys.** A key's path is its place in its channel, so another key can have it after an edit. An edit by the editor gives the selection the moved keys' new paths. Esc during a drag puts back the selection that the drag began with. After an undo or a redo, a selected key stays selected only if its path still holds the same line. A delete clears the selection.
 
 ### Edits
 
@@ -111,7 +112,7 @@ Each drag is one undo entry, through `Begin`, `StepFromStart` and `Commit`. Each
   - A subtitle whose `audio` names an audio section moves with that section.
 - **Trim:** drag an edge of a section or a range.
   - Keys keep their times on the cutscene's time, so a trim of a section's start changes the times of its keys.
-  - A trim of the start also changes an animation's or a sound's `offset` (times `speed`) and a sub-sequence's `trim` (times `scale`). So the clip stays where it was.
+  - A trim of the start also changes an animation's or a sound's `offset` (times `speed`) and a sub-sequence's `trim` (times `scale`). So the clip stays where it was. A sub-sequence section with no `trim` plays from the start of its child's range, so the editor reads the child's file for that start.
   - A section keeps its keys, its eases and blend in, and one frame at least.
   - A camera cut or sub-sequence section stops at its neighbours.
 - **Slip:** Alt and a drag of a body. The edges stay and the source moves under them.
@@ -123,7 +124,7 @@ Each drag is one undo entry, through `Begin`, `StepFromStart` and `Commit`. Each
   - The second half has the next section ID and starts where the first ends. Its keys move back by the cut, and its source starts later.
   - The second half takes the ease out, the blend out and the post roll. The first half keeps the ease in, the blend in and the pre roll.
   - Each channel gets a key at the cut in both halves. After a constant key, the value holds. After the other kinds, the value is on a straight line between the keys on each side. A Bezier key's tangents are not kept. The curve editor ([#553](https://github.com/aszecsei/cinnabar/issues/553)) will give exact values.
-- **Delete** deletes the selected sections, events and keys. When a channel loses its last key, the channel is deleted too.
+- **Delete** deletes the selected sections, events and keys. When a channel loses its last key, the channel is deleted too. A subtitle whose audio section is deleted stays, but loses its `audio`, so that it does not name a section that is gone.
 - **Nudge:** `,` and `.` move the selection one frame, and with Shift, 10 frames.
   - The repeats of a held key are one undo entry (`GraphDocument.EditMerged`). The release of the key ends the entry.
   - No entry stays open between repeats, so Save and Undo still run.
@@ -140,7 +141,7 @@ Each drag is one undo entry, through `Begin`, `StepFromStart` and `Commit`. Each
 ### Keys
 
 Each action is a command, so it is in the command palette, and `keybindings.json` can change its key. None of them is in the ribbon.
-- **The timeline's keys are bare letters,** which the viewport and the other panels also use. So each command acts only while the timeline has the keyboard, or while the command palette opened from it has it.
+- **The timeline's keys are bare letters,** which the viewport and the other panels also use. So each command acts only while the timeline has the keyboard, or while the command palette opened from it has it. When another window, such as a floating panel, becomes active, the timeline does not have the keyboard.
 - **Delete.** While the timeline has the keyboard, the scene's Delete deletes the timeline's selection.
 
 | Command | ID | Key |
@@ -159,7 +160,13 @@ Each action is a command, so it is in the command palette, and `keybindings.json
 
 ### Cost
 
-A redraw reads only what `CutsceneTimelineLayout.Visible` gives: the rows in view, and the items in view in each row. It finds the keys with a binary search. A test with 50 tracks and 5,000 keys checks that a redraw takes less than 4 ms.
+A redraw reads only the draw list that `CutsceneTimelineLayout.Visible` gives: the rows in view, and the items in view in each row. It finds the keys with a binary search. Each bar's label is made when the rows are built. `CutsceneFile` keeps an index of its blocks by path, which a change of a keyword line or of the tree drops, so a lookup of a selected path does not search the file.
+
+A test with 50 tracks and 5,000 keys checks two times:
+- the draw list takes less than 4 ms;
+- a drag's step takes less than 50 ms. A step reads the text again, edits it, and builds the rows again.
+
+The test does not measure Avalonia's drawing.
 
 ## Preview
 
