@@ -42,7 +42,7 @@ public sealed class FrameTimeline : Control
 
     readonly ProfilerModel _model;
     readonly Dictionary<string, FormattedText> _labels = [];
-    TimelineView _view = new(0, 1000);
+    TimelineView _view = new(0, 1000, TimelineZoom.Nanoseconds);
     double _scroll;
     FrameCapture? _shown;
     CapturedZone? _hover;
@@ -83,7 +83,7 @@ public sealed class FrameTimeline : Control
         {
             var (start, end) = c.Extent;
             // The frame itself fills the view; zones of the neighbouring frames that overlap it stay reachable by panning.
-            _view = TimelineView.Fit(Math.Max(start, -c.FrameNs / 20), Math.Min(end, c.FrameNs + c.FrameNs / 20), ViewWidth());
+            _view = TimelineView.Fit(Math.Max(start, -c.FrameNs / 20), Math.Min(end, c.FrameNs + c.FrameNs / 20), ViewWidth(), TimelineZoom.Nanoseconds);
         }
         InvalidateVisual();
     }
@@ -198,13 +198,13 @@ public sealed class FrameTimeline : Control
         var width = ViewWidth();
         var view = _view;
         double X(double ns) => Gutter + view.X(ns);
-        var startNs = view.Ns(0);
-        var endNs = view.Ns(width);
+        var startNs = view.At(0);
+        var endNs = view.At(width);
         var lanes = Layout();
 
         using (context.PushClip(new Rect(Gutter, 0, width, size.Height)))
         {
-            var spacing = TimelineGeometry.TickSpacing(view.NsPerPixel);
+            var spacing = TimelineGeometry.TickSpacing(view.PerPixel);
             for (var t = Math.Floor(startNs / spacing) * spacing; t <= endNs; t += spacing)
             {
                 var x = X(t);
@@ -378,9 +378,9 @@ public sealed class FrameTimeline : Control
         {
             return null;
         }
-        var ns = _view.Ns(p.X - Gutter);
+        var ns = _view.At(p.X - Gutter);
         // A zone narrower than a few pixels is still hit when the pointer is near it.
-        var slop = (long)(_view.NsPerPixel * 2);
+        var slop = (long)(_view.PerPixel * 2);
         foreach (var lane in Layout())
         {
             var depth = (int)Math.Floor((p.Y + _scroll - lane.Top - LaneHeader) / RowHeight);
@@ -424,7 +424,7 @@ public sealed class FrameTimeline : Control
         if (e.ClickCount == 2 && point.Properties.IsLeftButtonPressed && HitTest(point.Position) is { } zone)
         {
             Select(zone);
-            _view = TimelineView.Fit(zone.Start, zone.End, ViewWidth());
+            _view = TimelineView.Fit(zone.Start, zone.End, ViewWidth(), TimelineZoom.Nanoseconds);
             InvalidateVisual();
             e.Handled = true;
             return;

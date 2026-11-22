@@ -1,42 +1,51 @@
 namespace Cinnabar.Editor.Tools;
 
-/// <summary>
-/// The part of a frame that the profiler's timeline shows: the time at its left edge and the time per pixel, in
-/// nanoseconds. Zooming keeps the time under the pointer where it is.
-/// </summary>
-public readonly record struct TimelineView(double Start, double NsPerPixel)
+/// <summary>How far a timeline zooms: the least and the most time a pixel shows, in its unit.</summary>
+public readonly record struct TimelineZoom(double Min, double Max)
 {
-    /// <summary>The closest zoom: 10 ns a pixel.</summary>
-    public const double MinNsPerPixel = 10;
+    /// <summary>The profiler's, in nanoseconds: from 10 ns a pixel to a second across 1000 pixels.</summary>
+    public static readonly TimelineZoom Nanoseconds = new(10, 1e6);
 
-    /// <summary>The farthest zoom: a second across 1000 pixels.</summary>
-    public const double MaxNsPerPixel = 1e6;
+    /// <summary>
+    /// The cutscene editor's, in ticks at 60000 a second: from 20 ticks a pixel, a frame at 60 fps across 50 pixels, to
+    /// 600000, about 2.8 hours across 1000 pixels.
+    /// </summary>
+    public static readonly TimelineZoom Ticks = new(20, 600_000);
+}
 
-    public double X(double ns) => (ns - Start) / NsPerPixel;
+/// <summary>
+/// The part of a timeline that a view shows: the time at its left edge and the time per pixel, in the timeline's unit,
+/// which is nanoseconds for the profiler and ticks for the cutscene editor. Zooming keeps the time under the pointer
+/// where it is, within the zoom's limits.
+/// </summary>
+public readonly record struct TimelineView(double Start, double PerPixel, TimelineZoom Zoom)
+{
+    public double X(double time) => (time - Start) / PerPixel;
 
-    public double Ns(double x) => Start + x * NsPerPixel;
+    /// <summary>The time at the pixel x.</summary>
+    public double At(double x) => Start + x * PerPixel;
 
-    public double End(double width) => Ns(width);
+    public double End(double width) => At(width);
 
     /// <summary>The view of [start, end) across width pixels, with a margin of a twentieth on each side.</summary>
-    public static TimelineView Fit(double start, double end, double width)
+    public static TimelineView Fit(double start, double end, double width, TimelineZoom zoom)
     {
         var length = Math.Max(end - start, 1);
         var margin = length / 20;
-        var scale = Math.Clamp((length + 2 * margin) / Math.Max(width, 1), MinNsPerPixel, MaxNsPerPixel);
-        return new TimelineView(start - margin, scale);
+        var scale = Math.Clamp((length + 2 * margin) / Math.Max(width, 1), zoom.Min, zoom.Max);
+        return new TimelineView(start - margin, scale, zoom);
     }
 
     /// <summary>Zooms by factor (above 1 shows more time) around the pixel x.</summary>
     public TimelineView ZoomAbout(double x, double factor)
     {
-        var at = Ns(x);
-        var scale = Math.Clamp(NsPerPixel * factor, MinNsPerPixel, MaxNsPerPixel);
-        return new TimelineView(at - x * scale, scale);
+        var at = At(x);
+        var scale = Math.Clamp(PerPixel * factor, Zoom.Min, Zoom.Max);
+        return this with { Start = at - x * scale, PerPixel = scale };
     }
 
     /// <summary>Moves the view by dx pixels: a drag to the right shows earlier time.</summary>
-    public TimelineView Pan(double dx) => this with { Start = Start - dx * NsPerPixel };
+    public TimelineView Pan(double dx) => this with { Start = Start - dx * PerPixel };
 }
 
 /// <summary>A run of zones that the timeline draws as one block, because each is too narrow to see alone.</summary>
@@ -84,9 +93,9 @@ public static class TimelineGeometry
     };
 
     /// <summary>The spacing of the time ruler's ticks: 1, 2 or 5 times a power of ten, at least minPixels apart.</summary>
-    public static double TickSpacing(double nsPerPixel, double minPixels = 80)
+    public static double TickSpacing(double perPixel, double minPixels = 80)
     {
-        var target = nsPerPixel * minPixels;
+        var target = perPixel * minPixels;
         var power = Math.Pow(10, Math.Floor(Math.Log10(target)));
         foreach (var step in new[] { 1.0, 2.0, 5.0, 10.0 })
         {
@@ -96,5 +105,15 @@ public static class TimelineGeometry
             }
         }
         return power * 10;
+    }
+
+    /// <summary>
+    /// The spacing of a cutscene ruler's ticks: <see cref="TickSpacing"/>, rounded up to whole frames once a frame is at
+    /// least 4 pixels wide, so each tick is on a frame.
+    /// </summary>
+    public static double FrameSpacing(double ticksPerPixel, int frameTicks, double minPixels = 80)
+    {
+        var spacing = TickSpacing(ticksPerPixel, minPixels);
+        return frameTicks / ticksPerPixel >= 4 ? Math.Ceiling(spacing / frameTicks) * frameTicks : spacing;
     }
 }
