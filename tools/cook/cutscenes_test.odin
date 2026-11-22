@@ -2339,3 +2339,86 @@ a_preview_of_a_cutscene_checks_it_and_keeps_the_last_good_blob :: proc(t: ^testi
 	// A preview leaves the cutscene's own blob as the cook wrote it.
 	testing.expect(t, slice.equal(tree_blob(t, tree, intro), cooked))
 }
+
+@(test)
+markers_have_a_time_a_name_and_a_color_and_cook_in_time_order :: proc(t: ^testing.T) {
+	parsed, problems := cutscene_parse(
+		"cutscene 1\nlength = 100\nmarker 2 80 \"Late\"\n\tcolor = \"#102030\"\nmarker 1 20 \"Early\"\ntrack 1 camera_cut \"Cameras\"\n",
+		context.temp_allocator,
+	)
+	testing.expectf(t, len(problems) == 0, "problems: %v", problems)
+	testing.expect_value(t, len(parsed.contents.markers), 2)
+	if len(parsed.contents.markers) == 2 {
+		late, early := parsed.contents.markers[0], parsed.contents.markers[1]
+		testing.expect_value(t, late.name, "Late")
+		testing.expect_value(t, late.time, 80)
+		testing.expect_value(t, late.color, [3]u8{0x10, 0x20, 0x30})
+		testing.expect_value(t, early.color, CUTSCENE_MARKER_COLOR)
+	}
+	data := format.cutscene_write(parsed.contents, context.temp_allocator)
+	blob, ok := format.cutscene_view(data)
+	testing.expect(t, ok)
+	if !ok {
+		return
+	}
+	markers := format.cutscene_markers(data, blob)
+	testing.expect_value(t, len(markers), 2)
+	if len(markers) == 2 {
+		testing.expect_value(t, markers[0].id, 1)
+		testing.expect_value(t, format.blob_string(data, markers[0].name), "Early")
+		testing.expect_value(t, markers[1].time, 80)
+		testing.expect_value(t, markers[1].color, format.Ui_Color{0x10, 0x20, 0x30, 255})
+	}
+
+	Case :: struct {
+		text:     string,
+		line:     int,
+		fragment: string,
+	}
+	cases := []Case {
+		{"cutscene 1\nlength = 10\nmarker 1 4\n", 3, "a marker is `marker <id> <time>"},
+		{"cutscene 1\nlength = 10\nmarker 1 4 \"\"\n", 3, "a marker is `marker <id> <time>"},
+		{
+			"cutscene 1\nlength = 10\nmarker 1 4 \"A\"\nmarker 1 5 \"B\"\n",
+			4,
+			"a marker with the ID 1 already",
+		},
+		{"cutscene 1\nlength = 10\nmarker 1 11 \"A\"\n", 3, "a marker is inside the length (10)"},
+		{
+			"cutscene 1\nlength = 10\nmarker 1 4 \"A\"\n\tcolor = red\n",
+			4,
+			"color is a quoted color",
+		},
+		{
+			"cutscene 1\nlength = 10\nmarker 1 4 \"A\"\n\tcolor = \"#fff\"\n\tcolor = \"#000\"\n",
+			5,
+			"color is set twice",
+		},
+		{
+			"cutscene 1\nlength = 10\nmarker 1 4 \"A\"\n\trate = 30\n",
+			4,
+			"\"rate\" is not a setting of a marker",
+		},
+		{
+			"cutscene 1\nlength = 10\nmarker 1 4 \"A\"\n\ttrigger 1 4 go\n",
+			4,
+			"a trigger comes after a track line",
+		},
+	}
+	for c in cases {
+		_, found := cutscene_parse(c.text, context.temp_allocator)
+		hit := false
+		for p in found {
+			hit ||= p.line == c.line && strings.contains(p.message, c.fragment)
+		}
+		testing.expectf(
+			t,
+			hit,
+			"%q: no problem at line %d with %q: %v",
+			c.text,
+			c.line,
+			c.fragment,
+			found,
+		)
+	}
+}

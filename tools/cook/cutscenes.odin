@@ -14,7 +14,7 @@ import format "cinnabar:engine/asset/format"
 // in ticks, each with sections of keyed channels, a clip, a sound or a sub-sequence (see
 // docs/content/kinds/cutscenes.md). The cook checks the assets that a cutscene names and its sub-sequences' nesting, which
 // it reads from the other cutscenes' sources, so the order of the passes does not matter.
-CUTSCENE_COOK_VERSION :: "cutscenes 12"
+CUTSCENE_COOK_VERSION :: "cutscenes 13"
 
 // CUTSCENE_TEMPLATE is the text of a new cutscene: 10 seconds at 30 frames a second, with no bindings and an empty
 // camera cut track. testdata/cutscenes/template.cutscene is the same text, which the editor's tests read.
@@ -726,6 +726,17 @@ Pending_Value :: struct {
 	line:     int,
 }
 
+// Pending_Marker is a marker, with the line that sets its color.
+@(private = "file")
+Pending_Marker :: struct {
+	contents:   format.Cutscene_Marker_Contents,
+	line:       int,
+	color_line: int,
+}
+
+// CUTSCENE_MARKER_COLOR is the color of a marker without one: amber.
+CUTSCENE_MARKER_COLOR :: [3]u8{0xf5, 0xa6, 0x23}
+
 // Cutscene_Block is the innermost block that a line is in.
 @(private = "file")
 Cutscene_Block :: enum {
@@ -735,13 +746,14 @@ Cutscene_Block :: enum {
 	Section,
 	Channel,
 	Event,
+	Marker,
 }
 
 // cutscene_parse parses a cutscene's text: the first line `cutscene 1`, the header's settings, then `binding <id>
 // "<name>"` and `track <id> <kind> "<name>"` blocks, a track's `section <id> <start> <end>` blocks, a section's `channel
 // <name>` blocks and a channel's `key <time> <value> <interp> [<in> <out>]` lines, and an event track's `trigger <id>
-// <time> <name>` and `range <id> <start> <end> <name>` blocks. A `<name> = <value>` line sets a
-// setting of the innermost block. It checks everything but the assets that the text names, and gives every problem that
+// <time> <name>` and `range <id> <start> <end> <name>` blocks, and the cutscene's `marker <id> <time> "<name>"` blocks. A
+// `<name> = <value>` line sets a setting of the innermost block. It checks everything but the assets that the text names, and gives every problem that
 // it finds; the cutscene is good only without any.
 cutscene_parse :: proc(
 	text: string,
@@ -772,6 +784,7 @@ cutscene_parse :: proc(
 	section_ids := make(map[u32]bool, 16, context.temp_allocator)
 	event_ids := make(map[u32]bool, 16, context.temp_allocator)
 	event_count := 0
+	markers := make([dynamic]Pending_Marker)
 	// The assets that keys name, in the blob's order, and each one's index.
 	guids := make([dynamic]format.Guid)
 	guid_index := make(map[format.Guid]int, 16, context.temp_allocator)
@@ -846,6 +859,41 @@ cutscene_parse :: proc(
 			}
 			b.contents.id, b.contents.name = id, strings.clone(name)
 			append(&bindings, b)
+			continue
+		}
+		if is_block && word == "marker" {
+			block = .Marker
+			m := Pending_Marker {
+				line = line,
+				contents = {color = CUTSCENE_MARKER_COLOR},
+			}
+			id_text, _, after_id := strings.partition(rest, " ")
+			time_text, _, name_text := strings.partition(strings.trim_space(after_id), " ")
+			id, id_ok := cutscene_id(id_text)
+			time, time_ok := cutscene_ticks_text(time_text)
+			name, name_ok := cutscene_name(strings.trim_space(name_text))
+			if !id_ok || !time_ok || !name_ok || name == "" {
+				problem(
+					&found,
+					line,
+					"a marker is `marker <id> <time> \"<name>\"`, with an ID from 1 to 2147483647, a time in whole ticks and a name",
+				)
+			}
+			for other in markers {
+				if id_ok && other.contents.id == id {
+					problem(&found, line, "the cutscene has a marker with the ID %d already", id)
+				}
+			}
+			if len(markers) == format.MAX_CUTSCENE_MARKERS {
+				problem(
+					&found,
+					line,
+					"a cutscene has at most %d markers",
+					format.MAX_CUTSCENE_MARKERS,
+				)
+			}
+			m.contents.id, m.contents.time, m.contents.name = id, time, strings.clone(name)
+			append(&markers, m)
 			continue
 		}
 		if is_block && word == "track" {
@@ -948,7 +996,7 @@ cutscene_parse :: proc(
 			continue
 		}
 		if is_block && (word == "trigger" || word == "range") {
-			if block == .Header || block == .Binding {
+			if block == .Header || block == .Binding || block == .Marker {
 				problem(&found, line, "a %s comes after a track line", word)
 				continue
 			}
@@ -1128,7 +1176,7 @@ cutscene_parse :: proc(
 			problem(
 				&found,
 				line,
-				"a line is binding, track, section, channel, key, trigger, range or `<name> = <value>`",
+				"a line is binding, track, marker, section, channel, key, trigger, range or `<name> = <value>`",
 			)
 			continue
 		}
@@ -1761,6 +1809,22 @@ cutscene_parse :: proc(
 					name,
 				)
 			}
+		case .Marker:
+			m := &markers[len(markers) - 1]
+			if name != "color" {
+				problem(&found, line, "%q is not a setting of a marker: color", name)
+				continue
+			}
+			if m.color_line != 0 {
+				problem(&found, line, "color is set twice")
+				continue
+			}
+			color, ok := cutscene_color(value_text)
+			if !ok {
+				problem(&found, line, "color is %s", CUTSCENE_COLOR_FORM)
+				continue
+			}
+			m.contents.color, m.color_line = color, line
 		case .Channel:
 			switch name {
 			case "ease_in",
@@ -1847,6 +1911,14 @@ cutscene_parse :: proc(
 		)
 	}
 	contents.skip_ranges = skip_ranges[:]
+	marker_contents := make([]format.Cutscene_Marker_Contents, len(markers))
+	for m, i in markers {
+		if length_seen && (m.contents.time < 0 || m.contents.time > contents.length) {
+			problem(&found, m.line, "a marker is inside the length (%d)", contents.length)
+		}
+		marker_contents[i] = m.contents
+	}
+	contents.markers = marker_contents
 	// Bindings: what kind each is, and that its settings suit it.
 	result_bindings := make([]format.Cutscene_Binding_Contents, len(bindings))
 	for &b, i in bindings {

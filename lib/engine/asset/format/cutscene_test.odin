@@ -1358,3 +1358,68 @@ presentation_tracks_with_bad_rows_are_refused :: proc(t: ^testing.T) {
 	_, ok = cutscene_view(data)
 	testing.expect(t, ok, "the blob as it was")
 }
+
+@(test)
+markers_cook_in_time_order_and_bad_ones_are_refused :: proc(t: ^testing.T) {
+	data := cutscene_write(
+		{
+			length = 60000,
+			rate = 30,
+			range_end = 60000,
+			markers = {
+				{id = 2, time = 30000, name = "Late", color = {1, 2, 3}},
+				{id = 3, time = 0, name = "First"},
+				{id = 1, time = 30000, name = "Tie"},
+			},
+		},
+		context.temp_allocator,
+	)
+	blob, ok := cutscene_view(data)
+	if !testing.expect(t, ok) {
+		return
+	}
+	markers := cutscene_markers(data, blob)
+	testing.expect_value(t, len(markers), 3)
+	if len(markers) != 3 {
+		return
+	}
+	// In time order, and at one time, in ID order.
+	testing.expect_value(t, markers[0].id, 3)
+	testing.expect_value(t, markers[1].id, 1)
+	testing.expect_value(t, markers[2].id, 2)
+	testing.expect_value(t, blob_string(data, markers[2].name), "Late")
+	testing.expect_value(t, markers[2].color, Ui_Color{1, 2, 3, 255})
+
+	refused :: proc(t: ^testing.T, data: []byte, what: string) {
+		_, ok := cutscene_view(data)
+		testing.expect(t, !ok, what)
+	}
+	markers[2].time = 60001
+	refused(t, data, "a marker past the length")
+	markers[2].time = 30000
+	markers[0].time = -1
+	refused(t, data, "a marker before 0")
+	markers[0].time = 0
+	markers[1].id = 3
+	markers[1].time = 0
+	refused(t, data, "two markers with one time out of ID order")
+	markers[1].time = 30000
+	markers[1].id = 1
+	markers[0].time = 45000
+	refused(t, data, "markers out of time order")
+	markers[0].time = 0
+	markers[0].color.a = 0
+	refused(t, data, "a marker that is not opaque")
+	markers[0].color.a = 255
+	markers[0].name.size = 0
+	refused(t, data, "a marker without a name")
+	markers[0].name.size = 5
+	markers[0].name.offset = u32(len(data))
+	refused(t, data, "a marker's name outside the blob")
+	markers[0].name.offset = u32(blob.markers.offset)
+	blob.markers.size += 1
+	refused(t, data, "a marker table of part of a record")
+	blob.markers.size -= 1
+	blob.markers.offset = u32(len(data))
+	refused(t, data, "a marker table outside the blob")
+}
