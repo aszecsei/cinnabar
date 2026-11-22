@@ -470,7 +470,9 @@ game_shutdown :: proc(g: ^Game, h: Hooks) {
 	if h.shutdown != nil {
 		h.shutdown(g)
 	}
-	// The players give the world back, and their assets, while the world, the scripts and the assets are alive.
+	// The editor's overrides and cutscene preview, and then the players, give the world back, and their assets, while
+	// the world, the scripts and the assets are alive.
+	editor.end_overrides(&g.editor, &g.world, nil)
 	cutscene.destroy(&g.cutscenes, &g.world)
 	editor.destroy(&g.editor)
 	script.destroy(&g.scripts)

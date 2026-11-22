@@ -1968,7 +1968,7 @@ Mesh_Overlay :: struct {
 	grid_axis:   u8,
 }
 
-// Overrides (see docs/editor/link.md#overrides). In Edit, an owner in the editor, such as the cutscene editor's scrub,
+// Overrides (see docs/editor/link.md#overrides). In Edit, an owner in the editor, such as an animation's pose preview,
 // writes values over the world that mirrors the document, without the document: no operation, no undo entry, and
 // no change to what the editor saves. The editor picks each override's number, which only goes up in a session, so a
 // late message for an override that ended is dropped.

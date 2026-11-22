@@ -30,8 +30,6 @@ Cutscene_Preview :: struct {
 	modified: i64,
 	live:     cutscene.Player_Live,
 	clock:    Preview_Clock,
-	// The time that its evaluation was last laid at, so a lay at the same time does not seek.
-	shown:    Maybe(i32),
 	// The fields that its tracks wrote at its last lift, and the entities that they are on, in the host's heap.
 	held:     [dynamic]cutscene.Field,
 }
@@ -186,7 +184,6 @@ set_preview_time :: proc(e: ^Editor, w: ^ecs.World, p: ^Cutscene_Preview, tick: 
 		return
 	}
 	cutscene.seek(e.cutscenes, &p.live.evaluation, w, data, blob, tick)
-	p.shown = nil
 	if playing, is_playing := &p.clock.(Preview_Playing); is_playing {
 		playing.carry = 0
 	}
@@ -205,8 +202,9 @@ audition_of :: proc(clock: Preview_Clock) -> cutscene.Audition {
 	return .Scrub
 }
 
-// end_cutscene_preview ends the open preview: the world is the document's again, its spawned entities go, its live blob
-// ends, and with a reason, the editor learns why. It gives whether it despawned.
+// end_cutscene_preview ends the open preview: the world is the document's again, whatever its tracks' When Finished
+// says, its voices stop, its spawned entities go, its live blob ends, and with a reason, the editor learns why. It gives
+// whether it despawned.
 @(private)
 end_cutscene_preview :: proc(
 	e: ^Editor,
@@ -220,6 +218,10 @@ end_cutscene_preview :: proc(
 	if !open {
 		return
 	}
+	// A preview is no player that finishes: lift puts back what tracks set to keep wrote too, and a scrub's audition
+	// stops the voices that a finish would let play on.
+	cutscene.lift(e.cutscenes, &p.live.evaluation, w)
+	cutscene.set_audition(&p.live.evaluation, w, .Scrub)
 	despawned = cutscene.close_live(e.cutscenes, w, &p.live) > 0
 	if p.modified != 0 {
 		asset.clear_live(e.assets, p.guid)
@@ -261,7 +263,6 @@ lift_cutscene_preview :: proc(e: ^Editor, w: ^ecs.World) -> (lifted: bool) {
 	for saved in cutscene.saved_fields(&p.live.evaluation, e.platform.frame_allocator) {
 		append(&p.held, saved)
 	}
-	p.shown = nil
 	return cutscene.lift(e.cutscenes, &p.live.evaluation, w)
 }
 
@@ -286,7 +287,6 @@ evaluate_preview :: proc(e: ^Editor, w: ^ecs.World, p: ^Cutscene_Preview) -> boo
 	cutscene.evaluate(s, ev, w, data, blob, .Fixed)
 	cutscene.evaluate(s, ev, w, data, blob, .Late)
 	cutscene.show_live(s, w, &p.live)
-	p.shown = ev.time
 	return true
 }
 

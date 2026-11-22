@@ -10,6 +10,7 @@ import "core:time"
 
 import "cinnabar:core"
 import "cinnabar:core/jobs"
+import "cinnabar:core/testlog"
 import "cinnabar:engine/asset"
 import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/cutscene"
@@ -186,6 +187,7 @@ setup :: proc(t: ^testing.T, to: f32 = 10) -> ^Fixture {
 
 @(private = "file")
 teardown :: proc(f: ^Fixture) {
+	end_overrides(&f.editor, &f.world, nil)
 	destroy(&f.editor)
 	cutscene.destroy(&f.cutscenes, &f.world)
 	asset.destroy(&f.assets)
@@ -216,7 +218,7 @@ write_blob :: proc(t: ^testing.T, f: ^Fixture, guid: format.Guid, blob: []byte, 
 // cutscene_blob moves the hero from 0 m to `to` m over the first second, ramps its Bulb from 0 to 4, and spawns the
 // prop at 3 m.
 @(private = "file")
-cutscene_blob :: proc(f: ^Fixture, to: f32, key: u64 = 1) -> []byte {
+cutscene_blob :: proc(f: ^Fixture, to: f32, key: u64 = 1, hero: u64 = HERO) -> []byte {
 	ramp :: proc(name: string, from, to: f32) -> []format.Cutscene_Channel_Contents {
 		keys := make([]format.Cutscene_Key, 2, context.temp_allocator)
 		keys[0] = {
@@ -256,7 +258,7 @@ cutscene_blob :: proc(f: ^Fixture, to: f32, key: u64 = 1) -> []byte {
 		name     = "Hero",
 		parent   = format.CUTSCENE_NONE,
 		asset    = SCENE_GUID,
-		entity   = HERO,
+		entity   = hero,
 		rotation = {0, 0, 0, 1},
 		scale    = {1, 1, 1},
 		// What a player would suspend on the hero, which the preview does not.
@@ -278,6 +280,8 @@ cutscene_blob :: proc(f: ^Fixture, to: f32, key: u64 = 1) -> []byte {
 		kind     = .Transform,
 		name     = "Walk",
 		binding  = 0,
+		// A player keeps what this track wrote when it finishes. The preview gives the document back all the same.
+		finish   = .Keep,
 		space    = .Absolute,
 		sections = section(ramp("position_x", 0, to)),
 	}
@@ -663,4 +667,32 @@ a_new_unsaved_blob_replaces_the_old_at_the_same_time :: proc(t: ^testing.T) {
 	testing.expect_value(t, x_of(f, f.hero), METER)
 	step(f, open(2, SECOND / 2))
 	testing.expect_value(t, x_of(f, f.hero), 5 * METER)
+}
+
+// A newer unsaved blob whose required binding the scene does not have ends the preview, in the frame, while its writes
+// are on the world. The document comes back all the same, the kept track's too, and the editor learns why.
+@(test)
+a_blob_whose_binding_does_not_resolve_ends_the_preview_and_gives_the_document_back :: proc(
+	t: ^testing.T,
+) {
+	f := setup(t)
+	defer teardown(f)
+	write_blob(t, f, CUTSCENE_GUID, cutscene_blob(f, 10, key = 2), "preview")
+	step(f, open(1, SECOND / 2, unsaved = true))
+	testing.expect_value(t, x_of(f, f.hero), 5 * METER)
+	prop := spawned_prop(f)
+
+	write_blob(t, f, CUTSCENE_GUID, cutscene_blob(f, 10, key = 3, hero = HERO + 1), "preview")
+	(&f.editor.session.cutscene_previews.open.?).modified = 1
+	context.logger = testlog.expected_errors()
+	frame(f, 0)
+	testing.expect_value(t, x_of(f, f.hero), METER)
+	testing.expect_value(t, bulb_of(f), 1)
+	testing.expect(t, !ecs.is_alive(&f.world, prop))
+	_, open := f.editor.session.cutscene_previews.open.?
+	testing.expect(t, !open)
+	ended, told := find_message(step(f), link.Cutscene_Preview_Ended)
+	testing.expect(t, told)
+	testing.expect_value(t, ended, link.Cutscene_Preview_Ended{1, .Failed})
+	testing.expect_value(t, x_of(f, f.hero), METER)
 }
