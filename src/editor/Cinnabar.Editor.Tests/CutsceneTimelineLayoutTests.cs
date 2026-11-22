@@ -33,10 +33,11 @@ public sealed class CutsceneTimelineLayoutTests
         Assert.Equal(fit.At(400), zoomed.At(400), 6);
         Assert.Equal(165, zoomed.PerPixel, 6);
 
-        // Once a frame is 4 pixels wide, ticks are on whole frames: at 25 fps, a frame is 2400 ticks.
-        Assert.Equal(50400, TimelineGeometry.FrameSpacing(500, 2400));
-        Assert.Equal(100000, TimelineGeometry.FrameSpacing(1000, 2400));
-        Assert.Equal(6000, TimelineGeometry.FrameSpacing(30, 2000));
+        // The ruler's ticks are whole seconds where a second fits, and whole frames below: at 25 fps, a frame is 2400 ticks.
+        Assert.Equal(48000, TimelineGeometry.FrameSpacing(500, 2400));
+        Assert.Equal(120000, TimelineGeometry.FrameSpacing(1000, 2400));
+        Assert.Equal(4000, TimelineGeometry.FrameSpacing(30, 2000));
+        Assert.Equal(60000, TimelineGeometry.FrameSpacing(700, 2000));
     }
 
     [Fact]
@@ -132,9 +133,16 @@ public sealed class CutsceneTimelineLayoutTests
         Assert.Contains(200000, snapTo);
         Assert.Equal([0, 30000, 174000, 200000, 300000, 360000, 400000, 420000, 600000, 720000], layout.Edges());
     }
+}
 
+/// <summary>
+/// The timeline's cost at the size the issue names. It measures time, so it runs alone, not beside the other tests.
+/// </summary>
+[Collection(TimingCollection.Name)]
+public sealed class CutsceneTimelineCostTests
+{
     [Fact]
-    public void ATimelineOfFiftyTracksAndFiveThousandKeysRedrawsInUnderFourMilliseconds()
+    public void ATimelineOfFiftyTracksAndFiveThousandKeysMakesItsDrawListInUnderFourMilliseconds()
     {
         var text = new StringBuilder("cutscene 1\nlength = 600000\nrate = 30\nbinding 1 \"Actor\"\n\tpossess = @0123456789abcdef0123456789abcdef/1\n");
         for (var t = 1; t <= 50; t++)
@@ -167,7 +175,35 @@ public sealed class CutsceneTimelineLayoutTests
         }
         times.Sort();
         var median = times[times.Count / 2];
-        TestContext.Current.TestOutputHelper?.WriteLine($"50 tracks, 5000 keys: build {build.Elapsed.TotalMilliseconds:0.00} ms, redraw median {median:0.000} ms, worst {times[^1]:0.000} ms");
+
+        // A drag's step: the text read again from the drag's start, a move, the rows built again, and the draw list.
+        var source = file.Text;
+        var steps = new List<double>();
+        for (var i = 0; i < 20; i++)
+        {
+            var watch = Stopwatch.StartNew();
+            var stepped = CutsceneFile.Parse(source).File!;
+            CutsceneEdits.Move(stepped, ["section:7", "section:7/channel:value/key:50"], 2000 * (i + 1));
+            L.Build(stepped, new HashSet<string>()).Visible(view, 1400, 0, 2000);
+            watch.Stop();
+            steps.Add(watch.Elapsed.TotalMilliseconds);
+        }
+        steps.Sort();
+        // A box over every key.
+        var box = Stopwatch.StartNew();
+        Assert.Equal(5050, layout.InBox(L.Gutter, L.RulerHeight, L.Gutter + 1400, 2000, view, 0).Count);
+        box.Stop();
+        TestContext.Current.TestOutputHelper?.WriteLine(
+            $"50 tracks, 5000 keys: first build {build.Elapsed.TotalMilliseconds:0.00} ms; redraw median {median:0.000} ms, worst {times[^1]:0.000} ms; " +
+            $"drag step median {steps[steps.Count / 2]:0.00} ms, worst {steps[^1]:0.00} ms; box of everything {box.Elapsed.TotalMilliseconds:0.00} ms");
         Assert.True(median < 4, $"a redraw's median is {median:0.000} ms");
+        Assert.True(steps[steps.Count / 2] < 50, $"a drag step's median is {steps[steps.Count / 2]:0.00} ms");
     }
+}
+
+/// <summary>Tests that measure time, which run one at a time and after the others, so that load does not skew them.</summary>
+[CollectionDefinition(Name, DisableParallelization = true)]
+public sealed class TimingCollection
+{
+    public const string Name = "Timing";
 }

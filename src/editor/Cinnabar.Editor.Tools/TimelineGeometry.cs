@@ -108,12 +108,18 @@ public static class TimelineGeometry
     }
 
     /// <summary>
-    /// The spacing of a cutscene ruler's ticks: <see cref="TickSpacing"/>, rounded up to whole frames once a frame is at
-    /// least 4 pixels wide, so each tick is on a frame.
+    /// The spacing of a cutscene ruler's ticks, in ticks at 60000 a second: <see cref="TickSpacing"/> in seconds, 1, 2 or
+    /// 5 times a power of ten, where a second or more fits, and in frames below that, at most a second. So every tick is
+    /// on a frame, and timecode labels are round.
     /// </summary>
     public static double FrameSpacing(double ticksPerPixel, int frameTicks, double minPixels = 80)
     {
-        var spacing = TickSpacing(ticksPerPixel, minPixels);
-        return frameTicks / ticksPerPixel >= 4 ? Math.Ceiling(spacing / frameTicks) * frameTicks : spacing;
+        const double second = 60000;
+        if (ticksPerPixel * minPixels >= second)
+        {
+            return TickSpacing(ticksPerPixel / second, minPixels) * second;
+        }
+        var frames = Math.Max(TickSpacing(ticksPerPixel / frameTicks, minPixels), 1);
+        return Math.Min(frames * frameTicks, second);
     }
 }

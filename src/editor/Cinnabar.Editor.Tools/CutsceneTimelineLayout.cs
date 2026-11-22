@@ -18,7 +18,11 @@ public enum CutsceneItemKind
 }
 
 /// <summary>Something that a timeline row draws: a section or a range as a bar, or a trigger or a key at its time, on the cutscene's time.</summary>
-public sealed record CutsceneTimelineItem(CutsceneItemKind Kind, int Start, int End, string Path);
+public sealed record CutsceneTimelineItem(CutsceneItemKind Kind, int Start, int End, string Path)
+{
+    /// <summary>What a section's bar says: a subtitle's line, a presentation's kind, a camera cut's camera, or the ID.</summary>
+    public string? Label { get; init; }
+}
 
 /// <summary>A row of the timeline: a binding, a track or one of a track's channels, with what it draws.</summary>
 public sealed class CutsceneTimelineRow
@@ -171,7 +175,7 @@ public sealed class CutsceneTimelineLayout
             .ToList();
         foreach (var track in master)
         {
-            AddTrack(rows, track, 0, toggled);
+            AddTrack(rows, file, track, 0, toggled);
         }
         foreach (var binding in file.Bindings)
         {
@@ -189,7 +193,7 @@ public sealed class CutsceneTimelineLayout
             }
             foreach (var track in tracks)
             {
-                AddTrack(rows, track, 1, toggled);
+                AddTrack(rows, file, track, 1, toggled);
             }
         }
         for (var i = 0; i < rows.Count; i++)
@@ -199,7 +203,7 @@ public sealed class CutsceneTimelineLayout
         return new CutsceneTimelineLayout(rows, file.Length ?? 0, file.Rate, CutsceneEdits.RangeOf(file));
     }
 
-    static void AddTrack(List<CutsceneTimelineRow> rows, CutsceneBlock track, int depth, IReadOnlySet<string> toggled)
+    static void AddTrack(List<CutsceneTimelineRow> rows, CutsceneFile file, CutsceneBlock track, int depth, IReadOnlySet<string> toggled)
     {
         var path = CutsceneFile.PathOf(track);
         var label = string.IsNullOrEmpty(track.Name) ? track.TrackKind ?? "track" : track.Name;
@@ -219,10 +223,10 @@ public sealed class CutsceneTimelineLayout
             switch (child)
             {
                 case { Kind: CutsceneBlockKind.Section, Start: { } s, End: { } e }:
-                    row.Bars.Add(new CutsceneTimelineItem(CutsceneItemKind.Section, s, e, CutsceneFile.PathOf(child)));
-                    foreach (var key in child.Descendants().Where(b => b.Kind == CutsceneBlockKind.Key && b.Start != null))
+                    row.Bars.Add(new CutsceneTimelineItem(CutsceneItemKind.Section, s, e, CutsceneFile.PathOf(child)) { Label = SectionLabel(file, track, child) });
+                    foreach (var (key, keyPath) in Keys(child, null))
                     {
-                        row.Keys.Add(new CutsceneTimelineItem(CutsceneItemKind.Key, s + key.Start!.Value, s + key.Start!.Value, CutsceneFile.PathOf(key)));
+                        row.Keys.Add(new CutsceneTimelineItem(CutsceneItemKind.Key, s + key.Start!.Value, s + key.Start!.Value, keyPath));
                     }
                     break;
                 case { Kind: CutsceneBlockKind.Range, Start: { } s, End: { } e }:
@@ -250,19 +254,49 @@ public sealed class CutsceneTimelineLayout
             };
             foreach (var section in track.Children.Where(c => c.Kind == CutsceneBlockKind.Section && c.Start != null))
             {
-                foreach (var block in section.Children.Where(c => c.Kind == CutsceneBlockKind.Channel && c.Name == name))
+                foreach (var (key, keyPath) in Keys(section, name))
                 {
-                    foreach (var key in block.Children.Where(k => k.Kind == CutsceneBlockKind.Key && k.Start != null))
-                    {
-                        var at = section.Start!.Value + key.Start!.Value;
-                        channel.Keys.Add(new CutsceneTimelineItem(CutsceneItemKind.Key, at, at, CutsceneFile.PathOf(key)));
-                    }
+                    var at = section.Start!.Value + key.Start!.Value;
+                    channel.Keys.Add(new CutsceneTimelineItem(CutsceneItemKind.Key, at, at, keyPath));
                 }
             }
             channel.Keys.Sort((a, b) => a.Start.CompareTo(b.Start));
             rows.Add(channel);
         }
     }
+
+    // A section's keys with a time, of one channel or of all, with their paths, counted here rather than looked up for
+    // each key.
+    static IEnumerable<(CutsceneBlock Key, string Path)> Keys(CutsceneBlock section, string? channel)
+    {
+        var sectionPath = CutsceneFile.PathOf(section);
+        foreach (var block in section.Children.Where(c => c.Kind == CutsceneBlockKind.Channel && (channel == null || c.Name == channel)))
+        {
+            var index = 0;
+            foreach (var key in block.Children)
+            {
+                if (key.Kind != CutsceneBlockKind.Key)
+                {
+                    continue;
+                }
+                if (key.Start != null)
+                {
+                    yield return (key, $"{sectionPath}/channel:{block.Name}/key:{index}");
+                }
+                index++;
+            }
+        }
+    }
+
+    // What a section's bar says: a presentation section's line or kind, a camera cut's camera, or else its ID.
+    static string SectionLabel(CutsceneFile file, CutsceneBlock track, CutsceneBlock section) => track.TrackKind switch
+    {
+        "presentation" => section.Get("text") is { } text ? TextQuote.Unquote(text) ?? text : section.Get("kind") ?? "",
+        "camera_cut" => section.Get("camera") is { } camera && CutsceneFile.TryParseTicks(camera, out var id)
+            ? file.Bindings.FirstOrDefault(b => b.Id == id)?.Name ?? $"binding {id}"
+            : "",
+        _ => $"#{section.Id}",
+    };
 
     /// <summary>The row at a y in the control, or null over the ruler or under the rows.</summary>
     public CutsceneTimelineRow? RowAt(double y, double scrollY)
