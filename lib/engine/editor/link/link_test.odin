@@ -109,6 +109,9 @@ every_message_round_trips :: proc(t: ^testing.T) {
 					},
 				},
 			},
+			held = {{component = 1, field = 7}},
+			shown = {{id = 1, data = {4, 5, 6}}},
+			shown_preview = {ticket = 3, tick = 1200},
 		},
 		Profile_Summary {
 			first_frame = 10,

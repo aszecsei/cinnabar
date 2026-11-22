@@ -458,13 +458,20 @@ a_preview_shows_the_cutscene_at_each_time_and_close_gives_the_document_back :: p
 		)
 	}
 
-	// The editor hears the document's values, with the fields that the preview holds.
+	// The editor hears the document's values, with the fields that the preview holds, and what the world shows, with
+	// the preview's ticket and time.
+	step(f, link.Cutscene_Preview_Time{ticket = 1, tick = SECOND / 2})
 	messages := step(f, link.Watch_Entity{entity = u64(f.hero)})
 	values, sent := find_message(messages, link.Entity_Values)
 	if !sent {
 		values, sent = find_message(step(f), link.Entity_Values)
 	}
 	testing.expect(t, sent)
+	// What the world shows is taken before a poll, so it comes from the poll after the watch.
+	if len(values.shown) == 0 {
+		values, sent = find_message(step(f), link.Entity_Values)
+		testing.expect(t, sent)
+	}
 	testing.expect(
 		t,
 		slice.contains(
@@ -479,6 +486,21 @@ a_preview_shows_the_cutscene_at_each_time_and_close_gives_the_document_back :: p
 			link.Held_Field{f.bulb, format.scene_field_hash("brightness")},
 		),
 	)
+	document_x, shown_x: Maybe(i64)
+	for c in values.components {
+		if c.id == u64(ecs.TRANSFORM_ID) {
+			document_x = (^ecs.Transform)(raw_data(c.data)).position.raw.x
+		}
+	}
+	for c in values.shown {
+		if c.id == u64(ecs.TRANSFORM_ID) {
+			shown_x = (^ecs.Transform)(raw_data(c.data)).position.raw.x
+		}
+	}
+	testing.expect_value(t, document_x, METER)
+	sx, has_shown := shown_x.?
+	testing.expectf(t, has_shown && abs(sx - 5 * METER) <= 1, "shown x %v", shown_x)
+	testing.expect_value(t, values.shown_preview, link.Shown_Preview{ticket = 1, tick = SECOND / 2})
 
 	messages = step(f, link.Cutscene_Preview_Close{ticket = 1})
 	_, answered := find_message(messages, link.Cutscene_Preview_Ended)

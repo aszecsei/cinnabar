@@ -106,6 +106,17 @@ public sealed class WorldModel
     public bool IsHeld(ulong handle, ulong component, ulong field) =>
         _values.TryGetValue(handle, out var values) && values.Held.Any(h => h.Component == component && h.Field == field);
 
+    /// <summary>
+    /// A held entity's component as the world showed it, with the overrides and the cutscene preview over the document,
+    /// or null when the game sent none (see docs/editor/link.md#overrides). It comes a poll after the hold begins.
+    /// </summary>
+    public byte[]? ShownOf(ulong handle, ulong component) =>
+        _values.TryGetValue(handle, out var values) && values.Shown.FirstOrDefault(c => c.Id == component) is { } shown ? shown.Data : null;
+
+    /// <summary>The cutscene preview and its time when the world showed a watched entity's values, or null without them.</summary>
+    public ShownPreview? ShownPreviewOf(ulong handle) =>
+        _values.TryGetValue(handle, out var values) && values.Shown.Length > 0 ? values.ShownPreview : null;
+
     public EntityNode? Find(ulong handle) => _entities.GetValueOrDefault(handle);
 
     /// <summary>The entity that the scene with the number made with this scene ID, or null.</summary>

@@ -58,6 +58,21 @@ public class LinkWireTests
     }
 
     [Fact]
+    public void AnEntitysValuesRoundTripWithWhatTheWorldShows()
+    {
+        var message = new EntityValues(9, [new ComponentValue(1, [1, 2, 3])], [], [new HeldField(1, 7)],
+            [new ComponentValue(1, [4, 5, 6])], new ShownPreview(3, 1200));
+        var frame = LinkFrame.Encode(message);
+        var header = LinkFrame.ReadHeader(frame);
+        var read = Assert.IsType<EntityValues>(LinkFrame.Decode(header.Kind, frame.AsSpan(LinkFrame.HeaderSize), LinkMessages.Read));
+
+        Assert.Equal([1, 2, 3], Assert.Single(read.Components).Data);
+        Assert.Equal(new HeldField(1, 7), Assert.Single(read.Held));
+        Assert.Equal([4, 5, 6], Assert.Single(read.Shown).Data);
+        Assert.Equal(new ShownPreview(3, 1200), read.ShownPreview);
+    }
+
+    [Fact]
     public void ANavProbeRoundTrips()
     {
         var message = new NavProbe([new NavProbePoint([1, -2, 1L << 40]), new NavProbePoint([0, 0, 3])]);

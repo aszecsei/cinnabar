@@ -318,12 +318,23 @@ Unwatch_Entity :: struct {
 
 // Game to editor: a watched entity's values, at most twenty times a second, and only when they changed.
 Entity_Values :: struct {
-	entity:     u64,
-	components: []Component_Value,
-	behaviours: []Behaviour_Value,
+	entity:        u64,
+	components:    []Component_Value,
+	behaviours:    []Behaviour_Value,
 	// The fields that overrides hold (see Override_Frame). components has the document's values of them, not the
 	// overrides'.
-	held:       []Held_Field,
+	held:          []Held_Field,
+	// For an entity with a held field, each component's bytes as the world shows them, with the overrides and the
+	// cutscene preview over the document. Empty otherwise.
+	shown:         []Component_Value,
+	// The cutscene preview that shown was laid with, and its time then. The ticket is 0 when no preview is open.
+	shown_preview: Shown_Preview,
+}
+
+// The cutscene preview and its time when the world showed an entity's values (see Entity_Values.shown).
+Shown_Preview :: struct {
+	ticket: u64,
+	tick:   i32,
 }
 
 // A component's bytes, as they are in memory. The editor reads the fields with the Field_Info offsets.

@@ -342,9 +342,16 @@ poll :: proc(
 	}
 	// The editor's messages edit the document, and what goes back describes it, so the overrides are off the world
 	// until the poll ends (see overrides.odin). The frame propagates their transforms after the poll.
+	frame := e.platform.frame_allocator
+	now := e.platform.time_seconds()
+	values_due := now - e.session.last_values >= VALUES_INTERVAL
+	// What the world shows goes to the editor beside the document's values, so it is taken before the lift.
+	shown: Shown
+	if values_due {
+		shown = capture_shown(e, w, frame)
+	}
 	lift_overrides(e, w)
 	defer lay_overrides(e, w)
-	frame := e.platform.frame_allocator
 	for m in incoming {
 		message, ok := link.decode_message(m.kind, m.payload, frame)
 		if !ok {
@@ -515,7 +522,6 @@ poll :: proc(
 		link.write_message(out, agent_actions(e, frame))
 		s.types_sent = true
 	}
-	now := e.platform.time_seconds()
 	// A snapshot makes the editor forget which entities overrides write, so it hears them again.
 	if snapshot {
 		s.overrides.entities_sent = 0
@@ -526,9 +532,9 @@ poll :: proc(
 			link.write_message(out, message)
 		}
 	}
-	if now - s.last_values >= VALUES_INTERVAL {
+	if values_due {
 		s.last_values = now
-		send_values(e, w, scripts, out, frame)
+		send_values(e, w, scripts, shown, out, frame)
 		send_animators(e, w, out, frame)
 		send_agents(e, out, frame)
 		send_reflection_probes(e, w, out)
@@ -800,6 +806,7 @@ send_values :: proc(
 	e: ^Editor,
 	w: ^ecs.World,
 	scripts: ^script.Runtime,
+	shown: Shown,
 	out: ^[dynamic]byte,
 	allocator: runtime.Allocator,
 ) {
@@ -810,21 +817,20 @@ send_values :: proc(
 			continue
 		}
 		i += 1
-		components := ecs.entity_components(w, watched.entity)
-		values := make([]link.Component_Value, len(components), allocator)
-		for id, j in components {
-			values[j].id = u64(id)
-			info := ecs.registry_find(&w.registry, id)
-			data := ecs.get_raw(w, watched.entity, id)
-			if info != nil && data != nil {
-				values[j].data = ([^]u8)(data)[:info.size]
-			}
-		}
+		held := held_fields(e, w, watched.entity, allocator)
 		message := link.Entity_Values {
 			entity     = u64(watched.entity),
-			components = values,
+			components = component_values(w, watched.entity, allocator),
 			behaviours = behaviour_values(scripts, watched.entity, allocator),
-			held       = held_fields(e, w, watched.entity, allocator),
+			held       = held,
+		}
+		if len(held) > 0 {
+			for s in shown.entities {
+				if s.entity == watched.entity {
+					message.shown = s.values
+					message.shown_preview = shown.preview
+				}
+			}
 		}
 		encoded := make([dynamic]byte, allocator)
 		link.write_message(&encoded, message)
