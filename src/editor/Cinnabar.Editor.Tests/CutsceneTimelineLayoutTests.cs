@@ -133,6 +133,63 @@ public sealed class CutsceneTimelineLayoutTests
         Assert.Contains(200000, snapTo);
         Assert.Equal([0, 30000, 174000, 200000, 300000, 360000, 400000, 420000, 600000, 720000], layout.Edges());
     }
+
+    [Fact]
+    public void AMarkerIsOnTheRulerOverTheHandlesAndIsATargetAndAnEdge()
+    {
+        var file = Intro();
+        CutsceneEdits.AddMarker(file, 720000, "End");
+        CutsceneEdits.AddMarker(file, 100000, "Beat");
+        file.Find("marker:2")!.Set("color", "\"#336699\"");
+        var layout = L.Build(file, new HashSet<string>());
+        Assert.Equal([("marker:2", 100000, "Beat", "#336699"), ("marker:1", 720000, "End", (string?)null)],
+            layout.Markers.Select(m => (m.Path, m.Start, m.Label!, m.Color)));
+        // The flag at the length is the marker's, not the length's handle, and under the flags, the handle is.
+        Assert.Equal((CutsceneHitKind.Marker, "marker:1"), (layout.HitTest(X(720000) + 2, 4, Thousand, 0).Kind, layout.HitTest(X(720000) + 2, 4, Thousand, 0).Paths[0]));
+        Assert.Equal(CutsceneHitKind.Length, layout.HitTest(X(720000), L.MarkerHeight + 2, Thousand, 0).Kind);
+        Assert.Equal(CutsceneHitKind.Ruler, layout.HitTest(X(300000), 4, Thousand, 0).Kind);
+        Assert.Contains(100000, layout.SnapTargets(new HashSet<string>()));
+        Assert.DoesNotContain(100000, layout.SnapTargets(new HashSet<string> { "marker:2" }));
+        Assert.Contains(100000, layout.Edges());
+        Assert.Equal((100000, 720000), layout.SpanOf(new HashSet<string> { "marker:1", "marker:2" }));
+    }
+
+    [Fact]
+    public void AFilterShowsTheTracksThatItNamesOrThatHaveKeysInItsSpan()
+    {
+        var file = Intro();
+        string[] Labels(CutsceneRowFilter filter) => [.. L.Build(file, new HashSet<string>(), filter).Rows.Select(r => r.Label)];
+        // A binding that the text names shows all of its tracks; a track that it names shows with its binding.
+        Assert.Equal(["Walking Fox", "Fox walks", "Fox walk clip"], Labels(new("fox", null)));
+        Assert.Equal(["Extra Guard", "Bark"], Labels(new("BARK", null)));
+        Assert.Equal(["Music"], Labels(new("music", null)));
+        Assert.Empty(Labels(new("nothing", null)));
+        Assert.Equal(L.Build(file, new HashSet<string>()).Rows.Select(r => r.Label), Labels(CutsceneRowFilter.None));
+
+        // With a span, only the tracks with a key in it, and the bindings of those.
+        var keyed = L.Build(file, new HashSet<string>(), new("", (150000, 250000)));
+        Assert.Contains(keyed.Rows, r => r.Label == "Music");
+        Assert.All(keyed.Rows.Where(r => r.Kind == CutsceneRowKind.Track), r => Assert.Contains(r.Keys, k => k.Start is >= 150000 and <= 250000));
+        Assert.All(keyed.Rows.Where(r => r.Kind == CutsceneRowKind.Binding), b => Assert.Contains(keyed.Rows, r => r.Depth == 1 && r.Top == b.Top + L.RowHeight));
+        Assert.True(keyed.Rows.Count < L.Build(file, new HashSet<string>()).Rows.Count);
+    }
+
+    [Fact]
+    public void ATracksHeaderHasMuteSoloAndLockAtItsRightEnd()
+    {
+        var file = Intro();
+        file.Find("track:7")!.Set("muted", "true");
+        var layout = L.Build(file, new HashSet<string>());
+        var music = Y(layout, "track:7");
+        CutsceneHitKind Hit(double x, double y) => layout.HitTest(x, y, Thousand, 0).Kind;
+        Assert.Equal(CutsceneHitKind.Mute, Hit(L.MuteX + 5, music));
+        Assert.Equal(CutsceneHitKind.Solo, Hit(L.SoloX + 5, music));
+        Assert.Equal(CutsceneHitKind.Lock, Hit(L.Gutter - 5, music));
+        Assert.Equal(CutsceneHitKind.Header, Hit(L.MuteX - 5, music));
+        Assert.Equal(CutsceneHitKind.Header, Hit(L.MuteX + 5, Y(layout, "binding:1", CutsceneRowKind.Binding)));
+        Assert.True(layout.Rows.First(r => r.Path == "track:7").AssetMuted);
+        Assert.False(layout.Rows.First(r => r.Path == "track:5").AssetMuted);
+    }
 }
 
 /// <summary>
@@ -184,7 +241,8 @@ public sealed class CutsceneTimelineCostTests
             var watch = Stopwatch.StartNew();
             var stepped = CutsceneFile.Parse(source).File!;
             CutsceneEdits.Move(stepped, ["section:7", "section:7/channel:value/key:50"], 2000 * (i + 1));
-            L.Build(stepped, new HashSet<string>()).Visible(view, 1400, 0, 2000);
+            // With the search box's text, which every track's name holds, so the filter runs and keeps every row.
+            L.Build(stepped, new HashSet<string>(), new CutsceneRowFilter("track", null)).Visible(view, 1400, 0, 2000);
             watch.Stop();
             steps.Add(watch.Elapsed.TotalMilliseconds);
         }

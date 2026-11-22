@@ -284,6 +284,215 @@ public sealed class CutsceneTimelineTests : IDisposable
         Assert.Equal(800000, editor.File.Length);
     }
 
+    // The bark's section as another section with an ID and a span, for a copy of it.
+    static string BarkCopy(int id, int start, int end) => Bark.Replace("section 3 360000 420000", $"section {id} {start} {end}");
+
+    [Fact]
+    public void MAddsAMarkerThatTheRulerDragsAndEscPutsBack()
+    {
+        var (shell, editor, input, text) = Intro();
+        editor.TimelineFocused = true;
+        editor.SetPlayhead(100000);
+        shell.Commands.Get(EditorCommands.CutsceneAddMarker).Execute();
+        var marked = text.Replace("skip_color = \"#000000\"\n", "skip_color = \"#000000\"\nmarker 1 100000 \"Marker 1\"\n");
+        Assert.Equal(marked, editor.Document.Text);
+        Assert.Equal(["marker:1"], editor.SelectedPaths);
+        // M again at the marker's time selects it and adds none.
+        shell.Commands.Get(EditorCommands.CutsceneAddMarker).Execute();
+        Assert.Equal(["Add Marker"], editor.Document.History);
+
+        // A drag of its flag snaps to the bark's start, as one entry.
+        Drag(input, X(100000) + 2, 4, X(359000) + 2);
+        Assert.Equal(marked.Replace("marker 1 100000", "marker 1 360000"), editor.Document.Text);
+        Assert.Equal(["Add Marker", "Move"], editor.Document.History);
+
+        // Esc during a drag leaves the text and the history.
+        Assert.True(input.Press(X(360000) + 2, 4, MouseButton.Left, KeyModifiers.None));
+        input.Move(X(500000), 4, KeyModifiers.None);
+        Assert.Contains("marker 1 498000", editor.Document.Text);
+        Assert.True(input.Escape());
+        Assert.Equal(marked.Replace("marker 1 100000", "marker 1 360000"), editor.Document.Text);
+        Assert.Equal(["Add Marker", "Move"], editor.Document.History);
+
+        // Ctrl+Right stops at the marker, and the scene's Delete deletes it.
+        editor.SetPlayhead(300000);
+        shell.Commands.Get(EditorCommands.CutsceneNextEdge).Execute();
+        Assert.Equal(360000, editor.Playhead);
+        shell.Commands.Get(EditorCommands.DeleteEntity).Execute();
+        Assert.Equal(text, editor.Document.Text);
+        shell.Commands.Get("edit.undo").Execute();
+        shell.Commands.Get("edit.undo").Execute();
+        shell.Commands.Get("edit.undo").Execute();
+        Assert.Equal(text, editor.Document.Text);
+    }
+
+    [Fact]
+    public void CopyCutPasteAndDuplicateGiveTheExactTextAndUndoGoesBackOverThem()
+    {
+        var (shell, editor, input, text) = Intro();
+        input.Press(X(390000), Y(input, "track:3"), MouseButton.Left, KeyModifiers.None);
+        input.Release(X(390000), Y(input, "track:3"), KeyModifiers.None);
+        Assert.False(shell.Commands.Get(EditorCommands.CutsceneCopy).CanExecute);
+        editor.TimelineFocused = true;
+        var id = editor.File.NextId(Cinnabar.Editor.Document.CutsceneBlockKind.Section);
+
+        shell.Commands.Get(EditorCommands.CutsceneCopy).Execute();
+        Assert.NotNull(shell.CutsceneClipboard);
+        Assert.Empty(editor.Document.History);
+        editor.SetPlayhead(500000);
+        shell.Commands.Get(EditorCommands.CutscenePaste).Execute();
+        var pasted = text.Replace(Bark, Bark + BarkCopy(id, 500000, 560000));
+        Assert.Equal(pasted, editor.Document.Text);
+        Assert.Equal([$"section:{id}"], editor.SelectedPaths);
+
+        // Ctrl+D, the scene's Duplicate, puts a copy right after the selection while the timeline has the keyboard.
+        shell.Commands.Get(EditorCommands.DuplicateEntity).Execute();
+        var duplicated = text.Replace(Bark, Bark + BarkCopy(id, 500000, 560000) + BarkCopy(id + 1, 560000, 620000));
+        Assert.Equal(duplicated, editor.Document.Text);
+        Assert.Equal([$"section:{id + 1}"], editor.SelectedPaths);
+
+        // Cut copies and deletes in one entry.
+        shell.Commands.Get(EditorCommands.CutsceneCut).Execute();
+        Assert.Equal(pasted, editor.Document.Text);
+        Assert.Equal(["Paste", "Duplicate", "Cut"], editor.Document.History);
+        editor.SetPlayhead(0);
+        shell.Commands.Get(EditorCommands.CutscenePaste).Execute();
+        // The cut section's ID is free again.
+        Assert.Contains(BarkCopy(id + 1, 0, 60000), editor.Document.Text);
+
+        for (var i = 0; i < 4; i++)
+        {
+            shell.Commands.Get("edit.undo").Execute();
+        }
+        Assert.Equal(text, editor.Document.Text);
+
+        // Without the keyboard, the timeline's copy and paste leave their keys to the rest of the editor, and Duplicate
+        // is the scene's.
+        editor.TimelineFocused = false;
+        editor.Select([$"section:3"], SelectMode.Replace);
+        Assert.False(shell.Commands.Get(EditorCommands.CutsceneCopy).CanExecute);
+        Assert.False(shell.Commands.Get(EditorCommands.CutscenePaste).CanExecute);
+        shell.Commands.Get(EditorCommands.DuplicateEntity).Execute();
+        Assert.Equal(text, editor.Document.Text);
+    }
+
+    [Fact]
+    public void APasteOntoABindingWithoutTheTrackAsksFirst()
+    {
+        var (shell, editor, input, text) = Intro();
+        editor.TimelineFocused = true;
+        editor.Select(["section:3"], SelectMode.Replace);
+        editor.Copy();
+        IReadOnlyList<string>? asked = null;
+        editor.PasteTracksRequested += kinds => asked = kinds;
+        // The fox has no audio track: the paste asks, and No pastes nothing.
+        editor.Select(["binding:1"], SelectMode.Replace);
+        editor.Paste();
+        Assert.Equal(["audio"], asked);
+        Assert.Equal(text, editor.Document.Text);
+        Assert.Empty(editor.Document.History);
+        // Yes adds an audio track like the bark's, for the fox, in the paste's one entry.
+        var track = editor.File.NextId(Cinnabar.Editor.Document.CutsceneBlockKind.Track);
+        editor.Paste(addTracks: true);
+        Assert.Equal(["Paste"], editor.Document.History);
+        var added = editor.File.Find($"track:{track}")!;
+        Assert.Equal(("audio", "Bark", "1"), (added.TrackKind, added.Name, added.Get("binding")));
+        Assert.Equal(CutsceneEdits.TrackOf(editor.Selected!), added);
+        shell.Commands.Get("edit.undo").Execute();
+        Assert.Equal(text, editor.Document.Text);
+    }
+
+    [Fact]
+    public void TheFilterHidesTracksAndTakesTheirBlocksOutOfTheSelection()
+    {
+        var (_, editor, input, _) = Intro();
+        editor.Select(["section:3", "marker:9"], SelectMode.Replace);
+        editor.SetFilterText(" FOX ");
+        Assert.Equal("FOX", editor.FilterText);
+        Assert.Equal(["Walking Fox", "Fox walks", "Fox walk clip"], input.Layout.Rows.Select(r => r.Label));
+        // The bark is on the guard, which the filter hides.
+        Assert.Empty(editor.SelectedPaths);
+        // Nor can a click or a paste select it while the filter hides it.
+        editor.Select(["section:3", "section:1"], SelectMode.Replace);
+        Assert.Equal(["section:1"], editor.SelectedPaths);
+        editor.SetFilterText("");
+        Assert.Contains(input.Layout.Rows, r => r.Label == "Bark");
+
+        // Keys under the selection keep the span that the selection had: the music's key at 200000.
+        editor.Select(["section:6"], SelectMode.Replace);
+        editor.SetKeysUnderSelection(true);
+        Assert.True(editor.KeysUnderSelection);
+        Assert.Equal((200000, 400000), editor.RowFilter.KeysIn);
+        Assert.Contains(input.Layout.Rows, r => r.Label == "Music");
+        editor.Select([], SelectMode.Replace);
+        Assert.Equal((200000, 400000), editor.RowFilter.KeysIn);
+        editor.SetKeysUnderSelection(false);
+        Assert.True(editor.RowFilter.IsNone);
+    }
+
+    [Fact]
+    public void MuteAndSoloAreTheUsersAndSayWhatThePreviewPlays()
+    {
+        var (shell, editor, input, _) = Intro();
+        Assert.True(editor.Audible(7));
+        input.Press(L.MuteX + 5, Y(input, "track:7"), MouseButton.Left, KeyModifiers.None);
+        Assert.Contains(7, editor.Muted);
+        Assert.False(editor.Audible(7));
+        Assert.True(editor.Audible(3));
+        input.Press(L.SoloX + 5, Y(input, "track:3"), MouseButton.Left, KeyModifiers.None);
+        Assert.Contains(3, editor.Soloed);
+        Assert.True(editor.Audible(3));
+        Assert.False(editor.Audible(8));
+        // A muted track that is soloed stays muted.
+        editor.SetSoloed(7, true);
+        Assert.False(editor.Audible(7));
+        // A solo of a track that is gone silences nothing.
+        editor.SetSoloed(99, true);
+        editor.SetSoloed(3, false);
+        editor.SetSoloed(7, false);
+        Assert.True(editor.Audible(8));
+        editor.SetSoloed(99, false);
+        editor.SetSoloed(3, true);
+        editor.SetSoloed(7, true);
+        Assert.Empty(editor.Document.History);
+        var settings = File.ReadAllText(Path.Combine(_temp.Path, "settings", EditorSettings.CutsceneTimelineFileName));
+        Assert.Contains("\"Muted\":[7]", settings);
+        Assert.Contains("\"Soloed\":[3,7]", settings);
+
+        // The commands act on the selected track.
+        editor.TimelineFocused = true;
+        editor.Select(["section:3"], SelectMode.Replace);
+        shell.Commands.Get(EditorCommands.CutsceneSoloTrack).Execute();
+        shell.Commands.Get(EditorCommands.CutsceneMuteTrack).Execute();
+        Assert.Equal([7], editor.Soloed);
+        Assert.Equal([3, 7], editor.Muted.Order());
+
+        // A track that the asset mutes plays in no preview, and its M is the asset's.
+        editor.SetMuted(3, false);
+        editor.SetMuted(7, false);
+        editor.SetSoloed(7, false);
+        editor.EditSelected("Mute", b => CutsceneEdits.TrackOf(b)!.Set("muted", "true"));
+        Assert.False(editor.Audible(3));
+        input.Refresh();
+        input.Press(L.MuteX + 5, Y(input, "track:3"), MouseButton.Left, KeyModifiers.None);
+        Assert.DoesNotContain(3, editor.Muted);
+        Assert.Contains("{}", File.ReadAllText(Path.Combine(_temp.Path, "settings", EditorSettings.CutsceneTimelineFileName)));
+    }
+
+    [Fact]
+    public void ASettingsFileFromBeforeMuteAndSoloStillReads()
+    {
+        Directory.CreateDirectory(Path.Combine(_temp.Path, "settings"));
+        File.WriteAllText(Path.Combine(_temp.Path, "settings", EditorSettings.CutsceneTimelineFileName), $"{{\"{Guid}\":{{\"ShowFrames\":true,\"Locked\":[3]}}}}");
+        var (_, editor, _, _) = Intro();
+        Assert.True(editor.ShowFrames);
+        Assert.Equal([3], editor.Locked);
+        Assert.Empty(editor.Muted);
+        Assert.Empty(editor.Soloed);
+        editor.SetMuted(5, true);
+        Assert.Contains("\"Muted\":[5]", File.ReadAllText(Path.Combine(_temp.Path, "settings", EditorSettings.CutsceneTimelineFileName)));
+    }
+
     [Fact]
     public void TheTimelinesCommandsActOnlyWhileItHasTheKeyboardAndDeleteActsOnIt()
     {

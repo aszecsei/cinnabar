@@ -10,8 +10,8 @@ public enum CutsceneEdge
 }
 
 /// <summary>
-/// The timeline's edits of a cutscene (see docs/editor/cutscene-editor.md#the-timeline): move, trim, slip, split and
-/// delete, on blocks named by path. Each one keeps what the cooker checks: times inside the length, keys inside their
+/// The timeline's edits of a cutscene (see docs/editor/cutscene-editor.md#the-timeline): move, trim, slip, split,
+/// delete, markers, copy and paste, on blocks named by path. Each one keeps what the cooker checks: times inside the length, keys inside their
 /// section, a section no shorter than its eases, and a track's sections and a channel's keys in start order. Each one
 /// leaves alone the blocks of locked tracks, and returns the paths of the blocks that it moved, as they are after it.
 /// </summary>
@@ -63,16 +63,19 @@ public static class CutsceneEdits
 
     static IEnumerable<CutsceneBlock> Keys(CutsceneBlock block) => block.Descendants().Where(b => b.Kind == CutsceneBlockKind.Key);
 
+    /// <summary>Whether a block is one that the timeline moves, deletes, copies and pastes.</summary>
+    public static bool IsTimed(CutsceneBlock block) => block.Kind is CutsceneBlockKind.Section or CutsceneBlockKind.Trigger
+        or CutsceneBlockKind.Range or CutsceneBlockKind.Key or CutsceneBlockKind.Marker;
+
     /// <summary>
-    /// Moves sections, triggers, ranges and keys by a delta in ticks, clamped so that each stays inside the length and
-    /// each key inside its section. A key whose section moves too moves with it. A subtitle that names a moved audio
-    /// section with <c>audio</c> moves with that section, as docs/content/kinds/cutscenes.md says.
+    /// Moves sections, triggers, ranges, keys and markers by a delta in ticks, clamped so that each stays inside the
+    /// length and each key inside its section. A key whose section moves too moves with it. A subtitle that names a
+    /// moved audio section with <c>audio</c> moves with that section, as docs/content/kinds/cutscenes.md says. Markers
+    /// are on no track, so no lock holds them.
     /// </summary>
     public static IReadOnlyList<string> Move(CutsceneFile file, IEnumerable<string> paths, int delta, IReadOnlySet<int>? locked = null)
     {
-        var blocks = Resolve(file, paths, locked)
-            .Where(b => b.Kind is CutsceneBlockKind.Section or CutsceneBlockKind.Trigger or CutsceneBlockKind.Range or CutsceneBlockKind.Key)
-            .ToList();
+        var blocks = Resolve(file, paths, locked).Where(IsTimed).ToList();
         var sections = blocks.Where(b => b.Kind == CutsceneBlockKind.Section).ToHashSet();
         // A key inside a moving section moves with it.
         blocks.RemoveAll(b => b.Kind == CutsceneBlockKind.Key && SectionOf(b) is { } s && sections.Contains(s));
@@ -114,7 +117,7 @@ public static class CutsceneEdits
                 case CutsceneBlockKind.Section or CutsceneBlockKind.Range when b is { Start: { } s, End: { } e }:
                     b.SetSpan(s + d, e + d);
                     break;
-                case CutsceneBlockKind.Trigger or CutsceneBlockKind.Key when b.Start is { } t:
+                case CutsceneBlockKind.Trigger or CutsceneBlockKind.Key or CutsceneBlockKind.Marker when b.Start is { } t:
                     b.SetTime(t + d);
                     break;
             }
@@ -496,15 +499,14 @@ public static class CutsceneEdits
     };
 
     /// <summary>
-    /// Deletes sections, triggers, ranges and keys. A channel that loses its last key goes too, since the cooker wants a
-    /// key in each, and a subtitle of a deleted audio section loses its <c>audio</c>, even on a locked track. With ripple, the sections after a deleted section on its track move back by its length, as far as
-    /// the sections before it let them.
+    /// Deletes sections, triggers, ranges, keys and markers. A channel that loses its last key goes too, since the
+    /// cooker wants a key in each, and a subtitle of a deleted audio section loses its <c>audio</c>, even on a locked
+    /// track. With ripple, the sections after a deleted section on its track move back by its length, as far as the
+    /// sections before it let them.
     /// </summary>
     public static void Delete(CutsceneFile file, IEnumerable<string> paths, bool ripple, IReadOnlySet<int>? locked = null)
     {
-        var blocks = Resolve(file, paths, locked)
-            .Where(b => b.Kind is CutsceneBlockKind.Section or CutsceneBlockKind.Trigger or CutsceneBlockKind.Range or CutsceneBlockKind.Key)
-            .ToList();
+        var blocks = Resolve(file, paths, locked).Where(IsTimed).ToList();
         // A subtitle of a deleted sound stays, without the sound, since its audio must name a section that there is.
         foreach (var subtitle in Followers(file, [.. blocks.Where(b => b.Kind == CutsceneBlockKind.Section)], null))
         {
@@ -538,12 +540,12 @@ public static class CutsceneEdits
     }
 
     /// <summary>
-    /// Sets the cutscene's length, no less than the end of any section, range, trigger or of its range, and no less
-    /// than a frame.
+    /// Sets the cutscene's length, no less than the end of any section, range, trigger, marker or of its range, and no
+    /// less than a frame.
     /// </summary>
     public static void SetLength(CutsceneFile file, int length)
     {
-        var latest = file.Blocks.Where(b => b.Kind is CutsceneBlockKind.Section or CutsceneBlockKind.Trigger or CutsceneBlockKind.Range)
+        var latest = file.Blocks.Where(b => b.Kind is CutsceneBlockKind.Section or CutsceneBlockKind.Trigger or CutsceneBlockKind.Range or CutsceneBlockKind.Marker)
             .Select(b => b.End ?? b.Start ?? 0)
             .Append(RangeOf(file) is { End: var end } && file.Root.Get("range") != null ? end : 0)
             .Append(CutsceneFile.TicksPerSecond / file.Rate)
@@ -574,6 +576,261 @@ public static class CutsceneEdits
         file.Root.Set("range", start == 0 && end == file.Length ? null : $"[{Format(start)}, {Format(end)}]");
     }
 
+    /// <summary>
+    /// Adds a marker at a time inside the length, after the last marker, or with none, before the first binding or
+    /// track, so the header's settings stay above it. A marker at that time already is kept, and nothing is added.
+    /// Returns the marker's path.
+    /// </summary>
+    public static string AddMarker(CutsceneFile file, int at, string? name = null)
+    {
+        at = Math.Clamp(at, 0, LengthOf(file));
+        if (file.Markers.FirstOrDefault(m => m.Start == at) is { } there)
+        {
+            return CutsceneFile.PathOf(there);
+        }
+        var id = file.NextId(CutsceneBlockKind.Marker);
+        var marker = new CutsceneBlock(CutsceneBlockKind.Marker, null);
+        marker.Lines.Add(new TextLine($"marker {Format(id)} {Format(at)} {TextQuote.Quote(name ?? $"Marker {id}")}", ""));
+        file.Insert(file.Root, MarkerIndex(file), marker);
+        CutsceneFile.SortChildren(file.Root);
+        return CutsceneFile.PathOf(marker);
+    }
+
+    // Where a new marker goes under the cutscene: after the last marker, or before the first binding or track.
+    static int MarkerIndex(CutsceneFile file)
+    {
+        var children = file.Root.Children.ToList();
+        var last = children.FindLastIndex(c => c.Kind == CutsceneBlockKind.Marker);
+        var index = last >= 0 ? last + 1 : children.FindIndex(c => c.Kind is CutsceneBlockKind.Binding or CutsceneBlockKind.Track);
+        return index >= 0 ? index : children.Count;
+    }
+
+    /// <summary>
+    /// Copies sections (with their channels and keys), triggers, ranges, keys and markers for <see cref="Paste"/>, or
+    /// null when none is named. A key in a copied section goes with its section.
+    /// </summary>
+    public static CutsceneClip? Copy(CutsceneFile file, IEnumerable<string> paths)
+    {
+        var blocks = Resolve(file, paths, null).Where(IsTimed).ToList();
+        var sections = blocks.Where(b => b.Kind == CutsceneBlockKind.Section).ToHashSet();
+        blocks.RemoveAll(b => b.Kind == CutsceneBlockKind.Key && SectionOf(b) is { } s && sections.Contains(s));
+        blocks.RemoveAll(b => AbsoluteStart(b) == null);
+        if (blocks.Count == 0)
+        {
+            return null;
+        }
+        var items = new List<CutsceneClipItem>();
+        // In time order, and at one time, in the file's order, so a paste's new IDs do not hang on the order of the clicks.
+        var order = file.Blocks.Select((b, i) => (b, i)).ToDictionary(p => p.b, p => p.i);
+        foreach (var b in blocks.OrderBy(b => AbsoluteStart(b)).ThenBy(b => order[b]))
+        {
+            var track = TrackOf(b);
+            // A track as a model for one that a paste adds: its keyword line and settings, without its sections.
+            CutsceneBlock? model = null;
+            if (track != null)
+            {
+                model = track.Copy();
+                foreach (var child in model.Children.ToList())
+                {
+                    model.ChildList.Remove(child);
+                }
+            }
+            items.Add(new CutsceneClipItem(b.Copy(), AbsoluteStart(b)!.Value, AbsoluteEnd(b) ?? AbsoluteStart(b)!.Value,
+                track?.Id, track?.TrackKind, BindingOf(track), b.Kind == CutsceneBlockKind.Key ? b.Parent?.Name : null, model));
+        }
+        var anchor = items.Min(i => i.Start);
+        return new CutsceneClip(items, anchor, items.Max(i => i.End) - anchor);
+    }
+
+    /// <summary>The ID of the binding that a track is for, or null for a track of the cutscene's own, such as camera cuts.</summary>
+    public static int? BindingOf(CutsceneBlock? track) =>
+        track?.Get("binding") is { } text && CutsceneFile.TryParseTicks(text.Trim(), out var id) ? id : null;
+
+    // The track that each of a clip's tracks pastes onto: with a target, the target track when the clip has one track of
+    // its kind, else the track of the clip's track's kind on the target's binding; without one, the track with the
+    // clip's track's ID and kind, else one of its kind on its binding. Null when there is none, which a paste can add.
+    static Dictionary<(int? Id, string Kind, int? Binding), CutsceneBlock?> Targets(CutsceneFile file, CutsceneClip clip, CutsceneBlock? target)
+    {
+        var groups = clip.Items.Where(i => i.TrackKind != null).Select(i => (i.TrackId, i.TrackKind!, i.BindingId)).Distinct().ToList();
+        int? targetBinding = target?.Kind switch
+        {
+            CutsceneBlockKind.Binding => target.Id,
+            CutsceneBlockKind.Track => BindingOf(target),
+            _ => null,
+        };
+        var result = new Dictionary<(int?, string, int?), CutsceneBlock?>();
+        foreach (var group in groups)
+        {
+            var (id, kind, binding) = group;
+            CutsceneBlock? onto;
+            if (target is { Kind: CutsceneBlockKind.Track or CutsceneBlockKind.Binding })
+            {
+                onto = target.Kind == CutsceneBlockKind.Track && target.TrackKind == kind && groups.Count(g => g.Item2 == kind) == 1
+                    ? target
+                    : file.Tracks.FirstOrDefault(t => t.TrackKind == kind && BindingOf(t) == targetBinding && t.Id == id)
+                        ?? file.Tracks.FirstOrDefault(t => t.TrackKind == kind && BindingOf(t) == targetBinding);
+            }
+            else
+            {
+                var bindingThere = binding == null || file.Bindings.Any(b => b.Id == binding);
+                onto = file.Tracks.FirstOrDefault(t => t.Id == id && t.TrackKind == kind)
+                    ?? (bindingThere ? file.Tracks.FirstOrDefault(t => t.TrackKind == kind && BindingOf(t) == binding) : null);
+            }
+            result[group] = onto;
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// The kinds of the tracks that a paste onto a target would add, as the cutscene has no track of that kind there:
+    /// what the editor asks about before it pastes. Empty when the paste needs none.
+    /// </summary>
+    public static IReadOnlyList<string> MissingTracks(CutsceneFile file, CutsceneClip clip, CutsceneBlock? target) =>
+        [.. Targets(file, clip, target).Where(p => p.Value == null).Select(p => p.Key.Kind).Distinct()];
+
+    /// <summary>
+    /// Pastes a clip so that its earliest start is at a time, keeping the times of its blocks to each other, onto the
+    /// tracks that <see cref="MissingTracks"/> describes. A track that the cutscene lacks is added, like the copied
+    /// one, when addTracks says so, and its blocks are left out when not. Pasted sections, triggers, ranges and markers
+    /// take new IDs. A subtitle's <c>audio</c> names its pasted sound's new ID, or goes when its sound was not pasted.
+    /// A key goes into the section of its track that holds its time, in the channel of its name, and is left out
+    /// without one. Locked tracks take nothing. The length grows to hold what is pasted. Returns the pasted blocks'
+    /// paths.
+    /// </summary>
+    public static IReadOnlyList<string> Paste(CutsceneFile file, CutsceneClip clip, int at, CutsceneBlock? target, bool addTracks, IReadOnlySet<int>? locked = null)
+    {
+        var shift = Math.Max(at, 0) - clip.Anchor;
+        var targets = Targets(file, clip, target);
+        int? targetBinding = target?.Kind switch
+        {
+            CutsceneBlockKind.Binding => target.Id,
+            CutsceneBlockKind.Track => BindingOf(target),
+            _ => null,
+        };
+        var pasted = new List<CutsceneBlock>();
+        var audioIds = new Dictionary<string, string>();
+        var parents = new HashSet<CutsceneBlock>();
+        var latest = 0;
+        foreach (var item in clip.Items)
+        {
+            var start = item.Start + shift;
+            var block = item.Block.Copy();
+            if (item.Block.Kind == CutsceneBlockKind.Marker)
+            {
+                // The marker goes where AddMarker puts one, and keeps its name and color. Each new ID is taken before
+                // its block goes in, as the copy's own ID could be the highest.
+                var markerId = file.NextId(CutsceneBlockKind.Marker);
+                file.Insert(file.Root, MarkerIndex(file), block);
+                block.SetId(markerId);
+                block.SetTime(start);
+                parents.Add(file.Root);
+                pasted.Add(block);
+                latest = Math.Max(latest, start);
+                continue;
+            }
+            var group = (item.TrackId, item.TrackKind!, item.BindingId);
+            var track = targets[group];
+            if (track == null)
+            {
+                if (!addTracks || item.TrackModel == null)
+                {
+                    continue;
+                }
+                var binding = target is { Kind: CutsceneBlockKind.Track or CutsceneBlockKind.Binding } ? targetBinding : item.BindingId;
+                track = AddTrack(file, item.TrackModel, binding);
+                targets[group] = track;
+            }
+            if (IsLocked(track, locked))
+            {
+                continue;
+            }
+            switch (block.Kind)
+            {
+                case CutsceneBlockKind.Key:
+                {
+                    var section = track.Children.FirstOrDefault(s => s is { Kind: CutsceneBlockKind.Section, Start: { } s0, End: { } s1 } && s0 <= start && start <= s1);
+                    var channel = section?.Children.FirstOrDefault(c => c.Kind == CutsceneBlockKind.Channel && c.Name == item.Channel);
+                    if (channel == null)
+                    {
+                        continue;
+                    }
+                    file.Insert(channel, channel.Children.Count, block);
+                    block.SetTime(start - section!.Start!.Value);
+                    parents.Add(channel);
+                    break;
+                }
+                case CutsceneBlockKind.Section:
+                {
+                    var oldId = item.Block.Id;
+                    var sectionId = file.NextId(CutsceneBlockKind.Section);
+                    file.Insert(track, track.Children.Count, block);
+                    block.SetId(sectionId);
+                    if (item.TrackKind == "audio" && oldId != null)
+                    {
+                        audioIds[Format(oldId.Value)] = Format(block.Id!.Value);
+                    }
+                    block.SetSpan(start, start + (item.End - item.Start));
+                    parents.Add(track);
+                    break;
+                }
+                default:
+                {
+                    var eventId = file.NextId(CutsceneBlockKind.Trigger);
+                    file.Insert(track, track.Children.Count, block);
+                    block.SetId(eventId);
+                    if (block.Kind == CutsceneBlockKind.Range)
+                    {
+                        block.SetSpan(start, start + (item.End - item.Start));
+                    }
+                    else
+                    {
+                        block.SetTime(start);
+                    }
+                    parents.Add(track);
+                    break;
+                }
+            }
+            pasted.Add(block);
+            latest = Math.Max(latest, start + (item.End - item.Start));
+        }
+        foreach (var subtitle in pasted.Where(b => b.Kind == CutsceneBlockKind.Section && b.Get("audio") != null))
+        {
+            subtitle.Set("audio", audioIds.GetValueOrDefault(subtitle.Get("audio")!.Trim()));
+        }
+        foreach (var parent in parents)
+        {
+            CutsceneFile.SortChildren(parent);
+        }
+        if (pasted.Count > 0 && file.Length is { } length && latest > length)
+        {
+            file.Root.Set("length", Format(latest));
+        }
+        return [.. pasted.Select(CutsceneFile.PathOf)];
+    }
+
+    // Adds a track like a model, with the next track ID, for a binding or the cutscene, after the binding's last track,
+    // or after the last track.
+    static CutsceneBlock AddTrack(CutsceneFile file, CutsceneBlock model, int? binding)
+    {
+        var track = model.Copy();
+        var id = file.NextId(CutsceneBlockKind.Track);
+        file.Insert(file.Root, InsertAt(file, binding), track);
+        track.SetId(id);
+        track.Set("binding", binding is { } b ? Format(b) : null);
+        return track;
+    }
+
+    static int InsertAt(CutsceneFile file, int? binding)
+    {
+        var children = file.Root.Children.ToList();
+        var last = children.FindLastIndex(c => c.Kind == CutsceneBlockKind.Track && BindingOf(c) == binding);
+        if (last < 0)
+        {
+            last = children.FindLastIndex(c => c.Kind == CutsceneBlockKind.Track);
+        }
+        return last >= 0 ? last + 1 : children.Count;
+    }
+
     static int Ticks(CutsceneBlock block, string key) => FirstTicks(block, key);
 
     // Where a sub-sequence section starts in its child's time: its trim's start, or with no trim, the start of the
@@ -593,3 +850,16 @@ public static class CutsceneEdits
 
     static string Format(int ticks) => ticks.ToString(CultureInfo.InvariantCulture);
 }
+
+/// <summary>
+/// What a copy of a cutscene's timeline holds (see docs/editor/cutscene-editor.md#copy-and-paste): copies of the copied
+/// blocks with their times on the cutscene's time, the earliest start, and the span from it to the latest end.
+/// </summary>
+public sealed record CutsceneClip(IReadOnlyList<CutsceneClipItem> Items, int Anchor, int Span);
+
+/// <summary>
+/// A copied block, detached, with its start and end on the cutscene's time, and the track that it was on: its ID, kind,
+/// binding and a copy of it without its sections, which a paste that adds a track copies. A key has its channel's name.
+/// A marker has no track.
+/// </summary>
+public sealed record CutsceneClipItem(CutsceneBlock Block, int Start, int End, int? TrackId, string? TrackKind, int? BindingId, string? Channel, CutsceneBlock? TrackModel);

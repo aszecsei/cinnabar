@@ -54,7 +54,7 @@ sealed class CutsceneDetails : ScrollViewer
         _content.Children.Clear();
         if (block == null)
         {
-            _content.Children.Add(Dim("Select a row of the outline to see its details."));
+            _content.Children.Add(Dim("Select a row, a section, an event, a key or a marker to see its details."));
             return;
         }
         var rate = _editor.File.Rate;
@@ -87,13 +87,35 @@ sealed class CutsceneDetails : ScrollViewer
                 _content.Children.Add(Row("Interpolation", ValueBox(block.KeyInterpolation ?? "", "linear", text =>
                     _editor.EditSelected("Set Interpolation", b => b.SetKeyInterpolation(text)))));
                 break;
+            case CutsceneBlockKind.Marker:
+                // The markers stay in time order, as the editor keeps them.
+                _content.Children.Add(TicksRow("Time", "Move Marker", b => b.Start, (b, t) =>
+                {
+                    b.SetTime(Math.Min(t, _editor.File.Length ?? t));
+                    CutsceneFile.SortChildren(b.Parent!);
+                }, rate));
+                _content.Children.Add(Row("Name", ValueBox(block.Name ?? "", "name", text =>
+                {
+                    if (text.Trim().Length == 0)
+                    {
+                        Rebuild();
+                        return;
+                    }
+                    _editor.EditSelected("Rename Marker", b => b.SetName(text.Trim()));
+                })));
+                _content.Children.Add(Row("Color", ValueBox(block.Get("color") is { } color ? TextQuote.Unquote(color) ?? color : "", "#f5a623", text =>
+                {
+                    var hex = text.Trim();
+                    _editor.EditSelected("Set Marker Color", b => b.Set("color", hex.Length == 0 ? null : TextQuote.Quote(hex.StartsWith('#') ? hex : "#" + hex)));
+                })));
+                break;
             case CutsceneBlockKind.Cutscene:
                 _content.Children.Add(TicksRow("length", "Set Length", b => _editor.File.Length, (b, t) => b.Set("length", Format(Math.Max(t, 1))), rate));
                 break;
         }
         foreach (var (key, value) in block.Settings)
         {
-            if (block.Kind == CutsceneBlockKind.Cutscene && key == "length")
+            if ((block.Kind == CutsceneBlockKind.Cutscene && key == "length") || (block.Kind == CutsceneBlockKind.Marker && key == "color"))
             {
                 continue;
             }
@@ -108,7 +130,7 @@ sealed class CutsceneDetails : ScrollViewer
                 _editor.EditSelected($"Set {name}", b => b.Set(name, text.Trim()));
             }), SmallButton("×", $"Remove {name}", () => _editor.EditSelected($"Remove {name}", b => b.Set(name, null)))));
         }
-        if (block.Kind is not (CutsceneBlockKind.Key or CutsceneBlockKind.Channel))
+        if (block.Kind is not (CutsceneBlockKind.Key or CutsceneBlockKind.Channel or CutsceneBlockKind.Marker))
         {
             _content.Children.Add(Row("Add", ValueBox("", "name = value", text =>
             {

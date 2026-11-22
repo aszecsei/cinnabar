@@ -10,8 +10,8 @@ namespace Cinnabar.Editor.Cutscenes;
 /// <summary>
 /// The timeline's gestures (see docs/editor/cutscene-editor.md#the-timeline), with no window: the view passes its
 /// pointer, wheel and Esc here, and draws what this holds. A press selects; a drag moves, trims, ripples or slips, as
-/// one undo entry that Esc cancels; a drag in empty space selects in a box; the ruler moves the playhead and its
-/// handles set the range and the length. Tests drive it as the view does.
+/// one undo entry that Esc cancels; a drag in empty space selects in a box; the ruler moves the playhead, its handles
+/// set the range and the length, and its marker flags select and move markers. Tests drive it as the view does.
 /// </summary>
 public sealed class CutsceneTimelineInput
 {
@@ -66,8 +66,8 @@ public sealed class CutsceneTimelineInput
     /// <summary>The time area's width, right of the header gutter.</summary>
     public double TimeWidth => Math.Max(Width - CutsceneTimelineLayout.Gutter, 1);
 
-    /// <summary>The rows, built again when the cutscene, its folds or its locks change.</summary>
-    public CutsceneTimelineLayout Layout => _layout ??= CutsceneTimelineLayout.Build(_editor.File, _editor.Folds);
+    /// <summary>The rows, built again when the cutscene, its folds, its locks or its filter change.</summary>
+    public CutsceneTimelineLayout Layout => _layout ??= _editor.Layout();
 
     /// <summary>The time that a drag snapped to, which the view draws as a guide, or null.</summary>
     public int? Guide { get; private set; }
@@ -199,10 +199,17 @@ public sealed class CutsceneTimelineInput
             case CutsceneHitKind.Lock when hit.Row!.TrackId is { } track:
                 _editor.SetLocked(track, !_editor.Locked.Contains(track));
                 return false;
+            // A track that its asset mutes stays muted: its M is the asset's.
+            case CutsceneHitKind.Mute when hit.Row!.TrackId is { } track && !hit.Row.AssetMuted:
+                _editor.SetMuted(track, !_editor.Muted.Contains(track));
+                return false;
+            case CutsceneHitKind.Solo when hit.Row!.TrackId is { } track:
+                _editor.SetSoloed(track, !_editor.Soloed.Contains(track));
+                return false;
             case CutsceneHitKind.Header:
                 _editor.Select([hit.Row!.Path], ModeOf(modifiers));
                 return false;
-            case CutsceneHitKind.Key or CutsceneHitKind.Trigger or CutsceneHitKind.Body or CutsceneHitKind.StartEdge or CutsceneHitKind.EndEdge:
+            case CutsceneHitKind.Key or CutsceneHitKind.Trigger or CutsceneHitKind.Marker or CutsceneHitKind.Body or CutsceneHitKind.StartEdge or CutsceneHitKind.EndEdge:
             {
                 // A press on a selected item with no modifier keeps the selection, so a drag moves all of it.
                 var selected = hit.Paths.All(_editor.SelectedPaths.Contains);
@@ -306,7 +313,7 @@ public sealed class CutsceneTimelineInput
             Reset();
             return;
         }
-        var item = Layout.Rows.SelectMany(r => r.Bars.Concat(r.Points).Concat(r.Keys)).FirstOrDefault(i => i.Path == hit.Paths[0]);
+        var item = Layout.Rows.SelectMany(r => r.Bars.Concat(r.Points).Concat(r.Keys)).Concat(Layout.Markers).FirstOrDefault(i => i.Path == hit.Paths[0]);
         if (item == null)
         {
             Reset();

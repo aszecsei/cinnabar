@@ -104,12 +104,26 @@ static partial class EditorCommands
                 CanExecuteWhen = () => shell.CanEditScene,
             });
         }
-        commands.Register(new Command(DuplicateEntity, "Duplicate", shell.DuplicateSelected)
+        // While a cutscene's timeline has the keyboard, Duplicate duplicates what it selects (see
+        // docs/editor/cutscene-editor.md#copy-and-paste).
+        commands.Register(new Command(DuplicateEntity, "Duplicate", () =>
         {
-            Description = "Copy the selected entities and their children.",
+            if (shell.ActiveCutscene is { TimelineFocused: true } cutscene)
+            {
+                cutscene.Duplicate();
+            }
+            else
+            {
+                shell.DuplicateSelected();
+            }
+        })
+        {
+            Description = "Copy the selected entities and their children, or on a cutscene's timeline, the selected sections, events, keys and markers, right after themselves.",
             Icon = "copy",
             Shortcut = "Ctrl+D",
-            CanExecuteWhen = () => shell.SelectedSceneEntities.Count > 0,
+            CanExecuteWhen = () => shell.ActiveCutscene is { TimelineFocused: true } cutscene
+                ? cutscene.CanDuplicate
+                : shell.SelectedSceneEntities.Count > 0,
         });
         commands.Register(new Command(MakePrefab, "Make Prefab", shell.RequestMakePrefab)
         {
