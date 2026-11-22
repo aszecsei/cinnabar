@@ -45,6 +45,8 @@ public abstract class GraphDocument<TGraph> : IGraphDocument
     readonly List<(string Label, string Text)> _states;
     string? _transaction;
     string _transactionStart = "";
+    // The merge key of the current entry while edits with that key still merge into it, as a held key's nudges do.
+    string? _merge;
 
     /// <param name="path">The file's full path.</param>
     /// <param name="guid">The asset's GUID.</param>
@@ -105,6 +107,50 @@ public abstract class GraphDocument<TGraph> : IGraphDocument
         Push(label);
     }
 
+    /// <summary>
+    /// Changes the graph as one undo entry, which later edits with the same merge key change too, until
+    /// <see cref="EndMerge"/> or any other entry, undo, redo or save, so the entry is never the saved one. A held key's repeats are one entry this way, without an
+    /// entry left open, so Save and Undo still run between them. An edit that brings the graph back to the entry's
+    /// start drops the entry.
+    /// </summary>
+    public void EditMerged(string label, string mergeKey, Action<TGraph> edit)
+    {
+        if (_transaction != null)
+        {
+            Edit(label, edit);
+            return;
+        }
+        if (_merge != mergeKey || Position == 0 || Position != _states.Count - 1)
+        {
+            edit(Graph);
+            if (Push(label))
+            {
+                _merge = mergeKey;
+            }
+            return;
+        }
+        edit(Graph);
+        var text = WriteGraph();
+        if (text == _states[Position].Text)
+        {
+            return;
+        }
+        if (text == _states[Position - 1].Text)
+        {
+            _states.RemoveAt(Position);
+            Position--;
+            _merge = null;
+        }
+        else
+        {
+            _states[Position] = (_states[Position].Label, text);
+        }
+        Changed?.Invoke();
+    }
+
+    /// <summary>Ends the merge of <see cref="EditMerged"/>: the next edit is an entry of its own.</summary>
+    public void EndMerge() => _merge = null;
+
     /// <summary>Starts an entry that a drag's steps change, until <see cref="Commit"/> or <see cref="Cancel"/>.</summary>
     public void Begin(string label)
     {
@@ -112,6 +158,7 @@ public abstract class GraphDocument<TGraph> : IGraphDocument
         {
             throw new InvalidOperationException($"\"{_transaction}\" is still open");
         }
+        _merge = null;
         _transaction = label;
         _transactionStart = _states[Position].Text;
         Changed?.Invoke();
@@ -124,6 +171,21 @@ public abstract class GraphDocument<TGraph> : IGraphDocument
         {
             throw new InvalidOperationException("no entry is open");
         }
+        edit(Graph);
+        Changed?.Invoke();
+    }
+
+    /// <summary>
+    /// Changes the graph as a step of the open entry, from the graph as it was when the entry began: a drag's step that
+    /// sets where its blocks are from where they started, so steps do not add up and the blocks keep their first names.
+    /// </summary>
+    public void StepFromStart(Action<TGraph> edit)
+    {
+        if (_transaction == null)
+        {
+            throw new InvalidOperationException("no entry is open");
+        }
+        Graph = ReadGraph(_transactionStart);
         edit(Graph);
         Changed?.Invoke();
     }
@@ -154,6 +216,7 @@ public abstract class GraphDocument<TGraph> : IGraphDocument
     // Adds an entry for the graph as it is now, unless it is the current entry's. Returns whether it added one.
     bool Push(string label)
     {
+        _merge = null;
         var text = WriteGraph();
         if (text == _states[Position].Text)
         {
@@ -173,6 +236,7 @@ public abstract class GraphDocument<TGraph> : IGraphDocument
 
     public void Undo()
     {
+        _merge = null;
         if (CanUndo)
         {
             Position--;
@@ -183,6 +247,7 @@ public abstract class GraphDocument<TGraph> : IGraphDocument
 
     public void Redo()
     {
+        _merge = null;
         if (CanRedo)
         {
             Position++;
@@ -206,6 +271,7 @@ public abstract class GraphDocument<TGraph> : IGraphDocument
         }
         SceneDocument.WriteAtomically(Path, Text);
         SavedPosition = Position;
+        _merge = null;
         Changed?.Invoke();
     }
 

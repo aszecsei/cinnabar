@@ -1,0 +1,574 @@
+using System.Globalization;
+
+namespace Cinnabar.Editor.Document;
+
+/// <summary>Which edge of a section or a range a trim moves.</summary>
+public enum CutsceneEdge
+{
+    Start,
+    End,
+}
+
+/// <summary>
+/// The timeline's edits of a cutscene (see docs/editor/cutscene-editor.md#the-timeline): move, trim, slip, split and
+/// delete, on blocks named by path. Each one keeps what the cooker checks: times inside the length, keys inside their
+/// section, a section no shorter than its eases, and a track's sections and a channel's keys in start order. Each one
+/// leaves alone the blocks of locked tracks, and returns the paths of the blocks that it moved, as they are after it.
+/// </summary>
+public static class CutsceneEdits
+{
+    /// <summary>The track that a block is on, or null for a binding or the cutscene.</summary>
+    public static CutsceneBlock? TrackOf(CutsceneBlock block)
+    {
+        for (var at = block; at != null; at = at.Parent)
+        {
+            if (at.Kind == CutsceneBlockKind.Track)
+            {
+                return at;
+            }
+        }
+        return null;
+    }
+
+    /// <summary>The section that a key or a channel is in, or null.</summary>
+    public static CutsceneBlock? SectionOf(CutsceneBlock block)
+    {
+        for (var at = block; at != null; at = at.Parent)
+        {
+            if (at.Kind == CutsceneBlockKind.Section)
+            {
+                return at;
+            }
+        }
+        return null;
+    }
+
+    /// <summary>Whether a block is on a locked track.</summary>
+    public static bool IsLocked(CutsceneBlock block, IReadOnlySet<int>? locked) =>
+        locked != null && TrackOf(block)?.Id is { } id && locked.Contains(id);
+
+    /// <summary>A block's start on the cutscene's time: a key's is its section's start and its own time.</summary>
+    public static int? AbsoluteStart(CutsceneBlock block) => block.Kind == CutsceneBlockKind.Key
+        ? SectionOf(block)?.Start is { } s && block.Start is { } t ? s + t : null
+        : block.Start;
+
+    /// <summary>A block's end on the cutscene's time: a section's or a range's end, or a trigger's or a key's time.</summary>
+    public static int? AbsoluteEnd(CutsceneBlock block) => block.End ?? AbsoluteStart(block);
+
+    /// <summary>The cutscene's length, or no limit when the file has none.</summary>
+    public static int LengthOf(CutsceneFile file) => file.Length ?? int.MaxValue;
+
+    static List<CutsceneBlock> Resolve(CutsceneFile file, IEnumerable<string> paths, IReadOnlySet<int>? locked) =>
+        [.. paths.Distinct().Select(file.Find).OfType<CutsceneBlock>().Where(b => !IsLocked(b, locked))];
+
+    static IEnumerable<CutsceneBlock> Keys(CutsceneBlock block) => block.Descendants().Where(b => b.Kind == CutsceneBlockKind.Key);
+
+    /// <summary>
+    /// Moves sections, triggers, ranges and keys by a delta in ticks, clamped so that each stays inside the length and
+    /// each key inside its section. A key whose section moves too moves with it. A subtitle that names a moved audio
+    /// section with <c>audio</c> moves with that section, as docs/content/kinds/cutscenes.md says.
+    /// </summary>
+    public static IReadOnlyList<string> Move(CutsceneFile file, IEnumerable<string> paths, int delta, IReadOnlySet<int>? locked = null)
+    {
+        var blocks = Resolve(file, paths, locked)
+            .Where(b => b.Kind is CutsceneBlockKind.Section or CutsceneBlockKind.Trigger or CutsceneBlockKind.Range or CutsceneBlockKind.Key)
+            .ToList();
+        var sections = blocks.Where(b => b.Kind == CutsceneBlockKind.Section).ToHashSet();
+        // A key inside a moving section moves with it.
+        blocks.RemoveAll(b => b.Kind == CutsceneBlockKind.Key && SectionOf(b) is { } s && sections.Contains(s));
+        // Subtitles that belong to a moving audio section.
+        var audio = sections.Where(s => TrackOf(s)?.TrackKind == "audio" && s.Id != null).Select(s => s.Id!.Value.ToString(CultureInfo.InvariantCulture)).ToHashSet();
+        var followers = file.Blocks
+            .Where(b => b.Kind == CutsceneBlockKind.Section && !sections.Contains(b) && TrackOf(b)?.TrackKind == "presentation"
+                && b.Get("audio") is { } id && audio.Contains(id) && !IsLocked(b, locked))
+            .ToList();
+        var moving = blocks.Concat(followers).ToList();
+        if (moving.Count == 0 || delta == 0)
+        {
+            return [.. blocks.Select(CutsceneFile.PathOf)];
+        }
+        var length = LengthOf(file);
+        long lo = long.MinValue, hi = long.MaxValue;
+        foreach (var b in moving)
+        {
+            if (b.Kind == CutsceneBlockKind.Key)
+            {
+                var duration = SectionOf(b) is { Start: { } s, End: { } e } ? e - s : int.MaxValue;
+                var t = b.Start ?? 0;
+                lo = Math.Max(lo, -t);
+                hi = Math.Min(hi, (long)duration - t);
+            }
+            else
+            {
+                var start = b.Start ?? 0;
+                var end = b.End ?? start;
+                lo = Math.Max(lo, -start);
+                hi = Math.Min(hi, (long)length - end);
+            }
+        }
+        var d = (int)Math.Clamp(delta, Math.Min(lo, 0), Math.Max(hi, 0));
+        if (d == 0)
+        {
+            return [.. blocks.Select(CutsceneFile.PathOf)];
+        }
+        var parents = new HashSet<CutsceneBlock>();
+        foreach (var b in moving)
+        {
+            switch (b.Kind)
+            {
+                case CutsceneBlockKind.Section or CutsceneBlockKind.Range when b is { Start: { } s, End: { } e }:
+                    b.SetSpan(s + d, e + d);
+                    break;
+                case CutsceneBlockKind.Trigger or CutsceneBlockKind.Key when b.Start is { } t:
+                    b.SetTime(t + d);
+                    break;
+            }
+            parents.Add(b.Parent!);
+        }
+        foreach (var parent in parents)
+        {
+            CutsceneFile.SortChildren(parent);
+        }
+        return [.. blocks.Select(CutsceneFile.PathOf)];
+    }
+
+    // What a section's head can lose or a section can be, from what it has: its keys, its eases and blend, and where
+    // its source starts.
+    sealed record SectionLimits(int? FirstKey, int? LastKey, int MinDuration, double MinHeadCut, int PreviousEnd, int NextStart, int LaterEnd);
+
+    static SectionLimits Limits(CutsceneFile file, CutsceneBlock section)
+    {
+        var start = section.Start ?? 0;
+        var end = section.End ?? start;
+        var keys = Keys(section).Select(k => k.Start).OfType<int>().ToList();
+        var frame = CutsceneFile.TicksPerSecond / file.Rate;
+        var minimum = Math.Max(frame, Math.Max(Ticks(section, "ease_in") + Ticks(section, "ease_out"), FirstTicks(section, "blend_in")));
+        // How far before its start the section's source goes: its offset, or its sub-sequence's trim, in the
+        // cutscene's time.
+        var minHeadCut = double.NegativeInfinity;
+        var kind = TrackOf(section)?.TrackKind;
+        if (kind is "animation" or "audio")
+        {
+            minHeadCut = -Ticks(section, "offset") / (kind == "animation" ? Number(section, "speed", 1) : 1);
+        }
+        else if (kind == "sub_sequence")
+        {
+            minHeadCut = -FirstTicks(section, "trim") / Number(section, "scale", 1);
+        }
+        // A camera cut or a sub-sequence section starts at or after the end of the one before it.
+        var siblings = section.Parent!.Children.Where(c => c.Kind == CutsceneBlockKind.Section).ToList();
+        var index = siblings.IndexOf(section);
+        var ordered = kind is "camera_cut" or "sub_sequence";
+        var previousEnd = ordered && index > 0 ? siblings[index - 1].End ?? 0 : 0;
+        var nextStart = ordered && index < siblings.Count - 1 ? siblings[index + 1].Start ?? int.MaxValue : int.MaxValue;
+        var later = siblings.Where(c => c != section && c.Start >= end).ToList();
+        return new SectionLimits(keys.Count > 0 ? keys.Min() : null, keys.Count > 0 ? keys.Max() : null, minimum, minHeadCut,
+            previousEnd, nextStart, later.Select(c => c.End ?? 0).DefaultIfEmpty(end).Max());
+    }
+
+    /// <summary>
+    /// Trims an edge of a section or a range by a delta in ticks. Keys keep their times on the cutscene's time, so a
+    /// trim of a section's start moves its keys' times, its offset into its clip or sound and its sub-sequence's trim.
+    /// With ripple, a section keeps its start: its length changes by the trim, and the sections after it on its track
+    /// move by as much. The delta is clamped so that the section keeps its keys, eases and a frame, its source does not
+    /// start before its clip's, and every section stays inside the length.
+    /// </summary>
+    public static IReadOnlyList<string> Trim(CutsceneFile file, string path, CutsceneEdge edge, int delta, bool ripple, IReadOnlySet<int>? locked = null)
+    {
+        if (file.Find(path) is not { } block || IsLocked(block, locked) || block is not { Start: { } start, End: { } end })
+        {
+            return [];
+        }
+        var length = LengthOf(file);
+        var frame = CutsceneFile.TicksPerSecond / file.Rate;
+        if (block.Kind == CutsceneBlockKind.Range)
+        {
+            if (edge == CutsceneEdge.Start)
+            {
+                block.SetSpan(Math.Clamp(start + delta, 0, Math.Max(end - frame, 0)), end);
+            }
+            else
+            {
+                block.SetSpan(start, Math.Clamp(end + delta, Math.Min(start + frame, length), length));
+            }
+            CutsceneFile.SortChildren(block.Parent!);
+            return [path];
+        }
+        if (block.Kind != CutsceneBlockKind.Section)
+        {
+            return [];
+        }
+        var limits = Limits(file, block);
+        var duration = end - start;
+        var later = ripple
+            ? block.Parent!.Children.Where(c => c != block && c.Kind == CutsceneBlockKind.Section && c.Start >= end).ToList()
+            : [];
+        if (edge == CutsceneEdge.Start)
+        {
+            // The cut from the head: positive takes time off, negative adds it.
+            double lo = limits.MinHeadCut, hi = duration - limits.MinDuration;
+            if (limits.FirstKey is { } first)
+            {
+                hi = Math.Min(hi, first);
+            }
+            if (ripple)
+            {
+                // The sections after it move back by the cut, and forward by an added head, inside the length.
+                if (later.Count > 0)
+                {
+                    lo = Math.Max(lo, limits.LaterEnd - (double)length);
+                }
+                lo = Math.Max(lo, end - (double)length);
+            }
+            else
+            {
+                lo = Math.Max(lo, Math.Max(limits.PreviousEnd, 0) - (double)start);
+            }
+            var cut = (int)Math.Round(Math.Clamp(delta, Math.Min(lo, 0), Math.Max(hi, 0)));
+            if (cut == 0)
+            {
+                return [path];
+            }
+            CutHead(block, cut);
+            if (ripple)
+            {
+                block.SetSpan(start, end - cut);
+                Shift(later, -cut);
+            }
+            else
+            {
+                block.SetSpan(start + cut, end);
+            }
+        }
+        else
+        {
+            // The change of the end: positive adds time, negative takes it off.
+            double lo = limits.MinDuration - duration, hi = (double)length - end;
+            if (limits.LastKey is { } last)
+            {
+                lo = Math.Max(lo, last - duration);
+            }
+            if (ripple)
+            {
+                if (later.Count > 0)
+                {
+                    hi = Math.Min(hi, (double)length - limits.LaterEnd);
+                }
+            }
+            else
+            {
+                hi = Math.Min(hi, (double)limits.NextStart - end);
+            }
+            var change = (int)Math.Round(Math.Clamp(delta, Math.Min(lo, 0), Math.Max(hi, 0)));
+            if (change == 0)
+            {
+                return [path];
+            }
+            block.SetSpan(start, end + change);
+            if (ripple)
+            {
+                Shift(later, change);
+            }
+        }
+        CutsceneFile.SortChildren(block.Parent!);
+        return [path];
+    }
+
+    // Takes ticks off a section's head, or with a negative cut, adds them: its keys and its source keep their place on
+    // the cutscene's time. The caller sets the span.
+    static void CutHead(CutsceneBlock section, int cut)
+    {
+        foreach (var key in Keys(section))
+        {
+            if (key.Start is { } t)
+            {
+                key.SetTime(Math.Max(t - cut, 0));
+            }
+        }
+        AdvanceSource(section, cut);
+    }
+
+    // Moves where a section's source starts by ticks of the cutscene's time: an animation's or a sound's offset, or a
+    // sub-sequence's trim.
+    static void AdvanceSource(CutsceneBlock section, double ticks)
+    {
+        switch (TrackOf(section)?.TrackKind)
+        {
+            case "animation" or "audio":
+            {
+                var speed = TrackOf(section)!.TrackKind == "animation" ? Number(section, "speed", 1) : 1;
+                var offset = Math.Max((int)Math.Round(Ticks(section, "offset") + ticks * speed), 0);
+                section.Set("offset", offset == 0 ? null : Format(offset));
+                break;
+            }
+            case "sub_sequence" when section.Get("trim") is { } trim:
+            {
+                var scale = Number(section, "scale", 1);
+                var words = trim.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+                if (words.Length == 0 || !CutsceneFile.TryParseTicks(words[0], out var from))
+                {
+                    break;
+                }
+                var moved = Math.Max((int)Math.Round(from + ticks * scale), 0);
+                section.Set("trim", words.Length > 1 ? $"{Format(moved)} {words[1]}" : Format(moved));
+                break;
+            }
+            case "sub_sequence":
+            {
+                var moved = Math.Max((int)Math.Round(ticks * Number(section, "scale", 1)), 0);
+                if (moved > 0)
+                {
+                    section.Set("trim", Format(moved));
+                }
+                break;
+            }
+        }
+    }
+
+    static void Shift(IEnumerable<CutsceneBlock> sections, int delta)
+    {
+        foreach (var s in sections)
+        {
+            if (s is { Start: { } a, End: { } b })
+            {
+                s.SetSpan(a + delta, b + delta);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Slips a section: its edges stay, and what it plays moves under them by a delta in ticks, so a drag to the right
+    /// shows earlier source. An animation's or a sound's offset or a sub-sequence's trim changes, and never goes below 0.
+    /// Sections of the other kinds have no source, and do not change.
+    /// </summary>
+    public static IReadOnlyList<string> Slip(CutsceneFile file, string path, int delta, IReadOnlySet<int>? locked = null)
+    {
+        if (file.Find(path) is not { Kind: CutsceneBlockKind.Section } section || IsLocked(section, locked))
+        {
+            return [];
+        }
+        var kind = TrackOf(section)?.TrackKind;
+        if (kind is not ("animation" or "audio" or "sub_sequence"))
+        {
+            return [path];
+        }
+        if (kind == "sub_sequence" && section.Get("trim") is { } trim)
+        {
+            var scale = Number(section, "scale", 1);
+            var words = trim.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+            if (words.Length == 0 || !CutsceneFile.TryParseTicks(words[0], out var from))
+            {
+                return [path];
+            }
+            // The trim's end moves as far as its start does.
+            var moved = Math.Max((int)Math.Round(from - delta * scale), 0);
+            var shift = moved - from;
+            var end = words.Length > 1 && CutsceneFile.TryParseTicks(words[1], out var to) ? $" {Format(to + shift)}" : "";
+            section.Set("trim", Format(moved) + end);
+            return [path];
+        }
+        AdvanceSource(section, -delta);
+        return [path];
+    }
+
+    /// <summary>
+    /// Splits each section that a time is inside into two at that time. The second half is a copy with the next
+    /// section ID, which starts where the first ends: its keys move by the cut, its source starts later, and it takes
+    /// the ease and blend out and the post roll, while the first keeps the ease and blend in and the pre roll. Each
+    /// channel has a key at the cut in both halves, with the curve's value there: the key before it's for a constant
+    /// key, and a straight line between the keys on each side for the others. Returns both halves' paths.
+    /// </summary>
+    public static IReadOnlyList<string> Split(CutsceneFile file, IEnumerable<string> paths, int at, IReadOnlySet<int>? locked = null)
+    {
+        var result = new List<string>();
+        foreach (var section in Resolve(file, paths, locked).Where(b => b.Kind == CutsceneBlockKind.Section))
+        {
+            if (section is not { Start: { } start, End: { } end } || at <= start || at >= end || section.Id == null)
+            {
+                continue;
+            }
+            var cut = at - start;
+            var second = section.Copy();
+            var track = section.Parent!;
+            file.Insert(track, track.Children.ToList().IndexOf(section) + 1, second);
+            second.SetSectionId(file.NextId(CutsceneBlockKind.Section));
+            second.SetSpan(at, end);
+            section.SetSpan(start, at);
+            foreach (var setting in new[] { "ease_out", "blend_out", "post_roll" })
+            {
+                section.Set(setting, null);
+            }
+            foreach (var setting in new[] { "ease_in", "blend_in", "pre_roll" })
+            {
+                second.Set(setting, null);
+            }
+            AdvanceSource(second, cut);
+            var firstChannels = section.Children.Where(c => c.Kind == CutsceneBlockKind.Channel).ToList();
+            var secondChannels = second.Children.Where(c => c.Kind == CutsceneBlockKind.Channel).ToList();
+            for (var i = 0; i < firstChannels.Count; i++)
+            {
+                SplitChannel(file, firstChannels[i], secondChannels[i], cut);
+            }
+            result.Add(CutsceneFile.PathOf(section));
+            result.Add(CutsceneFile.PathOf(second));
+        }
+        return result;
+    }
+
+    // Keeps a channel's keys up to the cut in the first half and from it in the second, with a key at the cut in each.
+    static void SplitChannel(CutsceneFile file, CutsceneBlock first, CutsceneBlock second, int cut)
+    {
+        var keys = first.Children.Where(c => c.Kind == CutsceneBlockKind.Key && c.Start != null).ToList();
+        if (keys.Count == 0)
+        {
+            return;
+        }
+        var before = keys.LastOrDefault(k => k.Start <= cut);
+        var after = keys.FirstOrDefault(k => k.Start > cut);
+        var (value, interpolation) = ValueAt(before, after, cut);
+        // The first half: the keys before the cut, and one at it.
+        foreach (var key in keys.Where(k => k.Start > cut))
+        {
+            file.Remove(key);
+        }
+        if (before?.Start != cut)
+        {
+            var model = before ?? after!;
+            file.Insert(first, first.Children.Count, model.KeyLike(cut, value, interpolation));
+        }
+        // The second half: the keys after the cut, moved back by it, and one at its start.
+        var copies = second.Children.Where(c => c.Kind == CutsceneBlockKind.Key && c.Start != null).ToList();
+        var secondModel = copies.FirstOrDefault(k => k.Start >= cut) ?? copies[^1];
+        foreach (var key in copies)
+        {
+            if (key.Start < cut)
+            {
+                file.Remove(key);
+            }
+            else
+            {
+                key.SetTime(key.Start!.Value - cut);
+            }
+        }
+        if (before?.Start != cut)
+        {
+            var index = second.Children.ToList().FindIndex(c => c.Kind == CutsceneBlockKind.Key);
+            file.Insert(second, Math.Max(index, 0), secondModel.KeyLike(0, value, interpolation));
+        }
+    }
+
+    // The value of a channel's curve at a time between two keys, and the interpolation of a key there: a constant key's
+    // value holds, the other kinds are read as a straight line, and a Bezier key's tangents are not kept.
+    static (string Value, string Interpolation) ValueAt(CutsceneBlock? before, CutsceneBlock? after, int time)
+    {
+        if (before == null)
+        {
+            return (after!.KeyValue ?? "0", Kind(after));
+        }
+        var kind = Kind(before);
+        if (after == null || kind == "constant"
+            || !double.TryParse(before.KeyValue, NumberStyles.Float, CultureInfo.InvariantCulture, out var a)
+            || !double.TryParse(after.KeyValue, NumberStyles.Float, CultureInfo.InvariantCulture, out var b))
+        {
+            return (before.KeyValue ?? "0", kind);
+        }
+        var t0 = before.Start!.Value;
+        var t1 = after.Start!.Value;
+        var value = a + (b - a) * (time - t0) / Math.Max(t1 - t0, 1);
+        return (Math.Round(value, 6).ToString("R", CultureInfo.InvariantCulture), kind);
+    }
+
+    static string Kind(CutsceneBlock key) => key.KeyInterpolation?.Split(' ')[0] switch
+    {
+        "constant" => "constant",
+        "linear" => "linear",
+        _ => "auto",
+    };
+
+    /// <summary>
+    /// Deletes sections, triggers, ranges and keys. A channel that loses its last key goes too, since the cooker wants a
+    /// key in each. With ripple, the sections after a deleted section on its track move back by its length, as far as
+    /// the sections before it let them.
+    /// </summary>
+    public static void Delete(CutsceneFile file, IEnumerable<string> paths, bool ripple, IReadOnlySet<int>? locked = null)
+    {
+        var blocks = Resolve(file, paths, locked)
+            .Where(b => b.Kind is CutsceneBlockKind.Section or CutsceneBlockKind.Trigger or CutsceneBlockKind.Range or CutsceneBlockKind.Key)
+            .ToList();
+        // Later sections first, so each gap closes from the end of the track.
+        foreach (var b in blocks.OrderByDescending(b => AbsoluteStart(b) ?? 0))
+        {
+            var parent = b.Parent!;
+            var removed = b is { Kind: CutsceneBlockKind.Section, Start: { } s, End: { } e } ? (s, e) : ((int, int)?)null;
+            file.Remove(b);
+            if (b.Kind == CutsceneBlockKind.Key && !parent.Children.Any(c => c.Kind == CutsceneBlockKind.Key) && parent.Parent != null)
+            {
+                file.Remove(parent);
+            }
+            if (ripple && removed is { } gap)
+            {
+                var (start, end) = gap;
+                var sections = parent.Children.Where(c => c.Kind == CutsceneBlockKind.Section && c.Start != null).ToList();
+                var later = sections.Where(c => c.Start >= end).ToList();
+                if (later.Count == 0)
+                {
+                    continue;
+                }
+                // The sections that stay before the gap, which a moved section must not start before the end of.
+                var floor = sections.Except(later).Select(c => c.End ?? 0).Append(start).Max();
+                var shift = Math.Min(end - start, later.Min(c => c.Start!.Value) - floor);
+                Shift(later, -Math.Max(shift, 0));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Sets the cutscene's length, no less than the end of any section, range, trigger or of its range, and no less
+    /// than a frame.
+    /// </summary>
+    public static void SetLength(CutsceneFile file, int length)
+    {
+        var latest = file.Blocks.Where(b => b.Kind is CutsceneBlockKind.Section or CutsceneBlockKind.Trigger or CutsceneBlockKind.Range)
+            .Select(b => b.End ?? b.Start ?? 0)
+            .Append(RangeOf(file) is { End: var end } && file.Root.Get("range") != null ? end : 0)
+            .Append(CutsceneFile.TicksPerSecond / file.Rate)
+            .Max();
+        file.Root.Set("length", Format(Math.Max(length, latest)));
+    }
+
+    /// <summary>The part of the cutscene that plays: its <c>range</c>, or all of its length.</summary>
+    public static (int Start, int End) RangeOf(CutsceneFile file)
+    {
+        var length = file.Length ?? 0;
+        if (file.Root.Get("range") is { } text
+            && text.Trim().TrimStart('[').TrimEnd(']').Split(',') is [var a, var b]
+            && CutsceneFile.TryParseTicks(a.Trim(), out var start) && CutsceneFile.TryParseTicks(b.Trim(), out var end))
+        {
+            return (start, end);
+        }
+        return (0, length);
+    }
+
+    /// <summary>Sets the part that plays, inside the length and a frame long at least. All of the length drops the setting.</summary>
+    public static void SetRange(CutsceneFile file, int start, int end)
+    {
+        var length = LengthOf(file);
+        var frame = CutsceneFile.TicksPerSecond / file.Rate;
+        start = Math.Clamp(start, 0, Math.Max(length - frame, 0));
+        end = Math.Clamp(end, Math.Min(start + frame, length), length);
+        file.Root.Set("range", start == 0 && end == file.Length ? null : $"[{Format(start)}, {Format(end)}]");
+    }
+
+    static int Ticks(CutsceneBlock block, string key) => FirstTicks(block, key);
+
+    // A setting's first word as ticks, as blend_in's `<ticks> [curve]` and trim's `<start> [<end>]` are, or 0.
+    static int FirstTicks(CutsceneBlock block, string key) =>
+        block.Get(key)?.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries) is [var first, ..] && CutsceneFile.TryParseTicks(first, out var ticks)
+            ? ticks
+            : 0;
+
+    static double Number(CutsceneBlock block, string key, double fallback) =>
+        block.Get(key) is { } text && double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var value) && value > 0 ? value : fallback;
+
+    static string Format(int ticks) => ticks.ToString(CultureInfo.InvariantCulture);
+}

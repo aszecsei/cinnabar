@@ -247,6 +247,84 @@ public sealed class CutsceneBlock
         ChildList.Add(child);
     }
 
+    // Puts this block under a parent at an index.
+    internal void Adopt(CutsceneBlock parent, int index)
+    {
+        Parent = parent;
+        parent.ChildList.Insert(index, this);
+    }
+
+    /// <summary>
+    /// Sets a section's ID, keeping its span. A section that another one's copy becomes, as a split makes, takes a new ID.
+    /// </summary>
+    public void SetSectionId(int id)
+    {
+        var words = Words;
+        if (Kind != CutsceneBlockKind.Section || words.Length < 3)
+        {
+            throw new InvalidOperationException($"a {Kind} has no section ID to set");
+        }
+        SetHead($"section {Format(id)} {words[1]} {words[2]}");
+    }
+
+    /// <summary>
+    /// A copy of the block and the blocks under it, with no parent, for <see cref="CutsceneFile.Insert"/>. The comments
+    /// above it are the original's, so the copy leaves them out, and keeps the blank lines.
+    /// </summary>
+    public CutsceneBlock Copy()
+    {
+        var copy = new CutsceneBlock(Kind, null);
+        var head = Head;
+        var before = true;
+        foreach (var line in Lines)
+        {
+            if (line == head)
+            {
+                before = false;
+            }
+            if (before && line.Text.Trim().Length > 0)
+            {
+                continue;
+            }
+            copy.Lines.Add(new TextLine(line.Text, line.Ending));
+        }
+        foreach (var child in ChildList)
+        {
+            copy.Adopt(child.Copy());
+        }
+        return copy;
+    }
+
+    /// <summary>A new key of a channel at a time, written as a key line indented as this key's is.</summary>
+    public CutsceneBlock KeyLike(int time, string value, string interpolation)
+    {
+        if (Kind != CutsceneBlockKind.Key || Head is not { } head)
+        {
+            throw new InvalidOperationException($"a {Kind} is not a key");
+        }
+        var key = new CutsceneBlock(CutsceneBlockKind.Key, null);
+        key.Lines.Add(new TextLine($"{Indent(head)}key {Format(time)} {value} {interpolation}", ""));
+        return key;
+    }
+
+    // The blocks under this one in start order, keeping the order of blocks with one start. A block with no start
+    // leaves the order as it is, since the cooker reports it.
+    internal bool SortChildren()
+    {
+        if (ChildList.Count < 2 || ChildList.Any(c => c.Start == null))
+        {
+            return false;
+        }
+        var sorted = ChildList.OrderBy(c => c.Start!.Value).ToList();
+        if (sorted.SequenceEqual(ChildList))
+        {
+            return false;
+        }
+        ChildList.Clear();
+        ChildList.AddRange(sorted);
+        return true;
+    }
+
     /// <summary>The block and every block under it, in the file's order.</summary>
     public IEnumerable<CutsceneBlock> Descendants()
     {
@@ -503,6 +581,22 @@ public sealed class CutsceneFile
 
     /// <summary>The ID after the highest of a kind's blocks. Sections' IDs are the cutscene's, so they count across tracks.</summary>
     public int NextId(CutsceneBlockKind kind) => Blocks.Where(b => b.Kind == kind).Select(b => b.Id ?? 0).DefaultIfEmpty(0).Max() + 1;
+
+    /// <summary>Puts a block, as <see cref="CutsceneBlock.Copy"/> or <see cref="CutsceneBlock.KeyLike"/> makes it, under a parent at an index.</summary>
+    public void Insert(CutsceneBlock parent, int index, CutsceneBlock block)
+    {
+        if (block.Parent != null)
+        {
+            throw new InvalidOperationException("the block is in a file already");
+        }
+        block.Adopt(parent, index);
+    }
+
+    /// <summary>
+    /// Puts a block's children in start order, as the cooker wants a track's sections and a channel's keys, each with the
+    /// comments above it. Children with one start keep their order. Returns whether the order changed.
+    /// </summary>
+    public static bool SortChildren(CutsceneBlock block) => block.SortChildren();
 
     /// <summary>Removes a block and the blocks under it, with the comments and blank lines above it.</summary>
     public void Remove(CutsceneBlock block)
