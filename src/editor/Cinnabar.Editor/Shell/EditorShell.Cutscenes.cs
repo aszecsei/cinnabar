@@ -94,13 +94,15 @@ public sealed partial class EditorShell
 }
 
 /// <summary>
-/// How a user's timeline shows a cutscene: frames or timecode on the ruler, and the IDs of the locked, the muted and the
-/// soloed tracks.
+/// How a user's timeline shows a cutscene: frames or timecode on the ruler, the IDs of the locked, the muted and the
+/// soloed tracks, and whether the preview plays grains while scrubbed and sends events while it plays. A file from before
+/// a field has its default.
 /// </summary>
-public sealed record CutsceneTimelineView(bool ShowFrames, int[] Locked, int[]? Muted = null, int[]? Soloed = null)
+public sealed record CutsceneTimelineView(bool ShowFrames, int[] Locked, int[]? Muted = null, int[]? Soloed = null, bool ScrubSound = true, bool Events = false)
 {
     public static readonly CutsceneTimelineView Default = new(false, [], [], []);
 
     /// <summary>Whether the view is the default, which the file leaves out.</summary>
-    public bool IsDefault => !ShowFrames && (Locked?.Length ?? 0) == 0 && (Muted?.Length ?? 0) == 0 && (Soloed?.Length ?? 0) == 0;
+    public bool IsDefault => !ShowFrames && (Locked?.Length ?? 0) == 0 && (Muted?.Length ?? 0) == 0 && (Soloed?.Length ?? 0) == 0
+        && ScrubSound && !Events;
 }

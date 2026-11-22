@@ -446,7 +446,7 @@ The cutscene fixed system can run in a job, so it calls no script and no handler
 - **Finish.** When the cutscene finishes, each range that is still open sends its end. A cutscene finishes at its end, at a skip to its end, or at a `stop`. A spawned binding is despawned in the same update, before the scripts get the events. So its behaviours get none of the events of that last update, that end included. `restore` and `keep` do not apply: events change state through scripts, which own that state.
 - **Failure.** A cutscene that fails sends no more events. Its open ranges do not send their ends.
 - **Hot reload.** A reload forgets the open ranges whose IDs are no longer ranges, and sends nothing. The next playback sends the begins and ends that the new blob makes necessary, such as the end of a range that moved away from the time.
-- **The editor.** Only an evaluation whose `audition` is `.Play` sends events. A scrub and the editor's preview send none, so a preview never runs gameplay. `set_audition` forgets the open ranges and does not send their ends.
+- **The editor.** An evaluation whose `audition` is `.Play` sends events, and one whose `audition` is `.Preview` sends them only when the editor's mix lets it ([Evaluation: The editor's mix](evaluation.md#the-editors-mix)). A scrub sends none. `set_audition` forgets the open ranges and does not send their ends, and so does a change of the mix's events.
 
 `register` sets the event kind. The game gives the cutscenes its scripts in `init`. Without the scripts, only the native handlers get events.
 
@@ -629,7 +629,7 @@ Scripts read and change them with the `Subtitles` library ([Scripting: Subtitles
 ## Not built yet
 
 - Fields blend track by track: each track blends its sections over the field's own value, and the later track wins. So two shots that overlap cross-fade an `Animator`'s pose, but a transform or a property that both write takes the later shot's value at its weight over the own value, not over the other shot's.
-- The cutscene editor's preview sets `audition`: `.Preview` while it plays and `.Scrub` while it is scrubbed (see [Cutscene editor: Preview](../editor/cutscene-editor.md#preview)). Its waveforms are [#556](https://github.com/aszecsei/cinnabar/issues/556). The transport's option to send events to edit-mode behaviours is [#551](https://github.com/aszecsei/cinnabar/issues/551) part 2.
+- The cutscene editor's preview sets `audition`: `.Preview` while it plays and `.Scrub` while it is scrubbed (see [Cutscene editor: Preview](../editor/cutscene-editor.md#preview)). Its waveforms are [#556](https://github.com/aszecsei/cinnabar/issues/556).
 - In the editor, only the Game view follows the cut track. A viewport that pilots a camera waits for [#555](https://github.com/aszecsei/cinnabar/issues/555).
 
 ## Procedures

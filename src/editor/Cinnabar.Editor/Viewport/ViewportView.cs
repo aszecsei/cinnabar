@@ -55,6 +55,8 @@ public sealed class ViewportView : Grid
     readonly Border _overlay;
     // The Game view's notice that the world has no camera; null in a scene view.
     readonly Border? _noCamera;
+    readonly Border? _counter;
+    readonly TextBlock _counterText = new() { FontFamily = new FontFamily("Consolas"), FontSize = 12 };
     readonly TextBlock _stats;
     readonly Border _box;
     readonly TextBlock _speed;
@@ -121,6 +123,11 @@ public sealed class ViewportView : Grid
         if (_viewport.IsGame)
         {
             Children.Add(_overlay);
+            // The cutscene preview's frame counter: its timecode, frame and shot, at the bottom, clear of the view's header.
+            _counter = Overlay(_counterText, HorizontalAlignment.Left, VerticalAlignment.Bottom);
+            _counter.IsHitTestVisible = false;
+            _counter.IsVisible = false;
+            Children.Add(_counter);
             _noCamera = Overlay(new TextBlock { Text = "No camera in the scene: showing a default view", FontSize = 12 }, HorizontalAlignment.Center, VerticalAlignment.Top);
             _noCamera.Margin = new Thickness(8, 44, 8, 8);
             _noCamera.IsHitTestVisible = false;
@@ -221,6 +228,9 @@ public sealed class ViewportView : Grid
                 _gamepadTimer.Start();
                 _shell.WorldCameraChanged += ShowCamera;
                 _viewport.FocusRequested += TakeFocus;
+                _shell.CutscenePreview.Changed += ShowCounter;
+                _shell.CutscenePreview.PlayheadMoved += ShowCounter;
+                ShowCounter();
                 ShowCamera();
                 TakeFocus();
             }
@@ -246,6 +256,8 @@ public sealed class ViewportView : Grid
             {
                 _shell.WorldCameraChanged -= ShowCamera;
                 _viewport.FocusRequested -= TakeFocus;
+                _shell.CutscenePreview.Changed -= ShowCounter;
+                _shell.CutscenePreview.PlayheadMoved -= ShowCounter;
             }
             _timer.Stop();
             _flyTimer.Stop();
@@ -274,6 +286,13 @@ public sealed class ViewportView : Grid
         {
             _turnTimer.Stop();
         }
+    }
+
+    void ShowCounter()
+    {
+        var text = _shell.CutscenePreview.FrameCounter();
+        _counter!.IsVisible = text != null;
+        _counterText.Text = text ?? "";
     }
 
     bool OnHeader(RoutedEventArgs e) => e.Source is Visual source && (source == _toolbar || _toolbar.IsVisualAncestorOf(source));

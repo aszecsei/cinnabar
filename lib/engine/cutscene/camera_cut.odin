@@ -145,7 +145,7 @@ Shot :: struct {
 // that has no cut track shows each shot's own cuts (see docs/cinematics/tracks.md#sub-sequence-tracks).
 @(private)
 shown_shot :: proc(s: ^State, ctx: ^Track_Context) -> (shot: Shot, ok: bool) {
-	if cut, live := live_cut_track(ctx.data, ctx.blob); live {
+	if cut, live := live_cut_track(ctx.evaluation, ctx.child, ctx.data, ctx.blob); live {
 		sections := format.cutscene_track_sections(ctx.data, ctx.blob, cut)
 		if i, showing := shown_section(ctx, sections, ctx.time); showing {
 			return {ctx^, sections, i}, true
@@ -170,7 +170,7 @@ shown_shot :: proc(s: ^State, ctx: ^Track_Context) -> (shot: Shot, ok: bool) {
 // else that of the last child whose section covers the end, found the same way.
 @(private)
 last_shot :: proc(s: ^State, ctx: ^Track_Context) -> (shot: Shot, ok: bool) {
-	if cut, live := live_cut_track(ctx.data, ctx.blob); live {
+	if cut, live := live_cut_track(ctx.evaluation, ctx.child, ctx.data, ctx.blob); live {
 		sections := format.cutscene_track_sections(ctx.data, ctx.blob, cut)
 		if len(sections) > 0 {
 			return {ctx^, sections, len(sections) - 1}, true
@@ -194,12 +194,12 @@ last_shot :: proc(s: ^State, ctx: ^Track_Context) -> (shot: Shot, ok: bool) {
 // tree_has_cuts is whether the root or a loaded child has a camera cut track that is not muted.
 @(private)
 tree_has_cuts :: proc(s: ^State, ctx: ^Track_Context) -> bool {
-	if _, live := live_cut_track(ctx.data, ctx.blob); live {
+	if _, live := live_cut_track(ctx.evaluation, ctx.child, ctx.data, ctx.blob); live {
 		return true
 	}
 	for i in 1 ..= len(ctx.evaluation.children) {
 		if data, blob, ok := child_blob(s, ctx.evaluation, i); ok {
-			if _, live := live_cut_track(data, blob); live {
+			if _, live := live_cut_track(ctx.evaluation, i, data, blob); live {
 				return true
 			}
 		}
@@ -227,9 +227,12 @@ change_cut :: proc(e: ^Evaluation, next: Cut_Shown, leaving: camera.Blend) {
 	e.cut.shown = next
 }
 
-// live_cut_track is the cutscene's camera cut track while it is not muted.
+// live_cut_track is the camera cut track of one cutscene of the tree, by its child index (0 for the root), while it is
+// not muted or silenced (see track_silent).
 @(private)
 live_cut_track :: proc(
+	e: ^Evaluation,
+	child: int,
 	data: []byte,
 	blob: ^format.Cutscene_Blob,
 ) -> (
@@ -237,7 +240,7 @@ live_cut_track :: proc(
 	ok: bool,
 ) {
 	track = format.cutscene_cut_track(data, blob) or_return
-	return track, .Muted not_in track.flags
+	return track, !track_silent(e, child, track)
 }
 
 // shown_section is the cut section that covers a time on the scope's time: [start, end), and its end too at the range's
@@ -300,7 +303,7 @@ leaving_blend :: proc(s: ^State, ctx: ^Track_Context, jumped: bool) -> camera.Bl
 			continue
 		}
 		at, found := scope_context(s, ctx, i)
-		cut, live := live_cut_track(at.data, at.blob)
+		cut, live := live_cut_track(at.evaluation, at.child, at.data, at.blob)
 		if !found || !live {
 			continue
 		}
@@ -364,7 +367,8 @@ tree_cut_fires :: proc(s: ^State, ctx: ^Track_Context) -> bool {
 		if scope_cut_fires(&inner) {
 			return true
 		}
-		if _, live := live_cut_track(inner.data, inner.blob); !live {
+		if _, live := live_cut_track(inner.evaluation, inner.child, inner.data, inner.blob);
+		   !live {
 			continue
 		}
 		parent := scope_context(s, ctx, c.parent) or_continue
@@ -381,7 +385,7 @@ tree_cut_fires :: proc(s: ^State, ctx: ^Track_Context) -> bool {
 // start that does not blend in from gameplay, or a section's end that cuts back to gameplay, before the range's end.
 @(private)
 scope_cut_fires :: proc(ctx: ^Track_Context) -> bool {
-	cut, live := live_cut_track(ctx.data, ctx.blob)
+	cut, live := live_cut_track(ctx.evaluation, ctx.child, ctx.data, ctx.blob)
 
 	if !live {
 		return false
@@ -410,7 +414,7 @@ scope_cut_fires :: proc(ctx: ^Track_Context) -> bool {
 // It writes as the cut track, whose when_finished restores or keeps the parts.
 @(private)
 constrain :: proc(ctx: ^Track_Context) {
-	cut, live := live_cut_track(ctx.data, ctx.blob)
+	cut, live := live_cut_track(ctx.evaluation, ctx.child, ctx.data, ctx.blob)
 	constraints := format.cutscene_constraints(ctx.data, ctx.blob)
 	if !live || len(constraints) == 0 {
 		return

@@ -82,6 +82,26 @@ plays_child :: proc(
 	return false
 }
 
+// silenced_child is whether the editor's mix silences the root's sub-sequence track that plays a child of the root (see
+// set_mix). The child stays loaded, so a track that plays again needs no load.
+@(private)
+silenced_child :: proc(
+	e: ^Evaluation,
+	data: []byte,
+	blob: ^format.Cutscene_Blob,
+	c: Child,
+) -> bool {
+	if len(e.silent) == 0 {
+		return false
+	}
+	for track in format.cutscene_tracks(data, blob) {
+		if plays_child(data, blob, track, c) {
+			return track_silent(e, 0, track)
+		}
+	}
+	return false
+}
+
 // tree_binding is the entity of a binding of one cutscene of the tree, by its index in that cutscene's blob, while it
 // is alive. A child's binding that its section maps is its parent's binding. child is 0 for the root, and n for
 // children[n - 1].
@@ -231,7 +251,10 @@ tree_orders :: proc(
 				walk.orders[i] = walk.next
 			}
 			walk.next += 1
-			if track.kind != .Sub_Sequence || depth >= format.CUTSCENE_MAX_DEPTH {
+			// A silenced sub-sequence track counts no child, as walk_scope counts none.
+			if track.kind != .Sub_Sequence ||
+			   depth >= format.CUTSCENE_MAX_DEPTH ||
+			   track_silent(walk.e, at, track) {
 				continue
 			}
 			for c, j in walk.e.children {
@@ -589,6 +612,9 @@ child_context :: proc(
 	c := e.children[child - 1]
 	data, blob := child_blob(s, e, child) or_return
 	section := child_section(parent.data, parent.blob, c) or_return
+	if parent.child == 0 && silenced_child(e, parent.data, parent.blob, c) {
+		return
+	}
 	trim := trim_of(section, blob)
 	t, _ := child_time(section, trim, i64(parent.time))
 	at, covers := sample_section(parent, section, parent.time)
@@ -671,6 +697,9 @@ walk_scope :: proc(
 		ctx.order = next
 		next += 1
 		if track.kind == .Sub_Sequence {
+			if track_silent(e, ctx.child, track) {
+				continue
+			}
 			for c, k in e.children {
 				if c.parent != ctx.child || !plays_child(ctx.data, ctx.blob, track, c) {
 					continue
@@ -697,7 +726,7 @@ walk_scope :: proc(
 			continue
 		}
 		kind := s.kinds[track.kind]
-		if .Muted in track.flags || kind.evaluate == nil || kind.phase != phase {
+		if track_silent(e, ctx.child, track) || kind.evaluate == nil || kind.phase != phase {
 			continue
 		}
 		evaluates: bool

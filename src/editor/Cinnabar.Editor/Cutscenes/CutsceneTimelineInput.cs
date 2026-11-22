@@ -124,11 +124,38 @@ public sealed class CutsceneTimelineInput
         Invalidated?.Invoke();
     }
 
-    /// <summary>Pans the view so the playhead is in it, as Home, End and the jumps to an edge move it.</summary>
+    /// <summary>
+    /// Whether the view follows the playhead while the preview plays. A play turns it on, and a pan or a zoom of the time
+    /// by hand turns it off until the next play.
+    /// </summary>
+    public bool Follow { get; private set; } = true;
+
+    /// <summary>A play began: the view follows the playhead again.</summary>
+    public void OnPlayStarted()
+    {
+        Follow = true;
+        ShowPlayhead();
+    }
+
+    /// <summary>
+    /// Pans the view so the playhead is in it, as Home, End and the jumps to an edge move it, and centres it there. While
+    /// the preview plays, the view pages when the playhead leaves it, so the playhead starts again near the edge that it
+    /// comes from, and not at all once a pan or a zoom by hand turned <see cref="Follow"/> off.
+    /// </summary>
     public void ShowPlayhead()
     {
         var x = View.X(_editor.Playhead);
-        if (x < 0 || x > TimeWidth)
+        var outside = x < 0 || x > TimeWidth;
+        if (_editor.PlayingRate is { } rate)
+        {
+            if (Follow && outside)
+            {
+                var margin = TimeWidth / 10;
+                var at = rate > 0 ? margin : TimeWidth - margin;
+                View = View with { Start = _editor.Playhead - at * View.PerPixel };
+            }
+        }
+        else if (outside)
         {
             View = View with { Start = _editor.Playhead - TimeWidth / 2 * View.PerPixel };
         }
@@ -153,10 +180,12 @@ public sealed class CutsceneTimelineInput
         else if (modifiers.HasFlag(KeyModifiers.Shift))
         {
             View = View.Pan(delta * 60);
+            Follow = false;
         }
         else
         {
             View = View.ZoomAbout(x - CutsceneTimelineLayout.Gutter, Math.Pow(1.25, -delta));
+            Follow = false;
         }
         Invalidated?.Invoke();
     }
@@ -173,6 +202,7 @@ public sealed class CutsceneTimelineInput
         if (button == MouseButton.Middle || (button == MouseButton.Right && modifiers.HasFlag(KeyModifiers.Alt)))
         {
             _gesture = Gesture.Pan;
+            Follow = false;
             return true;
         }
         if (button != MouseButton.Left)

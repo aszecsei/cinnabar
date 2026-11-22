@@ -17,6 +17,7 @@ import "cinnabar:engine/cutscene"
 import "cinnabar:engine/ecs"
 import "cinnabar:engine/editor/link"
 import "cinnabar:engine/scene"
+import "cinnabar:engine/script"
 
 @(private = "file")
 SECOND :: format.CUTSCENE_TICKS_PER_SECOND
@@ -274,7 +275,7 @@ cutscene_blob :: proc(f: ^Fixture, to: f32, key: u64 = 1, hero: u64 = HERO) -> [
 		rotation = {0, 0, 0, 1},
 		scale    = {1, 1, 1},
 	}
-	tracks := make([]format.Cutscene_Track_Contents, 2, context.temp_allocator)
+	tracks := make([]format.Cutscene_Track_Contents, 3, context.temp_allocator)
 	tracks[0] = {
 		id       = 1,
 		kind     = .Transform,
@@ -293,6 +294,20 @@ cutscene_blob :: proc(f: ^Fixture, to: f32, key: u64 = 1, hero: u64 = HERO) -> [
 		component = f.bulb,
 		field     = "brightness",
 		sections  = section(ramp("value", 0, 4)),
+	}
+	beat := make([]format.Cutscene_Event_Contents, 1, context.temp_allocator)
+	beat[0] = {
+		id    = 1,
+		start = SECOND / 2,
+		end   = SECOND / 2,
+		name  = "beat",
+	}
+	tracks[2] = {
+		id      = 3,
+		kind    = .Event,
+		name    = "Beats",
+		binding = format.CUTSCENE_NONE,
+		events  = beat,
 	}
 	guids := make([]format.Guid, 1, context.temp_allocator)
 	guids[0] = PROP_GUID
@@ -645,6 +660,61 @@ play_moves_on_the_games_clock_and_stops_at_the_end :: proc(t: ^testing.T) {
 	testing.expect_value(t, x_of(f, f.hero), METER)
 	_, told = find_message(step(f), link.Cutscene_Preview_Tick)
 	testing.expect(t, !told)
+}
+
+@(private = "file", thread_local)
+beats: int
+
+// The settings silence a track, which then writes nothing, so its field shows the document's value under the preview,
+// and the others play on. With events, the event track's events go out while the preview plays, and never while it is
+// scrubbed. Settings with another ticket do nothing.
+@(test)
+settings_silence_tracks_turn_grains_off_and_send_events_while_playing :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	beats = 0
+	cutscene.register_event_handler(
+		&f.cutscenes,
+		"beat",
+		proc(_: rawptr, _: cutscene.Player_Handle, _: string, _: []script.Event_Arg) {
+			beats += 1
+		},
+	)
+	step(f, open(1, SECOND / 2))
+	testing.expect_value(t, bulb_of(f), 2)
+
+	step(f, link.Cutscene_Preview_Settings{ticket = 1, scrub_sound = true, silent = {2}})
+	testing.expect_value(t, bulb_of(f), 1)
+	testing.expect_value(t, x_of(f, f.hero), 5 * METER)
+	step(f, link.Cutscene_Preview_Settings{ticket = 0, scrub_sound = false})
+	testing.expect_value(t, bulb_of(f), 1)
+	p := &f.editor.session.cutscene_previews.open.?
+	testing.expect(t, !p.live.evaluation.no_grains)
+
+	step(f, link.Cutscene_Preview_Settings{ticket = 1, scrub_sound = false})
+	testing.expect_value(t, bulb_of(f), 2)
+	testing.expect(t, p.live.evaluation.no_grains)
+
+	// Without events, a play over the beat sends nothing.
+	step(f, link.Cutscene_Preview_Play{ticket = 1, tick = 0, rate = 1})
+	frame(f, time.Second)
+	testing.expect_value(t, beats, 0)
+
+	// With them, it sends the beat once; a scrub over it sends nothing.
+	step(f, link.Cutscene_Preview_Time{ticket = 1, tick = 0})
+	step(f, link.Cutscene_Preview_Settings{ticket = 1, scrub_sound = true, events = true})
+	step(f, link.Cutscene_Preview_Play{ticket = 1, tick = 0, rate = 1})
+	frame(f, time.Second / 4)
+	testing.expect_value(t, beats, 0)
+	frame(f, time.Second / 2)
+	testing.expect_value(t, beats, 1)
+	step(f)
+	frame(f, 0)
+	testing.expect_value(t, beats, 1)
+	step(f, link.Cutscene_Preview_Time{ticket = 1, tick = 0})
+	step(f, link.Cutscene_Preview_Time{ticket = 1, tick = SECOND})
+	frame(f, 0)
+	testing.expect_value(t, beats, 1)
 }
 
 // With unsaved, the preview plays the cook daemon's blob from the preview area, and a newer one there replaces it at the

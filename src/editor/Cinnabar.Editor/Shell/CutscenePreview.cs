@@ -4,10 +4,31 @@ using CutscenePreviewEnded = Cinnabar.Editor.Link.Protocol.CutscenePreviewEnded;
 using CutscenePreviewOpen = Cinnabar.Editor.Link.Protocol.CutscenePreviewOpen;
 using CutscenePreviewOpened = Cinnabar.Editor.Link.Protocol.CutscenePreviewOpened;
 using CutscenePreviewPlay = Cinnabar.Editor.Link.Protocol.CutscenePreviewPlay;
+using CutscenePreviewSettings = Cinnabar.Editor.Link.Protocol.CutscenePreviewSettings;
 using CutscenePreviewTick = Cinnabar.Editor.Link.Protocol.CutscenePreviewTick;
 using CutscenePreviewTime = Cinnabar.Editor.Link.Protocol.CutscenePreviewTime;
+using Cinnabar.Editor.Cutscenes;
+using Cinnabar.Editor.Tools;
 
 namespace Cinnabar.Editor.Shell;
+
+/// <summary>
+/// Whether an open session's clock stands or moves. A playing one moves at a rate times real time, backward below 0. Its
+/// loop is the tab's, which <see cref="CutscenePreview"/> reads when it sends the play.
+/// </summary>
+public abstract record CutsceneTransport
+{
+    private protected CutsceneTransport()
+    {
+    }
+
+    public sealed record Paused : CutsceneTransport
+    {
+        public static readonly Paused Instance = new();
+    }
+
+    public sealed record Playing(float Rate) : CutsceneTransport;
+}
 
 /// <summary>
 /// Where the cutscene preview is. Each state carries what belongs to it: a session its ticket and the tab that holds it.
@@ -21,21 +42,25 @@ public abstract record CutscenePreviewState
 
     /// <summary>
     /// No session. The reason is why the game ended the last one, or null when the editor did or there was none. With
-    /// <paramref name="Resume"/>, the last one played when the link or the game state went, so the next one plays.
+    /// <paramref name="Resume"/>, the last one played when the link or the game state went, so the next one plays at
+    /// its rate.
     /// </summary>
-    public sealed record Closed(CutscenePreviewEndReason? Reason = null, bool Resume = false) : CutscenePreviewState;
+    public sealed record Closed(CutscenePreviewEndReason? Reason = null, CutsceneTransport.Playing? Resume = null) : CutscenePreviewState;
 
     /// <summary>A session, which the game has not yet answered.</summary>
     public abstract record Live(ulong Ticket, CutsceneEditor Editor, bool Unsaved) : CutscenePreviewState;
 
     /// <summary>
     /// The editor sent Open and waits for Opened. With <paramref name="Resume"/>, the session replaces one that was
-    /// playing, so it plays again when the game answers.
+    /// playing, so it plays again at that rate when the game answers.
     /// </summary>
-    public sealed record Opening(ulong Ticket, CutsceneEditor Editor, bool Unsaved, bool Resume) : Live(Ticket, Editor, Unsaved);
+    public sealed record Opening(ulong Ticket, CutsceneEditor Editor, bool Unsaved, CutsceneTransport.Playing? Resume) : Live(Ticket, Editor, Unsaved);
 
     /// <summary>The game holds the session, with the cutscene's range in ticks, and the clock is the game's while it plays.</summary>
-    public sealed record Open(ulong Ticket, CutsceneEditor Editor, bool Unsaved, int RangeStart, int RangeEnd, bool Playing) : Live(Ticket, Editor, Unsaved);
+    public sealed record Open(ulong Ticket, CutsceneEditor Editor, bool Unsaved, int RangeStart, int RangeEnd, CutsceneTransport Transport) : Live(Ticket, Editor, Unsaved)
+    {
+        public bool Playing => Transport is CutsceneTransport.Playing;
+    }
 }
 
 /// <summary>
@@ -47,6 +72,9 @@ public abstract record CutscenePreviewState
 /// </summary>
 public sealed class CutscenePreview(EditorShell shell)
 {
+    /// <summary>The fastest that J and L shuttle, either way.</summary>
+    public const float MaxShuttle = 8f;
+
     // The last ticket given.
     ulong _last;
 
@@ -100,11 +128,11 @@ public sealed class CutscenePreview(EditorShell shell)
     public void Take(CutsceneEditor editor)
     {
         Owner = editor;
-        Start(editor, resume: false);
+        Start(editor, resume: null);
     }
 
     // Ends the session, which tells the game, and opens one for the editor at its playhead.
-    void Start(CutsceneEditor editor, bool resume)
+    void Start(CutsceneEditor editor, CutsceneTransport.Playing? resume)
     {
         Shut(send: true, null);
         if (!CanSend)
@@ -116,9 +144,24 @@ public sealed class CutscenePreview(EditorShell shell)
         var ticket = ++_last;
         Become(new CutscenePreviewState.Opening(ticket, editor, unsaved, resume));
         shell.Host.Send(new CutscenePreviewOpen(ticket, Convert.FromHexString(editor.Guid), unsaved, editor.Playhead));
+        // The game forgets the mix with the session, so each Open carries it. Messages are in order, so the game has it
+        // before the session's first frame.
+        SendSettings(ticket, editor);
     }
 
-    void Shut(bool send, CutscenePreviewEndReason? reason, bool resume = false)
+    void SendSettings(ulong ticket, CutsceneEditor editor) =>
+        shell.Host.Send(new CutscenePreviewSettings(ticket, editor.ScrubSound, editor.PreviewEvents, [.. editor.SilentTracks().Select(id => (uint)id)]));
+
+    /// <summary>The tab's scrub sound, events or audible tracks changed: its open or opening session hears it at once.</summary>
+    internal void OnMixChanged(CutsceneEditor editor)
+    {
+        if (State is CutscenePreviewState.Live live && live.Editor == editor && CanSend)
+        {
+            SendSettings(live.Ticket, editor);
+        }
+    }
+
+    void Shut(bool send, CutscenePreviewEndReason? reason, CutsceneTransport.Playing? resume = null)
     {
         if (State is not CutscenePreviewState.Live live)
         {
@@ -132,7 +175,7 @@ public sealed class CutscenePreview(EditorShell shell)
     }
 
     // A session for the owner, or for the active cutscene tab when there is no owner. The game's state has none.
-    void Reopen(bool resume)
+    void Reopen(CutsceneTransport.Playing? resume)
     {
         if ((Owner ?? shell.ActiveCutscene) is { } editor)
         {
@@ -141,8 +184,14 @@ public sealed class CutscenePreview(EditorShell shell)
         }
     }
 
-    static bool IsPlaying(CutscenePreviewState state) =>
-        state is CutscenePreviewState.Open { Playing: true } or CutscenePreviewState.Opening { Resume: true } or CutscenePreviewState.Closed { Resume: true };
+    // How the state plays, or plays again when it opens: null for paused.
+    static CutsceneTransport.Playing? PlayingOf(CutscenePreviewState state) => state switch
+    {
+        CutscenePreviewState.Open { Transport: CutsceneTransport.Playing playing } => playing,
+        CutscenePreviewState.Opening { Resume: { } resume } => resume,
+        CutscenePreviewState.Closed { Resume: { } resume } => resume,
+        _ => null,
+    };
 
     /// <summary>A cutscene tab became the active one. It takes the preview when no session is live.</summary>
     internal void OnActivated(CutsceneEditor? editor)
@@ -169,7 +218,7 @@ public sealed class CutscenePreview(EditorShell shell)
     internal void OnPlay() => Shut(send: false, null);
 
     /// <summary>The link closed, and the game ended its session. One that played plays again in the next.</summary>
-    internal void OnLinkLost() => Shut(send: false, null, IsPlaying(State));
+    internal void OnLinkLost() => Shut(send: false, null, PlayingOf(State));
 
     /// <summary>
     /// The game has a new state, which has no session. The scene's send opens one again (see <see cref="OnSceneSent"/>):
@@ -180,7 +229,7 @@ public sealed class CutscenePreview(EditorShell shell)
     {
         if (State is CutscenePreviewState.Live live)
         {
-            Shut(send: false, null, IsPlaying(live));
+            Shut(send: false, null, PlayingOf(live));
         }
     }
 
@@ -201,7 +250,7 @@ public sealed class CutscenePreview(EditorShell shell)
     {
         if (State is CutscenePreviewState.Live { Unsaved: false } live && live.Editor == editor)
         {
-            Start(editor, IsPlaying(live));
+            Start(editor, PlayingOf(live));
         }
     }
 
@@ -216,10 +265,10 @@ public sealed class CutscenePreview(EditorShell shell)
         switch (live)
         {
             case CutscenePreviewState.Open { Playing: true } open:
-                Become(open with { Playing = false });
+                Become(open with { Transport = CutsceneTransport.Paused.Instance });
                 break;
-            case CutscenePreviewState.Opening { Resume: true } opening:
-                Become(opening with { Resume = false });
+            case CutscenePreviewState.Opening { Resume: not null } opening:
+                Become(opening with { Resume = null });
                 break;
             default:
                 Changed?.Invoke();
@@ -242,7 +291,7 @@ public sealed class CutscenePreview(EditorShell shell)
 
     public bool IsPlayingIn(CutsceneEditor editor) => State is CutscenePreviewState.Open { Playing: true } open && open.Editor == editor;
 
-    /// <summary>Starts the game's clock at the playhead, or from the range's start at its end, or pauses it where it is.</summary>
+    /// <summary>Plays at the tab's play rate from the playhead, or pauses where it is: Space.</summary>
     public void PlayPause()
     {
         if (State is not CutscenePreviewState.Open open)
@@ -254,12 +303,71 @@ public sealed class CutscenePreview(EditorShell shell)
             Pause();
             return;
         }
-        _pending = null;
-        var tick = open.Editor.Playhead >= open.RangeEnd ? open.RangeStart : open.Editor.Playhead;
-        open.Editor.SetPlayheadFromGame(tick);
-        shell.Host.Send(new CutscenePreviewPlay(open.Ticket, tick, 1f, false, 0, 0));
-        Become(open with { Playing = true });
+        Play(open.Editor.PlayRate);
     }
+
+    /// <summary>
+    /// J and L: a press the way that the preview plays doubles its rate, up to <see cref="MaxShuttle"/>, and another
+    /// press, or one while it is paused, plays that way at 1×. <paramref name="direction"/> is 1 or -1.
+    /// </summary>
+    public void Shuttle(CutsceneEditor editor, int direction)
+    {
+        if (State is not CutscenePreviewState.Open open || open.Editor != editor)
+        {
+            return;
+        }
+        var rate = open.Transport is CutsceneTransport.Playing playing && Math.Sign(playing.Rate) == direction
+            ? Math.Min(Math.Abs(playing.Rate) * 2, MaxShuttle)
+            : 1f;
+        Play(rate * direction);
+    }
+
+    /// <summary>
+    /// Starts the game's clock at a rate from the playhead, inside the tab's loop when it loops. From the end that it
+    /// plays toward, it starts at the other end: of the loop when it loops, or else of the range.
+    /// </summary>
+    public void Play(float rate)
+    {
+        if (State is CutscenePreviewState.Open open && rate != 0)
+        {
+            SendPlay(open, rate);
+            open.Editor.OnPlayStarted();
+        }
+    }
+
+    // Sends the play from the playhead, which a new play and a change of the loop while it plays both do.
+    void SendPlay(CutscenePreviewState.Open open, float rate)
+    {
+        var editor = open.Editor;
+        var loop = editor.Loop ? editor.LoopRange : null;
+        var (start, end) = loop is { } l ? (l.Start, l.End) : (open.RangeStart, open.RangeEnd);
+        var tick = editor.Playhead;
+        if (rate > 0 && tick >= end)
+        {
+            tick = start;
+        }
+        else if (rate < 0 && tick <= start)
+        {
+            tick = end;
+        }
+        _pending = null;
+        editor.SetPlayheadFromGame(tick);
+        shell.Host.Send(new CutscenePreviewPlay(open.Ticket, tick, rate, loop != null, loop?.Start ?? 0, loop?.End ?? 0));
+        Become(open with { Transport = new CutsceneTransport.Playing(rate) });
+    }
+
+    /// <summary>The tab's loop, or its in or out point, changed: a session that plays sends its play again from the playhead, at its rate.</summary>
+    internal void OnLoopChanged(CutsceneEditor editor)
+    {
+        if (State is CutscenePreviewState.Open { Transport: CutsceneTransport.Playing playing } open && open.Editor == editor)
+        {
+            SendPlay(open, playing.Rate);
+        }
+    }
+
+    /// <summary>The rate at which the tab's session plays, or null when it does not.</summary>
+    public float? RateIn(CutsceneEditor editor) =>
+        State is CutscenePreviewState.Open { Transport: CutsceneTransport.Playing playing } open && open.Editor == editor ? playing.Rate : null;
 
     /// <summary>Pauses the game's clock at the playhead, which is the last tick that the game reported.</summary>
     internal void Pause()
@@ -269,11 +377,11 @@ public sealed class CutscenePreview(EditorShell shell)
             case CutscenePreviewState.Open { Playing: true } open:
                 _pending = null;
                 shell.Host.Send(new CutscenePreviewTime(open.Ticket, open.Editor.Playhead));
-                Become(open with { Playing = false });
+                Become(open with { Transport = CutsceneTransport.Paused.Instance });
                 break;
-            case CutscenePreviewState.Opening { Resume: true } opening:
+            case CutscenePreviewState.Opening { Resume: not null } opening:
                 // The session that replaces a playing one opens paused.
-                Become(opening with { Resume = false });
+                Become(opening with { Resume = null });
                 break;
         }
     }
@@ -285,10 +393,10 @@ public sealed class CutscenePreview(EditorShell shell)
         {
             return;
         }
-        Become(new CutscenePreviewState.Open(opening.Ticket, opening.Editor, opening.Unsaved, opened.RangeStart, opened.RangeEnd, false));
-        if (opening.Resume)
+        Become(new CutscenePreviewState.Open(opening.Ticket, opening.Editor, opening.Unsaved, opened.RangeStart, opened.RangeEnd, CutsceneTransport.Paused.Instance));
+        if (opening.Resume is { } resume)
         {
-            PlayPause();
+            Play(resume.Rate);
         }
     }
 
@@ -302,7 +410,7 @@ public sealed class CutscenePreview(EditorShell shell)
         {
             return;
         }
-        var resume = IsPlaying(live);
+        var resume = PlayingOf(live);
         Become(new CutscenePreviewState.Closed(ended.Reason));
         if (ended.Reason is CutscenePreviewEndReason.SceneLoaded or CutscenePreviewEndReason.CodeReloaded && Owner is { } owner)
         {
@@ -320,8 +428,36 @@ public sealed class CutscenePreview(EditorShell shell)
         open.Editor.SetPlayheadFromGame(tick.Tick);
         if (!tick.Playing)
         {
-            Become(open with { Playing = false });
+            Become(open with { Transport = CutsceneTransport.Paused.Instance });
         }
+    }
+
+    /// <summary>The playhead of the tab that holds the preview moved, by the editor or by the game.</summary>
+    public event Action? PlayheadMoved;
+
+    internal void OnPlayheadMoved(CutsceneEditor editor)
+    {
+        if (editor == Owner)
+        {
+            PlayheadMoved?.Invoke();
+        }
+    }
+
+    /// <summary>
+    /// What the Game view's frame counter says while a session is open: the playhead's timecode and frame at the
+    /// cutscene's rate, and the shot there (see <see cref="CutsceneTimelineLayout.ShotAt"/>), or "gameplay". Null with no
+    /// open session.
+    /// </summary>
+    public string? FrameCounter()
+    {
+        if (State is not CutscenePreviewState.Open open)
+        {
+            return null;
+        }
+        var editor = open.Editor;
+        var rate = editor.File.Rate;
+        var shot = CutsceneTimelineLayout.ShotAt(editor.File, editor.Playhead, editor.SilentTracks()) ?? "gameplay";
+        return $"{CutsceneTime.Timecode(editor.Playhead, rate)}  ·  frame {CutsceneTime.Frames(editor.Playhead, rate)}  ·  {shot}";
     }
 
     /// <summary>Whether the tab can take the preview from where it is, which the tab's button does.</summary>

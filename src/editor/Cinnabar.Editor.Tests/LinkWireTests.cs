@@ -18,6 +18,12 @@ public class LinkWireTests
         new ViewportTarget(2, "cinnabar.viewport2.g3", 3, 640, 360),
         new ViewportAcknowledged(2, 3, 1UL << 40),
         new CaptureSource(-1),
+        new CutscenePreviewTime(3, 1000),
+        new CutscenePreviewPlay(3, 1000, -2, true, 500, 90000),
+        new CutscenePreviewClose(3),
+        new CutscenePreviewOpened(3, 12000, 0, 600000),
+        new CutscenePreviewEnded(4, CutscenePreviewEndReason.CodeReloaded),
+        new CutscenePreviewTick(3, 1001, true),
     ];
 
     [Theory]
@@ -31,6 +37,24 @@ public class LinkWireTests
         Assert.Equal(message.MessageKind, header.Kind);
         Assert.Equal(7u, header.Request);
         Assert.Equal(message, LinkFrame.Decode(header.Kind, frame.AsSpan(LinkFrame.HeaderSize), LinkMessages.Read));
+    }
+
+    [Fact]
+    public void ACutscenePreviewsSettingsRoundTripWithTheirSilentTracks()
+    {
+        var message = new CutscenePreviewSettings(3, false, true, [4, 1_000_001]);
+        var frame = LinkFrame.Encode(message);
+        var header = LinkFrame.ReadHeader(frame);
+        var read = Assert.IsType<CutscenePreviewSettings>(LinkFrame.Decode(header.Kind, frame.AsSpan(LinkFrame.HeaderSize), LinkMessages.Read));
+        Assert.Equal((3UL, false, true), (read.Ticket, read.ScrubSound, read.Events));
+        Assert.Equal([4u, 1_000_001u], read.Silent);
+
+        byte[] guid = [1, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9];
+        frame = LinkFrame.Encode(new CutscenePreviewOpen(3, guid, true, 12000));
+        header = LinkFrame.ReadHeader(frame);
+        var open = Assert.IsType<CutscenePreviewOpen>(LinkFrame.Decode(header.Kind, frame.AsSpan(LinkFrame.HeaderSize), LinkMessages.Read));
+        Assert.Equal((3UL, true, 12000), (open.Ticket, open.Unsaved, open.Tick));
+        Assert.Equal(guid, open.Cutscene);
     }
 
     [Fact]

@@ -4,7 +4,7 @@ A cutscene's world is a function of its time. `evaluate` at a time *t* gives the
 
 This document describes `lib/engine/cutscene/evaluation.odin`: the clock, the order in the frame, how sections blend, events, the restore snapshot and hot reload. The tracks of each kind are separate parts of [#526](https://github.com/aszecsei/cinnabar/issues/526). Read [Bindings](bindings.md), [World: Time](../world/time.md#fixed-and-variable-rate) and [World: ECS: Systems](../world/ecs.md#systems) first.
 
-**In this document:** [The evaluation](#the-evaluation) · [The clock](#the-clock) · [The order in the frame](#the-order-in-the-frame) · [Kinds of track](#kinds-of-track) · [Sections and blending](#sections-and-blending) · [Events](#events) · [The restore snapshot](#the-restore-snapshot) · [Hot reload](#hot-reload) · [Determinism](#determinism) · [Procedures](#procedures)
+**In this document:** [The evaluation](#the-evaluation) · [The clock](#the-clock) · [The order in the frame](#the-order-in-the-frame) · [Kinds of track](#kinds-of-track) · [Sections and blending](#sections-and-blending) · [Events](#events) · [The restore snapshot](#the-restore-snapshot) · [Hot reload](#hot-reload) · [Determinism](#determinism) · [The editor's mix](#the-editors-mix) · [Procedures](#procedures)
 
 ## The evaluation
 
@@ -151,12 +151,20 @@ The same *t* gives the same values on one job or many:
 
 A test compares a play with one job and with eight workers.
 
+## The editor's mix
+
+The cutscene editor's preview sets three things on its evaluation with `set_mix`, which is their one writer. A player's evaluation leaves them at their zero values, so a game never sees them.
+- **Silent tracks.** `Evaluation.silent` holds IDs of the root cutscene's tracks. `track_silent` makes each one evaluate as a track whose blob sets `muted`: every place that skips a muted track asks it, so a silenced camera cut track shows no shot, a silenced sub-sequence track plays no child, and a transform track relative to a silenced one does not follow it. The IDs name the root's tracks only, not a child's. The children stay loaded. A change of the set ends what the evaluation holds outside the snapshot (`end_holds`) and forgets the open ranges, as a reload does, so the next evaluation starts the drives, the claim and the voices again for the tracks that still play.
+- **Grains.** `no_grains` stops a scrub's grains.
+- **Events.** `preview_events` lets the event tracks send events under the `.Preview` audition, which a play in the editor has. A change forgets the open ranges without sending their ends.
+
 ## Procedures
 
 | Procedure | What it does |
 |---|---|
 | `init(state, world, assets, actions, animation, views, sounds)`, `register(state, world)`, `destroy(state, world)` | Set up the state, register the two systems and clear the kinds, and reset and free the players |
 | `register_kind(state, kind, desc)` | Sets a kind's phase and evaluate procedure |
+| `set_mix(e, world, silent, grains, events)` | Sets the editor's mix: the root's tracks that evaluate as muted ones, the scrub's grains, and events under `.Preview` |
 | `init_evaluation(e, world, handle, data, blob)`, `destroy_evaluation(e, world)` | Start an evaluation at the range's start. Destroy its bindings and free its snapshot, without restoring. |
 | `advance(e, blob, dt)` | Moves the time by a duration, without drift, up to the range's end |
 | `seek(state, e, world, data, blob, t)` | Sets the time, so no event between fires, except the event tracks' keys marked to fire on seek when it goes forward |

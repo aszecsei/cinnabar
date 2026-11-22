@@ -778,6 +778,59 @@ a_scrub_plays_a_grain_of_each_section_under_the_playhead :: proc(t: ^testing.T) 
 	free_all(f.platform.frame_allocator)
 }
 
+// The editor's preview plays an evaluation of no player under the Preview audition, moved by advance on each frame's
+// real time (see docs/editor/cutscene-editor.md#the-games-side). Over 60 s of 1/60 s frames, its voices stay within a
+// frame of the picture, across eight sections in a row.
+@(test)
+a_previews_sounds_keep_within_a_frame_of_its_time_over_a_minute :: proc(t: ^testing.T) {
+	f := sound_setup(t)
+	defer sound_teardown(f)
+	SECTION :: SECOND * 15 / 2
+	sections: [8]format.Cutscene_Section_Contents
+	for &s, i in sections {
+		s = sound_section(
+			u32(i + 1),
+			i32(i) * SECTION,
+			i32(i + 1) * SECTION,
+			sound = LINE if i % 2 == 0 else MUSIC,
+		)
+	}
+	tracks := [?]format.Cutscene_Track_Contents{sound_track(1, ..sections[:])}
+	data := sounds_blob(f, tracks[:], 8 * SECTION)
+	aligned := make([]byte, len(data) + 16, context.temp_allocator)
+	start := int(-uintptr(raw_data(aligned)) & 15)
+	copy(aligned[start:], data)
+	data = aligned[start:][:len(data)]
+	blob, ok := format.cutscene_view(data)
+	testing.expect(t, ok)
+	e: Evaluation
+	init_evaluation(&e, &f.world, {}, data, blob)
+	defer destroy_evaluation(&e, &f.world)
+	set_audition(&e, &f.world, .Preview)
+	worst := 0.0
+	for k in 0 ..< 60 * 60 {
+		if k > 0 {
+			advance(&e, blob, time.Second / 60)
+		}
+		evaluate(&f.cutscenes, &e, &f.world, data, blob, .Fixed)
+		evaluate(&f.cutscenes, &e, &f.world, data, blob, .Late)
+		audio.update(&f.audio, &f.world, nil, true, time.Second / 60)
+		free_all(f.platform.frame_allocator)
+		// Away from a section's start, whose voice waits for its start on the audio's clock.
+		into := e.time % SECTION
+		if into > SECOND / 10 && into < SECTION - SECOND / 10 {
+			_, v, playing := voice_of(LINE if (e.time / SECTION) % 2 == 0 else MUSIC)
+			testing.expectf(t, playing, "no voice at %v", e.time)
+			expected := f64(into) / SECOND * boundary.SAMPLE_RATE
+			worst = max(worst, abs(fake_place(v, fake.clock) - expected))
+		}
+		fake.clock += FRAME
+	}
+	// 3599 frames of 1/60 s, which time.Duration rounds down by a third of a nanosecond each.
+	testing.expectf(t, abs(e.time - 3599 * TICK) <= 1, "the time is %v", e.time)
+	testing.expectf(t, worst < FRAME, "a voice was %v frames of audio from the picture", worst)
+}
+
 // The integral of a curve matches a fine sum of its values, through constant, linear, Bezier, automatic and weighted
 // segments, and past both ends.
 @(test)

@@ -43,6 +43,9 @@ sealed class CutsceneTimeline : Control
     static readonly IPen SelectedPen = new Pen(Brushes.White, 2);
     static readonly IPen ErrorPen = new Pen(new SolidColorBrush(Color.Parse("#E5534B")), 1.5);
     static readonly IPen PlayheadPen = new Pen(new SolidColorBrush(Color.Parse("#E5534B")), 1.5);
+    static readonly IBrush LoopBrush = new SolidColorBrush(Color.Parse("#5B8DEF"), 0.35);
+    static readonly IBrush InOutBrush = new SolidColorBrush(Color.Parse("#5B8DEF"));
+    static readonly IBrush OutsideLoop = new SolidColorBrush(Color.Parse("#000000"), 0.25);
     static readonly IPen GuidePen = new Pen(new SolidColorBrush(Color.Parse("#FFD24A")), 1, new DashStyle([4, 3], 0));
     static readonly IPen LengthPen = new Pen(new SolidColorBrush(Color.FromArgb(0xA0, 0xFF, 0xFF, 0xFF)), 1);
     static readonly IPen LockPen = new Pen(new SolidColorBrush(Color.Parse("#9A9AA2")), 1.2);
@@ -67,7 +70,9 @@ sealed class CutsceneTimeline : Control
         void Changed() => Input.Refresh();
         void Frame() => Input.Frame();
         void Playhead() => Input.ShowPlayhead();
+        void Played() => Input.OnPlayStarted();
         new ViewSubscriptions(this, attached: Input.Refresh)
+            .Add(() => _editor.PlayStarted += Played, () => _editor.PlayStarted -= Played)
             .Add(() => _editor.Changed += Changed, () => _editor.Changed -= Changed)
             .Add(() => _editor.ProblemsChanged += Changed, () => _editor.ProblemsChanged -= Changed)
             .Add(() => _editor.FrameRequested += Frame, () => _editor.FrameRequested -= Frame)
@@ -231,7 +236,14 @@ sealed class CutsceneTimeline : Control
             {
                 context.FillRectangle(PastLength, new Rect(gutter, 0, X(0) - gutter, size.Height));
             }
+            if (_editor.Loop && _editor.LoopRange is { } loop)
+            {
+                // Outside the loop, a shade.
+                context.FillRectangle(OutsideLoop, new Rect(gutter, Layout.RulerHeight, Math.Max(X(loop.Start) - gutter, 0), size.Height));
+                context.FillRectangle(OutsideLoop, new Rect(X(loop.End), Layout.RulerHeight, Math.Max(gutter + width - X(loop.End), 0), size.Height));
+            }
             DrawRuler(context, layout, view, width, X);
+            DrawInOut(context, X);
             DrawMarkers(context, layout, selected, width, X);
             if (Input.Guide is { } guide)
             {
@@ -288,6 +300,26 @@ sealed class CutsceneTimeline : Control
         var lengthX = x(layout.Length);
         context.DrawLine(LengthPen, new Point(lengthX, 0), new Point(lengthX, Layout.RulerHeight - Layout.RangeBarHeight));
         context.FillRectangle(HandleBrush, new Rect(lengthX - 3, 2, 6, 10));
+    }
+
+    // The loop's span on the ruler, under the range bar, while it loops or has an in or an out point, and a bracket at
+    // each of those points.
+    void DrawInOut(DrawingContext context, Func<double, double> x)
+    {
+        if ((_editor.Loop || _editor.InPoint != null || _editor.OutPoint != null) && _editor.LoopRange is { } loop)
+        {
+            var y = Layout.RulerHeight - Layout.RangeBarHeight - 4;
+            context.FillRectangle(LoopBrush, new Rect(x(loop.Start), y, Math.Max(x(loop.End) - x(loop.Start), 1), 3));
+        }
+        foreach (var (point, inward) in new[] { (_editor.InPoint, 1), (_editor.OutPoint, -1) })
+        {
+            if (point is { } at)
+            {
+                var px = x(at);
+                context.FillRectangle(InOutBrush, new Rect(px - (inward < 0 ? 2 : 0), 0, 2, Layout.RulerHeight - Layout.RangeBarHeight));
+                context.FillRectangle(InOutBrush, new Rect(inward > 0 ? px : px - 6, 0, 6, 2));
+            }
+        }
     }
 
     static readonly Dictionary<string, IBrush> MarkerBrushes = [];
@@ -555,5 +587,10 @@ sealed class CutsceneTimeline : Control
         base.OnKeyUp(e);
         // A held nudge key's repeats are one undo entry, which its release ends, whatever key keybindings.json gives it.
         _editor.EndNudge();
+        // The release of Shuttle Pause's key ends its hold, so J and L play again.
+        if (_editor.ShuttlePauseShortcut is { } shortcut && KeyGesture.Parse(shortcut).Key == e.Key)
+        {
+            _editor.EndShuttleHold();
+        }
     }
 }

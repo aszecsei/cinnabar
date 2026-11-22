@@ -24,7 +24,11 @@ public sealed class CutsceneEditorView : DockPanel
 {
     readonly EditorShell _shell;
     readonly CutsceneEditor _editor;
-    readonly TextBlock _playhead = new() { FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0), FontFamily = new FontFamily("Consolas, monospace") };
+    readonly TextBlock _playhead = new() { FontSize = 12, VerticalAlignment = VerticalAlignment.Center, FontFamily = new FontFamily("Consolas, monospace") };
+    readonly Button _playheadButton = new() { Classes = { "viewport-tool" }, Focusable = false, Margin = new Thickness(4, 0) };
+    readonly TextBox _timeBox = new() { Classes = { "value-edit" }, MinWidth = 140, FontSize = 12, IsVisible = false, Margin = new Thickness(4, 0), FontFamily = new FontFamily("Consolas, monospace") };
+    readonly ComboBox _rate = new() { FontSize = 11, Focusable = false, Margin = new Thickness(4, 0), VerticalAlignment = VerticalAlignment.Center };
+    readonly ToggleButton _loop = new() { Content = "Loop", Classes = { "viewport-tool" }, FontSize = 11, Focusable = false, Margin = new Thickness(4, 0) };
     readonly Button _play = new() { Classes = { "viewport-tool" }, Focusable = false, Margin = new Thickness(8, 0, 0, 0) };
     readonly Button _here;
     bool _flushQueued;
@@ -50,8 +54,33 @@ public sealed class CutsceneEditorView : DockPanel
         _play.Click += (_, _) => shell.CutscenePreview.PlayPause();
         DockPanel.SetDock(_play, DockSide.Left);
         toolbar.Children.Add(_play);
-        DockPanel.SetDock(_playhead, DockSide.Left);
-        toolbar.Children.Add(_playhead);
+        // The rate that Space plays at, and the loop.
+        foreach (var rate in PlayRates)
+        {
+            _rate.Items.Add(new ComboBoxItem { Content = $"{rate:0.##}×", Tag = rate });
+        }
+        ToolTip.SetTip(_rate, "The rate at which Space plays the preview");
+        _rate.SelectionChanged += (_, _) =>
+        {
+            if (_rate.SelectedItem is ComboBoxItem { Tag: float rate })
+            {
+                editor.PlayRate = rate;
+            }
+        };
+        DockPanel.SetDock(_rate, DockSide.Left);
+        toolbar.Children.Add(_rate);
+        _loop.IsCheckedChanged += (_, _) => editor.Loop = _loop.IsChecked == true;
+        DockPanel.SetDock(_loop, DockSide.Left);
+        toolbar.Children.Add(_loop);
+        // The playhead's time: a click, or Go to Time, swaps in a box to type a time. Enter jumps there, and Enter or
+        // Esc gives the keyboard back to the timeline.
+        _playheadButton.Content = _playhead;
+        ToolTip.SetTip(_playheadButton, "Type a time to go to (Ctrl+G)");
+        _playheadButton.Click += (_, _) => GoToTime();
+        DockPanel.SetDock(_playheadButton, DockSide.Left);
+        toolbar.Children.Add(_playheadButton);
+        DockPanel.SetDock(_timeBox, DockSide.Left);
+        toolbar.Children.Add(_timeBox);
         DockPanel.SetDock(_time, DockSide.Left);
         toolbar.Children.Add(_time);
         _here = SmallButton("Preview here", "Show this cutscene in the game, in place of the one that it shows now.", () => shell.CutscenePreview.Take(editor));
@@ -67,6 +96,33 @@ public sealed class CutsceneEditorView : DockPanel
 
         var grid = new Grid { RowDefinitions = new RowDefinitions("*,4,220") };
         var timeline = new CutsceneTimeline(editor);
+        // Enter and Esc give the keyboard back to the timeline. A click elsewhere leaves it where it went.
+        void EndGoToTime(bool jump, bool refocus)
+        {
+            if (!_timeBox.IsVisible)
+            {
+                return;
+            }
+            if (jump && CutsceneTime.TryParse(_timeBox.Text ?? "", editor.File.Rate, out var ticks))
+            {
+                editor.SetPlayhead(ticks);
+            }
+            _timeBox.IsVisible = false;
+            _playheadButton.IsVisible = true;
+            if (refocus)
+            {
+                timeline.Focus();
+            }
+        }
+        _timeBox.KeyDown += (_, e) =>
+        {
+            if (e.Key is Key.Enter or Key.Escape)
+            {
+                EndGoToTime(e.Key == Key.Enter, refocus: true);
+                e.Handled = true;
+            }
+        };
+        _timeBox.LostFocus += (_, _) => EndGoToTime(jump: false, refocus: false);
         // The strip over the timeline: the search box, which filters the tracks by binding or track name as it is
         // typed, and Esc in it clears it and gives the keyboard back to the timeline; and the keys-under-selection toggle.
         _search.Text = editor.FilterText;
@@ -122,6 +178,7 @@ public sealed class CutsceneEditorView : DockPanel
         new ViewSubscriptions(this, attached: Show)
             .Add(() => _editor.Changed += Show, () => _editor.Changed -= Show)
             .Add(() => _editor.FindRequested += Find, () => _editor.FindRequested -= Find)
+            .Add(() => _editor.GoToTimeRequested += GoToTime, () => _editor.GoToTimeRequested -= GoToTime)
             .Add(() => _editor.PasteTracksRequested += AskTracks, () => _editor.PasteTracksRequested -= AskTracks)
             .Add(() => _editor.ProblemsChanged += Show, () => _editor.ProblemsChanged -= Show)
             .Add(() => _shell.Cook.StateChanged += Show, () => _shell.Cook.StateChanged -= Show)
@@ -145,6 +202,18 @@ public sealed class CutsceneEditorView : DockPanel
         {
             _editor.Paste(addTracks: true);
         }
+    }
+
+    /// <summary>The rates of the play rate box.</summary>
+    static readonly float[] PlayRates = [0.1f, 0.25f, 0.5f, 1f, 2f, 4f];
+
+    void GoToTime()
+    {
+        _timeBox.Text = CutsceneTime.Timecode(_editor.Playhead, _editor.File.Rate);
+        _playheadButton.IsVisible = false;
+        _timeBox.IsVisible = true;
+        _timeBox.Focus();
+        _timeBox.SelectAll();
     }
 
     void OnHostState(HostState _) => Show();
@@ -189,6 +258,19 @@ public sealed class CutsceneEditorView : DockPanel
         {
             _keysUnder.IsChecked = _editor.KeysUnderSelection;
         }
+        if (_loop.IsChecked != _editor.Loop)
+        {
+            _loop.IsChecked = _editor.Loop;
+        }
+        var range = _editor.LoopRange is { } loop
+            ? $"{CutsceneTime.Timecode(loop.Start, _editor.File.Rate)} to {CutsceneTime.Timecode(loop.End, _editor.File.Rate)}"
+            : "nothing: the in and the out point are at one time";
+        ToolTip.SetTip(_loop, $"Loop the preview (Ctrl+L) over {range}. I and O set the in and the out point.");
+        var selected = Array.FindIndex(PlayRates, r => r == _editor.PlayRate);
+        if (_rate.SelectedIndex != selected)
+        {
+            _rate.SelectedIndex = selected;
+        }
         var file = _editor.File;
         _time.Text = file.Length is { } length
             ? $"{CutsceneTime.Timecode(length, file.Rate)}  ·  {CutsceneTime.Frames(length, file.Rate)} frames at {file.Rate} fps"
@@ -211,7 +293,8 @@ public sealed class CutsceneEditorView : DockPanel
         {
             parts.Add("not saved");
         }
-        parts.Add(preview.Describe(_editor));
+        var described = preview.Describe(_editor);
+        parts.Add(preview.RateIn(_editor) is { } playing && playing != 1 ? $"{described} at {playing:0.##}×" : described);
         _status.Text = string.Join("  ·  ", parts);
         _status.Classes.Set("warning", _editor.CookError != null);
         ToolTip.SetTip(_status, _editor.CookError);
@@ -234,4 +317,59 @@ public static class CutsceneTime
 
     /// <summary>The ticks of a frame at a rate.</summary>
     public static int FrameTicks(int rate) => CutsceneFile.TicksPerSecond / rate;
+
+    /// <summary>
+    /// Reads a time that a user typed, at a rate: timecode as <c>[[hh:]mm:]ss:ff</c>, or a count of frames as <c>120</c> or
+    /// <c>120f</c>. A frame field at or past the rate, or a seconds or minutes field past 59 after the first, does not read.
+    /// </summary>
+    public static bool TryParse(string text, int rate, out int ticks)
+    {
+        ticks = 0;
+        text = text.Trim();
+        if (rate <= 0 || text.Length == 0)
+        {
+            return false;
+        }
+        long frames;
+        if (!text.Contains(':'))
+        {
+            if (!long.TryParse(text.EndsWith('f') ? text[..^1] : text, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out frames))
+            {
+                return false;
+            }
+        }
+        else
+        {
+            var parts = text.Split(':');
+            if (parts.Length > 4)
+            {
+                return false;
+            }
+            var values = new long[parts.Length];
+            for (var i = 0; i < parts.Length; i++)
+            {
+                if (!long.TryParse(parts[i], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out values[i]) || values[i] > int.MaxValue)
+                {
+                    return false;
+                }
+            }
+            if (values[^1] >= rate || values[1..^1].Any(v => v >= 60))
+            {
+                return false;
+            }
+            long seconds = 0;
+            foreach (var v in values[..^1])
+            {
+                seconds = seconds * 60 + v;
+            }
+            frames = seconds * rate + values[^1];
+        }
+        var total = frames * FrameTicks(rate);
+        if (total > int.MaxValue)
+        {
+            return false;
+        }
+        ticks = (int)total;
+        return true;
+    }
 }

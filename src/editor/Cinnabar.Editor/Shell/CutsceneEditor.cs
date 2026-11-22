@@ -10,6 +10,9 @@ namespace Cinnabar.Editor.Shell;
 /// tests can drive the editor without a window. Blocks are named by path, since an undo reads the file again and
 /// replaces its block objects.
 /// </summary>
+/// <summary>A loop of the preview, from a tick to a later one.</summary>
+public sealed record CutsceneLoop(int Start, int End);
+
 public sealed class CutsceneEditor : IGraphEditor
 {
     readonly EditorShell _shell;
@@ -24,6 +27,12 @@ public sealed class CutsceneEditor : IGraphEditor
     bool _snap = true;
     bool _showFrames;
     bool _timelineFocused;
+    float _playRate = 1;
+    int? _in;
+    int? _out;
+    bool _loop;
+    bool _scrubSound;
+    bool _previewEvents;
 
     internal CutsceneEditor(EditorShell shell, CutsceneDocument document)
     {
@@ -36,6 +45,8 @@ public sealed class CutsceneEditor : IGraphEditor
         _locked = [.. view.Locked];
         _muted = [.. view.Muted ?? []];
         _soloed = [.. view.Soloed ?? []];
+        _scrubSound = view.ScrubSound;
+        _previewEvents = view.Events;
     }
 
     public CutsceneDocument Document { get; }
@@ -79,6 +90,8 @@ public sealed class CutsceneEditor : IGraphEditor
         if (!Document.InTransaction)
         {
             _cook.Schedule();
+            // A track added, deleted or muted in the asset changes which tracks a solo silences.
+            _shell.CutscenePreview.OnMixChanged(this);
         }
     }
 
@@ -199,6 +212,22 @@ public sealed class CutsceneEditor : IGraphEditor
 
     public void RequestFind() => FindRequested?.Invoke();
 
+    /// <summary>The view should put the keyboard in its time box: Ctrl+G.</summary>
+    public event Action? GoToTimeRequested;
+
+    public void RequestGoToTime() => GoToTimeRequested?.Invoke();
+
+    /// <summary>The rate at which this tab's preview plays, below 0 backward, or null when it does not play.</summary>
+    public float? PlayingRate => _shell.CutscenePreview.RateIn(this);
+
+    /// <summary>The preview began to play, from a press of Space, J or L, or again when it opens. A loop's change while it plays is not a new play.</summary>
+    public event Action? PlayStarted;
+
+    internal void OnPlayStarted() => PlayStarted?.Invoke();
+
+    /// <summary>J and L while K is not held: plays this tab's preview that way, faster on each press (see <see cref="CutscenePreview.Shuttle"/>).</summary>
+    public void Shuttle(int direction) => _shell.CutscenePreview.Shuttle(this, direction);
+
     /// <summary>Moves the playhead, inside the length. The preview shows it, and a playing preview pauses.</summary>
     public void SetPlayhead(int ticks)
     {
@@ -220,6 +249,7 @@ public sealed class CutsceneEditor : IGraphEditor
         }
         _playhead = at;
         PlayheadChanged?.Invoke();
+        _shell.CutscenePreview.OnPlayheadMoved(this);
         _shell.Commands.InvalidateAll();
         return true;
     }
@@ -304,7 +334,177 @@ public sealed class CutsceneEditor : IGraphEditor
             SaveView();
             Changed?.Invoke();
             _shell.Commands.InvalidateAll();
+            _shell.CutscenePreview.OnMixChanged(this);
         }
+    }
+
+    /// <summary>
+    /// The IDs of the tracks that the preview silences because <see cref="Audible"/> says no. A track that the asset
+    /// mutes is left out, since its blob mutes it already.
+    /// </summary>
+    public IEnumerable<int> SilentTracks() => File.Tracks
+        .Where(t => t.Id is { } id && !Audible(id) && t.Get("muted")?.Trim() != "true")
+        .Select(t => t.Id!.Value)
+        .Distinct();
+
+    /// <summary>Whether a scrub plays short grains of the sound under the playhead. On at first. Each user's, for each cutscene.</summary>
+    public bool ScrubSound
+    {
+        get => _scrubSound;
+        set => SetMix(ref _scrubSound, value);
+    }
+
+    /// <summary>Whether the event tracks send their events while the preview plays. Off at first. Each user's, for each cutscene.</summary>
+    public bool PreviewEvents
+    {
+        get => _previewEvents;
+        set => SetMix(ref _previewEvents, value);
+    }
+
+    void SetMix(ref bool field, bool value)
+    {
+        if (field != value)
+        {
+            field = value;
+            SaveView();
+            Changed?.Invoke();
+            _shell.Commands.InvalidateAll();
+            _shell.CutscenePreview.OnMixChanged(this);
+        }
+    }
+
+    /// <summary>The slowest and the fastest that the play rate box and Space play.</summary>
+    public const float MinPlayRate = 0.1f;
+
+    public const float MaxPlayRate = 4f;
+
+    /// <summary>The rate at which Space plays, from <see cref="MinPlayRate"/> to <see cref="MaxPlayRate"/>. The tab's, and not saved.</summary>
+    public float PlayRate
+    {
+        get => _playRate;
+        set
+        {
+            var rate = Math.Clamp(value, MinPlayRate, MaxPlayRate);
+            if (_playRate != rate)
+            {
+                _playRate = rate;
+                Changed?.Invoke();
+            }
+        }
+    }
+
+    /// <summary>The in point, which I sets at the playhead, or null for none: the loop starts there. The tab's, and not saved.</summary>
+    public int? InPoint => _in;
+
+    /// <summary>The out point, which O sets at the playhead, or null for none: the loop ends there. The tab's, and not saved.</summary>
+    public int? OutPoint => _out;
+
+    /// <summary>Whether playback loops over <see cref="LoopRange"/>. The tab's, and not saved.</summary>
+    public bool Loop
+    {
+        get => _loop;
+        set
+        {
+            if (_loop != value)
+            {
+                _loop = value;
+                LoopChanged(plays: true);
+            }
+        }
+    }
+
+    /// <summary>
+    /// What a loop plays: from the in point, or the start of the cutscene's range, to the out point, or the range's end,
+    /// in time order. Null when that span is empty, so a play does not loop.
+    /// </summary>
+    public CutsceneLoop? LoopRange
+    {
+        get
+        {
+            var length = File.Length ?? 0;
+            var range = CutsceneEdits.RangeOf(File);
+            var a = Math.Clamp(_in ?? range.Start, 0, length);
+            var b = Math.Clamp(_out ?? range.End, 0, length);
+            var (start, end) = a <= b ? (a, b) : (b, a);
+            return end > start ? new CutsceneLoop(start, end) : null;
+        }
+    }
+
+    /// <summary>Sets the in point at the playhead, or with null, clears it.</summary>
+    public void SetIn(int? tick)
+    {
+        if (_in != tick)
+        {
+            _in = tick;
+            LoopChanged(plays: _loop);
+        }
+    }
+
+    /// <summary>Sets the out point at the playhead, or with null, clears it.</summary>
+    public void SetOut(int? tick)
+    {
+        if (_out != tick)
+        {
+            _out = tick;
+            LoopChanged(plays: _loop);
+        }
+    }
+
+    /// <summary>Clears the in and the out point, as one change.</summary>
+    public void ClearInOut()
+    {
+        if (_in != null || _out != null)
+        {
+            _in = _out = null;
+            LoopChanged(plays: _loop);
+        }
+    }
+
+    // The points change the play only while it loops, and the loop's toggle always does.
+    void LoopChanged(bool plays = true)
+    {
+        Changed?.Invoke();
+        _shell.Commands.InvalidateAll();
+        if (plays)
+        {
+            _shell.CutscenePreview.OnLoopChanged(this);
+        }
+    }
+
+    /// <summary>
+    /// Whether the shuttle's pause, K, is held: J and L step a frame then, and do not play. The K command sets it, and
+    /// its key's release or the timeline's loss of the keyboard clears it.
+    /// </summary>
+    public bool ShuttleHeld { get; private set; }
+
+    /// <summary>Shuttle Pause's key went down: J and L step until <see cref="EndShuttleHold"/>.</summary>
+    public void BeginShuttleHold() => ShuttleHeld = true;
+
+    /// <summary>Shuttle Pause's key went up, or the timeline lost the keyboard: J and L play again.</summary>
+    public void EndShuttleHold() => ShuttleHeld = false;
+
+    /// <summary>The key of Shuttle Pause, as keybindings.json has it, whose release ends <see cref="ShuttleHeld"/>.</summary>
+    public string? ShuttlePauseShortcut => _shell.KeyBindings.ShortcutOf(EditorCommands.CutsceneShuttlePause);
+
+    /// <summary>
+    /// The IDs of the tracks of the selection: each selected track, and the track of each selected section, event or
+    /// key. Empty when the selection holds none.
+    /// </summary>
+    public IReadOnlySet<int> SelectedTracks => _selection
+        .Select(File.Find).OfType<CutsceneBlock>()
+        .Select(CutsceneEdits.TrackOf).OfType<CutsceneBlock>()
+        .Select(t => t.Id).OfType<int>()
+        .ToHashSet();
+
+    /// <summary>
+    /// The times that Up and Down move the playhead to: the start and the end, and the keys and the edges of the sections,
+    /// ranges and triggers of the selected tracks, or of every track that the filter shows when the selection holds
+    /// none. A folded binding's tracks count.
+    /// </summary>
+    public List<int> KeyEdges()
+    {
+        var tracks = SelectedTracks;
+        return CutsceneTimelineLayout.Build(File, new HashSet<string>(), RowFilter).KeyEdges(tracks.Count > 0 ? tracks : null);
     }
 
     /// <summary>
@@ -323,7 +523,7 @@ public sealed class CutsceneEditor : IGraphEditor
     }
 
     void SaveView() => _shell.SaveCutsceneTimelineSettings(Guid,
-        new CutsceneTimelineView(_showFrames, [.. _locked.Order()], [.. _muted.Order()], [.. _soloed.Order()]));
+        new CutsceneTimelineView(_showFrames, [.. _locked.Order()], [.. _muted.Order()], [.. _soloed.Order()], _scrubSound, _previewEvents));
 
     /// <summary>The text that the track tree's search box filters by.</summary>
     public string FilterText { get; private set; } = "";
@@ -416,6 +616,7 @@ public sealed class CutsceneEditor : IGraphEditor
                 if (!value)
                 {
                     EndNudge();
+                    EndShuttleHold();
                 }
                 _shell.Commands.InvalidateAll();
             }

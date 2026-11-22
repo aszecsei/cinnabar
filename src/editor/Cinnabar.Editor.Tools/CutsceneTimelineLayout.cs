@@ -625,6 +625,50 @@ public sealed class CutsceneTimelineLayout
         return [.. edges.Order()];
     }
 
+    /// <summary>
+    /// The shot at a time, as the Game view's frame counter names it: the camera of the cutscene's own camera cut section
+    /// over the time, from its start up to its end, or null when none is. A cut track that the asset mutes, or whose ID
+    /// is in <paramref name="silent"/>, names none, as the game shows none.
+    /// </summary>
+    public static string? ShotAt(CutsceneFile file, int tick, IEnumerable<int>? silent = null)
+    {
+        var quiet = silent?.ToHashSet() ?? [];
+        var cuts = file.Tracks
+            .Where(t => t.TrackKind == "camera_cut" && t.Get("muted")?.Trim() != "true" && !(t.Id is { } id && quiet.Contains(id)))
+            .Select(t => t.Id).OfType<int>().ToHashSet();
+        if (cuts.Count == 0)
+        {
+            return null;
+        }
+        var layout = Build(file, new HashSet<string>());
+        return layout.Rows
+            .Where(r => r.Kind == CutsceneRowKind.Track && r.TrackId is { } id && cuts.Contains(id))
+            .SelectMany(r => r.Bars)
+            .LastOrDefault(b => b.Start <= tick && (tick < b.End || (tick == b.End && b.End == layout.Length)))?.Label;
+    }
+
+    /// <summary>
+    /// The times of the keys and of the edges of the sections, ranges and triggers on the tracks whose IDs are in a set,
+    /// or on every track with null, and the start and the end, in order: where Up and Down move the playhead.
+    /// </summary>
+    public List<int> KeyEdges(IReadOnlySet<int>? tracks)
+    {
+        var edges = new HashSet<int> { 0, Length };
+        foreach (var row in Rows.Where(r => r.Kind == CutsceneRowKind.Track && (tracks == null || r.TrackId is { } id && tracks.Contains(id))))
+        {
+            foreach (var bar in row.Bars)
+            {
+                edges.Add(bar.Start);
+                edges.Add(bar.End);
+            }
+            foreach (var item in row.Points.Concat(row.Keys))
+            {
+                edges.Add(item.Start);
+            }
+        }
+        return [.. edges.Order()];
+    }
+
     /// <summary>The span of what the paths name, for F, or null when they name nothing on the timeline.</summary>
     public (int Start, int End)? SpanOf(IReadOnlySet<string> paths)
     {
