@@ -22,8 +22,8 @@ public sealed partial class EditorShell
     readonly Dictionary<string, (DateTime Modified, MaterialGraph? Graph)> _functions = [];
     // Editors that closed with their changes discarded, so their documents close without asking again.
     readonly HashSet<IGraphEditor> _discarding = [];
-    // The command line's materials, effects, animation graphs, UI documents, decisions and blackboards, which open once the
-    // index has them.
+    // The command line's materials, effects, animation graphs, UI documents, decisions, blackboards and cutscenes, which
+    // open once the index has them.
     readonly List<string> _pendingMaterials = [];
 
     void OpenPendingMaterials()
@@ -53,6 +53,10 @@ public sealed partial class EditorShell
                 {
                     OpenBlackboard(asset);
                 }
+                else if (asset.Kind == AssetKind.Cutscene)
+                {
+                    OpenCutscene(asset);
+                }
                 else
                 {
                     OpenMaterial(asset);
@@ -64,7 +68,8 @@ public sealed partial class EditorShell
     public IReadOnlyList<MaterialEditor> Materials => _materials;
 
     /// <summary>The open graphs of every kind.</summary>
-    public IEnumerable<IGraphEditor> GraphEditors => _materials.Concat<IGraphEditor>(_animationGraphs).Concat(_uiDocuments).Concat(_decisions).Concat(_blackboards).Concat(_worlds);
+    public IEnumerable<IGraphEditor> GraphEditors => _materials.Concat<IGraphEditor>(_animationGraphs).Concat(_uiDocuments).Concat(_decisions).Concat(_blackboards).Concat(_worlds)
+        .Concat(_cutscenes);
 
     /// <summary>The graph editor whose document is active, or null when the viewport is.</summary>
     public IGraphEditor? ActiveGraphEditor { get; private set; }
@@ -214,6 +219,10 @@ public sealed partial class EditorShell
         if (editor is WorldEditor world)
         {
             _worlds.Remove(world);
+        }
+        if (editor is CutsceneEditor cutscene)
+        {
+            _cutscenes.Remove(cutscene);
         }
         _discarding.Remove(editor);
         editor.Dispose();

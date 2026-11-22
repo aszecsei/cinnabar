@@ -55,7 +55,8 @@ public sealed partial class EditorShell
         return editor;
     }
 
-    // A UI document, a decision or a blackboard that the content browser made opens in its editor, once the index has it.
+    // A UI document, a decision, a blackboard or a cutscene that the content browser made opens in its editor, once the
+    // index has it.
     internal void OnAssetCreated(string guid, Link.Cook.AssetTemplate template)
     {
         if (template == Link.Cook.AssetTemplate.Ui || OpensWhenCreated(template))

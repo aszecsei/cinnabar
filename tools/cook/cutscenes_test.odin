@@ -1,6 +1,7 @@
 package cook
 
 import "core:fmt"
+import "core:mem"
 import "core:os"
 import "core:slice"
 import "core:strings"
@@ -197,6 +198,23 @@ cutscenes_parse_their_header_bindings_tracks_sections_and_keys :: proc(t: ^testi
 	testing.expect_value(t, plain.contents.clock, format.Cutscene_Clock.Game)
 	testing.expect_value(t, plain.contents.range_start, 0)
 	testing.expect_value(t, plain.contents.range_end, 600000)
+	// A new cutscene's one track is its camera cut track, with no sections yet.
+	if testing.expect_value(t, len(plain.contents.tracks), 1) {
+		testing.expect_value(
+			t,
+			plain.contents.tracks[0].kind,
+			format.Cutscene_Track_Kind.Camera_Cut,
+		)
+		testing.expect_value(t, len(plain.contents.tracks[0].sections), 0)
+	}
+	// The editor's tests read the template from testdata, which a checkout may give other line endings.
+	shared_text, _ := strings.replace_all(
+		#load("testdata/cutscenes/template.cutscene", string),
+		"\r\n",
+		"\n",
+		context.temp_allocator,
+	)
+	testing.expect_value(t, shared_text, CUTSCENE_TEMPLATE)
 }
 
 @(test)
@@ -2231,4 +2249,93 @@ presentation_sections_fade_letterbox_and_subtitle :: proc(t: ^testing.T) {
 	copy(aligned[start:], blob)
 	_, ok := format.cutscene_view(aligned[start:][:len(blob)])
 	testing.expect(t, ok, "the blob checks")
+}
+
+// line_of is the line, from 1, of the first line of text that has part.
+@(private = "file")
+line_of :: proc(text, part: string) -> u32 {
+	return u32(strings.count(text[:strings.index(text, part)], "\n") + 1)
+}
+
+// The editor's unsaved text of a cutscene is checked as a cook would check it. A good text goes in the preview area, and
+// a text with problems gives them by line and leaves the last good preview. Sub-sequences are checked with the other
+// cutscenes' sources on disk, and the unsaved text in place of the cutscene's own.
+@(test)
+a_preview_of_a_cutscene_checks_it_and_keeps_the_last_good_blob :: proc(t: ^testing.T) {
+	// The index has the sub-assets that a file made when it cooked, and the test's glTF is not a real file, so the intro
+	// here has no animation track.
+	full := INTRO
+	intro_text := strings.concatenate(
+		{
+			full[:strings.index(full, "track 2 animation")],
+			full[strings.index(full, "track 3 audio"):],
+		},
+		context.temp_allocator,
+	)
+	tree := cutscene_tree(t, intro = intro_text)
+	defer remove_tree(tree)
+	d: Daemon
+	d.options = tree_options(tree)
+	// Every kind, so the index has each asset. The test's model and sound are not real files, and fail.
+	pass := cook(d.options, ALL_KINDS, log_problems = false)
+	testing.expect_value(t, pass.cooked[.Cutscene], 2)
+	index_build(&d.index, pass, d.options.roots[:])
+	defer index_destroy(&d.index)
+	intro, _ := format.guid_parse(INTRO_GUID)
+	cooked := tree_blob(t, tree, intro)
+	buffer: [32]u8
+	preview_path := fmt.tprintf(
+		"%s/preview/%s.blob",
+		config_dir(d.options),
+		format.guid_format(intro, &buffer),
+	)
+
+	result := preview(&d, {guid = INTRO_GUID, text = intro_text})
+	testing.expectf(t, len(result.problems) == 0 && result.error == "", "%v", result)
+	good, good_err := os.read_entire_file(preview_path, context.temp_allocator)
+	if !testing.expect(t, good_err == nil) {
+		return
+	}
+	aligned, _ := mem.alloc_bytes(len(good), format.BLOB_ALIGN, context.temp_allocator)
+	copy(aligned, good)
+	blob, ok := format.cutscene_view(aligned)
+	testing.expect(t, ok)
+	testing.expect_value(t, format.blob_string(aligned, blob.source_path), "game/intro.cutscene")
+	testing.expect_value(t, len(format.cutscene_tracks(aligned, blob)), 4)
+
+	// A rate that is not a display rate, and a bind to a binding that the shot on disk does not have.
+	bad, _ := strings.replace(intro_text, "rate = 24", "rate = 23", 1, context.temp_allocator)
+	bad, _ = strings.replace(bad, "bind 7 = 1", "bind 9 = 1", 1, context.temp_allocator)
+	result = preview(&d, {guid = INTRO_GUID, text = bad})
+	testing.expect(t, result.error != "")
+	lines: [dynamic]u32
+	defer delete(lines)
+	for p in result.problems {
+		append(&lines, p.line)
+		testing.expect(t, strings.has_suffix(p.file, "/intro.cutscene"))
+	}
+	testing.expectf(
+		t,
+		slice.equal(lines[:], []u32{line_of(bad, "rate = 23"), line_of(bad, "bind 9 = 1")}),
+		"%v",
+		result.problems,
+	)
+	kept, _ := os.read_entire_file(preview_path, context.temp_allocator)
+	testing.expect(t, slice.equal(kept, good), "a text with problems keeps the last good preview")
+
+	// The shot, unsaved, names the intro, which on disk names the shot.
+	cycle := fmt.tprintf(
+		"cutscene 1\nlength = 60000\ntrack 1 sub_sequence \"S\"\n\tsection 1 0 60000\n\t\tasset = $%s\n",
+		INTRO_GUID,
+	)
+	result = preview(&d, {guid = SHOT_GUID, text = cycle})
+	cycled := false
+	for p in result.problems {
+		cycled ||=
+			p.line == 5 &&
+			strings.contains(p.text, "sub-sequence cycle: game/shot.cutscene -> game/intro")
+	}
+	testing.expectf(t, cycled, "%v", result.problems)
+	// A preview leaves the cutscene's own blob as the cook wrote it.
+	testing.expect(t, slice.equal(tree_blob(t, tree, intro), cooked))
 }

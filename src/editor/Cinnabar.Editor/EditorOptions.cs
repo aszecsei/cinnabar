@@ -8,7 +8,7 @@ namespace Cinnabar.Editor;
 /// <see cref="ForProject"/>), and with no arguments the editor shows its welcome window (see
 /// docs/editor/processes-and-projects.md#projects). The full form, which <c>just edit</c> uses, is <c>editor [--host &lt;host.exe&gt;] [--game &lt;game.dll&gt;] [--scene &lt;file.scene&gt;]
 /// [--cook &lt;cook.exe&gt;] [--cache &lt;dir&gt;] [--definitions &lt;file&gt;] [--dxc &lt;dxc.exe&gt;] [--include &lt;dir&gt;]...
-/// [--root &lt;name&gt;=&lt;dir&gt;]... [--load-dir &lt;dir&gt;] [--editor-dir &lt;dir&gt;] [--material &lt;file&gt;]... [--effect &lt;file&gt;]... [--animation-graph &lt;file&gt;]... [--ui-document &lt;file&gt;]... [--decision &lt;file&gt;]... [--blackboard &lt;file&gt;]... [--project &lt;project.settings&gt;]</c>. The daemon
+/// [--root &lt;name&gt;=&lt;dir&gt;]... [--load-dir &lt;dir&gt;] [--editor-dir &lt;dir&gt;] [--material &lt;file&gt;]... [--effect &lt;file&gt;]... [--animation-graph &lt;file&gt;]... [--ui-document &lt;file&gt;]... [--decision &lt;file&gt;]... [--blackboard &lt;file&gt;]... [--cutscene &lt;file&gt;]... [--project &lt;project.settings&gt;]</c>. The daemon
 /// cooks shaders only with <c>--dxc</c>. Each <c>--material</c> opens in the material editor, and each <c>--effect</c> in an
 /// effect preview, and each of the others in its editor, once the cook daemon's index has it. <c>--load-dir</c> is
 /// where the host puts its copies of the game's DLL, and <c>--editor-dir</c> where the editor's own files go (see
@@ -35,6 +35,9 @@ public sealed record EditorOptions(string HostPath, string GamePath, string? Sce
 
     /// <summary>Decisions and blackboards to open in their editors, by their files' full paths.</summary>
     public IReadOnlyList<string> DecisionPaths { get; init; } = [];
+
+    /// <summary>Cutscenes to open in the cutscene editor, by their files' full paths.</summary>
+    public IReadOnlyList<string> CutscenePaths { get; init; } = [];
 
     /// <summary>The project's folder, which Build Project and Export Project build: the settings file's.</summary>
     public string ProjectDirectory => Path.GetDirectoryName(ProjectPath) ?? Environment.CurrentDirectory;
@@ -151,6 +154,7 @@ public sealed record EditorOptions(string HostPath, string GamePath, string? Sce
         List<string> animationGraphs = [];
         List<string> uiDocuments = [];
         List<string> decisions = [];
+        List<string> cutscenes = [];
         string? project = null;
         string? load = null;
         string? editorDir = null;
@@ -210,6 +214,9 @@ public sealed record EditorOptions(string HostPath, string GamePath, string? Sce
                 case "--decision" or "--blackboard" when i + 1 < args.Count:
                     decisions.Add(Path.GetFullPath(args[++i]));
                     break;
+                case "--cutscene" when i + 1 < args.Count:
+                    cutscenes.Add(Path.GetFullPath(args[++i]));
+                    break;
                 case "--root" when i + 1 < args.Count && args[i + 1].IndexOf('=') > 0:
                     var root = args[++i];
                     var equals = root.IndexOf('=');
@@ -227,7 +234,7 @@ public sealed record EditorOptions(string HostPath, string GamePath, string? Sce
         {
             cook = cook with { Includes = includes };
         }
-        var options = new EditorOptions(Path.GetFullPath(host), Path.GetFullPath(game), scene) { Cook = cook, MaterialPaths = materials, EffectPaths = effects, AnimationGraphPaths = animationGraphs, UiDocumentPaths = uiDocuments, DecisionPaths = decisions, LoadDirectory = load };
+        var options = new EditorOptions(Path.GetFullPath(host), Path.GetFullPath(game), scene) { Cook = cook, MaterialPaths = materials, EffectPaths = effects, AnimationGraphPaths = animationGraphs, UiDocumentPaths = uiDocuments, DecisionPaths = decisions, CutscenePaths = cutscenes, LoadDirectory = load };
         if (project != null)
         {
             options = options with { ProjectPath = project };

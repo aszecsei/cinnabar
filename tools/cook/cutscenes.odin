@@ -3,6 +3,7 @@ package cook
 import "core:fmt"
 import "core:hash"
 import "core:math"
+import "core:os"
 import "core:slice"
 import "core:strconv"
 import "core:strings"
@@ -15,11 +16,14 @@ import format "cinnabar:engine/asset/format"
 // it reads from the other cutscenes' sources, so the order of the passes does not matter.
 CUTSCENE_COOK_VERSION :: "cutscenes 12"
 
-// CUTSCENE_TEMPLATE is the text of a new cutscene: 10 seconds at 30 frames a second, with no bindings or tracks.
+// CUTSCENE_TEMPLATE is the text of a new cutscene: 10 seconds at 30 frames a second, with no bindings and an empty
+// camera cut track. testdata/cutscenes/template.cutscene is the same text, which the editor's tests read.
 CUTSCENE_TEMPLATE :: `cutscene 1
 # Bindings, tracks, sections and keys (see docs/content/kinds/cutscenes.md). Times are ticks, 60000 a second.
 length = 600000
 rate = 30
+
+track 1 camera_cut "Cameras"
 `
 
 // Cutscene_Problem is an error in a cutscene's text, at a line from 1.
@@ -78,34 +82,11 @@ cook_cutscenes :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pas
 			names[s.guid] = fmt.tprintf("%s %s %s", a.name, s.kind, s.name)
 		}
 	}
-	graph := Cutscene_Graph {
-		by_guid = make(map[format.Guid]int, len(cutscenes), context.temp_allocator),
-		nodes   = make([]Cutscene_Node, len(cutscenes), context.temp_allocator),
-	}
+	sources := make([]Cutscene_Source, len(cutscenes), context.temp_allocator)
 	for i, n in cutscenes {
-		graph.by_guid[assets[i].meta.guid] = n
+		sources[n] = {assets[i].meta.guid, assets[i].name, string(asset_source(pass, i))}
 	}
-	for i, n in cutscenes {
-		node := &graph.nodes[n]
-		node.asset = i
-		node.parsed, node.problems = cutscene_parse(
-			string(asset_source(pass, i)),
-			context.temp_allocator,
-		)
-		node.children = make([dynamic]Cutscene_Child, context.temp_allocator)
-		for r in node.parsed.references {
-			if r.want != .Cutscene {
-				continue
-			}
-			if child, found := graph.by_guid[r.guid]; found {
-				append(&node.children, Cutscene_Child{child, r.line})
-			}
-		}
-		node.graph_problems = make([dynamic]Cutscene_Problem, context.temp_allocator)
-	}
-	cutscene_cycles(&graph, assets)
-	cutscene_depths(&graph, assets)
-	cutscene_sub_sequences(&graph, assets)
+	graph := cutscene_graph(sources)
 	ok := true
 	step_begin(pass, .Cutscene, "", len(cutscenes))
 	for i, n in cutscenes {
@@ -117,6 +98,114 @@ cook_cutscenes :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pas
 	return ok
 }
 
+// cutscene_check gives the problems of a cutscene's text that the editor has not saved, as a cook of the file at this
+// path would: its own, those of the assets that it names, which the index has, and those of its sub-sequences, read
+// with the other cutscenes' sources on disk. A text without problems goes in the preview area of the cache,
+// <config>/preview/<guid>.blob, which the editor's preview plays; the cutscene's own blob does not change. A text with
+// problems leaves the last good one.
+cutscene_check :: proc(
+	options: Cook_Options,
+	index: ^Index,
+	guid: format.Guid,
+	text, path, name: string,
+) -> (
+	problems: Problems,
+) {
+	kinds := index_kinds(index)
+	names := make(map[format.Guid]string, len(index.assets), context.temp_allocator)
+	sources := make([dynamic]Cutscene_Source, context.temp_allocator)
+	append(&sources, Cutscene_Source{guid, name, text})
+	for key, a in index.assets {
+		g, valid := format.guid_parse(key)
+		if !valid {
+			continue
+		}
+		kind := kinds[g]
+		file := fmt.tprintf("%s/%s", a.root, a.path)
+		names[g] =
+			a.parent == "" ? file : fmt.tprintf("%s %s %s", file, subasset_kind_name(kind), a.subasset)
+		if kind != .Cutscene || a.parent != "" || g == guid {
+			continue
+		}
+		// A cutscene that cannot be read is left out, as a cook fails it on its own.
+		for r in options.roots {
+			if r.name != a.root {
+				continue
+			}
+			if data, err := os.read_entire_file(
+				fmt.tprintf("%s/%s", r.dir, a.path),
+				context.temp_allocator,
+			); err == nil {
+				append(&sources, Cutscene_Source{g, file, string(data)})
+			}
+		}
+	}
+	graph := cutscene_graph(sources[:])
+	node := &graph.nodes[0]
+	found := cutscene_problems(node, kinds, names)
+	for p in found {
+		report_error(&problems, path, p.line, 0, "%s", p.message)
+	}
+	if len(found) > 0 {
+		return
+	}
+	dir := fmt.tprintf("%s/preview", config_dir(options))
+	if err := os.make_directory_all(dir); err != nil && err != .Exist {
+		report_error(&problems, dir, 0, 0, "%v", err)
+		return
+	}
+	contents := node.parsed.contents
+	contents.guid, contents.source_path = guid, name
+	contents.key = cutscene_blob_key(name, transmute([]byte)text, guid)
+	if !write_blob(
+		fmt.tprintf("%s/%s.blob", dir, guid_text(guid)),
+		format.cutscene_write(contents, context.temp_allocator),
+	) {
+		report_error(&problems, path, 0, 0, "cannot write its preview")
+	}
+	return
+}
+
+// Cutscene_Source is a cutscene's GUID, its name, such as "game/cutscenes/intro.cutscene", and its text.
+@(private = "file")
+Cutscene_Source :: struct {
+	guid: format.Guid,
+	name: string,
+	text: string,
+}
+
+// cutscene_graph parses each cutscene, links the cutscenes that its sub-sequences name, and finds the problems that they
+// have together: cycles, depths, and sub-sequences' trims and binds. Its nodes are in the order of the sources.
+@(private = "file")
+cutscene_graph :: proc(sources: []Cutscene_Source) -> Cutscene_Graph {
+	graph := Cutscene_Graph {
+		by_guid = make(map[format.Guid]int, len(sources), context.temp_allocator),
+		nodes   = make([]Cutscene_Node, len(sources), context.temp_allocator),
+	}
+	for s, n in sources {
+		graph.by_guid[s.guid] = n
+	}
+	for s, n in sources {
+		node := &graph.nodes[n]
+		node.name = s.name
+		node.parsed, node.problems = cutscene_parse(s.text, context.temp_allocator)
+		node.children = make([dynamic]Cutscene_Child, context.temp_allocator)
+		for r in node.parsed.references {
+			if r.want != .Cutscene {
+				continue
+			}
+			if child, found := graph.by_guid[r.guid]; found {
+				append(&node.children, Cutscene_Child{child, r.line})
+			}
+		}
+		node.graph_problems = make([dynamic]Cutscene_Problem, context.temp_allocator)
+	}
+	cutscene_cycles(&graph)
+	cutscene_depths(&graph)
+	cutscene_sub_sequences(&graph)
+	return graph
+}
+
 @(private = "file")
 Cutscene_Child :: struct {
 	node: int,
@@ -125,7 +214,8 @@ Cutscene_Child :: struct {
 
 @(private = "file")
 Cutscene_Node :: struct {
-	asset:          int,
+	// The cutscene's name, such as "game/cutscenes/intro.cutscene".
+	name:           string,
 	parsed:         Cutscene_Parsed,
 	problems:       []Cutscene_Problem,
 	// The cutscenes that its sub-sequence sections name, with the lines that name them.
@@ -149,7 +239,7 @@ Cutscene_Graph :: struct {
 // next cutscene on its shortest cycle, with the cycle's path. Every cutscene of a cycle reaches itself, so each one fails,
 // whatever order the scan found them in.
 @(private = "file")
-cutscene_cycles :: proc(graph: ^Cutscene_Graph, assets: []Asset_Source) {
+cutscene_cycles :: proc(graph: ^Cutscene_Graph) {
 	// A breadth-first search from each cutscene's children, which notes how it reached each cutscene, so the path back
 	// to the start is the shortest.
 	from := make([]int, len(graph.nodes), context.temp_allocator)
@@ -191,7 +281,7 @@ cutscene_cycles :: proc(graph: ^Cutscene_Graph, assets: []Asset_Source) {
 			if i > 0 {
 				strings.write_string(&builder, " -> ")
 			}
-			strings.write_string(&builder, assets[graph.nodes[at].asset].name)
+			strings.write_string(&builder, graph.nodes[at].name)
 		}
 		node := &graph.nodes[n]
 		line := 0
@@ -217,7 +307,7 @@ cutscene_cycles :: proc(graph: ^Cutscene_Graph, assets: []Asset_Source) {
 // a binding's kind in its own cutscene: a camera when its camera cut track shows it, and an entity with an Animator when
 // an animation track drives it. A bind of a camera to an animated entity that is not a camera, either way, is a problem.
 @(private = "file")
-cutscene_sub_sequences :: proc(graph: ^Cutscene_Graph, assets: []Asset_Source) {
+cutscene_sub_sequences :: proc(graph: ^Cutscene_Graph) {
 	Kinds :: struct {
 		cameras:  map[u32]bool,
 		animated: map[u32]bool,
@@ -254,7 +344,7 @@ cutscene_sub_sequences :: proc(graph: ^Cutscene_Graph, assets: []Asset_Source) {
 				continue
 			}
 			child := graph.nodes[n].parsed.contents
-			name := assets[graph.nodes[n].asset].name
+			name := graph.nodes[n].name
 			if m.parent == format.CUTSCENE_NONE {
 				if child.range_end > child.range_start &&
 				   (section.offset < child.range_start ||
@@ -316,7 +406,7 @@ cutscene_sub_sequences :: proc(graph: ^Cutscene_Graph, assets: []Asset_Source) {
 // CUTSCENE_MAX_DEPTH, at the line of the first sub-sequence on its deepest path. Cycles have their own problem, so a
 // path into one counts it as no depth.
 @(private = "file")
-cutscene_depths :: proc(graph: ^Cutscene_Graph, assets: []Asset_Source) {
+cutscene_depths :: proc(graph: ^Cutscene_Graph) {
 	depth :: proc(graph: ^Cutscene_Graph, n: int) -> int {
 		node := &graph.nodes[n]
 		if node.depth_known {
@@ -342,10 +432,10 @@ cutscene_depths :: proc(graph: ^Cutscene_Graph, assets: []Asset_Source) {
 		}
 		node := &graph.nodes[n]
 		builder := strings.builder_make(context.temp_allocator)
-		strings.write_string(&builder, assets[node.asset].name)
+		strings.write_string(&builder, node.name)
 		for at := n; graph.nodes[at].deepest >= 0; {
 			at = graph.nodes[at].children[graph.nodes[at].deepest].node
-			fmt.sbprintf(&builder, " -> %s", assets[graph.nodes[at].asset].name)
+			fmt.sbprintf(&builder, " -> %s", graph.nodes[at].name)
 		}
 		append(
 			&node.graph_problems,
@@ -380,6 +470,36 @@ cook_cutscene :: proc(
 			append(&a.dependencies, r.guid)
 		}
 	}
+	found := cutscene_problems(node, kinds, names)
+	for p in found {
+		report_error(problems, a.path, p.line, 0, "%s", p.message)
+	}
+	// A cutscene with errors keeps its old blob, so the running game keeps the last good version.
+	if len(found) > 0 || !settings_ok {
+		return .Failed
+	}
+	guid := a.meta.guid
+	key := cutscene_blob_key(a.name, source_of(a^), guid)
+	output := fmt.tprintf("%s/%s.blob", out_dir, guid_text(guid))
+	if cooked_key(output, .Cutscene, format.cutscene_layout()) == key && !pass.force[guid] {
+		return .Current
+	}
+	contents := node.parsed.contents
+	contents.guid, contents.key, contents.source_path = guid, key, a.name
+	if !write_blob(output, format.cutscene_write(contents, context.temp_allocator)) {
+		return .Failed
+	}
+	return .Cooked
+}
+
+// cutscene_problems is a cutscene's problems, sorted by line: its text's, its sub-sequences', and those of the assets
+// that it names, which must exist and be of the kind that their place asks for.
+@(private = "file")
+cutscene_problems :: proc(
+	node: ^Cutscene_Node,
+	kinds: map[format.Guid]format.Asset_Kind,
+	names: map[format.Guid]string,
+) -> []Cutscene_Problem {
 	found := make([dynamic]Cutscene_Problem, context.temp_allocator)
 	append(&found, ..node.problems)
 	append(&found, ..node.graph_problems[:])
@@ -410,34 +530,24 @@ cook_cutscene :: proc(
 		}
 	}
 	slice.stable_sort_by(found[:], proc(a, b: Cutscene_Problem) -> bool {return a.line < b.line})
-	for p in found {
-		report_error(problems, a.path, p.line, 0, "%s", p.message)
-	}
-	// A cutscene with errors keeps its old blob, so the running game keeps the last good version.
-	if len(found) > 0 || !settings_ok {
-		return .Failed
-	}
+	return found[:]
+}
+
+// cutscene_blob_key is the key of a cutscene's blob: of the cook's version, the cutscene's name, the blob's layout, its
+// text and its GUID.
+@(private = "file")
+cutscene_blob_key :: proc(name: string, source: []byte, guid: format.Guid) -> u64 {
 	key := hash.fnv64a(
 		transmute([]byte)fmt.tprintf(
 			"%s\x00%s\x00%x\x00",
 			CUTSCENE_COOK_VERSION,
-			a.name,
+			name,
 			format.cutscene_layout(),
 		),
 	)
-	key = hash.fnv64a(source_of(a^), key)
-	guid := a.meta.guid
-	key = hash.fnv64a(guid[:], key)
-	output := fmt.tprintf("%s/%s.blob", out_dir, guid_text(guid))
-	if cooked_key(output, .Cutscene, format.cutscene_layout()) == key && !pass.force[guid] {
-		return .Current
-	}
-	contents := node.parsed.contents
-	contents.guid, contents.key, contents.source_path = guid, key, a.name
-	if !write_blob(output, format.cutscene_write(contents, context.temp_allocator)) {
-		return .Failed
-	}
-	return .Cooked
+	key = hash.fnv64a(source, key)
+	guid := guid
+	return hash.fnv64a(guid[:], key)
 }
 
 // cutscene_kind_noun is what a reference must be, in a message.

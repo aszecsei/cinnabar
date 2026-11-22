@@ -257,6 +257,42 @@ public sealed class CookLinkTests : IDisposable
     }
 
     [Fact]
+    public async Task ANewCutsceneIsTheTemplateAndItsUnsavedTextKeepsItsLastGoodPreview()
+    {
+        if (!File.Exists(_cook))
+        {
+            Assert.Skip("build/tools/cook.exe is missing");
+        }
+        var index = new AssetIndex();
+        using var session = Start(index);
+        await Until(() => session.Linked, session, []);
+        Assert.Equal("", (await session.Request(new CreateFolder("game", "cutscenes"))).Error);
+        var created = await session.Request(new CreateAsset(AssetTemplate.Cutscene, "game", "cutscenes", "intro"));
+        Assert.Equal("", created.Error);
+        var guid = Assert.Single(created.Guids);
+        var path = Path.Combine(_content, "cutscenes", "intro.cutscene");
+        Assert.Equal(CutsceneFileTests.Template, File.ReadAllText(path).ReplaceLineEndings("\n"));
+        await Until(() => index.Find(guid)?.Status == AssetStatus.Current, session, []);
+
+        // The template cooks, and its preview goes in the preview area.
+        var file = CutsceneFile.Parse(CutsceneFileTests.Template).File!;
+        file.Tracks.Single().SetName("Shots");
+        Assert.Equal("", (await session.CookPreview(guid, file.Text)).Error);
+        var preview = Path.Combine(_dir, "cache", "preview", guid + ".blob");
+        var good = File.ReadAllBytes(preview);
+
+        // A problem names the file and its line, so the editor finds the block, and the last good preview stays.
+        file.Root.Set("rate", "23");
+        var broken = await session.CookPreview(guid, file.Text);
+        Assert.NotEqual("", broken.Error);
+        var problem = Assert.Single(broken.Problems);
+        Assert.Equal(Path.GetFullPath(path), Path.GetFullPath(problem.File), ignoreCase: true);
+        Assert.Same(file.Root, file.BlockAt((int)problem.Line));
+        Assert.Contains("rate", file.Text.Split('\n')[problem.Line - 1]);
+        Assert.Equal(good, File.ReadAllBytes(preview));
+    }
+
+    [Fact]
     public async Task TheDaemonChecksAnUnsavedDecisionAgainstItsBlackboardAndAnUnsavedBlackboard()
     {
         if (!File.Exists(_cook))

@@ -1,0 +1,6 @@
+cutscene 1
+# Bindings, tracks, sections and keys (see docs/content/kinds/cutscenes.md). Times are ticks, 60000 a second.
+length = 600000
+rate = 30
+
+track 1 camera_cut "Cameras"
