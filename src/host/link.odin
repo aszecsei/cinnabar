@@ -433,7 +433,14 @@ handle_message :: proc(l: ^Link, message: link.Message, connection: u64) {
 	     link.Override_Frame,
 	     link.Release_Override,
 	     link.Override_Ended,
-	     link.Overridden_Entities:
+	     link.Overridden_Entities,
+	     link.Cutscene_Preview_Open,
+	     link.Cutscene_Preview_Time,
+	     link.Cutscene_Preview_Play,
+	     link.Cutscene_Preview_Close,
+	     link.Cutscene_Preview_Opened,
+	     link.Cutscene_Preview_Ended,
+	     link.Cutscene_Preview_Tick:
 	// is_host_message sends these to the game.
 	}
 }

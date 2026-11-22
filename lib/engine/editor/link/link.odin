@@ -130,6 +130,13 @@ Message :: union {
 	Release_Override,
 	Override_Ended,
 	Overridden_Entities,
+	Cutscene_Preview_Open,
+	Cutscene_Preview_Time,
+	Cutscene_Preview_Play,
+	Cutscene_Preview_Close,
+	Cutscene_Preview_Opened,
+	Cutscene_Preview_Ended,
+	Cutscene_Preview_Tick,
 }
 
 // Editor to host, first: the editor's protocol version and its name.
@@ -2084,4 +2091,78 @@ Held_Field :: struct {
 // Game to editor: the entities that overrides write or spawned, when they change.
 Overridden_Entities :: struct {
 	entities: []u64,
+}
+
+// The cutscene preview (see docs/editor/cutscene-editor.md#preview). In Edit, the cutscene editor's tab shows its
+// cutscene in the world at the playhead, without the document: the game binds the cutscene, spawns its spawned
+// entities, and evaluates it at a time that the editor sends, or on its own clock while it plays. The editor picks each
+// preview's ticket, which only goes up in a session, so a late message for a preview that ended is dropped. One
+// preview is open at a time; an Open with a higher ticket ends the one before it.
+
+// Editor to game: preview the cutscene at tick, paused. With unsaved, its blob is the one that the cook daemon wrote to
+// the preview area from the editor's unsaved text, and a newer one there replaces it in place, at the same time.
+// The game answers with Cutscene_Preview_Opened, or with Cutscene_Preview_Ended when it cannot.
+Cutscene_Preview_Open :: struct {
+	ticket:   u64,
+	cutscene: [16]u8,
+	unsaved:  bool,
+	tick:     i32,
+}
+
+// Editor to game: show the preview at tick, paused. No event fires.
+Cutscene_Preview_Time :: struct {
+	ticket: u64,
+	tick:   i32,
+}
+
+// Editor to game: play the preview from tick on the game's clock, at rate times real time. With looping, the time
+// goes back to loop_start when it reaches loop_end; without, it stops at the end of the cutscene's range.
+Cutscene_Preview_Play :: struct {
+	ticket:     u64,
+	tick:       i32,
+	rate:       f32,
+	looping:    bool,
+	loop_start: i32,
+	loop_end:   i32,
+}
+
+// Editor to game: end the preview. The world shows the document again, and the spawned entities go, in the same
+// frame. The game does not answer.
+Cutscene_Preview_Close :: struct {
+	ticket: u64,
+}
+
+// Game to editor: the preview is open, at the tick, with the cutscene's range.
+Cutscene_Preview_Opened :: struct {
+	ticket:      u64,
+	tick:        i32,
+	range_start: i32,
+	range_end:   i32,
+}
+
+Cutscene_Preview_End_Reason :: enum u8 {
+	// The game is not in Edit with the editor's scene, so the preview did not open.
+	Not_Editing,
+	// The cutscene, an asset that it references, or a binding did not load, so the preview did not open or ended.
+	Failed,
+	// The mode changed from Edit.
+	Mode,
+	// The editor's scene replaced the world.
+	Scene_Loaded,
+	// The game's code reloaded.
+	Code_Reloaded,
+}
+
+// Game to editor: the game ended a preview that the editor did not close, or did not open it.
+Cutscene_Preview_Ended :: struct {
+	ticket: u64,
+	reason: Cutscene_Preview_End_Reason,
+}
+
+// Game to editor: the preview's time, in each frame while it plays, and once when it stops at the end of the range,
+// with playing false. The editor draws its playhead from it, and never waits for it.
+Cutscene_Preview_Tick :: struct {
+	ticket:  u64,
+	tick:    i32,
+	playing: bool,
 }
