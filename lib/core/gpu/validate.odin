@@ -460,6 +460,32 @@ validate :: proc(
 // validate_submission validates each command buffer, and checks that the pieces of split passes form chains:
 // a command buffer that ends with a suspended pass is followed by one that resumes it with the same attachments.
 // buffer is the index of the offending command buffer.
+// marker_at is the label of the innermost marker that is open at a packet of a command buffer, such as the name of
+// the render pass that recorded it, or "" outside every marker. A validation error names it, so the error says which
+// pass broke a rule.
+marker_at :: proc(cb: Command_Buffer, packet: int) -> string {
+	labels: [16]string
+	depth := 0
+	index := 0
+	it := packet_iterator(cb)
+	for p in next_packet(&it) {
+		if index == packet {
+			break
+		}
+		index += 1
+		#partial switch p.kind {
+		case .Begin_Marker:
+			if depth < len(labels) {
+				labels[depth] = marker_label(p)
+			}
+			depth += 1
+		case .End_Marker:
+			depth = max(depth - 1, 0)
+		}
+	}
+	return depth == 0 ? "" : labels[min(depth, len(labels)) - 1]
+}
+
 validate_submission :: proc(
 	buffers: []Command_Buffer,
 	resources: Resources,

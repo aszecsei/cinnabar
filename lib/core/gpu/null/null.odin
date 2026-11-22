@@ -354,7 +354,13 @@ submit :: proc(
 ) -> bool {
 	if err, buffer, packet := gpu.validate_submission(buffers, RESOURCES, &state.layouts, queue);
 	   err != .None {
-		log.errorf("gpu: command buffer %d, packet %d: %v", buffer, packet, err)
+		log.errorf(
+			"gpu: command buffer %d, packet %d, in %q: %v",
+			buffer,
+			packet,
+			gpu.marker_at(buffers[buffer], packet),
+			err,
+		)
 		return false
 	}
 	time_markers(buffers, queue)
