@@ -427,6 +427,7 @@ public sealed partial class EditorShell
         try
         {
             document.Apply(label, operations);
+            Edited(UndoTarget.Scene.Instance);
             return true;
         }
         catch (InvalidOperationException e)
@@ -520,6 +521,10 @@ public sealed partial class EditorShell
         }
         OpenEdit = null;
         edit.End(commit);
+        if (commit)
+        {
+            Edited(UndoTarget.Scene.Instance);
+        }
         Commands.InvalidateAll();
         edit.RaiseEnded(commit);
     }

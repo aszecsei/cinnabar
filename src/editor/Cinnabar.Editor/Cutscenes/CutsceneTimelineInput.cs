@@ -94,6 +94,23 @@ public sealed class CutsceneTimelineInput
         Invalidated?.Invoke();
     }
 
+    /// <summary>Scrolls the rows so that the row of a binding or a track is in view, when the layout has it.</summary>
+    public void Reveal(string path)
+    {
+        _layout = null;
+        if (Layout.Rows.FirstOrDefault(r => r.Path == path) is not { } row)
+        {
+            return;
+        }
+        var height = Math.Max(Height - CutsceneTimelineLayout.RulerHeight, CutsceneTimelineLayout.RowHeight);
+        if (row.Top < ScrollY || row.Top + CutsceneTimelineLayout.RowHeight > ScrollY + height)
+        {
+            ScrollY = row.Top - (height - CutsceneTimelineLayout.RowHeight) / 2;
+        }
+        ClampScroll();
+        Invalidated?.Invoke();
+    }
+
     /// <summary>The control's size. The first one with a width fits the whole cutscene.</summary>
     public void Resize(double width, double height)
     {

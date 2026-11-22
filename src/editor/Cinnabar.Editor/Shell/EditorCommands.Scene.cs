@@ -60,7 +60,7 @@ static partial class EditorCommands
         });
         commands.Register(new Command(Undo, "Undo", () =>
         {
-            if (shell.ActiveGraphEditor is { } graph)
+            if (shell.UndoEditor is { } graph)
             {
                 graph.Document.Undo();
             }
@@ -70,14 +70,14 @@ static partial class EditorCommands
             }
         })
         {
-            Description = "Undo the last edit of the active scene.",
+            Description = "Undo the last edit of the active editor's tab, or with none, of the active scene, or of the cutscene keyed after it.",
             Icon = "undo",
             Shortcut = "Ctrl+Z",
-            CanExecuteWhen = () => shell.ActiveGraphEditor is { } graph ? graph.Document.CanUndo : shell.IsEditing && shell.Scene?.CanUndo == true,
+            CanExecuteWhen = () => shell.UndoEditor is { } graph ? graph.Document.CanUndo : shell.IsEditing && shell.Scene?.CanUndo == true,
         });
         commands.Register(new Command(Redo, "Redo", () =>
         {
-            if (shell.ActiveGraphEditor is { } graph)
+            if (shell.UndoEditor is { } graph)
             {
                 graph.Document.Redo();
             }
@@ -87,10 +87,10 @@ static partial class EditorCommands
             }
         })
         {
-            Description = "Apply the last undone edit of the active scene again.",
+            Description = "Apply the last undone edit again, of the active editor's tab, or with none, of the active scene, or of the cutscene keyed after it.",
             Icon = "redo",
             Shortcut = "Ctrl+Y",
-            CanExecuteWhen = () => shell.ActiveGraphEditor is { } graph ? graph.Document.CanRedo : shell.IsEditing && shell.Scene?.CanRedo == true,
+            CanExecuteWhen = () => shell.UndoEditor is { } graph ? graph.Document.CanRedo : shell.IsEditing && shell.Scene?.CanRedo == true,
         });
         // A command for each kind of entity of the catalog (see docs/editor/shell-and-panels.md#add), which the Add
         // menus and the command palette show.

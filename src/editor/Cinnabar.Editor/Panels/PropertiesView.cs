@@ -89,7 +89,30 @@ public sealed class PropertiesView : ScrollViewer
             .Add(() => _shell.ModeChanged += Rebuild, () => _shell.ModeChanged -= Rebuild)
             .Add(() => _world.ProbeChanged += OnProbeChanged, () => _world.ProbeChanged -= OnProbeChanged)
             .Add(() => _shell.Host.StateChanged += OnHostState, () => _shell.Host.StateChanged -= OnHostState)
-            .Add(() => _shell.Assets.Changed += OnSceneChanged, () => _shell.Assets.Changed -= OnSceneChanged);
+            .Add(() => _shell.Assets.Changed += OnSceneChanged, () => _shell.Assets.Changed -= OnSceneChanged)
+            .Add(() => _shell.Keying.Changed += OnKeysChanged, () => _shell.Keying.Changed -= OnKeysChanged);
+    }
+
+    // A field of an entity that the previewed cutscene binds has a key button (see docs/editor/cutscene-editor.md#keying).
+    FieldKey? KeyOf(ulong entity, ulong component, Link.Protocol.FieldInfo f)
+    {
+        var keying = _shell.Keying;
+        return keying.TargetOf(entity, component, f) == null
+            ? null
+            : new FieldKey(() => keying.StateOf(entity, component, f), () => keying.Key(entity, component, f), () => keying.AddTrack(entity, component, f),
+                () => keying.RemoveKey(entity, component, f), () => keying.CanRemoveKey(entity, component, f), () => keying.GoToTrack(entity, component, f));
+    }
+
+    // The playhead, the cutscene or the preview moved: the key buttons show their new states, and a binding that came or
+    // went builds the panel again.
+    void OnKeysChanged()
+    {
+        if (Structure() != _structure)
+        {
+            Rebuild();
+            return;
+        }
+        _grid.ShowKeys();
     }
 
     // A script that the content does not have: deleted, or moved outside the editor without its .meta file. The game
@@ -193,6 +216,7 @@ public sealed class PropertiesView : ScrollViewer
                 {
                     Overridden = isSet == null ? null : Overridden(document!.Id, id, isSet),
                     Apply = () => _shell.ApplyField(document!.Id, id, null, f.Name),
+                    Key = KeyOf(node.Handle, id, f),
                 };
             });
             var note = id == SceneEdits.TransformId && node.Parent != 0 ? "Propagation writes a child's Transform from its Local Transform."
@@ -291,6 +315,7 @@ public sealed class PropertiesView : ScrollViewer
                 _grid.ShowHeld(component.Id.ToString("x16"), type, field => _world.IsHeld(entity, component.Id, Fnv.Hash64(Encoding.UTF8.GetBytes(field.Name))));
             }
         }
+        _grid.ShowKeys();
         foreach (var behaviour in values.Behaviours)
         {
             foreach (var field in behaviour.Fields)
@@ -331,7 +356,9 @@ public sealed class PropertiesView : ScrollViewer
         var scripts = behaviours.Select(b => Convert.ToHexStringLower(b.Script)).Concat(document?.Behaviours.Select(b => b.Script) ?? []);
         // An instance's header shows whether its prefab has unsaved changes.
         var prefab = _shell.InstanceOf(node.SceneId) is { } instance ? _shell.PrefabOfInstance(instance.Instance)?.IsDirty.ToString() : "";
-        return $"{node.Handle}|{node.Name}|{node.Active}|{node.Parent}|{string.Join(",", node.Components)}|{_world.Types.Count}|{inDocument}|{prefab}|" +
+        // The cutscene that keys take, and the binding of the entity there, decide which fields have key buttons.
+        var keyed = $"{_shell.Keying.Cutscene?.Guid}:{_shell.Keying.BindingOf(node.Handle)}";
+        return $"{keyed}|{node.Handle}|{node.Name}|{node.Active}|{node.Parent}|{string.Join(",", node.Components)}|{_world.Types.Count}|{inDocument}|{prefab}|" +
             $"{_shell.ProblemsOf(node.SceneId).Count}|{string.Join(",", scripts.Where(ScriptMissing))}|" +
             string.Join(";", behaviours.Select(b =>
                 $"{b.Class}:{b.Enabled}:{string.Join(",", b.Fields.Select(f => $"{f.Name}={FieldValues.DisplayKindOf(f.Kind)}"))}"));

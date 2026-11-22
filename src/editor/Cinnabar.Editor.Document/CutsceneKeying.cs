@@ -164,6 +164,25 @@ public static class CutsceneKeying
     }
 
     /// <summary>
+    /// The keys next to a time, one for each of a target's channels: the last key before it, or with none, the first
+    /// after it, in the section that keys there. A rotation turns the short way from them.
+    /// </summary>
+    public static IReadOnlyList<double?> NearKeys(CutsceneFile file, KeyTarget target, int tick)
+    {
+        if (TrackOf(file, target) is not { } track || SectionAt(track, tick) is not { Start: { } start } section)
+        {
+            return [];
+        }
+        var time = tick - start;
+        return [.. ChannelsOf(target, section).Select(name =>
+        {
+            var keys = Channel(section, name)?.Children.Where(k => k.Kind == CutsceneBlockKind.Key && k.Start != time).ToList() ?? [];
+            var near = keys.LastOrDefault(k => k.Start < time) ?? keys.FirstOrDefault(k => k.Start > time);
+            return near?.KeyValue is { } text && double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var value) ? value : (double?)null;
+        })];
+    }
+
+    /// <summary>
     /// What a target's key button shows at a time. <paramref name="differs"/> says whether the keys there, as
     /// <see cref="KeysAt"/> gives them, differ from what the world shows, or is null when the editor does not know what
     /// it shows.

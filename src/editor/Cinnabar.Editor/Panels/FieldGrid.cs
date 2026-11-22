@@ -32,6 +32,9 @@ sealed record FieldRow(string Owner, string Field, DisplayKind Kind, bool IsEnum
     /// <summary>The name that the row shows, the field's own humanized by default.</summary>
     public string? Label { get; init; }
 
+    /// <summary>For a field of a bound entity, its key button and menu (see docs/editor/cutscene-editor.md#keying).</summary>
+    public FieldKey? Key { get; init; }
+
     /// <summary>A component field's row, with what its field info says of how it shows.</summary>
     public static FieldRow Of(string owner, Link.Protocol.FieldInfo f, FieldEditor? editor, Func<bool>? isSet, Action reset) =>
         new(owner, f.Name, FieldValues.DisplayKindOf(f), f.Kind == Link.Protocol.FieldKind.Enum, editor, isSet, reset)
@@ -42,6 +45,12 @@ sealed record FieldRow(string Owner, string Field, DisplayKind Kind, bool IsEnum
             HasOverride = f.HasOverride,
         };
 }
+
+/// <summary>
+/// A field's key button and its menu's actions: its state at the playhead, or null when it has none now, and keying the
+/// field, adding its track, removing its keys at the playhead and showing its track.
+/// </summary>
+sealed record FieldKey(Func<KeyButton?> State, Action Key, Action AddTrack, Action RemoveKey, Func<bool> CanRemoveKey, Action GoToTrack);
 
 /// <summary>
 /// The rows of fields that the properties and atmosphere panels show (see docs/editor/shell-and-panels.md#properties):
@@ -57,6 +66,8 @@ sealed class FieldGrid(EditorShell shell)
     readonly List<(TextBlock Name, Func<bool> IsOverridden)> _bold = [];
     // Each field name, with its tooltip, which a mark for an override's hold adds to.
     readonly Dictionary<(string Owner, string Field), (TextBlock Name, string Tip)> _names = [];
+    // Each key button, with its field's key, which the playhead and the cutscene change without a rebuild.
+    readonly Dictionary<(string Owner, string Field), (Button Button, FieldKey Key, Action ShowItems)> _keys = [];
 
     /// <summary>The view and the editor of each row, by its owner, such as a component's ID, and its field's name.</summary>
     public Dictionary<(string Owner, string Field), FieldView> Views { get; } = [];
@@ -71,6 +82,36 @@ sealed class FieldGrid(EditorShell shell)
         _bold.Clear();
         _overrides.Clear();
         _names.Clear();
+        _keys.Clear();
+    }
+
+    static readonly string[] KeyClasses = ["key-none", "key-track", "key-keyed", "key-differs"];
+
+    /// <summary>The key button of each field that has one, by its owner and its field's name.</summary>
+    public IEnumerable<KeyValuePair<(string Owner, string Field), Button>> KeyButtons =>
+        _keys.Select(k => KeyValuePair.Create(k.Key, k.Value.Button));
+
+    /// <summary>Shows each key button's state at the playhead: hidden with none, its look, its tooltip, and whether it keys now.</summary>
+    public void ShowKeys()
+    {
+        foreach (var (button, key, showItems) in _keys.Values)
+        {
+            showItems();
+            var state = key.State();
+            button.IsVisible = state != null;
+            if (state == null)
+            {
+                continue;
+            }
+            var name = KeyClasses[(int)state.State];
+            foreach (var c in KeyClasses)
+            {
+                button.Classes.Set(c, c == name);
+            }
+            button.Content = state.State is Document.KeyState.Keyed or Document.KeyState.Differs ? "\u25C6" : "\u25C7";
+            button.IsEnabled = state.Refusal == null;
+            ToolTip.SetTip(button, state.Tip);
+        }
     }
 
     /// <summary>Shows again what the document sets: each reset button, and each name that an instance overrides.</summary>
@@ -110,6 +151,7 @@ sealed class FieldGrid(EditorShell shell)
             }
             var view = FieldView.Create(field.Kind, shell.Selection.Select, Label, field.Editor, field.IsEnum, new AssetContext(shell.Assets, field.AssetKind, shell.Content.RevealAsset), field.Axes, field.Range);
             Control label = name;
+            ContextMenu? menu = null;
             if (field.Overridden is { } overridden)
             {
                 name.FontWeight = overridden() ? FontWeight.Bold : FontWeight.Normal;
@@ -117,9 +159,18 @@ sealed class FieldGrid(EditorShell shell)
                 // An override's menu carries it to the prefab, or drops it.
                 var apply = new MenuItem { Header = "Apply to Prefab", Command = new RelayCommand(() => field.Apply?.Invoke()) };
                 var revert = new MenuItem { Header = "Revert", Command = new RelayCommand(field.Reset) };
-                var menu = new ContextMenu { Items = { apply, revert } };
+                menu = new ContextMenu { Items = { apply, revert } };
                 menu.Opening += (_, _) => apply.IsEnabled = revert.IsEnabled = overridden();
                 name.ContextMenu = menu;
+            }
+            Button? keyButton = null;
+            if (field.Key is { } key)
+            {
+                keyButton = Kit.SmallButton("\u25C7", "", key.Key);
+                menu ??= new ContextMenu();
+                _keys[(field.Owner, field.Field)] = (keyButton, key, AddKeyItems(menu, key));
+                name.ContextMenu = menu;
+                keyButton.ContextMenu = menu;
             }
             if (field.HasOverride)
             {
@@ -132,7 +183,7 @@ sealed class FieldGrid(EditorShell shell)
                 reset.IsVisible = field.IsSet();
                 _resets.Add((reset, field.IsSet));
             }
-            rows.Add(label, view.Control, reset);
+            rows.Add(label, view.Control, keyButton == null ? reset : Pair(keyButton, reset));
             Views[(field.Owner, field.Field)] = view;
             if (field.Editor != null)
             {
@@ -140,6 +191,57 @@ sealed class FieldGrid(EditorShell shell)
             }
         }
         return rows.Grid;
+    }
+
+    // The reset button and the key button after a field, in one cell.
+    static StackPanel Pair(Button key, Button? reset)
+    {
+        var panel = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+        if (reset != null)
+        {
+            panel.Children.Add(reset);
+        }
+        panel.Children.Add(key);
+        return panel;
+    }
+
+    // A key's items at the end of a field's menu, each enabled as the field's state at the playhead lets it.
+    static Action AddKeyItems(ContextMenu menu, FieldKey key)
+    {
+        var addTrack = new MenuItem { Header = "Add Track", Command = new RelayCommand(key.AddTrack) };
+        var keyItem = new MenuItem { Header = "Key", Command = new RelayCommand(key.Key) };
+        var removeKey = new MenuItem { Header = "Remove Key", Command = new RelayCommand(key.RemoveKey) };
+        var goToTrack = new MenuItem { Header = "Go to Track", Command = new RelayCommand(key.GoToTrack) };
+        var separator = new Separator();
+        if (menu.Items.Count > 0)
+        {
+            menu.Items.Add(separator);
+        }
+        foreach (var item in new[] { addTrack, keyItem, removeKey, goToTrack })
+        {
+            menu.Items.Add(item);
+        }
+        void Show() => ShowKeyItems(key, separator, addTrack, keyItem, removeKey, goToTrack);
+        menu.Opening += (_, _) => Show();
+        return Show;
+    }
+
+    // Shows a key's menu items as the field's state lets them act: hidden with no state, and each enabled when it can act.
+    static void ShowKeyItems(FieldKey key, Control separator, MenuItem addTrack, MenuItem keyItem, MenuItem removeKey, MenuItem goToTrack)
+    {
+        var state = key.State();
+        foreach (var item in new Control[] { separator, addTrack, keyItem, removeKey, goToTrack })
+        {
+            item.IsVisible = state != null;
+        }
+        if (state == null)
+        {
+            return;
+        }
+        addTrack.IsEnabled = state.State == Document.KeyState.None && state.Refusal == null;
+        keyItem.IsEnabled = state.Refusal == null;
+        removeKey.IsEnabled = key.CanRemoveKey();
+        goToTrack.IsEnabled = state.State != Document.KeyState.None;
     }
 
     /// <summary>

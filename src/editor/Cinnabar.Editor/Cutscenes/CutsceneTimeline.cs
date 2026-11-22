@@ -71,7 +71,9 @@ sealed class CutsceneTimeline : Control
         void Frame() => Input.Frame();
         void Playhead() => Input.ShowPlayhead();
         void Played() => Input.OnPlayStarted();
+        void Reveal(string path) => Input.Reveal(path);
         new ViewSubscriptions(this, attached: Input.Refresh)
+            .Add(() => _editor.RevealRequested += Reveal, () => _editor.RevealRequested -= Reveal)
             .Add(() => _editor.PlayStarted += Played, () => _editor.PlayStarted -= Played)
             .Add(() => _editor.Changed += Changed, () => _editor.Changed -= Changed)
             .Add(() => _editor.ProblemsChanged += Changed, () => _editor.ProblemsChanged -= Changed)

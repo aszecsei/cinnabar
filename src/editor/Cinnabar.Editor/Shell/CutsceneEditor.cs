@@ -93,6 +93,10 @@ public sealed class CutsceneEditor : IGraphEditor
             // A track added, deleted or muted in the asset changes which tracks a solo silences.
             _shell.CutscenePreview.OnMixChanged(this);
         }
+        if (_shell.CutscenePreview.Owner == this)
+        {
+            _shell.Keying.Raise();
+        }
     }
 
     /// <summary>
@@ -714,6 +718,48 @@ public sealed class CutsceneEditor : IGraphEditor
         IReadOnlyList<string> copies = [];
         Own(() => Document.Edit("Duplicate", f => copies = CutsceneEdits.Paste(f, clip, at, null, addTracks: false, _locked)));
         Select(copies, SelectMode.Replace);
+    }
+
+    /// <summary>
+    /// Makes keys from the inspector or the viewport as one undo entry (see docs/editor/cutscene-editor.md#keying), which
+    /// Undo then follows while no other editor's tab is active. Nothing during a drag. A key goes in among the keys of its
+    /// channel, so a selected key whose line moves is let go, as after any edit that is not the timeline's.
+    /// </summary>
+    public void Key(string label, Action<CutsceneFile> edit)
+    {
+        if (Document.InTransaction)
+        {
+            return;
+        }
+        var before = Document.Text;
+        Document.Edit(label, edit);
+        if (Document.Text != before)
+        {
+            _shell.Edited(new UndoTarget.Cutscene(this));
+        }
+    }
+
+    /// <summary>The timeline should scroll a row, by its binding's or its track's path, into view.</summary>
+    public event Action<string>? RevealRequested;
+
+    /// <summary>
+    /// Selects a track and shows it on the timeline: its binding unfolds, and a filter that hides it clears.
+    /// </summary>
+    public void Reveal(CutsceneBlock track)
+    {
+        var path = CutsceneFile.PathOf(track);
+        if (CutsceneEdits.BindingOf(track) is { } binding && File.Bindings.FirstOrDefault(b => b.Id == binding) is { } owner)
+        {
+            _folds.Remove(CutsceneFile.PathOf(owner));
+        }
+        if (!RowFilter.IsNone && Layout().Rows.All(r => r.Path != path))
+        {
+            FilterText = "";
+            _keysUnder = null;
+            FilterChanged();
+        }
+        Select(track);
+        RevealRequested?.Invoke(path);
     }
 
     /// <summary>Adds a marker at the playhead, or with one there, keeps it, and selects it.</summary>
