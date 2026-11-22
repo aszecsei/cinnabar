@@ -1,8 +1,9 @@
 # The animation scene, which F7 in mygame cycles to: two of the Khronos Fox, skinned, on a white floor in the sun. The
 # near one plays fox.animation_graph, which its fox_walker behaviour sets the speed of and moves it by, and whose
 # footsteps it logs (see docs/animation/design.md#the-ecs); the far one runs, with an Animator that plays the run clip
-# alone. They face +x, so the camera sees them from the side. Positions are raw World_Position values in units of
-# 2^-24 m. The editor writes this file; see docs/editor/document-and-scenes.md#scenes.
+# alone. They face +x, so the camera sees them from the side. I plays the intro cutscene, which possesses the walking
+# fox, through the camera's intro_player behaviour (see docs/cinematics/scripts.md). Positions are raw World_Position
+# values in units of 2^-24 m. The editor writes this file; see docs/editor/document-and-scenes.md#scenes.
 scene 3
 
 entity 756af5ffd7784831
@@ -13,6 +14,8 @@ component 1 Transform
 	scale = [1, 1, 1]
 component 32 Camera
 behaviour 79650b8e784445cba714fef3fd88eec6
+behaviour 864b7fdb1ded46458f96ce0c96cf5630
+	cutscene = $9d549a4b7235fb289389db323a19fd8f
 
 entity 76b64f812f12cecf
 name = "Running Fox"
