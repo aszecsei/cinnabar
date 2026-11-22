@@ -71,7 +71,7 @@ The game's side of the link is `lib/engine/editor`. The game keeps an `editor.Ed
 
 ### Overrides
 
-An override is a set of values that an owner in the editor, such as the cutscene editor's scrub, writes over the game's world in Edit. It is not a part of the document. It sends no operation, makes no undo entry and does not make the scene dirty. Save works while an override is on, and the file holds the document's values. Other previews, such as an animation's pose or a light's flicker, can use overrides too.
+An override is a set of values that an owner in the editor writes over the game's world in Edit. It is not a part of the document. It sends no operation, makes no undo entry and does not make the scene dirty. Save works while an override is on, and the file holds the document's values. Previews such as an animation's pose or a light's flicker can use overrides. The cutscene editor's preview does not: the game evaluates the cutscene itself, and lays its writes with the overrides (see [Cutscene editor: Preview](cutscene-editor.md#preview)).
 
 - **Tokens.** An owner calls `EditorShell.Overrides.Begin` and gets an `OverrideToken`. The editor gives each override a number, and the number only goes up, so the game drops a late message for an override that ended. `Begin` gives no token while the host is not linked or the editor is not in Edit. A token that ended does nothing, and its `Ended` event tells the owner once why it ended (`OverrideEnd`). `WorldOverrides.End` is the one place where a token ends.
 - **One message for each frame.** `OverrideToken.Write` sends one `Override_Frame` with all the override's writes for the frame. The frame is the override's whole state. What an earlier frame wrote and this frame does not goes back to the document's value. A frame writes:
@@ -113,7 +113,7 @@ A new link, from a start, a restart or a crash, and a soft restart both give the
   | The Navigation Path tool's points | `Nav_Probe` |
   | The live meshes | `Live_Mesh` |
   | Each open preview, with what it shows | `Open_Preview`, `Preview_Settings` |
-  | The cutscene preview's tab, at its playhead, with a new ticket | `Cutscene_Preview_Open`, then `Cutscene_Preview_Play` if it played |
+  | The cutscene preview's tab, at its playhead, with a new ticket, after the scene | `Cutscene_Preview_Open`, then `Cutscene_Preview_Play` if it played |
 
   It ends every override token with `NewGameState`, and sends no override again: the new state has none, and each owner begins again if it needs to. It drops the picks and the `Sky_Sun_Request` in flight, disconnects the previews from the old targets until the new `Preview_Target`s come, and restarts the thumbnail queue, whose bake the old state lost. A preview's `unsaved` flag follows the cook daemon's cache, not the game, so `Open_Preview` sends it again as it is. A new feature that keeps a copy of game state, or waits for an answer from the game, resets it in `OnNewGameState`, and nowhere else.
 

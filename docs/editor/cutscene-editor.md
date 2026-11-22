@@ -238,7 +238,7 @@ A text without problems goes in the cache's preview area, `<cache>/dev/preview/<
 
 | State | What it holds |
 |---|---|
-| `Closed` | Why the game ended the last session, or nothing. |
+| `Closed` | Why the game ended the last session, or nothing, and whether the next session plays at once. |
 | `Opening` | The ticket and the tab. The editor sent `Cutscene_Preview_Open` and waits for `Cutscene_Preview_Opened`. |
 | `Open` | The ticket, the tab, the cutscene's range, and whether it plays. |
 
@@ -246,7 +246,7 @@ A text without problems goes in the cache's preview area, `<cache>/dev/preview/<
 - **Tickets.** Each `Cutscene_Preview_Open` has a new ticket, which only goes up. The game drops a message with an older ticket, and the editor drops an answer to a ticket that is not its session's. A new Open ends the session before it, in the game too.
 - **The unsaved text.** An Open says `unsaved` once the tab's text has cooked clean. The game then plays the blob in the preview area, and follows a newer one there at the same time. The first clean cook of a session that played the saved blob opens a new session that plays the unsaved one.
 - **Ends.** Closing the tab sends `Cutscene_Preview_Close`. Play, a lost link and a new game state end the session without a message, because the game ends it itself. The game sends `Cutscene_Preview_Ended` when it cannot open the session (`Not_Editing`, `Failed`), at a mode change (`Mode`), when the editor's scene loads (`Scene_Loaded`) and at a code reload (`Code_Reloaded`).
-- **Opening again.** After a load or a code reload, the editor opens the session again at once. After Stop, and in `OnNewGameState`, it opens the session again for the owner at the playhead, and plays again if it played. During playback the playhead is the last tick that the game reported, so a reconnect goes on from there.
+- **Opening again.** After a load or a code reload, the editor opens the session again at once. Each time the editor sends its scene (`Load_Scene`), a closed session opens again for the owner at the playhead: after Stop, in `OnNewGameState`, and when a scene opens, so a session that the game refused without a scene opens with the scene. A session that played when the link or the game state went plays again. During playback the playhead is the last tick that the game reported, so a reconnect goes on from there. A scrub or a step while a session opens again keeps it paused.
 
 ### Scrub, play and step
 

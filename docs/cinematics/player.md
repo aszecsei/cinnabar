@@ -88,7 +88,7 @@ Each command takes a handle and returns a `Command_Result`:
 | `resume` | `Paused` | `Playing` |
 | `stop` | `Ready`, `Playing`, `Paused`, `Skipping` | `Finishing`, at the current time, without the rest of the cutscene. A loading player goes to `Restored` at once, because it has changed nothing. |
 | `skip` | `Ready`, `Playing`, `Paused` | `Skipping`, to the target that the skip policy gives at the player's time. A loading player skips from its start once it is ready. A second skip does nothing. |
-| `set_time` | `Ready`, `Playing`, `Paused` | The same state, at a new time, for a debugger and for the editor ([#551](https://github.com/aszecsei/cinnabar/issues/551)). It seeks, so no event between the two times fires, except the event tracks' keys marked to fire on seek ([Tracks: Event tracks](tracks.md#event-tracks)). |
+| `set_time` | `Ready`, `Playing`, `Paused` | The same state, at a new time, for a debugger. The cutscene editor's preview is no player: it seeks its own evaluation (see [Cutscene editor: Preview](../editor/cutscene-editor.md#preview)). It seeks, so no event between the two times fires, except the event tracks' keys marked to fire on seek ([Tracks: Event tracks](tracks.md#event-tracks)). |
 | `release` | `Restored`, `Failed` | A free slot. The handle is stale after it. |
 
 `status`, `player_time`, `player_failure`, `player_evaluation`, `can_skip` and `skip_fade` ask about a player through its handle.
