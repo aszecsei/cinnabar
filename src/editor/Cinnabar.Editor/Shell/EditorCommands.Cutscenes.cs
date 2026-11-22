@@ -123,7 +123,7 @@ static partial class EditorCommands
             "Pause the preview. While its key is held, Shuttle Back and Shuttle Forward step a frame.", "K",
             e =>
             {
-                e.ShuttleHeld = true;
+                e.BeginShuttleHold();
                 shell.CutscenePreview.Pause();
             });
         Register(CutsceneSetIn, "Set In", "cutscene", "Set the loop's in point at the playhead.", "I", e => e.SetIn(e.Playhead));

@@ -328,10 +328,16 @@ public sealed class CutscenePreview(EditorShell shell)
     /// </summary>
     public void Play(float rate)
     {
-        if (State is not CutscenePreviewState.Open open || rate == 0)
+        if (State is CutscenePreviewState.Open open && rate != 0)
         {
-            return;
+            SendPlay(open, rate);
+            open.Editor.OnPlayStarted();
         }
+    }
+
+    // Sends the play from the playhead, which a new play and a change of the loop while it plays both do.
+    void SendPlay(CutscenePreviewState.Open open, float rate)
+    {
         var editor = open.Editor;
         var loop = editor.Loop ? editor.LoopRange : null;
         var (start, end) = loop is { } l ? (l.Start, l.End) : (open.RangeStart, open.RangeEnd);
@@ -348,7 +354,6 @@ public sealed class CutscenePreview(EditorShell shell)
         editor.SetPlayheadFromGame(tick);
         shell.Host.Send(new CutscenePreviewPlay(open.Ticket, tick, rate, loop != null, loop?.Start ?? 0, loop?.End ?? 0));
         Become(open with { Transport = new CutsceneTransport.Playing(rate) });
-        editor.OnPlayStarted();
     }
 
     /// <summary>The tab's loop, or its in or out point, changed: a session that plays sends its play again from the playhead, at its rate.</summary>
@@ -356,7 +361,7 @@ public sealed class CutscenePreview(EditorShell shell)
     {
         if (State is CutscenePreviewState.Open { Transport: CutsceneTransport.Playing playing } open && open.Editor == editor)
         {
-            Play(playing.Rate);
+            SendPlay(open, playing.Rate);
         }
     }
 

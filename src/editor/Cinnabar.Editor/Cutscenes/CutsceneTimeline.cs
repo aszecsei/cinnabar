@@ -590,7 +590,7 @@ sealed class CutsceneTimeline : Control
         // The release of Shuttle Pause's key ends its hold, so J and L play again.
         if (_editor.ShuttlePauseShortcut is { } shortcut && KeyGesture.Parse(shortcut).Key == e.Key)
         {
-            _editor.ShuttleHeld = false;
+            _editor.EndShuttleHold();
         }
     }
 }

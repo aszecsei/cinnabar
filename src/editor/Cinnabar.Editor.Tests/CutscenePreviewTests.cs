@@ -741,6 +741,10 @@ public sealed class CutscenePreviewTests : IDisposable
         var start = input.View.Start;
         shell.OnGameMessage(new CutscenePreviewTick(ticket, 400000, true));
         Assert.Equal(start, input.View.Start);
+        // A change of the loop while it plays sends the play again, and is no new play.
+        editor.Loop = true;
+        shell.OnGameMessage(new CutscenePreviewTick(ticket, 500000, true));
+        Assert.Equal(start, input.View.Start);
         // Backward, it pages to put the playhead near its right edge.
         shell.CutscenePreview.Play(-1);
         Assert.True(input.Follow);

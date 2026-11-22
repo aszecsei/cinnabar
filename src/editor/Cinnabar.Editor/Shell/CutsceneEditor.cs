@@ -220,7 +220,7 @@ public sealed class CutsceneEditor : IGraphEditor
     /// <summary>The rate at which this tab's preview plays, below 0 backward, or null when it does not play.</summary>
     public float? PlayingRate => _shell.CutscenePreview.RateIn(this);
 
-    /// <summary>The preview began to play, from a press of Space, J or L, or again when it opens.</summary>
+    /// <summary>The preview began to play, from a press of Space, J or L, or again when it opens. A loop's change while it plays is not a new play.</summary>
     public event Action? PlayStarted;
 
     internal void OnPlayStarted() => PlayStarted?.Invoke();
@@ -408,7 +408,7 @@ public sealed class CutsceneEditor : IGraphEditor
             if (_loop != value)
             {
                 _loop = value;
-                LoopChanged();
+                LoopChanged(plays: true);
             }
         }
     }
@@ -436,7 +436,7 @@ public sealed class CutsceneEditor : IGraphEditor
         if (_in != tick)
         {
             _in = tick;
-            LoopChanged();
+            LoopChanged(plays: _loop);
         }
     }
 
@@ -446,7 +446,7 @@ public sealed class CutsceneEditor : IGraphEditor
         if (_out != tick)
         {
             _out = tick;
-            LoopChanged();
+            LoopChanged(plays: _loop);
         }
     }
 
@@ -456,22 +456,32 @@ public sealed class CutsceneEditor : IGraphEditor
         if (_in != null || _out != null)
         {
             _in = _out = null;
-            LoopChanged();
+            LoopChanged(plays: _loop);
         }
     }
 
-    void LoopChanged()
+    // The points change the play only while it loops, and the loop's toggle always does.
+    void LoopChanged(bool plays = true)
     {
         Changed?.Invoke();
         _shell.Commands.InvalidateAll();
-        _shell.CutscenePreview.OnLoopChanged(this);
+        if (plays)
+        {
+            _shell.CutscenePreview.OnLoopChanged(this);
+        }
     }
 
     /// <summary>
     /// Whether the shuttle's pause, K, is held: J and L step a frame then, and do not play. The K command sets it, and
     /// its key's release or the timeline's loss of the keyboard clears it.
     /// </summary>
-    public bool ShuttleHeld { get; set; }
+    public bool ShuttleHeld { get; private set; }
+
+    /// <summary>Shuttle Pause's key went down: J and L step until <see cref="EndShuttleHold"/>.</summary>
+    public void BeginShuttleHold() => ShuttleHeld = true;
+
+    /// <summary>Shuttle Pause's key went up, or the timeline lost the keyboard: J and L play again.</summary>
+    public void EndShuttleHold() => ShuttleHeld = false;
 
     /// <summary>The key of Shuttle Pause, as keybindings.json has it, whose release ends <see cref="ShuttleHeld"/>.</summary>
     public string? ShuttlePauseShortcut => _shell.KeyBindings.ShortcutOf(EditorCommands.CutsceneShuttlePause);
@@ -606,7 +616,7 @@ public sealed class CutsceneEditor : IGraphEditor
                 if (!value)
                 {
                     EndNudge();
-                    ShuttleHeld = false;
+                    EndShuttleHold();
                 }
                 _shell.Commands.InvalidateAll();
             }
