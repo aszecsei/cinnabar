@@ -293,6 +293,40 @@ public sealed class CookLinkTests : IDisposable
     }
 
     [Fact]
+    public async Task KeysThatTheEditorAddsCookClean()
+    {
+        if (!File.Exists(_cook))
+        {
+            Assert.Skip("build/tools/cook.exe is missing");
+        }
+        var index = new AssetIndex();
+        using var session = Start(index);
+        await Until(() => session.Linked, session, []);
+        Assert.Equal("", (await session.Request(new CreateFolder("game", "keys"))).Error);
+        var scene = Assert.Single((await session.Request(new CreateAsset(AssetTemplate.Scene, "game", "keys", "door"))).Guids);
+        var guid = Assert.Single((await session.Request(new CreateAsset(AssetTemplate.Cutscene, "game", "keys", "intro"))).Guids);
+        await Until(() => index.Find(guid)?.Status == AssetStatus.Current && index.Find(scene)?.Status == AssetStatus.Current, session, []);
+
+        // A possessed binding, keyed as the inspector and Key Transform key it: new tracks, a section over the length,
+        // channels, auto keys, a key that changes a value, a number with no exponent and a grown section.
+        var file = CutsceneFile.Parse(CutsceneFileTests.Template + $"\nbinding 1 \"Door\"\n\tpossess = @{scene}/0000000000000001\n").File!;
+        KeyTarget Pose(PosePart part) => new KeyTarget.Pose(1, part);
+        CutsceneKeying.SetKeys(file, Pose(PosePart.Position), 30000, [1.5, 0, -2], "Transform");
+        CutsceneKeying.SetKeys(file, Pose(PosePart.Rotation), 30000, [0, 30.000002, -179.5], "Transform");
+        CutsceneKeying.SetKeys(file, Pose(PosePart.Scale), 60000, [1, 1, 1], "Transform");
+        CutsceneKeying.SetKeys(file, Pose(PosePart.Position), 30000, [2, 0, -2], "Transform");
+        var focus = new KeyTarget.Property(1, 160, "focus_distance", PropertyShape.Number);
+        CutsceneKeying.SetKeys(file, focus, 90000, [0.0000001], "Focus Distance");
+        file.Find("section:2")!.SetSpan(0, 100000);
+        CutsceneKeying.SetKeys(file, focus, 120000, [6], "Focus Distance");
+
+        var result = await session.CookPreview(guid, file.Text);
+
+        Assert.Equal("", result.Error);
+        Assert.Empty(result.Problems);
+    }
+
+    [Fact]
     public async Task TheDaemonChecksAnUnsavedDecisionAgainstItsBlackboardAndAnUnsavedBlackboard()
     {
         if (!File.Exists(_cook))

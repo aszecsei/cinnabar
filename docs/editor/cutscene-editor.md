@@ -2,14 +2,14 @@
 
 The cutscene editor edits a cutscene (see [Content: Cutscenes](../content/kinds/cutscenes.md)), which the game plays as [Cinematics](../cinematics/README.md) describes. Each open one is a tab, `CutsceneEditorDocument`, over a `CutsceneEditor` in the shell, which holds its state. Docking can rebuild the view, and tests drive the editor without a window.
 
-The editor is built in steps under [#548](https://github.com/aszecsei/cinnabar/issues/548). This page describes what is built: the tab, its document, its timeline and details, the check of its unsaved text, and its preview in Edit. These come next:
+The editor is built in steps under [#548](https://github.com/aszecsei/cinnabar/issues/548). This page describes what is built: the tab, its document, its timeline and details, the check of its unsaved text, its preview in Edit, and keys from the inspector and the viewport. These come next:
 - a scene view that looks through the cut camera, and the camera tools ([#555](https://github.com/aszecsei/cinnabar/issues/555));
-- keys from the inspector ([#552](https://github.com/aszecsei/cinnabar/issues/552));
+- auto-key, preview values that Enter keys, and the question that possesses an entity that no binding has ([#552](https://github.com/aszecsei/cinnabar/issues/552));
 - the curve editor ([#553](https://github.com/aszecsei/cinnabar/issues/553));
 - the bindings and the viewport's selection ([#554](https://github.com/aszecsei/cinnabar/issues/554)), with the filter that shows the tracks of the entities selected in the viewport;
 - the clips' display ([#556](https://github.com/aszecsei/cinnabar/issues/556)).
 
-**In this document:** [The file](#the-file) · [The tab](#the-tab) · [The timeline](#the-timeline) · [Preview](#preview)
+**In this document:** [The file](#the-file) · [The tab](#the-tab) · [The timeline](#the-timeline) · [Preview](#preview) · [Keying](#keying)
 
 ## The file
 
@@ -28,6 +28,7 @@ The editor is built in steps under [#548](https://github.com/aszecsei/cinnabar/i
   - a setting line added or removed.
 
   A new setting goes after the block's last setting, before its first child block, because the cooker reads a setting after a child as the child's. Opening a file does not make it dirty.
+- **Comments:** a `#` starts a comment as the cooker's `strip_cutscene_comment` says, at the line's start or after a space or a tab, outside quotes. So a `possess` path, `@<guid>/<instance>#<entity>`, is one value (`TextLine` with `hashInWord`).
 - **It reads only the structure.** What a block's lines mean, and whether they are right, is the cooker's to say. So a cutscene with problems still opens, with its problems on its blocks. Only one file is refused: a file whose first line that is not a comment is not `cutscene 1`. That file opens in the script editor, with the reason in the console.
 - **It agrees with the cooker.** `tools/cook/testdata/cutscenes/template.cutscene` is the text of a new cutscene. The cooker's tests check that it is `CUTSCENE_TEMPLATE`, and the editor's tests open it. The sample's cutscenes, `intro` and `fox_walk`, read and write back unchanged.
 - **Paths:** an undo reads the text again, which replaces every block object. So the editor names a block by a path that the text gives:
@@ -182,6 +183,7 @@ Each action is a command, so it is in the command palette, and `keybindings.json
 - **The timeline's keys are bare letters,** which the viewport and the other panels also use. So each command acts only while the timeline has the keyboard, or while the command palette opened from it has it. When another window, such as a floating panel, becomes active, the timeline does not have the keyboard.
 - **Delete and Duplicate.** While the timeline has the keyboard, the scene's Delete deletes the timeline's selection, and its Duplicate duplicates it.
 - **Copy and paste.** A command that cannot act leaves its key to the focused control, and a text box keeps Ctrl+C, Ctrl+X and Ctrl+V. So the timeline's copy and paste take those keys only while it has the keyboard.
+- **Keying.** Key Transform and Key Tracked Fields act on the selected entities wherever the keyboard is (see [Keying](#keying)). K is Shuttle Pause, so they use Ctrl+K and Ctrl+Shift+K.
 
 | Command | ID | Key |
 |---|---|---|
@@ -213,6 +215,8 @@ Each action is a command, so it is in the command palette, and `keybindings.json
 | Go to Time | `cutscene.goToTime` | Ctrl+G |
 | Scrub Sound | `cutscene.scrubSound` | Alt+S |
 | Events in Preview | `cutscene.previewEvents` | Alt+E |
+| Key Transform | `cutscene.keyTransform` | Ctrl+K |
+| Key Tracked Fields | `cutscene.keyTrackedFields` | Ctrl+Shift+K |
 
 ### Cost
 
@@ -280,3 +284,71 @@ A text without problems goes in the cache's preview area, `<cache>/dev/preview/<
 - **The mix.** `Cutscene_Preview_Settings` calls `cutscene.set_mix` (see [Evaluation: The editor's mix](../cinematics/evaluation.md#the-editors-mix)). A silenced track evaluates as a muted one: it writes no field, so the next lay leaves the document's value; it plays no voice and drives no `Animator`; and a silenced camera cut track gives the views back. A silenced sub-sequence track plays no child, though the child stays loaded. With events on, `update_cutscene_preview` sends the events that a play crossed in the same frame, with `cutscene.send_events`.
 - **Marks.** The bound entities and the spawned ones are in `Overridden_Entities`, so the Outliner marks them. The fields that the preview writes are in `Entity_Values.held`.
 - **Ends.** `end_overrides` ends the preview with the overrides: at `Set_Mode`, `Load_Scene`, a code reload and a new link. `close_live` restores what the tracks wrote, despawns the spawned entities and unloads the assets. A new game state frees the preview without the world.
+
+## Keying
+
+A designer poses the world in the viewport and the inspector, and keys it. A key from the inspector or the viewport goes into the cutscene that holds the preview (`CutscenePreview.Owner`), at its playhead, as one undo entry in the cutscene's text. The scene does not change. `Keying` in the shell does the work, and `CutsceneKeying`, in `Cinnabar.Editor.Document`, makes the text's edits.
+
+### The key button
+
+While a cutscene holds the preview in Edit, the properties panel shows a key button after each field that a track can animate, on an entity that a binding possesses. The binding's `possess` names the entity's scene by its GUID and the entity by its scene ID, as `@<guid>/<id>`. A spawned binding's entity cannot be selected, so it has no buttons. The fields are:
+- a root's `Transform` and a child's `Local_Transform`: position (or offset), rotation and scale, which a transform track keys;
+- the other fields of a number, a bool, an integer, an enum, a `[2]f32`, a `[3]f32` or a color, which a property track keys. An `f64`, an entity, an asset and a read-only field have none.
+
+The button has four states at the playhead:
+
+| State | Shows |
+|---|---|
+| No track animates the field. | ◇, dim |
+| A track animates it, with no key at the playhead. | ◇ |
+| A key at the playhead holds it. | ◆, red |
+| A key is at the playhead, and the world shows another value. | ◆, amber |
+
+A click keys the field's value at the playhead, and adds its track when it has none. The playhead, an edit of the cutscene, the preview and the game's values change the buttons in place, without a build of the panel. A right-click on the field's name or on its button gives **Add Track**, **Key**, **Remove Key** and **Go to Track**, after an instance's Apply to Prefab and Revert. Go to Track shows the cutscene's tab and selects the track, with its binding unfolded and the filter cleared when it hides the track.
+
+### What a key holds
+
+A key holds what the world shows. The game lays the preview and the overrides over the document, so a field that one of them holds shows another value than the document's. The game sends that value too: for an entity with a held field, `Entity_Values.shown` has its components as the world shows them, with the preview's ticket and time (see [Link: World](link.md#world)). A field that nothing holds is keyed at the document's value.
+
+The world's values come at most twenty times a second, and they are taken before a poll, so they come a little after the playhead moves. So a held field keys only with values that are fresh:
+- the preview is this cutscene's, and it is paused: "Pause the preview to key" while it plays;
+- the values' ticket is the session's, and their time is the playhead, or past the cutscene's range, its end, where the game holds the time: "Waiting for the preview to show the playhead" until they come;
+- the world shows the tab's text: in a session that plays the unsaved text, the values name the blob that the daemon wrote for the text as it is now (`CutsceneEditor.CleanBlob`, the blob's file time in the preview area), and in a session that plays the saved file, the text is not changed. Otherwise "Waiting for the preview to show the cutscene's last edit", so a key never takes back an edit that the preview does not show yet.
+
+A refused key disables the button, and its tooltip says why. The warning state needs fresh values too. Without them, a key at the playhead shows as keyed.
+
+### Where a key goes
+
+- **The track:** for a property, the binding's property track with the field's `component` and `field`. For a pose, the binding's last transform track. When there is none, the key adds one after the binding's last track: a property track named for the field, or a transform track named "Transform", which is relative.
+- **The section:** the last section over the playhead that is not additive. When the track has none at all, a new section over the cutscene's length. Otherwise the nearest section grows to the playhead, as a trim does, so its keys keep their times on the cutscene's time.
+- **The channels:** `value`; `x` and `y`; `x`, `y` and `z`; `r`, `g` and `b` for a color; or a transform track's `position_*`, `rotation_*` and `scale_*`. A section that names a vector's or a color's channels the other way keeps its names. A missing channel goes after the section's channels.
+- **The key:** a key at the playhead's time takes the new value and keeps its interpolation. A new key is `auto` for a number, a vector, a color and a pose, and `constant` for a bool, an integer and an enum, which step. Its value is the shortest text that reads back as the same `f32`. An integer over 2^24, or a value that is not finite, is refused.
+- **A transform track's space** (see [Tracks: Transform tracks](../cinematics/tracks.md#transform-tracks)):
+  - **Relative:** the keys are the pose from the binding's own pose, which is the document's: the position's offset in the own rotation's axes, in meters, and the rotation after the own one. The scale is the world's.
+  - **Absolute:** the keys are the world's pose from the track's `origin`. The first position key of a track with no `origin` sets it to the whole meters nearest the entity, so the cooker's units are exact, however far from the world's origin.
+  - **Relative to another binding:** refused, as the other binding's pose is not watched.
+- **Rotation:** each angle moves by whole turns to its key next to it, so the curve turns the short way. The warning compares rotations as rotations, so a whole turn is the same.
+- **Remove Key** removes the field's keys at the playhead, and a channel that loses its last key.
+
+### Commands
+
+| Command | Key | What it keys |
+|---|---|---|
+| **Key Transform** (`cutscene.keyTransform`) | Ctrl+K | the position, rotation and scale of each selected entity that a binding possesses |
+| **Key Tracked Fields** (`cutscene.keyTrackedFields`) | Ctrl+Shift+K | each field of the selected entities that a property track animates, and the parts of the pose that the transform track keys |
+
+Each is one undo entry for all the selected entities. They act wherever the keyboard is, in the viewport, the timeline and the inspector, so K stays the timeline's Shuttle Pause. Like the timeline's commands, they are not in the ribbon.
+
+### Undo
+
+A key is in the cutscene's history. While the cutscene's tab or another editor's tab is active, Undo and Redo act on that tab, as always. While no such tab is active, as when the viewport has the keyboard, they act on what was edited last (`EditorShell.LastEdited`):
+- a committed scene edit makes it the scene;
+- a key makes it the cutscene.
+
+So Ctrl+K and then Ctrl+Z in the viewport takes the key back, and a second Ctrl+Z takes back the cutscene's entry before it. Redo goes the same way. The cutscene's tab closing, or another tab taking the preview, makes it the scene again. Only these two edits set it, so an edit in the cutscene's tab, which is active then, does not.
+
+### Limits
+
+- An inspector edit of a held field goes to the scene, under the preview, as before. So on a field with a track, a key holds the curve's value: the value shows amber only inside an ease, under a section's weight below 1, over an additive section, or where another track or a sub-sequence writes the same field, where the world's value is not the track's alone.
+- After a key's value changes, the warning can show until the daemon cooks the text and the preview follows it.
+- Buttons show for one selected entity, not for several.

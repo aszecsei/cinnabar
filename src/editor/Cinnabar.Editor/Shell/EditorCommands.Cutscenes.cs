@@ -44,6 +44,8 @@ static partial class EditorCommands
     public const string CutsceneGoToTime = "cutscene.goToTime";
     public const string CutsceneScrubSound = "cutscene.scrubSound";
     public const string CutscenePreviewEvents = "cutscene.previewEvents";
+    public const string CutsceneKeyTransform = "cutscene.keyTransform";
+    public const string CutsceneKeyTrackedFields = "cutscene.keyTrackedFields";
 
     /// <summary>The timeline's commands, which act on the active cutscene while its timeline has the keyboard.</summary>
     public static readonly string[] CutsceneTimelineCommands =
@@ -55,6 +57,12 @@ static partial class EditorCommands
         CutsceneShuttleBack, CutsceneShuttlePause, CutsceneShuttleForward, CutsceneSetIn, CutsceneSetOut, CutsceneClearInOut, CutsceneLoop,
         CutscenePreviousKey, CutsceneNextKey, CutsceneGoToTime, CutsceneScrubSound, CutscenePreviewEvents,
     ];
+
+    /// <summary>
+    /// The keying commands, which key the selected entities into the cutscene that holds the preview, wherever the
+    /// keyboard is: the viewport, the timeline or the inspector.
+    /// </summary>
+    public static readonly string[] CutsceneKeyCommands = [CutsceneKeyTransform, CutsceneKeyTrackedFields];
 
     // The cutscene editor's timeline (see docs/editor/cutscene-editor.md#the-timeline). Its keys are bare letters, which
     // the viewport and the other panels use too, so each command acts only while the timeline has the keyboard. Delete
@@ -212,6 +220,22 @@ static partial class EditorCommands
             e => e.Paste(), e => e.CanPaste);
         Register(CutsceneFind, "Find Track", "search", "Put the keyboard in the timeline's search box, which filters the tracks by binding or track name.", "Ctrl+F",
             e => e.RequestFind());
+        // Keys (see docs/editor/cutscene-editor.md#keying) act on the selection wherever the keyboard is, so K stays the
+        // timeline's Shuttle Pause.
+        commands.Register(new Command(CutsceneKeyTransform, "Key Transform", () => shell.Keying.KeyTransform())
+        {
+            Description = "Key the position, rotation and scale of each selected entity that the previewed cutscene binds, at its playhead.",
+            Icon = "cutscene",
+            Shortcut = "Ctrl+K",
+            CanExecuteWhen = () => shell.Keying.KeyTransformRefusal() == null,
+        });
+        commands.Register(new Command(CutsceneKeyTrackedFields, "Key Tracked Fields", () => shell.Keying.KeyTrackedFields())
+        {
+            Description = "Key every field of each selected entity that a track of the previewed cutscene animates, at its playhead.",
+            Icon = "cutscene",
+            Shortcut = "Ctrl+Shift+K",
+            CanExecuteWhen = () => shell.Keying.KeyTrackedFieldsRefusal() == null,
+        });
         commands.Register(new Command(CutsceneKeysUnderSelection, "Keys Under Selection", () =>
         {
             if (Timeline() is { } editor)

@@ -330,6 +330,24 @@ an_override_writes_the_world_and_the_editor_hears_the_document :: proc(t: ^testi
 		t,
 		!slice.contains(held, link.Held_Field{f.lamp, format.scene_field_hash("color")}),
 	)
+	// What the world shows is taken before the poll, so it comes in the next values, beside the document's, with no
+	// preview.
+	testing.expect_value(t, len(values.shown), 0)
+	values, has_values = find_values(step(f, 1), f.prop)
+	testing.expect(t, has_values)
+	shown_lamp, shown_transform := false, false
+	for c in values.shown {
+		if c.id == f.lamp {
+			testing.expect_value(t, (^Lamp)(raw_data(c.data)).brightness, 5)
+			shown_lamp = true
+		}
+		if c.id == u64(ecs.TRANSFORM_ID) {
+			testing.expect_value(t, (^ecs.Transform)(raw_data(c.data)).position.raw.x, 2 * METER)
+			shown_transform = true
+		}
+	}
+	testing.expect(t, shown_lamp && shown_transform)
+	testing.expect_value(t, values.shown_preview, link.Shown_Preview{})
 	entities, has_entities := find_entities(messages)
 	testing.expect(t, has_entities)
 	testing.expect(t, slice.contains(entities.entities, u64(f.prop)))

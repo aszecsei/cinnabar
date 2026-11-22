@@ -654,6 +654,71 @@ held_fields :: proc(
 	return held[:]
 }
 
+// Shown is what the world showed of the watched entities that overrides or the cutscene preview hold, before a poll
+// lifted them, in frame memory (see link.Entity_Values.shown).
+@(private)
+Shown :: struct {
+	entities: []Shown_Entity,
+	preview:  link.Shown_Preview,
+}
+
+@(private)
+Shown_Entity :: struct {
+	entity: ecs.Entity,
+	values: []link.Component_Value,
+}
+
+// capture_shown copies each component of each watched entity with a held field, as the world shows it now. Call it
+// while the overrides are laid, before the poll lifts them, so the editor can key what the preview shows.
+@(private)
+capture_shown :: proc(
+	e: ^Editor,
+	w: ^ecs.World,
+	allocator := context.allocator,
+) -> (
+	shown: Shown,
+) {
+	if e.session.overrides.layer != .Laid {
+		return
+	}
+	if p, open := e.session.cutscene_previews.open.?; open {
+		shown.preview = {p.ticket, p.live.evaluation.time, p.modified if p.unsaved else 0}
+	}
+	entities := make([dynamic]Shown_Entity, allocator)
+	for watched in e.session.watched {
+		if !ecs.is_alive(w, watched.entity) ||
+		   len(held_fields(e, w, watched.entity, allocator)) == 0 {
+			continue
+		}
+		append(
+			&entities,
+			Shown_Entity{watched.entity, component_values(w, watched.entity, allocator)},
+		)
+	}
+	shown.entities = entities[:]
+	return
+}
+
+// component_values copies each component of an entity, as it is in memory.
+@(private)
+component_values :: proc(
+	w: ^ecs.World,
+	entity: ecs.Entity,
+	allocator := context.allocator,
+) -> []link.Component_Value {
+	components := ecs.entity_components(w, entity)
+	values := make([]link.Component_Value, len(components), allocator)
+	for id, j in components {
+		values[j].id = u64(id)
+		info := ecs.registry_find(&w.registry, id)
+		data := ecs.get_raw(w, entity, id)
+		if info != nil && data != nil {
+			values[j].data = slice.clone(([^]u8)(data)[:info.size], allocator)
+		}
+	}
+	return values
+}
+
 // send_overridden_entities tells the editor which entities the overrides and the cutscene preview write or spawned,
 // when that changes.
 @(private)

@@ -793,7 +793,7 @@ cutscene_parse :: proc(
 	section_count, channel_count, key_count := 0, 0, 0
 	for raw, index in strings.split_lines(text) {
 		line := index + 1
-		trimmed := strings.trim_space(strip_line_comment(raw))
+		trimmed := strings.trim_space(strip_cutscene_comment(raw))
 		if trimmed == "" {
 			continue
 		}
@@ -3462,4 +3462,21 @@ cutscene_ticks_number :: proc(n: f64) -> (ticks: i32, ok: bool) {
 		return
 	}
 	return i32(n), true
+}
+
+// strip_cutscene_comment is a cutscene line without its comment: a # at the line's start or after a space or a tab,
+// outside quotes. A # inside a word stays, so a possess's path, @<scene guid>/<instance>#<entity>, is whole.
+strip_cutscene_comment :: proc(line: string) -> string {
+	quoted := false
+	for i := 0; i < len(line); i += 1 {
+		switch {
+		case quoted && line[i] == '\\':
+			i += 1
+		case line[i] == '"':
+			quoted = !quoted
+		case line[i] == '#' && !quoted && (i == 0 || line[i - 1] == ' ' || line[i - 1] == '\t'):
+			return line[:i]
+		}
+	}
+	return line
 }

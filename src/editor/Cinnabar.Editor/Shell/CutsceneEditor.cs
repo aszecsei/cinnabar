@@ -93,6 +93,10 @@ public sealed class CutsceneEditor : IGraphEditor
             // A track added, deleted or muted in the asset changes which tracks a solo silences.
             _shell.CutscenePreview.OnMixChanged(this);
         }
+        if (_shell.CutscenePreview.Owner == this)
+        {
+            _shell.Keying.Raise();
+        }
     }
 
     /// <summary>
@@ -716,6 +720,48 @@ public sealed class CutsceneEditor : IGraphEditor
         Select(copies, SelectMode.Replace);
     }
 
+    /// <summary>
+    /// Makes keys from the inspector or the viewport as one undo entry (see docs/editor/cutscene-editor.md#keying), which
+    /// Undo then follows while no other editor's tab is active. Nothing during a drag. A key goes in among the keys of its
+    /// channel, so a selected key whose line moves is let go, as after any edit that is not the timeline's.
+    /// </summary>
+    public void Key(string label, Action<CutsceneFile> edit)
+    {
+        if (Document.InTransaction)
+        {
+            return;
+        }
+        var before = Document.Text;
+        Document.Edit(label, edit);
+        if (Document.Text != before)
+        {
+            _shell.Edited(new UndoTarget.Cutscene(this));
+        }
+    }
+
+    /// <summary>The timeline should scroll a row, by its binding's or its track's path, into view.</summary>
+    public event Action<string>? RevealRequested;
+
+    /// <summary>
+    /// Selects a track and shows it on the timeline: its binding unfolds, and a filter that hides it clears.
+    /// </summary>
+    public void Reveal(CutsceneBlock track)
+    {
+        var path = CutsceneFile.PathOf(track);
+        if (CutsceneEdits.BindingOf(track) is { } binding && File.Bindings.FirstOrDefault(b => b.Id == binding) is { } owner)
+        {
+            _folds.Remove(CutsceneFile.PathOf(owner));
+        }
+        if (!RowFilter.IsNone && Layout().Rows.All(r => r.Path != path))
+        {
+            FilterText = "";
+            _keysUnder = null;
+            FilterChanged();
+        }
+        Select(track);
+        RevealRequested?.Invoke(path);
+    }
+
     /// <summary>Adds a marker at the playhead, or with one there, keeps it, and selects it.</summary>
     public void AddMarker()
     {
@@ -921,6 +967,12 @@ public sealed class CutsceneEditor : IGraphEditor
             _problems.Add(new GraphProblem(null, where + p.Text, p.Error, mine ? (int)p.Line : 0));
         }
         CookError = result.Error == "" ? null : result.Error;
+        if (CookError == null)
+        {
+            // The daemon wrote this text's blob before it answered, so its file time names this text in the game.
+            _cleanBlob = _shell.PreviewBlobTime(Guid) is var time and not 0 ? (text, time) : null;
+            _shell.Keying.Raise();
+        }
         ProblemsChanged?.Invoke();
         if (CookError == null && !CookedClean)
         {
@@ -928,6 +980,15 @@ public sealed class CutsceneEditor : IGraphEditor
             _shell.CutscenePreview.OnCooked(this);
         }
     }
+
+    // The text of the last clean cook, and its blob's file time in the preview area.
+    (string Text, long Blob)? _cleanBlob;
+
+    /// <summary>
+    /// The file time of the blob in the preview area that the daemon cooked from the tab's text as it is now, or null
+    /// when the text has changed since its last clean cook. The preview shows the text when it plays that blob.
+    /// </summary>
+    public long? CleanBlob => _cleanBlob is { } clean && clean.Text == Document.Text ? clean.Blob : null;
 
     /// <summary>Whether the daemon cooked this tab's text clean, so its unsaved text is in the preview area.</summary>
     public bool CookedClean { get; private set; }

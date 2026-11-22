@@ -387,6 +387,20 @@
     <Style Selector="TextBlock.warning">
         <Setter Property="Foreground" Value="#E8B04A" />
     </Style>
+    <!-- A field's key button (see docs/editor/cutscene-editor.md#keying): dim with no track, an outline with one, filled
+         with a key at the playhead, and in the warning color when the world shows another value. -->
+    <Style Selector="Button.field-button.key-none">
+        <Setter Property="Foreground" Value="#606068" />
+    </Style>
+    <Style Selector="Button.field-button.key-track">
+        <Setter Property="Foreground" Value="#C8C8D0" />
+    </Style>
+    <Style Selector="Button.field-button.key-keyed">
+        <Setter Property="Foreground" Value="#E05A4E" />
+    </Style>
+    <Style Selector="Button.field-button.key-differs">
+        <Setter Property="Foreground" Value="#E8B04A" />
+    </Style>
     <Style Selector="Button.add-component">
         <Setter Property="Margin" Value="4,6" />
         <Setter Property="FontSize" Value="12" />

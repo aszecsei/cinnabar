@@ -91,6 +91,8 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
         Host = new HostSession(options);
         Overrides = new WorldOverrides(this);
         CutscenePreview = new CutscenePreview(this);
+        Keying = new Keying(this);
+        WireKeying();
         Watches = new EntityWatches(Selection, Host);
         Visibility = new SceneVisibility(World, Selection, Host, settings, Console, () => [.. _scenes.Select(s => (s.Number, s.Path))], WriteSetting, Commands.InvalidateAll);
         Cook = new CookSession(options.Cook, Assets);

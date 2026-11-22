@@ -31,6 +31,14 @@ public sealed class CutsceneBlock
         Parent = parent;
     }
 
+    /// <summary>A new block of a kind with one keyword line, which is not in a file yet.</summary>
+    internal static CutsceneBlock Of(CutsceneBlockKind kind, string line)
+    {
+        var block = new CutsceneBlock(kind, null);
+        block.Lines.Add(new TextLine(line, "", hashInWord: true));
+        return block;
+    }
+
     public CutsceneBlockKind Kind { get; }
 
     public CutsceneBlock? Parent { get; private set; }
@@ -162,10 +170,10 @@ public sealed class CutsceneBlock
             indent = Kind == CutsceneBlockKind.Cutscene || Head == null ? "" : Indent(Head) + "\t";
         }
         var at = last != null ? Lines.IndexOf(last) + 1 : Head != null ? Lines.IndexOf(Head) + 1 : Lines.Count;
-        Lines.Insert(at, new TextLine($"{indent}{key} = {value}", ""));
+        Lines.Insert(at, new TextLine($"{indent}{key} = {value}", "", hashInWord: true));
     }
 
-    static string Indent(TextLine line) => line.Text[..(line.Text.Length - line.Text.TrimStart().Length)];
+    internal static string Indent(TextLine line) => line.Text[..(line.Text.Length - line.Text.TrimStart().Length)];
 
     /// <summary>Renames a binding, a track or a marker, keeping its ID and its kind or time.</summary>
     public void SetName(string name)
@@ -362,7 +370,7 @@ public sealed class CutsceneBlock
             {
                 continue;
             }
-            copy.Lines.Add(new TextLine(line.Text, line.Ending));
+            copy.Lines.Add(new TextLine(line.Text, line.Ending, hashInWord: true));
         }
         foreach (var child in ChildList)
         {
@@ -379,7 +387,7 @@ public sealed class CutsceneBlock
             throw new InvalidOperationException($"a {Kind} is not a key");
         }
         var key = new CutsceneBlock(CutsceneBlockKind.Key, null);
-        key.Lines.Add(new TextLine($"{Indent(head)}key {Format(time)} {value} {interpolation}", ""));
+        key.Lines.Add(new TextLine($"{Indent(head)}key {Format(time)} {value} {interpolation}", "", hashInWord: true));
         return key;
     }
 
@@ -540,7 +548,7 @@ public sealed class CutsceneFile
         // Blank lines and comments, which belong to the next block, or at the end, to the open one.
         var pending = new List<TextLine>();
         var number = 0;
-        foreach (var line in TextLine.Split(text))
+        foreach (var line in TextLine.Split(text, hashInWord: true))
         {
             number++;
             file._finalEnding = line.Ending;

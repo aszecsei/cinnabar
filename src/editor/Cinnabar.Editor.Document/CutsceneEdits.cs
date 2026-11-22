@@ -590,7 +590,7 @@ public static class CutsceneEdits
         }
         var id = file.NextId(CutsceneBlockKind.Marker);
         var marker = new CutsceneBlock(CutsceneBlockKind.Marker, null);
-        marker.Lines.Add(new TextLine($"marker {Format(id)} {Format(at)} {TextQuote.Quote(name ?? $"Marker {id}")}", ""));
+        marker.Lines.Add(new TextLine($"marker {Format(id)} {Format(at)} {TextQuote.Quote(name ?? $"Marker {id}")}", "", hashInWord: true));
         file.Insert(file.Root, MarkerIndex(file), marker);
         CutsceneFile.SortChildren(file.Root);
         return CutsceneFile.PathOf(marker);
@@ -839,7 +839,8 @@ public static class CutsceneEdits
         return track;
     }
 
-    static int InsertAt(CutsceneFile file, int? binding)
+    // Where a new track for a binding goes under the cutscene: after the binding's last track, or after the last track.
+    internal static int InsertAt(CutsceneFile file, int? binding)
     {
         var children = file.Root.Children.ToList();
         var last = children.FindLastIndex(c => c.Kind == CutsceneBlockKind.Track && BindingOf(c) == binding);

@@ -180,10 +180,10 @@ public sealed class WorldOverridesTests : IDisposable
         var content = (StackPanel)view.Content!;
         TextBlock Frozen() => content.GetLogicalDescendants().OfType<TextBlock>().Single(t => t.Classes.Contains("field-name") && t.Text == "Frozen");
 
-        shell.OnGameMessage(new EntityValues(Door, [new ComponentValue(1, new byte[56])], [], [new HeldField(1, Hash("frozen"))]));
+        shell.OnGameMessage(new EntityValues(Door, [new ComponentValue(1, new byte[56])], [], [new HeldField(1, Hash("frozen"))], [], new ShownPreview(0, 0, 0)));
         Assert.Contains("held", Frozen().Classes);
 
-        shell.OnGameMessage(new EntityValues(Door, [new ComponentValue(1, new byte[56])], [], []));
+        shell.OnGameMessage(new EntityValues(Door, [new ComponentValue(1, new byte[56])], [], [], [], new ShownPreview(0, 0, 0)));
         Assert.DoesNotContain("held", Frozen().Classes);
     });
 

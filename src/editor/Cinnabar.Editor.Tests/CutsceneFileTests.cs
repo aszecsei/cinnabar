@@ -43,6 +43,22 @@ public sealed class CutsceneFileTests
     }
 
     [Fact]
+    public void AHashInsideAWordIsNotAComment()
+    {
+        const string text = "cutscene 1\n# The header.\nlength = 60000 # after a space\nbinding 1 \"Crate\"\n" +
+            "\tpossess = @0123456789abcdef0123456789abcdef/00000000000000b2#00000000000000c3\t# the room's crate\n";
+        var file = Parse(text);
+
+        var binding = Assert.Single(file.Bindings);
+        Assert.Equal("@0123456789abcdef0123456789abcdef/00000000000000b2#00000000000000c3", binding.Get("possess"));
+        Assert.Equal(60000, file.Length);
+        // An edit keeps the comment after the value, and the file writes back as it was.
+        binding.Set("possess", "@0123456789abcdef0123456789abcdef/00000000000000b2#00000000000000d4");
+        Assert.EndsWith("#00000000000000d4\t# the room's crate\n", file.Text);
+        Assert.Equal(text, Parse(text).Text);
+    }
+
+    [Fact]
     public void BlocksNestByKeywordAsTheCookerReadsThemAndNotByIndent()
     {
         var file = Parse(Sample("intro"));
