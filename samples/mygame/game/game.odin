@@ -662,8 +662,16 @@ after_world :: proc(f: ^render.Frame) {
 	s := frame.state
 	g := f.graph
 	frame.scene = f.scene
+	// A pipeline that is not compiled, or whose shader is not cooked yet, records nothing. Debug validation drops a
+	// frame that sets one, so the passes wait for their pipelines. The shadows are only for the post pass.
+	platform := f.renderer.platform
+	if !render.pipeline_ready(platform, &s.pipelines.post) {
+		return
+	}
 	// The view that builds the triangle's structure says so when its frame has executed, so the next one does not.
-	if s.shadow_mode != .None && add_shadow_passes(g, frame) {
+	if s.shadow_mode != .None &&
+	   render.pipeline_ready(platform, &s.pipelines.shadows) &&
+	   add_shadow_passes(g, frame) {
 		render.on_executed(g, proc(data: rawptr) {
 				(^State)(data).blas_built = true
 			}, s)
@@ -814,7 +822,8 @@ trace_shadows :: proc(ctx: ^render.Pass_Context) {
 // draw_scene draws the large triangles.
 draw_scene :: proc(f: ^render.Frame, ctx: ^render.Pass_Context) {
 	frame := frame_of(f)
-	if frame.triangle_count == 0 {
+	if frame.triangle_count == 0 ||
+	   !render.pipeline_ready(f.renderer.platform, &frame.state.pipelines.scene) {
 		return
 	}
 	g, cb := ctx.graph, ctx.cb
