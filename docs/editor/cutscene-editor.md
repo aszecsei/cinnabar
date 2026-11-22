@@ -150,21 +150,23 @@ A marker is a named, colored point on the cutscene's time, such as a beat of the
 
 ### Copy and paste
 
-The clipboard is the shell's, `EditorShell.CutsceneClipboard`, so a paste works in another cutscene's tab. The system's clipboard does not change. A copy (`CutsceneEdits.Copy`) holds copies of the selected sections (with their channels and keys), triggers, ranges, keys and markers, their times, and for each, a copy of its track without its sections.
+The clipboard is the shell's, `EditorShell.CutsceneClipboard`, and the system's clipboard does not change. A copy pastes only into the cutscene that it came from, because its blocks name that cutscene's bindings by ID, as a camera cut's `camera` and a sub-sequence's `bind` do. A copy (`CutsceneEdits.Copy`) holds copies of the selected sections (with their channels and keys), triggers, ranges, keys and markers, their times, and for each, a copy of its track without its sections.
 - **Copy** (Ctrl+C) copies. **Cut** (Ctrl+X) copies and then deletes, in one entry; a block on a locked track is copied but stays.
 - **Paste** (Ctrl+V) puts the earliest copied time at the playhead, and keeps the times of the blocks to each other, in one entry. It selects what it pasted.
   - **Where:** with a track selected, or a block on one, a copy from one track of that kind goes onto that track. Otherwise each copied track's blocks go onto a track of its kind on the selected track's or binding's binding. With nothing selected, they go back onto the tracks they came from, or onto a track of the same kind on the same binding.
+  - **Bindings, as the cooker wants them:** a camera cut, sub-sequence or presentation track takes no binding, so its blocks go onto the cutscene's own track of that kind. A transform, property or animation track needs one, so with a target that has none, its blocks stay on their own binding.
   - **A missing track:** when the target has no track of a copied kind, the editor asks (`PasteTracksRequested`). **Add Tracks** adds one like the copied track, on that binding, in the paste's entry. **Cancel** pastes nothing.
   - **IDs:** pasted sections, triggers, ranges and markers take new IDs. A pasted subtitle's `audio` names its pasted sound's new ID, or is removed when its sound was not pasted.
-  - **Keys** go into the section of the target track that holds their new time, in the channel of their name. A key with no such section or channel is left out.
+  - **Keys** go into the section of the target track that holds their new time, in the channel of their name, in place of a key at that time. A key with no such section or channel is left out.
   - A locked track takes nothing. When what is pasted ends past the length, the length grows to hold it.
+  - A paste does not stop at a camera cut's or a sub-sequence's neighbours, as a move does not. So a pasted camera cut that blends in from gameplay, right after a cut, is a problem that the check reports.
 - **Duplicate** (Ctrl+D) is the scene's Duplicate, which acts on the timeline while it has the keyboard. It pastes the selection onto its own tracks right after itself: it moves by the span from its earliest start to its latest end, or by a frame for a single point. The clipboard does not change.
 
 ### Search and filter
 
 A strip over the timeline filters its rows. A filter belongs to the tab, and the editor does not save it. Every build of the rows takes it (`CutsceneRowFilter`), so hit tests, the edges of Ctrl+Left and Ctrl+Right, and F see the rows that are drawn.
 - **The search box** filters by name as you type, ignoring case. A binding whose name has the text shows all of its tracks. A track whose name has the text shows with its binding. **Ctrl+F** (**Find Track**) puts the keyboard in the box, and Esc there clears it and gives the keyboard back to the timeline.
-- **Keys under selection** shows only the tracks that have a key between the earliest start and the latest end of the selection. It keeps the span that the selection had when it was turned on, so a click in the filtered rows does not change which rows there are. With nothing selected, it hides nothing.
+- **Keys under selection,** the strip's toggle or the **Keys Under Selection** command, shows only the tracks that have a key between the earliest start and the latest end of the selection. It keeps the span that the selection had when it was turned on, so a click in the filtered rows does not change which rows there are. With nothing selected, it hides nothing.
 - **The selection.** When a filter hides a track, what is selected on it leaves the selection, so Delete never acts on what is not in view.
 
 ### Mute and solo
@@ -199,6 +201,7 @@ Each action is a command, so it is in the command palette, and `keybindings.json
 | Copy, Cut, Paste | `cutscene.copy`, `cutscene.cut`, `cutscene.paste` | Ctrl+C, Ctrl+X, Ctrl+V |
 | Duplicate | `entity.duplicate` | Ctrl+D |
 | Find Track | `cutscene.find` | Ctrl+F |
+| Keys Under Selection | `cutscene.keysUnderSelection` | None |
 
 ### Cost
 
