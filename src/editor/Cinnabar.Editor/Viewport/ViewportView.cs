@@ -123,8 +123,8 @@ public sealed class ViewportView : Grid
         if (_viewport.IsGame)
         {
             Children.Add(_overlay);
-            // The cutscene preview's frame counter: its timecode, frame and shot.
-            _counter = Overlay(_counterText, HorizontalAlignment.Left, VerticalAlignment.Top);
+            // The cutscene preview's frame counter: its timecode, frame and shot, at the bottom, clear of the view's header.
+            _counter = Overlay(_counterText, HorizontalAlignment.Left, VerticalAlignment.Bottom);
             _counter.IsHitTestVisible = false;
             _counter.IsVisible = false;
             Children.Add(_counter);
