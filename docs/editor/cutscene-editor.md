@@ -28,6 +28,7 @@ The editor is built in steps under [#548](https://github.com/aszecsei/cinnabar/i
   - a setting line added or removed.
 
   A new setting goes after the block's last setting, before its first child block, because the cooker reads a setting after a child as the child's. Opening a file does not make it dirty.
+- **Comments:** a `#` starts a comment as the cooker's `strip_cutscene_comment` says, at the line's start or after a space or a tab, outside quotes. So a `possess` path, `@<guid>/<instance>#<entity>`, is one value (`TextLine` with `hashInWord`).
 - **It reads only the structure.** What a block's lines mean, and whether they are right, is the cooker's to say. So a cutscene with problems still opens, with its problems on its blocks. Only one file is refused: a file whose first line that is not a comment is not `cutscene 1`. That file opens in the script editor, with the reason in the console.
 - **It agrees with the cooker.** `tools/cook/testdata/cutscenes/template.cutscene` is the text of a new cutscene. The cooker's tests check that it is `CUTSCENE_TEMPLATE`, and the editor's tests open it. The sample's cutscenes, `intro` and `fox_walk`, read and write back unchanged.
 - **Paths:** an undo reads the text again, which replaces every block object. So the editor names a block by a path that the text gives:

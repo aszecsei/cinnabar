@@ -590,7 +590,7 @@ public static class CutsceneEdits
         }
         var id = file.NextId(CutsceneBlockKind.Marker);
         var marker = new CutsceneBlock(CutsceneBlockKind.Marker, null);
-        marker.Lines.Add(new TextLine($"marker {Format(id)} {Format(at)} {TextQuote.Quote(name ?? $"Marker {id}")}", ""));
+        marker.Lines.Add(new TextLine($"marker {Format(id)} {Format(at)} {TextQuote.Quote(name ?? $"Marker {id}")}", "", hashInWord: true));
         file.Insert(file.Root, MarkerIndex(file), marker);
         CutsceneFile.SortChildren(file.Root);
         return CutsceneFile.PathOf(marker);

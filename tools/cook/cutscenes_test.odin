@@ -217,6 +217,34 @@ cutscenes_parse_their_header_bindings_tracks_sections_and_keys :: proc(t: ^testi
 	testing.expect_value(t, shared_text, CUTSCENE_TEMPLATE)
 }
 
+// A # starts a comment at a line's start or after a space or a tab. Inside a word it stays, so a possess names an
+// entity inside an instance by its path.
+@(test)
+a_possess_names_an_instances_entity_by_its_path_and_comments_still_end_lines :: proc(
+	t: ^testing.T,
+) {
+	TEXT ::
+		"cutscene 1\n# The header's comment.\nlength = 60000 # a comment after a space\n" +
+		"binding 1 \"Crate\"\n\tpossess = @" +
+		SCENE_GUID +
+		"/00000000000000b2#00000000000000c3\t# the crate in the room's instance\n"
+	parsed, problems := cutscene_parse(TEXT, context.temp_allocator)
+	testing.expectf(t, len(problems) == 0, "problems: %v", problems)
+	testing.expect_value(t, parsed.contents.length, 60000)
+	if len(parsed.contents.bindings) != 1 {
+		testing.expectf(t, false, "%d bindings", len(parsed.contents.bindings))
+		return
+	}
+	testing.expect_value(t, parsed.contents.bindings[0].entity, format.scene_path_id(0xb2, 0xc3))
+	testing.expect_value(t, strip_cutscene_comment("a#b # c"), "a#b ")
+	testing.expect_value(
+		t,
+		strip_cutscene_comment("text = \"#ff8800\"\t#c"),
+		"text = \"#ff8800\"\t",
+	)
+	testing.expect_value(t, strip_cutscene_comment("#all"), "")
+}
+
 @(test)
 each_mistake_in_a_cutscene_is_reported_at_its_line :: proc(t: ^testing.T) {
 	S :: "@" + SCENE_GUID + "/0000000000000001"

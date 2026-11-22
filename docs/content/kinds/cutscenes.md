@@ -48,7 +48,7 @@ Every time in the text and in the blob is a whole number of **ticks**, `i32`, at
 
 ## The text
 
-- **The first line** is `cutscene 1`. A `#` starts a comment, except inside quotes. So a color is quoted, as `"#ff8800"`: an unquoted `#` would start a comment. Indents make the text easier to read, but the parser ignores them.
+- **The first line** is `cutscene 1`. A `#` starts a comment at the line's start or after a space or a tab, except inside quotes. So a color is quoted, as `"#ff8800"`. A `#` inside a word is not a comment, so a `possess` path, `@<guid>/<instance>#<entity>`, is whole, and `x = 1 # note` still ends at the comment. The other text formats keep their own rule (`strip_line_comment`), and this one is `strip_cutscene_comment`. Indents make the text easier to read, but the parser ignores them.
 - **Blocks.** These lines start a block:
   - `binding <id> "<name>"`
   - `track <id> <kind> "<name>"`

@@ -17,6 +17,8 @@ public sealed class CutsceneKeyingTests
         	possess = @0123456789ABCDEF0123456789abcdef/a1
         binding 2 "Guard"
         	spawn = $aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        binding 3 "Crate"
+        	possess = @0123456789abcdef0123456789abcdef/00000000000000b2#00000000000000c3 # in the room's instance
         track 1 transform "Path"
         	binding = 1
         	section 3 60000 240000
@@ -57,6 +59,8 @@ public sealed class CutsceneKeyingTests
         Assert.Equal(new PossessRef(Guid, 0xa1), PossessRef.Parse("@0123456789ABCDEF0123456789abcdef/a1"));
         Assert.Equal(1, CutsceneKeying.BindingOf(file, new PossessRef(Guid, 0xa1)));
         Assert.Equal(new PossessRef(Guid, ScenePath.Id([0xb2, 0xc3])), PossessRef.Parse($"@{Guid}/00000000000000b2#00000000000000c3"));
+        // A # inside a word is not a comment in a cutscene, so the binding names the instance's entity by its path.
+        Assert.Equal(3, CutsceneKeying.BindingOf(file, new PossessRef(Guid, ScenePath.Id([0xb2, 0xc3]))));
         Assert.Null(CutsceneKeying.BindingOf(file, new PossessRef(Guid, 0xb2)));
         Assert.Null(PossessRef.Parse("$aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
         Assert.Null(PossessRef.Parse("@a1"));
