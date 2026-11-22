@@ -134,6 +134,10 @@ public sealed class HostSession : IDisposable
 
     readonly EditorOptions _options;
     readonly SynchronizationContext? _context;
+    readonly LogQueue<Log> _logs;
+
+    /// <summary>The most log lines that wait for the UI thread. The console keeps no more than this.</summary>
+    public const int LogBacklog = 5000;
     readonly StartProcess _start;
     readonly TimeSpan _connectTimeout;
     ulong _adapter;
@@ -150,6 +154,7 @@ public sealed class HostSession : IDisposable
         _start = start;
         _connectTimeout = connectTimeout;
         _context = SynchronizationContext.Current;
+        _logs = new LogQueue<Log>(LogBacklog, Post, (logs, dropped) => LogsReceived?.Invoke(logs, dropped));
     }
 
     public HostState State { get; private set; } = new HostState.Waiting();
@@ -178,8 +183,11 @@ public sealed class HostSession : IDisposable
     /// <summary>A line of the host's output that did not come through its logger, or a line about the host from the editor.</summary>
     public event Action<string>? Output;
 
-    /// <summary>A line of the host's or the game's log, over the link.</summary>
-    public event Action<Log>? LogReceived;
+    /// <summary>
+    /// Lines of the host's or the game's log, over the link, in batches: each batch has the lines that came since the last, and
+    /// how many older ones were dropped because more than <see cref="LogBacklog"/> waited.
+    /// </summary>
+    public event Action<IReadOnlyList<Log>, int>? LogsReceived;
 
     public event Action<ReloadKind>? GameReloaded;
 
@@ -288,7 +296,18 @@ public sealed class HostSession : IDisposable
             _ = link.DisposeAsync();
             return;
         }
-        link.Received += (message, _) => Post(() => OnReceived(link, message));
+        link.Received += (message, _) =>
+        {
+            // A log line waits for the next batch, so a game that logs on each frame costs one post a batch.
+            if (message is Log log)
+            {
+                _logs.Add(log);
+            }
+            else
+            {
+                Post(() => OnReceived(link, message));
+            }
+        };
         link.Closed += error => Post(() => OnLinkClosed(link, error));
         Become(new HostState.Handshaking(run, deadline, link));
         link.Start();
@@ -334,7 +353,7 @@ public sealed class HostSession : IDisposable
                 }
                 break;
             case Log log:
-                LogReceived?.Invoke(log);
+                LogsReceived?.Invoke([log], 0);
                 break;
             case GameReloaded reloaded:
                 GameReloaded?.Invoke(reloaded.Kind);

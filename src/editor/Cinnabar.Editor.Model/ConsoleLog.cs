@@ -1,4 +1,6 @@
 using System.Collections.ObjectModel;
+using System.Collections.Specialized;
+using System.ComponentModel;
 using System.Text.RegularExpressions;
 using Cinnabar.Editor.Link.Protocol;
 
@@ -22,7 +24,7 @@ public sealed partial class ConsoleLog
 {
     public const int Capacity = 5000;
 
-    public ObservableCollection<LogLine> Lines { get; } = [];
+    public LogLines Lines { get; } = [];
 
     /// <summary>Adds a line, with the level that its Odin log prefix gives, such as <c>[WARN ]</c>.</summary>
     public void Add(string text)
@@ -45,6 +47,23 @@ public sealed partial class ConsoleLog
             Lines.RemoveAt(0);
         }
         Lines.Add(new LogLine(level, text));
+    }
+
+    /// <summary>
+    /// Adds a batch of lines as one change, as a process's log comes, keeping the newest <see cref="Capacity"/>. When
+    /// lines were dropped on the way, a warning in their place says how many, from where.
+    /// </summary>
+    public void AddRange(IReadOnlyList<LogLine> lines, int dropped, string source)
+    {
+        if (dropped > 0)
+        {
+            List<LogLine> all = [new(LogLevel.Warning, $"console: {dropped} lines of the {source} log were dropped, as they came faster than the console shows them"), .. lines];
+            Lines.Append(all, Capacity);
+        }
+        else
+        {
+            Lines.Append(lines, Capacity);
+        }
     }
 
     public void Clear() => Lines.Clear();
@@ -82,4 +101,49 @@ public sealed partial class ConsoleLog
 
     [GeneratedRegex(@"^\[(DEBUG|INFO|WARN|ERROR|FATAL) *\]")]
     private static partial Regex LevelPrefix();
+}
+
+/// <summary>
+/// The console's lines. A batch of them is one change, a reset, so a view lays out once a batch, not once a line.
+/// </summary>
+public sealed class LogLines : ObservableCollection<LogLine>
+{
+    /// <summary>Adds lines, dropping the oldest past capacity. One line is an add; more are one reset.</summary>
+    public void Append(IReadOnlyList<LogLine> lines, int capacity)
+    {
+        switch (lines.Count)
+        {
+            case 0:
+                return;
+            case 1:
+                if (Count >= capacity)
+                {
+                    RemoveAt(0);
+                }
+                Add(lines[0]);
+                return;
+        }
+        CheckReentrancy();
+        var keep = Math.Min(lines.Count, capacity);
+        var remove = Math.Max(Count + keep - capacity, 0);
+        if (Items is List<LogLine> list)
+        {
+            list.RemoveRange(0, Math.Min(remove, list.Count));
+            list.AddRange(lines.Skip(lines.Count - keep));
+        }
+        else
+        {
+            for (var i = 0; i < remove; i++)
+            {
+                Items.RemoveAt(0);
+            }
+            foreach (var line in lines.Skip(lines.Count - keep))
+            {
+                Items.Add(line);
+            }
+        }
+        OnPropertyChanged(new PropertyChangedEventArgs(nameof(Count)));
+        OnPropertyChanged(new PropertyChangedEventArgs("Item[]"));
+        OnCollectionChanged(new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Reset));
+    }
 }

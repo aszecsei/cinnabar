@@ -304,6 +304,30 @@ empty_buffer_has_no_packets :: proc(t: ^testing.T) {
 }
 
 @(test)
+a_validation_error_names_the_marker_that_it_is_in :: proc(t: ^testing.T) {
+	arena: virtual.Arena
+	testing.expect(t, virtual.arena_init_growing(&arena) == nil)
+	defer virtual.arena_destroy(&arena)
+
+	// As the render graph records a pass: its name as a marker around its packets.
+	cb := command_buffer(virtual.arena_allocator(&arena))
+	cmd_begin_marker(&cb, "frame")
+	cmd_end_marker(&cb)
+	cmd_begin_marker(&cb, "post", timed = true)
+	cmd_set_pipeline(&cb, {})
+	cmd_end_marker(&cb)
+
+	err, packet := validate(cb, RESOURCES)
+	testing.expect_value(t, err, Validation_Error.Invalid_Pipeline)
+	testing.expect_value(t, packet, 3)
+	testing.expect_value(t, marker_at(cb, packet), "post")
+	// Outside every marker, and past the buffer's end.
+	testing.expect_value(t, marker_at(cb, 0), "")
+	testing.expect_value(t, marker_at(cb, 2), "")
+	testing.expect_value(t, marker_at(cb, 100), "")
+}
+
+@(test)
 long_labels_are_truncated :: proc(t: ^testing.T) {
 	arena: virtual.Arena
 	testing.expect(t, virtual.arena_init_growing(&arena) == nil)
