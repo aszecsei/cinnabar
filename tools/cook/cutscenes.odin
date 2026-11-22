@@ -13,7 +13,7 @@ import format "cinnabar:engine/asset/format"
 // in ticks, each with sections of keyed channels, a clip, a sound or a sub-sequence (see
 // docs/content/kinds/cutscenes.md). The cook checks the assets that a cutscene names and its sub-sequences' nesting, which
 // it reads from the other cutscenes' sources, so the order of the passes does not matter.
-CUTSCENE_COOK_VERSION :: "cutscenes 11"
+CUTSCENE_COOK_VERSION :: "cutscenes 12"
 
 // CUTSCENE_TEMPLATE is the text of a new cutscene: 10 seconds at 30 frames a second, with no bindings or tracks.
 CUTSCENE_TEMPLATE :: `cutscene 1
@@ -538,30 +538,34 @@ Pending_Channel :: struct {
 
 @(private = "file")
 Pending_Section :: struct {
-	contents:    format.Cutscene_Section_Contents,
-	line:        int,
-	seen:        [dynamic]string,
-	asset_line:  int,
-	blend_line:  int,
+	contents:           format.Cutscene_Section_Contents,
+	line:               int,
+	seen:               [dynamic]string,
+	asset_line:         int,
+	blend_line:         int,
 	// The lines of the settings that only a section that plays its clip takes: offset, speed, loop and root_motion.
-	play_lines:  [4]int,
+	play_lines:         [4]int,
 	// The line of the first of ease_in, ease_out, weight, pre_roll and post_roll, which a camera cut section does
 	// not take, and its name.
-	shape_line:  int,
-	shape_name:  string,
+	shape_line:         int,
+	shape_name:         string,
 	// The settings that only a camera cut section takes: the ID of its camera's binding, and the lines of camera,
 	// blend_in, blend_out and blend_on_skip.
-	camera_id:   u32,
-	cut_lines:   [4]int,
+	camera_id:          u32,
+	cut_lines:          [4]int,
 	// The lines of the settings that only an audio section takes: bus, min_distance, max_distance and
 	// plays_through_skip. And the line of the first of pre_roll and post_roll, which an audio section does not take.
-	audio_lines: [4]int,
-	roll_line:   int,
+	audio_lines:        [4]int,
+	roll_line:          int,
 	// The settings that only a sub-sequence section takes: the lines of trim and scale, and its binds.
-	sub_lines:   [2]int,
-	binds:       [dynamic]Pending_Bind,
-	constraints: Pending_Constraints,
-	channels:    [dynamic]Pending_Channel,
+	sub_lines:          [2]int,
+	binds:              [dynamic]Pending_Bind,
+	// The lines of the settings that only a presentation section takes: kind, color, speaker, text, key and audio,
+	// and the ID of the audio section that audio names.
+	presentation_lines: [6]int,
+	audio_id:           u32,
+	constraints:        Pending_Constraints,
+	channels:           [dynamic]Pending_Channel,
 }
 
 // Pending_Bind is a sub-sequence section's `bind <child binding id> = <binding id>` line.
@@ -588,6 +592,8 @@ Pending_Track :: struct {
 	relative_id:    u32,
 	// The lines of gain and time_scale, which only an audio track takes.
 	audio_lines:    [2]int,
+	// The line of letterbox_aspect, which only a presentation track takes.
+	aspect_line:    int,
 	// The line of when_finished, which an event track does not take.
 	finish_line:    int,
 	sections:       [dynamic]Pending_Section,
@@ -1129,11 +1135,18 @@ cutscene_parse :: proc(
 					continue
 				}
 				contents.skip_fade = ticks
+			case "skip_color":
+				color, ok := cutscene_color(value_text)
+				if !ok {
+					problem(&found, line, "skip_color is %s", CUTSCENE_COLOR_FORM)
+					continue
+				}
+				contents.skip_color = color
 			case:
 				problem(
 					&found,
 					line,
-					"%q is not a setting of the cutscene: length, rate, clock, range, suspend, input_context, hide_ui, skip or skip_fade",
+					"%q is not a setting of the cutscene: length, rate, clock, range, suspend, input_context, hide_ui, skip, skip_fade or skip_color",
 					name,
 				)
 			}
@@ -1247,6 +1260,16 @@ cutscene_parse :: proc(
 					continue
 				}
 				tr.audio_lines[1] = line
+			case "letterbox_aspect":
+				switch value_text {
+				case "camera":
+					tr.contents.flags += {.Follow_Camera}
+				case "sections":
+				case:
+					problem(&found, line, "letterbox_aspect is camera or sections")
+					continue
+				}
+				tr.aspect_line = line
 			case "origin":
 				value, message := parse_graph_value(value_text)
 				ok := message == "" && value.kind == .Numbers && value.count == 3
@@ -1271,7 +1294,7 @@ cutscene_parse :: proc(
 				problem(
 					&found,
 					line,
-					"%q is not a setting of a track: binding, muted, when_finished, component, field, space, origin, gain or time_scale",
+					"%q is not a setting of a track: binding, muted, when_finished, component, field, space, origin, gain, time_scale or letterbox_aspect",
 					name,
 				)
 			}
@@ -1331,7 +1354,8 @@ cutscene_parse :: proc(
 			     "space",
 			     "origin",
 			     "gain",
-			     "time_scale":
+			     "time_scale",
+			     "letterbox_aspect":
 				problem(&found, line, "%s comes before the track's triggers and ranges", name)
 			case:
 				problem(
@@ -1563,6 +1587,51 @@ cutscene_parse :: proc(
 					continue
 				}
 				s.audio_lines[3] = line
+			case "kind":
+				kind: format.Cutscene_Presentation_Kind
+				switch value_text {
+				case "fade":
+					kind = .Fade
+				case "letterbox":
+					kind = .Letterbox
+				case "subtitle":
+					kind = .Subtitle
+				case:
+					problem(&found, line, "kind is fade, letterbox or subtitle")
+					continue
+				}
+				s.contents.presentation.kind, s.presentation_lines[0] = kind, line
+			case "color":
+				color, ok := cutscene_color(value_text)
+				if !ok {
+					problem(&found, line, "color is %s", CUTSCENE_COLOR_FORM)
+					continue
+				}
+				s.contents.presentation.color, s.presentation_lines[1] = color, line
+			case "speaker", "text", "key":
+				quoted, ok := cutscene_name(value_text)
+				if !ok {
+					problem(&found, line, "%s is quoted text", name)
+					continue
+				}
+				switch name {
+				case "speaker":
+					s.contents.presentation.speaker, s.presentation_lines[2] =
+						strings.clone(quoted), line
+				case "text":
+					s.contents.presentation.text, s.presentation_lines[3] =
+						strings.clone(quoted), line
+				case "key":
+					s.contents.presentation.key, s.presentation_lines[4] =
+						strings.clone(quoted), line
+				}
+			case "audio":
+				id, ok := cutscene_id(value_text)
+				if !ok {
+					problem(&found, line, "audio is the ID of a section of an audio track")
+					continue
+				}
+				s.audio_id, s.presentation_lines[5] = id, line
 			case "binding",
 			     "muted",
 			     "when_finished",
@@ -1571,13 +1640,14 @@ cutscene_parse :: proc(
 			     "space",
 			     "origin",
 			     "gain",
-			     "time_scale":
+			     "time_scale",
+			     "letterbox_aspect":
 				problem(&found, line, "%s comes before the track's sections", name)
 			case:
 				problem(
 					&found,
 					line,
-					"%q is not a setting of a section: ease_in, ease_out, weight, pre_roll, post_roll, asset, blend, offset, speed, loop, trim, scale, root_motion, camera, blend_in, blend_out, blend_on_skip, look_at, look_at_offset, look_at_damping, follow, follow_offset, follow_damping, focus, bus, min_distance, max_distance or plays_through_skip",
+					"%q is not a setting of a section: ease_in, ease_out, weight, pre_roll, post_roll, asset, blend, offset, speed, loop, trim, scale, root_motion, camera, blend_in, blend_out, blend_on_skip, look_at, look_at_offset, look_at_damping, follow, follow_offset, follow_damping, focus, bus, min_distance, max_distance, plays_through_skip, kind, color, speaker, text, key or audio",
 					name,
 				)
 			}
@@ -1610,7 +1680,13 @@ cutscene_parse :: proc(
 			     "bus",
 			     "min_distance",
 			     "max_distance",
-			     "plays_through_skip":
+			     "plays_through_skip",
+			     "kind",
+			     "color",
+			     "speaker",
+			     "text",
+			     "key",
+			     "audio":
 				problem(&found, line, "%s comes before the section's channels", name)
 			case:
 				problem(&found, line, "a channel has keys, not settings")
@@ -1703,6 +1779,19 @@ cutscene_parse :: proc(
 	// The line of the camera cut track, of which a cutscene has one, and the cameras that its sections show.
 	cut_line := 0
 	cameras := make(map[u32]bool, context.temp_allocator)
+	// Each audio section's index among all the sections, by its ID, which a subtitle names it by.
+	audio_sections := make(map[u32]u32, context.temp_allocator)
+	{
+		n := u32(0)
+		for tr in tracks {
+			for s in tr.sections {
+				if tr.contents.kind == .Audio {
+					audio_sections[s.contents.id] = n
+				}
+				n += 1
+			}
+		}
+	}
 	for tr, i in tracks {
 		kind := tr.contents.kind
 		// The kind with its article, such as "an audio".
@@ -1835,6 +1924,10 @@ cutscene_parse :: proc(
 			}
 			result.gain, result.time_scale = 0, .Follow
 		}
+		if kind != .Presentation && tr.aspect_line != 0 {
+			problem(&found, tr.aspect_line, "only a presentation track has a letterbox_aspect")
+			result.flags -= {.Follow_Camera}
+		}
 		want := format.cutscene_track_asset(kind)
 		plays := format.cutscene_track_plays(kind)
 		sections := make([]format.Cutscene_Section_Contents, len(tr.sections))
@@ -1952,6 +2045,20 @@ cutscene_parse :: proc(
 				}
 				c.bus, c.min_distance, c.max_distance = 0, 0, 0
 				c.flags -= {.Plays_Through_Skip}
+			}
+			if kind == .Presentation {
+				cutscene_presentation_section(&found, s, &c, audio_sections)
+			} else {
+				for setting_line in s.presentation_lines {
+					if setting_line != 0 {
+						problem(
+							&found,
+							setting_line,
+							"only a presentation section has a kind, a color, a speaker, text, a key and audio",
+						)
+					}
+				}
+				c.presentation = {}
 			}
 			if length_seen && c.end > contents.length {
 				problem(
@@ -2794,6 +2901,79 @@ cutscene_property_channels :: proc(found: ^[dynamic]Cutscene_Problem, s: Pending
 CUTSCENE_AUDIO_MIN_DISTANCE :: 1
 CUTSCENE_AUDIO_MAX_DISTANCE :: 50
 
+// cutscene_presentation_section checks what a presentation section has (see
+// docs/cinematics/tracks.md#presentation-tracks): a kind; a color only on a fade; a speaker, text, a key and an audio
+// section only on a subtitle, which has text; an audio section of an audio track; and the channels of its kind, in
+// their ranges. It sets the audio section's index.
+@(private = "file")
+cutscene_presentation_section :: proc(
+	found: ^[dynamic]Cutscene_Problem,
+	s: Pending_Section,
+	c: ^format.Cutscene_Section_Contents,
+	audio_sections: map[u32]u32,
+) {
+	add :: proc(found: ^[dynamic]Cutscene_Problem, line: int, f: string, args: ..any) {
+		append(found, Cutscene_Problem{line, fmt.aprintf(f, ..args)})
+	}
+	lines := s.presentation_lines
+	if lines[0] == 0 {
+		add(found, s.line, "a presentation section has a kind: fade, letterbox or subtitle")
+		return
+	}
+	kind := c.presentation.kind
+	if kind != .Fade && lines[1] != 0 {
+		add(found, lines[1], "only a fade has a color")
+	}
+	if kind != .Subtitle {
+		for line in lines[2:] {
+			if line != 0 {
+				add(found, line, "only a subtitle has a speaker, text, a key and audio")
+			}
+		}
+		c.presentation = {
+			kind  = kind,
+			color = c.presentation.color if kind == .Fade else {},
+		}
+	} else if lines[3] == 0 {
+		add(found, s.line, "a subtitle section has its text, as text = \"...\"")
+	}
+	if kind == .Subtitle && lines[5] != 0 {
+		if index, found_audio := audio_sections[s.audio_id]; found_audio {
+			c.presentation.audio = index
+		} else {
+			add(found, lines[5], "audio is the ID of a section of an audio track of the cutscene")
+		}
+	}
+	for ch in s.channels {
+		switch kind {
+		case .Fade:
+			if ch.name != format.CUTSCENE_FADE_OPACITY {
+				add(found, ch.line, "a fade's channel is opacity")
+				continue
+			}
+		case .Letterbox:
+			if ch.name != format.CUTSCENE_LETTERBOX_ASPECT &&
+			   ch.name != format.CUTSCENE_LETTERBOX_AMOUNT {
+				add(found, ch.line, "a letterbox's channels are aspect and amount")
+				continue
+			}
+		case .Subtitle:
+			add(found, ch.line, "a subtitle has no channels")
+			continue
+		}
+		low, high: f32 = 0, 1
+		if ch.name == format.CUTSCENE_LETTERBOX_ASPECT {
+			low, high = format.CUTSCENE_MIN_ASPECT, format.CUTSCENE_MAX_ASPECT
+		}
+		for k in ch.keys {
+			if !(k.value >= low && k.value <= high) {
+				add(found, ch.line, "%s keys are numbers from %v to %v", ch.name, low, high)
+				break
+			}
+		}
+	}
+}
+
 // cutscene_audio_section checks what an audio section has (see docs/cinematics/tracks.md#audio-tracks): no pre_roll or
 // post_roll, distances whose max is above their min, and channels of gain from 0 and pitch from CUTSCENE_MIN_PITCH to
 // CUTSCENE_MAX_PITCH. It sets the distances that the section does not.
@@ -3032,6 +3212,22 @@ cutscene_skip_ranges :: proc(text: string) -> (ranges: []format.Cutscene_Skip_Ra
 		return
 	}
 	return found[:], true
+}
+
+// CUTSCENE_COLOR_FORM is how the text gives a color, for the problems that name it.
+@(private = "file")
+CUTSCENE_COLOR_FORM :: "a quoted color, as \"#rrggbb\" or \"#rgb\", without alpha"
+
+// cutscene_color reads a quoted opaque color, as a UI document gives one: quoted, since a # outside quotes starts a
+// comment.
+@(private = "file")
+cutscene_color :: proc(text: string) -> (color: [3]u8, ok: bool) {
+	quoted := cutscene_name(text) or_return
+	if len(quoted) != 4 && len(quoted) != 7 {
+		return
+	}
+	parsed := format.ui_parse_color(quoted) or_return
+	return parsed.rgb, true
 }
 
 // cutscene_name reads a quoted name.

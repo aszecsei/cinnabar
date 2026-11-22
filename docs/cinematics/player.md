@@ -42,7 +42,7 @@ A player's state is one union, `Player_State`. The data of each state is in its 
 | `Player_Playing` | `Player_Live` | The time moves on the cutscene's clock, and both phases evaluate. |
 | `Player_Paused` | `Player_Live` | The time stands still. Both phases still evaluate at the time, so the cutscene holds the world, and fires no events. |
 | `Player_Skipping` | `Player_Live`, the target, the part of the fade and how long it has run | The time stands still behind a fade out. Then the player jumps to the target, and goes to `Finishing` at the end or fades in and plays on ([Skipping: The state](skipping.md#the-state)). |
-| `Player_Finishing` | `Player_Live` | The last evaluation is done. The fades out ([#546](https://github.com/aszecsei/cinnabar/issues/546)) will run here. Until then, the same `update` gives the world back. |
+| `Player_Finishing` | `Player_Live`, and `cover` | The last evaluation is done. The same `update` gives the world back. `cover` is how much a skip's fade covered the frame as the player came from `Skipping`: 1 at a skip's end, less at a stop during its fade, and 0 when the player did not skip. The overlay fades back from it ([Skipping: The fade](skipping.md#the-fade)). |
 | `Player_Restored` | | The world is given back: the fields are restored, the input and the HUD are back, nothing is suspended, the spawned entities are gone and the assets are unloaded. The handle can be dropped. |
 | `Player_Failed` | A `Failure` | The player could not go on. What it had changed is given back, as for `Restored`. |
 
@@ -57,6 +57,7 @@ A player's state is one union, `Player_State`. The data of each state is in its 
 - It refuses a change that the diagram does not allow, and logs it.
 - It frees the data of the state that the player leaves. A loading player's overrides are freed. A live player that goes to `Restored` or `Failed` gives the world back (`give_back`): its tracks' fields are restored, its camera cut track releases its claim on the views ([Tracks: Camera cut tracks](tracks.md#camera-cut-tracks)), its input context and documents come back, its bindings resume what they suspended, its spawned entities are despawned and its assets are unloaded ([Possession: Giving it back](possession.md#giving-it-back)).
 - A `Ready` player that goes to `Playing` or `Skipping` shows its spawned entities (`reveal_bindings`), pushes its input context and hides its documents (`take_hold`, [Possession: The whole cutscene](possession.md#the-whole-cutscene)).
+- A live player that goes to `Restored` or `Failed` first calls `hand_off_overlay`, while the evaluation holds the last presentation. It keeps a fade that the player's track keeps, or a fade back from the skip's fade, in the overlay, which outlives the player. A player that fails hands off nothing ([Tracks: Presentation tracks](tracks.md#presentation-tracks)).
 - It records each change as a `Player_Event`. `player_events` gives the frame's events, and `end_frame` clears them.
 
 A change from one live state to another carries the live data. `moved(player, to)` makes the new variant from the data that the player holds at the moment of the change, so the change carries what the last evaluation saved. `skipping(player, target)` makes the `Skipping` variant, which has data of its own.
@@ -100,6 +101,7 @@ Each command takes a handle and returns a `Command_Result`:
 3. A skipping player moves its fade on by `dt`. At the end of the fade out, it jumps to its target and goes to `Finishing` at the range's end, or starts its fade in. At the end of the fade in, it is `Playing` ([Skipping: The state](skipping.md#the-state)).
 4. A playing player at the range's end evaluates both phases there, and goes to `Finishing`. An evaluation fires only the events after its phase's last time. So an event at the end fires once, whether a tick and the `Late` stage reached the end first or not. On the real clock, a cutscene can reach its end while the game is paused, with no `Late` stage. Its last events then fire here.
 5. A finishing player gives the world back and is `Restored`.
+6. The overlay opens its document, or the project's new one, moves a fade back on by `dt`, and ends what it holds once a player drives it (`update_overlay`).
 
 `update` returns how many spawned roots it despawned. The game then calls `forget_despawned`, as after a scene unloads.
 

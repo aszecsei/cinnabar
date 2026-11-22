@@ -125,6 +125,9 @@ Player_Skipping :: struct {
 // Player_Finishing is a player whose cutscene is over: its last evaluation is done, and the world is given back next.
 Player_Finishing :: struct {
 	using live: Player_Live,
+	// How much a skip's fade covered the frame as the player came from Skipping: 1 at a skip's end, less at a stop during
+	// its fade, and 0 when it did not skip. The overlay fades back from it (see hand_off_overlay).
+	cover:      f32,
 }
 
 // Player_Restored is a player that gave the world back: its fields are restored, its spawned entities are gone, and its
@@ -312,8 +315,8 @@ can_skip :: proc(s: ^State, h: Player_Handle) -> bool {
 	return false
 }
 
-// skip_fade is how much a skipping player's fade covers the frame, from 0 to 1, and 0 for any other player. The
-// presentation track (#546) draws it.
+// skip_fade is how much a skipping player's fade covers the frame, from 0 to 1, and 0 for any other player. The overlay
+// draws it in the cutscene's skip_color (see docs/cinematics/skipping.md#the-state).
 skip_fade :: proc(s: ^State, h: Player_Handle) -> f32 {
 	slot, found := slot_of(s, h)
 	if !found {
@@ -323,6 +326,13 @@ skip_fade :: proc(s: ^State, h: Player_Handle) -> f32 {
 	if !is_skipping {
 		return 0
 	}
+	return skip_cover(s, state)
+}
+
+// skip_cover is how much a skip's fade covers the frame, from 0 to 1.
+@(private)
+skip_cover :: proc(s: ^State, state: Player_Skipping) -> f32 {
+	state := state
 	length := skip_fade_length(s, &state.evaluation)
 	if length <= 0 {
 		return 1 if state.fade == .Out else 0
@@ -445,7 +455,8 @@ update :: proc(s: ^State, c: Player_Context) -> (despawned: int) {
 				}
 			}
 		}
-		// The fades out (#546) will hold a player in Finishing. Until then, it gives the world back at once.
+		// A finishing player gives the world back at once. The overlay holds a skip's fade, and fades it back (see
+		// hand_off_overlay).
 		if _, finishing := p.state.(Player_Finishing); finishing {
 			_, gave_back := change_cutscene(s, w, slot, Player_Restored{})
 			despawned += gave_back
@@ -454,6 +465,7 @@ update :: proc(s: ^State, c: Player_Context) -> (despawned: int) {
 			show_children(s, w, &live.evaluation)
 		}
 	}
+	update_overlay(s, c.dt)
 	send_events(s)
 	return
 }
@@ -509,16 +521,25 @@ change_cutscene :: proc(
 		refuse(s, slot, next)
 		return false, 0
 	}
+	// A skip's fade, as the player leaves Skipping for Finishing.
+	cover: f32
 	switch &state in p.state {
 	case Player_Loading:
 		free_overrides(&state.overrides)
 	case Player_Ready, Player_Playing, Player_Paused, Player_Skipping, Player_Finishing:
+		if skip, is_skip := p.state.(Player_Skipping); is_skip && next == .Finishing {
+			cover = skip_cover(s, skip)
+		}
 		if next == .Restored || next == .Failed {
+			hand_off_overlay(s, w, slot, next == .Failed)
 			despawned = give_back(s, w, live_of(&p.state))
 		}
 	case Player_Restored, Player_Failed:
 	}
 	p.state = to
+	if finishing, is_finishing := &p.state.(Player_Finishing); is_finishing {
+		finishing.cover = cover
+	}
 	// A cutscene that finishes, at its end, at a skip to it or at a stop, sends the end of each range that is open. One
 	// that fails sends nothing.
 	if next == .Finishing {
@@ -593,7 +614,7 @@ moved :: proc(p: ^Player, to: Player_Status) -> Player_State {
 	case .Paused:
 		return Player_Paused{live^}
 	case .Finishing:
-		return Player_Finishing{live^}
+		return Player_Finishing{live = live^}
 	}
 	panic("cutscene: moved takes a live state other than Skipping")
 }
@@ -827,7 +848,7 @@ skip_target :: proc(s: ^State, e: ^Evaluation) -> (target: i32, ok: bool) {
 }
 
 // skip_fade_length is the length of a skip's fade out, and of its fade in, from the blob's ticks.
-@(private = "file")
+@(private)
 skip_fade_length :: proc(s: ^State, e: ^Evaluation) -> time.Duration {
 	_, blob, ok := cutscene_data(s, e)
 	if !ok {

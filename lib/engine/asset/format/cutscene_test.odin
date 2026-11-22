@@ -1197,3 +1197,164 @@ event_tracks_with_bad_events_are_refused :: proc(t: ^testing.T) {
 	_, ok = cutscene_view(data)
 	testing.expect(t, ok, "the blob as it was")
 }
+
+// presentation_cutscene has an audio track with a line, and a presentation track with a fade, a letterbox and a subtitle
+// of that line.
+@(private = "file")
+presentation_cutscene :: proc() -> []byte {
+	opacity := []Cutscene_Key {
+		{time = 0, value = 1, interp = .Linear},
+		{time = 30000, value = 0, interp = .Linear},
+	}
+	aspect := []Cutscene_Key{{time = 0, value = 2.39, interp = .Constant}}
+	contents := Cutscene_Contents {
+		length     = 120000,
+		rate       = 30,
+		range_end  = 120000,
+		skip_color = {16, 32, 48},
+		tracks     = {
+			{
+				id = 1,
+				kind = .Audio,
+				name = "Dialogue",
+				binding = CUTSCENE_NONE,
+				gain = 1,
+				sections = {
+					{
+						id = 1,
+						start = 30000,
+						end = 90000,
+						weight = 1,
+						asset = SOUND,
+						speed = 1,
+						max_distance = 50,
+					},
+				},
+			},
+			{
+				id = 2,
+				kind = .Presentation,
+				name = "Presentation",
+				binding = CUTSCENE_NONE,
+				flags = {.Follow_Camera},
+				sections = {
+					{
+						id = 2,
+						start = 0,
+						end = 30000,
+						weight = 1,
+						presentation = {kind = .Fade, color = {255, 0, 0}},
+						channels = {{name = CUTSCENE_FADE_OPACITY, keys = opacity}},
+					},
+					{
+						id = 3,
+						start = 0,
+						end = 120000,
+						weight = 1,
+						presentation = {kind = .Letterbox},
+						channels = {{name = CUTSCENE_LETTERBOX_ASPECT, keys = aspect}},
+					},
+					{
+						id = 4,
+						start = 30000,
+						end = 90000,
+						weight = 1,
+						presentation = {
+							kind = .Subtitle,
+							speaker = "Fox",
+							text = "Over here.",
+							key = "intro.fox",
+							audio = 0,
+						},
+					},
+				},
+			},
+		},
+		guids      = {SOUND},
+	}
+	return aligned(cutscene_write(contents, context.temp_allocator))
+}
+
+@(test)
+presentation_tracks_round_trip :: proc(t: ^testing.T) {
+	data := presentation_cutscene()
+	blob, ok := cutscene_view(data)
+	if !testing.expect(t, ok) {
+		return
+	}
+	testing.expect_value(t, blob.skip_color, Ui_Color{16, 32, 48, 255})
+	rows := cutscene_presentations(data, blob)
+	testing.expect_value(t, len(rows), 3)
+	fade, found := cutscene_presentation_of(data, blob, 1)
+	testing.expect(t, found)
+	testing.expect_value(t, fade.kind, Cutscene_Presentation_Kind.Fade)
+	testing.expect_value(t, fade.color, Ui_Color{255, 0, 0, 255})
+	testing.expect_value(t, fade.audio, CUTSCENE_NONE)
+	line, _ := cutscene_presentation_of(data, blob, 3)
+	testing.expect_value(t, line.kind, Cutscene_Presentation_Kind.Subtitle)
+	testing.expect_value(t, blob_string(data, line.speaker), "Fox")
+	testing.expect_value(t, blob_string(data, line.text), "Over here.")
+	testing.expect_value(t, blob_string(data, line.key), "intro.fox")
+	testing.expect_value(t, line.audio, 0)
+	_, found = cutscene_presentation_of(data, blob, 0)
+	testing.expect(t, !found, "an audio section has no row")
+}
+
+@(test)
+presentation_tracks_with_bad_rows_are_refused :: proc(t: ^testing.T) {
+	data := presentation_cutscene()
+	blob, ok := cutscene_view(data)
+	if !testing.expect(t, ok) {
+		return
+	}
+	refused :: proc(t: ^testing.T, data: []byte, what: string) {
+		_, ok := cutscene_view(data)
+		testing.expect(t, !ok, what)
+	}
+	tracks := cutscene_tracks(data, blob)
+	rows := cutscene_presentations(data, blob)
+	channels := cutscene_channels(data, blob)
+
+	blob.skip_color.a = 0
+	refused(t, data, "a skip color that is not opaque")
+	blob.skip_color.a = 255
+	tracks[0].flags = {.Follow_Camera}
+	refused(t, data, "an audio track that follows the camera")
+	tracks[0].flags = {}
+	rows[0].section = 2
+	refused(t, data, "a row of another section")
+	rows[0].section = 1
+	rows[0].color.a = 128
+	refused(t, data, "a fade that is not opaque")
+	rows[0].color.a = 255
+	rows[1].color = {1, 1, 1, 255}
+	refused(t, data, "a letterbox with a color")
+	rows[1].color = {}
+	rows[1].text = rows[2].text
+	refused(t, data, "a letterbox with text")
+	rows[1].text = {}
+	rows[2].text.size = u32(len(data))
+	refused(t, data, "a subtitle's text past the end")
+	rows[2].text.size = 10
+	rows[2].audio = 2
+	refused(t, data, "a subtitle of a presentation section")
+	rows[2].audio = 7
+	refused(t, data, "a subtitle of a section past the sections")
+	rows[2].audio = 0
+	rows[2].kind = Cutscene_Presentation_Kind(3)
+	refused(t, data, "an unknown kind")
+	rows[2].kind = .Subtitle
+	rows[0].kind = .Letterbox
+	refused(t, data, "a letterbox with an opacity channel")
+	rows[0].kind = .Fade
+	saved := channels[1].name
+	channels[1].name = channels[0].name
+	refused(t, data, "a letterbox with an opacity channel's name")
+	channels[1].name = saved
+	blob.presentations.size -= size_of(Cutscene_Presentation)
+	refused(t, data, "a presentation section without a row")
+	blob.presentations.size += size_of(Cutscene_Presentation)
+
+	_, ok = cutscene_view(data)
+	testing.expect(t, ok, "the blob as it was")
+}

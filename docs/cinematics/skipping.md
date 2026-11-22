@@ -1,10 +1,10 @@
 # Skipping
 
-A player can skip a cutscene, all of it or one part. A skip must leave the world as playing to the end would: the possessed entities in their last places, the events that gameplay needs fired, and the doors left open. The player jumps to the target through one evaluation, in a `Skipping` state, behind a fade.
+A player can skip a cutscene, all of it or one part. A skip must leave the world as playing to the end would: the possessed entities in their last places, the events that gameplay needs fired, and the doors left open. The player jumps to the target through one evaluation, in a `Skipping` state, behind a fade that the overlay draws ([Tracks: Presentation tracks](tracks.md#presentation-tracks)).
 
 This document describes the skip in `lib/engine/cutscene/player.odin` and `evaluation.odin`, and the skip action in `skipping.odin`. Read [Player](player.md) and [Evaluation](evaluation.md) first.
 
-**In this document:** [The policy](#the-policy) · [The state](#the-state) · [Events](#events) · [Input](#input) · [Not built yet](#not-built-yet) · [Procedures](#procedures)
+**In this document:** [The policy](#the-policy) · [The state](#the-state) · [Events](#events) · [Input](#input) · [The fade](#the-fade) · [Not built yet](#not-built-yet) · [Procedures](#procedures)
 
 ## The policy
 
@@ -40,7 +40,7 @@ stateDiagram-v2
 
 1. **The fade out.** The time stands still, as for a paused player. The systems still evaluate the player's tracks at the time, so it holds the world, but it fires no events.
 2. **The jump.** At the end of the fade out, `skip_to` moves the time to the target and evaluates each phase there once, as a skip ([Events](#events)).
-3. **The end.** At the range's end, the player goes to `Finishing` in the same `update`, and gives the world back. There is no fade in: the frame comes back with the world given back.
+3. **The end.** At the range's end, the player goes to `Finishing` in the same `update`, and gives the world back. `Finishing` stays instant. There is no fade in before the world comes back: the frame comes back with the world given back, still covered, and the overlay then fades back over gameplay ([The fade](#the-fade)).
 4. **The fade in.** At a skip range's end, the fade in runs at the target. The time still stands still. At its end, the player is `Playing` from the target.
 
 A fade of 0 ticks (the default) does all of this in one `update`.
@@ -83,10 +83,20 @@ The player skips by holding a button, so that a tap does not skip by mistake.
 - `set_skip_input(state, action, hold)` sets the action's name and the hold time. `update_project` calls it with the project's settings. The name is kept in bytes, so it stays across a code reload.
 - `reset` ends a hold, for a soft restart and a new level.
 
+## The fade
+
+The overlay draws the skip's fade over the frame ([Tracks: Presentation tracks](tracks.md#presentation-tracks)). `skip_fade(state, handle)` gives how much the fade covers the frame, from 0 to 1.
+- **The color.** The cutscene's `skip_color`, a quoted `"#rrggbb"`, black by default ([Content: Cutscenes](../content/kinds/cutscenes.md#the-cutscene)). The fade draws over the presentation track's own fade.
+- **Without a presentation track.** The skip's fade shows all the same.
+- **Subtitles** hide for the whole skip, its fade in included.
+- **A skip to the end** differs from the fade in of #538, which runs only when play goes on. The world is given back while the fade covers the frame. The overlay outlives the player, so it then fades back from the skip's color to clear, over `skip_fade` ticks on real time, over gameplay. `Finishing` does not wait for it.
+  - `Player_Finishing.cover` is how much the skip's fade covered the frame as the player finished: 1 at the end of the fade out, less for a `stop` during the fade, and 0 when the player did not skip. The fade back starts from that coverage.
+  - A fade that a presentation track keeps wins over the fade back ([Tracks: Presentation tracks](tracks.md#presentation-tracks)).
+- **A skip that plays on** has its fade in at the target, as before.
+
 ## Not built yet
 
-The skip exposes what later tracks need, but the tracks are not built yet:
-- **The fade** is not drawn. `skip_fade(state, handle)` gives how much it covers the frame, from 0 to 1, and the presentation track ([#546](https://github.com/aszecsei/cinnabar/issues/546)) will draw it in its color. #546 also asks for a fade back from the end. This document follows #538: the fade in runs only when play goes on.
+The skip exposes what later tracks need, but some are not built yet:
 - **Sub-sequences** skip with their parent, through the same jump: their tracks evaluate at the target, mapped to their time, and their keys marked `fire_when_skipped` fire in time order with the parent's ([Tracks: Sub-sequence tracks](tracks.md#sub-sequence-tracks)).
 - **Scripts** skip through the `Cutscene` library ([#547](https://github.com/aszecsei/cinnabar/issues/547)).
 
@@ -102,7 +112,7 @@ The audio track is built too: as the skip begins, its voices fade out over what 
 |---|---|
 | `skip(state, world, handle)` | Starts a skip at the player's time, or returns `Not_Skippable` |
 | `can_skip(state, handle)` | Whether a skip would skip now |
-| `skip_fade(state, handle)` | How much a skipping player's fade covers the frame, from 0 to 1 |
+| `skip_fade(state, handle)` | How much a skipping player's fade covers the frame, from 0 to 1, which the overlay draws |
 | `skip_to(state, e, world, data, blob, target)` | The jump: evaluates each phase once at the target, as a skip |
 | `update_skip(state, world, input, dt)` | Reads the skip action and its hold, once a frame |
 | `skip_progress(state)` | How far the hold is, from 0 to 1 |

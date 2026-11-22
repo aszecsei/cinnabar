@@ -2,7 +2,7 @@
 
 A track acts on the world at the cutscene's time. Its kind says what it writes: a field, a pose, a camera, a sound, an event to the scripts, or the tracks of another cutscene. This document describes the kinds that the engine has, in `lib/engine/cutscene`, and the curve that every keyed track shares. Read [Evaluation](evaluation.md) first, for sections, blending and the restore snapshot.
 
-**In this document:** [Curves](#curves) · [Property tracks](#property-tracks) · [Transform tracks](#transform-tracks) · [Animation tracks](#animation-tracks) · [Camera cut tracks](#camera-cut-tracks) · [Audio tracks](#audio-tracks) · [Event tracks](#event-tracks) · [Sub-sequence tracks](#sub-sequence-tracks) · [Not built yet](#not-built-yet) · [Procedures](#procedures)
+**In this document:** [Curves](#curves) · [Property tracks](#property-tracks) · [Transform tracks](#transform-tracks) · [Animation tracks](#animation-tracks) · [Camera cut tracks](#camera-cut-tracks) · [Audio tracks](#audio-tracks) · [Event tracks](#event-tracks) · [Sub-sequence tracks](#sub-sequence-tracks) · [Presentation tracks](#presentation-tracks) · [Not built yet](#not-built-yet) · [Procedures](#procedures)
 
 ## Curves
 
@@ -268,7 +268,7 @@ track 5 camera_cut "Cuts"
 - **The field of view** is `2 × atan(sensor_height / (2 × focal_length))`. While a `Cinematic_Camera` is there, the `cinematic lens` system is the one writer of `Camera.vertical_fov`. It runs in the `Late` stage, after the cutscene's systems and the scripts, so a property track or a script that sets the lens sets the frame's field of view. The views read the lens directly too, so the editor's Edit mode, which runs no systems, shows the same field of view.
 - **The depth of field** takes the aperture and the focus ([Post-processing: Depth of field](../rendering/post-processing.md#depth-of-field)). A focus entity sets the focus to its distance along the camera's axis, each frame.
 - **Each field** animates with a property track on component 160, as the sample's rack focus does.
-- **The sensor's aspect** is the shot's aspect. The editor draws the camera's frustum with it. The presentation track's bars will letterbox a frame of another aspect ([#546](https://github.com/aszecsei/cinnabar/issues/546)).
+- **The sensor's aspect** is the shot's aspect. The editor draws the camera's frustum with it. The presentation track's bars letterbox a frame of another aspect, and can take the aspect of the shot's camera ([Presentation tracks](#presentation-tracks)).
 
 **Sections.** A cutscene has one camera cut track, and the track takes no binding. Each section shows the camera binding that `camera` names.
 - **Order.** Sections are in time order and do not overlap. A gap between two sections has no cutscene camera: the view goes back to gameplay.
@@ -515,9 +515,119 @@ track 4 sub_sequence "Shots"
 
 `register` does not set a kind for sub-sequence tracks: `run_phase` walks them.
 
+## Presentation tracks
+
+A presentation track puts what is not in the world over the frame: a fade, letterbox bars, a line of dialogue. It writes nothing to the world. It adds its sections to the evaluation's **presentation**, and the **overlay** shows that presentation.
+
+The fade is from `fox_walk.cutscene`, and the letterbox and the subtitle are from `intro.cutscene`.
+
+```
+cutscene 1
+length = 720000
+skip_fade = 15000
+skip_color = "#000000"
+
+track 1 presentation "Fade in"
+	section 1 0 60000
+		kind = fade
+		color = "#000000"
+		channel opacity
+			key 0 1 linear
+			key 60000 0 linear
+track 10 presentation "Presentation"
+	section 12 0 600000
+		kind = letterbox
+		ease_in = 30000
+		ease_out = 60000
+		channel aspect
+			key 0 2.39 constant
+	section 13 30000 174000
+		kind = subtitle
+		speaker = "Narrator"
+		text = "The fox walks this path every evening."
+		key = "intro.narrator.path"
+		audio = 10
+```
+
+**Sections.** Each section has a `kind`: `fade`, `letterbox` or `subtitle`. A track can hold sections of all three kinds, and takes no binding. Sections blend by their weights ([Sections and blending](evaluation.md#sections-and-blending)).
+
+| Kind | Settings | Channels |
+|---|---|---|
+| `fade` | `color`: a quoted `"#rrggbb"` or `"#rgb"`, opaque | `opacity`, from 0 to 1 |
+| `letterbox` | None | `aspect`, from 1 to 4, and `amount`, from 0 to 1 |
+| `subtitle` | `speaker`, `text` (needed), `key` and `audio` | None |
+
+- **Fades.** A fade covers the frame with its color. A section without an `opacity` channel has an opacity of 1. The fades of the sections that cover the time give one color and one opacity:
+  - The opacity is the sections' opacities, blended by their weights over 0.
+  - The color is the mean of the sections' colors in linear light, weighted by each section's weight times its opacity.
+- **Letterbox.** The bars crop the frame to the `aspect`, width over height, 2.39 by default. `amount` is how far the bars are in: 1 by default, and 0 is no bars. The sections' aspects and amounts blend by their weights, so an ease slides the bars in and out.
+  - An aspect wider than the window's gives bars at the top and the bottom. A narrower one gives bars at the sides.
+  - The bars crop the frame in the overlay. They do not change the render's size.
+  - The bars are black, or the project's `cutscene.letterbox_color` ([Overview: Project settings](../overview/architecture.md#project-settings)).
+  - `letterbox_aspect = camera` on the track sets `Follow_Camera`. While the cut track shows a camera with a `Cinematic_Camera`, the bars take that camera's aspect (`render.camera_aspect`), so each shot fills its frame. While gameplay shows, they take the sections' aspect. `letterbox_aspect = sections` (the default) always takes the sections'.
+- **Subtitles.** A subtitle section shows its `text` for its span, under its `speaker`.
+  - `key` is the key of the line in a string table. The cook keeps it in the blob. The runtime shows `text` and does not read the key yet.
+  - `audio` is the ID of a section of an audio track. It does not change the runtime. The editor moves the subtitle with that sound.
+  - At most `MAX_SUBTITLES` (3) lines show: the newest that cover the time, with the newest at the bottom. A fourth newer line drops the oldest.
+  - A line's text binds to its element as `Ui.bind` binds: with `set_binding`.
+
+**The track's time.** The track evaluates in the `Late` phase, once a frame, at the time that the frame shows (`shown_time`), as an audio track does ([Audio tracks](#audio-tracks)). A pause or a time scale holds or moves the fade with the cutscene's time, and the UI runs on real time. `run_phase` clears `Evaluation.presented` before the `Late` phase, so each frame's presentation is a value of the time alone ([Evaluation: The evaluation](evaluation.md#the-evaluation)).
+
+**Sub-sequences.** A presentation track of a child adds to the presentation by its section's weight, at the child's own time ([Sub-sequence tracks](#sub-sequence-tracks)).
+
+**The overlay.** The overlay is a UI document that the cutscene state owns, with no entity ([UI: Owned documents](../ui/design.md#owned-documents)). The engine's is `cutscene_overlay.ui`, in the engine content root.
+- **Order.** `OVERLAY_ORDER` is 8. The overlay draws over the gameplay documents (order 0, and 5 for the split-screen help) and under the sample's pause menu (order 10).
+- **No input.** The overlay takes no input.
+- **A project's own document.** The project setting `cutscene.overlay` names a UI document by its `$<guid>`. A zero, or no setting, means the engine's. The document needs elements with the ids below. `update` opens the new document when the setting changes.
+
+| Element | What `present` sets |
+|---|---|
+| `fade` | `fill` to the fade's color, as a paint, and `opacity` |
+| `bar_top`, `bar_bottom` | `height`, in percent of the window, and `fill` to the bars' color |
+| `bar_left`, `bar_right` | `width`, in percent of the window, and `fill` to the bars' color |
+| `subtitle_1` to `subtitle_3` | `visible`, true for a line that shows |
+| `speaker_n` | `visible`, true when the speaker is not empty; `size`; and its binding `{speaker_n}` |
+| `line_n` | `size`, and its binding `{line_n}` |
+| `subtitle_back_n` | `opacity`, the player's `subtitles.background` |
+
+- **The text's size.** `size` of `speaker_n` and `line_n` is the document's own size for the element times the player's `subtitles.size`. An element without a size of its own takes `DEFAULT_SPEAKER_SIZE` (22) or `DEFAULT_LINE_SIZE` (30).
+- **The frame.** The game calls `cutscene.present(state, world, window)` in `render_frame`, after the `Late` stage and before `ui.layout`. It hides the document when nothing shows. `present` does nothing when the state has no UI or the document is not built.
+- **The UI.** The game gives the cutscenes its UI in `init`, as the last, optional parameter, `interface: ^ui.State`. Without it, nothing shows the presentation tracks.
+
+**Who drives the overlay.** The overlay shows one player's presentation. A player drives it when it is `Playing`, `Paused`, `Skipping` or `Finishing`, and has a presentation track, or a skip's fade that covers the frame.
+- Of those players, the highest priority drives it, and of equal priority, the latest to start, as for a field ([Player: Conflicts](player.md#conflicts)).
+- Only the values of that player show.
+- A new driver ends what the overlay holds of an earlier one (see When finished, below).
+
+**Seek, skip and finish.**
+- **Seek and scrub backwards.** Each value is the value at the new time. Each line that covers the time shows under it.
+- **Skip.** The skip's fade draws over the track's fade, in the blob's `skip_color` (the cutscene's `skip_color = "#rrggbb"`, black by default). The subtitles hide for the whole skip, its fade in included.
+  - A skip to the end gives the world back while the fade covers the frame. The overlay then fades back from the skip's color, over `skip_fade`, on real time, over gameplay ([Skipping: The state](skipping.md#the-state)).
+  - A `stop` during a skip's fade fades back from the coverage that the fade had (`Player_Finishing.cover`).
+  - A cutscene without a presentation track still shows its skip's fade.
+- **When finished.** When the player gives the world back, `hand_off_overlay` decides what the overlay holds, in this order:
+  1. A fade whose track is `keep`, and that covers the frame, stays as `Overlay_Kept`. It stays across a level load (`reset`) too. A kept fade wins over the skip's fade back.
+  2. Else, after a skip's fade that covered the frame, the overlay fades back from the skip's color (`Overlay_Fading`).
+  3. Else the overlay hides. A track that restores (the default) leaves nothing. A player that fails hands off nothing.
+- **Releasing a kept fade.** `release_fade(state, length)` fades a kept fade back, over a length of real time. A length of 0 clears it. Another cutscene that drives the overlay also ends it.
+- **Destroy.** `destroy`, for a soft restart, closes the document.
+
+**The player's settings.** The settings are in the user's file, by the player's choice. The game takes them when the files change, so `Subtitles.set` holds between changes.
+
+| Setting | Values | Default | What it sets |
+|---|---|---|---|
+| `subtitles.enabled` | `true` or `false` | `true` | Whether subtitles show |
+| `subtitles.size` | From 0.5 to 2 | 1 | A scale of the text's size |
+| `subtitles.background` | From 0 to 1 | 0.5 | The opacity of the box behind each line |
+
+Scripts read and change them with the `Subtitles` library ([Scripting: Subtitles](../scripting/api.md#subtitles)). `set_subtitles` clamps a value into its range.
+
+**Hot reload.** `Presentation.key` holds the key of the evaluation's tree of blobs when the tracks made the presentation. After a reload of a blob of the tree, `presentation_values` does not read the subtitle rows, which moved, until the next `Late` phase makes the presentation again.
+
+`register` sets the presentation kind. Without the cutscenes' UI, the tracks evaluate and nothing shows.
+
 ## Not built yet
 
-- The presentation track is part of [#526](https://github.com/aszecsei/cinnabar/issues/526) ([#546](https://github.com/aszecsei/cinnabar/issues/546)). Until it is built, a presentation track does nothing.
 - Fields blend track by track: each track blends its sections over the field's own value, and the later track wins. So two shots that overlap cross-fade an `Animator`'s pose, but a transform or a property that both write takes the later shot's value at its weight over the own value, not over the other shot's.
 - No editor sets an evaluation's `audition` yet. The cutscene editor's scrub and playback ([#548](https://github.com/aszecsei/cinnabar/issues/548)) will, and its waveforms are [#556](https://github.com/aszecsei/cinnabar/issues/556). The transport's option to send events to edit-mode behaviours waits for the editor too.
 - In the editor, only the Game view follows the cut track. A viewport that pilots a camera waits for [#555](https://github.com/aszecsei/cinnabar/issues/555).
@@ -539,6 +649,15 @@ track 4 sub_sequence "Shots"
 | `animation_track(ctx)` | The animation kind's evaluate procedure |
 | `camera_cut_track(ctx)` | The camera cut kind's evaluate procedure |
 | `audio_track(ctx)` | The audio kind's evaluate procedure |
+| `presentation_track(ctx)` | The presentation kind's evaluate procedure |
+| `present(state, world, window)` | Writes what the overlay shows into its document, for a window's size in pixels. The game calls it each frame, after the `Late` stage and before `ui.layout`. |
+| `presentation_values(state, world, evaluation)` | What an evaluation's presentation shows: the fade's color and opacity, the letterbox's aspect and amount, and the subtitles' lines |
+| `release_fade(state, length)` | Fades back a fade that a track kept over the frame, over a length of real time. 0 clears it. |
+| `set_subtitles(state, settings)` | Sets the player's subtitle settings, clamped into their ranges |
+| `subtitles(state)` | The player's subtitle settings |
+| `set_overlay(state, document, letterbox)` | Sets the project's overlay document, zero for the engine's, and the bars' color, from `cutscene.overlay` and `cutscene.letterbox_color` |
+| `overlay_frame(state, world)` | What the overlay shows now: the driver's presentation with its skip's fade over it, or what the overlay holds |
+| `skip_fade(state, handle)` | How much a skipping player's fade covers the frame (see [Skipping](skipping.md#the-state)) |
 | `register_event_handler(state, name, procedure, data)` | Registers a native handler of the events of one name, from every cutscene |
 | `send_events(state)` | Delivers the queued events of the event tracks to the scripts and the native handlers. Call it from the frame code. |
 | `curve_integral(keys, t)` | A curve's integral from 0 to a time in ticks, in value × seconds |

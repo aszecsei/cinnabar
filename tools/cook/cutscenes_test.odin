@@ -248,6 +248,8 @@ each_mistake_in_a_cutscene_is_reported_at_its_line :: proc(t: ^testing.T) {
 		"\ntrack 1 sub_sequence \"S\"\n\tsection 1 0 10\n\t\tasset = $" +
 		SHOT_GUID +
 		"\n"
+	// A presentation track with a section, on lines 3 and 4.
+	PRESENT :: "cutscene 1\nlength = 10\ntrack 1 presentation \"P\"\n\tsection 1 0 10\n"
 	cases := [?]struct {
 		text:     string,
 		line:     int,
@@ -1066,6 +1068,64 @@ each_mistake_in_a_cutscene_is_reported_at_its_line :: proc(t: ^testing.T) {
 			"only a sub_sequence section binds",
 		},
 		{"cutscene 1\nlength = 10\nbind 1 = 1\n", 3, "a bind comes after a section line"},
+		// Presentation tracks: a section on line 4, and its settings from line 5.
+		{PRESENT, 4, "a presentation section has a kind"},
+		{PRESENT + "\t\tkind = wipe\n", 5, "kind is fade, letterbox or subtitle"},
+		{PRESENT + "\t\tkind = fade\n\t\tcolor = #000000\n", 6, "color is a quoted color"},
+		{PRESENT + "\t\tkind = fade\n\t\tcolor = \"#00000080\"\n", 6, "without alpha"},
+		{PRESENT + "\t\tkind = letterbox\n\t\tcolor = \"#000\"\n", 6, "only a fade has a color"},
+		{PRESENT + "\t\tkind = fade\n\t\ttext = \"Hi\"\n", 6, "only a subtitle has a speaker"},
+		{PRESENT + "\t\tkind = subtitle\n", 4, "a subtitle section has its text"},
+		{PRESENT + "\t\tkind = subtitle\n\t\ttext = Hi\n", 6, "text is quoted text"},
+		{
+			PRESENT + "\t\tkind = subtitle\n\t\ttext = \"Hi\"\n\t\taudio = 1\n",
+			7,
+			"audio is the ID of a section of an audio track",
+		},
+		{
+			PRESENT + "\t\tkind = fade\n\t\tchannel amount\n\t\t\tkey 0 1 linear\n",
+			6,
+			"a fade's channel is opacity",
+		},
+		{
+			PRESENT + "\t\tkind = fade\n\t\tchannel opacity\n\t\t\tkey 0 1.5 linear\n",
+			6,
+			"opacity keys are numbers from 0 to 1",
+		},
+		{
+			PRESENT + "\t\tkind = letterbox\n\t\tchannel aspect\n\t\t\tkey 0 5 linear\n",
+			6,
+			"aspect keys are numbers from 1 to 4",
+		},
+		{
+			PRESENT + "\t\tkind = letterbox\n\t\tchannel opacity\n\t\t\tkey 0 1 linear\n",
+			6,
+			"a letterbox's channels are aspect and amount",
+		},
+		{
+			PRESENT +
+			"\t\tkind = subtitle\n\t\ttext = \"Hi\"\n\t\tchannel amount\n\t\t\tkey 0 1 linear\n",
+			7,
+			"a subtitle has no channels",
+		},
+		{
+			PRESENT +
+			"\t\tkind = fade\n\t\tchannel opacity\n\t\t\tkey 0 1 linear\n\t\t\tcolor = \"#fff\"\n",
+			8,
+			"color comes before the section's channels",
+		},
+		{
+			"cutscene 1\nlength = 10\ntrack 1 presentation \"P\"\n\tletterbox_aspect = sensor\n",
+			4,
+			"letterbox_aspect is camera or sections",
+		},
+		{SOUNDS + "\t\tkind = fade\n", 6, "only a presentation section has a kind"},
+		{
+			"cutscene 1\nlength = 10\ntrack 1 audio \"A\"\n\tletterbox_aspect = camera\n",
+			4,
+			"only a presentation track has a letterbox_aspect",
+		},
+		{"cutscene 1\nlength = 10\nskip_color = \"black\"\n", 3, "skip_color is a quoted color"},
 	}
 	for c in cases {
 		_, problems := cutscene_parse(c.text, context.temp_allocator)
@@ -1322,7 +1382,7 @@ each_kind_of_track_suits_its_binding :: proc(t: ^testing.T) {
 		{"audio", .Optional, "", "\t\tasset = $" + SOUND_GUID + "\n"},
 		{"event", .Optional, "", "trigger"},
 		{"sub_sequence", .None, "", "\t\tasset = $" + SHOT_GUID + "\n"},
-		{"presentation", .None, "", ""},
+		{"presentation", .None, "", "\t\tkind = fade\n"},
 	}
 	for k in kinds {
 		for bound in ([?]bool{false, true}) {
@@ -2123,4 +2183,52 @@ track 3 sub_sequence "Shot"
 		}
 		testing.expectf(t, found, "line %d: %q: %v", c.line, c.fragment, pass.problems.list)
 	}
+}
+
+@(test)
+presentation_sections_fade_letterbox_and_subtitle :: proc(t: ^testing.T) {
+	text :=
+		"cutscene 1\nlength = 600000\nskip_color = \"#102030\"\n" +
+		"track 1 audio \"Dialogue\"\n\tsection 7 60000 120000\n\t\tasset = $" +
+		SOUND_GUID +
+		"\n" +
+		"track 2 presentation \"Presentation\"\n\tletterbox_aspect = camera\n\twhen_finished = keep\n" +
+		"\tsection 1 0 30000\n\t\tkind = fade\n\t\tcolor = \"#f00\"\n" +
+		"\t\tchannel opacity\n\t\t\tkey 0 1 linear\n\t\t\tkey 30000 0 linear\n" +
+		"\tsection 2 0 600000\n\t\tkind = letterbox\n\t\tease_in = 30000\n" +
+		"\t\tchannel aspect\n\t\t\tkey 0 2.39 constant\n" +
+		"\tsection 3 60000 120000\n\t\tkind = subtitle\n\t\tspeaker = \"Fox\"\n" +
+		"\t\ttext = \"Over # here.\"\n\t\tkey = \"intro.fox\"\n\t\taudio = 7\n" +
+		"\tsection 4 500000 600000\n\t\tkind = fade\n"
+	parsed, problems := cutscene_parse(text, context.temp_allocator)
+	testing.expectf(t, len(problems) == 0, "problems: %v", problems)
+	if len(parsed.contents.tracks) != 2 {
+		return
+	}
+	testing.expect_value(t, parsed.contents.skip_color, [3]u8{0x10, 0x20, 0x30})
+	present := parsed.contents.tracks[1]
+	testing.expect_value(t, present.flags, format.Cutscene_Track_Flags{.Follow_Camera})
+	testing.expect_value(t, present.finish, format.Cutscene_Finish.Keep)
+	fade := present.sections[0].presentation
+	testing.expect_value(t, fade.kind, format.Cutscene_Presentation_Kind.Fade)
+	testing.expect_value(t, fade.color, [3]u8{255, 0, 0})
+	testing.expect_value(
+		t,
+		present.sections[1].presentation.kind,
+		format.Cutscene_Presentation_Kind.Letterbox,
+	)
+	line := present.sections[2].presentation
+	testing.expect_value(t, line.kind, format.Cutscene_Presentation_Kind.Subtitle)
+	testing.expect_value(t, line.speaker, "Fox")
+	testing.expect_value(t, line.text, "Over # here.")
+	testing.expect_value(t, line.key, "intro.fox")
+	testing.expect_value(t, line.audio.? or_else 99, 0)
+	// A fade without a color is black.
+	testing.expect_value(t, present.sections[3].presentation.color, [3]u8{})
+	blob := format.cutscene_write(parsed.contents, context.temp_allocator)
+	aligned := make([]byte, len(blob) + 16, context.temp_allocator)
+	start := int(-uintptr(raw_data(aligned)) & 15)
+	copy(aligned[start:], blob)
+	_, ok := format.cutscene_view(aligned[start:][:len(blob)])
+	testing.expect(t, ok, "the blob checks")
 }

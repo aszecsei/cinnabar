@@ -226,6 +226,9 @@ CUTSCENE_INPUT_CONTEXT_CAPACITY :: 24
 Cutscene_Track_Flag :: enum u32 {
 	// The track does nothing.
 	Muted,
+	// A presentation track's letterbox bars take the aspect of the camera that the cutscene shows: its
+	// Cinematic_Camera's sensor's. Without it, or while gameplay shows, they take their sections' aspect.
+	Follow_Camera,
 }
 Cutscene_Track_Flags :: bit_set[Cutscene_Track_Flag;u32]
 
@@ -248,6 +251,42 @@ CUTSCENE_AUDIO_GAIN :: "gain"
 CUTSCENE_AUDIO_PITCH :: "pitch"
 CUTSCENE_MIN_PITCH :: 0.1
 CUTSCENE_MAX_PITCH :: 4
+
+// Cutscene_Presentation_Kind is what a presentation section shows (see docs/cinematics/tracks.md#presentation-tracks).
+Cutscene_Presentation_Kind :: enum u32 {
+	// A color over the frame, as much as its opacity channel says.
+	Fade,
+	// Bars at the frame's edges, which crop it to an aspect, as far in as its amount channel says.
+	Letterbox,
+	// A line of text, with its speaker.
+	Subtitle,
+}
+
+// The channels of a presentation section: a fade's opacity, from 0 to 1, and a letterbox's aspect, width over height,
+// and amount, from 0 (no bars) to 1 (the bars crop to the aspect). The cook checks their ranges, and the runtime clamps
+// to them.
+CUTSCENE_FADE_OPACITY :: "opacity"
+CUTSCENE_LETTERBOX_ASPECT :: "aspect"
+CUTSCENE_LETTERBOX_AMOUNT :: "amount"
+// The aspect of a letterbox section without an aspect channel.
+CUTSCENE_DEFAULT_ASPECT :: 2.39
+CUTSCENE_MIN_ASPECT :: 1
+CUTSCENE_MAX_ASPECT :: 4
+
+// Cutscene_Presentation is what a presentation section shows, beside its section, by the section's index: a fade's
+// color, opaque, and a subtitle's speaker, its text, the key of the text in a string table (empty for plain text), and
+// the index of the audio section that it belongs to, or CUTSCENE_NONE. The other kinds have zeros and CUTSCENE_NONE
+// there. The rows are in section order, one for each section of a presentation track.
+Cutscene_Presentation :: struct {
+	section: u32,
+	kind:    Cutscene_Presentation_Kind,
+	color:   Ui_Color,
+	audio:   u32,
+	speaker: Slice,
+	text:    Slice,
+	key:     Slice,
+}
+#assert(size_of(Cutscene_Presentation) == 40)
 
 // Cutscene_Blend_Curve is the shape of a camera cut section's blend from and to gameplay. It is camera.Curve's.
 Cutscene_Blend_Curve :: enum u8 {
@@ -513,7 +552,8 @@ Cutscene_Blob :: struct {
 	hide_ui:       Slice,
 	skip_ranges:   Slice,
 	skip_fade:     i32,
-	reserved:      u32,
+	// The color that a skip fades to, opaque: the fade's coverage is its alpha.
+	skip_color:    Ui_Color,
 	// The assets that the keys of channels with the Guids flag and the events' Asset values name, by index.
 	guids:         Slice,
 	// The camera constraints, those of sections and of bindings.
@@ -522,6 +562,8 @@ Cutscene_Blob :: struct {
 	event_values:  Slice,
 	// The sub-sequence sections' maps of their children's bindings, in section order.
 	binding_maps:  Slice,
+	// One row for each presentation section, in section order.
+	presentations: Slice,
 	reserved2:     u32,
 }
 #assert(size_of(Cutscene_Blob) % align_of(Cutscene_Binding) == 0)
@@ -538,6 +580,7 @@ cutscene_layout :: proc() -> u64 {
 	h ~= layout.hash(Cutscene_Event) * 852891037441
 	h ~= layout.hash(Cutscene_Event_Value) * 26439622160671
 	h ~= layout.hash(Cutscene_Binding_Map) * 819628286980801
+	h ~= layout.hash(Cutscene_Presentation) * 25408476896404831
 	return h
 }
 
@@ -592,6 +635,12 @@ cutscene_view :: proc(data: []byte) -> (blob: ^Cutscene_Blob, ok: bool) {
 			   size_of(Cutscene_Binding_Map),
 			   align_of(Cutscene_Binding_Map),
 		   ) ||
+	   !inside(
+			   data,
+			   blob.presentations,
+			   size_of(Cutscene_Presentation),
+			   align_of(Cutscene_Presentation),
+		   ) ||
 	   blob.reserved2 != 0 {
 		return nil, false
 	}
@@ -619,7 +668,8 @@ cutscene_view :: proc(data: []byte) -> (blob: ^Cutscene_Blob, ok: bool) {
 	   blob.range_start >= blob.range_end ||
 	   blob.range_end > blob.length ||
 	   blob.skip > .Ranges ||
-	   blob.skip_fade < 0 {
+	   blob.skip_fade < 0 ||
+	   blob.skip_color.a != 255 {
 		return nil, false
 	}
 	skip_ranges := cutscene_skip_ranges(data, blob)
@@ -667,7 +717,8 @@ cutscene_view :: proc(data: []byte) -> (blob: ^Cutscene_Blob, ok: bool) {
 		}
 		if tr.kind > .Presentation ||
 		   tr.finish > .Keep ||
-		   tr.flags - {.Muted} != {} ||
+		   tr.flags - {.Muted, .Follow_Camera} != {} ||
+		   (.Follow_Camera in tr.flags && tr.kind != .Presentation) ||
 		   !inside(data, tr.name, 1, 1) ||
 		   !inside(data, tr.field, 1, 1) ||
 		   (tr.kind == .Property) !=
@@ -797,9 +848,17 @@ cutscene_view :: proc(data: []byte) -> (blob: ^Cutscene_Blob, ok: bool) {
 			}
 		}
 	}
+	presentations := cutscene_presentations(data, blob)
+	if !cutscene_presentations_valid(data, presentations, tracks, sections) {
+		return nil, false
+	}
 	next_channel := u32(0)
+	next_presentation := 0
 	for tr in tracks {
 		for s in sections[tr.first_section:][:tr.section_count] {
+			defer if tr.kind == .Presentation {
+				next_presentation += 1
+			}
 			if s.first_channel != next_channel ||
 			   u64(s.first_channel) + u64(s.channel_count) > u64(len(channels)) {
 				return nil, false
@@ -817,6 +876,13 @@ cutscene_view :: proc(data: []byte) -> (blob: ^Cutscene_Blob, ok: bool) {
 					   name != CUTSCENE_AUDIO_GAIN && name != CUTSCENE_AUDIO_PITCH {
 						return nil, false
 					}
+				}
+				if tr.kind == .Presentation &&
+				   !cutscene_presentation_channel(
+						   presentations[next_presentation].kind,
+						   blob_string(data, c.name),
+					   ) {
+					return nil, false
 				}
 			}
 		}
@@ -887,6 +953,77 @@ cutscene_view :: proc(data: []byte) -> (blob: ^Cutscene_Blob, ok: bool) {
 		}
 	}
 	return blob, true
+}
+
+// cutscene_presentation_channel is whether a presentation section of a kind takes a channel of a name.
+@(private = "file")
+cutscene_presentation_channel :: proc(kind: Cutscene_Presentation_Kind, name: string) -> bool {
+	switch kind {
+	case .Fade:
+		return name == CUTSCENE_FADE_OPACITY
+	case .Letterbox:
+		return name == CUTSCENE_LETTERBOX_ASPECT || name == CUTSCENE_LETTERBOX_AMOUNT
+	case .Subtitle:
+	}
+	return false
+}
+
+// cutscene_presentations_valid checks the presentation rows: one for each section of a presentation track, in section
+// order, and none for another's; a fade's color opaque and the other kinds' zero; a subtitle's strings inside the blob,
+// and its audio section an audio track's. The other kinds have no strings and no audio section.
+@(private = "file")
+cutscene_presentations_valid :: proc(
+	data: []byte,
+	presentations: []Cutscene_Presentation,
+	tracks: []Cutscene_Track,
+	sections: []Cutscene_Section,
+) -> bool {
+	inside :: proc(data: []byte, s: Slice) -> bool {
+		return u64(s.offset) + u64(s.size) <= u64(len(data))
+	}
+	next := 0
+	for tr in tracks {
+		if tr.kind != .Presentation {
+			continue
+		}
+		for j in 0 ..< tr.section_count {
+			if next >= len(presentations) {
+				return false
+			}
+			p := presentations[next]
+			next += 1
+			if p.section != tr.first_section + j ||
+			   p.kind > .Subtitle ||
+			   !inside(data, p.speaker) ||
+			   !inside(data, p.text) ||
+			   !inside(data, p.key) {
+				return false
+			}
+			switch p.kind {
+			case .Fade:
+				if p.color.a != 255 {
+					return false
+				}
+			case .Letterbox, .Subtitle:
+				if p.color != {} {
+					return false
+				}
+			}
+			if p.kind != .Subtitle &&
+			   (p.speaker.size != 0 ||
+					   p.text.size != 0 ||
+					   p.key.size != 0 ||
+					   p.audio != CUTSCENE_NONE) {
+				return false
+			}
+			if p.audio != CUTSCENE_NONE &&
+			   (p.audio >= u32(len(sections)) ||
+					   cutscene_section_track(tracks, p.audio).kind != .Audio) {
+				return false
+			}
+		}
+	}
+	return next == len(presentations)
 }
 
 // cutscene_section_track is the track that holds a section, by the section's index, in a blob whose tracks' sections
@@ -1164,6 +1301,44 @@ cutscene_section_maps :: proc "contextless" (
 }
 
 // cutscene_events is the event tracks' events, each track's after those of the event tracks before it.
+// cutscene_presentations is the presentation rows, one for each section of a presentation track, in section order.
+cutscene_presentations :: proc "contextless" (
+	data: []byte,
+	blob: ^Cutscene_Blob,
+) -> []Cutscene_Presentation {
+	bytes := blob_bytes(data, blob.presentations)
+	return(
+		([^]Cutscene_Presentation)(raw_data(bytes))[:len(bytes) /
+		size_of(Cutscene_Presentation)] \
+	)
+}
+
+// cutscene_presentation_of is the presentation row of a section of a presentation track, by the section's index, in a
+// blob that cutscene_view checked.
+cutscene_presentation_of :: proc "contextless" (
+	data: []byte,
+	blob: ^Cutscene_Blob,
+	section: u32,
+) -> (
+	Cutscene_Presentation,
+	bool,
+) {
+	rows := cutscene_presentations(data, blob)
+	lo, hi := 0, len(rows)
+	for lo < hi {
+		mid := (lo + hi) / 2
+		if rows[mid].section < section {
+			lo = mid + 1
+		} else {
+			hi = mid
+		}
+	}
+	if lo < len(rows) && rows[lo].section == section {
+		return rows[lo], true
+	}
+	return {}, false
+}
+
 cutscene_events :: proc "contextless" (data: []byte, blob: ^Cutscene_Blob) -> []Cutscene_Event {
 	bytes := blob_bytes(data, blob.events)
 	return ([^]Cutscene_Event)(raw_data(bytes))[:len(bytes) / size_of(Cutscene_Event)]
@@ -1369,9 +1544,22 @@ Cutscene_Section_Contents :: struct {
 	// For a sub-sequence: the trim's end on the child's time, 0 for the child's range's end, and the maps of the child's
 	// bindings to this cutscene's.
 	trim_end:     i32,
+	// For a presentation section: what it shows. Its zero value is a black fade.
+	presentation: Cutscene_Presentation_Contents,
 	bindings:     []Cutscene_Binding_Map_Contents,
 	constraints:  []Cutscene_Constraint_Contents,
 	channels:     []Cutscene_Channel_Contents,
+}
+
+// Cutscene_Presentation_Contents is what a presentation section shows, as cutscene_write takes it: a fade's color, which
+// the blob makes opaque, and a subtitle's strings and its audio section's index.
+Cutscene_Presentation_Contents :: struct {
+	kind:    Cutscene_Presentation_Kind,
+	color:   [3]u8,
+	speaker: string,
+	text:    string,
+	key:     string,
+	audio:   Maybe(u32),
 }
 
 // Cutscene_Binding_Map_Contents gives a sub-sequence's binding, by its ID in the child, to a binding of the parent, by
@@ -1421,13 +1609,15 @@ Cutscene_Contents :: struct {
 	skip:          Cutscene_Skip,
 	skip_ranges:   []Cutscene_Skip_Range,
 	skip_fade:     i32,
+	// The color that a skip fades to. Its zero value is black.
+	skip_color:    [3]u8,
 	guids:         []Guid,
 }
 
 // cutscene_write builds a cutscene blob, flattening its tracks' sections, channels and keys.
 cutscene_write :: proc(contents: Cutscene_Contents, allocator := context.allocator) -> []byte {
 	section_count, channel_count, key_count, constraint_count := 0, 0, 0, 0
-	event_count, value_count, map_count := 0, 0, 0
+	event_count, value_count, map_count, presentation_count := 0, 0, 0, 0
 	for b in contents.bindings {
 		constraint_count += len(b.constraints)
 	}
@@ -1437,6 +1627,9 @@ cutscene_write :: proc(contents: Cutscene_Contents, allocator := context.allocat
 			value_count += len(ev.values)
 		}
 		section_count += len(tr.sections)
+		if tr.kind == .Presentation {
+			presentation_count += len(tr.sections)
+		}
 		for s in tr.sections {
 			map_count += len(s.bindings)
 			channel_count += len(s.channels)
@@ -1488,7 +1681,13 @@ cutscene_write :: proc(contents: Cutscene_Contents, allocator := context.allocat
 		map_count * size_of(Cutscene_Binding_Map),
 		align_of(Cutscene_Binding_Map),
 	)
+	presentations := reserve_bytes(
+		&buffer,
+		presentation_count * size_of(Cutscene_Presentation),
+		align_of(Cutscene_Presentation),
+	)
 	map_index := 0
+	presentation_index := 0
 	constraint_index := 0
 	add_constraint :: proc(
 		buffer: ^[dynamic]byte,
@@ -1626,6 +1825,26 @@ cutscene_write :: proc(contents: Cutscene_Contents, allocator := context.allocat
 				max_distance  = s.max_distance,
 				trim_end      = s.trim_end,
 			}
+			if tr.kind == .Presentation {
+				p := s.presentation
+				row := Cutscene_Presentation {
+					section = u32(section_index),
+					kind    = p.kind,
+					audio   = p.audio.? or_else CUTSCENE_NONE,
+					speaker = append_bytes(&buffer, transmute([]byte)p.speaker),
+					text    = append_bytes(&buffer, transmute([]byte)p.text),
+					key     = append_bytes(&buffer, transmute([]byte)p.key),
+				}
+				if p.kind == .Fade {
+					row.color = {p.color.r, p.color.g, p.color.b, 255}
+				}
+				mem.copy(
+					&buffer[int(presentations.offset) + presentation_index * size_of(Cutscene_Presentation)],
+					&row,
+					size_of(row),
+				)
+				presentation_index += 1
+			}
 			for m in s.bindings {
 				record := Cutscene_Binding_Map{u32(section_index), m.child, m.parent}
 				mem.copy(
@@ -1716,11 +1935,13 @@ cutscene_write :: proc(contents: Cutscene_Contents, allocator := context.allocat
 		skip = contents.skip,
 		skip_ranges = skip_ranges,
 		skip_fade = contents.skip_fade,
+		skip_color = {contents.skip_color.r, contents.skip_color.g, contents.skip_color.b, 255},
 		guids = guids,
 		constraints = constraints,
 		events = events,
 		event_values = event_values,
 		binding_maps = binding_maps,
+		presentations = presentations,
 	}
 	mem.copy(raw_data(buffer), &blob, size_of(blob))
 

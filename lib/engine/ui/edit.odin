@@ -186,3 +186,47 @@ focus_element :: proc(s: ^State, d: ^Document, id: string) -> string {
 	s.input.modality = .Keys
 	return ""
 }
+
+// own_attribute is the value that an element's document gives an attribute on the element itself, not through its
+// styles or what code set over it, and false when the element has none. Code that scales a document's own value, such
+// as the cutscene overlay's subtitle size, reads it here.
+own_attribute :: proc(
+	d: ^Document,
+	id: string,
+	attr: format.Ui_Attr,
+) -> (
+	value: format.Ui_Value,
+	ok: bool,
+) {
+	n := find_node(d, id) or_return
+	r := d.nodes[n].props
+	for p in d.props[r.first:][:r.count] {
+		if p.attr == attr {
+			return p.value, true
+		}
+	}
+	return nil, false
+}
+
+// override_of is what code set over an element's attribute, by the element's id, and false when nothing is set.
+override_of :: proc(d: ^Document, id: string, attr: format.Ui_Attr) -> (format.Ui_Value, bool) {
+	id_hash := hash_id(id)
+	for o in d.overrides {
+		if o.id_hash == id_hash && o.attr == attr {
+			return o.value, true
+		}
+	}
+	return nil, false
+}
+
+// set_value sets an attribute's value on the element of an id, as set_override does, for code that has the value
+// already parsed.
+set_value :: proc(
+	s: ^State,
+	d: ^Document,
+	id: string,
+	attr: format.Ui_Attr,
+	value: format.Ui_Value,
+) {
+	set_override(s, d, id, hash_id(id), attr, value)
+}

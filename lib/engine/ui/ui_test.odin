@@ -402,3 +402,46 @@ documents_come_and_go_with_their_entities :: proc(t: ^testing.T) {
 	testing.expect(t, document_of(&f.ui, other) == nil)
 	testing.expect(t, document_of(&f.ui, e).built)
 }
+
+@(test)
+an_owned_document_has_no_entity_outlives_the_world_and_takes_no_input :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(t, f)
+	OWNED :: "0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"
+	write_document(
+		t,
+		f,
+		OWNED,
+		"ui 1\n<ui size=\"20\">\n<button id=\"b\" anchor=\"fill\" click=\"pick\">{label}</button>\n</ui>\n",
+	)
+	handle, opened := open_owned(&f.ui, guid_of(OWNED), 8)
+	testing.expect(t, opened)
+	d := owned_document(&f.ui, handle)
+	testing.expect(t, d != nil && !d.visible)
+	step(f)
+	testing.expect(t, d.built)
+	// No entity's document is the owned one, not even the zero entity's.
+	testing.expect(t, document_of(&f.ui, {}) == nil)
+	d.visible = true
+	set_binding(&f.ui, d, "label", "shown")
+	text, _ := text_of(&f.ui, d, "b")
+	testing.expect_value(t, text, "shown")
+	// The world's entities going does not free it.
+	ecs.despawn_all(&f.world)
+	step(f)
+	testing.expect(t, owned_document(&f.ui, handle) == d && d.built)
+	// It takes no input, though its button covers the window.
+	step(f, {mouse_position = {50, 20}, down = {.Mouse_Left}, pressed = {.Mouse_Left}})
+	step(f, {mouse_position = {50, 20}, released = {.Mouse_Left}})
+	testing.expect_value(t, f.ui.input.hovered, NO_NODE)
+	testing.expect(t, !wants_input(&f.ui))
+	close_owned(&f.ui, handle)
+	testing.expect(t, owned_document(&f.ui, handle) == nil)
+	// A document that another owner opens in the slot is not the stale handle's.
+	again, _ := open_owned(&f.ui, guid_of(OWNED), 8)
+	testing.expect_value(t, again.index, handle.index)
+	testing.expect(t, owned_document(&f.ui, handle) == nil)
+	close_owned(&f.ui, handle)
+	testing.expect(t, owned_document(&f.ui, again) != nil)
+	close_owned(&f.ui, again)
+}

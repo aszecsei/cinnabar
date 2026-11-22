@@ -51,6 +51,17 @@ MAX_CUTSCENE_SKIP_HOLD :: 10
 CUTSCENE_AUDIO_DRIFT_KEY :: "cutscene.audio_drift"
 MIN_CUTSCENE_AUDIO_DRIFT :: 0.001
 MAX_CUTSCENE_AUDIO_DRIFT :: 0.5
+// The cutscene overlay's UI document, by GUID, and the color of its letterbox bars (see
+// docs/cinematics/tracks.md#presentation-tracks).
+CUTSCENE_OVERLAY_KEY :: "cutscene.overlay"
+CUTSCENE_LETTERBOX_COLOR_KEY :: "cutscene.letterbox_color"
+// The player's subtitle settings: whether subtitles show, a scale of their size, and the opacity of their backs (see
+// docs/cinematics/tracks.md#presentation-tracks), which the user file keeps.
+SUBTITLES_ENABLED_KEY :: "subtitles.enabled"
+SUBTITLES_SIZE_KEY :: "subtitles.size"
+SUBTITLES_BACKGROUND_KEY :: "subtitles.background"
+MIN_SUBTITLES_SIZE :: 0.5
+MAX_SUBTITLES_SIZE :: 2
 // The game's name, which a release's executable and window take, and its icon, a .ico file relative to the settings
 // file, which the export writes into the executable. The game only knows the keys.
 NAME_KEY :: "game.name"
@@ -101,6 +112,12 @@ Settings :: struct {
 	skip_hold:             Maybe(time.Duration),
 	// How far a cutscene's sound drifts before its track seeks it, in seconds, or nil for the cutscenes' own default.
 	audio_drift:           Maybe(f64),
+	// The cutscene overlay's document, or zero for the engine's, and its letterbox bars' color, sRGB-encoded, black by
+	// default.
+	cutscene_overlay:      format.Guid,
+	letterbox_color:       [3]u8,
+	// The player's subtitle settings. A key that no file gives is nil, for the cutscenes' own default.
+	subtitles:             Subtitle_Keys,
 }
 
 // physics_layers gives the layers that settings name, or the default ones.
@@ -429,6 +446,65 @@ parse :: proc(text: string, settings: ^Settings, problems: ^[dynamic]string = ni
 					MAX_CUTSCENE_SKIP_HOLD,
 					value,
 				)
+			}
+			continue
+		}
+		if key == CUTSCENE_OVERLAY_KEY {
+			if guid, ok := format.guid_parse(strings.trim_prefix(value, "$")); ok {
+				settings.cutscene_overlay = guid
+			} else {
+				problem(
+					problems,
+					line,
+					"%s takes a UI document's GUID of 32 hex digits, not %q",
+					key,
+					value,
+				)
+			}
+			continue
+		}
+		if key == CUTSCENE_LETTERBOX_COLOR_KEY {
+			if color, ok := format.ui_parse_color(value);
+			   ok && color.a == 255 && (len(value) == 4 || len(value) == 7) {
+				settings.letterbox_color = color.rgb
+			} else {
+				problem(problems, line, "%s takes a color, #rrggbb or #rgb, not %q", key, value)
+			}
+			continue
+		}
+		if key == SUBTITLES_ENABLED_KEY {
+			switch value {
+			case "true":
+				settings.subtitles.enabled = true
+			case "false":
+				settings.subtitles.enabled = false
+			case:
+				problem(problems, line, "%s takes true or false, not %q", key, value)
+			}
+			continue
+		}
+		if key == SUBTITLES_SIZE_KEY {
+			if size, ok := strconv.parse_f32(value);
+			   ok && size >= MIN_SUBTITLES_SIZE && size <= MAX_SUBTITLES_SIZE {
+				settings.subtitles.size = size
+			} else {
+				problem(
+					problems,
+					line,
+					"%s takes a number from %v to %v, not %q",
+					key,
+					MIN_SUBTITLES_SIZE,
+					MAX_SUBTITLES_SIZE,
+					value,
+				)
+			}
+			continue
+		}
+		if key == SUBTITLES_BACKGROUND_KEY {
+			if opacity, ok := strconv.parse_f32(value); ok && opacity >= 0 && opacity <= 1 {
+				settings.subtitles.background = opacity
+			} else {
+				problem(problems, line, "%s takes a number from 0 to 1, not %q", key, value)
 			}
 			continue
 		}

@@ -76,6 +76,7 @@ game_init :: proc(
 		&g.views,
 		&g.audio,
 		&g.scripts,
+		&g.ui,
 	)
 	register_world(g, h)
 	asset.init(&g.assets, platform, asset.content_source(platform.content_dir))
@@ -320,6 +321,8 @@ render_frame :: proc(g: ^Game, window: [2]u32, shown: camera.Frame_Views, h: Hoo
 		origin, extent := camera.pixel_rect(v.rect, window)
 		rects[i] = {f32(origin.x), f32(origin.y), f32(extent.x), f32(extent.y)}
 	}
+	// The cutscene overlay shows what the Late stage's presentation tracks gave, at the window's size.
+	cutscene.present(&g.cutscenes, &g.world, {f32(window.x), f32(window.y)})
 	// While a claim shows, no player's view does, and neither do the documents of the players' views.
 	ui.layout(
 		&g.ui,
@@ -428,6 +431,20 @@ update_project :: proc(g: ^Game, h: Hooks) {
 		settings.skip_hold,
 	)
 	cutscene.set_audio_drift(&g.cutscenes, settings.audio_drift.? or_else 0)
+	cutscene.set_overlay(&g.cutscenes, settings.cutscene_overlay, settings.letterbox_color)
+	if last, applied := g.subtitles_applied.?; !applied || last != settings.subtitles {
+		g.subtitles_applied = settings.subtitles
+		keys := settings.subtitles
+		defaults := cutscene.DEFAULT_SUBTITLES
+		cutscene.set_subtitles(
+			&g.cutscenes,
+			{
+				enabled = keys.enabled.? or_else defaults.enabled,
+				size = keys.size.? or_else defaults.size,
+				background = keys.background.? or_else defaults.background,
+			},
+		)
+	}
 	project.apply_display_settings(&g.display_applied, g.platform, &g.renderer, settings)
 	if h.settings_changed != nil {
 		h.settings_changed(g)

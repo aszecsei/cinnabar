@@ -1,6 +1,6 @@
 # Cinematics
 
-Cutscenes at run time, in `lib/engine/cutscene`. A cutscene asset holds bindings and tracks on one time axis (see [Content: Cutscenes](../content/kinds/cutscenes.md)). This layer describes how the game plays a cutscene: the entities that it acts on, how its tracks evaluate at a time, the player that runs it, and, in later parts, its tracks. Read [World: Scenes](../world/scenes.md) and [Editor: Prefabs](../editor/prefabs.md) first.
+Cutscenes at run time, in `lib/engine/cutscene`. A cutscene asset holds bindings and tracks on one time axis (see [Content: Cutscenes](../content/kinds/cutscenes.md)). This layer describes how the game plays a cutscene: the entities that it acts on, how its tracks evaluate at a time, the player that runs it, its tracks, and the overlay that shows its fades, letterbox and subtitles. Read [World: Scenes](../world/scenes.md) and [Editor: Prefabs](../editor/prefabs.md) first.
 
 ## Documents
 
@@ -11,22 +11,22 @@ Cutscenes at run time, in `lib/engine/cutscene`. A cutscene asset holds bindings
 | [Player](player.md) | The player's states and its one writer, handles, commands, loading and failures, conflicts between players, and reset. |
 | [Possession](possession.md) | What a cutscene suspends on the entities that it holds: behaviours, AI, navigation and physics. The input context and the hidden HUD, and how the end gives them back. |
 | [Skipping](skipping.md) | The skip policy, the `Skipping` state and its fades, the events that fire when skipped, and the skip action that a player holds. |
-| [Tracks](tracks.md) | The curve that every keyed track shares, and the kinds of track: property, transform, animation, camera cut, audio, event and sub-sequence tracks so far, with the cinematic camera and its constraints. |
+| [Tracks](tracks.md) | The curve that every keyed track shares, and the kinds of track: property, transform, animation, camera cut, audio, event, sub-sequence and presentation tracks, with the cinematic camera and its constraints, and the overlay that shows the presentation. |
 
 ## Overview
 
 | Package | Side | Responsibility |
 |---|---|---|
-| `lib/engine/cutscene` | Game | The bindings of a cutscene: how they resolve, their states, what they suspend, and how spawned entities are shown and released. The evaluation of its tracks at a time: the clock, the two systems, blending and the restore snapshot. The players: their lifecycle, handles and commands, what they hold of the game while they play, and how they skip. The curve, and the kinds of track. |
+| `lib/engine/cutscene` | Game | The bindings of a cutscene: how they resolve, their states, what they suspend, and how spawned entities are shown and released. The evaluation of its tracks at a time: the clock, the two systems, blending and the restore snapshot. The players: their lifecycle, handles and commands, what they hold of the game while they play, and how they skip. The curve, and the kinds of track. The overlay: the UI document that shows the presentation tracks' fades, letterbox and subtitles, and the player's subtitle settings. |
 
 The data flow:
 1. A script or the game plays a cutscene, and gets a handle to its [player](player.md). In the next frame, the player loads the cutscene and the assets that it references, and resolves its bindings. A possessed binding finds an entity of a loaded scene. A spawned binding spawns a prefab, which stays hidden until the cutscene plays. Each binding suspends the systems that would fight the cutscene on its entity, such as its behaviours and its AI ([Possession](possession.md)).
 2. When the cutscene starts to play, the player pushes its input context and hides the HUD. Each tick, the cutscene's time advances on its clock, and its tracks evaluate at the time. Tracks ask for a binding's entity, and get it only while it is alive. Before a track first writes a field, the snapshot saves the field ([Evaluation](evaluation.md)).
 3. A player who holds the skip action, or a script, skips the cutscene: behind a fade, the player evaluates the end, or the end of a skip range, once, and fires only the events marked to fire when skipped ([Skipping](skipping.md)).
 4. When the cutscene ends, the player gives the world back: the tracks set to restore put their fields back, the input and the HUD come back, the bindings resume what they suspended, the spawned entities are despawned and the assets are unloaded.
+5. Each frame, the presentation tracks give a fade, letterbox bars and subtitles, and the overlay, a UI document that the cutscene state owns, shows them over gameplay ([Tracks: Presentation tracks](tracks.md#presentation-tracks)). The overlay outlives the player, so it fades back from a skip's fade after the world is given back.
 
-**Not built yet:** the presentation track ([Tracks: Not built yet](tracks.md#not-built-yet)), the scripts' `Cutscene` library and the cutscene editor.
- Each one is a sub-issue of [#526](https://github.com/aszecsei/cinnabar/issues/526).
+**Not built yet:** the scripts' `Cutscene` library and the cutscene editor. Each one is a sub-issue of [#526](https://github.com/aszecsei/cinnabar/issues/526).
 
 ## References
 

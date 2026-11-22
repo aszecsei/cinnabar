@@ -2,7 +2,7 @@
 
 Fonts are `.ttf`, `.otf` and `.ttc` files in the content roots, which UI text is shaped and drawn with. `just fonts` runs `cook fonts --cache build/<target>/content --config dev|release --root game=<content root> --root engine=lib/engine/content`, and the daemon cooks them like any other kind (`tools/cook/fonts.odin`).
 
-**In this document:** [The cook](#the-cook) · [Glyphs](#glyphs) · [The atlas](#the-atlas) · [The blob](#the-blob) · [Import settings](#import-settings)
+**In this document:** [The cook](#the-cook) · [Glyphs](#glyphs) · [The atlas](#the-atlas) · [The blob](#the-blob) · [The engine's font](#the-engines-font) · [Import settings](#import-settings)
 
 ## The cook
 
@@ -43,6 +43,10 @@ A test font, `tools/cook/testdata/fonts/FiraSans-Subset.ttf`, is Fira Sans cut d
 ## The blob
 
 `Font_Blob` holds the atlas's GUID and size, the font's units per em, `em_size` and `range`, the ascender, descender and line gap in em with y up, which font of a collection it is, its `Font_Glyph` records sorted by id, the font's file, its family name from its `name` table, and the source path. A `Font_Glyph` is its id, its cell in the atlas in texels from the top left, and its plane. The font's file starts at 16 bytes. The runtime shapes text with it, as shaping needs the font's tables, and the atlas only has the glyphs.
+
+## The engine's font
+
+The engine content root ships Allo Regular (`lib/engine/content/fonts/Allo-Regular.otf`), a static CFF font from github.com/joshpuckett/allo. Its license, the SIL Open Font License, is in `Allo-OFL.txt` beside it. The cutscene overlay's document uses it ([UI: Owned documents](../../ui/design.md#owned-documents)).
 
 ## Import settings
 

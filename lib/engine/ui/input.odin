@@ -309,7 +309,7 @@ scope :: proc(s: ^State) -> []i32 {
 	// Each document's order and slot, the highest order first, and of one order the later slot, which draws later.
 	ordered := make([dynamic][2]i32, 0, MAX_DOCUMENTS, context.temp_allocator)
 	for &d, i in s.documents {
-		if d.used && d.built && d.visible && len(d.nodes) > 0 && d.nodes[0].shown {
+		if d.used && d.owner == 0 && d.built && d.visible && len(d.nodes) > 0 && d.nodes[0].shown {
 			append(&ordered, [2]i32{d.order, i32(i)})
 		}
 	}

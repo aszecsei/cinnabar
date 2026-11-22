@@ -210,14 +210,15 @@ dial_track :: proc(ctx: ^Track_Context) {
 }
 
 // event_track is the test's Late events, on presentation tracks: each key is an event at its section's start plus its time,
-// which records the key's value in the kind's list when it fires. The keys of a channel named "skipped" are marked to
-// fire when skipped; a skip passes the others.
+// which records the key's value in the kind's list when it fires. The keys of a channel named "skipped", which stand_in
+// names "amount", are marked to fire when skipped; a skip passes the others.
 @(private = "file")
 event_track :: proc(ctx: ^Track_Context) {
 	fired := (^[dynamic]f32)(ctx.user)
 	for section in format.cutscene_track_sections(ctx.data, ctx.blob, ctx.track) {
 		for channel in format.cutscene_section_channels(ctx.data, ctx.blob, section) {
-			if ctx.skipped && format.blob_string(ctx.data, channel.name) != "skipped" {
+			if ctx.skipped &&
+			   format.blob_string(ctx.data, channel.name) != format.CUTSCENE_LETTERBOX_AMOUNT {
 				continue
 			}
 			for key in format.cutscene_channel_keys(ctx.data, ctx.blob, channel) {
@@ -365,7 +366,7 @@ write_cutscene :: proc(t: ^testing.T, f: ^Player_Fixture, c: Cutscene) {
 				kind = .Presentation,
 				name = "Late events",
 				binding = format.CUTSCENE_NONE,
-				sections = events,
+				sections = stand_in(events),
 			},
 			format.Cutscene_Track_Contents {
 				id = 3,
@@ -1298,7 +1299,7 @@ write_skippable :: proc(
 		kind     = .Presentation,
 		name     = "Events",
 		binding  = format.CUTSCENE_NONE,
-		sections = events,
+		sections = stand_in(events),
 	}
 	bindings := make([]format.Cutscene_Binding_Contents, 1, context.temp_allocator)
 	bindings[0] = possessed(1, "Hero")
@@ -1730,4 +1731,35 @@ a_shots_entity_under_a_mapped_spawned_binding_shows_only_in_its_section :: proc(
 	}
 	frame(f)
 	testing.expect(t, !ecs.has(&f.world, lantern, ecs.Loading), "the lantern shows in its section")
+}
+
+// stand_in makes sections the stand-in event kind's, which the tests register over the presentation kind: letterbox
+// sections, whose channels the blob takes, with each "value" channel as "aspect" and each "skipped" one as "amount".
+@(private = "file")
+stand_in :: proc(
+	sections: []format.Cutscene_Section_Contents,
+) -> []format.Cutscene_Section_Contents {
+	result := make([]format.Cutscene_Section_Contents, len(sections), context.temp_allocator)
+	for s, i in sections {
+		result[i] = s
+		result[i].presentation = {
+			kind = .Letterbox,
+		}
+		channels := make(
+			[]format.Cutscene_Channel_Contents,
+			len(s.channels),
+			context.temp_allocator,
+		)
+		for c, j in s.channels {
+			channels[j] = c
+			switch c.name {
+			case "value":
+				channels[j].name = format.CUTSCENE_LETTERBOX_ASPECT
+			case "skipped":
+				channels[j].name = format.CUTSCENE_LETTERBOX_AMOUNT
+			}
+		}
+		result[i].channels = channels
+	}
+	return result
 }

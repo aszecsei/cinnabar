@@ -13,6 +13,7 @@ import "cinnabar:engine/audio"
 import "cinnabar:engine/camera"
 import "cinnabar:engine/ecs"
 import "cinnabar:engine/script"
+import "cinnabar:engine/ui"
 
 // MAX_FIELD_SIZE is the most bytes of one field that a track writes, and so that the snapshot saves.
 MAX_FIELD_SIZE :: 64
@@ -64,6 +65,11 @@ State :: struct {
 	// The scripts that event tracks send their events to (see docs/cinematics/tracks.md#event-tracks). Or nil, and only
 	// the native handlers get them.
 	scripts:       ^script.Runtime,
+	// The UI that the overlay's document shows in (see docs/cinematics/tracks.md#presentation-tracks). Or nil, and
+	// nothing shows the presentation tracks.
+	ui:            ^ui.State,
+	// The overlay: its document, its settings and what it holds of a player that ended.
+	overlay:       Overlay,
 	kinds:         [format.Cutscene_Track_Kind]Track_Kind,
 	// The event tracks' events that flush_events queued and send_events has not delivered yet, in order. Their names and
 	// values are frame memory, so end_frame delivers what is left. Heap memory.
@@ -138,6 +144,8 @@ Evaluation :: struct {
 	// driver at its end.
 	driven:       [dynamic]Driven,
 	driven_clips: [dynamic]Driven_Clip,
+	// What the presentation tracks gave at the last Late phase, which the overlay shows (see present).
+	presented:    Presentation,
 }
 
 // Phase_Mark is where a phase's events have fired up to.
@@ -259,8 +267,13 @@ init :: proc(
 	views: ^camera.Views = nil,
 	sounds: ^audio.State = nil,
 	scripts: ^script.Runtime = nil,
+	interface: ^ui.State = nil,
 ) {
 	s.assets = assets
+	s.ui = interface
+	s.overlay = {
+		subtitles = DEFAULT_SUBTITLES,
+	}
 	s.audio = sounds
 	s.scripts = scripts
 	s.rate = 1
@@ -278,6 +291,7 @@ init :: proc(
 // assets are alive. It gives how many spawned roots it despawned.
 destroy :: proc(s: ^State, w: ^ecs.World) -> (despawned: int) {
 	despawned = reset(s, w)
+	close_overlay(s)
 	delete(s.events)
 	s.events = nil
 	delete(s.outbox)
@@ -310,6 +324,10 @@ register :: proc(s: ^State, w: ^ecs.World) {
 	s.kinds[.Audio] = {
 		phase    = .Late,
 		evaluate = audio_track,
+	}
+	s.kinds[.Presentation] = {
+		phase    = .Late,
+		evaluate = presentation_track,
 	}
 	// In the Fixed phase, so script.fixed_events delivers the events in the same tick, as animation markers are.
 	s.kinds[.Event] = {
@@ -522,6 +540,12 @@ run_phase :: proc(
 	events: Events,
 ) {
 	follow_blob(s, e, w, data, blob)
+	if phase == .Late {
+		// The presentation is a value of the time alone: the tracks of this phase make it again.
+		e.presented = {
+			key = e.key.? or_else 0,
+		}
+	}
 	now := e.time
 	from := i64(blob.range_start) - 1
 	seek: Maybe(Seek_Range)
