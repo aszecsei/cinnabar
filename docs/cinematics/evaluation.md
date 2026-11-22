@@ -38,7 +38,7 @@ The blob's `clock` says which time the cutscene follows:
 - **The game's clock moves by whole world ticks.** A frame that runs no tick does not move it, so it can be up to one world tick behind the frames.
 - **The end.** The time stops at the range's end. The player then finishes ([Player: The frame](player.md#the-frame)).
 - **Seeks.** `seek` sets the time, inside the range, for a debugger, a scrub or the editor. It marks each phase as sought to the new time, so no event that it jumps over fires, except the keys that an event track marks to fire on seek ([Events](#events)). It also counts the jump in `Evaluation.jumps`, as `skip_to` does: an empty event range alone does not tell a seek from a pause, and a seek cuts the camera.
-- **The editor's Edit mode** runs no ticks and no frame code for the world, so nothing advances a cutscene there. The editor will scrub through `seek` and its own overrides ([#548](https://github.com/aszecsei/cinnabar/issues/548)).
+- **The editor's Edit mode** runs no ticks and no frame code for the world, so no player advances a cutscene there. The cutscene editor's preview evaluates one itself with `seek` and `evaluate`, and moves it by the frame's real time while it plays. Its writes lay over the document as the editor's overrides do. `lift` puts them back and forgets them, and keeps the drives, the camera cut's claim and the voices (see [Cutscene editor: Preview](../editor/cutscene-editor.md#preview)).
 
 ## The order in the frame
 

@@ -629,7 +629,7 @@ Scripts read and change them with the `Subtitles` library ([Scripting: Subtitles
 ## Not built yet
 
 - Fields blend track by track: each track blends its sections over the field's own value, and the later track wins. So two shots that overlap cross-fade an `Animator`'s pose, but a transform or a property that both write takes the later shot's value at its weight over the own value, not over the other shot's.
-- No editor sets an evaluation's `audition` yet. The cutscene editor's scrub and playback ([#548](https://github.com/aszecsei/cinnabar/issues/548)) will, and its waveforms are [#556](https://github.com/aszecsei/cinnabar/issues/556). The transport's option to send events to edit-mode behaviours waits for the editor too.
+- The cutscene editor's preview sets `audition`: `.Preview` while it plays and `.Scrub` while it is scrubbed (see [Cutscene editor: Preview](../editor/cutscene-editor.md#preview)). Its waveforms are [#556](https://github.com/aszecsei/cinnabar/issues/556). The transport's option to send events to edit-mode behaviours is [#551](https://github.com/aszecsei/cinnabar/issues/551) part 2.
 - In the editor, only the Game view follows the cut track. A viewport that pilots a camera waits for [#555](https://github.com/aszecsei/cinnabar/issues/555).
 
 ## Procedures

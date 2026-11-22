@@ -81,7 +81,7 @@ Two settings of the cutscene act on the game and not on a binding ([Content: Cut
 
 ## Giving it back
 
-One procedure gives everything back. `give_back` runs when a live player goes to `Restored` or `Failed`, and `reset` (a soft restart, or a new level) goes through it too ([Player: Reset](player.md#reset)). It:
+One procedure gives everything back. `close_live` runs when a live player goes to `Restored` or `Failed`, and `reset` (a soft restart, or a new level) goes through it too ([Player: Reset](player.md#reset)). It:
 1. restores the fields that the tracks set to restore wrote;
 2. releases the hold: pops the input context and shows the hidden documents (`release_hold`);
 3. releases the bindings (`release_bindings`): each binding resumes what it suspended, and then the spawned entities are despawned.
