@@ -14,6 +14,10 @@ import format "cinnabar:engine/asset/format"
 MAX_ASSETS :: 4096
 MAX_PATH :: 260
 MAX_BUNDLES :: 64
+// MAX_UNREADABLE is the most blobs that read_blob remembers it could not read, so it reports each once. Past it, the
+// oldest is forgotten, and reported again if it is still missing.
+MAX_UNREADABLE :: 1024
+
 // MAX_LIVE_ASSETS is the most live blobs, from set_live, at once.
 MAX_LIVE_ASSETS :: 16
 
@@ -146,6 +150,10 @@ Assets :: struct {
 	// flag of each record, since few are live at once.
 	live:             [MAX_LIVE_ASSETS]format.Guid,
 	live_count:       int,
+	// The blobs that read_blob could not read and has reported, oldest first. A caller can try a missing blob on
+	// each frame, as a pipeline whose shader is not cooked yet does, so each is reported once until it reads.
+	unreadable:       [MAX_UNREADABLE]format.Guid,
+	unreadable_count: int,
 }
 
 init :: proc(a: ^Assets, platform: ^core.Platform_API, source: Source) {
@@ -153,6 +161,7 @@ init :: proc(a: ^Assets, platform: ^core.Platform_API, source: Source) {
 	a.source = source
 	a.used = 0
 	a.live_count = 0
+	a.unreadable_count = 0
 	switch &source in a.source {
 	case Loose_Cache:
 		a.cache_generation = platform.file_modified(generation_path(a))
@@ -844,12 +853,14 @@ read_blob :: proc(a: ^Assets, guid: format.Guid) -> (data: []byte, modified: i64
 				) or_else nil
 		}
 		if data == nil {
-			buffer: [32]u8
-			log.errorf(
-				"asset: no blob for %s at %s. Cook the content.",
-				format.guid_format(guid, &buffer),
-				path,
-			)
+			if first_failure(a, guid) {
+				buffer: [32]u8
+				log.errorf(
+					"asset: no blob for %s at %s. Cook the content.",
+					format.guid_format(guid, &buffer),
+					path,
+				)
+			}
 			return
 		}
 	case Bundle:
@@ -859,11 +870,44 @@ read_blob :: proc(a: ^Assets, guid: format.Guid) -> (data: []byte, modified: i64
 	}
 	header, valid := format.blob_header(data)
 	if !valid || header.guid != guid {
-		log.errorf("asset: %s is not a cooked blob of its GUID", path)
+		if first_failure(a, guid) {
+			log.errorf("asset: %s is not a cooked blob of its GUID", path)
+		}
 		delete(data, a.platform.asset_allocator)
 		return nil, 0, false
 	}
+	readable(a, guid)
 	return data, modified, true
+}
+
+// first_failure records that a blob could not be read, and is whether this is the first time since it last read, so
+// that its failure is reported once and not on each try.
+@(private)
+first_failure :: proc(a: ^Assets, guid: format.Guid) -> bool {
+	for g in a.unreadable[:a.unreadable_count] {
+		if g == guid {
+			return false
+		}
+	}
+	if a.unreadable_count == MAX_UNREADABLE {
+		copy(a.unreadable[:], a.unreadable[1:])
+		a.unreadable_count -= 1
+	}
+	a.unreadable[a.unreadable_count] = guid
+	a.unreadable_count += 1
+	return true
+}
+
+// readable forgets a blob's failure, as it reads now, so a later failure is reported again.
+@(private)
+readable :: proc(a: ^Assets, guid: format.Guid) {
+	for g, i in a.unreadable[:a.unreadable_count] {
+		if g == guid {
+			copy(a.unreadable[i:], a.unreadable[i + 1:a.unreadable_count])
+			a.unreadable_count -= 1
+			return
+		}
+	}
 }
 
 // read_bundled reads a blob from the open bundle that has it. A GUID that no open bundle has may be a level's scene, so
@@ -884,7 +928,9 @@ read_bundled :: proc(
 	name := format.guid_format(guid, &buffer)
 	b, entry, found := bundle_entry_opening(a, source, guid)
 	if !found {
-		log.errorf("asset: no open bundle has %s. Cook and package the content.", name)
+		if first_failure(a, guid) {
+			log.errorf("asset: no open bundle has %s. Cook and package the content.", name)
+		}
 		return
 	}
 	path = bundle_path(a, source, string(b.name[:b.name_len]))

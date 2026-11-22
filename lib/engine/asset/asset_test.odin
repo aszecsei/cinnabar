@@ -238,6 +238,36 @@ missing_and_mismatched_blobs_do_not_load :: proc(t: ^testing.T) {
 }
 
 @(test)
+a_missing_blob_is_reported_once_until_it_reads :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	context.logger = capture_errors(f)
+	// A caller that tries on each frame, as a pipeline whose shader is not cooked yet does.
+	for _ in 0 ..< 100 {
+		_, ok := load(&f.assets, test_guid(1))
+		testing.expect(t, !ok)
+		_, _, ok = read(&f.assets, test_guid(2))
+		testing.expect(t, !ok)
+	}
+	testing.expect_value(t, len(f.errors), 2)
+	// Once cooked, it loads, and a failure after that is new, so it is reported again.
+	write_blob(t, f, test_guid(1), 7, time.now())
+	h, ok := load(&f.assets, test_guid(1))
+	testing.expect(t, ok)
+	unload(&f.assets, h)
+	os.remove(loose_path(&f.assets, test_guid(1)))
+	_, ok = load(&f.assets, test_guid(1))
+	testing.expect(t, !ok)
+	testing.expect_value(t, len(f.errors), 3)
+	// Past the most it remembers, the oldest failure is forgotten, and reported again.
+	for i in 0 ..< MAX_UNREADABLE {
+		_, _, _ = read(&f.assets, {0 = u8(i), 1 = u8(i >> 8), 15 = 0xbb})
+	}
+	testing.expect_value(t, f.assets.unreadable_count, MAX_UNREADABLE)
+	testing.expect_value(t, len(f.errors), 3 + MAX_UNREADABLE)
+}
+
+@(test)
 poll_swaps_a_rewritten_blob :: proc(t: ^testing.T) {
 	f := setup(t)
 	defer teardown(f)
