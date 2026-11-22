@@ -3,11 +3,10 @@
 The cutscene editor edits a cutscene (see [Content: Cutscenes](../content/kinds/cutscenes.md)), which the game plays as [Cinematics](../cinematics/README.md) describes. Each open one is a tab, `CutsceneEditorDocument`, over a `CutsceneEditor` in the shell, which holds its state. Docking can rebuild the view, and tests drive the editor without a window.
 
 The editor is built in steps under [#548](https://github.com/aszecsei/cinnabar/issues/548). This page describes what is built: the tab, its document, its timeline and details, and the check of its unsaved text. These come next:
-- the rest of the timeline ([#550](https://github.com/aszecsei/cinnabar/issues/550)): markers, copy and paste, the filter, mute and solo;
-- scrubbing and playing in Edit ([#551](https://github.com/aszecsei/cinnabar/issues/551));
+- scrubbing and playing in Edit ([#551](https://github.com/aszecsei/cinnabar/issues/551)), which plays what [mute and solo](#mute-and-solo) let it;
 - keys from the inspector ([#552](https://github.com/aszecsei/cinnabar/issues/552));
 - the curve editor ([#553](https://github.com/aszecsei/cinnabar/issues/553));
-- the bindings and the viewport's selection ([#554](https://github.com/aszecsei/cinnabar/issues/554));
+- the bindings and the viewport's selection ([#554](https://github.com/aszecsei/cinnabar/issues/554)), with the filter that shows the tracks of the entities selected in the viewport;
 - the clips' display ([#556](https://github.com/aszecsei/cinnabar/issues/556)).
 
 **In this document:** [The file](#the-file) · [The tab](#the-tab) · [The timeline](#the-timeline) · [Preview](#preview)
@@ -17,7 +16,7 @@ The editor is built in steps under [#548](https://github.com/aszecsei/cinnabar/i
 `CutsceneFile` reads a cutscene's text as whole lines (`TextLine`, which the animation graph and decision editors' files share). It puts each line in the block that `tools/cook/cutscenes.odin` would read it in. It does not write the text again from a model.
 
 - **Blocks nest by keyword, not by indent.** The cooker ignores indents. So a block starts at its keyword line:
-  - `binding` and `track` are under the cutscene;
+  - `binding`, `track` and `marker` are under the cutscene;
   - `section`, `trigger` and `range` are under a track;
   - `channel` is under a section;
   - `key` is under a channel.
@@ -55,6 +54,7 @@ The editor is built in steps under [#548](https://github.com/aszecsei/cinnabar/i
   - a section's or a range's start and end;
   - a trigger's time;
   - a key's time, value and interpolation;
+  - a marker's time, name and color;
   - the cutscene's length;
   - a row for each other setting, with a button that removes it;
   - a box that adds a setting as `name = value`.
@@ -75,7 +75,7 @@ On the left is a header for each row, and on the right is the time area. Both sc
 - **The order:** the tracks that have no binding come first, as camera cuts, audio, events, presentation and sub-sequences. Then each binding has a row, with its tracks under it. Its fold arrow hides them.
 - **A track's row** shows its sections, ranges and triggers, and the keys of all its sections. Its fold arrow shows a row for each channel name, with that channel's keys.
 - **Glyphs:** keys and triggers closer than 2 pixels draw as one glyph, as the profiler merges zones.
-- **A track's header** shows its kind's color, its name, a mark when its lines have problems, and the lock.
+- **A track's header** shows its kind's color, its name, a mark when its lines have problems, and at its right end, mute (M), solo (S) and the lock.
 - **A click on a header** selects the binding or the track, so the details edit its name and settings.
 
 ### The ruler
@@ -83,7 +83,8 @@ On the left is a header for each row, and on the right is the time area. Both sc
 The ruler shows timecode (`mm:ss:ff`), or frames at the display rate with **Show Frames**. Its ticks use `TimelineGeometry.TickSpacing` in whole seconds where a second fits, and in whole frames below that (`FrameSpacing`). So every tick is on a frame, and a label is a round timecode.
 - **The playhead.** A click or a drag on the ruler moves the playhead to a frame. The playhead belongs to the editor, so it is in no undo entry. In this step it only marks where Split, Home and End act. Scrubbing and playing in Edit come with [#551](https://github.com/aszecsei/cinnabar/issues/551).
 - **The range bar,** at the bottom of the ruler, is the part that plays: the cutscene's `range`. A drag of either end sets it. When the range is all of the length, the editor removes the setting.
-- **The length.** The handle at the top of the ruler is the length. A drag sets `length`, but not to less than the end of a section, range or trigger. Time past the length is shaded.
+- **The length.** The handle at the top of the ruler is the length. A drag sets `length`, but not to less than the end of a section, range or trigger, or a marker. Time past the length is shaded.
+- **Markers** are flags in the top of the ruler, in their colors, with their names while they fit (see [Markers](#markers)). A flag is over the handles: a press on it selects its marker.
 
 ### Navigation
 
@@ -91,12 +92,12 @@ The ruler shows timecode (`mm:ss:ff`), or frames at the display rate with **Show
 - **Zoom and scroll.** The wheel zooms about the pointer, and with Shift it scrolls the time. The wheel over the headers scrolls the rows.
 - **Pan:** a middle drag, or Alt and a right drag.
 - **F** fits the selection, or the whole cutscene when nothing on the timeline is selected.
-- **The playhead's keys.** **Home** and **End** move the playhead to the start and the end. **Ctrl+Left** and **Ctrl+Right** move it to the previous or next edge of a section, a range or a trigger.
+- **The playhead's keys.** **Home** and **End** move the playhead to the start and the end. **Ctrl+Left** and **Ctrl+Right** move it to the previous or next marker, or edge of a section, a range or a trigger.
 
 ### Selection
 
 The selection uses the gestures of the node graphs.
-- **A click** selects a section, a range, a trigger or a key glyph. Shift adds, and Ctrl toggles.
+- **A click** selects a section, a range, a trigger, a key glyph or a marker's flag. Shift adds, and Ctrl toggles.
 - **A box:** a drag in empty space selects what the box covers.
 - **To clear:** click in empty space, or press Esc.
 - **The primary item** is the last one selected. The details show it.
@@ -106,7 +107,7 @@ The selection uses the gestures of the node graphs.
 
 Each drag is one undo entry, through `Begin`, `StepFromStart` and `Commit`. Each step sets the blocks from where they were when the drag began, so steps do not add up. Esc during a drag cancels it, and the text and the undo stack stay as they were. During a drag, a tooltip shows the start, end, length and change in the ruler's units.
 
-- **Move:** drag a body, a trigger or a key. Everything selected moves.
+- **Move:** drag a body, a trigger, a key or a marker's flag. Everything selected moves.
   - A key moves inside its section, and everything stays inside the length.
   - A key moves with its section when both are selected.
   - A subtitle whose `audio` names an audio section moves with that section.
@@ -124,25 +125,61 @@ Each drag is one undo entry, through `Begin`, `StepFromStart` and `Commit`. Each
   - The second half has the next section ID and starts where the first ends. Its keys move back by the cut, and its source starts later.
   - The second half takes the ease out, the blend out and the post roll. The first half keeps the ease in, the blend in and the pre roll.
   - Each channel gets a key at the cut in both halves. After a constant key, the value holds. After the other kinds, the value is on a straight line between the keys on each side. A Bezier key's tangents are not kept. The curve editor ([#553](https://github.com/aszecsei/cinnabar/issues/553)) will give exact values.
-- **Delete** deletes the selected sections, events and keys. When a channel loses its last key, the channel is deleted too. A subtitle whose audio section is deleted stays, but loses its `audio`, so that it does not name a section that is gone.
+- **Delete** deletes the selected sections, events, keys and markers. When a channel loses its last key, the channel is deleted too. A subtitle whose audio section is deleted stays, but loses its `audio`, so that it does not name a section that is gone.
 - **Nudge:** `,` and `.` move the selection one frame, and with Shift, 10 frames.
   - The repeats of a held key are one undo entry (`GraphDocument.EditMerged`). The release of the key ends the entry.
   - No entry stays open between repeats, so Save and Undo still run.
   - Nudges from the command palette merge until another edit.
-- **Order:** sections and keys stay in start order in the text, as the cooker needs. When a section moves past another, it goes after it, with its comment.
+- **Order:** sections and keys stay in start order in the text, as the cooker needs. When a section moves past another, it goes after it, with its comment. Markers stay in time order among the places that markers have in the text.
 
 ### Snapping and lock
 
 - **Snapping** is on at first, and **N** turns it off and on. Ctrl during a drag turns it off for that drag.
-  - A dragged time snaps to a target within 6 pixels: the playhead, the edges of the other sections and ranges, or the other triggers and keys. A dashed line shows the target.
+  - A dragged time snaps to a target within 6 pixels: the playhead, the markers, the edges of the other sections and ranges, or the other triggers and keys. A dashed line shows the target.
   - With no target, the time snaps to a frame.
-- **Lock.** The padlock in a track's header, or **Lock Track**, locks the track. No edit changes its sections, events and keys, but you can still select them. Locks belong to each user. They are in `cutscene-timeline.json` in the editor's settings, with Show Frames, for each cutscene.
+- **Lock.** The padlock in a track's header, or **Lock Track**, locks the track. No edit changes its sections, events and keys, but you can still select them. Markers are on no track, so no lock holds them. Locks belong to each user. They are in `cutscene-timeline.json` in the editor's settings, with Show Frames, mute and solo, for each cutscene.
+
+### Markers
+
+A marker is a named, colored point on the cutscene's time, such as a beat of the music or the start of a shot. It is in the asset as a `marker` block (see [Content: Cutscenes](../content/kinds/cutscenes.md#markers)), so every user sees it.
+- **M** (**Add Marker**) adds a marker at the playhead, named "Marker" and its ID, and selects it. When a marker is at the playhead already, M selects that one.
+- A new marker goes after the last marker in the text, or with none, before the first binding or track, so the header's settings stay above it.
+- **A drag of its flag** moves it, as one entry that snaps and that Esc cancels. Nudge and Delete act on it too.
+- **The details** edit its time, its name and its color (`#rrggbb`). An empty color is the default amber.
+- A faint line in its color runs down the rows at its time.
+
+### Copy and paste
+
+The clipboard is the shell's, `EditorShell.CutsceneClipboard`, so a paste works in another cutscene's tab. The system's clipboard does not change. A copy (`CutsceneEdits.Copy`) holds copies of the selected sections (with their channels and keys), triggers, ranges, keys and markers, their times, and for each, a copy of its track without its sections.
+- **Copy** (Ctrl+C) copies. **Cut** (Ctrl+X) copies and then deletes, in one entry; a block on a locked track is copied but stays.
+- **Paste** (Ctrl+V) puts the earliest copied time at the playhead, and keeps the times of the blocks to each other, in one entry. It selects what it pasted.
+  - **Where:** with a track selected, or a block on one, a copy from one track of that kind goes onto that track. Otherwise each copied track's blocks go onto a track of its kind on the selected track's or binding's binding. With nothing selected, they go back onto the tracks they came from, or onto a track of the same kind on the same binding.
+  - **A missing track:** when the target has no track of a copied kind, the editor asks (`PasteTracksRequested`). **Add Tracks** adds one like the copied track, on that binding, in the paste's entry. **Cancel** pastes nothing.
+  - **IDs:** pasted sections, triggers, ranges and markers take new IDs. A pasted subtitle's `audio` names its pasted sound's new ID, or is removed when its sound was not pasted.
+  - **Keys** go into the section of the target track that holds their new time, in the channel of their name. A key with no such section or channel is left out.
+  - A locked track takes nothing. When what is pasted ends past the length, the length grows to hold it.
+- **Duplicate** (Ctrl+D) is the scene's Duplicate, which acts on the timeline while it has the keyboard. It pastes the selection onto its own tracks right after itself: it moves by the span from its earliest start to its latest end, or by a frame for a single point. The clipboard does not change.
+
+### Search and filter
+
+A strip over the timeline filters its rows. A filter belongs to the tab, and the editor does not save it. Every build of the rows takes it (`CutsceneRowFilter`), so hit tests, the edges of Ctrl+Left and Ctrl+Right, and F see the rows that are drawn.
+- **The search box** filters by name as you type, ignoring case. A binding whose name has the text shows all of its tracks. A track whose name has the text shows with its binding. **Ctrl+F** (**Find Track**) puts the keyboard in the box, and Esc there clears it and gives the keyboard back to the timeline.
+- **Keys under selection** shows only the tracks that have a key between the earliest start and the latest end of the selection. It keeps the span that the selection had when it was turned on, so a click in the filtered rows does not change which rows there are. With nothing selected, it hides nothing.
+- **The selection.** When a filter hides a track, what is selected on it leaves the selection, so Delete never acts on what is not in view.
+
+### Mute and solo
+
+The **M** and **S** buttons in a track's header, and **Mute Track** and **Solo Track**, mute and solo the track for this user. They change no file but `cutscene-timeline.json`, so they do not dirty the cutscene.
+- `CutsceneEditor.Audible(track)` says whether the preview plays a track. It does not when the user muted the track, or when the user soloed other tracks and not this one. Scrubbing and playing in Edit ([#551](https://github.com/aszecsei/cinnabar/issues/551)) ask it.
+- A track whose asset sets `muted = true` plays in no preview and no game. Its M is struck through, and a press on it does nothing: edit the setting to change it.
+- A track that is not audible draws its sections grey, which differs from a locked track's faint colors.
 
 ### Keys
 
 Each action is a command, so it is in the command palette, and `keybindings.json` can change its key. None of them is in the ribbon.
 - **The timeline's keys are bare letters,** which the viewport and the other panels also use. So each command acts only while the timeline has the keyboard, or while the command palette opened from it has it. When another window, such as a floating panel, becomes active, the timeline does not have the keyboard.
-- **Delete.** While the timeline has the keyboard, the scene's Delete deletes the timeline's selection.
+- **Delete and Duplicate.** While the timeline has the keyboard, the scene's Delete deletes the timeline's selection, and its Duplicate duplicates it.
+- **Copy and paste.** A command that cannot act leaves its key to the focused control, and a text box keeps Ctrl+C, Ctrl+X and Ctrl+V. So the timeline's copy and paste take those keys only while it has the keyboard.
 
 | Command | ID | Key |
 |---|---|---|
@@ -157,6 +194,11 @@ Each action is a command, so it is in the command palette, and `keybindings.json
 | Snap | `cutscene.snap` | N |
 | Show Frames | `cutscene.showFrames` | None |
 | Lock Track | `cutscene.lockTrack` | None |
+| Mute Track, Solo Track | `cutscene.muteTrack`, `cutscene.soloTrack` | None |
+| Add Marker | `cutscene.addMarker` | M |
+| Copy, Cut, Paste | `cutscene.copy`, `cutscene.cut`, `cutscene.paste` | Ctrl+C, Ctrl+X, Ctrl+V |
+| Duplicate | `entity.duplicate` | Ctrl+D |
+| Find Track | `cutscene.find` | Ctrl+F |
 
 ### Cost
 
@@ -164,7 +206,7 @@ A redraw reads only the draw list that `CutsceneTimelineLayout.Visible` gives: t
 
 A test with 50 tracks and 5,000 keys checks two times:
 - the draw list takes less than 4 ms;
-- a drag's step takes less than 50 ms. A step reads the text again, edits it, and builds the rows again.
+- a drag's step takes less than 50 ms. A step reads the text again, edits it, and builds the rows again, through a search filter that keeps every row.
 
 The test does not measure Avalonia's drawing.
 

@@ -52,6 +52,7 @@ Every time in the text and in the blob is a whole number of **ticks**, `i32`, at
 - **Blocks.** These lines start a block:
   - `binding <id> "<name>"`
   - `track <id> <kind> "<name>"`
+  - `marker <id> <time> "<name>"` (see [Markers](#markers))
   - `section <id> <start> <end>`, which belongs to the track before it
   - `channel <name>`, which belongs to the section before it
   - `trigger <id> <time> <name>` and `range <id> <start> <end> <name>`, which belong to the event track before them
@@ -61,6 +62,7 @@ Every time in the text and in the blob is a whole number of **ticks**, `i32`, at
   - Two bindings cannot have the same ID, and two tracks cannot have the same ID.
   - Each section's ID is unique in the whole cutscene.
   - Each trigger's and range's ID is unique among the cutscene's triggers and ranges.
+  - Each marker's ID is unique among the cutscene's markers.
 - **Names** are quoted. Each binding has a name that no other binding has, so that a binding can be named in place of its ID. A track's name can be empty.
 
 ### The cutscene
@@ -221,6 +223,22 @@ An event track has no sections and no `when_finished`. It has `trigger <id> <tim
 | `fire_on_seek` | `true`: a forward seek that crosses it sends it | `false` |
 | `fire_when_skipped` | `true`: a skip that crosses it sends it | `false` |
 
+### Markers
+
+A `marker <id> <time> "<name>"` block is a named, colored point on the cutscene's time, such as a beat of the music. The [cutscene editor](../../editor/cutscene-editor.md#markers) shows it on its ruler, snaps to it and jumps to it. Nothing at run time reads markers yet. They are not an animation clip's markers, which raise events ([Cinematics: Animation tracks](../../cinematics/tracks.md#animation-tracks)).
+- **It belongs to the cutscene,** as a binding or a track does, wherever it is in the text. So a setting after it is its own, and a section, a trigger or a range after it is a problem until the next track.
+- **The time** is inside the length. **The name** is quoted and not empty. A cutscene has at most `MAX_CUTSCENE_MARKERS` (1024).
+- **The text** may hold markers in any order. The blob holds them in time order, and at one time, in ID order. The editor keeps them in time order.
+
+| Setting | Value | Default |
+|---|---|---|
+| `color` | A quoted `"#rrggbb"` or `"#rgb"`, without alpha | `"#f5a623"`, amber |
+
+```
+marker 1 180000 "Music swells"
+	color = "#336699"
+```
+
 ### Channels and keys
 
 `channel <name>` starts a curve of the section. Its name is letters, digits and `_`, and no other channel of the section has it. A channel has at least one key. Its track's kind gives the names their meaning:
@@ -250,7 +268,7 @@ key 60000 $0d9b84a2116a5529c2cd33741edd33a4 constant
 
 ## The blob
 
-A `Cutscene_Blob` (`lib/engine/asset/format/cutscene.odin`) holds the length, the rate, the clock, the range, the name of its input context, the GUIDs of the documents that it hides (`cutscene_hide_ui`), and its skip policy, skip ranges (`cutscene_skip_ranges`, at most `MAX_CUTSCENE_SKIP_RANGES`, 256), skip fade and `skip_color`, an opaque `Ui_Color` that took the place of a reserved word. It then holds ten flat tables:
+A `Cutscene_Blob` (`lib/engine/asset/format/cutscene.odin`) holds the length, the rate, the clock, the range, the name of its input context, the GUIDs of the documents that it hides (`cutscene_hide_ui`), and its skip policy, skip ranges (`cutscene_skip_ranges`, at most `MAX_CUTSCENE_SKIP_RANGES`, 256), skip fade and `skip_color`, an opaque `Ui_Color` that took the place of a reserved word. It then holds eleven flat tables:
 
 - **`Cutscene_Binding`:**
   - its ID, kind, name and the name's hash (`animation_graph_hash`), and its policy;
@@ -266,6 +284,7 @@ A `Cutscene_Blob` (`lib/engine/asset/format/cutscene.odin`) holds the length, th
 - **`Cutscene_Event`:** a trigger or a range of an event track: its ID, its start and end on the cutscene's time (a trigger's end is its start), its flags (`.Range`, `.Fire_On_Seek`, `.Fire_When_Skipped`), its name, and its first value and count. At most `MAX_CUTSCENE_EVENTS` (8192).
 - **`Cutscene_Binding_Map`:** a sub-sequence section's `bind`: the section's index, the child's binding by its ID in the child, and this cutscene's binding by its index. At most `MAX_CUTSCENE_BINDING_MAPS` (65536), in section order. `cutscene_section_maps` gives one section's. A child's binding is by its ID, so a child that is cooked again, with its bindings in another order, keeps its maps.
 - **`Cutscene_Presentation`:** a row of 40 bytes for each section of a presentation track, in section order, by the section's index: its kind (`Cutscene_Presentation_Kind`: `Fade`, `Letterbox` or `Subtitle`), a fade's color, opaque, a subtitle's speaker, text and key, and the index of the audio section that it belongs to, or `CUTSCENE_NONE`. The other kinds have zeros and `CUTSCENE_NONE` there. `cutscene_presentations` gives the rows, and `cutscene_presentation_of` the row of a section.
+- **`Cutscene_Marker`:** a marker's ID, time, name and opaque `Ui_Color`, in time order and then ID order. `cutscene_markers` gives them, at most `MAX_CUTSCENE_MARKERS` (1024).
 - **`Cutscene_Event_Value`:** its kind (`Cutscene_Value_Kind`: `Number`, `Bool`, `String`, `Vector`, `Entity`, `Position` or `Asset`), and the field that the kind holds: `index` for a bool (0 or 1), a binding's index or an index into the GUIDs, `text`, `number`, `vector`, or `position` in `World_Position` units. The other fields are zero.
 
 The blob also holds `cutscene_guids`: the assets that keys and asset values name, each once, at most `MAX_CUTSCENE_GUIDS` (65536).
