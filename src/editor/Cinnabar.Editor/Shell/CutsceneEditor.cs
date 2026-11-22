@@ -66,8 +66,10 @@ public sealed class CutsceneEditor : IGraphEditor
 
     void OnDocumentChanged()
     {
-        // An undo or an edit can take selected blocks away.
-        _selection.RemoveAll(p => File.Find(p) == null);
+        // An undo or an edit can take selected blocks away. A key's path is its place in its channel, so another key can
+        // have it after a delete, an undo or a cancel: a key stays selected only while its path holds the same line.
+        _selection.RemoveAll(p => File.Find(p) is not { } block
+            || (!_ownEdit && block.Kind == CutsceneBlockKind.Key && _keyLines.TryGetValue(p, out var line) && line != KeyLine(block)));
         Changed?.Invoke();
         _shell.Commands.InvalidateAll();
         if (!Document.InTransaction)
@@ -89,22 +91,20 @@ public sealed class CutsceneEditor : IGraphEditor
     public void Select(IEnumerable<string> paths, SelectMode mode)
     {
         var hits = paths.Distinct().Where(p => File.Find(p) != null).ToList();
-        var next = mode == SelectMode.Replace ? [] : new List<string>(_selection);
-        foreach (var path in hits)
-        {
-            if (mode == SelectMode.Toggle && next.Remove(path))
-            {
-                continue;
-            }
-            next.Remove(path);
-            next.Add(path);
-        }
+        // The paths stay in the order they were selected, and a path selected again goes last, as the primary one.
+        var hitSet = hits.ToHashSet();
+        var current = _selection.ToHashSet();
+        var kept = mode == SelectMode.Replace ? [] : _selection.Where(p => !hitSet.Contains(p)).ToList();
+        var next = mode == SelectMode.Toggle
+            ? [.. kept, .. hits.Where(p => !current.Contains(p))]
+            : kept.Concat(hits).ToList();
         if (next.SequenceEqual(_selection))
         {
             return;
         }
-        _selection.Clear();
-        _selection.AddRange(next);
+        // A new selection ends a held nudge, so nudges of two selections are two entries.
+        Document.EndMerge();
+        Replace(next);
         Changed?.Invoke();
         _shell.Commands.InvalidateAll();
     }
@@ -122,13 +122,13 @@ public sealed class CutsceneEditor : IGraphEditor
         {
             return;
         }
-        Document.Edit(label, f =>
+        Own(() => Document.Edit(label, f =>
         {
             if (f.Find(path) is { } block)
             {
                 edit(block);
             }
-        });
+        }));
     }
 
     /// <summary>
@@ -152,13 +152,13 @@ public sealed class CutsceneEditor : IGraphEditor
         {
             return;
         }
-        Document.Step(f =>
+        Own(() => Document.Step(f =>
         {
             if (f.Find(path) is { } block)
             {
                 edit(block);
             }
-        });
+        }));
     }
 
     /// <summary>Ends the drag: commits its one undo entry, or with cancel, as with Esc, puts the text back as it was.</summary>
@@ -300,9 +300,13 @@ public sealed class CutsceneEditor : IGraphEditor
         {
             return false;
         }
+        _dragSelection = [.. _selection];
         Document.Begin(label);
         return true;
     }
+
+    // The selection when a drag began, which a cancel puts back, as the paths of moved keys change during it.
+    List<string>? _dragSelection;
 
     /// <summary>
     /// A step of the drag, from the cutscene as it was when the drag began: the edit returns the paths of what it moved,
@@ -315,7 +319,7 @@ public sealed class CutsceneEditor : IGraphEditor
             return;
         }
         IReadOnlyList<string> moved = [];
-        Document.StepFromStart(f => moved = edit(f));
+        Own(() => Document.StepFromStart(f => moved = edit(f)));
         SetSelection(moved);
     }
 
@@ -324,14 +328,45 @@ public sealed class CutsceneEditor : IGraphEditor
     {
         if (moved.Count > 0 && !moved.SequenceEqual(_selection))
         {
-            _selection.Clear();
-            _selection.AddRange(moved);
+            Replace(moved);
             Changed?.Invoke();
         }
     }
 
-    /// <summary>Ends the drag: commits its one entry, or with cancel, as with Esc, puts the text back.</summary>
-    public void EndDrag(bool cancel) => EndField(cancel);
+    // The selection becomes paths, with each key's line, which tells a selected key from another that takes its path.
+    void Replace(IEnumerable<string> paths)
+    {
+        _selection.Clear();
+        _selection.AddRange(paths);
+        _keyLines.Clear();
+        foreach (var path in _selection)
+        {
+            if (File.Find(path) is { Kind: CutsceneBlockKind.Key } key)
+            {
+                _keyLines[path] = KeyLine(key);
+            }
+        }
+    }
+
+    readonly Dictionary<string, string> _keyLines = [];
+
+    static string KeyLine(CutsceneBlock key) => key.LineTexts.LastOrDefault() ?? "";
+
+    /// <summary>
+    /// Ends the drag: commits its one entry, or with cancel, as with Esc, puts the text back, and the selection as it was
+    /// when the drag began.
+    /// </summary>
+    public void EndDrag(bool cancel)
+    {
+        var before = _dragSelection;
+        _dragSelection = null;
+        EndField(cancel);
+        if (cancel && before != null && !before.SequenceEqual(_selection))
+        {
+            Replace(before.Where(p => File.Find(p) != null));
+            Changed?.Invoke();
+        }
+    }
 
     /// <summary>
     /// Moves the selection by frames, as one undo entry while the key is held: <see cref="EndNudge"/> ends it, on the
@@ -345,11 +380,31 @@ public sealed class CutsceneEditor : IGraphEditor
         }
         var paths = _selection.ToList();
         IReadOnlyList<string> moved = [];
-        Document.EditMerged("Nudge", "nudge", f => moved = CutsceneEdits.Move(f, paths, frames * FrameTicks, _locked));
+        Own(() => Document.EditMerged("Nudge", "nudge", f => moved = CutsceneEdits.Move(f, paths, frames * FrameTicks, _locked)));
         SetSelection(moved);
     }
 
     public void EndNudge() => Document.EndMerge();
+
+    /// <summary>
+    /// Where a sub-sequence's child starts to play, the start of its range, read from the child's file by GUID: what a
+    /// section without a trim plays from, which a split, a trim and a slip move. 0 when the child cannot be read.
+    /// </summary>
+    public int ChildStart(string guid)
+    {
+        if (_shell.Assets.Find(guid) is not { } asset || _shell.Assets.FullPath(asset) is not { } path)
+        {
+            return 0;
+        }
+        try
+        {
+            return CutsceneFile.Parse(System.IO.File.ReadAllText(path)).File is { } child ? CutsceneEdits.RangeOf(child).Start : 0;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return 0;
+        }
+    }
 
     /// <summary>Whether a split at the playhead has a selected section to split.</summary>
     public bool CanSplit => !Document.InTransaction && _selection.Any(p => File.Find(p) is { Kind: CutsceneBlockKind.Section, Start: { } s, End: { } e } b
@@ -364,7 +419,7 @@ public sealed class CutsceneEditor : IGraphEditor
         }
         var paths = _selection.ToList();
         IReadOnlyList<string> halves = [];
-        Document.Edit("Split", f => halves = CutsceneEdits.Split(f, paths, _playhead, _locked));
+        Own(() => Document.Edit("Split", f => halves = CutsceneEdits.Split(f, paths, _playhead, _locked, ChildStart)));
         Select(halves, SelectMode.Replace);
     }
 
@@ -376,8 +431,33 @@ public sealed class CutsceneEditor : IGraphEditor
             return;
         }
         var paths = _selection.ToList();
-        Document.Edit(ripple ? "Ripple Delete" : "Delete", f => CutsceneEdits.Delete(f, paths, ripple, _locked));
+        Own(() => Document.Edit(ripple ? "Ripple Delete" : "Delete", f => CutsceneEdits.Delete(f, paths, ripple, _locked)));
+        // What was deleted is gone, and another key can have a deleted key's path, so nothing stays selected.
+        if (_selection.Count > 0)
+        {
+            Replace([]);
+            Changed?.Invoke();
+            _shell.Commands.InvalidateAll();
+        }
     }
+
+    // An edit that this editor makes, during which the selection keeps every path that still names a block, and after
+    // which each selected key's line is its new one.
+    void Own(Action edit)
+    {
+        _ownEdit = true;
+        try
+        {
+            edit();
+        }
+        finally
+        {
+            _ownEdit = false;
+        }
+        Replace([.. _selection]);
+    }
+
+    bool _ownEdit;
 
     /// <summary>Sends the unsaved text to the cook daemon now, and shows the answer's problems.</summary>
     public Task CookNow() => _cook.CookNow();

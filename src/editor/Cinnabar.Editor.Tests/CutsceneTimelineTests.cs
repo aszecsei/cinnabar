@@ -143,6 +143,56 @@ public sealed class CutsceneTimelineTests : IDisposable
     }
 
     [Fact]
+    public void EscDuringADragOfAKeyPastAnotherSelectsTheSameKeyAgain()
+    {
+        var (_, editor, input, text) = Intro();
+        var music = Y(input, "track:7");
+        // The music's first key, at 0, dragged past the one at 200000, takes the second place in its channel.
+        Assert.True(input.Press(X(0), music, MouseButton.Left, KeyModifiers.None));
+        Assert.Equal(["section:9/channel:gain/key:0"], editor.SelectedPaths);
+        input.Move(X(100000), music, KeyModifiers.None);
+        input.Move(X(300000), music, KeyModifiers.None);
+        Assert.Equal(["section:9/channel:gain/key:1"], editor.SelectedPaths);
+        Assert.Equal(300000, editor.File.Find("section:9/channel:gain/key:1")!.Start);
+
+        // After Esc, the key at 200000 is the second again, and the dragged key, the first, is selected.
+        Assert.True(input.Escape());
+        Assert.Equal(text, editor.Document.Text);
+        Assert.Equal(["section:9/channel:gain/key:0"], editor.SelectedPaths);
+
+        // A release of another button does not end a drag.
+        Assert.True(input.Press(X(0), music, MouseButton.Left, KeyModifiers.None));
+        input.Move(X(50000), music, KeyModifiers.None);
+        input.Release(X(50000), music, KeyModifiers.None, MouseButton.Right);
+        Assert.True(input.Dragging);
+        input.Release(X(50000), music, KeyModifiers.None);
+        Assert.Equal(["Move"], editor.Document.History);
+
+        // An undo changes the line at a selected key's path, so the editor cannot tell that it is the same key, and drops
+        // it; a selected key whose line the undo leaves stays.
+        editor.Select(["section:9/channel:gain/key:0", "section:9/channel:gain/key:2"], SelectMode.Replace);
+        editor.Document.Undo();
+        Assert.Equal(text, editor.Document.Text);
+        Assert.Equal(["section:9/channel:gain/key:2"], editor.SelectedPaths);
+    }
+
+    [Fact]
+    public void ALengthDragKeepsARangeThatWasAllOfTheLength()
+    {
+        var (_, editor, input, _) = Intro();
+        editor.Select(editor.File.Root);
+        editor.EditSelected("No range", b => b.Set("range", null));
+        Assert.Equal((0, 720000), input.Layout.Range);
+        Assert.True(input.Press(X(720000), 4, MouseButton.Left, KeyModifiers.None));
+        input.Move(X(740000), 4, KeyModifiers.None);
+        input.Move(X(760000), 4, KeyModifiers.None);
+        input.Move(X(780000), 4, KeyModifiers.None);
+        input.Release(X(780000), 4, KeyModifiers.None);
+        Assert.Equal(780000, editor.File.Length);
+        Assert.Null(editor.File.Root.Get("range"));
+    }
+
+    [Fact]
     public void AHeldNudgeIsOneUndoEntryUntilItsKeyIsReleased()
     {
         var (shell, editor, input, text) = Intro();

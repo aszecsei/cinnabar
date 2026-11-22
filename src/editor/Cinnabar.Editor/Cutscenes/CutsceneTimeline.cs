@@ -88,15 +88,37 @@ sealed class CutsceneTimeline : Control
         }
     }
 
+    // Another window, such as a floating panel, has the keyboard: the timeline's keys are that window's.
+    void OnDeactivated(object? sender, EventArgs e) => _editor.TimelineFocused = false;
+
+    // Back in this window, the keys are the timeline's when the focus is in it.
+    void OnActivated(object? sender, EventArgs e) => _editor.TimelineFocused = IsKeyboardFocusWithin;
+
+    // The window whose focus changes the timeline follows, kept so that a detach, when the timeline may no longer find
+    // it, takes the handler off the same window.
+    TopLevel? _window;
+
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnAttachedToVisualTree(e);
-        TopLevel.GetTopLevel(this)?.AddHandler(GotFocusEvent, OnFocusChanged, RoutingStrategies.Bubble, handledEventsToo: true);
+        _window = TopLevel.GetTopLevel(this);
+        _window?.AddHandler(GotFocusEvent, OnFocusChanged, RoutingStrategies.Bubble, handledEventsToo: true);
+        if (_window is Window window)
+        {
+            window.Deactivated += OnDeactivated;
+            window.Activated += OnActivated;
+        }
     }
 
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
-        TopLevel.GetTopLevel(this)?.RemoveHandler(GotFocusEvent, OnFocusChanged);
+        _window?.RemoveHandler(GotFocusEvent, OnFocusChanged);
+        if (_window is Window window)
+        {
+            window.Deactivated -= OnDeactivated;
+            window.Activated -= OnActivated;
+        }
+        _window = null;
         _editor.TimelineFocused = false;
         base.OnDetachedFromVisualTree(e);
     }
@@ -116,7 +138,19 @@ sealed class CutsceneTimeline : Control
         return formatted;
     }
 
+    static readonly Dictionary<(string?, bool), IBrush> Fills = [];
+
     static IBrush Fill(string? kind, bool dim)
+    {
+        if (!Fills.TryGetValue((kind, dim), out var brush))
+        {
+            brush = MakeFill(kind, dim);
+            Fills[(kind, dim)] = brush;
+        }
+        return brush;
+    }
+
+    static IBrush MakeFill(string? kind, bool dim)
     {
         var color = Color.Parse(kind switch
         {
@@ -261,7 +295,7 @@ sealed class CutsceneTimeline : Control
             {
                 context.DrawRectangle(SelectedPen, rect.Deflate(1), 2);
             }
-            if (rect.Width > 40 && row.Row.Kind == CutsceneRowKind.Track && Label(bar.Item.Path) is { Length: > 0 } label)
+            if (rect.Width > 40 && row.Row.Kind == CutsceneRowKind.Track && bar.Item.Label is { Length: > 0 } label)
             {
                 using (context.PushClip(rect.Deflate(new Thickness(4, 0))))
                 {
@@ -282,35 +316,28 @@ sealed class CutsceneTimeline : Control
         }
     }
 
+    // A diamond of each size about the origin, made once and moved to each glyph.
+    static readonly Dictionary<double, StreamGeometry> Diamonds = [];
+
     static void Diamond(DrawingContext context, double x, double y, double r, IBrush fill, bool problem)
     {
-        var g = new StreamGeometry();
-        using (var c = g.Open())
+        if (!Diamonds.TryGetValue(r, out var g))
         {
-            c.BeginFigure(new Point(x, y - r), true);
-            c.LineTo(new Point(x + r, y));
-            c.LineTo(new Point(x, y + r));
-            c.LineTo(new Point(x - r, y));
-            c.EndFigure(true);
+            g = new StreamGeometry();
+            using (var c = g.Open())
+            {
+                c.BeginFigure(new Point(0, -r), true);
+                c.LineTo(new Point(r, 0));
+                c.LineTo(new Point(0, r));
+                c.LineTo(new Point(-r, 0));
+                c.EndFigure(true);
+            }
+            Diamonds[r] = g;
         }
-        context.DrawGeometry(fill, problem ? ErrorPen : null, g);
-    }
-
-    // What a section's bar says: a presentation section's kind or line, or a camera cut's camera.
-    string? Label(string path)
-    {
-        if (_editor.File.Find(path) is not { Kind: CutsceneBlockKind.Section } section)
+        using (context.PushTransform(Matrix.CreateTranslation(x, y)))
         {
-            return null;
+            context.DrawGeometry(fill, problem ? ErrorPen : null, g);
         }
-        return CutsceneEdits.TrackOf(section)?.TrackKind switch
-        {
-            "presentation" => section.Get("text") is { } text ? TextQuote.Unquote(text) ?? text : section.Get("kind"),
-            "camera_cut" => section.Get("camera") is { } camera && CutsceneFile.TryParseTicks(camera, out var id)
-                ? _editor.File.Bindings.FirstOrDefault(b => b.Id == id)?.Name ?? $"binding {id}"
-                : null,
-            _ => $"#{section.Id}",
-        };
     }
 
     void DrawHeaders(DrawingContext context, List<CutsceneVisibleRow> rows, HashSet<string> selected, HashSet<string> problems, Size size)
@@ -416,7 +443,7 @@ sealed class CutsceneTimeline : Control
     {
         base.OnPointerReleased(e);
         var p = e.GetPosition(this);
-        Input.Release(p.X, p.Y, e.KeyModifiers);
+        Input.Release(p.X, p.Y, e.KeyModifiers, e.InitialPressMouseButton);
         e.Pointer.Capture(null);
     }
 
@@ -438,10 +465,7 @@ sealed class CutsceneTimeline : Control
     protected override void OnKeyUp(KeyEventArgs e)
     {
         base.OnKeyUp(e);
-        // A held nudge key's repeats are one undo entry, which its release ends.
-        if (e.Key is Key.OemComma or Key.OemPeriod)
-        {
-            _editor.EndNudge();
-        }
+        // A held nudge key's repeats are one undo entry, which its release ends, whatever key keybindings.json gives it.
+        _editor.EndNudge();
     }
 }

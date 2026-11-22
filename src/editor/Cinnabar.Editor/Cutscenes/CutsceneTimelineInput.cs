@@ -43,6 +43,10 @@ public sealed class CutsceneTimelineInput
     IReadOnlyList<string> _moving = [];
     List<int> _targets = [];
     (int Start, int End) _range;
+    // Whether the range was all of the length when a drag of a handle began, so it stays all of it.
+    bool _full;
+    // The button that started the gesture, whose release alone ends it.
+    MouseButton _button;
     bool _fitted;
 
     public CutsceneTimelineInput(CutsceneEditor editor)
@@ -160,11 +164,12 @@ public sealed class CutsceneTimelineInput
     /// <summary>A press. Returns whether the view should capture the pointer.</summary>
     public bool Press(double x, double y, MouseButton button, KeyModifiers modifiers)
     {
-        _pressAt = _pointer = new Point(x, y);
         if (_gesture != Gesture.None)
         {
             return false;
         }
+        _pressAt = _pointer = new Point(x, y);
+        _button = button;
         if (button == MouseButton.Middle || (button == MouseButton.Right && modifiers.HasFlag(KeyModifiers.Alt)))
         {
             _gesture = Gesture.Pan;
@@ -290,6 +295,7 @@ public sealed class CutsceneTimelineInput
                     _ => (Layout.Length, Layout.Length),
                 };
                 _moving = [];
+                _full = _range == (0, Layout.Length);
                 _targets = Layout.SnapTargets(new HashSet<string>());
                 _gesture = Gesture.Handle;
                 return;
@@ -365,7 +371,7 @@ public sealed class CutsceneTimelineInput
                 Guide = guide;
                 var path = _moving[0];
                 var ripple = _ripple;
-                _editor.StepDrag(f => CutsceneEdits.Trim(f, path, edge, to - from, ripple, _editor.Locked));
+                _editor.StepDrag(f => CutsceneEdits.Trim(f, path, edge, to - from, ripple, _editor.Locked, _editor.ChildStart));
                 var now = _editor.File.Find(path);
                 Tooltip = Describe(now?.Start ?? _grabbed.Start, now?.End ?? _grabbed.End, (edge == CutsceneEdge.Start ? now?.Start : now?.End) - from ?? 0);
                 break;
@@ -374,7 +380,7 @@ public sealed class CutsceneTimelineInput
             {
                 var delta = snap ? (int)(Math.Round(raw / frame) * frame) : (int)Math.Round(raw);
                 var path = _moving[0];
-                _editor.StepDrag(f => CutsceneEdits.Slip(f, path, delta, _editor.Locked));
+                _editor.StepDrag(f => CutsceneEdits.Slip(f, path, delta, _editor.Locked, _editor.ChildStart));
                 Tooltip = $"slip {Units(delta)}";
                 break;
             }
@@ -384,7 +390,7 @@ public sealed class CutsceneTimelineInput
                 Guide = guide;
                 var kind = _press!.Kind;
                 var range = _range;
-                var full = range == (0, Layout.Length);
+                var full = _full;
                 _editor.StepDrag(f =>
                 {
                     switch (kind)
@@ -419,8 +425,13 @@ public sealed class CutsceneTimelineInput
             ? $"{Units(start)}  ·  Δ {Units(delta)}"
             : $"{Units(start)} – {Units(end)}  ·  length {Units(end - start)}  ·  Δ {Units(delta)}";
 
-    public void Release(double x, double y, KeyModifiers modifiers)
+    /// <summary>A release. Only the button that started the gesture ends it.</summary>
+    public void Release(double x, double y, KeyModifiers modifiers, MouseButton button = MouseButton.Left)
     {
+        if (_gesture == Gesture.None || button != _button)
+        {
+            return;
+        }
         _pointer = new Point(x, y);
         switch (_gesture)
         {
@@ -457,7 +468,7 @@ public sealed class CutsceneTimelineInput
     {
         if (_gesture != Gesture.None)
         {
-            Release(_pointer.X, _pointer.Y, KeyModifiers.None);
+            Release(_pointer.X, _pointer.Y, KeyModifiers.None, _button);
         }
     }
 
