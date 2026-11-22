@@ -43,6 +43,8 @@ Runtime :: struct {
 	module_count:               int,
 	// Registrations, which reload clears: the methods of each engine type, and the exposed components.
 	light_methods:              [Light_Tag]Type_Methods,
+	// The polls of the light userdata types that coroutines wait on, by tag (see wait_light). Registrations.
+	light_polls:                [Light_Tag]Light_Poll_Proc,
 	userdata_methods:           [Userdata_Tag]Type_Methods,
 	defined:                    [MAX_DEFINED]Defined,
 	defined_count:              int,
@@ -224,6 +226,7 @@ reload :: proc(r: ^Runtime, platform: ^core.Platform_API, register: Register_Pro
 	r.bindings.ctx = context
 	script_host.clear(&r.bindings)
 	r.light_methods = {}
+	r.light_polls = {}
 	r.userdata_methods = {}
 	r.prefab_spawner = nil
 	r.spawned_hook = nil
@@ -432,6 +435,7 @@ create_metatables :: proc(r: ^Runtime) {
 	luau.setlightuserdataname(L, c.int(Light_Tag.Component_Type), "ComponentType")
 	luau.setlightuserdataname(L, c.int(Light_Tag.Asset), "Asset")
 	luau.setlightuserdataname(L, c.int(Light_Tag.Input_Context), "InputContext")
+	luau.setlightuserdataname(L, c.int(Light_Tag.Cutscene), "Cutscene")
 
 	for tag in Userdata_Tag {
 		if tag == .None {

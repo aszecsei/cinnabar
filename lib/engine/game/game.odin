@@ -310,6 +310,7 @@ register_scripts :: proc(r: ^script.Runtime) {
 	save.register_scripts(r)
 	project.define_display_bindings(r)
 	define_subtitle_bindings(r)
+	cutscene.register_scripts(r, &g.cutscenes)
 	physics.register_scripts(r, &g.physics)
 	audio.register_scripts(r, &g.audio)
 	anim.register_scripts(r, &g.animation)

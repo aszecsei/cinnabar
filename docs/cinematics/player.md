@@ -37,13 +37,13 @@ A player's state is one union, `Player_State`. The data of each state is in its 
 | State | Data | Meaning |
 |---|---|---|
 | `nil` | | A free slot. A handle to it is stale. |
-| `Player_Loading` | The cutscene's GUID, what to do when ready, whether a skip came, and the caller's overrides | The next `update` loads the cutscene and what it references, and resolves the bindings. |
+| `Player_Loading` | The cutscene's GUID, what to do when ready, whether a skip came, where it starts, and the caller's overrides | The next `update` loads the cutscene and what it references, and resolves the bindings. |
 | `Player_Ready` | `Player_Live` | Everything is loaded and resolved. The spawned entities are hidden. The first frame can be evaluated at once, so `start` plays without a hitch. |
 | `Player_Playing` | `Player_Live` | The time moves on the cutscene's clock, and both phases evaluate. |
 | `Player_Paused` | `Player_Live` | The time stands still. Both phases still evaluate at the time, so the cutscene holds the world, and fires no events. |
 | `Player_Skipping` | `Player_Live`, the target, the part of the fade and how long it has run | The time stands still behind a fade out. Then the player jumps to the target, and goes to `Finishing` at the end or fades in and plays on ([Skipping: The state](skipping.md#the-state)). |
-| `Player_Finishing` | `Player_Live`, and `cover` | The last evaluation is done. The same `update` gives the world back. `cover` is how much a skip's fade covered the frame as the player came from `Skipping`: 1 at a skip's end, less at a stop during its fade, and 0 when the player did not skip. The overlay fades back from it ([Skipping: The fade](skipping.md#the-fade)). |
-| `Player_Restored` | | The world is given back: the fields are restored, the input and the HUD are back, nothing is suspended, the spawned entities are gone and the assets are unloaded. The handle can be dropped. |
+| `Player_Finishing` | `Player_Live`, and `cover` | The last evaluation is done. The same `update` gives the world back. `cover` is how much a skip's fade covered the frame as the player came from `Skipping`: 1 at a skip's end, less at a stop during its fade, and 0 when the player did not skip. The overlay fades back from it ([Skipping: The fade](skipping.md#the-fade)). `skipped` is whether a skip took the player to its end: `run_skip` sets it when the jump reaches the range's end. A stop during a skip's fade is not skipped. |
+| `Player_Restored` | `skipped`, from `Finishing` | The world is given back: the fields are restored, the input and the HUD are back, nothing is suspended, the spawned entities are gone and the assets are unloaded. The handle can be dropped. |
 | `Player_Failed` | A `Failure` | The player could not go on. What it had changed is given back, as for `Restored`. |
 
 `Player_Live` is the data from `Ready` to `Finishing`:
@@ -59,6 +59,7 @@ A player's state is one union, `Player_State`. The data of each state is in its 
 - A `Ready` player that goes to `Playing` or `Skipping` shows its spawned entities (`reveal_bindings`), pushes its input context and hides its documents (`take_hold`, [Possession: The whole cutscene](possession.md#the-whole-cutscene)).
 - A live player that goes to `Restored` or `Failed` first calls `hand_off_overlay`, while the evaluation holds the last presentation. It keeps a fade that the player's track keeps, or a fade back from the skip's fade, in the overlay, which outlives the player. A player that fails hands off nothing ([Tracks: Presentation tracks](tracks.md#presentation-tracks)).
 - It records each change as a `Player_Event`. `player_events` gives the frame's events, and `end_frame` clears them.
+- It queues the change's script event, if it has one: `on_cutscene_started`, `on_cutscene_finished` or `on_cutscene_failed`, to the bindings' entities and the player's caller. It finds them before `give_back` ends the bindings ([Scripts: Events](scripts.md#events)).
 
 A change from one live state to another carries the live data. `moved(player, to)` makes the new variant from the data that the player holds at the moment of the change, so the change carries what the last evaluation saved. `skipping(player, target)` makes the `Skipping` variant, which has data of its own.
 
@@ -149,9 +150,9 @@ The evaluation follows a new blob for its tracks ([Evaluation: Hot reload](evalu
 
 | Procedure | What it does |
 |---|---|
-| `load(state, world, desc)`, `play(state, world, desc)` | Make a player in `Loading`, which waits in `Ready` or plays once loaded. `Play_Desc` holds the cutscene, the priority and the overrides. |
+| `load(state, world, desc)`, `play(state, world, desc)` | Make a player in `Loading`, which waits in `Ready` or plays once loaded. `Play_Desc` holds the cutscene, the priority, the overrides, the start, and the caller, the entity whose behaviours get the [script events](scripts.md#events). A start seeks the `Ready` player there before its first evaluation, as `set_time` does. |
 | `start`, `pause`, `resume`, `stop`, `skip`, `set_time`, `release` | The [commands](#commands) |
-| `status`, `player_time`, `player_failure`, `player_evaluation`, `can_skip`, `skip_fade` | Ask about a player through its handle |
+| `status`, `player_time`, `player_failure`, `player_skipped`, `player_evaluation`, `can_skip`, `skip_fade` | Ask about a player through its handle |
 | `update(state, context)` | Moves the players on, once a frame ([The frame](#the-frame)) |
 | `reset(state, world)` | Restores and frees every player |
 | `player_events(state)`, `end_frame(state)` | The frame's changes of state, and their end |

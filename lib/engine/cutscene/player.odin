@@ -64,6 +64,8 @@ Player_Loading :: struct {
 	// A skip came while it loaded: once ready, it skips from its start if the cutscene lets it, and does as when_ready
 	// says if not.
 	skip:       bool,
+	// Where it starts on its cutscene's time, in ticks, or nil for the start of its range.
+	start:      Maybe(i32),
 	// The caller's overrides. A binding named by its name has its own copy of the name on the heap.
 	overrides:  [dynamic]Binding_Override,
 }
@@ -128,11 +130,15 @@ Player_Finishing :: struct {
 	// How much a skip's fade covered the frame as the player came from Skipping: 1 at a skip's end, less at a stop during
 	// its fade, and 0 when it did not skip. The overlay fades back from it (see hand_off_overlay).
 	cover:      f32,
+	// A skip took it to its end. A stop during a skip's fade, and the end of play after a skip range, are not skipped.
+	skipped:    bool,
 }
 
 // Player_Restored is a player that gave the world back: its fields are restored, its spawned entities are gone, and its
-// assets are unloaded. The handle can be dropped.
-Player_Restored :: struct {}
+// assets are unloaded. The handle can be dropped. skipped is the Finishing state's.
+Player_Restored :: struct {
+	skipped: bool,
+}
 
 // Player_Failed is a player that could not go on. What it had changed is restored, as for Player_Restored.
 Player_Failed :: struct {
@@ -170,6 +176,8 @@ Player :: struct {
 	priority:   i32,
 	// When the player began, from State.started.
 	order:      u64,
+	// The entity whose behaviour played it, which gets its lifecycle's events with the bindings, or 0.
+	caller:     ecs.Entity,
 	state:      Player_State,
 }
 
@@ -180,10 +188,14 @@ Player_Event :: struct {
 }
 
 // Play_Desc is what a player plays: the cutscene, its priority, and the entities that the caller gives for bindings.
+// start is where it starts on its cutscene's time, in ticks, or nil for the start of its range. caller is the entity
+// whose behaviours get the player's lifecycle events with the bindings' (see docs/cinematics/scripts.md#events), or 0.
 Play_Desc :: struct {
 	cutscene:  format.Guid,
 	priority:  i32,
 	overrides: []Binding_Override,
+	start:     Maybe(i32),
+	caller:    ecs.Entity,
 }
 
 // Player_Context is what update needs to load cutscenes and resolve bindings: the world, its scenes, the scripts that
@@ -386,6 +398,13 @@ player_time :: proc(s: ^State, h: Player_Handle) -> (t: i32, ok: bool) {
 	return e.time, true
 }
 
+// player_skipped is whether a Restored player's skip took it to its end, and false for any other.
+player_skipped :: proc(s: ^State, h: Player_Handle) -> (skipped: bool, ok: bool) {
+	slot := slot_of(s, h) or_return
+	restored, is_restored := s.players[slot].state.(Player_Restored)
+	return restored.skipped, is_restored
+}
+
 // player_failure is why a Failed player failed, and false for any other.
 player_failure :: proc(s: ^State, h: Player_Handle) -> (failure: Failure, ok: bool) {
 	slot := slot_of(s, h) or_return
@@ -521,14 +540,21 @@ change_cutscene :: proc(
 		refuse(s, slot, next)
 		return false, 0
 	}
-	// A skip's fade, as the player leaves Skipping for Finishing.
+	// A skip's fade, as the player leaves Skipping for Finishing, and whether a Finishing player was skipped.
 	cover: f32
+	skipped: bool
+	// Who gets the change's script event: the bindings are read before give_back ends them.
+	lifecycle := lifecycle_of(from, next)
+	recipients := lifecycle_recipients(s, w, slot, lifecycle)
 	switch &state in p.state {
 	case Player_Loading:
 		free_overrides(&state.overrides)
 	case Player_Ready, Player_Playing, Player_Paused, Player_Skipping, Player_Finishing:
 		if skip, is_skip := p.state.(Player_Skipping); is_skip && next == .Finishing {
 			cover = skip_cover(s, skip)
+		}
+		if finishing, is_finishing := p.state.(Player_Finishing); is_finishing {
+			skipped = finishing.skipped
 		}
 		if next == .Restored || next == .Failed {
 			hand_off_overlay(s, w, slot, next == .Failed)
@@ -537,8 +563,11 @@ change_cutscene :: proc(
 	case Player_Restored, Player_Failed:
 	}
 	p.state = to
-	if finishing, is_finishing := &p.state.(Player_Finishing); is_finishing {
-		finishing.cover = cover
+	#partial switch &state in p.state {
+	case Player_Finishing:
+		state.cover = cover
+	case Player_Restored:
+		state.skipped = skipped
 	}
 	// A cutscene that finishes, at its end, at a skip to it or at a stop, sends the end of each range that is open. One
 	// that fails sends nothing.
@@ -556,6 +585,7 @@ change_cutscene :: proc(
 		take_hold(s, w, live)
 	}
 	append(&s.events, Player_Event{{u16(slot), p.generation}, next})
+	send_lifecycle(s, w, slot, lifecycle, recipients)
 	return true, despawned
 }
 
@@ -692,6 +722,7 @@ begin :: proc(
 		p.generation = 1
 	}
 	p.priority = desc.priority
+	p.caller = desc.caller
 	p.order = s.started
 	s.started += 1
 	overrides := make([dynamic]Binding_Override, 0, len(desc.overrides), w.platform.heap_allocator)
@@ -706,7 +737,12 @@ begin :: proc(
 		s,
 		w,
 		slot,
-		Player_Loading{cutscene = desc.cutscene, when_ready = when_ready, overrides = overrides},
+		Player_Loading {
+			cutscene = desc.cutscene,
+			when_ready = when_ready,
+			start = desc.start,
+			overrides = overrides,
+		},
 	)
 	return {u16(slot), p.generation}, true
 }
@@ -789,6 +825,11 @@ load_player :: proc(s: ^State, c: Player_Context, slot: int) {
 	live.shape = children_shape(s, &live.evaluation, data, blob)
 	when_ready, skips := loading.when_ready, loading.skip
 	change_cutscene(s, w, slot, Player_Ready{live})
+	// A start later in the range seeks there, as set_time does, before the first evaluation.
+	if start, has_start := loading.start.?; has_start {
+		e := &live_of(&p.state).evaluation
+		seek(s, e, w, data, blob, start)
+	}
 	if skips {
 		if target, ok := skip_target(s, &live_of(&p.state).evaluation); ok {
 			change_cutscene(s, w, slot, skipping(p, target))
@@ -828,7 +869,7 @@ run_skip :: proc(
 		}
 		skip_to(s, &state.evaluation, w, data, blob, state.target)
 		if state.evaluation.time >= blob.range_end {
-			change_cutscene(s, w, slot, moved(p, .Finishing))
+			change_cutscene(s, w, slot, Player_Finishing{live = state.live, skipped = true})
 			return
 		}
 		state.fade = .In

@@ -98,7 +98,8 @@ The overlay draws the skip's fade over the frame ([Tracks: Presentation tracks](
 
 The skip exposes what later tracks need, but some are not built yet:
 - **Sub-sequences** skip with their parent, through the same jump: their tracks evaluate at the target, mapped to their time, and their keys marked `fire_when_skipped` fire in time order with the parent's ([Tracks: Sub-sequence tracks](tracks.md#sub-sequence-tracks)).
-- **Scripts** skip through the `Cutscene` library ([#547](https://github.com/aszecsei/cinnabar/issues/547)).
+
+Scripts skip through the `Cutscene` library: `:skip()`, and `on_cutscene_finished(cutscene, skipped)` and `wait_cutscene` say whether a skip took the cutscene to its end ([Scripts](scripts.md)).
 
 The camera cut track is built: a skip to a later time cuts to the section there, and a skip that ends the cutscene cuts back to gameplay, or blends out when the last section has `blend_on_skip = true` ([Tracks: Camera cut tracks](tracks.md#camera-cut-tracks)).
 

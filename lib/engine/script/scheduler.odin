@@ -22,6 +22,7 @@ Wait :: union {
 	Wait_Until,
 	Wait_Event,
 	Wait_Fixed,
+	Wait_Light,
 }
 
 // Wait_Frames is wait_frames, and a plain coroutine.yield, which waits one frame: the frame that it resumes in.
@@ -53,6 +54,41 @@ Wait_Until :: struct {
 Wait_Event :: struct {
 	event:  c.int,
 	entity: ecs.Entity,
+}
+
+// Wait_Light waits on a light userdata of a type that another package owns, such as wait_cutscene: the poll that the
+// package registered for the tag says when the wait is over, and what the coroutine resumes with. The waiter holds no
+// procedure, so it survives a code reload, which registers the poll again.
+@(private)
+Wait_Light :: struct {
+	value: Light_Value,
+}
+
+// Light_Poll_Proc says whether a wait on a light userdata's payload is over. When it is, it pushes on L the values that
+// the coroutine resumes with, and gives their count.
+Light_Poll_Proc :: #type proc(L: ^luau.State, payload: u64) -> (done: bool, results: c.int)
+
+// light_poll registers the poll of a light userdata type, for wait_light. A registration, like a binding: reload clears
+// it, so register it again in the Register_Proc.
+light_poll :: proc(r: ^Runtime, tag: Light_Tag, poll: Light_Poll_Proc) {
+	r.light_polls[tag] = poll
+}
+
+// wait_light yields the running coroutine until the poll of the value's tag says that the wait is over. A binding
+// returns its result: return script.wait_light(L, value). It raises an error outside a coroutine that the engine runs.
+wait_light :: proc(L: ^luau.State, value: Light_Value) -> c.int {
+	return set_wait(runtime_of(L), L, Wait_Light{value})
+}
+
+// poll_light asks the poll of a Wait_Light whether its wait is over. Without a poll, as before a reload registers it
+// again, the wait goes on. When the wait is over, the results are on L.
+@(private = "file")
+poll_light :: proc(r: ^Runtime, L: ^luau.State, wait: Wait_Light) -> (done: bool, results: c.int) {
+	poll := r.light_polls[wait.value.tag]
+	if poll == nil {
+		return false, 0
+	}
+	return poll(L, wait.value.payload)
 }
 
 // Wait_Fixed is wait_fixed: the end of the next fixed tick, which fixed_events resumes.
@@ -466,6 +502,12 @@ run_coroutines :: proc(r: ^Runtime) {
 		}
 		switch wait in w.wait {
 		case Wait_Event, Wait_Fixed:
+		case Wait_Light:
+			top := luau.gettop(w.state)
+			if done, _ := poll_light(r, w.state, wait); done {
+				append(&due, Due{i, w.seq, 0})
+			}
+			luau.settop(w.state, top)
 		case Wait_Frames:
 			if wait.frame <= r.frame {
 				append(&due, Due{i, w.seq, 0})
@@ -510,8 +552,19 @@ run_coroutines :: proc(r: ^Runtime) {
 		proc(a, b: Due) -> bool {return a.key < b.key || a.key == b.key && a.seq < b.seq},
 	)
 	for d in due {
-		if waiter_due(r, d.index, d.seq) {
-			run_waiter(r, d.index)
+		if !waiter_due(r, d.index, d.seq) {
+			continue
 		}
+		// A wait on a light userdata resumes with what its poll gives now, after the coroutines before it ran.
+		nargs: c.int
+		w := &r.waiters[d.index]
+		if wait, is_light := w.wait.(Wait_Light); is_light {
+			done, results := poll_light(r, w.state, wait)
+			if !done {
+				continue
+			}
+			nargs = results
+		}
+		run_waiter(r, d.index, nargs)
 	}
 }
