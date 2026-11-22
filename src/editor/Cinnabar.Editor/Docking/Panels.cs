@@ -134,3 +134,7 @@ public sealed class BlackboardEditorDocument(Shell.BlackboardEditor editor, Func
 /// <summary>A world in the World editor (see docs/editor/world-view.md#the-world-editor).</summary>
 public sealed class WorldEditorDocument(Shell.WorldEditor editor, Func<Control> createView)
     : GraphEditorDocument(editor, $"world.{editor.Guid}", createView);
+
+/// <summary>A cutscene in the cutscene editor (see docs/editor/cutscene-editor.md#the-tab).</summary>
+public sealed class CutsceneEditorDocument(Shell.CutsceneEditor editor, Func<Control> createView)
+    : GraphEditorDocument(editor, $"cutscene.{editor.Guid}", createView);

@@ -116,8 +116,8 @@ public sealed partial class EditorShell
             ReadText(a) is { } text && DecisionFile.Parse(text).File is { } file && file.Blackboard == blackboard && file.ReadsKey(key))
             .OrderBy(a => a.Path, StringComparer.OrdinalIgnoreCase)];
 
-    // A decision or a blackboard that the content browser made opens in its editor, once the index has it.
+    // A decision, a blackboard or a cutscene that the content browser made opens in its editor, once the index has it.
     static bool OpensWhenCreated(AssetTemplate template) =>
         template is AssetTemplate.Blackboard or AssetTemplate.DecisionBehaviorTree or AssetTemplate.DecisionUtility or AssetTemplate.DecisionGoap
-            or AssetTemplate.DecisionHtn;
+            or AssetTemplate.DecisionHtn or AssetTemplate.Cutscene;
 }

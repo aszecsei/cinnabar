@@ -15,6 +15,11 @@ public sealed class EditorLayout
     public const string LeftDock = "dock.left";
     public const string RightDock = "dock.right";
     public const string BottomDock = "dock.bottom";
+    /// <summary>
+    /// A documents dock of its own for the asset editors' tabs, which a workspace can have apart from the viewports', as
+    /// the Cinematics workspace does. Without one, a tab opens beside the scene view.
+    /// </summary>
+    public const string EditorDocumentsDock = "dock.documents.editors";
     const string DocumentDockId = "dock.documents";
     const double DocumentDockProportion = 0.72;
 
@@ -105,10 +110,17 @@ public sealed class EditorLayout
     IDocumentDock? DocumentHost()
     {
         var docks = Walk(Root).OfType<IDocumentDock>().ToList();
+        if (docks.Find(d => d.Id == EditorDocumentsDock) is { } editors)
+        {
+            return editors;
+        }
         return _viewportsById.Values.Where(v => IsOpen(v.Id)).OrderBy(v => v == _scene ? 0 : 1).Select(v => v.Owner).OfType<IDocumentDock>().FirstOrDefault(docks.Contains) ?? docks.FirstOrDefault();
     }
 
-    /// <summary>Adds a material editor's or an effect preview's document beside the viewports, and shows it.</summary>
+    /// <summary>
+    /// Adds an asset editor's or an effect preview's document to the editors' dock, or without one, beside the
+    /// viewports, and shows it.
+    /// </summary>
     public void OpenDocument(EditorDocument document)
     {
         if (DocumentHost() is not { } dock)
@@ -140,7 +152,7 @@ public sealed class EditorLayout
         }
     }
 
-    EditorDocument? FindDocument(object editor) =>
+    internal EditorDocument? FindDocument(object editor) =>
         Walk(Root).OfType<EditorDocument>().FirstOrDefault(d => d.Shows == editor);
 
     /// <summary>Whether the Scene or the Game document (by <see cref="ViewportDocument.SceneId"/> or <see cref="ViewportDocument.GameId"/>) is in the layout, as a tab that may be behind another.</summary>
@@ -284,7 +296,18 @@ public sealed class EditorLayout
         {
             return false;
         }
+        // The asset editors' open tabs are not in a layout file. They move to the new layout's editors' dock, or beside
+        // its scene view, so a workspace switch does not close them.
+        var open = Root == null ? [] : Walk(Root).OfType<EditorDocument>().ToList();
         SetRoot(NewRoot(main));
+        if (open.Count > 0 && DocumentHost() is { } host)
+        {
+            foreach (var document in open)
+            {
+                Factory.AddDockable(host, document);
+            }
+            Factory.SetActiveDockable(open[^1]);
+        }
         foreach (var id in file.Floating.Select(CurrentId).Where(id => _panels.ContainsKey(id) && !used.Contains(id)))
         {
             Show(id);

@@ -86,8 +86,11 @@ public sealed partial class EditorShell
             case AssetKind.World:
                 OpenWorld(asset);
                 break;
+            case AssetKind.Cutscene:
+                OpenCutscene(asset);
+                break;
             case AssetKind.Script or AssetKind.Shader or AssetKind.ShadingModel or AssetKind.Material or AssetKind.MaterialInstance
-                or AssetKind.Perception or AssetKind.Cutscene:
+                or AssetKind.Perception:
                 OpenScript(path);
                 break;
         }
@@ -124,6 +127,7 @@ public sealed partial class EditorShell
         AssetKind.Decision => "Open in Decision Editor",
         AssetKind.Blackboard => "Open in Blackboard Editor",
         AssetKind.World => "Open in World Editor",
+        AssetKind.Cutscene => "Open in Cutscene Editor",
         _ => "Open in Script Editor",
     };
 

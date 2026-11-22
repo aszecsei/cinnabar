@@ -64,7 +64,8 @@ public sealed partial class EditorShell
     public IReadOnlyList<MaterialEditor> Materials => _materials;
 
     /// <summary>The open graphs of every kind.</summary>
-    public IEnumerable<IGraphEditor> GraphEditors => _materials.Concat<IGraphEditor>(_animationGraphs).Concat(_uiDocuments).Concat(_decisions).Concat(_blackboards).Concat(_worlds);
+    public IEnumerable<IGraphEditor> GraphEditors => _materials.Concat<IGraphEditor>(_animationGraphs).Concat(_uiDocuments).Concat(_decisions).Concat(_blackboards).Concat(_worlds)
+        .Concat(_cutscenes);
 
     /// <summary>The graph editor whose document is active, or null when the viewport is.</summary>
     public IGraphEditor? ActiveGraphEditor { get; private set; }
@@ -214,6 +215,10 @@ public sealed partial class EditorShell
         if (editor is WorldEditor world)
         {
             _worlds.Remove(world);
+        }
+        if (editor is CutsceneEditor cutscene)
+        {
+            _cutscenes.Remove(cutscene);
         }
         _discarding.Remove(editor);
         editor.Dispose();
