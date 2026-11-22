@@ -16,7 +16,7 @@ Read them in this order the first time.
 | [Shell and panels](shell-and-panels.md) | Docking and workspaces, the ribbon, the Add menu, commands and every panel. |
 | [Material editor](material-editor.md) | The node editor and its previews. |
 | [Animation graph editor](animation-graph-editor.md) | The canvas for `.animation_graph` files, its reader and writer that keep every line, and the live view of an Animator in play mode. |
-| [Cutscene editor](cutscene-editor.md) | The tab for `.cutscene` files: its reader and writer that keep every line, its blocks by keyword and their paths, the outline and details, the check of its unsaved text with the last good preview kept, and the Cinematics workspace. |
+| [Cutscene editor](cutscene-editor.md) | The tab for `.cutscene` files: its reader and writer that keep every line, its blocks by keyword and their paths, the timeline with its edits, snapping and keys, the details, the check of its unsaved text with the last good preview kept, and the Cinematics workspace. |
 | [Decision editor](decision-editor.md) | The views of `.decision` files: behavior trees and HTN domains on a canvas, utility options with their curves, and GOAP goals and actions with a plan preview; its reader and writer that keep every line, the blackboard editor's table, and the live view of an Agent in play mode. |
 | [UI editor](ui-editor.md) | The WYSIWYG editor for `.ui` documents: its reader and writer that keep every line, the canvas that the game draws at a screen's size and scale, picking, the tree, properties, styles and bindings. |
 | [Mesh editing](mesh-editing.md) | Level geometry as `.mesh` assets: mesh mode, the mesh and texture tools, and the live path that draws an unsaved mesh. |
