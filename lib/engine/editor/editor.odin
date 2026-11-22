@@ -483,6 +483,7 @@ poll :: proc(
 		case link.Cutscene_Preview_Open,
 		     link.Cutscene_Preview_Time,
 		     link.Cutscene_Preview_Play,
+		     link.Cutscene_Preview_Settings,
 		     link.Cutscene_Preview_Close:
 			if _, gone := handle_cutscene_preview_message(e, w, scripts, message); gone {
 				despawned = true

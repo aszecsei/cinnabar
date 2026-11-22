@@ -437,6 +437,7 @@ handle_message :: proc(l: ^Link, message: link.Message, connection: u64) {
 	     link.Cutscene_Preview_Open,
 	     link.Cutscene_Preview_Time,
 	     link.Cutscene_Preview_Play,
+	     link.Cutscene_Preview_Settings,
 	     link.Cutscene_Preview_Close,
 	     link.Cutscene_Preview_Opened,
 	     link.Cutscene_Preview_Ended,

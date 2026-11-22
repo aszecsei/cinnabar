@@ -90,6 +90,10 @@ handle_cutscene_preview_message :: proc(
 			}
 			set_preview_time(e, w, p, m.tick)
 		}
+	case link.Cutscene_Preview_Settings:
+		if p, ok := current_preview(e, m.ticket); ok {
+			cutscene.set_mix(&p.live.evaluation, w, m.silent, m.scrub_sound, m.events)
+		}
 	case link.Cutscene_Preview_Close:
 		if _, ok := current_preview(e, m.ticket); ok {
 			despawned = end_cutscene_preview(e, w, nil)
@@ -348,7 +352,10 @@ update_cutscene_preview :: proc(
 			)
 		}
 	}
-	return evaluate_preview(e, w, p), despawned
+	changed = evaluate_preview(e, w, p)
+	// The events that a play crossed go to the scripts in this frame, as a player's do at the end of update.
+	cutscene.send_events(e.cutscenes)
+	return changed, despawned
 }
 
 // advance_preview moves a playing preview's time by the frame's real time at its rate. Forward, it moves as a player's
