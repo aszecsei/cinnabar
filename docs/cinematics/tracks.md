@@ -423,7 +423,7 @@ track 9 event "Story"
 - A track **with a binding** sends its events to that binding's behaviours, as `script.send` does. The binding must not suspend `behaviours`. A suspended behaviour gets no events, so the cooker refuses this ([Possession: Behaviours](possession.md#behaviours)).
 - A track **without a binding** sends its events to every behaviour with the handler, as `script.broadcast` does.
 - **Native handlers.** `register_event_handler(state, name, procedure, data)` registers a procedure for one event name, such as `door_open` or `alarm_begin`. The procedure gets the player's handle, the name and the values, in frame memory, beside the behaviours. Call it in `register_world`, after `register`. `register` clears the handlers, so a code reload registers them again.
-- The cutscene's own script handlers, with the cutscene's handle as their first value, come with the scripting library ([#547](https://github.com/aszecsei/cinnabar/issues/547)).
+- **The player's own lifecycle** goes to the bindings' behaviours and the caller's as `on_cutscene_started`, `on_cutscene_finished` and `on_cutscene_failed`, with the cutscene's handle as their first value ([Scripts: Events](scripts.md#events)).
 
 **When events fire.** The track evaluates in the `Fixed` phase. Each evaluation sends what the move from the phase's last time crosses. The tracks record their events, and at the end of the phase `run_phase` queues them on the state:
 - In time order.
