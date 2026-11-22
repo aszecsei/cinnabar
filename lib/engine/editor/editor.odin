@@ -15,6 +15,7 @@ import "cinnabar:engine/anim"
 import "cinnabar:engine/asset"
 import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/camera"
+import "cinnabar:engine/cutscene"
 import "cinnabar:engine/ecs"
 import "cinnabar:engine/editor/link"
 import "cinnabar:engine/nav"
@@ -64,6 +65,9 @@ Editor :: struct {
 	// through, or nil without them (see overrides.odin).
 	views:       ^camera.Views,
 	animation:   ^anim.State,
+	// The game's cutscenes, which the cutscene preview loads and evaluates through, or nil without them (see
+	// cutscene_preview.odin).
+	cutscenes:   ^cutscene.State,
 	// How many times the editor replaced the game's world with its scene (Load_Scene), in every session: the game
 	// starts what it keeps for a world again when this changes (see world_loads).
 	loads:       u64,
@@ -75,49 +79,51 @@ Editor :: struct {
 // docs/overview/conventions.md#state-with-a-lifecycle).
 Session :: struct {
 	// The connection that this session is for. Another one means a new editor, which gets everything.
-	connection:     u64,
-	types_sent:     bool,
+	connection:        u64,
+	types_sent:        bool,
 	// What the editor knows of each entity slot, by entity index.
-	known:          [dynamic]Known,
+	known:             [dynamic]Known,
 	// The version that the last scan took, and how many entities the world had despawned at it.
-	scan_version:   u64,
-	despawned:      u64,
-	watched:        [dynamic]Watched,
+	scan_version:      u64,
+	despawned:         u64,
+	watched:           [dynamic]Watched,
 	// The editor's viewports, each with its camera and gizmo, its selection and its picks (see viewport.odin).
-	view:           View,
+	view:              View,
 	// The mode that the editor set (see modes.odin).
-	mode:           link.Editor_Mode,
+	mode:              link.Editor_Mode,
 	// Step_Frame messages that wait for a paused frame.
-	steps:          int,
-	last_scan:      f64,
-	last_values:    f64,
-	last_stats:     f64,
+	steps:             int,
+	last_scan:         f64,
+	last_values:       f64,
+	last_stats:        f64,
 	// The bytes of mesh pages that the renderer had streamed when the stats were last sent.
-	pages_streamed: u64,
+	pages_streamed:    u64,
 	// The bytes of virtual texture pages that the renderer had streamed when the stats were last sent.
-	texture_bytes:  u64,
+	texture_bytes:     u64,
 	// The material editor's previews, by ID, and the one to draw next (see preview.odin).
-	previews:       [MAX_PREVIEWS]Preview,
-	next_preview:   int,
-	thumbnail:      Thumbnail,
+	previews:          [MAX_PREVIEWS]Preview,
+	next_preview:      int,
+	thumbnail:         Thumbnail,
 	// The meshes that the editor edits, drawn from memory in place of their assets (see live.odin).
-	live_meshes:    map[format.Guid]Live_Mesh,
+	live_meshes:       map[format.Guid]Live_Mesh,
 	// What mesh mode draws over the live meshes (see mesh_overlay.odin), in the host's heap.
-	mesh_overlay:   link.Mesh_Overlay,
+	mesh_overlay:      link.Mesh_Overlay,
 	// The textures that the landscape tools paint, drawn from memory in place of their assets (see live_texture.odin).
-	live_textures:  map[format.Guid]Live_Texture,
+	live_textures:     map[format.Guid]Live_Texture,
 	// The landscape brush that the helpers draw.
-	brush:          link.Landscape_Overlay,
+	brush:             link.Landscape_Overlay,
 	// Set while the world is the editor's document in Edit: from the Load_Scene that made it, until the mode changes
 	// (see behaviours.odin).
-	mirror:         Maybe(Mirror),
+	mirror:            Maybe(Mirror),
 	// The streaming policy's changes when the session last sent Streamed_Scenes (see world_view.odin).
-	streamed_sent:  u64,
+	streamed_sent:     u64,
 	// The last ticket that the behaviours' edits had, and the messages that wait for poll, in the host's heap.
-	edit_tickets:   u64,
-	outbox:         [dynamic]byte,
+	edit_tickets:      u64,
+	outbox:            [dynamic]byte,
 	// What the editor's owners write over the world in Edit (see overrides.odin).
-	overrides:      Overrides,
+	overrides:         Overrides,
+	// The cutscene editor's preview, which lays over the world with the overrides (see cutscene_preview.odin).
+	cutscene_previews: Cutscene_Previews,
 }
 
 // Mirror is the world as a copy of the editor's document: the ticket of the Load_Scene that made it, and the
@@ -183,6 +189,7 @@ init :: proc(
 	streaming_state: ^streaming.State = nil,
 	views: ^camera.Views = nil,
 	animation: ^anim.State = nil,
+	cutscenes: ^cutscene.State = nil,
 ) {
 	e^ = {
 		platform  = platform,
@@ -195,6 +202,7 @@ init :: proc(
 		streaming = streaming_state,
 		views     = views,
 		animation = animation,
+		cutscenes = cutscenes,
 		commands  = make([dynamic]Command, platform.heap_allocator),
 	}
 	if e.scenes == nil {
@@ -243,6 +251,7 @@ end_session :: proc(e: ^Editor) {
 	release_live_textures(e)
 	close_previews(e)
 	free_overrides(&s.overrides)
+	free_cutscene_previews(&s.cutscene_previews)
 	delete(s.live_meshes)
 	delete(s.live_textures)
 	delete(s.outbox)
@@ -471,6 +480,15 @@ poll :: proc(
 				forget_dead(w, &e.session.view.selection)
 				forget_dead(w, &e.session.view.hidden)
 			}
+		case link.Cutscene_Preview_Open,
+		     link.Cutscene_Preview_Time,
+		     link.Cutscene_Preview_Play,
+		     link.Cutscene_Preview_Close:
+			if _, gone := handle_cutscene_preview_message(e, w, scripts, message); gone {
+				despawned = true
+				forget_dead(w, &e.session.view.selection)
+				forget_dead(w, &e.session.view.hidden)
+			}
 		case:
 			if !handle_thumbnail_message(e, message) &&
 			   !handle_preview_message(e, message) &&
@@ -516,7 +534,8 @@ poll :: proc(
 		send_preview_views(e, out, frame)
 		send_ui_layouts(e, out, frame)
 	}
-	send_overridden_entities(e, out, frame)
+	send_overridden_entities(e, w, out, frame)
+	send_cutscene_preview_tick(e, out)
 	send_streamed_scenes(e, out)
 	if now - s.last_stats >= STATS_INTERVAL {
 		stats_interval := now - s.last_stats
