@@ -14,12 +14,17 @@ What scripts see: the value types, entities and component references, the engine
 | `Entity` | Tagged light userdata, payload = the 64-bit handle | No | Equality is by value, so entities work as table keys. |
 | Component type | Tagged light userdata, payload = the component ID | No | The globals `Transform`, `Health` and so on |
 | `Asset` | Tagged light userdata, payload = one more than the index of its GUID in the runtime's table of the assets that scripts refer to | No | From a behaviour's `Field.asset`. Two references to one asset are the same value, so they compare equal and work as table keys. `asset.guid` is its 32 hex digits. At most 4096 assets at once. |
+| `Cutscene` | Tagged light userdata, payload = the player's generation and slot | No | From `Cutscene.play`. Two handles to one player are equal. The cutscene package owns the type: it registers its methods with `script.light_method` and its wait's poll with `script.light_poll` ([Cinematics: Scripts](../cinematics/scripts.md#the-handle)). |
 | `WorldPosition` | Tagged userdata, 24 bytes | Yes | `a - b` gives a `vector`, and `p + v`, `v + p` and `p - v` give a `WorldPosition`. See [World](../world/positions-and-transforms.md#where-positions-go). |
 | `Quaternion` | Tagged userdata, 16 bytes | Yes | `q * q`, `q * v` |
 | Component reference | Tagged userdata: entity handle and component ID | Yes | The result of `entity:get(Health)` |
 | Behaviour instance | Table with the class as its metatable | Yes | The result of `entity:get(Door)` |
 
-- All light userdata share one metatable in Luau. Its metamethods dispatch on the light userdata tag. Full userdata get one metatable per tag with `lua_setuserdatametatable`. `typeof` gives `Entity`, `ComponentType`, `Asset`, `WorldPosition`, `Quaternion` and `ComponentRef`.
+- All light userdata share one metatable in Luau. Its metamethods dispatch on the light userdata tag. Full userdata get one metatable per tag with `lua_setuserdatametatable`. `typeof` gives `Entity`, `ComponentType`, `Asset`, `InputContext`, `Cutscene`, `WorldPosition`, `Quaternion` and `ComponentRef`.
+- **A light userdata type of another package.** Such as `Cutscene`, it has its own tag in `script.Light_Tag`, whose payload only that package reads:
+  - `push_light`, `to_light` and `check_light` push and read a `Light_Value`;
+  - `light_method` registers its methods;
+  - a `Light_Value` is an event argument too.
 - Userdata tags and light userdata tags are engine constants. They never depend on registration order.
 - Luau sets each metatable only once, so `init` makes them, and a code reload keeps them. Their metamethods are dispatcher closures, so they reach the new DLL's bindings.
 - `WorldPosition` and `Quaternion` values are immutable, so scripts can share them, as `Quaternion.identity` and `WorldPosition.origin` are shared.

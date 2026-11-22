@@ -30,10 +30,10 @@ The handle is a `Cutscene`, a light userdata. It holds the player's slot and gen
 | `:play()` | Plays a `"ready"` player. A loading player plays once it is ready. |
 | `:pause()`, `:resume()` | Stops the player's time, and plays on from it. |
 | `:stop()` | Ends the player without the rest of the cutscene. The player is `"finishing"` at once, and the next `update` gives the world back. |
-| `:skip()` | Skips as the cutscene's skip policy says ([Skipping](skipping.md)). Returns whether the player skips. It returns false at a time that cannot be skipped. |
+| `:skip()` | Skips as the cutscene's skip policy says ([Skipping](skipping.md)). Returns whether the skip was taken. It returns false at a time that cannot be skipped. A loading player returns true, and skips from its start once it is ready, if its start can be skipped. |
 | `:state()` | `"loading"`, `"ready"`, `"playing"`, `"paused"`, `"skipping"`, `"finishing"`, `"restored"` or `"failed"`. |
 | `:error()` | The reason for `"failed"`. One of: `"missing"`, `"not_a_cutscene"`, `"reference_missing"`, `"bad_nesting"`, `"binding_missing"`, `"spawn_failed"`. The log has the asset or the binding. |
-| `:time()`, `:length()` | The player's time, and the cutscene's length, in seconds on the cutscene's time. Both are nil before `"ready"` and after the world is given back. |
+| `:time()`, `:length()` | The player's time, and the end of its range, where the time ends, in seconds on the cutscene's time. A sound that plays past the range does not count. Both are nil before `"ready"` and after the world is given back. |
 | `:binding(name)` | The entity of a binding, by its name, while it is alive. This includes a spawned one. |
 
 **Stale handles.** A handle is stale when its player is gone:
@@ -46,7 +46,7 @@ The cooker type checks the methods against the `Cutscene` type in the definition
 
 ## Events
 
-A player sends its lifecycle to behaviours, through `script.send`. Each event goes to the entities of the cutscene's own bindings (not those of its sub-sequences) and to its caller. An entity that is both gets the event once.
+A player sends its lifecycle to behaviours, as `script.send` does. Each event goes to the entities of the cutscene's own bindings (not those of its sub-sequences) and to its caller. An entity that is both gets the event once.
 
 | Event | When | Who gets it |
 |---|---|---|
@@ -55,6 +55,7 @@ A player sends its lifecycle to behaviours, through `script.send`. Each event go
 | `on_cutscene_failed(cutscene, reason)` | The player failed. `reason` is what `:error()` returns. | The possessed bindings' entities that had resolved, and the caller |
 
 - **Suspended behaviours.** A binding that suspends `behaviours` holds its entity from `"loading"` on ([Possession: The settings](possession.md#the-settings)). A suspended behaviour gets no events, so it misses `on_cutscene_started`. It does get `on_cutscene_finished` and `on_cutscene_failed`: they are delivered in the next script phase, after the player resumed its behaviours.
+- **Order.** The events go in the player's queue, after the events that its tracks sent and the ends of its open ranges. So at a skip to the end, the keys that fire when skipped come before `on_cutscene_finished`. The game sends the queue after `update` and each tick, and at the end of the frame ([Tracks: Event tracks](tracks.md#event-tracks)). An event that a command causes in the script phase, such as the start after `:play()`, arrives in the next script phase. Native event handlers do not get these events.
 - **What `skipped` means.** It is true only when a skip took the player to its end. It is false in these cases:
   - a `:stop()` during a skip's fade;
   - a skip to the end of a skip range, after which the cutscene plays to its end.
