@@ -14,6 +14,8 @@ public enum CutsceneBlockKind
     Trigger,
     Range,
     Key,
+    /// <summary>A <c>marker &lt;id&gt; &lt;time&gt; "&lt;name&gt;"</c> under the cutscene: a named, colored point on its time.</summary>
+    Marker,
 }
 
 /// <summary>
@@ -51,9 +53,9 @@ public sealed class CutsceneBlock
     // The setting lines, after the keyword line.
     IEnumerable<TextLine> SettingLines => Lines.SkipWhile(l => l != Head).Skip(1).Where(l => !l.IsBlank);
 
-    /// <summary>The ID of a binding, track, section, trigger or range, or null for another block or a bad ID.</summary>
+    /// <summary>The ID of a binding, track, section, trigger, range or marker, or null for another block or a bad ID.</summary>
     public int? Id => Kind is CutsceneBlockKind.Binding or CutsceneBlockKind.Track or CutsceneBlockKind.Section
-            or CutsceneBlockKind.Trigger or CutsceneBlockKind.Range
+            or CutsceneBlockKind.Trigger or CutsceneBlockKind.Range or CutsceneBlockKind.Marker
         && Words is [var id, ..] && CutsceneFile.TryParseTicks(id, out var value) && value > 0
             ? value
             : null;
@@ -62,8 +64,8 @@ public sealed class CutsceneBlock
     public string? TrackKind => Kind == CutsceneBlockKind.Track && Words is [_, var kind, ..] ? kind : null;
 
     /// <summary>
-    /// The name of a binding or a track, unquoted, a channel's, or the event of a trigger or a range, or null when the
-    /// block has none.
+    /// The name of a binding, a track or a marker, unquoted, a channel's, or the event of a trigger or a range, or null
+    /// when the block has none.
     /// </summary>
     public string? Name => Kind switch
     {
@@ -72,6 +74,7 @@ public sealed class CutsceneBlock
         CutsceneBlockKind.Channel => Words is [var name, ..] ? name : null,
         CutsceneBlockKind.Trigger => Rest(2),
         CutsceneBlockKind.Range => Rest(3),
+        CutsceneBlockKind.Marker => Quoted(2),
         _ => null,
     };
 
@@ -102,10 +105,10 @@ public sealed class CutsceneBlock
         return rest.Length == 0 ? null : rest;
     }
 
-    /// <summary>A section's or a range's start in ticks, or a key's or a trigger's time, or null.</summary>
+    /// <summary>A section's or a range's start in ticks, or a key's, a trigger's or a marker's time, or null.</summary>
     public int? Start => Kind switch
     {
-        CutsceneBlockKind.Section or CutsceneBlockKind.Range or CutsceneBlockKind.Trigger => Ticks(1),
+        CutsceneBlockKind.Section or CutsceneBlockKind.Range or CutsceneBlockKind.Trigger or CutsceneBlockKind.Marker => Ticks(1),
         CutsceneBlockKind.Key => Ticks(0),
         _ => null,
     };
@@ -164,7 +167,7 @@ public sealed class CutsceneBlock
 
     static string Indent(TextLine line) => line.Text[..(line.Text.Length - line.Text.TrimStart().Length)];
 
-    /// <summary>Renames a binding or a track, keeping its ID and kind.</summary>
+    /// <summary>Renames a binding, a track or a marker, keeping its ID and its kind or time.</summary>
     public void SetName(string name)
     {
         var words = Words;
@@ -175,6 +178,9 @@ public sealed class CutsceneBlock
                 break;
             case CutsceneBlockKind.Track when words.Length >= 2:
                 SetHead($"track {words[0]} {words[1]} {TextQuote.Quote(name)}");
+                break;
+            case CutsceneBlockKind.Marker when words.Length >= 2:
+                SetHead($"marker {words[0]} {words[1]} {TextQuote.Quote(name)}");
                 break;
             default:
                 throw new InvalidOperationException($"a {Kind} has no name to set");
@@ -198,7 +204,7 @@ public sealed class CutsceneBlock
         }
     }
 
-    /// <summary>Sets a key's or a trigger's time in ticks.</summary>
+    /// <summary>Sets a key's, a trigger's or a marker's time in ticks.</summary>
     public void SetTime(int time)
     {
         var words = Words;
@@ -209,6 +215,9 @@ public sealed class CutsceneBlock
                 break;
             case CutsceneBlockKind.Trigger when words.Length >= 3:
                 SetHead($"trigger {words[0]} {Format(time)} {Rest(2)}");
+                break;
+            case CutsceneBlockKind.Marker when words.Length >= 2:
+                SetHead($"marker {words[0]} {Format(time)} {Rest(2)}");
                 break;
             default:
                 throw new InvalidOperationException($"a {Kind} has no time to set");
@@ -320,6 +329,21 @@ public sealed class CutsceneBlock
     }
 
     /// <summary>
+    /// Sets the ID of a section, a trigger, a range, a marker or a track, keeping the rest of its keyword line: a pasted
+    /// copy takes a new one.
+    /// </summary>
+    public void SetId(int id)
+    {
+        if (Kind is not (CutsceneBlockKind.Section or CutsceneBlockKind.Trigger or CutsceneBlockKind.Range or CutsceneBlockKind.Marker
+            or CutsceneBlockKind.Track) || Head?.Code is not { } code || Words.Length < 1)
+        {
+            throw new InvalidOperationException($"a {Kind} has no ID to set");
+        }
+        var keyword = code.TrimStart().Split((char[]?)null, 2, StringSplitOptions.RemoveEmptyEntries)[0];
+        SetHead(Rest(1) is { } rest ? $"{keyword} {Format(id)} {rest}" : $"{keyword} {Format(id)}");
+    }
+
+    /// <summary>
     /// A copy of the block and the blocks under it, with no parent, for <see cref="CutsceneFile.Insert"/>. The comments
     /// above it are the original's, so the copy leaves them out, and keeps the blank lines.
     /// </summary>
@@ -360,9 +384,14 @@ public sealed class CutsceneBlock
     }
 
     // The blocks under this one in start order, keeping the order of blocks with one start. A block with no start
-    // leaves the order as it is, since the cooker reports it.
+    // leaves the order as it is, since the cooker reports it. Under the cutscene, only the markers change places, among
+    // the places that markers have, since the bindings and the tracks have no start.
     internal bool SortChildren()
     {
+        if (Kind == CutsceneBlockKind.Cutscene)
+        {
+            return SortMarkers();
+        }
         if (ChildList.Count < 2 || ChildList.Any(c => c.Start == null))
         {
             return false;
@@ -374,6 +403,27 @@ public sealed class CutsceneBlock
         }
         ChildList.Clear();
         ChildList.AddRange(sorted);
+        Touch();
+        return true;
+    }
+
+    bool SortMarkers()
+    {
+        var slots = ChildList.Select((c, i) => (c, i)).Where(p => p.c.Kind == CutsceneBlockKind.Marker).Select(p => p.i).ToList();
+        var markers = slots.Select(i => ChildList[i]).ToList();
+        if (markers.Any(m => m.Start == null))
+        {
+            return false;
+        }
+        var sorted = markers.OrderBy(m => m.Start!.Value).ToList();
+        if (sorted.SequenceEqual(markers))
+        {
+            return false;
+        }
+        for (var i = 0; i < slots.Count; i++)
+        {
+            ChildList[slots[i]] = sorted[i];
+        }
         Touch();
         return true;
     }
@@ -420,6 +470,9 @@ public sealed class CutsceneFile
     public IEnumerable<CutsceneBlock> Bindings => Root.Children.Where(b => b.Kind == CutsceneBlockKind.Binding);
 
     public IEnumerable<CutsceneBlock> Tracks => Root.Children.Where(b => b.Kind == CutsceneBlockKind.Track);
+
+    /// <summary>The markers, in the file's order, which the editor keeps in time order.</summary>
+    public IEnumerable<CutsceneBlock> Markers => Root.Children.Where(b => b.Kind == CutsceneBlockKind.Marker);
 
     /// <summary>The length in ticks, or null when the file does not set a good one.</summary>
     public int? Length => Root.Get("length") is { } text && TryParseTicks(text, out var ticks) && ticks > 0 ? ticks : null;
@@ -546,6 +599,7 @@ public sealed class CutsceneFile
         "channel" => CutsceneBlockKind.Channel,
         "trigger" => CutsceneBlockKind.Trigger,
         "range" => CutsceneBlockKind.Range,
+        "marker" => CutsceneBlockKind.Marker,
         _ => CutsceneBlockKind.Key,
     };
 
@@ -566,7 +620,7 @@ public sealed class CutsceneFile
         }
         return word switch
         {
-            "binding" or "track" => Up(CutsceneBlockKind.Cutscene),
+            "binding" or "track" or "marker" => Up(CutsceneBlockKind.Cutscene),
             // A track's sections and events, after its settings or another section's or event's lines.
             "section" or "trigger" or "range" => open.Kind is CutsceneBlockKind.Track or CutsceneBlockKind.Section or CutsceneBlockKind.Channel
                 or CutsceneBlockKind.Trigger or CutsceneBlockKind.Range
@@ -631,8 +685,16 @@ public sealed class CutsceneFile
         return Root.Index().GetValueOrDefault(path);
     }
 
-    /// <summary>The ID after the highest of a kind's blocks. Sections' IDs are the cutscene's, so they count across tracks.</summary>
-    public int NextId(CutsceneBlockKind kind) => Blocks.Where(b => b.Kind == kind).Select(b => b.Id ?? 0).DefaultIfEmpty(0).Max() + 1;
+    /// <summary>
+    /// The ID after the highest of a kind's blocks. Sections' IDs are the cutscene's, so they count across tracks, and
+    /// triggers and ranges share theirs, as the cooker checks them together.
+    /// </summary>
+    public int NextId(CutsceneBlockKind kind)
+    {
+        bool Shares(CutsceneBlock b) => b.Kind == kind
+            || (kind is CutsceneBlockKind.Trigger or CutsceneBlockKind.Range && b.Kind is CutsceneBlockKind.Trigger or CutsceneBlockKind.Range);
+        return Blocks.Where(Shares).Select(b => b.Id ?? 0).DefaultIfEmpty(0).Max() + 1;
+    }
 
     /// <summary>Puts a block, as <see cref="CutsceneBlock.Copy"/> or <see cref="CutsceneBlock.KeyLike"/> makes it, under a parent at an index.</summary>
     public void Insert(CutsceneBlock parent, int index, CutsceneBlock block)

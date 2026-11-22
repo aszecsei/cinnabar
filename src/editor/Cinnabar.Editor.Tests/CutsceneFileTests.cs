@@ -65,6 +65,32 @@ public sealed class CutsceneFileTests
     }
 
     [Fact]
+    public void AMarkerIsABlockOfTheCutsceneWithItsTimeNameAndColor()
+    {
+        const string Text = "cutscene 1\nlength = 60000\n# The beat.\nmarker 2 30000 \"Beat drop\"\n\tcolor = \"#336699\"\ntrack 1 event \"E\"\n\ttrigger 1 0 go\nmarker 1 0 \"Top\"\n";
+        var file = Parse(Text);
+        Assert.Equal(Text, file.Text);
+        Assert.Equal(["marker:2", "track:1", "marker:1"], file.Root.Children.Select(CutsceneFile.PathOf));
+        var beat = file.Find("marker:2")!;
+        Assert.Equal((CutsceneBlockKind.Marker, 2, 30000, "Beat drop", "\"#336699\""), (beat.Kind, beat.Id!.Value, beat.Start!.Value, beat.Name!, beat.Get("color")));
+        Assert.Null(beat.End);
+        // A marker after a track is the cutscene's, not the track's, and the trigger stays the track's.
+        Assert.Equal(["marker:2", "marker:1"], file.Markers.Select(CutsceneFile.PathOf));
+        Assert.Single(file.Find("track:1")!.Children);
+
+        beat.SetName("Drop");
+        beat.SetTime(45000);
+        beat.SetId(7);
+        Assert.Equal(Text.Replace("marker 2 30000 \"Beat drop\"", "marker 7 45000 \"Drop\""), file.Text);
+        Assert.Equal(8, file.NextId(CutsceneBlockKind.Marker));
+        // Triggers and ranges share their IDs, as the cooker checks them together.
+        Assert.Equal(2, file.NextId(CutsceneBlockKind.Range));
+        // A sort of the cutscene's children moves only the markers, among the places that markers have.
+        Assert.True(CutsceneFile.SortChildren(file.Root));
+        Assert.Equal(["marker:1", "track:1", "marker:7"], file.Root.Children.Select(CutsceneFile.PathOf));
+    }
+
+    [Fact]
     public void ALineInNoPlaceStaysInTheOpenBlockForTheCookerToReport()
     {
         const string Text = "cutscene 1\nlength = 60\nkey 0 1 linear\ntrack 1 event \"E\"\nchannel gain\n\tkey 0 1 linear\n";

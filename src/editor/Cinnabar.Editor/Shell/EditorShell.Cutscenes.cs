@@ -16,6 +16,12 @@ public sealed partial class EditorShell
     public CutsceneEditor? ActiveCutscene => ActiveGraphEditor as CutsceneEditor;
 
     /// <summary>
+    /// What the timeline's last copy or cut holds, which a paste in the tab of the cutscene that it came from puts at its
+    /// playhead (see docs/editor/cutscene-editor.md#copy-and-paste). The editor keeps it, not the system's clipboard.
+    /// </summary>
+    public CutsceneClip? CutsceneClipboard { get; internal set; }
+
+    /// <summary>
     /// Opens a cutscene in its editor, or shows its open editor. A file that does not start with <c>cutscene 1</c>
     /// opens in the script editor instead, with the reason in the console.
     /// </summary>
@@ -66,13 +72,16 @@ public sealed partial class EditorShell
                 Console.Add(LogLevel.Warning, $"cutscene: cannot read {EditorSettings.CutsceneTimelineFileName}: {e.Message}");
             }
         }
-        return _cutsceneViews.GetValueOrDefault(guid) ?? CutsceneTimelineView.Default;
+        // A file from before mute and solo has neither.
+        return _cutsceneViews.GetValueOrDefault(guid) is { } view
+            ? view with { Locked = view.Locked ?? [], Muted = view.Muted ?? [], Soloed = view.Soloed ?? [] }
+            : CutsceneTimelineView.Default;
     }
 
     internal void SaveCutsceneTimelineSettings(string guid, CutsceneTimelineView view)
     {
         CutsceneTimelineSettingsOf(guid);
-        if (view == CutsceneTimelineView.Default || (!view.ShowFrames && view.Locked.Length == 0))
+        if (view.IsDefault)
         {
             _cutsceneViews!.Remove(guid);
         }
@@ -84,8 +93,14 @@ public sealed partial class EditorShell
     }
 }
 
-/// <summary>How a user's timeline shows a cutscene: frames or timecode on the ruler, and the IDs of the locked tracks.</summary>
-public sealed record CutsceneTimelineView(bool ShowFrames, int[] Locked)
+/// <summary>
+/// How a user's timeline shows a cutscene: frames or timecode on the ruler, and the IDs of the locked, the muted and the
+/// soloed tracks.
+/// </summary>
+public sealed record CutsceneTimelineView(bool ShowFrames, int[] Locked, int[]? Muted = null, int[]? Soloed = null)
 {
-    public static readonly CutsceneTimelineView Default = new(false, []);
+    public static readonly CutsceneTimelineView Default = new(false, [], [], []);
+
+    /// <summary>Whether the view is the default, which the file leaves out.</summary>
+    public bool IsDefault => !ShowFrames && (Locked?.Length ?? 0) == 0 && (Muted?.Length ?? 0) == 0 && (Soloed?.Length ?? 0) == 0;
 }

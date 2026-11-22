@@ -15,13 +15,31 @@ public enum CutsceneItemKind
     Range,
     Trigger,
     Key,
+    Marker,
 }
 
-/// <summary>Something that a timeline row draws: a section or a range as a bar, or a trigger or a key at its time, on the cutscene's time.</summary>
+/// <summary>
+/// Something that the timeline draws: on a row, a section or a range as a bar, or a trigger or a key at its time, and on
+/// the ruler, a marker at its time, on the cutscene's time.
+/// </summary>
 public sealed record CutsceneTimelineItem(CutsceneItemKind Kind, int Start, int End, string Path)
 {
-    /// <summary>What a section's bar says: a subtitle's line, a presentation's kind, a camera cut's camera, or the ID.</summary>
+    /// <summary>What a section's bar says: a subtitle's line, a presentation's kind, a camera cut's camera, or the ID. A marker's name.</summary>
     public string? Label { get; init; }
+
+    /// <summary>A marker's color as <c>#rrggbb</c>, or null for the default.</summary>
+    public string? Color { get; init; }
+}
+
+/// <summary>
+/// Which rows the timeline shows (see docs/editor/cutscene-editor.md#search-and-filter): those whose binding's or
+/// track's name holds a text, ignoring case, and with keysIn, only the tracks with a key in that span of time.
+/// </summary>
+public sealed record CutsceneRowFilter(string Text, (int Start, int End)? KeysIn)
+{
+    public static readonly CutsceneRowFilter None = new("", null);
+
+    public bool IsNone => Text.Length == 0 && KeysIn == null;
 }
 
 /// <summary>A row of the timeline: a binding, a track or one of a track's channels, with what it draws.</summary>
@@ -58,6 +76,9 @@ public sealed class CutsceneTimelineRow
 
     /// <summary>Whether the rows under it are hidden.</summary>
     public bool Folded { get; internal set; }
+
+    /// <summary>Whether the track's asset sets <c>muted = true</c>, which no player plays.</summary>
+    public bool AssetMuted { get; internal set; }
 
     /// <summary>The row's top in content pixels, under the ruler.</summary>
     public double Top { get; internal set; }
@@ -99,7 +120,13 @@ public enum CutsceneHitKind
     /// <summary>A row's header, which selects its binding or track.</summary>
     Header,
     Fold,
+    /// <summary>A track's mute toggle, each user's, which only the preview hears.</summary>
+    Mute,
+    /// <summary>A track's solo toggle, each user's, which only the preview hears.</summary>
+    Solo,
     Lock,
+    /// <summary>A marker's flag on the ruler.</summary>
+    Marker,
     Key,
     Trigger,
     Body,
@@ -129,21 +156,33 @@ public sealed class CutsceneTimelineLayout
     public const double Grab = 5;
     /// <summary>Keys closer than this draw as one glyph.</summary>
     public const double MergeWidth = 2;
-    /// <summary>The lock toggle's left edge, from the gutter's right.</summary>
+    /// <summary>The width of each of a track header's toggles: mute, solo and lock, from left to right at its right end.</summary>
     public const double LockWidth = 22;
+    /// <summary>The marker flags' strip: the top of the ruler.</summary>
+    public const double MarkerHeight = 12;
+
+    /// <summary>The left edge of the mute toggle in a track's header.</summary>
+    public const double MuteX = Gutter - 3 * LockWidth;
+
+    /// <summary>The left edge of the solo toggle in a track's header.</summary>
+    public const double SoloX = Gutter - 2 * LockWidth;
 
     // The order of the tracks that no binding has, at the top.
     static readonly string[] MasterOrder = ["camera_cut", "audio", "event", "presentation", "sub_sequence"];
 
-    CutsceneTimelineLayout(List<CutsceneTimelineRow> rows, int length, int rate, (int Start, int End) range)
+    CutsceneTimelineLayout(List<CutsceneTimelineRow> rows, List<CutsceneTimelineItem> markers, int length, int rate, (int Start, int End) range)
     {
         Rows = rows;
+        Markers = markers;
         Length = length;
         Rate = rate;
         Range = range;
     }
 
     public IReadOnlyList<CutsceneTimelineRow> Rows { get; }
+
+    /// <summary>The markers, in time order.</summary>
+    public IReadOnlyList<CutsceneTimelineItem> Markers { get; }
 
     public int Length { get; }
 
@@ -162,16 +201,22 @@ public sealed class CutsceneTimelineLayout
     /// The rows of a cutscene: the tracks that no binding has first (camera cuts, audio, events, presentation and
     /// sub-sequences), then each binding with its tracks under it, and under a track, a row for each channel name of its
     /// sections. A binding shows its tracks unless toggled is folding it, and a track hides its channels unless toggled
-    /// opens it: toggled holds the paths whose fold is not the default.
+    /// opens it: toggled holds the paths whose fold is not the default. A filter leaves out the tracks that it does not
+    /// show, and a binding with none of its tracks shown, unless the text names the binding and no span is given.
     /// </summary>
-    public static CutsceneTimelineLayout Build(CutsceneFile file, IReadOnlySet<string> toggled)
+    public static CutsceneTimelineLayout Build(CutsceneFile file, IReadOnlySet<string> toggled, CutsceneRowFilter? filter = null)
     {
+        filter ??= CutsceneRowFilter.None;
         var rows = new List<CutsceneTimelineRow>();
         var bindingIds = file.Bindings.Select(b => b.Id).OfType<int>().ToHashSet();
         int? BindingOf(CutsceneBlock track) =>
             track.Get("binding") is { } text && CutsceneFile.TryParseTicks(text, out var id) && bindingIds.Contains(id) ? id : null;
+        bool Names(string? name) => filter.Text.Length == 0 || (name?.Contains(filter.Text, StringComparison.OrdinalIgnoreCase) ?? false);
+        bool HasKeysIn(CutsceneBlock track) => filter.KeysIn is not { } span || track.Children.Any(s => s is { Kind: CutsceneBlockKind.Section, Start: { } start }
+            && s.Descendants().Any(k => k.Kind == CutsceneBlockKind.Key && k.Start is { } t && start + t >= span.Start && start + t <= span.End));
         var master = file.Tracks.Where(t => BindingOf(t) == null)
             .OrderBy(t => Array.IndexOf(MasterOrder, t.TrackKind) is var i and >= 0 ? i : MasterOrder.Length)
+            .Where(t => Names(TrackLabel(t)) && HasKeysIn(t))
             .ToList();
         foreach (var track in master)
         {
@@ -180,7 +225,14 @@ public sealed class CutsceneTimelineLayout
         foreach (var binding in file.Bindings)
         {
             var path = CutsceneFile.PathOf(binding);
-            var tracks = file.Tracks.Where(t => binding.Id != null && BindingOf(t) == binding.Id).ToList();
+            var named = filter.Text.Length > 0 && Names(binding.Name);
+            var tracks = file.Tracks.Where(t => binding.Id != null && BindingOf(t) == binding.Id)
+                .Where(t => (named || Names(TrackLabel(t))) && HasKeysIn(t))
+                .ToList();
+            if (!filter.IsNone && tracks.Count == 0 && !(named && filter.KeysIn == null))
+            {
+                continue;
+            }
             var row = new CutsceneTimelineRow(CutsceneRowKind.Binding, path, binding.Name ?? $"binding {binding.Id}", 0)
             {
                 CanFold = tracks.Count > 0,
@@ -200,13 +252,23 @@ public sealed class CutsceneTimelineLayout
         {
             rows[i].Top = i * RowHeight;
         }
-        return new CutsceneTimelineLayout(rows, file.Length ?? 0, file.Rate, CutsceneEdits.RangeOf(file));
+        var markers = file.Markers.Where(m => m.Start != null)
+            .Select(m => new CutsceneTimelineItem(CutsceneItemKind.Marker, m.Start!.Value, m.Start!.Value, CutsceneFile.PathOf(m))
+            {
+                Label = m.Name,
+                Color = m.Get("color") is { } color ? TextQuote.Unquote(color) : null,
+            })
+            .OrderBy(m => m.Start)
+            .ToList();
+        return new CutsceneTimelineLayout(rows, markers, file.Length ?? 0, file.Rate, CutsceneEdits.RangeOf(file));
     }
+
+    static string TrackLabel(CutsceneBlock track) => string.IsNullOrEmpty(track.Name) ? track.TrackKind ?? "track" : track.Name;
 
     static void AddTrack(List<CutsceneTimelineRow> rows, CutsceneFile file, CutsceneBlock track, int depth, IReadOnlySet<string> toggled)
     {
         var path = CutsceneFile.PathOf(track);
-        var label = string.IsNullOrEmpty(track.Name) ? track.TrackKind ?? "track" : track.Name;
+        var label = TrackLabel(track);
         var channels = track.Children.Where(c => c.Kind == CutsceneBlockKind.Section)
             .SelectMany(s => s.Children.Where(c => c.Kind == CutsceneBlockKind.Channel))
             .Select(c => c.Name).OfType<string>().Distinct().ToList();
@@ -216,6 +278,7 @@ public sealed class CutsceneTimelineLayout
             TrackId = track.Id,
             CanFold = channels.Count > 0,
             Folded = !toggled.Contains(path),
+            AssetMuted = track.Get("muted")?.Trim() == "true",
         };
         rows.Add(row);
         foreach (var child in track.Children)
@@ -386,6 +449,11 @@ public sealed class CutsceneTimelineLayout
                 return new CutsceneHit(CutsceneHitKind.None, null, [], tick);
             }
             var tx = x - Gutter;
+            // A marker's flag before the handles, as it sits over them.
+            if (y < MarkerHeight && Nearest(Markers, view, tx) is { } markers)
+            {
+                return new CutsceneHit(CutsceneHitKind.Marker, null, markers, tick);
+            }
             if (y >= RulerHeight - RangeBarHeight)
             {
                 if (Math.Abs(tx - view.X(Range.End)) <= Grab)
@@ -415,9 +483,10 @@ public sealed class CutsceneTimelineLayout
             {
                 return new CutsceneHit(CutsceneHitKind.Fold, row, [row.Path], tick);
             }
-            if (row.Kind == CutsceneRowKind.Track && x >= Gutter - LockWidth)
+            if (row.Kind == CutsceneRowKind.Track && x >= MuteX)
             {
-                return new CutsceneHit(CutsceneHitKind.Lock, row, [row.Path], tick);
+                var kind = x >= Gutter - LockWidth ? CutsceneHitKind.Lock : x >= SoloX ? CutsceneHitKind.Solo : CutsceneHitKind.Mute;
+                return new CutsceneHit(kind, row, [row.Path], tick);
             }
             return new CutsceneHit(CutsceneHitKind.Header, row, [row.Path], tick);
         }
@@ -469,7 +538,7 @@ public sealed class CutsceneTimelineLayout
     }
 
     // The items nearest to a pixel within the grab distance, with the others that draw in the same glyph.
-    static List<string>? Nearest(List<CutsceneTimelineItem> items, TimelineView view, double px)
+    static List<string>? Nearest(IReadOnlyList<CutsceneTimelineItem> items, TimelineView view, double px)
     {
         var best = double.MaxValue;
         foreach (var item in items)
@@ -508,12 +577,16 @@ public sealed class CutsceneTimelineLayout
     }
 
     /// <summary>
-    /// The times that a drag snaps to, besides frames and the playhead: the edges of the bars, the triggers and the keys
-    /// that the drag does not move.
+    /// The times that a drag snaps to, besides frames and the playhead: the edges of the bars, the triggers, the keys and
+    /// the markers that the drag does not move.
     /// </summary>
     public List<int> SnapTargets(IReadOnlySet<string> moving)
     {
         var targets = new HashSet<int> { 0, Length };
+        foreach (var marker in Markers.Where(m => !moving.Contains(m.Path)))
+        {
+            targets.Add(marker.Start);
+        }
         foreach (var row in Rows.Where(r => r.Kind == CutsceneRowKind.Track))
         {
             foreach (var bar in row.Bars.Where(b => !moving.Contains(b.Path)))
@@ -529,10 +602,14 @@ public sealed class CutsceneTimelineLayout
         return [.. targets.Order()];
     }
 
-    /// <summary>The times that Ctrl+Left and Ctrl+Right go to: 0, the length, and the edges of the sections, ranges and triggers.</summary>
+    /// <summary>The times that Ctrl+Left and Ctrl+Right go to: 0, the length, the markers, and the edges of the sections, ranges and triggers.</summary>
     public List<int> Edges()
     {
         var edges = new HashSet<int> { 0, Length };
+        foreach (var marker in Markers)
+        {
+            edges.Add(marker.Start);
+        }
         foreach (var row in Rows.Where(r => r.Kind == CutsceneRowKind.Track))
         {
             foreach (var bar in row.Bars)
@@ -551,7 +628,7 @@ public sealed class CutsceneTimelineLayout
     /// <summary>The span of what the paths name, for F, or null when they name nothing on the timeline.</summary>
     public (int Start, int End)? SpanOf(IReadOnlySet<string> paths)
     {
-        var items = Rows.SelectMany(r => r.Bars.Concat(r.Points).Concat(r.Keys)).Where(i => paths.Contains(i.Path)).ToList();
+        var items = Rows.SelectMany(r => r.Bars.Concat(r.Points).Concat(r.Keys)).Concat(Markers).Where(i => paths.Contains(i.Path)).ToList();
         return items.Count == 0 ? null : (items.Min(i => i.Start), items.Max(i => i.End));
     }
 }

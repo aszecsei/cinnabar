@@ -1,5 +1,6 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
@@ -14,8 +15,8 @@ using DockSide = Avalonia.Controls.Dock;
 namespace Cinnabar.Editor.Cutscenes;
 
 /// <summary>
-/// The cutscene editor (see docs/editor/cutscene-editor.md#the-tab): a toolbar with the cutscene's length, the timeline of
-/// its bindings, tracks, sections and keys, and the selected block's details under it. Docking can rebuild the view at any
+/// The cutscene editor (see docs/editor/cutscene-editor.md#the-tab): a toolbar with the cutscene's length, a strip that
+/// filters the tracks, the timeline of its bindings, tracks, sections and keys, and the selected block's details under it. Docking can rebuild the view at any
 /// time, so its state is in its <see cref="CutsceneEditor"/>.
 /// </summary>
 public sealed class CutsceneEditorView : DockPanel
@@ -24,6 +25,8 @@ public sealed class CutsceneEditorView : DockPanel
     readonly CutsceneEditor _editor;
     readonly TextBlock _time = new() { FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0) };
     readonly TextBlock _status = new() { FontSize = 12, VerticalAlignment = VerticalAlignment.Center };
+    readonly TextBox _search = new() { PlaceholderText = "Filter tracks (Ctrl+F)", Classes = { "value-edit" }, MinWidth = 200, FontSize = 12 };
+    readonly ToggleButton _keysUnder = new() { Content = "Keys under selection", Classes = { "viewport-tool" }, FontSize = 11, Focusable = false, Margin = new Thickness(8, 0, 0, 0) };
 
     public CutsceneEditorView(EditorShell shell, CutsceneEditor editor)
     {
@@ -49,7 +52,29 @@ public sealed class CutsceneEditorView : DockPanel
 
         var grid = new Grid { RowDefinitions = new RowDefinitions("*,4,220") };
         var timeline = new CutsceneTimeline(editor);
-        grid.Children.Add(timeline);
+        // The strip over the timeline: the search box, which filters the tracks by binding or track name as it is
+        // typed, and Esc in it clears it and gives the keyboard back to the timeline; and the keys-under-selection toggle.
+        _search.Text = editor.FilterText;
+        _search.TextChanged += (_, _) => editor.SetFilterText(_search.Text ?? "");
+        _search.KeyDown += (_, e) =>
+        {
+            if (e.Key == Key.Escape)
+            {
+                _search.Text = "";
+                timeline.Focus();
+                e.Handled = true;
+            }
+        };
+        ToolTip.SetTip(_keysUnder, "Show only the tracks with keys in the span of the selection, as it is when this is turned on.");
+        _keysUnder.IsCheckedChanged += (_, _) => editor.SetKeysUnderSelection(_keysUnder.IsChecked == true);
+        var strip = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(8, 4) };
+        strip.Children.Add(new Border { Classes = { "value-box", "editable" }, Child = _search });
+        strip.Children.Add(_keysUnder);
+        var timelinePane = new DockPanel();
+        SetDock(strip, DockSide.Top);
+        timelinePane.Children.Add(strip);
+        timelinePane.Children.Add(timeline);
+        grid.Children.Add(timelinePane);
         var split = new GridSplitter { ResizeDirection = GridResizeDirection.Rows };
         Grid.SetRow(split, 1);
         grid.Children.Add(split);
@@ -73,14 +98,43 @@ public sealed class CutsceneEditorView : DockPanel
             }
         }, RoutingStrategies.Tunnel);
 
+        void Find()
+        {
+            _search.Focus();
+            _search.SelectAll();
+        }
+        void AskTracks(IReadOnlyList<string> kinds) => _ = AskPasteTracks(kinds);
         new ViewSubscriptions(this, attached: Show)
             .Add(() => _editor.Changed += Show, () => _editor.Changed -= Show)
+            .Add(() => _editor.FindRequested += Find, () => _editor.FindRequested -= Find)
+            .Add(() => _editor.PasteTracksRequested += AskTracks, () => _editor.PasteTracksRequested -= AskTracks)
             .Add(() => _editor.ProblemsChanged += Show, () => _editor.ProblemsChanged -= Show)
             .Add(() => _shell.Cook.StateChanged += Show, () => _shell.Cook.StateChanged -= Show);
     }
 
+    // A paste needs tracks that the cutscene lacks: Add pastes with them, Cancel pastes nothing.
+    async Task AskPasteTracks(IReadOnlyList<string> kinds)
+    {
+        if (TopLevel.GetTopLevel(this) is not Window window)
+        {
+            return;
+        }
+        var names = string.Join(", ", kinds.Select(k => k.Replace('_', ' ')));
+        var answer = await Dialogs.Ask(window, "Add tracks to paste?",
+            $"The paste needs tracks of these kinds, which the target does not have: {names}. Add them, like the tracks that were copied?",
+            "Add Tracks", "Cancel");
+        if (answer == "Add Tracks")
+        {
+            _editor.Paste(addTracks: true);
+        }
+    }
+
     void Show()
     {
+        if (_keysUnder.IsChecked != _editor.KeysUnderSelection)
+        {
+            _keysUnder.IsChecked = _editor.KeysUnderSelection;
+        }
         var file = _editor.File;
         _time.Text = file.Length is { } length
             ? $"{CutsceneTime.Timecode(length, file.Rate)}  ·  {CutsceneTime.Frames(length, file.Rate)} frames at {file.Rate} fps"

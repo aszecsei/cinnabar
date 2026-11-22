@@ -16,8 +16,8 @@ namespace Cinnabar.Editor.Cutscenes;
 
 /// <summary>
 /// The cutscene's timeline (see docs/editor/cutscene-editor.md#the-timeline): the headers of its bindings, tracks and
-/// channels on the left, the ruler with the range bar and the playhead at the top, and the sections, events and keys on
-/// one time axis. It draws what <see cref="CutsceneTimelineLayout.Visible"/> gives, and passes its input to a
+/// channels on the left, with each track's mute, solo and lock, the ruler with the markers, the range bar and the
+/// playhead at the top, and the sections, events and keys on one time axis. It draws what <see cref="CutsceneTimelineLayout.Visible"/> gives, and passes its input to a
 /// <see cref="CutsceneTimelineInput"/>.
 /// </summary>
 sealed class CutsceneTimeline : Control
@@ -47,6 +47,11 @@ sealed class CutsceneTimeline : Control
     static readonly IPen LengthPen = new Pen(new SolidColorBrush(Color.FromArgb(0xA0, 0xFF, 0xFF, 0xFF)), 1);
     static readonly IPen LockPen = new Pen(new SolidColorBrush(Color.Parse("#9A9AA2")), 1.2);
     static readonly IPen LockedPen = new Pen(new SolidColorBrush(Color.Parse("#FFD24A")), 1.2);
+    static readonly IBrush SilentFill = new SolidColorBrush(Color.Parse("#4A4A50"));
+    static readonly IBrush MutedBrush = new SolidColorBrush(Color.Parse("#E69138"));
+    static readonly IBrush SoloBrush = new SolidColorBrush(Color.Parse("#FFD24A"));
+    static readonly IPen StrikePen = new Pen(new SolidColorBrush(Color.Parse("#9A9AA2")), 1);
+    static readonly IBrush MarkerDefault = new SolidColorBrush(Color.Parse("#F5A623"));
     static readonly Typeface Face = new("Inter");
 
     readonly CutsceneEditor _editor;
@@ -209,6 +214,14 @@ sealed class CutsceneTimeline : Control
             {
                 DrawRow(context, row, selected, problems, X);
             }
+            foreach (var marker in layout.Markers)
+            {
+                var mx = X(marker.Start);
+                if (mx >= gutter - 1 && mx <= gutter + width + 1)
+                {
+                    context.DrawLine(new Pen(MarkerLine(marker.Color), 1), new Point(mx, Layout.RulerHeight), new Point(mx, size.Height));
+                }
+            }
             var lengthX = X(layout.Length);
             if (lengthX < gutter + width)
             {
@@ -219,6 +232,7 @@ sealed class CutsceneTimeline : Control
                 context.FillRectangle(PastLength, new Rect(gutter, 0, X(0) - gutter, size.Height));
             }
             DrawRuler(context, layout, view, width, X);
+            DrawMarkers(context, layout, selected, width, X);
             if (Input.Guide is { } guide)
             {
                 context.DrawLine(GuidePen, new Point(X(guide), 0), new Point(X(guide), size.Height));
@@ -276,17 +290,72 @@ sealed class CutsceneTimeline : Control
         context.FillRectangle(HandleBrush, new Rect(lengthX - 3, 2, 6, 10));
     }
 
+    static readonly Dictionary<string, IBrush> MarkerBrushes = [];
+
+    // A marker's color, or the default amber for none or one that does not parse.
+    static IBrush MarkerBrush(string? color, byte alpha = 0xFF)
+    {
+        var key = $"{color}/{alpha}";
+        if (!MarkerBrushes.TryGetValue(key, out var brush))
+        {
+            var c = color != null && Color.TryParse(color, out var parsed) ? parsed : ((SolidColorBrush)MarkerDefault).Color;
+            brush = new SolidColorBrush(Color.FromArgb(alpha, c.R, c.G, c.B));
+            MarkerBrushes[key] = brush;
+        }
+        return brush;
+    }
+
+    static IBrush MarkerLine(string? color) => MarkerBrush(color, 0x50);
+
+    // The markers' flags in the top of the ruler, each with its name while it fits before the next.
+    void DrawMarkers(DrawingContext context, Layout layout, HashSet<string> selected, double width, Func<double, double> x)
+    {
+        var markers = layout.Markers;
+        for (var i = 0; i < markers.Count; i++)
+        {
+            var m = markers[i];
+            var at = x(m.Start);
+            if (at < Layout.Gutter - 60 || at > Layout.Gutter + width + 1)
+            {
+                continue;
+            }
+            var flag = new StreamGeometry();
+            using (var g = flag.Open())
+            {
+                g.BeginFigure(new Point(at, 0), true);
+                g.LineTo(new Point(at + 8, 0));
+                g.LineTo(new Point(at + 8, Layout.MarkerHeight - 4));
+                g.LineTo(new Point(at, Layout.MarkerHeight));
+                g.EndFigure(true);
+            }
+            context.DrawGeometry(MarkerBrush(m.Color), selected.Contains(m.Path) ? SelectedPen : null, flag);
+            var room = (i + 1 < markers.Count ? x(markers[i + 1].Start) : Layout.Gutter + width) - at - 12;
+            if (room > 16 && m.Label is { Length: > 0 } name)
+            {
+                using (context.PushClip(new Rect(at + 10, 0, room, Layout.MarkerHeight)))
+                {
+                    // On the ruler's color, so the name reads over the ticks' labels under it.
+                    var text = Text(name, MarkerBrush(m.Color), 9);
+                    context.FillRectangle(RulerBrush, new Rect(at + 9, 0, text.Width + 3, Layout.MarkerHeight));
+                    context.DrawText(text, new Point(at + 10, -1));
+                }
+            }
+        }
+    }
+
     void DrawRow(DrawingContext context, CutsceneVisibleRow row, HashSet<string> selected, HashSet<string> problems, Func<double, double> x)
     {
         var y = row.Y;
         var locked = row.Row.TrackId is { } id && _editor.Locked.Contains(id);
+        // A track that the preview does not play, as muted or not soloed, draws grey, as a locked one draws faint.
+        var silent = row.Row.TrackId is { } trackId && !_editor.Audible(trackId);
         var top = y + 3;
         var height = Layout.RowHeight - 6;
         foreach (var bar in row.Bars)
         {
             var x0 = Layout.Gutter + bar.X0;
             var rect = new Rect(x0, bar.Item.Kind == CutsceneItemKind.Range ? top + height / 4 : top, Math.Max(bar.X1 - bar.X0, 2), bar.Item.Kind == CutsceneItemKind.Range ? height / 2 : height);
-            context.FillRectangle(Fill(row.Row.TrackKind, locked || row.Row.Kind == CutsceneRowKind.Channel), rect, 2);
+            context.FillRectangle(silent ? SilentFill : Fill(row.Row.TrackKind, locked || row.Row.Kind == CutsceneRowKind.Channel), rect, 2);
             if (problems.Contains(bar.Item.Path))
             {
                 context.DrawRectangle(ErrorPen, rect.Deflate(0.75), 2);
@@ -365,22 +434,41 @@ sealed class CutsceneTimeline : Control
                     x += 12;
                 }
                 var label = Text(r.Label, r.Kind == CutsceneRowKind.Channel ? DimText : TextBrush, r.Kind == CutsceneRowKind.Binding ? 12 : 11);
-                using (context.PushClip(new Rect(x, y, Layout.Gutter - Layout.LockWidth - x - 12, Layout.RowHeight)))
+                using (context.PushClip(new Rect(x, y, Layout.MuteX - x - 12, Layout.RowHeight)))
                 {
                     context.DrawText(label, new Point(x, y + (Layout.RowHeight - label.Height) / 2));
                 }
                 if (problems.Contains(r.Path) && r.Kind != CutsceneRowKind.Channel)
                 {
-                    context.DrawEllipse(ErrorBrush, null, new Point(Layout.Gutter - Layout.LockWidth - 6, y + Layout.RowHeight / 2), 3, 3);
+                    context.DrawEllipse(ErrorBrush, null, new Point(Layout.MuteX - 6, y + Layout.RowHeight / 2), 3, 3);
                 }
                 if (r.Kind == CutsceneRowKind.Track && r.TrackId is { } id)
                 {
+                    Toggle(context, Layout.MuteX, y, "M", _editor.Muted.Contains(id) ? MutedBrush : null, r.AssetMuted);
+                    Toggle(context, Layout.SoloX, y, "S", _editor.Soloed.Contains(id) ? SoloBrush : null, false);
                     Lock(context, Layout.Gutter - Layout.LockWidth + 6, y + 5, _editor.Locked.Contains(id));
                 }
             }
         }
         context.FillRectangle(RulerBrush, new Rect(0, 0, Layout.Gutter, Layout.RulerHeight));
         context.DrawText(Text(Units(_editor.Playhead), TextBrush, 12), new Point(8, 7));
+    }
+
+    // A mute or solo toggle: a letter, on a color when it is on. A track whose asset mutes it shows its M struck
+    // through, which no toggle changes.
+    void Toggle(DrawingContext context, double x, double y, string letter, IBrush? on, bool struck)
+    {
+        var box = new Rect(x + 4, y + 4, Layout.LockWidth - 8, Layout.RowHeight - 8);
+        if (on != null)
+        {
+            context.FillRectangle(on, box, 2);
+        }
+        var text = Text(letter, on != null ? BarText : DimText, 10);
+        context.DrawText(text, new Point(box.X + (box.Width - text.Width) / 2, box.Y + (box.Height - text.Height) / 2));
+        if (struck)
+        {
+            context.DrawLine(StrikePen, box.BottomLeft, box.TopRight);
+        }
     }
 
     // A padlock: closed and yellow when the track is locked, open and grey when not.

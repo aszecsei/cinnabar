@@ -224,7 +224,7 @@ track 2 animation "Fox acts"
 - **The root joint** is the graph's root motion joint. Without a graph, or without a root motion joint, `apply` moves nothing.
 - A transform track that keys the position or the rotation of the same binding also writes them. The later track in the cutscene wins.
 
-**Markers.** A clip's markers are those that the `Animator`'s graph puts on the clip: the markers of the first of the graph's clips that plays it. A clip that the graph does not play has no markers.
+**Markers.** These are a clip's markers, which raise events. A cutscene's own `marker` blocks are another thing: named points on its time for the editor, which raise nothing ([Content: Cutscenes](../content/kinds/cutscenes.md#markers)). A clip's markers are those that the `Animator`'s graph puts on the clip: the markers of the first of the graph's clips that plays it. A clip that the graph does not play has no markers.
 - Only one section raises markers, as the graph raises only its heaviest clip's: of the sections whose span meets the event range, the heaviest at the range's end, or at its own end when it ends first. So the tick that passes a section's end, and the tick at its start where its ease in weighs nothing, still raise its markers.
 - A marker is raised when the evaluation's event range `(last, now]`, in the clip's time, holds it. When the section starts in the range, a marker at its offset is raised too. A looping clip raises its markers in each loop that the range passes, up to `MAX_MARKER_LOOPS` (16).
 - `anim.raise_marker` puts each one before the tick's own events. It reaches the binding's behaviours as `on_animation_event`, in the same tick.

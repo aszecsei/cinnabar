@@ -18,6 +18,8 @@ public sealed class CutsceneEditor : IGraphEditor
     readonly List<string> _selection = [];
     readonly HashSet<string> _folds = [];
     readonly HashSet<int> _locked;
+    readonly HashSet<int> _muted;
+    readonly HashSet<int> _soloed;
     int _playhead;
     bool _snap = true;
     bool _showFrames;
@@ -32,6 +34,8 @@ public sealed class CutsceneEditor : IGraphEditor
         var view = shell.CutsceneTimelineSettingsOf(Guid);
         _showFrames = view.ShowFrames;
         _locked = [.. view.Locked];
+        _muted = [.. view.Muted ?? []];
+        _soloed = [.. view.Soloed ?? []];
     }
 
     public CutsceneDocument Document { get; }
@@ -90,7 +94,9 @@ public sealed class CutsceneEditor : IGraphEditor
     /// </summary>
     public void Select(IEnumerable<string> paths, SelectMode mode)
     {
-        var hits = paths.Distinct().Where(p => File.Find(p) != null).ToList();
+        // What the filter hides is not selected, so Delete never acts on what is not in view.
+        var shown = ShownTracks();
+        var hits = paths.Distinct().Where(p => File.Find(p) is { } b && InView(b, shown)).ToList();
         // The paths stay in the order they were selected, and a path selected again goes last, as the primary one.
         var hitSet = hits.ToHashSet();
         var current = _selection.ToHashSet();
@@ -188,6 +194,11 @@ public sealed class CutsceneEditor : IGraphEditor
 
     public void RequestFrame() => FrameRequested?.Invoke();
 
+    /// <summary>The view should put the keyboard in its search box: Ctrl+F.</summary>
+    public event Action? FindRequested;
+
+    public void RequestFind() => FindRequested?.Invoke();
+
     /// <summary>Moves the playhead, inside the length.</summary>
     public void SetPlayhead(int ticks)
     {
@@ -257,7 +268,116 @@ public sealed class CutsceneEditor : IGraphEditor
         }
     }
 
-    void SaveView() => _shell.SaveCutsceneTimelineSettings(Guid, new CutsceneTimelineView(_showFrames, [.. _locked.Order()]));
+    /// <summary>The IDs of the tracks that this user muted, which the preview does not play. Each user's, for each cutscene.</summary>
+    public IReadOnlySet<int> Muted => _muted;
+
+    /// <summary>The IDs of the tracks that this user soloed: with any, the preview plays only those. Each user's, for each cutscene.</summary>
+    public IReadOnlySet<int> Soloed => _soloed;
+
+    public void SetMuted(int track, bool muted) => Toggle(_muted, track, muted);
+
+    public void SetSoloed(int track, bool soloed) => Toggle(_soloed, track, soloed);
+
+    void Toggle(HashSet<int> set, int track, bool on)
+    {
+        if (on ? set.Add(track) : set.Remove(track))
+        {
+            SaveView();
+            Changed?.Invoke();
+            _shell.Commands.InvalidateAll();
+        }
+    }
+
+    /// <summary>
+    /// Whether the preview plays a track (see docs/editor/cutscene-editor.md#mute-and-solo): not when the asset sets
+    /// <c>muted = true</c>, which no player plays, nor when this user muted it, nor when this user soloed other tracks
+    /// and not it. Mute and solo change no file but the user's settings. The preview's player (#551) asks this. A solo
+    /// of a track that the cutscene no longer has counts for nothing, so a deleted track does not silence the others.
+    /// </summary>
+    public bool Audible(int track)
+    {
+        if (_muted.Contains(track) || (!_soloed.Contains(track) && _soloed.Any(id => File.Tracks.Any(t => t.Id == id))))
+        {
+            return false;
+        }
+        return File.Tracks.FirstOrDefault(t => t.Id == track)?.Get("muted")?.Trim() != "true";
+    }
+
+    void SaveView() => _shell.SaveCutsceneTimelineSettings(Guid,
+        new CutsceneTimelineView(_showFrames, [.. _locked.Order()], [.. _muted.Order()], [.. _soloed.Order()]));
+
+    /// <summary>The text that the track tree's search box filters by.</summary>
+    public string FilterText { get; private set; } = "";
+
+    /// <summary>Whether the timeline shows only the tracks with keys in the span that the selection had when this went on.</summary>
+    public bool KeysUnderSelection => _keysUnder != null;
+
+    // The keys-under-selection filter when it is on, with its span, or null for none, which hides nothing.
+    sealed record KeysFilter((int Start, int End)? Span);
+
+    KeysFilter? _keysUnder;
+
+    /// <summary>Which rows the timeline shows, which every <see cref="CutsceneTimelineLayout.Build"/> of this editor takes.</summary>
+    public CutsceneRowFilter RowFilter => new(FilterText, _keysUnder?.Span);
+
+    /// <summary>The timeline's rows, as the filter and the folds have them.</summary>
+    public CutsceneTimelineLayout Layout() => CutsceneTimelineLayout.Build(File, _folds, RowFilter);
+
+    public void SetFilterText(string text)
+    {
+        text = text.Trim();
+        if (text != FilterText)
+        {
+            FilterText = text;
+            FilterChanged();
+        }
+    }
+
+    /// <summary>
+    /// Turns the keys-under-selection filter on or off. On, it keeps the span of the selection as it is now, so that a
+    /// click in the filtered rows does not change which rows there are. With nothing selected, it hides nothing.
+    /// </summary>
+    public void SetKeysUnderSelection(bool on)
+    {
+        if (on == KeysUnderSelection)
+        {
+            return;
+        }
+        _keysUnder = on ? new KeysFilter(SelectionSpan()) : null;
+        FilterChanged();
+    }
+
+    // The paths of the tracks that the filter shows, or null when it shows them all.
+    HashSet<string>? ShownTracks() => RowFilter.IsNone
+        ? null
+        : Layout().Rows.Where(r => r.Kind == CutsceneRowKind.Track).Select(r => r.Path).ToHashSet();
+
+    // Whether a block is on no track, as a marker or a binding is, or on a track that the filter shows.
+    static bool InView(CutsceneBlock block, HashSet<string>? shown) =>
+        shown == null || block.Kind == CutsceneBlockKind.Binding || CutsceneEdits.TrackOf(block) is not { } track || shown.Contains(CutsceneFile.PathOf(track));
+
+    // The span of the selected sections, events, keys and markers on the cutscene's time, or null for none.
+    (int Start, int End)? SelectionSpan()
+    {
+        var blocks = _selection.Select(File.Find).OfType<CutsceneBlock>().Where(CutsceneEdits.IsTimed).ToList();
+        var starts = blocks.Select(CutsceneEdits.AbsoluteStart).OfType<int>().ToList();
+        var ends = blocks.Select(CutsceneEdits.AbsoluteEnd).OfType<int>().ToList();
+        return starts.Count == 0 ? null : (starts.Min(), ends.Max());
+    }
+
+    // A filter hides rows: what is selected on a hidden track leaves the selection, so Delete never acts on what is not
+    // in view.
+    void FilterChanged()
+    {
+        var shown = ShownTracks();
+        var kept = _selection.Where(p => File.Find(p) is not { } b || InView(b, shown)).ToList();
+        if (kept.Count != _selection.Count)
+        {
+            Replace(kept);
+        }
+        Changed?.Invoke();
+        _shell.Commands.InvalidateAll();
+    }
 
     /// <summary>The track of the primary selection: the selected track, or the track of a selected section, event or key.</summary>
     public CutsceneBlock? SelectedTrack => Selected is { } block ? CutsceneEdits.TrackOf(block) : null;
@@ -287,9 +407,113 @@ public sealed class CutsceneEditor : IGraphEditor
     public int FrameTicks => CutsceneFile.TicksPerSecond / File.Rate;
 
     /// <summary>Whether any selected block is one that a move, a nudge or a delete changes.</summary>
-    public bool CanEditSelection => !Document.InTransaction && _selection.Any(p => File.Find(p) is
-        { Kind: CutsceneBlockKind.Section or CutsceneBlockKind.Trigger or CutsceneBlockKind.Range or CutsceneBlockKind.Key } b
-        && !CutsceneEdits.IsLocked(b, _locked));
+    public bool CanEditSelection => !Document.InTransaction && _selection.Any(p => File.Find(p) is { } b
+        && CutsceneEdits.IsTimed(b) && !CutsceneEdits.IsLocked(b, _locked));
+
+    /// <summary>Whether any selected block is one that a copy takes.</summary>
+    public bool CanCopy => _selection.Any(p => File.Find(p) is { } b && CutsceneEdits.IsTimed(b));
+
+    /// <summary>Copies the selected sections, events, keys and markers to the shell's clipboard.</summary>
+    public void Copy()
+    {
+        if (CutsceneEdits.Copy(File, _selection) is { } clip)
+        {
+            _shell.CutsceneClipboard = clip with { Source = Guid };
+            _shell.Commands.InvalidateAll();
+        }
+    }
+
+    /// <summary>Copies the selection, then deletes what of it is not locked, in one undo entry.</summary>
+    public void Cut()
+    {
+        if (!CanEditSelection)
+        {
+            return;
+        }
+        Copy();
+        var paths = _selection.ToList();
+        Own(() => Document.Edit("Cut", f => CutsceneEdits.Delete(f, paths, ripple: false, _locked)));
+        Replace([]);
+        Changed?.Invoke();
+        _shell.Commands.InvalidateAll();
+    }
+
+    /// <summary>
+    /// Whether the clipboard holds something to paste here: a copy from this cutscene, since copied blocks name its
+    /// bindings by ID.
+    /// </summary>
+    public bool CanPaste => !Document.InTransaction && _shell.CutsceneClipboard?.Source == Guid;
+
+    /// <summary>
+    /// The tracks that a paste needs and the cutscene lacks, by kind: the editor asks whether to add them before it
+    /// pastes. The window answers with <see cref="Paste"/> and addTracks, or not at all for No.
+    /// </summary>
+    public event Action<IReadOnlyList<string>>? PasteTracksRequested;
+
+    // What a paste goes onto: the selected binding or track, or the track of the selected section, event or key.
+    CutsceneBlock? PasteTarget => Selected is { Kind: CutsceneBlockKind.Binding or CutsceneBlockKind.Track } b ? b
+        : Selected is { } s ? CutsceneEdits.TrackOf(s) : null;
+
+    /// <summary>
+    /// Pastes the clipboard at the playhead (see docs/editor/cutscene-editor.md#copy-and-paste), in one undo entry, and
+    /// selects what it pasted. When a track it needs is missing, it asks first through <see cref="PasteTracksRequested"/>
+    /// and pastes nothing, unless addTracks says to add them.
+    /// </summary>
+    public void Paste(bool addTracks = false)
+    {
+        if (!CanPaste || _shell.CutsceneClipboard is not { } clip)
+        {
+            return;
+        }
+        var target = PasteTarget;
+        if (!addTracks && CutsceneEdits.MissingTracks(File, clip, target) is { Count: > 0 } missing)
+        {
+            PasteTracksRequested?.Invoke(missing);
+            return;
+        }
+        var targetPath = target != null ? CutsceneFile.PathOf(target) : null;
+        IReadOnlyList<string> pasted = [];
+        Own(() => Document.Edit("Paste", f => pasted = CutsceneEdits.Paste(f, clip, _playhead, targetPath != null ? f.Find(targetPath) : null, addTracks, _locked)));
+        Select(pasted, SelectMode.Replace);
+    }
+
+    /// <summary>Whether a duplicate has something to copy.</summary>
+    public bool CanDuplicate => !Document.InTransaction && CanCopy;
+
+    /// <summary>
+    /// Copies the selection onto its own tracks right after itself, offset by its span, or a frame for a single point,
+    /// in one undo entry, and selects the copies. The clipboard does not change.
+    /// </summary>
+    public void Duplicate()
+    {
+        if (!CanDuplicate || CutsceneEdits.Copy(File, _selection) is not { } clip)
+        {
+            return;
+        }
+        var at = clip.Anchor + Math.Max(clip.Span, FrameTicks);
+        IReadOnlyList<string> copies = [];
+        Own(() => Document.Edit("Duplicate", f => copies = CutsceneEdits.Paste(f, clip, at, null, addTracks: false, _locked)));
+        Select(copies, SelectMode.Replace);
+    }
+
+    /// <summary>Adds a marker at the playhead, or with one there, keeps it, and selects it.</summary>
+    public void AddMarker()
+    {
+        if (Document.InTransaction)
+        {
+            return;
+        }
+        var path = "";
+        if (File.Markers.FirstOrDefault(m => m.Start == _playhead) is { } there)
+        {
+            path = CutsceneFile.PathOf(there);
+        }
+        else
+        {
+            Own(() => Document.Edit("Add Marker", f => path = CutsceneEdits.AddMarker(f, _playhead)));
+        }
+        Select([path], SelectMode.Replace);
+    }
 
     /// <summary>
     /// Starts a drag on the timeline: one undo entry from here to <see cref="EndDrag"/>. False when a drag is under way.

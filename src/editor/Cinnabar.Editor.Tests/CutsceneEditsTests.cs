@@ -293,4 +293,113 @@ public sealed class CutsceneEditsTests
         CutsceneEdits.SetLength(file, 1000);
         Assert.Equal(300000, file.Length);
     }
+    [Fact]
+    public void MarkersGoBeforeTheBindingsStayInTimeOrderAndHoldTheLength()
+    {
+        var file = Parse();
+        Assert.Equal("marker:1", CutsceneEdits.AddMarker(file, 60000));
+        Assert.Equal("marker:2", CutsceneEdits.AddMarker(file, 30000, "Start"));
+        // A marker at a time that has one already is that one.
+        Assert.Equal("marker:1", CutsceneEdits.AddMarker(file, 60000, "Again"));
+        Assert.Equal(With(("rate = 30\n\nbinding 1", "rate = 30\nmarker 2 30000 \"Start\"\nmarker 1 60000 \"Marker 1\"\n\nbinding 1")), file.Text);
+        Assert.Equal(["marker:2"], CutsceneEdits.Move(file, ["marker:2"], 60000));
+        Assert.Equal(With(("rate = 30\n\nbinding 1", "rate = 30\nmarker 1 60000 \"Marker 1\"\nmarker 2 90000 \"Start\"\n\nbinding 1")), file.Text);
+        // A move stops at the length.
+        CutsceneEdits.Move(file, ["marker:2"], 900000);
+        Assert.Equal(600000, file.Find("marker:2")!.Start);
+        CutsceneEdits.SetLength(file, 1000);
+        Assert.Equal(600000, file.Length);
+        CutsceneEdits.Delete(file, ["marker:1", "marker:2"], ripple: false);
+        Assert.Equal(Text.ReplaceLineEndings("\n"), file.Text);
+    }
+
+    [Fact]
+    public void APasteGoesAtThePlayheadWithNewIdsAndASubtitleKeepsItsSound()
+    {
+        var file = Parse();
+        var clip = CutsceneEdits.Copy(file, ["section:5", "section:4"])!;
+        Assert.Equal(30000, clip.Anchor);
+        Assert.Equal(60000, clip.Span);
+        Assert.Empty(CutsceneEdits.MissingTracks(file, clip, null));
+        Assert.Equal(["section:6", "section:7"], CutsceneEdits.Paste(file, clip, 400000, null, addTracks: false));
+        Assert.Equal(With(("""
+            		asset = $bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+            track 4 presentation "Subs"
+            	section 5 30000 90000
+            		kind = subtitle
+            		text = "Hi"
+            		audio = 4
+
+            """, """
+            		asset = $bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+            	section 6 400000 460000
+            		asset = $bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+            track 4 presentation "Subs"
+            	section 5 30000 90000
+            		kind = subtitle
+            		text = "Hi"
+            		audio = 4
+            	section 7 400000 460000
+            		kind = subtitle
+            		text = "Hi"
+            		audio = 6
+
+            """)), file.Text);
+
+        // A subtitle pasted without its sound loses it.
+        var alone = Parse();
+        CutsceneEdits.Paste(alone, CutsceneEdits.Copy(alone, ["section:5"])!, 400000, null, addTracks: false);
+        Assert.Null(alone.Find("section:6")!.Get("audio"));
+    }
+
+    [Fact]
+    public void APastePastTheLengthGrowsItAndALockedTrackTakesNothing()
+    {
+        var file = Parse();
+        var clip = CutsceneEdits.Copy(file, ["section:2"])!;
+        Assert.Empty(CutsceneEdits.Paste(file, clip, 550000, null, addTracks: false, locked: new HashSet<int> { 1 }));
+        Assert.Equal(Text.ReplaceLineEndings("\n"), file.Text);
+        Assert.Equal(["section:6"], CutsceneEdits.Paste(file, clip, 550000, null, addTracks: false));
+        Assert.Equal(670000, file.Length);
+        Assert.Equal(550000, file.Find("section:6")!.Start);
+        Assert.Equal("6000", file.Find("section:1")!.Get("offset"));
+    }
+
+    [Fact]
+    public void AKeyPastesIntoTheSectionUnderItsTimeAndAMarkerTakesANewId()
+    {
+        var file = Parse();
+        CutsceneEdits.AddMarker(file, 0, "Top");
+        var clip = CutsceneEdits.Copy(file, ["section:3/channel:position_x/key:1", "marker:1"])!;
+        // The key is at 180000 and the marker at 0, so the key lands 180000 after the playhead.
+        var pasted = CutsceneEdits.Paste(file, clip, 0, file.Find("track:2"), addTracks: false);
+        // The pasted key takes the place of the key at its time.
+        Assert.Equal(["marker:2", "section:3/channel:position_x/key:1"], pasted.Order());
+        Assert.Equal(With(("rate = 30\n\nbinding 1", "rate = 30\nmarker 1 0 \"Top\"\nmarker 2 0 \"Top\"\n\nbinding 1")), file.Text);
+        // A key with no section under its time is left out.
+        Assert.Equal(["marker:3"], CutsceneEdits.Paste(file, clip, 500000, file.Find("track:2"), addTracks: false));
+    }
+
+    [Fact]
+    public void APasteOntoABindingWithoutTheTrackNeedsOneLikeTheCopiedTrack()
+    {
+        var file = Parse();
+        var clip = CutsceneEdits.Copy(file, ["section:4"])!;
+        var binding = file.Find("binding:1");
+        Assert.Equal(["audio"], CutsceneEdits.MissingTracks(file, clip, binding));
+        Assert.Empty(CutsceneEdits.Paste(file, clip, 0, binding, addTracks: false));
+        Assert.Equal(["section:6"], CutsceneEdits.Paste(file, clip, 0, binding, addTracks: true));
+        Assert.Equal(With(("""
+            track 3 audio "Line"
+            """, """
+            track 6 audio "Line"
+            	binding = 1
+            	section 6 0 60000
+            		asset = $bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+            track 3 audio "Line"
+            """)), file.Text);
+        // The same kind on the selected track pastes there, and another kind there looks on its binding.
+        var again = Parse();
+        Assert.Empty(CutsceneEdits.MissingTracks(again, CutsceneEdits.Copy(again, ["section:1"])!, again.Find("track:2")));
+    }
 }

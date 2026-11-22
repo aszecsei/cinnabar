@@ -2,6 +2,7 @@ package asset_format
 
 import "core:math"
 import "core:mem"
+import "core:slice"
 
 import "cinnabar:core/layout"
 
@@ -31,6 +32,7 @@ MAX_CUTSCENE_GUIDS :: 65536
 MAX_CUTSCENE_CONSTRAINTS :: 8192
 MAX_CUTSCENE_EVENTS :: 8192
 MAX_CUTSCENE_BINDING_MAPS :: 65536
+MAX_CUTSCENE_MARKERS :: 1024
 // The most values that an event carries.
 MAX_CUTSCENE_EVENT_VALUES :: 4
 
@@ -514,6 +516,17 @@ Cutscene_Event :: struct {
 }
 #assert(size_of(Cutscene_Event) == 32)
 
+// Cutscene_Marker is a marker on the cutscene's time (see docs/content/kinds/cutscenes.md#markers): a named, colored
+// point that the editor shows on its ruler, at time ticks. These are not an animation clip's markers, which raise
+// events. A blob's markers are in time order, then ID order.
+Cutscene_Marker :: struct {
+	id:    u32,
+	time:  i32,
+	name:  Slice,
+	color: Ui_Color,
+}
+#assert(size_of(Cutscene_Marker) == 20)
+
 // Cutscene_Event_Value is a value that an event carries. Its kind says which field holds it: index for a Bool (0 or 1),
 // an Entity (a binding's index) and an Asset (an index into the blob's GUIDs), text for a String, number, vector, and
 // position in World_Position units for a Position. The other fields are zero.
@@ -564,6 +577,8 @@ Cutscene_Blob :: struct {
 	binding_maps:  Slice,
 	// One row for each presentation section, in section order.
 	presentations: Slice,
+	// The markers, in time order and then ID order.
+	markers:       Slice,
 	reserved2:     u32,
 }
 #assert(size_of(Cutscene_Blob) % align_of(Cutscene_Binding) == 0)
@@ -581,6 +596,7 @@ cutscene_layout :: proc() -> u64 {
 	h ~= layout.hash(Cutscene_Event_Value) * 26439622160671
 	h ~= layout.hash(Cutscene_Binding_Map) * 819628286980801
 	h ~= layout.hash(Cutscene_Presentation) * 25408476896404831
+	h ~= layout.hash(Cutscene_Marker) * 787662783788549761
 	return h
 }
 
@@ -641,6 +657,7 @@ cutscene_view :: proc(data: []byte) -> (blob: ^Cutscene_Blob, ok: bool) {
 			   size_of(Cutscene_Presentation),
 			   align_of(Cutscene_Presentation),
 		   ) ||
+	   !inside(data, blob.markers, size_of(Cutscene_Marker), align_of(Cutscene_Marker)) ||
 	   blob.reserved2 != 0 {
 		return nil, false
 	}
@@ -682,6 +699,22 @@ cutscene_view :: proc(data: []byte) -> (blob: ^Cutscene_Blob, ok: bool) {
 		   r.start >= r.end ||
 		   r.end > blob.length ||
 		   (i > 0 && r.start < skip_ranges[i - 1].end) {
+			return nil, false
+		}
+	}
+	markers := cutscene_markers(data, blob)
+	if len(markers) > MAX_CUTSCENE_MARKERS {
+		return nil, false
+	}
+	for m, i in markers {
+		if m.time < 0 ||
+		   m.time > blob.length ||
+		   m.name.size == 0 ||
+		   !inside(data, m.name, 1, 1) ||
+		   m.color.a != 255 ||
+		   (i > 0 &&
+				   (m.time < markers[i - 1].time ||
+						   (m.time == markers[i - 1].time && m.id <= markers[i - 1].id))) {
 			return nil, false
 		}
 	}
@@ -1301,6 +1334,13 @@ cutscene_section_maps :: proc "contextless" (
 }
 
 // cutscene_events is the event tracks' events, each track's after those of the event tracks before it.
+// cutscene_markers is the cutscene's markers, in time order and then ID order. Nothing at run time reads them yet: they
+// are where a later seek to a named time would look.
+cutscene_markers :: proc "contextless" (data: []byte, blob: ^Cutscene_Blob) -> []Cutscene_Marker {
+	bytes := blob_bytes(data, blob.markers)
+	return ([^]Cutscene_Marker)(raw_data(bytes))[:len(bytes) / size_of(Cutscene_Marker)]
+}
+
 // cutscene_presentations is the presentation rows, one for each section of a presentation track, in section order.
 cutscene_presentations :: proc "contextless" (
 	data: []byte,
@@ -1612,6 +1652,15 @@ Cutscene_Contents :: struct {
 	// The color that a skip fades to. Its zero value is black.
 	skip_color:    [3]u8,
 	guids:         []Guid,
+	// The markers in any order: cutscene_write sorts them by time and then ID.
+	markers:       []Cutscene_Marker_Contents,
+}
+
+Cutscene_Marker_Contents :: struct {
+	id:    u32,
+	time:  i32,
+	name:  string,
+	color: [3]u8,
 }
 
 // cutscene_write builds a cutscene blob, flattening its tracks' sections, channels and keys.
@@ -1911,6 +1960,28 @@ cutscene_write :: proc(contents: Cutscene_Contents, allocator := context.allocat
 			len(contents.skip_ranges) * size_of(Cutscene_Skip_Range),
 		)
 	}
+	sorted_markers := slice.clone(contents.markers, context.temp_allocator)
+	slice.sort_by(sorted_markers, proc(a, b: Cutscene_Marker_Contents) -> bool {
+		return a.time < b.time || (a.time == b.time && a.id < b.id)
+	})
+	markers := reserve_bytes(
+		&buffer,
+		len(sorted_markers) * size_of(Cutscene_Marker),
+		align_of(Cutscene_Marker),
+	)
+	for m, i in sorted_markers {
+		record := Cutscene_Marker {
+			id    = m.id,
+			time  = m.time,
+			name  = append_bytes(&buffer, transmute([]byte)m.name),
+			color = {m.color.r, m.color.g, m.color.b, 255},
+		}
+		mem.copy(
+			&buffer[int(markers.offset) + i * size_of(Cutscene_Marker)],
+			&record,
+			size_of(record),
+		)
+	}
 	blob := Cutscene_Blob {
 		header = {
 			magic = BLOB_MAGIC,
@@ -1942,6 +2013,7 @@ cutscene_write :: proc(contents: Cutscene_Contents, allocator := context.allocat
 		event_values = event_values,
 		binding_maps = binding_maps,
 		presentations = presentations,
+		markers = markers,
 	}
 	mem.copy(raw_data(buffer), &blob, size_of(blob))
 
