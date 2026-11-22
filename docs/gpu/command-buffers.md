@@ -57,6 +57,6 @@ A large render pass can be recorded in parallel as pieces, in consecutive comman
 
 ## Debugging
 
-- Development builds enable the D3D12 debug layer and DRED. They also validate each command buffer, including barrier layouts, before translation.
+- Development builds enable the D3D12 debug layer and DRED. They also validate each command buffer, including barrier layouts, before translation. A submission that breaks a rule is dropped, and the error names the command buffer, the packet and the innermost marker around it (`marker_at`). The render graph opens a marker with each pass's name, so the error names the pass.
 - Every resource and pipeline has a debug name. Command buffers carry debug markers for PIX. A marker that `cmd_begin_marker(cb, label, timed = true)` begins is also timed: the backend gives its GPU time to the profiler under its label ([Profiling](../core/profiling.md#gpu-timestamps)).
 - The null backend is the first tool for a bug in recording: `just test` runs the engine's render tests on it, and it rejects what only D3D12 would accept. `CINNABAR_DISABLE_FEATURES` tests the fallback paths on hardware that has the features.
