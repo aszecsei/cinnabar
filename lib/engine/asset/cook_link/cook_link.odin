@@ -305,7 +305,7 @@ Asset_Template :: enum u8 {
 	Decision_Goap,
 	// An HTN decision of one task, one method and one action, which names no blackboard yet.
 	Decision_Htn,
-	// A cutscene of 10 s at 30 frames a second, with no bindings or tracks.
+	// A cutscene of 10 s at 30 frames a second, with no bindings and an empty camera cut track.
 	Cutscene,
 }
 
@@ -506,10 +506,10 @@ Shading_Models :: struct {
 	models: []Shading_Model_Info,
 }
 
-// Editor to daemon: the text of a material, an animation graph or a UI document that the editor has not saved, as a
-// request. The daemon cooks it as the asset with this GUID, into the preview area of the cache,
-// <cache>/dev/preview/<guid>.blob, which the host's previews load. The asset's own blob does not change. A decision or a
-// blackboard is checked, and a GOAP decision also plans the plan query, of which there is at most one, as the runtime
+// Editor to daemon: the text of a material, an animation graph, a UI document or a cutscene that the editor has not
+// saved, as a request. The daemon cooks it as the asset with this GUID, into the preview area of the cache,
+// <cache>/dev/preview/<guid>.blob, which the host's previews load. The asset's own blob does not change. A decision, a
+// blackboard or a world is checked, and a GOAP decision also plans the plan query, of which there is at most one, as the runtime
 // would. A Preview_Result with the request's ID answers it.
 Cook_Preview :: struct {
 	guid: string,

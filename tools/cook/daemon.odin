@@ -392,11 +392,11 @@ handle_taken :: proc(d: ^Daemon, taken: serve.Taken) {
 	}
 }
 
-// preview cooks a material, an animation graph or a UI document that the editor has not saved into the cache's preview
-// area (see cook_preview, animation_graph_check and ui_check), and checks a decision, a blackboard or a world, which
-// have no preview, and writes nothing (see decision_check, blackboard_check and world_check). A GOAP decision that
-// checks out also plans the request's plan query (see plan_preview). Its problems go to the editor in the answer, and
-// not to the log: the asset's editor shows them on its nodes or elements.
+// preview cooks a material, an animation graph, a UI document or a cutscene that the editor has not saved into the
+// cache's preview area (see cook_preview, animation_graph_check, ui_check and cutscene_check), and checks a decision, a
+// blackboard or a world, which have no preview, and writes nothing (see decision_check, blackboard_check and
+// world_check). A GOAP decision that checks out also plans the request's plan query (see plan_preview). Its problems go
+// to the editor in the answer, and not to the log: the asset's editor shows them on its nodes or elements.
 @(private)
 preview :: proc(d: ^Daemon, msg: cook_link.Cook_Preview) -> cook_link.Preview_Result {
 	guid, guid_ok := format.guid_parse(msg.guid)
@@ -440,6 +440,10 @@ preview :: proc(d: ^Daemon, msg: cook_link.Cook_Preview) -> cook_link.Preview_Re
 		problems = world_check(&d.index, path, msg.text)
 		ok = len(problems.list) == 0
 		failed = "the world did not cook"
+	case known && a.kind == .Cutscene:
+		problems = cutscene_check(d.options, &d.index, guid, msg.text, path, name)
+		ok = len(problems.list) == 0
+		failed = "the cutscene did not cook"
 	case:
 		problems, ok = cook_preview(d.options, guid, msg.text)
 	}
@@ -463,7 +467,6 @@ preview :: proc(d: ^Daemon, msg: cook_link.Cook_Preview) -> cook_link.Preview_Re
 }
 
 // index_kinds is the kind of each asset in the index by its GUID, in the temporary allocator.
-@(private = "file")
 index_kinds :: proc(index: ^Index) -> map[format.Guid]format.Asset_Kind {
 	kinds := make(map[format.Guid]format.Asset_Kind, len(index.assets), context.temp_allocator)
 	for text, a in index.assets {
