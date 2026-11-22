@@ -133,6 +133,7 @@ Message :: union {
 	Cutscene_Preview_Open,
 	Cutscene_Preview_Time,
 	Cutscene_Preview_Play,
+	Cutscene_Preview_Settings,
 	Cutscene_Preview_Close,
 	Cutscene_Preview_Opened,
 	Cutscene_Preview_Ended,
@@ -2124,6 +2125,17 @@ Cutscene_Preview_Play :: struct {
 	looping:    bool,
 	loop_start: i32,
 	loop_end:   i32,
+}
+
+// Editor to game: how the preview sounds and what it sends, which the editor sends after each Open and on each change.
+// A preview opens with grains while scrubbed, no events, and every track. With scrub_sound false, a scrub plays no
+// grains. With events, the event tracks send their events while the preview plays, never while it is scrubbed. The
+// tracks whose IDs are in silent evaluate as a muted track does: they write nothing, play nothing and cut to nothing.
+Cutscene_Preview_Settings :: struct {
+	ticket:      u64,
+	scrub_sound: bool,
+	events:      bool,
+	silent:      []u32,
 }
 
 // Editor to game: end the preview. The world shows the document again, and the spawned entities go, in the same

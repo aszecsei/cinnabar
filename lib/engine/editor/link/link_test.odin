@@ -51,6 +51,12 @@ every_message_round_trips :: proc(t: ^testing.T) {
 			loop_start = 500,
 			loop_end = 90_000,
 		},
+		Cutscene_Preview_Settings {
+			ticket = 3,
+			scrub_sound = false,
+			events = true,
+			silent = {4, 1_000_001},
+		},
 		Cutscene_Preview_Opened{ticket = 3, tick = 12_000, range_start = 0, range_end = 600_000},
 		Cutscene_Preview_Ended{ticket = 4, reason = .Code_Reloaded},
 		Cutscene_Preview_Tick{ticket = 3, tick = 1001, playing = true},
