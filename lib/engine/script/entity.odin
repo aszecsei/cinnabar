@@ -119,7 +119,7 @@ light_index :: proc(L: ^luau.State) -> c.int {
 			return 1
 		}
 		raise(L, fmt.aprintf("Asset has no field %s", key, allocator = frame(r)))
-	case .None, .Instance_Key, .Action_Key, .Input_Context:
+	case .None, .Instance_Key, .Action_Key, .Input_Context, .Cutscene:
 	}
 	raise(L, "this value has no fields")
 }
@@ -171,6 +171,9 @@ light_tostring :: proc(L: ^luau.State) -> c.int {
 		)
 	case .Input_Context:
 		luau.pushodinstring(L, input_context_text(r, to_input_context(L, 1)))
+	case .Cutscene:
+		payload, _ := to_light(L, 1, .Cutscene)
+		luau.pushodinstring(L, fmt.aprintf("Cutscene(%x)", payload, allocator = frame(r)))
 	case .None, .Instance_Key, .Action_Key:
 		luau.pushstring(L, "lightuserdata")
 	}

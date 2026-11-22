@@ -65,6 +65,21 @@ declare extern type InputContext with
 	function is_pushed(self): boolean
 end
 
+-- A cutscene's player, from Cutscene.play, which a game defines (see docs/cinematics/scripts.md). Two handles to one
+-- player are equal. A handle whose player is gone is stale: its commands do nothing, and its readers give nil.
+declare extern type Cutscene with
+	function play(self): ()
+	function pause(self): ()
+	function resume(self): ()
+	function stop(self): ()
+	function skip(self): boolean
+	function state(self): CutsceneState?
+	function error(self): string?
+	function time(self): number?
+	function length(self): number?
+	function binding(self, name: string): Entity?
+end
+
 declare World: {
 	spawn: ((position: WorldPosition?, rotation: Quaternion?) -> Entity) & ((prefab: Asset, position: WorldPosition?, rotation: Quaternion?) -> Entity),
 	query: (...ComponentType) -> { Entity },
@@ -360,6 +375,18 @@ type SubtitleChange = {
 	enabled: boolean?,
 	size: number?,
 	background: number?,
+}
+
+-- Where a cutscene's player is, from Cutscene:state().
+type CutsceneState = "loading" | "ready" | "playing" | "paused" | "skipping" | "finishing" | "restored" | "failed"
+
+-- What Cutscene.play takes: the entities that it gives bindings, by the binding's name; its priority, a whole number;
+-- where it starts, in seconds on the cutscene's time; and whether it waits in "ready" for :play().
+type CutsceneOptions = {
+	bindings: { [string]: Entity }?,
+	priority: number?,
+	start: number?,
+	wait_ready: boolean?,
 }
 
 -- What the device can do that the quality depends on. aa lists the anti-aliasing techniques that it runs, gi the

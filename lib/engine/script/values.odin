@@ -28,6 +28,16 @@ Light_Tag :: enum c.int {
 	Action_Key,
 	// A push of an input context. The payload is its core.Input_Context_Token (see input_actions.odin).
 	Input_Context,
+	// A cutscene's player. The payload is the cutscene package's handle, which only that package reads (see
+	// docs/cinematics/scripts.md).
+	Cutscene,
+}
+
+// Light_Value is a light userdata of a type that another package owns, such as a Cutscene: its tag, and a payload that
+// only that package reads. It holds no pointer, so it survives a code reload.
+Light_Value :: struct {
+	tag:     Light_Tag,
+	payload: u64,
 }
 
 // The most assets that scripts can refer to at once. A GUID keeps its place for the runtime's life.
@@ -63,8 +73,8 @@ Type_Methods :: struct {
 	count:   int,
 }
 
-// method adds a method to a light userdata or userdata type. Registrations, like bindings: reload clears them.
-@(private)
+// light_method adds a method to a light userdata type, such as one that another package owns. Registrations, like
+// bindings: reload clears them, so register them again in the Register_Proc.
 light_method :: proc(
 	r: ^Runtime,
 	tag: Light_Tag,
@@ -172,6 +182,29 @@ push_asset :: proc(r: ^Runtime, L: ^luau.State, guid: format.Guid) {
 to_asset :: proc(r: ^Runtime, L: ^luau.State, idx: c.int) -> format.Guid {
 	index := int(uintptr(luau.tolightuserdatatagged(L, idx, c.int(Light_Tag.Asset))))
 	return index > 0 && index <= r.asset_ref_count ? r.asset_refs[index - 1] : {}
+}
+
+// push_light pushes a light userdata of a tag with its payload.
+push_light :: proc(L: ^luau.State, value: Light_Value) {
+	luau.pushlightuserdatatagged(L, rawptr(uintptr(value.payload)), c.int(value.tag))
+}
+
+// to_light is the payload of the light userdata of the tag at idx, and false if the value is not one.
+to_light :: proc(L: ^luau.State, idx: c.int, tag: Light_Tag) -> (payload: u64, ok: bool) {
+	if luau.type(L, idx) != .LIGHTUSERDATA || Light_Tag(luau.lightuserdatatag(L, idx)) != tag {
+		return 0, false
+	}
+	return u64(uintptr(luau.tolightuserdatatagged(L, idx, c.int(tag)))), true
+}
+
+// check_light is the payload of the light userdata of the tag at idx, and raises a type error, with name, if the value
+// is not one.
+check_light :: proc(L: ^luau.State, idx: c.int, tag: Light_Tag, name: cstring) -> u64 {
+	payload, ok := to_light(L, idx, tag)
+	if !ok {
+		luau.L_typeerrorL(L, idx, name)
+	}
+	return payload
 }
 
 push_component_type :: proc(L: ^luau.State, id: ecs.Component_Id) {

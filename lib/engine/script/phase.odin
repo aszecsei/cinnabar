@@ -193,6 +193,7 @@ Event_Arg :: union {
 	ecs.Entity,
 	ecs.World_Position,
 	format.Guid,
+	Light_Value,
 }
 
 // send queues an event for an entity's behaviours, like a script's entity:send. Call it from the frame code, not
@@ -239,6 +240,8 @@ push_event :: proc(r: ^Runtime, L: ^luau.State, name: string, args: []Event_Arg)
 			push_position(L, v)
 		case format.Guid:
 			push_asset(r, L, v)
+		case Light_Value:
+			push_light(L, v)
 		}
 	}
 }
