@@ -199,12 +199,14 @@ Play_Desc :: struct {
 }
 
 // Player_Context is what update needs to load cutscenes and resolve bindings: the world, its scenes, the scripts that
-// a spawned prefab's behaviours attach to (or nil), and the frame's real duration, which a skip's fades run on.
+// a spawned prefab's behaviours attach to (or nil), and the frame's real duration, which a skip's fades run on. With
+// unheld, the bindings suspend nothing on their entities, as for the editor's preview (see Resolve).
 Player_Context :: struct {
 	world:   ^ecs.World,
 	scenes:  ^scene.Scenes,
 	scripts: ^script.Runtime,
 	dt:      time.Duration,
+	unheld:  bool,
 }
 
 // Command_Result is what a command did. Gone is a stale handle, or a player that is Restored or Failed: nothing
@@ -543,7 +545,7 @@ change_cutscene :: proc(
 	// A skip's fade, as the player leaves Skipping for Finishing, and whether a Finishing player was skipped.
 	cover: f32
 	skipped: bool
-	// Who gets the change's script event: the bindings are read before give_back ends them.
+	// Who gets the change's script event: the bindings are read before close_live ends them.
 	lifecycle := lifecycle_of(from, next)
 	recipients := lifecycle_recipients(s, w, slot, lifecycle)
 	switch &state in p.state {
@@ -558,7 +560,7 @@ change_cutscene :: proc(
 		}
 		if next == .Restored || next == .Failed {
 			hand_off_overlay(s, w, slot, next == .Failed)
-			despawned = give_back(s, w, live_of(&p.state))
+			despawned = close_live(s, w, live_of(&p.state))
 		}
 	case Player_Restored, Player_Failed:
 	}
@@ -754,79 +756,22 @@ load_player :: proc(s: ^State, c: Player_Context, slot: int) {
 	w := c.world
 	p := &s.players[slot]
 	loading := p.state.(Player_Loading)
-	handle, loaded := asset.load(s.assets, loading.cutscene)
-	if !loaded {
-		fail(s, w, slot, Asset_Failure{loading.cutscene, .Missing})
-		return
-	}
-	data, _ := asset.data(s.assets, handle)
-	blob, is_cutscene := format.cutscene_view(data)
-	references, checked := format.blob_references(data, w.platform.frame_allocator)
-	if !is_cutscene || !checked {
-		asset.unload(s.assets, handle)
-		fail(s, w, slot, Asset_Failure{loading.cutscene, .Not_A_Cutscene})
-		return
-	}
-	live := Player_Live {
-		references = make([dynamic]asset.Handle, 0, len(references), w.platform.heap_allocator),
-		overrides  = make(
-			[dynamic]Binding_Override,
-			0,
-			len(loading.overrides),
-			w.platform.heap_allocator,
-		),
-		bindings   = bindings_hash(data, blob),
-	}
-	init_evaluation(&live.evaluation, w, handle, data, blob)
-	live.evaluation.player = {u16(slot), p.generation}
-	for guid in references {
-		reference, ok := asset.load(s.assets, guid)
-		if !ok {
-			log.errorf(
-				"cutscene: %s: an asset that it references did not load",
-				format.blob_string(data, blob.source_path),
-			)
-			give_back(s, w, &live)
-			fail(s, w, slot, Asset_Failure{guid, .Reference_Missing})
-			return
-		}
-		append(&live.references, reference)
-	}
-	// The sounds load now, outside the frames that start them (see docs/cinematics/tracks.md#audio-tracks).
-	prepare_sounds(s, data, blob)
-	bindings := format.cutscene_bindings(data, blob)
-	for o in loading.overrides {
-		if index, found := binding_index(data, blob, o.binding); found {
-			append(&live.overrides, Binding_Override{Binding_Id(bindings[index].id), o.entity})
-		} else {
-			log.warnf(
-				"cutscene: %s: no binding %v to override",
-				format.blob_string(data, blob.source_path),
-				o.binding,
-			)
-		}
-	}
-	if failure, failed := resolve_bindings(
-		   &live.evaluation.bindings,
-		   resolve_of(s, c, data, blob),
-		   live.overrides[:],
-	   ).?; failed {
-		give_back(s, w, &live)
+	live, failure := open_live(
+		s,
+		c,
+		loading.cutscene,
+		loading.overrides[:],
+		{u16(slot), p.generation},
+	)
+	if failure != nil {
 		fail(s, w, slot, failure)
 		return
 	}
-	// The sub-sequences load before Ready, with their bindings (see docs/cinematics/tracks.md#sub-sequence-tracks).
-	if failure, failed := open_children(s, c, &live.evaluation, data, blob).?; failed {
-		give_back(s, w, &live)
-		fail(s, w, slot, failure)
-		return
-	}
-	live.tree = tree_key(s, &live.evaluation, blob)
-	live.shape = children_shape(s, &live.evaluation, data, blob)
-	when_ready, skips := loading.when_ready, loading.skip
+	data, blob, _ := cutscene_data(s, &live.evaluation)
+	when_ready, skips, start := loading.when_ready, loading.skip, loading.start
 	change_cutscene(s, w, slot, Player_Ready{live})
 	// A start later in the range seeks there, as set_time does, before the first evaluation.
-	if start, has_start := loading.start.?; has_start {
+	if start, has_start := start.?; has_start {
 		e := &live_of(&p.state).evaluation
 		seek(s, e, w, data, blob, start)
 	}
@@ -845,6 +790,83 @@ load_player :: proc(s: ^State, c: Player_Context, slot: int) {
 	case .Play:
 		change_cutscene(s, w, slot, moved(p, .Playing))
 	}
+}
+
+// open_live loads a cutscene, the assets that it references, its bindings and its sub-sequences, for a player or for
+// the editor's preview, which is a live player without a slot (see docs/editor/cutscene-editor.md#preview). player is
+// the handle that native event handlers get, or the zero handle. It gives the failure, with nothing changed, when one
+// did not load. The caller ends what it gives with close_live.
+open_live :: proc(
+	s: ^State,
+	c: Player_Context,
+	cutscene: format.Guid,
+	overrides: []Binding_Override,
+	player: Player_Handle = {},
+) -> (
+	live: Player_Live,
+	failure: Failure,
+) {
+	w := c.world
+	handle, loaded := asset.load(s.assets, cutscene)
+	if !loaded {
+		return {}, Asset_Failure{cutscene, .Missing}
+	}
+	data, _ := asset.data(s.assets, handle)
+	blob, is_cutscene := format.cutscene_view(data)
+	references, checked := format.blob_references(data, w.platform.frame_allocator)
+	if !is_cutscene || !checked {
+		asset.unload(s.assets, handle)
+		return {}, Asset_Failure{cutscene, .Not_A_Cutscene}
+	}
+	live = Player_Live {
+		references = make([dynamic]asset.Handle, 0, len(references), w.platform.heap_allocator),
+		overrides  = make([dynamic]Binding_Override, 0, len(overrides), w.platform.heap_allocator),
+		bindings   = bindings_hash(data, blob),
+	}
+	init_evaluation(&live.evaluation, w, handle, data, blob)
+	live.evaluation.player = player
+	for guid in references {
+		reference, ok := asset.load(s.assets, guid)
+		if !ok {
+			log.errorf(
+				"cutscene: %s: an asset that it references did not load",
+				format.blob_string(data, blob.source_path),
+			)
+			close_live(s, w, &live)
+			return {}, Asset_Failure{guid, .Reference_Missing}
+		}
+		append(&live.references, reference)
+	}
+	// The sounds load now, outside the frames that start them (see docs/cinematics/tracks.md#audio-tracks).
+	prepare_sounds(s, data, blob)
+	bindings := format.cutscene_bindings(data, blob)
+	for o in overrides {
+		if index, found := binding_index(data, blob, o.binding); found {
+			append(&live.overrides, Binding_Override{Binding_Id(bindings[index].id), o.entity})
+		} else {
+			log.warnf(
+				"cutscene: %s: no binding %v to override",
+				format.blob_string(data, blob.source_path),
+				o.binding,
+			)
+		}
+	}
+	if failed, did := resolve_bindings(
+		   &live.evaluation.bindings,
+		   resolve_of(s, c, data, blob),
+		   live.overrides[:],
+	   ).?; did {
+		close_live(s, w, &live)
+		return {}, failed
+	}
+	// The sub-sequences load before Ready, with their bindings (see docs/cinematics/tracks.md#sub-sequence-tracks).
+	if failed, did := open_children(s, c, &live.evaluation, data, blob).?; did {
+		close_live(s, w, &live)
+		return {}, failed
+	}
+	live.tree = tree_key(s, &live.evaluation, blob)
+	live.shape = children_shape(s, &live.evaluation, data, blob)
+	return live, nil
 }
 
 // run_skip moves a skipping player's fade on by the frame's real duration. At the end of the fade out, the player jumps
@@ -898,14 +920,80 @@ skip_fade_length :: proc(s: ^State, e: ^Evaluation) -> time.Duration {
 	return time.Duration(i64(blob.skip_fade) * i64(time.Second) / format.CUTSCENE_TICKS_PER_SECOND)
 }
 
-// follow_bindings resolves a live player's bindings again when a reload changed them. The spawned entities spawn
-// again, and show at once unless the player is Ready. A binding that no longer resolves fails the player. It gives how
-// many spawned roots it despawned.
+// show_live shows a live player's spawned entities, and those of its sub-sequences as their sections at its time say, as
+// a player does once it plays. Call it after each evaluation.
+show_live :: proc(s: ^State, w: ^ecs.World, live: ^Player_Live) {
+	reveal_bindings(&live.evaluation.bindings, w)
+	show_children(s, w, &live.evaluation)
+}
+
+// spawned_roots is the roots of the entities that a live player spawned for its bindings and its sub-sequences'.
+spawned_roots :: proc(
+	live: ^Player_Live,
+	w: ^ecs.World,
+	allocator := context.allocator,
+) -> []ecs.Entity {
+	roots := make([dynamic]ecs.Entity, allocator)
+	add :: proc(roots: ^[dynamic]ecs.Entity, b: ^Bindings) {
+		for state in b.states {
+			if s, spawned := state.(Binding_Spawned); spawned {
+				append(roots, s.entity)
+			}
+		}
+	}
+	add(&roots, &live.evaluation.bindings)
+	for &child in live.evaluation.children {
+		add(&roots, &child.bindings)
+	}
+	return roots[:]
+}
+
+// follow_bindings resolves a live player's bindings again when a reload changed them, and fails the player when one no
+// longer resolves. It gives how many spawned roots it despawned.
 @(private = "file")
 follow_bindings :: proc(s: ^State, c: Player_Context, slot: int) -> (despawned: int) {
-	w := c.world
 	p := &s.players[slot]
-	live := live_of(&p.state)
+	failure: Failure
+	despawned, failure = follow_live_bindings(
+		s,
+		c,
+		live_of(&p.state),
+		status_of(p.state) != .Ready,
+	)
+	if failure != nil {
+		_, gave_back := fail(s, c.world, slot, failure)
+		despawned += gave_back
+	}
+	return
+}
+
+// follow_children loads a live player's sub-sequences again when a reload changed what they load from, and fails the
+// player when one no longer loads. It gives how many spawned roots it despawned.
+@(private = "file")
+follow_children :: proc(s: ^State, c: Player_Context, slot: int) -> (despawned: int) {
+	p := &s.players[slot]
+	failure: Failure
+	despawned, failure = follow_live_children(s, c, live_of(&p.state))
+	if failure != nil {
+		_, gave_back := fail(s, c.world, slot, failure)
+		despawned += gave_back
+	}
+	return
+}
+
+// follow_live_bindings resolves a live player's bindings again when a reload changed them. The spawned entities spawn
+// again, and show at once with reveal. It gives how many spawned roots it despawned, and the failure of a binding that
+// no longer resolves, which the caller ends the live player for.
+follow_live_bindings :: proc(
+	s: ^State,
+	c: Player_Context,
+	live: ^Player_Live,
+	reveal: bool,
+) -> (
+	despawned: int,
+	failure: Failure,
+) {
+	w := c.world
 	data, blob, ok := cutscene_data(s, &live.evaluation)
 	if !ok {
 		return
@@ -920,29 +1008,33 @@ follow_bindings :: proc(s: ^State, c: Player_Context, slot: int) -> (despawned: 
 			despawned += 1
 		}
 	}
-	if failure, failed := resolve_bindings(
+	if failed, did := resolve_bindings(
 		   &live.evaluation.bindings,
 		   resolve_of(s, c, data, blob),
 		   live.overrides[:],
-	   ).?; failed {
-		_, gave_back := fail(s, w, slot, failure)
-		return despawned + gave_back
+	   ).?; did {
+		return despawned, failed
 	}
-	if status_of(p.state) != .Ready {
+	if reveal {
 		reveal_bindings(&live.evaluation.bindings, w)
 	}
 	return
 }
 
-// follow_children loads a live player's sub-sequences again when a reload of a blob of the tree changed what they load
-// and resolve from: a section, a cutscene that a section plays, a map, or a child's bindings or assets. Their spawned
-// entities spawn again. A reload that changes only tracks keeps them, and the evaluation follows it. A child that no
-// longer loads fails the player. It gives how many spawned roots it despawned.
-@(private = "file")
-follow_children :: proc(s: ^State, c: Player_Context, slot: int) -> (despawned: int) {
+// follow_live_children loads a live player's sub-sequences again when a reload of a blob of the tree changed what they
+// load and resolve from: a section, a cutscene that a section plays, a map, or a child's bindings or assets. Their
+// spawned entities spawn again. A reload that changes only tracks keeps them, and the evaluation follows it. It gives
+// how many spawned roots it despawned, and the failure of a child that no longer loads, which the caller ends the live
+// player for.
+follow_live_children :: proc(
+	s: ^State,
+	c: Player_Context,
+	live: ^Player_Live,
+) -> (
+	despawned: int,
+	failure: Failure,
+) {
 	w := c.world
-	p := &s.players[slot]
-	live := live_of(&p.state)
 	e := &live.evaluation
 	data, blob, ok := cutscene_data(s, e)
 	if !ok {
@@ -958,9 +1050,8 @@ follow_children :: proc(s: ^State, c: Player_Context, slot: int) -> (despawned: 
 		return
 	}
 	despawned = close_children(s, w, e)
-	if failure, failed := open_children(s, c, e, data, blob).?; failed {
-		_, gave_back := fail(s, w, slot, failure)
-		return despawned + gave_back
+	if failed, did := open_children(s, c, e, data, blob).?; did {
+		return despawned, failed
 	}
 	live.tree = tree_key(s, e, blob)
 	live.shape = children_shape(s, e, data, blob)
@@ -1002,10 +1093,10 @@ fail :: proc(
 	return change_cutscene(s, w, slot, Player_Failed{failure})
 }
 
-// give_back ends what a live player did: it restores what its tracks wrote, despawns what it spawned, and unloads its
-// assets. It gives how many spawned roots it despawned.
-@(private = "file")
-give_back :: proc(s: ^State, w: ^ecs.World, live: ^Player_Live) -> (despawned: int) {
+// close_live ends what a live player, or the editor's preview, did: it restores what its tracks wrote, gives back its
+// hold, despawns what it spawned, and unloads its assets. The live player is then empty. It gives how many spawned
+// roots it despawned; call the systems' forget_despawned after it.
+close_live :: proc(s: ^State, w: ^ecs.World, live: ^Player_Live) -> (despawned: int) {
 	e := &live.evaluation
 	if data, blob, ok := cutscene_data(s, e); ok {
 		restore(s, e, w, data, blob)
@@ -1021,6 +1112,7 @@ give_back :: proc(s: ^State, w: ^ecs.World, live: ^Player_Live) -> (despawned: i
 	}
 	delete(live.references)
 	free_overrides(&live.overrides)
+	live^ = {}
 	return
 }
 
@@ -1089,6 +1181,7 @@ resolve_of :: proc(
 		assets = s.assets,
 		data = data,
 		blob = blob,
+		unheld = c.unheld,
 	}
 }
 

@@ -219,7 +219,7 @@ overlay_driver :: proc(s: ^State) -> (slot: int, found: bool) {
 // hand_off_overlay keeps what the overlay shows of a player that drives it as the player gives the world back: a fade
 // that its track keeps, if it covers the frame; else a fade back from the skip's fade that covered the frame as the
 // player finished, over the skip's fade; else nothing. A player that fails hands off nothing. change_cutscene calls it
-// before give_back, while the evaluation holds the last presentation.
+// before close_live, while the evaluation holds the last presentation.
 @(private)
 hand_off_overlay :: proc(s: ^State, w: ^ecs.World, slot: int, failed: bool) {
 	driver, driven := overlay_driver(s)

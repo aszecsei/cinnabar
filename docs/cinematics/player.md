@@ -55,11 +55,11 @@ A player's state is one union, `Player_State`. The data of each state is in its 
 
 **One writer.** `change_cutscene(state, world, slot, to)` is the only procedure that sets a player's state. `game.Sublevel_State` and `change_sublevel` are the model.
 - It refuses a change that the diagram does not allow, and logs it.
-- It frees the data of the state that the player leaves. A loading player's overrides are freed. A live player that goes to `Restored` or `Failed` gives the world back (`give_back`): its tracks' fields are restored, its camera cut track releases its claim on the views ([Tracks: Camera cut tracks](tracks.md#camera-cut-tracks)), its input context and documents come back, its bindings resume what they suspended, its spawned entities are despawned and its assets are unloaded ([Possession: Giving it back](possession.md#giving-it-back)).
+- It frees the data of the state that the player leaves. A loading player's overrides are freed. A live player that goes to `Restored` or `Failed` gives the world back (`close_live`): its tracks' fields are restored, its camera cut track releases its claim on the views ([Tracks: Camera cut tracks](tracks.md#camera-cut-tracks)), its input context and documents come back, its bindings resume what they suspended, its spawned entities are despawned and its assets are unloaded ([Possession: Giving it back](possession.md#giving-it-back)).
 - A `Ready` player that goes to `Playing` or `Skipping` shows its spawned entities (`reveal_bindings`), pushes its input context and hides its documents (`take_hold`, [Possession: The whole cutscene](possession.md#the-whole-cutscene)).
 - A live player that goes to `Restored` or `Failed` first calls `hand_off_overlay`, while the evaluation holds the last presentation. It keeps a fade that the player's track keeps, or a fade back from the skip's fade, in the overlay, which outlives the player. A player that fails hands off nothing ([Tracks: Presentation tracks](tracks.md#presentation-tracks)).
 - It records each change as a `Player_Event`. `player_events` gives the frame's events, and `end_frame` clears them.
-- It queues the change's script event, if it has one: `on_cutscene_started`, `on_cutscene_finished` or `on_cutscene_failed`, to the bindings' entities and the player's caller. It finds them before `give_back` ends the bindings ([Scripts: Events](scripts.md#events)).
+- It queues the change's script event, if it has one: `on_cutscene_started`, `on_cutscene_finished` or `on_cutscene_failed`, to the bindings' entities and the player's caller. It finds them before `close_live` ends the bindings ([Scripts: Events](scripts.md#events)).
 
 A change from one live state to another carries the live data. `moved(player, to)` makes the new variant from the data that the player holds at the moment of the change, so the change carries what the last evaluation saved. `skipping(player, target)` makes the `Skipping` variant, which has data of its own.
 
@@ -88,7 +88,7 @@ Each command takes a handle and returns a `Command_Result`:
 | `resume` | `Paused` | `Playing` |
 | `stop` | `Ready`, `Playing`, `Paused`, `Skipping` | `Finishing`, at the current time, without the rest of the cutscene. A loading player goes to `Restored` at once, because it has changed nothing. |
 | `skip` | `Ready`, `Playing`, `Paused` | `Skipping`, to the target that the skip policy gives at the player's time. A loading player skips from its start once it is ready. A second skip does nothing. |
-| `set_time` | `Ready`, `Playing`, `Paused` | The same state, at a new time, for a debugger and for the editor ([#551](https://github.com/aszecsei/cinnabar/issues/551)). It seeks, so no event between the two times fires, except the event tracks' keys marked to fire on seek ([Tracks: Event tracks](tracks.md#event-tracks)). |
+| `set_time` | `Ready`, `Playing`, `Paused` | The same state, at a new time, for a debugger. The cutscene editor's preview is no player: it seeks its own evaluation (see [Cutscene editor: Preview](../editor/cutscene-editor.md#preview)). It seeks, so no event between the two times fires, except the event tracks' keys marked to fire on seek ([Tracks: Event tracks](tracks.md#event-tracks)). |
 | `release` | `Restored`, `Failed` | A free slot. The handle is stale after it. |
 
 `status`, `player_time`, `player_failure`, `player_evaluation`, `can_skip` and `skip_fade` ask about a player through its handle.

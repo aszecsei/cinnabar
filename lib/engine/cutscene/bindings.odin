@@ -96,7 +96,8 @@ Binding_Failure :: struct {
 
 // Resolve is what resolve_bindings needs: the world, its scenes, the scripts that a prefab's behaviours attach to (or
 // nil), the assets that prefabs load from, and the cutscene's blob. For a sub-sequence, mapped has, for each binding,
-// the parent's binding that its section maps it to, or nil.
+// the parent's binding that its section maps it to, or nil. With unheld, the bindings suspend nothing on their
+// entities, for the editor's preview, where no system runs (see docs/editor/cutscene-editor.md#preview).
 Resolve :: struct {
 	world:   ^ecs.World,
 	scenes:  ^scene.Scenes,
@@ -105,6 +106,7 @@ Resolve :: struct {
 	data:    []byte,
 	blob:    ^format.Cutscene_Blob,
 	mapped:  []Maybe(Mapping),
+	unheld:  bool,
 }
 
 // Mapping is a parent's binding that a sub-sequence's binding is mapped to: its index in the parent's blob, and its
@@ -174,7 +176,7 @@ resolve_bindings :: proc(
 				continue
 			}
 		}
-		hold := hold_of(binding)
+		hold := Binding_Hold{} if r.unheld else hold_of(binding)
 		if entity := given[index]; entity != 0 {
 			if ecs.is_alive(w, entity) {
 				set_binding(b, w, index, Binding_Possessed{entity, hold})

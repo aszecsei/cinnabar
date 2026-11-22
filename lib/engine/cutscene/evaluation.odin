@@ -655,6 +655,28 @@ restore_all :: proc(s: ^State, e: ^Evaluation, w: ^ecs.World) {
 	end_holds(e, w)
 }
 
+// lift puts back every field that the evaluation's tracks wrote, and forgets them, for the editor's preview, which lays
+// over the document as its overrides do (see docs/editor/cutscene-editor.md#preview). What it holds outside the snapshot
+// stays: the driven Animators, the camera cut track's claim and the voices. The next evaluation saves each field again
+// as it writes it, so a document edit made while it is lifted is the value under it.
+lift :: proc(s: ^State, e: ^Evaluation, w: ^ecs.World) -> (lifted: bool) {
+	lifted = len(e.snapshot.saved) > 0
+	#reverse for &saved in e.snapshot.saved {
+		put_back(s, e, w, &saved)
+	}
+	forget(&e.snapshot)
+	return
+}
+
+// saved_fields is the fields that the evaluation's tracks wrote since it was last lifted or restored.
+saved_fields :: proc(e: ^Evaluation, allocator := context.allocator) -> []Field {
+	fields := make([]Field, len(e.snapshot.saved), allocator)
+	for saved, i in e.snapshot.saved {
+		fields[i] = saved.field
+	}
+	return fields
+}
+
 // end_holds ends what the evaluation holds outside the snapshot: the drives of the Animators that its animation tracks
 // drive, the camera cut track's claim on the views, and the audio tracks' voices. It is the one end of them, for
 // restore, restore_all, a reload and destroy_evaluation, and it does nothing when the evaluation holds nothing.

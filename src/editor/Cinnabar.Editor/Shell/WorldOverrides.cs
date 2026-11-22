@@ -89,7 +89,7 @@ public sealed class OverrideToken
 }
 
 /// <summary>
-/// The editor's overrides of the game's world in Edit (see docs/editor/link.md#overrides). A scrub, a preview or another
+/// The editor's overrides of the game's world in Edit (see docs/editor/link.md#overrides). A pose preview or another
 /// owner begins one and gets a token. Nothing here touches the document: no undo entry, no dirty scene, and saves hold
 /// the document's values. <see cref="End"/> is the one place that a token ends.
 /// </summary>

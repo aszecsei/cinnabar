@@ -219,17 +219,35 @@ end_overrides :: proc(
 			despawned = true
 		}
 	}
+	// The cutscene preview lays with the overrides, and ends with them.
+	preview_reason: Maybe(link.Cutscene_Preview_End_Reason)
+	if r, ended := reason.?; ended {
+		switch r {
+		case .Mode:
+			preview_reason = .Mode
+		case .Scene_Loaded:
+			preview_reason = .Scene_Loaded
+		case .Code_Reloaded:
+			preview_reason = .Code_Reloaded
+		case .Not_Editing, .Full:
+			preview_reason = .Not_Editing
+		}
+	}
+	if end_cutscene_preview(e, w, preview_reason) {
+		despawned = true
+	}
 	return
 }
 
-// lift_overrides puts back the values that the overrides wrote over, the last written first, and gives whether it
-// changed the world. Transforms then need propagating again.
+// lift_overrides puts back the values that the cutscene preview and then the overrides wrote over, the last written
+// first, and gives whether it changed the world. Transforms then need propagating again.
 lift_overrides :: proc(e: ^Editor, w: ^ecs.World) -> (lifted: bool) {
 	o := &e.session.overrides
 	if o.layer == .Lifted {
 		return false
 	}
 	o.layer = .Lifted
+	lifted = lift_cutscene_preview(e, w)
 	#reverse for &override in o.live {
 		#reverse for s in override.saved {
 			data := ecs.get_raw(w, s.entity, s.component)
@@ -249,8 +267,8 @@ lift_overrides :: proc(e: ^Editor, w: ^ecs.World) -> (lifted: bool) {
 	return
 }
 
-// lay_overrides writes the overrides' last frames over the world, the first begun first, and gives whether it changed
-// the world. Transforms then need propagating again. It skips an entity that is gone, starts a drive again for an
+// lay_overrides writes the overrides' last frames over the world, the first begun first, and then evaluates the
+// cutscene preview over them, and gives whether it changed the world. Transforms then need propagating again. It skips an entity that is gone, starts a drive again for an
 // Animator that lost its drive, and pushes a camera again whose entry went.
 lay_overrides :: proc(e: ^Editor, w: ^ecs.World) -> (laid: bool) {
 	o := &e.session.overrides
@@ -283,6 +301,9 @@ lay_overrides :: proc(e: ^Editor, w: ^ecs.World) -> (laid: bool) {
 				p.token, _ = camera.push(e.views, w, p.view, p.entity, p.priority)
 			}
 		}
+	}
+	if lay_cutscene_preview(e, w) {
+		laid = true
 	}
 	return
 }
@@ -629,12 +650,19 @@ held_fields :: proc(
 			}
 		}
 	}
+	preview_held_fields(e, w, entity, &held)
 	return held[:]
 }
 
-// send_overridden_entities tells the editor which entities the overrides write or spawned, when that changes.
+// send_overridden_entities tells the editor which entities the overrides and the cutscene preview write or spawned,
+// when that changes.
 @(private)
-send_overridden_entities :: proc(e: ^Editor, out: ^[dynamic]byte, allocator := context.allocator) {
+send_overridden_entities :: proc(
+	e: ^Editor,
+	w: ^ecs.World,
+	out: ^[dynamic]byte,
+	allocator := context.allocator,
+) {
 	entities := make([dynamic]u64, allocator)
 	add :: proc(entities: ^[dynamic]u64, entity: ecs.Entity) {
 		if !slice.contains(entities[:], u64(entity)) {
@@ -648,6 +676,7 @@ send_overridden_entities :: proc(e: ^Editor, out: ^[dynamic]byte, allocator := c
 		for p in o.pushes {add(&entities, p.entity)}
 		for s in o.spawned {add(&entities, s.root)}
 	}
+	preview_entities(e, w, &entities)
 	slice.sort(entities[:])
 	h: u64 = 0
 	if len(entities) > 0 {

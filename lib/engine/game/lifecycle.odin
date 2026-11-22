@@ -57,6 +57,7 @@ game_init :: proc(
 		&g.streaming,
 		&g.views,
 		&g.animation,
+		&g.cutscenes,
 	)
 	if !ecs.init(&g.world, platform) {
 		log.panic("game: cannot create the world")
@@ -169,8 +170,21 @@ game_update :: proc(g: ^Game, dt: time.Duration, h: Hooks) -> (keep_running: boo
 	cutscene.update_skip(&g.cutscenes, &g.world, &frame_input, dt)
 	// The players load, resolve their bindings and give the world back here, outside the systems and the script phase,
 	// once the frame's scenes are in place (see docs/cinematics/player.md#the-frame).
-	if cutscene.update(&g.cutscenes, {&g.world, &g.scenes, &g.scripts, dt}) > 0 {
+	if cutscene.update(
+		   &g.cutscenes,
+		   {world = &g.world, scenes = &g.scenes, scripts = &g.scripts, dt = dt},
+	   ) >
+	   0 {
 		forget_despawned(g)
+	}
+	// The cutscene editor's preview moves on the game's clock in Edit, and shows its time in this frame (see
+	// docs/editor/cutscene-editor.md#preview).
+	if changed, despawned := editor.update_cutscene_preview(&g.editor, &g.world, &g.scripts, dt);
+	   changed || despawned {
+		if despawned {
+			forget_despawned(g)
+		}
+		ecs.update_transforms(&g.world)
 	}
 	// In the editor's edit mode, and while it pauses, the world stands still and only its transforms propagate, so
 	// edits show. No script code runs then but the edit phase's, for the behaviours that run in edit mode, whose writes
@@ -456,7 +470,9 @@ game_shutdown :: proc(g: ^Game, h: Hooks) {
 	if h.shutdown != nil {
 		h.shutdown(g)
 	}
-	// The players give the world back, and their assets, while the world, the scripts and the assets are alive.
+	// The editor's overrides and cutscene preview, and then the players, give the world back, and their assets, while
+	// the world, the scripts and the assets are alive.
+	editor.end_overrides(&g.editor, &g.world, nil)
 	cutscene.destroy(&g.cutscenes, &g.world)
 	editor.destroy(&g.editor)
 	script.destroy(&g.scripts)

@@ -392,6 +392,60 @@ public abstract class HostTests : IAsyncDisposable
         Assert.DoesNotContain(editor.Skipped, m => m is Log { Level: LogLevel.Error });
     }
 
+    [Fact]
+    public async Task ACutscenePreviewMovesTheBoundEntitiesAndCloseGivesThemBack()
+    {
+        await using var editor = await Connect();
+        editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
+        await editor.Next<EntitySnapshot>();
+        // The sample's intro possesses the animation scene's walking fox, which this scene stands in for. Its first track
+        // walks the fox 4 m along x over the range's 10 s, and it spawns a guard and three cameras.
+        var snapshot = await Load(editor, Scene(Entity(Fox, "Fox")), guid: AnimationScene);
+        var fox = snapshot.Entities.Single(e => e.SceneId == Fox).Entity;
+        await Task.Delay(300, TestContext.Current.CancellationToken);
+        Drained(editor);
+        editor.Link.Send(new WatchEntity(fox));
+        var position = Document.Fnv.Hash64("position"u8.ToArray());
+
+        editor.Link.Send(new CutscenePreviewOpen(1, Convert.FromHexString(IntroCutscene), false, 300000));
+        var opened = await editor.Next<CutscenePreviewOpened>(o => o.Ticket == 1);
+        Assert.Equal(300000, opened.Tick);
+        Assert.Equal(600000, opened.RangeEnd);
+        // The fox and the spawned bindings are marked, and the fox's values are the document's, with its position held.
+        // The two come in either order, and each only when it changes.
+        bool Held(EntityValues v) => v.Entity == fox && v.Held.Any(h => h.Component == 1 && h.Field == position);
+        var marked = await editor.Next<OverriddenEntities>(o => o.Entities.Contains(fox) && o.Entities.Length >= 5);
+        var held = editor.Skipped.OfType<EntityValues>().LastOrDefault(Held) ?? await editor.Next<EntityValues>(Held);
+        Assert.Equal(Origin, BitConverter.ToInt64(held.Components.Single(c => c.Id == 1).Data, 0));
+
+        // Play moves on the game's clock, which the game reports in each frame.
+        editor.Link.Send(new CutscenePreviewPlay(1, 300000, 1, false, 0, 0));
+        var first = await editor.Next<CutscenePreviewTick>(t => t.Ticket == 1 && t.Playing);
+        var later = await editor.Next<CutscenePreviewTick>(t => t.Ticket == 1 && t.Tick > first.Tick + 6000);
+        Assert.True(later.Playing);
+        editor.Link.Send(new CutscenePreviewTime(1, 600000));
+        await Task.Delay(300, TestContext.Current.CancellationToken);
+        Assert.DoesNotContain(Drained(editor), m => m is CutscenePreviewTick { Playing: true } t && t.Tick > later.Tick + 60000);
+
+        // Close gives the document back, and the spawned bindings go.
+        editor.Skipped.Clear();
+        editor.Link.Send(new CutscenePreviewClose(1));
+        var after = await editor.Next<EntityValues>(v => v.Entity == fox && v.Held.Length == 0);
+        Assert.Equal(Origin, BitConverter.ToInt64(after.Components.Single(c => c.Id == 1).Data, 0));
+        await Task.Delay(500, TestContext.Current.CancellationToken);
+        var closed = editor.Skipped.Concat(Drained(editor)).ToList();
+        Assert.Contains(closed, m => m is OverriddenEntities { Entities.Length: 0 });
+        var destroyed = closed.OfType<EntityDelta>().SelectMany(d => d.Destroyed).ToHashSet();
+        Assert.All(marked.Entities.Where(e => e != fox), gone => Assert.Contains(gone, destroyed));
+        Assert.DoesNotContain(closed, m => m is CutscenePreviewEnded);
+        Assert.DoesNotContain(editor.Skipped, m => m is Log { Level: LogLevel.Error });
+    }
+
+    // The sample's intro, and the scene and the entity that its fox binding possesses.
+    const string IntroCutscene = "9d549a4b7235fb289389db323a19fd8f";
+    const string AnimationScene = "f496b929575035d9c2626ed56d3165ba";
+    const ulong Fox = 0x79cea6d7586e3f48;
+
     // The messages that have come, which it drops.
     static List<ILinkMessage> Drained(Editor editor)
     {

@@ -28,8 +28,10 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
     public ConsoleLog Console { get; } = new();
     public HostSession Host { get; }
     public WorldModel World { get; } = new();
-    /// <summary>What owners such as a scrub write over the game's world in Edit, outside the document (see docs/editor/link.md#overrides).</summary>
+    /// <summary>What owners such as a pose preview write over the game's world in Edit, outside the document (see docs/editor/link.md#overrides).</summary>
     public WorldOverrides Overrides { get; }
+    /// <summary>The cutscene editor's preview in the game, for one tab at a time (see docs/editor/cutscene-editor.md#preview).</summary>
+    public CutscenePreview CutscenePreview { get; }
     public ResourceStats Stats { get; } = new();
     public Selection Selection { get; } = new();
     public OutlinerState Outliner { get; } = new();
@@ -88,6 +90,7 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
         _gizmo = new GizmoController(label => TryBeginEdit(label, "the gizmo"), SendGizmo);
         Host = new HostSession(options);
         Overrides = new WorldOverrides(this);
+        CutscenePreview = new CutscenePreview(this);
         Watches = new EntityWatches(Selection, Host);
         Visibility = new SceneVisibility(World, Selection, Host, settings, Console, () => [.. _scenes.Select(s => (s.Number, s.Path))], WriteSetting, Commands.InvalidateAll);
         Cook = new CookSession(options.Cook, Assets);
@@ -249,6 +252,7 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
             _previewSlots.DisconnectAll();
             // The game ends the overrides of an editor that goes, so a token that wrote nothing would only seem live.
             Overrides.EndAll(OverrideEnd.LinkClosed);
+            CutscenePreview.OnLinkLost();
             if (Stats.Host != null || Stats.Game != null)
             {
                 Stats.Clear();
@@ -276,6 +280,8 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
     {
         // The new state has no overrides, so their owners hear that they ended, and nothing is sent again.
         Overrides.EndAll(OverrideEnd.NewGameState);
+        // The new state has no cutscene preview either. The scene's send opens the owner's again, after the scene.
+        CutscenePreview.OnNewGameState();
         ResetMode();
         SendScene();
         SendViewportTools();

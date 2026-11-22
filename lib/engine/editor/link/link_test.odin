@@ -37,6 +37,23 @@ every_message_round_trips :: proc(t: ^testing.T) {
 		},
 		Viewport_Acknowledged{viewport = 2, generation = 3, frame = 1 << 40},
 		Capture_Source{viewport = -1},
+		Cutscene_Preview_Open {
+			ticket = 3,
+			cutscene = {1 = 7, 15 = 9},
+			unsaved = true,
+			tick = 12_000,
+		},
+		Cutscene_Preview_Play {
+			ticket = 3,
+			tick = 1000,
+			rate = -2,
+			looping = true,
+			loop_start = 500,
+			loop_end = 90_000,
+		},
+		Cutscene_Preview_Opened{ticket = 3, tick = 12_000, range_start = 0, range_end = 600_000},
+		Cutscene_Preview_Ended{ticket = 4, reason = .Code_Reloaded},
+		Cutscene_Preview_Tick{ticket = 3, tick = 1001, playing = true},
 		Component_Types {
 			types = {
 				{

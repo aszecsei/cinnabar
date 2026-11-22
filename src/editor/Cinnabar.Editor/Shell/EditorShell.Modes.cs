@@ -44,6 +44,7 @@ public sealed partial class EditorShell
             InterruptEdit();
             // The game plays the document's world, so it ends the overrides of it.
             Overrides.EndAll(OverrideEnd.Mode);
+            CutscenePreview.OnPlay();
             // The game starts with the project's active set of sublevels, as a cooked game does (see
             // docs/editor/document-and-scenes.md#parts).
             LoadActiveSet();

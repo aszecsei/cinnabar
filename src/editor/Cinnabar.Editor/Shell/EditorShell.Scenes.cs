@@ -809,6 +809,7 @@ public sealed partial class EditorShell
         {
             // Each scene is its base and the parts of its loaded sublevels (see docs/editor/document-and-scenes.md#parts).
             Host.Send(SceneSnapshot.ToMessage(_scenes.SelectMany(PartsToLoad), ++_sceneTicket));
+            CutscenePreview.OnSceneSent();
         }
     }
 
@@ -895,6 +896,15 @@ public sealed partial class EditorShell
                 return;
             case Link.Protocol.OverrideEnded ended:
                 Overrides.OnEnded(ended);
+                return;
+            case Link.Protocol.CutscenePreviewOpened opened:
+                CutscenePreview.OnOpened(opened);
+                return;
+            case Link.Protocol.CutscenePreviewEnded ended:
+                CutscenePreview.OnEnded(ended);
+                return;
+            case Link.Protocol.CutscenePreviewTick tick:
+                CutscenePreview.OnTick(tick);
                 return;
         }
         if (message is not EditProblems problems)

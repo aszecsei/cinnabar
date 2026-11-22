@@ -27,6 +27,11 @@ static partial class EditorCommands
     public const string CutscenePaste = "cutscene.paste";
     public const string CutsceneFind = "cutscene.find";
     public const string CutsceneKeysUnderSelection = "cutscene.keysUnderSelection";
+    public const string CutscenePlayPause = "cutscene.playPause";
+    public const string CutsceneStepBack = "cutscene.stepBack";
+    public const string CutsceneStepForward = "cutscene.stepForward";
+    public const string CutsceneStepBack10 = "cutscene.stepBack10";
+    public const string CutsceneStepForward10 = "cutscene.stepForward10";
 
     /// <summary>The timeline's commands, which act on the active cutscene while its timeline has the keyboard.</summary>
     public static readonly string[] CutsceneTimelineCommands =
@@ -34,7 +39,7 @@ static partial class EditorCommands
         CutsceneFrame, CutsceneGoToStart, CutsceneGoToEnd, CutscenePreviousEdge, CutsceneNextEdge, CutsceneSplit, CutsceneRippleDelete,
         CutsceneNudgeEarlier, CutsceneNudgeLater, CutsceneNudgeEarlier10, CutsceneNudgeLater10, CutsceneSnap, CutsceneShowFrames, CutsceneLockTrack,
         CutsceneMuteTrack, CutsceneSoloTrack, CutsceneAddMarker, CutsceneCopy, CutsceneCut, CutscenePaste, CutsceneFind,
-        CutsceneKeysUnderSelection,
+        CutsceneKeysUnderSelection, CutscenePlayPause, CutsceneStepBack, CutsceneStepForward, CutsceneStepBack10, CutsceneStepForward10,
     ];
 
     // The cutscene editor's timeline (see docs/editor/cutscene-editor.md#the-timeline). Its keys are bare letters, which
@@ -61,6 +66,24 @@ static partial class EditorCommands
                 CanExecuteWhen = () => Timeline() is { } editor && (can == null || can(editor)),
             });
         }
+        commands.Register(new Command(CutscenePlayPause, "Play/Pause", () =>
+        {
+            if (Timeline() is { } editor && shell.CutscenePreview.CanPlay(editor))
+            {
+                shell.CutscenePreview.PlayPause();
+            }
+        })
+        {
+            Description = "Play the cutscene in the game from the playhead, or pause it. The game keeps the time while it plays.",
+            Icon = "play",
+            Shortcut = "Space",
+            CanExecuteWhen = () => Timeline() is { } editor && shell.CutscenePreview.CanPlay(editor),
+            IsCheckedWhen = () => shell.ActiveCutscene is { } editor && shell.CutscenePreview.IsPlayingIn(editor),
+        });
+        Register(CutsceneStepBack, "Step Back", "cutscene", "Move the playhead a frame earlier, and pause the preview.", "Left", e => e.Step(-1));
+        Register(CutsceneStepForward, "Step Forward", "cutscene", "Move the playhead a frame later, and pause the preview.", "Right", e => e.Step(1));
+        Register(CutsceneStepBack10, "Step Back 10 Frames", "cutscene", "Move the playhead 10 frames earlier, and pause the preview.", "Shift+Left", e => e.Step(-10));
+        Register(CutsceneStepForward10, "Step Forward 10 Frames", "cutscene", "Move the playhead 10 frames later, and pause the preview.", "Shift+Right", e => e.Step(10));
         Register(CutsceneFrame, "Frame Selection", "frame", "Fit the selected sections, events and keys in the timeline, or the whole cutscene when none is selected.", "F",
             e => e.RequestFrame());
         Register(CutsceneGoToStart, "Go to Start", "cutscene", "Move the playhead to the cutscene's start.", "Home", e => e.SetPlayhead(0));

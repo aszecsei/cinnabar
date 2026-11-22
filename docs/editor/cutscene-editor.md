@@ -2,8 +2,8 @@
 
 The cutscene editor edits a cutscene (see [Content: Cutscenes](../content/kinds/cutscenes.md)), which the game plays as [Cinematics](../cinematics/README.md) describes. Each open one is a tab, `CutsceneEditorDocument`, over a `CutsceneEditor` in the shell, which holds its state. Docking can rebuild the view, and tests drive the editor without a window.
 
-The editor is built in steps under [#548](https://github.com/aszecsei/cinnabar/issues/548). This page describes what is built: the tab, its document, its timeline and details, and the check of its unsaved text. These come next:
-- scrubbing and playing in Edit ([#551](https://github.com/aszecsei/cinnabar/issues/551)), which plays what [mute and solo](#mute-and-solo) let it;
+The editor is built in steps under [#548](https://github.com/aszecsei/cinnabar/issues/548). This page describes what is built: the tab, its document, its timeline and details, the check of its unsaved text, and its preview in Edit. These come next:
+- the rest of the transport ([#551](https://github.com/aszecsei/cinnabar/issues/551) part 2): J/K/L and the play rate, loop ranges, the jump to keys, following the playhead, typing a time, the scrub's sound toggle, events during playback, the frame counter in the Game view, and a preview that plays what [mute and solo](#mute-and-solo) let it;
 - keys from the inspector ([#552](https://github.com/aszecsei/cinnabar/issues/552));
 - the curve editor ([#553](https://github.com/aszecsei/cinnabar/issues/553));
 - the bindings and the viewport's selection ([#554](https://github.com/aszecsei/cinnabar/issues/554)), with the filter that shows the tracks of the entities selected in the viewport;
@@ -81,7 +81,7 @@ On the left is a header for each row, and on the right is the time area. Both sc
 ### The ruler
 
 The ruler shows timecode (`mm:ss:ff`), or frames at the display rate with **Show Frames**. Its ticks use `TimelineGeometry.TickSpacing` in whole seconds where a second fits, and in whole frames below that (`FrameSpacing`). So every tick is on a frame, and a label is a round timecode.
-- **The playhead.** A click or a drag on the ruler moves the playhead to a frame. The playhead belongs to the editor, so it is in no undo entry. In this step it only marks where Split, Home and End act. Scrubbing and playing in Edit come with [#551](https://github.com/aszecsei/cinnabar/issues/551).
+- **The playhead.** A click or a drag on the ruler moves the playhead to a frame. The playhead belongs to the editor, so it is in no undo entry. It marks where Split, Home and End act, and the [preview](#preview) shows the world at it.
 - **The range bar,** at the bottom of the ruler, is the part that plays: the cutscene's `range`. A drag of either end sets it. When the range is all of the length, the editor removes the setting.
 - **The length.** The handle at the top of the ruler is the length. A drag sets `length`, but not to less than the end of a section, range or trigger, or a marker. Time past the length is shaded.
 - **Markers** are flags in the top of the ruler, in their colors, with their names while they fit (see [Markers](#markers)). A flag is over the handles: a press on it selects its marker.
@@ -172,7 +172,7 @@ A strip over the timeline filters its rows. A filter belongs to the tab, and the
 ### Mute and solo
 
 The **M** and **S** buttons in a track's header, and **Mute Track** and **Solo Track**, mute and solo the track for this user. They change no file but `cutscene-timeline.json`, so they do not dirty the cutscene.
-- `CutsceneEditor.Audible(track)` says whether the preview plays a track. It does not when the user muted the track, or when the user soloed other tracks and not this one. Scrubbing and playing in Edit ([#551](https://github.com/aszecsei/cinnabar/issues/551)) ask it.
+- `CutsceneEditor.Audible(track)` says whether the preview plays a track. It does not when the user muted the track, or when the user soloed other tracks and not this one. The preview will ask it in [#551](https://github.com/aszecsei/cinnabar/issues/551) part 2. It plays every track for now.
 - A track whose asset sets `muted = true` plays in no preview and no game. Its M is struck through, and a press on it does nothing: edit the setting to change it.
 - A track that is not audible draws its sections grey, which differs from a locked track's faint colors.
 
@@ -202,6 +202,9 @@ Each action is a command, so it is in the command palette, and `keybindings.json
 | Duplicate | `entity.duplicate` | Ctrl+D |
 | Find Track | `cutscene.find` | Ctrl+F |
 | Keys Under Selection | `cutscene.keysUnderSelection` | None |
+| Play/Pause | `cutscene.playPause` | Space |
+| Step Back, Step Forward | `cutscene.stepBack`, `cutscene.stepForward` | Left, Right |
+| Step Back 10 Frames, Step Forward 10 Frames | `cutscene.stepBack10`, `cutscene.stepForward10` | Shift+Left, Shift+Right |
 
 ### Cost
 
@@ -215,6 +218,10 @@ The test does not measure Avalonia's drawing.
 
 ## Preview
 
+In Edit, the game shows the tab's cutscene in the world at the playhead, outside the document. Scrubbing, playing and stepping never edit a scene: they make no undo entry, and no scene becomes dirty.
+
+### The unsaved text
+
 Each committed edit sends the unsaved text to the cook daemon with `Cook_Preview`, through `PreviewCook`. `PreviewCook` waits 250 ms after the last edit, so at most four checks go each second, and it runs one at a time. A drag's steps are not sent: its end is the edit. The daemon's `cutscene_check` reports what a cook of the text would report:
 
 - the text's own problems;
@@ -223,4 +230,37 @@ Each committed edit sends the unsaved text to the cook daemon with `Cook_Preview
 
 The answer's problems are on their blocks by line. An answer about a text that has changed since it was sent is dropped, because its lines are old.
 
-A text without problems goes in the cache's preview area, `<cache>/dev/preview/<guid>.blob`, which scrubbing and playing in Edit will play ([#551](https://github.com/aszecsei/cinnabar/issues/551)). A text with problems leaves the last good one there. The cutscene's own blob does not change until it is saved and cooked.
+A text without problems goes in the cache's preview area, `<cache>/dev/preview/<guid>.blob`, which the preview plays. A text with problems leaves the last good one there. The cutscene's own blob does not change until it is saved and cooked.
+
+### The session
+
+`EditorShell.CutscenePreview` holds the preview's session. Its state is one value, `CutscenePreviewState`, which only `Become` changes (see [State with a lifecycle](../overview/conventions.md#state-with-a-lifecycle)):
+
+| State | What it holds |
+|---|---|
+| `Closed` | Why the game ended the last session, or nothing, and whether the next session plays at once. |
+| `Opening` | The ticket and the tab. The editor sent `Cutscene_Preview_Open` and waits for `Cutscene_Preview_Opened`. |
+| `Open` | The ticket, the tab, the cutscene's range, and whether it plays. |
+
+- **One preview at a time.** `Owner` is the tab that holds the preview. It is apart from the state, so it outlives a session. A tab that becomes active takes the preview when no session is live. Another tab shows "preview inactive" and a **Preview here** button, which takes it.
+- **Tickets.** Each `Cutscene_Preview_Open` has a new ticket, which only goes up. The game drops a message with an older ticket, and the editor drops an answer to a ticket that is not its session's. A new Open ends the session before it, in the game too.
+- **The unsaved text.** An Open says `unsaved` once the tab's text has cooked clean. The game then plays the blob in the preview area, and follows a newer one there at the same time. The first clean cook of a session that played the saved blob opens a new session that plays the unsaved one.
+- **Ends.** Closing the tab sends `Cutscene_Preview_Close`. Play, a lost link and a new game state end the session without a message, because the game ends it itself. The game sends `Cutscene_Preview_Ended` when it cannot open the session (`Not_Editing`, `Failed`), at a mode change (`Mode`), when the editor's scene loads (`Scene_Loaded`) and at a code reload (`Code_Reloaded`).
+- **Opening again.** After a load or a code reload, the editor opens the session again at once. Each time the editor sends its scene (`Load_Scene`), a closed session opens again for the owner at the playhead: after Stop, in `OnNewGameState`, and when a scene opens, so a session that the game refused without a scene opens with the scene. A session that played when the link or the game state went plays again. During playback the playhead is the last tick that the game reported, so a reconnect goes on from there. A scrub or a step while a session opens again keeps it paused.
+
+### Scrub, play and step
+
+- **Scrub.** A move of the playhead by the editor sends `Cutscene_Preview_Time` at most once a frame, with the latest tick. The view calls `Flush` from `RequestAnimationFrame`. The game shows that time in the same frame. A scrub pauses playback.
+- **Play.** Space sends `Cutscene_Preview_Play` from the playhead, or from the range's start when the playhead is at its end. The game owns the clock: it moves the time by each frame's real time, and sends `Cutscene_Preview_Tick` in each poll. The editor draws the playhead from the tick and does not wait for it. At the range's end the game stops, and sends one tick with `playing` false. Space again pauses at the playhead.
+- **Step.** Left and Right move the playhead one frame, and Shift moves it 10 frames. A step pauses playback.
+- **Sound.** While the preview plays, its audio tracks play. While it is scrubbed, they play short grains under the playhead (see [Tracks: Audio tracks](../cinematics/tracks.md#audio-tracks)).
+- **Events.** No event fires in the preview, so it never runs gameplay.
+
+### The game's side
+
+`lib/engine/editor/cutscene_preview.odin` holds the open preview in the editor's `Session`. It loads the cutscene with `cutscene.open_live`, as a player loads one, but without a player's slot and without its hold on gameplay. It pushes no input context, hides no UI, and suspends no systems on the bindings (`Player_Context.unheld`). It evaluates the cutscene with `seek` and `evaluate`, as a scrub does (see [Evaluation](../cinematics/evaluation.md)).
+
+- **A layer with the overrides.** The preview's writes are one more layer with the [overrides](link.md#overrides). `lift_overrides` puts them back with `cutscene.lift`, which keeps the drives, the camera cut's claim and the voices. `lay_overrides` evaluates the preview again at its time. So poll, the edit-mode behaviours and what the game sends the editor see the document. An edit of a field that the preview writes goes to the document, under the preview.
+- **The frame.** In Edit, `update_cutscene_preview` runs once a frame after the players. It follows a newer unsaved blob and a reload's bindings, moves a playing preview by the frame's real time, and evaluates it. Forward play moves as a player's clock does, so camera cuts blend.
+- **Marks.** The bound entities and the spawned ones are in `Overridden_Entities`, so the Outliner marks them. The fields that the preview writes are in `Entity_Values.held`.
+- **Ends.** `end_overrides` ends the preview with the overrides: at `Set_Mode`, `Load_Scene`, a code reload and a new link. `close_live` restores what the tracks wrote, despawns the spawned entities and unloads the assets. A new game state frees the preview without the world.

@@ -1600,3 +1600,52 @@ stand_in :: proc(
 	}
 	return result
 }
+
+// lift puts back what the tracks wrote and forgets it, as the editor's preview does while the editor reads or edits the
+// document. The next evaluation writes over the world again, and its base is the world's value then, so an edit made
+// while it was lifted is what a restore puts back.
+@(test)
+lift_puts_the_fields_back_and_the_next_evaluation_writes_over_an_edit :: proc(t: ^testing.T) {
+	f := eval_setup(t)
+	defer eval_teardown(t, f)
+	sections := []format.Cutscene_Section_Contents {
+		{
+			id = 1,
+			start = 0,
+			end = 2 * SECOND,
+			weight = 1,
+			channels = channel(ramp(0, 8, 2 * SECOND)),
+		},
+	}
+	tracks := []format.Cutscene_Track_Contents {
+		{
+			id = 1,
+			kind = .Property,
+			name = "Brightness",
+			binding = 0,
+			component = u64(LAMP_ID),
+			field = "brightness",
+			sections = sections,
+		},
+	}
+	e := begin_evaluation(t, f, cutscene_blob(tracks), added = false)
+	defer end_evaluation(f, e)
+	own := brightness(f)
+	at(f, e, SECOND)
+	testing.expect_value(t, brightness(f), 4)
+	testing.expect_value(t, len(saved_fields(e, context.temp_allocator)), 1)
+
+	testing.expect(t, lift(&f.cutscenes, e, &f.world))
+	testing.expect_value(t, brightness(f), own)
+	testing.expect_value(t, len(saved_fields(e, context.temp_allocator)), 0)
+	testing.expect(t, !lift(&f.cutscenes, e, &f.world))
+
+	// An edit while it is lifted, and the same time evaluated again, as a lay does.
+	ecs.get_write(&f.world, f.lamp, Lamp).brightness = 9
+	data, blob, _ := blob_of(f, e.cutscene)
+	evaluate(&f.cutscenes, e, &f.world, data, blob, .Fixed)
+	evaluate(&f.cutscenes, e, &f.world, data, blob, .Late)
+	testing.expect_value(t, brightness(f), 4)
+	restore(&f.cutscenes, e, &f.world, data, blob)
+	testing.expect_value(t, brightness(f), 9)
+}
