@@ -682,7 +682,7 @@ capture_shown :: proc(
 		return
 	}
 	if p, open := e.session.cutscene_previews.open.?; open {
-		shown.preview = {p.ticket, p.live.evaluation.time}
+		shown.preview = {p.ticket, p.live.evaluation.time, p.modified if p.unsaved else 0}
 	}
 	entities := make([dynamic]Shown_Entity, allocator)
 	for watched in e.session.watched {

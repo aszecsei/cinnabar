@@ -331,10 +331,13 @@ Entity_Values :: struct {
 	shown_preview: Shown_Preview,
 }
 
-// The cutscene preview and its time when the world showed an entity's values (see Entity_Values.shown).
+// The cutscene preview and its time when the world showed an entity's values (see Entity_Values.shown), and the
+// unsaved blob that it played: the preview area's file time in nanoseconds since the Unix epoch, or 0 for the saved
+// blob. The editor keys the values only when they show its text at its playhead.
 Shown_Preview :: struct {
 	ticket: u64,
 	tick:   i32,
+	blob:   i64,
 }
 
 // A component's bytes, as they are in memory. The editor reads the fields with the Field_Info offsets.

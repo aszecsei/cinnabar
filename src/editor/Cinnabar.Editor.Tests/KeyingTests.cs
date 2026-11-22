@@ -50,7 +50,10 @@ public sealed class KeyingTests : IDisposable
     // A linked shell in Edit with the door scene and a cutscene that binds the door, whose preview is open at tick 0.
     (EditorShell Shell, CutsceneEditor Editor, ulong Ticket) NewShell(string cutscene = Cutscene, ComponentType? transform = null)
     {
-        var shell = TestShell.Open(_temp, "door.scene", SceneText);
+        Directory.CreateDirectory(_temp.Path);
+        File.WriteAllText(_temp.Combine("door.scene"), SceneText);
+        var options = new EditorOptions("host.exe", "game.dll", _temp.Combine("door.scene")) { AutosaveDirectory = _temp.Combine("autosave") };
+        var shell = new EditorShell(options with { Cook = options.Cook with { CachePath = _temp.Combine("cache") } }, new EditorSettings(_temp.Combine("settings")));
         File.WriteAllText(_temp.Combine("door.cutscene"), cutscene);
         shell.Assets.Apply(new Welcome(1, "dev", [new Root("game", _temp.Path)], [], [], []));
         shell.Assets.Apply(new AssetSnapshot(
@@ -118,7 +121,7 @@ public sealed class KeyingTests : IDisposable
             world.Add(new ComponentValue(LightId, Lamp(s.Brightness ?? brightness)));
         }
         shell.OnGameMessage(new EntityValues(Door, [new ComponentValue(SceneEdits.TransformId, pose), new ComponentValue(LightId, Lamp(brightness))], [],
-            [.. held], [.. world], shown?.Stamp ?? new ShownPreview(0, 0)));
+            [.. held], [.. world], shown?.Stamp ?? new ShownPreview(0, 0, 0)));
     }
 
     static KeyState? State(EditorShell shell) => shell.Keying.StateOf(Door, LightId, Brightness)?.State;
@@ -141,15 +144,44 @@ public sealed class KeyingTests : IDisposable
         Assert.Equal([2.0], CutsceneKeying.KeysAt(editor.File, target, 0));
         Assert.Contains("\t\t\tkey 0 2 auto", editor.Document.Text.Split('\n'));
 
-        // The preview holds the field, and the world shows another value at the playhead.
-        Values(shell, Pose([0, 0, 0], Quat.Identity), 2, (null, 3, new ShownPreview(ticket, 0)));
+        // The world shows the saved cutscene, not the key: the key holds until the preview plays the edit.
+        Values(shell, Pose([0, 0, 0], Quat.Identity), 2, (null, 3, new ShownPreview(ticket, 0, 0)));
+        Assert.Equal(KeyState.Keyed, State(shell));
+        Assert.Contains("last edit", shell.Keying.StateOf(Door, LightId, Brightness)!.Refusal);
+
+        // The text cooks clean, and the preview plays its blob, where the world shows another value at the playhead.
+        var (unsaved, blob) = Cooked(shell, editor);
+        Values(shell, Pose([0, 0, 0], Quat.Identity), 2, (null, 3, new ShownPreview(unsaved, 0, blob)));
         Assert.Equal(KeyState.Differs, State(shell));
         Assert.Null(shell.Keying.StateOf(Door, LightId, Brightness)!.Refusal);
 
         // What the world showed at another time is not the playhead's: the key holds, and a key must wait.
-        Values(shell, Pose([0, 0, 0], Quat.Identity), 2, (null, 3, new ShownPreview(ticket, 2000)));
+        Values(shell, Pose([0, 0, 0], Quat.Identity), 2, (null, 3, new ShownPreview(unsaved, 2000, blob)));
         Assert.Equal(KeyState.Keyed, State(shell));
         Assert.NotNull(shell.Keying.StateOf(Door, LightId, Brightness)!.Refusal);
+
+        // An edit that has not cooked yet is not what the world shows either.
+        Values(shell, Pose([0, 0, 0], Quat.Identity), 2, (null, 3, new ShownPreview(unsaved, 0, blob)));
+        editor.Document.Edit("Rename", f => f.Find("track:1")!.SetName("Glow"));
+        Assert.Contains("last edit", shell.Keying.StateOf(Door, LightId, Brightness)!.Refusal);
+        var before = editor.Document.Text;
+        shell.Keying.Key(Door, LightId, Brightness);
+        Assert.Equal(before, editor.Document.Text);
+    }
+
+    // The daemon cooks the tab's text clean into the preview area, and the preview plays it: the unsaved session's
+    // ticket, and the blob's file time.
+    (ulong Ticket, long Blob) Cooked(EditorShell shell, CutsceneEditor editor)
+    {
+        var path = _temp.Combine("cache", "preview", CutsceneGuid + ".blob");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllBytes(path, [1]);
+        _sent.Clear();
+        editor.ShowProblems(editor.Document.Text, new PreviewResult("", [], []));
+        var ticket = _sent.OfType<CutscenePreviewOpen>().Single(o => o.Unsaved).Ticket;
+        shell.OnGameMessage(new CutscenePreviewOpened(ticket, 0, 0, 600000));
+        _sent.Clear();
+        return (ticket, (File.GetLastWriteTimeUtc(path) - DateTime.UnixEpoch).Ticks * 100);
     }
 
     [Fact]
@@ -158,7 +190,7 @@ public sealed class KeyingTests : IDisposable
         var (shell, editor, ticket) = NewShell();
         using var _ = shell;
         var target = new KeyTarget.Property(1, LightId, "brightness", PropertyShape.Number);
-        Values(shell, Pose([0, 0, 0], Quat.Identity), 2, (null, 3, new ShownPreview(ticket, 0)));
+        Values(shell, Pose([0, 0, 0], Quat.Identity), 2, (null, 3, new ShownPreview(ticket, 0, 0)));
 
         editor.SetPlayhead(2000);
         var before = editor.Document.Text;
@@ -166,7 +198,7 @@ public sealed class KeyingTests : IDisposable
         Assert.Equal(before, editor.Document.Text);
         Assert.Contains("Waiting", shell.Keying.StateOf(Door, LightId, Brightness)!.Refusal);
 
-        Values(shell, Pose([0, 0, 0], Quat.Identity), 2, (null, 4, new ShownPreview(ticket, 2000)));
+        Values(shell, Pose([0, 0, 0], Quat.Identity), 2, (null, 4, new ShownPreview(ticket, 2000, 0)));
         shell.Keying.Key(Door, LightId, Brightness);
         Assert.Equal([4.0], CutsceneKeying.KeysAt(editor.File, target, 2000));
 
@@ -187,7 +219,7 @@ public sealed class KeyingTests : IDisposable
         // The door stands at 1 m, turned 90° about y. The preview shows it 2 m on along its own x, turned 30° more.
         var own = Yaw(90);
         var moved = own.Rotate(new Vec3(2, 0, 0));
-        Values(shell, Pose([1, 0, 0], own), 2, (Pose([1 + moved.X, moved.Y, moved.Z], own * Yaw(30), 2), null, new ShownPreview(ticket, 0)));
+        Values(shell, Pose([1, 0, 0], own), 2, (Pose([1 + moved.X, moved.Y, moved.Z], own * Yaw(30), 2), null, new ShownPreview(ticket, 0, 0)));
 
         shell.Commands.Get(EditorCommands.CutsceneKeyTransform).Execute();
 
@@ -232,6 +264,31 @@ public sealed class KeyingTests : IDisposable
 
         Assert.Same(UndoTarget.Scene.Instance, shell.LastEdited);
         Assert.Null(shell.UndoEditor);
+    }
+
+    [Fact]
+    public void ACutsceneThatGivesThePreviewAwayIsNotWhatUndoFollowsWhenItTakesItBack()
+    {
+        var (shell, editor, _) = NewShell();
+        using var __ = shell;
+        shell.Selection.Select(Door);
+        shell.Commands.Get(EditorCommands.CutsceneKeyTransform).Execute();
+        File.WriteAllText(_temp.Combine("other.cutscene"), Cutscene);
+        shell.Assets.Apply(new AssetSnapshot(
+        [
+            TestAssets.Make(SceneGuid, AssetKind.Scene, "door.scene"),
+            TestAssets.Make(CutsceneGuid, AssetKind.Cutscene, "door.cutscene"),
+            TestAssets.Make("fedcba9876543210fedcba9876543210", AssetKind.Cutscene, "other.cutscene"),
+        ], []));
+
+        var other = shell.OpenCutscene(shell.Assets.Find("fedcba9876543210fedcba9876543210")!)!;
+        shell.CutscenePreview.Take(other);
+        Assert.Same(other, shell.CutscenePreview.Owner);
+        Assert.Same(UndoTarget.Scene.Instance, shell.LastEdited);
+        shell.CutscenePreview.Take(editor);
+
+        Assert.Same(editor, shell.CutscenePreview.Owner);
+        Assert.Same(UndoTarget.Scene.Instance, shell.LastEdited);
     }
 
     [Fact]

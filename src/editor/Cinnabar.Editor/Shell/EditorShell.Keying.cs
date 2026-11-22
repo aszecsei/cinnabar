@@ -23,16 +23,25 @@ public sealed partial class EditorShell
 
     /// <summary>
     /// What was edited last outside a graph editor's tab: the scene, or a cutscene by its keys. A cutscene whose tab
-    /// closed, or that gave the preview to another, is the scene again.
+    /// closes, or that gives the preview to another, is the scene again.
     /// </summary>
-    public UndoTarget LastEdited =>
-        _undoTarget is UndoTarget.Cutscene c && (c.Editor != CutscenePreview.Owner || !_cutscenes.Contains(c.Editor)) ? UndoTarget.Scene.Instance : _undoTarget;
+    public UndoTarget LastEdited => _undoTarget;
 
     /// <summary>
     /// The graph editor whose history Undo and Redo move: the active tab's, or with none, the cutscene that was keyed
     /// last, or null for the scene.
     /// </summary>
     public IGraphEditor? UndoEditor => ActiveGraphEditor ?? (LastEdited is UndoTarget.Cutscene c ? c.Editor : null);
+
+    /// <summary>
+    /// The file time, in nanoseconds since the Unix epoch as the game reads it, of an asset's blob in the cache's
+    /// preview area, or 0 when it has none.
+    /// </summary>
+    internal long PreviewBlobTime(string guid)
+    {
+        var path = Path.Combine(_options.Cook.CachePath, "preview", guid + ".blob");
+        return File.Exists(path) ? (File.GetLastWriteTimeUtc(path) - DateTime.UnixEpoch).Ticks * 100 : 0;
+    }
 
     // The one writer of what was edited last: each committed scene edit, and each key.
     internal void Edited(UndoTarget target)
@@ -44,9 +53,19 @@ public sealed partial class EditorShell
         }
     }
 
+    // A cutscene that leaves, by its tab closing or by giving the preview to another, is no longer what Undo follows.
+    void ForgetKeyed()
+    {
+        if (_undoTarget is UndoTarget.Cutscene c && (c.Editor != CutscenePreview.Owner || !_cutscenes.Contains(c.Editor)))
+        {
+            Edited(UndoTarget.Scene.Instance);
+        }
+    }
+
     // What a key button shows follows the preview, its playhead and the selected entities' values.
     void WireKeying()
     {
+        CutscenePreview.Changed += ForgetKeyed;
         CutscenePreview.Changed += Keying.Raise;
         CutscenePreview.PlayheadMoved += Keying.Raise;
         World.ValuesChanged += entity =>

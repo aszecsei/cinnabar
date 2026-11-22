@@ -496,7 +496,7 @@ public abstract class HostTests : IAsyncDisposable
         await editor.Next<CutscenePreviewOpened>(o => o.Ticket == 1);
         var values = await editor.Next<EntityValues>(v => v.Entity == fox && v.Shown.Length > 0);
 
-        Assert.Equal(new ShownPreview(1, 300000), values.ShownPreview);
+        Assert.Equal(new ShownPreview(1, 300000, 0), values.ShownPreview);
         var own = values.Components.Single(c => c.Id == 1).Data;
         var shown = values.Shown.Single(c => c.Id == 1).Data;
         Assert.Equal(Origin, BitConverter.ToInt64(own, 0));

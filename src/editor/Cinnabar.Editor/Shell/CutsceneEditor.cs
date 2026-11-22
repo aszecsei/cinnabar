@@ -967,6 +967,12 @@ public sealed class CutsceneEditor : IGraphEditor
             _problems.Add(new GraphProblem(null, where + p.Text, p.Error, mine ? (int)p.Line : 0));
         }
         CookError = result.Error == "" ? null : result.Error;
+        if (CookError == null)
+        {
+            // The daemon wrote this text's blob before it answered, so its file time names this text in the game.
+            _cleanBlob = _shell.PreviewBlobTime(Guid) is var time and not 0 ? (text, time) : null;
+            _shell.Keying.Raise();
+        }
         ProblemsChanged?.Invoke();
         if (CookError == null && !CookedClean)
         {
@@ -974,6 +980,15 @@ public sealed class CutsceneEditor : IGraphEditor
             _shell.CutscenePreview.OnCooked(this);
         }
     }
+
+    // The text of the last clean cook, and its blob's file time in the preview area.
+    (string Text, long Blob)? _cleanBlob;
+
+    /// <summary>
+    /// The file time of the blob in the preview area that the daemon cooked from the tab's text as it is now, or null
+    /// when the text has changed since its last clean cook. The preview shows the text when it plays that blob.
+    /// </summary>
+    public long? CleanBlob => _cleanBlob is { } clean && clean.Text == Document.Text ? clean.Blob : null;
 
     /// <summary>Whether the daemon cooked this tab's text clean, so its unsaved text is in the preview area.</summary>
     public bool CookedClean { get; private set; }

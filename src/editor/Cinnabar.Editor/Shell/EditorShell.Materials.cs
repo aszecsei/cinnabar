@@ -225,6 +225,7 @@ public sealed partial class EditorShell
         {
             _cutscenes.Remove(cutscene);
             CutscenePreview.OnTabClosed(cutscene);
+            ForgetKeyed();
         }
         _discarding.Remove(editor);
         editor.Dispose();

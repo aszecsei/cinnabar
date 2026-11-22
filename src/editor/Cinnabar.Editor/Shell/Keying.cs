@@ -393,6 +393,11 @@ public sealed class Keying
         {
             return "Waiting for the preview to show the playhead.";
         }
+        // The world must show the cutscene as the tab has it: its unsaved text's blob, or the saved file unchanged.
+        if (open.Unsaved ? shown.Blob == 0 || shown.Blob != open.Editor.CleanBlob : open.Editor.Document.IsDirty)
+        {
+            return "Waiting for the preview to show the cutscene's last edit.";
+        }
         return null;
     }
 
